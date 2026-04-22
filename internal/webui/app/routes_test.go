@@ -11,11 +11,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/webui"
 
+	beadsbackend "github.com/tysonthomas9/loomcli/internal/backend/beads"
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/types"
@@ -732,52 +734,20 @@ func TestSetupRoutes_TerminalEndpointNilManagerReturns503(t *testing.T) {
 	}
 }
 
-// TestSetupRoutes_StatsEndpoint tests that stats endpoint is registered.
-func TestSetupRoutes_StatsEndpoint(t *testing.T) {
+// TestSetupRoutes_GlobalStatsRemoved verifies that the old /api/stats endpoint
+// has been removed. It served per-workspace data from the default pool,
+// leaking one workspace's stats into every workspace's UI — replaced by
+// /api/workspaces/{ws}/stats.
+func TestSetupRoutes_GlobalStatsRemoved(t *testing.T) {
 	app := &Server{}
 	setupTestRoutes(t, app)
 
-	// Test that stats endpoint is registered
 	req := httptest.NewRequest(http.MethodGet, "/api/stats", nil)
 	rr := httptest.NewRecorder()
 	app.mux.ServeHTTP(rr, req)
 
-	// Should return 503 with nil pool
-	if rr.Code != http.StatusServiceUnavailable {
-		t.Errorf("expected /api/stats to return %d with nil pool, got %d", http.StatusServiceUnavailable, rr.Code)
-	}
-
-	// Verify JSON response
-	var resp healthhandlers.StatsResponse
-	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("failed to parse response: %v", err)
-	}
-
-	if resp.Success {
-		t.Error("expected Success to be false with nil pool")
-	}
-}
-
-// TestSetupRoutes_StatsEndpointPOSTFallsThrough tests that POST to stats returns 404 JSON.
-// Note: Go 1.22's pattern matching means "GET /api/stats" only matches GET requests.
-// A POST to /api/stats doesn't match that route, so it falls through to the
-// catch-all frontend handler which rejects /api/* paths with 404 JSON.
-func TestSetupRoutes_StatsEndpointPOSTFallsThrough(t *testing.T) {
-	app := &Server{}
-	setupTestRoutes(t, app)
-
-	// POST to GET-only endpoint falls through to frontend handler which rejects /api/* paths
-	req := httptest.NewRequest(http.MethodPost, "/api/stats", nil)
-	rr := httptest.NewRecorder()
-	app.mux.ServeHTTP(rr, req)
-
 	if rr.Code != http.StatusNotFound {
-		t.Errorf("expected POST /api/stats to return 404, got %d", rr.Code)
-	}
-
-	ct := rr.Header().Get("Content-Type")
-	if ct != "application/json" {
-		t.Errorf("Content-Type = %q, want %q", ct, "application/json")
+		t.Errorf("/api/stats should be deleted (404), got %d", rr.Code)
 	}
 }
 
@@ -2015,6 +1985,153 @@ func TestLegacyFlatAgentRoutesRemoved(t *testing.T) {
 			if rr.Code == http.StatusNotFound && errMsg == "not found" {
 				t.Errorf("workspace-scoped route %s %s fell through to SPA catch-all (got generic 404 %q); route is not registered",
 					tc.method, tc.path, errMsg)
+			}
+		})
+	}
+}
+
+// TestScopedMonitorRoutes_RegisteredAndPerWorkspace verifies that the five
+// workspace-scoped monitor routes (status/tasks/stats/sync/usage) are
+// registered via ScopedMonitorHandlersFn and that the wsID→wsPath resolver
+// is invoked per request — so two concurrently-active workspaces do not
+// collide.
+//
+// The handlers themselves run on the cli side and require a real bd pool
+// and workspace config; the factory we inject here records the (pattern,
+// wsPath-seen, pool-seen) tuples and returns a minimal echo handler. If
+// the wiring in registerScopedMonitorAndDaemonRoutes is correct, hitting
+// /api/workspaces/ws-alpha/monitor/status and /api/workspaces/ws-beta/
+// monitor/status each call pathFn("ws-alpha") and pathFn("ws-beta")
+// respectively and reach different handlers.
+func TestScopedMonitorRoutes_RegisteredAndPerWorkspace(t *testing.T) {
+	multiPool := daemon.NewMultiPool(middleware.WorkspaceFromContext, 1)
+	_ = multiPool.Register("ws-alpha", &stubPool{})
+	_ = multiPool.Register("ws-beta", &stubPool{})
+
+	wsExistsFn := func(id string) bool { return multiPool.PoolForWorkspace(id) != nil }
+	workspaceConfigFn := func() (*ops.WorkspaceData, error) {
+		return &ops.WorkspaceData{
+			Workspaces: []ops.WorkspaceSummary{
+				{ID: "ws-alpha", Path: "/tmp/ws-alpha"},
+				{ID: "ws-beta", Path: "/tmp/ws-beta"},
+			},
+		}, nil
+	}
+
+	// Record every (pattern, wsPath, poolNonNil) invocation for assertion.
+	type call struct {
+		pattern string
+		wsPath  string
+		pool    bool
+	}
+	var (
+		mu    sync.Mutex
+		calls []call
+	)
+
+	scopedFactory := func(
+		pathFn func(wsID string) string,
+		poolFn func(wsID string) beadsbackend.Pool,
+	) map[string]http.HandlerFunc {
+		handle := func(pattern string) http.HandlerFunc {
+			return func(w http.ResponseWriter, r *http.Request) {
+				wsID := r.PathValue("ws")
+				wsPath := pathFn(wsID)
+				pool := poolFn(wsID)
+				mu.Lock()
+				calls = append(calls, call{pattern: pattern, wsPath: wsPath, pool: pool != nil})
+				mu.Unlock()
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"wsPath":"` + wsPath + `"}`))
+			}
+		}
+		return map[string]http.HandlerFunc{
+			"GET /api/workspaces/{ws}/monitor/status": handle("status"),
+			"GET /api/workspaces/{ws}/monitor/tasks":  handle("tasks"),
+			"GET /api/workspaces/{ws}/monitor/stats":  handle("stats"),
+			"GET /api/workspaces/{ws}/monitor/sync":   handle("sync"),
+			"GET /api/workspaces/{ws}/monitor/usage":  handle("usage"),
+		}
+	}
+
+	app := &Server{
+		multiPool: multiPool,
+		config: webui.ServerConfig{
+			WorkspaceConfigFn:       workspaceConfigFn,
+			ScopedMonitorHandlersFn: scopedFactory,
+		},
+		wsExistsFn: wsExistsFn,
+	}
+	setupTestRoutes(t, app)
+
+	routes := []string{"status", "tasks", "stats", "sync", "usage"}
+	for _, kind := range routes {
+		for _, ws := range []string{"ws-alpha", "ws-beta"} {
+			req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+ws+"/monitor/"+kind, nil)
+			rr := httptest.NewRecorder()
+			app.mux.ServeHTTP(rr, req)
+
+			if rr.Code != http.StatusOK {
+				t.Errorf("%s %s: status = %d, want 200; body=%s", ws, kind, rr.Code, rr.Body.String())
+				continue
+			}
+			var body map[string]string
+			if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+				t.Errorf("%s %s: failed to parse body: %v", ws, kind, err)
+				continue
+			}
+			wantPath := "/tmp/" + ws
+			if body["wsPath"] != wantPath {
+				t.Errorf("%s %s: wsPath = %q, want %q (pathFn resolved wrong workspace)", ws, kind, body["wsPath"], wantPath)
+			}
+		}
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(calls) != len(routes)*2 {
+		t.Fatalf("expected %d handler invocations, got %d", len(routes)*2, len(calls))
+	}
+	// Every invocation should resolve to a non-nil pool for registered workspaces.
+	for _, c := range calls {
+		if !c.pool {
+			t.Errorf("pattern %s wsPath %s: poolFn returned nil for a registered workspace", c.pattern, c.wsPath)
+		}
+	}
+}
+
+// TestLegacyGlobalMonitorRoutesRemoved verifies that the five un-scoped
+// /api/monitor/{status,tasks,stats,sync,usage} endpoints — all of which
+// served per-workspace data from the launch workspace — fall through to
+// the SPA catch-all 404. The workspace-scoped replacements at
+// /api/workspaces/{ws}/monitor/* are exercised by
+// TestScopedMonitorRoutes_RegisteredAndPerWorkspace above.
+func TestLegacyGlobalMonitorRoutesRemoved(t *testing.T) {
+	app := &Server{}
+	setupTestRoutes(t, app)
+
+	paths := []string{
+		"/api/monitor/status",
+		"/api/monitor/tasks",
+		"/api/monitor/stats",
+		"/api/monitor/sync",
+		"/api/monitor/usage",
+	}
+	for _, p := range paths {
+		t.Run(p, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, p, nil)
+			rr := httptest.NewRecorder()
+			app.mux.ServeHTTP(rr, req)
+
+			if rr.Code != http.StatusNotFound {
+				t.Errorf("%s: status = %d, want 404 (route should have been deleted)", p, rr.Code)
+			}
+			var body map[string]string
+			if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+				t.Fatalf("%s: response not JSON: %v", p, err)
+			}
+			if body["error"] != "not found" {
+				t.Errorf("%s: error = %q, want generic 404 from SPA catch-all", p, body["error"])
 			}
 		})
 	}

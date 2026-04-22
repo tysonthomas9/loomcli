@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -16,18 +17,25 @@ import (
 var monitorCmd = &cobra.Command{
 	Use:   "monitor",
 	Short: "Show monitor dashboard from a loom server (HTTP, single-shot)",
-	Long: `Fetch /api/monitor/status from the configured loom server and render
-a simplified dashboard. This command is single-shot — it does not live-refresh
-or draw terminal boxes. Use the legacy 'loom monitor' command for the full
-interactive dashboard against a local checkout.`,
+	Long: `Fetch /api/workspaces/{ws}/monitor/status from the configured loom
+server and render a simplified dashboard. This command is single-shot — it
+does not live-refresh or draw terminal boxes. Use the legacy 'loom monitor'
+command for the full interactive dashboard against a local checkout.
+
+Workspace resolution: --workspace flag > LOOM_WORKSPACE env > server's
+active workspace.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
-		cli, url, err := getHTTPClient()
+		cli, base, err := getHTTPClient()
 		if err != nil {
 			return err
 		}
-		status, err := fetchMonitorStatus(ctx, cli, url)
+		wsID, err := resolveWorkspaceID(ctx, cli, base)
+		if err != nil {
+			return err
+		}
+		status, err := fetchMonitorStatus(ctx, cli, base, wsID)
 		if err != nil {
 			return err
 		}
@@ -35,13 +43,15 @@ interactive dashboard against a local checkout.`,
 	},
 }
 
-// fetchMonitorStatus performs a single GET to /api/monitor/status and
-// decodes the response. The monitor endpoint does NOT use the
-// {success,data,error} envelope that api.APIBackend's doRequest expects —
-// it returns MonitorStatusResponse directly — so we inline a small helper
-// here instead of reusing the backend's exec loop.
-func fetchMonitorStatus(ctx context.Context, cli *http.Client, baseURL string) (*gen.MonitorStatusResponse, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/api/monitor/status", nil)
+// fetchMonitorStatus performs a single GET to
+// /api/workspaces/{ws}/monitor/status and decodes the response. The scoped
+// monitor endpoint does NOT use the {success,data,error} envelope that
+// api.APIBackend's doRequest expects — it returns MonitorStatusResponse
+// directly — so we inline a small helper here instead of reusing the
+// backend's exec loop.
+func fetchMonitorStatus(ctx context.Context, cli *http.Client, baseURL, wsID string) (*gen.MonitorStatusResponse, error) {
+	endpoint := baseURL + "/api/workspaces/" + url.PathEscape(wsID) + "/monitor/status"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -54,6 +64,9 @@ func fetchMonitorStatus(ctx context.Context, cli *http.Client, baseURL string) (
 
 	if resp.StatusCode == http.StatusServiceUnavailable {
 		return nil, fmt.Errorf("monitor data unavailable on server")
+	}
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, fmt.Errorf("workspace %q not found on server", wsID)
 	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("monitor: HTTP %d", resp.StatusCode)

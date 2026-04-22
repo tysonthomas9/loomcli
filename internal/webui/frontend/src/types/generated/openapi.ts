@@ -55,23 +55,6 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/daemon/status": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /** Daemon configuration and status */
-    get: operations["getDaemonStatus"];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
   "/api/config": {
     parameters: {
       query?: never;
@@ -152,23 +135,6 @@ export interface paths {
     put?: never;
     /** CSP violation reporting (rate-limited, 60 req/min/IP) */
     post: operations["reportCSPViolation"];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/api/stats": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /** Global project statistics */
-    get: operations["getGlobalStats"];
-    put?: never;
-    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -1708,15 +1674,15 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/monitor/status": {
+  "/api/workspaces/{ws}/monitor/agents": {
     parameters: {
       query?: never;
       header?: never;
       path?: never;
       cookie?: never;
     };
-    /** Full monitor dashboard data */
-    get: operations["getMonitorStatus"];
+    /** Agent list scoped to a single workspace */
+    get: operations["getWorkspaceMonitorAgents"];
     put?: never;
     post?: never;
     delete?: never;
@@ -1725,15 +1691,15 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/monitor/agents": {
+  "/api/workspaces/{ws}/monitor/status": {
     parameters: {
       query?: never;
       header?: never;
       path?: never;
       cookie?: never;
     };
-    /** Agent list with optional workspace grouping */
-    get: operations["getMonitorAgents"];
+    /** Full monitor dashboard data scoped to a single workspace */
+    get: operations["getWorkspaceMonitorStatus"];
     put?: never;
     post?: never;
     delete?: never;
@@ -1742,15 +1708,15 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/monitor/tasks": {
+  "/api/workspaces/{ws}/monitor/tasks": {
     parameters: {
       query?: never;
       header?: never;
       path?: never;
       cookie?: never;
     };
-    /** Task distribution by status */
-    get: operations["getMonitorTasks"];
+    /** Task distribution scoped to a single workspace */
+    get: operations["getWorkspaceMonitorTasks"];
     put?: never;
     post?: never;
     delete?: never;
@@ -1759,15 +1725,15 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/monitor/stats": {
+  "/api/workspaces/{ws}/monitor/stats": {
     parameters: {
       query?: never;
       header?: never;
       path?: never;
       cookie?: never;
     };
-    /** Monitor statistics (distinct from /api/stats issue stats) */
-    get: operations["getMonitorStats"];
+    /** Monitor statistics scoped to a single workspace */
+    get: operations["getWorkspaceMonitorStats"];
     put?: never;
     post?: never;
     delete?: never;
@@ -1776,15 +1742,32 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/monitor/sync": {
+  "/api/workspaces/{ws}/monitor/sync": {
     parameters: {
       query?: never;
       header?: never;
       path?: never;
       cookie?: never;
     };
-    /** Git sync status */
-    get: operations["getMonitorSync"];
+    /** Git sync status scoped to a single workspace */
+    get: operations["getWorkspaceMonitorSync"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/monitor/usage": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Token usage aggregates scoped to a single workspace */
+    get: operations["getWorkspaceMonitorUsage"];
     put?: never;
     post?: never;
     delete?: never;
@@ -1819,23 +1802,6 @@ export interface paths {
     };
     /** Stale detector status */
     get: operations["getStaleDetector"];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/api/monitor/usage": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /** Token usage aggregates */
-    get: operations["getMonitorUsage"];
     put?: never;
     post?: never;
     delete?: never;
@@ -2891,26 +2857,6 @@ export interface operations {
       };
     };
   };
-  getDaemonStatus: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Daemon status */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": Record<string, never>;
-        };
-      };
-    };
-  };
   getAuthConfig: {
     parameters: {
       query?: never;
@@ -3063,26 +3009,6 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
-      };
-    };
-  };
-  getGlobalStats: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Statistics */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["Statistics"];
-        };
       };
     };
   };
@@ -6135,43 +6061,19 @@ export interface operations {
       };
     };
   };
-  getMonitorStatus: {
+  getWorkspaceMonitorAgents: {
     parameters: {
       query?: never;
       header?: never;
-      path?: never;
+      path: {
+        /** @description Workspace UUID */
+        ws: string;
+      };
       cookie?: never;
     };
     requestBody?: never;
     responses: {
-      /** @description Dashboard status */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["MonitorStatusResponse"];
-        };
-      };
-      /** @description Data collection unavailable */
-      503: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-    };
-  };
-  getMonitorAgents: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Agent list */
+      /** @description Agent list for this workspace (empty if workspace has no active agents) */
       200: {
         headers: {
           [name: string]: unknown;
@@ -6180,6 +6082,13 @@ export interface operations {
           "application/json": components["schemas"]["MonitorAgentsResponse"];
         };
       };
+      /** @description Workspace not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
       /** @description Data collection unavailable */
       503: {
         headers: {
@@ -6189,16 +6098,49 @@ export interface operations {
       };
     };
   };
-  getMonitorTasks: {
+  getWorkspaceMonitorStatus: {
     parameters: {
       query?: never;
       header?: never;
-      path?: never;
+      path: {
+        /** @description Workspace UUID */
+        ws: string;
+      };
       cookie?: never;
     };
     requestBody?: never;
     responses: {
-      /** @description Task breakdown */
+      /** @description Dashboard status for this workspace */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MonitorStatusResponse"];
+        };
+      };
+      /** @description Workspace not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  getWorkspaceMonitorTasks: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace UUID */
+        ws: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Task breakdown for this workspace */
       200: {
         headers: {
           [name: string]: unknown;
@@ -6207,8 +6149,8 @@ export interface operations {
           "application/json": components["schemas"]["MonitorTasksResponse"];
         };
       };
-      /** @description Data collection unavailable */
-      503: {
+      /** @description Workspace not found */
+      404: {
         headers: {
           [name: string]: unknown;
         };
@@ -6216,16 +6158,19 @@ export interface operations {
       };
     };
   };
-  getMonitorStats: {
+  getWorkspaceMonitorStats: {
     parameters: {
       query?: never;
       header?: never;
-      path?: never;
+      path: {
+        /** @description Workspace UUID */
+        ws: string;
+      };
       cookie?: never;
     };
     requestBody?: never;
     responses: {
-      /** @description Monitor stats */
+      /** @description Monitor stats for this workspace */
       200: {
         headers: {
           [name: string]: unknown;
@@ -6234,8 +6179,8 @@ export interface operations {
           "application/json": components["schemas"]["MonitorStatsResponse"];
         };
       };
-      /** @description Data collection unavailable */
-      503: {
+      /** @description Workspace not found */
+      404: {
         headers: {
           [name: string]: unknown;
         };
@@ -6243,16 +6188,19 @@ export interface operations {
       };
     };
   };
-  getMonitorSync: {
+  getWorkspaceMonitorSync: {
     parameters: {
       query?: never;
       header?: never;
-      path?: never;
+      path: {
+        /** @description Workspace UUID */
+        ws: string;
+      };
       cookie?: never;
     };
     requestBody?: never;
     responses: {
-      /** @description Sync status */
+      /** @description Sync status for this workspace */
       200: {
         headers: {
           [name: string]: unknown;
@@ -6261,8 +6209,53 @@ export interface operations {
           "application/json": components["schemas"]["MonitorSyncResponse"];
         };
       };
-      /** @description Data collection unavailable */
-      503: {
+      /** @description Workspace not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  getWorkspaceMonitorUsage: {
+    parameters: {
+      query?: {
+        agent?: string;
+        backend?: string;
+        epic?: string;
+        /** @description YYYY-MM-DD */
+        since?: string;
+        /** @description YYYY-MM-DD */
+        until?: string;
+      };
+      header?: never;
+      path: {
+        /** @description Workspace UUID */
+        ws: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Usage data for this workspace */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["UsageResponse"];
+        };
+      };
+      /** @description Invalid date parameter */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Workspace not found */
+      404: {
         headers: {
           [name: string]: unknown;
         };
@@ -6307,48 +6300,6 @@ export interface operations {
         content: {
           "application/json": components["schemas"]["StaleDetectorStatus"];
         };
-      };
-    };
-  };
-  getMonitorUsage: {
-    parameters: {
-      query?: {
-        agent?: string;
-        backend?: string;
-        epic?: string;
-        /** @description YYYY-MM-DD */
-        since?: string;
-        /** @description YYYY-MM-DD */
-        until?: string;
-      };
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Usage data */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["UsageResponse"];
-        };
-      };
-      /** @description Invalid date parameter */
-      400: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-      /** @description Usage store not initialized */
-      503: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
       };
     };
   };

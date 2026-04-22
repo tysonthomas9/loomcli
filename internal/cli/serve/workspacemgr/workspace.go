@@ -625,3 +625,25 @@ func ResolveWorkspaceID(name string) (string, error) {
 	}
 	return ws.ID, nil
 }
+
+// ResolveWorkspaceNameByID is the inverse of ResolveWorkspaceID — given a
+// stable UUID from the URL, returns the workspace name used as the agent
+// grouping key in the monitor data. Returns "" on any failure so callers
+// (typically scoped handlers) degrade to an empty result rather than 500.
+// Uses the cached config reader: this runs on every scoped-monitor poll, and
+// the uncached LoadConfig takes the config file flock.
+func ResolveWorkspaceNameByID(wsID string) string {
+	if wsID == "" {
+		return ""
+	}
+	cfg, err := config.LoadConfigCached()
+	if err != nil || cfg == nil {
+		return ""
+	}
+	for name, ws := range cfg.Workspaces {
+		if ws.ID == wsID {
+			return name
+		}
+	}
+	return ""
+}

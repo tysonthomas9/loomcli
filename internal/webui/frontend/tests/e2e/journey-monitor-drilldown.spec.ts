@@ -110,7 +110,7 @@ async function setupMocks(page: Page) {
   });
 
   // Monitor catch-all (lowest priority)
-  await page.route("**/api/monitor/**", async (route) => {
+  await page.route("**/monitor/**", async (route) => {
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({}) });
   });
   // Health endpoint
@@ -118,16 +118,16 @@ async function setupMocks(page: Page) {
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ status: "ok" }) });
   });
   // Specific monitor endpoints (higher priority — LIFO)
-  await page.route("**/api/monitor/agents", async (route) => {
+  await page.route("**/api/workspaces/*/monitor/agents", async (route) => {
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ agents: AGENTS, timestamp: "2026-01-15T10:00:00Z" }) });
   });
-  await page.route("**/api/monitor/status", async (route) => {
+  await page.route("**/api/workspaces/*/monitor/status", async (route) => {
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(LOOM_STATUS) });
   });
-  await page.route("**/api/monitor/tasks", async (route) => {
+  await page.route("**/api/workspaces/*/monitor/tasks", async (route) => {
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ summary: LOOM_STATUS.tasks, needs_planning: [], ready_to_implement: [], needs_review: [], in_progress: [], backlog: [], closed: [], timestamp: "2026-01-15T10:00:00Z" }) });
   });
-  await page.route("**/api/monitor/usage**", async (route) => {
+  await page.route("**/api/workspaces/*/monitor/usage**", async (route) => {
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
       total_input_tokens: 0, total_output_tokens: 0, total_cache_read_tokens: 0,
       total_cache_write_tokens: 0, total_cost: 0, session_count: 0,

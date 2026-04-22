@@ -105,6 +105,8 @@ vi.mock("@/hooks", () => ({
     setDefaultWorkspace: vi.fn(),
     agents: [],
     workspace: null,
+    ...defaultReposReturn,
+    ...reposOverride,
   }),
   useWorkspaceTree: () => ({
     epics: [],
@@ -245,23 +247,6 @@ describe("WorkspaceTree connection state", () => {
 
       expect(
         screen.getByRole("button", { name: "Retry now" }),
-      ).toBeInTheDocument();
-    });
-
-    it("shows countdown in retry label when retryCountdown is non-null", () => {
-      reposOverride = {
-        repos: [],
-        isLoading: false,
-        error: "Connection refused",
-        connectionState: "error_never_connected",
-        retryCountdown: 8,
-        retryNow: vi.fn(),
-      };
-
-      render(<WorkspaceTree defaultCollapsed={false} />);
-
-      expect(
-        screen.getByRole("button", { name: "Retry in 8s" }),
       ).toBeInTheDocument();
     });
 
@@ -430,30 +415,6 @@ describe("WorkspaceTree connection state", () => {
       expect(mockRetryNow).toHaveBeenCalledTimes(1);
     });
 
-    it("shows countdown in stale banner retry label when retryCountdown is non-null", () => {
-      reposOverride = {
-        repos: [
-          {
-            name: "alpha",
-            path: "/repos/alpha",
-            default_branch: "main",
-            remote: "origin",
-          },
-        ],
-        isLoading: false,
-        error: "Server down",
-        connectionState: "error_lost_connection",
-        retryCountdown: 15,
-        retryNow: vi.fn(),
-      };
-
-      render(<WorkspaceTree defaultCollapsed={false} />);
-
-      expect(
-        screen.getByRole("button", { name: "Retry in 15s" }),
-      ).toBeInTheDocument();
-    });
-
     it("still shows repo names when connection is lost", () => {
       reposOverride = {
         repos: [
@@ -524,23 +485,6 @@ describe("WorkspaceTree connection state", () => {
       ).toBeInTheDocument();
     });
 
-    it("shows 'Retry in Ns' when retryCountdown is non-null in error_never_connected", () => {
-      reposOverride = {
-        repos: [],
-        isLoading: false,
-        error: "Connection refused",
-        connectionState: "error_never_connected",
-        retryCountdown: 3,
-        retryNow: vi.fn(),
-      };
-
-      render(<WorkspaceTree defaultCollapsed={false} />);
-
-      expect(
-        screen.getByRole("button", { name: "Retry in 3s" }),
-      ).toBeInTheDocument();
-    });
-
     it("shows 'Retry now' when retryCountdown is null in error_lost_connection", () => {
       reposOverride = {
         repos: [
@@ -562,30 +506,6 @@ describe("WorkspaceTree connection state", () => {
 
       expect(
         screen.getByRole("button", { name: "Retry now" }),
-      ).toBeInTheDocument();
-    });
-
-    it("shows 'Retry in Ns' when retryCountdown is non-null in error_lost_connection", () => {
-      reposOverride = {
-        repos: [
-          {
-            name: "alpha",
-            path: "/repos/alpha",
-            default_branch: "main",
-            remote: "origin",
-          },
-        ],
-        isLoading: false,
-        error: "Connection lost",
-        connectionState: "error_lost_connection",
-        retryCountdown: 42,
-        retryNow: vi.fn(),
-      };
-
-      render(<WorkspaceTree defaultCollapsed={false} />);
-
-      expect(
-        screen.getByRole("button", { name: "Retry in 42s" }),
       ).toBeInTheDocument();
     });
   });

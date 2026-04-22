@@ -29,7 +29,7 @@ func (s *stubErrorPool) Close() error                { return nil }
 // stubTerminalService implements TerminalService with no-op defaults for module tests.
 type stubTerminalService struct{}
 
-func (s *stubTerminalService) GenerateToken(_ context.Context, _, _ string) (string, error) {
+func (s *stubTerminalService) GenerateToken(_ context.Context, _, _, _ string) (string, error) {
 	return "tok", nil
 }
 func (s *stubTerminalService) ListTabs(_ context.Context, _ string) ([]tabmeta.TabMetadata, error) {

@@ -10,7 +10,7 @@ import { useStore } from "zustand";
 
 import {
   useAgentStoreInstance,
-  useWorkspaceRepos,
+  useWorkspaceContext,
   useWorkspaceTree,
 } from "@/hooks";
 import { parseLoomStatus } from "@/types/agent";
@@ -38,7 +38,7 @@ interface EpicGroup {
 export function RunningSection({
   onSelect,
 }: RunningSectionProps): JSX.Element | null {
-  const { workspace } = useWorkspaceRepos();
+  const { workspace } = useWorkspaceContext();
   const agentStore = useAgentStoreInstance();
   const agents = useStore(agentStore, (s) => s.agents);
   const agentTasks = useStore(agentStore, (s) => s.agentTasks);

@@ -123,18 +123,8 @@ paths:
               schema:
                 type: object
 
-  /api/daemon/status:
-    get:
-      operationId: getDaemonStatus
-      tags: [health]
-      summary: Daemon configuration and status
-      responses:
-        "200":
-          description: Daemon status
-          content:
-            application/json:
-              schema:
-                type: object
+  # /api/daemon/{status,supervisor,config} deleted — superseded by
+  # /api/workspaces/{ws}/daemon/* which read per-workspace state files.
 
   # ── Config ──────────────────────────────────────────────────────────────
   /api/config:
@@ -245,18 +235,7 @@ paths:
           description: Rate limited
 
   # ── Stats ───────────────────────────────────────────────────────────────
-  /api/stats:
-    get:
-      operationId: getGlobalStats
-      tags: [stats]
-      summary: Global project statistics
-      responses:
-        "200":
-          description: Statistics
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Statistics"
+  # /api/stats deleted — superseded by /api/workspaces/{ws}/stats.
 
   /api/workspaces/{ws}/stats:
     get:
@@ -2893,80 +2872,163 @@ paths:
           description: Logs received
 
   # ── Monitor ─────────────────────────────────────────────────────────────
-  /api/monitor/status:
+  /api/workspaces/{ws}/monitor/agents:
     get:
-      operationId: getMonitorStatus
+      operationId: getWorkspaceMonitorAgents
       tags: [monitor]
-      summary: Full monitor dashboard data
+      summary: Agent list scoped to a single workspace
+      parameters:
+        - name: ws
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Workspace UUID
       responses:
         "200":
-          description: Dashboard status
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/MonitorStatusResponse"
-        "503":
-          description: Data collection unavailable
-
-  /api/monitor/agents:
-    get:
-      operationId: getMonitorAgents
-      tags: [monitor]
-      summary: Agent list with optional workspace grouping
-      responses:
-        "200":
-          description: Agent list
+          description: Agent list for this workspace (empty if workspace has no active agents)
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/MonitorAgentsResponse"
+        "404":
+          description: Workspace not found
         "503":
           description: Data collection unavailable
 
-  /api/monitor/tasks:
+  /api/workspaces/{ws}/monitor/status:
     get:
-      operationId: getMonitorTasks
+      operationId: getWorkspaceMonitorStatus
       tags: [monitor]
-      summary: Task distribution by status
+      summary: Full monitor dashboard data scoped to a single workspace
+      parameters:
+        - name: ws
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Workspace UUID
       responses:
         "200":
-          description: Task breakdown
+          description: Dashboard status for this workspace
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MonitorStatusResponse"
+        "404":
+          description: Workspace not found
+
+  /api/workspaces/{ws}/monitor/tasks:
+    get:
+      operationId: getWorkspaceMonitorTasks
+      tags: [monitor]
+      summary: Task distribution scoped to a single workspace
+      parameters:
+        - name: ws
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Workspace UUID
+      responses:
+        "200":
+          description: Task breakdown for this workspace
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/MonitorTasksResponse"
-        "503":
-          description: Data collection unavailable
+        "404":
+          description: Workspace not found
 
-  /api/monitor/stats:
+  /api/workspaces/{ws}/monitor/stats:
     get:
-      operationId: getMonitorStats
+      operationId: getWorkspaceMonitorStats
       tags: [monitor]
-      summary: Monitor statistics (distinct from /api/stats issue stats)
+      summary: Monitor statistics scoped to a single workspace
+      parameters:
+        - name: ws
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Workspace UUID
       responses:
         "200":
-          description: Monitor stats
+          description: Monitor stats for this workspace
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/MonitorStatsResponse"
-        "503":
-          description: Data collection unavailable
+        "404":
+          description: Workspace not found
 
-  /api/monitor/sync:
+  /api/workspaces/{ws}/monitor/sync:
     get:
-      operationId: getMonitorSync
+      operationId: getWorkspaceMonitorSync
       tags: [monitor]
-      summary: Git sync status
+      summary: Git sync status scoped to a single workspace
+      parameters:
+        - name: ws
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Workspace UUID
       responses:
         "200":
-          description: Sync status
+          description: Sync status for this workspace
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/MonitorSyncResponse"
-        "503":
-          description: Data collection unavailable
+        "404":
+          description: Workspace not found
+
+  /api/workspaces/{ws}/monitor/usage:
+    get:
+      operationId: getWorkspaceMonitorUsage
+      tags: [monitor]
+      summary: Token usage aggregates scoped to a single workspace
+      parameters:
+        - name: ws
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Workspace UUID
+        - name: agent
+          in: query
+          schema:
+            type: string
+        - name: backend
+          in: query
+          schema:
+            type: string
+        - name: epic
+          in: query
+          schema:
+            type: string
+        - name: since
+          in: query
+          description: "YYYY-MM-DD"
+          schema:
+            type: string
+        - name: until
+          in: query
+          description: "YYYY-MM-DD"
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Usage data for this workspace
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UsageResponse"
+        "400":
+          description: Invalid date parameter
+        "404":
+          description: Workspace not found
 
   /api/monitor/workspaces:
     get:
@@ -2993,46 +3055,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/StaleDetectorStatus"
-
-  /api/monitor/usage:
-    get:
-      operationId: getMonitorUsage
-      tags: [monitor]
-      summary: Token usage aggregates
-      parameters:
-        - name: agent
-          in: query
-          schema:
-            type: string
-        - name: backend
-          in: query
-          schema:
-            type: string
-        - name: epic
-          in: query
-          schema:
-            type: string
-        - name: since
-          in: query
-          description: "YYYY-MM-DD"
-          schema:
-            type: string
-        - name: until
-          in: query
-          description: "YYYY-MM-DD"
-          schema:
-            type: string
-      responses:
-        "200":
-          description: Usage data
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/UsageResponse"
-        "400":
-          description: Invalid date parameter
-        "503":
-          description: Usage store not initialized
 
   /metrics:
     get:

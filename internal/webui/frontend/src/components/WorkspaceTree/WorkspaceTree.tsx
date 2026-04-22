@@ -8,11 +8,7 @@ import { useState, useCallback, useEffect } from "react";
 
 import type { ConnectionState } from "@/api/common";
 import { useStore } from "zustand";
-import {
-  useWorkspaceRepos,
-  useWorkspaceContext,
-  useAgentStoreInstance,
-} from "@/hooks";
+import { useWorkspaceContext, useAgentStoreInstance } from "@/hooks";
 import { wsGet, wsSet } from "@/utils/scopedStorage";
 import { ErrorDisplay } from "@/components/ErrorDisplay";
 
@@ -71,7 +67,16 @@ export function WorkspaceTree({
   workQueueCounts,
   onTreeSelect,
 }: WorkspaceTreeProps): JSX.Element {
-  const { workspaceId, activeWorkspaceName } = useWorkspaceContext();
+  const {
+    workspaceId,
+    activeWorkspaceName,
+    workspace,
+    repos,
+    isLoading,
+    error,
+    connectionState: wsConnectionState,
+    retryNow,
+  } = useWorkspaceContext();
 
   // Load initial collapsed state from scoped localStorage
   const [isCollapsed, setIsCollapsed] = useState(() => {
@@ -79,16 +84,6 @@ export function WorkspaceTree({
     const stored = wsGet(workspaceId, SK_COLLAPSED);
     return stored !== null ? stored === "true" : defaultCollapsed;
   });
-
-  const {
-    workspace,
-    repos,
-    isLoading,
-    error,
-    connectionState: wsConnectionState,
-    retryCountdown,
-    retryNow,
-  } = useWorkspaceRepos();
 
   const agentStore = useAgentStoreInstance();
   const agents = useStore(agentStore, (s) => s.agents);
@@ -170,11 +165,7 @@ export function WorkspaceTree({
               description="Could not connect to workspace. The server may be starting up."
               onRetry={retryNow}
               isRetrying={isLoading}
-              retryLabel={
-                retryCountdown != null
-                  ? `Retry in ${retryCountdown}s`
-                  : "Retry now"
-              }
+              retryLabel="Retry now"
             />
           )}
 
@@ -186,9 +177,7 @@ export function WorkspaceTree({
                 onClick={retryNow}
                 className={styles.retryButton}
               >
-                {retryCountdown != null
-                  ? `Retry in ${retryCountdown}s`
-                  : "Retry now"}
+                Retry now
               </button>
             </div>
           )}

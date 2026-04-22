@@ -395,35 +395,23 @@ func TestStartServer_WriteTimeout_NonStreamingEndpoint(t *testing.T) {
 		t.Fatal("server did not become ready within timeout")
 	}
 
-	// Hit the stats endpoint (non-streaming). Without a daemon pool, it returns 503
-	// but the response itself should be well-formed JSON, confirming the WriteTimeout
-	// does not interfere with fast non-streaming responses.
-	resp, err := client.Get(serverAddr + "/api/stats")
+	// Hit a non-streaming endpoint whose fast path does not depend on the
+	// daemon pool. /api/config (auth discovery) always returns 200 JSON and
+	// is enough to prove WriteTimeout does not interfere with fast responses.
+	resp, err := client.Get(serverAddr + "/api/config")
 	if err != nil {
 		cancel()
-		t.Fatalf("stats request failed: %v", err)
+		t.Fatalf("config request failed: %v", err)
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusServiceUnavailable {
-		t.Errorf("expected status %d for stats without pool, got %d",
-			http.StatusServiceUnavailable, resp.StatusCode)
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected 200 from /api/config, got %d", resp.StatusCode)
 	}
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
+	if _, err := io.ReadAll(resp.Body); err != nil {
 		cancel()
 		t.Fatalf("failed to read response body: %v", err)
-	}
-
-	var statsResp healthhandlers.StatsResponse
-	if err := json.Unmarshal(body, &statsResp); err != nil {
-		cancel()
-		t.Fatalf("failed to parse stats response: %v", err)
-	}
-
-	if statsResp.Success {
-		t.Error("expected success to be false without daemon pool")
 	}
 
 	// Shut down

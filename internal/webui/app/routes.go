@@ -3,9 +3,11 @@ package app
 import (
 	"net/http"
 
+	beadsbackend "github.com/tysonthomas9/loomcli/internal/backend/beads"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlermux"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
+	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 // registerRoutes maps URL patterns to pre-built handler fields on the Server.
@@ -42,7 +44,6 @@ func (app *Server) registerCoreAPIRoutes(h *handlermux.Handlers) {
 	app.mux.HandleFunc("POST /api/client-errors", h.ClientErrors)
 	app.mux.HandleFunc("POST /api/csp-report", h.CSPReport)
 	app.mux.HandleFunc("GET /api/config", h.AuthConfig)
-	app.mux.HandleFunc("GET /api/stats", h.Stats)
 	app.mux.HandleFunc("GET /api/metrics", h.Metrics)
 	app.mux.HandleFunc("GET /api/config/backend", h.GetBackendConfig)
 	app.mux.HandleFunc("PATCH /api/config/backend", h.PatchBackendConfig)
@@ -52,16 +53,12 @@ func (app *Server) registerCoreAPIRoutes(h *handlermux.Handlers) {
 	}
 }
 
-// registerDaemonRoutes registers daemon status, supervisor, and config endpoints.
-func (app *Server) registerDaemonRoutes(h *handlermux.Handlers) {
-	app.mux.HandleFunc("GET /api/daemon/status", h.DaemonStatus)
-	if h.DaemonSupervisor != nil {
-		app.mux.HandleFunc("GET /api/daemon/supervisor", h.DaemonSupervisor)
-	}
-	if h.DaemonConfig != nil {
-		app.mux.HandleFunc("GET /api/daemon/config", h.DaemonConfig)
-	}
-}
+// registerDaemonRoutes is retained as a no-op hook for future server-wide
+// daemon endpoints. The previous /api/daemon/{status,supervisor,config}
+// routes were workspace-specific data served from the launch directory — they
+// now live under /api/workspaces/{ws}/daemon/* and resolve the right
+// per-workspace state file.
+func (app *Server) registerDaemonRoutes(_ *handlermux.Handlers) {}
 
 // registerAuthProxy forwards /api/auth/* to the external BetterAuth service.
 // Makes auth cookies same-origin with the frontend, avoiding cross-site cookie
@@ -88,31 +85,19 @@ func (app *Server) registerEditorAndNotifyRoutes(h *handlermux.Handlers) {
 
 // registerMonitorHandlers registers monitor/metrics/observability handlers
 // injected from the cli package via ServerConfig.MonitorHandlers.
+//
+// Per-workspace data (status/tasks/stats/sync/usage/agents) lives under
+// /api/workspaces/{ws}/monitor/* — the old un-scoped routes leaked the
+// launch workspace's data into every per-workspace view. The only /api/
+// monitor/* routes that survive here are genuinely server-wide:
+// workspaces (topology), stale-detector (fleet health), and Prometheus.
 func (app *Server) registerMonitorHandlers() {
 	mh := app.config.MonitorHandlers
-	if mh.Status != nil {
-		app.mux.HandleFunc("GET /api/monitor/status", mh.Status)
-	}
-	if mh.Agents != nil {
-		app.mux.HandleFunc("GET /api/monitor/agents", mh.Agents)
-	}
-	if mh.Tasks != nil {
-		app.mux.HandleFunc("GET /api/monitor/tasks", mh.Tasks)
-	}
-	if mh.Stats != nil {
-		app.mux.HandleFunc("GET /api/monitor/stats", mh.Stats)
-	}
-	if mh.Sync != nil {
-		app.mux.HandleFunc("GET /api/monitor/sync", mh.Sync)
-	}
 	if mh.Workspaces != nil {
 		app.mux.HandleFunc("GET /api/monitor/workspaces", mh.Workspaces)
 	}
 	if mh.StaleDetector != nil {
 		app.mux.HandleFunc("GET /api/monitor/stale-detector", mh.StaleDetector)
-	}
-	if mh.Usage != nil {
-		app.mux.HandleFunc("GET /api/monitor/usage", mh.Usage)
 	}
 	// /metrics serves both loom-specific monitor metrics and the auto-registered
 	// Prometheus metrics (loom_http_requests_total, loom_http_request_duration_seconds).
@@ -155,6 +140,7 @@ func (app *Server) registerWorkspaceRoutes() {
 	for _, mod := range app.wsModules {
 		mod.Register(wsMux)
 	}
+	app.registerScopedMonitorAndDaemonRoutes(wsMux)
 	// Mount workspace sub-mux with route pattern capture for metrics.
 	// Go's ServeMux sets r.Pattern on an internal request copy, invisible to
 	// the outer metrics middleware. We pre-resolve the pattern via Handler()
@@ -167,4 +153,43 @@ func (app *Server) registerWorkspaceRoutes() {
 		wsMux.ServeHTTP(w, r)
 	})
 	app.mux.Handle("/api/workspaces/{ws}/", middleware.Workspace(app.wsExistsFn)(wsHandler))
+}
+
+// registerScopedMonitorAndDaemonRoutes installs the workspace-scoped
+// counterparts of global /api/monitor/* and /api/daemon/* routes onto wsMux
+// so they inherit the middleware.Workspace wrapping that validates the {ws}
+// path param and populates the request context.
+func (app *Server) registerScopedMonitorAndDaemonRoutes(wsMux *http.ServeMux) {
+	// /monitor/agents is handled by ScopedMonitorHandlersFn below; it now
+	// uses the same per-workspace CollectMonitorDataScoped path as the other
+	// scoped routes. The global-collector + name-filter handler
+	// (MonitorHandlers.AgentsScoped) returned empty agents for any workspace
+	// that wasn't the one the global collector was initialized against.
+
+	pathFn := func(wsID string) string {
+		return service.ResolveWorkspacePath(app.config.WorkspaceConfigFn, wsID)
+	}
+	if app.config.ScopedMonitorHandlersFn != nil && app.multiPool != nil {
+		poolFn := func(wsID string) beadsbackend.Pool {
+			// daemon.Pool structurally satisfies beadsbackend.Pool; nil map
+			// lookup returns a nil interface, which callers check before
+			// invoking CollectMonitorDataScoped.
+			p := app.multiPool.PoolForWorkspace(wsID)
+			if p == nil {
+				return nil
+			}
+			return p
+		}
+		for pattern, handler := range app.config.ScopedMonitorHandlersFn(pathFn, poolFn) {
+			wsMux.Handle(pattern, handler)
+		}
+	}
+	if load := app.config.LoadDaemonSupervisorFn; load != nil {
+		wsMux.Handle("GET /api/workspaces/{ws}/daemon/supervisor",
+			webui.HandleDaemonSupervisorScoped(pathFn, load))
+	}
+	if load := app.config.LoadDaemonConfigFn; load != nil {
+		wsMux.Handle("GET /api/workspaces/{ws}/daemon/config",
+			webui.HandleDaemonConfigScoped(pathFn, load))
+	}
 }

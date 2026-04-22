@@ -10,9 +10,6 @@ import { test, expect, isIntegrationEnabled, generateTestId } from './api-client
 // Skip if integration tests not enabled
 test.skip(!isIntegrationEnabled, 'API E2E tests require RUN_INTEGRATION_TESTS=1')
 
-// Serial mode: stats tests modify shared state
-test.describe.configure({ mode: 'serial' })
-
 test.describe('Project Health', () => {
   // Test data tracking for cleanup
   const createdIssueIds: string[] = []
@@ -45,72 +42,8 @@ test.describe('Project Health', () => {
     })
   })
 
-  test.describe('Stats Endpoint', () => {
-    test('GET /api/stats returns issue counts', async ({ api }) => {
-      const stats = await api.stats()
-
-      // Verify stats fields exist and are numbers
-      expect(typeof stats.open_issues).toBe('number')
-      expect(typeof stats.closed_issues).toBe('number')
-      expect(typeof stats.total_issues).toBe('number')
-      expect(typeof stats.blocked_issues).toBe('number')
-      expect(typeof stats.in_progress_issues).toBe('number')
-
-      // All counts should be non-negative
-      expect(stats.open_issues).toBeGreaterThanOrEqual(0)
-      expect(stats.closed_issues).toBeGreaterThanOrEqual(0)
-      expect(stats.total_issues).toBeGreaterThanOrEqual(0)
-    })
-
-    test('stats updates after creating an issue', async ({ api }) => {
-      // Capture initial counts
-      const before = await api.stats()
-      const initialOpen = before.open_issues
-      const initialTotal = before.total_issues
-
-      // Create a new issue
-      const title = `Stats Test Issue ${generateTestId()}`
-      const created = await api.createIssue({
-        title,
-        issue_type: 'task',
-        priority: 2,
-      })
-      createdIssueIds.push(created.id)
-
-      // Verify counts increased
-      const after = await api.stats()
-      expect(after.open_issues).toBe(initialOpen + 1)
-      expect(after.total_issues).toBe(initialTotal + 1)
-    })
-
-    test('stats updates after closing an issue', async ({ api }) => {
-      // Create an issue first
-      const title = `Close Stats Test ${generateTestId()}`
-      const created = await api.createIssue({
-        title,
-        issue_type: 'task',
-        priority: 2,
-      })
-      const issueId = created.id
-      createdIssueIds.push(issueId) // Track for cleanup if test fails early
-
-      // Capture counts after creation
-      const before = await api.stats()
-      const initialOpen = before.open_issues
-      const initialClosed = before.closed_issues
-
-      // Close the issue
-      await api.closeIssue(issueId)
-
-      // Verify counts shifted (open decreased, closed increased)
-      const after = await api.stats()
-      expect(after.open_issues).toBe(initialOpen - 1)
-      expect(after.closed_issues).toBe(initialClosed + 1)
-      // Total should remain the same
-      expect(after.total_issues).toBe(before.total_issues)
-    })
-
-    test('stats reflects blocked issue count', async ({ api }) => {
+  test.describe('Blocked Issues', () => {
+    test('blocked endpoint reflects dependency relationships', async ({ api }) => {
       // Create two issues: one will block the other
       const blockerTitle = `Blocker Issue ${generateTestId()}`
       const blockedTitle = `Blocked Issue ${generateTestId()}`
@@ -129,22 +62,14 @@ test.describe('Project Health', () => {
       })
       createdIssueIds.push(blocked.id)
 
-      // Add dependency: blocked depends on blocker
       await api.addDependency(blocked.id, {
         depends_on_id: blocker.id,
       })
 
-      // Verify blocked issues endpoint sees the blocked issue
       const blockedIssues = await api.blocked()
 
-      // Find our blocked issue in the response
-      const foundBlocked = blockedIssues.some(
-        (issue) => issue.id === blocked.id
-      )
-      expect(foundBlocked).toBe(true)
-
-      // Verify the blocked issue has the blocker in its blocked_by list
-      const ourBlocked = blockedIssues.find(issue => issue.id === blocked.id)
+      const ourBlocked = blockedIssues.find((issue) => issue.id === blocked.id)
+      expect(ourBlocked).toBeDefined()
       expect(ourBlocked?.blocked_by).toContain(blocker.id)
     })
   })

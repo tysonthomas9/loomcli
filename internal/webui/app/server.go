@@ -125,14 +125,6 @@ func (app *Server) buildHandlers() {
 		getFleetTimeouts = app.fleetRegistry.GetTotalTimeoutCount
 	}
 
-	var daemonSupervisorH, daemonConfigH http.HandlerFunc
-	if app.config.DaemonSupervisorFn != nil {
-		daemonSupervisorH = webui.HandleDaemonSupervisor(app.config.DaemonSupervisorFn)
-	}
-	if app.config.DaemonConfigFn != nil {
-		daemonConfigH = webui.HandleDaemonConfig(app.config.DaemonConfigFn)
-	}
-
 	var backendsHealthH http.HandlerFunc
 	if app.config.BackendOps != nil {
 		backendsHealthH = webui.HandleBackendsHealth(app.config.BackendOps)
@@ -151,8 +143,6 @@ func (app *Server) buildHandlers() {
 		ExtAuthURL:         app.config.ExtAuthURL,
 		BackendsHealthH:    backendsHealthH,
 		NotifyToken:        app.notifyToken,
-		DaemonSupervisor:   daemonSupervisorH,
-		DaemonConfig:       daemonConfigH,
 		FleetTimeoutsFn:    getFleetTimeouts,
 		ClaimMetrics:       app.claimMetrics,
 		TerminalGraceMS:    graceMS,

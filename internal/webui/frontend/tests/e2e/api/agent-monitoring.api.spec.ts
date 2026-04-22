@@ -4,8 +4,9 @@
  * Story 11: As an operator, I want to monitor agent status via loom.
  * Tests loom proxy endpoints used by MonitorDashboard Agent Sidebar.
  *
- * Monitor endpoints are served directly on the single consolidated server
- * (e.g. /health, /api/monitor/agents, /api/monitor/status).
+ * Monitor endpoints are workspace-scoped:
+ * /api/workspaces/{ws}/monitor/{agents,status,tasks,...}. The workspace id
+ * is resolved once per test run via GET /api/workspaces/active.
  */
 
 import { test, expect, isIntegrationEnabled, generateTestId } from './api-client'
@@ -19,6 +20,17 @@ test.describe.configure({ mode: 'serial' })
 test.describe('Agent Monitoring (Loom)', () => {
   // Track created issues for cleanup
   const createdIssueIds: string[] = []
+  // Scoped monitor endpoints need the active workspace id. Resolved once via
+  // the same /api/workspaces/active endpoint cli/data uses.
+  let wsID = ''
+
+  test.beforeAll(async ({ request }) => {
+    const resp = await request.get('/api/workspaces/active')
+    expect(resp.ok()).toBe(true)
+    const body = await resp.json()
+    wsID = body.id as string
+    expect(wsID).toBeTruthy()
+  })
 
   test.afterEach(async ({ api }) => {
     // Clean up created issues using api fixture for consistency
@@ -42,8 +54,8 @@ test.describe('Agent Monitoring (Loom)', () => {
   })
 
   test.describe('Agents Endpoint', () => {
-    test('GET /api/monitor/agents returns agent list', async ({ request }) => {
-      const response = await request.get('/api/monitor/agents')
+    test('GET /api/workspaces/{ws}/monitor/agents returns agent list', async ({ request }) => {
+      const response = await request.get(`/api/workspaces/${wsID}/monitor/agents`)
 
       expect(response.ok()).toBe(true)
 
@@ -62,7 +74,7 @@ test.describe('Agent Monitoring (Loom)', () => {
     })
 
     test('agent data includes name, branch, status fields', async ({ request }) => {
-      const response = await request.get('/api/monitor/agents')
+      const response = await request.get(`/api/workspaces/${wsID}/monitor/agents`)
 
       expect(response.ok()).toBe(true)
 
@@ -94,8 +106,8 @@ test.describe('Agent Monitoring (Loom)', () => {
   })
 
   test.describe('Status Endpoint', () => {
-    test('GET /api/monitor/status returns system overview', async ({ request }) => {
-      const response = await request.get('/api/monitor/status')
+    test('GET /api/workspaces/{ws}/monitor/status returns system overview', async ({ request }) => {
+      const response = await request.get(`/api/workspaces/${wsID}/monitor/status`)
 
       expect(response.ok()).toBe(true)
 
@@ -121,7 +133,7 @@ test.describe('Agent Monitoring (Loom)', () => {
     })
 
     test('status includes task counts by workflow state', async ({ request }) => {
-      const response = await request.get('/api/monitor/status')
+      const response = await request.get(`/api/workspaces/${wsID}/monitor/status`)
 
       expect(response.ok()).toBe(true)
 
@@ -155,8 +167,8 @@ test.describe('Agent Monitoring (Loom)', () => {
   })
 
   test.describe('Tasks Endpoint', () => {
-    test('GET /api/monitor/tasks returns task distribution', async ({ request }) => {
-      const response = await request.get('/api/monitor/tasks')
+    test('GET /api/workspaces/{ws}/monitor/tasks returns task distribution', async ({ request }) => {
+      const response = await request.get(`/api/workspaces/${wsID}/monitor/tasks`)
 
       expect(response.ok()).toBe(true)
 
@@ -195,7 +207,7 @@ test.describe('Agent Monitoring (Loom)', () => {
   test.describe('Loom Integration', () => {
     test('loom reflects issue changes from loom daemon', async ({ api, request }) => {
       // Capture initial stats from loom
-      const initialResponse = await request.get('/api/monitor/status')
+      const initialResponse = await request.get(`/api/workspaces/${wsID}/monitor/status`)
       const initialBody = await initialResponse.json()
       const initialTotal = initialBody.stats.total
 
@@ -215,7 +227,7 @@ test.describe('Agent Monitoring (Loom)', () => {
       // the test workspace, so verify the count is at least non-negative
       // rather than asserting exact delta.
       await expect(async () => {
-        const response = await request.get('/api/monitor/status')
+        const response = await request.get(`/api/workspaces/${wsID}/monitor/status`)
         const body = await response.json()
 
         if (initialTotal > 0) {

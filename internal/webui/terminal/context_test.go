@@ -192,7 +192,7 @@ func TestFetchTerminalContext_Success(t *testing.T) {
 	}
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/monitor/status" {
+		if r.URL.Path != "/api/workspaces/test-ws/monitor/status" {
 			t.Errorf("unexpected path %q", r.URL.Path)
 			http.NotFound(w, r)
 			return
@@ -207,7 +207,7 @@ func TestFetchTerminalContext_Success(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	got, err := FetchTerminalContext(srv.URL)
+	got, err := FetchTerminalContext(srv.URL, "test-ws")
 	if err != nil {
 		t.Fatalf("FetchTerminalContext() error = %v", err)
 	}
@@ -269,7 +269,7 @@ func TestFetchTerminalContext_InvalidJSON(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	_, err := FetchTerminalContext(srv.URL)
+	_, err := FetchTerminalContext(srv.URL, "test-ws")
 	if err == nil {
 		t.Fatal("FetchTerminalContext() expected error for invalid JSON, got nil")
 	}
@@ -284,7 +284,7 @@ func TestFetchTerminalContext_HTTPError(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	_, err := FetchTerminalContext(srv.URL)
+	_, err := FetchTerminalContext(srv.URL, "test-ws")
 	if err == nil {
 		t.Fatal("FetchTerminalContext() expected error for HTTP 500, got nil")
 	}
@@ -295,7 +295,7 @@ func TestFetchTerminalContext_HTTPError(t *testing.T) {
 
 func TestFetchTerminalContext_ServerDown(t *testing.T) {
 	// Use a URL that will not connect to anything.
-	_, err := FetchTerminalContext("http://127.0.0.1:1")
+	_, err := FetchTerminalContext("http://127.0.0.1:1", "test-ws")
 	if err == nil {
 		t.Fatal("FetchTerminalContext() expected error for unreachable server, got nil")
 	}

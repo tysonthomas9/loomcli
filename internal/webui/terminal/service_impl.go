@@ -63,14 +63,14 @@ func (s *terminalServiceImpl) attachedClients(wsID, session string) int {
 	return s.ptyMgr.AttachmentCount(SessionKey{Workspace: wsID, Name: session})
 }
 
-func (s *terminalServiceImpl) GenerateToken(_ context.Context, session, userID string) (string, error) {
+func (s *terminalServiceImpl) GenerateToken(_ context.Context, session, wsID, userID string) (string, error) {
 	if s.termAuth == nil {
 		return "", service.ErrUnavailable("terminal auth not initialized")
 	}
 	if session == "" || !validTerminalSession.MatchString(session) {
 		return "", service.ErrValidation("invalid session name")
 	}
-	token, err := s.termAuth.GenerateToken(session, userID)
+	token, err := s.termAuth.GenerateToken(session, wsID, userID)
 	if err != nil {
 		return "", service.ErrInternal("failed to generate token", err)
 	}

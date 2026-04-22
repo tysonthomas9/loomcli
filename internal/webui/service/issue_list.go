@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"log/slog"
 	"strings"
 	"time"
@@ -13,20 +12,12 @@ import (
 )
 
 func (s *issueServiceImpl) ListIssues(ctx context.Context, params ListIssuesParams) (*ListIssuesResult, error) {
-	if s.pool == nil {
-		return nil, ErrUnavailable("connection pool not initialized")
-	}
-
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	client, err := s.pool.Get(ctx)
+	client, err := s.acquireClient(ctx)
 	if err != nil {
-		if errors.Is(err, context.DeadlineExceeded) {
-			return nil, ErrTimeout("timeout connecting to daemon")
-		}
-		slog.Error("connection pool error", "err", err)
-		return nil, ErrUnavailable("daemon unavailable")
+		return nil, err
 	}
 	rpcOK := false
 	defer s.releaseClient(client, &rpcOK)

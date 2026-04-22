@@ -14,7 +14,7 @@ import (
 // WebSocket now owns a fresh PTY managed directly by PTYManager.
 type TerminalService interface {
 	// --- WebSocket auth ---
-	GenerateToken(ctx context.Context, session, userID string) (string, error)
+	GenerateToken(ctx context.Context, session, wsID, userID string) (string, error)
 
 	// --- Tab metadata (Redis) ---
 	ListTabs(ctx context.Context, wsID string) ([]tabmeta.TabMetadata, error)

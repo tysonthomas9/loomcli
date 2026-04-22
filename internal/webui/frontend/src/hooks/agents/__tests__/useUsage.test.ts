@@ -19,6 +19,10 @@ vi.mock("@/api", () => ({
   fetchUsage: vi.fn(),
 }));
 
+vi.mock("@/hooks/workspace", () => ({
+  useWorkspaceContext: () => ({ workspaceId: "test-ws" }),
+}));
+
 const mockFetchUsage = vi.mocked(fetchUsage);
 
 function createMockUsage(overrides?: Partial<UsageResponse>): UsageResponse {
@@ -78,7 +82,7 @@ describe("useUsage", () => {
 
       await flushPromises();
 
-      expect(mockFetchUsage).toHaveBeenCalledWith(undefined);
+      expect(mockFetchUsage).toHaveBeenCalledWith("test-ws", undefined);
       expect(result.current.data).toEqual(usage);
       expect(result.current.isLoading).toBe(false);
       expect(result.current.isConnected).toBe(true);
@@ -104,7 +108,7 @@ describe("useUsage", () => {
 
       await flushPromises();
 
-      expect(mockFetchUsage).toHaveBeenCalledWith({
+      expect(mockFetchUsage).toHaveBeenCalledWith("test-ws", {
         agent: "nova",
         since: "2026-01-01",
       });

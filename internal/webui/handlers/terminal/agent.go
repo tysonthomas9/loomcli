@@ -8,7 +8,7 @@ import (
 	"regexp"
 	"time"
 
-	"nhooyr.io/websocket" //nolint:staticcheck // SA1019: websocket migration tracked separately
+	"github.com/coder/websocket"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
@@ -100,13 +100,14 @@ func HandleGetAgentTerminalInfo(svc service.AgentService) http.HandlerFunc {
 func HandleGetAgentTerminalToken(svc service.AgentService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		agentName := r.PathValue("name")
+		wsID := middleware.WorkspaceFromContext(r.Context())
 
 		var userID string
 		if identity, ok := middleware.UserIdentityFromContext(r.Context()); ok {
 			userID = identity.UserID
 		}
 
-		token, err := svc.GenerateTerminalToken(r.Context(), agentName, userID)
+		token, err := svc.GenerateTerminalToken(r.Context(), wsID, agentName, userID)
 		if err != nil {
 			var svcErr *service.ServiceError
 			status := http.StatusInternalServerError
@@ -160,7 +161,7 @@ func HandleAgentTerminalWS(manager *webuterminal.AgentTmuxManager, auth *realtim
 		closeStatus := websocket.StatusInternalError
 		closeReason := "connection closed"
 		defer func() {
-			_ = conn.Close(closeStatus, closeReason) //nolint:staticcheck // SA1019: websocket migration tracked separately
+			_ = conn.Close(closeStatus, closeReason)
 		}()
 
 		closeStatus, closeReason = runAgentTerminalRelay(r.Context(), conn, manager, sessionName, agentName)
@@ -200,7 +201,8 @@ func validateAgentWSRequest(w http.ResponseWriter, r *http.Request, manager *web
 	}
 
 	token := r.URL.Query().Get("token")
-	userID, err := auth.ValidateToken(token, agentLogTokenScope(agentName))
+	wsID := middleware.WorkspaceFromContext(r.Context())
+	userID, err := auth.ValidateToken(token, agentLogTokenScope(agentName), wsID)
 	if err != nil {
 		handler.WriteJSON(w, http.StatusUnauthorized, map[string]interface{}{
 			"success": false,
@@ -244,25 +246,25 @@ func resolveAgentSession(w http.ResponseWriter, manager *webuterminal.AgentTmuxM
 }
 
 // upgradeAgentWS performs the WebSocket upgrade for an agent terminal connection.
-func upgradeAgentWS(w http.ResponseWriter, r *http.Request, patterns []string) (*websocket.Conn, bool) { //nolint:staticcheck // SA1019: websocket migration tracked separately
+func upgradeAgentWS(w http.ResponseWriter, r *http.Request, patterns []string) (*websocket.Conn, bool) {
 	rc := http.NewResponseController(w)
 	if err := rc.SetWriteDeadline(time.Time{}); err != nil {
 		slog.Warn("agent terminal ws: failed to disable write deadline", "err", err)
 	}
 
-	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{ //nolint:staticcheck // SA1019: websocket migration tracked separately
+	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 		OriginPatterns: patterns,
 	})
 	if err != nil {
 		slog.Error("failed to accept agent terminal websocket", "err", err)
 		return nil, false
 	}
-	conn.SetReadLimit(realtime.WSReadLimit) //nolint:staticcheck // SA1019: websocket migration tracked separately
+	conn.SetReadLimit(realtime.WSReadLimit)
 	return conn, true
 }
 
 // runAgentTerminalRelay attaches to the tmux session and runs the bidirectional relay.
-func runAgentTerminalRelay(reqCtx context.Context, conn *websocket.Conn, manager *webuterminal.AgentTmuxManager, sessionName, agentName string) (websocket.StatusCode, string) { //nolint:staticcheck // SA1019: websocket migration tracked separately
+func runAgentTerminalRelay(reqCtx context.Context, conn *websocket.Conn, manager *webuterminal.AgentTmuxManager, sessionName, agentName string) (websocket.StatusCode, string) {
 	termSession, err := manager.AttachExistingRaw(sessionName, 80, 24)
 	if err != nil {
 		if errors.Is(err, webuterminal.ErrMaxSessionsReached) {
@@ -281,7 +283,7 @@ func runAgentTerminalRelay(reqCtx context.Context, conn *websocket.Conn, manager
 	go func() {
 		select {
 		case <-termSession.KillCh():
-			_ = conn.Close(websocket.StatusCode(realtime.WSCloseSessionKilled), "session killed") //nolint:staticcheck // SA1019: websocket migration tracked separately
+			_ = conn.Close(websocket.StatusCode(realtime.WSCloseSessionKilled), "session killed")
 			cancel()
 		case <-ctx.Done():
 		}

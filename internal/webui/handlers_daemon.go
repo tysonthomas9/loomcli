@@ -9,6 +9,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/webui/server/dto"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
 // ErrAgentNotFound is returned by AgentQueueFn when the agent name
@@ -92,6 +93,62 @@ type configResponse struct {
 func HandleDaemonConfig(fn func() (json.RawMessage, error)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		data, err := fn()
+		if err != nil {
+			handler.WriteJSON(w, http.StatusServiceUnavailable,
+				dto.NewErrorResponse("failed to load daemon config: "+err.Error(), "config_error"))
+			return
+		}
+		handler.WriteJSON(w, http.StatusOK, configResponse{Success: true, Data: data})
+	}
+}
+
+// HandleDaemonSupervisorScoped is the workspace-scoped counterpart to
+// HandleDaemonSupervisor. It resolves the workspace ID from the request
+// context (set by middleware.Workspace) to a filesystem path via pathFn,
+// then reads the daemon state from that workspace's .loom directory rather
+// than the server's launch directory.
+func HandleDaemonSupervisorScoped(
+	pathFn func(wsID string) string,
+	loadFn func(projectDir string) (*DaemonSupervisorData, error),
+) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		wsID := middleware.WorkspaceFromContext(r.Context())
+		wsPath := pathFn(wsID)
+		if wsPath == "" {
+			handler.WriteJSON(w, http.StatusNotFound,
+				dto.NewErrorResponse("workspace path not found", "workspace_not_found"))
+			return
+		}
+		data, err := loadFn(wsPath)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				handler.WriteJSON(w, http.StatusServiceUnavailable,
+					dto.NewErrorResponse("daemon is not running for this workspace", "daemon_not_running"))
+				return
+			}
+			handler.WriteJSON(w, http.StatusInternalServerError,
+				dto.NewErrorResponse("failed to read daemon state: "+err.Error(), "internal_error"))
+			return
+		}
+		handler.WriteJSON(w, http.StatusOK, map[string]any{"success": true, "data": data})
+	}
+}
+
+// HandleDaemonConfigScoped is the workspace-scoped counterpart to
+// HandleDaemonConfig.
+func HandleDaemonConfigScoped(
+	pathFn func(wsID string) string,
+	loadFn func(projectDir string) (json.RawMessage, error),
+) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		wsID := middleware.WorkspaceFromContext(r.Context())
+		wsPath := pathFn(wsID)
+		if wsPath == "" {
+			handler.WriteJSON(w, http.StatusNotFound,
+				dto.NewErrorResponse("workspace path not found", "workspace_not_found"))
+			return
+		}
+		data, err := loadFn(wsPath)
 		if err != nil {
 			handler.WriteJSON(w, http.StatusServiceUnavailable,
 				dto.NewErrorResponse("failed to load daemon config: "+err.Error(), "config_error"))

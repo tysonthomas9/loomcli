@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
+	beadsbackend "github.com/tysonthomas9/loomcli/internal/backend/beads"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 )
@@ -18,10 +19,66 @@ func CollectMonitorData(readyLimit int, branch string) *MonitorData {
 	// (respects setDefaultIssueBackend used by tests).
 	d := *cli.GetDeps(nil)
 	d.IssueBackend = cli.DefaultIssueBackend()
-	return collectMonitorDataDeps(&d, readyLimit, branch)
+	return collectMonitorDataDepsScoped(&d, "", nil, readyLimit, branch)
 }
 
-func collectMonitorDataDeps(deps *cli.Deps, readyLimit int, branch string) *MonitorData {
+// CollectMonitorDataScoped is the workspace-scoped counterpart to
+// CollectMonitorData. All bd RPCs route through `pool` (the target
+// workspace's daemon pool) instead of the default pool; worktrees are
+// discovered from the workspace entry named `workspaceName`; and the daemon
+// state path + bd sync working directory are resolved from `workspacePath`
+// rather than os.Getwd().
+//
+// workspaceName is required when multiple workspace configs share a Path
+// (e.g. "nova" and "loomcli" both rooted in the loomcli repo) — without it,
+// the resolver would pick a config by path-match alone, which is ambiguous.
+// When workspaceName is empty, falls back to the first config matching
+// workspacePath.
+//
+// An empty workspacePath or nil pool returns a zero-value MonitorData
+// (Timestamp set, everything else empty) rather than silently falling back
+// to cross-workspace data — the whole point of this scoped API is to refuse
+// to leak.
+func CollectMonitorDataScoped(workspacePath, workspaceName string, pool beadsbackend.Pool, readyLimit int, branch string) *MonitorData {
+	if workspacePath == "" || pool == nil {
+		return &MonitorData{Timestamp: time.Now()}
+	}
+	d := *cli.GetDeps(nil)
+	d.IssueBackend = beadsbackend.NewPooledBackend(pool)
+	resolver := resolverForWorkspace(workspaceName, workspacePath)
+	return collectMonitorDataDepsScoped(&d, workspacePath, resolver, readyLimit, branch)
+}
+
+// resolverForWorkspace returns a workspace-mode Resolver bound to
+// workspaceName. Falls back to path-based lookup when name is empty —
+// correct for the common one-config-per-path case, ambiguous when two
+// workspaces share a path (in which case callers should pass the name).
+// Returns nil if no match is found or config cannot be loaded.
+func resolverForWorkspace(workspaceName, workspacePath string) *cli.Resolver {
+	cfg, err := config.LoadConfigCached()
+	if err != nil || cfg == nil || len(cfg.Workspaces) == 0 {
+		return nil
+	}
+	if workspaceName != "" {
+		if _, ok := cfg.Workspaces[workspaceName]; ok {
+			return &cli.Resolver{Mode: cli.ModeWorkspace, Config: cfg, Workspace: workspaceName}
+		}
+		return nil
+	}
+	for name, ws := range cfg.Workspaces {
+		if ws.Path == workspacePath {
+			return &cli.Resolver{Mode: cli.ModeWorkspace, Config: cfg, Workspace: name}
+		}
+	}
+	return nil
+}
+
+// collectMonitorDataDepsScoped is the single source of truth for monitor
+// collection. When wsPath == "" and resolver == nil, it behaves exactly like
+// the legacy launch-workspace collector (uses cli.DiscoverWorktrees, os.Getwd,
+// cli.GetBeadsDir). When both are supplied, every per-workspace resource is
+// scoped to the target workspace.
+func collectMonitorDataDepsScoped(deps *cli.Deps, wsPath string, resolver *cli.Resolver, readyLimit int, branch string) *MonitorData {
 	data := &MonitorData{Timestamp: time.Now()}
 
 	// Start stats and sync bd call in parallel with task collection
@@ -40,7 +97,7 @@ func collectMonitorDataDeps(deps *cli.Deps, readyLimit int, branch string) *Moni
 
 	go func() {
 		defer wg.Done()
-		syncBdInfo = collectSyncBdStatusDeps(deps)
+		syncBdInfo = collectSyncBdStatusDepsScoped(deps, wsPath)
 	}()
 
 	// Collect tasks (internally parallel) to get agent-task mapping
@@ -48,7 +105,7 @@ func collectMonitorDataDeps(deps *cli.Deps, readyLimit int, branch string) *Moni
 
 	// Collect agents, passing the task map for fallback lookup
 	var taskIDToAgents map[string][]string
-	data.Agents, taskIDToAgents = collectAgentStatusDeps(deps, data.AgentTasks, branch)
+	data.Agents, taskIDToAgents = collectAgentStatusDepsScoped(deps, wsPath, resolver, data.AgentTasks, branch)
 
 	// Detect task conflicts (multiple agents claiming same task)
 	data.TaskConflicts = make(map[string][]string)
@@ -83,11 +140,14 @@ func collectMonitorDataDeps(deps *cli.Deps, readyLimit int, branch string) *Moni
 func collectAgentStatus(agentTasks map[string]TaskInfo, branch string) ([]AgentStatus, map[string][]string) {
 	d := *cli.GetDeps(nil)
 	d.IssueBackend = cli.DefaultIssueBackend()
-	return collectAgentStatusDeps(&d, agentTasks, branch)
+	return collectAgentStatusDepsScoped(&d, "", nil, agentTasks, branch)
 }
 
-func collectAgentStatusDeps(deps *cli.Deps, agentTasks map[string]TaskInfo, branch string) ([]AgentStatus, map[string][]string) {
-	allWorktrees, err := cli.DiscoverWorktrees()
+// collectAgentStatusDepsScoped collects agent status for the worktrees owned
+// by the given workspace. When wsPath == "" (and resolver == nil) it falls
+// back to cli.DiscoverWorktrees + os.Getwd, matching the legacy behavior.
+func collectAgentStatusDepsScoped(deps *cli.Deps, wsPath string, resolver *cli.Resolver, agentTasks map[string]TaskInfo, branch string) ([]AgentStatus, map[string][]string) {
+	allWorktrees, err := discoverWorktreesForScope(resolver)
 	if err != nil {
 		return nil, nil
 	}
@@ -111,8 +171,14 @@ func collectAgentStatusDeps(deps *cli.Deps, agentTasks map[string]TaskInfo, bran
 		}
 	}
 
+	projectDir := wsPath
+	if projectDir == "" {
+		if cwd, err2 := os.Getwd(); err2 == nil {
+			projectDir = cwd
+		}
+	}
 	var daemonManaged map[string]DaemonAgentInfo
-	if projectDir, err2 := os.Getwd(); err2 == nil {
+	if projectDir != "" {
 		daemonStatePath := config.ResolveDaemonStatePath(projectDir)
 		daemonManaged = LoadDaemonManagedAgents(daemonStatePath)
 	}
@@ -479,12 +545,18 @@ func processClosedIssues(issues []backend.IssueData, err error) []TaskInfo {
 // collectSyncBdStatus runs the bd sync --status command (safe to call concurrently).
 // Uses execCommand directly since sync is an infrastructure operation, not an issue query.
 func collectSyncBdStatus() SyncInfo {
-	return collectSyncBdStatusDeps(cli.GetDeps(nil))
+	return collectSyncBdStatusDepsScoped(cli.GetDeps(nil), "")
 }
 
-func collectSyncBdStatusDeps(deps *cli.Deps) SyncInfo {
+// collectSyncBdStatusDepsScoped runs `bd sync --status` in the given workspace
+// path. Empty wsPath falls back to cli.GetBeadsDir() (the launch workspace).
+func collectSyncBdStatusDepsScoped(deps *cli.Deps, wsPath string) SyncInfo {
+	dir := wsPath
+	if dir == "" {
+		dir = cli.GetBeadsDir()
+	}
 	var info SyncInfo
-	result := deps.Exec.Run(cli.GetBeadsDir(), "bd", "sync", "--status")
+	result := deps.Exec.Run(dir, "bd", "sync", "--status")
 	if result.Err == nil {
 		info.DBSynced = !strings.Contains(result.Stdout, "error") && !strings.Contains(result.Stdout, "failed")
 		info.DBLastSync = "recently"
@@ -492,6 +564,16 @@ func collectSyncBdStatusDeps(deps *cli.Deps) SyncInfo {
 		info.DBError = "unable to check"
 	}
 	return info
+}
+
+// discoverWorktreesForScope returns worktrees for the target workspace via
+// the supplied resolver, or falls back to the default resolver (legacy mode)
+// when resolver is nil.
+func discoverWorktreesForScope(resolver *cli.Resolver) ([]cli.WorktreeInfo, error) {
+	if resolver == nil {
+		return cli.DiscoverWorktrees()
+	}
+	return resolver.DiscoverWorktrees()
 }
 
 // completeSyncStatus combines the bd sync result with agent data for git push/pull counts.

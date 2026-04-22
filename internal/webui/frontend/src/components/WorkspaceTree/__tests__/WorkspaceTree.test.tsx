@@ -78,6 +78,8 @@ vi.mock("@/hooks", () => ({
     setDefaultWorkspace: vi.fn(),
     agents: [],
     workspace: null,
+    ...defaultReposReturn,
+    ...reposOverride,
   }),
   useWorkspaceTree: () => ({
     epics: [],

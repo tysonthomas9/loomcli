@@ -108,7 +108,7 @@ async function setupMocks(page: Page, issues = mockIssues) {
     })
   })
   // Mock stats endpoint to prevent "Stats unavailable" overlay
-  await page.route("**/api/stats", async (route) => {
+  await page.route("**/api/workspaces/*/stats", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
