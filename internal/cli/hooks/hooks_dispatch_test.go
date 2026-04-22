@@ -11,7 +11,7 @@ import (
 )
 
 func TestDispatchHookEvent_NilEvent(t *testing.T) {
-	err := dispatchHookEvent(nil, "/tmp/beads", "sess-123")
+	err := dispatchHookEvent(nil, "", "/tmp/beads", "sess-123")
 	if err != nil {
 		t.Fatalf("expected nil error for nil event, got: %v", err)
 	}
@@ -23,7 +23,7 @@ func TestDispatchHookEvent_EmptyBeadsDir(t *testing.T) {
 		Prompt:    "hello",
 		Timestamp: time.Now(),
 	}
-	err := dispatchHookEvent(event, "", "sess-123")
+	err := dispatchHookEvent(event, "", "", "sess-123")
 	if err != nil {
 		t.Fatalf("expected nil error for empty beadsDir, got: %v", err)
 	}
@@ -35,7 +35,7 @@ func TestDispatchHookEvent_EmptySessionID(t *testing.T) {
 		Prompt:    "hello",
 		Timestamp: time.Now(),
 	}
-	err := dispatchHookEvent(event, "/tmp/beads", "")
+	err := dispatchHookEvent(event, "", "/tmp/beads", "")
 	if err != nil {
 		t.Fatalf("expected nil error for empty sessionID, got: %v", err)
 	}
@@ -84,7 +84,7 @@ func TestDispatchHookEvent_SessionEndCapturesTokenUsage(t *testing.T) {
 		Timestamp:  time.Now(),
 	}
 
-	err := dispatchHookEvent(event, beadsDir, sessionID)
+	err := dispatchHookEvent(event, "", beadsDir, sessionID)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -150,7 +150,7 @@ func TestDispatchHookEvent_SessionEndMissingTranscript(t *testing.T) {
 		Timestamp:  time.Now(),
 	}
 
-	err := dispatchHookEvent(event, beadsDir, sessionID)
+	err := dispatchHookEvent(event, "", beadsDir, sessionID)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -206,7 +206,7 @@ func TestDispatchHookEvent_SessionEndEmptySessionRef(t *testing.T) {
 		Timestamp:  time.Now(),
 	}
 
-	err := dispatchHookEvent(event, beadsDir, sessionID)
+	err := dispatchHookEvent(event, "", beadsDir, sessionID)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -252,7 +252,7 @@ func TestDispatchHookEvent_SyncsNativeTranscript(t *testing.T) {
 		Backend:    "claude",
 		Timestamp:  time.Now(),
 	}
-	if err := dispatchHookEvent(event, beadsDir, sessionID); err != nil {
+	if err := dispatchHookEvent(event, "", beadsDir, sessionID); err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
 
@@ -297,7 +297,7 @@ func TestDispatchHookEvent_SyncsSubagentTranscript(t *testing.T) {
 		Backend:    "claude",
 		Timestamp:  time.Now(),
 	}
-	if err := dispatchHookEvent(event, beadsDir, sessionID); err != nil {
+	if err := dispatchHookEvent(event, "", beadsDir, sessionID); err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
 
@@ -325,7 +325,7 @@ func TestDispatchHookEvent_NoSessionRefSkipsSync(t *testing.T) {
 		Backend:   "claude",
 		Timestamp: time.Now(),
 	}
-	if err := dispatchHookEvent(event, beadsDir, sessionID); err != nil {
+	if err := dispatchHookEvent(event, "", beadsDir, sessionID); err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
 

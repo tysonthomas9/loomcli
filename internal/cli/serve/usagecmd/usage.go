@@ -48,20 +48,6 @@ type DailyCost struct {
 	Sessions int     `json:"sessions"`
 }
 
-// InitStore creates a usage store from the given directory.
-// Returns nil if the store cannot be created.
-func InitStore(dir string) *usage.Store {
-	if dir == "" {
-		dir = "."
-	}
-	s, err := usage.NewStore(dir)
-	if err != nil {
-		log.Printf("Warning: failed to create usage store: %v", err)
-		return nil
-	}
-	return s
-}
-
 // HandleUsage returns an http.HandlerFunc that reads usage data from the given store.
 func HandleUsage(store *usage.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

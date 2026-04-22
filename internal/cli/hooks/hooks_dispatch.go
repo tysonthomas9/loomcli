@@ -15,17 +15,20 @@ import (
 //
 // Designed for use inside hook subprocesses: errors are logged to stderr and
 // the function always returns nil so the hook process exits 0. Returns nil
-// immediately (no-op) when event is nil, or when beadsDir / sessionID are
-// missing (non-loom agent session).
-func dispatchHookEvent(event *HookEvent, beadsDir, sessionID string) error { //nolint:unparam // always nil by design: hooks must exit 0
+// immediately (no-op) when event is nil, or when the caller provided neither
+// a workspace ID nor a legacy beads dir alongside a session ID.
+func dispatchHookEvent(event *HookEvent, workspaceID, beadsDir, sessionID string) error { //nolint:unparam // always nil by design: hooks must exit 0
 	if event == nil {
 		return nil
 	}
-	if beadsDir == "" || sessionID == "" {
+	if sessionID == "" {
+		return nil
+	}
+	if workspaceID == "" && beadsDir == "" {
 		return nil
 	}
 
-	store, err := sessions.NewStore(beadsDir)
+	store, err := openHookStore(workspaceID, beadsDir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "loom hook: failed to create session store: %v\n", err)
 		return nil
@@ -58,6 +61,18 @@ func dispatchHookEvent(event *HookEvent, beadsDir, sessionID string) error { //n
 	}
 
 	return nil
+}
+
+// openHookStore returns the session Store the hook should write to. With a
+// workspace ID, the central ~/.loom/sessions/<wsID>/ store is used (production
+// path from spawn env). Empty workspace ID with a beadsDir means a legacy-path
+// caller (chiefly tests with a tmp dir) — fall back to the beadsDir-local
+// sessions/ tree so test isolation holds.
+func openHookStore(workspaceID, beadsDir string) (*sessions.Store, error) {
+	if workspaceID != "" {
+		return sessions.NewStoreForWorkspace(workspaceID, beadsDir)
+	}
+	return sessions.NewStore(beadsDir)
 }
 
 // deriveSubagentPath returns the on-disk path to a spawned subagent's JSONL

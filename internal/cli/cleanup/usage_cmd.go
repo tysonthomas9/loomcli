@@ -12,6 +12,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/monitor"
+	"github.com/tysonthomas9/loomcli/internal/cli/serve/workspacemgr"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
@@ -73,12 +74,7 @@ func init() {
 }
 
 func runUsage(cmd *cobra.Command, _ []string) {
-	loomDir := cli.GetBeadsDir()
-	if loomDir == "" {
-		loomDir = "."
-	}
-
-	store, err := usage.NewStore(loomDir)
+	store, err := usage.NewStoreForWorkspace(workspacemgr.ResolveInitialWorkspaceID(), cli.GetBeadsDir())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)

@@ -222,6 +222,11 @@ func applyAutoModeDefaults(opts *AutoModeOptions) {
 	if opts.Deps == nil {
 		opts.Deps = cli.GetDeps(nil)
 	}
+	if opts.WorkspaceID == "" {
+		if cfg, err := config.LoadConfig(); err == nil && cfg != nil && cfg.DefaultWorkspaceID != "" {
+			opts.WorkspaceID = cfg.DefaultWorkspaceID
+		}
+	}
 	if opts.BackoffBase == 0 {
 		opts.BackoffBase = 30 * time.Second
 	}
@@ -265,13 +270,14 @@ func initAutoLoop(opts AutoModeOptions) *autoLoopCtx {
 		log.Fatal("CustomPromptGen must be set on AutoModeOptions")
 	}
 
-	usageStore, usageErr := usage.NewStore(cli.GetBeadsDir())
+	legacyBeadsDir := cli.GetBeadsDir()
+	usageStore, usageErr := usage.NewStoreForWorkspace(opts.WorkspaceID, legacyBeadsDir)
 	if usageErr != nil {
 		fmt.Printf("[auto] Warning: usage tracking disabled: %v\n", usageErr)
 	}
 	ctx.usageStore = usageStore
 
-	sessStore, sessErr := sessions.NewStore(cli.GetBeadsDir())
+	sessStore, sessErr := sessions.NewStoreForWorkspace(opts.WorkspaceID, legacyBeadsDir)
 	if sessErr != nil {
 		log.Printf("[auto] Warning: session store unavailable: %v", sessErr)
 	}

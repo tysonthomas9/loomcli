@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/lockfile"
+	"github.com/tysonthomas9/loomcli/internal/workspace"
 )
 
 // Store provides append-only JSONL storage for session usage records.
@@ -20,11 +21,28 @@ type Store struct {
 
 // NewStore creates a Store that writes to {loomDir}/usage.jsonl.
 // It creates the loomDir directory if it does not exist.
+// Retained for pre-central-layout callers (chiefly tests); production writers
+// should use NewStoreForWorkspace so writer and reader resolve the same path.
 func NewStore(loomDir string) (*Store, error) {
 	if err := os.MkdirAll(loomDir, 0o755); err != nil {
 		return nil, fmt.Errorf("create usage dir: %w", err)
 	}
 	return &Store{path: filepath.Join(loomDir, "usage.jsonl")}, nil
+}
+
+// NewStoreForWorkspace returns a Store writing to
+// ~/.loom/usage/<wsID>/usage.jsonl, migrating <legacyBeadsDir>/usage.jsonl on
+// first use.
+func NewStoreForWorkspace(wsID, legacyBeadsDir string) (*Store, error) {
+	dir, err := workspace.CentralUsageDir(wsID)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, fmt.Errorf("create usage dir: %w", err)
+	}
+	workspace.MigrateLegacySessionsAndUsage(wsID, legacyBeadsDir)
+	return &Store{path: filepath.Join(dir, "usage.jsonl")}, nil
 }
 
 // Append serializes record as a single JSON line and appends it to the store

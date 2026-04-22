@@ -49,7 +49,7 @@ func (s *Supervisor) buildCommand(ap *AgentProcess) (*exec.Cmd, error) {
 
 	cmd.Env = s.appendDaemonEnv(cmd.Env)
 	cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_YIELD_FILE=%s", filepath.Join(ap.WorktreePath, YieldFileName)))
-	cmd.Env = appendSessionEnv(cmd.Env, ap)
+	cmd.Env = s.appendSessionEnv(cmd.Env, ap)
 
 	return cmd, nil
 }
@@ -122,7 +122,7 @@ func appendRoutingEnv(env []string, ap *AgentProcess) []string {
 }
 
 // appendSessionEnv adds session-related env vars for transcript-based liveness tracking.
-func appendSessionEnv(env []string, ap *AgentProcess) []string {
+func (s *Supervisor) appendSessionEnv(env []string, ap *AgentProcess) []string {
 	ap.Mu.Lock()
 	sess := ap.Session
 	ap.Mu.Unlock()
@@ -131,6 +131,9 @@ func appendSessionEnv(env []string, ap *AgentProcess) []string {
 			fmt.Sprintf("LOOM_SESSION_ID=%s", sess.SessionID()),
 			fmt.Sprintf("LOOM_BEADS_DIR=%s", cli.GetBeadsDir()),
 		)
+		if s.WorkspaceID != "" {
+			env = append(env, fmt.Sprintf("LOOM_WORKSPACE_ID=%s", s.WorkspaceID))
+		}
 	}
 	return env
 }

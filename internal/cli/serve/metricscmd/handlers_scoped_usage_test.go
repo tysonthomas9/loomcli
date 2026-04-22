@@ -13,11 +13,12 @@ import (
 )
 
 // TestScopedUsageStores_ReadsFromWorkspaceRoot guards the PR-46 P1 fix: the
-// scoped usage endpoint must read from <wsPath>/usage.jsonl — the path
-// automode writes through usage.NewStore(cli.GetBeadsDir()). A prior
-// revision wrote into <wsPath>/.loom/usage.jsonl, which silently returned
-// empty for every workspace.
+// scoped usage endpoint must read records seeded by automode's writer.
+// Post-centralization, both sides resolve ~/.loom/usage/<wsID>/usage.jsonl
+// from the workspace UUID; legacy <wsPath>/usage.jsonl gets migrated on
+// first access. The test overrides HOME so ~/.loom lands under the tmpdir.
 func TestScopedUsageStores_ReadsFromWorkspaceRoot(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	wsPath := t.TempDir()
 
 	// Seed a record via the same writer automode uses.
@@ -86,6 +87,7 @@ func TestScopedUsageStores_ReadsFromWorkspaceRoot(t *testing.T) {
 // must not reflect file-level changes made after the first response was
 // cached.
 func TestScopedUsageStores_CachesResponseWithinTTL(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	wsPath := t.TempDir()
 	writer, err := usage.NewStore(wsPath)
 	if err != nil {

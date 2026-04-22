@@ -14,8 +14,9 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/backends"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/git"
-	"github.com/tysonthomas9/loomcli/internal/cli/workspace"
+	cliworkspace "github.com/tysonthomas9/loomcli/internal/cli/workspace"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
+	"github.com/tysonthomas9/loomcli/internal/workspace"
 )
 
 var (
@@ -81,7 +82,7 @@ func runPlan(cmd *cobra.Command, args []string) {
 		argName = args[0]
 	}
 
-	target, err := workspace.ResolveAgentTarget(argName, "")
+	target, err := cliworkspace.ResolveAgentTarget(argName, "")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
@@ -202,7 +203,8 @@ func adoptOrCreateSession(agentName, parentID, prompt, phase string) *sessions.S
 		if inheritedBeads == "" {
 			inheritedBeads = cli.GetBeadsDir()
 		}
-		backends.SetActiveSessionEnv(inheritedBeads, inheritedSID)
+		inheritedWS := os.Getenv("LOOM_WORKSPACE_ID")
+		backends.SetActiveSessionEnvFull(inheritedBeads, inheritedSID, inheritedWS)
 		return nil
 	}
 	return createAgentSession(agentName, parentID, prompt, phase)
@@ -210,7 +212,8 @@ func adoptOrCreateSession(agentName, parentID, prompt, phase string) *sessions.S
 
 // createAgentSession creates a new session for tracking.
 func createAgentSession(agentName, parentID, prompt, phase string) *sessions.Session {
-	sessStore, sessErr := sessions.NewStore(cli.GetBeadsDir())
+	wsID := workspace.ResolveWorkspaceID("")
+	sessStore, sessErr := sessions.NewStoreForWorkspace(wsID, cli.GetBeadsDir())
 	if sessErr != nil {
 		log.Printf("[agent] Warning: session store unavailable: %v", sessErr)
 		return nil
@@ -220,7 +223,7 @@ func createAgentSession(agentName, parentID, prompt, phase string) *sessions.Ses
 		EpicID: parentID, Prompt: prompt, Phase: phase,
 	})
 	if sess != nil {
-		backends.SetActiveSessionEnv(cli.GetBeadsDir(), sess.SessionID())
+		backends.SetActiveSessionEnvFull(cli.GetBeadsDir(), sess.SessionID(), wsID)
 	}
 	return sess
 }

@@ -26,10 +26,12 @@ const scopedCollectorTTL = 10 * time.Second
 // BuildScopedMonitorHandlers returns the factory passed to
 // webui.ServerConfig.ScopedMonitorHandlersFn. It wires
 // monitor.CollectMonitorDataScoped behind the five per-workspace routes
-// (status/tasks/stats/sync/usage) so each request talks to the target
-// workspace's bd pool and reads usage from that workspace's
-// {wsPath}/usage.jsonl (the path automode writes through
-// usage.NewStore(cli.GetBeadsDir())).
+// (status/tasks/stats/sync/usage).
+//
+// Usage records live at ~/.loom/usage/<wsID>/usage.jsonl — the same path
+// automode writes through usage.NewStoreForWorkspace. pathFn(wsID) is still
+// consulted so legacy <wsPath>/usage.jsonl data gets migrated into the
+// central location on first access.
 //
 // nameFn resolves the URL wsID back to the workspace name used inside
 // MonitorData — mirrors the argument to HandleAgentsScoped so the response
@@ -159,11 +161,10 @@ func (c *scopedCollectorCache) get(
 }
 
 // scopedUsageStores lazily constructs and caches one usage.Store per
-// workspace path. Usage files live at {wsPath}/usage.jsonl — the same
-// layout automode writes through usage.NewStore(cli.GetBeadsDir()), so a
-// nested .loom/ directory here would silently read an empty file.
-// Caching avoids re-running os.MkdirAll on every poll. The map is bounded
-// by the user's workspace count, so no eviction is wired in.
+// workspace UUID. Records live at ~/.loom/usage/<wsID>/usage.jsonl —
+// centralized so this reader and the automode writer resolve the same path
+// from the workspace ID. On first access, legacy <wsPath>/usage.jsonl data is
+// migrated into the central location.
 type scopedUsageStores struct {
 	mu     sync.Mutex
 	stores map[string]*usage.Store
@@ -173,19 +174,23 @@ func newScopedUsageStores() *scopedUsageStores {
 	return &scopedUsageStores{stores: make(map[string]*usage.Store)}
 }
 
-// storeFor returns a cached store, creating it on first use. Returns nil if
-// wsPath is empty (caller treats that as a 404).
-func (s *scopedUsageStores) storeFor(wsPath string) *usage.Store {
-	if wsPath == "" {
+// storeFor returns a cached store, creating it on first use. Returns nil
+// when the workspace is unknown (empty wsID or empty wsPath from pathFn), so
+// the caller can 503 rather than silently land in the fallback bucket.
+func (s *scopedUsageStores) storeFor(wsID, wsPath string) *usage.Store {
+	if wsID == "" || wsPath == "" {
 		return nil
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if store, ok := s.stores[wsPath]; ok {
+	if store, ok := s.stores[wsID]; ok {
 		return store
 	}
-	store := usagecmd.InitStore(wsPath)
-	s.stores[wsPath] = store
+	store, err := usage.NewStoreForWorkspace(wsID, wsPath)
+	if err != nil {
+		return nil
+	}
+	s.stores[wsID] = store
 	return store
 }
 
@@ -207,7 +212,7 @@ func (s *scopedUsageStores) handle(pathFn func(wsID string) string) http.Handler
 		}
 
 		rec := &responseCapture{header: http.Header{}, status: http.StatusOK}
-		usagecmd.HandleUsage(s.storeFor(pathFn(wsID))).ServeHTTP(rec, r)
+		usagecmd.HandleUsage(s.storeFor(wsID, pathFn(wsID))).ServeHTTP(rec, r)
 
 		body := rec.body.Bytes()
 		if rec.status == http.StatusOK {

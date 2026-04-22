@@ -1188,15 +1188,22 @@ func TestCheckStaleSignalFiles_SkipsSubdirectories(t *testing.T) {
 
 // --- Session Record Tests ---
 
-// setupBeadsDirForTest configures GetBeadsDir() to return the given directory.
+// testWorkspaceID is the UUID attached to the doctor-test workspace so the
+// central ~/.loom/sessions/<wsID>/ path is deterministic.
+const testWorkspaceID = "00000000-0000-4000-8000-000000000001"
+
+// setupBeadsDirForTest configures GetBeadsDir() to return the given directory
+// and points HOME at it so central session/usage dirs land under the tmpdir
+// instead of the user's real ~/.loom.
 // Must not be used with t.Parallel() since it mutates global state.
 func setupBeadsDirForTest(t *testing.T, dir string) {
 	t.Helper()
 	ResetBeadsDirCache()
+	t.Setenv("HOME", dir)
 	setupWorkspaceConfig(t, &LoomConfig{
 		DefaultWorkspace: "test",
 		Workspaces: map[string]WorkspaceConfig{
-			"test": {Path: dir},
+			"test": {ID: testWorkspaceID, Path: dir},
 		},
 	})
 	t.Cleanup(func() { ResetBeadsDirCache() })
@@ -1357,7 +1364,7 @@ func TestCheckStaleSessionRecords_OrphanedDirFixMode(t *testing.T) {
 	}
 
 	// Verify the session was re-indexed (should now appear in queries)
-	store, err := sessions.NewStore(dir)
+	store, err := sessions.NewStoreForWorkspace(testWorkspaceID, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1386,7 +1393,7 @@ func TestCheckStaleSessionRecords_LeftoverTmp(t *testing.T) {
 	t.Cleanup(func() { doctorFix = origFix })
 
 	// Create a proper session via the store so it's in the index
-	store, err := sessions.NewStore(dir)
+	store, err := sessions.NewStoreForWorkspace(testWorkspaceID, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1424,7 +1431,7 @@ func TestCheckStaleSessionRecords_LeftoverTmpFixMode(t *testing.T) {
 	t.Cleanup(func() { doctorFix = origFix })
 
 	// Create a proper session via the store so it's in the index
-	store, err := sessions.NewStore(dir)
+	store, err := sessions.NewStoreForWorkspace(testWorkspaceID, dir)
 	if err != nil {
 		t.Fatal(err)
 	}

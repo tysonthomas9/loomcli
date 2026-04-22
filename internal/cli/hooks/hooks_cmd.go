@@ -114,12 +114,13 @@ var hookSessionEndCmd = &cobra.Command{
 }
 
 // runClaudeHook is the shared logic for all four Claude Code hook handlers.
-// It reads LOOM_SESSION_ID and LOOM_BEADS_DIR from env, reads JSON from
-// stdin, parses it, and dispatches the event. Always returns nil so the
-// hook process exits 0.
+// It reads LOOM_SESSION_ID, LOOM_BEADS_DIR and LOOM_WORKSPACE_ID from env,
+// reads JSON from stdin, parses it, and dispatches the event. Always returns
+// nil so the hook process exits 0.
 func runClaudeHook(cmd *cobra.Command, hookName string) error {
 	sessionID := os.Getenv("LOOM_SESSION_ID")
 	beadsDir := os.Getenv("LOOM_BEADS_DIR")
+	workspaceID := os.Getenv("LOOM_WORKSPACE_ID")
 
 	event, err := ParseClaudeHookInput(hookName, cmd.InOrStdin())
 	if err != nil {
@@ -127,7 +128,7 @@ func runClaudeHook(cmd *cobra.Command, hookName string) error {
 		return nil // Always exit 0
 	}
 
-	_ = dispatchHookEvent(event, beadsDir, sessionID)
+	_ = dispatchHookEvent(event, workspaceID, beadsDir, sessionID)
 
 	// Yield check for stop hook (defense-in-depth)
 	if hookName == "stop" {

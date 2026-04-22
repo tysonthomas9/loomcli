@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/cli/serve/workspacemgr"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 )
 
@@ -194,7 +195,7 @@ func queryIndexedSessionIDs(store *sessions.Store) (map[string]bool, error) {
 }
 
 func checkStaleSessionRecords() CheckResult {
-	sessStore, err := sessions.NewStore(cli.GetBeadsDir())
+	sessStore, err := sessions.NewStoreForWorkspace(workspacemgr.ResolveInitialWorkspaceID(), cli.GetBeadsDir())
 	if err != nil {
 		return CheckResult{} // skip — sessions store not available
 	}

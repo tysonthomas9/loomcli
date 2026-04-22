@@ -12,9 +12,10 @@ import (
 // Thread-safe package-level state for active session env vars.
 // Set by the parent loom process before invoking an agent, cleared after.
 var (
-	sessionEnvMu    sync.RWMutex
-	sessionBeadsDir string
-	sessionID       string
+	sessionEnvMu     sync.RWMutex
+	sessionBeadsDir  string
+	sessionID        string
+	sessionWorkspace string
 )
 
 // Thread-safe package-level state for Claude session resume.
@@ -83,10 +84,18 @@ func ClearLastCapturedSessionID() {
 // SetActiveSessionEnv sets the beads directory and session ID that will be
 // injected into agent subprocess environments. Thread-safe.
 func SetActiveSessionEnv(beadsDir, sid string) {
+	SetActiveSessionEnvFull(beadsDir, sid, "")
+}
+
+// SetActiveSessionEnvFull also records the workspace ID so hook subprocesses
+// can resolve the central ~/.loom/sessions/<wsID>/ store independent of
+// cli.GetBeadsDir() (which pins to the default workspace).
+func SetActiveSessionEnvFull(beadsDir, sid, wsID string) {
 	sessionEnvMu.Lock()
 	defer sessionEnvMu.Unlock()
 	sessionBeadsDir = beadsDir
 	sessionID = sid
+	sessionWorkspace = wsID
 }
 
 // ClearActiveSessionEnv clears the active session env vars. Thread-safe.
@@ -95,6 +104,7 @@ func ClearActiveSessionEnv() {
 	defer sessionEnvMu.Unlock()
 	sessionBeadsDir = ""
 	sessionID = ""
+	sessionWorkspace = ""
 }
 
 // GetActiveSessionEnv returns the current beads directory and session ID.
@@ -118,6 +128,9 @@ func activeSessionEnvVars() []string {
 	}
 	if sessionID != "" {
 		vars = append(vars, "LOOM_SESSION_ID="+sessionID)
+	}
+	if sessionWorkspace != "" {
+		vars = append(vars, "LOOM_WORKSPACE_ID="+sessionWorkspace)
 	}
 	return vars
 }
