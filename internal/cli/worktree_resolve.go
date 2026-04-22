@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 )
@@ -509,29 +510,59 @@ var (
 	beadsDirOnce  sync.Once
 )
 
-// Package-level default resolver (lazily initialized)
-var defaultResolver *Resolver
+// Package-level default resolver (lazily initialized). Invalidated when the
+// loom config file's mtime changes on disk so out-of-band edits to
+// ~/.loom/config.yaml (e.g., adding a new worktree entry) are picked up
+// without a server restart.
+var (
+	defaultResolverMu    sync.Mutex
+	defaultResolver      *Resolver
+	defaultResolverMtime time.Time
+)
 
 func GetDefaultResolver() *Resolver {
-	if defaultResolver == nil {
-		r, err := NewResolver()
-		if err != nil {
-			r = &Resolver{Mode: ModeLegacy}
-		}
-		defaultResolver = r
+	defaultResolverMu.Lock()
+	defer defaultResolverMu.Unlock()
+
+	var mtime time.Time
+	if info, err := os.Stat(config.GetConfigPath()); err == nil {
+		mtime = info.ModTime()
 	}
+
+	if defaultResolver != nil && mtime.Equal(defaultResolverMtime) {
+		return defaultResolver
+	}
+
+	r, err := NewResolver()
+	if err != nil {
+		r = &Resolver{Mode: ModeLegacy}
+	}
+	defaultResolver = r
+	defaultResolverMtime = mtime
 	return defaultResolver
 }
 
 // TestingResetDefaultResolver clears the cached default resolver so NewResolver
 // will be re-invoked. Returns the old resolver for restoring in cleanup.
 func TestingResetDefaultResolver() *Resolver {
+	defaultResolverMu.Lock()
+	defer defaultResolverMu.Unlock()
 	old := defaultResolver
 	defaultResolver = nil
+	defaultResolverMtime = time.Time{}
 	return old
 }
 
-// TestingSetDefaultResolver sets the cached default resolver.
+// TestingSetDefaultResolver sets the cached default resolver. The cached
+// mtime is set to the current config file's mtime so the injected resolver
+// is not immediately evicted by the next GetDefaultResolver call.
 func TestingSetDefaultResolver(r *Resolver) {
+	defaultResolverMu.Lock()
+	defer defaultResolverMu.Unlock()
 	defaultResolver = r
+	if info, err := os.Stat(config.GetConfigPath()); err == nil {
+		defaultResolverMtime = info.ModTime()
+	} else {
+		defaultResolverMtime = time.Time{}
+	}
 }
