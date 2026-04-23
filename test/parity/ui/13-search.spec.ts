@@ -2,6 +2,7 @@
  * 13 Search parity — full-text query returns the same result set.
  */
 import { parityTest as test, expect, useParityHooks } from "./_support/spec-harness";
+import { discoverWorkspaceId } from "./_support";
 import { PARITY_URLS } from "./playwright.config";
 
 useParityHooks();
@@ -9,12 +10,16 @@ useParityHooks();
 test.describe("13 search parity", () => {
     test("same query returns same issues on both backends", async ({ tabs }) => {
         const q = "checkout"; // matches "Fix checkout NPE" from seed
+        const [beadsWs, fleetWs] = await Promise.all([
+            discoverWorkspaceId(PARITY_URLS.beads),
+            discoverWorkspaceId(PARITY_URLS.fleet),
+        ]);
         const [b, f] = await Promise.all([
             fetch(
-                `${PARITY_URLS.beads}/api/workspaces/default/issues/search?q=${encodeURIComponent(q)}`,
+                `${PARITY_URLS.beads}/api/workspaces/${beadsWs}/issues/search?q=${encodeURIComponent(q)}`,
             ).then((r) => (r.ok ? r.json() : { data: [] })),
             fetch(
-                `${PARITY_URLS.fleet}/api/workspaces/${PARITY_URLS.workspace}/issues/search?q=${encodeURIComponent(q)}`,
+                `${PARITY_URLS.fleet}/api/workspaces/${fleetWs}/issues/search?q=${encodeURIComponent(q)}`,
             ).then((r) => (r.ok ? r.json() : { data: [] })),
         ]);
         const bTitles = (b.data ?? []).map((i: any) => i.title).sort();

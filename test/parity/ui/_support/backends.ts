@@ -83,21 +83,24 @@ export async function gotoBoth(tabs: DualTabs, relPath: string): Promise<void> {
 }
 
 /**
- * Go to the parity workspace's kanban page on both tabs and wait for it to
- * settle. `ws` defaults to PARITY_URLS.workspace but many views live at
- * /ws/default — the seed.sh currently seeds the default loom workspace on
- * the beads side and the PARITY workspace on fleet-db. We accommodate that
- * asymmetry by letting each tab pick its own workspace string.
+ * Go to the parity workspace's kanban/table/etc. page on both tabs and
+ * wait for it to settle. When ws IDs aren't passed, discover them at
+ * runtime — loom uses UUID workspace IDs, not literal names, so hardcoded
+ * strings like "default"/"PARITY" never match an actual workspace.
  */
 export async function gotoViews(
     tabs: DualTabs,
     view: "kanban" | "table" | "graph" | "monitor" | "settings",
-    wsBeads = "default",
-    wsFleet = PARITY_URLS.workspace,
+    wsBeads?: string,
+    wsFleet?: string,
 ): Promise<void> {
+    const [b, f] = await Promise.all([
+        wsBeads ?? discoverWorkspaceId(urlFor("beads")),
+        wsFleet ?? discoverWorkspaceId(urlFor("fleet")),
+    ]);
     await Promise.all([
-        tabs.beads.goto(`${urlFor("beads")}/ws/${wsBeads}/${view}`),
-        tabs.fleet.goto(`${urlFor("fleet")}/ws/${wsFleet}/${view}`),
+        tabs.beads.goto(`${urlFor("beads")}/ws/${b}/${view}`),
+        tabs.fleet.goto(`${urlFor("fleet")}/ws/${f}/${view}`),
     ]);
     await Promise.all([
         tabs.beads.waitForLoadState("networkidle").catch(() => undefined),
@@ -109,12 +112,16 @@ export async function gotoIssueDetail(
     tabs: DualTabs,
     issueIdBeads: string,
     issueIdFleet: string,
-    wsBeads = "default",
-    wsFleet = PARITY_URLS.workspace,
+    wsBeads?: string,
+    wsFleet?: string,
 ): Promise<void> {
+    const [b, f] = await Promise.all([
+        wsBeads ?? discoverWorkspaceId(urlFor("beads")),
+        wsFleet ?? discoverWorkspaceId(urlFor("fleet")),
+    ]);
     await Promise.all([
-        tabs.beads.goto(`${urlFor("beads")}/ws/${wsBeads}/issues/${issueIdBeads}`),
-        tabs.fleet.goto(`${urlFor("fleet")}/ws/${wsFleet}/issues/${issueIdFleet}`),
+        tabs.beads.goto(`${urlFor("beads")}/ws/${b}/issues/${issueIdBeads}`),
+        tabs.fleet.goto(`${urlFor("fleet")}/ws/${f}/issues/${issueIdFleet}`),
     ]);
 }
 
@@ -131,9 +138,13 @@ let resetInFlight: Promise<void> | null = null;
 export async function resetBothBackends(opts: { reseed?: boolean } = {}): Promise<void> {
     if (resetInFlight) await resetInFlight;
     resetInFlight = (async () => {
+        const [beadsWs, fleetWs] = await Promise.all([
+            discoverWorkspaceId(PARITY_URLS.beads),
+            discoverWorkspaceId(PARITY_URLS.fleet),
+        ]);
         await Promise.all([
-            deleteAllIssues(PARITY_URLS.beads, "default"),
-            deleteAllIssues(PARITY_URLS.fleet, PARITY_URLS.workspace),
+            deleteAllIssues(PARITY_URLS.beads, beadsWs),
+            deleteAllIssues(PARITY_URLS.fleet, fleetWs),
         ]);
         if (opts.reseed !== false) {
             await runSeedScript();
@@ -208,7 +219,7 @@ export async function snapshotState(label: "before" | "after", testId: string): 
 
 async function captureOne(b: Backend): Promise<BackendState> {
     const base = urlFor(b);
-    const ws = b === "beads" ? "default" : PARITY_URLS.workspace;
+    const ws = await discoverWorkspaceId(base);
     const [issuesR, statsR, configR] = await Promise.allSettled([
         fetch(`${base}/api/workspaces/${ws}/issues`).then((r) => (r.ok ? r.json() : null)),
         fetch(`${base}/api/workspaces/${ws}/stats`).then((r) => (r.ok ? r.json() : null)),
@@ -228,6 +239,55 @@ function pick<T>(s: PromiseSettledResult<T>): T | null {
 }
 
 /**
+ * Discover the active workspace ID on a loom instance via /api/workspaces.
+ * Loom auto-creates UUID-keyed workspaces on startup; callers can't assume
+ * a literal "default" or "PARITY" string in the URL — the actual ID is
+ * the UUID in the first row of `/api/workspaces`.
+ *
+ * Cached per base URL for the process lifetime — IDs don't change across
+ * a single test run. Skips invalid responses (returns null) so specs can
+ * surface a clean "couldn't find workspace" error instead of crashing on
+ * a malformed response.
+ */
+const workspaceIdCache: Record<string, string> = {};
+export async function discoverWorkspaceId(baseUrl: string): Promise<string> {
+    if (workspaceIdCache[baseUrl]) return workspaceIdCache[baseUrl];
+
+    // Primary: /api/workspaces (loom-beads populates this correctly).
+    const r = await fetch(`${baseUrl}/api/workspaces`);
+    if (r.ok) {
+        const j = await r.json();
+        const workspaces: any[] = j.workspaces ?? j.data ?? [];
+        const active = workspaces.find((w) => w.active) ?? workspaces[0];
+        if (active?.id) {
+            workspaceIdCache[baseUrl] = active.id;
+            return active.id;
+        }
+    }
+
+    // Fallback: /api/monitor/workspaces. When loom runs with a fleet backend,
+    // the public /api/workspaces list can be empty even though the internal
+    // fleet store has the workspace registered. The monitor endpoint surfaces
+    // the workspace name (e.g. "PARITY"). We accept that as the workspace id
+    // — loom treats it as an alias keyed by name in URLs.
+    const m = await fetch(`${baseUrl}/api/monitor/workspaces`);
+    if (m.ok) {
+        const j = await m.json();
+        // {mode, default, workspaces: {NAME: {...}}, ...}
+        const names = Object.keys(j?.workspaces ?? {});
+        const pick = j?.default && names.includes(j.default) ? j.default : names[0];
+        if (pick) {
+            workspaceIdCache[baseUrl] = pick;
+            return pick;
+        }
+    }
+
+    throw new Error(
+        `discoverWorkspaceId(${baseUrl}): neither /api/workspaces nor /api/monitor/workspaces yielded a workspace`,
+    );
+}
+
+/**
  * Look up a fleet-side issue by its title and return enough identity to
  * drive a follow-up write. Throws with the seed's full title list if no
  * match — specs surface "seed drift" clearly rather than crashing later
@@ -237,8 +297,9 @@ function pick<T>(s: PromiseSettledResult<T>): T | null {
 export async function findFleetIssueByTitle(
     title: string,
 ): Promise<{ id: string; issue: any }> {
+    const wsId = await discoverWorkspaceId(PARITY_URLS.fleet);
     const r = await fetch(
-        `${PARITY_URLS.fleet}/api/workspaces/${PARITY_URLS.workspace}/issues`,
+        `${PARITY_URLS.fleet}/api/workspaces/${wsId}/issues`,
     );
     if (!r.ok) {
         throw new Error(

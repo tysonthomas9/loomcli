@@ -16,6 +16,7 @@ export {
     resetBothBackends,
     snapshotState,
     findFleetIssueByTitle,
+    discoverWorkspaceId,
     type DualTabs,
     type BackendState,
     type Backend,

@@ -10,6 +10,7 @@ import { parityTest as test, expect, useParityHooks } from "./_support/spec-harn
 import {
     timingAssert,
     assertRoutingForAction,
+    discoverWorkspaceId,
 } from "./_support";
 import { PARITY_URLS } from "./playwright.config";
 
@@ -26,9 +27,13 @@ test.describe("09 SSE realtime parity", () => {
         const fleetObsCtx = await browser.newContext();
         const beadsObs = await beadsObsCtx.newPage();
         const fleetObs = await fleetObsCtx.newPage();
+        const [beadsWs, fleetWs] = await Promise.all([
+            discoverWorkspaceId(PARITY_URLS.beads),
+            discoverWorkspaceId(PARITY_URLS.fleet),
+        ]);
         await Promise.all([
-            beadsObs.goto(`${PARITY_URLS.beads}/ws/default/kanban`),
-            fleetObs.goto(`${PARITY_URLS.fleet}/ws/${PARITY_URLS.workspace}/kanban`),
+            beadsObs.goto(`${PARITY_URLS.beads}/ws/${beadsWs}/kanban`),
+            fleetObs.goto(`${PARITY_URLS.fleet}/ws/${fleetWs}/kanban`),
         ]);
         await Promise.all([
             beadsObs.waitForLoadState("networkidle"),
@@ -44,7 +49,10 @@ test.describe("09 SSE realtime parity", () => {
             const beadsStart = Date.now();
             await tabs.beads.evaluate(
                 async ({ title }) => {
-                    const ws = new URL(location.href).pathname.split("/")[2] ?? "default";
+                    // URL is /ws/<uuid>/kanban after the goto above — read
+                    // the UUID out of the path, not a hardcoded "default".
+                    const ws = new URL(location.href).pathname.split("/")[2] ?? "";
+                    if (!ws) throw new Error("could not extract ws id from " + location.href);
                     await fetch(`/api/workspaces/${ws}/issues`, {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },

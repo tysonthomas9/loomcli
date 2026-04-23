@@ -5,6 +5,7 @@ import { parityTest as test, expect, useParityHooks } from "./_support/spec-harn
 import {
     apiResponseDiff,
     captureBothTabs,
+    discoverWorkspaceId,
     visualDiff,
     REQUIRED_FIELDS,
     SEED_FIXTURE,
@@ -18,12 +19,16 @@ test.describe("06 issue detail parity", () => {
         // Use the first seeded child title to find the issue on both sides.
         const title = SEED_FIXTURE.children[0]; // "Add login flow"
 
+        // Discover real workspace IDs — loom uses UUIDs, not literal names.
+        const [beadsWs, fleetWs] = await Promise.all([
+            discoverWorkspaceId(PARITY_URLS.beads),
+            discoverWorkspaceId(PARITY_URLS.fleet),
+        ]);
+
         // Resolve ids on each backend.
         const [beadsList, fleetList] = await Promise.all([
-            fetch(`${PARITY_URLS.beads}/api/workspaces/default/issues`).then((r) => r.json()),
-            fetch(
-                `${PARITY_URLS.fleet}/api/workspaces/${PARITY_URLS.workspace}/issues`,
-            ).then((r) => r.json()),
+            fetch(`${PARITY_URLS.beads}/api/workspaces/${beadsWs}/issues`).then((r) => r.json()),
+            fetch(`${PARITY_URLS.fleet}/api/workspaces/${fleetWs}/issues`).then((r) => r.json()),
         ]);
         const beadsIssue = (beadsList.data ?? []).find((i: any) => i.title === title);
         const fleetIssue = (fleetList.data ?? []).find((i: any) => i.title === title);
@@ -32,10 +37,10 @@ test.describe("06 issue detail parity", () => {
 
         await Promise.all([
             tabs.beads.goto(
-                `${PARITY_URLS.beads}/ws/default/issues/${beadsIssue.id}`,
+                `${PARITY_URLS.beads}/ws/${beadsWs}/issues/${beadsIssue.id}`,
             ),
             tabs.fleet.goto(
-                `${PARITY_URLS.fleet}/ws/${PARITY_URLS.workspace}/issues/${fleetIssue.id}`,
+                `${PARITY_URLS.fleet}/ws/${fleetWs}/issues/${fleetIssue.id}`,
             ),
         ]);
 
@@ -51,10 +56,10 @@ test.describe("06 issue detail parity", () => {
         // normalization (see _support/diff.ts).
         const [bOne, fOne] = await Promise.all([
             fetch(
-                `${PARITY_URLS.beads}/api/workspaces/default/issues/${beadsIssue.id}`,
+                `${PARITY_URLS.beads}/api/workspaces/${beadsWs}/issues/${beadsIssue.id}`,
             ).then((r) => (r.ok ? r.json() : { data: null })),
             fetch(
-                `${PARITY_URLS.fleet}/api/workspaces/${PARITY_URLS.workspace}/issues/${fleetIssue.id}`,
+                `${PARITY_URLS.fleet}/api/workspaces/${fleetWs}/issues/${fleetIssue.id}`,
             ).then((r) => (r.ok ? r.json() : { data: null })),
         ]);
         expect(bOne?.data ?? bOne, "beads single-issue fetch").toBeTruthy();
