@@ -1,0 +1,768 @@
+{
+  "contract_file": "frontend/filters-bulk.md",
+  "validation_report": "reports/validation-filters-bulk.json",
+  "audit_date": "2026-04-23T00:00:00Z",
+  "spec_files_searched": [
+    "internal/webui/frontend/tests/e2e/filter.spec.ts",
+    "internal/webui/frontend/tests/e2e/filter-bar.spec.ts",
+    "internal/webui/frontend/tests/e2e/filter-url-sync.spec.ts",
+    "internal/webui/frontend/tests/e2e/search.spec.ts",
+    "internal/webui/frontend/tests/e2e/search-filter-journey.spec.ts",
+    "internal/webui/frontend/tests/e2e/journey-table-sort-select.spec.ts",
+    "internal/webui/frontend/tests/e2e/assembled-views.spec.ts",
+    "internal/webui/frontend/tests/e2e/swimlane-wiring.spec.ts",
+    "internal/webui/frontend/tests/e2e/keyboard-focus-management.spec.ts",
+    "internal/webui/frontend/tests/e2e/keyboard-global-shortcuts.spec.ts"
+  ],
+  "go_test_files_searched": [
+    "internal/webui/handlers/issues/issues_test.go",
+    "internal/webui/handlers/issues/coverage_test.go"
+  ],
+  "summary": {
+    "total_passing": 61,
+    "covered": 34,
+    "partial": 9,
+    "uncovered": 18,
+    "coverage_pct": 55.7
+  },
+  "assertions": [
+    {
+      "id": "VAL-FE-FILTER-001",
+      "title": "Filter state initialized from URL query parameters",
+      "coverage": "covered",
+      "spec_files": [
+        "filter-url-sync.spec.ts",
+        "filter.spec.ts"
+      ],
+      "test_names": [
+        "navigating to URL with priority param applies filter",
+        "navigating to URL with type param applies filter",
+        "navigating to URL with multiple filter params applies all filters",
+        "navigating to URL with filter params applies filters"
+      ],
+      "notes": "filter-url-sync.spec.ts navigates to URLs with priority, type, and combined filter params and verifies the dropdowns (priority-filter, type-filter) show the values from the URL. filter.spec.ts has an equivalent smoke test. Evidence criteria met: FilterState matches URL params on page load."
+    },
+    {
+      "id": "VAL-FE-FILTER-002",
+      "title": "Filter state syncs to URL on each change",
+      "coverage": "covered",
+      "spec_files": [
+        "filter.spec.ts",
+        "filter-url-sync.spec.ts"
+      ],
+      "test_names": [
+        "selecting priority filter updates URL with ?priority=N",
+        "selecting type filter updates URL with ?type=X",
+        "priority filter updates URL params",
+        "type filter updates URL params"
+      ],
+      "notes": "Tests select dropdown values and verify URL is updated with the corresponding query parameters (priority=N, type=X). Evidence criteria met: URL mutation after dropdown change."
+    },
+    {
+      "id": "VAL-FE-FILTER-003",
+      "title": "Multiple filters combined in URL",
+      "coverage": "covered",
+      "spec_files": [
+        "filter.spec.ts",
+        "filter-url-sync.spec.ts"
+      ],
+      "test_names": [
+        "combined filters in URL work correctly (?priority=1&type=bug)",
+        "navigating to URL with multiple filter params applies all filters",
+        "multiple filter params work with different order"
+      ],
+      "notes": "Tests verify that multiple filter params coexist in the URL (e.g., ?priority=1&type=bug) and that parameter order does not matter. Evidence criteria met."
+    },
+    {
+      "id": "VAL-FE-FILTER-004",
+      "title": "Clearing one filter removes only that param from URL",
+      "coverage": "partial",
+      "spec_files": [
+        "filter.spec.ts"
+      ],
+      "test_names": [
+        "clearing filter shows all issues again"
+      ],
+      "notes": "Existing test clears a single priority filter but starts with only priority set, so it does not verify that clearing ONE dimension (e.g., priority) preserves another dimension (e.g., type) in the URL. No test asserts 'type=bug remains while priority is removed'."
+    },
+    {
+      "id": "VAL-FE-FILTER-005",
+      "title": "Clear All Filters button removes all filter params from URL",
+      "coverage": "covered",
+      "spec_files": [
+        "filter.spec.ts",
+        "filter-url-sync.spec.ts",
+        "filter-bar.spec.ts"
+      ],
+      "test_names": [
+        "clearing all filters removes query params from URL",
+        "clear filters button clears all active filters at once",
+        "clear filters button removes URL params",
+        "clear filters button resets all filters and shows all issues"
+      ],
+      "notes": "Multiple tests exercise the Clear All button and assert that all filter-related query params are removed from the URL. Evidence criteria met."
+    },
+    {
+      "id": "VAL-FE-FILTER-006",
+      "title": "URL round-trip: copy URL, open in new tab, filters restore",
+      "coverage": "covered",
+      "spec_files": [
+        "filter.spec.ts",
+        "filter-url-sync.spec.ts"
+      ],
+      "test_names": [
+        "filter state survives page refresh via URL",
+        "filter state preserved through page refresh"
+      ],
+      "notes": "Page refresh re-initializes FilterState from the URL, which is operationally equivalent to opening the URL in a new tab. Evidence criteria met for URL-as-source-of-truth."
+    },
+    {
+      "id": "VAL-FE-FILTER-007",
+      "title": "Malformed query string is ignored gracefully",
+      "coverage": "covered",
+      "spec_files": [
+        "filter-url-sync.spec.ts"
+      ],
+      "test_names": [
+        "invalid URL params are ignored gracefully",
+        "empty priority param is ignored",
+        "non-numeric priority param is ignored"
+      ],
+      "notes": "Three tests cover malformed variants: invalid values (priority=99), empty values, and non-numeric values ('abc'). App loads without JS error in each case. Evidence criteria met."
+    },
+    {
+      "id": "VAL-FE-FILTER-008",
+      "title": "Search param preserved in URL with filters",
+      "coverage": "covered",
+      "spec_files": [
+        "filter-url-sync.spec.ts",
+        "filter.spec.ts"
+      ],
+      "test_names": [
+        "URL encoded search param is decoded correctly",
+        "search input updates URL params with debounce",
+        "combined priority + type + search filters work together"
+      ],
+      "notes": "Tests verify search param coexists with other filter params in the URL and that it survives combined-filter scenarios. Evidence criteria met."
+    },
+    {
+      "id": "VAL-FE-FILTER-009",
+      "title": "Priority dropdown shows all options",
+      "coverage": "partial",
+      "spec_files": [
+        "filter.spec.ts"
+      ],
+      "test_names": [
+        "selecting priority filters issues to only matching priority",
+        "P0 filter works correctly (value=0 not empty string)"
+      ],
+      "notes": "Tests verify specific priority values work (P0, P1, P2, P4 across various tests) but no test enumerates the dropdown's <option> elements to confirm all 5 priority tiers (P0-P4 + 'All') are present. Individual options covered; completeness of the list is not asserted."
+    },
+    {
+      "id": "VAL-FE-FILTER-010",
+      "title": "Type dropdown shows all issue types",
+      "coverage": "partial",
+      "spec_files": [
+        "filter.spec.ts"
+      ],
+      "test_names": [
+        "combined filters in URL work correctly (?priority=1&type=bug)",
+        "combined priority + type + search filters work together"
+      ],
+      "notes": "Tests select specific type values (e.g., 'bug') but no test enumerates the dropdown to confirm all types (bug/task/feature/epic/chore) are present. Individual options covered; completeness of the list is not asserted."
+    },
+    {
+      "id": "VAL-FE-FILTER-011",
+      "title": "Single priority selection filters issues",
+      "coverage": "covered",
+      "spec_files": [
+        "filter.spec.ts",
+        "filter-url-sync.spec.ts"
+      ],
+      "test_names": [
+        "selecting priority filters issues to only matching priority",
+        "P0 filter works correctly (value=0 not empty string)",
+        "priority filter updates URL params"
+      ],
+      "notes": "Selecting a priority value filters the visible issue set and also exercises the P0=0 sentinel edge case. Evidence criteria met."
+    },
+    {
+      "id": "VAL-FE-FILTER-012",
+      "title": "Single type selection filters issues",
+      "coverage": "covered",
+      "spec_files": [
+        "filter-url-sync.spec.ts",
+        "filter.spec.ts"
+      ],
+      "test_names": [
+        "type filter updates URL params",
+        "combined filters in URL work correctly (?priority=1&type=bug)"
+      ],
+      "notes": "Selecting a type filters the visible issue set and updates the URL. Evidence criteria met."
+    },
+    {
+      "id": "VAL-FE-FILTER-016",
+      "title": "Clear All Filters button clears all dimensions",
+      "coverage": "covered",
+      "spec_files": [
+        "filter.spec.ts",
+        "filter-bar.spec.ts"
+      ],
+      "test_names": [
+        "clear filters button clears all active filters at once",
+        "clear filters button clears combined priority+type+search filters",
+        "clear filters button resets all filters and shows all issues"
+      ],
+      "notes": "Tests apply priority + type + search simultaneously, click the Clear All button, and verify all three dimensions reset. Evidence criteria met."
+    },
+    {
+      "id": "VAL-FE-FILTER-017",
+      "title": "Filter bar updates when URL params change externally",
+      "coverage": "partial",
+      "spec_files": [
+        "filter-url-sync.spec.ts"
+      ],
+      "test_names": [
+        "navigating to URL with priority param applies filter",
+        "navigating to URL with type param applies filter",
+        "navigating to URL with search param applies filter"
+      ],
+      "notes": "Tests use page.goto() to load a URL with filter params and verify the dropdowns reflect them. This covers initial load but not programmatic history.pushState / history.replaceState / popstate (back/forward) events. 'Externally' in the contract implies these in-session mutations are also supported."
+    },
+    {
+      "id": "VAL-FE-SEARCH-001",
+      "title": "Search input accepts free-text queries",
+      "coverage": "covered",
+      "spec_files": [
+        "search.spec.ts",
+        "filter.spec.ts"
+      ],
+      "test_names": [
+        "filters issues by title match",
+        "typing in search filters issues by text"
+      ],
+      "notes": "Tests type into the search-input-field and verify the issue list is filtered. Evidence criteria met."
+    },
+    {
+      "id": "VAL-FE-SEARCH-002",
+      "title": "Search matches issue titles (substring, case-insensitive)",
+      "coverage": "covered",
+      "spec_files": [
+        "search.spec.ts",
+        "filter.spec.ts"
+      ],
+      "test_names": [
+        "filters issues by title match",
+        "partial match filters correctly",
+        "search is case-insensitive",
+        "typing in search filters issues by text"
+      ],
+      "notes": "Substring matching covered by 'partial match filters correctly'; case-insensitivity covered by 'search is case-insensitive'. Evidence criteria met."
+    },
+    {
+      "id": "VAL-FE-SEARCH-003",
+      "title": "Search matches issue descriptions",
+      "coverage": "covered",
+      "spec_files": [
+        "search.spec.ts",
+        "filter.spec.ts"
+      ],
+      "test_names": [
+        "filters issues by description match",
+        "search matches title, description, and notes"
+      ],
+      "notes": "Tests explicitly exercise description-only matches (search term appears in description but not title). Evidence criteria met."
+    },
+    {
+      "id": "VAL-FE-SEARCH-004",
+      "title": "Search is case-insensitive",
+      "coverage": "covered",
+      "spec_files": [
+        "search.spec.ts",
+        "filter.spec.ts"
+      ],
+      "test_names": [
+        "search is case-insensitive"
+      ],
+      "notes": "Dedicated tests verify that searching with different cases returns the same results. Evidence criteria met."
+    },
+    {
+      "id": "VAL-FE-SEARCH-005",
+      "title": "Search is debounced (300ms default)",
+      "coverage": "partial",
+      "spec_files": [
+        "filter.spec.ts",
+        "filter-url-sync.spec.ts"
+      ],
+      "test_names": [
+        "search input updates URL params with debounce",
+        "typing in search filters issues by text"
+      ],
+      "notes": "Tests await the 350ms debounce window before asserting results, which implicitly assumes debounce works. No test measures API-call count or asserts that requests are NOT fired before the 300ms threshold (e.g., rapid typing should coalesce to a single request)."
+    },
+    {
+      "id": "VAL-FE-SEARCH-006",
+      "title": "Clear button removes search text",
+      "coverage": "covered",
+      "spec_files": [
+        "search.spec.ts",
+        "filter.spec.ts"
+      ],
+      "test_names": [
+        "clearing search shows all issues",
+        "clearing search input shows all issues"
+      ],
+      "notes": "Tests click the search-input-clear button and assert the search input value is empty and all issues are visible. Evidence criteria met."
+    },
+    {
+      "id": "VAL-FE-SEARCH-007",
+      "title": "Escape key clears search",
+      "coverage": "covered",
+      "spec_files": [
+        "search.spec.ts",
+        "filter.spec.ts"
+      ],
+      "test_names": [
+        "Escape key clears search",
+        "escape key clears search"
+      ],
+      "notes": "Tests press Escape while the search input is focused and verify the input is cleared. Evidence criteria met."
+    },
+    {
+      "id": "VAL-FE-SEARCH-008",
+      "title": "Search param added to URL",
+      "coverage": "covered",
+      "spec_files": [
+        "filter-url-sync.spec.ts"
+      ],
+      "test_names": [
+        "search input updates URL params with debounce",
+        "navigating to URL with search param applies filter"
+      ],
+      "notes": "Tests verify ?search=... appears in the URL after typing (with debounce) and that navigating directly to a URL with search param applies it. Evidence criteria met."
+    },
+    {
+      "id": "VAL-FE-SEARCH-009",
+      "title": "Combined search + filter",
+      "coverage": "covered",
+      "spec_files": [
+        "filter.spec.ts",
+        "search-filter-journey.spec.ts"
+      ],
+      "test_names": [
+        "combined priority + type + search filters work together",
+        "search and priority filter persist through kanban → table → graph → kanban round-trip"
+      ],
+      "notes": "Tests apply search alongside priority/type filters and verify only the intersection is visible. Journey test exercises the combination across all three views. Evidence criteria met."
+    },
+    {
+      "id": "VAL-FE-SEARCH-010",
+      "title": "Empty search returns all (non-filtered) issues",
+      "coverage": "covered",
+      "spec_files": [
+        "search.spec.ts",
+        "filter.spec.ts"
+      ],
+      "test_names": [
+        "clearing search shows all issues",
+        "clearing search input shows all issues"
+      ],
+      "notes": "After clearing the search, all issues become visible again (with any active non-search filters still applied). Evidence criteria met."
+    },
+    {
+      "id": "VAL-FE-SEARCH-HIGHLIGHT-001",
+      "title": "Matching substrings are highlighted in title",
+      "coverage": "covered",
+      "spec_files": [
+        "search.spec.ts"
+      ],
+      "test_names": [
+        "search highlights matching text in card titles"
+      ],
+      "notes": "Test fills search with 'Auth' and verifies a <mark> element appears in the card title '[data-testid=\"issue-card-title\"] mark' containing the match. Evidence criteria met."
+    },
+    {
+      "id": "VAL-FE-SEARCH-HIGHLIGHT-002",
+      "title": "Multiple matches in same field are highlighted",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test searches for a term that appears multiple times in a single title/description and asserts more than one <mark> element. Existing highlight test uses toHaveCount(1)."
+    },
+    {
+      "id": "VAL-FE-SEARCH-HIGHLIGHT-003",
+      "title": "Case-insensitive highlighting",
+      "coverage": "partial",
+      "spec_files": [
+        "search.spec.ts"
+      ],
+      "test_names": [
+        "search highlights matching text in card titles"
+      ],
+      "notes": "Test uses search term 'Auth' which matches 'Auth' in 'Authentication Bug' case-sensitively — the toHaveText(/^Auth$/i) assertion does not prove case-insensitive highlighting. A test that searches with lowercase 'auth' against a mixed-case title and asserts the highlighted substring preserves original case would complete coverage."
+    },
+    {
+      "id": "VAL-FE-SEARCH-HIGHLIGHT-004",
+      "title": "Highlighting respects regex special characters",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test searches with regex metacharacters like '.*', '[', '(', '\\\\' and verifies the highlight treats them as literal text rather than regex operators. Risk of unescaped regex in highlight implementation."
+    },
+    {
+      "id": "VAL-FE-SEARCH-HIGHLIGHT-005",
+      "title": "No highlighting when search is empty",
+      "coverage": "partial",
+      "spec_files": [
+        "search.spec.ts"
+      ],
+      "test_names": [
+        "clearing search removes highlight marks"
+      ],
+      "notes": "Covered transitively: test asserts that after clearing search, 0 <mark> elements remain. However, the initial-page-load condition (navigate with no search param and verify 0 marks) is not explicitly asserted before any search is typed."
+    },
+    {
+      "id": "VAL-FE-SEARCH-HIGHLIGHT-006",
+      "title": "Highlighting removed when search clears",
+      "coverage": "covered",
+      "spec_files": [
+        "search.spec.ts"
+      ],
+      "test_names": [
+        "clearing search removes highlight marks"
+      ],
+      "notes": "Test fills search, waits for <mark> elements to appear, clicks clear, and asserts toHaveCount(0). Evidence criteria met."
+    },
+    {
+      "id": "VAL-FE-BULK-001",
+      "title": "Toolbar appears on first issue selection",
+      "coverage": "covered",
+      "spec_files": [
+        "journey-table-sort-select.spec.ts"
+      ],
+      "test_names": [
+        "Select issues via row checkboxes and verify bulk toolbar"
+      ],
+      "notes": "Test checks a row checkbox and asserts the bulk toolbar becomes visible. Evidence criteria met."
+    },
+    {
+      "id": "VAL-FE-BULK-002",
+      "title": "Toolbar hides when all selections are cleared",
+      "coverage": "covered",
+      "spec_files": [
+        "journey-table-sort-select.spec.ts"
+      ],
+      "test_names": [
+        "Clear selection via toolbar button"
+      ],
+      "notes": "Test clicks the Deselect all button and asserts the toolbar is hidden. Evidence criteria met."
+    },
+    {
+      "id": "VAL-FE-BULK-003",
+      "title": "Selection count updates as items are selected/deselected",
+      "coverage": "covered",
+      "spec_files": [
+        "journey-table-sort-select.spec.ts"
+      ],
+      "test_names": [
+        "Select issues via row checkboxes and verify bulk toolbar"
+      ],
+      "notes": "Test selects two rows sequentially and asserts the toolbar shows '1 selected' then '2 selected'. Evidence criteria met."
+    },
+    {
+      "id": "VAL-FE-BULK-005",
+      "title": "Selection persists across filtered state changes",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test selects rows, applies/changes a filter, and verifies the selection state of still-visible rows survives. Related: journey-table-sort-select tests selection but never mutates filters between selection and assertion."
+    },
+    {
+      "id": "VAL-FE-BULK-020",
+      "title": "Deselect all button",
+      "coverage": "covered",
+      "spec_files": [
+        "journey-table-sort-select.spec.ts"
+      ],
+      "test_names": [
+        "Clear selection via toolbar button"
+      ],
+      "notes": "Test clicks the deselect-all toolbar button and asserts selections and toolbar are cleared. Evidence criteria met."
+    },
+    {
+      "id": "VAL-FE-FILTER-TABLE-001",
+      "title": "Filtered issues removed from table",
+      "coverage": "covered",
+      "spec_files": [
+        "assembled-views.spec.ts"
+      ],
+      "test_names": [
+        "filtered data is consistent across kanban and table views",
+        "filter state persists across view switches"
+      ],
+      "notes": "assembled-views.spec.ts applies priority=1 filter, switches to Table view, and asserts filtered-in issues ARE visible while filtered-out issues (P2/P3/P0) are NOT visible in the table. Evidence criteria met."
+    },
+    {
+      "id": "VAL-FE-FILTER-TABLE-002",
+      "title": "Table sorting works on filtered data",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "journey-table-sort-select.spec.ts tests sorting without filters, and assembled-views tests filtering without sorting. No test combines 'apply filter' → 'sort column' → 'verify sorted order on filtered subset'."
+    },
+    {
+      "id": "VAL-FE-FILTER-TABLE-004",
+      "title": "Search highlighting works in filtered table",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "search.spec.ts highlight tests are run in Kanban view only (default '/' route). No test switches to Table view with an active search and asserts <mark> elements appear inside table cells (e.g., td > mark)."
+    },
+    {
+      "id": "VAL-FE-FILTER-TABLE-005",
+      "title": "Clear filters restores full table",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test is performed in Table view that: (1) applies filters, (2) switches into table, (3) clicks Clear All, (4) asserts the full unfiltered set appears in the table. Kanban-view equivalents exist but not the table-view flow."
+    },
+    {
+      "id": "VAL-FE-FILTER-KANBAN-001",
+      "title": "Filtered-out cards hidden from Kanban",
+      "coverage": "covered",
+      "spec_files": [
+        "filter.spec.ts",
+        "assembled-views.spec.ts"
+      ],
+      "test_names": [
+        "selecting priority filters issues to only matching priority",
+        "empty filter results shows no issues in columns",
+        "filtered data is consistent across kanban and table views"
+      ],
+      "notes": "Tests verify that cards not matching the active filter are removed from Kanban columns. Evidence criteria met."
+    },
+    {
+      "id": "VAL-FE-FILTER-KANBAN-005",
+      "title": "Search highlighting in Kanban cards",
+      "coverage": "covered",
+      "spec_files": [
+        "search.spec.ts"
+      ],
+      "test_names": [
+        "search highlights matching text in card titles",
+        "clearing search removes highlight marks"
+      ],
+      "notes": "search.spec.ts runs in Kanban view (default route) and asserts <mark> elements appear inside '[data-testid=\"issue-card-title\"]' on kanban cards. Evidence criteria met for kanban card highlighting."
+    },
+    {
+      "id": "VAL-FE-FILTER-KANBAN-004",
+      "title": "Grouped-by selection interacts with filters",
+      "coverage": "covered",
+      "spec_files": [
+        "swimlane-wiring.spec.ts"
+      ],
+      "test_names": [
+        "groupBy works with type filter",
+        "groupBy works with priority filter",
+        "changing groupBy preserves other filter params"
+      ],
+      "notes": "Tests apply filter + groupBy together and verify issues appear only in matching lanes, and that changing groupBy preserves filter params. Evidence criteria met (though approach is from groupBy-first rather than FilterBar-first)."
+    },
+    {
+      "id": "VAL-FE-ADV-001",
+      "title": "Filter with non-existent label",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test applies a label filter with a value that no issue has, and asserts the result is an empty set without a JS error. The label-filter UI is not yet implemented in FilterBar (only priority/type) per the validation report, but the URL-param handling for labels is still expected to be graceful."
+    },
+    {
+      "id": "VAL-FE-ADV-002",
+      "title": "Malformed JSON in URL query",
+      "coverage": "partial",
+      "spec_files": [
+        "filter-url-sync.spec.ts"
+      ],
+      "test_names": [
+        "invalid URL params are ignored gracefully",
+        "non-numeric priority param is ignored",
+        "empty priority param is ignored"
+      ],
+      "notes": "Related malformed-param tests exist for priority (numeric/empty/invalid) but the specific case of a JSON-shaped value (e.g., labels=[\"a\",\"b\"]) from the validation report is not explicitly tested. The validation evidence was manual with agent-browser."
+    },
+    {
+      "id": "VAL-FE-ADV-003",
+      "title": "Conflicting filters (status=open AND status=closed)",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test exercises a URL with duplicate mutually-exclusive params (e.g., ?status=open&status=closed) to verify which value wins or whether both are applied. Status filter UI is not implemented per the validation report, but URL-param handling for duplicates is still expected to be defined."
+    },
+    {
+      "id": "VAL-FE-ADV-004",
+      "title": "Very long search string (100+ characters)",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test fills the search input with a string >100 characters and asserts the UI doesn't crash, URL is updated, and a zero-result state renders correctly."
+    },
+    {
+      "id": "VAL-FE-ADV-005",
+      "title": "Regex metacharacters in search",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test fills the search input with regex metacharacters like '.*', '[', '(' and asserts they are treated as literal text. Risk of regex injection in the client-side filter/highlight implementation."
+    },
+    {
+      "id": "VAL-FE-ADV-009",
+      "title": "Empty filter state equals all filters cleared",
+      "coverage": "covered",
+      "spec_files": [
+        "filter.spec.ts"
+      ],
+      "test_names": [
+        "clearing filter shows all issues again",
+        "clear filters button clears all active filters at once"
+      ],
+      "notes": "Tests assert that when no filters are active, all issues are visible (matching pre-filter state). Evidence criteria met."
+    },
+    {
+      "id": "VAL-FE-ADV-010",
+      "title": "Search clears when filters clear",
+      "coverage": "covered",
+      "spec_files": [
+        "filter.spec.ts"
+      ],
+      "test_names": [
+        "clear filters button clears combined priority+type+search filters"
+      ],
+      "notes": "Test applies search + filters, clicks Clear All, and asserts search input is empty alongside the other dropdowns. Evidence criteria met."
+    },
+    {
+      "id": "VAL-FE-A11Y-001",
+      "title": "Filter bar is keyboard-navigable",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test Tabs into the filter bar, verifies the priority/type dropdowns receive focus in the expected order, opens dropdowns via keyboard (Enter/Space/Arrow), or uses arrow keys to change options. keyboard-focus-management.spec.ts and keyboard-global-shortcuts.spec.ts do not touch the FilterBar components."
+    },
+    {
+      "id": "VAL-FE-A11Y-002",
+      "title": "Bulk toolbar has screen-reader announcement",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test asserts that the bulk toolbar has a role='status' or aria-live region that announces selection count changes to assistive tech."
+    },
+    {
+      "id": "VAL-FE-A11Y-004",
+      "title": "Search input has accessible label",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test asserts the search input has an aria-label, associated <label for=...>, or aria-labelledby attribute. Tests only use data-testid for selection."
+    },
+    {
+      "id": "VAL-FE-PERF-001",
+      "title": "Search debounce prevents excessive re-renders",
+      "coverage": "partial",
+      "spec_files": [
+        "filter.spec.ts",
+        "filter-url-sync.spec.ts"
+      ],
+      "test_names": [
+        "search input updates URL params with debounce"
+      ],
+      "notes": "Tests wait for the debounce window (350ms) before asserting results, which implicitly relies on debounce working, but no test measures render count, intercepts API requests to count them, or types rapidly to confirm only a single request is fired per debounce window."
+    },
+    {
+      "id": "VAL-FE-PERF-002",
+      "title": "Filtering 1000+ issues is responsive",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test seeds a large issue set (1000+), applies a filter, and measures the time to repaint. Requires performance test infrastructure (e.g., PerformanceObserver, page.metrics) not currently used in Playwright specs."
+    },
+    {
+      "id": "VAL-FE-PERF-004",
+      "title": "URL with many filter params does not cause slowdown",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test constructs a URL with many filter params (e.g., 20+ labels) and measures load time or rendering performance."
+    },
+    {
+      "id": "VAL-FE-PERF-005",
+      "title": "Table with 1000+ filtered results is scrollable",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test renders a large filtered result set in Table view and verifies scrolling performance or virtual-scrolling behavior."
+    },
+    {
+      "id": "VAL-FE-STATE-001",
+      "title": "FilterState and URL remain in sync",
+      "coverage": "covered",
+      "spec_files": [
+        "filter-url-sync.spec.ts",
+        "filter.spec.ts"
+      ],
+      "test_names": [
+        "priority filter updates URL params",
+        "type filter updates URL params",
+        "navigating to URL with priority param applies filter",
+        "navigating to URL with type param applies filter",
+        "clearing all filters removes query params from URL",
+        "filter state preserved through page refresh"
+      ],
+      "notes": "A comprehensive suite of bidirectional-sync tests covers dropdown→URL and URL→dropdown mutations, plus round-trip via refresh. Evidence criteria met."
+    },
+    {
+      "id": "VAL-FE-STATE-002",
+      "title": "Selection state persists across filter changes",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "Same gap as VAL-FE-BULK-005 from the selection-state angle. No test selects issues, mutates filters, and verifies selection (for still-visible items) persists."
+    },
+    {
+      "id": "VAL-FE-STATE-003",
+      "title": "Search input and search param stay synchronized",
+      "coverage": "covered",
+      "spec_files": [
+        "filter-url-sync.spec.ts"
+      ],
+      "test_names": [
+        "search input updates URL params with debounce",
+        "navigating to URL with search param applies filter",
+        "URL encoded search param is decoded correctly"
+      ],
+      "notes": "Tests cover input→URL (typing writes param after debounce) and URL→input (loading URL populates input). Evidence criteria met."
+    },
+    {
+      "id": "VAL-FE-REGRESSION-001",
+      "title": "Filter changes do not break sorting",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test establishes a sort order in the table, then applies/removes a filter, and verifies the sort order is preserved on the filtered-but-sorted set. This is the table-view regression scenario paired with VAL-FE-FILTER-TABLE-002."
+    },
+    {
+      "id": "VAL-FE-REGRESSION-002",
+      "title": "Filters persist across view changes (Table ↔ Kanban)",
+      "coverage": "covered",
+      "spec_files": [
+        "filter.spec.ts",
+        "search-filter-journey.spec.ts",
+        "assembled-views.spec.ts"
+      ],
+      "test_names": [
+        "filtering persists across view switches",
+        "search and priority filter persist through kanban → table → graph → kanban round-trip",
+        "filter state persists across view switches"
+      ],
+      "notes": "Multiple tests switch between Kanban, Table, and Graph views with active filters and verify filter state (dropdown values, URL, and filtered result set) persists. Evidence criteria met."
+    }
+  ]
+}
