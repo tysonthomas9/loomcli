@@ -602,16 +602,39 @@ func (b *FleetBackend) RemoveLabel(ctx context.Context, id string, label string)
 // --- Comment operations ---
 
 func (b *FleetBackend) ListComments(ctx context.Context, id string) ([]backend.CommentData, error) {
-	// ListComments extracts comments from the Get response, which includes
-	// IssueDetails.Comments.
-	detail, err := b.Get(ctx, id)
+	// fleet-db exposes GET /issues/{id}/comments as a first-class endpoint
+	// that returns {"comments": [...]}. The Get response does NOT include
+	// comments inline (unlike beads' IssueDetails), so using Get here
+	// returned an empty list even when comments existed.
+	resp, err := b.exec(ctx, "ListComments", "GET", "/issues/"+url.PathEscape(id)+"/comments", nil)
 	if err != nil {
 		return nil, err
 	}
-	if detail.Comments == nil {
+	if !hasData(resp) {
 		return []backend.CommentData{}, nil
 	}
-	return detail.Comments, nil
+	// Try native wrapper {"comments":[...]} first, then bare array.
+	var wrap struct {
+		Comments []fleetCommentWire `json:"comments"`
+	}
+	if json.Unmarshal(resp.Data, &wrap) == nil && wrap.Comments != nil {
+		out := make([]backend.CommentData, 0, len(wrap.Comments))
+		for _, w := range wrap.Comments {
+			c := w.toTypesComment()
+			out = append(out, commentToData(&c))
+		}
+		return out, nil
+	}
+	var bare []fleetCommentWire
+	if err := json.Unmarshal(resp.Data, &bare); err != nil {
+		return nil, backend.ErrInternal("ListComments", "unmarshal response", err)
+	}
+	out := make([]backend.CommentData, 0, len(bare))
+	for _, w := range bare {
+		c := w.toTypesComment()
+		out = append(out, commentToData(&c))
+	}
+	return out, nil
 }
 
 func (b *FleetBackend) AddComment(ctx context.Context, params backend.CommentAddParams) (*backend.CommentData, error) {

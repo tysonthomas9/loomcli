@@ -452,12 +452,60 @@ func (a *cliBeadsAdapter) RemoveLabel(_ context.Context, _, _ string) error {
 
 // --- Comment methods ---
 
-func (a *cliBeadsAdapter) ListComments(_ context.Context, _ string) ([]backend.CommentData, error) {
-	return nil, backend.ErrNotImplemented("ListComments", "not supported via CLI adapter")
+func (a *cliBeadsAdapter) ListComments(_ context.Context, id string) ([]backend.CommentData, error) {
+	if id == "" {
+		return nil, backend.ErrValidation("ListComments", "id must not be empty")
+	}
+	// bd's `show --json` output embeds the comment list on each issue;
+	// no dedicated list-comments subcommand exists. Reuse the Get path
+	// and pick off the Comments slice.
+	result := a.runner.Run(a.dir, "show", id, "--json")
+	if result.Err != nil {
+		return nil, a.classifyError("ListComments", result)
+	}
+	var issues []cliIssueJSON
+	if err := json.Unmarshal([]byte(result.Stdout), &issues); err != nil {
+		return nil, fmt.Errorf("cliBeadsAdapter.ListComments(%s): parse: %w", id, err)
+	}
+	if len(issues) == 0 {
+		return nil, backend.ErrNotFound("ListComments", fmt.Sprintf("issue %s not found", id))
+	}
+	out := make([]backend.CommentData, 0, len(issues[0].Comments))
+	for _, c := range issues[0].Comments {
+		out = append(out, backend.CommentData{
+			ID:        c.ID,
+			IssueID:   c.IssueID,
+			Author:    c.Author,
+			Text:      c.Text,
+			CreatedAt: c.CreatedAt,
+		})
+	}
+	return out, nil
 }
 
-func (a *cliBeadsAdapter) AddComment(_ context.Context, _ backend.CommentAddParams) (*backend.CommentData, error) {
-	return nil, backend.ErrNotImplemented("AddComment", "not supported via CLI adapter")
+func (a *cliBeadsAdapter) AddComment(_ context.Context, params backend.CommentAddParams) (*backend.CommentData, error) {
+	if params.IssueID == "" {
+		return nil, backend.ErrValidation("AddComment", "issue_id must not be empty")
+	}
+	if params.Text == "" {
+		return nil, backend.ErrValidation("AddComment", "text must not be empty")
+	}
+	// `bd comment add <id> <text>` is the canonical CLI shape; --json
+	// keeps the output machine-readable when bd supports it, otherwise
+	// fall through with a best-effort placeholder.
+	result := a.runner.Run(a.dir, "comment", "add", params.IssueID, params.Text)
+	if result.Err != nil {
+		return nil, a.classifyError("AddComment", result)
+	}
+	// bd doesn't emit a structured response on add; the returned
+	// CommentData carries whatever the caller passed (+ author filled
+	// by the daemon). Good enough for a routing signal; callers who
+	// need the full record should re-list.
+	return &backend.CommentData{
+		IssueID: params.IssueID,
+		Author:  params.Author,
+		Text:    params.Text,
+	}, nil
 }
 
 // --- Event methods ---
@@ -508,6 +556,15 @@ type cliIssueJSON struct {
 	AcceptCrit   string              `json:"acceptance_criteria,omitempty"`
 	ExternalRef  string              `json:"external_ref,omitempty"`
 	Dependencies []cliDependencyJSON `json:"dependencies,omitempty"`
+	Comments     []cliCommentJSON    `json:"comments,omitempty"`
+}
+
+type cliCommentJSON struct {
+	ID        int64     `json:"id"`
+	IssueID   string    `json:"issue_id"`
+	Author    string    `json:"author"`
+	Text      string    `json:"text"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 type cliDependencyJSON struct {
