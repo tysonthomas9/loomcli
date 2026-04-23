@@ -34,10 +34,19 @@ test.describe("09 SSE realtime parity", () => {
         await Promise.all([
             beadsObs.goto(`${PARITY_URLS.beads}/ws/${beadsWs}/kanban`),
             fleetObs.goto(`${PARITY_URLS.fleet}/ws/${fleetWs}/kanban`),
+            // The writer tabs (tabs.beads/tabs.fleet from the DualTabs
+            // fixture) default to about:blank. The `evaluate` block below
+            // reads the workspace ID out of location.pathname, so they
+            // need to be on /ws/{id}/kanban too — otherwise the URL split
+            // returns an empty string and the fetch never fires.
+            tabs.beads.goto(`${PARITY_URLS.beads}/ws/${beadsWs}/kanban`),
+            tabs.fleet.goto(`${PARITY_URLS.fleet}/ws/${fleetWs}/kanban`),
         ]);
         await Promise.all([
             beadsObs.waitForLoadState("networkidle"),
             fleetObs.waitForLoadState("networkidle"),
+            tabs.beads.waitForLoadState("networkidle"),
+            tabs.fleet.waitForLoadState("networkidle"),
         ]);
 
         try {
@@ -85,7 +94,7 @@ test.describe("09 SSE realtime parity", () => {
                             }),
                         });
                     },
-                    { title: fleetTitle, ws: PARITY_URLS.workspace },
+                    { title: fleetTitle, ws: fleetWs },
                 );
             });
             await fleetObs

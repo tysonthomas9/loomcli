@@ -11,11 +11,17 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/types"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 )
+
+// IssueBackendFn returns the active backend.IssueBackend. Passed through to
+// HandleGraph so the handler can fall back to the backend when no daemon
+// pool is available (fleet mode) or pool acquisition fails.
+type IssueBackendFn func() backend.IssueBackend
 
 // BlockedResponse wraps the blocked issues data for JSON response.
 type BlockedResponse struct {
@@ -212,10 +218,208 @@ func HandleBlockedWithPool(pool BlockedConnectionGetter) http.HandlerFunc { //no
 
 // HandleGraph returns issues with full dependency data for graph visualization.
 func HandleGraph(pool daemon.Pool) http.HandlerFunc {
-	if pool == nil {
-		return HandleGraphWithPool(nil)
+	return HandleGraphWithBackendFallback(pool, nil)
+}
+
+// HandleGraphWithBackendFallback returns a handler that serves the graph
+// endpoint through the daemon pool when available and transparently falls
+// back to the supplied backend.IssueBackend when the pool is nil or the
+// pool-backed RPC path can't be reached (fleet mode has no daemon). The
+// backend fallback serves a reduced projection: it covers the top-level
+// fields plus Dependencies sourced from backend.Get, which is enough for
+// the SPA GraphView to lay out parent-child + blocker edges.
+//
+// backendFn may be nil — in that case the behaviour is identical to the
+// legacy HandleGraph(pool) path, returning a 503 when the pool is unusable.
+func HandleGraphWithBackendFallback(pool daemon.Pool, backendFn IssueBackendFn) http.HandlerFunc {
+	var poolAdapter GraphConnectionGetter
+	if pool != nil {
+		poolAdapter = &graphPoolAdapter{pool: pool}
 	}
-	return HandleGraphWithPool(&graphPoolAdapter{pool: pool})
+	poolHandler := HandleGraphWithPool(poolAdapter)
+	if backendFn == nil {
+		return poolHandler
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Shortcut fleet mode: no pool at all, serve exclusively from the
+		// backend. Otherwise try the pool path first via a response
+		// recorder so a 503/504 from pool acquisition transparently
+		// degrades to the backend fallback without double-writing.
+		if pool == nil {
+			if serveGraphViaBackend(w, r, backendFn) {
+				return
+			}
+			poolHandler(w, r) // 503 path for nil backend + nil pool
+			return
+		}
+		rec := &graphInterceptor{header: http.Header{}}
+		poolHandler(rec, r)
+		// Pool path succeeded (2xx) or produced a client-authored error
+		// (4xx) — forward as-is, don't second-guess.
+		if rec.statusCode >= 200 && rec.statusCode < 500 {
+			rec.flushTo(w)
+			return
+		}
+		// 5xx from the pool layer — try the backend. If the backend can't
+		// serve either, fall through and return the original pool-layer
+		// error so the FE still sees a coherent response.
+		if serveGraphViaBackend(w, r, backendFn) {
+			return
+		}
+		rec.flushTo(w)
+	}
+}
+
+// graphInterceptor captures the pool-handler's response so the wrapper can
+// decide whether to forward or fall through to the backend path without
+// double-writing to the real ResponseWriter.
+type graphInterceptor struct {
+	header     http.Header
+	body       []byte
+	statusCode int
+}
+
+func (g *graphInterceptor) Header() http.Header { return g.header }
+
+func (g *graphInterceptor) WriteHeader(code int) {
+	if g.statusCode == 0 {
+		g.statusCode = code
+	}
+}
+
+func (g *graphInterceptor) Write(b []byte) (int, error) {
+	if g.statusCode == 0 {
+		g.statusCode = http.StatusOK
+	}
+	g.body = append(g.body, b...)
+	return len(b), nil
+}
+
+func (g *graphInterceptor) flushTo(w http.ResponseWriter) {
+	for k, vs := range g.header {
+		for _, v := range vs {
+			w.Header().Add(k, v)
+		}
+	}
+	if g.statusCode == 0 {
+		g.statusCode = http.StatusOK
+	}
+	w.WriteHeader(g.statusCode)
+	_, _ = w.Write(g.body)
+}
+
+// serveGraphViaBackend materializes a GraphResponse from the supplied
+// IssueBackend and writes it to w. Returns true when it served the request
+// (success OR backend error), false when no backend is wired so the caller
+// can fall through to the pool-error path.
+func serveGraphViaBackend(w http.ResponseWriter, r *http.Request, backendFn IssueBackendFn) bool {
+	if backendFn == nil {
+		return false
+	}
+	be := backendFn()
+	if be == nil {
+		return false
+	}
+	status, includeClosed, _ := parseGraphParams(r)
+	validStatuses := map[string]bool{"all": true, "open": true, "closed": true}
+	if !validStatuses[status] {
+		handler.WriteJSON(w, http.StatusBadRequest, GraphResponse{
+			Success: false,
+			Error:   fmt.Sprintf("invalid status: %s (must be all, open, or closed)", status),
+		})
+		return true
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	list, err := be.List(ctx, backend.ListOpts{})
+	if err != nil {
+		slog.Error("backend error in HandleGraph fallback", "err", err)
+		handler.WriteJSON(w, http.StatusInternalServerError, GraphResponse{
+			Success: false,
+			Error:   "failed to list issues",
+		})
+		return true
+	}
+
+	graphIssues := make([]*GraphIssue, 0, len(list))
+	for _, d := range list {
+		if !includeGraphIssue(d.Status, status, includeClosed) {
+			continue
+		}
+		gi := &GraphIssue{
+			ID:        d.ID,
+			Title:     d.Title,
+			Status:    d.Status,
+			Priority:  d.Priority,
+			IssueType: d.IssueType,
+			Labels:    d.Labels,
+		}
+		// Fetch detail to pull dependencies; fleet and beads backends both
+		// populate DependencyData from a single Get. If Get fails, leave
+		// Dependencies empty so the node still appears without edges.
+		if detail, detErr := be.Get(ctx, d.ID); detErr == nil && detail != nil {
+			deps := make([]*GraphDependency, 0, len(detail.Dependencies))
+			for _, dep := range detail.Dependencies {
+				deps = append(deps, &GraphDependency{
+					DependsOnID: dep.DependsOnID,
+					Type:        dep.Type,
+				})
+			}
+			gi.Dependencies = deps
+		}
+		// Synthesize a parent-child edge when the backend reports a
+		// parent but didn't encode it in Dependencies (beads slim list
+		// path). The FE treats parent-child as a first-class edge type.
+		if d.Parent != "" {
+			hasParent := false
+			for _, dep := range gi.Dependencies {
+				if dep.DependsOnID == d.Parent && dep.Type == "parent-child" {
+					hasParent = true
+					break
+				}
+			}
+			if !hasParent {
+				gi.Dependencies = append(gi.Dependencies, &GraphDependency{
+					DependsOnID: d.Parent,
+					Type:        "parent-child",
+				})
+			}
+		}
+		if d.DeferUntil != nil {
+			gi.DeferUntil = d.DeferUntil.Format(time.RFC3339)
+		}
+		if d.DueAt != nil {
+			gi.DueAt = d.DueAt.Format(time.RFC3339)
+		}
+		graphIssues = append(graphIssues, gi)
+	}
+
+	handler.WriteJSON(w, http.StatusOK, GraphResponse{
+		Success: true,
+		Data:    graphIssues,
+	})
+	return true
+}
+
+// includeGraphIssue applies the status filter used by parseGraphParams.
+// Mirrors the exclude-set logic in HandleGraphWithPool so the fallback
+// preserves filter semantics.
+func includeGraphIssue(issueStatus, filter string, includeClosed bool) bool {
+	if issueStatus == "tombstone" {
+		return false
+	}
+	switch filter {
+	case "open":
+		return issueStatus != "closed" && issueStatus != "tombstone"
+	case "closed":
+		return issueStatus == "closed"
+	default: // "all"
+		if !includeClosed && issueStatus == "closed" {
+			return false
+		}
+		return true
+	}
 }
 
 // HandleGraphWithPool is the internal implementation that accepts an interface for testing.

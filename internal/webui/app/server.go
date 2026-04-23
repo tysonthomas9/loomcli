@@ -158,6 +158,7 @@ func (app *Server) buildHandlers() {
 		TerminalGraceMS:    graceMS,
 		TerminalIdleMS:     idleMS,
 		TerminalMaxSession: maxSess,
+		IssueBackendFn:     app.config.IssueBackendFn,
 	})
 }
 

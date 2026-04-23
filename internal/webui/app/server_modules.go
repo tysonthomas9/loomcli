@@ -21,10 +21,14 @@ func (app *Server) buildModules() {
 		agentQueueH = webui.HandleAgentQueue(app.config.AgentQueueFn)
 	}
 
-	// Core modules
-	app.wsModules = append(app.wsModules,
-		handlermux.NewWorkspaceOpsModule(app.workspaceSvc, app.multiPool, agentQueueH),
-	)
+	// Core modules. When the cli wiring supplies an IssueBackend factory,
+	// plumb it into the ops module so /api/workspaces/{ws}/issues/graph
+	// can serve requests in fleet mode (where the daemon pool is nil).
+	opsModule := handlermux.NewWorkspaceOpsModule(app.workspaceSvc, app.multiPool, agentQueueH)
+	if app.config.IssueBackendFn != nil {
+		opsModule = opsModule.WithIssueBackendFn(app.config.IssueBackendFn)
+	}
+	app.wsModules = append(app.wsModules, opsModule)
 
 	// Issue + session modules
 	app.wsModules = append(app.wsModules,

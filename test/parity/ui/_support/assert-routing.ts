@@ -72,7 +72,11 @@ export function attachFleetNetworkSpy(fleet: Page) {
 function redisXLen(): number {
     try {
         const out = execSync(
-            composeRun(`exec -T redis redis-cli XLEN events:${PARITY_URLS.workspace}`),
+            // Stream key is fleet-db:{ws}:events (workspace-wide firehose).
+            // Per-issue streams (fleet-db:{ws}:events:issue:{id}) exist but
+            // each one only reflects its own issue — assertion needs the
+            // workspace-scoped total to see cross-issue writes land.
+            composeRun(`exec -T redis redis-cli XLEN fleet-db:${PARITY_URLS.workspace}:events`),
             {
                 cwd: REPO_ROOT,
                 encoding: "utf-8",

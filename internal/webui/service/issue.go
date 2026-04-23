@@ -151,6 +151,12 @@ type EventListParams struct {
 	Limit   int
 }
 
+// SearchIssuesParams holds the parameters for full-text search.
+type SearchIssuesParams struct {
+	Query string
+	Limit int
+}
+
 // IssueService defines the business logic operations for issues.
 type IssueService interface {
 	GetIssue(ctx context.Context, issueID string) (json.RawMessage, error)
@@ -165,4 +171,5 @@ type IssueService interface {
 	RemoveDependency(ctx context.Context, params RemoveDependencyParams) error
 	ListEvents(ctx context.Context, params EventListParams) ([]*types.Event, error)
 	MoveIssue(ctx context.Context, params MoveIssueParams) (*MoveIssueResult, error)
+	SearchIssues(ctx context.Context, params SearchIssuesParams) (json.RawMessage, error)
 }

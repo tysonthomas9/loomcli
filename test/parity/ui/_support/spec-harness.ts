@@ -34,7 +34,17 @@ export interface ParityFixtures {
 
 export const parityTest = base.extend<ParityFixtures>({
     tabs: async ({ browser }, use, testInfo) => {
+        // Log the budget consumed by each phase of tabs setup so future
+        // "timeout while setting up tabs" failures can be blamed on the
+        // right step (HAR context, newPage, resetBothBackends, etc.)
+        // rather than the umbrella fixture.
+        const t0 = Date.now();
         const tabs = await openDualTabs(browser, testInfo.titlePath.join("::"));
+        const openMs = Date.now() - t0;
+        if (openMs > 2000) {
+            // eslint-disable-next-line no-console
+            console.log(`[tabs-fixture] openDualTabs took ${openMs}ms`);
+        }
         // Track EVERY request so the coverage helper can normalize URLs on
         // both tabs without manual recordRouteHit calls in simple specs.
         const urls: string[] = [];
@@ -76,7 +86,13 @@ export const parityTest = base.extend<ParityFixtures>({
     },
 
     stateBefore: async ({ tabs }, use, testInfo) => {
+        const t0 = Date.now();
         const s = await snapshotState("before", tabs.testId);
+        const snapMs = Date.now() - t0;
+        if (snapMs > 3000) {
+            // eslint-disable-next-line no-console
+            console.log(`[stateBefore] snapshotState took ${snapMs}ms`);
+        }
         await use(s);
     },
 });
@@ -95,8 +111,22 @@ export function useParityHooks() {
         await preflight();
     });
 
-    parityTest.beforeEach(async () => {
+    parityTest.beforeEach(async ({}, testInfo) => {
+        // The reseed runs `podman compose run --rm parity-seed`, which
+        // typically eats ~15–20s of wall time on this machine — nearly a
+        // third of the default 60s test timeout. Give each test 90s so
+        // the actual test body (which has its own 15s waits for selectors
+        // + network settle) isn't starved by beforeEach.
+        testInfo.setTimeout(90_000);
+        const t0 = Date.now();
         await resetBothBackends({ reseed: true });
+        const resetMs = Date.now() - t0;
+        if (resetMs > 5000) {
+            // eslint-disable-next-line no-console
+            console.log(
+                `[beforeEach] resetBothBackends took ${resetMs}ms (seed dominates)`,
+            );
+        }
     });
 }
 

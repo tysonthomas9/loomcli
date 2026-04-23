@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 )
 
@@ -875,5 +876,110 @@ func TestParseGraphParams_TableDriven(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Backend-fallback tests — HandleGraphWithBackendFallback
+// ---------------------------------------------------------------------------
+
+func TestHandleGraph_BackendFallbackWhenNoPool(t *testing.T) {
+	be := &stubGraphBackend{
+		list: []backend.IssueData{
+			{ID: "PARITY-1", Title: "Child A", Status: "open", Priority: 1, IssueType: "bug", Parent: "EPIC-1"},
+			{ID: "EPIC-1", Title: "Epic", Status: "open", Priority: 0, IssueType: "epic"},
+		},
+		details: map[string]*backend.IssueDetailData{
+			"PARITY-1": {
+				IssueData: backend.IssueData{ID: "PARITY-1"},
+				Dependencies: []backend.DependencyData{
+					{IssueID: "PARITY-1", DependsOnID: "BLOCKER-1", Type: "blocks"},
+				},
+			},
+			"EPIC-1": {IssueData: backend.IssueData{ID: "EPIC-1"}},
+		},
+	}
+	handler := HandleGraphWithBackendFallback(nil, func() backend.IssueBackend { return be })
+
+	req := httptest.NewRequest(http.MethodGet, "/api/issues/graph", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	var resp GraphResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !resp.Success {
+		t.Fatalf("expected success=true; error=%q", resp.Error)
+	}
+	if len(resp.Data) != 2 {
+		t.Fatalf("issues = %d, want 2", len(resp.Data))
+	}
+	var found *GraphIssue
+	for _, gi := range resp.Data {
+		if gi.ID == "PARITY-1" {
+			found = gi
+		}
+	}
+	if found == nil {
+		t.Fatal("missing PARITY-1 node")
+	}
+	// Should contain BOTH the backend-reported "blocks" dependency AND the
+	// synthesized parent-child edge (Parent field).
+	sawBlocker, sawParent := false, false
+	for _, dep := range found.Dependencies {
+		if dep.DependsOnID == "BLOCKER-1" && dep.Type == "blocks" {
+			sawBlocker = true
+		}
+		if dep.DependsOnID == "EPIC-1" && dep.Type == "parent-child" {
+			sawParent = true
+		}
+	}
+	if !sawBlocker {
+		t.Error("expected blocks dependency in child node")
+	}
+	if !sawParent {
+		t.Error("expected synthesized parent-child edge to EPIC-1")
+	}
+}
+
+func TestHandleGraph_BackendFallbackStatusFilter(t *testing.T) {
+	be := &stubGraphBackend{
+		list: []backend.IssueData{
+			{ID: "OPEN-1", Status: "open"},
+			{ID: "CLOSED-1", Status: "closed"},
+			{ID: "TOMB-1", Status: "tombstone"},
+		},
+		details: map[string]*backend.IssueDetailData{},
+	}
+	handler := HandleGraphWithBackendFallback(nil, func() backend.IssueBackend { return be })
+
+	req := httptest.NewRequest(http.MethodGet, "/api/issues/graph?status=open", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	var resp GraphResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(resp.Data) != 1 || resp.Data[0].ID != "OPEN-1" {
+		ids := make([]string, 0, len(resp.Data))
+		for _, gi := range resp.Data {
+			ids = append(ids, gi.ID)
+		}
+		t.Errorf("status=open returned IDs %v; want [OPEN-1]", ids)
+	}
+}
+
+func TestHandleGraph_NoPoolNoBackendReturns503(t *testing.T) {
+	handler := HandleGraphWithBackendFallback(nil, nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/issues/graph", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want 503", rr.Code)
 	}
 }

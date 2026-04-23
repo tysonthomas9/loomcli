@@ -31,8 +31,13 @@ func NewIssueModule(svc service.IssueService, workspaceConfigFn func() (*ops.Wor
 	}
 }
 
-// Register implements [Module] by registering 11 workspace-scoped issue routes.
+// Register implements [Module] by registering 12 workspace-scoped issue routes.
 func (m *IssueModule) Register(mux *http.ServeMux) {
+	// Search — must register alongside {id} because Go 1.22+ ServeMux prefers
+	// the literal "search" segment over the {id} wildcard, so this will route
+	// correctly even though both patterns share the same prefix.
+	mux.HandleFunc("GET /api/workspaces/{ws}/issues/search", HandleSearchIssues(m.svc))
+
 	// Issue CRUD
 	mux.HandleFunc("GET /api/workspaces/{ws}/issues/{id}", HandleGetIssue(m.svc))
 	mux.HandleFunc("GET /api/workspaces/{ws}/issues", HandleListIssues(m.svc))

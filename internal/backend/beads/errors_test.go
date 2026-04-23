@@ -92,6 +92,26 @@ func TestClassifyError(t *testing.T) {
 			wantKind: backend.KindConflict,
 		},
 		{
+			name: "resp.Error already closed",
+			op:   "Close",
+			err:  nil,
+			resp: &rpc.Response{
+				Success: false,
+				Error:   "issue is already closed",
+			},
+			wantKind: backend.KindConflict,
+		},
+		{
+			name: "resp.Error is closed",
+			op:   "Close",
+			err:  nil,
+			resp: &rpc.Response{
+				Success: false,
+				Error:   "issue bd-x-01 is closed",
+			},
+			wantKind: backend.KindConflict,
+		},
+		{
 			name: "resp.Error validation error",
 			op:   "Create",
 			err:  nil,

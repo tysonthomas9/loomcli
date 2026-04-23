@@ -7,12 +7,114 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
+
+// stubGraphBackend implements backend.IssueBackend with just enough surface
+// area to exercise the HandleGraphWithBackendFallback path in unit tests.
+// Every method not exercised returns a canned error.
+type stubGraphBackend struct {
+	list    []backend.IssueData
+	details map[string]*backend.IssueDetailData
+}
+
+func (s *stubGraphBackend) BackendName() string { return "stub-graph" }
+
+func (s *stubGraphBackend) List(_ context.Context, _ backend.ListOpts) ([]backend.IssueData, error) {
+	return s.list, nil
+}
+
+func (s *stubGraphBackend) Get(_ context.Context, id string) (*backend.IssueDetailData, error) {
+	if s.details == nil {
+		return nil, fmt.Errorf("no details configured")
+	}
+	if d, ok := s.details[id]; ok {
+		return d, nil
+	}
+	return &backend.IssueDetailData{IssueData: backend.IssueData{ID: id}}, nil
+}
+
+// Remaining IssueBackend methods — unused in graph-fallback tests, return
+// sentinel errors so accidental use shows up as a test failure rather than
+// a silent empty payload.
+func (s *stubGraphBackend) Ready(_ context.Context, _ backend.ReadyOpts) ([]backend.IssueData, error) {
+	return nil, fmt.Errorf("Ready not implemented in stubGraphBackend")
+}
+func (s *stubGraphBackend) Blocked(_ context.Context, _ backend.BlockedOpts) ([]backend.IssueData, error) {
+	return nil, fmt.Errorf("Blocked not implemented in stubGraphBackend")
+}
+func (s *stubGraphBackend) Stats(_ context.Context) (*backend.StatsData, error) {
+	return nil, fmt.Errorf("Stats not implemented in stubGraphBackend")
+}
+func (s *stubGraphBackend) Count(_ context.Context, _ backend.CountOpts) (int, error) {
+	return 0, fmt.Errorf("Count not implemented in stubGraphBackend")
+}
+func (s *stubGraphBackend) GetChildren(_ context.Context, _ string) ([]backend.IssueData, error) {
+	return nil, fmt.Errorf("GetChildren not implemented in stubGraphBackend")
+}
+func (s *stubGraphBackend) SearchIssues(_ context.Context, _ string, _ int) ([]backend.IssueData, error) {
+	return nil, fmt.Errorf("SearchIssues not implemented in stubGraphBackend")
+}
+func (s *stubGraphBackend) Create(_ context.Context, _ backend.CreateParams) (*backend.IssueData, error) {
+	return nil, fmt.Errorf("Create not implemented in stubGraphBackend")
+}
+func (s *stubGraphBackend) Update(_ context.Context, _ string, _ backend.UpdateParams) error {
+	return fmt.Errorf("Update not implemented in stubGraphBackend")
+}
+func (s *stubGraphBackend) ClaimIssue(_ context.Context, _ string, _ time.Duration) error {
+	return fmt.Errorf("ClaimIssue not implemented in stubGraphBackend")
+}
+func (s *stubGraphBackend) DeferIssue(_ context.Context, _ string, _ time.Time) error {
+	return fmt.Errorf("DeferIssue not implemented in stubGraphBackend")
+}
+func (s *stubGraphBackend) UndeferIssue(_ context.Context, _ string) error {
+	return fmt.Errorf("UndeferIssue not implemented in stubGraphBackend")
+}
+func (s *stubGraphBackend) Close(_ context.Context, _ string, _ backend.CloseParams) (*backend.CloseResult, error) {
+	return nil, fmt.Errorf("Close not implemented in stubGraphBackend")
+}
+func (s *stubGraphBackend) Reopen(_ context.Context, _ string, _ backend.ReopenParams) error {
+	return fmt.Errorf("Reopen not implemented in stubGraphBackend")
+}
+func (s *stubGraphBackend) Delete(_ context.Context, _ backend.DeleteParams) error {
+	return fmt.Errorf("Delete not implemented in stubGraphBackend")
+}
+func (s *stubGraphBackend) AddDependency(_ context.Context, _ backend.DepAddParams) error {
+	return fmt.Errorf("AddDependency not implemented in stubGraphBackend")
+}
+func (s *stubGraphBackend) RemoveDependency(_ context.Context, _ backend.DepRemoveParams) error {
+	return fmt.Errorf("RemoveDependency not implemented in stubGraphBackend")
+}
+func (s *stubGraphBackend) AddLabel(_ context.Context, _, _ string) error {
+	return fmt.Errorf("AddLabel not implemented in stubGraphBackend")
+}
+func (s *stubGraphBackend) RemoveLabel(_ context.Context, _, _ string) error {
+	return fmt.Errorf("RemoveLabel not implemented in stubGraphBackend")
+}
+func (s *stubGraphBackend) ListComments(_ context.Context, _ string) ([]backend.CommentData, error) {
+	return nil, fmt.Errorf("ListComments not implemented in stubGraphBackend")
+}
+func (s *stubGraphBackend) AddComment(_ context.Context, _ backend.CommentAddParams) (*backend.CommentData, error) {
+	return nil, fmt.Errorf("AddComment not implemented in stubGraphBackend")
+}
+func (s *stubGraphBackend) ListEvents(_ context.Context, _ string, _ int) ([]backend.EventData, error) {
+	return nil, fmt.Errorf("ListEvents not implemented in stubGraphBackend")
+}
+func (s *stubGraphBackend) Batch(_ context.Context, _ []backend.BatchOp) ([]backend.BatchResult, error) {
+	return nil, fmt.Errorf("Batch not implemented in stubGraphBackend")
+}
+func (s *stubGraphBackend) GetMutations(_ context.Context, _ int64) ([]backend.MutationData, error) {
+	return nil, fmt.Errorf("GetMutations not implemented in stubGraphBackend")
+}
+func (s *stubGraphBackend) WaitForMutations(_ context.Context, _ int64, _ int64) ([]backend.MutationData, error) {
+	return nil, fmt.Errorf("WaitForMutations not implemented in stubGraphBackend")
+}
 
 // ---------------------------------------------------------------------------
 // Aliases for renamed types (old → new)

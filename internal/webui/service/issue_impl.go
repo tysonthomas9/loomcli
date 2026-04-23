@@ -484,6 +484,45 @@ func (s *issueServiceImpl) RemoveDependency(ctx context.Context, params RemoveDe
 	return nil
 }
 
+// SearchIssues performs a full-text relevance-ranked search via the
+// backend.IssueBackend.SearchIssues operation and returns the slim issue list
+// marshalled into the same wire shape as the list endpoint (IssueData).
+// Returns ErrValidation if the query is empty, ErrUnavailable if no backend is
+// wired, and translates backend errors via translateBackendError.
+func (s *issueServiceImpl) SearchIssues(ctx context.Context, params SearchIssuesParams) (json.RawMessage, error) {
+	if strings.TrimSpace(params.Query) == "" {
+		return nil, ErrValidation("search query is required")
+	}
+	if params.Limit < 0 {
+		return nil, ErrValidation("limit must be non-negative")
+	}
+
+	be, svcErr := s.resolveBackend()
+	if svcErr != nil {
+		return nil, svcErr
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	issues, err := be.SearchIssues(ctx, params.Query, params.Limit)
+	if err != nil {
+		slog.Error("backend error in SearchIssues", "query", params.Query, "err", err)
+		return nil, translateBackendError(err)
+	}
+
+	wire := make([]map[string]any, 0, len(issues))
+	for i := range issues {
+		wire = append(wire, issueDataToWire(&issues[i]))
+	}
+
+	out, err := json.Marshal(wire)
+	if err != nil {
+		return nil, ErrInternal("failed to marshal search results", err)
+	}
+	return out, nil
+}
+
 func (s *issueServiceImpl) ListEvents(ctx context.Context, params EventListParams) ([]*types.Event, error) {
 	be, svcErr := s.resolveBackend()
 	if svcErr != nil {

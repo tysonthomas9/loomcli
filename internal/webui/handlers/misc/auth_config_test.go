@@ -181,3 +181,47 @@ func TestAuthConfigLimiter_AllowAndEvict(t *testing.T) {
 		t.Error("request should be allowed after eviction")
 	}
 }
+
+func TestNormalizeBackendName(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		{"", ""},
+		{"beads", "beads"},
+		{"beads-pooled", "beads"},
+		{"Beads-Pooled", "beads"},
+		{"fleet", "fleet"},
+		{"fleet-db", "fleet"},
+		{"fleetdb", "fleet"},
+		{"fleet-workspace", "fleet"},
+		{"api", "api"},
+		{"agent-ipc", "agent-ipc"},
+		{"something-new", "something-new"},
+	}
+	for _, c := range cases {
+		if got := normalizeBackendName(c.in); got != c.want {
+			t.Errorf("normalizeBackendName(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestHandleAuthConfig_IssueBackendFromEnv(t *testing.T) {
+	t.Setenv("LOOM_ISSUE_BACKEND", "fleet")
+
+	limiter := newAuthConfigLimiter(rate.Limit(5), 10, 5*time.Minute, 10*time.Minute)
+	defer limiter.Stop()
+	handler := HandleAuthConfig("", limiter, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	var resp authConfigResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.IssueBackend != "fleet" {
+		t.Errorf("IssueBackend = %q, want %q", resp.IssueBackend, "fleet")
+	}
+}

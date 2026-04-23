@@ -6,6 +6,7 @@ import (
 
 	"golang.org/x/time/rate"
 
+	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 	healthhandlers "github.com/tysonthomas9/loomcli/internal/webui/handlers/health"
@@ -59,6 +60,11 @@ type HandlerDeps struct {
 	TerminalGraceMS    int64               // 0 = disabled
 	TerminalIdleMS     int64               // 0 = disabled
 	TerminalMaxSession int                 // 0 = unknown
+	// IssueBackendFn returns the active backend.IssueBackend. Threaded
+	// into /api/config so clients can see which backend the server is
+	// talking to without peeking at LOOM_ISSUE_BACKEND on the host. Nil
+	// is safe — the response falls back to the env var, then empty.
+	IssueBackendFn func() backend.IssueBackend
 }
 
 // BuildHandlers constructs all top-level HTTP handlers.
@@ -74,7 +80,7 @@ func BuildHandlers(deps HandlerDeps) *Handlers {
 		APIHealth:          healthhandlers.HandleAPIHealth(deps.Pool),
 		ClientErrors:       misc.HandleClientErrors(clientErrLimiter),
 		CSPReport:          misc.HandleCSPReport(cspLimiter),
-		AuthConfig:         misc.HandleAuthConfig(deps.ExtAuthURL, authCfgLimiter),
+		AuthConfig:         misc.HandleAuthConfig(deps.ExtAuthURL, authCfgLimiter, deps.IssueBackendFn),
 		Stats:              healthhandlers.HandleStats(deps.Pool),
 		Metrics:            healthhandlers.HandleMetrics(deps.Hub, deps.FleetTimeoutsFn, deps.ClaimMetrics),
 		DaemonStatus:       healthhandlers.HandleDaemonStatus(deps.Pool),

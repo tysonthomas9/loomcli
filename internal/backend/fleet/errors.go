@@ -57,7 +57,9 @@ func classifyErrorString(op, msg string) error {
 	switch {
 	case strings.Contains(lower, "not found"):
 		return backend.ErrNotFound(op, msg)
-	case strings.Contains(lower, "already claimed"):
+	case strings.Contains(lower, "already claimed"),
+		strings.Contains(lower, "already closed"),
+		strings.Contains(lower, "is closed"):
 		return backend.ErrConflict(op, msg)
 	case strings.Contains(lower, "validation") || strings.Contains(lower, "invalid"):
 		return backend.ErrValidation(op, msg)

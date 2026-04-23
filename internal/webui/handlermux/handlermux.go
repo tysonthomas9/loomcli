@@ -7,6 +7,7 @@ package handlermux
 import (
 	"net/http"
 
+	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 	githandlers "github.com/tysonthomas9/loomcli/internal/webui/handlers/git"
 	healthhandlers "github.com/tysonthomas9/loomcli/internal/webui/handlers/health"
@@ -24,14 +25,26 @@ type Module interface {
 
 // WorkspaceOpsModule registers workspace-scoped operations routes.
 type WorkspaceOpsModule struct {
-	workspaceSvc service.WorkspaceService
-	multiPool    daemon.Pool
-	agentQueueH  http.HandlerFunc
+	workspaceSvc   service.WorkspaceService
+	multiPool      daemon.Pool
+	agentQueueH    http.HandlerFunc
+	issueBackendFn func() backend.IssueBackend
 }
 
-// NewWorkspaceOpsModule creates a WorkspaceOpsModule.
+// NewWorkspaceOpsModule creates a WorkspaceOpsModule. Callers that support
+// pool-less backends (e.g. fleet mode) should also call WithIssueBackendFn
+// so the graph handler can fall back to the IssueBackend when the daemon
+// pool is unavailable.
 func NewWorkspaceOpsModule(workspaceSvc service.WorkspaceService, multiPool daemon.Pool, agentQueueH http.HandlerFunc) *WorkspaceOpsModule {
 	return &WorkspaceOpsModule{workspaceSvc: workspaceSvc, multiPool: multiPool, agentQueueH: agentQueueH}
+}
+
+// WithIssueBackendFn injects the IssueBackend factory used by handlers
+// that can degrade gracefully without the daemon pool (currently just the
+// graph endpoint). Returns the module for chaining.
+func (m *WorkspaceOpsModule) WithIssueBackendFn(fn func() backend.IssueBackend) *WorkspaceOpsModule {
+	m.issueBackendFn = fn
+	return m
 }
 
 // Register implements Module.
@@ -39,7 +52,8 @@ func (m *WorkspaceOpsModule) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/workspaces/{ws}/stats", healthhandlers.HandleStats(m.multiPool))
 	mux.HandleFunc("GET /api/workspaces/{ws}/ready", issues.HandleReady(m.multiPool))
 	mux.HandleFunc("GET /api/workspaces/{ws}/blocked", githandlers.HandleBlocked(m.multiPool))
-	mux.HandleFunc("GET /api/workspaces/{ws}/issues/graph", githandlers.HandleGraph(m.multiPool))
+	mux.HandleFunc("GET /api/workspaces/{ws}/issues/graph",
+		githandlers.HandleGraphWithBackendFallback(m.multiPool, githandlers.IssueBackendFn(m.issueBackendFn)))
 	mux.HandleFunc("GET /api/workspaces/{ws}/daemon/status", healthhandlers.HandleDaemonStatus(m.multiPool))
 	mux.HandleFunc("GET /api/workspaces/{ws}/config/backend", hterminal.HandleGetBackendConfig(m.multiPool))
 	if m.agentQueueH != nil {

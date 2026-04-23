@@ -27,8 +27,9 @@ import (
 //     c. Contains "does not exist" (case-insensitive) → KindNotFound
 //     d. Contains "already claimed" (case-insensitive) → KindConflict
 //     e. Contains "already exists" (case-insensitive) → KindConflict
-//     f. Contains "validation" or "invalid" (case-insensitive) → KindValidation
-//     g. All others → KindInternal
+//     f. Contains "already closed" or "is closed" (case-insensitive) → KindConflict
+//     g. Contains "validation" or "invalid" (case-insensitive) → KindValidation
+//     h. All others → KindInternal
 //  4. err != nil (other transport error) → KindUnavailable
 //  5. resp is nil (daemon not available) → KindUnavailable
 //  6. No error → return nil
@@ -65,7 +66,9 @@ func classifyError(op string, err error, resp *rpc.Response) error {
 			strings.Contains(lower, "does not exist"):
 			return backend.ErrNotFound(op, msg)
 		case strings.Contains(lower, "already claimed"),
-			strings.Contains(lower, "already exists"):
+			strings.Contains(lower, "already exists"),
+			strings.Contains(lower, "already closed"),
+			strings.Contains(lower, "is closed"):
 			return backend.ErrConflict(op, msg)
 		case strings.Contains(lower, "validation"),
 			strings.Contains(lower, "invalid"):

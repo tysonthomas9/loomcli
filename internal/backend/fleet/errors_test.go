@@ -53,6 +53,8 @@ func TestClassifyHTTPError_SuccessFalseStringMatching(t *testing.T) {
 	}{
 		{"not found", apiResponse{Error: "issue not found"}, backend.KindNotFound},
 		{"already claimed", apiResponse{Error: "task already claimed by another"}, backend.KindConflict},
+		{"already closed", apiResponse{Error: "issue is already closed"}, backend.KindConflict},
+		{"is closed", apiResponse{Error: "issue bd-x-01 is closed"}, backend.KindConflict},
 		{"validation", apiResponse{Error: "validation failed"}, backend.KindValidation},
 		{"invalid", apiResponse{Error: "invalid input"}, backend.KindValidation},
 		{"other", apiResponse{Error: "something unexpected"}, backend.KindInternal},
@@ -67,6 +69,25 @@ func TestClassifyHTTPError_SuccessFalseStringMatching(t *testing.T) {
 				t.Fatalf("expected kind %s, got %v", tt.wantKind, err)
 			}
 		})
+	}
+}
+
+// Regression (parity harness 14-error-handling.spec.ts): closing an
+// already-closed issue must map to HTTP 409 (KindConflict), not 500. The
+// fleet-db backend returns {"success":false,"error":"issue is already
+// closed"} (observed in loom-fleet logs as `error="backend [internal]
+// Close: issue is already closed"`). Without this classifier entry the
+// webui returned 500, failing the idempotency-parity spec.
+func TestClassifyHTTPError_AlreadyClosed_IsConflict(t *testing.T) {
+	err := classifyHTTPError("Close", 200, apiResponse{
+		Success: false,
+		Error:   "issue is already closed",
+	})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !backend.IsKind(err, backend.KindConflict) {
+		t.Fatalf("expected KindConflict, got %v", err)
 	}
 }
 

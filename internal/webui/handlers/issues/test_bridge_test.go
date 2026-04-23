@@ -49,6 +49,7 @@ var handleGetIssueEvents = HandleGetIssueEvents
 var handleAddDependency = HandleAddDependency
 var handleRemoveDependency = HandleRemoveDependency
 var handleReady = HandleReady
+var handleSearchIssues = HandleSearchIssues
 
 // NewDiffService delegates to the git handlers package.
 var NewDiffService = githandlers.NewDiffService
@@ -165,6 +166,7 @@ type mockIssueService struct {
 	removeDependencyFunc func(ctx context.Context, params service.RemoveDependencyParams) error
 	listEventsFunc       func(ctx context.Context, params service.EventListParams) ([]*types.Event, error)
 	moveIssueFunc        func(ctx context.Context, params service.MoveIssueParams) (*service.MoveIssueResult, error)
+	searchIssuesFunc     func(ctx context.Context, params service.SearchIssuesParams) (json.RawMessage, error)
 }
 
 func (m *mockIssueService) GetIssue(ctx context.Context, issueID string) (json.RawMessage, error) {
@@ -236,6 +238,12 @@ func (m *mockIssueService) ListEvents(ctx context.Context, params service.EventL
 func (m *mockIssueService) MoveIssue(ctx context.Context, params service.MoveIssueParams) (*service.MoveIssueResult, error) {
 	if m.moveIssueFunc != nil {
 		return m.moveIssueFunc(ctx, params)
+	}
+	return nil, nil
+}
+func (m *mockIssueService) SearchIssues(ctx context.Context, params service.SearchIssuesParams) (json.RawMessage, error) {
+	if m.searchIssuesFunc != nil {
+		return m.searchIssuesFunc(ctx, params)
 	}
 	return nil, nil
 }

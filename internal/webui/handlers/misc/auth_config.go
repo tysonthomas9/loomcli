@@ -3,8 +3,10 @@ package misc
 import (
 	"math"
 	"net/http"
+	"os"
 
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -14,14 +16,19 @@ import (
 	"golang.org/x/time/rate"
 
 	"github.com/tysonthomas9/loomcli/internal/authmode"
+	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
 // authConfigResponse is the JSON response for GET /api/config.
-// It tells clients which authentication mode the server is running.
+// It tells clients which authentication mode the server is running, plus
+// the active issue-tracking backend so the frontend Settings view (and the
+// parity harness) can distinguish a beads instance from a fleet instance
+// without poking at LOOM_ISSUE_BACKEND on the host.
 type authConfigResponse struct {
-	Mode    string `json:"mode"`               // "open" or "oidc"
-	AuthURL string `json:"auth_url,omitempty"` // Better Auth service base URL for OAuth redirects (only when mode is "oidc")
+	Mode         string `json:"mode"`                    // "open" or "oidc"
+	AuthURL      string `json:"auth_url,omitempty"`      // Better Auth service base URL for OAuth redirects (only when mode is "oidc")
+	IssueBackend string `json:"issue_backend,omitempty"` // "beads" | "fleet" | "fleetdb" | "api" | "agent-ipc" (active IssueBackend.BackendName(), normalized)
 }
 
 // AuthConfigLimiter is a per-IP token bucket rate limiter for GET /api/config.
@@ -106,20 +113,29 @@ func (l *AuthConfigLimiter) evictStale() {
 // management calls. It is NOT a JWKS URL — JWKS discovery is internal to the
 // JWT verification middleware.
 //
-// The response is pre-built once — config values never change at runtime
-// (requires server restart).
-func HandleAuthConfig(extAuthURL string, limiter *AuthConfigLimiter) http.HandlerFunc {
-	var resp authConfigResponse
+// issueBackendFn (optional) returns the active backend.IssueBackend. When
+// non-nil and the resolved backend is non-nil at request time, the response
+// includes the normalized backend family in the "issue_backend" field so
+// clients can render a deterministic label (e.g., "beads" or "fleet") in
+// the Settings view. The closure is re-evaluated per request to handle
+// runtime swaps, though BackendName is documented as immutable. Falls back
+// to the LOOM_ISSUE_BACKEND env var when the closure is nil or returns nil,
+// which matters during early server bring-up before IssueBackendFn is wired.
+//
+// The rest of the response is effectively cached per request — config values
+// (auth mode, auth URL) don't change at runtime (requires server restart).
+func HandleAuthConfig(extAuthURL string, limiter *AuthConfigLimiter, issueBackendFn func() backend.IssueBackend) http.HandlerFunc {
+	var baseResp authConfigResponse
 	if extAuthURL != "" {
 		// Return same-origin URL so the frontend BetterAuth client sends
 		// requests through the auth proxy at /api/auth/*. This makes cookies
 		// first-party and avoids cross-origin issues over HTTP.
-		resp = authConfigResponse{
+		baseResp = authConfigResponse{
 			Mode:    authmode.ModeOIDC,
 			AuthURL: "", // empty = same-origin proxy at /api/auth/*
 		}
 	} else {
-		resp = authConfigResponse{
+		baseResp = authConfigResponse{
 			Mode: authmode.ModeOpen,
 		}
 	}
@@ -136,10 +152,53 @@ func HandleAuthConfig(extAuthURL string, limiter *AuthConfigLimiter) http.Handle
 			return
 		}
 
+		// Resolve issue_backend lazily per request so runtime backend swaps
+		// reflect in the response. Most of the time this is a simple pointer
+		// load and never-nil — cost is negligible vs the rate limiter above.
+		resp := baseResp
+		resp.IssueBackend = resolveIssueBackendLabel(issueBackendFn)
+
 		// SECURITY: no-store prevents caching that could enable downgrade attacks.
 		// An attacker who poisons a cached response with mode:"open" would bypass
 		// auth for the cache lifetime. no-store ensures every page load fetches fresh.
 		w.Header().Set("Cache-Control", "no-store")
 		handler.WriteJSON(w, http.StatusOK, resp)
+	}
+}
+
+// resolveIssueBackendLabel returns the normalized issue backend family name
+// ("beads", "fleet", "fleetdb", "api", "agent-ipc") for /api/config. The
+// normalization collapses backend-specific suffixes (e.g. "beads-pooled" →
+// "beads", "fleet-db" → "fleet") so the frontend can switch on a small set
+// of stable labels. Falls back to LOOM_ISSUE_BACKEND when no factory is
+// wired — matches the resolution order used elsewhere in the codebase.
+func resolveIssueBackendLabel(issueBackendFn func() backend.IssueBackend) string {
+	if issueBackendFn != nil {
+		if be := issueBackendFn(); be != nil {
+			return normalizeBackendName(be.BackendName())
+		}
+	}
+	if v := os.Getenv("LOOM_ISSUE_BACKEND"); v != "" {
+		return normalizeBackendName(v)
+	}
+	return ""
+}
+
+// normalizeBackendName maps a raw BackendName() output to the canonical
+// family label the frontend/CLI knows about. Unknown values pass through
+// so callers can still see what the backend reported.
+func normalizeBackendName(name string) string {
+	n := strings.ToLower(strings.TrimSpace(name))
+	switch {
+	case n == "":
+		return ""
+	case strings.HasPrefix(n, "beads"):
+		return "beads"
+	case n == "fleet-db" || n == "fleetdb":
+		return "fleet"
+	case strings.HasPrefix(n, "fleet"):
+		return "fleet"
+	default:
+		return n
 	}
 }

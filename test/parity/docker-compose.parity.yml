@@ -111,10 +111,10 @@ services:
     ports:
       - "8081:8080"
     healthcheck:
-      # /api/config only reports {"mode":"open"} on this loom build — no
-      # issue_backend field. Backend selection is verified by the Playwright
-      # preflight via other channels (env var inspection, network probe to
-      # fleet-db, etc.). Healthcheck is just liveness here.
+      # /api/config now exposes issue_backend (normalized, e.g. "beads" or
+      # "fleet") alongside mode; the Playwright preflight uses that field
+      # to prove each tab is talking to the right backend. Healthcheck
+      # here is just liveness — any 2xx means loom serve is reachable.
       test: ["CMD-SHELL", "wget -qO- http://localhost:8080/api/config > /dev/null 2>&1"]
       interval: 5s
       timeout: 3s
