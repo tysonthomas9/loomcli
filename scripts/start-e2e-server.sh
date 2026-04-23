@@ -107,6 +107,10 @@ mkdir -p "$LOOM_CONFIG_DIR"
 echo "[e2e] Created isolated workspace: $E2E_WORKSPACE"
 
 # --- 3b. Create a second workspace for cross-workspace tests ---
+# The source repo lives at E2E_WORKSPACE_2; the workspace dir is the default
+# under $LOOM_CONFIG_DIR/workspaces/e2e-ws-2. Must NOT collocate --path with
+# --repos (loomcli-r3ddn.3) — loom workspace create now rejects identical
+# or nested --path/--repos to avoid a nested worktree gitlink.
 E2E_WORKSPACE_2="$REPO_ROOT/tmp/e2e-workspace-2"
 rm -rf "$E2E_WORKSPACE_2"
 mkdir -p "$E2E_WORKSPACE_2"
@@ -118,7 +122,7 @@ mkdir -p "$E2E_WORKSPACE_2"
         git commit --allow-empty -m "e2e seed 2" -q
 )
 LOOM_CONFIG_DIR="$E2E_WORKSPACE/.loom-config" "$LOOM_BIN" workspace create e2e-ws-2 \
-    --repos "$E2E_WORKSPACE_2" --path "$E2E_WORKSPACE_2" 2>/dev/null || true
+    --repos "$E2E_WORKSPACE_2" 2>/dev/null || true
 echo "[e2e] Created second workspace: $E2E_WORKSPACE_2"
 
 # --- 4. Start bd daemon in isolated workspace ---

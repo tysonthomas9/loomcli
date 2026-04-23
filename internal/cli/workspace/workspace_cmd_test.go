@@ -836,6 +836,136 @@ func TestWorkspaceCreate_SingleRepo(t *testing.T) {
 	}
 }
 
+func TestIsSubPath(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		parent string
+		child  string
+		want   bool
+	}{
+		{"identical", "/foo/bar", "/foo/bar", false},
+		{"direct child", "/foo", "/foo/bar", true},
+		{"deeper descendant", "/foo", "/foo/bar/baz", true},
+		{"sibling", "/foo/bar", "/foo/baz", false},
+		{"ancestor of parent", "/foo/bar", "/foo", false},
+		{"unrelated absolute", "/foo", "/other/thing", false},
+		{"prefix-match but not subpath", "/foo", "/foobar", false},
+		{"root and root", "/", "/", false},
+		{"root parent with child", "/", "/foo", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isSubPath(tt.parent, tt.child); got != tt.want {
+				t.Errorf("isSubPath(%q, %q) = %v, want %v", tt.parent, tt.child, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCheckWorkspacePathCollision(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		wsDir   string
+		repos   []cliResolvedRepo
+		wantErr bool
+		wantMsg string
+	}{
+		{
+			name:    "distinct paths - no collision",
+			wsDir:   "/home/user/.loom/workspaces/myws",
+			repos:   []cliResolvedRepo{{path: "/home/user/code/frontend", name: "frontend"}},
+			wantErr: false,
+		},
+		{
+			name:    "path equals repo - exact collision",
+			wsDir:   "/repo/alpha",
+			repos:   []cliResolvedRepo{{path: "/repo/alpha", name: "alpha"}},
+			wantErr: true,
+			wantMsg: "collides with source repo",
+		},
+		{
+			name:    "workspace nested inside repo",
+			wsDir:   "/repo/alpha/workspace",
+			repos:   []cliResolvedRepo{{path: "/repo/alpha", name: "alpha"}},
+			wantErr: true,
+			wantMsg: "is inside source repo",
+		},
+		{
+			name:    "repo nested inside workspace",
+			wsDir:   "/ws/myws",
+			repos:   []cliResolvedRepo{{path: "/ws/myws/child", name: "child"}},
+			wantErr: true,
+			wantMsg: "is inside workspace path",
+		},
+		{
+			name:  "multiple repos, one collides",
+			wsDir: "/collide",
+			repos: []cliResolvedRepo{
+				{path: "/ok/path", name: "ok"},
+				{path: "/collide", name: "bad"},
+			},
+			wantErr: true,
+			wantMsg: "collides with source repo",
+		},
+		{
+			name:  "multiple repos, none collide",
+			wsDir: "/ws/myws",
+			repos: []cliResolvedRepo{
+				{path: "/code/a", name: "a"},
+				{path: "/code/b", name: "b"},
+			},
+			wantErr: false,
+		},
+		{
+			name:    "sibling directories - no collision",
+			wsDir:   "/base/ws",
+			repos:   []cliResolvedRepo{{path: "/base/repo", name: "repo"}},
+			wantErr: false,
+		},
+		{
+			name:    "repo prefix match but not nested",
+			wsDir:   "/base/foobar",
+			repos:   []cliResolvedRepo{{path: "/base/foo", name: "foo"}},
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := checkWorkspacePathCollision(tt.wsDir, tt.repos)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got nil")
+				}
+				if !strings.Contains(err.Error(), tt.wantMsg) {
+					t.Errorf("error %q does not contain %q", err.Error(), tt.wantMsg)
+				}
+				if !strings.Contains(err.Error(), tt.wsDir) {
+					t.Errorf("error %q does not mention wsDir %q", err.Error(), tt.wsDir)
+				}
+				// The offending repo path must appear in the error so users
+				// know which --repos entry collides.
+				offendingRepoFound := false
+				for _, r := range tt.repos {
+					if strings.Contains(err.Error(), r.path) {
+						offendingRepoFound = true
+						break
+					}
+				}
+				if !offendingRepoFound {
+					t.Errorf("error %q does not name any repo path", err.Error())
+				}
+			} else if err != nil {
+				t.Errorf("expected no error, got: %v", err)
+			}
+		})
+	}
+}
+
 func TestWorkspaceRemove_MultipleWorkspaces(t *testing.T) {
 	resetWorkspaceFlags(t)
 

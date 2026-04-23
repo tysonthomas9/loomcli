@@ -280,6 +280,93 @@ func TestE2E_WorkspaceCreate_MissingReposFlag(t *testing.T) {
 	}
 }
 
+func TestE2E_WorkspaceCreate_RejectsPathRepoCollision(t *testing.T) {
+	t.Parallel()
+	configDir := t.TempDir()
+	base := t.TempDir()
+	repo := filepath.Join(base, "myrepo")
+	createTestGitRepo(t, repo)
+
+	// --repos and --path resolve to the same directory.
+	_, stderr, exitCode := runLoomWorkspace(t, configDir, "create", "collide", "--repos", repo, "--path", repo)
+	if exitCode == 0 {
+		t.Fatalf("expected non-zero exit for path=repo collision, got 0 (stderr: %s)", stderr)
+	}
+	if !strings.Contains(stderr, "collides") {
+		t.Errorf("expected stderr to contain 'collides', got: %s", stderr)
+	}
+	if !strings.Contains(stderr, repo) {
+		t.Errorf("expected stderr to name repo path %q, got: %s", repo, stderr)
+	}
+
+	// Workspace must NOT have been added to config (config file may not
+	// exist at all if it was the first create invocation).
+	if data, err := os.ReadFile(filepath.Join(configDir, "config.yaml")); err == nil {
+		if strings.Contains(string(data), "collide") {
+			t.Errorf("expected config.yaml to NOT contain 'collide', got:\n%s", string(data))
+		}
+	}
+	// No git worktree should have been registered in the source repo.
+	cmd := exec.Command("git", "-C", repo, "worktree", "list")
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git worktree list failed: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	if len(lines) != 1 {
+		t.Errorf("expected only the main worktree in source repo, got %d entries:\n%s", len(lines), string(out))
+	}
+}
+
+func TestE2E_WorkspaceCreate_RejectsNestedPath(t *testing.T) {
+	t.Parallel()
+	configDir := t.TempDir()
+	base := t.TempDir()
+	repo := filepath.Join(base, "parent")
+	createTestGitRepo(t, repo)
+
+	// --path is inside --repos.
+	nestedPath := filepath.Join(repo, "child")
+	_, stderr, exitCode := runLoomWorkspace(t, configDir, "create", "nestpath", "--repos", repo, "--path", nestedPath)
+	if exitCode == 0 {
+		t.Fatalf("expected non-zero exit for path-inside-repo, got 0 (stderr: %s)", stderr)
+	}
+	if !strings.Contains(stderr, "is inside source repo") {
+		t.Errorf("expected stderr to contain 'is inside source repo', got: %s", stderr)
+	}
+	if !strings.Contains(stderr, repo) || !strings.Contains(stderr, nestedPath) {
+		t.Errorf("expected stderr to name both paths, got: %s", stderr)
+	}
+	// Workspace path must not have been created.
+	if _, err := os.Stat(nestedPath); !os.IsNotExist(err) {
+		t.Errorf("expected nested path %q to not exist, stat err: %v", nestedPath, err)
+	}
+}
+
+func TestE2E_WorkspaceCreate_RejectsNestedRepo(t *testing.T) {
+	t.Parallel()
+	configDir := t.TempDir()
+	base := t.TempDir()
+	wsDir := filepath.Join(base, "ws")
+	if err := os.MkdirAll(wsDir, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	repo := filepath.Join(wsDir, "repo")
+	createTestGitRepo(t, repo)
+
+	// --repos is inside --path.
+	_, stderr, exitCode := runLoomWorkspace(t, configDir, "create", "nestrepo", "--repos", repo, "--path", wsDir)
+	if exitCode == 0 {
+		t.Fatalf("expected non-zero exit for repo-inside-path, got 0 (stderr: %s)", stderr)
+	}
+	if !strings.Contains(stderr, "is inside workspace path") {
+		t.Errorf("expected stderr to contain 'is inside workspace path', got: %s", stderr)
+	}
+	if !strings.Contains(stderr, repo) || !strings.Contains(stderr, wsDir) {
+		t.Errorf("expected stderr to name both paths, got: %s", stderr)
+	}
+}
+
 // --- workspace list tests ---
 
 func TestE2E_WorkspaceList_NoWorkspaces(t *testing.T) {
