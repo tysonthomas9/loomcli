@@ -8,11 +8,13 @@ import (
 
 // WorkspaceListItem represents a workspace in the list response.
 type WorkspaceListItem struct {
-	ID     string     `json:"id"`
-	Name   string     `json:"name"`
-	Path   string     `json:"path"`
-	Active bool       `json:"active"`
-	Pool   *PoolStats `json:"pool,omitempty"`
+	ID        string     `json:"id"`
+	Name      string     `json:"name"`
+	Path      string     `json:"path"`
+	Active    bool       `json:"active"`
+	RepoCount int        `json:"repo_count"`
+	IsDefault bool       `json:"is_default"`
+	Pool      *PoolStats `json:"pool,omitempty"`
 }
 
 // JobStore is implemented by WorkspaceJobStore for async workspace creation.

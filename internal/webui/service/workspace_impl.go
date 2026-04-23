@@ -103,42 +103,27 @@ func (s *workspaceServiceImpl) ListWorkspaces(_ context.Context) ([]WorkspaceLis
 	}
 
 	ids := s.multiPool.WorkspaceIDs()
-
-	// Build workspace metadata maps from config if available.
-	var wsMetaByName map[string]ops.WorkspaceSummary
-	var wsMetaByID map[string]ops.WorkspaceSummary
-	if s.configFn != nil {
-		if data, err := s.configFn(); err == nil && data != nil {
-			wsMetaByName = make(map[string]ops.WorkspaceSummary, len(data.Workspaces))
-			wsMetaByID = make(map[string]ops.WorkspaceSummary, len(data.Workspaces))
-			for _, ws := range data.Workspaces {
-				wsMetaByName[ws.Name] = ws
-				if ws.ID != "" {
-					wsMetaByID[ws.ID] = ws
-				}
-			}
-		}
-	}
+	wsMetaByID, wsMetaByName := s.loadWorkspaceMeta()
 
 	items := make([]WorkspaceListItem, 0, len(ids))
 	for _, id := range ids {
-		item := WorkspaceListItem{
-			ID:   id,
-			Name: id,
-		}
+		item := WorkspaceListItem{ID: id, Name: id}
 
-		// Enrich with config metadata if available.
 		if meta, ok := wsMetaByID[id]; ok {
 			item.Name = meta.Name
 			item.ID = meta.ID
 			item.Path = meta.Path
 			item.Active = meta.Active
+			item.RepoCount = meta.RepoCount
+			item.IsDefault = meta.IsDefault
 		} else if meta, ok := wsMetaByName[id]; ok {
 			if meta.ID != "" {
 				item.ID = meta.ID
 			}
 			item.Path = meta.Path
 			item.Active = meta.Active
+			item.RepoCount = meta.RepoCount
+			item.IsDefault = meta.IsDefault
 		}
 
 		if p := s.multiPool.PoolForWorkspace(id); p != nil {
@@ -150,6 +135,27 @@ func (s *workspaceServiceImpl) ListWorkspaces(_ context.Context) ([]WorkspaceLis
 	}
 
 	return items, nil
+}
+
+// loadWorkspaceMeta returns workspace metadata maps keyed by ID and by name.
+// Both maps are nil if configFn is unset or the config load fails.
+func (s *workspaceServiceImpl) loadWorkspaceMeta() (byID, byName map[string]ops.WorkspaceSummary) {
+	if s.configFn == nil {
+		return nil, nil
+	}
+	data, err := s.configFn()
+	if err != nil || data == nil {
+		return nil, nil
+	}
+	byID = make(map[string]ops.WorkspaceSummary, len(data.Workspaces))
+	byName = make(map[string]ops.WorkspaceSummary, len(data.Workspaces))
+	for _, ws := range data.Workspaces {
+		byName[ws.Name] = ws
+		if ws.ID != "" {
+			byID[ws.ID] = ws
+		}
+	}
+	return byID, byName
 }
 
 func (s *workspaceServiceImpl) GetWorkspace(_ context.Context, wsID string) (*ops.WorkspaceData, error) {
