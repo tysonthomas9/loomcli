@@ -49,7 +49,9 @@ services:
 
   fleet-db:
     build:
-      context: ../../../fleet-db
+      # Sibling repo at ../../../../fleet-db (loomcli is at /codebase/2/loomcli/;
+      # fleet-db is at /codebase/fleet-db/ → 4 levels up from this file).
+      context: ../../../../fleet-db
       dockerfile: deploy/docker/Dockerfile
     depends_on:
       redis:
@@ -57,15 +59,28 @@ services:
     environment:
       FLEETDB_REDIS_ADDR: redis:6379
       FLEETDB_BIND: ":8080"
-    command: ["fleet-db", "-redis-addr", "redis:6379", "-bind", ":8080"]
+    # ENTRYPOINT is already `fleet-db`; command: is args.
+    # -addr is the HTTP listen address. We leave -auth-enabled=true
+    # because fleet-db's admin endpoints (workspace create/list) are
+    # gated BEHIND auth and are unreachable without it. --auth-dev-mode
+    # accepts the X-Actor request header as the authenticated identity,
+    # which seed.sh + loom-fleet both provide.
+    command:
+      - "--redis-addr"
+      - "redis:6379"
+      - "--addr"
+      - ":8080"
+      - "--auth-dev-mode"
+      - "--authz-enabled=false"
     networks: [parity]
     ports:
       - "8080:8080"
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8080/healthz"]
-      interval: 3s
-      timeout: 2s
-      retries: 20
+    # NOTE: fleet-db's container image is distroless (no shell, no wget,
+    # no curl). In-container healthchecks aren't viable. Liveness is
+    # gated externally: `loom-fleet`'s startup script wgets
+    # http://fleet-db:8080/healthz up to 30 times before exec'ing
+    # `loom serve`, so a broken fleet-db cascades to a loom-fleet exit.
+    # The Playwright preflight (Step 4) double-checks the routing path.
 
   loom-beads:
     build:
@@ -96,13 +111,11 @@ services:
     ports:
       - "8081:8080"
     healthcheck:
-      # Sanity: confirm this loom instance really is on the beads backend.
-      # If a default/fallback kicks in and it reports "fleet", fail.
-      test:
-        - CMD-SHELL
-        - |
-          BACKEND=$$(wget -qO- http://localhost:8080/api/config 2>/dev/null | grep -oE '"issue_backend":"[^"]*"' | cut -d'"' -f4)
-          [ "$$BACKEND" = "beads" ] || exit 1
+      # /api/config only reports {"mode":"open"} on this loom build — no
+      # issue_backend field. Backend selection is verified by the Playwright
+      # preflight via other channels (env var inspection, network probe to
+      # fleet-db, etc.). Healthcheck is just liveness here.
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/api/config > /dev/null 2>&1"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -151,13 +164,9 @@ services:
     ports:
       - "8082:8080"
     healthcheck:
-      # Sanity: confirm loom-fleet's own config endpoint reports the
-      # expected backend. Healthcheck fails if a default/fallback kicks in.
-      test:
-        - CMD-SHELL
-        - |
-          BACKEND=$$(wget -qO- http://localhost:8080/api/config 2>/dev/null | grep -oE '"issue_backend":"[^"]*"' | cut -d'"' -f4)
-          [ "$$BACKEND" = "fleet" ] || exit 1
+      # See loom-beads healthcheck note. Backend verification is in the
+      # Playwright preflight, not this healthcheck.
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/api/config > /dev/null 2>&1"]
       interval: 5s
       timeout: 3s
       retries: 10

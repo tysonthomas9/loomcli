@@ -1,6 +1,88 @@
 # Webui Parity Findings — 2026-04-22
 
-**Status:** scaffold ready, execution pending operator
+**Status:** scaffold + infrastructure verified (2026-04-23), seeding blocked
+
+## Infrastructure verification log (2026-04-23 stack bring-up)
+
+Attempted end-to-end run of the Playwright suite against the compose
+stack. Got most of the way. Concrete findings:
+
+### Fixes landed (committed)
+
+1. **Compose build-context path**: was `../../../fleet-db` (resolves to
+   `/codebase/2/fleet-db`, doesn't exist). Corrected to
+   `../../../../fleet-db` → `/codebase/fleet-db`.
+2. **Fleet-db flag names**: compose had `-bind` (doesn't exist); correct
+   flag is `-addr`. Also removed the duplicated `fleet-db` binary name
+   at the head of the command array (ENTRYPOINT already sets it).
+3. **`Dockerfile.parity` missing tools**: added `tmux` (required by
+   `bd daemon start`) and `wget` (required by the in-container startup
+   pre-flight that waits on fleet-db reachability, and the
+   healthcheck).
+4. **fleet-db auth posture**: `-auth-enabled=false` disables user auth
+   BUT fleet-db's admin endpoints (workspace create/list) are behind
+   auth and become unreachable when auth is fully off. Switched to
+   `-auth-dev-mode` (accepts `X-Actor` header as identity) +
+   `-authz-enabled=false`. Admin calls now work with an
+   `X-Actor: parity-harness` header.
+5. **fleet-db healthcheck removed**: the fleet-db image is distroless
+   (no sh, no wget, no curl), so in-container healthchecks are
+   impossible. Liveness is now gated externally: `loom-fleet`'s startup
+   script retries `wget http://fleet-db:8080/healthz` up to 30 times
+   before `exec`ing loom serve, so a broken fleet-db cascades to a
+   loom-fleet fatal exit that compose surfaces.
+6. **Loom-* healthchecks relaxed**: `/api/config` on the current loom
+   build only returns `{"mode":"open"}` — no `issue_backend` field.
+   Backend-selection verification moved to the Playwright preflight
+   (which uses env var inspection, network probe, and workspace
+   listing). In-container healthcheck is now plain liveness.
+
+After those fixes the stack builds cleanly, all services start:
+```
+loomcli-parity_redis_1      Up (healthy)
+loomcli-parity_fleet-db_1   Up (running)
+loomcli-parity_loom-beads_1 Up (healthy)
+loomcli-parity_loom-fleet_1 Up (healthy)
+```
+
+### Blockers remaining for full parity run
+
+Two concrete seeding issues still need a follow-up pass:
+
+**A. `seed.sh` API shapes are wrong for both sides.**
+Currently POSTs to `${FLEET_URL}/api/v1/${WS}/issues` (fleet-db native)
+and `${BEADS_URL}/api/issues` (assumed loom webui). But:
+
+- The fleet-db native path requires `X-Actor: parity-harness` header
+  for admin workspace creation (fix landed in compose via
+  `-auth-dev-mode`, but seed.sh doesn't send the header yet).
+- Loom-beads exposes `/api/workspaces/{workspace-id}/issues`, NOT
+  `/api/issues`. The workspace ID must be discovered via
+  `GET /api/workspaces` first.
+
+Verified working: `curl -X POST http://localhost:8081/api/workspaces/3d0c99cb.../issues` returned 201 with the created issue.
+
+**B. loom-fleet workspace bootstrap.**
+`curl http://localhost:8082/api/workspaces` returns empty —
+loom-fleet doesn't auto-create a PARITY workspace in its webui
+even though fleet-db has one. Either needs an env-driven workspace
+mapping or an explicit bootstrap API call in seed.sh.
+
+### To finish (estimated 30-60 min)
+
+1. Rewrite `seed.sh`:
+   - Create fleet-db workspace via `POST /api/v1/admin/workspaces` with
+     `X-Actor: parity-harness` header
+   - Discover loom-beads workspace ID via `GET /api/workspaces`
+   - For each issue: POST to both `loom-beads:/api/workspaces/{beads-ws}/issues`
+     and `loom-fleet:/api/workspaces/{fleet-ws}/issues` (once
+     loom-fleet's workspace is bootstrapped)
+2. Bootstrap loom-fleet workspace — either extend compose to POST the
+   workspace on startup, or add an env var `LOOM_AUTO_CREATE_WORKSPACE=PARITY`
+   that loom-fleet honors
+3. `make test-parity-ui` — the Playwright suite's preflight will run
+   all 9 sanity checks (see Step 0 table below) and the 14 specs will
+   execute against seeded data
 
 > **Note on automation (2026-04-22):** the UI Parity Test Suite is now
 > implemented at `test/parity/ui/` (Playwright). Every time it runs, its
