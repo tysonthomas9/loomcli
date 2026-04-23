@@ -1,28 +1,24 @@
 #!/bin/sh
 # seed.sh — populate identical fixture set into both parity backends.
 #
-# Flow:
-#   1. Ensure fleet-db has the PARITY workspace (admin API; needs X-Actor
-#      header because fleet-db is running in --auth-dev-mode).
-#   2. Discover loom-beads' workspace ID via GET /api/workspaces.
-#   3. Discover loom-fleet's workspace ID likewise (loom-fleet surfaces
-#      fleet-db's workspaces). If loom-fleet has no workspace yet, hit
-#      fleet-db admin directly and trust the loom webui to re-list.
-#   4. For each fixture issue: POST to
-#      loom-beads:/api/workspaces/{beads-ws}/issues  AND
-#      loom-fleet:/api/workspaces/{fleet-ws}/issues.
+# Strategy:
+#   - fleet-db side: use the `fdb` CLI directly (--server URL, --workspace
+#     PARITY, --actor parity-harness). Tests the real user-facing CLI
+#     path, not just the HTTP wire shape.
+#   - loom-beads side: POST to loom-beads webui's
+#     /api/workspaces/{id}/issues path, since bd's CLI lives inside the
+#     loom-beads container and isn't easily callable from here.
+#
+# Workspace bootstrap:
+#   - fleet-db: `fdb workspace create PARITY` via fdb (admin API; fdb
+#     forwards X-Actor as an authenticated identity in --auth-dev-mode)
+#   - loom-beads: discovered at runtime via GET /api/workspaces (loom
+#     auto-creates one called "workspace" on container init)
 #
 # Environment inputs (set by docker-compose.parity.yml):
 #   FLEET_URL        e.g. http://fleet-db:8080
 #   FLEET_WORKSPACE  e.g. PARITY
 #   BEADS_URL        e.g. http://loom-beads:8080
-#
-# Additional variables discovered at runtime:
-#   LOOM_FLEET_URL   hard-coded below — http://loom-fleet:8080
-#   ACTOR            parity-harness — forwarded as X-Actor to fleet-db admin
-#
-# On failure, exits non-zero and leaves partial state behind so the
-# operator can inspect containers for forensics.
 
 set -eu
 
@@ -30,29 +26,39 @@ set -eu
 : "${FLEET_WORKSPACE:?must be set}"
 : "${BEADS_URL:?must be set}"
 
-LOOM_FLEET_URL="${LOOM_FLEET_URL:-http://loom-fleet:8080}"
 ACTOR="parity-harness"
 
-echo "[seed] FLEET_URL=${FLEET_URL}  workspace=${FLEET_WORKSPACE}"
+echo "[seed] FLEET_URL=${FLEET_URL}  workspace=${FLEET_WORKSPACE}  actor=${ACTOR}"
 echo "[seed] BEADS_URL=${BEADS_URL}"
-echo "[seed] LOOM_FLEET_URL=${LOOM_FLEET_URL}"
+
+# Base invocations. `workspace create` needs --key (admin endpoint),
+# but per-workspace data operations need -workspace.
+FDB_ADMIN="fdb -server ${FLEET_URL} -actor ${ACTOR}"
+FDB_DATA="fdb -server ${FLEET_URL} -workspace ${FLEET_WORKSPACE} -actor ${ACTOR}"
+echo "[seed] fdb admin base: ${FDB_ADMIN}"
+echo "[seed] fdb data  base: ${FDB_DATA}"
 
 # ──────────────────────────────────────────────────────────────────
-# Phase 1: create fleet-db workspace via admin API (X-Actor required)
+# Phase 1: ensure fleet-db PARITY workspace exists (via fdb)
+# Try create; accept "already_exists" as success. Simpler than trying
+# to detect existence via `workspace show` (whose arg shape differs
+# from the data commands).
 # ──────────────────────────────────────────────────────────────────
 echo "[seed] ensuring fleet-db workspace ${FLEET_WORKSPACE} exists..."
-curl -fsS -X POST "${FLEET_URL}/api/v1/admin/workspaces" \
-    -H 'Content-Type: application/json' \
-    -H "X-Actor: ${ACTOR}" \
-    -d "{\"key\":\"${FLEET_WORKSPACE}\",\"name\":\"Parity Fixture\"}" \
-    > /dev/null 2>&1 \
-    && echo "[seed]   ✓ created" \
-    || echo "[seed]   ≈ already exists (ok)"
+CREATE_OUT=$(${FDB_ADMIN} workspace create --key "${FLEET_WORKSPACE}" --name "Parity Fixture" 2>&1 || true)
+case "${CREATE_OUT}" in
+    *already_exists*|*already\ exists*)
+        echo "[seed]   ≈ already exists (ok)" ;;
+    *)
+        # Any other output: print it for debugging but don't fail — the
+        # data calls below will surface a real problem with a clearer error.
+        echo "[seed]   create result: ${CREATE_OUT}" ;;
+esac
 
 # ──────────────────────────────────────────────────────────────────
 # Phase 2: discover loom-beads workspace ID
 # ──────────────────────────────────────────────────────────────────
-BEADS_WS_ID=$(curl -fsS "${BEADS_URL}/api/workspaces" \
+BEADS_WS_ID=$(curl -fsS "${BEADS_URL}/api/workspaces" 2>/dev/null \
     | sed -n 's/.*"id":"\([^"]*\)".*/\1/p' | head -1)
 if [ -z "${BEADS_WS_ID}" ]; then
     echo "[seed] FATAL: loom-beads has no workspaces"
@@ -61,44 +67,24 @@ fi
 echo "[seed] loom-beads workspace ID: ${BEADS_WS_ID}"
 
 # ──────────────────────────────────────────────────────────────────
-# Phase 3: discover loom-fleet workspace ID (or fall back)
-# ──────────────────────────────────────────────────────────────────
-FLEET_WS_ID=$(curl -fsS "${LOOM_FLEET_URL}/api/workspaces" 2>/dev/null \
-    | sed -n 's/.*"id":"\([^"]*\)".*/\1/p' | head -1 || true)
-if [ -z "${FLEET_WS_ID}" ]; then
-    # If loom-fleet's webui doesn't list the workspace, try creating one
-    # via the loom webui itself — which proxies to fleet-db.
-    echo "[seed] loom-fleet has no workspaces; bootstrapping..."
-    # Loom webui workspace schema requires "type" (one of empty/clone/template).
-    BOOT=$(curl -sS -X POST "${LOOM_FLEET_URL}/api/workspaces" \
-        -H 'Content-Type: application/json' \
-        -d "{\"name\":\"${FLEET_WORKSPACE}\",\"path\":\"/workspace\",\"type\":\"empty\"}" 2>&1)
-    echo "[seed]   bootstrap response: ${BOOT}"
-    FLEET_WS_ID=$(echo "${BOOT}" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p' | head -1 || true)
-fi
-if [ -z "${FLEET_WS_ID}" ]; then
-    echo "[seed] could not discover or create loom-fleet workspace; will"
-    echo "[seed] fall back to using FLEET_WORKSPACE (${FLEET_WORKSPACE}) as the ID"
-    FLEET_WS_ID="${FLEET_WORKSPACE}"
-fi
-echo "[seed] loom-fleet workspace ID: ${FLEET_WS_ID}"
-
-# ──────────────────────────────────────────────────────────────────
-# Phase 4: seed fixtures identically on both sides
+# Phase 3: seed fixtures via fdb (fleet) + curl (loom-beads webui)
 # ──────────────────────────────────────────────────────────────────
 post_issue() {
     local title="$1"; local type="$2"; local priority="$3"
-    local body
-    body="{\"title\":\"$title\",\"issue_type\":\"$type\",\"priority\":$priority}"
+
     echo "[seed] creating: $title ($type, P$priority)"
+
+    # Loom-beads side via webui (loom-beads has bd internally; we go
+    # through the webui to mirror the fleet path's "client → server" shape).
+    body="{\"title\":\"$title\",\"issue_type\":\"$type\",\"priority\":$priority}"
     curl -fsS -X POST "${BEADS_URL}/api/workspaces/${BEADS_WS_ID}/issues" \
         -H 'Content-Type: application/json' \
         -d "$body" > /dev/null \
         || { echo "[seed]   FAILED on loom-beads"; exit 3; }
-    curl -fsS -X POST "${LOOM_FLEET_URL}/api/workspaces/${FLEET_WS_ID}/issues" \
-        -H 'Content-Type: application/json' \
-        -d "$body" > /dev/null \
-        || { echo "[seed]   FAILED on loom-fleet"; exit 4; }
+
+    # Fleet side via fdb CLI — this is the "real user CLI" path.
+    ${FDB_DATA} create -title "$title" -type "$type" -priority "$priority" > /dev/null 2>&1 \
+        || { echo "[seed]   FAILED on fleet-db (fdb)"; exit 4; }
 }
 
 post_issue "Epic Alpha"  epic    2
@@ -116,4 +102,4 @@ post_issue "Theme toggle"             feature 3
 post_issue "Flaky test: login_e2e"    task    2
 post_issue "Clarify rate limit docs"  task    4
 
-echo "[seed] done"
+echo "[seed] done — 13 issues seeded into both backends"
