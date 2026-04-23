@@ -515,21 +515,26 @@ func (b *FleetBackend) Reopen(ctx context.Context, id string, params backend.Reo
 	if id == "" {
 		return backend.ErrValidation("Reopen", "id must not be empty")
 	}
-	// Reopen is done via PATCH with status="open".
-	req := map[string]interface{}{
-		"status": "open",
-	}
-	_, err := b.exec(ctx, "Reopen", "PATCH", "/issues/"+url.PathEscape(id), req)
+	// fleet-db has a dedicated reopen route (see internal/api/issues.go:49);
+	// previous implementation used PATCH status=open, but fleet-db's
+	// UpdateIssueRequest schema doesn't accept `status` under
+	// disallowUnknownFields, so every reopen 400'd with "unknown field
+	// status". The per-issue endpoint is also semantically richer — it
+	// runs the reopen state machine server-side and allows concurrent
+	// close-reopen ordering guarantees.
+	_, err := b.exec(ctx, "Reopen", "POST", "/issues/"+url.PathEscape(id)+"/reopen", map[string]interface{}{})
 	if err != nil {
 		return err
 	}
 	// Record reason as a comment per the IssueBackend interface contract.
-	// Best-effort: the status transition already succeeded.
+	// Best-effort: the status transition already succeeded. fleet-db
+	// expects "body" here (see CreateCommentRequest), not the beads-
+	// dialect "text".
 	if params.Reason != "" {
 		type commentReq struct {
-			Text string `json:"text"`
+			Body string `json:"body"`
 		}
-		_, _ = b.exec(ctx, "Reopen", "POST", "/issues/"+url.PathEscape(id)+"/comments", commentReq{Text: params.Reason})
+		_, _ = b.exec(ctx, "Reopen", "POST", "/issues/"+url.PathEscape(id)+"/comments", commentReq{Body: params.Reason})
 	}
 	return nil
 }

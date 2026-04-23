@@ -1273,15 +1273,19 @@ func TestNonJSONResponse(t *testing.T) {
 // --- Reopen test ---
 
 func TestReopen_HappyPath(t *testing.T) {
-	var patchBody map[string]interface{}
+	var reopenPosted bool
 	var commentPosted bool
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "PATCH" {
-			json.NewDecoder(r.Body).Decode(&patchBody) //nolint:errcheck
+		// fleet-db reopen is POST /issues/{id}/reopen (dedicated endpoint);
+		// the previous PATCH status=open approach was rejected by
+		// fleet-db's strict JSON validation. Comment body uses "body"
+		// to match CreateCommentRequest.
+		if r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/reopen") {
+			reopenPosted = true
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(apiResponse{ //nolint:errcheck
 				Success: true,
-				Data:    json.RawMessage(`{"id":"test-1","status":"updated"}`),
+				Data:    json.RawMessage(`{"id":"test-1","status":"open"}`),
 			})
 			return
 		}
@@ -1289,10 +1293,10 @@ func TestReopen_HappyPath(t *testing.T) {
 			commentPosted = true
 			var body map[string]string
 			json.NewDecoder(r.Body).Decode(&body) //nolint:errcheck
-			if body["text"] != "need more work" {
-				t.Errorf("comment text = %q, want %q", body["text"], "need more work")
+			if body["body"] != "need more work" {
+				t.Errorf("comment body = %q, want %q", body["body"], "need more work")
 			}
-			respondOK(w, map[string]interface{}{"id": 1, "text": body["text"]})
+			respondOK(w, map[string]interface{}{"id": 1, "body": body["body"]})
 			return
 		}
 		t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
@@ -1303,8 +1307,8 @@ func TestReopen_HappyPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Reopen: %v", err)
 	}
-	if patchBody["status"] != "open" {
-		t.Errorf("status = %v, want %q", patchBody["status"], "open")
+	if !reopenPosted {
+		t.Error("expected POST /issues/{id}/reopen to fire")
 	}
 	if !commentPosted {
 		t.Error("expected comment to be posted with reason")
