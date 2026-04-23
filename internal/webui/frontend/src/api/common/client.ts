@@ -4,23 +4,32 @@ import type { paths } from "@/types/generated/openapi";
 const DEFAULT_TIMEOUT = 30000;
 
 /**
- * API server base URL, set at build time via VITE_API_BASE_URL.
- * Empty string = same-origin deployment (reverse proxy or Vite dev proxy).
- * Trailing slashes are stripped to avoid double slashes in constructed URLs.
+ * API server base URL.
+ *
+ * IMPORTANT: this is intentionally an empty string in production builds so
+ * every fetch is same-origin and resolved by the browser against
+ * `window.location.origin` at runtime. That lets one committed `dist/` serve
+ * behind any reverse proxy (Caddy sidecars in the parity harness, the Go
+ * embedded handler, a CDN, etc.) without being tied to a build-time host.
+ *
+ * For cross-origin deployments, set the API origin on the server side (CORS
+ * + path routing) and keep the SPA same-origin. If you truly need a
+ * cross-origin SPA, wire it at runtime via `window.__LOOM_API_ORIGIN__` or
+ * similar — NOT via `VITE_API_BASE_URL`, which inlines a literal at build
+ * time and turns the bundle into an environment-specific artifact.
  */
-export const API_BASE_URL: string = (
-  (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? ""
-).replace(/\/$/, "");
+export const API_BASE_URL: string = "";
 
 /**
- * Return the API origin for use in absolute URLs (SSE EventSource, etc.).
- * Falls back to window.location.origin for same-origin deployments.
- * In non-browser environments (Node-based unit tests) where window is
+ * Return the API origin for use in absolute URLs (SSE EventSource,
+ * WebSocket, etc.). Resolved at runtime from `window.location.origin` so the
+ * same bundle works on any host/port the SPA is served from.
+ *
+ * In non-browser environments (Node-based unit tests) where `window` is
  * unavailable, falls back to "http://localhost" — matching the legacy
  * behavior the old helpers exposed to tests.
  */
 export function getApiOrigin(): string {
-  if (API_BASE_URL) return API_BASE_URL;
   if (typeof window !== "undefined" && window.location) {
     return window.location.origin;
   }
