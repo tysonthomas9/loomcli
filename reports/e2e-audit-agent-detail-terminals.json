@@ -1,0 +1,653 @@
+{
+  "contract_file": "frontend/agent-detail-terminals.md",
+  "validation_report": "reports/validation-agent-detail-terminals.json",
+  "audit_date": "2026-04-23T09:02:58Z",
+  "spec_files_searched": [
+    "internal/webui/frontend/tests/e2e/agent-review-journey.spec.ts",
+    "internal/webui/frontend/tests/e2e/agents-sidebar.spec.ts",
+    "internal/webui/frontend/tests/e2e/integration/terminal-parity.integration.spec.ts",
+    "internal/webui/frontend/tests/e2e/journey-monitor-drilldown.spec.ts",
+    "internal/webui/frontend/tests/e2e/kanban-redesign.spec.ts",
+    "internal/webui/frontend/tests/e2e/kanban-ui-redesign.spec.ts",
+    "internal/webui/frontend/tests/e2e/keyboard-escape-layers.spec.ts",
+    "internal/webui/frontend/tests/e2e/keyboard-focus-management.spec.ts",
+    "internal/webui/frontend/tests/e2e/log-streaming.spec.ts",
+    "internal/webui/frontend/tests/e2e/paste-confirm-dialog.spec.ts",
+    "internal/webui/frontend/tests/e2e/session-detail-view.spec.ts",
+    "internal/webui/frontend/tests/e2e/task-log-tabs.spec.ts",
+    "internal/webui/frontend/tests/e2e/terminal-disconnect-reconnect.spec.ts",
+    "internal/webui/frontend/tests/e2e/terminal-keyboard-shortcuts.spec.ts",
+    "internal/webui/frontend/tests/e2e/terminal-split-view.spec.ts",
+    "internal/webui/frontend/tests/e2e/terminal-tab-management.spec.ts",
+    "internal/webui/frontend/tests/e2e/visual-regression-terminal.spec.ts"
+  ],
+  "go_test_files_searched": [
+    "internal/webui/handlers/git/diff_test.go",
+    "internal/webui/handlers/git/git_test.go",
+    "internal/webui/handlers/misc/files_test.go",
+    "internal/webui/handlers/misc/logs_test.go",
+    "internal/webui/handlers/terminal/agent_test.go",
+    "internal/webui/handlers/terminal/lead_session_test.go",
+    "internal/webui/handlers/terminal/sessions_test.go",
+    "internal/webui/handlers/terminal/terminal_test.go",
+    "internal/webui/log/streamer_test.go",
+    "internal/webui/server/realtime/terminal_auth_test.go",
+    "internal/webui/terminal/manager_test.go",
+    "internal/webui/terminal/ownership_test.go"
+  ],
+  "summary": {
+    "total_passing": 62,
+    "covered": 32,
+    "partial": 11,
+    "uncovered": 19,
+    "coverage_pct": 51.6
+  },
+  "assertions": [
+    {
+      "id": "VAL-FE-AGENT-DETAIL-001",
+      "title": "Agent card click opens detail panel",
+      "coverage": "covered",
+      "spec_files": ["agent-review-journey.spec.ts", "log-streaming.spec.ts"],
+      "test_names": [
+        "Step 1-3: Open agent panel and verify Info tab",
+        "logs tab exists and opens from agent detail panel"
+      ],
+      "notes": "agent-review-journey clicks ember agent button and asserts agent-detail-panel data-state=open. log-streaming.openEmberLogs() also verifies the panel opens via card click."
+    },
+    {
+      "id": "VAL-FE-AGENT-DETAIL-002",
+      "title": "Panel header shows agent avatar, name, and status",
+      "coverage": "partial",
+      "spec_files": ["agent-review-journey.spec.ts"],
+      "test_names": ["Step 1-3: Open agent panel and verify Info tab"],
+      "notes": "Test verifies agent name in panel.locator('h2') (\"ember\"). Avatar element, status dot color, and sticky header scroll behavior are not asserted."
+    },
+    {
+      "id": "VAL-FE-AGENT-DETAIL-003",
+      "title": "Five tabs render in order: Info, Logs, Git, Diff, Files",
+      "coverage": "covered",
+      "spec_files": ["agent-review-journey.spec.ts", "log-streaming.spec.ts"],
+      "test_names": [
+        "Step 1-3: Open agent panel and verify Info tab",
+        "Step 6: Git tab renders commits and status",
+        "Step 7-8: Diff tab renders files, expand shows diff viewer",
+        "Step 9: Files tab renders file explorer",
+        "logs tab exists and opens from agent detail panel"
+      ],
+      "notes": "agent-review-journey covers Info/Git/Diff/Files via getByRole('tab', { name: ... }). log-streaming asserts both Info and Logs tabs visible explicitly. Combined coverage exercises all 5 tabs. Tab order is implied by the role-based getters but not explicitly asserted."
+    },
+    {
+      "id": "VAL-FE-AGENT-DETAIL-004",
+      "title": "Clicking tab switches content without closing panel",
+      "coverage": "covered",
+      "spec_files": ["agent-review-journey.spec.ts"],
+      "test_names": [
+        "Step 6: Git tab renders commits and status",
+        "Step 7-8: Diff tab renders files, expand shows diff viewer",
+        "Step 9: Files tab renders file explorer"
+      ],
+      "notes": "Steps 6/7/8/9 each click a tab and assert the corresponding tabpanel is visible while continuing to interact with the open panel. Panel data-state=open is asserted between switches."
+    },
+    {
+      "id": "VAL-FE-AGENT-DETAIL-005",
+      "title": "Switching agent resets activeTab to Info",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec opens agent A on a non-Info tab, then opens agent B and verifies activeTab resets to Info. agent-review-journey only exercises a single agent."
+    },
+    {
+      "id": "VAL-FE-AGENT-DETAIL-006",
+      "title": "Close button dismisses panel",
+      "coverage": "covered",
+      "spec_files": ["agent-review-journey.spec.ts"],
+      "test_names": ["Step 10: Close panel"],
+      "notes": "Step 10 clicks getByRole('button', { name: 'Close panel' }) and asserts panel data-state=closed."
+    },
+    {
+      "id": "VAL-FE-AGENT-DETAIL-007",
+      "title": "Pressing Escape closes panel",
+      "coverage": "covered",
+      "spec_files": ["agent-review-journey.spec.ts"],
+      "test_names": ["Step 10: Close panel"],
+      "notes": "Step 10 reopens the panel after the close-button check, then presses Escape and asserts data-state=closed."
+    },
+    {
+      "id": "VAL-FE-AGENT-DETAIL-008",
+      "title": "Panel background click closes panel",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec clicks the overlay/background area to dismiss the panel. Step 10 uses only the close button and Escape."
+    },
+    {
+      "id": "VAL-FE-AGENT-DETAIL-009",
+      "title": "Info tab displays Current Task section",
+      "coverage": "partial",
+      "spec_files": ["agent-review-journey.spec.ts"],
+      "test_names": ["Step 1-3: Open agent panel and verify Info tab"],
+      "notes": "Test asserts task title 'Fix authentication bug' is visible. Does not verify the labelled 'Current Task' section heading, the priority badge, or the clickable task link styling. Step 4-5 indirectly proves the title is a button by clicking it, but the section structure is not asserted."
+    },
+    {
+      "id": "VAL-FE-AGENT-DETAIL-011",
+      "title": "Commit Status section shows sync status",
+      "coverage": "covered",
+      "spec_files": ["agent-review-journey.spec.ts"],
+      "test_names": [
+        "Step 1-3: Open agent panel and verify Info tab",
+        "Step 6: Git tab renders commits and status"
+      ],
+      "notes": "Both Step 1-3 and Step 6 assert '+3 ahead' and '-1 behind' badges visible in panel/gitPanel."
+    },
+    {
+      "id": "VAL-FE-AGENT-DETAIL-012",
+      "title": "Commit list displays recent commits",
+      "coverage": "covered",
+      "spec_files": ["agent-review-journey.spec.ts"],
+      "test_names": ["Step 6: Git tab renders commits and status"],
+      "notes": "Step 6 asserts three commit messages ('Add auth middleware', 'Fix token validation', 'Add auth tests') visible in gitPanel after clicking Git tab."
+    },
+    {
+      "id": "VAL-FE-AGENT-DETAIL-013",
+      "title": "Show all commits button loads expanded commit list",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec exercises the 'Show all N commits' toggle or asserts the commit list expands/collapses."
+    },
+    {
+      "id": "VAL-FE-AGENT-DETAIL-014",
+      "title": "Changes section lists modified files",
+      "coverage": "covered",
+      "spec_files": ["agent-review-journey.spec.ts"],
+      "test_names": ["Step 6: Git tab renders commits and status"],
+      "notes": "Step 6 asserts 'Working Tree' label, 'src/auth.go', and 'src/auth_test.go' visible in gitPanel."
+    },
+    {
+      "id": "VAL-FE-AGENT-DETAIL-015",
+      "title": "Agent Info metadata grid",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec asserts the dt/dd metadata grid (Path, Branch, Repos, Status, Task ID, Duration). Step 1-3 only checks task title and commit badges."
+    },
+    {
+      "id": "VAL-FE-AGENT-DETAIL-016",
+      "title": "Open in Editor link",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec verifies the editor integration link or its href. Grep across e2e/ for 'Open in Editor' / 'open-in-editor' returns no matches."
+    },
+    {
+      "id": "VAL-FE-AGENT-DETAIL-017",
+      "title": "Logs tab fetches agent terminal logs",
+      "coverage": "covered",
+      "spec_files": ["log-streaming.spec.ts", "integration/terminal-parity.integration.spec.ts"],
+      "test_names": [
+        "logs tab exists and opens from agent detail panel",
+        "archive mode renders with refresh control",
+        "tmux mode renders live badge and token fetch path",
+        "talk-to-lead and ember logs render the same terminal content",
+        "ember archive mode is stable when live tmux session is absent"
+      ],
+      "notes": "log-streaming asserts log-viewer testid visible after clicking Logs tab and exercises both archive and tmux modes including 'Archive snapshot' and 'Live (tmux)' badge labels. terminal-parity covers tmux mode end-to-end. Go coverage in handlers/misc/logs_test.go and log/streamer_test.go also validates server-side log streaming."
+    },
+    {
+      "id": "VAL-FE-AGENT-DETAIL-018",
+      "title": "LogViewer displays log chunks with scroll follow",
+      "coverage": "partial",
+      "spec_files": ["log-streaming.spec.ts"],
+      "test_names": [
+        "logs tab exists and opens from agent detail panel",
+        "archive mode renders with refresh control"
+      ],
+      "notes": "Tests verify log-viewer testid visible and data-state=connected. Scroll-to-top loading older logs (isLoadingMore spinner) and the auto-scroll/follow-tail behavior on new chunks are not asserted."
+    },
+    {
+      "id": "VAL-FE-AGENT-DETAIL-019",
+      "title": "Refresh button visible in archive mode",
+      "coverage": "covered",
+      "spec_files": ["log-streaming.spec.ts", "integration/terminal-parity.integration.spec.ts"],
+      "test_names": [
+        "archive mode renders with refresh control",
+        "archive refresh triggers another archive fetch",
+        "ember archive mode is stable when live tmux session is absent"
+      ],
+      "notes": "log-streaming asserts getByRole('button', { name: 'Refresh' }) visible in archive mode and verifies clicking it triggers a second /api/agents/ember/logs request (archiveRequests >= 2)."
+    },
+    {
+      "id": "VAL-FE-AGENT-DETAIL-022",
+      "title": "Git tab renders GitTab component",
+      "coverage": "covered",
+      "spec_files": ["agent-review-journey.spec.ts"],
+      "test_names": ["Step 6: Git tab renders commits and status"],
+      "notes": "Step 6 clicks Git tab, asserts #agent-panel-tabpanel-git visible and aria-selected=true, then asserts branch/commits/working-tree content."
+    },
+    {
+      "id": "VAL-FE-AGENT-DETAIL-023",
+      "title": "Diff tab renders DiffTab component",
+      "coverage": "covered",
+      "spec_files": ["agent-review-journey.spec.ts"],
+      "test_names": ["Step 7-8: Diff tab renders files, expand shows diff viewer"],
+      "notes": "Step 7-8 clicks Diff tab, asserts #agent-panel-tabpanel-diff visible and aria-selected=true, verifies '3 files changed' summary, file rows, and that expanding a row reveals diff content with data-type='add' lines."
+    },
+    {
+      "id": "VAL-FE-AGENT-DETAIL-024",
+      "title": "Files tab opens FileEditorPanel",
+      "coverage": "covered",
+      "spec_files": ["agent-review-journey.spec.ts"],
+      "test_names": ["Step 9: Files tab renders file explorer"],
+      "notes": "Step 9 clicks Files tab, asserts file-editor-panel testid visible, expands 'src' directory, clicks auth.go and verifies content loads."
+    },
+    {
+      "id": "VAL-FE-TERM-001",
+      "title": "EmbeddedTerminal renders header and terminal instance",
+      "coverage": "partial",
+      "spec_files": [
+        "integration/terminal-parity.integration.spec.ts",
+        "log-streaming.spec.ts",
+        "terminal-tab-management.spec.ts"
+      ],
+      "test_names": [
+        "talk-to-lead and ember logs render the same terminal content",
+        "logs tab exists and opens from agent detail panel",
+        "renders tab bar with initial tabs"
+      ],
+      "notes": "EmbeddedTerminal is rendered in many specs (terminal-parity asserts terminal-container testid; log-streaming asserts log-viewer; tab-management asserts tab bar). However, no spec explicitly asserts the terminal-header testid as a structural element with all expected children together (backend label + connection dot + breadcrumb)."
+    },
+    {
+      "id": "VAL-FE-TERM-002",
+      "title": "Terminal header shows backend name",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec asserts the BACKEND_DISPLAY label ('Claude'/'Codex'/'OpenCode') text inside terminal-header. Tab-management asserts tab labels, but the header inside EmbeddedTerminal showing the backend name is not exercised. visual-regression-terminal covers WelcomeBanner backend variants, not the EmbeddedTerminal header."
+    },
+    {
+      "id": "VAL-FE-TERM-003",
+      "title": "Terminal header shows connection state indicator",
+      "coverage": "covered",
+      "spec_files": ["integration/terminal-parity.integration.spec.ts"],
+      "test_names": ["talk-to-lead and ember logs render the same terminal content"],
+      "notes": "terminal-parity asserts terminal-status-dot testid has data-status='connected' after WS opens. (terminal-tab-management asserts a tab-level status dot, which is a separate testid.)"
+    },
+    {
+      "id": "VAL-FE-TERM-004",
+      "title": "Terminal header shows worktree path breadcrumb",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec asserts worktree-breadcrumb testid or the truncated path text. Grep for 'worktree-breadcrumb' in tests/e2e/ returns no matches."
+    },
+    {
+      "id": "VAL-FE-TERM-005",
+      "title": "EmbeddedTerminal reports connection state changes",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "Callback contract is observable in Go via terminal/manager_test.go and handlers/terminal/terminal_test.go (broadcast/state). No Playwright spec verifies the onConnectionStateChange prop firing at the React layer."
+    },
+    {
+      "id": "VAL-FE-TERM-012",
+      "title": "TerminalInstance initializes xterm.js terminal",
+      "coverage": "covered",
+      "spec_files": [
+        "terminal-disconnect-reconnect.spec.ts",
+        "integration/terminal-parity.integration.spec.ts"
+      ],
+      "test_names": [
+        "shows connecting overlay on first connection",
+        "hides overlay when connection succeeds",
+        "talk-to-lead and ember logs render the same terminal content"
+      ],
+      "notes": "Overlay-state assertions implicitly require xterm.js mounted in the DOM (terminal-container testid). terminal-parity captures a screenshot of the rendered xterm canvas."
+    },
+    {
+      "id": "VAL-FE-TERM-013",
+      "title": "Terminal applies FitAddon for auto-resize",
+      "coverage": "partial",
+      "spec_files": ["terminal-split-view.spec.ts"],
+      "test_names": [
+        "split container renders with CSS grid columns",
+        "dragging divider right increases left pane ratio",
+        "split auto-disables when viewport width drops below 900px"
+      ],
+      "notes": "Split view tests verify CSS grid resize and divider drag, which require FitAddon to keep xterm in sync, but no spec explicitly asserts xterm cols/rows recompute after a resize event."
+    },
+    {
+      "id": "VAL-FE-TERM-014",
+      "title": "SearchAddon enables find-in-page",
+      "coverage": "covered",
+      "spec_files": ["terminal-keyboard-shortcuts.spec.ts"],
+      "test_names": [
+        "Ctrl+F opens search bar",
+        "Ctrl+F toggles search bar closed when open",
+        "Escape closes search bar when open",
+        "Enter in search bar retains focus",
+        "Shift+Enter in search bar retains focus"
+      ],
+      "notes": "Five tests in the 'Search shortcuts' describe block exercise the SearchBar / SearchAddon UI surface."
+    },
+    {
+      "id": "VAL-FE-TERM-015",
+      "title": "Terminal establishes WebSocket connection",
+      "coverage": "covered",
+      "spec_files": [
+        "terminal-disconnect-reconnect.spec.ts",
+        "integration/terminal-parity.integration.spec.ts"
+      ],
+      "test_names": [
+        "hides overlay when connection succeeds",
+        "transitions through connecting → connected (overlay disappears)",
+        "talk-to-lead and ember logs render the same terminal content"
+      ],
+      "notes": "Disconnect-reconnect spec asserts connecting → connected transition (WS open). terminal-parity asserts terminal-status-dot data-status='connected'."
+    },
+    {
+      "id": "VAL-FE-TERM-019",
+      "title": "Terminal cursor blinks",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec asserts the cursorBlink xterm option or measures the cursor element animation."
+    },
+    {
+      "id": "VAL-FE-TERM-020",
+      "title": "Terminal connection state transitions: disconnected → connecting → connected",
+      "coverage": "covered",
+      "spec_files": ["terminal-disconnect-reconnect.spec.ts"],
+      "test_names": [
+        "shows connecting overlay on first connection",
+        "hides overlay when connection succeeds",
+        "transitions through connecting → connected (overlay disappears)"
+      ],
+      "notes": "'Connection State Transitions' describe block explicitly asserts the connecting overlay appears then disappears as state advances."
+    },
+    {
+      "id": "VAL-FE-TERM-021",
+      "title": "Connection state 'error' when WebSocket fails",
+      "coverage": "covered",
+      "spec_files": ["terminal-disconnect-reconnect.spec.ts"],
+      "test_names": [
+        "shows error state after max initial attempts (3)",
+        "shows session expired after mid-session reconnect exhaustion",
+        "manual reconnect from error state"
+      ],
+      "notes": "Backoff Exhaustion describe block exercises the error state after max attempts and the manual recovery path from error."
+    },
+    {
+      "id": "VAL-FE-TERM-027",
+      "title": "Auto-reconnect on WebSocket disconnect",
+      "coverage": "covered",
+      "spec_files": ["terminal-disconnect-reconnect.spec.ts"],
+      "test_names": ["auto-reconnect fires after disconnect"],
+      "notes": "Network Disconnect describe block asserts auto-reconnect fires after a forced WS close."
+    },
+    {
+      "id": "VAL-FE-TERM-028",
+      "title": "Reconnect overlay shows attempt count",
+      "coverage": "covered",
+      "spec_files": ["terminal-disconnect-reconnect.spec.ts"],
+      "test_names": [
+        "shows disconnected overlay when WebSocket closes",
+        "auto-reconnect fires after disconnect"
+      ],
+      "notes": "Disconnect overlay tests assert the overlay appears with retry/attempt messaging during reconnection sequences."
+    },
+    {
+      "id": "VAL-FE-TERM-029",
+      "title": "Reconnect button in overlay manually retries",
+      "coverage": "covered",
+      "spec_files": ["terminal-disconnect-reconnect.spec.ts"],
+      "test_names": [
+        "reconnect button triggers new connection attempt",
+        "manual reconnect from error state"
+      ],
+      "notes": "Both tests click the reconnect button and assert a new connection attempt fires."
+    },
+    {
+      "id": "VAL-FE-TERM-033",
+      "title": "Terminal focus management",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec asserts terminal.focus() on click or keyboard activation. keyboard-focus-management.spec.ts covers modal focus traps and skip link only, not terminal focus."
+    },
+    {
+      "id": "VAL-FE-TERM-034",
+      "title": "Terminal blur removes caret",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec asserts blur behavior on the xterm caret."
+    },
+    {
+      "id": "VAL-FE-TERM-039",
+      "title": "TerminalView manages multiple terminal tabs",
+      "coverage": "covered",
+      "spec_files": ["terminal-tab-management.spec.ts", "terminal-keyboard-shortcuts.spec.ts"],
+      "test_names": [
+        "renders tab bar with initial tabs",
+        "marks active tab with aria-selected=true",
+        "Ctrl+1 switches to first tab",
+        "Ctrl+2 switches to second tab",
+        "Ctrl+3 switches to third tab"
+      ],
+      "notes": "tab-management asserts the terminal-tab-bar testid and renders three default tabs with labels. keyboard-shortcuts exercises switching between three tabs via Ctrl+N."
+    },
+    {
+      "id": "VAL-FE-TERM-040",
+      "title": "New tab button spawns new terminal session",
+      "coverage": "covered",
+      "spec_files": ["terminal-tab-management.spec.ts"],
+      "test_names": ["clicking + button opens backend picker and creates a tab"],
+      "notes": "Test clicks terminal-new-tab-button, fills session-name-input, clicks Create, and polls for the role='tab' count to increase."
+    },
+    {
+      "id": "VAL-FE-TERM-041",
+      "title": "Tab bar shows backend brand color",
+      "coverage": "partial",
+      "spec_files": ["terminal-tab-management.spec.ts"],
+      "test_names": ["shows connection state dots with data-status attribute"],
+      "notes": "tab-management asserts terminal-tab-status-* testid is visible with a data-status attribute, but does not assert the brand-dot computed background color matches BACKEND_DISPLAY (Claude=#D97706, Codex=#10B981, etc.). brand-dot testid exists in TerminalHeader.tsx but no spec inspects its color."
+    },
+    {
+      "id": "VAL-FE-TERM-042",
+      "title": "Tab close button removes tab",
+      "coverage": "covered",
+      "spec_files": ["terminal-tab-management.spec.ts"],
+      "test_names": [
+        "clicking close button removes the tab",
+        "close button hidden when only 1 tab remains",
+        "clicking Close removes the tab"
+      ],
+      "notes": "Tab Closing describe block clicks terminal-tab-close-* and asserts deleteCalls contains the session id; also verifies close button hidden for single-tab case."
+    },
+    {
+      "id": "VAL-FE-TERM-043",
+      "title": "Active tab switches automatically when current tab is closed",
+      "coverage": "partial",
+      "spec_files": ["terminal-tab-management.spec.ts", "terminal-split-view.spec.ts"],
+      "test_names": [
+        "clicking close button removes the tab",
+        "split auto-disables when closing a tab reduces count below 2"
+      ],
+      "notes": "Tab close test verifies the closed tab disappears from deleteCalls but does not explicitly assert another tab becomes aria-selected=true. split-view test verifies side effects of tab-count change but not the active-tab promotion algorithm."
+    },
+    {
+      "id": "VAL-FE-TERM-047",
+      "title": "Close all tabs button closes all sessions",
+      "coverage": "partial",
+      "spec_files": ["terminal-tab-management.spec.ts"],
+      "test_names": ["context menu shows expected options"],
+      "notes": "Test asserts context-menu-close-all option is visible in the right-click menu but does not click it or assert that all sessions are deleted."
+    },
+    {
+      "id": "VAL-FE-TERM-051",
+      "title": "Split view toggle enables two-pane mode",
+      "coverage": "covered",
+      "spec_files": ["terminal-split-view.spec.ts"],
+      "test_names": [
+        "split toggle button is visible when 2+ tabs exist",
+        "split toggle button is disabled when only 1 tab exists",
+        "clicking toggle enables split view",
+        "clicking toggle again disables split view"
+      ],
+      "notes": "Four tests in 'Split view toggle' describe block fully exercise toggle visibility, enable, and disable."
+    },
+    {
+      "id": "VAL-FE-TERM-052",
+      "title": "Split pane divider is draggable",
+      "coverage": "covered",
+      "spec_files": ["terminal-split-view.spec.ts"],
+      "test_names": [
+        "split-divider has role=separator and aria-orientation=vertical",
+        "dragging divider right increases left pane ratio",
+        "dragging divider left decreases left pane ratio",
+        "double-clicking divider resets to 50/50"
+      ],
+      "notes": "'Divider resize' describe block covers drag right/left, double-click reset, and ARIA semantics."
+    },
+    {
+      "id": "VAL-FE-TERM-053",
+      "title": "Right pane tab selector switches which tab is shown on right",
+      "coverage": "covered",
+      "spec_files": ["terminal-split-view.spec.ts"],
+      "test_names": [
+        "right pane shows non-active tab via split-pane-selector",
+        "selector lists all tabs except the active left tab",
+        "changing selector switches right pane tab",
+        "when active left tab changes, selector updates to exclude it"
+      ],
+      "notes": "'Split pane selector' describe block fully covers selector population and pane-switching behavior."
+    },
+    {
+      "id": "VAL-FE-TERM-054",
+      "title": "Terminal session scrollback is persistent in split view",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec asserts xterm scroll position is preserved when a tab moves between left/right pane or when split is toggled. Session-storage tests cover layout persistence (split-view, ratio, right-tab) but not terminal scrollback."
+    },
+    {
+      "id": "VAL-FE-TERM-055",
+      "title": "Terminal tabs are loaded from server metadata on first render",
+      "coverage": "covered",
+      "spec_files": ["terminal-tab-management.spec.ts"],
+      "test_names": ["renders tab bar with initial tabs"],
+      "notes": "setupTerminalMocks installs /api/terminal/state GET with active_tab plus per-session GETs. 'renders tab bar with initial tabs' iterates DEFAULT_TABS and asserts each terminal-tab-label-* renders with the server-provided label."
+    },
+    {
+      "id": "VAL-FE-TERM-056",
+      "title": "Active tab is restored from sessionStorage",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "tab-management seeds active_tab via the /api/terminal/state mock (server source), not sessionStorage. split-view sessionStorage tests cover terminal-split-view / terminal-split-ratio / terminal-split-right-tab keys, not the active-tab restoration key."
+    },
+    {
+      "id": "VAL-FE-TERM-057",
+      "title": "Active tab is persisted to server on change",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "trackers.statePatchCalls captures PATCH /api/terminal/state bodies in the mock harness, but no test asserts a specific PATCH body or count after a tab switch. The persistence path is exercised but not verified."
+    },
+    {
+      "id": "VAL-FE-TERM-516",
+      "title": "Dark theme vs. light theme color palette",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "visual-regression-terminal screenshots SessionNamePrompt, WelcomeBanner, HelpPopover, and SearchBar in single-theme modes. No test compares xterm color palette across dark/light themes."
+    },
+    {
+      "id": "VAL-FE-TTL-001",
+      "title": "Talk-to-Lead button is visible in app header/layout",
+      "coverage": "covered",
+      "spec_files": ["kanban-ui-redesign.spec.ts", "kanban-redesign.spec.ts"],
+      "test_names": [
+        "FAB button is visible with correct text",
+        "FAB has coral background color",
+        "Talk to Lead FAB has fixed positioning"
+      ],
+      "notes": "kanban-ui-redesign asserts talk-to-lead-button testid visible with text /Talk to Lead/ and coral rgb(240,93,70) background. kanban-redesign asserts position:fixed."
+    },
+    {
+      "id": "VAL-FE-TTL-002",
+      "title": "Button shows session count badge",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec asserts a session-count badge element on the Talk-to-Lead button."
+    },
+    {
+      "id": "VAL-FE-TTL-003",
+      "title": "Button aria-label includes session count",
+      "coverage": "partial",
+      "spec_files": ["kanban-ui-redesign.spec.ts"],
+      "test_names": ["FAB has aria-label for accessibility"],
+      "notes": "Test asserts aria-label='Talk to Lead' (literal). Contract requires the aria-label to *include* a session count (e.g., 'Talk to Lead (3 sessions)'). The asserted value omits the count, so coverage is partial against the contract."
+    },
+    {
+      "id": "VAL-FE-TTL-004",
+      "title": "Clicking button opens Talk-to-Lead terminal panel",
+      "coverage": "covered",
+      "spec_files": ["integration/terminal-parity.integration.spec.ts"],
+      "test_names": ["talk-to-lead and ember logs render the same terminal content"],
+      "notes": "Test clicks talk-to-lead-button and asserts terminal-panel-overlay testid becomes visible. Requires RUN_INTEGRATION_TESTS=1 (and tmux), but the test exists and exercises the click-open behavior end-to-end."
+    },
+    {
+      "id": "VAL-FE-TTL-005",
+      "title": "Talk-to-Lead terminal is an EmbeddedTerminal instance",
+      "coverage": "partial",
+      "spec_files": ["integration/terminal-parity.integration.spec.ts"],
+      "test_names": ["talk-to-lead and ember logs render the same terminal content"],
+      "notes": "Test renders terminal-container inside the talk overlay and verifies pixel-parity with the agent log terminal. Component identity (EmbeddedTerminal props/structure) is not asserted directly; parity with the agent terminal serves as indirect evidence."
+    },
+    {
+      "id": "VAL-FE-TTL-006",
+      "title": "Talk-to-Lead terminal WebSocket URL is for lead session",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec inspects the WS URL constructed for the Talk-to-Lead terminal. Go coverage exists in handlers/terminal/lead_session_test.go and server/realtime/terminal_auth_test.go for the server-side endpoint, but the client URL contract is not E2E-asserted."
+    },
+    {
+      "id": "VAL-FE-TTL-007",
+      "title": "Talk-to-Lead terminal accepts user input",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec types into the Talk-to-Lead terminal and asserts characters are echoed or sent to the backend."
+    },
+    {
+      "id": "VAL-FE-TTL-009",
+      "title": "Talk-to-Lead terminal auto-reconnects on disconnect",
+      "coverage": "partial",
+      "spec_files": ["terminal-disconnect-reconnect.spec.ts"],
+      "test_names": [
+        "auto-reconnect fires after disconnect",
+        "reconnect button triggers new connection attempt"
+      ],
+      "notes": "terminal-disconnect-reconnect exercises auto-reconnect for a generic terminal context, not the Talk-to-Lead overlay specifically. The shared TerminalInstance code path is the same, but no spec asserts reconnect behavior with the talk-to-lead-button entrypoint."
+    },
+    {
+      "id": "VAL-FE-TTL-010",
+      "title": "Button is disabled if no backends configured",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec mocks a zero-backends configuration and asserts the talk-to-lead-button is disabled."
+    },
+    {
+      "id": "VAL-FE-TTL-011",
+      "title": "Talk-to-Lead panel can be closed",
+      "coverage": "covered",
+      "spec_files": ["integration/terminal-parity.integration.spec.ts"],
+      "test_names": ["talk-to-lead and ember logs render the same terminal content"],
+      "notes": "Test clicks terminal-close-button and asserts terminal-panel-overlay aria-hidden='true'."
+    }
+  ]
+}
