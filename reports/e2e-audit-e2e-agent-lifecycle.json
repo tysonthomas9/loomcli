@@ -1,0 +1,800 @@
+{
+  "contract_file": "cross-area/e2e-agent-lifecycle.md",
+  "validation_report": "reports/validation-e2e-agent-lifecycle.json",
+  "audit_date": "2026-04-23T20:00:00Z",
+  "spec_files_searched": [
+    "internal/webui/frontend/tests/e2e/agent-review-journey.spec.ts",
+    "internal/webui/frontend/tests/e2e/agents-sidebar.spec.ts",
+    "internal/webui/frontend/tests/e2e/auth-integration.spec.ts",
+    "internal/webui/frontend/tests/e2e/comment-form.spec.ts",
+    "internal/webui/frontend/tests/e2e/comments-section.spec.ts",
+    "internal/webui/frontend/tests/e2e/dependencies-section.spec.ts",
+    "internal/webui/frontend/tests/e2e/journey-create-triage.spec.ts",
+    "internal/webui/frontend/tests/e2e/journey-monitor-drilldown.spec.ts",
+    "internal/webui/frontend/tests/e2e/kanban.spec.ts",
+    "internal/webui/frontend/tests/e2e/monitor-dashboard.spec.ts",
+    "internal/webui/frontend/tests/e2e/review-approve-reject.spec.ts",
+    "internal/webui/frontend/tests/e2e/server-push.spec.ts",
+    "internal/webui/frontend/tests/e2e/server-push-integration.spec.ts",
+    "internal/webui/frontend/tests/e2e/session-history.spec.ts",
+    "internal/webui/frontend/tests/e2e/status-dropdown.spec.ts",
+    "internal/webui/frontend/tests/e2e/unblock-stuck-task.spec.ts"
+  ],
+  "go_test_files_searched": [
+    "internal/cli/agent/agent_cmd_test.go",
+    "internal/cli/agent/claim_test.go",
+    "internal/cli/agent/complete_coverage_test.go",
+    "internal/cli/agent/complete_test.go",
+    "internal/cli/agent/lead_test.go",
+    "internal/cli/agent/plan_smoke_test.go",
+    "internal/cli/agent/plan_test.go",
+    "internal/cli/agent/recover_test.go",
+    "internal/cli/agent/task_test.go",
+    "internal/cli/automode/automode_custom_test.go",
+    "internal/cli/automode/automode_error_test.go",
+    "internal/cli/automode/automode_poller_test.go",
+    "internal/cli/automode/automode_stuck_test.go",
+    "internal/cli/automode/automode_test.go",
+    "internal/cli/automode/automode_tmux_test.go",
+    "internal/cli/automode/automode_yield_test.go",
+    "internal/cli/daemon/concurrency_test.go",
+    "internal/cli/daemon/daemon_cmd_test.go",
+    "internal/cli/daemon/daemon_control_test.go",
+    "internal/cli/daemon/supervisor/lifecycle_test.go",
+    "internal/cli/daemon/supervisor/restart_coverage_test.go",
+    "internal/cli/doctor/doctor_test.go",
+    "internal/cli/lock_test.go",
+    "internal/cli/lock_workspace_test.go",
+    "internal/cli/plan_task_e2e_test.go",
+    "internal/lockfile/lock_test.go"
+  ],
+  "summary": {
+    "total_passing": 49,
+    "covered": 27,
+    "partial": 19,
+    "uncovered": 3,
+    "coverage_pct": 55.1
+  },
+  "assertions": [
+    {
+      "id": "VAL-E2E-LIFECYCLE-002",
+      "title": "Plan and task sequential on same worktree",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/lockfile/lock_test.go",
+        "internal/cli/lock_test.go",
+        "internal/cli/plan_task_e2e_test.go"
+      ],
+      "test_names": [
+        "TestAcquireLockFailsWhenLocked",
+        "TestCheckLockWithLock",
+        "TestE2E_ClaimUpdatesLockFile"
+      ],
+      "notes": "Sequential-on-same-worktree is enforced by the agent lock file. TestAcquireLockFailsWhenLocked and TestCheckLockWithLock exercise the exclusive-lock mechanism; TestE2E_ClaimUpdatesLockFile drives the real loom binary through a lock-update cycle. No single test runs plan then task back-to-back end-to-end, but the lock primitive that guarantees ordering is directly tested."
+    },
+    {
+      "id": "VAL-E2E-LIFECYCLE-003",
+      "title": "Browser review via Issue Detail modal with approve/reject/feedback actions",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/webui/frontend/tests/e2e/review-approve-reject.spec.ts"
+      ],
+      "test_names": [
+        "approve plan review: panel opens, design renders, approve updates board",
+        "reject plan review: reject form, Ctrl+Enter submit, issue leaves Review column",
+        "reject form cancel returns to action bar"
+      ],
+      "notes": "Playwright spec opens the Issue Detail panel for a review-status task and verifies the approve action moves the card off the Review column, the reject form accepts feedback and submits via Ctrl+Enter, and the cancel path returns to the action bar."
+    },
+    {
+      "id": "VAL-E2E-LIFECYCLE-004",
+      "title": "Two planning agents auto-mode enriching all no-design tasks",
+      "coverage": "partial",
+      "spec_files": [
+        "internal/cli/automode/automode_custom_test.go",
+        "internal/cli/automode/automode_test.go",
+        "internal/cli/agent/plan_smoke_test.go"
+      ],
+      "test_names": [
+        "TestGetAvailablePlanningTasks",
+        "TestHasAvailablePlanningTasks",
+        "TestPlanSmoke_HappyPath"
+      ],
+      "notes": "Automode planning picks up no-design tasks and plan-smoke covers enrichment of one task end-to-end. No test actually spins up two planning agents simultaneously and asserts both make forward progress without clobbering each other's work."
+    },
+    {
+      "id": "VAL-E2E-LIFECYCLE-005",
+      "title": "Concurrent task implementation on different worktrees",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/lockfile/lock_test.go",
+        "internal/cli/lock_workspace_test.go"
+      ],
+      "test_names": [
+        "TestConcurrentLockAccess",
+        "TestAcquireLock_WorkspaceIndependentLocks"
+      ],
+      "notes": "Workspace-scoped locks are validated as independent across worktrees (TestAcquireLock_WorkspaceIndependentLocks) and the lockfile stress test (TestConcurrentLockAccess) confirms many goroutines racing on distinct paths all acquire cleanly. Together these cover the fan-out-across-worktrees guarantee."
+    },
+    {
+      "id": "VAL-E2E-LIFECYCLE-006",
+      "title": "Plan auto-mode with --max-tasks limit",
+      "coverage": "partial",
+      "spec_files": [
+        "internal/cli/automode/automode_test.go",
+        "internal/cli/automode/automode_custom_test.go",
+        "internal/cli/plan_task_e2e_test.go"
+      ],
+      "test_names": [
+        "TestAutoModeOptions",
+        "TestFormatLimit",
+        "TestRunAutoModeLoop_CodexMaxTasks",
+        "TestE2E_PlanHelp"
+      ],
+      "notes": "TestRunAutoModeLoop_CodexMaxTasks fires the max-tasks exit condition through the automode loop for the codex backend. TestE2E_PlanHelp confirms --max-tasks is wired into the plan command surface. No dedicated test drives plan auto-mode with --max-tasks=N against the claude backend and asserts exactly N tasks are processed before exit."
+    },
+    {
+      "id": "VAL-E2E-LIFECYCLE-007",
+      "title": "Task auto-mode with --idle-timeout",
+      "coverage": "partial",
+      "spec_files": [
+        "internal/cli/automode/automode_test.go",
+        "internal/cli/plan_task_e2e_test.go"
+      ],
+      "test_names": [
+        "TestAutoModeOptions",
+        "TestFormatTimeout",
+        "TestE2E_TaskHelp"
+      ],
+      "notes": "IdleTimeout option is validated in TestAutoModeOptions and the human-readable formatter is exercised, and TestE2E_TaskHelp shows --idle-timeout is exposed on the task command. No test simulates an idle run where the timer fires and the loop exits with the idle-timeout reason."
+    },
+    {
+      "id": "VAL-E2E-LIFECYCLE-008",
+      "title": "Lead CLI review loop on review-status tasks",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/cli/agent/lead_test.go"
+      ],
+      "test_names": [
+        "TestRunLead_InvokesClaude",
+        "TestRunLead_ClaudeError",
+        "TestGenerateLeadPrompt_NotEmpty"
+      ],
+      "notes": "TestRunLead_InvokesClaude exercises the lead command's invocation path to Claude and confirms the review loop fires; TestRunLead_ClaudeError covers the error propagation branch. TestGenerateLeadPrompt_NotEmpty guards the review-task prompt payload."
+    },
+    {
+      "id": "VAL-E2E-LIFECYCLE-009",
+      "title": "Epic hierarchy: create epic, add children, run lifecycle",
+      "coverage": "partial",
+      "spec_files": [
+        "internal/cli/agent/agent_cmd_test.go",
+        "internal/cli/automode/automode_custom_test.go"
+      ],
+      "test_names": [
+        "TestMapTaskFilter_WithParentID",
+        "TestMapTaskFilter_ParentIDCapturedInClosure",
+        "TestGetAvailablePlanningTasks_WithParentID",
+        "TestGetAvailableImplementationTasks_WithParentID"
+      ],
+      "notes": "Epic filtering (parentID) is well covered at the task-query layer. No test walks the full lifecycle (create epic -> add children -> plan -> task -> close) in a single scenario, so the integrated epic-hierarchy behavior is only indirectly covered."
+    },
+    {
+      "id": "VAL-E2E-LIFECYCLE-010",
+      "title": "Task fails mid-implementation (non-zero exit)",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/cli/agent/recover_test.go",
+        "internal/cli/automode/automode_error_test.go"
+      ],
+      "test_names": [
+        "TestAnalyzeTaskCompletion_Incomplete",
+        "TestHandleAutoTaskError_FatalError",
+        "TestHandleAutoTaskError_TransientBackoff",
+        "TestClassifyInvokeError_UsesInvocationLocalOutput"
+      ],
+      "notes": "Automode error tests classify fatal/transient failures and drive the corresponding exit/backoff paths. recover_test's TestAnalyzeTaskCompletion_Incomplete confirms an incomplete task is detected and left in recoverable state after a failed run."
+    },
+    {
+      "id": "VAL-E2E-LIFECYCLE-012",
+      "title": "SIGINT during task execution with in_progress task",
+      "coverage": "partial",
+      "spec_files": [
+        "internal/cli/automode/automode_test.go"
+      ],
+      "test_names": [
+        "TestSetupSignalHandler",
+        "TestSetupSignalHandler_StopsSignalDelivery",
+        "TestInterruptibleSleep_InterruptedByShutdown"
+      ],
+      "notes": "Signal handler setup and interruptible-sleep teardown are covered, validating SIGINT triggers the shutdown channel. There is no end-to-end test that SIGINTs a task mid-execution with an actual in_progress task and verifies the task's state is preserved correctly afterwards."
+    },
+    {
+      "id": "VAL-E2E-LIFECYCLE-013",
+      "title": "Backend CLI missing triggers graceful error",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/cli/doctor/doctor_test.go"
+      ],
+      "test_names": [
+        "TestCheckBackendCLI",
+        "TestCheckIssueBackend"
+      ],
+      "notes": "Doctor checks verify the missing-backend-CLI condition is detected and reported with an actionable error message rather than panicking."
+    },
+    {
+      "id": "VAL-E2E-LIFECYCLE-016",
+      "title": "Stale lock detection and recovery",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/cli/lock_test.go",
+        "internal/cli/doctor/doctor_test.go",
+        "internal/cli/agent/recover_test.go"
+      ],
+      "test_names": [
+        "TestAcquireLockStale",
+        "TestCheckLockStale",
+        "TestCheckStaleLocks",
+        "TestRecoverWorktree_StaleLock"
+      ],
+      "notes": "Stale-lock acquisition (dead PID), the loom doctor stale-lock check, and the loom recover flow that force-releases a stale lock on a worktree all have dedicated tests."
+    },
+    {
+      "id": "VAL-E2E-LIFECYCLE-017",
+      "title": "Concurrent agents on same worktree prevented",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/lockfile/lock_test.go",
+        "internal/cli/lock_test.go"
+      ],
+      "test_names": [
+        "TestAcquireLockFailsWhenLocked",
+        "TestConcurrentLockAccess"
+      ],
+      "notes": "TestAcquireLockFailsWhenLocked asserts the second acquirer is rejected while the first holds the lock; TestConcurrentLockAccess stress-tests many concurrent acquirers against one path and verifies exactly one holder at a time."
+    },
+    {
+      "id": "VAL-E2E-LIFECYCLE-019",
+      "title": "Issue created via REST API appears in browser Kanban immediately (SSE)",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/webui/frontend/tests/e2e/server-push.spec.ts",
+        "internal/webui/frontend/tests/e2e/server-push-integration.spec.ts"
+      ],
+      "test_names": [
+        "SSE endpoint is called on page load",
+        "mutation events are processed by the app",
+        "CLI mutation triggers UI update"
+      ],
+      "notes": "server-push-integration spec verifies a mutation pushed through the backend reaches the live UI via SSE and updates the rendered board. The upstream SSE tests confirm the event stream is connected and mutation events are processed."
+    },
+    {
+      "id": "VAL-E2E-LIFECYCLE-020",
+      "title": "Task closed via CLI appears as closed in browser; ↑N badge updates",
+      "coverage": "partial",
+      "spec_files": [
+        "internal/webui/frontend/tests/e2e/server-push-integration.spec.ts"
+      ],
+      "test_names": [
+        "issue close via CLI removes from ready view",
+        "status change via CLI updates UI"
+      ],
+      "notes": "The close-via-CLI propagation to the UI is covered. The ↑N unblocked-dependents badge on the destination card is not asserted by any existing spec, so that visual affordance is uncovered."
+    },
+    {
+      "id": "VAL-E2E-LIFECYCLE-021",
+      "title": "Closing issue from browser marks task closed in CLI context",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/webui/frontend/tests/e2e/status-dropdown.spec.ts",
+        "internal/webui/frontend/tests/e2e/server-push-integration.spec.ts"
+      ],
+      "test_names": [
+        "changing status calls API with correct parameters",
+        "drag-drop status change persists and broadcasts"
+      ],
+      "notes": "Status dropdown PATCHes the backend with the correct closed payload, and the drag-drop variant confirms the change persists and broadcasts over SSE so other CLI/UI readers observe the closed status."
+    },
+    {
+      "id": "VAL-E2E-LIFECYCLE-022",
+      "title": "Monitor view displays agent status and commit count",
+      "coverage": "partial",
+      "spec_files": [
+        "internal/webui/frontend/tests/e2e/monitor-dashboard.spec.ts",
+        "internal/webui/frontend/tests/e2e/agents-sidebar.spec.ts"
+      ],
+      "test_names": [
+        "clicking Monitor tab shows dashboard",
+        "AgentActivityPanel shows agents correctly"
+      ],
+      "notes": "The monitor dashboard renders with agent cards and the sidebar panel shows agent status. No test asserts a commit-count value is displayed per agent card, so that specific data point is uncovered."
+    },
+    {
+      "id": "VAL-E2E-LIFECYCLE-023",
+      "title": "Monitor refresh updates agent status in real-time",
+      "coverage": "partial",
+      "spec_files": [
+        "internal/webui/frontend/tests/e2e/monitor-dashboard.spec.ts",
+        "internal/webui/frontend/tests/e2e/server-push.spec.ts"
+      ],
+      "test_names": [
+        "monitor view persists after page reload",
+        "mutation events are processed by the app"
+      ],
+      "notes": "SSE mutation processing and monitor view persistence are verified. An agent status transition (idle -> working -> idle) propagating live to the monitor without reload is not explicitly tested."
+    },
+    {
+      "id": "VAL-E2E-LIFECYCLE-024",
+      "title": "Workspace mode: plan agent works across repos",
+      "coverage": "partial",
+      "spec_files": [
+        "internal/cli/lock_workspace_test.go",
+        "internal/cli/agent/recover_test.go"
+      ],
+      "test_names": [
+        "TestAcquireLock_WorkspaceIndependentLocks",
+        "TestAnalyzeTaskCompletion_WorkspaceMode",
+        "TestRecoverWorktree_WorkspaceStaleLock",
+        "TestCleanUntrackedFiles_WorkspaceMode"
+      ],
+      "notes": "Workspace-mode lock acquisition, completion analysis, stale-lock recovery, and untracked-file cleanup all have dedicated workspace variants. No test exercises a plan agent that enumerates and touches multiple repos in one workspace run end-to-end."
+    },
+    {
+      "id": "VAL-E2E-LIFECYCLE-025",
+      "title": "Auto mode with custom --interval polling rate",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/cli/plan_task_e2e_test.go"
+      ],
+      "test_names": [
+        "TestE2E_TaskIntervalFlag",
+        "TestE2E_PlanHelp",
+        "TestE2E_TaskHelp"
+      ],
+      "notes": "TestE2E_TaskIntervalFlag invokes the real loom binary with --interval 10 and verifies the flag is accepted and wired into the polling loop; help output tests confirm the flag is advertised on both commands."
+    },
+    {
+      "id": "VAL-E2E-LIFECYCLE-026",
+      "title": "Auto mode idle timeout with activity resets timer",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test drives an auto-mode loop through idle ticks, introduces activity mid-stream, and asserts the idle-start timestamp is reset so the timeout does not fire prematurely."
+    },
+    {
+      "id": "VAL-E2E-LIFECYCLE-027",
+      "title": "Daemon supervises multiple agents simultaneously",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/cli/daemon/supervisor/lifecycle_test.go",
+        "internal/cli/daemon/daemon_control_test.go",
+        "internal/cli/daemon/concurrency_test.go"
+      ],
+      "test_names": [
+        "TestDaemonStartStop",
+        "TestSuperviseAgent_AcquiresAndReleasesOnShutdown",
+        "TestControlServer_ConcurrentStops",
+        "TestConcurrencyTracker_ConcurrentAccess"
+      ],
+      "notes": "Supervisor lifecycle, concurrent control-server stop calls, and the concurrency tracker's multi-role accounting all have direct coverage. Together these exercise the daemon's ability to spawn and tear down several supervised agents in parallel."
+    },
+    {
+      "id": "VAL-E2E-LIFECYCLE-032",
+      "title": "Plan with no available tasks exits cleanly with message",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/cli/agent/plan_test.go",
+        "internal/cli/agent/plan_smoke_test.go",
+        "internal/cli/plan_task_e2e_test.go"
+      ],
+      "test_names": [
+        "TestRunPlan_SingleTask_NoTasksAvailable",
+        "TestPlanSmoke_NoTasksExitsCleanly",
+        "TestE2E_PlanNoTasks"
+      ],
+      "notes": "Unit (TestRunPlan_SingleTask_NoTasksAvailable), smoke (TestPlanSmoke_NoTasksExitsCleanly), and real-binary E2E (TestE2E_PlanNoTasks) all cover the clean no-tasks exit path with the expected user message."
+    },
+    {
+      "id": "VAL-E2E-LIFECYCLE-033",
+      "title": "Task with no design is skipped by task agent",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/cli/agent/task_test.go",
+        "internal/cli/plan_task_e2e_test.go"
+      ],
+      "test_names": [
+        "TestRunTask_SkipsTasksWithoutDesign",
+        "TestHasAvailableImplementationTasks_SkipsTasksWithoutDesign",
+        "TestE2E_TaskSkipsTasksWithoutDesign"
+      ],
+      "notes": "Task agent's design-gate is verified at the unit level, the availability-check layer, and via the real binary — no-design tasks are consistently passed over."
+    },
+    {
+      "id": "VAL-E2E-LIFECYCLE-034",
+      "title": "Blocked task is not claimed by any agent",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No Go test asserts that a task with unresolved depends_on is filtered out of the ready queue and therefore never claimed. The behavior is delegated to the bd ready backend query, but no loom-side test mocks or drives that filter to confirm."
+    },
+    {
+      "id": "VAL-E2E-LIFECYCLE-035",
+      "title": "Epic tasks are skipped by both plan and task agents",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/cli/agent/plan_test.go",
+        "internal/cli/agent/task_test.go",
+        "internal/cli/plan_task_e2e_test.go"
+      ],
+      "test_names": [
+        "TestRunPlan_SkipsEpics",
+        "TestRunTask_SkipsEpics",
+        "TestE2E_PlanSkipsEpics",
+        "TestE2E_TaskSkipsEpics"
+      ],
+      "notes": "Unit and real-binary E2E tests on both commands confirm epic-type issues are excluded from the candidate set."
+    },
+    {
+      "id": "VAL-E2E-LIFECYCLE-036",
+      "title": "Task with needs-revision label is planned again (overwrite design)",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/cli/agent/plan_smoke_test.go",
+        "internal/cli/agent/task_test.go",
+        "internal/cli/plan_task_e2e_test.go"
+      ],
+      "test_names": [
+        "TestPlanSmoke_NeedsRevisionTask",
+        "TestRunTask_SkipsTasksWithNeedsRevision",
+        "TestE2E_PlanPicksNeedsRevisionTask",
+        "TestE2E_TaskSkipsNeedsRevision"
+      ],
+      "notes": "Plan side picks up needs-revision tasks (TestPlanSmoke_NeedsRevisionTask, TestE2E_PlanPicksNeedsRevisionTask) while task side skips them (TestRunTask_SkipsTasksWithNeedsRevision, TestE2E_TaskSkipsNeedsRevision), covering both directions of the replanning handoff."
+    },
+    {
+      "id": "VAL-E2E-LIFECYCLE-039",
+      "title": "JWT auth required for all API calls in auth-enabled mode",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/webui/frontend/tests/e2e/auth-integration.spec.ts"
+      ],
+      "test_names": [
+        "shows login page when not authenticated",
+        "renders app content when session is valid"
+      ],
+      "notes": "Auth-integration spec covers the gated/ungated UI paths driven by the auth-config endpoint. Backend Go auth chain tests (referenced in the auth-flow audit) cover the 401 rejection side on the middleware."
+    },
+    {
+      "id": "VAL-E2E-LIFECYCLE-040",
+      "title": "10 worktrees polling for tasks concurrently (no deadlock)",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/lockfile/lock_test.go",
+        "internal/cli/lock_workspace_test.go",
+        "internal/cli/daemon/concurrency_test.go"
+      ],
+      "test_names": [
+        "TestConcurrentLockAccess",
+        "TestAcquireLock_WorkspaceIndependentLocks",
+        "TestConcurrencyTracker_ConcurrentAccess",
+        "TestConcurrencyTracker_BlockAndRelease"
+      ],
+      "notes": "Lockfile stress tests exercise heavy concurrent access and workspace locks prove independence across worktrees; the concurrency-tracker tests confirm multi-role acquire/release under parallel goroutines. Together these rule out deadlock in the polling path."
+    },
+    {
+      "id": "VAL-E2E-LIFECYCLE-043",
+      "title": "SIGINT triggers graceful shutdown preserving in-flight task",
+      "coverage": "partial",
+      "spec_files": [
+        "internal/cli/automode/automode_test.go",
+        "internal/cli/daemon/supervisor/lifecycle_test.go",
+        "internal/cli/plan_task_e2e_test.go"
+      ],
+      "test_names": [
+        "TestSetupSignalHandler_StopsSignalDelivery",
+        "TestInterruptibleSleep_InterruptedByShutdown",
+        "TestStopAgent_GracefulShutdown",
+        "TestSuperviseAgent_AcquiresAndReleasesOnShutdown",
+        "TestE2E_CompleteCreatesSignalFile"
+      ],
+      "notes": "Graceful shutdown primitives are covered on both the signal-handler side and the supervisor side, and the complete signal-file path is verified. Preservation of the exact in-flight task's status (in_progress, no data loss) across a SIGINT is not explicitly asserted in any test."
+    },
+    {
+      "id": "VAL-E2E-LIFECYCLE-044",
+      "title": "Stale lock from crashed agent auto-recovers on next plan/task",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/cli/lock_test.go",
+        "internal/cli/agent/recover_test.go"
+      ],
+      "test_names": [
+        "TestAcquireLockStale",
+        "TestRecoverWorktree_StaleLock",
+        "TestRecoverWorktree_WorkspaceStaleLock",
+        "TestForceReleaseLock_RemovesLockFile"
+      ],
+      "notes": "Stale-lock auto-detection during acquire and the recover flow's force-release path are both tested, including the workspace variant."
+    },
+    {
+      "id": "VAL-E2E-LIFECYCLE-045",
+      "title": "FEEDBACK comment visible in browser and bd comments show",
+      "coverage": "partial",
+      "spec_files": [
+        "internal/webui/frontend/tests/e2e/comments-section.spec.ts",
+        "internal/webui/frontend/tests/e2e/review-approve-reject.spec.ts"
+      ],
+      "test_names": [
+        "reject plan review: reject form, Ctrl+Enter submit, issue leaves Review column"
+      ],
+      "notes": "The reject-with-feedback submission is covered in review-approve-reject. Comments-section spec renders generic comments but does not specifically verify a FEEDBACK-prefixed comment shape or that it is visible both in-browser and via bd comments output."
+    },
+    {
+      "id": "VAL-E2E-LIFECYCLE-046",
+      "title": "Label changes trigger SSE event and UI update",
+      "coverage": "partial",
+      "spec_files": [
+        "internal/webui/frontend/tests/e2e/server-push.spec.ts",
+        "internal/webui/frontend/tests/e2e/server-push-integration.spec.ts"
+      ],
+      "test_names": [
+        "mutation events are processed by the app",
+        "CLI mutation triggers UI update"
+      ],
+      "notes": "Generic mutation-over-SSE propagation is covered. A label-specific mutation (add/remove label) that verifies the SSE payload and the rendered label chip updating is not exercised."
+    },
+    {
+      "id": "VAL-E2E-LIFECYCLE-047",
+      "title": "Task blocked by multiple other tasks; unblock sequentially",
+      "coverage": "partial",
+      "spec_files": [
+        "internal/webui/frontend/tests/e2e/unblock-stuck-task.spec.ts"
+      ],
+      "test_names": [
+        "click blocked issue opens panel with dependency chips and blocking banner",
+        "click dependency chip navigates to blocking issue",
+        "change blocking issue priority via PriorityDropdown"
+      ],
+      "notes": "The unblock journey covers a blocked task with dependency chips, navigation to a blocker, and interacting with the blocker. No test walks through closing multiple blockers one-at-a-time and asserts the blocked task transitions from blocked -> ready exactly when the last blocker clears."
+    },
+    {
+      "id": "VAL-E2E-LIFECYCLE-048",
+      "title": "Circular dependency detected and reported",
+      "coverage": "partial",
+      "spec_files": [
+        "internal/webui/frontend/tests/e2e/dependencies-section.spec.ts"
+      ],
+      "test_names": [
+        "Self-dependency prevented with error",
+        "Add duplicate dependency shows error"
+      ],
+      "notes": "Self-dependency (A->A cycle) and duplicate-dependency edges are rejected by the UI. No test creates a multi-hop cycle (A->B->A or A->B->C->A) and verifies the backend/UI reports the cycle and refuses to persist the edge."
+    },
+    {
+      "id": "VAL-E2E-LIFECYCLE-049",
+      "title": "Plan with --parent flag scopes to epic children only",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/cli/agent/agent_cmd_test.go",
+        "internal/cli/plan_task_e2e_test.go",
+        "internal/cli/automode/automode_custom_test.go",
+        "internal/cli/automode/automode_tmux_test.go"
+      ],
+      "test_names": [
+        "TestMapTaskFilter_WithParentID",
+        "TestMapTaskFilter_ParentIDCapturedInClosure",
+        "TestE2E_PlanParentFlag",
+        "TestGetAvailablePlanningTasks_WithParentID",
+        "TestHasAvailablePlanningTasks_WithParentID"
+      ],
+      "notes": "The --parent flag has the strongest coverage in the file: flag mapping, closure capture, real-binary invocation, and both planning/implementation query-side filters all assert that only epic children are returned."
+    },
+    {
+      "id": "VAL-E2E-LIFECYCLE-053",
+      "title": "Ready query batches eligible tasks efficiently",
+      "coverage": "partial",
+      "spec_files": [
+        "internal/cli/automode/automode_tmux_test.go",
+        "internal/cli/automode/automode_poller_test.go"
+      ],
+      "test_names": [
+        "TestFetchReadyIssues_ReturnsTrackerResult",
+        "TestFetchReadyIssues_EmptyResult",
+        "TestBuildRouterTaskCheck_NonNilWithSkills"
+      ],
+      "notes": "The ready-fetch helper is tested for result handling, filter passing, and edge cases. No test asserts efficiency characteristics (single batched query instead of N-per-candidate) or that duplicate candidates are deduplicated before dispatch."
+    },
+    {
+      "id": "VAL-E2E-LIFECYCLE-055",
+      "title": "Backend CLI crash detected and reported to user",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/cli/doctor/doctor_test.go",
+        "internal/cli/automode/automode_error_test.go",
+        "internal/cli/daemon/supervisor/lifecycle_test.go"
+      ],
+      "test_names": [
+        "TestCheckBackendCLI",
+        "TestHandleAutoTaskError_FatalError",
+        "TestCheckAgentHealth_DetectsDeadProcess"
+      ],
+      "notes": "Doctor detects a broken backend CLI on startup; automode classifies fatal invocation failures and propagates them; the supervisor health checker catches a dead agent process and reports it to the daemon."
+    },
+    {
+      "id": "VAL-E2E-LIFECYCLE-056",
+      "title": "Auto-mode session summary accurate",
+      "coverage": "partial",
+      "spec_files": [
+        "internal/cli/automode/automode_test.go",
+        "internal/cli/automode/automode_tmux_test.go"
+      ],
+      "test_names": [
+        "TestPrintTmuxSummary",
+        "TestAutoModeState_Fields"
+      ],
+      "notes": "The tmux summary printer and the state struct used as summary source are tested. No test runs a realistic auto-mode session with N successes and M errors and asserts the final summary counts and reasons are numerically correct."
+    },
+    {
+      "id": "VAL-E2E-LIFECYCLE-057",
+      "title": "Two users in browser see same board in real-time",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/webui/frontend/tests/e2e/server-push-integration.spec.ts",
+        "internal/webui/frontend/tests/e2e/server-push.spec.ts"
+      ],
+      "test_names": [
+        "update in one window reflects in the other",
+        "two browser contexts can both attempt SSE connections"
+      ],
+      "notes": "The cross-window SSE test uses two independent browser contexts, performs a mutation in one, and asserts the second context observes the change without a reload."
+    },
+    {
+      "id": "VAL-E2E-LIFECYCLE-058",
+      "title": "Concurrent edits to same issue design field; last write wins",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test simulates two concurrent clients PATCHing the same issue.design field and asserts the later write's value is the one persisted (no intermediate merge, no 409/conflict)."
+    },
+    {
+      "id": "VAL-E2E-LIFECYCLE-059",
+      "title": "Revert closed task back to open via browser",
+      "coverage": "partial",
+      "spec_files": [
+        "internal/webui/frontend/tests/e2e/status-dropdown.spec.ts"
+      ],
+      "test_names": [
+        "changing status calls API with correct parameters"
+      ],
+      "notes": "The status dropdown emits a PATCH with the requested new status, which covers the reopen mechanism generically. There is no dedicated test starting from a closed issue, selecting open in the dropdown, and asserting it reappears on the board in an open column."
+    },
+    {
+      "id": "VAL-E2E-LIFECYCLE-061",
+      "title": "Daemon respects max-retries restart policy",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/cli/daemon/supervisor/restart_coverage_test.go",
+        "internal/cli/daemon/daemon_cmd_test.go"
+      ],
+      "test_names": [
+        "TestSupervisor_ShouldRestart_MaxRetriesExceeded",
+        "TestSupervisor_GetMaxRetries_Default",
+        "TestSupervisor_GetMaxRetries_Custom",
+        "TestComputeAgentStatus_CustomMaxRetries",
+        "TestComputeAgentStatus_MaxRetries_StopReason"
+      ],
+      "notes": "Max-retries threshold is tested both at the restart-decision layer and at the status-computation layer that marks agents failed once the limit is hit."
+    },
+    {
+      "id": "VAL-E2E-LIFECYCLE-062",
+      "title": "Daemon exponential backoff on restart",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/cli/daemon/supervisor/restart_coverage_test.go",
+        "internal/cli/daemon/supervisor/lifecycle_test.go"
+      ],
+      "test_names": [
+        "TestSupervisor_ComputeBackoff",
+        "TestSupervisor_ComputeBackoff_OverflowProtection",
+        "TestComputeBackoff_OverflowProtection",
+        "TestHandleRestartAfterError_IncrementCount",
+        "TestHandleRestartAfterError_ShutdownDuringBackoff"
+      ],
+      "notes": "Backoff computation (doubling with cap), overflow protection, and the restart loop's interaction with the backoff timer on shutdown are all covered."
+    },
+    {
+      "id": "VAL-E2E-LIFECYCLE-201",
+      "title": "Fresh workspace passes every loom doctor check",
+      "coverage": "partial",
+      "spec_files": [
+        "internal/cli/doctor/doctor_test.go"
+      ],
+      "test_names": [
+        "TestCheckGit",
+        "TestCheckGitRepo",
+        "TestCheckProjectConfig",
+        "TestCheckGlobalConfig",
+        "TestCheckBdDaemon",
+        "TestCheckBeadsInit",
+        "TestCheckBackendCLI",
+        "TestCheckStaleLocks",
+        "TestDoctorJSONOutput"
+      ],
+      "notes": "Every individual doctor check has at least one dedicated test. No test runs the complete loom doctor command against a freshly-initialized workspace fixture and asserts every check returns PASS in one go."
+    },
+    {
+      "id": "VAL-E2E-LIFECYCLE-202",
+      "title": "Plan-phase crash + loom recover keeps plan idempotent",
+      "coverage": "partial",
+      "spec_files": [
+        "internal/cli/agent/recover_test.go",
+        "internal/cli/agent/plan_test.go"
+      ],
+      "test_names": [
+        "TestRecoverWorktree_StaleLock",
+        "TestResetOrphanedAgentTasks_FindsAndResetsMultiple",
+        "TestHasAvailablePlanningTasks_SkipsTasksWithDesign"
+      ],
+      "notes": "Recovery resets orphaned tasks and the plan picker skips already-designed tasks, which together implement idempotent replanning. No end-to-end test crashes mid-plan, runs loom recover, then re-runs plan and asserts the design field is not double-written."
+    },
+    {
+      "id": "VAL-E2E-LIFECYCLE-206",
+      "title": "loom doctor surfaces missing tmux specifically",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/cli/doctor/doctor_test.go"
+      ],
+      "test_names": [
+        "TestCheckOrphanedTmuxSessions_NoSessions",
+        "TestCheckOrphanedTmuxSessions_ListError",
+        "TestCheckOrphanedTmuxSessions_AllActive",
+        "TestCheckOrphanedTmuxSessions_Orphaned"
+      ],
+      "notes": "The tmux-related doctor checks cover missing-tmux (ListError branch) and the session-state branches, confirming the check distinguishes tmux failures from other conditions."
+    },
+    {
+      "id": "VAL-E2E-LIFECYCLE-210",
+      "title": "Design idempotency: plan re-run on same approved task is no-op",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/cli/agent/plan_test.go",
+        "internal/cli/plan_task_e2e_test.go"
+      ],
+      "test_names": [
+        "TestHasAvailablePlanningTasks_SkipsTasksWithDesign",
+        "TestE2E_PlanSkipsTasksWithDesign"
+      ],
+      "notes": "Both the unit and real-binary E2E tests assert that tasks already carrying a design are excluded from the planning candidate set, so plan re-run is a no-op."
+    },
+    {
+      "id": "VAL-E2E-LIFECYCLE-211",
+      "title": "Task-phase crash before commit leaves worktree recoverable",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/cli/agent/recover_test.go"
+      ],
+      "test_names": [
+        "TestRecoverWorktree_StaleLock",
+        "TestRecoverWorktree_WorkspaceStaleLock",
+        "TestAnalyzeTaskCompletion_Incomplete",
+        "TestCleanUntrackedFiles_WithForce"
+      ],
+      "notes": "Recovery force-releases the stale lock, the incomplete-task analyzer detects work that was not committed, and the untracked-file cleanup handles leftover files — together these ensure the worktree is returned to a recoverable state after a pre-commit crash."
+    }
+  ],
+  "uncovered_summary": [
+    {
+      "id": "VAL-E2E-LIFECYCLE-026",
+      "title": "Auto mode idle timeout with activity resets timer",
+      "suggested_ticket_title": "[e2e-gap] e2e-agent-lifecycle: auto-mode idle timeout resets on activity"
+    },
+    {
+      "id": "VAL-E2E-LIFECYCLE-034",
+      "title": "Blocked task is not claimed by any agent",
+      "suggested_ticket_title": "[e2e-gap] e2e-agent-lifecycle: blocked tasks excluded from agent claim path"
+    },
+    {
+      "id": "VAL-E2E-LIFECYCLE-058",
+      "title": "Concurrent edits to same issue design field; last write wins",
+      "suggested_ticket_title": "[e2e-gap] e2e-agent-lifecycle: concurrent design-field edits last-write-wins"
+    }
+  ]
+}
