@@ -98,17 +98,15 @@ func readGitHeadBranch(repoPath string) string {
 }
 
 func (s *workspaceServiceImpl) ListWorkspaces(_ context.Context) ([]WorkspaceListItem, error) {
-	if s.multiPool == nil {
-		return []WorkspaceListItem{}, nil
-	}
-
-	ids := s.multiPool.WorkspaceIDs()
-
-	// Build workspace metadata maps from config if available.
+	// Build workspace metadata maps from config first — used both as the
+	// primary source (fleet mode, where multiPool is empty) and as
+	// enrichment (beads mode, where multiPool drives the listing).
 	var wsMetaByName map[string]ops.WorkspaceSummary
 	var wsMetaByID map[string]ops.WorkspaceSummary
+	var configWorkspaces []ops.WorkspaceSummary
 	if s.configFn != nil {
 		if data, err := s.configFn(); err == nil && data != nil {
+			configWorkspaces = data.Workspaces
 			wsMetaByName = make(map[string]ops.WorkspaceSummary, len(data.Workspaces))
 			wsMetaByID = make(map[string]ops.WorkspaceSummary, len(data.Workspaces))
 			for _, ws := range data.Workspaces {
@@ -116,6 +114,28 @@ func (s *workspaceServiceImpl) ListWorkspaces(_ context.Context) ([]WorkspaceLis
 				if ws.ID != "" {
 					wsMetaByID[ws.ID] = ws
 				}
+			}
+		}
+	}
+
+	// Determine the workspace ID source. In beads mode the multiPool owns
+	// the canonical list (its keys are the IDs the daemon is connected
+	// to). In fleet mode the multiPool is intentionally empty — the
+	// daemon connection isn't used at all — so fall back to the config
+	// data that workspacemgr.BuildWorkspaceInfo populated at startup.
+	var ids []string
+	if s.multiPool != nil {
+		ids = s.multiPool.WorkspaceIDs()
+	}
+	if len(ids) == 0 && len(configWorkspaces) > 0 {
+		ids = make([]string, 0, len(configWorkspaces))
+		for _, ws := range configWorkspaces {
+			id := ws.ID
+			if id == "" {
+				id = ws.Name
+			}
+			if id != "" {
+				ids = append(ids, id)
 			}
 		}
 	}
@@ -141,9 +161,11 @@ func (s *workspaceServiceImpl) ListWorkspaces(_ context.Context) ([]WorkspaceLis
 			item.Active = meta.Active
 		}
 
-		if p := s.multiPool.PoolForWorkspace(id); p != nil {
-			ps := poolStatsFromDaemon(p.Stats())
-			item.Pool = &ps
+		if s.multiPool != nil {
+			if p := s.multiPool.PoolForWorkspace(id); p != nil {
+				ps := poolStatsFromDaemon(p.Stats())
+				item.Pool = &ps
+			}
 		}
 
 		items = append(items, item)

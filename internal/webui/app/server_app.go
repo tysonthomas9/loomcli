@@ -361,12 +361,25 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 
 	// Workspace-existence checker. Also activates the SSE subscriber lazily
 	// on the first API request (idempotent — no-op if already active).
+	//
+	// Workspace IDs in URLs are usually UUIDs, but external callers (CLI
+	// tooling, parity tests, the fdb client) frequently use the workspace
+	// *name* instead. When the direct UUID lookup misses, fall back to the
+	// resolver so a name like "PARITY" still maps to the registered UUID
+	// rather than 404'ing.
+	wsResolver := config.WorkspaceIDResolverFn
 	app.wsExistsFn = func(id string) bool {
-		if !app.registry.Registered(id) {
-			return false
+		if app.registry.Registered(id) {
+			_ = app.registry.ActivateSubscriber(id)
+			return true
 		}
-		_ = app.registry.ActivateSubscriber(id)
-		return true
+		if wsResolver != nil {
+			if uuid, err := wsResolver(id); err == nil && uuid != "" && app.registry.Registered(uuid) {
+				_ = app.registry.ActivateSubscriber(uuid)
+				return true
+			}
+		}
+		return false
 	}
 
 	// Initialize workspace service layer

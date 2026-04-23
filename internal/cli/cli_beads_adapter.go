@@ -527,8 +527,39 @@ func (a *cliBeadsAdapter) runMutation(method string, args ...string) error {
 
 func (a *cliBeadsAdapter) classifyError(method string, result CommandResult) error {
 	stderr := strings.TrimSpace(result.Stderr)
-	if strings.Contains(stderr, "not found") {
-		return backend.ErrNotFound(method, stderr)
+	stdout := strings.TrimSpace(result.Stdout)
+
+	// bd writes its error message into one of three places depending on the
+	// flag set in play:
+	//   - human mode → stderr ("Error: …")
+	//   - --json     → stdout as {"error":"…"}
+	//   - some ops   → both empty (exit code 1 only)
+	// Inspect each so a missing-issue exit always classifies as NotFound and
+	// not as a transport failure.
+	bag := stderr
+	if stdout != "" {
+		var jsonErr struct {
+			Error string `json:"error"`
+		}
+		if json.Unmarshal([]byte(stdout), &jsonErr) == nil && jsonErr.Error != "" {
+			bag = jsonErr.Error
+		} else if bag == "" {
+			bag = stdout
+		}
 	}
-	return backend.ErrUnavailable(method, fmt.Sprintf("%v: %s", result.Err, stderr), result.Err)
+
+	lower := strings.ToLower(bag)
+	switch {
+	case strings.Contains(lower, "not found"),
+		strings.Contains(lower, "no issue found"),
+		strings.Contains(lower, "does not exist"):
+		return backend.ErrNotFound(method, bag)
+	case strings.Contains(lower, "already exists"),
+		strings.Contains(lower, "already claimed"):
+		return backend.ErrConflict(method, bag)
+	case strings.Contains(lower, "validation"),
+		strings.Contains(lower, "invalid"):
+		return backend.ErrValidation(method, bag)
+	}
+	return backend.ErrUnavailable(method, fmt.Sprintf("%v: %s", result.Err, bag), result.Err)
 }
