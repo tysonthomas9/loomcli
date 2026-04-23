@@ -28,11 +28,12 @@ const maxResponseBody = 50 << 20
 // server's REST API. It is safe for concurrent use.
 type FleetBackend struct {
 	client           *http.Client
-	baseWorkspaceURL string // e.g., "http://host/api/workspaces/ws1"
+	baseWorkspaceURL string // e.g., "http://host/api/v1/ws1"
 
 	mu        sync.RWMutex
 	authToken string
 	apiKey    string
+	actor     string
 }
 
 // Compile-time interface check.
@@ -62,9 +63,10 @@ func New(cfg Config) (*FleetBackend, error) {
 
 	return &FleetBackend{
 		client:           httpClient,
-		baseWorkspaceURL: baseURL + "/api/workspaces/" + url.PathEscape(cfg.WorkspaceID),
+		baseWorkspaceURL: baseURL + "/api/v1/" + url.PathEscape(cfg.WorkspaceID),
 		authToken:        cfg.AuthToken,
 		apiKey:           cfg.APIKey,
+		actor:            cfg.Actor,
 	}, nil
 }
 
@@ -111,6 +113,7 @@ func (b *FleetBackend) doRequest(ctx context.Context, method, path string, body 
 	b.mu.RLock()
 	token := b.authToken
 	key := b.apiKey
+	actor := b.actor
 	b.mu.RUnlock()
 
 	if token != "" {
@@ -118,6 +121,9 @@ func (b *FleetBackend) doRequest(ctx context.Context, method, path string, body 
 	}
 	if key != "" {
 		req.Header.Set("X-Fleet-API-Key", key)
+	}
+	if actor != "" {
+		req.Header.Set("X-Actor", actor)
 	}
 
 	resp, err := b.client.Do(req)
@@ -131,12 +137,59 @@ func (b *FleetBackend) doRequest(ctx context.Context, method, path string, body 
 		return nil, resp.StatusCode, fmt.Errorf("read response body: %w", err)
 	}
 
-	var apiResp apiResponse
-	if err := json.Unmarshal(respBody, &apiResp); err != nil {
-		return nil, resp.StatusCode, fmt.Errorf("fleet server returned non-JSON response (HTTP %d)", resp.StatusCode)
+	apiResp, err := parseFleetResponse(respBody, resp.StatusCode)
+	if err != nil {
+		return nil, resp.StatusCode, err
+	}
+	return apiResp, resp.StatusCode, nil
+}
+
+// parseFleetResponse turns a fleet-db response body into the apiResponse
+// envelope downstream code expects. fleet-db speaks two dialects:
+//   - Legacy/wrapper: {"success":true,"data":...}  or  {"success":false,"error":"..."}
+//   - Native:        the raw entity (e.g. an Issue) on 2xx, or
+//                    {"error":{"code":"...","message":"..."}} on 4xx
+//
+// Both are valid; we synthesize a uniform apiResponse so callers don't have
+// to care which dialect fired.
+func parseFleetResponse(body []byte, statusCode int) (*apiResponse, error) {
+	// Try envelope first.
+	var env apiResponse
+	envErr := json.Unmarshal(body, &env)
+	hasEnvelopeFields := envErr == nil && (env.Success || env.Error != "" || env.Data != nil)
+	if hasEnvelopeFields {
+		return &env, nil
 	}
 
-	return &apiResp, resp.StatusCode, nil
+	// Native dialect. On 2xx the whole body IS the data; on non-2xx try
+	// to extract a structured error message before falling back to the raw
+	// body string.
+	if statusCode >= 200 && statusCode < 300 {
+		// Empty body (e.g. 204 No Content) → success with no data.
+		if len(bytes.TrimSpace(body)) == 0 {
+			return &apiResponse{Success: true}, nil
+		}
+		return &apiResponse{Success: true, Data: body}, nil
+	}
+
+	// Native error shape: {"error":{"code":"...","message":"..."}}.
+	var errEnv struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(body, &errEnv) == nil && errEnv.Error.Message != "" {
+		return &apiResponse{Success: false, Error: errEnv.Error.Message}, nil
+	}
+
+	// Last resort: surface the raw body as the error string. If even THAT
+	// failed to parse as JSON, return the parse error so callers can
+	// distinguish "non-JSON response" from "unknown error".
+	if envErr != nil {
+		return nil, fmt.Errorf("fleet server returned non-JSON response (HTTP %d)", statusCode)
+	}
+	return &apiResponse{Success: false, Error: string(body)}, nil
 }
 
 // exec is a convenience wrapper around doRequest that classifies errors.
@@ -336,7 +389,8 @@ func (b *FleetBackend) SearchIssues(ctx context.Context, query string, limit int
 // --- Mutation operations ---
 
 func (b *FleetBackend) Create(ctx context.Context, params backend.CreateParams) (*backend.IssueData, error) {
-	resp, err := b.exec(ctx, "Create", "POST", "/issues", params)
+	body := createParamsToBody(params)
+	resp, err := b.exec(ctx, "Create", "POST", "/issues", body)
 	if err != nil {
 		return nil, err
 	}
@@ -364,16 +418,17 @@ func (b *FleetBackend) Update(ctx context.Context, id string, params backend.Upd
 // ClaimIssue atomically claims an issue via the fleet claim endpoint.
 // The lockTTL parameter is accepted but ignored — fleet server manages
 // claim TTL via server-side configuration.
+//
+// fleet-db's claim endpoint is per-issue: POST /issues/{id}/claim with an
+// empty body. Earlier drafts of this client used a workspace-level
+// /fleet/claim endpoint with the issue ID in the body, which fleet-db never
+// shipped. Using the per-issue route also lets us share auth/authz with
+// other per-issue routes.
 func (b *FleetBackend) ClaimIssue(ctx context.Context, id string, _ time.Duration) error {
 	if id == "" {
 		return backend.ErrValidation("ClaimIssue", "id must not be empty")
 	}
-	type claimReq struct {
-		IssueID string `json:"issue_id"`
-	}
-	// The fleet claim endpoint uses "payload" instead of "data", but we only
-	// care about success/error for ClaimIssue (which returns only error).
-	_, err := b.exec(ctx, "ClaimIssue", "POST", "/fleet/claim", claimReq{IssueID: id})
+	_, err := b.exec(ctx, "ClaimIssue", "POST", "/issues/"+url.PathEscape(id)+"/claim", map[string]interface{}{})
 	return err
 }
 

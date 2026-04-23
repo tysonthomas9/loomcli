@@ -251,35 +251,73 @@ func blockedOptsToQuery(opts backend.BlockedOpts) string {
 }
 
 // updateParamsToPatchRequest converts backend.UpdateParams to the PATCH request
-// format expected by the fleet server (PatchIssueRequest shape).
+// format expected by the fleet server (UpdateIssueRequest shape).
+//
+// fleet-db uses strict JSON validation (disallowUnknownFields); fields not
+// present on its UpdateIssueRequest must be omitted entirely, not just
+// zeroed. Loom carries a richer field set than fleet-db accepts on PATCH
+// (status / claim / labels go through dedicated endpoints), so we drop
+// loom-only fields here. If the caller relies on a dropped field landing,
+// the corresponding dedicated endpoint should be called instead.
 func updateParamsToPatchRequest(params backend.UpdateParams) map[string]interface{} {
 	req := make(map[string]interface{})
 	setStrField(req, "title", params.Title)
 	setStrField(req, "description", params.Description)
-	setStrField(req, "status", params.Status)
 	setIntField(req, "priority", params.Priority)
 	setStrField(req, "design", params.Design)
-	setStrField(req, "acceptance_criteria", params.AcceptanceCriteria)
 	setStrField(req, "notes", params.Notes)
-	setStrField(req, "assignee", params.Assignee)
 	setStrField(req, "owner", params.Owner)
-	setStrField(req, "issue_type", params.IssueType)
-	setStrField(req, "external_ref", params.ExternalRef)
-	setIntField(req, "estimated_minutes", params.EstimatedMinutes)
-	if len(params.AddLabels) > 0 {
-		req["add_labels"] = params.AddLabels
-	}
-	if len(params.RemoveLabels) > 0 {
-		req["remove_labels"] = params.RemoveLabels
-	}
-	if len(params.SetLabels) > 0 {
-		req["set_labels"] = params.SetLabels
-	}
-	setStrField(req, "parent", params.Parent)
+	// Field rename: loom's IssueBackend uses "issue_type"; fleet-db's
+	// UpdateIssueRequest names the same field "type".
+	setStrField(req, "type", params.IssueType)
 	setStrField(req, "due_at", params.DueAt)
-	setStrField(req, "defer_until", params.DeferUntil)
-	setStrField(req, "agent_state", params.AgentState)
 	return req
+}
+
+// createParamsToBody converts backend.CreateParams to the POST /issues body
+// shape fleet-db's CreateIssueRequest expects. Same dialect concerns as
+// updateParamsToPatchRequest — strict JSON validation rejects unknown
+// fields, so we drop loom-only fields rather than shipping them as-is.
+//
+// Field renames vs CreateParams:
+//   - "issue_type"  → "type"
+//   - "parent"      → "parent_id"
+//   - "owner" stays "owner" but fleet-db expects *string (we send the
+//     scalar value directly; omitempty handles the unset case)
+//
+// Dropped (no equivalent on fleet-db's CreateIssueRequest):
+//   - id, acceptance_criteria, created_by, external_ref,
+//     estimated_minutes, dependencies, due_at
+//   - DeferUntil is dropped at create time; defer is a separate op
+//
+// If any of those need round-tripping, file a fleet-db ticket to extend
+// the CreateIssueRequest schema rather than smuggling them through here.
+func createParamsToBody(params backend.CreateParams) map[string]interface{} {
+	req := make(map[string]interface{})
+	setNonEmptyStr(req, "title", params.Title)
+	setNonEmptyStr(req, "description", params.Description)
+	if params.Priority != 0 {
+		req["priority"] = params.Priority
+	}
+	setNonEmptyStr(req, "type", params.IssueType)
+	setNonEmptyStr(req, "assignee", params.Assignee)
+	setNonEmptyStr(req, "owner", params.Owner)
+	if len(params.Labels) > 0 {
+		req["labels"] = params.Labels
+	}
+	setNonEmptyStr(req, "parent_id", params.Parent)
+	setNonEmptyStr(req, "design", params.Design)
+	setNonEmptyStr(req, "notes", params.Notes)
+	return req
+}
+
+// setNonEmptyStr sets m[key] = val if val is non-empty. Companion to
+// setStrField (which is *string-based for PATCH semantics where nil
+// distinguishes "unset" from "empty").
+func setNonEmptyStr(m map[string]interface{}, key, val string) {
+	if val != "" {
+		m[key] = val
+	}
 }
 
 // --- Helpers ---

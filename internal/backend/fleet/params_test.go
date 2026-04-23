@@ -7,65 +7,117 @@ import (
 )
 
 // --- updateParamsToPatchRequest tests ---
+//
+// These exercise the loom→fleet-db field mapping. fleet-db's
+// UpdateIssueRequest schema is intentionally narrower than loom's
+// UpdateParams: status / claim / labels / agent_state / assignee /
+// acceptance_criteria / external_ref / estimated_minutes have dedicated
+// endpoints (close, reopen, claim, label.add, etc.) and aren't accepted
+// on PATCH. fleet-db enforces this with disallowUnknownFields, so loom
+// must drop those keys here rather than silently shipping them.
 
-func TestUpdateParamsToPatchRequest_AgentState_Set(t *testing.T) {
+func TestUpdateParamsToPatchRequest_DropsAgentState(t *testing.T) {
 	state := "running"
-	params := backend.UpdateParams{
-		AgentState: &state,
-	}
-
-	req := updateParamsToPatchRequest(params)
-
-	got, ok := req["agent_state"]
-	if !ok {
-		t.Fatal("expected agent_state key in patch request map")
-	}
-	if got != "running" {
-		t.Errorf("agent_state = %v, want %q", got, "running")
-	}
-}
-
-func TestUpdateParamsToPatchRequest_AgentState_Nil(t *testing.T) {
-	params := backend.UpdateParams{} // AgentState is nil
-
-	req := updateParamsToPatchRequest(params)
-
+	req := updateParamsToPatchRequest(backend.UpdateParams{AgentState: &state})
 	if _, ok := req["agent_state"]; ok {
-		t.Error("expected agent_state to be omitted when nil")
+		t.Error("agent_state must be dropped — fleet-db rejects unknown fields")
 	}
 }
 
-func TestUpdateParamsToPatchRequest_AgentState_EmptyString(t *testing.T) {
-	empty := ""
-	params := backend.UpdateParams{
-		AgentState: &empty,
-	}
-
-	req := updateParamsToPatchRequest(params)
-
-	got, ok := req["agent_state"]
-	if !ok {
-		t.Fatal("expected agent_state key for empty-string pointer")
-	}
-	if got != "" {
-		t.Errorf("agent_state = %v, want empty string", got)
-	}
-}
-
-func TestUpdateParamsToPatchRequest_AgentState_WithOtherFields(t *testing.T) {
-	state := "stuck"
+func TestUpdateParamsToPatchRequest_DropsStatus(t *testing.T) {
 	status := "in_progress"
-	params := backend.UpdateParams{
-		Status:     &status,
-		AgentState: &state,
+	req := updateParamsToPatchRequest(backend.UpdateParams{Status: &status})
+	if _, ok := req["status"]; ok {
+		t.Error("status must be dropped — use Close/Reopen/Claim instead")
 	}
+}
 
-	req := updateParamsToPatchRequest(params)
-
-	if req["status"] != "in_progress" {
-		t.Errorf("status = %v, want %q", req["status"], "in_progress")
+func TestUpdateParamsToPatchRequest_RenamesIssueTypeToType(t *testing.T) {
+	it := "epic"
+	req := updateParamsToPatchRequest(backend.UpdateParams{IssueType: &it})
+	if _, ok := req["issue_type"]; ok {
+		t.Error("issue_type key must be dropped — fleet-db expects 'type'")
 	}
-	if req["agent_state"] != "stuck" {
-		t.Errorf("agent_state = %v, want %q", req["agent_state"], "stuck")
+	if got, ok := req["type"]; !ok || got != "epic" {
+		t.Errorf("type = %v, want %q", got, "epic")
+	}
+}
+
+func TestUpdateParamsToPatchRequest_KeepsSupportedFields(t *testing.T) {
+	title := "new title"
+	owner := "alice"
+	prio := 1
+	req := updateParamsToPatchRequest(backend.UpdateParams{
+		Title:    &title,
+		Owner:    &owner,
+		Priority: &prio,
+	})
+	if req["title"] != "new title" {
+		t.Errorf("title = %v, want %q", req["title"], "new title")
+	}
+	if req["owner"] != "alice" {
+		t.Errorf("owner = %v, want %q", req["owner"], "alice")
+	}
+	if req["priority"] != 1 {
+		t.Errorf("priority = %v, want 1", req["priority"])
+	}
+}
+
+// --- createParamsToBody tests ---
+
+func TestCreateParamsToBody_RenamesFields(t *testing.T) {
+	req := createParamsToBody(backend.CreateParams{
+		Title:     "T",
+		IssueType: "task",
+		Parent:    "loom-1",
+		Priority:  3,
+	})
+	// Renames: issue_type → type, parent → parent_id.
+	if _, ok := req["issue_type"]; ok {
+		t.Error("issue_type must be renamed to 'type'")
+	}
+	if req["type"] != "task" {
+		t.Errorf("type = %v, want %q", req["type"], "task")
+	}
+	if _, ok := req["parent"]; ok {
+		t.Error("parent must be renamed to 'parent_id'")
+	}
+	if req["parent_id"] != "loom-1" {
+		t.Errorf("parent_id = %v, want %q", req["parent_id"], "loom-1")
+	}
+	if req["priority"] != 3 {
+		t.Errorf("priority = %v, want 3", req["priority"])
+	}
+}
+
+func TestCreateParamsToBody_DropsLoomOnlyFields(t *testing.T) {
+	estim := 30
+	req := createParamsToBody(backend.CreateParams{
+		Title:              "T",
+		IssueType:          "task",
+		ID:                 "explicit-id",
+		AcceptanceCriteria: "AC",
+		CreatedBy:          "bob",
+		ExternalRef:        "JIRA-1",
+		EstimatedMinutes:   &estim,
+		Dependencies:       []string{"loom-2"},
+		DueAt:              "2026-05-01",
+	})
+	for _, k := range []string{
+		"id", "acceptance_criteria", "created_by",
+		"external_ref", "estimated_minutes", "dependencies", "due_at",
+	} {
+		if _, ok := req[k]; ok {
+			t.Errorf("field %q must be dropped — not on fleet-db CreateIssueRequest", k)
+		}
+	}
+}
+
+func TestCreateParamsToBody_OmitsZeroValues(t *testing.T) {
+	req := createParamsToBody(backend.CreateParams{Title: "only"})
+	for _, k := range []string{"description", "type", "assignee", "owner", "labels", "parent_id", "design", "notes", "priority"} {
+		if _, ok := req[k]; ok {
+			t.Errorf("zero-value field %q should not appear in body", k)
+		}
 	}
 }

@@ -133,8 +133,16 @@ services:
     environment:
       LOOM_ISSUE_BACKEND: fleet
       LOOM_FLEET_URL: http://fleet-db:8080
+      # The fleet backend's URL builder uses LOOM_FLEET_WORKSPACE (not
+      # LOOM_WORKSPACE) — without this, requests go to .../workspaces/default/
+      # and 404 because fleet-db has no "default" workspace seeded.
+      LOOM_FLEET_WORKSPACE: PARITY
       LOOM_WORKSPACE: PARITY
       LOOM_AGENT_NAME: parity-harness
+      # X-Actor header required by fleet-db's --auth-dev-mode (the only auth
+      # path enabled in this compose). Falls back to LOOM_AGENT_NAME, but
+      # being explicit avoids a surprise if someone unsets the agent name.
+      LOOM_FLEET_ACTOR: parity-harness
       # Fail fast if loom boots thinking it has a local beads backend.
       # Any fallback to an embedded beads path in fleet mode should surface
       # as a startup error, not a silent re-route.

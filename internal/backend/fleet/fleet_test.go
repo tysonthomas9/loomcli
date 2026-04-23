@@ -102,6 +102,44 @@ func TestAuthHeaders(t *testing.T) {
 	}
 }
 
+func TestActorHeader(t *testing.T) {
+	var gotActor string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotActor = r.Header.Get("X-Actor")
+		respondOK(w, json.RawMessage(`{}`))
+	}))
+	defer ts.Close()
+
+	fb, err := New(Config{BaseURL: ts.URL, WorkspaceID: "ws", Actor: "alice"})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	_, _ = fb.Stats(context.Background())
+
+	if gotActor != "alice" {
+		t.Errorf("X-Actor = %q, want %q", gotActor, "alice")
+	}
+}
+
+func TestActorHeader_OmittedWhenEmpty(t *testing.T) {
+	var sawActor bool
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, sawActor = r.Header["X-Actor"]
+		respondOK(w, json.RawMessage(`{}`))
+	}))
+	defer ts.Close()
+
+	fb, err := New(Config{BaseURL: ts.URL, WorkspaceID: "ws"})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	_, _ = fb.Stats(context.Background())
+
+	if sawActor {
+		t.Errorf("X-Actor header should not be set when Actor is empty")
+	}
+}
+
 func TestSetAuthToken(t *testing.T) {
 	var gotAuth string
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
@@ -540,7 +578,7 @@ func TestCheckFleetUnsupportedFilters_SupportedFieldsOnly(t *testing.T) {
 
 func TestStats_HappyPath(t *testing.T) {
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/workspaces/test-ws/issues/count" {
+		if r.URL.Path != "/api/v1/test-ws/issues/count" {
 			t.Errorf("path = %q, want issues/count", r.URL.Path)
 		}
 		if r.URL.Query().Get("group_by") != "status" {
@@ -830,20 +868,12 @@ func TestUpdate_ClaimFalseAllowed(t *testing.T) {
 
 func TestClaimIssue_HappyPath(t *testing.T) {
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != "POST" || !strings.HasSuffix(r.URL.Path, "/fleet/claim") {
+		// fleet-db's claim is per-issue: POST /api/v1/{ws}/issues/{id}/claim
+		if r.Method != "POST" || !strings.HasSuffix(r.URL.Path, "/issues/test-1/claim") {
 			t.Errorf("unexpected: %s %s", r.Method, r.URL.Path)
 		}
-		var body map[string]string
-		json.NewDecoder(r.Body).Decode(&body) //nolint:errcheck
-		if body["issue_id"] != "test-1" {
-			t.Errorf("issue_id = %q, want %q", body["issue_id"], "test-1")
-		}
 		w.Header().Set("Content-Type", "application/json")
-		// Fleet claim uses "payload" field but we parse with generic apiResponse
-		json.NewEncoder(w).Encode(map[string]interface{}{ //nolint:errcheck
-			"success": true,
-			"payload": map[string]interface{}{"issue": map[string]string{"id": "test-1"}},
-		})
+		respondOK(w, json.RawMessage(`{}`))
 	})
 	defer ts.Close()
 

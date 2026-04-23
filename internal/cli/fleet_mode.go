@@ -103,11 +103,12 @@ func createFleetIssueBackendFromConfig(cfg config.FleetClientConfig) (backend.Is
 		BaseURL:     cfg.URL,
 		WorkspaceID: cfg.Workspace,
 		APIKey:      cfg.APIKey,
+		Actor:       cfg.Actor,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create fleet backend: %w", err)
 	}
 
-	slog.Info("fleet issue backend created", "url", cfg.URL, "workspace", cfg.Workspace)
+	slog.Info("fleet issue backend created", "url", cfg.URL, "workspace", cfg.Workspace, "actor", cfg.Actor)
 	return fb, nil
 }
