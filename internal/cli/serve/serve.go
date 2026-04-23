@@ -354,6 +354,13 @@ func buildCoreServerConfig(monitorHandlers webui.MonitorHandlers, gitOps *opsimp
 		NotifyTokenDir:       cli.GetBeadsDir(),
 		Logger:               slog.Default(),
 		SentryDSN:            serveSentryDSN,
+		// Wire the active IssueBackend (beads / fleet / fleet-db / api) into
+		// the webui service layer so the migrated CRUD endpoints don't
+		// hardcode the rpc.Client path. The closure lets the backend resolve
+		// lazily — important because in fleet mode the backend is created on
+		// first call, after the serve command has finished its early-startup
+		// configuration.
+		IssueBackendFn: cli.DefaultIssueBackend,
 	}
 }
 

@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/agentcontrol"
@@ -88,6 +89,17 @@ type ServerConfig struct {
 	DaemonStartupFn         func(ctx context.Context, onReady func(wsID string)) // Starts daemons for secondary workspaces; calls onReady(wsID) when each is reachable
 	Logger                  *slog.Logger                                         // Structured logger (optional; nil falls back to slog.Default())
 	SentryDSN               string                                               // Sentry/GlitchTip DSN for error tracking (optional; empty disables)
+	// IssueBackendFn returns the active backend.IssueBackend used by the
+	// webui issue service for the migrated CRUD operations (Get, Create,
+	// Update/Patch, Close, Claim, Delete, AddComment, AddDependency,
+	// RemoveDependency, ListEvents). When nil, the service falls back to
+	// returning ErrUnavailable from those operations. Wired through
+	// service.IssueBackendProvider; see service.NewIssueServiceWithBackend.
+	//
+	// Threaded as a closure rather than a backend.IssueBackend field so the
+	// cli wiring can resolve the backend lazily without webui depending on
+	// internal/cli (which would create an import cycle).
+	IssueBackendFn func() backend.IssueBackend
 }
 
 // WorkspaceIDResolverFn resolves a workspace name to its stable UUID.

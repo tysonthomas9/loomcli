@@ -153,8 +153,21 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 		}()
 	}
 
-	// Initialize issue service layer
-	app.issueSvc = service.NewIssueService(app.pool, app.multiPool, middleware.WithWorkspace)
+	// Initialize issue service layer.
+	//
+	// When the cli wiring supplies an IssueBackend factory, prefer the
+	// backend-aware constructor so migrated CRUD methods route through
+	// backend.IssueBackend (which supports both beads and fleet). The pool
+	// stays around to back the not-yet-migrated paths (ListIssues/Kanban
+	// and the cross-workspace MoveIssue helper).
+	if config.IssueBackendFn != nil {
+		app.issueSvc = service.NewIssueServiceWithBackend(
+			app.pool, app.multiPool, middleware.WithWorkspace,
+			service.IssueBackendProvider(config.IssueBackendFn),
+		)
+	} else {
+		app.issueSvc = service.NewIssueService(app.pool, app.multiPool, middleware.WithWorkspace)
+	}
 
 	// Create SSE hub for real-time push notifications
 	app.hub = appstores.NewHub()
