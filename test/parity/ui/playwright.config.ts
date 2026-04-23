@@ -91,9 +91,16 @@ export default defineConfig({
 });
 
 // Re-exported for specs and helpers so everyone reads the same envs.
+//
+// Defaults point at the Caddy UI sidecars (8083 fleet, 8084 beads) which
+// serve the prebuilt frontend AND proxy /api/* to the underlying loom
+// container. Specs that want to bypass the proxy and hit loom directly
+// can override via LOOM_BEADS_URL / LOOM_FLEET_URL → "http://localhost:8081"
+// or 8082. fleetDB stays at 8080 since several tests poke fleet-db
+// directly to confirm the through-loom path actually wrote.
 export const PARITY_URLS = {
-    beads: process.env.LOOM_BEADS_URL ?? "http://localhost:8081",
-    fleet: process.env.LOOM_FLEET_URL ?? "http://localhost:8082",
+    beads: process.env.LOOM_BEADS_URL ?? "http://localhost:8084",
+    fleet: process.env.LOOM_FLEET_URL ?? "http://localhost:8083",
     fleetDB: process.env.FLEET_DB_URL ?? "http://localhost:8080",
     redis: process.env.REDIS_URL ?? "redis://localhost:6379",
     workspace: process.env.PARITY_WORKSPACE ?? "PARITY",

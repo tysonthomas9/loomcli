@@ -7,6 +7,7 @@
 import { execSync } from "node:child_process";
 import * as path from "node:path";
 import { PARITY_URLS } from "../playwright.config";
+import { composeRun } from "./compose";
 
 const REPO_ROOT = path.resolve(__dirname, "../../../..");
 
@@ -23,7 +24,7 @@ export async function ensureSeeded(force = false): Promise<void> {
     }
     try {
         execSync(
-            `docker compose -f test/parity/docker-compose.parity.yml run --rm parity-seed`,
+            composeRun(`run --rm parity-seed`),
             {
                 cwd: REPO_ROOT,
                 encoding: "utf-8",

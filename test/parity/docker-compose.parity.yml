@@ -194,6 +194,46 @@ services:
       retries: 10
       start_period: 20s
 
+  # ──────────────────────────────────────────────────────────────────
+  # Frontend-serving sidecars. loom serve is API-only (Dockerfile.parity
+  # intentionally omits Node + the frontend build), so Playwright can't
+  # render any SPA route directly against loom-{beads,fleet}. Each Caddy
+  # instance below serves the prebuilt React dist mounted from the host
+  # and reverse-proxies /api/*, /healthz, /sse/* to its loom backend.
+  # PARITY_BEADS_URL / PARITY_FLEET_URL in playwright.config can either
+  # point at these sidecars (8083/8084) for full UI-rendering tests, or
+  # at the raw loom ports (8081/8082) for API-only specs.
+  # ──────────────────────────────────────────────────────────────────
+  ui-fleet:
+    image: docker.io/library/caddy:2-alpine
+    depends_on:
+      loom-fleet:
+        condition: service_started
+    environment:
+      FRONTEND_PORT: "8080"
+      LOOM_UPSTREAM: http://loom-fleet:8080
+    ports:
+      - "8083:8080"
+    networks: [parity]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ../../internal/webui/frontend/dist:/srv:ro
+
+  ui-beads:
+    image: docker.io/library/caddy:2-alpine
+    depends_on:
+      loom-beads:
+        condition: service_started
+    environment:
+      FRONTEND_PORT: "8080"
+      LOOM_UPSTREAM: http://loom-beads:8080
+    ports:
+      - "8084:8080"
+    networks: [parity]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ../../internal/webui/frontend/dist:/srv:ro
+
   # One-shot fixture seeder. Runs after both loom-* services are up.
   # Builds a tiny image containing fdb (copied from fleet-db image) and bd
   # (copied from loom-beads image) so both CLIs are available in one place.

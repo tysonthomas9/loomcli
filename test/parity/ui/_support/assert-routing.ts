@@ -21,6 +21,7 @@ import { execSync } from "node:child_process";
 import * as path from "node:path";
 import * as fs from "node:fs/promises";
 import { PARITY_URLS, ARTIFACTS_DIR } from "../playwright.config";
+import { composeRun } from "./compose";
 
 const REPO_ROOT = path.resolve(__dirname, "../../../..");
 
@@ -71,7 +72,7 @@ export function attachFleetNetworkSpy(fleet: Page) {
 function redisXLen(): number {
     try {
         const out = execSync(
-            `docker compose -f test/parity/docker-compose.parity.yml exec -T redis redis-cli XLEN events:${PARITY_URLS.workspace}`,
+            composeRun(`exec -T redis redis-cli XLEN events:${PARITY_URLS.workspace}`),
             {
                 cwd: REPO_ROOT,
                 encoding: "utf-8",
@@ -86,21 +87,29 @@ function redisXLen(): number {
 }
 
 function fleetDBRequestCount(): number {
-    // fleet-db's /metrics exposes a counter we can read. Fall back to
-    // log-line count if metrics aren't available.
+    // fleet-db's /metrics exposes per-route histogram counters. Sum all
+    // *_count series across labels for a single grand total. Earlier
+    // versions of this helper looked for `http_requests_total` which
+    // fleet-db never emits — that returned 0 unconditionally and made
+    // every routing assertion think the request had silently fallen back.
     try {
         const m = execSync(
             `curl -sf ${PARITY_URLS.fleetDB}/metrics 2>/dev/null || true`,
             { encoding: "utf-8", timeout: 3000 },
         );
-        const match = m.match(/^http_requests_total(?:\{[^}]*\})?\s+(\d+(?:\.\d+)?)/m);
-        if (match) return Math.floor(parseFloat(match[1]));
+        const re = /^fleetdb_http_request_duration_seconds_count\{[^}]*\}\s+(\d+(?:\.\d+)?)/gm;
+        let total = 0;
+        let match: RegExpExecArray | null;
+        while ((match = re.exec(m)) !== null) {
+            total += Math.floor(parseFloat(match[1]));
+        }
+        if (total > 0) return total;
     } catch {
         // fall through
     }
     try {
         const logs = execSync(
-            `docker compose -f test/parity/docker-compose.parity.yml logs --tail=1000 fleet-db 2>&1 | grep -cE 'POST|PUT|PATCH|DELETE' || true`,
+            composeRun(`logs --tail=1000 fleet-db 2>&1 | grep -cE 'POST|PUT|PATCH|DELETE' || true`),
             { cwd: REPO_ROOT, encoding: "utf-8", timeout: 5000 },
         );
         return parseInt(logs.trim(), 10) || 0;
@@ -120,7 +129,7 @@ async function dumpForensics(testId: string, proof: RoutingProof): Promise<void>
     // Fleet-db log tail
     try {
         const logs = execSync(
-            `docker compose -f test/parity/docker-compose.parity.yml logs --tail=200 fleet-db 2>&1`,
+            composeRun(`logs --tail=200 fleet-db 2>&1`),
             { cwd: REPO_ROOT, encoding: "utf-8", timeout: 5000 },
         );
         await fs.writeFile(path.join(dir, `fleet-db-log.txt`), logs);

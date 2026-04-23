@@ -14,6 +14,7 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { execSync } from "node:child_process";
 import { PARITY_URLS } from "../playwright.config";
+import { composeRun } from "./compose";
 
 const WEBUI_GAPS_PATH = path.resolve(
     __dirname,
@@ -82,7 +83,7 @@ async function httpPost(
 function dockerExec(service: string, cmd: string): string {
     try {
         return execSync(
-            `docker compose -f test/parity/docker-compose.parity.yml exec -T ${service} sh -c ${JSON.stringify(cmd)}`,
+            composeRun(`exec -T ${service} sh -c ${JSON.stringify(cmd)}`),
             {
                 cwd: path.resolve(__dirname, "../../../.."),
                 encoding: "utf-8",
@@ -97,7 +98,7 @@ function dockerExec(service: string, cmd: string): string {
 async function fleetDBLogTail(linesFromEnd = 50): Promise<string> {
     try {
         return execSync(
-            `docker compose -f test/parity/docker-compose.parity.yml logs --tail=${linesFromEnd} fleet-db 2>&1`,
+            composeRun(`logs --tail=${linesFromEnd} fleet-db 2>&1`),
             {
                 cwd: path.resolve(__dirname, "../../../.."),
                 encoding: "utf-8",
@@ -156,7 +157,7 @@ async function runAllChecks(): Promise<PreflightResult> {
     // 3. Container healthchecks
     try {
         const ps = execSync(
-            `docker compose -f test/parity/docker-compose.parity.yml ps --format json`,
+            composeRun(`ps --format json`),
             {
                 cwd: path.resolve(__dirname, "../../../.."),
                 encoding: "utf-8",
