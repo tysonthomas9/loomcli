@@ -1,6 +1,9 @@
 package rpc
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // Mutation event types
 const (
@@ -31,4 +34,10 @@ type MutationEvent struct {
 	ParentID   string `json:"parent_id,omitempty"`   // Parent molecule (for bonded events)
 	StepCount  int    `json:"step_count,omitempty"`  // Number of steps (for bonded events)
 	SourceRepo string `json:"source_repo,omitempty"` // Source repository for multi-repo workspaces
+	// Issue carries the full lightweight issue JSON for create/update/status
+	// mutations, letting consumers replace their stored issue wholesale instead
+	// of hand-mapping individual fields. Absent for mutations that don't map
+	// to a single issue (refresh, session_change, etc.) or when the daemon
+	// didn't have the issue object readily available.
+	Issue json.RawMessage `json:"issue,omitempty"`
 }

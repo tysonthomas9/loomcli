@@ -34,7 +34,9 @@ const granularMutationThreshold = 100
 
 // emitGranularMutations broadcasts individual mutation events for each changed issue,
 // comparing against knownIssues to determine the mutation type (create/status/update).
-func (s *DaemonSubscriber) emitGranularMutations(changed []changedIssue, now time.Time, totalCount int64) {
+// rawIssues is keyed by issue ID and carries the raw JSON payload to embed in each
+// mutation event so frontend consumers can wholesale-replace their stored issue.
+func (s *DaemonSubscriber) emitGranularMutations(changed []changedIssue, rawIssues map[string]json.RawMessage, now time.Time, totalCount int64) {
 	known := s.snapshotKnownIssues()
 
 	mutationCount := 0
@@ -42,7 +44,7 @@ func (s *DaemonSubscriber) emitGranularMutations(changed []changedIssue, now tim
 		if issue.ID == "" {
 			continue
 		}
-		payload := s.buildMutationPayload(issue, now, known)
+		payload := s.buildMutationPayload(issue, rawIssues[issue.ID], now, known)
 		s.hub.Broadcast(payload)
 		mutationCount++
 	}
@@ -67,8 +69,10 @@ func (s *DaemonSubscriber) snapshotKnownIssues() map[string]knownIssueState {
 }
 
 // buildMutationPayload creates a MutationPayload for a changed issue, classifying
-// the mutation type by comparing against previously known state.
-func (s *DaemonSubscriber) buildMutationPayload(issue changedIssue, now time.Time, known map[string]knownIssueState) *realtime.MutationPayload {
+// the mutation type by comparing against previously known state. rawIssue, if
+// non-nil, is embedded so frontend consumers can wholesale-replace their stored
+// issue without hand-mapping fields.
+func (s *DaemonSubscriber) buildMutationPayload(issue changedIssue, rawIssue json.RawMessage, now time.Time, known map[string]knownIssueState) *realtime.MutationPayload {
 	payload := &realtime.MutationPayload{
 		IssueID:     issue.ID,
 		Title:       issue.Title,
@@ -77,6 +81,7 @@ func (s *DaemonSubscriber) buildMutationPayload(issue changedIssue, now time.Tim
 		SourceRepo:  issue.SourceRepo,
 		WorkspaceID: s.workspaceID,
 		Priority:    &issue.Priority,
+		Issue:       rawIssue,
 	}
 	prev, existed := known[issue.ID]
 	switch {
@@ -118,53 +123,68 @@ func (s *DaemonSubscriber) updateKnownIssues(changed []changedIssue, now time.Ti
 
 // fetchChangedIssues calls List with UpdatedAfter to get issues changed since lastPollTime.
 //
-// Returns (issues, clientHealthy):
+// Returns (issues, rawIssues, clientHealthy):
 //   - clientHealthy == false iff the List RPC hit a transport error and the
 //     connection's read buffer may be poisoned. The caller must Discard.
-//   - (nil, true) means "List succeeded logically but body was empty or
+//   - (nil, nil, true) means "List succeeded logically but body was empty or
 //     unparseable" — the caller may fall back to a blanket refresh.
-//   - (issues, true) on the happy path.
+//   - (issues, rawIssues, true) on the happy path. rawIssues is keyed by issue
+//     ID and carries the per-issue JSON so SSE can embed it unchanged.
+//
+// Uses Lightweight: true to skip description/design/acceptance_criteria/notes,
+// keeping broadcast payload sizes small (matching loadKnownIssues).
 //
 // Note the distinction: returning nil does NOT imply an unhealthy connection.
 // Callers must check clientHealthy separately (ref: loomcli-67meg).
-func (s *DaemonSubscriber) fetchChangedIssues(client *rpc.Client, since time.Time) ([]changedIssue, bool) {
+func (s *DaemonSubscriber) fetchChangedIssues(client *rpc.Client, since time.Time) ([]changedIssue, map[string]json.RawMessage, bool) {
 	resp, err := client.List(&rpc.ListArgs{
 		UpdatedAfter: since.UTC().Format(time.RFC3339),
+		Lightweight:  true,
 	})
 	if err != nil {
 		if resp == nil {
 			slog.Error("external poll: list changed issues transport error", "err", err)
-			return nil, false
+			return nil, nil, false
 		}
 		// resp != nil — Success=false. Logical failure, connection intact.
 		slog.Error("external poll: list changed issues failed", "err", resp.Error)
-		return nil, true
+		return nil, nil, true
 	}
 	if !resp.Success {
 		slog.Error("external poll: list changed issues failed", "err", resp.Error)
-		return nil, true
+		return nil, nil, true
 	}
 
-	return parseChangedIssues(resp.Data), true
+	issues, rawIssues := parseChangedIssues(resp.Data)
+	return issues, rawIssues, true
 }
 
-// parseChangedIssues parses a List RPC response into changedIssue structs.
-func parseChangedIssues(data json.RawMessage) []changedIssue {
-	// List returns []*types.IssueWithCounts; we parse only the fields we need.
-	var raw []struct {
-		ID         string `json:"id"`
-		Title      string `json:"title"`
-		Assignee   string `json:"assignee"`
-		Status     string `json:"status"`
-		Priority   int    `json:"priority"`
-		SourceRepo string `json:"source_repo"`
-	}
-	if err := json.Unmarshal(data, &raw); err != nil {
+// parseChangedIssues parses a List RPC response into changedIssue structs and
+// a parallel ID-keyed map of raw per-issue JSON. The raw map is what SSE
+// consumers embed so the frontend can wholesale-replace its stored issue.
+func parseChangedIssues(data json.RawMessage) ([]changedIssue, map[string]json.RawMessage) {
+	// Decode the array as raw JSON first so we can retain the per-element bytes
+	// without a second Marshal round-trip.
+	var rawElems []json.RawMessage
+	if err := json.Unmarshal(data, &rawElems); err != nil {
 		slog.Error("external poll: parse changed issues error", "err", err)
-		return nil
+		return nil, nil
 	}
-	result := make([]changedIssue, 0, len(raw))
-	for _, r := range raw {
+	result := make([]changedIssue, 0, len(rawElems))
+	rawByID := make(map[string]json.RawMessage, len(rawElems))
+	for _, elem := range rawElems {
+		var r struct {
+			ID         string `json:"id"`
+			Title      string `json:"title"`
+			Assignee   string `json:"assignee"`
+			Status     string `json:"status"`
+			Priority   int    `json:"priority"`
+			SourceRepo string `json:"source_repo"`
+		}
+		if err := json.Unmarshal(elem, &r); err != nil {
+			slog.Error("external poll: parse changed issue element error", "err", err)
+			continue
+		}
 		result = append(result, changedIssue{
 			ID:         r.ID,
 			Title:      r.Title,
@@ -173,8 +193,11 @@ func parseChangedIssues(data json.RawMessage) []changedIssue {
 			Priority:   r.Priority,
 			SourceRepo: r.SourceRepo,
 		})
+		if r.ID != "" {
+			rawByID[r.ID] = elem
+		}
 	}
-	return result
+	return result, rawByID
 }
 
 // broadcastRefresh sends a MutationRefresh event and updates poll state.
@@ -215,7 +238,7 @@ func (s *DaemonSubscriber) loadKnownIssues(client *rpc.Client) bool {
 	if !resp.Success {
 		return true
 	}
-	issues := parseChangedIssues(resp.Data)
+	issues, _ := parseChangedIssues(resp.Data)
 	if issues == nil {
 		return true
 	}

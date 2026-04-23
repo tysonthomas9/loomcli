@@ -207,7 +207,38 @@ export function isStaleMutation(
   return mutationTime < issueTime;
 }
 
+/**
+ * Embed the backend's lightweight issue object into an existing Issue, merging
+ * the mutation timestamp and preserving fields the lightweight payload omits
+ * (repo is a frontend alias for source_repo that the backend doesn't carry on
+ * a lightweight serialization). Returns the merged issue for wholesale
+ * replacement.
+ */
+function mergeEmbeddedIssue(
+  existing: Issue | undefined,
+  embedded: Issue,
+  mutation: MutationPayload,
+): Issue {
+  const merged: Issue = {
+    ...(existing ?? ({} as Issue)),
+    ...embedded,
+    // id and updated_at come from the mutation envelope, which is guaranteed
+    // to carry both. Guards against a partially-populated embedded payload
+    // leaving the merged issue without an id (the store entry would
+    // otherwise be unreachable by getIssue).
+    id: mutation.issue_id || embedded.id,
+    updated_at: mutation.timestamp,
+  };
+  if (mutation.source_repo != null && !merged.repo) {
+    merged.repo = mutation.source_repo;
+  }
+  return merged;
+}
+
 function createIssueFromMutation(mutation: MutationPayload): Issue {
+  if (mutation.issue) {
+    return mergeEmbeddedIssue(undefined, mutation.issue, mutation);
+  }
   const now = mutation.timestamp;
   const issue: Issue = {
     id: mutation.issue_id,
@@ -222,7 +253,17 @@ function createIssueFromMutation(mutation: MutationPayload): Issue {
   return issue;
 }
 
-function applyUpdateToIssue(issue: Issue, mutation: MutationPayload): Issue {
+/**
+ * Apply any issue-level mutation (update, status, bonded, etc.) to an existing
+ * issue. Prefers the embedded `issue` payload for wholesale replacement — the
+ * single code path that fixes the drift where applyStatusToIssue silently
+ * dropped non-status fields like priority and assignee. Falls back to
+ * per-field apply for backwards compatibility with older daemons.
+ */
+function applyMutationToIssue(issue: Issue, mutation: MutationPayload): Issue {
+  if (mutation.issue) {
+    return mergeEmbeddedIssue(issue, mutation.issue, mutation);
+  }
   return produce(issue, (draft) => {
     draft.updated_at = mutation.timestamp;
     if (mutation.title != null) draft.title = mutation.title;
@@ -238,20 +279,6 @@ function applyUpdateToIssue(issue: Issue, mutation: MutationPayload): Issue {
     }
     if (mutation.source_repo != null && !draft.repo)
       draft.repo = mutation.source_repo;
-  });
-}
-
-function applyStatusToIssue(issue: Issue, mutation: MutationPayload): Issue {
-  return produce(issue, (draft) => {
-    draft.updated_at = mutation.timestamp;
-    if (mutation.new_status != null)
-      draft.status = mutation.new_status as Status;
-  });
-}
-
-function applyBondedToIssue(issue: Issue, mutation: MutationPayload): Issue {
-  return produce(issue, (draft) => {
-    draft.updated_at = mutation.timestamp;
   });
 }
 
@@ -313,7 +340,7 @@ export function processMutation(
           scheduleRefresh: false,
         };
       }
-      const updated = applyUpdateToIssue(existing, mutation);
+      const updated = applyMutationToIssue(existing, mutation);
       const newMap = new Map(issuesMap);
       newMap.set(issue_id, updated);
       return {
@@ -385,13 +412,13 @@ export function processMutation(
   let updated: Issue;
   switch (type) {
     case MutationUpdate:
-      updated = applyUpdateToIssue(existing, mutation);
-      break;
     case MutationStatus:
-      updated = applyStatusToIssue(existing, mutation);
+      updated = applyMutationToIssue(existing, mutation);
       break;
     case MutationBonded:
-      updated = applyBondedToIssue(existing, mutation);
+      updated = produce(existing, (draft) => {
+        draft.updated_at = mutation.timestamp;
+      });
       break;
     default:
       updated = produce(existing, (draft) => {

@@ -9,6 +9,7 @@
  */
 
 import type { ISODateString } from "@/types/common";
+import type { Issue } from "@/types/issue/issue";
 
 /**
  * Kinds of mutation events emitted by the backend over SSE.
@@ -49,6 +50,14 @@ export interface MutationPayload {
   priority?: number;
   source_repo?: string;
   workspace_id?: string;
+  /**
+   * Full lightweight issue object embedded by the backend for issue-level
+   * mutations (create, update, status). When present, consumers should replace
+   * their stored issue wholesale. Absent for non-issue mutations (refresh,
+   * terminal_session_change, etc.) and for legacy daemons — consumers must
+   * fall back to per-field apply.
+   */
+  issue?: Issue;
 }
 
 /**

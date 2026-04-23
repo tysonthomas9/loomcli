@@ -905,6 +905,204 @@ describe("issueStore", () => {
         "2026-02-01T00:00:00Z",
       );
     });
+
+    // ---------------------------------------------------------------------
+    // Embedded issue wholesale replacement (loomcli-lygp4)
+    //
+    // When the backend includes the full lightweight issue object in the
+    // SSE mutation under mutation.issue, the store should replace the
+    // stored issue wholesale — fixing the prior drift where status
+    // mutations silently dropped non-status fields like priority/assignee.
+    // ---------------------------------------------------------------------
+
+    it("wholesale replaces issue when mutation.issue is present on update", () => {
+      store.setState({
+        issuesMap: new Map([
+          [
+            "a",
+            makeIssue({
+              id: "a",
+              title: "Old",
+              priority: 3,
+              assignee: "alice",
+              status: "open",
+              updated_at: "2026-01-01T00:00:00Z",
+            }),
+          ],
+        ]),
+      });
+
+      const embedded = {
+        id: "a",
+        title: "New",
+        priority: 0,
+        assignee: "bob",
+        status: "in_progress",
+        created_at: "2026-01-01T00:00:00Z",
+        updated_at: "2026-02-01T00:00:00Z",
+        labels: ["urgent"],
+      } as unknown as Issue;
+
+      store.getState().applyMutation(
+        makeMutation({
+          type: "update",
+          issue_id: "a",
+          timestamp: "2026-02-01T00:00:00Z",
+          issue: embedded,
+        }),
+      );
+
+      const after = store.getState().issuesMap.get("a")!;
+      expect(after.title).toBe("New");
+      expect(after.priority).toBe(0);
+      expect(after.assignee).toBe("bob");
+      expect(after.status).toBe("in_progress");
+      expect(after.labels).toEqual(["urgent"]);
+      expect(after.updated_at).toBe("2026-02-01T00:00:00Z");
+    });
+
+    it("applies status+priority+assignee via embedded issue on status mutation", () => {
+      // Regression for the bug where applyStatusToIssue dropped priority
+      // and assignee changes — the embedded issue path must apply them.
+      store.setState({
+        issuesMap: new Map([
+          [
+            "a",
+            makeIssue({
+              id: "a",
+              title: "T",
+              priority: 3,
+              assignee: "alice",
+              status: "open",
+              updated_at: "2026-01-01T00:00:00Z",
+            }),
+          ],
+        ]),
+      });
+
+      const embedded = {
+        id: "a",
+        title: "T",
+        priority: 0,
+        assignee: "bob",
+        status: "in_progress",
+        created_at: "2026-01-01T00:00:00Z",
+        updated_at: "2026-02-01T00:00:00Z",
+      } as unknown as Issue;
+
+      store.getState().applyMutation(
+        makeMutation({
+          type: "status",
+          issue_id: "a",
+          new_status: "in_progress",
+          timestamp: "2026-02-01T00:00:00Z",
+          issue: embedded,
+        }),
+      );
+
+      const after = store.getState().issuesMap.get("a")!;
+      expect(after.status).toBe("in_progress");
+      expect(after.priority).toBe(0);
+      expect(after.assignee).toBe("bob");
+    });
+
+    it("populates a create mutation from embedded issue instead of an Untitled stub", () => {
+      const embedded = {
+        id: "newbie",
+        title: "Real Title",
+        priority: 1,
+        status: "open",
+        issue_type: "bug",
+        created_at: "2026-02-01T00:00:00Z",
+        updated_at: "2026-02-01T00:00:00Z",
+      } as unknown as Issue;
+
+      store.getState().applyMutation(
+        makeMutation({
+          type: "create",
+          issue_id: "newbie",
+          timestamp: "2026-02-01T00:00:00Z",
+          issue: embedded,
+        }),
+      );
+
+      const after = store.getState().issuesMap.get("newbie")!;
+      expect(after.title).toBe("Real Title");
+      expect(after.priority).toBe(1);
+      expect(after.issue_type).toBe("bug");
+    });
+
+    it("falls back to per-field apply when mutation.issue is absent (backwards compat)", () => {
+      store.setState({
+        issuesMap: new Map([
+          [
+            "a",
+            makeIssue({
+              id: "a",
+              title: "T",
+              priority: 3,
+              assignee: "alice",
+              status: "open",
+              updated_at: "2026-01-01T00:00:00Z",
+            }),
+          ],
+        ]),
+      });
+
+      store.getState().applyMutation(
+        makeMutation({
+          type: "update",
+          issue_id: "a",
+          title: "New Title",
+          assignee: "bob",
+          priority: 0,
+          timestamp: "2026-02-01T00:00:00Z",
+        }),
+      );
+
+      const after = store.getState().issuesMap.get("a")!;
+      expect(after.title).toBe("New Title");
+      expect(after.assignee).toBe("bob");
+      expect(after.priority).toBe(0);
+      expect(after.status).toBe("open");
+    });
+
+    it("ignores stale mutation even when it carries an embedded issue", () => {
+      store.setState({
+        issuesMap: new Map([
+          [
+            "a",
+            makeIssue({
+              id: "a",
+              title: "Current",
+              priority: 1,
+              updated_at: "2026-02-10T00:00:00Z",
+            }),
+          ],
+        ]),
+      });
+
+      const embedded = {
+        id: "a",
+        title: "Old Title From Past",
+        priority: 4,
+        created_at: "2026-01-01T00:00:00Z",
+        updated_at: "2026-01-05T00:00:00Z",
+      } as unknown as Issue;
+
+      store.getState().applyMutation(
+        makeMutation({
+          type: "update",
+          issue_id: "a",
+          timestamp: "2026-01-05T00:00:00Z",
+          issue: embedded,
+        }),
+      );
+
+      const after = store.getState().issuesMap.get("a")!;
+      expect(after.title).toBe("Current");
+      expect(after.priority).toBe(1);
+    });
   });
 
   // -----------------------------------------------------------------------

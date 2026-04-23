@@ -1,9 +1,11 @@
 package realtime
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 )
@@ -251,6 +253,87 @@ func TestHub_GetActiveSourceRepos_Empty(t *testing.T) {
 	h := NewHub()
 	if repos := h.GetActiveSourceRepos(); repos != nil {
 		t.Errorf("expected nil, got %v", repos)
+	}
+}
+
+// TestHub_BroadcastPreservesIssueField verifies that the Issue RawMessage on a
+// broadcast payload reaches a registered client intact and re-marshals back to
+// JSON equivalent to the original lightweight issue.
+func TestHub_BroadcastPreservesIssueField(t *testing.T) {
+	h := NewHub()
+	go h.Run()
+	defer h.Stop()
+
+	c := NewClient(1, ClientSendBuf, 0, nil, "ws-1")
+	h.RegisterClient(c)
+	time.Sleep(20 * time.Millisecond)
+
+	issueJSON := json.RawMessage(`{"id":"bd-9","title":"Carry me","priority":2,"status":"open","assignee":"alice"}`)
+
+	h.Broadcast(&MutationPayload{
+		Type:        "update",
+		IssueID:     "bd-9",
+		WorkspaceID: "ws-1",
+		Timestamp:   time.Now().UTC().Format(time.RFC3339),
+		Issue:       issueJSON,
+	})
+
+	select {
+	case m := <-c.Send():
+		if m.IssueID != "bd-9" {
+			t.Errorf("IssueID = %q, want %q", m.IssueID, "bd-9")
+		}
+		if len(m.Issue) == 0 {
+			t.Fatal("received payload has empty Issue RawMessage")
+		}
+
+		// Re-marshal the whole payload and assert the embedded "issue" key survives.
+		wire, err := json.Marshal(m)
+		if err != nil {
+			t.Fatalf("re-marshal received payload: %v", err)
+		}
+		if !strings.Contains(string(wire), `"issue"`) {
+			t.Errorf("expected re-marshaled payload to contain \"issue\" key, got: %s", wire)
+		}
+
+		// And compare the decoded issue bytes structurally.
+		var gotIssue, wantIssue map[string]any
+		if err := json.Unmarshal(m.Issue, &gotIssue); err != nil {
+			t.Fatalf("unmarshal received Issue: %v", err)
+		}
+		if err := json.Unmarshal(issueJSON, &wantIssue); err != nil {
+			t.Fatalf("unmarshal original Issue: %v", err)
+		}
+		if len(gotIssue) != len(wantIssue) {
+			t.Errorf("Issue key count = %d, want %d", len(gotIssue), len(wantIssue))
+		}
+		for k, v := range wantIssue {
+			if gv, ok := gotIssue[k]; !ok || gv != v {
+				t.Errorf("Issue[%q] = %v (present=%v), want %v", k, gv, ok, v)
+			}
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for broadcast")
+	}
+}
+
+// TestMutationPayload_IssueOmitEmpty confirms the json:"issue,omitempty" tag —
+// nil Issue must drop the key from the wire format so non-issue mutations
+// (refresh, terminal_session_change) don't ship a bogus null field.
+func TestMutationPayload_IssueOmitEmpty(t *testing.T) {
+	payload := &MutationPayload{
+		Type:        "refresh",
+		IssueID:     "",
+		WorkspaceID: "ws-1",
+		Timestamp:   time.Now().UTC().Format(time.RFC3339),
+		// Issue intentionally left nil.
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(data), `"issue"`) {
+		t.Errorf("expected no \"issue\" key for nil Issue, got: %s", data)
 	}
 }
 

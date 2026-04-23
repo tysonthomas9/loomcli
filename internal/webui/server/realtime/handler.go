@@ -201,6 +201,7 @@ func RPCMutationToPayload(m rpc.MutationEvent) *MutationPayload {
 		ParentID:   m.ParentID,
 		StepCount:  m.StepCount,
 		SourceRepo: m.SourceRepo,
+		Issue:      m.Issue,
 	}
 }
 

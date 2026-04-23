@@ -429,7 +429,7 @@ func (s *DaemonSubscriber) handleExternalChanges(client *rpc.Client, now time.Ti
 		return s.loadKnownIssues(client)
 	}
 
-	changed, fetchHealthy := s.fetchChangedIssues(client, lastPollTime)
+	changed, rawIssues, fetchHealthy := s.fetchChangedIssues(client, lastPollTime)
 	if !fetchHealthy {
 		return false
 	}
@@ -453,7 +453,7 @@ func (s *DaemonSubscriber) handleExternalChanges(client *rpc.Client, now time.Ti
 		return true
 	}
 
-	s.emitGranularMutations(changed, now, totalCount)
+	s.emitGranularMutations(changed, rawIssues, now, totalCount)
 	return true
 }
 

@@ -2,6 +2,7 @@ package realtime
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"slices"
@@ -52,6 +53,13 @@ type MutationPayload struct {
 	Priority    *int   `json:"priority,omitempty"`     // Issue priority (for update events from external poll)
 	SourceRepo  string `json:"source_repo,omitempty"`  // Source repository for multi-repo filtering
 	WorkspaceID string `json:"workspace_id,omitempty"` // Workspace ID for multi-workspace filtering
+	// Issue carries the full lightweight issue JSON when the mutation relates
+	// to an issue change (create, update, status). Frontend wholesale replaces
+	// its stored issue when present, avoiding hand-maintained field projection.
+	// Absent for non-issue mutations (refresh, terminal_session_change, etc.)
+	// and when the emitter didn't have the issue object — frontend falls back
+	// to per-field apply.
+	Issue json.RawMessage `json:"issue,omitempty"`
 }
 
 // Hub manages connected SSE clients and broadcasts mutations to them.

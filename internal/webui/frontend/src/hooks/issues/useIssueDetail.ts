@@ -6,9 +6,16 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 
 import { getIssue } from "@/api/issues";
+import type { MutationPayload } from "@/api/common";
 import type { Issue, IssueDetails } from "@/types";
 
+import { useEventSubscription } from "@/hooks/common";
 import { useWorkspaceContext } from "@/hooks/workspace";
+
+// Debounce window for SSE-triggered re-fetches. If several mutations for the
+// same displayed issue fire in a burst (e.g. a script doing rapid updates),
+// collapse them into a single fetch.
+const DETAIL_SSE_REFETCH_DEBOUNCE_MS = 500;
 
 /**
  * Return type for the useIssueDetail hook.
@@ -69,11 +76,21 @@ export function useIssueDetail(): UseIssueDetailReturn {
   // Track if the component is mounted
   const mountedRef = useRef<boolean>(true);
 
+  // Track the currently displayed issue ID for the SSE subscription callback.
+  // Refs because the subscription registers once and reads the latest value
+  // on each mutation — avoids re-subscribing on every render.
+  const currentIssueIdRef = useRef<string | null>(null);
+  const refetchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Cleanup on unmount
   useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      if (refetchTimeoutRef.current) {
+        clearTimeout(refetchTimeoutRef.current);
+        refetchTimeoutRef.current = null;
+      }
     };
   }, []);
 
@@ -83,6 +100,8 @@ export function useIssueDetail(): UseIssueDetailReturn {
       if (!id) {
         return;
       }
+
+      currentIssueIdRef.current = id;
 
       // Increment request ID to handle concurrent requests
       const requestId = ++currentRequestIdRef.current;
@@ -117,10 +136,38 @@ export function useIssueDetail(): UseIssueDetailReturn {
 
   const clearIssue = useCallback(() => {
     currentRequestIdRef.current++; // Cancel any in-flight requests
+    currentIssueIdRef.current = null;
+    if (refetchTimeoutRef.current) {
+      clearTimeout(refetchTimeoutRef.current);
+      refetchTimeoutRef.current = null;
+    }
     setIssueDetails(null);
     setError(null);
     setIsLoading(false);
   }, []);
+
+  // Keep the detail panel in sync when the displayed issue is mutated by
+  // another client or by the CLI. Re-fetch via REST rather than applying the
+  // lightweight SSE payload inline because IssueDetails carries comments,
+  // dependencies, and full text fields that the SSE payload doesn't include.
+  const handleDetailMutation = useCallback(
+    (mutation: MutationPayload) => {
+      const displayedId = currentIssueIdRef.current;
+      if (!displayedId || mutation.issue_id !== displayedId) return;
+      if (refetchTimeoutRef.current) clearTimeout(refetchTimeoutRef.current);
+      refetchTimeoutRef.current = setTimeout(() => {
+        refetchTimeoutRef.current = null;
+        if (mountedRef.current && currentIssueIdRef.current === displayedId) {
+          void fetchIssue(displayedId);
+        }
+      }, DETAIL_SSE_REFETCH_DEBOUNCE_MS);
+    },
+    [fetchIssue],
+  );
+
+  useEventSubscription(handleDetailMutation, {
+    types: ["create", "update", "status", "comment"],
+  });
 
   const updateIssueDetails = useCallback((updated: Issue) => {
     setIssueDetails((prev) => {

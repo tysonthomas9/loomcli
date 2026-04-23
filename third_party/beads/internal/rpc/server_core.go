@@ -108,6 +108,11 @@ type MutationEvent struct {
 	ParentID   string `json:"parent_id,omitempty"`   // Parent molecule (for bonded events)
 	StepCount  int    `json:"step_count,omitempty"`  // Number of steps (for bonded events)
 	SourceRepo string `json:"source_repo,omitempty"` // Source repository (for multi-repo filtering)
+	// Issue carries the full lightweight issue JSON so consumers can replace
+	// their stored issue wholesale instead of hand-mapping individual fields.
+	// Absent when the emitter didn't have the issue object handy (e.g. delete,
+	// gate close) — consumers fall back to per-field apply.
+	Issue json.RawMessage `json:"issue,omitempty"`
 }
 
 // NewServer creates a new RPC server
@@ -182,6 +187,28 @@ func (s *Server) emitMutation(eventType, issueID, title, assignee string) {
 		Title:    title,
 		Assignee: assignee,
 	})
+}
+
+// marshalLightweightIssue returns a JSON encoding of the issue with heavy text
+// fields (description, design, acceptance_criteria, notes) stripped, matching
+// the List RPC's Lightweight mode. Used to keep SSE mutation payloads small.
+// Returns nil if issue is nil or marshal fails — callers treat nil as "issue
+// not available" and consumers fall back to per-field apply.
+func marshalLightweightIssue(issue *types.Issue) json.RawMessage {
+	if issue == nil {
+		return nil
+	}
+	// Copy and clear heavy fields without mutating the caller's issue.
+	lightweight := *issue
+	lightweight.Description = ""
+	lightweight.Design = ""
+	lightweight.AcceptanceCriteria = ""
+	lightweight.Notes = ""
+	data, err := json.Marshal(&lightweight)
+	if err != nil {
+		return nil
+	}
+	return data
 }
 
 // emitRichMutation sends a pre-built mutation event with optional metadata.

@@ -35,7 +35,7 @@ func TestParseChangedIssues_ValidJSON(t *testing.T) {
 		t.Fatalf("failed to marshal test data: %v", err)
 	}
 
-	result := parseChangedIssues(json.RawMessage(data))
+	result, _ := parseChangedIssues(json.RawMessage(data))
 	if result == nil {
 		t.Fatal("parseChangedIssues returned nil for valid JSON")
 	}
@@ -75,7 +75,7 @@ func TestParseChangedIssues_ValidJSON(t *testing.T) {
 // TestParseChangedIssues_EmptyJSON tests parseChangedIssues with an empty JSON array.
 func TestParseChangedIssues_EmptyJSON(t *testing.T) {
 	data := json.RawMessage(`[]`)
-	result := parseChangedIssues(data)
+	result, _ := parseChangedIssues(data)
 	if result == nil {
 		t.Fatal("parseChangedIssues returned nil for empty array")
 	}
@@ -87,7 +87,7 @@ func TestParseChangedIssues_EmptyJSON(t *testing.T) {
 // TestParseChangedIssues_InvalidJSON tests parseChangedIssues with invalid JSON.
 func TestParseChangedIssues_InvalidJSON(t *testing.T) {
 	data := json.RawMessage(`not valid json at all`)
-	result := parseChangedIssues(data)
+	result, _ := parseChangedIssues(data)
 	if result != nil {
 		t.Errorf("expected nil for invalid JSON, got %v", result)
 	}
@@ -98,7 +98,7 @@ func TestParseChangedIssues_InvalidJSON(t *testing.T) {
 // initialized by json.Unmarshal — the function then returns an empty result slice.
 func TestParseChangedIssues_NullJSON(t *testing.T) {
 	data := json.RawMessage(`null`)
-	result := parseChangedIssues(data)
+	result, _ := parseChangedIssues(data)
 	if result == nil {
 		t.Fatal("expected non-nil empty slice for null JSON")
 	}
@@ -110,7 +110,7 @@ func TestParseChangedIssues_NullJSON(t *testing.T) {
 // TestParseChangedIssues_PartialFields tests parseChangedIssues with issues that have only some fields.
 func TestParseChangedIssues_PartialFields(t *testing.T) {
 	data := json.RawMessage(`[{"id":"bd-1","title":"Partial"}]`)
-	result := parseChangedIssues(data)
+	result, _ := parseChangedIssues(data)
 	if result == nil {
 		t.Fatal("parseChangedIssues returned nil")
 	}
@@ -131,7 +131,7 @@ func TestParseChangedIssues_PartialFields(t *testing.T) {
 // TestParseChangedIssues_ExtraFieldsIgnored tests that extra/unknown JSON fields are silently ignored.
 func TestParseChangedIssues_ExtraFieldsIgnored(t *testing.T) {
 	data := json.RawMessage(`[{"id":"bd-1","title":"Extra","unknown_field":"ignored","count":42}]`)
-	result := parseChangedIssues(data)
+	result, _ := parseChangedIssues(data)
 	if result == nil {
 		t.Fatal("parseChangedIssues returned nil")
 	}
@@ -140,6 +140,122 @@ func TestParseChangedIssues_ExtraFieldsIgnored(t *testing.T) {
 	}
 	if result[0].ID != "bd-1" {
 		t.Errorf("result[0].ID = %q, want %q", result[0].ID, "bd-1")
+	}
+}
+
+// TestParseChangedIssues_RawByIDContainsPerIssueJSON verifies that the second
+// return value is an ID-keyed map of the per-element JSON bytes, and that each
+// entry round-trips to the same issue ID.
+func TestParseChangedIssues_RawByIDContainsPerIssueJSON(t *testing.T) {
+	data := json.RawMessage(`[
+		{"id":"bd-1","title":"First","assignee":"alice","status":"open","priority":1,"source_repo":"repo-a"},
+		{"id":"bd-2","title":"Second","assignee":"bob","status":"in_progress","priority":2,"source_repo":"repo-b"}
+	]`)
+
+	result, rawByID := parseChangedIssues(data)
+	if result == nil {
+		t.Fatal("parseChangedIssues returned nil result slice")
+	}
+	if len(result) != 2 {
+		t.Fatalf("expected 2 changedIssue entries, got %d", len(result))
+	}
+	if rawByID == nil {
+		t.Fatal("rawByID map is nil")
+	}
+	if len(rawByID) != 2 {
+		t.Fatalf("expected 2 rawByID entries, got %d", len(rawByID))
+	}
+
+	for _, id := range []string{"bd-1", "bd-2"} {
+		raw, ok := rawByID[id]
+		if !ok {
+			t.Errorf("rawByID missing key %q", id)
+			continue
+		}
+		// Each raw entry must itself be valid JSON and the decoded ID must match.
+		var decoded struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(raw, &decoded); err != nil {
+			t.Errorf("rawByID[%q] is not valid JSON: %v (bytes=%s)", id, err, raw)
+			continue
+		}
+		if decoded.ID != id {
+			t.Errorf("rawByID[%q] decodes to id=%q, want %q", id, decoded.ID, id)
+		}
+	}
+}
+
+// TestParseChangedIssues_SkipsMalformedElement verifies that a single bad
+// element does not abort the whole parse — the surrounding valid elements are
+// still returned, and the malformed one is simply absent.
+func TestParseChangedIssues_SkipsMalformedElement(t *testing.T) {
+	// The middle element is not a JSON object — it's a scalar — so the inner
+	// Unmarshal into the struct fails and that element is skipped.
+	data := json.RawMessage(`[
+		{"id":"bd-good-1","title":"Good","status":"open"},
+		"not-an-object",
+		{"id":"bd-good-2","title":"Also Good","status":"open"}
+	]`)
+
+	result, rawByID := parseChangedIssues(data)
+	if result == nil {
+		t.Fatal("parseChangedIssues returned nil despite recoverable malformed element")
+	}
+	if len(result) != 2 {
+		t.Errorf("expected 2 surviving changedIssue entries, got %d: %+v", len(result), result)
+	}
+	if len(rawByID) != 2 {
+		t.Errorf("expected 2 rawByID entries, got %d", len(rawByID))
+	}
+	for _, id := range []string{"bd-good-1", "bd-good-2"} {
+		if _, ok := rawByID[id]; !ok {
+			t.Errorf("rawByID missing surviving id %q", id)
+		}
+	}
+}
+
+// TestParseChangedIssues_EmptyIDNotInRawMap verifies the current implementation
+// detail that elements with empty ID are appended to the []changedIssue slice
+// but NOT inserted into the rawByID map (protecting downstream callers from
+// collapsing distinct empty-ID issues onto a single map slot).
+func TestParseChangedIssues_EmptyIDNotInRawMap(t *testing.T) {
+	data := json.RawMessage(`[
+		{"id":"","title":"No ID","status":"open"},
+		{"id":"bd-1","title":"Has ID","status":"open"}
+	]`)
+
+	result, rawByID := parseChangedIssues(data)
+	if result == nil {
+		t.Fatal("parseChangedIssues returned nil")
+	}
+	// Slice includes both (empty-ID element is NOT dropped at parse time — the
+	// emit loop drops it later via its own `if issue.ID == ""` guard).
+	if len(result) != 2 {
+		t.Errorf("expected 2 slice entries (empty-ID preserved), got %d: %+v", len(result), result)
+	}
+	// Map: only the non-empty key.
+	if len(rawByID) != 1 {
+		t.Errorf("rawByID size = %d, want 1 (empty-ID must not be inserted)", len(rawByID))
+	}
+	if _, ok := rawByID[""]; ok {
+		t.Error("rawByID must not contain empty-string key")
+	}
+	if _, ok := rawByID["bd-1"]; !ok {
+		t.Error("rawByID missing bd-1")
+	}
+}
+
+// TestParseChangedIssues_InvalidTopLevelReturnsNilMap verifies that a totally
+// invalid payload (cannot even decode as an array) yields (nil, nil) — not an
+// empty map that would mask the failure downstream.
+func TestParseChangedIssues_InvalidTopLevelReturnsNilMap(t *testing.T) {
+	result, rawByID := parseChangedIssues(json.RawMessage(`garbage`))
+	if result != nil {
+		t.Errorf("expected nil result slice on top-level parse failure, got %v", result)
+	}
+	if rawByID != nil {
+		t.Errorf("expected nil rawByID map on top-level parse failure, got %v", rawByID)
 	}
 }
 
@@ -165,7 +281,7 @@ func TestEmitGranularMutations_NewIssue(t *testing.T) {
 		{ID: "bd-new-1", Title: "New Issue", Assignee: "alice", Status: "open", Priority: 1, SourceRepo: "repo-a"},
 	}
 
-	subscriber.emitGranularMutations(changed, now, 10)
+	subscriber.emitGranularMutations(changed, nil, now, 10)
 
 	// Should receive a MutationCreate event
 	select {
@@ -226,7 +342,7 @@ func TestEmitGranularMutations_StatusChange(t *testing.T) {
 		{ID: "bd-1", Title: "Issue One", Assignee: "alice", Status: "in_progress", Priority: 2, SourceRepo: "repo-a"},
 	}
 
-	subscriber.emitGranularMutations(changed, now, 10)
+	subscriber.emitGranularMutations(changed, nil, now, 10)
 
 	select {
 	case received := <-client.Send():
@@ -277,7 +393,7 @@ func TestEmitGranularMutations_UpdateNonStatus(t *testing.T) {
 		{ID: "bd-1", Title: "New Title", Assignee: "bob", Status: "open", Priority: 1, SourceRepo: "repo-a"},
 	}
 
-	subscriber.emitGranularMutations(changed, now, 10)
+	subscriber.emitGranularMutations(changed, nil, now, 10)
 
 	select {
 	case received := <-client.Send():
@@ -320,7 +436,7 @@ func TestEmitGranularMutations_SkipsEmptyID(t *testing.T) {
 		{ID: "", Title: "No ID Issue", Status: "open"},
 	}
 
-	subscriber.emitGranularMutations(changed, now, 5)
+	subscriber.emitGranularMutations(changed, nil, now, 5)
 
 	// Should NOT receive any broadcast
 	select {
@@ -355,7 +471,7 @@ func TestEmitGranularMutations_UpdatesTrackingState(t *testing.T) {
 	subscriber.lastPollTime = oldPollTime
 
 	now := time.Now()
-	subscriber.emitGranularMutations([]changedIssue{}, now, 42)
+	subscriber.emitGranularMutations([]changedIssue{}, nil, now, 42)
 
 	subscriber.mu.RLock()
 	defer subscriber.mu.RUnlock()
@@ -392,7 +508,7 @@ func TestEmitGranularMutations_MixedMutationTypes(t *testing.T) {
 		{ID: "bd-status", Title: "Status Change", Assignee: "bob", Status: "closed"}, // status changed → MutationStatus
 	}
 
-	subscriber.emitGranularMutations(changed, now, 15)
+	subscriber.emitGranularMutations(changed, nil, now, 15)
 
 	// Collect 3 broadcasts
 	received := make(map[string]*realtime.MutationPayload, 3)

@@ -553,6 +553,7 @@ func (s *Server) handleCreate(req *Request) Response {
 		Title:      issue.Title,
 		Assignee:   issue.Assignee,
 		SourceRepo: issue.SourceRepo,
+		Issue:      marshalLightweightIssue(issue),
 	})
 
 	data, _ := json.Marshal(issue)
@@ -806,6 +807,7 @@ func (s *Server) handleUpdate(req *Request) Response {
 
 	// Emit mutation event for event-driven daemon (only if any updates or label/parent operations were performed)
 	if len(updates) > 0 || len(updateArgs.SetLabels) > 0 || len(updateArgs.AddLabels) > 0 || len(updateArgs.RemoveLabels) > 0 || updateArgs.Parent != nil {
+		lightweightIssue := marshalLightweightIssue(updatedIssue)
 		// Check if this was a status change - emit rich MutationStatus event
 		if updateArgs.Status != nil && *updateArgs.Status != string(issue.Status) {
 			s.emitRichMutation(MutationEvent{
@@ -817,6 +819,7 @@ func (s *Server) handleUpdate(req *Request) Response {
 				OldStatus:  string(issue.Status),
 				NewStatus:  *updateArgs.Status,
 				SourceRepo: updatedIssue.SourceRepo,
+				Issue:      lightweightIssue,
 			})
 		} else {
 			s.emitRichMutation(MutationEvent{
@@ -826,6 +829,7 @@ func (s *Server) handleUpdate(req *Request) Response {
 				Assignee:   updatedIssue.Assignee,
 				Actor:      actor,
 				SourceRepo: updatedIssue.SourceRepo,
+				Issue:      lightweightIssue,
 			})
 		}
 	}
@@ -902,6 +906,8 @@ func (s *Server) handleClose(req *Request) Response {
 		}
 	}
 
+	closedIssue, _ := store.GetIssue(ctx, closeArgs.ID)
+
 	// Emit rich status change event for event-driven daemon
 	s.emitRichMutation(MutationEvent{
 		Type:       MutationStatus,
@@ -911,9 +917,8 @@ func (s *Server) handleClose(req *Request) Response {
 		OldStatus:  oldStatus,
 		NewStatus:  "closed",
 		SourceRepo: issue.SourceRepo,
+		Issue:      marshalLightweightIssue(closedIssue),
 	})
-
-	closedIssue, _ := store.GetIssue(ctx, closeArgs.ID)
 
 	// If SuggestNext is requested, find newly unblocked issues (GH#679)
 	if closeArgs.SuggestNext {

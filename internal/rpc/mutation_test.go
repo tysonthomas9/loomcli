@@ -197,6 +197,110 @@ func TestMutationEvent_JSONTagConsistency(t *testing.T) {
 	}
 }
 
+func TestMutationEvent_IssueField_RoundTrip(t *testing.T) {
+	t.Parallel()
+
+	// Populate with a representative lightweight issue payload (no description
+	// / design / acceptance_criteria / notes, matching marshalLightweightIssue).
+	issueJSON := json.RawMessage(`{"id":"bd-1","title":"T","priority":1,"status":"open","assignee":"alice"}`)
+
+	original := MutationEvent{
+		Type:      MutationCreate,
+		IssueID:   "bd-1",
+		Timestamp: time.Now().UTC().Truncate(time.Millisecond),
+		Issue:     issueJSON,
+	}
+
+	data, err := json.Marshal(original)
+	if err != nil {
+		t.Fatalf("json.Marshal() error: %v", err)
+	}
+
+	var restored MutationEvent
+	if err := json.Unmarshal(data, &restored); err != nil {
+		t.Fatalf("json.Unmarshal() error: %v", err)
+	}
+
+	if len(restored.Issue) == 0 {
+		t.Fatal("expected restored.Issue to be non-empty")
+	}
+
+	// Compare as decoded objects rather than bytes — whitespace/key-ordering in
+	// RawMessage is not stable across Marshal/Unmarshal round-trips.
+	var gotObj, wantObj map[string]any
+	if err := json.Unmarshal(restored.Issue, &gotObj); err != nil {
+		t.Fatalf("unmarshal restored.Issue: %v", err)
+	}
+	if err := json.Unmarshal(issueJSON, &wantObj); err != nil {
+		t.Fatalf("unmarshal original issue: %v", err)
+	}
+	if len(gotObj) != len(wantObj) {
+		t.Errorf("restored Issue has %d keys, want %d (got=%v want=%v)", len(gotObj), len(wantObj), gotObj, wantObj)
+	}
+	for k, v := range wantObj {
+		if gv, ok := gotObj[k]; !ok || gv != v {
+			t.Errorf("restored Issue[%q] = %v (present=%v), want %v", k, gv, ok, v)
+		}
+	}
+
+	// The envelope must also contain an "issue" key (sanity-check omitempty
+	// semantics aren't stripping a populated RawMessage).
+	if !strings.Contains(string(data), `"issue"`) {
+		t.Errorf("expected marshaled event to contain \"issue\" key, got: %s", data)
+	}
+}
+
+func TestMutationEvent_IssueField_OmitEmpty(t *testing.T) {
+	t.Parallel()
+
+	// Case 1: Issue is nil — must be omitted.
+	nilEvent := MutationEvent{
+		Type:      MutationDelete,
+		IssueID:   "bd-42",
+		Timestamp: time.Now(),
+	}
+	nilData, err := json.Marshal(nilEvent)
+	if err != nil {
+		t.Fatalf("json.Marshal(nilEvent) error: %v", err)
+	}
+	if strings.Contains(string(nilData), `"issue"`) {
+		t.Errorf("Issue=nil should not emit \"issue\" key, got: %s", nilData)
+	}
+
+	// Case 2: Issue is an empty []byte — treated by encoding/json as empty
+	// RawMessage; documented behavior: omitempty triggers on len==0, so no key.
+	emptyEvent := MutationEvent{
+		Type:      MutationDelete,
+		IssueID:   "bd-42",
+		Timestamp: time.Now(),
+		Issue:     json.RawMessage{},
+	}
+	emptyData, err := json.Marshal(emptyEvent)
+	if err != nil {
+		t.Fatalf("json.Marshal(emptyEvent) error: %v", err)
+	}
+	if strings.Contains(string(emptyData), `"issue"`) {
+		t.Errorf("Issue=empty slice should not emit \"issue\" key, got: %s", emptyData)
+	}
+
+	// Case 3: Issue is explicit JSON "null" (non-empty bytes). omitempty does
+	// NOT strip non-empty RawMessages, so "null" is emitted verbatim. Document
+	// this so callers know to pass nil (not RawMessage("null")) to omit.
+	nullEvent := MutationEvent{
+		Type:      MutationDelete,
+		IssueID:   "bd-42",
+		Timestamp: time.Now(),
+		Issue:     json.RawMessage("null"),
+	}
+	nullData, err := json.Marshal(nullEvent)
+	if err != nil {
+		t.Fatalf("json.Marshal(nullEvent) error: %v", err)
+	}
+	if !strings.Contains(string(nullData), `"issue":null`) {
+		t.Errorf("Issue=RawMessage(\"null\") should emit \"issue\":null verbatim, got: %s", nullData)
+	}
+}
+
 func TestMutationEvent_AllTypes(t *testing.T) {
 	t.Parallel()
 
