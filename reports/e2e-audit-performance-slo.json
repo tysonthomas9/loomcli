@@ -1,0 +1,134 @@
+{
+    "contract_file": "cross-area/performance-slo.md",
+    "validation_report": "reports/validation-performance-slo.json",
+    "audit_date": "2026-04-23",
+    "spec_files_searched": [
+        "internal/webui/frontend/tests/e2e/integration/concurrent-ops.integration.spec.ts",
+        "internal/webui/frontend/tests/e2e/integration/sse-updates.integration.spec.ts",
+        "internal/webui/frontend/tests/e2e/integration/sse-multiclient.integration.spec.ts",
+        "internal/webui/frontend/tests/e2e/server-push.spec.ts",
+        "internal/webui/frontend/tests/e2e/server-push-integration.spec.ts"
+    ],
+    "go_test_files_searched": [
+        "internal/cli/serve_e2e_test.go",
+        "internal/cli/init_e2e_test.go",
+        "internal/webui/handlers/issues/handlers_integration_test.go",
+        "internal/webui/handlers/issues/write_test.go",
+        "internal/webui/handlers/misc/client_errors_test.go",
+        "internal/webui/handlers/misc/csp_test.go",
+        "internal/webui/handlers/misc/auth_config_test.go",
+        "internal/webui/daemon/pool_test.go",
+        "internal/webui/daemon/multi_pool_test.go",
+        "internal/webui/server/realtime/hub_test.go",
+        "internal/webui/app/sse_push_test.go",
+        "internal/webui/app/sse_live_test.go",
+        "internal/webui/app/e2e_auth_resilience_test.go",
+        "internal/webui/fleet/metrics_test.go",
+        "internal/webui/fleet/ratelimit_test.go",
+        "third_party/beads/internal/rpc/bench_test.go",
+        "third_party/beads/internal/storage/sqlite/sqlite_bench_test.go",
+        "third_party/beads/internal/storage/sqlite/compact_bench_test.go",
+        "third_party/beads/internal/storage/sqlite/cycle_bench_test.go"
+    ],
+    "summary": {
+        "total_passing": 5,
+        "covered": 0,
+        "partial": 5,
+        "uncovered": 0,
+        "coverage_pct": 0.0
+    },
+    "assertions": [
+        {
+            "id": "VAL-E2E-PERF-015",
+            "title": "loom serve /api/health responds within 5s of launch",
+            "coverage": "partial",
+            "spec_files": [],
+            "test_names": [
+                "TestE2E_ServeStartupAndHealthCheck",
+                "TestE2E_ServeAPIEndpoints",
+                "TestE2E_ServeGracefulShutdown_SIGTERM",
+                "TestE2E_ServeGracefulShutdown_SIGINT",
+                "TestE2E_ServePortFlag",
+                "TestE2E_ServeCORSHeaders",
+                "TestE2E_ServeDefaultCORSHeader"
+            ],
+            "notes": "internal/cli/serve_e2e_test.go spawns a real `loom serve` subprocess and polls GET /health via the waitForServeReady helper to confirm the server becomes ready. However, the helper uses a 10s timeout and asserts only that the server eventually returns status=ok; it does not measure or assert elapsed time from process start to first successful /health response, nor does it fail if startup exceeds the 5s SLO. Partial: correctness of startup is covered, but the <5s latency budget is not enforced."
+        },
+        {
+            "id": "VAL-E2E-PERF-029",
+            "title": "100 concurrent issue-create requests succeed",
+            "coverage": "partial",
+            "spec_files": [
+                "internal/webui/frontend/tests/e2e/integration/concurrent-ops.integration.spec.ts"
+            ],
+            "test_names": [
+                "concurrent creates all succeed and return distinct IDs",
+                "concurrent creates all delivered via SSE to browser",
+                "TestHandleCreateIssue_Success",
+                "TestHandleCreateIssueW_WithTitleAndType",
+                "TestHandleClientErrors_RateLimit",
+                "TestHandleCSPReport_RateLimit",
+                "TestClaimMetrics_ConcurrentAccess",
+                "BenchmarkDaemonCreate",
+                "BenchmarkConcurrentAgents"
+            ],
+            "notes": "concurrent-ops.integration.spec.ts issues 5 concurrent POST /api/workspaces/{id}/issues requests via Promise.all and verifies all succeed with distinct IDs — this is behaviorally the same path as the assertion but at 1/20th the scale and without asserting the response-status invariant (2xx or 429 only; no 5xx). TestHandleCreateIssue_Success / TestHandleCreateIssueW_* exercise the HTTP create handler with httptest.NewRecorder at single-request scale. TestHandleClientErrors_RateLimit and TestHandleCSPReport_RateLimit verify 429 responses under burst, but on /api/client-errors and /api/csp-report respectively — not the /issues endpoint. BenchmarkConcurrentAgents drives 4 concurrent RPC creators through the daemon (not HTTP). TestClaimMetrics_ConcurrentAccess uses 100 goroutines but against the fleet claim-metrics counter, not the issue-create HTTP path. Partial: concurrent create behavior is covered at small scale, but no test drives 100 concurrent POST /issues and asserts only {2xx, 429}, no 5xx."
+        },
+        {
+            "id": "VAL-E2E-PERF-030",
+            "title": "Issue-update burst 1000/min sustainable",
+            "coverage": "partial",
+            "spec_files": [
+                "internal/webui/frontend/tests/e2e/integration/concurrent-ops.integration.spec.ts"
+            ],
+            "test_names": [
+                "concurrent PATCH of different fields preserves all changes",
+                "concurrent PATCH of same field resolves without corruption",
+                "concurrent label add operations accumulate",
+                "TestHandlePatchIssueW_UpdateStatus",
+                "TestHandlePatchIssueW_UpdatePriority",
+                "TestSSE_MutationDelivery_Update",
+                "TestSSE_MutationDelivery_StatusChange",
+                "TestSSELive_MutationDelivery",
+                "TestSSELive_MultipleMutationTypes",
+                "BenchmarkDaemonUpdate",
+                "BenchmarkUpdateIssue_Large"
+            ],
+            "notes": "Individual PATCH-to-SSE propagation is well covered: TestSSE_MutationDelivery_Update and TestSSELive_MutationDelivery assert that an update mutation results in an SSE payload reaching registered clients. concurrent-ops.integration.spec.ts runs 4–5 concurrent PATCHes via Promise.all and checks data integrity. TestHandlePatchIssueW_* cover single PATCHes at the handler layer. BenchmarkDaemonUpdate and BenchmarkUpdateIssue_Large provide throughput figures at the RPC/storage layers but contain no SSE assertions and no sustained-rate check. Partial: single and small-batch PATCH-with-SSE are covered, but no test drives a sustained 1000/min PATCH burst through the HTTP layer and asserts both (a) sustained success and (b) every mutation reaches SSE subscribers."
+        },
+        {
+            "id": "VAL-E2E-PERF-032",
+            "title": "Daemon pool scales beyond default on contention",
+            "coverage": "partial",
+            "spec_files": [],
+            "test_names": [
+                "TestConnectionPool_ConcurrentGetPut",
+                "TestConnectionPool_ConcurrentStats",
+                "TestConnectionPool_Get_PoolExhausted",
+                "TestConnectionPool_Get_CreatesConnection",
+                "TestConnectionPool_GetPutGet_Reuse",
+                "TestMultiPool_ConcurrentAccess",
+                "BenchmarkDaemonLatency"
+            ],
+            "notes": "internal/webui/daemon/pool_test.go covers pool mechanics — TestConnectionPool_ConcurrentGetPut spins 5 goroutines that Get/Put against a mock daemon, and TestConnectionPool_ConcurrentStats uses 10 concurrent stats readers. TestConnectionPool_Get_PoolExhausted verifies pool-timeout behavior. TestMultiPool_ConcurrentAccess exercises multi-workspace dispatch under concurrency. BenchmarkDaemonLatency in third_party/beads/internal/rpc/bench_test.go measures single-call latency. None of these drive 50 concurrent HTTP-layer callers against an issues list endpoint or assert a p95 checkout <2s SLO under contention. Partial: pool contention correctness is tested at 5–10 goroutines but the 50-caller-with-p95-latency scenario behind the validation pass is not enforced."
+        },
+        {
+            "id": "VAL-E2E-PERF-033",
+            "title": "loom init on empty dir <5s",
+            "coverage": "partial",
+            "spec_files": [],
+            "test_names": [
+                "TestE2E_InitLegacyNonInteractive",
+                "TestE2E_InitCreatesWorktrees",
+                "TestE2E_InitCustomNames",
+                "TestE2E_InitIdempotent",
+                "TestE2E_InitNotGitRepo",
+                "TestE2E_InitCustomWorktreesDir",
+                "TestE2E_InitBeadsInitialized",
+                "TestE2E_InitHooksInstalled",
+                "TestE2E_InitExitCodeOnPrereqFail"
+            ],
+            "notes": "internal/cli/init_e2e_test.go runs the real `loom init` subprocess across nine scenarios (legacy flag, worktree creation, custom names, idempotency, missing git, custom worktrees dir, pre-initialized beads, hooks installation, prereq exit code) and asserts correctness of stdout/filesystem side effects. None of these tests measure or assert elapsed time — no call to time.Since, no deadline check against 5s. Partial: init correctness is extensively covered but the <5s latency SLO is not enforced."
+        }
+    ]
+}
