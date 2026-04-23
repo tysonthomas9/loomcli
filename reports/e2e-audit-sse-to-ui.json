@@ -1,0 +1,276 @@
+{
+  "contract_file": "cross-area/sse-to-ui.md",
+  "validation_report": "reports/validation-sse-to-ui.json",
+  "audit_date": "2026-04-23T19:00:00Z",
+  "spec_files_searched": [
+    "internal/webui/frontend/tests/e2e/integration/sse-updates.integration.spec.ts",
+    "internal/webui/frontend/tests/e2e/integration/sse-multiclient.integration.spec.ts",
+    "internal/webui/frontend/tests/e2e/server-push.spec.ts",
+    "internal/webui/frontend/tests/e2e/server-push-integration.spec.ts",
+    "internal/webui/frontend/tests/e2e/api/realtime-updates.api.spec.ts",
+    "internal/webui/frontend/tests/e2e/integration/kanban-crud.integration.spec.ts",
+    "internal/webui/frontend/tests/e2e/assembled-views.spec.ts",
+    "internal/webui/frontend/src/api/common/__tests__/sse.test.ts"
+  ],
+  "go_test_files_searched": [
+    "internal/webui/app/sse_live_test.go",
+    "internal/webui/server/realtime/hub_test.go",
+    "internal/webui/app/e2e_auth_sse_security_test.go"
+  ],
+  "summary": {
+    "total_passing": 16,
+    "covered": 4,
+    "partial": 8,
+    "uncovered": 4,
+    "coverage_pct": 25.0
+  },
+  "assertions": [
+    {
+      "id": "VAL-E2E-SSE-002",
+      "title": "SSE connections established in all 5 tabs",
+      "coverage": "partial",
+      "spec_files": [
+        "internal/webui/frontend/tests/e2e/integration/sse-updates.integration.spec.ts",
+        "internal/webui/frontend/tests/e2e/server-push.spec.ts",
+        "internal/webui/frontend/tests/e2e/api/realtime-updates.api.spec.ts",
+        "internal/webui/app/sse_live_test.go"
+      ],
+      "test_names": [
+        "SSE connection establishes on page load",
+        "SSE endpoint is called on page load",
+        "two browser contexts can both attempt SSE connections",
+        "SSE connection establishes successfully",
+        "TestSSELive_ConnectionAndHandshake"
+      ],
+      "notes": "Tests verify SSE connection establishment for 1 browser context (sse-updates.integration.spec.ts, server-push.spec.ts) or 2 mocked contexts (two browser contexts test). TestSSELive_ConnectionAndHandshake verifies the server-side SSE handshake (Content-Type, Cache-Control, clientId) for 1 client. No test opens all 5 views (Kanban + Table + Graph + Monitor + Issue Detail) simultaneously and verifies each establishes its own SSE connection. Graph view is absent per validation notes."
+    },
+    {
+      "id": "VAL-E2E-SSE-003",
+      "title": "Each tab SSE client reports connected state",
+      "coverage": "partial",
+      "spec_files": [
+        "internal/webui/frontend/tests/e2e/integration/sse-updates.integration.spec.ts",
+        "internal/webui/frontend/tests/e2e/server-push.spec.ts",
+        "internal/webui/frontend/src/api/common/__tests__/sse.test.ts"
+      ],
+      "test_names": [
+        "SSE connection establishes on page load",
+        "connection status element exists with data-state attribute",
+        "state transitions from disconnected to connecting to connected"
+      ],
+      "notes": "Tests verify the connected-state indicator renders correctly in 1 tab via real backend (sse-updates), 1 mocked tab (server-push), and in the client library unit tests (sse.test.ts). None open 5 simultaneous tabs and assert each shows the connected state. For a cross-area multi-view assertion this fails the multi-view requirement."
+    },
+    {
+      "id": "VAL-E2E-SSE-010",
+      "title": "Card moves column when issue status changes via PATCH",
+      "coverage": "partial",
+      "spec_files": [
+        "internal/webui/frontend/tests/e2e/integration/sse-updates.integration.spec.ts",
+        "internal/webui/frontend/tests/e2e/server-push-integration.spec.ts",
+        "internal/webui/frontend/tests/e2e/api/realtime-updates.api.spec.ts"
+      ],
+      "test_names": [
+        "status change via API updates UI via SSE",
+        "status change via CLI updates UI",
+        "status event received after status change"
+      ],
+      "notes": "sse-updates.integration verifies 1 Kanban tab: PATCH status -> card moves from ready to in_progress via SSE (no page refresh). server-push-integration does the same via CLI mutation. realtime-updates.api confirms the SSE status event payload arrives. All tests use 1 tab. The assertion requires the card to move in 5 browser tabs simultaneously — no test verifies multi-view propagation. sse-updates also uses a 10s timeout with an implicit reload fallback, weakening the \"no page refresh\" evidence."
+    },
+    {
+      "id": "VAL-E2E-SSE-011",
+      "title": "Table row status cell updates to reflect new status",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "sse-updates.integration.spec.ts only scopes selectors to the Kanban view (section[data-status=...]). No Playwright spec navigates to the List/Table view and verifies that a row's status badge updates from Open to Review via SSE after an API PATCH. realtime-updates.api confirms the status event is broadcast at the API layer, but that is not UI-level rendering coverage for the Table view."
+    },
+    {
+      "id": "VAL-E2E-SSE-013",
+      "title": "Latency from PATCH to Kanban card move is < 1 second",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "sse-updates.integration's \"status change via API updates UI via SSE\" uses a 10s Playwright timeout and performs a page reload as a fallback, which means it verifies the card *eventually* moves but does not bound the latency. No test measures the wall-clock delta between the PATCH request and the DOM mutation, nor asserts an upper bound under 1 second. Server-side SSE delivery timing (observed as <500ms in the validation run) is not asserted as a test invariant."
+    },
+    {
+      "id": "VAL-E2E-SSE-014",
+      "title": "All 5 tabs receive SSE mutation event at similar times (p99 < 2s)",
+      "coverage": "partial",
+      "spec_files": [
+        "internal/webui/frontend/tests/e2e/integration/sse-multiclient.integration.spec.ts",
+        "internal/webui/frontend/tests/e2e/server-push-integration.spec.ts",
+        "internal/webui/app/sse_live_test.go"
+      ],
+      "test_names": [
+        "mutation broadcast reaches two independent browser contexts",
+        "status change broadcast reaches both clients",
+        "update in one window reflects in the other",
+        "TestSSELive_MultipleClients"
+      ],
+      "notes": "sse-multiclient and server-push-integration verify fan-out to 2 browser contexts (not 5). TestSSELive_MultipleClients verifies 3 Go SSE clients all receive a broadcast. No test opens 5 tabs and measures p99 delivery latency across 100+ repeated mutations. The <2s p99 SLA is not asserted anywhere — the multi-client tests only check that a single broadcast is delivered within generous Playwright timeouts."
+    },
+    {
+      "id": "VAL-E2E-SSE-070",
+      "title": "SSE disconnect for 10s; reconnect; missed events delivered in order",
+      "coverage": "partial",
+      "spec_files": [
+        "internal/webui/frontend/tests/e2e/integration/sse-multiclient.integration.spec.ts",
+        "internal/webui/frontend/tests/e2e/api/realtime-updates.api.spec.ts",
+        "internal/webui/app/sse_live_test.go"
+      ],
+      "test_names": [
+        "issue created during disconnection appears after reconnect",
+        "reconnect with ?since= catches up missed events",
+        "TestSSELive_CatchUpOnReconnect"
+      ],
+      "notes": "sse-multiclient and realtime-updates.api both exercise a 1-mutation-during-disconnect pattern; the issue appears after reconnect. TestSSELive_CatchUpOnReconnect verifies 2 historical mutations are delivered via ?since= before the connected event. The assertion requires 5 mutations over a 10s disconnect window, all delivered in strict chronological order with resulting card positions correct. No test exercises ordered delivery of multiple queued mutations after a reconnect; the ordering invariant is only tested at the live-stream layer (TestSSELive_MonotonicEventIDs) or client-side (sse.test.ts out-of-order guard)."
+    },
+    {
+      "id": "VAL-E2E-SSE-071",
+      "title": "SSE Last-Event-ID resumes from correct position",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/webui/app/sse_live_test.go",
+        "internal/webui/frontend/tests/e2e/api/realtime-updates.api.spec.ts",
+        "internal/webui/frontend/src/api/common/__tests__/sse.test.ts"
+      ],
+      "test_names": [
+        "TestSSELive_LastEventIDHeader",
+        "TestSSELive_CatchUpOnReconnect",
+        "reconnect with ?since= catches up missed events",
+        "tracks last event ID from event.lastEventId",
+        "uses latest event ID when receiving multiple mutations",
+        "connect with explicit since overrides last event ID",
+        "does not overwrite newer ID with older ID (out-of-order)"
+      ],
+      "notes": "TestSSELive_LastEventIDHeader verifies the Last-Event-ID header value is forwarded to the getMutationsSince callback at the server boundary. TestSSELive_CatchUpOnReconnect confirms that a ?since= connection replays historical mutations before the connected event. realtime-updates.api replicates this end-to-end via the Node HTTP client, verifying the missed-event is actually received after reconnection. sse.test.ts covers the browser-side persistence and transmission of lastEventId across reconnects, including the out-of-order guard. Server + HTTP + client layers all assert the resume-from-position contract."
+    },
+    {
+      "id": "VAL-E2E-SSE-090",
+      "title": "Three browsers connected; mutation visible in other two within 1s",
+      "coverage": "partial",
+      "spec_files": [
+        "internal/webui/frontend/tests/e2e/integration/sse-multiclient.integration.spec.ts",
+        "internal/webui/frontend/tests/e2e/server-push-integration.spec.ts",
+        "internal/webui/app/sse_live_test.go"
+      ],
+      "test_names": [
+        "mutation broadcast reaches two independent browser contexts",
+        "status change broadcast reaches both clients",
+        "update in one window reflects in the other",
+        "TestSSELive_MultipleClients"
+      ],
+      "notes": "Playwright multi-client tests use 2 contexts, not the 3 the assertion requires. TestSSELive_MultipleClients does use 3 concurrent SSE clients and asserts all 3 receive the broadcast, but only at the Go HTTP layer — no UI rendering assertion. The \"within 1s\" latency bound is not enforced anywhere. Coverage is partial because server-side fan-out is verified at the required scale, but UI rendering in 3 browsers is not."
+    },
+    {
+      "id": "VAL-E2E-SSE-091",
+      "title": "Browser A offline; browsers B and C continue receiving mutations",
+      "coverage": "partial",
+      "spec_files": [
+        "internal/webui/frontend/tests/e2e/integration/sse-multiclient.integration.spec.ts",
+        "internal/webui/server/realtime/hub_test.go"
+      ],
+      "test_names": [
+        "connection status shows disconnected during network interruption",
+        "issue created during disconnection appears after reconnect",
+        "TestHub_RegisterAndUnregister",
+        "TestHub_BroadcastDelivers"
+      ],
+      "notes": "sse-multiclient verifies that 1 browser can be disconnected (route abort) and subsequently reconnect, with a queued mutation visible after catch-up. TestHub_RegisterAndUnregister verifies the hub correctly tracks client counts during unregister. No test asserts the \"B and C continue unaffected\" half of the contract with three simultaneous clients where one is offline — the isolation between disconnected and still-connected clients is not directly exercised as a multi-client scenario."
+    },
+    {
+      "id": "VAL-E2E-SSE-100",
+      "title": "10 mutations issued in 100ms; browser sees all 10 events in order",
+      "coverage": "partial",
+      "spec_files": [
+        "internal/webui/frontend/tests/e2e/integration/sse-updates.integration.spec.ts",
+        "internal/webui/frontend/tests/e2e/server-push-integration.spec.ts",
+        "internal/webui/app/sse_live_test.go",
+        "internal/webui/server/realtime/hub_test.go"
+      ],
+      "test_names": [
+        "multiple rapid updates via API are reflected in UI",
+        "multiple rapid mutations are processed in order",
+        "TestSSELive_MonotonicEventIDs",
+        "TestNextEventID_Monotonic"
+      ],
+      "notes": "sse-updates creates 3 issues rapidly and checks they all appear. server-push-integration issues 4 sequential title updates to one issue and asserts final state matches the last. TestSSELive_MonotonicEventIDs broadcasts 5 mutations and asserts strictly increasing event IDs. TestNextEventID_Monotonic asserts the ID generator is monotonic under pure-unit conditions. No test issues 10 mutations within 100ms and asserts all 10 event IDs are observed in order at the browser — the scale, time budget, and browser-level ordering check are all below contract."
+    },
+    {
+      "id": "VAL-E2E-SSE-102",
+      "title": "Concurrent mutations to same issue; final state matches last write",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "server-push-integration's \"multiple rapid mutations are processed in order\" issues 4 sequential title updates via CLI — this is serial, not concurrent. No test issues two (or more) truly concurrent PATCHes from separate sources with different status values and asserts the card ends in the column matching the last-processed PATCH. The concurrent-mutation race condition and last-write-wins behavior are not exercised."
+    },
+    {
+      "id": "VAL-E2E-SSE-110",
+      "title": "Large description update (10KB of text) propagates without truncation",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No Playwright spec or Go test constructs a 10KB description payload and verifies SSE propagation without truncation. Existing tests use small payloads. The validation report notes SSE events are summary notifications (not full payloads) and the client fetches full data via API, but neither the notification path nor the follow-up fetch is tested with a large payload as an edge case."
+    },
+    {
+      "id": "VAL-E2E-SSE-112",
+      "title": "Empty/null fields in mutation payload handled gracefully",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/webui/frontend/tests/e2e/server-push.spec.ts",
+        "internal/webui/frontend/src/api/common/__tests__/sse.test.ts",
+        "internal/webui/server/realtime/hub_test.go"
+      ],
+      "test_names": [
+        "mutation for non-existent issue does not crash app",
+        "malformed SSE data does not crash the app",
+        "app handles unknown mutation types gracefully",
+        "malformed JSON is ignored with warning",
+        "TestMutationPayload_IssueOmitEmpty"
+      ],
+      "notes": "server-push.spec.ts covers all the client-side edge-case payload scenarios the assertion requires: a mutation for a non-existent issue, malformed SSE data, and unknown mutation types — none of which crash the app. sse.test.ts's \"malformed JSON is ignored with warning\" exercises the parser-level resilience. TestMutationPayload_IssueOmitEmpty confirms the server correctly omits the Issue field when nil so clients never see null in an unexpected shape. This is an assertion about graceful handling of edge-case payloads, and the mocked + unit tests are the right layer."
+    },
+    {
+      "id": "VAL-E2E-SSE-130",
+      "title": "SSE event timestamp may differ from browser clock; ordering stable",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/webui/app/sse_live_test.go",
+        "internal/webui/server/realtime/hub_test.go",
+        "internal/webui/frontend/src/api/common/__tests__/sse.test.ts"
+      ],
+      "test_names": [
+        "TestSSELive_MonotonicEventIDs",
+        "TestNextEventID_Monotonic",
+        "does not overwrite newer ID with older ID (out-of-order)",
+        "tracks last event ID from event.lastEventId",
+        "uses latest event ID when receiving multiple mutations"
+      ],
+      "notes": "The assertion's core invariant is that event ordering follows server-assigned event IDs rather than timestamps. TestSSELive_MonotonicEventIDs and TestNextEventID_Monotonic both assert IDs are strictly increasing at the live SSE layer and the pure-hub layer. sse.test.ts's out-of-order guard explicitly asserts the client uses event IDs for ordering and ignores later events with smaller IDs. Collectively, server-assigned ID monotonicity and client-side ID-based ordering are both proven."
+    },
+    {
+      "id": "VAL-E2E-SSE-140",
+      "title": "SSE connection drops; client auto-reconnects within 5s",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/webui/frontend/tests/e2e/server-push.spec.ts",
+        "internal/webui/frontend/tests/e2e/server-push-integration.spec.ts",
+        "internal/webui/frontend/tests/e2e/integration/sse-multiclient.integration.spec.ts",
+        "internal/webui/app/sse_live_test.go",
+        "internal/webui/frontend/src/api/common/__tests__/sse.test.ts"
+      ],
+      "test_names": [
+        "SSE client retries connection on failure",
+        "connection status shows reconnecting or disconnected on failure",
+        "server 500 error triggers reconnection",
+        "SSE reconnects after brief network interruption simulation",
+        "connection status shows disconnected during network interruption",
+        "TestSSELive_RetryFieldInStream",
+        "error triggers reconnecting with unified manual reconnect",
+        "reconnectAttempts resets to 0 on successful open",
+        "open mode uses manual reconnect (EventSource closed on error)"
+      ],
+      "notes": "TestSSELive_RetryFieldInStream asserts the server emits retry: 5000 before the connected event, setting the 5-second reconnect window. server-push.spec.ts's retry tests verify the client reconnects after abort and 500 responses, and that the connection status element reflects the transition. server-push-integration and sse-multiclient verify the real daemon scenario: network abort/offline -> reconnecting state -> recovered. sse.test.ts covers the client-side state machine (connected -> reconnecting -> connected, attempt counter reset). The full connected->disconnected->reconnecting->connected cycle is covered across all layers."
+    }
+  ]
+}
