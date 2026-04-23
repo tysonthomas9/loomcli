@@ -48,15 +48,217 @@ const mockIssues = [
 ]
 
 /**
+ * Workspace fixture used by SearchInput filtering tests. Shape matches the
+ * WorkspaceData interface. WorkspaceLayout calls fetchWorkspaceApi() before
+ * rendering children, so the mock must return an object with a non-empty id
+ * under `{ success: true, data: ... }`.
+ */
+const mockWorkspaceData = {
+  id: "default",
+  name: "default",
+  path: "/test",
+  repos: [],
+  groups: [],
+  agents: [],
+  workspaces: [
+    {
+      id: "default",
+      name: "default",
+      path: "/test",
+      active: true,
+      repo_count: 0,
+      is_default: true,
+    },
+  ],
+  workspace_order: ["default"],
+  default_workspace: "default",
+}
+
+/**
  * Set up API mocks for search tests.
  */
 async function setupMocks(page: Page) {
-  await page.route("**/api/ready", async (route) => {
+  // Neutralize AbortController signals in fetch. React StrictMode (dev mode)
+  // double-fires effects; the cleanup aborts in-flight fetches before they
+  // reach the network. openapi-fetch bakes the signal into the Request
+  // object, so stripping `init.signal` is not enough — we must also
+  // reconstruct Request inputs without their signal. Otherwise page.route
+  // never sees the kanban /issues request because it's aborted pre-dispatch.
+  //
+  // Note: the openapi-fetch middleware may have attached a `_timeoutController`
+  // to the incoming Request for its onResponse cleanup. We preserve that
+  // reference on the reconstructed Request so the middleware's timeout
+  // cleanup still runs and doesn't leak 30s timers.
+  await page.addInitScript(() => {
+    const origFetch = window.fetch
+    window.fetch = function (input: RequestInfo | URL, init?: RequestInit) {
+      const strippedInit: RequestInit = init ? { ...init } : {}
+      if ("signal" in strippedInit) delete strippedInit.signal
+      if (input instanceof Request) {
+        const req = input
+        const newInit: RequestInit = {
+          method: req.method,
+          headers: req.headers,
+          credentials: req.credentials,
+          cache: req.cache,
+          redirect: req.redirect,
+          referrer: req.referrer,
+          referrerPolicy: req.referrerPolicy,
+          integrity: req.integrity,
+          keepalive: req.keepalive,
+        }
+        const preserveTimeout = (target: Request) => {
+          const tc = (req as unknown as { _timeoutController?: unknown })
+            ._timeoutController
+          if (tc) {
+            ;(target as unknown as { _timeoutController: unknown })._timeoutController =
+              tc
+          }
+        }
+        if (req.method !== "GET" && req.method !== "HEAD") {
+          return req
+            .clone()
+            .blob()
+            .then((blob) => {
+              const newReq = new Request(req.url, { ...newInit, body: blob })
+              preserveTimeout(newReq)
+              return origFetch.call(this, newReq, {})
+            })
+        }
+        const newReq = new Request(req.url, newInit)
+        preserveTimeout(newReq)
+        return origFetch.call(this, newReq, {})
+      }
+      return origFetch.call(this, input, strippedInit)
+    }
+  })
+
+  // App config (boot)
+  await page.route("**/api/config", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({ success: true, data: mockIssues }),
+      body: JSON.stringify({ mode: "open" }),
     })
+  })
+
+  // Auth token
+  await page.route("**/api/auth/token", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ token: "test-token-search" }),
+    })
+  })
+
+  // Global health (App shell fetches on mount)
+  await page.route("**/api/health", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ status: "ok", daemon: true }),
+    })
+  })
+
+  // Global backend config
+  await page.route("**/api/config/backend", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        success: true,
+        data: {
+          backend: "shell",
+          source: "default",
+          available: ["shell"],
+          agents: [],
+        },
+      }),
+    })
+  })
+
+  // All /api/workspaces/* endpoints. Dispatches on pathname so a single
+  // handler covers workspace metadata, kanban issues, ready issues, stats,
+  // blocked, graph, and SSE abort.
+  await page.route("**/api/workspaces/**", async (route) => {
+    const url = new URL(route.request().url())
+    const pathname = url.pathname
+
+    // SSE events — abort so we don't hang waitForLoadState("networkidle")
+    if (/\/api\/workspaces\/[^/]+\/events/.test(pathname)) {
+      await route.abort()
+      return
+    }
+
+    // /api/workspaces/{id}/issues — kanban mode hits this via getKanbanIssues
+    // /api/workspaces/{id}/ready — table/list mode hits this via getReadyIssues
+    if (
+      /\/api\/workspaces\/[^/]+\/issues$/.test(pathname) ||
+      /\/api\/workspaces\/[^/]+\/ready$/.test(pathname)
+    ) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ success: true, data: mockIssues }),
+      })
+      return
+    }
+
+    // /api/workspaces/{id}/stats
+    if (/\/api\/workspaces\/[^/]+\/stats$/.test(pathname)) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          success: true,
+          data: { open: 3, closed: 1, total: 4, completion: 25 },
+        }),
+      })
+      return
+    }
+
+    // /api/workspaces/{id}/blocked
+    if (/\/api\/workspaces\/[^/]+\/blocked$/.test(pathname)) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ success: true, data: [] }),
+      })
+      return
+    }
+
+    // /api/workspaces/{id}/issues/graph
+    if (/\/api\/workspaces\/[^/]+\/issues\/graph$/.test(pathname)) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ success: true, data: mockIssues }),
+      })
+      return
+    }
+
+    // /api/workspaces/{id} — workspace metadata. Must return an object with
+    // a non-empty id, otherwise WorkspaceLayout redirects to "/" and loops.
+    if (/^\/api\/workspaces\/[^/]+\/?$/.test(pathname)) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ success: true, data: mockWorkspaceData }),
+      })
+      return
+    }
+
+    // Anything else under /api/workspaces/* — return empty success.
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ success: true, data: [] }),
+    })
+  })
+
+  // Abort loom monitor requests (not workspace-scoped)
+  await page.route("**/monitor/**", async (route) => {
+    await route.abort()
   })
 }
 
@@ -66,7 +268,10 @@ async function setupMocks(page: Page) {
 async function navigateAndWait(page: Page, path: string) {
   const [response] = await Promise.all([
     page.waitForResponse(
-      (res) => res.url().includes("/api/ready") && res.status() === 200
+      (res) =>
+        res.url().includes("/api/workspaces/") &&
+        /\/issues(\?|$)/.test(res.url()) &&
+        res.status() === 200
     ),
     page.goto(path),
   ])
@@ -86,7 +291,7 @@ test.describe("SearchInput filtering", () => {
   })
 
   test("filters issues by title match", async ({ page }) => {
-    await navigateAndWait(page, "/")
+    await navigateAndWait(page, "/ws/default/kanban")
 
     // Verify all 4 cards are visible initially
     await expect(async () => {
@@ -109,7 +314,7 @@ test.describe("SearchInput filtering", () => {
   })
 
   test("filters issues by description match", async ({ page }) => {
-    await navigateAndWait(page, "/")
+    await navigateAndWait(page, "/ws/default/kanban")
 
     // Type "metrics" in search (matches "Dashboard Feature" by description)
     const searchInput = page.getByTestId("search-input-field")
@@ -126,7 +331,7 @@ test.describe("SearchInput filtering", () => {
   })
 
   test("search is case-insensitive", async ({ page }) => {
-    await navigateAndWait(page, "/")
+    await navigateAndWait(page, "/ws/default/kanban")
 
     // Type in uppercase - should still match
     const searchInput = page.getByTestId("search-input-field")
@@ -144,7 +349,7 @@ test.describe("SearchInput filtering", () => {
   })
 
   test("partial match filters correctly", async ({ page }) => {
-    await navigateAndWait(page, "/")
+    await navigateAndWait(page, "/ws/default/kanban")
 
     // Type partial term "Auth" - should match both "Authentication Bug" and "API Endpoint"
     const searchInput = page.getByTestId("search-input-field")
@@ -161,7 +366,7 @@ test.describe("SearchInput filtering", () => {
   })
 
   test("no matches shows empty columns", async ({ page }) => {
-    await navigateAndWait(page, "/")
+    await navigateAndWait(page, "/ws/default/kanban")
 
     // Type a term that doesn't match anything
     const searchInput = page.getByTestId("search-input-field")
@@ -172,13 +377,18 @@ test.describe("SearchInput filtering", () => {
       expect(await countVisibleCards(page)).toBe(0)
     }).toPass({ timeout: 2000 })
 
-    // Verify all columns show 0 count badges
-    const openColumn = page.locator('section[data-status="ready"]')
-    await expect(openColumn.getByLabel("0 issues")).toBeVisible()
+    // When every issue is filtered out, the board renders EmptyWorkspaceBoard
+    // instead of per-column "0 issues" badges. KanbanPage does not forward
+    // the `filters` prop, so hasFiltersActive is false and the heading stays
+    // "No issues yet" — if filters are ever threaded through, the heading
+    // becomes "No issues match your filters" and this locator must update.
+    await expect(
+      page.getByRole("heading", { name: "No issues yet" }),
+    ).toBeVisible()
   })
 
   test("clearing search shows all issues", async ({ page }) => {
-    await navigateAndWait(page, "/")
+    await navigateAndWait(page, "/ws/default/kanban")
 
     // First, filter to show fewer cards
     const searchInput = page.getByTestId("search-input-field")
@@ -203,7 +413,7 @@ test.describe("SearchInput filtering", () => {
   })
 
   test("search highlights matching text in card titles", async ({ page }) => {
-    await navigateAndWait(page, "/")
+    await navigateAndWait(page, "/ws/default/kanban")
 
     // Wait for cards to render before searching
     await expect(async () => {
@@ -228,7 +438,7 @@ test.describe("SearchInput filtering", () => {
   })
 
   test("clearing search removes highlight marks", async ({ page }) => {
-    await navigateAndWait(page, "/")
+    await navigateAndWait(page, "/ws/default/kanban")
 
     const searchInput = page.getByTestId("search-input-field")
     await searchInput.fill("Auth")
@@ -251,7 +461,7 @@ test.describe("SearchInput filtering", () => {
   })
 
   test("Escape key clears search", async ({ page }) => {
-    await navigateAndWait(page, "/")
+    await navigateAndWait(page, "/ws/default/kanban")
 
     // First, filter to show fewer cards
     const searchInput = page.getByTestId("search-input-field")
