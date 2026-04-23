@@ -159,6 +159,20 @@ services:
         done
         wget -qO- "$$LOOM_FLEET_URL/healthz" > /dev/null || { echo "[loom-fleet] FATAL: fleet-db unreachable"; exit 1; }
 
+        # Bootstrap a minimal git repo + PARITY loom workspace so the
+        # webui has something to render. loom-beads does this implicitly
+        # via `bd init` + the auto-registered workspace; loom-fleet needs
+        # it explicit because there's no beads daemon to piggy-back on.
+        if [ ! -d .git ]; then
+          git init -q
+          git config user.email "parity@fixture.local"
+          git config user.name  "parity"
+          echo "initial" > .init
+          git add .init
+          git commit -q -m "initial"
+        fi
+        loom workspace create PARITY --repos /workspace 2>&1 | tail -3 || true
+
         exec loom serve --bind 0.0.0.0 --port 8080
     networks: [parity]
     ports:

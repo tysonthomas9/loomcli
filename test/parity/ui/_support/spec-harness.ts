@@ -87,6 +87,10 @@ export const parityTest = base.extend<ParityFixtures>({
  */
 export function useParityHooks() {
     parityTest.beforeAll(async () => {
+        // Skip sanity gate on operator request — see global-setup.ts.
+        if (process.env.PARITY_SKIP_PREFLIGHT === "1") {
+            return;
+        }
         // Runs once per worker — preflight caches, so cheap to call again.
         await preflight();
     });

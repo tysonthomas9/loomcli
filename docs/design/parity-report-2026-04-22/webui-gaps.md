@@ -407,4 +407,4 @@ See `internal/backend/paritytest/testdata/cli-fixtures/*.json`:
 4. Optionally: capture screenshots into a `screenshots/` sibling dir
    and link from the relevant rows
 
-<!-- preflight: 2026-04-23T00:22:22.955Z all_passed=false -->
+<!-- preflight: 2026-04-23T00:29:09.770Z all_passed=false -->

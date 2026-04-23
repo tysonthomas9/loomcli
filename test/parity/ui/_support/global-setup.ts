@@ -13,6 +13,16 @@
 import { preflight } from "./preflight";
 
 export default async function globalSetup(): Promise<void> {
+    // Escape hatch: PARITY_SKIP_PREFLIGHT=1 skips the preflight's environment
+    // sanity gate. Tests still exercise both backends — they just aren't
+    // blocked on preflight assumptions that may not hold in every
+    // environment (podman vs docker, /api/config backend exposure, etc.).
+    // Only use in exploratory runs; CI should keep preflight enforced.
+    if (process.env.PARITY_SKIP_PREFLIGHT === "1") {
+        // eslint-disable-next-line no-console
+        console.log("[global-setup] PARITY_SKIP_PREFLIGHT=1 — preflight bypassed");
+        return;
+    }
     // eslint-disable-next-line no-console
     console.log("[global-setup] running parity preflight...");
     await preflight(); // throws on any failure — suite aborts.
