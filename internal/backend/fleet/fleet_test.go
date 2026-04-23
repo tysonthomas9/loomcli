@@ -177,10 +177,22 @@ func TestGet_HappyPath(t *testing.T) {
 	}
 
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != "GET" || !strings.HasSuffix(r.URL.Path, "/issues/issue-1") {
+		// Get fires three requests: the primary /issues/{id} (returning
+		// the slim record that fleet-db ships), then /deps and /comments
+		// to populate the embedded relations that beads' IssueDetails
+		// carries inline but fleet-db doesn't. The deps/comments calls
+		// are tolerated with empty-list responses — the test only
+		// asserts that the primary issue fetch happened correctly.
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/issues/issue-1"):
+			respondOK(w, details)
+		case strings.HasSuffix(r.URL.Path, "/deps"):
+			respondOK(w, map[string]interface{}{"dependencies": []interface{}{}})
+		case strings.HasSuffix(r.URL.Path, "/comments"):
+			respondOK(w, map[string]interface{}{"comments": []interface{}{}})
+		default:
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
 		}
-		respondOK(w, details)
 	})
 	defer ts.Close()
 

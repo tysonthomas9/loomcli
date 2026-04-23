@@ -255,7 +255,56 @@ func (b *FleetBackend) Get(ctx context.Context, id string) (*backend.IssueDetail
 		return nil, backend.ErrInternal("Get", "unmarshal response", err)
 	}
 	result := detailsToDetailData(&details)
+
+	// fleet-db's GET /issues/{id} response is the slim issue record — no
+	// inline dependencies or comments (beads' IssueDetails embeds both).
+	// Fetch them via the dedicated list endpoints so the returned
+	// IssueDetailData matches the beads contract callers rely on
+	// (webui/service/issue_impl.go#ListDependencies projects off
+	// result.Dependencies, and the /issues/{id} UI route does the same).
+	// Failures are non-fatal: the primary Get already succeeded and
+	// empty-list is a reasonable degraded mode.
+	if deps, err := b.fetchDependencies(ctx, id); err == nil {
+		result.Dependencies = deps
+	}
+	if comments, err := b.ListComments(ctx, id); err == nil {
+		result.Comments = comments
+	}
+
 	return &result, nil
+}
+
+// fetchDependencies calls fleet-db's GET /issues/{id}/deps and projects
+// the native payload ({"dependencies":[{issue_id, depends_on_id, type,
+// created_at, ...}]}) into the backend.DependencyData shape.
+func (b *FleetBackend) fetchDependencies(ctx context.Context, id string) ([]backend.DependencyData, error) {
+	resp, err := b.exec(ctx, "Get", "GET", "/issues/"+url.PathEscape(id)+"/deps", nil)
+	if err != nil {
+		return nil, err
+	}
+	if !hasData(resp) {
+		return nil, nil
+	}
+	type depWire struct {
+		IssueID     string `json:"issue_id"`
+		DependsOnID string `json:"depends_on_id"`
+		Type        string `json:"type"`
+	}
+	var wrap struct {
+		Dependencies []depWire `json:"dependencies"`
+	}
+	if json.Unmarshal(resp.Data, &wrap) != nil {
+		return nil, nil
+	}
+	out := make([]backend.DependencyData, 0, len(wrap.Dependencies))
+	for _, d := range wrap.Dependencies {
+		out = append(out, backend.DependencyData{
+			IssueID:     d.IssueID,
+			DependsOnID: d.DependsOnID,
+			Type:        d.Type,
+		})
+	}
+	return out, nil
 }
 
 func (b *FleetBackend) List(ctx context.Context, opts backend.ListOpts) ([]backend.IssueData, error) {
