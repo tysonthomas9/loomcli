@@ -1,0 +1,430 @@
+{
+  "contract_file": "frontend/settings-obs-usage.md",
+  "validation_report": "reports/validation-settings-obs-usage.json",
+  "audit_date": "2026-04-23T10:07:25Z",
+  "spec_files_searched": [
+    "internal/webui/frontend/tests/e2e/nav-rail.spec.ts",
+    "internal/webui/frontend/tests/e2e/keyboard-global-shortcuts.spec.ts",
+    "internal/webui/frontend/tests/e2e/workspace-breadcrumb.spec.ts",
+    "internal/webui/frontend/tests/e2e/multi-workspace-monitoring.spec.ts",
+    "internal/webui/frontend/tests/e2e/assembled-views.spec.ts",
+    "internal/webui/frontend/tests/e2e/skeleton.spec.ts",
+    "internal/webui/frontend/tests/e2e/toast-notifications.spec.ts",
+    "internal/webui/frontend/tests/e2e/stats-header.spec.ts",
+    "internal/webui/frontend/tests/e2e/monitor-dashboard.spec.ts",
+    "internal/webui/frontend/tests/e2e/monitor-panels.spec.ts",
+    "internal/webui/frontend/tests/e2e/monitor-degradation.spec.ts",
+    "internal/webui/frontend/tests/e2e/monitor-visual-regression.spec.ts",
+    "internal/webui/frontend/tests/e2e/monitor-backlog-label.spec.ts",
+    "internal/webui/frontend/tests/e2e/journey-monitor-drilldown.spec.ts",
+    "internal/webui/frontend/tests/e2e/sessions-tab.spec.ts",
+    "internal/webui/frontend/tests/e2e/session-detail-view.spec.ts",
+    "internal/webui/frontend/tests/e2e/session-history.spec.ts",
+    "internal/webui/frontend/tests/e2e/session-timeline.spec.ts",
+    "internal/webui/frontend/tests/e2e/view-switcher.spec.ts",
+    "internal/webui/frontend/tests/e2e/router-deeplink.spec.ts",
+    "internal/webui/frontend/tests/e2e/workspace-switcher.spec.ts",
+    "internal/webui/frontend/tests/e2e/visual-regression.spec.ts",
+    "internal/webui/frontend/tests/e2e/visual-regression-panels.spec.ts",
+    "internal/webui/frontend/tests/e2e/auth-integration.spec.ts",
+    "internal/webui/frontend/tests/e2e/smoke.spec.ts",
+    "internal/webui/frontend/tests/e2e/error-boundary.spec.ts",
+    "internal/webui/frontend/tests/e2e/error.spec.ts",
+    "internal/webui/frontend/tests/e2e/app.spec.ts",
+    "internal/webui/frontend/tests/e2e/api/daemon-config.api.spec.ts",
+    "internal/webui/frontend/tests/e2e/integration/"
+  ],
+  "go_test_files_searched": [
+    "internal/webui/handlers/misc/config_test.go",
+    "internal/webui/handlers/misc/config_coverage_test.go",
+    "internal/cli/serve/observability/observability_test.go",
+    "internal/events/metrics_test.go",
+    "internal/webui/app/metrics_test.go",
+    "internal/usage/collector_test.go",
+    "internal/usage/store_test.go",
+    "internal/usage/usage_test.go"
+  ],
+  "summary": {
+    "total_passing": 42,
+    "covered": 2,
+    "partial": 6,
+    "uncovered": 34,
+    "coverage_pct": 4.8
+  },
+  "assertions": [
+    {
+      "id": "VAL-FE-SETTINGS-001",
+      "title": "Settings page loads on navigation",
+      "coverage": "partial",
+      "spec_files": [
+        "nav-rail.spec.ts",
+        "workspace-breadcrumb.spec.ts"
+      ],
+      "test_names": [
+        "clicking Settings switches to settings view",
+        "shows Settings label on settings view"
+      ],
+      "notes": "nav-rail.spec.ts verifies the Settings nav button activates (data-active=true) after click, but does not verify the page content. workspace-breadcrumb.spec.ts navigates to ?view=settings and verifies the h1 'Settings' heading is visible. Neither test asserts that the three required panels (Project Default Backend, Agent Backend Overrides, Terminal Font) render. The assertion requires all three panels visible, which no test currently verifies."
+    },
+    {
+      "id": "VAL-FE-SETTINGS-002",
+      "title": "Current backend value displayed in dropdown",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No Playwright test mounts the SettingsView Default Backend combobox and verifies its value matches the API response. Several specs mock GET /api/config/backend for navigation context (nav-rail, workspace-switcher, multi-workspace-monitoring) but none exercise the BackendSelectorDropdown UI."
+    },
+    {
+      "id": "VAL-FE-SETTINGS-003",
+      "title": "Available backends populate the dropdown",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No Playwright test opens the Backend dropdown on the Settings page and asserts available options are populated from the /api/config/backend/available response."
+    },
+    {
+      "id": "VAL-FE-SETTINGS-004",
+      "title": "Backend selection changes state",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No Playwright test selects a new backend in the Settings page dropdown and verifies the selection is reflected in component state (or enables the Save button)."
+    },
+    {
+      "id": "VAL-FE-SETTINGS-005",
+      "title": "Save button disabled when no changes",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No Playwright test on the Settings page asserts that the Save button is disabled in the initial state (no pending changes)."
+    },
+    {
+      "id": "VAL-FE-SETTINGS-008",
+      "title": "Save button disabled during save operation",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No Playwright test on the Settings page verifies the Save button becomes disabled while a PATCH /api/config/backend request is in flight."
+    },
+    {
+      "id": "VAL-FE-SETTINGS-009",
+      "title": "Rapid save clicks debounced or prevented",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No Playwright test exercises the Save button click flow and asserts that rapid clicks are deduplicated (single PATCH request, not one per click)."
+    },
+    {
+      "id": "VAL-FE-SETTINGS-011",
+      "title": "Agent overrides empty state",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No Playwright test verifies the Agent Backend Overrides section displays an empty-state message (e.g., 'No agent overrides set') when no overrides are configured."
+    },
+    {
+      "id": "VAL-FE-SETTINGS-013",
+      "title": "Terminal font family dropdown loads presets",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No Playwright test opens the Terminal Font family dropdown on the Settings page and verifies the preset options (e.g., Menlo, Monaco, Consolas, Courier New, Custom) populate the listbox."
+    },
+    {
+      "id": "VAL-FE-SETTINGS-014",
+      "title": "Terminal font size dropdown shows pixel options",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No Playwright test opens the Terminal Font size dropdown and verifies pixel options (e.g., 10px, 12px, 14px) are presented."
+    },
+    {
+      "id": "VAL-FE-SETTINGS-015",
+      "title": "Custom font input appears when \"Custom\" selected",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No Playwright test selects the 'Custom' option from the Terminal Font family dropdown and asserts a text input appears for entering a custom font name."
+    },
+    {
+      "id": "VAL-FE-SETTINGS-016",
+      "title": "Terminal font selection persists in localStorage",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No Playwright test selects a terminal font and verifies the value is written to localStorage (useTerminalFont hook) and restored after reload."
+    },
+    {
+      "id": "VAL-FE-SETTINGS-017",
+      "title": "Observability navigation button",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "The validation report references an 'Open Observability' button with data-testid=observability-nav-button embedded within the Settings page (SettingsView.tsx:306), separate from the NavRail Observability button. No Playwright test locates this Settings-embedded button or verifies it navigates to the Observability view. nav-rail.spec.ts tests the nav rail button, which is a different element."
+    },
+    {
+      "id": "VAL-FE-SETTINGS-ADV-003",
+      "title": "Rapid backend changes and saves",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No Playwright test exercises the rapid-change scenario: select backend A, save, immediately select backend B, save, and verify both requests resolve cleanly without race conditions."
+    },
+    {
+      "id": "VAL-FE-SETTINGS-ADV-005",
+      "title": "Required field validation — empty backend",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No Playwright test attempts to submit the backend configuration with an empty/unset backend value and asserts that client-side validation blocks the save (or the button is disabled)."
+    },
+    {
+      "id": "VAL-FE-SETTINGS-A11Y-001",
+      "title": "Settings page keyboard accessible",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "keyboard-global-shortcuts.spec.ts verifies the '0' key switches the global view to Settings, but does not tab-navigate through the Settings page controls (backend dropdown, save button, font pickers, agent overrides) to verify keyboard accessibility of interactive elements."
+    },
+    {
+      "id": "VAL-FE-OBS-001",
+      "title": "Observability page loads with metrics cards",
+      "coverage": "partial",
+      "spec_files": [
+        "multi-workspace-monitoring.spec.ts"
+      ],
+      "test_names": [
+        "Observability view renders dashboard with metric panels"
+      ],
+      "notes": "Test navigates to ?view=observability, waits for /api/observability/metrics, and verifies four REGIONS render (Task Timeline, Agent Utilization, Errors & Restarts, Epic Progress). However, the assertion requires the four summary metric CARDS to render (Tasks/Hour, Avg Duration, Lines/Hour, Error Rate) — these are different UI elements (MetricsCards vs TaskTimeline/AgentUtilization/ErrorIndicators/EpicProgress panels). The test does NOT verify the four metric cards."
+    },
+    {
+      "id": "VAL-FE-OBS-002",
+      "title": "Metrics cards show numeric values",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test asserts the four metric cards render numeric values with correct formatting (Tasks/Hour=0, Avg Duration with 's' suffix, Lines/Hour=0, Error Rate with '%' suffix). The multi-workspace-monitoring test does not inspect MetricsCards content."
+    },
+    {
+      "id": "VAL-FE-OBS-005",
+      "title": "Hourly chart empty state",
+      "coverage": "partial",
+      "spec_files": [
+        "multi-workspace-monitoring.spec.ts"
+      ],
+      "test_names": [
+        "Observability view renders dashboard with metric panels"
+      ],
+      "notes": "Test verifies the 'Task Timeline' region and 'Hourly Completions (24h)' heading are visible, but does NOT assert the empty-state text 'No task completions in the last 24 hours' appears when tasks_by_hour is empty."
+    },
+    {
+      "id": "VAL-FE-OBS-008",
+      "title": "Agent utilization empty state",
+      "coverage": "partial",
+      "spec_files": [
+        "multi-workspace-monitoring.spec.ts"
+      ],
+      "test_names": [
+        "Observability view renders dashboard with metric panels"
+      ],
+      "notes": "Test verifies the 'Agent Utilization' region is visible, but does NOT assert the empty-state text 'No agent utilization data' when agent_utilization is empty."
+    },
+    {
+      "id": "VAL-FE-OBS-013",
+      "title": "Error indicators empty state",
+      "coverage": "partial",
+      "spec_files": [
+        "multi-workspace-monitoring.spec.ts"
+      ],
+      "test_names": [
+        "Observability view renders dashboard with metric panels"
+      ],
+      "notes": "Test verifies the 'Errors & Restarts' region is visible, but does NOT assert the empty-state text 'No errors or restarts in the last 24 hours' when errors_by_task is empty."
+    },
+    {
+      "id": "VAL-FE-OBS-015",
+      "title": "Epic progress section renders",
+      "coverage": "covered",
+      "spec_files": [
+        "multi-workspace-monitoring.spec.ts"
+      ],
+      "test_names": [
+        "Observability view renders dashboard with metric panels"
+      ],
+      "notes": "Test explicitly verifies both the 'Epic Progress' region (via getByRole('region', { name: 'Epic Progress' })) AND the 'Epic Progress' heading (via getByRole('heading', { name: 'Epic Progress' })) are visible. Matches the expected result 'Section with heading visible'."
+    },
+    {
+      "id": "VAL-FE-OBS-016",
+      "title": "Last updated timestamp",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No Playwright test verifies a 'Last updated ...' timestamp renders on the Observability dashboard after metrics load."
+    },
+    {
+      "id": "VAL-FE-OBS-018",
+      "title": "Metrics polling at 30-second intervals",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No Playwright test observes the network over a 30+ second window to verify /api/observability/metrics is polled on a 30s cadence, nor uses clock/timer mocking to verify the interval."
+    },
+    {
+      "id": "VAL-FE-OBS-022",
+      "title": "Loading skeleton during initial load",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "skeleton.spec.ts covers generic loading skeletons but does not exercise the Observability dashboard's LoadingSkeleton.Observability during the initial metrics fetch. No test delays the metrics response and verifies the skeleton placeholder appears."
+    },
+    {
+      "id": "VAL-FE-OBS-A11Y-001",
+      "title": "Observability charts have alt text or descriptions",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No Playwright test inspects the Observability charts (TaskTimeline, AgentUtilizationBars, ErrorIndicators, EpicProgress) for aria-label, alt attributes, or figcaption elements. The region aria-labels verified by multi-workspace-monitoring.spec.ts are on container regions, not on the charts themselves."
+    },
+    {
+      "id": "VAL-FE-USAGE-001",
+      "title": "Usage dashboard loads with filter bar",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No Playwright spec exists for the standalone UsageDashboard component. sessions-tab.spec.ts tests the SessionsTab within IssueDetailPanel, which is a different component. No test navigates to the standalone Usage view and verifies the filter bar renders."
+    },
+    {
+      "id": "VAL-FE-USAGE-002",
+      "title": "Date range filter options",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test opens the date-range filter on the Usage dashboard and asserts the preset options (Today, Last 7 days, Last 30 days, All time) are listed."
+    },
+    {
+      "id": "VAL-FE-USAGE-022",
+      "title": "Usage empty state — zero sessions",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No Playwright test mocks /api/monitor/usage to return zero sessions and asserts an empty-state message renders on the Usage dashboard."
+    },
+    {
+      "id": "VAL-FE-USAGE-024",
+      "title": "Usage loading state",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No Playwright test delays the /api/monitor/usage response and verifies a loading indicator renders on the Usage dashboard."
+    },
+    {
+      "id": "VAL-FE-USAGE-025",
+      "title": "Usage polling every 30 seconds",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No Playwright test observes network calls over a 30+ second window on the Usage dashboard, nor uses clock mocking to verify the 30s polling interval."
+    },
+    {
+      "id": "VAL-FE-USAGE-026",
+      "title": "Single agent filter hides agent dropdown",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test asserts that when the usage dataset contains only a single agent, the agent filter dropdown is hidden (or disabled)."
+    },
+    {
+      "id": "VAL-FE-USAGE-027",
+      "title": "Single backend filter hides backend dropdown",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test asserts that when the usage dataset contains only a single backend, the backend filter dropdown is hidden (or disabled)."
+    },
+    {
+      "id": "VAL-FE-USAGE-028",
+      "title": "Cost formatting edge case — very small costs",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test asserts formatting of very small costs (e.g., $0.001 displayed as '$0.00') on the Usage dashboard."
+    },
+    {
+      "id": "VAL-FE-USAGE-030",
+      "title": "Token formatting edge case — 999 tokens",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test asserts token formatting in the 999-token edge case (should render as '999', not '1K') on the Usage dashboard."
+    },
+    {
+      "id": "VAL-FE-USAGE-031",
+      "title": "Average cost calculation with zero sessions",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test asserts the Usage dashboard displays '$0.00' for average cost when session count is zero (avoiding NaN)."
+    },
+    {
+      "id": "VAL-FE-USAGE-ADV-001",
+      "title": "Usage dashboard with zero sessions",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "Adversarial: no test verifies the Usage dashboard renders without error when the API returns zero sessions across all filters."
+    },
+    {
+      "id": "VAL-FE-USAGE-A11Y-001",
+      "title": "Usage table has semantic HTML",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test inspects the Usage dashboard recent-sessions table for semantic HTML elements (<table>, <thead>, <tbody>, <tr>, <td>)."
+    },
+    {
+      "id": "VAL-FE-USAGE-A11Y-002",
+      "title": "Progress bar aria attributes",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test asserts the cost-by-agent progress bars on the Usage dashboard carry aria-valuenow, aria-valuemin, and aria-valuemax attributes."
+    },
+    {
+      "id": "VAL-FE-INT-001",
+      "title": "Settings view loads SettingsView component",
+      "coverage": "partial",
+      "spec_files": [
+        "nav-rail.spec.ts",
+        "workspace-breadcrumb.spec.ts",
+        "keyboard-global-shortcuts.spec.ts"
+      ],
+      "test_names": [
+        "clicking Settings switches to settings view",
+        "shows Settings label on settings view",
+        "Number keys switch views (3=terminal, 0=settings)"
+      ],
+      "notes": "Navigation tests implicitly verify that the Settings route lazy-loads without error (h1 'Settings' is visible, nav button becomes active). However, no test queries for data-testid=settings-view explicitly or asserts SettingsView component's internal subcomponents (BackendSelectorDropdown, AgentOverrides, TerminalFontPicker) render after Suspense resolves. Partial because the component loads but content is not verified."
+    },
+    {
+      "id": "VAL-FE-INT-002",
+      "title": "Observability page loads ObservabilityDashboard component",
+      "coverage": "covered",
+      "spec_files": [
+        "multi-workspace-monitoring.spec.ts"
+      ],
+      "test_names": [
+        "Observability view renders dashboard with metric panels"
+      ],
+      "notes": "Test navigates to ?view=observability (lazy-loaded route), waits for GET /api/observability/metrics 200 response, and verifies multiple ObservabilityDashboard panels render (Task Timeline, Agent Utilization, Errors & Restarts, Epic Progress). Matches the expected result 'Dashboard loads and fetches metrics'."
+    },
+    {
+      "id": "VAL-FE-INT-003",
+      "title": "Usage data refetch on params change",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No Playwright test changes usage filter params (dateRange, agent, backend) and observes a new /api/monitor/usage fetch is triggered with updated query parameters."
+    }
+  ]
+}
