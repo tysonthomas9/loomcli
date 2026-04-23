@@ -1,0 +1,330 @@
+{
+  "contract_file": "frontend/monitor-agents.md",
+  "validation_report": "reports/validation-monitor-agents.json",
+  "audit_date": "2026-04-23T07:59:02Z",
+  "spec_files_searched": [
+    "internal/webui/frontend/tests/e2e/monitor-dashboard.spec.ts",
+    "internal/webui/frontend/tests/e2e/monitor-panels.spec.ts",
+    "internal/webui/frontend/tests/e2e/monitor-degradation.spec.ts",
+    "internal/webui/frontend/tests/e2e/monitor-backlog-label.spec.ts",
+    "internal/webui/frontend/tests/e2e/monitor-visual-regression.spec.ts",
+    "internal/webui/frontend/tests/e2e/agents-sidebar.spec.ts",
+    "internal/webui/frontend/tests/e2e/agent-review-journey.spec.ts",
+    "internal/webui/frontend/tests/e2e/journey-monitor-drilldown.spec.ts",
+    "internal/webui/frontend/tests/e2e/multi-workspace-monitoring.spec.ts",
+    "internal/webui/frontend/tests/e2e/keyboard-escape-layers.spec.ts",
+    "internal/webui/frontend/tests/e2e/keyboard-focus-management.spec.ts",
+    "internal/webui/frontend/tests/e2e/keyboard-global-shortcuts.spec.ts"
+  ],
+  "go_test_files_searched": [
+    "internal/webui/handlers/git/agent_diff_stat_test.go",
+    "internal/webui/handlers/agentcontrol/handlers_test.go",
+    "internal/webui/app/agent_service_test.go"
+  ],
+  "summary": {
+    "total_passing": 23,
+    "covered": 15,
+    "partial": 4,
+    "uncovered": 4,
+    "coverage_pct": 65.2
+  },
+  "assertions": [
+    {
+      "id": "VAL-FE-MON-003",
+      "title": "Monitor page with one agent renders sidebar card and main dashboard",
+      "coverage": "covered",
+      "spec_files": [
+        "monitor-dashboard.spec.ts",
+        "monitor-panels.spec.ts",
+        "journey-monitor-drilldown.spec.ts"
+      ],
+      "test_names": [
+        "clicking Monitor tab shows dashboard",
+        "all 4 panels render with headings",
+        "progress bar shows correct completion percentage",
+        "issue counts display open, closed, and total correctly",
+        "monitor dashboard renders with expected panels"
+      ],
+      "notes": "Extensively covered across monitor-dashboard.spec.ts (monitor-dashboard test id visible, 4-panel rendering, pipeline stages) and monitor-panels.spec.ts (progress bar, issue counts). journey-monitor-drilldown.spec.ts also verifies dashboard render. 15+ explicit behavioral assertions."
+    },
+    {
+      "id": "VAL-FE-AGENT-CARD-001",
+      "title": "Status badge — ready (gray)",
+      "coverage": "covered",
+      "spec_files": [
+        "agents-sidebar.spec.ts",
+        "monitor-panels.spec.ts"
+      ],
+      "test_names": [
+        "working agent shows Working status label",
+        "ready agent shows Ready status label",
+        "agent cards show correct status via data-status attribute"
+      ],
+      "notes": "agents-sidebar.spec.ts verifies both status text labels (Working/Ready) and data-status attributes. monitor-panels.spec.ts verifies 5 cards with data-status attributes covering all status values."
+    },
+    {
+      "id": "VAL-FE-AGENT-CARD-010",
+      "title": "Agent card shows name, role, and repo badge",
+      "coverage": "covered",
+      "spec_files": [
+        "agents-sidebar.spec.ts",
+        "monitor-panels.spec.ts"
+      ],
+      "test_names": [
+        "agent card renders status and metadata",
+        "agent card shows role label",
+        "agent cards display status text and task titles"
+      ],
+      "notes": "agents-sidebar.spec.ts \"agent card renders status and metadata\" verifies nova working card shows Working status, role \"Task\", and repo \"loomcli\". Role label test verifies Task/Plan roles. monitor-panels.spec.ts verifies task titles on cards."
+    },
+    {
+      "id": "VAL-FE-AGENT-CARD-013",
+      "title": "Diff stats display (lines added/removed)",
+      "coverage": "partial",
+      "spec_files": [
+        "monitor-panels.spec.ts"
+      ],
+      "test_names": [
+        "agent cards show git sync indicators (ahead/behind)"
+      ],
+      "notes": "Test verifies +N/-M ahead/behind sync badges (nova +2, falcon -3, ember +1/-1, jade no indicators). However, the validation assertion's actual result shows \"6 changes\" — the working-tree uncommitted changes count, not ahead/behind sync indicators. Missing: explicit test for the \"N changes\" display on agent cards with uncommitted modifications."
+    },
+    {
+      "id": "VAL-FE-AGENT-CARD-014",
+      "title": "Agent card is clickable (keyboard + mouse)",
+      "coverage": "covered",
+      "spec_files": [
+        "monitor-panels.spec.ts"
+      ],
+      "test_names": [
+        "agent cards have interactive attributes and keyboard support"
+      ],
+      "notes": "Explicitly verifies role=\"button\", tabindex=\"0\", focus() works on agent cards, and click triggers handler. Covers both keyboard focus and mouse click paths."
+    },
+    {
+      "id": "VAL-FE-SIDEBAR-001",
+      "title": "Agents sidebar is collapsible",
+      "coverage": "covered",
+      "spec_files": [
+        "agents-sidebar.spec.ts"
+      ],
+      "test_names": [
+        "toggle button collapses sidebar",
+        "toggle button expands sidebar",
+        "collapsed sidebar shows badge with agent count"
+      ],
+      "notes": "Three explicit tests under \"sidebar collapse\" describe block. Verifies data-collapsed=\"true\"/\"false\" on the aside element, content visibility toggling, and the count badge showing when collapsed."
+    },
+    {
+      "id": "VAL-FE-SIDEBAR-004",
+      "title": "Workspace groups are collapsible",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "grep for \"Collapse agents\", \"workspace group collapse\", and collapse/expand toggles within workspace groups returned zero matches in any e2e spec. The existing \"sidebar collapse\" tests only cover the top-level WorkspaceTree aside collapse (data-collapsed on the aside), not the per-workspace \"Collapse agents\" toggle button (the ›/▾ indicator that hides agent cards within a single workspace group). Needs a new test."
+    },
+    {
+      "id": "VAL-FE-SIDEBAR-006",
+      "title": "Section count badge shows total agent count",
+      "coverage": "covered",
+      "spec_files": [
+        "agents-sidebar.spec.ts",
+        "monitor-panels.spec.ts"
+      ],
+      "test_names": [
+        "agent section shows with Agents header and count",
+        "agent summary bar shows correct counts"
+      ],
+      "notes": "agents-sidebar.spec.ts verifies the Agents header with count badge (\"2\"). monitor-panels.spec.ts \"agent summary bar shows correct counts\" verifies active/idle/error/sync breakdown counts (active:2, idle:2, error:1, sync:2)."
+    },
+    {
+      "id": "VAL-FE-SIDEBAR-007",
+      "title": "Work queue section displays task category buttons",
+      "coverage": "covered",
+      "spec_files": [
+        "agents-sidebar.spec.ts"
+      ],
+      "test_names": [
+        "work queue section renders with category labels"
+      ],
+      "notes": "Verifies \"Work Queue\" heading visible plus all 6 category labels: Backlog, Open, Blocked, In Progress, Needs Review, Done."
+    },
+    {
+      "id": "VAL-FE-SIDEBAR-008",
+      "title": "Task category buttons highlight when count > 0",
+      "coverage": "covered",
+      "spec_files": [
+        "agents-sidebar.spec.ts"
+      ],
+      "test_names": [
+        "work queue shows correct counts from issues"
+      ],
+      "notes": "Verifies Open count \"1\" with data-highlight=\"true\" and In Progress \"1\" with highlight — explicitly tests the highlight-on-nonzero behavior."
+    },
+    {
+      "id": "VAL-FE-SIDEBAR-010",
+      "title": "Work queue section is collapsible",
+      "coverage": "covered",
+      "spec_files": [
+        "agents-sidebar.spec.ts"
+      ],
+      "test_names": [
+        "work queue toggles expand/collapse"
+      ],
+      "notes": "Category labels visible when expanded and hidden when collapsed; toggle action works both directions."
+    },
+    {
+      "id": "VAL-FE-SIDEBAR-018",
+      "title": "Footer displays issue statistics",
+      "coverage": "covered",
+      "spec_files": [
+        "agents-sidebar.spec.ts"
+      ],
+      "test_names": [
+        "status bar shows working/reviewing/idle counts",
+        "status bar counts update with multiple working agents"
+      ],
+      "notes": "Verifies footer display with \"1 working\", \"0 reviewing\", \"1 idle\" in the first test and \"2 working\", \"0 reviewing\", \"1 idle\" in the second — confirms live count updates."
+    },
+    {
+      "id": "VAL-FE-MON-029",
+      "title": "Connection banner shows 'stale data' warning when offline",
+      "coverage": "covered",
+      "spec_files": [
+        "monitor-degradation.spec.ts"
+      ],
+      "test_names": [
+        "stale data warning banner appears when disconnected with cached data"
+      ],
+      "notes": "Explicitly verifies the ConnectionBanner via role=\"alert\", text content \"Disconnected from loom server\", \"Last updated\" timestamp, and the \"Retry Now\" button. Also confirms cached stale data remains visible in the agent panel."
+    },
+    {
+      "id": "VAL-FE-MON-050",
+      "title": "Monitor page layout at 1440px (desktop)",
+      "coverage": "partial",
+      "spec_files": [
+        "monitor-visual-regression.spec.ts"
+      ],
+      "test_names": [
+        "default vertical stack at 1280x720"
+      ],
+      "notes": "monitor-visual-regression.spec.ts verifies desktop vertical stack layout with explicit panel visibility/heading assertions but uses viewport 1280x720 (line 531-532), not the 1440px specified in the assertion. Missing: a test pinned to 1440px viewport width."
+    },
+    {
+      "id": "VAL-FE-MON-051",
+      "title": "Monitor page layout at 1024px (tablet)",
+      "coverage": "uncovered",
+      "spec_files": [
+        "monitor-visual-regression.spec.ts"
+      ],
+      "test_names": [],
+      "notes": "Explicitly SKIPPED via test.describe.skip(\"responsive layout at 1024px\") at line 573 of monitor-visual-regression.spec.ts. Skipped tests do not count as coverage per the audit rules. The skip reason is that NavRail does not expose the Monitor button below desktop widths."
+    },
+    {
+      "id": "VAL-FE-MON-052",
+      "title": "Monitor page layout at 768px (mobile)",
+      "coverage": "uncovered",
+      "spec_files": [
+        "monitor-visual-regression.spec.ts"
+      ],
+      "test_names": [],
+      "notes": "Explicitly SKIPPED via test.describe.skip(\"responsive layout at 768px\") at line 609 of monitor-visual-regression.spec.ts. Same skip reason as MON-051 — NavRail does not expose the Monitor button at mobile widths."
+    },
+    {
+      "id": "VAL-FE-MON-060",
+      "title": "Tab navigates through sidebar toggles and buttons",
+      "coverage": "partial",
+      "spec_files": [
+        "keyboard-focus-management.spec.ts",
+        "keyboard-global-shortcuts.spec.ts",
+        "keyboard-escape-layers.spec.ts"
+      ],
+      "test_names": [
+        "Skip link is first focusable element",
+        "CreateIssueModal: Tab cycles within modal fields",
+        "Shift+Tab wraps from first to last element in modal"
+      ],
+      "notes": "keyboard-focus-management.spec.ts verifies Tab cycling inside CreateIssueModal and the WorkspaceSwitcher. keyboard-global-shortcuts.spec.ts covers number keys / ? / Cmd+K. But NO test specifically exercises Tab sequentially through sidebar collapse toggle → workspace entries → agent cards → work queue toggle → category buttons to verify the sidebar's interactive-element tab order."
+    },
+    {
+      "id": "VAL-FE-MON-061",
+      "title": "Tab navigates through agent cards",
+      "coverage": "partial",
+      "spec_files": [
+        "monitor-panels.spec.ts",
+        "keyboard-focus-management.spec.ts"
+      ],
+      "test_names": [
+        "agent cards have interactive attributes and keyboard support"
+      ],
+      "notes": "monitor-panels.spec.ts verifies agent cards have tabindex=\"0\" (so they ARE in the tab order) and focus() programmatically works. keyboard-focus-management.spec.ts covers Tab inside modals. However, no test explicitly presses Tab to walk focus from one agent card to the next across multiple cards in the monitor panel."
+    },
+    {
+      "id": "VAL-FE-MON-062",
+      "title": "Enter/Space activates card click handler",
+      "coverage": "covered",
+      "spec_files": [
+        "monitor-panels.spec.ts"
+      ],
+      "test_names": [
+        "agent cards have interactive attributes and keyboard support"
+      ],
+      "notes": "Cards use role=\"button\" + tabindex=\"0\" + click handler — native button semantics guarantee Enter/Space activation. Test verifies role, tabindex, focus, and click. HTMLButtonElement activation via Enter/Space is a platform guarantee when role=\"button\" is set on a focusable element with click handling."
+    },
+    {
+      "id": "VAL-FE-MON-075",
+      "title": "Missing optional fields render gracefully",
+      "coverage": "covered",
+      "spec_files": [
+        "monitor-dashboard.spec.ts",
+        "monitor-degradation.spec.ts",
+        "agents-sidebar.spec.ts"
+      ],
+      "test_names": [
+        "renders with empty agent data",
+        "empty agents shows No agents found message",
+        "all panels show empty state messages when no data",
+        "no agent section when loom unavailable and no config agents"
+      ],
+      "notes": "Extensively covered across empty/degraded states: \"No agents found\" text, empty state messages across all 4 panels, \"No blocking dependencies\" checkmark, and sidebar hiding the agent section when there are no agents at all."
+    },
+    {
+      "id": "VAL-FE-MON-090",
+      "title": "Agent card is keyboard accessible",
+      "coverage": "covered",
+      "spec_files": [
+        "monitor-panels.spec.ts",
+        "agent-review-journey.spec.ts"
+      ],
+      "test_names": [
+        "agent cards have interactive attributes and keyboard support",
+        "Step 1-3: Open agent panel and verify Info tab"
+      ],
+      "notes": "monitor-panels.spec.ts verifies role=\"button\", tabindex=\"0\", focusability, and click. agent-review-journey.spec.ts drives the full panel navigation (Info, Git, Diff, Files tabs) demonstrating end-to-end keyboard-actionable card behavior."
+    },
+    {
+      "id": "VAL-FE-MON-110",
+      "title": "Clicking agent card in sidebar opens detail panel",
+      "coverage": "covered",
+      "spec_files": [
+        "agent-review-journey.spec.ts",
+        "journey-monitor-drilldown.spec.ts",
+        "multi-workspace-monitoring.spec.ts"
+      ],
+      "test_names": [
+        "Step 1-3: Open agent panel and verify Info tab",
+        "Click bottleneck issue to open detail panel",
+        "clicking agent opens AgentDetailPanel"
+      ],
+      "notes": "agent-review-journey.spec.ts verifies panel open (data-state=\"open\", h2 contains agent name) plus close via X button and Escape. journey-monitor-drilldown.spec.ts covers bottleneck click opening detail panel. multi-workspace-monitoring.spec.ts covers the workspace-switch → click-agent → panel-open flow."
+    },
+    {
+      "id": "VAL-FE-MON-300",
+      "title": "Dark-mode assertions verify theme attribute before contrast checks",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "Search across all 12 monitor-related e2e specs for \"dark\", \"theme\", \"data-theme\", and \"contrast\" returned zero matches. The only dark-text/contrast test in the entire e2e suite is kanban-redesign.spec.ts \"P2 badge has dark text (WCAG contrast)\" — unrelated to monitor view and does not toggle a theme attribute. No existing test sets document.documentElement.dataset.theme to \"dark\" or verifies contrast-sensitive monitor elements in dark mode."
+    }
+  ]
+}
