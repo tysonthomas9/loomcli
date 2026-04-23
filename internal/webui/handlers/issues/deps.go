@@ -16,6 +16,34 @@ type AddDependencyRequest struct {
 	DepType     string `json:"dep_type,omitempty"` // defaults to "blocks"
 }
 
+// HandleListDependencies returns a handler that lists dependencies for an
+// issue. The wire shape mirrors IssueDetailData.dependencies so the FE consumes
+// it with no translation: each entry is {id, title, status, priority,
+// dependency_type, created_at, ...}.
+func HandleListDependencies(svc service.IssueService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		issueID := r.PathValue("id")
+		if issueID == "" {
+			handler.WriteJSON(w, http.StatusBadRequest, DependencyResponse{
+				Success: false,
+				Error:   "missing issue ID",
+			})
+			return
+		}
+
+		data, err := svc.ListDependencies(r.Context(), issueID)
+		if err != nil {
+			handler.HandleServiceError(w, err)
+			return
+		}
+
+		handler.WriteJSON(w, http.StatusOK, DependencyResponse{
+			Success: true,
+			Data:    data,
+		})
+	}
+}
+
 // DependencyResponse wraps the dependency operation result for JSON response.
 // Follows the same structure as other API responses for consistency.
 type DependencyResponse struct {

@@ -159,11 +159,14 @@ type mockIssueService struct {
 	createIssueFunc      func(ctx context.Context, params service.CreateIssueParams) (json.RawMessage, error)
 	patchIssueFunc       func(ctx context.Context, params service.PatchIssueParams) error
 	closeIssueFunc       func(ctx context.Context, params service.CloseIssueParams) (json.RawMessage, error)
+	reopenIssueFunc      func(ctx context.Context, params service.ReopenIssueParams) error
 	claimIssueFunc       func(ctx context.Context, params service.ClaimIssueParams) (json.RawMessage, error)
 	deleteIssueFunc      func(ctx context.Context, issueID string) (json.RawMessage, error)
 	addCommentFunc       func(ctx context.Context, params service.AddCommentParams) (*types.Comment, error)
+	listCommentsFunc     func(ctx context.Context, issueID string) ([]*types.Comment, error)
 	addDependencyFunc    func(ctx context.Context, params service.AddDependencyParams) error
 	removeDependencyFunc func(ctx context.Context, params service.RemoveDependencyParams) error
+	listDependenciesFunc func(ctx context.Context, issueID string) (json.RawMessage, error)
 	listEventsFunc       func(ctx context.Context, params service.EventListParams) ([]*types.Event, error)
 	moveIssueFunc        func(ctx context.Context, params service.MoveIssueParams) (*service.MoveIssueResult, error)
 	searchIssuesFunc     func(ctx context.Context, params service.SearchIssuesParams) (json.RawMessage, error)
@@ -214,6 +217,24 @@ func (m *mockIssueService) DeleteIssue(ctx context.Context, issueID string) (jso
 func (m *mockIssueService) AddComment(ctx context.Context, params service.AddCommentParams) (*types.Comment, error) {
 	if m.addCommentFunc != nil {
 		return m.addCommentFunc(ctx, params)
+	}
+	return nil, nil
+}
+func (m *mockIssueService) ListComments(ctx context.Context, issueID string) ([]*types.Comment, error) {
+	if m.listCommentsFunc != nil {
+		return m.listCommentsFunc(ctx, issueID)
+	}
+	return nil, nil
+}
+func (m *mockIssueService) ReopenIssue(ctx context.Context, params service.ReopenIssueParams) error {
+	if m.reopenIssueFunc != nil {
+		return m.reopenIssueFunc(ctx, params)
+	}
+	return nil
+}
+func (m *mockIssueService) ListDependencies(ctx context.Context, issueID string) (json.RawMessage, error) {
+	if m.listDependenciesFunc != nil {
+		return m.listDependenciesFunc(ctx, issueID)
 	}
 	return nil, nil
 }

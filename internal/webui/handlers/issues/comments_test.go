@@ -218,6 +218,112 @@ func TestHandleAddComment_Validation(t *testing.T) {
 	}
 }
 
+// TestHandleListComments_Success verifies GET /issues/:id/comments returns the
+// standard {success:true, data:[]} envelope with the comment list inline.
+func TestHandleListComments_Success(t *testing.T) {
+	var capturedIssueID string
+	svc := &mockIssueService{
+		listCommentsFunc: func(ctx context.Context, issueID string) ([]*types.Comment, error) {
+			capturedIssueID = issueID
+			return []*types.Comment{
+				{ID: 1, IssueID: "test-123", Author: "web-ui", Text: "first"},
+				{ID: 2, IssueID: "test-123", Author: "web-ui", Text: "second"},
+			}, nil
+		},
+	}
+	handler := HandleListComments(svc)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/ws/issues/test-123/comments", nil)
+	req.SetPathValue("id", "test-123")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if capturedIssueID != "test-123" {
+		t.Errorf("expected issueID 'test-123', got %q", capturedIssueID)
+	}
+
+	var resp CommentListResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if !resp.Success {
+		t.Errorf("expected success=true, got false (error: %s)", resp.Error)
+	}
+	if len(resp.Data) != 2 {
+		t.Fatalf("expected 2 comments, got %d", len(resp.Data))
+	}
+	if resp.Data[0].Text != "first" {
+		t.Errorf("expected first comment text 'first', got %q", resp.Data[0].Text)
+	}
+}
+
+// TestHandleListComments_EmptyListShape verifies that a backend returning no
+// comments yields a non-null data array so the FE can render unconditionally.
+func TestHandleListComments_EmptyListShape(t *testing.T) {
+	svc := &mockIssueService{
+		listCommentsFunc: func(ctx context.Context, issueID string) ([]*types.Comment, error) {
+			return nil, nil
+		},
+	}
+	handler := HandleListComments(svc)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/ws/issues/test-123/comments", nil)
+	req.SetPathValue("id", "test-123")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	// The raw body must contain "data":[] (not "data":null).
+	body := rec.Body.String()
+	if !strings.Contains(body, `"data":[]`) {
+		t.Errorf("expected data:[] in body, got %q", body)
+	}
+}
+
+// TestHandleListComments_MissingID verifies 400 when :id is empty.
+func TestHandleListComments_MissingID(t *testing.T) {
+	svc := &mockIssueService{}
+	handler := HandleListComments(svc)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/ws/issues//comments", nil)
+	req.SetPathValue("id", "")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp CommentListResponse
+	json.NewDecoder(rec.Body).Decode(&resp)
+	if resp.Error != "missing issue ID" {
+		t.Errorf("expected 'missing issue ID', got %q", resp.Error)
+	}
+}
+
+// TestHandleListComments_NotFound verifies 404 when service reports missing issue.
+func TestHandleListComments_NotFound(t *testing.T) {
+	svc := &mockIssueService{
+		listCommentsFunc: func(ctx context.Context, issueID string) ([]*types.Comment, error) {
+			return nil, service.ErrNotFound("issue not found")
+		},
+	}
+	handler := HandleListComments(svc)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/ws/issues/test-123/comments", nil)
+	req.SetPathValue("id", "test-123")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
 // TestHandleAddComment_SuccessViaService verifies a successful comment creation.
 func TestHandleAddComment_SuccessViaService(t *testing.T) {
 	svc := &mockIssueService{

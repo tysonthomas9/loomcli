@@ -523,6 +523,94 @@ func (s *issueServiceImpl) SearchIssues(ctx context.Context, params SearchIssues
 	return out, nil
 }
 
+// ReopenIssue transitions a closed issue back to open status. If
+// ReopenIssueParams.Reason is non-empty, the backend records it as a comment on
+// the issue (best-effort; status transition is the primary result).
+// Returns ErrValidation for empty IssueID.
+func (s *issueServiceImpl) ReopenIssue(ctx context.Context, params ReopenIssueParams) error {
+	if strings.TrimSpace(params.IssueID) == "" {
+		return ErrValidation("issue ID is required")
+	}
+
+	be, svcErr := s.resolveBackend()
+	if svcErr != nil {
+		return svcErr
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	if err := be.Reopen(ctx, params.IssueID, backend.ReopenParams{Reason: params.Reason}); err != nil {
+		slog.Error("backend error in ReopenIssue", "issue_id", params.IssueID, "err", err)
+		return translateBackendError(err)
+	}
+	return nil
+}
+
+// ListComments returns all comments for an issue, ordered by creation time.
+// Returns ErrValidation for empty IssueID.
+func (s *issueServiceImpl) ListComments(ctx context.Context, issueID string) ([]*types.Comment, error) {
+	if strings.TrimSpace(issueID) == "" {
+		return nil, ErrValidation("issue ID is required")
+	}
+
+	be, svcErr := s.resolveBackend()
+	if svcErr != nil {
+		return nil, svcErr
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	data, err := be.ListComments(ctx, issueID)
+	if err != nil {
+		slog.Error("backend error in ListComments", "issue_id", issueID, "err", err)
+		return nil, translateBackendError(err)
+	}
+
+	comments := make([]*types.Comment, 0, len(data))
+	for i := range data {
+		comments = append(comments, commentDataToTypesComment(&data[i]))
+	}
+	return comments, nil
+}
+
+// ListDependencies returns the dependency list for an issue in the same wire
+// shape used by IssueDetailData.Dependencies (depsToWire). Marshalled to
+// json.RawMessage so handlers can forward it through the usual {success,data}
+// envelope without re-marshaling.
+func (s *issueServiceImpl) ListDependencies(ctx context.Context, issueID string) (json.RawMessage, error) {
+	if strings.TrimSpace(issueID) == "" {
+		return nil, ErrValidation("issue ID is required")
+	}
+
+	be, svcErr := s.resolveBackend()
+	if svcErr != nil {
+		return nil, svcErr
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	// The IssueBackend interface does not expose a standalone ListDependencies;
+	// it returns them embedded in IssueDetailData.Get. That's the canonical
+	// source so both beads and fleet paths reuse their existing machinery.
+	detail, err := be.Get(ctx, issueID)
+	if err != nil {
+		slog.Error("backend error in ListDependencies", "issue_id", issueID, "err", err)
+		return nil, translateBackendError(err)
+	}
+	if detail == nil {
+		return nil, ErrNotFound(fmt.Sprintf("issue not found: %s", issueID))
+	}
+
+	out, err := json.Marshal(depsToWire(detail.Dependencies))
+	if err != nil {
+		return nil, ErrInternal("failed to marshal dependencies", err)
+	}
+	return out, nil
+}
+
 func (s *issueServiceImpl) ListEvents(ctx context.Context, params EventListParams) ([]*types.Event, error) {
 	be, svcErr := s.resolveBackend()
 	if svcErr != nil {

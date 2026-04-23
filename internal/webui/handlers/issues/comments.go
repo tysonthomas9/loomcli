@@ -38,6 +38,45 @@ type CommentResponse struct {
 	Error   string         `json:"error,omitempty"`
 }
 
+// CommentListResponse wraps the comment list data for JSON response.
+// Data is always a (possibly empty) slice so the FE sees a stable shape.
+type CommentListResponse struct {
+	Success bool             `json:"success"`
+	Data    []*types.Comment `json:"data"`
+	Error   string           `json:"error,omitempty"`
+}
+
+// HandleListComments returns a handler that lists comments for an issue.
+// Always returns {success:true, data:[]} for issues with no comments rather
+// than nil, matching the parity test's expectation of a list shape.
+func HandleListComments(svc service.IssueService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		issueID := r.PathValue("id")
+		if issueID == "" {
+			handler.WriteJSON(w, http.StatusBadRequest, CommentListResponse{
+				Success: false,
+				Data:    []*types.Comment{},
+				Error:   "missing issue ID",
+			})
+			return
+		}
+
+		comments, err := svc.ListComments(r.Context(), issueID)
+		if err != nil {
+			handler.HandleServiceError(w, err)
+			return
+		}
+		if comments == nil {
+			comments = []*types.Comment{}
+		}
+
+		handler.WriteJSON(w, http.StatusOK, CommentListResponse{
+			Success: true,
+			Data:    comments,
+		})
+	}
+}
+
 // handleAddComment returns a handler that adds a comment to an issue.
 func HandleAddComment(svc service.IssueService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

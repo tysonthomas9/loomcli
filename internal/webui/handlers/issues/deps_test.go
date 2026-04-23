@@ -15,6 +15,100 @@ import (
 )
 
 // ---------------------------------------------------------------------------
+// HandleListDependencies -- service-based tests
+// ---------------------------------------------------------------------------
+
+// TestHandleListDependencies_Success verifies the dependency list is surfaced
+// inside the standard {success, data} envelope. Data is a json.RawMessage so
+// the wire shape flows through unchanged from the service.
+func TestHandleListDependencies_Success(t *testing.T) {
+	payload := []byte(`[{"id":"dep-1","title":"Blocker","status":"open","priority":2,"dependency_type":"blocks","created_at":"2026-01-01T00:00:00Z"}]`)
+	var capturedIssueID string
+	svc := &mockIssueService{
+		listDependenciesFunc: func(ctx context.Context, issueID string) (json.RawMessage, error) {
+			capturedIssueID = issueID
+			return json.RawMessage(payload), nil
+		},
+	}
+	handler := HandleListDependencies(svc)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/ws/issues/issue-1/dependencies", nil)
+	req.SetPathValue("id", "issue-1")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if capturedIssueID != "issue-1" {
+		t.Errorf("expected issueID 'issue-1', got %q", capturedIssueID)
+	}
+
+	var resp struct {
+		Success bool              `json:"success"`
+		Data    []json.RawMessage `json:"data"`
+		Error   string            `json:"error,omitempty"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if !resp.Success {
+		t.Errorf("expected success=true, got false (error: %s)", resp.Error)
+	}
+	if len(resp.Data) != 1 {
+		t.Fatalf("expected 1 dependency, got %d", len(resp.Data))
+	}
+	// Probe one FE-facing key to lock the wire contract.
+	var entry map[string]any
+	if err := json.Unmarshal(resp.Data[0], &entry); err != nil {
+		t.Fatalf("failed to decode dep entry: %v", err)
+	}
+	if entry["dependency_type"] != "blocks" {
+		t.Errorf("expected dependency_type=blocks, got %v", entry["dependency_type"])
+	}
+}
+
+// TestHandleListDependencies_MissingID verifies 400 when :id is empty.
+func TestHandleListDependencies_MissingID(t *testing.T) {
+	svc := &mockIssueService{}
+	handler := HandleListDependencies(svc)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/ws/issues//dependencies", nil)
+	req.SetPathValue("id", "")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp DependencyResponse
+	json.NewDecoder(rec.Body).Decode(&resp)
+	if resp.Error != "missing issue ID" {
+		t.Errorf("expected 'missing issue ID', got %q", resp.Error)
+	}
+}
+
+// TestHandleListDependencies_NotFound verifies 404 is propagated when the
+// service reports a missing issue.
+func TestHandleListDependencies_NotFound(t *testing.T) {
+	svc := &mockIssueService{
+		listDependenciesFunc: func(ctx context.Context, issueID string) (json.RawMessage, error) {
+			return nil, service.ErrNotFound("issue not found")
+		},
+	}
+	handler := HandleListDependencies(svc)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/ws/issues/missing/dependencies", nil)
+	req.SetPathValue("id", "missing")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// ---------------------------------------------------------------------------
 // handleAddDependency -- service-based tests
 // ---------------------------------------------------------------------------
 

@@ -157,6 +157,12 @@ type SearchIssuesParams struct {
 	Limit int
 }
 
+// ReopenIssueParams holds the parameters for reopening a closed issue.
+type ReopenIssueParams struct {
+	IssueID string
+	Reason  string
+}
+
 // IssueService defines the business logic operations for issues.
 type IssueService interface {
 	GetIssue(ctx context.Context, issueID string) (json.RawMessage, error)
@@ -164,11 +170,14 @@ type IssueService interface {
 	CreateIssue(ctx context.Context, params CreateIssueParams) (json.RawMessage, error)
 	PatchIssue(ctx context.Context, params PatchIssueParams) error
 	CloseIssue(ctx context.Context, params CloseIssueParams) (json.RawMessage, error)
+	ReopenIssue(ctx context.Context, params ReopenIssueParams) error
 	ClaimIssue(ctx context.Context, params ClaimIssueParams) (json.RawMessage, error)
 	DeleteIssue(ctx context.Context, issueID string) (json.RawMessage, error)
 	AddComment(ctx context.Context, params AddCommentParams) (*types.Comment, error)
+	ListComments(ctx context.Context, issueID string) ([]*types.Comment, error)
 	AddDependency(ctx context.Context, params AddDependencyParams) error
 	RemoveDependency(ctx context.Context, params RemoveDependencyParams) error
+	ListDependencies(ctx context.Context, issueID string) (json.RawMessage, error)
 	ListEvents(ctx context.Context, params EventListParams) ([]*types.Event, error)
 	MoveIssue(ctx context.Context, params MoveIssueParams) (*MoveIssueResult, error)
 	SearchIssues(ctx context.Context, params SearchIssuesParams) (json.RawMessage, error)

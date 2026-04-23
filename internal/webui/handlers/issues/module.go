@@ -7,7 +7,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
-// IssueModule registers the 11 workspace-scoped issue CRUD, comment, event,
+// IssueModule registers the workspace-scoped issue CRUD, comment, event,
 // and dependency routes on a [*http.ServeMux].
 //
 // It delegates to the same package-level handler functions that
@@ -31,7 +31,7 @@ func NewIssueModule(svc service.IssueService, workspaceConfigFn func() (*ops.Wor
 	}
 }
 
-// Register implements [Module] by registering 12 workspace-scoped issue routes.
+// Register implements [Module] by registering the workspace-scoped issue routes.
 func (m *IssueModule) Register(mux *http.ServeMux) {
 	// Search — must register alongside {id} because Go 1.22+ ServeMux prefers
 	// the literal "search" segment over the {id} wildcard, so this will route
@@ -44,17 +44,20 @@ func (m *IssueModule) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/workspaces/{ws}/issues", HandleCreateIssue(m.svc))
 	mux.HandleFunc("PATCH /api/workspaces/{ws}/issues/{id}", HandlePatchIssue(m.svc))
 	mux.HandleFunc("POST /api/workspaces/{ws}/issues/{id}/close", HandleCloseIssue(m.svc))
+	mux.HandleFunc("POST /api/workspaces/{ws}/issues/{id}/reopen", HandleReopenIssue(m.svc))
 	mux.HandleFunc("POST /api/workspaces/{ws}/issues/{id}/claim", HandleClaimIssue(m.svc))
 	mux.HandleFunc("POST /api/workspaces/{ws}/issues/{id}/move", HandleMoveIssue(m.svc, m.workspaceConfigFn))
 	mux.HandleFunc("DELETE /api/workspaces/{ws}/issues/{id}", HandleDeleteIssue(m.svc))
 
 	// Comments
+	mux.HandleFunc("GET /api/workspaces/{ws}/issues/{id}/comments", HandleListComments(m.svc))
 	mux.HandleFunc("POST /api/workspaces/{ws}/issues/{id}/comments", HandleAddComment(m.svc))
 
 	// Events
 	mux.HandleFunc("GET /api/workspaces/{ws}/issues/{id}/events", HandleGetIssueEvents(m.svc))
 
 	// Dependencies
+	mux.HandleFunc("GET /api/workspaces/{ws}/issues/{id}/dependencies", HandleListDependencies(m.svc))
 	mux.HandleFunc("POST /api/workspaces/{ws}/issues/{id}/dependencies", HandleAddDependency(m.svc))
 	mux.HandleFunc("DELETE /api/workspaces/{ws}/issues/{id}/dependencies/{depId}", HandleRemoveDependency(m.svc))
 }

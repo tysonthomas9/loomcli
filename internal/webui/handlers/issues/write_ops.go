@@ -132,6 +132,68 @@ func HandleClaimIssue(svc service.IssueService) http.HandlerFunc {
 	}
 }
 
+// ReopenRequest represents the JSON body for reopening a closed issue. All
+// fields optional; an empty body is valid and yields a status-only reopen.
+type ReopenRequest struct {
+	Reason string `json:"reason,omitempty"`
+}
+
+// ReopenResponse wraps the reopen operation result.
+type ReopenResponse struct {
+	Success bool   `json:"success"`
+	Error   string `json:"error,omitempty"`
+}
+
+// HandleReopenIssue returns a handler that transitions a closed issue back
+// to open status. An empty body or {} is valid.
+func HandleReopenIssue(svc service.IssueService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		issueID := r.PathValue("id")
+		if issueID == "" {
+			handler.WriteJSON(w, http.StatusBadRequest, ReopenResponse{
+				Success: false,
+				Error:   "missing issue ID",
+			})
+			return
+		}
+
+		r.Body = http.MaxBytesReader(w, r.Body, handler.MaxRequestBody)
+
+		var req ReopenRequest
+		if r.Body != nil && r.ContentLength > 0 {
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				var maxBytesErr *http.MaxBytesError
+				if errors.As(err, &maxBytesErr) {
+					handler.WriteJSON(w, http.StatusRequestEntityTooLarge, ReopenResponse{
+						Success: false,
+						Error:   "request body too large (max 1MB)",
+					})
+					return
+				}
+				slog.Warn("invalid request body in handleReopenIssue", "err", err)
+				handler.WriteJSON(w, http.StatusBadRequest, ReopenResponse{
+					Success: false,
+					Error:   "invalid request body",
+				})
+				return
+			}
+		}
+
+		err := svc.ReopenIssue(r.Context(), service.ReopenIssueParams{
+			IssueID: issueID,
+			Reason:  req.Reason,
+		})
+		if err != nil {
+			handler.HandleServiceError(w, err)
+			return
+		}
+
+		handler.WriteJSON(w, http.StatusOK, ReopenResponse{
+			Success: true,
+		})
+	}
+}
+
 // handleDeleteIssue returns a handler that permanently deletes an issue by ID.
 func HandleDeleteIssue(svc service.IssueService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

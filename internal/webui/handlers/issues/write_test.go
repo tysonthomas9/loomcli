@@ -1113,3 +1113,120 @@ func TestHandleClaimIssueW_ServiceUnavailable(t *testing.T) {
 		t.Errorf("status = %d, want %d", w.Code, http.StatusServiceUnavailable)
 	}
 }
+
+// ===========================================================================
+// HandleReopenIssue tests
+// ===========================================================================
+
+// TestHandleReopenIssue_SuccessEmptyBody exercises the common UI path where
+// the body is absent. The handler must forward to the service with an empty
+// reason and emit {"success":true}.
+func TestHandleReopenIssue_SuccessEmptyBody(t *testing.T) {
+	var capturedParams service.ReopenIssueParams
+	svc := &mockIssueService{
+		reopenIssueFunc: func(_ context.Context, params service.ReopenIssueParams) error {
+			capturedParams = params
+			return nil
+		},
+	}
+	h := HandleReopenIssue(svc)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/ws/issues/x/reopen", nil)
+	req.SetPathValue("id", "x")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+	if capturedParams.IssueID != "x" {
+		t.Errorf("expected issueID 'x', got %q", capturedParams.IssueID)
+	}
+	if capturedParams.Reason != "" {
+		t.Errorf("expected empty reason, got %q", capturedParams.Reason)
+	}
+
+	var resp ReopenResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode: %v", err)
+	}
+	if !resp.Success {
+		t.Errorf("expected success=true, got false (error: %s)", resp.Error)
+	}
+}
+
+// TestHandleReopenIssue_SuccessWithReason verifies the reason field is
+// threaded through to the service.
+func TestHandleReopenIssue_SuccessWithReason(t *testing.T) {
+	var capturedParams service.ReopenIssueParams
+	svc := &mockIssueService{
+		reopenIssueFunc: func(_ context.Context, params service.ReopenIssueParams) error {
+			capturedParams = params
+			return nil
+		},
+	}
+	h := HandleReopenIssue(svc)
+
+	body := `{"reason":"broken again"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/ws/issues/x/reopen", strings.NewReader(body))
+	req.SetPathValue("id", "x")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+	if capturedParams.Reason != "broken again" {
+		t.Errorf("expected reason 'broken again', got %q", capturedParams.Reason)
+	}
+}
+
+// TestHandleReopenIssue_MissingID returns 400.
+func TestHandleReopenIssue_MissingID(t *testing.T) {
+	svc := &mockIssueService{}
+	h := HandleReopenIssue(svc)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/ws/issues//reopen", nil)
+	req.SetPathValue("id", "")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+}
+
+// TestHandleReopenIssue_NotFound surfaces 404 when the service reports the
+// issue doesn't exist.
+func TestHandleReopenIssue_NotFound(t *testing.T) {
+	svc := &mockIssueService{
+		reopenIssueFunc: func(_ context.Context, _ service.ReopenIssueParams) error {
+			return service.ErrNotFound("issue not found")
+		},
+	}
+	h := HandleReopenIssue(svc)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/ws/issues/ghost/reopen", nil)
+	req.SetPathValue("id", "ghost")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusNotFound)
+	}
+}
+
+// TestHandleReopenIssue_InvalidBody verifies 400 on malformed JSON.
+func TestHandleReopenIssue_InvalidBody(t *testing.T) {
+	svc := &mockIssueService{}
+	h := HandleReopenIssue(svc)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/ws/issues/x/reopen", strings.NewReader(`not json`))
+	req.SetPathValue("id", "x")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+}

@@ -10,7 +10,7 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { ARTIFACTS_DIR, PARITY_URLS } from "../playwright.config";
-import type { BackendState } from "./backends";
+import { discoverWorkspaceId, type BackendState } from "./backends";
 
 const TS_TOLERANCE_MS = 5_000;
 const DATA_DIFFS_PATH = path.join(ARTIFACTS_DIR, "reports", "data-diffs.json");
@@ -156,17 +156,23 @@ export function diffIssueLists(
 /**
  * Fetch both backends' response for an endpoint and diff the result.
  * `endpointPath` is a workspace-scoped path segment, e.g. "issues" or
- * "issues/ready". For backends that use different workspace keys, each
- * backend's workspace is read from PARITY_URLS.
+ * "issues/ready". When `wsBeads` / `wsFleet` are omitted, each backend's
+ * workspace ID is discovered at call time via `/api/workspaces` — loom
+ * uses UUID workspace IDs, so literals like "default" or "PARITY" never
+ * match an actual workspace and produce 404s with empty payloads.
  */
 export async function apiResponseDiff(
     endpointSuffix: string,
-    wsBeads = "default",
-    wsFleet = PARITY_URLS.workspace,
+    wsBeads?: string,
+    wsFleet?: string,
 ): Promise<ApiResponseDiff> {
+    const [bWs, fWs] = await Promise.all([
+        wsBeads ?? discoverWorkspaceId(PARITY_URLS.beads),
+        wsFleet ?? discoverWorkspaceId(PARITY_URLS.fleet),
+    ]);
     const [b, f] = await Promise.all([
-        fetchJson(`${PARITY_URLS.beads}/api/workspaces/${wsBeads}/${endpointSuffix}`),
-        fetchJson(`${PARITY_URLS.fleet}/api/workspaces/${wsFleet}/${endpointSuffix}`),
+        fetchJson(`${PARITY_URLS.beads}/api/workspaces/${bWs}/${endpointSuffix}`),
+        fetchJson(`${PARITY_URLS.fleet}/api/workspaces/${fWs}/${endpointSuffix}`),
     ]);
     const bData = Array.isArray(b?.data) ? b.data : b?.data ? [b.data] : [];
     const fData = Array.isArray(f?.data) ? f.data : f?.data ? [f.data] : [];
