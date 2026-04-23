@@ -3,6 +3,7 @@ package agent
 import (
 	"bytes"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -93,6 +94,87 @@ func TestRunLead_ClaudeError(t *testing.T) {
 	// So we verify the setup is correct
 	if recorder.InteractiveErr != expectedErr {
 		t.Errorf("mock not configured correctly")
+	}
+}
+
+func TestExecShell_ChdirHonorsWorkDir(t *testing.T) {
+	// not parallel: mutates process-wide cwd (os.Chdir) and SHELL env var
+	// Capture original cwd so we can restore it after the test.
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("failed to get original cwd: %v", err)
+	}
+	t.Cleanup(func() { os.Chdir(origDir) })
+
+	// Create a temp dir and resolve symlinks so macOS /var -> /private/var
+	// mismatches don't cause false failures.
+	tmpDir := t.TempDir()
+	tmpDir, err = filepath.EvalSymlinks(tmpDir)
+	if err != nil {
+		t.Fatalf("failed to eval symlinks for tmpDir: %v", err)
+	}
+
+	// Start from a directory different from tmpDir so that an unchanged
+	// cwd after execShell would prove the fix is missing.
+	startDir, err := filepath.EvalSymlinks(os.TempDir())
+	if err != nil {
+		t.Fatalf("failed to eval symlinks for os.TempDir: %v", err)
+	}
+	if err := os.Chdir(startDir); err != nil {
+		t.Fatalf("failed to chdir to startDir: %v", err)
+	}
+
+	// Force syscall.Exec to fail quickly by pointing SHELL at a path that
+	// cannot possibly exist. The fallback cmd.Run() will also fail because
+	// the binary is missing — that's fine; we only care that os.Chdir ran
+	// before syscall.Exec.
+	origShell, shellWasSet := os.LookupEnv("SHELL")
+	os.Setenv("SHELL", "/nonexistent/path/shell-bin-for-test-exec-shell-chdir")
+	t.Cleanup(func() {
+		if shellWasSet {
+			os.Setenv("SHELL", origShell)
+		} else {
+			os.Unsetenv("SHELL")
+		}
+	})
+
+	// Redirect stderr so any warnings / noise from the fallback don't
+	// pollute test output. Drain the read-end so writes never block on a
+	// full kernel pipe buffer.
+	oldStderr := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("failed to create stderr pipe: %v", err)
+	}
+	os.Stderr = w
+	drained := make(chan struct{})
+	go func() {
+		io.Copy(io.Discard, r)
+		close(drained)
+	}()
+	defer func() {
+		w.Close()
+		<-drained
+		r.Close()
+		os.Stderr = oldStderr
+	}()
+
+	// Call execShell. syscall.Exec will fail (bad SHELL path), fallback
+	// cmd.Run will also fail — but execShell must have chdir'd to tmpDir
+	// before attempting syscall.Exec.
+	execShell(tmpDir)
+
+	// Assert: cwd should now be tmpDir, proving os.Chdir(workDir) ran.
+	gotDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("failed to get cwd after execShell: %v", err)
+	}
+	gotDir, err = filepath.EvalSymlinks(gotDir)
+	if err != nil {
+		t.Fatalf("failed to eval symlinks for gotDir: %v", err)
+	}
+	if gotDir != tmpDir {
+		t.Errorf("expected cwd after execShell to be %q, got %q", tmpDir, gotDir)
 	}
 }
 

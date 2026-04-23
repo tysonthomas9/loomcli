@@ -90,6 +90,13 @@ func execShell(workDir string) {
 	if shell == "" {
 		shell = "/bin/bash"
 	}
+	// syscall.Exec has no "dir" parameter — the replacement process inherits
+	// the current cwd, so we must chdir before exec. If chdir fails, warn but
+	// proceed: landing in a shell in the wrong directory beats not dropping
+	// into a shell at all.
+	if err := os.Chdir(workDir); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not change to directory %s: %v\n", workDir, err)
+	}
 	// Try to replace the process entirely so the terminal stays alive.
 	// The shell path is read from the user's own $SHELL env var (trusted),
 	// with a safe fallback to /bin/bash. This is an interactive drop-in,
