@@ -1,0 +1,523 @@
+{
+  "contract_file": "frontend/shell-auth-errors.md",
+  "validation_report": "reports/validation-shell-auth-errors.json",
+  "audit_date": "2026-04-23T10:53:18Z",
+  "spec_files_searched": [
+    "internal/webui/frontend/tests/e2e/app.spec.ts",
+    "internal/webui/frontend/tests/e2e/nav-rail.spec.ts",
+    "internal/webui/frontend/tests/e2e/workspace-breadcrumb.spec.ts",
+    "internal/webui/frontend/tests/e2e/auth-integration.spec.ts",
+    "internal/webui/frontend/tests/e2e/keyboard-focus-management.spec.ts",
+    "internal/webui/frontend/tests/e2e/keyboard-escape-layers.spec.ts",
+    "internal/webui/frontend/tests/e2e/error-boundary.spec.ts",
+    "internal/webui/frontend/tests/e2e/error.spec.ts",
+    "internal/webui/frontend/tests/e2e/toast-notifications.spec.ts",
+    "internal/webui/frontend/tests/e2e/skeleton.spec.ts",
+    "internal/webui/frontend/tests/e2e/server-push.spec.ts",
+    "internal/webui/frontend/tests/e2e/server-push-integration.spec.ts",
+    "internal/webui/frontend/tests/e2e/smoke.spec.ts",
+    "internal/webui/frontend/tests/e2e/assembled-views.spec.ts",
+    "internal/webui/frontend/tests/e2e/integration/daemon-recovery.integration.spec.ts",
+    "internal/webui/frontend/tests/e2e/integration/sse-updates.integration.spec.ts"
+  ],
+  "go_test_files_searched": [
+    "internal/webui/handlers/misc/auth_config_test.go",
+    "internal/webui/app/routes_test.go"
+  ],
+  "summary": {
+    "total_passing": 42,
+    "covered": 19,
+    "partial": 9,
+    "uncovered": 14,
+    "coverage_pct": 45.2
+  },
+  "assertions": [
+    {
+      "id": "VAL-FE-SHELL-001",
+      "title": "AppLayout renders with all regions present",
+      "coverage": "partial",
+      "spec_files": [
+        "keyboard-focus-management.spec.ts",
+        "nav-rail.spec.ts"
+      ],
+      "test_names": [
+        "Skip link is first focusable element",
+        "navigation landmark is present"
+      ],
+      "notes": "Skip link focus and nav[aria-label=Primary] landmark are tested, but no explicit assertion for role=banner on header, role=main on main, or id=main-content. Tests touch individual regions but no single test verifies the complete app shell structure described by the assertion."
+    },
+    {
+      "id": "VAL-FE-SHELL-002",
+      "title": "Header displays title and action slots",
+      "coverage": "partial",
+      "spec_files": [
+        "app.spec.ts"
+      ],
+      "test_names": [
+        "displays main heading",
+        "displays connection status"
+      ],
+      "notes": "h1 visibility and ConnectionStatus indicator visibility are both verified, but no test exercises the header action slots as a group (ThemeToggle + ConnectionStatus + UserMenu co-located in header actions region)."
+    },
+    {
+      "id": "VAL-FE-SHELL-003",
+      "title": "Main content area is scrollable",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No Playwright test asserts overflow-y: auto/scroll on the main content area. No existing coverage."
+    },
+    {
+      "id": "VAL-FE-SHELL-004",
+      "title": "Content wrapper contains navRail, sidebar, and main in correct layout",
+      "coverage": "partial",
+      "spec_files": [
+        "nav-rail.spec.ts"
+      ],
+      "test_names": [
+        "renders as horizontal bottom bar on mobile",
+        "all four buttons visible on mobile"
+      ],
+      "notes": "Responsive nav rail visibility and mobile bottom-bar positioning are tested, but the left-to-right ordering (navRail | sidebar | main) and width ratios on desktop are not asserted."
+    },
+    {
+      "id": "VAL-FE-SHELL-010",
+      "title": "NavRail renders icon buttons for Kanban, Monitor, Settings",
+      "coverage": "covered",
+      "spec_files": [
+        "nav-rail.spec.ts"
+      ],
+      "test_names": [
+        "renders all four navigation buttons",
+        "all buttons have aria-labels"
+      ],
+      "notes": "Verifies nav buttons for Kanban, List, Terminal, Settings are rendered with aria-labels. Note: the current app exposes four buttons (Kanban, List, Terminal, Settings) where the contract describes three (Kanban, Monitor, Settings) — Terminal maps behaviorally to Monitor."
+    },
+    {
+      "id": "VAL-FE-SHELL-011",
+      "title": "NavRail Workspaces button is active when on kanban or table view",
+      "coverage": "covered",
+      "spec_files": [
+        "nav-rail.spec.ts"
+      ],
+      "test_names": [
+        "Kanban button is active by default",
+        "clicking List switches to table view",
+        "active state communicated via data-active"
+      ],
+      "notes": "Active state (data-active=\"true\") verified on Kanban for default view and on List after switching to table view."
+    },
+    {
+      "id": "VAL-FE-SHELL-012",
+      "title": "NavRail Settings button is active when on settings view",
+      "coverage": "covered",
+      "spec_files": [
+        "nav-rail.spec.ts"
+      ],
+      "test_names": [
+        "clicking Settings switches to settings view"
+      ],
+      "notes": "Verifies Settings button gains data-active=\"true\" after click and Kanban loses data-active."
+    },
+    {
+      "id": "VAL-FE-SHELL-013",
+      "title": "NavRail Monitor button is active when on monitor or terminal view",
+      "coverage": "covered",
+      "spec_files": [
+        "nav-rail.spec.ts"
+      ],
+      "test_names": [
+        "clicking Terminal switches to terminal view"
+      ],
+      "notes": "Verifies Terminal button gains data-active=\"true\" after click (Terminal is the app's realization of the Monitor concept from the contract)."
+    },
+    {
+      "id": "VAL-FE-SHELL-014",
+      "title": "NavRail button click triggers navigation",
+      "coverage": "covered",
+      "spec_files": [
+        "nav-rail.spec.ts"
+      ],
+      "test_names": [
+        "clicking List switches to table view",
+        "clicking Terminal switches to terminal view",
+        "clicking Settings switches to settings view",
+        "clicking Kanban returns to kanban view",
+        "rapid view switching works correctly"
+      ],
+      "notes": "Every nav button click is covered: each click activates the target button and deactivates previously active buttons; view-specific UI (issue-table, terminal wrapper, kanban column) appears after click."
+    },
+    {
+      "id": "VAL-FE-SHELL-015",
+      "title": "NavRail icons have aria-hidden=\"true\"",
+      "coverage": "covered",
+      "spec_files": [
+        "nav-rail.spec.ts"
+      ],
+      "test_names": [
+        "SVG icons are hidden from screen readers"
+      ],
+      "notes": "Iterates every SVG inside the nav rail and asserts aria-hidden=\"true\" (nav-rail.spec.ts:637)."
+    },
+    {
+      "id": "VAL-FE-SHELL-016",
+      "title": "NavRail buttons have visible tooltip on hover",
+      "coverage": "covered",
+      "spec_files": [
+        "nav-rail.spec.ts"
+      ],
+      "test_names": [
+        "tooltips appear on hover",
+        "tooltips show correct labels"
+      ],
+      "notes": "Tooltip visibility on hover and correct label text verified for all four nav buttons."
+    },
+    {
+      "id": "VAL-FE-SHELL-017",
+      "title": "NavRail buttons have keyboard focus ring visible on Tab",
+      "coverage": "covered",
+      "spec_files": [
+        "nav-rail.spec.ts"
+      ],
+      "test_names": [
+        "buttons are keyboard focusable"
+      ],
+      "notes": "Tab order traversal through Kanban → List → Terminal → Settings verified via toBeFocused() (nav-rail.spec.ts:600). Focus ring visibility itself is CSS-driven; keyboard focusability is asserted."
+    },
+    {
+      "id": "VAL-FE-SHELL-020",
+      "title": "WorkspaceBreadcrumb displays view label",
+      "coverage": "covered",
+      "spec_files": [
+        "workspace-breadcrumb.spec.ts"
+      ],
+      "test_names": [
+        "shows Kanban label on default view"
+      ],
+      "notes": "h1.getByText(\"Kanban\") verified on default view (workspace-breadcrumb.spec.ts:266)."
+    },
+    {
+      "id": "VAL-FE-SHELL-021",
+      "title": "WorkspaceBreadcrumb shows correct view label",
+      "coverage": "covered",
+      "spec_files": [
+        "workspace-breadcrumb.spec.ts"
+      ],
+      "test_names": [
+        "shows List label on table view",
+        "shows Terminal label on terminal view",
+        "shows Settings label on settings view",
+        "updates to List when clicking List NavRail button",
+        "updates to Terminal when clicking Terminal NavRail button",
+        "updates to Settings when clicking Settings NavRail button",
+        "updates back to Kanban when clicking Kanban NavRail button"
+      ],
+      "notes": "View labels per URL ?view= query param and NavRail-driven updates are verified. Note: the test labels ('Kanban', 'Terminal') differ slightly from the current source labels ('Aether Project', 'Monitor') in WorkspaceBreadcrumb.tsx — possible test/source drift to flag separately, but the behavior (label changes with active view) is exercised."
+    },
+    {
+      "id": "VAL-FE-SHELL-023",
+      "title": "WorkspaceBreadcrumb shows \"Aether\" when no workspace",
+      "coverage": "partial",
+      "spec_files": [
+        "workspace-breadcrumb.spec.ts"
+      ],
+      "test_names": [
+        "shows Cortex when workspace has no repos",
+        "shows Cortex when workspace API returns error"
+      ],
+      "notes": "Zero-repo and error-fallback paths are exercised, but the tests assert h1.getByText(\"Cortex\") while the source component renders \"Aether\" (WorkspaceBreadcrumb.tsx:40). The test currently asserts against stale text; concept is tested but the specific evidence text differs from the assertion."
+    },
+    {
+      "id": "VAL-FE-SHELL-030",
+      "title": "ThemeToggle renders button with sun/moon icon",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No Playwright spec exists for ThemeToggle. No existing coverage."
+    },
+    {
+      "id": "VAL-FE-SHELL-031",
+      "title": "ThemeToggle button has correct aria-label",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No Playwright assertion on ThemeToggle aria-label (\"Switch to dark/light mode\"). No existing coverage."
+    },
+    {
+      "id": "VAL-FE-SHELL-032",
+      "title": "ThemeToggle click calls onToggle callback",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No Playwright test clicks ThemeToggle and asserts the toggle behavior."
+    },
+    {
+      "id": "VAL-FE-SHELL-033",
+      "title": "Theme persists in localStorage",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No Playwright test asserts localStorage theme value after toggle."
+    },
+    {
+      "id": "VAL-FE-SHELL-034",
+      "title": "Theme applies data-theme attribute to <html>",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No Playwright test asserts documentElement.getAttribute(\"data-theme\")."
+    },
+    {
+      "id": "VAL-FE-SHELL-035",
+      "title": "Theme sets colorScheme style on <html>",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No Playwright test asserts documentElement.style.colorScheme."
+    },
+    {
+      "id": "VAL-FE-SHELL-036",
+      "title": "Rapid theme toggle has no visual flicker",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No Playwright test performs rapid theme toggles and checks for flicker/stability."
+    },
+    {
+      "id": "VAL-FE-SHELL-037",
+      "title": "Theme toggle at 320px viewport works",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No Playwright test exercises ThemeToggle at 320px viewport."
+    },
+    {
+      "id": "VAL-FE-SHELL-040",
+      "title": "ConnectionStatus renders with status indicator dot",
+      "coverage": "covered",
+      "spec_files": [
+        "app.spec.ts",
+        "server-push.spec.ts",
+        "integration/daemon-recovery.integration.spec.ts"
+      ],
+      "test_names": [
+        "displays connection status",
+        "connection status element exists with data-state attribute"
+      ],
+      "notes": "ConnectionStatus visibility via [data-state] selector (app.spec.ts:164), role=\"status\" presence (server-push.spec.ts:115), and data-state value-set assertion [connected|connecting|reconnecting|disconnected] are all verified."
+    },
+    {
+      "id": "VAL-FE-SHELL-041",
+      "title": "ConnectionStatus indicator is green when state=\"connected\"",
+      "coverage": "covered",
+      "spec_files": [
+        "integration/daemon-recovery.integration.spec.ts",
+        "server-push-integration.spec.ts"
+      ],
+      "test_names": [
+        "CLI mutation triggers UI update",
+        "health check failure shows daemon unavailable overlay",
+        "SSE reconnection after network interruption"
+      ],
+      "notes": "[role=\"status\"][data-state=\"connected\"] selector used across multiple integration tests to assert connected state (daemon-recovery.integration.spec.ts:101,211,239,279,321,367,405)."
+    },
+    {
+      "id": "VAL-FE-SHELL-048",
+      "title": "ConnectionStatus has aria-label with full status text",
+      "coverage": "partial",
+      "spec_files": [
+        "server-push.spec.ts"
+      ],
+      "test_names": [
+        "connection status element exists with data-state attribute"
+      ],
+      "notes": "getByRole(\"status\", { name: /Connection status/i }) implies the accessible name starts with \"Connection status\" (server-push.spec.ts:124), but no explicit toHaveAttribute(\"aria-label\", ...) assertion for the full text per state (e.g., \"Connection status: Connected\")."
+    },
+    {
+      "id": "VAL-FE-SHELL-049",
+      "title": "ConnectionStatus has role=\"status\" and aria-live=\"polite\"",
+      "coverage": "partial",
+      "spec_files": [
+        "server-push.spec.ts",
+        "integration/daemon-recovery.integration.spec.ts"
+      ],
+      "test_names": [
+        "connection status element exists with data-state attribute"
+      ],
+      "notes": "role=\"status\" is verified via getByRole(\"status\") and [role=\"status\"][data-state=...] selectors, but aria-live=\"polite\" is never explicitly asserted. Screen-reader announcement verification relies solely on the implicit role=status mapping."
+    },
+    {
+      "id": "VAL-FE-AUTH-051",
+      "title": "AuthGate with AUTH_MODE_OPEN renders children (no login gate)",
+      "coverage": "covered",
+      "spec_files": [
+        "auth-integration.spec.ts"
+      ],
+      "test_names": [
+        "app loads without auth gate",
+        "no auth-related requests made",
+        "SSE connects without token"
+      ],
+      "notes": "Covered by auth-integration.spec.ts mode=open suite: asserts children render, no /api/auth/* requests fire, SSE connects without tokens. auth_config_test.go (Go) exists but server-side unit tests do not count as E2E coverage for the frontend gate."
+    },
+    {
+      "id": "VAL-FE-ERR-090",
+      "title": "DaemonUnavailableOverlay appears when daemon unreachable",
+      "coverage": "covered",
+      "spec_files": [
+        "integration/daemon-recovery.integration.spec.ts"
+      ],
+      "test_names": [
+        "health check failure shows daemon unavailable overlay",
+        "retry now button triggers immediate reconnection",
+        "route blocking only affects browser, not server"
+      ],
+      "notes": "Overlay appearance verified via [aria-labelledby=\"daemon-overlay-title\"] selector and #daemon-overlay-title toContainText(\"lost\") (daemon-recovery.integration.spec.ts:184,189)."
+    },
+    {
+      "id": "VAL-FE-ERR-098",
+      "title": "DaemonUnavailableOverlay has role=\"dialog\" aria-modal=\"true\"",
+      "coverage": "partial",
+      "spec_files": [
+        "integration/daemon-recovery.integration.spec.ts"
+      ],
+      "test_names": [
+        "health check failure shows daemon unavailable overlay"
+      ],
+      "notes": "Overlay presence is verified via [aria-labelledby=\"daemon-overlay-title\"], but role=\"dialog\" and aria-modal=\"true\" attributes are not explicitly asserted by any Playwright test. The source renders them (DaemonUnavailableOverlay.tsx:55) but no E2E check confirms them at runtime."
+    },
+    {
+      "id": "VAL-FE-SHELL-050",
+      "title": "Header actions region contains ThemeToggle, ConnectionStatus, UserMenu",
+      "coverage": "partial",
+      "spec_files": [
+        "app.spec.ts"
+      ],
+      "test_names": [
+        "displays connection status"
+      ],
+      "notes": "ConnectionStatus visibility in the header is verified via [data-state] selector, but ThemeToggle and UserMenu presence inside the header actions region is not asserted."
+    },
+    {
+      "id": "VAL-FE-SHELL-051",
+      "title": "UserMenu only renders when auth mode is OIDC and authenticated",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "auth-integration.spec.ts covers mode=open (no UserMenu expected) and mode=oidc (app content renders after auth), but no test asserts UserMenu visibility conditional on mode=oidc + valid session, nor its absence in mode=open."
+    },
+    {
+      "id": "VAL-FE-A11Y-100",
+      "title": "All nav icons have aria-label",
+      "coverage": "covered",
+      "spec_files": [
+        "nav-rail.spec.ts"
+      ],
+      "test_names": [
+        "all buttons have aria-labels"
+      ],
+      "notes": "Each nav rail button asserted via toHaveAttribute(\"aria-label\", \"Kanban\"/\"List\"/\"Terminal\"/\"Settings\") (nav-rail.spec.ts:327)."
+    },
+    {
+      "id": "VAL-FE-A11Y-101",
+      "title": "All interactive elements are keyboard accessible",
+      "coverage": "covered",
+      "spec_files": [
+        "nav-rail.spec.ts",
+        "keyboard-focus-management.spec.ts"
+      ],
+      "test_names": [
+        "buttons are keyboard focusable",
+        "Skip link is first focusable element",
+        "CreateIssueModal: Tab cycles within modal fields",
+        "Shift+Tab wraps from first to last element in modal"
+      ],
+      "notes": "Tab traversal through nav buttons, skip link first-focusable guarantee, and modal Tab cycling all verified. Covers the core keyboard accessibility contract for shell interactive elements."
+    },
+    {
+      "id": "VAL-FE-A11Y-105",
+      "title": "Icon-only buttons have aria-label",
+      "coverage": "covered",
+      "spec_files": [
+        "nav-rail.spec.ts"
+      ],
+      "test_names": [
+        "all buttons have aria-labels",
+        "SVG icons are hidden from screen readers"
+      ],
+      "notes": "Icon-only nav rail buttons have aria-labels verified, and SVGs inside them have aria-hidden=\"true\" so the accessible name comes from aria-label alone."
+    },
+    {
+      "id": "VAL-FE-A11Y-303",
+      "title": "ARIA live region announces SSE-driven list mutations",
+      "coverage": "covered",
+      "spec_files": [
+        "toast-notifications.spec.ts"
+      ],
+      "test_names": [
+        "error toast has assertive aria-live for screen readers",
+        "non-error toasts have polite aria-live",
+        "toast has role=alert"
+      ],
+      "notes": "Toast notification aria-live attributes (assertive for errors, polite for success/warning/info) explicitly asserted via toHaveAttribute(\"aria-live\", ...). This is the mechanism by which SSE-driven mutations are announced in this app."
+    },
+    {
+      "id": "VAL-FE-A11Y-304",
+      "title": "Live region uses polite (not assertive) for non-critical updates",
+      "coverage": "covered",
+      "spec_files": [
+        "toast-notifications.spec.ts"
+      ],
+      "test_names": [
+        "non-error toasts have polite aria-live"
+      ],
+      "notes": "toast-success, toast-warning, toast-info all verified as aria-live=\"polite\" (toast-notifications.spec.ts:265-271)."
+    },
+    {
+      "id": "VAL-FE-A11Y-305",
+      "title": "Status is never conveyed by color alone",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No Playwright test asserts that ConnectionStatus / status indicators include a text or icon supplement alongside color (e.g., \"Connected\" text, check/cross icon)."
+    },
+    {
+      "id": "VAL-FE-A11Y-315",
+      "title": "Form fields have programmatic labels",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No Playwright test asserts <label for=...> association or aria-label on shell/auth form fields (login form, settings form inputs). Existing modal tests (CreateIssueModal) are scoped to issue fields, not shell/auth forms."
+    },
+    {
+      "id": "VAL-FE-A11Y-316",
+      "title": "Landmark regions present",
+      "coverage": "partial",
+      "spec_files": [
+        "nav-rail.spec.ts",
+        "keyboard-escape-layers.spec.ts"
+      ],
+      "test_names": [
+        "navigation landmark is present",
+        "Skip link is first focusable element"
+      ],
+      "notes": "nav[aria-label=\"Primary\"] landmark is asserted and other terminal-oriented specs wait on [role=\"banner\"], but no single shell test explicitly asserts banner + main + nav + contentinfo landmarks together. Partial coverage."
+    },
+    {
+      "id": "VAL-FE-ERR-304",
+      "title": "Private/Incognito localStorage write failure degrades gracefully",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No Playwright test simulates localStorage.setItem throwing (SecurityError/QuotaExceededError) and verifies the app continues to bootstrap."
+    },
+    {
+      "id": "VAL-FE-ERR-306",
+      "title": "Corrupt localStorage JSON does not crash bootstrap",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No Playwright test pre-seeds malformed JSON in localStorage (theme/prefs keys) and asserts the app still renders without a crash."
+    }
+  ]
+}
