@@ -5,6 +5,14 @@
 # workspaces via the `loom workspace create` CLI BEFORE starting the server
 # so the server reads them from config at boot. Never POST /api/workspaces at
 # runtime — that handler can stall on bd-init edge cases and deadlock GETs.
+#
+# Source repos and workspaces live at distinct paths. Source repos live
+# under /root/.loom/src/<name> and workspaces live under
+# /root/.loom/workspaces/<name>. This keeps `loom workspace create`'s
+# --path and --repos arguments distinct so the git worktree does not get
+# nested inside its own source repo (see loomcli-r3ddn.3).
+#
+# EXTRA_WORKSPACES uses "<name>:<src>:<path>" tuples, whitespace-separated.
 set -euo pipefail
 
 API_PORT=${API_PORT:-8080}
@@ -12,10 +20,12 @@ UI_PORT=${UI_PORT:-3000}
 DEFAULT_BACKEND=${DEFAULT_BACKEND:-claude}
 
 # Primary workspace owns the bd daemon. Extra workspaces get registered via
-# `loom workspace create` CLI.
+# `loom workspace create` CLI. Source and workspace paths MUST be distinct
+# so `loom workspace create` does not produce a nested worktree gitlink.
 PRIMARY_NAME=${PRIMARY_NAME:-alpha}
+PRIMARY_SRC=${PRIMARY_SRC:-/root/.loom/src/alpha}
 PRIMARY_PATH=${PRIMARY_PATH:-/root/.loom/workspaces/alpha}
-EXTRA_WORKSPACES=${EXTRA_WORKSPACES:-bravo:/root/.loom/workspaces/bravo}
+EXTRA_WORKSPACES=${EXTRA_WORKSPACES:-bravo:/root/.loom/src/bravo:/root/.loom/workspaces/bravo}
 
 # Scope loom's state to a container-local config dir so we don't need to care
 # about ~/.loom vs /root/.loom layout.
@@ -24,51 +34,69 @@ mkdir -p "$LOOM_CONFIG_DIR"
 
 log() { printf '[dev] %s\n' "$*"; }
 
-# ── 1. Seed primary workspace: git + bd (bd init needed so daemon has .beads) ──
-if [ ! -d "$PRIMARY_PATH/.git" ]; then
-    log "seeding primary workspace '$PRIMARY_NAME' at $PRIMARY_PATH"
-    mkdir -p "$PRIMARY_PATH"
-    git -C "$PRIMARY_PATH" init -q
-    git -C "$PRIMARY_PATH" config user.email dev@loom.local
-    git -C "$PRIMARY_PATH" config user.name loom-dev
-    git -C "$PRIMARY_PATH" commit --allow-empty -qm "init"
+# ── 1. Seed primary source repo (git only — workspace owns bd init) ──
+if [ ! -d "$PRIMARY_SRC/.git" ]; then
+    log "seeding primary source repo '$PRIMARY_NAME' at $PRIMARY_SRC"
+    mkdir -p "$PRIMARY_SRC"
+    git -C "$PRIMARY_SRC" init -q
+    git -C "$PRIMARY_SRC" config user.email dev@loom.local
+    git -C "$PRIMARY_SRC" config user.name loom-dev
+    git -C "$PRIMARY_SRC" commit --allow-empty -qm "init"
 fi
+
+# Pre-init bd at the workspace path so the prefix is set before
+# `loom workspace create` runs its own (prefix-less) bd init. This is the
+# daemon's home; loom serve auto-discovers the socket from cwd=$PRIMARY_PATH.
+mkdir -p "$PRIMARY_PATH"
 if [ ! -d "$PRIMARY_PATH/.beads" ]; then
-    log "initializing bd in $PRIMARY_PATH"
+    log "initializing bd at workspace path $PRIMARY_PATH"
     (cd "$PRIMARY_PATH" && bd init --prefix "$PRIMARY_NAME" --skip-hooks -q)
 fi
 
-# ── 2. Seed extra workspaces: git only (no bd init — loom owns that) ──
+# ── 2. Seed extra workspaces: git init on the SOURCE path only ──
 for spec in $EXTRA_WORKSPACES; do
     ws_name=${spec%%:*}
-    ws_path=${spec#*:}
-    if [ ! -d "$ws_path/.git" ]; then
-        log "seeding extra workspace '$ws_name' at $ws_path"
-        mkdir -p "$ws_path"
-        git -C "$ws_path" init -q
-        git -C "$ws_path" config user.email dev@loom.local
-        git -C "$ws_path" config user.name loom-dev
-        git -C "$ws_path" commit --allow-empty -qm "init"
+    rest=${spec#*:}
+    ws_src=${rest%%:*}
+    ws_path=${rest#*:}
+    if [ ! -d "$ws_src/.git" ]; then
+        log "seeding extra source repo '$ws_name' at $ws_src"
+        mkdir -p "$ws_src"
+        git -C "$ws_src" init -q
+        git -C "$ws_src" config user.email dev@loom.local
+        git -C "$ws_src" config user.name loom-dev
+        git -C "$ws_src" commit --allow-empty -qm "init"
+    fi
+    # Pre-init bd at the workspace path for the prefix, same reason as primary.
+    mkdir -p "$ws_path"
+    if [ ! -d "$ws_path/.beads" ]; then
+        log "initializing bd at workspace path $ws_path"
+        (cd "$ws_path" && bd init --prefix "$ws_name" --skip-hooks -q) || true
     fi
 done
 
 # ── 3a. Register the primary workspace as default ──
 #
-# Must match PRIMARY_PATH (= cwd when loom serve starts). Otherwise the
-# server's initialWorkspaceID (read from cfg.DefaultWorkspaceID) resolves to
-# a different workspace than cwd auto-discovers the bd socket for, and the
-# prebuilt pool gets associated with the wrong workspace — cross-workspace
-# data leak.
+# --repos and --path MUST be distinct filesystem locations. Otherwise
+# `loom workspace create` rejects up front (loomcli-r3ddn.3): with
+# --repos == --path, git worktree add creates a nested gitlink worktree
+# (is_linked_worktree=true) inside the source repo, which the frontend
+# sidebar then filters out.
+#
+# PRIMARY_PATH remains the cwd of `loom serve`, which is required so
+# DefaultWorkspaceID matches what cwd auto-discovers for bd socket lookup.
 log "registering primary workspace '$PRIMARY_NAME' as default via loom CLI"
-loom workspace create "$PRIMARY_NAME" --repos "$PRIMARY_PATH" --path "$PRIMARY_PATH" --default \
+loom workspace create "$PRIMARY_NAME" --repos "$PRIMARY_SRC" --path "$PRIMARY_PATH" --default \
     2>/dev/null || log "  (already registered or create failed — continuing)"
 
 # ── 3b. Register extra workspaces via the loom CLI (writes to LOOM_CONFIG_DIR) ──
 for spec in $EXTRA_WORKSPACES; do
     ws_name=${spec%%:*}
-    ws_path=${spec#*:}
+    rest=${spec#*:}
+    ws_src=${rest%%:*}
+    ws_path=${rest#*:}
     log "registering workspace '$ws_name' via loom CLI"
-    loom workspace create "$ws_name" --repos "$ws_path" --path "$ws_path" \
+    loom workspace create "$ws_name" --repos "$ws_src" --path "$ws_path" \
         2>/dev/null || log "  (already registered or create failed — continuing)"
 done
 
@@ -77,7 +105,9 @@ done
 # loom serve's per-workspace pools try to connect on first use. Without a
 # daemon already running, the pool fails once, trips the circuit breaker,
 # and the workspace is unreachable for ~30s on first request. Starting all
-# daemons up front avoids that cold-start.
+# daemons up front avoids that cold-start. The daemon lives at the
+# workspace path (not the source path) so loom serve's cwd-based
+# auto-discovery finds it.
 start_bd_daemon() {
     local ws_path="$1"
     local ws_name="$2"
@@ -97,12 +127,8 @@ start_bd_daemon "$PRIMARY_PATH" "$PRIMARY_NAME" \
     || { log "primary daemon startup failed"; exit 1; }
 for spec in $EXTRA_WORKSPACES; do
     ws_name=${spec%%:*}
-    ws_path=${spec#*:}
-    # bd init is needed for extra workspaces before starting their daemon
-    if [ ! -d "$ws_path/.beads" ]; then
-        log "initializing bd in $ws_path"
-        (cd "$ws_path" && bd init --prefix "$ws_name" --skip-hooks -q) || true
-    fi
+    rest=${spec#*:}
+    ws_path=${rest#*:}
     start_bd_daemon "$ws_path" "$ws_name" || true
 done
 

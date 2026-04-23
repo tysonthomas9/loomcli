@@ -52,6 +52,11 @@ var workspaceCreateCmd = &cobra.Command{
 For each repo, a git worktree is created under the workspace directory.
 The workspace is registered in ~/.loom/config.yaml.
 
+The --path directory must be distinct from every --repos entry and must
+not be nested inside (or contain) any source repo. Using the same path
+for --path and --repos would create a git worktree gitlink nested inside
+the source repo and is rejected up front.
+
 Examples:
   loom workspace create myws --repos /path/to/frontend,/path/to/backend
   loom workspace create myws --repos /path/to/repo --branch feature-x
@@ -131,8 +136,18 @@ func runWorkspaceCreate(cmd *cobra.Command, args []string) {
 	if wsDir == "" {
 		wsDir = config.GetWorkspaceDir(wsName)
 	}
+	absWsDir, err := filepath.Abs(wsDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: cannot resolve workspace path %q: %v\n", wsDir, err)
+		os.Exit(1)
+	}
+	wsDir = filepath.Clean(absWsDir)
 
 	resolvedRepos := resolveAndValidateRepos(repoPaths)
+	if err := checkWorkspacePathCollision(wsDir, resolvedRepos); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
 	repos := createWorkspaceWorktrees(deps, wsDir, resolvedRepos, branch)
 
 	bdResult := deps.Exec.Run(wsDir, "bd", "init")
@@ -231,6 +246,43 @@ func resolveAndValidateRepos(repoPaths []string) []cliResolvedRepo {
 		os.Exit(1)
 	}
 	return resolved
+}
+
+// checkWorkspacePathCollision rejects workspace create invocations where
+// --path (wsDir) and any --repos entry resolve to the same directory or
+// where one is nested inside the other. Without this guard, git worktree
+// add would silently produce a worktree gitlink inside the source repo
+// (is_linked_worktree=true), corrupting the workspace layout.
+//
+// Both wsDir and each repo.path are assumed to be cleaned absolute paths.
+func checkWorkspacePathCollision(wsDir string, repos []cliResolvedRepo) error {
+	for _, repo := range repos {
+		switch {
+		case repo.path == wsDir:
+			return fmt.Errorf("workspace path %q collides with source repo %q: they resolve to the same directory. Use --path to point at a distinct directory (e.g. under ~/.loom/workspaces/)", wsDir, repo.path)
+		case isSubPath(repo.path, wsDir):
+			return fmt.Errorf("workspace path %q is inside source repo %q: a workspace must not live inside one of its source repos. Use --path to point at a distinct directory (e.g. under ~/.loom/workspaces/)", wsDir, repo.path)
+		case isSubPath(wsDir, repo.path):
+			return fmt.Errorf("source repo %q is inside workspace path %q: --repos entries must not live inside --path. Use --path to point at a distinct directory (e.g. under ~/.loom/workspaces/)", repo.path, wsDir)
+		}
+	}
+	return nil
+}
+
+// isSubPath reports whether child is inside parent (child != parent).
+// Both arguments must already be cleaned absolute paths.
+func isSubPath(parent, child string) bool {
+	rel, err := filepath.Rel(parent, child)
+	if err != nil {
+		return false
+	}
+	if rel == "." {
+		return false
+	}
+	if strings.HasPrefix(rel, "..") {
+		return false
+	}
+	return true
 }
 
 func validateRepoPath(absPath string) {
