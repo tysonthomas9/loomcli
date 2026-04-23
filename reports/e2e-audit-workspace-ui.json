@@ -1,0 +1,494 @@
+{
+  "contract_file": "frontend/workspace-ui.md",
+  "validation_report": "reports/validation-workspace-ui.json",
+  "audit_date": "2026-04-23T17:00:00Z",
+  "spec_files_searched": [
+    "internal/webui/frontend/tests/e2e/workspace-switcher.spec.ts",
+    "internal/webui/frontend/tests/e2e/create-workspace-modal.spec.ts",
+    "internal/webui/frontend/tests/e2e/repo-selector.spec.ts",
+    "internal/webui/frontend/tests/e2e/workspace-breadcrumb.spec.ts",
+    "internal/webui/frontend/tests/e2e/journey-workspace-lifecycle.spec.ts",
+    "internal/webui/frontend/tests/e2e/multi-workspace-monitoring.spec.ts",
+    "internal/webui/frontend/tests/e2e/keyboard-escape-layers.spec.ts",
+    "internal/webui/frontend/tests/e2e/keyboard-focus-management.spec.ts",
+    "internal/webui/frontend/tests/e2e/keyboard-global-shortcuts.spec.ts",
+    "internal/webui/frontend/tests/e2e/app.spec.ts",
+    "internal/webui/frontend/tests/e2e/agents-sidebar.spec.ts",
+    "internal/webui/frontend/tests/e2e/visual-regression-sidebar.spec.ts",
+    "internal/webui/frontend/tests/e2e/router-deeplink.spec.ts",
+    "internal/webui/frontend/tests/e2e/integration/workspace-lifecycle.integration.spec.ts",
+    "internal/webui/frontend/tests/e2e/integration/cross-workspace-move.integration.spec.ts"
+  ],
+  "go_test_files_searched": [
+    "internal/webui/handlers/workspace/workspace_test.go",
+    "internal/webui/handlers/workspace/workspaces_test.go"
+  ],
+  "summary": {
+    "total_passing": 46,
+    "covered": 28,
+    "partial": 8,
+    "uncovered": 10,
+    "coverage_pct": 60.9
+  },
+  "assertions": [
+    {
+      "id": "VAL-FE-WS-001",
+      "title": "Switcher lists all workspaces from /api/workspaces",
+      "coverage": "covered",
+      "spec_files": ["workspace-switcher.spec.ts"],
+      "test_names": ["displays all workspace names, paths, and repo counts"],
+      "notes": "Test opens switcher via mocked /api/workspaces, asserts 3 [data-workspace-item] rows, names (alpha, beta, gamma), paths (/workspaces/alpha, /workspaces/beta, /workspaces/gamma), and repo counts (3 repos, 1 repo, 2 repos) are all rendered."
+    },
+    {
+      "id": "VAL-FE-WS-002",
+      "title": "Switcher marks current workspace with checkmark",
+      "coverage": "covered",
+      "spec_files": ["workspace-switcher.spec.ts"],
+      "test_names": ["shows active indicator (checkmark) for current workspace"],
+      "notes": "Test asserts items.nth(0) contains ✓ and items.nth(1)/.nth(2) do not contain ✓."
+    },
+    {
+      "id": "VAL-FE-WS-003",
+      "title": "Clicking workspace row triggers switch",
+      "coverage": "covered",
+      "spec_files": ["workspace-switcher.spec.ts"],
+      "test_names": ["clicking a workspace item selects it and closes dialog"],
+      "notes": "Clicks items.nth(1) (beta), asserts dialog not visible and URL waits for **/ws/ws-beta/**."
+    },
+    {
+      "id": "VAL-FE-WS-004",
+      "title": "Keyboard navigation — Arrow Down cycles through workspaces",
+      "coverage": "covered",
+      "spec_files": ["workspace-switcher.spec.ts"],
+      "test_names": [
+        "ArrowDown moves highlight to next item",
+        "ArrowDown wraps from last to first"
+      ],
+      "notes": "Primary test presses ArrowDown then Enter, waits for /ws/ws-beta/. The wrap test extends coverage by verifying 3 ArrowDown presses wrap back to alpha."
+    },
+    {
+      "id": "VAL-FE-WS-005",
+      "title": "Keyboard navigation — Arrow Up cycles backward",
+      "coverage": "covered",
+      "spec_files": ["workspace-switcher.spec.ts"],
+      "test_names": [
+        "ArrowUp moves highlight to previous item",
+        "ArrowUp wraps from first to last"
+      ],
+      "notes": "Primary test presses ArrowDown twice then ArrowUp then Enter, verifies beta selected. Wrap test verifies ArrowUp from index 0 wraps to gamma."
+    },
+    {
+      "id": "VAL-FE-WS-006",
+      "title": "Keyboard navigation — Enter selects highlighted workspace",
+      "coverage": "covered",
+      "spec_files": ["workspace-switcher.spec.ts"],
+      "test_names": ["Enter selects the highlighted workspace"],
+      "notes": "Test presses Enter on default (index 0) highlight and verifies navigation to /ws/ws-alpha/. Enter-on-empty-results test also covers the no-op edge case."
+    },
+    {
+      "id": "VAL-FE-WS-007",
+      "title": "Escape key closes switcher",
+      "coverage": "covered",
+      "spec_files": ["workspace-switcher.spec.ts"],
+      "test_names": ["Escape closes the switcher"],
+      "notes": "Test presses Escape, asserts dialog not visible and URL unchanged from capture before Escape."
+    },
+    {
+      "id": "VAL-FE-WS-008",
+      "title": "Search filter — substring match on workspace name",
+      "coverage": "covered",
+      "spec_files": ["workspace-switcher.spec.ts"],
+      "test_names": [
+        "filters workspaces by name substring",
+        "search is case-insensitive"
+      ],
+      "notes": "Primary test fills search with a name fragment and verifies only matching rows remain. Case-insensitive variant strengthens coverage."
+    },
+    {
+      "id": "VAL-FE-WS-009",
+      "title": "Search filter — substring match on workspace path",
+      "coverage": "covered",
+      "spec_files": ["workspace-switcher.spec.ts"],
+      "test_names": ["filters workspaces by path substring"],
+      "notes": "Test fills search with '/workspaces/gamma' and verifies only the gamma row remains."
+    },
+    {
+      "id": "VAL-FE-WS-010",
+      "title": "Empty search result state",
+      "coverage": "covered",
+      "spec_files": ["workspace-switcher.spec.ts"],
+      "test_names": ["shows 'No workspaces found' when nothing matches"],
+      "notes": "Test fills search with 'nonexistent' and asserts 0 workspace items + 'No workspaces found' message visible."
+    },
+    {
+      "id": "VAL-FE-WS-011",
+      "title": "Search clears when switcher reopens",
+      "coverage": "covered",
+      "spec_files": ["workspace-switcher.spec.ts"],
+      "test_names": ["reopening resets search term"],
+      "notes": "Test types 'beta', verifies 1 row; closes via Escape; reopens; asserts search input empty and all 3 rows visible."
+    },
+    {
+      "id": "VAL-FE-WS-012",
+      "title": "Keyboard shortcut hints visible (first 9 workspaces)",
+      "coverage": "covered",
+      "spec_files": ["workspace-switcher.spec.ts"],
+      "test_names": ["shows shortcut hints for first 9 workspaces"],
+      "notes": "Test asserts Ctrl+Shift+1, Ctrl+Shift+2, Ctrl+Shift+3 labels are visible for the 3 mock workspaces. Covers the rendering convention; not the 9-item ceiling explicitly."
+    },
+    {
+      "id": "VAL-FE-WS-013",
+      "title": "100+ workspaces — dropdown scrollable",
+      "coverage": "partial",
+      "spec_files": ["workspace-switcher.spec.ts"],
+      "test_names": ["works with a single workspace"],
+      "notes": "Edge-case tests exist (e.g. single-workspace fixture, keyboard nav after filtering) but no test renders 100+ workspaces to verify the scrollable container overflow behavior. CSS declares max-height + overflow but no assertion in a spec proves scrollability at scale."
+    },
+    {
+      "id": "VAL-FE-WS-016",
+      "title": "Clicking overlay backdrop closes switcher",
+      "coverage": "covered",
+      "spec_files": ["workspace-switcher.spec.ts"],
+      "test_names": ["clicking the overlay backdrop closes without selecting"],
+      "notes": "Test clicks at mouse coord (5,5) outside the dialog surface, asserts dialog not visible and URL unchanged."
+    },
+    {
+      "id": "VAL-FE-WS-017",
+      "title": "Focus trap active while switcher open",
+      "coverage": "partial",
+      "spec_files": [
+        "workspace-switcher.spec.ts",
+        "keyboard-focus-management.spec.ts"
+      ],
+      "test_names": [
+        "auto-focuses search input on open",
+        "WorkspaceSwitcher: ArrowDown/ArrowUp navigate highlighted items, Enter selects"
+      ],
+      "notes": "Auto-focus of the search input is covered. keyboard-focus-management.spec.ts exercises arrow navigation while switcher is open but no test verifies Tab cycling is trapped inside the switcher (i.e. Tab at the last element returns to the first rather than escaping to the page)."
+    },
+    {
+      "id": "VAL-FE-WS-018",
+      "title": "Highlighted item scrolls into view",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec renders enough workspaces to force the scroll container to overflow and then verifies the highlighted row scrolls into view. Cannot be exercised with the current 3-workspace fixture."
+    },
+    {
+      "id": "VAL-FE-WS-019",
+      "title": "Tree collapses and expands via toggle button",
+      "coverage": "partial",
+      "spec_files": ["agents-sidebar.spec.ts"],
+      "test_names": [
+        "toggle button collapses sidebar",
+        "toggle button expands sidebar",
+        "collapsed sidebar shows badge with agent count"
+      ],
+      "notes": "Tests exercise the WorkspaceTree sidebar toggle: click collapses (data-collapsed=true, Agents text hidden), second click expands, and a collapsed badge renders agent count. Missing: assertion that state is persisted to localStorage key loom:{wsId}:tree-collapsed across reloads."
+    },
+    {
+      "id": "VAL-FE-WS-020",
+      "title": "Tree shows repo list with health badges",
+      "coverage": "partial",
+      "spec_files": ["visual-regression-sidebar.spec.ts"],
+      "test_names": [
+        "workspace with health colors",
+        "multi workspace with agents",
+        "single workspace"
+      ],
+      "notes": "Visual regression screenshots render the WorkspaceTree with multi-repo fixtures and health-colored agents, implicitly verifying the repo list layout. Missing: explicit non-screenshot assertions that each repo row renders the repo name text and an agent-count / health badge."
+    },
+    {
+      "id": "VAL-FE-WS-039",
+      "title": "Agent list in expanded tree",
+      "coverage": "covered",
+      "spec_files": ["agents-sidebar.spec.ts"],
+      "test_names": [
+        "agent section shows with Agents header and count",
+        "agent cards render for each agent",
+        "agent card renders status and metadata",
+        "agent card shows role label",
+        "working agent shows Working status label",
+        "ready agent shows Ready status label"
+      ],
+      "notes": "Tests render the expanded sidebar (WorkspaceTree aside) with multiple agents and assert the Agents header + count, per-agent cards with [data-status], status labels (Working/Ready), role labels (Task/Plan), and repo metadata (loomcli)."
+    },
+    {
+      "id": "VAL-FE-WS-040",
+      "title": "Add workspace button triggers modal",
+      "coverage": "covered",
+      "spec_files": ["create-workspace-modal.spec.ts"],
+      "test_names": [
+        "clicking '+ New Workspace' opens the modal",
+        "modal has dialog role, aria-modal, and aria-label",
+        "modal title shows 'Create Workspace'"
+      ],
+      "notes": "Test clicks the New Workspace control and asserts the Create Workspace dialog becomes visible; companion tests verify ARIA attributes and title on the opened modal."
+    },
+    {
+      "id": "VAL-FE-WS-041",
+      "title": "WorkspaceLayout validates workspace ID",
+      "coverage": "partial",
+      "spec_files": ["workspace-breadcrumb.spec.ts"],
+      "test_names": ["shows Cortex when workspace API returns error"],
+      "notes": "Covers non-404 backend error (500) — WorkspaceLayout passes it through and falls back to 'Cortex'. But the contract assertion is specifically about an invalid workspace ID (404-equivalent) that should surface a boot error, which no test exercises."
+    },
+    {
+      "id": "VAL-FE-WS-043",
+      "title": "WorkspacePage renders only if multi-repo workspace",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec navigates to the WorkspacePage for a single-repo workspace and asserts the guard redirects or hides the page. journey-workspace-lifecycle.spec.ts tests a general workspace route but not the multi-repo gating."
+    },
+    {
+      "id": "VAL-FE-WS-045",
+      "title": "Modal opens with name field focused",
+      "coverage": "covered",
+      "spec_files": ["create-workspace-modal.spec.ts"],
+      "test_names": ["name input auto-focuses when modal opens"],
+      "notes": "Test opens modal and asserts create-workspace-name input is focused."
+    },
+    {
+      "id": "VAL-FE-WS-046",
+      "title": "Type selector shows three cards",
+      "coverage": "covered",
+      "spec_files": ["create-workspace-modal.spec.ts"],
+      "test_names": [
+        "Clone type is selected by default",
+        "Local Repos type shows Repository Paths field instead",
+        "Template radio is disabled"
+      ],
+      "notes": "Three tests collectively exercise all three type cards: clone (checked by default + shows clone-url input), empty (shows repo-path input), template (disabled). Together they satisfy the 'three cards visible and distinct' assertion."
+    },
+    {
+      "id": "VAL-FE-WS-048",
+      "title": "Clone type requires repository URL",
+      "coverage": "covered",
+      "spec_files": ["create-workspace-modal.spec.ts"],
+      "test_names": [
+        "submit disabled when clone type and no URLs added",
+        "submit enabled with name + pending URL text",
+        "submit enabled when name filled and URLs added"
+      ],
+      "notes": "Submit is disabled with name only (no URL); enabled after filling pending URL or adding a URL chip. Demonstrates the URL requirement for clone type."
+    },
+    {
+      "id": "VAL-FE-WS-049",
+      "title": "Add multiple clone URLs",
+      "coverage": "covered",
+      "spec_files": ["create-workspace-modal.spec.ts"],
+      "test_names": [
+        "typing URL and clicking Add creates a chip",
+        "pressing Enter in URL field adds chip",
+        "chip has remove button that removes it",
+        "duplicate URLs are not added"
+      ],
+      "notes": "Tests cover both Add-button and Enter-key paths to accumulate chips; removal and de-duplication behaviors are also covered."
+    },
+    {
+      "id": "VAL-FE-WS-050",
+      "title": "Empty type shows repo paths input",
+      "coverage": "covered",
+      "spec_files": ["create-workspace-modal.spec.ts"],
+      "test_names": [
+        "Local Repos type shows Repository Paths field instead",
+        "type path and Add creates a chip"
+      ],
+      "notes": "Clicking empty type hides clone-url input and surfaces create-workspace-repo-path input; chip behaviour for repo paths is also exercised."
+    },
+    {
+      "id": "VAL-FE-WS-051",
+      "title": "Template type shows coming soon placeholder",
+      "coverage": "covered",
+      "spec_files": ["create-workspace-modal.spec.ts"],
+      "test_names": ["Template radio is disabled"],
+      "notes": "Template radio asserted disabled, matching the coming-soon placeholder contract."
+    },
+    {
+      "id": "VAL-FE-WS-052",
+      "title": "Name field validates non-empty",
+      "coverage": "covered",
+      "spec_files": ["create-workspace-modal.spec.ts"],
+      "test_names": ["submit disabled when name is empty"],
+      "notes": "Test asserts submit button is disabled when name is empty on initial modal open."
+    },
+    {
+      "id": "VAL-FE-WS-053",
+      "title": "Location (path) field is optional",
+      "coverage": "partial",
+      "spec_files": ["create-workspace-modal.spec.ts"],
+      "test_names": [
+        "submits with correct body",
+        "Location placeholder updates dynamically with name",
+        "custom path sent when Location field filled"
+      ],
+      "notes": "'submits with correct body' test omits the path field and verifies POST body contains only {name, type, clone_urls} — implicitly exercising optional semantics. Companion tests verify the placeholder updates and that a filled path is included in the body. No explicit assertion names 'path optional' as its primary behavior."
+    },
+    {
+      "id": "VAL-FE-WS-054",
+      "title": "Submit form calls createWorkspace API",
+      "coverage": "covered",
+      "spec_files": ["create-workspace-modal.spec.ts"],
+      "test_names": [
+        "submits with correct body",
+        "modal closes on success",
+        "pending URL auto-added on submit",
+        "submit shows 'Creating...' and disables form during submission"
+      ],
+      "notes": "Tests intercept POST /api/workspaces, verify body shape {name, type, clone_urls}, modal closes on success, pending URL is added before submit, and the loading state is rendered during async submit."
+    },
+    {
+      "id": "VAL-FE-WS-059",
+      "title": "Escape key closes modal (not during async job)",
+      "coverage": "covered",
+      "spec_files": [
+        "create-workspace-modal.spec.ts",
+        "keyboard-escape-layers.spec.ts"
+      ],
+      "test_names": [
+        "Escape key closes modal",
+        "clicking overlay closes modal"
+      ],
+      "notes": "Escape press dismisses the Create Workspace modal; overlay-click and Cancel paths reinforce dismiss behavior. keyboard-escape-layers.spec.ts verifies layer priority so Escape doesn't double-fire when other overlays are open."
+    },
+    {
+      "id": "VAL-FE-WS-060",
+      "title": "Cancel button closes modal",
+      "coverage": "covered",
+      "spec_files": ["create-workspace-modal.spec.ts"],
+      "test_names": ["Cancel button closes modal"],
+      "notes": "Test clicks the Cancel button and asserts the overlay is no longer visible."
+    },
+    {
+      "id": "VAL-FE-WS-064",
+      "title": "RepoBadge displays repo name with deterministic color",
+      "coverage": "covered",
+      "spec_files": [
+        "workspace-breadcrumb.spec.ts",
+        "repo-selector.spec.ts"
+      ],
+      "test_names": [
+        "dot has a background color",
+        "shows workspace name with dot and separator",
+        "clicking trigger opens dropdown with repo checkboxes"
+      ],
+      "notes": "workspace-breadcrumb.spec.ts verifies the multi-repo dot renders with inline background style. repo-selector.spec.ts verifies the repo checkboxes each surface repo names (frontend/backend/shared). Together they cover badge presence + color styling and name rendering."
+    },
+    {
+      "id": "VAL-FE-WS-065",
+      "title": "RepoBadge uses dark text for contrast",
+      "coverage": "partial",
+      "spec_files": ["workspace-breadcrumb.spec.ts"],
+      "test_names": ["dot has a background color"],
+      "notes": "Test asserts the dot has a background color but does NOT assert the text color is dark or verify WCAG contrast. repo-selector.spec.ts displays repo names but doesn't check color/contrast on the label."
+    },
+    {
+      "id": "VAL-FE-WS-066",
+      "title": "RepoSelector hidden if <2 repos",
+      "coverage": "covered",
+      "spec_files": ["repo-selector.spec.ts"],
+      "test_names": [
+        "not visible when workspace has only 1 repo",
+        "visible when workspace has 2+ repos"
+      ],
+      "notes": "Pair of tests confirms repo-filter-trigger is not visible with a single-repo workspace and is visible with multi-repo fixture."
+    },
+    {
+      "id": "VAL-FE-WS-071",
+      "title": "Empty state when zero issues in workspace",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No Playwright spec mocks a workspace with zero issues and verifies the empty state component (headline, icon, subtitle) renders."
+    },
+    {
+      "id": "VAL-FE-WS-072",
+      "title": "Empty state for single-repo workspace",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec asserts the single-repo empty state rendering explicitly. The repo-selector test confirms the filter is hidden for a single-repo workspace but does not verify any zero-issue empty state message."
+    },
+    {
+      "id": "VAL-FE-WS-075",
+      "title": "Root / fetches workspace list",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec navigates to / and asserts a workspace list fetch occurs before redirect resolution. Existing specs navigate directly to /ws/{id} as their setup step."
+    },
+    {
+      "id": "VAL-FE-WS-076",
+      "title": "Uses localStorage last workspace ID if valid",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec seeds loom:last-workspace-id in localStorage, navigates to /, and asserts redirect to that stored ID."
+    },
+    {
+      "id": "VAL-FE-WS-077",
+      "title": "Falls back to default workspace if stored ID is stale",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec seeds a stale loom:last-workspace-id and verifies fallback to the default workspace via /api/workspaces/active."
+    },
+    {
+      "id": "VAL-FE-WS-078",
+      "title": "Deep link to specific workspace /ws/{id} works",
+      "coverage": "partial",
+      "spec_files": [
+        "workspace-switcher.spec.ts",
+        "workspace-breadcrumb.spec.ts",
+        "multi-workspace-monitoring.spec.ts"
+      ],
+      "test_names": [
+        "navigating to workspace B via URL shows workspace B data",
+        "displays workspace name from API response"
+      ],
+      "notes": "Multi-workspace monitoring spec does navigate to /ws/{id} and verifies workspace B data is shown, which implicitly covers deep link loading. But no dedicated test isolates 'deep link → correct workspace loaded' as its primary assertion against the canonical URL shape; most specs use /ws/{id} as a setup step rather than an assertion target."
+    },
+    {
+      "id": "VAL-FE-WS-079",
+      "title": "Deep link to invalid workspace shows boot error",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec navigates to /ws/{invalid-id}/ and asserts a boot-error UI is surfaced rather than a silent redirect or blank page. Closely related to VAL-FE-WS-041 partial coverage."
+    },
+    {
+      "id": "VAL-FE-WS-081",
+      "title": "URL updates on workspace switch",
+      "coverage": "covered",
+      "spec_files": [
+        "workspace-switcher.spec.ts",
+        "multi-workspace-monitoring.spec.ts"
+      ],
+      "test_names": [
+        "clicking a workspace item selects it and closes dialog",
+        "ArrowDown moves highlight to next item",
+        "Enter selects the highlighted workspace",
+        "Ctrl+K opens switcher, search filters, Enter switches workspace",
+        "navigating to workspace B via URL shows workspace B data"
+      ],
+      "notes": "Multiple switcher tests assert page.waitForURL(**/ws/{new-id}/**) after click / ArrowDown+Enter / Ctrl+K+search+Enter, covering the core 'URL updates to the new workspace ID' contract across interaction modes. multi-workspace-monitoring.spec.ts additionally verifies URL-driven navigation renders workspace B data."
+    },
+    {
+      "id": "VAL-FE-WS-082",
+      "title": "URL segments preserved or reset on switch",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec switches workspaces while on a non-default view (e.g. ?view=table, issue panel open) and asserts whether view/query segments are preserved or reset in the post-switch URL."
+    },
+    {
+      "id": "VAL-FE-WS-084",
+      "title": "Back button returns to previous workspace",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec switches workspaces and then invokes page.goBack() to verify browser history restores the previous workspace URL and data."
+    }
+  ]
+}
