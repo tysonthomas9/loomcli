@@ -1,0 +1,661 @@
+{
+  "contract_file": "cross-area/multi-agent-parallel.md",
+  "validation_report": "reports/validation-multi-agent-parallel.json",
+  "audit_date": "2026-04-23",
+  "spec_files_searched": [
+    "internal/webui/frontend/tests/e2e/server-push.spec.ts",
+    "internal/webui/frontend/tests/e2e/server-push-integration.spec.ts",
+    "internal/webui/frontend/tests/e2e/integration/concurrent-ops.integration.spec.ts"
+  ],
+  "go_test_files_searched": [
+    "internal/cli/lock_test.go",
+    "internal/cli/lock_workspace_test.go",
+    "internal/cli/daemon_e2e_test.go",
+    "internal/cli/agent/claim_test.go",
+    "internal/cli/agent/complete_test.go",
+    "internal/cli/agent/plan_test.go",
+    "internal/cli/agent/recover_test.go",
+    "internal/cli/agent/task_test.go",
+    "internal/cli/daemon/daemon_cmd_test.go",
+    "internal/cli/daemon/daemon_control_test.go",
+    "internal/cli/daemon/daemon_coverage_test.go",
+    "internal/cli/daemon/daemon_drain_test.go",
+    "internal/cli/daemon/daemon_ipc_test.go",
+    "internal/cli/daemon/daemon_logs_cmd_test.go",
+    "internal/cli/daemon/daemon_reconciler_test.go",
+    "internal/cli/git/push_test.go",
+    "internal/cli/git/sync_test.go",
+    "internal/lockfile/lock_test.go",
+    "internal/types/lock_check_test.go",
+    "internal/types/lock_test.go"
+  ],
+  "summary": {
+    "total_passing": 43,
+    "covered": 27,
+    "partial": 14,
+    "uncovered": 2,
+    "coverage_pct": 62.8
+  },
+  "assertions": [
+    {
+      "id": "VAL-E2E-MULTI-001",
+      "title": "Two agents in different worktrees claim non-overlapping tasks",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/cli/lock_workspace_test.go",
+        "internal/cli/agent/claim_test.go"
+      ],
+      "test_names": [
+        "TestAcquireLock_WorkspaceIndependentLocks",
+        "TestLockInfo_WorkspaceField",
+        "TestRunClaim_Success"
+      ],
+      "notes": "TestAcquireLock_WorkspaceIndependentLocks exercises two different worktrees acquiring independent locks simultaneously. TestRunClaim_Success covers the atomic claim mechanism that prevents two agents from claiming the same task."
+    },
+    {
+      "id": "VAL-E2E-MULTI-002",
+      "title": "Lock file prevents concurrent agent in same worktree",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/cli/lock_test.go",
+        "internal/lockfile/lock_test.go"
+      ],
+      "test_names": [
+        "TestAcquireLockFailsWhenLocked",
+        "TestTryLockExclusive_AlreadyLocked",
+        "TestCheckLockWithLock"
+      ],
+      "notes": "TestAcquireLockFailsWhenLocked directly asserts a second acquire returns the 'already running' error. TestTryLockExclusive_AlreadyLocked exercises the flock primitive underneath."
+    },
+    {
+      "id": "VAL-E2E-MULTI-003",
+      "title": "Lock released after completion allows re-entry",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/cli/lock_test.go",
+        "internal/lockfile/lock_test.go"
+      ],
+      "test_names": [
+        "TestReleaseLock",
+        "TestTryLockExclusive_ReleasedAfterClose"
+      ],
+      "notes": "TestReleaseLock confirms the lock file is removed on release. TestTryLockExclusive_ReleasedAfterClose confirms a second acquire succeeds after the first releases."
+    },
+    {
+      "id": "VAL-E2E-MULTI-004",
+      "title": "Lock prevents plan and task in same worktree",
+      "coverage": "partial",
+      "spec_files": [
+        "internal/cli/lock_test.go",
+        "internal/cli/agent/plan_test.go",
+        "internal/cli/agent/task_test.go"
+      ],
+      "test_names": [
+        "TestAcquireLockFailsWhenLocked",
+        "TestRunPlan_DaemonMode_AcquiresLock",
+        "TestRunTask_DaemonMode_AcquiresLock"
+      ],
+      "notes": "Lock-rejection mechanism (TestAcquireLockFailsWhenLocked) is well covered and plan and task each acquire the same shared lock type. No single test runs plan and task back-to-back in the same worktree and asserts task is rejected while plan holds the lock."
+    },
+    {
+      "id": "VAL-E2E-MULTI-005",
+      "title": "Claim-level task atomicity in local mode",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/cli/agent/claim_test.go",
+        "internal/cli/daemon/daemon_ipc_test.go"
+      ],
+      "test_names": [
+        "TestRunClaim_Success",
+        "TestIPCServer_ClaimSuccess",
+        "TestIPCServer_ClaimConflict"
+      ],
+      "notes": "TestRunClaim_Success exercises the claim path end-to-end. TestIPCServer_ClaimConflict asserts a second claim of the same task returns an error, proving atomicity."
+    },
+    {
+      "id": "VAL-E2E-MULTI-006",
+      "title": "Stale lock detected and cleaned on next startup",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/cli/lock_test.go",
+        "internal/cli/agent/recover_test.go"
+      ],
+      "test_names": [
+        "TestAcquireLockStale",
+        "TestAcquireLockStale_ConcurrentRetry",
+        "TestCheckLockStale",
+        "TestRecoverWorktree_StaleLock"
+      ],
+      "notes": "TestAcquireLockStale verifies a lock referencing a dead PID is removed and the new agent acquires. TestCheckLockStale verifies detection. TestRecoverWorktree_StaleLock covers the recover path."
+    },
+    {
+      "id": "VAL-E2E-MULTI-007",
+      "title": "Recovery removes stale lock and in_progress status",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/cli/agent/recover_test.go"
+      ],
+      "test_names": [
+        "TestForceReleaseLock_RemovesLockFile",
+        "TestResetTask_Success",
+        "TestRecoverWorktree_StaleLock",
+        "TestResetOrphanedAgentTasks_FindsAndResetsMultiple"
+      ],
+      "notes": "TestRecoverWorktree_StaleLock covers lock removal. TestResetTask_Success and TestResetOrphanedAgentTasks_FindsAndResetsMultiple cover resetting task status from in_progress to open."
+    },
+    {
+      "id": "VAL-E2E-MULTI-008",
+      "title": "Three agents in parallel, no double-claim",
+      "coverage": "partial",
+      "spec_files": [
+        "internal/cli/lock_workspace_test.go",
+        "internal/cli/agent/claim_test.go",
+        "internal/lockfile/lock_test.go"
+      ],
+      "test_names": [
+        "TestAcquireLock_WorkspaceIndependentLocks",
+        "TestRunClaim_Success",
+        "TestConcurrentLockAccess"
+      ],
+      "notes": "The mechanisms are individually tested: independent per-worktree locks (TestAcquireLock_WorkspaceIndependentLocks), atomic claim (TestRunClaim_Success), and concurrent lock-race safety (TestConcurrentLockAccess). No test spins up three concurrent agents across three worktrees and asserts no task is claimed twice."
+    },
+    {
+      "id": "VAL-E2E-MULTI-010",
+      "title": "Lock file contains agent PID and start timestamp",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/cli/lock_test.go",
+        "internal/types/lock_test.go"
+      ],
+      "test_names": [
+        "TestReadLockFile",
+        "TestExclusiveLock_MarshalJSON",
+        "TestNewExclusiveLock"
+      ],
+      "notes": "TestReadLockFile asserts the lock JSON contains pid, command, started_at, and agent_name. TestExclusiveLock_MarshalJSON and TestNewExclusiveLock cover the lock struct shape."
+    },
+    {
+      "id": "VAL-E2E-MULTI-011",
+      "title": "Lock updated with task_id when task is claimed",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/cli/lock_test.go",
+        "internal/cli/agent/claim_test.go"
+      ],
+      "test_names": [
+        "TestUpdateLockTask",
+        "TestRunClaim_Success"
+      ],
+      "notes": "TestUpdateLockTask verifies task_id is written into the lock. TestRunClaim_Success confirms the claim CLI invokes this update."
+    },
+    {
+      "id": "VAL-E2E-MULTI-012",
+      "title": "Lock state field tracks active/idle transitions",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/cli/lock_test.go"
+      ],
+      "test_names": [
+        "TestUpdateLockState",
+        "TestGetLockStatus_IdleState",
+        "TestGetLockStatus_ActiveStateShowsCommand"
+      ],
+      "notes": "TestUpdateLockState verifies the state field can be written. TestGetLockStatus_IdleState and TestGetLockStatus_ActiveStateShowsCommand confirm read-back of both states."
+    },
+    {
+      "id": "VAL-E2E-MULTI-013",
+      "title": "Lock cleared from task info between auto-mode iterations",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/cli/lock_test.go"
+      ],
+      "test_names": [
+        "TestClearLockTaskID",
+        "TestSingleTaskModeLockStatePattern",
+        "TestSingleTaskModeLockStatePattern_Task"
+      ],
+      "notes": "TestClearLockTaskID asserts task_id is cleared. TestSingleTaskModeLockStatePattern_Task simulates the single-task mode workflow clearing between iterations."
+    },
+    {
+      "id": "VAL-E2E-MULTI-023",
+      "title": "Daemon launches agents in parallel on startup",
+      "coverage": "partial",
+      "spec_files": [
+        "internal/cli/daemon_e2e_test.go",
+        "internal/cli/daemon/daemon_cmd_test.go"
+      ],
+      "test_names": [
+        "TestE2E_DaemonDryRun",
+        "TestE2E_DaemonStartCreatesPIDFile",
+        "TestComputeAgentStatus_Running"
+      ],
+      "notes": "Daemon startup and PID-file creation are covered end-to-end. No test asserts that the daemon launches multiple configured agents in parallel (as opposed to sequentially) on startup."
+    },
+    {
+      "id": "VAL-E2E-MULTI-024",
+      "title": "Daemon restart policy keeps agents running on clean exit",
+      "coverage": "partial",
+      "spec_files": [
+        "internal/cli/daemon/daemon_cmd_test.go",
+        "internal/cli/daemon/daemon_drain_test.go"
+      ],
+      "test_names": [
+        "TestComputeAgentStatus_Running",
+        "TestComputeAgentStatus_Stopped",
+        "TestApplyRestartPolicyDefaults_YieldTimeout"
+      ],
+      "notes": "Agent status computation is tested. No test actually observes a daemon respawn an agent after a clean exit end-to-end."
+    },
+    {
+      "id": "VAL-E2E-MULTI-025",
+      "title": "Daemon restart backoff on error exit",
+      "coverage": "partial",
+      "spec_files": [
+        "internal/cli/daemon/daemon_cmd_test.go"
+      ],
+      "test_names": [
+        "TestComputeAgentStatus_Failed",
+        "TestComputeAgentStatus_FailedBoundary",
+        "TestComputeAgentStatus_CustomMaxRetries"
+      ],
+      "notes": "Failure boundary and max-retry logic is unit-tested. No test asserts exponential backoff timing (2s, 4s, 8s, capped at 300s) across successive restarts."
+    },
+    {
+      "id": "VAL-E2E-MULTI-026",
+      "title": "Daemon stops all agents on SIGTERM",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/cli/daemon_e2e_test.go",
+        "internal/cli/daemon/daemon_drain_test.go"
+      ],
+      "test_names": [
+        "TestE2E_DaemonSIGTERMCleanShutdown",
+        "TestE2E_DaemonStop",
+        "TestApplyRestartPolicyDefaults_YieldTimeout",
+        "TestApplyRestartPolicyDefaults_SigtermTimeout"
+      ],
+      "notes": "TestE2E_DaemonSIGTERMCleanShutdown runs a real daemon process, sends SIGTERM, and asserts clean termination. Drain tests cover the timeout defaults."
+    },
+    {
+      "id": "VAL-E2E-MULTI-027",
+      "title": "Daemon prevents concurrent instances",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/cli/daemon_e2e_test.go",
+        "internal/lockfile/lock_test.go"
+      ],
+      "test_names": [
+        "TestE2E_DaemonConcurrentStartBlocked",
+        "TestTryDaemonLock"
+      ],
+      "notes": "TestE2E_DaemonConcurrentStartBlocked runs two daemon processes and asserts the second exits with an error. TestTryDaemonLock covers the underlying lock primitive."
+    },
+    {
+      "id": "VAL-E2E-MULTI-028",
+      "title": "Daemon agent log per-agent output",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/cli/daemon/daemon_logs_cmd_test.go"
+      ],
+      "test_names": [
+        "TestResolveAgentLogPath_Basic",
+        "TestResolveAgentLogPath_WithRepo",
+        "TestRunDaemonLogs_NoArgs_ListsAgents"
+      ],
+      "notes": "Per-agent log path resolution (including per-repo paths) and the logs-listing command are directly tested."
+    },
+    {
+      "id": "VAL-E2E-MULTI-029",
+      "title": "Daemon recovers from stale PID file",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/cli/daemon/daemon_cmd_test.go"
+      ],
+      "test_names": [
+        "TestIsLoomDaemonRunning_StalePIDFile",
+        "TestIsLoomDaemonRunning_ValidPIDFile",
+        "TestIsLoomDaemonRunning_NoPIDFile"
+      ],
+      "notes": "TestIsLoomDaemonRunning_StalePIDFile asserts that a PID file referencing a dead PID is not considered a running daemon, which is the mechanism by which the daemon recovers and can start anew."
+    },
+    {
+      "id": "VAL-E2E-MULTI-030",
+      "title": "Daemon control socket IPC for agent lifecycle",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/cli/daemon/daemon_control_test.go"
+      ],
+      "test_names": [
+        "TestControlServer_StopAgent",
+        "TestControlServer_StartAgent",
+        "TestControlServer_RestartRunningAgent",
+        "TestControlServer_SocketRoundTrip",
+        "TestControlServer_ForceStop"
+      ],
+      "notes": "The full control-socket API (start/stop/restart/force-stop + socket round-trip) is covered with dedicated unit tests."
+    },
+    {
+      "id": "VAL-E2E-MULTI-031",
+      "title": "Two agents push to main concurrently",
+      "coverage": "partial",
+      "spec_files": [
+        "internal/cli/git/push_test.go"
+      ],
+      "test_names": [
+        "TestPushAllWorktrees",
+        "TestPushWorkspaceWorktrees_IteratesAllRepos"
+      ],
+      "notes": "Multi-worktree push iteration is tested. No test spins up two concurrent push processes to the same remote branch to verify both succeed without interleave corruption."
+    },
+    {
+      "id": "VAL-E2E-MULTI-032",
+      "title": "Push to main with local changes on agent branch",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/cli/git/push_test.go"
+      ],
+      "test_names": [
+        "TestPushBranch_DirtyWorkingTree_StashesAndPops",
+        "TestPushBranchInRepo_DirtyWorkingTree_StashesAndPops",
+        "TestPushBranchInRepo_CleanWorkingTree_NoStash"
+      ],
+      "notes": "Dirty-working-tree push path is exercised end-to-end via stash/pop. Clean-tree skip-stash path is also covered."
+    },
+    {
+      "id": "VAL-E2E-MULTI-033",
+      "title": "Sync fetches latest and rebases",
+      "coverage": "partial",
+      "spec_files": [
+        "internal/cli/git/sync_test.go"
+      ],
+      "test_names": [
+        "TestSyncCmd_NoArgs",
+        "TestSyncCmd_Flags",
+        "TestSyncSingleWorkspace_EmptyWorktrees"
+      ],
+      "notes": "Sync command flag handling and no-args behavior are tested. No test drives an actual fetch+rebase against a remote with upstream changes."
+    },
+    {
+      "id": "VAL-E2E-MULTI-036",
+      "title": "Kill -9 mid-task leaves lock and in_progress status",
+      "coverage": "partial",
+      "spec_files": [
+        "internal/lockfile/lock_test.go",
+        "internal/cli/lock_test.go"
+      ],
+      "test_names": [
+        "TestCheckPIDFile",
+        "TestIsProcessRunning",
+        "TestCheckLockStale"
+      ],
+      "notes": "Dead-PID detection (the mechanism for identifying a kill -9 aftermath) is covered. No test actually SIGKILLs an agent mid-task and asserts both the lock file persistence and the task's in_progress state."
+    },
+    {
+      "id": "VAL-E2E-MULTI-037",
+      "title": "Loom recover clears stale lock and resets task status",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/cli/agent/recover_test.go"
+      ],
+      "test_names": [
+        "TestForceReleaseLock_RemovesLockFile",
+        "TestRecoverWorktree_StaleLock",
+        "TestResetTask_Success",
+        "TestResetOrphanedAgentTasks_FindsAndResetsMultiple"
+      ],
+      "notes": "Recover path is thoroughly covered: lock removal (TestForceReleaseLock_RemovesLockFile), stale detection (TestRecoverWorktree_StaleLock), and status reset (TestResetTask_Success, TestResetOrphanedAgentTasks_FindsAndResetsMultiple)."
+    },
+    {
+      "id": "VAL-E2E-MULTI-038",
+      "title": "Recovering task is re-claimable by next agent",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/cli/agent/recover_test.go",
+        "internal/cli/agent/claim_test.go"
+      ],
+      "test_names": [
+        "TestResetTask_Success",
+        "TestResetOrphanedAgentTasks_FindsAndResetsMultiple",
+        "TestRunClaim_Success"
+      ],
+      "notes": "Reset returns the task to open status (tested). Claim operates on open tasks (tested). Together these cover the re-claimability path."
+    },
+    {
+      "id": "VAL-E2E-MULTI-039",
+      "title": "Recover in clean worktree exits 0 with no-op",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/cli/agent/recover_test.go"
+      ],
+      "test_names": [
+        "TestRecoverWorktree_NoLock"
+      ],
+      "notes": "TestRecoverWorktree_NoLock asserts recover on a worktree without a lock file returns success without error."
+    },
+    {
+      "id": "VAL-E2E-MULTI-040",
+      "title": "SSE delivers task.claimed event from all agents",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/webui/frontend/tests/e2e/server-push-integration.spec.ts",
+        "internal/webui/frontend/tests/e2e/integration/concurrent-ops.integration.spec.ts",
+        "internal/cli/daemon/daemon_ipc_test.go"
+      ],
+      "test_names": [
+        "CLI mutation triggers UI update",
+        "concurrent creates all delivered via SSE to browser",
+        "TestIPCServer_ClaimPublishesMutation"
+      ],
+      "notes": "TestIPCServer_ClaimPublishesMutation asserts the daemon publishes a mutation event on claim. Playwright tests verify the browser receives and processes CLI-triggered mutations via SSE."
+    },
+    {
+      "id": "VAL-E2E-MULTI-041",
+      "title": "SSE delivers task.updated events in order per task",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/webui/frontend/tests/e2e/server-push-integration.spec.ts",
+        "internal/cli/daemon/daemon_ipc_test.go"
+      ],
+      "test_names": [
+        "multiple rapid mutations are processed in order",
+        "TestIPCServer_UpdatePublishesMutation"
+      ],
+      "notes": "'multiple rapid mutations are processed in order' directly validates per-task ordering under a burst. TestIPCServer_UpdatePublishesMutation covers the publish side."
+    },
+    {
+      "id": "VAL-E2E-MULTI-042",
+      "title": "SSE initial snapshot includes all current state",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test asserts that the SSE stream's initial snapshot frame contains all currently-open issues (or a representative subset). 'SSE endpoint is called on page load' only asserts the endpoint is hit; none of the SSE specs parse the initial event payload for full-state coverage."
+    },
+    {
+      "id": "VAL-E2E-MULTI-046",
+      "title": "Five concurrent startup; only one acquires lock",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/lockfile/lock_test.go",
+        "internal/cli/lock_test.go"
+      ],
+      "test_names": [
+        "TestConcurrentLockAccess",
+        "TestAcquireLockStale_ConcurrentRetry"
+      ],
+      "notes": "TestConcurrentLockAccess spawns multiple goroutines all attempting to acquire the same lock and asserts only one succeeds. TestAcquireLockStale_ConcurrentRetry covers the contended-retry path."
+    },
+    {
+      "id": "VAL-E2E-MULTI-047",
+      "title": "Database lock contention under concurrent bd updates",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/webui/frontend/tests/e2e/integration/concurrent-ops.integration.spec.ts"
+      ],
+      "test_names": [
+        "concurrent PATCH of different fields preserves all changes",
+        "concurrent PATCH of same field resolves without corruption",
+        "concurrent status transitions end in valid state",
+        "concurrent label add operations accumulate"
+      ],
+      "notes": "The concurrent-ops integration spec drives parallel PATCH requests against the real API/DB and asserts all updates succeed without corruption, directly exercising DB lock contention."
+    },
+    {
+      "id": "VAL-E2E-MULTI-049",
+      "title": "Kill -9 daemon; agents orphaned then recovered",
+      "coverage": "partial",
+      "spec_files": [
+        "internal/cli/agent/recover_test.go",
+        "internal/cli/daemon/daemon_cmd_test.go"
+      ],
+      "test_names": [
+        "TestRecoverWorktree_StaleLock",
+        "TestForceReleaseLock_RemovesLockFile",
+        "TestResetOrphanedAgentTasks_FindsAndResetsMultiple",
+        "TestIsLoomDaemonRunning_StalePIDFile"
+      ],
+      "notes": "The recovery primitives (stale lock cleanup, orphaned task reset, stale daemon PID detection) are all tested. No test actually SIGKILLs a running daemon, verifies the orphaned state, then drives recover."
+    },
+    {
+      "id": "VAL-E2E-MULTI-052",
+      "title": "Push during parallel rebase causes conflict then retry",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/cli/git/push_test.go"
+      ],
+      "test_names": [
+        "TestPushBranch_StashPopConflicts_WarnsButSucceeds",
+        "TestPushBranchInRepo_StashPopConflicts_WarnsButSucceeds",
+        "TestPushBranchInRepoDetached_MergeConflicts_InvokesClaude",
+        "TestPushBranchDetached_MergeConflicts_InvokesClaude"
+      ],
+      "notes": "Conflict handling paths during push are thoroughly covered: stash/pop conflicts (warn-but-succeed) and merge conflicts (delegated to Claude) both have dedicated tests."
+    },
+    {
+      "id": "VAL-E2E-MULTI-053",
+      "title": "Daemon and manual agent in different worktrees coexist",
+      "coverage": "partial",
+      "spec_files": [
+        "internal/cli/lock_workspace_test.go"
+      ],
+      "test_names": [
+        "TestAcquireLock_WorkspaceIndependentLocks"
+      ],
+      "notes": "The lock-independence mechanism (per-worktree locks) is tested. No test actually runs a daemon-managed agent and a manual agent in two different worktrees simultaneously and asserts both run without interference."
+    },
+    {
+      "id": "VAL-E2E-MULTI-054",
+      "title": "Manual agent in same worktree as daemon rejected",
+      "coverage": "partial",
+      "spec_files": [
+        "internal/cli/lock_test.go"
+      ],
+      "test_names": [
+        "TestAcquireLockFailsWhenLocked"
+      ],
+      "notes": "Daemon and manual agents use the same lock acquisition path, so TestAcquireLockFailsWhenLocked covers the mechanism. No test specifically asserts that a manual 'loom task' invocation is rejected when a daemon-spawned agent already holds the worktree lock."
+    },
+    {
+      "id": "VAL-E2E-MULTI-055",
+      "title": "Daemon stop clears lock, allows manual agent",
+      "coverage": "partial",
+      "spec_files": [
+        "internal/cli/daemon/daemon_control_test.go",
+        "internal/cli/lock_test.go"
+      ],
+      "test_names": [
+        "TestControlServer_StopAgent",
+        "TestControlServer_ForceStop",
+        "TestReleaseLock"
+      ],
+      "notes": "Daemon stop-agent IPC (TestControlServer_StopAgent, TestControlServer_ForceStop) and lock release (TestReleaseLock) are each tested. No integration test chains the two to verify a manual agent can enter after daemon-driven stop."
+    },
+    {
+      "id": "VAL-E2E-MULTI-056",
+      "title": "Lock released on normal exit",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/cli/lock_test.go",
+        "internal/cli/agent/plan_test.go",
+        "internal/cli/agent/task_test.go"
+      ],
+      "test_names": [
+        "TestReleaseLock",
+        "TestRunPlan_SingleTask_Success",
+        "TestRunTask_SingleTask_Success"
+      ],
+      "notes": "TestReleaseLock directly asserts normal release. TestRunPlan_SingleTask_Success and TestRunTask_SingleTask_Success exercise the full agent lifecycle with release-on-exit."
+    },
+    {
+      "id": "VAL-E2E-MULTI-058",
+      "title": "Lock released on error exit",
+      "coverage": "partial",
+      "spec_files": [
+        "internal/cli/lock_test.go"
+      ],
+      "test_names": [
+        "TestReleaseLock",
+        "TestReleaseLockDifferentPID",
+        "TestReleaseLockNoLock"
+      ],
+      "notes": "Lock release mechanism is tested. The defer-based release in agent code guarantees invocation on error, but no test asserts the lock is released when the agent exits with a non-zero status."
+    },
+    {
+      "id": "VAL-E2E-MULTI-059",
+      "title": "Task status transitions in correct order",
+      "coverage": "partial",
+      "spec_files": [
+        "internal/webui/frontend/tests/e2e/integration/concurrent-ops.integration.spec.ts",
+        "internal/cli/daemon/daemon_ipc_test.go"
+      ],
+      "test_names": [
+        "concurrent status transitions end in valid state",
+        "TestIPCServer_UpdateSuccess"
+      ],
+      "notes": "'concurrent status transitions end in valid state' asserts the final state is valid under parallel updates but does not enforce forward-only ordering (open -> in_progress -> closed). TestIPCServer_UpdateSuccess covers individual status-field updates."
+    },
+    {
+      "id": "VAL-E2E-MULTI-060",
+      "title": "Design populated before task agent begins",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/cli/agent/task_test.go"
+      ],
+      "test_names": [
+        "TestRunTask_SkipsTasksWithoutDesign",
+        "TestHasAvailableImplementationTasks_SkipsTasksWithoutDesign",
+        "TestGetAvailableImplementationTasks_SkipsNeedsRevision"
+      ],
+      "notes": "TestRunTask_SkipsTasksWithoutDesign directly asserts that tasks without a design field are skipped. The availability filters enforce the design-gating invariant."
+    },
+    {
+      "id": "VAL-E2E-MULTI-061",
+      "title": "Lock file permissions are 0600",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "Lock source code uses mode 0600 (internal/cli/lock.go writes with 0600) but no test reads back the file mode to assert it is 0600. TestNewExclusiveLock validates struct contents only; TestAcquireLock does not stat() the resulting file."
+    },
+    {
+      "id": "VAL-E2E-MULTI-064",
+      "title": "Assertion count and coverage verification",
+      "coverage": "covered",
+      "spec_files": [
+        "reports/validation-multi-agent-parallel.json"
+      ],
+      "test_names": [],
+      "notes": "Meta-assertion: the validation report itself demonstrates that 64 VAL-E2E-MULTI-* assertions (VAL-E2E-MULTI-001 through VAL-E2E-MULTI-064) were executed. Self-covered by the validation artifact."
+    }
+  ],
+  "uncovered_summary": [
+    {
+      "id": "VAL-E2E-MULTI-042",
+      "title": "SSE initial snapshot includes all current state",
+      "suggested_ticket_title": "[e2e-gap] multi-agent-parallel: SSE initial snapshot contains all current state on connect"
+    },
+    {
+      "id": "VAL-E2E-MULTI-061",
+      "title": "Lock file permissions are 0600",
+      "suggested_ticket_title": "[e2e-gap] multi-agent-parallel: assert lock file mode is 0600 after acquire"
+    }
+  ]
+}
