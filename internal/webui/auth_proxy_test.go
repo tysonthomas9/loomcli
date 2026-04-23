@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 )
@@ -109,6 +110,79 @@ func TestNewAuthProxy_ValidURL(t *testing.T) {
 	if NewAuthProxy("https://auth.example.com", nil) == nil {
 		t.Error("expected non-nil for valid URL")
 	}
+}
+
+// TestNewAuthProxy_RewriteSetsContext exercises the Rewrite callback end-to-end
+// to verify that the outbound request carries the correct Host header and that
+// TLS state — determined from the inbound request — is threaded through the
+// context so that ModifyResponse emits cookies with or without the Secure flag.
+func TestNewAuthProxy_RewriteSetsContext(t *testing.T) {
+	var gotHost, gotPath string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotHost = r.Host
+		gotPath = r.URL.Path
+		w.Header().Add("Set-Cookie", "session=abc; HttpOnly")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	proxy := NewAuthProxy(upstream.URL, nil)
+	if proxy == nil {
+		t.Fatal("NewAuthProxy returned nil")
+	}
+	proxySrv := httptest.NewServer(proxy)
+	defer proxySrv.Close()
+
+	upstreamURL, _ := url.Parse(upstream.URL)
+
+	t.Run("plain_HTTP_no_Secure_flag", func(t *testing.T) {
+		gotHost, gotPath = "", ""
+		req, _ := http.NewRequest("GET", proxySrv.URL+"/api/auth/session", nil)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if gotHost != upstreamURL.Host {
+			t.Errorf("expected upstream Host %q, got %q", upstreamURL.Host, gotHost)
+		}
+		if gotPath != "/api/auth/session" {
+			t.Errorf("expected upstream path %q, got %q", "/api/auth/session", gotPath)
+		}
+		cookies := resp.Header.Values("Set-Cookie")
+		if len(cookies) != 1 {
+			t.Fatalf("expected 1 cookie, got %d: %v", len(cookies), cookies)
+		}
+		if hasCookieFlag(cookies[0], "Secure") {
+			t.Errorf("expected Secure absent on plain HTTP, got %q", cookies[0])
+		}
+	})
+
+	t.Run("X_Forwarded_Proto_https_adds_Secure_flag", func(t *testing.T) {
+		gotHost, gotPath = "", ""
+		req, _ := http.NewRequest("GET", proxySrv.URL+"/api/auth/session", nil)
+		req.Header.Set("X-Forwarded-Proto", "https")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if gotHost != upstreamURL.Host {
+			t.Errorf("expected upstream Host %q, got %q", upstreamURL.Host, gotHost)
+		}
+		if gotPath != "/api/auth/session" {
+			t.Errorf("expected upstream path %q, got %q", "/api/auth/session", gotPath)
+		}
+		cookies := resp.Header.Values("Set-Cookie")
+		if len(cookies) != 1 {
+			t.Fatalf("expected 1 cookie, got %d: %v", len(cookies), cookies)
+		}
+		if !hasCookieFlag(cookies[0], "Secure") {
+			t.Errorf("expected Secure added when X-Forwarded-Proto=https, got %q", cookies[0])
+		}
+	})
 }
 
 func TestCookieStripAttr(t *testing.T) {

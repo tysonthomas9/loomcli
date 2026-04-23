@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// authProxyCtxKey threads TLS state from Director into ModifyResponse.
+// authProxyCtxKey threads TLS state from Rewrite into ModifyResponse.
 type authProxyCtxKey struct{}
 
 // NewAuthProxy returns a reverse proxy that forwards /api/auth/* requests to
@@ -32,20 +32,19 @@ func NewAuthProxy(extAuthURL string, logger *slog.Logger) http.Handler {
 		return nil
 	}
 
-	proxy := httputil.NewSingleHostReverseProxy(target)
-	proxy.Transport = &http.Transport{
-		TLSHandshakeTimeout:   5 * time.Second,
-		ResponseHeaderTimeout: 30 * time.Second,
-		IdleConnTimeout:       30 * time.Second,
-	}
-
-	originalDirector := proxy.Director
-	proxy.Director = func(req *http.Request) {
-		originalDirector(req)
-		req.Host = target.Host
-		isTLS := req.TLS != nil ||
-			strings.EqualFold(req.Header.Get("X-Forwarded-Proto"), "https")
-		*req = *req.WithContext(context.WithValue(req.Context(), authProxyCtxKey{}, isTLS))
+	proxy := &httputil.ReverseProxy{
+		Rewrite: func(r *httputil.ProxyRequest) {
+			r.SetURL(target)
+			r.Out.Host = target.Host
+			isTLS := r.In.TLS != nil ||
+				strings.EqualFold(r.In.Header.Get("X-Forwarded-Proto"), "https")
+			r.Out = r.Out.WithContext(context.WithValue(r.Out.Context(), authProxyCtxKey{}, isTLS))
+		},
+		Transport: &http.Transport{
+			TLSHandshakeTimeout:   5 * time.Second,
+			ResponseHeaderTimeout: 30 * time.Second,
+			IdleConnTimeout:       30 * time.Second,
+		},
 	}
 
 	proxy.ModifyResponse = rewriteAuthProxyCookies
