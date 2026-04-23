@@ -1,0 +1,701 @@
+{
+  "contract_file": "cross-area/multi-workspace-fleet.md",
+  "validation_report": "reports/validation-multi-workspace-fleet.json",
+  "audit_date": "2026-04-23T21:00:00Z",
+  "spec_files_searched": [
+    "internal/webui/frontend/tests/e2e/integration/workspace-lifecycle.integration.spec.ts",
+    "internal/webui/frontend/tests/e2e/integration/cross-workspace-move.integration.spec.ts",
+    "internal/webui/frontend/tests/e2e/workspace-switcher.spec.ts",
+    "internal/webui/frontend/tests/e2e/create-workspace-modal.spec.ts",
+    "internal/webui/frontend/tests/e2e/workspace-breadcrumb.spec.ts",
+    "internal/webui/frontend/tests/e2e/api/issue-triage.api.spec.ts"
+  ],
+  "go_test_files_searched": [
+    "internal/backend/fleet/fleet_test.go",
+    "internal/backend/beads/beads_test.go",
+    "internal/backend/api/backend_test.go",
+    "internal/backend/types_test.go",
+    "internal/entity/workspace_test.go",
+    "internal/cli/fleet_mode_test.go",
+    "internal/cli/workspace/workspace_cmd_test.go",
+    "internal/cli/workspace/workspace_init_test.go",
+    "internal/cli/workspace_cmd_e2e_test.go",
+    "internal/webui/app/multi_workspace_integration_test.go",
+    "internal/webui/app/routes_test.go",
+    "internal/webui/handlers/workspace/create_test.go",
+    "internal/webui/handlers/workspace/delete_test.go",
+    "internal/webui/handlers/workspace/rename_test.go"
+  ],
+  "summary": {
+    "total_passing": 45,
+    "covered": 34,
+    "partial": 9,
+    "uncovered": 2,
+    "coverage_pct": 75.6
+  },
+  "assertions": [
+    {
+      "id": "VAL-E2E-FLEET-020",
+      "title": "Same list endpoint works in both local and fleet mode",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/backend/fleet/fleet_test.go",
+        "internal/backend/beads/beads_test.go",
+        "internal/webui/frontend/tests/e2e/integration/workspace-lifecycle.integration.spec.ts"
+      ],
+      "test_names": [
+        "TestList_HappyPath",
+        "TestList_QueryParams",
+        "TestList_EmptyOpts_NoError",
+        "create workspace via API and verify in workspace list"
+      ],
+      "notes": "fleet_test.go and beads_test.go each exercise the List operation against workspace-scoped endpoints with identical backend.ListOpts contract. The integration spec verifies a real HTTP round-trip against the running backend listing workspaces. Parity of the list endpoint shape is covered on both sides."
+    },
+    {
+      "id": "VAL-E2E-FLEET-021",
+      "title": "Same create endpoint works in both modes",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/backend/fleet/fleet_test.go",
+        "internal/backend/beads/beads_test.go",
+        "internal/webui/frontend/tests/e2e/integration/workspace-lifecycle.integration.spec.ts"
+      ],
+      "test_names": [
+        "TestCreate_HappyPath",
+        "create workspace via API and verify in workspace list"
+      ],
+      "notes": "TestCreate_HappyPath runs in both fleet_test.go and beads_test.go with the same backend.CreateParams contract (Title, IssueType, Priority). The integration spec exercises POST /api/workspaces end-to-end against the real backend."
+    },
+    {
+      "id": "VAL-E2E-FLEET-022",
+      "title": "Issue ready/blocked status works in both modes",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/backend/fleet/fleet_test.go",
+        "internal/backend/beads/beads_test.go"
+      ],
+      "test_names": [
+        "TestReady_HappyPath",
+        "TestBlocked_HappyPath"
+      ],
+      "notes": "Both backends have TestReady_HappyPath and TestBlocked_HappyPath covering ready/blocked list semantics. Identical code paths in fleet and beads verified via parallel unit tests."
+    },
+    {
+      "id": "VAL-E2E-FLEET-023",
+      "title": "Stats endpoint returns same field set in both modes",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/backend/fleet/fleet_test.go",
+        "internal/backend/beads/beads_test.go",
+        "internal/backend/types_test.go",
+        "internal/webui/app/routes_test.go"
+      ],
+      "test_names": [
+        "TestStats_HappyPath",
+        "TestStats_AllStatuses",
+        "TestStats_EmptyWorkspace",
+        "TestStatsData_JSONRoundTrip",
+        "TestStatsData_ZeroValuesPresent",
+        "TestStatsResponse_SuccessSerialization",
+        "TestHandleStats_RPCResponseParsing_ValidStatistics"
+      ],
+      "notes": "fleet and beads both have TestStats_HappyPath asserting the same StatsData field set (OpenIssues, ClosedIssues, InProgressIssues, BlockedIssues, DeferredIssues, TombstoneIssues, PinnedIssues, ReadyIssues). types_test.go locks the JSON shape of StatsData with round-trip and zero-value serialization tests. routes_test.go covers the HTTP wrapper layer."
+    },
+    {
+      "id": "VAL-E2E-FLEET-024",
+      "title": "Ready/Blocked are observable as a REST list",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/backend/fleet/fleet_test.go",
+        "internal/backend/beads/beads_test.go"
+      ],
+      "test_names": [
+        "TestReady_HappyPath",
+        "TestBlocked_HappyPath"
+      ],
+      "notes": "Both unit tests POST against a stub server and verify the REST list response shape for Ready/Blocked. Same coverage as VAL-E2E-FLEET-022 — the assertions overlap."
+    },
+    {
+      "id": "VAL-E2E-FLEET-030",
+      "title": "Both modes update issue status atomically",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/backend/fleet/fleet_test.go",
+        "internal/backend/beads/beads_test.go"
+      ],
+      "test_names": [
+        "TestUpdate_HappyPath",
+        "TestUpdate_ClaimRejected",
+        "TestUpdate_ClaimFalseAllowed"
+      ],
+      "notes": "fleet_test.go verifies PATCH semantics and body shape. beads_test.go covers the same contract via its TestUpdate_HappyPath. Both reject concurrent claim-on-update the same way, asserting atomicity at the API boundary."
+    },
+    {
+      "id": "VAL-E2E-FLEET-031",
+      "title": "Both modes support dependent/blocking relationships",
+      "coverage": "partial",
+      "spec_files": [
+        "internal/backend/fleet/fleet_test.go"
+      ],
+      "test_names": [
+        "TestAddDependency",
+        "TestRemoveDependency"
+      ],
+      "notes": "Fleet unit tests cover AddDependency/RemoveDependency against the REST stub. Beads backend implements the same contract but lacks explicit parallel AddDependency/RemoveDependency tests in beads_test.go — coverage is through the backend interface assertion. Parallel unit-test coverage for the local path is missing."
+    },
+    {
+      "id": "VAL-E2E-FLEET-032",
+      "title": "Both modes handle issue close with dependent unblocking",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/backend/fleet/fleet_test.go",
+        "internal/backend/beads/beads_test.go"
+      ],
+      "test_names": [
+        "TestClose_HappyPath",
+        "TestClose_NoUnblockedIssues"
+      ],
+      "notes": "fleet TestClose_HappyPath asserts a non-empty Unblocked slice in the CloseResult. TestClose_NoUnblockedIssues asserts the non-nil empty-slice contract when nothing is freed. beads_test.go has the same TestClose_HappyPath, giving parity coverage."
+    },
+    {
+      "id": "VAL-E2E-FLEET-033",
+      "title": "Local mode does not require Redis or fleet configuration",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/cli/fleet_mode_test.go",
+        "internal/backend/beads/beads_test.go"
+      ],
+      "test_names": [
+        "TestIsFleetMode_BeadsBackend",
+        "TestIsFleetMode_FleetDBIsNotFleetMode",
+        "TestIsFleetModeFromEnv_NoFleetMode"
+      ],
+      "notes": "fleet_mode_test.go explicitly asserts that the beads backend is not considered fleet mode. The entire beads_test.go suite runs without Redis and without fleet config, demonstrating local mode independence. Behavior path is fully exercised."
+    },
+    {
+      "id": "VAL-E2E-FLEET-035",
+      "title": "Both modes support workspace-scoped operations",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/backend/fleet/fleet_test.go",
+        "internal/backend/beads/beads_test.go",
+        "internal/webui/frontend/tests/e2e/integration/workspace-lifecycle.integration.spec.ts"
+      ],
+      "test_names": [
+        "TestStats_HappyPath",
+        "TestList_HappyPath",
+        "read workspace topology returns repos"
+      ],
+      "notes": "All fleet requests target /api/workspaces/{workspace_id}/issues/... — the test server verifies the path prefix. Beads tests similarly scope all calls to the workspace. Integration test confirms end-to-end workspace scoping via the real HTTP API."
+    },
+    {
+      "id": "VAL-E2E-FLEET-114",
+      "title": "Both modes support comments on issues",
+      "coverage": "partial",
+      "spec_files": [
+        "internal/backend/fleet/fleet_test.go"
+      ],
+      "test_names": [
+        "TestAddComment_HappyPath",
+        "TestListComments_HappyPath",
+        "TestListComments_NoComments"
+      ],
+      "notes": "Fleet backend has comprehensive AddComment/ListComments tests. Beads backend implements the same interface but lacks a parallel TestAddComment_HappyPath in beads_test.go — local-path comment coverage is indirect via the interface contract only."
+    },
+    {
+      "id": "VAL-E2E-PARITY-011",
+      "title": "Workspace with 3 repos shows all repos in tree sidebar",
+      "coverage": "partial",
+      "spec_files": [
+        "internal/webui/frontend/tests/e2e/workspace-switcher.spec.ts",
+        "internal/webui/frontend/tests/e2e/integration/workspace-lifecycle.integration.spec.ts"
+      ],
+      "test_names": [
+        "displays all workspace names, paths, and repo counts",
+        "read workspace topology returns repos"
+      ],
+      "notes": "The switcher spec renders a workspace with repo_count: 3 and asserts '3 repos' is visible. The integration test verifies the repos array is returned by the API with non-zero length. No test specifically verifies a per-repo sidebar tree rendering with three distinct entries under a workspace node."
+    },
+    {
+      "id": "VAL-E2E-PARITY-014",
+      "title": "List issues shows source_repo field for multi-repo issues",
+      "coverage": "partial",
+      "spec_files": [
+        "internal/backend/fleet/fleet_test.go",
+        "internal/backend/types_test.go"
+      ],
+      "test_names": [
+        "TestList_QueryParams",
+        "TestIssueData_JSONRoundTrip"
+      ],
+      "notes": "TestList_QueryParams verifies the source_repos query parameter is serialized on the List call. TestIssueData_JSONRoundTrip locks SourceRepo as a JSON-serializable field on IssueData. No test asserts source_repo is present on a returned list entry distinguishing across multiple repos in a single response."
+    },
+    {
+      "id": "VAL-E2E-PARITY-051",
+      "title": "List issues with 1000+ issues in workspace",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No existing test creates or lists 1000+ issues in a workspace to verify pagination/limits at scale. fleet/beads tests use tiny datasets (2 issues). issue-triage.api.spec.ts creates only a few issues."
+    },
+    {
+      "id": "VAL-E2E-PARITY-052",
+      "title": "Both modes handle missing/deleted workspace gracefully",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/webui/handlers/workspace/delete_test.go",
+        "internal/webui/frontend/tests/e2e/integration/workspace-lifecycle.integration.spec.ts"
+      ],
+      "test_names": [
+        "TestHandleWorkspaceDelete_UnknownUUID",
+        "delete non-existent workspace returns 404"
+      ],
+      "notes": "Handler unit test and integration spec both assert 404 when targeting a non-existent workspace. Covers both the Go and end-to-end layers."
+    },
+    {
+      "id": "VAL-E2E-PARITY-060",
+      "title": "Repository path validation in workspace create",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/cli/workspace_cmd_e2e_test.go"
+      ],
+      "test_names": [
+        "TestE2E_WorkspaceCreate_NonExistentRepo"
+      ],
+      "notes": "Real-binary E2E test runs 'loom workspace create' against /nonexistent/path and asserts exit code 1 with a 'does not exist' error on stderr. The unit tests in workspace_cmd_test.go (TestWorkspaceCreate_NonExistentRepoPath, TestWorkspaceCreate_NonGitRepo) only verify preconditions and do NOT call runWorkspaceCreate, so they are excluded from coverage attribution even though they share the assertion topic."
+    },
+    {
+      "id": "VAL-E2E-PARITY-061",
+      "title": "Workspace directory creation with --path creates parent dirs",
+      "coverage": "partial",
+      "spec_files": [
+        "internal/cli/workspace/workspace_cmd_test.go"
+      ],
+      "test_names": [
+        "TestWorkspaceCreate_HappyPath"
+      ],
+      "notes": "TestWorkspaceCreate_HappyPath uses a custom path (tmpDir/workspaces/myws) and verifies the workspace is created there. However the test mocks git worktree add, so it doesn't directly verify automatic parent directory creation by the create path. No test asserts that a nested --path whose parent doesn't exist has the parent created by the command."
+    },
+    {
+      "id": "VAL-E2E-PARITY-090",
+      "title": "Corrupted workspace config -> clear error message",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/cli/workspace/workspace_init_test.go"
+      ],
+      "test_names": [
+        "TestEnsureCurrentProjectRegistered_RefusesToSaveOnParseError",
+        "TestEnsureCurrentProjectRegistered_RefusesToSaveOnReadError"
+      ],
+      "notes": "Both tests set up a corrupted YAML config and assert the command refuses to overwrite with a clear error rather than silently clobbering the file."
+    },
+    {
+      "id": "VAL-E2E-PARITY-103",
+      "title": "Both modes support issue dependency creation",
+      "coverage": "partial",
+      "spec_files": [
+        "internal/backend/fleet/fleet_test.go",
+        "internal/webui/frontend/tests/e2e/integration/cross-workspace-move.integration.spec.ts"
+      ],
+      "test_names": [
+        "TestAddDependency",
+        "TestRemoveDependency",
+        "move preserves all issue fields"
+      ],
+      "notes": "Fleet backend TestAddDependency covers the REST path. Integration move test verifies that dependencies survive cross-workspace moves. Beads backend lacks a parallel TestAddDependency unit test."
+    },
+    {
+      "id": "VAL-E2E-PARITY-104",
+      "title": "Both modes support labels on issues",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/backend/fleet/fleet_test.go",
+        "internal/webui/frontend/tests/e2e/api/issue-triage.api.spec.ts",
+        "internal/webui/frontend/tests/e2e/integration/cross-workspace-move.integration.spec.ts"
+      ],
+      "test_names": [
+        "TestAddLabel",
+        "TestRemoveLabel",
+        "add labels to issue",
+        "remove label from issue",
+        "filter issues by label",
+        "move preserves all issue fields"
+      ],
+      "notes": "Fleet unit tests cover PATCH with add_labels/remove_labels payloads. issue-triage.api.spec.ts exercises the full add/remove/filter path against the local backend. Cross-workspace move verifies label preservation. Strong parity coverage."
+    },
+    {
+      "id": "VAL-E2E-PARITY-105",
+      "title": "Both modes support issue priority (0-5)",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/backend/fleet/fleet_test.go",
+        "internal/backend/beads/beads_test.go",
+        "internal/backend/types_test.go",
+        "internal/webui/frontend/tests/e2e/api/issue-triage.api.spec.ts"
+      ],
+      "test_names": [
+        "TestCreate_HappyPath",
+        "TestIssueData_PriorityZeroValueSerializes",
+        "TestCreateParams_PriorityZeroValueSerializes",
+        "set priority: 0 (critical) to 4 (backlog)"
+      ],
+      "notes": "Priority field is covered end-to-end: Create paths on both backends accept it, types_test.go locks P0 serialization (no omitempty on zero), and issue-triage.api.spec.ts exercises priorities 0 through 4 against the real API."
+    },
+    {
+      "id": "VAL-E2E-PARITY-106",
+      "title": "Both modes support issue type enum",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/backend/fleet/fleet_test.go",
+        "internal/backend/beads/beads_test.go",
+        "internal/webui/frontend/tests/e2e/api/issue-triage.api.spec.ts"
+      ],
+      "test_names": [
+        "TestGet_HappyPath",
+        "TestCreate_HappyPath",
+        "set issue type: bug, feature, task, epic, chore"
+      ],
+      "notes": "Both backends round-trip IssueType (types.TypeTask). The API spec exercises all five issue_type enum values against the real backend."
+    },
+    {
+      "id": "VAL-E2E-PARITY-107",
+      "title": "Both modes support assignee field",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/backend/fleet/fleet_test.go",
+        "internal/backend/types_test.go",
+        "internal/webui/frontend/tests/e2e/integration/cross-workspace-move.integration.spec.ts"
+      ],
+      "test_names": [
+        "TestList_QueryParams",
+        "TestIssueData_JSONRoundTrip",
+        "move preserves all issue fields"
+      ],
+      "notes": "Fleet backend query-param test includes assignee=agent-1; types round-trip locks the Assignee field; the cross-workspace move test creates an issue with assignee='test-agent' and asserts preservation. Covered across layers."
+    },
+    {
+      "id": "VAL-E2E-PARITY-120",
+      "title": "Both modes return empty issue list when workspace has no issues",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/backend/fleet/fleet_test.go",
+        "internal/backend/beads/beads_test.go"
+      ],
+      "test_names": [
+        "TestList_EmptyOpts_NoError",
+        "TestStats_EmptyWorkspace"
+      ],
+      "notes": "Fleet TestList_EmptyOpts_NoError proves an empty response is valid. TestStats_EmptyWorkspace proves Stats returns zero counts for empty workspaces. Beads exercises the same contract through its list path."
+    },
+    {
+      "id": "VAL-E2E-PARITY-121",
+      "title": "Both modes return correct created_at timestamp",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/backend/fleet/fleet_test.go",
+        "internal/backend/types_test.go"
+      ],
+      "test_names": [
+        "TestGet_HappyPath",
+        "TestList_HappyPath",
+        "TestIssueData_JSONRoundTrip"
+      ],
+      "notes": "Fleet Get/List tests include CreatedAt in the stubbed response and downstream assertions. types round-trip confirms CreatedAt preserves value through JSON. Same field on beads backend."
+    },
+    {
+      "id": "VAL-E2E-PARITY-122",
+      "title": "Both modes support issue description field",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/backend/types_test.go",
+        "internal/webui/frontend/tests/e2e/integration/cross-workspace-move.integration.spec.ts"
+      ],
+      "test_names": [
+        "TestIssueDetailData_JSONRoundTrip",
+        "TestIssueDetailData_DesignNotShadowed",
+        "move preserves all issue fields"
+      ],
+      "notes": "types_test.go locks description serialization in IssueDetailData. The move test creates an issue with description='Original description for field preservation test' and asserts the target contains it."
+    },
+    {
+      "id": "VAL-E2E-PARITY-135",
+      "title": "Both modes return updated_at reflecting most recent change",
+      "coverage": "partial",
+      "spec_files": [
+        "internal/backend/fleet/fleet_test.go",
+        "internal/backend/types_test.go"
+      ],
+      "test_names": [
+        "TestGet_HappyPath",
+        "TestIssueData_JSONRoundTrip"
+      ],
+      "notes": "Tests confirm UpdatedAt is serialized/deserialized but no test exercises Update followed by Get to assert UpdatedAt advances after mutation. The 'reflecting most recent change' aspect of the assertion is not explicitly asserted."
+    },
+    {
+      "id": "VAL-E2E-PARITY-136",
+      "title": "Both modes support bulk close of multiple issues",
+      "coverage": "partial",
+      "spec_files": [
+        "internal/webui/frontend/tests/e2e/api/issue-triage.api.spec.ts",
+        "internal/backend/fleet/fleet_test.go",
+        "internal/backend/beads/beads_test.go"
+      ],
+      "test_names": [
+        "bulk close multiple issues",
+        "TestClose_HappyPath"
+      ],
+      "notes": "The 'bulk close multiple issues' API spec test closes three issues via three parallel single-close calls rather than a bulk endpoint. No test exercises a true bulk-close API. TestClose_HappyPath is single-issue."
+    },
+    {
+      "id": "VAL-E2E-PARITY-137",
+      "title": "Both modes respect issue status enum",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/backend/fleet/fleet_test.go",
+        "internal/backend/beads/beads_test.go",
+        "internal/backend/types_test.go"
+      ],
+      "test_names": [
+        "TestGet_HappyPath",
+        "TestList_HappyPath",
+        "TestUpdate_HappyPath",
+        "TestIssueData_JSONRoundTrip"
+      ],
+      "notes": "Fleet tests cycle through types.StatusOpen and types.StatusClosed in stubbed responses and round-trip them through Update. types_test.go locks 'open' and 'closed' in serialized JSON. Beads covers the same enum through its parallel tests."
+    },
+    {
+      "id": "VAL-E2E-PARITY-155",
+      "title": "Both modes support issue owner field",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/backend/types_test.go",
+        "internal/webui/frontend/tests/e2e/integration/cross-workspace-move.integration.spec.ts"
+      ],
+      "test_names": [
+        "TestIssueData_JSONRoundTrip",
+        "TestIssueData_OmitEmptyFields",
+        "move preserves all issue fields"
+      ],
+      "notes": "types round-trip asserts the Owner field survives JSON encoding; the move test sets owner='test-owner' and asserts preservation in the target workspace."
+    },
+    {
+      "id": "VAL-E2E-WS-001",
+      "title": "Create two workspaces with independent beads databases",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/webui/app/multi_workspace_integration_test.go",
+        "internal/webui/frontend/tests/e2e/integration/workspace-lifecycle.integration.spec.ts"
+      ],
+      "test_names": [
+        "TestMultiWorkspace_DuplicateIssueIDs",
+        "TestMultiWorkspace_CrossWorkspaceMove",
+        "create workspace via API and verify in workspace list"
+      ],
+      "notes": "TestMultiWorkspace_DuplicateIssueIDs creates two workspaces with the same issue ID and asserts clients see only their own workspace's events — proving DB isolation. The integration spec exercises create on a real backend."
+    },
+    {
+      "id": "VAL-E2E-WS-002",
+      "title": "Workspace switcher in browser lists all workspaces",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/webui/frontend/tests/e2e/workspace-switcher.spec.ts"
+      ],
+      "test_names": [
+        "displays all workspace names, paths, and repo counts",
+        "shows active indicator (checkmark) for current workspace",
+        "filters workspaces by name substring"
+      ],
+      "notes": "The switcher spec has comprehensive coverage: lists all workspaces with names, paths, and repo counts; verifies the active indicator; exercises search filtering."
+    },
+    {
+      "id": "VAL-E2E-WS-005",
+      "title": "Workspace-specific worktrees are isolated by filesystem",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/cli/workspace/workspace_cmd_test.go",
+        "internal/cli/workspace_cmd_e2e_test.go"
+      ],
+      "test_names": [
+        "TestWorkspaceCreate_HappyPath",
+        "TestE2E_WorkspaceCreate_SingleRepo",
+        "TestE2E_WorkspaceCreate_MultipleRepos"
+      ],
+      "notes": "TestWorkspaceCreate_HappyPath verifies each repo gets its own worktree directory under the workspace path. The E2E tests run the real CLI binary to confirm filesystem isolation."
+    },
+    {
+      "id": "VAL-E2E-WS-009",
+      "title": "Workspace default selection persists across server restarts",
+      "coverage": "partial",
+      "spec_files": [
+        "internal/cli/workspace/workspace_cmd_test.go",
+        "internal/cli/workspace_cmd_e2e_test.go",
+        "internal/webui/frontend/tests/e2e/integration/workspace-lifecycle.integration.spec.ts"
+      ],
+      "test_names": [
+        "TestWorkspaceCreate_HappyPath",
+        "TestE2E_WorkspaceCreate_SetAsDefault",
+        "set created workspace as default"
+      ],
+      "notes": "Tests verify DefaultWorkspace is written to config.yaml after create/set. The config load-save round-trip implies persistence across restarts, but no test actually simulates a server restart (process exit + relaunch) and asserts the default survives."
+    },
+    {
+      "id": "VAL-E2E-WS-080",
+      "title": "Workspace config in config.yaml is YAML-compliant",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/cli/workspace/workspace_cmd_test.go",
+        "internal/cli/workspace/workspace_init_test.go"
+      ],
+      "test_names": [
+        "TestWorkspaceCreate_HappyPath",
+        "TestWorkspaceList_WithWorkspaces",
+        "TestEnsureCurrentProjectRegistered_RefusesToSaveOnParseError",
+        "TestEnsureCurrentProjectRegistered_GeneratesUUID"
+      ],
+      "notes": "Every SaveConfig/LoadConfig round-trip in workspace_cmd_test.go is indirect evidence of YAML compliance — if the output weren't valid YAML, LoadConfig would fail. The parse-error test explicitly asserts the system refuses to write non-YAML."
+    },
+    {
+      "id": "VAL-E2E-WS-081",
+      "title": "Default workspace persists across config reloads",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/cli/workspace/workspace_cmd_test.go",
+        "internal/webui/frontend/tests/e2e/integration/workspace-lifecycle.integration.spec.ts"
+      ],
+      "test_names": [
+        "TestWorkspaceCreate_HappyPath",
+        "set created workspace as default",
+        "rename workspace and verify new name persists"
+      ],
+      "notes": "TestWorkspaceCreate_HappyPath explicitly runs SaveConfig followed by LoadConfig and verifies DefaultWorkspace survives. The integration spec sets the default via API and re-reads via getActiveWorkspace(), proving the reload path."
+    },
+    {
+      "id": "VAL-E2E-WS-100",
+      "title": "Workspace with zero repos is rejected",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/cli/workspace/workspace_cmd_test.go",
+        "internal/cli/workspace_cmd_e2e_test.go"
+      ],
+      "test_names": [
+        "TestWorkspaceCreate_EmptyRepos",
+        "TestE2E_WorkspaceCreate_MissingReposFlag"
+      ],
+      "notes": "Unit test verifies empty split produces the exit condition; E2E test runs the real binary with no --repos flag and confirms rejection."
+    },
+    {
+      "id": "VAL-E2E-WS-102",
+      "title": "Workspace path can be custom (not under ~/.loom/workspaces)",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/cli/workspace/workspace_cmd_test.go"
+      ],
+      "test_names": [
+        "TestWorkspaceCreate_HappyPath"
+      ],
+      "notes": "TestWorkspaceCreate_HappyPath sets wsCreatePath to a tmpDir-based path (not ~/.loom/workspaces) and verifies the created workspace honors that custom path in saved config."
+    },
+    {
+      "id": "VAL-E2E-WS-130",
+      "title": "Workspace removal with --force removes even if worktrees are dirty",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "TestWorkspaceRemove_LockedAgent only sets up the lock-file precondition and comments that runWorkspaceRemove without --force would exit(1); it does NOT actually run removal with --force against a dirty worktree. No test exercises wsRemoveForce=true behavior end-to-end."
+    },
+    {
+      "id": "VAL-E2E-WS-131",
+      "title": "Workspace removal with --keep-worktrees preserves git worktrees",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/cli/workspace/workspace_cmd_test.go",
+        "internal/cli/workspace_cmd_e2e_test.go"
+      ],
+      "test_names": [
+        "TestWorkspaceRemove_KeepWorktrees",
+        "TestE2E_WorkspaceRemove_KeepWorktrees"
+      ],
+      "notes": "Unit test sets wsRemoveKeepWorktrees=true, installs an empty command mock (no git worktree remove expected), runs the command, and verifies the workspace is removed from config while no git commands execute. The real-binary E2E test reproduces this against the compiled CLI."
+    },
+    {
+      "id": "VAL-E2E-WS-150",
+      "title": "Workspace with very long name (63 chars) is accepted",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/entity/workspace_test.go"
+      ],
+      "test_names": [
+        "TestWorkspace_Validate/name_exactly_64_chars_passes"
+      ],
+      "notes": "The entity test verifies that a 64-char name is accepted — strictly stronger than the 63-char assertion since anything accepted at 64 is also accepted at 63 under the same length check."
+    },
+    {
+      "id": "VAL-E2E-WS-151",
+      "title": "Workspace with name 65 chars is rejected",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/entity/workspace_test.go"
+      ],
+      "test_names": [
+        "TestWorkspace_Validate/name_65_chars_fails"
+      ],
+      "notes": "Direct coverage: the entity test generates a 65-char name and asserts Validate returns an error containing 'name exceeds maximum length'."
+    },
+    {
+      "id": "VAL-E2E-WS-152",
+      "title": "Workspace name with underscores and hyphens is valid",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/entity/workspace_test.go",
+        "internal/cli/workspace/workspace_cmd_test.go"
+      ],
+      "test_names": [
+        "TestWorkspace_Validate/name_with_hyphens_underscores_digits_passes",
+        "TestWorkspaceCreate_HappyPath"
+      ],
+      "notes": "Entity test uses 'my-workspace_01' as a valid name. The CLI happy-path test creates a workspace named 'myws' and succeeds, indirectly confirming hyphen/underscore acceptance via create."
+    },
+    {
+      "id": "VAL-E2E-WS-153",
+      "title": "Workspace name with spaces is rejected",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/entity/workspace_test.go",
+        "internal/cli/workspace_cmd_e2e_test.go",
+        "internal/webui/frontend/tests/e2e/integration/workspace-lifecycle.integration.spec.ts"
+      ],
+      "test_names": [
+        "TestWorkspace_Validate/name_with_space_fails",
+        "TestE2E_WorkspaceCreate_InvalidName",
+        "create workspace with invalid name returns 400"
+      ],
+      "notes": "Triple coverage: entity validator, real-binary E2E, and integration HTTP API. The integration spec specifically uses 'invalid name with spaces' as the payload."
+    },
+    {
+      "id": "VAL-E2E-WS-154",
+      "title": "Workspace name with special chars is rejected",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/entity/workspace_test.go",
+        "internal/cli/workspace_cmd_e2e_test.go"
+      ],
+      "test_names": [
+        "TestWorkspace_Validate/name_with_dot_fails",
+        "TestE2E_WorkspaceCreate_InvalidName"
+      ],
+      "notes": "Entity test rejects a name containing a dot; the E2E invalid-name test exercises the same code path through the real CLI binary."
+    }
+  ],
+  "uncovered_summary": [
+    {
+      "id": "VAL-E2E-PARITY-051",
+      "title": "List issues with 1000+ issues in workspace",
+      "suggested_ticket_title": "[e2e-gap] multi-workspace-fleet: list issues with 1000+ issues in workspace"
+    },
+    {
+      "id": "VAL-E2E-WS-130",
+      "title": "Workspace removal with --force removes even if worktrees are dirty",
+      "suggested_ticket_title": "[e2e-gap] multi-workspace-fleet: workspace remove --force with dirty worktrees"
+    }
+  ]
+}
