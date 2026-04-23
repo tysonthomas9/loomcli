@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 
@@ -14,8 +15,9 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/backends"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/git"
-	"github.com/tysonthomas9/loomcli/internal/cli/workspace"
+	cliworkspace "github.com/tysonthomas9/loomcli/internal/cli/workspace"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
+	"github.com/tysonthomas9/loomcli/internal/workspace"
 )
 
 var (
@@ -81,7 +83,7 @@ func runPlan(cmd *cobra.Command, args []string) {
 		argName = args[0]
 	}
 
-	target, err := workspace.ResolveAgentTarget(argName, "")
+	target, err := cliworkspace.ResolveAgentTarget(argName, "")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
@@ -196,21 +198,42 @@ func runPlanSingleTask(deps *cli.Deps, worktreePath, agentName string, routerChe
 }
 
 // adoptOrCreateSession either inherits a parent session or creates a new one.
+// Adoption requires LOOM_SESSION_ID to reference a session that actually
+// exists on disk; stale env vars (e.g. leaked from a prior shell into
+// `loom plan` runs) otherwise silently suppress new session creation and the
+// run captures nothing.
 func adoptOrCreateSession(agentName, parentID, prompt, phase string) *sessions.Session {
-	if inheritedSID := os.Getenv("LOOM_SESSION_ID"); inheritedSID != "" {
+	inheritedSID := os.Getenv("LOOM_SESSION_ID")
+	if inheritedSID != "" && inheritedSessionExists(inheritedSID) {
 		inheritedBeads := os.Getenv("LOOM_BEADS_DIR")
 		if inheritedBeads == "" {
 			inheritedBeads = cli.GetBeadsDir()
 		}
-		backends.SetActiveSessionEnv(inheritedBeads, inheritedSID)
+		inheritedWS := os.Getenv("LOOM_WORKSPACE_ID")
+		backends.SetActiveSessionEnvFull(inheritedBeads, inheritedSID, inheritedWS)
 		return nil
 	}
 	return createAgentSession(agentName, parentID, prompt, phase)
 }
 
-// createAgentSession creates a new session for tracking.
+func inheritedSessionExists(sid string) bool {
+	dir, err := workspace.CentralSessionsDir(os.Getenv("LOOM_WORKSPACE_ID"))
+	if err != nil {
+		return false
+	}
+	if _, err := os.Stat(filepath.Join(dir, sid, "metadata.json")); err == nil {
+		return true
+	}
+	return false
+}
+
 func createAgentSession(agentName, parentID, prompt, phase string) *sessions.Session {
-	sessStore, sessErr := sessions.NewStore(cli.GetBeadsDir())
+	wsID := automode.DefaultWorkspaceID()
+	if wsID == "" {
+		log.Printf("[agent] Warning: no workspace ID resolved; session store disabled")
+		return nil
+	}
+	sessStore, sessErr := sessions.NewStoreForWorkspace(wsID)
 	if sessErr != nil {
 		log.Printf("[agent] Warning: session store unavailable: %v", sessErr)
 		return nil
@@ -220,7 +243,7 @@ func createAgentSession(agentName, parentID, prompt, phase string) *sessions.Ses
 		EpicID: parentID, Prompt: prompt, Phase: phase,
 	})
 	if sess != nil {
-		backends.SetActiveSessionEnv(cli.GetBeadsDir(), sess.SessionID())
+		backends.SetActiveSessionEnvFull(cli.GetBeadsDir(), sess.SessionID(), wsID)
 	}
 	return sess
 }

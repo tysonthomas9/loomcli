@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
@@ -23,60 +24,67 @@ var _ service.SessionService = (*sessionServiceImpl)(nil)
 type sessionServiceImpl struct {
 	configByIDFn func(string) (*ops.WorkspaceData, error)
 	histStore    *sessionhistory.Store
+
+	storesMu sync.Mutex
+	stores   map[string]*sessions.Store
 }
 
 // NewSessionService creates a new SessionService implementation.
 func NewSessionService(configByIDFn func(string) (*ops.WorkspaceData, error), histStore *sessionhistory.Store) service.SessionService {
-	return &sessionServiceImpl{configByIDFn: configByIDFn, histStore: histStore}
+	return &sessionServiceImpl{
+		configByIDFn: configByIDFn,
+		histStore:    histStore,
+		stores:       make(map[string]*sessions.Store),
+	}
 }
 
-// storesForWorkspace returns session stores for all repos in the workspace.
-// Agent worktrees store sessions in their own directories, so we need to
-// search across all repos to find sessions for a given task.
-func (s *sessionServiceImpl) storesForWorkspace(wsID string) ([]*sessions.Store, error) {
+// storeForWorkspace returns a cached central session store for the workspace.
+// First access per wsID does MkdirAll under ~/.loom/sessions/<wsID>/; the lock
+// is dropped across that syscall so unrelated workspaces don't serialize.
+func (s *sessionServiceImpl) storeForWorkspace(wsID string) (*sessions.Store, error) {
 	if s.configByIDFn == nil {
 		return nil, service.ErrUnavailable("session store not available")
 	}
-	wsData, err := s.configByIDFn(wsID)
-	if err != nil || wsData == nil {
+	if wsData, err := s.configByIDFn(wsID); err != nil || wsData == nil {
 		return nil, service.ErrNotFound("workspace not found")
 	}
-	var stores []*sessions.Store
-	// Include workspace root
-	if st, err := sessions.NewStore(wsData.Path); err == nil {
-		stores = append(stores, st)
+
+	s.storesMu.Lock()
+	if store, ok := s.stores[wsID]; ok {
+		s.storesMu.Unlock()
+		return store, nil
 	}
-	// Include each repo (agent worktrees have their own sessions dir)
-	for _, repo := range wsData.Repos {
-		if repo.Path == wsData.Path {
-			continue // already added
-		}
-		if st, err := sessions.NewStore(repo.Path); err == nil {
-			stores = append(stores, st)
-		}
+	s.storesMu.Unlock()
+
+	store, err := sessions.NewStoreForWorkspace(wsID)
+	if err != nil {
+		return nil, service.ErrInternal("session store unavailable", err)
 	}
-	if len(stores) == 0 {
-		return nil, service.ErrInternal("no session stores available", nil)
+
+	s.storesMu.Lock()
+	defer s.storesMu.Unlock()
+	if existing, ok := s.stores[wsID]; ok {
+		return existing, nil
 	}
-	return stores, nil
+	s.stores[wsID] = store
+	return store, nil
 }
 
-// findStoreForSession returns the first store that has metadata for the given session.
+// findStoreForSession returns the workspace's store if it has metadata for
+// the given session.
 func (s *sessionServiceImpl) findStoreForSession(wsID, sessionID string) (*sessions.Store, error) {
-	stores, err := s.storesForWorkspace(wsID)
+	store, err := s.storeForWorkspace(wsID)
 	if err != nil {
 		return nil, err
 	}
-	for _, store := range stores {
-		if _, err := store.LoadMetadata(sessionID); err == nil {
-			return store, nil
-		}
+	if _, err := store.LoadMetadata(sessionID); err == nil {
+		return store, nil
 	}
 	return nil, service.ErrNotFound("session not found")
 }
 
 func (s *sessionServiceImpl) ListTaskSessions(_ context.Context, wsID, taskID string) ([]service.SessionListItem, error) {
-	stores, err := s.storesForWorkspace(wsID)
+	store, err := s.storeForWorkspace(wsID)
 	if err != nil {
 		return nil, err
 	}
@@ -84,25 +92,23 @@ func (s *sessionServiceImpl) ListTaskSessions(_ context.Context, wsID, taskID st
 		return nil, service.ErrValidation("invalid task ID: must match [a-zA-Z0-9._-]+")
 	}
 
-	var items []service.SessionListItem
-	for _, store := range stores {
-		records, err := store.SessionsByTask(taskID)
-		if err != nil {
-			continue
+	records, err := store.SessionsByTask(taskID)
+	if err != nil {
+		return nil, nil
+	}
+	items := make([]service.SessionListItem, 0, len(records))
+	for _, rec := range records {
+		item := service.SessionListItem{
+			SessionRecord: rec,
+			IsActive:      rec.Status == sessions.StatusRunning,
 		}
-		for _, rec := range records {
-			item := service.SessionListItem{
-				SessionRecord: rec,
-				IsActive:      rec.Status == sessions.StatusRunning,
-			}
-			if info, err := os.Stat(store.NativeTranscriptPath(rec.SessionID)); err == nil && info.Size() > 0 {
-				item.HasTranscript = true
-			}
-			if diff, err := store.ReadDiff(rec.SessionID); err == nil && diff != "" {
-				item.HasDiff = true
-			}
-			items = append(items, item)
+		if info, err := os.Stat(store.NativeTranscriptPath(rec.SessionID)); err == nil && info.Size() > 0 {
+			item.HasTranscript = true
 		}
+		if diff, err := store.ReadDiff(rec.SessionID); err == nil && diff != "" {
+			item.HasDiff = true
+		}
+		items = append(items, item)
 	}
 	return items, nil
 }

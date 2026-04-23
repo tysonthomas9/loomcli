@@ -4,13 +4,14 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/cli/serve/workspacemgr"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
 // cleanupUsage purges old records from usage.jsonl.
 // Returns (purged count, error).
-func cleanupUsage(beadsDir string, maxAge time.Duration, dryRun bool) (int, error) {
-	store, err := usage.NewStore(beadsDir)
+func cleanupUsage(maxAge time.Duration, dryRun bool) (int, error) {
+	store, err := workspacemgr.OpenInitialUsageStore()
 	if err != nil {
 		return 0, fmt.Errorf("open usage store: %w", err)
 	}

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/lockfile"
+	"github.com/tysonthomas9/loomcli/internal/workspace"
 )
 
 const (
@@ -17,20 +18,43 @@ const (
 	sessFilePerm = 0o600
 )
 
-// Store provides session storage under a beadsDir/sessions/ directory.
-// Each session gets its own subdirectory containing metadata.json,
-// transcript.jsonl, and prompt.txt.
+// Store provides session storage under a single directory. Each session gets
+// its own subdirectory containing metadata.json, transcript.jsonl, prompt.txt,
+// and the store's index.jsonl lives at the root.
 type Store struct {
-	dir string // absolute path to <beadsDir>/sessions/
+	dir string // absolute path to the sessions root
 }
 
 // Dir returns the absolute path to the sessions directory.
 func (s *Store) Dir() string { return s.dir }
 
-// NewStore creates a Store rooted at beadsDir/sessions/.
-// It creates the sessions/ directory if it does not exist.
+// TranscriptPath returns the on-disk path to a session's transcript.jsonl
+// (the loom-authored transcript, not the backend-native one). Does not check
+// existence.
+func (s *Store) TranscriptPath(sessionID string) string {
+	return filepath.Join(s.dir, sessionID, "transcript.jsonl")
+}
+
+// NewStore creates a Store rooted at beadsDir/sessions/. Test-only helper.
 func NewStore(beadsDir string) (*Store, error) {
-	dir := filepath.Join(beadsDir, "sessions")
+	return NewStoreAt(filepath.Join(beadsDir, "sessions"))
+}
+
+// NewStoreAt creates a Store rooted at dir exactly — no "/sessions" suffix
+// is appended. Test-only helper.
+func NewStoreAt(dir string) (*Store, error) {
+	if err := os.MkdirAll(dir, sessDirPerm); err != nil {
+		return nil, fmt.Errorf("create sessions dir: %w", err)
+	}
+	return &Store{dir: dir}, nil
+}
+
+// NewStoreForWorkspace returns the Store rooted at ~/.loom/sessions/<wsID>/.
+func NewStoreForWorkspace(wsID string) (*Store, error) {
+	dir, err := workspace.CentralSessionsDir(wsID)
+	if err != nil {
+		return nil, err
+	}
 	if err := os.MkdirAll(dir, sessDirPerm); err != nil {
 		return nil, fmt.Errorf("create sessions dir: %w", err)
 	}

@@ -147,7 +147,8 @@ func runAgentDaemon(worktreePath, agentName string, promptGen func(string, *conf
 		if inheritedBeads == "" {
 			inheritedBeads = cli.GetBeadsDir()
 		}
-		backends.SetActiveSessionEnv(inheritedBeads, inheritedSID)
+		inheritedWS := os.Getenv("LOOM_WORKSPACE_ID")
+		backends.SetActiveSessionEnvFull(inheritedBeads, inheritedSID, inheritedWS)
 		defer backends.ClearActiveSessionEnv()
 	}
 

@@ -11,7 +11,20 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/sessions"
+	"github.com/tysonthomas9/loomcli/internal/workspace"
 )
+
+// centralSessionsDir is a test helper: resolves the central sessions path
+// under HOME, fatal on error. setupBeadsDirForTest sets HOME, so it's safe to
+// call after that.
+func centralSessionsDir(t *testing.T) string {
+	t.Helper()
+	dir, err := workspace.CentralSessionsDir(testWorkspaceID)
+	if err != nil {
+		t.Fatalf("CentralSessionsDir: %v", err)
+	}
+	return dir
+}
 
 func TestCheckGit(t *testing.T) {
 	t.Parallel()
@@ -1188,15 +1201,22 @@ func TestCheckStaleSignalFiles_SkipsSubdirectories(t *testing.T) {
 
 // --- Session Record Tests ---
 
-// setupBeadsDirForTest configures GetBeadsDir() to return the given directory.
+// testWorkspaceID is the UUID attached to the doctor-test workspace so the
+// central ~/.loom/sessions/<wsID>/ path is deterministic.
+const testWorkspaceID = "00000000-0000-4000-8000-000000000001"
+
+// setupBeadsDirForTest configures GetBeadsDir() to return the given directory
+// and points HOME at it so central session/usage dirs land under the tmpdir
+// instead of the user's real ~/.loom.
 // Must not be used with t.Parallel() since it mutates global state.
 func setupBeadsDirForTest(t *testing.T, dir string) {
 	t.Helper()
 	ResetBeadsDirCache()
+	t.Setenv("HOME", dir)
 	setupWorkspaceConfig(t, &LoomConfig{
 		DefaultWorkspace: "test",
 		Workspaces: map[string]WorkspaceConfig{
-			"test": {Path: dir},
+			"test": {ID: testWorkspaceID, Path: dir},
 		},
 	})
 	t.Cleanup(func() { ResetBeadsDirCache() })
@@ -1228,7 +1248,7 @@ func TestCheckStaleSessionRecords_HalfWritten(t *testing.T) {
 	t.Cleanup(func() { doctorFix = origFix })
 
 	// Create a session dir with only prompt.txt (no metadata.json)
-	sessDir := filepath.Join(dir, "sessions", "half-written-session")
+	sessDir := filepath.Join(centralSessionsDir(t), "half-written-session")
 	if err := os.MkdirAll(sessDir, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -1257,7 +1277,7 @@ func TestCheckStaleSessionRecords_HalfWrittenFixMode(t *testing.T) {
 	t.Cleanup(func() { doctorFix = origFix })
 
 	// Create a half-written session dir
-	sessDir := filepath.Join(dir, "sessions", "half-written-fix")
+	sessDir := filepath.Join(centralSessionsDir(t), "half-written-fix")
 	if err := os.MkdirAll(sessDir, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -1286,7 +1306,7 @@ func TestCheckStaleSessionRecords_OrphanedDir(t *testing.T) {
 
 	// Create a session dir with valid metadata.json but no index entry
 	sessID := "orphaned-test-session"
-	sessDir := filepath.Join(dir, "sessions", sessID)
+	sessDir := filepath.Join(centralSessionsDir(t), sessID)
 	if err := os.MkdirAll(sessDir, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -1329,7 +1349,7 @@ func TestCheckStaleSessionRecords_OrphanedDirFixMode(t *testing.T) {
 
 	// Create a session dir with valid metadata.json but no index entry
 	sessID := "orphaned-fix-session"
-	sessDir := filepath.Join(dir, "sessions", sessID)
+	sessDir := filepath.Join(centralSessionsDir(t), sessID)
 	if err := os.MkdirAll(sessDir, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -1357,7 +1377,7 @@ func TestCheckStaleSessionRecords_OrphanedDirFixMode(t *testing.T) {
 	}
 
 	// Verify the session was re-indexed (should now appear in queries)
-	store, err := sessions.NewStore(dir)
+	store, err := sessions.NewStoreForWorkspace(testWorkspaceID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1386,7 +1406,7 @@ func TestCheckStaleSessionRecords_LeftoverTmp(t *testing.T) {
 	t.Cleanup(func() { doctorFix = origFix })
 
 	// Create a proper session via the store so it's in the index
-	store, err := sessions.NewStore(dir)
+	store, err := sessions.NewStoreForWorkspace(testWorkspaceID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1424,7 +1444,7 @@ func TestCheckStaleSessionRecords_LeftoverTmpFixMode(t *testing.T) {
 	t.Cleanup(func() { doctorFix = origFix })
 
 	// Create a proper session via the store so it's in the index
-	store, err := sessions.NewStore(dir)
+	store, err := sessions.NewStoreForWorkspace(testWorkspaceID)
 	if err != nil {
 		t.Fatal(err)
 	}

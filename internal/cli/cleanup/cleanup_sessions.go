@@ -4,13 +4,14 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/cli/serve/workspacemgr"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 )
 
 // cleanupSessions purges old session directories and compacts the sessions index.
 // Returns (purged count, compacted entry count, error).
-func cleanupSessions(beadsDir string, maxAge time.Duration, dryRun bool) (int, int, error) {
-	store, err := sessions.NewStore(beadsDir)
+func cleanupSessions(maxAge time.Duration, dryRun bool) (int, int, error) {
+	store, err := workspacemgr.OpenInitialSessionStore()
 	if err != nil {
 		return 0, 0, fmt.Errorf("open session store: %w", err)
 	}

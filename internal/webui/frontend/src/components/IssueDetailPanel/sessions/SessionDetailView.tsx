@@ -13,6 +13,7 @@ import { CodeMirrorEditor } from "@/components/CodeMirrorEditor";
 import { useSessionTranscript, useSessionDiff } from "@/hooks/terminal";
 import type { SessionRecord, TranscriptEntry } from "@/types/agent";
 
+import { MarkdownRenderer } from "../sections/MarkdownRenderer";
 import styles from "./SessionsTab.module.css";
 
 export interface SessionDetailViewProps {
@@ -350,7 +351,9 @@ export function SessionDetailView({
         {grouped.prompt && (
           <div className={styles.promptBlock}>
             <div className={styles.promptLabel}>Prompt</div>
-            <div className={styles.promptBody}>{grouped.prompt.text}</div>
+            <div className={styles.promptBody}>
+              <MarkdownRenderer content={grouped.prompt.text} />
+            </div>
           </div>
         )}
 

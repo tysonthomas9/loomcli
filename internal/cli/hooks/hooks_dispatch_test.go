@@ -10,47 +10,16 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 )
 
-func TestDispatchHookEvent_NilEvent(t *testing.T) {
-	err := dispatchHookEvent(nil, "/tmp/beads", "sess-123")
-	if err != nil {
-		t.Fatalf("expected nil error for nil event, got: %v", err)
-	}
-}
+const testHooksWorkspaceID = "00000000-0000-4000-8000-000000000aaa"
 
-func TestDispatchHookEvent_EmptyBeadsDir(t *testing.T) {
-	event := &HookEvent{
-		Type:      HookTurnStart,
-		Prompt:    "hello",
-		Timestamp: time.Now(),
-	}
-	err := dispatchHookEvent(event, "", "sess-123")
-	if err != nil {
-		t.Fatalf("expected nil error for empty beadsDir, got: %v", err)
-	}
-}
-
-func TestDispatchHookEvent_EmptySessionID(t *testing.T) {
-	event := &HookEvent{
-		Type:      HookTurnStart,
-		Prompt:    "hello",
-		Timestamp: time.Now(),
-	}
-	err := dispatchHookEvent(event, "/tmp/beads", "")
-	if err != nil {
-		t.Fatalf("expected nil error for empty sessionID, got: %v", err)
-	}
-}
-
-func TestDispatchHookEvent_SessionEndCapturesTokenUsage(t *testing.T) {
-	beadsDir := t.TempDir()
-	sessionID := "test-session-token-capture"
-
-	sessDir := filepath.Join(beadsDir, "sessions", sessionID)
+// seedCentralSession creates the session dir under the HOME-resolved central
+// store and writes a minimal metadata.json. Returns the session dir path.
+func seedCentralSession(t *testing.T, sessionID string) string {
+	t.Helper()
+	sessDir := filepath.Join(os.Getenv("HOME"), ".loom", "sessions", testHooksWorkspaceID, sessionID)
 	if err := os.MkdirAll(sessDir, 0o700); err != nil {
 		t.Fatalf("create session dir: %v", err)
 	}
-
-	// Write initial metadata.json so LoadMetadata works.
 	meta := map[string]interface{}{
 		"schema_version": 1,
 		"session_id":     sessionID,
@@ -66,6 +35,33 @@ func TestDispatchHookEvent_SessionEndCapturesTokenUsage(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(sessDir, "metadata.json"), metaBytes, 0o600); err != nil {
 		t.Fatalf("write metadata.json: %v", err)
 	}
+	return sessDir
+}
+
+func TestDispatchHookEvent_NilEvent(t *testing.T) {
+	if err := dispatchHookEvent(nil, testHooksWorkspaceID, "sess-123"); err != nil {
+		t.Fatalf("expected nil error for nil event, got: %v", err)
+	}
+}
+
+func TestDispatchHookEvent_EmptyWorkspaceID(t *testing.T) {
+	event := &HookEvent{Type: HookTurnStart, Prompt: "hello", Timestamp: time.Now()}
+	if err := dispatchHookEvent(event, "", "sess-123"); err != nil {
+		t.Fatalf("expected nil error for empty workspaceID, got: %v", err)
+	}
+}
+
+func TestDispatchHookEvent_EmptySessionID(t *testing.T) {
+	event := &HookEvent{Type: HookTurnStart, Prompt: "hello", Timestamp: time.Now()}
+	if err := dispatchHookEvent(event, testHooksWorkspaceID, ""); err != nil {
+		t.Fatalf("expected nil error for empty sessionID, got: %v", err)
+	}
+}
+
+func TestDispatchHookEvent_SessionEndCapturesTokenUsage(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	sessionID := "test-session-token-capture"
+	seedCentralSession(t, sessionID)
 
 	// Write a Claude transcript JSONL file with usage data.
 	txDir := t.TempDir()
@@ -77,22 +73,14 @@ func TestDispatchHookEvent_SessionEndCapturesTokenUsage(t *testing.T) {
 		t.Fatalf("write transcript: %v", err)
 	}
 
-	event := &HookEvent{
-		Type:       HookSessionEnd,
-		SessionRef: txPath,
-		Backend:    "claude",
-		Timestamp:  time.Now(),
-	}
-
-	err := dispatchHookEvent(event, beadsDir, sessionID)
-	if err != nil {
+	event := &HookEvent{Type: HookSessionEnd, SessionRef: txPath, Backend: "claude", Timestamp: time.Now()}
+	if err := dispatchHookEvent(event, testHooksWorkspaceID, sessionID); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Verify metadata was patched with token usage.
-	store, err := sessions.NewStore(beadsDir)
+	store, err := sessions.NewStoreForWorkspace(testHooksWorkspaceID)
 	if err != nil {
-		t.Fatalf("NewStore: %v", err)
+		t.Fatalf("NewStoreForWorkspace: %v", err)
 	}
 	loaded, err := store.LoadMetadata(sessionID)
 	if err != nil {
@@ -100,16 +88,16 @@ func TestDispatchHookEvent_SessionEndCapturesTokenUsage(t *testing.T) {
 	}
 
 	if loaded.InputTokens != 3000 {
-		t.Errorf("InputTokens = %d, want 3000 (1000+2000)", loaded.InputTokens)
+		t.Errorf("InputTokens = %d, want 3000", loaded.InputTokens)
 	}
 	if loaded.OutputTokens != 1300 {
-		t.Errorf("OutputTokens = %d, want 1300 (500+800)", loaded.OutputTokens)
+		t.Errorf("OutputTokens = %d, want 1300", loaded.OutputTokens)
 	}
 	if loaded.CacheReadTokens != 500 {
-		t.Errorf("CacheReadTokens = %d, want 500 (200+300)", loaded.CacheReadTokens)
+		t.Errorf("CacheReadTokens = %d, want 500", loaded.CacheReadTokens)
 	}
 	if loaded.CacheWriteTokens != 150 {
-		t.Errorf("CacheWriteTokens = %d, want 150 (100+50)", loaded.CacheWriteTokens)
+		t.Errorf("CacheWriteTokens = %d, want 150", loaded.CacheWriteTokens)
 	}
 	if loaded.EstimatedCostUSD <= 0 {
 		t.Errorf("EstimatedCostUSD = %f, want > 0", loaded.EstimatedCostUSD)
@@ -117,127 +105,56 @@ func TestDispatchHookEvent_SessionEndCapturesTokenUsage(t *testing.T) {
 }
 
 func TestDispatchHookEvent_SessionEndMissingTranscript(t *testing.T) {
-	beadsDir := t.TempDir()
+	t.Setenv("HOME", t.TempDir())
 	sessionID := "test-session-missing-tx"
+	seedCentralSession(t, sessionID)
 
-	sessDir := filepath.Join(beadsDir, "sessions", sessionID)
-	if err := os.MkdirAll(sessDir, 0o700); err != nil {
-		t.Fatalf("create session dir: %v", err)
-	}
-
-	// Write initial metadata with zero tokens.
-	meta := map[string]interface{}{
-		"schema_version": 1,
-		"session_id":     sessionID,
-		"agent_name":     "nova",
-		"backend":        "claude",
-		"status":         "running",
-		"started_at":     "2026-03-28T10:00:00Z",
-		"exit_code":      0,
-		"input_tokens":   0,
-		"output_tokens":  0,
-	}
-	metaBytes, _ := json.MarshalIndent(meta, "", "  ")
-	if err := os.WriteFile(filepath.Join(sessDir, "metadata.json"), metaBytes, 0o600); err != nil {
-		t.Fatalf("write metadata.json: %v", err)
-	}
-
-	// Point to a nonexistent transcript — SumTranscriptUsage returns zero, nil.
-	event := &HookEvent{
-		Type:       HookSessionEnd,
-		SessionRef: "/nonexistent/transcript.jsonl",
-		Backend:    "claude",
-		Timestamp:  time.Now(),
-	}
-
-	err := dispatchHookEvent(event, beadsDir, sessionID)
-	if err != nil {
+	event := &HookEvent{Type: HookSessionEnd, SessionRef: "/nonexistent/transcript.jsonl", Backend: "claude", Timestamp: time.Now()}
+	if err := dispatchHookEvent(event, testHooksWorkspaceID, sessionID); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Metadata should remain unchanged (zero tokens → captureTokenUsage skips save).
-	store, err := sessions.NewStore(beadsDir)
+	store, err := sessions.NewStoreForWorkspace(testHooksWorkspaceID)
 	if err != nil {
-		t.Fatalf("NewStore: %v", err)
+		t.Fatalf("NewStoreForWorkspace: %v", err)
 	}
 	loaded, err := store.LoadMetadata(sessionID)
 	if err != nil {
 		t.Fatalf("LoadMetadata: %v", err)
 	}
-	if loaded.InputTokens != 0 {
-		t.Errorf("InputTokens = %d, want 0 (unchanged)", loaded.InputTokens)
-	}
-	if loaded.OutputTokens != 0 {
-		t.Errorf("OutputTokens = %d, want 0 (unchanged)", loaded.OutputTokens)
+	if loaded.InputTokens != 0 || loaded.OutputTokens != 0 {
+		t.Errorf("expected zero tokens, got in=%d out=%d", loaded.InputTokens, loaded.OutputTokens)
 	}
 }
 
 func TestDispatchHookEvent_SessionEndEmptySessionRef(t *testing.T) {
-	beadsDir := t.TempDir()
+	t.Setenv("HOME", t.TempDir())
 	sessionID := "test-session-empty-ref"
+	seedCentralSession(t, sessionID)
 
-	sessDir := filepath.Join(beadsDir, "sessions", sessionID)
-	if err := os.MkdirAll(sessDir, 0o700); err != nil {
-		t.Fatalf("create session dir: %v", err)
-	}
-
-	// Write initial metadata with zero tokens.
-	meta := map[string]interface{}{
-		"schema_version": 1,
-		"session_id":     sessionID,
-		"agent_name":     "nova",
-		"backend":        "claude",
-		"status":         "running",
-		"started_at":     "2026-03-28T10:00:00Z",
-		"exit_code":      0,
-		"input_tokens":   0,
-		"output_tokens":  0,
-	}
-	metaBytes, _ := json.MarshalIndent(meta, "", "  ")
-	if err := os.WriteFile(filepath.Join(sessDir, "metadata.json"), metaBytes, 0o600); err != nil {
-		t.Fatalf("write metadata.json: %v", err)
-	}
-
-	// SessionEnd with empty SessionRef — captureTokenUsage should NOT be called.
-	event := &HookEvent{
-		Type:       HookSessionEnd,
-		SessionRef: "", // empty
-		Backend:    "claude",
-		Timestamp:  time.Now(),
-	}
-
-	err := dispatchHookEvent(event, beadsDir, sessionID)
-	if err != nil {
+	event := &HookEvent{Type: HookSessionEnd, SessionRef: "", Backend: "claude", Timestamp: time.Now()}
+	if err := dispatchHookEvent(event, testHooksWorkspaceID, sessionID); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Metadata should be unchanged.
-	store, err := sessions.NewStore(beadsDir)
+	store, err := sessions.NewStoreForWorkspace(testHooksWorkspaceID)
 	if err != nil {
-		t.Fatalf("NewStore: %v", err)
+		t.Fatalf("NewStoreForWorkspace: %v", err)
 	}
 	loaded, err := store.LoadMetadata(sessionID)
 	if err != nil {
 		t.Fatalf("LoadMetadata: %v", err)
 	}
-	if loaded.InputTokens != 0 {
-		t.Errorf("InputTokens = %d, want 0 (captureTokenUsage should not have been called)", loaded.InputTokens)
-	}
-	if loaded.OutputTokens != 0 {
-		t.Errorf("OutputTokens = %d, want 0 (captureTokenUsage should not have been called)", loaded.OutputTokens)
+	if loaded.InputTokens != 0 || loaded.OutputTokens != 0 {
+		t.Errorf("expected zero tokens (captureTokenUsage should not have run), got in=%d out=%d", loaded.InputTokens, loaded.OutputTokens)
 	}
 }
 
 func TestDispatchHookEvent_SyncsNativeTranscript(t *testing.T) {
-	beadsDir := t.TempDir()
+	t.Setenv("HOME", t.TempDir())
 	sessionID := "20260417-120000-nova-abcd-0123abcd"
+	sessDir := seedCentralSession(t, sessionID)
 
-	sessDir := filepath.Join(beadsDir, "sessions", sessionID)
-	if err := os.MkdirAll(sessDir, 0o700); err != nil {
-		t.Fatalf("create session dir: %v", err)
-	}
-
-	// Native transcript file that Claude (or another backend) is writing.
 	native := filepath.Join(t.TempDir(), "native.jsonl")
 	payload := `{"type":"user","uuid":"u1","message":{"content":"hello"}}` + "\n" +
 		`{"type":"assistant","uuid":"a1","message":{"content":[{"type":"text","text":"hi"}]}}` + "\n"
@@ -245,14 +162,8 @@ func TestDispatchHookEvent_SyncsNativeTranscript(t *testing.T) {
 		t.Fatalf("write native: %v", err)
 	}
 
-	event := &HookEvent{
-		Type:       HookTurnStart,
-		Prompt:     "hello",
-		SessionRef: native,
-		Backend:    "claude",
-		Timestamp:  time.Now(),
-	}
-	if err := dispatchHookEvent(event, beadsDir, sessionID); err != nil {
+	event := &HookEvent{Type: HookTurnStart, Prompt: "hello", SessionRef: native, Backend: "claude", Timestamp: time.Now()}
+	if err := dispatchHookEvent(event, testHooksWorkspaceID, sessionID); err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
 
@@ -266,15 +177,10 @@ func TestDispatchHookEvent_SyncsNativeTranscript(t *testing.T) {
 }
 
 func TestDispatchHookEvent_SyncsSubagentTranscript(t *testing.T) {
-	beadsDir := t.TempDir()
+	t.Setenv("HOME", t.TempDir())
 	sessionID := "20260417-120000-nova-abcd-0123abcd"
+	sessDir := seedCentralSession(t, sessionID)
 
-	sessDir := filepath.Join(beadsDir, "sessions", sessionID)
-	if err := os.MkdirAll(sessDir, 0o700); err != nil {
-		t.Fatalf("create session dir: %v", err)
-	}
-
-	// Stage a parent transcript + subagent transcript in the layout Claude Code uses.
 	parentDir := t.TempDir()
 	parent := filepath.Join(parentDir, "parent.jsonl")
 	if err := os.WriteFile(parent, []byte(`{"type":"user","uuid":"u1","message":{"content":"hi"}}`+"\n"), 0o600); err != nil {
@@ -290,14 +196,8 @@ func TestDispatchHookEvent_SyncsSubagentTranscript(t *testing.T) {
 		t.Fatalf("write sub: %v", err)
 	}
 
-	event := &HookEvent{
-		Type:       HookSubagentEnd,
-		SessionRef: parent,
-		SubagentID: subID,
-		Backend:    "claude",
-		Timestamp:  time.Now(),
-	}
-	if err := dispatchHookEvent(event, beadsDir, sessionID); err != nil {
+	event := &HookEvent{Type: HookSubagentEnd, SessionRef: parent, SubagentID: subID, Backend: "claude", Timestamp: time.Now()}
+	if err := dispatchHookEvent(event, testHooksWorkspaceID, sessionID); err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
 
@@ -311,21 +211,12 @@ func TestDispatchHookEvent_SyncsSubagentTranscript(t *testing.T) {
 }
 
 func TestDispatchHookEvent_NoSessionRefSkipsSync(t *testing.T) {
-	beadsDir := t.TempDir()
+	t.Setenv("HOME", t.TempDir())
 	sessionID := "20260417-120000-nova-abcd-0123abcd"
+	sessDir := seedCentralSession(t, sessionID)
 
-	sessDir := filepath.Join(beadsDir, "sessions", sessionID)
-	if err := os.MkdirAll(sessDir, 0o700); err != nil {
-		t.Fatalf("create session dir: %v", err)
-	}
-
-	event := &HookEvent{
-		Type:      HookTurnStart,
-		Prompt:    "hello",
-		Backend:   "claude",
-		Timestamp: time.Now(),
-	}
-	if err := dispatchHookEvent(event, beadsDir, sessionID); err != nil {
+	event := &HookEvent{Type: HookTurnStart, Prompt: "hello", Backend: "claude", Timestamp: time.Now()}
+	if err := dispatchHookEvent(event, testHooksWorkspaceID, sessionID); err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
 

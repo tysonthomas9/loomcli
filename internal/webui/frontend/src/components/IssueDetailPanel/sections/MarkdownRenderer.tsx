@@ -3,6 +3,7 @@
  * Renders markdown content with consistent styling.
  */
 
+import { memo, useMemo } from "react";
 import Markdown from "react-markdown";
 import rehypeSanitize from "rehype-sanitize";
 
@@ -16,15 +17,18 @@ export interface MarkdownRendererProps {
   className?: string;
 }
 
-/**
- * MarkdownRenderer displays markdown content with consistent typography styles.
- * Handles empty/null content gracefully.
- */
-export function MarkdownRenderer({
+// memo + useMemo because transcript-streaming parents re-render on every
+// event, but Markdown content usually isn't changing on each tick — reparsing
+// 10 KB of prompt every render shows up in profiles.
+function MarkdownRendererImpl({
   content,
   className,
 }: MarkdownRendererProps): JSX.Element {
   const rootClassName = [styles.markdown, className].filter(Boolean).join(" ");
+  const sanitizedContent = useMemo(
+    () => (content ? sanitizeHtml(content) : ""),
+    [content],
+  );
 
   if (!content) {
     return (
@@ -34,11 +38,11 @@ export function MarkdownRenderer({
     );
   }
 
-  const sanitizedContent = sanitizeHtml(content);
-
   return (
     <div className={rootClassName} data-testid="markdown-content">
       <Markdown rehypePlugins={[rehypeSanitize]}>{sanitizedContent}</Markdown>
     </div>
   );
 }
+
+export const MarkdownRenderer = memo(MarkdownRendererImpl);

@@ -22,7 +22,11 @@ func startTmuxSession(sessionName string, opts AutoModeOptions, logFile string) 
 	if resolved := cli.GetBackendName(); resolved != "claude" {
 		termPrefix = ""
 	}
-	loomCmd := fmt.Sprintf("%sloom %s %s --daemon-mode", termPrefix, shellQuote(opts.AgentType), shellQuote(opts.WorktreePath))
+	wsEnvPrefix := ""
+	if opts.WorkspaceID != "" {
+		wsEnvPrefix = fmt.Sprintf("LOOM_WORKSPACE_ID=%s ", shellQuote(opts.WorkspaceID))
+	}
+	loomCmd := fmt.Sprintf("%s%sloom %s %s --daemon-mode", wsEnvPrefix, termPrefix, shellQuote(opts.AgentType), shellQuote(opts.WorktreePath))
 
 	// Always propagate backend to subprocess so the tmux-spawned process
 	// (which runs the installed binary) uses the same backend as the parent.

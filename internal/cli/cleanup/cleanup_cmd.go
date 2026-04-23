@@ -47,8 +47,6 @@ func init() {
 }
 
 func runCleanup(_ *cobra.Command, _ []string) error {
-	beadsDir := cli.GetBeadsDir()
-
 	sessDur, err := parseDayDuration(cleanupSessionsAge)
 	if err != nil {
 		return fmt.Errorf("invalid --sessions-older-than %q: %w", cleanupSessionsAge, err)
@@ -64,10 +62,10 @@ func runCleanup(_ *cobra.Command, _ []string) error {
 
 	var hasError bool
 
-	sp, sc, se := cleanupSessions(beadsDir, sessDur, cleanupDryRun)
+	sp, sc, se := cleanupSessions(sessDur, cleanupDryRun)
 	hasError = printCleanupResult("Sessions", sp, sc, se) || hasError
 
-	up, ue := cleanupUsage(beadsDir, usageDur, cleanupDryRun)
+	up, ue := cleanupUsage(usageDur, cleanupDryRun)
 	hasError = printCleanupResult("Usage", up, 0, ue) || hasError
 
 	ep, ee := cleanupEvents(eventsDur, cleanupDryRun)

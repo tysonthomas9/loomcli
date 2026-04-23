@@ -361,7 +361,11 @@ func applyWorkspaceConfig(cfg *webui.ServerConfig) {
 	cfg.ClearDefaultWorkspaceFn = workspacemgr.ClearDefaultWorkspace
 	cfg.WorkspaceCreateFn = workspacemgr.CreateWorkspace
 	cfg.WorkspaceListFn = daemonwire.ListWorkspaces
-	cfg.InitialWorkspaceID = workspacemgr.ResolveInitialWorkspaceID()
+	if id, err := workspacemgr.ResolveInitialWorkspaceID(); err == nil {
+		cfg.InitialWorkspaceID = id
+	} else {
+		slog.Warn("starting server without default workspace — scoped session/usage routes will 503", "err", err)
+	}
 	cfg.WorkspaceIDResolverFn = workspacemgr.ResolveWorkspaceID
 }
 
