@@ -126,10 +126,100 @@ func (p *graphPoolAdapter) Discard(client GraphClient) {
 
 // HandleBlocked returns issues that have blocking dependencies (waiting on other issues).
 func HandleBlocked(pool daemon.Pool) http.HandlerFunc {
-	if pool == nil {
-		return HandleBlockedWithPool(nil)
+	return HandleBlockedWithBackendFallback(pool, nil)
+}
+
+// HandleBlockedWithBackendFallback returns a handler that serves the blocked
+// endpoint through the daemon pool when available and transparently falls
+// back to the supplied backend.IssueBackend when the pool is nil or the
+// pool-backed RPC path produces a 5xx (fleet mode has no daemon). The
+// fallback emits the {success:true, data:[...]} envelope mirrored from the
+// pool path; each item is serialized directly from backend.IssueData, which
+// overlaps the FE's Issue/BlockedIssue shape on id/title/status/priority/
+// issue_type/assignee/labels/parent/source_repo/created_at/updated_at. Fields
+// only the daemon populates (blocked_by*, blocked_by_details) are absent
+// from the backend fallback — the FE degrades to "unknown blocker count"
+// rather than crashing.
+//
+// backendFn may be nil — in that case the behaviour is identical to the
+// legacy HandleBlocked(pool) path, returning a 503 when the pool is unusable.
+func HandleBlockedWithBackendFallback(pool daemon.Pool, backendFn IssueBackendFn) http.HandlerFunc {
+	var poolAdapter BlockedConnectionGetter
+	if pool != nil {
+		poolAdapter = &blockedPoolAdapter{pool: pool}
 	}
-	return HandleBlockedWithPool(&blockedPoolAdapter{pool: pool})
+	poolHandler := HandleBlockedWithPool(poolAdapter)
+	if backendFn == nil {
+		return poolHandler
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		if pool == nil {
+			if serveBlockedViaBackend(w, r, backendFn) {
+				return
+			}
+			poolHandler(w, r)
+			return
+		}
+		rec := &graphInterceptor{header: http.Header{}}
+		poolHandler(rec, r)
+		if rec.statusCode >= 200 && rec.statusCode < 500 {
+			rec.flushTo(w)
+			return
+		}
+		if serveBlockedViaBackend(w, r, backendFn) {
+			return
+		}
+		rec.flushTo(w)
+	}
+}
+
+// serveBlockedViaBackend materializes a BlockedResponse-style envelope from
+// the supplied IssueBackend and writes it to w. Returns true when it served
+// the request (including backend errors), false when no backend is wired so
+// the caller can fall through to the pool-error path.
+func serveBlockedViaBackend(w http.ResponseWriter, r *http.Request, backendFn IssueBackendFn) bool {
+	if backendFn == nil {
+		return false
+	}
+	be := backendFn()
+	if be == nil {
+		return false
+	}
+	args, err := parseBlockedParams(r)
+	if err != nil {
+		handler.WriteJSON(w, http.StatusBadRequest, map[string]any{
+			"success": false,
+			"error":   err.Error(),
+		})
+		return true
+	}
+	opts := backend.BlockedOpts{
+		ParentID: args.ParentID,
+		Assignee: args.Assignee,
+		Priority: args.Priority,
+		Type:     args.Type,
+		Limit:    args.Limit,
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	issues, err := be.Blocked(ctx, opts)
+	if err != nil {
+		slog.Error("backend error in HandleBlocked fallback", "err", err)
+		handler.WriteJSON(w, http.StatusInternalServerError, map[string]any{
+			"success": false,
+			"error":   "failed to list blocked issues",
+		})
+		return true
+	}
+	if issues == nil {
+		issues = []backend.IssueData{}
+	}
+	handler.WriteJSON(w, http.StatusOK, map[string]any{
+		"success": true,
+		"data":    issues,
+	})
+	return true
 }
 
 // HandleBlockedWithPool is the internal implementation that accepts an interface for testing.

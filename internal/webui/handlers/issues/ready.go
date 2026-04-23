@@ -11,11 +11,19 @@ import (
 
 	"net/url"
 
+	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/types"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 )
+
+// IssueBackendFn returns the active backend.IssueBackend. Consumed by
+// HandleReadyWithBackendFallback so the handler can fall back to the backend
+// when no daemon pool is available (fleet mode) or the pool path returns a
+// 5xx. Defined locally to mirror the git package's identical-shape type
+// without creating a package cross-import in production code.
+type IssueBackendFn func() backend.IssueBackend
 
 // ReadyIssueWithParent extends Issue with parent info for /api/ready.
 // This enables epic swimlane grouping in the Kanban view.
@@ -71,10 +79,186 @@ func (p *readyPoolAdapter) Discard(client readyClient) {
 
 // HandleReady returns issues ready to work on (open/in_progress with no blockers).
 func HandleReady(pool daemon.Pool) http.HandlerFunc {
-	if pool == nil {
-		return handleReadyWithPool(nil)
+	return HandleReadyWithBackendFallback(pool, nil)
+}
+
+// HandleReadyWithBackendFallback returns a handler that serves the ready
+// endpoint through the daemon pool when available and transparently falls
+// back to the supplied backend.IssueBackend when the pool is nil or the
+// pool-backed RPC path produces a 5xx (fleet mode has no daemon). The
+// fallback emits the {success:true, data:[...]} envelope matching the
+// pool-path ReadyResponse; each item is projected from backend.IssueData
+// and overlays the Parent/Repo fields used by the Kanban epic-swimlane view.
+// The parent_title enrichment performed by the pool path is absent — the
+// FE already tolerates a missing parent_title and falls back to Parent.
+//
+// backendFn may be nil — in that case the behaviour is identical to the
+// legacy HandleReady(pool) path, returning a 503 when the pool is unusable.
+func HandleReadyWithBackendFallback(pool daemon.Pool, backendFn IssueBackendFn) http.HandlerFunc {
+	var poolAdapter readyConnectionGetter
+	if pool != nil {
+		poolAdapter = &readyPoolAdapter{pool: pool}
 	}
-	return handleReadyWithPool(&readyPoolAdapter{pool: pool})
+	poolHandler := handleReadyWithPool(poolAdapter)
+	if backendFn == nil {
+		return poolHandler
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		if pool == nil {
+			if serveReadyViaBackend(w, r, backendFn) {
+				return
+			}
+			poolHandler(w, r)
+			return
+		}
+		rec := &readyInterceptor{header: http.Header{}}
+		poolHandler(rec, r)
+		if rec.statusCode >= 200 && rec.statusCode < 500 {
+			rec.flushTo(w)
+			return
+		}
+		if serveReadyViaBackend(w, r, backendFn) {
+			return
+		}
+		rec.flushTo(w)
+	}
+}
+
+// readyInterceptor captures the pool-handler's response so the wrapper can
+// decide whether to forward or fall through to the backend path without
+// double-writing to the real ResponseWriter. Mirrors graphInterceptor in
+// the git package.
+type readyInterceptor struct {
+	header     http.Header
+	body       []byte
+	statusCode int
+}
+
+func (g *readyInterceptor) Header() http.Header { return g.header }
+
+func (g *readyInterceptor) WriteHeader(code int) {
+	if g.statusCode == 0 {
+		g.statusCode = code
+	}
+}
+
+func (g *readyInterceptor) Write(b []byte) (int, error) {
+	if g.statusCode == 0 {
+		g.statusCode = http.StatusOK
+	}
+	g.body = append(g.body, b...)
+	return len(b), nil
+}
+
+func (g *readyInterceptor) flushTo(w http.ResponseWriter) {
+	for k, vs := range g.header {
+		for _, v := range vs {
+			w.Header().Add(k, v)
+		}
+	}
+	if g.statusCode == 0 {
+		g.statusCode = http.StatusOK
+	}
+	w.WriteHeader(g.statusCode)
+	_, _ = w.Write(g.body)
+}
+
+// serveReadyViaBackend materializes a ready-style response from the supplied
+// IssueBackend and writes it to w. Returns true when it served the request
+// (including backend errors), false when no backend is wired so the caller
+// can fall through to the pool-error path.
+func serveReadyViaBackend(w http.ResponseWriter, r *http.Request, backendFn IssueBackendFn) bool {
+	if backendFn == nil {
+		return false
+	}
+	be := backendFn()
+	if be == nil {
+		return false
+	}
+	args, err := parseReadyParams(r)
+	if err != nil {
+		handler.WriteJSON(w, http.StatusBadRequest, ReadyResponse{
+			Success: false,
+			Error:   err.Error(),
+		})
+		return true
+	}
+	opts := backend.ReadyOpts{
+		Assignee:        args.Assignee,
+		Unassigned:      args.Unassigned,
+		Priority:        args.Priority,
+		Type:            args.Type,
+		ParentID:        args.ParentID,
+		Limit:           args.Limit,
+		SortPolicy:      args.SortPolicy,
+		Labels:          args.Labels,
+		LabelsAny:       args.LabelsAny,
+		MolType:         args.MolType,
+		IncludeDeferred: args.IncludeDeferred,
+		SourceRepos:     args.SourceRepos,
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	issues, err := be.Ready(ctx, opts)
+	if err != nil {
+		slog.Error("backend error in HandleReady fallback", "err", err)
+		handler.WriteJSON(w, http.StatusInternalServerError, ReadyResponse{
+			Success: false,
+			Error:   "failed to list ready issues",
+		})
+		return true
+	}
+	// Project each IssueData onto the pool-path wire shape. The backend
+	// fallback has no parent_title enrichment (it would require a per-issue
+	// Get), so Parent/Repo are surfaced from IssueData directly and
+	// ParentTitle is left nil — the FE already tolerates this.
+	out := make([]*ReadyIssueWithParent, 0, len(issues))
+	for i := range issues {
+		d := &issues[i]
+		iwp := &ReadyIssueWithParent{Issue: issueDataToTypesIssue(d)}
+		if d.Parent != "" {
+			p := d.Parent
+			iwp.Parent = &p
+		}
+		if d.SourceRepo != "" {
+			r := d.SourceRepo
+			iwp.Repo = &r
+		}
+		out = append(out, iwp)
+	}
+	handler.WriteJSON(w, http.StatusOK, ReadyResponse{
+		Success: true,
+		Data:    out,
+	})
+	return true
+}
+
+// issueDataToTypesIssue projects a backend.IssueData into the slim
+// *types.Issue shape that ReadyIssueWithParent embeds. Only the fields the
+// backend slim projection populates are carried; unknown fields stay at
+// their zero values (the FE already tolerates missing optional fields on a
+// ready list item).
+func issueDataToTypesIssue(d *backend.IssueData) *types.Issue {
+	if d == nil {
+		return nil
+	}
+	issue := &types.Issue{
+		ID:         d.ID,
+		Title:      d.Title,
+		Status:     types.Status(d.Status),
+		Priority:   d.Priority,
+		IssueType:  types.IssueType(d.IssueType),
+		Assignee:   d.Assignee,
+		Owner:      d.Owner,
+		Labels:     d.Labels,
+		SourceRepo: d.SourceRepo,
+		CreatedAt:  d.CreatedAt,
+		UpdatedAt:  d.UpdatedAt,
+		DueAt:      d.DueAt,
+		DeferUntil: d.DeferUntil,
+	}
+	return issue
 }
 
 // executeReadyRPC acquires a connection, calls Ready, and returns filtered issues.

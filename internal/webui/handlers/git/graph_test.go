@@ -10,6 +10,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/rpc"
+	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 )
 
 // ---------------------------------------------------------------------------
@@ -977,6 +978,134 @@ func TestHandleGraph_BackendFallbackStatusFilter(t *testing.T) {
 func TestHandleGraph_NoPoolNoBackendReturns503(t *testing.T) {
 	handler := HandleGraphWithBackendFallback(nil, nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/issues/graph", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want 503", rr.Code)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Backend-fallback tests — HandleBlockedWithBackendFallback
+// ---------------------------------------------------------------------------
+
+// stubBlockedBackend implements backend.IssueBackend with just enough surface
+// to exercise the HandleBlockedWithBackendFallback path in unit tests. Only
+// Blocked is functional; every other method returns a sentinel error so
+// unintended use shows up as a test failure rather than silent success.
+type stubBlockedBackend struct {
+	*stubGraphBackend
+	blocked []backend.IssueData
+	err     error
+}
+
+func (s *stubBlockedBackend) Blocked(_ context.Context, _ backend.BlockedOpts) ([]backend.IssueData, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	return s.blocked, nil
+}
+
+// errorDaemonPool implements daemon.Pool and returns a fixed error from Get.
+// Used to force HandleBlockedWithPool into the 503-pool-error branch and
+// verify the wrapper falls through to the backend.
+type errorDaemonPool struct{ err error }
+
+func (p *errorDaemonPool) Get(_ context.Context) (*rpc.Client, error) { return nil, p.err }
+func (p *errorDaemonPool) Put(_ *rpc.Client)                          {}
+func (p *errorDaemonPool) PutAfterError(_ *rpc.Client)                {}
+func (p *errorDaemonPool) Discard(_ *rpc.Client)                      {}
+func (p *errorDaemonPool) Stats() daemon.PoolStats                    { return daemon.PoolStats{} }
+func (p *errorDaemonPool) Close() error                               { return nil }
+
+func TestHandleBlocked_BackendFallbackOnPoolError(t *testing.T) {
+	dp := &errorDaemonPool{err: errors.New("pool unavailable")}
+	be := &stubBlockedBackend{
+		stubGraphBackend: &stubGraphBackend{},
+		blocked: []backend.IssueData{
+			{ID: "BE-1", Title: "Via backend", Status: "blocked", Priority: 1},
+		},
+	}
+	handler := HandleBlockedWithBackendFallback(dp, func() backend.IssueBackend { return be })
+
+	req := httptest.NewRequest(http.MethodGet, "/api/blocked", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	var env struct {
+		Success bool                `json:"success"`
+		Data    []backend.IssueData `json:"data"`
+		Error   string              `json:"error"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&env); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !env.Success {
+		t.Fatalf("expected success=true; error=%q", env.Error)
+	}
+	if len(env.Data) != 1 || env.Data[0].ID != "BE-1" {
+		t.Errorf("expected backend-path data (BE-1), got %+v", env.Data)
+	}
+}
+
+func TestHandleBlocked_PoolPathPreservedWhenBackendPresent(t *testing.T) {
+	// When backendFn is non-nil but pool returns a 4xx (client error, e.g.
+	// bad query param), the wrapper must NOT fall through — it should
+	// forward the 4xx verbatim so the FE sees parse errors instead of a
+	// masked backend-happy-path.
+	dp := &errorDaemonPool{err: errors.New("should not be invoked")}
+	be := &stubBlockedBackend{
+		stubGraphBackend: &stubGraphBackend{},
+		blocked:          []backend.IssueData{{ID: "SHOULD-NOT-APPEAR"}},
+	}
+	handler := HandleBlockedWithBackendFallback(dp, func() backend.IssueBackend { return be })
+
+	req := httptest.NewRequest(http.MethodGet, "/api/blocked?priority=abc", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	// parseBlockedParams errors BEFORE the pool is consulted (in
+	// HandleBlockedWithPool), so a 400 is emitted and the wrapper forwards
+	// it unchanged rather than falling back.
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 (client-error preserved); body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandleBlocked_BackendOnlyWhenNoPool(t *testing.T) {
+	be := &stubBlockedBackend{
+		stubGraphBackend: &stubGraphBackend{},
+		blocked: []backend.IssueData{
+			{ID: "FLEET-1", Title: "fleet-only"},
+		},
+	}
+	handler := HandleBlockedWithBackendFallback(nil, func() backend.IssueBackend { return be })
+
+	req := httptest.NewRequest(http.MethodGet, "/api/blocked", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	var env struct {
+		Success bool                `json:"success"`
+		Data    []backend.IssueData `json:"data"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&env); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !env.Success || len(env.Data) != 1 || env.Data[0].ID != "FLEET-1" {
+		t.Errorf("expected fleet-only data (FLEET-1), got %+v", env)
+	}
+}
+
+func TestHandleBlocked_NoPoolNoBackendReturns503(t *testing.T) {
+	handler := HandleBlockedWithBackendFallback(nil, nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/blocked", nil)
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
 	if rr.Code != http.StatusServiceUnavailable {

@@ -50,8 +50,10 @@ func (m *WorkspaceOpsModule) WithIssueBackendFn(fn func() backend.IssueBackend) 
 // Register implements Module.
 func (m *WorkspaceOpsModule) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/workspaces/{ws}/stats", healthhandlers.HandleStats(m.multiPool))
-	mux.HandleFunc("GET /api/workspaces/{ws}/ready", issues.HandleReady(m.multiPool))
-	mux.HandleFunc("GET /api/workspaces/{ws}/blocked", githandlers.HandleBlocked(m.multiPool))
+	mux.HandleFunc("GET /api/workspaces/{ws}/ready",
+		issues.HandleReadyWithBackendFallback(m.multiPool, issues.IssueBackendFn(m.issueBackendFn)))
+	mux.HandleFunc("GET /api/workspaces/{ws}/blocked",
+		githandlers.HandleBlockedWithBackendFallback(m.multiPool, githandlers.IssueBackendFn(m.issueBackendFn)))
 	mux.HandleFunc("GET /api/workspaces/{ws}/issues/graph",
 		githandlers.HandleGraphWithBackendFallback(m.multiPool, githandlers.IssueBackendFn(m.issueBackendFn)))
 	mux.HandleFunc("GET /api/workspaces/{ws}/daemon/status", healthhandlers.HandleDaemonStatus(m.multiPool))
