@@ -69,7 +69,7 @@ func validateWorkspaceCreateRequest(req *WorkspaceCreateRequest) *ServiceError {
 			}
 		}
 	case "template":
-		return &ServiceError{Kind: KindUnavailable, Message: "template workspace type is not yet supported"}
+		return ErrNotImplemented("template workspace type is not yet supported")
 	case "":
 		return ErrValidation("type is required")
 	default:
