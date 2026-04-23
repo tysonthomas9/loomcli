@@ -1,0 +1,451 @@
+{
+  "contract_file": "frontend/files-editor.md",
+  "validation_report": "reports/validation-files-editor.json",
+  "audit_date": "2026-04-23T11:19:59Z",
+  "spec_files_searched": [
+    "internal/webui/frontend/tests/e2e/agent-review-journey.spec.ts",
+    "internal/webui/frontend/tests/e2e/keyboard-escape-layers.spec.ts",
+    "internal/webui/frontend/tests/e2e/keyboard-focus-management.spec.ts",
+    "internal/webui/frontend/tests/e2e/keyboard-global-shortcuts.spec.ts",
+    "internal/webui/frontend/tests/e2e/toast-notifications.spec.ts",
+    "internal/webui/frontend/tests/e2e/session-detail-view.spec.ts",
+    "internal/webui/frontend/tests/e2e/sessions-tab.spec.ts",
+    "internal/webui/frontend/tests/e2e/session-timeline.spec.ts",
+    "internal/webui/frontend/tests/e2e/terminal-keyboard-shortcuts.spec.ts",
+    "internal/webui/frontend/tests/e2e/terminal-disconnect-reconnect.spec.ts",
+    "internal/webui/frontend/tests/e2e/review-approve-reject.spec.ts",
+    "internal/webui/frontend/tests/e2e/editable-description.spec.ts",
+    "internal/webui/frontend/tests/e2e/integration/concurrent-ops.integration.spec.ts",
+    "internal/webui/frontend/tests/e2e/integration/daemon-recovery.integration.spec.ts"
+  ],
+  "go_test_files_searched": [
+    "internal/webui/handlers/misc/files_test.go",
+    "internal/webui/handlers/misc/files_coverage_test.go",
+    "internal/webui/handlers/misc/editors_test.go"
+  ],
+  "summary": {
+    "total_passing": 52,
+    "covered": 0,
+    "partial": 4,
+    "uncovered": 48,
+    "coverage_pct": 0.0
+  },
+  "assertions": [
+    {
+      "id": "VAL-FE-FILES-001",
+      "title": "File tree loads root directory on component mount",
+      "coverage": "partial",
+      "spec_files": ["agent-review-journey.spec.ts"],
+      "test_names": ["Step 9: Files tab renders file explorer"],
+      "notes": "Step 9 (lines 771-819) asserts root entries 'src' and 'README.md' render in the FileEditorPanel after clicking the Files tab. However, the spec uses page.route() mocks (mockFileTreeRoot at lines 492-509) — it does NOT verify a real GET request to /agents/{agent}/files/tree is issued, nor that the response 'path' field is '' (root). Partial because the UI-visible outcome is exercised but the network contract is not verified."
+    },
+    {
+      "id": "VAL-FE-FILES-002",
+      "title": "First agent auto-selected from dropdown",
+      "coverage": "partial",
+      "spec_files": ["agent-review-journey.spec.ts"],
+      "test_names": ["Step 9: Files tab renders file explorer"],
+      "notes": "The expected_result has two parts: (a) dropdown shows first agent highlighted, (b) tree populated with that agent's files. Step 9 verifies (b) — the tree populates with the ember agent's mocked files after navigating to the agent detail panel. It does NOT verify (a) — the agent dropdown's auto-selection/highlighting of the first agent is not asserted. Partial coverage."
+    },
+    {
+      "id": "VAL-FE-FILES-003",
+      "title": "Switching agent refreshes tree",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec exercises switching the selected agent in the file tree and verifying the tree transitions to show the new agent's files with no cross-agent mixing. agent-review-journey.spec.ts only navigates to a single agent (ember)."
+    },
+    {
+      "id": "VAL-FE-FILES-004",
+      "title": "Directory expansion fetches child entries",
+      "coverage": "partial",
+      "spec_files": ["agent-review-journey.spec.ts"],
+      "test_names": ["Step 9: Files tab renders file explorer"],
+      "notes": "Step 9 clicks the 'src' directory button (lines 793-797) and asserts 'auth.go' and 'auth_test.go' appear (lines 800-803). This exercises the UI-visible expansion behavior. However, the test uses a mocked route (lines 511-531) with path-query routing, and does NOT verify the actual GET /agents/{agent}/files/tree?path=src network call or 200 status. Partial because child rendering is verified but network contract is not."
+    },
+    {
+      "id": "VAL-FE-FILES-005",
+      "title": "Expanding a directory twice does not re-fetch",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec verifies directory cache behavior. agent-review-journey.spec.ts Step 9 expands 'src' only once. Verifying no duplicate network call for the same path would require a request counter/listener, which is not present in any spec."
+    },
+    {
+      "id": "VAL-FE-FILES-006",
+      "title": "Folder collapse hides children",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "Step 9 of agent-review-journey.spec.ts expands 'src' but never clicks it a second time to collapse. No spec exercises the collapse behavior nor verifies child entries disappear from the DOM after collapsing a folder."
+    },
+    {
+      "id": "VAL-FE-FILES-007",
+      "title": "Empty directory shows no children",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec tests the empty directory path — mocked routes in agent-review-journey.spec.ts always return directories with entries. Empty-directory rendering (no children, no error state) is not exercised."
+    },
+    {
+      "id": "VAL-FE-FILES-008",
+      "title": "Clicking a file opens it in editor",
+      "coverage": "partial",
+      "spec_files": ["agent-review-journey.spec.ts"],
+      "test_names": ["Step 9: Files tab renders file explorer"],
+      "notes": "Step 9 clicks auth.go (lines 807-811), asserts the editor shows 'src/auth.go' path (line 814), and confirms the 'Select a file to edit' placeholder is hidden (lines 816-818). This verifies the core open-in-editor behavior. However, the test does NOT verify: (a) the file is highlighted/selected in the tree, (b) syntax highlighting is applied to the content, (c) the GET /files?path=src/auth.go network call. Partial coverage."
+    },
+    {
+      "id": "VAL-FE-FILES-009",
+      "title": "File editor displays path and unsaved indicator",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "Step 9 shows the file path ('src/auth.go') is rendered but does not verify the unsaved/dirty indicator element is present in the editor chrome. No spec asserts the dirty indicator visibility or its toggle behavior."
+    },
+    {
+      "id": "VAL-FE-FILES-010",
+      "title": "Editor detects language by file extension",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec verifies CodeMirror language detection. Step 9 opens a single .go file but does not assert syntax-highlighting CSS classes or language-mode attributes. Other extensions (.ts, .json, .md, .yaml, .yml) are not exercised at all."
+    },
+    {
+      "id": "VAL-FE-FILES-011",
+      "title": "Line numbers visible in editor",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec asserts the presence of the CodeMirror line-number gutter or its numeric content. Step 9 only checks the file path text is visible."
+    },
+    {
+      "id": "VAL-FE-FILES-012",
+      "title": "Search panel opens with cmd+F",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec tests CodeMirror's search panel lifecycle. keyboard-global-shortcuts.spec.ts does not cover cmd+F in the file editor context."
+    },
+    {
+      "id": "VAL-FE-FILES-013",
+      "title": "Search highlights all matches",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec exercises CodeMirror search highlighting in the file editor."
+    },
+    {
+      "id": "VAL-FE-FILES-014",
+      "title": "Search result navigation with Enter/arrows",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec exercises search result navigation (Enter/arrows) in the file editor."
+    },
+    {
+      "id": "VAL-FE-FILES-015",
+      "title": "Search panel closes with Escape",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "keyboard-escape-layers.spec.ts handles generic Escape behavior but does not cover the file editor's CodeMirror search-panel-close-on-Escape."
+    },
+    {
+      "id": "VAL-FE-FILES-017",
+      "title": "Typing in editor marks file as dirty",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec types content into the CodeMirror file editor or asserts the dirty state indicator appears."
+    },
+    {
+      "id": "VAL-FE-FILES-019",
+      "title": "Save button disabled when file is not dirty",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec exercises the Save button's disabled state when a freshly opened file has no edits."
+    },
+    {
+      "id": "VAL-FE-FILES-020",
+      "title": "Save button enabled when file is dirty",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec types into the editor and then asserts the Save button is enabled."
+    },
+    {
+      "id": "VAL-FE-FILES-021",
+      "title": "cmd+S saves the file",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec tests cmd+S/ctrl+S save shortcut in the file editor, nor PUT /api/.../files?path={filePath} network verification."
+    },
+    {
+      "id": "VAL-FE-FILES-022",
+      "title": "Click Save button saves the file",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec clicks the Save button and verifies the PUT request, toast, and dirty indicator clearing."
+    },
+    {
+      "id": "VAL-FE-FILES-023",
+      "title": "Save success shows toast notification",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "toast-notifications.spec.ts does not cover the file-save success toast. No spec asserts this toast appears after a successful save."
+    },
+    {
+      "id": "VAL-FE-FILES-024",
+      "title": "Save button shows 'Saving...' during request",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec asserts the transient 'Saving...' label on the Save button during an in-flight PUT request."
+    },
+    {
+      "id": "VAL-FE-FILES-030",
+      "title": "Binary files display read-only message",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec opens a binary file and verifies the read-only message is shown. Binary detection is tested in files_test.go (Go unit tests) but that does not exercise the frontend rendering."
+    },
+    {
+      "id": "VAL-FE-FILES-031",
+      "title": "Read-only mode disables editing",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec verifies CodeMirror's readOnly extension prevents keystroke-driven edits on binary files."
+    },
+    {
+      "id": "VAL-FE-FILES-032",
+      "title": "Read-only file has no Save button",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec verifies Save button is hidden or absent when a read-only/binary file is loaded."
+    },
+    {
+      "id": "VAL-FE-FILES-033",
+      "title": "Syntax highlighting works on read-only files",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec verifies that syntax highlighting classes are still applied to read-only file content."
+    },
+    {
+      "id": "VAL-FE-FILES-034",
+      "title": "Filter input narrows visible tree entries",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec tests the tree filter input narrowing behavior."
+    },
+    {
+      "id": "VAL-FE-FILES-035",
+      "title": "Filter narrows with parent folder visibility",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec verifies parent folders stay visible when a child matches the filter."
+    },
+    {
+      "id": "VAL-FE-FILES-036",
+      "title": "Filter with zero matches shows 'No matches' message",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec verifies the 'No matches' empty-state message when no tree entry matches the filter."
+    },
+    {
+      "id": "VAL-FE-FILES-037",
+      "title": "Clearing filter restores full tree",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec tests clearing the filter input and verifying the full tree is restored."
+    },
+    {
+      "id": "VAL-FE-FILES-038",
+      "title": "Filter text is debounced (200ms)",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec verifies the filter input's 200ms debounce timing."
+    },
+    {
+      "id": "VAL-FE-FILES-039",
+      "title": "Large file (>5MB) loads with warning or is rejected",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec exercises opening a >5MB file or verifies warning/rejection UI. files_coverage_test.go covers size limits at the Go layer but not the frontend behavior."
+    },
+    {
+      "id": "VAL-FE-FILES-041",
+      "title": "Opening file while another saves does not conflict",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec exercises concurrent file open/save operations to verify state isolation. concurrent-ops.integration.spec.ts covers unrelated concurrent scenarios."
+    },
+    {
+      "id": "VAL-FE-FILES-043",
+      "title": "Editors dropdown fetches detected editors",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec exercises the OpenInEditor dropdown that fetches /api/editors. editors_test.go covers the handler at the Go layer but not the frontend dropdown."
+    },
+    {
+      "id": "VAL-FE-FILES-044",
+      "title": "Selecting editor launches it with file path",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec clicks an editor in the OpenInEditor dropdown and verifies the POST /api/editors/open call with the current file path."
+    },
+    {
+      "id": "VAL-FE-FILES-058",
+      "title": "Navigating with unsaved changes shows warning",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec types to dirty the editor, clicks a different tree entry, and verifies the unsaved-changes warning dialog appears. paste-confirm-dialog.spec.ts is unrelated."
+    },
+    {
+      "id": "VAL-FE-FILES-059",
+      "title": "Discard in unsaved warning proceeds to new file",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec exercises the Discard action in the unsaved-changes dialog."
+    },
+    {
+      "id": "VAL-FE-FILES-060",
+      "title": "Keep Editing in unsaved warning stays on current file",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec exercises the Keep Editing action in the unsaved-changes dialog."
+    },
+    {
+      "id": "VAL-FE-FILES-063",
+      "title": "Go file syntax highlighting",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "Step 9 opens a .go file but does not assert CodeMirror Go language highlighting classes (e.g., .tok-keyword for 'func'/'package')."
+    },
+    {
+      "id": "VAL-FE-FILES-065",
+      "title": "JSON file syntax highlighting",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec opens a .json file in the editor or verifies JSON syntax highlighting."
+    },
+    {
+      "id": "VAL-FE-FILES-066",
+      "title": "Markdown file syntax highlighting",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec opens a .md file in the editor or verifies Markdown syntax highlighting. README.md is listed in the tree but never clicked."
+    },
+    {
+      "id": "VAL-FE-FILES-067",
+      "title": "YAML file syntax highlighting",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec opens a .yaml/.yml file in the editor or verifies YAML syntax highlighting."
+    },
+    {
+      "id": "VAL-FE-FILES-068",
+      "title": "Unknown extension renders as plain text",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec opens a file with an unknown extension to verify plain-text fallback rendering."
+    },
+    {
+      "id": "VAL-FE-FILES-069",
+      "title": "UTF-8 file displays correctly",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec opens a UTF-8 file with multi-byte characters and asserts correct rendering in the editor."
+    },
+    {
+      "id": "VAL-FE-FILES-070",
+      "title": "UTF-16 file shows warning or error",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec opens a UTF-16 file to verify warning/error handling."
+    },
+    {
+      "id": "VAL-FE-FILES-072",
+      "title": "Symlink folder is refused",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "files_test.go covers symlink refusal at the Go handler layer, but no Playwright spec exercises the frontend behavior when the API returns a symlink-refused error."
+    },
+    {
+      "id": "VAL-FE-FILES-074",
+      "title": "File not found during editing",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec simulates a file being deleted during editing or verifies the frontend's 404 handling in the editor."
+    },
+    {
+      "id": "VAL-FE-FILES-075",
+      "title": "Rapid file switching does not cause race condition",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec exercises rapid file clicks in the tree to verify the editor settles on the last-clicked file without displaying stale content."
+    },
+    {
+      "id": "VAL-FE-FILES-078",
+      "title": "GET /agents/{agent}/files/tree network error shows fallback",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec mocks a failed tree request and verifies the fallback UI (error message, retry option) in the file tree."
+    },
+    {
+      "id": "VAL-FE-FILES-079",
+      "title": "GET /agents/{agent}/files network error shows editor error",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec mocks a failed file-content request and verifies the editor displays a read error to the user."
+    },
+    {
+      "id": "VAL-FE-FILES-080",
+      "title": "POST /api/editors/open failure is shown in OpenInEditor menu",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec mocks a failed POST /api/editors/open and verifies the OpenInEditor menu shows an error."
+    },
+    {
+      "id": "VAL-FE-FILES-085",
+      "title": "Editor is keyboard accessible",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "keyboard-focus-management.spec.ts and keyboard-global-shortcuts.spec.ts do not cover the file editor surface. No spec verifies Tab reaches the tree, editor, and Save button in a logical order, nor that arrow keys navigate the tree."
+    }
+  ]
+}
