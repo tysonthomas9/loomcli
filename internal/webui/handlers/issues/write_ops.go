@@ -89,7 +89,7 @@ func HandleCloseIssue(svc service.IssueService) http.HandlerFunc {
 
 		params := service.CloseIssueParams{
 			IssueID:     issueID,
-			Reason:      req.Reason,
+			Reason:      req.ResolvedReason(),
 			Session:     req.Session,
 			SuggestNext: req.SuggestNext,
 			Force:       req.Force,

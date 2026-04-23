@@ -554,20 +554,25 @@ func (b *FleetBackend) Delete(ctx context.Context, params backend.DeleteParams) 
 // --- Dependency operations ---
 
 func (b *FleetBackend) AddDependency(ctx context.Context, params backend.DepAddParams) error {
+	// fleet-db mounts dependency routes at /issues/{id}/deps (abbreviated)
+	// and its AddDependencyRequest names the dep kind "type" (not
+	// "dep_type"). Path + body tweaked to match.
 	type depReq struct {
 		DependsOnID string `json:"depends_on_id"`
-		DepType     string `json:"dep_type,omitempty"`
+		Type        string `json:"type,omitempty"`
 	}
 	req := depReq{
 		DependsOnID: params.ToID,
-		DepType:     params.DepType,
+		Type:        params.DepType,
 	}
-	_, err := b.exec(ctx, "AddDependency", "POST", "/issues/"+url.PathEscape(params.FromID)+"/dependencies", req)
+	_, err := b.exec(ctx, "AddDependency", "POST", "/issues/"+url.PathEscape(params.FromID)+"/deps", req)
 	return err
 }
 
 func (b *FleetBackend) RemoveDependency(ctx context.Context, params backend.DepRemoveParams) error {
-	_, err := b.exec(ctx, "RemoveDependency", "DELETE", "/issues/"+url.PathEscape(params.FromID)+"/dependencies/"+url.PathEscape(params.ToID), nil)
+	// fleet-db delete route is /issues/{id}/deps/{depends_on_id}; abbreviated
+	// to match the add route.
+	_, err := b.exec(ctx, "RemoveDependency", "DELETE", "/issues/"+url.PathEscape(params.FromID)+"/deps/"+url.PathEscape(params.ToID), nil)
 	return err
 }
 

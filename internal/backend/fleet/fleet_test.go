@@ -1095,8 +1095,8 @@ func TestRemoveDependency(t *testing.T) {
 		if r.Method != "DELETE" {
 			t.Errorf("Method = %q, want DELETE", r.Method)
 		}
-		if !strings.Contains(r.URL.Path, "/dependencies/") {
-			t.Errorf("path missing /dependencies/: %s", r.URL.Path)
+		if !strings.Contains(r.URL.Path, "/deps/") {
+			t.Errorf("path missing /deps/: %s", r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(apiResponse{Success: true}) //nolint:errcheck
