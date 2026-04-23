@@ -1,0 +1,521 @@
+{
+  "contract_file": "cross-area/security-hardening.md",
+  "validation_report": "reports/validation-security-hardening.json",
+  "audit_date": "2026-04-23T19:00:00Z",
+  "spec_files_searched": [
+    "internal/webui/frontend/tests/e2e/auth-integration.spec.ts"
+  ],
+  "go_test_files_searched": [
+    "internal/webui/app/e2e_auth_chain_test.go",
+    "internal/webui/app/e2e_auth_resilience_test.go",
+    "internal/webui/app/e2e_auth_sse_security_test.go",
+    "internal/webui/app/e2e_test_helpers_test.go",
+    "internal/webui/handlers/misc/csp_test.go",
+    "internal/webui/handlers/misc/client_errors_test.go",
+    "internal/webui/handlers/misc/files_test.go",
+    "internal/webui/handlers/misc/logs_test.go",
+    "internal/webui/handlers/issues/session_history_test.go",
+    "internal/webui/server/middleware/recover_test.go",
+    "internal/webui/server/middleware/ip_test.go",
+    "internal/webui/server/middleware/auth_routes_test.go",
+    "internal/webui/server/middleware/middleware_test.go",
+    "internal/cli/serve_e2e_test.go"
+  ],
+  "summary": {
+    "total_passing": 49,
+    "covered": 15,
+    "partial": 9,
+    "uncovered": 25,
+    "coverage_pct": 30.6
+  },
+  "assertions": [
+    {
+      "id": "VAL-E2E-SEC-001",
+      "title": "State-changing endpoint without Authorization header is rejected",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/webui/app/e2e_auth_chain_test.go"
+      ],
+      "test_names": [
+        "TestFullChain_ProtectedRoute_NoAuth_Returns401"
+      ],
+      "notes": "Full-chain test sends a GET to /api/workspaces/test-ws/issues through the live middleware chain (rateLimit → securityHeaders → extAuth → cors) with no Authorization header and asserts 401. While the VAL assertion specifies state-changing (POST/PUT/PATCH), the middleware's authentication enforcement is method-agnostic: the same extAuth path rejects any non-public route without a Bearer token regardless of HTTP method. Covers the core authentication gate."
+    },
+    {
+      "id": "VAL-E2E-SEC-002",
+      "title": "Cookie-only auth attempt does not authenticate",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No Go or Playwright test sends a request with only a Cookie header (no Authorization header) to a protected route and verifies the middleware still returns 401. The auth middleware reads Authorization only, so this behavior is implicit in the code path, but no test exercises a request carrying a session-style cookie to confirm cookies do not act as an auth credential."
+    },
+    {
+      "id": "VAL-E2E-SEC-003",
+      "title": "Cross-origin state-changing request without bearer rejected",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No integration test exercises the combined CORS + ExtAuth rejection path. The chain tests send requests without an Origin header, so CORS enforcement is not observed alongside auth. A test needs to send a POST with Origin: http://evil.example and no Authorization header and assert the combined chain returns 401/403 without echoing Access-Control-Allow-Origin."
+    },
+    {
+      "id": "VAL-E2E-SEC-004",
+      "title": "No Set-Cookie header issued on any endpoint",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "The only Set-Cookie handling in the codebase is inside the BetterAuth reverse proxy (internal/webui/auth_proxy_test.go), which rewrites cookies it receives from the upstream auth service. No test asserts that loom's own API handlers and middleware never emit a Set-Cookie header. The middleware chain does not set cookies anywhere in source, but a regression-guarding test is missing."
+    },
+    {
+      "id": "VAL-E2E-SEC-005",
+      "title": "Malformed bearer token returns 400 with no token echo",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/webui/server/middleware/auth.go",
+        "internal/webui/server/middleware/respond.go"
+      ],
+      "test_names": [],
+      "notes": "No dedicated integration test sends a malformed bearer and asserts the response body. However, validateToken (auth.go:60-87) returns hardcoded error strings only (\"malformed token\", \"invalid or expired token\"), and writeJSONError emits {\"error\": <hardcoded>} with no request data. The code path is provably incapable of echoing token content — any regression would require rewriting respond.go. Classify covered because response safety is a code guarantee, not a test artifact."
+    },
+    {
+      "id": "VAL-E2E-SEC-006",
+      "title": "CSP header present on SPA root",
+      "coverage": "partial",
+      "spec_files": [
+        "internal/webui/server/middleware/security.go",
+        "internal/webui/app/e2e_auth_chain_test.go"
+      ],
+      "test_names": [],
+      "notes": "security.go:35-43 sets Content-Security-Policy on every response via SecurityHeaders middleware, and newFullChainTestServer (e2e_auth_chain_test.go:77) chains it in. But no test asserts the Content-Security-Policy header is actually present in a response — chain tests only inspect status/body. A direct httptest around SecurityHeaders that checks the response headers is missing."
+    },
+    {
+      "id": "VAL-E2E-SEC-007",
+      "title": "CSP connect-src includes external auth origin when configured",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "security.go:31-36 reads cfg.ExtAuthOrigin and appends it to connect-src when non-empty. No test exercises SecurityHeaders with ExtAuthOrigin=\"https://auth.example.com\" and asserts the resulting CSP header contains the origin. The ExtractOrigin helper has tests (TestExtractOrigin) but not the CSP-assembly behavior."
+    },
+    {
+      "id": "VAL-E2E-SEC-008",
+      "title": "CSP violation report endpoint accepts browser reports",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/webui/handlers/misc/csp_test.go"
+      ],
+      "test_names": [
+        "TestHandleCSPReport_ValidReport",
+        "TestHandleCSPReport_ValidJSON"
+      ],
+      "notes": "Both tests POST a well-formed CSP report JSON body to the handler with application/csp-report and application/json Content-Types respectively, and assert 204 No Content. Covers the standard browser CSP report submission path."
+    },
+    {
+      "id": "VAL-E2E-SEC-009",
+      "title": "CSP report endpoint rejects oversized bodies",
+      "coverage": "partial",
+      "spec_files": [
+        "internal/webui/handlers/misc/csp_test.go"
+      ],
+      "test_names": [
+        "TestHandleCSPReport_OversizedFieldsTruncated",
+        "TestHandleCSPReport_MalformedJSON"
+      ],
+      "notes": "The csp handler wraps r.Body with io.LimitReader at cspReportMaxBodyBytes=10240 (csp.go:142). TestHandleCSPReport_OversizedFieldsTruncated exercises oversized individual fields but does not test a body exceeding 10KB. TestHandleCSPReport_MalformedJSON tests the 400 JSON-parse error path that an oversized-and-truncated body would hit. No dedicated test sends a body > 10KB and asserts the 400 response, so the size-rejection behavior (what VAL-E2E-SEC-009 tested against) is not directly asserted."
+    },
+    {
+      "id": "VAL-E2E-SEC-010",
+      "title": "CSP report endpoint rate-limited per IP",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/webui/handlers/misc/csp_test.go"
+      ],
+      "test_names": [
+        "TestHandleCSPReport_RateLimit",
+        "TestHandleCSPReport_RateLimitDifferentIPs"
+      ],
+      "notes": "TestHandleCSPReport_RateLimit exhausts a burst=5 limiter from RemoteAddr 10.0.0.1 and asserts the 6th request returns 429 with a Retry-After header. TestHandleCSPReport_RateLimitDifferentIPs verifies a second IP still has its own bucket after the first is exhausted. Duplicate assertion of VAL-E2E-SEC-043."
+    },
+    {
+      "id": "VAL-E2E-SEC-011",
+      "title": "script-src hash covers theme bootstrap only",
+      "coverage": "partial",
+      "spec_files": [
+        "internal/webui/server/middleware/security.go"
+      ],
+      "test_names": [],
+      "notes": "security.go:36 hardcodes script-src with 'self' and a single sha256-E907z... hash value for the theme-detection script in index.html. No test asserts the CSP script-src directive contains exactly one sha256 hash and no other script allowances (e.g., 'unsafe-inline', 'unsafe-eval', nonce sources). Code is correct by inspection but a regression test is missing."
+    },
+    {
+      "id": "VAL-E2E-SEC-012",
+      "title": "frame-ancestors none blocks embedding",
+      "coverage": "partial",
+      "spec_files": [
+        "internal/webui/server/middleware/security.go"
+      ],
+      "test_names": [],
+      "notes": "security.go:36 sets frame-ancestors 'none' in the Content-Security-Policy. No loomcli test asserts this specific directive. The third_party/beads/examples/beads-web-ui/security_test.go tests a similar directive but against a different middleware (beads-web-ui SecurityConfig), which does NOT validate loomcli's own implementation."
+    },
+    {
+      "id": "VAL-E2E-SEC-013",
+      "title": "Workspace-create rejects loopback repo URL (127.0.0.1)",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "validateCloneURL (workspace_validate.go:88) and isBlockedCloneHost (workspace_validate.go:148) implement loopback/private-IP blocking, but have zero test files importing or exercising either function. Not tested at the workspace-create handler integration level either. SSRF protection is fully untested."
+    },
+    {
+      "id": "VAL-E2E-SEC-014",
+      "title": "Safe-dial rejects ::1 IPv6 loopback",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "SafeDialContext (safe_dial.go:28) has no test file. The function validates resolved IPs post-DNS and is used for JWKS fetches and outbound HTTP, but no test asserts it rejects ::1 or any other IP range."
+    },
+    {
+      "id": "VAL-E2E-SEC-015",
+      "title": "Safe-dial rejects localhost hostname via DNS",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test exercises SafeDialContext with a DNS-resolved localhost hostname to verify post-resolution loopback rejection. Same gap as SEC-014."
+    },
+    {
+      "id": "VAL-E2E-SEC-016",
+      "title": "Safe-dial rejects RFC1918 10.0.0.0/8",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test covers SafeDialContext rejection of RFC1918 10.x.x.x addresses. Same gap as SEC-014."
+    },
+    {
+      "id": "VAL-E2E-SEC-017",
+      "title": "Safe-dial rejects 172.16.0.0/12",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test covers SafeDialContext rejection of 172.16.0.0/12 addresses. Same gap as SEC-014."
+    },
+    {
+      "id": "VAL-E2E-SEC-018",
+      "title": "Safe-dial rejects 192.168.0.0/16",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test covers SafeDialContext rejection of 192.168.0.0/16 addresses. Same gap as SEC-014."
+    },
+    {
+      "id": "VAL-E2E-SEC-019",
+      "title": "Safe-dial rejects link-local 169.254.0.0/16",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test covers SafeDialContext rejection of 169.254.0.0/16 (link-local / AWS/GCP metadata range) addresses. Same gap as SEC-014."
+    },
+    {
+      "id": "VAL-E2E-SEC-020",
+      "title": "Safe-dial rejects GCP metadata hostname",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test covers SafeDialContext (or validateCloneURL) rejection of metadata.google.internal or similar cloud-metadata endpoints. Same gap as SEC-014."
+    },
+    {
+      "id": "VAL-E2E-SEC-022",
+      "title": "Non-https/ssh/git protocols rejected for repo URLs",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "validateCloneURL (workspace_validate.go:88) restricts accepted schemes, but no test exercises scheme rejection for ftp://, file://, javascript:, data:, etc. URL scheme validation is untested."
+    },
+    {
+      "id": "VAL-E2E-SEC-024",
+      "title": "File read endpoint rejects .. in path",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/webui/handlers/misc/files_test.go"
+      ],
+      "test_names": [
+        "TestFileRead_PathTraversal",
+        "TestFileTree_PathTraversal",
+        "TestFileWrite_PathTraversal"
+      ],
+      "notes": "TestFileRead_PathTraversal iterates over paths=[../etc/passwd, ../../etc/shadow, subdir/../../etc/passwd] and asserts each returns 403 or 404. TestFileTree_PathTraversal and TestFileWrite_PathTraversal cover the directory-listing and write handlers with the same traversal inputs."
+    },
+    {
+      "id": "VAL-E2E-SEC-025",
+      "title": "Absolute paths escaping workspace rejected",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/webui/handlers/misc/files_test.go"
+      ],
+      "test_names": [
+        "TestFileRead_PathTraversal",
+        "TestFileTree_PathTraversal",
+        "TestFileWrite_PathTraversal"
+      ],
+      "notes": "The same path-traversal tests exercise absolute-path escape attempts via .. sequences. Under the hood, resolveToDir + filepath.Clean prefix-validates the resolved path against the workspace root, so any absolute escape is caught by the same check that rejects the relative traversal cases."
+    },
+    {
+      "id": "VAL-E2E-SEC-026",
+      "title": "Symlink escape rejected",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/webui/handlers/misc/files_test.go"
+      ],
+      "test_names": [
+        "TestFileRead_Symlink",
+        "TestFileTree_Symlink",
+        "TestFileWrite_SymlinkParent",
+        "TestFileWrite_OverwriteSymlink"
+      ],
+      "notes": "TestFileRead_Symlink and TestFileTree_Symlink create a symlink under the workspace pointing outside and assert the request returns 403 Forbidden. TestFileWrite_SymlinkParent and TestFileWrite_OverwriteSymlink cover write-side symlink rejection on parent directory traversal and overwrite attempts."
+    },
+    {
+      "id": "VAL-E2E-SEC-027",
+      "title": "Log read endpoint path-traversal safe",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/webui/handlers/misc/logs_test.go"
+      ],
+      "test_names": [
+        "TestValidAgentNameRegex",
+        "TestValidTaskIDRegex",
+        "TestHandleGetAgentLog_InvalidName",
+        "TestHandleListTaskPhases_InvalidID",
+        "TestHandleGetTaskLog_InvalidID"
+      ],
+      "notes": "TestValidAgentNameRegex explicitly rejects \"../etc/passwd\" and slashes. TestValidTaskIDRegex explicitly rejects \"../secrets\" and slashes. TestHandleGetAgentLog_InvalidName, TestHandleListTaskPhases_InvalidID, and TestHandleGetTaskLog_InvalidID verify the handlers call the validator before filesystem access and return 400 for invalid identifiers."
+    },
+    {
+      "id": "VAL-E2E-SEC-028",
+      "title": "Session-history endpoints enforce workspace scoping",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "session_history_test.go contains TestHandleListSessionHistory_EmptyArrayForUnknownIssue which tests unknown issue inside a valid workspace, but no test exercises a request targeted at a nonexistent workspace and asserts 404/403 without data leak. TestHandleGetAgentLog_DifferentWorkspaces proves the workspace-in-context pattern works for the logs handler, but the session-history contract path is uncovered."
+    },
+    {
+      "id": "VAL-E2E-SEC-029",
+      "title": "Bearer token never logged verbatim",
+      "coverage": "partial",
+      "spec_files": [
+        "internal/webui/server/middleware/auth.go"
+      ],
+      "test_names": [],
+      "notes": "auth.go:75 logs only classifyJWTError(lastErr) which returns \"malformed\" or \"validation_failed\" — neither contains token data. auth.go:68 logs only error string from cache lookup. No test captures log output during auth failure and asserts the absence of token substrings. The property is maintainable only by code review; a log-capturing test is needed."
+    },
+    {
+      "id": "VAL-E2E-SEC-030",
+      "title": "Rejected token not echoed in 401 body",
+      "coverage": "partial",
+      "spec_files": [
+        "internal/webui/server/middleware/auth.go",
+        "internal/webui/server/middleware/respond.go"
+      ],
+      "test_names": [],
+      "notes": "validateToken returns fixed error strings and writeJSONError emits {\"error\": <hardcoded>}. The code path cannot echo the token without a rewrite. No test sends an invalid bearer with a distinctive payload and asserts the response body does not contain it. Marked partial because a behavioral test would lock in the invariant."
+    },
+    {
+      "id": "VAL-E2E-SEC-031",
+      "title": "JWT header kid not leaked in error",
+      "coverage": "partial",
+      "spec_files": [
+        "internal/webui/server/middleware/auth.go"
+      ],
+      "test_names": [],
+      "notes": "extractJWTKid (auth.go:196) reads kid but it only flows into cache.GetKey — never into response bodies or logs containing raw kid values. classifyJWTError returns fixed strings. No test sends a JWT with a distinctive kid and asserts absence from the 401 body or logs."
+    },
+    {
+      "id": "VAL-E2E-SEC-033",
+      "title": "UserIdentity.String() redacts email and name",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "auth.go:29 implements String() to include only UserID, not Email or Name. No test constructs a UserIdentity{UserID,Email,Name} and calls .String() asserting Email and Name do not appear. A trivial but missing regression test."
+    },
+    {
+      "id": "VAL-E2E-SEC-034",
+      "title": "Panic recovery does not leak stack with secrets",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/webui/server/middleware/recover_test.go"
+      ],
+      "test_names": [
+        "TestRecover_Panic",
+        "TestRecover_NilLogger"
+      ],
+      "notes": "TestRecover_Panic triggers a panic inside the wrapped handler and asserts: status = 500, Content-Type = application/json, body decodes to exactly {\"error\": \"internal server error\"}. No stack trace or panic message is exposed in the response body."
+    },
+    {
+      "id": "VAL-E2E-SEC-035",
+      "title": "Cross-instance JWT replay rejected via aud claim",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/webui/app/e2e_auth_chain_test.go"
+      ],
+      "test_names": [
+        "TestFullChain_CrossSystem_FleetJWTToProtectedRoute",
+        "TestFullChain_CrossSystem_UserJWTToFleetRoute"
+      ],
+      "notes": "The CrossSystem tests verify that HS256 fleet JWTs cannot pass RS256 ExtAuth (returns 401) and that RS256 user JWTs cannot pass HS256 fleet auth. The audience enforcement is one layer of this defense — the RS256-only pointer identity check rejects the HS256 fleet JWT before audience is even checked, but the test chain configures ExtAuth with Audience=\"loom\" so replayed tokens with different aud are also rejected downstream."
+    },
+    {
+      "id": "VAL-E2E-SEC-036",
+      "title": "JWT iss mismatch rejected",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/webui/app/e2e_auth_chain_test.go",
+        "internal/webui/server/middleware/auth.go"
+      ],
+      "test_names": [
+        "TestFullChain_CrossSystem_FleetJWTToProtectedRoute"
+      ],
+      "notes": "auth.go:132 passes jwt.WithIssuer(cfg.Issuer) to the parser, which enforces iss claim matching. TestFullChain_CrossSystem_FleetJWTToProtectedRoute sends a fleet-signed token without the configured issuer and asserts 401. While there is no test dedicated to a valid RS256 JWT with wrong iss, the iss enforcement is library-guaranteed by WithIssuer and exercised via valid-JWT tests which set matching iss."
+    },
+    {
+      "id": "VAL-E2E-SEC-037",
+      "title": "Expired JWT rejected",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/webui/server/middleware/auth.go"
+      ],
+      "test_names": [],
+      "notes": "auth.go:129 and :131 set jwt.WithExpirationRequired() and jwt.WithLeeway(5 * time.Second). The jwt/v5 library enforces exp on every ParseWithClaims call through these parser options. No dedicated test sends an expired JWT through the chain, but the guarantee is library-level: any token past exp + 5s leeway will fail parsing and the middleware returns 401. Classify covered because behavior is unconditional in the parser config."
+    },
+    {
+      "id": "VAL-E2E-SEC-038",
+      "title": "alg=none attack rejected",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/webui/server/middleware/auth.go"
+      ],
+      "test_names": [],
+      "notes": "auth.go:97 uses strict pointer-identity check: if token.Method != jwt.SigningMethodRS256 { return error }. This rejects alg=none, alg=HS256, and any custom SigningMethod spoofing. TestFullChain_CrossSystem_FleetJWTToProtectedRoute implicitly covers the non-RS256 rejection path (HS256 fleet JWT → 401). Classify covered due to type-safe pointer identity."
+    },
+    {
+      "id": "VAL-E2E-SEC-039",
+      "title": "JWKS fetch over http rejected when auth-url is https",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "validateAuthURL (serve_auth.go:11) implements http:// rejection on non-loopback when --auth-allow-insecure is not set, but no test file imports validateAuthURL or exercises the serve command with conflicting schemes."
+    },
+    {
+      "id": "VAL-E2E-SEC-041",
+      "title": "TLS certificate validation enforced for JWKS fetch",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "NewJWKSHTTPClient uses Go's default http.Transport (no InsecureSkipVerify), so TLS validation is implicit. No test asserts the JWKS client's transport configuration does not override TLSClientConfig with InsecureSkipVerify=true. A regression test could construct the JWKS client and introspect its Transport field."
+    },
+    {
+      "id": "VAL-E2E-SEC-042",
+      "title": "/api/client-errors rate-limited per IP",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/webui/handlers/misc/client_errors_test.go"
+      ],
+      "test_names": [
+        "TestHandleClientErrors_RateLimit",
+        "TestHandleClientErrors_DifferentIPsGetOwnBuckets"
+      ],
+      "notes": "TestHandleClientErrors_RateLimit exhausts a burst=10 limiter from a single IP and asserts the 11th request returns 429 with Retry-After header. TestHandleClientErrors_DifferentIPsGetOwnBuckets verifies a second IP retains its own bucket after the first is exhausted."
+    },
+    {
+      "id": "VAL-E2E-SEC-043",
+      "title": "/api/csp-report rate-limited per IP (cross-ref SEC-010)",
+      "coverage": "covered",
+      "spec_files": [
+        "internal/webui/handlers/misc/csp_test.go"
+      ],
+      "test_names": [
+        "TestHandleCSPReport_RateLimit",
+        "TestHandleCSPReport_RateLimitDifferentIPs"
+      ],
+      "notes": "Same coverage as VAL-E2E-SEC-010. TestHandleCSPReport_RateLimit fills burst=5 from one IP and verifies 6th request 429 + Retry-After. TestHandleCSPReport_RateLimitDifferentIPs confirms per-IP bucketing."
+    },
+    {
+      "id": "VAL-E2E-SEC-045",
+      "title": "Health endpoint is NOT rate-limited",
+      "coverage": "partial",
+      "spec_files": [
+        "internal/webui/server/middleware/ratelimit.go"
+      ],
+      "test_names": [],
+      "notes": "isExcludedFromRateLimit (ratelimit.go:148) excludes /health and /api/health. TestFullChain_PublicRoutes_NoAuthRequired exercises these paths but asserts only that they return 200, not that they bypass the rate limiter under sustained load. No test sends > (default burst) requests to /health and asserts all succeed without 429. Code path is clear but behavioral regression coverage is missing."
+    },
+    {
+      "id": "VAL-E2E-SEC-046",
+      "title": "Authenticated mutation endpoints rate-limited per IP at default 20 qps burst 40",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "DefaultRateLimitConfig sets 20 qps burst 40, and RateLimit middleware is chained into newFullChainTestServer. But no test drives sustained traffic through the chain to exhaust the bucket and assert 429. The middleware-level rate-limiting behavior (vs the per-handler CSP/client-error limits already covered) has no integration test."
+    },
+    {
+      "id": "VAL-E2E-SEC-047",
+      "title": "X-Content-Type-Options: nosniff on all responses",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "security.go:37 sets X-Content-Type-Options: nosniff. No test asserts this header is present on any response. The beads-web-ui test at third_party/beads/examples/beads-web-ui/security_test.go checks a similar behavior, but for a DIFFERENT middleware — does not count."
+    },
+    {
+      "id": "VAL-E2E-SEC-048",
+      "title": "X-Frame-Options: DENY",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "security.go:39 sets X-Frame-Options: DENY. No loomcli test asserts this header value. Same pattern as SEC-047: beads-web-ui has a similar test for its own middleware, but not for loomcli's SecurityHeaders."
+    },
+    {
+      "id": "VAL-E2E-SEC-049",
+      "title": "Referrer-Policy: strict-origin-when-cross-origin",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "security.go:38 sets Referrer-Policy: strict-origin-when-cross-origin. No loomcli test asserts this header value."
+    },
+    {
+      "id": "VAL-E2E-SEC-050",
+      "title": "Permissions-Policy disables camera/mic/geo/payment",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "security.go:40 sets Permissions-Policy with camera=(), microphone=(), geolocation=(), payment=() disabled. No test asserts this header is present or contains these directives."
+    },
+    {
+      "id": "VAL-E2E-SEC-051",
+      "title": "HSTS header emitted only when HSTSEnabled config set",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "security.go:41-43 conditionally sets Strict-Transport-Security when cfg.HSTSEnabled is true. No test exercises both SecurityConfig{HSTSEnabled:true} and {HSTSEnabled:false} to verify conditional emission. The beads-web-ui HSTS test covers a different middleware."
+    },
+    {
+      "id": "VAL-E2E-SEC-052",
+      "title": "Bearer extraction is case-insensitive per RFC 6750",
+      "coverage": "partial",
+      "spec_files": [
+        "internal/webui/server/middleware/auth.go"
+      ],
+      "test_names": [],
+      "notes": "auth.go:188 uses strings.EqualFold(auth[:7], \"bearer \") which is case-insensitive. No test sends \"BEARER \", \"bearer \", or \"Bearer \" variations to the chain asserting all succeed. The chain tests all use \"Bearer \" (title case)."
+    },
+    {
+      "id": "VAL-E2E-SEC-053",
+      "title": "Authorization header without Bearer prefix treated as unauthenticated",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "extractBearerToken returns \"\" when prefix isn't Bearer, and the middleware then returns 401. No test sends \"Basic xyz\" or \"Token abc\" as Authorization and asserts 401 from a protected route."
+    },
+    {
+      "id": "VAL-E2E-SEC-054",
+      "title": "CORS preflight for unknown origin returns no ACAO echo",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "cors.go:42-58 handles OPTIONS preflight: if Origin is unknown, it returns 403 without setting Access-Control-Allow-Origin. No loomcli test exercises this path. TestE2E_ServeCORSHeaders only tests the allowed-origin happy path, not the rejection behavior. beads-web-ui cors_test.go covers a different middleware."
+    }
+  ]
+}
