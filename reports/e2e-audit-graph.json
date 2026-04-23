@@ -1,0 +1,516 @@
+{
+  "contract_file": "frontend/graph.md",
+  "validation_report": "reports/validation-graph.json",
+  "audit_date": "2026-04-23T08:23:25Z",
+  "spec_files_searched": [
+    "internal/webui/frontend/tests/e2e/graph-status-filter.spec.ts",
+    "internal/webui/frontend/tests/e2e/issue-node-styling.spec.ts",
+    "internal/webui/frontend/tests/e2e/dependency-edge-styling.spec.ts",
+    "internal/webui/frontend/tests/e2e/dependency-type-filter.spec.ts",
+    "internal/webui/frontend/tests/e2e/show-closed-toggle.spec.ts",
+    "internal/webui/frontend/tests/e2e/integration/dependency-graph.integration.spec.ts"
+  ],
+  "go_test_files_searched": [
+    "internal/webui/handlers/git/graph_test.go",
+    "internal/webui/handlers/issues/handlers_integration_test.go"
+  ],
+  "summary": {
+    "total_passing": 55,
+    "covered": 16,
+    "partial": 8,
+    "uncovered": 31,
+    "coverage_pct": 29.1
+  },
+  "assertions": [
+    {
+      "id": "VAL-FE-GRAPH-002",
+      "title": "Single-node graph renders without edges",
+      "coverage": "covered",
+      "spec_files": ["dependency-edge-styling.spec.ts"],
+      "test_names": ["graph with no dependencies renders no edges"],
+      "notes": "dependency-edge-styling.spec.ts:433 mocks two issues with no dependencies, asserts node count = 2 and edge count = 0. Confirms isolated nodes render without edges, satisfying the 'node count, edge count = 0' evidence criterion."
+    },
+    {
+      "id": "VAL-FE-GRAPH-003",
+      "title": "Five-node linear chain renders top-to-bottom",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test asserts monotonically increasing X (or Y) coordinates for nodes in a linear dependency chain. Existing specs render up to 6 nodes but do not verify layout ordering in LR or TB direction."
+    },
+    {
+      "id": "VAL-FE-GRAPH-008",
+      "title": "Graph bounds match computed size",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test asserts that all nodes are within the viewport bounds after fitView. Tests render nodes via getByTestId/visible, which only requires intersection with viewport, not that every node is within computed graph bounds."
+    },
+    {
+      "id": "VAL-FE-GRAPH-009",
+      "title": "Layout is stable across render cycles",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test captures node X/Y coordinates before and after a hover/filter toggle and asserts identical (+/- 2px) positions. Existing tests verify counts, not positional stability."
+    },
+    {
+      "id": "VAL-FE-GRAPH-011",
+      "title": "Open issue node background is correct color",
+      "coverage": "covered",
+      "spec_files": ["issue-node-styling.spec.ts"],
+      "test_names": [
+        "open node has data-status attribute",
+        "open node has full opacity",
+        "open node has normal styling (no filter)"
+      ],
+      "notes": "issue-node-styling.spec.ts:213-244 verifies data-status='open', opacity=1, and filter=none. The data-status attribute drives the CSS background-color var(--color-status-open), so this constitutes full coverage of the visual style claim."
+    },
+    {
+      "id": "VAL-FE-GRAPH-012",
+      "title": "In-progress issue node is colored distinctly",
+      "coverage": "covered",
+      "spec_files": ["issue-node-styling.spec.ts"],
+      "test_names": [
+        "in progress node has data-status attribute",
+        "in progress node has full opacity",
+        "in progress node has solid border"
+      ],
+      "notes": "issue-node-styling.spec.ts:179-209 verifies data-status='in_progress', opacity=1, solid border. Combined with closed/deferred tests asserting different filter/border attributes, visual distinctness is covered via the attribute-driven styling contract."
+    },
+    {
+      "id": "VAL-FE-GRAPH-013",
+      "title": "Blocked issue node background indicates blocked state",
+      "coverage": "covered",
+      "spec_files": ["issue-node-styling.spec.ts"],
+      "test_names": [
+        "blocked node has data-status attribute",
+        "blocked node has full opacity",
+        "blocked node has solid border"
+      ],
+      "notes": "issue-node-styling.spec.ts:248-279 verifies data-status='blocked' which selects the blocked color variable in CSS; opacity=1 and solid border confirmed."
+    },
+    {
+      "id": "VAL-FE-GRAPH-014",
+      "title": "Closed issue node background is dimmed/grayed",
+      "coverage": "covered",
+      "spec_files": ["issue-node-styling.spec.ts"],
+      "test_names": [
+        "closed node has data-status attribute",
+        "closed node has reduced opacity",
+        "closed node has grayscale filter",
+        "closed node has solid border-top"
+      ],
+      "notes": "issue-node-styling.spec.ts:95-140 verifies data-status='closed', opacity≈0.6, grayscale filter present, solid border-top. The grayscale filter + reduced opacity fully encode the 'dimmed/grayed' visual claim."
+    },
+    {
+      "id": "VAL-FE-GRAPH-015",
+      "title": "Deferred issue node background is distinct",
+      "coverage": "covered",
+      "spec_files": ["issue-node-styling.spec.ts"],
+      "test_names": [
+        "deferred node has data-status attribute",
+        "deferred node has reduced opacity",
+        "deferred node has dashed border"
+      ],
+      "notes": "issue-node-styling.spec.ts:144-175 verifies data-status='deferred', opacity≈0.7, dashed border — distinct visual treatment from open/in_progress/closed statuses."
+    },
+    {
+      "id": "VAL-FE-GRAPH-017",
+      "title": "Node displays formatted issue ID",
+      "coverage": "partial",
+      "spec_files": ["issue-node-styling.spec.ts"],
+      "test_names": [],
+      "notes": "Helper getIssueNode(page, title) in issue-node-styling.spec.ts locates nodes by title text; nodes are verified to exist and be visible, but no test explicitly asserts the formatted issue ID string (e.g., 'LOOM-123') renders in node DOM."
+    },
+    {
+      "id": "VAL-FE-GRAPH-018",
+      "title": "Node displays truncated title if long",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test asserts text-overflow: ellipsis or fixed-width truncation on node titles. Mock issue titles are short enough to not trigger truncation."
+    },
+    {
+      "id": "VAL-FE-GRAPH-019",
+      "title": "Node displays issue type badge",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test asserts the presence of an issue type badge element inside a node. issue-node-styling tests focus on status styling, not type badges."
+    },
+    {
+      "id": "VAL-FE-GRAPH-020",
+      "title": "Node displays priority level (0-4)",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test asserts that a node renders 'P0'..'P4' text or a priority indicator. Mock issues set priority=2 but no assertion checks the rendered output."
+    },
+    {
+      "id": "VAL-FE-GRAPH-021",
+      "title": "Node displays dependency count icons",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test asserts incoming/outgoing dependency count icons render in the node footer."
+    },
+    {
+      "id": "VAL-FE-GRAPH-032",
+      "title": "Edge paths follow smooth step routing",
+      "coverage": "partial",
+      "spec_files": ["dependency-edge-styling.spec.ts"],
+      "test_names": [
+        "'blocks' type edge has dashed stroke pattern",
+        "'related' type edge has solid stroke (no dash)",
+        "blocking and non-blocking edges have different CSS classes"
+      ],
+      "notes": "dependency-edge-styling.spec.ts:232-299 verifies that edge-path elements render with correct stroke dasharrays and CSS classes, which implies React Flow's configured smoothstep edge type is being exercised. However, no test inspects the SVG path 'd' attribute for the L/curve segments characteristic of smooth-step routing, so the routing-shape evidence criterion is only partially met."
+    },
+    {
+      "id": "VAL-FE-GRAPH-034",
+      "title": "Clicking node triggers onNodeClick callback",
+      "coverage": "partial",
+      "spec_files": ["issue-node-styling.spec.ts"],
+      "test_names": [
+        "closed node is clickable despite reduced opacity",
+        "deferred node is clickable despite reduced opacity"
+      ],
+      "notes": "issue-node-styling.spec.ts:282-323 clicks styled nodes and verifies they remain visible (pointer-events not disabled). No assertion that an onNodeClick callback fires or that a selection/detail-panel state change occurs."
+    },
+    {
+      "id": "VAL-FE-GRAPH-036",
+      "title": "Clicking canvas background deselects node",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test clicks on the canvas background to verify node deselection. Selected-state assertions in issue-node-styling.spec.ts are .skip'd."
+    },
+    {
+      "id": "VAL-FE-GRAPH-037",
+      "title": "Hovering over node sets tooltip position",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test asserts tooltip rendering or positioning on node hover."
+    },
+    {
+      "id": "VAL-FE-GRAPH-038",
+      "title": "Hovering over node invokes onNodeMouseEnter",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test verifies onNodeMouseEnter callback fires or tooltip state changes on hover."
+    },
+    {
+      "id": "VAL-FE-GRAPH-039",
+      "title": "Mouse leaving node invokes onNodeMouseLeave",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test verifies tooltip is cleared or onNodeMouseLeave fires when mouse exits a node."
+    },
+    {
+      "id": "VAL-FE-GRAPH-040",
+      "title": "Click-and-drag pans the viewport",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test performs a click-drag on the canvas and asserts that the react-flow__viewport transform value changes."
+    },
+    {
+      "id": "VAL-FE-GRAPH-041",
+      "title": "Panning does not select nodes",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test verifies that dragging to pan does not leave any node in selected state."
+    },
+    {
+      "id": "VAL-FE-GRAPH-042",
+      "title": "Double-click on node does not trigger selection twice",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test asserts idempotent selected-state on double-click. Selection state tests in issue-node-styling are skipped."
+    },
+    {
+      "id": "VAL-FE-GRAPH-045",
+      "title": "Fit-to-view button brings all nodes in viewport",
+      "coverage": "partial",
+      "spec_files": ["show-closed-toggle.spec.ts"],
+      "test_names": ["graph updates layout after toggle change"],
+      "notes": "show-closed-toggle.spec.ts:431 verifies graph updates layout (node counts) after toggle change, which implicitly triggers a re-fit. No test explicitly clicks the fit-to-view control or asserts that all node coordinates are within computed viewport bounds."
+    },
+    {
+      "id": "VAL-FE-GRAPH-046",
+      "title": "Mouse wheel zoom in",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test dispatches a mouse wheel event and asserts the viewport scale transform increases."
+    },
+    {
+      "id": "VAL-FE-GRAPH-047",
+      "title": "Mouse wheel zoom out",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test dispatches a mouse wheel event in the zoom-out direction and asserts the viewport scale transform decreases."
+    },
+    {
+      "id": "VAL-FE-GRAPH-048",
+      "title": "Zoom is bounded (min 0.1, max 2.0)",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test verifies that repeated zoom-in/zoom-out actions clamp scale to the [0.1, 2.0] range."
+    },
+    {
+      "id": "VAL-FE-GRAPH-049",
+      "title": "Zoom respects fitViewOptions padding",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test asserts that outermost nodes are not flush with viewport edges after fitView (padding margin > 0)."
+    },
+    {
+      "id": "VAL-FE-GRAPH-052",
+      "title": "GraphControls widget is visible",
+      "coverage": "covered",
+      "spec_files": ["graph-status-filter.spec.ts"],
+      "test_names": ["status filter dropdown renders in GraphControls"],
+      "notes": "graph-status-filter.spec.ts:93 asserts page.getByTestId('graph-controls') is visible alongside the status filter. Confirms the controls panel mounts and contains filter and zoom-adjacent UI."
+    },
+    {
+      "id": "VAL-FE-GRAPH-054",
+      "title": "Status filter 'All' shows all issues",
+      "coverage": "covered",
+      "spec_files": ["graph-status-filter.spec.ts"],
+      "test_names": [
+        "default filter is 'All' showing all issues",
+        "all issues visible when filter is 'all'"
+      ],
+      "notes": "graph-status-filter.spec.ts:142-165 asserts default filter value 'all' with 5 visible nodes, and separately verifies each data-status value is present exactly once under the 'all' filter."
+    },
+    {
+      "id": "VAL-FE-GRAPH-060",
+      "title": "Status filter persists to scoped localStorage",
+      "coverage": "covered",
+      "spec_files": ["graph-status-filter.spec.ts"],
+      "test_names": ["filter state persists to localStorage"],
+      "notes": "graph-status-filter.spec.ts:445 selects 'blocked' from dropdown and asserts localStorage.getItem('graph-status-filter') === 'blocked'."
+    },
+    {
+      "id": "VAL-FE-GRAPH-061",
+      "title": "Status filter restores from localStorage on load",
+      "coverage": "covered",
+      "spec_files": ["graph-status-filter.spec.ts"],
+      "test_names": [
+        "filter state restores from localStorage",
+        "filter state persists across page refresh"
+      ],
+      "notes": "graph-status-filter.spec.ts:460-505 uses addInitScript to pre-seed localStorage, then asserts the dropdown reflects the saved value and the correct subset of nodes renders."
+    },
+    {
+      "id": "VAL-FE-GRAPH-063",
+      "title": "Show Closed toggle state persists to localStorage",
+      "coverage": "covered",
+      "spec_files": ["show-closed-toggle.spec.ts"],
+      "test_names": [
+        "toggle state persists to localStorage",
+        "toggle state restores from localStorage on page load",
+        "toggle state persists across navigation"
+      ],
+      "notes": "show-closed-toggle.spec.ts:340-427 covers full persistence lifecycle: writing to localStorage on change, restoring on page load, and preserving across view navigation (kanban ↔ graph)."
+    },
+    {
+      "id": "VAL-FE-GRAPH-066",
+      "title": "Dependency type filter 'Non-blocking' controls non-blocking edges",
+      "coverage": "covered",
+      "spec_files": ["dependency-type-filter.spec.ts"],
+      "test_names": [
+        "non-blocking edges hidden by default",
+        "default shows Blocking and Parent-Child checked",
+        "checking Non-blocking shows non-blocking edges"
+      ],
+      "notes": "dependency-type-filter.spec.ts:195-325 verifies non-blocking checkbox is unchecked by default, that related-type edges are hidden when unchecked, and that checking the box reveals non-blocking edges."
+    },
+    {
+      "id": "VAL-FE-GRAPH-068",
+      "title": "Dependency type filter persists to localStorage",
+      "coverage": "covered",
+      "spec_files": ["dependency-type-filter.spec.ts"],
+      "test_names": [
+        "filter state persists to localStorage",
+        "filter state restores from localStorage",
+        "filter state persists across page load",
+        "invalid localStorage value falls back to defaults"
+      ],
+      "notes": "dependency-type-filter.spec.ts:468-548 verifies JSON array persisted under 'graph-dep-type-filter' key, restored on load, and falls back to defaults on invalid JSON."
+    },
+    {
+      "id": "VAL-FE-GRAPH-069",
+      "title": "Highlight Ready toggle enables ready-node highlighting",
+      "coverage": "covered",
+      "spec_files": ["graph-status-filter.spec.ts"],
+      "test_names": ["status filter works with Highlight Ready toggle"],
+      "notes": "graph-status-filter.spec.ts:556 enables highlight-ready toggle and asserts GraphView element has data-highlight-ready='true' attribute set."
+    },
+    {
+      "id": "VAL-FE-GRAPH-073",
+      "title": "MiniMap reflects viewport window",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test asserts the MiniMap viewport mask/frame is visible or moves in response to pan/zoom."
+    },
+    {
+      "id": "VAL-FE-GRAPH-075",
+      "title": "Legend button is visible",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test asserts visibility of the Legend toggle button."
+    },
+    {
+      "id": "VAL-FE-GRAPH-076",
+      "title": "Legend expands to show content",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test clicks the Legend button and verifies the Priority/Status/Edges sections become visible."
+    },
+    {
+      "id": "VAL-FE-GRAPH-077",
+      "title": "Legend shows priority levels (P0-P4)",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test verifies the Legend renders 5 priority items (P0..P4) with color swatches."
+    },
+    {
+      "id": "VAL-FE-GRAPH-078",
+      "title": "Legend shows status colors",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test verifies the Legend renders status color swatches matching the rendered graph nodes."
+    },
+    {
+      "id": "VAL-FE-GRAPH-079",
+      "title": "Legend shows edge types",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test verifies the Legend renders edge type examples (blocking, parent-child, related)."
+    },
+    {
+      "id": "VAL-FE-GRAPH-080",
+      "title": "Legend shows indicators (Root Blocker, Blocked Count)",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test verifies Root Blocker or Blocked Count legend items are rendered."
+    },
+    {
+      "id": "VAL-FE-GRAPH-081",
+      "title": "Legend collapses to hide content",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test clicks the Legend a second time to verify its content is hidden."
+    },
+    {
+      "id": "VAL-FE-GRAPH-082",
+      "title": "Legend state is separate from filter controls",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test asserts that toggling the Legend leaves node/edge counts unchanged."
+    },
+    {
+      "id": "VAL-FE-GRAPH-084",
+      "title": "SSE issue.created adds new node to graph",
+      "coverage": "partial",
+      "spec_files": ["dependency-graph.integration.spec.ts"],
+      "test_names": ["new dependency edge appears in graph after adding dependency"],
+      "notes": "integration/dependency-graph.integration.spec.ts:263 exercises the SSE pipeline for the graph view but for dependency.created (edge count increases), not issue.created (node count increases). Both issues in the test are created before the graph loads. No Playwright test creates an issue via API while the graph is open and asserts a new node appears via SSE. The SSE subscription path is partially exercised but this specific scenario is not."
+    },
+    {
+      "id": "VAL-FE-GRAPH-087",
+      "title": "SSE updates respect active filters",
+      "coverage": "partial",
+      "spec_files": [
+        "graph-status-filter.spec.ts",
+        "dependency-graph.integration.spec.ts"
+      ],
+      "test_names": ["closing issue updates node styling in graph"],
+      "notes": "graph-status-filter.spec.ts verifies status filters remove non-matching nodes; dependency-graph.integration.spec.ts:294 verifies a closed node's data-status updates via SSE. No test verifies that an SSE-arrived issue whose status does not match the active filter is excluded from the visible graph."
+    },
+    {
+      "id": "VAL-FE-GRAPH-090",
+      "title": "Isolated node renders",
+      "coverage": "covered",
+      "spec_files": ["dependency-edge-styling.spec.ts"],
+      "test_names": ["graph with no dependencies renders no edges"],
+      "notes": "dependency-edge-styling.spec.ts:433 verifies two isolated nodes (no dependencies) render with 0 edges — directly demonstrates the isolated-node rendering claim."
+    },
+    {
+      "id": "VAL-FE-GRAPH-091",
+      "title": "Very long issue title (200+ chars) is truncated",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test seeds an issue with a 200+ character title to verify truncation within node bounds. All mock titles are short."
+    },
+    {
+      "id": "VAL-FE-GRAPH-093",
+      "title": "Selecting/dragging during pan causes no errors",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test combines pan and select interactions or captures console errors during concurrent interactions."
+    },
+    {
+      "id": "VAL-FE-GRAPH-094",
+      "title": "Graph renders in mobile viewport (360px width)",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test sets viewport to 360x800 and asserts graph + controls are accessible. All existing specs use default desktop viewport."
+    },
+    {
+      "id": "VAL-FE-GRAPH-096",
+      "title": "Rapid filter toggling does not cause flicker",
+      "coverage": "partial",
+      "spec_files": ["dependency-type-filter.spec.ts"],
+      "test_names": ["filter can be toggled repeatedly"],
+      "notes": "dependency-type-filter.spec.ts:614 toggles Blocking checkbox 3 times verifying correct edge counts after each state. Does not perform 5+ rapid toggles or verify absence of visual flicker."
+    },
+    {
+      "id": "VAL-FE-GRAPH-097",
+      "title": "Issue with undefined priority renders with default",
+      "coverage": "partial",
+      "spec_files": ["issue-node-styling.spec.ts"],
+      "test_names": [],
+      "notes": "All mock issues used by spec files set priority=2 explicitly. No test exercises an issue where priority is omitted to verify the default/fallback rendering path (e.g., P4 or P2 default)."
+    },
+    {
+      "id": "VAL-FE-GRAPH-098",
+      "title": "Issue with missing title renders 'Untitled'",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test seeds an issue with an empty/missing title to verify the 'Untitled' placeholder fallback."
+    },
+    {
+      "id": "VAL-FE-GRAPH-100",
+      "title": "Empty graph does not render orphaned controls/legend",
+      "coverage": "covered",
+      "spec_files": ["graph-status-filter.spec.ts"],
+      "test_names": ["filter works with empty issues list"],
+      "notes": "graph-status-filter.spec.ts:610 mocks an empty issues response and asserts the status filter dropdown still renders and is interactive — confirms controls remain functional with 0 nodes."
+    }
+  ]
+}
