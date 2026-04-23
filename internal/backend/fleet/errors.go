@@ -28,16 +28,15 @@ func classifyHTTPError(op string, statusCode int, body apiResponse) error {
 		return classifyErrorString(op, msg)
 	}
 
-	// fleet-db surfaces semantic conflicts (e.g. "issue is already closed")
-	// as 500 Internal Server Error rather than 409 Conflict. The status
-	// code alone can't distinguish "transient server error" from "client
-	// precondition failed"; give the string matcher a chance first. Only
-	// promote when the match yields a non-default verdict, so we don't
-	// re-bucket a genuine internal error.
-	if statusCode >= 500 {
-		if classified := classifyErrorString(op, msg); !isInternalBucket(classified) {
-			return classified
-		}
+	// Non-2xx: fleet-db uses a mix of status codes for semantic errors
+	// (e.g. 422 for "invalid_transition: issue is already closed", 500
+	// for generic internal errors, 404 for missing resources). Status
+	// alone can't distinguish "transient server error" from "client
+	// precondition failed", so run the string matcher first and promote
+	// its verdict when it's non-default. Genuine internal errors fall
+	// through to the status-based switch below.
+	if classified := classifyErrorString(op, msg); !isInternalBucket(classified) {
+		return classified
 	}
 
 	switch statusCode {
