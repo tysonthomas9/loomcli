@@ -175,7 +175,18 @@ func (s *workspaceServiceImpl) ListWorkspaces(_ context.Context) ([]WorkspaceLis
 }
 
 func (s *workspaceServiceImpl) GetWorkspace(_ context.Context, wsID string) (*ops.WorkspaceData, error) {
-	if s.multiPool == nil || s.multiPool.PoolForWorkspace(wsID) == nil {
+	// Primary existence check: the multiPool registry. In beads mode the
+	// daemon pool owns the authoritative list of live workspaces. In fleet
+	// mode the multiPool is intentionally empty (no beads daemon), so the
+	// multiPool check alone would 404 every lookup — fall through to a
+	// config-based lookup instead.
+	poolKnown := s.multiPool != nil && s.multiPool.PoolForWorkspace(wsID) != nil
+	if !poolKnown {
+		if data, ok, err := s.lookupWorkspaceFromConfig(wsID); err != nil {
+			return nil, err
+		} else if ok {
+			return data, nil
+		}
 		return nil, ErrNotFound("workspace not found: " + wsID)
 	}
 
@@ -198,6 +209,71 @@ func (s *workspaceServiceImpl) GetWorkspace(_ context.Context, wsID string) (*op
 		data.Workspaces[i].Active = data.Workspaces[i].ID == wsID
 	}
 	return data, nil
+}
+
+// lookupWorkspaceFromConfig resolves a workspace UUID via the config-based
+// suppliers (configByIDFn preferred, configFn as secondary). Returns (data,
+// true, nil) when a match is found, (nil, false, nil) when the ID is unknown,
+// or (nil, false, err) on a load error. Used by GetWorkspace as the fleet-mode
+// fallback when the multiPool registry has no entry for the workspace.
+func (s *workspaceServiceImpl) lookupWorkspaceFromConfig(wsID string) (*ops.WorkspaceData, bool, error) {
+	// Prefer the by-ID supplier (cheaper — it only loads the target
+	// workspace's topology rather than every configured workspace).
+	if s.configByIDFn != nil {
+		if data, err := s.configByIDFn(wsID); err == nil && data != nil {
+			normalizeWorkspaceData(data)
+			for i := range data.Repos {
+				if b := readGitHeadBranch(data.Repos[i].Path); b != "" {
+					data.Repos[i].CurrentBranch = b
+				}
+			}
+			for i := range data.Workspaces {
+				data.Workspaces[i].Active = data.Workspaces[i].ID == wsID
+			}
+			return data, true, nil
+		}
+	}
+
+	// Fallback: scan the full config for a matching UUID. This also
+	// synthesizes a WorkspaceData from the summary when configByIDFn isn't
+	// wired (test path) but configFn is.
+	if s.configFn == nil {
+		return nil, false, nil
+	}
+	cfgData, err := s.configFn()
+	if err != nil {
+		return nil, false, ErrInternal("failed to load workspace config", err)
+	}
+	if cfgData == nil {
+		return nil, false, nil
+	}
+	for _, ws := range cfgData.Workspaces {
+		if ws.ID != wsID {
+			continue
+		}
+		result := &ops.WorkspaceData{
+			ID:               ws.ID,
+			Name:             ws.Name,
+			Path:             ws.Path,
+			Repos:            cfgData.Repos,
+			Groups:           cfgData.Groups,
+			Agents:           cfgData.Agents,
+			Workspaces:       cfgData.Workspaces,
+			WorkspaceOrder:   cfgData.WorkspaceOrder,
+			DefaultWorkspace: cfgData.DefaultWorkspace,
+		}
+		normalizeWorkspaceData(result)
+		for i := range result.Repos {
+			if b := readGitHeadBranch(result.Repos[i].Path); b != "" {
+				result.Repos[i].CurrentBranch = b
+			}
+		}
+		for i := range result.Workspaces {
+			result.Workspaces[i].Active = result.Workspaces[i].ID == wsID
+		}
+		return result, true, nil
+	}
+	return nil, false, nil
 }
 
 func (s *workspaceServiceImpl) CreateWorkspace(ctx context.Context, req WorkspaceCreateRequest) (*ops.WorkspaceData, []string, error) {
