@@ -240,8 +240,70 @@ func (a *cliBeadsAdapter) SearchIssues(_ context.Context, query string, limit in
 
 // --- Mutation methods ---
 
-func (a *cliBeadsAdapter) Create(_ context.Context, _ backend.CreateParams) (*backend.IssueData, error) {
-	return nil, backend.ErrNotImplemented("Create", "not supported via CLI adapter")
+func (a *cliBeadsAdapter) Create(_ context.Context, params backend.CreateParams) (*backend.IssueData, error) {
+	if params.Title == "" {
+		return nil, backend.ErrValidation("Create", "title must not be empty")
+	}
+
+	args := []string{"create", "--title", params.Title, "--silent"}
+	if params.IssueType != "" {
+		args = append(args, "--type", params.IssueType)
+	}
+	if params.Priority != 0 {
+		args = append(args, "--priority", strconv.Itoa(params.Priority))
+	}
+	if params.Description != "" {
+		args = append(args, "--description", params.Description)
+	}
+	if params.Design != "" {
+		args = append(args, "--design", params.Design)
+	}
+	if params.AcceptanceCriteria != "" {
+		args = append(args, "--acceptance", params.AcceptanceCriteria)
+	}
+	if params.Notes != "" {
+		args = append(args, "--notes", params.Notes)
+	}
+	if params.Assignee != "" {
+		args = append(args, "--assignee", params.Assignee)
+	}
+	if params.Owner != "" {
+		args = append(args, "--owner", params.Owner)
+	}
+	if params.Parent != "" {
+		args = append(args, "--parent", params.Parent)
+	}
+	if params.ExternalRef != "" {
+		args = append(args, "--external-ref", params.ExternalRef)
+	}
+	if len(params.Labels) > 0 {
+		args = append(args, "--labels", strings.Join(params.Labels, ","))
+	}
+
+	result := a.runner.Run(a.dir, args...)
+	if result.Err != nil {
+		return nil, a.classifyError("Create", result)
+	}
+
+	// --silent makes bd write only the issue ID (e.g., "bd-42") to stdout.
+	id := strings.TrimSpace(result.Stdout)
+	if id == "" {
+		return nil, backend.ErrInternal("Create", "bd create returned empty ID", nil)
+	}
+
+	// Resolve to a full IssueData via Get so the FE sees the canonical
+	// shape (including default values bd populated server-side). If Get
+	// fails, return a minimal projection rather than failing the create.
+	if detail, err := a.Get(context.Background(), id); err == nil && detail != nil {
+		return &detail.IssueData, nil
+	}
+	return &backend.IssueData{
+		ID:        id,
+		Title:     params.Title,
+		Status:    "open",
+		Priority:  params.Priority,
+		IssueType: params.IssueType,
+	}, nil
 }
 
 func (a *cliBeadsAdapter) Update(_ context.Context, id string, params backend.UpdateParams) error {

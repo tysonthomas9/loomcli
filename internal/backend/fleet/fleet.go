@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -211,12 +212,29 @@ func hasData(resp *apiResponse) bool {
 
 // unmarshalIssueList unmarshals a []*types.IssueWithCounts response and
 // converts to []backend.IssueData. Used by List, GetChildren, and SearchIssues.
+//
+// fleet-db speaks two list dialects:
+//   - Bare array: [{...}, {...}]                 (legacy / wrapper-envelope path)
+//   - Wrapped:   {"issues": [{...}, {...}]}      (native v1 list responses)
+//
+// Try the bare array first; on a JSON unmarshal type mismatch, fall back
+// to the wrapper. Anything else is a real parse failure.
 func unmarshalIssueList(resp *apiResponse, op string) ([]backend.IssueData, error) {
 	if !hasData(resp) {
 		return []backend.IssueData{}, nil
 	}
 	var issues []*types.IssueWithCounts
-	if err := json.Unmarshal(resp.Data, &issues); err != nil {
+	err := json.Unmarshal(resp.Data, &issues)
+	if err != nil {
+		var ute *json.UnmarshalTypeError
+		if errors.As(err, &ute) {
+			var wrapper struct {
+				Issues []*types.IssueWithCounts `json:"issues"`
+			}
+			if werr := json.Unmarshal(resp.Data, &wrapper); werr == nil {
+				return issuesWithCountsToData(wrapper.Issues), nil
+			}
+		}
 		return nil, backend.ErrInternal(op, "unmarshal response", err)
 	}
 	return issuesWithCountsToData(issues), nil

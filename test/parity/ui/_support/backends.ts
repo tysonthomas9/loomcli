@@ -179,20 +179,33 @@ async function deleteAllIssues(baseUrl: string, workspace: string): Promise<void
 }
 
 async function runSeedScript(): Promise<void> {
-    try {
-        execSync(
-            `docker compose -f test/parity/docker-compose.parity.yml run --rm parity-seed`,
-            {
+    // Try both compose tools — environments use whichever is installed,
+    // and `docker` may be a podman alias on Linux setups but not all of
+    // them. Surfacing the failure is critical because tests that depend
+    // on seeded fixtures (titles like "Refactor auth middleware") will
+    // otherwise report cryptic "no seed match" errors.
+    const cmds = [
+        `podman compose -f test/parity/docker-compose.parity.yml run --rm parity-seed`,
+        `docker compose -f test/parity/docker-compose.parity.yml run --rm parity-seed`,
+    ];
+    let lastErr: unknown;
+    for (const cmd of cmds) {
+        try {
+            execSync(cmd, {
                 cwd: REPO_ROOT,
                 encoding: "utf-8",
-                timeout: 60_000,
+                timeout: 90_000,
                 stdio: ["ignore", "pipe", "pipe"],
-            },
-        );
-    } catch (e: any) {
-        // eslint-disable-next-line no-console
-        console.warn(`[backends] reseed failed: ${e?.message ?? e}`);
+            });
+            return;
+        } catch (e) {
+            lastErr = e;
+        }
     }
+    // eslint-disable-next-line no-console
+    console.warn(
+        `[backends] reseed failed via both compose tools: ${(lastErr as Error)?.message ?? lastErr}`,
+    );
 }
 
 /**
