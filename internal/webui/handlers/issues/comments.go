@@ -11,8 +11,24 @@ import (
 )
 
 // CommentRequest represents the JSON body for creating a comment.
+//
+// Accepts both "text" and "body" keys on the wire. The backends diverge
+// on field naming (beads uses "text", fleet-db uses "body") and clients
+// have historically sent whichever matched their backend. Covering both
+// here keeps the handler dialect-agnostic; Content() returns whichever
+// was set, with "text" winning when both are present.
 type CommentRequest struct {
-	Text string `json:"text"`
+	Text string `json:"text,omitempty"`
+	Body string `json:"body,omitempty"`
+}
+
+// Content returns the comment text regardless of which JSON key the
+// caller supplied. "text" wins if both are set (beads' canonical name).
+func (r CommentRequest) Content() string {
+	if r.Text != "" {
+		return r.Text
+	}
+	return r.Body
 }
 
 // CommentResponse wraps the comment data for JSON response.
@@ -47,7 +63,7 @@ func HandleAddComment(svc service.IssueService) http.HandlerFunc {
 		comment, err := svc.AddComment(r.Context(), service.AddCommentParams{
 			IssueID: issueID,
 			Author:  "web-ui",
-			Text:    req.Text,
+			Text:    req.Content(),
 		})
 		if err != nil {
 			handler.HandleServiceError(w, err)

@@ -42,11 +42,14 @@ test.describe("09 SSE realtime parity", () => {
             tabs.beads.goto(`${PARITY_URLS.beads}/ws/${beadsWs}/kanban`),
             tabs.fleet.goto(`${PARITY_URLS.fleet}/ws/${fleetWs}/kanban`),
         ]);
+        // Only the observer tabs need networkidle — they wait for the SSE
+        // subscription to be established before we expect them to see the
+        // title text. The writer tabs (tabs.beads/tabs.fleet) only need
+        // location.href set; the SPA's ongoing polling means networkidle
+        // never fires, and waiting for it would blow the 30s budget.
         await Promise.all([
-            beadsObs.waitForLoadState("networkidle"),
-            fleetObs.waitForLoadState("networkidle"),
-            tabs.beads.waitForLoadState("networkidle"),
-            tabs.fleet.waitForLoadState("networkidle"),
+            beadsObs.waitForLoadState("domcontentloaded"),
+            fleetObs.waitForLoadState("domcontentloaded"),
         ]);
 
         try {
