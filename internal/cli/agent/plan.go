@@ -217,22 +217,23 @@ func adoptOrCreateSession(agentName, parentID, prompt, phase string) *sessions.S
 }
 
 func inheritedSessionExists(sid string) bool {
-	if dir, err := workspace.CentralSessionsDir(os.Getenv("LOOM_WORKSPACE_ID")); err == nil {
-		if _, err := os.Stat(filepath.Join(dir, sid, "metadata.json")); err == nil {
-			return true
-		}
+	dir, err := workspace.CentralSessionsDir(os.Getenv("LOOM_WORKSPACE_ID"))
+	if err != nil {
+		return false
 	}
-	if beads := os.Getenv("LOOM_BEADS_DIR"); beads != "" {
-		if _, err := os.Stat(filepath.Join(beads, "sessions", sid, "metadata.json")); err == nil {
-			return true
-		}
+	if _, err := os.Stat(filepath.Join(dir, sid, "metadata.json")); err == nil {
+		return true
 	}
 	return false
 }
 
 func createAgentSession(agentName, parentID, prompt, phase string) *sessions.Session {
 	wsID := automode.DefaultWorkspaceID()
-	sessStore, sessErr := sessions.NewStoreForWorkspace(wsID, cli.GetBeadsDir())
+	if wsID == "" {
+		log.Printf("[agent] Warning: no workspace ID resolved; session store disabled")
+		return nil
+	}
+	sessStore, sessErr := sessions.NewStoreForWorkspace(wsID)
 	if sessErr != nil {
 		log.Printf("[agent] Warning: session store unavailable: %v", sessErr)
 		return nil

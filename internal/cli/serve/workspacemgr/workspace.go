@@ -596,18 +596,18 @@ func cleanupCloneDir(wsDir string) {
 }
 
 // ResolveInitialWorkspaceID returns the stable UUID for the current working
-// directory's workspace. Falls back to filepath.Base(cwd) if config is
-// unavailable or the workspace has no UUID (pre-migration config).
-func ResolveInitialWorkspaceID() string {
+// directory's workspace. Returns an error if config cannot be loaded or no
+// default workspace UUID is set — callers must fail loud rather than fall
+// back to an ambiguous bucket.
+func ResolveInitialWorkspaceID() (string, error) {
 	cfg, err := config.LoadConfig()
-	if err == nil && cfg != nil && cfg.DefaultWorkspaceID != "" {
-		return cfg.DefaultWorkspaceID
+	if err != nil {
+		return "", fmt.Errorf("load config: %w", err)
 	}
-	// Fallback: CWD basename (pre-UUID config or load failure)
-	if cwd, err := os.Getwd(); err == nil {
-		return filepath.Base(cwd)
+	if cfg == nil || cfg.DefaultWorkspaceID == "" {
+		return "", fmt.Errorf("no default workspace UUID configured; run 'loom init' or set default workspace")
 	}
-	return "default"
+	return cfg.DefaultWorkspaceID, nil
 }
 
 // ResolveWorkspaceID loads config and resolves a workspace name to its UUID.

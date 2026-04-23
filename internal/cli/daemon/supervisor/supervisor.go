@@ -82,7 +82,7 @@ func (s *Supervisor) Start() error {
 	s.Shutdown = make(chan struct{})
 
 	// Sweep orphaned sessions from prior daemon runs before launching agents.
-	if sessStore, err := sessions.NewStoreForWorkspace(s.WorkspaceID, cli.GetBeadsDir()); err != nil {
+	if sessStore, err := sessions.NewStoreForWorkspace(s.WorkspaceID); err != nil {
 		slog.Warn("session store unavailable, skipping orphan sweep", "err", err)
 	} else {
 		if healed, err := sessStore.SweepOrphans(); err != nil {
@@ -269,7 +269,7 @@ func (s *Supervisor) assignEpic(ap *AgentProcess) string {
 
 // createAgentSession creates a session for liveness tracking.
 func (s *Supervisor) createAgentSession(ap *AgentProcess, epicID string) {
-	sessStore, err := sessions.NewStoreForWorkspace(s.WorkspaceID, cli.GetBeadsDir())
+	sessStore, err := sessions.NewStoreForWorkspace(s.WorkspaceID)
 	if err != nil {
 		slog.Warn("session store unavailable, watchdog will use log file", "worktree", ap.Entry.Worktree, "err", err)
 		return

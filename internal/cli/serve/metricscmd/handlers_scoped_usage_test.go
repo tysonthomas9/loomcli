@@ -4,30 +4,25 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
-// TestScopedUsageStores_ReadsFromWorkspaceRoot guards the PR-46 P1 fix: the
-// scoped usage endpoint must read records seeded by automode's writer.
-// Post-centralization, both sides resolve ~/.loom/usage/<wsID>/usage.jsonl
-// from the workspace UUID; legacy <wsPath>/usage.jsonl gets migrated on
-// first access. The test overrides HOME so ~/.loom lands under the tmpdir.
-func TestScopedUsageStores_ReadsFromWorkspaceRoot(t *testing.T) {
+// TestScopedUsageStores_ReadsCentralStore confirms the scoped endpoint reads
+// from ~/.loom/usage/<wsID>/usage.jsonl — the path the automode writer
+// resolves through usage.NewStoreForWorkspace.
+func TestScopedUsageStores_ReadsCentralStore(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	wsPath := t.TempDir()
+	const wsID = "ws-alpha"
 
-	// Seed a record via the same writer automode uses.
-	writer, err := usage.NewStore(wsPath)
+	writer, err := usage.NewStoreForWorkspace(wsID)
 	if err != nil {
 		t.Fatalf("seed store: %v", err)
 	}
 	now := time.Now()
-	seeded := usage.SessionUsage{
+	if err := writer.Append(usage.SessionUsage{
 		AgentName:        "nova",
 		Backend:          "claude",
 		InputTokens:      4200,
@@ -35,30 +30,17 @@ func TestScopedUsageStores_ReadsFromWorkspaceRoot(t *testing.T) {
 		EstimatedCostUSD: 0.42,
 		StartedAt:        now.Add(-5 * time.Minute),
 		EndedAt:          now,
-	}
-	if err := writer.Append(seeded); err != nil {
+	}); err != nil {
 		t.Fatalf("seed append: %v", err)
 	}
 
-	// Guards a future rename on either side of the writer/reader contract.
-	expectedPath := filepath.Join(wsPath, "usage.jsonl")
-	if _, statErr := os.Stat(expectedPath); statErr != nil {
-		t.Fatalf("expected seeded file at %s: %v", expectedPath, statErr)
-	}
-
 	stores := newScopedUsageStores()
-	pathFn := func(wsID string) string {
-		if wsID == "ws-alpha" {
-			return wsPath
-		}
-		return ""
-	}
-	handler := stores.handle(pathFn)
+	handler := stores.handle()
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/workspaces/{ws}/monitor/usage", handler)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/ws-alpha/monitor/usage", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+wsID+"/monitor/usage", nil)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 
@@ -88,8 +70,9 @@ func TestScopedUsageStores_ReadsFromWorkspaceRoot(t *testing.T) {
 // cached.
 func TestScopedUsageStores_CachesResponseWithinTTL(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	wsPath := t.TempDir()
-	writer, err := usage.NewStore(wsPath)
+	const wsID = "ws-1"
+
+	writer, err := usage.NewStoreForWorkspace(wsID)
 	if err != nil {
 		t.Fatalf("seed store: %v", err)
 	}
@@ -104,14 +87,13 @@ func TestScopedUsageStores_CachesResponseWithinTTL(t *testing.T) {
 	}
 
 	stores := newScopedUsageStores()
-	pathFn := func(string) string { return wsPath }
-	handler := stores.handle(pathFn)
+	handler := stores.handle()
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/workspaces/{ws}/monitor/usage", handler)
 
 	do := func() int {
-		req := httptest.NewRequest(http.MethodGet, "/api/workspaces/ws-1/monitor/usage", nil)
+		req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+wsID+"/monitor/usage", nil)
 		rr := httptest.NewRecorder()
 		mux.ServeHTTP(rr, req)
 		if rr.Code != http.StatusOK {
@@ -145,20 +127,12 @@ func TestScopedUsageStores_CachesResponseWithinTTL(t *testing.T) {
 	}
 }
 
-// TestScopedUsageStores_EmptyPathReturns503 confirms the wsID-missing branch
-// still signals "not configured" rather than falling back to the launch dir.
-func TestScopedUsageStores_EmptyPathReturns503(t *testing.T) {
+// TestScopedUsageStores_EmptyWorkspaceIDReturnsNil confirms storeFor refuses
+// to build a store when wsID is empty — callers surface this as 503 rather
+// than falling back to a shared bucket.
+func TestScopedUsageStores_EmptyWorkspaceIDReturnsNil(t *testing.T) {
 	stores := newScopedUsageStores()
-	handler := stores.handle(func(string) string { return "" })
-
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /api/workspaces/{ws}/monitor/usage", handler)
-
-	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/unknown/monitor/usage", nil)
-	rr := httptest.NewRecorder()
-	mux.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, want 503", rr.Code)
+	if got := stores.storeFor(""); got != nil {
+		t.Fatalf("storeFor(\"\") = %v, want nil", got)
 	}
 }

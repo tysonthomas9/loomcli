@@ -84,26 +84,17 @@ func (s *stubPool) Stats() daemon.PoolStats {
 }
 func (s *stubPool) Close() error { return nil }
 
-// newTestSessionStore creates a sessions.Store rooted in a temporary directory.
-func newTestSessionStore(t *testing.T) *sessions.Store {
-	t.Helper()
-	dir := t.TempDir()
-	store, err := sessions.NewStore(dir)
-	if err != nil {
-		t.Fatalf("NewStore: %v", err)
-	}
-	return store
-}
-
-// newTestSessionStoreWithDir creates a sessions.Store and returns the base dir (for configByIDFn).
+// newTestSessionStoreWithDir redirects HOME at a tmpdir and returns a Store
+// rooted at ~/.loom/sessions/test-ws/, plus the tmpdir for configByIDFn.
 func newTestSessionStoreWithDir(t *testing.T) (*sessions.Store, string) {
 	t.Helper()
-	dir := t.TempDir()
-	store, err := sessions.NewStore(dir)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	store, err := sessions.NewStoreForWorkspace("test-ws")
 	if err != nil {
-		t.Fatalf("NewStore: %v", err)
+		t.Fatalf("NewStoreForWorkspace: %v", err)
 	}
-	return store, dir
+	return store, home
 }
 
 // createTestSession creates a session via the store and finalizes it.

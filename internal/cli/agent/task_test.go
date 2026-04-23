@@ -73,6 +73,11 @@ func TestRunTask_SingleTask_Success(t *testing.T) {
 	os.Chdir(tmpDir)
 	t.Cleanup(func() { os.Chdir(origDir) })
 
+	// Central session store requires a resolvable workspace ID; seed via env
+	// and point HOME at a tmpdir so ~/.loom/sessions/<wsID>/ is isolated.
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("LOOM_WORKSPACE_ID", "00000000-0000-4000-8000-000000000ccc")
+
 	// Create .git directory
 	os.MkdirAll(filepath.Join(tmpDir, ".git"), 0755)
 

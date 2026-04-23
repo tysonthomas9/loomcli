@@ -74,7 +74,7 @@ func init() {
 }
 
 func runUsage(cmd *cobra.Command, _ []string) {
-	store, err := usage.NewStoreForWorkspace(workspacemgr.ResolveInitialWorkspaceID(), cli.GetBeadsDir())
+	store, err := workspacemgr.OpenInitialUsageStore()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)

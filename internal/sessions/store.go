@@ -35,16 +35,13 @@ func (s *Store) TranscriptPath(sessionID string) string {
 	return filepath.Join(s.dir, sessionID, "transcript.jsonl")
 }
 
-// NewStore creates a Store rooted at beadsDir/sessions/.
-// Kept for callers that pre-date the central ~/.loom layout (chiefly tests);
-// production writers should use NewStoreForWorkspace so writer and reader
-// resolve the same path from the workspace UUID.
+// NewStore creates a Store rooted at beadsDir/sessions/. Test-only helper.
 func NewStore(beadsDir string) (*Store, error) {
 	return NewStoreAt(filepath.Join(beadsDir, "sessions"))
 }
 
 // NewStoreAt creates a Store rooted at dir exactly — no "/sessions" suffix
-// is appended. Use with CentralSessionsDir output.
+// is appended. Test-only helper.
 func NewStoreAt(dir string) (*Store, error) {
 	if err := os.MkdirAll(dir, sessDirPerm); err != nil {
 		return nil, fmt.Errorf("create sessions dir: %w", err)
@@ -52,21 +49,14 @@ func NewStoreAt(dir string) (*Store, error) {
 	return &Store{dir: dir}, nil
 }
 
-// NewStoreForWorkspace returns the Store rooted at ~/.loom/sessions/<wsID>/,
-// migrating any legacy sessions from the given sources on first use. Multiple
-// legacySources let callers sweep both the workspace root and per-repo paths
-// (agent worktrees that wrote to their own repo.Path/sessions/ before
-// centralization) without needing to import workspace themselves.
-func NewStoreForWorkspace(wsID string, legacySources ...string) (*Store, error) {
+// NewStoreForWorkspace returns the Store rooted at ~/.loom/sessions/<wsID>/.
+func NewStoreForWorkspace(wsID string) (*Store, error) {
 	dir, err := workspace.CentralSessionsDir(wsID)
 	if err != nil {
 		return nil, err
 	}
 	if err := os.MkdirAll(dir, sessDirPerm); err != nil {
 		return nil, fmt.Errorf("create sessions dir: %w", err)
-	}
-	for _, src := range legacySources {
-		workspace.MigrateLegacySessionsAndUsage(wsID, src)
 	}
 	return &Store{dir: dir}, nil
 }

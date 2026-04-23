@@ -1,25 +1,33 @@
 package workspacemgr
 
 import (
+	"fmt"
 	"log"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
+	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
 // PurgeOldSessions sweeps orphaned sessions and purges sessions older than
 // 30 days across every configured workspace's ~/.loom/sessions/<wsID>/ store.
 // Intended to be called as a goroutine during server startup.
 func PurgeOldSessions() {
-	for _, wsID := range workspaceIDsForPurge() {
-		purgeWorkspaceSessions(wsID)
+	cfg, err := config.LoadConfig()
+	if err != nil || cfg == nil {
+		return
+	}
+	for _, ws := range cfg.Workspaces {
+		if ws.ID == "" {
+			continue
+		}
+		purgeWorkspaceSessions(ws.ID)
 	}
 }
 
 func purgeWorkspaceSessions(wsID string) {
-	sessStore, err := sessions.NewStoreForWorkspace(wsID, cli.GetBeadsDir())
+	sessStore, err := sessions.NewStoreForWorkspace(wsID)
 	if err != nil {
 		return
 	}
@@ -36,33 +44,38 @@ func purgeWorkspaceSessions(wsID string) {
 	}
 }
 
-// workspaceIDsForPurge returns every configured workspace UUID, plus an
-// empty-string sentinel so pre-migration (or fallback) buckets still get swept.
-func workspaceIDsForPurge() []string {
-	cfg, err := config.LoadConfig()
-	if err != nil || cfg == nil {
-		return []string{""}
-	}
-	ids := make([]string, 0, len(cfg.Workspaces)+1)
-	for _, ws := range cfg.Workspaces {
-		if ws.ID != "" {
-			ids = append(ids, ws.ID)
-		}
-	}
-	ids = append(ids, "")
-	return ids
-}
-
 // NewSessionStore returns a central session store for the default workspace.
-// Returns nil if the store cannot be created.
+// Returns nil if no default workspace UUID is configured or the store cannot
+// be created.
 func NewSessionStore() *sessions.Store {
-	wsID := ""
-	if cfg, err := config.LoadConfig(); err == nil && cfg != nil {
-		wsID = cfg.DefaultWorkspaceID
+	cfg, err := config.LoadConfig()
+	if err != nil || cfg == nil || cfg.DefaultWorkspaceID == "" {
+		return nil
 	}
-	s, err := sessions.NewStoreForWorkspace(wsID, cli.GetBeadsDir())
+	s, err := sessions.NewStoreForWorkspace(cfg.DefaultWorkspaceID)
 	if err != nil {
 		return nil
 	}
 	return s
+}
+
+// OpenInitialSessionStore resolves the current workspace's UUID and opens its
+// central session store, returning a single combined error for CLI call sites
+// that need to bubble it to the user.
+func OpenInitialSessionStore() (*sessions.Store, error) {
+	wsID, err := ResolveInitialWorkspaceID()
+	if err != nil {
+		return nil, fmt.Errorf("resolve workspace ID: %w", err)
+	}
+	return sessions.NewStoreForWorkspace(wsID)
+}
+
+// OpenInitialUsageStore is the usage-store counterpart to
+// OpenInitialSessionStore.
+func OpenInitialUsageStore() (*usage.Store, error) {
+	wsID, err := ResolveInitialWorkspaceID()
+	if err != nil {
+		return nil, fmt.Errorf("resolve workspace ID: %w", err)
+	}
+	return usage.NewStoreForWorkspace(wsID)
 }

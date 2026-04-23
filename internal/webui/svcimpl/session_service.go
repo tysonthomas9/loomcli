@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
@@ -23,39 +24,49 @@ var _ service.SessionService = (*sessionServiceImpl)(nil)
 type sessionServiceImpl struct {
 	configByIDFn func(string) (*ops.WorkspaceData, error)
 	histStore    *sessionhistory.Store
+
+	storesMu sync.Mutex
+	stores   map[string]*sessions.Store
 }
 
 // NewSessionService creates a new SessionService implementation.
 func NewSessionService(configByIDFn func(string) (*ops.WorkspaceData, error), histStore *sessionhistory.Store) service.SessionService {
-	return &sessionServiceImpl{configByIDFn: configByIDFn, histStore: histStore}
+	return &sessionServiceImpl{
+		configByIDFn: configByIDFn,
+		histStore:    histStore,
+		stores:       make(map[string]*sessions.Store),
+	}
 }
 
-// storeForWorkspace returns the central session store for the workspace. A
-// single store is enough — writers now land under ~/.loom/sessions/<wsID>/
-// regardless of which repo the agent ran in, so the old per-repo fan-out is
-// unnecessary. wsData.Path is still passed as the legacy source so stray
-// sessions written before centralization get migrated on first access.
+// storeForWorkspace returns a cached central session store for the workspace.
+// First access per wsID does MkdirAll under ~/.loom/sessions/<wsID>/; the lock
+// is dropped across that syscall so unrelated workspaces don't serialize.
 func (s *sessionServiceImpl) storeForWorkspace(wsID string) (*sessions.Store, error) {
 	if s.configByIDFn == nil {
 		return nil, service.ErrUnavailable("session store not available")
 	}
-	wsData, err := s.configByIDFn(wsID)
-	if err != nil || wsData == nil {
+	if wsData, err := s.configByIDFn(wsID); err != nil || wsData == nil {
 		return nil, service.ErrNotFound("workspace not found")
 	}
-	// Sweep wsData.Path plus every repo.Path — some pre-centralization agent
-	// worktrees wrote sessions to their own repo root. Per-source sentinels
-	// make repeat calls cheap.
-	legacy := []string{wsData.Path}
-	for _, repo := range wsData.Repos {
-		if repo.Path != "" && repo.Path != wsData.Path {
-			legacy = append(legacy, repo.Path)
-		}
+
+	s.storesMu.Lock()
+	if store, ok := s.stores[wsID]; ok {
+		s.storesMu.Unlock()
+		return store, nil
 	}
-	store, err := sessions.NewStoreForWorkspace(wsID, legacy...)
+	s.storesMu.Unlock()
+
+	store, err := sessions.NewStoreForWorkspace(wsID)
 	if err != nil {
 		return nil, service.ErrInternal("session store unavailable", err)
 	}
+
+	s.storesMu.Lock()
+	defer s.storesMu.Unlock()
+	if existing, ok := s.stores[wsID]; ok {
+		return existing, nil
+	}
+	s.stores[wsID] = store
 	return store, nil
 }
 
