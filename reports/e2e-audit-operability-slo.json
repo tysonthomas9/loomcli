@@ -1,0 +1,543 @@
+{
+  "contract_file": "cross-area/operability-slo.md",
+  "validation_report": "reports/validation-operability-slo.json",
+  "audit_date": "2026-04-23T13:27:07Z",
+  "spec_files_searched": [],
+  "go_test_files_searched": [
+    "internal/webui/app/routes_test.go",
+    "internal/webui/app/contract_test.go",
+    "internal/webui/app/server_app_test.go",
+    "internal/webui/app/server_lifecycle_test.go",
+    "internal/webui/health_doctor_test.go",
+    "internal/cli/serve_e2e_test.go",
+    "internal/cli/daemon_e2e_test.go",
+    "internal/cli/logger_test.go",
+    "internal/cli/doctor_e2e_test.go",
+    "internal/cli/daemon/daemon_cmd_test.go",
+    "internal/cli/daemon/daemon_mutations_test.go",
+    "internal/cli/daemon/supervisor/drain_test.go",
+    "internal/cli/daemon/supervisor/lifecycle_test.go",
+    "internal/webui/terminal/pty_manager_test.go",
+    "internal/webui/server/dto/issue_mapper_test.go",
+    "internal/webui/server/dto/agent_response_test.go",
+    "internal/webui/server/realtime/hub_test.go",
+    "internal/webui/daemon/breaker_test.go",
+    "internal/notify/bus_test.go",
+    "internal/events/emitter_test.go",
+    "internal/circuitbreaker/breaker_test.go",
+    "internal/usage/usage_test.go",
+    "internal/usage/collector_test.go",
+    "internal/configlock/configlock_test.go",
+    "internal/atomicfile/atomicfile_test.go",
+    "internal/lockfile/lock_test.go"
+  ],
+  "summary": {
+    "total_passing": 46,
+    "covered": 33,
+    "partial": 8,
+    "uncovered": 5,
+    "coverage_pct": 71.7
+  },
+  "assertions": [
+    {
+      "id": "VAL-E2E-OPS-001",
+      "title": "/health returns 200 immediately after process start",
+      "coverage": "covered",
+      "spec_files": [],
+      "test_names": [
+        "TestE2E_ServeStartupAndHealthCheck",
+        "TestContractEnvelope_HealthEndpoints",
+        "TestSetupRoutes_HealthEndpoint_GETOnly"
+      ],
+      "notes": "TestE2E_ServeStartupAndHealthCheck launches a real `loom serve` subprocess and polls GET /health, verifying status 200 and the JSON envelope. TestContractEnvelope_HealthEndpoints asserts the response shape for both /health and /api/health. TestSetupRoutes_HealthEndpoint_GETOnly confirms GET-only registration."
+    },
+    {
+      "id": "VAL-E2E-OPS-002",
+      "title": "/api/health reports degraded while daemon pool not ready",
+      "coverage": "covered",
+      "spec_files": [],
+      "test_names": [
+        "TestHandleAPIHealth_NilPool",
+        "TestHealthStatus_DegradedSerialization",
+        "TestHealthStatus_PoolOmittedWhenNil"
+      ],
+      "notes": "TestHandleAPIHealth_NilPool exercises the degraded path when the daemon pool is nil (not ready) and asserts the JSON response. TestHealthStatus_DegradedSerialization verifies the degraded status shape including daemon.connected=false."
+    },
+    {
+      "id": "VAL-E2E-OPS-003",
+      "title": "/api/health transitions to ok once daemon is reachable",
+      "coverage": "covered",
+      "spec_files": [],
+      "test_names": [
+        "TestHandleAPIHealth_SuccessWithMockServer",
+        "TestHealthStatus_HealthySerialization"
+      ],
+      "notes": "TestHandleAPIHealth_SuccessWithMockServer simulates a reachable daemon via a mock server and verifies /api/health returns ok. TestHealthStatus_HealthySerialization confirms the healthy response shape."
+    },
+    {
+      "id": "VAL-E2E-OPS-004",
+      "title": "Readiness distinguishes from liveness",
+      "coverage": "partial",
+      "spec_files": [],
+      "test_names": [
+        "TestContractEnvelope_HealthEndpoints",
+        "TestHandleAPIHealth_NilPool",
+        "TestHandleAPIHealth_SuccessWithMockServer"
+      ],
+      "notes": "Separate tests cover /health (liveness) and /api/health (readiness) individually and confirm different shapes. No single test exercises a transition where the daemon disappears and reappears to prove dynamic distinction between the two probes."
+    },
+    {
+      "id": "VAL-E2E-OPS-006",
+      "title": "SIGTERM stops accepting new connections",
+      "coverage": "partial",
+      "spec_files": [],
+      "test_names": [
+        "TestE2E_ServeGracefulShutdown_SIGTERM",
+        "TestStartServer_ConcurrentRequests_DuringShutdown"
+      ],
+      "notes": "TestE2E_ServeGracefulShutdown_SIGTERM sends SIGTERM to a real serve process and verifies clean exit. TestStartServer_ConcurrentRequests_DuringShutdown verifies in-flight drain. Neither explicitly asserts that new connection attempts during shutdown are rejected (expected 503 or connection refused)."
+    },
+    {
+      "id": "VAL-E2E-OPS-007",
+      "title": "In-flight requests drain within shutdown timeout",
+      "coverage": "covered",
+      "spec_files": [],
+      "test_names": [
+        "TestStartServer_GracefulShutdown_CompletesWithinTimeout",
+        "TestStartServer_ConcurrentRequests_DuringShutdown"
+      ],
+      "notes": "TestStartServer_GracefulShutdown_CompletesWithinTimeout verifies the shutdown completes within the configured timeout. TestStartServer_ConcurrentRequests_DuringShutdown fires concurrent requests during shutdown and confirms they complete."
+    },
+    {
+      "id": "VAL-E2E-OPS-008",
+      "title": "SIGINT equivalent to SIGTERM",
+      "coverage": "covered",
+      "spec_files": [],
+      "test_names": [
+        "TestE2E_ServeGracefulShutdown_SIGINT"
+      ],
+      "notes": "TestE2E_ServeGracefulShutdown_SIGINT sends SIGINT to a real serve subprocess and asserts the same clean-exit behavior as SIGTERM (exit code 0 or -1 for signal)."
+    },
+    {
+      "id": "VAL-E2E-OPS-009",
+      "title": "Rate-limiter cleanup goroutine stops on shutdown",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "internal/webui/server/middleware/ratelimit.go has no test file. The fleet rate limiter test (internal/webui/fleet/ratelimit_test.go) covers a different Redis-based component and does not validate in-process middleware cleanup on shutdown. No goroutine-leak assertion exists for the rate limiter."
+    },
+    {
+      "id": "VAL-E2E-OPS-010",
+      "title": "Second SIGTERM forces exit",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "TestE2E_ServeGracefulShutdown_SIGTERM and TestE2E_ServeGracefulShutdown_SIGINT each send only one signal. No test sends a second SIGTERM after the first and asserts forced immediate exit."
+    },
+    {
+      "id": "VAL-E2E-OPS-011",
+      "title": "PID file created on daemon start",
+      "coverage": "covered",
+      "spec_files": [],
+      "test_names": [
+        "TestE2E_DaemonStartCreatesPIDFile",
+        "TestWritePIDFile_Success",
+        "TestWritePIDFile_Permissions"
+      ],
+      "notes": "TestE2E_DaemonStartCreatesPIDFile launches the real daemon and verifies the PID file appears on disk. Unit tests confirm atomic write and 0600 permissions."
+    },
+    {
+      "id": "VAL-E2E-OPS-012",
+      "title": "PID file removed on clean exit",
+      "coverage": "covered",
+      "spec_files": [],
+      "test_names": [
+        "TestE2E_DaemonSIGTERMCleanShutdown"
+      ],
+      "notes": "TestE2E_DaemonSIGTERMCleanShutdown sends SIGTERM to the daemon and verifies clean shutdown including PID file cleanup."
+    },
+    {
+      "id": "VAL-E2E-OPS-013",
+      "title": "Stale pidfile detected and cleaned on restart",
+      "coverage": "covered",
+      "spec_files": [],
+      "test_names": [
+        "TestIsLoomDaemonRunning_StalePIDFile",
+        "TestCheckPIDFile"
+      ],
+      "notes": "TestIsLoomDaemonRunning_StalePIDFile writes a PID file containing a dead PID and confirms the daemon detects it as stale. TestCheckPIDFile exercises the same path in the lockfile package."
+    },
+    {
+      "id": "VAL-E2E-OPS-014",
+      "title": "PID file locked (flock) prevents double-start",
+      "coverage": "covered",
+      "spec_files": [],
+      "test_names": [
+        "TestE2E_DaemonConcurrentStartBlocked",
+        "TestTryLockExclusive_AlreadyLocked",
+        "TestTryDaemonLock"
+      ],
+      "notes": "TestE2E_DaemonConcurrentStartBlocked starts a second daemon process while the first is running and asserts it is blocked. Unit tests validate the flock-based exclusion mechanism."
+    },
+    {
+      "id": "VAL-E2E-OPS-020",
+      "title": "Default log level is info",
+      "coverage": "partial",
+      "spec_files": [],
+      "test_names": [
+        "TestInitLogger_TextFormat",
+        "TestInitLogger_JSONFormat"
+      ],
+      "notes": "Logger initialization tests cover text/JSON format selection but do not explicitly assert the default log level is 'info'. No test captures the zero-configuration logger and inspects the effective level."
+    },
+    {
+      "id": "VAL-E2E-OPS-021",
+      "title": "Clean shutdown exits 0",
+      "coverage": "covered",
+      "spec_files": [],
+      "test_names": [
+        "TestE2E_ServeGracefulShutdown_SIGTERM",
+        "TestE2E_ServeGracefulShutdown_SIGINT"
+      ],
+      "notes": "Both E2E tests assert ExitCode == 0 (accepting -1 when the process is killed by the signal before returning an exit code, which is the standard Go os/exec convention for signal-terminated children)."
+    },
+    {
+      "id": "VAL-E2E-OPS-022",
+      "title": "Fatal startup error exits non-zero with documented code",
+      "coverage": "covered",
+      "spec_files": [],
+      "test_names": [
+        "TestE2E_ServePortConflict"
+      ],
+      "notes": "TestE2E_ServePortConflict binds the target port first, launches loom serve, and asserts ExitCode != 0 when startup fails due to port unavailable."
+    },
+    {
+      "id": "VAL-E2E-OPS-024",
+      "title": "CLI usage error exits 2",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No existing test invokes loom with an unknown flag or invalid subcommand and asserts exit code 2. The serve/doctor E2E tests all exercise valid flags."
+    },
+    {
+      "id": "VAL-E2E-OPS-025",
+      "title": "All API timestamps are UTC ISO8601 with Z",
+      "coverage": "partial",
+      "spec_files": [],
+      "test_names": [
+        "TestIssueFromEntity_Timestamps",
+        "TestAgentStatusResponse_TimestampsPreserved"
+      ],
+      "notes": "DTO tests verify timestamp fields are preserved and round-trip through JSON, but do not explicitly assert the serialized string ends with 'Z' or is parseable as RFC3339Nano UTC. The production code uses time.Time's default JSON format which does emit Z for UTC, but no test enforces this invariant for all response shapes."
+    },
+    {
+      "id": "VAL-E2E-OPS-026",
+      "title": "Log line timestamps are UTC",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No logger test captures output and asserts the timestamp field is in UTC. TestInitLogger_* tests assert format selection (text/json) and handler behavior, not timestamp timezone."
+    },
+    {
+      "id": "VAL-E2E-OPS-027",
+      "title": "bd-backed timestamps normalized to UTC",
+      "coverage": "partial",
+      "spec_files": [],
+      "test_names": [
+        "TestIssueFromEntity_Timestamps"
+      ],
+      "notes": "The mapper test uses time.UTC fixtures and verifies they round-trip, but does not feed a non-UTC zoned time and assert normalization to UTC in the API response. Any bd entity with a local-zone timestamp would pass through unchanged by the current test."
+    },
+    {
+      "id": "VAL-E2E-OPS-029",
+      "title": "Deprecated endpoints carry deprecated: true",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test asserts a 'deprecated' boolean in any API response header or body. No OpenAPI contract test enforces this flag."
+    },
+    {
+      "id": "VAL-E2E-OPS-030",
+      "title": "Server advertises version in /api/health or build info",
+      "coverage": "partial",
+      "spec_files": [],
+      "test_names": [
+        "TestHandleAPIHealth_SuccessWithMockServer",
+        "TestContractEnvelope_HealthEndpoints"
+      ],
+      "notes": "Health tests verify the envelope shape but do not assert the presence or format of a version/build string. Some tests touch version-adjacent fields without enforcing them as required."
+    },
+    {
+      "id": "VAL-E2E-OPS-037",
+      "title": "Stale lockfile recovered automatically",
+      "coverage": "covered",
+      "spec_files": [],
+      "test_names": [
+        "TestIsLoomDaemonRunning_StalePIDFile",
+        "TestCheckPIDFile",
+        "TestReadLockInfo"
+      ],
+      "notes": "Stale PID/lock detection tests verify the daemon recognizes and recovers from a stale lockfile written by a dead process."
+    },
+    {
+      "id": "VAL-E2E-OPS-038",
+      "title": "Atomic file write via temp+rename",
+      "coverage": "covered",
+      "spec_files": [],
+      "test_names": [
+        "TestWriteFile_Basic",
+        "TestWriteFile_ConcurrentWrites",
+        "TestWriteFile_NoOrphanTempFiles",
+        "TestWritePIDFile_AtomicWrite"
+      ],
+      "notes": "atomicfile package explicitly tests the temp+rename pattern and asserts no orphaned temp files remain after concurrent writes. PID file atomic write is verified separately."
+    },
+    {
+      "id": "VAL-E2E-OPS-039",
+      "title": "Lock directory auto-created",
+      "coverage": "covered",
+      "spec_files": [],
+      "test_names": [
+        "TestConfigLock_CreatesDirectory",
+        "TestWriteFile_NonExistentParentDir"
+      ],
+      "notes": "Both configlock and atomicfile packages create parent directories as needed and test this path explicitly."
+    },
+    {
+      "id": "VAL-E2E-OPS-040",
+      "title": "Lock file permissions 0600",
+      "coverage": "covered",
+      "spec_files": [],
+      "test_names": [
+        "TestWriteFile_Permissions_0600",
+        "TestWritePIDFile_Permissions"
+      ],
+      "notes": "Both atomicfile and PID file permission tests stat the resulting file and assert mode 0600."
+    },
+    {
+      "id": "VAL-E2E-OPS-041",
+      "title": "/api/health exposes breaker state",
+      "coverage": "covered",
+      "spec_files": [],
+      "test_names": [
+        "TestProtectedPool_BreakerState",
+        "TestHandleAPIHealth_SuccessWithMockServer"
+      ],
+      "notes": "TestProtectedPool_BreakerState verifies the breaker state is readable from the pool wrapper. TestHandleAPIHealth_SuccessWithMockServer exercises the health handler which includes the breaker state in its response."
+    },
+    {
+      "id": "VAL-E2E-OPS-043",
+      "title": "Open breaker fails fast (<50ms)",
+      "coverage": "covered",
+      "spec_files": [],
+      "test_names": [
+        "TestBreaker_OpenState_FailsFast",
+        "TestProtectedPool_FailsFast_WhenOpen"
+      ],
+      "notes": "Both circuitbreaker and protected pool tests assert that calls return immediately when the breaker is open, without invoking the wrapped operation."
+    },
+    {
+      "id": "VAL-E2E-OPS-046",
+      "title": "Token counts within +/-2% of provider invoice for Claude",
+      "coverage": "partial",
+      "spec_files": [],
+      "test_names": [
+        "TestEstimateCost_ClaudeDefaults",
+        "TestCollector_Finalize_CostEstimation"
+      ],
+      "notes": "Tests verify the cost-calculation formula and that the collector applies it on finalize, but no test compares token counts against a reference provider invoice. The +/-2% accuracy claim is an external calibration concern the unit tests cannot verify."
+    },
+    {
+      "id": "VAL-E2E-OPS-047",
+      "title": "Dedup on messageID prevents double counting",
+      "coverage": "covered",
+      "spec_files": [],
+      "test_names": [
+        "TestCollector_Deduplication",
+        "TestCollector_ThreadSafety_DuplicateIDs"
+      ],
+      "notes": "Both tests feed duplicate messageIDs and assert the running totals count each message exactly once. Thread-safety variant exercises concurrent duplicate inserts."
+    },
+    {
+      "id": "VAL-E2E-OPS-048",
+      "title": "Cost calculation uses configurable per-MTok rates",
+      "coverage": "covered",
+      "spec_files": [],
+      "test_names": [
+        "TestResolvePricing_Defaults",
+        "TestResolvePricing_EnvOverrides",
+        "TestEstimateCost_CodexPricing"
+      ],
+      "notes": "Tests assert default rates, env-driven rate overrides, and backend-specific pricing all flow through EstimateCost correctly."
+    },
+    {
+      "id": "VAL-E2E-OPS-049",
+      "title": "Unknown backend falls back to default rates",
+      "coverage": "covered",
+      "spec_files": [],
+      "test_names": [
+        "TestResolvePricing_UnknownBackend"
+      ],
+      "notes": "Explicitly asserts that passing an unknown backend name to ResolvePricing returns the default pricing table."
+    },
+    {
+      "id": "VAL-E2E-OPS-050",
+      "title": "Cache-read and cache-write tokens reported separately",
+      "coverage": "covered",
+      "spec_files": [],
+      "test_names": [
+        "TestCollector_BasicAccumulation",
+        "TestSessionUsage_Fields"
+      ],
+      "notes": "Collector accumulation test verifies cache_creation_input_tokens and cache_read_input_tokens are tracked as independent fields. TestSessionUsage_Fields asserts the serialized shape preserves both."
+    },
+    {
+      "id": "VAL-E2E-OPS-051",
+      "title": "Concurrent Accumulate calls safe",
+      "coverage": "covered",
+      "spec_files": [],
+      "test_names": [
+        "TestCollector_ThreadSafety",
+        "TestCollector_ThreadSafety_DuplicateIDs"
+      ],
+      "notes": "Both tests launch many goroutines calling Accumulate in parallel and assert the collector totals are deterministic and race-free."
+    },
+    {
+      "id": "VAL-E2E-OPS-052",
+      "title": "Publish fan-out latency <50ms for N=100 subscribers",
+      "coverage": "partial",
+      "spec_files": [],
+      "test_names": [
+        "TestFanOutToMultipleSubscribers",
+        "TestFanOutWorkspaceIsolation"
+      ],
+      "notes": "Fan-out is exercised with a small number of subscribers (~10) and functional correctness is verified, but no test scales to N=100 or measures wall-clock latency against a 50ms SLO."
+    },
+    {
+      "id": "VAL-E2E-OPS-053",
+      "title": "Workspace-scoped subscribers receive only their workspace events",
+      "coverage": "covered",
+      "spec_files": [],
+      "test_names": [
+        "TestWorkspaceScopedReceivesMatching",
+        "TestWorkspaceScopedRejectsNonMatching",
+        "TestFanOutWorkspaceIsolation",
+        "TestHub_WorkspaceFilter"
+      ],
+      "notes": "Multiple tests in the bus and SSE hub assert workspace isolation from both positive (match) and negative (reject) sides."
+    },
+    {
+      "id": "VAL-E2E-OPS-054",
+      "title": "Topic-prefix match works",
+      "coverage": "covered",
+      "spec_files": [],
+      "test_names": [
+        "TestTopicPrefixMatch",
+        "TestTopicNoFalsePrefix",
+        "TestTopicWrongPrefix",
+        "TestTopicExactMatch",
+        "TestSubTopicExactNotParent"
+      ],
+      "notes": "Extensive positive and negative matching tests cover exact, prefix, false-prefix, and sub-topic boundary cases."
+    },
+    {
+      "id": "VAL-E2E-OPS-055",
+      "title": "Slow subscriber does not block publisher",
+      "coverage": "covered",
+      "spec_files": [],
+      "test_names": [
+        "TestBackpressureDropsEvent",
+        "TestBackpressureDoesNotAffectOthers"
+      ],
+      "notes": "Tests create a stalled subscriber and assert the publisher drops events to it rather than blocking; a concurrent fast subscriber continues receiving events unimpeded."
+    },
+    {
+      "id": "VAL-E2E-OPS-056",
+      "title": "Dropped-event counter exposed via TotalDropped",
+      "coverage": "covered",
+      "spec_files": [],
+      "test_names": [
+        "TestTotalDropped"
+      ],
+      "notes": "Explicitly asserts the bus-level TotalDropped counter reflects the number of events dropped due to backpressure."
+    },
+    {
+      "id": "VAL-E2E-OPS-057",
+      "title": "Subscribe after Close returns nil",
+      "coverage": "covered",
+      "spec_files": [],
+      "test_names": [
+        "TestBusCloseSubscribeReturnsNil"
+      ],
+      "notes": "Closes the bus and then calls Subscribe, asserting the returned subscription is nil."
+    },
+    {
+      "id": "VAL-E2E-OPS-058",
+      "title": "Publish after Close is no-op",
+      "coverage": "covered",
+      "spec_files": [],
+      "test_names": [
+        "TestBusClosePublishIsNoop"
+      ],
+      "notes": "Closes the bus and then calls Publish, asserting no panic and no delivery."
+    },
+    {
+      "id": "VAL-E2E-OPS-059",
+      "title": "Close idempotent",
+      "coverage": "covered",
+      "spec_files": [],
+      "test_names": [
+        "TestBusDoubleCloseNoPanic"
+      ],
+      "notes": "Calls Close twice in sequence and asserts neither call panics."
+    },
+    {
+      "id": "VAL-E2E-OPS-060",
+      "title": "Subscription.Close idempotent and non-blocking",
+      "coverage": "covered",
+      "spec_files": [],
+      "test_names": [
+        "TestSubscriptionDoubleCloseNoPanic",
+        "TestSubscriptionCloseClosesChannel",
+        "TestSubscriptionCloseStopsDelivery"
+      ],
+      "notes": "Double-close, channel closure semantics, and delivery-stop-after-close are all tested independently."
+    },
+    {
+      "id": "VAL-E2E-OPS-061",
+      "title": "Timestamp auto-set if zero",
+      "coverage": "covered",
+      "spec_files": [],
+      "test_names": [
+        "TestPublishAutoSetsTimestamp",
+        "TestPublishPreservesNonZeroTimestamp",
+        "TestBus_AutoSetsTimestamp",
+        "TestDaemon_PublishMutation_SetsTimestamp"
+      ],
+      "notes": "Tests at the bus, emitter, and daemon mutation layers all verify: zero timestamps are auto-set on Publish, and non-zero timestamps are preserved."
+    },
+    {
+      "id": "VAL-E2E-OPS-062",
+      "title": "NopPublisher discards events silently",
+      "coverage": "covered",
+      "spec_files": [],
+      "test_names": [
+        "TestNopPublisherDoesNotPanic",
+        "TestNopBus_DiscardsSilently",
+        "TestDaemon_PublishMutation_NopPublisher"
+      ],
+      "notes": "Nop behavior is tested at the bus, emitter, and daemon mutation layers. All assert publish+close do not panic and no subscribers receive events."
+    },
+    {
+      "id": "VAL-E2E-OPS-063",
+      "title": "Bus respects min buffer size of 1",
+      "coverage": "covered",
+      "spec_files": [],
+      "test_names": [
+        "TestWithBufferSizeZeroClamped",
+        "TestWithBufferSizeNegativeClamped"
+      ],
+      "notes": "Both zero and negative buffer-size options are tested and asserted to clamp up to 1."
+    }
+  ]
+}
