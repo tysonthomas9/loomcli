@@ -45,6 +45,9 @@ func HandleGetAgentLog(svc service.AgentService) http.HandlerFunc {
 		if linesParam := r.URL.Query().Get("lines"); linesParam != "" {
 			if n, err := strconv.Atoi(linesParam); err == nil && n > 0 {
 				lines = n
+				if lines > logReadMaxLines {
+					lines = logReadMaxLines
+				}
 			}
 		}
 

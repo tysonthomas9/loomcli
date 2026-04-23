@@ -1247,6 +1247,55 @@ func TestHandleGetAgentLog_LinesParam(t *testing.T) {
 	}
 }
 
+// TestHandleGetAgentLog_LinesParamClamped verifies that the handler clamps
+// the ?lines query parameter to logReadMaxLines before forwarding to the
+// service layer (defense-in-depth at the HTTP boundary).
+func TestHandleGetAgentLog_LinesParamClamped(t *testing.T) {
+	cases := []struct {
+		name       string
+		linesParam string
+		wantLines  int
+	}{
+		{"exceeds max is clamped", "20000", logReadMaxLines},
+		{"far above max is clamped", "1000000", logReadMaxLines},
+		{"exactly max is preserved", "10000", logReadMaxLines},
+		{"just below max is preserved", "9999", 9999},
+		{"default when omitted", "", logReadDefaultLines},
+		{"negative ignored, default used", "-5", logReadDefaultLines},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var capturedLines int
+			svc := &mockAgentService{
+				getLogFunc: func(_ context.Context, _, _ string, lines int, _ int64) (*AgentLogResult, error) {
+					capturedLines = lines
+					return &AgentLogResult{Lines: []string{}, LineCount: 0, StartLine: 1}, nil
+				},
+			}
+			handler := handleGetAgentLog(svc)
+			mux := http.NewServeMux()
+			mux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/logs", handler)
+
+			url := "/api/workspaces/test-ws/agents/agent1/logs"
+			if tc.linesParam != "" {
+				url += "?lines=" + tc.linesParam
+			}
+			req := httptest.NewRequest(http.MethodGet, url, nil)
+			req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
+			rr := httptest.NewRecorder()
+			mux.ServeHTTP(rr, req)
+
+			if rr.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200", rr.Code)
+			}
+			if capturedLines != tc.wantLines {
+				t.Errorf("service received lines = %d, want %d", capturedLines, tc.wantLines)
+			}
+		})
+	}
+}
+
 // TestHandleListTaskPhases_Success tests the full success path for listing task phases.
 func TestHandleListTaskPhases_Success(t *testing.T) {
 	tmpHome, err := filepath.EvalSymlinks(t.TempDir())
