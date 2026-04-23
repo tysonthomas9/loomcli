@@ -1,0 +1,500 @@
+{
+  "contract_file": "frontend/table.md",
+  "validation_report": "reports/validation-table.json",
+  "audit_date": "2026-04-23T00:00:00Z",
+  "spec_files_searched": [
+    "internal/webui/frontend/tests/e2e/table-sort.spec.ts",
+    "internal/webui/frontend/tests/e2e/journey-table-sort-select.spec.ts",
+    "internal/webui/frontend/tests/e2e/issue-detail-panel.spec.ts",
+    "internal/webui/frontend/tests/e2e/view-switcher.spec.ts",
+    "internal/webui/frontend/tests/e2e/filter.spec.ts",
+    "internal/webui/frontend/tests/e2e/search-filter-journey.spec.ts",
+    "internal/webui/frontend/tests/e2e/assembled-views.spec.ts",
+    "internal/webui/frontend/tests/e2e/server-push.spec.ts",
+    "internal/webui/frontend/tests/e2e/skeleton.spec.ts"
+  ],
+  "go_test_files_searched": [
+    "internal/webui/handlers/issues/issues_test.go"
+  ],
+  "summary": {
+    "total_passing": 59,
+    "covered": 15,
+    "partial": 6,
+    "uncovered": 38,
+    "coverage_pct": 25.4
+  },
+  "assertions": [
+    {
+      "id": "VAL-FE-TABLE-001",
+      "title": "All default columns rendered with correct headers",
+      "coverage": "partial",
+      "spec_files": ["table-sort.spec.ts"],
+      "test_names": ["all sortable columns show unsorted state", "sortable headers have role button"],
+      "notes": "table-sort.spec.ts verifies 5 sortable columns (id, priority, title, status, issue_type) render with aria-sort and role=button. It does not verify presence of SELECT/BLOCKED/ASSIGNEE/REPO/UPDATED columns which the validation evidence cites as part of the 10-column default set."
+    },
+    {
+      "id": "VAL-FE-TABLE-002",
+      "title": "Issue ID column renders correctly with issue.id",
+      "coverage": "covered",
+      "spec_files": ["table-sort.spec.ts", "journey-table-sort-select.spec.ts"],
+      "test_names": ["click ID header sorts ascending", "Sort by priority column"],
+      "notes": "Both specs use getRowIds() which reads td[data-column=\"id\"] cells and asserts exact issue ID values (aaa-001/mmm-003/zzz-002 and sort-001..sort-005). This confirms the ID column renders issue.id correctly."
+    },
+    {
+      "id": "VAL-FE-TABLE-003",
+      "title": "Title column renders and is searchable/highlightable",
+      "coverage": "partial",
+      "spec_files": ["table-sort.spec.ts"],
+      "test_names": ["click Title header sorts alphabetically ascending", "click again sorts alphabetically descending"],
+      "notes": "table-sort.spec.ts verifies title cells render expected strings via getRowTitles() reading td[data-column=\"title\"]. Search-filter highlighting behavior within the table is not exercised — filter.spec.ts and search-filter-journey.spec.ts do not assert highlight markup inside table cells."
+    },
+    {
+      "id": "VAL-FE-TABLE-004",
+      "title": "Status column displays status badge with correct styling",
+      "coverage": "partial",
+      "spec_files": ["table-sort.spec.ts"],
+      "test_names": ["click Status header sorts by status"],
+      "notes": "table-sort.spec.ts verifies status values sort correctly as strings (closed < in_progress < open) which implies the column renders. Badge styling (colored chip classes, formatted labels like 'In progress') is not asserted in the spec."
+    },
+    {
+      "id": "VAL-FE-TABLE-005",
+      "title": "Priority column renders P0-P4 badge with color coding",
+      "coverage": "partial",
+      "spec_files": ["journey-table-sort-select.spec.ts"],
+      "test_names": ["Sort by priority column"],
+      "notes": "journey-table-sort-select.spec.ts exercises all 5 priority levels (P0-P4) via sort ordering with 5 issues. It does not assert P0-P4 badge text rendering or color-coding CSS classes on priority cells."
+    },
+    {
+      "id": "VAL-FE-TABLE-006",
+      "title": "Type column renders issue type (Task, Bug, Feature, Epic)",
+      "coverage": "partial",
+      "spec_files": ["table-sort.spec.ts"],
+      "test_names": ["click Type header sorts by issue type"],
+      "notes": "table-sort.spec.ts sorts by issue_type and verifies ordering bug < chore < task via row IDs. It does not verify the rendered type label text (capitalized Task/Bug/Feature/Epic) or type-specific icons."
+    },
+    {
+      "id": "VAL-FE-TABLE-007",
+      "title": "Assignee column shows assignee name or dash for unassigned",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec reads td[data-column=\"assignee\"] values or tests the dash fallback for unassigned rows. Mock issues in table-sort/journey-table-sort-select include assignee fields but assignee rendering is never asserted."
+    },
+    {
+      "id": "VAL-FE-TABLE-008",
+      "title": "Updated column shows relative date",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec verifies td[data-column=\"updated_at\"] rendering or relative-date formatting (e.g., '2 hours ago')."
+    },
+    {
+      "id": "VAL-FE-TABLE-011",
+      "title": "Null/empty field renders placeholder (dash or empty)",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec mocks issues with null/empty fields and asserts placeholder rendering in table cells."
+    },
+    {
+      "id": "VAL-FE-TABLE-012",
+      "title": "Extremely long title truncates gracefully with ellipsis",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec uses long-string fixtures or asserts CSS truncation/ellipsis behavior on title cells."
+    },
+    {
+      "id": "VAL-FE-TABLE-014",
+      "title": "Column header click cycles sort: asc → desc → none",
+      "coverage": "covered",
+      "spec_files": ["table-sort.spec.ts"],
+      "test_names": ["click ID header sorts ascending", "second click sorts descending", "third click clears sort", "aria-sort attribute updates correctly"],
+      "notes": "table-sort.spec.ts explicitly tests all three stages of the sort cycle with aria-sort attribute and sort indicator (↕/▲/▼) assertions."
+    },
+    {
+      "id": "VAL-FE-TABLE-015",
+      "title": "Sort indicator visible only on currently sorted column",
+      "coverage": "covered",
+      "spec_files": ["table-sort.spec.ts", "journey-table-sort-select.spec.ts"],
+      "test_names": ["only one column shows sorted at a time", "Sort by status column resets priority header"],
+      "notes": "Both specs verify the issue-table__header-cell--sorted class moves to the newly-clicked column and is removed from the previously sorted one."
+    },
+    {
+      "id": "VAL-FE-TABLE-017",
+      "title": "Sorting null/empty values: sort to end (asc) or beginning (desc)",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec mocks null/empty sortable fields and asserts sort placement. All mock issues have fully populated fields."
+    },
+    {
+      "id": "VAL-FE-TABLE-018",
+      "title": "String sort is case-insensitive",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec uses mixed-case fixtures to verify case-insensitive sort. table-sort.spec.ts title fixtures ('Alpha bug', 'Middle task', 'Zebra feature') are all capitalized."
+    },
+    {
+      "id": "VAL-FE-TABLE-019",
+      "title": "Numeric sort on Priority works correctly",
+      "coverage": "covered",
+      "spec_files": ["table-sort.spec.ts", "journey-table-sort-select.spec.ts"],
+      "test_names": ["click Priority header sorts ascending (P0 first)", "click again sorts descending (P4 first)", "Sort by priority column"],
+      "notes": "Both specs verify numeric priority sort: table-sort uses P0/P2/P4 (3 rows) and journey uses all 5 levels P0→P4 ascending and descending. The order returned matches numeric (not lexicographic) comparison."
+    },
+    {
+      "id": "VAL-FE-TABLE-021",
+      "title": "Sort state persists after filter/search change",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "filter.spec.ts and search-filter-journey.spec.ts exercise table filtering but none assert that a previously applied sort remains applied after the filter changes. 'sort persists when switching columns' is about a different behavior (switching sort column, not filter)."
+    },
+    {
+      "id": "VAL-FE-TABLE-022",
+      "title": "Multi-sort not supported (single sort at a time)",
+      "coverage": "covered",
+      "spec_files": ["table-sort.spec.ts", "journey-table-sort-select.spec.ts"],
+      "test_names": ["only one column shows sorted at a time", "sort persists when switching columns", "Sort by status column resets priority header"],
+      "notes": "Specs confirm single-sort semantics: clicking a new header removes aria-sort and sorted-class from the previous header."
+    },
+    {
+      "id": "VAL-FE-TABLE-023",
+      "title": "Sorting is stable — rows with equal values maintain original order",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No fixture has duplicate sort-key values across rows to verify stability. All mock rows use distinct priorities/statuses/titles."
+    },
+    {
+      "id": "VAL-FE-TABLE-024",
+      "title": "Checkbox column visible when showCheckbox=true",
+      "coverage": "covered",
+      "spec_files": ["journey-table-sort-select.spec.ts"],
+      "test_names": ["Select issues via row checkboxes and verify bulk toolbar"],
+      "notes": "Uses page.getByRole('checkbox', { name: 'Select issue sort-001' }) confirming per-row checkbox column exists and is accessible."
+    },
+    {
+      "id": "VAL-FE-TABLE-025",
+      "title": "Individual row checkbox toggles row selection state",
+      "coverage": "covered",
+      "spec_files": ["journey-table-sort-select.spec.ts"],
+      "test_names": ["Select issues via row checkboxes and verify bulk toolbar"],
+      "notes": "Clicks checkboxes for sort-001 and sort-002 and asserts toBeChecked() on both. Selection count text updates accordingly."
+    },
+    {
+      "id": "VAL-FE-TABLE-028",
+      "title": "Clicking row (non-checkbox) does not toggle selection",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "issue-detail-panel.spec.ts Table View tests click on the row body and verify the panel opens, but do not assert that the row checkbox remains unchanged."
+    },
+    {
+      "id": "VAL-FE-TABLE-029",
+      "title": "Selection count display shows number of selected rows",
+      "coverage": "covered",
+      "spec_files": ["journey-table-sort-select.spec.ts"],
+      "test_names": ["Select issues via row checkboxes and verify bulk toolbar"],
+      "notes": "Asserts bulk-action-toolbar visibility and selection-count text '1 selected' then '2 selected' as checkboxes are toggled."
+    },
+    {
+      "id": "VAL-FE-TABLE-030",
+      "title": "Selection survives sort/filter changes",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec selects rows, applies a sort/filter, and re-verifies checkbox state. journey-table-sort-select interleaves sort tests before selection tests, not after."
+    },
+    {
+      "id": "VAL-FE-TABLE-031",
+      "title": "Deselect-all clears all selected checkboxes",
+      "coverage": "covered",
+      "spec_files": ["journey-table-sort-select.spec.ts"],
+      "test_names": ["Clear selection via toolbar button"],
+      "notes": "Clicks bulk-action-clear testid and asserts toolbar disappears and both sort-001 and sort-002 checkboxes become not.toBeChecked()."
+    },
+    {
+      "id": "VAL-FE-TABLE-033",
+      "title": "Clicking a row opens issue detail panel",
+      "coverage": "covered",
+      "spec_files": ["issue-detail-panel.spec.ts", "assembled-views.spec.ts"],
+      "test_names": ["IssueDetailPanel - Table View > clicking table row opens panel", "drag-drop status change persists / kanban to detail panel via table"],
+      "notes": "issue-detail-panel.spec.ts Table View describe block explicitly tests: navigate to table, click a tr row, assert panel data-state='open' and issue-id text. assembled-views.spec.ts also exercises table-row click → detail panel."
+    },
+    {
+      "id": "VAL-FE-TABLE-034",
+      "title": "Row click passes issue data to onRowClick callback",
+      "coverage": "covered",
+      "spec_files": ["issue-detail-panel.spec.ts"],
+      "test_names": ["IssueDetailPanel - Table View > clicking table row opens panel"],
+      "notes": "After clicking the table row for 'First Test Issue', the spec asserts page.getByTestId('issue-id') contains 'panel-test-1' — confirming the clicked row's issue object is propagated to the panel."
+    },
+    {
+      "id": "VAL-FE-TABLE-035",
+      "title": "Keyboard navigation: Enter or Space on a row triggers click",
+      "coverage": "partial",
+      "spec_files": ["table-sort.spec.ts"],
+      "test_names": ["Enter key on focused column header triggers sort", "Space key on focused column header triggers sort"],
+      "notes": "Enter/Space are tested against column HEADERS (for sort) but never against table ROWS to trigger onRowClick and open the detail panel."
+    },
+    {
+      "id": "VAL-FE-TABLE-036",
+      "title": "Row highlight shows visual feedback when selected",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec asserts a visual selected-state class (e.g., issue-table__row--selected) on checked rows."
+    },
+    {
+      "id": "VAL-FE-TABLE-038",
+      "title": "Small list (< 100 rows) renders all rows statically",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec distinguishes static vs virtualized rendering at the <100 threshold."
+    },
+    {
+      "id": "VAL-FE-TABLE-039",
+      "title": "Large list (> 100 rows) uses virtual scrolling",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec loads >100 rows or asserts virtualization (spacer rows, windowed DOM nodes)."
+    },
+    {
+      "id": "VAL-FE-TABLE-040",
+      "title": "Virtual scroll with 1000 issues maintains 60 fps",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "Requires specialized performance testing (frame timing, CDP tracing); not achievable with standard Playwright assertions."
+    },
+    {
+      "id": "VAL-FE-TABLE-041",
+      "title": "Virtualized row rendering uses spacer rows for scroll height",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec asserts presence of virtualizer spacer rows or measures scroll container height against expected total."
+    },
+    {
+      "id": "VAL-FE-TABLE-042",
+      "title": "Row height is consistent and estimated correctly",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec measures row bounding boxes or virtualizer estimateSize accuracy."
+    },
+    {
+      "id": "VAL-FE-TABLE-043",
+      "title": "Scrolling to bottom loads/shows all remaining rows",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec scrolls the table container and asserts final-row visibility."
+    },
+    {
+      "id": "VAL-FE-TABLE-044",
+      "title": "Overscan buffer ensures smooth scroll without visible gaps",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec checks overscan count or asserts absence of visible gaps while scrolling."
+    },
+    {
+      "id": "VAL-FE-TABLE-045",
+      "title": "New issue added via SSE appears as new row",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "server-push.spec.ts tests SSE lifecycle against kanban view, not table. No spec pushes an SSE 'issue_created' event while on /view=table and asserts a new tr appears."
+    },
+    {
+      "id": "VAL-FE-TABLE-046",
+      "title": "Existing issue updated via SSE updates row in place",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec emits 'issue_updated' SSE events while on the table view and verifies in-place cell updates."
+    },
+    {
+      "id": "VAL-FE-TABLE-047",
+      "title": "Issue deleted via SSE removes row",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec emits 'issue_deleted' SSE events while on the table view and verifies the row disappears."
+    },
+    {
+      "id": "VAL-FE-TABLE-048",
+      "title": "Live updates respect current sort order",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec applies a sort then pushes SSE updates and verifies new/updated rows are inserted in the correct sorted position."
+    },
+    {
+      "id": "VAL-FE-TABLE-049",
+      "title": "Live updates don't clear user selection",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec selects rows, pushes SSE updates, and asserts checkbox state preserved."
+    },
+    {
+      "id": "VAL-FE-TABLE-050",
+      "title": "SSE connection state displayed",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "server-push.spec.ts covers generic SSE connection indicators but not within the table view context. The contract asks about connection status shown alongside the table."
+    },
+    {
+      "id": "VAL-FE-TABLE-051",
+      "title": "SSE reconnect with exponential backoff",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "server-push.spec.ts exercises reconnect generically; no table-specific test asserts the table view recovers from SSE disconnects."
+    },
+    {
+      "id": "VAL-FE-TABLE-052",
+      "title": "SSE catch-up: events since last ID are replayed on reconnect",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "server-push.spec.ts may test generic Last-Event-ID replay, but no table-view-specific test asserts that catch-up events update the rendered table."
+    },
+    {
+      "id": "VAL-FE-TABLE-053",
+      "title": "Empty state message when no issues",
+      "coverage": "covered",
+      "spec_files": ["table-sort.spec.ts"],
+      "test_names": ["sorting with empty table displays empty message"],
+      "notes": "Mocks /api/ready with empty data array and asserts page.getByTestId('issue-table-empty') is visible. Also verifies sort still works without errors."
+    },
+    {
+      "id": "VAL-FE-TABLE-054",
+      "title": "Loading skeleton during initial data fetch",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "skeleton.spec.ts covers kanban skeleton, not table. No spec delays /api/ready and asserts a table-skeleton testid."
+    },
+    {
+      "id": "VAL-FE-TABLE-055",
+      "title": "Loading state persists until first data arrives",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec asserts loading state visibility is maintained until the first chunk of table data renders."
+    },
+    {
+      "id": "VAL-FE-TABLE-064",
+      "title": "Sortable headers have aria-label for screen readers",
+      "coverage": "covered",
+      "spec_files": ["table-sort.spec.ts"],
+      "test_names": ["aria-label describes sort state"],
+      "notes": "Asserts the aria-label includes '/currently sorted ascending/' and '/currently sorted descending/' after clicks, confirming screen-reader-friendly sort state."
+    },
+    {
+      "id": "VAL-FE-TABLE-066",
+      "title": "Checkbox labels identify the row",
+      "coverage": "covered",
+      "spec_files": ["journey-table-sort-select.spec.ts"],
+      "test_names": ["Select issues via row checkboxes and verify bulk toolbar"],
+      "notes": "Uses getByRole('checkbox', { name: 'Select issue sort-001' }) — the accessible name includes the issue ID, confirming labels identify their row."
+    },
+    {
+      "id": "VAL-FE-TABLE-067",
+      "title": "Sortable headers are keyboard accessible",
+      "coverage": "covered",
+      "spec_files": ["table-sort.spec.ts"],
+      "test_names": ["Enter key on focused column header triggers sort", "Space key on focused column header triggers sort", "Tab navigates between sortable headers", "sortable headers have role button"],
+      "notes": "Covers Enter/Space activation, Tab traversal between sortable headers, and role=button attribute on headers."
+    },
+    {
+      "id": "VAL-FE-TABLE-071",
+      "title": "Long assignee names truncate or wrap without breaking layout",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec uses long-string assignee fixtures or measures row layout/overflow."
+    },
+    {
+      "id": "VAL-FE-TABLE-072",
+      "title": "Issue with all fields null/empty renders without errors",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec mocks an all-null-fields issue and verifies no render errors or console warnings."
+    },
+    {
+      "id": "VAL-FE-TABLE-073",
+      "title": "Sorting with mixed data types (null and string)",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec mixes null and non-null sort keys to verify robust sort behavior."
+    },
+    {
+      "id": "VAL-FE-TABLE-074",
+      "title": "Search term with regex special characters",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec types regex metacharacters (., *, ?, [, ]) into the search box and asserts the table does not throw or misbehave."
+    },
+    {
+      "id": "VAL-FE-TABLE-076",
+      "title": "Rapidly toggling sort clicks does not cause race conditions",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec rapid-clicks a sort header and asserts final state is deterministic without intermediate visual glitches."
+    },
+    {
+      "id": "VAL-FE-TABLE-078",
+      "title": "High-frequency SSE updates don't cause flickering",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec bursts SSE events against the table view and measures re-render count or DOM churn."
+    },
+    {
+      "id": "VAL-FE-TABLE-079",
+      "title": "Issue created and immediately deleted via SSE",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec pushes a create-then-delete SSE sequence and asserts final row count/order in the table."
+    },
+    {
+      "id": "VAL-FE-TABLE-207",
+      "title": "Sort of 1000 rows completes in <200ms",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "Performance assertion; cannot be meaningfully verified via standard Playwright assertions. Needs specialized performance test (e.g., Vitest benchmark or Playwright CDP trace)."
+    },
+    {
+      "id": "VAL-FE-TABLE-208",
+      "title": "Sort is stable for equal keys",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No spec creates fixtures with duplicate sort-key values to observe stable ordering. Same gap as VAL-FE-TABLE-023 but from a performance/algorithmic angle."
+    },
+    {
+      "id": "VAL-FE-TABLE-209",
+      "title": "Large dataset sort does not block user input",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "Performance assertion; needs non-blocking-main-thread verification (e.g., interaction latency during sort) which standard Playwright tests cannot assert meaningfully."
+    }
+  ]
+}
