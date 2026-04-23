@@ -16,6 +16,16 @@ test.describe("12 close / reopen parity", () => {
     test("close shows reason, reopen clears it", async ({ tabs, fleetSpy }) => {
         const { id } = await findFleetIssueByTitle(SEED_FIXTURE.children[5]); // "Update README"
 
+        // routedFleetRequest evaluates fetch("/api/...") inside tabs.fleet's
+        // page context; a freshly-created BrowserContext page is on
+        // about:blank, so the relative URL has no origin to resolve
+        // against and the fetch throws "Failed to parse URL from …".
+        // Other mutation specs do this goto for the same reason (see 07,
+        // 08, 10, 11) — this one was missing it.
+        await tabs.fleet.goto(
+            `${PARITY_URLS.fleet}/ws/${PARITY_URLS.workspace}/issues/${id}`,
+        );
+
         await routedFleetRequest(tabs, fleetSpy, "close-issue", {
             path: `issues/${id}/close`,
             method: "POST",

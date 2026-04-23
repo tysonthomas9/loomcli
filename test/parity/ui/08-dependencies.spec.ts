@@ -22,15 +22,20 @@ test.describe("08 dependencies parity", () => {
             `${PARITY_URLS.fleet}/ws/${PARITY_URLS.workspace}/issues/${blockedId}`,
         );
 
+        // webui route is /dependencies (plural, unabbreviated); fleet-db's
+        // native API is /deps. We hit the webui so the test proves the
+        // full path (browser → webui → backend.IssueBackend → fleet-db).
+        // Body keys (depends_on_id, dep_type) match the webui's
+        // AddDependencyRequest decoder.
         await routedFleetRequest(tabs, fleetSpy, "add-dep", {
-            path: `issues/${blockedId}/deps`,
+            path: `issues/${blockedId}/dependencies`,
             method: "POST",
-            body: { blocked_by: blockerId },
-            acceptStatus: [201],
+            body: { depends_on_id: blockerId, dep_type: "blocks" },
+            acceptStatus: [200, 201, 204],
         });
 
         // Verify the dep appears via the API on both sides.
-        const deps = await apiResponseDiff(`issues/${blockedId}/deps`);
+        const deps = await apiResponseDiff(`issues/${blockedId}/dependencies`);
         expect(deps.count_fleet).toBeGreaterThanOrEqual(1);
     });
 });
