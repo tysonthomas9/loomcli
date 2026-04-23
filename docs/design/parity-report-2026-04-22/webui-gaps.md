@@ -68,21 +68,74 @@ loom-fleet doesn't auto-create a PARITY workspace in its webui
 even though fleet-db has one. Either needs an env-driven workspace
 mapping or an explicit bootstrap API call in seed.sh.
 
-### To finish (estimated 30-60 min)
+### To finish (true blocker: loom-fleet workspace bootstrap)
 
-1. Rewrite `seed.sh`:
-   - Create fleet-db workspace via `POST /api/v1/admin/workspaces` with
-     `X-Actor: parity-harness` header
-   - Discover loom-beads workspace ID via `GET /api/workspaces`
-   - For each issue: POST to both `loom-beads:/api/workspaces/{beads-ws}/issues`
-     and `loom-fleet:/api/workspaces/{fleet-ws}/issues` (once
-     loom-fleet's workspace is bootstrapped)
-2. Bootstrap loom-fleet workspace — either extend compose to POST the
-   workspace on startup, or add an env var `LOOM_AUTO_CREATE_WORKSPACE=PARITY`
-   that loom-fleet honors
-3. `make test-parity-ui` — the Playwright suite's preflight will run
-   all 9 sanity checks (see Step 0 table below) and the 14 specs will
-   execute against seeded data
+`seed.sh` was rewritten (commit `TBD`) to use the correct paths and
+headers:
+- ✓ Creates fleet-db workspace with `X-Actor: parity-harness` (works)
+- ✓ Discovers loom-beads workspace ID via `GET /api/workspaces` (works)
+- ✓ Seeds loom-beads via `/api/workspaces/{id}/issues` (returns 201)
+- ✗ Falls through on loom-fleet — cannot bootstrap a loom-webui workspace
+
+### Why loom-fleet bootstrap fails
+
+Loom's webui workspace is NOT the same as fleet-db's workspace. Loom's
+webui workspace expects:
+- A filesystem `path`
+- A `type` (`empty` | `clone` | `template`)
+- A `repos` array (even for `type: empty`, `repos` is required per
+  `internal/webui/service/workspace_validate.go:74+`)
+
+The parity-seed container has no filesystem path or repos; it's just
+a seeder. The loom webui's workspace model assumes multi-repo git
+workflows, not a bare "issues only" fixture.
+
+### Two ways forward
+
+**Option A — bootstrap at container start time.** Add a
+`LOOM_SEED_WORKSPACE=PARITY` env var that `loom serve` honors on
+startup by calling its own internal workspace-create with synthesized
+repos pointing at, say, `/workspace`. Requires a small loom-webui
+feature: auto-create a minimal workspace on first boot when the env
+var is set. Estimated 1-2 hours.
+
+**Option B — seed fleet-db directly; don't go through loom-fleet.**
+`seed.sh` could POST directly to fleet-db (`${FLEET_URL}/api/v1/PARITY/issues`)
+with the `X-Actor` header, skipping loom-fleet entirely. Then
+Playwright tests would observe loom-fleet's webui reading from
+fleet-db without any pre-seeded loom workspace — but this assumes
+loom-fleet can render a page when its webui has no workspaces,
+which it currently can't (the webui defaults to rendering the
+active workspace).
+
+**Recommendation:** Option A. File as a loomcli ticket; the auto-
+bootstrap feature is useful beyond parity testing (ephemeral demo
+stacks, CI containers).
+
+### Commands to reproduce the blocker
+
+```bash
+# After stack up:
+curl -X POST http://localhost:8082/api/workspaces \
+    -H 'Content-Type: application/json' \
+    -d '{"name":"PARITY","path":"/workspace","type":"empty"}'
+# → {"error":"repos is required for empty workspace type","kind":"validation_error"}
+
+curl -X POST http://localhost:8082/api/workspaces \
+    -H 'Content-Type: application/json' \
+    -d '{"name":"PARITY","path":"/workspace","type":"empty","repos":[]}'
+# → (probably still rejects; needs at least one repo)
+```
+
+### Until it's fixed
+
+- The **Playwright suite** (implemented at `test/parity/ui/`) will run
+  its preflight. Most checks will pass (backends responsive, env vars
+  correct) but any check that requires data seeded into loom-fleet's
+  webui will fail with "no workspaces" and flag that explicitly.
+- The **backend-level parity** (fleet-db's own harness at 60 unapproved
+  diffs, + loomcli's paritytest at 5 diffs on 4 fixtures) remains fully
+  functional and is the primary evidence of parity.
 
 > **Note on automation (2026-04-22):** the UI Parity Test Suite is now
 > implemented at `test/parity/ui/` (Playwright). Every time it runs, its
