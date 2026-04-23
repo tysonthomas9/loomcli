@@ -605,22 +605,69 @@ func (b *FleetBackend) ListComments(ctx context.Context, id string) ([]backend.C
 }
 
 func (b *FleetBackend) AddComment(ctx context.Context, params backend.CommentAddParams) (*backend.CommentData, error) {
+	// Request body: fleet-db names the content field "body". Earlier
+	// drafts of this client sent "text" (beads' dialect); fleet-db's
+	// strict JSON validation (disallowUnknownFields) rejected it with
+	// 400 "unknown field text". Response body: fleet-db returns a
+	// "body" field + string ID; loom's canonical types.Comment has
+	// "text" + int64 ID. Unmarshal into a local struct that mirrors
+	// fleet-db's wire shape, then project to types.Comment.
 	type commentReq struct {
-		Text string `json:"text"`
+		Body string `json:"body"`
 	}
-	resp, err := b.exec(ctx, "AddComment", "POST", "/issues/"+url.PathEscape(params.IssueID)+"/comments", commentReq{Text: params.Text})
+	resp, err := b.exec(ctx, "AddComment", "POST", "/issues/"+url.PathEscape(params.IssueID)+"/comments", commentReq{Body: params.Text})
 	if err != nil {
 		return nil, err
 	}
 	if !hasData(resp) {
 		return nil, backend.ErrInternal("AddComment", "empty response from server", nil)
 	}
-	var comment types.Comment
-	if err := json.Unmarshal(resp.Data, &comment); err != nil {
+	var wire fleetCommentWire
+	if err := json.Unmarshal(resp.Data, &wire); err != nil {
 		return nil, backend.ErrInternal("AddComment", "unmarshal response", err)
 	}
+	comment := wire.toTypesComment()
 	result := commentToData(&comment)
 	return &result, nil
+}
+
+// fleetCommentWire mirrors fleet-db's comment response shape so the
+// unmarshal path doesn't collide with types.Comment's beads-dialect
+// field tags. Fleet-db can emit ID as either string (per-issue sequence
+// like "2") or number (legacy envelope wrappers); json.RawMessage
+// tolerates both and the toTypesComment projection normalizes to int64.
+// Field rename: body → Text.
+type fleetCommentWire struct {
+	ID        json.RawMessage `json:"id"`
+	IssueID   string          `json:"issue_id"`
+	Author    string          `json:"author"`
+	Body      string          `json:"body"`
+	Text      string          `json:"text,omitempty"` // legacy alias; some envelopes still emit "text"
+	CreatedAt time.Time       `json:"created_at"`
+}
+
+// toTypesComment projects the fleet-db wire shape back into loom's
+// canonical types.Comment so downstream helpers (commentToData, service
+// handlers, FE JSON) don't have to know about the dialect gap.
+func (w fleetCommentWire) toTypesComment() types.Comment {
+	var id int64
+	if len(w.ID) > 0 {
+		raw := strings.Trim(strings.TrimSpace(string(w.ID)), `"`)
+		if n, err := strconv.ParseInt(raw, 10, 64); err == nil {
+			id = n
+		}
+	}
+	text := w.Body
+	if text == "" {
+		text = w.Text
+	}
+	return types.Comment{
+		ID:        id,
+		IssueID:   w.IssueID,
+		Author:    w.Author,
+		Text:      text,
+		CreatedAt: w.CreatedAt,
+	}
 }
 
 // --- Event operations ---
