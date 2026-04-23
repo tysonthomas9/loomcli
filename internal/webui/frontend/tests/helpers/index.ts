@@ -1,4 +1,5 @@
 export * from './api-mock';
+export * from './dnd';
 export * from './keyboard-setup';
 export * from './sse-mock';
 export * from './terminal-seed';

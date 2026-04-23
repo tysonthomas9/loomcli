@@ -1,4 +1,5 @@
 import { test, expect, Page } from "@playwright/test";
+import { dragWithPointer } from "../helpers";
 
 /**
  * Workspace fixture — must have a non-empty id, otherwise WorkspaceLayout
@@ -684,59 +685,11 @@ test.describe("groupBy Epic Swim Lanes", () => {
         '[data-droppable-id="in_progress"]',
       );
 
-      const sourceBox = await draggable.boundingBox();
-      const targetBox = await dropTarget.boundingBox();
+      await dragWithPointer(page, draggable, dropTarget);
 
-      if (!sourceBox || !targetBox)
-        throw new Error("Could not get bounding boxes");
-
-      const startX = sourceBox.x + sourceBox.width / 2;
-      const startY = sourceBox.y + sourceBox.height / 2;
-      const endX = targetBox.x + targetBox.width / 2;
-      const endY = targetBox.y + targetBox.height / 2;
-
-      await draggable.dispatchEvent("pointerdown", {
-        clientX: startX,
-        clientY: startY,
-        button: 0,
-        buttons: 1,
-        pointerId: 1,
-        pointerType: "mouse",
-        isPrimary: true,
-      });
-      await page.waitForTimeout(50);
-
-      await page.dispatchEvent("body", "pointermove", {
-        clientX: startX + 10,
-        clientY: startY,
-        button: 0,
-        buttons: 1,
-        pointerId: 1,
-        pointerType: "mouse",
-        isPrimary: true,
-      });
-      await page.waitForTimeout(50);
-
-      await page.dispatchEvent("body", "pointermove", {
-        clientX: endX,
-        clientY: endY,
-        button: 0,
-        buttons: 1,
-        pointerId: 1,
-        pointerType: "mouse",
-        isPrimary: true,
-      });
-      await page.waitForTimeout(50);
-
-      await page.dispatchEvent("body", "pointerup", {
-        clientX: endX,
-        clientY: endY,
-        button: 0,
-        buttons: 0,
-        pointerId: 1,
-        pointerType: "mouse",
-        isPrimary: true,
-      });
+      // open -> in_progress triggers AssigneePrompt; Skip preserves
+      // the { status: "in_progress" } PATCH body the test asserts.
+      await page.getByTestId("assignee-skip-button").click();
 
       await page.waitForResponse(
         (res) =>
@@ -807,59 +760,11 @@ test.describe("groupBy Epic Swim Lanes", () => {
         '[data-droppable-id="in_progress"]',
       );
 
-      const sourceBox = await draggable.boundingBox();
-      const targetBox = await dropTarget.boundingBox();
+      await dragWithPointer(page, draggable, dropTarget);
 
-      if (!sourceBox || !targetBox)
-        throw new Error("Could not get bounding boxes");
-
-      const startX = sourceBox.x + sourceBox.width / 2;
-      const startY = sourceBox.y + sourceBox.height / 2;
-      const endX = targetBox.x + targetBox.width / 2;
-      const endY = targetBox.y + targetBox.height / 2;
-
-      await draggable.dispatchEvent("pointerdown", {
-        clientX: startX,
-        clientY: startY,
-        button: 0,
-        buttons: 1,
-        pointerId: 1,
-        pointerType: "mouse",
-        isPrimary: true,
-      });
-      await page.waitForTimeout(50);
-
-      await page.dispatchEvent("body", "pointermove", {
-        clientX: startX + 10,
-        clientY: startY,
-        button: 0,
-        buttons: 1,
-        pointerId: 1,
-        pointerType: "mouse",
-        isPrimary: true,
-      });
-      await page.waitForTimeout(50);
-
-      await page.dispatchEvent("body", "pointermove", {
-        clientX: endX,
-        clientY: endY,
-        button: 0,
-        buttons: 1,
-        pointerId: 1,
-        pointerType: "mouse",
-        isPrimary: true,
-      });
-      await page.waitForTimeout(50);
-
-      await page.dispatchEvent("body", "pointerup", {
-        clientX: endX,
-        clientY: endY,
-        button: 0,
-        buttons: 0,
-        pointerId: 1,
-        pointerType: "mouse",
-        isPrimary: true,
-      });
+      // open -> in_progress triggers AssigneePrompt; Skip preserves
+      // the { status: "in_progress" } PATCH body the test asserts.
+      await page.getByTestId("assignee-skip-button").click();
 
       await page.waitForResponse(
         (res) =>

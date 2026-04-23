@@ -3,6 +3,7 @@
  */
 
 import { type Locator, type Page, expect } from '@playwright/test';
+import { dragWithPointer } from '../helpers';
 
 /**
  * Kanban column status values.
@@ -48,16 +49,15 @@ export class KanbanPage {
 
   /**
    * Drags an issue card from its current column to a target column.
-   * Uses Playwright's drag API.
+   * Uses the dragWithPointer helper (real CDP pointer events) so @dnd-kit
+   * PointerSensor activation fires reliably. See loomcli-7rth3.3.
    */
   async dragIssue(issueId: string, toStatus: KanbanColumn): Promise<void> {
     const card = this.getIssueCard(issueId);
     const targetColumn = this.getColumn(toStatus);
     const dropZone = targetColumn.locator('[data-droppable-id]').first();
-
-    // If no explicit drop zone, drag to the column itself
     const target = (await dropZone.isVisible().catch(() => false)) ? dropZone : targetColumn;
-    await card.dragTo(target);
+    await dragWithPointer(this.page, card, target);
   }
 
   /** Returns the empty state text for a column. */

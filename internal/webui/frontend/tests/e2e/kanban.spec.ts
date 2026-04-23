@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test"
+import { dragWithPointer } from "../helpers"
 
 /**
  * Mock issues for testing Kanban board rendering.
@@ -243,70 +244,7 @@ test.describe("KanbanBoard", () => {
     const draggable = cardToDrag.locator("..")
     const dropTarget = inProgressColumn.locator('[data-droppable-id="in_progress"]')
 
-    // Get positions for the drag operation
-    const sourceBox = await draggable.boundingBox()
-    const targetBox = await dropTarget.boundingBox()
-
-    if (!sourceBox || !targetBox) {
-      throw new Error("Could not get bounding boxes")
-    }
-
-    const startX = sourceBox.x + sourceBox.width / 2
-    const startY = sourceBox.y + sourceBox.height / 2
-    const endX = targetBox.x + targetBox.width / 2
-    const endY = targetBox.y + targetBox.height / 2
-
-    // Use Playwright's dispatchEvent to fire pointer events
-    // This creates events that go through the browser's event system
-    await draggable.dispatchEvent("pointerdown", {
-      clientX: startX,
-      clientY: startY,
-      button: 0,
-      buttons: 1,
-      pointerId: 1,
-      pointerType: "mouse",
-      isPrimary: true,
-    })
-
-    // Wait for drag to activate
-    await page.waitForTimeout(50)
-
-    // Move past activation threshold
-    await page.dispatchEvent("body", "pointermove", {
-      clientX: startX + 10,
-      clientY: startY,
-      button: 0,
-      buttons: 1,
-      pointerId: 1,
-      pointerType: "mouse",
-      isPrimary: true,
-    })
-
-    await page.waitForTimeout(50)
-
-    // Move to target
-    await page.dispatchEvent("body", "pointermove", {
-      clientX: endX,
-      clientY: endY,
-      button: 0,
-      buttons: 1,
-      pointerId: 1,
-      pointerType: "mouse",
-      isPrimary: true,
-    })
-
-    await page.waitForTimeout(50)
-
-    // Release at target
-    await page.dispatchEvent("body", "pointerup", {
-      clientX: endX,
-      clientY: endY,
-      button: 0,
-      buttons: 0,
-      pointerId: 1,
-      pointerType: "mouse",
-      isPrimary: true,
-    })
+    await dragWithPointer(page, draggable, dropTarget)
 
     // Wait for the PATCH API call to complete (avoids arbitrary timeout)
     await page.waitForResponse(
@@ -401,39 +339,7 @@ test.describe("KanbanBoard", () => {
     const dropTarget = inProgressColumn.locator('[data-droppable-id="in_progress"]')
     await expect(dropTarget).toBeVisible()
 
-    // Get bounding boxes for pointer event coordinates
-    const dragBox = await draggableWrapper.boundingBox()
-    const dropBox = await dropTarget.boundingBox()
-    if (!dragBox || !dropBox) throw new Error("Could not get element bounds")
-
-    const startX = dragBox.x + dragBox.width / 2
-    const startY = dragBox.y + dragBox.height / 2
-    const endX = dropBox.x + dropBox.width / 2
-    const endY = dropBox.y + dropBox.height / 2
-
-    // Use dispatchEvent to fire pointer events that @dnd-kit's PointerSensor handles
-    await draggableWrapper.dispatchEvent("pointerdown", {
-      bubbles: true,
-      cancelable: true,
-      pointerId: 1,
-      pointerType: "mouse",
-      isPrimary: true,
-      clientX: startX,
-      clientY: startY,
-      button: 0,
-      buttons: 1,
-    })
-
-    // Move beyond activation threshold (5px)
-    await page.mouse.move(startX + 10, startY)
-    await page.waitForTimeout(50) // Allow time for drag activation
-
-    // Move to drop target
-    await page.mouse.move(endX, endY, { steps: 5 })
-    await page.waitForTimeout(50)
-
-    // Fire pointerup on the page to complete the drag
-    await page.mouse.up()
+    await dragWithPointer(page, draggableWrapper, dropTarget)
 
     // Wait for PATCH to complete (will fail if drag didn't trigger API call)
     await patchPromise
@@ -517,28 +423,12 @@ test.describe("KanbanBoard", () => {
     const endX = dropBox.x + dropBox.width / 2
     const endY = dropBox.y + dropBox.height / 2
 
-    // Use dispatchEvent for all pointer events (consistent with @dnd-kit's PointerSensor)
-    // 1. Initiate drag with pointerdown
-    await draggableWrapper.dispatchEvent("pointerdown", {
-      clientX: startX,
-      clientY: startY,
-      button: 0,
-      buttons: 1,
-      pointerId: 1,
-      pointerType: "mouse",
-      isPrimary: true,
-    })
+    // 1. Initiate drag with real CDP pointer events (see dragWithPointer helper)
+    await draggableWrapper.hover()
+    await page.mouse.down()
 
     // 2. Move past activation threshold (>5px) to trigger drag activation
-    await page.dispatchEvent("body", "pointermove", {
-      clientX: startX + 10,
-      clientY: startY,
-      button: 0,
-      buttons: 1,
-      pointerId: 1,
-      pointerType: "mouse",
-      isPrimary: true,
-    })
+    await page.mouse.move(startX + 10, startY)
 
     // 3. Wait for drag to activate (deterministic) and verify visual feedback
     await expect(draggableWrapper).toHaveAttribute("data-dragging", "true", { timeout: 2000 })
@@ -570,15 +460,7 @@ test.describe("KanbanBoard", () => {
     expect(overlayShadow).not.toBe("none")
 
     // 5. Move to drop target column
-    await page.dispatchEvent("body", "pointermove", {
-      clientX: endX,
-      clientY: endY,
-      button: 0,
-      buttons: 1,
-      pointerId: 1,
-      pointerType: "mouse",
-      isPrimary: true,
-    })
+    await page.mouse.move(endX, endY, { steps: 10 })
 
     // 6. Wait for drop target to receive hover state (deterministic)
     await expect(dropTarget).toHaveAttribute("data-is-over", "true", { timeout: 2000 })
@@ -594,15 +476,7 @@ test.describe("KanbanBoard", () => {
     expect(hasDropOverClass).toBe(true)
 
     // 7. Complete drag with pointerup
-    await page.dispatchEvent("body", "pointerup", {
-      clientX: endX,
-      clientY: endY,
-      button: 0,
-      buttons: 0,
-      pointerId: 1,
-      pointerType: "mouse",
-      isPrimary: true,
-    })
+    await page.mouse.up()
 
     // Wait for the PATCH API call to complete
     await page.waitForResponse(
@@ -706,60 +580,7 @@ test.describe("KanbanBoard", () => {
     const dropTarget = doneColumn.locator('[data-droppable-id="done"]')
     await expect(dropTarget).toBeVisible()
 
-    // Get bounding boxes
-    const dragBox = await draggableWrapper.boundingBox()
-    const dropBox = await dropTarget.boundingBox()
-    if (!dragBox || !dropBox) throw new Error("Could not get element bounds")
-
-    const startX = dragBox.x + dragBox.width / 2
-    const startY = dragBox.y + dragBox.height / 2
-    const endX = dropBox.x + dropBox.width / 2
-    const endY = dropBox.y + dropBox.height / 2
-
-    // Perform drag operation
-    await draggableWrapper.dispatchEvent("pointerdown", {
-      clientX: startX,
-      clientY: startY,
-      button: 0,
-      buttons: 1,
-      pointerId: 1,
-      pointerType: "mouse",
-      isPrimary: true,
-    })
-
-    await page.dispatchEvent("body", "pointermove", {
-      clientX: startX + 10,
-      clientY: startY,
-      button: 0,
-      buttons: 1,
-      pointerId: 1,
-      pointerType: "mouse",
-      isPrimary: true,
-    })
-
-    await page.waitForTimeout(50)
-
-    await page.dispatchEvent("body", "pointermove", {
-      clientX: endX,
-      clientY: endY,
-      button: 0,
-      buttons: 1,
-      pointerId: 1,
-      pointerType: "mouse",
-      isPrimary: true,
-    })
-
-    await page.waitForTimeout(50)
-
-    await page.dispatchEvent("body", "pointerup", {
-      clientX: endX,
-      clientY: endY,
-      button: 0,
-      buttons: 0,
-      pointerId: 1,
-      pointerType: "mouse",
-      isPrimary: true,
-    })
+    await dragWithPointer(page, draggableWrapper, dropTarget)
 
     // Wait for PATCH API call
     await page.waitForResponse(
@@ -842,60 +663,7 @@ test.describe("KanbanBoard", () => {
     const dropTarget = reviewColumn.locator('[data-droppable-id="review"]')
     await expect(dropTarget).toBeVisible()
 
-    // Get bounding boxes
-    const dragBox = await draggableWrapper.boundingBox()
-    const dropBox = await dropTarget.boundingBox()
-    if (!dragBox || !dropBox) throw new Error("Could not get element bounds")
-
-    const startX = dragBox.x + dragBox.width / 2
-    const startY = dragBox.y + dragBox.height / 2
-    const endX = dropBox.x + dropBox.width / 2
-    const endY = dropBox.y + dropBox.height / 2
-
-    // Perform drag operation
-    await draggableWrapper.dispatchEvent("pointerdown", {
-      clientX: startX,
-      clientY: startY,
-      button: 0,
-      buttons: 1,
-      pointerId: 1,
-      pointerType: "mouse",
-      isPrimary: true,
-    })
-
-    await page.dispatchEvent("body", "pointermove", {
-      clientX: startX + 10,
-      clientY: startY,
-      button: 0,
-      buttons: 1,
-      pointerId: 1,
-      pointerType: "mouse",
-      isPrimary: true,
-    })
-
-    await page.waitForTimeout(50)
-
-    await page.dispatchEvent("body", "pointermove", {
-      clientX: endX,
-      clientY: endY,
-      button: 0,
-      buttons: 1,
-      pointerId: 1,
-      pointerType: "mouse",
-      isPrimary: true,
-    })
-
-    await page.waitForTimeout(50)
-
-    await page.dispatchEvent("body", "pointerup", {
-      clientX: endX,
-      clientY: endY,
-      button: 0,
-      buttons: 0,
-      pointerId: 1,
-      pointerType: "mouse",
-      isPrimary: true,
-    })
+    await dragWithPointer(page, draggableWrapper, dropTarget)
 
     // Wait for PATCH API call
     await page.waitForResponse(

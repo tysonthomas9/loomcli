@@ -1,4 +1,5 @@
 import { test, expect, Page } from "@playwright/test"
+import { dragWithPointer } from "../helpers"
 
 /**
  * Mock issues for testing swim lane wiring in App.tsx.
@@ -248,67 +249,12 @@ test.describe("Swim Lane Wiring in App.tsx", () => {
         .filter({ hasText: "Feature in Epic" })
       await expect(cardToDrag).toBeVisible()
 
-      // Perform drag operation (using the established pattern from kanban.spec.ts)
       const draggable = cardToDrag.locator("..")
       const dropTarget = inProgressColumn.locator(
         '[data-droppable-id="in_progress"]'
       )
 
-      const sourceBox = await draggable.boundingBox()
-      const targetBox = await dropTarget.boundingBox()
-
-      if (!sourceBox || !targetBox) throw new Error("Could not get bounding boxes")
-
-      const startX = sourceBox.x + sourceBox.width / 2
-      const startY = sourceBox.y + sourceBox.height / 2
-      const endX = targetBox.x + targetBox.width / 2
-      const endY = targetBox.y + targetBox.height / 2
-
-      await draggable.dispatchEvent("pointerdown", {
-        clientX: startX,
-        clientY: startY,
-        button: 0,
-        buttons: 1,
-        pointerId: 1,
-        pointerType: "mouse",
-        isPrimary: true,
-      })
-
-      await page.waitForTimeout(50)
-
-      await page.dispatchEvent("body", "pointermove", {
-        clientX: startX + 10,
-        clientY: startY,
-        button: 0,
-        buttons: 1,
-        pointerId: 1,
-        pointerType: "mouse",
-        isPrimary: true,
-      })
-
-      await page.waitForTimeout(50)
-
-      await page.dispatchEvent("body", "pointermove", {
-        clientX: endX,
-        clientY: endY,
-        button: 0,
-        buttons: 1,
-        pointerId: 1,
-        pointerType: "mouse",
-        isPrimary: true,
-      })
-
-      await page.waitForTimeout(50)
-
-      await page.dispatchEvent("body", "pointerup", {
-        clientX: endX,
-        clientY: endY,
-        button: 0,
-        buttons: 0,
-        pointerId: 1,
-        pointerType: "mouse",
-        isPrimary: true,
-      })
+      await dragWithPointer(page, draggable, dropTarget)
 
       // Wait for API call
       await page.waitForResponse(
