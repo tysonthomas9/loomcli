@@ -426,8 +426,21 @@ func (a *cliBeadsAdapter) Reopen(_ context.Context, id string, params backend.Re
 	return a.runMutation("Reopen", args...)
 }
 
-func (a *cliBeadsAdapter) Delete(_ context.Context, _ backend.DeleteParams) error {
-	return backend.ErrNotImplemented("Delete", "not supported via CLI adapter")
+func (a *cliBeadsAdapter) Delete(_ context.Context, params backend.DeleteParams) error {
+	if len(params.IDs) == 0 {
+		return backend.ErrValidation("Delete", "at least one id is required")
+	}
+	// bd delete is destructive and prompts for confirmation in interactive
+	// mode — --force skips the prompt, which is what any automated caller
+	// (including the parity test's resetBothBackends loop) needs. bd
+	// supports batch-delete by passing multiple IDs in one invocation.
+	args := append([]string{"delete"}, params.IDs...)
+	args = append(args, "--force")
+	result := a.runner.Run(a.dir, args...)
+	if result.Err != nil {
+		return a.classifyError("Delete", result)
+	}
+	return nil
 }
 
 // --- Dependency methods ---
