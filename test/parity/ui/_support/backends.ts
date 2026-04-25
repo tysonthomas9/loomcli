@@ -195,16 +195,30 @@ async function deleteAllIssues(baseUrl: string, workspace: string): Promise<void
         if (!r.ok) return;
         const j = await r.json();
         const issues: any[] = j?.data ?? [];
-        // DELETE in parallel, ignore missing.
-        await Promise.all(
-            issues.map((i) => {
-                const id = i.id ?? i.ID ?? i.issue_id;
-                if (!id) return Promise.resolve();
-                return fetch(`${baseUrl}/api/workspaces/${workspace}/issues/${id}`, {
-                    method: "DELETE",
-                }).catch(() => undefined);
-            }),
-        );
+
+        // Issue per-id DELETEs in capped batches. Parallel-everything
+        // hammered bd's SQLite WAL hard enough that ~30% of DELETEs
+        // failed silently (caught) under the prior `Promise.all(map)`
+        // pattern, leaving beads with a growing residue across the
+        // suite — which then blew the 90 s test budget on later
+        // beforeEach hooks (the next reset had to delete 30+ issues).
+        // Batches of 4 are roughly the sweet spot: enough concurrency
+        // to keep wall time short, low enough to keep the lock
+        // contention rate at zero in practice.
+        const batchSize = 4;
+        for (let i = 0; i < issues.length; i += batchSize) {
+            const slice = issues.slice(i, i + batchSize);
+            await Promise.all(
+                slice.map((it) => {
+                    const id = it.id ?? it.ID ?? it.issue_id;
+                    if (!id) return Promise.resolve();
+                    return fetch(
+                        `${baseUrl}/api/workspaces/${workspace}/issues/${id}`,
+                        { method: "DELETE" },
+                    ).catch(() => undefined);
+                }),
+            );
+        }
     } catch {
         // Backend may not support delete; surface later in assertions.
     }
