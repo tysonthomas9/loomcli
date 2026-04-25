@@ -401,6 +401,7 @@ func applyWorkspaceConfig(cfg *webui.ServerConfig) {
 			}
 			return daemonwire.LoadDaemonConfigRaw(resolved.WorkDir)
 		}
+		cfg.AgentStatusCollectFn = daemonwire.BuildAgentStatusCollectFn()
 	}
 }
 

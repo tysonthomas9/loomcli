@@ -2166,6 +2166,39 @@ paths:
         "503":
           description: Daemon unavailable
 
+  /api/workspaces/{ws}/agents/status:
+    get:
+      operationId: getWorkspaceAgentStatus
+      tags: [agent-status]
+      summary: Merged daemon+git agent status for a workspace
+      description: |
+        Returns one entry per agent in the workspace's daemon-agents.json,
+        enriched with monitor-format status strings, yield file data, IPC
+        socket health, and git sync counts (branch, ahead/behind, file changes).
+        Per-agent collection failures surface as a non-empty `error` field on
+        the entry; daemon-level failures return 503.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: Agent status list (may include per-agent errors)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    $ref: "#/components/schemas/WorkspaceAgentStatusResponse"
+        "400":
+          description: Missing workspace id
+        "503":
+          description: Daemon unavailable or not running
+        "500":
+          description: Internal error (corrupt state file)
+
   /api/workspaces/{ws}/agents/{name}/stop:
     post:
       operationId: stopAgent
@@ -4015,6 +4048,114 @@ components:
           type: string
         status:
           type: string
+
+    WorkspaceAgentStatusResponse:
+      type: object
+      description: Envelope for the workspace agent status endpoint
+      required:
+        - agents
+        - ipc_socket_active
+        - daemon_pid
+        - daemon_started_at
+        - workspace_name
+        - timestamp
+      properties:
+        agents:
+          type: array
+          items:
+            $ref: "#/components/schemas/AgentStatusEntry"
+        ipc_socket_active:
+          type: boolean
+        daemon_pid:
+          type: integer
+        daemon_started_at:
+          type: string
+          format: date-time
+        workspace_name:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+
+    AgentStatusEntry:
+      type: object
+      description: Merged daemon+git status for a single agent worktree
+      required:
+        - worktree
+        - worktree_path
+        - path
+        - workspace
+        - cross_repo
+        - pid
+        - status
+        - supervisor_status
+        - restart_count
+        - branch
+        - ahead
+        - behind
+        - changes
+        - yield_requested
+      properties:
+        worktree:
+          type: string
+        worktree_path:
+          type: string
+        path:
+          type: string
+          description: Alias for worktree_path (LoomAgentStatus adapter compatibility)
+        role:
+          type: string
+        repo:
+          type: string
+        workspace:
+          type: string
+        cross_repo:
+          type: boolean
+        pid:
+          type: integer
+        status:
+          type: string
+          description: Monitor-format status string consumed by parseLoomStatus
+        supervisor_status:
+          type: string
+          enum: [running, stopped, failed, starting]
+        restart_count:
+          type: integer
+        last_error_class:
+          type: string
+        backoff_until:
+          type: string
+          format: date-time
+          nullable: true
+        stop_reason:
+          type: string
+        task_id:
+          type: string
+        epic_id:
+          type: string
+        current_backend:
+          type: string
+        branch:
+          type: string
+        ahead:
+          type: integer
+        behind:
+          type: integer
+        changes:
+          type: integer
+        remote_branch:
+          type: string
+        yield_requested:
+          type: boolean
+        yield_reason:
+          type: string
+        yield_requested_at:
+          type: string
+          format: date-time
+          nullable: true
+        error:
+          type: string
+          description: Per-agent collection error (partial-failure envelope)
 
     # ── Session Schemas ─────────────────────────────────────────────────
     SessionResponse:

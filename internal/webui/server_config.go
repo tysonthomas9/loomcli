@@ -103,8 +103,14 @@ type ServerConfig struct {
 	// WorkspaceDaemonResolver resolves a workspace ID to its daemon paths
 	// (socket, state, config, workdir); nil = workspace-scoped daemon routes unavailable.
 	WorkspaceDaemonResolver func(wsID string) (*WorkspaceDaemonPaths, error)
-	Logger                  *slog.Logger // Structured logger (optional; nil falls back to slog.Default())
-	SentryDSN               string       // Sentry/GlitchTip DSN for error tracking (optional; empty disables)
+	// AgentStatusCollectFn enriches a single agent's worktree with git+lock data.
+	// Always returns a non-nil *AgentGitStatus; the Err field marks per-agent
+	// failures. Reuses monitor package's globalChangeDetector cache — no
+	// subprocess fan-out on warm cache. Nil = /api/workspaces/{ws}/agents/status
+	// endpoint unavailable.
+	AgentStatusCollectFn AgentStatusCollectFn
+	Logger               *slog.Logger // Structured logger (optional; nil falls back to slog.Default())
+	SentryDSN            string       // Sentry/GlitchTip DSN for error tracking (optional; empty disables)
 }
 
 // WorkspaceIDResolverFn resolves a workspace name to its stable UUID.

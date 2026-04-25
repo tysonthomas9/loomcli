@@ -8,6 +8,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/appinfra"
 	"github.com/tysonthomas9/loomcli/internal/webui/appstores"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlermux"
+	"github.com/tysonthomas9/loomcli/internal/webui/handlers/agentstatus"
 	"github.com/tysonthomas9/loomcli/internal/webui/modbuilder"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/svcimpl"
@@ -94,5 +95,17 @@ func (app *Server) buildInfraModules() {
 	if app.config.WsDaemonSupervisorFn != nil || app.config.WsDaemonConfigFn != nil {
 		app.wsModules = append(app.wsModules,
 			webui.NewDaemonModule(app.config.WsDaemonSupervisorFn, app.config.WsDaemonConfigFn))
+	}
+
+	if app.config.AgentStatusCollectFn != nil &&
+		app.config.WsDaemonSupervisorFn != nil &&
+		app.config.WorkspaceDaemonResolver != nil {
+		h := agentstatus.HandleAgentStatus(
+			app.config.WsDaemonSupervisorFn,
+			app.config.WorkspaceDaemonResolver,
+			app.config.WorkspaceConfigByIDFn,
+			app.config.AgentStatusCollectFn,
+		)
+		app.wsModules = append(app.wsModules, agentstatus.NewModule(h))
 	}
 }

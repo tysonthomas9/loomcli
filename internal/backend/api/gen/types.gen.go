@@ -14,6 +14,30 @@ const (
 	WorkerTokenScopes = "WorkerToken.Scopes"
 )
 
+// Defines values for AgentStatusEntrySupervisorStatus.
+const (
+	AgentStatusEntrySupervisorStatusFailed   AgentStatusEntrySupervisorStatus = "failed"
+	AgentStatusEntrySupervisorStatusRunning  AgentStatusEntrySupervisorStatus = "running"
+	AgentStatusEntrySupervisorStatusStarting AgentStatusEntrySupervisorStatus = "starting"
+	AgentStatusEntrySupervisorStatusStopped  AgentStatusEntrySupervisorStatus = "stopped"
+)
+
+// Valid indicates whether the value is a known member of the AgentStatusEntrySupervisorStatus enum.
+func (e AgentStatusEntrySupervisorStatus) Valid() bool {
+	switch e {
+	case AgentStatusEntrySupervisorStatusFailed:
+		return true
+	case AgentStatusEntrySupervisorStatusRunning:
+		return true
+	case AgentStatusEntrySupervisorStatusStarting:
+		return true
+	case AgentStatusEntrySupervisorStatusStopped:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AgentStatusResponseAgentState.
 const (
 	AgentStatusResponseAgentStateDead     AgentStatusResponseAgentState = "dead"
@@ -649,34 +673,34 @@ func (e TranscriptEntryType) Valid() bool {
 
 // Defines values for TreeNodeAgentState.
 const (
-	Dead     TreeNodeAgentState = "dead"
-	Done     TreeNodeAgentState = "done"
-	Idle     TreeNodeAgentState = "idle"
-	Running  TreeNodeAgentState = "running"
-	Spawning TreeNodeAgentState = "spawning"
-	Stopped  TreeNodeAgentState = "stopped"
-	Stuck    TreeNodeAgentState = "stuck"
-	Working  TreeNodeAgentState = "working"
+	TreeNodeAgentStateDead     TreeNodeAgentState = "dead"
+	TreeNodeAgentStateDone     TreeNodeAgentState = "done"
+	TreeNodeAgentStateIdle     TreeNodeAgentState = "idle"
+	TreeNodeAgentStateRunning  TreeNodeAgentState = "running"
+	TreeNodeAgentStateSpawning TreeNodeAgentState = "spawning"
+	TreeNodeAgentStateStopped  TreeNodeAgentState = "stopped"
+	TreeNodeAgentStateStuck    TreeNodeAgentState = "stuck"
+	TreeNodeAgentStateWorking  TreeNodeAgentState = "working"
 )
 
 // Valid indicates whether the value is a known member of the TreeNodeAgentState enum.
 func (e TreeNodeAgentState) Valid() bool {
 	switch e {
-	case Dead:
+	case TreeNodeAgentStateDead:
 		return true
-	case Done:
+	case TreeNodeAgentStateDone:
 		return true
-	case Idle:
+	case TreeNodeAgentStateIdle:
 		return true
-	case Running:
+	case TreeNodeAgentStateRunning:
 		return true
-	case Spawning:
+	case TreeNodeAgentStateSpawning:
 		return true
-	case Stopped:
+	case TreeNodeAgentStateStopped:
 		return true
-	case Stuck:
+	case TreeNodeAgentStateStuck:
 		return true
-	case Working:
+	case TreeNodeAgentStateWorking:
 		return true
 	default:
 		return false
@@ -933,6 +957,45 @@ type AgentControlEntry struct {
 	Role   string `json:"role"`
 	Status string `json:"status"`
 }
+
+// AgentStatusEntry Merged daemon+git status for a single agent worktree
+type AgentStatusEntry struct {
+	Ahead          int        `json:"ahead"`
+	BackoffUntil   *time.Time `json:"backoff_until,omitempty"`
+	Behind         int        `json:"behind"`
+	Branch         string     `json:"branch"`
+	Changes        int        `json:"changes"`
+	CrossRepo      bool       `json:"cross_repo"`
+	CurrentBackend *string    `json:"current_backend,omitempty"`
+	EpicId         *string    `json:"epic_id,omitempty"`
+
+	// Error Per-agent collection error (partial-failure envelope)
+	Error          *string `json:"error,omitempty"`
+	LastErrorClass *string `json:"last_error_class,omitempty"`
+
+	// Path Alias for worktree_path (LoomAgentStatus adapter compatibility)
+	Path         string  `json:"path"`
+	Pid          int     `json:"pid"`
+	RemoteBranch *string `json:"remote_branch,omitempty"`
+	Repo         *string `json:"repo,omitempty"`
+	RestartCount int     `json:"restart_count"`
+	Role         *string `json:"role,omitempty"`
+
+	// Status Monitor-format status string consumed by parseLoomStatus
+	Status           string                           `json:"status"`
+	StopReason       *string                          `json:"stop_reason,omitempty"`
+	SupervisorStatus AgentStatusEntrySupervisorStatus `json:"supervisor_status"`
+	TaskId           *string                          `json:"task_id,omitempty"`
+	Workspace        string                           `json:"workspace"`
+	Worktree         string                           `json:"worktree"`
+	WorktreePath     string                           `json:"worktree_path"`
+	YieldReason      *string                          `json:"yield_reason,omitempty"`
+	YieldRequested   bool                             `json:"yield_requested"`
+	YieldRequestedAt *time.Time                       `json:"yield_requested_at,omitempty"`
+}
+
+// AgentStatusEntrySupervisorStatus defines model for AgentStatusEntry.SupervisorStatus.
+type AgentStatusEntrySupervisorStatus string
 
 // AgentStatusResponse Agent entity from dto.AgentStatusResponse
 type AgentStatusResponse struct {
@@ -1867,6 +1930,16 @@ type WorkspaceAgentInfo struct {
 	Name       string   `json:"name"`
 	RepoGroups []string `json:"repo_groups"`
 	Repos      []string `json:"repos"`
+}
+
+// WorkspaceAgentStatusResponse Envelope for the workspace agent status endpoint
+type WorkspaceAgentStatusResponse struct {
+	Agents          []AgentStatusEntry `json:"agents"`
+	DaemonPid       int                `json:"daemon_pid"`
+	DaemonStartedAt time.Time          `json:"daemon_started_at"`
+	IpcSocketActive bool               `json:"ipc_socket_active"`
+	Timestamp       time.Time          `json:"timestamp"`
+	WorkspaceName   string             `json:"workspace_name"`
 }
 
 // WorkspaceBackendPatchRequest defines model for WorkspaceBackendPatchRequest.

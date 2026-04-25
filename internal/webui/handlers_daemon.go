@@ -59,6 +59,33 @@ type DaemonAgentEntry struct {
 	RemoteBranch   string    `json:"remote_branch,omitempty"`
 }
 
+// AgentStatusCollectInput is the per-agent input to AgentStatusCollectFn.
+type AgentStatusCollectInput struct {
+	WorktreePath  string // absolute path; required
+	AgentName     string // bare worktree name (for lock lookup + diagnostics)
+	Repo          string // workspace repo name (for per-repo default branch)
+	DefaultBranch string // integration branch for ahead/behind comparison
+}
+
+// AgentGitStatus carries enriched git + lock data returned by the collector.
+// Always non-nil from the callback; Err != nil signals a collection failure
+// that the handler maps to the per-entry "error" field.
+type AgentGitStatus struct {
+	Status  string
+	Branch  string
+	Ahead   int
+	Behind  int
+	Changes int
+	TaskID  string
+	Err     error
+}
+
+// AgentStatusCollectFn enriches a single agent worktree with git + lock data.
+// Implementations capture the monitor package's BuildSingleAgentStatusCollector
+// so per-package change-detector and commit caches are shared with the
+// background monitor collector.
+type AgentStatusCollectFn func(in AgentStatusCollectInput) *AgentGitStatus
+
 // AgentQueueEntry represents a single scored issue in the agent queue response.
 type AgentQueueEntry struct {
 	IssueID  string   `json:"issue_id"`

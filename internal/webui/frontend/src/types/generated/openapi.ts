@@ -1156,6 +1156,30 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/workspaces/{ws}/agents/status": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Merged daemon+git agent status for a workspace
+     * @description Returns one entry per agent in the workspace's daemon-agents.json,
+     *     enriched with monitor-format status strings, yield file data, IPC
+     *     socket health, and git sync counts (branch, ahead/behind, file changes).
+     *     Per-agent collection failures surface as a non-empty `error` field on
+     *     the entry; daemon-level failures return 503.
+     */
+    get: operations["getWorkspaceAgentStatus"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/workspaces/{ws}/agents/{name}/stop": {
     parameters: {
       query?: never;
@@ -2303,6 +2327,52 @@ export interface components {
       name: string;
       role: string;
       status: string;
+    };
+    /** @description Envelope for the workspace agent status endpoint */
+    WorkspaceAgentStatusResponse: {
+      agents: components["schemas"]["AgentStatusEntry"][];
+      ipc_socket_active: boolean;
+      daemon_pid: number;
+      /** Format: date-time */
+      daemon_started_at: string;
+      workspace_name: string;
+      /** Format: date-time */
+      timestamp: string;
+    };
+    /** @description Merged daemon+git status for a single agent worktree */
+    AgentStatusEntry: {
+      worktree: string;
+      worktree_path: string;
+      /** @description Alias for worktree_path (LoomAgentStatus adapter compatibility) */
+      path: string;
+      role?: string;
+      repo?: string;
+      workspace: string;
+      cross_repo: boolean;
+      pid: number;
+      /** @description Monitor-format status string consumed by parseLoomStatus */
+      status: string;
+      /** @enum {string} */
+      supervisor_status: "running" | "stopped" | "failed" | "starting";
+      restart_count: number;
+      last_error_class?: string;
+      /** Format: date-time */
+      backoff_until?: string | null;
+      stop_reason?: string;
+      task_id?: string;
+      epic_id?: string;
+      current_backend?: string;
+      branch: string;
+      ahead: number;
+      behind: number;
+      changes: number;
+      remote_branch?: string;
+      yield_requested: boolean;
+      yield_reason?: string;
+      /** Format: date-time */
+      yield_requested_at?: string | null;
+      /** @description Per-agent collection error (partial-failure envelope) */
+      error?: string;
     };
     /** @description Session audit record from dto.SessionResponse */
     SessionResponse: {
@@ -5170,6 +5240,53 @@ export interface operations {
         };
       };
       /** @description Daemon unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  getWorkspaceAgentStatus: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Agent status list (may include per-agent errors) */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            success: boolean;
+            data: components["schemas"]["WorkspaceAgentStatusResponse"];
+          };
+        };
+      };
+      /** @description Missing workspace id */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Internal error (corrupt state file) */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Daemon unavailable or not running */
       503: {
         headers: {
           [name: string]: unknown;

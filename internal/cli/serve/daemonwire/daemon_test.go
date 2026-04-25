@@ -305,3 +305,25 @@ agents:
   - worktree: other-agent
     role: plan
 `
+
+// TestBuildAgentStatusCollectFn_AdapterEmptyWorktree verifies that the
+// type-adapter returned by BuildAgentStatusCollectFn calls through to the
+// monitor collector and copies the Err field back into the webui shape.
+func TestBuildAgentStatusCollectFn_AdapterEmptyWorktree(t *testing.T) {
+	collect := BuildAgentStatusCollectFn()
+	if collect == nil {
+		t.Fatal("BuildAgentStatusCollectFn returned nil")
+	}
+	got := collect(webui.AgentStatusCollectInput{
+		WorktreePath:  "", // forces the inner collector to set Err
+		AgentName:     "any",
+		Repo:          "any",
+		DefaultBranch: "main",
+	})
+	if got == nil {
+		t.Fatal("expected non-nil *AgentGitStatus from adapter")
+	}
+	if got.Err == nil {
+		t.Errorf("expected Err to be propagated from monitor collector, got nil (%+v)", got)
+	}
+}

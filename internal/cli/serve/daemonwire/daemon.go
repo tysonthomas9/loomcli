@@ -14,6 +14,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/daemon"
+	"github.com/tysonthomas9/loomcli/internal/cli/monitor"
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/agentcontrol"
@@ -296,6 +297,32 @@ func BuildWorkspaceDaemonResolver(
 			ConfigPath: filepath.Join(wsData.Path, "loom.yaml"),
 			WorkDir:    wsData.Path,
 		}, nil
+	}
+}
+
+// BuildAgentStatusCollectFn wraps monitor.BuildSingleAgentStatusCollector in a
+// type-adapter that targets webui.AgentStatusCollectFn. The inner closure is
+// captured once so the package-level change-detector and commit caches in the
+// monitor package are shared across calls and with the background monitor
+// collector.
+func BuildAgentStatusCollectFn() webui.AgentStatusCollectFn {
+	mc := monitor.BuildSingleAgentStatusCollector()
+	return func(in webui.AgentStatusCollectInput) *webui.AgentGitStatus {
+		r := mc(monitor.SingleAgentStatusInput{
+			WorktreePath:  in.WorktreePath,
+			AgentName:     in.AgentName,
+			Repo:          in.Repo,
+			DefaultBranch: in.DefaultBranch,
+		})
+		return &webui.AgentGitStatus{
+			Status:  r.Status,
+			Branch:  r.Branch,
+			Ahead:   r.Ahead,
+			Behind:  r.Behind,
+			Changes: r.Changes,
+			TaskID:  r.TaskID,
+			Err:     r.Err,
+		}
 	}
 }
 

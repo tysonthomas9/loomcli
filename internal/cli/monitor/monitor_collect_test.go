@@ -102,6 +102,40 @@ func TestCollectMonitorDataDepsScoped_DistinctWorkspaces(t *testing.T) {
 	}
 }
 
+// TestBuildSingleAgentStatusCollector_EmptyWorktreePath verifies the
+// collector reports an error (and does no further work) when the input
+// WorktreePath is empty.
+func TestBuildSingleAgentStatusCollector_EmptyWorktreePath(t *testing.T) {
+	collect := BuildSingleAgentStatusCollector()
+	res := collect(SingleAgentStatusInput{
+		WorktreePath:  "",
+		AgentName:     "x",
+		Repo:          "r",
+		DefaultBranch: "main",
+	})
+	if res.Err == nil {
+		t.Fatalf("expected Err, got nil result=%+v", res)
+	}
+}
+
+// TestBuildSingleAgentStatusCollector_DefaultBranchFallback verifies that an
+// empty DefaultBranch on the input does not panic — the collector applies its
+// internal "main" fallback. We don't set up a real worktree, so the observable
+// effect is just zero values + no crash.
+func TestBuildSingleAgentStatusCollector_DefaultBranchFallback(t *testing.T) {
+	tmp := t.TempDir()
+	fakeWT := filepath.Join(tmp, "no-such-worktree")
+	collect := BuildSingleAgentStatusCollector()
+	res := collect(SingleAgentStatusInput{
+		WorktreePath:  fakeWT,
+		AgentName:     "agent",
+		Repo:          "repo",
+		DefaultBranch: "", // exercise internal fallback to "main"
+	})
+	// No assertion on values — collector must simply return without panicking.
+	_ = res
+}
+
 // TestCollectSyncBdStatusDepsScoped_UsesWorkspacePath verifies that the
 // scoped sync invocation passes wsPath as the exec working directory rather
 // than cli.GetBeadsDir() (the launch workspace).

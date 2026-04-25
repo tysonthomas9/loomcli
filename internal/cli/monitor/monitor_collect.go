@@ -137,6 +137,82 @@ func collectMonitorDataDepsScoped(deps *cli.Deps, wsPath string, resolver *cli.R
 	return data
 }
 
+// SingleAgentStatusInput is the per-agent input to the status collector returned
+// by BuildSingleAgentStatusCollector. WorktreePath is required (absolute path);
+// AgentName is the bare worktree name used for diagnostics. Repo and DefaultBranch
+// are used for ahead/behind comparison.
+type SingleAgentStatusInput struct {
+	WorktreePath  string
+	AgentName     string
+	Repo          string
+	DefaultBranch string
+}
+
+// SingleAgentStatusResult is the per-agent output. Status is the monitor-format
+// status string consumed by parseLoomStatus on the frontend. Err carries a
+// fatal collection error (empty WorktreePath); per-field zero values for
+// branch/ahead/behind/changes are normal on transient git failures.
+type SingleAgentStatusResult struct {
+	Status  string
+	Branch  string
+	Ahead   int
+	Behind  int
+	Changes int
+	TaskID  string
+	Err     error
+}
+
+// BuildSingleAgentStatusCollector returns a closure that produces enriched git +
+// lock status for a single agent worktree. The closure shares the package-level
+// globalChangeDetector + globalCommitCache singletons, so cache hits from the
+// background monitor collector benefit this caller and vice versa — no extra
+// git subprocess fan-out per workspace-scoped status request on cache hit.
+//
+// Status string forms (consumed by parseLoomStatus):
+//   - "ready"                       (idle, clean)
+//   - "<N> changes"                 (idle, dirty with file count)
+//   - "dirty"                       (idle, dirty without file count)
+//   - "working: <taskid> (<dur>)"   (locked, command != "plan")
+//   - "planning: <taskid> (<dur>)"  (locked, command == "plan")
+//   - "review: <taskid> (<dur>)"    (locked, plan command + needs_review)
+//   - "done: <taskid> (<dur>)"      (locked, task closed)
+//   - "idle (<dur>)"                (locked but in idle polling state)
+func BuildSingleAgentStatusCollector() func(SingleAgentStatusInput) SingleAgentStatusResult {
+	d := *cli.GetDeps(nil)
+	d.IssueBackend = cli.DefaultIssueBackend()
+	return func(in SingleAgentStatusInput) SingleAgentStatusResult {
+		var res SingleAgentStatusResult
+		if in.WorktreePath == "" {
+			res.Err = fmt.Errorf("empty worktree_path")
+			return res
+		}
+
+		branch, _ := ReadBranchFromFS(in.WorktreePath)
+		res.Branch = branch
+
+		if lockInfo, running, _ := cli.CheckLock(in.WorktreePath); running && lockInfo != nil {
+			res.TaskID = lockInfo.TaskID
+		}
+
+		lockStatus := cli.GetLockStatus(in.WorktreePath)
+		idleStatus, idleChanges := resolveIdleStatus(&d, in.WorktreePath)
+		if lockStatus != "" {
+			res.Status = lockStatus
+		} else {
+			res.Status = idleStatus
+		}
+		res.Changes = len(idleChanges)
+
+		defaultBranch := in.DefaultBranch
+		if defaultBranch == "" {
+			defaultBranch = "main"
+		}
+		wt := cli.WorktreeInfo{Name: in.AgentName, Path: in.WorktreePath, Branch: branch}
+		res.Ahead, res.Behind = collectAgentAheadBehind(&d, wt, branch, defaultBranch, "")
+		return res
+	}
+}
+
 func collectAgentStatus(agentTasks map[string]TaskInfo, branch string) ([]AgentStatus, map[string][]string) {
 	d := *cli.GetDeps(nil)
 	d.IssueBackend = cli.DefaultIssueBackend()
