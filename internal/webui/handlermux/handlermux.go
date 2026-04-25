@@ -87,6 +87,6 @@ func HandleActiveWorkspace(svc service.WorkspaceService) http.HandlerFunc {
 }
 
 // SetupWorkerAPIRoutes re-exports misc.SetupWorkerAPIRoutes.
-func SetupWorkerAPIRoutes(mux *http.ServeMux, token string, resolveWorktree func(string, string) string, resolveEventsDir func(string) string, resolveLogPath func(string, string) string, validateWorkspace func(string) bool) {
+func SetupWorkerAPIRoutes(mux *http.ServeMux, token string, resolveWorktree func(string, string) string, resolveEventsDir func(string) string, resolveLogPath func(string, string, string) string, validateWorkspace func(string) bool) {
 	misc.SetupWorkerAPIRoutes(mux, token, resolveWorktree, resolveEventsDir, resolveLogPath, validateWorkspace)
 }

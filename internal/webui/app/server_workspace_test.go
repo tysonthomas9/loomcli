@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -703,5 +705,89 @@ func TestWrapWorkspaceDeleteFn_UUIDResolvedBeforeDelete(t *testing.T) {
 	if resolveSeq >= deleteSeq {
 		t.Errorf("resolveID (seq=%d) was called AFTER innerDelete (seq=%d); must be called before",
 			resolveSeq, deleteSeq)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// safeLogPath repo disambiguation (loomcli-lg0de.23)
+// ---------------------------------------------------------------------------
+
+// TestSafeLogPath_RepoDisambiguation verifies that two agents sharing a bare
+// name across different repos in the same workspace resolve to distinct log
+// files, while a legacy empty-repo registration retains the pre-fix basename.
+func TestSafeLogPath_RepoDisambiguation(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	backendPath := safeLogPath(tmpDir, "backend", "falcon")
+	frontendPath := safeLogPath(tmpDir, "frontend", "falcon")
+	legacyPath := safeLogPath(tmpDir, "", "falcon")
+
+	if backendPath == "" || frontendPath == "" || legacyPath == "" {
+		t.Fatalf("expected non-empty paths; got backend=%q frontend=%q legacy=%q", backendPath, frontendPath, legacyPath)
+	}
+	if backendPath == frontendPath {
+		t.Errorf("backend and frontend share path %q — repo disambiguation failed", backendPath)
+	}
+	if backendPath == legacyPath || frontendPath == legacyPath {
+		t.Errorf("repo-set path collides with legacy empty-repo path: backend=%q frontend=%q legacy=%q", backendPath, frontendPath, legacyPath)
+	}
+
+	wantBackend := "task-backend-falcon.log"
+	wantFrontend := "task-frontend-falcon.log"
+	wantLegacy := "task-falcon.log"
+
+	if got := filepath.Base(backendPath); got != wantBackend {
+		t.Errorf("backend basename = %q, want %q", got, wantBackend)
+	}
+	if got := filepath.Base(frontendPath); got != wantFrontend {
+		t.Errorf("frontend basename = %q, want %q", got, wantFrontend)
+	}
+	if got := filepath.Base(legacyPath); got != wantLegacy {
+		t.Errorf("legacy basename = %q, want %q", got, wantLegacy)
+	}
+
+	logsDir := filepath.Join(tmpDir, ".loom", "logs") + string(filepath.Separator)
+	for _, p := range []string{backendPath, frontendPath, legacyPath} {
+		if !strings.HasPrefix(p, logsDir) {
+			t.Errorf("path %q escapes logs dir %q", p, logsDir)
+		}
+	}
+}
+
+// TestSafeLogPath_RepoTraversal verifies that a malicious Repo segment is
+// sanitized and the resulting path stays under the logs dir.
+func TestSafeLogPath_RepoTraversal(t *testing.T) {
+	tmpDir := t.TempDir()
+	got := safeLogPath(tmpDir, "../../../etc", "falcon")
+	if got == "" {
+		// Containment check rejected — also acceptable.
+		return
+	}
+	logsDir := filepath.Join(tmpDir, ".loom", "logs") + string(filepath.Separator)
+	if !strings.HasPrefix(got, logsDir) {
+		t.Fatalf("traversal path escaped logs dir: %q", got)
+	}
+	// BuildAgentLogFilename sanitizes via filepath.Base so "../../../etc" becomes "etc".
+	wantBase := "task-etc-falcon.log"
+	if base := filepath.Base(got); base != wantBase {
+		t.Errorf("traversal basename = %q, want %q", base, wantBase)
+	}
+}
+
+// TestSafeLogPath_AgentTraversal preserves the existing path-traversal guard
+// for malicious agent values via filepath.Base sanitization.
+func TestSafeLogPath_AgentTraversal(t *testing.T) {
+	tmpDir := t.TempDir()
+	got := safeLogPath(tmpDir, "", "../../../etc")
+	if got == "" {
+		return
+	}
+	logsDir := filepath.Join(tmpDir, ".loom", "logs") + string(filepath.Separator)
+	if !strings.HasPrefix(got, logsDir) {
+		t.Fatalf("traversal path escaped logs dir: %q", got)
+	}
+	wantBase := "task-etc.log"
+	if base := filepath.Base(got); base != wantBase {
+		t.Errorf("traversal basename = %q, want %q", base, wantBase)
 	}
 }

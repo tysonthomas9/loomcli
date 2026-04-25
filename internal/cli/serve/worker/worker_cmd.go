@@ -24,6 +24,7 @@ import (
 var (
 	workerControlPlane string
 	workerWorkspace    string
+	workerRepo         string
 	workerAgent        string
 	workerBackend      string
 	workerInterval     int
@@ -49,6 +50,7 @@ The worker:
 FLAGS
   --control-plane  Control plane URL (or LOOM_WORKER_CONTROL_PLANE)
   --workspace      Workspace name (or LOOM_WORKER_WORKSPACE)
+  --repo           Repo name when the workspace has multiple repos (or LOOM_WORKER_REPO)
   --agent          Agent name (or LOOM_WORKER_AGENT)
   --backend        AI backend to use (or LOOM_WORKER_BACKEND)
 
@@ -68,11 +70,13 @@ EXAMPLES
 func init() {
 	defaultControlPlane := os.Getenv("LOOM_WORKER_CONTROL_PLANE")
 	defaultWorkspace := os.Getenv("LOOM_WORKER_WORKSPACE")
+	defaultRepo := os.Getenv("LOOM_WORKER_REPO")
 	defaultAgent := os.Getenv("LOOM_WORKER_AGENT")
 	defaultBackend := os.Getenv("LOOM_WORKER_BACKEND")
 
 	workerCmd.Flags().StringVar(&workerControlPlane, "control-plane", defaultControlPlane, "Control plane URL (env: LOOM_WORKER_CONTROL_PLANE)")
 	workerCmd.Flags().StringVar(&workerWorkspace, "workspace", defaultWorkspace, "Workspace UUID or name (env: LOOM_WORKER_WORKSPACE)")
+	workerCmd.Flags().StringVar(&workerRepo, "repo", defaultRepo, "Repo name when the workspace has multiple repos (env: LOOM_WORKER_REPO)")
 	workerCmd.Flags().StringVar(&workerAgent, "agent", defaultAgent, "Agent name (env: LOOM_WORKER_AGENT)")
 	workerCmd.Flags().StringVar(&workerBackend, "backend", defaultBackend, "AI backend (env: LOOM_WORKER_BACKEND)")
 	workerCmd.Flags().IntVarP(&workerInterval, "interval", "i", 30, "Polling interval in seconds when no tasks available")
@@ -87,6 +91,7 @@ func init() {
 type workerRegistration struct {
 	WorkerID  string `json:"worker_id"`
 	Workspace string `json:"workspace"`
+	Repo      string `json:"repo,omitempty"`
 	Agent     string `json:"agent"`
 	Backend   string `json:"backend"`
 	Token     string `json:"token,omitempty"` // returned by control plane
@@ -177,6 +182,7 @@ func printWorkerBanner(worktreePath string) {
 	fmt.Println("LOOM WORKER (Remote Agent)")
 	fmt.Printf("Control plane: %s\n", workerControlPlane)
 	fmt.Printf("Workspace:     %s\n", workerWorkspace)
+	fmt.Printf("Repo:          %s\n", workerRepo)
 	fmt.Printf("Agent:         %s\n", workerAgent)
 	fmt.Printf("Backend:       %s\n", workerBackend)
 	fmt.Printf("Worktree:      %s\n", worktreePath)
@@ -187,7 +193,7 @@ func printWorkerBanner(worktreePath string) {
 func registerAndGetToken(workerToken string) (*workerRegistration, string) {
 	fmt.Println("[worker] Registering with control plane...")
 	reg, err := registerWorker(workerControlPlane, workerToken, workerRegistration{
-		Workspace: workerWorkspace, Agent: workerAgent, Backend: workerBackend,
+		Workspace: workerWorkspace, Repo: workerRepo, Agent: workerAgent, Backend: workerBackend,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: failed to register with control plane: %v\n", err)

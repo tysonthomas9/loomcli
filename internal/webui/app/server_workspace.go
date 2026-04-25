@@ -105,10 +105,19 @@ func wrapWorkspaceDeleteFn(
 	}
 }
 
-// safeLogPath builds a log file path for an agent, guarding against path traversal.
-func safeLogPath(basePath, agent string) string {
+// safeLogPath builds a log file path for an agent, guarding against path
+// traversal. The basename mirrors cli/config.BuildAgentLogFilename so the
+// webui worker API stays collision-free with the daemon supervisor writer.
+// role is hardcoded to "task" because loom worker only ever runs task-role
+// agents (see internal/cli/serve/worker/worker_cmd.go).
+//
+// The basename construction is duplicated here (rather than imported) because
+// the webui-isolation depguard rule forbids internal/webui from importing
+// internal/cli. If the canonical helper changes shape, update this function
+// in lockstep — covered by the TestSafeLogPath_RepoDisambiguation regression.
+func safeLogPath(basePath, repo, agent string) string {
 	logsDir := filepath.Join(basePath, ".loom", "logs")
-	candidate := filepath.Clean(filepath.Join(logsDir, fmt.Sprintf("task-%s.log", agent)))
+	candidate := filepath.Clean(filepath.Join(logsDir, agentLogBasename("task", repo, agent)))
 	absLogs, err := filepath.Abs(logsDir)
 	if err != nil {
 		return ""
@@ -121,6 +130,22 @@ func safeLogPath(basePath, agent string) string {
 		return "" // agent name escapes log dir
 	}
 	return candidate
+}
+
+// agentLogBasename mirrors cli/config.BuildAgentLogFilename. Each segment is
+// sanitized with filepath.Base; a "." or ".." repo falls back to the two-
+// segment legacy form to avoid filesystem-hostile basenames.
+func agentLogBasename(role, repo, worktree string) string {
+	safeRole := filepath.Base(role)
+	safeWorktree := filepath.Base(worktree)
+	if repo == "" {
+		return fmt.Sprintf("%s-%s.log", safeRole, safeWorktree)
+	}
+	safeRepo := filepath.Base(repo)
+	if safeRepo == "." || safeRepo == ".." {
+		return fmt.Sprintf("%s-%s.log", safeRole, safeWorktree)
+	}
+	return fmt.Sprintf("%s-%s-%s.log", safeRole, safeRepo, safeWorktree)
 }
 
 func (app *Server) registerWorkerAPIRoutes() {
@@ -196,13 +221,13 @@ func workerResolveEventsDir(configFn func() (*ops.WorkspaceData, error)) func(st
 }
 
 // workerResolveLogPath returns a function that resolves a safe log file path
-// for a workspace agent.
-func workerResolveLogPath(configFn func() (*ops.WorkspaceData, error)) func(string, string) string {
-	return func(workspace, agent string) string {
+// for a workspace agent, scoped by its repo when provided (workspace mode).
+func workerResolveLogPath(configFn func() (*ops.WorkspaceData, error)) func(string, string, string) string {
+	return func(workspace, repo, agent string) string {
 		path := service.ResolveWorkspacePath(configFn, workspace)
 		if path == "" {
 			return ""
 		}
-		return safeLogPath(path, agent)
+		return safeLogPath(path, repo, agent)
 	}
 }

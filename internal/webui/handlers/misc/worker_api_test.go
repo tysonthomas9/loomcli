@@ -646,7 +646,7 @@ func TestHandleWorkerEvents_EmptyEventsDir(t *testing.T) {
 func TestHandleWorkerLogs(t *testing.T) {
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "agent.log")
-	resolveLog := func(workspace, agent string) string { return logPath }
+	resolveLog := func(workspace, repo, agent string) string { return logPath }
 
 	reg := NewWorkerRegistry()
 	reg.Register(&WorkerInfo{ID: "w1", Workspace: "ws", Agent: "a1"})
@@ -690,7 +690,7 @@ func TestHandleWorkerLogs_EmptyLogPath(t *testing.T) {
 	reg := NewWorkerRegistry()
 	reg.Register(&WorkerInfo{ID: "w1", Workspace: "ws", Agent: "a1"})
 
-	resolveLog := func(workspace, agent string) string { return "" }
+	resolveLog := func(workspace, repo, agent string) string { return "" }
 	handler := handleWorkerLogs(reg, resolveLog)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/internal/workers/w1/logs", strings.NewReader("data"))
@@ -1007,7 +1007,7 @@ func TestSetupWorkerAPIRoutes(t *testing.T) {
 
 	resolveWT := func(ws, ag string) string { return tmpDir }
 	resolveEvt := func(ws string) string { return tmpDir }
-	resolveLog := func(ws, ag string) string { return filepath.Join(tmpDir, "agent.log") }
+	resolveLog := func(ws, repo, ag string) string { return filepath.Join(tmpDir, "agent.log") }
 
 	reg := SetupWorkerAPIRoutes(mux, "test-token", resolveWT, resolveEvt, resolveLog, nil)
 	if reg == nil {
@@ -1055,7 +1055,7 @@ func TestSetupWorkerAPIRoutes(t *testing.T) {
 func TestSetupWorkerAPIRoutes_RejectsWithoutAuth(t *testing.T) {
 	mux := http.NewServeMux()
 	tmpDir := t.TempDir()
-	SetupWorkerAPIRoutes(mux, "secret", func(_, _ string) string { return tmpDir }, func(_ string) string { return tmpDir }, func(_, _ string) string { return filepath.Join(tmpDir, "a.log") }, nil)
+	SetupWorkerAPIRoutes(mux, "secret", func(_, _ string) string { return tmpDir }, func(_ string) string { return tmpDir }, func(_, _, _ string) string { return filepath.Join(tmpDir, "a.log") }, nil)
 
 	ts := httptest.NewServer(mux)
 	defer ts.Close()
@@ -1552,7 +1552,7 @@ func TestHandleWorkerLogs_AppendToExistingFile(t *testing.T) {
 
 	reg := NewWorkerRegistry()
 	reg.Register(&WorkerInfo{ID: "w1", Workspace: "ws", Agent: "a1"})
-	resolveLog := func(_, _ string) string { return logPath }
+	resolveLog := func(_, _, _ string) string { return logPath }
 
 	handler := handleWorkerLogs(reg, resolveLog)
 	req := httptest.NewRequest(http.MethodPost, "/api/internal/workers/w1/logs",
@@ -1584,7 +1584,7 @@ func TestHandleWorkerLogs_LargeLogData(t *testing.T) {
 
 	reg := NewWorkerRegistry()
 	reg.Register(&WorkerInfo{ID: "w1", Workspace: "ws", Agent: "a1"})
-	resolveLog := func(_, _ string) string { return logPath }
+	resolveLog := func(_, _, _ string) string { return logPath }
 
 	// Build a large log payload (~100KB).
 	var sb strings.Builder
@@ -1625,7 +1625,7 @@ func TestHandleWorkerLogs_ReadOnlyDir(t *testing.T) {
 
 	reg := NewWorkerRegistry()
 	reg.Register(&WorkerInfo{ID: "w1", Workspace: "ws", Agent: "a1"})
-	resolveLog := func(_, _ string) string { return logPath }
+	resolveLog := func(_, _, _ string) string { return logPath }
 
 	handler := handleWorkerLogs(reg, resolveLog)
 	req := httptest.NewRequest(http.MethodPost, "/api/internal/workers/w1/logs",
@@ -1645,7 +1645,7 @@ func TestHandleWorkerLogs_MultipleAppends(t *testing.T) {
 
 	reg := NewWorkerRegistry()
 	reg.Register(&WorkerInfo{ID: "w1", Workspace: "ws", Agent: "a1"})
-	resolveLog := func(_, _ string) string { return logPath }
+	resolveLog := func(_, _, _ string) string { return logPath }
 
 	handler := handleWorkerLogs(reg, resolveLog)
 	for i := 0; i < 5; i++ {
@@ -2035,7 +2035,7 @@ func TestResolveWorktreePath_UsesWorkspaceUUID(t *testing.T) {
 		}
 		return filepath.Join(path, ".loom", "events")
 	}
-	resolveLog := func(workspace, agent string) string {
+	resolveLog := func(workspace, repo, agent string) string {
 		path := service.FindWorkspacePathByID(wsData, workspace)
 		if path == "" {
 			return ""
@@ -2120,5 +2120,127 @@ func TestResolveWorktreePath_UsesWorkspaceUUID(t *testing.T) {
 	}
 	if infoB["state"] != "running-beta" {
 		t.Errorf("workspace B state = %v, want %q", infoB["state"], "running-beta")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Repo disambiguation (loomcli-lg0de.23)
+// ---------------------------------------------------------------------------
+
+// TestHandleWorkerLogs_DistinctFilesPerRepo verifies that two workers sharing a
+// workspace and bare agent name but registered with different Repo values
+// stream to distinct log files instead of colliding on a single task-{agent}.log.
+func TestHandleWorkerLogs_DistinctFilesPerRepo(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	reg := NewWorkerRegistry()
+	reg.Register(&WorkerInfo{ID: "w1", Workspace: "ws", Repo: "backend", Agent: "falcon"})
+	reg.Register(&WorkerInfo{ID: "w2", Workspace: "ws", Repo: "frontend", Agent: "falcon"})
+
+	resolveLog := func(ws, repo, ag string) string {
+		if repo == "" {
+			return filepath.Join(tmpDir, "task-"+ag+".log")
+		}
+		return filepath.Join(tmpDir, "task-"+repo+"-"+ag+".log")
+	}
+
+	handler := handleWorkerLogs(reg, resolveLog)
+
+	post := func(workerID, payload string) {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPost, "/api/internal/workers/"+workerID+"/logs", strings.NewReader(payload))
+		req.SetPathValue("id", workerID)
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("worker %s POST /logs status = %d, want %d; body = %s", workerID, w.Code, http.StatusOK, w.Body.String())
+		}
+	}
+	post("w1", "alpha\n")
+	post("w2", "beta\n")
+
+	backendLog := filepath.Join(tmpDir, "task-backend-falcon.log")
+	frontendLog := filepath.Join(tmpDir, "task-frontend-falcon.log")
+	collisionLog := filepath.Join(tmpDir, "task-falcon.log")
+
+	bData, err := os.ReadFile(backendLog)
+	if err != nil {
+		t.Fatalf("read backend log: %v", err)
+	}
+	if string(bData) != "alpha\n" {
+		t.Errorf("backend log = %q, want %q", string(bData), "alpha\n")
+	}
+	fData, err := os.ReadFile(frontendLog)
+	if err != nil {
+		t.Fatalf("read frontend log: %v", err)
+	}
+	if string(fData) != "beta\n" {
+		t.Errorf("frontend log = %q, want %q", string(fData), "beta\n")
+	}
+	if _, err := os.Stat(collisionLog); !os.IsNotExist(err) {
+		t.Errorf("collision file %s exists (err=%v) — repo disambiguation failed", collisionLog, err)
+	}
+}
+
+// TestHandleWorkerRegister_PersistsRepo verifies that a registration body
+// containing "repo":"backend" round-trips through the registry so handleWorkerLogs
+// can read it.
+func TestHandleWorkerRegister_PersistsRepo(t *testing.T) {
+	reg := NewWorkerRegistry()
+	handler := handleWorkerRegister(reg, nil)
+
+	body := `{"workspace":"ws","repo":"backend","agent":"falcon","backend":"local"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/internal/workers/register", strings.NewReader(body))
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d; body = %s", w.Code, http.StatusCreated, w.Body.String())
+	}
+
+	var resp workerRegisterResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.WorkerID == "" {
+		t.Fatal("WorkerID empty")
+	}
+	info := reg.Get(resp.WorkerID)
+	if info == nil {
+		t.Fatalf("registry has no entry for %s", resp.WorkerID)
+	}
+	if info.Repo != "backend" {
+		t.Errorf("Repo = %q, want %q", info.Repo, "backend")
+	}
+	if info.Agent != "falcon" {
+		t.Errorf("Agent = %q, want %q", info.Agent, "falcon")
+	}
+}
+
+// TestHandleWorkerRegister_OmittedRepoDefaultsEmpty verifies backward compat:
+// an old worker that does not send "repo" in JSON must still register cleanly
+// and produce a WorkerInfo with Repo == "" (legacy single-repo behavior).
+func TestHandleWorkerRegister_OmittedRepoDefaultsEmpty(t *testing.T) {
+	reg := NewWorkerRegistry()
+	handler := handleWorkerRegister(reg, nil)
+
+	body := `{"workspace":"ws","agent":"falcon","backend":"local"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/internal/workers/register", strings.NewReader(body))
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusCreated)
+	}
+	var resp workerRegisterResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	info := reg.Get(resp.WorkerID)
+	if info == nil {
+		t.Fatalf("registry has no entry for %s", resp.WorkerID)
+	}
+	if info.Repo != "" {
+		t.Errorf("Repo = %q, want empty (legacy single-repo)", info.Repo)
 	}
 }

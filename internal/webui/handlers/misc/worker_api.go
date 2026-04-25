@@ -22,7 +22,8 @@ import (
 // WorkerInfo tracks a registered remote worker.
 type WorkerInfo struct {
 	ID        string    `json:"worker_id"`
-	Workspace string    `json:"workspace"` // Stable workspace UUID (not name)
+	Workspace string    `json:"workspace"`      // Stable workspace UUID (not name)
+	Repo      string    `json:"repo,omitempty"` // optional: agent's repo segment in workspace mode
 	Agent     string    `json:"agent"`
 	Backend   string    `json:"backend"`
 	StartedAt time.Time `json:"started_at"`
@@ -91,6 +92,7 @@ func workerAuthMiddleware(workerToken string, next http.Handler) http.Handler {
 // workerRegisterRequest is the JSON body for POST /api/internal/workers/register.
 type workerRegisterRequest struct {
 	Workspace string `json:"workspace"`
+	Repo      string `json:"repo,omitempty"`
 	Agent     string `json:"agent"`
 	Backend   string `json:"backend"`
 }
@@ -133,13 +135,14 @@ func HandleWorkerRegister(registry *WorkerRegistry, validateWorkspace func(id st
 		info := &WorkerInfo{
 			ID:        workerID,
 			Workspace: req.Workspace,
+			Repo:      req.Repo,
 			Agent:     req.Agent,
 			Backend:   req.Backend,
 			StartedAt: time.Now(),
 		}
 		registry.Register(info)
 
-		slog.Info("worker registered", "worker_id", workerID, "workspace", req.Workspace, "agent", req.Agent)
+		slog.Info("worker registered", "worker_id", workerID, "workspace", req.Workspace, "repo", req.Repo, "agent", req.Agent)
 
 		handler.WriteJSON(w, http.StatusCreated, workerRegisterResponse{
 			WorkerID: workerID,
@@ -271,7 +274,7 @@ func handleWorkerEvents(registry *WorkerRegistry, resolveEventsDir func(workspac
 }
 
 // handleWorkerLogs receives log chunks from remote workers and appends to the agent's log file.
-func handleWorkerLogs(registry *WorkerRegistry, resolveLogPath func(workspace, agent string) string) http.HandlerFunc {
+func handleWorkerLogs(registry *WorkerRegistry, resolveLogPath func(workspace, repo, agent string) string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		workerID := r.PathValue("id")
 		worker := registry.Get(workerID)
@@ -286,7 +289,7 @@ func handleWorkerLogs(registry *WorkerRegistry, resolveLogPath func(workspace, a
 			return
 		}
 
-		logPath := resolveLogPath(worker.Workspace, worker.Agent)
+		logPath := resolveLogPath(worker.Workspace, worker.Repo, worker.Agent)
 		if logPath == "" {
 			handler.RespondError(w, http.StatusInternalServerError, "cannot resolve log path")
 			return
@@ -434,14 +437,15 @@ func appendToLogFile(logPath string, data []byte) error {
 // workerToken is the shared secret from LOOM_WORKER_TOKEN.
 // resolveWorktreePath maps (workspace UUID, agent) to a filesystem path.
 // resolveEventsDir maps workspace UUID to its events directory.
-// resolveLogPath maps (workspace UUID, agent) to the agent's log file path.
+// resolveLogPath maps (workspace UUID, repo, agent) to the agent's log file path.
+// repo is required to disambiguate same-named agents across repos within one workspace.
 // validateWorkspace checks whether a workspace UUID is known; nil skips validation.
 func SetupWorkerAPIRoutes(
 	mux *http.ServeMux,
 	workerToken string,
 	resolveWorktreePath func(workspace, agent string) string,
 	resolveEventsDir func(workspace string) string,
-	resolveLogPath func(workspace, agent string) string,
+	resolveLogPath func(workspace, repo, agent string) string,
 	validateWorkspace func(id string) bool,
 ) *WorkerRegistry {
 	registry := NewWorkerRegistry()
