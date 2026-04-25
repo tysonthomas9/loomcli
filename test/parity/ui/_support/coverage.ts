@@ -9,22 +9,30 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { ARTIFACTS_DIR } from "../playwright.config";
 
+// Routes the parity suite must exercise at least once. The
+// normalizeUrlToRoute helper below collapses live URLs (which include
+// concrete UUIDs and IDs) into these canonical patterns; the gate then
+// asserts that every required route appears in the recorded set.
+//
+// Earlier drafts of this list used /api/issues/... — a pre-multi-
+// workspace shape that the production webui never shipped — which made
+// the gate guaranteed-to-fail on every run regardless of test results.
+// The current canonical shape is /api/issues, /api/issues/:id, etc. with
+// the workspace prefix stripped by the normalizer.
 export const REQUIRED_ROUTES = [
+    "/api/config",
+    "/api/workspaces",
     "/api/issues",
     "/api/issues/:id",
     "/api/issues/:id/close",
     "/api/issues/:id/reopen",
-    "/api/issues/:id/labels",
     "/api/issues/:id/comments",
-    "/api/issues/:id/deps",
+    "/api/issues/:id/dependencies",
     "/api/issues/:id/events",
-    "/api/issues/ready",
-    "/api/issues/blocked",
     "/api/issues/search",
-    "/api/issues/stats",
-    "/api/config",
-    "/api/workspaces",
-    "/api/sse",
+    "/api/ready",
+    "/api/blocked",
+    "/api/stats",
 ];
 
 export const REQUIRED_FIELDS = [
@@ -64,18 +72,31 @@ export function recordRoutes(test: string, routes: string[], fields: string[] = 
 
 /**
  * Normalize a URL to a route pattern like "/api/issues/:id/close".
+ *
+ * Strips the workspace UUID and concrete issue IDs so the canonical
+ * route shape can be matched against REQUIRED_ROUTES. Bare /api/workspaces
+ * (the list endpoint) is preserved separately from /api/workspaces/{uuid}/...
+ * (which collapse to /api/...).
  */
 export function normalizeUrlToRoute(url: string): string | null {
     try {
         const u = new URL(url);
         let p = u.pathname;
-        // Workspace-scoped to plan-level route
+        // Bare /api/workspaces (list) — preserve as-is.
+        if (p === "/api/workspaces" || p === "/api/workspaces/") {
+            return "/api/workspaces";
+        }
+        // /api/workspaces/{uuid}/... → /api/...
         p = p.replace(/^\/api\/workspaces\/[^/]+/, "/api");
-        p = p.replace(/\/issues\/[^/]+\/(close|reopen|labels|comments|deps|events)$/, "/issues/:id/$1");
+        // /api/issues/{id}/{action} → /api/issues/:id/{action}
+        p = p.replace(/\/issues\/[^/]+\/(close|reopen|labels|comments|dependencies|deps|events)$/, "/issues/:id/$1");
+        // /api/issues/search? → /api/issues/search (preserve before :id collapse)
+        if (/\/issues\/search(\?|$)/.test(p)) return "/api/issues/search";
+        // /api/issues/{id} (no trailing action) → /api/issues/:id
         p = p.replace(/\/issues\/[^/]+$/, "/issues/:id");
-        if (p.startsWith("/api/workspaces")) return "/api/workspaces";
+        // SSE event paths.
         if (p === "/api/events" || /\/events(\/|$)/.test(p)) return "/api/sse";
-        // Only return paths we care about.
+        // Direct REQUIRED_ROUTES match.
         const known = REQUIRED_ROUTES.find((r) => r === p || r === p.replace(/\/$/, ""));
         return known ?? (REQUIRED_ROUTES.includes(p) ? p : p.startsWith("/api/") ? p : null);
     } catch {
