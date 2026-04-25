@@ -33,11 +33,13 @@ test.describe("10 create-flow parity", () => {
             acceptStatus: [201],
         });
 
-        // Verify via the canonical listing endpoint.
-        const listDiff = await apiResponseDiff("issues");
-        expect(listDiff.count_fleet).toBeGreaterThan(listDiff.count_beads - 1); // fleet grew by 1
+        // Comparing fleet and beads list counts is meaningless here because
+        // beads accumulates tombstoned issues from earlier tests in the
+        // same suite (DELETE leaves bd tombstones that still appear in the
+        // list). The semantic check is "fleet grew by exactly 1, beads
+        // didn't grow at all" — assert that directly via the snapshots.
+        await apiResponseDiff("issues"); // still useful for the diff report
 
-        // State delta check: fleet issue count went up by 1, beads didn't.
         const stateAfter = await snapshotState("after", tabs.testId);
         const syncDiff = stateSyncDiff(stateBefore, stateAfter, "create-on-fleet");
         expect(
