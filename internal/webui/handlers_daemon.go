@@ -16,6 +16,12 @@ import (
 // is not found in the daemon config.
 var ErrAgentNotFound = errors.New("agent not found in daemon config")
 
+// ErrAgentAmbiguous is returned by AgentQueueFn when the bare agent name
+// matches more than one agent in the daemon config (e.g., two agents with
+// the same worktree name in different repos). Clients should retry with
+// ?repo= to disambiguate. Mapped by HandleAgentQueue to HTTP 409.
+var ErrAgentAmbiguous = errors.New("agent name ambiguous across repos; specify repo to disambiguate")
+
 // DaemonSupervisorData is the response payload for GET /api/daemon/supervisor.
 type DaemonSupervisorData struct {
 	PID           int                `json:"pid"`
@@ -182,16 +188,29 @@ func HandleWsDaemonConfig(fn func(wsID string) (json.RawMessage, error)) http.Ha
 }
 
 // HandleAgentQueue returns a handler for GET /api/workspaces/{ws}/agents/{name}/queue.
-// Maps ErrAgentNotFound to 404, other errors to 503.
+// The optional ?repo= query parameter disambiguates duplicate worktree names
+// across repos within a workspace; when present the handler forwards the
+// compound key "repo/name" to fn. Maps ErrAgentNotFound to 404,
+// ErrAgentAmbiguous to 409, other errors to 503.
 func HandleAgentQueue(fn func(wsID, agentName string) ([]AgentQueueEntry, error)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		wsID := middleware.WorkspaceFromContext(r.Context())
 		name := r.PathValue("name")
-		entries, err := fn(wsID, name)
+		repo := r.URL.Query().Get("repo")
+		key := name
+		if repo != "" {
+			key = repo + "/" + name
+		}
+		entries, err := fn(wsID, key)
 		if err != nil {
 			if errors.Is(err, ErrAgentNotFound) {
 				handler.WriteJSON(w, http.StatusNotFound,
-					dto.NewErrorResponse("agent \""+name+"\" not found in daemon config", "agent_not_found"))
+					dto.NewErrorResponse("agent \""+key+"\" not found in daemon config", "agent_not_found"))
+				return
+			}
+			if errors.Is(err, ErrAgentAmbiguous) {
+				handler.WriteJSON(w, http.StatusConflict,
+					dto.NewErrorResponse("agent \""+name+"\" is ambiguous across repos; use ?repo= to disambiguate", "agent_ambiguous"))
 				return
 			}
 			handler.WriteJSON(w, http.StatusServiceUnavailable,

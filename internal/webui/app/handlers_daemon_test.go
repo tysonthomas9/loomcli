@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -404,6 +405,106 @@ func TestHandleAgentQueue_PassesWorkspaceID(t *testing.T) {
 
 	if capturedWSID != "ws-uuid-123" {
 		t.Errorf("expected wsID 'ws-uuid-123', got %q", capturedWSID)
+	}
+}
+
+func TestHandleAgentQueue_WithRepoQuery(t *testing.T) {
+	var captured string
+	fn := func(wsID, name string) ([]webui.AgentQueueEntry, error) {
+		captured = name
+		return nil, nil
+	}
+
+	h := webui.HandleAgentQueue(fn)
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/queue", h)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/api/workspaces/default/agents/falcon/queue?repo=backend", nil)
+	mux.ServeHTTP(rec, req)
+
+	if captured != "backend/falcon" {
+		t.Errorf("expected compound key 'backend/falcon', got %q", captured)
+	}
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", rec.Code)
+	}
+}
+
+func TestHandleAgentQueue_WithoutRepoQuery(t *testing.T) {
+	var captured string
+	fn := func(wsID, name string) ([]webui.AgentQueueEntry, error) {
+		captured = name
+		return nil, nil
+	}
+
+	h := webui.HandleAgentQueue(fn)
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/queue", h)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/api/workspaces/default/agents/falcon/queue", nil)
+	mux.ServeHTTP(rec, req)
+
+	if captured != "falcon" {
+		t.Errorf("expected bare key 'falcon', got %q", captured)
+	}
+}
+
+func TestHandleAgentQueue_AgentAmbiguous(t *testing.T) {
+	fn := func(wsID, name string) ([]webui.AgentQueueEntry, error) {
+		return nil, webui.ErrAgentAmbiguous
+	}
+
+	h := webui.HandleAgentQueue(fn)
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/queue", h)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/api/workspaces/default/agents/falcon/queue", nil)
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d", rec.Code)
+	}
+
+	var resp struct {
+		Success bool   `json:"success"`
+		Code    string `json:"code"`
+		Error   string `json:"error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.Code != "agent_ambiguous" {
+		t.Errorf("expected code 'agent_ambiguous', got %q", resp.Code)
+	}
+	if resp.Success {
+		t.Error("expected success=false")
+	}
+}
+
+func TestHandleAgentQueue_AgentNotFound_WithRepo(t *testing.T) {
+	fn := func(wsID, name string) ([]webui.AgentQueueEntry, error) {
+		return nil, webui.ErrAgentNotFound
+	}
+	h := webui.HandleAgentQueue(fn)
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/queue", h)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/api/workspaces/default/agents/falcon/queue?repo=backend", nil)
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", rec.Code)
+	}
+	var resp struct {
+		Error string `json:"error"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &resp)
+	if !strings.Contains(resp.Error, "backend/falcon") {
+		t.Errorf("expected error message to contain 'backend/falcon', got %q", resp.Error)
 	}
 }
 

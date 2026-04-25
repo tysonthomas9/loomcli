@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 )
@@ -305,6 +306,96 @@ agents:
   - worktree: other-agent
     role: plan
 `
+
+func TestFindAgentByKey_CompoundMatch(t *testing.T) {
+	agents := []config.AgentEntry{
+		{Worktree: "falcon", Repo: "backend", Role: "planner"},
+		{Worktree: "falcon", Repo: "frontend", Role: "coder"},
+	}
+
+	got, err := findAgentByKey(agents, "backend/falcon")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got == nil || got.Repo != "backend" || got.Role != "planner" {
+		t.Errorf("got %+v, want backend/falcon planner", got)
+	}
+}
+
+func TestFindAgentByKey_BareUnambiguous(t *testing.T) {
+	agents := []config.AgentEntry{
+		{Worktree: "falcon", Repo: "backend", Role: "planner"},
+		{Worktree: "spark", Repo: "frontend", Role: "coder"},
+	}
+
+	got, err := findAgentByKey(agents, "spark")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got == nil || got.Worktree != "spark" {
+		t.Errorf("got %+v, want spark", got)
+	}
+}
+
+func TestFindAgentByKey_BareAmbiguous(t *testing.T) {
+	agents := []config.AgentEntry{
+		{Worktree: "falcon", Repo: "backend", Role: "planner"},
+		{Worktree: "falcon", Repo: "frontend", Role: "coder"},
+	}
+
+	_, err := findAgentByKey(agents, "falcon")
+	if !errors.Is(err, webui.ErrAgentAmbiguous) {
+		t.Errorf("expected ErrAgentAmbiguous, got %v", err)
+	}
+}
+
+func TestFindAgentByKey_NotFound(t *testing.T) {
+	agents := []config.AgentEntry{
+		{Worktree: "falcon", Repo: "backend"},
+	}
+
+	_, err := findAgentByKey(agents, "nonexistent")
+	if !errors.Is(err, webui.ErrAgentNotFound) {
+		t.Errorf("expected ErrAgentNotFound, got %v", err)
+	}
+}
+
+func TestFindAgentByKey_BareAgentMatchedViaKey(t *testing.T) {
+	agents := []config.AgentEntry{
+		{Worktree: "falcon", Repo: ""},
+	}
+
+	got, err := findAgentByKey(agents, "falcon")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got == nil || got.Worktree != "falcon" {
+		t.Errorf("got %+v, want falcon", got)
+	}
+}
+
+func TestFindAgentByKey_MixedBareAndCompound(t *testing.T) {
+	agents := []config.AgentEntry{
+		{Worktree: "falcon", Repo: "", Role: "legacy"},
+		{Worktree: "falcon", Repo: "backend", Role: "planner"},
+	}
+
+	bare, err := findAgentByKey(agents, "falcon")
+	if err != nil {
+		t.Fatalf("bare lookup: %v", err)
+	}
+	if bare.Role != "legacy" {
+		t.Errorf("bare: got role %q, want legacy", bare.Role)
+	}
+
+	compound, err := findAgentByKey(agents, "backend/falcon")
+	if err != nil {
+		t.Fatalf("compound lookup: %v", err)
+	}
+	if compound.Role != "planner" {
+		t.Errorf("compound: got role %q, want planner", compound.Role)
+	}
+}
 
 // TestBuildAgentStatusCollectFn_AdapterEmptyWorktree verifies that the
 // type-adapter returned by BuildAgentStatusCollectFn calls through to the

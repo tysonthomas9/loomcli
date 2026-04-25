@@ -188,10 +188,46 @@ func BuildDaemonConfigFn() func() (json.RawMessage, error) {
 	}
 }
 
+// findAgentByKey returns the agent in agents whose identity matches key.
+// It first tries an exact compound-key match (entry.Key() == key); if none
+// matches it falls back to a bare Worktree match but only when unambiguous.
+// Returns webui.ErrAgentAmbiguous when two or more agents share the bare
+// worktree name matching key, and webui.ErrAgentNotFound when no agent
+// matches. Callers pass the raw agent identity string (the compound key
+// built from the HTTP request, e.g. "repo/worktree" or bare "worktree").
+//
+// This mirrors Daemon.resolveToCompoundKey (internal/cli/daemon/daemon.go)
+// so HTTP callers and daemon IPC callers resolve the same way.
+func findAgentByKey(agents []config.AgentEntry, key string) (*config.AgentEntry, error) {
+	for i := range agents {
+		if agents[i].Key() == key {
+			return &agents[i], nil
+		}
+	}
+	var match *config.AgentEntry
+	matches := 0
+	for i := range agents {
+		if agents[i].Worktree == key {
+			match = &agents[i]
+			matches++
+		}
+	}
+	if matches == 1 {
+		return match, nil
+	}
+	if matches > 1 {
+		return nil, webui.ErrAgentAmbiguous
+	}
+	return nil, webui.ErrAgentNotFound
+}
+
 // BuildWorkspaceAgentQueueFn returns a workspace-aware callback that fetches
-// and scores ready issues for a named agent. The resolver maps wsID to daemon
-// paths; the returned function loads loom.yaml from the resolved workspace's
-// WorkDir on each call.
+// and scores ready issues for an agent identified by its compound key
+// ("repo/worktree") or bare worktree name (when unambiguous within the
+// workspace's loom.yaml). The resolver maps wsID to daemon paths; the
+// returned function loads loom.yaml from the resolved workspace's WorkDir
+// on each call. Returns webui.ErrAgentAmbiguous if the bare name matches
+// more than one agent, webui.ErrAgentNotFound if no agent matches.
 func BuildWorkspaceAgentQueueFn(resolver func(wsID string) (*webui.WorkspaceDaemonPaths, error)) func(wsID, agentName string) ([]webui.AgentQueueEntry, error) {
 	if resolver == nil {
 		return nil
@@ -207,16 +243,9 @@ func BuildWorkspaceAgentQueueFn(resolver func(wsID string) (*webui.WorkspaceDaem
 			return nil, fmt.Errorf("load daemon config: %w", err)
 		}
 
-		// Find agent entry by worktree name
-		var agent *config.AgentEntry
-		for i := range cfg.Agents {
-			if cfg.Agents[i].Worktree == agentName {
-				agent = &cfg.Agents[i]
-				break
-			}
-		}
-		if agent == nil {
-			return nil, webui.ErrAgentNotFound
+		agent, err := findAgentByKey(cfg.Agents, agentName)
+		if err != nil {
+			return nil, err
 		}
 
 		// Resolve role constraints
