@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/circuitbreaker"
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/types"
@@ -16,6 +18,12 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
+
+// IssueBackendFn returns the active backend.IssueBackend or nil. Used by
+// HandleStatsWithBackendFallback to serve stats out-of-pool when the
+// daemon connection isn't available (fleet mode). Mirrors the pattern
+// established in handlers/git/graph.go.
+type IssueBackendFn func() backend.IssueBackend
 
 // CircuitBreakerStatus represents the circuit breaker state in health responses.
 type CircuitBreakerStatus struct {
@@ -204,10 +212,80 @@ func HandleAPIHealth(pool daemon.Pool) http.HandlerFunc { //nolint:funlen
 
 // HandleStats returns project statistics from the daemon.
 func HandleStats(pool daemon.Pool) http.HandlerFunc {
-	if pool == nil {
-		return HandleStatsWithPool(nil)
+	return HandleStatsWithBackendFallback(pool, nil)
+}
+
+// HandleStatsWithBackendFallback returns a handler that serves /stats from
+// the daemon connection pool when available and from the IssueBackend
+// otherwise. Mirrors HandleGraphWithBackendFallback / HandleReadyWithBackendFallback.
+//
+// In fleet mode the pool is empty; without this, the handler returns 503
+// even though backend.IssueBackend.Stats works fine. backendFn may be nil
+// — in that case behaviour is identical to the legacy pool-only path.
+func HandleStatsWithBackendFallback(pool daemon.Pool, backendFn IssueBackendFn) http.HandlerFunc {
+	var poolAdapter StatsConnectionGetter
+	if pool != nil {
+		poolAdapter = &statsPoolAdapter{pool: pool}
 	}
-	return HandleStatsWithPool(&statsPoolAdapter{pool: pool})
+	poolHandler := HandleStatsWithPool(poolAdapter)
+	if backendFn == nil {
+		return poolHandler
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Shortcut fleet mode: no pool at all, serve from backend.
+		if poolAdapter == nil {
+			serveStatsViaBackend(w, r, backendFn)
+			return
+		}
+		// Try pool path first via a recorder so 5xx falls through.
+		rec := httptest.NewRecorder()
+		poolHandler.ServeHTTP(rec, r)
+		if rec.Code >= 500 {
+			serveStatsViaBackend(w, r, backendFn)
+			return
+		}
+		for k, v := range rec.Header() {
+			w.Header()[k] = v
+		}
+		w.WriteHeader(rec.Code)
+		_, _ = w.Write(rec.Body.Bytes())
+	}
+}
+
+// serveStatsViaBackend writes a /stats response sourced from the
+// IssueBackend.Stats() projection rather than the daemon RPC pool.
+func serveStatsViaBackend(w http.ResponseWriter, r *http.Request, backendFn IssueBackendFn) {
+	be := backendFn()
+	if be == nil {
+		handler.WriteJSON(w, http.StatusServiceUnavailable, StatsResponse{
+			Success: false,
+			Error:   "issue backend not configured",
+		})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	data, err := be.Stats(ctx)
+	if err != nil {
+		handler.WriteJSON(w, http.StatusInternalServerError, StatsResponse{
+			Success: false,
+			Error:   err.Error(),
+		})
+		return
+	}
+	stats := &types.Statistics{
+		TotalIssues:             data.TotalIssues,
+		OpenIssues:              data.OpenIssues,
+		InProgressIssues:        data.InProgressIssues,
+		ClosedIssues:            data.ClosedIssues,
+		BlockedIssues:           data.BlockedIssues,
+		DeferredIssues:          data.DeferredIssues,
+		ReadyIssues:             data.ReadyIssues,
+		TombstoneIssues:         data.TombstoneIssues,
+		PinnedIssues:            data.PinnedIssues,
+		EpicsEligibleForClosure: data.EpicsEligibleForClosure,
+	}
+	handler.WriteJSON(w, http.StatusOK, StatsResponse{Success: true, Data: stats})
 }
 
 // HandleStatsWithPool is the implementation that accepts an interface for testing.
