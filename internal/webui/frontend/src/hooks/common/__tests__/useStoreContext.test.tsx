@@ -35,12 +35,17 @@ const {
     isLoading: false,
   });
 
-  const _makeMockAgentStoreMethods = () => ({
-    reset: vi.fn(),
-    startPolling: vi.fn(),
-    stopPolling: vi.fn(),
-    isLoading: false,
-  });
+  const _makeMockAgentStoreMethods = () => {
+    const disposer = vi.fn();
+    return {
+      reset: vi.fn(),
+      start: vi.fn(() => disposer),
+      stop: vi.fn(),
+      setReconnectAttempts: vi.fn(),
+      disposer,
+      isLoading: false,
+    };
+  };
 
   type MockIssueStoreMethods = ReturnType<typeof _makeMockIssueStoreMethods>;
   type MockAgentStoreMethods = ReturnType<typeof _makeMockAgentStoreMethods>;
@@ -385,14 +390,23 @@ describe("useStoreContext", () => {
   // 8. Initial startPolling
   // -----------------------------------------------------------------------
 
-  describe("Initial polling", () => {
-    it("calls startPolling with pollInterval 5000", () => {
+  describe("Initial start", () => {
+    it("calls start with workspaceId and subscribe function", () => {
       renderHook(() => useAgentStoreInstance(), { wrapper });
 
-      expect(agentMethodsRef.current.startPolling).toHaveBeenCalledWith({
-        pollInterval: 5000,
-        workspaceId: "test-ws-id",
-      });
+      expect(agentMethodsRef.current.start).toHaveBeenCalledWith(
+        "test-ws-id",
+        mockEvent.subscribe,
+      );
+    });
+
+    it("mirrors reconnectAttempts into agentStore.setReconnectAttempts", () => {
+      mockEvent.reconnectAttempts = 5;
+      renderHook(() => useAgentStoreInstance(), { wrapper });
+
+      expect(agentMethodsRef.current.setReconnectAttempts).toHaveBeenCalledWith(
+        5,
+      );
     });
   });
 
@@ -401,30 +415,35 @@ describe("useStoreContext", () => {
   // -----------------------------------------------------------------------
 
   describe("Workspace change", () => {
-    it("resets both stores and re-starts agent polling on workspace change", () => {
+    it("resets both stores and re-starts agent on workspace change", () => {
       const { rerender } = renderHook(() => useIssueStoreInstance(), {
         wrapper,
       });
 
+      // Capture the disposer returned by the initial start() so we can
+      // assert it was called as the cleanup before re-start.
+      const initialDisposer = agentMethodsRef.current.disposer;
+
       // Clear initial calls
       issueMethodsRef.current.reset.mockClear();
       agentMethodsRef.current.reset.mockClear();
-      agentMethodsRef.current.startPolling.mockClear();
-      agentMethodsRef.current.stopPolling.mockClear();
+      agentMethodsRef.current.start.mockClear();
+      initialDisposer.mockClear();
 
       // Change workspace
       mockWorkspace.workspaceId = "new-ws-id";
       rerender();
 
-      expect(agentMethodsRef.current.stopPolling).toHaveBeenCalled();
+      // Cleanup of the prior effect runs the disposer
+      expect(initialDisposer).toHaveBeenCalled();
       expect(issueMethodsRef.current.reset).toHaveBeenCalled();
       expect(agentMethodsRef.current.reset).toHaveBeenCalled();
       // fetchIssues is NOT called by StoreWiring — App.tsx drives mode-based fetching
       expect(issueMethodsRef.current.fetchIssues).not.toHaveBeenCalled();
-      expect(agentMethodsRef.current.startPolling).toHaveBeenCalledWith({
-        pollInterval: 5000,
-        workspaceId: "new-ws-id",
-      });
+      expect(agentMethodsRef.current.start).toHaveBeenCalledWith(
+        "new-ws-id",
+        mockEvent.subscribe,
+      );
     });
   });
 
@@ -511,16 +530,17 @@ describe("useStoreContext", () => {
       expect(agentMethodsRef.current.reset).toHaveBeenCalled();
     });
 
-    it("calls stopPolling on agent store when unmounting", () => {
+    it("calls the disposer returned from agentStore.start when unmounting", () => {
       const { unmount } = renderHook(() => useIssueStoreInstance(), {
         wrapper,
       });
 
-      agentMethodsRef.current.stopPolling.mockClear();
+      const disposer = agentMethodsRef.current.disposer;
+      disposer.mockClear();
 
       unmount();
 
-      expect(agentMethodsRef.current.stopPolling).toHaveBeenCalled();
+      expect(disposer).toHaveBeenCalled();
     });
   });
 

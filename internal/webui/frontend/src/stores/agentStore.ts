@@ -1,8 +1,20 @@
 /**
  * Zustand vanilla store for agent state management.
- * Replaces useAgents hook (371 lines) with a single testable, framework-agnostic store.
- * Owns its own polling lifecycle (interval-based fetching, exponential backoff,
- * watchdog, visibility-change refetch) as vanilla JS — no React hooks needed.
+ *
+ * Lifecycle is SSE-signal-driven: `start(workspaceId, subscribeFn)` subscribes
+ * to `agent_state_change` mutations and refetches agent data on each signal.
+ * Status/tasks (no SSE equivalent) keep a 5s polling timer.
+ *
+ * Two disjoint fetch paths:
+ *   - fetchAgentData → drives isConnected / backoff. Runs on cold start, on
+ *     each SSE signal, and on a fallback 5s timer when SSE is wedged
+ *     (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS).
+ *   - fetchMonitorData → status + tasks. Runs on cold start and every 5s.
+ *     Failures log a warning only; never touches isConnected.
+ *
+ * `start()` returns an idempotent disposer. The caller (StoreWiring) returns
+ * it from useEffect cleanup. `stop()` exists so `reset()` can tear down
+ * without threading the disposer through.
  */
 
 import { createStore, type StoreApi } from "zustand/vanilla";
@@ -14,6 +26,9 @@ import {
   DEFAULT_STATS,
   DEFAULT_TASK_LISTS,
 } from "../api/agents/defaults";
+import { MAX_RECONNECT_ATTEMPTS } from "./issueStoreHelpers";
+import type { SubscribeFn } from "./issueStoreHelpers";
+import type { MutationPayload } from "../types";
 import type {
   LoomAgentStatus,
   LoomTaskSummary,
@@ -33,12 +48,8 @@ const MAX_RETRY_DELAY_S = 60;
 const BACKOFF_MULTIPLIER = 2;
 const STALE_BANNER_DELAY_MS = 5_000;
 const MAX_FAILURES_AT_CEILING = 5;
-const FETCH_TIMEOUT_MS = 15_000;
-const WATCHDOG_TIMEOUT_MS = 20_000;
-
-// ---------------------------------------------------------------------------
-// Default values (moved from useAgents.ts)
-// ---------------------------------------------------------------------------
+const MONITOR_POLL_INTERVAL_MS = 5_000;
+const FALLBACK_POLL_INTERVAL_MS = 5_000;
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -46,13 +57,6 @@ const WATCHDOG_TIMEOUT_MS = 20_000;
 
 export interface AgentStoreConfig {
   onToast?: (message: string) => void;
-}
-
-export interface PollingOptions {
-  pollInterval?: number; // ms, default 5000
-  // workspaceId is required for workspace-scoped fetches. Empty or unknown
-  // values result in empty responses rather than cross-workspace data leaks.
-  workspaceId: string;
 }
 
 export interface AgentStoreState {
@@ -84,9 +88,9 @@ export interface AgentStoreState {
 }
 
 export interface AgentStoreActions {
-  fetchData: () => Promise<void>;
-  startPolling: (options?: PollingOptions) => void;
-  stopPolling: () => void;
+  start: (workspaceId: string, subscribeFn: SubscribeFn) => () => void;
+  stop: () => void;
+  setReconnectAttempts: (attempts: number) => void;
   retryNow: () => void;
   getAgentByName: (name: string) => LoomAgentStatus | undefined;
   reset: () => void;
@@ -118,32 +122,6 @@ export const INITIAL_STATE: AgentStoreState = {
 };
 
 // ---------------------------------------------------------------------------
-// withTimeout utility (same logic as useAgents.ts)
-// ---------------------------------------------------------------------------
-
-async function withTimeout<T>(
-  promise: Promise<T>,
-  timeoutMs: number,
-  label: string,
-): Promise<T> {
-  let timeoutId: ReturnType<typeof setTimeout> | null = null;
-
-  const timeoutPromise = new Promise<T>((_, reject) => {
-    timeoutId = setTimeout(() => {
-      reject(new Error(`${label} timeout`));
-    }, timeoutMs);
-  });
-
-  try {
-    return await Promise.race([promise, timeoutPromise]);
-  } finally {
-    if (timeoutId !== null) {
-      clearTimeout(timeoutId);
-    }
-  }
-}
-
-// ---------------------------------------------------------------------------
 // deriveConnectionState
 // ---------------------------------------------------------------------------
 
@@ -168,19 +146,33 @@ export function createAgentStore(
   _initialConfig?: AgentStoreConfig,
 ): StoreApi<AgentStore> {
   // --- Closure state (not in Zustand — doesn't trigger re-renders) ---
-  let pollIntervalId: ReturnType<typeof setInterval> | null = null;
+  let activeDisposer: (() => void) | null = null;
+  let sseUnsubscribe: (() => void) | null = null;
+  let agentFetchController: AbortController | null = null;
+  let monitorFetchController: AbortController | null = null;
+  let monitorIntervalId: ReturnType<typeof setInterval> | null = null;
+  let fallbackIntervalId: ReturnType<typeof setInterval> | null = null;
+  let fallbackPollingActive = false;
+  let coldStartInFlight = false;
+  let pendingSignalDuringColdStart = false;
+  let visibilityHandler: (() => void) | null = null;
+
+  // Monotonic generation counter — bumped on every start() invocation.
+  // The cold-start `.finally` callback captures the generation it was scheduled
+  // under and bails if a newer start() has already begun. Prevents a stale
+  // (aborted) cold-start finally from clobbering the new start's
+  // `coldStartInFlight` flag during a rapid workspace switch.
+  let startGeneration = 0;
+
   let retryTimeoutId: ReturnType<typeof setTimeout> | null = null;
   let countdownIntervalId: ReturnType<typeof setInterval> | null = null;
   let staleBannerTimeoutId: ReturnType<typeof setTimeout> | null = null;
-  let fetchInProgress = false;
-  let fetchStartTime = 0;
   let currentRetryDelay = INITIAL_RETRY_DELAY_S;
   let consecutiveFailuresAtCeiling = 0;
-  let visibilityHandler: (() => void) | null = null;
-  let isPolling = false;
-  // Active workspace ID set by startPolling. fetchData reads it per call so
-  // callers don't pass it on every invocation, and so retryNow/visibility
-  // refetches use the same workspace as the polling loop.
+
+  // Active workspace ID set by start(). fetchAgentData / fetchMonitorData
+  // read it per call so the disposer can guard against late writes after a
+  // workspace switch.
   let activeWorkspaceID = "";
 
   // Drops entries from `patch` whose serialized value equals the current
@@ -266,12 +258,11 @@ export function createAgentStore(
     retryTimeoutId = setTimeout(() => {
       clearRetryTimers();
       set({ retryCountdown: 0 });
-      // Increase backoff for next attempt
       currentRetryDelay = Math.min(
         currentRetryDelay * BACKOFF_MULTIPLIER,
         MAX_RETRY_DELAY_S,
       );
-      void get().fetchData();
+      if (activeWorkspaceID) void fetchAgentData(activeWorkspaceID);
     }, delay * 1000);
   }
 
@@ -309,217 +300,182 @@ export function createAgentStore(
     }
   }
 
-  // --- Store ---
+  // ---------------------------------------------------------------------
+  // Fetch paths
+  // ---------------------------------------------------------------------
 
-  const store = createStore<AgentStore>((set, get) => ({
-    ...INITIAL_STATE,
+  // Hoisted refs to set/get filled in by createStore below — needed so the
+  // top-level fetchAgentData/fetchMonitorData helpers can update store state
+  // without being re-defined inside the actions block on every call.
+  let storeSet: ((partial: Partial<AgentStore>) => void) | null = null;
+  let storeGet: (() => AgentStore) | null = null;
 
-    async fetchData(): Promise<void> {
-      if (fetchInProgress) return;
+  async function fetchAgentData(wsID: string): Promise<void> {
+    if (!storeSet || !storeGet) return;
+    const set = storeSet;
+    const get = storeGet;
 
-      fetchInProgress = true;
-      fetchStartTime = Date.now();
-      set({ isLoading: true });
+    // Abort any in-flight agent fetch so the new call always proceeds.
+    if (agentFetchController) agentFetchController.abort();
+    const controller = new AbortController();
+    agentFetchController = controller;
 
-      // Pin wsID so awaits in this cycle can't splice data across a
-      // workspace switch.
-      const wsID = activeWorkspaceID;
+    set({ isLoading: true });
+    try {
+      const agents = await fetchAgents(wsID, { signal: controller.signal });
+      // Pin workspace switch + supersession safety
+      if (agentFetchController !== controller) return;
+      if (wsID !== activeWorkspaceID) return;
 
+      const now = Date.now();
+      set(
+        skipIfEqual(
+          {
+            agents,
+            isConnected: true,
+            error: null,
+            lastUpdated: now,
+            isLoading: false,
+          },
+          get(),
+          ["agents"] as const,
+        ),
+      );
+      reportSuccess(set);
+      const state = get();
+      set({
+        connectionState: deriveConnectionState(
+          true,
+          false,
+          state.wasEverConnected,
+          state.retryCountdown,
+        ),
+      });
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") return;
+      if (agentFetchController !== controller) return;
+      const error = err instanceof Error ? err : new Error(String(err));
+      set({ error, isConnected: false, isLoading: false });
+      reportFailure(set, get);
+      const state = get();
+      set({
+        connectionState: deriveConnectionState(
+          false,
+          false,
+          state.wasEverConnected,
+          state.retryCountdown,
+        ),
+      });
+    } finally {
+      if (agentFetchController === controller) agentFetchController = null;
+    }
+  }
+
+  async function fetchMonitorData(wsID: string): Promise<void> {
+    if (!storeSet || !storeGet) return;
+    const set = storeSet;
+    const get = storeGet;
+
+    if (monitorFetchController) monitorFetchController.abort();
+    const controller = new AbortController();
+    monitorFetchController = controller;
+
+    try {
       try {
-        const agentsResult = await withTimeout(
-          fetchAgents(wsID),
-          FETCH_TIMEOUT_MS,
-          "Agent fetch",
-        );
+        const statusResult = await fetchStatus(wsID, {
+          signal: controller.signal,
+        });
+        if (monitorFetchController !== controller) return;
         if (wsID !== activeWorkspaceID) return;
-
-        // Primary success
-        const now = Date.now();
         set(
           skipIfEqual(
             {
-              agents: agentsResult,
-              isConnected: true,
-              error: null,
-              lastUpdated: now,
-              isLoading: false,
+              tasks: statusResult.tasks,
+              agentTasks: statusResult.agentTasks,
+              sync: statusResult.sync,
+              stats: statusResult.stats,
             },
             get(),
-            ["agents"] as const,
+            ["tasks", "agentTasks", "sync", "stats"] as const,
           ),
         );
-
-        reportSuccess(set);
-
-        // Derive connection state
-        const state = get();
-        set({
-          connectionState: deriveConnectionState(
-            true,
-            false,
-            state.wasEverConnected,
-            state.retryCountdown,
-          ),
-        });
-
-        // Fire secondary fetches (fire-and-forget)
-        void (async () => {
-          try {
-            const statusResult = await withTimeout(
-              fetchStatus(wsID),
-              FETCH_TIMEOUT_MS,
-              "Status fetch",
-            );
-            if (wsID !== activeWorkspaceID) return;
-            set(
-              skipIfEqual(
-                {
-                  tasks: statusResult.tasks,
-                  agentTasks: statusResult.agentTasks,
-                  sync: statusResult.sync,
-                  stats: statusResult.stats,
-                },
-                get(),
-                ["tasks", "agentTasks", "sync", "stats"] as const,
-              ),
-            );
-          } catch (statusError) {
-            console.warn(
-              "Loom status fetch failed:",
-              statusError instanceof Error
-                ? statusError.message
-                : String(statusError),
-            );
-          }
-        })();
-
-        void (async () => {
-          try {
-            const tasksResult = await withTimeout(
-              fetchTasks(wsID),
-              FETCH_TIMEOUT_MS,
-              "Tasks fetch",
-            );
-            if (wsID !== activeWorkspaceID) return;
-            set(
-              skipIfEqual({ taskLists: tasksResult }, get(), [
-                "taskLists",
-              ] as const),
-            );
-          } catch (taskError) {
-            console.warn(
-              "Loom tasks fetch failed:",
-              taskError instanceof Error
-                ? taskError.message
-                : String(taskError),
-            );
-          }
-        })();
       } catch (err) {
-        // Primary failure
-        const error = err instanceof Error ? err : new Error(String(err));
-        set({
-          error,
-          isConnected: false,
-          isLoading: false,
+        if (!(err instanceof DOMException && err.name === "AbortError")) {
+          console.warn(
+            "Loom status fetch failed:",
+            err instanceof Error ? err.message : String(err),
+          );
+        }
+      }
+
+      try {
+        const tasksResult = await fetchTasks(wsID, {
+          signal: controller.signal,
         });
-
-        reportFailure(set, get);
-
-        // Derive connection state
-        const state = get();
-        set({
-          connectionState: deriveConnectionState(
-            false,
-            false,
-            state.wasEverConnected,
-            state.retryCountdown,
-          ),
-        });
-      } finally {
-        fetchInProgress = false;
+        if (monitorFetchController !== controller) return;
+        if (wsID !== activeWorkspaceID) return;
+        set(
+          skipIfEqual({ taskLists: tasksResult }, get(), [
+            "taskLists",
+          ] as const),
+        );
+      } catch (err) {
+        if (!(err instanceof DOMException && err.name === "AbortError")) {
+          console.warn(
+            "Loom tasks fetch failed:",
+            err instanceof Error ? err.message : String(err),
+          );
+        }
       }
-    },
+    } finally {
+      if (monitorFetchController === controller) monitorFetchController = null;
+    }
+  }
 
-    startPolling(options?: PollingOptions): void {
-      // If already polling, stop first
-      if (isPolling) {
-        get().stopPolling();
+  // ---------------------------------------------------------------------
+  // Internal teardown — runs as the disposer body. Idempotent.
+  // ---------------------------------------------------------------------
+
+  function tearDown(): void {
+    if (sseUnsubscribe) {
+      try {
+        sseUnsubscribe();
+      } catch (err) {
+        console.warn("[agentStore] SSE unsubscribe threw:", err);
       }
+      sseUnsubscribe = null;
+    }
+    if (monitorIntervalId) {
+      clearInterval(monitorIntervalId);
+      monitorIntervalId = null;
+    }
+    if (fallbackIntervalId) {
+      clearInterval(fallbackIntervalId);
+      fallbackIntervalId = null;
+    }
+    if (agentFetchController) {
+      agentFetchController.abort();
+      agentFetchController = null;
+    }
+    if (monitorFetchController) {
+      monitorFetchController.abort();
+      monitorFetchController = null;
+    }
+    if (visibilityHandler && typeof document !== "undefined") {
+      document.removeEventListener("visibilitychange", visibilityHandler);
+      visibilityHandler = null;
+    }
 
-      // Empty workspaceId would cause every poll tick to fire a doomed
-      // /api/workspaces//monitor/agents request — the backend rejects it and
-      // the store would churn state on each tick. The caller hasn't resolved
-      // a workspace yet; wait for the next startPolling call with a real ID.
-      const wsID = options?.workspaceId ?? "";
-      if (wsID === "") {
-        return;
-      }
+    clearRetryTimers();
+    clearStaleBannerTimer();
 
-      const interval = options?.pollInterval ?? 5000;
+    fallbackPollingActive = false;
+    coldStartInFlight = false;
+    pendingSignalDuringColdStart = false;
 
-      // Reset backoff so a new workspace doesn't inherit stale retry delay
-      // from a previous workspace's failure streak.
-      if (wsID !== activeWorkspaceID) {
-        currentRetryDelay = INITIAL_RETRY_DELAY_S;
-        consecutiveFailuresAtCeiling = 0;
-      }
-
-      activeWorkspaceID = wsID;
-      isPolling = true;
-
-      // Initial fetch
-      void get().fetchData();
-
-      // Setup polling with watchdog (only if interval > 0)
-      if (interval > 0) {
-        pollIntervalId = setInterval(() => {
-          // Watchdog: if previous fetch has been running past the timeout
-          if (
-            fetchInProgress &&
-            Date.now() - fetchStartTime > WATCHDOG_TIMEOUT_MS
-          ) {
-            console.warn(
-              "Agent fetch watchdog: force-resetting stale fetch lock",
-            );
-            fetchInProgress = false;
-          }
-          void get().fetchData();
-        }, interval);
-      }
-
-      // Visibility change handler (guarded for non-browser environments)
-      if (typeof document !== "undefined") {
-        visibilityHandler = () => {
-          if (document.visibilityState === "visible") {
-            // Force-reset in case previous fetch was orphaned during background
-            fetchInProgress = false;
-            void get().fetchData();
-          }
-        };
-        document.addEventListener("visibilitychange", visibilityHandler);
-      }
-    },
-
-    stopPolling(): void {
-      if (pollIntervalId) {
-        clearInterval(pollIntervalId);
-        pollIntervalId = null;
-      }
-
-      clearRetryTimers();
-      clearStaleBannerTimer();
-
-      if (visibilityHandler && typeof document !== "undefined") {
-        document.removeEventListener("visibilitychange", visibilityHandler);
-        visibilityHandler = null;
-      }
-
-      isPolling = false;
-
-      // Reset retry state and re-derive connectionState
-      const state = get();
-      set({
+    if (storeSet && storeGet) {
+      const state = storeGet();
+      storeSet({
         retryCountdown: 0,
         connectionState: deriveConnectionState(
           state.isConnected,
@@ -528,32 +484,172 @@ export function createAgentStore(
           0,
         ),
       });
-    },
+    }
+  }
 
-    retryNow(): void {
-      clearRetryTimers();
-      currentRetryDelay = INITIAL_RETRY_DELAY_S;
-      consecutiveFailuresAtCeiling = 0;
-      set({ connectionLost: false, retryCountdown: 0 });
-      void get().fetchData();
-    },
+  // ---------------------------------------------------------------------
+  // Store
+  // ---------------------------------------------------------------------
 
-    getAgentByName(name: string): LoomAgentStatus | undefined {
-      return get().agents.find((a) => a.name === name);
-    },
+  const store = createStore<AgentStore>((set, get) => {
+    storeSet = set;
+    storeGet = get;
 
-    reset(): void {
-      get().stopPolling();
+    return {
+      ...INITIAL_STATE,
 
-      fetchInProgress = false;
-      fetchStartTime = 0;
-      currentRetryDelay = INITIAL_RETRY_DELAY_S;
-      consecutiveFailuresAtCeiling = 0;
-      isPolling = false;
+      start(workspaceId: string, subscribeFn: SubscribeFn): () => void {
+        // Empty workspaceId: no subscription, no fetch, no timer.
+        if (workspaceId === "") {
+          if (
+            typeof process !== "undefined" &&
+            process.env?.NODE_ENV !== "production"
+          ) {
+            console.warn(
+              "[agentStore] start() called with empty workspaceId — no-op",
+            );
+          }
+          return () => {};
+        }
 
-      set({ ...INITIAL_STATE });
-    },
-  }));
+        // Re-entry: tear down the prior subscription so we don't leak
+        // SSE listeners across rapid workspace switches.
+        if (activeDisposer) {
+          activeDisposer();
+        }
+
+        // Reset backoff on workspace change so a new workspace doesn't
+        // inherit a stale retry delay from a previous workspace's failure
+        // streak.
+        if (workspaceId !== activeWorkspaceID) {
+          currentRetryDelay = INITIAL_RETRY_DELAY_S;
+          consecutiveFailuresAtCeiling = 0;
+        }
+        activeWorkspaceID = workspaceId;
+
+        // 1. Subscribe BEFORE the cold-start fetch — guarantees no SSE
+        //    signal is dropped while the initial fetch is in flight.
+        const myGeneration = ++startGeneration;
+        coldStartInFlight = true;
+        pendingSignalDuringColdStart = false;
+        sseUnsubscribe = subscribeFn(
+          (mutation: MutationPayload) => {
+            // Workspace gate (belt-and-suspenders on top of EventProvider's
+            // per-workspace SSE client; defends against stale callbacks
+            // during a workspace-switch race).
+            if (
+              mutation.workspace_id &&
+              mutation.workspace_id !== activeWorkspaceID
+            ) {
+              return;
+            }
+            if (coldStartInFlight) {
+              pendingSignalDuringColdStart = true;
+              return;
+            }
+            if (activeWorkspaceID) void fetchAgentData(activeWorkspaceID);
+          },
+          { types: ["agent_state_change"] },
+        );
+
+        // 2. Cold-start fetch. Bind the finally to this specific promise
+        //    AND this start() generation: a stale finally from a prior
+        //    start() (whose fetch was aborted by tearDown) must not clobber
+        //    the new start's `coldStartInFlight` flag.
+        const coldStartPromise = fetchAgentData(workspaceId);
+        coldStartPromise.finally(() => {
+          if (myGeneration !== startGeneration) return;
+          coldStartInFlight = false;
+          if (pendingSignalDuringColdStart) {
+            pendingSignalDuringColdStart = false;
+            if (activeWorkspaceID) void fetchAgentData(activeWorkspaceID);
+          }
+        });
+        void fetchMonitorData(workspaceId);
+
+        // 3. Monitor poll timer (always on; status/tasks have no SSE).
+        monitorIntervalId = setInterval(() => {
+          if (activeWorkspaceID) void fetchMonitorData(activeWorkspaceID);
+        }, MONITOR_POLL_INTERVAL_MS);
+
+        // 4. Visibility handler — refetch both paths on tab focus.
+        if (typeof document !== "undefined") {
+          visibilityHandler = () => {
+            if (document.visibilityState === "visible") {
+              if (activeWorkspaceID) {
+                void fetchAgentData(activeWorkspaceID);
+                void fetchMonitorData(activeWorkspaceID);
+              }
+            }
+          };
+          document.addEventListener("visibilitychange", visibilityHandler);
+        }
+
+        // 5. Idempotent disposer.
+        const disposer = (): void => {
+          if (activeDisposer !== disposer) return;
+          activeDisposer = null;
+          tearDown();
+        };
+        activeDisposer = disposer;
+        return disposer;
+      },
+
+      stop(): void {
+        if (activeDisposer) activeDisposer();
+      },
+
+      setReconnectAttempts(attempts: number): void {
+        // No active session: ignore. Without this guard, fallbackIntervalId
+        // would be set up with no disposer to clean it up — leaks the timer
+        // until process exit. This also avoids spawning a fallback timer
+        // before start() has run (e.g. if EventProvider's reconnectAttempts
+        // hits the threshold before workspaceId resolves).
+        if (!activeWorkspaceID) return;
+
+        const shouldFallback = attempts >= MAX_RECONNECT_ATTEMPTS;
+        if (shouldFallback && !fallbackPollingActive) {
+          fallbackPollingActive = true;
+          void fetchAgentData(activeWorkspaceID);
+          fallbackIntervalId = setInterval(() => {
+            if (activeWorkspaceID) void fetchAgentData(activeWorkspaceID);
+          }, FALLBACK_POLL_INTERVAL_MS);
+        } else if (!shouldFallback && fallbackPollingActive) {
+          fallbackPollingActive = false;
+          if (fallbackIntervalId) {
+            clearInterval(fallbackIntervalId);
+            fallbackIntervalId = null;
+          }
+        }
+
+        if (attempts >= MAX_RECONNECT_ATTEMPTS) {
+          set({ connectionLost: true });
+        }
+      },
+
+      retryNow(): void {
+        clearRetryTimers();
+        currentRetryDelay = INITIAL_RETRY_DELAY_S;
+        consecutiveFailuresAtCeiling = 0;
+        set({ connectionLost: false, retryCountdown: 0 });
+        if (activeWorkspaceID) void fetchAgentData(activeWorkspaceID);
+      },
+
+      getAgentByName(name: string): LoomAgentStatus | undefined {
+        return get().agents.find((a) => a.name === name);
+      },
+
+      reset(): void {
+        get().stop();
+
+        currentRetryDelay = INITIAL_RETRY_DELAY_S;
+        consecutiveFailuresAtCeiling = 0;
+        activeWorkspaceID = "";
+
+        set({ ...INITIAL_STATE });
+      },
+    };
+  });
 
   return store;
 }

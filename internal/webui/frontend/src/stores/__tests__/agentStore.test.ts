@@ -1,21 +1,29 @@
 /**
  * Unit tests for agentStore.
+ *
+ * The store's lifecycle is SSE-driven: `start(workspaceId, subscribeFn)`
+ * subscribes to `agent_state_change` mutations and refetches agent data on
+ * each signal. Status/tasks (no SSE equivalent) keep a 5s polling timer.
+ *
  * All tests use the vanilla store directly — no React rendering needed.
- * Uses vi.useFakeTimers() for timer control.
+ * Uses vi.useFakeTimers() for timer control. Tests pass a mock subscribeFn
+ * that captures the registered callback so signals can be emitted directly.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 import { createAgentStore, INITIAL_STATE } from "../agentStore";
 import type { AgentStore } from "../agentStore";
+import type { SubscribeFn } from "../issueStoreHelpers";
 import type { StoreApi } from "zustand/vanilla";
 import type { LoomAgentStatus } from "../../types";
+import type { MutationPayload, MutationType } from "../../types";
 
 // ---------------------------------------------------------------------------
 // Minimal document mock for visibility change tests
 // ---------------------------------------------------------------------------
 
-const listeners = new Map<string, Set<() => void>>();
+const docListeners = new Map<string, Set<() => void>>();
 let mockVisibilityState = "visible";
 
 const mockDocument = {
@@ -23,19 +31,18 @@ const mockDocument = {
     return mockVisibilityState;
   },
   addEventListener(event: string, handler: () => void) {
-    if (!listeners.has(event)) listeners.set(event, new Set());
-    listeners.get(event)!.add(handler);
+    if (!docListeners.has(event)) docListeners.set(event, new Set());
+    docListeners.get(event)!.add(handler);
   },
   removeEventListener(event: string, handler: () => void) {
-    listeners.get(event)?.delete(handler);
+    docListeners.get(event)?.delete(handler);
   },
   dispatchEvent(event: Event) {
-    listeners.get(event.type)?.forEach((h) => h());
+    docListeners.get(event.type)?.forEach((h) => h());
     return true;
   },
 };
 
-// Assign to globalThis so the store can access it
 Object.defineProperty(globalThis, "document", {
   value: mockDocument,
   writable: true,
@@ -70,6 +77,48 @@ function makeAgent(overrides: Partial<LoomAgentStatus> = {}): LoomAgentStatus {
     ahead: 0,
     behind: 0,
     ...overrides,
+  };
+}
+
+function makeMutation(
+  type: MutationType,
+  workspaceId?: string,
+): MutationPayload {
+  return {
+    type,
+    issue_id: "",
+    timestamp: new Date().toISOString(),
+    ...(workspaceId !== undefined ? { workspace_id: workspaceId } : {}),
+  };
+}
+
+interface SubscribeHarness {
+  subscribe: SubscribeFn;
+  spy: ReturnType<typeof vi.fn>;
+  emit: (mutation: MutationPayload) => void;
+  unsubscribeSpy: ReturnType<typeof vi.fn>;
+  listenerCount: () => number;
+}
+
+function makeSubscribe(): SubscribeHarness {
+  const callbacks: Array<(m: MutationPayload) => void> = [];
+  const unsubscribeSpy = vi.fn();
+  const spy = vi.fn();
+  const subscribe: SubscribeFn = (cb, opts) => {
+    spy(cb, opts);
+    callbacks.push(cb);
+    return () => {
+      unsubscribeSpy();
+      const i = callbacks.indexOf(cb);
+      if (i >= 0) callbacks.splice(i, 1);
+    };
+  };
+  return {
+    subscribe,
+    spy,
+    emit: (m) => callbacks.forEach((cb) => cb(m)),
+    unsubscribeSpy,
+    listenerCount: () => callbacks.length,
   };
 }
 
@@ -118,6 +167,15 @@ function setupSuccessfulMocks(): void {
   });
 }
 
+// flushMicrotasks drains promise continuations without burning past the 15s
+// timeout in fetchAgents/fetchStatus/fetchTasks. Tests with hung mocks rely
+// on this — runAllTimersAsync would trip the fetch's internal timeout.
+async function flushMicrotasks(rounds = 4): Promise<void> {
+  for (let i = 0; i < rounds; i++) {
+    await vi.advanceTimersByTimeAsync(0);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -129,7 +187,7 @@ describe("agentStore", () => {
     vi.useFakeTimers();
     store = createAgentStore();
     vi.clearAllMocks();
-    listeners.clear();
+    docListeners.clear();
     mockVisibilityState = "visible";
   });
 
@@ -139,7 +197,7 @@ describe("agentStore", () => {
   });
 
   // -----------------------------------------------------------------------
-  // 1. Initial state
+  // Initial state
   // -----------------------------------------------------------------------
 
   describe("initial state", () => {
@@ -165,14 +223,166 @@ describe("agentStore", () => {
   });
 
   // -----------------------------------------------------------------------
-  // 2. fetchData — success
+  // start / stop lifecycle
   // -----------------------------------------------------------------------
 
-  describe("fetchData", () => {
-    it("populates agents and sets connected state on success", async () => {
+  describe("start / stop lifecycle", () => {
+    it("subscribes once with agent_state_change type filter", async () => {
       setupSuccessfulMocks();
+      const sub = makeSubscribe();
 
-      await store.getState().fetchData();
+      store.getState().start("ws-1", sub.subscribe);
+      await flushMicrotasks();
+
+      expect(sub.spy).toHaveBeenCalledTimes(1);
+      expect(sub.spy.mock.calls[0]![1]).toEqual({
+        types: ["agent_state_change"],
+      });
+    });
+
+    it("calls fetchAgents/fetchStatus/fetchTasks once on cold start", async () => {
+      setupSuccessfulMocks();
+      const sub = makeSubscribe();
+
+      store.getState().start("ws-1", sub.subscribe);
+      await flushMicrotasks();
+
+      expect(mockFetchAgents).toHaveBeenCalledTimes(1);
+      expect(mockFetchAgents).toHaveBeenCalledWith("ws-1", expect.anything());
+      expect(mockFetchStatus).toHaveBeenCalledTimes(1);
+      expect(mockFetchTasks).toHaveBeenCalledTimes(1);
+    });
+
+    it("subscribe is invoked before the first fetchAgents call", async () => {
+      setupSuccessfulMocks();
+      const sub = makeSubscribe();
+
+      store.getState().start("ws-1", sub.subscribe);
+      await flushMicrotasks();
+
+      const subscribeOrder = sub.spy.mock.invocationCallOrder[0]!;
+      const fetchOrder = mockFetchAgents.mock.invocationCallOrder[0]!;
+      expect(subscribeOrder).toBeLessThan(fetchOrder);
+    });
+
+    it("monitor 5s timer fires fetchStatus/fetchTasks every tick", async () => {
+      setupSuccessfulMocks();
+      const sub = makeSubscribe();
+
+      store.getState().start("ws-1", sub.subscribe);
+      await flushMicrotasks();
+      expect(mockFetchStatus).toHaveBeenCalledTimes(1);
+      expect(mockFetchTasks).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(mockFetchStatus).toHaveBeenCalledTimes(2);
+      expect(mockFetchTasks).toHaveBeenCalledTimes(2);
+
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(mockFetchStatus).toHaveBeenCalledTimes(3);
+      expect(mockFetchTasks).toHaveBeenCalledTimes(3);
+    });
+
+    it("monitor timer does NOT call fetchAgents (no fallback active)", async () => {
+      setupSuccessfulMocks();
+      const sub = makeSubscribe();
+
+      store.getState().start("ws-1", sub.subscribe);
+      await flushMicrotasks();
+      expect(mockFetchAgents).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(15000);
+      expect(mockFetchAgents).toHaveBeenCalledTimes(1);
+    });
+
+    it("disposer tears down: no further fetches after dispose", async () => {
+      setupSuccessfulMocks();
+      const sub = makeSubscribe();
+
+      const dispose = store.getState().start("ws-1", sub.subscribe);
+      await flushMicrotasks();
+      const fetchAgentsCalls = mockFetchAgents.mock.calls.length;
+      const fetchStatusCalls = mockFetchStatus.mock.calls.length;
+
+      dispose();
+      await vi.advanceTimersByTimeAsync(60000);
+
+      expect(mockFetchAgents.mock.calls.length).toBe(fetchAgentsCalls);
+      expect(mockFetchStatus.mock.calls.length).toBe(fetchStatusCalls);
+    });
+
+    it("disposer is idempotent (no throw on double-call)", async () => {
+      setupSuccessfulMocks();
+      const sub = makeSubscribe();
+
+      const dispose = store.getState().start("ws-1", sub.subscribe);
+      await flushMicrotasks();
+
+      expect(() => dispose()).not.toThrow();
+      expect(() => dispose()).not.toThrow();
+      expect(sub.unsubscribeSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it("emitting a signal after dispose does not call fetchAgents", async () => {
+      setupSuccessfulMocks();
+      const sub = makeSubscribe();
+
+      const dispose = store.getState().start("ws-1", sub.subscribe);
+      await flushMicrotasks();
+      const callsBefore = mockFetchAgents.mock.calls.length;
+
+      dispose();
+      sub.emit(makeMutation("agent_state_change", "ws-1"));
+      await flushMicrotasks();
+
+      expect(mockFetchAgents.mock.calls.length).toBe(callsBefore);
+      expect(sub.listenerCount()).toBe(0);
+    });
+
+    it("start('') is a no-op (no fetch, no subscribe, no timer)", async () => {
+      setupSuccessfulMocks();
+      const sub = makeSubscribe();
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      const dispose = store.getState().start("", sub.subscribe);
+      await vi.advanceTimersByTimeAsync(30000);
+
+      expect(sub.spy).not.toHaveBeenCalled();
+      expect(mockFetchAgents).not.toHaveBeenCalled();
+      expect(mockFetchStatus).not.toHaveBeenCalled();
+      expect(mockFetchTasks).not.toHaveBeenCalled();
+      expect(() => dispose()).not.toThrow();
+
+      warnSpy.mockRestore();
+    });
+
+    it("calling start again tears down the previous subscription", async () => {
+      setupSuccessfulMocks();
+      const sub = makeSubscribe();
+
+      store.getState().start("ws-1", sub.subscribe);
+      await flushMicrotasks();
+      expect(sub.listenerCount()).toBe(1);
+
+      store.getState().start("ws-2", sub.subscribe);
+      await flushMicrotasks();
+
+      expect(sub.unsubscribeSpy).toHaveBeenCalledTimes(1);
+      expect(sub.listenerCount()).toBe(1);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // fetchAgentData / fetchMonitorData isolation
+  // -----------------------------------------------------------------------
+
+  describe("fetchAgentData + fetchMonitorData isolation", () => {
+    it("agent path drives isConnected on success", async () => {
+      setupSuccessfulMocks();
+      const sub = makeSubscribe();
+
+      store.getState().start("ws-1", sub.subscribe);
+      await flushMicrotasks();
 
       const state = store.getState();
       expect(state.agents).toHaveLength(1);
@@ -181,26 +391,58 @@ describe("agentStore", () => {
       expect(state.connectionState).toBe("connected");
       expect(state.error).toBeNull();
       expect(state.lastUpdated).toBeTypeOf("number");
-      expect(state.isLoading).toBe(false);
       expect(state.wasEverConnected).toBe(true);
     });
 
-    // -----------------------------------------------------------------------
-    // 3. fetchData — secondary fetches fire
-    // -----------------------------------------------------------------------
-
-    it("fires secondary fetches and populates their state", async () => {
+    it("agent path failure flips isConnected and schedules retry (when previously connected)", async () => {
+      // First connect
       setupSuccessfulMocks();
+      const sub = makeSubscribe();
+      store.getState().start("ws-1", sub.subscribe);
+      await flushMicrotasks();
+      expect(store.getState().isConnected).toBe(true);
 
-      await store.getState().fetchData();
-      // Let secondary fire-and-forget promises resolve
-      await vi.runAllTimersAsync();
+      // Now fail on next refetch — emit an SSE signal with a rejecting fetch
+      mockFetchAgents.mockRejectedValue(new Error("Network error"));
+      sub.emit(makeMutation("agent_state_change", "ws-1"));
+      await flushMicrotasks();
 
       const state = store.getState();
-      expect(mockFetchAgents).toHaveBeenCalledOnce();
-      expect(mockFetchStatus).toHaveBeenCalledOnce();
-      expect(mockFetchTasks).toHaveBeenCalledOnce();
+      expect(state.isConnected).toBe(false);
+      expect(state.error).toBeInstanceOf(Error);
+      expect(state.error!.message).toBe("Network error");
+      expect(state.retryCountdown).toBe(5);
+    });
 
+    it("monitor path failure logs warn and does NOT touch isConnected", async () => {
+      mockFetchAgents.mockResolvedValue([makeAgent()]);
+      mockFetchStatus.mockRejectedValue(new Error("Status failed"));
+      mockFetchTasks.mockRejectedValue(new Error("Tasks failed"));
+
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const sub = makeSubscribe();
+
+      store.getState().start("ws-1", sub.subscribe);
+      await flushMicrotasks();
+
+      const state = store.getState();
+      expect(state.isConnected).toBe(true);
+      expect(state.error).toBeNull();
+      expect(state.tasks).toEqual(INITIAL_STATE.tasks);
+      expect(state.taskLists).toEqual(INITIAL_STATE.taskLists);
+      expect(warnSpy).toHaveBeenCalledTimes(2);
+
+      warnSpy.mockRestore();
+    });
+
+    it("populates monitor data on success", async () => {
+      setupSuccessfulMocks();
+      const sub = makeSubscribe();
+
+      store.getState().start("ws-1", sub.subscribe);
+      await flushMicrotasks();
+
+      const state = store.getState();
       expect(state.tasks.needs_planning).toBe(1);
       expect(state.tasks.ready_to_implement).toBe(2);
       expect(state.agentTasks).toHaveProperty("nova");
@@ -209,154 +451,301 @@ describe("agentStore", () => {
       expect(state.taskLists.readyToImplement).toHaveLength(1);
     });
 
-    // -----------------------------------------------------------------------
-    // 4. fetchData — primary failure
-    // -----------------------------------------------------------------------
-
-    it("sets error and disconnected state on primary failure", async () => {
-      mockFetchAgents.mockRejectedValue(new Error("Network error"));
-
-      await store.getState().fetchData();
-
-      const state = store.getState();
-      expect(state.error).toBeInstanceOf(Error);
-      expect(state.error!.message).toBe("Network error");
-      expect(state.isConnected).toBe(false);
-      expect(state.connectionState).toBe("never_connected");
-      expect(state.isLoading).toBe(false);
-    });
-
-    // -----------------------------------------------------------------------
-    // 5. fetchData — secondary failure
-    // -----------------------------------------------------------------------
-
-    it("maintains connection on secondary fetch failure", async () => {
+    it("monitor failure does not prevent agent success", async () => {
       mockFetchAgents.mockResolvedValue([makeAgent()]);
       mockFetchStatus.mockRejectedValue(new Error("Status failed"));
-      mockFetchTasks.mockRejectedValue(new Error("Tasks failed"));
-
+      mockFetchTasks.mockResolvedValue({
+        needsPlanning: [],
+        readyToImplement: [],
+        needsReview: [],
+        inProgress: [],
+        backlog: [],
+        done: [],
+      });
       const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const sub = makeSubscribe();
 
-      await store.getState().fetchData();
-      await vi.runAllTimersAsync();
+      store.getState().start("ws-1", sub.subscribe);
+      await flushMicrotasks();
 
-      const state = store.getState();
-      expect(state.isConnected).toBe(true);
-      expect(state.tasks).toEqual(INITIAL_STATE.tasks); // retains default
-      expect(state.taskLists).toEqual(INITIAL_STATE.taskLists);
-      expect(warnSpy).toHaveBeenCalledTimes(2);
+      expect(store.getState().isConnected).toBe(true);
+      expect(store.getState().agents).toHaveLength(1);
 
       warnSpy.mockRestore();
     });
+  });
 
-    // -----------------------------------------------------------------------
-    // 6. fetchData — overlap prevention
-    // -----------------------------------------------------------------------
+  // -----------------------------------------------------------------------
+  // Cold-start race
+  // -----------------------------------------------------------------------
 
-    it("prevents overlapping fetches", async () => {
-      let resolve!: (value: LoomAgentStatus[]) => void;
-      mockFetchAgents.mockReturnValue(
-        new Promise<LoomAgentStatus[]>((r) => {
-          resolve = r;
-        }),
+  describe("cold-start race", () => {
+    it("coalesces signals during cold start into one refetch after resolve", async () => {
+      let resolveAgents!: (v: LoomAgentStatus[]) => void;
+      mockFetchAgents.mockImplementationOnce(
+        () =>
+          new Promise<LoomAgentStatus[]>((r) => {
+            resolveAgents = r;
+          }),
       );
+      mockFetchAgents.mockResolvedValue([makeAgent()]);
+      mockFetchStatus.mockResolvedValue({
+        agents: [],
+        tasks: INITIAL_STATE.tasks,
+        agentTasks: {},
+        sync: INITIAL_STATE.sync,
+        stats: INITIAL_STATE.stats,
+        timestamp: "",
+      });
+      mockFetchTasks.mockResolvedValue(INITIAL_STATE.taskLists);
+      const sub = makeSubscribe();
 
-      // Start first fetch (doesn't resolve yet)
-      const p1 = store.getState().fetchData();
-      // Second call should be no-op
-      const p2 = store.getState().fetchData();
+      store.getState().start("ws-1", sub.subscribe);
+      await flushMicrotasks();
+      expect(mockFetchAgents).toHaveBeenCalledTimes(1);
 
-      resolve([makeAgent()]);
-      await p1;
-      await p2;
+      sub.emit(makeMutation("agent_state_change", "ws-1"));
+      sub.emit(makeMutation("agent_state_change", "ws-1"));
+      sub.emit(makeMutation("agent_state_change", "ws-1"));
+      await flushMicrotasks();
+      // Cold start still in-flight — no extra fetches yet
+      expect(mockFetchAgents).toHaveBeenCalledTimes(1);
 
-      expect(mockFetchAgents).toHaveBeenCalledOnce();
+      resolveAgents([makeAgent()]);
+      await flushMicrotasks();
+      // Cold start + 1 coalesced refetch
+      expect(mockFetchAgents).toHaveBeenCalledTimes(2);
+
+      // Post-cold-start signal fires immediately
+      sub.emit(makeMutation("agent_state_change", "ws-1"));
+      await flushMicrotasks();
+      expect(mockFetchAgents).toHaveBeenCalledTimes(3);
+    });
+
+    it("no signal during cold start → no extra refetch after resolve", async () => {
+      setupSuccessfulMocks();
+      const sub = makeSubscribe();
+
+      store.getState().start("ws-1", sub.subscribe);
+      await flushMicrotasks();
+
+      expect(mockFetchAgents).toHaveBeenCalledTimes(1);
+    });
+
+    it("ignores signals for other workspaces", async () => {
+      setupSuccessfulMocks();
+      const sub = makeSubscribe();
+
+      store.getState().start("ws-1", sub.subscribe);
+      await flushMicrotasks();
+      expect(mockFetchAgents).toHaveBeenCalledTimes(1);
+
+      sub.emit(makeMutation("agent_state_change", "ws-2"));
+      await flushMicrotasks();
+      expect(mockFetchAgents).toHaveBeenCalledTimes(1);
+
+      sub.emit(makeMutation("agent_state_change", "ws-1"));
+      await flushMicrotasks();
+      expect(mockFetchAgents).toHaveBeenCalledTimes(2);
     });
   });
 
   // -----------------------------------------------------------------------
-  // 7-9. Polling
+  // Fallback polling
   // -----------------------------------------------------------------------
 
-  describe("polling", () => {
-    it("starts initial fetch and polls on interval", async () => {
+  describe("fallback polling", () => {
+    it("activates at threshold: immediate fetch + 5s interval", async () => {
       setupSuccessfulMocks();
+      const sub = makeSubscribe();
 
-      store
-        .getState()
-        .startPolling({ pollInterval: 5000, workspaceId: "ws-1" });
-      await vi.advanceTimersByTimeAsync(0); // initial fetch
+      store.getState().start("ws-1", sub.subscribe);
+      await flushMicrotasks();
+      const baseline = mockFetchAgents.mock.calls.length;
 
-      expect(mockFetchAgents).toHaveBeenCalledOnce();
+      store.getState().setReconnectAttempts(10);
+      await flushMicrotasks();
+      // Immediate fetch
+      expect(mockFetchAgents.mock.calls.length).toBe(baseline + 1);
 
-      await vi.advanceTimersByTimeAsync(5000); // first interval
-      expect(mockFetchAgents).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(5000);
+      // 5s interval tick (also a monitor tick — may also fire fetchStatus, but
+      // those are tracked separately).
+      expect(mockFetchAgents.mock.calls.length).toBe(baseline + 2);
 
-      await vi.advanceTimersByTimeAsync(5000); // second interval
-      expect(mockFetchAgents).toHaveBeenCalledTimes(3);
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(mockFetchAgents.mock.calls.length).toBe(baseline + 3);
     });
 
-    it("restarts polling when called again", async () => {
+    it("deactivates below threshold", async () => {
       setupSuccessfulMocks();
+      const sub = makeSubscribe();
 
-      store
-        .getState()
-        .startPolling({ pollInterval: 5000, workspaceId: "ws-1" });
-      await vi.advanceTimersByTimeAsync(0);
-      expect(mockFetchAgents).toHaveBeenCalledOnce();
+      store.getState().start("ws-1", sub.subscribe);
+      await flushMicrotasks();
 
-      store
-        .getState()
-        .startPolling({ pollInterval: 10000, workspaceId: "ws-1" });
-      await vi.advanceTimersByTimeAsync(0); // new initial fetch
-      expect(mockFetchAgents).toHaveBeenCalledTimes(2);
+      store.getState().setReconnectAttempts(10);
+      await flushMicrotasks();
+      const callsAtActivation = mockFetchAgents.mock.calls.length;
 
-      // At 10s only the new interval fires (not the old 5s one)
-      await vi.advanceTimersByTimeAsync(10000);
-      expect(mockFetchAgents).toHaveBeenCalledTimes(3);
+      store.getState().setReconnectAttempts(9);
+      await vi.advanceTimersByTimeAsync(15000);
+      // No further fallback-driven fetches
+      expect(mockFetchAgents.mock.calls.length).toBe(callsAtActivation);
     });
 
-    it("stops polling and clears timers", async () => {
+    it("setReconnectAttempts(0) before threshold is a no-op", async () => {
       setupSuccessfulMocks();
+      const sub = makeSubscribe();
 
-      store
-        .getState()
-        .startPolling({ pollInterval: 5000, workspaceId: "ws-1" });
-      await vi.advanceTimersByTimeAsync(0);
-      expect(mockFetchAgents).toHaveBeenCalledOnce();
+      store.getState().start("ws-1", sub.subscribe);
+      await flushMicrotasks();
+      const calls = mockFetchAgents.mock.calls.length;
 
-      store.getState().stopPolling();
-      await vi.advanceTimersByTimeAsync(60000);
-      // No additional fetches after stop
-      expect(mockFetchAgents).toHaveBeenCalledOnce();
+      store.getState().setReconnectAttempts(0);
+      await flushMicrotasks();
+      expect(mockFetchAgents.mock.calls.length).toBe(calls);
     });
 
-    it("starts with pollInterval=0 (initial fetch only)", async () => {
+    it("connectionLost flips on threshold", async () => {
+      setupSuccessfulMocks();
+      const sub = makeSubscribe();
+
+      store.getState().start("ws-1", sub.subscribe);
+      await flushMicrotasks();
+      expect(store.getState().connectionLost).toBe(false);
+
+      store.getState().setReconnectAttempts(10);
+      expect(store.getState().connectionLost).toBe(true);
+    });
+
+    it("connectionLost remains true when reconnectAttempts drops (cleared via reportSuccess/retryNow)", async () => {
+      setupSuccessfulMocks();
+      const sub = makeSubscribe();
+
+      store.getState().start("ws-1", sub.subscribe);
+      await flushMicrotasks();
+
+      store.getState().setReconnectAttempts(10);
+      expect(store.getState().connectionLost).toBe(true);
+
+      store.getState().setReconnectAttempts(0);
+      expect(store.getState().connectionLost).toBe(true);
+    });
+
+    it("setReconnectAttempts(10) without an active session is a no-op", async () => {
       setupSuccessfulMocks();
 
-      store.getState().startPolling({ pollInterval: 0, workspaceId: "ws-1" });
-      await vi.advanceTimersByTimeAsync(0);
-      expect(mockFetchAgents).toHaveBeenCalledOnce();
+      // No start() call — activeWorkspaceID is "".
+      store.getState().setReconnectAttempts(10);
+      // Advance to ensure no fallback timer was registered.
+      await vi.advanceTimersByTimeAsync(15000);
 
-      await vi.advanceTimersByTimeAsync(30000);
-      expect(mockFetchAgents).toHaveBeenCalledOnce();
+      expect(mockFetchAgents).not.toHaveBeenCalled();
+      expect(store.getState().connectionLost).toBe(false);
+    });
+
+    it("setReconnectAttempts(10) after reset is a no-op (no leaked interval)", async () => {
+      setupSuccessfulMocks();
+      const sub = makeSubscribe();
+
+      store.getState().start("ws-1", sub.subscribe);
+      await flushMicrotasks();
+      store.getState().reset();
+
+      mockFetchAgents.mockClear();
+      store.getState().setReconnectAttempts(10);
+      await vi.advanceTimersByTimeAsync(15000);
+
+      expect(mockFetchAgents).not.toHaveBeenCalled();
+      expect(store.getState().connectionLost).toBe(false);
     });
   });
 
   // -----------------------------------------------------------------------
-  // 10-12. Backoff
+  // Cold-start race — generation guard for rapid start() re-entry
+  // -----------------------------------------------------------------------
+
+  describe("cold-start generation guard", () => {
+    it("stale start's .finally does not clobber the new start's coldStartInFlight", async () => {
+      // ws-1 cold-start hangs.
+      let resolveWs1!: (v: LoomAgentStatus[]) => void;
+      mockFetchAgents.mockImplementationOnce(
+        () =>
+          new Promise<LoomAgentStatus[]>((r) => {
+            resolveWs1 = r;
+          }),
+      );
+      // ws-2 cold-start also hangs so we can observe whether the SSE signal
+      // mid-cold-start is coalesced or fires immediately.
+      let resolveWs2!: (v: LoomAgentStatus[]) => void;
+      mockFetchAgents.mockImplementationOnce(
+        () =>
+          new Promise<LoomAgentStatus[]>((r) => {
+            resolveWs2 = r;
+          }),
+      );
+      mockFetchAgents.mockResolvedValue([]);
+      mockFetchStatus.mockResolvedValue({
+        agents: [],
+        tasks: INITIAL_STATE.tasks,
+        agentTasks: {},
+        sync: INITIAL_STATE.sync,
+        stats: INITIAL_STATE.stats,
+        timestamp: "",
+      });
+      mockFetchTasks.mockResolvedValue(INITIAL_STATE.taskLists);
+
+      const sub = makeSubscribe();
+
+      // 1. Start ws-1; ws-1 cold-start is hung.
+      store.getState().start("ws-1", sub.subscribe);
+      await flushMicrotasks();
+      expect(mockFetchAgents).toHaveBeenCalledTimes(1);
+
+      // 2. Start ws-2 before ws-1 resolves. ws-1's controller is aborted,
+      //    but its .finally is still pending until the rejection propagates.
+      store.getState().start("ws-2", sub.subscribe);
+      await flushMicrotasks();
+      // Cold-start fetch fired for ws-2.
+      expect(mockFetchAgents).toHaveBeenCalledTimes(2);
+      // Resolve the (already-aborted) ws-1 fetch so its .finally runs.
+      resolveWs1([makeAgent({ name: "ws1-stale" })]);
+      await flushMicrotasks();
+
+      // 3. With the generation guard, ws-1's .finally bails because
+      //    startGeneration has incremented. coldStartInFlight remains true
+      //    for ws-2. An SSE signal during ws-2's still-in-flight cold start
+      //    must coalesce, NOT fire a third fetchAgents.
+      const callsBefore = mockFetchAgents.mock.calls.length;
+      sub.emit(makeMutation("agent_state_change", "ws-2"));
+      sub.emit(makeMutation("agent_state_change", "ws-2"));
+      await flushMicrotasks();
+      expect(mockFetchAgents.mock.calls.length).toBe(callsBefore);
+
+      // 4. Resolve ws-2 → coalesced refetch fires exactly once.
+      resolveWs2([makeAgent()]);
+      await flushMicrotasks();
+      expect(mockFetchAgents.mock.calls.length).toBe(callsBefore + 1);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // Backoff
   // -----------------------------------------------------------------------
 
   describe("backoff", () => {
     it("schedules retry after failure when previously connected", async () => {
-      // First: connect successfully
       setupSuccessfulMocks();
-      await store.getState().fetchData();
+      const sub = makeSubscribe();
+
+      store.getState().start("ws-1", sub.subscribe);
+      await flushMicrotasks();
       expect(store.getState().isConnected).toBe(true);
 
-      // Then: fail
       mockFetchAgents.mockRejectedValue(new Error("fail"));
-      await store.getState().fetchData();
+      sub.emit(makeMutation("agent_state_change", "ws-1"));
+      await flushMicrotasks();
 
       expect(store.getState().retryCountdown).toBe(5);
 
@@ -364,286 +753,265 @@ describe("agentStore", () => {
       await vi.advanceTimersByTimeAsync(1000);
       expect(store.getState().retryCountdown).toBe(4);
 
-      // Retry fires after full delay
+      // Retry fires after full delay → succeeds
       mockFetchAgents.mockResolvedValue([makeAgent()]);
       await vi.advanceTimersByTimeAsync(4000);
-      expect(mockFetchAgents).toHaveBeenCalledTimes(3); // initial + fail + retry
+      await flushMicrotasks();
+      // 1 (cold) + 1 (signal-fail) + 1 (retry-success) = 3
+      expect(mockFetchAgents.mock.calls.length).toBe(3);
     });
 
     it("follows exponential backoff progression", async () => {
-      // Connect first
       setupSuccessfulMocks();
-      await store.getState().fetchData();
+      const sub = makeSubscribe();
+      store.getState().start("ws-1", sub.subscribe);
+      await flushMicrotasks();
 
       mockFetchAgents.mockRejectedValue(new Error("fail"));
 
       // First failure: 5s retry
-      await store.getState().fetchData();
+      sub.emit(makeMutation("agent_state_change", "ws-1"));
+      await flushMicrotasks();
       expect(store.getState().retryCountdown).toBe(5);
 
-      // Let retry fire → second failure: 10s retry
       await vi.advanceTimersByTimeAsync(5000);
-      await vi.advanceTimersByTimeAsync(0); // let fetchData resolve
+      await flushMicrotasks();
       expect(store.getState().retryCountdown).toBe(10);
 
-      // Third failure: 20s retry
       await vi.advanceTimersByTimeAsync(10000);
-      await vi.advanceTimersByTimeAsync(0);
+      await flushMicrotasks();
       expect(store.getState().retryCountdown).toBe(20);
 
-      // Fourth failure: 40s retry
       await vi.advanceTimersByTimeAsync(20000);
-      await vi.advanceTimersByTimeAsync(0);
+      await flushMicrotasks();
       expect(store.getState().retryCountdown).toBe(40);
 
-      // Fifth failure: 60s (capped)
       await vi.advanceTimersByTimeAsync(40000);
-      await vi.advanceTimersByTimeAsync(0);
+      await flushMicrotasks();
       expect(store.getState().retryCountdown).toBe(60);
 
-      // Sixth failure: still 60s (capped)
       await vi.advanceTimersByTimeAsync(60000);
-      await vi.advanceTimersByTimeAsync(0);
+      await flushMicrotasks();
       expect(store.getState().retryCountdown).toBe(60);
     });
 
     it("does not schedule retry before first connection", async () => {
       mockFetchAgents.mockRejectedValue(new Error("fail"));
+      mockFetchStatus.mockResolvedValue({
+        agents: [],
+        tasks: INITIAL_STATE.tasks,
+        agentTasks: {},
+        sync: INITIAL_STATE.sync,
+        stats: INITIAL_STATE.stats,
+        timestamp: "",
+      });
+      mockFetchTasks.mockResolvedValue(INITIAL_STATE.taskLists);
+      const sub = makeSubscribe();
 
-      await store.getState().fetchData();
+      store.getState().start("ws-1", sub.subscribe);
+      await flushMicrotasks();
 
       expect(store.getState().retryCountdown).toBe(0);
       expect(store.getState().wasEverConnected).toBe(false);
 
-      // Advance 60s — no retry
-      await vi.advanceTimersByTimeAsync(60000);
-      expect(mockFetchAgents).toHaveBeenCalledOnce();
+      // Advance well past the fallback threshold-less timer; no fallback
+      // active and no scheduled retry, so no extra agent fetch.
+      const initialCalls = mockFetchAgents.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(30000);
+      // Monitor timer ticks fire status/tasks but never fetchAgents.
+      expect(mockFetchAgents.mock.calls.length).toBe(initialCalls);
     });
   });
 
   // -----------------------------------------------------------------------
-  // 13. retryNow
+  // retryNow
   // -----------------------------------------------------------------------
 
   describe("retryNow", () => {
     it("resets backoff and fetches immediately", async () => {
-      // Connect then disconnect
       setupSuccessfulMocks();
-      await store.getState().fetchData();
+      const sub = makeSubscribe();
+      store.getState().start("ws-1", sub.subscribe);
+      await flushMicrotasks();
 
       mockFetchAgents.mockRejectedValue(new Error("fail"));
-      await store.getState().fetchData();
+      sub.emit(makeMutation("agent_state_change", "ws-1"));
+      await flushMicrotasks();
       expect(store.getState().retryCountdown).toBe(5);
 
-      // retryNow
       mockFetchAgents.mockResolvedValue([makeAgent()]);
+      const callsBefore = mockFetchAgents.mock.calls.length;
       store.getState().retryNow();
-      await vi.advanceTimersByTimeAsync(0);
+      await flushMicrotasks();
 
       expect(store.getState().connectionLost).toBe(false);
       expect(store.getState().retryCountdown).toBe(0);
-      expect(mockFetchAgents).toHaveBeenCalledTimes(3);
+      expect(mockFetchAgents.mock.calls.length).toBe(callsBefore + 1);
     });
   });
 
   // -----------------------------------------------------------------------
-  // 14-16. Stale banner
+  // Stale banner
   // -----------------------------------------------------------------------
 
   describe("stale banner", () => {
     it("shows after 5s of disconnection", async () => {
-      // Connect first
       setupSuccessfulMocks();
-      await store.getState().fetchData();
+      const sub = makeSubscribe();
+      store.getState().start("ws-1", sub.subscribe);
+      await flushMicrotasks();
 
-      // Fail
       mockFetchAgents.mockRejectedValue(new Error("fail"));
-      await store.getState().fetchData();
+      sub.emit(makeMutation("agent_state_change", "ws-1"));
+      await flushMicrotasks();
 
       expect(store.getState().showStaleBanner).toBe(false);
       expect(store.getState().disconnectedSince).toBeTypeOf("number");
 
-      // Advance 5s
       await vi.advanceTimersByTimeAsync(5000);
       expect(store.getState().showStaleBanner).toBe(true);
     });
 
     it("clears on successful reconnect", async () => {
-      // Connect → fail → show banner
       setupSuccessfulMocks();
-      await store.getState().fetchData();
+      const sub = makeSubscribe();
+      store.getState().start("ws-1", sub.subscribe);
+      await flushMicrotasks();
 
       mockFetchAgents.mockRejectedValue(new Error("fail"));
-      await store.getState().fetchData();
+      sub.emit(makeMutation("agent_state_change", "ws-1"));
+      await flushMicrotasks();
       await vi.advanceTimersByTimeAsync(5000);
       expect(store.getState().showStaleBanner).toBe(true);
 
-      // Reconnect
       mockFetchAgents.mockResolvedValue([makeAgent()]);
-      await store.getState().fetchData();
+      sub.emit(makeMutation("agent_state_change", "ws-1"));
+      await flushMicrotasks();
 
       expect(store.getState().showStaleBanner).toBe(false);
       expect(store.getState().disconnectedSince).toBeNull();
     });
-
-    it("never shows if recovery happens within 5s", async () => {
-      // Connect → fail → recover within 5s
-      setupSuccessfulMocks();
-      await store.getState().fetchData();
-
-      mockFetchAgents.mockRejectedValue(new Error("fail"));
-      await store.getState().fetchData();
-
-      // Advance 3s (less than 5s)
-      await vi.advanceTimersByTimeAsync(3000);
-      expect(store.getState().showStaleBanner).toBe(false);
-
-      // Recover
-      mockFetchAgents.mockResolvedValue([makeAgent()]);
-      await store.getState().fetchData();
-      expect(store.getState().showStaleBanner).toBe(false);
-
-      // Advance past 5s total — still false
-      await vi.advanceTimersByTimeAsync(5000);
-      expect(store.getState().showStaleBanner).toBe(false);
-    });
   });
 
   // -----------------------------------------------------------------------
-  // 17-18. connectionLost
+  // connectionLost (via backoff ceiling)
   // -----------------------------------------------------------------------
 
   describe("connectionLost", () => {
     it("becomes true after 5 failures at 60s ceiling", async () => {
-      // Connect first
       setupSuccessfulMocks();
-      await store.getState().fetchData();
+      const sub = makeSubscribe();
+      store.getState().start("ws-1", sub.subscribe);
+      await flushMicrotasks();
 
       mockFetchAgents.mockRejectedValue(new Error("fail"));
 
-      // Exhaust backoff to reach 60s ceiling: 5→10→20→40→60
-      // Each retry fires fetchData again automatically
-      await store.getState().fetchData(); // fail 1, delay=5
+      // Trigger first failure via SSE signal
+      sub.emit(makeMutation("agent_state_change", "ws-1"));
+      await flushMicrotasks();
+      // delay=5
+
       await vi.advanceTimersByTimeAsync(5000);
-      await vi.advanceTimersByTimeAsync(0); // fail 2, delay=10
+      await flushMicrotasks();
+      // delay=10
+
       await vi.advanceTimersByTimeAsync(10000);
-      await vi.advanceTimersByTimeAsync(0); // fail 3, delay=20
+      await flushMicrotasks();
+      // delay=20
+
       await vi.advanceTimersByTimeAsync(20000);
-      await vi.advanceTimersByTimeAsync(0); // fail 4, delay=40
+      await flushMicrotasks();
+      // delay=40
+
       await vi.advanceTimersByTimeAsync(40000);
-      await vi.advanceTimersByTimeAsync(0); // fail 5, delay=60, first at ceiling
+      await flushMicrotasks();
+      // delay=60, first at ceiling
       expect(store.getState().connectionLost).toBe(false);
 
-      // Now 5 more at ceiling
+      // 4 more at ceiling = 5 total at ceiling
       for (let i = 0; i < 4; i++) {
         await vi.advanceTimersByTimeAsync(60000);
-        await vi.advanceTimersByTimeAsync(0);
+        await flushMicrotasks();
       }
-      // After 5 failures at ceiling
       expect(store.getState().connectionLost).toBe(true);
     });
 
     it("resets on retryNow", async () => {
-      // Force connectionLost state
       setupSuccessfulMocks();
-      await store.getState().fetchData();
+      const sub = makeSubscribe();
+      store.getState().start("ws-1", sub.subscribe);
+      await flushMicrotasks();
 
       mockFetchAgents.mockRejectedValue(new Error("fail"));
-      await store.getState().fetchData();
-      // Manually advance through backoff to get to ceiling and accumulate failures
+      sub.emit(makeMutation("agent_state_change", "ws-1"));
+      await flushMicrotasks();
+
+      // Drive past ceiling
       for (let i = 0; i < 20; i++) {
         await vi.advanceTimersByTimeAsync(60000);
-        await vi.advanceTimersByTimeAsync(0);
+        await flushMicrotasks();
       }
 
-      // retryNow resets
       mockFetchAgents.mockResolvedValue([makeAgent()]);
       store.getState().retryNow();
-      await vi.advanceTimersByTimeAsync(0);
+      await flushMicrotasks();
       expect(store.getState().connectionLost).toBe(false);
     });
   });
 
   // -----------------------------------------------------------------------
-  // 19. Watchdog
-  // -----------------------------------------------------------------------
-
-  describe("watchdog", () => {
-    it("recovers from hung fetch via timeout and continues polling", async () => {
-      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-
-      // First call hangs (never resolves) — withTimeout will reject it at 15s
-      mockFetchAgents.mockReturnValueOnce(
-        new Promise<LoomAgentStatus[]>(() => {}),
-      );
-
-      store
-        .getState()
-        .startPolling({ pollInterval: 5000, workspaceId: "ws-1" });
-
-      // At 15s, withTimeout fires, rejecting the fetch and resetting fetchInProgress
-      // At 20s, next poll fires and should succeed
-      mockFetchAgents.mockResolvedValue([makeAgent()]);
-      await vi.advanceTimersByTimeAsync(20000);
-
-      // The system recovered: subsequent fetch succeeded
-      expect(store.getState().error).toBeNull();
-      expect(mockFetchAgents.mock.calls.length).toBeGreaterThan(1);
-
-      warnSpy.mockRestore();
-    });
-  });
-
-  // -----------------------------------------------------------------------
-  // 20. Visibility change
+  // Visibility change
   // -----------------------------------------------------------------------
 
   describe("visibility change", () => {
-    it("refetches on tab focus when polling", async () => {
+    it("refetches both paths on tab focus", async () => {
       setupSuccessfulMocks();
+      const sub = makeSubscribe();
 
-      store
-        .getState()
-        .startPolling({ pollInterval: 5000, workspaceId: "ws-1" });
-      await vi.advanceTimersByTimeAsync(0); // initial fetch
+      store.getState().start("ws-1", sub.subscribe);
+      await flushMicrotasks();
 
-      expect(mockFetchAgents).toHaveBeenCalledOnce();
+      const agentsBefore = mockFetchAgents.mock.calls.length;
+      const statusBefore = mockFetchStatus.mock.calls.length;
 
-      // Simulate visibility change
       mockVisibilityState = "visible";
       document.dispatchEvent(new Event("visibilitychange"));
-      await vi.advanceTimersByTimeAsync(0);
+      await flushMicrotasks();
 
-      expect(mockFetchAgents).toHaveBeenCalledTimes(2);
+      expect(mockFetchAgents.mock.calls.length).toBe(agentsBefore + 1);
+      expect(mockFetchStatus.mock.calls.length).toBe(statusBefore + 1);
     });
 
-    it("does not refetch when polling is stopped", async () => {
+    it("does not refetch after dispose", async () => {
       setupSuccessfulMocks();
+      const sub = makeSubscribe();
 
-      store
-        .getState()
-        .startPolling({ pollInterval: 5000, workspaceId: "ws-1" });
-      await vi.advanceTimersByTimeAsync(0);
-      store.getState().stopPolling();
+      const dispose = store.getState().start("ws-1", sub.subscribe);
+      await flushMicrotasks();
+      dispose();
 
       mockFetchAgents.mockClear();
+      mockFetchStatus.mockClear();
 
       mockVisibilityState = "visible";
       document.dispatchEvent(new Event("visibilitychange"));
-      await vi.advanceTimersByTimeAsync(0);
+      await flushMicrotasks();
 
       expect(mockFetchAgents).not.toHaveBeenCalled();
+      expect(mockFetchStatus).not.toHaveBeenCalled();
     });
   });
 
   // -----------------------------------------------------------------------
-  // 22. getAgentByName
+  // getAgentByName
   // -----------------------------------------------------------------------
 
   describe("getAgentByName", () => {
     it("returns the matching agent", async () => {
       setupSuccessfulMocks();
-      await store.getState().fetchData();
+      const sub = makeSubscribe();
+      store.getState().start("ws-1", sub.subscribe);
+      await flushMicrotasks();
 
       const agent = store.getState().getAgentByName("nova");
       expect(agent).toBeDefined();
@@ -652,24 +1020,25 @@ describe("agentStore", () => {
 
     it("returns undefined for nonexistent agent", async () => {
       setupSuccessfulMocks();
-      await store.getState().fetchData();
+      const sub = makeSubscribe();
+      store.getState().start("ws-1", sub.subscribe);
+      await flushMicrotasks();
 
       expect(store.getState().getAgentByName("nonexistent")).toBeUndefined();
     });
   });
 
   // -----------------------------------------------------------------------
-  // 23. reset
+  // reset
   // -----------------------------------------------------------------------
 
   describe("reset", () => {
-    it("clears all state and stops polling", async () => {
+    it("clears all state and tears down subscription/timers", async () => {
       setupSuccessfulMocks();
+      const sub = makeSubscribe();
 
-      store
-        .getState()
-        .startPolling({ pollInterval: 5000, workspaceId: "ws-1" });
-      await vi.advanceTimersByTimeAsync(0);
+      store.getState().start("ws-1", sub.subscribe);
+      await flushMicrotasks();
       expect(store.getState().agents).toHaveLength(1);
 
       store.getState().reset();
@@ -680,27 +1049,42 @@ describe("agentStore", () => {
       expect(state.wasEverConnected).toBe(false);
       expect(state.connectionState).toBe("never_connected");
       expect(state.lastUpdated).toBeNull();
+      expect(sub.listenerCount()).toBe(0);
 
-      // Verify timers cleared
       mockFetchAgents.mockClear();
+      mockFetchStatus.mockClear();
       await vi.advanceTimersByTimeAsync(60000);
       expect(mockFetchAgents).not.toHaveBeenCalled();
+      expect(mockFetchStatus).not.toHaveBeenCalled();
     });
   });
 
   // -----------------------------------------------------------------------
-  // 24. Multiple instances
+  // Multiple instances
   // -----------------------------------------------------------------------
 
   describe("multiple instances", () => {
     it("creates independent stores", async () => {
       const store2 = createAgentStore();
+      const sub = makeSubscribe();
 
-      mockFetchAgents.mockResolvedValue([makeAgent({ name: "alpha" })]);
-      await store.getState().fetchData();
+      mockFetchAgents.mockResolvedValueOnce([makeAgent({ name: "alpha" })]);
+      mockFetchAgents.mockResolvedValueOnce([makeAgent({ name: "beta" })]);
+      mockFetchStatus.mockResolvedValue({
+        agents: [],
+        tasks: INITIAL_STATE.tasks,
+        agentTasks: {},
+        sync: INITIAL_STATE.sync,
+        stats: INITIAL_STATE.stats,
+        timestamp: "",
+      });
+      mockFetchTasks.mockResolvedValue(INITIAL_STATE.taskLists);
 
-      mockFetchAgents.mockResolvedValue([makeAgent({ name: "beta" })]);
-      await store2.getState().fetchData();
+      store.getState().start("ws-1", sub.subscribe);
+      await flushMicrotasks();
+      const sub2 = makeSubscribe();
+      store2.getState().start("ws-2", sub2.subscribe);
+      await flushMicrotasks();
 
       expect(store.getState().agents[0]!.name).toBe("alpha");
       expect(store2.getState().agents[0]!.name).toBe("beta");
@@ -710,13 +1094,15 @@ describe("agentStore", () => {
   });
 
   // -----------------------------------------------------------------------
-  // 25. connectionState derivation
+  // connectionState derivation
   // -----------------------------------------------------------------------
 
   describe("connectionState derivation", () => {
     it("is 'connected' when isConnected is true", async () => {
       setupSuccessfulMocks();
-      await store.getState().fetchData();
+      const sub = makeSubscribe();
+      store.getState().start("ws-1", sub.subscribe);
+      await flushMicrotasks();
       expect(store.getState().connectionState).toBe("connected");
     });
 
@@ -726,30 +1112,47 @@ describe("agentStore", () => {
 
     it("is 'never_connected' on first failure", async () => {
       mockFetchAgents.mockRejectedValue(new Error("fail"));
-      await store.getState().fetchData();
+      mockFetchStatus.mockResolvedValue({
+        agents: [],
+        tasks: INITIAL_STATE.tasks,
+        agentTasks: {},
+        sync: INITIAL_STATE.sync,
+        stats: INITIAL_STATE.stats,
+        timestamp: "",
+      });
+      mockFetchTasks.mockResolvedValue(INITIAL_STATE.taskLists);
+      const sub = makeSubscribe();
+      store.getState().start("ws-1", sub.subscribe);
+      await flushMicrotasks();
       expect(store.getState().connectionState).toBe("never_connected");
     });
 
     it("is 'reconnecting' during retry countdown", async () => {
       setupSuccessfulMocks();
-      await store.getState().fetchData();
+      const sub = makeSubscribe();
+      store.getState().start("ws-1", sub.subscribe);
+      await flushMicrotasks();
 
       mockFetchAgents.mockRejectedValue(new Error("fail"));
-      await store.getState().fetchData();
+      sub.emit(makeMutation("agent_state_change", "ws-1"));
+      await flushMicrotasks();
 
       expect(store.getState().retryCountdown).toBeGreaterThan(0);
       expect(store.getState().connectionState).toBe("reconnecting");
     });
 
-    it("is 'disconnected' when connected previously but no active retry", async () => {
+    it("is 'disconnected' when previously connected but no active retry", async () => {
       setupSuccessfulMocks();
-      await store.getState().fetchData();
+      const sub = makeSubscribe();
+      const dispose = store.getState().start("ws-1", sub.subscribe);
+      await flushMicrotasks();
 
       mockFetchAgents.mockRejectedValue(new Error("fail"));
-      await store.getState().fetchData();
+      sub.emit(makeMutation("agent_state_change", "ws-1"));
+      await flushMicrotasks();
 
-      // stopPolling clears retry timers and re-derives connectionState
-      store.getState().stopPolling();
+      // Disposer clears retry timers and re-derives connectionState
+      dispose();
 
       const state = store.getState();
       expect(state.wasEverConnected).toBe(true);
@@ -759,18 +1162,12 @@ describe("agentStore", () => {
     });
   });
 
-  describe("workspace snapshot binding", () => {
-    // flushMicrotasks drains promise continuations without advancing the
-    // fake clock. Using runAllTimersAsync here would burn past the 15s
-    // withTimeout inside fetchData, rejecting hung fetches before the test
-    // can resolve them and making the guard untestable.
-    const flushMicrotasks = async (rounds = 4) => {
-      for (let i = 0; i < rounds; i++) {
-        await vi.advanceTimersByTimeAsync(0);
-      }
-    };
+  // -----------------------------------------------------------------------
+  // Workspace snapshot binding (drops late writes after workspace switch)
+  // -----------------------------------------------------------------------
 
-    it("drops primary agents result when workspace switches mid-fetch", async () => {
+  describe("workspace snapshot binding", () => {
+    it("drops agents result when workspace switches mid-fetch", async () => {
       let resolvePrimary!: (v: LoomAgentStatus[]) => void;
       mockFetchAgents.mockImplementationOnce(
         () =>
@@ -788,32 +1185,30 @@ describe("agentStore", () => {
       });
       mockFetchTasks.mockResolvedValue(INITIAL_STATE.taskLists);
 
-      // Start ws-1 polling — primary fetchAgents hangs.
-      store.getState().startPolling({ pollInterval: 0, workspaceId: "ws-1" });
+      const sub = makeSubscribe();
+      store.getState().start("ws-1", sub.subscribe);
       await flushMicrotasks();
-      expect(mockFetchAgents).toHaveBeenCalledWith("ws-1");
+      expect(mockFetchAgents).toHaveBeenCalledWith("ws-1", expect.anything());
 
-      // Switch workspace: startPolling updates activeWorkspaceID but the
-      // in-flight ws-1 primary still holds fetchInProgress, so no new
-      // fetchData fires yet.
-      store.getState().startPolling({ pollInterval: 0, workspaceId: "ws-2" });
+      // Switch to ws-2: tears down ws-1 (aborts in-flight) and starts new
+      store.getState().start("ws-2", sub.subscribe);
 
-      // Resolve the stale ws-1 primary. Without the guard this writes
-      // "ws1-stale" into state.agents.
+      // Resolve the (now-aborted) ws-1 primary. The new fetch's
+      // AbortController guards stale write.
+      mockFetchAgents.mockResolvedValue([]);
       resolvePrimary([makeAgent({ name: "ws1-stale" })]);
       await flushMicrotasks();
 
       const state = store.getState();
-      expect(state.agents).toEqual([]);
-      expect(state.isConnected).toBe(false);
+      // ws1-stale must not appear
+      expect(state.agents.find((a) => a.name === "ws1-stale")).toBeUndefined();
     });
 
-    it("drops secondary status result when workspace switches mid-fetch", async () => {
+    it("drops monitor status result when workspace switches mid-fetch", async () => {
       const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
       mockFetchAgents.mockResolvedValue([makeAgent()]);
 
-      // First fetchStatus (ws-1) hangs; default handles ws-2.
       let resolveStaleStatus!: (v: {
         agents: LoomAgentStatus[];
         tasks: typeof INITIAL_STATE.tasks;
@@ -839,18 +1234,16 @@ describe("agentStore", () => {
       mockFetchStatus.mockResolvedValue(cleanStatus);
       mockFetchTasks.mockResolvedValue(INITIAL_STATE.taskLists);
 
-      // ws-1: primary resolves, secondary status hangs (keeps the Once-mock
-      // promise pending — its withTimeout would otherwise reject at 15s).
-      store.getState().startPolling({ pollInterval: 0, workspaceId: "ws-1" });
+      const sub = makeSubscribe();
+      store.getState().start("ws-1", sub.subscribe);
       await flushMicrotasks();
 
-      // Switch to ws-2 → new fetchData populates stats.open = 7.
-      store.getState().startPolling({ pollInterval: 0, workspaceId: "ws-2" });
+      store.getState().start("ws-2", sub.subscribe);
       await flushMicrotasks();
       expect(store.getState().stats.open).toBe(7);
 
-      // Resolve the stale ws-1 status. Without the guard this overwrites
-      // stats.open with 999.
+      // Resolve the (aborted) ws-1 status. Without the controller-supersede
+      // guard this would overwrite stats.open with 999.
       resolveStaleStatus({
         agents: [],
         tasks: { ...INITIAL_STATE.tasks, needs_planning: 999 },

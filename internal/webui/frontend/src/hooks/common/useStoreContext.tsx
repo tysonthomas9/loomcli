@@ -99,7 +99,13 @@ function StoreWiring({
     issueStore.getState().setReconnectAttempts(eventContext.reconnectAttempts);
   }, [issueStore, eventContext.reconnectAttempts]);
 
-  // 4. Reset stores on workspace *change* + start agent polling.
+  // Mirror eventContext.reconnectAttempts into agentStore so it can engage
+  // fallback polling when SSE has wedged past MAX_RECONNECT_ATTEMPTS.
+  useEffect(() => {
+    agentStore.getState().setReconnectAttempts(eventContext.reconnectAttempts);
+  }, [agentStore, eventContext.reconnectAttempts]);
+
+  // 4. Reset stores on workspace *change* + start agent SSE-driven lifecycle.
   // Issue fetching is driven by App.tsx (mode-aware), not here.
   // Skip reset on the initial mount: App.tsx's sibling useEffect fires its
   // fetchIssues(...) call before this parent effect runs (children-first
@@ -118,14 +124,12 @@ function StoreWiring({
     }
     prevWorkspaceIdRef.current = workspaceId;
 
-    agentStore
+    const dispose = agentStore
       .getState()
-      .startPolling({ pollInterval: 5000, workspaceId: workspaceId ?? "" });
+      .start(workspaceId ?? "", eventContext.subscribe);
 
-    return () => {
-      agentStore.getState().stopPolling();
-    };
-  }, [workspaceId]); // eslint-disable-line react-hooks/exhaustive-deps
+    return dispose;
+  }, [workspaceId, eventContext.subscribe]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 5. Cleanup on unmount
   useEffect(() => {

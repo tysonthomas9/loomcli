@@ -25,18 +25,28 @@ import {
  * request — matches fetchStatus / fetchTasks. Callers without an active
  * workspace must handle the empty case themselves.
  *
+ * Optional `opts.signal` is merged with the 15s timeout via AbortSignal.any
+ * so callers (e.g. agentStore) can cancel in-flight requests from a disposer
+ * while the timeout still applies.
+ *
  * Throws on network errors or non-OK responses so callers can handle
  * connection state.
  */
-export async function fetchAgents(wsID: string): Promise<LoomAgentStatus[]> {
+export async function fetchAgents(
+  wsID: string,
+  opts?: { signal?: AbortSignal },
+): Promise<LoomAgentStatus[]> {
   if (wsID === "") {
     return [];
   }
+  const signal = opts?.signal
+    ? AbortSignal.any([opts.signal, AbortSignal.timeout(15000)])
+    : AbortSignal.timeout(15000);
   const { data, error, response } = await api.GET(
     "/api/workspaces/{ws}/monitor/agents",
     {
       params: { path: { ws: wsID } },
-      signal: AbortSignal.timeout(15000),
+      signal,
     },
   );
   if (error) throw apiErrorFromResponse(error, response);
@@ -76,15 +86,21 @@ export interface FetchStatusResult {
  * Throws on network errors or invalid responses so callers can handle
  * connection state.
  */
-export async function fetchStatus(wsID: string): Promise<FetchStatusResult> {
+export async function fetchStatus(
+  wsID: string,
+  opts?: { signal?: AbortSignal },
+): Promise<FetchStatusResult> {
   if (wsID === "") {
     return emptyStatus();
   }
+  const signal = opts?.signal
+    ? AbortSignal.any([opts.signal, AbortSignal.timeout(15000)])
+    : AbortSignal.timeout(15000);
   const { data, error, response } = await api.GET(
     "/api/workspaces/{ws}/monitor/status",
     {
       params: { path: { ws: wsID } },
-      signal: AbortSignal.timeout(15000),
+      signal,
     },
   );
   if (error) throw apiErrorFromResponse(error, response);
@@ -107,15 +123,21 @@ export async function fetchStatus(wsID: string): Promise<FetchStatusResult> {
  * fetchStatus — the old behavior of falling through to the unscoped
  * /api/monitor/tasks leaked the launch workspace's queue into every sidebar.
  */
-export async function fetchTasks(wsID: string): Promise<LoomTaskLists> {
+export async function fetchTasks(
+  wsID: string,
+  opts?: { signal?: AbortSignal },
+): Promise<LoomTaskLists> {
   if (wsID === "") {
     return emptyTaskLists();
   }
+  const signal = opts?.signal
+    ? AbortSignal.any([opts.signal, AbortSignal.timeout(15000)])
+    : AbortSignal.timeout(15000);
   const { data, error, response } = await api.GET(
     "/api/workspaces/{ws}/monitor/tasks",
     {
       params: { path: { ws: wsID } },
-      signal: AbortSignal.timeout(15000),
+      signal,
     },
   );
   if (error) throw apiErrorFromResponse(error, response);

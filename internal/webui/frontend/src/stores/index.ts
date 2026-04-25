@@ -21,7 +21,6 @@ export type {
   AgentStoreActions,
   AgentStore,
   AgentStoreConfig,
-  PollingOptions,
 } from "./agentStore";
 
 export {
