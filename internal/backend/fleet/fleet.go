@@ -328,9 +328,23 @@ func (b *FleetBackend) Ready(ctx context.Context, opts backend.ReadyOpts) ([]bac
 	if !hasData(resp) {
 		return []backend.IssueData{}, nil
 	}
-	// The ready endpoint returns ReadyIssueWithParent which embeds *types.Issue.
+	// fleet-db's /ready and /blocked wrap their payload as {"issues":[...]},
+	// matching the /issues list response shape. Earlier drafts unmarshaled
+	// straight into []*readyIssueWithParent, which json.UnmarshalTypeError'd
+	// on the wrapper. Try bare-array first for legacy paths, then fall
+	// through to the wrapper.
 	var issues []*readyIssueWithParent
-	if err := json.Unmarshal(resp.Data, &issues); err != nil {
+	err = json.Unmarshal(resp.Data, &issues)
+	if err != nil {
+		var ute *json.UnmarshalTypeError
+		if errors.As(err, &ute) {
+			var wrap struct {
+				Issues []*readyIssueWithParent `json:"issues"`
+			}
+			if werr := json.Unmarshal(resp.Data, &wrap); werr == nil {
+				return readyIssuesToData(wrap.Issues), nil
+			}
+		}
 		return nil, backend.ErrInternal("Ready", "unmarshal response", err)
 	}
 	return readyIssuesToData(issues), nil
@@ -346,7 +360,17 @@ func (b *FleetBackend) Blocked(ctx context.Context, opts backend.BlockedOpts) ([
 		return []backend.IssueData{}, nil
 	}
 	var issues []*types.BlockedIssue
-	if err := json.Unmarshal(resp.Data, &issues); err != nil {
+	err = json.Unmarshal(resp.Data, &issues)
+	if err != nil {
+		var ute *json.UnmarshalTypeError
+		if errors.As(err, &ute) {
+			var wrap struct {
+				Issues []*types.BlockedIssue `json:"issues"`
+			}
+			if werr := json.Unmarshal(resp.Data, &wrap); werr == nil {
+				return blockedIssuesToData(wrap.Issues), nil
+			}
+		}
 		return nil, backend.ErrInternal("Blocked", "unmarshal response", err)
 	}
 	return blockedIssuesToData(issues), nil
