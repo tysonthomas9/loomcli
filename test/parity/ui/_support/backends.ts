@@ -67,16 +67,21 @@ export async function openDualTabs(browser: Browser, testId: string): Promise<Du
         viewport: { width: 1280, height: 720 },
         deviceScaleFactor: 2,
     });
-    await installApiBaseRewrite(beadsCtx, PARITY_URLS.beads);
-    await installApiBaseRewrite(fleetCtx, PARITY_URLS.fleet);
-    await installWorkspaceLookupFallback(beadsCtx, PARITY_URLS.beads);
-    await installWorkspaceLookupFallback(fleetCtx, PARITY_URLS.fleet);
-    // TablePage fetches /ready + /blocked in parallel with /issues; on the
-    // fleet backend those return 503 ("workspace not registered") even when
-    // /issues returns 200. Stub those 503s as empty lists so the view's
-    // "fetch-error" branch doesn't trip and hide the actual rows.
-    await installEmptyListFallbacks(beadsCtx, PARITY_URLS.beads);
-    await installEmptyListFallbacks(fleetCtx, PARITY_URLS.fleet);
+    // Three test-layer shims used to live here:
+    //   - installApiBaseRewrite (rewrote baked-in localhost:8085 → Caddy origin)
+    //   - installWorkspaceLookupFallback (404 on /api/workspaces/{uuid} → /active)
+    //   - installEmptyListFallbacks (503 on /ready + /blocked → empty list)
+    //
+    // All three were upstream-fixed:
+    //   - frontend/src/api/common/client.ts now resolves baseURL at runtime
+    //     (window.location.origin) instead of compile-time substitution.
+    //   - workspace_impl.go#GetWorkspace falls back to config-based lookup
+    //     when multiPool is empty (fleet mode).
+    //   - fleet-db gained /ready + /blocked workspace-root aliases AND
+    //     loomcli's HandleReady/HandleBlocked got backend-fallback variants.
+    //
+    // If any test starts failing on the symptoms above, the right answer is
+    // to fix the corresponding upstream — not to reintroduce a shim here.
     const beads = await beadsCtx.newPage();
     const fleet = await fleetCtx.newPage();
 
@@ -90,171 +95,6 @@ export async function openDualTabs(browser: Browser, testId: string): Promise<Du
             await Promise.allSettled([beadsCtx.close(), fleetCtx.close()]);
         },
     };
-}
-
-/**
- * Rewrite the SPA's baked-in API origin so fetch/XHR/EventSource calls land
- * on the Caddy sidecar the tab actually loaded from. The dist bundle has
- * `VITE_API_BASE_URL=http://localhost:8085` hard-coded, but neither Caddy
- * listens there; redirecting requests to `${caddyOrigin}` restores same-
- * origin semantics and lets Caddy proxy /api/* to the right loom backend.
- *
- * We rewrite client-side via addInitScript (not route.continue) because
- * route-level rewrites only change the request target — the browser still
- * treats the fetch as cross-origin (page is on 8084, SPA asked 8085) and
- * blocks it with CORS, surfacing as net::ERR_FAILED (HAR status = -1).
- * Patching fetch/XHR/EventSource at the page boundary makes the browser
- * see every call as same-origin from the start.
- */
-const BAKED_API_ORIGIN = "http://localhost:8085";
-async function installApiBaseRewrite(ctx: BrowserContext, caddyOrigin: string): Promise<void> {
-    await ctx.addInitScript(
-        ({ baked, caddy }) => {
-            const rewrite = (u: unknown): unknown => {
-                if (typeof u === "string" && u.indexOf(baked) === 0) {
-                    return caddy + u.slice(baked.length);
-                }
-                if (u instanceof URL && u.origin === baked) {
-                    return new URL(u.pathname + u.search + u.hash, caddy);
-                }
-                if (u instanceof Request) {
-                    const newUrl =
-                        u.url.indexOf(baked) === 0
-                            ? caddy + u.url.slice(baked.length)
-                            : u.url;
-                    if (newUrl === u.url) return u;
-                    return new Request(newUrl, u);
-                }
-                return u;
-            };
-            const origFetch = window.fetch.bind(window);
-            window.fetch = ((input: any, init?: any) => {
-                return origFetch(rewrite(input) as any, init);
-            }) as typeof window.fetch;
-
-            const OrigXHR = window.XMLHttpRequest;
-            function PatchedXHR(this: XMLHttpRequest) {
-                const xhr = new OrigXHR();
-                const origOpen = xhr.open.bind(xhr);
-                (xhr as any).open = function (
-                    method: string,
-                    url: string | URL,
-                    ...rest: any[]
-                ) {
-                    return origOpen(method, rewrite(url) as any, ...rest);
-                };
-                return xhr;
-            }
-            (PatchedXHR as any).prototype = OrigXHR.prototype;
-            (window as any).XMLHttpRequest = PatchedXHR;
-
-            const OrigES = window.EventSource;
-            if (OrigES) {
-                function PatchedES(
-                    this: EventSource,
-                    url: string | URL,
-                    cfg?: EventSourceInit,
-                ) {
-                    return new OrigES(rewrite(url) as any, cfg);
-                }
-                (PatchedES as any).prototype = OrigES.prototype;
-                (window as any).EventSource = PatchedES;
-            }
-        },
-        { baked: BAKED_API_ORIGIN, caddy: caddyOrigin },
-    );
-}
-
-/**
- * Fleet-backend fallback: when the SPA fetches `/api/workspaces/{uuid}` for
- * the active workspace, loom-fleet's handler sometimes returns 404 even
- * though `/api/workspaces` (list) and `/api/workspaces/active` include the
- * same UUID. The frontend's WorkspaceLayout treats any 404 here as "stale
- * local storage" and redirects to "/", which then renders the "No
- * workspaces found" empty state — the parity test never sees the issue
- * title.
- *
- * Transparently intercept the per-UUID GET and rewrite any 404 response
- * to the payload of `/api/workspaces/active` when the active workspace's
- * id matches. This is a test-layer shim — the backend bug is tracked
- * separately and must not be masked in production. The shim only kicks
- * in on 404; success responses are passed through untouched.
- */
-async function installWorkspaceLookupFallback(
-    ctx: BrowserContext,
-    caddyOrigin: string,
-): Promise<void> {
-    const pattern = new RegExp(
-        `^${escapeRegex(caddyOrigin)}/api/workspaces/([0-9a-fA-F-]{8,})(?:$|\\?)`,
-    );
-    await ctx.route(pattern, async (route) => {
-        const req = route.request();
-        if (req.method() !== "GET") return route.continue();
-        const response = await route.fetch();
-        if (response.status() !== 404) {
-            return route.fulfill({ response });
-        }
-        const wsId = req.url().match(pattern)?.[1] ?? "";
-        // Ask the active-workspace endpoint, which populates the same shape
-        // as per-id GETs and is served by a different internal path that
-        // doesn't hit the 404 bug.
-        const activeResp = await fetch(`${caddyOrigin}/api/workspaces/active`);
-        if (!activeResp.ok) {
-            // Give up — pass through the original 404 so UI shows a genuine
-            // error rather than silently succeeding on a mismatched ws.
-            return route.fulfill({ response });
-        }
-        const body = await activeResp.json();
-        const data = body?.data;
-        if (!data || data.id !== wsId) {
-            return route.fulfill({ response });
-        }
-        return route.fulfill({
-            status: 200,
-            contentType: "application/json",
-            body: JSON.stringify(body),
-        });
-    });
-}
-
-function escapeRegex(s: string): string {
-    return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-/**
- * Stub `/ready` and `/blocked` workspace-scoped endpoints as `{data: []}`
- * when they return 503. On the fleet backend these return
- * "workspace not registered" even though the sibling `/issues` endpoint
- * works on the same workspace — a known backend quirk. TablePage renders
- * rows from `/issues`, but joins the ready/blocked lists for the blocked
- * column; a 503 on either triggers the "Failed to load data" error
- * boundary and the rows never appear.
- *
- * This is a test-layer shim — production UIs should surface a real error.
- * The shim ONLY converts 503s into empty 200 lists; any 2xx or 4xx
- * response (including 404) is passed through unchanged so genuine
- * regressions still surface.
- */
-async function installEmptyListFallbacks(
-    ctx: BrowserContext,
-    caddyOrigin: string,
-): Promise<void> {
-    const pattern = new RegExp(
-        `^${escapeRegex(caddyOrigin)}/api/workspaces/[^/]+/(ready|blocked)(?:$|\\?)`,
-    );
-    await ctx.route(pattern, async (route) => {
-        const req = route.request();
-        if (req.method() !== "GET") return route.continue();
-        const response = await route.fetch();
-        if (response.status() !== 503) {
-            return route.fulfill({ response });
-        }
-        return route.fulfill({
-            status: 200,
-            contentType: "application/json",
-            body: JSON.stringify({ success: true, data: [] }),
-        });
-    });
 }
 
 export async function gotoBoth(tabs: DualTabs, relPath: string): Promise<void> {
