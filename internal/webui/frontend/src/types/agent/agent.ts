@@ -108,6 +108,40 @@ export type LoomAgentStatus = Omit<
   path?: string;
   /** Absolute path to the agent's worktree */
   worktree_path?: string;
+
+  // --- Daemon supervision fields (populated by the workspace-scoped
+  //     /api/workspaces/{ws}/agents/status endpoint via mapToLoomAgentStatus).
+  //     All optional so the ~30 existing consumers compile unchanged. ---
+  /** Process ID of the agent's session */
+  pid?: number;
+  /** Raw daemon supervisor state */
+  supervisor_status?: "running" | "stopped" | "failed" | "starting";
+  /** Number of times the daemon has restarted this agent */
+  restart_count?: number;
+  /** Error classification from the most recent failure */
+  last_error_class?: string;
+  /** ISO timestamp when the current backoff expires */
+  backoff_until?: string;
+  /** Reason the agent was stopped (user-initiated, error, etc.) */
+  stop_reason?: string;
+  /** Task ID resolved from the agent's lock file */
+  task_id?: string;
+  /** Epic ID associated with this agent */
+  epic_id?: string;
+  /** Current LLM backend in use */
+  current_backend?: string;
+  /** Remote tracking branch */
+  remote_branch?: string;
+  /** Whether a yield has been requested for this agent */
+  yield_requested?: boolean;
+  /** Reason for the yield request */
+  yield_reason?: string;
+  /** ISO timestamp when the yield was requested */
+  yield_requested_at?: string;
+  /** Count of uncommitted file changes (number, not the changes array) */
+  changes_count?: number;
+  /** Per-agent collection error from the partial-failure envelope */
+  collection_error?: string;
 };
 
 /**
