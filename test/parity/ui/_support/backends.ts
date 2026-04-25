@@ -126,9 +126,17 @@ export async function gotoViews(
         tabs.beads.goto(`${urlFor("beads")}/ws/${b}/${view}`),
         tabs.fleet.goto(`${urlFor("fleet")}/ws/${f}/${view}`),
     ]);
+    // domcontentloaded, NOT networkidle: with the runtime-baseURL frontend
+    // (no more rewrite shim) and the SSE event stream now wired through the
+    // backend-fallback Ready/Blocked handlers, the SPA never goes quiet —
+    // it polls + maintains an open EventSource. networkidle therefore
+    // never resolves and burns the 30 s default timeout per tab, which
+    // pushed several specs (05 settings, 09 SSE) past their 90 s test
+    // budget. domcontentloaded fires when the SPA shell is mounted and
+    // can read location.href / start submitting requests.
     await Promise.all([
-        tabs.beads.waitForLoadState("networkidle").catch(() => undefined),
-        tabs.fleet.waitForLoadState("networkidle").catch(() => undefined),
+        tabs.beads.waitForLoadState("domcontentloaded").catch(() => undefined),
+        tabs.fleet.waitForLoadState("domcontentloaded").catch(() => undefined),
     ]);
 }
 
