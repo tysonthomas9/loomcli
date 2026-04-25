@@ -90,6 +90,23 @@ function redisXLen(): number {
     }
 }
 
+// writeRequiresEventStream returns true if a successful write to the
+// observed URL is expected to produce an entry on fleet-db's per-workspace
+// `fleet-db:{ws}:events` stream. Issue lifecycle ops (create, patch, close,
+// claim, comment) are streamed; relation ops (dependencies, labels) and
+// some metadata ops are not — fleet-db treats them as side-effects of the
+// owning issue rather than independent events. Without this guard, every
+// dep / label test trips the "redis delta=0" silent-fallback branch even
+// though the action actually landed on fleet-db.
+function writeRequiresEventStream(write: { url?: string } | undefined): boolean {
+    if (!write?.url) return true;
+    const u = write.url;
+    // Anything containing /dependencies, /labels, /tags is a relation-only
+    // op; fleet-db doesn't emit a workspace-stream event for these.
+    if (/\/(dependencies|deps|labels|tags)(\/|\?|$)/.test(u)) return false;
+    return true;
+}
+
 function fleetDBRequestCount(): number {
     // fleet-db's /metrics exposes per-route histogram counters. Sum all
     // *_count series across labels for a single grand total. Earlier
@@ -189,7 +206,7 @@ export async function assertRoutingForAction(
     } else if (logDelta === 0) {
         verdict = "silent-fallback";
         notes.push("Browser sent a write but fleet-db's request count did NOT grow — silent fallback to beads.");
-    } else if (redisDelta === 0) {
+    } else if (redisDelta === 0 && writeRequiresEventStream(lastWrite)) {
         verdict = "silent-fallback";
         notes.push("Fleet-db saw the request but Redis events:PARITY did NOT grow — fleet-db rejected or stream not wired.");
     }
