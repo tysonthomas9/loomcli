@@ -1992,6 +1992,9 @@ type AgentName = string
 // IssueId defines model for IssueId.
 type IssueId = string
 
+// RepoQuery defines model for RepoQuery.
+type RepoQuery = string
+
 // WorkspaceId defines model for WorkspaceId.
 type WorkspaceId = string
 
@@ -2092,14 +2095,58 @@ type GetAgentLogParams struct {
 	BeforeLine *int64 `form:"before_line,omitempty" json:"before_line,omitempty"`
 }
 
+// RestartAgentParams defines parameters for RestartAgent.
+type RestartAgentParams struct {
+	// Repo Optional repo identifier to disambiguate two agents that share the
+	// same bare worktree name across different repos within a workspace
+	// (workspace mode). When present, the backend forms the compound
+	// agent key "repo/worktree" to target the correct agent. When absent
+	// or empty, the handler falls back to the bare worktree name — safe
+	// for single-repo setups where every worktree name is unique.
+	Repo *RepoQuery `form:"repo,omitempty" json:"repo,omitempty"`
+}
+
+// StartAgentParams defines parameters for StartAgent.
+type StartAgentParams struct {
+	// Repo Optional repo identifier to disambiguate two agents that share the
+	// same bare worktree name across different repos within a workspace
+	// (workspace mode). When present, the backend forms the compound
+	// agent key "repo/worktree" to target the correct agent. When absent
+	// or empty, the handler falls back to the bare worktree name — safe
+	// for single-repo setups where every worktree name is unique.
+	Repo *RepoQuery `form:"repo,omitempty" json:"repo,omitempty"`
+}
+
 // StopAgentJSONBody defines parameters for StopAgent.
 type StopAgentJSONBody struct {
 	Force *bool `json:"force,omitempty"`
 }
 
+// StopAgentParams defines parameters for StopAgent.
+type StopAgentParams struct {
+	// Repo Optional repo identifier to disambiguate two agents that share the
+	// same bare worktree name across different repos within a workspace
+	// (workspace mode). When present, the backend forms the compound
+	// agent key "repo/worktree" to target the correct agent. When absent
+	// or empty, the handler falls back to the bare worktree name — safe
+	// for single-repo setups where every worktree name is unique.
+	Repo *RepoQuery `form:"repo,omitempty" json:"repo,omitempty"`
+}
+
 // ConnectAgentTerminalWSParams defines parameters for ConnectAgentTerminalWS.
 type ConnectAgentTerminalWSParams struct {
 	Token string `form:"token" json:"token"`
+}
+
+// YieldAgentParams defines parameters for YieldAgent.
+type YieldAgentParams struct {
+	// Repo Optional repo identifier to disambiguate two agents that share the
+	// same bare worktree name across different repos within a workspace
+	// (workspace mode). When present, the backend forms the compound
+	// agent key "repo/worktree" to target the correct agent. When absent
+	// or empty, the handler falls back to the bare worktree name — safe
+	// for single-repo setups where every worktree name is unique.
+	Repo *RepoQuery `form:"repo,omitempty" json:"repo,omitempty"`
 }
 
 // ListBlockedParams defines parameters for ListBlocked.

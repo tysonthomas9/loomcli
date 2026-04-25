@@ -2878,6 +2878,15 @@ export interface components {
     IssueId: string;
     /** @description Agent worktree name */
     AgentName: string;
+    /**
+     * @description Optional repo identifier to disambiguate two agents that share the
+     *     same bare worktree name across different repos within a workspace
+     *     (workspace mode). When present, the backend forms the compound
+     *     agent key "repo/worktree" to target the correct agent. When absent
+     *     or empty, the handler falls back to the bare worktree name — safe
+     *     for single-repo setups where every worktree name is unique.
+     */
+    RepoQuery: string;
   };
   requestBodies: never;
   headers: never;
@@ -5297,7 +5306,17 @@ export interface operations {
   };
   stopAgent: {
     parameters: {
-      query?: never;
+      query?: {
+        /**
+         * @description Optional repo identifier to disambiguate two agents that share the
+         *     same bare worktree name across different repos within a workspace
+         *     (workspace mode). When present, the backend forms the compound
+         *     agent key "repo/worktree" to target the correct agent. When absent
+         *     or empty, the handler falls back to the bare worktree name — safe
+         *     for single-repo setups where every worktree name is unique.
+         */
+        repo?: components["parameters"]["RepoQuery"];
+      };
       header?: never;
       path: {
         /** @description Workspace identifier */
@@ -5345,7 +5364,17 @@ export interface operations {
   };
   startAgent: {
     parameters: {
-      query?: never;
+      query?: {
+        /**
+         * @description Optional repo identifier to disambiguate two agents that share the
+         *     same bare worktree name across different repos within a workspace
+         *     (workspace mode). When present, the backend forms the compound
+         *     agent key "repo/worktree" to target the correct agent. When absent
+         *     or empty, the handler falls back to the bare worktree name — safe
+         *     for single-repo setups where every worktree name is unique.
+         */
+        repo?: components["parameters"]["RepoQuery"];
+      };
       header?: never;
       path: {
         /** @description Workspace identifier */
@@ -5377,7 +5406,17 @@ export interface operations {
   };
   restartAgent: {
     parameters: {
-      query?: never;
+      query?: {
+        /**
+         * @description Optional repo identifier to disambiguate two agents that share the
+         *     same bare worktree name across different repos within a workspace
+         *     (workspace mode). When present, the backend forms the compound
+         *     agent key "repo/worktree" to target the correct agent. When absent
+         *     or empty, the handler falls back to the bare worktree name — safe
+         *     for single-repo setups where every worktree name is unique.
+         */
+        repo?: components["parameters"]["RepoQuery"];
+      };
       header?: never;
       path: {
         /** @description Workspace identifier */
@@ -5409,7 +5448,17 @@ export interface operations {
   };
   yieldAgent: {
     parameters: {
-      query?: never;
+      query?: {
+        /**
+         * @description Optional repo identifier to disambiguate two agents that share the
+         *     same bare worktree name across different repos within a workspace
+         *     (workspace mode). When present, the backend forms the compound
+         *     agent key "repo/worktree" to target the correct agent. When absent
+         *     or empty, the handler falls back to the bare worktree name — safe
+         *     for single-repo setups where every worktree name is unique.
+         */
+        repo?: components["parameters"]["RepoQuery"];
+      };
       header?: never;
       path: {
         /** @description Workspace identifier */

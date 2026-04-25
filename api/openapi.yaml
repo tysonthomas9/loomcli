@@ -2211,6 +2211,7 @@ paths:
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
         - $ref: "#/components/parameters/AgentName"
+        - $ref: "#/components/parameters/RepoQuery"
       requestBody:
         content:
           application/json:
@@ -2244,6 +2245,7 @@ paths:
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
         - $ref: "#/components/parameters/AgentName"
+        - $ref: "#/components/parameters/RepoQuery"
       responses:
         "200":
           description: Agent started
@@ -2262,6 +2264,7 @@ paths:
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
         - $ref: "#/components/parameters/AgentName"
+        - $ref: "#/components/parameters/RepoQuery"
       responses:
         "200":
           description: Agent restarted
@@ -2280,6 +2283,7 @@ paths:
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
         - $ref: "#/components/parameters/AgentName"
+        - $ref: "#/components/parameters/RepoQuery"
       responses:
         "202":
           description: Yield signal sent
@@ -3271,6 +3275,20 @@ components:
       in: path
       required: true
       description: Agent worktree name
+      schema:
+        type: string
+
+    RepoQuery:
+      name: repo
+      in: query
+      required: false
+      description: |
+        Optional repo identifier to disambiguate two agents that share the
+        same bare worktree name across different repos within a workspace
+        (workspace mode). When present, the backend forms the compound
+        agent key "repo/worktree" to target the correct agent. When absent
+        or empty, the handler falls back to the bare worktree name — safe
+        for single-repo setups where every worktree name is unique.
       schema:
         type: string
 
