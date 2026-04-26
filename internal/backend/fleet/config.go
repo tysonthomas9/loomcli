@@ -24,6 +24,9 @@ type Config struct {
 	Actor string
 
 	// HTTPClient is an optional override for the HTTP client.
-	// If nil, a default client with 30s timeout is created.
+	// If nil, the process-wide singleton from SharedHTTPClient() is used,
+	// which is backed by a tuned *http.Transport (MaxIdleConnsPerHost=128)
+	// and a 65s Timeout that decouples from the fleet-db long-poll
+	// deadline. See SharedHTTPClient docstring for details.
 	HTTPClient *http.Client
 }

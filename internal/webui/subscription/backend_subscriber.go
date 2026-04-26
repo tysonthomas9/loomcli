@@ -129,7 +129,15 @@ func (s *BackendMutationSubscriber) loop() {
 		s.mu.RUnlock()
 
 		timeoutMs := int64(backendWaitTimeout / time.Millisecond)
-		muts, err := s.backend.WaitForMutations(s.ctx, since, timeoutMs)
+		// Wrap the long-poll in a per-call deadline that exceeds the
+		// server-side timeout by a slack window. With the shared HTTP
+		// client's Timeout set to 65s (see fleet.SharedHTTPClient), this
+		// per-call context is what actually unblocks WaitForMutations on
+		// timeout — eliminating the 30s vs 30s race that surfaced as
+		// `context canceled` log spam on every empty long-poll.
+		reqCtx, reqCancel := context.WithTimeout(s.ctx, backendWaitTimeout+10*time.Second)
+		muts, err := s.backend.WaitForMutations(reqCtx, since, timeoutMs)
+		reqCancel()
 		if err != nil {
 			// Cancellation is the expected exit path on Stop(); don't
 			// retry-spin on it.
@@ -142,9 +150,14 @@ func (s *BackendMutationSubscriber) loop() {
 		}
 
 		if len(muts) == 0 {
-			// Long-poll timed out with nothing to deliver — re-enter
-			// immediately. The backend's own timeout (30 s server-side)
-			// is the rate limit; no client-side delay needed.
+			// Long-poll returned no mutations. Apply a small client-side
+			// back-off before re-entering: under fleet-db pool pressure
+			// the server returns early empty 200s (well before its 30s
+			// timeout), and a tight loop pegs both subscriber CPU and the
+			// downstream Redis pool. 250ms caps re-entry at 4/s in that
+			// degraded mode while still being invisible in the steady
+			// state where the server honors the full long-poll window.
+			s.waitWithCancel(250 * time.Millisecond)
 			continue
 		}
 

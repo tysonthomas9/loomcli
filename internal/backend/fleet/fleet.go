@@ -59,7 +59,12 @@ func New(cfg Config) (*FleetBackend, error) {
 	baseURL := strings.TrimRight(cfg.BaseURL, "/")
 	httpClient := cfg.HTTPClient
 	if httpClient == nil {
-		httpClient = &http.Client{Timeout: 30 * time.Second}
+		// Use the shared transport-backed client so every FleetBackend in
+		// the process pools idle connections together (default
+		// http.DefaultTransport caps MaxIdleConnsPerHost=2, which starves
+		// fleet-db's Redis pool under N×M concurrent callers). See
+		// SharedHTTPClient docstring + docs/design/fleet-http-connection-reuse.md.
+		httpClient = SharedHTTPClient()
 	}
 
 	return &FleetBackend{
