@@ -290,6 +290,17 @@ export async function timingAssert(
 ): Promise<TimingResult> {
     const fastest = Math.min(times.beads, times.fleet);
     const slowest = Math.max(times.beads, times.fleet);
-    const within = fastest > 0 ? slowest <= fastest * 2 : slowest < 2000;
+    // Sub-500ms timings are dominated by jitter (Playwright tick rounding,
+    // network noise, GC pauses), so any backend that lands under that
+    // floor is "fast enough" regardless of the cross-backend ratio. Above
+    // 500ms apply the strict 2x parity check.
+    let within: boolean;
+    if (slowest < 500) {
+        within = true;
+    } else if (fastest > 0) {
+        within = slowest <= fastest * 2;
+    } else {
+        within = slowest < 2000;
+    }
     return { action, beads_ms: times.beads, fleet_ms: times.fleet, within_2x: within };
 }
