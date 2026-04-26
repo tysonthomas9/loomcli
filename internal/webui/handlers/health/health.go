@@ -133,11 +133,33 @@ func HandleHealth(pool daemon.Pool) http.HandlerFunc {
 
 // HandleAPIHealth returns a detailed health check including daemon connectivity.
 //
-// Pool-less (fleet) mode: the absence of a bd daemon is the steady state, not
-// a degraded one — return 200 OK with daemon.connected=false rather than 503.
-// The FE's daemon-status badge already distinguishes "no daemon expected"
-// from "daemon should be here but isn't" via the GET /api/config response.
-func HandleAPIHealth(pool daemon.Pool) http.HandlerFunc { //nolint:funlen
+// Backwards-compatible wrapper for the daemon-only call site. New call sites
+// should use HandleAPIHealthWithBackend so the response can distinguish "no
+// daemon expected (fleet mode)" from "daemon expected but unreachable".
+func HandleAPIHealth(pool daemon.Pool) http.HandlerFunc {
+	return HandleAPIHealthWithBackend(pool, nil)
+}
+
+// HandleAPIHealthWithBackend is the backend-aware variant.
+//
+// Status semantics:
+//   - "ok" + daemon.connected=true: bd daemon is up and answering.
+//   - "ok" + daemon.connected=false: fleet mode (no daemon expected). Returned
+//     as 200 because the server itself is healthy — the FE badge can use the
+//     daemon.connected field to render mode-specific UI.
+//   - "ok" + daemon.connected=false (no backend resolved either): pool-less
+//     mode with no fleet adapter wired; conservatively still 200 since the
+//     HTTP server is responding.
+//   - "starting": daemon is intermediately initialising — 200 so probes
+//     don't flap during boot.
+//   - "degraded": daemon expected but unreachable AND no fleet fallback.
+//     Returns 503.
+//
+// The previous implementation 503'd on any non-pool-less degradation, which
+// caused fleet-mode `/api/health` to flap to 503 once the bd daemon's circuit
+// breaker opened (the pool exists in fleet mode, just never connects). The
+// backendFn signal disambiguates that case.
+func HandleAPIHealthWithBackend(pool daemon.Pool, backendFn IssueBackendFn) http.HandlerFunc { //nolint:funlen
 	return func(w http.ResponseWriter, r *http.Request) {
 		status := HealthStatus{
 			Status: "ok",
@@ -203,8 +225,15 @@ func HandleAPIHealth(pool daemon.Pool) http.HandlerFunc { //nolint:funlen
 				}
 			}
 		}
-		// pool == nil is the fleet/pool-less steady state; status stays "ok"
-		// with daemon.connected=false. No httpStatus override needed.
+
+		// If a backend is wired we know the server is fully functional — even
+		// if the bd daemon's pool has gone degraded (fleet mode), the
+		// IssueBackend is the actual issue source. Promote back to "ok" so
+		// the badge stays green; the daemon details remain on the response
+		// for clients that care about the bd subsystem specifically.
+		if status.Status == "degraded" && backendFn != nil && backendFn() != nil {
+			status.Status = "ok"
+		}
 
 		httpStatus := http.StatusOK
 		if status.Status != "ok" && status.Status != "starting" {

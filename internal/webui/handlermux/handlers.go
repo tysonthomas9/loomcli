@@ -75,7 +75,7 @@ func BuildHandlers(deps HandlerDeps) *Handlers {
 
 	h := &Handlers{
 		Health:             healthhandlers.HandleHealth(deps.Pool),
-		APIHealth:          healthhandlers.HandleAPIHealth(deps.Pool),
+		APIHealth:          healthhandlers.HandleAPIHealthWithBackend(deps.Pool, healthhandlers.IssueBackendFn(deps.IssueBackendFn)),
 		ClientErrors:       misc.HandleClientErrors(clientErrLimiter),
 		CSPReport:          misc.HandleCSPReport(cspLimiter),
 		AuthConfig:         misc.HandleAuthConfig(deps.ExtAuthURL, authCfgLimiter, deps.IssueBackendFn),
