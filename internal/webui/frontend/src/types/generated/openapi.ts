@@ -55,23 +55,6 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/daemon/status": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /** Daemon configuration and status */
-    get: operations["getDaemonStatus"];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
   "/api/config": {
     parameters: {
       query?: never;
@@ -152,23 +135,6 @@ export interface paths {
     put?: never;
     /** CSP violation reporting (rate-limited, 60 req/min/IP) */
     post: operations["reportCSPViolation"];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/api/stats": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /** Global project statistics */
-    get: operations["getGlobalStats"];
-    put?: never;
-    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -1148,23 +1114,6 @@ export interface paths {
      *     The frontend's `terminalConnection.ts` handles this directly.
      */
     get: operations["connectAgentTerminalWS"];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/api/workspaces/{ws}/agents": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /** List agents via daemon control socket */
-    get: operations["listAgents"];
     put?: never;
     post?: never;
     delete?: never;
@@ -2891,26 +2840,6 @@ export interface operations {
       };
     };
   };
-  getDaemonStatus: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Daemon status */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": Record<string, never>;
-        };
-      };
-    };
-  };
   getAuthConfig: {
     parameters: {
       query?: never;
@@ -3063,26 +2992,6 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
-      };
-    };
-  };
-  getGlobalStats: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Statistics */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["Statistics"];
-        };
       };
     };
   };
@@ -5144,39 +5053,6 @@ export interface operations {
       };
       /** @description Invalid or expired token */
       401: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-    };
-  };
-  listAgents: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description Workspace identifier */
-        ws: components["parameters"]["WorkspaceId"];
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Agent list */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": {
-            success: boolean;
-            data: components["schemas"]["AgentControlEntry"][];
-          };
-        };
-      };
-      /** @description Daemon unavailable */
-      503: {
         headers: {
           [name: string]: unknown;
         };

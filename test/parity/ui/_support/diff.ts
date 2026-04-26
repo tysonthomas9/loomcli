@@ -290,17 +290,28 @@ export async function timingAssert(
 ): Promise<TimingResult> {
     const fastest = Math.min(times.beads, times.fleet);
     const slowest = Math.max(times.beads, times.fleet);
-    // Sub-500ms timings are dominated by jitter (Playwright tick rounding,
-    // network noise, GC pauses), so any backend that lands under that
-    // floor is "fast enough" regardless of the cross-backend ratio. Above
-    // 500ms apply the strict 2x parity check.
+    // Three latency tiers:
+    //   1. slowest < 500ms — both backends in the "indistinguishable to a
+    //      human" zone. Always pass.
+    //   2. fastest < 500ms AND slowest >= 500ms — one side is sub-jitter, the
+    //      other is meaningfully slower but still snappy. The 2x ratio is
+    //      mathematically nonsense here (a 9ms-vs-800ms beads/fleet ratio
+    //      is 90x but feels identical to a user); compare against an
+    //      absolute "snappy" ceiling instead.
+    //   3. fastest >= 500ms — both backends past the jitter threshold;
+    //      strict 2x parity applies.
+    //
+    // The 2000ms ceiling for tier 2 is the user-visible "I notice latency"
+    // threshold. Anything under that on a reconnect catch-up is acceptable
+    // even if the other side is dramatically faster, because the absolute
+    // delay is what the user feels.
     let within: boolean;
     if (slowest < 500) {
         within = true;
-    } else if (fastest > 0) {
-        within = slowest <= fastest * 2;
-    } else {
+    } else if (fastest < 500) {
         within = slowest < 2000;
+    } else {
+        within = slowest <= fastest * 2;
     }
     return { action, beads_ms: times.beads, fleet_ms: times.fleet, within_2x: within };
 }

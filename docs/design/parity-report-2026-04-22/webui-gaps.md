@@ -207,7 +207,7 @@ and fix the compose / env config first.
 |---|---|---|---|
 | `GET :8081/api/config .issue_backend` | `beads` | beads | PASS |
 | `GET :8082/api/config .issue_backend` | `fleet` | beads | PASS |
-| Container healthchecks all green | healthy | loom-beads=Up 2 minutes (healthy) loom-fleet=Up 2 minutes (healthy) fleet-db=Up 2 minutes | PASS |
+| Container healthchecks all green | healthy | loom-beads=Up 5 minutes (healthy) loom-fleet=Up 5 minutes (healthy) fleet-db=Up 5 minutes | PASS |
 | Probe POST to :8082 shows up in fleet-db logs | yes | yes — fleet-db received POST /api/v1/PARITY/issues | PASS |
 | `loom-fleet` env `LOOM_FLEET_URL` | `http://fleet-db:8080` | http://fleet-db:8080 | PASS |
 | `loom-fleet` env `LOOM_WORKSPACE` | `PARITY` | PARITY | PASS |
@@ -407,4 +407,4 @@ See `internal/backend/paritytest/testdata/cli-fixtures/*.json`:
 4. Optionally: capture screenshots into a `screenshots/` sibling dir
    and link from the relevant rows
 
-<!-- preflight: 2026-04-26T18:36:08.366Z all_passed=true -->
+<!-- preflight: 2026-04-26T18:38:37.845Z all_passed=true -->
