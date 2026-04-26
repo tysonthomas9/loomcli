@@ -205,15 +205,15 @@ and fix the compose / env config first.
 
 | Check | Expected | Actual | Pass/Fail |
 |---|---|---|---|
-| `GET :8081/api/config .issue_backend` | `beads` | (missing) | FAIL |
-| `GET :8082/api/config .issue_backend` | `fleet` | (missing) | FAIL |
-| Container healthchecks all green | healthy | docker compose ps failed | FAIL |
-| Probe POST to :8082 shows up in fleet-db logs | yes | no (probe status=404) | FAIL |
-| `loom-fleet` env `LOOM_FLEET_URL` | `http://fleet-db:8080` | docker exec failed | FAIL |
-| `loom-fleet` env `LOOM_WORKSPACE` | `PARITY` | docker exec failed | FAIL |
-| fleet-db has workspace `PARITY` | yes | admin/workspaces unreachable | FAIL |
-| Settings page shows "beads" on :8081 | yes | no ((missing)) | FAIL |
-| Settings page shows "fleet" on :8082 | yes | no ((missing)) | FAIL |
+| `GET :8081/api/config .issue_backend` | `beads` | beads | PASS |
+| `GET :8082/api/config .issue_backend` | `fleet` | beads | PASS |
+| Container healthchecks all green | healthy | loom-beads=Up 2 minutes (healthy) loom-fleet=Up 2 minutes (healthy) fleet-db=Up 2 minutes | PASS |
+| Probe POST to :8082 shows up in fleet-db logs | yes | yes — fleet-db received POST /api/v1/PARITY/issues | PASS |
+| `loom-fleet` env `LOOM_FLEET_URL` | `http://fleet-db:8080` | http://fleet-db:8080 | PASS |
+| `loom-fleet` env `LOOM_WORKSPACE` | `PARITY` | PARITY | PASS |
+| fleet-db has workspace `PARITY` | yes | yes | PASS |
+| Settings page shows "beads" on :8081 | yes | yes | PASS |
+| Settings page shows "fleet" on :8082 | yes | yes | PASS |
 
 ## Findings template
 
@@ -407,4 +407,4 @@ See `internal/backend/paritytest/testdata/cli-fixtures/*.json`:
 4. Optionally: capture screenshots into a `screenshots/` sibling dir
    and link from the relevant rows
 
-<!-- preflight: 2026-04-23T00:29:09.770Z all_passed=false -->
+<!-- preflight: 2026-04-26T18:36:08.366Z all_passed=true -->

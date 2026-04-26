@@ -225,14 +225,31 @@ async function deleteAllIssues(baseUrl: string, workspace: string): Promise<void
 }
 
 async function runSeedScript(): Promise<void> {
-    // Try both compose tools — environments use whichever is installed,
-    // and `docker` may be a podman alias on Linux setups but not all of
-    // them. Surfacing the failure is critical because tests that depend
-    // on seeded fixtures (titles like "Refactor auth middleware") will
-    // otherwise report cryptic "no seed match" errors.
+    // Bypass `<compose> run --rm parity-seed` and invoke plain `<runtime> run`.
+    //
+    // Background: podman-compose 1.0.6's `compose run` is broken — its
+    // generated teardown calls `down(args)` with a Namespace that does not
+    // carry `remove_orphans`, raising AttributeError. The crash also tears
+    // down peer containers that share the project network, knocking
+    // loom-fleet offline and cascading every subsequent preflight to a 502.
+    // See https://github.com/containers/podman-compose/issues for the upstream
+    // remove_orphans regression. docker compose handles `run --rm` fine,
+    // but on this host docker is a podman alias and inherits the same bug.
+    //
+    // The plain-runtime path mounts seed.sh into a fresh container of the
+    // pre-built parity-seed image, joins the same project network, exits
+    // when the script finishes, and never touches the rest of the stack.
+    const seedHostPath = path.resolve(REPO_ROOT, "test/parity/seed.sh");
+    const network = "loomcli-parity_parity";
+    const image = "loomcli-parity_parity-seed";
+    const envFlags = [
+        "-e", `FLEET_URL=http://fleet-db:8080`,
+        "-e", `FLEET_WORKSPACE=PARITY`,
+        "-e", `BEADS_URL=http://loom-beads:8080`,
+    ].join(" ");
     const cmds = [
-        `podman compose -f test/parity/docker-compose.parity.yml run --rm parity-seed`,
-        `docker compose -f test/parity/docker-compose.parity.yml run --rm parity-seed`,
+        `podman run --rm --network ${network} ${envFlags} -v ${seedHostPath}:/seed.sh:ro --entrypoint /bin/sh ${image} /seed.sh`,
+        `docker run --rm --network ${network} ${envFlags} -v ${seedHostPath}:/seed.sh:ro --entrypoint /bin/sh ${image} /seed.sh`,
     ];
     let lastErr: unknown;
     for (const cmd of cmds) {
@@ -250,7 +267,7 @@ async function runSeedScript(): Promise<void> {
     }
     // eslint-disable-next-line no-console
     console.warn(
-        `[backends] reseed failed via both compose tools: ${(lastErr as Error)?.message ?? lastErr}`,
+        `[backends] reseed failed via both runtimes: ${(lastErr as Error)?.message ?? lastErr}`,
     );
 }
 

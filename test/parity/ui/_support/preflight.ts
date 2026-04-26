@@ -41,11 +41,16 @@ export interface PreflightResult {
 // Cached across the whole run — preflight must run exactly once via beforeAll.
 let cached: PreflightResult | null = null;
 
-async function httpJson(url: string, timeoutMs = 5000): Promise<any> {
+// 15s default — long enough to absorb a cold-start fleet-db connection pool
+// on the first preflight probe while still failing fast if the service is
+// actually wedged. Earlier 5s timeout was tripping the AbortController on
+// the first call after a fresh `compose up` even though every subsequent
+// request landed in <10ms.
+async function httpJson(url: string, timeoutMs = 15000, headers?: Record<string, string>): Promise<any> {
     const controller = new AbortController();
     const t = setTimeout(() => controller.abort(), timeoutMs);
     try {
-        const r = await fetch(url, { signal: controller.signal });
+        const r = await fetch(url, { signal: controller.signal, headers });
         if (!r.ok) throw new Error(`HTTP ${r.status} on ${url}`);
         return await r.json();
     } finally {
@@ -56,7 +61,7 @@ async function httpJson(url: string, timeoutMs = 5000): Promise<any> {
 async function httpPost(
     url: string,
     body: unknown,
-    timeoutMs = 5000,
+    timeoutMs = 15000,
 ): Promise<{ status: number; body: any }> {
     const controller = new AbortController();
     const t = setTimeout(() => controller.abort(), timeoutMs);
@@ -155,27 +160,32 @@ async function runAllChecks(): Promise<PreflightResult> {
     }
 
     // 3. Container healthchecks
+    //
+    // `docker compose ps --format json` works on docker but podman-compose
+    // 1.0.x rejects --format ("unrecognized arguments"). Bypass compose
+    // entirely and ask podman/docker for the container list directly,
+    // filtered by the well-known project name. Both runtimes accept
+    // `<runtime> ps --format '{{.Names}} {{.Status}}'` and the parity stack
+    // uses a stable project prefix `loomcli-parity_`.
     try {
+        const runtime = composeRun("").trim().split(/\s+/)[0]; // "podman" | "docker"
         const ps = execSync(
-            composeRun(`ps --format json`),
+            `${runtime} ps -a --format '{{.Names}}|{{.Status}}'`,
             {
                 cwd: path.resolve(__dirname, "../../../.."),
                 encoding: "utf-8",
                 timeout: 10_000,
             },
         );
-        // `docker compose ps --format json` may emit one JSON per line OR a
-        // single array. Handle both.
-        const rows: any[] = ps
+        const services: { name: string; status: string }[] = ps
             .split("\n")
-            .filter((l) => l.trim().startsWith("{"))
-            .map((l) => JSON.parse(l));
-        const alsoArray = ps.trim().startsWith("[") ? JSON.parse(ps) : [];
-        const services = [...rows, ...alsoArray];
-        const healthFor = (name: string) =>
-            services.find((s) => s.Service === name || s.Name?.includes(name))?.Health ??
-            services.find((s) => s.Service === name || s.Name?.includes(name))?.Status ??
-            "(not found)";
+            .filter((l) => l.includes("loomcli-parity_"))
+            .map((l) => {
+                const [name, ...rest] = l.split("|");
+                return { name, status: rest.join("|") };
+            });
+        const healthFor = (svc: string) =>
+            services.find((s) => s.name.includes(svc))?.status ?? "(not found)";
         const fleetHealth = healthFor("loom-fleet");
         const beadsHealth = healthFor("loom-beads");
         const fleetDbHealth = healthFor("fleet-db");
@@ -192,7 +202,7 @@ async function runAllChecks(): Promise<PreflightResult> {
         checks.push({
             name: "Container healthchecks all green",
             expected: "healthy",
-            actual: "docker compose ps failed",
+            actual: "container ps failed",
             pass: false,
             error: e?.message ?? String(e),
         });
@@ -200,22 +210,40 @@ async function runAllChecks(): Promise<PreflightResult> {
 
     // 4. Probe POST to :8082 must cause fleet-db to log POST /api/v1/PARITY/issues.
     //
-    // We poll the log tail rather than sleeping a fixed 2s because CI can
+    // The unscoped /api/issues was retired in favour of
+    // /api/workspaces/{ws}/issues (commit loomcli-n28bt.4 on 2026-03-25),
+    // so the probe must hit the workspace-scoped path to actually exercise
+    // the live routing. Discover the workspace ID at runtime — loom uses
+    // UUID workspace IDs, not literals.
+    //
+    // Poll the log tail rather than sleeping a fixed 2s because CI can
     // take longer to flush stdout on busy runners — a fixed sleep produces
     // false-negatives that abort the whole suite. Success detection breaks
     // out of the poll as soon as the log entry lands; the total budget
     // (5s) is the fail threshold.
     try {
+        const fleetWs = await httpJson(`${PARITY_URLS.fleet}/api/workspaces`)
+            .then((j: any) => (j?.workspaces?.[0]?.id ?? j?.data?.[0]?.id) as string);
+        if (!fleetWs) throw new Error("no workspace id from /api/workspaces");
         const before = await fleetDBLogTail(5);
-        const probe = await httpPost(`${PARITY_URLS.fleet}/api/issues`, {
-            title: `parity-preflight-${Date.now()}`,
-            issue_type: "task",
-            priority: 3,
-            description: "preflight routing probe — safe to delete",
-        });
+        const probe = await httpPost(
+            `${PARITY_URLS.fleet}/api/workspaces/${fleetWs}/issues`,
+            {
+                title: `parity-preflight-${Date.now()}`,
+                issue_type: "task",
+                priority: 3,
+                description: "preflight routing probe — safe to delete",
+            },
+        );
+        // fleet-db emits structured JSON logs (`"method":"POST","path":"/api/v1/PARITY/issues"`)
+        // not classic Apache-style lines, so plain "POST /api/..." substring
+        // matching never fires. Match the JSON-field shape and the legacy
+        // shape both so this works against future fleet-db log format
+        // changes without re-breaking.
         const sawInboundPattern = (delta: string) =>
-            /POST\s+\/api\/v1\/PARITY\/issues/.test(delta) ||
-            /POST .*\/PARITY\/issues/.test(delta);
+            /"method":"POST".*"path":"\/api\/v1\/PARITY\/issues"/.test(delta) ||
+            /"path":"\/api\/v1\/PARITY\/issues".*"method":"POST"/.test(delta) ||
+            /POST\s+\/api\/v1\/PARITY\/issues/.test(delta);
 
         const pollDeadline = Date.now() + 5000;
         let sawInbound = false;
@@ -285,10 +313,18 @@ async function runAllChecks(): Promise<PreflightResult> {
         });
     }
 
-    // 7. fleet-db has workspace PARITY
+    // 7. fleet-db has workspace PARITY.
+    // fleet-db's admin/workspaces requires authentication; under
+    // --auth-dev-mode it accepts X-Actor as the authenticated identity.
+    // Without it the request 401s before reaching the workspace lookup.
     try {
-        const j = await httpJson(`${PARITY_URLS.fleetDB}/api/v1/admin/workspaces`);
-        const keys: string[] = (j?.data ?? []).map((w: any) => w.key ?? w.Key);
+        const j = await httpJson(
+            `${PARITY_URLS.fleetDB}/api/v1/admin/workspaces`,
+            5000,
+            { "X-Actor": "parity-harness" },
+        );
+        const list: any[] = j?.data ?? j?.workspaces ?? (Array.isArray(j) ? j : []);
+        const keys: string[] = list.map((w: any) => w.key ?? w.Key ?? w.name ?? w.Name);
         const has = keys.includes("PARITY");
         checks.push({
             name: "fleet-db has workspace PARITY",

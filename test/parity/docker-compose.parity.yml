@@ -142,7 +142,12 @@ services:
       # X-Actor header required by fleet-db's --auth-dev-mode (the only auth
       # path enabled in this compose). Falls back to LOOM_AGENT_NAME, but
       # being explicit avoids a surprise if someone unsets the agent name.
-      LOOM_FLEET_ACTOR: parity-harness
+      #
+      # Match the loom-beads side's git config user.email so issues created
+      # via the live loom-fleet UI carry the same owner string seed.sh and
+      # the bd daemon both produce. Without alignment the parity diff trips
+      # on owner ("parity-harness" vs "parity-harness@fixture.local").
+      LOOM_FLEET_ACTOR: parity-harness@fixture.local
       # Fail fast if loom boots thinking it has a local beads backend.
       # Any fallback to an embedded beads path in fleet mode should surface
       # as a startup error, not a silent re-route.

@@ -26,7 +26,12 @@ set -eu
 : "${FLEET_WORKSPACE:?must be set}"
 : "${BEADS_URL:?must be set}"
 
-ACTOR="parity-harness"
+# Use the same actor identity beads gets from git config user.email
+# (set to parity-harness@fixture.local in docker-compose.parity.yml).
+# Without this, the parity diff trips on owner/created_by:
+#   beads → "parity-harness@fixture.local"
+#   fleet → "parity-harness"
+ACTOR="parity-harness@fixture.local"
 
 echo "[seed] FLEET_URL=${FLEET_URL}  workspace=${FLEET_WORKSPACE}  actor=${ACTOR}"
 echo "[seed] BEADS_URL=${BEADS_URL}"
@@ -40,18 +45,31 @@ echo "[seed] fdb data  base: ${FDB_DATA}"
 
 # ──────────────────────────────────────────────────────────────────
 # Phase 1: ensure fleet-db PARITY workspace exists (via fdb)
-# Try create; accept "already_exists" as success. Simpler than trying
-# to detect existence via `workspace show` (whose arg shape differs
-# from the data commands).
+#
+# When PARITY already exists from a prior compose run, drop and recreate
+# it so the issue list starts at 0. Fleet-db's Redis state survives
+# `podman-compose up` (the redis container is restarted but its Streams
+# data is event-sourced and replayed at boot via fleet-db's own snapshot).
+# Beads' parity always starts clean (loom-beads' bd database lives in the
+# container's filesystem and gets re-init'd on each container creation),
+# so without the drop-and-recreate the parity diff observes
+# fleet=N*13 vs beads=13.
 # ──────────────────────────────────────────────────────────────────
-echo "[seed] ensuring fleet-db workspace ${FLEET_WORKSPACE} exists..."
+echo "[seed] resetting fleet-db workspace ${FLEET_WORKSPACE} for a clean seed..."
+DELETE_OUT=$(${FDB_ADMIN} workspace delete --key "${FLEET_WORKSPACE}" --confirm 2>&1 || true)
+case "${DELETE_OUT}" in
+    *not_found*|*does\ not\ exist*|*"not found"*)
+        echo "[seed]   ≈ no existing workspace to delete (first run)" ;;
+    *)
+        echo "[seed]   delete result: ${DELETE_OUT}" ;;
+esac
 CREATE_OUT=$(${FDB_ADMIN} workspace create --key "${FLEET_WORKSPACE}" --name "Parity Fixture" 2>&1 || true)
 case "${CREATE_OUT}" in
     *already_exists*|*already\ exists*)
-        echo "[seed]   ≈ already exists (ok)" ;;
+        # Delete didn't take — proceed anyway; the data calls will
+        # surface a real problem with a clearer error.
+        echo "[seed]   ≈ already exists after delete (ok)" ;;
     *)
-        # Any other output: print it for debugging but don't fail — the
-        # data calls below will surface a real problem with a clearer error.
         echo "[seed]   create result: ${CREATE_OUT}" ;;
 esac
 
