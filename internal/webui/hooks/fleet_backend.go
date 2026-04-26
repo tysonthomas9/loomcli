@@ -20,13 +20,17 @@ type FleetBackendHook struct {
 	baseURL     string
 	workspaceID string // fleet server workspace (e.g., "default"), not local UUID
 	apiKey      string
+	actor       string // X-Actor header (fleet-db --auth-dev-mode); empty = no header
 	logger      *slog.Logger
 }
 
 // NewFleetBackendHook creates a FleetBackendHook. baseURL must not be empty.
 // workspaceID is the fleet server workspace identifier (defaults to "default"
-// if empty). A nil logger defaults to slog.Default().
-func NewFleetBackendHook(baseURL, workspaceID, apiKey string, logger *slog.Logger) *FleetBackendHook {
+// if empty). actor is the X-Actor header value used for fleet-db's
+// --auth-dev-mode (typically the loom agent name); empty means no header
+// is sent and fleet-db will reject the request unless a JWT is configured
+// via apiKey. A nil logger defaults to slog.Default().
+func NewFleetBackendHook(baseURL, workspaceID, apiKey, actor string, logger *slog.Logger) *FleetBackendHook {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -37,6 +41,7 @@ func NewFleetBackendHook(baseURL, workspaceID, apiKey string, logger *slog.Logge
 		baseURL:     baseURL,
 		workspaceID: workspaceID,
 		apiKey:      apiKey,
+		actor:       actor,
 		logger:      logger,
 	}
 }
@@ -56,6 +61,7 @@ func (h *FleetBackendHook) OnRegister(ctx *coordinator.RegistrationContext) erro
 		BaseURL:     h.baseURL,
 		WorkspaceID: h.workspaceID,
 		APIKey:      h.apiKey,
+		Actor:       h.actor,
 	})
 	if err != nil {
 		return fmt.Errorf("create fleet backend for %q: %w", id, err)

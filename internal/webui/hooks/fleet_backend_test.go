@@ -12,7 +12,7 @@ const testFleetURL = "http://localhost:0"
 
 func newTestFleetBackendHook(t *testing.T) *FleetBackendHook {
 	t.Helper()
-	return NewFleetBackendHook(testFleetURL, "test-ws", "test-key", slog.Default())
+	return NewFleetBackendHook(testFleetURL, "test-ws", "test-key", "test-actor", slog.Default())
 }
 
 func TestFleetBackendHook_Name(t *testing.T) {
@@ -55,7 +55,7 @@ func TestFleetBackendHook_OnRegister_CreatesBackend(t *testing.T) {
 
 func TestFleetBackendHook_OnRegister_Error(t *testing.T) {
 	// Empty baseURL causes fleet.New to fail.
-	hook := NewFleetBackendHook("", "test-ws", "test-key", slog.Default())
+	hook := NewFleetBackendHook("", "test-ws", "test-key", "test-actor", slog.Default())
 
 	ctx := regCtx("ws-fleet-err", "/tmp/ws-err")
 	if err := hook.OnRegister(ctx); err == nil {

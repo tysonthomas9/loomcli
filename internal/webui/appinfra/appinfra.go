@@ -99,6 +99,7 @@ type HookConfig struct {
 	FleetURL    string
 	FleetWS     string
 	FleetKey    string
+	FleetActor  string // X-Actor header value (fleet-db --auth-dev-mode)
 	FleetMode   bool
 	Logger      *slog.Logger
 }
@@ -142,7 +143,7 @@ func RegisterHooks(registry *WorkspaceRegistry, cfg HookConfig) RegisteredHooks 
 		// FleetBackendHook MUST be added before FleetSubscriberHook so that
 		// by the time FleetSubscriberHook.Activate fires, the FleetBackend
 		// resource is already in the workspace handle.
-		_ = registry.AddHook(hooks.NewFleetBackendHook(cfg.FleetURL, cfg.FleetWS, cfg.FleetKey, cfg.Logger))
+		_ = registry.AddHook(hooks.NewFleetBackendHook(cfg.FleetURL, cfg.FleetWS, cfg.FleetKey, cfg.FleetActor, cfg.Logger))
 	}
 
 	// Fleet-mode SSE push: FleetSubscriberHook bridges the per-workspace

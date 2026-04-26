@@ -273,6 +273,7 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 		FleetURL:    config.FleetClientURL,
 		FleetWS:     config.FleetClientWorkspace,
 		FleetKey:    config.FleetClientAPIKey,
+		FleetActor:  config.FleetClientActor,
 		FleetMode:   config.FleetMode,
 		Logger:      config.Logger,
 	})

@@ -373,6 +373,7 @@ func applyFleetConfig(cfg *webui.ServerConfig, fs fleetState) {
 	cfg.FleetClientURL = fs.clientCfg.URL
 	cfg.FleetClientWorkspace = fs.clientCfg.Workspace
 	cfg.FleetClientAPIKey = fs.clientCfg.APIKey
+	cfg.FleetClientActor = fs.clientCfg.Actor
 }
 
 func applyWorkspaceConfig(cfg *webui.ServerConfig) {
