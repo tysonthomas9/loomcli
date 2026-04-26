@@ -1343,8 +1343,8 @@ func TestReady_HappyPath(t *testing.T) {
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
 		respondOK(w, []*readyIssueWithParent{
 			{
-				Issue:  &types.Issue{ID: "r-1", Title: "Ready", Status: types.StatusOpen, CreatedAt: now, UpdatedAt: now},
-				Parent: &parent,
+				fleetIssueWire: fleetIssueWire{ID: "r-1", Title: "Ready", Status: string(types.StatusOpen), CreatedAt: now, UpdatedAt: now},
+				Parent:         &parent,
 			},
 		})
 	})

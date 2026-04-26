@@ -37,6 +37,13 @@ type IssueData struct {
 	UpdatedAt  time.Time  `json:"updated_at"`
 	DueAt      *time.Time `json:"due_at,omitempty"`
 	DeferUntil *time.Time `json:"defer_until,omitempty"`
+	// Lifecycle fields. Beads sends these on slim list responses (daemon
+	// RPC unmarshals straight into types.IssueWithCounts and serializes
+	// every field), so the kanban + filter UIs depend on them being
+	// present. Fleet must populate them via the wire type as well.
+	CreatedBy   string     `json:"created_by,omitempty"`
+	ClosedAt    *time.Time `json:"closed_at,omitempty"`
+	CloseReason string     `json:"close_reason,omitempty"`
 	// Counts for list display (populated by backends that support them).
 	DependencyCount int `json:"dependency_count,omitempty"`
 	DependentCount  int `json:"dependent_count,omitempty"`

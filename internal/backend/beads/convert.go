@@ -60,20 +60,23 @@ func issueToData(issue *types.Issue) backend.IssueData {
 		labels = issue.Labels
 	}
 	return backend.IssueData{
-		ID:         issue.ID,
-		Title:      issue.Title,
-		Status:     string(issue.Status),
-		Priority:   issue.Priority,
-		IssueType:  string(issue.IssueType),
-		Assignee:   issue.Assignee,
-		Owner:      issue.Owner,
-		Labels:     labels,
-		SourceRepo: issue.SourceRepo,
-		Design:     issue.Design,
-		CreatedAt:  issue.CreatedAt,
-		UpdatedAt:  issue.UpdatedAt,
-		DueAt:      issue.DueAt,
-		DeferUntil: issue.DeferUntil,
+		ID:          issue.ID,
+		Title:       issue.Title,
+		Status:      string(issue.Status),
+		Priority:    issue.Priority,
+		IssueType:   string(issue.IssueType),
+		Assignee:    issue.Assignee,
+		Owner:       issue.Owner,
+		Labels:      labels,
+		SourceRepo:  issue.SourceRepo,
+		Design:      issue.Design,
+		CreatedAt:   issue.CreatedAt,
+		UpdatedAt:   issue.UpdatedAt,
+		DueAt:       issue.DueAt,
+		DeferUntil:  issue.DeferUntil,
+		CreatedBy:   issue.CreatedBy,
+		ClosedAt:    issue.ClosedAt,
+		CloseReason: issue.CloseReason,
 	}
 }
 

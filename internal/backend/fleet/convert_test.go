@@ -220,11 +220,11 @@ func TestReadyIssuesToData(t *testing.T) {
 	parent := "epic-1"
 	issues := []*readyIssueWithParent{
 		{
-			Issue:  &types.Issue{ID: "test-1", Title: "Ready 1", Status: types.StatusOpen, CreatedAt: now, UpdatedAt: now},
-			Parent: &parent,
+			fleetIssueWire: fleetIssueWire{ID: "test-1", Title: "Ready 1", Status: string(types.StatusOpen), CreatedAt: now, UpdatedAt: now},
+			Parent:         &parent,
 		},
 		{
-			Issue: &types.Issue{ID: "test-2", Title: "Ready 2", Status: types.StatusOpen, CreatedAt: now, UpdatedAt: now},
+			fleetIssueWire: fleetIssueWire{ID: "test-2", Title: "Ready 2", Status: string(types.StatusOpen), CreatedAt: now, UpdatedAt: now},
 		},
 		nil, // should be skipped
 	}
@@ -243,9 +243,9 @@ func TestReadyIssuesToData(t *testing.T) {
 
 func TestBlockedIssuesToData(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
-	issues := []*types.BlockedIssue{
+	issues := []*blockedIssueWire{
 		{
-			Issue:          types.Issue{ID: "test-1", Title: "Blocked", Status: types.StatusBlocked, CreatedAt: now, UpdatedAt: now},
+			fleetIssueWire: fleetIssueWire{ID: "test-1", Title: "Blocked", Status: string(types.StatusBlocked), CreatedAt: now, UpdatedAt: now},
 			BlockedBy:      []string{"dep-1"},
 			BlockedByCount: 1,
 		},

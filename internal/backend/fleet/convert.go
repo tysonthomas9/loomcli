@@ -9,12 +9,108 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/types"
 )
 
+// fleetIssueWire mirrors fleet-db's wire shape for an issue. Used as an
+// intermediate during unmarshal because types.Issue (the beads-flavoured
+// canonical type) tags the kind field as `issue_type` while fleet-db
+// emits `type`. Without this hop, Issue.IssueType ends up empty on every
+// fleet response and downstream UI ("kanban column by type", "filter by
+// type") sees undefined. Same logic for created_by, closed_at,
+// close_reason — fleet-db emits them on slim responses too.
+//
+// All fields use omitempty so a partial fleet-db response (e.g. list
+// projection that doesn't include closed_at) doesn't zero out fields
+// downstream code expects to leave alone.
+type fleetIssueWire struct {
+	ID          string     `json:"id,omitempty"`
+	Title       string     `json:"title,omitempty"`
+	Status      string     `json:"status,omitempty"`
+	Priority    int        `json:"priority,omitempty"`
+	Type        string     `json:"type,omitempty"`       // fleet-db dialect
+	IssueType   string     `json:"issue_type,omitempty"` // beads dialect, kept for symmetry
+	Assignee    string     `json:"assignee,omitempty"`
+	Owner       string     `json:"owner,omitempty"`
+	Labels      []string   `json:"labels,omitempty"`
+	SourceRepo  string     `json:"source_repo,omitempty"`
+	Design      string     `json:"design,omitempty"`
+	Description string     `json:"description,omitempty"`
+	CreatedAt   time.Time  `json:"created_at,omitempty"`
+	CreatedBy   string     `json:"created_by,omitempty"`
+	UpdatedAt   time.Time  `json:"updated_at,omitempty"`
+	DueAt       *time.Time `json:"due_at,omitempty"`
+	DeferUntil  *time.Time `json:"defer_until,omitempty"`
+	ClosedAt    *time.Time `json:"closed_at,omitempty"`
+	CloseReason string     `json:"close_reason,omitempty"`
+}
+
+// toIssue projects the wire shape to the canonical types.Issue. `type`
+// wins over `issue_type` when both are set (fleet-db's dialect is the
+// authoritative one for fleet responses).
+func (w fleetIssueWire) toIssue() types.Issue {
+	kind := w.Type
+	if kind == "" {
+		kind = w.IssueType
+	}
+	return types.Issue{
+		ID:          w.ID,
+		Title:       w.Title,
+		Description: w.Description,
+		Status:      types.Status(w.Status),
+		Priority:    w.Priority,
+		IssueType:   types.IssueType(kind),
+		Assignee:    w.Assignee,
+		Owner:       w.Owner,
+		Labels:      w.Labels,
+		SourceRepo:  w.SourceRepo,
+		Design:      w.Design,
+		CreatedAt:   w.CreatedAt,
+		CreatedBy:   w.CreatedBy,
+		UpdatedAt:   w.UpdatedAt,
+		DueAt:       w.DueAt,
+		DeferUntil:  w.DeferUntil,
+		ClosedAt:    w.ClosedAt,
+		CloseReason: w.CloseReason,
+	}
+}
+
+// fleetIssueWithCountsWire mirrors fleet-db's IssueWithCounts wrapper.
+type fleetIssueWithCountsWire struct {
+	fleetIssueWire
+	DependencyCount int `json:"dependency_count,omitempty"`
+	DependentCount  int `json:"dependent_count,omitempty"`
+}
+
+// toIssueData projects the wire shape directly to backend.IssueData with
+// counts populated. Used by the list / Get paths instead of going through
+// types.IssueWithCounts so the type-tag mismatch (`type` vs `issue_type`)
+// is resolved at the wire boundary.
+func (w fleetIssueWithCountsWire) toIssueData() backend.IssueData {
+	issue := w.toIssue()
+	d := issueToData(&issue)
+	d.DependencyCount = w.DependencyCount
+	d.DependentCount = w.DependentCount
+	return d
+}
+
 // readyIssueWithParent mirrors webui.ReadyIssueWithParent for JSON parsing.
+// Embeds fleetIssueWire (not types.Issue) so fleet-db's `type` field is
+// captured during unmarshal — see fleetIssueWire docstring for the
+// type-vs-issue_type rename rationale.
 type readyIssueWithParent struct {
-	*types.Issue
+	fleetIssueWire
 	Parent      *string `json:"parent,omitempty"`
 	ParentTitle *string `json:"parent_title,omitempty"`
 	Repo        *string `json:"repo,omitempty"`
+}
+
+// blockedIssueWire mirrors types.BlockedIssue but embeds fleetIssueWire so
+// fleet-db's `type` field survives unmarshal. types.BlockedIssue embeds
+// types.Issue (json tag `issue_type`) and would silently drop the type
+// field on every fleet response.
+type blockedIssueWire struct {
+	fleetIssueWire
+	BlockedByCount   int                `json:"blocked_by_count,omitempty"`
+	BlockedBy        []string           `json:"blocked_by,omitempty"`
+	BlockedByDetails []types.BlockerRef `json:"blocked_by_details,omitempty"`
 }
 
 // countIssuesResponse is the JSON structure returned by the fleet server's
@@ -37,20 +133,23 @@ func issueToData(issue *types.Issue) backend.IssueData {
 		labels = issue.Labels
 	}
 	return backend.IssueData{
-		ID:         issue.ID,
-		Title:      issue.Title,
-		Status:     string(issue.Status),
-		Priority:   issue.Priority,
-		IssueType:  string(issue.IssueType),
-		Assignee:   issue.Assignee,
-		Owner:      issue.Owner,
-		Labels:     labels,
-		SourceRepo: issue.SourceRepo,
-		Design:     issue.Design,
-		CreatedAt:  issue.CreatedAt,
-		UpdatedAt:  issue.UpdatedAt,
-		DueAt:      issue.DueAt,
-		DeferUntil: issue.DeferUntil,
+		ID:          issue.ID,
+		Title:       issue.Title,
+		Status:      string(issue.Status),
+		Priority:    issue.Priority,
+		IssueType:   string(issue.IssueType),
+		Assignee:    issue.Assignee,
+		Owner:       issue.Owner,
+		Labels:      labels,
+		SourceRepo:  issue.SourceRepo,
+		Design:      issue.Design,
+		CreatedAt:   issue.CreatedAt,
+		UpdatedAt:   issue.UpdatedAt,
+		DueAt:       issue.DueAt,
+		DeferUntil:  issue.DeferUntil,
+		CreatedBy:   issue.CreatedBy,
+		ClosedAt:    issue.ClosedAt,
+		CloseReason: issue.CloseReason,
 	}
 }
 
@@ -199,10 +298,11 @@ func eventToData(e *types.Event) backend.EventData {
 func readyIssuesToData(issues []*readyIssueWithParent) []backend.IssueData {
 	result := make([]backend.IssueData, 0, len(issues))
 	for _, riwp := range issues {
-		if riwp == nil || riwp.Issue == nil {
+		if riwp == nil {
 			continue
 		}
-		d := issueToData(riwp.Issue)
+		issue := riwp.fleetIssueWire.toIssue()
+		d := issueToData(&issue)
 		if riwp.Parent != nil {
 			d.Parent = *riwp.Parent
 		}
@@ -212,12 +312,14 @@ func readyIssuesToData(issues []*readyIssueWithParent) []backend.IssueData {
 }
 
 // blockedIssuesToData converts blocked issues to []backend.IssueData.
-func blockedIssuesToData(issues []*types.BlockedIssue) []backend.IssueData {
+func blockedIssuesToData(issues []*blockedIssueWire) []backend.IssueData {
 	result := make([]backend.IssueData, 0, len(issues))
 	for _, bi := range issues {
-		if bi != nil {
-			result = append(result, issueToData(&bi.Issue))
+		if bi == nil {
+			continue
 		}
+		issue := bi.fleetIssueWire.toIssue()
+		result = append(result, issueToData(&issue))
 	}
 	return result
 }

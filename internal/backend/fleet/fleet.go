@@ -228,21 +228,33 @@ func unmarshalIssueList(resp *apiResponse, op string) ([]backend.IssueData, erro
 	if !hasData(resp) {
 		return []backend.IssueData{}, nil
 	}
-	var issues []*types.IssueWithCounts
+	// Use fleetIssueWithCountsWire so fleet-db's `type` field is captured
+	// (types.IssueWithCounts looks for `issue_type` and would drop it).
+	var issues []fleetIssueWithCountsWire
 	err := json.Unmarshal(resp.Data, &issues)
 	if err != nil {
 		var ute *json.UnmarshalTypeError
 		if errors.As(err, &ute) {
 			var wrapper struct {
-				Issues []*types.IssueWithCounts `json:"issues"`
+				Issues []fleetIssueWithCountsWire `json:"issues"`
 			}
 			if werr := json.Unmarshal(resp.Data, &wrapper); werr == nil {
-				return issuesWithCountsToData(wrapper.Issues), nil
+				return wireIssuesToData(wrapper.Issues), nil
 			}
 		}
 		return nil, backend.ErrInternal(op, "unmarshal response", err)
 	}
-	return issuesWithCountsToData(issues), nil
+	return wireIssuesToData(issues), nil
+}
+
+// wireIssuesToData converts a slice of the fleet-db wire shape into the
+// backend.IssueData projection downstream code consumes.
+func wireIssuesToData(wires []fleetIssueWithCountsWire) []backend.IssueData {
+	out := make([]backend.IssueData, 0, len(wires))
+	for _, w := range wires {
+		out = append(out, w.toIssueData())
+	}
+	return out
 }
 
 // --- Query operations ---
@@ -255,11 +267,19 @@ func (b *FleetBackend) Get(ctx context.Context, id string) (*backend.IssueDetail
 	if !hasData(resp) {
 		return nil, backend.ErrNotFound("Get", "issue not found")
 	}
-	var details types.IssueDetails
-	if err := json.Unmarshal(resp.Data, &details); err != nil {
+	// Unmarshal through the wire shape so fleet-db's `type` lands in
+	// IssueType and `created_by` / `closed_at` / `close_reason` on the
+	// slim list projection don't get dropped.
+	var wire fleetIssueWithCountsWire
+	if err := json.Unmarshal(resp.Data, &wire); err != nil {
 		return nil, backend.ErrInternal("Get", "unmarshal response", err)
 	}
+	issue := wire.toIssue()
+	details := types.IssueDetails{Issue: issue}
 	result := detailsToDetailData(&details)
+	// Ensure the slim counts (if fleet-db included them) propagate.
+	result.IssueData.DependencyCount = wire.DependencyCount
+	result.IssueData.DependentCount = wire.DependentCount
 
 	// fleet-db's GET /issues/{id} response is the slim issue record — no
 	// inline dependencies or comments (beads' IssueDetails embeds both).
@@ -364,13 +384,13 @@ func (b *FleetBackend) Blocked(ctx context.Context, opts backend.BlockedOpts) ([
 	if !hasData(resp) {
 		return []backend.IssueData{}, nil
 	}
-	var issues []*types.BlockedIssue
+	var issues []*blockedIssueWire
 	err = json.Unmarshal(resp.Data, &issues)
 	if err != nil {
 		var ute *json.UnmarshalTypeError
 		if errors.As(err, &ute) {
 			var wrap struct {
-				Issues []*types.BlockedIssue `json:"issues"`
+				Issues []*blockedIssueWire `json:"issues"`
 			}
 			if werr := json.Unmarshal(resp.Data, &wrap); werr == nil {
 				return blockedIssuesToData(wrap.Issues), nil
