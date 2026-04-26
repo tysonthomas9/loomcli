@@ -13,9 +13,14 @@ import (
 
 const (
 	// backendWaitTimeout is the long-poll timeout passed to
-	// IssueBackend.WaitForMutations. Matches the daemon path's
-	// subscriptionTimeout so reconnect cadence is consistent across modes.
-	backendWaitTimeout = 30 * time.Second
+	// IssueBackend.WaitForMutations. fleet-db caps the server-side
+	// timeout at 10 s (see fleet-db internal/api/mutations.go
+	// mutationsMaxTimeout) to bound how long XREAD BLOCK 0 holds a
+	// Redis pool connection. Anything > 10 s is rejected as a
+	// validation error. Browser SSE reconnect cadence is dominated by
+	// the FE's exponential backoff anyway, so this 10 s ceiling is
+	// invisible to clients.
+	backendWaitTimeout = 10 * time.Second
 
 	// backendRetryDelay is the backoff applied after a non-cancellation
 	// error from WaitForMutations (e.g., transient HTTP failure). Matches
