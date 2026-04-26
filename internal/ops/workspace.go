@@ -24,6 +24,11 @@ type WorkspaceSummary struct {
 	Backend      string `json:"backend,omitempty"`
 	State        string `json:"state,omitempty"`
 	ErrorMessage string `json:"error_message,omitempty"`
+	// AgentKind selects the terminal backend used for this workspace's
+	// sessions. Values: "ephemeral" (default; in-process PTY) or
+	// "persistent" (loom-agentd microVM). Empty == "ephemeral". Set by
+	// operators in workspace config (Phase 5: dispatch factory).
+	AgentKind string `json:"agent_kind,omitempty"`
 }
 
 // WorkspaceRepo represents a repository within a workspace.

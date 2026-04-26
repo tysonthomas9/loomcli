@@ -312,6 +312,7 @@ func buildServerConfig(monitorHandlers webui.MonitorHandlers, fs fleetState) web
 	applyFleetConfig(&cfg, fs)
 	applyWorkspaceConfig(&cfg)
 	applyCORSConfig(&cfg)
+	applyPersistentAgentsConfig(&cfg)
 	return cfg
 }
 
@@ -367,6 +368,28 @@ func applyWorkspaceConfig(cfg *webui.ServerConfig) {
 		slog.Warn("starting server without default workspace — scoped session/usage routes will 503", "err", err)
 	}
 	cfg.WorkspaceIDResolverFn = workspacemgr.ResolveWorkspaceID
+}
+
+// applyPersistentAgentsConfig wires the Phase 5 persistent-agent dispatch
+// settings from environment variables into the server config. Default off:
+// the only opt-in path is LOOM_ENABLE_PERSISTENT_AGENTS=true. Reading the
+// CA file is deferred to here (rather than at flag-init time) so an unset
+// LOOM_AGENTD_CA_PATH does not cost a stat() in non-persistent mode.
+func applyPersistentAgentsConfig(cfg *webui.ServerConfig) {
+	enabled, _ := strconv.ParseBool(os.Getenv("LOOM_ENABLE_PERSISTENT_AGENTS"))
+	if !enabled {
+		return
+	}
+	cfg.EnablePersistentAgents = true
+	cfg.ControlPlaneEndpoint = os.Getenv("LOOM_CONTROL_PLANE_ENDPOINT")
+	if caPath := os.Getenv("LOOM_AGENTD_CA_PATH"); caPath != "" {
+		caPEM, err := os.ReadFile(caPath)
+		if err != nil {
+			log.Printf("WARNING: LOOM_AGENTD_CA_PATH=%q unreadable: %v (persistent-agent TLS will use the system trust store)", caPath, err)
+		} else {
+			cfg.AgentdRootCAPEM = caPEM
+		}
+	}
 }
 
 func applyCORSConfig(cfg *webui.ServerConfig) {

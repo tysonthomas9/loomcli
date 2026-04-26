@@ -20,6 +20,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 	"github.com/tysonthomas9/loomcli/internal/webui/svcimpl"
 	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
+	"github.com/tysonthomas9/loomcli/internal/webui/terminal/agentd"
 )
 
 // NewServer initializes all server dependencies. On failure, it cleans up
@@ -172,6 +173,39 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	app.ptyMgr = terminal.NewMultiPTYManager(config.TerminalCmd, config.MaxTerminalSessions)
 	cleanups = append(cleanups, func() { _ = app.ptyMgr.Close() })
 	logger.Info("multi pty manager initialized", "component", "terminal", "default_command", config.TerminalCmd)
+
+	// Default off: the value handlers route through is the local manager
+	// itself, no dispatcher wrapper. This is the regression-safe path that
+	// plan-rbp.5.3 asserts is bit-for-bit unchanged from Phase 4.
+	app.ptySource = app.ptyMgr
+
+	// Persistent-agent opt-in. When EnablePersistentAgents is true we build
+	// an AgentdClient and a Dispatcher that routes per-session based on
+	// workspace metadata. Misconfiguration (flag on, endpoint empty) fails
+	// startup — the operator opted in, and silently degrading would mask
+	// the misconfig until the first persistent attach surfaced it.
+	if config.EnablePersistentAgents {
+		if config.ControlPlaneEndpoint == "" {
+			return nil, fmt.Errorf("EnablePersistentAgents=true but ControlPlaneEndpoint is empty (set LOOM_CONTROL_PLANE_ENDPOINT)")
+		}
+		agentdClient, agentdErr := agentd.New(agentd.Options{
+			ControlPlaneEndpoint: config.ControlPlaneEndpoint,
+			AgentdRootCAPEM:      config.AgentdRootCAPEM,
+		})
+		if agentdErr != nil {
+			return nil, fmt.Errorf("init agentd client: %w", agentdErr)
+		}
+		app.agentdClient = agentdClient
+		cleanups = append(cleanups, func() { _ = app.agentdClient.Close() })
+
+		classify := classifyFromWorkspaceConfig(config.WorkspaceConfigByIDFn)
+		app.ptySource = terminal.NewDispatcher(app.ptyMgr, app.agentdClient, classify)
+		logger.Info("persistent-agent dispatcher enabled",
+			"component", "terminal",
+			"control_plane_endpoint", config.ControlPlaneEndpoint,
+			"agentd_ca_present", len(config.AgentdRootCAPEM) > 0,
+		)
+	}
 
 	// Agent-view tmux manager: kept only so the web UI can attach to tmux
 	// sessions that the CLI auto-mode creates for agents. Missing tmux is a
@@ -380,7 +414,7 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 			rc = app.tabMetaStore.RedisClient()
 		}
 		app.termSvc = terminal.NewTerminalService(
-			app.termAuth, app.tabMetaStore, app.hub, rc, app.ptyMgr,
+			app.termAuth, app.tabMetaStore, app.hub, rc, app.ptySource,
 		)
 	}
 

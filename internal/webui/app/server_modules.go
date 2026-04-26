@@ -52,7 +52,7 @@ func (app *Server) buildTerminalModules() {
 			modbuilder.NewTerminalModules(modbuilder.TerminalModuleDeps{
 				TermSvc:         app.termSvc,
 				AgentSvc:        app.agentSvc,
-				PTYMgr:          app.ptyMgr,
+				PTYMgr:          app.ptySource,
 				AgentTmuxMgr:    app.agentTmuxMgr,
 				TermAuth:        app.termAuth,
 				CORSOrigins:     app.corsConfig.AllowedOrigins,

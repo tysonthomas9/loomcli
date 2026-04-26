@@ -24,6 +24,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 	"github.com/tysonthomas9/loomcli/internal/webui/svcimpl"
 	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
+	"github.com/tysonthomas9/loomcli/internal/webui/terminal/agentd"
 )
 
 // logger is the package-level structured logger.
@@ -72,7 +73,16 @@ type Server struct {
 	initialWorkspaceID string
 
 	// Terminal
-	ptyMgr       *terminal.MultiPTYManager  // main web terminal (per-workspace dispatch)
+	ptyMgr *terminal.MultiPTYManager // main local backend (per-workspace dispatch)
+	// ptySource is the value handlers / services route through. When the
+	// persistent-agents feature flag is OFF this points at ptyMgr (an
+	// interface view of the same value, no wrapping). When ON it points at
+	// a *terminal.Dispatcher that fans calls out to ptyMgr or agentdClient
+	// based on per-session classification. Diagnostic accessors
+	// (GracePeriod / IdleTimeout / Close) keep talking to ptyMgr because
+	// the dispatcher is intentionally narrow to the PTYSource interface.
+	ptySource    terminal.PTYSource
+	agentdClient *agentd.AgentdClient       // nil unless EnablePersistentAgents is true
 	agentTmuxMgr *terminal.AgentTmuxManager // agent-view only; nil if tmux unavailable
 	termAuth     *appstores.TerminalAuth    // one-time token issuer (nil disables auth)
 

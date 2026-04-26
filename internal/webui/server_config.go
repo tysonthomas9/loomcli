@@ -100,6 +100,22 @@ type ServerConfig struct {
 	DaemonStartupFn         func(ctx context.Context, onReady func(wsID string))   // Starts daemons for secondary workspaces; calls onReady(wsID) when each is reachable
 	Logger                  *slog.Logger                                           // Structured logger (optional; nil falls back to slog.Default())
 	SentryDSN               string                                                 // Sentry/GlitchTip DSN for error tracking (optional; empty disables)
+
+	// EnablePersistentAgents opts the loomcli process into routing
+	// persistent-classified sessions through the agentd-backed PTYSource
+	// instead of the local PTYManager. Default false; production rollouts
+	// flip it explicitly via LOOM_ENABLE_PERSISTENT_AGENTS=true once a
+	// control-plane endpoint is reachable. (plan-rbp.5)
+	EnablePersistentAgents bool
+	// ControlPlaneEndpoint is the host:port of the loom-control-plane gRPC
+	// service used by the persistent-agent backend. Required when
+	// EnablePersistentAgents is true; ignored otherwise.
+	ControlPlaneEndpoint string
+	// AgentdRootCAPEM is the PEM-encoded CA used to verify loom-agentd
+	// server certs. Optional when ControlPlaneEndpoint is reachable over
+	// an out-of-band-trusted network (tests / bufconn) but should be set
+	// for production deployments. Read from LOOM_AGENTD_CA_PATH.
+	AgentdRootCAPEM []byte
 }
 
 // WorkspaceIDResolverFn resolves a workspace name to its stable UUID.
