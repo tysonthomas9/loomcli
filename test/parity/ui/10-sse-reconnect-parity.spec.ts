@@ -97,27 +97,19 @@ test.describe("10 sse reconnect parity", () => {
                 postIssueViaNode(PARITY_URLS.fleet, fleetWs, gapTitleFleet),
             ]);
 
-            // Restore + start the latency clock at the same moment so
-            // beadsMs / fleetMs are directly comparable.
-            const reconnectStart = Date.now();
             await Promise.all([
                 restoreSseRoute(beadsObsCtx),
                 restoreSseRoute(fleetObsCtx),
             ]);
 
-            // ---- Assertions.
             // Each observer must see its own backend's gap title within 15s.
-            // assertCatchupArrived returns ms-since-call; we want
-            // ms-since-restore, which is exactly the same here because we
-            // call assertCatchupArrived immediately after restore.
+            // assertCatchupArrived starts its clock right after route
+            // restoration completes, so beadsMs / fleetMs are directly
+            // comparable.
             const [beadsMs, fleetMs] = await Promise.all([
                 assertCatchupArrived(beadsObs, gapTitleBeads),
                 assertCatchupArrived(fleetObs, gapTitleFleet),
             ]);
-            // Sanity: ensure timings are anchored to the reconnect (within
-            // the 15 s waitForSelector budget). Used only for forensics if
-            // the run fails — not part of the parity assertion.
-            void reconnectStart;
 
             // No-duplicate invariant: the gap title must appear in the API
             // exactly once per backend. Catches getMutationsSince returning

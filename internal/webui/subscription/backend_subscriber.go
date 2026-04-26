@@ -32,15 +32,14 @@ const (
 // BackendMutationSubscriber is the fleet-mode sibling of DaemonSubscriber.
 // It sources mutation events from a backend.IssueBackend.WaitForMutations
 // long-poll and bridges them onto the same realtime.Hub the bd daemon path
-// uses. One goroutine per workspace; the loop exits cleanly when either
-// done is closed or the embedded ctx is canceled.
+// uses. One goroutine per workspace; the loop exits when ctx is canceled
+// (Stop()).
 type BackendMutationSubscriber struct {
 	backend     backend.IssueBackend
 	hub         *realtime.Hub
 	workspaceID string
 
-	done chan struct{}
-	wg   sync.WaitGroup
+	wg sync.WaitGroup
 
 	mu        sync.RWMutex
 	lastSince int64
@@ -62,7 +61,6 @@ func NewBackendMutationSubscriber(b backend.IssueBackend, hub *realtime.Hub, wor
 		backend:     b,
 		hub:         hub,
 		workspaceID: workspaceID,
-		done:        make(chan struct{}),
 		ctx:         ctx,
 		cancel:      cancel,
 	}
@@ -79,15 +77,12 @@ func (s *BackendMutationSubscriber) Start() {
 }
 
 // Stop gracefully tears down the subscriber. Cancels the embedded context
-// FIRST (which unblocks any in-flight WaitForMutations call), then waits
-// for the goroutine to exit, then closes done. Order matters: closing done
-// before canceling ctx would deadlock if the loop is mid-long-poll.
-// Safe to call multiple times.
+// (unblocks any in-flight WaitForMutations) and waits for the goroutine
+// to exit. Safe to call multiple times.
 func (s *BackendMutationSubscriber) Stop() {
 	s.stopOnce.Do(func() {
 		s.cancel()
 		s.wg.Wait()
-		close(s.done)
 		slog.Info("backend mutation subscription stopped", "workspace", s.workspaceID)
 	})
 }
@@ -125,12 +120,8 @@ func (s *BackendMutationSubscriber) loop() {
 	defer s.wg.Done()
 
 	for {
-		select {
-		case <-s.ctx.Done():
+		if s.ctx.Err() != nil {
 			return
-		case <-s.done:
-			return
-		default:
 		}
 
 		s.mu.RLock()

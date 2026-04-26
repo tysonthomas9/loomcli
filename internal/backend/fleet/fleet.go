@@ -1064,6 +1064,11 @@ func (b *FleetBackend) runSingleDelete(ctx context.Context, op backend.BatchOp) 
 	return backend.BatchResult{Success: true}
 }
 
+// fleetCursorZero is the literal fleet-db `since` value that requests the
+// full event history. fleet-db's `since` validator accepts "0" or a Redis
+// Stream ID of the form "<ms>-<seq>"; zero is the only special-case form.
+const fleetCursorZero = "0"
+
 // formatFleetCursor renders an int64 millisecond epoch into the Redis-stream
 // ID shape that fleet-db's `since` validator accepts. Zero stays "0"; any
 // positive value gets a "-0" suffix to satisfy "<ms>-<seq>" parsing without
@@ -1071,7 +1076,7 @@ func (b *FleetBackend) runSingleDelete(ctx context.Context, op backend.BatchOp) 
 // same millisecond as the cursor — see GetMutations doc for the dedupe trade.
 func formatFleetCursor(sinceMs int64) string {
 	if sinceMs <= 0 {
-		return "0"
+		return fleetCursorZero
 	}
 	return strconv.FormatInt(sinceMs, 10) + "-0"
 }

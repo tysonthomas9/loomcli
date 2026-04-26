@@ -186,11 +186,11 @@ func (m *MultiWorkspaceSubscriber) WorkspaceIDs() []string {
 }
 
 // GetMutationsSince retrieves mutations since the given timestamp from all
-// workspace subscribers. This is used for SSE client reconnection catch-up.
-// Each subscriber returns []backend.MutationData via the workspaceSubscriber
-// interface; results are projected to []rpc.MutationEvent so the SSE
-// handler's signature does not have to change with the addition of fleet
-// subscribers.
+// workspace subscribers. Used for SSE client reconnection catch-up.
+//
+// Beads subscribers take the direct shortcut (rpc.MutationEvent → return);
+// fleet subscribers project from backend.MutationData via the workspaceSubscriber
+// interface. The SSE handler's signature is []rpc.MutationEvent regardless.
 func (m *MultiWorkspaceSubscriber) GetMutationsSince(since int64) []rpc.MutationEvent {
 	m.mu.RLock()
 	entries := make(map[string]*subscriberEntry, len(m.subscribers))
@@ -201,6 +201,10 @@ func (m *MultiWorkspaceSubscriber) GetMutationsSince(since int64) []rpc.Mutation
 
 	var all []rpc.MutationEvent
 	for _, entry := range entries {
+		if ds, ok := entry.sub.(*DaemonSubscriber); ok {
+			all = append(all, ds.GetMutationsSince(since)...)
+			continue
+		}
 		muts := entry.sub.GetMutationDataSince(since)
 		for _, m := range muts {
 			all = append(all, realtime.BackendMutationToRPCEvent(m))
@@ -258,15 +262,20 @@ func (m *MultiWorkspaceSubscriber) idleDeactivationLoop() {
 
 // GetMutationsSinceForWorkspace retrieves mutations since the given timestamp
 // from a specific workspace's subscriber only. Returns nil if the workspace
-// has no active subscriber. Projects from the unified workspaceSubscriber
-// return type ([]backend.MutationData) into []rpc.MutationEvent so the
-// realtime SSE handler's catch-up signature stays unchanged.
+// has no active subscriber.
+//
+// Beads path returns rpc.MutationEvent directly; fleet path projects from
+// backend.MutationData. Avoids a wasteful rpc → backend → rpc round-trip
+// on every beads-side reconnect.
 func (m *MultiWorkspaceSubscriber) GetMutationsSinceForWorkspace(wsID string, since int64) []rpc.MutationEvent {
 	m.mu.RLock()
 	entry, ok := m.subscribers[wsID]
 	m.mu.RUnlock()
 	if !ok {
 		return nil
+	}
+	if ds, ok := entry.sub.(*DaemonSubscriber); ok {
+		return ds.GetMutationsSince(since)
 	}
 	muts := entry.sub.GetMutationDataSince(since)
 	if len(muts) == 0 {
