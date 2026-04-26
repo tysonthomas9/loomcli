@@ -1064,19 +1064,31 @@ func (b *FleetBackend) runSingleDelete(ctx context.Context, op backend.BatchOp) 
 	return backend.BatchResult{Success: true}
 }
 
+// formatFleetCursor renders an int64 millisecond epoch into the Redis-stream
+// ID shape that fleet-db's `since` validator accepts. Zero stays "0"; any
+// positive value gets a "-0" suffix to satisfy "<ms>-<seq>" parsing without
+// claiming a specific sequence position. Callers re-receive events from the
+// same millisecond as the cursor — see GetMutations doc for the dedupe trade.
+func formatFleetCursor(sinceMs int64) string {
+	if sinceMs <= 0 {
+		return "0"
+	}
+	return strconv.FormatInt(sinceMs, 10) + "-0"
+}
+
 // --- Mutation polling ---
 
 // GetMutations returns mutation events from fleet-db's cursor-based events
-// stream. The caller passes sinceMs as a millisecond epoch, but fleet-db's
-// cursor is a Redis Stream ID of the form "<ms>-<seq>"; we pass the integer
-// as-is because fleet's handler accepts any numeric prefix and treats it as a
-// millisecond timestamp when a dash is absent. Callers that hold a real
-// cursor from a previous response should thread it back via the sinceMs
-// parameter (the backend interface uses int64, so until a generic cursor API
-// lands — cf. fleet-0qcs — we cannot round-trip the "<ms>-<seq>" form and will
-// re-receive events emitted within the same millisecond).
+// stream. fleet-db's `since` parameter validates strictly: it must be the
+// literal string "0" OR a Redis Stream ID of the form "<ms>-<seq>".
+// Caller passes a millisecond epoch (int64) per the IssueBackend interface;
+// for any value > 0 we synthesize the lowest-sequence stream ID
+// "<ms>-0" so the validator passes. Trade-off: events that landed in the
+// same millisecond as the cursor get re-delivered (caller must dedupe).
+// Once a generic cursor API lands (fleet-0qcs) we can round-trip the full
+// "<ms>-<seq>" form.
 func (b *FleetBackend) GetMutations(ctx context.Context, sinceMs int64) ([]backend.MutationData, error) {
-	path := "/events/mutations?since=" + strconv.FormatInt(sinceMs, 10)
+	path := "/events/mutations?since=" + formatFleetCursor(sinceMs)
 	resp, err := b.exec(ctx, "GetMutations", "GET", path, nil)
 	if err != nil {
 		return nil, err
@@ -1097,7 +1109,7 @@ func (b *FleetBackend) GetMutations(ctx context.Context, sinceMs int64) ([]backe
 // so callers see a classified validation error rather than silent truncation.
 // On timeout, fleet-db returns an empty events array (not an error).
 func (b *FleetBackend) WaitForMutations(ctx context.Context, sinceMs int64, timeoutMs int64) ([]backend.MutationData, error) {
-	path := fmt.Sprintf("/events/mutations?since=%d&timeout=%d", sinceMs, timeoutMs)
+	path := fmt.Sprintf("/events/mutations?since=%s&timeout=%d", formatFleetCursor(sinceMs), timeoutMs)
 	resp, err := b.exec(ctx, "WaitForMutations", "GET", path, nil)
 	if err != nil {
 		return nil, err
