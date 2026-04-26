@@ -14,6 +14,7 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 
+	agentdpb "github.com/tysonthomas9/loom-agentd/proto/agentdpb"
 	cpb "github.com/tysonthomas9/loom-control-plane/proto/cpb"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
@@ -121,20 +122,30 @@ func readyResolveResponse(t *testing.T, ws, agent string) *cpb.ResolveResponse {
 	}
 }
 
+// attachWithStubAgentd wraps a control-plane fake with a stub agentd that
+// answers AttachOpen with a vanilla AttachReady. Used by the routing-focused
+// tests below so they can assert ResolveAgent / EnsureAlive call counts
+// without standing up a custom Attach handler each time.
+func attachWithStubAgentd(t *testing.T, cp *fakeControlPlane, certTTL time.Duration, reattached bool) *AgentdClient {
+	t.Helper()
+	stub := &fakeAgentd{attachFunc: readyOnlyAttach("conn-stub", reattached)}
+	return newAttachmentClient(t, cp, stub, certTTL)
+}
+
 func TestAttachSession_ResolveHit(t *testing.T) {
 	fake := &fakeControlPlane{
 		resolveFn: func(req *cpb.ResolveRequest) (*cpb.ResolveResponse, error) {
 			return readyResolveResponse(t, req.GetWorkspace(), req.GetAgent()), nil
 		},
 	}
-	c := startFakeCP(t, fake, 0)
+	c := attachWithStubAgentd(t, fake, 0, false)
 
 	att, reattached, err := c.AttachSession(terminal.SessionKey{Workspace: "demo", Name: "main"}, 80, 24, nil)
 	if err != nil {
 		t.Fatalf("AttachSession: %v", err)
 	}
 	if att == nil {
-		t.Fatalf("AttachSession att = nil, want phase2Attachment")
+		t.Fatalf("AttachSession att = nil, want agentdAttachment")
 	}
 	if reattached {
 		t.Errorf("first AttachSession reattached = true, want false")
@@ -159,7 +170,7 @@ func TestAttachSession_ResolveNotFound_FallsBackToEnsure(t *testing.T) {
 			}, nil
 		},
 	}
-	c := startFakeCP(t, fake, 0)
+	c := attachWithStubAgentd(t, fake, 0, false)
 
 	att, reattached, err := c.AttachSession(terminal.SessionKey{Workspace: "demo", Name: "main"}, 80, 24, nil)
 	if err != nil {
@@ -185,7 +196,31 @@ func TestAttachSession_HitCacheOnSecondCall(t *testing.T) {
 			return readyResolveResponse(t, req.GetWorkspace(), req.GetAgent()), nil
 		},
 	}
-	c := startFakeCP(t, fake, time.Minute)
+	// Stub agentd echoes AttachOpen.expect_replay back as AttachReady.reattached.
+	// That makes the routing-cache hit observable end-to-end: the second call
+	// should see reattached=true because the cache-hit path requested replay.
+	stub := &fakeAgentd{
+		attachFunc: func(srv agentdpb.Terminal_AttachServer) error {
+			open, err := srv.Recv()
+			if err != nil {
+				return err
+			}
+			expect := open.GetOpen().GetExpectReplay()
+			if err := srv.Send(&agentdpb.AttachServerMsg{
+				Msg: &agentdpb.AttachServerMsg_Ready{Ready: &agentdpb.AttachReady{
+					ConnId: "conn-cache", Reattached: expect,
+				}},
+			}); err != nil {
+				return err
+			}
+			for {
+				if _, err := srv.Recv(); err != nil {
+					return nil
+				}
+			}
+		},
+	}
+	c := newAttachmentClient(t, fake, stub, time.Minute)
 
 	key := terminal.SessionKey{Workspace: "demo", Name: "main"}
 	if _, _, err := c.AttachSession(key, 80, 24, nil); err != nil {
@@ -212,7 +247,7 @@ func TestAttachSession_CacheTTLExpiry(t *testing.T) {
 			return readyResolveResponse(t, req.GetWorkspace(), req.GetAgent()), nil
 		},
 	}
-	c := startFakeCP(t, fake, 10*time.Millisecond)
+	c := attachWithStubAgentd(t, fake, 10*time.Millisecond, false)
 
 	key := terminal.SessionKey{Workspace: "demo", Name: "main"}
 	if _, _, err := c.AttachSession(key, 80, 24, nil); err != nil {
@@ -343,7 +378,7 @@ func TestEnsureAlive_TransientThenReady(t *testing.T) {
 			}, nil
 		},
 	}
-	c := startFakeCP(t, fake, 0)
+	c := attachWithStubAgentd(t, fake, 0, false)
 	att, _, err := c.AttachSession(terminal.SessionKey{Workspace: "demo", Name: "main"}, 80, 24, nil)
 	if err != nil {
 		t.Fatalf("AttachSession: %v", err)

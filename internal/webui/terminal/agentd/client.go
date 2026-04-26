@@ -3,11 +3,12 @@
 // gRPC. The webui handler treats it identically to the in-process PTYManager.
 //
 // Phase 2 (plan-rbp.2) wires the control-plane integration: AttachSession
-// resolves the persistent-agent VM through ResolveAgent / EnsureAlive,
-// caches the address + short-lived mTLS cert, and produces a *tls.Config
-// ready for an agentd stream. The actual stream + Terminal RPC plumbing
-// lands in Phase 3 (plan-rbp.3) — until then AttachSession returns a
-// placeholder Attachment whose I/O methods report Unimplemented.
+// resolves the persistent-agent VM through ResolveAgent / EnsureAlive and
+// caches the address + short-lived mTLS cert. Phase 3 (plan-rbp.3) replaces
+// the previous placeholder Attachment with a real bidi gRPC stream against
+// the agentd's loom.agentd.v1.Terminal service — including Kill / List
+// dispatch over the same routing tuple — so the WebSocket terminal handler
+// can drive a persistent-agent VM end-to-end.
 package agentd
 
 import (
@@ -15,13 +16,12 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
-	"sync/atomic"
 	"time"
 
-	"github.com/google/uuid"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	agentdpb "github.com/tysonthomas9/loom-agentd/proto/agentdpb"
 	cpb "github.com/tysonthomas9/loom-control-plane/proto/cpb"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
@@ -57,6 +57,11 @@ type Options struct {
 	CertTTL time.Duration
 }
 
+// agentdDialer is the abstraction tests use to inject a bufconn-backed
+// agentdConn instead of dialing a real network. Production sets dialer to
+// nil and AttachSession falls back to dialAgentd.
+type agentdDialer func(ctx context.Context, vmHost string, port int32, tlsCfg *tls.Config) (*agentdConn, error)
+
 // AgentdClient is the persistent-agent backend for the web terminal. It is
 // constructed once per loomcli process and shared across all WebSocket
 // connections — call sites are responsible for routing only persistent-agent
@@ -66,6 +71,12 @@ type AgentdClient struct {
 	cache     *routingCache
 	caRootPEM []byte
 	certTTL   time.Duration
+
+	// dialer is non-nil only in tests; production code calls dialAgentd
+	// directly. Centralizing the indirection here keeps AttachSession /
+	// Kill / HasSession / AttachmentCount sharing the exact same
+	// connection-bring-up path.
+	dialer agentdDialer
 }
 
 // New constructs an AgentdClient with the given options. The constructor
@@ -135,6 +146,13 @@ func newWithControlPlane(cp *controlPlaneClient, caRootPEM []byte, certTTL time.
 	}
 }
 
+// withDialer injects a custom agentd dialer (used by Phase 3 bufconn tests).
+// Returns the receiver so test setup can chain it onto newWithControlPlane.
+func (c *AgentdClient) withDialer(d agentdDialer) *AgentdClient {
+	c.dialer = d
+	return c
+}
+
 // Close tears down the gRPC connection to the control-plane. Returns nil if
 // the client was never fully constructed.
 func (c *AgentdClient) Close() error {
@@ -145,24 +163,18 @@ func (c *AgentdClient) Close() error {
 }
 
 // AttachSession opens or rejoins a session against the persistent agent
-// identified by key. Phase 2 only goes far enough to verify connectivity:
+// identified by key. The flow is:
 //
-//  1. Look up the routing cache. A live entry → build a *tls.Config from
-//     the cached PEMs and return a placeholder Attachment marked
-//     reattached=true (Phase 3 will set reattached based on the agentd's
-//     expect_replay response — for now a cache hit is the only signal we
-//     have that the session was previously resolved).
-//  2. Cache miss → ResolveAgent. NotFound → EnsureAlive. Any other RPC
-//     error is returned verbatim (callers translate as needed).
-//  3. Validate the routing payload (vm_host non-empty, agentd_port > 0,
-//     cert + key non-empty) before caching. Empty fields trip codes.Internal.
-//  4. Build the *tls.Config from the freshly-minted PEMs and return a
-//     placeholder Attachment with reattached=false.
+//  1. Look up the routing cache. A live entry → reuse the cached vmHost,
+//     port, and PEMs. A cache miss → ResolveAgent (NotFound → EnsureAlive).
+//  2. Validate the routing payload, build the *tls.Config, and dial agentd.
+//  3. Open the Terminal/Attach bidi stream and exchange AttachOpen /
+//     AttachReady. The reattached flag returned to callers comes from the
+//     AttachReady frame — agentd is authoritative.
 //
-// Returned tls.Configs are not stashed back on the AgentdClient — Phase 3
-// will own the agentd connection / stream lifecycle and is the appropriate
-// place to make that decision.
-func (c *AgentdClient) AttachSession(key terminal.SessionKey, _, _ uint16, _ []string) (terminal.Attachment, bool, error) {
+// On any error after dial the agentd connection is closed before the
+// function returns so we don't leak conns on the failure path.
+func (c *AgentdClient) AttachSession(key terminal.SessionKey, cols, rows uint16, argv []string) (terminal.Attachment, bool, error) {
 	if key.Workspace == "" {
 		return nil, false, status.Error(codes.InvalidArgument, "agentd: SessionKey.Workspace is empty")
 	}
@@ -172,40 +184,74 @@ func (c *AgentdClient) AttachSession(key terminal.SessionKey, _, _ uint16, _ []s
 
 	// AttachSession's signature does not propagate a context (PTYSource is
 	// kept narrow on purpose). The control-plane RPCs need one anyway, and
-	// we want a hard ceiling on resolve+ensure latency so a stuck server
-	// can't wedge a websocket attach. 30 s comfortably exceeds the
+	// we want a hard ceiling on resolve+ensure+attach latency so a stuck
+	// server can't wedge a websocket attach. 30 s comfortably exceeds the
 	// EnsureAlive 1-second backoff plus any reasonable READY wait.
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
+	tlsCfg, vmHost, port, expectReplay, err := c.routingTLS(ctx, key)
+	if err != nil {
+		return nil, false, err
+	}
+
+	conn, err := c.dialAgentd(ctx, vmHost, port, tlsCfg)
+	if err != nil {
+		return nil, false, err
+	}
+
+	att, reattached, err := newAgentdAttachment(ctx, conn, key, cols, rows, expectReplay, argv)
+	if err != nil {
+		_ = conn.Close()
+		return nil, false, err
+	}
+	return att, reattached, nil
+}
+
+// routingTLS returns the tls.Config + agentd address for key, falling back
+// to ResolveAgent / EnsureAlive on a cache miss. The expectReplay flag is
+// derived from the cache-hit signal: a cached entry means we've previously
+// seen this session, so the next attach should request the replay frame.
+// On a fresh resolve we skip the replay request — there's nothing to replay
+// for a brand-new session.
+func (c *AgentdClient) routingTLS(ctx context.Context, key terminal.SessionKey) (cfg *tls.Config, vmHost string, port int32, expectReplay bool, err error) {
 	if entry, ok := c.cache.Get(key.Workspace, key.Name); ok {
-		tlsCfg, err := tlsConfigFromPEM(entry.certPEM, entry.keyPEM, c.caRootPEM, key.Workspace, key.Name)
-		if err != nil {
-			// A cached entry that cannot rebuild a tls.Config is unusable;
-			// drop it and fall through to a fresh resolve.
-			c.cache.Invalidate(key.Workspace, key.Name)
-		} else {
-			return newPhase2Attachment(tlsCfg, entry.vmHost, entry.agentdPort), true, nil
+		cfg, err := tlsConfigFromPEM(entry.certPEM, entry.keyPEM, c.caRootPEM, key.Workspace, key.Name)
+		if err == nil {
+			return cfg, entry.vmHost, entry.agentdPort, true, nil
 		}
+		// A cached entry that cannot rebuild a tls.Config is unusable; drop
+		// it and fall through to a fresh resolve.
+		c.cache.Invalidate(key.Workspace, key.Name)
 	}
 
 	routing, err := c.resolveOrEnsure(ctx, key.Workspace, key.Name)
 	if err != nil {
-		return nil, false, err
+		return nil, "", 0, false, err
 	}
 	if err := validateRouting(routing); err != nil {
-		return nil, false, err
+		return nil, "", 0, false, err
 	}
 
 	c.cache.Put(key.Workspace, key.Name, routing.GetVmHost(), routing.GetAgentdPort(), routing.GetMtlsCertPem(), routing.GetMtlsKeyPem())
 
-	tlsCfg, err := tlsConfigFromPEM(routing.GetMtlsCertPem(), routing.GetMtlsKeyPem(), c.caRootPEM, key.Workspace, key.Name)
+	cfg, err = tlsConfigFromPEM(routing.GetMtlsCertPem(), routing.GetMtlsKeyPem(), c.caRootPEM, key.Workspace, key.Name)
 	if err != nil {
 		// Inconsistent: the control-plane handed us PEMs we can't parse.
 		// Surface as Internal so callers don't retry blindly.
-		return nil, false, status.Errorf(codes.Internal, "agentd: build tls.Config: %v", err)
+		return nil, "", 0, false, status.Errorf(codes.Internal, "agentd: build tls.Config: %v", err)
 	}
-	return newPhase2Attachment(tlsCfg, routing.GetVmHost(), routing.GetAgentdPort()), false, nil
+	return cfg, routing.GetVmHost(), routing.GetAgentdPort(), false, nil
+}
+
+// dialAgentd is the dialer-respecting wrapper used by every code path that
+// needs a per-call agentdConn. Tests inject c.dialer to swap in a bufconn
+// connection; production leaves it nil and goes through the real grpc.NewClient.
+func (c *AgentdClient) dialAgentd(ctx context.Context, vmHost string, port int32, tlsCfg *tls.Config) (*agentdConn, error) {
+	if c.dialer != nil {
+		return c.dialer(ctx, vmHost, port, tlsCfg)
+	}
+	return dialAgentd(ctx, vmHost, port, tlsCfg)
 }
 
 // resolveOrEnsure runs the Resolve → EnsureAlive fallback. Returns the
@@ -245,34 +291,130 @@ func validateRouting(r *cpb.ResolveResponse) error {
 	return nil
 }
 
-// Detach will release the named attachment for the session.
+// Detach is a documented no-op. The agentd-side detach-with-grace is
+// triggered by closing the Terminal/Attach stream, which the attachment
+// owns and handles in its close path. Phase 3 keeps Detach in the
+// PTYSource interface as a no-op so the local PTYManager and the agentd
+// backend remain interchangeable from the WS handler's perspective.
 func (c *AgentdClient) Detach(_ terminal.SessionKey, _ string) {
-	// Phase 2: silent no-op. Once the bidi stream lands (plan-rbp.3) this
-	// closes the per-attachment input channel and lets the agentd-side
-	// session enter the grace window.
+	// Intentionally empty: see doc comment.
 }
 
-// Kill will terminate the persistent-agent session immediately.
-func (c *AgentdClient) Kill(_ terminal.SessionKey) error {
-	return status.Error(codes.Unimplemented, "agentd: Kill not implemented")
+// Kill terminates the persistent-agent session immediately by issuing the
+// Terminal/Kill RPC against the agentd that owns it. Routing is taken from
+// the cache; a cache miss falls through to a single ResolveAgent. NotFound
+// at any layer (cache, control-plane, agentd) is treated as "already gone"
+// and returns nil — Kill is documented as idempotent in both the proto and
+// the PTYSource interface.
+func (c *AgentdClient) Kill(key terminal.SessionKey) error {
+	if key.Workspace == "" {
+		return status.Error(codes.InvalidArgument, "agentd: SessionKey.Workspace is empty")
+	}
+	if key.Name == "" {
+		return status.Error(codes.InvalidArgument, "agentd: SessionKey.Name is empty")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	tlsCfg, vmHost, port, _, err := c.routingTLS(ctx, key)
+	if err != nil {
+		// NotFound at the routing layer means the session isn't known to
+		// the control plane — equivalent to "already dead" from a Kill
+		// caller's standpoint.
+		if status.Code(err) == codes.NotFound {
+			return nil
+		}
+		return err
+	}
+
+	conn, err := c.dialAgentd(ctx, vmHost, port, tlsCfg)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = conn.Close() }()
+
+	_, err = conn.client.Kill(ctx, &agentdpb.KillRequest{Session: key.Name, Force: true})
+	if err != nil && status.Code(err) == codes.NotFound {
+		return nil
+	}
+	return err
 }
 
-// HasSession reports whether a live session exists for key.
-func (c *AgentdClient) HasSession(_ terminal.SessionKey) bool {
+// HasSession reports whether a live session exists for key by issuing a
+// Terminal/List RPC against the cached agentd. A cache miss returns false:
+// without prior routing info we have no agentd to ask, and the WS handler
+// should treat the session as "not currently mapped to this loomcli".
+func (c *AgentdClient) HasSession(key terminal.SessionKey) bool {
+	infos, err := c.listSessions(key)
+	if err != nil {
+		return false
+	}
+	for _, info := range infos {
+		if info.GetSession() == key.Name {
+			return true
+		}
+	}
 	return false
 }
 
-// AttachmentCount reports the number of live attachments for key.
-func (c *AgentdClient) AttachmentCount(_ terminal.SessionKey) int {
+// AttachmentCount reports the number of live attachments for key as
+// reported by Terminal/List. Returns 0 on any error or for unknown
+// sessions — same fallback as HasSession.
+func (c *AgentdClient) AttachmentCount(key terminal.SessionKey) int {
+	infos, err := c.listSessions(key)
+	if err != nil {
+		return 0
+	}
+	for _, info := range infos {
+		if info.GetSession() == key.Name {
+			return int(info.GetAttachedCount())
+		}
+	}
 	return 0
 }
 
-// SessionCount reports the total number of live sessions.
+// listSessions issues a Terminal/List RPC against the agentd that owns key.
+// Routing must already be cached; a cache miss returns (nil, nil) so the
+// caller can treat it as "no live sessions" without distinguishing it from
+// an empty-list response. (HasSession / AttachmentCount must not block on
+// a fresh resolve — they're called on the hot path while serving WS frames
+// and a control-plane round trip would defeat the point of the cache.)
+func (c *AgentdClient) listSessions(key terminal.SessionKey) ([]*agentdpb.SessionInfo, error) {
+	entry, ok := c.cache.Get(key.Workspace, key.Name)
+	if !ok {
+		return nil, nil
+	}
+	tlsCfg, err := tlsConfigFromPEM(entry.certPEM, entry.keyPEM, c.caRootPEM, key.Workspace, key.Name)
+	if err != nil {
+		return nil, err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	conn, err := c.dialAgentd(ctx, entry.vmHost, entry.agentdPort, tlsCfg)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = conn.Close() }()
+
+	resp, err := conn.client.List(ctx, &agentdpb.ListRequest{})
+	if err != nil {
+		return nil, err
+	}
+	return resp.GetSessions(), nil
+}
+
+// SessionCount returns 0 — agentd-backed sessions are tracked per-VM, so
+// the loomcli process has no global view to report. Callers that need
+// per-workspace caps should use SessionCountFor (also currently 0).
 func (c *AgentdClient) SessionCount() int {
 	return 0
 }
 
-// SessionCountFor returns the live-session count scoped to wsID.
+// SessionCountFor returns 0 — see SessionCount. The per-workspace cap
+// will be enforced in plan-rbp.5 where the dispatch factory aggregates
+// across local + agentd backends.
 func (c *AgentdClient) SessionCountFor(_ string) int {
 	return 0
 }
@@ -286,58 +428,3 @@ func (c *AgentdClient) MaxSessions() int {
 }
 
 var _ terminal.PTYSource = (*AgentdClient)(nil)
-
-// phase2Attachment is the placeholder Attachment AttachSession returns
-// while Phase 3 is unimplemented. It satisfies the terminal.Attachment
-// contract with the obvious zero values: a closed Output() channel, a
-// generated ConnID, nil scrollback, and Unimplemented errors from any
-// method that would otherwise touch a stream.
-//
-// The tls.Config + agentd address are stashed on the value so Phase 3
-// can promote phase2Attachment to a real bidi-stream owner without a
-// signature change to AttachSession.
-type phase2Attachment struct {
-	connID     string
-	output     chan []byte
-	tlsCfg     *tls.Config
-	vmHost     string
-	agentdPort int32
-}
-
-// connSeq is incremented monotonically for fallback ConnID generation when
-// uuid.NewRandom fails (which is effectively never on Linux, but defensive
-// programming prefers a deterministic suffix to a panic).
-var connSeq atomic.Uint64
-
-func newPhase2Attachment(tlsCfg *tls.Config, vmHost string, port int32) *phase2Attachment {
-	out := make(chan []byte)
-	close(out)
-
-	id := uuid.NewString()
-	if id == "" {
-		id = fmt.Sprintf("agentd-phase2-%d", connSeq.Add(1))
-	}
-
-	return &phase2Attachment{
-		connID:     id,
-		output:     out,
-		tlsCfg:     tlsCfg,
-		vmHost:     vmHost,
-		agentdPort: port,
-	}
-}
-
-func (a *phase2Attachment) ConnID() string         { return a.connID }
-func (a *phase2Attachment) Output() <-chan []byte  { return a.output }
-func (a *phase2Attachment) WriteInput(_ []byte) (int, error) {
-	return 0, status.Error(codes.Unimplemented, "agentd: WriteInput not implemented (phase 3)")
-}
-func (a *phase2Attachment) Scrollback() []byte { return nil }
-func (a *phase2Attachment) Resize(_ string, _, _ uint16) error {
-	return status.Error(codes.Unimplemented, "agentd: Resize not implemented (phase 3)")
-}
-func (a *phase2Attachment) ExitReason() string { return "" }
-
-// Compile-time assertions: phase2Attachment must satisfy terminal.Attachment
-// so AttachSession's return type compiles even before Phase 3 promotes it.
-var _ terminal.Attachment = (*phase2Attachment)(nil)

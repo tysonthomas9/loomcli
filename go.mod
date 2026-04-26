@@ -18,6 +18,7 @@ require (
 	github.com/spf13/cobra v1.10.2
 	github.com/steveyegge/beads v0.0.0
 	github.com/stretchr/testify v1.11.1
+	github.com/tysonthomas9/loom-agentd v0.0.0-00010101000000-000000000000
 	github.com/tysonthomas9/loom-control-plane v0.0.0-00010101000000-000000000000
 	github.com/zricethezav/gitleaks/v8 v8.30.1
 	go.opentelemetry.io/otel v1.41.0
@@ -38,6 +39,8 @@ require (
 replace github.com/steveyegge/beads => ./third_party/beads
 
 replace github.com/tysonthomas9/loom-control-plane => ../loom-control-plane
+
+replace github.com/tysonthomas9/loom-agentd => ../loom-agentd
 
 require (
 	dario.cat/mergo v1.0.1 // indirect

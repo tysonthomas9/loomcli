@@ -1,7 +1,6 @@
 package agentd
 
 import (
-	"crypto/tls"
 	"errors"
 	"testing"
 
@@ -59,16 +58,16 @@ func TestAgentdClient_New_RejectsNegativeTTL(t *testing.T) {
 	}
 }
 
-func TestAgentdClient_KillReturnsUnimplemented(t *testing.T) {
+func TestAgentdClient_KillRejectsEmptyKey(t *testing.T) {
 	c := newTestClient(t)
-	err := c.Kill(terminal.SessionKey{Workspace: "w", Name: "s"})
-	if got := codeOf(err); got != codes.Unimplemented {
-		t.Errorf("Kill code = %v, want Unimplemented", got)
+	err := c.Kill(terminal.SessionKey{Workspace: "", Name: "s"})
+	if got := codeOf(err); got != codes.InvalidArgument {
+		t.Errorf("Kill empty workspace code = %v, want InvalidArgument", got)
 	}
 	// Sanity: errors.Is against a sentinel of the same code should not match
 	// — this guards against accidentally returning a sentinel that callers
 	// might unwrap and mishandle.
-	if errors.Is(err, status.Error(codes.Unimplemented, "x")) {
+	if errors.Is(err, status.Error(codes.InvalidArgument, "x")) {
 		t.Errorf("Kill returned a wrapped sentinel; want a fresh status.Error")
 	}
 }
@@ -112,43 +111,5 @@ func TestAgentdClient_AttachSession_RejectsEmptyKey(t *testing.T) {
 	}
 }
 
-func TestPhase2Attachment_Methods(t *testing.T) {
-	att := newPhase2Attachment(&tls.Config{MinVersion: tls.VersionTLS13}, "vm:1234", 9100)
-	if att.ConnID() == "" {
-		t.Errorf("ConnID = \"\", want non-empty")
-	}
-	out := att.Output()
-	if out == nil {
-		t.Fatalf("Output() returned nil channel")
-	}
-	// Output is a closed channel: a receive must not block and must report
-	// closed-on-second-read with !ok.
-	select {
-	case _, ok := <-out:
-		if ok {
-			t.Errorf("Output() yielded a value before being closed")
-		}
-	default:
-		t.Errorf("Output() blocked; want closed channel")
-	}
-	if got := att.Scrollback(); got != nil {
-		t.Errorf("Scrollback = %v, want nil", got)
-	}
-	if got := att.ExitReason(); got != "" {
-		t.Errorf("ExitReason = %q, want empty", got)
-	}
-	if _, err := att.WriteInput([]byte("x")); codeOf(err) != codes.Unimplemented {
-		t.Errorf("WriteInput code = %v, want Unimplemented", codeOf(err))
-	}
-	if err := att.Resize("any", 80, 24); codeOf(err) != codes.Unimplemented {
-		t.Errorf("Resize code = %v, want Unimplemented", codeOf(err))
-	}
-}
-
-func TestPhase2Attachment_ConnIDsAreUnique(t *testing.T) {
-	a := newPhase2Attachment(nil, "vm", 1)
-	b := newPhase2Attachment(nil, "vm", 1)
-	if a.ConnID() == b.ConnID() {
-		t.Errorf("two phase2Attachments shared ConnID %q", a.ConnID())
-	}
-}
+// agentdAttachment behavior is exercised end-to-end against a bufconn-backed
+// fake agentd in attachment_test.go.
