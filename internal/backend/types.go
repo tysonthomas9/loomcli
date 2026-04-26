@@ -51,6 +51,10 @@ type IssueData struct {
 
 // IssueDetailData is the full issue projection returned by Get.
 // It embeds IssueData and adds content fields and relational data.
+//
+// CreatedBy / ClosedAt / CloseReason live on the embedded IssueData (the
+// slim list projection now carries them too) — accessing them via
+// d.CreatedBy still works through Go's field promotion.
 type IssueDetailData struct {
 	IssueData
 
@@ -59,11 +63,8 @@ type IssueDetailData struct {
 	AcceptanceCriteria string `json:"acceptance_criteria,omitempty"`
 	Notes              string `json:"notes,omitempty"`
 
-	// Lifecycle.
-	CreatedBy       string     `json:"created_by,omitempty"`
-	ClosedAt        *time.Time `json:"closed_at,omitempty"`
-	CloseReason     string     `json:"close_reason,omitempty"`
-	ClosedBySession string     `json:"closed_by_session,omitempty"`
+	// Lifecycle (detail-only — IssueData carries the others).
+	ClosedBySession string `json:"closed_by_session,omitempty"`
 
 	// External integration.
 	ExternalRef      string `json:"external_ref,omitempty"`

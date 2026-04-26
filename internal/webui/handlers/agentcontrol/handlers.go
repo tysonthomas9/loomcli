@@ -1,6 +1,7 @@
 package agentcontrol
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -106,6 +107,32 @@ func handleAgentYield(controlFn AgentControlFn) http.HandlerFunc {
 		}
 		handler.WriteJSON(w, http.StatusOK,
 			dto.NewMessageResponse(fmt.Sprintf("yield requested for agent %q", name)))
+	}
+}
+
+// handleAgentList serves GET /api/workspaces/{ws}/agents. Used by the
+// `loom data agents list` CLI subcommand (internal/cli/data/agents.go).
+// The FE itself reads the daemon-aware /api/monitor/agents instead.
+func handleAgentList(controlFn AgentControlFn) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		result, err := controlFn("agent_list", "", false)
+		if err != nil {
+			writeDaemonError(w, err)
+			return
+		}
+		if !result.Success {
+			writeControlError(w, result)
+			return
+		}
+		var entries []AgentControlEntry
+		if result.Data != nil {
+			if err := json.Unmarshal(result.Data, &entries); err != nil {
+				handler.WriteJSON(w, http.StatusBadGateway,
+					dto.NewErrorResponse("invalid agent list data from daemon", "daemon_error"))
+				return
+			}
+		}
+		handler.WriteJSON(w, http.StatusOK, dto.NewListResponse(entries, len(entries)))
 	}
 }
 

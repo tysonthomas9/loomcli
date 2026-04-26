@@ -63,6 +63,12 @@ type HandlerDeps struct {
 	// talking to without peeking at LOOM_ISSUE_BACKEND on the host. Nil
 	// is safe — the response falls back to the env var, then empty.
 	IssueBackendFn func() backend.IssueBackend
+	// DaemonExpected is true when this server expects a bd daemon to be
+	// reachable (beads mode). False in fleet mode where the IssueBackend
+	// is the canonical issue source and no daemon should exist. Drives
+	// /api/health: when false, daemon checks are skipped entirely so a
+	// missing daemon doesn't false-positive a liveness probe.
+	DaemonExpected bool
 }
 
 // BuildHandlers constructs all top-level HTTP handlers.
@@ -73,9 +79,13 @@ func BuildHandlers(deps HandlerDeps) *Handlers {
 
 	editorCache := misc.NewDefaultEditorCache()
 
+	apiHealth := healthhandlers.HandleAPIHealth(deps.Pool)
+	if !deps.DaemonExpected {
+		apiHealth = healthhandlers.HandleAPIHealthNoDaemon()
+	}
 	h := &Handlers{
 		Health:             healthhandlers.HandleHealth(deps.Pool),
-		APIHealth:          healthhandlers.HandleAPIHealthWithBackend(deps.Pool, healthhandlers.IssueBackendFn(deps.IssueBackendFn)),
+		APIHealth:          apiHealth,
 		ClientErrors:       misc.HandleClientErrors(clientErrLimiter),
 		CSPReport:          misc.HandleCSPReport(cspLimiter),
 		AuthConfig:         misc.HandleAuthConfig(deps.ExtAuthURL, authCfgLimiter, deps.IssueBackendFn),

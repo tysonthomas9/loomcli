@@ -129,10 +129,8 @@ func detailsToDetailData(details *types.IssueDetails) backend.IssueDetailData {
 	d.AcceptanceCriteria = details.AcceptanceCriteria
 	d.Notes = details.Notes
 
-	// Lifecycle.
-	d.CreatedBy = details.CreatedBy
-	d.ClosedAt = details.ClosedAt
-	d.CloseReason = details.CloseReason
+	// Lifecycle. CreatedBy/ClosedAt/CloseReason are populated by
+	// issueToData via the embedded IssueData; no duplicate assignment.
 	d.ClosedBySession = details.ClosedBySession
 
 	// External integration.

@@ -2,11 +2,131 @@ package fleet
 
 import (
 	"encoding/json"
+	"reflect"
 	"testing"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/types"
 )
+
+// TestFleetIssueWire_FieldDriftGuard catches drift between fleetIssueWire
+// and types.Issue. Both must carry the same field set so that fleet-db's
+// wire shape projects losslessly into the canonical type. Adding a field
+// to types.Issue without mirroring it here will silently drop that field
+// on every fleet response — the exact bug the wire indirection exists to
+// prevent for `type` vs `issue_type`.
+//
+// Compares the json-tagged keys of fleetIssueWire to the keys this package
+// claims to project. Bumping the allowlist below documents the deliberate
+// choice (e.g. fields fleet-db will never emit).
+func TestFleetIssueWire_FieldDriftGuard(t *testing.T) {
+	wireT := reflect.TypeOf(fleetIssueWire{})
+	wireKeys := make(map[string]bool)
+	for i := 0; i < wireT.NumField(); i++ {
+		tag := wireT.Field(i).Tag.Get("json")
+		if tag == "" || tag == "-" {
+			continue
+		}
+		key := tag
+		if idx := indexComma(tag); idx >= 0 {
+			key = tag[:idx]
+		}
+		if key == "type" || key == "issue_type" {
+			// `type` and `issue_type` carry the same value (kind), one per
+			// dialect — collapse to a single canonical key.
+			wireKeys["kind"] = true
+			continue
+		}
+		wireKeys[key] = true
+	}
+	canonical := map[string]bool{
+		"id": true, "title": true, "status": true, "priority": true,
+		"kind": true, "assignee": true, "owner": true, "labels": true,
+		"source_repo": true, "design": true, "description": true,
+		"created_at": true, "created_by": true, "updated_at": true,
+		"due_at": true, "defer_until": true, "closed_at": true,
+		"close_reason": true,
+	}
+	for k := range canonical {
+		if !wireKeys[k] {
+			t.Errorf("fleetIssueWire missing canonical field %q — fleet-db responses will silently drop it", k)
+		}
+	}
+	for k := range wireKeys {
+		if !canonical[k] {
+			t.Errorf("fleetIssueWire has %q but it isn't in the canonical set — update the test if intentional", k)
+		}
+	}
+}
+
+func indexComma(s string) int {
+	for i := 0; i < len(s); i++ {
+		if s[i] == ',' {
+			return i
+		}
+	}
+	return -1
+}
+
+// TestFleetIssueWire_RoundTrip verifies a maximally-populated wire shape
+// projects to types.Issue without dropping fields, then back to
+// backend.IssueData via issueToData with all values preserved.
+func TestFleetIssueWire_RoundTrip(t *testing.T) {
+	now := time.Date(2026, 4, 26, 12, 0, 0, 0, time.UTC)
+	closed := now.Add(2 * time.Hour)
+	due := now.Add(24 * time.Hour)
+	defer_ := now.Add(time.Hour)
+	wire := fleetIssueWire{
+		ID:          "PARITY-1",
+		Title:       "round-trip",
+		Status:      "closed",
+		Priority:    1,
+		Type:        "bug",
+		Assignee:    "agent-a",
+		Owner:       "owner@example.com",
+		Labels:      []string{"x", "y"},
+		SourceRepo:  "repo",
+		Design:      "design notes",
+		Description: "desc",
+		CreatedAt:   now,
+		CreatedBy:   "creator",
+		UpdatedAt:   now,
+		DueAt:       &due,
+		DeferUntil:  &defer_,
+		ClosedAt:    &closed,
+		CloseReason: "fixed",
+	}
+	issue := wire.toIssue()
+	d := issueToData(&issue)
+	want := map[string]any{
+		"ID": "PARITY-1", "Title": "round-trip", "Status": "closed",
+		"Priority": 1, "IssueType": "bug",
+		"Assignee": "agent-a", "Owner": "owner@example.com",
+		"SourceRepo": "repo", "Design": "design notes",
+		"CreatedBy": "creator", "CloseReason": "fixed",
+	}
+	got := map[string]any{
+		"ID": d.ID, "Title": d.Title, "Status": d.Status,
+		"Priority": d.Priority, "IssueType": d.IssueType,
+		"Assignee": d.Assignee, "Owner": d.Owner,
+		"SourceRepo": d.SourceRepo, "Design": d.Design,
+		"CreatedBy": d.CreatedBy, "CloseReason": d.CloseReason,
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("%s = %v, want %v", k, got[k], v)
+		}
+	}
+	if d.ClosedAt == nil || !d.ClosedAt.Equal(closed) {
+		t.Errorf("ClosedAt = %v, want %v", d.ClosedAt, closed)
+	}
+	if d.DueAt == nil || !d.DueAt.Equal(due) {
+		t.Errorf("DueAt = %v, want %v", d.DueAt, due)
+	}
+	if d.DeferUntil == nil || !d.DeferUntil.Equal(defer_) {
+		t.Errorf("DeferUntil = %v, want %v", d.DeferUntil, defer_)
+	}
+}
 
 func TestIssueToData(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)

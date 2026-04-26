@@ -374,6 +374,10 @@ func applyFleetConfig(cfg *webui.ServerConfig, fs fleetState) {
 	cfg.FleetClientWorkspace = fs.clientCfg.Workspace
 	cfg.FleetClientAPIKey = fs.clientCfg.APIKey
 	cfg.FleetClientActor = fs.clientCfg.Actor
+	// fs.modeDetected is true when LOOM_ISSUE_BACKEND=fleet (or the
+	// equivalent loom.yaml setting). In that mode the IssueBackend is
+	// fleet-db over HTTP and there is no local bd daemon.
+	cfg.FleetClient = fs.modeDetected
 }
 
 func applyWorkspaceConfig(cfg *webui.ServerConfig) {

@@ -284,32 +284,31 @@ export interface TimingResult {
     within_2x: boolean;
 }
 
+/**
+ * Below this floor, timing is jitter-dominated (Playwright tick rounding,
+ * GC pauses, network noise). Cross-backend ratios are not meaningful.
+ */
+const JITTER_FLOOR_MS = 500;
+
+/**
+ * User-visible "I notice latency" threshold. When one backend is in the
+ * jitter zone and the other isn't, gate on absolute latency against this
+ * ceiling instead of the strict 2x ratio — a 9ms-vs-800ms beads/fleet
+ * pair is 90x by ratio but feels identical to a user.
+ */
+const SNAPPY_CEILING_MS = 2000;
+
 export async function timingAssert(
     action: string,
     times: { beads: number; fleet: number },
 ): Promise<TimingResult> {
     const fastest = Math.min(times.beads, times.fleet);
     const slowest = Math.max(times.beads, times.fleet);
-    // Three latency tiers:
-    //   1. slowest < 500ms — both backends in the "indistinguishable to a
-    //      human" zone. Always pass.
-    //   2. fastest < 500ms AND slowest >= 500ms — one side is sub-jitter, the
-    //      other is meaningfully slower but still snappy. The 2x ratio is
-    //      mathematically nonsense here (a 9ms-vs-800ms beads/fleet ratio
-    //      is 90x but feels identical to a user); compare against an
-    //      absolute "snappy" ceiling instead.
-    //   3. fastest >= 500ms — both backends past the jitter threshold;
-    //      strict 2x parity applies.
-    //
-    // The 2000ms ceiling for tier 2 is the user-visible "I notice latency"
-    // threshold. Anything under that on a reconnect catch-up is acceptable
-    // even if the other side is dramatically faster, because the absolute
-    // delay is what the user feels.
     let within: boolean;
-    if (slowest < 500) {
+    if (slowest < JITTER_FLOOR_MS) {
         within = true;
-    } else if (fastest < 500) {
-        within = slowest < 2000;
+    } else if (fastest < JITTER_FLOOR_MS) {
+        within = slowest < SNAPPY_CEILING_MS;
     } else {
         within = slowest <= fastest * 2;
     }

@@ -20,9 +20,6 @@ func TestModule_RegisterRoutes(t *testing.T) {
 	mux := http.NewServeMux()
 	mod.Register(mux)
 
-	// GET /api/workspaces/{ws}/agents was deleted as part of the parity work
-	// (no FE caller; FE uses /api/monitor/agents instead). Only the four
-	// per-agent lifecycle routes remain.
 	routes := []struct {
 		method string
 		path   string
@@ -31,6 +28,7 @@ func TestModule_RegisterRoutes(t *testing.T) {
 		{"POST", "/api/workspaces/test-ws/agents/falcon/start"},
 		{"POST", "/api/workspaces/test-ws/agents/falcon/restart"},
 		{"POST", "/api/workspaces/test-ws/agents/falcon/yield"},
+		{"GET", "/api/workspaces/test-ws/agents"},
 	}
 
 	for _, rt := range routes {

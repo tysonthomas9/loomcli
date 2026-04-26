@@ -55,6 +55,12 @@ type ServerConfig struct {
 	TerminalCmd             string
 	MaxTerminalSessions     int  // Maximum concurrent terminal connections (0 = default 20)
 	FleetEnabled            bool // Register fleet API routes (requires Redis coordination)
+	// FleetClient is true when this loom server is a fleet-db CLIENT (not a
+	// fleet API server itself). In this mode there is no local bd daemon to
+	// talk to — the IssueBackend is fleet-db over HTTP. Drives the
+	// /api/health handler choice so a missing daemon is reported as the
+	// expected steady state, not a degraded one.
+	FleetClient             bool
 	FleetRedis              *fleet.RedisConfig
 	FleetJWTKey             []byte                                               // Pre-provisioned JWT signing key for fleet auth (optional; if nil, server generates one)
 	FleetAPIKey             string                                               // Pre-shared API key for fleet worker registration (required for fleet register endpoint)

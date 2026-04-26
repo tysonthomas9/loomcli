@@ -2098,9 +2098,30 @@ paths:
           description: Invalid or expired token
 
   # ── Agent Control ───────────────────────────────────────────────────────
-  # /api/workspaces/{ws}/agents (bare list): removed in the beads/fleet
-  # parity work — the FE consumes the daemon-aware /api/monitor/agents,
-  # not this route. The four per-agent lifecycle endpoints below remain.
+  /api/workspaces/{ws}/agents:
+    get:
+      operationId: listAgents
+      tags: [agent-control]
+      summary: List agents via daemon control socket
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: Agent list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AgentControlEntry"
+        "503":
+          description: Daemon unavailable
 
   /api/workspaces/{ws}/agents/{name}/stop:
     post:

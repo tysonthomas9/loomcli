@@ -131,108 +131,85 @@ func HandleHealth(pool daemon.Pool) http.HandlerFunc {
 	}
 }
 
-// HandleAPIHealth returns a detailed health check including daemon connectivity.
-//
-// Backwards-compatible wrapper for the daemon-only call site. New call sites
-// should use HandleAPIHealthWithBackend so the response can distinguish "no
-// daemon expected (fleet mode)" from "daemon expected but unreachable".
+// HandleAPIHealth returns a detailed health check including daemon
+// connectivity. Treats the pool as the source of truth: if it can't be
+// reached the response flips to 503 so liveness probes restart the pod.
+// Use the *NoDaemon* variant for deployments where no daemon is expected
+// (fleet mode); 503 there would falsely page on a healthy server.
 func HandleAPIHealth(pool daemon.Pool) http.HandlerFunc {
-	return HandleAPIHealthWithBackend(pool, nil)
+	return handleAPIHealthImpl(pool, true)
 }
 
-// HandleAPIHealthWithBackend is the backend-aware variant.
-//
-// Status semantics:
-//   - "ok" + daemon.connected=true: bd daemon is up and answering.
-//   - "ok" + daemon.connected=false: fleet mode (no daemon expected). Returned
-//     as 200 because the server itself is healthy — the FE badge can use the
-//     daemon.connected field to render mode-specific UI.
-//   - "ok" + daemon.connected=false (no backend resolved either): pool-less
-//     mode with no fleet adapter wired; conservatively still 200 since the
-//     HTTP server is responding.
-//   - "starting": daemon is intermediately initialising — 200 so probes
-//     don't flap during boot.
-//   - "degraded": daemon expected but unreachable AND no fleet fallback.
-//     Returns 503.
-//
-// The previous implementation 503'd on any non-pool-less degradation, which
-// caused fleet-mode `/api/health` to flap to 503 once the bd daemon's circuit
-// breaker opened (the pool exists in fleet mode, just never connects). The
-// backendFn signal disambiguates that case.
-func HandleAPIHealthWithBackend(pool daemon.Pool, backendFn IssueBackendFn) http.HandlerFunc { //nolint:funlen
+// HandleAPIHealthNoDaemon is the fleet-mode variant. Skips the pool dial
+// entirely (no bd daemon to talk to in this deployment) and returns 200
+// with daemon.connected=false. Avoids both the false-positive 503 and the
+// 2s pool.Get() that would otherwise burn on every probe.
+func HandleAPIHealthNoDaemon() http.HandlerFunc {
+	return handleAPIHealthImpl(nil, false)
+}
+
+func handleAPIHealthImpl(pool daemon.Pool, daemonExpected bool) http.HandlerFunc { //nolint:funlen
 	return func(w http.ResponseWriter, r *http.Request) {
 		status := HealthStatus{
 			Status: "ok",
-			Daemon: DaemonStatus{
-				Connected: false,
-			},
+			Daemon: DaemonStatus{Connected: false},
 		}
 
-		// Check daemon connection if pool is available
-		if pool != nil {
-			poolStats := pool.Stats()
-			status.Pool = &poolStats
+		if !daemonExpected || pool == nil {
+			handler.WriteJSON(w, http.StatusOK, status)
+			return
+		}
 
-			// Include circuit breaker state if available
-			if bs, ok := pool.(breakerStater); ok {
-				stats := bs.BreakerStats()
-				status.CircuitBreaker = &CircuitBreakerStatus{
-					State:           stats.State.String(),
-					FailureCount:    stats.ConsecutiveFail,
-					LastStateChange: stats.LastStateChange,
-				}
+		poolStats := pool.Stats()
+		status.Pool = &poolStats
+
+		if bs, ok := pool.(breakerStater); ok {
+			stats := bs.BreakerStats()
+			status.CircuitBreaker = &CircuitBreakerStatus{
+				State:           stats.State.String(),
+				FailureCount:    stats.ConsecutiveFail,
+				LastStateChange: stats.LastStateChange,
 			}
+		}
 
-			// Try to get a connection and check daemon health
-			ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
-			defer cancel()
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		defer cancel()
 
-			client, err := pool.Get(ctx)
-			if err != nil {
-				if errors.Is(err, daemon.ErrDaemonStarting) {
-					status.Status = "starting"
-					status.Daemon.Error = "daemon is starting up"
-				} else {
-					status.Status = "degraded"
-					status.Daemon.Error = err.Error()
-				}
+		client, err := pool.Get(ctx)
+		if err != nil {
+			if errors.Is(err, daemon.ErrDaemonStarting) {
+				status.Status = "starting"
+				status.Daemon.Error = "daemon is starting up"
 			} else {
-				rpcOK := false
-				defer func() {
-					if rpcOK {
-						pool.Put(client)
-					} else {
-						pool.Discard(client)
-					}
-				}()
-
-				// Get daemon health
-				health, err := client.Health()
-				if err != nil {
-					status.Status = "degraded"
-					status.Daemon.Error = err.Error()
+				status.Status = "degraded"
+				status.Daemon.Error = err.Error()
+			}
+		} else {
+			rpcOK := false
+			defer func() {
+				if rpcOK {
+					pool.Put(client)
 				} else {
-					rpcOK = true
-					status.Daemon.Connected = true
-					status.Daemon.Status = health.Status
-					status.Daemon.Uptime = health.Uptime
-					status.Daemon.Version = health.Version
+					pool.Discard(client)
+				}
+			}()
 
-					if health.Status == "unhealthy" {
-						status.Status = "degraded"
-						status.Daemon.Error = health.Error
-					}
+			health, err := client.Health()
+			if err != nil {
+				status.Status = "degraded"
+				status.Daemon.Error = err.Error()
+			} else {
+				rpcOK = true
+				status.Daemon.Connected = true
+				status.Daemon.Status = health.Status
+				status.Daemon.Uptime = health.Uptime
+				status.Daemon.Version = health.Version
+
+				if health.Status == "unhealthy" {
+					status.Status = "degraded"
+					status.Daemon.Error = health.Error
 				}
 			}
-		}
-
-		// If a backend is wired we know the server is fully functional — even
-		// if the bd daemon's pool has gone degraded (fleet mode), the
-		// IssueBackend is the actual issue source. Promote back to "ok" so
-		// the badge stays green; the daemon details remain on the response
-		// for clients that care about the bd subsystem specifically.
-		if status.Status == "degraded" && backendFn != nil && backendFn() != nil {
-			status.Status = "ok"
 		}
 
 		httpStatus := http.StatusOK

@@ -99,6 +99,12 @@ type readyIssueWithParent struct {
 // fleet-db's `type` field survives unmarshal. types.BlockedIssue embeds
 // types.Issue (json tag `issue_type`) and would silently drop the type
 // field on every fleet response.
+//
+// The BlockedBy* fields are captured for unmarshal completeness only —
+// blockedIssuesToData currently projects to backend.IssueData, which has
+// no blocker columns, so these get dropped. Widening IssueData (or adding
+// a dedicated BlockedIssueData) is the path if the kanban or detail view
+// ever needs blocker chips on fleet.
 type blockedIssueWire struct {
 	fleetIssueWire
 	BlockedByCount   int                `json:"blocked_by_count,omitempty"`
@@ -183,10 +189,8 @@ func detailsToDetailData(details *types.IssueDetails) backend.IssueDetailData {
 	d.AcceptanceCriteria = details.AcceptanceCriteria
 	d.Notes = details.Notes
 
-	// Lifecycle.
-	d.CreatedBy = details.CreatedBy
-	d.ClosedAt = details.ClosedAt
-	d.CloseReason = details.CloseReason
+	// Lifecycle. CreatedBy/ClosedAt/CloseReason are populated by
+	// issueToData via the embedded IssueData; no duplicate assignment.
 	d.ClosedBySession = details.ClosedBySession
 
 	// External integration.

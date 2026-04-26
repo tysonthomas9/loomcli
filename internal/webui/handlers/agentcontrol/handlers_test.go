@@ -237,6 +237,65 @@ func TestHandleAgentYield_Success(t *testing.T) {
 	}
 }
 
+// --- List tests ---
+
+func TestHandleAgentList_Success(t *testing.T) {
+	entries := []AgentControlEntry{
+		{Name: "falcon", Role: "planner", Status: "running"},
+		{Name: "eagle", Role: "coder", Status: "stopped"},
+	}
+	data, _ := json.Marshal(entries)
+	fn, _ := newMockControlFn(&AgentControlResult{Success: true, Data: data}, nil)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/workspaces/{ws}/agents", handleAgentList(fn))
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/api/workspaces/ws1/agents", nil)
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200", rec.Code)
+	}
+
+	var resp dto.ListResponse[AgentControlEntry]
+	json.NewDecoder(rec.Body).Decode(&resp)
+	if !resp.Success {
+		t.Error("Success = false")
+	}
+	if resp.Total != 2 || len(resp.Data) != 2 {
+		t.Errorf("Total/len = %d/%d, want 2/2", resp.Total, len(resp.Data))
+	}
+	if resp.Data[0].Name != "falcon" {
+		t.Errorf("Data[0].Name = %q, want falcon", resp.Data[0].Name)
+	}
+}
+
+func TestHandleAgentList_Empty(t *testing.T) {
+	data, _ := json.Marshal([]AgentControlEntry{})
+	fn, _ := newMockControlFn(&AgentControlResult{Success: true, Data: data}, nil)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/workspaces/{ws}/agents", handleAgentList(fn))
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/api/workspaces/ws1/agents", nil)
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200", rec.Code)
+	}
+
+	var resp dto.ListResponse[AgentControlEntry]
+	json.NewDecoder(rec.Body).Decode(&resp)
+	if resp.Total != 0 {
+		t.Errorf("Total = %d, want 0", resp.Total)
+	}
+	if resp.Data == nil {
+		t.Error("Data is nil, want empty slice")
+	}
+}
+
 // --- Error mapping tests ---
 
 func TestErrorMapping_NotFound(t *testing.T) {
