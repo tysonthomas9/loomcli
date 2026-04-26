@@ -200,7 +200,12 @@ func (c *AgentdClient) AttachSession(key terminal.SessionKey, cols, rows uint16,
 		return nil, false, err
 	}
 
-	att, reattached, err := newAgentdAttachment(ctx, conn, key, cols, rows, expectReplay, argv)
+	// Capture the dialer + routing tuple onto the attachment so its recv
+	// loop can transparently rebuild the stream against the same agentd on
+	// a transient close (Phase 4 — plan-rbp.4.2). Reconnect deliberately
+	// does NOT go back through control-plane Resolve: the cache + the
+	// original tuple are sufficient until vm-host migration lands.
+	att, reattached, err := newAgentdAttachment(ctx, c.dialAgentd, conn, vmHost, port, tlsCfg, key, cols, rows, expectReplay, argv)
 	if err != nil {
 		_ = conn.Close()
 		return nil, false, err

@@ -239,7 +239,12 @@ func TestAgentdAttachment_HappyPath(t *testing.T) {
 					return err
 				}
 			}
-			return nil
+			// Send a Killed frame so the recv loop short-circuits the
+			// auto-reconnect path (Phase 4 — bare stream close without a
+			// Killed signal would otherwise trigger a retry sequence).
+			return srv.Send(&agentdpb.AttachServerMsg{
+				Msg: &agentdpb.AttachServerMsg_Killed{Killed: &agentdpb.AttachKilled{Reason: "exited"}},
+			})
 		},
 	}
 	cpFake := &fakeControlPlane{
@@ -264,8 +269,8 @@ func TestAgentdAttachment_HappyPath(t *testing.T) {
 	}
 
 	awaitClosed(t, att.Output(), 2*time.Second)
-	if got := att.ExitReason(); got != "" {
-		t.Errorf("ExitReason = %q after clean EOF, want empty", got)
+	if got := att.ExitReason(); got != "exited" {
+		t.Errorf("ExitReason = %q, want %q", got, "exited")
 	}
 }
 
@@ -291,11 +296,19 @@ func TestAgentdAttachment_Reattach_WithReplay(t *testing.T) {
 			}); err != nil {
 				return err
 			}
-			return nil
+			// Send Killed so the recv loop tears down without entering the
+			// Phase 4 reconnect path.
+			return srv.Send(&agentdpb.AttachServerMsg{
+				Msg: &agentdpb.AttachServerMsg_Killed{Killed: &agentdpb.AttachKilled{Reason: "exited"}},
+			})
 		},
 	}
 	c := newAttachmentClient(t, &fakeControlPlane{resolveFn: resolveOK(t)}, fakeAg, 0)
 
+	// Replay frame should be exposed verbatim (including the reset escape).
+	// Read Scrollback BEFORE awaiting close so the consume-on-first-read
+	// semantics don't make a later assertion racy with reconnect-driven
+	// scrollback resets.
 	att, reattached := firstAttachClient(t, c, terminal.SessionKey{Workspace: "demo", Name: "main"})
 	if !reattached {
 		t.Errorf("reattached = false, want true")
@@ -305,12 +318,17 @@ func TestAgentdAttachment_Reattach_WithReplay(t *testing.T) {
 	if string(frames[0]) != "live!" {
 		t.Errorf("output frame = %q, want %q", frames[0], "live!")
 	}
-	awaitClosed(t, att.Output(), 2*time.Second)
 
-	// Replay frame should be exposed verbatim (including the reset escape).
 	if got := att.Scrollback(); string(got) != string(replayBytes) {
 		t.Errorf("Scrollback = %q, want %q", got, replayBytes)
 	}
+	// Second Scrollback() must return nil — Phase 4 (plan-rbp.4.1) makes
+	// scrollback consume-on-first-read.
+	if got := att.Scrollback(); got != nil {
+		t.Errorf("second Scrollback = %q, want nil after first consume", got)
+	}
+
+	awaitClosed(t, att.Output(), 2*time.Second)
 }
 
 func TestAgentdAttachment_KilledFrame(t *testing.T) {
@@ -452,27 +470,39 @@ func TestAgentdAttachment_FirstFrameNotReady_Errors(t *testing.T) {
 }
 
 func TestAgentdAttachment_StreamErrorClosesOutput(t *testing.T) {
+	// Phase 4 changes the semantics here: a bare stream error now triggers
+	// the reconnect retry sequence rather than closing Output immediately.
+	// The first Attach call replies with AttachReady (so AttachSession
+	// itself succeeds) and then aborts with Unavailable. Every subsequent
+	// Attach call fails the AttachReady handshake outright — that's how
+	// reconnect attempts get exhausted in a bounded amount of test time.
+	var attachN atomic.Int32
 	fakeAg := &fakeAgentd{
 		attachFunc: func(srv agentdpb.Terminal_AttachServer) error {
 			if _, err := srv.Recv(); err != nil {
 				return err
 			}
-			if err := srv.Send(&agentdpb.AttachServerMsg{
-				Msg: &agentdpb.AttachServerMsg_Ready{Ready: &agentdpb.AttachReady{ConnId: "conn-aborted"}},
-			}); err != nil {
-				return err
+			n := attachN.Add(1)
+			if n == 1 {
+				if err := srv.Send(&agentdpb.AttachServerMsg{
+					Msg: &agentdpb.AttachServerMsg_Ready{Ready: &agentdpb.AttachReady{ConnId: "conn-aborted"}},
+				}); err != nil {
+					return err
+				}
 			}
-			// Abort with a non-EOF, non-cancellation error.
+			// Reconnect attempts: fail outright so the recv loop exhausts
+			// retries and closes Output with reconnect_failed.
 			return status.Error(codes.Unavailable, "agentd rolling restart")
 		},
 	}
 	c := newAttachmentClient(t, &fakeControlPlane{resolveFn: resolveOK(t)}, fakeAg, 0)
 	att, _ := firstAttachClient(t, c, terminal.SessionKey{Workspace: "demo", Name: "main"})
 
-	awaitClosed(t, att.Output(), 2*time.Second)
+	// 200+800+2000 ms of backoff plus per-attempt handshakes ⇒ 5 s ceiling.
+	awaitClosed(t, att.Output(), 5*time.Second)
 	got := att.ExitReason()
-	if !strings.HasPrefix(got, "stream_error:") {
-		t.Errorf("ExitReason = %q, want prefix %q", got, "stream_error:")
+	if !strings.HasPrefix(got, "reconnect_failed:") {
+		t.Errorf("ExitReason = %q, want prefix %q", got, "reconnect_failed:")
 	}
 }
 
@@ -511,6 +541,308 @@ func TestAgentdClient_Kill_DispatchesToAgentd(t *testing.T) {
 	// independent, but the close path must still be safe).
 	if a, ok := att.(*agentdAttachment); ok {
 		a.close("test-cleanup")
+	}
+}
+
+// TestAgentdAttachment_ScrollbackConsumeOnce verifies plan-rbp.4.1: the
+// first Scrollback() call after a Replay returns the bytes verbatim, the
+// second returns nil (so a misbehaving caller can't double-render), and
+// live Output frames continue to flow afterwards.
+func TestAgentdAttachment_ScrollbackConsumeOnce(t *testing.T) {
+	replayBytes := []byte("\x1b[2J\x1b[Hreplayed-bytes")
+	live1 := []byte("live-1")
+	live2 := []byte("live-2")
+
+	released := make(chan struct{})
+	fakeAg := &fakeAgentd{
+		attachFunc: func(srv agentdpb.Terminal_AttachServer) error {
+			if _, err := srv.Recv(); err != nil {
+				return err
+			}
+			if err := srv.Send(&agentdpb.AttachServerMsg{
+				Msg: &agentdpb.AttachServerMsg_Ready{Ready: &agentdpb.AttachReady{ConnId: "conn-once", Reattached: true}},
+			}); err != nil {
+				return err
+			}
+			if err := srv.Send(&agentdpb.AttachServerMsg{
+				Msg: &agentdpb.AttachServerMsg_Replay{Replay: &agentdpb.AttachReplay{Data: replayBytes}},
+			}); err != nil {
+				return err
+			}
+			if err := srv.Send(&agentdpb.AttachServerMsg{
+				Msg: &agentdpb.AttachServerMsg_Output{Output: &agentdpb.AttachOutput{Data: live1}},
+			}); err != nil {
+				return err
+			}
+			if err := srv.Send(&agentdpb.AttachServerMsg{
+				Msg: &agentdpb.AttachServerMsg_Output{Output: &agentdpb.AttachOutput{Data: live2}},
+			}); err != nil {
+				return err
+			}
+			<-released
+			return srv.Send(&agentdpb.AttachServerMsg{
+				Msg: &agentdpb.AttachServerMsg_Killed{Killed: &agentdpb.AttachKilled{Reason: "exited"}},
+			})
+		},
+	}
+	c := newAttachmentClient(t, &fakeControlPlane{resolveFn: resolveOK(t)}, fakeAg, 0)
+	att, _ := firstAttachClient(t, c, terminal.SessionKey{Workspace: "demo", Name: "main"})
+
+	// Wait for Replay to land — the recv goroutine writes scrollback under
+	// mu before the live Output is emitted, so reading at least one Output
+	// frame guarantees the replay has been seen.
+	frames := readN(t, att.Output(), 2, 2*time.Second)
+	if string(frames[0]) != string(live1) {
+		t.Errorf("first frame = %q, want %q", frames[0], live1)
+	}
+	if string(frames[1]) != string(live2) {
+		t.Errorf("second frame = %q, want %q", frames[1], live2)
+	}
+
+	if got := att.Scrollback(); string(got) != string(replayBytes) {
+		t.Errorf("first Scrollback = %q, want %q", got, replayBytes)
+	}
+	if got := att.Scrollback(); got != nil {
+		t.Errorf("second Scrollback = %q, want nil after consume", got)
+	}
+	if got := att.Scrollback(); got != nil {
+		t.Errorf("third Scrollback = %q, want nil after consume", got)
+	}
+
+	close(released)
+	awaitClosed(t, att.Output(), 2*time.Second)
+}
+
+// TestAgentdAttachment_DetachReattach_ReplaysScrollback verifies
+// plan-rbp.4.3: a brand-new attachment against a session that's already
+// running surfaces the agentd-supplied replay verbatim, the consume-once
+// rule still holds, and live Output flows after the replay.
+func TestAgentdAttachment_DetachReattach_ReplaysScrollback(t *testing.T) {
+	priorBytes := []byte("Hello from session")
+	replayBytes := append([]byte("\x1b[2J\x1b[H"), priorBytes...)
+	freshOutput := []byte("fresh-after-reattach")
+
+	var attachN atomic.Int32
+	released := make(chan struct{})
+	fakeAg := &fakeAgentd{
+		attachFunc: func(srv agentdpb.Terminal_AttachServer) error {
+			n := attachN.Add(1)
+			if _, err := srv.Recv(); err != nil {
+				return err
+			}
+			switch n {
+			case 1:
+				if err := srv.Send(&agentdpb.AttachServerMsg{
+					Msg: &agentdpb.AttachServerMsg_Ready{Ready: &agentdpb.AttachReady{ConnId: "conn-1", Reattached: false}},
+				}); err != nil {
+					return err
+				}
+				if err := srv.Send(&agentdpb.AttachServerMsg{
+					Msg: &agentdpb.AttachServerMsg_Output{Output: &agentdpb.AttachOutput{Data: priorBytes}},
+				}); err != nil {
+					return err
+				}
+				// Park until the test detaches client #1.
+				for {
+					if _, err := srv.Recv(); err != nil {
+						return nil
+					}
+				}
+			case 2:
+				if err := srv.Send(&agentdpb.AttachServerMsg{
+					Msg: &agentdpb.AttachServerMsg_Ready{Ready: &agentdpb.AttachReady{ConnId: "conn-2", Reattached: true}},
+				}); err != nil {
+					return err
+				}
+				if err := srv.Send(&agentdpb.AttachServerMsg{
+					Msg: &agentdpb.AttachServerMsg_Replay{Replay: &agentdpb.AttachReplay{Data: replayBytes}},
+				}); err != nil {
+					return err
+				}
+				if err := srv.Send(&agentdpb.AttachServerMsg{
+					Msg: &agentdpb.AttachServerMsg_Output{Output: &agentdpb.AttachOutput{Data: freshOutput}},
+				}); err != nil {
+					return err
+				}
+				<-released
+				return srv.Send(&agentdpb.AttachServerMsg{
+					Msg: &agentdpb.AttachServerMsg_Killed{Killed: &agentdpb.AttachKilled{Reason: "exited"}},
+				})
+			}
+			return nil
+		},
+	}
+	// Use a non-zero certTTL so the second AttachSession hits the routing
+	// cache and requests expect_replay=true. Without that the fake's "second
+	// attach gets a Replay" expectation wouldn't be triggered through the
+	// production path.
+	c := newAttachmentClient(t, &fakeControlPlane{resolveFn: resolveOK(t)}, fakeAg, time.Minute)
+
+	key := terminal.SessionKey{Workspace: "demo", Name: "main"}
+
+	// Client #1 — first attach, drains the prior bytes.
+	att1, reattached := firstAttachClient(t, c, key)
+	if reattached {
+		t.Errorf("att1 reattached = true, want false on first attach")
+	}
+	if frames := readN(t, att1.Output(), 1, 2*time.Second); string(frames[0]) != string(priorBytes) {
+		t.Errorf("att1 Output = %q, want %q", frames[0], priorBytes)
+	}
+	// Detach client #1. The fake's first stream returns when it sees the
+	// stream EOF.
+	if a, ok := att1.(*agentdAttachment); ok {
+		a.close("test-detach")
+	}
+
+	// Client #2 — reattach. Cached routing → expect_replay=true. The fake
+	// replies with reattached=true + Replay + a fresh Output frame.
+	att2, reattached := firstAttachClient(t, c, key)
+	if !reattached {
+		t.Errorf("att2 reattached = false, want true on cache-hit reattach")
+	}
+
+	// Drain at least one Output frame so the recv goroutine has definitely
+	// processed the Replay that came before it.
+	if frames := readN(t, att2.Output(), 1, 2*time.Second); string(frames[0]) != string(freshOutput) {
+		t.Errorf("att2 Output = %q, want %q", frames[0], freshOutput)
+	}
+	if got := att2.Scrollback(); string(got) != string(replayBytes) {
+		t.Errorf("att2 Scrollback = %q, want %q", got, replayBytes)
+	}
+	if got := att2.Scrollback(); got != nil {
+		t.Errorf("att2 second Scrollback = %q, want nil after consume", got)
+	}
+
+	close(released)
+	awaitClosed(t, att2.Output(), 2*time.Second)
+}
+
+// TestAgentdAttachment_AutoReconnect_OnBareStreamClose verifies
+// plan-rbp.4.2: when the agentd stream dies without an AttachKilled frame
+// the recv loop transparently rebuilds the stream. The consumer's Output
+// channel never closes; the post-reconnect AttachReplay is exposed via
+// Scrollback() and live Output continues.
+func TestAgentdAttachment_AutoReconnect_OnBareStreamClose(t *testing.T) {
+	prior := []byte("before-blip")
+	replayBytes := append([]byte("\x1b[2J\x1b[H"), prior...)
+	fresh := []byte("after-blip")
+
+	var attachN atomic.Int32
+	released := make(chan struct{})
+	fakeAg := &fakeAgentd{
+		attachFunc: func(srv agentdpb.Terminal_AttachServer) error {
+			n := attachN.Add(1)
+			if _, err := srv.Recv(); err != nil {
+				return err
+			}
+			switch n {
+			case 1:
+				if err := srv.Send(&agentdpb.AttachServerMsg{
+					Msg: &agentdpb.AttachServerMsg_Ready{Ready: &agentdpb.AttachReady{ConnId: "conn-pre", Reattached: false}},
+				}); err != nil {
+					return err
+				}
+				if err := srv.Send(&agentdpb.AttachServerMsg{
+					Msg: &agentdpb.AttachServerMsg_Output{Output: &agentdpb.AttachOutput{Data: prior}},
+				}); err != nil {
+					return err
+				}
+				// Bare close (Unavailable) — no AttachKilled. The recv loop
+				// MUST treat this as transient and reconnect.
+				return status.Error(codes.Unavailable, "transient blip")
+			case 2:
+				if err := srv.Send(&agentdpb.AttachServerMsg{
+					Msg: &agentdpb.AttachServerMsg_Ready{Ready: &agentdpb.AttachReady{ConnId: "conn-post", Reattached: true}},
+				}); err != nil {
+					return err
+				}
+				if err := srv.Send(&agentdpb.AttachServerMsg{
+					Msg: &agentdpb.AttachServerMsg_Replay{Replay: &agentdpb.AttachReplay{Data: replayBytes}},
+				}); err != nil {
+					return err
+				}
+				if err := srv.Send(&agentdpb.AttachServerMsg{
+					Msg: &agentdpb.AttachServerMsg_Output{Output: &agentdpb.AttachOutput{Data: fresh}},
+				}); err != nil {
+					return err
+				}
+				<-released
+				return srv.Send(&agentdpb.AttachServerMsg{
+					Msg: &agentdpb.AttachServerMsg_Killed{Killed: &agentdpb.AttachKilled{Reason: "exited"}},
+				})
+			}
+			return nil
+		},
+	}
+	c := newAttachmentClient(t, &fakeControlPlane{resolveFn: resolveOK(t)}, fakeAg, time.Minute)
+	att, _ := firstAttachClient(t, c, terminal.SessionKey{Workspace: "demo", Name: "main"})
+
+	// Drain "before-blip" then expect "after-blip" without any close in
+	// between. The 4-second budget covers the 200 ms backoff before retry
+	// #1 plus the second attach handshake.
+	first := readN(t, att.Output(), 1, 2*time.Second)
+	if string(first[0]) != string(prior) {
+		t.Errorf("first frame = %q, want %q", first[0], prior)
+	}
+	second := readN(t, att.Output(), 1, 4*time.Second)
+	if string(second[0]) != string(fresh) {
+		t.Errorf("post-reconnect frame = %q, want %q", second[0], fresh)
+	}
+
+	// Post-reconnect Scrollback should surface the replay verbatim. The
+	// "fresh" frame above guarantees the Replay has already been processed
+	// by the recv goroutine (Replay precedes Output on a stream).
+	if got := att.Scrollback(); string(got) != string(replayBytes) {
+		t.Errorf("post-reconnect Scrollback = %q, want %q", got, replayBytes)
+	}
+	if got := att.Scrollback(); got != nil {
+		t.Errorf("second Scrollback = %q, want nil after consume", got)
+	}
+
+	close(released)
+	awaitClosed(t, att.Output(), 2*time.Second)
+
+	if got := fakeAg.attachCalls.Load(); got != 2 {
+		t.Errorf("fake Attach calls = %d, want 2 (1 original + 1 reconnect)", got)
+	}
+}
+
+// TestAgentdAttachment_AutoReconnect_GivesUpAfterRetries verifies the
+// terminal failure leg of plan-rbp.4.2: when every reconnect attempt fails
+// the AttachReady handshake the attachment terminates with a
+// reconnect_failed exit reason and Output is closed.
+func TestAgentdAttachment_AutoReconnect_GivesUpAfterRetries(t *testing.T) {
+	var attachN atomic.Int32
+	fakeAg := &fakeAgentd{
+		attachFunc: func(srv agentdpb.Terminal_AttachServer) error {
+			n := attachN.Add(1)
+			if _, err := srv.Recv(); err != nil {
+				return err
+			}
+			if n == 1 {
+				// Initial handshake must succeed so AttachSession returns a
+				// live attachment; otherwise the test would simply observe a
+				// constructor error and never exercise the reconnect path.
+				if err := srv.Send(&agentdpb.AttachServerMsg{
+					Msg: &agentdpb.AttachServerMsg_Ready{Ready: &agentdpb.AttachReady{ConnId: "conn-doomed"}},
+				}); err != nil {
+					return err
+				}
+			}
+			return status.Error(codes.Unavailable, "always failing")
+		},
+	}
+	c := newAttachmentClient(t, &fakeControlPlane{resolveFn: resolveOK(t)}, fakeAg, time.Minute)
+	att, _ := firstAttachClient(t, c, terminal.SessionKey{Workspace: "demo", Name: "main"})
+
+	// 200+800+2000 ms backoff plus per-attempt handshakes ⇒ 5 s ceiling.
+	awaitClosed(t, att.Output(), 5*time.Second)
+
+	if got := att.ExitReason(); !strings.HasPrefix(got, "reconnect_failed:") {
+		t.Errorf("ExitReason = %q, want prefix %q", got, "reconnect_failed:")
+	}
+	if got := fakeAg.attachCalls.Load(); got != 4 {
+		t.Errorf("fake Attach calls = %d, want 4 (1 original + 3 retries)", got)
 	}
 }
 
