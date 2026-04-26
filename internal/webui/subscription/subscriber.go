@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
@@ -128,6 +129,24 @@ func (s *DaemonSubscriber) GetMutationsSince(since int64) []rpc.MutationEvent {
 	}
 
 	return mutations
+}
+
+// GetMutationDataSince is the workspaceSubscriber-shaped wrapper around
+// GetMutationsSince. It exists so DaemonSubscriber can sit alongside
+// BackendMutationSubscriber in MultiWorkspaceSubscriber's registry without
+// renaming the existing GetMutationsSince (which other tests depend on).
+// Each rpc.MutationEvent is projected via realtime.RPCEventToMutationData
+// so the catch-up path returns a single uniform type regardless of source.
+func (s *DaemonSubscriber) GetMutationDataSince(since int64) []backend.MutationData {
+	events := s.GetMutationsSince(since)
+	if len(events) == 0 {
+		return nil
+	}
+	out := make([]backend.MutationData, len(events))
+	for i, e := range events {
+		out[i] = realtime.RPCEventToMutationData(e)
+	}
+	return out
 }
 
 // subscriptionLoop continuously polls/waits for mutations from the daemon.

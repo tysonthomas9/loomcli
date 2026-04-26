@@ -63,3 +63,12 @@ export {
     writeCoverageReport,
     type CoverageRecord,
 } from "./coverage";
+
+export {
+    waitForSseReady,
+    abortSseRoute,
+    restoreSseRoute,
+    postIssueViaNode,
+    assertCatchupArrived,
+    assertNoDuplicates,
+} from "./sse-helpers";

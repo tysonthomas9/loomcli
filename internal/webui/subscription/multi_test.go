@@ -2,6 +2,7 @@ package subscription
 
 import (
 	"encoding/json"
+	"sync"
 	"testing"
 	"time"
 
@@ -158,5 +159,84 @@ func TestGetMutationsSinceForWorkspace_OnlyQueriesCorrectSubscriber(t *testing.T
 	}
 	if got[0].IssueID != "bd-from-ws2" {
 		t.Errorf("expected bd-from-ws2, got %s", got[0].IssueID)
+	}
+}
+
+// TestAddWorkspaceWithBackend_Idempotent verifies that calling
+// AddWorkspaceWithBackend twice for the same wsID does not start a second
+// subscriber, mirroring AddWorkspace's idempotent contract.
+func TestAddWorkspaceWithBackend_Idempotent(t *testing.T) {
+	hub := realtime.NewHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	multi := NewMultiWorkspaceSubscriber(hub, nil, nil)
+	defer multi.Stop()
+
+	be := &fakeBackend{}
+	if err := multi.AddWorkspaceWithBackend("ws-fleet-1", be); err != nil {
+		t.Fatalf("first AddWorkspaceWithBackend: %v", err)
+	}
+	if err := multi.AddWorkspaceWithBackend("ws-fleet-1", be); err != nil {
+		t.Fatalf("second AddWorkspaceWithBackend: %v", err)
+	}
+
+	if !multi.HasSubscriber("ws-fleet-1") {
+		t.Error("expected subscriber for ws-fleet-1 after Add")
+	}
+	if ids := multi.WorkspaceIDs(); len(ids) != 1 {
+		t.Errorf("expected 1 subscriber, got %v", ids)
+	}
+}
+
+// TestAddWorkspaceWithBackend_NilBackend_Errors verifies the input
+// validation guard (nil backend should not silently start a subscriber
+// with a typed-nil reference).
+func TestAddWorkspaceWithBackend_NilBackend_Errors(t *testing.T) {
+	hub := realtime.NewHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	multi := NewMultiWorkspaceSubscriber(hub, nil, nil)
+	defer multi.Stop()
+
+	if err := multi.AddWorkspaceWithBackend("ws-nil", nil); err == nil {
+		t.Error("expected error when backend is nil")
+	}
+	if multi.HasSubscriber("ws-nil") {
+		t.Error("subscriber should not be registered when backend is nil")
+	}
+}
+
+// TestAddWorkspaceWithBackend_TOCTOUSafe verifies that two concurrent
+// AddWorkspaceWithBackend calls for the same wsID result in exactly one
+// subscriber, not two. The mu.Lock() guard in the implementation closes
+// the time-of-check / time-of-use window between the existence check and
+// the insertion.
+func TestAddWorkspaceWithBackend_TOCTOUSafe(t *testing.T) {
+	hub := realtime.NewHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	multi := NewMultiWorkspaceSubscriber(hub, nil, nil)
+	defer multi.Stop()
+
+	const goroutines = 16
+	be := &fakeBackend{}
+	var wg sync.WaitGroup
+	wg.Add(goroutines)
+	start := make(chan struct{})
+	for i := 0; i < goroutines; i++ {
+		go func() {
+			defer wg.Done()
+			<-start
+			_ = multi.AddWorkspaceWithBackend("ws-race", be)
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	if ids := multi.WorkspaceIDs(); len(ids) != 1 {
+		t.Errorf("expected exactly 1 subscriber under concurrent activation, got %v", ids)
 	}
 }
