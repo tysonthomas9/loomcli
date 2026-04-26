@@ -619,6 +619,10 @@ func TestDaemonStatus_OptionalFieldsOmitted(t *testing.T) {
 }
 
 // TestHandleAPIHealth_NilPool tests API health endpoint with nil pool.
+//
+// Pool-less mode is the steady state for fleet (no bd daemon to connect to),
+// so we expect 200 OK with daemon.connected=false rather than the historical
+// 503 + "connection pool not initialized" error response.
 func TestHandleAPIHealth_NilPool(t *testing.T) {
 	handler := healthhandlers.HandleAPIHealth(nil)
 
@@ -627,8 +631,8 @@ func TestHandleAPIHealth_NilPool(t *testing.T) {
 
 	handler.ServeHTTP(rr, req)
 
-	if rr.Code != http.StatusServiceUnavailable {
-		t.Errorf("expected status %d, got %d", http.StatusServiceUnavailable, rr.Code)
+	if rr.Code != http.StatusOK {
+		t.Errorf("expected status %d, got %d", http.StatusOK, rr.Code)
 	}
 
 	var resp healthhandlers.HealthStatus
@@ -636,12 +640,12 @@ func TestHandleAPIHealth_NilPool(t *testing.T) {
 		t.Fatalf("failed to parse response: %v", err)
 	}
 
-	if resp.Status != "degraded" {
-		t.Errorf("expected status 'degraded', got %q", resp.Status)
+	if resp.Status != "ok" {
+		t.Errorf("expected status 'ok', got %q", resp.Status)
 	}
 
-	if resp.Daemon.Error != "connection pool not initialized" {
-		t.Errorf("expected daemon error 'connection pool not initialized', got %q", resp.Daemon.Error)
+	if resp.Daemon.Connected {
+		t.Errorf("expected daemon.connected=false in pool-less mode")
 	}
 }
 
@@ -732,52 +736,23 @@ func TestSetupRoutes_TerminalEndpointNilManagerReturns503(t *testing.T) {
 	}
 }
 
-// TestSetupRoutes_StatsEndpoint tests that stats endpoint is registered.
-func TestSetupRoutes_StatsEndpoint(t *testing.T) {
+// TestSetupRoutes_StatsEndpointDeleted verifies the unscoped /api/stats route
+// is no longer registered — it had no FE caller and 503'd in fleet mode.
+// The workspace-scoped /api/workspaces/{ws}/stats remains the canonical path.
+func TestSetupRoutes_StatsEndpointDeleted(t *testing.T) {
 	app := &Server{}
 	setupTestRoutes(t, app)
 
-	// Test that stats endpoint is registered
-	req := httptest.NewRequest(http.MethodGet, "/api/stats", nil)
-	rr := httptest.NewRecorder()
-	app.mux.ServeHTTP(rr, req)
-
-	// Should return 503 with nil pool
-	if rr.Code != http.StatusServiceUnavailable {
-		t.Errorf("expected /api/stats to return %d with nil pool, got %d", http.StatusServiceUnavailable, rr.Code)
-	}
-
-	// Verify JSON response
-	var resp healthhandlers.StatsResponse
-	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("failed to parse response: %v", err)
-	}
-
-	if resp.Success {
-		t.Error("expected Success to be false with nil pool")
-	}
-}
-
-// TestSetupRoutes_StatsEndpointPOSTFallsThrough tests that POST to stats returns 404 JSON.
-// Note: Go 1.22's pattern matching means "GET /api/stats" only matches GET requests.
-// A POST to /api/stats doesn't match that route, so it falls through to the
-// catch-all frontend handler which rejects /api/* paths with 404 JSON.
-func TestSetupRoutes_StatsEndpointPOSTFallsThrough(t *testing.T) {
-	app := &Server{}
-	setupTestRoutes(t, app)
-
-	// POST to GET-only endpoint falls through to frontend handler which rejects /api/* paths
-	req := httptest.NewRequest(http.MethodPost, "/api/stats", nil)
-	rr := httptest.NewRecorder()
-	app.mux.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusNotFound {
-		t.Errorf("expected POST /api/stats to return 404, got %d", rr.Code)
-	}
-
-	ct := rr.Header().Get("Content-Type")
-	if ct != "application/json" {
-		t.Errorf("Content-Type = %q, want %q", ct, "application/json")
+	for _, method := range []string{http.MethodGet, http.MethodPost} {
+		req := httptest.NewRequest(method, "/api/stats", nil)
+		rr := httptest.NewRecorder()
+		app.mux.ServeHTTP(rr, req)
+		if rr.Code != http.StatusNotFound {
+			t.Errorf("%s /api/stats: expected 404, got %d", method, rr.Code)
+		}
+		if ct := rr.Header().Get("Content-Type"); ct != "application/json" {
+			t.Errorf("%s /api/stats: Content-Type = %q, want %q", method, ct, "application/json")
+		}
 	}
 }
 

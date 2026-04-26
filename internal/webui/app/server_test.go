@@ -354,9 +354,13 @@ func TestDefaultConfig(t *testing.T) {
 }
 
 // TestStartServer_WriteTimeout_NonStreamingEndpoint verifies that a non-streaming
-// endpoint (stats) works correctly under the 30s WriteTimeout. This tests the
-// opposite concern from streaming handlers: non-streaming handlers must complete
-// within the WriteTimeout, which they easily do for well-behaved requests.
+// endpoint works correctly under the 30s WriteTimeout. This tests the opposite
+// concern from streaming handlers: non-streaming handlers must complete within
+// the WriteTimeout, which they easily do for well-behaved requests.
+//
+// /api/health is the canonical non-streaming probe used here since the unscoped
+// /api/stats route was deleted as part of the parity work (no FE caller, 503'd
+// in fleet mode).
 func TestStartServer_WriteTimeout_NonStreamingEndpoint(t *testing.T) {
 	port := grabEphemeralPort(t)
 
@@ -395,35 +399,32 @@ func TestStartServer_WriteTimeout_NonStreamingEndpoint(t *testing.T) {
 		t.Fatal("server did not become ready within timeout")
 	}
 
-	// Hit the stats endpoint (non-streaming). Without a daemon pool, it returns 503
-	// but the response itself should be well-formed JSON, confirming the WriteTimeout
-	// does not interfere with fast non-streaming responses.
-	resp, err := client.Get(serverAddr + "/api/stats")
+	resp, err := client.Get(serverAddr + "/api/health")
 	if err != nil {
 		cancel()
-		t.Fatalf("stats request failed: %v", err)
+		t.Fatalf("health request failed: %v", err)
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusServiceUnavailable {
-		t.Errorf("expected status %d for stats without pool, got %d",
-			http.StatusServiceUnavailable, resp.StatusCode)
-	}
-
+	// /api/health may return 200 (pool-less / fleet steady state) or 503
+	// (pool present but daemon unreachable, as in this test where PoolSize=1
+	// but no real daemon is started). The point of the test is that the
+	// response completes well-formed within the WriteTimeout, not the exact
+	// status code.
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		cancel()
 		t.Fatalf("failed to read response body: %v", err)
 	}
 
-	var statsResp healthhandlers.StatsResponse
-	if err := json.Unmarshal(body, &statsResp); err != nil {
+	var healthResp healthhandlers.HealthStatus
+	if err := json.Unmarshal(body, &healthResp); err != nil {
 		cancel()
-		t.Fatalf("failed to parse stats response: %v", err)
+		t.Fatalf("failed to parse health response: %v", err)
 	}
 
-	if statsResp.Success {
-		t.Error("expected success to be false without daemon pool")
+	if healthResp.Status == "" {
+		t.Errorf("expected non-empty status from /api/health, got empty")
 	}
 
 	// Shut down

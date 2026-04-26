@@ -661,9 +661,11 @@ func TestContractEnvelope_HealthEndpoints(t *testing.T) {
 		w := httptest.NewRecorder()
 		handler.ServeHTTP(w, req)
 
-		// With nil pool, returns degraded status
-		if w.Code != http.StatusServiceUnavailable {
-			t.Errorf("status = %d, want %d", w.Code, http.StatusServiceUnavailable)
+		// Pool-less mode (fleet) is the steady state, not degraded —
+		// return 200 with daemon.connected=false. See HandleAPIHealth
+		// docstring for the rationale.
+		if w.Code != http.StatusOK {
+			t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
 		}
 
 		body := assertJSONResponse(t, w)

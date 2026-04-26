@@ -22,9 +22,7 @@ type Handlers struct {
 	ClientErrors        http.HandlerFunc
 	CSPReport           http.HandlerFunc
 	AuthConfig          http.HandlerFunc
-	Stats               http.HandlerFunc
 	Metrics             http.HandlerFunc // pre-built by caller (requires fleet types)
-	DaemonStatus        http.HandlerFunc
 	GetBackendConfig    http.HandlerFunc
 	PatchBackendConfig  http.HandlerFunc
 	GetTerminalConfig   http.HandlerFunc
@@ -81,9 +79,7 @@ func BuildHandlers(deps HandlerDeps) *Handlers {
 		ClientErrors:       misc.HandleClientErrors(clientErrLimiter),
 		CSPReport:          misc.HandleCSPReport(cspLimiter),
 		AuthConfig:         misc.HandleAuthConfig(deps.ExtAuthURL, authCfgLimiter, deps.IssueBackendFn),
-		Stats:              healthhandlers.HandleStats(deps.Pool),
 		Metrics:            healthhandlers.HandleMetrics(deps.Hub, deps.FleetTimeoutsFn, deps.ClaimMetrics),
-		DaemonStatus:       healthhandlers.HandleDaemonStatus(deps.Pool),
 		GetBackendConfig:   hterminal.HandleGetBackendConfig(deps.Pool),
 		PatchBackendConfig: hterminal.HandlePatchBackendConfig(deps.Pool),
 		GetTerminalConfig: hterminal.HandleGetTerminalConfig(hterminal.TerminalLifecycleConfig{

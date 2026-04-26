@@ -132,6 +132,11 @@ func HandleHealth(pool daemon.Pool) http.HandlerFunc {
 }
 
 // HandleAPIHealth returns a detailed health check including daemon connectivity.
+//
+// Pool-less (fleet) mode: the absence of a bd daemon is the steady state, not
+// a degraded one — return 200 OK with daemon.connected=false rather than 503.
+// The FE's daemon-status badge already distinguishes "no daemon expected"
+// from "daemon should be here but isn't" via the GET /api/config response.
 func HandleAPIHealth(pool daemon.Pool) http.HandlerFunc { //nolint:funlen
 	return func(w http.ResponseWriter, r *http.Request) {
 		status := HealthStatus{
@@ -197,10 +202,9 @@ func HandleAPIHealth(pool daemon.Pool) http.HandlerFunc { //nolint:funlen
 					}
 				}
 			}
-		} else {
-			status.Status = "degraded"
-			status.Daemon.Error = "connection pool not initialized"
 		}
+		// pool == nil is the fleet/pool-less steady state; status stays "ok"
+		// with daemon.connected=false. No httpStatus override needed.
 
 		httpStatus := http.StatusOK
 		if status.Status != "ok" && status.Status != "starting" {

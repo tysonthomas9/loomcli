@@ -35,14 +35,17 @@ func (app *Server) registerRoutes() {
 	}))
 }
 
-// registerCoreAPIRoutes registers health, config, stats, and error reporting endpoints.
+// registerCoreAPIRoutes registers health, config, and error reporting endpoints.
+//
+// Removed in the beads/fleet parity work: GET /api/stats — workspace-scoped
+// /api/workspaces/{ws}/stats is the only path the FE uses, and the unscoped
+// pool-only variant 503'd in fleet mode.
 func (app *Server) registerCoreAPIRoutes(h *handlermux.Handlers) {
 	app.mux.HandleFunc("GET /health", h.Health)
 	app.mux.HandleFunc("GET /api/health", h.APIHealth)
 	app.mux.HandleFunc("POST /api/client-errors", h.ClientErrors)
 	app.mux.HandleFunc("POST /api/csp-report", h.CSPReport)
 	app.mux.HandleFunc("GET /api/config", h.AuthConfig)
-	app.mux.HandleFunc("GET /api/stats", h.Stats)
 	app.mux.HandleFunc("GET /api/metrics", h.Metrics)
 	app.mux.HandleFunc("GET /api/config/backend", h.GetBackendConfig)
 	app.mux.HandleFunc("PATCH /api/config/backend", h.PatchBackendConfig)
@@ -52,9 +55,12 @@ func (app *Server) registerCoreAPIRoutes(h *handlermux.Handlers) {
 	}
 }
 
-// registerDaemonRoutes registers daemon status, supervisor, and config endpoints.
+// registerDaemonRoutes registers daemon supervisor and config endpoints.
+//
+// Removed in the beads/fleet parity work: GET /api/daemon/status — no FE
+// caller; workspace-scoped /api/workspaces/{ws}/daemon/status remains for
+// the daemon-mode badge.
 func (app *Server) registerDaemonRoutes(h *handlermux.Handlers) {
-	app.mux.HandleFunc("GET /api/daemon/status", h.DaemonStatus)
 	if h.DaemonSupervisor != nil {
 		app.mux.HandleFunc("GET /api/daemon/supervisor", h.DaemonSupervisor)
 	}
