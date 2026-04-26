@@ -45,6 +45,25 @@ export function composeCmd(): string {
     return cached;
 }
 
+export type Runtime = "podman" | "docker";
+
+/** Container runtime ("podman" | "docker"), independent of compose plugin. */
+export function composeRuntime(): Runtime {
+    return composeCmd().split(/\s+/)[0] as Runtime;
+}
+
+/** docker-compose `name:` field, derived from `-p` flag at parity-stack boot. */
+export const COMPOSE_PROJECT = "loomcli-parity";
+
+/** Project network — generated as `${COMPOSE_PROJECT}_${networks[0]}`. */
+export const PARITY_NETWORK = `${COMPOSE_PROJECT}_parity`;
+
+/** Pre-built parity-seed image, tagged as `${COMPOSE_PROJECT}_parity-seed`. */
+export const PARITY_SEED_IMAGE = `${COMPOSE_PROJECT}_parity-seed`;
+
+/** Container-name prefix all parity services share. */
+export const PARITY_CONTAINER_PREFIX = `${COMPOSE_PROJECT}_`;
+
 /**
  * Build a full compose subcommand string. Concatenated as a string (not
  * args) because the existing call sites hand the result straight to

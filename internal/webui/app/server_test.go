@@ -353,14 +353,9 @@ func TestDefaultConfig(t *testing.T) {
 	}
 }
 
-// TestStartServer_WriteTimeout_NonStreamingEndpoint verifies that a non-streaming
-// endpoint works correctly under the 30s WriteTimeout. This tests the opposite
-// concern from streaming handlers: non-streaming handlers must complete within
-// the WriteTimeout, which they easily do for well-behaved requests.
-//
-// /api/health is the canonical non-streaming probe used here since the unscoped
-// /api/stats route was deleted as part of the parity work (no FE caller, 503'd
-// in fleet mode).
+// TestStartServer_WriteTimeout_NonStreamingEndpoint verifies that a
+// non-streaming endpoint completes within the 30s WriteTimeout. /api/health
+// is the canonical non-streaming probe used here.
 func TestStartServer_WriteTimeout_NonStreamingEndpoint(t *testing.T) {
 	port := grabEphemeralPort(t)
 

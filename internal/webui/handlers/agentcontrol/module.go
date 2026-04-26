@@ -14,10 +14,9 @@ func NewModule(controlFn AgentControlFn) *Module {
 	return &Module{controlFn: controlFn}
 }
 
-// Register implements webui.Module by registering the agent lifecycle control
-// routes. The bare `GET /api/workspaces/{ws}/agents` list is intentionally
-// not registered: the FE consumes the daemon-aware `/api/monitor/agents`
-// endpoint instead, and the bare list 503'd in fleet mode.
+// Register implements webui.Module by registering the agent lifecycle
+// control routes (start/stop/restart/yield). FE list-of-agents lookups go
+// through /api/monitor/agents, not a per-workspace /agents list.
 func (m *Module) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/workspaces/{ws}/agents/{name}/stop", handleAgentStop(m.controlFn))
 	mux.HandleFunc("POST /api/workspaces/{ws}/agents/{name}/start", handleAgentStart(m.controlFn))

@@ -123,10 +123,6 @@ paths:
               schema:
                 type: object
 
-  # /api/daemon/status: removed in the beads/fleet parity work.
-  # Workspace-scoped /api/workspaces/{ws}/daemon/status remains for the
-  # daemon-mode badge.
-
   # ── Config ──────────────────────────────────────────────────────────────
   /api/config:
     get:
@@ -236,9 +232,6 @@ paths:
           description: Rate limited
 
   # ── Stats ───────────────────────────────────────────────────────────────
-  # /api/stats: removed in the beads/fleet parity work (no FE caller; the
-  # workspace-scoped /api/workspaces/{ws}/stats below is the only path
-  # the UI uses).
   /api/workspaces/{ws}/stats:
     get:
       operationId: getWorkspaceStats

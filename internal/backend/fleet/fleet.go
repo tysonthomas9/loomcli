@@ -228,23 +228,35 @@ func unmarshalIssueList(resp *apiResponse, op string) ([]backend.IssueData, erro
 	if !hasData(resp) {
 		return []backend.IssueData{}, nil
 	}
-	// Use fleetIssueWithCountsWire so fleet-db's `type` field is captured
-	// (types.IssueWithCounts looks for `issue_type` and would drop it).
-	var issues []fleetIssueWithCountsWire
-	err := json.Unmarshal(resp.Data, &issues)
+	wires, err := unmarshalListOrWrapper[fleetIssueWithCountsWire](resp.Data, op)
 	if err != nil {
+		return nil, err
+	}
+	return wireIssuesToData(wires), nil
+}
+
+// unmarshalListOrWrapper handles fleet-db's two list dialects (bare array
+// or `{"issues": [...]}` wrapper). Bare array is tried first; on a type
+// mismatch it falls through to the wrapper. Used by every list endpoint
+// (List/Ready/Blocked) and centralises the "two-shape tolerance" so each
+// callsite stays a one-liner.
+func unmarshalListOrWrapper[T any](data []byte, op string) ([]T, error) {
+	var bare []T
+	if err := json.Unmarshal(data, &bare); err == nil {
+		return bare, nil
+	} else {
 		var ute *json.UnmarshalTypeError
-		if errors.As(err, &ute) {
-			var wrapper struct {
-				Issues []fleetIssueWithCountsWire `json:"issues"`
-			}
-			if werr := json.Unmarshal(resp.Data, &wrapper); werr == nil {
-				return wireIssuesToData(wrapper.Issues), nil
-			}
+		if !errors.As(err, &ute) {
+			return nil, backend.ErrInternal(op, "unmarshal response", err)
 		}
+	}
+	var wrapper struct {
+		Issues []T `json:"issues"`
+	}
+	if err := json.Unmarshal(data, &wrapper); err != nil {
 		return nil, backend.ErrInternal(op, "unmarshal response", err)
 	}
-	return wireIssuesToData(issues), nil
+	return wrapper.Issues, nil
 }
 
 // wireIssuesToData converts a slice of the fleet-db wire shape into the
@@ -267,9 +279,6 @@ func (b *FleetBackend) Get(ctx context.Context, id string) (*backend.IssueDetail
 	if !hasData(resp) {
 		return nil, backend.ErrNotFound("Get", "issue not found")
 	}
-	// Unmarshal through the wire shape so fleet-db's `type` lands in
-	// IssueType and `created_by` / `closed_at` / `close_reason` on the
-	// slim list projection don't get dropped.
 	var wire fleetIssueWithCountsWire
 	if err := json.Unmarshal(resp.Data, &wire); err != nil {
 		return nil, backend.ErrInternal("Get", "unmarshal response", err)
@@ -277,7 +286,6 @@ func (b *FleetBackend) Get(ctx context.Context, id string) (*backend.IssueDetail
 	issue := wire.toIssue()
 	details := types.IssueDetails{Issue: issue}
 	result := detailsToDetailData(&details)
-	// Ensure the slim counts (if fleet-db included them) propagate.
 	result.IssueData.DependencyCount = wire.DependencyCount
 	result.IssueData.DependentCount = wire.DependentCount
 
@@ -353,24 +361,9 @@ func (b *FleetBackend) Ready(ctx context.Context, opts backend.ReadyOpts) ([]bac
 	if !hasData(resp) {
 		return []backend.IssueData{}, nil
 	}
-	// fleet-db's /ready and /blocked wrap their payload as {"issues":[...]},
-	// matching the /issues list response shape. Earlier drafts unmarshaled
-	// straight into []*readyIssueWithParent, which json.UnmarshalTypeError'd
-	// on the wrapper. Try bare-array first for legacy paths, then fall
-	// through to the wrapper.
-	var issues []*readyIssueWithParent
-	err = json.Unmarshal(resp.Data, &issues)
+	issues, err := unmarshalListOrWrapper[*readyIssueWithParent](resp.Data, "Ready")
 	if err != nil {
-		var ute *json.UnmarshalTypeError
-		if errors.As(err, &ute) {
-			var wrap struct {
-				Issues []*readyIssueWithParent `json:"issues"`
-			}
-			if werr := json.Unmarshal(resp.Data, &wrap); werr == nil {
-				return readyIssuesToData(wrap.Issues), nil
-			}
-		}
-		return nil, backend.ErrInternal("Ready", "unmarshal response", err)
+		return nil, err
 	}
 	return readyIssuesToData(issues), nil
 }
@@ -384,19 +377,9 @@ func (b *FleetBackend) Blocked(ctx context.Context, opts backend.BlockedOpts) ([
 	if !hasData(resp) {
 		return []backend.IssueData{}, nil
 	}
-	var issues []*blockedIssueWire
-	err = json.Unmarshal(resp.Data, &issues)
+	issues, err := unmarshalListOrWrapper[*blockedIssueWire](resp.Data, "Blocked")
 	if err != nil {
-		var ute *json.UnmarshalTypeError
-		if errors.As(err, &ute) {
-			var wrap struct {
-				Issues []*blockedIssueWire `json:"issues"`
-			}
-			if werr := json.Unmarshal(resp.Data, &wrap); werr == nil {
-				return blockedIssuesToData(wrap.Issues), nil
-			}
-		}
-		return nil, backend.ErrInternal("Blocked", "unmarshal response", err)
+		return nil, err
 	}
 	return blockedIssuesToData(issues), nil
 }

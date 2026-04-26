@@ -9,17 +9,10 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/types"
 )
 
-// fleetIssueWire mirrors fleet-db's wire shape for an issue. Used as an
-// intermediate during unmarshal because types.Issue (the beads-flavoured
-// canonical type) tags the kind field as `issue_type` while fleet-db
-// emits `type`. Without this hop, Issue.IssueType ends up empty on every
-// fleet response and downstream UI ("kanban column by type", "filter by
-// type") sees undefined. Same logic for created_by, closed_at,
-// close_reason — fleet-db emits them on slim responses too.
-//
-// All fields use omitempty so a partial fleet-db response (e.g. list
-// projection that doesn't include closed_at) doesn't zero out fields
-// downstream code expects to leave alone.
+// fleetIssueWire mirrors fleet-db's wire shape so unmarshal captures
+// `type` (fleet-db dialect) into a struct field. types.Issue tags the
+// same field as `issue_type` (beads dialect) and silently drops `type`,
+// leaving every fleet response's IssueType empty for downstream UIs.
 type fleetIssueWire struct {
 	ID          string     `json:"id,omitempty"`
 	Title       string     `json:"title,omitempty"`

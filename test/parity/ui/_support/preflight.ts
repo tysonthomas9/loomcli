@@ -14,7 +14,12 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { execSync } from "node:child_process";
 import { PARITY_URLS } from "../playwright.config";
-import { composeRun } from "./compose";
+import {
+    composeRun,
+    composeRuntime,
+    PARITY_CONTAINER_PREFIX,
+} from "./compose";
+import { discoverWorkspaceId } from "./backends";
 
 const WEBUI_GAPS_PATH = path.resolve(
     __dirname,
@@ -115,6 +120,28 @@ async function fleetDBLogTail(linesFromEnd = 50): Promise<string> {
     }
 }
 
+/**
+ * Fetch fleet-db log lines emitted after the given timestamp. Used in
+ * preflight's POST probe — `fleetDBLogTail(N)` is unsafe under steady-state
+ * SSE polling because the per-second log volume routinely exceeds N within
+ * one tick of the probe loop, so a fixed line window can't span the
+ * "before the POST → after the POST" boundary.
+ */
+async function fleetDBLogSince(sinceISO: string): Promise<string> {
+    try {
+        return execSync(
+            composeRun(`logs --since=${sinceISO} fleet-db 2>&1`),
+            {
+                cwd: path.resolve(__dirname, "../../../.."),
+                encoding: "utf-8",
+                timeout: 10_000,
+            },
+        );
+    } catch (e) {
+        return "";
+    }
+}
+
 async function runAllChecks(): Promise<PreflightResult> {
     const started = new Date().toISOString();
     const checks: PreflightCheck[] = [];
@@ -159,18 +186,12 @@ async function runAllChecks(): Promise<PreflightResult> {
         });
     }
 
-    // 3. Container healthchecks
-    //
-    // `docker compose ps --format json` works on docker but podman-compose
-    // 1.0.x rejects --format ("unrecognized arguments"). Bypass compose
-    // entirely and ask podman/docker for the container list directly,
-    // filtered by the well-known project name. Both runtimes accept
-    // `<runtime> ps --format '{{.Names}} {{.Status}}'` and the parity stack
-    // uses a stable project prefix `loomcli-parity_`.
+    // 3. Container healthchecks. Bypass compose: podman-compose 1.0.x
+    // rejects `ps --format json`. The runtime's own ps with a name filter
+    // works on both podman and docker.
     try {
-        const runtime = composeRun("").trim().split(/\s+/)[0]; // "podman" | "docker"
         const ps = execSync(
-            `${runtime} ps -a --format '{{.Names}}|{{.Status}}'`,
+            `${composeRuntime()} ps --filter name=${PARITY_CONTAINER_PREFIX} --format '{{.Names}}|{{.Status}}'`,
             {
                 cwd: path.resolve(__dirname, "../../../.."),
                 encoding: "utf-8",
@@ -179,7 +200,7 @@ async function runAllChecks(): Promise<PreflightResult> {
         );
         const services: { name: string; status: string }[] = ps
             .split("\n")
-            .filter((l) => l.includes("loomcli-parity_"))
+            .filter((l) => l.trim().length > 0)
             .map((l) => {
                 const [name, ...rest] = l.split("|");
                 return { name, status: rest.join("|") };
@@ -208,13 +229,7 @@ async function runAllChecks(): Promise<PreflightResult> {
         });
     }
 
-    // 4. Probe POST to :8082 must cause fleet-db to log POST /api/v1/PARITY/issues.
-    //
-    // The unscoped /api/issues was retired in favour of
-    // /api/workspaces/{ws}/issues (commit loomcli-n28bt.4 on 2026-03-25),
-    // so the probe must hit the workspace-scoped path to actually exercise
-    // the live routing. Discover the workspace ID at runtime — loom uses
-    // UUID workspace IDs, not literals.
+    // 4. Probe POST to :8082 must cause fleet-db to log POST <ws>/issues.
     //
     // Poll the log tail rather than sleeping a fixed 2s because CI can
     // take longer to flush stdout on busy runners — a fixed sleep produces
@@ -222,10 +237,11 @@ async function runAllChecks(): Promise<PreflightResult> {
     // out of the poll as soon as the log entry lands; the total budget
     // (5s) is the fail threshold.
     try {
-        const fleetWs = await httpJson(`${PARITY_URLS.fleet}/api/workspaces`)
-            .then((j: any) => (j?.workspaces?.[0]?.id ?? j?.data?.[0]?.id) as string);
-        if (!fleetWs) throw new Error("no workspace id from /api/workspaces");
-        const before = await fleetDBLogTail(5);
+        const fleetWs = await discoverWorkspaceId(PARITY_URLS.fleet);
+        // Stamp T0 just before the POST so the log query bounds itself to the
+        // probe window. Subtract 1s so a slightly-skewed container clock or a
+        // log line that lands "at" T0 isn't excluded.
+        const probeStart = new Date(Date.now() - 1000).toISOString();
         const probe = await httpPost(
             `${PARITY_URLS.fleet}/api/workspaces/${fleetWs}/issues`,
             {
@@ -235,23 +251,19 @@ async function runAllChecks(): Promise<PreflightResult> {
                 description: "preflight routing probe — safe to delete",
             },
         );
-        // fleet-db emits structured JSON logs (`"method":"POST","path":"/api/v1/PARITY/issues"`)
-        // not classic Apache-style lines, so plain "POST /api/..." substring
-        // matching never fires. Match the JSON-field shape and the legacy
-        // shape both so this works against future fleet-db log format
-        // changes without re-breaking.
-        const sawInboundPattern = (delta: string) =>
-            /"method":"POST".*"path":"\/api\/v1\/PARITY\/issues"/.test(delta) ||
-            /"path":"\/api\/v1\/PARITY\/issues".*"method":"POST"/.test(delta) ||
-            /POST\s+\/api\/v1\/PARITY\/issues/.test(delta);
+        // fleet-db emits structured JSON logs, not classic Apache-style lines.
+        const inboundPath = `/api/v1/${PARITY_URLS.workspace}/issues`;
+        const escaped = inboundPath.replace(/\//g, "\\/");
+        const sawInboundPattern = (logBlob: string) =>
+            new RegExp(`"method":"POST".*"path":"${escaped}"`).test(logBlob) ||
+            new RegExp(`"path":"${escaped}".*"method":"POST"`).test(logBlob) ||
+            new RegExp(`POST\\s+${escaped}`).test(logBlob);
 
         const pollDeadline = Date.now() + 5000;
         let sawInbound = false;
-        let lastDelta = "";
         while (Date.now() < pollDeadline) {
-            const after = await fleetDBLogTail(30);
-            lastDelta = after.slice(before.length);
-            if (sawInboundPattern(lastDelta)) {
+            const since = await fleetDBLogSince(probeStart);
+            if (sawInboundPattern(since)) {
                 sawInbound = true;
                 break;
             }
@@ -261,7 +273,7 @@ async function runAllChecks(): Promise<PreflightResult> {
             name: "Probe POST to :8082 shows up in fleet-db logs",
             expected: "yes",
             actual: sawInbound
-                ? "yes — fleet-db received POST /api/v1/PARITY/issues"
+                ? `yes — fleet-db received POST ${inboundPath}`
                 : `no (probe status=${probe.status})`,
             pass: sawInbound,
         });

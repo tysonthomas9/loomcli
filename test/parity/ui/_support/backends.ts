@@ -11,6 +11,11 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { execSync } from "node:child_process";
 import { PARITY_URLS, ARTIFACTS_DIR } from "../playwright.config";
+import {
+    composeRuntime,
+    PARITY_NETWORK,
+    PARITY_SEED_IMAGE,
+} from "./compose";
 
 export type Backend = "beads" | "fleet";
 
@@ -225,50 +230,29 @@ async function deleteAllIssues(baseUrl: string, workspace: string): Promise<void
 }
 
 async function runSeedScript(): Promise<void> {
-    // Bypass `<compose> run --rm parity-seed` and invoke plain `<runtime> run`.
-    //
-    // Background: podman-compose 1.0.6's `compose run` is broken — its
-    // generated teardown calls `down(args)` with a Namespace that does not
-    // carry `remove_orphans`, raising AttributeError. The crash also tears
-    // down peer containers that share the project network, knocking
-    // loom-fleet offline and cascading every subsequent preflight to a 502.
-    // See https://github.com/containers/podman-compose/issues for the upstream
-    // remove_orphans regression. docker compose handles `run --rm` fine,
-    // but on this host docker is a podman alias and inherits the same bug.
-    //
-    // The plain-runtime path mounts seed.sh into a fresh container of the
-    // pre-built parity-seed image, joins the same project network, exits
-    // when the script finishes, and never touches the rest of the stack.
+    // podman-compose 1.0.6's `compose run` raises AttributeError on
+    // remove_orphans during its generated teardown, and the crash tears
+    // down peer containers on the project network — knocking loom-fleet
+    // offline and cascading every subsequent preflight to a 502. Bypass
+    // compose entirely and invoke the runtime directly.
     const seedHostPath = path.resolve(REPO_ROOT, "test/parity/seed.sh");
-    const network = "loomcli-parity_parity";
-    const image = "loomcli-parity_parity-seed";
     const envFlags = [
         "-e", `FLEET_URL=http://fleet-db:8080`,
-        "-e", `FLEET_WORKSPACE=PARITY`,
+        "-e", `FLEET_WORKSPACE=${PARITY_URLS.workspace}`,
         "-e", `BEADS_URL=http://loom-beads:8080`,
     ].join(" ");
-    const cmds = [
-        `podman run --rm --network ${network} ${envFlags} -v ${seedHostPath}:/seed.sh:ro --entrypoint /bin/sh ${image} /seed.sh`,
-        `docker run --rm --network ${network} ${envFlags} -v ${seedHostPath}:/seed.sh:ro --entrypoint /bin/sh ${image} /seed.sh`,
-    ];
-    let lastErr: unknown;
-    for (const cmd of cmds) {
-        try {
-            execSync(cmd, {
-                cwd: REPO_ROOT,
-                encoding: "utf-8",
-                timeout: 90_000,
-                stdio: ["ignore", "pipe", "pipe"],
-            });
-            return;
-        } catch (e) {
-            lastErr = e;
-        }
+    const cmd = `${composeRuntime()} run --rm --network ${PARITY_NETWORK} ${envFlags} -v ${seedHostPath}:/seed.sh:ro --entrypoint /bin/sh ${PARITY_SEED_IMAGE} /seed.sh`;
+    try {
+        execSync(cmd, {
+            cwd: REPO_ROOT,
+            encoding: "utf-8",
+            timeout: 90_000,
+            stdio: ["ignore", "pipe", "pipe"],
+        });
+    } catch (e) {
+        // eslint-disable-next-line no-console
+        console.warn(`[backends] reseed failed: ${(e as Error)?.message ?? e}`);
     }
-    // eslint-disable-next-line no-console
-    console.warn(
-        `[backends] reseed failed via both runtimes: ${(lastErr as Error)?.message ?? lastErr}`,
-    );
 }
 
 /**
