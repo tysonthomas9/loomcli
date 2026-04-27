@@ -96,31 +96,54 @@ func (p *configPoolAdapter) Discard(client configClient) {
 	}
 }
 
+// WorkspacePathResolver resolves a workspace ID (from the {ws} path
+// segment) to the workspace's filesystem path. Used by the config-backend
+// handler so it can read loom.yaml without going through a daemon RPC —
+// daemon-less deployments (fleet mode) don't have a Status() endpoint.
+// Nil falls back to the daemon path.
+type WorkspacePathResolver func(workspaceID string) (string, bool)
+
 // HandleGetBackendConfig returns a handler that reads backend config from loom.yaml.
 func HandleGetBackendConfig(pool daemon.Pool) http.HandlerFunc {
-	if pool == nil {
-		return handleGetBackendConfigWithPool(nil)
+	return HandleGetBackendConfigWithResolver(pool, nil)
+}
+
+// HandleGetBackendConfigWithResolver is the daemon-less variant. When the
+// resolver returns a path for the request's {ws} param, loom.yaml is read
+// directly without acquiring a daemon connection. Falls back to the
+// daemon-based resolution when the resolver returns false.
+func HandleGetBackendConfigWithResolver(pool daemon.Pool, resolver WorkspacePathResolver) http.HandlerFunc {
+	var poolGetter configConnectionGetter
+	if pool != nil {
+		poolGetter = &configPoolAdapter{pool: pool}
 	}
-	return handleGetBackendConfigWithPool(&configPoolAdapter{pool: pool})
+	return handleGetBackendConfigWithPool(poolGetter, resolver)
 }
 
 // handleGetBackendConfigWithPool is the internal testable implementation.
-func handleGetBackendConfigWithPool(pool configConnectionGetter) http.HandlerFunc {
+func handleGetBackendConfigWithPool(pool configConnectionGetter, resolver WorkspacePathResolver) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if pool == nil {
-			handler.WriteJSON(w, http.StatusServiceUnavailable, BackendConfigResponse{Success: false, Error: "connection pool not initialized"})
-			return
-		}
-
-		// Get workspace path from daemon status
-		wsPath, err := getWorkspacePath(pool, r.Context())
-		if err != nil {
-			status := http.StatusServiceUnavailable
-			if errors.Is(err, context.DeadlineExceeded) {
-				status = http.StatusGatewayTimeout
+		var wsPath string
+		if resolver != nil {
+			if p, ok := resolver(r.PathValue("ws")); ok {
+				wsPath = p
 			}
-			handler.WriteJSON(w, status, BackendConfigResponse{Success: false, Error: "daemon not available"})
-			return
+		}
+		if wsPath == "" {
+			if pool == nil {
+				handler.WriteJSON(w, http.StatusServiceUnavailable, BackendConfigResponse{Success: false, Error: "connection pool not initialized"})
+				return
+			}
+			p, err := getWorkspacePath(pool, r.Context())
+			if err != nil {
+				status := http.StatusServiceUnavailable
+				if errors.Is(err, context.DeadlineExceeded) {
+					status = http.StatusGatewayTimeout
+				}
+				handler.WriteJSON(w, status, BackendConfigResponse{Success: false, Error: "daemon not available"})
+				return
+			}
+			wsPath = p
 		}
 
 		// Read loom.yaml

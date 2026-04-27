@@ -68,7 +68,7 @@ func TestHandleGetBackendConfig_WithProjectBackend(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "loom.yaml"), []byte("backend: codex\n"), 0644)
 
 	pool := newMockConfigPool(dir)
-	handler := handleGetBackendConfigWithPool(pool)
+	handler := handleGetBackendConfigWithPool(pool, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/config/backend", nil)
 	rec := httptest.NewRecorder()
@@ -100,7 +100,7 @@ func TestHandleGetBackendConfig_NoBackendField(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "loom.yaml"), []byte("agents:\n  - worktree: nova\n    role: task\n"), 0644)
 
 	pool := newMockConfigPool(dir)
-	handler := handleGetBackendConfigWithPool(pool)
+	handler := handleGetBackendConfigWithPool(pool, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/config/backend", nil)
 	rec := httptest.NewRecorder()
@@ -125,7 +125,7 @@ func TestHandleGetBackendConfig_NoFile(t *testing.T) {
 	dir := t.TempDir()
 
 	pool := newMockConfigPool(dir)
-	handler := handleGetBackendConfigWithPool(pool)
+	handler := handleGetBackendConfigWithPool(pool, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/config/backend", nil)
 	rec := httptest.NewRecorder()
@@ -162,7 +162,7 @@ agents:
 	os.WriteFile(filepath.Join(dir, "loom.yaml"), []byte(yaml), 0644)
 
 	pool := newMockConfigPool(dir)
-	handler := handleGetBackendConfigWithPool(pool)
+	handler := handleGetBackendConfigWithPool(pool, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/config/backend", nil)
 	rec := httptest.NewRecorder()
@@ -187,7 +187,7 @@ agents:
 }
 
 func TestHandleGetBackendConfig_NilPool(t *testing.T) {
-	handler := handleGetBackendConfigWithPool(nil)
+	handler := handleGetBackendConfigWithPool(nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/config/backend", nil)
 	rec := httptest.NewRecorder()
@@ -204,7 +204,7 @@ func TestHandleGetBackendConfig_DaemonUnavailable(t *testing.T) {
 			return nil, errors.New("connection refused")
 		},
 	}
-	handler := handleGetBackendConfigWithPool(pool)
+	handler := handleGetBackendConfigWithPool(pool, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/config/backend", nil)
 	rec := httptest.NewRecorder()
@@ -412,7 +412,7 @@ func TestHandleGetBackendConfig_AvailableIncludesShell(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "loom.yaml"), []byte("backend: claude\n"), 0644)
 
 	pool := newMockConfigPool(dir)
-	handler := handleGetBackendConfigWithPool(pool)
+	handler := handleGetBackendConfigWithPool(pool, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/config/backend", nil)
 	rec := httptest.NewRecorder()

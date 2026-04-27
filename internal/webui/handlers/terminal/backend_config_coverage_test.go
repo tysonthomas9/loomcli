@@ -342,7 +342,7 @@ func TestHandleGetBackendConfig_DeadlineExceeded(t *testing.T) {
 			return nil, context.DeadlineExceeded
 		},
 	}
-	handler := handleGetBackendConfigWithPool(pool)
+	handler := handleGetBackendConfigWithPool(pool, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/config/backend", nil)
 	rec := httptest.NewRecorder()
@@ -358,7 +358,7 @@ func TestHandleGetBackendConfig_InvalidYAMLFile(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "loom.yaml"), []byte(":\t:\n  [[[invalid"), 0644)
 
 	pool := newMockConfigPool(dir)
-	handler := handleGetBackendConfigWithPool(pool)
+	handler := handleGetBackendConfigWithPool(pool, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/config/backend", nil)
 	rec := httptest.NewRecorder()

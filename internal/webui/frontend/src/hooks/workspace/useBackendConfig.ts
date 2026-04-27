@@ -11,6 +11,7 @@ import {
   getCachedBackendConfig,
 } from "@/api/common";
 import type { BackendConfigData } from "@/api/common";
+import { getWorkspaceBackendConfig } from "@/api/workspace";
 
 /**
  * Return type for the useBackendConfig hook.
@@ -34,9 +35,15 @@ export interface UseBackendConfigReturn {
 
 /**
  * React hook for managing backend configuration state.
- * Fetches from GET /api/config/backend on mount, updates via PATCH.
+ *
+ * When a workspaceId is provided, fetches from the workspace-scoped
+ * /api/workspaces/{ws}/config/backend (works in fleet client mode).
+ * When omitted, falls back to the unscoped /api/config/backend (legacy
+ * single-workspace dev mode); that endpoint requires a daemon and will
+ * 503 in fleet mode, so callers in workspace-aware UIs should always
+ * pass a workspaceId.
  */
-export function useBackendConfig(): UseBackendConfigReturn {
+export function useBackendConfig(workspaceId?: string): UseBackendConfigReturn {
   const [initialCache] = useState(() => getCachedBackendConfig());
   const [config, setConfig] = useState<BackendConfigData | null>(initialCache);
   const [isLoading, setIsLoading] = useState(true);
@@ -60,7 +67,9 @@ export function useBackendConfig(): UseBackendConfigReturn {
     setError(null);
 
     try {
-      const data = await getBackendConfig();
+      const data = workspaceId
+        ? await getWorkspaceBackendConfig(workspaceId)
+        : await getBackendConfig();
       if (mountedRef.current) {
         setConfig(data);
         setIsCached(false);
@@ -80,9 +89,9 @@ export function useBackendConfig(): UseBackendConfigReturn {
         setIsLoading(false);
       }
     }
-  }, []);
+  }, [workspaceId]);
 
-  // Fetch on mount
+  // Fetch on mount + whenever workspaceId changes.
   useEffect(() => {
     fetchConfig();
   }, [fetchConfig]);

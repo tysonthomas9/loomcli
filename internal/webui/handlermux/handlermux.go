@@ -29,14 +29,20 @@ type WorkspaceOpsModule struct {
 	multiPool      daemon.Pool
 	agentQueueH    http.HandlerFunc
 	issueBackendFn func() backend.IssueBackend
+	daemonExpected bool
+	wsPathFn       hterminal.WorkspacePathResolver
 }
 
 // NewWorkspaceOpsModule creates a WorkspaceOpsModule. Callers that support
 // pool-less backends (e.g. fleet mode) should also call WithIssueBackendFn
 // so the graph handler can fall back to the IssueBackend when the daemon
 // pool is unavailable.
+//
+// daemonExpected defaults to true; chain WithDaemonExpected(false) for
+// fleet client mode so /daemon/status returns a fleet-mode stub instead
+// of 503.
 func NewWorkspaceOpsModule(workspaceSvc service.WorkspaceService, multiPool daemon.Pool, agentQueueH http.HandlerFunc) *WorkspaceOpsModule {
-	return &WorkspaceOpsModule{workspaceSvc: workspaceSvc, multiPool: multiPool, agentQueueH: agentQueueH}
+	return &WorkspaceOpsModule{workspaceSvc: workspaceSvc, multiPool: multiPool, agentQueueH: agentQueueH, daemonExpected: true}
 }
 
 // WithIssueBackendFn injects the IssueBackend factory used by handlers
@@ -44,6 +50,22 @@ func NewWorkspaceOpsModule(workspaceSvc service.WorkspaceService, multiPool daem
 // graph endpoint). Returns the module for chaining.
 func (m *WorkspaceOpsModule) WithIssueBackendFn(fn func() backend.IssueBackend) *WorkspaceOpsModule {
 	m.issueBackendFn = fn
+	return m
+}
+
+// WithDaemonExpected sets whether a bd daemon is expected to be reachable
+// for this deployment. False in fleet client mode. Returns the module for
+// chaining.
+func (m *WorkspaceOpsModule) WithDaemonExpected(b bool) *WorkspaceOpsModule {
+	m.daemonExpected = b
+	return m
+}
+
+// WithWorkspacePathResolver injects the workspace-id → filesystem-path
+// resolver used by /config/backend so it can read loom.yaml without a
+// daemon RPC. Returns the module for chaining.
+func (m *WorkspaceOpsModule) WithWorkspacePathResolver(fn hterminal.WorkspacePathResolver) *WorkspaceOpsModule {
+	m.wsPathFn = fn
 	return m
 }
 
@@ -57,8 +79,8 @@ func (m *WorkspaceOpsModule) Register(mux *http.ServeMux) {
 		githandlers.HandleBlockedWithBackendFallback(m.multiPool, githandlers.IssueBackendFn(m.issueBackendFn)))
 	mux.HandleFunc("GET /api/workspaces/{ws}/issues/graph",
 		githandlers.HandleGraphWithBackendFallback(m.multiPool, githandlers.IssueBackendFn(m.issueBackendFn)))
-	mux.HandleFunc("GET /api/workspaces/{ws}/daemon/status", healthhandlers.HandleDaemonStatus(m.multiPool))
-	mux.HandleFunc("GET /api/workspaces/{ws}/config/backend", hterminal.HandleGetBackendConfig(m.multiPool))
+	mux.HandleFunc("GET /api/workspaces/{ws}/daemon/status", healthhandlers.HandleDaemonStatusWithMode(m.multiPool, m.daemonExpected))
+	mux.HandleFunc("GET /api/workspaces/{ws}/config/backend", hterminal.HandleGetBackendConfigWithResolver(m.multiPool, m.wsPathFn))
 	if m.agentQueueH != nil {
 		mux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/queue", m.agentQueueH)
 	}

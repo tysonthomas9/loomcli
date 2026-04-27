@@ -8,7 +8,7 @@ import { useState } from "react";
 import { ErrorDisplay } from "@/components/ErrorDisplay";
 import { LoadingSkeleton } from "@/components/LoadingSkeleton";
 import type { ViewMode } from "@/components/ViewSwitcher";
-import { useBackendConfig } from "@/hooks/workspace";
+import { useBackendConfig, useWorkspaceContext } from "@/hooks/workspace";
 import {
   useTerminalFont,
   FONT_FAMILY_OPTIONS,
@@ -29,6 +29,7 @@ export function SettingsView({
   className,
   onNavigate,
 }: SettingsViewProps): JSX.Element {
+  const { workspaceId } = useWorkspaceContext();
   const {
     config,
     isLoading,
@@ -37,7 +38,7 @@ export function SettingsView({
     isCached,
     updateBackend,
     refetch,
-  } = useBackendConfig();
+  } = useBackendConfig(workspaceId);
   const { showToast } = useToast();
   const [selectedBackend, setSelectedBackend] = useState<string | null>(null);
 
