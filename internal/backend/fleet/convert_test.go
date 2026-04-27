@@ -32,9 +32,15 @@ func TestFleetIssueWire_FieldDriftGuard(t *testing.T) {
 			key = tag[:idx]
 		}
 		if key == "type" || key == "issue_type" {
-			// `type` and `issue_type` carry the same value (kind), one per
-			// dialect — collapse to a single canonical key.
+			// `type` (fleet-db) and `issue_type` (beads) carry the same value
+			// — collapse to one canonical key.
 			wireKeys["kind"] = true
+			continue
+		}
+		if key == "repo" || key == "source_repo" {
+			// `repo` (fleet-db) and `source_repo` (beads) carry the same
+			// value — same dual-tag pattern as type/issue_type.
+			wireKeys["repo_canonical"] = true
 			continue
 		}
 		wireKeys[key] = true
@@ -42,7 +48,7 @@ func TestFleetIssueWire_FieldDriftGuard(t *testing.T) {
 	canonical := map[string]bool{
 		"id": true, "title": true, "status": true, "priority": true,
 		"kind": true, "assignee": true, "owner": true, "labels": true,
-		"source_repo": true, "design": true, "description": true,
+		"repo_canonical": true, "design": true, "description": true,
 		"created_at": true, "created_by": true, "updated_at": true,
 		"due_at": true, "defer_until": true, "closed_at": true,
 		"close_reason": true,
@@ -414,4 +420,31 @@ func TestCloseResultJSONToData_NilClosed(t *testing.T) {
 	if result.Unblocked == nil {
 		t.Error("Unblocked should be empty slice, not nil")
 	}
+}
+
+// TestFleetIssueWire_RepoAlias verifies fleet-db's `repo` json key is
+// projected to types.Issue.SourceRepo, mirroring the type/issue_type
+// dual-tag treatment. fleet-db emits both `repo` and `source_repo` after
+// the parity extension (see fleet-db/internal/models/issue.go MarshalJSON);
+// this guard keeps the loom adapter compatible with fleet-db builds that
+// only emit `repo` (older/un-extended fleet-db servers).
+func TestFleetIssueWire_RepoAlias(t *testing.T) {
+	t.Run("repo only (legacy fleet-db)", func(t *testing.T) {
+		w := fleetIssueWire{Repo: "org/legacy"}
+		if got := w.toIssue().SourceRepo; got != "org/legacy" {
+			t.Errorf("SourceRepo = %q, want %q", got, "org/legacy")
+		}
+	})
+	t.Run("source_repo only (beads style)", func(t *testing.T) {
+		w := fleetIssueWire{SourceRepo: "org/aliased"}
+		if got := w.toIssue().SourceRepo; got != "org/aliased" {
+			t.Errorf("SourceRepo = %q, want %q", got, "org/aliased")
+		}
+	})
+	t.Run("both set — repo wins", func(t *testing.T) {
+		w := fleetIssueWire{Repo: "primary", SourceRepo: "alias"}
+		if got := w.toIssue().SourceRepo; got != "primary" {
+			t.Errorf("SourceRepo = %q, want %q (repo should win)", got, "primary")
+		}
+	})
 }

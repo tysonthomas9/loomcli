@@ -23,7 +23,8 @@ type fleetIssueWire struct {
 	Assignee    string     `json:"assignee,omitempty"`
 	Owner       string     `json:"owner,omitempty"`
 	Labels      []string   `json:"labels,omitempty"`
-	SourceRepo  string     `json:"source_repo,omitempty"`
+	SourceRepo  string     `json:"source_repo,omitempty"` // beads/loom dialect
+	Repo        string     `json:"repo,omitempty"`        // fleet-db dialect, same value
 	Design      string     `json:"design,omitempty"`
 	Description string     `json:"description,omitempty"`
 	CreatedAt   time.Time  `json:"created_at,omitempty"`
@@ -35,13 +36,18 @@ type fleetIssueWire struct {
 	CloseReason string     `json:"close_reason,omitempty"`
 }
 
-// toIssue projects the wire shape to the canonical types.Issue. `type`
-// wins over `issue_type` when both are set (fleet-db's dialect is the
-// authoritative one for fleet responses).
+// toIssue projects the wire shape to the canonical types.Issue. For dual-tag
+// fields (`type`/`issue_type`, `repo`/`source_repo`) fleet-db's dialect wins
+// when both are present; the alias kicks in only when the native key is
+// absent.
 func (w fleetIssueWire) toIssue() types.Issue {
 	kind := w.Type
 	if kind == "" {
 		kind = w.IssueType
+	}
+	repo := w.Repo
+	if repo == "" {
+		repo = w.SourceRepo
 	}
 	return types.Issue{
 		ID:          w.ID,
@@ -53,7 +59,7 @@ func (w fleetIssueWire) toIssue() types.Issue {
 		Assignee:    w.Assignee,
 		Owner:       w.Owner,
 		Labels:      w.Labels,
-		SourceRepo:  w.SourceRepo,
+		SourceRepo:  repo,
 		Design:      w.Design,
 		CreatedAt:   w.CreatedAt,
 		CreatedBy:   w.CreatedBy,
