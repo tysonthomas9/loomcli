@@ -36,8 +36,15 @@ type StatusResponse struct {
 	AutoPull     bool   `json:"auto_pull"`     // Whether auto-pull is enabled (periodic remote sync)
 	LocalMode    bool   `json:"local_mode"`    // Whether running in local-only mode (no git)
 	SyncInterval string `json:"sync_interval"` // Sync interval (e.g., "5s")
-	DaemonMode   string `json:"daemon_mode"`   // Sync mode: "poll" or "events"
+	DaemonMode   string `json:"daemon_mode"`   // Sync mode: see DaemonMode* constants
 }
+
+// DaemonMode values for StatusResponse.DaemonMode.
+const (
+	DaemonModePoll   = "poll"   // bd daemon polls for changes on SyncInterval
+	DaemonModeEvents = "events" // bd daemon receives push events
+	DaemonModeFleet  = "fleet"  // fleet client mode — no local bd daemon
+)
 
 // HealthResponse is the response for a health check operation
 

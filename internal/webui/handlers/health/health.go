@@ -418,7 +418,7 @@ func HandleDaemonStatusWithMode(pool daemon.Pool, daemonExpected bool) http.Hand
 		if !daemonExpected {
 			handler.WriteJSON(w, http.StatusOK, DaemonStatusResponse{
 				Success: true,
-				Data:    &rpc.StatusResponse{DaemonMode: "fleet"},
+				Data:    &rpc.StatusResponse{DaemonMode: rpc.DaemonModeFleet},
 			})
 			return
 		}

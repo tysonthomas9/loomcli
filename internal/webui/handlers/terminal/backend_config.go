@@ -123,27 +123,10 @@ func HandleGetBackendConfigWithResolver(pool daemon.Pool, resolver WorkspacePath
 // handleGetBackendConfigWithPool is the internal testable implementation.
 func handleGetBackendConfigWithPool(pool configConnectionGetter, resolver WorkspacePathResolver) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		var wsPath string
-		if resolver != nil {
-			if p, ok := resolver(r.PathValue("ws")); ok {
-				wsPath = p
-			}
-		}
-		if wsPath == "" {
-			if pool == nil {
-				handler.WriteJSON(w, http.StatusServiceUnavailable, BackendConfigResponse{Success: false, Error: "connection pool not initialized"})
-				return
-			}
-			p, err := getWorkspacePath(pool, r.Context())
-			if err != nil {
-				status := http.StatusServiceUnavailable
-				if errors.Is(err, context.DeadlineExceeded) {
-					status = http.StatusGatewayTimeout
-				}
-				handler.WriteJSON(w, status, BackendConfigResponse{Success: false, Error: "daemon not available"})
-				return
-			}
-			wsPath = p
+		wsPath, status, err := resolveWorkspacePath(r, pool, resolver)
+		if err != nil {
+			handler.WriteJSON(w, status, BackendConfigResponse{Success: false, Error: err.Error()})
+			return
 		}
 
 		// Read loom.yaml
@@ -261,6 +244,31 @@ func isValidBackend(name string) bool {
 		}
 	}
 	return false
+}
+
+// resolveWorkspacePath returns the workspace's filesystem path for the
+// request's {ws} param. Tries the resolver first (daemon-less / fleet
+// path); falls back to acquiring a daemon connection and reading
+// Status().WorkspacePath. Returns (path, httpStatus, err) — err is non-nil
+// only when neither path produced a usable answer.
+func resolveWorkspacePath(r *http.Request, pool configConnectionGetter, resolver WorkspacePathResolver) (string, int, error) {
+	if resolver != nil {
+		if p, ok := resolver(r.PathValue("ws")); ok && p != "" {
+			return p, 0, nil
+		}
+	}
+	if pool == nil {
+		return "", http.StatusServiceUnavailable, fmt.Errorf("connection pool not initialized")
+	}
+	p, err := getWorkspacePath(pool, r.Context())
+	if err != nil {
+		status := http.StatusServiceUnavailable
+		if errors.Is(err, context.DeadlineExceeded) {
+			status = http.StatusGatewayTimeout
+		}
+		return "", status, fmt.Errorf("daemon not available")
+	}
+	return p, 0, nil
 }
 
 // getWorkspacePath acquires a daemon connection and returns the workspace path.

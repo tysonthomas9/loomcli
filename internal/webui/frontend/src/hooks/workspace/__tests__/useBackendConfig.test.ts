@@ -33,9 +33,6 @@ const mockGetBackendConfig = vi.mocked(getBackendConfig);
 const mockUpdateBackendConfig = vi.mocked(updateBackendConfig);
 const mockGetWorkspaceBackendConfig = vi.mocked(getWorkspaceBackendConfig);
 
-/**
- * Helper to create a mock BackendConfigData.
- */
 function createMockConfig(
   overrides?: Partial<BackendConfigData>,
 ): BackendConfigData {
@@ -48,9 +45,6 @@ function createMockConfig(
   };
 }
 
-/**
- * Helper to flush pending promises.
- */
 async function flushPromises(): Promise<void> {
   await act(async () => {
     await Promise.resolve();

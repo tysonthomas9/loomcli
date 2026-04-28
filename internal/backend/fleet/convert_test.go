@@ -423,11 +423,8 @@ func TestCloseResultJSONToData_NilClosed(t *testing.T) {
 }
 
 // TestFleetIssueWire_RepoAlias verifies fleet-db's `repo` json key is
-// projected to types.Issue.SourceRepo, mirroring the type/issue_type
-// dual-tag treatment. fleet-db emits both `repo` and `source_repo` after
-// the parity extension (see fleet-db/internal/models/issue.go MarshalJSON);
-// this guard keeps the loom adapter compatible with fleet-db builds that
-// only emit `repo` (older/un-extended fleet-db servers).
+// projected to types.Issue.SourceRepo. Mirrors the type/issue_type
+// dual-tag treatment — see fleetIssueWire docstring.
 func TestFleetIssueWire_RepoAlias(t *testing.T) {
 	t.Run("repo only (legacy fleet-db)", func(t *testing.T) {
 		w := fleetIssueWire{Repo: "org/legacy"}

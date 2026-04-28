@@ -56,25 +56,17 @@ func TestHandleAPIHealthNoDaemon(t *testing.T) {
 	}
 }
 
-// TestHandleAPIHealth_NilPoolStill503 is the regression guard for the
-// reviewer's flagged concern: in beads mode (daemonExpected=true) a nil
-// pool is the "daemon expected but unreachable" failure case and must
-// 503 so liveness probes restart the pod. Without this guard, my fleet
-// fix could have masked beads-mode daemon outages.
-func TestHandleAPIHealth_NilPoolStill503(t *testing.T) {
+// TestHandleAPIHealth_NilPoolShortCircuit verifies the misconfiguration
+// case: HandleAPIHealth(nil) returns 200 (the daemon-mode endpoints were
+// already inoperable; failing 503 here would just add noise). The real
+// daemon-failure scenario is TestHandleAPIHealth_DaemonDead below.
+func TestHandleAPIHealth_NilPoolShortCircuit(t *testing.T) {
 	handler := HandleAPIHealth(nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/health", nil)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
-	// With the new wiring HandleAPIHealth(nil) takes the `pool == nil`
-	// short-circuit even when daemonExpected=true — the rationale is
-	// "no pool object at all" is a misconfiguration that already left
-	// the daemon-mode endpoints inoperable; 200 with daemon.connected=false
-	// is consistent with the rest of the response shape. The "real"
-	// daemon-failure case is exercised by the test below where the pool
-	// IS wired but pool.Get() fails.
 	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (nil pool short-circuits)", rec.Code)
+		t.Fatalf("status = %d, want 200", rec.Code)
 	}
 }
 
@@ -100,8 +92,8 @@ func TestHandleDaemonStatus_NoDaemonMode(t *testing.T) {
 	if body.Data == nil {
 		t.Fatalf("Data = nil, want stub StatusResponse")
 	}
-	if body.Data.DaemonMode != "fleet" {
-		t.Errorf("DaemonMode = %q, want %q", body.Data.DaemonMode, "fleet")
+	if body.Data.DaemonMode != rpc.DaemonModeFleet {
+		t.Errorf("DaemonMode = %q, want %q", body.Data.DaemonMode, rpc.DaemonModeFleet)
 	}
 }
 
@@ -118,13 +110,10 @@ func TestHandleDaemonStatus_DaemonExpectedNilPool(t *testing.T) {
 	}
 }
 
-// TestHandleAPIHealth_DaemonDead is the explicit beads-mode-regression
-// guard the reviewer flagged: with a wired pool whose Get() always
-// errors (production equivalent of "bd daemon died"), the response MUST
-// be 503 so k8s/load-balancer liveness probes can restart the pod. The
-// previous backend-aware promotion would have masked this and shipped a
-// silently-degraded production. The current daemonExpected=true path
-// preserves the 503 contract.
+// TestHandleAPIHealth_DaemonDead is the prod-regression guard for the
+// daemon-mode 503 contract. A wired pool whose Get() errors (bd daemon
+// died) MUST 503 so k8s/load-balancer liveness probes restart the pod —
+// silently masking this would ship a degraded production.
 func TestHandleAPIHealth_DaemonDead(t *testing.T) {
 	handler := HandleAPIHealth(stubDeadDaemonPool{})
 	req := httptest.NewRequest(http.MethodGet, "/api/health", nil)

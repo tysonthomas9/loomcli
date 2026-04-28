@@ -29,13 +29,18 @@ func (app *Server) buildModules() {
 	if app.config.IssueBackendFn != nil {
 		opsModule = opsModule.WithIssueBackendFn(app.config.IssueBackendFn)
 	}
-	if app.config.WorkspaceConfigByIDFn != nil {
+	if app.config.WorkspaceListFn != nil {
 		opsModule = opsModule.WithWorkspacePathResolver(func(wsID string) (string, bool) {
-			data, err := app.config.WorkspaceConfigByIDFn(wsID)
-			if err != nil || data == nil || data.Path == "" {
+			// WorkspaceListFn returns id→path directly from one LoadConfig
+			// pass — strictly less work than WorkspaceConfigByIDFn (which
+			// also walks repos, loads agents, builds summaries) just to
+			// surface the same path field.
+			paths, err := app.config.WorkspaceListFn()
+			if err != nil {
 				return "", false
 			}
-			return data.Path, true
+			p, ok := paths[wsID]
+			return p, ok && p != ""
 		})
 	}
 	app.wsModules = append(app.wsModules, opsModule)
