@@ -14,6 +14,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 import { getBackendConfig, updateBackendConfig } from "@/api/common";
 import type { BackendConfigData } from "@/api/common";
+import { getWorkspaceBackendConfig } from "@/api/workspace";
 
 import { useBackendConfig } from "../useBackendConfig";
 
@@ -24,8 +25,13 @@ vi.mock("@/api/common", () => ({
   getCachedBackendConfig: vi.fn().mockReturnValue(null),
 }));
 
+vi.mock("@/api/workspace", () => ({
+  getWorkspaceBackendConfig: vi.fn(),
+}));
+
 const mockGetBackendConfig = vi.mocked(getBackendConfig);
 const mockUpdateBackendConfig = vi.mocked(updateBackendConfig);
+const mockGetWorkspaceBackendConfig = vi.mocked(getWorkspaceBackendConfig);
 
 /**
  * Helper to create a mock BackendConfigData.
@@ -494,6 +500,64 @@ describe("useBackendConfig", () => {
       });
 
       // If we got here without errors, the test passes
+    });
+  });
+
+  describe("workspaceId routing", () => {
+    it("calls workspace-scoped fetch when workspaceId is provided", async () => {
+      const cfg = createMockConfig({ backend: "codex", source: "workspace" });
+      mockGetWorkspaceBackendConfig.mockResolvedValueOnce(cfg);
+
+      const { result } = renderHook(() => useBackendConfig("ws-fleet-1"));
+      await flushPromises();
+
+      expect(mockGetWorkspaceBackendConfig).toHaveBeenCalledWith("ws-fleet-1");
+      expect(mockGetBackendConfig).not.toHaveBeenCalled();
+      expect(result.current.config).toEqual(cfg);
+      expect(result.current.error).toBeNull();
+    });
+
+    it("falls back to unscoped fetch when workspaceId is undefined", async () => {
+      const cfg = createMockConfig();
+      mockGetBackendConfig.mockResolvedValueOnce(cfg);
+
+      const { result } = renderHook(() => useBackendConfig());
+      await flushPromises();
+
+      expect(mockGetBackendConfig).toHaveBeenCalled();
+      expect(mockGetWorkspaceBackendConfig).not.toHaveBeenCalled();
+      expect(result.current.config).toEqual(cfg);
+    });
+
+    it("re-fetches when workspaceId changes", async () => {
+      const cfgA = createMockConfig({ backend: "claude" });
+      const cfgB = createMockConfig({ backend: "codex" });
+      mockGetWorkspaceBackendConfig
+        .mockResolvedValueOnce(cfgA)
+        .mockResolvedValueOnce(cfgB);
+
+      const { result, rerender } = renderHook(
+        ({ ws }: { ws: string }) => useBackendConfig(ws),
+        { initialProps: { ws: "ws-A" } },
+      );
+      await flushPromises();
+      expect(result.current.config?.backend).toBe("claude");
+
+      rerender({ ws: "ws-B" });
+      await flushPromises();
+      expect(mockGetWorkspaceBackendConfig).toHaveBeenNthCalledWith(2, "ws-B");
+      expect(result.current.config?.backend).toBe("codex");
+    });
+
+    it("propagates workspace-scoped fetch error", async () => {
+      mockGetWorkspaceBackendConfig.mockRejectedValueOnce(
+        new Error("503 daemon unavailable"),
+      );
+
+      const { result } = renderHook(() => useBackendConfig("ws-fleet-1"));
+      await flushPromises();
+
+      expect(result.current.error).toBe("503 daemon unavailable");
     });
   });
 });

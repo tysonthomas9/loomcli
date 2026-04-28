@@ -445,3 +445,63 @@ func TestHandleGetBackendConfig_AvailableIncludesShell(t *testing.T) {
 		t.Errorf("expected 'shell' in available list, got: %v", resp.Data.Available)
 	}
 }
+
+// TestHandleGetBackendConfig_ResolverHit verifies the workspace-path
+// resolver (used in fleet client mode) reads loom.yaml directly without
+// consulting the daemon pool. Pool is nil — a regression here would
+// surface as a 503 from the "pool not initialized" branch.
+func TestHandleGetBackendConfig_ResolverHit(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "loom.yaml"), []byte("backend: codex\n"), 0644); err != nil {
+		t.Fatalf("write loom.yaml: %v", err)
+	}
+	resolver := func(ws string) (string, bool) {
+		if ws == "ws-fleet-1" {
+			return dir, true
+		}
+		return "", false
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/workspaces/{ws}/config/backend", handleGetBackendConfigWithPool(nil, resolver))
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/ws-fleet-1/config/backend", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"backend":"codex"`) {
+		t.Errorf("body = %s, want backend=codex", rec.Body.String())
+	}
+}
+
+// TestHandleGetBackendConfig_ResolverMissFallsThroughToPool covers the
+// case where the resolver doesn't have a path for this workspace ID
+// (e.g. workspace registry has been restarted but the pool can still
+// answer). With nil pool this becomes a 503 — exercised by NilPool
+// already; this test confirms the fall-through path is reached.
+func TestHandleGetBackendConfig_ResolverMissFallsThroughToPool(t *testing.T) {
+	resolver := func(ws string) (string, bool) { return "", false }
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/workspaces/{ws}/config/backend", handleGetBackendConfigWithPool(nil, resolver))
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/whatever/config/backend", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503 (no pool to fall through to), got %d", rec.Code)
+	}
+}
+
+// TestHandleGetBackendConfig_ResolverEmptyPathFallsThrough covers a
+// resolver that returns ("", true) — semantically "I claim this
+// workspace exists but its path is unknown". Treat as a miss.
+func TestHandleGetBackendConfig_ResolverEmptyPathFallsThrough(t *testing.T) {
+	resolver := func(ws string) (string, bool) { return "", true }
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/workspaces/{ws}/config/backend", handleGetBackendConfigWithPool(nil, resolver))
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/whatever/config/backend", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503 (empty path → fall through to pool, which is nil), got %d", rec.Code)
+	}
+}
