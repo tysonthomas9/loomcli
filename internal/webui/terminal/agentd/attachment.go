@@ -198,16 +198,31 @@ func openAttachStream(ctx, streamCtx context.Context, conn *agentdConn, session 
 		err error
 	}
 	firstCh := make(chan firstFrame, 1)
+	// Per-handshake context derived from streamCtx. Cancelling this on
+	// ctx.Done() unblocks the Recv goroutine immediately so it can't leak
+	// past the handshake deadline. We can't cancel streamCtx itself —
+	// callers (initial AttachSession + reconnect loop) reuse it for the
+	// long-lived stream that follows a successful handshake.
+	recvCtx, cancelRecv := context.WithCancel(streamCtx)
 	go func() {
 		msg, err := stream.Recv()
-		firstCh <- firstFrame{msg: msg, err: err}
+		select {
+		case firstCh <- firstFrame{msg: msg, err: err}:
+		case <-recvCtx.Done():
+		}
 	}()
 
 	var first firstFrame
 	select {
 	case <-ctx.Done():
+		cancelRecv()
+		// Tear down the half-open stream so the server-side Attach handler
+		// returns; otherwise we'd leave a one-sided stream on conn until
+		// TCP eventually times out.
+		_ = stream.CloseSend()
 		return nil, nil, ctx.Err()
 	case first = <-firstCh:
+		cancelRecv()
 	}
 
 	if first.err != nil {

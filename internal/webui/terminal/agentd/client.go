@@ -90,6 +90,15 @@ func New(opts Options) (*AgentdClient, error) {
 	if opts.CertTTL < 0 {
 		return nil, fmt.Errorf("agentd: Options.CertTTL must be >= 0, got %v", opts.CertTTL)
 	}
+	// A non-nil ControlPlaneTLS signals "production wiring is in place" —
+	// in that case the caller MUST also provide AgentdRootCAPEM so we
+	// can verify agentd's server cert. Without the CA bytes,
+	// tlsConfigFromPEM later returns an error at AttachSession time;
+	// surface it earlier so misconfiguration fails at startup rather
+	// than at the first attach.
+	if opts.ControlPlaneTLS != nil && len(opts.AgentdRootCAPEM) == 0 {
+		return nil, errors.New("agentd: Options.AgentdRootCAPEM is required when ControlPlaneTLS is set")
+	}
 
 	ttl := opts.CertTTL
 	if ttl == 0 {
