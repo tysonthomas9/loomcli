@@ -16,12 +16,9 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
 
-// outputBufferSize matches the in-process PTYManager's attachment buffer
-// (terminal/pty_session.go::attachBufferSize) so an agentd-backed attachment
-// has the same back-pressure shape as a local one. Producers (the recv
-// goroutine) drop into a non-blocking send + close-on-overflow policy if the
-// consumer falls behind — see runRecv for the exact handling.
-const outputBufferSize = 64
+// outputBufferSize is the agentd-backed attachment's output channel cap;
+// reuses terminal.AttachBufferSize so a tuning change lands in one place.
+const outputBufferSize = terminal.AttachBufferSize
 
 // reconnectAttempts caps the number of dial+attach retries the recv loop
 // will run after a bare stream close. The total wall-clock budget is roughly

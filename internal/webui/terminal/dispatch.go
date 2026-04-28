@@ -50,39 +50,20 @@ func NewDispatcher(ephemeral, persistent PTYSource, classify func(SessionKey) Ag
 	}
 }
 
-// pickFor returns the backend that should handle key. If persistent is nil
-// or classify returns AgentEphemeral, the ephemeral backend is returned.
-// If classify returns AgentPersistent but persistent is nil (a misconfig
-// from the operator's perspective), the call falls back to ephemeral and
-// emits a warning at most once per (workspace, name) tuple — the user-
-// visible behavior is "got a local shell instead of the persistent agent",
-// which is recoverable, so we don't error.
+// pickFor returns the backend that should handle key, defaulting to the
+// ephemeral path. If classify says persistent but persistent==nil (operator
+// misconfig), falls back to ephemeral and emits a warning at most once per
+// (workspace, name) tuple — user-visible behavior is "got a local shell
+// instead of the persistent agent", which is recoverable, so we don't error.
 func (d *Dispatcher) pickFor(key SessionKey) PTYSource {
+	if d.classify == nil || d.classify(key) != AgentPersistent {
+		return d.ephemeral
+	}
 	if d.persistent == nil {
-		return d.ephemeral
-	}
-	if d.classify == nil {
-		return d.ephemeral
-	}
-	if d.classify(key) == AgentPersistent {
-		return d.persistent
-	}
-	return d.ephemeral
-}
-
-// pickForWithFallback is like pickFor, but logs a warning when the classify
-// callback says the key is persistent yet the persistent backend is nil.
-// Centralizing the fallback path here keeps the warning emitted once per
-// tuple and makes it impossible for AttachSession / Kill / etc. to disagree
-// on whether the warning was logged.
-func (d *Dispatcher) pickForWithFallback(key SessionKey) PTYSource {
-	if d.persistent != nil {
-		return d.pickFor(key)
-	}
-	if d.classify != nil && d.classify(key) == AgentPersistent {
 		d.warnFallbackOnce(key)
+		return d.ephemeral
 	}
-	return d.ephemeral
+	return d.persistent
 }
 
 // warnFallbackOnce emits the persistent-classified-but-no-backend warning
@@ -105,27 +86,27 @@ func (d *Dispatcher) warnFallbackOnce(key SessionKey) {
 
 // AttachSession routes the attach to the chosen backend.
 func (d *Dispatcher) AttachSession(key SessionKey, cols, rows uint16, argv []string) (Attachment, bool, error) {
-	return d.pickForWithFallback(key).AttachSession(key, cols, rows, argv)
+	return d.pickFor(key).AttachSession(key, cols, rows, argv)
 }
 
 // Detach forwards to the chosen backend.
 func (d *Dispatcher) Detach(key SessionKey, connID string) {
-	d.pickForWithFallback(key).Detach(key, connID)
+	d.pickFor(key).Detach(key, connID)
 }
 
 // Kill forwards to the chosen backend.
 func (d *Dispatcher) Kill(key SessionKey) error {
-	return d.pickForWithFallback(key).Kill(key)
+	return d.pickFor(key).Kill(key)
 }
 
 // HasSession forwards to the chosen backend.
 func (d *Dispatcher) HasSession(key SessionKey) bool {
-	return d.pickForWithFallback(key).HasSession(key)
+	return d.pickFor(key).HasSession(key)
 }
 
 // AttachmentCount forwards to the chosen backend.
 func (d *Dispatcher) AttachmentCount(key SessionKey) int {
-	return d.pickForWithFallback(key).AttachmentCount(key)
+	return d.pickFor(key).AttachmentCount(key)
 }
 
 // SessionCount returns the ephemeral backend's session count. In dispatch
