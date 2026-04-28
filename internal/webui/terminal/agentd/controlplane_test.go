@@ -92,7 +92,7 @@ func startFakeCP(t *testing.T, fake *fakeControlPlane, certTTL time.Duration) *A
 	}
 
 	cp := newControlPlaneClientFromConn(conn)
-	caPEM, _ := makeSelfSigned(t, "agent:demo/main") // dummy CA root used by tlsConfigFromPEM
+	caPEM, _ := makeSelfSigned(t, "agent.demo.main") // dummy CA root used by tlsConfigFromPEM
 	client := newWithControlPlane(cp, []byte(caPEM), certTTL)
 
 	t.Cleanup(func() {
@@ -111,7 +111,7 @@ func startFakeCP(t *testing.T, fake *fakeControlPlane, certTTL time.Duration) *A
 // trivial.
 func readyResolveResponse(t *testing.T, ws, agent string) *cpb.ResolveResponse {
 	t.Helper()
-	cert, key := makeSelfSigned(t, "agent:"+ws+"/"+agent)
+	cert, key := makeSelfSigned(t, "agent."+ws+"."+agent)
 	return &cpb.ResolveResponse{
 		Kind:        cpb.AgentKind_AGENT_PERSISTENT,
 		VmHost:      "vm-" + agent + ".local",
@@ -267,7 +267,7 @@ func TestAttachSession_CacheTTLExpiry(t *testing.T) {
 func TestAttachSession_RejectsEmptyVMHost(t *testing.T) {
 	fake := &fakeControlPlane{
 		resolveFn: func(_ *cpb.ResolveRequest) (*cpb.ResolveResponse, error) {
-			cert, key := makeSelfSigned(t, "agent:demo/main")
+			cert, key := makeSelfSigned(t, "agent.demo.main")
 			return &cpb.ResolveResponse{
 				Kind:        cpb.AgentKind_AGENT_PERSISTENT,
 				VmHost:      "", // invalid
@@ -288,7 +288,7 @@ func TestAttachSession_RejectsEmptyVMHost(t *testing.T) {
 func TestAttachSession_RejectsZeroPort(t *testing.T) {
 	fake := &fakeControlPlane{
 		resolveFn: func(_ *cpb.ResolveRequest) (*cpb.ResolveResponse, error) {
-			cert, key := makeSelfSigned(t, "agent:demo/main")
+			cert, key := makeSelfSigned(t, "agent.demo.main")
 			return &cpb.ResolveResponse{
 				VmHost:      "vm.local",
 				AgentdPort:  0,

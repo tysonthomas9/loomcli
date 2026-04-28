@@ -61,10 +61,11 @@ func tlsConfigFromPEM(certPEM, keyPEM string, caRootPEM []byte, workspace, agent
 }
 
 // serverNameForAgent returns the SNI / verified-server-name string the
-// agentd's server cert is expected to present. Matches the
-// "agent:{workspace}/{agent}" convention the control-plane mints — keeping
-// this in a single helper means every consumer of the cert (AttachSession,
-// tests, future Phase 3 stream attach) renders the same canonical string.
+// agentd's server cert is expected to present. Matches the cert-mint
+// convention `agent.{workspace}.{agent}` — dot separators keep the value
+// a valid DNS name; an earlier `agent:{ws}/{agent}` form was treated by
+// Go's tls package as host:port and silently truncated to "agent" during
+// SNI/verify, which made every mTLS dial fail.
 func serverNameForAgent(workspace, agent string) string {
-	return "agent:" + workspace + "/" + agent
+	return "agent." + workspace + "." + agent
 }

@@ -48,7 +48,7 @@ func makeSelfSigned(t *testing.T, cn string) (certPEM, keyPEM string) {
 }
 
 func TestTLSConfigFromPEM_RoundTrip(t *testing.T) {
-	certPEM, keyPEM := makeSelfSigned(t, "agent:demo/main")
+	certPEM, keyPEM := makeSelfSigned(t, "agent.demo.main")
 	caPEM := []byte(certPEM) // self-signed: cert is its own root
 
 	cfg, err := tlsConfigFromPEM(certPEM, keyPEM, caPEM, "demo", "main")
@@ -61,7 +61,7 @@ func TestTLSConfigFromPEM_RoundTrip(t *testing.T) {
 	if cfg.MinVersion != tls.VersionTLS13 {
 		t.Errorf("MinVersion = %x, want TLS13 (%x)", cfg.MinVersion, tls.VersionTLS13)
 	}
-	if got, want := cfg.ServerName, "agent:demo/main"; got != want {
+	if got, want := cfg.ServerName, "agent.demo.main"; got != want {
 		t.Errorf("ServerName = %q, want %q", got, want)
 	}
 	if len(cfg.Certificates) != 1 {
@@ -82,7 +82,7 @@ func TestTLSConfigFromPEM_RoundTrip(t *testing.T) {
 }
 
 func TestTLSConfigFromPEM_RejectsEmptyInputs(t *testing.T) {
-	certPEM, keyPEM := makeSelfSigned(t, "agent:demo/main")
+	certPEM, keyPEM := makeSelfSigned(t, "agent.demo.main")
 	caPEM := []byte(certPEM)
 
 	cases := []struct {
@@ -115,7 +115,7 @@ func TestTLSConfigFromPEM_RejectsMalformedCert(t *testing.T) {
 }
 
 func TestTLSConfigFromPEM_RejectsMalformedCA(t *testing.T) {
-	certPEM, keyPEM := makeSelfSigned(t, "agent:demo/main")
+	certPEM, keyPEM := makeSelfSigned(t, "agent.demo.main")
 	_, err := tlsConfigFromPEM(certPEM, keyPEM, []byte("not-a-ca-pem"), "ws", "a")
 	if err == nil {
 		t.Fatalf("tlsConfigFromPEM with malformed CA returned nil err")
@@ -126,7 +126,7 @@ func TestTLSConfigFromPEM_RejectsMalformedCA(t *testing.T) {
 }
 
 func TestServerNameForAgent(t *testing.T) {
-	if got, want := serverNameForAgent("ws", "a"), "agent:ws/a"; got != want {
+	if got, want := serverNameForAgent("ws", "a"), "agent.ws.a"; got != want {
 		t.Errorf("serverNameForAgent = %q, want %q", got, want)
 	}
 }
