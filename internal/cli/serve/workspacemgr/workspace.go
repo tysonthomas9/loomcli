@@ -18,6 +18,18 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/workspaceerrors"
 )
 
+// bdSyncTimeout caps how long `bd repo sync` may run inside startDaemonAsync
+// before the goroutine gives up and continues to mark the workspace ready.
+// Generous (vs. a short bd-init timeout) because sync is I/O-heavy: it
+// rewrites the workspace-root beads.db from each per-repo beads.db and can
+// legitimately take tens of seconds on workspaces with many issues. A stuck
+// daemon would otherwise pin the goroutine forever, leaving the workspace
+// at state=initializing on disk indefinitely.
+//
+// Declared as a var (not const) for test override; not mutated at runtime in
+// production.
+var bdSyncTimeout = 60 * time.Second
+
 // DeleteWorkspace removes a workspace from config without deleting git worktrees.
 // Returns an error if the workspace is not found or has running agents.
 func DeleteWorkspace(name string) error {
@@ -489,8 +501,8 @@ func startDaemonAsync(timeout time.Duration, wsName, wsDir string, repos []confi
 		workspace.CreateAgentWorktrees(wsDir, repos, agentNames)
 		if err := workspace.EnsureDaemonForWorkspace(deps, context.Background(), wsDir, timeout); err != nil {
 			slog.Warn("failed to start daemon for workspace", "workspace", wsName, "err", err)
-		} else if result := deps.Exec.Run(wsDir, "bd", "repo", "sync"); result.Err != nil {
-			slog.Warn("bd repo sync failed", "workspace", wsName, "err", result.Err)
+		} else {
+			runBdRepoSync(deps, wsName, wsDir)
 		}
 		// Also start loom daemon (agent supervisor). Independent of bd daemon —
 		// best-effort so a failure here doesn't block the workspace reaching ready.
@@ -504,6 +516,19 @@ func startDaemonAsync(timeout time.Duration, wsName, wsDir string, repos []confi
 			slog.Error("failed to mark workspace ready", "workspace", wsName, "err", err)
 		}
 	}()
+}
+
+// runBdRepoSync runs `bd repo sync` in wsDir under a bdSyncTimeout-bounded
+// context. A stuck bd daemon would otherwise hang the subprocess forever and
+// pin the calling goroutine before it can mark the workspace ready. Logs and
+// returns on error rather than propagating: sync failure is non-fatal — the
+// workspace is still considered created and must reach state=ready.
+func runBdRepoSync(deps *cli.Deps, wsName, wsDir string) {
+	ctx, cancel := context.WithTimeout(context.Background(), bdSyncTimeout)
+	defer cancel()
+	if result := deps.ExecCtx.Run(ctx, wsDir, "bd", "repo", "sync"); result.Err != nil {
+		slog.Warn("bd repo sync failed", "workspace", wsName, "err", result.Err, "timeout", bdSyncTimeout)
+	}
 }
 
 // repoNameFromURL derives a directory name from a git clone URL.
