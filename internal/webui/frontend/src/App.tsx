@@ -31,6 +31,7 @@ import {
   StaleDataBanner,
   DaemonStatusBadge,
   ToastContainer,
+  ConfirmDialog,
   FilterBar,
   MoreFiltersMenu,
   SearchInput,
@@ -68,6 +69,7 @@ import {
   useToast,
   useTheme,
   useWorkspaceContext,
+  useWorkspaceManagementActions,
   useWorkspaceState,
   useRepoFilterParam,
   useSearchScope,
@@ -123,6 +125,9 @@ function App() {
     selectRepos,
     sourceReposFilter,
   } = useWorkspaceContext();
+
+  // Workspace rename/delete/default actions for the global Cmd+K switcher
+  const workspaceManagementActions = useWorkspaceManagementActions();
 
   // Repo filter URL param sync (deep linking for repo selection)
   const [repoFilterParam] = useRepoFilterParam();
@@ -1223,13 +1228,33 @@ function App() {
       </SearchTermProvider>
       <KeyboardCheatsheet />
       {isMultiRepo && (
-        <WorkspaceSwitcher
-          isOpen={isWorkspaceSwitcherOpen}
-          workspaces={workspace?.workspaces ?? []}
-          activeWorkspaceId={workspaceId}
-          onSelect={handleWorkspaceSwitcherSelect}
-          onClose={() => setIsWorkspaceSwitcherOpen(false)}
-        />
+        <>
+          <WorkspaceSwitcher
+            isOpen={isWorkspaceSwitcherOpen}
+            workspaces={workspace?.workspaces ?? []}
+            activeWorkspaceId={workspaceId}
+            onSelect={handleWorkspaceSwitcherSelect}
+            onClose={() => setIsWorkspaceSwitcherOpen(false)}
+            onRename={workspaceManagementActions.onRename}
+            onDelete={workspaceManagementActions.onDelete}
+            onSetDefault={workspaceManagementActions.onSetDefault}
+            onClearDefault={workspaceManagementActions.onClearDefault}
+            defaultWorkspaceId={workspaceManagementActions.defaultWorkspaceId}
+          />
+          <ConfirmDialog
+            isOpen={workspaceManagementActions.pendingDelete !== null}
+            title="Remove workspace"
+            message={
+              workspaceManagementActions.pendingDelete
+                ? `Are you sure you want to remove "${workspaceManagementActions.pendingDelete.name}"? Git worktrees will be kept on disk.`
+                : ""
+            }
+            confirmLabel="Remove"
+            variant="danger"
+            onConfirm={workspaceManagementActions.onConfirmDelete}
+            onCancel={workspaceManagementActions.onCancelDelete}
+          />
+        </>
       )}
       <CreateWorkspaceModal
         isOpen={showCreateWorkspace}

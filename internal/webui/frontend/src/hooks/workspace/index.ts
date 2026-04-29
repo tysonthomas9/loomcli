@@ -62,3 +62,6 @@ export type {
 
 export { useWorkspaceTree } from "./useWorkspaceTree";
 export type { EpicWithTasks, UseWorkspaceTreeReturn } from "./useWorkspaceTree";
+
+export { useWorkspaceManagementActions } from "./useWorkspaceManagementActions";
+export type { UseWorkspaceManagementActionsReturn } from "./useWorkspaceManagementActions";

@@ -6,7 +6,12 @@
  * Unit tests for WorkspaceSwitcher component.
  */
 
-import { render as rtlRender, screen, fireEvent } from "@testing-library/react";
+import {
+  render as rtlRender,
+  screen,
+  fireEvent,
+  waitFor,
+} from "@testing-library/react";
 import type { RenderOptions } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import "@testing-library/jest-dom";
@@ -650,6 +655,438 @@ describe("WorkspaceSwitcher", () => {
       );
 
       expect(screen.getByText("No workspaces found")).toBeInTheDocument();
+    });
+  });
+
+  describe("workspace management actions", () => {
+    it("renders no overflow button when neither onRename nor onDelete is provided", () => {
+      render(
+        <WorkspaceSwitcher
+          isOpen={true}
+          workspaces={createWorkspaces()}
+          activeWorkspaceId="ws-alpha"
+          onSelect={vi.fn()}
+          onClose={vi.fn()}
+        />,
+      );
+
+      expect(
+        document.querySelector("[data-testid^='workspace-switcher-overflow-']"),
+      ).toBeNull();
+    });
+
+    it("renders an overflow button per workspace when onRename or onDelete is provided", () => {
+      render(
+        <WorkspaceSwitcher
+          isOpen={true}
+          workspaces={createWorkspaces()}
+          activeWorkspaceId="ws-alpha"
+          onSelect={vi.fn()}
+          onClose={vi.fn()}
+          onRename={vi.fn().mockResolvedValue(undefined)}
+          onDelete={vi.fn()}
+        />,
+      );
+
+      expect(
+        screen.getByTestId("workspace-switcher-overflow-ws-alpha"),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByTestId("workspace-switcher-overflow-ws-beta"),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByTestId("workspace-switcher-overflow-ws-gamma"),
+      ).toBeInTheDocument();
+    });
+
+    it("clicking the overflow button opens the context menu without firing onSelect", () => {
+      const onSelect = vi.fn();
+      render(
+        <WorkspaceSwitcher
+          isOpen={true}
+          workspaces={createWorkspaces()}
+          activeWorkspaceId="ws-alpha"
+          onSelect={onSelect}
+          onClose={vi.fn()}
+          onRename={vi.fn().mockResolvedValue(undefined)}
+          onDelete={vi.fn()}
+        />,
+      );
+
+      fireEvent.click(
+        screen.getByTestId("workspace-switcher-overflow-ws-beta"),
+      );
+
+      expect(screen.getByTestId("workspace-context-menu")).toBeInTheDocument();
+      expect(onSelect).not.toHaveBeenCalled();
+    });
+
+    it("right-click on a workspace item opens the context menu", () => {
+      render(
+        <WorkspaceSwitcher
+          isOpen={true}
+          workspaces={createWorkspaces()}
+          activeWorkspaceId="ws-alpha"
+          onSelect={vi.fn()}
+          onClose={vi.fn()}
+          onRename={vi.fn().mockResolvedValue(undefined)}
+          onDelete={vi.fn()}
+        />,
+      );
+
+      const items = document.querySelectorAll("[data-workspace-item]");
+      fireEvent.contextMenu(items[1]);
+
+      expect(screen.getByTestId("workspace-context-menu")).toBeInTheDocument();
+    });
+
+    it("right-click does not open the context menu when management callbacks are absent", () => {
+      render(
+        <WorkspaceSwitcher
+          isOpen={true}
+          workspaces={createWorkspaces()}
+          activeWorkspaceId="ws-alpha"
+          onSelect={vi.fn()}
+          onClose={vi.fn()}
+        />,
+      );
+
+      const items = document.querySelectorAll("[data-workspace-item]");
+      fireEvent.contextMenu(items[1]);
+
+      expect(
+        screen.queryByTestId("workspace-context-menu"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("Rename swaps the item to an input pre-filled with the workspace name", () => {
+      render(
+        <WorkspaceSwitcher
+          isOpen={true}
+          workspaces={createWorkspaces()}
+          activeWorkspaceId="ws-alpha"
+          onSelect={vi.fn()}
+          onClose={vi.fn()}
+          onRename={vi.fn().mockResolvedValue(undefined)}
+          onDelete={vi.fn()}
+        />,
+      );
+
+      fireEvent.click(
+        screen.getByTestId("workspace-switcher-overflow-ws-beta"),
+      );
+      fireEvent.click(screen.getByTestId("workspace-context-menu-rename"));
+
+      const input = screen.getByTestId(
+        "workspace-switcher-rename-input",
+      ) as HTMLInputElement;
+      expect(input).toBeInTheDocument();
+      expect(input.value).toBe("beta");
+    });
+
+    it("Enter inside the rename input calls onRename with (wsId, trimmedName) and closes edit mode on resolve", async () => {
+      const onRename = vi.fn().mockResolvedValue(undefined);
+      render(
+        <WorkspaceSwitcher
+          isOpen={true}
+          workspaces={createWorkspaces()}
+          activeWorkspaceId="ws-alpha"
+          onSelect={vi.fn()}
+          onClose={vi.fn()}
+          onRename={onRename}
+          onDelete={vi.fn()}
+        />,
+      );
+
+      fireEvent.click(
+        screen.getByTestId("workspace-switcher-overflow-ws-beta"),
+      );
+      fireEvent.click(screen.getByTestId("workspace-context-menu-rename"));
+
+      const input = screen.getByTestId("workspace-switcher-rename-input");
+      fireEvent.change(input, { target: { value: "  renamed-beta  " } });
+      fireEvent.keyDown(input, { key: "Enter" });
+
+      await waitFor(() => {
+        expect(onRename).toHaveBeenCalledWith("ws-beta", "renamed-beta");
+      });
+      await waitFor(() => {
+        expect(
+          screen.queryByTestId("workspace-switcher-rename-input"),
+        ).not.toBeInTheDocument();
+      });
+    });
+
+    it("submitting an empty name shows an inline error and does not call onRename", () => {
+      const onRename = vi.fn().mockResolvedValue(undefined);
+      render(
+        <WorkspaceSwitcher
+          isOpen={true}
+          workspaces={createWorkspaces()}
+          activeWorkspaceId="ws-alpha"
+          onSelect={vi.fn()}
+          onClose={vi.fn()}
+          onRename={onRename}
+          onDelete={vi.fn()}
+        />,
+      );
+
+      fireEvent.click(
+        screen.getByTestId("workspace-switcher-overflow-ws-beta"),
+      );
+      fireEvent.click(screen.getByTestId("workspace-context-menu-rename"));
+
+      const input = screen.getByTestId("workspace-switcher-rename-input");
+      fireEvent.change(input, { target: { value: "   " } });
+      fireEvent.keyDown(input, { key: "Enter" });
+
+      expect(
+        screen.getByTestId("workspace-switcher-rename-error"),
+      ).toHaveTextContent("Name cannot be empty");
+      expect(onRename).not.toHaveBeenCalled();
+      expect(
+        screen.getByTestId("workspace-switcher-rename-input"),
+      ).toBeInTheDocument();
+    });
+
+    it("submitting an unchanged (trimmed) name exits edit mode without calling onRename", () => {
+      const onRename = vi.fn().mockResolvedValue(undefined);
+      render(
+        <WorkspaceSwitcher
+          isOpen={true}
+          workspaces={createWorkspaces()}
+          activeWorkspaceId="ws-alpha"
+          onSelect={vi.fn()}
+          onClose={vi.fn()}
+          onRename={onRename}
+          onDelete={vi.fn()}
+        />,
+      );
+
+      fireEvent.click(
+        screen.getByTestId("workspace-switcher-overflow-ws-beta"),
+      );
+      fireEvent.click(screen.getByTestId("workspace-context-menu-rename"));
+
+      const input = screen.getByTestId("workspace-switcher-rename-input");
+      fireEvent.change(input, { target: { value: "  beta  " } });
+      fireEvent.keyDown(input, { key: "Enter" });
+
+      expect(onRename).not.toHaveBeenCalled();
+      expect(
+        screen.queryByTestId("workspace-switcher-rename-input"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("rename API rejection shows inline error and preserves edit mode", async () => {
+      const onRename = vi
+        .fn()
+        .mockRejectedValue(new Error("Name already taken"));
+      render(
+        <WorkspaceSwitcher
+          isOpen={true}
+          workspaces={createWorkspaces()}
+          activeWorkspaceId="ws-alpha"
+          onSelect={vi.fn()}
+          onClose={vi.fn()}
+          onRename={onRename}
+          onDelete={vi.fn()}
+        />,
+      );
+
+      fireEvent.click(
+        screen.getByTestId("workspace-switcher-overflow-ws-beta"),
+      );
+      fireEvent.click(screen.getByTestId("workspace-context-menu-rename"));
+
+      const input = screen.getByTestId("workspace-switcher-rename-input");
+      fireEvent.change(input, { target: { value: "alpha" } });
+      fireEvent.keyDown(input, { key: "Enter" });
+
+      await waitFor(() => {
+        expect(
+          screen.getByTestId("workspace-switcher-rename-error"),
+        ).toHaveTextContent("Name already taken");
+      });
+      expect(
+        screen.getByTestId("workspace-switcher-rename-input"),
+      ).toBeInTheDocument();
+    });
+
+    it("Escape inside the rename input cancels without calling onRename", () => {
+      const onRename = vi.fn().mockResolvedValue(undefined);
+      render(
+        <WorkspaceSwitcher
+          isOpen={true}
+          workspaces={createWorkspaces()}
+          activeWorkspaceId="ws-alpha"
+          onSelect={vi.fn()}
+          onClose={vi.fn()}
+          onRename={onRename}
+          onDelete={vi.fn()}
+        />,
+      );
+
+      fireEvent.click(
+        screen.getByTestId("workspace-switcher-overflow-ws-beta"),
+      );
+      fireEvent.click(screen.getByTestId("workspace-context-menu-rename"));
+
+      const input = screen.getByTestId("workspace-switcher-rename-input");
+      fireEvent.change(input, { target: { value: "renamed" } });
+      fireEvent.keyDown(input, { key: "Escape" });
+
+      expect(onRename).not.toHaveBeenCalled();
+      expect(
+        screen.queryByTestId("workspace-switcher-rename-input"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("Escape during rename cancels the rename without closing the switcher", () => {
+      const onClose = vi.fn();
+      render(
+        <WorkspaceSwitcher
+          isOpen={true}
+          workspaces={createWorkspaces()}
+          activeWorkspaceId="ws-alpha"
+          onSelect={vi.fn()}
+          onClose={onClose}
+          onRename={vi.fn().mockResolvedValue(undefined)}
+          onDelete={vi.fn()}
+        />,
+      );
+
+      fireEvent.click(
+        screen.getByTestId("workspace-switcher-overflow-ws-beta"),
+      );
+      fireEvent.click(screen.getByTestId("workspace-context-menu-rename"));
+
+      // The escape-layer registration is suspended during rename so the
+      // document-level Escape would not also trigger onClose.
+      fireEvent.keyDown(document, { key: "Escape" });
+
+      expect(onClose).not.toHaveBeenCalled();
+    });
+
+    it("Remove from the context menu fires onDelete with (wsId, wsName) and closes the switcher", () => {
+      const onDelete = vi.fn();
+      const onClose = vi.fn();
+      render(
+        <WorkspaceSwitcher
+          isOpen={true}
+          workspaces={createWorkspaces()}
+          activeWorkspaceId="ws-alpha"
+          onSelect={vi.fn()}
+          onClose={onClose}
+          onRename={vi.fn().mockResolvedValue(undefined)}
+          onDelete={onDelete}
+        />,
+      );
+
+      fireEvent.click(
+        screen.getByTestId("workspace-switcher-overflow-ws-gamma"),
+      );
+      fireEvent.click(screen.getByTestId("workspace-context-menu-remove"));
+
+      expect(onDelete).toHaveBeenCalledWith("ws-gamma", "gamma");
+      expect(onClose).toHaveBeenCalled();
+    });
+
+    it("Set as default fires onSetDefault when target is not the default", () => {
+      const onSetDefault = vi.fn();
+      render(
+        <WorkspaceSwitcher
+          isOpen={true}
+          workspaces={createWorkspaces()}
+          activeWorkspaceId="ws-alpha"
+          onSelect={vi.fn()}
+          onClose={vi.fn()}
+          onRename={vi.fn().mockResolvedValue(undefined)}
+          onDelete={vi.fn()}
+          onSetDefault={onSetDefault}
+          onClearDefault={vi.fn()}
+          defaultWorkspaceId="ws-alpha"
+        />,
+      );
+
+      fireEvent.click(
+        screen.getByTestId("workspace-switcher-overflow-ws-beta"),
+      );
+      fireEvent.click(screen.getByTestId("workspace-context-menu-default"));
+
+      expect(onSetDefault).toHaveBeenCalledWith("beta");
+    });
+
+    it("Clear default fires onClearDefault when target is already the default", () => {
+      const onClearDefault = vi.fn();
+      render(
+        <WorkspaceSwitcher
+          isOpen={true}
+          workspaces={createWorkspaces()}
+          activeWorkspaceId="ws-alpha"
+          onSelect={vi.fn()}
+          onClose={vi.fn()}
+          onRename={vi.fn().mockResolvedValue(undefined)}
+          onDelete={vi.fn()}
+          onSetDefault={vi.fn()}
+          onClearDefault={onClearDefault}
+          defaultWorkspaceId="ws-beta"
+        />,
+      );
+
+      fireEvent.click(
+        screen.getByTestId("workspace-switcher-overflow-ws-beta"),
+      );
+      fireEvent.click(screen.getByTestId("workspace-context-menu-default"));
+
+      expect(onClearDefault).toHaveBeenCalled();
+    });
+
+    it("ArrowDown/Enter do not fire workspace navigation while a rename is in progress", () => {
+      const onSelect = vi.fn();
+      render(
+        <WorkspaceSwitcher
+          isOpen={true}
+          workspaces={createWorkspaces()}
+          activeWorkspaceId="ws-alpha"
+          onSelect={onSelect}
+          onClose={vi.fn()}
+          onRename={vi.fn().mockResolvedValue(undefined)}
+          onDelete={vi.fn()}
+        />,
+      );
+
+      fireEvent.click(
+        screen.getByTestId("workspace-switcher-overflow-ws-beta"),
+      );
+      fireEvent.click(screen.getByTestId("workspace-context-menu-rename"));
+
+      const overlay = document.querySelector("[class*=overlay]")!;
+      fireEvent.keyDown(overlay, { key: "ArrowDown" });
+      fireEvent.keyDown(overlay, { key: "Enter" });
+
+      expect(onSelect).not.toHaveBeenCalled();
+    });
+
+    it("does not switch workspace when clicking the overflow button (stops propagation)", () => {
+      const onSelect = vi.fn();
+      render(
+        <WorkspaceSwitcher
+          isOpen={true}
+          workspaces={createWorkspaces()}
+          activeWorkspaceId="ws-alpha"
+          onSelect={onSelect}
+          onClose={vi.fn()}
+          onRename={vi.fn().mockResolvedValue(undefined)}
+          onDelete={vi.fn()}
+        />,
+      );
+
+      fireEvent.click(
+        screen.getByTestId("workspace-switcher-overflow-ws-gamma"),
+      );
+
+      expect(onSelect).not.toHaveBeenCalled();
     });
   });
 

@@ -32,6 +32,13 @@ export const ALLOWLIST = [
     source: "src/components/AppLayout/AppLayout.tsx",
     target: "@/components/LiveRegion/LiveRegion",
   },
+  {
+    // The WorkspaceTree barrel re-exports WorkspaceSelectorBar, which
+    // imports WorkspaceSwitcher — going through the barrel would form a
+    // runtime cycle. Direct import of the leaf module is the safe path.
+    source: "src/components/WorkspaceSwitcher/WorkspaceSwitcher.tsx",
+    target: "@/components/WorkspaceTree/menus/WorkspaceContextMenu",
+  },
 ];
 
 /**

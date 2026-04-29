@@ -90,6 +90,16 @@ vi.mock("@/hooks", () => ({
     refetch: vi.fn(),
   }),
   useToast: () => ({ showToast: vi.fn() }),
+  useWorkspaceManagementActions: () => ({
+    onRename: vi.fn().mockResolvedValue(undefined),
+    onDelete: vi.fn(),
+    onSetDefault: vi.fn(),
+    onClearDefault: vi.fn(),
+    defaultWorkspaceId: undefined,
+    pendingDelete: null,
+    onConfirmDelete: vi.fn(),
+    onCancelDelete: vi.fn(),
+  }),
   useIssueDiffStat: () => ({
     data: null,
     isLoading: false,

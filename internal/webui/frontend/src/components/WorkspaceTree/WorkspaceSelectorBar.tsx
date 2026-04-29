@@ -6,7 +6,9 @@
 import { useState, useCallback } from "react";
 
 import type { WorkspaceSummary } from "@/api/workspace";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { WorkspaceSwitcher } from "@/components/WorkspaceSwitcher";
+import { useWorkspaceManagementActions } from "@/hooks";
 import { getWorkspaceColor } from "@/utils/workspace";
 
 import styles from "./WorkspaceSelectorBar.module.css";
@@ -32,6 +34,16 @@ export function WorkspaceSelectorBar({
   onAddWorkspace,
 }: WorkspaceSelectorBarProps): JSX.Element {
   const [isSwitcherOpen, setIsSwitcherOpen] = useState(false);
+  const {
+    onRename,
+    onDelete,
+    onSetDefault,
+    onClearDefault,
+    defaultWorkspaceId,
+    pendingDelete,
+    onConfirmDelete,
+    onCancelDelete,
+  } = useWorkspaceManagementActions();
 
   const handleOpen = useCallback(() => {
     setIsSwitcherOpen(true);
@@ -77,6 +89,24 @@ export function WorkspaceSelectorBar({
         onSelect={handleSelect}
         onClose={handleClose}
         onAddWorkspace={onAddWorkspace}
+        onRename={onRename}
+        onDelete={onDelete}
+        onSetDefault={onSetDefault}
+        onClearDefault={onClearDefault}
+        defaultWorkspaceId={defaultWorkspaceId}
+      />
+      <ConfirmDialog
+        isOpen={pendingDelete !== null}
+        title="Remove workspace"
+        message={
+          pendingDelete
+            ? `Are you sure you want to remove "${pendingDelete.name}"? Git worktrees will be kept on disk.`
+            : ""
+        }
+        confirmLabel="Remove"
+        variant="danger"
+        onConfirm={onConfirmDelete}
+        onCancel={onCancelDelete}
       />
     </>
   );

@@ -359,6 +359,16 @@ vi.mock("@/hooks", () => ({
     isMultiRepo: false,
   })),
   useWorkspaceState: vi.fn(),
+  useWorkspaceManagementActions: vi.fn(() => ({
+    onRename: vi.fn().mockResolvedValue(undefined),
+    onDelete: vi.fn(),
+    onSetDefault: vi.fn(),
+    onClearDefault: vi.fn(),
+    defaultWorkspaceId: undefined,
+    pendingDelete: null,
+    onConfirmDelete: vi.fn(),
+    onCancelDelete: vi.fn(),
+  })),
   useElapsedTime: vi.fn(() => "0s"),
   useJobPolling: vi.fn(() => ({
     isPolling: false,
