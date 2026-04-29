@@ -672,28 +672,17 @@ All workspace-scoped routes are registered under `/api/workspaces/{ws}/` via mod
 | GET | `.../tasks/{id}/logs` | `handleListTaskPhases` |
 | GET | `.../tasks/{id}/logs/{phase}` | `handleGetTaskLog` |
 
-#### TerminalModule (12-16 routes)
+#### TerminalModule (5 routes)
 
-**File:** `internal/webui/terminal_module.go`
+**File:** `internal/webui/handlers/terminal/module.go`
 
 | Method | Pattern | Handler |
 |--------|---------|---------|
 | GET | `.../agents/{name}/terminal/info` | Agent terminal info (conditional) |
 | GET | `.../agents/{name}/terminal/token` | Agent terminal token (conditional) |
 | GET | `.../agents/{name}/terminal/ws` | Agent terminal WebSocket |
-| GET | `.../terminal/sessions` | List terminal sessions |
 | GET | `.../terminal/token` | General terminal token (conditional) |
 | GET | `.../terminal/ws` | Terminal WebSocket |
-| POST | `.../terminal/restart` | Restart terminal |
-| POST | `.../terminal/kill` | Kill terminal |
-| GET | `.../terminal/session-status` | Session status |
-| POST | `.../terminal/spawn` | Spawn terminal |
-| POST | `.../terminal/sessions/{name}/seed` | Seed session |
-| POST | `.../terminal/sessions/{session}/kill` | Schedule session kill |
-| POST | `.../terminal/sessions/close-all` | Close all sessions |
-| GET | `.../terminal/sessions/{session}/scrollback` | Get scrollback |
-| GET | `.../terminal/sessions/{session}/export` | Export session |
-| GET | `.../terminal/sessions/{session}/scrollback-info` | Scrollback info |
 
 #### TerminalTabModule (8 routes)
 

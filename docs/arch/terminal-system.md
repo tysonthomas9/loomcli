@@ -2,9 +2,9 @@
 
 ## Overview
 
-The Terminal System provides an integrated terminal experience within the web UI, supporting multiple AI backend sessions (Claude, Codex, OpenCode) and plain shell tabs. It spans from the NavRail entry point through a tabbed terminal view with WebSocket-relayed PTY connections to tmux sessions on the backend.
+The Terminal System provides an integrated terminal experience within the web UI, supporting multiple AI backend sessions (Claude, Codex, OpenCode) and plain shell tabs. It spans from the NavRail entry point through a tabbed terminal view with WebSocket-relayed PTY connections; each main-terminal WebSocket owns a PTY directly, while agent terminals still run under tmux.
 
-The system supports workspace-scoped tab isolation, drag-and-drop tab reordering, split-pane viewing, slash commands, crash recovery, session scrollback persistence, and issue-linked terminal sessions.
+The system supports workspace-scoped tab isolation, drag-and-drop tab reordering, split-pane viewing, slash commands, crash recovery, scrollback replay on reattach, and issue-linked terminal sessions.
 
 ---
 
@@ -23,7 +23,7 @@ TerminalView (TerminalView.tsx)            <- orchestrator
   +-- useClipboard                         <- copy/paste with confirmation
   +-- useTabActions                        <- close/duplicate/rename
   +-- useTabOrdering                       <- pin/reorder/close-others
-  +-- useSessionManagement                 <- issue-linked tab creation + close-all
+  +-- useSessionManagement                 <- issue-linked tab creation
   |
   +-- TerminalTabBar (TerminalTabBar.tsx)   <- WAI-ARIA tablist
   |    +-- SortableTab (dnd-kit)           <- drag-and-drop per tab
@@ -122,7 +122,6 @@ The dot also shows `hasUnread` as a pulsing indicator (`span.unreadDot`) when th
 - **Pin / Unpin**: reorders tab to start/end of pinned zone.
 - **Close**: removes tab, switches active tab to adjacent.
 - **Close Others**: removes all other tabs, calls `deleteTabMetadata` for each.
-- **Close All**: calls `POST /api/terminal/sessions/close-all`.
 
 ---
 
@@ -133,8 +132,7 @@ The dot also shows `hasUnread` as a pulsing indicator (`span.unreadDot`) when th
 Modal (`role="dialog" aria-modal="true"`) that appears when the user clicks "+" or presses Ctrl+T. Shows a `<select>` populated from `config.available` (the `available` field from `/api/config/backend`).
 
 On submit, `handleBackendSelect` fires:
-- For `shell` backend: `spawnTerminalSession(sessionName, 'shell')` pre-creates tmux session before WS connects.
-- For AI backends: session creation is deferred to `TerminalManager.Attach` on first WS connect.
+- Session creation is deferred to the first WebSocket attach — there is no pre-spawn REST call for any backend.
 
 ### Default Tabs from Backend Config
 
@@ -396,36 +394,20 @@ if (event.code === WS_CLOSE_BACKEND_EXITED) {
 
 ### CrashOverlay Actions
 
-- **Restart**: `restartTerminalSession(sessionName, token)` (POST /api/terminal/restart). Server kills old session, updates manager's default command, responds. Then `instance.reconnect()` creates a new WebSocket.
+- **Restart**: `instance.reconnect()` opens a new WebSocket. The PTY manager spawns a fresh shell for the session on first attach after the previous session exited; no REST call is needed.
 - **Close Tab**: `handleTabClose`.
 
 ### Session Scrollback
 
-On reconnect, `fetchScrollback(sessionName)` calls `GET /api/terminal/sessions/{session}/scrollback` which runs `tmux capture-pane -p -S -5000`. Terminal is cleared and scrollback is written before new WebSocket connects, giving continuity.
-
-Scrollback files are persisted to `~/.loom/session-scrollback/{sessionName}.log` when a session is killed (last 10,000 lines via `tmux capture-pane -S -10000`).
-
-Export (`GET /api/terminal/sessions/{session}/export?format=txt|md`) runs `tmux capture-pane -p -S -` (full history), ANSI codes stripped via `StripANSI`.
+On reattach, the WebSocket handler writes a one-shot scrollback replay payload (from the session's in-memory ring buffer) before resuming live output. The replay is delivered in-band through the existing `/api/workspaces/{ws}/terminal/ws` WebSocket — there is no separate REST endpoint for fetching or exporting scrollback.
 
 ---
 
 ## 10. Issue-Linked Sessions
 
-When `issueId` prop is passed to `TerminalView`, `useSessionManagement` creates a tab with session name `issue-{sanitized-issueId}`.
+When an `issueId` prop is passed to `TerminalView`, `useSessionManagement` creates a tab with session name `issue-{sanitized-issueId}`.
 
-When `pendingIssueContext` is passed, `TerminalView` calls `POST /api/terminal/sessions/{name}/seed` once the tab connects, which uses `tmux send-keys` to inject the issue context prompt:
-```
-I need help with issue {issue_id}: {title}
-
-Description: {description (max 800 chars)}
-
-Design: {design (max 500 chars)}
-
-Blockers:
-- {id}: {title}
-```
-
-If the issue tab already exists, the user is switched to it without re-seeding.
+If the issue tab already exists, the user is switched to it without creating a new one.
 
 ---
 
@@ -479,9 +461,6 @@ A separate `"terminal_session_change"` event is broadcast when issue linkage cha
 |--------|------|-------------|
 | GET | `/api/terminal/token` | Generate one-time HMAC-SHA256 WS auth token |
 | GET | `/api/terminal/ws` | WebSocket upgrade for xterm.js relay |
-| POST | `/api/terminal/spawn` | Pre-create tmux session for shell tabs |
-| POST | `/api/terminal/restart` | Kill + recreate tmux session |
-| POST | `/api/terminal/kill` | Kill terminal session |
 
 ### Tab Metadata
 
@@ -491,19 +470,6 @@ A separate `"terminal_session_change"` event is broadcast when issue linkage cha
 | PUT | `/api/terminal/tabs/{session}` | Create/replace tab metadata |
 | PATCH | `/api/terminal/tabs/{session}` | Update individual metadata fields |
 | DELETE | `/api/terminal/tabs/{session}` | Remove tab metadata |
-
-### Session Management
-
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/terminal/sessions` | List active tmux sessions |
-| POST | `/api/terminal/sessions/{session}/seed` | Inject issue context via send-keys |
-| POST | `/api/terminal/sessions/{session}/schedule-kill` | Deferred session kill |
-| POST | `/api/terminal/sessions/close-all` | Kill all sessions |
-| GET | `/api/terminal/sessions/{session}/scrollback` | Capture pane scrollback |
-| GET | `/api/terminal/sessions/{session}/scrollback-info` | Scrollback line counts |
-| GET | `/api/terminal/sessions/{session}/export` | ANSI-stripped scrollback download |
-| GET | `/api/terminal/session-status` | Check if session alive / pane dead |
 | GET | `/api/terminal/sessions/by-issue` | List sessions linked to an issue |
 
 ### UI State
@@ -568,18 +534,13 @@ A separate `"terminal_session_change"` event is broadcast when issue linkage cha
 | File | Responsibility |
 |------|---------------|
 | `internal/webui/terminal.go` | TerminalManager struct, `ErrTmuxNotFound`, `ErrMaxSessionsReached`, core fields |
-| `internal/webui/terminal_lifecycle.go` | Shutdown, deferred kill cancellation, session cleanup |
 | `internal/webui/terminal_auth.go` | HMAC-SHA256 one-time token (60s expiry, single-use nonce) |
 | `internal/webui/terminal_context.go` | FetchTerminalContext + FormatContextBanner |
 | `internal/webui/terminal_health.go` | SessionAlive, PaneDead, CapturePane |
 | `internal/webui/terminal_sessions.go` | KillAllSessions, CaptureScrollback, captureScrollbackToFile |
-| `internal/webui/handlers_terminal.go` | `handleTerminalToken`, `handleTerminalRestart`, `handleTerminalKill`, `handleTerminalSessionStatus`, constants |
+| `internal/webui/handlers_terminal.go` | handleTerminalToken, constants |
 | `internal/webui/handlers_terminal_ws.go` | WebSocket relay (`handleTerminalWS`), `ptyToWS`, `wsToPTY`, `crashInfo` |
 | `internal/webui/handlers_terminal_tabs.go` | REST: GET/PUT/PATCH/DELETE /api/terminal/tabs |
-| `internal/webui/handlers_terminal_sessions.go` | REST: list sessions, seed, schedule-kill, close-all |
-| `internal/webui/handlers_terminal_spawn.go` | REST: POST /api/terminal/spawn |
 | `internal/webui/handlers_terminal_state.go` | REST: GET/PATCH /api/terminal/state |
-| `internal/webui/handlers_terminal_scrollback.go` | REST: GET scrollback |
-| `internal/webui/handlers_terminal_export.go` | REST: GET export (ANSI-stripped download) |
 | `internal/webui/tabmeta/store.go` | Redis-backed TabMetadata store |
 | `internal/webui/handlers_config.go` | attachCommandForSession, shellCommand, validBackends |

@@ -114,7 +114,7 @@ interface DetailTab {
 **Closing connected terminal:**
 1. `handleTabClose(tabId)` checks `connectionState === "connected"`
 2. If connected: shows `ConfirmDialog`
-3. On confirm: `closeTab(tabId)` → `deleteTabMetadata(sessionName)` + `scheduleSessionKill(sessionName)`
+3. On confirm: `closeTab(tabId)` → `deleteTabMetadata(sessionName)` (the PTY session is torn down by the manager when the tab metadata is deleted; there is no separate REST kill call)
 
 ### Tab Persistence (Redis)
 
@@ -138,10 +138,10 @@ Tab state persisted per-issue via `useIssueTabPersistence`:
 
 ```
 User clicks "New Terminal" or agent badge
-  -> spawnTerminalSession(sessionName, backend)    POST /api/terminal/spawn
   -> addTab("terminal", { sessionName, ... })
   -> EmbeddedTerminal renders
   -> TerminalInstance connects via WebSocket        GET /api/terminal/ws
+  -> (PTY manager spawns shell on first attach — no pre-spawn REST call)
   -> onConnectionStateChange("connected")
   -> tab connection dot turns green
 ```
@@ -282,10 +282,8 @@ Renders markdown design content with:
 
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/api/terminal/spawn` | Create tmux session |
 | GET | `/api/terminal/ws` | WebSocket upgrade for xterm.js |
 | DELETE | `/api/terminal/tabs/{session}` | Remove tab metadata |
-| POST | `/api/terminal/sessions/{session}/kill` | Deferred session kill |
 | GET | `/api/issues/{id}/sessions` | Session history records |
 
 ### Backend Registry
@@ -350,6 +348,5 @@ Renders markdown design content with:
 
 | Path | Description |
 |------|-------------|
-| `internal/webui/handlers_terminal_spawn.go` | POST /api/terminal/spawn |
 | `internal/webui/issuetabs/store.go` | Redis store for tab state |
 | `internal/webui/sessionhistory/store.go` | Redis store for session history |
