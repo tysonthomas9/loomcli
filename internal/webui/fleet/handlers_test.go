@@ -441,6 +441,13 @@ func TestFleetClaim_ReadyRPCError(t *testing.T) {
 
 	result := assertJSONResponse(t, w)
 	assertEnvelopeError(t, result, "payload")
+
+	// Transport error on Ready must Discard — connection's read buffer may hold
+	// a partial frame (loomcli-q4xms / loomcli-67meg).
+	put, discard := pool.counts()
+	if discard != 1 || put != 0 {
+		t.Errorf("pool calls = put=%d discard=%d, want put=0 discard=1", put, discard)
+	}
 }
 
 func TestFleetClaim_EmptyBodyClaimsFromReady(t *testing.T) {
@@ -2187,18 +2194,17 @@ func TestFleetClaim_SpecificIssue_MalformedResponseData_Returns500(t *testing.T)
 	assertEnvelopeError(t, result, "payload")
 }
 
-func TestFleetClaim_ReadyThenClaim_RPCError_SkipsToNext(t *testing.T) {
+// TestFleetClaim_ReadyThenClaim_TransportError_BreaksLoopAndDiscards verifies
+// that when tryClaimIssue hits a transport error (resp == nil && err != nil),
+// the loop breaks immediately, the connection is Discarded, and the handler
+// returns StatusNoContent. Continuing the loop on a poisoned connection would
+// just compound the damage. See loomcli-q4xms / loomcli-67meg.
+func TestFleetClaim_ReadyThenClaim_TransportError_BreaksLoopAndDiscards(t *testing.T) {
 	readyIssues := []*types.Issue{
 		{ID: "task-1", Title: "First", Status: "open"},
 		{ID: "task-2", Title: "Second", Status: "open"},
 	}
 	readyData, _ := json.Marshal(readyIssues)
-
-	claimedData, _ := json.Marshal(types.Issue{
-		ID:     "task-2",
-		Title:  "Second",
-		Status: "in_progress",
-	})
 
 	callCount := 0
 	client := &mockFleetClient{
@@ -2210,15 +2216,8 @@ func TestFleetClaim_ReadyThenClaim_RPCError_SkipsToNext(t *testing.T) {
 		},
 		updateFunc: func(args *rpc.UpdateArgs) (*rpc.Response, error) {
 			callCount++
-			if callCount == 1 {
-				// First attempt: RPC error
-				return nil, errors.New("connection reset")
-			}
-			// Second attempt: success
-			return &rpc.Response{
-				Success: true,
-				Data:    claimedData,
-			}, nil
+			// Transport error on every attempt; the loop should break after the first.
+			return nil, errors.New("connection reset")
 		},
 	}
 
@@ -2235,19 +2234,17 @@ func TestFleetClaim_ReadyThenClaim_RPCError_SkipsToNext(t *testing.T) {
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
-	if w.Code != http.StatusOK {
-		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
+	if w.Code != http.StatusNoContent {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusNoContent)
 	}
 
-	if callCount != 2 {
-		t.Errorf("Update called %d times, want 2", callCount)
+	if callCount != 1 {
+		t.Errorf("Update called %d times, want 1 (loop must break on transport error)", callCount)
 	}
 
-	result := assertJSONResponse(t, w)
-	payload := result["payload"].(map[string]interface{})
-	issue := payload["issue"].(map[string]interface{})
-	if issue["id"] != "task-2" {
-		t.Errorf("claimed issue id = %v, want %q", issue["id"], "task-2")
+	put, discard := pool.counts()
+	if discard != 1 || put != 0 {
+		t.Errorf("pool calls = put=%d discard=%d, want put=0 discard=1", put, discard)
 	}
 }
 

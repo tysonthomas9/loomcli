@@ -78,7 +78,7 @@ func handleFleetClaim(pool daemon.Pool, claimMetrics *ClaimMetrics) http.Handler
 }
 
 // handleFleetClaimWithPool is the internal implementation that accepts an interface for testing.
-func handleFleetClaimWithPool(pool fleetClaimPoolGetter, claimMetrics *ClaimMetrics) http.HandlerFunc { //nolint:gocognit,funlen
+func handleFleetClaimWithPool(pool fleetClaimPoolGetter, claimMetrics *ClaimMetrics) http.HandlerFunc { //nolint:gocognit,funlen,cyclop
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Check pool availability
 		if pool == nil {
@@ -159,7 +159,8 @@ func handleFleetClaimWithPool(pool fleetClaimPoolGetter, claimMetrics *ClaimMetr
 		}
 
 		resp, err := client.Ready(readyArgs)
-		if err != nil {
+		if err != nil && resp == nil {
+			// Transport error: response frame was not fully consumed, connection is suspect.
 			slog.Error("fleet RPC error", "handler", "handleFleetClaim", "op", "ready", "err", err)
 			handler.WriteJSON(w, http.StatusInternalServerError, FleetClaimResponse{
 				Success: false,
@@ -168,7 +169,19 @@ func handleFleetClaimWithPool(pool fleetClaimPoolGetter, claimMetrics *ClaimMetr
 			return
 		}
 
+		if resp == nil {
+			// Defensive: rpc.Client.Execute never returns (nil, nil), but a misbehaving
+			// mock could. Treat as transport error.
+			handler.WriteJSON(w, http.StatusInternalServerError, FleetClaimResponse{
+				Success: false,
+				Error:   "internal server error",
+			})
+			return
+		}
+
 		if !resp.Success {
+			// Logical failure with a fully-received response frame — connection is intact.
+			rpcOK = true
 			handler.WriteJSON(w, http.StatusInternalServerError, FleetClaimResponse{
 				Success: false,
 				Error:   resp.Error,
@@ -176,11 +189,11 @@ func handleFleetClaimWithPool(pool fleetClaimPoolGetter, claimMetrics *ClaimMetr
 			return
 		}
 
-		rpcOK = true
-
-		// Parse ready issues
+		// Parse ready issues. Frame was fully received, so parse failure does not
+		// taint the connection.
 		var issues []*types.Issue
 		if err := json.Unmarshal(resp.Data, &issues); err != nil {
+			rpcOK = true
 			handler.WriteJSON(w, http.StatusInternalServerError, FleetClaimResponse{
 				Success: false,
 				Error:   fmt.Sprintf("failed to parse ready issues: %v", err),
@@ -190,19 +203,30 @@ func handleFleetClaimWithPool(pool fleetClaimPoolGetter, claimMetrics *ClaimMetr
 
 		// No tasks available
 		if len(issues) == 0 {
+			rpcOK = true
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
 
-		// Try to claim each issue in order (already sorted by priority from Ready)
+		// Try to claim each issue in order (already sorted by priority from Ready).
+		// Track allHealthy: a transport error in any iteration breaks the loop and
+		// forces Discard to prevent pool poisoning (ref: loomcli-67meg, loomcli-hzp7p).
+		allHealthy := true
 		for _, issue := range issues {
-			claimed := tryClaimIssue(w, client, issue.ID, claimMetrics)
+			claimed, healthy := tryClaimIssue(w, client, issue.ID, claimMetrics)
 			if claimed {
+				rpcOK = healthy
 				return
+			}
+			if !healthy {
+				allHealthy = false
+				break
 			}
 		}
 
-		// All tasks were already claimed by other workers
+		rpcOK = allHealthy
+		// All tasks were already claimed by other workers (or the loop broke on
+		// transport error — in which case Discard runs).
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
@@ -302,8 +326,18 @@ func claimSpecificIssue(w http.ResponseWriter, client fleetClaimClient, issueID 
 }
 
 // tryClaimIssue attempts to claim an issue and writes the response if successful.
-// Returns true if the claim succeeded and a response was written.
-func tryClaimIssue(w http.ResponseWriter, client fleetClaimClient, issueID string, claimMetrics *ClaimMetrics) bool {
+// Returns:
+//   - claimed: true iff the claim succeeded and a response body was written.
+//   - clientHealthy: false iff client.Update returned a transport error
+//     (resp == nil && err != nil); true otherwise. Logical failures
+//     (!resp.Success) and parse errors on a fully-received resp.Data
+//     leave the connection healthy. The caller threads clientHealthy into
+//     rpcOK so the deferred cleanup Discards a poisoned connection.
+//     See loomcli-67meg / loomcli-hzp7p for the convention.
+//
+// On transport error, no response body is written — the caller decides whether
+// to write StatusNoContent (the default loop terminator) or some other status.
+func tryClaimIssue(w http.ResponseWriter, client fleetClaimClient, issueID string, claimMetrics *ClaimMetrics) (claimed bool, clientHealthy bool) {
 	inProgress := "in_progress"
 	updateArgs := &rpc.UpdateArgs{
 		ID:     issueID,
@@ -312,23 +346,40 @@ func tryClaimIssue(w http.ResponseWriter, client fleetClaimClient, issueID strin
 	}
 
 	resp, err := client.Update(updateArgs)
+	if err != nil && resp == nil {
+		// Transport error: response frame was not fully consumed, connection is suspect.
+		slog.Warn("fleet claim attempt failed (transport error)", "issue_id", issueID, "err", err)
+		return false, false
+	}
+
+	if resp == nil {
+		// Defensive: rpc.Client.Execute never returns (nil, nil), but a misbehaving
+		// mock could. Treat as transport error.
+		slog.Warn("fleet claim attempt failed (nil response)", "issue_id", issueID)
+		return false, false
+	}
+
 	if err != nil {
+		// Logical failure surfaced as (&resp, err) by rpc.Client.Execute when
+		// !resp.Success. Frame was fully consumed at the transport layer.
 		slog.Warn("fleet claim attempt failed", "issue_id", issueID, "err", err)
-		return false
+		recordClaim(claimMetrics, ClaimResultCollision)
+		return false, true
 	}
 
 	if !resp.Success {
-		// "already claimed" is expected during contention - log at debug level
+		// "already claimed" is expected during contention.
 		slog.Warn("fleet claim attempt failed", "issue_id", issueID, "err", resp.Error)
 		recordClaim(claimMetrics, ClaimResultCollision)
-		return false
+		return false, true
 	}
 
-	// Parse the updated issue from response
+	// Parse the updated issue from response. Parse error on a fully-received
+	// frame keeps the connection healthy.
 	var issue types.Issue
 	if err := json.Unmarshal(resp.Data, &issue); err != nil {
 		slog.Error("failed to parse claim response", "issue_id", issueID, "err", err)
-		return false
+		return false, true
 	}
 
 	recordClaim(claimMetrics, ClaimResultSuccess)
@@ -339,7 +390,7 @@ func tryClaimIssue(w http.ResponseWriter, client fleetClaimClient, issueID strin
 			Labels: issue.Labels,
 		},
 	})
-	return true
+	return true, true
 }
 
 // recordClaim safely records a claim result, handling nil metrics.
