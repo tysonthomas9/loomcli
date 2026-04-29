@@ -112,15 +112,15 @@ func (s *DaemonSubscriber) GetMutationsSince(since int64) []rpc.MutationEvent {
 
 	resp, err := client.GetMutations(&rpc.GetMutationsArgs{Since: since})
 	if err != nil {
-		slog.Error("RPC error", "op", "GetMutationsSince", "err", err)
+		if resp == nil {
+			slog.Error("RPC transport error", "op", "GetMutationsSince", "err", err)
+			return nil
+		}
+		slog.Error("RPC failed", "op", "GetMutationsSince", "err", resp.Error)
+		rpcOK = true
 		return nil
 	}
 	rpcOK = true
-
-	if !resp.Success {
-		slog.Error("RPC failed", "op", "GetMutationsSince", "err", resp.Error)
-		return nil
-	}
 
 	var mutations []rpc.MutationEvent
 	if err := json.Unmarshal(resp.Data, &mutations); err != nil {

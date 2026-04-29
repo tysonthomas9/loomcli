@@ -800,9 +800,18 @@ func TestDaemonSubscriber_GetMutationsSince_Success(t *testing.T) {
 	if result[1].IssueID != "bd-2" {
 		t.Errorf("mutation[1].IssueID = %q, want %q", result[1].IssueID, "bd-2")
 	}
+	if got := pool.PutCount(); got != 1 {
+		t.Errorf("PutCount = %d, want 1 (success path must Put, not Discard)", got)
+	}
+	if got := pool.DiscardCount(); got != 0 {
+		t.Errorf("DiscardCount = %d, want 0 (success path must not Discard)", got)
+	}
 }
 
 // TestDaemonSubscriber_GetMutationsSince_RPCFailure tests GetMutationsSince when RPC returns failure.
+// On a logical Success=false response, the connection's read buffer is drained and the
+// transport is healthy — Put is correct, Discard would over-churn the pool. Regression
+// guard for loomcli-zbjyl.
 func TestDaemonSubscriber_GetMutationsSince_RPCFailure(t *testing.T) {
 	socketPath := startSubscriptionMockServerRaw(t, func(req rpc.Request) rpc.Response {
 		switch req.Operation {
@@ -828,9 +837,47 @@ func TestDaemonSubscriber_GetMutationsSince_RPCFailure(t *testing.T) {
 	if result != nil {
 		t.Errorf("expected nil for RPC failure, got %v", result)
 	}
+	if got := pool.PutCount(); got != 1 {
+		t.Errorf("PutCount = %d, want 1 (Success=false is a logical failure, connection is intact)", got)
+	}
+	if got := pool.DiscardCount(); got != 0 {
+		t.Errorf("DiscardCount = %d, want 0 (Success=false must not Discard the pooled connection)", got)
+	}
 }
 
-// TestDaemonSubscriber_GetMutationsSince_InvalidJSON tests GetMutationsSince with invalid JSON data.
+// TestDaemonSubscriber_GetMutationsSince_TransportError tests GetMutationsSince when the
+// daemon closes the connection mid-read of the response. The client's reader returns EOF,
+// so client.GetMutations returns (nil, err) — the transport-error case where Discard is correct.
+func TestDaemonSubscriber_GetMutationsSince_TransportError(t *testing.T) {
+	socketPath := startSubscriptionMockServerWithDrop(
+		t,
+		func(op string, callIndex int) bool { return op == "get_mutations" },
+		nil,
+		nil,
+	)
+
+	pool := newSubscriptionMockPool(socketPath)
+	defer pool.Close()
+
+	hub := realtime.NewHub()
+	subscriber := NewDaemonSubscriber(pool, hub)
+
+	result := subscriber.GetMutationsSince(0)
+	if result != nil {
+		t.Errorf("expected nil for transport error, got %v", result)
+	}
+	if got := pool.PutCount(); got != 0 {
+		t.Errorf("PutCount = %d, want 0 (transport error must not Put)", got)
+	}
+	if got := pool.DiscardCount(); got != 1 {
+		t.Errorf("DiscardCount = %d, want 1 (transport error must Discard)", got)
+	}
+}
+
+// TestDaemonSubscriber_GetMutationsSince_InvalidJSON tests GetMutationsSince with a
+// fully-delivered response whose Data payload is valid JSON but cannot unmarshal as
+// []rpc.MutationEvent. The wire frame is well-formed so the connection is clean —
+// Put is correct, Discard would over-churn the pool.
 func TestDaemonSubscriber_GetMutationsSince_InvalidJSON(t *testing.T) {
 	socketPath := startSubscriptionMockServerRaw(t, func(req rpc.Request) rpc.Response {
 		switch req.Operation {
@@ -840,7 +887,8 @@ func TestDaemonSubscriber_GetMutationsSince_InvalidJSON(t *testing.T) {
 		case "ping":
 			return rpc.Response{Success: true}
 		case "get_mutations":
-			return rpc.Response{Success: true, Data: []byte(`not valid json`)}
+			// Valid wire JSON, but the body is an object — unmarshal as []MutationEvent fails.
+			return rpc.Response{Success: true, Data: []byte(`{"not":"an array"}`)}
 		default:
 			return rpc.Response{Success: false, Error: "unknown"}
 		}
@@ -855,6 +903,12 @@ func TestDaemonSubscriber_GetMutationsSince_InvalidJSON(t *testing.T) {
 	result := subscriber.GetMutationsSince(0)
 	if result != nil {
 		t.Errorf("expected nil for invalid JSON, got %v", result)
+	}
+	if got := pool.PutCount(); got != 1 {
+		t.Errorf("PutCount = %d, want 1 (parse error on a fully-delivered body keeps the connection clean)", got)
+	}
+	if got := pool.DiscardCount(); got != 0 {
+		t.Errorf("DiscardCount = %d, want 0 (parse error must not Discard)", got)
 	}
 }
 
@@ -884,6 +938,12 @@ func TestDaemonSubscriber_GetMutationsSince_EmptyMutations(t *testing.T) {
 	result := subscriber.GetMutationsSince(0)
 	if len(result) != 0 {
 		t.Errorf("expected 0 mutations, got %d", len(result))
+	}
+	if got := pool.PutCount(); got != 1 {
+		t.Errorf("PutCount = %d, want 1", got)
+	}
+	if got := pool.DiscardCount(); got != 0 {
+		t.Errorf("DiscardCount = %d, want 0", got)
 	}
 }
 
