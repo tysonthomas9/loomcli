@@ -1102,8 +1102,8 @@ func TestPushBranchInRepo_WorktreeConflict_UsesDetached(t *testing.T) {
 		{Args: nil, Err: nil}, // GitCreateBranchFromHead (temp branch)
 		{Args: nil, Err: nil}, // GitMerge
 		{Args: nil, Err: nil}, // GitPushRefspec (temp:main)
-		{Args: nil, Err: nil}, // GitDeleteBranch (cleanup temp, detached defer LIFO)
-		{Args: nil, Err: nil}, // GitCheckout (source, detached defer LIFO)
+		{Args: nil, Err: nil}, // GitCheckout (source, runs first in cleanup)
+		{Args: nil, Err: nil}, // GitDeleteBranch (temp, runs after checkout)
 		{Args: nil, Err: nil}, // GitCheckout (restore original, caller defer)
 	}
 
@@ -1141,8 +1141,8 @@ func TestPushBranchInRepoDetached_Success(t *testing.T) {
 		{Args: nil, Err: nil}, // GitCreateBranchFromHead (temp branch)
 		{Args: nil, Err: nil}, // GitMerge (feature)
 		{Args: nil, Err: nil}, // GitPushRefspec (temp:main)
-		{Args: nil, Err: nil}, // GitDeleteBranch (cleanup temp, defer LIFO - runs first)
-		{Args: nil, Err: nil}, // GitCheckout (source, defer LIFO - runs second)
+		{Args: nil, Err: nil}, // GitCheckout (source, runs first in cleanup)
+		{Args: nil, Err: nil}, // GitDeleteBranch (temp, runs after checkout)
 	}
 
 	commandStubs := []CommandStub{
@@ -1208,8 +1208,8 @@ func TestPushBranchInRepoDetached_MergeConflicts_InvokesClaude(t *testing.T) {
 		{Args: nil, Err: nil},                    // GitCreateBranchFromHead (temp branch)
 		{Args: nil, Err: errors.New("CONFLICT")}, // GitMerge fails with conflicts
 		// No push - conflicts
-		{Args: nil, Err: nil}, // GitDeleteBranch (cleanup temp, defer LIFO - runs first)
-		{Args: nil, Err: nil}, // GitCheckout (source, defer LIFO - runs second)
+		{Args: nil, Err: nil}, // GitCheckout (source, runs first in cleanup)
+		{Args: nil, Err: nil}, // GitDeleteBranch (temp, runs after checkout)
 	}
 
 	commandStubs := []CommandStub{
@@ -1282,8 +1282,8 @@ func TestPushBranchInRepoDetached_CustomRemote(t *testing.T) {
 		{Args: nil, Err: nil}, // GitCreateBranchFromHead (temp branch)
 		{Args: nil, Err: nil}, // GitMerge (feature)
 		{Args: nil, Err: nil}, // GitPushRefspec (temp:main via upstream)
-		{Args: nil, Err: nil}, // GitDeleteBranch (cleanup temp, defer LIFO - runs first)
-		{Args: nil, Err: nil}, // GitCheckout (source, defer LIFO - runs second)
+		{Args: nil, Err: nil}, // GitCheckout (source, runs first in cleanup)
+		{Args: nil, Err: nil}, // GitDeleteBranch (temp, runs after checkout)
 	}
 
 	commandStubs := []CommandStub{
@@ -1306,6 +1306,65 @@ func TestPushBranchInRepoDetached_CustomRemote(t *testing.T) {
 	}
 }
 
+// Regression test for the temp-branch leak bug: cleanup must restore the
+// source branch BEFORE deleting the temp branch, so HEAD has left the temp
+// branch by the time `git branch -D` runs. Two LIFO defers used to run
+// delete-then-checkout, causing git to refuse the delete with "cannot delete
+// branch X used by worktree" and leaking loom-push-temp-* into the worktree.
+func TestPushBranchInRepoDetached_CleanupOrder_RestoresBranchBeforeDelete(t *testing.T) {
+	t.Parallel()
+	deps, _, _, _, _ := NewTestDeps(t)
+
+	outputStubs := []OutputCommandStub{
+		{Args: nil, Err: nil}, // GitCheckoutDetached (origin/main)
+		{Args: nil, Err: nil}, // GitCreateBranchFromHead (temp branch)
+		{Args: nil, Err: nil}, // GitMerge (feature)
+		{Args: nil, Err: nil}, // GitPushRefspec (temp:main)
+		{Args: nil, Err: nil}, // GitCheckout (source) — must run BEFORE delete
+		{Args: nil, Err: nil}, // GitDeleteBranch (temp) — must run AFTER checkout
+	}
+
+	commandStubs := []CommandStub{
+		{Name: "git", Args: []string{"log", "origin/main..feature", "--oneline"}, Stdout: "abc commit\n"},
+	}
+
+	cmdMock := NewCommandMock(t, commandStubs)
+	cmdMock.InstallOn(deps)
+	outputMock := NewOutputCommandMock(t, outputStubs)
+	outputMock.InstallOn(deps)
+
+	deps.Agent = &MockAgentInvoker{InteractiveFunc: func(workDir, prompt, agentName string) error {
+		t.Error("unexpected claude invocation")
+		return nil
+	}}
+
+	if err := pushBranchInRepoDetached(deps, "/repo", "feature", "main", ""); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	calls := outputMock.calls
+	if len(calls) < 2 {
+		t.Fatalf("expected at least 2 recorded calls, got %d", len(calls))
+	}
+
+	// The two cleanup calls are the LAST two recorded.
+	checkoutCall := calls[len(calls)-2]
+	deleteCall := calls[len(calls)-1]
+
+	// Penultimate call: checkout source branch.
+	if len(checkoutCall.Args) < 2 || checkoutCall.Args[0] != "checkout" || checkoutCall.Args[1] != "feature" {
+		t.Errorf("expected penultimate call to be `checkout feature` (restore source), got %v", checkoutCall.Args)
+	}
+
+	// Last call: delete temp branch (loom-push-temp-<nsec>).
+	if len(deleteCall.Args) < 4 || deleteCall.Args[0] != "branch" || deleteCall.Args[1] != "-D" || deleteCall.Args[2] != "--" {
+		t.Fatalf("expected last call to be `branch -D -- loom-push-temp-*`, got %v", deleteCall.Args)
+	}
+	if !strings.HasPrefix(deleteCall.Args[3], "loom-push-temp-") {
+		t.Errorf("expected last call to delete a loom-push-temp-* branch, got %q", deleteCall.Args[3])
+	}
+}
+
 func TestPushBranch_WorktreeConflict_UsesDetached(t *testing.T) {
 	t.Parallel()
 	deps, _, _, _, _ := NewTestDeps(t)
@@ -1321,8 +1380,8 @@ func TestPushBranch_WorktreeConflict_UsesDetached(t *testing.T) {
 		{Args: nil, Err: nil}, // GitCreateBranchFromHead (temp branch)
 		{Args: nil, Err: nil}, // GitMerge
 		{Args: nil, Err: nil}, // GitPushRefspec (temp:main)
-		{Args: nil, Err: nil}, // GitDeleteBranch (cleanup temp, detached defer LIFO)
-		{Args: nil, Err: nil}, // GitCheckout (source, detached defer LIFO)
+		{Args: nil, Err: nil}, // GitCheckout (source, runs first in cleanup)
+		{Args: nil, Err: nil}, // GitDeleteBranch (temp, runs after checkout)
 		{Args: nil, Err: nil}, // GitCheckout (restore original, caller defer)
 	}
 
@@ -1389,8 +1448,8 @@ func TestPushBranchDetached_Success(t *testing.T) {
 		{Args: nil, Err: nil}, // GitCreateBranchFromHead (temp branch)
 		{Args: nil, Err: nil}, // GitMerge (feature)
 		{Args: nil, Err: nil}, // GitPushRefspec (temp:main via origin)
-		{Args: nil, Err: nil}, // GitDeleteBranch (cleanup temp, defer LIFO - runs first)
-		{Args: nil, Err: nil}, // GitCheckout (source, defer LIFO - runs second)
+		{Args: nil, Err: nil}, // GitCheckout (source, runs first in cleanup)
+		{Args: nil, Err: nil}, // GitDeleteBranch (temp, runs after checkout)
 	}
 
 	commandStubs := []CommandStub{
@@ -1424,8 +1483,8 @@ func TestPushBranchDetached_MergeConflicts_InvokesClaude(t *testing.T) {
 		{Args: nil, Err: nil},                    // GitCreateBranchFromHead (temp branch)
 		{Args: nil, Err: errors.New("CONFLICT")}, // GitMerge fails
 		// No push - conflicts
-		{Args: nil, Err: nil}, // GitDeleteBranch (cleanup temp, defer LIFO - runs first)
-		{Args: nil, Err: nil}, // GitCheckout (source, defer LIFO - runs second)
+		{Args: nil, Err: nil}, // GitCheckout (source, runs first in cleanup)
+		{Args: nil, Err: nil}, // GitDeleteBranch (temp, runs after checkout)
 	}
 
 	commandStubs := []CommandStub{
@@ -1473,8 +1532,8 @@ func TestPushBranchInRepo_CheckoutAlreadyCheckedOut_UsesDetached(t *testing.T) {
 		{Args: nil, Err: nil}, // GitCreateBranchFromHead (temp branch)
 		{Args: nil, Err: nil}, // GitMerge
 		{Args: nil, Err: nil}, // GitPushRefspec (temp:main)
-		{Args: nil, Err: nil}, // GitDeleteBranch (cleanup temp, detached defer LIFO)
-		{Args: nil, Err: nil}, // GitCheckout (source, detached defer LIFO)
+		{Args: nil, Err: nil}, // GitCheckout (source, runs first in cleanup)
+		{Args: nil, Err: nil}, // GitDeleteBranch (temp, runs after checkout)
 		{Args: nil, Err: nil}, // GitCheckout (restore original, caller defer)
 	}
 
@@ -1516,8 +1575,8 @@ func TestPushBranch_CheckoutAlreadyCheckedOut_UsesDetached(t *testing.T) {
 		{Args: nil, Err: nil}, // GitCreateBranchFromHead (temp branch)
 		{Args: nil, Err: nil}, // GitMerge
 		{Args: nil, Err: nil}, // GitPushRefspec (temp:main)
-		{Args: nil, Err: nil}, // GitDeleteBranch (cleanup temp, detached defer LIFO)
-		{Args: nil, Err: nil}, // GitCheckout (source, detached defer LIFO)
+		{Args: nil, Err: nil}, // GitCheckout (source, runs first in cleanup)
+		{Args: nil, Err: nil}, // GitDeleteBranch (temp, runs after checkout)
 		{Args: nil, Err: nil}, // GitCheckout (restore original, caller defer)
 	}
 

@@ -203,9 +203,16 @@ func pushBranchInRepoDetached(deps *cli.Deps, repoPath, sourceBranch, targetBran
 		return fmt.Errorf("checking out %s/%s detached: %v", r, targetBranch, err)
 	}
 
-	// Ensure we restore source branch on any exit path (including early return)
+	// Single deferred cleanup: restore source branch FIRST so HEAD leaves the
+	// temp branch, THEN delete the temp branch. Two separate defers would run
+	// LIFO and try to delete the temp branch while HEAD is still on it, which
+	// git refuses with "cannot delete branch X used by worktree".
+	branchCreated := false
 	defer func() {
 		_ = gitCheckout(deps, repoPath, sourceBranch)
+		if branchCreated {
+			_ = gitDeleteBranch(deps, repoPath, tempBranch, true)
+		}
 	}()
 
 	// Check if there are commits to merge before creating temp branch
@@ -219,11 +226,7 @@ func pushBranchInRepoDetached(deps *cli.Deps, repoPath, sourceBranch, targetBran
 	if err := gitCreateBranchFromHead(deps, repoPath, tempBranch); err != nil {
 		return fmt.Errorf("creating temp branch: %v", err)
 	}
-
-	// Cleanup temp branch on exit
-	defer func() {
-		_ = gitDeleteBranch(deps, repoPath, tempBranch, true)
-	}()
+	branchCreated = true
 
 	// Attempt merge
 	conflicts, mergeErr := mergeSourceDeps(deps, repoPath, sourceBranch, targetBranch)
@@ -379,9 +382,16 @@ func pushBranchDetached(deps *cli.Deps, scriptDir, sourceBranch, targetBranch st
 		return fmt.Errorf("checking out origin/%s detached: %v", targetBranch, err)
 	}
 
-	// Ensure we restore source branch on any exit path (including early return)
+	// Single deferred cleanup: restore source branch FIRST so HEAD leaves the
+	// temp branch, THEN delete the temp branch. Two separate defers would run
+	// LIFO and try to delete the temp branch while HEAD is still on it, which
+	// git refuses with "cannot delete branch X used by worktree".
+	branchCreated := false
 	defer func() {
 		_ = gitCheckout(deps, scriptDir, sourceBranch)
+		if branchCreated {
+			_ = gitDeleteBranch(deps, scriptDir, tempBranch, true)
+		}
 	}()
 
 	// Check if there are commits to merge before creating temp branch
@@ -395,11 +405,7 @@ func pushBranchDetached(deps *cli.Deps, scriptDir, sourceBranch, targetBranch st
 	if err := gitCreateBranchFromHead(deps, scriptDir, tempBranch); err != nil {
 		return fmt.Errorf("creating temp branch: %v", err)
 	}
-
-	// Cleanup temp branch on exit
-	defer func() {
-		_ = gitDeleteBranch(deps, scriptDir, tempBranch, true)
-	}()
+	branchCreated = true
 
 	// Attempt merge
 	conflicts, mergeErr := mergeSourceDeps(deps, scriptDir, sourceBranch, targetBranch)

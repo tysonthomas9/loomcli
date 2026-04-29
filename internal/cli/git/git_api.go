@@ -142,7 +142,18 @@ func pushBranchInRepoDetachedResult(repoPath, sourceBranch, targetBranch, remote
 	if err := GitCheckoutDetached(repoPath, r+"/"+targetBranch); err != nil {
 		return nil, fmt.Errorf("checking out %s/%s detached: %v", r, targetBranch, err)
 	}
-	defer func() { _ = GitCheckout(repoPath, sourceBranch) }()
+
+	// Single deferred cleanup: restore source branch FIRST so HEAD leaves the
+	// temp branch, THEN delete the temp branch. Two separate defers would run
+	// LIFO and try to delete the temp branch while HEAD is still on it, which
+	// git refuses with "cannot delete branch X used by worktree".
+	branchCreated := false
+	defer func() {
+		_ = GitCheckout(repoPath, sourceBranch)
+		if branchCreated {
+			_ = GitDeleteBranch(repoPath, tempBranch, true)
+		}
+	}()
 
 	if upToDate, res := checkAlreadyUpToDate(repoPath, remote, targetBranch, sourceBranch); upToDate {
 		return res, nil
@@ -151,7 +162,7 @@ func pushBranchInRepoDetachedResult(repoPath, sourceBranch, targetBranch, remote
 	if err := GitCreateBranchFromHead(repoPath, tempBranch); err != nil {
 		return nil, fmt.Errorf("creating temp branch: %v", err)
 	}
-	defer func() { _ = GitDeleteBranch(repoPath, tempBranch, true) }()
+	branchCreated = true
 
 	conflicts, mergeErr := mergeSource(repoPath, sourceBranch, targetBranch)
 	if mergeErr != nil {
