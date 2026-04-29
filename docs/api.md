@@ -1784,7 +1784,7 @@ Generate a one-time HMAC-SHA256 terminal authentication token.
 
 ### `GET /api/workspaces/{ws}/terminal/ws` (WebSocket)
 
-WebSocket endpoint for live terminal relay (tmux-backed). Supports bidirectional terminal I/O.
+WebSocket endpoint for live terminal relay (PTY-backed). The session is owned by `(workspace, session)` and outlives the WebSocket for a grace period so page refresh / brief network blip reattaches to the same shell with scrollback replayed. Bidirectional binary I/O with a wterm-style resize escape on the client→server direction.
 
 - **Auth:** One-time token via `?token=` query param (not bearer auth — token carries session identity and authorization)
 - **Path Parameters:**
@@ -1797,43 +1797,39 @@ WebSocket endpoint for live terminal relay (tmux-backed). Supports bidirectional
 
 | Param | Type | Required | Description |
 |-------|------|----------|-------------|
-| session | string | yes | tmux session name |
+| session | string | yes | session name (ASCII `^[a-zA-Z0-9_-]+$`) |
 | token | string | yes* | One-time terminal token (*when auth enabled) |
 
 - **Pre-Upgrade Validation (HTTP JSON before WebSocket upgrade):**
   - `400` — missing session, invalid session name
   - `401` — terminal authentication failed (invalid/expired/replayed token)
   - `404` — workspace not found
-  - `503` — terminal manager not initialized, or maximum terminal sessions reached (default 20)
+  - `503` — PTY manager not initialized, or maximum terminal sessions reached (default 40, `defaultPTYMaxSessions`)
 
-- **WebSocket Binary Protocol:**
-  - All frames are binary (`MessageBinary`)
-  - **Server → Client:** raw PTY output bytes (read buffer 4096 bytes)
-  - **Client → Server:** raw terminal input bytes OR resize message
-  - **Resize message format (in-band): exactly 5 bytes**
-    - Byte 0: `0x01` (resize marker)
-    - Bytes 1-2: cols as uint16 big-endian
-    - Bytes 3-4: rows as uint16 big-endian
-    - Example: 80×24 = `[0x01, 0x00, 0x50, 0x00, 0x18]`
-  - Max terminal size: 500 cols × 200 rows (values exceeding these are silently ignored)
-  - Zero values for cols or rows: silently ignored (no resize performed)
-  - Read limit: 32 KB per WebSocket message
-  - Default terminal size: 80×24 (frontend sends resize immediately after connect)
-  - Non-matching binary messages (wrong length or missing `0x01` marker): treated as regular terminal input, written to PTY
+- **WebSocket Protocol:**
+  - **Server → Client:** raw PTY output bytes in `MessageBinary` frames (each attachment has its own buffered output channel; the session's single drain goroutine fans out PTY reads to every attached channel). On attach, if the scrollback ring has accumulated bytes, a one-shot replay payload (reset escape + ring bytes) is written before live output — non-empty in practice only on reattach.
+  - **Client → Server:** two cases:
+    - **Resize:** a UTF-8 string `\x1b[RESIZE:<cols>;<rows>]` (decimal, no padding). Parsed by `WSToPTY` against the regex `^\x1b\[RESIZE:(\d+);(\d+)\]$`. Server silently ignores `cols == 0`, `rows == 0`, `cols > 500`, or `rows > 200`.
+    - **Keystrokes:** any message whose first byte is not `0x1b`, or whose first byte is `0x1b` but does not match the resize regex, is written verbatim to the PTY as input.
+  - Max terminal size: 500 cols × 200 rows.
+  - Default terminal size on first attach: 80×24 (frontend sends a resize immediately after connect).
+  - Read limit: 32 KB per WebSocket message (`WSReadLimit`).
 
 - **Close Codes:**
 
 | Code | Meaning | Frontend behavior |
 |------|---------|-------------------|
-| 1000 | Normal closure / session detached | Allow reconnect |
-| 4001 | Backend process exited (crash) | Show CrashOverlay, no auto-reconnect |
+| 1000 | Normal closure / session detached (attachment replaced, context cancelled, or benign channel close) | Allow reconnect |
+| 1001 | Going away — workspace deregistered or PTY manager shut down mid-attach | Allow reconnect to a different workspace; this one is gone |
+| 1011 | Internal error — attach failed (spawn error, or race-window `maximum terminal sessions reached` after pre-upgrade 503 passed) | Surface the error reason; reconnect at user discretion |
+| 4001 | Backend process exited | Show CrashOverlay; no auto-reconnect |
+| 4002 | Session killed (explicit `PTYManager.Kill`, e.g. tab-close) | No overlay; session destroyed — do not reconnect |
 
-- **Close reason on crash:** last 10 lines of PTY output (truncated to 123 bytes, UTF-8-safe)
+- **Close reason on crash:** fixed string — `"backend process exited"` for 4001, `"session killed"` for 4002. (The legacy "last 10 lines of PTY output, truncated to 123 bytes UTF-8-safe" capture applies only to the tmux-monitored `## Agent Terminal` path via `PtyToWS`, not this endpoint.)
 
-- **Session Creation:** if tmux session does not exist, `Attach()` creates it with the default command. Session is workspace-scoped (prefixed by workspace ID).
-- **Deferred Kill Cancellation:** if a pending scheduled kill exists for this session, `CancelPendingKill()` is called on attach.
+- **Session Lifetime:** Sessions are owned by `(workspace, session)`. On first attach, a shell is spawned under the workspace path with `TERM=xterm-256color`. The PTY outlives the WebSocket: on WS close the session is detached and a grace timer is armed (zero on local `loom serve` — session persists until explicit kill, manager shutdown, child exit, or idle reap; non-zero on remote `loom-agentd`). A new WebSocket opened before the grace timer fires reattaches to the same shell and receives a scrollback replay before going live.
 - **SSE Broadcast:** if session is linked to an issue (via tab metadata), broadcasts `terminal_session_change` event on connect.
-- **Concurrent Connections:** each WebSocket connection to the same session gets its own PTY attach with a unique connection ID.
+- **Concurrent Connections:** multiple WebSockets may attach to the same `(workspace, session)` simultaneously. Each gets a unique `connID` of the form `pty-<counter>` (monotonic, generated by the manager) and its own buffered output channel; the session's drain goroutine fans every PTY chunk out to every live attachment, so all clients see the same byte stream. Detach is per-`connID` — the grace-period kill timer arms only when the last attachment leaves.
 
 ### Edge Cases
 
