@@ -483,6 +483,144 @@ func (s *workspaceServiceImpl) PatchRepoDefaultBranch(_ context.Context, wsID, r
 	return s.refreshWorkspaceData()
 }
 
+// isValidRepoName mirrors the workspace-name shape: alphanumeric, hyphens,
+// underscores. Keeps repo names safe for YAML round-trip and path joins.
+func isValidRepoName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for _, c := range name {
+		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.') {
+			return false
+		}
+	}
+	return true
+}
+
+// validateAddRepoParams resolves and validates AddRepoParams. Returns the
+// resolved absolute path and final repo name, or a *ServiceError.
+func validateAddRepoParams(params AddRepoParams) (absPath, name string, err error) {
+	if params.Path == "" {
+		return "", "", ErrValidation("repo path is required")
+	}
+	absPath, statErr := filepath.Abs(params.Path)
+	if statErr != nil {
+		return "", "", ErrValidation(fmt.Sprintf("cannot resolve repo path %q: %v", params.Path, statErr))
+	}
+	info, statErr := os.Stat(absPath)
+	if statErr != nil {
+		return "", "", ErrValidation(fmt.Sprintf("repo path does not exist: %s", absPath))
+	}
+	if !info.IsDir() {
+		return "", "", ErrValidation(fmt.Sprintf("repo path is not a directory: %s", absPath))
+	}
+	if _, statErr := os.Stat(filepath.Join(absPath, ".git")); statErr != nil {
+		return "", "", ErrValidation(fmt.Sprintf("not a git repository: %s", absPath))
+	}
+	name = strings.TrimSpace(params.Name)
+	if name == "" {
+		name = filepath.Base(absPath)
+	}
+	if !isValidRepoName(name) {
+		return "", "", ErrValidation(fmt.Sprintf("invalid repo name %q; use only alphanumeric, hyphens, underscores, and dots", name))
+	}
+	return absPath, name, nil
+}
+
+// loadAndResolveWorkspaceForRepos acquires the config lock, loads the typed
+// repo-branch config, and resolves wsID → workspace name + entry. The caller
+// must invoke unlock() exactly once. On error the lock is already released.
+func loadAndResolveWorkspaceForRepos(wsID string) (cfg *loomConfigForRepoBranch, wsName string, ws loomWorkspaceForRepoBranch, unlock func(), err error) {
+	dir := loomConfigDir()
+	unlock, lockErr := configlock.ConfigLock(dir)
+	if lockErr != nil {
+		return nil, "", loomWorkspaceForRepoBranch{}, func() {}, ErrInternal("failed to acquire config lock", lockErr)
+	}
+	cfg, loadErr := loadLoomConfigForRepoBranchUnlocked()
+	if loadErr != nil {
+		unlock()
+		return nil, "", loomWorkspaceForRepoBranch{}, func() {}, ErrInternal("failed to load config", loadErr)
+	}
+	if cfg == nil {
+		unlock()
+		return nil, "", loomWorkspaceForRepoBranch{}, func() {}, ErrNotFound("no config found")
+	}
+	wsName, ws, found := resolveWorkspaceNameByIDForRepoBranch(cfg, wsID)
+	if !found {
+		unlock()
+		return nil, "", loomWorkspaceForRepoBranch{}, func() {}, ErrNotFound(fmt.Sprintf("workspace with ID %q not found", wsID))
+	}
+	return cfg, wsName, ws, unlock, nil
+}
+
+func (s *workspaceServiceImpl) AddWorkspaceRepo(_ context.Context, wsID string, params AddRepoParams) (*ops.WorkspaceData, error) {
+	absPath, name, err := validateAddRepoParams(params)
+	if err != nil {
+		return nil, err
+	}
+
+	cfg, wsName, ws, unlock, err := loadAndResolveWorkspaceForRepos(wsID)
+	if err != nil {
+		return nil, err
+	}
+	for i := range ws.Repos {
+		if ws.Repos[i].Name == name {
+			unlock()
+			return nil, ErrConflict(fmt.Sprintf("repo %q already exists in workspace %q", name, wsName))
+		}
+	}
+	ws.Repos = append(ws.Repos, repoForBranch{
+		Name:          name,
+		Path:          absPath,
+		DefaultBranch: params.DefaultBranch,
+		Remote:        params.Remote,
+		Groups:        params.Groups,
+		SourceRepoID:  name,
+	})
+	cfg.Workspaces[wsName] = ws
+	if err := saveLoomConfigForRepoBranchUnlocked(cfg); err != nil {
+		unlock()
+		return nil, ErrInternal("failed to save config", err)
+	}
+	unlock()
+	return s.refreshWorkspaceData()
+}
+
+func (s *workspaceServiceImpl) RemoveWorkspaceRepo(_ context.Context, wsID string, repoName string) (*ops.WorkspaceData, error) {
+	if repoName == "" {
+		return nil, ErrValidation("repo name is required")
+	}
+	// Defensive shape check: blocks path-traversal and shell-special characters
+	// that may arrive through the URL path segment after percent-decoding.
+	if !isValidRepoName(repoName) {
+		return nil, ErrValidation(fmt.Sprintf("invalid repo name %q", repoName))
+	}
+
+	cfg, wsName, ws, unlock, err := loadAndResolveWorkspaceForRepos(wsID)
+	if err != nil {
+		return nil, err
+	}
+	repoIdx := -1
+	for i := range ws.Repos {
+		if ws.Repos[i].Name == repoName {
+			repoIdx = i
+			break
+		}
+	}
+	if repoIdx == -1 {
+		unlock()
+		return nil, ErrNotFound(fmt.Sprintf("repo %q not found in workspace %q", repoName, wsName))
+	}
+	ws.Repos = append(ws.Repos[:repoIdx], ws.Repos[repoIdx+1:]...)
+	cfg.Workspaces[wsName] = ws
+	if err := saveLoomConfigForRepoBranchUnlocked(cfg); err != nil {
+		unlock()
+		return nil, ErrInternal("failed to save config", err)
+	}
+	unlock()
+	return s.refreshWorkspaceData()
+}
+
 func poolStatsFromDaemon(d daemon.PoolStats) PoolStats {
 	return PoolStats{
 		Size:      d.Size,

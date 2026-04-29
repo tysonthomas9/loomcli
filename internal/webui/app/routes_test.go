@@ -26,6 +26,7 @@ import (
 	hterminal "github.com/tysonthomas9/loomcli/internal/webui/handlers/terminal"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
+	"github.com/tysonthomas9/loomcli/internal/webui/service"
 	"github.com/tysonthomas9/loomcli/internal/webui/svcimpl"
 	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
@@ -1654,6 +1655,89 @@ func TestSetupRoutes_RepoDefaultBranchPatchEndpoint(t *testing.T) {
 	}
 	if success, _ := body["success"].(bool); !success {
 		t.Errorf("response success = false, want true; body=%v", body)
+	}
+}
+
+// TestSetupRoutes_AddRepoEndpoint verifies that POST /api/workspaces/{ws}/repos
+// is registered on the outer mux and the request body reaches the handler.
+func TestSetupRoutes_AddRepoEndpoint(t *testing.T) {
+	multiPool := daemon.NewMultiPool(middleware.WorkspaceFromContext, 1)
+	_ = multiPool.Register("test-ws", &stubPool{})
+
+	wsExistsFn := func(id string) bool { return multiPool.PoolForWorkspace(id) != nil }
+	workspaceConfigFn := func() (*ops.WorkspaceData, error) {
+		return &ops.WorkspaceData{Name: "test-ws", Path: "/tmp/test"}, nil
+	}
+
+	var capturedPath, capturedName string
+	wsSvc := &mockWorkspaceService{
+		addWorkspaceRepoFn: func(_ context.Context, _ string, params service.AddRepoParams) (*ops.WorkspaceData, error) {
+			capturedPath = params.Path
+			capturedName = params.Name
+			return &ops.WorkspaceData{Name: "test-ws", Path: "/tmp/test"}, nil
+		},
+	}
+	app := &Server{multiPool: multiPool, config: webui.ServerConfig{WorkspaceConfigFn: workspaceConfigFn}, wsExistsFn: wsExistsFn, workspaceSvc: wsSvc}
+	app.sessSvc = svcimpl.NewSessionService(nil, nil)
+	setupTestRoutes(t, app)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/test-ws/repos",
+		strings.NewReader(`{"name":"backend","path":"/abs/path"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	app.mux.ServeHTTP(rr, req)
+
+	ct := rr.Header().Get("Content-Type")
+	if ct == "text/html; charset=utf-8" {
+		t.Fatal("expected POST repos route to be registered, but request fell through to frontend handler")
+	}
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if capturedPath != "/abs/path" {
+		t.Errorf("path = %q, want /abs/path", capturedPath)
+	}
+	if capturedName != "backend" {
+		t.Errorf("name = %q, want backend", capturedName)
+	}
+}
+
+// TestSetupRoutes_RemoveRepoEndpoint verifies that DELETE
+// /api/workspaces/{ws}/repos/{repo} is registered on the outer mux and the
+// repo path param reaches the handler.
+func TestSetupRoutes_RemoveRepoEndpoint(t *testing.T) {
+	multiPool := daemon.NewMultiPool(middleware.WorkspaceFromContext, 1)
+	_ = multiPool.Register("test-ws", &stubPool{})
+
+	wsExistsFn := func(id string) bool { return multiPool.PoolForWorkspace(id) != nil }
+	workspaceConfigFn := func() (*ops.WorkspaceData, error) {
+		return &ops.WorkspaceData{Name: "test-ws", Path: "/tmp/test"}, nil
+	}
+
+	var capturedRepo string
+	wsSvc := &mockWorkspaceService{
+		removeWorkspaceRepoFn: func(_ context.Context, _ string, repoName string) (*ops.WorkspaceData, error) {
+			capturedRepo = repoName
+			return &ops.WorkspaceData{Name: "test-ws", Path: "/tmp/test"}, nil
+		},
+	}
+	app := &Server{multiPool: multiPool, config: webui.ServerConfig{WorkspaceConfigFn: workspaceConfigFn}, wsExistsFn: wsExistsFn, workspaceSvc: wsSvc}
+	app.sessSvc = svcimpl.NewSessionService(nil, nil)
+	setupTestRoutes(t, app)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/workspaces/test-ws/repos/backend", nil)
+	rr := httptest.NewRecorder()
+	app.mux.ServeHTTP(rr, req)
+
+	ct := rr.Header().Get("Content-Type")
+	if ct == "text/html; charset=utf-8" {
+		t.Fatal("expected DELETE repo route to be registered, but request fell through to frontend handler")
+	}
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if capturedRepo != "backend" {
+		t.Errorf("repo = %q, want backend", capturedRepo)
 	}
 }
 

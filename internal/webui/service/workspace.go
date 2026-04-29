@@ -6,6 +6,16 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/ops"
 )
 
+// AddRepoParams carries the fields needed to add a new repo to a workspace.
+// Name may be empty — service derives it from filepath.Base(Path) if so.
+type AddRepoParams struct {
+	Name          string
+	Path          string
+	DefaultBranch string
+	Remote        string
+	Groups        []string
+}
+
 // WorkspaceListItem represents a workspace in the list response.
 type WorkspaceListItem struct {
 	ID        string     `json:"id"`
@@ -81,4 +91,18 @@ type WorkspaceService interface {
 	// Returns ErrValidation if branch is empty.
 	// Returns refreshed workspace data.
 	PatchRepoDefaultBranch(ctx context.Context, wsID, repoName, branch string) (*ops.WorkspaceData, error)
+
+	// AddWorkspaceRepo appends a new repo entry to the workspace identified
+	// by wsID. The path must exist, be a directory, and contain a .git entry.
+	// If params.Name is empty, the basename of params.Path is used.
+	// Returns ErrValidation for missing/invalid path or name; ErrConflict if
+	// a repo with the same name already exists; ErrNotFound for unknown wsID.
+	// Returns refreshed workspace data on success.
+	AddWorkspaceRepo(ctx context.Context, wsID string, params AddRepoParams) (*ops.WorkspaceData, error)
+
+	// RemoveWorkspaceRepo deletes a repo entry from the workspace's config
+	// without touching files on disk or git worktrees. Returns ErrNotFound
+	// for unknown workspace or repo; ErrValidation for empty repoName.
+	// Returns refreshed workspace data on success.
+	RemoveWorkspaceRepo(ctx context.Context, wsID string, repoName string) (*ops.WorkspaceData, error)
 }

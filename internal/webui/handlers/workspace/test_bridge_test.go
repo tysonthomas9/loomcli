@@ -23,6 +23,8 @@ var handleGetWorkspaceJob = HandleGetWorkspaceJob
 var handleSetDefaultWorkspace = HandleSetDefaultWorkspace
 var handleClearDefaultWorkspace = HandleClearDefaultWorkspace
 var handleRepoDefaultBranchPatch = HandleRepoDefaultBranchPatch
+var handleAddRepo = HandleAddRepo
+var handleRemoveRepo = HandleRemoveRepo
 
 // ---------------------------------------------------------------------------
 // mockWorkspaceService — local copy for handler-level testing
@@ -42,6 +44,8 @@ type mockWorkspaceService struct {
 	clearDefaultWorkspaceFn  func(ctx context.Context) (*ops.WorkspaceData, error)
 	patchWorkspaceBackendFn  func(ctx context.Context, wsID string, backend string) (*ops.WorkspaceData, error)
 	patchRepoDefaultBranchFn func(ctx context.Context, wsID, repoName, branch string) (*ops.WorkspaceData, error)
+	addWorkspaceRepoFn       func(ctx context.Context, wsID string, params service.AddRepoParams) (*ops.WorkspaceData, error)
+	removeWorkspaceRepoFn    func(ctx context.Context, wsID string, repoName string) (*ops.WorkspaceData, error)
 }
 
 func (m *mockWorkspaceService) GetActiveWorkspace(ctx context.Context) (*ops.WorkspaceData, error) {
@@ -119,6 +123,18 @@ func (m *mockWorkspaceService) PatchWorkspaceBackend(ctx context.Context, wsID s
 func (m *mockWorkspaceService) PatchRepoDefaultBranch(ctx context.Context, wsID, repoName, branch string) (*ops.WorkspaceData, error) {
 	if m.patchRepoDefaultBranchFn != nil {
 		return m.patchRepoDefaultBranchFn(ctx, wsID, repoName, branch)
+	}
+	return nil, service.ErrUnavailable("not available")
+}
+func (m *mockWorkspaceService) AddWorkspaceRepo(ctx context.Context, wsID string, params service.AddRepoParams) (*ops.WorkspaceData, error) {
+	if m.addWorkspaceRepoFn != nil {
+		return m.addWorkspaceRepoFn(ctx, wsID, params)
+	}
+	return nil, service.ErrUnavailable("not available")
+}
+func (m *mockWorkspaceService) RemoveWorkspaceRepo(ctx context.Context, wsID string, repoName string) (*ops.WorkspaceData, error) {
+	if m.removeWorkspaceRepoFn != nil {
+		return m.removeWorkspaceRepoFn(ctx, wsID, repoName)
 	}
 	return nil, service.ErrUnavailable("not available")
 }

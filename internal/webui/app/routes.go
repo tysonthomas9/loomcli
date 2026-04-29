@@ -176,6 +176,11 @@ func (app *Server) registerWorkspaceRoutes() {
 	app.mux.Handle("PATCH /api/workspaces/{ws}/name", middleware.Workspace(app.wsExistsFn)(handlermux.HandleWorkspaceRename(app.workspaceSvc)))
 	app.mux.Handle("PATCH /api/workspaces/{ws}/config/backend", middleware.Workspace(app.wsExistsFn)(handlermux.HandleWorkspaceBackendPatch(app.workspaceSvc)))
 	app.mux.Handle("PATCH /api/workspaces/{ws}/repos/{repo}/default-branch", middleware.Workspace(app.wsExistsFn)(handlermux.HandleRepoDefaultBranchPatch(app.workspaceSvc)))
+	// POST/DELETE for repo collection mutation: registered on the outer mux for
+	// consistency with the sibling PATCH endpoints above (same body-routing
+	// concerns, same workspace existence middleware).
+	app.mux.Handle("POST /api/workspaces/{ws}/repos", middleware.Workspace(app.wsExistsFn)(handlermux.HandleAddRepo(app.workspaceSvc)))
+	app.mux.Handle("DELETE /api/workspaces/{ws}/repos/{repo}", middleware.Workspace(app.wsExistsFn)(handlermux.HandleRemoveRepo(app.workspaceSvc)))
 
 	wsMux := http.NewServeMux()
 	for _, mod := range app.wsModules {

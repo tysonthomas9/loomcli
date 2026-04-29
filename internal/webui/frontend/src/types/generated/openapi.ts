@@ -315,6 +315,40 @@ export interface paths {
     patch: operations["patchRepoDefaultBranch"];
     trace?: never;
   };
+  "/api/workspaces/{ws}/repos": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Add a repo entry to an existing workspace */
+    post: operations["addWorkspaceRepo"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/repos/{repo}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /** Remove a repo entry from a workspace (config only — no files deleted) */
+    delete: operations["removeWorkspaceRepo"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/workspaces/{ws}/daemon/status": {
     parameters: {
       query?: never;
@@ -2275,6 +2309,18 @@ export interface components {
       /** @description New default (integration) branch for the repo */
       branch: string;
     };
+    AddRepoRequest: {
+      /** @description Repo name; defaults to the directory basename of path */
+      name?: string;
+      /** @description Filesystem path to the repo (must exist and contain .git) */
+      path: string;
+      /** @description Default integration branch for the repo */
+      default_branch?: string;
+      /** @description Git remote name (defaults to origin) */
+      remote?: string;
+      /** @description Logical groups this repo belongs to */
+      groups?: string[];
+    };
     BackendConfigResponse: {
       success: boolean;
       data?: {
@@ -3509,6 +3555,103 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Workspace or repo not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  addWorkspaceRepo: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AddRepoRequest"];
+      };
+    };
+    responses: {
+      /** @description Added */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MessageResponse"];
+        };
+      };
+      /** @description Invalid path or missing field */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Workspace not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Repo with the same name already exists in the workspace */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Request body too large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  removeWorkspaceRepo: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Repo name as declared in workspace config */
+        repo: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Removed */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MessageResponse"];
         };
       };
       /** @description Workspace or repo not found */

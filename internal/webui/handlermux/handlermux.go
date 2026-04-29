@@ -82,6 +82,12 @@ func HandleWorkspaceBackendPatch(svc service.WorkspaceService) http.HandlerFunc 
 func HandleRepoDefaultBranchPatch(svc service.WorkspaceService) http.HandlerFunc {
 	return workspace.HandleRepoDefaultBranchPatch(svc)
 }
+func HandleAddRepo(svc service.WorkspaceService) http.HandlerFunc {
+	return workspace.HandleAddRepo(svc)
+}
+func HandleRemoveRepo(svc service.WorkspaceService) http.HandlerFunc {
+	return workspace.HandleRemoveRepo(svc)
+}
 func HandleActiveWorkspace(svc service.WorkspaceService) http.HandlerFunc {
 	return workspace.HandleActiveWorkspace(svc)
 }

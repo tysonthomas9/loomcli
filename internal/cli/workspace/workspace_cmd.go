@@ -37,11 +37,15 @@ Subcommands:
   create       Create a new workspace with git worktrees
   list         List all configured workspaces
   remove       Remove a workspace and its worktrees
+  add-repo     Add a repo entry to an existing workspace
+  remove-repo  Remove a repo entry from an existing workspace
 
 Examples:
   loom workspace create myws --repos /path/to/repo1,/path/to/repo2
   loom workspace list
-  loom workspace remove myws`,
+  loom workspace remove myws
+  loom workspace add-repo myws /path/to/repo
+  loom workspace remove-repo myws repo-name`,
 }
 
 var workspaceCreateCmd = &cobra.Command{
@@ -100,9 +104,16 @@ func init() {
 	workspaceRemoveCmd.Flags().BoolVar(&wsRemoveForce, "force", false, "Remove even if worktrees are dirty")
 	workspaceRemoveCmd.Flags().BoolVar(&wsRemoveKeepWorktrees, "keep-worktrees", false, "Remove from config but don't delete git worktrees")
 
+	workspaceAddRepoCmd.Flags().StringVar(&wsAddRepoName, "name", "", "Repo name (default: directory basename)")
+	workspaceAddRepoCmd.Flags().StringVar(&wsAddRepoBranch, "branch", "", "Default integration branch for this repo")
+	workspaceAddRepoCmd.Flags().StringVar(&wsAddRepoRemote, "remote", "", "Git remote name (default: origin)")
+	workspaceAddRepoCmd.Flags().StringVar(&wsAddRepoGroups, "groups", "", "Comma-separated logical groups (e.g., backend,api)")
+
 	workspaceCmd.AddCommand(workspaceCreateCmd)
 	workspaceCmd.AddCommand(workspaceListCmd)
 	workspaceCmd.AddCommand(workspaceRemoveCmd)
+	workspaceCmd.AddCommand(workspaceAddRepoCmd)
+	workspaceCmd.AddCommand(workspaceRemoveRepoCmd)
 
 	cli.RegisterCommand(workspaceCmd)
 }

@@ -189,6 +189,10 @@ func resolveWorkspaceNameByIDForBackend(cfg *loomConfigForBackend, wsID string) 
 // read repo fields), repo-branch patching must parse repos as a typed slice
 // to find the target repo by name and update its DefaultBranch. The fields
 // mirror config.RepoConfig's YAML tags to preserve round-trip fidelity.
+//
+// These types support any workspace-repos-list mutation (default-branch
+// patch, add-repo, remove-repo). Reused by PatchRepoDefaultBranch,
+// AddWorkspaceRepo, and RemoveWorkspaceRepo.
 
 type loomConfigForRepoBranch struct {
 	Version          int                                   `yaml:"version,omitempty"`

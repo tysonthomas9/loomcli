@@ -540,6 +540,77 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /api/workspaces/{ws}/repos:
+    post:
+      operationId: addWorkspaceRepo
+      tags: [workspaces]
+      summary: Add a repo entry to an existing workspace
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddRepoRequest"
+      responses:
+        "201":
+          description: Added
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+        "400":
+          description: Invalid path or missing field
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Workspace not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Repo with the same name already exists in the workspace
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "413":
+          description: Request body too large
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/workspaces/{ws}/repos/{repo}:
+    delete:
+      operationId: removeWorkspaceRepo
+      tags: [workspaces]
+      summary: Remove a repo entry from a workspace (config only — no files deleted)
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: repo
+          in: path
+          required: true
+          schema: { type: string }
+          description: Repo name as declared in workspace config
+      responses:
+        "200":
+          description: Removed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+        "404":
+          description: Workspace or repo not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /api/workspaces/{ws}/daemon/status:
     get:
       operationId: getWorkspaceDaemonStatus
@@ -3971,6 +4042,28 @@ components:
         branch:
           type: string
           description: New default (integration) branch for the repo
+
+    AddRepoRequest:
+      type: object
+      required: [path]
+      properties:
+        name:
+          type: string
+          description: Repo name; defaults to the directory basename of path
+        path:
+          type: string
+          description: Filesystem path to the repo (must exist and contain .git)
+        default_branch:
+          type: string
+          description: Default integration branch for the repo
+        remote:
+          type: string
+          description: Git remote name (defaults to origin)
+        groups:
+          type: array
+          items:
+            type: string
+          description: Logical groups this repo belongs to
 
     # ── Config Schemas ──────────────────────────────────────────────────
     BackendConfigResponse:

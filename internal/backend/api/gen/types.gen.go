@@ -944,6 +944,24 @@ type AddDependencyRequest struct {
 	DependsOnId string  `json:"depends_on_id"`
 }
 
+// AddRepoRequest defines model for AddRepoRequest.
+type AddRepoRequest struct {
+	// DefaultBranch Default integration branch for the repo
+	DefaultBranch *string `json:"default_branch,omitempty"`
+
+	// Groups Logical groups this repo belongs to
+	Groups *[]string `json:"groups,omitempty"`
+
+	// Name Repo name; defaults to the directory basename of path
+	Name *string `json:"name,omitempty"`
+
+	// Path Filesystem path to the repo (must exist and contain .git)
+	Path string `json:"path"`
+
+	// Remote Git remote name (defaults to origin)
+	Remote *string `json:"remote,omitempty"`
+}
+
 // AgentBackendOverride defines model for AgentBackendOverride.
 type AgentBackendOverride struct {
 	Backend  string `json:"backend"`
@@ -2393,6 +2411,9 @@ type SaveIssueTabsJSONRequestBody SaveIssueTabsJSONBody
 
 // RenameWorkspaceJSONRequestBody defines body for RenameWorkspace for application/json ContentType.
 type RenameWorkspaceJSONRequestBody = WorkspaceRenameRequest
+
+// AddWorkspaceRepoJSONRequestBody defines body for AddWorkspaceRepo for application/json ContentType.
+type AddWorkspaceRepoJSONRequestBody = AddRepoRequest
 
 // PatchRepoDefaultBranchJSONRequestBody defines body for PatchRepoDefaultBranch for application/json ContentType.
 type PatchRepoDefaultBranchJSONRequestBody = RepoDefaultBranchPatchRequest
