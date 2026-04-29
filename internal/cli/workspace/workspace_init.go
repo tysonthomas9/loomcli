@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -143,6 +144,30 @@ func isDaemonStatusRunning(jsonOutput string) bool {
 	return status.Status == "running"
 }
 
+// loomDaemonStartLocks serializes concurrent EnsureLoomDaemonRunning calls
+// within a single process for the same workspace. See loomcli-dmm1t.
+var (
+	loomDaemonStartMapMu sync.Mutex
+	loomDaemonStartLocks = map[string]*sync.Mutex{}
+)
+
+// acquireLoomDaemonStartLock returns a mutex dedicated to serializing
+// EnsureLoomDaemonRunning calls for the given workspace directory within
+// this process. Callers must Unlock when done. Keyed by filepath.Clean(wsDir)
+// so /foo/bar and /foo/bar/ share the same lock.
+func acquireLoomDaemonStartLock(wsDir string) *sync.Mutex {
+	key := filepath.Clean(wsDir)
+	loomDaemonStartMapMu.Lock()
+	mu, ok := loomDaemonStartLocks[key]
+	if !ok {
+		mu = &sync.Mutex{}
+		loomDaemonStartLocks[key] = mu
+	}
+	loomDaemonStartMapMu.Unlock()
+	mu.Lock()
+	return mu
+}
+
 // EnsureLoomDaemonRunning starts the loom daemon (agent supervisor) in the
 // given workspace directory if it's not already running. Skips silently when:
 //   - no loom.yaml exists (workspace has no agents configured)
@@ -157,6 +182,15 @@ func EnsureLoomDaemonRunning(ctx context.Context, wsDir string, timeout time.Dur
 	if ctx.Err() != nil {
 		return fmt.Errorf("loom daemon startup in %s cancelled: %w", wsDir, ctx.Err())
 	}
+
+	// Serialize concurrent start attempts for the same workspace. Without this,
+	// two in-process callers (EnsureDaemonsForAllWorkspaces + startDaemonAsync)
+	// can both pass shouldSkipLoomDaemonStart before either daemon finishes
+	// acquiring its lock file, and the loser's os.Remove(statePath) below will
+	// delete the daemon-agents.json the winner just wrote. See loomcli-dmm1t.
+	mu := acquireLoomDaemonStartLock(wsDir)
+	defer mu.Unlock()
+
 	if skip, err := shouldSkipLoomDaemonStart(wsDir); err != nil || skip {
 		return err
 	}

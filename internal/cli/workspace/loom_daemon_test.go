@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -117,6 +118,101 @@ func TestEnsureLoomDaemonRunning_ClearsStaleStateFile(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "did not become ready") {
 		t.Errorf("expected 'did not become ready', got: %v", err)
+	}
+}
+
+func TestEnsureLoomDaemonRunning_SerializesConcurrentCallsForSameWsDir(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	validLoomYaml(t, dir)
+
+	const timeout = 300 * time.Millisecond
+	var wg sync.WaitGroup
+	wg.Add(2)
+	errs := make([]error, 2)
+	start := time.Now()
+	for i := 0; i < 2; i++ {
+		go func(idx int) {
+			defer wg.Done()
+			errs[idx] = EnsureLoomDaemonRunning(context.Background(), dir, timeout)
+		}(i)
+	}
+	wg.Wait()
+	elapsed := time.Since(start)
+
+	for i, err := range errs {
+		if err == nil {
+			t.Errorf("goroutine %d: expected timeout error, got nil", i)
+		} else if !strings.Contains(err.Error(), "did not become ready") {
+			t.Errorf("goroutine %d: expected 'did not become ready', got: %v", i, err)
+		}
+	}
+	// Both calls run sequentially under the mutex; each waits its full timeout
+	// because the test binary spawned as "loom daemon" never writes state. So
+	// total elapsed should be ~2× timeout. Allow a 50ms slack floor for jitter.
+	if elapsed < 2*timeout-150*time.Millisecond {
+		t.Errorf("expected serialized execution (~%v), got %v — calls appear to run in parallel", 2*timeout, elapsed)
+	}
+	if elapsed > 3*timeout {
+		t.Errorf("elapsed %v exceeds 3× timeout (%v) — scheduler stall or unrelated bug", elapsed, 3*timeout)
+	}
+}
+
+func TestEnsureLoomDaemonRunning_DoesNotSerializeDifferentWsDirs(t *testing.T) {
+	t.Parallel()
+	dirA := t.TempDir()
+	dirB := t.TempDir()
+	validLoomYaml(t, dirA)
+	validLoomYaml(t, dirB)
+
+	const timeout = 300 * time.Millisecond
+	var wg sync.WaitGroup
+	wg.Add(2)
+	start := time.Now()
+	go func() {
+		defer wg.Done()
+		_ = EnsureLoomDaemonRunning(context.Background(), dirA, timeout)
+	}()
+	go func() {
+		defer wg.Done()
+		_ = EnsureLoomDaemonRunning(context.Background(), dirB, timeout)
+	}()
+	wg.Wait()
+	elapsed := time.Since(start)
+
+	// Different wsDirs must run in parallel; total elapsed should be ~1× timeout.
+	if elapsed > 9*timeout/5 {
+		t.Errorf("expected parallel execution for different wsDirs (~%v), got %v — calls appear to be serialized", timeout, elapsed)
+	}
+}
+
+func TestEnsureLoomDaemonRunning_CleanedPathsShareLock(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	validLoomYaml(t, dir)
+
+	const timeout = 300 * time.Millisecond
+	var wg sync.WaitGroup
+	wg.Add(2)
+	start := time.Now()
+	go func() {
+		defer wg.Done()
+		_ = EnsureLoomDaemonRunning(context.Background(), dir, timeout)
+	}()
+	go func() {
+		defer wg.Done()
+		_ = EnsureLoomDaemonRunning(context.Background(), dir+string(filepath.Separator), timeout)
+	}()
+	wg.Wait()
+	elapsed := time.Since(start)
+
+	// Trailing-slash variant must hash to the same lock under filepath.Clean,
+	// so the two calls serialize and elapsed ≈ 2× timeout.
+	if elapsed < 2*timeout-150*time.Millisecond {
+		t.Errorf("expected serialized execution under cleaned path (~%v), got %v — trailing slash not normalized", 2*timeout, elapsed)
+	}
+	if elapsed > 3*timeout {
+		t.Errorf("elapsed %v exceeds 3× timeout (%v) — scheduler stall or unrelated bug", elapsed, 3*timeout)
 	}
 }
 
