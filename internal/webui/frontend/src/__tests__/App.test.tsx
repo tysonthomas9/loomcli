@@ -1832,6 +1832,134 @@ describe("App", () => {
       expect(fetchIssue).toHaveBeenCalledTimes(2);
       expect(fetchIssue).toHaveBeenCalledWith("issue-2");
     });
+
+    // Regression: clicking a different issue within the close-animation window
+    // formerly displayed the previous issue's content because clearIssue was
+    // deferred 300ms. clearIssue must now fire synchronously on close.
+    it("handlePanelClose calls clearIssue synchronously (no setTimeout)", () => {
+      const clearIssue = vi.fn();
+      mockStoreState = createMockUseIssuesReturn({});
+      vi.mocked(useIssueDetail).mockReturnValue(
+        createMockUseIssueDetailReturn({
+          issueDetails: {
+            id: "issue-1",
+            title: "Open Issue",
+            priority: 2,
+            status: "open",
+            issue_type: "task",
+            created_at: "2024-01-01T00:00:00Z",
+            updated_at: "2024-01-01T00:00:00Z",
+          },
+          clearIssue,
+        }),
+      );
+      // Panel is open with an issue so the close button is rendered
+      mockUsePanelManager.mockReturnValue({
+        activePanel: { type: "issue", id: "issue-1" },
+        pendingPanel: null,
+        openPanel: mockOpenPanel,
+        closePanel: mockClosePanel,
+        isOpen: vi.fn((type: string) => type === "issue"),
+      });
+
+      vi.useFakeTimers({ shouldAdvanceTime: false });
+      try {
+        render(<App />);
+
+        // Reset any clearIssue invocations from mount-time effects so the
+        // assertion below isolates the close-button path.
+        clearIssue.mockClear();
+        mockClosePanel.mockClear();
+
+        const closeButton = screen.getByRole("button", { name: "Close panel" });
+        fireEvent.click(closeButton);
+
+        // clearIssue is called on the same tick — no timer advancement needed.
+        expect(clearIssue).toHaveBeenCalledTimes(1);
+        expect(mockClosePanel).toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("URL-sync close branch clears issue synchronously when issue panel was open", () => {
+      const clearIssue = vi.fn();
+      mockStoreState = createMockUseIssuesReturn({});
+      vi.mocked(useIssueDetail).mockReturnValue(
+        createMockUseIssueDetailReturn({
+          clearIssue,
+        }),
+      );
+      // No issueId in URL, but the issue panel is still open (back/popstate path).
+      mockUsePanelManager.mockReturnValue({
+        activePanel: { type: "issue", id: "issue-1" },
+        pendingPanel: null,
+        openPanel: mockOpenPanel,
+        closePanel: mockClosePanel,
+        isOpen: vi.fn((type: string) => type === "issue"),
+      });
+      mockUseRouteView.mockReturnValue(createViewStateReturn("kanban"));
+
+      vi.useFakeTimers({ shouldAdvanceTime: false });
+      try {
+        render(<App />);
+
+        // Effect fires on mount with selectedIssueId=null + activePanel.type="issue".
+        expect(clearIssue).toHaveBeenCalledTimes(1);
+        expect(mockClosePanel).toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("handleAgentClick clears issue synchronously when swapping from issue panel", () => {
+      const clearIssue = vi.fn();
+      mockStoreState = createMockUseIssuesReturn({
+        agents: [
+          {
+            name: "agent-1",
+            status: "idle",
+            current_task: null,
+            workspace: "/test",
+            started_at: "2024-01-01T00:00:00Z",
+          },
+        ],
+      });
+      vi.mocked(useIssueDetail).mockReturnValue(
+        createMockUseIssueDetailReturn({
+          clearIssue,
+        }),
+      );
+      // Issue panel is currently open; clicking an agent should swap and clear.
+      mockUsePanelManager.mockReturnValue({
+        activePanel: { type: "issue", id: "issue-1" },
+        pendingPanel: null,
+        openPanel: mockOpenPanel,
+        closePanel: mockClosePanel,
+        isOpen: vi.fn((type: string) => type === "issue"),
+      });
+
+      vi.useFakeTimers({ shouldAdvanceTime: false });
+      try {
+        render(<App />);
+
+        // Reset clearIssue calls from any URL-sync mount-time effect so we
+        // measure only the agent-click path. The mount-time effect runs with
+        // selectedIssueId=null and would fire the URL-sync close branch.
+        clearIssue.mockClear();
+
+        fireEvent.click(screen.getByText("agent-1"));
+
+        // clearIssue fires on the same tick as openPanel({type: "agent"}).
+        expect(clearIssue).toHaveBeenCalledTimes(1);
+        expect(mockOpenPanel).toHaveBeenCalledWith({
+          type: "agent",
+          name: "agent-1",
+        });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 
   describe("fetchIssues mode parameter based on activeView", () => {

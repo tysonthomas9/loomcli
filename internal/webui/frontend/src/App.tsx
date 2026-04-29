@@ -523,19 +523,16 @@ function App() {
     }
     // No issueId in URL. If an issue panel is still open, the URL change
     // happened externally (browser back, popstate) — close the panel and
-    // delay issue cleanup until the close animation finishes. When the
-    // panel is already closed (handlePanelClose path), this branch is a no-op
-    // and the cleanup scheduled there runs normally.
+    // flush issue state on the same tick. IssueDetailPanel renders the
+    // empty state against issue===null while the slide-out animation runs,
+    // which avoids the rapid-reopen stale-content flash.
     if (
       activeView !== "issue-detail" &&
       activePanelRef.current?.type === "issue"
     ) {
       panelHistory.clear();
+      clearIssue();
       closePanel();
-      setTimeout(() => {
-        if (!mountedRef.current) return;
-        clearIssue();
-      }, 300);
     }
   }, [selectedIssueId, activeView]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -594,12 +591,16 @@ function App() {
   // Handle issue click from SwimLaneBoard/IssueTable or IssueDetailPanel
   // navigation. Eagerly opens the panel and fetches for snappiness; the
   // follow-up URL-sync effect no-ops via usePanelManager's same-panel guard.
+  // navigate() uses `flushSync: true` because urgent panelHistory/openPanel
+  // setState runs first and can starve React Router v7's default
+  // startTransition — see useWorkspaceContext.setActiveWorkspace for the
+  // full rationale.
   const handleIssueClick = useCallback(
     (issue: Issue) => {
       if (activeView === "issue-detail") {
         // Already in full-page detail — navigate to different issue within the view
         if (issue.id === selectedIssueId) return;
-        navigate(`/ws/${workspaceId}/issues/${issue.id}`);
+        navigate(`/ws/${workspaceId}/issues/${issue.id}`, { flushSync: true });
         fetchIssue(issue.id);
         return;
       }
@@ -617,11 +618,13 @@ function App() {
         panelHistory.clear();
         openPanel({ type: "issue", id: issue.id });
         fetchIssue(issue.id);
-        navigate(`/ws/${workspaceId}/${activeView}/issues/${issue.id}`);
+        navigate(`/ws/${workspaceId}/${activeView}/issues/${issue.id}`, {
+          flushSync: true,
+        });
       } else {
         // Panel isn't URL-addressable on this view (e.g. opened via the tree
         // over terminal); route to the full-page detail for a deep-linkable URL.
-        navigate(`/ws/${workspaceId}/issues/${issue.id}`);
+        navigate(`/ws/${workspaceId}/issues/${issue.id}`, { flushSync: true });
         fetchIssue(issue.id);
       }
     },
@@ -647,7 +650,9 @@ function App() {
       openPanel({ type: "issue", id: issue.id });
       fetchIssue(issue.id);
       if (activeView !== "issue-detail") {
-        navigate(`/ws/${workspaceId}/${activeView}/issues/${issue.id}`);
+        navigate(`/ws/${workspaceId}/${activeView}/issues/${issue.id}`, {
+          flushSync: true,
+        });
       }
     },
     [
@@ -668,24 +673,24 @@ function App() {
     openPanel({ type: "issue", id: prevId });
     fetchIssue(prevId);
     if (activeView !== "issue-detail") {
-      navigate(`/ws/${workspaceId}/${activeView}/issues/${prevId}`);
+      navigate(`/ws/${workspaceId}/${activeView}/issues/${prevId}`, {
+        flushSync: true,
+      });
     }
   }, [activeView, workspaceId, navigate, fetchIssue, openPanel, panelHistory]);
 
-  // Handle panel close
+  // Handle panel close. Flush issue state synchronously on close so a rapid
+  // reopen (clicking another issue within the 300ms slide-out window) renders
+  // the loading skeleton instead of the closed issue's stale content.
   const handlePanelClose = useCallback(() => {
+    clearIssue();
     closePanel();
     panelHistory.clear();
     // Push the base-view URL (without issueId) so the URL reflects the
     // closed-panel state and browser Back reopens the panel.
     if (activeView !== "issue-detail") {
-      navigate(`/ws/${workspaceId}/${activeView}`);
+      navigate(`/ws/${workspaceId}/${activeView}`, { flushSync: true });
     }
-    // Clear issue details after close animation completes
-    setTimeout(() => {
-      if (!mountedRef.current) return;
-      clearIssue();
-    }, 300);
   }, [closePanel, clearIssue, navigate, workspaceId, activeView, panelHistory]);
 
   // Handle approve button click on review cards
@@ -761,19 +766,16 @@ function App() {
       const hadIssuePanel = isOpen("issue");
       // Mutual exclusivity + no-op guard handled by usePanelManager
       openPanel({ type: "agent", name: agentName });
-      // When swapping from the issue panel, clear the issueId from the URL so
-      // the URL reflects the closed issue panel, then clean up stale issue
-      // data after the close animation. Issue-panel history is no longer
-      // relevant once the agent panel replaces it.
+      // When swapping from the issue panel, clear the issueId from the URL
+      // so the URL reflects the closed issue panel, and flush stale issue
+      // state on the same tick. Issue-panel history is no longer relevant
+      // once the agent panel replaces it.
       if (hadIssuePanel) {
         panelHistory.clear();
         if (activeView !== "issue-detail" && selectedIssueId) {
-          navigate(`/ws/${workspaceId}/${activeView}`);
+          navigate(`/ws/${workspaceId}/${activeView}`, { flushSync: true });
         }
-        setTimeout(() => {
-          if (!mountedRef.current) return;
-          clearIssue();
-        }, 300);
+        clearIssue();
       }
     },
     [
@@ -845,11 +847,13 @@ function App() {
         panelHistory.clear();
         openPanel({ type: "issue", id: issueId });
         fetchIssue(issueId);
-        navigate(`/ws/${workspaceId}/${activeView}/issues/${issueId}`);
+        navigate(`/ws/${workspaceId}/${activeView}/issues/${issueId}`, {
+          flushSync: true,
+        });
       } else {
         // Non-panel views (terminal, settings, workspace, files,
         // observability) and issue-detail route to the full-page view.
-        navigate(`/ws/${workspaceId}/issues/${issueId}`);
+        navigate(`/ws/${workspaceId}/issues/${issueId}`, { flushSync: true });
         fetchIssue(issueId);
       }
     },
@@ -912,9 +916,11 @@ function App() {
         panelHistory.clear();
         openPanel({ type: "issue", id: taskId });
         fetchIssue(taskId);
-        navigate(`/ws/${workspaceId}/${activeView}/issues/${taskId}`);
+        navigate(`/ws/${workspaceId}/${activeView}/issues/${taskId}`, {
+          flushSync: true,
+        });
       } else {
-        navigate(`/ws/${workspaceId}/issues/${taskId}`);
+        navigate(`/ws/${workspaceId}/issues/${taskId}`, { flushSync: true });
         fetchIssue(taskId);
       }
     },
