@@ -137,10 +137,13 @@ func handleFleetClaimWithPool(pool fleetClaimPoolGetter, claimMetrics *ClaimMetr
 			}
 		}()
 
-		// If a specific issue ID was requested, claim it directly
+		// If a specific issue ID was requested, claim it directly.
+		// rpcOK is set from claimSpecificIssue's clientHealthy return so the
+		// deferred cleanup Discards the connection on transport errors that
+		// may have left an unread response frame in the read buffer
+		// (ref: loomcli-67meg, loomcli-hzp7p).
 		if req.IssueID != "" {
-			rpcOK = true
-			claimSpecificIssue(w, client, req.IssueID, claimMetrics)
+			rpcOK = claimSpecificIssue(w, client, req.IssueID, claimMetrics)
 			return
 		}
 
@@ -205,7 +208,11 @@ func handleFleetClaimWithPool(pool fleetClaimPoolGetter, claimMetrics *ClaimMetr
 }
 
 // claimSpecificIssue attempts to claim a specific issue by ID and writes the response.
-func claimSpecificIssue(w http.ResponseWriter, client fleetClaimClient, issueID string, claimMetrics *ClaimMetrics) { //nolint:funlen
+// Returns clientHealthy: false iff client.Update returned a transport error
+// (resp == nil && err != nil), true in all other cases. The caller uses this
+// value to decide between pool.Put (healthy) and pool.Discard (unhealthy).
+// See loomcli-67meg for the convention.
+func claimSpecificIssue(w http.ResponseWriter, client fleetClaimClient, issueID string, claimMetrics *ClaimMetrics) (clientHealthy bool) { //nolint:funlen
 	inProgress := "in_progress"
 	updateArgs := &rpc.UpdateArgs{
 		ID:     issueID,
@@ -214,7 +221,8 @@ func claimSpecificIssue(w http.ResponseWriter, client fleetClaimClient, issueID 
 	}
 
 	resp, err := client.Update(updateArgs)
-	if err != nil {
+	if err != nil && resp == nil {
+		// Transport error: response frame was not fully consumed, connection is suspect.
 		status := http.StatusInternalServerError
 		if strings.Contains(err.Error(), "not found") {
 			status = http.StatusNotFound
@@ -224,7 +232,35 @@ func claimSpecificIssue(w http.ResponseWriter, client fleetClaimClient, issueID 
 			Success: false,
 			Error:   "internal server error",
 		})
-		return
+		return false
+	}
+
+	if resp == nil {
+		// Defensive: rpc.Client.Execute never returns (nil, nil), but a misbehaving
+		// mock could. Treat as transport error.
+		handler.WriteJSON(w, http.StatusInternalServerError, FleetClaimResponse{
+			Success: false,
+			Error:   "internal server error",
+		})
+		return false
+	}
+
+	if err != nil {
+		// Logical failure surfaced as (&resp, err) by rpc.Client.Execute when
+		// !resp.Success. Frame was fully consumed at the transport layer.
+		if strings.Contains(err.Error(), "not found") {
+			handler.WriteJSON(w, http.StatusNotFound, FleetClaimResponse{
+				Success: false,
+				Error:   "internal server error",
+			})
+			return true
+		}
+		slog.Error("fleet RPC error", "handler", "claimSpecificIssue", "issue_id", issueID, "err", err)
+		handler.WriteJSON(w, http.StatusInternalServerError, FleetClaimResponse{
+			Success: false,
+			Error:   "internal server error",
+		})
+		return true
 	}
 
 	if !resp.Success {
@@ -234,23 +270,24 @@ func claimSpecificIssue(w http.ResponseWriter, client fleetClaimClient, issueID 
 				Success: false,
 				Error:   "task already claimed by another worker",
 			})
-			return
+			return true
 		}
 		handler.WriteJSON(w, http.StatusInternalServerError, FleetClaimResponse{
 			Success: false,
 			Error:   resp.Error,
 		})
-		return
+		return true
 	}
 
 	// Parse the updated issue from response
 	var issue types.Issue
 	if err := json.Unmarshal(resp.Data, &issue); err != nil {
+		// Parse error on a fully-received frame — connection is intact.
 		handler.WriteJSON(w, http.StatusInternalServerError, FleetClaimResponse{
 			Success: false,
 			Error:   fmt.Sprintf("failed to parse claimed issue: %v", err),
 		})
-		return
+		return true
 	}
 
 	recordClaim(claimMetrics, ClaimResultSuccess)
@@ -261,6 +298,7 @@ func claimSpecificIssue(w http.ResponseWriter, client fleetClaimClient, issueID 
 			Labels: issue.Labels,
 		},
 	})
+	return true
 }
 
 // tryClaimIssue attempts to claim an issue and writes the response if successful.

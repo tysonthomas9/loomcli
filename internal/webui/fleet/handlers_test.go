@@ -18,49 +18,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/types"
 )
 
-// mockFleetClient implements fleetClaimClient for testing.
-type mockFleetClient struct {
-	updateFunc func(args *rpc.UpdateArgs) (*rpc.Response, error)
-	readyFunc  func(args *rpc.ReadyArgs) (*rpc.Response, error)
-}
-
-func (m *mockFleetClient) Update(args *rpc.UpdateArgs) (*rpc.Response, error) {
-	if m.updateFunc != nil {
-		return m.updateFunc(args)
-	}
-	return nil, errors.New("updateFunc not implemented")
-}
-
-func (m *mockFleetClient) Ready(args *rpc.ReadyArgs) (*rpc.Response, error) {
-	if m.readyFunc != nil {
-		return m.readyFunc(args)
-	}
-	return nil, errors.New("readyFunc not implemented")
-}
-
-// mockFleetPool implements fleetClaimPoolGetter for testing.
-type mockFleetPool struct {
-	getFunc func(ctx context.Context) (fleetClaimClient, error)
-	putFunc func(client fleetClaimClient)
-}
-
-func (m *mockFleetPool) Get(ctx context.Context) (fleetClaimClient, error) {
-	if m.getFunc != nil {
-		return m.getFunc(ctx)
-	}
-	return nil, errors.New("getFunc not implemented")
-}
-
-func (m *mockFleetPool) Put(client fleetClaimClient) {
-	if m.putFunc != nil {
-		m.putFunc(client)
-	}
-}
-
-func (m *mockFleetPool) Discard(client fleetClaimClient) {
-	// no-op for tests
-}
-
 func TestFleetClaim_SuccessSpecificIssue(t *testing.T) {
 	issueData, _ := json.Marshal(types.Issue{
 		ID:     "test-123",
@@ -448,6 +405,13 @@ func TestFleetClaim_SpecificIssueNotFound(t *testing.T) {
 
 	result := assertJSONResponse(t, w)
 	assertEnvelopeError(t, result, "payload")
+
+	// (nil, err) is a transport error regardless of the error text — connection
+	// must be Discarded even though the HTTP status is 404 (loomcli-hzp7p).
+	put, discard := pool.counts()
+	if discard != 1 || put != 0 {
+		t.Errorf("pool calls = put=%d discard=%d, want put=0 discard=1", put, discard)
+	}
 }
 
 func TestFleetClaim_ReadyRPCError(t *testing.T) {
