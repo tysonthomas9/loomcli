@@ -77,17 +77,14 @@ func TestRepro_LoomMergeSetsCoreBare(t *testing.T) {
 	deps.Git = snap
 
 	// Drive the production flow on the feature worktree twice so we capture
-	// both the non-detached path (which will fail at checkout because main
-	// is checked out in <repo>) and the detached path directly (which is
-	// the code the design fingers as the likely writer of core.bare=true).
+	// both the top-level path (which engages the detached fallback because
+	// main is checked out in <repo>) and the detached path directly (which
+	// the design fingers as the likely writer of core.bare=true).
 	//
-	// We call pushBranchInRepoDetached explicitly because the current
-	// production `isWorktreeConflictErr` gate matches against stderr text
-	// that runGitOutput does not propagate into the error — exercising the
-	// gate via pushBranchInRepo would short-circuit before ever entering
-	// the detached code path. The bug report is about the detached code
-	// path, so we drive it directly to observe what it writes.
-	t.Log("--- phase A: pushBranchInRepo (non-detached normal path should fail at checkout) ---")
+	// After the GitExecError fix, RunWithOutput wraps stderr into the
+	// returned error, so isWorktreeConflictErr now matches and Phase A
+	// exercises the full top-level push → detached fallback chain.
+	t.Log("--- phase A: pushBranchInRepo (top-level path; should engage detached fallback) ---")
 	startA := time.Now()
 	errA := pushBranchInRepo(deps, wtFeature, "feature", "main", "")
 	elapsedA := time.Since(startA)
@@ -95,6 +92,9 @@ func TestRepro_LoomMergeSetsCoreBare(t *testing.T) {
 		t.Logf("pushBranchInRepo returned err (non-fatal for harness): %v", errA)
 	}
 	t.Logf("pushBranchInRepo completed in %s", elapsedA)
+	if !sawCheckoutDetach(snap.calls) {
+		t.Errorf("phase A: expected `git checkout --detach` to be invoked via the detached fallback, but it was not\nTrace:\n%s", snap.Trace())
+	}
 
 	// Reset back to feature so we know the worktree is on a branch, not
 	// mid-detached state, before running the direct detached drill.
@@ -219,7 +219,26 @@ func (s *snapshottingGitRunner) RunWithOutput(dir string, args ...string) error 
 		postHash: post, postBody: postBody, hasBareAfter: postBare,
 		stderrTail: tail(stderr.String(), 240), err: err,
 	})
-	return err
+	if err != nil {
+		// Mirror production wrapping so substring matchers like
+		// isWorktreeConflictErr engage in the harness exactly as they do
+		// in production.
+		return &cli.GitExecError{
+			Args:   append([]string(nil), args...),
+			Stderr: strings.TrimRight(stderr.String(), "\n"),
+			Err:    err,
+		}
+	}
+	return nil
+}
+
+func sawCheckoutDetach(calls []gitCall) bool {
+	for _, c := range calls {
+		if len(c.args) >= 2 && c.args[0] == "checkout" && c.args[1] == "--detach" {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *snapshottingGitRunner) Trace() string {
