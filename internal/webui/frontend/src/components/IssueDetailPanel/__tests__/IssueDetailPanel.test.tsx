@@ -12,12 +12,16 @@ import {
   fireEvent,
   within,
   waitFor,
+  act,
 } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import "@testing-library/jest-dom";
 
 import type { Issue, IssueDetails, IssueWithDependencyMetadata } from "@/types";
 import { updateIssue } from "@/api";
+import { createIssueStore } from "@/stores/issueStore";
+import { createAgentStore } from "@/stores/agentStore";
+import { StoreContext } from "@/hooks/common";
 
 import { IssueDetailPanel } from "../IssueDetailPanel";
 
@@ -28,6 +32,7 @@ const {
   mockScheduleSessionKill,
   mockUseIssueTabPersistence,
   mockUseWorkspaceContext,
+  knownAssigneesCaptures,
 } = vi.hoisted(() => ({
   mockUseRegisterEscapeLayer: vi.fn(),
   mockDeleteTabMetadata: vi.fn(() => Promise.resolve()),
@@ -38,6 +43,7 @@ const {
     saveTabs: vi.fn(),
     clearTabs: vi.fn(),
   })),
+  knownAssigneesCaptures: [] as Array<string[] | undefined>,
   mockUseWorkspaceContext: vi.fn(() => ({
     workspace: null,
     repos: [],
@@ -86,6 +92,35 @@ vi.mock("@/hooks/workspace", async () => {
       "@/hooks/workspace",
     );
   return { ...actual, useWorkspaceContext: mockUseWorkspaceContext };
+});
+
+// Mock the fields barrel so we can intercept AssigneeDropdown's knownAssignees
+// prop. IssueDetailPanel and SplitDetailSummary both import from "./fields".
+// Stubs preserve the data-testids existing tests rely on.
+vi.mock("@/components/IssueDetailPanel/fields", async (importOriginal) => {
+  const actual =
+    await importOriginal<
+      typeof import("@/components/IssueDetailPanel/fields")
+    >();
+  const AssigneeDropdownStub = (props: {
+    assignee?: string;
+    knownAssignees?: string[];
+  }) => {
+    knownAssigneesCaptures.push(props.knownAssignees);
+    const display =
+      props.assignee && props.assignee.length > 0
+        ? props.assignee.replace(/^\[H\]\s*/, "")
+        : "Unassigned";
+    return (
+      <button data-testid="assignee-dropdown-trigger" type="button">
+        {display}
+      </button>
+    );
+  };
+  return {
+    ...actual,
+    AssigneeDropdown: AssigneeDropdownStub,
+  };
 });
 
 vi.mock("@/hooks", async (importOriginal) => {
@@ -1504,6 +1539,182 @@ describe("IssueDetailPanel", () => {
       );
       expect(screen.getByRole("tab", { name: "Details" })).toBeInTheDocument();
       expect(screen.getByRole("tab", { name: "Sessions" })).toBeInTheDocument();
+    });
+  });
+
+  describe("knownAssignees memoization", () => {
+    function makeStoreWrapper() {
+      const issueStore = createIssueStore();
+      const agentStore = createAgentStore();
+      const Wrapper = ({ children }: { children: React.ReactNode }) => (
+        <StoreContext.Provider value={{ issueStore, agentStore }}>
+          {children}
+        </StoreContext.Provider>
+      );
+      return { issueStore, agentStore, Wrapper };
+    }
+
+    function makeIssue(id: string, assignee?: string): Issue {
+      return createTestIssue({ id, assignee });
+    }
+
+    function lastCapture(): string[] | undefined {
+      return knownAssigneesCaptures[knownAssigneesCaptures.length - 1];
+    }
+
+    beforeEach(() => {
+      knownAssigneesCaptures.length = 0;
+    });
+
+    it("populates sorted, deduped human assignee names on first mount", () => {
+      const { issueStore, Wrapper } = makeStoreWrapper();
+      issueStore.setState({
+        issuesMap: new Map([
+          ["1", makeIssue("1", "[H]Alice")],
+          ["2", makeIssue("2", "[H]Bob")],
+          ["3", makeIssue("3", "agent:foo")],
+          ["4", makeIssue("4", "[H]Alice")],
+        ]),
+      });
+      const issue = makeIssue("1", "[H]Alice");
+      render(
+        <Wrapper>
+          <IssueDetailPanel isOpen={true} issue={issue} onClose={() => {}} />
+        </Wrapper>,
+      );
+      expect(lastCapture()).toEqual(["Alice", "Bob"]);
+    });
+
+    it("returns the same array reference when only non-assignee fields change", () => {
+      const { issueStore, Wrapper } = makeStoreWrapper();
+      const a1 = makeIssue("1", "[H]Alice");
+      const b1 = makeIssue("2", "[H]Bob");
+      issueStore.setState({
+        issuesMap: new Map([
+          ["1", a1],
+          ["2", b1],
+        ]),
+      });
+      render(
+        <Wrapper>
+          <IssueDetailPanel isOpen={true} issue={a1} onClose={() => {}} />
+        </Wrapper>,
+      );
+      const first = lastCapture();
+      expect(first).toEqual(["Alice", "Bob"]);
+
+      // Replace map; same human assignees but flipped status on issue 1.
+      const a2 = { ...a1, status: "in_progress" as const };
+      act(() => {
+        issueStore.setState({
+          issuesMap: new Map([
+            ["1", a2],
+            ["2", b1],
+          ]),
+        });
+      });
+      const second = lastCapture();
+      expect(Object.is(second, first)).toBe(true);
+    });
+
+    it("returns a new reference when a human assignee is added", () => {
+      const { issueStore, Wrapper } = makeStoreWrapper();
+      const a1 = makeIssue("1", "[H]Alice");
+      issueStore.setState({ issuesMap: new Map([["1", a1]]) });
+      render(
+        <Wrapper>
+          <IssueDetailPanel isOpen={true} issue={a1} onClose={() => {}} />
+        </Wrapper>,
+      );
+      const first = lastCapture();
+      expect(first).toEqual(["Alice"]);
+
+      act(() => {
+        issueStore.setState({
+          issuesMap: new Map([
+            ["1", a1],
+            ["2", makeIssue("2", "[H]Bob")],
+          ]),
+        });
+      });
+      const second = lastCapture();
+      expect(second).toEqual(["Alice", "Bob"]);
+      expect(Object.is(second, first)).toBe(false);
+    });
+
+    it("returns a new reference when a human assignee is removed", () => {
+      const { issueStore, Wrapper } = makeStoreWrapper();
+      const a1 = makeIssue("1", "[H]Alice");
+      const b1 = makeIssue("2", "[H]Bob");
+      issueStore.setState({
+        issuesMap: new Map([
+          ["1", a1],
+          ["2", b1],
+        ]),
+      });
+      render(
+        <Wrapper>
+          <IssueDetailPanel isOpen={true} issue={a1} onClose={() => {}} />
+        </Wrapper>,
+      );
+      const first = lastCapture();
+      expect(first).toEqual(["Alice", "Bob"]);
+
+      act(() => {
+        issueStore.setState({ issuesMap: new Map([["2", b1]]) });
+      });
+      const second = lastCapture();
+      expect(second).toEqual(["Bob"]);
+      expect(Object.is(second, first)).toBe(false);
+    });
+
+    it("yields an empty array (no crash) when the store is empty", () => {
+      const { Wrapper } = makeStoreWrapper();
+      // store starts with empty issuesMap by default
+      const issue = makeIssue("solo", "[H]Carol");
+      render(
+        <Wrapper>
+          <IssueDetailPanel isOpen={true} issue={issue} onClose={() => {}} />
+        </Wrapper>,
+      );
+      const captured = lastCapture();
+      expect(Array.isArray(captured)).toBe(true);
+      expect(captured).toHaveLength(0);
+    });
+
+    it("returns the same empty-array reference across two empty maps", () => {
+      const { issueStore, Wrapper } = makeStoreWrapper();
+      const issue = makeIssue("solo", "[H]Carol");
+      render(
+        <Wrapper>
+          <IssueDetailPanel isOpen={true} issue={issue} onClose={() => {}} />
+        </Wrapper>,
+      );
+      const first = lastCapture();
+      expect(first).toEqual([]);
+
+      act(() => {
+        issueStore.setState({ issuesMap: new Map() });
+      });
+      const second = lastCapture();
+      expect(Object.is(second, first)).toBe(true);
+    });
+
+    it("dedupes a [H] name that appears across multiple issues", () => {
+      const { issueStore, Wrapper } = makeStoreWrapper();
+      issueStore.setState({
+        issuesMap: new Map([
+          ["1", makeIssue("1", "[H]Alice")],
+          ["2", makeIssue("2", "[H]Alice")],
+        ]),
+      });
+      const issue = makeIssue("1", "[H]Alice");
+      render(
+        <Wrapper>
+          <IssueDetailPanel isOpen={true} issue={issue} onClose={() => {}} />
+        </Wrapper>,
+      );
+      expect(lastCapture()).toEqual(["Alice"]);
     });
   });
 });

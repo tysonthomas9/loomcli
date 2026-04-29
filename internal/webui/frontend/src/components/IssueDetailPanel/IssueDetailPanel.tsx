@@ -401,10 +401,19 @@ function DefaultContent({
 
   // Human assignee names derived from loaded issues — pre-populates the
   // AssigneeDropdown "People" section even on a cold browser (no localStorage).
-  // Selector returns a serialized key so useStore can skip re-renders when the
-  // set of names is unchanged. The actual array is built in useMemo below.
+  // Cache keys on issuesMap reference identity: the store always replaces the
+  // map on mutation (never mutates in place), so a stable map reference means
+  // the derivation is up to date. When sorted+deduped names are unchanged we
+  // return the previously-cached array so Zustand's Object.is short-circuits
+  // re-renders without running iterate+filter+sort on every SSE notification.
   const issueStore = useIssueStoreInstance();
-  const knownAssigneesKey = useStore(issueStore, (s) => {
+  const knownAssigneesCache = useRef<{
+    map: Map<string, Issue> | null;
+    names: string[];
+  }>({ map: null, names: [] });
+  const knownAssignees = useStore(issueStore, (s) => {
+    const cache = knownAssigneesCache.current;
+    if (cache.map === s.issuesMap) return cache.names;
     const names = new Set<string>();
     for (const existing of s.issuesMap.values()) {
       const a = existing.assignee;
@@ -412,12 +421,21 @@ function DefaultContent({
         names.add(a.replace(/^\[H\]\s*/, ""));
       }
     }
-    return JSON.stringify(Array.from(names).sort());
+    const next = Array.from(names).sort();
+    const prev = cache.names;
+    let same = next.length === prev.length;
+    if (same) {
+      for (let i = 0; i < next.length; i++) {
+        if (next[i] !== prev[i]) {
+          same = false;
+          break;
+        }
+      }
+    }
+    const result = same ? prev : next;
+    knownAssigneesCache.current = { map: s.issuesMap, names: result };
+    return result;
   });
-  const knownAssignees = useMemo<string[]>(
-    () => JSON.parse(knownAssigneesKey) as string[],
-    [knownAssigneesKey],
-  );
 
   // Reset tabs when issue changes — clean up orphaned terminal sessions first
   useEffect(() => {
