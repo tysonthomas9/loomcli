@@ -1,6 +1,5 @@
 /**
- * Visual regression screenshots for sidebar components:
- * AgentsSidebar, WorkspaceTree.
+ * Visual regression screenshots for sidebar components: WorkspaceTree.
  *
  * These use window.__fixtureData for complex context data.
  * seedFixtureData must be called BEFORE page.goto().
@@ -8,99 +7,9 @@
 
 import { test, expect, waitForStableContent } from "../fixtures/screenshot";
 import {
-  agentsSidebarUrl,
   workspaceTreeUrl,
   seedFixtureData,
 } from "../helpers/fixture-routes";
-
-// --- AgentsSidebar -------------------------------------------------------
-
-test.describe("Visual Regression - AgentsSidebar", () => {
-  test.use({ viewport: { width: 1280, height: 720 } });
-
-  test("expanded with agents", async ({ screenshotPage: page }) => {
-    await seedFixtureData(page, {
-      agents: [
-        {
-          name: "alpha",
-          status: "working",
-          branch: "feature-auth",
-          task: "bd-001",
-          ahead: 0,
-          behind: 0,
-          last_seen: "2026-01-24T12:00:00Z",
-        },
-        {
-          name: "beta",
-          status: "idle",
-          branch: "main",
-          task: "",
-          ahead: 0,
-          behind: 0,
-          last_seen: "2026-01-24T11:30:00Z",
-        },
-        {
-          name: "gamma",
-          status: "error",
-          branch: "bugfix-crash",
-          task: "bd-003",
-          ahead: 0,
-          behind: 0,
-          last_seen: "2026-01-24T11:00:00Z",
-        },
-      ],
-      tasks: {
-        needs_planning: 2,
-        ready_to_implement: 3,
-        in_progress: 1,
-        need_review: 1,
-        backlog: 0,
-      },
-      agentTasks: {
-        alpha: { id: "bd-001", title: "Implement auth flow", priority: 1 },
-        gamma: { id: "bd-003", title: "Fix crash on startup", priority: 0 },
-      },
-      taskLists: {
-        needsPlanning: [],
-        readyToImplement: [],
-        needsReview: [],
-        inProgress: [],
-        backlog: [],
-        done: [],
-      },
-    });
-    await page.goto(agentsSidebarUrl());
-    await waitForStableContent(page);
-
-    await expect(page).toHaveScreenshot("agents-sidebar-expanded.png");
-  });
-
-  test("empty no agents", async ({ screenshotPage: page }) => {
-    await seedFixtureData(page, {
-      agents: [],
-      tasks: {
-        needs_planning: 0,
-        ready_to_implement: 0,
-        in_progress: 0,
-        need_review: 0,
-        backlog: 0,
-      },
-      agentTasks: {},
-      taskLists: {
-        needsPlanning: [],
-        readyToImplement: [],
-        needsReview: [],
-        inProgress: [],
-        backlog: [],
-        done: [],
-      },
-    });
-    await page.goto(agentsSidebarUrl());
-    await waitForStableContent(page);
-
-    await expect(page).toHaveScreenshot("agents-sidebar-empty.png");
-  });
-});
 
 // --- WorkspaceTree -------------------------------------------------------
 

@@ -13,6 +13,8 @@ export interface WorkQueueCounts {
   inProgress: number;
   needsReview: number;
   done: number;
+  /** Ephemeral-task execution failures, derived from agents in error state. */
+  failed: number;
 }
 
 export interface QueueStatsBarProps {
@@ -32,7 +34,7 @@ export function QueueStatsBar({ counts }: QueueStatsBarProps): JSX.Element {
       </span>
       <span className={styles.separator}>&middot;</span>
       <span className={styles.stat}>
-        Blocked <span className={styles.count}>{counts.blocked}</span>
+        Failed <span className={styles.count}>{counts.failed}</span>
       </span>
     </div>
   );

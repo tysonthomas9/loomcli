@@ -6,6 +6,7 @@
 
 import { IssueDetailPanel, ToastContainer } from "@/components";
 import { WorkspaceTree } from "@/components/WorkspaceTree";
+import type { WorkQueueCounts } from "@/components/WorkspaceTree";
 import { SplitDetailSummary } from "@/components/IssueDetailPanel";
 import {
   SessionNamePrompt,
@@ -419,6 +420,10 @@ export function WorkspaceTreeFixture(): JSX.Element {
   const repos = readFixtureData("repos", []);
   const workspace = readFixtureData("workspace", null);
   const wsAgents = readFixtureData("wsAgents", []);
+  const workQueueCounts = readFixtureData<WorkQueueCounts | undefined>(
+    "workQueueCounts",
+    undefined,
+  );
 
   const wsContextValue: WorkspaceContextValue = {
     ...NO_WORKSPACE_CONTEXT,
@@ -437,7 +442,7 @@ export function WorkspaceTreeFixture(): JSX.Element {
       <WorkspaceContext.Provider value={wsContextValue}>
         <StoreContext.Provider value={storeContextValue}>
           <div data-testid="fixture-root" style={FIXTURE_ROOT_STYLE}>
-            <WorkspaceTree />
+            <WorkspaceTree {...(workQueueCounts ? { workQueueCounts } : {})} />
           </div>
         </StoreContext.Provider>
       </WorkspaceContext.Provider>

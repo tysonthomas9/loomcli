@@ -1,14 +1,13 @@
 /**
  * WorkspaceTree component — v2 sidebar redesign.
- * Simplified layout: WorkspaceSelectorBar → AgentSection → RunningSection →
- * EpicTaskTree → ReposSection, with QueueStatsBar pinned at the bottom.
+ * Section order: WorkspaceSelectorBar → AgentSection → RunningSection →
+ * ReposSection → OtherWorkspacesSection, with QueueStatsBar pinned at the bottom.
  */
 
 import { useState, useCallback, useEffect } from "react";
 
 import type { ConnectionState } from "@/api/common";
-import { useStore } from "zustand";
-import { useWorkspaceContext, useAgentStoreInstance } from "@/hooks";
+import { useWorkspaceContext } from "@/hooks";
 import { wsGet, wsSet } from "@/utils/scopedStorage";
 import { ErrorDisplay } from "@/components/ErrorDisplay";
 import { updateRepoDefaultBranch } from "@/hooks/api";
@@ -17,8 +16,8 @@ import { WorkspaceSelectorBar } from "./WorkspaceSelectorBar";
 import { AgentSection } from "./AgentSection";
 import { RunningSection } from "./RunningSection";
 import { ReposSection } from "./ReposSection";
+import { OtherWorkspacesSection } from "./OtherWorkspacesSection";
 import { QueueStatsBar, type WorkQueueCounts } from "./QueueStatsBar";
-import { SidebarStatusBar } from "./nav";
 import styles from "./WorkspaceTree.module.css";
 
 /**
@@ -80,6 +79,9 @@ export function WorkspaceTree({
     refetch,
   } = useWorkspaceContext();
 
+  // Workspace switch handler used by both the top selector and the other-workspaces list
+  const handleWorkspaceSwitch = onWorkspaceSwitch ?? (() => {});
+
   const handleDefaultBranchChange = useCallback(
     (repoName: string, newBranch: string) => {
       if (!workspaceId) return;
@@ -99,9 +101,6 @@ export function WorkspaceTree({
     const stored = wsGet(workspaceId, SK_COLLAPSED);
     return stored !== null ? stored === "true" : defaultCollapsed;
   });
-
-  const agentStore = useAgentStoreInstance();
-  const agents = useStore(agentStore, (s) => s.agents);
 
   // Re-read scoped state when workspace changes (SPA navigation)
   useEffect(() => {
@@ -146,7 +145,7 @@ export function WorkspaceTree({
             workspaceName={activeWorkspaceName}
             workspaces={workspaces}
             activeWorkspaceId={workspaceId}
-            onWorkspaceSwitch={onWorkspaceSwitch ?? (() => {})}
+            onWorkspaceSwitch={handleWorkspaceSwitch}
             onAddWorkspace={onAddClick}
           />
         )}
@@ -217,6 +216,14 @@ export function WorkspaceTree({
             workspaceId={workspaceId}
             onDefaultBranchChange={handleDefaultBranchChange}
           />
+
+          {/* Non-active workspaces, drag-orderable */}
+          <OtherWorkspacesSection
+            workspaces={workspaces}
+            activeWorkspaceName={activeWorkspaceName}
+            onWorkspaceSwitch={handleWorkspaceSwitch}
+            refetchWorkspaces={refetch}
+          />
         </div>
       )}
 
@@ -224,7 +231,6 @@ export function WorkspaceTree({
       {!isCollapsed && workQueueCounts && (
         <QueueStatsBar counts={workQueueCounts} />
       )}
-      {!isCollapsed && <SidebarStatusBar agents={agents} />}
 
       {!isCollapsed && connectionLost && (
         <div className={styles.daemonPrompt} role="alert">

@@ -20,7 +20,11 @@ import { WorkspaceTree } from "../WorkspaceTree";
 
 // Default mock return values
 const defaultReposReturn = {
-  workspace: null,
+  workspace: null as null | {
+    name: string;
+    id: string;
+    workspaces: Array<{ name: string; id: string }>;
+  },
   repos: [] as RepoInfo[],
   isLoading: false,
   error: null as string | null,
@@ -53,6 +57,7 @@ const defaultAgentContext = {
 // Mutable overrides – tests can replace before rendering
 let reposOverride: Partial<typeof defaultReposReturn> = {};
 let agentOverride: Partial<typeof defaultAgentContext> = {};
+let activeWorkspaceNameOverride: string | null = null;
 
 const TEST_WS_ID = "test-ws-uuid-1234";
 
@@ -69,11 +74,10 @@ vi.mock("@/hooks", () => ({
   useAgentStoreInstance: () => ({}), // dummy — useStore mock ignores store arg
   useWorkspaceContext: () => ({
     workspaceId: TEST_WS_ID,
-    activeWorkspaceName: null,
+    activeWorkspaceName: activeWorkspaceNameOverride,
     defaultWorkspaceName: null,
     setDefaultWorkspace: vi.fn(),
     agents: [],
-    workspace: null,
     ...defaultReposReturn,
     ...reposOverride,
   }),
@@ -151,6 +155,7 @@ describe("WorkspaceTree", () => {
     localStorage.setItem("loom:last-workspace-id", TEST_WS_ID);
     reposOverride = {};
     agentOverride = {};
+    activeWorkspaceNameOverride = null;
   });
 
   describe("repo list rendering", () => {
@@ -401,4 +406,101 @@ describe("WorkspaceTree", () => {
   });
 
   // "+ New Workspace" button moved to WorkspaceSwitcher dialog (loomcli-8uy0o)
+
+  describe("other workspaces section", () => {
+    it("renders non-active workspaces below the repos list", () => {
+      activeWorkspaceNameOverride = "alpha";
+      reposOverride = {
+        workspace: {
+          name: "alpha",
+          id: TEST_WS_ID,
+          workspaces: [
+            { name: "alpha", id: TEST_WS_ID },
+            { name: "beta", id: "beta-id" },
+          ],
+        },
+      };
+
+      render(
+        <WorkspaceTree defaultCollapsed={false} onWorkspaceSwitch={vi.fn()} />,
+      );
+
+      // "beta" is the only non-active workspace; it should render
+      expect(screen.getByText("beta")).toBeInTheDocument();
+    });
+
+    it("does not render the Workspaces section when only the active workspace exists", () => {
+      activeWorkspaceNameOverride = "solo";
+      reposOverride = {
+        workspace: {
+          name: "solo",
+          id: TEST_WS_ID,
+          workspaces: [{ name: "solo", id: TEST_WS_ID }],
+        },
+      };
+
+      render(<WorkspaceTree defaultCollapsed={false} />);
+
+      // The OtherWorkspacesSection header is "Workspaces" — must be absent
+      expect(screen.queryByText("Workspaces")).not.toBeInTheDocument();
+    });
+  });
+
+  describe("queue stats bar", () => {
+    it("shows Failed (not Blocked) and reflects the failed count", () => {
+      render(
+        <WorkspaceTree
+          defaultCollapsed={false}
+          workQueueCounts={{
+            backlog: 0,
+            open: 1,
+            blocked: 0,
+            inProgress: 0,
+            needsReview: 0,
+            done: 5,
+            failed: 3,
+          }}
+        />,
+      );
+
+      expect(screen.getByText("Failed")).toBeInTheDocument();
+      expect(screen.getByText("3")).toBeInTheDocument();
+      expect(screen.queryByText("Blocked")).not.toBeInTheDocument();
+    });
+  });
+
+  describe("status bar removal", () => {
+    it("does not render the working/reviewing/idle status bar copy", () => {
+      reposOverride = {
+        repos: [
+          {
+            name: "alpha",
+            path: "/repos/alpha",
+            default_branch: "main",
+            remote: "origin",
+            groups: [],
+          },
+        ],
+      };
+      agentOverride = {
+        agents: [
+          {
+            name: "a1",
+            branch: "main",
+            status: "working",
+            ahead: 0,
+            behind: 0,
+            repo: "alpha",
+          },
+        ],
+      };
+
+      render(<WorkspaceTree defaultCollapsed={false} />);
+
+      // SidebarStatusBar copy ("N working", "N reviewing", "N idle") must be gone
+      expect(screen.queryByText(/\d+\s*working/i)).not.toBeInTheDocument();
+      expect(screen.queryByText(/\d+\s*reviewing/i)).not.toBeInTheDocument();
+      expect(screen.queryByText(/\d+\s*idle/i)).not.toBeInTheDocument();
+    });
+  });
 });

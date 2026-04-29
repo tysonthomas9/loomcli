@@ -77,6 +77,7 @@ import {
   KeyboardShortcutProvider,
 } from "@/hooks";
 import type { Issue, Status } from "@/types";
+import { parseLoomStatus } from "@/types";
 
 import styles from "./App.module.css";
 
@@ -281,6 +282,18 @@ function App() {
     return map;
   }, [activeView, issues, blockedIssuesData]);
 
+  // Agent data (shared via agentStore — single polling loop)
+  const agentStore = useAgentStoreInstance();
+  const agents = useStore(agentStore, (s) => s.agents);
+  const agentTasks = useStore(agentStore, (s) => s.agentTasks);
+  const agentShowStaleBanner = useStore(agentStore, (s) => s.showStaleBanner);
+  const agentConnectionLost = useStore(agentStore, (s) => s.connectionLost);
+  const agentDisconnectedSince = useStore(
+    agentStore,
+    (s) => s.disconnectedSince,
+  );
+  const agentRetryNow = useStore(agentStore, (s) => s.retryNow);
+
   // Compute Work Queue counts from workspace-scoped issues for sidebar display
   const workQueueCounts = useMemo(() => {
     let backlog = 0;
@@ -318,8 +331,12 @@ function App() {
           break;
       }
     }
-    return { backlog, open, blocked, inProgress, needsReview, done };
-  }, [issues]);
+    let failed = 0;
+    for (const agent of agents) {
+      if (parseLoomStatus(agent.status).type === "error") failed++;
+    }
+    return { backlog, open, blocked, inProgress, needsReview, done, failed };
+  }, [issues, agents]);
 
   const { toasts, showToast, dismissToast } = useToast();
   const mountedRef = useRef(true);
@@ -392,18 +409,6 @@ function App() {
 
   // Terminal unread output indicator
   const [hasTerminalUnread, setHasTerminalUnread] = useState(false);
-
-  // Agent data (shared via agentStore — single polling loop)
-  const agentStore = useAgentStoreInstance();
-  const agents = useStore(agentStore, (s) => s.agents);
-  const agentTasks = useStore(agentStore, (s) => s.agentTasks);
-  const agentShowStaleBanner = useStore(agentStore, (s) => s.showStaleBanner);
-  const agentConnectionLost = useStore(agentStore, (s) => s.connectionLost);
-  const agentDisconnectedSince = useStore(
-    agentStore,
-    (s) => s.disconnectedSince,
-  );
-  const agentRetryNow = useStore(agentStore, (s) => s.retryNow);
 
   // Combine SSE and agent stale data states (show banner if either is stale)
   const showStaleBanner = sseShowStaleBanner || agentShowStaleBanner;

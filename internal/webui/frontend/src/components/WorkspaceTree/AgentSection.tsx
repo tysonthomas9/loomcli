@@ -1,15 +1,17 @@
 /**
  * AgentSection displays a flat list of agents in the sidebar.
- * Each agent shows name + status on line 1, repo · branch on line 2.
+ * Each agent row: avatar + name + status label on line 1, scope on line 2.
  * Merges fleet (live) agents with workspace config (placeholder) agents.
  */
 
 import { useMemo } from "react";
 import { useStore } from "zustand";
 
-import { AgentCard } from "@/components/AgentCard";
 import { useAgentStoreInstance, useWorkspaceContext } from "@/hooks";
 import type { LoomAgentStatus } from "@/types";
+import { parseLoomStatus } from "@/types";
+import { getStatusDotColor, getStatusLabel } from "@/components/AgentCard";
+import { getAvatarColor, shouldUseWhiteText } from "@/utils/colorUtils";
 
 import styles from "./AgentSection.module.css";
 
@@ -56,13 +58,26 @@ export function AgentSection({
       <div className={styles.header}>Agents</div>
       <div className={styles.list}>
         {agents.map((agent) => {
+          const parsed = parseLoomStatus(agent.status);
+          const avatarColor = getAvatarColor(agent.name);
+          const dotColor = getStatusDotColor(parsed.type);
+          const statusLabel = getStatusLabel(parsed);
+          const initial = agent.name.charAt(0) || "?";
+          const textColor = shouldUseWhiteText(avatarColor)
+            ? "#fff"
+            : "#1f2937";
+          const taskTitle = agentTasks?.[agent.name]?.title;
+          const isError = parsed.type === "error";
+
           const handleClick = onAgentClick
             ? () => onAgentClick(agent.name)
             : undefined;
+
           return (
             <div
               key={agent.name}
               className={styles.agentRow}
+              data-status={parsed.type}
               onClick={handleClick}
               role={handleClick ? "button" : undefined}
               tabIndex={handleClick ? 0 : undefined}
@@ -78,11 +93,30 @@ export function AgentSection({
                   : undefined
               }
             >
-              <AgentCard
-                agent={agent}
-                showRepoBadge={false}
-                taskTitle={agentTasks?.[agent.name]?.title}
-              />
+              <div className={styles.row}>
+                <div className={styles.avatarContainer}>
+                  <div
+                    className={styles.avatar}
+                    style={{ backgroundColor: avatarColor, color: textColor }}
+                    aria-hidden="true"
+                  >
+                    {initial}
+                  </div>
+                  <span
+                    className={styles.statusDot}
+                    style={{ backgroundColor: dotColor }}
+                    aria-hidden="true"
+                  />
+                </div>
+                <span className={styles.name}>{agent.name}</span>
+                <span
+                  className={styles.statusLabel}
+                  data-error={isError || undefined}
+                  title={taskTitle || statusLabel}
+                >
+                  {statusLabel}
+                </span>
+              </div>
               <div className={styles.scopeLine}>
                 {agent.cross_repo ? (
                   <span className={styles.scopeLabel}>workspace</span>

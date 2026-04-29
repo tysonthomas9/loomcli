@@ -46,10 +46,6 @@ export function searchBarUrl(opts?: {
   return `/test/search-bar${qs ? `?${qs}` : ""}`;
 }
 
-export function agentsSidebarUrl(): string {
-  return "/test/agents-sidebar";
-}
-
 export function workspaceTreeUrl(): string {
   return "/test/workspace-tree";
 }
