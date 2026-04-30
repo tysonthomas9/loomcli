@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 )
@@ -361,6 +362,31 @@ func TestNextEventID_Monotonic(t *testing.T) {
 	id2 := NextEventID()
 	if id2 <= id1 {
 		t.Errorf("expected id2 (%d) > id1 (%d)", id2, id1)
+	}
+}
+
+func TestWriteSSEEventUsesMutationTimestampAsEventID(t *testing.T) {
+	rr := httptest.NewRecorder()
+	sw, err := NewWriter(rr)
+	if err != nil {
+		t.Fatalf("NewWriter() error = %v", err)
+	}
+
+	err = writeSSEEvent(sw, &MutationPayload{
+		Type:      "update",
+		IssueID:   "issue-1",
+		Timestamp: "2026-04-30T10:20:30.456Z",
+	})
+	if err != nil {
+		t.Fatalf("writeSSEEvent() error = %v", err)
+	}
+
+	body := rr.Body.String()
+	if !strings.Contains(body, "id: 1777544430456\n") {
+		t.Fatalf("SSE event ID should be mutation timestamp cursor, got:\n%s", body)
+	}
+	if !strings.Contains(body, "event: mutation\n") {
+		t.Fatalf("SSE event missing mutation event name, got:\n%s", body)
 	}
 }
 

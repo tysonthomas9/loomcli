@@ -162,7 +162,18 @@ func writeSSEEvent(sw *Writer, mutation *MutationPayload) error {
 		slog.Error("SSE marshal error", "err", err)
 		return nil // marshal error is not a write error -- skip this event
 	}
-	return sw.WriteEvent(NextEventID(), "mutation", string(data))
+	return sw.WriteEvent(eventIDForMutation(mutation), "mutation", string(data))
+}
+
+func eventIDForMutation(mutation *MutationPayload) int64 {
+	if mutation == nil || mutation.Timestamp == "" {
+		return NextEventID()
+	}
+	ts, err := time.Parse(time.RFC3339Nano, mutation.Timestamp)
+	if err != nil {
+		return NextEventID()
+	}
+	return ts.UnixMilli()
 }
 
 // validateAuth checks the opaque token from the query parameter when auth

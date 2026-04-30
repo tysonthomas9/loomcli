@@ -436,6 +436,7 @@ func applyWorkspaceConfig(cfg *webui.ServerConfig) {
 		cfg.WorkspaceListFn = buildLegacyWorkspaceListFn
 		cfg.WorkspaceIDResolverFn = workspacemgr.ResolveWorkspaceID
 		cfg.InitialWorkspaceID = workspacemgr.ResolveInitialWorkspaceID()
+		applyFleetInitialWorkspaceFallback(cfg, true)
 		cfg.WorkspaceDeleteFn = workspacemgr.DeleteWorkspace
 		cfg.SetDefaultWorkspaceFn = workspacemgr.SetDefaultWorkspace
 		cfg.ClearDefaultWorkspaceFn = workspacemgr.ClearDefaultWorkspace
@@ -447,6 +448,7 @@ func applyWorkspaceConfig(cfg *webui.ServerConfig) {
 	cfg.WorkspaceListFn = serveadapter.BuildWorkspaceListFn(cfg.Store)
 	cfg.WorkspaceIDResolverFn = serveadapter.BuildWorkspaceIDResolverFn(cfg.Store)
 	cfg.InitialWorkspaceID = serveadapter.ResolveInitialWorkspaceID(cfg.Store)
+	applyFleetInitialWorkspaceFallback(cfg, false)
 	cfg.WorkspaceDeleteFn = serveadapter.BuildWorkspaceDeleteFn(cfg.Store)
 	cfg.SetDefaultWorkspaceFn = serveadapter.BuildSetDefaultWorkspaceFn(cfg.Store)
 	cfg.ClearDefaultWorkspaceFn = serveadapter.BuildClearDefaultWorkspaceFn()
@@ -455,6 +457,15 @@ func applyWorkspaceConfig(cfg *webui.ServerConfig) {
 	// on workspacemgr until that flow is reworked. The store-backed
 	// Create (loom workspace add) handles the metadata-only path.
 	cfg.WorkspaceCreateFn = workspacemgr.CreateWorkspace
+}
+
+func applyFleetInitialWorkspaceFallback(cfg *webui.ServerConfig, force bool) {
+	if cfg == nil || !cfg.FleetClient || cfg.FleetClientWorkspace == "" {
+		return
+	}
+	if force || cfg.InitialWorkspaceID == "" || cfg.InitialWorkspaceID == "workspace" || cfg.InitialWorkspaceID == "default" {
+		cfg.InitialWorkspaceID = cfg.FleetClientWorkspace
+	}
 }
 
 func buildLegacyWorkspaceListFn() (map[string]string, error) {
