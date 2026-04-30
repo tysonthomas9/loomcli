@@ -243,6 +243,19 @@ export function CreateWorkspaceModal({
         req.clone_urls = finalCloneUrls;
       }
 
+      let finalRepos = repos;
+      if (type === "empty" && repoInput.trim()) {
+        const trimmed = repoInput.trim();
+        if (!repos.includes(trimmed)) {
+          finalRepos = [...repos, trimmed];
+        }
+        setRepoInput("");
+      }
+
+      if (type === "empty" && finalRepos.length > 0) {
+        req.repos = finalRepos;
+      }
+
       if (path.trim()) {
         req.path = path.trim();
       }

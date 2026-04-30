@@ -16,6 +16,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
@@ -207,20 +208,25 @@ func runServe(cmd *cobra.Command, args []string) {
 	monitorHandlers := buildMonitorHandlers(collectDataFn, staleDetectorHandler)
 	workspacemgr.EnsureProjectRegistered()
 
-	// Open the fleet-db-backed store handle. In ModeLocal this spawns
-	// the embedded fleet-db subprocess; in ModeCloud it dials the
-	// configured URL. The handle is shared with the webui server so
-	// workspace/agent endpoints read from the store directly. Failure
-	// is fatal — there is no yaml fallback path post-migration.
-	storeHandle, storeErr := cmdstore.OpenStore(ctx)
+	// Open a fleet-db-backed store handle only for fleet-backed modes. Beads
+	// mode still serves workspace topology from the legacy yaml config; forcing
+	// a local embedded fleet-db binary there breaks minimal deployments like the
+	// parity container.
+	storeHandle, storeErr := openServeStore(ctx, fleetState)
 	if storeErr != nil {
 		log.Fatalf("failed to open fleet-db store: %v", storeErr)
 	}
-	defer storeHandle.Close()
+	if storeHandle != nil {
+		defer storeHandle.Close()
+	}
 
 	webuiErr := make(chan error, 1)
 	go func() {
-		cfg := buildServerConfig(monitorHandlers, fleetState, storeHandle.Store)
+		var st store.Store
+		if storeHandle != nil {
+			st = storeHandle.Store
+		}
+		cfg := buildServerConfig(monitorHandlers, fleetState, st)
 		if !serveNoDaemon {
 			cfg.DaemonStartupFn = workspacemgr.EnsureDaemonsForAllWorkspaces
 		}
@@ -229,6 +235,25 @@ func runServe(cmd *cobra.Command, args []string) {
 
 	logServerStartup()
 	awaitShutdown(cmd, stop, webuiErr, cancel)
+}
+
+func openServeStore(ctx context.Context, fs fleetState) (*bootstrap.StoreHandle, error) {
+	if cli.IsFleetActive() {
+		ensureFleetStoreEnv(fs.clientCfg)
+	}
+	if !cli.IsFleetActive() && !cli.IsFleetDBActive() && os.Getenv(bootstrap.EnvFleetDBURL) == "" {
+		return nil, nil
+	}
+	return cmdstore.OpenStore(ctx)
+}
+
+func ensureFleetStoreEnv(cfg config.FleetClientConfig) {
+	if os.Getenv(bootstrap.EnvFleetDBURL) == "" && cfg.URL != "" {
+		_ = os.Setenv(bootstrap.EnvFleetDBURL, cfg.URL)
+	}
+	if os.Getenv(bootstrap.EnvFleetDBActor) == "" && cfg.Actor != "" {
+		_ = os.Setenv(bootstrap.EnvFleetDBActor, cfg.Actor)
+	}
 }
 
 func checkTmuxInstalled() {
@@ -401,17 +426,21 @@ func applyFleetConfig(cfg *webui.ServerConfig, fs fleetState) {
 }
 
 // applyWorkspaceConfig wires the workspace-related closures the webui
-// server consumes. Reads + simple writes go through serveadapter
-// (store-backed). The CreateWorkspace closure stays on workspacemgr
-// because it coordinates disk operations (clone repos, set up
-// worktrees) that aren't part of the store contract; the noun-verb
-// CLI's `loom workspace add` covers the metadata-only path.
+// server consumes. Fleet-backed modes prefer the unified store; beads mode
+// keeps the yaml-backed workspacemgr path so minimal local deployments do not
+// require an embedded fleet-db binary just to serve the UI.
 func applyWorkspaceConfig(cfg *webui.ServerConfig) {
 	if cfg.Store == nil {
-		// runServe makes OpenStore failure fatal, so this should be
-		// unreachable. Defensive panic surfaces a wiring bug loudly
-		// rather than silently degrading.
-		panic("applyWorkspaceConfig: cfg.Store is nil")
+		cfg.WorkspaceConfigFn = workspacemgr.BuildWorkspaceInfo
+		cfg.WorkspaceConfigByIDFn = workspacemgr.BuildWorkspaceInfoForID
+		cfg.WorkspaceListFn = buildLegacyWorkspaceListFn
+		cfg.WorkspaceIDResolverFn = workspacemgr.ResolveWorkspaceID
+		cfg.InitialWorkspaceID = workspacemgr.ResolveInitialWorkspaceID()
+		cfg.WorkspaceDeleteFn = workspacemgr.DeleteWorkspace
+		cfg.SetDefaultWorkspaceFn = workspacemgr.SetDefaultWorkspace
+		cfg.ClearDefaultWorkspaceFn = workspacemgr.ClearDefaultWorkspace
+		cfg.WorkspaceCreateFn = workspacemgr.CreateWorkspace
+		return
 	}
 	cfg.WorkspaceConfigFn = serveadapter.BuildWorkspaceConfigFn(cfg.Store)
 	cfg.WorkspaceConfigByIDFn = serveadapter.BuildWorkspaceConfigByIDFn(cfg.Store)
@@ -426,6 +455,25 @@ func applyWorkspaceConfig(cfg *webui.ServerConfig) {
 	// on workspacemgr until that flow is reworked. The store-backed
 	// Create (loom workspace add) handles the metadata-only path.
 	cfg.WorkspaceCreateFn = workspacemgr.CreateWorkspace
+}
+
+func buildLegacyWorkspaceListFn() (map[string]string, error) {
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		return nil, err
+	}
+	if cfg == nil || len(cfg.Workspaces) == 0 {
+		return map[string]string{}, nil
+	}
+	out := make(map[string]string, len(cfg.Workspaces))
+	for name, ws := range cfg.Workspaces {
+		id := ws.ID
+		if id == "" {
+			id = name
+		}
+		out[id] = ws.Path
+	}
+	return out, nil
 }
 
 func applyCORSConfig(cfg *webui.ServerConfig) {

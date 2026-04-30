@@ -4,12 +4,15 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 )
@@ -124,6 +127,54 @@ func TestWriteJSON(t *testing.T) {
 				t.Errorf("Response is not valid JSON: %v", err)
 			}
 		})
+	}
+}
+
+func TestApplyWorkspaceConfig_NilStoreUsesLegacyFns(t *testing.T) {
+	cfg := webui.ServerConfig{}
+
+	applyWorkspaceConfig(&cfg)
+
+	if cfg.WorkspaceConfigFn == nil {
+		t.Fatal("WorkspaceConfigFn was nil")
+	}
+	if cfg.WorkspaceConfigByIDFn == nil {
+		t.Fatal("WorkspaceConfigByIDFn was nil")
+	}
+	if cfg.WorkspaceListFn == nil {
+		t.Fatal("WorkspaceListFn was nil")
+	}
+	if cfg.WorkspaceIDResolverFn == nil {
+		t.Fatal("WorkspaceIDResolverFn was nil")
+	}
+	if cfg.WorkspaceDeleteFn == nil {
+		t.Fatal("WorkspaceDeleteFn was nil")
+	}
+	if cfg.SetDefaultWorkspaceFn == nil {
+		t.Fatal("SetDefaultWorkspaceFn was nil")
+	}
+	if cfg.ClearDefaultWorkspaceFn == nil {
+		t.Fatal("ClearDefaultWorkspaceFn was nil")
+	}
+	if cfg.WorkspaceCreateFn == nil {
+		t.Fatal("WorkspaceCreateFn was nil")
+	}
+}
+
+func TestEnsureFleetStoreEnv_UsesFleetClientConfig(t *testing.T) {
+	t.Setenv(bootstrap.EnvFleetDBURL, "")
+	t.Setenv(bootstrap.EnvFleetDBActor, "")
+
+	ensureFleetStoreEnv(config.FleetClientConfig{
+		URL:   "http://fleet-db:8080",
+		Actor: "parity-harness",
+	})
+
+	if got := os.Getenv(bootstrap.EnvFleetDBURL); got != "http://fleet-db:8080" {
+		t.Fatalf("%s = %q, want %q", bootstrap.EnvFleetDBURL, got, "http://fleet-db:8080")
+	}
+	if got := os.Getenv(bootstrap.EnvFleetDBActor); got != "parity-harness" {
+		t.Fatalf("%s = %q, want %q", bootstrap.EnvFleetDBActor, got, "parity-harness")
 	}
 }
 

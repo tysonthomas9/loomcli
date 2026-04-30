@@ -407,9 +407,31 @@ func (s *workspaceServiceImpl) GetWorkspaceJob(_ context.Context, jobID string) 
 	return job, nil
 }
 
-func (s *workspaceServiceImpl) DeleteWorkspace(_ context.Context, wsID string) (*ops.WorkspaceData, error) {
+func (s *workspaceServiceImpl) DeleteWorkspace(ctx context.Context, wsID string) (*ops.WorkspaceData, error) {
 	if s.deleteFn == nil {
 		return nil, ErrUnavailable("workspace deletion not available")
+	}
+
+	if s.store != nil {
+		key := wsID
+		if _, err := s.store.Workspaces().Get(ctx, key); err != nil {
+			if ws, byNameErr := s.store.Workspaces().GetByName(ctx, wsID); byNameErr == nil && ws != nil {
+				key = ws.Key
+			} else {
+				return nil, ErrNotFound(fmt.Sprintf("workspace with ID %q not found", wsID))
+			}
+		}
+		if err := s.deleteFn(key); err != nil {
+			errMsg := err.Error()
+			if strings.Contains(errMsg, "not found") {
+				return nil, ErrNotFound(errMsg)
+			}
+			if strings.Contains(errMsg, "has running agents") {
+				return nil, ErrConflict(errMsg)
+			}
+			return nil, ErrInternal(errMsg, err)
+		}
+		return s.refreshWorkspaceData()
 	}
 
 	name, err := s.resolveWorkspaceNameByUUID(wsID)

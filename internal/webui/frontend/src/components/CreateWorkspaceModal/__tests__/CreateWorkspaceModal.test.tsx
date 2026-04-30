@@ -604,6 +604,35 @@ describe("CreateWorkspaceModal", () => {
       });
     });
 
+    it("sends pending repo path when empty workspace is submitted", async () => {
+      mockCreateWorkspace.mockResolvedValue(MOCK_CREATE_RESULT);
+
+      render(
+        <CreateWorkspaceModal
+          isOpen={true}
+          onClose={onClose}
+          onSuccess={onSuccess}
+        />,
+      );
+
+      selectTypeCard("empty");
+      fireEvent.change(screen.getByTestId("create-workspace-name"), {
+        target: { value: "test-ws" },
+      });
+      fireEvent.change(screen.getByTestId("create-workspace-repo-path"), {
+        target: { value: "/workspace/api" },
+      });
+      fireEvent.click(screen.getByTestId("create-workspace-submit"));
+
+      await waitFor(() => {
+        expect(mockCreateWorkspace).toHaveBeenCalledWith({
+          name: "test-ws",
+          type: "empty",
+          repos: ["/workspace/api"],
+        });
+      });
+    });
+
     it("sends clone_urls when type is clone", async () => {
       mockCreateWorkspace.mockResolvedValue(MOCK_CREATE_RESULT);
 

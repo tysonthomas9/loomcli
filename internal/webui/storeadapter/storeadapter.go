@@ -36,7 +36,11 @@ func BuildActiveWorkspaceData(ctx context.Context, s store.Store) (*ops.Workspac
 	key, err := bootstrap.ResolveActiveWorkspaceKey(ctx, s.Workspaces())
 	if err != nil {
 		if errors.Is(err, bootstrap.ErrNoActiveWorkspace) || errors.Is(err, domain.ErrNotFound) {
-			return nil, nil
+			key, err = firstWorkspaceKey(ctx, s)
+			if err != nil || key == "" {
+				return nil, err
+			}
+			return BuildWorkspaceDataForKey(ctx, s, key)
 		}
 		return nil, err
 	}
@@ -211,6 +215,18 @@ func loadSummaries(ctx context.Context, s store.Store, activeKey string) ([]ops.
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out, nil
+}
+
+func firstWorkspaceKey(ctx context.Context, s store.Store) (string, error) {
+	all, err := s.Workspaces().List(ctx)
+	if err != nil {
+		return "", fmt.Errorf("storeadapter: list workspaces: %w", err)
+	}
+	if len(all) == 0 {
+		return "", nil
+	}
+	sort.Slice(all, func(i, j int) bool { return all[i].Name < all[j].Name })
+	return all[0].Key, nil
 }
 
 // resolveWorkspacePath looks up the per-machine workspace path from the

@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -10,7 +11,9 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/configlock"
 )
@@ -291,6 +294,14 @@ func saveWorkspaceConfig(cfg *config.LoomConfig, wsName, wsDir string, repos []c
 }
 
 func runWorkspaceList(cmd *cobra.Command, args []string) {
+	if cli.IsFleetDBActive() || cli.IsFleetActive() {
+		if err := runFleetWorkspaceList(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	cfg, err := config.LoadConfig()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -333,6 +344,82 @@ func runWorkspaceList(cmd *cobra.Command, args []string) {
 
 		fmt.Printf("%-20s %s (%d repos, %s)%s\n", name, ws.Path, len(ws.Repos), dirStatus, defaultMarker)
 	}
+}
+
+func runFleetWorkspaceList() error {
+	return cmdstore.WithStore(func(ctx context.Context, h *bootstrap.StoreHandle) error {
+		workspaces, err := h.Store.Workspaces().List(ctx)
+		if err != nil {
+			return fmt.Errorf("list workspaces: %w", err)
+		}
+		if len(workspaces) == 0 {
+			fmt.Println("No workspaces configured. Run 'loom workspace add <KEY>' to create one.")
+			return nil
+		}
+
+		sc, _ := bootstrap.LoadStateCache()
+		pathByKey := map[string]string{}
+		activeKey := ""
+		if sc != nil {
+			activeKey = sc.LastWorkspace
+			for key, local := range sc.Workspaces {
+				pathByKey[key] = local.Path
+			}
+		}
+
+		sort.Slice(workspaces, func(i, j int) bool { return workspaces[i].Name < workspaces[j].Name })
+		if wsListJSON {
+			type fleetWorkspaceListItem struct {
+				Key       string `json:"key"`
+				Name      string `json:"name"`
+				Path      string `json:"path,omitempty"`
+				Repos     int    `json:"repos"`
+				State     string `json:"state"`
+				IsDefault bool   `json:"is_default"`
+			}
+			items := make([]fleetWorkspaceListItem, 0, len(workspaces))
+			for _, ws := range workspaces {
+				repos, err := h.Store.Repos().List(ctx, ws.Key)
+				if err != nil {
+					return fmt.Errorf("list repos for %s: %w", ws.Key, err)
+				}
+				state := string(ws.State)
+				if state == "" {
+					state = "ready"
+				}
+				items = append(items, fleetWorkspaceListItem{
+					Key:       ws.Key,
+					Name:      ws.Name,
+					Path:      pathByKey[ws.Key],
+					Repos:     len(repos),
+					State:     state,
+					IsDefault: ws.Key == activeKey,
+				})
+			}
+			return cmdstore.WriteJSON(items)
+		}
+
+		for _, ws := range workspaces {
+			repos, err := h.Store.Repos().List(ctx, ws.Key)
+			if err != nil {
+				return fmt.Errorf("list repos for %s: %w", ws.Key, err)
+			}
+			state := string(ws.State)
+			if state == "" {
+				state = "ready"
+			}
+			defaultMarker := ""
+			if ws.Key == activeKey {
+				defaultMarker = " *"
+			}
+			path := pathByKey[ws.Key]
+			if path == "" {
+				path = "(no local checkout)"
+			}
+			fmt.Printf("%-20s %s (%d repos, %s)%s\n", ws.Key, path, len(repos), state, defaultMarker)
+		}
+		return nil
+	})
 }
 
 func runWorkspaceRemove(cmd *cobra.Command, args []string) {

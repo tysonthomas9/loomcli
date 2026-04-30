@@ -21,10 +21,15 @@ ARG GO_VERSION=1.25.6
 # ── Stage 1: build loom + bd ──
 FROM golang:${GO_VERSION}-bookworm AS builder
 WORKDIR /src
-COPY . .
+COPY go.mod go.sum ./
+COPY third_party/beads/go.mod third_party/beads/go.sum ./third_party/beads/
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod download
+COPY cmd ./cmd
+COPY internal ./internal
+COPY third_party/beads ./third_party/beads
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    go mod download && \
     CGO_ENABLED=0 go build -o /out/loom ./cmd/loom && \
     if [ -f third_party/beads/cmd/bd/main.go ]; then \
         cd third_party/beads && CGO_ENABLED=0 go build -o /out/bd ./cmd/bd; \

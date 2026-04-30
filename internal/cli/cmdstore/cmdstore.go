@@ -23,6 +23,7 @@ import (
 // OpenStore opens a fleet-db-backed Store appropriate for the current
 // Mode. Returns the handle so callers can `defer h.Close()`.
 func OpenStore(ctx context.Context) (*bootstrap.StoreHandle, error) {
+	ensureFleetDBEnvFromFleetEnv()
 	dataDir := bootstrap.LoomDir()
 	if dataDir == "" {
 		return nil, errors.New("cannot resolve loom directory (set HOME or LOOM_CONFIG_DIR)")
@@ -32,6 +33,19 @@ func OpenStore(ctx context.Context) (*bootstrap.StoreHandle, error) {
 		return nil, fmt.Errorf("open store: %w", err)
 	}
 	return handle, nil
+}
+
+func ensureFleetDBEnvFromFleetEnv() {
+	if os.Getenv(bootstrap.EnvFleetDBURL) == "" {
+		if v := os.Getenv("LOOM_FLEET_URL"); v != "" {
+			_ = os.Setenv(bootstrap.EnvFleetDBURL, v)
+		}
+	}
+	if os.Getenv(bootstrap.EnvFleetDBActor) == "" {
+		if v := os.Getenv("LOOM_FLEET_ACTOR"); v != "" {
+			_ = os.Setenv(bootstrap.EnvFleetDBActor, v)
+		}
+	}
 }
 
 // SignalContext returns a context cancelled on SIGINT/SIGTERM. CLI

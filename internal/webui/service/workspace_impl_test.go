@@ -5,7 +5,10 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/ops"
+	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 )
 
@@ -168,5 +171,32 @@ func TestGetWorkspace_ConfigFnFallback(t *testing.T) {
 	}
 	if activeCount != 1 {
 		t.Errorf("expected exactly 1 active workspace, got %d", activeCount)
+	}
+}
+
+func TestDeleteWorkspace_StoreBackedUsesWorkspaceKey(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "ALPHA", Name: "Alpha Project"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+
+	var deletedKey string
+	svc := NewWorkspaceService(WorkspaceServiceConfig{
+		Store: st,
+		DeleteFn: func(key string) error {
+			deletedKey = key
+			return st.Workspaces().Delete(ctx, key)
+		},
+	})
+
+	if _, err := svc.DeleteWorkspace(ctx, "ALPHA"); err != nil {
+		t.Fatalf("DeleteWorkspace returned error: %v", err)
+	}
+	if deletedKey != "ALPHA" {
+		t.Fatalf("deleted key = %q, want ALPHA", deletedKey)
+	}
+	if _, err := st.Workspaces().Get(ctx, "ALPHA"); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("workspace still exists or unexpected error: %v", err)
 	}
 }

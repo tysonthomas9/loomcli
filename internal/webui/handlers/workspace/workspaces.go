@@ -42,3 +42,25 @@ func HandleGetWorkspace(svc service.WorkspaceService) http.HandlerFunc {
 		handler.WriteJSON(w, http.StatusOK, WorkspaceResponse{Success: true, Data: data})
 	}
 }
+
+// HandleListWorkspaceRepos returns GET /api/workspaces/{ws}/repos — the
+// workspace's repo list as a lightweight endpoint for clients that do not need
+// the full WorkspaceData payload.
+func HandleListWorkspaceRepos(svc service.WorkspaceService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		wsID := strings.TrimSpace(r.PathValue("ws"))
+		if wsID == "" {
+			handler.RespondError(w, http.StatusBadRequest, "workspace ID is required")
+			return
+		}
+		data, err := svc.GetWorkspace(r.Context(), wsID)
+		if err != nil {
+			handler.HandleServiceError(w, err)
+			return
+		}
+		handler.WriteJSON(w, http.StatusOK, map[string]interface{}{
+			"success": true,
+			"repos":   data.Repos,
+		})
+	}
+}

@@ -43,6 +43,18 @@ FDB_DATA="fdb -server ${FLEET_URL} -workspace ${FLEET_WORKSPACE} -actor ${ACTOR}
 echo "[seed] fdb admin base: ${FDB_ADMIN}"
 echo "[seed] fdb data  base: ${FDB_DATA}"
 
+echo "[seed] waiting for fleet-db admin API..."
+for i in $(seq 1 30); do
+    if ${FDB_ADMIN} workspace list > /dev/null 2>&1; then
+        break
+    fi
+    if [ "$i" = "30" ]; then
+        echo "[seed] FATAL: fleet-db admin API did not become ready"
+        exit 5
+    fi
+    sleep 1
+done
+
 # ──────────────────────────────────────────────────────────────────
 # Phase 1: ensure fleet-db PARITY workspace exists (via fdb)
 #
@@ -56,7 +68,7 @@ echo "[seed] fdb data  base: ${FDB_DATA}"
 # fleet=N*13 vs beads=13.
 # ──────────────────────────────────────────────────────────────────
 echo "[seed] resetting fleet-db workspace ${FLEET_WORKSPACE} for a clean seed..."
-DELETE_OUT=$(${FDB_ADMIN} workspace delete --key "${FLEET_WORKSPACE}" --confirm 2>&1 || true)
+DELETE_OUT=$(${FDB_ADMIN} workspace delete "${FLEET_WORKSPACE}" --force 2>&1 || true)
 case "${DELETE_OUT}" in
     *not_found*|*does\ not\ exist*|*"not found"*)
         echo "[seed]   ≈ no existing workspace to delete (first run)" ;;

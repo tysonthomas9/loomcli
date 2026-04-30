@@ -41,34 +41,32 @@ func mirrorWorkspaceToStore(wsName string, wsID string, repos []config.RepoConfi
 	if !isValidStoreKey(key) {
 		key = wsName
 	}
-	go func() {
-		ctx, cancel := cmdstore.SignalContext()
-		defer cancel()
-		h, err := cmdstore.OpenStore(ctx)
-		if err != nil {
-			slog.Debug("store mirror skipped (open store)", "workspace", wsName, "err", err)
-			return
-		}
-		defer h.Close()
-		if _, err := h.Store.Workspaces().Create(ctx, storepkg.WorkspaceCreate{
-			Key:           key,
-			Name:          wsName,
-			DefaultBranch: "main",
+	ctx, cancel := cmdstore.SignalContext()
+	defer cancel()
+	h, err := cmdstore.OpenStore(ctx)
+	if err != nil {
+		slog.Debug("store mirror skipped (open store)", "workspace", wsName, "err", err)
+		return
+	}
+	defer h.Close()
+	if _, err := h.Store.Workspaces().Create(ctx, storepkg.WorkspaceCreate{
+		Key:           key,
+		Name:          wsName,
+		DefaultBranch: "main",
+	}); err != nil && !errors.Is(err, domain.ErrAlreadyExists) {
+		slog.Debug("store mirror failed (workspace create)", "workspace", wsName, "err", err)
+		return
+	}
+	for _, r := range repos {
+		if _, err := h.Store.Repos().Create(ctx, storepkg.RepoCreate{
+			WorkspaceKey: key,
+			Name:         r.Name,
+			SourceRepoID: r.SourceRepoID,
 		}); err != nil && !errors.Is(err, domain.ErrAlreadyExists) {
-			slog.Debug("store mirror failed (workspace create)", "workspace", wsName, "err", err)
-			return
+			slog.Debug("store mirror failed (repo create)",
+				"workspace", wsName, "repo", r.Name, "err", err)
 		}
-		for _, r := range repos {
-			if _, err := h.Store.Repos().Create(ctx, storepkg.RepoCreate{
-				WorkspaceKey: key,
-				Name:         r.Name,
-				SourceRepoID: r.SourceRepoID,
-			}); err != nil && !errors.Is(err, domain.ErrAlreadyExists) {
-				slog.Debug("store mirror failed (repo create)",
-					"workspace", wsName, "repo", r.Name, "err", err)
-			}
-		}
-	}()
+	}
 }
 
 // mirrorWorkspaceDelete removes a workspace from the fleet-db store
@@ -81,19 +79,17 @@ func mirrorWorkspaceDelete(wsName, wsID string) {
 	if !isValidStoreKey(key) {
 		return
 	}
-	go func() {
-		ctx, cancel := cmdstore.SignalContext()
-		defer cancel()
-		h, err := cmdstore.OpenStore(ctx)
-		if err != nil {
-			slog.Debug("store mirror delete skipped (open store)", "workspace", wsName, "err", err)
-			return
-		}
-		defer h.Close()
-		if err := h.Store.Workspaces().Delete(ctx, key); err != nil && !errors.Is(err, domain.ErrNotFound) {
-			slog.Debug("store mirror delete failed", "workspace", wsName, "err", err)
-		}
-	}()
+	ctx, cancel := cmdstore.SignalContext()
+	defer cancel()
+	h, err := cmdstore.OpenStore(ctx)
+	if err != nil {
+		slog.Debug("store mirror delete skipped (open store)", "workspace", wsName, "err", err)
+		return
+	}
+	defer h.Close()
+	if err := h.Store.Workspaces().Delete(ctx, key); err != nil && !errors.Is(err, domain.ErrNotFound) {
+		slog.Debug("store mirror delete failed", "workspace", wsName, "err", err)
+	}
 }
 
 // isValidStoreKey reports whether s satisfies fleet-db's workspace key

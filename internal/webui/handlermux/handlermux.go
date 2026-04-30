@@ -72,6 +72,7 @@ func (m *WorkspaceOpsModule) WithWorkspacePathResolver(fn hterminal.WorkspacePat
 
 // Register implements Module.
 func (m *WorkspaceOpsModule) Register(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/workspaces/{ws}/repos", workspace.HandleListWorkspaceRepos(m.workspaceSvc))
 	mux.HandleFunc("GET /api/workspaces/{ws}/stats",
 		healthhandlers.HandleStatsWithBackendFallback(m.multiPool, healthhandlers.IssueBackendFn(m.issueBackendFn)))
 	mux.HandleFunc("GET /api/workspaces/{ws}/ready",
@@ -97,6 +98,9 @@ func HandleListWorkspaces(svc service.WorkspaceService) http.HandlerFunc {
 }
 func HandleGetWorkspace(svc service.WorkspaceService) http.HandlerFunc {
 	return workspace.HandleGetWorkspace(svc)
+}
+func HandleListWorkspaceRepos(svc service.WorkspaceService) http.HandlerFunc {
+	return workspace.HandleListWorkspaceRepos(svc)
 }
 func HandleGetWorkspaceJob(svc service.WorkspaceService) http.HandlerFunc {
 	return workspace.HandleGetWorkspaceJob(svc)
