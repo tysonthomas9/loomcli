@@ -3,6 +3,9 @@
 **Status:** Approved
 **Date:** 2026-03-13
 **Approach:** Pragmatic Hybrid (3-phase)
+**Related:** See `docs/design/distributed-control-plane.md` for the
+target local/global/observed state boundary and distributed runtime
+architecture.
 
 ## Overview
 
