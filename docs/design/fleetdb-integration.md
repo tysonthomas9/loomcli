@@ -5,7 +5,9 @@
 **Approach:** Pragmatic Hybrid (3-phase)
 **Related:** See `docs/design/distributed-control-plane.md` for the
 target local/global/observed state boundary and distributed runtime
-architecture.
+architecture. See
+`docs/design/distributed-control-plane-data-model.md` for the current
+vs proposed model review.
 
 ## Overview
 

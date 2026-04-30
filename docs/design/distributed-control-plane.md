@@ -2,7 +2,8 @@
 
 **Status:** Draft
 **Date:** 2026-04-30
-**Related:** `loomcli-26v50`, `loomcli-37h1h`
+**Related:** `loomcli-26v50`, `loomcli-37h1h`,
+`docs/design/distributed-control-plane-data-model.md`
 
 ## Purpose
 
@@ -21,6 +22,10 @@ The central rule is simple:
 The current codebase only partially follows this rule. This document
 records the intended boundary, the main gotchas, and the migration path
 needed to make the system coherent.
+
+For a model-by-model comparison of the current codebase against this
+target architecture, see
+`docs/design/distributed-control-plane-data-model.md`.
 
 ## Terms
 
