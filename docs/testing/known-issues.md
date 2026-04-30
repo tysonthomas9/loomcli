@@ -2,26 +2,9 @@
 
 Documented failures and their tracking tickets. Tests that hit these should NOT be reported as part of a passing run — they're either tracking debt or environment quirks.
 
-## `loomcli-26v50.40` — fleet-db daemon PUT loses fields (BUG, P2)
+## `loomcli-26v50.40` — fleet-db daemon PUT loses fields (FIXED)
 
-**Surfaces in:** `e2e-cli.md` test D5
-
-**Symptom:** `PUT /api/v1/{ws}/daemon` with an empty body should clear all optional fields (PUT replace semantics). Instead it preserves the prior values silently. Reproduction:
-
-```bash
-curl -X PUT -d '{"max_agents":7}' http://localhost:18095/api/v1/MYWS/daemon  # SET
-curl http://localhost:18095/api/v1/MYWS/daemon                              # → max_agents:7
-curl -X PUT -d '{}' http://localhost:18095/api/v1/MYWS/daemon               # CLEAR (empty body)
-curl http://localhost:18095/api/v1/MYWS/daemon                              # → STILL max_agents:7  ← bug
-```
-
-**Root cause:** `internal/projection/handlers.go:handleDaemonUpdate` calls `SetFields` (additive) regardless of `event.Metadata["mode"]`. PUT semantics require deleting the hash before re-writing.
-
-**Fix:** when `event.Metadata["mode"] == "upsert"`, call `pc.Delete(DaemonProfileKey)` before SetFields.
-
-**Workaround:** use PATCH endpoint with `clear_*` flags instead of PUT with absent fields. The role + repo + agent PATCH endpoints already work this way.
-
-**Test handling:** D5 is marked EXPECTED FAIL. Once `.40` lands, replace D5 with the positive assertion: PUT empty body → next GET response has no `max_agents` field.
+**Status:** fixed. `internal/projection/handlers.go:handleDaemonUpdate` now `Delete`s the daemon profile hash before `SetFields` when `event.Metadata["mode"] == "upsert"`. PATCH semantics (mode=patch or unset) preserved. D5 in `e2e-cli.md` should now PASS — PUT with empty body actually clears the storage hash. Regression guard: `TestProjectEvent_DaemonUpdate_{Upsert,Patch}*` in fleet-db's `internal/projection/projector_test.go`.
 
 ---
 

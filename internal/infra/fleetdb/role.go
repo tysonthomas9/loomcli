@@ -176,9 +176,6 @@ func (s *roleStore) Update(ctx context.Context, ws, name string, patch store.Rol
 	if err := s.client.do(ctx, "PATCH", "/api/v1/"+pathEscape(ws)+"/roles/"+pathEscape(name), body, &resp); err != nil {
 		return nil, err
 	}
-	if resp.Name == "" {
-		return s.Get(ctx, ws, name)
-	}
 	return resp.toDomain(), nil
 }
 

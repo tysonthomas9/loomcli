@@ -122,11 +122,11 @@ func (s *workspaceStore) Update(ctx context.Context, key string, patch store.Wor
 		s := string(*patch.State)
 		body.State = &s
 	}
-	if err := s.client.do(ctx, "PATCH", "/api/v1/admin/workspaces/"+pathEscape(key), body, nil); err != nil {
+	var resp workspaceWire
+	if err := s.client.do(ctx, "PATCH", "/api/v1/admin/workspaces/"+pathEscape(key), body, &resp); err != nil {
 		return nil, err
 	}
-	// fleet-db PATCH returns 204 No Content. Re-Get for the canonical view.
-	return s.Get(ctx, key)
+	return resp.toDomain(), nil
 }
 
 func (s *workspaceStore) Delete(ctx context.Context, key string) error {

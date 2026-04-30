@@ -127,9 +127,6 @@ func (s *agentStore) Update(ctx context.Context, ws, name string, patch store.Ag
 	if err := s.client.do(ctx, "PATCH", "/api/v1/"+pathEscape(ws)+"/agents/"+pathEscape(name), body, &resp); err != nil {
 		return nil, err
 	}
-	if resp.Name == "" {
-		return s.Get(ctx, ws, name)
-	}
 	return resp.toDomain(), nil
 }
 

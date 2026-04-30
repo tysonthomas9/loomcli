@@ -102,10 +102,6 @@ func (s *repoStore) Update(ctx context.Context, ws, name string, patch store.Rep
 	if err := s.client.do(ctx, "PATCH", "/api/v1/"+pathEscape(ws)+"/repos/"+pathEscape(name), body, &resp); err != nil {
 		return nil, err
 	}
-	// PATCH may return 204 (no body); re-Get for canonical view.
-	if resp.Name == "" {
-		return s.Get(ctx, ws, name)
-	}
 	return resp.toDomain(), nil
 }
 

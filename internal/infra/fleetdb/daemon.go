@@ -154,8 +154,5 @@ func (s *daemonStore) Upsert(ctx context.Context, profile *domain.DaemonProfile)
 	if err := s.client.do(ctx, "PUT", "/api/v1/"+pathEscape(profile.WorkspaceKey)+"/daemon", body, &resp); err != nil {
 		return nil, err
 	}
-	if resp.WorkspaceKey == "" {
-		return s.Get(ctx, profile.WorkspaceKey)
-	}
 	return resp.toDomain(), nil
 }
