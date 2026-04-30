@@ -18,21 +18,29 @@ export PATH="$HOME/.local/bin:$PATH"
 
 ## Quick Start
 
-```bash
-# 1. Initialize your project (bd is included with the loom install)
-loom init
+State lives in a fleet-db service. Local mode auto-spawns an embedded
+fleet-db on first command (zero install). Cloud mode points loom at a
+shared fleet-db via `LOOM_FLEET_DB_URL`.
 
-# 3. Create tasks
+```bash
+# 1. Create a workspace + a repo + a role + an agent
+loom workspace add ACME             # Creates workspace ACME, sets it active
+loom repo add my-app --url git@github.com:org/my-app.git
+loom role set reviewer --prompt-file ./prompts/reviewer.txt
+loom agentdef add falcon --role reviewer --repo my-app
+
+# 2. Create tasks (bd is included with the loom install)
 bd create --title="Add login feature" --type=feature --priority=2
 bd create --title="Fix checkout crash on empty cart" --type=bug --priority=1
-bd create --title="Refactor auth middleware" --type=task --priority=3
-bd create --title="User onboarding flow" --type=epic --priority=2
 
-# 4. Run agents
+# 3. Run agents
 loom plan falcon              # Planning agent creates designs
 loom lead                     # Review and approve plans
 loom task falcon              # Implementation agent builds it
 ```
+
+In cloud mode (shared fleet-db), set `LOOM_FLEET_DB_URL=https://fleet.example.com`
+before running any of the above. Local mode is the default.
 
 ## Web UI
 
@@ -109,9 +117,12 @@ reset      Hard reset worktree to a specific branch
 
 ### Configuration
 ```
+workspace  Create/list/show workspaces (workspace add|use|show|status)
+repo       Manage repos within a workspace (repo add|remove|list|show)
+role       Manage agent roles (role set|unset|show|list)
+agentdef   Manage agent definitions (agentdef add|remove|update|list|show)
+daemon     Daemon profile + lifecycle (daemon profile show|set|unset)
 init       Guided setup wizard (beads init, worktree creation)
-config     Manage workspace configuration (~/.loom/config.yaml)
-workspace  Manage multi-repo workspaces
 ```
 
 ### Server
@@ -140,8 +151,9 @@ loom monitor                  # Live terminal dashboard
 loom serve                    # Web UI at http://localhost:8080
 
 # Multi-agent supervision
-loom daemon                   # Start daemon (reads loom.yaml)
-loom daemon status            # Check daemon status
+loom daemon profile set --max-agents=10   # Configure daemon profile (stored in fleet-db)
+loom daemon                               # Start daemon
+loom daemon status                        # Check daemon status
 ```
 
 ## Auto Mode
@@ -232,58 +244,57 @@ loom plan falcon --backend codex      # Flag (highest priority)
 LOOM_BACKEND=codex loom plan falcon   # Environment variable
 ```
 
-Or configure in `loom.yaml`:
-```yaml
-backend: codex
+Or set the workspace daemon profile so agents inherit it:
+```bash
+loom daemon profile set --backend codex
 ```
 
-**Resolution order:** `--backend` flag > `LOOM_BACKEND` env > project `loom.yaml` > global `~/.loom/config.yaml` > default `claude`
+**Resolution order:** `--backend` flag > `LOOM_BACKEND` env > workspace daemon profile > default `claude`
 
 ## Configuration
 
-### Project-local: `loom.yaml`
+All loom state lives in fleet-db (workspaces, repos, roles, agent definitions,
+daemon profiles, issues). Edit it via the noun-verb CLI:
 
-```yaml
-backend: codex
+```bash
+# Workspace lifecycle
+loom workspace add ACME                                  # Create workspace ACME
+loom workspace use ACME                                  # Set ACME as the active workspace
+loom workspace show                                      # Show the active workspace + state
+loom workspace list                                      # All workspaces in the fleet-db
 
-daemon:
-  max_agents: 20
-  restart_policy:
-    max_retries: 3
-    backoff_initial: 2
-    backoff_max: 300
-    output_timeout: 900
+# Repos (workspace-scoped)
+loom repo add frontend --url git@github.com:org/frontend.git
+loom repo list
+loom repo show frontend
+loom repo remove frontend
 
-roles:
-  reviewer:
-    description: "Code reviewer"
-    prompt_file: ./prompts/reviewer.txt
-    task_filter: has_design
+# Roles (workspace-scoped)
+loom role set reviewer --prompt-file ./prompts/reviewer.txt --backend codex
+loom role show reviewer
+loom role unset reviewer --backend                       # Clear a single field
+loom role list
 
-agents:
-  - worktree: falcon
-    role: plan
-    auto: true
-  - worktree: nova
-    role: task
-    auto: true
+# Agent definitions (workspace-scoped)
+loom agentdef add falcon --role reviewer --repo frontend
+loom agentdef update falcon --auto
+loom agentdef list
+
+# Daemon profile (one per workspace)
+loom daemon profile set --max-agents=20 --log-level=debug
+loom daemon profile show
+loom daemon profile unset --max-agents                   # Clear an int field
 ```
 
-### Global: `~/.loom/config.yaml`
+### Storage modes
 
-Used for workspace mode (multi-repo):
-```yaml
-default_workspace: myproject
-workspaces:
-  myproject:
-    path: /path/to/workspace
-    repos:
-      - name: frontend
-        path: /path/to/workspace/frontend
-        default_branch: main
-      - name: backend
-        path: /path/to/workspace/backend
-```
+| Mode | Trigger | fleet-db location | Notes |
+|---|---|---|---|
+| **Local** (default) | `LOOM_FLEET_DB_URL` unset | Embedded subprocess auto-spawned per CLI invocation. Backed by an in-process miniredis with a JSON snapshot at `~/.loom/fleet-db/redis-snapshot.json`. | Zero-install. The miniredis snapshot is the source of truth for backups — copy that file. |
+| **Cloud** | `LOOM_FLEET_DB_URL=<https://...>` | External fleet-db (shared across loom installs). Requires `LOOM_FLEET_DB_API_KEY` for auth, or `LOOM_FLEET_DB_ACTOR=<name>` in dev mode. | Multi-user / multi-machine. State stays on the server. |
+
+`~/.loom/state.json` is a per-user cache of the last-active workspace key
+and is regenerable — not config. Safe to delete.
 
 ## API Reference
 

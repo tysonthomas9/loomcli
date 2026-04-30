@@ -1,5 +1,7 @@
 # Multi-Workspace Frontend Architecture (Epics 3wsub + rml7g)
 
+> **Note (loomcli-26v50 migration):** sections describing yaml-based persistence (`~/.loom/config.yaml`, atomic temp-file rename) describe the legacy storage path. As of the fleet-db migration (epic loomcli-26v50), workspace state lives in fleet-db; the loom server reads it via `internal/store` + `internal/webui/storeadapter`. Frontend behavior is unchanged.
+
 ## Overview
 
 The multi-workspace frontend enables users to manage multiple workspaces, each containing multiple repos, from a single web UI. It provides workspace CRUD, per-repo agent grouping, scoped search, context preservation across workspace switches, and graceful degradation to single-repo mode.

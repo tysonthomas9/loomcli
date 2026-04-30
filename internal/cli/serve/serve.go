@@ -23,8 +23,10 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/metricscmd"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/observability"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/opsimpl"
+	"github.com/tysonthomas9/loomcli/internal/cli/serve/serveadapter"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/usagecmd"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/workspacemgr"
+	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	webuiapp "github.com/tysonthomas9/loomcli/internal/webui/app"
 )
@@ -222,10 +224,11 @@ func runServe(cmd *cobra.Command, args []string) {
 
 	webuiErr := make(chan error, 1)
 	go func() {
-		cfg := buildServerConfig(monitorHandlers, fleetState)
+		var s store.Store
 		if storeHandle != nil {
-			cfg.Store = storeHandle.Store
+			s = storeHandle.Store
 		}
+		cfg := buildServerConfig(monitorHandlers, fleetState, s)
 		if !serveNoDaemon {
 			cfg.DaemonStartupFn = workspacemgr.EnsureDaemonsForAllWorkspaces
 		}
@@ -339,12 +342,13 @@ func buildMonitorHandlers(collectDataFn metricscmd.CollectDataFn, staleDetectorH
 	}
 }
 
-func buildServerConfig(monitorHandlers webui.MonitorHandlers, fs fleetState) webui.ServerConfig {
+func buildServerConfig(monitorHandlers webui.MonitorHandlers, fs fleetState, s store.Store) webui.ServerConfig {
 	gitOps := opsimpl.NewGitOps()
 	resolvedBackend := cli.ResolveBackendName()
 	log.Printf("Terminal backend: %s", resolvedBackend)
 
 	cfg := buildCoreServerConfig(monitorHandlers, gitOps, resolvedBackend)
+	cfg.Store = s
 	applyFleetConfig(&cfg, fs)
 	applyWorkspaceConfig(&cfg)
 	applyCORSConfig(&cfg)
@@ -404,16 +408,41 @@ func applyFleetConfig(cfg *webui.ServerConfig, fs fleetState) {
 	cfg.FleetClient = fs.modeDetected
 }
 
+// applyWorkspaceConfig wires the workspace-related closures the webui
+// server consumes. When a fleet-db Store is available (cfg.Store, set
+// after OpenStore), reads + simple writes go through serveadapter
+// (store-backed). The CreateWorkspace closure stays on workspacemgr
+// because it coordinates disk operations (clone, worktree creation)
+// that the store doesn't model. Disk-side cleanup on delete is also
+// the user's responsibility — the store-backed delete is
+// metadata-only.
 func applyWorkspaceConfig(cfg *webui.ServerConfig) {
-	cfg.WorkspaceConfigFn = workspacemgr.BuildWorkspaceInfo
-	cfg.WorkspaceConfigByIDFn = workspacemgr.BuildWorkspaceInfoForID
-	cfg.WorkspaceDeleteFn = workspacemgr.DeleteWorkspace
-	cfg.SetDefaultWorkspaceFn = workspacemgr.SetDefaultWorkspace
-	cfg.ClearDefaultWorkspaceFn = workspacemgr.ClearDefaultWorkspace
+	if cfg.Store != nil {
+		cfg.WorkspaceConfigFn = serveadapter.BuildWorkspaceConfigFn(cfg.Store)
+		cfg.WorkspaceConfigByIDFn = serveadapter.BuildWorkspaceConfigByIDFn(cfg.Store)
+		cfg.WorkspaceListFn = serveadapter.BuildWorkspaceListFn(cfg.Store)
+		cfg.WorkspaceIDResolverFn = serveadapter.BuildWorkspaceIDResolverFn(cfg.Store)
+		cfg.InitialWorkspaceID = serveadapter.ResolveInitialWorkspaceID(cfg.Store)
+		cfg.WorkspaceDeleteFn = serveadapter.BuildWorkspaceDeleteFn(cfg.Store)
+		cfg.SetDefaultWorkspaceFn = serveadapter.BuildSetDefaultWorkspaceFn(cfg.Store)
+		cfg.ClearDefaultWorkspaceFn = serveadapter.BuildClearDefaultWorkspaceFn()
+	} else {
+		// No store available: fall back to legacy yaml-backed adapters.
+		// This branch goes away once the migration completes (.23/.25).
+		cfg.WorkspaceConfigFn = workspacemgr.BuildWorkspaceInfo
+		cfg.WorkspaceConfigByIDFn = workspacemgr.BuildWorkspaceInfoForID
+		cfg.WorkspaceDeleteFn = workspacemgr.DeleteWorkspace
+		cfg.SetDefaultWorkspaceFn = workspacemgr.SetDefaultWorkspace
+		cfg.ClearDefaultWorkspaceFn = workspacemgr.ClearDefaultWorkspace
+		cfg.WorkspaceListFn = daemonwire.ListWorkspaces
+		cfg.InitialWorkspaceID = workspacemgr.ResolveInitialWorkspaceID()
+		cfg.WorkspaceIDResolverFn = workspacemgr.ResolveWorkspaceID
+	}
+	// CreateWorkspace coordinates disk operations (clone repos, set
+	// up worktrees) that aren't part of the store contract — it stays
+	// on workspacemgr in both branches. The store-backed Create
+	// (loom workspace add) handles the metadata-only path.
 	cfg.WorkspaceCreateFn = workspacemgr.CreateWorkspace
-	cfg.WorkspaceListFn = daemonwire.ListWorkspaces
-	cfg.InitialWorkspaceID = workspacemgr.ResolveInitialWorkspaceID()
-	cfg.WorkspaceIDResolverFn = workspacemgr.ResolveWorkspaceID
 }
 
 func applyCORSConfig(cfg *webui.ServerConfig) {

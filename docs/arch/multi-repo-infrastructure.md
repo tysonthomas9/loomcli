@@ -1,5 +1,7 @@
 # Multi-Repo Infrastructure Architecture (Epic y5vpk)
 
+> **Note (loomcli-26v50 migration):** sections describing `~/.loom/config.yaml` and `loom.yaml` as the source of workspace/repo config describe the legacy persistence path. As of the fleet-db migration, workspace + repo + agent + role + daemon-profile state is stored in fleet-db (see `internal/store/`, `internal/infra/fleetdb/`); the noun-verb CLI (`loom workspace/repo/role/agentdef/daemon profile`) is the user-facing interface. The yaml-based legacy code is being retired in tickets `.23` (workspacemgr), `.24` (yaml.v3), `.25` (config/).
+
 ## Overview
 
 The multi-repo infrastructure enables a single beads daemon to aggregate issues from multiple repositories and route agent work items based on repository affinity. The central concept is `source_repo`: a stable string identifier attached to every issue at creation time, propagated through the entire stack from database to frontend, and used for SQL filtering, SSE fan-out, and agent task routing.

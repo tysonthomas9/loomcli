@@ -1,5 +1,7 @@
 # Backend Infrastructure Architecture
 
+> **Note (loomcli-26v50 migration):** sections referencing yaml file watchers, `loom.yaml`, and `~/.loom/config.yaml` describe the legacy persistence path. As of the fleet-db migration, all loom state (workspaces, repos, agents, roles, daemon profiles) lives in fleet-db via `internal/store` interfaces and `internal/infra/fleetdb` HTTP-client implementations. The legacy yaml watcher is retained during the transition; new code paths use the store directly.
+
 ## Overview
 
 The backend infrastructure encompasses the core abstractions and systems powering loom: the `IssueBackend` interface with three pluggable implementations (beads RPC, fleet REST, agent IPC), a canonical entity domain layer, entity mapping between wire and domain types, an in-process notification bus, task routing with repo affinity, the web UI server with its coordinator-based workspace lifecycle, module-based route registration, middleware stack, SSE real-time hub, agent IPC with cooperative preemption, diff viewer pipeline, session/tab persistence stores, daemon lifecycle management, auto-mode polling, and structured logging.

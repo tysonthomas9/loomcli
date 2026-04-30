@@ -20,22 +20,19 @@ fleet mode is on without an external Redis, the snapshot also contains
 the JWT signing key and is written with `0o600` permissions. Plain
 UI-only snapshots use `0o644`.
 
-### Config File Security
+### State File Security
 
 | File | Scope | Contents |
 |------|-------|----------|
-| `~/.loom/config.yaml` | User-level | Workspace paths, backend selection, daemon settings |
-| `loom.yaml` | Project-level | Agent config, daemon settings |
+| `~/.loom/state.json` | User-level cache | Last-active workspace key (regenerable, not config) |
+| `~/.loom/fleet-db/redis-snapshot.json` | Local-mode storage | Embedded fleet-db's miniredis snapshot — workspaces, repos, agents, roles, daemon profiles, issues |
 | `.loom/` | User config directory | Runtime state, daemon PID files |
 
-Both `loom.yaml` and `.loom/` are listed in the project `.gitignore` to prevent accidental credential commits.
+The miniredis snapshot may include an embedded fleet JWT signing key (when fleet mode is on); the writer chmods it to `0o600` in that case. Plain UI snapshots stay `0o644`.
 
-If you have previously committed a `loom.yaml` that contains credentials, remove it from tracking:
+`.loom/` is listed in the project `.gitignore`. The user-level `~/.loom/` directory lives outside any repo by design.
 
-```
-git rm --cached loom.yaml
-git commit -m "Remove loom.yaml from tracking"
-```
+In cloud mode (`LOOM_FLEET_DB_URL` set), state lives on the fleet-db server; the local files above are not used. Auth is via `LOOM_FLEET_DB_API_KEY` (production) or `LOOM_FLEET_DB_ACTOR` (dev mode).
 
 ### Redis Production Configuration
 
