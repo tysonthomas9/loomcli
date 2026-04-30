@@ -11,6 +11,7 @@ package localredis
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -26,9 +27,24 @@ import (
 )
 
 const (
-	currentSchemaVersion = 1
+	// currentSchemaVersion is the snapshot format version this code reads
+	// AND writes. Bump when adding new snapshotEntry types so snapshots
+	// written by this version cannot be loaded by older binaries
+	// (older binaries reject snap.SchemaVersion > currentSchemaVersion).
+	//
+	// v1: hash, string
+	// v2: + set, list, zset, stream  (required for embedded fleet-db)
+	currentSchemaVersion = 2
 	defaultInterval      = 30 * time.Second
 	dumpTimeout          = 5 * time.Second
+
+	// maxStreamEntriesPerKey caps how many entries from a single Redis
+	// Stream are serialized into the snapshot. Fleet-db's compaction
+	// keeps streams bounded, but this is a defense against runaway
+	// growth that would otherwise balloon the snapshot file (and the
+	// in-process JSON marshal). Newest entries are kept; older ones
+	// stay in the live miniredis but don't survive restarts.
+	maxStreamEntriesPerKey = 10000
 )
 
 // includedPrefixes are key patterns always persisted.
@@ -39,8 +55,14 @@ var includedPrefixes = []string{
 }
 
 // fleetPrefixes are key patterns persisted only when fleet mode is on.
+// Includes fleet-db's entire keyspace so the embedded-fleet-db CLI flow
+// (internal/bootstrap/embedded.go) survives across CLI invocations —
+// each `loom <cmd>` boots a fresh fleet-db subprocess that connects to
+// this in-process miniredis, and the snapshot must round-trip the
+// workspace/repo/agent/role/issue data fleet-db wrote.
 var fleetPrefixes = []string{
 	"fleet:jwt-signing-key:",
+	"fleet-db:",
 }
 
 // Manager owns the miniredis lifecycle and snapshot persistence.
@@ -56,6 +78,14 @@ type Manager struct {
 	started   bool
 	mu        sync.Mutex
 	closeOnce sync.Once
+
+	// lastDumpHash is the SHA-256 of the most recently written snapshot
+	// payload. Subsequent Dump calls compare against this to skip
+	// disk writes when the keyspace hasn't changed. Empty until the
+	// first successful dump; cleared on the rare error path so the
+	// next attempt always writes.
+	lastDumpHash [sha256.Size]byte
+	lastDumpSet  bool
 }
 
 // NewManager starts an in-process miniredis and returns a Manager.
@@ -134,6 +164,10 @@ func (m *Manager) run(ctx context.Context) {
 // from any goroutine; the miniredis SCAN is serialized internally.
 // Uses context.Background() with a short timeout, so this keeps working
 // even when the parent ctx has been cancelled at shutdown.
+//
+// Skips the disk write when the entries hash matches the previous dump
+// (no-op churn detector). DumpedAt is intentionally NOT included in the
+// hash so the dump is content-addressed, not time-addressed.
 func (m *Manager) Dump() error {
 	if m.snapshotPath == "" {
 		return nil
@@ -145,6 +179,21 @@ func (m *Manager) Dump() error {
 	if err != nil {
 		return fmt.Errorf("collect entries: %w", err)
 	}
+	// Hash the entries (excluding DumpedAt timestamp) so an idle
+	// keyspace doesn't cause a write every tick. JSON-marshaled entries
+	// are deterministic because collectEntries sorts keys.
+	entriesJSON, err := json.Marshal(entries)
+	if err != nil {
+		return fmt.Errorf("hash snapshot entries: %w", err)
+	}
+	hash := sha256.Sum256(entriesJSON)
+	m.mu.Lock()
+	if m.lastDumpSet && m.lastDumpHash == hash {
+		m.mu.Unlock()
+		return nil
+	}
+	m.mu.Unlock()
+
 	snap := snapshot{
 		SchemaVersion: currentSchemaVersion,
 		DumpedAt:      time.Now().UTC(),
@@ -179,6 +228,10 @@ func (m *Manager) Dump() error {
 		_ = os.Remove(tmpPath)
 		return fmt.Errorf("rename snapshot: %w", err)
 	}
+	m.mu.Lock()
+	m.lastDumpHash = hash
+	m.lastDumpSet = true
+	m.mu.Unlock()
 	return nil
 }
 
@@ -214,10 +267,29 @@ type snapshot struct {
 
 type snapshotEntry struct {
 	Key    string            `json:"key"`
-	Type   string            `json:"type"`             // "hash" or "string"
+	Type   string            `json:"type"`             // "hash"|"string"|"set"|"list"|"zset"|"stream"
 	TTLMs  int64             `json:"ttl_ms"`           // -1 for no expiry
-	Hash   map[string]string `json:"hash,omitempty"`   // for type=hash
-	String string            `json:"string,omitempty"` // for type=string
+	Hash   map[string]string `json:"hash,omitempty"`   // type=hash
+	String string            `json:"string,omitempty"` // type=string
+	Set    []string          `json:"set,omitempty"`    // type=set (order not significant)
+	List   []string          `json:"list,omitempty"`   // type=list (head-to-tail)
+	ZSet   []zEntry          `json:"zset,omitempty"`   // type=zset
+	Stream []streamEntry     `json:"stream,omitempty"` // type=stream (oldest-first; IDs preserved)
+}
+
+// zEntry pairs a sorted-set member with its score. Score is float64 to
+// match Redis semantics; lossy roundtrip across JSON is acceptable for
+// loom's use cases (priority queues use integer scores).
+type zEntry struct {
+	Member string  `json:"member"`
+	Score  float64 `json:"score"`
+}
+
+// streamEntry mirrors a Redis Stream entry. ID is preserved verbatim so
+// downstream consumers' cursors remain valid across snapshot reload.
+type streamEntry struct {
+	ID     string            `json:"id"`
+	Values map[string]string `json:"values"`
 }
 
 func (m *Manager) shouldPersist(key string) bool {
@@ -238,10 +310,23 @@ func (m *Manager) shouldPersist(key string) bool {
 
 // collectEntries walks the miniredis keyspace and returns all persistable
 // entries in deterministic order (sorted by key) for stable snapshots.
+//
+// Uses SCAN rather than KEYS to avoid the canonical "blocks the entire
+// server" issue — even though miniredis is in-process, the dump runs on
+// a 30s timer alongside live traffic.
 func (m *Manager) collectEntries(ctx context.Context) ([]snapshotEntry, error) {
-	keys, err := m.client.Keys(ctx, "*").Result()
-	if err != nil {
-		return nil, fmt.Errorf("keys: %w", err)
+	var keys []string
+	var cursor uint64
+	for {
+		batch, next, err := m.client.Scan(ctx, cursor, "*", 1000).Result()
+		if err != nil {
+			return nil, fmt.Errorf("scan: %w", err)
+		}
+		keys = append(keys, batch...)
+		cursor = next
+		if cursor == 0 {
+			break
+		}
 	}
 	sort.Strings(keys)
 	entries := make([]snapshotEntry, 0, len(keys))
@@ -295,9 +380,68 @@ func (m *Manager) readEntry(ctx context.Context, key string) (*snapshotEntry, er
 			return nil, err
 		}
 		return &snapshotEntry{Key: key, Type: "string", TTLMs: ttlMs, String: value}, nil
+	case "set":
+		members, err := m.client.SMembers(ctx, key).Result()
+		if err != nil {
+			return nil, err
+		}
+		if len(members) == 0 {
+			return nil, nil
+		}
+		sort.Strings(members) // determinism for tests + diffs
+		return &snapshotEntry{Key: key, Type: "set", TTLMs: ttlMs, Set: members}, nil
+	case "list":
+		values, err := m.client.LRange(ctx, key, 0, -1).Result()
+		if err != nil {
+			return nil, err
+		}
+		if len(values) == 0 {
+			return nil, nil
+		}
+		return &snapshotEntry{Key: key, Type: "list", TTLMs: ttlMs, List: values}, nil
+	case "zset":
+		zs, err := m.client.ZRangeWithScores(ctx, key, 0, -1).Result()
+		if err != nil {
+			return nil, err
+		}
+		if len(zs) == 0 {
+			return nil, nil
+		}
+		entries := make([]zEntry, 0, len(zs))
+		for _, z := range zs {
+			member, _ := z.Member.(string)
+			entries = append(entries, zEntry{Member: member, Score: z.Score})
+		}
+		return &snapshotEntry{Key: key, Type: "zset", TTLMs: ttlMs, ZSet: entries}, nil
+	case "stream":
+		// Read the newest maxStreamEntriesPerKey via XREVRANGE; reverse
+		// to oldest-first so replay preserves ordering. Older entries
+		// beyond the cap are NOT in the snapshot — they remain in the
+		// running miniredis but won't survive a restart.
+		msgs, err := m.client.XRevRangeN(ctx, key, "+", "-", maxStreamEntriesPerKey).Result()
+		if err != nil {
+			return nil, err
+		}
+		if len(msgs) == 0 {
+			return nil, nil
+		}
+		entries := make([]streamEntry, 0, len(msgs))
+		for i := len(msgs) - 1; i >= 0; i-- {
+			msg := msgs[i]
+			vals := make(map[string]string, len(msg.Values))
+			for k, v := range msg.Values {
+				if s, ok := v.(string); ok {
+					vals[k] = s
+				} else {
+					vals[k] = fmt.Sprint(v)
+				}
+			}
+			entries = append(entries, streamEntry{ID: msg.ID, Values: vals})
+		}
+		return &snapshotEntry{Key: key, Type: "stream", TTLMs: ttlMs, Stream: entries}, nil
 	default:
-		// Unsupported type (list, set, zset, etc.) — not used by any of
-		// the persisted stores today. Skip silently.
+		// Truly unsupported (geo, hyperloglog, etc.) — fleet-db does not
+		// use these today. Skip silently rather than fail the whole dump.
 		return nil, nil
 	}
 }
@@ -337,7 +481,22 @@ func (m *Manager) load() error {
 	if snap.SchemaVersion > currentSchemaVersion {
 		return fmt.Errorf("snapshot schema_version %d newer than supported %d", snap.SchemaVersion, currentSchemaVersion)
 	}
-	return m.replay(&snap)
+	if err := m.replay(&snap); err != nil {
+		return err
+	}
+	// Seed the dirty-flag with the on-disk content's hash so the first
+	// Dump after load short-circuits when the keyspace hasn't been
+	// mutated. Without this seed, every CLI invocation rewrites the
+	// snapshot file even on read-only commands (each invocation creates
+	// a fresh Manager with lastDumpSet=false).
+	if entriesJSON, err := json.Marshal(snap.Entries); err == nil {
+		hash := sha256.Sum256(entriesJSON)
+		m.mu.Lock()
+		m.lastDumpHash = hash
+		m.lastDumpSet = true
+		m.mu.Unlock()
+	}
+	return nil
 }
 
 func (m *Manager) replay(snap *snapshot) error {
@@ -372,6 +531,39 @@ func (m *Manager) replay(snap *snapshot) error {
 			if err := m.mr.Set(e.Key, e.String); err != nil {
 				m.logger.Warn("failed to set string on load", "key", e.Key, "err", err)
 				continue
+			}
+		case "set":
+			if len(e.Set) == 0 {
+				continue
+			}
+			m.mr.SetAdd(e.Key, e.Set...)
+		case "list":
+			if len(e.List) == 0 {
+				continue
+			}
+			// Push from the right so order matches LRANGE 0 -1.
+			if _, err := m.mr.Push(e.Key, e.List...); err != nil {
+				m.logger.Warn("failed to push list on load", "key", e.Key, "err", err)
+				continue
+			}
+		case "zset":
+			if len(e.ZSet) == 0 {
+				continue
+			}
+			for _, z := range e.ZSet {
+				if _, err := m.mr.ZAdd(e.Key, z.Score, z.Member); err != nil {
+					m.logger.Warn("failed to zadd on load", "key", e.Key, "member", z.Member, "err", err)
+				}
+			}
+		case "stream":
+			if len(e.Stream) == 0 {
+				continue
+			}
+			for _, msg := range e.Stream {
+				flat := flattenHash(msg.Values)
+				if _, err := m.mr.XAdd(e.Key, msg.ID, flat); err != nil {
+					m.logger.Warn("failed to xadd on load", "key", e.Key, "id", msg.ID, "err", err)
+				}
 			}
 		default:
 			continue

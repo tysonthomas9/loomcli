@@ -1,6 +1,7 @@
 package handlermux
 
 import (
+	"context"
 	"net/http"
 	"time"
 
@@ -62,7 +63,11 @@ type HandlerDeps struct {
 	// into /api/config so clients can see which backend the server is
 	// talking to without peeking at LOOM_ISSUE_BACKEND on the host. Nil
 	// is safe — the response falls back to the env var, then empty.
-	IssueBackendFn func() backend.IssueBackend
+	//
+	// ctx carries the per-request workspace ID so cloud-mode wirings can
+	// route to a per-workspace fleet-db backend; /api/config callers pass
+	// context.Background() since the response is workspace-agnostic.
+	IssueBackendFn func(ctx context.Context) backend.IssueBackend
 	// DaemonExpected is true when this server expects a bd daemon to be
 	// reachable (beads mode). False in fleet mode where the IssueBackend
 	// is the canonical issue source and no daemon should exist. Drives

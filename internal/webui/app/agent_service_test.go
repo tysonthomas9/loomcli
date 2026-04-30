@@ -34,7 +34,7 @@ func requireServiceError(t *testing.T, err error, wantKind service.ErrorKind) *s
 // --- Agent name validation ---
 
 func TestAgentService_ValidateAgentName(t *testing.T) {
-	svc := svcimpl.NewAgentService(&mockGitOps{}, nil, nil)
+	svc := svcimpl.NewAgentService(&mockGitOps{}, nil, nil, nil)
 	ctx := context.Background()
 
 	t.Run("empty name returns ErrValidation", func(t *testing.T) {
@@ -65,7 +65,7 @@ func TestAgentService_ValidateAgentName(t *testing.T) {
 				return ops.DiffStatResult{}
 			},
 		}
-		svc := svcimpl.NewAgentService(gitOps, nil, nil)
+		svc := svcimpl.NewAgentService(gitOps, nil, nil, nil)
 
 		validNames := []string{"alpha", "test-agent", "agent_1", "ABC", "a-b_c-123"}
 		for _, name := range validNames {
@@ -83,7 +83,7 @@ func TestAgentService_GetTerminalInfo(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("nil termMgr returns ErrUnavailable", func(t *testing.T) {
-		svc := svcimpl.NewAgentService(&mockGitOps{}, nil, nil)
+		svc := svcimpl.NewAgentService(&mockGitOps{}, nil, nil, nil)
 		_, err := svc.GetTerminalInfo(ctx, "ws", "agent1")
 		requireServiceError(t, err, service.KindUnavailable)
 	})
@@ -98,7 +98,7 @@ func TestAgentService_GetTerminalInfo(t *testing.T) {
 		}
 		defer mgr.Shutdown()
 
-		svc := svcimpl.NewAgentService(&mockGitOps{}, mgr, nil)
+		svc := svcimpl.NewAgentService(&mockGitOps{}, mgr, nil, nil)
 		result, err := svc.GetTerminalInfo(ctx, "ws", "nonexistent-agent")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -118,7 +118,7 @@ func TestAgentService_GenerateTerminalToken(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("nil termAuth returns ErrUnavailable", func(t *testing.T) {
-		svc := svcimpl.NewAgentService(&mockGitOps{}, nil, nil)
+		svc := svcimpl.NewAgentService(&mockGitOps{}, nil, nil, nil)
 		_, err := svc.GenerateTerminalToken(ctx, "agent1", "user1")
 		requireServiceError(t, err, service.KindUnavailable)
 	})
@@ -130,7 +130,7 @@ func TestAgentService_GenerateTerminalToken(t *testing.T) {
 		}
 		defer ta.Stop()
 
-		svc := svcimpl.NewAgentService(&mockGitOps{}, nil, ta)
+		svc := svcimpl.NewAgentService(&mockGitOps{}, nil, ta, nil)
 		token, err := svc.GenerateTerminalToken(ctx, "agent1", "user1")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -145,7 +145,7 @@ func TestAgentService_GenerateTerminalToken(t *testing.T) {
 
 func TestAgentService_GetLog(t *testing.T) {
 	ctx := context.Background()
-	svc := svcimpl.NewAgentService(&mockGitOps{}, nil, nil)
+	svc := svcimpl.NewAgentService(&mockGitOps{}, nil, nil, nil)
 
 	t.Run("file not found returns ErrNotFound", func(t *testing.T) {
 		_, err := svc.GetLog(ctx, "ws", "no-such-agent", 100, 0)
@@ -233,7 +233,7 @@ func TestAgentService_GetDiffStat(t *testing.T) {
 				}
 			},
 		}
-		svc := svcimpl.NewAgentService(gitOps, nil, nil)
+		svc := svcimpl.NewAgentService(gitOps, nil, nil, nil)
 
 		result, err := svc.GetDiffStat(ctx, "ws", "test-agent")
 		if err != nil {
@@ -256,7 +256,7 @@ func TestAgentService_GetDiffStat(t *testing.T) {
 				return nil, errors.New("not found")
 			},
 		}
-		svc := svcimpl.NewAgentService(gitOps, nil, nil)
+		svc := svcimpl.NewAgentService(gitOps, nil, nil, nil)
 
 		_, err := svc.GetDiffStat(ctx, "ws", "missing-agent")
 		requireServiceError(t, err, service.KindNotFound)
@@ -281,7 +281,7 @@ func TestAgentService_GitPush(t *testing.T) {
 				}, nil
 			},
 		}
-		svc := svcimpl.NewAgentService(gitOps, nil, nil)
+		svc := svcimpl.NewAgentService(gitOps, nil, nil, nil)
 
 		result, err := svc.GitPush(ctx, "ws", "test-agent", "develop")
 		if err != nil {
@@ -304,7 +304,7 @@ func TestAgentService_GitPush(t *testing.T) {
 				return &ops.GitPushResult{Success: true, Message: "ok"}, nil
 			},
 		}
-		svc := svcimpl.NewAgentService(gitOps, nil, nil)
+		svc := svcimpl.NewAgentService(gitOps, nil, nil, nil)
 
 		_, err := svc.GitPush(ctx, "ws", "test-agent", "")
 		if err != nil {
@@ -342,7 +342,7 @@ func TestAgentService_GitPushAll(t *testing.T) {
 				return nil, errors.New("unexpected")
 			},
 		}
-		svc := svcimpl.NewAgentService(gitOps, nil, nil)
+		svc := svcimpl.NewAgentService(gitOps, nil, nil, nil)
 
 		result, err := svc.GitPushAll(ctx, "ws")
 		if err != nil {
@@ -394,7 +394,7 @@ func TestAgentService_GitPull(t *testing.T) {
 				return &ops.GitPullResult{Success: true, Message: "pulled from " + sourceBranch}, nil
 			},
 		}
-		svc := svcimpl.NewAgentService(gitOps, nil, nil)
+		svc := svcimpl.NewAgentService(gitOps, nil, nil, nil)
 
 		result, err := svc.GitPull(ctx, "ws", "test-agent", "develop")
 		if err != nil {
@@ -420,7 +420,7 @@ func TestAgentService_GitPull(t *testing.T) {
 				return &ops.GitPullResult{Success: true, Message: "ok"}, nil
 			},
 		}
-		svc := svcimpl.NewAgentService(gitOps, nil, nil)
+		svc := svcimpl.NewAgentService(gitOps, nil, nil, nil)
 
 		_, err := svc.GitPull(ctx, "ws", "test-agent", "")
 		if err != nil {
@@ -453,7 +453,7 @@ func TestAgentService_GitSync(t *testing.T) {
 				return &ops.GitPullResult{Success: true, Message: "pulled"}, nil
 			},
 		}
-		svc := svcimpl.NewAgentService(gitOps, nil, nil)
+		svc := svcimpl.NewAgentService(gitOps, nil, nil, nil)
 
 		result, err := svc.GitSync(ctx, "ws", "test-agent")
 		if err != nil {
@@ -487,7 +487,7 @@ func TestAgentService_GitSync(t *testing.T) {
 				}, nil
 			},
 		}
-		svc := svcimpl.NewAgentService(gitOps, nil, nil)
+		svc := svcimpl.NewAgentService(gitOps, nil, nil, nil)
 
 		result, err := svc.GitSync(ctx, "ws", "test-agent")
 		if err != nil {
@@ -519,7 +519,7 @@ func TestAgentService_CreatePR(t *testing.T) {
 				return errors.New("gh not found")
 			},
 		}
-		svc := svcimpl.NewAgentService(gitOps, nil, nil)
+		svc := svcimpl.NewAgentService(gitOps, nil, nil, nil)
 
 		_, err := svc.CreatePR(ctx, "ws", "test-agent", "main")
 		requireServiceError(t, err, service.KindUnavailable)
@@ -539,7 +539,7 @@ func TestAgentService_CreatePR(t *testing.T) {
 				}, nil
 			},
 		}
-		svc := svcimpl.NewAgentService(gitOps, nil, nil)
+		svc := svcimpl.NewAgentService(gitOps, nil, nil, nil)
 
 		result, err := svc.CreatePR(ctx, "ws", "test-agent", "main")
 		if err != nil {
@@ -574,7 +574,7 @@ func TestAgentService_GitReset(t *testing.T) {
 				}, nil
 			},
 		}
-		svc := svcimpl.NewAgentService(gitOps, nil, nil)
+		svc := svcimpl.NewAgentService(gitOps, nil, nil, nil)
 
 		result, err := svc.GitReset(ctx, "ws", "test-agent", "develop", true, true)
 		if err != nil {
@@ -604,7 +604,7 @@ func TestAgentService_GitReset(t *testing.T) {
 				return nil, lockedErr
 			},
 		}
-		svc := svcimpl.NewAgentService(gitOps, nil, nil)
+		svc := svcimpl.NewAgentService(gitOps, nil, nil, nil)
 
 		_, err := svc.GitReset(ctx, "ws", "test-agent", "main", false, false)
 		if err == nil {
@@ -631,7 +631,7 @@ func TestAgentService_GitReset(t *testing.T) {
 				return &ops.GitResetResult{Success: true, Message: "ok"}, nil
 			},
 		}
-		svc := svcimpl.NewAgentService(gitOps, nil, nil)
+		svc := svcimpl.NewAgentService(gitOps, nil, nil, nil)
 
 		_, err := svc.GitReset(ctx, "ws", "test-agent", "", false, false)
 		if err != nil {
@@ -665,7 +665,7 @@ func TestAgentService_GitStatus(t *testing.T) {
 				}, nil
 			},
 		}
-		svc := svcimpl.NewAgentService(gitOps, nil, nil)
+		svc := svcimpl.NewAgentService(gitOps, nil, nil, nil)
 
 		result, err := svc.GitStatus(ctx, "ws", "test-agent")
 		if err != nil {
@@ -692,7 +692,7 @@ func TestAgentService_GitStatus(t *testing.T) {
 				return nil, errors.New("git status failed")
 			},
 		}
-		svc := svcimpl.NewAgentService(gitOps, nil, nil)
+		svc := svcimpl.NewAgentService(gitOps, nil, nil, nil)
 
 		_, err := svc.GitStatus(ctx, "ws", "test-agent")
 		if err == nil {
@@ -718,7 +718,7 @@ func TestAgentService_SetTargetBranch(t *testing.T) {
 				return wt, nil
 			},
 		}
-		svc := svcimpl.NewAgentService(gitOps, nil, nil)
+		svc := svcimpl.NewAgentService(gitOps, nil, nil, nil)
 
 		err := svc.SetTargetBranch(ctx, "ws", "test-agent", "develop")
 		requireServiceError(t, err, service.KindValidation)
@@ -737,7 +737,7 @@ func TestAgentService_SetTargetBranch(t *testing.T) {
 				return nil
 			},
 		}
-		svc := svcimpl.NewAgentService(gitOps, nil, nil)
+		svc := svcimpl.NewAgentService(gitOps, nil, nil, nil)
 
 		err := svc.SetTargetBranch(ctx, "ws", "test-agent", "develop")
 		if err != nil {

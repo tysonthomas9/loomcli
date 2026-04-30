@@ -23,7 +23,10 @@ import (
 // HandleStatsWithBackendFallback to serve stats out-of-pool when the
 // daemon connection isn't available (fleet mode). Mirrors the pattern
 // established in handlers/git/graph.go.
-type IssueBackendFn func() backend.IssueBackend
+//
+// ctx carries the per-request workspace ID so cloud-mode wirings can route
+// to a per-workspace fleet-db backend.
+type IssueBackendFn func(ctx context.Context) backend.IssueBackend
 
 // CircuitBreakerStatus represents the circuit breaker state in health responses.
 type CircuitBreakerStatus struct {
@@ -265,7 +268,7 @@ func HandleStatsWithBackendFallback(pool daemon.Pool, backendFn IssueBackendFn) 
 // serveStatsViaBackend writes a /stats response sourced from the
 // IssueBackend.Stats() projection rather than the daemon RPC pool.
 func serveStatsViaBackend(w http.ResponseWriter, r *http.Request, backendFn IssueBackendFn) {
-	be := backendFn()
+	be := backendFn(r.Context())
 	if be == nil {
 		handler.WriteJSON(w, http.StatusServiceUnavailable, StatsResponse{
 			Success: false,

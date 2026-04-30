@@ -32,6 +32,8 @@ loom.yaml
 usage.jsonl
 /sessions/
 internal/cli/sessions/
+internal/cli/agent/sessions/
+internal/cli/automode/sessions/
 notify.token
 
 # Auth service

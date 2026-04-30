@@ -125,7 +125,7 @@ func TestHandleReady_BackendFallbackWhenNoPool(t *testing.T) {
 			{ID: "RDY-2", Title: "Ready Two", Status: "open", Priority: 2, IssueType: "bug"},
 		},
 	}
-	handler := HandleReadyWithBackendFallback(nil, func() backend.IssueBackend { return be })
+	handler := HandleReadyWithBackendFallback(nil, func(_ context.Context) backend.IssueBackend { return be })
 
 	req := httptest.NewRequest(http.MethodGet, "/api/ready", nil)
 	rr := httptest.NewRecorder()
@@ -168,7 +168,7 @@ func TestHandleReady_BackendFallbackOnPoolError(t *testing.T) {
 			{ID: "BE-1", Title: "Via backend", Status: "open", Priority: 1},
 		},
 	}
-	handler := HandleReadyWithBackendFallback(dp, func() backend.IssueBackend { return be })
+	handler := HandleReadyWithBackendFallback(dp, func(_ context.Context) backend.IssueBackend { return be })
 
 	req := httptest.NewRequest(http.MethodGet, "/api/ready", nil)
 	rr := httptest.NewRecorder()
@@ -202,7 +202,7 @@ func TestHandleReady_PoolPathClientErrorPreserved(t *testing.T) {
 	be := &stubReadyBackend{
 		ready: []backend.IssueData{{ID: "SHOULD-NOT-APPEAR"}},
 	}
-	handler := HandleReadyWithBackendFallback(dp, func() backend.IssueBackend { return be })
+	handler := HandleReadyWithBackendFallback(dp, func(_ context.Context) backend.IssueBackend { return be })
 
 	req := httptest.NewRequest(http.MethodGet, "/api/ready?priority=abc", nil)
 	rr := httptest.NewRecorder()

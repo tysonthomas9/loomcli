@@ -23,7 +23,10 @@ import (
 // when no daemon pool is available (fleet mode) or the pool path returns a
 // 5xx. Defined locally to mirror the git package's identical-shape type
 // without creating a package cross-import in production code.
-type IssueBackendFn func() backend.IssueBackend
+//
+// ctx carries the per-request workspace ID so cloud-mode wirings can route
+// to a per-workspace fleet-db backend.
+type IssueBackendFn func(ctx context.Context) backend.IssueBackend
 
 // ReadyIssueWithParent extends Issue with parent info for /api/ready.
 // This enables epic swimlane grouping in the Kanban view.
@@ -171,7 +174,7 @@ func serveReadyViaBackend(w http.ResponseWriter, r *http.Request, backendFn Issu
 	if backendFn == nil {
 		return false
 	}
-	be := backendFn()
+	be := backendFn(r.Context())
 	if be == nil {
 		return false
 	}

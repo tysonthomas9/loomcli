@@ -13,8 +13,10 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/backends"
+	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/events"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
@@ -387,7 +389,11 @@ func runAutoTask(ctx *autoLoopCtx, shutdown chan struct{}) bool {
 	fmt.Printf("\n[auto] === Starting task %d ===\n\n", ctx.state.TasksCompleted+1)
 
 	beforeRef := CaptureHEADRef(ctx.opts.WorktreePath)
-	workspace, _ := config.ResolveActiveWorkspace()
+	// Phase 4 of fleet-db migration: resolve the active workspace via
+	// store first, falling back to the legacy yaml-derived config when
+	// the store is unreachable. The prompt generator still consumes
+	// *config.WorkspaceConfig, so we synthesize one from store data.
+	workspace := resolveActiveWorkspaceForAutomode()
 	prompt := ctx.generatePrompt(ctx.opts.AgentName, workspace)
 	sess := createAutoSession(ctx, prompt)
 
@@ -529,4 +535,45 @@ func formatTimeout(timeout int) string {
 		return "none"
 	}
 	return fmt.Sprintf("%dm", timeout)
+}
+
+// resolveActiveWorkspaceForAutomode returns the active workspace as a
+// *config.WorkspaceConfig, preferring the fleet-db store when
+// available. Phase 4 of the loom -> fleet-db migration.
+//
+// Failure to open the store falls back to the legacy yaml path so the
+// auto-loop keeps running on dev machines that haven't switched over.
+// The synthesized *config.WorkspaceConfig only carries fields used by
+// the prompt builders (Repos, Path, ID).
+func resolveActiveWorkspaceForAutomode() *config.WorkspaceConfig {
+	// Prefer store: avoids parsing yaml + tolerates partial migrations.
+	ctx, cancel := cmdstore.SignalContext()
+	defer cancel()
+	if h, err := cmdstore.OpenStore(ctx); err == nil {
+		defer h.Close()
+		key, keyErr := bootstrap.ResolveActiveWorkspaceKey(ctx, h.Store.Workspaces())
+		if keyErr == nil {
+			ws, _ := h.Store.Workspaces().Get(ctx, key)
+			repos, _ := h.Store.Repos().List(ctx, key)
+			if ws != nil {
+				out := &config.WorkspaceConfig{
+					ID:   ws.Key,
+					Path: "", // resolved at call site via state cache; not material for prompts
+				}
+				for _, r := range repos {
+					out.Repos = append(out.Repos, config.RepoConfig{
+						Name:          r.Name,
+						DefaultBranch: r.DefaultBranch,
+						Remote:        r.Remote,
+						SourceRepoID:  r.SourceRepoID,
+						Groups:        r.Groups,
+					})
+				}
+				return out
+			}
+		}
+	}
+	// Legacy fallback.
+	ws, _ := config.ResolveActiveWorkspace()
+	return ws
 }

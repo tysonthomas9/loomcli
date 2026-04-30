@@ -193,7 +193,7 @@ func (f *fakeIssueBackend) BackendName() string { return "fake" }
 // newServiceWithFake constructs an issueServiceImpl wired to a fake backend
 // (no daemon pool). Pool-using paths (ListIssues, MoveIssue) are unaffected.
 func newServiceWithFake(fb *fakeIssueBackend) IssueService {
-	return NewIssueServiceWithBackend(nil, nil, nil, func() backend.IssueBackend { return fb })
+	return NewIssueServiceWithBackend(nil, nil, nil, func(_ context.Context) backend.IssueBackend { return fb })
 }
 
 // --- ListEvents ---
@@ -246,7 +246,7 @@ func TestListEvents_Backend_NotFound_MapsTo404(t *testing.T) {
 }
 
 func TestListEvents_Backend_Unavailable_NilBackend(t *testing.T) {
-	svc := NewIssueServiceWithBackend(nil, nil, nil, func() backend.IssueBackend { return nil })
+	svc := NewIssueServiceWithBackend(nil, nil, nil, func(_ context.Context) backend.IssueBackend { return nil })
 	_, err := svc.ListEvents(context.Background(), EventListParams{IssueID: "x"})
 	var sErr *ServiceError
 	if !errors.As(err, &sErr) {

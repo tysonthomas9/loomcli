@@ -2,6 +2,7 @@ package workspacemgr
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -12,16 +13,121 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/workspace"
+	"github.com/tysonthomas9/loomcli/internal/domain"
+	storepkg "github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 	"github.com/tysonthomas9/loomcli/internal/workspaceerrors"
 )
 
+// mirrorWorkspaceToStore writes a freshly-created workspace + its repos
+// to the fleet-db store. Best-effort: fleet-db unavailability or schema
+// errors log a warning but do not fail the create — the legacy yaml
+// path remains the source of truth during the migration window.
+//
+// wsKey must satisfy fleet-db's `^[A-Z]([A-Z0-9-]{0,30}[A-Z0-9])?$`
+// regex; non-conforming workspace names skip the mirror entirely (the
+// noun-verb commands pre-validate, but legacy `loom workspace create`
+// accepts arbitrary names).
+func mirrorWorkspaceToStore(wsName string, wsID string, repos []config.RepoConfig) {
+	if !isValidStoreKey(wsID) && !isValidStoreKey(wsName) {
+		slog.Debug("skipping store mirror: workspace name not a valid fleet-db key",
+			"workspace", wsName, "id", wsID)
+		return
+	}
+	key := wsID
+	if !isValidStoreKey(key) {
+		key = wsName
+	}
+	go func() {
+		ctx, cancel := cmdstore.SignalContext()
+		defer cancel()
+		h, err := cmdstore.OpenStore(ctx)
+		if err != nil {
+			slog.Debug("store mirror skipped (open store)", "workspace", wsName, "err", err)
+			return
+		}
+		defer h.Close()
+		if _, err := h.Store.Workspaces().Create(ctx, storepkg.WorkspaceCreate{
+			Key:           key,
+			Name:          wsName,
+			DefaultBranch: "main",
+		}); err != nil && !errors.Is(err, domain.ErrAlreadyExists) {
+			slog.Debug("store mirror failed (workspace create)", "workspace", wsName, "err", err)
+			return
+		}
+		for _, r := range repos {
+			if _, err := h.Store.Repos().Create(ctx, storepkg.RepoCreate{
+				WorkspaceKey: key,
+				Name:         r.Name,
+				SourceRepoID: r.SourceRepoID,
+			}); err != nil && !errors.Is(err, domain.ErrAlreadyExists) {
+				slog.Debug("store mirror failed (repo create)",
+					"workspace", wsName, "repo", r.Name, "err", err)
+			}
+		}
+	}()
+}
+
+// mirrorWorkspaceDelete removes a workspace from the fleet-db store
+// when the legacy yaml-backed delete path runs. Best-effort.
+func mirrorWorkspaceDelete(wsName, wsID string) {
+	key := wsID
+	if !isValidStoreKey(key) {
+		key = wsName
+	}
+	if !isValidStoreKey(key) {
+		return
+	}
+	go func() {
+		ctx, cancel := cmdstore.SignalContext()
+		defer cancel()
+		h, err := cmdstore.OpenStore(ctx)
+		if err != nil {
+			slog.Debug("store mirror delete skipped (open store)", "workspace", wsName, "err", err)
+			return
+		}
+		defer h.Close()
+		if err := h.Store.Workspaces().Delete(ctx, key); err != nil && !errors.Is(err, domain.ErrNotFound) {
+			slog.Debug("store mirror delete failed", "workspace", wsName, "err", err)
+		}
+	}()
+}
+
+// isValidStoreKey reports whether s satisfies fleet-db's workspace key
+// regex `^[A-Z]([A-Z0-9-]{0,30}[A-Z0-9])?$`.
+func isValidStoreKey(s string) bool {
+	if s == "" || len(s) > 32 {
+		return false
+	}
+	for i, r := range s {
+		if i == 0 {
+			if r < 'A' || r > 'Z' {
+				return false
+			}
+			continue
+		}
+		if (r < 'A' || r > 'Z') && (r < '0' || r > '9') && r != '-' {
+			return false
+		}
+	}
+	if s[len(s)-1] == '-' {
+		return false
+	}
+	return true
+}
+
 // DeleteWorkspace removes a workspace from config without deleting git worktrees.
 // Returns an error if the workspace is not found or has running agents.
+//
+// Phase 4 of the loom -> fleet-db migration: this function continues to
+// be the legacy yaml writer; on success it also fires a best-effort
+// store mirror delete so the fleet-db view stays in sync.
 func DeleteWorkspace(name string) error {
-	return config.WithConfigLock(func() error {
+	var deletedID string
+	err := config.WithConfigLock(func() error {
 		cfg, err := config.LoadConfigUnlocked()
 		if err != nil {
 			return fmt.Errorf("failed to load config: %w", err)
@@ -34,6 +140,7 @@ func DeleteWorkspace(name string) error {
 		if !ok {
 			return fmt.Errorf("workspace %q not found", name)
 		}
+		deletedID = ws.ID
 
 		if err := checkNoRunningAgents(ws, name); err != nil {
 			return err
@@ -46,6 +153,10 @@ func DeleteWorkspace(name string) error {
 		}
 		return nil
 	})
+	if err == nil {
+		mirrorWorkspaceDelete(name, deletedID)
+	}
+	return err
 }
 
 // checkNoRunningAgents returns an error if any repo in the workspace has an active agent lock.
@@ -178,6 +289,9 @@ func CreateWorkspace(ctx context.Context, req service.WorkspaceCreateRequest) (s
 	if err == nil && result.DeferDaemonStart {
 		daemonTimeout := daemonCfg.Daemon.GetStartupTimeout(workspace.DefaultDaemonStartupTimeout)
 		startDaemonAsync(daemonTimeout, req.Name, result.WorkspacePath, createdRepos, agentNames)
+		// Best-effort fleet-db mirror so the new workspace surfaces in
+		// store-driven endpoints (Phase 4 migration).
+		mirrorWorkspaceToStore(req.Name, result.WorkspaceID, createdRepos)
 	}
 
 	return result, err

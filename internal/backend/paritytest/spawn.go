@@ -4,13 +4,14 @@ package paritytest
 
 import (
 	"bytes"
+	"context"
 	"fmt"
-	"net"
-	"net/http"
 	"os"
 	"os/exec" //nolint:norawexec // parity harness must spawn real bd + fleet-db subprocesses
 	"path/filepath"
 	"syscall"
+
+	"github.com/tysonthomas9/loomcli/internal/netutil"
 	"testing"
 	"time"
 
@@ -216,12 +217,15 @@ func spawnFleetDB(t *testing.T) (backend.IssueBackend, func()) {
 	cmd, logPath := startFleetDBProcess(t, binary, addr, mr.Addr())
 
 	baseURL := "http://" + addr
-	if err := waitForHealthz(baseURL, fleetSpawnTimeout); err != nil {
+	healthCtx, healthCancel := context.WithTimeout(context.Background(), fleetSpawnTimeout)
+	if err := netutil.WaitForHealthz(healthCtx, baseURL, time.Second); err != nil {
+		healthCancel()
 		logDump, _ := os.ReadFile(logPath) // #nosec G304 — test log diagnostic
 		t.Logf("fleet-db log:\n%s", string(logDump))
 		terminateProcess(cmd, 3*time.Second)
 		t.Fatalf("fleet-db did not become healthy in %s: %v", fleetSpawnTimeout, err)
 	}
+	healthCancel()
 	if err := createFleetWorkspace(baseURL, defaultWorkspaceID); err != nil {
 		terminateProcess(cmd, 3*time.Second)
 		t.Fatalf("create workspace: %v", err)
@@ -261,10 +265,10 @@ func startMiniRedis(t *testing.T) *miniredis.Miniredis {
 	return mr
 }
 
-// pickFreePortOrFatal wraps pickFreePort with test fatalling.
+// pickFreePortOrFatal wraps netutil.PickFreeLoopbackPort with test fatalling.
 func pickFreePortOrFatal(t *testing.T) int {
 	t.Helper()
-	port, err := pickFreePort()
+	_, port, err := netutil.PickFreeLoopbackPort()
 	if err != nil {
 		t.Fatalf("pick free port: %v", err)
 	}
@@ -316,44 +320,6 @@ func startFleetDBProcess(t *testing.T, binary, addr, redisAddr string) (*exec.Cm
 	return cmd, logPath
 }
 
-// pickFreePort grabs an ephemeral port by binding to :0, closing the listener,
-// and returning the port. A brief race window exists before fleet-db binds,
-// but in practice the OS won't reassign the port that quickly on a quiet box.
-func pickFreePort() (int, error) {
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		return 0, err
-	}
-	port := ln.Addr().(*net.TCPAddr).Port
-	_ = ln.Close()
-	return port, nil
-}
-
-// waitForHealthz polls GET /healthz until it returns 200 or the deadline
-// expires. Used to serialize spawnFleetDB returns with server readiness.
-func waitForHealthz(baseURL string, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	client := &http.Client{Timeout: 1 * time.Second}
-	url := baseURL + "/healthz"
-	var lastErr error
-	for time.Now().Before(deadline) {
-		resp, err := client.Get(url)
-		if err == nil {
-			_ = resp.Body.Close()
-			if resp.StatusCode == http.StatusOK {
-				return nil
-			}
-			lastErr = fmt.Errorf("healthz returned %d", resp.StatusCode)
-		} else {
-			lastErr = err
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	if lastErr != nil {
-		return lastErr
-	}
-	return fmt.Errorf("healthz never succeeded")
-}
 
 // runCmdOpts configures runOrFail.
 type runCmdOpts struct {

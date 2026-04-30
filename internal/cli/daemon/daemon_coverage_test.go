@@ -9,7 +9,7 @@ import (
 )
 
 func TestNewDaemon_NilConfig(t *testing.T) {
-	_, err := NewDaemon(nil, "/tmp", nil, nil)
+	_, err := NewDaemon(nil, "/tmp", nil, nil, nil)
 	if err == nil {
 		t.Error("expected error for nil config, got nil")
 	}
@@ -19,7 +19,7 @@ func TestNewDaemon_EmptyAgents(t *testing.T) {
 	cfg := &DaemonConfig{
 		Agents: []AgentEntry{},
 	}
-	_, err := NewDaemon(cfg, "/tmp", nil, nil)
+	_, err := NewDaemon(cfg, "/tmp", nil, nil, nil)
 	if err == nil {
 		t.Error("expected error for empty agents, got nil")
 	}

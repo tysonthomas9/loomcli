@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/netutil"
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 )
 
@@ -230,12 +231,15 @@ func spawnCLIHarness(t *testing.T) *cliHarness {
 	cmd, logPath := startFleetDBProcess(t, fleetBinary, addr, mr.Addr())
 
 	baseURL := "http://" + addr
-	if err := waitForHealthz(baseURL, fleetSpawnTimeout); err != nil {
+	healthCtx, healthCancel := context.WithTimeout(context.Background(), fleetSpawnTimeout)
+	if err := netutil.WaitForHealthz(healthCtx, baseURL, time.Second); err != nil {
+		healthCancel()
 		logDump, _ := os.ReadFile(logPath) // #nosec G304 — test log diagnostic
 		t.Logf("fleet-db log:\n%s", string(logDump))
 		terminateProcess(cmd, 3*time.Second)
 		t.Fatalf("fleet-db did not become healthy in %s: %v", fleetSpawnTimeout, err)
 	}
+	healthCancel()
 	if err := createFleetWorkspace(baseURL, defaultWorkspaceID); err != nil {
 		terminateProcess(cmd, 3*time.Second)
 		t.Fatalf("create workspace: %v", err)

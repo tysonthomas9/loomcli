@@ -9,6 +9,7 @@ import (
 
 	// Sub-package registrations — each package's init() calls cli.RegisterCommand().
 	_ "github.com/tysonthomas9/loomcli/internal/cli/agent"
+	_ "github.com/tysonthomas9/loomcli/internal/cli/agentdef"
 	_ "github.com/tysonthomas9/loomcli/internal/cli/automode"
 	_ "github.com/tysonthomas9/loomcli/internal/cli/backends"
 	_ "github.com/tysonthomas9/loomcli/internal/cli/cleanup"
@@ -18,6 +19,8 @@ import (
 	_ "github.com/tysonthomas9/loomcli/internal/cli/hooks"
 	_ "github.com/tysonthomas9/loomcli/internal/cli/migrate"
 	_ "github.com/tysonthomas9/loomcli/internal/cli/monitor"
+	_ "github.com/tysonthomas9/loomcli/internal/cli/repo"
+	_ "github.com/tysonthomas9/loomcli/internal/cli/role"
 	_ "github.com/tysonthomas9/loomcli/internal/cli/serve"
 	_ "github.com/tysonthomas9/loomcli/internal/cli/serve/install"
 	_ "github.com/tysonthomas9/loomcli/internal/cli/serve/logroutercmd"

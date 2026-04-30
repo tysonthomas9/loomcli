@@ -1,10 +1,12 @@
 package svcimpl
 
 import (
+	"errors"
 	"path/filepath"
 	"regexp"
 	"strings"
 
+	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
@@ -69,4 +71,27 @@ func validateAgentName(name string) error {
 		return service.ErrValidation("invalid agent name: must match [a-zA-Z0-9_-]+")
 	}
 	return nil
+}
+
+// classifyStoreError translates a domain.Err* sentinel into the
+// equivalent *service.ServiceError so HTTP handlers can map it to the
+// right status code. op is a short verb describing the operation
+// ("create agent", "delete role", etc.) used for logs and the wrapped
+// error chain.
+func classifyStoreError(op string, err error) error {
+	if err == nil {
+		return nil
+	}
+	switch {
+	case errors.Is(err, domain.ErrNotFound):
+		return service.ErrNotFound(op + ": " + err.Error())
+	case errors.Is(err, domain.ErrAlreadyExists):
+		return service.ErrConflict(op + ": " + err.Error())
+	case errors.Is(err, domain.ErrInvalid):
+		return service.ErrValidation(op + ": " + err.Error())
+	case errors.Is(err, domain.ErrConflict):
+		return service.ErrConflict(op + ": " + err.Error())
+	default:
+		return service.ErrInternal(op, err)
+	}
 }

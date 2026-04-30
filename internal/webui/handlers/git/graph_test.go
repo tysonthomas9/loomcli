@@ -900,7 +900,7 @@ func TestHandleGraph_BackendFallbackWhenNoPool(t *testing.T) {
 			"EPIC-1": {IssueData: backend.IssueData{ID: "EPIC-1"}},
 		},
 	}
-	handler := HandleGraphWithBackendFallback(nil, func() backend.IssueBackend { return be })
+	handler := HandleGraphWithBackendFallback(nil, func(_ context.Context) backend.IssueBackend { return be })
 
 	req := httptest.NewRequest(http.MethodGet, "/api/issues/graph", nil)
 	rr := httptest.NewRecorder()
@@ -956,7 +956,7 @@ func TestHandleGraph_BackendFallbackStatusFilter(t *testing.T) {
 		},
 		details: map[string]*backend.IssueDetailData{},
 	}
-	handler := HandleGraphWithBackendFallback(nil, func() backend.IssueBackend { return be })
+	handler := HandleGraphWithBackendFallback(nil, func(_ context.Context) backend.IssueBackend { return be })
 
 	req := httptest.NewRequest(http.MethodGet, "/api/issues/graph?status=open", nil)
 	rr := httptest.NewRecorder()
@@ -1026,7 +1026,7 @@ func TestHandleBlocked_BackendFallbackOnPoolError(t *testing.T) {
 			{ID: "BE-1", Title: "Via backend", Status: "blocked", Priority: 1},
 		},
 	}
-	handler := HandleBlockedWithBackendFallback(dp, func() backend.IssueBackend { return be })
+	handler := HandleBlockedWithBackendFallback(dp, func(_ context.Context) backend.IssueBackend { return be })
 
 	req := httptest.NewRequest(http.MethodGet, "/api/blocked", nil)
 	rr := httptest.NewRecorder()
@@ -1061,7 +1061,7 @@ func TestHandleBlocked_PoolPathPreservedWhenBackendPresent(t *testing.T) {
 		stubGraphBackend: &stubGraphBackend{},
 		blocked:          []backend.IssueData{{ID: "SHOULD-NOT-APPEAR"}},
 	}
-	handler := HandleBlockedWithBackendFallback(dp, func() backend.IssueBackend { return be })
+	handler := HandleBlockedWithBackendFallback(dp, func(_ context.Context) backend.IssueBackend { return be })
 
 	req := httptest.NewRequest(http.MethodGet, "/api/blocked?priority=abc", nil)
 	rr := httptest.NewRecorder()
@@ -1082,7 +1082,7 @@ func TestHandleBlocked_BackendOnlyWhenNoPool(t *testing.T) {
 			{ID: "FLEET-1", Title: "fleet-only"},
 		},
 	}
-	handler := HandleBlockedWithBackendFallback(nil, func() backend.IssueBackend { return be })
+	handler := HandleBlockedWithBackendFallback(nil, func(_ context.Context) backend.IssueBackend { return be })
 
 	req := httptest.NewRequest(http.MethodGet, "/api/blocked", nil)
 	rr := httptest.NewRecorder()

@@ -1,0 +1,123 @@
+package bootstrap
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+
+	"github.com/tysonthomas9/loomcli/internal/atomicfile"
+	"github.com/tysonthomas9/loomcli/internal/configlock"
+)
+
+// stateCacheVersion is bumped whenever the on-disk schema gains a
+// breaking change. The Load function tolerates older versions by
+// applying defaults; truly incompatible files cause a fatal error so
+// the user can decide whether to delete the cache.
+const stateCacheVersion = 1
+
+// StateCache is the per-user, per-machine state file at ~/.loom/state.json.
+//
+// This is NOT loom config. The source of truth for workspace/repo/agent
+// existence is fleet-db. The cache exists to hold local-only
+// information that fleet-db can't (and shouldn't) know:
+//   - which workspace the user touched last (so the CLI can default the
+//     active workspace without an explicit -w flag)
+//   - where each workspace's checkout lives on this machine
+//   - where each repo within a workspace is checked out on this machine
+//   - where each agent's git worktree lives on this machine
+//
+// All of these are regenerable: a missing state.json is recoverable by
+// re-cloning + re-running `loom workspace use <name>`. The cache is a
+// convenience, never load-bearing for correctness.
+type StateCache struct {
+	Version       int                            `json:"version"`
+	LastWorkspace string                         `json:"last_workspace,omitempty"`
+	Workspaces    map[string]WorkspaceLocalState `json:"workspaces,omitempty"`
+}
+
+// WorkspaceLocalState holds the per-workspace data that varies by
+// machine. Path is the workspace's root directory on this machine.
+// Repos and Agents map their workspace-scoped names to local paths.
+type WorkspaceLocalState struct {
+	Path   string                     `json:"path,omitempty"`
+	Repos  map[string]string          `json:"repos,omitempty"`
+	Agents map[string]AgentLocalState `json:"agents,omitempty"`
+}
+
+// AgentLocalState holds an agent's local-machine attributes. Worktree
+// is the git worktree path the agent operates inside.
+type AgentLocalState struct {
+	Worktree string `json:"worktree,omitempty"`
+}
+
+// LoadStateCache reads ~/.loom/state.json. A missing file returns an
+// empty StateCache (not an error) so callers can do
+// `cache, _ := LoadStateCache(); ...` and treat first-run as normal.
+//
+// A malformed file IS an error — the cache is per-user state and the
+// user should decide how to recover.
+func LoadStateCache() (*StateCache, error) {
+	path := StateFilePath()
+	if path == "" {
+		return nil, errors.New("statecache: cannot resolve loom directory")
+	}
+	data, err := os.ReadFile(path) //nolint:gosec // path is constructed from LoomDir
+	if err != nil {
+		if os.IsNotExist(err) {
+			return &StateCache{Version: stateCacheVersion}, nil
+		}
+		return nil, fmt.Errorf("statecache: read %s: %w", path, err)
+	}
+	var sc StateCache
+	if err := json.Unmarshal(data, &sc); err != nil {
+		return nil, fmt.Errorf("statecache: parse %s: %w", path, err)
+	}
+	if sc.Version == 0 {
+		sc.Version = stateCacheVersion
+	}
+	if sc.Workspaces == nil {
+		sc.Workspaces = make(map[string]WorkspaceLocalState)
+	}
+	return &sc, nil
+}
+
+// SaveStateCache writes the cache atomically. Callers must wrap
+// Load+mutate+Save in WithStateLock when concurrent CLI invocations are
+// possible (every interactive command path qualifies).
+func SaveStateCache(sc *StateCache) error {
+	if sc == nil {
+		return errors.New("statecache: nil cache")
+	}
+	if sc.Version == 0 {
+		sc.Version = stateCacheVersion
+	}
+	path := StateFilePath()
+	if path == "" {
+		return errors.New("statecache: cannot resolve loom directory")
+	}
+	if err := os.MkdirAll(LoomDir(), 0755); err != nil {
+		return fmt.Errorf("statecache: mkdir %s: %w", LoomDir(), err)
+	}
+	data, err := json.MarshalIndent(sc, "", "  ")
+	if err != nil {
+		return fmt.Errorf("statecache: marshal: %w", err)
+	}
+	if err := atomicfile.WriteFile(path, data, 0600); err != nil {
+		return fmt.Errorf("statecache: write %s: %w", path, err)
+	}
+	return nil
+}
+
+// WithStateLock acquires the loom directory lock, runs fn, releases.
+// Use to wrap Load+mutate+Save sequences so concurrent CLI invocations
+// don't clobber each other's writes. The lock file lives in LoomDir
+// and is independent of any other lock files (e.g., the legacy yaml
+// config lock at config.lock).
+func WithStateLock(fn func() error) error {
+	dir := LoomDir()
+	if dir == "" {
+		return errors.New("statecache: cannot resolve loom directory")
+	}
+	return configlock.WithLock(dir, fn)
+}

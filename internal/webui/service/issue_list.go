@@ -11,6 +11,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/types"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
 func (s *issueServiceImpl) ListIssues(ctx context.Context, params ListIssuesParams) (*ListIssuesResult, error) {
@@ -18,10 +19,23 @@ func (s *issueServiceImpl) ListIssues(ctx context.Context, params ListIssuesPara
 	// directly through the IssueBackend. The pool path below only runs
 	// in beads mode where multiPool/pool is wired.
 	if s.pool == nil {
-		if be, _ := s.resolveBackend(); be != nil {
+		if be, _ := s.resolveBackend(ctx); be != nil {
 			return s.listIssuesViaBackend(ctx, be, params)
 		}
 		return nil, ErrUnavailable("connection pool not initialized")
+	}
+
+	// Mixed deployment: a beads pool exists for the local workspace, but
+	// other workspaces (fleet-db-only) won't have one. When the request's
+	// workspace isn't in the pool registry, route to the IssueBackend
+	// instead of opening a daemon connection that would return the wrong
+	// workspace's data.
+	if wsID := middleware.WorkspaceFromContext(ctx); wsID != "" && s.multiPool != nil {
+		if s.multiPool.PoolForWorkspace(wsID) == nil {
+			if be, _ := s.resolveBackend(ctx); be != nil {
+				return s.listIssuesViaBackend(ctx, be, params)
+			}
+		}
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -33,7 +47,7 @@ func (s *issueServiceImpl) ListIssues(ctx context.Context, params ListIssuesPara
 		// non-functional (no bd daemon at all), so before bubbling
 		// "daemon unavailable" up to the FE, see whether a backend is
 		// wired and serve the list from there.
-		if be, _ := s.resolveBackend(); be != nil {
+		if be, _ := s.resolveBackend(ctx); be != nil {
 			return s.listIssuesViaBackend(ctx, be, params)
 		}
 		if errors.Is(err, context.DeadlineExceeded) {

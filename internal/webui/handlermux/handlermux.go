@@ -5,6 +5,7 @@
 package handlermux
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
@@ -28,7 +29,7 @@ type WorkspaceOpsModule struct {
 	workspaceSvc   service.WorkspaceService
 	multiPool      daemon.Pool
 	agentQueueH    http.HandlerFunc
-	issueBackendFn func() backend.IssueBackend
+	issueBackendFn func(ctx context.Context) backend.IssueBackend
 	daemonExpected bool
 	wsPathFn       hterminal.WorkspacePathResolver
 }
@@ -48,7 +49,7 @@ func NewWorkspaceOpsModule(workspaceSvc service.WorkspaceService, multiPool daem
 // WithIssueBackendFn injects the IssueBackend factory used by handlers
 // that can degrade gracefully without the daemon pool (currently just the
 // graph endpoint). Returns the module for chaining.
-func (m *WorkspaceOpsModule) WithIssueBackendFn(fn func() backend.IssueBackend) *WorkspaceOpsModule {
+func (m *WorkspaceOpsModule) WithIssueBackendFn(fn func(ctx context.Context) backend.IssueBackend) *WorkspaceOpsModule {
 	m.issueBackendFn = fn
 	return m
 }

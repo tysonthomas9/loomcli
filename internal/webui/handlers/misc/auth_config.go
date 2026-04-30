@@ -1,6 +1,7 @@
 package misc
 
 import (
+	"context"
 	"math"
 	"net/http"
 	"os"
@@ -124,7 +125,7 @@ func (l *AuthConfigLimiter) evictStale() {
 //
 // The rest of the response is effectively cached per request — config values
 // (auth mode, auth URL) don't change at runtime (requires server restart).
-func HandleAuthConfig(extAuthURL string, limiter *AuthConfigLimiter, issueBackendFn func() backend.IssueBackend) http.HandlerFunc {
+func HandleAuthConfig(extAuthURL string, limiter *AuthConfigLimiter, issueBackendFn func(ctx context.Context) backend.IssueBackend) http.HandlerFunc {
 	var baseResp authConfigResponse
 	if extAuthURL != "" {
 		// Return same-origin URL so the frontend BetterAuth client sends
@@ -156,7 +157,7 @@ func HandleAuthConfig(extAuthURL string, limiter *AuthConfigLimiter, issueBacken
 		// reflect in the response. Most of the time this is a simple pointer
 		// load and never-nil — cost is negligible vs the rate limiter above.
 		resp := baseResp
-		resp.IssueBackend = resolveIssueBackendLabel(issueBackendFn)
+		resp.IssueBackend = resolveIssueBackendLabel(r.Context(), issueBackendFn)
 
 		// SECURITY: no-store prevents caching that could enable downgrade attacks.
 		// An attacker who poisons a cached response with mode:"open" would bypass
@@ -172,9 +173,9 @@ func HandleAuthConfig(extAuthURL string, limiter *AuthConfigLimiter, issueBacken
 // "beads", "fleet-db" → "fleet") so the frontend can switch on a small set
 // of stable labels. Falls back to LOOM_ISSUE_BACKEND when no factory is
 // wired — matches the resolution order used elsewhere in the codebase.
-func resolveIssueBackendLabel(issueBackendFn func() backend.IssueBackend) string {
+func resolveIssueBackendLabel(ctx context.Context, issueBackendFn func(ctx context.Context) backend.IssueBackend) string {
 	if issueBackendFn != nil {
-		if be := issueBackendFn(); be != nil {
+		if be := issueBackendFn(ctx); be != nil {
 			return normalizeBackendName(be.BackendName())
 		}
 	}

@@ -1896,7 +1896,7 @@ func TestLegacyFlatAgentRoutesRemoved(t *testing.T) {
 	gitOps := &mockGitOps{}
 	fileOps := &mockFileOps{}
 
-	app := &Server{multiPool: multiPool, config: webui.ServerConfig{GitOps: gitOps, FileOps: fileOps}, wsExistsFn: wsExistsFn, agentSvc: svcimpl.NewAgentService(gitOps, nil, nil)}
+	app := &Server{multiPool: multiPool, config: webui.ServerConfig{GitOps: gitOps, FileOps: fileOps}, wsExistsFn: wsExistsFn, agentSvc: svcimpl.NewAgentService(gitOps, nil, nil, nil)}
 	app.diffSvc = svcimpl.NewDiffService(gitOps, nil)
 	app.fileSvc = svcimpl.NewFileService(fileOps)
 	app.sessSvc = svcimpl.NewSessionService(nil, nil)

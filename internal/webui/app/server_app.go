@@ -215,7 +215,7 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 
 	// Initialize agent service layer (requires ops.GitOps; agentTmuxMgr/termAuth may be nil)
 	if config.GitOps != nil {
-		app.agentSvc = svcimpl.NewAgentService(config.GitOps, app.agentTmuxMgr, app.termAuth)
+		app.agentSvc = svcimpl.NewAgentService(config.GitOps, app.agentTmuxMgr, app.termAuth, config.Store)
 	}
 
 	// Initialize SSE token exchange store (external auth mode only).
@@ -368,7 +368,13 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	// *name* instead. When the direct UUID lookup misses, fall back to the
 	// resolver so a name like "PARITY" still maps to the registered UUID
 	// rather than 404'ing.
+	//
+	// Final fallback: the unified store. Fleet-db-only workspaces (created
+	// post-Phase-4) aren't in the beads registry, so without this check
+	// every `/api/workspaces/{ws}/...` route would 404 before the handler
+	// could read state from fleet-db.
 	wsResolver := config.WorkspaceIDResolverFn
+	wsStore := config.Store
 	app.wsExistsFn = func(id string) bool {
 		if app.registry.Registered(id) {
 			_ = app.registry.ActivateSubscriber(id)
@@ -380,11 +386,20 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 				return true
 			}
 		}
+		if wsStore != nil {
+			if ws, err := wsStore.Workspaces().Get(ctx, id); err == nil && ws != nil {
+				return true
+			}
+		}
 		return false
 	}
 
-	// Initialize workspace service layer
+	// Initialize workspace service layer. Store is the preferred read
+	// source (Phase 4 of fleet-db migration); the legacy ConfigFn /
+	// ConfigByIDFn closures stay wired during the transition for code
+	// paths that haven't yet been moved to store reads.
 	app.workspaceSvc = service.NewWorkspaceService(service.WorkspaceServiceConfig{
+		Store:          config.Store,
 		ConfigFn:       config.WorkspaceConfigFn,
 		ConfigByIDFn:   config.WorkspaceConfigByIDFn,
 		MultiPool:      app.multiPool,

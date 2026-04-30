@@ -13,6 +13,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/ops"
+	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/agentcontrol"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
@@ -81,6 +82,16 @@ type ServerConfig struct {
 	WorkspaceListFn         func() (map[string]string, error)                    // Returns all configured workspaces as id→path (UUID preferred, name fallback for pre-migration); nil = single-workspace mode
 	InitialWorkspaceID      string                                               // Stable UUID of the initial workspace (CWD); if empty, falls back to filepath.Base(cwd)
 	WorkspaceIDResolverFn   WorkspaceIDResolverFn                                // Resolves workspace name → UUID; nil = no resolution available
+	// Store is the unified state store — workspaces, repos, agents, roles,
+	// daemon profiles. Set by serve.go via bootstrap.OpenStore. When non-nil,
+	// the workspace/agent service implementations source their data from
+	// store calls rather than the legacy yaml-derived closures above.
+	//
+	// Migration order (Phase 4 of fleet-db migration): the closure fields
+	// listed above are scheduled for removal once their consumers have been
+	// switched over to Store. Until then, both fields coexist so partial
+	// migrations stay functional.
+	Store                   store.Store
 	BackendOps              ops.BackendOps                                       // Backend health operations interface (optional; nil disables backend health endpoint)
 	ScrollbackMaxLines      int                                                  // Maximum lines per scrollback buffer (0 = default 10000)
 	NotifyTokenDir          string                                               // Directory to write notify.token (typically beads dir); empty = token file not written
@@ -106,7 +117,12 @@ type ServerConfig struct {
 	// Threaded as a closure rather than a backend.IssueBackend field so the
 	// cli wiring can resolve the backend lazily without webui depending on
 	// internal/cli (which would create an import cycle).
-	IssueBackendFn func() backend.IssueBackend
+	//
+	// The ctx carries the per-request workspace ID via middleware.WithWorkspace,
+	// allowing the closure to construct a per-workspace fleet-db backend in
+	// cloud mode. Beads-mode wirings ignore ctx and return the process-global
+	// backend (loom is single-workspace per process in beads mode).
+	IssueBackendFn func(ctx context.Context) backend.IssueBackend
 }
 
 // WorkspaceIDResolverFn resolves a workspace name to its stable UUID.

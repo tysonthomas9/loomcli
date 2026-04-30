@@ -1,0 +1,266 @@
+// Package fleetdb implements store.Store as an HTTP client against the
+// fleet-db service's REST API.
+//
+// This is the production wiring used by loom serve + loom CLI commands.
+// Tests typically use internal/infra/memstore instead. Both packages
+// implement the same store.Store contract, so any caller can be tested
+// against memstore and run in production against fleetdb without code
+// changes.
+//
+// Authentication: the client sends X-Fleet-API-Key (when APIKey is
+// configured) and X-Actor (always — defaults to the loom agent name or
+// the OS user). Fleet-db's --auth-dev-mode treats X-Actor as the
+// authenticated identity; production deployments should configure
+// JWT bearer tokens via SetAuthToken.
+package fleetdb
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"strings"
+	"sync"
+
+	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/store"
+)
+
+// maxResponseBody caps response reads at 16 MiB to prevent OOM if
+// fleet-db ever sends a malformed/huge body. Workspace metadata is
+// kilobytes; this is generous.
+const maxResponseBody = 16 << 20
+
+// Config holds connection parameters for the fleet-db HTTP client.
+type Config struct {
+	// BaseURL is the fleet-db base URL, e.g. "http://localhost:8080".
+	// Required. Trailing slash trimmed.
+	BaseURL string
+
+	// APIKey is sent as X-Fleet-API-Key. Optional in dev mode.
+	APIKey string
+
+	// Actor is sent as X-Actor on every request. Identifies the caller
+	// for audit + (in dev-mode) authorization.
+	Actor string
+
+	// AuthToken is a JWT bearer token for production auth. When set,
+	// sent as `Authorization: Bearer <token>`. Mutate post-construction
+	// via SetAuthToken — safe for concurrent use.
+	AuthToken string
+
+	// HTTPClient is an optional override. When nil, a new http.Client
+	// with default settings is used. Production callers should inject a
+	// transport-pooled client.
+	HTTPClient *http.Client
+}
+
+// Client is the fleet-db HTTP client. Implements store.Store.
+type Client struct {
+	baseURL string
+	http    *http.Client
+
+	mu        sync.RWMutex
+	apiKey    string
+	actor     string
+	authToken string
+
+	workspaces *workspaceStore
+	repos      *repoStore
+	agents     *agentStore
+	roles      *roleStore
+	daemon     *daemonStore
+}
+
+// New constructs a fleet-db client. Returns an error if BaseURL is empty.
+func New(cfg Config) (*Client, error) {
+	if cfg.BaseURL == "" {
+		return nil, fmt.Errorf("fleetdb: BaseURL required")
+	}
+	httpClient := cfg.HTTPClient
+	if httpClient == nil {
+		httpClient = &http.Client{}
+	}
+	c := &Client{
+		baseURL:   strings.TrimRight(cfg.BaseURL, "/"),
+		http:      httpClient,
+		apiKey:    cfg.APIKey,
+		actor:     cfg.Actor,
+		authToken: cfg.AuthToken,
+	}
+	c.workspaces = &workspaceStore{client: c}
+	c.repos = &repoStore{client: c}
+	c.agents = &agentStore{client: c}
+	c.roles = &roleStore{client: c}
+	c.daemon = &daemonStore{client: c}
+	return c, nil
+}
+
+// Compile-time check.
+var _ store.Store = (*Client)(nil)
+
+// Workspaces returns the WorkspaceStore.
+func (c *Client) Workspaces() store.WorkspaceStore { return c.workspaces }
+
+// Repos returns the RepoStore.
+func (c *Client) Repos() store.RepoStore { return c.repos }
+
+// Agents returns the AgentStore.
+func (c *Client) Agents() store.AgentStore { return c.agents }
+
+// Roles returns the RoleStore.
+func (c *Client) Roles() store.RoleStore { return c.roles }
+
+// Daemon returns the DaemonProfileStore.
+func (c *Client) Daemon() store.DaemonProfileStore { return c.daemon }
+
+// Close is a no-op — HTTP clients hold no resources beyond the
+// transport's connection pool, and that is shared / not owned by us.
+func (c *Client) Close() error { return nil }
+
+// SetAuthToken updates the bearer token used on subsequent requests.
+// Safe for concurrent use.
+func (c *Client) SetAuthToken(token string) {
+	c.mu.Lock()
+	c.authToken = token
+	c.mu.Unlock()
+}
+
+// SetAPIKey updates the API key used on subsequent requests. Safe for
+// concurrent use.
+func (c *Client) SetAPIKey(key string) {
+	c.mu.Lock()
+	c.apiKey = key
+	c.mu.Unlock()
+}
+
+// do executes an HTTP request, decoding the response into out (when
+// non-nil). The body parameter, when non-nil, is JSON-marshaled and
+// sent as the request body with Content-Type: application/json.
+//
+// HTTP error responses are mapped to domain sentinel errors:
+//   - 404 → domain.ErrNotFound
+//   - 409 → domain.ErrAlreadyExists
+//   - 400/422 → domain.ErrInvalid
+//   - 4xx other → domain.ErrConflict (best fit; callers can inspect msg)
+//   - 5xx → fmt.Errorf wrapping the body
+//
+// 204 No Content is treated as success with no body.
+func (c *Client) do(ctx context.Context, method, path string, body, out any) error {
+	var reader io.Reader
+	if body != nil {
+		raw, err := json.Marshal(body)
+		if err != nil {
+			return fmt.Errorf("fleetdb: marshal request: %w", err)
+		}
+		reader = bytes.NewReader(raw)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, reader)
+	if err != nil {
+		return fmt.Errorf("fleetdb: build request: %w", err)
+	}
+	req.Header.Set("Accept", "application/json")
+	if reader != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+
+	c.mu.RLock()
+	apiKey, actor, authToken := c.apiKey, c.actor, c.authToken
+	c.mu.RUnlock()
+	if apiKey != "" {
+		req.Header.Set("X-Fleet-API-Key", apiKey)
+	}
+	if actor != "" {
+		req.Header.Set("X-Actor", actor)
+	}
+	if authToken != "" {
+		req.Header.Set("Authorization", "Bearer "+authToken)
+	}
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return fmt.Errorf("fleetdb: %s %s: %w", method, path, err)
+	}
+	defer func() {
+		// Drain so the underlying connection can be returned to the
+		// keep-alive pool even when callers don't consume the full body.
+		_, _ = io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+	}()
+
+	if resp.StatusCode >= 400 {
+		respBody, readErr := io.ReadAll(io.LimitReader(resp.Body, maxResponseBody))
+		if readErr != nil {
+			return fmt.Errorf("fleetdb: %s %s: HTTP %d (read body: %w)", method, path, resp.StatusCode, readErr)
+		}
+		return classifyHTTPError(method, path, resp.StatusCode, respBody)
+	}
+	if out == nil || resp.StatusCode == http.StatusNoContent {
+		return nil
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxResponseBody)).Decode(out); err != nil {
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		return fmt.Errorf("fleetdb: decode response (%s %s): %w", method, path, err)
+	}
+	return nil
+}
+
+// classifyHTTPError maps an HTTP status + body into the appropriate
+// domain sentinel + descriptive wrap.
+func classifyHTTPError(method, path string, status int, body []byte) error {
+	msg := extractErrorMessage(body)
+	prefix := fmt.Sprintf("fleetdb: %s %s: HTTP %d", method, path, status)
+	if msg != "" {
+		prefix += ": " + msg
+	}
+	switch status {
+	case http.StatusNotFound:
+		return fmt.Errorf("%s: %w", prefix, domain.ErrNotFound)
+	case http.StatusConflict:
+		return fmt.Errorf("%s: %w", prefix, domain.ErrAlreadyExists)
+	case http.StatusBadRequest, http.StatusUnprocessableEntity:
+		return fmt.Errorf("%s: %w", prefix, domain.ErrInvalid)
+	}
+	if status >= 400 && status < 500 {
+		return fmt.Errorf("%s: %w", prefix, domain.ErrConflict)
+	}
+	return errors.New(prefix)
+}
+
+// extractErrorMessage tries the two error-envelope shapes fleet-db uses:
+// the wrapper {"error":"..."} and the structured {"error":{"code":"...","message":"..."}}.
+func extractErrorMessage(body []byte) string {
+	if len(bytes.TrimSpace(body)) == 0 {
+		return ""
+	}
+	var envelope struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(body, &envelope); err == nil && envelope.Error != "" {
+		return envelope.Error
+	}
+	var structured struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(body, &structured); err == nil && structured.Error.Message != "" {
+		return structured.Error.Message
+	}
+	// Last resort: surface trimmed body for debuggability.
+	s := strings.TrimSpace(string(body))
+	if len(s) > 200 {
+		s = s[:200] + "…"
+	}
+	return s
+}
+
+// pathEscape wraps url.PathEscape so call sites stay compact.
+func pathEscape(s string) string { return url.PathEscape(s) }

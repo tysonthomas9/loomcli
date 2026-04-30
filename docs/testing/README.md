@@ -19,6 +19,15 @@ Comprehensive documentation of all tests in the loomcli project.
 - **[Test Infrastructure](test-infrastructure.md)** - CI/CD, scripts, Makefile targets, configuration files, coverage
 - **[Test Patterns & Conventions](test-patterns.md)** - Common patterns, mocking strategies, helpers, and best practices
 
+### Manual E2E plans (loomcli ↔ fleet-db migration)
+
+Reproducible end-to-end plans for the fleet-db-backed architecture. Designed to be runnable by an agent or by hand.
+
+- **[E2E preflight](e2e-preflight.md)** - shared setup (binaries, podman Redis, fleet-db subprocess, env vars, runner conventions, cleanup)
+- **[E2E CLI + curl](e2e-cli.md)** - CLI noun-verb commands, failure modes, embedded mode, direct fleet-db API, multi-workspace isolation
+- **[E2E Web UI](e2e-ui.md)** - multi-workspace lifecycle via agent-browser (gated on Phase 4 of the migration)
+- **[Known issues](known-issues.md)** - documented expected-failures + bug references + test-methodology pitfalls. Read before claiming a clean run
+
 ## Running Tests
 
 ### Go Tests

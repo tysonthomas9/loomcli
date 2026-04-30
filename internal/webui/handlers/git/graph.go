@@ -21,7 +21,10 @@ import (
 // IssueBackendFn returns the active backend.IssueBackend. Passed through to
 // HandleGraph so the handler can fall back to the backend when no daemon
 // pool is available (fleet mode) or pool acquisition fails.
-type IssueBackendFn func() backend.IssueBackend
+//
+// ctx carries the per-request workspace ID so cloud-mode wirings can route
+// to a per-workspace fleet-db backend.
+type IssueBackendFn func(ctx context.Context) backend.IssueBackend
 
 // BlockedResponse wraps the blocked issues data for JSON response.
 type BlockedResponse struct {
@@ -181,7 +184,7 @@ func serveBlockedViaBackend(w http.ResponseWriter, r *http.Request, backendFn Is
 	if backendFn == nil {
 		return false
 	}
-	be := backendFn()
+	be := backendFn(r.Context())
 	if be == nil {
 		return false
 	}
@@ -406,7 +409,7 @@ func serveGraphViaBackend(w http.ResponseWriter, r *http.Request, backendFn Issu
 	if backendFn == nil {
 		return false
 	}
-	be := backendFn()
+	be := backendFn(r.Context())
 	if be == nil {
 		return false
 	}

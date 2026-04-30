@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/ops"
+	"github.com/tysonthomas9/loomcli/internal/store"
 	webuilog "github.com/tysonthomas9/loomcli/internal/webui/log"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
@@ -19,16 +21,22 @@ type agentServiceImpl struct {
 	gitOps   ops.GitOps
 	termMgr  *terminal.AgentTmuxManager
 	termAuth *realtime.TerminalAuth
+	store    store.Store // fleet-db backed store; nil disables CRUD endpoints
 }
 
 // NewAgentService creates a new AgentService implementation.
 // gitOps must be non-nil. termMgr (AgentTmuxManager) and termAuth may be nil;
 // methods that require them return service.ErrUnavailable.
-func NewAgentService(gitOps ops.GitOps, termMgr *terminal.AgentTmuxManager, termAuth *realtime.TerminalAuth) service.AgentService {
+//
+// Phase 4 of the loom -> fleet-db migration: store is the source of
+// truth for agent CRUD endpoints. When nil, ListAgents / CreateAgent /
+// UpdateAgent / DeleteAgent return service.ErrUnavailable.
+func NewAgentService(gitOps ops.GitOps, termMgr *terminal.AgentTmuxManager, termAuth *realtime.TerminalAuth, st store.Store) service.AgentService {
 	return &agentServiceImpl{
 		gitOps:   gitOps,
 		termMgr:  termMgr,
 		termAuth: termAuth,
+		store:    st,
 	}
 }
 
@@ -299,6 +307,102 @@ func (s *agentServiceImpl) GitStatus(_ context.Context, wsID, agentName string) 
 		return nil, fmt.Errorf("getting git status: %w", err)
 	}
 	return result, nil
+}
+
+// ListAgents returns all agents registered for the workspace via the
+// fleet-db store. Returns ErrUnavailable when no store handle was
+// provided at construction time.
+func (s *agentServiceImpl) ListAgents(ctx context.Context, wsKey string) ([]*domain.Agent, error) {
+	if s.store == nil {
+		return nil, service.ErrUnavailable("fleet-db store not configured")
+	}
+	if wsKey == "" {
+		return nil, service.ErrValidation("workspace key required")
+	}
+	agents, err := s.store.Agents().List(ctx, wsKey)
+	if err != nil {
+		return nil, service.ErrInternal("list agents", err)
+	}
+	return agents, nil
+}
+
+// CreateAgent registers a new agent assignment in the fleet-db store.
+func (s *agentServiceImpl) CreateAgent(ctx context.Context, in service.AgentCreateInput) (*domain.Agent, error) {
+	if s.store == nil {
+		return nil, service.ErrUnavailable("fleet-db store not configured")
+	}
+	if err := validateAgentCreateInput(in); err != nil {
+		return nil, err
+	}
+	created, err := s.store.Agents().Create(ctx, store.AgentCreate{
+		WorkspaceKey:     in.WorkspaceKey,
+		Name:             in.Name,
+		RoleName:         in.RoleName,
+		Auto:             in.Auto,
+		Backend:          in.Backend,
+		FallbackBackends: in.FallbackBackends,
+		Repos:            in.Repos,
+		RepoGroups:       in.RepoGroups,
+		CrossRepo:        in.CrossRepo,
+		Parent:           in.Parent,
+	})
+	if err != nil {
+		return nil, classifyStoreError("create agent", err)
+	}
+	return created, nil
+}
+
+// UpdateAgent applies a partial update to an existing agent.
+func (s *agentServiceImpl) UpdateAgent(ctx context.Context, wsKey, name string, patch service.AgentUpdateInput) (*domain.Agent, error) {
+	if s.store == nil {
+		return nil, service.ErrUnavailable("fleet-db store not configured")
+	}
+	if err := validateAgentName(name); err != nil {
+		return nil, err
+	}
+	updated, err := s.store.Agents().Update(ctx, wsKey, name, store.AgentUpdate{
+		RoleName:         patch.RoleName,
+		Auto:             patch.Auto,
+		Backend:          patch.Backend,
+		FallbackBackends: patch.FallbackBackends,
+		Repos:            patch.Repos,
+		RepoGroups:       patch.RepoGroups,
+		CrossRepo:        patch.CrossRepo,
+		Parent:           patch.Parent,
+		State:            patch.State,
+	})
+	if err != nil {
+		return nil, classifyStoreError("update agent", err)
+	}
+	return updated, nil
+}
+
+// DeleteAgent removes an agent assignment from the fleet-db store.
+func (s *agentServiceImpl) DeleteAgent(ctx context.Context, wsKey, name string) error {
+	if s.store == nil {
+		return service.ErrUnavailable("fleet-db store not configured")
+	}
+	if err := validateAgentName(name); err != nil {
+		return err
+	}
+	if err := s.store.Agents().Delete(ctx, wsKey, name); err != nil {
+		return classifyStoreError("delete agent", err)
+	}
+	return nil
+}
+
+// validateAgentCreateInput checks required fields on an agent create payload.
+func validateAgentCreateInput(in service.AgentCreateInput) error {
+	if in.WorkspaceKey == "" {
+		return service.ErrValidation("workspace_key required")
+	}
+	if err := validateAgentName(in.Name); err != nil {
+		return err
+	}
+	if in.RoleName == "" {
+		return service.ErrValidation("role_name required")
+	}
+	return nil
 }
 
 func (s *agentServiceImpl) SetTargetBranch(_ context.Context, wsID, agentName, branch string) error {

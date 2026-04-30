@@ -17,6 +17,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/daemonwire"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/metricscmd"
@@ -204,9 +205,27 @@ func runServe(cmd *cobra.Command, args []string) {
 	monitorHandlers := buildMonitorHandlers(collectDataFn, staleDetectorHandler)
 	workspacemgr.EnsureProjectRegistered()
 
+	// Open the fleet-db-backed store handle. In ModeLocal this spawns
+	// the embedded fleet-db subprocess; in ModeCloud it dials the
+	// configured URL. The handle is shared with the webui server so
+	// workspace/agent endpoints can read from store rather than yaml.
+	storeHandle, storeErr := cmdstore.OpenStore(ctx)
+	if storeErr != nil {
+		// Failure to open the store is non-fatal during the migration
+		// window — yaml-backed closures still satisfy the legacy paths.
+		// Once Phase 6 deletes those, this becomes a hard failure.
+		log.Printf("Warning: failed to open fleet-db store: %v (workspace endpoints will fall back to yaml)", storeErr)
+	}
+	if storeHandle != nil {
+		defer storeHandle.Close()
+	}
+
 	webuiErr := make(chan error, 1)
 	go func() {
 		cfg := buildServerConfig(monitorHandlers, fleetState)
+		if storeHandle != nil {
+			cfg.Store = storeHandle.Store
+		}
 		if !serveNoDaemon {
 			cfg.DaemonStartupFn = workspacemgr.EnsureDaemonsForAllWorkspaces
 		}
@@ -360,7 +379,12 @@ func buildCoreServerConfig(monitorHandlers webui.MonitorHandlers, gitOps *opsimp
 		// lazily — important because in fleet mode the backend is created on
 		// first call, after the serve command has finished its early-startup
 		// configuration.
-		IssueBackendFn: cli.DefaultIssueBackend,
+		//
+		// Cloud mode (LOOM_FLEET_DB_URL set) takes the workspace ID from the
+		// request context and constructs a per-workspace fleet-db backend so
+		// /api/workspaces/{ws}/issues stays scoped. Local mode falls back to
+		// the process-global backend (single-workspace beads).
+		IssueBackendFn: cli.WorkspaceAwareIssueBackend(),
 	}
 }
 

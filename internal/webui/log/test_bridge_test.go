@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
@@ -91,3 +92,13 @@ func (m *mockAgentService) GitStatus(ctx context.Context, wsID, agentName string
 func (m *mockAgentService) SetTargetBranch(ctx context.Context, wsID, agentName, branch string) error {
 	return nil
 }
+func (m *mockAgentService) ListAgents(_ context.Context, _ string) ([]*domain.Agent, error) {
+	return nil, nil
+}
+func (m *mockAgentService) CreateAgent(_ context.Context, _ service.AgentCreateInput) (*domain.Agent, error) {
+	return nil, nil
+}
+func (m *mockAgentService) UpdateAgent(_ context.Context, _, _ string, _ service.AgentUpdateInput) (*domain.Agent, error) {
+	return nil, nil
+}
+func (m *mockAgentService) DeleteAgent(_ context.Context, _, _ string) error { return nil }

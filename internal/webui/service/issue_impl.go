@@ -40,7 +40,11 @@ const (
 // Implementations may resolve the backend lazily; callers must handle a nil
 // return by treating the backend as unavailable. The returned backend is
 // expected to be safe for concurrent use across goroutines.
-type IssueBackendProvider func() backend.IssueBackend
+//
+// The ctx carries the per-request workspace ID; cloud-mode providers use it
+// to build a fleet-db backend scoped to the request's workspace. Single-
+// workspace providers (beads) ignore ctx.
+type IssueBackendProvider func(ctx context.Context) backend.IssueBackend
 
 type issueServiceImpl struct {
 	pool            daemon.Pool
@@ -88,12 +92,13 @@ func NewIssueServiceWithBackend(pool daemon.Pool, multiPool *daemon.MultiPool, w
 }
 
 // resolveBackend returns the current IssueBackend or a service error if no
-// backend has been wired into the service.
-func (s *issueServiceImpl) resolveBackend() (backend.IssueBackend, *ServiceError) {
+// backend has been wired into the service. The ctx is forwarded to the
+// provider so cloud-mode wirings can pick a per-workspace backend.
+func (s *issueServiceImpl) resolveBackend(ctx context.Context) (backend.IssueBackend, *ServiceError) {
 	if s.backendFn == nil {
 		return nil, ErrUnavailable("issue backend not configured")
 	}
-	be := s.backendFn()
+	be := s.backendFn(ctx)
 	if be == nil {
 		return nil, ErrUnavailable("issue backend not available")
 	}
@@ -173,7 +178,7 @@ func (s *issueServiceImpl) releaseClient(client *rpc.Client, ok *bool) {
 }
 
 func (s *issueServiceImpl) GetIssue(ctx context.Context, issueID string) (json.RawMessage, error) {
-	be, svcErr := s.resolveBackend()
+	be, svcErr := s.resolveBackend(ctx)
 	if svcErr != nil {
 		return nil, svcErr
 	}
@@ -202,7 +207,7 @@ func (s *issueServiceImpl) CreateIssue(ctx context.Context, params CreateIssuePa
 		return nil, err
 	}
 
-	be, svcErr := s.resolveBackend()
+	be, svcErr := s.resolveBackend(ctx)
 	if svcErr != nil {
 		return nil, svcErr
 	}
@@ -248,7 +253,7 @@ func (s *issueServiceImpl) CreateIssue(ctx context.Context, params CreateIssuePa
 }
 
 func (s *issueServiceImpl) PatchIssue(ctx context.Context, params PatchIssueParams) error {
-	be, svcErr := s.resolveBackend()
+	be, svcErr := s.resolveBackend(ctx)
 	if svcErr != nil {
 		return svcErr
 	}
@@ -278,7 +283,7 @@ func isTemplateUpdateError(err error) bool {
 }
 
 func (s *issueServiceImpl) CloseIssue(ctx context.Context, params CloseIssueParams) (json.RawMessage, error) {
-	be, svcErr := s.resolveBackend()
+	be, svcErr := s.resolveBackend(ctx)
 	if svcErr != nil {
 		return nil, svcErr
 	}
@@ -327,7 +332,7 @@ func (s *issueServiceImpl) ClaimIssue(ctx context.Context, params ClaimIssuePara
 		return nil, ErrValidation("issue ID is required")
 	}
 
-	be, svcErr := s.resolveBackend()
+	be, svcErr := s.resolveBackend(ctx)
 	if svcErr != nil {
 		return nil, svcErr
 	}
@@ -367,7 +372,7 @@ func (s *issueServiceImpl) ClaimIssue(ctx context.Context, params ClaimIssuePara
 }
 
 func (s *issueServiceImpl) DeleteIssue(ctx context.Context, issueID string) (json.RawMessage, error) {
-	be, svcErr := s.resolveBackend()
+	be, svcErr := s.resolveBackend(ctx)
 	if svcErr != nil {
 		return nil, svcErr
 	}
@@ -405,7 +410,7 @@ func (s *issueServiceImpl) AddComment(ctx context.Context, params AddCommentPara
 		return nil, ErrValidation(fmt.Sprintf("comment text too long (%d bytes, max %d)", len(text), maxCommentLength))
 	}
 
-	be, svcErr := s.resolveBackend()
+	be, svcErr := s.resolveBackend(ctx)
 	if svcErr != nil {
 		return nil, svcErr
 	}
@@ -446,7 +451,7 @@ func (s *issueServiceImpl) AddDependency(ctx context.Context, params AddDependen
 		depType = "blocks"
 	}
 
-	be, svcErr := s.resolveBackend()
+	be, svcErr := s.resolveBackend(ctx)
 	if svcErr != nil {
 		return svcErr
 	}
@@ -466,7 +471,7 @@ func (s *issueServiceImpl) AddDependency(ctx context.Context, params AddDependen
 }
 
 func (s *issueServiceImpl) RemoveDependency(ctx context.Context, params RemoveDependencyParams) error {
-	be, svcErr := s.resolveBackend()
+	be, svcErr := s.resolveBackend(ctx)
 	if svcErr != nil {
 		return svcErr
 	}
@@ -497,7 +502,7 @@ func (s *issueServiceImpl) SearchIssues(ctx context.Context, params SearchIssues
 		return nil, ErrValidation("limit must be non-negative")
 	}
 
-	be, svcErr := s.resolveBackend()
+	be, svcErr := s.resolveBackend(ctx)
 	if svcErr != nil {
 		return nil, svcErr
 	}
@@ -532,7 +537,7 @@ func (s *issueServiceImpl) ReopenIssue(ctx context.Context, params ReopenIssuePa
 		return ErrValidation("issue ID is required")
 	}
 
-	be, svcErr := s.resolveBackend()
+	be, svcErr := s.resolveBackend(ctx)
 	if svcErr != nil {
 		return svcErr
 	}
@@ -554,7 +559,7 @@ func (s *issueServiceImpl) ListComments(ctx context.Context, issueID string) ([]
 		return nil, ErrValidation("issue ID is required")
 	}
 
-	be, svcErr := s.resolveBackend()
+	be, svcErr := s.resolveBackend(ctx)
 	if svcErr != nil {
 		return nil, svcErr
 	}
@@ -584,7 +589,7 @@ func (s *issueServiceImpl) ListDependencies(ctx context.Context, issueID string)
 		return nil, ErrValidation("issue ID is required")
 	}
 
-	be, svcErr := s.resolveBackend()
+	be, svcErr := s.resolveBackend(ctx)
 	if svcErr != nil {
 		return nil, svcErr
 	}
@@ -612,7 +617,7 @@ func (s *issueServiceImpl) ListDependencies(ctx context.Context, issueID string)
 }
 
 func (s *issueServiceImpl) ListEvents(ctx context.Context, params EventListParams) ([]*types.Event, error) {
-	be, svcErr := s.resolveBackend()
+	be, svcErr := s.resolveBackend(ctx)
 	if svcErr != nil {
 		return nil, svcErr
 	}

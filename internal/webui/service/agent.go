@@ -4,6 +4,7 @@ import (
 	"context"
 	"regexp"
 
+	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/ops"
 )
 
@@ -46,6 +47,49 @@ type AgentService interface {
 
 	// SetTargetBranch changes the target/integration branch for a worktree.
 	SetTargetBranch(ctx context.Context, wsID, agentName, branch string) error
+
+	// ListAgents returns all agent assignments registered to a workspace
+	// in the fleet-db store. Empty slice when none. Returns ErrUnavailable
+	// when the service was constructed without a store handle.
+	ListAgents(ctx context.Context, wsKey string) ([]*domain.Agent, error)
+
+	// CreateAgent registers a new agent assignment in the store.
+	CreateAgent(ctx context.Context, in AgentCreateInput) (*domain.Agent, error)
+
+	// UpdateAgent applies a partial-update to an existing agent.
+	UpdateAgent(ctx context.Context, wsKey, name string, patch AgentUpdateInput) (*domain.Agent, error)
+
+	// DeleteAgent removes an agent assignment from the store.
+	DeleteAgent(ctx context.Context, wsKey, name string) error
+}
+
+// AgentCreateInput is the JSON payload for POST /api/agents.
+// Mirrors store.AgentCreate but kept distinct so the service contract
+// doesn't leak the persistence type.
+type AgentCreateInput struct {
+	WorkspaceKey     string   `json:"workspace_key"`
+	Name             string   `json:"name"`
+	RoleName         string   `json:"role_name"`
+	Auto             bool     `json:"auto"`
+	Backend          string   `json:"backend,omitempty"`
+	FallbackBackends []string `json:"fallback_backends,omitempty"`
+	Repos            []string `json:"repos,omitempty"`
+	RepoGroups       []string `json:"repo_groups,omitempty"`
+	CrossRepo        bool     `json:"cross_repo,omitempty"`
+	Parent           string   `json:"parent,omitempty"`
+}
+
+// AgentUpdateInput is the partial-update payload for PATCH /api/agents.
+type AgentUpdateInput struct {
+	RoleName         *string             `json:"role_name,omitempty"`
+	Auto             *bool               `json:"auto,omitempty"`
+	Backend          *string             `json:"backend,omitempty"`
+	FallbackBackends *[]string           `json:"fallback_backends,omitempty"`
+	Repos            *[]string           `json:"repos,omitempty"`
+	RepoGroups       *[]string           `json:"repo_groups,omitempty"`
+	CrossRepo        *bool               `json:"cross_repo,omitempty"`
+	Parent           *string             `json:"parent,omitempty"`
+	State            *domain.AgentState  `json:"state,omitempty"`
 }
 
 // AgentTerminalInfoResult contains the terminal mode for an agent.

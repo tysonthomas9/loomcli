@@ -10,9 +10,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/configlock"
 	"github.com/tysonthomas9/loomcli/internal/ops"
+	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
+	"github.com/tysonthomas9/loomcli/internal/webui/storeadapter"
 )
 
 const (
@@ -21,8 +24,14 @@ const (
 )
 
 // WorkspaceServiceConfig holds the dependencies for workspace service construction.
+//
+// Phase 4 of the loom -> fleet-db migration: when Store is non-nil, the
+// service sources its read-side data from Store instead of the legacy
+// ConfigFn / ConfigByIDFn closures (which still drive write-side
+// helpers + tests). The closures will be removed in Phase 6.
 type WorkspaceServiceConfig struct {
-	ConfigFn       func() (*ops.WorkspaceData, error)       // Workspace topology supplier
+	Store          store.Store                              // Fleet-db-backed store; preferred read source when set
+	ConfigFn       func() (*ops.WorkspaceData, error)       // Workspace topology supplier (legacy yaml-derived)
 	ConfigByIDFn   func(string) (*ops.WorkspaceData, error) // Topology supplier by workspace ID
 	MultiPool      *daemon.MultiPool                        // For listing workspaces and existence checks
 	CreateFn       WorkspaceCreateFn                        // Already wrapped with registry hooks
@@ -33,6 +42,7 @@ type WorkspaceServiceConfig struct {
 }
 
 type workspaceServiceImpl struct {
+	store          store.Store
 	configFn       func() (*ops.WorkspaceData, error)
 	configByIDFn   func(string) (*ops.WorkspaceData, error)
 	multiPool      *daemon.MultiPool
@@ -46,6 +56,7 @@ type workspaceServiceImpl struct {
 // NewWorkspaceService creates a new WorkspaceService from the given config.
 func NewWorkspaceService(cfg WorkspaceServiceConfig) WorkspaceService {
 	return &workspaceServiceImpl{
+		store:          cfg.Store,
 		configFn:       cfg.ConfigFn,
 		configByIDFn:   cfg.ConfigByIDFn,
 		multiPool:      cfg.MultiPool,
@@ -57,8 +68,41 @@ func NewWorkspaceService(cfg WorkspaceServiceConfig) WorkspaceService {
 	}
 }
 
-func (s *workspaceServiceImpl) GetActiveWorkspace(_ context.Context) (*ops.WorkspaceData, error) {
-	if s.configFn == nil {
+// loadActiveWorkspace returns the active workspace topology, preferring
+// the store when configured. Falls back to configFn during the migration
+// window.
+func (s *workspaceServiceImpl) loadActiveWorkspace(ctx context.Context) (*ops.WorkspaceData, error) {
+	if s.store != nil {
+		data, err := storeadapter.BuildActiveWorkspaceData(ctx, s.store)
+		if err == nil && data != nil {
+			return data, nil
+		}
+		// Fall through on store miss / no active workspace — legacy path
+		// may still know the workspace from yaml.
+	}
+	if s.configFn != nil {
+		return s.configFn()
+	}
+	return nil, nil
+}
+
+// loadWorkspaceByID returns a specific workspace's topology, preferring
+// the store when configured.
+func (s *workspaceServiceImpl) loadWorkspaceByID(ctx context.Context, wsID string) (*ops.WorkspaceData, error) {
+	if s.store != nil {
+		data, err := storeadapter.BuildWorkspaceDataForKey(ctx, s.store, wsID)
+		if err == nil && data != nil {
+			return data, nil
+		}
+	}
+	if s.configByIDFn != nil {
+		return s.configByIDFn(wsID)
+	}
+	return nil, nil
+}
+
+func (s *workspaceServiceImpl) GetActiveWorkspace(ctx context.Context) (*ops.WorkspaceData, error) {
+	if s.store == nil && s.configFn == nil {
 		return &ops.WorkspaceData{
 			Repos:      []ops.WorkspaceRepo{},
 			Groups:     []string{},
@@ -67,9 +111,9 @@ func (s *workspaceServiceImpl) GetActiveWorkspace(_ context.Context) (*ops.Works
 		}, nil
 	}
 
-	data, err := s.configFn()
+	data, err := s.loadActiveWorkspace(ctx)
 	if err != nil {
-		return nil, ErrInternal("failed to load workspace config", err)
+		return nil, ErrInternal("failed to load workspace data", err)
 	}
 	if data == nil {
 		data = &ops.WorkspaceData{}
@@ -97,32 +141,51 @@ func readGitHeadBranch(repoPath string) string {
 	return after
 }
 
-func (s *workspaceServiceImpl) ListWorkspaces(_ context.Context) ([]WorkspaceListItem, error) {
-	// Build workspace metadata maps from config first — used both as the
-	// primary source (fleet mode, where multiPool is empty) and as
-	// enrichment (beads mode, where multiPool drives the listing).
+func (s *workspaceServiceImpl) ListWorkspaces(ctx context.Context) ([]WorkspaceListItem, error) {
+	// Store is authoritative when set: list its workspaces directly so
+	// the API surface reflects fleet-db's actual contents — not whatever
+	// the legacy multiPool/yaml closures believed at startup. The
+	// multiPool is consulted only to enrich items with beads-pool stats.
+	if s.store != nil {
+		wsList, err := s.store.Workspaces().List(ctx)
+		if err == nil {
+			activeKey, _ := bootstrap.ResolveActiveWorkspaceKey(ctx, s.store.Workspaces())
+			items := make([]WorkspaceListItem, 0, len(wsList))
+			for _, ws := range wsList {
+				item := WorkspaceListItem{
+					ID:     ws.Key,
+					Name:   ws.Name,
+					Active: ws.Key == activeKey,
+				}
+				if s.multiPool != nil {
+					if p := s.multiPool.PoolForWorkspace(ws.Key); p != nil {
+						ps := poolStatsFromDaemon(p.Stats())
+						item.Pool = &ps
+					}
+				}
+				items = append(items, item)
+			}
+			return items, nil
+		}
+		slog.Warn("store list failed, falling through to legacy", "err", err)
+	}
+
+	// Legacy path: multiPool first (beads), else yaml-derived configFn.
 	var wsMetaByName map[string]ops.WorkspaceSummary
 	var wsMetaByID map[string]ops.WorkspaceSummary
 	var configWorkspaces []ops.WorkspaceSummary
-	if s.configFn != nil {
-		if data, err := s.configFn(); err == nil && data != nil {
-			configWorkspaces = data.Workspaces
-			wsMetaByName = make(map[string]ops.WorkspaceSummary, len(data.Workspaces))
-			wsMetaByID = make(map[string]ops.WorkspaceSummary, len(data.Workspaces))
-			for _, ws := range data.Workspaces {
-				wsMetaByName[ws.Name] = ws
-				if ws.ID != "" {
-					wsMetaByID[ws.ID] = ws
-				}
+	if data, err := s.loadActiveWorkspace(ctx); err == nil && data != nil {
+		configWorkspaces = data.Workspaces
+		wsMetaByName = make(map[string]ops.WorkspaceSummary, len(data.Workspaces))
+		wsMetaByID = make(map[string]ops.WorkspaceSummary, len(data.Workspaces))
+		for _, ws := range data.Workspaces {
+			wsMetaByName[ws.Name] = ws
+			if ws.ID != "" {
+				wsMetaByID[ws.ID] = ws
 			}
 		}
 	}
 
-	// Determine the workspace ID source. In beads mode the multiPool owns
-	// the canonical list (its keys are the IDs the daemon is connected
-	// to). In fleet mode the multiPool is intentionally empty — the
-	// daemon connection isn't used at all — so fall back to the config
-	// data that workspacemgr.BuildWorkspaceInfo populated at startup.
 	var ids []string
 	if s.multiPool != nil {
 		ids = s.multiPool.WorkspaceIDs()
@@ -146,8 +209,6 @@ func (s *workspaceServiceImpl) ListWorkspaces(_ context.Context) ([]WorkspaceLis
 			ID:   id,
 			Name: id,
 		}
-
-		// Enrich with config metadata if available.
 		if meta, ok := wsMetaByID[id]; ok {
 			item.Name = meta.Name
 			item.ID = meta.ID
@@ -160,29 +221,27 @@ func (s *workspaceServiceImpl) ListWorkspaces(_ context.Context) ([]WorkspaceLis
 			item.Path = meta.Path
 			item.Active = meta.Active
 		}
-
 		if s.multiPool != nil {
 			if p := s.multiPool.PoolForWorkspace(id); p != nil {
 				ps := poolStatsFromDaemon(p.Stats())
 				item.Pool = &ps
 			}
 		}
-
 		items = append(items, item)
 	}
 
 	return items, nil
 }
 
-func (s *workspaceServiceImpl) GetWorkspace(_ context.Context, wsID string) (*ops.WorkspaceData, error) {
+func (s *workspaceServiceImpl) GetWorkspace(ctx context.Context, wsID string) (*ops.WorkspaceData, error) {
 	// Primary existence check: the multiPool registry. In beads mode the
 	// daemon pool owns the authoritative list of live workspaces. In fleet
 	// mode the multiPool is intentionally empty (no beads daemon), so the
 	// multiPool check alone would 404 every lookup — fall through to a
-	// config-based lookup instead.
+	// store/config-based lookup instead.
 	poolKnown := s.multiPool != nil && s.multiPool.PoolForWorkspace(wsID) != nil
 	if !poolKnown {
-		if data, ok, err := s.lookupWorkspaceFromConfig(wsID); err != nil {
+		if data, ok, err := s.lookupWorkspace(ctx, wsID); err != nil {
 			return nil, err
 		} else if ok {
 			return data, nil
@@ -190,13 +249,9 @@ func (s *workspaceServiceImpl) GetWorkspace(_ context.Context, wsID string) (*op
 		return nil, ErrNotFound("workspace not found: " + wsID)
 	}
 
-	if s.configByIDFn == nil {
-		return nil, ErrInternal("workspace config not available", nil)
-	}
-
-	data, err := s.configByIDFn(wsID)
+	data, err := s.loadWorkspaceByID(ctx, wsID)
 	if err != nil || data == nil {
-		return nil, ErrInternal("failed to load workspace config", err)
+		return nil, ErrInternal("failed to load workspace data", err)
 	}
 
 	normalizeWorkspaceData(data)
@@ -211,14 +266,28 @@ func (s *workspaceServiceImpl) GetWorkspace(_ context.Context, wsID string) (*op
 	return data, nil
 }
 
-// lookupWorkspaceFromConfig resolves a workspace UUID via the config-based
-// suppliers (configByIDFn preferred, configFn as secondary). Returns (data,
-// true, nil) when a match is found, (nil, false, nil) when the ID is unknown,
-// or (nil, false, err) on a load error. Used by GetWorkspace as the fleet-mode
-// fallback when the multiPool registry has no entry for the workspace.
-func (s *workspaceServiceImpl) lookupWorkspaceFromConfig(wsID string) (*ops.WorkspaceData, bool, error) {
-	// Prefer the by-ID supplier (cheaper — it only loads the target
-	// workspace's topology rather than every configured workspace).
+// lookupWorkspace resolves a workspace UUID via the store (preferred)
+// or the legacy config closures. Returns (data, true, nil) when a match
+// is found, (nil, false, nil) when the ID is unknown, or (nil, false,
+// err) on a load error. Used by GetWorkspace as the fallback when the
+// multiPool registry has no entry for the workspace.
+func (s *workspaceServiceImpl) lookupWorkspace(ctx context.Context, wsID string) (*ops.WorkspaceData, bool, error) {
+	// Prefer the store — single Get call, no full-config scan.
+	if s.store != nil {
+		if data, err := storeadapter.BuildWorkspaceDataForKey(ctx, s.store, wsID); err == nil && data != nil {
+			normalizeWorkspaceData(data)
+			for i := range data.Repos {
+				if b := readGitHeadBranch(data.Repos[i].Path); b != "" {
+					data.Repos[i].CurrentBranch = b
+				}
+			}
+			for i := range data.Workspaces {
+				data.Workspaces[i].Active = data.Workspaces[i].ID == wsID
+			}
+			return data, true, nil
+		}
+	}
+	// Legacy: by-ID supplier (cheaper than full config scan).
 	if s.configByIDFn != nil {
 		if data, err := s.configByIDFn(wsID); err == nil && data != nil {
 			normalizeWorkspaceData(data)
@@ -234,9 +303,7 @@ func (s *workspaceServiceImpl) lookupWorkspaceFromConfig(wsID string) (*ops.Work
 		}
 	}
 
-	// Fallback: scan the full config for a matching UUID. This also
-	// synthesizes a WorkspaceData from the summary when configByIDFn isn't
-	// wired (test path) but configFn is.
+	// Final fallback: scan the full config for a matching UUID.
 	if s.configFn == nil {
 		return nil, false, nil
 	}

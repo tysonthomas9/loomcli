@@ -13,6 +13,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/daemon/supervisor"
 	"github.com/tysonthomas9/loomcli/internal/events"
 	"github.com/tysonthomas9/loomcli/internal/notify"
+	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 // Daemon coordinates multiple supervised agents.
@@ -51,6 +52,12 @@ type Daemon struct {
 	mutBuf *MutationBuffer
 
 	issueBackend backend.IssueBackend // pluggable issue data access
+
+	// store is the fleet-db backed source of agent assignments + daemon
+	// profile (Phase 4 of fleet-db migration). When non-nil, the
+	// reconciler may consult store.Agents().List in addition to the
+	// legacy cfgpkg.DaemonConfig path. nil = legacy yaml-only mode.
+	store store.Store
 }
 
 // configSnapshot returns a snapshot of the current config pointer under RLock.
@@ -70,7 +77,12 @@ func (d *Daemon) emitEvent(evt events.Event) {
 // NewDaemon creates a daemon from the loaded config.
 // If eventBus is nil, a NopBus is used (events are silently discarded).
 // issueBackend provides issue data access for epic transition checks.
-func NewDaemon(config *cfgpkg.DaemonConfig, projectDir string, eventBus events.Emitter, issueBackend backend.IssueBackend) (*Daemon, error) {
+//
+// Phase 4 of the loom -> fleet-db migration: callers may pass a non-nil
+// st (fleet-db Store) so the reconciler can consult store.Agents().List
+// in addition to the legacy cfgpkg.DaemonConfig path. The full switch
+// to store-only is gated on Phase 6 (.25) which deletes config.Agents.
+func NewDaemon(config *cfgpkg.DaemonConfig, projectDir string, eventBus events.Emitter, issueBackend backend.IssueBackend, st store.Store) (*Daemon, error) {
 	if config == nil {
 		return nil, fmt.Errorf("daemon config is nil")
 	}
@@ -87,6 +99,7 @@ func NewDaemon(config *cfgpkg.DaemonConfig, projectDir string, eventBus events.E
 		projectDir:   projectDir,
 		notifyBus:    notify.NopPublisher{},
 		issueBackend: issueBackend,
+		store:        st,
 	}
 
 	// Build the supervisor
@@ -183,13 +196,37 @@ func (d *Daemon) isAgentRunning(name string) bool {
 	return false
 }
 
-// agentExistsInConfig returns true if an agent with the given name exists in the current config.
+// agentExistsInConfig returns true if an agent with the given name
+// exists in the current config. When a fleet-db Store is wired in,
+// also checks store.Agents() so reconciles stay correct after store
+// CRUD writes that haven't been mirrored into yaml yet (Phase 4
+// migration window).
 func (d *Daemon) agentExistsInConfig(name string) bool {
 	cfg := d.configSnapshot()
 	for _, agent := range cfg.Agents {
 		if agent.Worktree == name {
 			return true
 		}
+	}
+	if d.store != nil {
+		if d.agentExistsInStore(name) {
+			return true
+		}
+	}
+	return false
+}
+
+// agentExistsInStore reports whether the named agent is registered in
+// the store for the daemon's workspace. Best-effort: store-side errors
+// are treated as "not found" so the legacy path can still answer.
+func (d *Daemon) agentExistsInStore(name string) bool {
+	if d.store == nil || d.sup == nil || d.sup.WorkspaceID == "" {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if _, err := d.store.Agents().Get(ctx, d.sup.WorkspaceID, name); err == nil {
+		return true
 	}
 	return false
 }

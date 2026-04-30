@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -15,10 +16,12 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/daemon/supervisor"
 	"github.com/tysonthomas9/loomcli/internal/events"
 	"github.com/tysonthomas9/loomcli/internal/lockfile"
+	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 // DaemonAgentStatus represents the status of a single supervised agent
@@ -266,7 +269,20 @@ func initDaemonServices(config *cfgpkg.DaemonConfig, projectDir string, paths da
 
 	fleetDBSrv := maybeStartFleetDB(config, projectDir)
 
-	daemon, err := NewDaemon(config, projectDir, eventBus, cli.DefaultIssueBackend())
+	// Open fleet-db store best-effort. Failure is non-fatal during the
+	// migration window — the daemon still runs against the yaml-derived
+	// config.Agents list. Once Phase 6 (.25) deletes config/, this
+	// becomes a hard failure.
+	storeHandle, storeErr := cmdstore.OpenStore(context.Background())
+	if storeErr != nil {
+		fmt.Printf("Warning: failed to open fleet-db store for daemon: %v (running in legacy yaml-only mode)\n", storeErr)
+	}
+	var st store.Store
+	if storeHandle != nil {
+		st = storeHandle.Store
+	}
+
+	daemon, err := NewDaemon(config, projectDir, eventBus, cli.DefaultIssueBackend(), st)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: creating daemon: %v\n", err)
 		os.Exit(1)
