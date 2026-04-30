@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/fleethttp"
 	"github.com/tysonthomas9/loomcli/internal/types"
 )
 
@@ -96,40 +97,13 @@ func (b *FleetBackend) BackendName() string { return "fleet" }
 
 // doRequest executes an HTTP request and parses the JSON response envelope.
 func (b *FleetBackend) doRequest(ctx context.Context, method, path string, body interface{}) (*apiResponse, int, error) {
-	fullURL := b.baseWorkspaceURL + path
-
-	var bodyReader io.Reader
-	if body != nil {
-		data, err := json.Marshal(body)
-		if err != nil {
-			return nil, 0, fmt.Errorf("marshal request body: %w", err)
-		}
-		bodyReader = bytes.NewReader(data)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, method, fullURL, bodyReader)
-	if err != nil {
-		return nil, 0, fmt.Errorf("create request: %w", err)
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
-
-	// Set auth headers.
 	b.mu.RLock()
-	token := b.authToken
-	key := b.apiKey
-	actor := b.actor
+	auth := fleethttp.Auth{BearerToken: b.authToken, APIKey: b.apiKey, Actor: b.actor}
 	b.mu.RUnlock()
 
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-	if key != "" {
-		req.Header.Set("X-Fleet-API-Key", key)
-	}
-	if actor != "" {
-		req.Header.Set("X-Actor", actor)
+	req, err := fleethttp.BuildJSONRequest(ctx, method, b.baseWorkspaceURL+path, auth, body)
+	if err != nil {
+		return nil, 0, err
 	}
 
 	resp, err := b.client.Do(req)

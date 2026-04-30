@@ -23,6 +23,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+
+	"github.com/tysonthomas9/loomcli/internal/fleethttp"
 	"strings"
 	"sync"
 
@@ -151,34 +153,13 @@ func (c *Client) SetAPIKey(key string) {
 //
 // 204 No Content is treated as success with no body.
 func (c *Client) do(ctx context.Context, method, path string, body, out any) error {
-	var reader io.Reader
-	if body != nil {
-		raw, err := json.Marshal(body)
-		if err != nil {
-			return fmt.Errorf("fleetdb: marshal request: %w", err)
-		}
-		reader = bytes.NewReader(raw)
-	}
-	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, reader)
-	if err != nil {
-		return fmt.Errorf("fleetdb: build request: %w", err)
-	}
-	req.Header.Set("Accept", "application/json")
-	if reader != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-
 	c.mu.RLock()
-	apiKey, actor, authToken := c.apiKey, c.actor, c.authToken
+	auth := fleethttp.Auth{BearerToken: c.authToken, APIKey: c.apiKey, Actor: c.actor}
 	c.mu.RUnlock()
-	if apiKey != "" {
-		req.Header.Set("X-Fleet-API-Key", apiKey)
-	}
-	if actor != "" {
-		req.Header.Set("X-Actor", actor)
-	}
-	if authToken != "" {
-		req.Header.Set("Authorization", "Bearer "+authToken)
+
+	req, err := fleethttp.BuildJSONRequest(ctx, method, c.baseURL+path, auth, body)
+	if err != nil {
+		return fmt.Errorf("fleetdb: %w", err)
 	}
 
 	resp, err := c.http.Do(req)
@@ -233,28 +214,17 @@ func classifyHTTPError(method, path string, status int, body []byte) error {
 	return errors.New(prefix)
 }
 
-// extractErrorMessage tries the two error-envelope shapes fleet-db uses:
-// the wrapper {"error":"..."} and the structured {"error":{"code":"...","message":"..."}}.
+// extractErrorMessage delegates to fleethttp.ExtractErrorMessage and
+// adds a last-resort trimmed-body fallback for unknown error shapes —
+// preserved for debuggability when fleet-db emits a message in neither
+// envelope dialect.
 func extractErrorMessage(body []byte) string {
+	if msg := fleethttp.ExtractErrorMessage(body); msg != "" {
+		return msg
+	}
 	if len(bytes.TrimSpace(body)) == 0 {
 		return ""
 	}
-	var envelope struct {
-		Error string `json:"error"`
-	}
-	if err := json.Unmarshal(body, &envelope); err == nil && envelope.Error != "" {
-		return envelope.Error
-	}
-	var structured struct {
-		Error struct {
-			Code    string `json:"code"`
-			Message string `json:"message"`
-		} `json:"error"`
-	}
-	if err := json.Unmarshal(body, &structured); err == nil && structured.Error.Message != "" {
-		return structured.Error.Message
-	}
-	// Last resort: surface trimmed body for debuggability.
 	s := strings.TrimSpace(string(body))
 	if len(s) > 200 {
 		s = s[:200] + "…"
