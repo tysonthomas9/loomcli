@@ -210,25 +210,17 @@ func runServe(cmd *cobra.Command, args []string) {
 	// Open the fleet-db-backed store handle. In ModeLocal this spawns
 	// the embedded fleet-db subprocess; in ModeCloud it dials the
 	// configured URL. The handle is shared with the webui server so
-	// workspace/agent endpoints can read from store rather than yaml.
+	// workspace/agent endpoints read from the store directly. Failure
+	// is fatal — there is no yaml fallback path post-migration.
 	storeHandle, storeErr := cmdstore.OpenStore(ctx)
 	if storeErr != nil {
-		// Failure to open the store is non-fatal during the migration
-		// window — yaml-backed closures still satisfy the legacy paths.
-		// Once Phase 6 deletes those, this becomes a hard failure.
-		log.Printf("Warning: failed to open fleet-db store: %v (workspace endpoints will fall back to yaml)", storeErr)
+		log.Fatalf("failed to open fleet-db store: %v", storeErr)
 	}
-	if storeHandle != nil {
-		defer storeHandle.Close()
-	}
+	defer storeHandle.Close()
 
 	webuiErr := make(chan error, 1)
 	go func() {
-		var s store.Store
-		if storeHandle != nil {
-			s = storeHandle.Store
-		}
-		cfg := buildServerConfig(monitorHandlers, fleetState, s)
+		cfg := buildServerConfig(monitorHandlers, fleetState, storeHandle.Store)
 		if !serveNoDaemon {
 			cfg.DaemonStartupFn = workspacemgr.EnsureDaemonsForAllWorkspaces
 		}
@@ -409,39 +401,30 @@ func applyFleetConfig(cfg *webui.ServerConfig, fs fleetState) {
 }
 
 // applyWorkspaceConfig wires the workspace-related closures the webui
-// server consumes. When a fleet-db Store is available (cfg.Store, set
-// after OpenStore), reads + simple writes go through serveadapter
+// server consumes. Reads + simple writes go through serveadapter
 // (store-backed). The CreateWorkspace closure stays on workspacemgr
-// because it coordinates disk operations (clone, worktree creation)
-// that the store doesn't model. Disk-side cleanup on delete is also
-// the user's responsibility — the store-backed delete is
-// metadata-only.
+// because it coordinates disk operations (clone repos, set up
+// worktrees) that aren't part of the store contract; the noun-verb
+// CLI's `loom workspace add` covers the metadata-only path.
 func applyWorkspaceConfig(cfg *webui.ServerConfig) {
-	if cfg.Store != nil {
-		cfg.WorkspaceConfigFn = serveadapter.BuildWorkspaceConfigFn(cfg.Store)
-		cfg.WorkspaceConfigByIDFn = serveadapter.BuildWorkspaceConfigByIDFn(cfg.Store)
-		cfg.WorkspaceListFn = serveadapter.BuildWorkspaceListFn(cfg.Store)
-		cfg.WorkspaceIDResolverFn = serveadapter.BuildWorkspaceIDResolverFn(cfg.Store)
-		cfg.InitialWorkspaceID = serveadapter.ResolveInitialWorkspaceID(cfg.Store)
-		cfg.WorkspaceDeleteFn = serveadapter.BuildWorkspaceDeleteFn(cfg.Store)
-		cfg.SetDefaultWorkspaceFn = serveadapter.BuildSetDefaultWorkspaceFn(cfg.Store)
-		cfg.ClearDefaultWorkspaceFn = serveadapter.BuildClearDefaultWorkspaceFn()
-	} else {
-		// No store available: fall back to legacy yaml-backed adapters.
-		// This branch goes away once the migration completes (.23/.25).
-		cfg.WorkspaceConfigFn = workspacemgr.BuildWorkspaceInfo
-		cfg.WorkspaceConfigByIDFn = workspacemgr.BuildWorkspaceInfoForID
-		cfg.WorkspaceDeleteFn = workspacemgr.DeleteWorkspace
-		cfg.SetDefaultWorkspaceFn = workspacemgr.SetDefaultWorkspace
-		cfg.ClearDefaultWorkspaceFn = workspacemgr.ClearDefaultWorkspace
-		cfg.WorkspaceListFn = daemonwire.ListWorkspaces
-		cfg.InitialWorkspaceID = workspacemgr.ResolveInitialWorkspaceID()
-		cfg.WorkspaceIDResolverFn = workspacemgr.ResolveWorkspaceID
+	if cfg.Store == nil {
+		// runServe makes OpenStore failure fatal, so this should be
+		// unreachable. Defensive panic surfaces a wiring bug loudly
+		// rather than silently degrading.
+		panic("applyWorkspaceConfig: cfg.Store is nil")
 	}
+	cfg.WorkspaceConfigFn = serveadapter.BuildWorkspaceConfigFn(cfg.Store)
+	cfg.WorkspaceConfigByIDFn = serveadapter.BuildWorkspaceConfigByIDFn(cfg.Store)
+	cfg.WorkspaceListFn = serveadapter.BuildWorkspaceListFn(cfg.Store)
+	cfg.WorkspaceIDResolverFn = serveadapter.BuildWorkspaceIDResolverFn(cfg.Store)
+	cfg.InitialWorkspaceID = serveadapter.ResolveInitialWorkspaceID(cfg.Store)
+	cfg.WorkspaceDeleteFn = serveadapter.BuildWorkspaceDeleteFn(cfg.Store)
+	cfg.SetDefaultWorkspaceFn = serveadapter.BuildSetDefaultWorkspaceFn(cfg.Store)
+	cfg.ClearDefaultWorkspaceFn = serveadapter.BuildClearDefaultWorkspaceFn()
 	// CreateWorkspace coordinates disk operations (clone repos, set
 	// up worktrees) that aren't part of the store contract — it stays
-	// on workspacemgr in both branches. The store-backed Create
-	// (loom workspace add) handles the metadata-only path.
+	// on workspacemgr until that flow is reworked. The store-backed
+	// Create (loom workspace add) handles the metadata-only path.
 	cfg.WorkspaceCreateFn = workspacemgr.CreateWorkspace
 }
 
