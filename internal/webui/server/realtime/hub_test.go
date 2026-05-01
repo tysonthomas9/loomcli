@@ -336,6 +336,7 @@ func TestParseLastSince(t *testing.T) {
 		{"header wins (larger)", "300", "200", "300"},
 		{"query wins (larger)", "100", "400", "400"},
 		{"invalid header", "abc", "200", "200"},
+		{"fleet cursor header only", "1700000000000-0", "", "1700000000000-0"},
 		{"opaque query wins", "100", "c1.cursor", "c1.cursor"},
 	}
 	for _, tt := range tests {
