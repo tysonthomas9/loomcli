@@ -204,6 +204,29 @@ func (a *fleetDBAdapter) Get(ctx context.Context, id string) (*backend.IssueDeta
 	return detail, nil
 }
 
+func (a *fleetDBAdapter) listIssueIDs(ctx context.Context) ([]string, error) {
+	raw, status, err := a.doJSON(ctx, http.MethodGet, a.wsPath("/issues"), nil)
+	if err != nil {
+		return nil, backend.ErrInternal("List", "http", err)
+	}
+	if cerr := a.classifyStatus("List", status, raw); cerr != nil {
+		return nil, cerr
+	}
+	var wrap struct {
+		Issues []struct {
+			ID string `json:"id"`
+		} `json:"issues"`
+	}
+	if err := json.Unmarshal(raw, &wrap); err != nil {
+		return nil, backend.ErrInternal("List", "decode response", err)
+	}
+	ids := make([]string, 0, len(wrap.Issues))
+	for _, issue := range wrap.Issues {
+		ids = append(ids, issue.ID)
+	}
+	return ids, nil
+}
+
 // Update issues PATCH /api/v1/{ws}/issues/{id}. fleet-db's PATCH body is a
 // narrow subset of UpdateParams (title, description, priority, type, design,
 // notes, owner, due_at) and rejects unknown fields with 400 — so we only

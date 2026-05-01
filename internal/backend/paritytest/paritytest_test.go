@@ -602,6 +602,66 @@ func TestFleetDBOnlyBackendWorkerHeartbeatRenewsAndStaleRecovers(t *testing.T) {
 	}
 }
 
+func TestFleetDBOnlyBackendRemoteWorkspaceIsolation(t *testing.T) {
+	fleetBE, _ := spawnFleetDB(t)
+	ctx := context.Background()
+	wsA, ok := fleetBE.(*fleetDBAdapter)
+	if !ok {
+		t.Fatalf("spawnFleetDB returned %T, want *fleetDBAdapter", fleetBE)
+	}
+	const workspaceB = "PARITY-B"
+	if err := createFleetWorkspace(wsA.baseURL, workspaceB); err != nil {
+		t.Fatalf("create second workspace: %v", err)
+	}
+	wsB := newFleetDBAdapter(wsA.baseURL, workspaceB, parityActor)
+
+	issueA, err := wsA.Create(ctx, backend.CreateParams{Title: "Workspace A issue", Priority: 2, IssueType: "task"})
+	if err != nil {
+		t.Fatalf("create workspace A issue: %v", err)
+	}
+	issueB, err := wsB.Create(ctx, backend.CreateParams{Title: "Workspace B issue", Priority: 2, IssueType: "task"})
+	if err != nil {
+		t.Fatalf("create workspace B issue: %v", err)
+	}
+
+	if _, err := wsA.Get(ctx, issueB.ID); !backend.IsKind(err, backend.KindNotFound) {
+		t.Fatalf("workspace A get workspace B issue error = %v, want KindNotFound", err)
+	}
+	if _, err := wsB.Get(ctx, issueA.ID); !backend.IsKind(err, backend.KindNotFound) {
+		t.Fatalf("workspace B get workspace A issue error = %v, want KindNotFound", err)
+	}
+	if err := wsA.ClaimIssue(ctx, issueB.ID, time.Second); !backend.IsKind(err, backend.KindNotFound) {
+		t.Fatalf("workspace A claim workspace B issue error = %v, want KindNotFound", err)
+	}
+	if err := wsB.ClaimIssue(ctx, issueA.ID, time.Second); !backend.IsKind(err, backend.KindNotFound) {
+		t.Fatalf("workspace B claim workspace A issue error = %v, want KindNotFound", err)
+	}
+
+	listA, err := wsA.listIssueIDs(ctx)
+	if err != nil {
+		t.Fatalf("list workspace A: %v", err)
+	}
+	listB, err := wsB.listIssueIDs(ctx)
+	if err != nil {
+		t.Fatalf("list workspace B: %v", err)
+	}
+	if slicesContainsString(listA, issueB.ID) {
+		t.Fatalf("workspace A list leaked workspace B issue %q", issueB.ID)
+	}
+	if slicesContainsString(listB, issueA.ID) {
+		t.Fatalf("workspace B list leaked workspace A issue %q", issueA.ID)
+	}
+}
+
+func slicesContainsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
 func mustRawJSON(t *testing.T, value any) json.RawMessage {
 	t.Helper()
 	raw, err := json.Marshal(value)
