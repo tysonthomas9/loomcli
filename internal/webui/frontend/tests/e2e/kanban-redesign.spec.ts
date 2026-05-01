@@ -1,4 +1,9 @@
-import { test, expect } from "@playwright/test"
+import { test, expect, type Page } from "@playwright/test"
+import {
+  setupFleetMocks,
+  waitForWorkspaceIssues,
+  workspacePath,
+} from "./helpers/fleet"
 
 /**
  * E2E tests for the Kanban Redesign CSS properties.
@@ -27,53 +32,21 @@ function makeIssue(overrides: Record<string, unknown>) {
 }
 
 async function setupMocks(
-  page: import("@playwright/test").Page,
+  page: Page,
   options: {
     issues: Record<string, unknown>[]
     blockedIssues?: Record<string, unknown>[]
   }
 ) {
-  await page.route("**/api/ready", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({ success: true, data: options.issues }),
-    })
-  })
-
-  await page.route("**/api/blocked", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({
-        success: true,
-        data: options.blockedIssues ?? [],
-      }),
-    })
-  })
-
-  await page.route("**/api/stats", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({
-        success: true,
-        data: { open: 0, closed: 0, in_progress: 0, blocked: 0, total: 0 },
-      }),
-    })
-  })
-
-  await page.route("**/api/events", async (route) => {
-    await route.abort()
+  await setupFleetMocks(page, options.issues, undefined, {
+    blockedIssues: options.blockedIssues,
   })
 }
 
-async function navigateToKanban(page: import("@playwright/test").Page) {
+async function navigateToKanban(page: Page) {
   const [response] = await Promise.all([
-    page.waitForResponse(
-      (res) => res.url().includes("/api/ready") && res.status() === 200
-    ),
-    page.goto("/?groupBy=none"),
+    waitForWorkspaceIssues(page),
+    page.goto(workspacePath("/?groupBy=none")),
   ])
   expect(response.ok()).toBe(true)
 }
