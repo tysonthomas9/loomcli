@@ -14,3 +14,4 @@ artifacts/test-output/
 
 # CLI-parity harness output (written by `make test-parity-cli`)
 cli-report.json
+cli-fleetdb-only-report.json

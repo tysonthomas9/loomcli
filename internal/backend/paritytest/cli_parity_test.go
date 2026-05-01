@@ -26,6 +26,10 @@ import (
 // signal from one directory.
 const cliReportPath = "../../../test/parity/ui/cli-report.json"
 
+// cliFleetOnlyReportPath is the fleet-db-only report path. It is separate
+// from cliReportPath so deletion-gate runs do not overwrite comparison runs.
+const cliFleetOnlyReportPath = "../../../test/parity/ui/cli-fleetdb-only-report.json"
+
 // fdbBinaryDefault is the built fdb binary path. Overridden via FDB_BIN env
 // var. We intentionally use the same /tmp/... convention as fleet-db so the
 // two binaries live next to each other.
@@ -64,6 +68,12 @@ type cliStep struct {
 // managed by t.Cleanup registered from the underlying spawners.
 type cliHarness struct {
 	bdDir      string
+	fdbBaseURL string
+	fdbWS      string
+	fdbBinary  string
+}
+
+type cliFleetOnlyHarness struct {
 	fdbBaseURL string
 	fdbWS      string
 	fdbBinary  string
@@ -133,22 +143,84 @@ func TestCLIParity(t *testing.T) {
 		report.Summary.DiffsFound, report.Verdict, outPath)
 }
 
+// TestCLIFleetDBOnly is the deletion-gate variant of TestCLIParity. It runs
+// the same CLI fixture catalog against fleet-db only, with PATH stripped so any
+// accidental bd/git subprocess dependency fails immediately.
+func TestCLIFleetDBOnly(t *testing.T) {
+	emptyPath := t.TempDir()
+	t.Setenv("PATH", emptyPath)
+
+	h := spawnCLIFleetOnlyHarness(t)
+
+	fixtures, err := discoverCLIFixtures("testdata/cli-fixtures")
+	if err != nil {
+		t.Fatalf("discoverCLIFixtures: %v", err)
+	}
+	if len(fixtures) == 0 {
+		t.Fatal("no CLI fixtures found under testdata/cli-fixtures — expected at least one")
+	}
+
+	report := NewReport("1.0.0", "fleet_db_only")
+
+	for _, path := range fixtures {
+		fx, err := loadCLIFixture(path)
+		if err != nil {
+			t.Fatalf("loadCLIFixture(%s): %v", path, err)
+		}
+
+		t.Run(fx.ID, func(t *testing.T) {
+			failures, err := h.runCLIFleetOnlyFixture(t.Context(), *fx)
+			if err != nil {
+				t.Fatalf("runCLIFleetOnlyFixture: %v", err)
+			}
+			report.AddFixture(fx.ID, fx.Title, failures, len(fx.Steps))
+
+			for _, d := range failures {
+				t.Errorf("fleet-db-only failure: step=%s field=%s fleet=%v verdict=%s",
+					d.StepID, d.Field, d.FleetDB, d.Verdict)
+			}
+		})
+	}
+
+	report.Finalize()
+	outPath, err := resolveCLIFleetOnlyReportPath()
+	if err != nil {
+		t.Fatalf("resolve cli-fleetdb-only-report path: %v", err)
+	}
+	if err := report.WriteJSON(outPath); err != nil {
+		t.Fatalf("WriteJSON(%s): %v", outPath, err)
+	}
+	t.Logf("cli-fleetdb-only report: fixtures=%d steps=%d failures=%d verdict=%s path=%s",
+		report.Summary.FixturesRun, report.Summary.StepsExecuted,
+		report.Summary.UnapprovedDiffs, report.Verdict, outPath)
+}
+
 // resolveCLIReportPath finds the repo root (where go.mod lives) by walking
 // upward from pwd so test/parity/ui/cli-report.json resolves regardless of
 // where `go test` was invoked from.
 func resolveCLIReportPath() (string, error) {
+	return resolveReportPath("test", "parity", "ui", "cli-report.json", cliReportPath)
+}
+
+func resolveCLIFleetOnlyReportPath() (string, error) {
+	return resolveReportPath("test", "parity", "ui", "cli-fleetdb-only-report.json", cliFleetOnlyReportPath)
+}
+
+func resolveReportPath(parts ...string) (string, error) {
+	fallback := parts[len(parts)-1]
+	relParts := parts[:len(parts)-1]
 	dir, err := os.Getwd()
 	if err != nil {
 		return "", err
 	}
 	for {
 		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-			return filepath.Join(dir, "test", "parity", "ui", "cli-report.json"), nil
+			return filepath.Join(append([]string{dir}, relParts...)...), nil
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
 			// Fallback to relative path for exotic layouts.
-			return cliReportPath, nil
+			return fallback, nil
 		}
 		dir = parent
 	}
@@ -260,6 +332,43 @@ func spawnCLIHarness(t *testing.T) *cliHarness {
 	}
 }
 
+func spawnCLIFleetOnlyHarness(t *testing.T) *cliFleetOnlyHarness {
+	t.Helper()
+
+	fdbBinary := resolveFDBBinary(t)
+	fleetBinary := fleetDBBinary(t)
+	mr := startMiniRedis(t)
+	port := pickFreePortOrFatal(t)
+	addr := fmt.Sprintf("127.0.0.1:%d", port)
+
+	cmd, logPath := startFleetDBProcess(t, fleetBinary, addr, mr.Addr())
+
+	baseURL := "http://" + addr
+	healthCtx, healthCancel := context.WithTimeout(context.Background(), fleetSpawnTimeout)
+	if err := netutil.WaitForHealthz(healthCtx, baseURL, time.Second); err != nil {
+		healthCancel()
+		logDump, _ := os.ReadFile(logPath) // #nosec G304 — test log diagnostic
+		t.Logf("fleet-db log:\n%s", string(logDump))
+		terminateProcess(cmd, 3*time.Second)
+		t.Fatalf("fleet-db did not become healthy in %s: %v", fleetSpawnTimeout, err)
+	}
+	healthCancel()
+	if err := createFleetWorkspace(baseURL, defaultWorkspaceID); err != nil {
+		terminateProcess(cmd, 3*time.Second)
+		t.Fatalf("create workspace: %v", err)
+	}
+	t.Cleanup(func() {
+		terminateProcess(cmd, 3*time.Second)
+	})
+	_ = mr
+
+	return &cliFleetOnlyHarness{
+		fdbBaseURL: baseURL,
+		fdbWS:      defaultWorkspaceID,
+		fdbBinary:  fdbBinary,
+	}
+}
+
 // cliSocketPath resolves the bd daemon RPC socket for the given workspace
 // dir via loomcli's production rpc helper — same convention spawn.go uses.
 func cliSocketPath(dir string) string {
@@ -337,6 +446,41 @@ func (h *cliHarness) runCLIFixture(ctx context.Context, fx cliFixture) ([]DiffEn
 	return diffs, nil
 }
 
+func (h *cliFleetOnlyHarness) runCLIFleetOnlyFixture(ctx context.Context, fx cliFixture) ([]DiffEntry, error) {
+	if len(fx.Steps) == 0 {
+		return nil, fmt.Errorf("cli fixture %q: no steps", fx.ID)
+	}
+
+	fleetVars := map[string]string{}
+
+	var failures []DiffEntry
+	for _, step := range fx.Steps {
+		fdbArgs := substituteVarArgs(step.FdbArgs, fleetVars)
+
+		fdbStdout, fdbErr := h.runFDB(ctx, fdbArgs)
+		if step.CaptureVars != nil && fdbErr == nil {
+			captureVarsJSON(fdbStdout, step.CaptureVars, fleetVars)
+		}
+
+		if step.ExpectError {
+			if fdbErr == nil {
+				failures = append(failures, fleetOnlyFailure(fx.ID, step.ID, joinFleetCmd(fdbArgs), "_outcome", "expected error, got success"))
+			}
+			continue
+		}
+		if fdbErr != nil {
+			failures = append(failures, fleetOnlyFailure(fx.ID, step.ID, joinFleetCmd(fdbArgs), "_outcome", describeCLIOutcome(fdbStdout, fdbErr)))
+			continue
+		}
+		if expectsJSON(fdbArgs) {
+			if _, ok := parseMaybeJSON(fdbStdout); !ok {
+				failures = append(failures, fleetOnlyFailure(fx.ID, step.ID, joinFleetCmd(fdbArgs), "_stdout_json", "expected JSON stdout"))
+			}
+		}
+	}
+	return failures, nil
+}
+
 // runBD invokes `bd <args...>` in the bd workspace dir with a 30s deadline.
 // Stdout is returned verbatim for parsing; non-zero exit is surfaced as an
 // error with combined stdout+stderr in the message so the diff report has
@@ -361,14 +505,22 @@ func (h *cliHarness) runBD(ctx context.Context, args []string) (string, error) {
 // the fixture's `fdb_args` stays focused on the subcommand + its flags,
 // mirroring the mental model operators have when invoking fdb manually.
 func (h *cliHarness) runFDB(ctx context.Context, args []string) (string, error) {
+	return runFDBCommand(ctx, h.fdbBinary, h.fdbBaseURL, h.fdbWS, args)
+}
+
+func (h *cliFleetOnlyHarness) runFDB(ctx context.Context, args []string) (string, error) {
+	return runFDBCommand(ctx, h.fdbBinary, h.fdbBaseURL, h.fdbWS, args)
+}
+
+func runFDBCommand(ctx context.Context, binary, baseURL, workspace string, args []string) (string, error) {
 	cctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	all := append([]string{
-		"-server", h.fdbBaseURL,
-		"-workspace", h.fdbWS,
+		"-server", baseURL,
+		"-workspace", workspace,
 		"-actor", parityActor,
 	}, args...)
-	cmd := exec.CommandContext(cctx, h.fdbBinary, all...) //nolint:norawexec,gosec
+	cmd := exec.CommandContext(cctx, binary, all...) //nolint:norawexec,gosec
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -376,6 +528,35 @@ func (h *cliHarness) runFDB(ctx context.Context, args []string) (string, error) 
 		return stdout.String(), fmt.Errorf("fdb %v: %w (stderr: %s)", args, err, stderr.String())
 	}
 	return stdout.String(), nil
+}
+
+func expectsJSON(args []string) bool {
+	for _, arg := range args {
+		if arg == "-json" || arg == "--json" {
+			return true
+		}
+	}
+	return false
+}
+
+func joinFleetCmd(fdbArgs []string) string {
+	fdb := "fdb " + strings.Join(fdbArgs, " ")
+	if len(fdb) > 200 {
+		return fdb[:200] + "..."
+	}
+	return fdb
+}
+
+func fleetOnlyFailure(fixtureID, stepID, method, field string, value any) DiffEntry {
+	return DiffEntry{
+		FixtureID: fixtureID,
+		StepID:    stepID,
+		Method:    method,
+		Field:     field,
+		DriftTag:  "fleet_db_only",
+		FleetDB:   value,
+		Verdict:   "fail",
+	}
 }
 
 // joinCmd returns a human-readable shorthand for the method label on a

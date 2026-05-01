@@ -1,6 +1,6 @@
 # Makefile for loomcli project
 
-.PHONY: all build build-frontend build-all test test-integration test-all test-parity test-parity-cli test-parity-ui lint lint-frontend test-frontend test-e2e test-e2e-api test-e2e-api-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install install-bd help frontend sync-beads update-beads check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-no-raw-exec test-coverage test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness
+.PHONY: all build build-frontend build-all test test-integration test-all test-parity test-parity-cli test-fleetdb-cli test-parity-ui lint lint-frontend test-frontend test-e2e test-e2e-api test-e2e-api-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install install-bd help frontend sync-beads update-beads check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-no-raw-exec test-coverage test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness
 
 # Default target
 all: build
@@ -41,6 +41,16 @@ test-parity:
 test-parity-cli:
 	@echo "Running loomcli CLI-parity harness..."
 	go test -tags parity -race -timeout 10m -v ./internal/backend/paritytest/... -run TestCLIParity
+
+# Run the fleet-db-only CLI parity harness — same CLI fixture catalog as
+# test-parity-cli, but starts only fleet-db/miniredis and strips PATH so any
+# accidental bd dependency fails. Writes test/parity/ui/cli-fleetdb-only-report.json.
+# Prerequisites:
+#   cd ~/codebase/fleet-db && go build -o /tmp/fleet-db ./cmd/fleet-db
+#   cd ~/codebase/fleet-db && go build -o /tmp/fdb ./cmd/fdb
+test-fleetdb-cli:
+	@echo "Running fleet-db-only CLI parity harness..."
+	go test -tags parity -race -count=1 -timeout 10m -v ./internal/backend/paritytest/... -run TestCLIFleetDBOnly
 
 # Run the UI Parity Test Suite (Playwright; beads :8081 vs fleet :8082).
 # Assumes docker-compose.parity.yml is already up AND seeded — the suite's
