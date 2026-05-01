@@ -20,7 +20,12 @@
       "id": "step_03",
       "description": "Show — verify updated fields persist",
       "bd_args":  ["--json", "show", "${issue_id}"],
-      "fdb_args": ["-json", "show", "${issue_id}"]
+      "fdb_args": ["-json", "show", "${issue_id}"],
+      "expect_json": {
+        "$.title": "Updated title",
+        "$.description": "Updated description",
+        "$.priority": 1
+      }
     }
   ]
 }

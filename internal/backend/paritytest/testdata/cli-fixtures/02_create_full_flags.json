@@ -15,7 +15,16 @@
       "id": "step_02",
       "description": "Show to verify round-trip",
       "bd_args":  ["--json", "show", "${issue_id}"],
-      "fdb_args": ["-json", "show", "${issue_id}"]
+      "fdb_args": ["-json", "show", "${issue_id}"],
+      "expect_json": {
+        "$.title": "full flags",
+        "$.description": "a thorough description",
+        "$.owner": "parity-harness",
+        "$.assignee": "alice",
+        "$.labels": ["bug", "urgent"],
+        "$.type": "bug",
+        "$.priority": 1
+      }
     }
   ]
 }

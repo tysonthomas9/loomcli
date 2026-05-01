@@ -338,10 +338,11 @@ func (a *fleetDBAdapter) Delete(ctx context.Context, params backend.DeleteParams
 // workspace used by the harness. fleet-db needs this before any issue ops
 // will succeed.
 func createFleetWorkspace(baseURL, key string) error {
-	body := map[string]string{
+	body := map[string]any{
 		"key":         key,
 		"name":        "Parity harness workspace",
 		"description": "created by loomcli paritytest",
+		"repos":       []string{"org/repo-a", "org/repo-b"},
 	}
 	data, err := json.Marshal(body)
 	if err != nil {

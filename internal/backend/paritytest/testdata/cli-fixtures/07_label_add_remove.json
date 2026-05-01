@@ -33,7 +33,10 @@
       "description": "Show — final labels should be ['urgent']",
       "bd_args":  ["--json", "show", "${issue_id}"],
       "fdb_args": ["-json", "show", "${issue_id}"],
-      "compare_field": "$.labels"
+      "compare_field": "$.labels",
+      "expect_json": {
+        "$.labels": ["urgent"]
+      }
     }
   ]
 }

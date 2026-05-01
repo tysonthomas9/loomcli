@@ -1151,6 +1151,13 @@ func fieldsEqualNormalized(a, b any) bool {
 			}
 		}
 	}
+	if as, aok := a.(string); aok {
+		if bs, bok := b.(string); bok {
+			if timesEqual(as, bs) {
+				return true
+			}
+		}
+	}
 	return reflect.DeepEqual(a, b)
 }
 
@@ -1175,6 +1182,21 @@ func parsePriorityString(s string) (int, error) {
 		return 0, err
 	}
 	return n, nil
+}
+
+func timesEqual(a, b string) bool {
+	at, aok := parseCLIFieldTime(a)
+	bt, bok := parseCLIFieldTime(b)
+	return aok && bok && at.Equal(bt)
+}
+
+func parseCLIFieldTime(s string) (time.Time, bool) {
+	for _, layout := range []string{time.RFC3339Nano, time.RFC3339, "2006-01-02"} {
+		if t, err := time.Parse(layout, strings.TrimSpace(s)); err == nil {
+			return t.UTC(), true
+		}
+	}
+	return time.Time{}, false
 }
 
 // normalizeErrorMsg strips absolute paths + random IDs from error
