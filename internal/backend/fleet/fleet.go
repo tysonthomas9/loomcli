@@ -735,6 +735,7 @@ func (b *FleetBackend) ListComments(ctx context.Context, id string) ([]backend.C
 			c := w.toTypesComment()
 			out = append(out, commentToData(&c))
 		}
+		backend.SortCommentsByCreation(out)
 		return out, nil
 	}
 	var bare []fleetCommentWire
@@ -746,6 +747,7 @@ func (b *FleetBackend) ListComments(ctx context.Context, id string) ([]backend.C
 		c := w.toTypesComment()
 		out = append(out, commentToData(&c))
 	}
+	backend.SortCommentsByCreation(out)
 	return out, nil
 }
 

@@ -1477,8 +1477,8 @@ func TestListComments_HappyPath(t *testing.T) {
 		Dependencies: []*types.IssueWithDependencyMetadata{},
 		Dependents:   []*types.IssueWithDependencyMetadata{},
 		Comments: []*types.Comment{
+			{ID: 2, IssueID: "test-1", Author: "user2", Text: "c2", CreatedAt: now.Add(time.Second)},
 			{ID: 1, IssueID: "test-1", Author: "user", Text: "c1", CreatedAt: now},
-			{ID: 2, IssueID: "test-1", Author: "user2", Text: "c2", CreatedAt: now},
 		},
 	}
 
@@ -1493,6 +1493,9 @@ func TestListComments_HappyPath(t *testing.T) {
 	}
 	if len(result) != 2 {
 		t.Fatalf("len = %d, want 2", len(result))
+	}
+	if result[0].ID != 1 || result[1].ID != 2 {
+		t.Fatalf("comment order = [%d %d], want oldest-first [1 2]", result[0].ID, result[1].ID)
 	}
 }
 

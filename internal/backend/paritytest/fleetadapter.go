@@ -487,6 +487,7 @@ func (a *fleetDBAdapter) ListComments(ctx context.Context, id string) ([]backend
 	for _, c := range wrap.Comments {
 		out = append(out, c.toData())
 	}
+	backend.SortCommentsByCreation(out)
 	return out, nil
 }
 
