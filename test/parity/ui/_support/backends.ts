@@ -258,7 +258,7 @@ async function runSeedScript(): Promise<void> {
         execSync(cmd, {
             cwd: REPO_ROOT,
             encoding: "utf-8",
-            timeout: 90_000,
+            timeout: 150_000,
             stdio: ["ignore", "pipe", "pipe"],
         });
     } catch (e) {

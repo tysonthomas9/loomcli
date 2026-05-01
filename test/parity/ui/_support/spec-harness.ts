@@ -117,7 +117,7 @@ export function useParityHooks() {
         // third of the default 60s test timeout. Give each test 90s so
         // the actual test body (which has its own 15s waits for selectors
         // + network settle) isn't starved by beforeEach.
-        testInfo.setTimeout(90_000);
+        testInfo.setTimeout(Math.max(testInfo.timeout, 90_000));
         const t0 = Date.now();
         await resetBothBackends({ reseed: true });
         const resetMs = Date.now() - t0;

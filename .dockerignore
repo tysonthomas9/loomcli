@@ -1,7 +1,9 @@
 .git/
 worktrees/
 .beads/
+internal/cli/sessions/
 node_modules/
+test/parity/ui/artifacts/
 *.log
 .loom/
 loom.yaml

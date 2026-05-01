@@ -1267,6 +1267,9 @@ func TestAddComment_HappyPath(t *testing.T) {
 func TestListEvents_HappyPath(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/issues/test-1/history") {
+			t.Errorf("path = %q, want suffix /issues/test-1/history", r.URL.Path)
+		}
 		if r.URL.Query().Get("limit") != "10" {
 			t.Errorf("limit = %q, want %q", r.URL.Query().Get("limit"), "10")
 		}
