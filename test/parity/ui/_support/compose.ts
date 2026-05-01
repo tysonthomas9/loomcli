@@ -61,6 +61,9 @@ export const PARITY_NETWORK = `${COMPOSE_PROJECT}_parity`;
 /** Pre-built parity-seed image, tagged as `${COMPOSE_PROJECT}_parity-seed`. */
 export const PARITY_SEED_IMAGE = `${COMPOSE_PROJECT}_parity-seed`;
 
+/** Pre-built fleet-only parity seeder image. */
+export const PARITY_SEED_FLEET_IMAGE = `${COMPOSE_PROJECT}_parity-seed-fleet`;
+
 /** Container-name prefix all parity services share. */
 export const PARITY_CONTAINER_PREFIX = `${COMPOSE_PROJECT}_`;
 

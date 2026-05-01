@@ -5,6 +5,7 @@
   "description": "Side-by-side UI parity tests: beads (:8081) vs fleet (:8082). See docs/design/parity-report-2026-04-22/ui-test-plan.md.",
   "scripts": {
     "test": "playwright test",
+    "test:fleet-only": "PARITY_MODE=fleet-only playwright test",
     "test:headed": "playwright test --headed",
     "test:debug": "playwright test --debug",
     "test:ui": "playwright test --ui",

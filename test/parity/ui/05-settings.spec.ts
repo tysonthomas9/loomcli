@@ -6,7 +6,7 @@
  * UI surfaces that difference.
  */
 import { parityTest as test, expect, useParityHooks } from "./_support/spec-harness";
-import { gotoViews, captureBothTabs, visualDiff } from "./_support";
+import { gotoViews, captureBothTabs, visualDiff, isFleetOnlyMode } from "./_support";
 import { PARITY_URLS } from "./playwright.config";
 
 useParityHooks();
@@ -24,7 +24,9 @@ test.describe("05 settings parity", () => {
             fetch(`${PARITY_URLS.beads}/api/config`).then((r) => r.json()),
             fetch(`${PARITY_URLS.fleet}/api/config`).then((r) => r.json()),
         ]);
-        expect(beadsCfg.issue_backend ?? beadsCfg.backend).toBe("beads");
+        expect(beadsCfg.issue_backend ?? beadsCfg.backend).toBe(
+            isFleetOnlyMode() ? "fleet" : "beads",
+        );
         expect(fleetCfg.issue_backend ?? fleetCfg.backend).toBe("fleet");
 
         // Rendered text (best-effort; selector may change across redesigns).

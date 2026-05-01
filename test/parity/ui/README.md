@@ -54,6 +54,22 @@ cat test/parity/ui/artifacts/reports/routing-proof.json
 docker compose -f test/parity/docker-compose.parity.yml down -v
 ```
 
+### Fleet-db-only regression mode
+
+After side-by-side parity has passed, the same browser suite can run against
+only fleet-db-backed loom. This path does not start or require `loom-beads`,
+`bd`, or `third_party/beads`.
+
+```bash
+docker compose -f test/parity/docker-compose.parity.yml up -d --build redis fleet-db loom-fleet ui-fleet parity-seed-fleet
+
+make test-fleetdb-ui
+```
+
+Fleet-only mode sets `PARITY_MODE=fleet-only`. The harness opens two isolated
+browser contexts against the fleet UI so existing dual-tab assertions still
+exercise rendering, SSE, routing, and write flows without a beads reference.
+
 ## Environment overrides
 
 | var | default | purpose |
@@ -62,6 +78,7 @@ docker compose -f test/parity/docker-compose.parity.yml down -v
 | `LOOM_FLEET_URL` | `http://localhost:8082` | fleet-backed loom |
 | `FLEET_DB_URL` | `http://localhost:8080` | fleet-db admin API |
 | `PARITY_WORKSPACE` | `PARITY` | fleet-db workspace key |
+| `PARITY_MODE` | `dual` | `dual` or `fleet-only` |
 | `PARITY_COVERAGE_WAIVE` | (none) | comma-separated list of routes to skip |
 | `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` | (system) | pin Docker chromium |
 

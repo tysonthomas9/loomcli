@@ -11,10 +11,12 @@
  *   FLEET_DB_URL    default http://localhost:8080
  *   REDIS_URL       default redis://localhost:6379 (used by redis-cli probe)
  *   PARITY_WORKSPACE default PARITY
+ *   PARITY_MODE     dual (default) or fleet-only
  *   PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH  to pin Docker chromium
  */
 import { defineConfig, devices } from "@playwright/test";
 import * as path from "path";
+import { isFleetOnlyMode, parityMode } from "./_support/mode";
 
 const chromiumExecutablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH;
 
@@ -99,11 +101,17 @@ export default defineConfig({
 // or 8082. fleetDB stays at 8080 since several tests poke fleet-db
 // directly to confirm the through-loom path actually wrote.
 export const PARITY_URLS = {
-    beads: process.env.LOOM_BEADS_URL ?? "http://localhost:8084",
     fleet: process.env.LOOM_FLEET_URL ?? "http://localhost:8083",
     fleetDB: process.env.FLEET_DB_URL ?? "http://localhost:8080",
     redis: process.env.REDIS_URL ?? "redis://localhost:6379",
     workspace: process.env.PARITY_WORKSPACE ?? "PARITY",
+    mode: parityMode(),
+    // In fleet-only regression mode the "beads/reference" tab is a second
+    // fleet tab. This lets most side-by-side specs continue exercising the
+    // same UI paths without starting loom-beads or bd.
+    beads: isFleetOnlyMode()
+        ? (process.env.LOOM_FLEET_URL ?? "http://localhost:8083")
+        : (process.env.LOOM_BEADS_URL ?? "http://localhost:8084"),
 };
 
 export const ARTIFACTS_DIR = path.resolve(__dirname, "artifacts");

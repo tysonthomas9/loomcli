@@ -262,3 +262,25 @@ services:
       - ./seed.sh:/seed.sh:ro
     entrypoint: ["/bin/sh", "/seed.sh"]
     restart: "no"
+
+  # Fleet-db-only seeder for browser regression mode. It intentionally has no
+  # loom-beads dependency and sets FLEET_ONLY=1 so seed.sh never talks to bd.
+  parity-seed-fleet:
+    image: loomcli-parity_parity-seed-fleet
+    build:
+      context: .
+      dockerfile: Dockerfile.seed
+    depends_on:
+      fleet-db:
+        condition: service_healthy
+      loom-fleet:
+        condition: service_started
+    environment:
+      FLEET_URL: http://fleet-db:8080
+      FLEET_WORKSPACE: PARITY
+      FLEET_ONLY: "1"
+    networks: [parity]
+    volumes:
+      - ./seed.sh:/seed.sh:ro
+    entrypoint: ["/bin/sh", "/seed.sh"]
+    restart: "no"

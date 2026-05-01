@@ -1,6 +1,6 @@
 # Makefile for loomcli project
 
-.PHONY: all build build-frontend build-all test test-integration test-all test-parity test-parity-cli test-fleetdb-cli test-parity-ui lint lint-frontend test-frontend test-e2e test-e2e-api test-e2e-api-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install install-bd help frontend sync-beads update-beads check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-no-raw-exec test-coverage test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness
+.PHONY: all build build-frontend build-all test test-integration test-all test-parity test-parity-cli test-fleetdb-cli test-parity-ui test-fleetdb-ui lint lint-frontend test-frontend test-e2e test-e2e-api test-e2e-api-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install install-bd help frontend sync-beads update-beads check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-no-raw-exec test-coverage test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness
 
 # Default target
 all: build
@@ -76,6 +76,20 @@ test-parity-ui:
 	    npx playwright install --with-deps chromium || exit 1; \
 	  fi && \
 	  npx playwright test
+
+# Run the UI browser suite in fleet-db-only regression mode. The command
+# assumes the fleet-only subset of docker-compose.parity.yml is up and seeded:
+#   docker compose -f test/parity/docker-compose.parity.yml up -d --build redis fleet-db loom-fleet ui-fleet parity-seed-fleet
+# It does not require loom-beads, bd, or third_party/beads containers.
+test-fleetdb-ui:
+	@echo "Running fleet-db-only UI regression suite (Playwright)..."
+	@cd test/parity/ui && \
+	  if [ ! -d node_modules ]; then \
+	    echo "[test-fleetdb-ui] installing npm deps..."; \
+	    npm install --no-audit --no-fund --silent || exit 1; \
+	    npx playwright install --with-deps chromium || exit 1; \
+	  fi && \
+	  PARITY_MODE=fleet-only npx playwright test
 
 # Run tests with race detector and coverage
 test-race-cover:
@@ -377,6 +391,8 @@ help:
 	@echo "  make lint-frontend     - Run frontend typecheck + ESLint"
 	@echo "  make test-frontend     - Run frontend unit tests (vitest)"
 	@echo "  make test-e2e          - Run Playwright mocked e2e tests (no server)"
+	@echo "  make test-parity-ui    - Run side-by-side UI parity suite"
+	@echo "  make test-fleetdb-ui   - Run fleet-db-only UI regression suite"
 	@echo "  make test-e2e-api      - Run Playwright API e2e tests (self-contained)"
 	@echo "  make test-e2e-api-local - Run Playwright API e2e tests (needs loom serve)"
 	@echo "  make test-e2e-integration - Run Playwright integration e2e tests (self-contained)"

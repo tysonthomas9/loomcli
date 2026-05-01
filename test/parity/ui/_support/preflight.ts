@@ -20,6 +20,7 @@ import {
     PARITY_CONTAINER_PREFIX,
 } from "./compose";
 import { discoverWorkspaceId } from "./backends";
+import { isFleetOnlyMode } from "./mode";
 
 const WEBUI_GAPS_PATH = path.resolve(
     __dirname,
@@ -145,25 +146,35 @@ async function fleetDBLogSince(sinceISO: string): Promise<string> {
 async function runAllChecks(): Promise<PreflightResult> {
     const started = new Date().toISOString();
     const checks: PreflightCheck[] = [];
+    const fleetOnly = isFleetOnlyMode();
 
     // 1. beads config
-    try {
-        const j = await httpJson(`${PARITY_URLS.beads}/api/config`);
-        const backend = j.issue_backend ?? j.backend ?? "(missing)";
+    if (fleetOnly) {
         checks.push({
             name: "GET :8081/api/config .issue_backend",
-            expected: "beads",
-            actual: String(backend),
-            pass: backend === "beads",
+            expected: "skipped in fleet-only mode",
+            actual: "skipped",
+            pass: true,
         });
-    } catch (e: any) {
-        checks.push({
-            name: "GET :8081/api/config .issue_backend",
-            expected: "beads",
-            actual: "UNREACHABLE",
-            pass: false,
-            error: e?.message ?? String(e),
-        });
+    } else {
+        try {
+            const j = await httpJson(`${PARITY_URLS.beads}/api/config`);
+            const backend = j.issue_backend ?? j.backend ?? "(missing)";
+            checks.push({
+                name: "GET :8081/api/config .issue_backend",
+                expected: "beads",
+                actual: String(backend),
+                pass: backend === "beads",
+            });
+        } catch (e: any) {
+            checks.push({
+                name: "GET :8081/api/config .issue_backend",
+                expected: "beads",
+                actual: "UNREACHABLE",
+                pass: false,
+                error: e?.message ?? String(e),
+            });
+        }
     }
 
     // 2. fleet config
@@ -208,14 +219,19 @@ async function runAllChecks(): Promise<PreflightResult> {
         const healthFor = (svc: string) =>
             services.find((s) => s.name.includes(svc))?.status ?? "(not found)";
         const fleetHealth = healthFor("loom-fleet");
-        const beadsHealth = healthFor("loom-beads");
+        const beadsHealth = fleetOnly ? "skipped" : healthFor("loom-beads");
         const fleetDbHealth = healthFor("fleet-db");
-        const allHealthy = [fleetHealth, beadsHealth, fleetDbHealth].every(
+        const required = fleetOnly
+            ? [fleetHealth, fleetDbHealth]
+            : [fleetHealth, beadsHealth, fleetDbHealth];
+        const allHealthy = required.every(
             (h) => typeof h === "string" && /healthy|running|Up/i.test(h),
         );
         checks.push({
             name: "Container healthchecks all green",
-            expected: "healthy (loom-beads, loom-fleet, fleet-db)",
+            expected: fleetOnly
+                ? "healthy (loom-fleet, fleet-db); loom-beads not required"
+                : "healthy (loom-beads, loom-fleet, fleet-db)",
             actual: `loom-beads=${beadsHealth} loom-fleet=${fleetHealth} fleet-db=${fleetDbHealth}`,
             pass: allHealthy,
         });
@@ -356,23 +372,32 @@ async function runAllChecks(): Promise<PreflightResult> {
 
     // 8/9. Settings page backend indicator — asserted via /api/config since
     // that's what the Settings page reads. Two separate table rows.
-    try {
-        const j = await httpJson(`${PARITY_URLS.beads}/api/config`);
-        const b = j.issue_backend ?? j.backend ?? "(missing)";
+    if (fleetOnly) {
         checks.push({
             name: "Settings page shows 'beads' on :8081",
-            expected: "yes",
-            actual: b === "beads" ? "yes" : `no (${b})`,
-            pass: b === "beads",
+            expected: "skipped in fleet-only mode",
+            actual: "skipped",
+            pass: true,
         });
-    } catch (e: any) {
-        checks.push({
-            name: "Settings page shows 'beads' on :8081",
-            expected: "yes",
-            actual: "UNREACHABLE",
-            pass: false,
-            error: e?.message ?? String(e),
-        });
+    } else {
+        try {
+            const j = await httpJson(`${PARITY_URLS.beads}/api/config`);
+            const b = j.issue_backend ?? j.backend ?? "(missing)";
+            checks.push({
+                name: "Settings page shows 'beads' on :8081",
+                expected: "yes",
+                actual: b === "beads" ? "yes" : `no (${b})`,
+                pass: b === "beads",
+            });
+        } catch (e: any) {
+            checks.push({
+                name: "Settings page shows 'beads' on :8081",
+                expected: "yes",
+                actual: "UNREACHABLE",
+                pass: false,
+                error: e?.message ?? String(e),
+            });
+        }
     }
     try {
         const j = await httpJson(`${PARITY_URLS.fleet}/api/config`);
@@ -403,6 +428,7 @@ async function runAllChecks(): Promise<PreflightResult> {
             LOOM_FLEET_URL: PARITY_URLS.fleet,
             FLEET_DB_URL: PARITY_URLS.fleetDB,
             PARITY_WORKSPACE: PARITY_URLS.workspace,
+            PARITY_MODE: PARITY_URLS.mode,
         },
     };
 }
@@ -506,7 +532,9 @@ export async function preflight(): Promise<PreflightResult> {
     const result = await runAllChecks();
     cached = result;
     await writeJsonReport(result);
-    await writeStepZeroTable(result);
+    if (!isFleetOnlyMode()) {
+        await writeStepZeroTable(result);
+    }
 
     if (!result.all_passed) {
         throw preflightError(result);
@@ -523,12 +551,15 @@ function preflightError(r: PreflightResult): Error {
     const summary = failed
         .map((c) => `  - ${c.name}: expected=${c.expected} actual=${c.actual}${c.error ? ` (err=${c.error})` : ""}`)
         .join("\n");
+    const setup = isFleetOnlyMode()
+        ? `  docker compose -f test/parity/docker-compose.parity.yml up -d --build redis fleet-db loom-fleet ui-fleet parity-seed-fleet`
+        : `  docker compose -f test/parity/docker-compose.parity.yml up -d\n` +
+        `  docker compose -f test/parity/docker-compose.parity.yml run --rm parity-seed`;
     return new Error(
         `Parity preflight failed — cannot run suite.\n\n` +
             `Failing checks (${failed.length}/${r.checks.length}):\n${summary}\n\n` +
             `The docker-compose.parity.yml stack must be up and healthy. Run:\n` +
-            `  docker compose -f test/parity/docker-compose.parity.yml up -d\n` +
-            `  docker compose -f test/parity/docker-compose.parity.yml run --rm parity-seed\n\n` +
+            `${setup}\n\n` +
             `Then retry. Never stub out this preflight — see ui-test-plan.md §0.\n` +
             `Detailed JSON: ${PREFLIGHT_JSON}`,
     );

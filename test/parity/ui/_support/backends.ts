@@ -14,8 +14,10 @@ import { PARITY_URLS, ARTIFACTS_DIR } from "../playwright.config";
 import {
     composeRuntime,
     PARITY_NETWORK,
+    PARITY_SEED_FLEET_IMAGE,
     PARITY_SEED_IMAGE,
 } from "./compose";
+import { isFleetOnlyMode } from "./mode";
 
 export type Backend = "beads" | "fleet";
 
@@ -41,6 +43,7 @@ export interface BackendState {
 const REPO_ROOT = path.resolve(__dirname, "../../../..");
 
 function urlFor(b: Backend): string {
+    if (b === "beads" && isFleetOnlyMode()) return PARITY_URLS.fleet;
     return b === "beads" ? PARITY_URLS.beads : PARITY_URLS.fleet;
 }
 
@@ -175,14 +178,16 @@ let resetInFlight: Promise<void> | null = null;
 export async function resetBothBackends(opts: { reseed?: boolean } = {}): Promise<void> {
     if (resetInFlight) await resetInFlight;
     resetInFlight = (async () => {
-        const [beadsWs, fleetWs] = await Promise.all([
-            discoverWorkspaceId(PARITY_URLS.beads),
-            discoverWorkspaceId(PARITY_URLS.fleet),
-        ]);
-        await Promise.all([
-            deleteAllIssues(PARITY_URLS.beads, beadsWs),
-            deleteAllIssues(PARITY_URLS.fleet, fleetWs),
-        ]);
+        const fleetWs = await discoverWorkspaceId(PARITY_URLS.fleet);
+        if (isFleetOnlyMode()) {
+            await deleteAllIssues(PARITY_URLS.fleet, fleetWs);
+        } else {
+            const beadsWs = await discoverWorkspaceId(PARITY_URLS.beads);
+            await Promise.all([
+                deleteAllIssues(PARITY_URLS.beads, beadsWs),
+                deleteAllIssues(PARITY_URLS.fleet, fleetWs),
+            ]);
+        }
         if (opts.reseed !== false) {
             await runSeedScript();
         }
@@ -236,12 +241,19 @@ async function runSeedScript(): Promise<void> {
     // offline and cascading every subsequent preflight to a 502. Bypass
     // compose entirely and invoke the runtime directly.
     const seedHostPath = path.resolve(REPO_ROOT, "test/parity/seed.sh");
-    const envFlags = [
+    const fleetOnly = isFleetOnlyMode();
+    const image = fleetOnly ? PARITY_SEED_FLEET_IMAGE : PARITY_SEED_IMAGE;
+    const env: string[] = [
         "-e", `FLEET_URL=http://fleet-db:8080`,
         "-e", `FLEET_WORKSPACE=${PARITY_URLS.workspace}`,
-        "-e", `BEADS_URL=http://loom-beads:8080`,
-    ].join(" ");
-    const cmd = `${composeRuntime()} run --rm --network ${PARITY_NETWORK} ${envFlags} -v ${seedHostPath}:/seed.sh:ro --entrypoint /bin/sh ${PARITY_SEED_IMAGE} /seed.sh`;
+    ];
+    if (fleetOnly) {
+        env.push("-e", "FLEET_ONLY=1");
+    } else {
+        env.push("-e", "BEADS_URL=http://loom-beads:8080");
+    }
+    const envFlags = env.join(" ");
+    const cmd = `${composeRuntime()} run --rm --network ${PARITY_NETWORK} ${envFlags} -v ${seedHostPath}:/seed.sh:ro --entrypoint /bin/sh ${image} /seed.sh`;
     try {
         execSync(cmd, {
             cwd: REPO_ROOT,

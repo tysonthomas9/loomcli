@@ -18,13 +18,17 @@
 # Environment inputs (set by docker-compose.parity.yml):
 #   FLEET_URL        e.g. http://fleet-db:8080
 #   FLEET_WORKSPACE  e.g. PARITY
-#   BEADS_URL        e.g. http://loom-beads:8080
+#   BEADS_URL        e.g. http://loom-beads:8080 (not required with FLEET_ONLY=1)
+#   FLEET_ONLY       set to 1 to seed only fleet-db
 
 set -eu
 
 : "${FLEET_URL:?must be set}"
 : "${FLEET_WORKSPACE:?must be set}"
-: "${BEADS_URL:?must be set}"
+FLEET_ONLY="${FLEET_ONLY:-0}"
+if [ "${FLEET_ONLY}" != "1" ]; then
+    : "${BEADS_URL:?must be set unless FLEET_ONLY=1}"
+fi
 
 # Use the same actor identity beads gets from git config user.email
 # (set to parity-harness@fixture.local in docker-compose.parity.yml).
@@ -34,7 +38,11 @@ set -eu
 ACTOR="parity-harness@fixture.local"
 
 echo "[seed] FLEET_URL=${FLEET_URL}  workspace=${FLEET_WORKSPACE}  actor=${ACTOR}"
-echo "[seed] BEADS_URL=${BEADS_URL}"
+if [ "${FLEET_ONLY}" = "1" ]; then
+    echo "[seed] FLEET_ONLY=1 — skipping loom-beads seed path"
+else
+    echo "[seed] BEADS_URL=${BEADS_URL}"
+fi
 
 # Base invocations. `workspace create` needs --key (admin endpoint),
 # but per-workspace data operations need -workspace.
@@ -86,15 +94,18 @@ case "${CREATE_OUT}" in
 esac
 
 # ──────────────────────────────────────────────────────────────────
-# Phase 2: discover loom-beads workspace ID
+# Phase 2: discover loom-beads workspace ID unless fleet-only
 # ──────────────────────────────────────────────────────────────────
-BEADS_WS_ID=$(curl -fsS "${BEADS_URL}/api/workspaces" 2>/dev/null \
-    | sed -n 's/.*"id":"\([^"]*\)".*/\1/p' | head -1)
-if [ -z "${BEADS_WS_ID}" ]; then
-    echo "[seed] FATAL: loom-beads has no workspaces"
-    exit 2
+BEADS_WS_ID=""
+if [ "${FLEET_ONLY}" != "1" ]; then
+    BEADS_WS_ID=$(curl -fsS "${BEADS_URL}/api/workspaces" 2>/dev/null \
+        | sed -n 's/.*"id":"\([^"]*\)".*/\1/p' | head -1)
+    if [ -z "${BEADS_WS_ID}" ]; then
+        echo "[seed] FATAL: loom-beads has no workspaces"
+        exit 2
+    fi
+    echo "[seed] loom-beads workspace ID: ${BEADS_WS_ID}"
 fi
-echo "[seed] loom-beads workspace ID: ${BEADS_WS_ID}"
 
 # ──────────────────────────────────────────────────────────────────
 # Phase 3: seed fixtures via fdb (fleet) + curl (loom-beads webui)
@@ -104,13 +115,15 @@ post_issue() {
 
     echo "[seed] creating: $title ($type, P$priority)"
 
-    # Loom-beads side via webui (loom-beads has bd internally; we go
-    # through the webui to mirror the fleet path's "client → server" shape).
-    body="{\"title\":\"$title\",\"issue_type\":\"$type\",\"priority\":$priority}"
-    curl -fsS -X POST "${BEADS_URL}/api/workspaces/${BEADS_WS_ID}/issues" \
-        -H 'Content-Type: application/json' \
-        -d "$body" > /dev/null \
-        || { echo "[seed]   FAILED on loom-beads"; exit 3; }
+    if [ "${FLEET_ONLY}" != "1" ]; then
+        # Loom-beads side via webui (loom-beads has bd internally; we go
+        # through the webui to mirror the fleet path's "client → server" shape).
+        body="{\"title\":\"$title\",\"issue_type\":\"$type\",\"priority\":$priority}"
+        curl -fsS -X POST "${BEADS_URL}/api/workspaces/${BEADS_WS_ID}/issues" \
+            -H 'Content-Type: application/json' \
+            -d "$body" > /dev/null \
+            || { echo "[seed]   FAILED on loom-beads"; exit 3; }
+    fi
 
     # Fleet side via fdb CLI — this is the "real user CLI" path.
     ${FDB_DATA} create -title "$title" -type "$type" -priority "$priority" > /dev/null 2>&1 \
@@ -132,4 +145,8 @@ post_issue "Theme toggle"             feature 3
 post_issue "Flaky test: login_e2e"    task    2
 post_issue "Clarify rate limit docs"  task    4
 
-echo "[seed] done — 13 issues seeded into both backends"
+if [ "${FLEET_ONLY}" = "1" ]; then
+    echo "[seed] done — 13 issues seeded into fleet-db"
+else
+    echo "[seed] done — 13 issues seeded into both backends"
+fi

@@ -9,6 +9,12 @@ export {
 } from "./preflight";
 
 export {
+    parityMode,
+    isFleetOnlyMode,
+    type ParityMode,
+} from "./mode";
+
+export {
     openDualTabs,
     gotoBoth,
     gotoViews,

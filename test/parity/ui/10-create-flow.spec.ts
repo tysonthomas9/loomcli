@@ -4,6 +4,7 @@
 import { parityTest as test, expect, useParityHooks } from "./_support/spec-harness";
 import {
     apiResponseDiff,
+    isFleetOnlyMode,
     routedFleetRequest,
     snapshotState,
     stateSyncDiff,
@@ -45,7 +46,9 @@ test.describe("10 create-flow parity", () => {
         expect(
             stateAfter.fleet.issues.length,
         ).toBeGreaterThan(stateBefore.fleet.issues.length);
-        // Beads must NOT grow — writes shouldn't leak across backends.
-        expect(stateAfter.beads.issues.length).toBe(stateBefore.beads.issues.length);
+        if (!isFleetOnlyMode()) {
+            // Beads must NOT grow — writes shouldn't leak across backends.
+            expect(stateAfter.beads.issues.length).toBe(stateBefore.beads.issues.length);
+        }
     });
 });
