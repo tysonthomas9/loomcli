@@ -70,16 +70,10 @@ func NewWorkspaceService(cfg WorkspaceServiceConfig) WorkspaceService {
 }
 
 // loadActiveWorkspace returns the active workspace topology, preferring
-// the store when configured. Falls back to configFn during the migration
-// window.
+// the store when configured.
 func (s *workspaceServiceImpl) loadActiveWorkspace(ctx context.Context) (*ops.WorkspaceData, error) {
 	if s.store != nil {
-		data, err := storeadapter.BuildActiveWorkspaceData(ctx, s.store)
-		if err == nil && data != nil {
-			return data, nil
-		}
-		// Fall through on store miss / no active workspace — legacy path
-		// may still know the workspace from yaml.
+		return storeadapter.BuildActiveWorkspaceData(ctx, s.store)
 	}
 	if s.configFn != nil {
 		return s.configFn()
@@ -91,10 +85,7 @@ func (s *workspaceServiceImpl) loadActiveWorkspace(ctx context.Context) (*ops.Wo
 // the store when configured.
 func (s *workspaceServiceImpl) loadWorkspaceByID(ctx context.Context, wsID string) (*ops.WorkspaceData, error) {
 	if s.store != nil {
-		data, err := storeadapter.BuildWorkspaceDataForKey(ctx, s.store, wsID)
-		if err == nil && data != nil {
-			return data, nil
-		}
+		return storeadapter.BuildWorkspaceDataForKey(ctx, s.store, wsID)
 	}
 	if s.configByIDFn != nil {
 		return s.configByIDFn(wsID)
@@ -270,8 +261,8 @@ func (s *workspaceServiceImpl) GetWorkspace(ctx context.Context, wsID string) (*
 	return data, nil
 }
 
-// lookupWorkspace resolves a workspace UUID via the store (preferred)
-// or the legacy config closures. Returns (data, true, nil) when a match
+// lookupWorkspace resolves a workspace UUID via the store, or via legacy
+// config closures only when no store is configured. Returns (data, true, nil) when a match
 // is found, (nil, false, nil) when the ID is unknown, or (nil, false,
 // err) on a load error. Used by GetWorkspace as the fallback when the
 // multiPool registry has no entry for the workspace.
@@ -290,6 +281,7 @@ func (s *workspaceServiceImpl) lookupWorkspace(ctx context.Context, wsID string)
 			}
 			return data, true, nil
 		}
+		return nil, false, nil
 	}
 	// Legacy: by-ID supplier (cheaper than full config scan).
 	if s.configByIDFn != nil {

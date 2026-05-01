@@ -13,6 +13,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
+	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 )
@@ -130,8 +131,40 @@ func TestWriteJSON(t *testing.T) {
 	}
 }
 
-func TestApplyWorkspaceConfig_NilStoreUsesLegacyFns(t *testing.T) {
+func TestApplyWorkspaceConfig_NilStoreDoesNotWireLegacyFns(t *testing.T) {
 	cfg := webui.ServerConfig{}
+
+	applyWorkspaceConfig(&cfg)
+
+	if cfg.WorkspaceConfigFn != nil {
+		t.Fatal("WorkspaceConfigFn should not fall back to legacy config")
+	}
+	if cfg.WorkspaceConfigByIDFn != nil {
+		t.Fatal("WorkspaceConfigByIDFn should not fall back to legacy config")
+	}
+	if cfg.WorkspaceListFn != nil {
+		t.Fatal("WorkspaceListFn should not fall back to legacy config")
+	}
+	if cfg.WorkspaceIDResolverFn != nil {
+		t.Fatal("WorkspaceIDResolverFn should not fall back to legacy resolver")
+	}
+	if cfg.WorkspaceDeleteFn != nil {
+		t.Fatal("WorkspaceDeleteFn should not fall back to legacy delete")
+	}
+	if cfg.SetDefaultWorkspaceFn != nil {
+		t.Fatal("SetDefaultWorkspaceFn should not fall back to legacy default setter")
+	}
+	if cfg.ClearDefaultWorkspaceFn != nil {
+		t.Fatal("ClearDefaultWorkspaceFn should not fall back to legacy default clearer")
+	}
+	if cfg.WorkspaceCreateFn != nil {
+		t.Fatal("WorkspaceCreateFn should not fall back to legacy create")
+	}
+}
+
+func TestApplyWorkspaceConfig_StoreWiresStoreBackedFns(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	cfg := webui.ServerConfig{Store: memstore.New()}
 
 	applyWorkspaceConfig(&cfg)
 

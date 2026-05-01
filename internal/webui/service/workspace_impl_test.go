@@ -245,6 +245,49 @@ func TestListWorkspaces_StoreBackedMarksActiveAndDefault(t *testing.T) {
 	}
 }
 
+func TestGetActiveWorkspace_StoreBackedDoesNotFallbackToLegacyConfig(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	t.Setenv("LOOM_WORKSPACE", "")
+
+	st := memstore.New()
+	svc := NewWorkspaceService(WorkspaceServiceConfig{
+		Store: st,
+		ConfigFn: func() (*ops.WorkspaceData, error) {
+			t.Fatal("store-backed active workspace should not call legacy configFn")
+			return nil, nil
+		},
+	})
+
+	data, err := svc.GetActiveWorkspace(context.Background())
+	if err != nil {
+		t.Fatalf("GetActiveWorkspace returned error: %v", err)
+	}
+	if data == nil {
+		t.Fatal("GetActiveWorkspace returned nil")
+	}
+}
+
+func TestGetWorkspace_StoreBackedMissDoesNotFallbackToLegacyConfig(t *testing.T) {
+	st := memstore.New()
+	svc := NewWorkspaceService(WorkspaceServiceConfig{
+		Store: st,
+		ConfigByIDFn: func(string) (*ops.WorkspaceData, error) {
+			t.Fatal("store-backed workspace lookup should not call legacy configByIDFn")
+			return nil, nil
+		},
+		ConfigFn: func() (*ops.WorkspaceData, error) {
+			t.Fatal("store-backed workspace lookup should not call legacy configFn")
+			return nil, nil
+		},
+	})
+
+	_, err := svc.GetWorkspace(context.Background(), "MISSING")
+	var se *ServiceError
+	if !errors.As(err, &se) || se.Kind != KindNotFound {
+		t.Fatalf("err = %v, want NotFound", err)
+	}
+}
+
 func TestSetDefaultWorkspace_StoreBackedResolvesNameAndReturnsStoreData(t *testing.T) {
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
 	t.Setenv("LOOM_WORKSPACE", "")

@@ -203,10 +203,8 @@ func runServe(cmd *cobra.Command, args []string) {
 		staleDetectorHandler = daemonwire.InitStaleDetectorHandler(ctx, serveRedisAddr, serveRedisPassword)
 	}
 	initUsageStore()
-	go workspacemgr.PurgeOldSessions()
 
 	monitorHandlers := buildMonitorHandlers(collectDataFn, staleDetectorHandler)
-	workspacemgr.EnsureProjectRegistered()
 
 	// Open a fleet-db-backed store handle only for fleet-backed modes. Beads
 	// mode still serves workspace topology from the legacy yaml config; forcing
@@ -218,6 +216,9 @@ func runServe(cmd *cobra.Command, args []string) {
 	}
 	if storeHandle != nil {
 		defer storeHandle.Close()
+	} else {
+		go workspacemgr.PurgeOldSessions()
+		workspacemgr.EnsureProjectRegistered()
 	}
 
 	webuiErr := make(chan error, 1)
@@ -227,7 +228,7 @@ func runServe(cmd *cobra.Command, args []string) {
 			st = storeHandle.Store
 		}
 		cfg := buildServerConfig(monitorHandlers, fleetState, st)
-		if !serveNoDaemon {
+		if !serveNoDaemon && st == nil {
 			cfg.DaemonStartupFn = workspacemgr.EnsureDaemonsForAllWorkspaces
 		}
 		webuiErr <- webuiapp.StartServer(ctx, cfg)
@@ -425,22 +426,13 @@ func applyFleetConfig(cfg *webui.ServerConfig, fs fleetState) {
 	cfg.FleetClient = fs.modeDetected
 }
 
-// applyWorkspaceConfig wires the workspace-related closures the webui
-// server consumes. Fleet-backed modes prefer the unified store; beads mode
-// keeps the yaml-backed workspacemgr path so minimal local deployments do not
-// require an embedded fleet-db binary just to serve the UI.
+// applyWorkspaceConfig wires the workspace-related closures the webui server
+// consumes. Fleet-db-backed serve must use the unified store; nil-store serve
+// leaves workspace management unavailable instead of silently falling back to
+// legacy yaml/workspacemgr paths.
 func applyWorkspaceConfig(cfg *webui.ServerConfig) {
 	if cfg.Store == nil {
-		cfg.WorkspaceConfigFn = workspacemgr.BuildWorkspaceInfo
-		cfg.WorkspaceConfigByIDFn = workspacemgr.BuildWorkspaceInfoForID
-		cfg.WorkspaceListFn = buildLegacyWorkspaceListFn
-		cfg.WorkspaceIDResolverFn = workspacemgr.ResolveWorkspaceID
-		cfg.InitialWorkspaceID = workspacemgr.ResolveInitialWorkspaceID()
 		applyFleetInitialWorkspaceFallback(cfg, true)
-		cfg.WorkspaceDeleteFn = workspacemgr.DeleteWorkspace
-		cfg.SetDefaultWorkspaceFn = workspacemgr.SetDefaultWorkspace
-		cfg.ClearDefaultWorkspaceFn = workspacemgr.ClearDefaultWorkspace
-		cfg.WorkspaceCreateFn = workspacemgr.CreateWorkspace
 		return
 	}
 	cfg.WorkspaceConfigFn = serveadapter.BuildWorkspaceConfigFn(cfg.Store)
@@ -462,25 +454,6 @@ func applyFleetInitialWorkspaceFallback(cfg *webui.ServerConfig, force bool) {
 	if force || cfg.InitialWorkspaceID == "" || cfg.InitialWorkspaceID == "workspace" || cfg.InitialWorkspaceID == "default" {
 		cfg.InitialWorkspaceID = cfg.FleetClientWorkspace
 	}
-}
-
-func buildLegacyWorkspaceListFn() (map[string]string, error) {
-	cfg, err := config.LoadConfig()
-	if err != nil {
-		return nil, err
-	}
-	if cfg == nil || len(cfg.Workspaces) == 0 {
-		return map[string]string{}, nil
-	}
-	out := make(map[string]string, len(cfg.Workspaces))
-	for name, ws := range cfg.Workspaces {
-		id := ws.ID
-		if id == "" {
-			id = name
-		}
-		out[id] = ws.Path
-	}
-	return out, nil
 }
 
 func applyCORSConfig(cfg *webui.ServerConfig) {
