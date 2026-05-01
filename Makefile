@@ -1,6 +1,6 @@
 # Makefile for loomcli project
 
-.PHONY: all build build-frontend build-all test test-integration test-all test-parity test-parity-cli test-fleetdb-cli test-fleetdb-embedded test-parity-ui test-fleetdb-ui test-distributed-smoke lint lint-frontend test-frontend test-e2e test-e2e-api test-e2e-api-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install install-bd help frontend sync-beads update-beads check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-no-raw-exec test-coverage test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness
+.PHONY: all build build-frontend build-all test test-integration test-all test-parity test-parity-cli test-fleetdb-cli test-fleetdb-embedded test-fleetdb-supervisor test-parity-ui test-fleetdb-ui test-distributed-smoke lint lint-frontend test-frontend test-e2e test-e2e-api test-e2e-api-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install install-bd help frontend sync-beads update-beads check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-no-raw-exec test-coverage test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness
 
 # Default target
 all: build
@@ -57,6 +57,11 @@ test-fleetdb-cli:
 test-fleetdb-embedded: build
 	@echo "Running fleet-db-only clean checkout embedded smoke..."
 	LOOM_BIN="$(PWD)/loom" scripts/test-fleetdb-clean-checkout.sh
+
+test-fleetdb-supervisor:
+	@echo "Running fleet-db supervisor control-plane gate..."
+	go test -count=1 ./internal/cli ./internal/cli/daemon ./internal/cli/daemon/supervisor \
+	  -run 'Test(AgentIPCClient|IPCServer_|Supervisor(Register|Heartbeats|Mirrors)ControlPlane|BuildCommand_SessionEnvVars)'
 
 # Run the UI Parity Test Suite (Playwright; beads :8081 vs fleet :8082).
 # Assumes docker-compose.parity.yml is already up AND seeded — the suite's
