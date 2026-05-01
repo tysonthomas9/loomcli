@@ -18,13 +18,15 @@
       "id": "step_ready",
       "description": "List ready issues",
       "bd_args":  ["--json", "ready", "--limit", "10"],
-      "fdb_args": ["-json", "ready", "-limit", "10"]
+      "fdb_args": ["-json", "ready", "-limit", "10"],
+      "expect_result_count": 2
     },
     {
       "id": "step_ready_priority_filter",
       "description": "Ready with priority filter",
       "bd_args":  ["--json", "ready", "--priority", "1", "--limit", "10"],
-      "fdb_args": ["-json", "ready", "-priority", "1", "-limit", "10"]
+      "fdb_args": ["-json", "ready", "-priority", "1", "-limit", "10"],
+      "expect_result_count": 1
     }
   ]
 }

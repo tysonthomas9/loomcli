@@ -23,25 +23,29 @@
       "id": "step_list_all",
       "description": "List everything — total should match",
       "bd_args":  ["--json", "list", "--limit", "50"],
-      "fdb_args": ["-json", "list", "-limit", "50"]
+      "fdb_args": ["-json", "list", "-limit", "50"],
+      "expect_result_count": 3
     },
     {
       "id": "step_list_by_type",
       "description": "Filter by type=bug",
       "bd_args":  ["--json", "list", "--type", "bug", "--limit", "50"],
-      "fdb_args": ["-json", "list", "-type", "bug", "-limit", "50"]
+      "fdb_args": ["-json", "list", "-type", "bug", "-limit", "50"],
+      "expect_result_count": 1
     },
     {
       "id": "step_list_by_assignee",
       "description": "Filter by assignee=alice",
       "bd_args":  ["--json", "list", "--assignee", "alice", "--limit", "50"],
-      "fdb_args": ["-json", "list", "-assignee", "alice", "-limit", "50"]
+      "fdb_args": ["-json", "list", "-assignee", "alice", "-limit", "50"],
+      "expect_result_count": 2
     },
     {
       "id": "step_list_by_status_open",
       "description": "Filter by status=open",
       "bd_args":  ["--json", "list", "--status", "open", "--limit", "50"],
-      "fdb_args": ["-json", "list", "-status", "open", "-limit", "50"]
+      "fdb_args": ["-json", "list", "-status", "open", "-limit", "50"],
+      "expect_result_count": 3
     }
   ]
 }

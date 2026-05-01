@@ -54,13 +54,15 @@ type cliFixture struct {
 // extracts values from the per-backend stdout JSON into per-backend
 // variable namespaces via jq-lite-ish dotted keys (e.g. "$.id").
 type cliStep struct {
-	ID           string            `json:"id"`
-	Description  string            `json:"description,omitempty"`
-	BdArgs       []string          `json:"bd_args"`
-	FdbArgs      []string          `json:"fdb_args"`
-	CaptureVars  map[string]string `json:"capture_vars,omitempty"`
-	ExpectError  bool              `json:"expect_error,omitempty"`
-	CompareField string            `json:"compare_field,omitempty"`
+	ID                string            `json:"id"`
+	Description       string            `json:"description,omitempty"`
+	BdArgs            []string          `json:"bd_args"`
+	FdbArgs           []string          `json:"fdb_args"`
+	CaptureVars       map[string]string `json:"capture_vars,omitempty"`
+	ExpectError       bool              `json:"expect_error,omitempty"`
+	CompareField      string            `json:"compare_field,omitempty"`
+	ExpectJSON        map[string]any    `json:"expect_json,omitempty"`
+	ExpectResultCount *int              `json:"expect_result_count,omitempty"`
 }
 
 // cliHarness owns the pair of backends (bd workspace dir + fdb HTTP URL)
@@ -150,8 +152,6 @@ func TestCLIFleetDBOnly(t *testing.T) {
 	emptyPath := t.TempDir()
 	t.Setenv("PATH", emptyPath)
 
-	h := spawnCLIFleetOnlyHarness(t)
-
 	fixtures, err := discoverCLIFixtures("testdata/cli-fixtures")
 	if err != nil {
 		t.Fatalf("discoverCLIFixtures: %v", err)
@@ -169,6 +169,7 @@ func TestCLIFleetDBOnly(t *testing.T) {
 		}
 
 		t.Run(fx.ID, func(t *testing.T) {
+			h := spawnCLIFleetOnlyHarness(t)
 			failures, err := h.runCLIFleetOnlyFixture(t.Context(), *fx)
 			if err != nil {
 				t.Fatalf("runCLIFleetOnlyFixture: %v", err)
@@ -472,13 +473,76 @@ func (h *cliFleetOnlyHarness) runCLIFleetOnlyFixture(ctx context.Context, fx cli
 			failures = append(failures, fleetOnlyFailure(fx.ID, step.ID, joinFleetCmd(fdbArgs), "_outcome", describeCLIOutcome(fdbStdout, fdbErr)))
 			continue
 		}
-		if expectsJSON(fdbArgs) {
-			if _, ok := parseMaybeJSON(fdbStdout); !ok {
+		if expectsJSON(fdbArgs) || len(step.ExpectJSON) > 0 || step.ExpectResultCount != nil {
+			parsed, ok := parseMaybeJSON(fdbStdout)
+			if !ok {
 				failures = append(failures, fleetOnlyFailure(fx.ID, step.ID, joinFleetCmd(fdbArgs), "_stdout_json", "expected JSON stdout"))
+				continue
 			}
+			failures = append(failures, assertFleetOnlyJSON(fx.ID, step, joinFleetCmd(fdbArgs), parsed)...)
 		}
 	}
 	return failures, nil
+}
+
+func assertFleetOnlyJSON(fixtureID string, step cliStep, method string, parsed any) []DiffEntry {
+	var failures []DiffEntry
+	if step.ExpectResultCount != nil {
+		if got, ok := resultCount(parsed); !ok || got != *step.ExpectResultCount {
+			failures = append(failures, fleetOnlyFailure(fixtureID, step.ID, method, "_result_count", map[string]any{
+				"got":       got,
+				"want":      *step.ExpectResultCount,
+				"countable": ok,
+				"stdout":    parsed,
+			}))
+		}
+	}
+	for selector, want := range step.ExpectJSON {
+		got, ok := applyJSONSelector(parsed, selector)
+		if !ok || !fieldsEqualNormalized(got, want) {
+			failures = append(failures, fleetOnlyFailure(fixtureID, step.ID, method, selector, map[string]any{
+				"got":   got,
+				"want":  want,
+				"found": ok,
+			}))
+		}
+	}
+	return failures
+}
+
+func resultCount(v any) (int, bool) {
+	switch t := v.(type) {
+	case []any:
+		return len(t), true
+	case map[string]any:
+		for _, key := range []string{"total", "count"} {
+			if n, ok := numberToInt(t[key]); ok {
+				return n, true
+			}
+		}
+		for _, key := range []string{"issues", "items", "results", "data"} {
+			if arr, ok := t[key].([]any); ok {
+				return len(arr), true
+			}
+		}
+	}
+	return 0, false
+}
+
+func numberToInt(v any) (int, bool) {
+	switch n := v.(type) {
+	case float64:
+		return int(n), true
+	case int:
+		return n, true
+	case int64:
+		return int(n), true
+	case json.Number:
+		i, err := n.Int64()
+		return int(i), err == nil
+	default:
+		return 0, false
+	}
 }
 
 // runBD invokes `bd <args...>` in the bd workspace dir with a 30s deadline.

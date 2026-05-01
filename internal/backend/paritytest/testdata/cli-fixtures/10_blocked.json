@@ -26,7 +26,8 @@
       "id": "step_blocked",
       "description": "List blocked issues",
       "bd_args":  ["--json", "blocked"],
-      "fdb_args": ["-json", "blocked"]
+      "fdb_args": ["-json", "blocked"],
+      "expect_result_count": 1
     }
   ]
 }

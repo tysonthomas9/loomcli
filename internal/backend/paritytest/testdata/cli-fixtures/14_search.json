@@ -18,13 +18,15 @@
       "id": "search_alpha",
       "description": "Search for 'frobnicator' — should find only the alpha issue",
       "bd_args":  ["--json", "search", "frobnicator"],
-      "fdb_args": ["-json", "search", "frobnicator"]
+      "fdb_args": ["-json", "search", "frobnicator"],
+      "expect_result_count": 1
     },
     {
       "id": "search_none",
       "description": "Search for a term that matches nothing",
       "bd_args":  ["--json", "search", "xyzqwopasdnomatch"],
-      "fdb_args": ["-json", "search", "xyzqwopasdnomatch"]
+      "fdb_args": ["-json", "search", "xyzqwopasdnomatch"],
+      "expect_result_count": 0
     }
   ]
 }

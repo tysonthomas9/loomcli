@@ -23,19 +23,22 @@
       "id": "count_all",
       "description": "Total count",
       "bd_args":  ["--json", "count"],
-      "fdb_args": ["-json", "count"]
+      "fdb_args": ["-json", "count"],
+      "expect_result_count": 3
     },
     {
       "id": "count_by_type",
       "description": "Group by type",
       "bd_args":  ["--json", "count", "--by-type"],
-      "fdb_args": ["-json", "count", "-by-type"]
+      "fdb_args": ["-json", "count", "-by-type"],
+      "expect_result_count": 3
     },
     {
       "id": "count_by_status",
       "description": "Group by status",
       "bd_args":  ["--json", "count", "--by-status"],
-      "fdb_args": ["-json", "count", "-by-status"]
+      "fdb_args": ["-json", "count", "-by-status"],
+      "expect_result_count": 3
     }
   ]
 }
