@@ -955,8 +955,8 @@ func (b *FleetBackend) runBatchCreates(ctx context.Context, ops []backend.BatchO
 		Issues []batchCreateIssueReq `json:"issues"`
 	}
 	type batchCreateResp struct {
-		Issues []types.Issue `json:"issues"`
-		Count  int           `json:"count"`
+		Issues []fleetIssueWire `json:"issues"`
+		Count  int              `json:"count"`
 	}
 	req := batchCreateReq{Issues: make([]batchCreateIssueReq, 0, len(idx))}
 	for _, i := range idx {
@@ -1016,7 +1016,8 @@ func (b *FleetBackend) runBatchCreates(ctx context.Context, ops []backend.BatchO
 			continue // marshal error; skip
 		}
 		if respIdx < len(parsed.Issues) {
-			issueData := issueToData(&parsed.Issues[respIdx])
+			issue := parsed.Issues[respIdx].toIssue()
+			issueData := issueToData(&issue)
 			respIdx++
 			raw, merr := json.Marshal(issueData)
 			if merr != nil {
@@ -1165,12 +1166,31 @@ func normalizeFleetCursor(cursor string) string {
 		return fleetCursorZero
 	}
 	if strings.HasPrefix(cursor, fleetOpaqueCursorPrefix) {
+		if decoded, err := base64.RawURLEncoding.DecodeString(strings.TrimPrefix(cursor, fleetOpaqueCursorPrefix)); err == nil {
+			cursor = string(decoded)
+		}
+	}
+	if isFleetStreamID(cursor) {
 		return cursor
 	}
 	if _, err := strconv.ParseInt(cursor, 10, 64); err == nil {
-		cursor += "-0"
+		return cursor + "-0"
 	}
-	return fleetOpaqueCursorPrefix + base64.RawURLEncoding.EncodeToString([]byte(cursor))
+	return fleetCursorZero
+}
+
+func isFleetStreamID(cursor string) bool {
+	parts := strings.Split(cursor, "-")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return false
+	}
+	if _, err := strconv.ParseInt(parts[0], 10, 64); err != nil {
+		return false
+	}
+	if _, err := strconv.ParseInt(parts[1], 10, 64); err != nil {
+		return false
+	}
+	return true
 }
 
 // --- Mutation polling ---

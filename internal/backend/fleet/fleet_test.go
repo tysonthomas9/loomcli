@@ -1911,6 +1911,38 @@ func TestWaitForMutations_ServerError(t *testing.T) {
 	}
 }
 
+func TestGetMutationsAfter_PreservesRedisStreamCursor(t *testing.T) {
+	var gotSince string
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		gotSince = r.URL.Query().Get("since")
+		respondOK(w, fleetMutationsResponse{Events: []fleetMutationEvent{}, Cursor: "1700000000000-1"})
+	})
+	defer ts.Close()
+
+	if _, err := fb.GetMutationsAfter(context.Background(), "1700000000000-0"); err != nil {
+		t.Fatalf("GetMutationsAfter: %v", err)
+	}
+	if gotSince != "1700000000000-0" {
+		t.Fatalf("since = %q, want native Redis cursor", gotSince)
+	}
+}
+
+func TestWaitForMutationsAfter_IntegerCursorAddsRedisSequence(t *testing.T) {
+	var gotSince string
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		gotSince = r.URL.Query().Get("since")
+		respondOK(w, fleetMutationsResponse{Events: []fleetMutationEvent{}, Cursor: "1700000000000-1"})
+	})
+	defer ts.Close()
+
+	if _, err := fb.WaitForMutationsAfter(context.Background(), "1700000000000", 1000); err != nil {
+		t.Fatalf("WaitForMutationsAfter: %v", err)
+	}
+	if gotSince != "1700000000000-0" {
+		t.Fatalf("since = %q, want integer cursor normalized to Redis stream ID", gotSince)
+	}
+}
+
 // --- Batch tests ---
 
 func TestBatch_EmptyOpsReturnsEmpty(t *testing.T) {
@@ -1936,9 +1968,9 @@ func TestBatch_Creates_Aggregated(t *testing.T) {
 		gotPath = r.URL.Path
 		_ = json.NewDecoder(r.Body).Decode(&gotBody)
 		respondOK(w, map[string]interface{}{
-			"issues": []types.Issue{
-				{ID: "new-1", Title: "One", Status: types.StatusOpen, CreatedAt: now, UpdatedAt: now},
-				{ID: "new-2", Title: "Two", Status: types.StatusOpen, CreatedAt: now, UpdatedAt: now},
+			"issues": []map[string]interface{}{
+				{"id": "new-1", "title": "One", "status": "open", "type": "task", "priority": 2, "created_at": now, "updated_at": now},
+				{"id": "new-2", "title": "Two", "status": "open", "type": "task", "priority": 2, "created_at": now, "updated_at": now},
 			},
 			"count": 2,
 		})
@@ -1976,6 +2008,13 @@ func TestBatch_Creates_Aggregated(t *testing.T) {
 		}
 		if len(r.Data) == 0 {
 			t.Errorf("results[%d].Data is empty", i)
+		}
+		var data backend.IssueData
+		if err := json.Unmarshal(r.Data, &data); err != nil {
+			t.Fatalf("results[%d].Data unmarshal: %v", i, err)
+		}
+		if data.IssueType != "task" {
+			t.Errorf("results[%d].Data.issue_type = %q, want task", i, data.IssueType)
 		}
 	}
 }
