@@ -15,14 +15,14 @@ import (
 // (external auth mode only).
 type Module struct {
 	hub               *realtime.Hub
-	getMutationsSince func(wsID string, since int64) []rpc.MutationEvent
+	getMutationsSince func(wsID string, since string) []rpc.MutationEvent
 	workspaceFromCtx  func(context.Context) string
 	sseTokens         *realtime.TokenStore // may be nil — token route skipped
 }
 
 // NewModule returns a Module. sseTokens may be nil — the token
 // exchange route will simply not be registered.
-func NewModule(hub *realtime.Hub, getMutationsSince func(string, int64) []rpc.MutationEvent, workspaceFromCtx func(context.Context) string, sseTokens *realtime.TokenStore) *Module {
+func NewModule(hub *realtime.Hub, getMutationsSince func(string, string) []rpc.MutationEvent, workspaceFromCtx func(context.Context) string, sseTokens *realtime.TokenStore) *Module {
 	return &Module{
 		hub:               hub,
 		getMutationsSince: getMutationsSince,

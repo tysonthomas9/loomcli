@@ -16,7 +16,7 @@ import (
 // HandlerConfig configures the SSE Handler.
 type HandlerConfig struct {
 	Hub               *Hub
-	GetMutationsSince func(wsID string, since int64) []rpc.MutationEvent
+	GetMutationsSince func(wsID string, since string) []rpc.MutationEvent
 	WorkspaceFromCtx  func(context.Context) string
 	TokenStore        *TokenStore // nil = open mode (no auth required)
 }
@@ -24,7 +24,7 @@ type HandlerConfig struct {
 // Handler is an http.Handler for the SSE endpoint with configurable heartbeat.
 type Handler struct {
 	hub               *Hub
-	getMutationsSince func(wsID string, since int64) []rpc.MutationEvent
+	getMutationsSince func(wsID string, since string) []rpc.MutationEvent
 	heartbeatInterval time.Duration
 	tokenStore        *TokenStore
 	workspaceFromCtx  func(context.Context) string
@@ -110,8 +110,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.streamLoop(sw, client, r.Context())
 }
 
-func (h *Handler) sendCatchUp(sw *Writer, since int64, workspaceID string, sourceRepos []string) error {
-	if since <= 0 || h.getMutationsSince == nil || workspaceID == "" {
+func (h *Handler) sendCatchUp(sw *Writer, since string, workspaceID string, sourceRepos []string) error {
+	if since == "" || h.getMutationsSince == nil || workspaceID == "" {
 		return nil
 	}
 	for _, m := range h.getMutationsSince(workspaceID, since) {
@@ -162,18 +162,30 @@ func writeSSEEvent(sw *Writer, mutation *MutationPayload) error {
 		slog.Error("SSE marshal error", "err", err)
 		return nil // marshal error is not a write error -- skip this event
 	}
-	return sw.WriteEvent(eventIDForMutation(mutation), "mutation", string(data))
+	return sw.WriteEventID(eventIDForMutation(mutation), "mutation", string(data))
 }
 
-func eventIDForMutation(mutation *MutationPayload) int64 {
+func eventIDForMutation(mutation *MutationPayload) string {
+	if mutation != nil && mutation.Cursor != "" {
+		return mutation.Cursor
+	}
 	if mutation == nil || mutation.Timestamp == "" {
-		return NextEventID()
+		return fmt.Sprintf("%d", NextEventID())
 	}
 	ts, err := time.Parse(time.RFC3339Nano, mutation.Timestamp)
 	if err != nil {
-		return NextEventID()
+		return fmt.Sprintf("%d", NextEventID())
 	}
-	return ts.UnixMilli()
+	tsMs := ts.UnixMilli()
+	for {
+		current := eventIDCounter.Load()
+		if tsMs <= current {
+			return fmt.Sprintf("%d", NextEventID())
+		}
+		if eventIDCounter.CompareAndSwap(current, tsMs) {
+			return fmt.Sprintf("%d", tsMs)
+		}
+	}
 }
 
 // validateAuth checks the opaque token from the query parameter when auth
@@ -201,6 +213,7 @@ func (h *Handler) validateAuth(w http.ResponseWriter, r *http.Request) bool {
 // RPCMutationToPayload converts an RPC mutation event to a payload.
 func RPCMutationToPayload(m rpc.MutationEvent) *MutationPayload {
 	return &MutationPayload{
+		Cursor:     m.Cursor,
 		Type:       m.Type,
 		IssueID:    m.IssueID,
 		Title:      m.Title,

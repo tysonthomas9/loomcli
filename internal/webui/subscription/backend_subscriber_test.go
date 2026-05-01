@@ -239,7 +239,7 @@ func TestBackendMutationSubscriber_Broadcast(t *testing.T) {
 	sub, fb, hub := newTestSubscriberEnv(t)
 
 	// Register an SSE client to receive broadcasts.
-	client := realtime.NewClient(1, 64, 0, nil, "ws-test")
+	client := realtime.NewClient(1, 64, "0", nil, "ws-test")
 	hub.RegisterClient(client)
 	time.Sleep(20 * time.Millisecond) // let the hub install the client
 
@@ -410,7 +410,7 @@ func TestBackendMutationSubscriber_GetMutationDataSince_HappyPath(t *testing.T) 
 		}, nil
 	}
 
-	got := sub.GetMutationDataSince(100)
+	got := sub.GetMutationDataSince("100")
 	if len(got) != 2 {
 		t.Fatalf("got %d, want 2", len(got))
 	}
@@ -430,7 +430,7 @@ func TestBackendMutationSubscriber_GetMutationDataSince_BackendError(t *testing.
 		return nil, errors.New("simulated network failure")
 	}
 
-	got := sub.GetMutationDataSince(0)
+	got := sub.GetMutationDataSince("0")
 	if got != nil {
 		t.Errorf("expected nil on backend error, got %v", got)
 	}
@@ -448,7 +448,7 @@ func TestBackendMutationSubscriber_GetMutationDataSince_NilBackend(t *testing.T)
 	sub := NewBackendMutationSubscriber(nil, hub, "ws-x")
 	t.Cleanup(sub.Stop)
 
-	if got := sub.GetMutationDataSince(0); got != nil {
+	if got := sub.GetMutationDataSince("0"); got != nil {
 		t.Errorf("expected nil with nil backend, got %v", got)
 	}
 }

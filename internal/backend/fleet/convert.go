@@ -406,6 +406,7 @@ func actionToMutationType(action, entityType string) string {
 // (StepCount, Assignee for non-assign actions) remain zero.
 func fleetEventToMutationData(e *fleetMutationEvent) backend.MutationData {
 	md := backend.MutationData{
+		Cursor:    e.ID,
 		Type:      actionToMutationType(e.Action, e.EntityType),
 		IssueID:   e.EntityID,
 		Actor:     e.Actor,

@@ -46,8 +46,9 @@ type BackendMutationSubscriber struct {
 
 	wg sync.WaitGroup
 
-	mu        sync.RWMutex
-	lastSince int64
+	mu         sync.RWMutex
+	lastSince  int64
+	lastCursor string
 
 	startOnce sync.Once
 	stopOnce  sync.Once
@@ -102,13 +103,21 @@ func (s *BackendMutationSubscriber) Stop() {
 // daemon-path sibling has its own *DaemonSubscriber.GetMutationsSince
 // returning []rpc.MutationEvent, which is depended on by older tests; the
 // two cannot share a name).
-func (s *BackendMutationSubscriber) GetMutationDataSince(since int64) []backend.MutationData {
+func (s *BackendMutationSubscriber) GetMutationDataSince(since string) []backend.MutationData {
 	if s.backend == nil {
 		return nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), backendCatchUpTimeout)
 	defer cancel()
-	muts, err := s.backend.GetMutations(ctx, since)
+	var (
+		muts []backend.MutationData
+		err  error
+	)
+	if cursorBackend, ok := s.backend.(backend.CursorMutationBackend); ok {
+		muts, err = cursorBackend.GetMutationsAfter(ctx, since)
+	} else {
+		muts, err = s.backend.GetMutations(ctx, parseCursorMillis(since))
+	}
 	if err != nil {
 		slog.Error("backend GetMutations error", "workspace", s.workspaceID, "err", err)
 		return nil
@@ -131,7 +140,11 @@ func (s *BackendMutationSubscriber) loop() {
 
 		s.mu.RLock()
 		since := s.lastSince
+		cursor := s.lastCursor
 		s.mu.RUnlock()
+		if cursor == "" {
+			cursor = "0"
+		}
 
 		timeoutMs := int64(backendWaitTimeout / time.Millisecond)
 		// Wrap the long-poll in a per-call deadline that exceeds the
@@ -141,7 +154,13 @@ func (s *BackendMutationSubscriber) loop() {
 		// timeout — eliminating the 30s vs 30s race that surfaced as
 		// `context canceled` log spam on every empty long-poll.
 		reqCtx, reqCancel := context.WithTimeout(s.ctx, backendWaitTimeout+10*time.Second)
-		muts, err := s.backend.WaitForMutations(reqCtx, since, timeoutMs)
+		var muts []backend.MutationData
+		var err error
+		if cursorBackend, ok := s.backend.(backend.CursorMutationBackend); ok {
+			muts, err = cursorBackend.WaitForMutationsAfter(reqCtx, cursor, timeoutMs)
+		} else {
+			muts, err = s.backend.WaitForMutations(reqCtx, since, timeoutMs)
+		}
 		reqCancel()
 		if err != nil {
 			// Cancellation is the expected exit path on Stop(); don't
@@ -170,16 +189,23 @@ func (s *BackendMutationSubscriber) loop() {
 		// the first broadcast. A concurrent GetMutationsSince(N) would
 		// otherwise re-fetch events still in flight.
 		var maxMs int64
+		lastCursor := ""
 		for _, m := range muts {
 			ms := m.Timestamp.UnixMilli()
 			if ms > maxMs {
 				maxMs = ms
 			}
+			if m.Cursor != "" {
+				lastCursor = m.Cursor
+			}
 		}
-		if maxMs > 0 {
+		if maxMs > 0 || lastCursor != "" {
 			s.mu.Lock()
 			if maxMs > s.lastSince {
 				s.lastSince = maxMs
+			}
+			if lastCursor != "" {
+				s.lastCursor = lastCursor
 			}
 			s.mu.Unlock()
 		}

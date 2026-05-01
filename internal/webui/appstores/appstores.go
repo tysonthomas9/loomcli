@@ -36,7 +36,7 @@ type MultiWorkspaceSubscriber = subscription.MultiWorkspaceSubscriber
 type SessionRecord = sessionhistory.SessionRecord
 
 // MutationsSinceFn is the type for the getMutationsSince callback.
-type MutationsSinceFn = func(wsID string, since int64) []rpc.MutationEvent
+type MutationsSinceFn = func(wsID string, since string) []rpc.MutationEvent
 
 // Hub is a type alias for realtime.Hub.
 type Hub = realtime.Hub
@@ -62,7 +62,7 @@ func NewMultiSub(hub *realtime.Hub, multiPool *daemon.MultiPool, logger *slog.Lo
 }
 
 // GetMutationsSinceFn returns the mutations-since callback from the subscriber.
-func GetMutationsSinceFn(sub *MultiWorkspaceSubscriber) func(wsID string, since int64) []rpc.MutationEvent {
+func GetMutationsSinceFn(sub *MultiWorkspaceSubscriber) func(wsID string, since string) []rpc.MutationEvent {
 	if sub == nil {
 		return nil
 	}
@@ -113,6 +113,6 @@ func ValidateIssueID(issueID string) error {
 type SubscriptionModule = subscription.Module
 
 // NewSubscriptionModule creates a new SSE subscription module.
-func NewSubscriptionModule(hub *realtime.Hub, getMutationsSince func(string, int64) []rpc.MutationEvent, wsFromCtx func(context.Context) string, sseTokens *realtime.TokenStore) *SubscriptionModule {
+func NewSubscriptionModule(hub *realtime.Hub, getMutationsSince func(string, string) []rpc.MutationEvent, wsFromCtx func(context.Context) string, sseTokens *realtime.TokenStore) *SubscriptionModule {
 	return subscription.NewModule(hub, getMutationsSince, wsFromCtx, sseTokens)
 }

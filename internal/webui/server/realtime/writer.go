@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 )
 
 // Writer centralizes SSE wire-format concerns.
@@ -30,7 +31,13 @@ func (sw *Writer) WriteRetry(ms int) error {
 
 // WriteEvent writes a named event with data to the SSE stream.
 func (sw *Writer) WriteEvent(id int64, event, data string) error {
-	_, err := io.WriteString(sw.W, fmt.Sprintf("id: %d\nevent: %s\ndata: %s\n\n", id, event, data))
+	return sw.WriteEventID(strconv.FormatInt(id, 10), event, data)
+}
+
+// WriteEventID writes a named event with a string event ID. SSE event IDs are
+// opaque strings, which lets fleet-db cursors round-trip through Last-Event-ID.
+func (sw *Writer) WriteEventID(id, event, data string) error {
+	_, err := io.WriteString(sw.W, fmt.Sprintf("id: %s\nevent: %s\ndata: %s\n\n", id, event, data))
 	sw.Flusher.Flush()
 	return err
 }

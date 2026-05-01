@@ -301,7 +301,7 @@ func TestDaemonSubscriber_BroadcastsToHub(t *testing.T) {
 	defer hub.Stop()
 
 	// Register a client to receive broadcasts
-	client := realtime.NewClient(1, 64, 0, nil, "test-ws")
+	client := realtime.NewClient(1, 64, "0", nil, "test-ws")
 	hub.RegisterClient(client)
 	time.Sleep(50 * time.Millisecond)
 
@@ -337,7 +337,7 @@ func TestDaemonSubscriber_LastSinceUpdatedBeforeBroadcast(t *testing.T) {
 	subscriber.workspaceID = "test-ws"
 
 	// Register a client to observe broadcasts
-	client := realtime.NewClient(1, 64, 0, nil, "test-ws")
+	client := realtime.NewClient(1, 64, "0", nil, "test-ws")
 	hub.RegisterClient(client)
 	time.Sleep(50 * time.Millisecond)
 
@@ -556,7 +556,7 @@ func TestDaemonSubscriber_PollDBChanges_CountChanged(t *testing.T) {
 	defer hub.Stop()
 
 	// Register a client to capture broadcasts
-	client := realtime.NewClient(1, 64, 0, nil, "test-ws")
+	client := realtime.NewClient(1, 64, "0", nil, "test-ws")
 	hub.RegisterClient(client)
 	time.Sleep(50 * time.Millisecond) // Wait for registration
 
@@ -618,7 +618,7 @@ func TestDaemonSubscriber_PollDBChanges_UpdateDetected(t *testing.T) {
 	go hub.Run()
 	defer hub.Stop()
 
-	client := realtime.NewClient(1, 64, 0, nil, "test-ws")
+	client := realtime.NewClient(1, 64, "0", nil, "test-ws")
 	hub.RegisterClient(client)
 	time.Sleep(50 * time.Millisecond)
 
@@ -668,7 +668,7 @@ func TestDaemonSubscriber_PollDBChanges_NoChange(t *testing.T) {
 	go hub.Run()
 	defer hub.Stop()
 
-	client := realtime.NewClient(1, 64, 0, nil, "")
+	client := realtime.NewClient(1, 64, "0", nil, "")
 	hub.RegisterClient(client)
 	time.Sleep(50 * time.Millisecond)
 
@@ -711,7 +711,7 @@ func TestDaemonSubscriber_PollDBChanges_SkipsFirstPoll(t *testing.T) {
 	go hub.Run()
 	defer hub.Stop()
 
-	client := realtime.NewClient(1, 64, 0, nil, "")
+	client := realtime.NewClient(1, 64, "0", nil, "")
 	hub.RegisterClient(client)
 	time.Sleep(50 * time.Millisecond)
 
@@ -989,7 +989,7 @@ func TestDaemonSubscriber_WaitForMutations_Success(t *testing.T) {
 	go hub.Run()
 	defer hub.Stop()
 
-	client := realtime.NewClient(1, 64, 0, nil, "test-ws")
+	client := realtime.NewClient(1, 64, "0", nil, "test-ws")
 	hub.RegisterClient(client)
 	time.Sleep(50 * time.Millisecond)
 
@@ -1046,7 +1046,7 @@ func TestDaemonSubscriber_PollMutations_Success(t *testing.T) {
 	go hub.Run()
 	defer hub.Stop()
 
-	client := realtime.NewClient(1, 64, 0, nil, "test-ws")
+	client := realtime.NewClient(1, 64, "0", nil, "test-ws")
 	hub.RegisterClient(client)
 	time.Sleep(50 * time.Millisecond)
 
@@ -1189,7 +1189,7 @@ func TestDaemonSubscriber_ExternalChangeLoop_IntegrationDetectsChange(t *testing
 	defer hub.Stop()
 
 	// Register an SSE client to capture broadcasts
-	client := realtime.NewClient(1, 64, 0, nil, "test-ws")
+	client := realtime.NewClient(1, 64, "0", nil, "test-ws")
 	hub.RegisterClient(client)
 	time.Sleep(50 * time.Millisecond)
 
@@ -1300,7 +1300,7 @@ func TestDaemonSubscriber_SubscriptionLoop_FallbackTransition(t *testing.T) {
 	go hub.Run()
 	defer hub.Stop()
 
-	client := realtime.NewClient(1, 64, 0, nil, "test-ws")
+	client := realtime.NewClient(1, 64, "0", nil, "test-ws")
 	hub.RegisterClient(client)
 	time.Sleep(50 * time.Millisecond)
 
@@ -1388,7 +1388,7 @@ func TestDaemonSubscriber_ConcurrentLoops_NoRace(t *testing.T) {
 	defer hub.Stop()
 
 	// Register a client to consume broadcasts (prevent channel backpressure)
-	client := realtime.NewClient(1, 512, 0, nil, "test-ws")
+	client := realtime.NewClient(1, 512, "0", nil, "test-ws")
 	hub.RegisterClient(client)
 	time.Sleep(50 * time.Millisecond)
 
@@ -1428,7 +1428,7 @@ func TestDaemonSubscriber_PollDBChanges_CountRPCNotSuccess(t *testing.T) {
 	go hub.Run()
 	defer hub.Stop()
 
-	client := realtime.NewClient(1, 64, 0, nil, "")
+	client := realtime.NewClient(1, 64, "0", nil, "")
 	hub.RegisterClient(client)
 	time.Sleep(50 * time.Millisecond)
 
@@ -1467,7 +1467,7 @@ func TestDaemonSubscriber_PollDBChanges_InvalidCountJSON(t *testing.T) {
 	go hub.Run()
 	defer hub.Stop()
 
-	client := realtime.NewClient(1, 64, 0, nil, "")
+	client := realtime.NewClient(1, 64, "0", nil, "")
 	hub.RegisterClient(client)
 	time.Sleep(50 * time.Millisecond)
 
@@ -1512,7 +1512,7 @@ func TestDaemonSubscriber_PollDBChanges_UpdatedAfterCallFails(t *testing.T) {
 	go hub.Run()
 	defer hub.Stop()
 
-	client := realtime.NewClient(1, 64, 0, nil, "")
+	client := realtime.NewClient(1, 64, "0", nil, "")
 	hub.RegisterClient(client)
 	time.Sleep(50 * time.Millisecond)
 
@@ -1556,7 +1556,7 @@ func TestDaemonSubscriber_PollDBChanges_UpdatedAfterNotSuccess(t *testing.T) {
 	go hub.Run()
 	defer hub.Stop()
 
-	client := realtime.NewClient(1, 64, 0, nil, "")
+	client := realtime.NewClient(1, 64, "0", nil, "")
 	hub.RegisterClient(client)
 	time.Sleep(50 * time.Millisecond)
 
@@ -1616,7 +1616,7 @@ func TestDaemonSubscriber_PollDBChanges_PerRepoRefresh(t *testing.T) {
 	defer hub.Stop()
 
 	// Register a filtered client watching repo-a
-	client := realtime.NewClient(1, 64, 0, []string{"repo-a"}, "test-ws")
+	client := realtime.NewClient(1, 64, "0", []string{"repo-a"}, "test-ws")
 	hub.RegisterClient(client)
 	time.Sleep(50 * time.Millisecond)
 
@@ -1686,9 +1686,9 @@ func TestDaemonSubscriber_PollDBChanges_FilteredClientSkipsOtherRepo(t *testing.
 	defer hub.Stop()
 
 	// Filtered client watching repo-a
-	filteredClient := realtime.NewClient(1, 64, 0, []string{"repo-a"}, "test-ws")
+	filteredClient := realtime.NewClient(1, 64, "0", []string{"repo-a"}, "test-ws")
 	// Unfiltered client to receive the global fallback
-	unfilteredClient := realtime.NewClient(2, 64, 0, nil, "test-ws")
+	unfilteredClient := realtime.NewClient(2, 64, "0", nil, "test-ws")
 	hub.RegisterClient(filteredClient)
 	hub.RegisterClient(unfilteredClient)
 	time.Sleep(50 * time.Millisecond)
@@ -1760,7 +1760,7 @@ func TestDaemonSubscriber_PollDBChanges_NoFilteredClients_GlobalRefresh(t *testi
 	defer hub.Stop()
 
 	// Register an unfiltered client (no sourceRepos)
-	client := realtime.NewClient(1, 64, 0, nil, "test-ws")
+	client := realtime.NewClient(1, 64, "0", nil, "test-ws")
 	hub.RegisterClient(client)
 	time.Sleep(50 * time.Millisecond)
 
@@ -1833,7 +1833,7 @@ func TestDaemonSubscriber_PollDBChanges_PerRepoCountFailure_FallbackGlobal(t *te
 	defer hub.Stop()
 
 	// Register a filtered client to trigger per-repo path
-	client := realtime.NewClient(1, 64, 0, []string{"repo-a"}, "test-ws")
+	client := realtime.NewClient(1, 64, "0", []string{"repo-a"}, "test-ws")
 	hub.RegisterClient(client)
 	time.Sleep(50 * time.Millisecond)
 
@@ -1899,9 +1899,9 @@ func TestDaemonSubscriber_PollDBChanges_UnwatchedRepoChange_GlobalRefresh(t *tes
 	defer hub.Stop()
 
 	// Filtered client watching repo-a
-	filteredClient := realtime.NewClient(1, 64, 0, []string{"repo-a"}, "test-ws")
+	filteredClient := realtime.NewClient(1, 64, "0", []string{"repo-a"}, "test-ws")
 	// Unfiltered client to catch global refresh
-	unfilteredClient := realtime.NewClient(2, 64, 0, nil, "test-ws")
+	unfilteredClient := realtime.NewClient(2, 64, "0", nil, "test-ws")
 	hub.RegisterClient(filteredClient)
 	hub.RegisterClient(unfilteredClient)
 	time.Sleep(50 * time.Millisecond)

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"strconv"
 	"sync"
 	"time"
 
@@ -34,7 +35,7 @@ const idleDeactivationTimeout = 60 * time.Second
 type workspaceSubscriber interface {
 	Start()
 	Stop()
-	GetMutationDataSince(since int64) []backend.MutationData
+	GetMutationDataSince(since string) []backend.MutationData
 }
 
 // subscriberEntry tracks a subscriber and when it last had SSE clients.
@@ -191,7 +192,7 @@ func (m *MultiWorkspaceSubscriber) WorkspaceIDs() []string {
 // Beads subscribers take the direct shortcut (rpc.MutationEvent → return);
 // fleet subscribers project from backend.MutationData via the workspaceSubscriber
 // interface. The SSE handler's signature is []rpc.MutationEvent regardless.
-func (m *MultiWorkspaceSubscriber) GetMutationsSince(since int64) []rpc.MutationEvent {
+func (m *MultiWorkspaceSubscriber) GetMutationsSince(since string) []rpc.MutationEvent {
 	m.mu.RLock()
 	entries := make(map[string]*subscriberEntry, len(m.subscribers))
 	for k, v := range m.subscribers {
@@ -202,7 +203,7 @@ func (m *MultiWorkspaceSubscriber) GetMutationsSince(since int64) []rpc.Mutation
 	var all []rpc.MutationEvent
 	for _, entry := range entries {
 		if ds, ok := entry.sub.(*DaemonSubscriber); ok {
-			all = append(all, ds.GetMutationsSince(since)...)
+			all = append(all, ds.GetMutationsSince(parseCursorMillis(since))...)
 			continue
 		}
 		muts := entry.sub.GetMutationDataSince(since)
@@ -267,7 +268,7 @@ func (m *MultiWorkspaceSubscriber) idleDeactivationLoop() {
 // Beads path returns rpc.MutationEvent directly; fleet path projects from
 // backend.MutationData. Avoids a wasteful rpc → backend → rpc round-trip
 // on every beads-side reconnect.
-func (m *MultiWorkspaceSubscriber) GetMutationsSinceForWorkspace(wsID string, since int64) []rpc.MutationEvent {
+func (m *MultiWorkspaceSubscriber) GetMutationsSinceForWorkspace(wsID string, since string) []rpc.MutationEvent {
 	m.mu.RLock()
 	entry, ok := m.subscribers[wsID]
 	m.mu.RUnlock()
@@ -275,7 +276,7 @@ func (m *MultiWorkspaceSubscriber) GetMutationsSinceForWorkspace(wsID string, si
 		return nil
 	}
 	if ds, ok := entry.sub.(*DaemonSubscriber); ok {
-		return ds.GetMutationsSince(since)
+		return ds.GetMutationsSince(parseCursorMillis(since))
 	}
 	muts := entry.sub.GetMutationDataSince(since)
 	if len(muts) == 0 {
@@ -286,4 +287,12 @@ func (m *MultiWorkspaceSubscriber) GetMutationsSinceForWorkspace(wsID string, si
 		out[i] = realtime.BackendMutationToRPCEvent(m)
 	}
 	return out
+}
+
+func parseCursorMillis(cursor string) int64 {
+	if cursor == "" {
+		return 0
+	}
+	n, _ := strconv.ParseInt(cursor, 10, 64)
+	return n
 }

@@ -191,7 +191,7 @@ func parseMutationPayload(data string) (*realtime.MutationPayload, error) {
 // newLiveSSEServer creates an httptest.NewServer wired to realtime.NewHandler with the
 // given hub and getMutationsSince callback. The caller must call server.Close()
 // and hub.Stop() when done (use t.Cleanup).
-func newLiveSSEServer(t *testing.T, hub *realtime.Hub, getMutationsSince func(wsID string, since int64) []rpc.MutationEvent) *httptest.Server {
+func newLiveSSEServer(t *testing.T, hub *realtime.Hub, getMutationsSince func(wsID string, since string) []rpc.MutationEvent) *httptest.Server {
 	t.Helper()
 
 	handler := realtime.NewHandler(realtime.HandlerConfig{Hub: hub, GetMutationsSince: getMutationsSince, WorkspaceFromCtx: middleware.WorkspaceFromContext})
@@ -458,7 +458,7 @@ func TestSSELive_CatchUpOnReconnect(t *testing.T) {
 		},
 	}
 
-	getMutationsSince := func(wsID string, since int64) []rpc.MutationEvent {
+	getMutationsSince := func(wsID string, since string) []rpc.MutationEvent {
 		return catchUpEvents
 	}
 
@@ -511,8 +511,8 @@ func TestSSELive_LastEventIDHeader(t *testing.T) {
 	go hub.Run()
 	t.Cleanup(hub.Stop)
 
-	var capturedSince int64
-	getMutationsSince := func(wsID string, since int64) []rpc.MutationEvent {
+	var capturedSince string
+	getMutationsSince := func(wsID string, since string) []rpc.MutationEvent {
 		capturedSince = since
 		return nil
 	}
@@ -530,8 +530,8 @@ func TestSSELive_LastEventIDHeader(t *testing.T) {
 		t.Fatalf("failed to read connected event: %v", err)
 	}
 
-	if capturedSince != 9876543210 {
-		t.Errorf("expected getMutationsSince called with 9876543210, got %d", capturedSince)
+	if capturedSince != "9876543210" {
+		t.Errorf("expected getMutationsSince called with 9876543210, got %s", capturedSince)
 	}
 }
 

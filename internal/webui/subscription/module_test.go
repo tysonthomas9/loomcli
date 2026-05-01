@@ -20,7 +20,7 @@ func TestModule_RegisterRoutes(t *testing.T) {
 	}
 	defer tokens.Stop()
 
-	getMutations := func(_ string, _ int64) []rpc.MutationEvent { return nil }
+	getMutations := func(_ string, _ string) []rpc.MutationEvent { return nil }
 	wsFromCtx := func(_ context.Context) string { return "test-ws" }
 
 	mod := NewModule(hub, getMutations, wsFromCtx, tokens)
@@ -54,7 +54,7 @@ func TestModule_ConditionalRoutes(t *testing.T) {
 	hub := realtime.NewHub()
 	defer hub.Stop()
 
-	getMutations := func(_ string, _ int64) []rpc.MutationEvent { return nil }
+	getMutations := func(_ string, _ string) []rpc.MutationEvent { return nil }
 	wsFromCtx := func(_ context.Context) string { return "test-ws" }
 
 	t.Run("nil sseTokens omits token route", func(t *testing.T) {
@@ -95,7 +95,7 @@ func TestModule_WrongMethod_Returns405(t *testing.T) {
 	}
 	defer tokens.Stop()
 
-	getMutations := func(_ string, _ int64) []rpc.MutationEvent { return nil }
+	getMutations := func(_ string, _ string) []rpc.MutationEvent { return nil }
 	wsFromCtx := func(_ context.Context) string { return "test-ws" }
 
 	mod := NewModule(hub, getMutations, wsFromCtx, tokens)

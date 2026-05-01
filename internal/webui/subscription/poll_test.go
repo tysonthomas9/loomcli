@@ -148,7 +148,7 @@ func TestEmitGranularMutations_NewIssue(t *testing.T) {
 	go hub.Run()
 	defer hub.Stop()
 
-	client := realtime.NewClient(1, 64, 0, nil, "test-ws")
+	client := realtime.NewClient(1, 64, "0", nil, "test-ws")
 	hub.RegisterClient(client)
 	time.Sleep(50 * time.Millisecond)
 
@@ -207,7 +207,7 @@ func TestEmitGranularMutations_StatusChange(t *testing.T) {
 	go hub.Run()
 	defer hub.Stop()
 
-	client := realtime.NewClient(1, 64, 0, nil, "test-ws")
+	client := realtime.NewClient(1, 64, "0", nil, "test-ws")
 	hub.RegisterClient(client)
 	time.Sleep(50 * time.Millisecond)
 
@@ -258,7 +258,7 @@ func TestEmitGranularMutations_UpdateNonStatus(t *testing.T) {
 	go hub.Run()
 	defer hub.Stop()
 
-	client := realtime.NewClient(1, 64, 0, nil, "test-ws")
+	client := realtime.NewClient(1, 64, "0", nil, "test-ws")
 	hub.RegisterClient(client)
 	time.Sleep(50 * time.Millisecond)
 
@@ -303,7 +303,7 @@ func TestEmitGranularMutations_SkipsEmptyID(t *testing.T) {
 	go hub.Run()
 	defer hub.Stop()
 
-	client := realtime.NewClient(1, 64, 0, nil, "test-ws")
+	client := realtime.NewClient(1, 64, "0", nil, "test-ws")
 	hub.RegisterClient(client)
 	time.Sleep(50 * time.Millisecond)
 
@@ -370,7 +370,7 @@ func TestEmitGranularMutations_MixedMutationTypes(t *testing.T) {
 	go hub.Run()
 	defer hub.Stop()
 
-	client := realtime.NewClient(1, 64, 0, nil, "test-ws")
+	client := realtime.NewClient(1, 64, "0", nil, "test-ws")
 	hub.RegisterClient(client)
 	time.Sleep(50 * time.Millisecond)
 
@@ -426,7 +426,7 @@ func TestBroadcastRefresh(t *testing.T) {
 	go hub.Run()
 	defer hub.Stop()
 
-	client := realtime.NewClient(1, 64, 0, nil, "test-ws")
+	client := realtime.NewClient(1, 64, "0", nil, "test-ws")
 	hub.RegisterClient(client)
 	time.Sleep(50 * time.Millisecond)
 
@@ -523,7 +523,7 @@ func TestPollDBChanges_GranularPath_EmitsIndividualMutations(t *testing.T) {
 	go hub.Run()
 	defer hub.Stop()
 
-	client := realtime.NewClient(1, 64, 0, nil, "test-ws")
+	client := realtime.NewClient(1, 64, "0", nil, "test-ws")
 	hub.RegisterClient(client)
 	time.Sleep(50 * time.Millisecond)
 
@@ -616,7 +616,7 @@ func TestPollDBChanges_FallbackOnDeletion(t *testing.T) {
 	go hub.Run()
 	defer hub.Stop()
 
-	client := realtime.NewClient(1, 64, 0, nil, "test-ws")
+	client := realtime.NewClient(1, 64, "0", nil, "test-ws")
 	hub.RegisterClient(client)
 	time.Sleep(50 * time.Millisecond)
 
@@ -720,7 +720,7 @@ func TestPollDBChanges_FallbackOnThresholdExceeded(t *testing.T) {
 	go hub.Run()
 	defer hub.Stop()
 
-	client := realtime.NewClient(1, 256, 0, nil, "test-ws")
+	client := realtime.NewClient(1, 256, "0", nil, "test-ws")
 	hub.RegisterClient(client)
 	time.Sleep(50 * time.Millisecond)
 
@@ -783,7 +783,7 @@ func TestPollDBChanges_FallbackWhenListFails(t *testing.T) {
 	go hub.Run()
 	defer hub.Stop()
 
-	client := realtime.NewClient(1, 64, 0, nil, "test-ws")
+	client := realtime.NewClient(1, 64, "0", nil, "test-ws")
 	hub.RegisterClient(client)
 	time.Sleep(50 * time.Millisecond)
 
@@ -853,7 +853,7 @@ func TestPollDBChanges_GranularPath_StatusChange(t *testing.T) {
 	go hub.Run()
 	defer hub.Stop()
 
-	client := realtime.NewClient(1, 64, 0, nil, "test-ws")
+	client := realtime.NewClient(1, 64, "0", nil, "test-ws")
 	hub.RegisterClient(client)
 	time.Sleep(50 * time.Millisecond)
 
@@ -923,7 +923,7 @@ func TestPollDBChanges_CountIncrease_GranularPath(t *testing.T) {
 	go hub.Run()
 	defer hub.Stop()
 
-	client := realtime.NewClient(1, 64, 0, nil, "test-ws")
+	client := realtime.NewClient(1, 64, "0", nil, "test-ws")
 	hub.RegisterClient(client)
 	time.Sleep(50 * time.Millisecond)
 

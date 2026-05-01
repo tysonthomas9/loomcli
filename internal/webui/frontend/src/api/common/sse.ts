@@ -72,7 +72,7 @@ export class BeadsSSEClient {
   private eventSource: EventSource | null = null;
   private state: ConnectionState = "disconnected";
   private reconnectAttempts = 0;
-  private lastEventId: number | undefined;
+  private lastEventId: string | undefined;
   private manualDisconnect = false;
   private currentSourceRepos?: string[] | undefined;
   private workspaceId: string;
@@ -104,10 +104,10 @@ export class BeadsSSEClient {
 
   /**
    * Connect to the SSE endpoint.
-   * @param since Optional timestamp (ms) to receive events since that time
+   * @param since Optional cursor to receive events after
    * @param sourceRepos Optional repo filter for server-side event filtering
    */
-  async connect(since?: number, sourceRepos?: string[]): Promise<void> {
+  async connect(since?: string | number, sourceRepos?: string[]): Promise<void> {
     if (this.destroyed) return;
 
     // Always update stored sourceRepos even if we bail early,
@@ -228,10 +228,10 @@ export class BeadsSSEClient {
 
   /**
    * Get the last event ID received from the server.
-   * This is the timestamp (in ms) used for catch-up on reconnection.
+   * This is the durable cursor used for catch-up on reconnection.
    * Returns undefined if no events have been received yet.
    */
-  getLastEventId(): number | undefined {
+  getLastEventId(): string | undefined {
     return this.lastEventId;
   }
 
@@ -369,15 +369,10 @@ export class BeadsSSEClient {
       return;
     }
 
-    // Track last event ID for reconnection catch-up
-    // The server sends `id: <unix_ms>` which is exposed via event.lastEventId
+    // Track the server-provided event ID for reconnection catch-up. Fleet-db
+    // emits opaque durable cursors here, so preserve the value as-is.
     if (event.lastEventId) {
-      const eventId = parseInt(event.lastEventId, 10);
-      if (!isNaN(eventId) && eventId > 0) {
-        if (this.lastEventId === undefined || eventId > this.lastEventId) {
-          this.lastEventId = eventId;
-        }
-      }
+      this.lastEventId = event.lastEventId;
     }
 
     this.onMutation?.(mutation);
@@ -387,11 +382,11 @@ export class BeadsSSEClient {
 /**
  * Get the SSE URL for the events endpoint.
  * @param workspaceId Workspace UUID for path-based routing
- * @param since Optional timestamp (ms) for catch-up events
+ * @param since Optional cursor for catch-up events
  */
 export function getSSEUrl(
   workspaceId: string,
-  since?: number,
+  since?: string | number,
   sourceRepos?: string[],
   opaqueToken?: string,
 ): string {

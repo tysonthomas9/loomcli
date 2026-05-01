@@ -524,7 +524,7 @@ describe("BeadsSSEClient", () => {
       MockEventSource.lastInstance?.simulateMutation(mutation);
 
       const expectedTime = Date.parse("2025-01-23T12:00:00Z");
-      expect(client.getLastEventId()).toBe(expectedTime);
+      expect(client.getLastEventId()).toBe(String(expectedTime));
     });
 
     it("tracks last event ID from event.lastEventId", async () => {
@@ -607,7 +607,7 @@ describe("BeadsSSEClient", () => {
       );
     });
 
-    it("ignores lastEventId of 0", async () => {
+    it("stores lastEventId of 0", async () => {
       const client = new BeadsSSEClient("test-ws-id");
 
       await client.connect();
@@ -622,10 +622,10 @@ describe("BeadsSSEClient", () => {
 
       MockEventSource.lastInstance?.simulateMutation(mutation, "0");
 
-      expect(client.getLastEventId()).toBeUndefined();
+      expect(client.getLastEventId()).toBe("0");
     });
 
-    it("ignores negative lastEventId", async () => {
+    it("stores negative lastEventId", async () => {
       const client = new BeadsSSEClient("test-ws-id");
 
       await client.connect();
@@ -640,10 +640,10 @@ describe("BeadsSSEClient", () => {
 
       MockEventSource.lastInstance?.simulateMutation(mutation, "-1");
 
-      expect(client.getLastEventId()).toBeUndefined();
+      expect(client.getLastEventId()).toBe("-1");
     });
 
-    it("ignores non-numeric lastEventId", async () => {
+    it("stores opaque lastEventId", async () => {
       const client = new BeadsSSEClient("test-ws-id");
 
       await client.connect();
@@ -658,10 +658,10 @@ describe("BeadsSSEClient", () => {
 
       MockEventSource.lastInstance?.simulateMutation(mutation, "abc");
 
-      expect(client.getLastEventId()).toBeUndefined();
+      expect(client.getLastEventId()).toBe("abc");
     });
 
-    it("does not overwrite newer ID with older ID (out-of-order)", async () => {
+    it("stores the last delivered event ID", async () => {
       const client = new BeadsSSEClient("test-ws-id");
 
       await client.connect();
@@ -684,7 +684,7 @@ describe("BeadsSSEClient", () => {
       MockEventSource.lastInstance?.simulateMutation(mutation1, "2000");
       MockEventSource.lastInstance?.simulateMutation(mutation2, "1000");
 
-      expect(client.getLastEventId()).toBe(2000);
+      expect(client.getLastEventId()).toBe("1000");
     });
 
     it("handles empty lastEventId string", async () => {
@@ -719,7 +719,7 @@ describe("BeadsSSEClient", () => {
         timestamp: "invalid-date",
       };
 
-      MockEventSource.lastInstance?.simulateMutation(mutation);
+      MockEventSource.lastInstance?.simulateMutation(mutation, "");
 
       // Callback should still be called
       expect(onMutation).toHaveBeenCalled();

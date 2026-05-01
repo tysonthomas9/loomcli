@@ -39,7 +39,8 @@ func NextEventID() int64 {
 
 // MutationPayload represents mutation data sent to clients.
 type MutationPayload struct {
-	Type        string `json:"type"` // create, update, delete, comment, status, bonded, squashed, burned, refresh, terminal_session_change
+	Cursor      string `json:"cursor,omitempty"` // Durable stream cursor for SSE Last-Event-ID when available
+	Type        string `json:"type"`             // create, update, delete, comment, status, bonded, squashed, burned, refresh, terminal_session_change
 	IssueID     string `json:"issue_id"`
 	Title       string `json:"title,omitempty"`
 	Assignee    string `json:"assignee,omitempty"`
@@ -73,13 +74,13 @@ type Client struct {
 	id          int64
 	send        chan *MutationPayload
 	done        chan struct{}
-	lastSince   int64
+	lastSince   string
 	sourceRepos []string // repos this client wants; empty = all
 	workspaceID string   // workspace this client subscribed to; empty = no mutations (fail-closed)
 }
 
 // NewClient creates a new SSE client with the given parameters.
-func NewClient(id int64, sendBuf int, lastSince int64, sourceRepos []string, workspaceID string) *Client {
+func NewClient(id int64, sendBuf int, lastSince string, sourceRepos []string, workspaceID string) *Client {
 	return &Client{
 		id:          id,
 		send:        make(chan *MutationPayload, sendBuf),
@@ -191,6 +192,7 @@ func (h *Hub) fanOutMutation(mutation *MutationPayload) {
 		return
 	}
 	h.mu.RLock()
+	var slow []*Client
 	for client := range h.clients {
 		if !MatchesWorkspaceFilter(client.workspaceID, mutation.WorkspaceID) {
 			continue
@@ -201,10 +203,14 @@ func (h *Hub) fanOutMutation(mutation *MutationPayload) {
 		select {
 		case client.send <- mutation:
 		default:
-			slog.Warn("SSE client buffer full, skipping mutation", "client_id", client.id)
+			slog.Warn("SSE client buffer full, disconnecting client", "client_id", client.id, "workspace_id", client.workspaceID)
+			slow = append(slow, client)
 		}
 	}
 	h.mu.RUnlock()
+	for _, client := range slow {
+		h.removeClient(client)
+	}
 }
 
 // closeAllClients closes all client send channels and clears the client map.
@@ -348,9 +354,29 @@ func (h *Hub) drainRetryQueue() {
 	}
 }
 
-// ParseLastSince extracts the reconnection catch-up timestamp from the request,
-// preferring the larger of Last-Event-ID header and ?since query parameter.
-func ParseLastSince(r *http.Request) int64 {
+// ParseLastSince extracts the reconnection catch-up cursor from the request.
+// It preserves opaque cursors (fleet-db v2) and still supports numeric
+// millisecond cursors for beads / legacy callers. If both header and query are
+// present and both are numeric, the larger value wins; otherwise the explicit
+// query parameter wins over Last-Event-ID.
+func ParseLastSince(r *http.Request) string {
+	lastEventID := r.Header.Get("Last-Event-ID")
+	since := r.URL.Query().Get("since")
+	if lastEventID == "" {
+		return since
+	}
+	if since == "" {
+		return lastEventID
+	}
+	headerTS, headerErr := strconv.ParseInt(lastEventID, 10, 64)
+	queryTS, queryErr := strconv.ParseInt(since, 10, 64)
+	if headerErr == nil && queryErr == nil && headerTS > queryTS {
+		return lastEventID
+	}
+	return since
+}
+
+func ParseLastSinceMillis(r *http.Request) int64 {
 	var lastSince int64
 	if lastEventID := r.Header.Get("Last-Event-ID"); lastEventID != "" {
 		if ts, err := strconv.ParseInt(lastEventID, 10, 64); err == nil {

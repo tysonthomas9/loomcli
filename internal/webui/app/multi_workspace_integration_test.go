@@ -81,7 +81,7 @@ func (p *trackingMockPool) IsClosed() bool {
 func newTestSSEClientWithWorkspace(t *testing.T, hub *realtime.Hub, id int64, workspaceID string) *testSSEClient {
 	t.Helper()
 
-	client := realtime.NewClient(id, 64, 0, nil, workspaceID)
+	client := realtime.NewClient(id, 64, "0", nil, workspaceID)
 
 	hub.RegisterClient(client)
 	time.Sleep(50 * time.Millisecond)

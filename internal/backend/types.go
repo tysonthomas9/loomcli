@@ -10,6 +10,7 @@
 package backend
 
 import (
+	"context"
 	"encoding/json"
 	"time"
 )
@@ -142,6 +143,7 @@ type CloseResult struct {
 // BeadsBackend subscription layer (task .11) maps rpc.MutationEvent to
 // MutationData. Other backends produce MutationData directly.
 type MutationData struct {
+	Cursor     string    `json:"cursor,omitempty"`
 	Type       string    `json:"type"`
 	IssueID    string    `json:"issue_id"`
 	Title      string    `json:"title,omitempty"`
@@ -153,6 +155,14 @@ type MutationData struct {
 	ParentID   string    `json:"parent_id,omitempty"`
 	SourceRepo string    `json:"source_repo,omitempty"`
 	StepCount  int       `json:"step_count,omitempty"`
+}
+
+// CursorMutationBackend is an optional IssueBackend extension for durable
+// stream cursors. Backends that implement it can round-trip opaque event IDs
+// instead of lossy millisecond timestamps for reconnect catch-up.
+type CursorMutationBackend interface {
+	GetMutationsAfter(ctx context.Context, since string) ([]MutationData, error)
+	WaitForMutationsAfter(ctx context.Context, since string, timeoutMs int64) ([]MutationData, error)
 }
 
 // ---------------------------------------------------------------------------

@@ -24,7 +24,7 @@ func TestHub_RegisterAndUnregister(t *testing.T) {
 	go h.Run()
 	defer h.Stop()
 
-	c := NewClient(1, ClientSendBuf, 0, nil, "ws-1")
+	c := NewClient(1, ClientSendBuf, "0", nil, "ws-1")
 	h.RegisterClient(c)
 
 	// Give the run loop time to process
@@ -45,7 +45,7 @@ func TestHub_BroadcastDelivers(t *testing.T) {
 	go h.Run()
 	defer h.Stop()
 
-	c := NewClient(1, ClientSendBuf, 0, nil, "ws-1")
+	c := NewClient(1, ClientSendBuf, "0", nil, "ws-1")
 	h.RegisterClient(c)
 	time.Sleep(20 * time.Millisecond)
 
@@ -70,7 +70,7 @@ func TestHub_BroadcastDropsEmptyWorkspace(t *testing.T) {
 	go h.Run()
 	defer h.Stop()
 
-	c := NewClient(1, ClientSendBuf, 0, nil, "ws-1")
+	c := NewClient(1, ClientSendBuf, "0", nil, "ws-1")
 	h.RegisterClient(c)
 	time.Sleep(20 * time.Millisecond)
 
@@ -94,8 +94,8 @@ func TestHub_WorkspaceFilter(t *testing.T) {
 	go h.Run()
 	defer h.Stop()
 
-	c1 := NewClient(1, ClientSendBuf, 0, nil, "ws-1")
-	c2 := NewClient(2, ClientSendBuf, 0, nil, "ws-2")
+	c1 := NewClient(1, ClientSendBuf, "0", nil, "ws-1")
+	c2 := NewClient(2, ClientSendBuf, "0", nil, "ws-2")
 	h.RegisterClient(c1)
 	h.RegisterClient(c2)
 	time.Sleep(20 * time.Millisecond)
@@ -128,7 +128,7 @@ func TestHub_SourceRepoFilter(t *testing.T) {
 	go h.Run()
 	defer h.Stop()
 
-	c := NewClient(1, ClientSendBuf, 0, []string{"repoA"}, "ws-1")
+	c := NewClient(1, ClientSendBuf, "0", []string{"repoA"}, "ws-1")
 	h.RegisterClient(c)
 	time.Sleep(20 * time.Millisecond)
 
@@ -176,7 +176,7 @@ func TestHub_Stop(t *testing.T) {
 	h := NewHub()
 	go h.Run()
 
-	c := NewClient(1, ClientSendBuf, 0, nil, "ws-1")
+	c := NewClient(1, ClientSendBuf, "0", nil, "ws-1")
 	h.RegisterClient(c)
 	time.Sleep(20 * time.Millisecond)
 
@@ -196,7 +196,7 @@ func TestHub_RegisterAfterStop(t *testing.T) {
 	h.Stop()
 	time.Sleep(20 * time.Millisecond)
 
-	c := NewClient(99, ClientSendBuf, 0, nil, "ws-1")
+	c := NewClient(99, ClientSendBuf, "0", nil, "ws-1")
 	h.RegisterClient(c)
 
 	// Client send channel should be closed since hub is stopped
@@ -227,9 +227,9 @@ func TestHub_GetActiveSourceRepos(t *testing.T) {
 	go h.Run()
 	defer h.Stop()
 
-	c1 := NewClient(1, ClientSendBuf, 0, []string{"repoA", "repoB"}, "ws-1")
-	c2 := NewClient(2, ClientSendBuf, 0, []string{"repoB", "repoC"}, "ws-1")
-	c3 := NewClient(3, ClientSendBuf, 0, nil, "ws-1") // no filter
+	c1 := NewClient(1, ClientSendBuf, "0", []string{"repoA", "repoB"}, "ws-1")
+	c2 := NewClient(2, ClientSendBuf, "0", []string{"repoB", "repoC"}, "ws-1")
+	c3 := NewClient(3, ClientSendBuf, "0", nil, "ws-1") // no filter
 	h.RegisterClient(c1)
 	h.RegisterClient(c2)
 	h.RegisterClient(c3)
@@ -328,15 +328,15 @@ func TestParseLastSince(t *testing.T) {
 		name        string
 		lastEventID string
 		sinceQuery  string
-		want        int64
+		want        string
 	}{
-		{"no values", "", "", 0},
-		{"header only", "100", "", 100},
-		{"query only", "", "200", 200},
-		{"header wins (larger)", "300", "200", 300},
-		{"query wins (larger)", "100", "400", 400},
-		{"invalid header", "abc", "200", 200},
-		{"invalid query", "100", "xyz", 100},
+		{"no values", "", "", ""},
+		{"header only", "100", "", "100"},
+		{"query only", "", "200", "200"},
+		{"header wins (larger)", "300", "200", "300"},
+		{"query wins (larger)", "100", "400", "400"},
+		{"invalid header", "abc", "200", "200"},
+		{"opaque query wins", "100", "c1.cursor", "c1.cursor"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -351,7 +351,7 @@ func TestParseLastSince(t *testing.T) {
 			}
 			got := ParseLastSince(r)
 			if got != tt.want {
-				t.Errorf("ParseLastSince() = %d, want %d", got, tt.want)
+				t.Errorf("ParseLastSince() = %q, want %q", got, tt.want)
 			}
 		})
 	}
@@ -365,7 +365,7 @@ func TestNextEventID_Monotonic(t *testing.T) {
 	}
 }
 
-func TestWriteSSEEventUsesMutationTimestampAsEventID(t *testing.T) {
+func TestWriteSSEEventUsesMutationCursorAsEventID(t *testing.T) {
 	rr := httptest.NewRecorder()
 	sw, err := NewWriter(rr)
 	if err != nil {
@@ -373,6 +373,7 @@ func TestWriteSSEEventUsesMutationTimestampAsEventID(t *testing.T) {
 	}
 
 	err = writeSSEEvent(sw, &MutationPayload{
+		Cursor:    "c1.cursor",
 		Type:      "update",
 		IssueID:   "issue-1",
 		Timestamp: "2026-04-30T10:20:30.456Z",
@@ -382,8 +383,8 @@ func TestWriteSSEEventUsesMutationTimestampAsEventID(t *testing.T) {
 	}
 
 	body := rr.Body.String()
-	if !strings.Contains(body, "id: 1777544430456\n") {
-		t.Fatalf("SSE event ID should be mutation timestamp cursor, got:\n%s", body)
+	if !strings.Contains(body, "id: c1.cursor\n") {
+		t.Fatalf("SSE event ID should use mutation cursor, got:\n%s", body)
 	}
 	if !strings.Contains(body, "event: mutation\n") {
 		t.Fatalf("SSE event missing mutation event name, got:\n%s", body)
@@ -391,12 +392,12 @@ func TestWriteSSEEventUsesMutationTimestampAsEventID(t *testing.T) {
 }
 
 func TestNewClient(t *testing.T) {
-	c := NewClient(42, 8, 100, []string{"r1"}, "ws-1")
+	c := NewClient(42, 8, "100", []string{"r1"}, "ws-1")
 	if c.ID() != 42 {
 		t.Errorf("expected id 42, got %d", c.ID())
 	}
-	if c.lastSince != 100 {
-		t.Errorf("expected lastSince 100, got %d", c.lastSince)
+	if c.lastSince != "100" {
+		t.Errorf("expected lastSince 100, got %s", c.lastSince)
 	}
 	if len(c.sourceRepos) != 1 || c.sourceRepos[0] != "r1" {
 		t.Errorf("unexpected sourceRepos: %v", c.sourceRepos)

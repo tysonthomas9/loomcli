@@ -7,6 +7,7 @@ package fleet
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -31,6 +32,7 @@ const maxResponseBody = 50 << 20
 type FleetBackend struct {
 	client           *http.Client
 	baseWorkspaceURL string // e.g., "http://host/api/v1/ws1"
+	baseWorkspaceV2  string // e.g., "http://host/api/v2/ws1"
 
 	mu        sync.RWMutex
 	authToken string
@@ -40,6 +42,7 @@ type FleetBackend struct {
 
 // Compile-time interface check.
 var _ backend.IssueBackend = (*FleetBackend)(nil)
+var _ backend.CursorMutationBackend = (*FleetBackend)(nil)
 
 // apiResponse is the generic JSON envelope returned by fleet server endpoints.
 type apiResponse struct {
@@ -71,10 +74,39 @@ func New(cfg Config) (*FleetBackend, error) {
 	return &FleetBackend{
 		client:           httpClient,
 		baseWorkspaceURL: baseURL + "/api/v1/" + url.PathEscape(cfg.WorkspaceID),
+		baseWorkspaceV2:  baseURL + "/api/v2/" + url.PathEscape(cfg.WorkspaceID),
 		authToken:        cfg.AuthToken,
 		apiKey:           cfg.APIKey,
 		actor:            cfg.Actor,
 	}, nil
+}
+
+func (b *FleetBackend) doRequestURL(ctx context.Context, method, rawURL string, body interface{}) (*apiResponse, int, error) {
+	b.mu.RLock()
+	auth := fleethttp.Auth{BearerToken: b.authToken, APIKey: b.apiKey, Actor: b.actor}
+	b.mu.RUnlock()
+
+	req, err := fleethttp.BuildJSONRequest(ctx, method, rawURL, auth, body)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	resp, err := b.client.Do(req)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBody))
+	if err != nil {
+		return nil, resp.StatusCode, fmt.Errorf("read response body: %w", err)
+	}
+
+	apiResp, err := parseFleetResponse(respBody, resp.StatusCode)
+	if err != nil {
+		return nil, resp.StatusCode, err
+	}
+	return apiResp, resp.StatusCode, nil
 }
 
 // SetAuthToken updates the bearer token for subsequent requests.
@@ -128,7 +160,7 @@ func (b *FleetBackend) doRequest(ctx context.Context, method, path string, body 
 // envelope downstream code expects. fleet-db speaks two dialects:
 //   - Legacy/wrapper: {"success":true,"data":...}  or  {"success":false,"error":"..."}
 //   - Native:        the raw entity (e.g. an Issue) on 2xx, or
-//                    {"error":{"code":"...","message":"..."}} on 4xx
+//     {"error":{"code":"...","message":"..."}} on 4xx
 //
 // Both are valid; we synthesize a uniform apiResponse so callers don't have
 // to care which dialect fired.
@@ -175,6 +207,17 @@ func parseFleetResponse(body []byte, statusCode int) (*apiResponse, error) {
 // exec is a convenience wrapper around doRequest that classifies errors.
 func (b *FleetBackend) exec(ctx context.Context, op, method, path string, body interface{}) (*apiResponse, error) {
 	apiResp, statusCode, err := b.doRequest(ctx, method, path, body)
+	if err != nil {
+		return nil, classifyTransportError(op, err)
+	}
+	if cerr := classifyHTTPError(op, statusCode, *apiResp); cerr != nil {
+		return nil, cerr
+	}
+	return apiResp, nil
+}
+
+func (b *FleetBackend) execURL(ctx context.Context, op, method, rawURL string, body interface{}) (*apiResponse, error) {
+	apiResp, statusCode, err := b.doRequestURL(ctx, method, rawURL, body)
 	if err != nil {
 		return nil, classifyTransportError(op, err)
 	}
@@ -1050,6 +1093,7 @@ func (b *FleetBackend) runSingleDelete(ctx context.Context, op backend.BatchOp) 
 // full event history. fleet-db's `since` validator accepts "0" or a Redis
 // Stream ID of the form "<ms>-<seq>"; zero is the only special-case form.
 const fleetCursorZero = "0"
+const fleetOpaqueCursorPrefix = "c1."
 
 // formatFleetCursor renders an int64 millisecond epoch into the Redis-stream
 // ID shape that fleet-db's `since` validator accepts. Zero stays "0"; any
@@ -1063,7 +1107,52 @@ func formatFleetCursor(sinceMs int64) string {
 	return strconv.FormatInt(sinceMs, 10) + "-0"
 }
 
+func normalizeFleetCursor(cursor string) string {
+	cursor = strings.TrimSpace(cursor)
+	if cursor == "" || cursor == fleetCursorZero {
+		return fleetCursorZero
+	}
+	if strings.HasPrefix(cursor, fleetOpaqueCursorPrefix) {
+		return cursor
+	}
+	if _, err := strconv.ParseInt(cursor, 10, 64); err == nil {
+		cursor += "-0"
+	}
+	return fleetOpaqueCursorPrefix + base64.RawURLEncoding.EncodeToString([]byte(cursor))
+}
+
 // --- Mutation polling ---
+
+func (b *FleetBackend) getMutationsAfter(ctx context.Context, op string, since string, timeoutMs int64) ([]backend.MutationData, error) {
+	params := url.Values{}
+	params.Set("since", normalizeFleetCursor(since))
+	if timeoutMs > 0 {
+		params.Set("timeout", strconv.FormatInt(timeoutMs, 10))
+	}
+	rawURL := b.baseWorkspaceV2 + "/events/mutations?" + params.Encode()
+	resp, err := b.execURL(ctx, op, "GET", rawURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	if !hasData(resp) {
+		return []backend.MutationData{}, nil
+	}
+	var fresp fleetMutationsResponse
+	if err := json.Unmarshal(resp.Data, &fresp); err != nil {
+		return nil, backend.ErrInternal(op, "unmarshal response", err)
+	}
+	return fleetEventsToMutationData(fresp.Events), nil
+}
+
+// GetMutationsAfter returns mutation events after an opaque fleet-db cursor.
+func (b *FleetBackend) GetMutationsAfter(ctx context.Context, since string) ([]backend.MutationData, error) {
+	return b.getMutationsAfter(ctx, "GetMutationsAfter", since, 0)
+}
+
+// WaitForMutationsAfter long-polls mutation events after an opaque fleet-db cursor.
+func (b *FleetBackend) WaitForMutationsAfter(ctx context.Context, since string, timeoutMs int64) ([]backend.MutationData, error) {
+	return b.getMutationsAfter(ctx, "WaitForMutationsAfter", since, timeoutMs)
+}
 
 // GetMutations returns mutation events from fleet-db's cursor-based events
 // stream. fleet-db's `since` parameter validates strictly: it must be the

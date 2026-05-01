@@ -19,6 +19,7 @@ const (
 
 // MutationEvent represents a database mutation for event-driven sync
 type MutationEvent struct {
+	Cursor    string    `json:"cursor,omitempty"`   // Durable stream cursor for reconnect catch-up when available
 	Type      string    `json:"type"`               // One of the Mutation* constants
 	IssueID   string    `json:"issue_id"`           // e.g., "bd-42"
 	Title     string    `json:"title,omitempty"`    // Issue title for display context (may be empty for some operations)

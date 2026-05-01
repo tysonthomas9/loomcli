@@ -51,7 +51,7 @@ func TestGetMutationsSinceForWorkspace_KnownWorkspace(t *testing.T) {
 	multi.subscribers["ws-1"] = &subscriberEntry{sub: sub}
 	multi.mu.Unlock()
 
-	got := multi.GetMutationsSinceForWorkspace("ws-1", 0)
+	got := multi.GetMutationsSinceForWorkspace("ws-1", "0")
 	if len(got) != 2 {
 		t.Fatalf("expected 2 mutations, got %d", len(got))
 	}
@@ -72,7 +72,7 @@ func TestGetMutationsSinceForWorkspace_UnknownWorkspace(t *testing.T) {
 
 	multi := NewMultiWorkspaceSubscriber(hub, nil, nil)
 
-	got := multi.GetMutationsSinceForWorkspace("no-such-ws", 0)
+	got := multi.GetMutationsSinceForWorkspace("no-such-ws", "0")
 	if got != nil {
 		t.Errorf("expected nil for unknown workspace, got %v", got)
 	}
@@ -144,7 +144,7 @@ func TestGetMutationsSinceForWorkspace_OnlyQueriesCorrectSubscriber(t *testing.T
 	multi.mu.Unlock()
 
 	// Query ws-1 only
-	got := multi.GetMutationsSinceForWorkspace("ws-1", 0)
+	got := multi.GetMutationsSinceForWorkspace("ws-1", "0")
 	if len(got) != 1 {
 		t.Fatalf("expected 1 mutation from ws-1, got %d", len(got))
 	}
@@ -153,7 +153,7 @@ func TestGetMutationsSinceForWorkspace_OnlyQueriesCorrectSubscriber(t *testing.T
 	}
 
 	// Query ws-2 only
-	got = multi.GetMutationsSinceForWorkspace("ws-2", 0)
+	got = multi.GetMutationsSinceForWorkspace("ws-2", "0")
 	if len(got) != 1 {
 		t.Fatalf("expected 1 mutation from ws-2, got %d", len(got))
 	}

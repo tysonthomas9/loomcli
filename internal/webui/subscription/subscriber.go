@@ -137,8 +137,8 @@ func (s *DaemonSubscriber) GetMutationsSince(since int64) []rpc.MutationEvent {
 // renaming the existing GetMutationsSince (which other tests depend on).
 // Each rpc.MutationEvent is projected via realtime.RPCEventToMutationData
 // so the catch-up path returns a single uniform type regardless of source.
-func (s *DaemonSubscriber) GetMutationDataSince(since int64) []backend.MutationData {
-	events := s.GetMutationsSince(since)
+func (s *DaemonSubscriber) GetMutationDataSince(since string) []backend.MutationData {
+	events := s.GetMutationsSince(parseCursorMillis(since))
 	if len(events) == 0 {
 		return nil
 	}

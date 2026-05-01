@@ -19,6 +19,7 @@ import (
 // fleet-sourced events are intermixed in the SSE stream.
 func BackendMutationToPayload(m backend.MutationData, workspaceID string) *MutationPayload {
 	return &MutationPayload{
+		Cursor:      m.Cursor,
 		Type:        m.Type,
 		IssueID:     m.IssueID,
 		Title:       m.Title,
@@ -42,6 +43,7 @@ func BackendMutationToPayload(m backend.MutationData, workspaceID string) *Mutat
 // (time.Time → time.Time); RPCMutationToPayload formats it into RFC3339.
 func BackendMutationToRPCEvent(m backend.MutationData) rpc.MutationEvent {
 	return rpc.MutationEvent{
+		Cursor:     m.Cursor,
 		Type:       m.Type,
 		IssueID:    m.IssueID,
 		Title:      m.Title,
@@ -63,6 +65,7 @@ func BackendMutationToRPCEvent(m backend.MutationData) rpc.MutationEvent {
 // adapter to be rewritten.
 func RPCEventToMutationData(e rpc.MutationEvent) backend.MutationData {
 	return backend.MutationData{
+		Cursor:     e.Cursor,
 		Type:       e.Type,
 		IssueID:    e.IssueID,
 		Title:      e.Title,
