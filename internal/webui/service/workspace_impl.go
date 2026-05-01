@@ -12,6 +12,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/configlock"
+	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
@@ -150,12 +151,15 @@ func (s *workspaceServiceImpl) ListWorkspaces(ctx context.Context) ([]WorkspaceL
 		wsList, err := s.store.Workspaces().List(ctx)
 		if err == nil {
 			activeKey, _ := bootstrap.ResolveActiveWorkspaceKey(ctx, s.store.Workspaces())
+			defaultKey := storeadapter.DefaultWorkspaceKey()
 			items := make([]WorkspaceListItem, 0, len(wsList))
 			for _, ws := range wsList {
 				item := WorkspaceListItem{
-					ID:     ws.Key,
-					Name:   ws.Name,
-					Active: ws.Key == activeKey,
+					ID:        ws.Key,
+					Name:      ws.Name,
+					Path:      storeadapter.ResolveWorkspacePath(ws.Key),
+					Active:    ws.Key == activeKey,
+					IsDefault: ws.Key == defaultKey,
 				}
 				if s.multiPool != nil {
 					if p := s.multiPool.PoolForWorkspace(ws.Key); p != nil {
@@ -167,7 +171,7 @@ func (s *workspaceServiceImpl) ListWorkspaces(ctx context.Context) ([]WorkspaceL
 			}
 			return items, nil
 		}
-		slog.Warn("store list failed, falling through to legacy", "err", err)
+		return nil, ErrInternal("failed to list workspaces from store", err)
 	}
 
 	// Legacy path: multiPool first (beads), else yaml-derived configFn.
@@ -547,7 +551,23 @@ func (s *workspaceServiceImpl) ReorderWorkspaces(_ context.Context, order []stri
 	return s.refreshWorkspaceData()
 }
 
-func (s *workspaceServiceImpl) SetDefaultWorkspace(_ context.Context, name string) (*ops.WorkspaceData, error) {
+func (s *workspaceServiceImpl) SetDefaultWorkspace(ctx context.Context, name string) (*ops.WorkspaceData, error) {
+	if s.store != nil {
+		ws, err := s.resolveStoreWorkspaceForDefault(ctx, name)
+		if err != nil {
+			return nil, err
+		}
+		if err := bootstrap.SetActiveWorkspaceKey(ws.Key); err != nil {
+			return nil, ErrInternal("failed to save default workspace", err)
+		}
+		data, buildErr := storeadapter.BuildWorkspaceDataForKey(ctx, s.store, ws.Key)
+		if buildErr != nil {
+			return nil, ErrInternal("failed to load workspace data", buildErr)
+		}
+		normalizeWorkspaceData(data)
+		return data, nil
+	}
+
 	if s.setDefaultFn == nil {
 		return nil, ErrUnavailable("set default workspace not available")
 	}
@@ -563,7 +583,22 @@ func (s *workspaceServiceImpl) SetDefaultWorkspace(_ context.Context, name strin
 	return s.refreshWorkspaceData()
 }
 
-func (s *workspaceServiceImpl) ClearDefaultWorkspace(_ context.Context) (*ops.WorkspaceData, error) {
+func (s *workspaceServiceImpl) ClearDefaultWorkspace(ctx context.Context) (*ops.WorkspaceData, error) {
+	if s.store != nil {
+		if err := bootstrap.ClearActiveWorkspaceKey(); err != nil {
+			return nil, ErrInternal("failed to clear default workspace", err)
+		}
+		data, err := storeadapter.BuildActiveWorkspaceData(ctx, s.store)
+		if err != nil {
+			return nil, ErrInternal("failed to load workspace data", err)
+		}
+		if data == nil {
+			data = &ops.WorkspaceData{}
+		}
+		normalizeWorkspaceData(data)
+		return data, nil
+	}
+
 	if s.clearDefaultFn == nil {
 		return nil, ErrUnavailable("clear default workspace not available")
 	}
@@ -573,6 +608,28 @@ func (s *workspaceServiceImpl) ClearDefaultWorkspace(_ context.Context) (*ops.Wo
 	}
 
 	return s.refreshWorkspaceData()
+}
+
+func (s *workspaceServiceImpl) resolveStoreWorkspaceForDefault(ctx context.Context, name string) (*domain.Workspace, *ServiceError) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil, ErrValidation("workspace name is required")
+	}
+	ws, err := s.store.Workspaces().Get(ctx, name)
+	if err == nil {
+		return ws, nil
+	}
+	if !errors.Is(err, domain.ErrNotFound) && !errors.Is(err, domain.ErrInvalid) {
+		return nil, ErrInternal("failed to load workspace", err)
+	}
+	ws, err = s.store.Workspaces().GetByName(ctx, name)
+	if err == nil {
+		return ws, nil
+	}
+	if errors.Is(err, domain.ErrNotFound) {
+		return nil, ErrNotFound("workspace not found: " + name)
+	}
+	return nil, ErrInternal("failed to load workspace", err)
 }
 
 func (s *workspaceServiceImpl) PatchWorkspaceBackend(_ context.Context, wsID string, backend string) (*ops.WorkspaceData, error) {

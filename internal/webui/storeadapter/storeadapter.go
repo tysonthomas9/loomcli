@@ -76,6 +76,11 @@ func BuildWorkspaceDataForKey(ctx context.Context, s store.Store, key string) (*
 
 	wsPath := resolveWorkspacePath(ws.Key)
 
+	defaultName, err := defaultWorkspaceName(ctx, s)
+	if err != nil {
+		return nil, err
+	}
+
 	return &ops.WorkspaceData{
 		ID:               ws.Key,
 		Name:             ws.Name,
@@ -85,7 +90,7 @@ func BuildWorkspaceDataForKey(ctx context.Context, s store.Store, key string) (*
 		Agents:           agents,
 		Workspaces:       summaries,
 		WorkspaceOrder:   nil, // TODO(.16): persist order in DaemonProfile or similar
-		DefaultWorkspace: defaultWorkspaceKey(),
+		DefaultWorkspace: defaultName,
 	}, nil
 }
 
@@ -242,6 +247,12 @@ func resolveWorkspacePath(key string) string {
 	return ""
 }
 
+// ResolveWorkspacePath exposes the local path lookup for list endpoints that
+// need workspace summaries without materializing full WorkspaceData.
+func ResolveWorkspacePath(key string) string {
+	return resolveWorkspacePath(key)
+}
+
 // resolveRepoPath looks up the per-machine on-disk path for a repo within
 // a workspace from the state cache. Returns "" if missing.
 func resolveRepoPath(wsKey, repoName string) string {
@@ -267,4 +278,25 @@ func defaultWorkspaceKey() string {
 		return ""
 	}
 	return sc.LastWorkspace
+}
+
+// DefaultWorkspaceKey returns the workspace key stored in the per-user state
+// cache as the default/active workspace hint.
+func DefaultWorkspaceKey() string {
+	return defaultWorkspaceKey()
+}
+
+func defaultWorkspaceName(ctx context.Context, s store.Store) (string, error) {
+	key := defaultWorkspaceKey()
+	if key == "" {
+		return "", nil
+	}
+	ws, err := s.Workspaces().Get(ctx, key)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return "", nil
+		}
+		return "", fmt.Errorf("storeadapter: get default workspace: %w", err)
+	}
+	return ws.Name, nil
 }

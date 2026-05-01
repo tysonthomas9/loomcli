@@ -120,3 +120,15 @@ func SetActiveWorkspaceKey(key string) error {
 		return SaveStateCache(sc)
 	})
 }
+
+// ClearActiveWorkspaceKey removes the per-user active/default workspace hint.
+func ClearActiveWorkspaceKey() error {
+	return WithStateLock(func() error {
+		sc, err := LoadStateCache()
+		if err != nil {
+			return err
+		}
+		sc.LastWorkspace = ""
+		return SaveStateCache(sc)
+	})
+}

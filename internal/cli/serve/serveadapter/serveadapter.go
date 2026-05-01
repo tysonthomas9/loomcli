@@ -141,6 +141,6 @@ func BuildSetDefaultWorkspaceFn(s store.Store) func(string) error {
 // hint in the state cache.
 func BuildClearDefaultWorkspaceFn() func() error {
 	return func() error {
-		return bootstrap.SetActiveWorkspaceKey("")
+		return bootstrap.ClearActiveWorkspaceKey()
 	}
 }
