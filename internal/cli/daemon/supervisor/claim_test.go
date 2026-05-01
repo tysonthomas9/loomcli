@@ -7,6 +7,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
 	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/clitest"
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
 )
@@ -106,5 +107,17 @@ func TestClaimTask_SkipsLongLivedRoleWithoutTaskFilter(t *testing.T) {
 	}
 	if len(mock.Calls) != 0 {
 		t.Fatalf("backend calls = %#v, want none", mock.Calls)
+	}
+}
+
+func TestTaskIDForLifecycle_UsesAssignedFallback(t *testing.T) {
+	s := &Supervisor{}
+	ap := &AgentProcess{AssignedTaskID: "task-assigned"}
+
+	if got := s.taskIDForLifecycle(ap, nil); got != "task-assigned" {
+		t.Fatalf("taskIDForLifecycle(nil) = %q, want task-assigned", got)
+	}
+	if got := s.taskIDForLifecycle(ap, &cli.LockInfo{TaskID: "task-lock"}); got != "task-lock" {
+		t.Fatalf("taskIDForLifecycle(lock) = %q, want task-lock", got)
 	}
 }

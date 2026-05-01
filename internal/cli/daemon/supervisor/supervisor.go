@@ -669,6 +669,9 @@ func (s *Supervisor) finalizeAgentSession(ap *AgentProcess, exitCode int) {
 	if info, lockErr := cli.ReadLockFile(ap.WorktreePath); lockErr == nil {
 		taskID = info.TaskID
 	}
+	if taskID == "" {
+		taskID = s.taskIDForLifecycle(ap, nil)
+	}
 	diffStats := git.ComputeDiffStats(ap.WorktreePath, bRef)
 
 	ap.Mu.Lock()

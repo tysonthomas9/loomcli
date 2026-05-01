@@ -14,9 +14,14 @@ import (
 func (s *Supervisor) classifyAgentExit(ap *AgentProcess, exitCode int) {
 	// Read lock info before recovery clears it (for logging and NoWork detection)
 	lockInfo, _, _ := cli.CheckLock(ap.WorktreePath)
-	if lockInfo != nil && lockInfo.TaskID != "" {
+	taskID := s.taskIDForLifecycle(ap, lockInfo)
+	if taskID != "" {
+		title := ""
+		if lockInfo != nil {
+			title = lockInfo.TaskTitle
+		}
 		log.Printf("[daemon] Agent %s: exited with code %d (task %s: %s)",
-			ap.Entry.Worktree, exitCode, lockInfo.TaskID, lockInfo.TaskTitle)
+			ap.Entry.Worktree, exitCode, taskID, title)
 	} else {
 		log.Printf("[daemon] Agent %s: exited with code %d", ap.Entry.Worktree, exitCode)
 	}
@@ -30,7 +35,7 @@ func (s *Supervisor) classifyAgentExit(ap *AgentProcess, exitCode int) {
 		backend = s.ConfigSnapshot().Backend
 	}
 
-	if exitCode == 0 && (lockInfo == nil || lockInfo.TaskID == "") {
+	if exitCode == 0 && taskID == "" {
 		// No work available — exit 0 with no task claimed
 		ap.Mu.Lock()
 		ap.LastError = &agenterr.AgentError{
@@ -79,7 +84,8 @@ func (s *Supervisor) handleAgentCheckpoint(ap *AgentProcess, exitCode int) {
 // checkpoint file. Called when an agent exits non-zero before recovery clears the worktree.
 func (s *Supervisor) saveAgentCheckpoint(ap *AgentProcess, exitCode int) {
 	lockInfo, _, _ := cli.CheckLock(ap.WorktreePath)
-	if lockInfo == nil || lockInfo.TaskID == "" {
+	taskID := s.taskIDForLifecycle(ap, lockInfo)
+	if taskID == "" {
 		return
 	}
 
@@ -92,9 +98,14 @@ func (s *Supervisor) saveAgentCheckpoint(ap *AgentProcess, exitCode int) {
 	epicID := ap.AssignedEpicID
 	ap.Mu.Unlock()
 
+	agentName := ap.Entry.Worktree
+	if lockInfo != nil && lockInfo.AgentName != "" {
+		agentName = lockInfo.AgentName
+	}
+
 	cp := &config.Checkpoint{
-		AgentName:  lockInfo.AgentName,
-		TaskID:     lockInfo.TaskID,
+		AgentName:  agentName,
+		TaskID:     taskID,
 		EpicID:     epicID,
 		GitDiff:    diff,
 		ExitCode:   exitCode,
@@ -105,7 +116,7 @@ func (s *Supervisor) saveAgentCheckpoint(ap *AgentProcess, exitCode int) {
 	if err := config.SaveCheckpoint(lockDir, cp); err != nil {
 		log.Printf("[daemon] Agent %s: failed to save checkpoint: %v", ap.Entry.Worktree, err)
 	} else {
-		log.Printf("[daemon] Agent %s: saved checkpoint for task %s", ap.Entry.Worktree, lockInfo.TaskID)
+		log.Printf("[daemon] Agent %s: saved checkpoint for task %s", ap.Entry.Worktree, taskID)
 	}
 }
 
@@ -114,7 +125,8 @@ func (s *Supervisor) saveAgentCheckpoint(ap *AgentProcess, exitCode int) {
 // "Yielded" and records the yield reason from the yield file.
 func (s *Supervisor) saveYieldCheckpoint(ap *AgentProcess) {
 	lockInfo, _, _ := cli.CheckLock(ap.WorktreePath)
-	if lockInfo == nil || lockInfo.TaskID == "" {
+	taskID := s.taskIDForLifecycle(ap, lockInfo)
+	if taskID == "" {
 		return
 	}
 
@@ -129,9 +141,14 @@ func (s *Supervisor) saveYieldCheckpoint(ap *AgentProcess) {
 	epicID := ap.AssignedEpicID
 	ap.Mu.Unlock()
 
+	agentName := ap.Entry.Worktree
+	if lockInfo != nil && lockInfo.AgentName != "" {
+		agentName = lockInfo.AgentName
+	}
+
 	cp := &config.Checkpoint{
-		AgentName:   lockInfo.AgentName,
-		TaskID:      lockInfo.TaskID,
+		AgentName:   agentName,
+		TaskID:      taskID,
 		EpicID:      epicID,
 		GitDiff:     diff,
 		ExitCode:    0,
@@ -144,6 +161,15 @@ func (s *Supervisor) saveYieldCheckpoint(ap *AgentProcess) {
 		log.Printf("[daemon] Agent %s: failed to save yield checkpoint: %v", ap.Entry.Worktree, err)
 	} else {
 		log.Printf("[daemon] Agent %s: saved yield checkpoint for task %s (reason: %s)",
-			ap.Entry.Worktree, lockInfo.TaskID, yieldReason)
+			ap.Entry.Worktree, taskID, yieldReason)
 	}
+}
+
+func (s *Supervisor) taskIDForLifecycle(ap *AgentProcess, lockInfo *cli.LockInfo) string {
+	if lockInfo != nil && lockInfo.TaskID != "" {
+		return lockInfo.TaskID
+	}
+	ap.Mu.Lock()
+	defer ap.Mu.Unlock()
+	return ap.AssignedTaskID
 }
