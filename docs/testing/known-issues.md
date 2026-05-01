@@ -20,13 +20,11 @@ Documented failures and their tracking tickets. Tests that hit these should NOT 
 
 ---
 
-## RPC socket bind permission (cosmetic, low priority)
+## RPC socket bind permission (FIXED)
 
-**Symptom:** fleet-db logs `rpc-listener: bind: permission denied on /var/run/fleet-db.sock` because the default RPC socket path requires root.
+**Status:** fixed for embedded local mode. `bootstrap.StartEmbedded` passes `--rpc-enabled=false`, so the embedded fleet-db used by loom does not bind `/var/run/fleet-db.sock`.
 
-**Workaround:** `e2e-preflight.md` passes `--rpc-socket=` to disable RPC entirely (loom doesn't use it).
-
-**Long-term fix:** make the embedded.go `--rpc-socket=` flag default behavior, OR repoint to a user-writable location.
+If this warning reappears during embedded-mode tests, verify the command path is using `StartEmbedded` rather than launching `fleet-db` directly.
 
 ---
 

@@ -312,6 +312,34 @@ func TestSnapshotFileMode_TightenedWhenFleetKeysOn(t *testing.T) {
 	}
 }
 
+func TestSnapshotFileMode_TightensPreexistingFleetFiles(t *testing.T) {
+	dir := t.TempDir()
+	snapPath := filepath.Join(dir, "snapshot.json")
+	if err := os.WriteFile(snapPath, []byte(`{"schema_version":2,"entries":[]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(snapPath+".tmp", []byte("stale tmp"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	m, _ := NewManager(snapPath, true, nil)
+	_ = m.Client().Set(context.Background(), "fleet:jwt-signing-key:current", "secret", 0).Err()
+	_ = m.Close()
+
+	for _, path := range []string{snapPath, snapPath + ".bak"} {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatalf("stat %s: %v", path, err)
+		}
+		if got := info.Mode().Perm(); got != 0o600 {
+			t.Errorf("%s perm = %o, want 0600", path, got)
+		}
+	}
+	if _, err := os.Stat(snapPath + ".tmp"); !os.IsNotExist(err) {
+		t.Fatalf("stale tmp should be removed after dump, err=%v", err)
+	}
+}
+
 func TestDumpAtomicity_NoPartialOnRename(t *testing.T) {
 	snapPath := filepath.Join(t.TempDir(), "snapshot.json")
 	ctx := context.Background()

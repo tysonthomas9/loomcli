@@ -206,28 +206,32 @@ func (m *Manager) Dump() error {
 	if err := os.MkdirAll(filepath.Dir(m.snapshotPath), 0o755); err != nil {
 		return fmt.Errorf("mkdir snapshot dir: %w", err)
 	}
-	// Rotate current → .bak before overwriting. Tolerate missing source
-	// (first run). On subsequent runs this gives us one fallback copy if
-	// a later write is corrupted by a hard kill.
-	backupPath := m.snapshotPath + ".bak"
-	if _, statErr := os.Stat(m.snapshotPath); statErr == nil {
-		_ = os.Rename(m.snapshotPath, backupPath)
-	}
-	tmpPath := m.snapshotPath + ".tmp"
 	// Snapshot may contain the fleet JWT signing key when fleetKeys is on,
 	// so lock down perms in that case. Plain UI state stays 0o644.
 	perm := os.FileMode(0o644)
 	if m.fleetKeys {
 		perm = 0o600
 	}
+	// Rotate current → .bak before overwriting. Tolerate missing source
+	// (first run). On subsequent runs this gives us one fallback copy if
+	// a later write is corrupted by a hard kill.
+	backupPath := m.snapshotPath + ".bak"
+	if _, statErr := os.Stat(m.snapshotPath); statErr == nil {
+		_ = os.Rename(m.snapshotPath, backupPath)
+		_ = os.Chmod(backupPath, perm)
+	}
+	tmpPath := m.snapshotPath + ".tmp"
+	_ = os.Remove(tmpPath)
 	// #nosec G306 — file mode varies by snapshot sensitivity, see above
 	if err := os.WriteFile(tmpPath, data, perm); err != nil {
 		return fmt.Errorf("write snapshot tmp: %w", err)
 	}
+	_ = os.Chmod(tmpPath, perm)
 	if err := os.Rename(tmpPath, m.snapshotPath); err != nil {
 		_ = os.Remove(tmpPath)
 		return fmt.Errorf("rename snapshot: %w", err)
 	}
+	_ = os.Chmod(m.snapshotPath, perm)
 	m.mu.Lock()
 	m.lastDumpHash = hash
 	m.lastDumpSet = true

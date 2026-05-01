@@ -16,6 +16,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/lockfile"
 	"github.com/tysonthomas9/loomcli/internal/netutil"
 	"github.com/tysonthomas9/loomcli/internal/webui/localredis"
 )
@@ -37,6 +38,60 @@ type FleetDBBinaryDiagnostic struct {
 	ProbeOutput string
 	Err         error
 	Remediation string
+}
+
+type embeddedRuntimeLock struct {
+	path string
+	file *os.File
+}
+
+func acquireEmbeddedRuntimeLock(fleetDir string) (*embeddedRuntimeLock, error) {
+	path := filepath.Join(fleetDir, "embedded.lock")
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0600) //nolint:gosec // user-private runtime lock
+	if err != nil {
+		return nil, fmt.Errorf("embedded: open runtime lock %s: %w", path, err)
+	}
+	if err := lockfile.TryLockExclusive(f); err != nil {
+		_ = f.Close()
+		if errors.Is(err, lockfile.ErrLocked) {
+			return nil, fmt.Errorf("embedded: fleet-db is already running for this loom data dir (lock %s is held); set %s to a shared fleet-db URL for concurrent clients or stop the existing local process", path, EnvFleetDBURL)
+		}
+		return nil, fmt.Errorf("embedded: lock runtime %s: %w", path, err)
+	}
+	if err := f.Truncate(0); err != nil {
+		_ = lockfile.FlockUnlock(f)
+		_ = f.Close()
+		return nil, fmt.Errorf("embedded: truncate runtime lock %s: %w", path, err)
+	}
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		_ = lockfile.FlockUnlock(f)
+		_ = f.Close()
+		return nil, fmt.Errorf("embedded: seek runtime lock %s: %w", path, err)
+	}
+	if _, err := fmt.Fprintf(f, "%d\n", os.Getpid()); err != nil {
+		_ = lockfile.FlockUnlock(f)
+		_ = f.Close()
+		return nil, fmt.Errorf("embedded: write runtime lock %s: %w", path, err)
+	}
+	return &embeddedRuntimeLock{path: path, file: f}, nil
+}
+
+func (l *embeddedRuntimeLock) Release() error {
+	if l == nil || l.file == nil {
+		return nil
+	}
+	var err error
+	if unlockErr := lockfile.FlockUnlock(l.file); unlockErr != nil {
+		err = unlockErr
+	}
+	if closeErr := l.file.Close(); closeErr != nil && err == nil {
+		err = closeErr
+	}
+	l.file = nil
+	if err != nil {
+		return fmt.Errorf("%s: %w", l.path, err)
+	}
+	return nil
 }
 
 // healthCheckTimeout caps the per-attempt HTTP timeout while polling
@@ -65,6 +120,7 @@ type EmbeddedFleetDB struct {
 	url      string
 	cmd      *exec.Cmd
 	redisMgr *localredis.Manager
+	runLock  *embeddedRuntimeLock
 	logger   *slog.Logger
 
 	stopOnce      sync.Once
@@ -99,6 +155,16 @@ func StartEmbedded(ctx context.Context, dataDir string, logger *slog.Logger) (*E
 	if err := os.MkdirAll(fleetDir, 0755); err != nil {
 		return nil, fmt.Errorf("embedded: mkdir %s: %w", fleetDir, err)
 	}
+	runLock, err := acquireEmbeddedRuntimeLock(fleetDir)
+	if err != nil {
+		return nil, err
+	}
+	releaseLockOnError := true
+	defer func() {
+		if releaseLockOnError {
+			_ = runLock.Release()
+		}
+	}()
 
 	snapshotPath := filepath.Join(fleetDir, "redis-snapshot.json")
 	// fleetKeys=true so the snapshot persists fleet-db's keyspace
@@ -152,6 +218,7 @@ func StartEmbedded(ctx context.Context, dataDir string, logger *slog.Logger) (*E
 		url:      "http://" + httpAddr,
 		cmd:      cmd,
 		redisMgr: redisMgr,
+		runLock:  runLock,
 		logger:   logger,
 		waitErr:  make(chan error, 1),
 		done:     make(chan struct{}),
@@ -170,6 +237,7 @@ func StartEmbedded(ctx context.Context, dataDir string, logger *slog.Logger) (*E
 			startupTimeout, err, binPath, httpAddr, redisMgr.Addr(), snapshotPath, stderrTail.String(), stdoutTail.String())
 	}
 
+	releaseLockOnError = false
 	return emb, nil
 }
 
@@ -200,6 +268,11 @@ func (e *EmbeddedFleetDB) Stop() error {
 		if e.redisMgr != nil {
 			if rerr := e.redisMgr.Close(); rerr != nil && err == nil {
 				err = fmt.Errorf("embedded: miniredis close: %w", rerr)
+			}
+		}
+		if e.runLock != nil {
+			if lerr := e.runLock.Release(); lerr != nil && err == nil {
+				err = fmt.Errorf("embedded: release runtime lock: %w", lerr)
 			}
 		}
 		close(e.done)

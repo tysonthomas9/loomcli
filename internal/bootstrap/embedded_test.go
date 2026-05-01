@@ -59,3 +59,21 @@ func TestDiagnoseFleetDBBinaryEnvRunnable(t *testing.T) {
 		t.Fatalf("Path = %q, want %q", diag.Path, path)
 	}
 }
+
+func TestEmbeddedRuntimeLockFailsFastWhenHeld(t *testing.T) {
+	fleetDir := t.TempDir()
+	first, err := acquireEmbeddedRuntimeLock(fleetDir)
+	if err != nil {
+		t.Fatalf("acquire first lock: %v", err)
+	}
+	defer first.Release()
+
+	second, err := acquireEmbeddedRuntimeLock(fleetDir)
+	if err == nil {
+		_ = second.Release()
+		t.Fatal("second lock acquired while first lock was held")
+	}
+	if !strings.Contains(err.Error(), "already running") {
+		t.Fatalf("second lock err = %v, want already running", err)
+	}
+}
