@@ -343,6 +343,30 @@ func (a *fleetDBAdapter) ClaimIssue(ctx context.Context, id string, lockTTL time
 	return a.classifyStatus("ClaimIssue", status, raw)
 }
 
+type heartbeatResult struct {
+	Success bool   `json:"success"`
+	TTL     int    `json:"ttl,omitempty"`
+	Error   string `json:"error,omitempty"`
+}
+
+func (a *fleetDBAdapter) heartbeatWorker(ctx context.Context, workerID string) (*heartbeatResult, error) {
+	if workerID == "" {
+		return nil, backend.ErrValidation("HeartbeatWorker", "workerID must not be empty")
+	}
+	raw, status, err := a.doJSON(ctx, http.MethodPost, a.wsPath("/workers/"+url.PathEscape(workerID)+"/heartbeat"), nil)
+	if err != nil {
+		return nil, backend.ErrInternal("HeartbeatWorker", "http", err)
+	}
+	if cerr := a.classifyStatus("HeartbeatWorker", status, raw); cerr != nil {
+		return nil, cerr
+	}
+	var result heartbeatResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, backend.ErrInternal("HeartbeatWorker", "decode response", err)
+	}
+	return &result, nil
+}
+
 func (a *fleetDBAdapter) Delete(ctx context.Context, params backend.DeleteParams) error {
 	if len(params.IDs) == 0 {
 		return backend.ErrValidation("Delete", "IDs must not be empty")

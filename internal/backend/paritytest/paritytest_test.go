@@ -548,6 +548,60 @@ func TestFleetDBOnlyBackendMultiActorAuditAndAuth(t *testing.T) {
 	}
 }
 
+func TestFleetDBOnlyBackendWorkerHeartbeatRenewsAndStaleRecovers(t *testing.T) {
+	fleetBE, _, mr := spawnFleetDBWithRedis(t)
+	ctx := context.Background()
+	worker, ok := fleetBE.(*fleetDBAdapter)
+	if !ok {
+		t.Fatalf("spawnFleetDB returned %T, want *fleetDBAdapter", fleetBE)
+	}
+	worker.actor = "supervisor-a"
+	other := newFleetDBAdapter(worker.baseURL, worker.workspaceID, "supervisor-b")
+
+	issue, err := worker.Create(ctx, backend.CreateParams{
+		Title:     "Heartbeat stale recovery seed",
+		Priority:  2,
+		IssueType: "task",
+		Owner:     "supervisor-a",
+	})
+	if err != nil {
+		t.Fatalf("create heartbeat seed: %v", err)
+	}
+	if err := worker.ClaimIssue(ctx, issue.ID, time.Second); err != nil {
+		t.Fatalf("initial claim: %v", err)
+	}
+
+	mr.FastForward(500 * time.Millisecond)
+	hb, err := worker.heartbeatWorker(ctx, "supervisor-a")
+	if err != nil {
+		t.Fatalf("heartbeat: %v", err)
+	}
+	if !hb.Success || hb.TTL <= 1 {
+		t.Fatalf("heartbeat result = %+v, want success with renewed TTL > original claim TTL", hb)
+	}
+
+	mr.FastForward(2 * time.Second)
+	err = other.ClaimIssue(ctx, issue.ID, time.Second)
+	if err == nil {
+		t.Fatal("other supervisor claimed after original TTL despite heartbeat renewal")
+	}
+	if !backend.IsKind(err, backend.KindConflict) {
+		t.Fatalf("claim after heartbeat error = %v, want KindConflict", err)
+	}
+
+	mr.FastForward(time.Duration(hb.TTL+1) * time.Second)
+	if err := other.ClaimIssue(ctx, issue.ID, time.Second); err != nil {
+		t.Fatalf("stale recovery claim after renewed TTL expiry: %v", err)
+	}
+	recovered, err := other.Get(ctx, issue.ID)
+	if err != nil {
+		t.Fatalf("get recovered issue: %v", err)
+	}
+	if recovered.Assignee != "supervisor-b" {
+		t.Fatalf("assignee after stale recovery = %q, want supervisor-b", recovered.Assignee)
+	}
+}
+
 func mustRawJSON(t *testing.T, value any) json.RawMessage {
 	t.Helper()
 	raw, err := json.Marshal(value)
