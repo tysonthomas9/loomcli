@@ -178,6 +178,10 @@ let resetInFlight: Promise<void> | null = null;
 export async function resetBothBackends(opts: { reseed?: boolean } = {}): Promise<void> {
     if (resetInFlight) await resetInFlight;
     resetInFlight = (async () => {
+        if (isFleetOnlyMode() && opts.reseed !== false) {
+            await resetFleetOnlyFixture();
+            return;
+        }
         const fleetWs = await discoverWorkspaceId(PARITY_URLS.fleet);
         if (isFleetOnlyMode()) {
             await deleteAllIssues(PARITY_URLS.fleet, fleetWs);
@@ -196,6 +200,81 @@ export async function resetBothBackends(opts: { reseed?: boolean } = {}): Promis
         await resetInFlight;
     } finally {
         resetInFlight = null;
+    }
+}
+
+const FLEET_SEED_ISSUES = [
+    { title: "Epic Alpha", type: "epic", priority: 2 },
+    { title: "Epic Beta", type: "epic", priority: 2 },
+    { title: "Epic Gamma", type: "epic", priority: 3 },
+    { title: "Add login flow", type: "feature", priority: 2 },
+    { title: "Fix checkout NPE", type: "bug", priority: 1 },
+    { title: "Refactor auth middleware", type: "task", priority: 3 },
+    { title: "Onboarding wizard", type: "feature", priority: 2 },
+    { title: "Cache invalidation bug", type: "bug", priority: 1 },
+    { title: "Update README", type: "task", priority: 4 },
+    { title: "Session timeout edge", type: "bug", priority: 2 },
+    { title: "Theme toggle", type: "feature", priority: 3 },
+    { title: "Flaky test: login_e2e", type: "task", priority: 2 },
+    { title: "Clarify rate limit docs", type: "task", priority: 4 },
+] as const;
+
+async function resetFleetOnlyFixture(): Promise<void> {
+    const actorHeaders = { "X-Actor": "parity-harness@fixture.local" };
+    await deleteFleetDBIssues(actorHeaders);
+    await fetch(
+        `${PARITY_URLS.fleetDB}/api/v1/admin/workspaces/${encodeURIComponent(PARITY_URLS.workspace)}?force=true`,
+        { method: "DELETE", headers: actorHeaders },
+    ).catch(() => undefined);
+
+    const createWorkspace = await fetch(`${PARITY_URLS.fleetDB}/api/v1/admin/workspaces`, {
+        method: "POST",
+        headers: { ...actorHeaders, "Content-Type": "application/json" },
+        body: JSON.stringify({
+            key: PARITY_URLS.workspace,
+            name: "Parity Fixture",
+        }),
+    });
+    if (!createWorkspace.ok && createWorkspace.status !== 409) {
+        throw new Error(`fleet-only workspace reset failed: HTTP ${createWorkspace.status} ${await createWorkspace.text()}`);
+    }
+
+    for (const issue of FLEET_SEED_ISSUES) {
+        const response = await fetch(
+            `${PARITY_URLS.fleetDB}/api/v1/${encodeURIComponent(PARITY_URLS.workspace)}/issues`,
+            {
+                method: "POST",
+                headers: { ...actorHeaders, "Content-Type": "application/json" },
+                body: JSON.stringify(issue),
+            },
+        );
+        if (!response.ok) {
+            throw new Error(`fleet-only seed failed for ${issue.title}: HTTP ${response.status} ${await response.text()}`);
+        }
+    }
+}
+
+async function deleteFleetDBIssues(actorHeaders: Record<string, string>): Promise<void> {
+    const list = await fetch(
+        `${PARITY_URLS.fleetDB}/api/v1/${encodeURIComponent(PARITY_URLS.workspace)}/issues?limit=1000`,
+        { headers: actorHeaders },
+    ).catch(() => null);
+    if (!list?.ok) return;
+
+    const body = await list.json();
+    const issues: any[] = body?.issues ?? body?.data ?? [];
+    const batchSize = 8;
+    for (let i = 0; i < issues.length; i += batchSize) {
+        await Promise.all(
+            issues.slice(i, i + batchSize).map((issue) => {
+                const id = issue.id ?? issue.ID ?? issue.issue_id;
+                if (!id) return Promise.resolve();
+                return fetch(
+                    `${PARITY_URLS.fleetDB}/api/v1/${encodeURIComponent(PARITY_URLS.workspace)}/issues/${encodeURIComponent(id)}?force=true`,
+                    { method: "DELETE", headers: actorHeaders },
+                ).catch(() => undefined);
+            }),
+        );
     }
 }
 
