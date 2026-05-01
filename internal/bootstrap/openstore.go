@@ -37,6 +37,17 @@ type StoreHandle struct {
 // Mode reports the deployment mode chosen at OpenStore time.
 func (h *StoreHandle) Mode() Mode { return h.mode }
 
+// URL reports the fleet-db base URL used by this handle.
+func (h *StoreHandle) URL() string {
+	if h == nil {
+		return ""
+	}
+	if h.embedded != nil {
+		return h.embedded.URL()
+	}
+	return os.Getenv(EnvFleetDBURL)
+}
+
 // Close shuts down the store and any subprocess it owns. Idempotent.
 func (h *StoreHandle) Close() error {
 	var firstErr error
@@ -121,4 +132,3 @@ func resolveActor() string {
 	}
 	return os.Getenv("USER")
 }
-

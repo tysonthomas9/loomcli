@@ -122,10 +122,12 @@ func StartEmbedded(ctx context.Context, dataDir string, logger *slog.Logger) (*E
 	//                                       fits embedded-miniredis equally well)
 	//   --auth-dev-mode                     accept X-Actor as identity (no JWT setup)
 	//   --authz-enabled=false               single-user mode skips RBAC
+	//   --rpc-enabled=false                 embedded mode uses HTTP only; avoid binding /var/run
 	cmd := exec.CommandContext(ctx, binPath, //nolint:gosec // binPath is from controlled discovery
 		"--redis-durability-profile=managed",
 		"--auth-dev-mode",
 		"--authz-enabled=false",
+		"--rpc-enabled=false",
 	)
 	cmd.Env = append(os.Environ(),
 		"FLEET_SERVER_ADDR="+httpAddr,
@@ -306,6 +308,9 @@ func probeFleetDBBinary(path string, checked []string, remediation string) Fleet
 		text = text[:500]
 	}
 	if err != nil {
+		if looksLikeFleetDBHelp(text) {
+			return FleetDBBinaryDiagnostic{Path: path, Checked: checked, Runnable: true, ProbeOutput: text, Remediation: remediation}
+		}
 		return FleetDBBinaryDiagnostic{
 			Path:        path,
 			Checked:     checked,
@@ -324,6 +329,12 @@ func probeFleetDBBinary(path string, checked []string, remediation string) Fleet
 		}
 	}
 	return FleetDBBinaryDiagnostic{Path: path, Checked: checked, Runnable: true, ProbeOutput: text, Remediation: remediation}
+}
+
+func looksLikeFleetDBHelp(text string) bool {
+	lower := strings.ToLower(text)
+	return strings.Contains(lower, "usage of fleet-db") ||
+		(strings.Contains(lower, "auth-dev-mode") && strings.Contains(lower, "redis-addr"))
 }
 
 // slogWriter routes child-process stdio into a slog logger so output

@@ -1,6 +1,6 @@
 # Makefile for loomcli project
 
-.PHONY: all build build-frontend build-all test test-integration test-all test-parity test-parity-cli test-fleetdb-cli test-parity-ui test-fleetdb-ui lint lint-frontend test-frontend test-e2e test-e2e-api test-e2e-api-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install install-bd help frontend sync-beads update-beads check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-no-raw-exec test-coverage test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness
+.PHONY: all build build-frontend build-all test test-integration test-all test-parity test-parity-cli test-fleetdb-cli test-fleetdb-embedded test-parity-ui test-fleetdb-ui lint lint-frontend test-frontend test-e2e test-e2e-api test-e2e-api-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install install-bd help frontend sync-beads update-beads check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-no-raw-exec test-coverage test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness
 
 # Default target
 all: build
@@ -51,6 +51,12 @@ test-parity-cli:
 test-fleetdb-cli:
 	@echo "Running fleet-db-only CLI parity harness..."
 	go test -tags parity -race -count=1 -timeout 10m -v ./internal/backend/paritytest/... -run TestCLIFleetDBOnly
+
+# Run clean-checkout embedded local mode smoke. Requires a loom binary and
+# fleet-db binary; override with LOOM_BIN=/path/to/loom FLEET_DB_BIN=/path/to/fleet-db.
+test-fleetdb-embedded: build
+	@echo "Running fleet-db-only clean checkout embedded smoke..."
+	LOOM_BIN="$(PWD)/loom" scripts/test-fleetdb-clean-checkout.sh
 
 # Run the UI Parity Test Suite (Playwright; beads :8081 vs fleet :8082).
 # Assumes docker-compose.parity.yml is already up AND seeded — the suite's
@@ -393,6 +399,7 @@ help:
 	@echo "  make test-e2e          - Run Playwright mocked e2e tests (no server)"
 	@echo "  make test-parity-ui    - Run side-by-side UI parity suite"
 	@echo "  make test-fleetdb-ui   - Run fleet-db-only UI regression suite"
+	@echo "  make test-fleetdb-embedded - Run clean-checkout embedded fleet-db smoke"
 	@echo "  make test-e2e-api      - Run Playwright API e2e tests (self-contained)"
 	@echo "  make test-e2e-api-local - Run Playwright API e2e tests (needs loom serve)"
 	@echo "  make test-e2e-integration - Run Playwright integration e2e tests (self-contained)"

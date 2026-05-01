@@ -227,7 +227,7 @@ func runServe(cmd *cobra.Command, args []string) {
 		if storeHandle != nil {
 			st = storeHandle.Store
 		}
-		cfg := buildServerConfig(monitorHandlers, fleetState, st)
+		cfg := buildServerConfig(monitorHandlers, fleetState, storeHandle)
 		if !serveNoDaemon && st == nil {
 			cfg.DaemonStartupFn = workspacemgr.EnsureDaemonsForAllWorkspaces
 		}
@@ -360,13 +360,18 @@ func buildMonitorHandlers(collectDataFn metricscmd.CollectDataFn, staleDetectorH
 	}
 }
 
-func buildServerConfig(monitorHandlers webui.MonitorHandlers, fs fleetState, s store.Store) webui.ServerConfig {
+func buildServerConfig(monitorHandlers webui.MonitorHandlers, fs fleetState, storeHandle *bootstrap.StoreHandle) webui.ServerConfig {
 	gitOps := opsimpl.NewGitOps()
 	resolvedBackend := cli.ResolveBackendName()
 	log.Printf("Terminal backend: %s", resolvedBackend)
 
 	cfg := buildCoreServerConfig(monitorHandlers, gitOps, resolvedBackend)
-	cfg.Store = s
+	if storeHandle != nil {
+		cfg.Store = storeHandle.Store
+		if url := storeHandle.URL(); url != "" {
+			cfg.IssueBackendFn = cli.WorkspaceAwareIssueBackendForURL(url, fs.clientCfg.Actor)
+		}
+	}
 	applyFleetConfig(&cfg, fs)
 	applyWorkspaceConfig(&cfg)
 	applyCORSConfig(&cfg)

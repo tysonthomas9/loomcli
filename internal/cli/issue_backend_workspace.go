@@ -20,7 +20,13 @@ import (
 // DefaultIssueBackend when ctx has no workspace or the env var is unset
 // — preserves legacy single-workspace beads behavior.
 func WorkspaceAwareIssueBackend() func(ctx context.Context) backend.IssueBackend {
-	fleetURL := os.Getenv(bootstrap.EnvFleetDBURL)
+	return WorkspaceAwareIssueBackendForURL(os.Getenv(bootstrap.EnvFleetDBURL), os.Getenv(bootstrap.EnvFleetDBActor))
+}
+
+// WorkspaceAwareIssueBackendForURL returns an IssueBackend factory scoped to a
+// concrete fleet-db base URL. Serve uses this for embedded local mode, where
+// fleet-db is running but LOOM_FLEET_DB_URL intentionally remains unset.
+func WorkspaceAwareIssueBackendForURL(fleetURL, actor string) func(ctx context.Context) backend.IssueBackend {
 	if fleetURL == "" {
 		// Local/beads mode: ctx-aware factory degenerates to the global
 		// backend. Single-workspace beads doesn't multiplex on ctx.
@@ -29,7 +35,9 @@ func WorkspaceAwareIssueBackend() func(ctx context.Context) backend.IssueBackend
 		}
 	}
 
-	actor := os.Getenv(bootstrap.EnvFleetDBActor)
+	if actor == "" {
+		actor = os.Getenv("USER")
+	}
 	var (
 		mu    sync.Mutex
 		cache = make(map[string]backend.IssueBackend)
