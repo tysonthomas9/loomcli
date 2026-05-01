@@ -53,6 +53,7 @@ const INITIAL_CONNECT_CONFIG: ReconnectConfig = {
  * loop doesn't run forever unnoticed.
  */
 const UNBOUNDED_RECONNECT_TIMEOUT_MS = 60 * 60 * 1000; // 1 h when server disables its own timeout
+const SCROLL_BOTTOM_THRESHOLD_PX = 24;
 
 export type ConnectionState =
   | "disconnected"
@@ -121,13 +122,36 @@ export const TerminalInstance = forwardRef<
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const terminalSizeRef = useRef({ cols: 80, rows: 24 });
 
+  const getViewportElement = useCallback((): HTMLElement | null => {
+    return wrapperRef.current?.querySelector<HTMLElement>(".wterm") ?? null;
+  }, []);
+
+  const distanceFromBottom = useCallback((el: HTMLElement): number => {
+    return Math.max(0, el.scrollHeight - el.scrollTop - el.clientHeight);
+  }, []);
+
+  const isViewportNearBottom = useCallback(
+    (el: HTMLElement): boolean =>
+      distanceFromBottom(el) <= SCROLL_BOTTOM_THRESHOLD_PX,
+    [distanceFromBottom],
+  );
+
+  const disableRendererBottomFollow = useCallback(() => {
+    const instance = wtermRef.current?.instance as unknown as
+      | { _shouldScrollToBottom?: boolean }
+      | null;
+    if (instance) {
+      instance._shouldScrollToBottom = false;
+    }
+  }, []);
+
   const syncViewportToBottom = useCallback(() => {
-    const el = wrapperRef.current?.querySelector<HTMLElement>(".wterm");
+    const el = getViewportElement();
     if (!el) return;
     requestAnimationFrame(() => {
       el.scrollTop = el.scrollHeight;
     });
-  }, []);
+  }, [getViewportElement]);
 
   const write = useCallback((data: string | Uint8Array) => {
     wtermRef.current?.write(data);
@@ -300,6 +324,7 @@ export const TerminalInstance = forwardRef<
       agentName,
       write,
       clearReconnectTimers,
+      syncViewportToBottom,
       startReconnectLoop,
     ],
   );
@@ -308,6 +333,44 @@ export const TerminalInstance = forwardRef<
   doConnectRef.current = doConnect;
 
   // Mount / teardown per session.
+  useEffect(() => {
+    const el = getViewportElement();
+    if (!el) return;
+
+    const handleWheel = (event: WheelEvent) => {
+      const maxScrollTop = Math.max(0, el.scrollHeight - el.clientHeight);
+      if (maxScrollTop <= 0) return;
+
+      const deltaY =
+        event.deltaMode === WheelEvent.DOM_DELTA_LINE
+          ? event.deltaY * 16
+          : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
+            ? event.deltaY * el.clientHeight
+            : event.deltaY;
+      const nextScrollTop = Math.min(
+        maxScrollTop,
+        Math.max(0, el.scrollTop + deltaY),
+      );
+      if (nextScrollTop === el.scrollTop) return;
+
+      event.preventDefault();
+      el.scrollTop = nextScrollTop;
+      if (!isViewportNearBottom(el)) {
+        disableRendererBottomFollow();
+      }
+    };
+
+    el.addEventListener("wheel", handleWheel, { passive: false });
+    return () => {
+      el.removeEventListener("wheel", handleWheel);
+    };
+  }, [
+    disableRendererBottomFollow,
+    getViewportElement,
+    isViewportNearBottom,
+    sessionName,
+  ]);
+
   useEffect(() => {
     beingKilledRef.current = false;
     hasConnectedRef.current = false;
@@ -446,7 +509,7 @@ export const TerminalInstance = forwardRef<
         }
       },
     }),
-    [focus, clearReconnectTimers, syncViewportToBottom],
+    [focus, clearReconnectTimers],
   );
 
   return (
