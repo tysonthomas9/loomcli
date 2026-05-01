@@ -3,6 +3,8 @@
 **Status:** Implementation inventory
 **Date:** 2026-05-01
 **Epic:** `loomcli-wpltp` - Fleet-db full parity before beads removal
+**Companion docs:** `docs/testing/fleetdb-acceptance-gates.md`,
+`docs/design/beads-code-classification.md`
 
 ## Scope
 
