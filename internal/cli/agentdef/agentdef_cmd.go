@@ -16,6 +16,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
+	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -28,8 +29,9 @@ var (
 	agentAddCrossRepo  bool
 	agentAddParent     string
 
-	agentListJSON bool
-	agentShowJSON bool
+	agentListJSON  bool
+	agentShowJSON  bool
+	agentStopForce bool
 )
 
 var agentdefCmd = &cobra.Command{
@@ -70,6 +72,20 @@ var agentRemoveCmd = &cobra.Command{
 	RunE:  runAgentRemove,
 }
 
+var agentStartCmd = &cobra.Command{
+	Use:   "start <NAME>",
+	Short: "Request an agent assignment to start",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runAgentStart,
+}
+
+var agentStopCmd = &cobra.Command{
+	Use:   "stop <NAME>",
+	Short: "Request an agent assignment to stop",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runAgentStop,
+}
+
 func init() {
 	agentAddCmd.Flags().StringVar(&agentAddRole, "role", "", "Role name (required)")
 	_ = agentAddCmd.MarkFlagRequired("role")
@@ -82,8 +98,9 @@ func init() {
 
 	agentListCmd.Flags().BoolVar(&agentListJSON, "json", false, "JSON output")
 	agentShowCmd.Flags().BoolVar(&agentShowJSON, "json", false, "JSON output")
+	agentStopCmd.Flags().BoolVar(&agentStopForce, "force", false, "Stop without graceful yield when handled by a local daemon")
 
-	agentdefCmd.AddCommand(agentAddCmd, agentListCmd, agentShowCmd, agentRemoveCmd)
+	agentdefCmd.AddCommand(agentAddCmd, agentListCmd, agentShowCmd, agentRemoveCmd, agentStartCmd, agentStopCmd)
 	cli.RegisterCommand(agentdefCmd)
 }
 
@@ -171,6 +188,41 @@ func runAgentRemove(_ *cobra.Command, args []string) error {
 			return fmt.Errorf("remove agent: %w", err)
 		}
 		fmt.Printf("Removed agent %s/%s\n", ws, args[0])
+		return nil
+	})
+}
+
+func runAgentStart(_ *cobra.Command, args []string) error {
+	return updateAgentDesiredState(args[0], domain.AgentDesiredRunning, domain.AgentStateActive, "start", nil)
+}
+
+func runAgentStop(_ *cobra.Command, args []string) error {
+	payload := map[string]string{}
+	if agentStopForce {
+		payload["force"] = "true"
+	}
+	return updateAgentDesiredState(args[0], domain.AgentDesiredStopped, domain.AgentStateStopped, "stop", payload)
+}
+
+func updateAgentDesiredState(name string, desired domain.AgentDesiredState, state domain.AgentState, commandType string, payload map[string]string) error {
+	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
+		if _, err := h.Store.Agents().Update(ctx, ws, name, store.AgentUpdate{
+			DesiredState: &desired,
+			State:        &state,
+		}); err != nil {
+			return fmt.Errorf("update agent desired state: %w", err)
+		}
+		if h.Store.AgentCommands() != nil {
+			if _, err := h.Store.AgentCommands().Create(ctx, store.AgentCommandCreate{
+				WorkspaceKey:  ws,
+				TargetAgentID: name,
+				Type:          commandType,
+				Payload:       payload,
+			}); err != nil {
+				return fmt.Errorf("create agent command: %w", err)
+			}
+		}
+		fmt.Printf("Requested agent %s/%s %s\n", ws, name, commandType)
 		return nil
 	})
 }

@@ -139,8 +139,11 @@ func (d *Daemon) Start() error {
 		defer d.sup.Wg.Done()
 		d.configReconciler()
 	}()
-
-	return d.sup.Start()
+	if err := d.sup.Start(); err != nil {
+		return err
+	}
+	d.startAgentCommandPoller()
+	return nil
 }
 
 // Stop gracefully shuts down the daemon.
