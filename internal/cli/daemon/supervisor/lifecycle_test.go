@@ -2033,10 +2033,12 @@ func TestBuildCommand_SessionEnvVars(t *testing.T) {
 			EmitEvent:      func(events.Event) {},
 		}
 		ap := &AgentProcess{
-			Entry:        cfgpkg.AgentEntry{Worktree: "falcon", Role: "plan"},
-			RoleConfig:   cfgpkg.RoleConfig{Description: "Built-in plan agent"},
-			WorktreePath: tmpDir,
-			Session:      sess,
+			Entry:           cfgpkg.AgentEntry{Worktree: "falcon", Role: "plan"},
+			RoleConfig:      cfgpkg.RoleConfig{Description: "Built-in plan agent"},
+			WorktreePath:    tmpDir,
+			Session:         sess,
+			AgentLeaseID:    "lease-1",
+			AgentLeaseToken: "token-1",
 		}
 
 		cmd, err := s.buildCommand(ap)
@@ -2066,6 +2068,18 @@ func TestBuildCommand_SessionEnvVars(t *testing.T) {
 		if !foundBeads {
 			t.Error("LOOM_BEADS_DIR not found in cmd.Env")
 		}
+		for _, want := range []string{"LOOM_AGENT_LEASE_ID=lease-1", "LOOM_AGENT_LEASE_TOKEN=token-1"} {
+			found := false
+			for _, env := range cmd.Env {
+				if env == want {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("%s not found in cmd.Env", want)
+			}
+		}
 	})
 
 	t.Run("nil session omits env vars", func(t *testing.T) {
@@ -2073,7 +2087,7 @@ func TestBuildCommand_SessionEnvVars(t *testing.T) {
 		// environment so cli.FilteredEnv() does not leak them into the test.
 		// t.Setenv handles restore-on-cleanup; Unsetenv removes them for the
 		// duration of this subtest.
-		for _, key := range []string{"LOOM_SESSION_ID", "LOOM_BEADS_DIR"} {
+		for _, key := range []string{"LOOM_SESSION_ID", "LOOM_BEADS_DIR", "LOOM_AGENT_LEASE_ID", "LOOM_AGENT_LEASE_TOKEN"} {
 			t.Setenv(key, "") // registers cleanup to restore original value
 			os.Unsetenv(key)  // actually remove from os.Environ()
 		}
@@ -2105,6 +2119,12 @@ func TestBuildCommand_SessionEnvVars(t *testing.T) {
 			}
 			if len(env) >= len("LOOM_BEADS_DIR=") && env[:len("LOOM_BEADS_DIR=")] == "LOOM_BEADS_DIR=" {
 				t.Errorf("LOOM_BEADS_DIR should not be in cmd.Env when session is nil, got %q", env)
+			}
+			if len(env) >= len("LOOM_AGENT_LEASE_ID=") && env[:len("LOOM_AGENT_LEASE_ID=")] == "LOOM_AGENT_LEASE_ID=" {
+				t.Errorf("LOOM_AGENT_LEASE_ID should not be in cmd.Env when session is nil, got %q", env)
+			}
+			if len(env) >= len("LOOM_AGENT_LEASE_TOKEN=") && env[:len("LOOM_AGENT_LEASE_TOKEN=")] == "LOOM_AGENT_LEASE_TOKEN=" {
+				t.Errorf("LOOM_AGENT_LEASE_TOKEN should not be in cmd.Env when session is nil, got %q", env)
 			}
 		}
 	})

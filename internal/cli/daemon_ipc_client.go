@@ -17,6 +17,9 @@ import (
 type AgentIPCClient struct {
 	SocketPath string
 	AgentName  string
+	SessionID  string
+	LeaseID    string
+	LeaseToken string
 }
 
 // NewAgentIPCClient returns an IPC client that will connect to the given socket
@@ -30,9 +33,12 @@ func NewAgentIPCClient(socketPath, agentName string) *AgentIPCClient {
 // already claimed, KindNotFound if issue missing.
 func (c *AgentIPCClient) Claim(issueID string, lockTTL time.Duration) error {
 	req := AgentIPCRequest{
-		Operation: IPCOpClaim,
-		AgentName: c.AgentName,
-		IssueID:   issueID,
+		Operation:  IPCOpClaim,
+		AgentName:  c.AgentName,
+		IssueID:    issueID,
+		SessionID:  c.SessionID,
+		LeaseID:    c.LeaseID,
+		LeaseToken: c.LeaseToken,
 	}
 
 	if lockTTL > 0 {
@@ -58,10 +64,13 @@ func (c *AgentIPCClient) Update(issueID string, params backend.UpdateParams) err
 	}
 
 	req := AgentIPCRequest{
-		Operation: IPCOpUpdate,
-		AgentName: c.AgentName,
-		IssueID:   issueID,
-		Args:      args,
+		Operation:  IPCOpUpdate,
+		AgentName:  c.AgentName,
+		IssueID:    issueID,
+		SessionID:  c.SessionID,
+		LeaseID:    c.LeaseID,
+		LeaseToken: c.LeaseToken,
+		Args:       args,
 	}
 
 	resp, err := sendAgentIPCRequest(c.SocketPath, req)
@@ -79,10 +88,13 @@ func (c *AgentIPCClient) Complete(issueID string, params backend.CloseParams) (*
 	}
 
 	req := AgentIPCRequest{
-		Operation: IPCOpComplete,
-		AgentName: c.AgentName,
-		IssueID:   issueID,
-		Args:      args,
+		Operation:  IPCOpComplete,
+		AgentName:  c.AgentName,
+		IssueID:    issueID,
+		SessionID:  c.SessionID,
+		LeaseID:    c.LeaseID,
+		LeaseToken: c.LeaseToken,
+		Args:       args,
 	}
 
 	resp, err := sendAgentIPCRequest(c.SocketPath, req)

@@ -18,10 +18,13 @@ import (
 
 // AgentIPCRequest is sent by an agent subprocess to the daemon IPC socket.
 type AgentIPCRequest struct {
-	Operation string          `json:"operation"`      // "claim", "update", "complete"
-	AgentName string          `json:"agent_name"`     // BD_ACTOR identity (required)
-	IssueID   string          `json:"issue_id"`       // target issue (required)
-	Args      json.RawMessage `json:"args,omitempty"` // operation-specific params
+	Operation  string          `json:"operation"`             // "claim", "update", "complete"
+	AgentName  string          `json:"agent_name"`            // BD_ACTOR identity (required)
+	IssueID    string          `json:"issue_id"`              // target issue (required)
+	SessionID  string          `json:"session_id,omitempty"`  // fleet-db AgentSession id
+	LeaseID    string          `json:"lease_id,omitempty"`    // fleet-db AgentLease id
+	LeaseToken string          `json:"lease_token,omitempty"` // fleet-db AgentLease token
+	Args       json.RawMessage `json:"args,omitempty"`        // operation-specific params
 }
 
 // AgentIPCResponse is sent by the daemon back to the agent subprocess.
@@ -174,6 +177,9 @@ func (d *Daemon) handleIPCClaim(req AgentIPCRequest) AgentIPCResponse {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
+	if resp, ok := d.validateIPCLease(ctx, req); !ok {
+		return resp
+	}
 	if err := d.issueBackend.ClaimIssue(ctx, req.IssueID, lockTTL); err != nil {
 		return ipcErrorResponse(err)
 	}
@@ -203,6 +209,9 @@ func (d *Daemon) handleIPCUpdate(req AgentIPCRequest) AgentIPCResponse {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
+	if resp, ok := d.validateIPCLease(ctx, req); !ok {
+		return resp
+	}
 	if err := d.issueBackend.Update(ctx, req.IssueID, params); err != nil {
 		return ipcErrorResponse(err)
 	}
@@ -231,6 +240,9 @@ func (d *Daemon) handleIPCComplete(req AgentIPCRequest) AgentIPCResponse {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
+	if resp, ok := d.validateIPCLease(ctx, req); !ok {
+		return resp
+	}
 	result, err := d.issueBackend.Close(ctx, req.IssueID, params)
 	if err != nil {
 		return ipcErrorResponse(err)
@@ -258,6 +270,29 @@ func (d *Daemon) handleIPCComplete(req AgentIPCRequest) AgentIPCResponse {
 	d.publishMutation(mut)
 
 	return AgentIPCResponse{Success: true, Data: data}
+}
+
+func (d *Daemon) validateIPCLease(ctx context.Context, req AgentIPCRequest) (AgentIPCResponse, bool) {
+	if d.store == nil || d.sup == nil || d.sup.WorkspaceID == "" {
+		return AgentIPCResponse{}, true
+	}
+	if req.SessionID == "" || req.LeaseID == "" || req.LeaseToken == "" {
+		return AgentIPCResponse{
+			Error: "session_id, lease_id, and lease_token are required for fenced daemon IPC mutations",
+			Kind:  string(backend.KindValidation),
+		}, false
+	}
+	lease, err := d.store.AgentLeases().Heartbeat(ctx, d.sup.WorkspaceID, req.LeaseID, req.LeaseToken, 2*time.Minute)
+	if err != nil {
+		return ipcErrorResponse(err), false
+	}
+	if lease.SessionID != req.SessionID || lease.AgentID != req.AgentName {
+		return AgentIPCResponse{
+			Error: "lease does not match IPC session or agent",
+			Kind:  string(backend.KindConflict),
+		}, false
+	}
+	return AgentIPCResponse{}, true
 }
 
 // ipcErrorResponse converts a backend error into an AgentIPCResponse.

@@ -132,6 +132,12 @@ func appendSessionEnv(env []string, ap *AgentProcess) []string {
 			fmt.Sprintf("LOOM_BEADS_DIR=%s", cli.GetBeadsDir()),
 		)
 	}
+	if ap.AgentLeaseID != "" && ap.AgentLeaseToken != "" {
+		env = append(env,
+			fmt.Sprintf("LOOM_AGENT_LEASE_ID=%s", ap.AgentLeaseID),
+			fmt.Sprintf("LOOM_AGENT_LEASE_TOKEN=%s", ap.AgentLeaseToken),
+		)
+	}
 	return env
 }
 

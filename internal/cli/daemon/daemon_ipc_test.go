@@ -13,8 +13,11 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli/daemon/supervisor"
+	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/events"
+	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/notify"
+	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 // mockIPCBackend is a minimal IssueBackend implementation for IPC server tests.
@@ -216,6 +219,66 @@ func TestIPCServer_ClaimSuccess(t *testing.T) {
 	}
 	if mb.claimCalls[0].LockTTL != 0 {
 		t.Errorf("claim LockTTL = %v, want 0", mb.claimCalls[0].LockTTL)
+	}
+}
+
+func TestIPCServer_ClaimRequiresValidLeaseWhenStoreBacked(t *testing.T) {
+	mb := &mockIPCBackend{}
+	d := newTestIPCDaemon(mb)
+	st := memstore.New()
+	d.store = st
+	d.sup.WorkspaceID = "WS"
+	session, err := st.AgentSessions().Create(t.Context(), store.AgentSessionCreate{
+		WorkspaceKey: "WS",
+		SessionID:    "sess-1",
+		AgentID:      "falcon",
+		NodeID:       "node-1",
+		Kind:         domain.AgentSessionKindTask,
+		Status:       domain.AgentSessionRunning,
+	})
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	lease, err := st.AgentLeases().Create(t.Context(), store.AgentLeaseCreate{
+		WorkspaceKey: "WS",
+		SessionID:    session.SessionID,
+		LeaseID:      "lease-1",
+		AgentID:      "falcon",
+		NodeID:       "node-1",
+		TTL:          time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("create lease: %v", err)
+	}
+
+	bad := d.handleIPCClaim(AgentIPCRequest{
+		Operation:  ipcOpClaim,
+		AgentName:  "falcon",
+		IssueID:    "abc-123",
+		SessionID:  session.SessionID,
+		LeaseID:    lease.LeaseID,
+		LeaseToken: "wrong",
+	})
+	if bad.Success {
+		t.Fatal("claim with bad lease token succeeded")
+	}
+	if len(mb.claimCalls) != 0 {
+		t.Fatalf("backend called for bad token: %d", len(mb.claimCalls))
+	}
+
+	good := d.handleIPCClaim(AgentIPCRequest{
+		Operation:  ipcOpClaim,
+		AgentName:  "falcon",
+		IssueID:    "abc-123",
+		SessionID:  session.SessionID,
+		LeaseID:    lease.LeaseID,
+		LeaseToken: lease.Token,
+	})
+	if !good.Success {
+		t.Fatalf("claim with valid lease failed: %s", good.Error)
+	}
+	if len(mb.claimCalls) != 1 {
+		t.Fatalf("backend claim calls = %d, want 1", len(mb.claimCalls))
 	}
 }
 

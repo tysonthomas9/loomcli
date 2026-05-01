@@ -179,6 +179,9 @@ func DefaultIssueBackend() backend.IssueBackend {
 			agentName := os.Getenv("BD_ACTOR")
 			fallback := resolveFallbackBackend()
 			ipcClient := NewAgentIPCClient(sock, agentName)
+			ipcClient.SessionID = os.Getenv("LOOM_SESSION_ID")
+			ipcClient.LeaseID = os.Getenv("LOOM_AGENT_LEASE_ID")
+			ipcClient.LeaseToken = os.Getenv("LOOM_AGENT_LEASE_TOKEN")
 			trackerInst = newIPCIssueBackend(ipcClient, fallback)
 		} else {
 			trackerInst = resolveFallbackBackend()
