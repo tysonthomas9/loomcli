@@ -100,3 +100,51 @@ type AgentSession struct {
 	CreatedAt       time.Time          `json:"created_at"`
 	UpdatedAt       time.Time          `json:"updated_at"`
 }
+
+type TerminalSessionStatus string
+
+const (
+	TerminalSessionOpen   TerminalSessionStatus = "open"
+	TerminalSessionClosed TerminalSessionStatus = "closed"
+	TerminalSessionLost   TerminalSessionStatus = "lost"
+)
+
+type TerminalSession struct {
+	WorkspaceKey    string                `json:"workspace_key"`
+	TerminalID      string                `json:"terminal_id"`
+	AgentID         string                `json:"agent_id,omitempty"`
+	SessionID       string                `json:"session_id,omitempty"`
+	NodeID          string                `json:"node_id,omitempty"`
+	TaskID          string                `json:"task_id,omitempty"`
+	Title           string                `json:"title,omitempty"`
+	Kind            string                `json:"kind,omitempty"`
+	Status          TerminalSessionStatus `json:"status"`
+	PTYProvider     string                `json:"pty_provider,omitempty"`
+	StreamRef       string                `json:"stream_ref,omitempty"`
+	TranscriptRef   string                `json:"transcript_ref,omitempty"`
+	AttachedClients int                   `json:"attached_clients,omitempty"`
+	Metadata        map[string]string     `json:"metadata,omitempty"`
+	StartedAt       time.Time             `json:"started_at"`
+	LastSeenAt      time.Time             `json:"last_seen_at,omitempty"`
+	EndedAt         *time.Time            `json:"ended_at,omitempty"`
+	CreatedAt       time.Time             `json:"created_at"`
+	UpdatedAt       time.Time             `json:"updated_at"`
+}
+
+type Artifact struct {
+	WorkspaceKey string            `json:"workspace_key"`
+	ArtifactID   string            `json:"artifact_id"`
+	AgentID      string            `json:"agent_id,omitempty"`
+	SessionID    string            `json:"session_id,omitempty"`
+	TerminalID   string            `json:"terminal_id,omitempty"`
+	TaskID       string            `json:"task_id,omitempty"`
+	Type         string            `json:"type"`
+	URI          string            `json:"uri"`
+	Summary      string            `json:"summary,omitempty"`
+	MIMEType     string            `json:"mime_type,omitempty"`
+	SizeBytes    int64             `json:"size_bytes,omitempty"`
+	Checksum     string            `json:"checksum,omitempty"`
+	Metadata     map[string]string `json:"metadata,omitempty"`
+	CreatedAt    time.Time         `json:"created_at"`
+	UpdatedAt    time.Time         `json:"updated_at"`
+}

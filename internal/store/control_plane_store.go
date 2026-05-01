@@ -83,3 +83,99 @@ type AgentSessionStore interface {
 	Heartbeat(ctx context.Context, workspaceKey, sessionID string) (*domain.AgentSession, error)
 	Update(ctx context.Context, workspaceKey, sessionID string, patch AgentSessionUpdate) (*domain.AgentSession, error)
 }
+
+type TerminalSessionCreate struct {
+	WorkspaceKey    string
+	TerminalID      string
+	AgentID         string
+	SessionID       string
+	NodeID          string
+	TaskID          string
+	Title           string
+	Kind            string
+	Status          domain.TerminalSessionStatus
+	PTYProvider     string
+	StreamRef       string
+	TranscriptRef   string
+	AttachedClients int
+	Metadata        map[string]string
+}
+
+type TerminalSessionFilter struct {
+	AgentID   string
+	SessionID string
+	NodeID    string
+	TaskID    string
+	Status    domain.TerminalSessionStatus
+	Limit     int
+}
+
+type TerminalSessionUpdate struct {
+	AgentID         *string
+	SessionID       *string
+	NodeID          *string
+	TaskID          *string
+	Title           *string
+	Kind            *string
+	Status          *domain.TerminalSessionStatus
+	PTYProvider     *string
+	StreamRef       *string
+	TranscriptRef   *string
+	AttachedClients *int
+	LastSeenAt      *time.Time
+	EndedAt         **time.Time
+	Metadata        *map[string]string
+}
+
+type TerminalSessionStore interface {
+	Create(ctx context.Context, in TerminalSessionCreate) (*domain.TerminalSession, error)
+	Get(ctx context.Context, workspaceKey, terminalID string) (*domain.TerminalSession, error)
+	List(ctx context.Context, workspaceKey string, filter TerminalSessionFilter) ([]*domain.TerminalSession, error)
+	Update(ctx context.Context, workspaceKey, terminalID string, patch TerminalSessionUpdate) (*domain.TerminalSession, error)
+}
+
+type ArtifactCreate struct {
+	WorkspaceKey string
+	ArtifactID   string
+	AgentID      string
+	SessionID    string
+	TerminalID   string
+	TaskID       string
+	Type         string
+	URI          string
+	Summary      string
+	MIMEType     string
+	SizeBytes    int64
+	Checksum     string
+	Metadata     map[string]string
+}
+
+type ArtifactFilter struct {
+	AgentID    string
+	SessionID  string
+	TerminalID string
+	TaskID     string
+	Type       string
+	Limit      int
+}
+
+type ArtifactUpdate struct {
+	AgentID    *string
+	SessionID  *string
+	TerminalID *string
+	TaskID     *string
+	Type       *string
+	URI        *string
+	Summary    *string
+	MIMEType   *string
+	SizeBytes  *int64
+	Checksum   *string
+	Metadata   *map[string]string
+}
+
+type ArtifactStore interface {
+	Create(ctx context.Context, in ArtifactCreate) (*domain.Artifact, error)
+	Get(ctx context.Context, workspaceKey, artifactID string) (*domain.Artifact, error)
+	List(ctx context.Context, workspaceKey string, filter ArtifactFilter) ([]*domain.Artifact, error)
+	Update(ctx context.Context, workspaceKey, artifactID string, patch ArtifactUpdate) (*domain.Artifact, error)
+}

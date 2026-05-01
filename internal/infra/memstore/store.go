@@ -19,6 +19,8 @@ type Store struct {
 	agents     *agentStore
 	nodes      *nodeStore
 	sessions   *agentSessionStore
+	terminals  *terminalSessionStore
+	artifacts  *artifactStore
 	roles      *roleStore
 	daemon     *daemonStore
 }
@@ -32,6 +34,8 @@ func New() *Store {
 		agents:     newAgentStore(),
 		nodes:      newNodeStore(),
 		sessions:   newAgentSessionStore(),
+		terminals:  newTerminalSessionStore(),
+		artifacts:  newArtifactStore(),
 		roles:      newRoleStore(),
 		daemon:     newDaemonStore(),
 	}
@@ -61,6 +65,10 @@ func (s *Store) Nodes() store.NodeStore { return s.nodes }
 
 // AgentSessions returns the AgentSessionStore.
 func (s *Store) AgentSessions() store.AgentSessionStore { return s.sessions }
+
+func (s *Store) TerminalSessions() store.TerminalSessionStore { return s.terminals }
+
+func (s *Store) Artifacts() store.ArtifactStore { return s.artifacts }
 
 // Roles returns the RoleStore.
 func (s *Store) Roles() store.RoleStore { return s.roles }

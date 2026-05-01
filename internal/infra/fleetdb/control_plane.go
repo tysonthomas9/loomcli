@@ -186,3 +186,160 @@ func ttlSeconds(ttl time.Duration) int {
 	}
 	return int(ttl.Round(time.Second) / time.Second)
 }
+
+type terminalSessionStore struct{ client *Client }
+
+var _ store.TerminalSessionStore = (*terminalSessionStore)(nil)
+
+func (s *terminalSessionStore) Create(ctx context.Context, in store.TerminalSessionCreate) (*domain.TerminalSession, error) {
+	body := map[string]any{
+		"terminal_id":      in.TerminalID,
+		"agent_id":         in.AgentID,
+		"session_id":       in.SessionID,
+		"node_id":          in.NodeID,
+		"task_id":          in.TaskID,
+		"title":            in.Title,
+		"kind":             in.Kind,
+		"status":           in.Status,
+		"pty_provider":     in.PTYProvider,
+		"stream_ref":       in.StreamRef,
+		"transcript_ref":   in.TranscriptRef,
+		"attached_clients": in.AttachedClients,
+		"metadata":         in.Metadata,
+	}
+	var out domain.TerminalSession
+	if err := s.client.do(ctx, "POST", "/api/v1/"+pathEscape(in.WorkspaceKey)+"/terminal-sessions", body, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (s *terminalSessionStore) Get(ctx context.Context, ws, terminalID string) (*domain.TerminalSession, error) {
+	var out domain.TerminalSession
+	if err := s.client.do(ctx, "GET", "/api/v1/"+pathEscape(ws)+"/terminal-sessions/"+pathEscape(terminalID), nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (s *terminalSessionStore) List(ctx context.Context, ws string, filter store.TerminalSessionFilter) ([]*domain.TerminalSession, error) {
+	q := url.Values{}
+	if filter.AgentID != "" {
+		q.Set("agent_id", filter.AgentID)
+	}
+	if filter.SessionID != "" {
+		q.Set("session_id", filter.SessionID)
+	}
+	if filter.NodeID != "" {
+		q.Set("node_id", filter.NodeID)
+	}
+	if filter.TaskID != "" {
+		q.Set("task_id", filter.TaskID)
+	}
+	if filter.Status != "" {
+		q.Set("status", string(filter.Status))
+	}
+	if filter.Limit > 0 {
+		q.Set("limit", strconv.Itoa(filter.Limit))
+	}
+	path := "/api/v1/" + pathEscape(ws) + "/terminal-sessions"
+	if encoded := q.Encode(); encoded != "" {
+		path += "?" + encoded
+	}
+	var resp struct {
+		TerminalSessions []*domain.TerminalSession `json:"terminal_sessions"`
+	}
+	if err := s.client.do(ctx, "GET", path, nil, &resp); err != nil {
+		return nil, err
+	}
+	if resp.TerminalSessions == nil {
+		resp.TerminalSessions = []*domain.TerminalSession{}
+	}
+	return resp.TerminalSessions, nil
+}
+
+func (s *terminalSessionStore) Update(ctx context.Context, ws, terminalID string, patch store.TerminalSessionUpdate) (*domain.TerminalSession, error) {
+	var out domain.TerminalSession
+	if err := s.client.do(ctx, "PATCH", "/api/v1/"+pathEscape(ws)+"/terminal-sessions/"+pathEscape(terminalID), patch, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+type artifactStore struct{ client *Client }
+
+var _ store.ArtifactStore = (*artifactStore)(nil)
+
+func (s *artifactStore) Create(ctx context.Context, in store.ArtifactCreate) (*domain.Artifact, error) {
+	body := map[string]any{
+		"artifact_id": in.ArtifactID,
+		"agent_id":    in.AgentID,
+		"session_id":  in.SessionID,
+		"terminal_id": in.TerminalID,
+		"task_id":     in.TaskID,
+		"type":        in.Type,
+		"uri":         in.URI,
+		"summary":     in.Summary,
+		"mime_type":   in.MIMEType,
+		"size_bytes":  in.SizeBytes,
+		"checksum":    in.Checksum,
+		"metadata":    in.Metadata,
+	}
+	var out domain.Artifact
+	if err := s.client.do(ctx, "POST", "/api/v1/"+pathEscape(in.WorkspaceKey)+"/artifacts", body, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (s *artifactStore) Get(ctx context.Context, ws, artifactID string) (*domain.Artifact, error) {
+	var out domain.Artifact
+	if err := s.client.do(ctx, "GET", "/api/v1/"+pathEscape(ws)+"/artifacts/"+pathEscape(artifactID), nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (s *artifactStore) List(ctx context.Context, ws string, filter store.ArtifactFilter) ([]*domain.Artifact, error) {
+	q := url.Values{}
+	if filter.AgentID != "" {
+		q.Set("agent_id", filter.AgentID)
+	}
+	if filter.SessionID != "" {
+		q.Set("session_id", filter.SessionID)
+	}
+	if filter.TerminalID != "" {
+		q.Set("terminal_id", filter.TerminalID)
+	}
+	if filter.TaskID != "" {
+		q.Set("task_id", filter.TaskID)
+	}
+	if filter.Type != "" {
+		q.Set("type", filter.Type)
+	}
+	if filter.Limit > 0 {
+		q.Set("limit", strconv.Itoa(filter.Limit))
+	}
+	path := "/api/v1/" + pathEscape(ws) + "/artifacts"
+	if encoded := q.Encode(); encoded != "" {
+		path += "?" + encoded
+	}
+	var resp struct {
+		Artifacts []*domain.Artifact `json:"artifacts"`
+	}
+	if err := s.client.do(ctx, "GET", path, nil, &resp); err != nil {
+		return nil, err
+	}
+	if resp.Artifacts == nil {
+		resp.Artifacts = []*domain.Artifact{}
+	}
+	return resp.Artifacts, nil
+}
+
+func (s *artifactStore) Update(ctx context.Context, ws, artifactID string, patch store.ArtifactUpdate) (*domain.Artifact, error) {
+	var out domain.Artifact
+	if err := s.client.do(ctx, "PATCH", "/api/v1/"+pathEscape(ws)+"/artifacts/"+pathEscape(artifactID), patch, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
