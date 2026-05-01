@@ -1,0 +1,226 @@
+# Fleet-db distributed smoke stack.
+#
+# Usage from the loomcli repo root:
+#   make test-distributed-smoke
+#
+# The stack intentionally runs without beads. It exercises one shared fleet-db,
+# two loom serve processes, two local supervisor heartbeat loops, and one
+# smoke runner that validates auth/audit, claim contention, SSE reconnect
+# catch-up across loom instances, and WebUI/API health.
+
+name: loomcli-distributed-smoke
+
+networks:
+  distributed:
+    driver: bridge
+
+volumes:
+  redis-data:
+    driver: local
+
+services:
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "no", "--save", ""]
+    networks: [distributed]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 1s
+      retries: 20
+
+  fleet-db:
+    image: alpine:3.20
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      FLEETDB_REDIS_ADDR: redis:6379
+      FLEETDB_BIND: ":8080"
+    command:
+      - "/usr/local/bin/fleet-db"
+      - "--redis-addr"
+      - "redis:6379"
+      - "--addr"
+      - ":8080"
+      - "--auth-dev-mode"
+      - "--authz-enabled=false"
+    volumes:
+      - ../../tmp/distributed-smoke/bin/fleet-db:/usr/local/bin/fleet-db:ro
+    networks: [distributed]
+    ports:
+      - "8090:8080"
+
+  loom-a:
+    build:
+      context: .
+      dockerfile: Dockerfile.runtime
+    depends_on:
+      - fleet-db
+    environment:
+      LOOM_ISSUE_BACKEND: fleet
+      LOOM_FLEET_URL: http://fleet-db:8080
+      LOOM_FLEET_WORKSPACE: DIST
+      LOOM_WORKSPACE: DIST
+      LOOM_AGENT_NAME: distributed-loom-a
+      LOOM_FLEET_ACTOR: distributed-loom-a
+      LOOM_FLEET_REQUIRED: "1"
+    volumes:
+      - ../../tmp/distributed-smoke/bin/loom:/usr/local/bin/loom:ro
+    command:
+      - /bin/sh
+      - -c
+      - |
+        set -e
+        cd /workspace
+        for i in $$(seq 1 60); do
+          wget -qO- "$$LOOM_FLEET_URL/healthz" >/dev/null 2>&1 && break
+          sleep 1
+        done
+        wget -qO- "$$LOOM_FLEET_URL/healthz" >/dev/null
+        curl -fsS -H "Content-Type: application/json" -H "X-Actor: distributed-loom-a" \
+          -X POST --data '{"key":"DIST","name":"Distributed Smoke","repos":["smoke-org/smoke-repo"]}' \
+          "$$LOOM_FLEET_URL/api/v1/admin/workspaces" >/dev/null 2>&1 || true
+        if [ ! -d .git ]; then
+          git init -q -b main
+          git config user.email "distributed-a@fixture.local"
+          git config user.name "distributed-a"
+          echo "distributed smoke a" > README.md
+          git add README.md
+          git commit -q -m "initial"
+        fi
+        loom workspace create DIST --repos /workspace 2>&1 | tail -3 || true
+        exec loom serve --bind 0.0.0.0 --port 8080
+    networks: [distributed]
+    ports:
+      - "8091:8080"
+
+  loom-b:
+    build:
+      context: .
+      dockerfile: Dockerfile.runtime
+    depends_on:
+      - fleet-db
+    environment:
+      LOOM_ISSUE_BACKEND: fleet
+      LOOM_FLEET_URL: http://fleet-db:8080
+      LOOM_FLEET_WORKSPACE: DIST
+      LOOM_WORKSPACE: DIST
+      LOOM_AGENT_NAME: distributed-loom-b
+      LOOM_FLEET_ACTOR: distributed-loom-b
+      LOOM_FLEET_REQUIRED: "1"
+    volumes:
+      - ../../tmp/distributed-smoke/bin/loom:/usr/local/bin/loom:ro
+    command:
+      - /bin/sh
+      - -c
+      - |
+        set -e
+        cd /workspace
+        for i in $$(seq 1 60); do
+          wget -qO- "$$LOOM_FLEET_URL/healthz" >/dev/null 2>&1 && break
+          sleep 1
+        done
+        wget -qO- "$$LOOM_FLEET_URL/healthz" >/dev/null
+        curl -fsS -H "Content-Type: application/json" -H "X-Actor: distributed-loom-b" \
+          -X POST --data '{"key":"DIST","name":"Distributed Smoke","repos":["smoke-org/smoke-repo"]}' \
+          "$$LOOM_FLEET_URL/api/v1/admin/workspaces" >/dev/null 2>&1 || true
+        if [ ! -d .git ]; then
+          git init -q -b main
+          git config user.email "distributed-b@fixture.local"
+          git config user.name "distributed-b"
+          echo "distributed smoke b" > README.md
+          git add README.md
+          git commit -q -m "initial"
+        fi
+        loom workspace create DIST --repos /workspace 2>&1 | tail -3 || true
+        exec loom serve --bind 0.0.0.0 --port 8080
+    networks: [distributed]
+    ports:
+      - "8092:8080"
+
+  supervisor-a:
+    build:
+      context: .
+      dockerfile: Dockerfile.runtime
+    depends_on:
+      - fleet-db
+    networks: [distributed]
+    command:
+      - /bin/sh
+      - -c
+      - |
+        while true; do
+          curl -fsS -X POST -H "Content-Type: application/json" -H "X-Actor: supervisor-a" --data '{}' \
+            http://fleet-db:8080/api/v1/DIST/workers/supervisor-a/heartbeat >/dev/null || true
+          sleep 5
+        done
+
+  supervisor-b:
+    build:
+      context: .
+      dockerfile: Dockerfile.runtime
+    depends_on:
+      - fleet-db
+    networks: [distributed]
+    command:
+      - /bin/sh
+      - -c
+      - |
+        while true; do
+          curl -fsS -X POST -H "Content-Type: application/json" -H "X-Actor: supervisor-b" --data '{}' \
+            http://fleet-db:8080/api/v1/DIST/workers/supervisor-b/heartbeat >/dev/null || true
+          sleep 5
+        done
+
+  ui-a:
+    image: docker.io/library/caddy:2-alpine
+    depends_on:
+      - loom-a
+    environment:
+      FRONTEND_PORT: "8080"
+      LOOM_UPSTREAM: http://loom-a:8080
+    networks: [distributed]
+    ports:
+      - "8093:8080"
+    volumes:
+      - ../parity/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ../../internal/webui/frontend/dist:/srv:ro
+
+  ui-b:
+    image: docker.io/library/caddy:2-alpine
+    depends_on:
+      - loom-b
+    environment:
+      FRONTEND_PORT: "8080"
+      LOOM_UPSTREAM: http://loom-b:8080
+    networks: [distributed]
+    ports:
+      - "8094:8080"
+    volumes:
+      - ../parity/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ../../internal/webui/frontend/dist:/srv:ro
+
+  distributed-smoke:
+    build:
+      context: .
+      dockerfile: Dockerfile.smoke
+    depends_on:
+      - fleet-db
+      - loom-a
+      - loom-b
+      - supervisor-a
+      - supervisor-b
+      - ui-a
+      - ui-b
+    environment:
+      WORKSPACE: DIST
+      FLEET_URL: http://fleet-db:8080
+      LOOM_A_URL: http://loom-a:8080
+      LOOM_B_URL: http://loom-b:8080
+      UI_A_URL: http://ui-a:8080
+      UI_B_URL: http://ui-b:8080
+    networks: [distributed]
+    restart: "no"

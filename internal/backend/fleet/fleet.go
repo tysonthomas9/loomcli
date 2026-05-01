@@ -1179,6 +1179,14 @@ func normalizeFleetCursor(cursor string) string {
 	return fleetCursorZero
 }
 
+func normalizeFleetCursorForV2(cursor string) string {
+	cursor = normalizeFleetCursor(cursor)
+	if cursor == fleetCursorZero {
+		return fleetCursorZero
+	}
+	return fleetOpaqueCursorPrefix + base64.RawURLEncoding.EncodeToString([]byte(cursor))
+}
+
 func isFleetStreamID(cursor string) bool {
 	parts := strings.Split(cursor, "-")
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
@@ -1197,7 +1205,7 @@ func isFleetStreamID(cursor string) bool {
 
 func (b *FleetBackend) getMutationsAfter(ctx context.Context, op string, since string, timeoutMs int64) ([]backend.MutationData, error) {
 	params := url.Values{}
-	params.Set("since", normalizeFleetCursor(since))
+	params.Set("since", normalizeFleetCursorForV2(since))
 	if timeoutMs > 0 {
 		params.Set("timeout", strconv.FormatInt(timeoutMs, 10))
 	}

@@ -1,6 +1,6 @@
 # Makefile for loomcli project
 
-.PHONY: all build build-frontend build-all test test-integration test-all test-parity test-parity-cli test-fleetdb-cli test-fleetdb-embedded test-parity-ui test-fleetdb-ui lint lint-frontend test-frontend test-e2e test-e2e-api test-e2e-api-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install install-bd help frontend sync-beads update-beads check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-no-raw-exec test-coverage test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness
+.PHONY: all build build-frontend build-all test test-integration test-all test-parity test-parity-cli test-fleetdb-cli test-fleetdb-embedded test-parity-ui test-fleetdb-ui test-distributed-smoke lint lint-frontend test-frontend test-e2e test-e2e-api test-e2e-api-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install install-bd help frontend sync-beads update-beads check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-no-raw-exec test-coverage test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness
 
 # Default target
 all: build
@@ -96,6 +96,37 @@ test-fleetdb-ui:
 	    npx playwright install --with-deps chromium || exit 1; \
 	  fi && \
 	  PARITY_MODE=fleet-only npx playwright test
+
+# Run the fleet-db distributed smoke stack: shared fleet-db/Redis, two loom
+# serve processes, two local supervisor heartbeat loops, and a one-shot smoke
+# runner that reports auth, claim contention, SSE reconnect catch-up, and WebUI
+# health. Builds local static loom/fleet-db binaries, then mounts them into
+# small runtime containers. Override FLEET_DB_REPO if the sibling repo is not at
+# ../../fleet-db. Falls back to Podman Compose when Docker is unavailable.
+test-distributed-smoke:
+	@echo "Running fleet-db distributed smoke..."
+	@mkdir -p "$(DISTRIBUTED_SMOKE_BIN)"
+	@echo "[distributed-smoke] building loom binary..."
+	@CGO_ENABLED=0 go build -o "$(DISTRIBUTED_SMOKE_BIN)/loom" ./cmd/loom
+	@echo "[distributed-smoke] building fleet-db binary from $(FLEET_DB_REPO)..."
+	@cd "$(FLEET_DB_REPO)" && CGO_ENABLED=0 go build -o "$(DISTRIBUTED_SMOKE_BIN)/fleet-db" ./cmd/fleet-db
+	@set +e; \
+	if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then \
+	  compose="docker compose"; \
+	elif command -v podman >/dev/null 2>&1 && podman compose version >/dev/null 2>&1; then \
+	  compose="podman compose"; \
+	else \
+	  echo "docker compose or podman compose is required" >&2; \
+	  exit 127; \
+	fi; \
+	compose="$$compose -f test/distributed/docker-compose.smoke.yml"; \
+	trap "$$compose down -v --remove-orphans" EXIT; \
+	$$compose build; \
+	status=$$?; \
+	if [ $$status -ne 0 ]; then exit $$status; fi; \
+	$$compose up --abort-on-container-exit --exit-code-from distributed-smoke distributed-smoke; \
+	status=$$?; \
+	exit $$status
 
 # Run tests with race detector and coverage
 test-race-cover:
@@ -224,6 +255,8 @@ clean:
 
 # Frontend directory
 FRONTEND_DIR := internal/webui/frontend
+FLEET_DB_REPO ?= ../../fleet-db
+DISTRIBUTED_SMOKE_BIN := $(CURDIR)/tmp/distributed-smoke/bin
 
 # Git hooks directory (resolves correctly in both regular repos and worktrees)
 GIT_HOOKS_DIR := $(shell git rev-parse --git-path hooks)
@@ -400,6 +433,7 @@ help:
 	@echo "  make test-parity-ui    - Run side-by-side UI parity suite"
 	@echo "  make test-fleetdb-ui   - Run fleet-db-only UI regression suite"
 	@echo "  make test-fleetdb-embedded - Run clean-checkout embedded fleet-db smoke"
+	@echo "  make test-distributed-smoke - Run fleet-db distributed compose smoke"
 	@echo "  make test-e2e-api      - Run Playwright API e2e tests (self-contained)"
 	@echo "  make test-e2e-api-local - Run Playwright API e2e tests (needs loom serve)"
 	@echo "  make test-e2e-integration - Run Playwright integration e2e tests (self-contained)"

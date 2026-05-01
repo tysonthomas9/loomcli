@@ -2,6 +2,7 @@ package fleet
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -1922,8 +1923,26 @@ func TestGetMutationsAfter_PreservesRedisStreamCursor(t *testing.T) {
 	if _, err := fb.GetMutationsAfter(context.Background(), "1700000000000-0"); err != nil {
 		t.Fatalf("GetMutationsAfter: %v", err)
 	}
-	if gotSince != "1700000000000-0" {
-		t.Fatalf("since = %q, want native Redis cursor", gotSince)
+	want := fleetOpaqueCursorPrefix + base64.RawURLEncoding.EncodeToString([]byte("1700000000000-0"))
+	if gotSince != want {
+		t.Fatalf("since = %q, want opaque cursor %q", gotSince, want)
+	}
+}
+
+func TestGetMutationsAfter_PreservesOpaqueCursor(t *testing.T) {
+	var gotSince string
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		gotSince = r.URL.Query().Get("since")
+		respondOK(w, fleetMutationsResponse{Events: []fleetMutationEvent{}, Cursor: "1700000000000-1"})
+	})
+	defer ts.Close()
+
+	want := fleetOpaqueCursorPrefix + base64.RawURLEncoding.EncodeToString([]byte("1700000000000-0"))
+	if _, err := fb.GetMutationsAfter(context.Background(), want); err != nil {
+		t.Fatalf("GetMutationsAfter: %v", err)
+	}
+	if gotSince != want {
+		t.Fatalf("since = %q, want opaque cursor preserved", gotSince)
 	}
 }
 
@@ -1938,8 +1957,9 @@ func TestWaitForMutationsAfter_IntegerCursorAddsRedisSequence(t *testing.T) {
 	if _, err := fb.WaitForMutationsAfter(context.Background(), "1700000000000", 1000); err != nil {
 		t.Fatalf("WaitForMutationsAfter: %v", err)
 	}
-	if gotSince != "1700000000000-0" {
-		t.Fatalf("since = %q, want integer cursor normalized to Redis stream ID", gotSince)
+	want := fleetOpaqueCursorPrefix + base64.RawURLEncoding.EncodeToString([]byte("1700000000000-0"))
+	if gotSince != want {
+		t.Fatalf("since = %q, want integer cursor normalized to opaque stream ID %q", gotSince, want)
 	}
 }
 
