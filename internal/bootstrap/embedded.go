@@ -10,6 +10,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -25,6 +27,17 @@ const EnvFleetDBBin = "FLEET_DB_BIN"
 // fleetDBBinName is the executable name used in PATH lookup and standard
 // install locations.
 const fleetDBBinName = "fleet-db"
+
+// FleetDBBinaryDiagnostic describes embedded fleet-db binary discovery in a
+// form suitable for doctor output and startup errors.
+type FleetDBBinaryDiagnostic struct {
+	Path        string
+	Checked     []string
+	Runnable    bool
+	ProbeOutput string
+	Err         error
+	Remediation string
+}
 
 // healthCheckTimeout caps the per-attempt HTTP timeout while polling
 // /healthz. Long enough for slow startup, short enough to detect a
@@ -73,9 +86,13 @@ func StartEmbedded(ctx context.Context, dataDir string, logger *slog.Logger) (*E
 		logger = slog.Default()
 	}
 
-	binPath, err := DiscoverFleetDBBinary()
-	if err != nil {
-		return nil, err
+	diag := DiagnoseFleetDBBinary()
+	if diag.Err != nil {
+		return nil, diag.Err
+	}
+	binPath := diag.Path
+	if !diag.Runnable {
+		return nil, fmt.Errorf("embedded: fleet-db binary %s is not runnable. %s", binPath, diag.Remediation)
 	}
 
 	fleetDir := filepath.Join(dataDir, "fleet-db")
@@ -116,8 +133,10 @@ func StartEmbedded(ctx context.Context, dataDir string, logger *slog.Logger) (*E
 	)
 	// Pipe stderr/stdout into the loom logger so the user sees fleet-db
 	// startup errors in their loom serve log.
-	cmd.Stdout = newSlogWriter(logger, slog.LevelDebug, "fleet-db")
-	cmd.Stderr = newSlogWriter(logger, slog.LevelInfo, "fleet-db")
+	stdoutTail := newTailWriter(4096)
+	stderrTail := newTailWriter(4096)
+	cmd.Stdout = io.MultiWriter(newSlogWriter(logger, slog.LevelDebug, "fleet-db"), stdoutTail)
+	cmd.Stderr = io.MultiWriter(newSlogWriter(logger, slog.LevelInfo, "fleet-db"), stderrTail)
 	// New process group so SIGINT to loom doesn't double-fire to fleet-db.
 	cmd.SysProcAttr = newDetachedSysProcAttr()
 
@@ -145,7 +164,8 @@ func StartEmbedded(ctx context.Context, dataDir string, logger *slog.Logger) (*E
 	defer healthCancel()
 	if err := netutil.WaitForHealthz(healthCtx, emb.url, healthCheckTimeout); err != nil {
 		_ = emb.Stop()
-		return nil, fmt.Errorf("embedded: fleet-db not ready after %s: %w", startupTimeout, err)
+		return nil, fmt.Errorf("embedded: fleet-db not ready after %s: %w (binary=%s addr=%s redis=%s snapshot=%s stderr=%q stdout=%q)",
+			startupTimeout, err, binPath, httpAddr, redisMgr.Addr(), snapshotPath, stderrTail.String(), stdoutTail.String())
 	}
 
 	return emb, nil
@@ -214,30 +234,97 @@ func (e *EmbeddedFleetDB) reapAndPublish() {
 //  3. Sibling of the loom binary (filepath.Dir(os.Args[0])/fleet-db)
 //  4. <LoomDir>/bin/fleet-db
 func DiscoverFleetDBBinary() (string, error) {
+	diag := DiagnoseFleetDBBinary()
+	if diag.Err != nil {
+		return "", diag.Err
+	}
+	return diag.Path, nil
+}
+
+// DiagnoseFleetDBBinary locates and probes the embedded fleet-db executable.
+func DiagnoseFleetDBBinary() FleetDBBinaryDiagnostic {
+	var checked []string
+	remediation := fmt.Sprintf("Install fleet-db on PATH, set %s=/path/to/fleet-db, or place it at %s.", EnvFleetDBBin, filepath.Join("<loom-dir>", "bin", fleetDBBinName))
+
 	if p := os.Getenv(EnvFleetDBBin); p != "" {
-		if _, err := os.Stat(p); err != nil {
-			return "", fmt.Errorf("%s=%s: %w", EnvFleetDBBin, p, err)
+		checked = append(checked, EnvFleetDBBin+"="+p)
+		if err := validateFleetDBBinaryPath(p); err != nil {
+			return FleetDBBinaryDiagnostic{Path: p, Checked: checked, Err: fmt.Errorf("%s=%s: %w. %s", EnvFleetDBBin, p, err, remediation), Remediation: remediation}
 		}
-		return p, nil
+		return probeFleetDBBinary(p, checked, remediation)
 	}
 	if p, err := exec.LookPath(fleetDBBinName); err == nil {
-		return p, nil
+		checked = append(checked, "PATH:"+p)
+		if err := validateFleetDBBinaryPath(p); err == nil {
+			return probeFleetDBBinary(p, checked, remediation)
+		}
+	} else {
+		checked = append(checked, "PATH:"+fleetDBBinName)
 	}
 	if exe, err := os.Executable(); err == nil {
 		sibling := filepath.Join(filepath.Dir(exe), fleetDBBinName)
-		if _, err := os.Stat(sibling); err == nil {
-			return sibling, nil
+		checked = append(checked, sibling)
+		if err := validateFleetDBBinaryPath(sibling); err == nil {
+			return probeFleetDBBinary(sibling, checked, remediation)
 		}
 	}
 	if dir := LoomDir(); dir != "" {
 		bundled := filepath.Join(dir, "bin", fleetDBBinName)
-		if _, err := os.Stat(bundled); err == nil {
-			return bundled, nil
+		checked = append(checked, bundled)
+		if err := validateFleetDBBinaryPath(bundled); err == nil {
+			return probeFleetDBBinary(bundled, checked, remediation)
 		}
 	}
-	return "", fmt.Errorf("fleet-db binary not found (set %s, install on PATH, or place at <loom-dir>/bin/%s)", EnvFleetDBBin, fleetDBBinName)
+	return FleetDBBinaryDiagnostic{
+		Checked:     checked,
+		Err:         fmt.Errorf("fleet-db binary not found; checked %s. %s", strings.Join(checked, ", "), remediation),
+		Remediation: remediation,
+	}
 }
 
+func validateFleetDBBinaryPath(path string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	if info.IsDir() {
+		return fmt.Errorf("is a directory")
+	}
+	if runtime.GOOS != "windows" && info.Mode()&0111 == 0 {
+		return fmt.Errorf("not executable")
+	}
+	return nil
+}
+
+func probeFleetDBBinary(path string, checked []string, remediation string) FleetDBBinaryDiagnostic {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, path, "--help") //nolint:gosec // path was validated by discovery
+	out, err := cmd.CombinedOutput()
+	text := strings.TrimSpace(string(out))
+	if len(text) > 500 {
+		text = text[:500]
+	}
+	if err != nil {
+		return FleetDBBinaryDiagnostic{
+			Path:        path,
+			Checked:     checked,
+			ProbeOutput: text,
+			Err:         fmt.Errorf("fleet-db binary %s is not runnable: %w. %s", path, err, remediation),
+			Remediation: remediation,
+		}
+	}
+	if !strings.Contains(strings.ToLower(text), "fleet") {
+		return FleetDBBinaryDiagnostic{
+			Path:        path,
+			Checked:     checked,
+			ProbeOutput: text,
+			Err:         fmt.Errorf("fleet-db binary %s probe output did not look like fleet-db. %s", path, remediation),
+			Remediation: remediation,
+		}
+	}
+	return FleetDBBinaryDiagnostic{Path: path, Checked: checked, Runnable: true, ProbeOutput: text, Remediation: remediation}
+}
 
 // slogWriter routes child-process stdio into a slog logger so output
 // lands in loom's structured log instead of disappearing or polluting
@@ -256,6 +343,32 @@ const maxLineBuffer = 64 * 1024
 
 func newSlogWriter(logger *slog.Logger, level slog.Level, source string) io.Writer {
 	return &slogWriter{logger: logger, level: level, source: source}
+}
+
+type tailWriter struct {
+	mu  sync.Mutex
+	buf []byte
+	max int
+}
+
+func newTailWriter(max int) *tailWriter {
+	return &tailWriter{max: max}
+}
+
+func (w *tailWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.buf = append(w.buf, p...)
+	if len(w.buf) > w.max {
+		w.buf = append([]byte(nil), w.buf[len(w.buf)-w.max:]...)
+	}
+	return len(p), nil
+}
+
+func (w *tailWriter) String() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return strings.TrimSpace(string(w.buf))
 }
 
 func (w *slogWriter) Write(p []byte) (int, error) {

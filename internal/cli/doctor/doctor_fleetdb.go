@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/kv"
@@ -34,6 +36,9 @@ func checkIssueBackend() CheckResult {
 }
 
 func checkFleetDB() CheckResult {
+	if bootstrap.DetectMode() == bootstrap.ModeLocal {
+		return checkEmbeddedFleetDB()
+	}
 	dc, err := cfgpkg.LoadDaemonConfig(cli.GetBeadsDir())
 	if err != nil {
 		cfg, _ := cfgpkg.ResolveFleetDBConfig(&cfgpkg.DaemonSettings{})
@@ -41,6 +46,24 @@ func checkFleetDB() CheckResult {
 	}
 	cfg, _ := cfgpkg.ResolveFleetDBConfig(&dc.Daemon)
 	return reportFleetDBConfig(cfg)
+}
+
+func checkEmbeddedFleetDB() CheckResult {
+	diag := bootstrap.DiagnoseFleetDBBinary()
+	if diag.Err != nil {
+		return CheckResult{
+			Name:    "fleetdb",
+			Status:  StatusFail,
+			Summary: "embedded fleet-db binary is not ready",
+			Detail:  fmt.Sprintf("%v\nchecked: %s\nremediation: %s", diag.Err, strings.Join(diag.Checked, ", "), diag.Remediation),
+		}
+	}
+	return CheckResult{
+		Name:    "fleetdb",
+		Status:  StatusPass,
+		Summary: fmt.Sprintf("embedded fleet-db ready (%s)", diag.Path),
+		Detail:  fmt.Sprintf("checked: %s", strings.Join(diag.Checked, ", ")),
+	}
 }
 
 func reportFleetDBConfig(cfg cfgpkg.FleetDBServerConfig) CheckResult {
