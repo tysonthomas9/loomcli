@@ -1,5 +1,5 @@
 // Package data contains the `loom data ...` command subtree — thin CLI
-// commands that interact with a running loom server over HTTP exclusively.
+// commands that interact with local and remote loom issue backends.
 //
 // Unlike the legacy top-level commands (`loom show`, `loom list`,
 // `loom monitor`, etc.) which operate on local state via daemon RPC and
@@ -25,8 +25,9 @@
 // Instead, it exports Commands() which cmd/loom/main.go consumes and
 // registers explicitly.
 //
-// Server selection: every command in this subtree requires either the
-// --server flag or the LOOM_SERVER_URL environment variable. The --workspace
-// flag / LOOM_WORKSPACE env var selects the target workspace; if unset the
-// package discovers it via GET /api/workspaces/active on the server.
+// Server selection: commands use --server or LOOM_SERVER_URL when present.
+// Without a server, issue commands use an injected local backend provider.
+// The --workspace flag / LOOM_WORKSPACE env var selects the target remote
+// workspace; if unset the package discovers it via GET /api/workspaces/active
+// on the server.
 package data

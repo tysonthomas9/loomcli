@@ -1,11 +1,13 @@
 package data
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"os"
 	"sync"
 
+	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/backend/api"
 	"github.com/tysonthomas9/loomcli/internal/httpclient"
 )
@@ -26,7 +28,18 @@ var (
 	httpCli     *http.Client
 	rawHC       *httpclient.Client //nolint:unused // kept for future direct Do() access (e.g. SSE)
 	resolvedURL string
+
+	providerMu                sync.Mutex
+	localIssueBackendProvider func(context.Context) backend.IssueBackend
 )
+
+// SetLocalIssueBackendProvider wires the non-HTTP backend used by issue
+// commands when no --server/LOOM_SERVER_URL is configured.
+func SetLocalIssueBackendProvider(provider func(context.Context) backend.IssueBackend) {
+	providerMu.Lock()
+	defer providerMu.Unlock()
+	localIssueBackendProvider = provider
+}
 
 // getHTTPClient returns the lazily-initialized *http.Client that wraps
 // internal/httpclient.Client via api.AuthTransport. It also returns the
@@ -59,6 +72,38 @@ func getHTTPClient() (*http.Client, string, error) {
 	httpCli = api.NewAuthHTTPClient(hc)
 	resolvedURL = url
 	return httpCli, resolvedURL, nil
+}
+
+func configuredServerURL() string {
+	if serverURL != "" {
+		return serverURL
+	}
+	return os.Getenv("LOOM_SERVER_URL")
+}
+
+func getIssueBackend(ctx context.Context) (backend.IssueBackend, error) {
+	if configuredServerURL() == "" {
+		providerMu.Lock()
+		provider := localIssueBackendProvider
+		providerMu.Unlock()
+		if provider == nil {
+			return nil, fmt.Errorf("loom data issue commands require --server/LOOM_SERVER_URL or a local backend provider")
+		}
+		ib := provider(ctx)
+		if ib == nil {
+			return nil, fmt.Errorf("local issue backend provider returned nil")
+		}
+		return ib, nil
+	}
+	cli, url, err := getHTTPClient()
+	if err != nil {
+		return nil, err
+	}
+	wsID, err := resolveWorkspaceID(ctx, cli, url)
+	if err != nil {
+		return nil, err
+	}
+	return api.New(api.Config{BaseURL: url, WorkspaceID: wsID, HTTPClient: cli})
 }
 
 // resetClient clears the singleton state so a fresh client can be

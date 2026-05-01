@@ -1,9 +1,11 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 
+	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/data"
 
@@ -32,6 +34,9 @@ import (
 // itself via init() like other sub-packages. Instead it exports Commands()
 // which we register explicitly from main.
 func init() {
+	data.SetLocalIssueBackendProvider(func(_ context.Context) backend.IssueBackend {
+		return cli.DefaultIssueBackend()
+	})
 	for _, c := range data.Commands() {
 		cli.RegisterCommand(c)
 	}

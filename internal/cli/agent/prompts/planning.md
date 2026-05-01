@@ -9,11 +9,11 @@ Follow this workflow EXACTLY for ONE task.
 - Run this command to find tasks needing planning (no design yet OR needs revision):
   {{ .BdReadyJSON }} | jq -r '.[] | select(.status == "open") | select((.issue_type == "epic") | not) | select((.design == null or .design == "") or ((.labels // []) | index("needs-revision"))) | "\(.id) [\(.priority)] \(.title)"'
 - If jq fails, fallback: Run '{{ .BdReadyFallback }}' and manually SKIP epics and tasks that already have a --design field (unless they have the 'needs-revision' label)
-- SKIP any task already 'in_progress' by checking 'bd list --status=in_progress'
+- SKIP any task already 'in_progress' by checking 'loom data list --status in_progress'
 - IGNORE existing assignees - if status is 'open', the task is available to claim
 - Pick the HIGHEST PRIORITY task (P0 > P1 > P2 > P3 > P4)
-- Run 'bd show <id>' to understand the task requirements
-- Run 'bd update <id> --claim' to claim it (atomic - prevents race conditions)
+- Run 'loom data show <id>' to understand the task requirements
+- Run 'loom data claim <id>' to claim it (atomic - prevents race conditions)
 - If claim fails with 'already claimed by X', pick the next highest priority task
 - Run 'loom claim <id>' to register the task with the agent monitor
 - REMEMBER this task ID
@@ -22,7 +22,7 @@ Follow this workflow EXACTLY for ONE task.
 
 ### Step 1.5: Check if This is a Revision
 Check the task's labels for 'needs-revision':
-- Run 'bd show <id> --json' and check the labels field
+- Run 'loom data show <id> --output json' and check the labels field
 
 **If the task has a 'needs-revision' label:**
 - This is a REVISION - a previous design was rejected
@@ -40,16 +40,16 @@ Before writing any plan, you MUST build context from three sources: the epic, si
 #### 2a. Read the Epic
 
 Understand the big picture before designing a piece of it:
-- Determine the parent epic from the task ID (e.g., `loomcli-abc.5` -> parent is `loomcli-abc`) or from `bd show <id> --json` parent field
-- Run `bd show <epic-id>` to read the epic's title, description, and notes
+- Determine the parent epic from the task ID (e.g., `loomcli-abc.5` -> parent is `loomcli-abc`) or from `loom data show <id> --output json` parent field
+- Run `loom data show <epic-id>` to read the epic's title, description, and notes
 - The epic notes may contain architectural decisions, naming conventions, or scope boundaries — these are **authoritative**. Your design must conform to them.
 - If the epic has no notes, proceed — but be aware that you are establishing conventions that sibling tasks must follow
 
 #### 2b. Read Sibling Task Designs
 
 Check what other tasks in this epic have already decided:
-- Run: `bd list --parent <epic-id> --json | jq -r '.[] | select(.design and .design != "") | "\(.id) \(.title)"'`
-- For each sibling that has a design, run `bd show <sibling-id>` and read its design
+- Run: `loom data list --parent <epic-id> --output json | jq -r '.[] | select(.design and .design != "") | "\(.id) \(.title)"'`
+- For each sibling that has a design, run `loom data show <sibling-id>` and read its design
 - Extract and note:
   - **Naming conventions**: sentinel values, fallback constants, key prefixes
   - **Identity patterns**: what type of ID is used (UUID, name, slug), how empty/missing is handled
@@ -135,7 +135,7 @@ Write a comprehensive plan that includes:
 ### Step 4: Save the Plan
 Save your plan to the task's design field:
 ```
-bd update <id> --design="<your complete plan here>"
+loom data update <id> --design="<your complete plan here>"
 ```
 
 IMPORTANT: Make sure the plan is complete and detailed enough that another agent
@@ -148,17 +148,16 @@ Set the task status to 'review' and clear the assignee:
 bd label remove <id> needs-revision
 
 # Then mark for review:
-bd update <id> --status review --assignee=""
+loom data update <id> --status review --assignee=""
 ```
 
 This puts the task in review status where:
-- It won't appear in 'bd ready' (filtered out)
-- The lead can find it with 'bd list --status=review'
+- It won't appear in 'loom data ready' (filtered out)
+- The lead can find it with 'loom data list --status review'
 - Other agents won't accidentally pick it up
 
 ### Step 6: Signal Completion and Exit
 ```
-bd sync
 loom complete
 ```
 
@@ -172,7 +171,7 @@ After completing Step 6, you are DONE.
 - Simply EXIT
 
 You have completed ONE planning task. The human will:
-1. Review your plan with 'bd list --status=review' then 'bd show <id>'
+1. Review your plan with 'loom data list --status review' then 'loom data show <id>'
 2. Either approve it (set status back to open) or request changes
 3. Run an implementation agent separately
 

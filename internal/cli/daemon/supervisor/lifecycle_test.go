@@ -2039,6 +2039,7 @@ func TestBuildCommand_SessionEnvVars(t *testing.T) {
 			Session:         sess,
 			AgentLeaseID:    "lease-1",
 			AgentLeaseToken: "token-1",
+			AssignedTaskID:  "task-1",
 		}
 
 		cmd, err := s.buildCommand(ap)
@@ -2068,7 +2069,7 @@ func TestBuildCommand_SessionEnvVars(t *testing.T) {
 		if !foundBeads {
 			t.Error("LOOM_BEADS_DIR not found in cmd.Env")
 		}
-		for _, want := range []string{"LOOM_AGENT_LEASE_ID=lease-1", "LOOM_AGENT_LEASE_TOKEN=token-1"} {
+		for _, want := range []string{"LOOM_AGENT_LEASE_ID=lease-1", "LOOM_AGENT_LEASE_TOKEN=token-1", "LOOM_ASSIGNED_TASK_ID=task-1"} {
 			found := false
 			for _, env := range cmd.Env {
 				if env == want {

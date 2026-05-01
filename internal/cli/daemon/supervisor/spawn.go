@@ -47,6 +47,13 @@ func (s *Supervisor) buildCommand(ap *AgentProcess) (*exec.Cmd, error) {
 		cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_SOURCE_REPOS=%s", strings.Join(sourceRepos, ",")))
 	}
 
+	ap.Mu.Lock()
+	assignedTaskID := ap.AssignedTaskID
+	ap.Mu.Unlock()
+	if assignedTaskID != "" {
+		cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_ASSIGNED_TASK_ID=%s", assignedTaskID))
+	}
+
 	cmd.Env = s.appendDaemonEnv(cmd.Env)
 	cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_YIELD_FILE=%s", filepath.Join(ap.WorktreePath, YieldFileName)))
 	cmd.Env = appendSessionEnv(cmd.Env, ap)

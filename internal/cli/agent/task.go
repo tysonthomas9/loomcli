@@ -127,6 +127,9 @@ func runTaskDaemon(deps *cli.Deps, worktreePath, agentName string) {
 
 	ws, _ := config.ResolveActiveWorkspace()
 	prompt := GenerateTaskPrompt(agentName, ws, taskParentID, cli.GetBackendName())
+	if assignedTaskID := os.Getenv("LOOM_ASSIGNED_TASK_ID"); assignedTaskID != "" {
+		prompt = GenerateFleetTaskPrompt(agentName, assignedTaskID, ws, cli.GetBackendName())
+	}
 	sess := adoptOrCreateSession(agentName, taskParentID, prompt, "implementation")
 
 	beforeRef := automode.CaptureHEADRef(worktreePath)

@@ -133,6 +133,9 @@ func runPlanDaemon(deps *cli.Deps, worktreePath, agentName string) {
 
 	ws, _ := config.ResolveActiveWorkspace()
 	prompt := GeneratePlanningPrompt(agentName, ws, planParentID)
+	if assignedTaskID := os.Getenv("LOOM_ASSIGNED_TASK_ID"); assignedTaskID != "" {
+		prompt = GenerateFleetPlanningPrompt(agentName, assignedTaskID, ws)
+	}
 	sess := adoptOrCreateSession(agentName, planParentID, prompt, "planning")
 
 	beforeRef := automode.CaptureHEADRef(worktreePath)

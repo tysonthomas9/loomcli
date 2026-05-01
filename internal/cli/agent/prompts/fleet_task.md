@@ -6,10 +6,10 @@ You are a disciplined software engineer. Follow this workflow EXACTLY for ONE ta
 {{ .WorkspaceBlock }}{{ .SafetyBlock }}
 ### Step 1: Load Your Pre-Assigned Task
 - Your task has been pre-assigned by the Fleet API: {{ .TaskID }}
-- Run 'bd show {{ .TaskID }}' to load the full task details and review the --design field
-- Run 'bd update {{ .TaskID }} --status in_progress --assignee {{ .AgentName }}' to mark it active
+- Run 'loom data show {{ .TaskID }}' to load the full task details and review the --design field
+- The supervisor or Fleet API has already claimed this task
 - Run 'loom claim {{ .TaskID }}' to register with the agent monitor
-- IMPORTANT: Do NOT run 'bd ready' or 'bd update --claim' — your task is already assigned
+- IMPORTANT: Do NOT run 'loom data ready' — your task is already assigned
 - If the task does not exist, has no --design field, or has 'needs-revision' label:
   1. Print the error
   2. Run 'loom complete'
@@ -59,11 +59,11 @@ If at ANY point you discover the task cannot be completed:
 
 Do NOT leave the task in_progress. Instead:
 1. Document what's blocking in the notes:
-   bd update <id> --notes "BLOCKED: <detailed reason>"
+   loom data update <id> --notes "BLOCKED: <detailed reason>"
 2. If the blocker is another task, add the dependency:
    bd dep add <this-task-id> <blocking-task-id>
 3. Change status to blocked:
-   bd update <id> --status blocked
+   loom data update <id> --status blocked
 4. Commit any partial work (if meaningful):
    git add -A && git commit -m "WIP: <task-id> - blocked on <reason>
 
@@ -80,8 +80,7 @@ This ensures the task is properly tracked as blocked, not orphaned in error stat
   make gate
 - If it fails, fix ALL failures and re-run until it passes
 - Do NOT commit or push with failing tests
-- Run 'bd close <id> --reason "Completed with tests and code review"'
-- Run 'bd sync'
+- Run 'loom data close <id> --reason "Completed with tests and code review"'
 - Stage and commit: git add -A && git commit -m "<brief description> (<task-id>)
 
 Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"
@@ -90,7 +89,7 @@ Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"
 
 ### CRITICAL: STOP
 After completing Step 8 (blocked) or Step 9 (completed), you are DONE.
-- Do NOT run 'bd ready' again
+- Do NOT run 'loom data ready' again
 - Do NOT pick up another task
 - Do NOT continue working
 - Simply EXIT

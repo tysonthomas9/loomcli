@@ -6,7 +6,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
-	"github.com/tysonthomas9/loomcli/internal/backend/api"
 )
 
 var (
@@ -21,15 +20,7 @@ var closeCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
-		cli, url, err := getHTTPClient()
-		if err != nil {
-			return err
-		}
-		wsID, err := resolveWorkspaceID(ctx, cli, url)
-		if err != nil {
-			return err
-		}
-		ab, err := api.New(api.Config{BaseURL: url, WorkspaceID: wsID, HTTPClient: cli})
+		ib, err := getIssueBackend(ctx)
 		if err != nil {
 			return err
 		}
@@ -38,7 +29,7 @@ var closeCmd = &cobra.Command{
 			Session: closeSession,
 			Force:   closeForce,
 		}
-		if _, err := ab.Close(ctx, args[0], params); err != nil {
+		if _, err := ib.Close(ctx, args[0], params); err != nil {
 			return err
 		}
 		return printMessageResult(os.Stdout, "closed "+args[0], outputFormat)

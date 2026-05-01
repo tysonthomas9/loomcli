@@ -14,22 +14,21 @@ var (
 
 var dataRootCmd = &cobra.Command{
 	Use:   "data",
-	Short: "Data-only commands that talk to a loom server over HTTP",
+	Short: "Data-only commands for local or remote loom backends",
 	Long: `The 'loom data' subtree contains thin CLI commands that interact
-with a running loom server via HTTP exclusively. These commands do NOT read
-local files, do NOT auto-spawn the daemon, and require either the --server
-flag or LOOM_SERVER_URL environment variable to point at a reachable server.
+with the configured loom issue backend. When --server or LOOM_SERVER_URL is
+set, commands talk to that loom server over HTTP. Without a server, issue
+commands use the local backend selected by the workspace configuration and
+daemon IPC environment.
 
 Use 'loom data' commands when:
-  • You are on a machine without a local checkout.
+  • You want a backend-aware command surface for agents and scripts.
   • You want to manage agents on a remote loom server.
   • You are scripting against a hosted loom deployment.
 
-For local-mode operation, use the legacy top-level commands
-(loom show, loom list, loom monitor, ...).
-
 Examples:
   loom data show <id> --server http://localhost:8080
+  loom data ready --limit 10
   loom data list --server http://localhost:8080 -o json | jq '.[].id'
   loom data monitor --server http://localhost:8080
   loom data agent stop falcon --server http://localhost:8080
@@ -57,6 +56,7 @@ func init() {
 		readyCmd,
 		blockedCmd,
 		claimCmd,
+		updateCmd,
 		closeCmd,
 		commentCmd,
 		monitorCmd,

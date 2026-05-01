@@ -216,7 +216,7 @@ func TestPlanSmoke_PromptIncludesAllSections(t *testing.T) {
 		"Step 2:",
 		"Step 3:",
 		"agent name is:",
-		"bd ready",
+		"loom data ready",
 	}
 
 	for _, section := range expectedSections {

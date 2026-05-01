@@ -18,7 +18,7 @@ func TestGeneratePlanningPrompt(t *testing.T) {
 			agentName: "falcon",
 			wantParts: []string{
 				"Your agent name is: falcon",
-				"--claim",
+				"loom data claim",
 				"Planning Task",
 				"Do NOT write any implementation code",
 				"--status review",
@@ -30,7 +30,7 @@ func TestGeneratePlanningPrompt(t *testing.T) {
 			agentName: "nova",
 			wantParts: []string{
 				"Your agent name is: nova",
-				"--claim",
+				"loom data claim",
 			},
 		},
 	}
@@ -59,8 +59,8 @@ func TestGenerateTaskPrompt(t *testing.T) {
 			agentName: "ember",
 			wantParts: []string{
 				"Your agent name is: ember",
-				"--claim",          // Main task claiming uses atomic --claim
-				"--assignee ember", // Reclaiming stale tasks still uses --assignee
+				"loom data claim",  // Main task claiming uses the backend claim API.
+				"--assignee ember", // Reclaiming stale tasks still sets assignee.
 				"Implementation Task",
 				"--design",
 				"git push origin HEAD",
@@ -72,7 +72,7 @@ func TestGenerateTaskPrompt(t *testing.T) {
 			agentName: "zephyr",
 			wantParts: []string{
 				"Your agent name is: zephyr",
-				"--claim",
+				"loom data claim",
 				"--assignee zephyr",
 			},
 		},
@@ -95,8 +95,8 @@ func TestGeneratePlanningPrompt_WithParent(t *testing.T) {
 	prompt := GeneratePlanningPrompt("falcon", nil, "my-epic-abc")
 
 	wantParts := []string{
-		"bd ready --parent my-epic-abc --limit 200 --json",
-		"bd ready --parent my-epic-abc --limit 200",
+		"loom data ready --parent my-epic-abc --limit 200 --output json",
+		"loom data ready --parent my-epic-abc --limit 200",
 		"Epic scope: my-epic-abc",
 		"MUST only select tasks from this epic",
 	}
@@ -106,9 +106,9 @@ func TestGeneratePlanningPrompt_WithParent(t *testing.T) {
 		}
 	}
 
-	// Should NOT contain unscoped bd ready
-	if strings.Contains(prompt, "bd ready --json |") {
-		t.Error("planning prompt with parentID should not contain unscoped 'bd ready --json |'")
+	// Should NOT contain unscoped ready.
+	if strings.Contains(prompt, "loom data ready --output json |") {
+		t.Error("planning prompt with parentID should not contain unscoped 'loom data ready --output json |'")
 	}
 }
 
@@ -116,8 +116,8 @@ func TestGenerateTaskPrompt_WithParent(t *testing.T) {
 	prompt := GenerateTaskPrompt("nova", nil, "proj-xyz", "claude")
 
 	wantParts := []string{
-		"bd ready --parent proj-xyz --limit 200 --json",
-		"bd ready --parent proj-xyz --limit 200",
+		"loom data ready --parent proj-xyz --limit 200 --output json",
+		"loom data ready --parent proj-xyz --limit 200",
 		"Epic scope: proj-xyz",
 		"MUST only select tasks from this epic",
 	}
@@ -127,9 +127,9 @@ func TestGenerateTaskPrompt_WithParent(t *testing.T) {
 		}
 	}
 
-	// Should NOT contain unscoped bd ready
-	if strings.Contains(prompt, "bd ready --json |") {
-		t.Error("task prompt with parentID should not contain unscoped 'bd ready --json |'")
+	// Should NOT contain unscoped ready.
+	if strings.Contains(prompt, "loom data ready --output json |") {
+		t.Error("task prompt with parentID should not contain unscoped 'loom data ready --output json |'")
 	}
 }
 
@@ -144,12 +144,12 @@ func TestGeneratePrompts_NoParent_NoEpicScope(t *testing.T) {
 		t.Error("task prompt without parentID should not contain 'Epic scope'")
 	}
 
-	// Should contain unscoped bd ready
-	if !strings.Contains(planPrompt, "bd ready --limit 200 --json") {
-		t.Error("planning prompt without parentID should contain 'bd ready --limit 200 --json'")
+	// Should contain unscoped backend-aware ready.
+	if !strings.Contains(planPrompt, "loom data ready --limit 200 --output json") {
+		t.Error("planning prompt without parentID should contain 'loom data ready --limit 200 --output json'")
 	}
-	if !strings.Contains(taskPrompt, "bd ready --limit 200 --json") {
-		t.Error("task prompt without parentID should contain 'bd ready --limit 200 --json'")
+	if !strings.Contains(taskPrompt, "loom data ready --limit 200 --output json") {
+		t.Error("task prompt without parentID should contain 'loom data ready --limit 200 --output json'")
 	}
 }
 
@@ -646,8 +646,8 @@ func TestGenerateFleetPlanningPrompt(t *testing.T) {
 				"pre-assigned",
 				"Fleet API",
 				"loom claim loomcli-kv6.4",
-				"bd show loomcli-kv6.4",
-				"status in_progress",
+				"loom data show loomcli-kv6.4",
+				"already claimed",
 				"--status review",
 				"needs-revision",
 			},
@@ -660,7 +660,7 @@ func TestGenerateFleetPlanningPrompt(t *testing.T) {
 				"Your agent name is: nova",
 				"proj-abc.1",
 				"loom claim proj-abc.1",
-				"bd show proj-abc.1",
+				"loom data show proj-abc.1",
 			},
 		},
 	}
@@ -696,8 +696,8 @@ func TestGenerateFleetTaskPrompt(t *testing.T) {
 				"pre-assigned",
 				"Fleet API",
 				"loom claim loomcli-kv6.4",
-				"bd show loomcli-kv6.4",
-				"status in_progress",
+				"loom data show loomcli-kv6.4",
+				"already claimed",
 				"--design",
 				"git push origin HEAD",
 			},
@@ -710,7 +710,7 @@ func TestGenerateFleetTaskPrompt(t *testing.T) {
 				"Your agent name is: ember",
 				"proj-xyz.2",
 				"loom claim proj-xyz.2",
-				"bd show proj-xyz.2",
+				"loom data show proj-xyz.2",
 			},
 		},
 	}

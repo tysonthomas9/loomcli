@@ -6,7 +6,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
-	"github.com/tysonthomas9/loomcli/internal/backend/api"
 )
 
 var commentAuthor string
@@ -17,15 +16,7 @@ var commentCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
-		cli, url, err := getHTTPClient()
-		if err != nil {
-			return err
-		}
-		wsID, err := resolveWorkspaceID(ctx, cli, url)
-		if err != nil {
-			return err
-		}
-		ab, err := api.New(api.Config{BaseURL: url, WorkspaceID: wsID, HTTPClient: cli})
+		ib, err := getIssueBackend(ctx)
 		if err != nil {
 			return err
 		}
@@ -34,7 +25,7 @@ var commentCmd = &cobra.Command{
 			Author:  commentAuthor,
 			Text:    args[1],
 		}
-		if _, err := ab.AddComment(ctx, params); err != nil {
+		if _, err := ib.AddComment(ctx, params); err != nil {
 			return err
 		}
 		return printMessageResult(os.Stdout, "comment added to "+args[0], outputFormat)

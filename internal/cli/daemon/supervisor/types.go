@@ -31,6 +31,7 @@ type AgentProcess struct {
 	AgentLeaseID    string            // fleet-db control-plane lease id (empty when no lease active)
 	AgentLeaseToken string            // fleet-db control-plane lease token (empty when no lease active)
 	BeforeRef       string            // git HEAD ref before spawn (for diff stats at finalization)
+	AssignedTaskID  string            // task claimed by supervisor preflight for this run
 
 	RestartCount   int       // consecutive restart attempts
 	LastStart      time.Time // when subprocess was last spawned
@@ -52,7 +53,7 @@ type AgentProcess struct {
 
 	StopReason StopReason // why the agent was stopped (set at decision site, empty while running)
 
-	Mu sync.Mutex // protects Cmd, Pid, LogFile, restart tracking, AssignedEpicID, LastError, CurrentBackendIdx, Session, AgentSessionID, AgentLeaseID, AgentLeaseToken, TranscriptPath, BeforeRef, StopReason
+	Mu sync.Mutex // protects Cmd, Pid, LogFile, restart tracking, AssignedEpicID, AssignedTaskID, LastError, CurrentBackendIdx, Session, AgentSessionID, AgentLeaseID, AgentLeaseToken, TranscriptPath, BeforeRef, StopReason
 }
 
 // StopReason identifies why an agent was stopped.

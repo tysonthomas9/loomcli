@@ -111,6 +111,7 @@ func NewDaemon(config *cfgpkg.DaemonConfig, projectDir string, eventBus events.E
 		StoppedAgents:  make(map[string]struct{}),
 		Agents:         make([]*supervisor.AgentProcess, 0, len(config.Agents)),
 		ControlStore:   st,
+		IssueBackend:   issueBackend,
 	}
 
 	wireSupervisorCallbacks(sup, issueBackend)

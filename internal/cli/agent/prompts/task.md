@@ -21,15 +21,15 @@ You are running in a parallel multi-agent environment. Follow these rules strict
 - Run this command to find tasks ready to implement (has design, not needs-revision):
   {{ .BdReadyJSON }} | jq -r '.[] | select(.status == "open") | select((.issue_type == "epic") | not) | select(.design) | select((.design == "") | not) | select(((.labels // []) | index("needs-revision")) | not) | "\(.id) [\(.priority)] \(.title)"'
 - If jq fails, fallback: Run '{{ .BdReadyFallback }}' and manually SKIP epics, tasks without a --design field, or tasks with 'needs-revision' label
-- Run 'bd list --status=in_progress --json' to check for stale tasks (updated_at >10 hours ago = abandoned, reclaim with 'bd update <id> --status in_progress --assignee {{ .AgentName }}')
+- Run 'loom data list --status in_progress --output json' to check for stale tasks (updated_at >10 hours ago = abandoned, reclaim with 'loom data update <id> --status in_progress --assignee {{ .AgentName }}')
 - IGNORE existing assignees - if status is 'open', the task is available to claim
 - Pick the HIGHEST PRIORITY task (P0 > P1 > P2 > P3 > P4) that is not already in_progress
-- Run 'bd show <id>' to understand the task requirements
+- Run 'loom data show <id>' to understand the task requirements
 - If NO tasks have a --design field (or all have 'needs-revision' label):
   1. Print: "No planned tasks available. Run 'loom plan' first."
   2. Run: loom complete
   3. EXIT immediately
-- Run 'bd update <id> --claim' to claim it (atomic - prevents race conditions)
+- Run 'loom data claim <id>' to claim it (atomic - prevents race conditions)
 - If claim fails with 'already claimed by X', pick the next highest priority task
 - Run 'loom claim <id>' to register the task with the agent monitor
 - REMEMBER this task ID - you will work ONLY on this task
@@ -39,18 +39,18 @@ You are running in a parallel multi-agent environment. Follow these rules strict
 Before writing any code, build context from three sources: the epic, related tasks, and the current code.
 
 #### 2a. Read the Epic
-- Determine the parent epic: check the task ID for a dotted prefix (e.g., `loomcli-abc.5` -> parent is `loomcli-abc`), or run `bd show <id> --json` and check the `parent` field
-- Run `bd show <epic-id>` to read the epic's title, description, and notes
+- Determine the parent epic: check the task ID for a dotted prefix (e.g., `loomcli-abc.5` -> parent is `loomcli-abc`), or run `loom data show <id> --output json` and check the `parent` field
+- Run `loom data show <epic-id>` to read the epic's title, description, and notes
 - The epic notes contain architectural decisions and conventions — these are **authoritative**
 
 #### 2b. Read Dependency and Sibling Designs
-- Run `bd show <id> --json` and check the `depends_on` field for blockers
-- For each dependency: run `bd show <dep-id>` and read its design and status
+- Run `loom data show <id> --output json` and check the `depends_on` field for blockers
+- For each dependency: run `loom data show <dep-id>` and read its design and status
   - If a dependency is closed: note what it implemented — you will build on its code
   - If a dependency is still open: go to Step 8 (Handle Blockers)
 - Read 2-3 other closed sibling tasks in the same epic to understand the conventions they established:
-  `bd list --parent <epic-id> --status=closed --limit 5 --json | jq -r '.[] | "\(.id) \(.title)"'`
-  For each, run `bd show <sibling-id>` and skim the design for naming conventions, sentinel values, key formats, and patterns
+  `loom data list --parent <epic-id> --status closed --limit 5 --output json | jq -r '.[] | "\(.id) \(.title)"'`
+  For each, run `loom data show <sibling-id>` and skim the design for naming conventions, sentinel values, key formats, and patterns
 
 #### 2c. Read the Design and Reconcile Against Current Code
 - Read the --design field thoroughly
@@ -137,11 +137,11 @@ If at ANY point you discover the task cannot be completed:
 
 Do NOT leave the task in_progress. Instead:
 1. Document what's blocking in the notes:
-   bd update <id> --notes "BLOCKED: <detailed reason>"
+   loom data update <id> --notes "BLOCKED: <detailed reason>"
 2. If the blocker is another task, add the dependency:
    bd dep add <this-task-id> <blocking-task-id>
 3. Change status to blocked:
-   bd update <id> --status blocked
+   loom data update <id> --status blocked
 4. Commit any partial work (if meaningful):
    git add <files> && git commit -m "WIP: <task-id> - blocked on <reason>"
    git push origin HEAD
@@ -156,15 +156,14 @@ This ensures the task is properly tracked as blocked, not orphaned in error stat
   make gate
 - If it fails, fix ALL failures and re-run until it passes
 - Do NOT commit or push with failing tests
-- Run 'bd close <id> --reason "Completed with tests and code review"'
-- Run 'bd sync'
+- Run 'loom data close <id> --reason "Completed with tests and code review"'
 - Stage and commit: git add <files> && git commit -m "<brief description> (<task-id>)"
 - Push: git push origin HEAD
 - Signal completion: loom complete
 
 ### CRITICAL: STOP
 After completing Step 8 (blocked) or Step 9 (completed), you are DONE.
-- Do NOT run 'bd ready' again
+- Do NOT run 'loom data ready' again
 - Do NOT pick up another task
 - Do NOT continue working
 - Simply EXIT

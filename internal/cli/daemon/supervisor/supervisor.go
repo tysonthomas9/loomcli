@@ -9,6 +9,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/agenterr"
+	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/automode"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
@@ -57,6 +59,7 @@ type Supervisor struct {
 
 	// IssueBackendReady checks if an epic has ready tasks. Injected by daemon.
 	IssueBackendReady func(epicID string) (bool, error)
+	IssueBackend      backend.IssueBackend
 
 	// ControlStore is the fleet-db-backed control plane used for node,
 	// session, lease, terminal, artifact, and command records.
@@ -262,7 +265,17 @@ func (s *Supervisor) superviseAgent(ap *AgentProcess) {
 			return
 		}
 
-		s.preFlightSetup(ap)
+		if !s.preFlightSetup(ap) {
+			s.Concurrency.Release(ap.Entry.Role)
+			s.postExitCleanup(ap)
+			if !s.shouldRestart(ap) {
+				return
+			}
+			if !s.sleepBeforeRestart(ap) {
+				return
+			}
+			continue
+		}
 
 		if !s.spawnAndWait(ap) {
 			continue
@@ -331,21 +344,26 @@ func (s *Supervisor) clearAgentSessionState(ap *AgentProcess) {
 	ap.AgentLeaseToken = ""
 	ap.TranscriptPath = ""
 	ap.BeforeRef = ""
+	ap.AssignedTaskID = ""
 	ap.Mu.Unlock()
 }
 
 // preFlightSetup runs recovery, assigns epic, creates session, and clears yield file.
-func (s *Supervisor) preFlightSetup(ap *AgentProcess) {
+func (s *Supervisor) preFlightSetup(ap *AgentProcess) bool {
 	if err := s.recoverAgent(ap, 0); err != nil {
 		slog.Warn("pre-flight recovery failed", "worktree", ap.Entry.Worktree, "err", err)
 	}
 
 	epicID := s.assignEpic(ap)
+	if !s.claimTask(ap, epicID) {
+		return false
+	}
 	s.createAgentSession(ap, epicID)
 
 	if err := ClearYieldFile(ap.WorktreePath); err != nil {
 		slog.Warn("failed to clear stale yield file", "worktree", ap.Entry.Worktree, "err", err)
 	}
+	return true
 }
 
 // assignEpic assigns and emits an epic for the agent.
@@ -365,6 +383,74 @@ func (s *Supervisor) assignEpic(ap *AgentProcess) string {
 		}
 	}
 	return epicID
+}
+
+func (s *Supervisor) claimTask(ap *AgentProcess, epicID string) bool {
+	if s.IssueBackend == nil || !shouldClaimTaskForRole(ap) {
+		return true
+	}
+	ae := ap.Entry
+	if sourceRepos, err := config.ResolveAgentRepos(ap.Entry, s.Repos); err == nil {
+		ae.SourceRepos = sourceRepos
+	} else {
+		slog.Warn("failed to resolve agent repos for task claim", "worktree", ap.Entry.Worktree, "err", err)
+	}
+	constraints := cli.MergeRoleConstraints(ap.RoleConfig, ae)
+	opts := backend.ReadyOpts{Limit: 10000, ParentID: epicID}
+	if ap.Entry.Repo != "" {
+		opts.Labels = []string{"repo:" + ap.Entry.Repo}
+	}
+	if len(ae.SourceRepos) > 0 {
+		opts.SourceRepos = ae.SourceRepos
+	}
+	issues, err := s.IssueBackend.Ready(context.Background(), opts)
+	if err != nil {
+		s.setPreflightError(ap, agenterr.Unknown, fmt.Sprintf("ready query failed: %v", err))
+		return false
+	}
+	for {
+		match := cli.SelectBestTask(issues, constraints)
+		if match == nil {
+			s.setPreflightError(ap, agenterr.NoWork, "no claimable tasks")
+			return false
+		}
+		if err := s.IssueBackend.ClaimIssue(context.Background(), match.Issue.ID, 0); err != nil {
+			if backend.IsKind(err, backend.KindConflict) {
+				issues = removeIssueByID(issues, match.Issue.ID)
+				continue
+			}
+			s.setPreflightError(ap, agenterr.Unknown, fmt.Sprintf("claim failed for %s: %v", match.Issue.ID, err))
+			return false
+		}
+		ap.Mu.Lock()
+		ap.AssignedTaskID = match.Issue.ID
+		ap.Mu.Unlock()
+		slog.Info("claimed task for agent", "worktree", ap.Entry.Worktree, "task_id", match.Issue.ID, "reason", match.Reason)
+		return true
+	}
+}
+
+func shouldClaimTaskForRole(ap *AgentProcess) bool {
+	return BuiltInRoles[ap.Entry.Role] || ap.RoleConfig.TaskFilter != ""
+}
+
+func (s *Supervisor) setPreflightError(ap *AgentProcess, class agenterr.ErrorClass, message string) {
+	ap.Mu.Lock()
+	ap.LastExitCode = 0
+	ap.LastExit = time.Now()
+	ap.LastError = &agenterr.AgentError{Class: class, Message: message}
+	ap.LastNoWork = class == agenterr.NoWork
+	ap.Mu.Unlock()
+}
+
+func removeIssueByID(issues []backend.IssueData, id string) []backend.IssueData {
+	out := issues[:0]
+	for _, issue := range issues {
+		if issue.ID != id {
+			out = append(out, issue)
+		}
+	}
+	return out
 }
 
 // createAgentSession creates a session for liveness tracking.
