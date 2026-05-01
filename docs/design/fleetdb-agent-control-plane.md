@@ -1,6 +1,6 @@
 # Fleet-Db Agent Control Plane
 
-**Status:** Draft for implementation planning
+**Status:** Contract v1 for implementation
 **Date:** 2026-05-01
 **Related:** `loomcli-wpltp`, `distributed-control-plane.md`,
 `distributed-control-plane-data-model.md`
@@ -196,6 +196,11 @@ Artifact
 
 ## API Shape
 
+This is the upstream fleet-db API contract loomcli expects before beads
+fallbacks can be removed. Endpoint names are workspace-scoped and should be
+reflected in fleet-db's OpenAPI definition, generated clients, Redis store,
+Postgres store, and integration tests.
+
 ```text
 POST  /api/v1/{ws}/nodes
 GET   /api/v1/{ws}/nodes
@@ -233,6 +238,105 @@ POST  /api/v1/{ws}/agents/{agent_id}/commands
 GET   /api/v1/{ws}/agents/{agent_id}/commands?since=...
 POST  /api/v1/{ws}/commands/{command_id}/ack
 ```
+
+The fleet-db OpenAPI spec must add schema components for:
+
+- `AgentProfile` and profile create/update requests.
+- `Node` plus node heartbeat and drain requests.
+- `AgentSession` plus claim, heartbeat, update, complete, and release
+  requests/responses.
+- `AgentLease` plus lease token response and lease-token request headers or
+  body fields.
+- `TerminalSession` plus attach-token request/response.
+- `Artifact` plus artifact create/list filters.
+- `Command` plus command ack/result/cancel requests.
+- `FleetEvent` or equivalent mutation payload with `entity_type`, `entity_id`,
+  `action`, `cursor`, `actor`, and `occurred_at`.
+
+Do not reuse loomcli WebUI's current local terminal schemas as the upstream
+fleet-db contract. Those schemas describe local tmux process management; this
+contract describes distributed metadata and control intent.
+
+### API Invariants
+
+- All mutating endpoints must require an actor identity. In local embedded
+  mode this is `X-Actor`; in remote mode it is the authenticated principal plus
+  any service/node identity granted by auth.
+- `workspace_key` always comes from the path, not the request body.
+- `node_id`, `agent_id`, `session_id`, `terminal_id`, `artifact_id`, and
+  `command_id` are opaque IDs generated or validated by fleet-db.
+- List endpoints must support pagination with an opaque cursor. Offset-only
+  pagination is not acceptable for `AgentSession`, `Artifact`, or `Command`
+  history.
+- State transitions must be idempotent where clients naturally retry
+  (`heartbeat`, `ack`, `release`) and conflict-protected where stale writers
+  are dangerous (`complete`, `cancel`, lease renewals).
+- Fleet-db should return typed errors that loomcli can map consistently:
+  `validation`, `not_found`, `conflict`, `unauthorized`, `forbidden`,
+  `lease_expired`, `lease_mismatch`, `stale_version`, and `unavailable`.
+
+### Entity Contract
+
+`AgentProfile` is the existing user-facing agent concept. Fleet-db may keep
+the route name `/agents`, but the model must be treated as durable desired
+configuration, not as an execution record.
+
+`AgentSession` is the only accepted execution record. It replaces task-run
+terminology for loomcli. A task attempt, long-lived orchestrator slice,
+maintenance job, ad-hoc terminal-backed action, or cron invocation all create
+or attach to an agent session.
+
+`AgentLease` is the only write authority for active execution. Heartbeat,
+progress, completion, failure, yield, release, command result, and artifact
+attachment require the current lease token unless the operation is explicitly
+user/admin control-plane intent.
+
+`Node` is runtime capacity. It may represent a laptop, a local supervisor, an
+E2B sandbox, a CI runner, or a Kubernetes pod. Node rows are observed/runtime
+records, not durable agent configuration.
+
+`TerminalSession` stores metadata and attachment intent only. PTY bytes,
+scrollback, sockets, process IDs, and file descriptors remain node-local or in
+a stream/log backend and are referenced through artifacts or attach tokens.
+
+`Artifact` stores durable metadata and pointers only. Blob contents, large
+logs, transcripts, screenshots, patches, and test outputs live in object
+storage, local node storage, git, or a log backend.
+
+`Command` is a control-plane request from user/service to agent/node/session.
+Commands are not terminal bytes. They must have delivery state, ack state,
+dedupe keys, and optional lease binding.
+
+### Command Contract
+
+```text
+Command
+  command_id
+  workspace_key
+  target_type: agent | session | node | terminal
+  target_id
+  type: start | stop | drain | resume | cancel | send_input |
+        rotate_log | collect_artifact | open_terminal | close_terminal |
+        custom
+  payload
+  idempotency_key
+  status: queued | delivered | acked | running | succeeded | failed |
+          cancelled | expired
+  created_by
+  created_at
+  delivered_at
+  acked_at
+  completed_at
+  expires_at
+  result_summary
+  error_class
+  lease_id: optional
+```
+
+Commands are pull-friendly: workers can poll `GET
+/api/v1/{ws}/agents/{agent_id}/commands?since=...` or subscribe through SSE.
+Push transports may be added later, but the durable command log is the source
+of truth.
 
 The claim endpoint should atomically:
 
@@ -288,17 +392,61 @@ heartbeat unless an audit mode explicitly asks for that volume.
 
 Required hot indexes:
 
+- profiles by workspace/name: `workspace_key, agent_id`
 - active sessions by workspace: `workspace_key, status`
 - sessions by agent: `workspace_key, agent_id, created_at`
 - sessions by task: `workspace_key, task_id, created_at`
+- sessions by node: `workspace_key, node_id, status`
 - leases by expiry: `workspace_key, expires_at`
+- leases by resource/session: `workspace_key, session_id, status`
 - active nodes by heartbeat/expiry: `workspace_key, expires_at`
 - terminals by workspace/node/status
 - artifacts by session/terminal/task
+- commands by target/status/cursor: `workspace_key, target_type, target_id,
+  status, created_at`
 
 Redis mode can use hashes, sets, sorted sets, and TTL keys. Postgres mode needs
 tables and indexes for the same entities. Fleet-db should not ship this as
 Redis-only if remote distributed mode is expected to be production-grade.
+
+### Redis Storage Contract
+
+- Store latest entity state in hashes keyed by workspace and entity ID.
+- Maintain sorted-set indexes for session history, lease expiry, node expiry,
+  command delivery, terminal status, and artifact history.
+- Store active lease tokens as hashes only. Raw tokens must never be persisted;
+  only a hash and lease version are stored.
+- Lease acquire/renew/release/complete must be atomic. Redis mode should use a
+  Lua script or equivalent transaction so session state, issue claim state,
+  lease state, and event emission cannot diverge.
+- TTL keys may drive expiry detection, but expiry must also be recoverable by
+  scanning the `expires_at` index after process restart.
+
+### Postgres Storage Contract
+
+Fleet-db Postgres mode must expose the same behavior as Redis mode. Minimum
+tables:
+
+```text
+agent_profiles(workspace_key, agent_id, desired_state, config_json, timestamps)
+nodes(workspace_key, node_id, runtime_provider, labels_json, capabilities_json,
+      drain_state, last_heartbeat, expires_at, timestamps)
+agent_sessions(workspace_key, session_id, agent_id, node_id, kind, task_id,
+      terminal_id, parent_session_id, status, phase, attempt,
+      started_at, last_heartbeat, finished_at, metadata_json)
+agent_leases(workspace_key, lease_id, session_id, agent_id, node_id,
+      token_hash, version, acquired_at, expires_at, released_at, status)
+terminal_sessions(workspace_key, terminal_id, node_id, agent_id, session_id,
+      task_id, purpose, status, pty_backend, metadata_json, timestamps)
+artifacts(workspace_key, artifact_id, agent_id, session_id, terminal_id,
+      task_id, kind, uri, content_type, size_bytes, digest, summary, created_at)
+commands(workspace_key, command_id, target_type, target_id, type, payload_json,
+      idempotency_key, status, timestamps, result_json, lease_id)
+```
+
+Postgres lease mutation must use row locks or compare-and-swap predicates on
+`version`, `token_hash`, and `expires_at`. It must not rely on app-side
+read-then-write checks.
 
 ## Scalability Rules
 
@@ -312,6 +460,72 @@ Redis-only if remote distributed mode is expected to be production-grade.
   event streams.
 - SSE should support workspace, entity type, agent, task, and repo filters so
   high-volume workspaces do not fan every event to every client.
+
+### SSE And Cursor Contract
+
+Fleet-db must expose one durable cursor model for long-poll and SSE. Cursors
+are opaque to loomcli and may be Redis stream IDs, Postgres WAL/event IDs, or a
+versioned encoded form. Clients must be able to reconnect to any fleet-db
+process with the last cursor and receive missed events.
+
+Required filters:
+
+```text
+workspace_key
+entity_type: issue | node | agent | agent_session | agent_lease |
+             terminal | artifact | command
+agent_id
+session_id
+task_id
+repo_name
+node_id
+```
+
+Server rules:
+
+- Filters apply to catch-up and live delivery.
+- Slow clients are disconnected before unbounded buffering.
+- Heartbeat-only updates may be coalesced into projected state; lifecycle
+  transitions must be durable events.
+- Event payloads include `workspace_key`, `entity_type`, `entity_id`, `action`,
+  `cursor`, `actor`, and `occurred_at`.
+
+## Local And Distributed Modes
+
+Local single-user embedded mode and remote multi-user mode use the same
+control-plane contract. The difference is deployment, not data shape:
+
+| Concern | Local embedded | Remote distributed |
+|---|---|---|
+| Fleet-db process | Spawned by loomcli | Shared service |
+| Redis/Postgres | Embedded miniredis for local dev | Managed Redis or Postgres |
+| Node | Local supervisor registers one local node | Each laptop/sandbox/runner registers a node |
+| Actor | `X-Actor` from local user/env | Authenticated user/service |
+| Lease | Still required | Required |
+| Terminal bytes | Local tmux/PTY | Node-local or stream service |
+| Artifacts | Local URI or git/object pointer | Object/log storage pointer |
+
+Local mode must not bypass node registration or leases. It is the cheap path
+that keeps distributed correctness exercised during normal development.
+
+## Upstream Work Tracking
+
+The fleet-db implementation work is intentionally tracked as concrete tickets
+before loomcli supervisor migration:
+
+| Ticket | Upstream fleet-db scope | Blocks |
+|---|---|---|
+| `loomcli-wpltp.11.1` | `Node`, `AgentProfile`, and `AgentSession` domain/store/API/OpenAPI/client coverage | `.8`, `.11.7` |
+| `loomcli-wpltp.11.2` | `TerminalSession` and `Artifact` metadata models, attach-token intent, artifact pointer APIs | `.11.7` |
+| `loomcli-wpltp.11.3` | `AgentLease` fencing tokens, atomic acquire/renew/release/complete, stale-token errors | `.8`, `.11.7` |
+| `loomcli-wpltp.11.4` | Durable `Command` log, polling, ack/result/cancel semantics | `.11.7` |
+| `loomcli-wpltp.11.5` | Shared event fanout, opaque cursor catch-up, SSE filters, slow-client bounds | `.6`, `.11.7` |
+| `loomcli-wpltp.11.6` | Postgres parity for existing repo/role/agent/daemon entities and all new control-plane entities | `.8`, `.11.7` |
+| `loomcli-wpltp.11.7` | Loomcli supervisor migration to node/session/lease/artifact/command APIs | `.5`, `.9` |
+
+`loomcli-wpltp.5`, `.6`, and `.8` must remain blocked until the relevant
+fleet-db tickets above are implemented and accepted. The supervisor should not
+invent loomcli-local placeholders for these concepts.
 
 ## Migration Plan
 
