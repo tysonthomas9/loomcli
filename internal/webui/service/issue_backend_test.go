@@ -485,7 +485,13 @@ func TestClaimIssue_Backend_HappyPath_RoutesToBackendAndReturnsIssue(t *testing.
 }
 
 func TestClaimIssue_Backend_AlreadyClaimed_MapsTo409(t *testing.T) {
+	now := time.Now().UTC()
 	fb := &fakeIssueBackend{
+		getResult: &backend.IssueDetailData{
+			IssueData: backend.IssueData{
+				ID: "i-1", Title: "T", Status: "open", Priority: 1, CreatedAt: now, UpdatedAt: now,
+			},
+		},
 		claimErr: backend.ErrConflict("ClaimIssue", "issue already claimed by other-agent"),
 	}
 	svc := newServiceWithFake(fb)
@@ -493,6 +499,65 @@ func TestClaimIssue_Backend_AlreadyClaimed_MapsTo409(t *testing.T) {
 	var sErr *ServiceError
 	if !errors.As(err, &sErr) || sErr.Kind != KindConflict {
 		t.Fatalf("expected ConflictError, got %v", err)
+	}
+}
+
+func TestClaimIssue_Backend_BlockedIssue_MapsTo409AndDoesNotClaim(t *testing.T) {
+	now := time.Now().UTC()
+	fb := &fakeIssueBackend{
+		getResult: &backend.IssueDetailData{
+			IssueData: backend.IssueData{
+				ID: "i-1", Title: "T", Status: "open", Priority: 1, CreatedAt: now, UpdatedAt: now,
+			},
+			Dependencies: []backend.DependencyData{
+				{
+					IssueID:     "i-1",
+					DependsOnID: "blocker-1",
+					Type:        "blocks",
+					Status:      "open",
+					CreatedAt:   now,
+				},
+			},
+		},
+	}
+	svc := newServiceWithFake(fb)
+	_, err := svc.ClaimIssue(context.Background(), ClaimIssueParams{IssueID: "i-1"})
+	var sErr *ServiceError
+	if !errors.As(err, &sErr) || sErr.Kind != KindConflict {
+		t.Fatalf("expected ConflictError, got %v", err)
+	}
+	if !strings.Contains(sErr.Message, "blocked by open dependency blocker-1") {
+		t.Fatalf("unexpected conflict message: %q", sErr.Message)
+	}
+	if len(fb.claimCalls) != 0 {
+		t.Fatalf("blocked issue should not be claimed, got calls %+v", fb.claimCalls)
+	}
+}
+
+func TestClaimIssue_Backend_ClosedBlockingDependency_AllowsClaim(t *testing.T) {
+	now := time.Now().UTC()
+	fb := &fakeIssueBackend{
+		getResult: &backend.IssueDetailData{
+			IssueData: backend.IssueData{
+				ID: "i-1", Title: "T", Status: "in_progress", Priority: 1, CreatedAt: now, UpdatedAt: now,
+			},
+			Dependencies: []backend.DependencyData{
+				{
+					IssueID:     "i-1",
+					DependsOnID: "blocker-1",
+					Type:        "blocks",
+					Status:      "closed",
+					CreatedAt:   now,
+				},
+			},
+		},
+	}
+	svc := newServiceWithFake(fb)
+	if _, err := svc.ClaimIssue(context.Background(), ClaimIssueParams{IssueID: "i-1"}); err != nil {
+		t.Fatalf("ClaimIssue: %v", err)
+	}
+	if len(fb.claimCalls) != 1 {
+		t.Fatalf("expected claim call, got %+v", fb.claimCalls)
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/entity"
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/types"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
@@ -340,6 +341,10 @@ func (s *issueServiceImpl) ClaimIssue(ctx context.Context, params ClaimIssuePara
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
+	if err := ensureClaimable(ctx, be, params.IssueID); err != nil {
+		return nil, err
+	}
+
 	if err := be.ClaimIssue(ctx, params.IssueID, 0); err != nil {
 		slog.Error("backend error in ClaimIssue", "issue_id", params.IssueID, "err", err)
 		return nil, translateBackendError(err)
@@ -369,6 +374,36 @@ func (s *issueServiceImpl) ClaimIssue(ctx context.Context, params ClaimIssuePara
 		return nil, ErrInternal("failed to marshal issue", err)
 	}
 	return out, nil
+}
+
+func ensureClaimable(ctx context.Context, be backend.IssueBackend, issueID string) *ServiceError {
+	detail, err := be.Get(ctx, issueID)
+	if err != nil {
+		return translateBackendError(err)
+	}
+	if detail == nil {
+		return ErrInternal("backend returned nil issue before claim", nil)
+	}
+	if blockerID, ok := firstOpenClaimBlocker(detail.Dependencies); ok {
+		return ErrConflict(fmt.Sprintf("issue is blocked by open dependency %s", blockerID))
+	}
+	return nil
+}
+
+func firstOpenClaimBlocker(deps []backend.DependencyData) (string, bool) {
+	for _, dep := range deps {
+		if !entity.DependencyType(dep.Type).AffectsReadyWork() {
+			continue
+		}
+		if strings.EqualFold(dep.Status, "closed") {
+			continue
+		}
+		if dep.DependsOnID != "" {
+			return dep.DependsOnID, true
+		}
+		return "unknown", true
+	}
+	return "", false
 }
 
 func (s *issueServiceImpl) DeleteIssue(ctx context.Context, issueID string) (json.RawMessage, error) {

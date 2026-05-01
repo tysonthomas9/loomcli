@@ -383,6 +383,7 @@ export interface paths {
      * @description Claims an issue for the BD_ACTOR configured on the server. Returns 409
      *     Conflict if the issue is already claimed by another agent. The claim
      *     operation is atomic — only one of N concurrent callers will succeed.
+     *     Blocked issues with open ready-work dependencies cannot be claimed.
      *     Sets assignee and transitions status to in_progress in a single step.
      */
     post: operations["claimIssue"];
@@ -3709,7 +3710,7 @@ export interface operations {
           "application/json": components["schemas"]["ErrorResponse"];
         };
       };
-      /** @description Issue already claimed by another agent */
+      /** @description Issue already claimed by another agent or blocked by an open dependency */
       409: {
         headers: {
           [name: string]: unknown;
