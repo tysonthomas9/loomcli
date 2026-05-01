@@ -1,0 +1,52 @@
+{
+  "id": "dependency_roundtrip",
+  "title": "Dependency add/remove round trip",
+  "description": "Creates two issues, adds a blocking dependency, verifies detail projection, removes it, and verifies the projection clears.",
+  "tags": ["dependency", "graph", "detail"],
+  "steps": [
+    {
+      "id": "seed_blocked",
+      "description": "Create issue that will be blocked",
+      "method": "issue.create",
+      "params": {
+        "title": "Backend dep blocked",
+        "priority": 2,
+        "type": "task",
+        "owner": "parity-harness",
+        "actor": "parity-harness"
+      }
+    },
+    {
+      "id": "seed_blocker",
+      "description": "Create issue that will block the first issue",
+      "method": "issue.create",
+      "params": {
+        "title": "Backend dep blocker",
+        "priority": 1,
+        "type": "task",
+        "owner": "parity-harness",
+        "actor": "parity-harness"
+      }
+    },
+    {
+      "id": "dep_add",
+      "description": "Add blocked -> blocker",
+      "method": "dep.add",
+      "params": {
+        "from_id": "${seed_blocked_id}",
+        "to_id": "${seed_blocker_id}",
+        "dep_type": "blocks"
+      }
+    },
+    {
+      "id": "dep_remove",
+      "description": "Remove blocked -> blocker",
+      "method": "dep.remove",
+      "params": {
+        "from_id": "${seed_blocked_id}",
+        "to_id": "${seed_blocker_id}",
+        "dep_type": "blocks"
+      }
+    }
+  ]
+}

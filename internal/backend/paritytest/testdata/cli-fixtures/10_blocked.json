@@ -27,7 +27,14 @@
       "description": "List blocked issues",
       "bd_args":  ["--json", "blocked"],
       "fdb_args": ["-json", "blocked"],
-      "expect_result_count": 1
+      "expect_result_count": 1,
+      "expect_json": {
+        "$[0].issue.id": "${blocked_id}",
+        "$[0].issue.title": "blocked",
+        "$[0].blockers[0].id": "${blocker_id}",
+        "$[0].blockers[0].title": "blocker",
+        "$[0].blockers[0].dep_type": "blocks"
+      }
     }
   ]
 }

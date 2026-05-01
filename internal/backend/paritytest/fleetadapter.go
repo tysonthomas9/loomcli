@@ -194,7 +194,11 @@ func (a *fleetDBAdapter) Get(ctx context.Context, id string) (*backend.IssueDeta
 	if err != nil {
 		return nil, backend.ErrInternal("Get", "decode response", err)
 	}
-	return &backend.IssueDetailData{IssueData: *slim}, nil
+	detail := &backend.IssueDetailData{IssueData: *slim}
+	if deps, err := a.fetchDependencies(ctx, id); err == nil {
+		detail.Dependencies = deps
+	}
+	return detail, nil
 }
 
 // Update issues PATCH /api/v1/{ws}/issues/{id}. fleet-db's PATCH body is a
@@ -332,6 +336,73 @@ func (a *fleetDBAdapter) Delete(ctx context.Context, params backend.DeleteParams
 		}
 	}
 	return nil
+}
+
+func (a *fleetDBAdapter) AddDependency(ctx context.Context, params backend.DepAddParams) error {
+	if params.FromID == "" || params.ToID == "" {
+		return backend.ErrValidation("AddDependency", "from_id and to_id must not be empty")
+	}
+	depType := params.DepType
+	if depType == "" {
+		depType = "blocks"
+	}
+	body := map[string]string{
+		"depends_on_id": params.ToID,
+		"type":          depType,
+	}
+	raw, status, err := a.doJSON(ctx, http.MethodPost, a.wsPath("/issues/"+url.PathEscape(params.FromID)+"/deps"), body)
+	if err != nil {
+		return backend.ErrInternal("AddDependency", "http", err)
+	}
+	return a.classifyStatus("AddDependency", status, raw)
+}
+
+func (a *fleetDBAdapter) RemoveDependency(ctx context.Context, params backend.DepRemoveParams) error {
+	if params.FromID == "" || params.ToID == "" {
+		return backend.ErrValidation("RemoveDependency", "from_id and to_id must not be empty")
+	}
+	path := "/issues/" + url.PathEscape(params.FromID) + "/deps/" + url.PathEscape(params.ToID)
+	if params.DepType != "" {
+		path += "?type=" + url.QueryEscape(params.DepType)
+	}
+	raw, status, err := a.doJSON(ctx, http.MethodDelete, a.wsPath(path), nil)
+	if err != nil {
+		return backend.ErrInternal("RemoveDependency", "http", err)
+	}
+	return a.classifyStatus("RemoveDependency", status, raw)
+}
+
+func (a *fleetDBAdapter) fetchDependencies(ctx context.Context, id string) ([]backend.DependencyData, error) {
+	raw, status, err := a.doJSON(ctx, http.MethodGet, a.wsPath("/issues/"+url.PathEscape(id)+"/deps"), nil)
+	if err != nil {
+		return nil, backend.ErrInternal("GetDependencies", "http", err)
+	}
+	if cerr := a.classifyStatus("GetDependencies", status, raw); cerr != nil {
+		return nil, cerr
+	}
+	var wrap struct {
+		Dependencies []struct {
+			IssueID     string    `json:"issue_id"`
+			DependsOnID string    `json:"depends_on_id"`
+			Type        string    `json:"type"`
+			CreatedAt   time.Time `json:"created_at"`
+			CreatedBy   string    `json:"created_by"`
+		} `json:"dependencies"`
+	}
+	if err := json.Unmarshal(raw, &wrap); err != nil {
+		return nil, backend.ErrInternal("GetDependencies", "decode response", err)
+	}
+	out := make([]backend.DependencyData, 0, len(wrap.Dependencies))
+	for _, d := range wrap.Dependencies {
+		out = append(out, backend.DependencyData{
+			IssueID:     d.IssueID,
+			DependsOnID: d.DependsOnID,
+			Type:        d.Type,
+			CreatedAt:   d.CreatedAt,
+			CreatedBy:   d.CreatedBy,
+		})
+	}
+	return out, nil
 }
 
 // createFleetWorkspace POSTs /api/v1/admin/workspaces to create the default

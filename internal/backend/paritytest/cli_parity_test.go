@@ -479,6 +479,7 @@ func (h *cliFleetOnlyHarness) runCLIFleetOnlyFixture(ctx context.Context, fx cli
 				failures = append(failures, fleetOnlyFailure(fx.ID, step.ID, joinFleetCmd(fdbArgs), "_stdout_json", "expected JSON stdout"))
 				continue
 			}
+			step.ExpectJSON = substituteExpectedJSON(step.ExpectJSON, fleetVars)
 			failures = append(failures, assertFleetOnlyJSON(fx.ID, step, joinFleetCmd(fdbArgs), parsed)...)
 		}
 	}
@@ -658,6 +659,44 @@ func substituteVarArgs(args []string, vars map[string]string) []string {
 		})
 	}
 	return out
+}
+
+func substituteExpectedJSON(expect map[string]any, vars map[string]string) map[string]any {
+	if len(expect) == 0 {
+		return expect
+	}
+	out := make(map[string]any, len(expect))
+	for selector, value := range expect {
+		out[selector] = substituteExpectedValue(value, vars)
+	}
+	return out
+}
+
+func substituteExpectedValue(value any, vars map[string]string) any {
+	switch v := value.(type) {
+	case string:
+		return cliVarPattern.ReplaceAllStringFunc(v, func(match string) string {
+			name := cliVarPattern.FindStringSubmatch(match)[1]
+			if resolved, ok := vars[name]; ok {
+				return resolved
+			}
+			return match
+		})
+	case []any:
+		out := make([]any, len(v))
+		for i := range v {
+			out[i] = substituteExpectedValue(v[i], vars)
+		}
+		return out
+	case map[string]any:
+		out := make(map[string]any, len(v))
+		for k, item := range v {
+			out[k] = substituteExpectedValue(item, vars)
+		}
+		return out
+	default:
+		return value
+	}
 }
 
 // captureVarsJSON extracts values from stdout into vars. Each CaptureVars

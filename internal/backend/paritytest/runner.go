@@ -69,9 +69,11 @@ func (r *DualRunner) RunFixture(ctx context.Context, fx Fixture) ([]DiffEntry, e
 		// result_captures syntax is an extension for future fixtures.
 		if fleetErr == nil {
 			captureID(fleetResp, "issue_id", fleetVars)
+			captureID(fleetResp, step.ID+"_id", fleetVars)
 		}
 		if beadsErr == nil {
 			captureID(beadsResp, "issue_id", beadsVars)
+			captureID(beadsResp, step.ID+"_id", beadsVars)
 		}
 
 		stepDiffs := diffResponses(fx.ID, step.ID, step.Method, fleetResp, beadsResp, fleetErr, beadsErr)
@@ -245,6 +247,48 @@ func (r *DualRunner) executeStep(ctx context.Context, be backend.IssueBackend, m
 			return nil, err
 		}
 		return map[string]any{"ids": ids}, nil
+
+	case "dep.add":
+		var p struct {
+			FromID  string `json:"from_id"`
+			ToID    string `json:"to_id"`
+			DepType string `json:"dep_type,omitempty"`
+		}
+		if err := unmarshalParams(rawParams, &p); err != nil {
+			return nil, err
+		}
+		if p.DepType == "" {
+			p.DepType = "blocks"
+		}
+		if err := be.AddDependency(ctx, backend.DepAddParams{
+			FromID:  p.FromID,
+			ToID:    p.ToID,
+			DepType: p.DepType,
+		}); err != nil {
+			return nil, err
+		}
+		return map[string]any{"ok": true}, nil
+
+	case "dep.remove":
+		var p struct {
+			FromID  string `json:"from_id"`
+			ToID    string `json:"to_id"`
+			DepType string `json:"dep_type,omitempty"`
+		}
+		if err := unmarshalParams(rawParams, &p); err != nil {
+			return nil, err
+		}
+		if p.DepType == "" {
+			p.DepType = "blocks"
+		}
+		if err := be.RemoveDependency(ctx, backend.DepRemoveParams{
+			FromID:  p.FromID,
+			ToID:    p.ToID,
+			DepType: p.DepType,
+		}); err != nil {
+			return nil, err
+		}
+		return map[string]any{"ok": true}, nil
 
 	default:
 		return nil, fmt.Errorf("paritytest: unsupported method %q", method)
