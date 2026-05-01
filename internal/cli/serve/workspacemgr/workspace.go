@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
@@ -291,6 +292,163 @@ func CreateWorkspace(ctx context.Context, req service.WorkspaceCreateRequest) (s
 	}
 
 	return result, err
+}
+
+// BuildStoreBackedCreateWorkspace returns a create function for fleet-db store
+// mode. Existing-dir ("empty") creation writes workspace/repo metadata to the
+// store as the source of truth and records only local checkout paths in
+// ~/.loom/state.json. Clone creation still uses the legacy flow until the clone
+// parity ticket moves disk cloning to store-primary semantics.
+func BuildStoreBackedCreateWorkspace(s storepkg.Store) service.WorkspaceCreateFn {
+	if s == nil {
+		return nil
+	}
+	return func(ctx context.Context, req service.WorkspaceCreateRequest) (service.WorkspaceCreateResult, error) {
+		if req.Type == "clone" {
+			return CreateWorkspace(ctx, req)
+		}
+		return createStoreBackedEmptyWorkspace(ctx, s, req)
+	}
+}
+
+func createStoreBackedEmptyWorkspace(ctx context.Context, s storepkg.Store, req service.WorkspaceCreateRequest) (service.WorkspaceCreateResult, error) {
+	if req.Type != "empty" {
+		return service.WorkspaceCreateResult{}, fmt.Errorf("unsupported workspace type: %s", req.Type)
+	}
+	if existing, err := s.Workspaces().GetByName(ctx, req.Name); err == nil && existing != nil {
+		return service.WorkspaceCreateResult{}, workspaceerrors.New(workspaceerrors.AlreadyExists, fmt.Sprintf("workspace %q already exists", req.Name), nil)
+	} else if err != nil && !errors.Is(err, domain.ErrNotFound) {
+		return service.WorkspaceCreateResult{}, fmt.Errorf("check workspace name: %w", err)
+	}
+
+	wsDir, err := resolveSecureWorkspaceDir(req.Path, req.Name)
+	if err != nil {
+		return service.WorkspaceCreateResult{}, err
+	}
+	if err := validateWorkspacePath(wsDir); err != nil {
+		return service.WorkspaceCreateResult{}, err
+	}
+	resolved, err := resolveRepoPaths(req.Repos)
+	if err != nil {
+		return service.WorkspaceCreateResult{}, err
+	}
+
+	branch := req.Branch
+	if branch == "" {
+		branch = req.Name
+	}
+	key := workspaceKeyFromName(req.Name)
+	if _, err := s.Workspaces().Get(ctx, key); err == nil {
+		return service.WorkspaceCreateResult{}, workspaceerrors.New(workspaceerrors.AlreadyExists, fmt.Sprintf("workspace %q already exists", req.Name), nil)
+	} else if err != nil && !errors.Is(err, domain.ErrNotFound) {
+		return service.WorkspaceCreateResult{}, fmt.Errorf("check workspace key: %w", err)
+	}
+
+	if err := os.MkdirAll(wsDir, 0755); err != nil {
+		return service.WorkspaceCreateResult{}, fmt.Errorf("cannot create workspace directory: %w", err)
+	}
+	created, repos, err := addWorktrees(ctx, resolved, wsDir, branch)
+	if err != nil {
+		cleanupWorktrees(wsDir, created)
+		return service.WorkspaceCreateResult{}, err
+	}
+
+	if _, err := s.Workspaces().Create(ctx, storepkg.WorkspaceCreate{
+		Key:           key,
+		Name:          req.Name,
+		DefaultBranch: branch,
+	}); err != nil {
+		cleanupWorktrees(wsDir, created)
+		return service.WorkspaceCreateResult{}, fmt.Errorf("create workspace in store: %w", err)
+	}
+	storeCreated := true
+	rollbackStore := func() {
+		if storeCreated {
+			if err := s.Workspaces().Delete(context.Background(), key); err != nil && !errors.Is(err, domain.ErrNotFound) {
+				slog.Warn("failed to rollback store workspace create", "workspace", key, "err", err)
+			}
+		}
+	}
+
+	for _, r := range repos {
+		if _, err := s.Repos().Create(ctx, storepkg.RepoCreate{
+			WorkspaceKey:  key,
+			Name:          r.Name,
+			DefaultBranch: branch,
+			SourceRepoID:  r.SourceRepoID,
+		}); err != nil {
+			rollbackStore()
+			cleanupWorktrees(wsDir, created)
+			return service.WorkspaceCreateResult{}, fmt.Errorf("create repo %q in store: %w", r.Name, err)
+		}
+	}
+
+	if err := saveLocalWorkspaceState(key, wsDir, repos, true); err != nil {
+		rollbackStore()
+		cleanupWorktrees(wsDir, created)
+		return service.WorkspaceCreateResult{}, err
+	}
+
+	return service.WorkspaceCreateResult{WorkspaceID: key, WorkspacePath: wsDir}, nil
+}
+
+func workspaceKeyFromName(name string) string {
+	var b strings.Builder
+	for _, r := range strings.ToUpper(name) {
+		switch {
+		case r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+		case r == '-' || r == '_' || r == '.':
+			b.WriteByte('-')
+		}
+	}
+	key := strings.Trim(b.String(), "-")
+	if key == "" {
+		key = "W"
+	}
+	if key[0] < 'A' || key[0] > 'Z' {
+		key = "W-" + key
+	}
+	if len(key) > 32 {
+		key = strings.TrimRight(key[:32], "-")
+	}
+	if key == "" || key[0] < 'A' || key[0] > 'Z' {
+		key = "W"
+	}
+	return key
+}
+
+func saveLocalWorkspaceState(key, wsDir string, repos []config.RepoConfig, makeActive bool) error {
+	if key == "" {
+		return errors.New("save local workspace state: key must not be empty")
+	}
+	return bootstrap.WithStateLock(func() error {
+		sc, err := bootstrap.LoadStateCache()
+		if err != nil {
+			return fmt.Errorf("load local workspace state: %w", err)
+		}
+		if sc.Workspaces == nil {
+			sc.Workspaces = make(map[string]bootstrap.WorkspaceLocalState)
+		}
+		repoPaths := make(map[string]string, len(repos))
+		for _, r := range repos {
+			repoPaths[r.Name] = r.Path
+		}
+		local := sc.Workspaces[key]
+		local.Path = wsDir
+		local.Repos = repoPaths
+		if local.Agents == nil {
+			local.Agents = make(map[string]bootstrap.AgentLocalState)
+		}
+		sc.Workspaces[key] = local
+		if makeActive {
+			sc.LastWorkspace = key
+		}
+		if err := bootstrap.SaveStateCache(sc); err != nil {
+			return fmt.Errorf("save local workspace state: %w", err)
+		}
+		return nil
+	})
 }
 
 // loadOrCreateConfig loads the config, creating a fresh one if nil.

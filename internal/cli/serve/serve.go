@@ -452,11 +452,7 @@ func applyWorkspaceConfig(cfg *webui.ServerConfig) {
 	cfg.WorkspaceDeleteFn = serveadapter.BuildWorkspaceDeleteFn(cfg.Store)
 	cfg.SetDefaultWorkspaceFn = serveadapter.BuildSetDefaultWorkspaceFn(cfg.Store)
 	cfg.ClearDefaultWorkspaceFn = serveadapter.BuildClearDefaultWorkspaceFn()
-	// CreateWorkspace coordinates disk operations (clone repos, set
-	// up worktrees) that aren't part of the store contract — it stays
-	// on workspacemgr until that flow is reworked. The store-backed
-	// Create (loom workspace add) handles the metadata-only path.
-	cfg.WorkspaceCreateFn = workspacemgr.CreateWorkspace
+	cfg.WorkspaceCreateFn = workspacemgr.BuildStoreBackedCreateWorkspace(cfg.Store)
 }
 
 func applyFleetInitialWorkspaceFallback(cfg *webui.ServerConfig, force bool) {

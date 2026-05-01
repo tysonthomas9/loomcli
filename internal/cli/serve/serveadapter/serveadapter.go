@@ -42,26 +42,16 @@ func BuildWorkspaceConfigByIDFn(s store.Store) func(string) (*ops.WorkspaceData,
 }
 
 // BuildWorkspaceListFn returns a closure satisfying
-// webui.ServerConfig.WorkspaceListFn — id→path map. Path is empty in
-// fleet-db mode (workspace state is server-side; per-machine paths
-// belong on the local checkout cache, not the workspace record). The
-// webui treats an empty path as "no local checkout" and renders the
-// workspace anyway.
+// webui.ServerConfig.WorkspaceListFn — id→local checkout path map.
+// Shared workspace metadata lives in fleet-db; per-machine checkout paths
+// come from ~/.loom/state.json and may be empty when this machine has not
+// checked out the workspace.
 func BuildWorkspaceListFn(s store.Store) func() (map[string]string, error) {
 	if s == nil {
 		return nil
 	}
 	return func() (map[string]string, error) {
-		ctx := context.Background()
-		list, err := s.Workspaces().List(ctx)
-		if err != nil {
-			return nil, err
-		}
-		out := make(map[string]string, len(list))
-		for _, ws := range list {
-			out[ws.Key] = "" // no per-machine path in fleet-db mode
-		}
-		return out, nil
+		return storeadapter.ListWorkspacePaths(context.Background(), s)
 	}
 }
 
