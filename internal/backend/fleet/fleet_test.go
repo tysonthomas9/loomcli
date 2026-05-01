@@ -1209,8 +1209,15 @@ func TestListEvents_HappyPath(t *testing.T) {
 		if r.URL.Query().Get("limit") != "10" {
 			t.Errorf("limit = %q, want %q", r.URL.Query().Get("limit"), "10")
 		}
-		respondOK(w, []*types.Event{
-			{ID: 1, IssueID: "test-1", EventType: types.EventCreated, Actor: "user", CreatedAt: now},
+		respondOK(w, map[string]any{
+			"history": []map[string]any{
+				{
+					"id":        "1",
+					"timestamp": now,
+					"actor":     "user",
+					"action":    "issue.created",
+				},
+			},
 		})
 	})
 	defer ts.Close()
@@ -1888,6 +1895,13 @@ func TestBatch_Creates_Aggregated(t *testing.T) {
 	issues, ok := gotBody["issues"].([]interface{})
 	if !ok || len(issues) != 2 {
 		t.Errorf("body.issues len = %d, want 2 (body=%+v)", len(issues), gotBody)
+	}
+	firstIssue, _ := issues[0].(map[string]interface{})
+	if _, exists := firstIssue["issue_type"]; exists {
+		t.Errorf("body.issues[0] contains issue_type; fleet-db batch API expects type (body=%+v)", firstIssue)
+	}
+	if firstIssue["type"] != "task" {
+		t.Errorf("body.issues[0].type = %v, want task", firstIssue["type"])
 	}
 	if len(results) != 2 {
 		t.Fatalf("results len = %d, want 2", len(results))

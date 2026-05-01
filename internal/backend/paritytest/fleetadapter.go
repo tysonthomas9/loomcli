@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
@@ -456,6 +457,111 @@ func (a *fleetDBAdapter) ListEvents(ctx context.Context, id string, limit int) (
 		})
 	}
 	return out, nil
+}
+
+func (a *fleetDBAdapter) Batch(ctx context.Context, ops []backend.BatchOp) ([]backend.BatchResult, error) {
+	results := make([]backend.BatchResult, len(ops))
+	for i, op := range ops {
+		switch strings.ToLower(op.Operation) {
+		case "create":
+			results[i] = a.batchCreateOne(ctx, op.Args)
+		case "update":
+			results[i] = a.batchUpdateOne(ctx, op.Args)
+		case "close":
+			results[i] = a.batchCloseOne(ctx, op.Args)
+		case "delete":
+			results[i] = a.batchDeleteOne(ctx, op.Args)
+		default:
+			results[i] = backend.BatchResult{
+				Success: false,
+				Error:   fmt.Sprintf("backend [%s] Batch: unsupported batch operation %q", backend.KindValidation, op.Operation),
+			}
+		}
+	}
+	return results, nil
+}
+
+func (a *fleetDBAdapter) batchCreateOne(ctx context.Context, raw json.RawMessage) backend.BatchResult {
+	var p backend.CreateParams
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return batchFailure(backend.ErrValidation("Batch", "unmarshal create args: "+err.Error()))
+	}
+	created, err := a.Create(ctx, p)
+	if err != nil {
+		return batchFailure(err)
+	}
+	data, err := json.Marshal(created)
+	if err != nil {
+		return batchFailure(backend.ErrInternal("Batch", "marshal create result", err))
+	}
+	return backend.BatchResult{Success: true, Data: data}
+}
+
+func (a *fleetDBAdapter) batchUpdateOne(ctx context.Context, raw json.RawMessage) backend.BatchResult {
+	var p struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return batchFailure(backend.ErrValidation("Batch", "unmarshal update args: "+err.Error()))
+	}
+	if p.ID == "" {
+		return batchFailure(backend.ErrValidation("Batch", "update op missing id"))
+	}
+	var params backend.UpdateParams
+	if err := json.Unmarshal(raw, &params); err != nil {
+		return batchFailure(backend.ErrValidation("Batch", "unmarshal update args: "+err.Error()))
+	}
+	if err := a.Update(ctx, p.ID, params); err != nil {
+		return batchFailure(err)
+	}
+	return backend.BatchResult{Success: true}
+}
+
+func (a *fleetDBAdapter) batchCloseOne(ctx context.Context, raw json.RawMessage) backend.BatchResult {
+	var p struct {
+		ID     string `json:"id"`
+		Reason string `json:"reason,omitempty"`
+	}
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return batchFailure(backend.ErrValidation("Batch", "unmarshal close args: "+err.Error()))
+	}
+	if p.ID == "" {
+		return batchFailure(backend.ErrValidation("Batch", "close op missing id"))
+	}
+	if _, err := a.Close(ctx, p.ID, backend.CloseParams{Reason: p.Reason}); err != nil {
+		return batchFailure(err)
+	}
+	return backend.BatchResult{Success: true}
+}
+
+func (a *fleetDBAdapter) batchDeleteOne(ctx context.Context, raw json.RawMessage) backend.BatchResult {
+	var p struct {
+		ID      string   `json:"id"`
+		IDs     []string `json:"ids"`
+		Reason  string   `json:"reason,omitempty"`
+		Force   bool     `json:"force,omitempty"`
+		Cascade bool     `json:"cascade,omitempty"`
+	}
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return batchFailure(backend.ErrValidation("Batch", "unmarshal delete args: "+err.Error()))
+	}
+	ids := p.IDs
+	if p.ID != "" {
+		ids = append([]string{p.ID}, ids...)
+	}
+	if err := a.Delete(ctx, backend.DeleteParams{
+		IDs: ids, Reason: p.Reason, Force: p.Force, Cascade: p.Cascade,
+	}); err != nil {
+		return batchFailure(err)
+	}
+	return backend.BatchResult{Success: true}
+}
+
+func batchFailure(err error) backend.BatchResult {
+	if err == nil {
+		return backend.BatchResult{Success: false}
+	}
+	return backend.BatchResult{Success: false, Error: err.Error()}
 }
 
 func (a *fleetDBAdapter) fetchDependencies(ctx context.Context, id string) ([]backend.DependencyData, error) {

@@ -3,6 +3,7 @@
 package paritytest
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -263,6 +264,117 @@ func TestParityTest_AllFixtures(t *testing.T) {
 	// discovered fixture.
 	if report.Summary.FixturesRun != len(fixtures) {
 		t.Errorf("FixturesRun: got %d want %d", report.Summary.FixturesRun, len(fixtures))
+	}
+}
+
+func TestFleetDBOnlyBackendBatchAndErrorSemantics(t *testing.T) {
+	fleetBE, _ := spawnFleetDB(t)
+	ctx := context.Background()
+
+	seedUpdate, err := fleetBE.Create(ctx, backend.CreateParams{
+		Title:     "Batch update seed",
+		Priority:  2,
+		IssueType: "task",
+		Owner:     parityActor,
+	})
+	if err != nil {
+		t.Fatalf("create update seed: %v", err)
+	}
+	seedClose, err := fleetBE.Create(ctx, backend.CreateParams{
+		Title:     "Batch close seed",
+		Priority:  2,
+		IssueType: "task",
+		Owner:     parityActor,
+	})
+	if err != nil {
+		t.Fatalf("create close seed: %v", err)
+	}
+
+	updateTitle := "Batch-updated issue"
+	updatePriority := 1
+	successOps := []backend.BatchOp{
+		{Operation: "create", Args: mustRawJSON(t, backend.CreateParams{
+			Title:     "Batch-created issue",
+			Priority:  2,
+			IssueType: "task",
+			Owner:     parityActor,
+		})},
+		{Operation: "update", Args: mustRawJSON(t, map[string]any{
+			"id":       seedUpdate.ID,
+			"title":    updateTitle,
+			"priority": updatePriority,
+		})},
+		{Operation: "close", Args: mustRawJSON(t, map[string]any{
+			"id":     seedClose.ID,
+			"reason": "batch close",
+		})},
+	}
+	results, err := fleetBE.Batch(ctx, successOps)
+	if err != nil {
+		t.Fatalf("successful Batch returned method error: %v", err)
+	}
+	assertBatchShape(t, results, []bool{true, true, true}, []string{"", "", ""})
+
+	updated, err := fleetBE.Get(ctx, seedUpdate.ID)
+	if err != nil {
+		t.Fatalf("get updated issue: %v", err)
+	}
+	if updated.Title != updateTitle {
+		t.Errorf("updated.Title = %q, want %q", updated.Title, updateTitle)
+	}
+	if updated.Priority != updatePriority {
+		t.Errorf("updated.Priority = %d, want %d", updated.Priority, updatePriority)
+	}
+	closed, err := fleetBE.Get(ctx, seedClose.ID)
+	if err != nil {
+		t.Fatalf("get closed issue: %v", err)
+	}
+	if closed.Status != "closed" {
+		t.Errorf("closed.Status = %q, want closed", closed.Status)
+	}
+
+	errorOps := []backend.BatchOp{
+		{Operation: "update", Args: mustRawJSON(t, map[string]any{"title": "missing id"})},
+		{Operation: "delete", Args: mustRawJSON(t, map[string]any{"id": "does-not-exist-ever-parity-probe"})},
+		{Operation: "close", Args: mustRawJSON(t, map[string]any{"id": seedClose.ID})},
+		{Operation: "teleport", Args: mustRawJSON(t, map[string]any{})},
+	}
+	results, err = fleetBE.Batch(ctx, errorOps)
+	if err != nil {
+		t.Fatalf("error Batch returned method error: %v", err)
+	}
+	assertBatchShape(t, results,
+		[]bool{false, false, false, false},
+		[]string{
+			string(backend.KindValidation),
+			string(backend.KindNotFound),
+			string(backend.KindConflict),
+			string(backend.KindValidation),
+		},
+	)
+}
+
+func mustRawJSON(t *testing.T, value any) json.RawMessage {
+	t.Helper()
+	raw, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("marshal raw json: %v", err)
+	}
+	return raw
+}
+
+func assertBatchShape(t *testing.T, results []backend.BatchResult, wantSuccess []bool, wantKinds []string) {
+	t.Helper()
+	if len(results) != len(wantSuccess) {
+		t.Fatalf("len(results) = %d, want %d: %+v", len(results), len(wantSuccess), results)
+	}
+	for i, result := range results {
+		if result.Success != wantSuccess[i] {
+			t.Errorf("results[%d].Success = %v, want %v (error=%q)", i, result.Success, wantSuccess[i], result.Error)
+		}
+		if got := batchErrorKind(result.Error); got != wantKinds[i] {
+			t.Errorf("results[%d] error kind = %q, want %q (error=%q)", i, got, wantKinds[i], result.Error)
+		}
 	}
 }
 

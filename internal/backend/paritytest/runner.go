@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 )
@@ -339,6 +340,19 @@ func (r *DualRunner) executeStep(ctx context.Context, be backend.IssueBackend, m
 		}
 		return map[string]any{"count": len(events)}, nil
 
+	case "batch":
+		var p struct {
+			Ops []backend.BatchOp `json:"ops"`
+		}
+		if err := unmarshalParams(rawParams, &p); err != nil {
+			return nil, err
+		}
+		results, err := be.Batch(ctx, p.Ops)
+		if err != nil {
+			return nil, err
+		}
+		return batchResultsToComparableMap(results), nil
+
 	default:
 		return nil, fmt.Errorf("paritytest: unsupported method %q", method)
 	}
@@ -369,6 +383,47 @@ func commentsToComparableMap(comments []backend.CommentData) map[string]any {
 		"texts":          texts,
 		"authors":        authors,
 		"has_created_at": hasCreatedAt,
+	}
+}
+
+func batchResultsToComparableMap(results []backend.BatchResult) map[string]any {
+	successes := make([]bool, 0, len(results))
+	errorKinds := make([]string, 0, len(results))
+	for _, result := range results {
+		successes = append(successes, result.Success)
+		errorKinds = append(errorKinds, batchErrorKind(result.Error))
+	}
+	return map[string]any{
+		"count":       len(results),
+		"successes":   successes,
+		"error_kinds": errorKinds,
+	}
+}
+
+func batchErrorKind(message string) string {
+	message = strings.ToLower(message)
+	switch {
+	case message == "":
+		return ""
+	case strings.Contains(message, string(backend.KindNotFound)) || strings.Contains(message, "not found"):
+		return string(backend.KindNotFound)
+	case strings.Contains(message, string(backend.KindConflict)) ||
+		strings.Contains(message, "already claimed") ||
+		strings.Contains(message, "already closed") ||
+		strings.Contains(message, "is closed"):
+		return string(backend.KindConflict)
+	case strings.Contains(message, string(backend.KindValidation)) ||
+		strings.Contains(message, "validation") ||
+		strings.Contains(message, "invalid") ||
+		strings.Contains(message, "missing id") ||
+		strings.Contains(message, "unsupported batch operation"):
+		return string(backend.KindValidation)
+	case strings.Contains(message, string(backend.KindUnavailable)):
+		return string(backend.KindUnavailable)
+	case strings.Contains(message, string(backend.KindTimeout)):
+		return string(backend.KindTimeout)
+	default:
+		return string(backend.KindInternal)
 	}
 }
 

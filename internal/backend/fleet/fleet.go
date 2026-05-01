@@ -923,21 +923,48 @@ func (b *FleetBackend) Batch(ctx context.Context, ops []backend.BatchOp) ([]back
 // POST /issues/batch. Results are written back into `results` at the original
 // indices.
 func (b *FleetBackend) runBatchCreates(ctx context.Context, ops []backend.BatchOp, idx []int, results []backend.BatchResult) {
+	type batchCreateIssueReq struct {
+		Title       string   `json:"title"`
+		Description string   `json:"description,omitempty"`
+		Priority    int      `json:"priority"`
+		Type        string   `json:"type"`
+		Assignee    string   `json:"assignee,omitempty"`
+		Owner       string   `json:"owner,omitempty"`
+		Labels      []string `json:"labels,omitempty"`
+		ParentID    string   `json:"parent_id,omitempty"`
+		Design      string   `json:"design,omitempty"`
+		Notes       string   `json:"notes,omitempty"`
+		DueAt       string   `json:"due_at,omitempty"`
+		DeferUntil  string   `json:"defer_until,omitempty"`
+	}
 	type batchCreateReq struct {
-		Issues []backend.CreateParams `json:"issues"`
+		Issues []batchCreateIssueReq `json:"issues"`
 	}
 	type batchCreateResp struct {
 		Issues []types.Issue `json:"issues"`
 		Count  int           `json:"count"`
 	}
-	req := batchCreateReq{Issues: make([]backend.CreateParams, 0, len(idx))}
+	req := batchCreateReq{Issues: make([]batchCreateIssueReq, 0, len(idx))}
 	for _, i := range idx {
 		var p backend.CreateParams
 		if err := json.Unmarshal(ops[i].Args, &p); err != nil {
 			results[i] = backend.BatchResult{Success: false, Error: "unmarshal create args: " + err.Error()}
 			continue
 		}
-		req.Issues = append(req.Issues, p)
+		req.Issues = append(req.Issues, batchCreateIssueReq{
+			Title:       p.Title,
+			Description: p.Description,
+			Priority:    p.Priority,
+			Type:        p.IssueType,
+			Assignee:    p.Assignee,
+			Owner:       p.Owner,
+			Labels:      p.Labels,
+			ParentID:    p.Parent,
+			Design:      p.Design,
+			Notes:       p.Notes,
+			DueAt:       p.DueAt,
+			DeferUntil:  p.DeferUntil,
+		})
 	}
 	// If every op had a marshal error we have nothing to send.
 	if len(req.Issues) == 0 {
