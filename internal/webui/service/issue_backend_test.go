@@ -534,6 +534,95 @@ func TestClaimIssue_Backend_BlockedIssue_MapsTo409AndDoesNotClaim(t *testing.T) 
 	}
 }
 
+func TestClaimIssue_Backend_AllReadyWorkBlockers_MapTo409AndDoNotClaim(t *testing.T) {
+	blockingTypes := []string{
+		"blocks",
+		"parent-child",
+		"conditional-blocks",
+		"waits-for",
+	}
+
+	for _, depType := range blockingTypes {
+		t.Run(depType, func(t *testing.T) {
+			now := time.Now().UTC()
+			fb := &fakeIssueBackend{
+				getResult: &backend.IssueDetailData{
+					IssueData: backend.IssueData{
+						ID: "i-1", Title: "T", Status: "open", Priority: 1, CreatedAt: now, UpdatedAt: now,
+					},
+					Dependencies: []backend.DependencyData{
+						{
+							IssueID:     "i-1",
+							DependsOnID: "blocker-1",
+							Type:        depType,
+							Status:      "open",
+							CreatedAt:   now,
+						},
+					},
+				},
+			}
+			svc := newServiceWithFake(fb)
+			_, err := svc.ClaimIssue(context.Background(), ClaimIssueParams{IssueID: "i-1"})
+			var sErr *ServiceError
+			if !errors.As(err, &sErr) || sErr.Kind != KindConflict {
+				t.Fatalf("expected ConflictError, got %v", err)
+			}
+			if len(fb.claimCalls) != 0 {
+				t.Fatalf("blocked issue should not be claimed, got calls %+v", fb.claimCalls)
+			}
+		})
+	}
+}
+
+func TestClaimIssue_Backend_NonBlockingDependencyTypes_AllowClaim(t *testing.T) {
+	nonBlockingTypes := []string{
+		"related",
+		"discovered-from",
+		"replies-to",
+		"relates-to",
+		"duplicates",
+		"supersedes",
+		"authored-by",
+		"assigned-to",
+		"approved-by",
+		"attests",
+		"tracks",
+		"until",
+		"caused-by",
+		"validates",
+		"delegated-from",
+	}
+
+	for _, depType := range nonBlockingTypes {
+		t.Run(depType, func(t *testing.T) {
+			now := time.Now().UTC()
+			fb := &fakeIssueBackend{
+				getResult: &backend.IssueDetailData{
+					IssueData: backend.IssueData{
+						ID: "i-1", Title: "T", Status: "in_progress", Priority: 1, CreatedAt: now, UpdatedAt: now,
+					},
+					Dependencies: []backend.DependencyData{
+						{
+							IssueID:     "i-1",
+							DependsOnID: "linked-1",
+							Type:        depType,
+							Status:      "open",
+							CreatedAt:   now,
+						},
+					},
+				},
+			}
+			svc := newServiceWithFake(fb)
+			if _, err := svc.ClaimIssue(context.Background(), ClaimIssueParams{IssueID: "i-1"}); err != nil {
+				t.Fatalf("ClaimIssue: %v", err)
+			}
+			if len(fb.claimCalls) != 1 {
+				t.Fatalf("expected claim call, got %+v", fb.claimCalls)
+			}
+		})
+	}
+}
+
 func TestClaimIssue_Backend_ClosedBlockingDependency_AllowsClaim(t *testing.T) {
 	now := time.Now().UTC()
 	fb := &fakeIssueBackend{
