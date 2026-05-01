@@ -8,6 +8,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/appinfra"
 	"github.com/tysonthomas9/loomcli/internal/webui/appstores"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlermux"
+	"github.com/tysonthomas9/loomcli/internal/webui/handlers/agents"
 	"github.com/tysonthomas9/loomcli/internal/webui/modbuilder"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/svcimpl"
@@ -17,7 +18,7 @@ import (
 // and assigns them to app.wsModules.
 func (app *Server) buildModules() {
 	var agentQueueH http.HandlerFunc
-	if app.config.AgentQueueFn != nil {
+	if app.config.AgentQueueFn != nil && app.config.Store == nil && !app.config.FleetClient {
 		agentQueueH = webui.HandleAgentQueue(app.config.AgentQueueFn)
 	}
 
@@ -106,7 +107,9 @@ func (app *Server) buildInfraModules() {
 		app.wsModules = append(app.wsModules, modbuilder.NewFileModule(app.fileSvc))
 	}
 
-	if app.config.AgentControlFn != nil {
+	if app.config.Store != nil {
+		app.wsModules = append(app.wsModules, agents.NewModule(app.agentSvc))
+	} else if app.config.AgentControlFn != nil {
 		app.wsModules = append(app.wsModules, webui.NewAgentControlModule(app.config.AgentControlFn))
 	}
 }
