@@ -41,6 +41,9 @@ func NewWorkspaceJobStore() *WorkspaceJobStore {
 // job ID immediately.
 func (s *WorkspaceJobStore) Start(req service.WorkspaceCreateRequest, createFn service.WorkspaceCreateFn) string {
 	id := uuid.New().String()
+	if req.Type == "clone" && req.Name != "" {
+		id = service.WorkspaceKeyFromName(req.Name)
+	}
 
 	// Store initial running state.
 	s.jobs.Store(id, &service.WorkspaceJob{

@@ -9,7 +9,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
-func TestWorkspaceJobStore_StartReturnsUUID(t *testing.T) {
+func TestWorkspaceJobStore_StartReturnsWorkspaceKeyForClone(t *testing.T) {
 	store := NewWorkspaceJobStore()
 	defer store.Stop()
 
@@ -17,13 +17,9 @@ func TestWorkspaceJobStore_StartReturnsUUID(t *testing.T) {
 		return service.WorkspaceCreateResult{WorkspaceID: "ws-123"}, nil
 	}
 
-	id := store.Start(service.WorkspaceCreateRequest{Name: "test", Type: "clone"}, createFn)
-	if id == "" {
-		t.Fatal("expected non-empty job ID")
-	}
-	// UUID format: 8-4-4-4-12
-	if len(id) != 36 {
-		t.Errorf("expected UUID format (36 chars), got %d chars: %s", len(id), id)
+	id := store.Start(service.WorkspaceCreateRequest{Name: "clone_ws", Type: "clone"}, createFn)
+	if id != "CLONE-WS" {
+		t.Fatalf("job id = %q, want CLONE-WS", id)
 	}
 }
 

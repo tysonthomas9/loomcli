@@ -305,7 +305,7 @@ func BuildStoreBackedCreateWorkspace(s storepkg.Store) service.WorkspaceCreateFn
 	}
 	return func(ctx context.Context, req service.WorkspaceCreateRequest) (service.WorkspaceCreateResult, error) {
 		if req.Type == "clone" {
-			return CreateWorkspace(ctx, req)
+			return createStoreBackedCloneWorkspace(ctx, s, req)
 		}
 		return createStoreBackedEmptyWorkspace(ctx, s, req)
 	}
@@ -337,7 +337,7 @@ func createStoreBackedEmptyWorkspace(ctx context.Context, s storepkg.Store, req 
 	if branch == "" {
 		branch = req.Name
 	}
-	key := workspaceKeyFromName(req.Name)
+	key := service.WorkspaceKeyFromName(req.Name)
 	if _, err := s.Workspaces().Get(ctx, key); err == nil {
 		return service.WorkspaceCreateResult{}, workspaceerrors.New(workspaceerrors.AlreadyExists, fmt.Sprintf("workspace %q already exists", req.Name), nil)
 	} else if err != nil && !errors.Is(err, domain.ErrNotFound) {
@@ -392,30 +392,108 @@ func createStoreBackedEmptyWorkspace(ctx context.Context, s storepkg.Store, req 
 	return service.WorkspaceCreateResult{WorkspaceID: key, WorkspacePath: wsDir}, nil
 }
 
-func workspaceKeyFromName(name string) string {
-	var b strings.Builder
-	for _, r := range strings.ToUpper(name) {
-		switch {
-		case r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
-			b.WriteRune(r)
-		case r == '-' || r == '_' || r == '.':
-			b.WriteByte('-')
+func createStoreBackedCloneWorkspace(ctx context.Context, s storepkg.Store, req service.WorkspaceCreateRequest) (service.WorkspaceCreateResult, error) {
+	cloneURLs := req.CloneURLs
+	if len(cloneURLs) == 0 && req.CloneURL != "" {
+		cloneURLs = []string{req.CloneURL}
+	}
+	if len(cloneURLs) == 0 {
+		return service.WorkspaceCreateResult{}, workspaceerrors.New(workspaceerrors.PathNotFound, "no clone URLs specified", nil)
+	}
+	if existing, err := s.Workspaces().GetByName(ctx, req.Name); err == nil && existing != nil {
+		return service.WorkspaceCreateResult{}, workspaceerrors.New(workspaceerrors.AlreadyExists, fmt.Sprintf("workspace %q already exists", req.Name), nil)
+	} else if err != nil && !errors.Is(err, domain.ErrNotFound) {
+		return service.WorkspaceCreateResult{}, fmt.Errorf("check workspace name: %w", err)
+	}
+
+	wsDir, err := resolveSecureWorkspaceDir(req.Path, req.Name)
+	if err != nil {
+		return service.WorkspaceCreateResult{}, err
+	}
+	if err := validateWorkspacePath(wsDir); err != nil {
+		return service.WorkspaceCreateResult{}, err
+	}
+	branch := req.Branch
+	if branch == "" {
+		branch = "main"
+	}
+	key := service.WorkspaceKeyFromName(req.Name)
+	if _, err := s.Workspaces().Get(ctx, key); err == nil {
+		return service.WorkspaceCreateResult{}, workspaceerrors.New(workspaceerrors.AlreadyExists, fmt.Sprintf("workspace %q already exists", req.Name), nil)
+	} else if err != nil && !errors.Is(err, domain.ErrNotFound) {
+		return service.WorkspaceCreateResult{}, fmt.Errorf("check workspace key: %w", err)
+	}
+
+	if _, err := s.Workspaces().Create(ctx, storepkg.WorkspaceCreate{
+		Key:           key,
+		Name:          req.Name,
+		DefaultBranch: branch,
+	}); err != nil {
+		return service.WorkspaceCreateResult{}, fmt.Errorf("create workspace in store: %w", err)
+	}
+	_ = updateStoreWorkspaceState(ctx, s, key, domain.WorkspaceStateCreating, "")
+
+	markErr := func(msg string) {
+		if err := updateStoreWorkspaceState(context.Background(), s, key, domain.WorkspaceStateError, msg); err != nil {
+			slog.Warn("failed to mark store workspace error", "workspace", key, "err", err)
 		}
 	}
-	key := strings.Trim(b.String(), "-")
-	if key == "" {
-		key = "W"
+	if err := os.MkdirAll(wsDir, 0755); err != nil {
+		markErr(fmt.Sprintf("cannot create directory: %v", err))
+		return service.WorkspaceCreateResult{}, fmt.Errorf("cannot create workspace directory: %w", err)
 	}
-	if key[0] < 'A' || key[0] > 'Z' {
-		key = "W-" + key
+
+	if err := updateStoreWorkspaceState(ctx, s, key, domain.WorkspaceStateCloning, ""); err != nil {
+		cleanupCloneDir(wsDir)
+		return service.WorkspaceCreateResult{}, fmt.Errorf("mark workspace cloning: %w", err)
 	}
-	if len(key) > 32 {
-		key = strings.TrimRight(key[:32], "-")
+	repos, err := cloneRepos(ctx, cloneURLs, wsDir)
+	if err != nil {
+		cleanupCloneDir(wsDir)
+		markErr(err.Error())
+		return service.WorkspaceCreateResult{}, err
 	}
-	if key == "" || key[0] < 'A' || key[0] > 'Z' {
-		key = "W"
+
+	if err := updateStoreWorkspaceState(ctx, s, key, domain.WorkspaceStateInitializing, ""); err != nil {
+		cleanupCloneDir(wsDir)
+		markErr(err.Error())
+		return service.WorkspaceCreateResult{}, fmt.Errorf("mark workspace initializing: %w", err)
 	}
-	return key
+	for i, r := range repos {
+		remoteURL := ""
+		if i < len(cloneURLs) {
+			remoteURL = cloneURLs[i]
+		}
+		if _, err := s.Repos().Create(ctx, storepkg.RepoCreate{
+			WorkspaceKey:  key,
+			Name:          r.Name,
+			RemoteURL:     remoteURL,
+			DefaultBranch: branch,
+			SourceRepoID:  r.SourceRepoID,
+		}); err != nil {
+			cleanupCloneDir(wsDir)
+			markErr(err.Error())
+			return service.WorkspaceCreateResult{}, fmt.Errorf("create repo %q in store: %w", r.Name, err)
+		}
+	}
+	if err := saveLocalWorkspaceState(key, wsDir, repos, true); err != nil {
+		cleanupCloneDir(wsDir)
+		markErr(err.Error())
+		return service.WorkspaceCreateResult{}, err
+	}
+	if err := updateStoreWorkspaceState(ctx, s, key, domain.WorkspaceStateReady, ""); err != nil {
+		return service.WorkspaceCreateResult{}, fmt.Errorf("mark workspace ready: %w", err)
+	}
+
+	return service.WorkspaceCreateResult{WorkspaceID: key, WorkspacePath: wsDir}, nil
+}
+
+func updateStoreWorkspaceState(ctx context.Context, s storepkg.Store, key string, state domain.WorkspaceState, msg string) error {
+	_, err := s.Workspaces().Update(ctx, key, storepkg.WorkspaceUpdate{
+		State:        &state,
+		ErrorMessage: &msg,
+	})
+	return err
 }
 
 func saveLocalWorkspaceState(key, wsDir string, repos []config.RepoConfig, makeActive bool) error {

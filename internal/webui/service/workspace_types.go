@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strings"
 	"time"
 )
 
@@ -14,6 +15,35 @@ type WorkspaceCreateRequest struct {
 	CloneURLs []string `json:"clone_urls"` // multiple git URLs (for clone type)
 	Branch    string   `json:"branch"`     // optional branch name
 	Path      string   `json:"path"`       // optional workspace directory override
+}
+
+// WorkspaceKeyFromName derives the fleet-db workspace key used by store-backed
+// web workspace creation. It intentionally mirrors fleet-db's key regex:
+// uppercase letters/digits/hyphens, starts with a letter, max 32 chars.
+func WorkspaceKeyFromName(name string) string {
+	var b strings.Builder
+	for _, r := range strings.ToUpper(name) {
+		switch {
+		case r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+		case r == '-' || r == '_' || r == '.':
+			b.WriteByte('-')
+		}
+	}
+	key := strings.Trim(b.String(), "-")
+	if key == "" {
+		key = "W"
+	}
+	if key[0] < 'A' || key[0] > 'Z' {
+		key = "W-" + key
+	}
+	if len(key) > 32 {
+		key = strings.TrimRight(key[:32], "-")
+	}
+	if key == "" || key[0] < 'A' || key[0] > 'Z' {
+		key = "W"
+	}
+	return key
 }
 
 // WorkspaceCreateResult carries data produced during workspace creation,

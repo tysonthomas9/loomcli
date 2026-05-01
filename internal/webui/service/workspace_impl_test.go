@@ -318,3 +318,58 @@ func TestClearDefaultWorkspace_StoreBackedClearsStateCache(t *testing.T) {
 		}
 	}
 }
+
+func TestGetWorkspaceJob_StoreFallbackSurvivesJobStoreLoss(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "CLONE-WS", Name: "clone-ws"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	cloning := domain.WorkspaceStateCloning
+	if _, err := st.Workspaces().Update(ctx, "CLONE-WS", store.WorkspaceUpdate{State: &cloning}); err != nil {
+		t.Fatalf("mark cloning: %v", err)
+	}
+
+	svc := NewWorkspaceService(WorkspaceServiceConfig{Store: st})
+	job, err := svc.GetWorkspaceJob(ctx, "CLONE-WS")
+	if err != nil {
+		t.Fatalf("GetWorkspaceJob returned error: %v", err)
+	}
+	if job.Status != JobStatusRunning {
+		t.Fatalf("status = %q, want running", job.Status)
+	}
+	if job.Progress != "cloning repository..." {
+		t.Fatalf("progress = %q", job.Progress)
+	}
+	if job.WorkspaceID != "CLONE-WS" {
+		t.Fatalf("workspace_id = %q, want CLONE-WS", job.WorkspaceID)
+	}
+}
+
+func TestGetWorkspaceJob_StoreFallbackReturnsFailedForErrorWorkspace(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "CLONE-WS", Name: "clone-ws"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	failed := domain.WorkspaceStateError
+	msg := "git clone failed"
+	if _, err := st.Workspaces().Update(ctx, "CLONE-WS", store.WorkspaceUpdate{
+		State:        &failed,
+		ErrorMessage: &msg,
+	}); err != nil {
+		t.Fatalf("mark error: %v", err)
+	}
+
+	svc := NewWorkspaceService(WorkspaceServiceConfig{Store: st})
+	job, err := svc.GetWorkspaceJob(ctx, "CLONE-WS")
+	if err != nil {
+		t.Fatalf("GetWorkspaceJob returned error: %v", err)
+	}
+	if job.Status != JobStatusFailed {
+		t.Fatalf("status = %q, want failed", job.Status)
+	}
+	if job.Error != msg {
+		t.Fatalf("error = %q, want %q", job.Error, msg)
+	}
+}

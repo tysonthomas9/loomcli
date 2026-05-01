@@ -110,6 +110,90 @@ func TestStoreBackedCreateEmptyWorkspaceRollsBackOnRepoStoreError(t *testing.T) 
 	}
 }
 
+func TestStoreBackedCreateCloneWorkspacePersistsLifecycleAndRepos(t *testing.T) {
+	loomDir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", loomDir)
+
+	src := initTestGitRepo(t, t.TempDir(), "app")
+	st := memstore.New()
+	createFn := BuildStoreBackedCreateWorkspace(st)
+	wsPath := filepath.Join(loomDir, "workspaces", "clone-ws")
+
+	result, err := createFn(context.Background(), service.WorkspaceCreateRequest{
+		Name:      "clone-ws",
+		Type:      "clone",
+		CloneURLs: []string{src},
+		Branch:    "main",
+		Path:      wsPath,
+	})
+	if err != nil {
+		t.Fatalf("clone workspace: %v", err)
+	}
+	if result.WorkspaceID != "CLONE-WS" {
+		t.Fatalf("WorkspaceID = %q, want CLONE-WS", result.WorkspaceID)
+	}
+	ws, err := st.Workspaces().Get(context.Background(), "CLONE-WS")
+	if err != nil {
+		t.Fatalf("workspace not stored: %v", err)
+	}
+	if ws.State != domain.WorkspaceStateReady {
+		t.Fatalf("workspace state = %q, want ready", ws.State)
+	}
+	repos, err := st.Repos().List(context.Background(), "CLONE-WS")
+	if err != nil {
+		t.Fatalf("list repos: %v", err)
+	}
+	if len(repos) != 1 || repos[0].Name != "app" || repos[0].RemoteURL != src {
+		t.Fatalf("repos = %#v, want cloned app repo with remote URL", repos)
+	}
+	if _, err := os.Stat(filepath.Join(wsPath, "app", ".git")); err != nil {
+		t.Fatalf("clone checkout not created: %v", err)
+	}
+	sc, err := bootstrap.LoadStateCache()
+	if err != nil {
+		t.Fatalf("load state cache: %v", err)
+	}
+	if sc.LastWorkspace != "CLONE-WS" {
+		t.Fatalf("LastWorkspace = %q, want CLONE-WS", sc.LastWorkspace)
+	}
+	if sc.Workspaces["CLONE-WS"].Repos["app"] != filepath.Join(wsPath, "app") {
+		t.Fatalf("state repo path = %q", sc.Workspaces["CLONE-WS"].Repos["app"])
+	}
+}
+
+func TestStoreBackedCreateCloneWorkspaceMarksErrorInStoreOnCloneFailure(t *testing.T) {
+	loomDir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", loomDir)
+
+	st := memstore.New()
+	createFn := BuildStoreBackedCreateWorkspace(st)
+	wsPath := filepath.Join(loomDir, "workspaces", "clone-ws")
+
+	_, err := createFn(context.Background(), service.WorkspaceCreateRequest{
+		Name:      "clone-ws",
+		Type:      "clone",
+		CloneURLs: []string{filepath.Join(t.TempDir(), "missing")},
+		Path:      wsPath,
+	})
+	if err == nil {
+		t.Fatal("clone workspace succeeded, want git clone error")
+	}
+
+	ws, getErr := st.Workspaces().Get(context.Background(), "CLONE-WS")
+	if getErr != nil {
+		t.Fatalf("workspace error marker was not persisted: %v", getErr)
+	}
+	if ws.State != domain.WorkspaceStateError {
+		t.Fatalf("workspace state = %q, want error", ws.State)
+	}
+	if ws.ErrorMessage == "" {
+		t.Fatal("workspace error message is empty")
+	}
+	if _, statErr := os.Stat(wsPath); !os.IsNotExist(statErr) {
+		t.Fatalf("workspace path still exists after clone failure, stat err=%v", statErr)
+	}
+}
+
 type repoFailStore struct {
 	*memstore.Store
 	err error

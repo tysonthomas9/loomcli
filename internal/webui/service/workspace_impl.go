@@ -399,14 +399,47 @@ func (s *workspaceServiceImpl) StartAsyncCreate(_ context.Context, req Workspace
 	return jobID, nil
 }
 
-func (s *workspaceServiceImpl) GetWorkspaceJob(_ context.Context, jobID string) (*WorkspaceJob, error) {
-	if s.jobStore == nil {
-		return nil, ErrNotFound("job not found")
+func (s *workspaceServiceImpl) GetWorkspaceJob(ctx context.Context, jobID string) (*WorkspaceJob, error) {
+	if s.jobStore != nil {
+		if job := s.jobStore.Get(jobID); job != nil {
+			return job, nil
+		}
 	}
+	if s.store != nil {
+		return s.workspaceJobFromStore(ctx, jobID)
+	}
+	return nil, ErrNotFound("job not found")
+}
 
-	job := s.jobStore.Get(jobID)
-	if job == nil {
-		return nil, ErrNotFound("job not found")
+func (s *workspaceServiceImpl) workspaceJobFromStore(ctx context.Context, key string) (*WorkspaceJob, error) {
+	ws, err := s.store.Workspaces().Get(ctx, key)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return nil, ErrNotFound("job not found")
+		}
+		return nil, ErrInternal("failed to load workspace job", err)
+	}
+	job := &WorkspaceJob{ID: key, WorkspaceID: key}
+	switch ws.State {
+	case domain.WorkspaceStateCreating:
+		job.Status = JobStatusRunning
+		job.Progress = "creating workspace..."
+	case domain.WorkspaceStateCloning:
+		job.Status = JobStatusRunning
+		job.Progress = "cloning repository..."
+	case domain.WorkspaceStateInitializing:
+		job.Status = JobStatusRunning
+		job.Progress = "initializing workspace..."
+	case domain.WorkspaceStateError:
+		job.Status = JobStatusFailed
+		job.Error = ws.ErrorMessage
+		if job.Error == "" {
+			job.Error = "workspace creation failed"
+		}
+		job.CompletedAt = ws.UpdatedAt
+	default:
+		job.Status = JobStatusDone
+		job.CompletedAt = ws.UpdatedAt
 	}
 	return job, nil
 }
