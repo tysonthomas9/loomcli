@@ -103,6 +103,9 @@ func TestSupervisorMirrorsAgentSessionToControlPlane(t *testing.T) {
 	if ap.AgentSessionID == "" {
 		t.Fatal("AgentSessionID was not set")
 	}
+	if ap.AgentLeaseID == "" || ap.AgentLeaseToken == "" {
+		t.Fatalf("lease id/token not set: %q/%q", ap.AgentLeaseID, ap.AgentLeaseToken)
+	}
 	session, err := st.AgentSessions().Get(t.Context(), "WS", ap.AgentSessionID)
 	if err != nil {
 		t.Fatalf("get created agent session: %v", err)
@@ -116,6 +119,13 @@ func TestSupervisorMirrorsAgentSessionToControlPlane(t *testing.T) {
 	if session.Metadata["epic_id"] != "epic-1" || session.Metadata["repo"] != "repo-a" {
 		t.Fatalf("metadata = %#v, want epic/repo", session.Metadata)
 	}
+	lease, err := st.AgentLeases().Get(t.Context(), "WS", ap.AgentLeaseID)
+	if err != nil {
+		t.Fatalf("get created lease: %v", err)
+	}
+	if lease.SessionID != ap.AgentSessionID || lease.Status != domain.AgentLeaseActive {
+		t.Fatalf("lease session/status = %q/%q, want %q/active", lease.SessionID, lease.Status, ap.AgentSessionID)
+	}
 
 	s.markControlPlaneAgentSessionRunning(ap)
 	session, err = st.AgentSessions().Get(t.Context(), "WS", ap.AgentSessionID)
@@ -127,7 +137,9 @@ func TestSupervisorMirrorsAgentSessionToControlPlane(t *testing.T) {
 	}
 
 	sessionID := ap.AgentSessionID
-	s.completeControlPlaneAgentSession(ap, sessionID, 7, "Fatal")
+	leaseID := ap.AgentLeaseID
+	leaseToken := ap.AgentLeaseToken
+	s.completeControlPlaneAgentSession(ap, sessionID, leaseID, leaseToken, 7, "Fatal")
 	session, err = st.AgentSessions().Get(t.Context(), "WS", sessionID)
 	if err != nil {
 		t.Fatalf("get completed agent session: %v", err)
@@ -143,6 +155,13 @@ func TestSupervisorMirrorsAgentSessionToControlPlane(t *testing.T) {
 	}
 	if session.FinishedAt == nil {
 		t.Fatal("FinishedAt was not set")
+	}
+	lease, err = st.AgentLeases().Get(t.Context(), "WS", leaseID)
+	if err != nil {
+		t.Fatalf("get released lease: %v", err)
+	}
+	if lease.Status != domain.AgentLeaseReleased {
+		t.Fatalf("lease status = %q, want released", lease.Status)
 	}
 }
 

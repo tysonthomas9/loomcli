@@ -21,14 +21,16 @@ type AgentProcess struct {
 	WorktreePath string             // resolved worktree path
 	RepoConfig   *cfgpkg.RepoConfig // per-repo config (nil in non-workspace mode)
 
-	Cmd            *exec.Cmd         // current subprocess (nil when not running)
-	Pid            int               // PID of current subprocess (0 when not running)
-	LogFile        *os.File          // log file handle for subprocess output (nil if not logging)
-	LogFilePath    string            // path to agent log file for watchdog stat checks
-	TranscriptPath string            // path to session transcript.jsonl for watchdog liveness (set by superviseAgent)
-	Session        *sessions.Session // daemon-created session handle (nil when no session active)
-	AgentSessionID string            // fleet-db control-plane session id (empty when no session active)
-	BeforeRef      string            // git HEAD ref before spawn (for diff stats at finalization)
+	Cmd             *exec.Cmd         // current subprocess (nil when not running)
+	Pid             int               // PID of current subprocess (0 when not running)
+	LogFile         *os.File          // log file handle for subprocess output (nil if not logging)
+	LogFilePath     string            // path to agent log file for watchdog stat checks
+	TranscriptPath  string            // path to session transcript.jsonl for watchdog liveness (set by superviseAgent)
+	Session         *sessions.Session // daemon-created session handle (nil when no session active)
+	AgentSessionID  string            // fleet-db control-plane session id (empty when no session active)
+	AgentLeaseID    string            // fleet-db control-plane lease id (empty when no lease active)
+	AgentLeaseToken string            // fleet-db control-plane lease token (empty when no lease active)
+	BeforeRef       string            // git HEAD ref before spawn (for diff stats at finalization)
 
 	RestartCount   int       // consecutive restart attempts
 	LastStart      time.Time // when subprocess was last spawned
@@ -50,7 +52,7 @@ type AgentProcess struct {
 
 	StopReason StopReason // why the agent was stopped (set at decision site, empty while running)
 
-	Mu sync.Mutex // protects Cmd, Pid, LogFile, restart tracking, AssignedEpicID, LastError, CurrentBackendIdx, Session, AgentSessionID, TranscriptPath, BeforeRef, StopReason
+	Mu sync.Mutex // protects Cmd, Pid, LogFile, restart tracking, AssignedEpicID, LastError, CurrentBackendIdx, Session, AgentSessionID, AgentLeaseID, AgentLeaseToken, TranscriptPath, BeforeRef, StopReason
 }
 
 // StopReason identifies why an agent was stopped.

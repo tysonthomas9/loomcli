@@ -144,6 +144,7 @@ func (s *Supervisor) Start() error {
 const (
 	defaultNodeTTL      = 2 * time.Minute
 	defaultNodeInterval = 30 * time.Second
+	defaultLeaseTTL     = 2 * time.Minute
 )
 
 func (s *Supervisor) startControlPlaneNode() error {
@@ -326,6 +327,8 @@ func (s *Supervisor) clearAgentSessionState(ap *AgentProcess) {
 	ap.Mu.Lock()
 	ap.Session = nil
 	ap.AgentSessionID = ""
+	ap.AgentLeaseID = ""
+	ap.AgentLeaseToken = ""
 	ap.TranscriptPath = ""
 	ap.BeforeRef = ""
 	ap.Mu.Unlock()
@@ -426,7 +429,26 @@ func (s *Supervisor) createControlPlaneAgentSession(ap *AgentProcess, sessionID,
 		Metadata:     metadata,
 	}); err != nil {
 		slog.Warn("control-plane agent session creation failed", "worktree", ap.Entry.Worktree, "session_id", sessionID, "err", err)
+		return
 	}
+	lease, err := s.ControlStore.AgentLeases().Create(ctx, store.AgentLeaseCreate{
+		WorkspaceKey: s.WorkspaceID,
+		SessionID:    sessionID,
+		LeaseID:      sessionID + "-lease",
+		AgentID:      ap.Entry.Worktree,
+		NodeID:       s.NodeID,
+		TTL:          defaultLeaseTTL,
+	})
+	if err != nil {
+		slog.Warn("control-plane agent lease creation failed", "worktree", ap.Entry.Worktree, "session_id", sessionID, "err", err)
+		return
+	}
+	ap.Mu.Lock()
+	if ap.AgentSessionID == sessionID {
+		ap.AgentLeaseID = lease.LeaseID
+		ap.AgentLeaseToken = lease.Token
+	}
+	ap.Mu.Unlock()
 }
 
 func (s *Supervisor) markControlPlaneAgentSessionRunning(ap *AgentProcess) {
@@ -451,7 +473,7 @@ func (s *Supervisor) markControlPlaneAgentSessionRunning(ap *AgentProcess) {
 	}
 }
 
-func (s *Supervisor) completeControlPlaneAgentSession(ap *AgentProcess, sessionID string, exitCode int, errClass string) {
+func (s *Supervisor) completeControlPlaneAgentSession(ap *AgentProcess, sessionID, leaseID, leaseToken string, exitCode int, errClass string) {
 	if s.ControlStore == nil || s.WorkspaceID == "" || sessionID == "" {
 		return
 	}
@@ -472,6 +494,11 @@ func (s *Supervisor) completeControlPlaneAgentSession(ap *AgentProcess, sessionI
 	}); err != nil {
 		slog.Warn("control-plane agent session completion failed", "worktree", ap.Entry.Worktree, "session_id", sessionID, "err", err)
 	}
+	if leaseID != "" && leaseToken != "" {
+		if _, err := s.ControlStore.AgentLeases().Release(ctx, s.WorkspaceID, leaseID, leaseToken); err != nil {
+			slog.Warn("control-plane agent lease release failed", "worktree", ap.Entry.Worktree, "session_id", sessionID, "lease_id", leaseID, "err", err)
+		}
+	}
 }
 
 // spawnAndWait spawns the agent and waits for it to exit. Returns false if spawn fails (continue loop).
@@ -483,11 +510,15 @@ func (s *Supervisor) spawnAndWait(ap *AgentProcess) bool {
 		ap.Session = nil
 		orphanSessionID := ap.AgentSessionID
 		ap.AgentSessionID = ""
+		orphanLeaseID := ap.AgentLeaseID
+		orphanLeaseToken := ap.AgentLeaseToken
+		ap.AgentLeaseID = ""
+		ap.AgentLeaseToken = ""
 		ap.Mu.Unlock()
 		if orphanSess != nil {
 			_ = orphanSess.Finalize(sessions.FinalizeOptions{ExitCode: -1, ErrorClass: "spawn_failure"})
 		}
-		s.completeControlPlaneAgentSession(ap, orphanSessionID, -1, "spawn_failure")
+		s.completeControlPlaneAgentSession(ap, orphanSessionID, orphanLeaseID, orphanLeaseToken, -1, "spawn_failure")
 		s.Concurrency.Release(ap.Entry.Role)
 		return s.handleRestartAfterError(ap)
 	}
@@ -507,9 +538,13 @@ func (s *Supervisor) finalizeAgentSession(ap *AgentProcess, exitCode int) {
 	ap.Mu.Lock()
 	sess := ap.Session
 	agentSessionID := ap.AgentSessionID
+	agentLeaseID := ap.AgentLeaseID
+	agentLeaseToken := ap.AgentLeaseToken
 	bRef := ap.BeforeRef
 	ap.Session = nil
 	ap.AgentSessionID = ""
+	ap.AgentLeaseID = ""
+	ap.AgentLeaseToken = ""
 	ap.Mu.Unlock()
 
 	if sess == nil && agentSessionID == "" {
@@ -540,7 +575,7 @@ func (s *Supervisor) finalizeAgentSession(ap *AgentProcess, exitCode int) {
 			slog.Warn("session finalization failed", "worktree", ap.Entry.Worktree, "err", err)
 		}
 	}
-	s.completeControlPlaneAgentSession(ap, agentSessionID, exitCode, errClass)
+	s.completeControlPlaneAgentSession(ap, agentSessionID, agentLeaseID, agentLeaseToken, exitCode, errClass)
 }
 
 // postMortemRecovery runs recovery after agent exit, skipping for yield exits.
