@@ -98,6 +98,62 @@ func TestHandler_FleetDBOnlyReconnectCatchUpUsesSinceQuery(t *testing.T) {
 	}
 }
 
+func TestHandler_FleetDBOnlyCatchUpAppliesSourceRepoFilter(t *testing.T) {
+	h := NewHandler(HandlerConfig{
+		Hub: NewHub(),
+		GetMutationsSince: func(wsID string, since string) []rpc.MutationEvent {
+			return []rpc.MutationEvent{
+				{Cursor: "1700000000500-0", Type: "update", IssueID: "repo-a-task", SourceRepo: "repo-a", Timestamp: time.Date(2026, 5, 1, 12, 3, 0, 0, time.UTC)},
+				{Cursor: "1700000000600-0", Type: "update", IssueID: "repo-b-task", SourceRepo: "repo-b", Timestamp: time.Date(2026, 5, 1, 12, 4, 0, 0, time.UTC)},
+			}
+		},
+		WorkspaceFromCtx: func(context.Context) string { return "ws-fleet" },
+	})
+	h.heartbeatInterval = time.Hour
+
+	body := serveSSEOnce(t, h, func(req *http.Request) {
+		q := req.URL.Query()
+		q.Set("since", "1700000000400-0")
+		q.Set("source_repos", "repo-a")
+		req.URL.RawQuery = q.Encode()
+	})
+
+	if !strings.Contains(body, `"issue_id":"repo-a-task"`) {
+		t.Fatalf("matching repo mutation missing from catch-up body:\n%s", body)
+	}
+	if strings.Contains(body, "repo-b-task") {
+		t.Fatalf("non-matching repo mutation leaked through catch-up filter:\n%s", body)
+	}
+}
+
+func TestHandler_FleetDBOnlyCatchUpFailsClosedWithoutWorkspace(t *testing.T) {
+	called := false
+	h := NewHandler(HandlerConfig{
+		Hub: NewHub(),
+		GetMutationsSince: func(wsID string, since string) []rpc.MutationEvent {
+			called = true
+			return []rpc.MutationEvent{
+				{Cursor: "1700000000700-0", Type: "update", IssueID: "leaked-task", Timestamp: time.Date(2026, 5, 1, 12, 5, 0, 0, time.UTC)},
+			}
+		},
+		WorkspaceFromCtx: func(context.Context) string { return "" },
+	})
+	h.heartbeatInterval = time.Hour
+
+	body := serveSSEOnce(t, h, func(req *http.Request) {
+		q := req.URL.Query()
+		q.Set("since", "1700000000600-0")
+		req.URL.RawQuery = q.Encode()
+	})
+
+	if called {
+		t.Fatal("GetMutationsSince should not be called when workspace is empty")
+	}
+	if strings.Contains(body, "leaked-task") || strings.Contains(body, "event: mutation\n") {
+		t.Fatalf("empty workspace catch-up should fail closed, got body:\n%s", body)
+	}
+}
+
 func serveSSEOnce(t *testing.T, h *Handler, mutateReq func(*http.Request)) string {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
