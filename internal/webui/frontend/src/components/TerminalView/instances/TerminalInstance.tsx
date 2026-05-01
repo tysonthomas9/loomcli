@@ -11,6 +11,7 @@
  * internals.
  */
 
+import type { WTerm } from "@wterm/dom";
 import { Terminal, type TerminalHandle } from "@wterm/react";
 import "@wterm/react/css";
 import {
@@ -117,6 +118,16 @@ export const TerminalInstance = forwardRef<
 ) {
   const { workspaceId } = useWorkspaceContext();
   const wtermRef = useRef<TerminalHandle | null>(null);
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
+  const terminalSizeRef = useRef({ cols: 80, rows: 24 });
+
+  const syncViewportToBottom = useCallback(() => {
+    const el = wrapperRef.current?.querySelector<HTMLElement>(".wterm");
+    if (!el) return;
+    requestAnimationFrame(() => {
+      el.scrollTop = el.scrollHeight;
+    });
+  }, []);
 
   const write = useCallback((data: string | Uint8Array) => {
     wtermRef.current?.write(data);
@@ -155,6 +166,7 @@ export const TerminalInstance = forwardRef<
   );
   const beingKilledRef = useRef(false);
   const hasConnectedRef = useRef(false);
+  const initialViewportSyncDoneRef = useRef(false);
   const [connectionState, setConnectionState] =
     useState<ConnectionState>("disconnected");
 
@@ -249,6 +261,10 @@ export const TerminalInstance = forwardRef<
         () => {
           clearReconnectTimers();
           onReconnectStateChangeRef.current?.(null);
+          if (!initialViewportSyncDoneRef.current) {
+            initialViewportSyncDoneRef.current = true;
+            syncViewportToBottom();
+          }
           opts?.onOutcome?.(true);
         },
         // onDisconnected — schedule a reconnect unless we're being killed.
@@ -274,6 +290,7 @@ export const TerminalInstance = forwardRef<
           clearReconnectTimers();
           onReconnectStateChangeRef.current?.(null);
         },
+        terminalSizeRef.current,
       );
       wsCleanupRef.current = cleanup;
     },
@@ -294,6 +311,7 @@ export const TerminalInstance = forwardRef<
   useEffect(() => {
     beingKilledRef.current = false;
     hasConnectedRef.current = false;
+    initialViewportSyncDoneRef.current = false;
     // Connection normally begins in the onReady handler. If we're in a
     // StrictMode remount (wterm already fired onReady, and its cached
     // WASM means it won't fire again), re-kick the connection here —
@@ -318,14 +336,46 @@ export const TerminalInstance = forwardRef<
   // never fires again on remount (same component instance), leaving the tab
   // stuck in "connecting".
   const wtermReadyRef = useRef(false);
-  const handleReady = useCallback(() => {
+  const measureTerminalSize = useCallback(
+    (wt: WTerm): { cols: number; rows: number } | null => {
+      const el = wt.element;
+      const grid = el.querySelector<HTMLElement>(".term-grid");
+      if (!grid) return null;
+
+      const probe = document.createElement("span");
+      probe.className = "term-cell";
+      probe.textContent = "W";
+      probe.style.position = "absolute";
+      probe.style.visibility = "hidden";
+      grid.appendChild(probe);
+
+      const rect = probe.getBoundingClientRect();
+      probe.remove();
+
+      if (rect.width <= 0 || rect.height <= 0) return null;
+
+      const cols = Math.max(1, Math.floor(el.clientWidth / rect.width));
+      const rows = Math.max(1, Math.floor(el.clientHeight / rect.height));
+      return { cols, rows };
+    },
+    [],
+  );
+
+  const handleReady = useCallback((wt: WTerm) => {
     wtermReadyRef.current = true;
     if (ptyAlive === false) {
       setConnectionState("session_ended");
       return;
     }
+    const measured = measureTerminalSize(wt);
+    if (measured) {
+      terminalSizeRef.current = measured;
+      if (wt.cols !== measured.cols || wt.rows !== measured.rows) {
+        wt.resize(measured.cols, measured.rows);
+      }
+    }
     doConnectRef.current?.();
-  }, [ptyAlive]);
+  }, [measureTerminalSize, ptyAlive]);
 
   const handleData = useCallback((data: string) => {
     const ws = wsRef.current;
@@ -335,6 +385,7 @@ export const TerminalInstance = forwardRef<
   }, []);
 
   const handleResize = useCallback((cols: number, rows: number) => {
+    terminalSizeRef.current = { cols, rows };
     const ws = wsRef.current;
     if (ws?.readyState === WebSocket.OPEN) {
       ws.send(encodeResize(cols, rows));
@@ -395,11 +446,15 @@ export const TerminalInstance = forwardRef<
         }
       },
     }),
-    [focus, clearReconnectTimers],
+    [focus, clearReconnectTimers, syncViewportToBottom],
   );
 
   return (
-    <div className={styles.wrapper} data-testid="terminal-wrapper">
+    <div
+      ref={wrapperRef}
+      className={styles.wrapper}
+      data-testid="terminal-wrapper"
+    >
       <Terminal
         ref={wtermRef}
         cols={80}

@@ -42,6 +42,30 @@ func TestNewPTYManager_CwdIsRespected(t *testing.T) {
 	}
 }
 
+func TestTerminalSpawnEnv_StripsStaleGeometryAndOverridesTERM(t *testing.T) {
+	env := terminalSpawnEnv([]string{
+		"PATH=/usr/bin",
+		"COLUMNS=88",
+		"LINES=33",
+		"TERM=screen-256color",
+		"HOME=/tmp/home",
+	})
+
+	joined := strings.Join(env, "\n")
+	if strings.Contains(joined, "COLUMNS=") {
+		t.Fatalf("terminalSpawnEnv() leaked COLUMNS: %q", joined)
+	}
+	if strings.Contains(joined, "LINES=") {
+		t.Fatalf("terminalSpawnEnv() leaked LINES: %q", joined)
+	}
+	if strings.Contains(joined, "TERM=screen-256color") {
+		t.Fatalf("terminalSpawnEnv() kept stale TERM: %q", joined)
+	}
+	if !strings.Contains(joined, termEnv) {
+		t.Fatalf("terminalSpawnEnv() missing %q: %q", termEnv, joined)
+	}
+}
+
 // newTestManager returns a manager configured to spawn `/bin/bash -c "cat"`.
 // cat echoes stdin to stdout so tests can deterministically drive the PTY.
 func newTestManager(t *testing.T) *PTYManager {

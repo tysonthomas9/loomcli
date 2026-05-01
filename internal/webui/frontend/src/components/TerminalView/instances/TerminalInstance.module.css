@@ -8,11 +8,10 @@
  *       → .wrapper (flex:1, min-height:0)
  *         → .container / .wterm (height:100%)
  *
- * wterm adds its own `.wterm` class on mount and toggles `.has-scrollback`
- * when scrollback accumulates; wterm's base CSS flips `overflow-y: auto`
- * at that point. We intentionally do NOT set overflow on the .wterm
- * element here — wterm's own base CSS already handles it based on
- * scrollback presence.
+ * We keep the `.wterm` element as a stable scroll container from the start
+ * instead of waiting for wterm's `.has-scrollback` toggle. That avoids
+ * viewport churn when a session first accumulates scrollback and makes
+ * restored tabs behave consistently with fresh shells.
  */
 
 .wrapper {
@@ -35,6 +34,10 @@
   box-shadow: none;
   background: var(--terminal-bg);
   color: var(--terminal-fg);
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 
   --term-bg: var(--terminal-bg);
   --term-fg: var(--terminal-fg);
@@ -47,6 +50,10 @@
 
 .container:global(.wterm) ::selection {
   background: var(--terminal-selection);
+}
+
+.container:global(.wterm.has-scrollback) {
+  overflow-y: auto;
 }
 
 .container:global(.wterm)::-webkit-scrollbar {

@@ -56,6 +56,21 @@ const (
 // and is what tmux 3.6+ requires to start.
 const termEnv = "TERM=xterm-256color"
 
+func terminalSpawnEnv(base []string) []string {
+	env := make([]string, 0, len(base)+1)
+	for _, entry := range base {
+		switch {
+		case strings.HasPrefix(entry, "COLUMNS="),
+			strings.HasPrefix(entry, "LINES="),
+			strings.HasPrefix(entry, "TERM="):
+			continue
+		default:
+			env = append(env, entry)
+		}
+	}
+	return append(env, termEnv)
+}
+
 // SessionKey identifies a persistent terminal session. Two WebSockets opened
 // sequentially with the same key attach to the same underlying PTY.
 type SessionKey struct {
@@ -125,7 +140,7 @@ func NewPTYManager(command string, maxSessions int, cwd string) *PTYManager {
 		argv = []string{"-c", command}
 	}
 
-	env := append(os.Environ(), termEnv)
+	env := terminalSpawnEnv(os.Environ())
 
 	m := &PTYManager{
 		sessions:    make(map[SessionKey]*ptySession),

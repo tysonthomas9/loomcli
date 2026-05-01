@@ -143,6 +143,10 @@ function makeMocks() {
   };
 }
 
+async function waitForBufferedFlush(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 25));
+}
+
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -276,6 +280,7 @@ describe("connectWebSocket", () => {
 
     // Simulate message after cleanup — should be ignored
     ws.simulateMessage("hello");
+    await waitForBufferedFlush();
 
     expect(m.write).not.toHaveBeenCalled();
   });
@@ -308,6 +313,7 @@ describe("connectWebSocket", () => {
 
     // Receive data
     ws.simulateMessage("output text");
+    await waitForBufferedFlush();
     expect(m.write).toHaveBeenCalledWith("output text");
     expect(m.onOutput).toHaveBeenCalled();
 
@@ -315,6 +321,65 @@ describe("connectWebSocket", () => {
     cleanup();
     expect(ws.close).toHaveBeenCalledWith(1000);
     expect(m.wsRef.current).toBeNull();
+  });
+
+  it("batches adjacent terminal output frames into a single renderer write", async () => {
+    const m = makeMocks();
+    connectWebSocket(
+      "ws1",
+      "session1",
+      m.write,
+      m.wsRef,
+      m.setConnectionState,
+      m.onConnected,
+      m.onDisconnected,
+      m.onOutput,
+    );
+
+    shared.resolveToken!({ token: "tok" });
+    await vi.waitFor(() => {
+      expect(MockWebSocket.instances).toHaveLength(1);
+    });
+
+    const ws = MockWebSocket.instances[0];
+    ws.simulateOpen();
+
+    ws.simulateMessage("hello");
+    ws.simulateMessage(" ");
+    ws.simulateMessage("world");
+    await waitForBufferedFlush();
+
+    expect(m.write).toHaveBeenCalledTimes(1);
+    expect(m.write).toHaveBeenCalledWith("hello world");
+    expect(m.onOutput).toHaveBeenCalledTimes(1);
+  });
+
+  it("includes initial terminal size in the first workspace terminal websocket URL", async () => {
+    const m = makeMocks();
+    connectWebSocket(
+      "ws1",
+      "session1",
+      m.write,
+      m.wsRef,
+      m.setConnectionState,
+      m.onConnected,
+      m.onDisconnected,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { cols: 132, rows: 40 },
+    );
+
+    shared.resolveToken!({ token: "tok" });
+    await vi.waitFor(() => {
+      expect(MockWebSocket.instances).toHaveLength(1);
+    });
+
+    const ws = MockWebSocket.instances[0];
+    expect(ws.url).toContain("session=session1");
+    expect(ws.url).toContain("cols=132");
+    expect(ws.url).toContain("rows=40");
   });
 
   it("handles fetchTerminalToken rejection gracefully", async () => {
@@ -521,6 +586,7 @@ describe("connectWebSocket", () => {
       expect(m.onConnected).toHaveBeenCalled();
 
       ws.simulateMessage("agent output");
+      await waitForBufferedFlush();
       expect(m.write).toHaveBeenCalledWith("agent output");
       expect(m.onOutput).toHaveBeenCalled();
 

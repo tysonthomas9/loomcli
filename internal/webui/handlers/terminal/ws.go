@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"time"
 
 	"nhooyr.io/websocket" //nolint:staticcheck // SA1019: websocket migration tracked separately
@@ -61,6 +62,7 @@ func HandleTerminalWS(manager webuterminal.PTYSource, auth *realtime.TerminalAut
 		if !ok {
 			return
 		}
+		initialCols, initialRows := initialTerminalSizeFromRequest(r)
 
 		conn, ok := upgradeTerminalWS(w, r, p.patterns)
 		if !ok {
@@ -73,7 +75,15 @@ func HandleTerminalWS(manager webuterminal.PTYSource, auth *realtime.TerminalAut
 			_ = conn.Close(closeStatus, closeReason) //nolint:staticcheck // SA1019: websocket migration tracked separately
 		}()
 
-		closeStatus, closeReason = runTerminalRelay(r.Context(), conn, p, session, workspace)
+		closeStatus, closeReason = runTerminalRelay(
+			r.Context(),
+			conn,
+			p,
+			session,
+			workspace,
+			initialCols,
+			initialRows,
+		)
 	}
 }
 
@@ -180,10 +190,10 @@ func classifyAttachErr(err error, session, workspace string) (websocket.StatusCo
 // runTerminalRelay attaches to the (workspace, session) PTY session and runs
 // the bidirectional relay until the WebSocket closes. On WS close the session
 // is detached (grace period armed); the PTY and child process stay alive.
-func runTerminalRelay(reqCtx context.Context, conn *websocket.Conn, p *terminalWSParams, session, workspace string) (websocket.StatusCode, string) { //nolint:staticcheck // SA1019: websocket migration tracked separately
+func runTerminalRelay(reqCtx context.Context, conn *websocket.Conn, p *terminalWSParams, session, workspace string, initialCols, initialRows uint16) (websocket.StatusCode, string) { //nolint:staticcheck // SA1019: websocket migration tracked separately
 	key := webuterminal.SessionKey{Workspace: workspace, Name: session}
 
-	att, reattach, err := p.manager.AttachSession(key, 80, 24, webuterminal.ArgvForSession(session))
+	att, reattach, err := p.manager.AttachSession(key, initialCols, initialRows, webuterminal.ArgvForSession(session))
 	if err != nil {
 		return classifyAttachErr(err, session, workspace)
 	}
@@ -236,6 +246,24 @@ func runTerminalRelay(reqCtx context.Context, conn *websocket.Conn, p *terminalW
 	p.manager.Detach(key, connID)
 
 	return (<-crashCh).WSClose()
+}
+
+func initialTerminalSizeFromRequest(r *http.Request) (uint16, uint16) {
+	const (
+		defaultCols = 80
+		defaultRows = 24
+	)
+
+	parse := func(raw string, fallback int, max int) uint16 {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n <= 0 || n > max {
+			return uint16(fallback)
+		}
+		return uint16(n)
+	}
+
+	return parse(r.URL.Query().Get("cols"), defaultCols, realtime.MaxTerminalCols),
+		parse(r.URL.Query().Get("rows"), defaultRows, realtime.MaxTerminalRows)
 }
 
 // attachmentWriter adapts Attachment to realtime.WSToPTY's io.Writer input.

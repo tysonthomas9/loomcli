@@ -49,12 +49,17 @@ function buildWsUrl(
   workspaceId: string,
   sessionName: string,
   token: string | null,
+  initialSize?: { cols: number; rows: number },
 ): string {
   const path = wsUrl(
     workspaceId,
     `/terminal/ws?session=${encodeURIComponent(sessionName)}`,
   );
   let url = `${getWsBaseUrl()}${path}`; // allow-url
+  if (initialSize) {
+    url += `&cols=${encodeURIComponent(String(initialSize.cols))}`;
+    url += `&rows=${encodeURIComponent(String(initialSize.rows))}`;
+  }
   if (token) {
     url += `&token=${encodeURIComponent(token)}`;
   }
@@ -95,11 +100,78 @@ export function connectWebSocket(
   onBackendCrash?: (reason: string) => void,
   agentName?: string,
   onSessionKilled?: () => void,
+  initialSize?: { cols: number; rows: number },
 ): () => void {
   setConnectionState("connecting");
 
   let cancelled = false;
   let wsCleanupInner: (() => void) | null = null;
+  let flushTimer: ReturnType<typeof setTimeout> | null = null;
+  const pendingWrites: Array<string | Uint8Array> = [];
+
+  const cancelPendingFlush = () => {
+    if (flushTimer != null) {
+      clearTimeout(flushTimer);
+      flushTimer = null;
+    }
+  };
+
+  const flushBinaryGroup = (group: Uint8Array[]) => {
+    if (group.length === 0) return;
+    if (group.length === 1) {
+      const first = group[0];
+      if (first) {
+        write(first);
+      }
+      return;
+    }
+    const total = group.reduce((sum, chunk) => sum + chunk.byteLength, 0);
+    const merged = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of group) {
+      merged.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    write(merged);
+  };
+
+  const flushPendingWrites = () => {
+    flushTimer = null;
+    if (cancelled || pendingWrites.length === 0) return;
+
+    let textGroup = "";
+    let binaryGroup: Uint8Array[] = [];
+
+    const flushTextGroup = () => {
+      if (textGroup.length === 0) return;
+      write(textGroup);
+      textGroup = "";
+    };
+
+    const flushCurrentBinaryGroup = () => {
+      flushBinaryGroup(binaryGroup);
+      binaryGroup = [];
+    };
+
+    for (const chunk of pendingWrites.splice(0, pendingWrites.length)) {
+      if (typeof chunk === "string") {
+        flushCurrentBinaryGroup();
+        textGroup += chunk;
+      } else {
+        flushTextGroup();
+        binaryGroup.push(chunk);
+      }
+    }
+
+    flushCurrentBinaryGroup();
+    flushTextGroup();
+    onOutput?.();
+  };
+
+  const scheduleFlush = () => {
+    if (flushTimer != null) return;
+    flushTimer = setTimeout(flushPendingWrites, 16);
+  };
 
   const tokenPromise = agentName
     ? getAgentTerminalToken(workspaceId, agentName).catch(() => null)
@@ -112,7 +184,7 @@ export function connectWebSocket(
       const url =
         agentName && token
           ? getAgentTerminalWsUrl(workspaceId, agentName, token)
-          : buildWsUrl(workspaceId, sessionName, token);
+          : buildWsUrl(workspaceId, sessionName, token, initialSize);
       const ws = new WebSocket(url);
       wsRef.current = ws;
       ws.binaryType = "arraybuffer";
@@ -134,11 +206,11 @@ export function connectWebSocket(
       ws.onmessage = (ev: MessageEvent) => {
         if (cancelled) return;
         if (typeof ev.data === "string") {
-          write(ev.data);
+          pendingWrites.push(ev.data);
         } else if (ev.data instanceof ArrayBuffer) {
-          write(new Uint8Array(ev.data));
+          pendingWrites.push(new Uint8Array(ev.data));
         }
-        onOutput?.();
+        scheduleFlush();
       };
 
       ws.onclose = (event: CloseEvent) => {
@@ -163,6 +235,8 @@ export function connectWebSocket(
       };
 
       wsCleanupInner = () => {
+        cancelPendingFlush();
+        pendingWrites.length = 0;
         if (
           ws.readyState === WebSocket.OPEN ||
           ws.readyState === WebSocket.CONNECTING
@@ -181,6 +255,8 @@ export function connectWebSocket(
 
   return () => {
     cancelled = true;
+    cancelPendingFlush();
+    pendingWrites.length = 0;
     if (wsCleanupInner) {
       const fn = wsCleanupInner;
       wsCleanupInner = null;
