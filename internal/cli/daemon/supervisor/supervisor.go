@@ -325,6 +325,7 @@ func (s *Supervisor) setStopReasonDefault(ap *AgentProcess, reason StopReason) {
 func (s *Supervisor) clearAgentSessionState(ap *AgentProcess) {
 	ap.Mu.Lock()
 	ap.Session = nil
+	ap.AgentSessionID = ""
 	ap.TranscriptPath = ""
 	ap.BeforeRef = ""
 	ap.Mu.Unlock()
@@ -392,9 +393,85 @@ func (s *Supervisor) createAgentSession(ap *AgentProcess, epicID string) {
 	bRef := automode.CaptureHEADRef(ap.WorktreePath)
 	ap.Mu.Lock()
 	ap.Session = sess
+	ap.AgentSessionID = sess.SessionID()
 	ap.TranscriptPath = txPath
 	ap.BeforeRef = bRef
 	ap.Mu.Unlock()
+
+	s.createControlPlaneAgentSession(ap, sess.SessionID(), epicID, phase, restartCount)
+}
+
+func (s *Supervisor) createControlPlaneAgentSession(ap *AgentProcess, sessionID, epicID, phase string, attempt int) {
+	if s.ControlStore == nil || s.WorkspaceID == "" || sessionID == "" {
+		return
+	}
+	metadata := map[string]string{}
+	if epicID != "" {
+		metadata["epic_id"] = epicID
+	}
+	if ap.Entry.Repo != "" {
+		metadata["repo"] = ap.Entry.Repo
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if _, err := s.ControlStore.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey: s.WorkspaceID,
+		SessionID:    sessionID,
+		AgentID:      ap.Entry.Worktree,
+		NodeID:       s.NodeID,
+		Kind:         domain.AgentSessionKindTask,
+		Status:       domain.AgentSessionStarting,
+		Phase:        phase,
+		Attempt:      attempt,
+		Metadata:     metadata,
+	}); err != nil {
+		slog.Warn("control-plane agent session creation failed", "worktree", ap.Entry.Worktree, "session_id", sessionID, "err", err)
+	}
+}
+
+func (s *Supervisor) markControlPlaneAgentSessionRunning(ap *AgentProcess) {
+	if s.ControlStore == nil || s.WorkspaceID == "" {
+		return
+	}
+	ap.Mu.Lock()
+	sessionID := ap.AgentSessionID
+	ap.Mu.Unlock()
+	if sessionID == "" {
+		return
+	}
+	now := time.Now().UTC()
+	status := domain.AgentSessionRunning
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if _, err := s.ControlStore.AgentSessions().Update(ctx, s.WorkspaceID, sessionID, store.AgentSessionUpdate{
+		Status:        &status,
+		LastHeartbeat: &now,
+	}); err != nil {
+		slog.Warn("control-plane agent session running update failed", "worktree", ap.Entry.Worktree, "session_id", sessionID, "err", err)
+	}
+}
+
+func (s *Supervisor) completeControlPlaneAgentSession(ap *AgentProcess, sessionID string, exitCode int, errClass string) {
+	if s.ControlStore == nil || s.WorkspaceID == "" || sessionID == "" {
+		return
+	}
+	status := domain.AgentSessionCompleted
+	if exitCode != 0 {
+		status = domain.AgentSessionFailed
+	}
+	finishedAt := time.Now().UTC()
+	finishedAtPtr := &finishedAt
+	exitCodePtr := &exitCode
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if _, err := s.ControlStore.AgentSessions().Update(ctx, s.WorkspaceID, sessionID, store.AgentSessionUpdate{
+		Status:     &status,
+		FinishedAt: &finishedAtPtr,
+		ErrorClass: &errClass,
+		ExitCode:   &exitCodePtr,
+	}); err != nil {
+		slog.Warn("control-plane agent session completion failed", "worktree", ap.Entry.Worktree, "session_id", sessionID, "err", err)
+	}
 }
 
 // spawnAndWait spawns the agent and waits for it to exit. Returns false if spawn fails (continue loop).
@@ -404,10 +481,13 @@ func (s *Supervisor) spawnAndWait(ap *AgentProcess) bool {
 		ap.Mu.Lock()
 		orphanSess := ap.Session
 		ap.Session = nil
+		orphanSessionID := ap.AgentSessionID
+		ap.AgentSessionID = ""
 		ap.Mu.Unlock()
 		if orphanSess != nil {
 			_ = orphanSess.Finalize(sessions.FinalizeOptions{ExitCode: -1, ErrorClass: "spawn_failure"})
 		}
+		s.completeControlPlaneAgentSession(ap, orphanSessionID, -1, "spawn_failure")
 		s.Concurrency.Release(ap.Entry.Role)
 		return s.handleRestartAfterError(ap)
 	}
@@ -426,11 +506,13 @@ func (s *Supervisor) spawnAndWait(ap *AgentProcess) bool {
 func (s *Supervisor) finalizeAgentSession(ap *AgentProcess, exitCode int) {
 	ap.Mu.Lock()
 	sess := ap.Session
+	agentSessionID := ap.AgentSessionID
 	bRef := ap.BeforeRef
 	ap.Session = nil
+	ap.AgentSessionID = ""
 	ap.Mu.Unlock()
 
-	if sess == nil {
+	if sess == nil && agentSessionID == "" {
 		return
 	}
 
@@ -447,15 +529,18 @@ func (s *Supervisor) finalizeAgentSession(ap *AgentProcess, exitCode int) {
 	}
 	ap.Mu.Unlock()
 
-	if err := sess.Finalize(sessions.FinalizeOptions{
-		TaskID: taskID, ExitCode: exitCode, ErrorClass: errClass,
-		FilesTouched: diffStats.FilesTouched,
-		DiffStats: sessions.DiffStats{
-			FilesChanged: diffStats.FilesChanged, LinesAdded: diffStats.LinesAdded, LinesRemoved: diffStats.LinesRemoved,
-		},
-	}); err != nil {
-		slog.Warn("session finalization failed", "worktree", ap.Entry.Worktree, "err", err)
+	if sess != nil {
+		if err := sess.Finalize(sessions.FinalizeOptions{
+			TaskID: taskID, ExitCode: exitCode, ErrorClass: errClass,
+			FilesTouched: diffStats.FilesTouched,
+			DiffStats: sessions.DiffStats{
+				FilesChanged: diffStats.FilesChanged, LinesAdded: diffStats.LinesAdded, LinesRemoved: diffStats.LinesRemoved,
+			},
+		}); err != nil {
+			slog.Warn("session finalization failed", "worktree", ap.Entry.Worktree, "err", err)
+		}
 	}
+	s.completeControlPlaneAgentSession(ap, agentSessionID, exitCode, errClass)
 }
 
 // postMortemRecovery runs recovery after agent exit, skipping for yield exits.

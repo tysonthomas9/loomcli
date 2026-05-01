@@ -172,6 +172,7 @@ func (s *Supervisor) spawnAgent(ap *AgentProcess) error {
 	if evt, err := events.NewEvent(events.AgentStarted, worktree, role, epicID, events.AgentStartedData{PID: pid}); err == nil {
 		s.EmitEvent(evt)
 	}
+	s.markControlPlaneAgentSessionRunning(ap)
 
 	return nil
 }

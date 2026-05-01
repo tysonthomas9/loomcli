@@ -27,6 +27,7 @@ type AgentProcess struct {
 	LogFilePath    string            // path to agent log file for watchdog stat checks
 	TranscriptPath string            // path to session transcript.jsonl for watchdog liveness (set by superviseAgent)
 	Session        *sessions.Session // daemon-created session handle (nil when no session active)
+	AgentSessionID string            // fleet-db control-plane session id (empty when no session active)
 	BeforeRef      string            // git HEAD ref before spawn (for diff stats at finalization)
 
 	RestartCount   int       // consecutive restart attempts
@@ -49,7 +50,7 @@ type AgentProcess struct {
 
 	StopReason StopReason // why the agent was stopped (set at decision site, empty while running)
 
-	Mu sync.Mutex // protects Cmd, Pid, LogFile, restart tracking, AssignedEpicID, LastError, CurrentBackendIdx, Session, TranscriptPath, BeforeRef, StopReason
+	Mu sync.Mutex // protects Cmd, Pid, LogFile, restart tracking, AssignedEpicID, LastError, CurrentBackendIdx, Session, AgentSessionID, TranscriptPath, BeforeRef, StopReason
 }
 
 // StopReason identifies why an agent was stopped.
