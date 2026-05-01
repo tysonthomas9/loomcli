@@ -408,13 +408,7 @@ func (s *Supervisor) createControlPlaneAgentSession(ap *AgentProcess, sessionID,
 	if s.ControlStore == nil || s.WorkspaceID == "" || sessionID == "" {
 		return
 	}
-	metadata := map[string]string{}
-	if epicID != "" {
-		metadata["epic_id"] = epicID
-	}
-	if ap.Entry.Repo != "" {
-		metadata["repo"] = ap.Entry.Repo
-	}
+	metadata := s.agentSessionMetadata(ap, epicID)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	if _, err := s.ControlStore.AgentSessions().Create(ctx, store.AgentSessionCreate{
@@ -455,8 +449,10 @@ func (s *Supervisor) markControlPlaneAgentSessionRunning(ap *AgentProcess) {
 	if s.ControlStore == nil || s.WorkspaceID == "" {
 		return
 	}
+	backend := s.GetEffectiveBackend(ap)
 	ap.Mu.Lock()
 	sessionID := ap.AgentSessionID
+	metadata := s.agentSessionMetadataLocked(ap, backend)
 	ap.Mu.Unlock()
 	if sessionID == "" {
 		return
@@ -468,9 +464,41 @@ func (s *Supervisor) markControlPlaneAgentSessionRunning(ap *AgentProcess) {
 	if _, err := s.ControlStore.AgentSessions().Update(ctx, s.WorkspaceID, sessionID, store.AgentSessionUpdate{
 		Status:        &status,
 		LastHeartbeat: &now,
+		Metadata:      &metadata,
 	}); err != nil {
 		slog.Warn("control-plane agent session running update failed", "worktree", ap.Entry.Worktree, "session_id", sessionID, "err", err)
 	}
+}
+
+func (s *Supervisor) agentSessionMetadata(ap *AgentProcess, epicID string) map[string]string {
+	backend := s.GetEffectiveBackend(ap)
+	ap.Mu.Lock()
+	defer ap.Mu.Unlock()
+	if epicID != "" {
+		ap.AssignedEpicID = epicID
+	}
+	return s.agentSessionMetadataLocked(ap, backend)
+}
+
+// agentSessionMetadataLocked requires ap.Mu to be held.
+func (s *Supervisor) agentSessionMetadataLocked(ap *AgentProcess, backend string) map[string]string {
+	metadata := map[string]string{}
+	if backend != "" {
+		metadata["backend"] = backend
+	}
+	if ap.AssignedEpicID != "" {
+		metadata["epic_id"] = ap.AssignedEpicID
+	}
+	if ap.Entry.Repo != "" {
+		metadata["repo"] = ap.Entry.Repo
+	}
+	if ap.TranscriptPath != "" {
+		metadata["transcript_path"] = ap.TranscriptPath
+	}
+	if ap.LogFilePath != "" {
+		metadata["log_path"] = ap.LogFilePath
+	}
+	return metadata
 }
 
 func (s *Supervisor) completeControlPlaneAgentSession(ap *AgentProcess, sessionID, leaseID, leaseToken string, exitCode int, errClass string) {

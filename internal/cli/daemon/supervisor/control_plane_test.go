@@ -96,6 +96,7 @@ func TestSupervisorMirrorsAgentSessionToControlPlane(t *testing.T) {
 
 	ap := &AgentProcess{
 		Entry:        cfgpkg.AgentEntry{Worktree: "worker-1", Role: "task", Repo: "repo-a"},
+		RoleConfig:   cfgpkg.RoleConfig{Backend: "claude"},
 		WorktreePath: worktree,
 	}
 
@@ -127,6 +128,9 @@ func TestSupervisorMirrorsAgentSessionToControlPlane(t *testing.T) {
 		t.Fatalf("lease session/status = %q/%q, want %q/active", lease.SessionID, lease.Status, ap.AgentSessionID)
 	}
 
+	ap.Mu.Lock()
+	ap.LogFilePath = "/tmp/worker-1.log"
+	ap.Mu.Unlock()
 	s.markControlPlaneAgentSessionRunning(ap)
 	session, err = st.AgentSessions().Get(t.Context(), "WS", ap.AgentSessionID)
 	if err != nil {
@@ -134,6 +138,12 @@ func TestSupervisorMirrorsAgentSessionToControlPlane(t *testing.T) {
 	}
 	if session.Status != domain.AgentSessionRunning {
 		t.Fatalf("status = %q, want running", session.Status)
+	}
+	if session.Metadata["backend"] != "claude" {
+		t.Fatalf("backend metadata = %q, want claude", session.Metadata["backend"])
+	}
+	if session.Metadata["transcript_path"] == "" || session.Metadata["log_path"] != "/tmp/worker-1.log" {
+		t.Fatalf("path metadata = %#v, want transcript and log path", session.Metadata)
 	}
 
 	sessionID := ap.AgentSessionID
