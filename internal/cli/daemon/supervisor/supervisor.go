@@ -1,8 +1,10 @@
 package supervisor
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"sync"
 	"time"
@@ -12,8 +14,10 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/git"
 	"github.com/tysonthomas9/loomcli/internal/cli/workspace"
+	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/events"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
+	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 // EventEmitter is the interface for emitting observability events.
@@ -53,6 +57,13 @@ type Supervisor struct {
 
 	// IssueBackendReady checks if an epic has ready tasks. Injected by daemon.
 	IssueBackendReady func(epicID string) (bool, error)
+
+	// ControlStore is the fleet-db-backed control plane used for node,
+	// session, lease, terminal, artifact, and command records.
+	ControlStore store.Store
+	NodeID       string
+	NodeTTL      time.Duration
+	NodeInterval time.Duration
 }
 
 // NewAgent creates an AgentProcess from an agent entry, resolving the worktree path
@@ -80,6 +91,10 @@ func (s *Supervisor) NewAgent(entry config.AgentEntry, idx int) (*AgentProcess, 
 // Start launches supervisor goroutines for all configured agents.
 func (s *Supervisor) Start() error {
 	s.Shutdown = make(chan struct{})
+
+	if err := s.startControlPlaneNode(); err != nil {
+		return err
+	}
 
 	// Sweep orphaned sessions from prior daemon runs before launching agents.
 	if sessStore, err := sessions.NewStore(cli.GetBeadsDir()); err != nil {
@@ -124,6 +139,87 @@ func (s *Supervisor) Start() error {
 	}
 
 	return nil
+}
+
+const (
+	defaultNodeTTL      = 2 * time.Minute
+	defaultNodeInterval = 30 * time.Second
+)
+
+func (s *Supervisor) startControlPlaneNode() error {
+	if s.ControlStore == nil || s.WorkspaceID == "" {
+		return nil
+	}
+	nodeID := s.resolveNodeID()
+	ttl := s.NodeTTL
+	if ttl <= 0 {
+		ttl = defaultNodeTTL
+	}
+	interval := s.NodeInterval
+	if interval <= 0 {
+		interval = defaultNodeInterval
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if _, err := s.ControlStore.Nodes().Create(ctx, store.NodeCreate{
+		WorkspaceKey:    s.WorkspaceID,
+		NodeID:          nodeID,
+		OwnerActor:      resolveNodeOwnerActor(),
+		RuntimeProvider: domain.RuntimeProviderLocal,
+		Capabilities:    []string{"local-supervisor", "agent-process"},
+		Capacity:        len(s.Agents),
+		DrainState:      domain.NodeDrainActive,
+		TTL:             ttl,
+	}); err != nil {
+		return fmt.Errorf("register supervisor node %q: %w", nodeID, err)
+	}
+	s.NodeID = nodeID
+
+	s.Wg.Add(1)
+	go func() {
+		defer s.Wg.Done()
+		s.runNodeHeartbeat(nodeID, ttl, interval)
+	}()
+	return nil
+}
+
+func (s *Supervisor) runNodeHeartbeat(nodeID string, ttl, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-s.Shutdown:
+			return
+		case <-ticker.C:
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			_, err := s.ControlStore.Nodes().Heartbeat(ctx, s.WorkspaceID, nodeID, ttl)
+			cancel()
+			if err != nil {
+				slog.Warn("supervisor node heartbeat failed", "workspace", s.WorkspaceID, "node_id", nodeID, "err", err)
+			}
+		}
+	}
+}
+
+func (s *Supervisor) resolveNodeID() string {
+	if s.NodeID != "" {
+		return s.NodeID
+	}
+	host, err := os.Hostname()
+	if err != nil || host == "" {
+		host = "unknown-host"
+	}
+	return fmt.Sprintf("loom-supervisor-%s-%d", host, os.Getpid())
+}
+
+func resolveNodeOwnerActor() string {
+	for _, key := range []string{"LOOM_FLEET_DB_ACTOR", "LOOM_AGENT_NAME", "USER"} {
+		if value := os.Getenv(key); value != "" {
+			return value
+		}
+	}
+	return "local"
 }
 
 // Stop gracefully shuts down all agents. Safe to call multiple times.
