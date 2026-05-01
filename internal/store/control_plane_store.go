@@ -179,3 +179,28 @@ type ArtifactStore interface {
 	List(ctx context.Context, workspaceKey string, filter ArtifactFilter) ([]*domain.Artifact, error)
 	Update(ctx context.Context, workspaceKey, artifactID string, patch ArtifactUpdate) (*domain.Artifact, error)
 }
+
+type AgentLeaseCreate struct {
+	WorkspaceKey string
+	SessionID    string
+	LeaseID      string
+	AgentID      string
+	NodeID       string
+	TTL          time.Duration
+}
+
+type AgentLeaseFilter struct {
+	SessionID string
+	AgentID   string
+	NodeID    string
+	Status    domain.AgentLeaseStatus
+	Limit     int
+}
+
+type AgentLeaseStore interface {
+	Create(ctx context.Context, in AgentLeaseCreate) (*domain.AgentLease, error)
+	Get(ctx context.Context, workspaceKey, leaseID string) (*domain.AgentLease, error)
+	List(ctx context.Context, workspaceKey string, filter AgentLeaseFilter) ([]*domain.AgentLease, error)
+	Heartbeat(ctx context.Context, workspaceKey, leaseID, token string, ttl time.Duration) (*domain.AgentLease, error)
+	Release(ctx context.Context, workspaceKey, leaseID, token string) (*domain.AgentLease, error)
+}

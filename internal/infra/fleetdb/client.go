@@ -78,6 +78,7 @@ type Client struct {
 	sessions   *agentSessionStore
 	terminals  *terminalSessionStore
 	artifacts  *artifactStore
+	leases     *agentLeaseStore
 	roles      *roleStore
 	daemon     *daemonStore
 }
@@ -105,6 +106,7 @@ func New(cfg Config) (*Client, error) {
 	c.sessions = &agentSessionStore{client: c}
 	c.terminals = &terminalSessionStore{client: c}
 	c.artifacts = &artifactStore{client: c}
+	c.leases = &agentLeaseStore{client: c}
 	c.roles = &roleStore{client: c}
 	c.daemon = &daemonStore{client: c}
 	return c, nil
@@ -133,6 +135,9 @@ func (c *Client) TerminalSessions() store.TerminalSessionStore { return c.termin
 
 // Artifacts returns the ArtifactStore.
 func (c *Client) Artifacts() store.ArtifactStore { return c.artifacts }
+
+// AgentLeases returns the AgentLeaseStore.
+func (c *Client) AgentLeases() store.AgentLeaseStore { return c.leases }
 
 // Roles returns the RoleStore.
 func (c *Client) Roles() store.RoleStore { return c.roles }
@@ -173,6 +178,10 @@ func (c *Client) SetAPIKey(key string) {
 //
 // 204 No Content is treated as success with no body.
 func (c *Client) do(ctx context.Context, method, path string, body, out any) error {
+	return c.doWithHeaders(ctx, method, path, body, out, nil)
+}
+
+func (c *Client) doWithHeaders(ctx context.Context, method, path string, body, out any, headers map[string]string) error {
 	c.mu.RLock()
 	auth := fleethttp.Auth{BearerToken: c.authToken, APIKey: c.apiKey, Actor: c.actor}
 	c.mu.RUnlock()
@@ -180,6 +189,9 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 	req, err := fleethttp.BuildJSONRequest(ctx, method, c.baseURL+path, auth, body)
 	if err != nil {
 		return fmt.Errorf("fleetdb: %w", err)
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
 	}
 
 	resp, err := c.http.Do(req)

@@ -148,3 +148,26 @@ type Artifact struct {
 	CreatedAt    time.Time         `json:"created_at"`
 	UpdatedAt    time.Time         `json:"updated_at"`
 }
+
+type AgentLeaseStatus string
+
+const (
+	AgentLeaseActive   AgentLeaseStatus = "active"
+	AgentLeaseReleased AgentLeaseStatus = "released"
+	AgentLeaseExpired  AgentLeaseStatus = "expired"
+)
+
+type AgentLease struct {
+	WorkspaceKey  string           `json:"workspace_key"`
+	LeaseID       string           `json:"lease_id"`
+	SessionID     string           `json:"session_id"`
+	AgentID       string           `json:"agent_id,omitempty"`
+	NodeID        string           `json:"node_id,omitempty"`
+	Token         string           `json:"token,omitempty"`
+	FencingToken  int64            `json:"fencing_token"`
+	Status        AgentLeaseStatus `json:"status"`
+	ExpiresAt     time.Time        `json:"expires_at"`
+	LastHeartbeat time.Time        `json:"last_heartbeat"`
+	CreatedAt     time.Time        `json:"created_at"`
+	UpdatedAt     time.Time        `json:"updated_at"`
+}

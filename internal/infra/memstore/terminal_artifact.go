@@ -177,3 +177,101 @@ func terminalMatches(t *domain.TerminalSession, f store.TerminalSessionFilter) b
 func artifactMatchesMem(a *domain.Artifact, f store.ArtifactFilter) bool {
 	return (f.AgentID == "" || a.AgentID == f.AgentID) && (f.SessionID == "" || a.SessionID == f.SessionID) && (f.TerminalID == "" || a.TerminalID == f.TerminalID) && (f.TaskID == "" || a.TaskID == f.TaskID) && (f.Type == "" || a.Type == f.Type)
 }
+
+type agentLeaseStore struct {
+	mu    sync.RWMutex
+	items map[string]map[string]*domain.AgentLease
+	next  int64
+}
+
+func newAgentLeaseStore() *agentLeaseStore {
+	return &agentLeaseStore{items: make(map[string]map[string]*domain.AgentLease)}
+}
+
+func (s *agentLeaseStore) Create(_ context.Context, in store.AgentLeaseCreate) (*domain.AgentLease, error) {
+	if in.WorkspaceKey == "" || in.SessionID == "" {
+		return nil, fmt.Errorf("workspace_key + session_id required: %w", domain.ErrInvalid)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.items[in.WorkspaceKey] == nil {
+		s.items[in.WorkspaceKey] = make(map[string]*domain.AgentLease)
+	}
+	s.next++
+	now := time.Now().UTC()
+	ttl := in.TTL
+	if ttl <= 0 {
+		ttl = 5 * time.Minute
+	}
+	id := in.LeaseID
+	if id == "" {
+		id = fmt.Sprintf("lease-%d", s.next)
+	}
+	lease := &domain.AgentLease{WorkspaceKey: in.WorkspaceKey, LeaseID: id, SessionID: in.SessionID, AgentID: in.AgentID, NodeID: in.NodeID, Token: fmt.Sprintf("token-%d", s.next), FencingToken: s.next, Status: domain.AgentLeaseActive, ExpiresAt: now.Add(ttl), LastHeartbeat: now, CreatedAt: now, UpdatedAt: now}
+	s.items[in.WorkspaceKey][id] = lease
+	return cloneAgentLease(lease), nil
+}
+
+func (s *agentLeaseStore) Get(_ context.Context, ws, leaseID string) (*domain.AgentLease, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	lease, ok := s.items[ws][leaseID]
+	if !ok {
+		return nil, fmt.Errorf("agent lease %q in workspace %q: %w", leaseID, ws, domain.ErrNotFound)
+	}
+	return cloneAgentLease(lease), nil
+}
+
+func (s *agentLeaseStore) List(_ context.Context, ws string, filter store.AgentLeaseFilter) ([]*domain.AgentLease, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]*domain.AgentLease, 0, len(s.items[ws]))
+	for _, lease := range s.items[ws] {
+		if leaseMatchesMem(lease, filter) {
+			out = append(out, cloneAgentLease(lease))
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
+	if filter.Limit > 0 && len(out) > filter.Limit {
+		out = out[:filter.Limit]
+	}
+	return out, nil
+}
+
+func (s *agentLeaseStore) Heartbeat(_ context.Context, ws, leaseID, token string, ttl time.Duration) (*domain.AgentLease, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	lease, ok := s.items[ws][leaseID]
+	if !ok || lease.Token != token {
+		return nil, fmt.Errorf("agent lease %q in workspace %q: %w", leaseID, ws, domain.ErrConflict)
+	}
+	now := time.Now().UTC()
+	if ttl <= 0 {
+		ttl = 5 * time.Minute
+	}
+	lease.LastHeartbeat = now
+	lease.ExpiresAt = now.Add(ttl)
+	lease.UpdatedAt = now
+	return cloneAgentLease(lease), nil
+}
+
+func (s *agentLeaseStore) Release(_ context.Context, ws, leaseID, token string) (*domain.AgentLease, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	lease, ok := s.items[ws][leaseID]
+	if !ok || lease.Token != token {
+		return nil, fmt.Errorf("agent lease %q in workspace %q: %w", leaseID, ws, domain.ErrConflict)
+	}
+	lease.Status = domain.AgentLeaseReleased
+	lease.UpdatedAt = time.Now().UTC()
+	return cloneAgentLease(lease), nil
+}
+
+func cloneAgentLease(l *domain.AgentLease) *domain.AgentLease {
+	out := *l
+	return &out
+}
+
+func leaseMatchesMem(l *domain.AgentLease, f store.AgentLeaseFilter) bool {
+	return (f.SessionID == "" || l.SessionID == f.SessionID) && (f.AgentID == "" || l.AgentID == f.AgentID) && (f.NodeID == "" || l.NodeID == f.NodeID) && (f.Status == "" || l.Status == f.Status)
+}
