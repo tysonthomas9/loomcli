@@ -154,6 +154,57 @@ func TestHandler_FleetDBOnlyCatchUpFailsClosedWithoutWorkspace(t *testing.T) {
 	}
 }
 
+func TestHandler_FleetDBOnlyReconnectCanMoveBetweenServeProcesses(t *testing.T) {
+	const workspaceID = "ws-fleet"
+	durableEvents := []rpc.MutationEvent{
+		{Cursor: "1700000000800-0", Type: "update", IssueID: "before-disconnect", Timestamp: time.Date(2026, 5, 1, 12, 6, 0, 0, time.UTC)},
+		{Cursor: "1700000000900-0", Type: "update", IssueID: "missed-on-other-process", Timestamp: time.Date(2026, 5, 1, 12, 7, 0, 0, time.UTC)},
+	}
+	getSince := func(wsID string, since string) []rpc.MutationEvent {
+		if wsID != workspaceID {
+			t.Errorf("workspace = %q, want %q", wsID, workspaceID)
+		}
+		var out []rpc.MutationEvent
+		for _, event := range durableEvents {
+			if event.Cursor > since {
+				out = append(out, event)
+			}
+		}
+		return out
+	}
+	newProcess := func() *Handler {
+		h := NewHandler(HandlerConfig{
+			Hub:               NewHub(),
+			GetMutationsSince: getSince,
+			WorkspaceFromCtx:  func(context.Context) string { return workspaceID },
+		})
+		h.heartbeatInterval = time.Hour
+		return h
+	}
+
+	firstProcessBody := serveSSEOnce(t, newProcess(), func(req *http.Request) {
+		q := req.URL.Query()
+		q.Set("since", "1700000000000-0")
+		req.URL.RawQuery = q.Encode()
+	})
+	if !strings.Contains(firstProcessBody, "id: 1700000000800-0\n") {
+		t.Fatalf("first process did not emit durable cursor:\n%s", firstProcessBody)
+	}
+
+	secondProcessBody := serveSSEOnce(t, newProcess(), func(req *http.Request) {
+		req.Header.Set("Last-Event-ID", "1700000000800-0")
+	})
+	if strings.Contains(secondProcessBody, "before-disconnect") {
+		t.Fatalf("second process replayed already-acknowledged mutation:\n%s", secondProcessBody)
+	}
+	if !strings.Contains(secondProcessBody, `"issue_id":"missed-on-other-process"`) {
+		t.Fatalf("second process did not catch up missed durable mutation:\n%s", secondProcessBody)
+	}
+	if !strings.Contains(secondProcessBody, "id: 1700000000900-0\n") {
+		t.Fatalf("second process did not preserve fleet-db cursor id:\n%s", secondProcessBody)
+	}
+}
+
 func serveSSEOnce(t *testing.T, h *Handler, mutateReq func(*http.Request)) string {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
