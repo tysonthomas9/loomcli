@@ -222,6 +222,47 @@ func TestHub_RetryQueue(t *testing.T) {
 	}
 }
 
+func TestHub_RetryQueueBoundedUnderHighFanout(t *testing.T) {
+	h := NewHub()
+	for i := 0; i < cap(h.broadcast)+1025; i++ {
+		h.Broadcast(&MutationPayload{
+			Type:        "update",
+			IssueID:     "fanout-overflow",
+			WorkspaceID: "ws-1",
+		})
+	}
+
+	if depth := h.GetRetryQueueDepth(); depth != 1024 {
+		t.Fatalf("retry queue depth = %d, want bounded cap 1024", depth)
+	}
+	if dropped := h.GetDroppedCount(); dropped != 1 {
+		t.Fatalf("dropped count = %d, want 1 overflow drop", dropped)
+	}
+}
+
+func TestHub_SlowClientDisconnectedWhenSendBufferFull(t *testing.T) {
+	h := NewHub()
+	go h.Run()
+	defer h.Stop()
+
+	c := NewClient(1, 1, "1700000000000-0", nil, "ws-1")
+	h.RegisterClient(c)
+	waitForHubCondition(t, func() bool { return h.ClientCount() == 1 })
+
+	h.Broadcast(&MutationPayload{Type: "update", IssueID: "first", WorkspaceID: "ws-1"})
+	waitForHubCondition(t, func() bool { return len(c.send) == 1 })
+
+	h.Broadcast(&MutationPayload{Type: "update", IssueID: "second", WorkspaceID: "ws-1"})
+	waitForHubCondition(t, func() bool { return h.ClientCount() == 0 })
+
+	if _, ok := <-c.send; !ok {
+		t.Fatal("expected first buffered mutation to remain readable before channel close")
+	}
+	if _, ok := <-c.send; ok {
+		t.Fatal("expected slow client send channel to close after disconnect")
+	}
+}
+
 func TestHub_GetActiveSourceRepos(t *testing.T) {
 	h := NewHub()
 	go h.Run()
@@ -406,4 +447,16 @@ func TestNewClient(t *testing.T) {
 	if c.workspaceID != "ws-1" {
 		t.Errorf("expected workspaceID ws-1, got %s", c.workspaceID)
 	}
+}
+
+func waitForHubCondition(t *testing.T, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("condition not met before timeout")
 }
