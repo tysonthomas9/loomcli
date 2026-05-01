@@ -177,11 +177,13 @@ services:
         # via `bd init` + the auto-registered workspace; loom-fleet needs
         # it explicit because there's no beads daemon to piggy-back on.
         if [ ! -d .git ]; then
-          git init -q
+          git init -q -b main
           git config user.email "parity@fixture.local"
           git config user.name  "parity"
           echo "initial" > .init
+          echo "# Parity Fixture" > README.md
           git add .init
+          git add README.md
           git commit -q -m "initial"
         fi
         loom workspace create PARITY --repos /workspace 2>&1 | tail -3 || true
