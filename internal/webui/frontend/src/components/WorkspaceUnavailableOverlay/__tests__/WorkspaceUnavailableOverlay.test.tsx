@@ -3,7 +3,7 @@
  */
 
 /**
- * Unit tests for DaemonUnavailableOverlay component.
+ * Unit tests for WorkspaceUnavailableOverlay component.
  *
  * Verifies rendering for different connection modes, error display,
  * countdown/retrying states, button visibility, and accessibility attributes.
@@ -13,7 +13,7 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 import "@testing-library/jest-dom";
 
-import { DaemonUnavailableOverlay } from "../DaemonUnavailableOverlay";
+import { WorkspaceUnavailableOverlay } from "../WorkspaceUnavailableOverlay";
 
 // Mock useFocusTrap to avoid focus management side effects in tests
 vi.mock("@/hooks", () => ({
@@ -36,11 +36,11 @@ vi.mock("@/hooks", () => ({
   LAYER_TERMINAL_SEARCH: 5,
 }));
 
-describe("DaemonUnavailableOverlay", () => {
+describe("WorkspaceUnavailableOverlay", () => {
   describe("rendering by mode", () => {
     it('renders "Connecting to workspace service..." for never_connected mode', () => {
       render(
-        <DaemonUnavailableOverlay
+        <WorkspaceUnavailableOverlay
           mode="never_connected"
           retryCountdown={5}
           lastError={null}
@@ -49,12 +49,14 @@ describe("DaemonUnavailableOverlay", () => {
         />,
       );
 
-      expect(screen.getByText(/Connecting to workspace service/)).toBeInTheDocument();
+      expect(
+        screen.getByText(/Connecting to workspace service/),
+      ).toBeInTheDocument();
     });
 
     it('renders "Connection to workspace service lost" for lost_connection mode', () => {
       render(
-        <DaemonUnavailableOverlay
+        <WorkspaceUnavailableOverlay
           mode="lost_connection"
           retryCountdown={5}
           lastError={null}
@@ -63,12 +65,14 @@ describe("DaemonUnavailableOverlay", () => {
         />,
       );
 
-      expect(screen.getByText("Connection to workspace service lost")).toBeInTheDocument();
+      expect(
+        screen.getByText("Connection to workspace service lost"),
+      ).toBeInTheDocument();
     });
 
     it('renders "Connection to workspace service lost" for reconnecting mode', () => {
       render(
-        <DaemonUnavailableOverlay
+        <WorkspaceUnavailableOverlay
           mode="reconnecting"
           retryCountdown={5}
           lastError={null}
@@ -77,12 +81,14 @@ describe("DaemonUnavailableOverlay", () => {
         />,
       );
 
-      expect(screen.getByText("Connection to workspace service lost")).toBeInTheDocument();
+      expect(
+        screen.getByText("Connection to workspace service lost"),
+      ).toBeInTheDocument();
     });
 
     it('renders "Workspace loading\u2026" for starting mode', () => {
       render(
-        <DaemonUnavailableOverlay
+        <WorkspaceUnavailableOverlay
           mode="starting"
           retryCountdown={5}
           lastError={null}
@@ -96,7 +102,7 @@ describe("DaemonUnavailableOverlay", () => {
 
     it("shows description text for starting mode", () => {
       render(
-        <DaemonUnavailableOverlay
+        <WorkspaceUnavailableOverlay
           mode="starting"
           retryCountdown={5}
           lastError={null}
@@ -110,7 +116,7 @@ describe("DaemonUnavailableOverlay", () => {
 
     it("does not show Retry Now button for starting mode", () => {
       render(
-        <DaemonUnavailableOverlay
+        <WorkspaceUnavailableOverlay
           mode="starting"
           retryCountdown={5}
           lastError={null}
@@ -126,23 +132,23 @@ describe("DaemonUnavailableOverlay", () => {
 
     it("does not show error detail for starting mode even if lastError exists", () => {
       render(
-        <DaemonUnavailableOverlay
+        <WorkspaceUnavailableOverlay
           mode="starting"
           retryCountdown={5}
-          lastError="daemon is starting up"
+          lastError="workspace service is starting up"
           onRetry={vi.fn()}
           onSettingsClick={vi.fn()}
         />,
       );
 
       expect(
-        screen.queryByText("daemon is starting up"),
+        screen.queryByText("workspace service is starting up"),
       ).not.toBeInTheDocument();
     });
 
     it('does not show "Retrying..." text for starting mode when countdown is 0', () => {
       render(
-        <DaemonUnavailableOverlay
+        <WorkspaceUnavailableOverlay
           mode="starting"
           retryCountdown={0}
           lastError={null}
@@ -158,7 +164,7 @@ describe("DaemonUnavailableOverlay", () => {
   describe("error detail display", () => {
     it("shows error detail when mode is not never_connected and lastError exists", () => {
       render(
-        <DaemonUnavailableOverlay
+        <WorkspaceUnavailableOverlay
           mode="lost_connection"
           retryCountdown={5}
           lastError="Connection refused"
@@ -172,7 +178,7 @@ describe("DaemonUnavailableOverlay", () => {
 
     it("does not show error detail when mode is never_connected even if lastError exists", () => {
       render(
-        <DaemonUnavailableOverlay
+        <WorkspaceUnavailableOverlay
           mode="never_connected"
           retryCountdown={5}
           lastError="Connection refused"
@@ -186,7 +192,7 @@ describe("DaemonUnavailableOverlay", () => {
 
     it("does not show error detail when lastError is null", () => {
       render(
-        <DaemonUnavailableOverlay
+        <WorkspaceUnavailableOverlay
           mode="lost_connection"
           retryCountdown={5}
           lastError={null}
@@ -204,7 +210,7 @@ describe("DaemonUnavailableOverlay", () => {
   describe("countdown and retrying text", () => {
     it("shows countdown when retryCountdown > 0", () => {
       render(
-        <DaemonUnavailableOverlay
+        <WorkspaceUnavailableOverlay
           mode="reconnecting"
           retryCountdown={10}
           lastError={null}
@@ -218,7 +224,7 @@ describe("DaemonUnavailableOverlay", () => {
 
     it('shows "Retrying..." when countdown is 0 and mode is not never_connected', () => {
       render(
-        <DaemonUnavailableOverlay
+        <WorkspaceUnavailableOverlay
           mode="reconnecting"
           retryCountdown={0}
           lastError={null}
@@ -232,7 +238,7 @@ describe("DaemonUnavailableOverlay", () => {
 
     it('does not show "Retrying..." when countdown is 0 and mode is never_connected', () => {
       render(
-        <DaemonUnavailableOverlay
+        <WorkspaceUnavailableOverlay
           mode="never_connected"
           retryCountdown={0}
           lastError={null}
@@ -246,7 +252,7 @@ describe("DaemonUnavailableOverlay", () => {
 
     it("does not show countdown text when retryCountdown is 0 for never_connected", () => {
       render(
-        <DaemonUnavailableOverlay
+        <WorkspaceUnavailableOverlay
           mode="never_connected"
           retryCountdown={0}
           lastError={null}
@@ -262,7 +268,7 @@ describe("DaemonUnavailableOverlay", () => {
   describe("Retry Now button", () => {
     it("shows Retry Now button for lost_connection mode", () => {
       render(
-        <DaemonUnavailableOverlay
+        <WorkspaceUnavailableOverlay
           mode="lost_connection"
           retryCountdown={5}
           lastError={null}
@@ -278,7 +284,7 @@ describe("DaemonUnavailableOverlay", () => {
 
     it("shows Retry Now button for reconnecting mode", () => {
       render(
-        <DaemonUnavailableOverlay
+        <WorkspaceUnavailableOverlay
           mode="reconnecting"
           retryCountdown={5}
           lastError={null}
@@ -294,7 +300,7 @@ describe("DaemonUnavailableOverlay", () => {
 
     it("does not show Retry Now button for never_connected mode", () => {
       render(
-        <DaemonUnavailableOverlay
+        <WorkspaceUnavailableOverlay
           mode="never_connected"
           retryCountdown={5}
           lastError={null}
@@ -311,7 +317,7 @@ describe("DaemonUnavailableOverlay", () => {
     it("calls onRetry when Retry Now button is clicked", () => {
       const onRetry = vi.fn();
       render(
-        <DaemonUnavailableOverlay
+        <WorkspaceUnavailableOverlay
           mode="lost_connection"
           retryCountdown={5}
           lastError={null}
@@ -328,7 +334,7 @@ describe("DaemonUnavailableOverlay", () => {
   describe("Open Settings button", () => {
     it("always shows Open Settings button for never_connected mode", () => {
       render(
-        <DaemonUnavailableOverlay
+        <WorkspaceUnavailableOverlay
           mode="never_connected"
           retryCountdown={5}
           lastError={null}
@@ -344,7 +350,7 @@ describe("DaemonUnavailableOverlay", () => {
 
     it("always shows Open Settings button for lost_connection mode", () => {
       render(
-        <DaemonUnavailableOverlay
+        <WorkspaceUnavailableOverlay
           mode="lost_connection"
           retryCountdown={5}
           lastError={null}
@@ -360,7 +366,7 @@ describe("DaemonUnavailableOverlay", () => {
 
     it("always shows Open Settings button for reconnecting mode", () => {
       render(
-        <DaemonUnavailableOverlay
+        <WorkspaceUnavailableOverlay
           mode="reconnecting"
           retryCountdown={5}
           lastError={null}
@@ -377,7 +383,7 @@ describe("DaemonUnavailableOverlay", () => {
     it("calls onSettingsClick when Open Settings button is clicked", () => {
       const onSettingsClick = vi.fn();
       render(
-        <DaemonUnavailableOverlay
+        <WorkspaceUnavailableOverlay
           mode="never_connected"
           retryCountdown={5}
           lastError={null}
@@ -394,7 +400,7 @@ describe("DaemonUnavailableOverlay", () => {
   describe("accessibility", () => {
     it('has role="dialog" with aria-modal for accessibility', () => {
       render(
-        <DaemonUnavailableOverlay
+        <WorkspaceUnavailableOverlay
           mode="lost_connection"
           retryCountdown={5}
           lastError={null}
@@ -410,7 +416,7 @@ describe("DaemonUnavailableOverlay", () => {
 
     it("has aria-labelledby pointing to the title", () => {
       render(
-        <DaemonUnavailableOverlay
+        <WorkspaceUnavailableOverlay
           mode="lost_connection"
           retryCountdown={5}
           lastError={null}
@@ -420,12 +426,15 @@ describe("DaemonUnavailableOverlay", () => {
       );
 
       const dialog = screen.getByRole("dialog");
-      expect(dialog).toHaveAttribute("aria-labelledby", "daemon-overlay-title");
+      expect(dialog).toHaveAttribute(
+        "aria-labelledby",
+        "workspace-overlay-title",
+      );
     });
 
     it("all buttons have type=button", () => {
       render(
-        <DaemonUnavailableOverlay
+        <WorkspaceUnavailableOverlay
           mode="lost_connection"
           retryCountdown={5}
           lastError={null}

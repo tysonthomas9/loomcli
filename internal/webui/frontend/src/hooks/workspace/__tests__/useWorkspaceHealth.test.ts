@@ -3,31 +3,31 @@
  */
 
 /**
- * Unit tests for useDaemonHealth hook.
+ * Unit tests for useWorkspaceHealth hook.
  *
  * Verifies initial health check, state transitions, exponential backoff,
- * retryNow behavior, visibility change re-polling, daemon-unavailable
+ * retryNow behavior, visibility change re-polling, workspace service-unavailable
  * custom events, and debounce logic.
  */
 
 import { renderHook, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-import { notifyDaemonUnavailable } from "@/api/common";
-import { checkDaemonHealth } from "@/api/common";
+import { notifyWorkspaceUnavailable } from "@/api/common";
+import { checkWorkspaceHealth } from "@/api/common";
 
-import { useDaemonHealth } from "../useDaemonHealth";
+import { useWorkspaceHealth } from "../useWorkspaceHealth";
 
 // Mock the health API
 vi.mock(import("@/api/common"), async (importOriginal) => {
   const actual = await importOriginal();
   return {
     ...actual,
-    checkDaemonHealth: vi.fn(),
+    checkWorkspaceHealth: vi.fn(),
   };
 });
 
-const mockGet = vi.mocked(checkDaemonHealth);
+const mockGet = vi.mocked(checkWorkspaceHealth);
 
 /** Helper to create a successful health response. */
 function healthOk() {
@@ -49,7 +49,7 @@ async function flushPromises(): Promise<void> {
   });
 }
 
-describe("useDaemonHealth", () => {
+describe("useWorkspaceHealth", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockGet.mockReset();
@@ -65,7 +65,7 @@ describe("useDaemonHealth", () => {
     it("performs a health check on mount", async () => {
       mockGet.mockResolvedValueOnce(healthOk());
 
-      renderHook(() => useDaemonHealth());
+      renderHook(() => useWorkspaceHealth());
 
       await flushPromises();
 
@@ -76,11 +76,11 @@ describe("useDaemonHealth", () => {
     it("returns connected state on successful health check", async () => {
       mockGet.mockResolvedValueOnce(healthOk());
 
-      const { result } = renderHook(() => useDaemonHealth());
+      const { result } = renderHook(() => useWorkspaceHealth());
 
       await flushPromises();
 
-      expect(result.current.isDaemonAvailable).toBe(true);
+      expect(result.current.isWorkspaceAvailable).toBe(true);
       expect(result.current.wasEverConnected).toBe(true);
       expect(result.current.connectionMode).toBe("connected");
       expect(result.current.lastError).toBeNull();
@@ -90,11 +90,11 @@ describe("useDaemonHealth", () => {
     it("returns never_connected on initial health check failure", async () => {
       mockGet.mockRejectedValueOnce(new Error("Network error"));
 
-      const { result } = renderHook(() => useDaemonHealth());
+      const { result } = renderHook(() => useWorkspaceHealth());
 
       await flushPromises();
 
-      expect(result.current.isDaemonAvailable).toBe(false);
+      expect(result.current.isWorkspaceAvailable).toBe(false);
       expect(result.current.wasEverConnected).toBe(false);
       expect(result.current.connectionMode).toBe("never_connected");
       expect(result.current.lastError).toBe("Network error");
@@ -109,7 +109,7 @@ describe("useDaemonHealth", () => {
           }),
       );
 
-      const { result } = renderHook(() => useDaemonHealth());
+      const { result } = renderHook(() => useWorkspaceHealth());
 
       // Should be checking during the request
       expect(result.current.isChecking).toBe(true);
@@ -127,12 +127,12 @@ describe("useDaemonHealth", () => {
       // First check fails
       mockGet.mockRejectedValueOnce(new Error("Connection refused"));
 
-      const { result } = renderHook(() => useDaemonHealth());
+      const { result } = renderHook(() => useWorkspaceHealth());
 
       await flushPromises();
 
       expect(result.current.connectionMode).toBe("never_connected");
-      expect(result.current.isDaemonAvailable).toBe(false);
+      expect(result.current.isWorkspaceAvailable).toBe(false);
 
       // Next check succeeds (triggered by retry)
       mockGet.mockResolvedValueOnce(healthOk());
@@ -143,7 +143,7 @@ describe("useDaemonHealth", () => {
       await flushPromises();
 
       expect(result.current.connectionMode).toBe("connected");
-      expect(result.current.isDaemonAvailable).toBe(true);
+      expect(result.current.isWorkspaceAvailable).toBe(true);
       expect(result.current.wasEverConnected).toBe(true);
     });
 
@@ -151,18 +151,18 @@ describe("useDaemonHealth", () => {
       // First check succeeds
       mockGet.mockResolvedValueOnce(healthOk());
 
-      const { result } = renderHook(() => useDaemonHealth());
+      const { result } = renderHook(() => useWorkspaceHealth());
 
       await flushPromises();
 
       expect(result.current.connectionMode).toBe("connected");
 
-      // Second check fails (simulate via daemon-unavailable event)
-      mockGet.mockRejectedValueOnce(new Error("Daemon stopped"));
+      // Second check fails (simulate via workspace service-unavailable event)
+      mockGet.mockRejectedValueOnce(new Error("Workspace service stopped"));
 
-      // Dispatch daemon-unavailable event to trigger a re-check
+      // Dispatch workspace service-unavailable event to trigger a re-check
       await act(async () => {
-        notifyDaemonUnavailable();
+        notifyWorkspaceUnavailable();
       });
       await flushPromises();
 
@@ -170,14 +170,14 @@ describe("useDaemonHealth", () => {
       // Advance past the debounce (2s)
       // The first failure starts the unavailable timer. Need a second failure
       // after the debounce to actually show overlay.
-      mockGet.mockRejectedValueOnce(new Error("Daemon stopped"));
+      mockGet.mockRejectedValueOnce(new Error("Workspace service stopped"));
 
       await act(async () => {
         vi.advanceTimersByTime(5000);
       });
       await flushPromises();
 
-      expect(result.current.isDaemonAvailable).toBe(false);
+      expect(result.current.isWorkspaceAvailable).toBe(false);
       expect(result.current.connectionMode).toBe("reconnecting");
     });
 
@@ -185,15 +185,15 @@ describe("useDaemonHealth", () => {
       // First check succeeds
       mockGet.mockResolvedValueOnce(healthOk());
 
-      const { result } = renderHook(() => useDaemonHealth());
+      const { result } = renderHook(() => useWorkspaceHealth());
 
       await flushPromises();
 
       // Second check fails
-      mockGet.mockRejectedValueOnce(new Error("Daemon stopped"));
+      mockGet.mockRejectedValueOnce(new Error("Workspace service stopped"));
 
       await act(async () => {
-        notifyDaemonUnavailable();
+        notifyWorkspaceUnavailable();
       });
       await flushPromises();
 
@@ -216,7 +216,7 @@ describe("useDaemonHealth", () => {
       await flushPromises();
 
       expect(result.current.connectionMode).toBe("connected");
-      expect(result.current.isDaemonAvailable).toBe(true);
+      expect(result.current.isWorkspaceAvailable).toBe(true);
       expect(result.current.lastError).toBeNull();
     });
   });
@@ -225,7 +225,7 @@ describe("useDaemonHealth", () => {
     it("schedules retry with initial 5s delay after failure", async () => {
       mockGet.mockRejectedValueOnce(new Error("down"));
 
-      const { result } = renderHook(() => useDaemonHealth());
+      const { result } = renderHook(() => useWorkspaceHealth());
 
       await flushPromises();
 
@@ -237,7 +237,7 @@ describe("useDaemonHealth", () => {
       // Initial failure
       mockGet.mockRejectedValueOnce(new Error("down"));
 
-      const { result } = renderHook(() => useDaemonHealth());
+      const { result } = renderHook(() => useWorkspaceHealth());
 
       await flushPromises();
 
@@ -288,7 +288,7 @@ describe("useDaemonHealth", () => {
     it("countdown decrements every second", async () => {
       mockGet.mockRejectedValueOnce(new Error("down"));
 
-      const { result } = renderHook(() => useDaemonHealth());
+      const { result } = renderHook(() => useWorkspaceHealth());
 
       await flushPromises();
 
@@ -333,7 +333,7 @@ describe("useDaemonHealth", () => {
       // Initial failure
       mockGet.mockRejectedValueOnce(new Error("down"));
 
-      const { result } = renderHook(() => useDaemonHealth());
+      const { result } = renderHook(() => useWorkspaceHealth());
 
       await flushPromises();
 
@@ -355,7 +355,7 @@ describe("useDaemonHealth", () => {
       });
       await flushPromises();
 
-      expect(result.current.isDaemonAvailable).toBe(true);
+      expect(result.current.isWorkspaceAvailable).toBe(true);
       expect(result.current.retryCountdown).toBe(0);
       expect(result.current.connectionMode).toBe("connected");
     });
@@ -364,7 +364,7 @@ describe("useDaemonHealth", () => {
       // Initial failure
       mockGet.mockRejectedValueOnce(new Error("down"));
 
-      const { result } = renderHook(() => useDaemonHealth());
+      const { result } = renderHook(() => useWorkspaceHealth());
 
       await flushPromises();
 
@@ -391,15 +391,15 @@ describe("useDaemonHealth", () => {
   });
 
   describe("visibility change", () => {
-    it("re-polls when tab becomes visible and daemon is unavailable", async () => {
+    it("re-polls when tab becomes visible and workspace service is unavailable", async () => {
       // Initial failure
       mockGet.mockRejectedValueOnce(new Error("down"));
 
-      const { result } = renderHook(() => useDaemonHealth());
+      const { result } = renderHook(() => useWorkspaceHealth());
 
       await flushPromises();
 
-      expect(result.current.isDaemonAvailable).toBe(false);
+      expect(result.current.isWorkspaceAvailable).toBe(false);
 
       const callCountBefore = mockGet.mock.calls.length;
 
@@ -417,14 +417,14 @@ describe("useDaemonHealth", () => {
       await flushPromises();
 
       expect(mockGet.mock.calls.length).toBeGreaterThan(callCountBefore);
-      expect(result.current.isDaemonAvailable).toBe(true);
+      expect(result.current.isWorkspaceAvailable).toBe(true);
     });
 
-    it("does not re-poll when tab becomes visible and daemon is available", async () => {
+    it("does not re-poll when tab becomes visible and workspace service is available", async () => {
       // Initial success
       mockGet.mockResolvedValueOnce(healthOk());
 
-      renderHook(() => useDaemonHealth());
+      renderHook(() => useWorkspaceHealth());
 
       await flushPromises();
 
@@ -441,46 +441,46 @@ describe("useDaemonHealth", () => {
       });
       await flushPromises();
 
-      // No additional calls since daemon is available
+      // No additional calls since workspace service is available
       expect(mockGet.mock.calls.length).toBe(callCountBefore);
     });
   });
 
-  describe("daemon-unavailable events", () => {
-    it("triggers health check on daemon-unavailable event when daemon is available", async () => {
+  describe("workspace service-unavailable events", () => {
+    it("triggers health check on workspace service-unavailable event when workspace service is available", async () => {
       // Initially connected
       mockGet.mockResolvedValueOnce(healthOk());
 
-      renderHook(() => useDaemonHealth());
+      renderHook(() => useWorkspaceHealth());
 
       await flushPromises();
 
       const callCountBefore = mockGet.mock.calls.length;
 
-      // Dispatch daemon-unavailable event
+      // Dispatch workspace service-unavailable event
       mockGet.mockResolvedValueOnce(healthOk());
 
       await act(async () => {
-        notifyDaemonUnavailable();
+        notifyWorkspaceUnavailable();
       });
       await flushPromises();
 
       expect(mockGet.mock.calls.length).toBeGreaterThan(callCountBefore);
     });
 
-    it("does not trigger redundant health check when daemon already unavailable", async () => {
-      // Initial failure -> daemon unavailable
+    it("does not trigger redundant health check when workspace service already unavailable", async () => {
+      // Initial failure -> workspace service unavailable
       mockGet.mockRejectedValueOnce(new Error("down"));
 
-      renderHook(() => useDaemonHealth());
+      renderHook(() => useWorkspaceHealth());
 
       await flushPromises();
 
       const callCountBefore = mockGet.mock.calls.length;
 
-      // Dispatch daemon-unavailable event while already unavailable
+      // Dispatch workspace service-unavailable event while already unavailable
       await act(async () => {
-        notifyDaemonUnavailable();
+        notifyWorkspaceUnavailable();
       });
       await flushPromises();
 
@@ -493,65 +493,65 @@ describe("useDaemonHealth", () => {
     it("shows overlay immediately for never-connected state (no debounce)", async () => {
       mockGet.mockRejectedValueOnce(new Error("Cannot connect"));
 
-      const { result } = renderHook(() => useDaemonHealth());
+      const { result } = renderHook(() => useWorkspaceHealth());
 
       await flushPromises();
 
       // Should immediately show as unavailable (first check = never-connected, no debounce)
-      expect(result.current.isDaemonAvailable).toBe(false);
+      expect(result.current.isWorkspaceAvailable).toBe(false);
       expect(result.current.connectionMode).toBe("never_connected");
     });
 
-    it("debounces before showing overlay for previously connected daemon", async () => {
+    it("debounces before showing overlay for previously connected workspace service", async () => {
       // Start connected
       mockGet.mockResolvedValueOnce(healthOk());
 
-      const { result } = renderHook(() => useDaemonHealth());
+      const { result } = renderHook(() => useWorkspaceHealth());
 
       await flushPromises();
 
-      expect(result.current.isDaemonAvailable).toBe(true);
+      expect(result.current.isWorkspaceAvailable).toBe(true);
 
       // Now fail - should not immediately mark unavailable due to debounce
       mockGet.mockRejectedValueOnce(new Error("Blip"));
 
       await act(async () => {
-        notifyDaemonUnavailable();
+        notifyWorkspaceUnavailable();
       });
       await flushPromises();
 
       // Still available due to debounce (failure < 2s ago)
-      expect(result.current.isDaemonAvailable).toBe(true);
+      expect(result.current.isWorkspaceAvailable).toBe(true);
     });
   });
 
   describe("degraded response handling", () => {
-    it("treats degraded daemon.connected=false as unavailable", async () => {
+    it("treats degraded workspace service.connected=false as unavailable", async () => {
       mockGet.mockResolvedValueOnce(healthDegraded("Low memory"));
 
-      const { result } = renderHook(() => useDaemonHealth());
+      const { result } = renderHook(() => useWorkspaceHealth());
 
       await flushPromises();
 
-      expect(result.current.isDaemonAvailable).toBe(false);
+      expect(result.current.isWorkspaceAvailable).toBe(false);
       expect(result.current.lastError).toBe("Low memory");
     });
 
-    it("treats response with status=ok and daemon.connected=true as available", async () => {
+    it("treats response with status=ok and workspace service.connected=true as available", async () => {
       mockGet.mockResolvedValueOnce(healthOk());
 
-      const { result } = renderHook(() => useDaemonHealth());
+      const { result } = renderHook(() => useWorkspaceHealth());
 
       await flushPromises();
 
-      expect(result.current.isDaemonAvailable).toBe(true);
+      expect(result.current.isWorkspaceAvailable).toBe(true);
       expect(result.current.connectionMode).toBe("connected");
     });
 
     it("uses default error message for degraded response without error field", async () => {
       mockGet.mockResolvedValueOnce(healthDegraded());
 
-      const { result } = renderHook(() => useDaemonHealth());
+      const { result } = renderHook(() => useWorkspaceHealth());
 
       await flushPromises();
 
@@ -563,16 +563,16 @@ describe("useDaemonHealth", () => {
     it('sets connectionMode to "starting" when health returns status=starting', async () => {
       mockGet.mockResolvedValueOnce({
         status: "starting" as const,
-        daemon: { connected: false, error: "daemon is starting up" },
+        daemon: { connected: false, error: "workspace service is starting up" },
       });
 
-      const { result } = renderHook(() => useDaemonHealth());
+      const { result } = renderHook(() => useWorkspaceHealth());
 
       await flushPromises();
 
       expect(result.current.connectionMode).toBe("starting");
-      expect(result.current.isDaemonAvailable).toBe(false);
-      expect(result.current.lastError).toBe("daemon is starting up");
+      expect(result.current.isWorkspaceAvailable).toBe(false);
+      expect(result.current.lastError).toBe("workspace service is starting up");
     });
 
     it("uses default error message when starting response has no error field", async () => {
@@ -581,7 +581,7 @@ describe("useDaemonHealth", () => {
         daemon: { connected: false },
       });
 
-      const { result } = renderHook(() => useDaemonHealth());
+      const { result } = renderHook(() => useWorkspaceHealth());
 
       await flushPromises();
 
@@ -592,10 +592,10 @@ describe("useDaemonHealth", () => {
     it("schedules retry after starting response", async () => {
       mockGet.mockResolvedValueOnce({
         status: "starting" as const,
-        daemon: { connected: false, error: "daemon is starting up" },
+        daemon: { connected: false, error: "workspace service is starting up" },
       });
 
-      const { result } = renderHook(() => useDaemonHealth());
+      const { result } = renderHook(() => useWorkspaceHealth());
 
       await flushPromises();
 
@@ -603,14 +603,14 @@ describe("useDaemonHealth", () => {
       expect(result.current.retryCountdown).toBeGreaterThan(0);
     });
 
-    it("transitions from starting to connected when daemon finishes hydrating", async () => {
+    it("transitions from starting to connected when workspace service finishes hydrating", async () => {
       // First check: starting
       mockGet.mockResolvedValueOnce({
         status: "starting" as const,
-        daemon: { connected: false, error: "daemon is starting up" },
+        daemon: { connected: false, error: "workspace service is starting up" },
       });
 
-      const { result } = renderHook(() => useDaemonHealth());
+      const { result } = renderHook(() => useWorkspaceHealth());
 
       await flushPromises();
 
@@ -625,7 +625,7 @@ describe("useDaemonHealth", () => {
       await flushPromises();
 
       expect(result.current.connectionMode).toBe("connected");
-      expect(result.current.isDaemonAvailable).toBe(true);
+      expect(result.current.isWorkspaceAvailable).toBe(true);
       expect(result.current.lastError).toBeNull();
     });
   });
@@ -634,7 +634,7 @@ describe("useDaemonHealth", () => {
     it("extracts message from Error instances", async () => {
       mockGet.mockRejectedValueOnce(new Error("ECONNREFUSED"));
 
-      const { result } = renderHook(() => useDaemonHealth());
+      const { result } = renderHook(() => useWorkspaceHealth());
 
       await flushPromises();
 
@@ -644,11 +644,13 @@ describe("useDaemonHealth", () => {
     it("uses fallback message for non-Error exceptions", async () => {
       mockGet.mockRejectedValueOnce("string error");
 
-      const { result } = renderHook(() => useDaemonHealth());
+      const { result } = renderHook(() => useWorkspaceHealth());
 
       await flushPromises();
 
-      expect(result.current.lastError).toBe("Failed to reach workspace service");
+      expect(result.current.lastError).toBe(
+        "Failed to reach workspace service",
+      );
     });
   });
 
@@ -656,7 +658,7 @@ describe("useDaemonHealth", () => {
     it("clears timers on unmount", async () => {
       mockGet.mockRejectedValueOnce(new Error("down"));
 
-      const { unmount } = renderHook(() => useDaemonHealth());
+      const { unmount } = renderHook(() => useWorkspaceHealth());
 
       await flushPromises();
 
@@ -682,7 +684,7 @@ describe("useDaemonHealth", () => {
       // Start with failure to get into never_connected state
       mockGet.mockRejectedValueOnce(new Error("down"));
 
-      const { result } = renderHook(() => useDaemonHealth());
+      const { result } = renderHook(() => useWorkspaceHealth());
 
       await flushPromises();
 
@@ -700,7 +702,7 @@ describe("useDaemonHealth", () => {
       // All error state should be cleared
       expect(result.current.lastError).toBeNull();
       expect(result.current.retryCountdown).toBe(0);
-      expect(result.current.isDaemonAvailable).toBe(true);
+      expect(result.current.isWorkspaceAvailable).toBe(true);
       expect(result.current.connectionMode).toBe("connected");
       expect(result.current.wasEverConnected).toBe(true);
     });

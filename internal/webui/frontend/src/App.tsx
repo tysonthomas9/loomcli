@@ -29,7 +29,7 @@ import {
   LoadingSkeleton,
   ConnectionStatus,
   StaleDataBanner,
-  DaemonStatusBadge,
+  WorkspaceStatusBadge,
   ToastContainer,
   FilterBar,
   MoreFiltersMenu,
@@ -71,7 +71,7 @@ import {
   useWorkspaceState,
   useRepoFilterParam,
   useSearchScope,
-  useDaemonHealth,
+  useWorkspaceHealth,
   usePanelManager,
   KeyboardShortcutProvider,
 } from "@/hooks";
@@ -96,14 +96,14 @@ function App() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  // Daemon health monitoring
+  // Workspace service health monitoring
   const {
-    isDaemonAvailable,
+    isWorkspaceAvailable,
     connectionMode,
     retryCountdown,
     lastError,
-    retryNow: daemonRetryNow,
-  } = useDaemonHealth();
+    retryNow: workspaceRetryNow,
+  } = useWorkspaceHealth();
 
   // Theme state
   const { theme, toggleTheme } = useTheme();
@@ -907,12 +907,12 @@ function App() {
 
   const headerActions = (
     <div className={styles.headerActions}>
-      <DaemonStatusBadge
-        isDaemonAvailable={isDaemonAvailable}
+      <WorkspaceStatusBadge
+        isWorkspaceAvailable={isWorkspaceAvailable}
         mode={connectionMode}
         retryCountdown={retryCountdown}
         lastError={lastError}
-        onRetry={daemonRetryNow}
+        onRetry={workspaceRetryNow}
       />
       <UserMenu />
       <ThemeToggle theme={theme} onToggle={toggleTheme} />

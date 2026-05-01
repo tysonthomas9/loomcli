@@ -1,18 +1,18 @@
 /**
- * DaemonStatusBadge - Inline, non-blocking indicator of workspace service availability.
- * Replaces the full-page DaemonUnavailableOverlay modal so users can still
+ * WorkspaceStatusBadge - Inline, non-blocking indicator of workspace service availability.
+ * Replaces the full-page WorkspaceUnavailableOverlay modal so users can still
  * interact with the UI while the workspace service is reconnecting.
  */
 
-import type { DaemonConnectionMode } from "@/hooks/workspace/useDaemonHealth";
+import type { WorkspaceConnectionMode } from "@/hooks/workspace/useWorkspaceHealth";
 
-import styles from "./DaemonStatusBadge.module.css";
+import styles from "./WorkspaceStatusBadge.module.css";
 
-export interface DaemonStatusBadgeProps {
+export interface WorkspaceStatusBadgeProps {
   /** Whether the workspace service is currently available. */
-  isDaemonAvailable: boolean;
+  isWorkspaceAvailable: boolean;
   /** Connection mode determines messaging. */
-  mode: DaemonConnectionMode;
+  mode: WorkspaceConnectionMode;
   /** Seconds until next automatic retry. */
   retryCountdown: number;
   /** Last error message from health check. */
@@ -21,13 +21,13 @@ export interface DaemonStatusBadgeProps {
   onRetry: () => void;
 }
 
-export function DaemonStatusBadge({
-  isDaemonAvailable,
+export function WorkspaceStatusBadge({
+  isWorkspaceAvailable,
   mode,
   retryCountdown,
   onRetry,
-}: DaemonStatusBadgeProps): JSX.Element | null {
-  if (isDaemonAvailable) return null;
+}: WorkspaceStatusBadgeProps): JSX.Element | null {
+  if (isWorkspaceAvailable) return null;
 
   const isNeverConnected = mode === "never_connected";
   const label = isNeverConnected

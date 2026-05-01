@@ -1,4 +1,4 @@
-/* Full-page overlay — mirrors DaemonUnavailableOverlay */
+/* Full-page overlay — mirrors WorkspaceUnavailableOverlay */
 .overlay {
   position: fixed;
   inset: 0;

@@ -90,7 +90,7 @@ describe("useRecentOwners", () => {
 
     it("loads initial state from localStorage", () => {
       mockStorage.store.set(
-        "beads-recent-owners",
+        "loom-recent-owners",
         JSON.stringify(["Alice", "Bob", "Charlie"]),
       );
 
@@ -99,8 +99,26 @@ describe("useRecentOwners", () => {
       expect(result.current.recentOwners).toEqual(["Alice", "Bob", "Charlie"]);
     });
 
+    it("migrates initial state from legacy localStorage key", () => {
+      mockStorage.store.set(
+        "beads-recent-owners",
+        JSON.stringify(["Alice", "Bob", "Charlie"]),
+      );
+
+      const { result } = renderHook(() => useRecentOwners());
+
+      expect(result.current.recentOwners).toEqual(["Alice", "Bob", "Charlie"]);
+      expect(mockStorage.setItem).toHaveBeenCalledWith(
+        "loom-recent-owners",
+        JSON.stringify(["Alice", "Bob", "Charlie"]),
+      );
+      expect(mockStorage.removeItem).toHaveBeenCalledWith(
+        "beads-recent-owners",
+      );
+    });
+
     it("handles invalid JSON in localStorage gracefully", () => {
-      mockStorage.store.set("beads-recent-owners", "not valid json {{{");
+      mockStorage.store.set("loom-recent-owners", "not valid json {{{");
 
       const { result } = renderHook(() => useRecentOwners());
 
@@ -109,7 +127,7 @@ describe("useRecentOwners", () => {
 
     it("handles non-array JSON in localStorage gracefully", () => {
       mockStorage.store.set(
-        "beads-recent-owners",
+        "loom-recent-owners",
         JSON.stringify({ invalid: "object" }),
       );
 
@@ -120,7 +138,7 @@ describe("useRecentOwners", () => {
 
     it("filters out non-string items from localStorage", () => {
       mockStorage.store.set(
-        "beads-recent-owners",
+        "loom-recent-owners",
         JSON.stringify(["Alice", 123, "Bob", null, "Charlie"]),
       );
 
@@ -258,7 +276,7 @@ describe("useRecentOwners", () => {
   describe("clearRecentOwners", () => {
     it("clears all recent owners", () => {
       mockStorage.store.set(
-        "beads-recent-owners",
+        "loom-recent-owners",
         JSON.stringify(["Alice", "Bob", "Charlie"]),
       );
 
@@ -275,7 +293,7 @@ describe("useRecentOwners", () => {
 
     it("persists the empty state to localStorage", () => {
       mockStorage.store.set(
-        "beads-recent-owners",
+        "loom-recent-owners",
         JSON.stringify(["Alice", "Bob"]),
       );
 
@@ -287,8 +305,11 @@ describe("useRecentOwners", () => {
 
       // Check localStorage was updated to empty array
       expect(mockStorage.setItem).toHaveBeenCalledWith(
-        "beads-recent-owners",
+        "loom-recent-owners",
         "[]",
+      );
+      expect(mockStorage.removeItem).toHaveBeenCalledWith(
+        "beads-recent-owners",
       );
     });
   });
@@ -302,8 +323,11 @@ describe("useRecentOwners", () => {
       });
 
       expect(mockStorage.setItem).toHaveBeenCalledWith(
-        "beads-recent-owners",
+        "loom-recent-owners",
         JSON.stringify(["Alice"]),
+      );
+      expect(mockStorage.removeItem).toHaveBeenCalledWith(
+        "beads-recent-owners",
       );
     });
 
@@ -323,7 +347,7 @@ describe("useRecentOwners", () => {
         mockStorage.setItem.mock.calls[
           mockStorage.setItem.mock.calls.length - 1
         ];
-      expect(lastCall[0]).toBe("beads-recent-owners");
+      expect(lastCall[0]).toBe("loom-recent-owners");
       expect(JSON.parse(lastCall[1] as string)).toEqual(["Bob", "Alice"]);
     });
 

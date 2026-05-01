@@ -111,20 +111,20 @@ export function onAuthStateChange(
   };
 }
 
-// Daemon-unavailable listeners
-type DaemonUnavailableListener = { callback: () => void; active: boolean };
-const daemonUnavailableListeners: DaemonUnavailableListener[] = [];
+// Workspace service-unavailable listeners
+type WorkspaceUnavailableListener = { callback: () => void; active: boolean };
+const workspaceUnavailableListeners: WorkspaceUnavailableListener[] = [];
 
-export function onDaemonUnavailable(callback: () => void): () => void {
-  const listener: DaemonUnavailableListener = { callback, active: true };
-  daemonUnavailableListeners.push(listener);
+export function onWorkspaceUnavailable(callback: () => void): () => void {
+  const listener: WorkspaceUnavailableListener = { callback, active: true };
+  workspaceUnavailableListeners.push(listener);
   return () => {
     listener.active = false;
   };
 }
 
-export function notifyDaemonUnavailable(): void {
-  for (const listener of daemonUnavailableListeners) {
+export function notifyWorkspaceUnavailable(): void {
+  for (const listener of workspaceUnavailableListeners) {
     if (listener.active) listener.callback();
   }
 }
@@ -225,11 +225,11 @@ const apiMiddleware: Middleware = {
         notifyAuthTokenExpired();
       }
 
-      // 503 daemon unavailable — skip for terminal endpoints which return 503
-      // when Redis is absent (the daemon itself is still healthy)
+      // 503 workspace service unavailable — skip for terminal endpoints which return 503
+      // when Redis is absent (the workspace service itself is still healthy)
       const url503 = new URL(request.url, "http://localhost");
       if (response.status === 503 && !url503.pathname.includes("/terminal/")) {
-        notifyDaemonUnavailable();
+        notifyWorkspaceUnavailable();
       }
 
       // 5xx error reporting (avoid recursion for the error endpoint itself)
@@ -397,10 +397,10 @@ async function fetchApi<T>(
   } catch (error) {
     clearTimeoutCleanup();
     if (error instanceof ApiError) {
-      // Notify daemon-unavailable for 503, but not for terminal endpoints
-      // which return 503 when Redis is absent (daemon itself is still healthy)
+      // Notify workspace service-unavailable for 503, but not for terminal endpoints
+      // which return 503 when Redis is absent (workspace service itself is still healthy)
       if (error.status === 503 && !path.includes("/terminal/")) {
-        notifyDaemonUnavailable();
+        notifyWorkspaceUnavailable();
       }
       throw error;
     }
@@ -411,8 +411,8 @@ async function fetchApi<T>(
       // User-provided signal was aborted - re-throw as-is
       throw error;
     }
-    // Network error (status 0) — daemon likely unreachable.
-    notifyDaemonUnavailable();
+    // Network error (status 0) — workspace service likely unreachable.
+    notifyWorkspaceUnavailable();
     throw new ApiError(0, "Network error", error);
   }
 }

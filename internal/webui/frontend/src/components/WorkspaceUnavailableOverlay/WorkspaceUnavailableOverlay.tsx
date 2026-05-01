@@ -1,19 +1,19 @@
 /**
- * DaemonUnavailableOverlay - Full-page overlay shown when the workspace service is unavailable.
+ * WorkspaceUnavailableOverlay - Full-page overlay shown when the workspace service is unavailable.
  * Renders on top of AppLayout content, allowing Settings navigation via callback.
  * Distinguishes between never-connected and lost-connection states.
  */
 
 import { useRef } from "react";
 
-import type { DaemonConnectionMode } from "@/hooks/workspace";
+import type { WorkspaceConnectionMode } from "@/hooks/workspace";
 import { useFocusTrap } from "@/hooks";
 
-import styles from "./DaemonUnavailableOverlay.module.css";
+import styles from "./WorkspaceUnavailableOverlay.module.css";
 
-export interface DaemonUnavailableOverlayProps {
+export interface WorkspaceUnavailableOverlayProps {
   /** Connection mode determines messaging and UI. */
-  mode: DaemonConnectionMode;
+  mode: WorkspaceConnectionMode;
   /** Seconds until next automatic retry. */
   retryCountdown: number;
   /** Last error message from health check. */
@@ -24,13 +24,13 @@ export interface DaemonUnavailableOverlayProps {
   onSettingsClick: () => void;
 }
 
-export function DaemonUnavailableOverlay({
+export function WorkspaceUnavailableOverlay({
   mode,
   retryCountdown,
   lastError,
   onRetry,
   onSettingsClick,
-}: DaemonUnavailableOverlayProps): JSX.Element {
+}: WorkspaceUnavailableOverlayProps): JSX.Element {
   const overlayRef = useRef<HTMLDivElement>(null);
 
   // Focus trap: keeps Tab/Shift+Tab within the overlay
@@ -54,7 +54,7 @@ export function DaemonUnavailableOverlay({
       className={styles.overlay}
       role="dialog"
       aria-modal="true"
-      aria-labelledby="daemon-overlay-title"
+      aria-labelledby="workspace-overlay-title"
       ref={overlayRef}
       tabIndex={-1}
     >
@@ -63,7 +63,7 @@ export function DaemonUnavailableOverlay({
           <div className={styles.spinnerRing} />
         </div>
 
-        <h2 id="daemon-overlay-title" className={styles.title}>
+        <h2 id="workspace-overlay-title" className={styles.title}>
           {titleText}
         </h2>
 

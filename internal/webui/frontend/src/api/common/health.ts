@@ -1,5 +1,5 @@
 /**
- * API functions for daemon health checking.
+ * API functions for workspace service health checking.
  * Uses openapi-fetch generated client.
  */
 
@@ -18,10 +18,10 @@ export interface HealthResponse {
 }
 
 /**
- * Check daemon health via the API health endpoint.
+ * Check workspace service health via the API health endpoint.
  * Uses a short timeout (5s) since this is a connectivity probe.
  */
-export async function checkDaemonHealth(): Promise<HealthResponse> {
+export async function checkWorkspaceHealth(): Promise<HealthResponse> {
   const { data, error, response } = await api.GET("/api/health", {
     signal: AbortSignal.timeout(5000),
   });

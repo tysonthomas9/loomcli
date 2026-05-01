@@ -13,7 +13,7 @@ import {
   setAuthState,
   wsUrl,
   onAuthTokenExpired,
-  onDaemonUnavailable,
+  onWorkspaceUnavailable,
   API_BASE_URL,
   getApiOrigin,
   getWsBaseUrl,
@@ -666,9 +666,9 @@ describe("API Client", () => {
       }
     });
 
-    it("onDaemonUnavailable unsubscribe prevents further callbacks", async () => {
+    it("onWorkspaceUnavailable unsubscribe prevents further callbacks", async () => {
       const cb = vi.fn();
-      const unsub = onDaemonUnavailable(cb);
+      const unsub = onWorkspaceUnavailable(cb);
       unsub();
 
       setAuthToken(null);
@@ -698,7 +698,7 @@ describe("API Client", () => {
       expect(cb).not.toHaveBeenCalled();
     });
 
-    it("503 response notifies daemon-unavailable listeners", async () => {
+    it("503 response notifies workspace service-unavailable listeners", async () => {
       global.fetch = vi.fn().mockResolvedValue({
         ok: false,
         status: 503,
@@ -707,7 +707,7 @@ describe("API Client", () => {
       });
 
       const cb = vi.fn();
-      const unsub = onDaemonUnavailable(cb);
+      const unsub = onWorkspaceUnavailable(cb);
 
       try {
         await expect(get("/api/test")).rejects.toThrow(ApiError);
@@ -717,13 +717,13 @@ describe("API Client", () => {
       }
     });
 
-    it("network error notifies daemon-unavailable listeners", async () => {
+    it("network error notifies workspace service-unavailable listeners", async () => {
       global.fetch = vi
         .fn()
         .mockRejectedValue(new TypeError("Failed to fetch"));
 
       const cb = vi.fn();
-      const unsub = onDaemonUnavailable(cb);
+      const unsub = onWorkspaceUnavailable(cb);
 
       try {
         await expect(get("/api/test")).rejects.toThrow(ApiError);

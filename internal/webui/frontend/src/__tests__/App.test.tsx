@@ -349,8 +349,8 @@ vi.mock("@/hooks", () => ({
     scopeName: undefined,
     clearScope: vi.fn(),
   })),
-  useDaemonHealth: vi.fn(() => ({
-    isDaemonAvailable: true,
+  useWorkspaceHealth: vi.fn(() => ({
+    isWorkspaceAvailable: true,
     isChecking: false,
     wasEverConnected: true,
     connectionMode: "connected" as const,

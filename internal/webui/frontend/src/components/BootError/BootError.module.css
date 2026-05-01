@@ -1,7 +1,7 @@
 /**
  * BootError styles.
  * Full-page overlay for config fetch failures during boot.
- * Same visual pattern as DaemonUnavailableOverlay.
+ * Same visual pattern as WorkspaceUnavailableOverlay.
  */
 
 .overlay {

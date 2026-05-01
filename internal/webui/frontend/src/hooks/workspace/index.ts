@@ -8,11 +8,11 @@ export type { UseBackendConfigReturn } from "./useBackendConfig";
 export { useBackends } from "./useBackends";
 export type { UseBackendsReturn } from "./useBackends";
 
-export { useDaemonHealth } from "./useDaemonHealth";
+export { useWorkspaceHealth } from "./useWorkspaceHealth";
 export type {
-  DaemonConnectionMode,
-  UseDaemonHealthReturn,
-} from "./useDaemonHealth";
+  WorkspaceConnectionMode,
+  UseWorkspaceHealthReturn,
+} from "./useWorkspaceHealth";
 
 export { useGitActions } from "./useGitActions";
 export type {

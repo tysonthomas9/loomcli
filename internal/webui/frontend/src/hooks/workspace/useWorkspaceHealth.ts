@@ -1,21 +1,21 @@
 /**
- * useDaemonHealth - React hook for daemon availability monitoring.
- * Polls GET /api/health with exponential backoff and provides daemon
+ * useWorkspaceHealth - React hook for workspace service availability monitoring.
+ * Polls GET /api/health with exponential backoff and provides workspace service
  * availability state to the app. Uses the shared usePollingWithBackoff
  * hook for retry scheduling.
  */
 
 import { useState, useCallback, useEffect, useRef } from "react";
 
-import { onDaemonUnavailable } from "@/api/common";
-import { checkDaemonHealth } from "@/api/common";
+import { onWorkspaceUnavailable } from "@/api/common";
+import { checkWorkspaceHealth } from "@/api/common";
 
 import { usePollingWithBackoff } from "@/hooks/common";
 
 // ============= Constants =============
 
 /**
- * Debounce before showing overlay (ms). Daemon must be unreachable for
+ * Debounce before showing overlay (ms). Workspace service must be unreachable for
  * this long before the overlay appears. Prevents flash on brief blips.
  * Not applied in never-connected state (show immediately).
  */
@@ -24,23 +24,23 @@ const UNAVAILABLE_DEBOUNCE_MS = 2000;
 // ============= Types =============
 
 /** Connection mode distinguishing first-time vs reconnection scenarios. */
-export type DaemonConnectionMode =
+export type WorkspaceConnectionMode =
   | "never_connected"
   | "connected"
   | "lost_connection"
   | "reconnecting"
   | "starting";
 
-/** Return type for the useDaemonHealth hook. */
-export interface UseDaemonHealthReturn {
-  /** Whether the daemon is currently available. */
-  isDaemonAvailable: boolean;
+/** Return type for the useWorkspaceHealth hook. */
+export interface UseWorkspaceHealthReturn {
+  /** Whether the workspace service is currently available. */
+  isWorkspaceAvailable: boolean;
   /** Whether a health check is in progress. */
   isChecking: boolean;
-  /** Whether the daemon was ever successfully connected. */
+  /** Whether the workspace service was ever successfully connected. */
   wasEverConnected: boolean;
   /** Current connection mode for overlay messaging. */
-  connectionMode: DaemonConnectionMode;
+  connectionMode: WorkspaceConnectionMode;
   /** Seconds until next retry (0 if not waiting). */
   retryCountdown: number;
   /** Last error message from health check, if any. */
@@ -51,15 +51,15 @@ export interface UseDaemonHealthReturn {
 
 // ============= Hook =============
 
-export function useDaemonHealth(): UseDaemonHealthReturn {
-  const [isDaemonAvailable, setIsDaemonAvailable] = useState(true);
+export function useWorkspaceHealth(): UseWorkspaceHealthReturn {
+  const [isWorkspaceAvailable, setIsWorkspaceAvailable] = useState(true);
   const [isChecking, setIsChecking] = useState(false);
   const [connectionMode, setConnectionMode] =
-    useState<DaemonConnectionMode>("never_connected");
+    useState<WorkspaceConnectionMode>("never_connected");
   const [lastError, setLastError] = useState<string | null>(null);
 
   const mountedRef = useRef(true);
-  /** Timestamp (ms) when daemon first became unavailable (pre-debounce). */
+  /** Timestamp (ms) when workspace service first became unavailable (pre-debounce). */
   const unavailableSinceRef = useRef<number | null>(null);
   /** Whether the initial health check has completed. */
   const initialCheckDoneRef = useRef(false);
@@ -74,9 +74,9 @@ export function useDaemonHealth(): UseDaemonHealthReturn {
     onRetry: () => {
       void checkHealth();
     },
-    staleBannerDelayMs: 0, // Daemon uses its own overlay, not stale banner
-    maxFailuresAtCeiling: 0, // Disable — daemon doesn't track connectionLost
-    repollOnVisibilityChange: false, // Daemon handles visibility itself
+    staleBannerDelayMs: 0, // Workspace service uses its own overlay, not stale banner
+    maxFailuresAtCeiling: 0, // Disable — workspace service doesn't track connectionLost
+    repollOnVisibilityChange: false, // Workspace service handles visibility itself
   });
 
   // Keep wasEverConnectedRef in sync with backoff state
@@ -88,7 +88,7 @@ export function useDaemonHealth(): UseDaemonHealthReturn {
   reportSuccessRef.current = backoff.reportSuccess;
   reportFailureRef.current = backoff.reportFailure;
 
-  /** Handle daemon unavailable state with debounce and backoff. */
+  /** Handle workspace service unavailable state with debounce and backoff. */
   const handleUnavailable = useCallback((errorMessage: string) => {
     if (!mountedRef.current) return;
 
@@ -113,7 +113,7 @@ export function useDaemonHealth(): UseDaemonHealthReturn {
     }
 
     // Show overlay
-    setIsDaemonAvailable(false);
+    setIsWorkspaceAvailable(false);
     setConnectionMode(
       wasEverConnectedRef.current ? "reconnecting" : "never_connected",
     );
@@ -127,13 +127,13 @@ export function useDaemonHealth(): UseDaemonHealthReturn {
     setIsChecking(true);
 
     try {
-      const response = await checkDaemonHealth();
+      const response = await checkWorkspaceHealth();
 
       if (!mountedRef.current) return;
 
       if (response.status === "ok" || response.daemon.connected) {
-        // Daemon is available
-        setIsDaemonAvailable(true);
+        // Workspace service is available
+        setIsWorkspaceAvailable(true);
         wasEverConnectedRef.current = true;
         setConnectionMode("connected");
         setLastError(null);
@@ -141,20 +141,26 @@ export function useDaemonHealth(): UseDaemonHealthReturn {
         initialCheckDoneRef.current = true;
         reportSuccessRef.current();
       } else if (response.status === "starting") {
-        // Daemon is starting up (hydrating) — show loading state, not error
-        setIsDaemonAvailable(false);
+        // Workspace service is starting up (hydrating) — show loading state, not error
+        setIsWorkspaceAvailable(false);
         setConnectionMode("starting");
-        setLastError(response.daemon.error ?? "Workspace service is starting up");
+        setLastError(
+          response.daemon.error ?? "Workspace service is starting up",
+        );
         initialCheckDoneRef.current = true;
         reportFailureRef.current({ forceRetry: true });
       } else {
-        // Daemon responded but degraded/unhealthy
-        handleUnavailable(response.daemon.error ?? "Workspace service is degraded");
+        // Workspace service responded but degraded/unhealthy
+        handleUnavailable(
+          response.daemon.error ?? "Workspace service is degraded",
+        );
       }
     } catch (err) {
       if (!mountedRef.current) return;
       const message =
-        err instanceof Error ? err.message : "Failed to reach workspace service";
+        err instanceof Error
+          ? err.message
+          : "Failed to reach workspace service";
       handleUnavailable(message);
     } finally {
       if (mountedRef.current) {
@@ -181,30 +187,30 @@ export function useDaemonHealth(): UseDaemonHealthReturn {
     checkHealth();
   }, [checkHealth]);
 
-  // Listen for daemon-unavailable notifications from fetchApi
+  // Listen for workspace service-unavailable notifications from fetchApi
   useEffect(() => {
     const handler = () => {
       // Only trigger if currently marked available — avoids redundant checks
-      if (isDaemonAvailable && !isChecking) {
+      if (isWorkspaceAvailable && !isChecking) {
         checkHealth();
       }
     };
-    return onDaemonUnavailable(handler);
-  }, [isDaemonAvailable, isChecking, checkHealth]);
+    return onWorkspaceUnavailable(handler);
+  }, [isWorkspaceAvailable, isChecking, checkHealth]);
 
   // Re-poll immediately when tab becomes visible
   useEffect(() => {
     const handler = () => {
-      if (document.visibilityState === "visible" && !isDaemonAvailable) {
+      if (document.visibilityState === "visible" && !isWorkspaceAvailable) {
         retryNow();
       }
     };
     document.addEventListener("visibilitychange", handler);
     return () => document.removeEventListener("visibilitychange", handler);
-  }, [isDaemonAvailable, retryNow]);
+  }, [isWorkspaceAvailable, retryNow]);
 
   return {
-    isDaemonAvailable,
+    isWorkspaceAvailable,
     isChecking,
     wasEverConnected: backoff.wasEverConnected,
     connectionMode,
