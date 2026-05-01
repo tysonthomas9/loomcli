@@ -96,17 +96,39 @@ func ResolveInitialWorkspaceID(s store.Store) string {
 
 // BuildWorkspaceDeleteFn returns a closure satisfying
 // webui.ServerConfig.WorkspaceDeleteFn — store-backed delete. The
-// store cascades repo/agent/role/daemon-profile deletion server-side;
-// disk-side worktree teardown is the user's responsibility (the
-// noun-verb CLI prompts before clobbering checkouts; the webui's
-// "delete workspace" is metadata-only by design).
+// store cascades repo/agent/role/daemon-profile deletion server-side.
+// Local checkout paths are removed from the per-machine state cache so
+// default selection and path lookups cannot point at a deleted workspace.
 func BuildWorkspaceDeleteFn(s store.Store) func(string) error {
 	if s == nil {
 		return nil
 	}
 	return func(key string) error {
-		return s.Workspaces().Delete(context.Background(), key)
+		ctx := context.Background()
+		if err := s.Workspaces().Delete(ctx, key); err != nil {
+			return err
+		}
+		return deleteWorkspaceLocalState(key)
 	}
+}
+
+func deleteWorkspaceLocalState(key string) error {
+	if key == "" {
+		return nil
+	}
+	return bootstrap.WithStateLock(func() error {
+		sc, err := bootstrap.LoadStateCache()
+		if err != nil {
+			return err
+		}
+		if sc.Workspaces != nil {
+			delete(sc.Workspaces, key)
+		}
+		if sc.LastWorkspace == key {
+			sc.LastWorkspace = ""
+		}
+		return bootstrap.SaveStateCache(sc)
+	})
 }
 
 // BuildSetDefaultWorkspaceFn satisfies SetDefaultWorkspaceFn by

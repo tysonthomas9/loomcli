@@ -574,6 +574,37 @@ func TestWrapWorkspaceDeleteFn_NilResolveID(t *testing.T) {
 	}
 }
 
+func TestWrapWorkspaceDeleteFn_NilResolveIDCleansUpWhenDeleteArgumentIsKey(t *testing.T) {
+	registry, multiPool, multiSub := newTestRegistry(t)
+
+	wsID := "ALPHA"
+	wsPath := t.TempDir()
+	if err := registry.Register(wsID, wsPath); err != nil {
+		t.Fatalf("Register returned error: %v", err)
+	}
+	_ = registry.ActivateSubscriber(wsID)
+
+	var innerCalledWith string
+	innerDelete := func(name string) error {
+		innerCalledWith = name
+		return nil
+	}
+
+	wrapped := wrapWorkspaceDeleteFn(innerDelete, registry, nil)
+	if err := wrapped(wsID); err != nil {
+		t.Fatalf("wrapped delete returned error: %v", err)
+	}
+	if innerCalledWith != wsID {
+		t.Fatalf("innerDelete called with %q, want %q", innerCalledWith, wsID)
+	}
+	if multiPool.PoolForWorkspace(wsID) != nil {
+		t.Error("expected pool to be deregistered when delete argument is the workspace key")
+	}
+	if len(multiSub.WorkspaceIDs()) != 0 {
+		t.Error("expected subscriber cleanup when delete argument is the workspace key")
+	}
+}
+
 func TestWrapWorkspaceDeleteFn_ResolveIDEmptyString(t *testing.T) {
 	registry, multiPool, multiSub := newTestRegistry(t)
 

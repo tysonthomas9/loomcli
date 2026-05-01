@@ -70,23 +70,20 @@ func wrapWorkspaceDeleteFn(
 		return nil
 	}
 	return func(name string) error {
-		// 1. Resolve UUID BEFORE deletion (config entry is removed by innerDelete).
-		var wsID string
-		var resolved bool
+		// Prefer the argument as the cleanup key. Store-backed workspace
+		// delete passes the stable fleet-db key here, so resolver failures
+		// must not leak runtime pools/subscribers/terminal managers.
+		wsID := name
 		if resolveID != nil {
 			if id, err := resolveID(name); err != nil {
-				logger.Error("failed to resolve workspace UUID for deletion cleanup — pool and fleet store will leak until restart",
+				logger.Warn("failed to resolve workspace ID for deletion cleanup; using delete key",
 					"workspace", name, "err", err)
 			} else if id == "" {
-				logger.Error("workspace ID resolver returned empty UUID for deletion cleanup — pool and fleet store will leak until restart",
+				logger.Warn("workspace ID resolver returned empty ID for deletion cleanup; using delete key",
 					"workspace", name)
 			} else {
 				wsID = id
-				resolved = true
 			}
-		} else {
-			logger.Error("no workspace ID resolver available — pool and fleet store will leak until restart",
-				"workspace", name)
 		}
 
 		// 2. Perform the config deletion (the critical path — always proceed).
@@ -94,8 +91,8 @@ func wrapWorkspaceDeleteFn(
 			return err
 		}
 
-		// 3. Clean up pool, subscriber, and fleet state atomically (only if UUID was resolved).
-		if resolved && registry != nil {
+		// 3. Clean up pool, subscriber, and fleet state atomically.
+		if wsID != "" && registry != nil {
 			registry.Deregister(wsID)
 			logger.Info("workspace cleaned up after deletion",
 				"workspace", name, "id", wsID)
