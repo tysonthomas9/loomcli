@@ -22,6 +22,8 @@ type Store interface {
 	Workspaces() WorkspaceStore
 	Repos() RepoStore
 	Agents() AgentStore
+	Nodes() NodeStore
+	AgentSessions() AgentSessionStore
 	Roles() RoleStore
 	Daemon() DaemonProfileStore
 	io.Closer

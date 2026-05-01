@@ -47,6 +47,11 @@ func (s *agentStore) Create(_ context.Context, in store.AgentCreate) (*domain.Ag
 		CrossRepo:        in.CrossRepo,
 		Parent:           in.Parent,
 		State:            domain.AgentStateIdle,
+		Mode:             in.Mode,
+		TaskFilter:       in.TaskFilter,
+		MaxConcurrency:   in.MaxConcurrency,
+		BudgetPolicy:     in.BudgetPolicy,
+		DesiredState:     in.DesiredState,
 		CreatedAt:        now,
 		UpdatedAt:        now,
 	}
@@ -109,6 +114,21 @@ func (s *agentStore) Update(_ context.Context, ws, name string, patch store.Agen
 	}
 	if patch.State != nil {
 		a.State = *patch.State
+	}
+	if patch.Mode != nil {
+		a.Mode = *patch.Mode
+	}
+	if patch.TaskFilter != nil {
+		a.TaskFilter = *patch.TaskFilter
+	}
+	if patch.MaxConcurrency != nil {
+		a.MaxConcurrency = *patch.MaxConcurrency
+	}
+	if patch.BudgetPolicy != nil {
+		a.BudgetPolicy = *patch.BudgetPolicy
+	}
+	if patch.DesiredState != nil {
+		a.DesiredState = *patch.DesiredState
 	}
 	a.UpdatedAt = time.Now().UTC()
 	return cloneAgent(a), nil

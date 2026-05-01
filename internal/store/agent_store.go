@@ -20,6 +20,11 @@ type AgentCreate struct {
 	RepoGroups       []string
 	CrossRepo        bool
 	Parent           string
+	Mode             domain.AgentMode
+	TaskFilter       string
+	MaxConcurrency   int
+	BudgetPolicy     string
+	DesiredState     domain.AgentDesiredState
 }
 
 // AgentUpdate is the partial-update payload for agents.
@@ -33,6 +38,11 @@ type AgentUpdate struct {
 	CrossRepo        *bool
 	Parent           *string
 	State            *domain.AgentState
+	Mode             *domain.AgentMode
+	TaskFilter       *string
+	MaxConcurrency   *int
+	BudgetPolicy     *string
+	DesiredState     *domain.AgentDesiredState
 }
 
 // AgentStore is the persistence interface for Agent assignments.

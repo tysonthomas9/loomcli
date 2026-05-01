@@ -17,6 +17,8 @@ type Store struct {
 	workspaces *workspaceStore
 	repos      *repoStore
 	agents     *agentStore
+	nodes      *nodeStore
+	sessions   *agentSessionStore
 	roles      *roleStore
 	daemon     *daemonStore
 }
@@ -28,6 +30,8 @@ func New() *Store {
 		workspaces: newWorkspaceStore(),
 		repos:      newRepoStore(),
 		agents:     newAgentStore(),
+		nodes:      newNodeStore(),
+		sessions:   newAgentSessionStore(),
 		roles:      newRoleStore(),
 		daemon:     newDaemonStore(),
 	}
@@ -51,6 +55,12 @@ func (s *Store) Repos() store.RepoStore { return s.repos }
 
 // Agents returns the AgentStore.
 func (s *Store) Agents() store.AgentStore { return s.agents }
+
+// Nodes returns the NodeStore.
+func (s *Store) Nodes() store.NodeStore { return s.nodes }
+
+// AgentSessions returns the AgentSessionStore.
+func (s *Store) AgentSessions() store.AgentSessionStore { return s.sessions }
 
 // Roles returns the RoleStore.
 func (s *Store) Roles() store.RoleStore { return s.roles }
