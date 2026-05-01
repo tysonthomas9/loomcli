@@ -15,7 +15,7 @@ import {
 
 /**
  * Fetch available log phases for a task.
- * @param taskId The task ID (e.g., "beads-abc123")
+ * @param taskId The task ID (e.g., "TASK-123")
  * @returns Array of available phases (e.g., ["planning", "implementation"])
  */
 export async function getTaskLogPhases(

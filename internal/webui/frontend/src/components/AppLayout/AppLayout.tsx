@@ -23,7 +23,7 @@ export interface AppLayoutProps {
   actions?: ReactNode;
   /** Optional element to render in the left sidebar */
   sidebar?: ReactNode;
-  /** Application title displayed in header (defaults to "Beads") */
+  /** Application title displayed in header (defaults to "Loom") */
   title?: ReactNode;
   /** Additional CSS class name */
   className?: string;
@@ -40,7 +40,7 @@ export function AppLayout({
   navigation,
   actions,
   sidebar,
-  title = "Beads",
+  title = "Loom",
   className,
 }: AppLayoutProps): JSX.Element {
   const rootClassName = className

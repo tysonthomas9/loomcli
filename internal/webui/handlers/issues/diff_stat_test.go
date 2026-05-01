@@ -257,7 +257,7 @@ func TestHandleGetIssueDiffStat_DaemonUnavailable(t *testing.T) {
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode error: %v", err)
 	}
-	if !strings.Contains(resp["error"], "daemon not available") {
-		t.Errorf("error = %q, want to contain 'daemon not available'", resp["error"])
+	if !strings.Contains(resp["error"], "issue backend unavailable") {
+		t.Errorf("error = %q, want to contain 'issue backend unavailable'", resp["error"])
 	}
 }

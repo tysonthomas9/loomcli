@@ -224,7 +224,7 @@ export function WorkspaceTree({
           <div className={styles.daemonPromptText}>
             <span className={styles.daemonPromptTitle}>Connection lost</span>
             <span className={styles.daemonPromptDesc}>
-              Check that the daemon is running.
+              Check that the workspace service is running.
             </span>
           </div>
           {onRetryConnection && (

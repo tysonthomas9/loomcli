@@ -66,7 +66,7 @@ const VARIANT_DEFAULTS: Record<
   loading: {
     title: "Workspace loading...",
     description:
-      "The workspace daemon is starting up. This may take a few minutes for large repositories.",
+      "The workspace service is starting up. This may take a few minutes for large repositories.",
   },
   custom: {
     title: "Error",

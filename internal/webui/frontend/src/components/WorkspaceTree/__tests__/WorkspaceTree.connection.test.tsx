@@ -221,7 +221,7 @@ describe("WorkspaceTree connection status", () => {
       expect(alert).toBeInTheDocument();
       expect(screen.getByText("Connection lost")).toBeInTheDocument();
       expect(
-        screen.getByText("Check that the daemon is running."),
+        screen.getByText("Check that the workspace service is running."),
       ).toBeInTheDocument();
 
       // Retry button inside the daemon prompt

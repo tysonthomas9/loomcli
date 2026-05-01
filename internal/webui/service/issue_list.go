@@ -45,16 +45,16 @@ func (s *issueServiceImpl) ListIssues(ctx context.Context, params ListIssuesPara
 	if err != nil {
 		// Pool acquisition failed. In fleet mode the pool is intentionally
 		// non-functional (no bd daemon at all), so before bubbling
-		// "daemon unavailable" up to the FE, see whether a backend is
+		// "issue backend unavailable" up to the FE, see whether a backend is
 		// wired and serve the list from there.
 		if be, _ := s.resolveBackend(ctx); be != nil {
 			return s.listIssuesViaBackend(ctx, be, params)
 		}
 		if errors.Is(err, context.DeadlineExceeded) {
-			return nil, ErrTimeout("timeout connecting to daemon")
+			return nil, ErrTimeout("timeout connecting to issue backend")
 		}
 		slog.Error("connection pool error", "err", err)
-		return nil, ErrUnavailable("daemon unavailable")
+		return nil, ErrUnavailable("issue backend unavailable")
 	}
 	rpcOK := false
 	defer s.releaseClient(client, &rpcOK)

@@ -155,7 +155,7 @@ func (s *diffServiceImpl) GetIssueDiffStat(ctx context.Context, wsID, issueID st
 		return nil, service.ErrValidation("missing issue ID")
 	}
 	if s.pool == nil {
-		return nil, service.ErrUnavailable("daemon not available")
+		return nil, service.ErrUnavailable("issue backend unavailable")
 	}
 
 	rpcCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -163,7 +163,7 @@ func (s *diffServiceImpl) GetIssueDiffStat(ctx context.Context, wsID, issueID st
 
 	client, err := s.pool.Get(rpcCtx)
 	if err != nil {
-		return nil, service.ErrUnavailable("daemon not available")
+		return nil, service.ErrUnavailable("issue backend unavailable")
 	}
 	defer s.pool.Put(client)
 

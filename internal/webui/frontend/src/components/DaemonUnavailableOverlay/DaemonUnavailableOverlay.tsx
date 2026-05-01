@@ -1,5 +1,5 @@
 /**
- * DaemonUnavailableOverlay - Full-page overlay shown when the daemon is unavailable.
+ * DaemonUnavailableOverlay - Full-page overlay shown when the workspace service is unavailable.
  * Renders on top of AppLayout content, allowing Settings navigation via callback.
  * Distinguishes between never-connected and lost-connection states.
  */
@@ -42,11 +42,11 @@ export function DaemonUnavailableOverlay({
   const titleText = isStarting
     ? "Workspace loading\u2026"
     : isNeverConnected
-      ? "Connecting to daemon\u2026"
-      : "Connection to daemon lost";
+      ? "Connecting to workspace service\u2026"
+      : "Connection to workspace service lost";
 
   const descriptionText = isStarting
-    ? "The workspace daemon is starting up. This may take a few minutes for large repositories."
+    ? "The workspace service is starting up. This may take a few minutes for large repositories."
     : null;
 
   return (

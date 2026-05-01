@@ -259,7 +259,7 @@ func HandleBlockedWithPool(pool BlockedConnectionGetter) http.HandlerFunc { //no
 			slog.Error("pool error in HandleBlocked", "err", err)
 			handler.WriteJSON(w, status, BlockedResponse{
 				Success: false,
-				Error:   "daemon not available",
+				Error:   "issue backend unavailable",
 			})
 			return
 		}
@@ -552,7 +552,7 @@ func HandleGraphWithPool(pool GraphConnectionGetter) http.HandlerFunc { //nolint
 			slog.Error("pool error in HandleGraph", "err", err)
 			handler.WriteJSON(w, httpStatus, GraphResponse{
 				Success: false,
-				Error:   "daemon not available",
+				Error:   "issue backend unavailable",
 			})
 			return
 		}

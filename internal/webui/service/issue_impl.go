@@ -150,9 +150,9 @@ func (s *issueServiceImpl) acquireClient(ctx context.Context) (*rpc.Client, erro
 			return nil, ErrStarting("workspace is loading")
 		}
 		if errors.Is(err, context.DeadlineExceeded) {
-			return nil, ErrTimeout("timeout connecting to daemon")
+			return nil, ErrTimeout("timeout connecting to issue backend")
 		}
-		return nil, ErrUnavailable("daemon not available")
+		return nil, ErrUnavailable("issue backend unavailable")
 	}
 	return client, nil
 }

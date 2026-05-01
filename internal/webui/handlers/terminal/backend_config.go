@@ -178,7 +178,7 @@ func handlePatchBackendConfigWithPool(pool configConnectionGetter) http.HandlerF
 			if errors.Is(err, context.DeadlineExceeded) {
 				status = http.StatusGatewayTimeout
 			}
-			handler.WriteJSON(w, status, BackendConfigResponse{Success: false, Error: "daemon not available"})
+			handler.WriteJSON(w, status, BackendConfigResponse{Success: false, Error: "workspace service unavailable"})
 			return
 		}
 
@@ -266,7 +266,7 @@ func resolveWorkspacePath(r *http.Request, pool configConnectionGetter, resolver
 		if errors.Is(err, context.DeadlineExceeded) {
 			status = http.StatusGatewayTimeout
 		}
-		return "", status, fmt.Errorf("daemon not available")
+		return "", status, fmt.Errorf("workspace service unavailable")
 	}
 	return p, 0, nil
 }

@@ -144,17 +144,17 @@ export function useDaemonHealth(): UseDaemonHealthReturn {
         // Daemon is starting up (hydrating) — show loading state, not error
         setIsDaemonAvailable(false);
         setConnectionMode("starting");
-        setLastError(response.daemon.error ?? "Daemon is starting up");
+        setLastError(response.daemon.error ?? "Workspace service is starting up");
         initialCheckDoneRef.current = true;
         reportFailureRef.current({ forceRetry: true });
       } else {
         // Daemon responded but degraded/unhealthy
-        handleUnavailable(response.daemon.error ?? "Daemon is degraded");
+        handleUnavailable(response.daemon.error ?? "Workspace service is degraded");
       }
     } catch (err) {
       if (!mountedRef.current) return;
       const message =
-        err instanceof Error ? err.message : "Failed to reach daemon";
+        err instanceof Error ? err.message : "Failed to reach workspace service";
       handleUnavailable(message);
     } finally {
       if (mountedRef.current) {

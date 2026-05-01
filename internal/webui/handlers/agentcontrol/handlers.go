@@ -137,15 +137,15 @@ func handleAgentList(controlFn AgentControlFn) http.HandlerFunc {
 }
 
 // writeDaemonError handles the case where AgentControlFn returns a non-nil error
-// (daemon unreachable or socket timeout).
+// (agent supervisor unreachable or socket timeout).
 func writeDaemonError(w http.ResponseWriter, err error) {
 	if strings.Contains(err.Error(), "timeout") {
 		handler.WriteJSON(w, http.StatusGatewayTimeout,
-			dto.NewErrorResponse("daemon did not respond in time", "daemon_timeout"))
+			dto.NewErrorResponse("agent supervisor did not respond in time", "daemon_timeout"))
 		return
 	}
 	handler.WriteJSON(w, http.StatusServiceUnavailable,
-		dto.NewErrorResponse("daemon is not running", "daemon_unavailable"))
+		dto.NewErrorResponse("agent supervisor is not running", "daemon_unavailable"))
 }
 
 // writeControlError handles the case where the daemon responded with Success=false.

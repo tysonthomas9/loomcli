@@ -555,7 +555,7 @@ describe("useDaemonHealth", () => {
 
       await flushPromises();
 
-      expect(result.current.lastError).toBe("Daemon is degraded");
+      expect(result.current.lastError).toBe("Workspace service is degraded");
     });
   });
 
@@ -586,7 +586,7 @@ describe("useDaemonHealth", () => {
       await flushPromises();
 
       expect(result.current.connectionMode).toBe("starting");
-      expect(result.current.lastError).toBe("Daemon is starting up");
+      expect(result.current.lastError).toBe("Workspace service is starting up");
     });
 
     it("schedules retry after starting response", async () => {
@@ -648,7 +648,7 @@ describe("useDaemonHealth", () => {
 
       await flushPromises();
 
-      expect(result.current.lastError).toBe("Failed to reach daemon");
+      expect(result.current.lastError).toBe("Failed to reach workspace service");
     });
   });
 

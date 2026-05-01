@@ -39,8 +39,8 @@ func TestHandlePatchBackendConfig_PoolGetError(t *testing.T) {
 	if resp.Success {
 		t.Fatal("expected failure")
 	}
-	if !strings.Contains(resp.Error, "daemon not available") {
-		t.Errorf("expected daemon not available error, got: %s", resp.Error)
+	if !strings.Contains(resp.Error, "workspace service unavailable") {
+		t.Errorf("expected workspace service unavailable error, got: %s", resp.Error)
 	}
 }
 

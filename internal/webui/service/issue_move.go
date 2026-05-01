@@ -34,10 +34,10 @@ func (s *issueServiceImpl) MoveIssue(ctx context.Context, params MoveIssueParams
 	client, err := s.pool.Get(ctx)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
-			return nil, ErrTimeout("timeout connecting to daemon")
+			return nil, ErrTimeout("timeout connecting to issue backend")
 		}
 		slog.Error("pool error in MoveIssue", "err", err)
-		return nil, ErrUnavailable("daemon not available")
+		return nil, ErrUnavailable("issue backend unavailable")
 	}
 	rpcOK := false
 	defer s.releaseClient(client, &rpcOK)
@@ -127,7 +127,7 @@ func (s *issueServiceImpl) createIssueInTarget(ctx context.Context, targetWsID, 
 			return "", ErrValidation(fmt.Sprintf("target workspace %q not registered", targetWorkspace))
 		}
 		slog.Error("target pool error in MoveIssue", "workspace", targetWorkspace, "err", err)
-		return "", ErrUnavailable("target workspace daemon not available")
+		return "", ErrUnavailable("target workspace issue backend unavailable")
 	}
 	rpcOK := false
 	defer func() {

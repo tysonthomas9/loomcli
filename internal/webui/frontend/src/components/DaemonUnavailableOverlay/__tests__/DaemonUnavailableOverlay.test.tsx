@@ -38,7 +38,7 @@ vi.mock("@/hooks", () => ({
 
 describe("DaemonUnavailableOverlay", () => {
   describe("rendering by mode", () => {
-    it('renders "Connecting to daemon..." for never_connected mode', () => {
+    it('renders "Connecting to workspace service..." for never_connected mode', () => {
       render(
         <DaemonUnavailableOverlay
           mode="never_connected"
@@ -49,10 +49,10 @@ describe("DaemonUnavailableOverlay", () => {
         />,
       );
 
-      expect(screen.getByText(/Connecting to daemon/)).toBeInTheDocument();
+      expect(screen.getByText(/Connecting to workspace service/)).toBeInTheDocument();
     });
 
-    it('renders "Connection to daemon lost" for lost_connection mode', () => {
+    it('renders "Connection to workspace service lost" for lost_connection mode', () => {
       render(
         <DaemonUnavailableOverlay
           mode="lost_connection"
@@ -63,10 +63,10 @@ describe("DaemonUnavailableOverlay", () => {
         />,
       );
 
-      expect(screen.getByText("Connection to daemon lost")).toBeInTheDocument();
+      expect(screen.getByText("Connection to workspace service lost")).toBeInTheDocument();
     });
 
-    it('renders "Connection to daemon lost" for reconnecting mode', () => {
+    it('renders "Connection to workspace service lost" for reconnecting mode', () => {
       render(
         <DaemonUnavailableOverlay
           mode="reconnecting"
@@ -77,7 +77,7 @@ describe("DaemonUnavailableOverlay", () => {
         />,
       );
 
-      expect(screen.getByText("Connection to daemon lost")).toBeInTheDocument();
+      expect(screen.getByText("Connection to workspace service lost")).toBeInTheDocument();
     });
 
     it('renders "Workspace loading\u2026" for starting mode', () => {
@@ -196,7 +196,7 @@ describe("DaemonUnavailableOverlay", () => {
       );
 
       // Should only have the title, no error detail paragraph
-      const title = screen.getByText("Connection to daemon lost");
+      const title = screen.getByText("Connection to workspace service lost");
       expect(title).toBeInTheDocument();
     });
   });

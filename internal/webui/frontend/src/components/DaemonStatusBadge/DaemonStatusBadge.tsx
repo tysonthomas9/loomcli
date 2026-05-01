@@ -1,7 +1,7 @@
 /**
- * DaemonStatusBadge - Inline, non-blocking indicator of daemon availability.
+ * DaemonStatusBadge - Inline, non-blocking indicator of workspace service availability.
  * Replaces the full-page DaemonUnavailableOverlay modal so users can still
- * interact with the UI while the daemon is reconnecting.
+ * interact with the UI while the workspace service is reconnecting.
  */
 
 import type { DaemonConnectionMode } from "@/hooks/workspace/useDaemonHealth";
@@ -9,7 +9,7 @@ import type { DaemonConnectionMode } from "@/hooks/workspace/useDaemonHealth";
 import styles from "./DaemonStatusBadge.module.css";
 
 export interface DaemonStatusBadgeProps {
-  /** Whether the daemon is currently available. */
+  /** Whether the workspace service is currently available. */
   isDaemonAvailable: boolean;
   /** Connection mode determines messaging. */
   mode: DaemonConnectionMode;
@@ -33,15 +33,15 @@ export function DaemonStatusBadge({
   const label = isNeverConnected
     ? "Connecting\u2026"
     : retryCountdown > 0
-      ? `Daemon offline \u00B7 ${retryCountdown}s`
-      : "Daemon offline";
+      ? `Workspace service offline \u00B7 ${retryCountdown}s`
+      : "Workspace service offline";
 
   return (
     <button
       className={styles.badge}
       onClick={onRetry}
       type="button"
-      title="Click to retry daemon connection"
+      title="Click to retry workspace service connection"
       aria-live="polite"
     >
       <span className={styles.dot} aria-hidden="true" />
