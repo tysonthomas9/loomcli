@@ -28,6 +28,10 @@ var (
 	agentAddRepoGroups []string
 	agentAddCrossRepo  bool
 	agentAddParent     string
+	agentAddMode       string
+	agentAddTaskFilter string
+	agentAddMaxConc    int
+	agentAddBudget     string
 
 	agentListJSON  bool
 	agentShowJSON  bool
@@ -95,6 +99,10 @@ func init() {
 	agentAddCmd.Flags().StringSliceVar(&agentAddRepoGroups, "repo-groups", nil, "Repo groups (comma-separated or repeat flag)")
 	agentAddCmd.Flags().BoolVar(&agentAddCrossRepo, "cross-repo", false, "Allow tasks spanning repos")
 	agentAddCmd.Flags().StringVar(&agentAddParent, "parent", "", "Epic ID to scope this agent to")
+	agentAddCmd.Flags().StringVar(&agentAddMode, "mode", "", "Agent mode: ephemeral or service")
+	agentAddCmd.Flags().StringVar(&agentAddTaskFilter, "task-filter", "", "Task filter for task-driven agents")
+	agentAddCmd.Flags().IntVar(&agentAddMaxConc, "max-concurrency", 0, "Maximum concurrent runs for orchestrator/service agents")
+	agentAddCmd.Flags().StringVar(&agentAddBudget, "budget-policy", "", "Budget/retry policy name")
 
 	agentListCmd.Flags().BoolVar(&agentListJSON, "json", false, "JSON output")
 	agentShowCmd.Flags().BoolVar(&agentShowJSON, "json", false, "JSON output")
@@ -106,16 +114,21 @@ func init() {
 
 func runAgentAdd(_ *cobra.Command, args []string) error {
 	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
+		mode := domain.AgentMode(agentAddMode)
 		a, err := h.Store.Agents().Create(ctx, store.AgentCreate{
-			WorkspaceKey: ws,
-			Name:         args[0],
-			RoleName:     agentAddRole,
-			Auto:         agentAddAuto,
-			Backend:      agentAddBackend,
-			Repos:        agentAddRepos,
-			RepoGroups:   agentAddRepoGroups,
-			CrossRepo:    agentAddCrossRepo,
-			Parent:       agentAddParent,
+			WorkspaceKey:   ws,
+			Name:           args[0],
+			RoleName:       agentAddRole,
+			Auto:           agentAddAuto,
+			Backend:        agentAddBackend,
+			Repos:          agentAddRepos,
+			RepoGroups:     agentAddRepoGroups,
+			CrossRepo:      agentAddCrossRepo,
+			Parent:         agentAddParent,
+			Mode:           mode,
+			TaskFilter:     agentAddTaskFilter,
+			MaxConcurrency: agentAddMaxConc,
+			BudgetPolicy:   agentAddBudget,
 		})
 		if err != nil {
 			return fmt.Errorf("create agent: %w", err)
@@ -143,7 +156,11 @@ func runAgentList(_ *cobra.Command, _ []string) error {
 			if a.Auto {
 				auto = " auto"
 			}
-			fmt.Printf("%-20s role=%-10s state=%s%s\n", a.Name, a.RoleName, a.State, auto)
+			mode := ""
+			if a.Mode != "" {
+				mode = " mode=" + string(a.Mode)
+			}
+			fmt.Printf("%-20s role=%-10s state=%s%s%s\n", a.Name, a.RoleName, a.State, mode, auto)
 		}
 		return nil
 	})
@@ -177,6 +194,18 @@ func runAgentShow(_ *cobra.Command, args []string) error {
 		}
 		if a.Parent != "" {
 			fmt.Printf("Parent epic:  %s\n", a.Parent)
+		}
+		if a.Mode != "" {
+			fmt.Printf("Mode:         %s\n", a.Mode)
+		}
+		if a.TaskFilter != "" {
+			fmt.Printf("Task filter:  %s\n", a.TaskFilter)
+		}
+		if a.MaxConcurrency > 0 {
+			fmt.Printf("Max conc:     %d\n", a.MaxConcurrency)
+		}
+		if a.BudgetPolicy != "" {
+			fmt.Printf("Budget:       %s\n", a.BudgetPolicy)
 		}
 		return nil
 	})
