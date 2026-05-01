@@ -471,6 +471,83 @@ func TestFleetDBOnlyBackendClaimAndLockSemantics(t *testing.T) {
 	}
 }
 
+func TestFleetDBOnlyBackendMultiActorAuditAndAuth(t *testing.T) {
+	fleetBE, _ := spawnFleetDB(t)
+	ctx := context.Background()
+	alice, ok := fleetBE.(*fleetDBAdapter)
+	if !ok {
+		t.Fatalf("spawnFleetDB returned %T, want *fleetDBAdapter", fleetBE)
+	}
+	alice.actor = "alice"
+	bob := newFleetDBAdapter(alice.baseURL, alice.workspaceID, "bob")
+
+	issue, err := alice.Create(ctx, backend.CreateParams{
+		Title:     "Audit actor seed",
+		Priority:  2,
+		IssueType: "task",
+		Owner:     "alice",
+	})
+	if err != nil {
+		t.Fatalf("alice create: %v", err)
+	}
+	if issue.CreatedBy != "alice" {
+		t.Fatalf("created_by = %q, want alice", issue.CreatedBy)
+	}
+
+	if err := bob.ClaimIssue(ctx, issue.ID, 5*time.Second); err != nil {
+		t.Fatalf("bob claim: %v", err)
+	}
+	claimed, err := bob.Get(ctx, issue.ID)
+	if err != nil {
+		t.Fatalf("bob get claimed: %v", err)
+	}
+	if claimed.Assignee != "bob" {
+		t.Fatalf("assignee = %q, want bob", claimed.Assignee)
+	}
+
+	comment, err := bob.AddComment(ctx, backend.CommentAddParams{IssueID: issue.ID, Text: "bob audit comment"})
+	if err != nil {
+		t.Fatalf("bob comment: %v", err)
+	}
+	if comment.Author != "bob" {
+		t.Fatalf("comment author = %q, want bob", comment.Author)
+	}
+
+	events, err := bob.ListEvents(ctx, issue.ID, 10)
+	if err != nil {
+		t.Fatalf("list events: %v", err)
+	}
+	seenCreate := false
+	seenClaim := false
+	seenComment := false
+	for _, event := range events {
+		switch {
+		case event.Kind == "issue.create" && event.Actor == "alice":
+			seenCreate = true
+		case event.Kind == "issue.claim" && event.Actor == "bob":
+			seenClaim = true
+		case event.Kind == "comment.add" && event.Actor == "bob":
+			seenComment = true
+		}
+	}
+	if !seenCreate || !seenClaim || !seenComment {
+		t.Fatalf("audit events missing actors: create=%v claim=%v comment=%v events=%+v", seenCreate, seenClaim, seenComment, events)
+	}
+
+	unauthenticated := newFleetDBAdapter(alice.baseURL, alice.workspaceID, "")
+	_, err = unauthenticated.Create(ctx, backend.CreateParams{
+		Title:     "Should be unauthorized",
+		Priority:  2,
+		IssueType: "task",
+	})
+	if err == nil {
+		t.Fatal("unauthenticated create succeeded; want auth failure")
+	}
+	if !backend.IsKind(err, backend.KindUnavailable) {
+		t.Fatalf("unauthenticated create error = %v, want KindUnavailable auth failure", err)
+	}
+}
+
 func mustRawJSON(t *testing.T, value any) json.RawMessage {
 	t.Helper()
 	raw, err := json.Marshal(value)

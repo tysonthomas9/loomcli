@@ -126,6 +126,8 @@ func (a *fleetDBAdapter) classifyStatus(op string, status int, body []byte) erro
 		return backend.ErrValidation(op, msg)
 	case http.StatusConflict:
 		return backend.ErrConflict(op, msg)
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return backend.ErrUnavailable(op, msg, nil)
 	default:
 		return backend.ErrInternal(op, fmt.Sprintf("HTTP %d (%s)", status, code), nil)
 	}
@@ -695,6 +697,7 @@ func parseFleetIssue(raw []byte) (*backend.IssueData, error) {
 		Assignee:  asString(m["assignee"]),
 		Owner:     asString(m["owner"]),
 		Parent:    asString(m["parent_id"]),
+		CreatedBy: asString(m["created_by"]),
 	}
 	// Created/updated timestamps — optional, best effort.
 	out.CreatedAt = asTime(m["created_at"])
