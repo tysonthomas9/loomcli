@@ -884,6 +884,9 @@ func TestClaimIssue_HappyPath(t *testing.T) {
 		if r.Method != "POST" || !strings.HasSuffix(r.URL.Path, "/issues/test-1/claim") {
 			t.Errorf("unexpected: %s %s", r.Method, r.URL.Path)
 		}
+		if r.ContentLength > 0 {
+			t.Errorf("zero TTL should omit request body; content length = %d", r.ContentLength)
+		}
 		w.Header().Set("Content-Type", "application/json")
 		respondOK(w, json.RawMessage(`{}`))
 	})
@@ -895,11 +898,69 @@ func TestClaimIssue_HappyPath(t *testing.T) {
 	}
 }
 
+func TestClaimIssue_ForwardsLockTTL(t *testing.T) {
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" || !strings.HasSuffix(r.URL.Path, "/issues/test-1/claim") {
+			t.Errorf("unexpected: %s %s", r.Method, r.URL.Path)
+		}
+		var body struct {
+			LockTTL int `json:"lock_ttl"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		if body.LockTTL != 300 {
+			t.Errorf("lock_ttl = %d, want 300", body.LockTTL)
+		}
+		respondOK(w, json.RawMessage(`{}`))
+	})
+	defer ts.Close()
+
+	if err := fb.ClaimIssue(context.Background(), "test-1", 5*time.Minute); err != nil {
+		t.Fatalf("ClaimIssue: %v", err)
+	}
+}
+
+func TestClaimIssue_RoundsPositiveSubsecondTTL(t *testing.T) {
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			LockTTL int `json:"lock_ttl"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		if body.LockTTL != 1 {
+			t.Errorf("lock_ttl = %d, want 1", body.LockTTL)
+		}
+		respondOK(w, json.RawMessage(`{}`))
+	})
+	defer ts.Close()
+
+	if err := fb.ClaimIssue(context.Background(), "test-1", time.Millisecond); err != nil {
+		t.Fatalf("ClaimIssue: %v", err)
+	}
+}
+
 func TestClaimIssue_EmptyID(t *testing.T) {
 	fb, _ := New(Config{BaseURL: "http://x", WorkspaceID: "ws"})
 	err := fb.ClaimIssue(context.Background(), "", 0)
 	if err == nil {
 		t.Fatal("expected error for empty ID")
+	}
+	if !backend.IsKind(err, backend.KindValidation) {
+		t.Fatalf("expected KindValidation, got %v", err)
+	}
+}
+
+func TestClaimIssue_NegativeTTL(t *testing.T) {
+	fb, ts := newTestServer(t, func(_ http.ResponseWriter, _ *http.Request) {
+		t.Fatal("server should not be contacted for negative TTL")
+	})
+	defer ts.Close()
+
+	err := fb.ClaimIssue(context.Background(), "test-1", -time.Second)
+	if err == nil {
+		t.Fatal("expected error for negative TTL")
 	}
 	if !backend.IsKind(err, backend.KindValidation) {
 		t.Fatalf("expected KindValidation, got %v", err)

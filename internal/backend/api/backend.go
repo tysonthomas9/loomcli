@@ -326,22 +326,35 @@ func (b *APIBackend) Update(ctx context.Context, id string, params backend.Updat
 	return err
 }
 
-// ClaimIssue atomically claims an issue via POST /issues/{id}/claim. The
-// lockTTL parameter is accepted per the IssueBackend contract but is not
-// forwarded to the server — beads SQLite has no TTL support, matching
-// BeadsBackend.ClaimIssue and FleetBackend.ClaimIssue behavior. Returns
-// KindConflict when the issue is already claimed by a different agent and
-// KindNotFound when the issue does not exist.
+// ClaimIssue atomically claims an issue via POST /issues/{id}/claim. A zero
+// TTL asks the server to use its default; positive TTLs are forwarded as
+// second-granular lock_ttl values. Returns KindConflict when the issue is
+// already claimed by a different agent and KindNotFound when it does not
+// exist.
 func (b *APIBackend) ClaimIssue(ctx context.Context, id string, lockTTL time.Duration) error {
 	if id == "" {
 		return backend.ErrValidation("ClaimIssue", "id must not be empty")
 	}
-	if lockTTL < 0 {
-		return backend.ErrValidation("ClaimIssue", "lockTTL must not be negative")
+	body, err := claimIssueBody(lockTTL)
+	if err != nil {
+		return err
 	}
 	path := "/issues/" + url.PathEscape(id) + "/claim"
-	_, err := b.exec(ctx, "ClaimIssue", http.MethodPost, path, nil)
+	_, err = b.exec(ctx, "ClaimIssue", http.MethodPost, path, body)
 	return err
+}
+
+func claimIssueBody(lockTTL time.Duration) (any, error) {
+	if lockTTL < 0 {
+		return nil, backend.ErrValidation("ClaimIssue", "lockTTL must not be negative")
+	}
+	if lockTTL == 0 {
+		return nil, nil
+	}
+	seconds := int((lockTTL + time.Second - time.Nanosecond) / time.Second)
+	return struct {
+		LockTTL int `json:"lock_ttl"`
+	}{LockTTL: seconds}, nil
 }
 
 // DeferIssue defers an issue via PATCH with status="deferred" and optional

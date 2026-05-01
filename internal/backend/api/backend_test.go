@@ -597,6 +597,9 @@ func TestClaimIssue_Success(t *testing.T) {
 	ab, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		gotMethod = r.Method
 		gotPath = r.URL.Path
+		if r.ContentLength > 0 {
+			t.Errorf("zero TTL should omit request body; content length = %d", r.ContentLength)
+		}
 		respondOK(w, gen.IssueResponse{
 			Id:        "abc",
 			Title:     "claim test",
@@ -618,6 +621,46 @@ func TestClaimIssue_Success(t *testing.T) {
 	}
 	if !strings.HasSuffix(gotPath, "/issues/abc/claim") {
 		t.Errorf("path = %q, want suffix /issues/abc/claim", gotPath)
+	}
+}
+
+func TestClaimIssue_ForwardsLockTTL(t *testing.T) {
+	ab, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			LockTTL int `json:"lock_ttl"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		if body.LockTTL != 300 {
+			t.Errorf("lock_ttl = %d, want 300", body.LockTTL)
+		}
+		respondOK(w, gen.IssueResponse{Id: "abc"})
+	})
+	defer ts.Close()
+
+	if err := ab.ClaimIssue(context.Background(), "abc", 5*time.Minute); err != nil {
+		t.Fatalf("ClaimIssue: %v", err)
+	}
+}
+
+func TestClaimIssue_RoundsPositiveSubsecondTTL(t *testing.T) {
+	ab, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			LockTTL int `json:"lock_ttl"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		if body.LockTTL != 1 {
+			t.Errorf("lock_ttl = %d, want 1", body.LockTTL)
+		}
+		respondOK(w, gen.IssueResponse{Id: "abc"})
+	})
+	defer ts.Close()
+
+	if err := ab.ClaimIssue(context.Background(), "abc", time.Millisecond); err != nil {
+		t.Fatalf("ClaimIssue: %v", err)
 	}
 }
 

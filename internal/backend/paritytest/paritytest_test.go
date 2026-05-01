@@ -8,8 +8,11 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 )
@@ -352,6 +355,120 @@ func TestFleetDBOnlyBackendBatchAndErrorSemantics(t *testing.T) {
 			string(backend.KindValidation),
 		},
 	)
+}
+
+func TestFleetDBOnlyBackendClaimAndLockSemantics(t *testing.T) {
+	fleetBE, _, mr := spawnFleetDBWithRedis(t)
+	ctx := context.Background()
+	fleetAdapter, ok := fleetBE.(*fleetDBAdapter)
+	if !ok {
+		t.Fatalf("spawnFleetDB returned %T, want *fleetDBAdapter", fleetBE)
+	}
+
+	issue, err := fleetBE.Create(ctx, backend.CreateParams{
+		Title:     "Claim lock seed",
+		Priority:  2,
+		IssueType: "task",
+		Owner:     parityActor,
+	})
+	if err != nil {
+		t.Fatalf("create claim seed: %v", err)
+	}
+	if err := fleetBE.ClaimIssue(ctx, issue.ID, time.Second); err != nil {
+		t.Fatalf("initial claim: %v", err)
+	}
+	claimed, err := fleetBE.Get(ctx, issue.ID)
+	if err != nil {
+		t.Fatalf("get claimed issue: %v", err)
+	}
+	if claimed.Status != "in_progress" {
+		t.Errorf("claimed.Status = %q, want in_progress", claimed.Status)
+	}
+	if claimed.Assignee != parityActor {
+		t.Errorf("claimed.Assignee = %q, want %q", claimed.Assignee, parityActor)
+	}
+
+	// Same-actor re-claim is a heartbeat-style refresh.
+	if err := fleetBE.ClaimIssue(ctx, issue.ID, time.Second); err != nil {
+		t.Fatalf("same actor reclaim: %v", err)
+	}
+
+	other := newFleetDBAdapter(fleetAdapter.baseURL, fleetAdapter.workspaceID, "other-agent")
+	err = other.ClaimIssue(ctx, issue.ID, 2*time.Second)
+	if err == nil {
+		t.Fatal("cross-actor claim while lock is live succeeded; want conflict")
+	}
+	if !backend.IsKind(err, backend.KindConflict) {
+		t.Fatalf("cross-actor live-lock claim error = %v, want KindConflict", err)
+	}
+
+	mr.FastForward(2 * time.Second)
+	if err := other.ClaimIssue(ctx, issue.ID, 2*time.Second); err != nil {
+		t.Fatalf("stale claim recovery after TTL expiry: %v", err)
+	}
+	reclaimed, err := other.Get(ctx, issue.ID)
+	if err != nil {
+		t.Fatalf("get reclaimed issue: %v", err)
+	}
+	if reclaimed.Status != "in_progress" {
+		t.Errorf("reclaimed.Status = %q, want in_progress", reclaimed.Status)
+	}
+	if reclaimed.Assignee != "other-agent" {
+		t.Errorf("reclaimed.Assignee = %q, want other-agent", reclaimed.Assignee)
+	}
+
+	concurrentIssue, err := fleetBE.Create(ctx, backend.CreateParams{
+		Title:     "Concurrent claim seed",
+		Priority:  2,
+		IssueType: "task",
+		Owner:     parityActor,
+	})
+	if err != nil {
+		t.Fatalf("create concurrent seed: %v", err)
+	}
+
+	const contenders = 8
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var successes []string
+	conflicts := 0
+	for i := 0; i < contenders; i++ {
+		actor := "contender-" + strconv.Itoa(i)
+		wg.Add(1)
+		go func(actor string) {
+			defer wg.Done()
+			<-start
+			adapter := newFleetDBAdapter(fleetAdapter.baseURL, fleetAdapter.workspaceID, actor)
+			err := adapter.ClaimIssue(ctx, concurrentIssue.ID, 5*time.Second)
+			mu.Lock()
+			defer mu.Unlock()
+			switch {
+			case err == nil:
+				successes = append(successes, actor)
+			case backend.IsKind(err, backend.KindConflict):
+				conflicts++
+			default:
+				t.Errorf("claim by %s returned unexpected error: %v", actor, err)
+			}
+		}(actor)
+	}
+	close(start)
+	wg.Wait()
+
+	if len(successes) != 1 {
+		t.Fatalf("successful concurrent claims = %v, want exactly one", successes)
+	}
+	if conflicts != contenders-1 {
+		t.Fatalf("conflicts = %d, want %d", conflicts, contenders-1)
+	}
+	final, err := fleetBE.Get(ctx, concurrentIssue.ID)
+	if err != nil {
+		t.Fatalf("get concurrent issue: %v", err)
+	}
+	if final.Assignee != successes[0] {
+		t.Errorf("final.Assignee = %q, want winning actor %q", final.Assignee, successes[0])
+	}
 }
 
 func mustRawJSON(t *testing.T, value any) json.RawMessage {

@@ -320,6 +320,27 @@ func (a *fleetDBAdapter) Reopen(ctx context.Context, id string, params backend.R
 	return nil
 }
 
+func (a *fleetDBAdapter) ClaimIssue(ctx context.Context, id string, lockTTL time.Duration) error {
+	if id == "" {
+		return backend.ErrValidation("ClaimIssue", "id must not be empty")
+	}
+	if lockTTL < 0 {
+		return backend.ErrValidation("ClaimIssue", "lockTTL must not be negative")
+	}
+	var body any
+	if lockTTL > 0 {
+		seconds := int((lockTTL + time.Second - time.Nanosecond) / time.Second)
+		body = struct {
+			LockTTL int `json:"lock_ttl"`
+		}{LockTTL: seconds}
+	}
+	raw, status, err := a.doJSON(ctx, http.MethodPost, a.wsPath("/issues/"+url.PathEscape(id)+"/claim"), body)
+	if err != nil {
+		return backend.ErrInternal("ClaimIssue", "http", err)
+	}
+	return a.classifyStatus("ClaimIssue", status, raw)
+}
+
 func (a *fleetDBAdapter) Delete(ctx context.Context, params backend.DeleteParams) error {
 	if len(params.IDs) == 0 {
 		return backend.ErrValidation("Delete", "IDs must not be empty")

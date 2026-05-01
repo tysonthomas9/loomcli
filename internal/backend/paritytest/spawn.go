@@ -208,6 +208,12 @@ func waitForBeadsSocket(socketPath string, timeout time.Duration) (*rpc.Client, 
 //     `cd ~/codebase/fleet-db && go build -o /tmp/fleet-db ./cmd/fleet-db`)
 func spawnFleetDB(t *testing.T) (backend.IssueBackend, func()) {
 	t.Helper()
+	be, cleanup, _ := spawnFleetDBWithRedis(t)
+	return be, cleanup
+}
+
+func spawnFleetDBWithRedis(t *testing.T) (backend.IssueBackend, func(), *miniredis.Miniredis) {
+	t.Helper()
 
 	binary := fleetDBBinary(t)
 	mr := startMiniRedis(t)
@@ -237,7 +243,7 @@ func spawnFleetDB(t *testing.T) (backend.IssueBackend, func()) {
 	}
 	t.Cleanup(cleanup)
 
-	return be, cleanup
+	return be, cleanup, mr
 }
 
 // fleetDBBinary resolves which fleet-db binary to spawn and skips the test
@@ -319,7 +325,6 @@ func startFleetDBProcess(t *testing.T, binary, addr, redisAddr string) (*exec.Cm
 	}
 	return cmd, logPath
 }
-
 
 // runCmdOpts configures runOrFail.
 type runCmdOpts struct {

@@ -532,20 +532,34 @@ func (b *FleetBackend) Update(ctx context.Context, id string, params backend.Upd
 }
 
 // ClaimIssue atomically claims an issue via the fleet claim endpoint.
-// The lockTTL parameter is accepted but ignored — fleet server manages
-// claim TTL via server-side configuration.
 //
 // fleet-db's claim endpoint is per-issue: POST /issues/{id}/claim with an
-// empty body. Earlier drafts of this client used a workspace-level
-// /fleet/claim endpoint with the issue ID in the body, which fleet-db never
-// shipped. Using the per-issue route also lets us share auth/authz with
-// other per-issue routes.
-func (b *FleetBackend) ClaimIssue(ctx context.Context, id string, _ time.Duration) error {
+// optional {"lock_ttl": seconds} body. A zero TTL asks the server to use its
+// default; positive sub-second TTLs round up to one second because the wire
+// contract is second-granular.
+func (b *FleetBackend) ClaimIssue(ctx context.Context, id string, lockTTL time.Duration) error {
 	if id == "" {
 		return backend.ErrValidation("ClaimIssue", "id must not be empty")
 	}
-	_, err := b.exec(ctx, "ClaimIssue", "POST", "/issues/"+url.PathEscape(id)+"/claim", map[string]interface{}{})
+	body, err := claimIssueBody(lockTTL)
+	if err != nil {
+		return err
+	}
+	_, err = b.exec(ctx, "ClaimIssue", "POST", "/issues/"+url.PathEscape(id)+"/claim", body)
 	return err
+}
+
+func claimIssueBody(lockTTL time.Duration) (interface{}, error) {
+	if lockTTL < 0 {
+		return nil, backend.ErrValidation("ClaimIssue", "lockTTL must not be negative")
+	}
+	if lockTTL == 0 {
+		return nil, nil
+	}
+	seconds := int((lockTTL + time.Second - time.Nanosecond) / time.Second)
+	return struct {
+		LockTTL int `json:"lock_ttl"`
+	}{LockTTL: seconds}, nil
 }
 
 // DeferIssue defers an issue via PATCH with status="deferred" and optional
