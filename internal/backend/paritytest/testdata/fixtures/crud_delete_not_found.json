@@ -1,0 +1,37 @@
+{
+  "id": "crud_delete_not_found",
+  "title": "Delete removes an issue and later reads return not found",
+  "description": "Creates an issue, deletes it with force semantics, then shows it again. Both backends should classify the final read as not_found.",
+  "tags": ["crud", "delete", "not_found"],
+  "steps": [
+    {
+      "id": "step_01",
+      "description": "Create issue for delete lifecycle",
+      "method": "issue.create",
+      "params": {
+        "title": "Delete fixture",
+        "priority": 2,
+        "type": "task",
+        "owner": "parity-harness",
+        "actor": "parity-harness"
+      }
+    },
+    {
+      "id": "step_02",
+      "description": "Delete the issue",
+      "method": "issue.delete",
+      "params": {
+        "id": "${issue_id}",
+        "force": true
+      }
+    },
+    {
+      "id": "step_03",
+      "description": "Show deleted issue should return not_found",
+      "method": "issue.show",
+      "params": {
+        "id": "${issue_id}"
+      }
+    }
+  ]
+}

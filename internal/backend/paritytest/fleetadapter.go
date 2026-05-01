@@ -315,6 +315,25 @@ func (a *fleetDBAdapter) Reopen(ctx context.Context, id string, params backend.R
 	return nil
 }
 
+func (a *fleetDBAdapter) Delete(ctx context.Context, params backend.DeleteParams) error {
+	if len(params.IDs) == 0 {
+		return backend.ErrValidation("Delete", "IDs must not be empty")
+	}
+	for _, id := range params.IDs {
+		raw, status, err := a.doJSON(ctx, http.MethodDelete, a.wsPath("/issues/"+url.PathEscape(id)), nil)
+		if err != nil {
+			return backend.ErrInternal("Delete", "http", err)
+		}
+		if cerr := a.classifyStatus("Delete", status, raw); cerr != nil {
+			if params.Force && backend.IsKind(cerr, backend.KindNotFound) {
+				continue
+			}
+			return cerr
+		}
+	}
+	return nil
+}
+
 // createFleetWorkspace POSTs /api/v1/admin/workspaces to create the default
 // workspace used by the harness. fleet-db needs this before any issue ops
 // will succeed.

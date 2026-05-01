@@ -221,6 +221,31 @@ func (r *DualRunner) executeStep(ctx context.Context, be backend.IssueBackend, m
 		}
 		return map[string]any{"id": p.ID}, nil
 
+	case "issue.delete":
+		var p struct {
+			ID      string   `json:"id,omitempty"`
+			IDs     []string `json:"ids,omitempty"`
+			Reason  string   `json:"reason,omitempty"`
+			Force   bool     `json:"force,omitempty"`
+			Cascade bool     `json:"cascade,omitempty"`
+		}
+		if err := unmarshalParams(rawParams, &p); err != nil {
+			return nil, err
+		}
+		ids := p.IDs
+		if p.ID != "" {
+			ids = append([]string{p.ID}, ids...)
+		}
+		if err := be.Delete(ctx, backend.DeleteParams{
+			IDs:     ids,
+			Reason:  p.Reason,
+			Force:   p.Force,
+			Cascade: p.Cascade,
+		}); err != nil {
+			return nil, err
+		}
+		return map[string]any{"ids": ids}, nil
+
 	default:
 		return nil, fmt.Errorf("paritytest: unsupported method %q", method)
 	}
