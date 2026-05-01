@@ -1,0 +1,74 @@
+{
+  "id": "cli_history_events",
+  "title": "History and mutation events expose issue changes",
+  "description": "Fleet-db-only checks for issue history and workspace mutation event JSON projections used by UI refresh flows.",
+  "tags": ["cli", "history", "events", "fleetdb"],
+  "steps": [
+    {
+      "id": "seed_issue",
+      "bd_args":  ["--json", "create", "--title", "history probe", "--type", "task", "--priority", "2"],
+      "fdb_args": ["-json", "create", "-title", "history probe", "-type", "task", "-priority", "2"],
+      "capture_vars": {"issue_id": "$.id"}
+    },
+    {
+      "id": "capture_cursor_after_create",
+      "fleet_only": true,
+      "fdb_args": ["-json", "events", "mutations", "-limit", "10"],
+      "expect_result_count": 2,
+      "capture_vars": {"after_create_cursor": "$.cursor"},
+      "expect_json": {
+        "$.events[0].action": "workspace.create",
+        "$.events[1].actor": "parity-harness",
+        "$.events[1].action": "issue.create",
+        "$.events[1].entity_id": "${issue_id}"
+      }
+    },
+    {
+      "id": "add_comment",
+      "fleet_only": true,
+      "fdb_args": ["-json", "comment", "add", "${issue_id}", "-body", "history comment"],
+      "expect_result_count": 1,
+      "expect_json": {
+        "$[0].issue_id": "${issue_id}",
+        "$[0].author": "parity-harness",
+        "$[0].body": "history comment"
+      }
+    },
+    {
+      "id": "history_comment_filter",
+      "fleet_only": true,
+      "fdb_args": ["-json", "history", "list", "${issue_id}", "-action", "comment.add", "-limit", "1"],
+      "expect_result_count": 1,
+      "expect_json": {
+        "$.history[0].actor": "parity-harness",
+        "$.history[0].action": "comment.add",
+        "$.history[0].category": "comment",
+        "$.history[0].metadata.text": "history comment",
+        "$.total_events": 2
+      }
+    },
+    {
+      "id": "mutations_since_cursor",
+      "fleet_only": true,
+      "fdb_args": ["-json", "events", "mutations", "-since", "${after_create_cursor}", "-limit", "1"],
+      "expect_result_count": 1,
+      "expect_json": {
+        "$.events[0].actor": "parity-harness",
+        "$.events[0].action": "comment.add",
+        "$.events[0].entity_id": "${issue_id}"
+      }
+    },
+    {
+      "id": "history_limit",
+      "fleet_only": true,
+      "fdb_args": ["-json", "history", "list", "${issue_id}", "-limit", "1"],
+      "expect_result_count": 1,
+      "expect_json": {
+        "$.history[0].actor": "parity-harness",
+        "$.history[0].action": "issue.create",
+        "$.has_more": true,
+        "$.total_events": 2
+      }
+    }
+  ]
+}

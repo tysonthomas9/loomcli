@@ -14,19 +14,40 @@
       "id": "comment_add_1",
       "description": "First comment (bd: positional, fdb: --body)",
       "bd_args":  ["comments", "add", "${issue_id}", "first comment"],
-      "fdb_args": ["comment", "add", "${issue_id}", "-body", "first comment"]
+      "fdb_args": ["-json", "comment", "add", "${issue_id}", "-body", "first comment"],
+      "expect_result_count": 1,
+      "expect_json": {
+        "$[0].issue_id": "${issue_id}",
+        "$[0].author": "parity-harness",
+        "$[0].body": "first comment"
+      }
     },
     {
       "id": "comment_add_2",
       "description": "Second comment",
       "bd_args":  ["comments", "add", "${issue_id}", "second comment"],
-      "fdb_args": ["comment", "add", "${issue_id}", "-body", "second comment"]
+      "fdb_args": ["-json", "comment", "add", "${issue_id}", "-body", "second comment"],
+      "expect_result_count": 1,
+      "expect_json": {
+        "$[0].issue_id": "${issue_id}",
+        "$[0].author": "parity-harness",
+        "$[0].body": "second comment"
+      }
     },
     {
       "id": "comment_list",
       "description": "List comments",
       "bd_args":  ["--json", "comments", "${issue_id}"],
-      "fdb_args": ["-json", "comment", "list", "${issue_id}"]
+      "fdb_args": ["-json", "comment", "list", "${issue_id}"],
+      "expect_result_count": 2,
+      "expect_json": {
+        "$[0].issue_id": "${issue_id}",
+        "$[0].author": "parity-harness",
+        "$[0].body": "second comment",
+        "$[1].issue_id": "${issue_id}",
+        "$[1].author": "parity-harness",
+        "$[1].body": "first comment"
+      }
     }
   ]
 }

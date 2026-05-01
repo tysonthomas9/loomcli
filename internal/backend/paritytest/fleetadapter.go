@@ -372,6 +372,92 @@ func (a *fleetDBAdapter) RemoveDependency(ctx context.Context, params backend.De
 	return a.classifyStatus("RemoveDependency", status, raw)
 }
 
+func (a *fleetDBAdapter) AddComment(ctx context.Context, params backend.CommentAddParams) (*backend.CommentData, error) {
+	if params.IssueID == "" {
+		return nil, backend.ErrValidation("AddComment", "issue_id must not be empty")
+	}
+	if params.Text == "" {
+		return nil, backend.ErrValidation("AddComment", "text must not be empty")
+	}
+	raw, status, err := a.doJSON(ctx, http.MethodPost, a.wsPath("/issues/"+url.PathEscape(params.IssueID)+"/comments"), map[string]string{
+		"body": params.Text,
+	})
+	if err != nil {
+		return nil, backend.ErrInternal("AddComment", "http", err)
+	}
+	if cerr := a.classifyStatus("AddComment", status, raw); cerr != nil {
+		return nil, cerr
+	}
+	comment, err := parseFleetComment(raw)
+	if err != nil {
+		return nil, backend.ErrInternal("AddComment", "decode response", err)
+	}
+	return comment, nil
+}
+
+func (a *fleetDBAdapter) ListComments(ctx context.Context, id string) ([]backend.CommentData, error) {
+	if id == "" {
+		return nil, backend.ErrValidation("ListComments", "id must not be empty")
+	}
+	raw, status, err := a.doJSON(ctx, http.MethodGet, a.wsPath("/issues/"+url.PathEscape(id)+"/comments"), nil)
+	if err != nil {
+		return nil, backend.ErrInternal("ListComments", "http", err)
+	}
+	if cerr := a.classifyStatus("ListComments", status, raw); cerr != nil {
+		return nil, cerr
+	}
+	var wrap struct {
+		Comments []fleetCommentJSON `json:"comments"`
+	}
+	if err := json.Unmarshal(raw, &wrap); err != nil {
+		return nil, backend.ErrInternal("ListComments", "decode response", err)
+	}
+	out := make([]backend.CommentData, 0, len(wrap.Comments))
+	for _, c := range wrap.Comments {
+		out = append(out, c.toData())
+	}
+	return out, nil
+}
+
+func (a *fleetDBAdapter) ListEvents(ctx context.Context, id string, limit int) ([]backend.EventData, error) {
+	if id == "" {
+		return nil, backend.ErrValidation("ListEvents", "id must not be empty")
+	}
+	path := "/issues/" + url.PathEscape(id) + "/history"
+	if limit > 0 {
+		path += "?limit=" + url.QueryEscape(fmt.Sprintf("%d", limit))
+	}
+	raw, status, err := a.doJSON(ctx, http.MethodGet, a.wsPath(path), nil)
+	if err != nil {
+		return nil, backend.ErrInternal("ListEvents", "http", err)
+	}
+	if cerr := a.classifyStatus("ListEvents", status, raw); cerr != nil {
+		return nil, cerr
+	}
+	var wrap struct {
+		History []struct {
+			ID        string    `json:"id"`
+			Timestamp time.Time `json:"timestamp"`
+			Actor     string    `json:"actor"`
+			Action    string    `json:"action"`
+		} `json:"history"`
+	}
+	if err := json.Unmarshal(raw, &wrap); err != nil {
+		return nil, backend.ErrInternal("ListEvents", "decode response", err)
+	}
+	out := make([]backend.EventData, 0, len(wrap.History))
+	for _, e := range wrap.History {
+		out = append(out, backend.EventData{
+			ID:        e.ID,
+			IssueID:   id,
+			Kind:      e.Action,
+			Actor:     e.Actor,
+			CreatedAt: e.Timestamp,
+		})
+	}
+	return out, nil
+}
+
 func (a *fleetDBAdapter) fetchDependencies(ctx context.Context, id string) ([]backend.DependencyData, error) {
 	raw, status, err := a.doJSON(ctx, http.MethodGet, a.wsPath("/issues/"+url.PathEscape(id)+"/deps"), nil)
 	if err != nil {
@@ -403,6 +489,32 @@ func (a *fleetDBAdapter) fetchDependencies(ctx context.Context, id string) ([]ba
 		})
 	}
 	return out, nil
+}
+
+type fleetCommentJSON struct {
+	ID        string    `json:"id"`
+	IssueID   string    `json:"issue_id"`
+	Author    string    `json:"author"`
+	Body      string    `json:"body"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+func parseFleetComment(raw []byte) (*backend.CommentData, error) {
+	var c fleetCommentJSON
+	if err := json.Unmarshal(raw, &c); err != nil {
+		return nil, err
+	}
+	data := c.toData()
+	return &data, nil
+}
+
+func (c fleetCommentJSON) toData() backend.CommentData {
+	return backend.CommentData{
+		IssueID:   c.IssueID,
+		Author:    c.Author,
+		Text:      c.Body,
+		CreatedAt: c.CreatedAt,
+	}
 }
 
 // createFleetWorkspace POSTs /api/v1/admin/workspaces to create the default

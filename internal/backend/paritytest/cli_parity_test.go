@@ -63,6 +63,7 @@ type cliStep struct {
 	CompareField      string            `json:"compare_field,omitempty"`
 	ExpectJSON        map[string]any    `json:"expect_json,omitempty"`
 	ExpectResultCount *int              `json:"expect_result_count,omitempty"`
+	FleetOnly         bool              `json:"fleet_only,omitempty"`
 }
 
 // cliHarness owns the pair of backends (bd workspace dir + fdb HTTP URL)
@@ -419,6 +420,9 @@ func (h *cliHarness) runCLIFixture(ctx context.Context, fx cliFixture) ([]DiffEn
 
 	var diffs []DiffEntry
 	for _, step := range fx.Steps {
+		if step.FleetOnly {
+			continue
+		}
 		bdArgs := substituteVarArgs(step.BdArgs, beadsVars)
 		fdbArgs := substituteVarArgs(step.FdbArgs, fleetVars)
 
@@ -521,7 +525,7 @@ func resultCount(v any) (int, bool) {
 				return n, true
 			}
 		}
-		for _, key := range []string{"issues", "items", "results", "data"} {
+		for _, key := range []string{"issues", "items", "results", "data", "comments", "events", "history"} {
 			if arr, ok := t[key].([]any); ok {
 				return len(arr), true
 			}

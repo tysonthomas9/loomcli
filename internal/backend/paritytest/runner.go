@@ -290,8 +290,85 @@ func (r *DualRunner) executeStep(ctx context.Context, be backend.IssueBackend, m
 		}
 		return map[string]any{"ok": true}, nil
 
+	case "comment.add":
+		var p struct {
+			IssueID string `json:"issue_id"`
+			Author  string `json:"author,omitempty"`
+			Text    string `json:"text"`
+		}
+		if err := unmarshalParams(rawParams, &p); err != nil {
+			return nil, err
+		}
+		if p.Author == "" {
+			p.Author = "parity-harness"
+		}
+		comment, err := be.AddComment(ctx, backend.CommentAddParams{
+			IssueID: p.IssueID,
+			Author:  p.Author,
+			Text:    p.Text,
+		})
+		if err != nil {
+			return nil, err
+		}
+		return commentDataToComparableMap(comment), nil
+
+	case "comment.list":
+		var p struct {
+			IssueID string `json:"issue_id"`
+		}
+		if err := unmarshalParams(rawParams, &p); err != nil {
+			return nil, err
+		}
+		comments, err := be.ListComments(ctx, p.IssueID)
+		if err != nil {
+			return nil, err
+		}
+		return commentsToComparableMap(comments), nil
+
+	case "event.list":
+		var p struct {
+			IssueID string `json:"issue_id"`
+			Limit   int    `json:"limit,omitempty"`
+		}
+		if err := unmarshalParams(rawParams, &p); err != nil {
+			return nil, err
+		}
+		events, err := be.ListEvents(ctx, p.IssueID, p.Limit)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"count": len(events)}, nil
+
 	default:
 		return nil, fmt.Errorf("paritytest: unsupported method %q", method)
+	}
+}
+
+func commentDataToComparableMap(c *backend.CommentData) map[string]any {
+	if c == nil {
+		return nil
+	}
+	return map[string]any{
+		"author":         c.Author,
+		"text":           c.Text,
+		"has_created_at": !c.CreatedAt.IsZero(),
+	}
+}
+
+func commentsToComparableMap(comments []backend.CommentData) map[string]any {
+	texts := make([]string, 0, len(comments))
+	authors := make([]string, 0, len(comments))
+	hasCreatedAt := make([]bool, 0, len(comments))
+	for _, c := range comments {
+		texts = append(texts, c.Text)
+		authors = append(authors, c.Author)
+		hasCreatedAt = append(hasCreatedAt, !c.CreatedAt.IsZero())
+	}
+	return map[string]any{
+		"count":          len(comments),
+		"texts":          texts,
+		"authors":        authors,
+		"has_created_at": hasCreatedAt,
 	}
 }
 

@@ -804,7 +804,7 @@ func (w fleetCommentWire) toTypesComment() types.Comment {
 // --- Event operations ---
 
 func (b *FleetBackend) ListEvents(ctx context.Context, id string, limit int) ([]backend.EventData, error) {
-	path := "/issues/" + url.PathEscape(id) + "/events"
+	path := "/issues/" + url.PathEscape(id) + "/history"
 	if limit > 0 {
 		path += "?limit=" + strconv.Itoa(limit)
 	}
@@ -815,15 +815,26 @@ func (b *FleetBackend) ListEvents(ctx context.Context, id string, limit int) ([]
 	if !hasData(resp) {
 		return []backend.EventData{}, nil
 	}
-	var events []*types.Event
-	if err := json.Unmarshal(resp.Data, &events); err != nil {
+	var history struct {
+		History []struct {
+			ID        string    `json:"id"`
+			Timestamp time.Time `json:"timestamp"`
+			Actor     string    `json:"actor"`
+			Action    string    `json:"action"`
+		} `json:"history"`
+	}
+	if err := json.Unmarshal(resp.Data, &history); err != nil {
 		return nil, backend.ErrInternal("ListEvents", "unmarshal response", err)
 	}
-	result := make([]backend.EventData, 0, len(events))
-	for _, e := range events {
-		if e != nil {
-			result = append(result, eventToData(e))
-		}
+	result := make([]backend.EventData, 0, len(history.History))
+	for _, e := range history.History {
+		result = append(result, backend.EventData{
+			ID:        e.ID,
+			IssueID:   id,
+			Kind:      e.Action,
+			Actor:     e.Actor,
+			CreatedAt: e.Timestamp,
+		})
 	}
 	return result, nil
 }
