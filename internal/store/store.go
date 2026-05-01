@@ -27,6 +27,7 @@ type Store interface {
 	TerminalSessions() TerminalSessionStore
 	Artifacts() ArtifactStore
 	AgentLeases() AgentLeaseStore
+	AgentCommands() AgentCommandStore
 	Roles() RoleStore
 	Daemon() DaemonProfileStore
 	io.Closer

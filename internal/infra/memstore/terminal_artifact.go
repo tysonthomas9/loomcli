@@ -275,3 +275,101 @@ func cloneAgentLease(l *domain.AgentLease) *domain.AgentLease {
 func leaseMatchesMem(l *domain.AgentLease, f store.AgentLeaseFilter) bool {
 	return (f.SessionID == "" || l.SessionID == f.SessionID) && (f.AgentID == "" || l.AgentID == f.AgentID) && (f.NodeID == "" || l.NodeID == f.NodeID) && (f.Status == "" || l.Status == f.Status)
 }
+
+type agentCommandStore struct {
+	mu    sync.RWMutex
+	items map[string]map[string]*domain.AgentCommand
+	next  int64
+}
+
+func newAgentCommandStore() *agentCommandStore {
+	return &agentCommandStore{items: make(map[string]map[string]*domain.AgentCommand)}
+}
+
+func (s *agentCommandStore) Create(_ context.Context, in store.AgentCommandCreate) (*domain.AgentCommand, error) {
+	if in.WorkspaceKey == "" || in.Type == "" {
+		return nil, fmt.Errorf("workspace_key + type required: %w", domain.ErrInvalid)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.items[in.WorkspaceKey] == nil {
+		s.items[in.WorkspaceKey] = make(map[string]*domain.AgentCommand)
+	}
+	s.next++
+	now := time.Now().UTC()
+	id := in.CommandID
+	if id == "" {
+		id = fmt.Sprintf("cmd-%d", s.next)
+	}
+	cmd := &domain.AgentCommand{WorkspaceKey: in.WorkspaceKey, CommandID: id, Cursor: s.next, TargetAgentID: in.TargetAgentID, TargetNodeID: in.TargetNodeID, SessionID: in.SessionID, Type: in.Type, Payload: cloneMap(in.Payload), Status: domain.AgentCommandQueued, CreatedAt: now, UpdatedAt: now}
+	s.items[in.WorkspaceKey][id] = cmd
+	return cloneAgentCommand(cmd), nil
+}
+
+func (s *agentCommandStore) Get(_ context.Context, ws, commandID string) (*domain.AgentCommand, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	cmd, ok := s.items[ws][commandID]
+	if !ok {
+		return nil, fmt.Errorf("agent command %q in workspace %q: %w", commandID, ws, domain.ErrNotFound)
+	}
+	return cloneAgentCommand(cmd), nil
+}
+
+func (s *agentCommandStore) List(_ context.Context, ws string, filter store.AgentCommandFilter) ([]*domain.AgentCommand, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]*domain.AgentCommand, 0, len(s.items[ws]))
+	for _, cmd := range s.items[ws] {
+		if commandMatchesMem(cmd, filter) {
+			out = append(out, cloneAgentCommand(cmd))
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Cursor < out[j].Cursor })
+	if filter.Limit > 0 && len(out) > filter.Limit {
+		out = out[:filter.Limit]
+	}
+	return out, nil
+}
+
+func (s *agentCommandStore) Ack(_ context.Context, ws, commandID string) (*domain.AgentCommand, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cmd, ok := s.items[ws][commandID]
+	if !ok {
+		return nil, fmt.Errorf("agent command %q in workspace %q: %w", commandID, ws, domain.ErrNotFound)
+	}
+	now := time.Now().UTC()
+	cmd.Status = domain.AgentCommandAcked
+	cmd.AckedAt = &now
+	cmd.UpdatedAt = now
+	return cloneAgentCommand(cmd), nil
+}
+
+func (s *agentCommandStore) Complete(_ context.Context, ws, commandID string, update store.AgentCommandComplete) (*domain.AgentCommand, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cmd, ok := s.items[ws][commandID]
+	if !ok {
+		return nil, fmt.Errorf("agent command %q in workspace %q: %w", commandID, ws, domain.ErrNotFound)
+	}
+	if update.Status == "" {
+		update.Status = domain.AgentCommandSucceeded
+	}
+	cmd.Status = update.Status
+	cmd.Result = update.Result
+	cmd.ErrorClass = update.ErrorClass
+	cmd.UpdatedAt = time.Now().UTC()
+	return cloneAgentCommand(cmd), nil
+}
+
+func cloneAgentCommand(c *domain.AgentCommand) *domain.AgentCommand {
+	out := *c
+	out.AckedAt = clonePtr(c.AckedAt)
+	out.Payload = cloneMap(c.Payload)
+	return &out
+}
+
+func commandMatchesMem(c *domain.AgentCommand, f store.AgentCommandFilter) bool {
+	return (f.TargetAgentID == "" || c.TargetAgentID == f.TargetAgentID) && (f.TargetNodeID == "" || c.TargetNodeID == f.TargetNodeID) && (f.Status == "" || c.Status == f.Status) && (f.AfterCursor <= 0 || c.Cursor > f.AfterCursor)
+}

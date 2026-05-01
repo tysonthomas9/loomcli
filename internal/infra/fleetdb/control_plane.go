@@ -417,3 +417,73 @@ func (s *agentLeaseStore) Release(ctx context.Context, ws, leaseID, token string
 	}
 	return &out, nil
 }
+
+type agentCommandStore struct{ client *Client }
+
+var _ store.AgentCommandStore = (*agentCommandStore)(nil)
+
+func (s *agentCommandStore) Create(ctx context.Context, in store.AgentCommandCreate) (*domain.AgentCommand, error) {
+	body := map[string]any{"command_id": in.CommandID, "target_agent_id": in.TargetAgentID, "target_node_id": in.TargetNodeID, "session_id": in.SessionID, "type": in.Type, "payload": in.Payload}
+	var out domain.AgentCommand
+	if err := s.client.do(ctx, "POST", "/api/v1/"+pathEscape(in.WorkspaceKey)+"/agent-commands", body, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (s *agentCommandStore) Get(ctx context.Context, ws, commandID string) (*domain.AgentCommand, error) {
+	var out domain.AgentCommand
+	if err := s.client.do(ctx, "GET", "/api/v1/"+pathEscape(ws)+"/agent-commands/"+pathEscape(commandID), nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (s *agentCommandStore) List(ctx context.Context, ws string, filter store.AgentCommandFilter) ([]*domain.AgentCommand, error) {
+	q := url.Values{}
+	if filter.TargetAgentID != "" {
+		q.Set("target_agent_id", filter.TargetAgentID)
+	}
+	if filter.TargetNodeID != "" {
+		q.Set("target_node_id", filter.TargetNodeID)
+	}
+	if filter.Status != "" {
+		q.Set("status", string(filter.Status))
+	}
+	if filter.AfterCursor > 0 {
+		q.Set("after_cursor", strconv.FormatInt(filter.AfterCursor, 10))
+	}
+	if filter.Limit > 0 {
+		q.Set("limit", strconv.Itoa(filter.Limit))
+	}
+	path := "/api/v1/" + pathEscape(ws) + "/agent-commands"
+	if encoded := q.Encode(); encoded != "" {
+		path += "?" + encoded
+	}
+	var resp struct {
+		AgentCommands []*domain.AgentCommand `json:"agent_commands"`
+	}
+	if err := s.client.do(ctx, "GET", path, nil, &resp); err != nil {
+		return nil, err
+	}
+	if resp.AgentCommands == nil {
+		resp.AgentCommands = []*domain.AgentCommand{}
+	}
+	return resp.AgentCommands, nil
+}
+
+func (s *agentCommandStore) Ack(ctx context.Context, ws, commandID string) (*domain.AgentCommand, error) {
+	var out domain.AgentCommand
+	if err := s.client.do(ctx, "POST", "/api/v1/"+pathEscape(ws)+"/agent-commands/"+pathEscape(commandID)+"/ack", nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (s *agentCommandStore) Complete(ctx context.Context, ws, commandID string, update store.AgentCommandComplete) (*domain.AgentCommand, error) {
+	var out domain.AgentCommand
+	if err := s.client.do(ctx, "POST", "/api/v1/"+pathEscape(ws)+"/agent-commands/"+pathEscape(commandID)+"/complete", update, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}

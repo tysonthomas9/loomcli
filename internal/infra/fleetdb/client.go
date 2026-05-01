@@ -79,6 +79,7 @@ type Client struct {
 	terminals  *terminalSessionStore
 	artifacts  *artifactStore
 	leases     *agentLeaseStore
+	commands   *agentCommandStore
 	roles      *roleStore
 	daemon     *daemonStore
 }
@@ -107,6 +108,7 @@ func New(cfg Config) (*Client, error) {
 	c.terminals = &terminalSessionStore{client: c}
 	c.artifacts = &artifactStore{client: c}
 	c.leases = &agentLeaseStore{client: c}
+	c.commands = &agentCommandStore{client: c}
 	c.roles = &roleStore{client: c}
 	c.daemon = &daemonStore{client: c}
 	return c, nil
@@ -138,6 +140,8 @@ func (c *Client) Artifacts() store.ArtifactStore { return c.artifacts }
 
 // AgentLeases returns the AgentLeaseStore.
 func (c *Client) AgentLeases() store.AgentLeaseStore { return c.leases }
+
+func (c *Client) AgentCommands() store.AgentCommandStore { return c.commands }
 
 // Roles returns the RoleStore.
 func (c *Client) Roles() store.RoleStore { return c.roles }

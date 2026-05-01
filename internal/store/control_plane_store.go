@@ -204,3 +204,35 @@ type AgentLeaseStore interface {
 	Heartbeat(ctx context.Context, workspaceKey, leaseID, token string, ttl time.Duration) (*domain.AgentLease, error)
 	Release(ctx context.Context, workspaceKey, leaseID, token string) (*domain.AgentLease, error)
 }
+
+type AgentCommandCreate struct {
+	WorkspaceKey  string
+	CommandID     string
+	TargetAgentID string
+	TargetNodeID  string
+	SessionID     string
+	Type          string
+	Payload       map[string]string
+}
+
+type AgentCommandFilter struct {
+	TargetAgentID string
+	TargetNodeID  string
+	Status        domain.AgentCommandStatus
+	AfterCursor   int64
+	Limit         int
+}
+
+type AgentCommandComplete struct {
+	Status     domain.AgentCommandStatus `json:"status"`
+	Result     string                    `json:"result,omitempty"`
+	ErrorClass string                    `json:"error_class,omitempty"`
+}
+
+type AgentCommandStore interface {
+	Create(ctx context.Context, in AgentCommandCreate) (*domain.AgentCommand, error)
+	Get(ctx context.Context, workspaceKey, commandID string) (*domain.AgentCommand, error)
+	List(ctx context.Context, workspaceKey string, filter AgentCommandFilter) ([]*domain.AgentCommand, error)
+	Ack(ctx context.Context, workspaceKey, commandID string) (*domain.AgentCommand, error)
+	Complete(ctx context.Context, workspaceKey, commandID string, update AgentCommandComplete) (*domain.AgentCommand, error)
+}
