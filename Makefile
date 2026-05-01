@@ -60,8 +60,8 @@ test-fleetdb-embedded: build
 
 test-fleetdb-supervisor:
 	@echo "Running fleet-db supervisor control-plane gate..."
-	go test -count=1 ./internal/cli ./internal/cli/daemon ./internal/cli/daemon/supervisor \
-	  -run 'Test(AgentIPCClient|IPCServer_|Supervisor(Register|Heartbeats|Mirrors)ControlPlane|BuildCommand_SessionEnvVars)'
+	go test -count=1 ./internal/cli ./internal/cli/data ./internal/cli/agentdef ./internal/cli/daemon ./internal/cli/daemon/supervisor \
+	  -run 'Test(AgentIPCClient|IPCServer_|Data(Ready|ShowClaimClose)_NoServer|ClaimTask_|TaskIDForLifecycle_|Supervisor(Register|Heartbeats|Mirrors)ControlPlane|BuildCommand_SessionEnvVars)'
 
 # Run the UI Parity Test Suite (Playwright; beads :8081 vs fleet :8082).
 # Assumes docker-compose.parity.yml is already up AND seeded — the suite's
