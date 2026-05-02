@@ -11,14 +11,6 @@ import (
 	"testing"
 )
 
-// requireBdBinary skips the test if bd is not on PATH.
-func requireBdBinary(t *testing.T) {
-	t.Helper()
-	if _, err := exec.LookPath("bd"); err != nil {
-		t.Skip("bd binary not found on PATH; skipping E2E test")
-	}
-}
-
 // setupInitTestRepo creates an isolated temp dir with a real git repo.
 func setupInitTestRepo(t *testing.T) string {
 	t.Helper()
@@ -77,7 +69,6 @@ func runLoomInit(t *testing.T, dir string, args ...string) (stdout, stderr strin
 func TestE2E_InitLegacyNonInteractive(t *testing.T) {
 	t.Parallel()
 	loomBinaryPath(t)
-	requireBdBinary(t)
 	dir := setupInitTestRepo(t)
 
 	stdout, _, exitCode := runLoomInit(t, dir, "--yes")
@@ -89,8 +80,8 @@ func TestE2E_InitLegacyNonInteractive(t *testing.T) {
 		"🔧 Loom Setup Wizard",
 		"Step 1: Prerequisites",
 		"✓ git repository detected",
-		"✓ bd (beads CLI) found",
-		"Step 2: Initialize beads",
+		"✓ fleet-db issue backend active",
+		"Step 2: Issue storage",
 		"Step 3: Create worktrees directory",
 		"Step 4: Create agent worktrees",
 		"Setup complete!",
@@ -106,7 +97,6 @@ func TestE2E_InitLegacyNonInteractive(t *testing.T) {
 func TestE2E_InitCreatesWorktrees(t *testing.T) {
 	t.Parallel()
 	loomBinaryPath(t)
-	requireBdBinary(t)
 	dir := setupInitTestRepo(t)
 
 	stdout, _, exitCode := runLoomInit(t, dir, "--yes")
@@ -144,7 +134,6 @@ func TestE2E_InitCreatesWorktrees(t *testing.T) {
 func TestE2E_InitCustomNames(t *testing.T) {
 	t.Parallel()
 	loomBinaryPath(t)
-	requireBdBinary(t)
 	dir := setupInitTestRepo(t)
 
 	stdout, _, exitCode := runLoomInit(t, dir, "--yes", "--names", "spark,ember,flux")
@@ -171,7 +160,6 @@ func TestE2E_InitCustomNames(t *testing.T) {
 func TestE2E_InitIdempotent(t *testing.T) {
 	t.Parallel()
 	loomBinaryPath(t)
-	requireBdBinary(t)
 	dir := setupInitTestRepo(t)
 
 	// First run
@@ -186,8 +174,8 @@ func TestE2E_InitIdempotent(t *testing.T) {
 		t.Fatalf("second run: expected exit 0, got %d\nstdout: %s", exitCode2, stdout2)
 	}
 
-	if !strings.Contains(stdout2, "✓ beads already initialized, skipping...") {
-		t.Errorf("second run should report beads already initialized\nfull output:\n%s", stdout2)
+	if !strings.Contains(stdout2, "Fleet-db issue storage is used") {
+		t.Errorf("second run should report fleet-db issue storage\nfull output:\n%s", stdout2)
 	}
 	if !strings.Contains(stdout2, "already exists") {
 		t.Errorf("second run should report existing directories/worktrees\nfull output:\n%s", stdout2)
@@ -231,7 +219,6 @@ func TestE2E_InitNotGitRepo(t *testing.T) {
 func TestE2E_InitCustomWorktreesDir(t *testing.T) {
 	t.Parallel()
 	loomBinaryPath(t)
-	requireBdBinary(t)
 	dir := setupInitTestRepo(t)
 
 	stdout, _, exitCode := runLoomInit(t, dir, "--yes", "--worktrees-dir", "agents")
@@ -279,7 +266,6 @@ func TestE2E_InitUsesFleetDBStorage(t *testing.T) {
 func TestE2E_InitHooksInstalled(t *testing.T) {
 	t.Parallel()
 	loomBinaryPath(t)
-	requireBdBinary(t)
 	dir := setupInitTestRepo(t)
 
 	stdout, _, exitCode := runLoomInit(t, dir, "--yes")

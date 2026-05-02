@@ -321,7 +321,7 @@ func showSetupSummary(backend string, worktreeNames []string) {
 	fmt.Printf("  Worktrees:  %d (%s)\n", len(worktreeNames), strings.Join(worktreeNames, ", "))
 	fmt.Println("")
 	fmt.Println("Next steps:")
-	fmt.Println("  1. Create tasks:     bd create --title=\"My task\" --type=task")
+	fmt.Println("  1. Create tasks:     loom serve, then use New issue in the UI")
 	fmt.Println("  2. Run planner:      loom plan " + getFirstName(worktreeNames))
 	fmt.Println("  3. Review plans:     loom lead")
 	fmt.Println("  4. Implement:        loom task " + getFirstName(worktreeNames))

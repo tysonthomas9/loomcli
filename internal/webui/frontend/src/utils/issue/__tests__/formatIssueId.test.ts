@@ -16,7 +16,7 @@ describe("formatIssueId", () => {
   });
 
   it("returns short ID as-is when length <= 16", () => {
-    expect(formatIssueId("beads-v3vw")).toBe("beads-v3vw");
+    expect(formatIssueId("issue-v3vw")).toBe("issue-v3vw");
   });
 
   it("returns single character as-is", () => {
@@ -32,7 +32,7 @@ describe("formatIssueId", () => {
   });
 
   it("returns 14-char ID as-is", () => {
-    expect(formatIssueId("beads-abcdefgh")).toBe("beads-abcdefgh");
+    expect(formatIssueId("issue-abcdefgh")).toBe("issue-abcdefgh");
   });
 
   it("returns 16-char ID as-is", () => {

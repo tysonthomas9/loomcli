@@ -29,9 +29,9 @@ loom repo add my-app --url git@github.com:org/my-app.git
 loom role set reviewer --prompt-file ./prompts/reviewer.txt
 loom agentdef add falcon --role reviewer --repo my-app
 
-# 2. Create tasks (bd is included with the loom install)
-bd create --title="Add login feature" --type=feature --priority=2
-bd create --title="Fix checkout crash on empty cart" --type=bug --priority=1
+# 2. Start the UI and create tasks
+loom serve
+# Open http://localhost:8080 and use New issue
 
 # 3. Run agents
 loom plan falcon              # Planning agent creates designs

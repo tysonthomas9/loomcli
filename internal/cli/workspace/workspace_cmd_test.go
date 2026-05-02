@@ -61,14 +61,12 @@ func TestWorkspaceCreate_HappyPath(t *testing.T) {
 	wsCreateBranch = "feat-branch"
 
 	deps, _, _, _, _ := NewTestDeps(t)
-	// Mock execCommand to intercept git worktree add and bd init calls
+	// Mock execCommand to intercept git worktree add calls.
 	mock := NewCommandMock(t, []CommandStub{
 		// git worktree add for frontend
 		{Name: "git", Args: []string{"worktree", "add", filepath.Join(wsDir, "frontend"), "-b", "feat-branch"}, Stdout: ""},
 		// git worktree add for backend
 		{Name: "git", Args: []string{"worktree", "add", filepath.Join(wsDir, "backend"), "-b", "feat-branch"}, Stdout: ""},
-		// bd init in workspace dir
-		{Name: "bd", Args: []string{"init"}, Stdout: ""},
 	})
 	mock.InstallOn(deps)
 
@@ -128,7 +126,6 @@ func TestWorkspaceCreate_DefaultBranchIsName(t *testing.T) {
 	mock := NewCommandMock(t, []CommandStub{
 		// branch should default to workspace name "feature-x"
 		{Name: "git", Args: []string{"worktree", "add", filepath.Join(wsDir, "svc"), "-b", "feature-x"}, Stdout: ""},
-		{Name: "bd", Args: []string{"init"}, Stdout: ""},
 	})
 	mock.InstallOn(deps)
 
@@ -168,7 +165,6 @@ func TestWorkspaceCreate_DefaultWorkspacePath(t *testing.T) {
 	deps, _, _, _, _ := NewTestDeps(t)
 	mock := NewCommandMock(t, []CommandStub{
 		{Name: "git", Args: []string{"worktree", "add", filepath.Join(expectedDir, "app"), "-b", "ws1"}, Stdout: ""},
-		{Name: "bd", Args: []string{"init"}, Stdout: ""},
 	})
 	mock.InstallOn(deps)
 
@@ -774,7 +770,6 @@ func TestWorkspaceCreate_MultipleReposWithSpaces(t *testing.T) {
 	mock := NewCommandMock(t, []CommandStub{
 		{Name: "git", Args: []string{"worktree", "add", filepath.Join(wsDir, "svc1"), "-b", "dev"}, Stdout: ""},
 		{Name: "git", Args: []string{"worktree", "add", filepath.Join(wsDir, "svc2"), "-b", "dev"}, Stdout: ""},
-		{Name: "bd", Args: []string{"init"}, Stdout: ""},
 	})
 	mock.InstallOn(deps)
 
@@ -811,7 +806,6 @@ func TestWorkspaceCreate_SingleRepo(t *testing.T) {
 	deps, _, _, _, _ := NewTestDeps(t)
 	mock := NewCommandMock(t, []CommandStub{
 		{Name: "git", Args: []string{"worktree", "add", filepath.Join(wsDir, "mono"), "-b", "solo"}, Stdout: ""},
-		{Name: "bd", Args: []string{"init"}, Stdout: ""},
 	})
 	mock.InstallOn(deps)
 

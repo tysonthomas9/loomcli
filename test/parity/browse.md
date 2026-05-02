@@ -3,7 +3,7 @@
 Paired with `docker-compose.parity.yml` and `seed.sh`. After seeding,
 open two browser tabs:
 
-- **Beads side:** http://localhost:8081
+- **Reference side:** http://localhost:8081
 - **Fleet side:** http://localhost:8082
 
 Walk through the checklist below, comparing both tabs. For each step,
@@ -22,7 +22,7 @@ Each loom instance exposes its active issue backend via `/api/config`:
 
 ```bash
 curl -s http://localhost:8081/api/config | jq -r '.issue_backend'
-# Expected: "beads"
+# Expected: "reference"
 
 curl -s http://localhost:8082/api/config | jq -r '.issue_backend'
 # Expected: "fleet"
@@ -98,7 +98,7 @@ correctly — file as a webui bug before walking the checklist.
 
 - [ ] Both tabs show 13 issues (3 epics + 10 children) in the correct
       swim lanes (open/in_progress/review/closed)
-- [ ] Drag-drop on beads: move `Add login flow` → in_progress. Reload the
+- [ ] Drag-drop on reference: move `Add login flow` → in_progress. Reload the
       tab. Status persists.
 - [ ] Drag-drop on fleet: same action. Status persists.
 - [ ] Ordering within a lane matches (priority then created_at desc)
@@ -127,16 +127,16 @@ correctly — file as a webui bug before walking the checklist.
 
 ## Settings
 
-- [ ] Backend selector on beads tab shows `beads` as active
+- [ ] Backend selector on reference tab shows `reference` as active
 - [ ] Backend selector on fleet tab shows `fleet` as active
 - [ ] Switching projects works on both (if seeded multiple workspaces)
 
 ## SSE / realtime
 
-- [ ] Create an issue in one beads tab; the second beads tab sees it
+- [ ] Create an issue in one reference tab; the second reference tab sees it
       within 2s
 - [ ] Same test on fleet side
-- [ ] Close an issue in beads; kanban reshuffles live
+- [ ] Close an issue in reference; kanban reshuffles live
 - [ ] Same on fleet
 
 ## Issue detail view
@@ -153,7 +153,7 @@ correctly — file as a webui bug before walking the checklist.
 For each FAIL, capture:
 
 ```
-View | Step | Beads behavior | Fleet behavior | Severity | Owner
+View | Step | Reference behavior | Fleet behavior | Severity | Owner
 ```
 
 Severity buckets:

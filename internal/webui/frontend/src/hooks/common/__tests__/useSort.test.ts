@@ -48,7 +48,7 @@ const issueColumns: ColumnDef<Issue>[] = [
 
 const testIssues: Issue[] = [
   {
-    id: "bd-001",
+    id: "issue-001",
     title: "Alpha",
     priority: 2,
     status: "open",
@@ -56,7 +56,7 @@ const testIssues: Issue[] = [
     updated_at: "2024-01-15T00:00:00Z",
   },
   {
-    id: "bd-002",
+    id: "issue-002",
     title: "beta",
     priority: 0,
     status: "in_progress",
@@ -64,7 +64,7 @@ const testIssues: Issue[] = [
     updated_at: "2024-01-10T00:00:00Z",
   },
   {
-    id: "bd-003",
+    id: "issue-003",
     title: "Charlie",
     priority: 1,
     status: "closed",

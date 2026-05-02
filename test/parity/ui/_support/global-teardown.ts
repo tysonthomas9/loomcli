@@ -11,29 +11,29 @@
 import { writeCoverageReport } from "./coverage";
 
 export default async function globalTeardown(): Promise<void> {
-    const report = await writeCoverageReport();
-    // eslint-disable-next-line no-console
-    console.log(
-        `[global-teardown] coverage: ${report.covered.length} routes covered; ${report.missing.length} missing`,
-    );
-    if (report.missing.length === 0) return;
+  const report = await writeCoverageReport();
+  // eslint-disable-next-line no-console
+  console.log(
+    `[global-teardown] coverage: ${report.covered.length} routes covered; ${report.missing.length} missing`,
+  );
+  if (report.missing.length === 0) return;
 
-    const waived = (process.env.PARITY_COVERAGE_WAIVE ?? "")
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean);
-    const hardMissing = report.missing.filter((r) => !waived.includes(r));
+  const waived = (process.env.PARITY_COVERAGE_WAIVE ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const hardMissing = report.missing.filter((r) => !waived.includes(r));
 
-    // eslint-disable-next-line no-console
-    console.warn(
-        `[global-teardown] MISSING ROUTES (browser-tab observation only — host-side fetch()s aren't tracked):\n` +
-            `  ${report.missing.join(", ")}\n` +
-            `  waived: ${waived.join(", ") || "(none)"}\n` +
-            `  See artifacts/reports/coverage.json`,
+  // eslint-disable-next-line no-console
+  console.warn(
+    `[global-teardown] MISSING ROUTES (browser-tab observation only — host-side fetch()s aren't tracked):\n` +
+      `  ${report.missing.join(", ")}\n` +
+      `  waived: ${waived.join(", ") || "(none)"}\n` +
+      `  See artifacts/reports/coverage.json`,
+  );
+  if (process.env.PARITY_COVERAGE_STRICT === "1" && hardMissing.length > 0) {
+    throw new Error(
+      `coverage gate failed (strict mode): ${hardMissing.length} required route(s) not exercised: ${hardMissing.join(", ")}`,
     );
-    if (process.env.PARITY_COVERAGE_STRICT === "1" && hardMissing.length > 0) {
-        throw new Error(
-            `coverage gate failed (strict mode): ${hardMissing.length} required route(s) not exercised: ${hardMissing.join(", ")}`,
-        );
-    }
+  }
 }

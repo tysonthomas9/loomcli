@@ -41,11 +41,11 @@ describe("IssueCard", () => {
     });
 
     it("renders issue ID (shortened with prefix preserved)", () => {
-      const issue = createTestIssue({ id: "beads-abc123def456" });
+      const issue = createTestIssue({ id: "issue-abc123def456" });
       render(<IssueCard issue={issue} />);
 
-      // Should preserve prefix and truncate: "beads-abc12..."
-      expect(screen.getByText("beads-abc12...")).toBeInTheDocument();
+      // Should preserve prefix and truncate: "issue-abc12..."
+      expect(screen.getByText("issue-abc12...")).toBeInTheDocument();
     });
 
     it("renders short ID as-is", () => {

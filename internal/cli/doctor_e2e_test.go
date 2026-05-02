@@ -320,40 +320,19 @@ func TestE2E_DoctorWorktreeDetection(t *testing.T) {
 	}
 }
 
-func TestE2E_DoctorBeadsInitCheck(t *testing.T) {
-	// Repo WITHOUT .beads/
+func TestE2E_DoctorOmitsLegacyBeadsChecks(t *testing.T) {
 	dir := initTempGitRepo(t)
 
 	stdout, _, _ := runLoomDoctor(t, dir, "--json")
 	output := parseDoctorJSON(t, stdout)
 
-	beadsCheck := findCheck(output, "beads_init")
-	if beadsCheck == nil {
-		// beads_init may not be present if fleetdb is active; skip
-		t.Skip("beads_init check not present (fleetdb may be active)")
+	for _, name := range []string{"bd_cli", "bd_daemon", "bd_socket", "beads_init"} {
+		if check := findCheck(output, name); check != nil {
+			t.Fatalf("legacy beads check %q should not be present: %+v", name, check)
+		}
 	}
-
-	if beadsCheck.Status != "fail" {
-		t.Errorf("expected beads_init to fail without .beads/, got %v: %s",
-			beadsCheck.Status, beadsCheck.Summary)
-	}
-
-	// Now create .beads/ and re-run
-	if err := os.MkdirAll(filepath.Join(dir, ".beads"), 0755); err != nil {
-		t.Fatalf("failed to create .beads: %v", err)
-	}
-
-	stdout2, _, _ := runLoomDoctor(t, dir, "--json")
-	output2 := parseDoctorJSON(t, stdout2)
-
-	beadsCheck2 := findCheck(output2, "beads_init")
-	if beadsCheck2 == nil {
-		t.Fatal("beads_init check disappeared after creating .beads/")
-	}
-
-	if beadsCheck2.Status != "pass" {
-		t.Errorf("expected beads_init to pass with .beads/, got %v: %s",
-			beadsCheck2.Status, beadsCheck2.Summary)
+	if check := findCheck(output, "fleetdb"); check == nil {
+		t.Fatal("fleetdb check should be present")
 	}
 }
 

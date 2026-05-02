@@ -22,12 +22,13 @@ function getContent(isMultiRepo: boolean, hasFiltersActive: boolean) {
     return {
       headline: "No issues in this workspace",
       subtitle:
-        "Create your first issue with bd new or import from your tracker",
+        "Create your first issue with New issue or import from your tracker",
     };
   }
   return {
     headline: "No issues yet",
-    subtitle: "Create your first issue with bd new or import from your tracker",
+    subtitle:
+      "Create your first issue with New issue or import from your tracker",
   };
 }
 

@@ -31,7 +31,7 @@ func checkIssueBackend() CheckResult {
 	return CheckResult{
 		Name:    "issue_backend",
 		Status:  StatusPass,
-		Summary: "Issue backend: beads (bd CLI)",
+		Summary: "Issue backend: fleet-db",
 	}
 }
 

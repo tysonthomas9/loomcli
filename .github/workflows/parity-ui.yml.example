@@ -28,7 +28,7 @@ concurrency:
 
 jobs:
   parity-ui:
-    name: UI Parity (beads vs fleet)
+    name: UI Parity (reference vs fleet)
     runs-on: ubuntu-latest-16core
     timeout-minutes: 45
     # Run the tests inside the Microsoft-pinned Playwright image so screenshots
@@ -72,11 +72,11 @@ jobs:
           for i in $(seq 1 60); do
             BEADS=$(curl -sf http://localhost:8081/api/config | jq -r '.issue_backend // empty' || true)
             FLEET=$(curl -sf http://localhost:8082/api/config | jq -r '.issue_backend // empty' || true)
-            if [ "$BEADS" = "beads" ] && [ "$FLEET" = "fleet" ]; then
+            if [ "$BEADS" = "reference" ] && [ "$FLEET" = "fleet" ]; then
               echo "both healthy"
               exit 0
             fi
-            echo "waiting for healthy ($i/60) beads=$BEADS fleet=$FLEET"
+            echo "waiting for healthy ($i/60) reference=$BEADS fleet=$FLEET"
             sleep 2
           done
           exit 1
@@ -90,7 +90,7 @@ jobs:
       - name: Run UI parity suite
         working-directory: loomcli/test/parity/ui
         env:
-          LOOM_BEADS_URL: http://localhost:8081
+          LOOM_REFERENCE_URL: http://localhost:8081
           LOOM_FLEET_URL: http://localhost:8082
           FLEET_DB_URL: http://localhost:8080
           PARITY_WORKSPACE: PARITY
@@ -111,6 +111,6 @@ jobs:
         working-directory: loomcli
         run: |
           docker compose -f test/parity/docker-compose.parity.yml logs fleet-db > fleet-db-logs.txt 2>&1 || true
-          docker compose -f test/parity/docker-compose.parity.yml logs loom-beads > loom-beads-logs.txt 2>&1 || true
+          docker compose -f test/parity/docker-compose.parity.yml logs loom-reference > loom-reference-logs.txt 2>&1 || true
           docker compose -f test/parity/docker-compose.parity.yml logs loom-fleet > loom-fleet-logs.txt 2>&1 || true
           docker compose -f test/parity/docker-compose.parity.yml down -v

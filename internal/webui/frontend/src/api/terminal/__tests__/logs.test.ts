@@ -48,13 +48,13 @@ describe("logs API", () => {
         response: new Response(),
       } as never);
 
-      const result = await getTaskLogPhases("test-ws-id", "beads-abc");
+      const result = await getTaskLogPhases("test-ws-id", "issue-abc");
 
       expect(result).toEqual(["planning", "implementation"]);
       expect(mockApiGet).toHaveBeenCalledWith(
         "/api/workspaces/{ws}/tasks/{id}/logs",
         {
-          params: { path: { ws: "test-ws-id", id: "beads-abc" } },
+          params: { path: { ws: "test-ws-id", id: "issue-abc" } },
         },
       );
     });
@@ -81,7 +81,7 @@ describe("logs API", () => {
         }),
       } as never);
 
-      await expect(getTaskLogPhases("test-ws-id", "beads-abc")).rejects.toThrow(
+      await expect(getTaskLogPhases("test-ws-id", "issue-abc")).rejects.toThrow(
         ApiError,
       );
     });
@@ -99,7 +99,7 @@ describe("logs API", () => {
 
       const content = await getTaskLogContent(
         "test-ws-id",
-        "beads-abc",
+        "issue-abc",
         "planning",
         25,
       );
@@ -108,7 +108,7 @@ describe("logs API", () => {
         "/api/workspaces/{ws}/tasks/{id}/logs/{phase}",
         {
           params: {
-            path: { ws: "test-ws-id", id: "beads-abc", phase: "planning" },
+            path: { ws: "test-ws-id", id: "issue-abc", phase: "planning" },
             query: { lines: 25 },
           },
         },
@@ -141,7 +141,7 @@ describe("logs API", () => {
       } as never);
 
       await expect(
-        getTaskLogContent("test-ws-id", "beads-abc", "planning"),
+        getTaskLogContent("test-ws-id", "issue-abc", "planning"),
       ).rejects.toThrow(ApiError);
     });
 
@@ -156,7 +156,7 @@ describe("logs API", () => {
 
       const content = await getTaskLogContent(
         "test-ws-id",
-        "beads-abc",
+        "issue-abc",
         "planning",
       );
       expect(content).toEqual({ lines: [], lineCount: 0 });

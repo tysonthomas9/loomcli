@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -152,57 +151,6 @@ func TestCheckGitRepo(t *testing.T) {
 		result := checkGitRepo(deps)
 		if result.Status != StatusWarn {
 			t.Errorf("expected warn for worktree, got %v: %s", result.Status, result.Summary)
-		}
-	})
-}
-
-func TestCheckBdDaemon(t *testing.T) {
-	t.Parallel()
-
-	t.Run("bd not on PATH", func(t *testing.T) {
-		t.Parallel()
-		deps, _, _, _, _ := NewTestDeps(t)
-		deps.LookPath = func(string) (string, error) {
-			return "", exec.ErrNotFound
-		}
-
-		result := checkBdDaemon(deps)
-		if result.Status != StatusFail {
-			t.Errorf("expected fail, got %v: %s", result.Status, result.Summary)
-		}
-		if !strings.Contains(result.Summary, "bd not found") {
-			t.Errorf("expected summary to contain 'bd not found', got %q", result.Summary)
-		}
-	})
-
-	t.Run("daemon running", func(t *testing.T) {
-		t.Parallel()
-		deps, _, _, _, _ := NewTestDeps(t)
-		deps.LookPath = func(string) (string, error) { return "/usr/bin/bd", nil }
-		deps.Exec = &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
-			if name == "bd" && len(args) >= 2 && args[1] == "status" {
-				return CommandResult{Stdout: `{"status":"running","pid":1234}`}
-			}
-			return CommandResult{Err: fmt.Errorf("unexpected")}
-		}}
-
-		result := checkBdDaemon(deps)
-		if result.Status != StatusPass {
-			t.Errorf("expected pass, got %v: %s", result.Status, result.Summary)
-		}
-	})
-
-	t.Run("daemon not running", func(t *testing.T) {
-		t.Parallel()
-		deps, _, _, _, _ := NewTestDeps(t)
-		deps.LookPath = func(string) (string, error) { return "/usr/bin/bd", nil }
-		deps.Exec = &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
-			return CommandResult{Err: fmt.Errorf("not running")}
-		}}
-
-		result := checkBdDaemon(deps)
-		if result.Status != StatusWarn {
-			t.Errorf("expected warn, got %v", result.Status)
 		}
 	})
 }
@@ -373,36 +321,6 @@ func TestCheckStaleLocks(t *testing.T) {
 		}
 		if result.Status != StatusWarn {
 			t.Errorf("expected warn for stale lock, got %v: %s", result.Status, result.Summary)
-		}
-	})
-}
-
-func TestCheckBeadsInit(t *testing.T) {
-	t.Run("beads initialized", func(t *testing.T) {
-		dir := t.TempDir()
-		defer ResetBeadsDirCache()
-		ResetBeadsDirCache()
-		setupWorkspaceConfig(t, &LoomConfig{DefaultWorkspace: "test", Workspaces: map[string]WorkspaceConfig{"test": {Path: dir}}})
-
-		if err := os.MkdirAll(filepath.Join(dir, ".beads"), 0755); err != nil {
-			t.Fatal(err)
-		}
-
-		result := checkBeadsInit()
-		if result.Status != StatusPass {
-			t.Errorf("expected pass, got %v: %s", result.Status, result.Summary)
-		}
-	})
-
-	t.Run("beads not initialized", func(t *testing.T) {
-		dir := t.TempDir()
-		defer ResetBeadsDirCache()
-		ResetBeadsDirCache()
-		setupWorkspaceConfig(t, &LoomConfig{DefaultWorkspace: "test", Workspaces: map[string]WorkspaceConfig{"test": {Path: dir}}})
-
-		result := checkBeadsInit()
-		if result.Status != StatusFail {
-			t.Errorf("expected fail, got %v: %s", result.Status, result.Summary)
 		}
 	})
 }

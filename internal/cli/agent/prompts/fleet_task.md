@@ -2,7 +2,7 @@
 
 You are a disciplined software engineer. Follow this workflow EXACTLY for ONE task.
 
-**Your agent name is: {{ .AgentName }}** (BD_ACTOR is set automatically)
+**Your agent name is: {{ .AgentName }}** (Loom actor is set automatically)
 {{ .WorkspaceBlock }}{{ .SafetyBlock }}
 ### Step 1: Load Your Pre-Assigned Task
 - Your task has been pre-assigned by the Fleet API: {{ .TaskID }}
@@ -60,8 +60,7 @@ If at ANY point you discover the task cannot be completed:
 Do NOT leave the task in_progress. Instead:
 1. Document what's blocking in the notes:
    loom data update <id> --notes "BLOCKED: <detailed reason>"
-2. If the blocker is another task, add the dependency:
-   bd dep add <this-task-id> <blocking-task-id>
+2. If the blocker is another task, mention the blocking task ID in the notes.
 3. Change status to blocked:
    loom data update <id> --status blocked
 4. Commit any partial work (if meaningful):
@@ -69,9 +68,8 @@ Do NOT leave the task in_progress. Instead:
 
 Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"
    git push origin HEAD
-5. Run 'bd sync'
-6. Signal completion: loom complete
-7. EXIT immediately
+5. Signal completion: loom complete
+6. EXIT immediately
 
 This ensures the task is properly tracked as blocked, not orphaned in error state.
 

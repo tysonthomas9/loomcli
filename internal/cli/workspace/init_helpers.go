@@ -321,14 +321,14 @@ func showSummary(worktreesDir string, names []string) {
 	fmt.Println("Setup complete! 🎉")
 	fmt.Println("")
 	fmt.Println("Directory structure:")
-	fmt.Println("  .beads/           Issue database")
+	fmt.Println("  .loom/            Runtime state")
 	fmt.Printf("  %s/\n", worktreesDir)
 	for _, name := range names {
 		fmt.Printf("    %s/         Agent workspace (branch: %s)\n", name, name)
 	}
 	fmt.Println("")
 	fmt.Println("Next steps:")
-	fmt.Println("  1. Create tasks:     bd create --title=\"My first task\" --type=task")
+	fmt.Println("  1. Create tasks:     loom serve, then use New issue in the UI")
 	fmt.Println("  2. Run planner:      loom plan " + getFirstName(names))
 	fmt.Println("  3. Review plans:     loom lead")
 	fmt.Println("  4. Implement:        loom task " + getFirstName(names))

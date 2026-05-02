@@ -158,7 +158,7 @@ func resetTask(deps *cli.Deps, taskID string) {
 		fmt.Printf("Warning: failed to reset task: %v\n", err)
 		fmt.Println("")
 		fmt.Println("You may need to manually reset the task:")
-		fmt.Printf("  bd update %s --status open --assignee \"\"\n", taskID)
+		fmt.Printf("  loom data update %s --status open --assignee \"\"\n", taskID)
 	} else {
 		fmt.Printf("✓ Task %s reset to open\n", taskID)
 	}

@@ -1,10 +1,10 @@
 # Caddyfile — serves the prebuilt frontend SPA + proxies API calls to the
-# co-located loom backend. One Caddy instance per backend (beads/fleet) so
+# co-located loom backend. One Caddy instance per backend (reference/fleet) so
 # the browser sees a single origin and tests don't have to fight CORS.
 #
 # Two virtual hosts share one Caddy process via SRV-style env vars:
 #   FRONTEND_PORT — caddy listen port (set in compose)
-#   LOOM_UPSTREAM — http://loom-fleet:8080 or http://loom-beads:8080
+#   LOOM_UPSTREAM — http://loom-fleet:8080 or http://loom-reference:8080
 #
 # `handle` is mutually exclusive (Caddy short-circuits on the first match),
 # which is what we want — once /api/* matches, the static file_server

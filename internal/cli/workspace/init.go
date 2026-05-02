@@ -29,8 +29,8 @@ var initCmd = &cobra.Command{
 	Long: `Initialize loom with a guided, interactive setup experience.
 
 This command helps new users set up loom agents:
-  - Checks prerequisites (beads CLI, git)
-  - Initializes beads if not already done
+  - Checks prerequisites (git, fleet-db local mode)
+  - Confirms fleet-db issue storage
   - Creates worktrees for agents (legacy mode)
   - Or validates workspace setup (workspace mode)
 
@@ -78,8 +78,8 @@ func runInit(cmd *cobra.Command, args []string) {
 	}
 	fmt.Println("")
 
-	// Step 2: Initialize beads
-	fmt.Println("Step 2: Initialize beads")
+	// Step 2: Confirm issue storage
+	fmt.Println("Step 2: Issue storage")
 	if !initBeads(deps) {
 		os.Exit(1)
 	}
@@ -175,13 +175,13 @@ func showWorkspaceSummary(ws config.WorkspaceConfig) {
 	fmt.Println("")
 	fmt.Println("Directory structure:")
 	fmt.Printf("  %s/\n", ws.Path)
-	fmt.Println("    .beads/         Shared issue database")
+	fmt.Println("    .loom/          Runtime state")
 	for _, repo := range ws.Repos {
 		fmt.Printf("    %s/         Repo worktree\n", repo.Name)
 	}
 	fmt.Println("")
 	fmt.Println("Next steps:")
-	fmt.Println("  1. Create tasks:     bd create --title=\"My task\" --type=task")
+	fmt.Println("  1. Create tasks:     loom serve, then use New issue in the UI")
 	if len(ws.Repos) > 0 {
 		fmt.Printf("  2. Run agent:        loom agent %s\n", ws.Repos[0].Name)
 	}

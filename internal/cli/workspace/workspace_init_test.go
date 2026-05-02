@@ -2,7 +2,6 @@ package workspace
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,17 +13,7 @@ import (
 
 func TestEnsureDaemonForWorkspace_ContextCancelled(t *testing.T) {
 	t.Parallel()
-	deps, _, execR, _, _ := NewTestDeps(t)
-	// Mock: daemon start succeeds but status never reports running.
-	execR.RunFunc = func(dir, name string, args ...string) CommandResult {
-		if len(args) >= 2 && args[1] == "start" {
-			return CommandResult{}
-		}
-		if len(args) >= 2 && args[1] == "status" {
-			return CommandResult{Err: fmt.Errorf("not running")}
-		}
-		return CommandResult{}
-	}
+	deps, _, _, _, _ := NewTestDeps(t)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // cancel immediately
@@ -43,17 +32,7 @@ func TestEnsureDaemonForWorkspace_ContextCancelled(t *testing.T) {
 
 func TestEnsureDaemonForWorkspace_ContextDeadlineExceeded(t *testing.T) {
 	t.Parallel()
-	deps, _, execR, _, _ := NewTestDeps(t)
-	// Mock: daemon start succeeds but status never reports running.
-	execR.RunFunc = func(dir, name string, args ...string) CommandResult {
-		if len(args) >= 2 && args[1] == "start" {
-			return CommandResult{}
-		}
-		if len(args) >= 2 && args[1] == "status" {
-			return CommandResult{Err: fmt.Errorf("not running")}
-		}
-		return CommandResult{}
-	}
+	deps, _, _, _, _ := NewTestDeps(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
 	defer cancel()
@@ -69,26 +48,21 @@ func TestEnsureDaemonForWorkspace_ContextDeadlineExceeded(t *testing.T) {
 	}
 }
 
-func TestEnsureDaemonForWorkspace_TimeoutFallback(t *testing.T) {
+func TestEnsureDaemonForWorkspace_FleetDBDoesNotShellOut(t *testing.T) {
 	t.Parallel()
 	deps, _, execR, _, _ := NewTestDeps(t)
-	// Mock: daemon start succeeds but status never reports running.
+	called := false
 	execR.RunFunc = func(dir, name string, args ...string) CommandResult {
-		if len(args) >= 2 && args[1] == "start" {
-			return CommandResult{}
-		}
-		if len(args) >= 2 && args[1] == "status" {
-			return CommandResult{Err: fmt.Errorf("not running")}
-		}
+		called = true
 		return CommandResult{}
 	}
 
 	err := EnsureDaemonForWorkspace(deps, context.Background(), t.TempDir(), 200*time.Millisecond)
-	if err == nil {
-		t.Fatal("expected timeout error")
+	if err != nil {
+		t.Fatalf("EnsureDaemonForWorkspace() error = %v", err)
 	}
-	if !strings.Contains(err.Error(), "did not become ready") {
-		t.Errorf("error should mention 'did not become ready', got: %v", err)
+	if called {
+		t.Error("EnsureDaemonForWorkspace should not shell out in FleetDB mode")
 	}
 }
 
@@ -109,12 +83,9 @@ func TestEnsureCurrentProjectRegistered_GeneratesUUID(t *testing.T) {
 	if err := os.MkdirAll(wsDir, 0755); err != nil {
 		t.Fatalf("MkdirAll() error = %v", err)
 	}
-	// Create .git and .beads so the guard allows registration.
+	// Create .git so the guard allows registration.
 	if err := os.MkdirAll(filepath.Join(wsDir, ".git"), 0755); err != nil {
 		t.Fatalf("MkdirAll(.git) error = %v", err)
-	}
-	if err := os.MkdirAll(filepath.Join(wsDir, ".beads"), 0755); err != nil {
-		t.Fatalf("MkdirAll(.beads) error = %v", err)
 	}
 
 	// Change to the workspace directory so ensureCurrentProjectRegistered uses it.
@@ -158,12 +129,9 @@ func TestEnsureCurrentProjectRegistered_SkipsExistingByPath(t *testing.T) {
 	if err := os.MkdirAll(wsDir, 0755); err != nil {
 		t.Fatalf("MkdirAll() error = %v", err)
 	}
-	// Create .git and .beads so the guard allows registration.
+	// Create .git so the guard allows registration.
 	if err := os.MkdirAll(filepath.Join(wsDir, ".git"), 0755); err != nil {
 		t.Fatalf("MkdirAll(.git) error = %v", err)
-	}
-	if err := os.MkdirAll(filepath.Join(wsDir, ".beads"), 0755); err != nil {
-		t.Fatalf("MkdirAll(.beads) error = %v", err)
 	}
 
 	// Resolve symlinks (macOS /var -> /private/var) so the path matches os.Getwd().
@@ -246,30 +214,20 @@ func TestEnsureCurrentProjectRegistered_RefusesToSaveOnParseError(t *testing.T) 
 	}
 }
 
-func TestStopDaemonForWorkspace_CallsBdDaemonStop(t *testing.T) {
+func TestStopDaemonForWorkspace_FleetDBDoesNotShellOut(t *testing.T) {
 	t.Parallel()
 	deps, _, execR, _, _ := NewTestDeps(t)
-	var calledDir, calledName string
-	var calledArgs []string
+	called := false
 	execR.RunFunc = func(dir, name string, args ...string) CommandResult {
-		calledDir = dir
-		calledName = name
-		calledArgs = args
+		called = true
 		return CommandResult{}
 	}
 
 	wsDir := t.TempDir()
 	StopDaemonForWorkspace(deps, wsDir)
 
-	if calledDir != wsDir {
-		t.Errorf("dir = %q, want %q", calledDir, wsDir)
-	}
-	if calledName != "bd" {
-		t.Errorf("name = %q, want %q", calledName, "bd")
-	}
-	wantArgs := []string{"daemon", "stop"}
-	if len(calledArgs) != len(wantArgs) || calledArgs[0] != wantArgs[0] || calledArgs[1] != wantArgs[1] {
-		t.Errorf("args = %v, want %v", calledArgs, wantArgs)
+	if called {
+		t.Error("StopDaemonForWorkspace should not shell out in FleetDB mode")
 	}
 }
 
@@ -277,7 +235,8 @@ func TestStopDaemonForWorkspace_ErrorIsNonFatal(t *testing.T) {
 	t.Parallel()
 	deps, _, execR, _, _ := NewTestDeps(t)
 	execR.RunFunc = func(dir, name string, args ...string) CommandResult {
-		return CommandResult{Err: fmt.Errorf("daemon not running")}
+		t.Fatalf("StopDaemonForWorkspace should not shell out, got %s %v", name, args)
+		return CommandResult{}
 	}
 
 	// Should not panic or crash

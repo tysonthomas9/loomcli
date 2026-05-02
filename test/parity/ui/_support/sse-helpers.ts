@@ -20,10 +20,10 @@
  * Usage:
  *   await waitForSseReady(observer, "Cache invalidation bug");
  *   await abortSseRoute(observerCtx);
- *   await postIssueViaNode(BEADS_URL, wsId, "gap-beads-1234");
+ *   await postIssueViaNode(BEADS_URL, wsId, "gap-reference-1234");
  *   await restoreSseRoute(observerCtx);
- *   const ms = await assertCatchupArrived(observer, "gap-beads-1234");
- *   await assertNoDuplicates(BEADS_URL, wsId, "gap-beads-1234");
+ *   const ms = await assertCatchupArrived(observer, "gap-reference-1234");
+ *   await assertNoDuplicates(BEADS_URL, wsId, "gap-reference-1234");
  */
 import type { BrowserContext, Page } from "@playwright/test";
 
@@ -46,11 +46,11 @@ const SSE_STREAM_GLOB = "**/workspaces/*/events*";
  * received either the catch-up replay or the fresh push.
  */
 export async function waitForSseReady(
-    page: Page,
-    knownTitle: string,
-    timeout: number = 10_000,
+  page: Page,
+  knownTitle: string,
+  timeout: number = 10_000,
 ): Promise<void> {
-    await page.waitForSelector(`text=${knownTitle}`, { timeout });
+  await page.waitForSelector(`text=${knownTitle}`, { timeout });
 }
 
 /**
@@ -60,13 +60,13 @@ export async function waitForSseReady(
  * registered exactly once per context).
  *
  * EventSource will see the connection drop, fire `onerror`, and the SPA's
- * BeadsSSEClient will start its exponential-backoff reconnect loop
+ * ReferenceSSEClient will start its exponential-backoff reconnect loop
  * (1s → 2s → 4s … capped at 30s). Each retry hits the route again and
  * gets aborted, so the observer stays disconnected until restoreSseRoute
  * is called.
  */
 export async function abortSseRoute(ctx: BrowserContext): Promise<void> {
-    await ctx.route(SSE_STREAM_GLOB, (route) => route.abort());
+  await ctx.route(SSE_STREAM_GLOB, (route) => route.abort());
 }
 
 /**
@@ -79,7 +79,7 @@ export async function abortSseRoute(ctx: BrowserContext): Promise<void> {
  * in Playwright.
  */
 export async function restoreSseRoute(ctx: BrowserContext): Promise<void> {
-    await ctx.unroute(SSE_STREAM_GLOB);
+  await ctx.unroute(SSE_STREAM_GLOB);
 }
 
 /**
@@ -93,33 +93,32 @@ export async function restoreSseRoute(ctx: BrowserContext): Promise<void> {
  * the body wasn't shaped like the rest of loom's create responses.
  */
 export async function postIssueViaNode(
-    baseUrl: string,
-    wsId: string,
-    title: string,
+  baseUrl: string,
+  wsId: string,
+  title: string,
 ): Promise<string> {
-    const r = await fetch(`${baseUrl}/api/workspaces/${wsId}/issues`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-            title,
-            issue_type: "task",
-            priority: 3,
-        }),
-    });
-    if (!r.ok) {
-        throw new Error(
-            `postIssueViaNode(${baseUrl}, ${wsId}, ${title}): HTTP ${r.status}`,
-        );
-    }
-    const j = await r.json().catch(() => null);
-    const id =
-        j?.data?.id ?? j?.id ?? j?.data?.ID ?? j?.ID;
-    if (!id) {
-        throw new Error(
-            `postIssueViaNode(${baseUrl}, ${wsId}, ${title}): response missing id; body=${JSON.stringify(j)?.slice(0, 200)}`,
-        );
-    }
-    return String(id);
+  const r = await fetch(`${baseUrl}/api/workspaces/${wsId}/issues`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      title,
+      issue_type: "task",
+      priority: 3,
+    }),
+  });
+  if (!r.ok) {
+    throw new Error(
+      `postIssueViaNode(${baseUrl}, ${wsId}, ${title}): HTTP ${r.status}`,
+    );
+  }
+  const j = await r.json().catch(() => null);
+  const id = j?.data?.id ?? j?.id ?? j?.data?.ID ?? j?.ID;
+  if (!id) {
+    throw new Error(
+      `postIssueViaNode(${baseUrl}, ${wsId}, ${title}): response missing id; body=${JSON.stringify(j)?.slice(0, 200)}`,
+    );
+  }
+  return String(id);
 }
 
 /**
@@ -134,13 +133,13 @@ export async function postIssueViaNode(
  * ignoring the `?since=` query param or sendCatchUp dropping mutations.
  */
 export async function assertCatchupArrived(
-    obs: Page,
-    title: string,
-    timeoutMs: number = 15_000,
+  obs: Page,
+  title: string,
+  timeoutMs: number = 15_000,
 ): Promise<number> {
-    const t0 = Date.now();
-    await obs.waitForSelector(`text=${title}`, { timeout: timeoutMs });
-    return Date.now() - t0;
+  const t0 = Date.now();
+  await obs.waitForSelector(`text=${title}`, { timeout: timeoutMs });
+  return Date.now() - t0;
 }
 
 /**
@@ -155,22 +154,22 @@ export async function assertCatchupArrived(
  * directly to surface it.
  */
 export async function assertNoDuplicates(
-    baseUrl: string,
-    wsId: string,
-    title: string,
+  baseUrl: string,
+  wsId: string,
+  title: string,
 ): Promise<void> {
-    const r = await fetch(`${baseUrl}/api/workspaces/${wsId}/issues`);
-    if (!r.ok) {
-        throw new Error(
-            `assertNoDuplicates(${baseUrl}, ${wsId}, ${title}): list HTTP ${r.status}`,
-        );
-    }
-    const j = await r.json().catch(() => null);
-    const issues: any[] = j?.data ?? [];
-    const matches = issues.filter((i: any) => i?.title === title);
-    if (matches.length !== 1) {
-        throw new Error(
-            `assertNoDuplicates(${baseUrl}, ${wsId}, ${title}): expected exactly 1 match, got ${matches.length}; ids=[${matches.map((m) => m.id).join(", ")}]`,
-        );
-    }
+  const r = await fetch(`${baseUrl}/api/workspaces/${wsId}/issues`);
+  if (!r.ok) {
+    throw new Error(
+      `assertNoDuplicates(${baseUrl}, ${wsId}, ${title}): list HTTP ${r.status}`,
+    );
+  }
+  const j = await r.json().catch(() => null);
+  const issues: any[] = j?.data ?? [];
+  const matches = issues.filter((i: any) => i?.title === title);
+  if (matches.length !== 1) {
+    throw new Error(
+      `assertNoDuplicates(${baseUrl}, ${wsId}, ${title}): expected exactly 1 match, got ${matches.length}; ids=[${matches.map((m) => m.id).join(", ")}]`,
+    );
+  }
 }

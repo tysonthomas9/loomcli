@@ -133,7 +133,7 @@ describe("useEventProvider", () => {
   });
 
   describe("Connection lifecycle", () => {
-    it("creates exactly one BeadsSSEClient on mount", async () => {
+    it("creates exactly one WorkspaceSSEClient on mount", async () => {
       render(
         <EventProvider>
           <div>child</div>

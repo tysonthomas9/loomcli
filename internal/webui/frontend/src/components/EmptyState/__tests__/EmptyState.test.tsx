@@ -61,11 +61,11 @@ describe("EmptyState", () => {
       expect(screen.getByText(/loom init/)).toBeInTheDocument();
     });
 
-    it("no-issues variant includes bd create guidance", () => {
+    it("no-issues variant includes New issue guidance", () => {
       render(<EmptyState variant="no-issues" />);
 
-      expect(screen.getByText(/bd create/)).toBeInTheDocument();
-      expect(screen.getByText(/bd ready/)).toBeInTheDocument();
+      expect(screen.getByText(/New issue/)).toBeInTheDocument();
+      expect(screen.getByText(/loom data ready/)).toBeInTheDocument();
     });
 
     it("no-agents variant includes loom spawn guidance", () => {

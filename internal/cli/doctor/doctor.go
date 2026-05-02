@@ -137,13 +137,8 @@ func collectDoctorChecks(cmd *cobra.Command) []checkFunc {
 	}
 	if cli.IsFleetActive() {
 		checks = append(checks, checkFleet)
-	} else if cli.IsFleetDBActive() {
-		checks = append(checks, checkFleetDB)
 	} else {
-		checks = append(checks,
-			func() CheckResult { return checkBdCLI(deps) },
-			func() CheckResult { return checkBdDaemon(deps) },
-			checkBdSocket, checkBeadsInit)
+		checks = append(checks, checkFleetDB)
 	}
 	checks = append(checks, checkBackendCLI, checkProjectConfig, checkGlobalConfig,
 		checkWorktrees, checkStaleLocks, checkStaleSignalFiles, checkStaleSessionRecords,

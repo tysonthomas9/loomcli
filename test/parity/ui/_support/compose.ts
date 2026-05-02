@@ -18,38 +18,38 @@ import { execSync } from "node:child_process";
 let cached: string | null = null;
 
 function probe(): string {
-    const override = process.env.PARITY_COMPOSE?.toLowerCase().trim();
-    if (override === "docker" || override === "podman") {
-        return `${override} compose`;
+  const override = process.env.PARITY_COMPOSE?.toLowerCase().trim();
+  if (override === "docker" || override === "podman") {
+    return `${override} compose`;
+  }
+  // Try podman first (this repo's default) — falls through to docker on
+  // hosts where podman isn't installed.
+  for (const tool of ["podman", "docker"]) {
+    try {
+      execSync(`${tool} compose version`, {
+        stdio: "ignore",
+        timeout: 3000,
+      });
+      return `${tool} compose`;
+    } catch {
+      // try next
     }
-    // Try podman first (this repo's default) — falls through to docker on
-    // hosts where podman isn't installed.
-    for (const tool of ["podman", "docker"]) {
-        try {
-            execSync(`${tool} compose version`, {
-                stdio: "ignore",
-                timeout: 3000,
-            });
-            return `${tool} compose`;
-        } catch {
-            // try next
-        }
-    }
-    // Last resort: `docker compose` even if probing failed — let the
-    // caller surface a clean error rather than swallow an EnoEnt here.
-    return "docker compose";
+  }
+  // Last resort: `docker compose` even if probing failed — let the
+  // caller surface a clean error rather than swallow an EnoEnt here.
+  return "docker compose";
 }
 
 export function composeCmd(): string {
-    if (cached === null) cached = probe();
-    return cached;
+  if (cached === null) cached = probe();
+  return cached;
 }
 
 export type Runtime = "podman" | "docker";
 
 /** Container runtime ("podman" | "docker"), independent of compose plugin. */
 export function composeRuntime(): Runtime {
-    return composeCmd().split(/\s+/)[0] as Runtime;
+  return composeCmd().split(/\s+/)[0] as Runtime;
 }
 
 /** docker-compose `name:` field, derived from `-p` flag at parity-stack boot. */
@@ -73,5 +73,5 @@ export const PARITY_CONTAINER_PREFIX = `${COMPOSE_PROJECT}_`;
  * execSync without shell-quoting concerns; the file path is fixed.
  */
 export function composeRun(rest: string): string {
-    return `${composeCmd()} -f test/parity/docker-compose.parity.yml ${rest}`;
+  return `${composeCmd()} -f test/parity/docker-compose.parity.yml ${rest}`;
 }

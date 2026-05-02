@@ -259,22 +259,8 @@ func TestGenerateLeadPrompt(t *testing.T) {
 		}
 	}
 
-	// Check for beads commands
-	beadsCommands := []string{
-		"bd stats",
-		"bd list",
-		"bd show",
-		"bd create",
-		"bd update",
-		"bd close",
-		"bd sync",
-		"bd blocked",
-	}
-
-	for _, cmd := range beadsCommands {
-		if !strings.Contains(prompt, cmd) {
-			t.Errorf("prompt missing beads command: %q", cmd)
-		}
+	if strings.Contains(prompt, "bd ") {
+		t.Errorf("prompt should not include legacy bd commands:\n%s", prompt)
 	}
 }
 
@@ -337,7 +323,7 @@ func TestGeneratePlanningPrompt_Workspace(t *testing.T) {
 		"develop",
 		"backend",
 		"./services/backend",
-		"Run `bd` commands from the workspace root",
+		"Run `loom data` commands from the workspace root",
 		"Run git commands (git status, git add, git commit, git push) from the specific repo subdirectory",
 		// Standard planning steps must still be present
 		"Step 1:",
@@ -373,7 +359,7 @@ func TestGenerateTaskPrompt_Workspace(t *testing.T) {
 		"./api",
 		"web",
 		"./web",
-		"Run `bd` commands from the workspace root",
+		"Run `loom data` commands from the workspace root",
 		"Run git commands (git status, git add, git commit, git push) from the specific repo subdirectory",
 		"Run build/test commands from the specific repo subdirectory",
 		"Changes may span multiple repos",
@@ -746,7 +732,7 @@ func TestGenerateFleetPlanningPrompt_Workspace(t *testing.T) {
 		"develop",
 		"backend",
 		"./services/backend",
-		"Run `bd` commands from the workspace root",
+		"Run `loom data` commands from the workspace root",
 		// Standard planning steps must still be present
 		"Step 1:",
 		"Step 2:",
@@ -783,7 +769,7 @@ func TestGenerateFleetTaskPrompt_Workspace(t *testing.T) {
 		"./api",
 		"web",
 		"./web",
-		"Run `bd` commands from the workspace root",
+		"Run `loom data` commands from the workspace root",
 		"Run build/test commands from the specific repo subdirectory",
 		"Changes may span multiple repos",
 		// Standard task steps must still be present
@@ -996,8 +982,8 @@ func TestRenderPrompt_EmbeddedTemplate(t *testing.T) {
 		name string
 		data promptTemplateData
 	}{
-		{"planning", promptTemplateData{AgentName: "test", BdReadyJSON: "bd ready --limit 200 --json", BdReadyFallback: "bd ready --limit 200"}},
-		{"task", promptTemplateData{AgentName: "test", BdReadyJSON: "bd ready --limit 200 --json", BdReadyFallback: "bd ready --limit 200", TestStep: "test step", ReviewStep: "review step"}},
+		{"planning", promptTemplateData{AgentName: "test", BdReadyJSON: "loom data ready --limit 200 --output json", BdReadyFallback: "loom data ready --limit 200"}},
+		{"task", promptTemplateData{AgentName: "test", BdReadyJSON: "loom data ready --limit 200 --output json", BdReadyFallback: "loom data ready --limit 200", TestStep: "test step", ReviewStep: "review step"}},
 		{"fleet_planning", promptTemplateData{AgentName: "test", TaskID: "bd-test.1"}},
 		{"fleet_task", promptTemplateData{AgentName: "test", TaskID: "bd-test.1", TestStep: "test step", ReviewStep: "review step"}},
 		{"conflict_resolution", promptTemplateData{SourceBranch: "feature", TargetBranch: "main", ConflictList: "file.go", PushRef: "main"}},
@@ -1098,8 +1084,8 @@ func TestAllTemplatesRender(t *testing.T) {
 		WorkspaceBlock:  "workspace block content",
 		EpicScope:       "epic scope content",
 		SafetyBlock:     "safety block content",
-		BdReadyJSON:     "bd ready --parent epic-123 --limit 200 --json",
-		BdReadyFallback: "bd ready --parent epic-123 --limit 200",
+		BdReadyJSON:     "loom data ready --parent epic-123 --limit 200 --output json",
+		BdReadyFallback: "loom data ready --parent epic-123 --limit 200",
 		TaskID:          "task-456",
 		TestStep:        "### Step 5: Write Tests\n- test content",
 		ReviewStep:      "### Step 6: Code Review\n- review content",

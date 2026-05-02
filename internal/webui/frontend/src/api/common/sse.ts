@@ -1,5 +1,5 @@
 /**
- * SSE (Server-Sent Events) client for real-time mutation events from the beads server.
+ * SSE (Server-Sent Events) client for real-time mutation events from the workspace event server.
  * Provides injectable token exchange, typed event callbacks, and unified manual reconnect
  * with configurable exponential backoff.
  */
@@ -43,7 +43,7 @@ import type { MutationPayload } from "@/types/workspace";
 export type { MutationType, MutationPayload } from "@/types/workspace";
 
 /**
- * Options for the BeadsSSEClient.
+ * Options for the WorkspaceSSEClient.
  */
 export interface SSEClientOptions {
   /** Called when a mutation event is received */
@@ -65,10 +65,10 @@ export interface SSEClientOptions {
 }
 
 /**
- * SSE client for beads mutation events.
+ * SSE client for workspace mutation events.
  * Uses unified manual reconnect with configurable exponential backoff.
  */
-export class BeadsSSEClient {
+export class WorkspaceSSEClient {
   private eventSource: EventSource | null = null;
   private state: ConnectionState = "disconnected";
   private reconnectAttempts = 0;

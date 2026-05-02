@@ -1,5 +1,5 @@
 # docker-compose.parity.yml — fleet-db regression stack for manual and
-# automated parity validation after beads removal.
+# automated parity validation after reference removal.
 #
 # Brings up:
 #   - redis         shared Redis for fleet-db (port 6379, host not exposed)
@@ -98,8 +98,8 @@ services:
       # being explicit avoids a surprise if someone unsets the agent name.
       #
       LOOM_FLEET_ACTOR: parity-harness@fixture.local
-      # Fail fast if loom boots thinking it has a local beads backend.
-      # Any fallback to an embedded beads path in fleet mode should surface
+      # Fail fast if loom boots thinking it has a local reference backend.
+      # Any fallback to an embedded reference path in fleet mode should surface
       # as a startup error, not a silent re-route.
       LOOM_FLEET_REQUIRED: "1"
     command:

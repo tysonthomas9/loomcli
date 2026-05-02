@@ -1022,8 +1022,11 @@ func TestShowWorkspaceSummary(t *testing.T) {
 	if !strings.Contains(output, "/home/user/myworkspace") {
 		t.Error("showWorkspaceSummary should include workspace path")
 	}
-	if !strings.Contains(output, ".beads/") {
-		t.Error("showWorkspaceSummary should mention .beads/ directory")
+	if !strings.Contains(output, ".loom/") {
+		t.Error("showWorkspaceSummary should mention .loom/ runtime state")
+	}
+	if strings.Contains(output, ".beads/") || strings.Contains(output, "bd create") {
+		t.Error("showWorkspaceSummary should not mention legacy beads guidance")
 	}
 	if !strings.Contains(output, "loom agent backend") {
 		t.Error("showWorkspaceSummary should suggest 'loom agent' with first repo name")

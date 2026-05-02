@@ -11,8 +11,7 @@
 # `--frontend-url http://localhost:3000` so the Go server allows the
 # Vite dev origin in that mode (inert when same-origin).
 #
-# Cleanup is handled via a trap on EXIT — Ctrl-C kills both processes
-# and stops bd daemon if this script started it.
+# Cleanup is handled via a trap on EXIT — Ctrl-C kills both processes.
 
 set -euo pipefail
 
@@ -22,7 +21,6 @@ FRONTEND_DIR="$REPO_ROOT/internal/webui/frontend"
 
 AIR_PID=""
 VITE_PID=""
-DAEMON_STARTED=""
 
 cleanup() {
     echo ""
@@ -35,9 +33,6 @@ cleanup() {
     if [[ -n "$AIR_PID" ]]; then
         kill -TERM -"$AIR_PID" 2>/dev/null || kill "$AIR_PID" 2>/dev/null || true
         wait "$AIR_PID" 2>/dev/null || true
-    fi
-    if [[ -n "$DAEMON_STARTED" ]]; then
-        bd daemon stop 2>/dev/null || true
     fi
 }
 
@@ -60,12 +55,7 @@ check_deps() {
 
 check_deps
 
-# Start bd daemon if not running
-if ! bd daemon status >/dev/null 2>&1; then
-    echo "Starting bd daemon..."
-    bd daemon start
-    DAEMON_STARTED=1
-fi
+export LOOM_ISSUE_BACKEND="${LOOM_ISSUE_BACKEND:-fleetdb}"
 
 # Install node_modules if missing
 if [[ ! -d "$FRONTEND_DIR/node_modules" ]]; then
@@ -78,6 +68,7 @@ echo "Starting loom dev environment..."
 echo "  API:      http://localhost:8080"
 echo "  Frontend: http://localhost:3000"
 echo "  Note:     /api/* and /health are proxied through Vite → :8080"
+echo "  Backend:  ${LOOM_ISSUE_BACKEND}"
 echo ""
 
 trap cleanup EXIT

@@ -1,7 +1,6 @@
 package doctor
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -13,7 +12,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/daemon"
-	"github.com/tysonthomas9/loomcli/internal/rpc"
 )
 
 // --- individual checks ---
@@ -123,101 +121,6 @@ func checkTmux(deps *cli.Deps) CheckResult {
 	}
 }
 
-func checkBdCLI(deps *cli.Deps) CheckResult {
-	_, err := deps.LookPath("bd")
-	if err != nil {
-		return CheckResult{
-			Name:    "bd_cli",
-			Status:  StatusFail,
-			Summary: "bd CLI not found",
-			Detail:  "Install bd separately if using legacy task storage",
-		}
-	}
-
-	result := deps.Exec.Run(".", "bd", "--version")
-	versionStr := strings.TrimSpace(result.Stdout)
-	if versionStr != "" {
-		return CheckResult{
-			Name:    "bd_cli",
-			Status:  StatusPass,
-			Summary: fmt.Sprintf("bd %s found", versionStr),
-		}
-	}
-
-	return CheckResult{
-		Name:    "bd_cli",
-		Status:  StatusPass,
-		Summary: "bd CLI found",
-	}
-}
-
-func checkBdDaemon(deps *cli.Deps) CheckResult {
-	if _, err := deps.LookPath("bd"); err != nil {
-		return CheckResult{
-			Name:    "bd_daemon",
-			Status:  StatusFail,
-			Summary: "bd not found (cannot check daemon)",
-			Detail:  "Install bd separately if using legacy task storage",
-		}
-	}
-
-	result := deps.Exec.Run(cli.GetBeadsDir(), "bd", "daemon", "status", "--json")
-	if result.Err != nil {
-		return CheckResult{
-			Name:    "bd_daemon",
-			Status:  StatusWarn,
-			Summary: "bd daemon not running",
-			Detail:  "Start with: bd daemon start",
-		}
-	}
-
-	var status cli.DaemonStatus
-	if err := json.Unmarshal([]byte(result.Stdout), &status); err != nil {
-		return CheckResult{
-			Name:    "bd_daemon",
-			Status:  StatusWarn,
-			Summary: "bd daemon status unparseable",
-		}
-	}
-
-	if status.Status != "running" {
-		return CheckResult{
-			Name:    "bd_daemon",
-			Status:  StatusWarn,
-			Summary: fmt.Sprintf("bd daemon status: %s", status.Status),
-			Detail:  "Start with: bd daemon start",
-		}
-	}
-
-	return CheckResult{
-		Name:    "bd_daemon",
-		Status:  StatusPass,
-		Summary: fmt.Sprintf("bd daemon running (PID %d)", status.PID),
-	}
-}
-
-func checkBdSocket() CheckResult {
-	beadsDir := cli.GetBeadsDir()
-	socketPath := rpc.ShortSocketPath(beadsDir)
-
-	client, err := rpc.TryConnect(socketPath)
-	if err != nil || client == nil {
-		return CheckResult{
-			Name:    "bd_socket",
-			Status:  StatusWarn,
-			Summary: "bd daemon socket not reachable",
-			Detail:  fmt.Sprintf("Expected at: %s", socketPath),
-		}
-	}
-	_ = client.Close()
-
-	return CheckResult{
-		Name:    "bd_socket",
-		Status:  StatusPass,
-		Summary: "bd daemon socket reachable",
-	}
-}
-
 func checkBackendCLI() CheckResult {
 	name := cli.ResolveBackendName()
 	_, err := exec.LookPath(name)
@@ -234,26 +137,6 @@ func checkBackendCLI() CheckResult {
 		Name:    "backend_cli",
 		Status:  StatusPass,
 		Summary: fmt.Sprintf("%s CLI found (active backend)", name),
-	}
-}
-
-func checkBeadsInit() CheckResult {
-	beadsDir := cli.GetBeadsDir()
-	beadsPath := filepath.Join(beadsDir, ".beads")
-
-	if _, err := os.Stat(beadsPath); err != nil {
-		return CheckResult{
-			Name:    "beads_init",
-			Status:  StatusFail,
-			Summary: ".beads/ not found",
-			Detail:  "Run: bd init",
-		}
-	}
-
-	return CheckResult{
-		Name:    "beads_init",
-		Status:  StatusPass,
-		Summary: ".beads/ initialized",
 	}
 }
 

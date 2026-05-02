@@ -18,7 +18,7 @@ describe("Graph types", () => {
   describe("IssueNode", () => {
     it("should create valid IssueNode", () => {
       const issue: Issue = {
-        id: "beads-123",
+        id: "issue-123",
         title: "Test Issue",
         priority: 2,
         created_at: "2024-01-01T00:00:00Z",
@@ -50,7 +50,7 @@ describe("Graph types", () => {
 
     it("should handle undefined optional fields", () => {
       const issue: Issue = {
-        id: "beads-456",
+        id: "issue-456",
         title: "Minimal Issue",
         priority: 1,
         created_at: "2024-01-01T00:00:00Z",
@@ -85,7 +85,7 @@ describe("Graph types", () => {
         position: { x: 0, y: 0 },
         data: {
           issue: {
-            id: `beads-p${priority}`,
+            id: `issue-p${priority}`,
             title: `P${priority} Issue`,
             priority,
             created_at: "2024-01-01T00:00:00Z",
@@ -119,8 +119,8 @@ describe("Graph types", () => {
         data: {
           dependencyType: "blocks",
           isBlocking: true,
-          sourceIssueId: "beads-123",
-          targetIssueId: "beads-456",
+          sourceIssueId: "issue-123",
+          targetIssueId: "issue-456",
         },
       };
 
@@ -141,8 +141,8 @@ describe("Graph types", () => {
         data: {
           dependencyType: "related",
           isBlocking: false,
-          sourceIssueId: "beads-789",
-          targetIssueId: "beads-012",
+          sourceIssueId: "issue-789",
+          targetIssueId: "issue-012",
         },
       };
 
@@ -174,8 +174,8 @@ describe("Graph types", () => {
             dependencyType: depType,
             isBlocking:
               depType === "blocks" || depType === "conditional-blocks",
-            sourceIssueId: "beads-src",
-            targetIssueId: "beads-tgt",
+            sourceIssueId: "issue-src",
+            targetIssueId: "issue-tgt",
           },
         };
 
@@ -187,7 +187,7 @@ describe("Graph types", () => {
   describe("IssueNodeData", () => {
     it("should contain all required fields", () => {
       const issue: Issue = {
-        id: "beads-data-test",
+        id: "issue-data-test",
         title: "Data Test",
         priority: 3,
         created_at: "2024-01-01T00:00:00Z",
@@ -221,14 +221,14 @@ describe("Graph types", () => {
       const edgeData: DependencyEdgeData = {
         dependencyType: "blocks",
         isBlocking: true,
-        sourceIssueId: "beads-src",
-        targetIssueId: "beads-tgt",
+        sourceIssueId: "issue-src",
+        targetIssueId: "issue-tgt",
       };
 
       expect(edgeData.dependencyType).toBe("blocks");
       expect(edgeData.isBlocking).toBe(true);
-      expect(edgeData.sourceIssueId).toBe("beads-src");
-      expect(edgeData.targetIssueId).toBe("beads-tgt");
+      expect(edgeData.sourceIssueId).toBe("issue-src");
+      expect(edgeData.targetIssueId).toBe("issue-tgt");
     });
   });
 
@@ -240,7 +240,7 @@ describe("Graph types", () => {
         position: { x: 0, y: 0 },
         data: {
           issue: {
-            id: "beads-union",
+            id: "issue-union",
             title: "Union Test",
             priority: 2,
             created_at: "2024-01-01T00:00:00Z",
@@ -267,8 +267,8 @@ describe("Graph types", () => {
         data: {
           dependencyType: "blocks",
           isBlocking: true,
-          sourceIssueId: "beads-a",
-          targetIssueId: "beads-b",
+          sourceIssueId: "issue-a",
+          targetIssueId: "issue-b",
         },
       };
 
@@ -286,7 +286,7 @@ describe("Graph types", () => {
           position: { x: 0, y: 0 },
           data: {
             issue: {
-              id: "beads-narrow",
+              id: "issue-narrow",
               title: "Narrowing Test",
               priority: 1,
               created_at: "2024-01-01T00:00:00Z",
@@ -306,7 +306,7 @@ describe("Graph types", () => {
         if (node.type === "issue") {
           // TypeScript should narrow to IssueNode here
           expect(node.data.title).toBe("Narrowing Test");
-          expect(node.data.issue.id).toBe("beads-narrow");
+          expect(node.data.issue.id).toBe("issue-narrow");
         }
       }
     });
@@ -321,8 +321,8 @@ describe("Graph types", () => {
           data: {
             dependencyType: "waits-for",
             isBlocking: true,
-            sourceIssueId: "beads-1",
-            targetIssueId: "beads-2",
+            sourceIssueId: "issue-1",
+            targetIssueId: "issue-2",
           },
         },
       ];

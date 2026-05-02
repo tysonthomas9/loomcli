@@ -138,11 +138,6 @@ func runWorkspaceCreate(cmd *cobra.Command, args []string) {
 	resolvedRepos := resolveAndValidateRepos(repoPaths)
 	repos := createWorkspaceWorktrees(deps, wsDir, resolvedRepos, branch)
 
-	bdResult := deps.Exec.Run(wsDir, "bd", "init")
-	if bdResult.Err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: bd init failed in workspace (non-fatal): %s\n", bdResult.Stderr)
-	}
-
 	saveWorkspaceConfig(cfg, wsName, wsDir, repos)
 	fmt.Printf("Workspace %q created at %s with %d repo(s).\n", wsName, wsDir, len(repos))
 }

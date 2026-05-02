@@ -19,9 +19,9 @@ type ResolvedTarget struct {
 
 // ResolveAgentTarget resolves a CLI argument (workspace name, repo name, or
 // worktree name) into the working directory and agent name. In workspace mode,
-// Claude always runs from the workspace root so bd commands use the shared
-// .beads/ directory. When repo is non-empty in workspace mode, the agent gets
-// its own git worktree under <workspace>/worktrees/<repo>/<name>/.
+// Claude always runs from the workspace root so loom data commands resolve the
+// active workspace. When repo is non-empty in workspace mode, the agent gets its
+// own git worktree under <workspace>/worktrees/<repo>/<name>/.
 func ResolveAgentTarget(name, repo string) (ResolvedTarget, error) {
 	resolver, _ := cli.NewResolver()
 	if resolver.Mode == cli.ModeWorkspace {

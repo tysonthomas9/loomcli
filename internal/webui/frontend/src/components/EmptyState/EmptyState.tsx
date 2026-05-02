@@ -68,13 +68,10 @@ function getVariantContent(variant: EmptyStateVariant): VariantContent {
         title: "No issues yet",
         description: (
           <>
-            Create your first issue with{" "}
-            <code className={styles.code}>
-              bd create &quot;My first task&quot;
-            </code>
-            . Issues will appear here as you add them. Use{" "}
-            <code className={styles.code}>bd ready</code> to see the board
-            populate.
+            Create your first issue with the New issue action. Issues will
+            appear here as you add them. Use{" "}
+            <code className={styles.code}>loom data ready</code> to see the
+            board populate.
           </>
         ),
       };

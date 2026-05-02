@@ -1,14 +1,14 @@
 # UI Parity Test Suite
 
 Side-by-side Playwright suite that proves the web UI renders identically
-when loom is backed by beads (`:8081`) vs fleet-db (`:8082`). Implements
+when loom is backed by reference (`:8081`) vs fleet-db (`:8082`). Implements
 `docs/design/parity-report-2026-04-22/ui-test-plan.md`.
 
 ## What makes this different from the frontend e2e suite
 
 The frontend e2e suite in `internal/webui/frontend/tests/e2e/` mocks the
 backend so it can test React components in isolation. This suite does the
-opposite: it runs two REAL backends (beads + fleet-db) and asserts the UI
+opposite: it runs two REAL backends (reference + fleet-db) and asserts the UI
 behaves the same against both. Silent fallbacks are the main failure mode
 we defend against — see [Routing verification](#routing-verification).
 
@@ -18,14 +18,14 @@ we defend against — see [Routing verification](#routing-verification).
 backends aren't what we expect.** See `_support/preflight.ts`. Nine
 checks, all must pass:
 
-1. `GET :8081/api/config` returns `issue_backend: "beads"`
+1. `GET :8081/api/config` returns `issue_backend: "reference"`
 2. `GET :8082/api/config` returns `issue_backend: "fleet"`
-3. All three containers (loom-beads, loom-fleet, fleet-db) are healthy
+3. All three containers (loom-reference, loom-fleet, fleet-db) are healthy
 4. A POST to `:8082/api/issues` shows up in fleet-db's access log
 5. `loom-fleet` container env `LOOM_FLEET_URL` == `http://fleet-db:8080`
 6. `loom-fleet` container env `LOOM_WORKSPACE` == `PARITY`
 7. `fleet-db` admin API lists the `PARITY` workspace
-8. `:8081/api/config` surfaces "beads" to the Settings page
+8. `:8081/api/config` surfaces "reference" to the Settings page
 9. `:8082/api/config` surfaces "fleet" to the Settings page
 
 On every run the preflight rewrites the Step 0 table in
@@ -57,8 +57,8 @@ docker compose -f test/parity/docker-compose.parity.yml down -v
 ### Fleet-db-only regression mode
 
 After side-by-side parity has passed, the same browser suite can run against
-only fleet-db-backed loom. This path does not start or require `loom-beads`,
-`bd`, or `third_party/beads`.
+only fleet-db-backed loom. This path does not start or require `loom-reference`,
+or any legacy issue-store sidecar.
 
 ```bash
 docker compose -f test/parity/docker-compose.parity.yml up -d --build redis fleet-db loom-fleet ui-fleet parity-seed-fleet
@@ -68,13 +68,13 @@ make test-fleetdb-ui
 
 Fleet-only mode sets `PARITY_MODE=fleet-only`. The harness opens two isolated
 browser contexts against the fleet UI so existing dual-tab assertions still
-exercise rendering, SSE, routing, and write flows without a beads reference.
+exercise rendering, SSE, routing, and write flows without a reference reference.
 
 ## Environment overrides
 
 | var | default | purpose |
 |---|---|---|
-| `LOOM_BEADS_URL` | `http://localhost:8081` | beads-backed loom |
+| `LOOM_REFERENCE_URL` | `http://localhost:8081` | reference-backed loom |
 | `LOOM_FLEET_URL` | `http://localhost:8082` | fleet-backed loom |
 | `FLEET_DB_URL` | `http://localhost:8080` | fleet-db admin API |
 | `PARITY_WORKSPACE` | `PARITY` | fleet-db workspace key |
@@ -111,7 +111,7 @@ test("...", async ({ tabs, fleetSpy }) => {
     await assertRoutingForAction(tabs.testId, "action", fleetSpy, async () => {
         // action that must hit fleet-db
     });
-    const shot = await captureBothTabs(tabs.beads, tabs.fleet, tabs.testId, "step");
+    const shot = await captureBothTabs(tabs.reference, tabs.fleet, tabs.testId, "step");
     await visualDiff(shot);
 });
 ```

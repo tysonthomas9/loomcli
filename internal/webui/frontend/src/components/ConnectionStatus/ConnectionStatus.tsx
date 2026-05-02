@@ -1,6 +1,6 @@
 /**
  * ConnectionStatus component displays the current connection state.
- * Provides visual feedback about whether the application is connected to the beads daemon.
+ * Provides visual feedback about whether the application is connected to the event stream.
  */
 
 import type { ConnectionState } from "@/api/common";

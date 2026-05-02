@@ -1,18 +1,16 @@
 #!/usr/bin/env bash
 # dev-container-start.sh — orchestrator for the Loom dev container.
 #
-# Mirrors the working e2e flow (scripts/start-e2e-server.sh): register
-# workspaces via the `loom workspace create` CLI BEFORE starting the server
-# so the server reads them from config at boot. Never POST /api/workspaces at
-# runtime — that handler can stall on bd-init edge cases and deadlock GETs.
+# Mirrors the e2e flow (scripts/start-e2e-server.sh): register workspaces via
+# the `loom workspace create` CLI before starting the server so the server reads
+# them from config at boot.
 set -euo pipefail
 
 API_PORT=${API_PORT:-8080}
 UI_PORT=${UI_PORT:-3000}
 DEFAULT_BACKEND=${DEFAULT_BACKEND:-claude}
 
-# Primary workspace owns the bd daemon. Extra workspaces get registered via
-# `loom workspace create` CLI.
+# Extra workspaces get registered via `loom workspace create` CLI.
 PRIMARY_NAME=${PRIMARY_NAME:-alpha}
 PRIMARY_PATH=${PRIMARY_PATH:-/root/.loom/workspaces/alpha}
 EXTRA_WORKSPACES=${EXTRA_WORKSPACES:-bravo:/root/.loom/workspaces/bravo}
@@ -24,7 +22,7 @@ mkdir -p "$LOOM_CONFIG_DIR"
 
 log() { printf '[dev] %s\n' "$*"; }
 
-# ── 1. Seed primary workspace: git + bd (bd init needed so daemon has .beads) ──
+# ── 1. Seed primary workspace: git only ──
 if [ ! -d "$PRIMARY_PATH/.git" ]; then
     log "seeding primary workspace '$PRIMARY_NAME' at $PRIMARY_PATH"
     mkdir -p "$PRIMARY_PATH"
@@ -33,12 +31,8 @@ if [ ! -d "$PRIMARY_PATH/.git" ]; then
     git -C "$PRIMARY_PATH" config user.name loom-dev
     git -C "$PRIMARY_PATH" commit --allow-empty -qm "init"
 fi
-if [ ! -d "$PRIMARY_PATH/.beads" ]; then
-    log "initializing bd in $PRIMARY_PATH"
-    (cd "$PRIMARY_PATH" && bd init --prefix "$PRIMARY_NAME" --skip-hooks -q)
-fi
 
-# ── 2. Seed extra workspaces: git only (no bd init — loom owns that) ──
+# ── 2. Seed extra workspaces: git only ──
 for spec in $EXTRA_WORKSPACES; do
     ws_name=${spec%%:*}
     ws_path=${spec#*:}
@@ -61,35 +55,24 @@ for spec in $EXTRA_WORKSPACES; do
         2>/dev/null || log "  (already registered or create failed — continuing)"
 done
 
-# ── 4. Start bd daemon in the primary workspace ──
-log "starting bd daemon in $PRIMARY_PATH"
-(cd "$PRIMARY_PATH" && bd daemon start) || true
-
-SOCKET="$PRIMARY_PATH/.beads/bd.sock"
-for _ in $(seq 1 10); do
-    [ -S "$SOCKET" ] && break
-    sleep 0.5
-done
-[ -S "$SOCKET" ] || { log "bd daemon socket never appeared at $SOCKET"; exit 1; }
-
-# ── 5. Cleanup hook ──
+# ── 4. Cleanup hook ──
 cleanup() {
     kill "$(jobs -p)" 2>/dev/null || true
-    (cd "$PRIMARY_PATH" && bd daemon stop 2>/dev/null) || true
 }
 trap cleanup EXIT INT TERM
 
-# ── 6. Start loom serve from within the primary workspace ──
+# ── 5. Start loom serve from within the primary workspace ──
 log "starting loom serve on :${API_PORT}"
+export LOOM_ISSUE_BACKEND="${LOOM_ISSUE_BACKEND:-fleetdb}"
+export LOOM_FLEET_DB_ACTOR="${LOOM_FLEET_DB_ACTOR:-loom-dev}"
 cd "$PRIMARY_PATH"
 loom serve \
     --bind 127.0.0.1 --port "$API_PORT" \
-    --webui-socket "$SOCKET" \
     --frontend-url "${LOOM_FRONTEND_URL:-http://localhost:${UI_PORT}}" \
     --frontend-url "http://localhost:${UI_PORT}" \
     --no-daemon &
 
-# ── 7. Wait for /api/health and /api/workspaces to both work before UI boots ──
+# ── 6. Wait for /api/health and /api/workspaces to both work before UI boots ──
 for _ in $(seq 1 30); do
     if curl -fs --max-time 2 "http://127.0.0.1:${API_PORT}/api/health" >/dev/null 2>&1 \
        && curl -fs --max-time 2 "http://127.0.0.1:${API_PORT}/api/workspaces" >/dev/null 2>&1
@@ -100,7 +83,7 @@ curl -fs --max-time 2 "http://127.0.0.1:${API_PORT}/api/workspaces" >/dev/null 2
     || { log "loom serve /api/workspaces not responding"; exit 1; }
 log "loom serve ready"
 
-# ── 8. Set default backend on every registered workspace (non-blocking) ──
+# ── 7. Set default backend on every registered workspace (non-blocking) ──
 (
     ws_ids=$(curl -s "http://127.0.0.1:${API_PORT}/api/workspaces" \
         | jq -r '.workspaces[]?.id' 2>/dev/null || true)
@@ -113,7 +96,7 @@ log "loom serve ready"
     log "default backend '$DEFAULT_BACKEND' applied where possible"
 ) &
 
-# ── 9. Vite preview (foreground, keeps container alive) ──
+# ── 8. Vite preview (foreground, keeps container alive) ──
 log "starting vite preview on :${UI_PORT}"
 cd /src/internal/webui/frontend
 exec npx vite preview --host 0.0.0.0 --port "$UI_PORT" --strictPort

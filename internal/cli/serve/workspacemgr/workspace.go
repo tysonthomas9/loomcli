@@ -274,14 +274,11 @@ func CreateWorkspace(ctx context.Context, req service.WorkspaceCreateRequest) (s
 		return err
 	})
 
-	// Start daemon AFTER config lock is released to prevent deadlock.
-	// The daemon start goroutine polls for the socket which can take 30+ seconds;
-	// holding the lock during that time blocks all other config operations.
-	// Copy the timeout value before launching the goroutine to avoid racing
-	// on the config pointer which may be reloaded by concurrent callers.
+	// Finish workspace initialization AFTER config lock is released to prevent
+	// long git worktree operations from blocking other config operations.
 	if err == nil && result.DeferDaemonStart {
 		daemonTimeout := daemonCfg.Daemon.GetStartupTimeout(workspace.DefaultDaemonStartupTimeout)
-		startDaemonAsync(daemonTimeout, req.Name, result.WorkspacePath, createdRepos, agentNames)
+		finishWorkspaceAsync(daemonTimeout, req.Name, result.WorkspacePath, createdRepos, agentNames)
 		// Best-effort fleet-db mirror so the new workspace surfaces in
 		// store-driven endpoints (Phase 4 migration).
 		mirrorWorkspaceToStore(req.Name, result.WorkspaceID, createdRepos)
@@ -457,33 +454,12 @@ func addWorktrees(ctx context.Context, resolved []resolvedRepo, wsDir, branch st
 	return created, repos, nil
 }
 
-// initWorkspaceBeads initializes beads in each repo and at the workspace root,
-// then registers repos with relative paths for correct source_repo values.
-func initWorkspaceBeads(wsDir string, repos []config.RepoConfig) {
-	runner := cli.GetDeps(nil).Exec
-	for _, repo := range repos {
-		if result := runner.Run(repo.Path, "bd", "init", "--quiet"); result.Err != nil {
-			slog.Warn("bd init failed for repo", "repo", repo.Name, "path", repo.Path, "err", result.Err)
-		}
-	}
-	if result := runner.Run(wsDir, "bd", "init", "--quiet"); result.Err != nil {
-		slog.Warn("bd init failed for workspace root", "path", wsDir, "err", result.Err)
-	}
-	for _, repo := range repos {
-		if result := runner.Run(wsDir, "bd", "repo", "add", repo.Name); result.Err != nil {
-			slog.Warn("failed to add repo to workspace beads", "repo", repo.Name, "err", result.Err)
-		}
-	}
-}
-
-// finalizeWorkspace performs bd init and writes the workspace into config with
-// state=initializing. Async daemon startup will transition it to ready.
-// Returns the repos and generated agent names so the daemon-start goroutine can
-// create per-agent worktrees before running bd repo sync.
+// finalizeWorkspace writes the workspace into config with state=initializing.
+// Async completion creates per-agent worktrees and transitions it to ready.
+// Returns the repos and generated agent names for the completion goroutine.
 func finalizeWorkspace(cfg *config.LoomConfig, wsName, wsDir, wsID string, repos []config.RepoConfig, created []createdWorktree, save func(*config.LoomConfig) error) (service.WorkspaceCreateResult, []config.RepoConfig, []string, error) {
 	transitionState(cfg, wsName, config.WorkspaceStateInitializing, save)
 
-	initWorkspaceBeads(wsDir, repos)
 	agentNames, err := workspace.WriteLoomYaml(wsDir)
 	if err != nil {
 		slog.Warn("failed to write loom.yaml for workspace", "workspace", wsName, "err", err)
@@ -599,23 +575,16 @@ func validateWorkspacePath(wsDir string) error {
 	return nil
 }
 
-// startDaemonAsync creates per-agent worktrees, starts the bd daemon for a
-// workspace in the background, then syncs repos after the daemon is ready
-// (sync can be slow for large repos). Worktree creation runs first because
-// it's pure git ops and doesn't need the daemon.
-func startDaemonAsync(timeout time.Duration, wsName, wsDir string, repos []config.RepoConfig, agentNames []string) {
-	go func() { //nolint:gosec // G118 — intentional: daemon outlives request
+// finishWorkspaceAsync creates per-agent worktrees and marks the workspace ready
+// in the background. FleetDB local mode has no per-workspace issue daemon to
+// start or repository sync command to run.
+func finishWorkspaceAsync(timeout time.Duration, wsName, wsDir string, repos []config.RepoConfig, agentNames []string) {
+	go func() { //nolint:gosec // G118 — intentional: workspace finalization outlives request
 		deps := cli.GetDeps(nil)
-		// Create agent worktrees first (pure git ops, no daemon needed).
 		workspace.CreateAgentWorktrees(wsDir, repos, agentNames)
 		if err := workspace.EnsureDaemonForWorkspace(deps, context.Background(), wsDir, timeout); err != nil {
-			slog.Warn("failed to start daemon for workspace", "workspace", wsName, "err", err)
-		} else if result := deps.Exec.Run(wsDir, "bd", "repo", "sync"); result.Err != nil {
-			slog.Warn("bd repo sync failed", "workspace", wsName, "err", result.Err)
+			slog.Warn("workspace readiness hook failed", "workspace", wsName, "err", err)
 		}
-		// Mark ready even if daemon/sync failed — the workspace itself is created.
-		// Daemon health is surfaced separately; trapping a workspace in
-		// "initializing" forever would prevent the user from seeing or fixing it.
 		if err := workspace.SetWorkspaceState(wsName, config.WorkspaceStateReady, ""); err != nil {
 			slog.Error("failed to mark workspace ready", "workspace", wsName, "err", err)
 		}

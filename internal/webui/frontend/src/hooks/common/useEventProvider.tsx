@@ -1,6 +1,6 @@
 /**
  * useEventProvider - React context for a shared SSE connection with typed event subscription.
- * Consolidates SSE into a single BeadsSSEClient instance per workspace,
+ * Consolidates SSE into a single WorkspaceSSEClient instance per workspace,
  * fanning out mutation events to subscribers via a ref-based registry.
  *
  * Follows useWorkspaceContext pattern.
@@ -18,7 +18,7 @@ import {
 } from "react";
 
 import {
-  BeadsSSEClient,
+  WorkspaceSSEClient,
   type ConnectionState,
   type MutationPayload,
   type MutationType,
@@ -89,7 +89,7 @@ interface SubscriberEntry {
 }
 
 /**
- * EventProvider owns a single BeadsSSEClient and fans out mutation events
+ * EventProvider owns a single WorkspaceSSEClient and fans out mutation events
  * to subscribers registered via subscribe(). Connection metadata is exposed
  * via context; mutations are dispatched via direct callback invocation
  * (no React re-render path).
@@ -111,7 +111,7 @@ export function EventProvider({
   const subscribersRef = useRef<Map<number, SubscriberEntry>>(new Map());
 
   // SSE client ref
-  const clientRef = useRef<BeadsSSEClient | null>(null);
+  const clientRef = useRef<WorkspaceSSEClient | null>(null);
   const mountedRef = useRef(true);
 
   // Track sourceRepos for reconnect detection
@@ -159,7 +159,7 @@ export function EventProvider({
     setReconnectAttempts(0);
     setLastError(null);
 
-    const client = new BeadsSSEClient(workspaceId, {
+    const client = new WorkspaceSSEClient(workspaceId, {
       onMutation: (mutation: MutationPayload) => {
         if (!mountedRef.current) return;
         // Fan out to all subscribers

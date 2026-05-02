@@ -2,7 +2,6 @@ package workspace
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"math/rand"
@@ -15,9 +14,9 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 )
 
-// DefaultDaemonStartupTimeout is the fallback timeout for waiting for the daemon to become ready.
-// Set to 120s because secondary workspaces start async (no HTTP request waiting)
-// and large repos can take >30s for daemon initialization.
+// DefaultDaemonStartupTimeout is retained while workspace creation APIs still
+// carry the old deferred-start field. FleetDB local mode does not start a
+// per-workspace issue daemon.
 const DefaultDaemonStartupTimeout = 120 * time.Second
 
 // agentNamePool is the list of fun agent names to pick from when seeding loom.yaml.
@@ -85,75 +84,27 @@ func CreateAgentWorktrees(wsDir string, repos []config.RepoConfig, agentNames []
 	}
 }
 
-// ensureDaemonForWorkspace starts the bd daemon in the given workspace directory.
-// It shells out to `bd daemon start` with Dir set to wsDir, then polls for readiness.
-// If wsDir is not itself a git repository (e.g., a multi-repo workspace), the daemon
-// is started with --local to avoid requiring a git repo at the workspace root.
-// The function respects the provided context for cancellation and uses timeout as
-// a fallback deadline for polling.
+// EnsureDaemonForWorkspace is now a FleetDB-era readiness hook. There is no
+// per-workspace issue daemon to start; callers keep using this function until
+// the remaining workspace lifecycle names are cleaned up.
 func EnsureDaemonForWorkspace(deps *cli.Deps, ctx context.Context, wsDir string, timeout time.Duration) error {
+	_ = deps
+	_ = timeout
 	if ctx.Err() != nil {
-		return fmt.Errorf("daemon startup in %s cancelled: %w", wsDir, ctx.Err())
+		return fmt.Errorf("workspace readiness in %s cancelled: %w", wsDir, ctx.Err())
 	}
-
-	// Check if workspace dir is a git repo; if not, use --local mode
-	args := []string{"daemon", "start"}
-	if _, err := os.Stat(filepath.Join(wsDir, ".git")); err != nil {
-		args = append(args, "--local")
-	}
-	result := deps.Exec.Run(wsDir, "bd", args...)
-	if result.Err != nil {
-		// bd daemon start returns non-zero when already running — proceed to poll anyway
-		slog.Warn("bd daemon start returned error, will poll for readiness",
-			"path", wsDir, "err", result.Err, "stderr", result.Stderr)
-	}
-
-	ticker := time.NewTicker(200 * time.Millisecond)
-	defer ticker.Stop()
-	deadlineTimer := time.NewTimer(timeout)
-	defer deadlineTimer.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("daemon startup in %s cancelled: %w", wsDir, ctx.Err())
-		case <-deadlineTimer.C:
-			return fmt.Errorf("daemon in %s did not become ready within %s", wsDir, timeout)
-		case <-ticker.C:
-			check := deps.Exec.Run(wsDir, "bd", "daemon", "status", "--json")
-			if check.Err == nil && isDaemonStatusRunning(check.Stdout) {
-				slog.Info("bd daemon started for workspace", "path", wsDir)
-				return nil
-			}
-		}
-	}
+	slog.Debug("workspace ready for FleetDB local mode", "path", wsDir)
+	return nil
 }
 
-// isDaemonStatusRunning parses bd daemon status JSON and checks if running.
-// Uses JSON unmarshal instead of string matching to handle pretty-printed output.
-func isDaemonStatusRunning(jsonOutput string) bool {
-	var status struct {
-		Status string `json:"status"`
-	}
-	if err := json.Unmarshal([]byte(jsonOutput), &status); err != nil {
-		return false
-	}
-	return status.Status == "running"
-}
-
-// stopDaemonForWorkspace is the cleanup counterpart to ensureDaemonForWorkspace.
-// It runs `bd daemon stop` in wsDir on a best-effort basis: errors are logged at
-// debug level but never returned, so callers can safely use it in cleanup paths
-// without aborting other cleanup steps.
+// StopDaemonForWorkspace is a no-op compatibility hook. FleetDB local mode
+// does not run a per-workspace issue daemon.
 func StopDaemonForWorkspace(deps *cli.Deps, wsDir string) {
+	_ = deps
 	if wsDir == "" {
 		return
 	}
-	result := deps.Exec.Run(wsDir, "bd", "daemon", "stop")
-	if result.Err != nil {
-		slog.Debug("stopDaemonForWorkspace: bd daemon stop returned error (expected if not running)",
-			"path", wsDir, "err", result.Err)
-	}
+	slog.Debug("workspace stop hook skipped for FleetDB local mode", "path", wsDir)
 }
 
 // ensureCurrentProjectRegistered registers the current working directory as a workspace
@@ -170,14 +121,9 @@ func EnsureCurrentProjectRegistered() {
 		return
 	}
 
-	// Guard: only auto-register directories that look like a loom project
-	// (must have .git/ so we know it's a repo, and .beads/ so we know bd can serve it).
+	// Guard: only auto-register directories that look like a loom project.
 	if _, err := os.Stat(filepath.Join(cwd, ".git")); err != nil {
 		slog.Debug("skipping CWD auto-registration: no .git directory", "path", cwd)
-		return
-	}
-	if _, err := os.Stat(filepath.Join(cwd, ".beads")); err != nil {
-		slog.Debug("skipping CWD auto-registration: no .beads directory", "path", cwd)
 		return
 	}
 
@@ -227,51 +173,28 @@ func EnsureCurrentProjectRegistered() {
 	}
 }
 
-// EnsureDaemonsForAllWorkspaces starts bd daemons for all configured workspaces
-// that have a .beads/ directory. Runs staggered (200ms between each) to avoid
-// thundering-herd on system resources. Skips the CWD workspace (already started
-// by EnsureIssueBackendRunning in serve.go). Best-effort: errors are logged, not fatal.
+// EnsureDaemonsForAllWorkspaces marks ready configured workspaces as available
+// to FleetDB-backed subscribers. There is no per-workspace issue daemon to
+// start in local FleetDB mode. Best-effort: errors are logged, not fatal.
 //
 // When onReady is non-nil, it is called with the workspace UUID after each
-// daemon is confirmed running. This is used to defer SSE subscriber activation
-// until the daemon is reachable, preventing circuit breaker trips during startup.
+// ready workspace is observed so subscribers can activate after config recovery.
 func EnsureDaemonsForAllWorkspaces(deps *cli.Deps, ctx context.Context, onReady func(wsID string)) {
+	_ = deps
 	// Mark any interrupted workspaces as error before attempting daemon startup.
 	RecoverIncompleteWorkspaces()
-
-	cwd, _ := os.Getwd()
 
 	cfg, err := config.LoadConfig()
 	if err != nil || cfg == nil {
 		return
 	}
 
-	timeout := cfg.Daemon.GetStartupTimeout(DefaultDaemonStartupTimeout)
-
-	for name, ws := range cfg.Workspaces {
+	for _, ws := range cfg.Workspaces {
 		if ctx.Err() != nil {
 			return
 		}
-		// Skip the CWD workspace — its daemon is managed by the main serve loop.
-		if ws.Path == cwd {
-			continue
-		}
 		// Skip workspaces that aren't ready (error, creating, etc.)
 		if ws.State != "" && ws.State != config.WorkspaceStateReady {
-			continue
-		}
-		// Only start daemons for workspaces that have a .beads/ directory.
-		if _, err := os.Stat(filepath.Join(ws.Path, ".beads")); err != nil {
-			continue
-		}
-
-		// Stagger to avoid thundering-herd.
-		time.Sleep(200 * time.Millisecond)
-
-		slog.Info("auto-starting daemon for workspace", "workspace", name, "path", ws.Path)
-		if err := EnsureDaemonForWorkspace(deps, ctx, ws.Path, timeout); err != nil {
-			slog.Warn("failed to auto-start daemon for workspace",
-				"workspace", name, "path", ws.Path, "err", err)
 			continue
 		}
 		if onReady != nil && ws.ID != "" {

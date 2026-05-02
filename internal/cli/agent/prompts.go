@@ -127,7 +127,7 @@ func buildWorkspaceContextBlock(workspace *config.WorkspaceConfig) string {
 	}
 
 	sb.WriteString("\n**Important workspace rules:**\n")
-	sb.WriteString("- Run `bd` commands from the workspace root (current directory)\n")
+	sb.WriteString("- Run `loom data` commands from the workspace root (current directory)\n")
 	sb.WriteString("- Run git commands (git status, git add, git commit, git push) from the specific repo subdirectory\n")
 	sb.WriteString("- Run build/test commands from the specific repo subdirectory\n")
 	sb.WriteString("- Changes may span multiple repos — coordinate commits across them\n\n")
@@ -149,7 +149,7 @@ You are running in a parallel multi-agent environment. Follow these rules strict
 - **Never force-push or reset --hard** without explicit instruction from the user
 - **If you encounter files/changes from another agent**, leave them alone — do not modify, revert, or clean them up
 - **Commit only your changes** — do not stage unrelated modifications with ` + "`git add -A`" + ` or ` + "`git add .`" + `; use specific file paths
-- **If your worktree has unexpected state**, report it (via bd notes or loom complete) rather than cleaning it up
+- **If your worktree has unexpected state**, report it via task notes or ` + "`loom complete`" + ` rather than cleaning it up
 - **Do not switch branches** — you are confined to your assigned worktree branch
 `
 }
@@ -357,7 +357,7 @@ func injectCheckpointContext(prompt string, cp *config.Checkpoint) string {
 	return prompt + sb.String()
 }
 
-const readOnlyPreamble = `IMPORTANT: You are running in READ-ONLY mode. You MUST NOT modify any files, create new files, or run destructive commands. You may only read files, search code, and provide analysis/comments. Use bd commands to comment on tasks but do not make code changes.`
+const readOnlyPreamble = `IMPORTANT: You are running in READ-ONLY mode. You MUST NOT modify any files, create new files, or run destructive commands. You may only read files, search code, and provide analysis/comments. Use loom data commands to comment on tasks but do not make code changes.`
 
 // ReadOnlyPreamble returns the read-only instruction preamble if LOOM_READ_ONLY is set.
 // Returns empty string if not in read-only mode.

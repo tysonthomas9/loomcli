@@ -24,7 +24,7 @@ describe("EmptyWorkspaceBoard", () => {
       ).toBeInTheDocument();
       expect(
         screen.getByText(
-          "Create your first issue with bd new or import from your tracker",
+          "Create your first issue with New issue or import from your tracker",
         ),
       ).toBeInTheDocument();
     });
@@ -91,7 +91,7 @@ describe("EmptyWorkspaceBoard", () => {
 
       expect(
         screen.getByText(
-          "Create your first issue with bd new or import from your tracker",
+          "Create your first issue with New issue or import from your tracker",
         ),
       ).toBeInTheDocument();
     });
@@ -101,7 +101,7 @@ describe("EmptyWorkspaceBoard", () => {
 
       expect(
         screen.getByText(
-          "Create your first issue with bd new or import from your tracker",
+          "Create your first issue with New issue or import from your tracker",
         ),
       ).toBeInTheDocument();
     });
