@@ -56,7 +56,7 @@ const mockIssueDetails = {
 // -- Session mock data --
 
 interface MockSession {
-  id: string;
+  session_id: string;
   agent_name: string;
   backend: string;
   model?: string;
@@ -85,7 +85,7 @@ function createMockSession(
   overrides: Partial<MockSession> = {},
 ): MockSession {
   return {
-    id: "sess-001",
+    session_id: "sess-001",
     agent_name: "agent-alpha",
     backend: "claude",
     model: "opus-4",
@@ -115,7 +115,7 @@ function createMockSession(
 const completedSession = createMockSession();
 
 const activeSession = createMockSession({
-  id: "sess-002",
+  session_id: "sess-002",
   agent_name: "agent-beta",
   status: "running",
   is_active: true,
@@ -132,7 +132,7 @@ const activeSession = createMockSession({
 });
 
 const failedSession = createMockSession({
-  id: "sess-003",
+  session_id: "sess-003",
   agent_name: "agent-gamma",
   status: "failed",
   has_transcript: false,
@@ -382,9 +382,9 @@ async function setupSessionMocks(
     }
   });
 
-  // Mock GET /api/tasks/{taskId}/sessions/{sessionId}/transcript
+  // Mock GET /api/workspaces/{ws}/tasks/{taskId}/sessions/{sessionId}/transcript
   // (registered BEFORE broader sessions route to avoid glob collision)
-  await page.route("**/api/tasks/*/sessions/*/transcript", async (route) => {
+  await page.route("**/api/workspaces/*/tasks/*/sessions/*/transcript", async (route) => {
     trackers.transcriptCount.value++;
     if (options.transcriptError) {
       await route.fulfill({
@@ -405,9 +405,9 @@ async function setupSessionMocks(
     });
   });
 
-  // Mock GET /api/tasks/{taskId}/sessions/{sessionId}/diff
+  // Mock GET /api/workspaces/{ws}/tasks/{taskId}/sessions/{sessionId}/diff
   // (registered BEFORE broader sessions route)
-  await page.route("**/api/tasks/*/sessions/*/diff", async (route) => {
+  await page.route("**/api/workspaces/*/tasks/*/sessions/*/diff", async (route) => {
     trackers.diffCount.value++;
     if (options.diffError) {
       await route.fulfill({
@@ -424,8 +424,8 @@ async function setupSessionMocks(
     });
   });
 
-  // Mock GET /api/tasks/{taskId}/sessions
-  await page.route("**/api/tasks/*/sessions", async (route) => {
+  // Mock GET /api/workspaces/{ws}/tasks/{taskId}/sessions
+  await page.route("**/api/workspaces/*/tasks/*/sessions", async (route) => {
     trackers.sessionsCount.value++;
     if (options.sessionsError) {
       await route.fulfill({
@@ -451,7 +451,9 @@ async function setupSessionMocks(
 // -- Navigation helpers --
 
 async function navigateToApp(page: Page) {
-  await page.goto("/ws/default/", { waitUntil: "domcontentloaded" });
+  await page.goto("/ws/default/kanban?groupBy=none", {
+    waitUntil: "domcontentloaded",
+  });
 }
 
 async function openIssuePanel(page: Page, title: string) {

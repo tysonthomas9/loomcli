@@ -3,8 +3,8 @@
  * E2E tests for Terminal disconnect and reconnect.
  *
  * Covers WebSocket connection lifecycle: initial connection overlay,
- * network disconnect, auto-reconnect, scrollback recovery, backoff
- * exhaustion, and backend crash (close code 4001).
+ * network disconnect, auto-reconnect, backoff exhaustion, and backend crash
+ * (close code 4001).
  *
  * All backend interactions are mocked via page.route() and page.addInitScript()
  * for WebSocket — no real backend needed.
@@ -13,49 +13,15 @@
 
 import { test, expect } from "../fixtures";
 import type { Page } from "@playwright/test";
+import { WORKSPACE_ID, WS_API, setupFleetMocks } from "./helpers/fleet";
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
 const SESSION_NAME = "test-session-01";
-const WORKSPACE_ID = "default";
 const MOCK_TOKEN = "mock-token-abc";
-const WS_PREFIX = `/api/workspaces/${WORKSPACE_ID}`;
-
-const WORKSPACE_DATA = {
-  id: WORKSPACE_ID,
-  name: "Disconnect Test Workspace",
-  path: "/tmp/disconnect-test-ws",
-  repos: [],
-  groups: [],
-  agents: [],
-  workspaces: [
-    {
-      id: WORKSPACE_ID,
-      name: "Disconnect Test Workspace",
-      path: "/tmp/disconnect-test-ws",
-      active: true,
-      repo_count: 1,
-      is_default: true,
-    },
-  ],
-  default_workspace: WORKSPACE_ID,
-};
-
-const MOCK_STATS = {
-  total_issues: 0,
-  open_issues: 0,
-  in_progress_issues: 0,
-  closed_issues: 0,
-  blocked_issues: 0,
-  deferred_issues: 0,
-  ready_issues: 0,
-  tombstone_issues: 0,
-  pinned_issues: 0,
-  epics_eligible_for_closure: 0,
-  average_lead_time_hours: 0,
-};
+const WS_PREFIX = WS_API;
 
 interface TabMetadata {
   session_name: string;
@@ -223,8 +189,6 @@ interface RequestTracker {
 
 interface MockTrackers {
   tokenTracker: RequestTracker;
-  scrollbackTracker: RequestTracker;
-  restartTracker: RequestTracker;
 }
 
 interface SetupOptions {
@@ -238,8 +202,6 @@ async function setupHttpMocks(
 ): Promise<MockTrackers> {
   const tabList = options.tabs ?? [SINGLE_TAB];
   const tokenTracker: RequestTracker = { calls: [] };
-  const scrollbackTracker: RequestTracker = { calls: [] };
-  const restartTracker: RequestTracker = { calls: [] };
 
   // Neutralize AbortController signals (React StrictMode workaround)
   await page.addInitScript(() => {
@@ -252,6 +214,8 @@ async function setupHttpMocks(
       return origFetch.call(this, input, init);
     };
   });
+
+  await setupFleetMocks(page, []);
 
   // Auth token
   await page.route("**/api/auth/token", async (route) => {
@@ -276,70 +240,6 @@ async function setupHttpMocks(
           version: "test",
         },
       }),
-    });
-  });
-
-  // Terminal token
-  await page.route("**/api/terminal/token**", async (route) => {
-    tokenTracker.calls.push({
-      url: route.request().url(),
-      method: route.request().method(),
-    });
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({ token: MOCK_TOKEN }),
-    });
-  });
-
-  // Terminal state (GET/PATCH) — non-workspace-scoped fallback
-  await page.route("**/api/terminal/state", async (route) => {
-    if (route.request().method() === "PATCH") {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({ success: true }),
-      });
-      return;
-    }
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({
-        success: true,
-        data: { active_tab: SESSION_NAME },
-      }),
-    });
-  });
-
-  // Terminal session-status
-  await page.route("**/api/terminal/session-status**", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({ alive: true }),
-    });
-  });
-
-  // Terminal restart
-  await page.route("**/api/terminal/restart**", async (route) => {
-    restartTracker.calls.push({
-      url: route.request().url(),
-      method: route.request().method(),
-    });
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({ success: true, backend: "shell" }),
-    });
-  });
-
-  // Terminal spawn
-  await page.route("**/api/terminal/spawn", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({ success: true, session: SESSION_NAME }),
     });
   });
 
@@ -378,16 +278,6 @@ async function setupHttpMocks(
     async (route) => {
       const url = route.request().url();
       const method = route.request().method();
-
-      // Workspace resolution
-      if (url.includes("/api/workspaces/active")) {
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify({ success: true, data: WORKSPACE_DATA }),
-        });
-        return;
-      }
 
       // SSE events: fulfill with connected event then close
       if (url.includes(WS_PREFIX + "/events")) {
@@ -465,40 +355,15 @@ async function setupHttpMocks(
         return;
       }
 
-      // Issues / graph
-      if (url.includes(WS_PREFIX + "/issues")) {
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify({ success: true, data: [] }),
+      if (url.includes(WS_PREFIX + "/terminal/token")) {
+        tokenTracker.calls.push({
+          url: route.request().url(),
+          method,
         });
-        return;
-      }
-
-      // Ready / blocked
-      if (url.includes(WS_PREFIX + "/ready")) {
         await route.fulfill({
           status: 200,
           contentType: "application/json",
-          body: JSON.stringify({ success: true, data: [] }),
-        });
-        return;
-      }
-      if (url.includes(WS_PREFIX + "/blocked")) {
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify({ success: true, data: [] }),
-        });
-        return;
-      }
-
-      // Stats
-      if (url.includes(WS_PREFIX + "/stats")) {
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify({ success: true, data: MOCK_STATS }),
+          body: JSON.stringify({ token: MOCK_TOKEN }),
         });
         return;
       }
@@ -513,44 +378,11 @@ async function setupHttpMocks(
         return;
       }
 
-      // Exact workspace path
-      if (url.includes(WS_PREFIX)) {
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify({ success: true, data: WORKSPACE_DATA }),
-        });
-        return;
-      }
-
-      // Unknown workspace route
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({ success: true, data: [] }),
-      });
+      await route.fallback();
     },
   );
 
-  // Scrollback — dedicated route registered AFTER workspace handler.
-  // Playwright tries last-registered routes first, so this intercepts
-  // scrollback requests before the workspace handler's catch-all can.
-  await page.route("**/terminal/sessions/*/scrollback*", async (route) => {
-    scrollbackTracker.calls.push({
-      url: route.request().url(),
-      method: route.request().method(),
-    });
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({
-        success: true,
-        data: { content: "$ mock scrollback\r\n", lines: 1 },
-      }),
-    });
-  });
-
-  return { tokenTracker, scrollbackTracker, restartTracker };
+  return { tokenTracker };
 }
 
 // ---------------------------------------------------------------------------
@@ -558,7 +390,7 @@ async function setupHttpMocks(
 // ---------------------------------------------------------------------------
 
 async function navigateToTerminal(page: Page): Promise<void> {
-  await page.goto(`/ws/${WORKSPACE_ID}/?view=terminal`);
+  await page.goto(`/ws/${WORKSPACE_ID}/terminal`);
   await page.waitForSelector('[role="banner"]', { timeout: 15_000 });
   await expect(page.getByTestId("terminal-tab-bar")).toBeVisible({
     timeout: 10_000,
@@ -783,31 +615,10 @@ test.describe("Terminal disconnect and reconnect", () => {
   });
 
   // -----------------------------------------------------------------------
-  // Reconnect with Scrollback Recovery
+  // Reconnect without tmux-era scrollback recovery
   // -----------------------------------------------------------------------
-  test.describe("Reconnect with Scrollback Recovery", () => {
-    test("fetches scrollback on reconnect after prior connection", async ({
-      page,
-    }) => {
-      await injectWebSocketMock(page);
-      const { scrollbackTracker } = await setupHttpMocks(page);
-      await navigateToTerminal(page);
-
-      // Connect (hasConnected → true) then disconnect
-      const wsIdx = await waitForActiveWS(page);
-      await fireMockWSOpen(page, wsIdx);
-      await expect(
-        page.getByTestId("terminal-connection-overlay"),
-      ).not.toBeVisible({ timeout: 5_000 });
-      await fireMockWSClose(page, wsIdx, 1006);
-
-      // Scrollback is fetched during auto-reconnect (before new WS created)
-      await expect
-        .poll(() => scrollbackTracker.calls.length, { timeout: 10_000 })
-        .toBeGreaterThanOrEqual(1);
-    });
-
-    test("skips scrollback on initial connection failure", async ({
+  test.describe("Reconnect without tmux-era scrollback recovery", () => {
+    test("initial connection failure retries without scrollback API calls", async ({
       page,
     }) => {
       // WS errors + closes WITHOUT opening (hasConnected stays false)
@@ -815,7 +626,7 @@ test.describe("Terminal disconnect and reconnect", () => {
         autoCloseCode: 1006,
         speedUpTimers: true,
       });
-      const { scrollbackTracker } = await setupHttpMocks(page);
+      await setupHttpMocks(page);
       await navigateToTerminal(page);
 
       // Wait for at least one reconnect attempt
@@ -823,8 +634,7 @@ test.describe("Terminal disconnect and reconnect", () => {
         .poll(() => getWSInstanceCount(page), { timeout: 10_000 })
         .toBeGreaterThan(1);
 
-      // Scrollback should NOT have been fetched (hasConnected was never true)
-      expect(scrollbackTracker.calls.length).toBe(0);
+      await expect(page.getByTestId("terminal-connection-overlay")).toBeVisible();
     });
   });
 
@@ -832,7 +642,7 @@ test.describe("Terminal disconnect and reconnect", () => {
   // Backoff Exhaustion
   // -----------------------------------------------------------------------
   test.describe("Backoff Exhaustion", () => {
-    test("shows error state after max initial attempts (3)", async ({
+    test("continues auto-reconnect after initial connection failures", async ({
       page,
     }) => {
       // WS errors + closes on every attempt, timers sped up
@@ -843,17 +653,12 @@ test.describe("Terminal disconnect and reconnect", () => {
       await setupHttpMocks(page);
       await navigateToTerminal(page);
 
-      // INITIAL_CONNECT_CONFIG: 3 attempts, baseDelay=3000, maxDelay=15000
-      // With speedUpTimers all delays are 10ms — exhaustion happens in ~30ms
       const overlay = page.getByTestId("terminal-connection-overlay");
-      await expect(overlay).toContainText("Connection failed", {
-        timeout: 10_000,
-      });
+      await expect(overlay).toContainText("Disconnected", { timeout: 10_000 });
       await expect(
         page.getByTestId("terminal-reconnect-button"),
       ).toBeVisible();
-      // Error state has no "Auto-reconnecting..." subtext
-      await expect(overlay).not.toContainText("Auto-reconnecting...");
+      await expect(overlay).toContainText("Auto-reconnecting...");
     });
 
     test("shows session expired after mid-session reconnect exhaustion", async ({
@@ -928,7 +733,7 @@ test.describe("Terminal disconnect and reconnect", () => {
       page,
     }) => {
       await injectWebSocketMock(page);
-      const { tokenTracker, restartTracker } = await setupHttpMocks(page);
+      const { tokenTracker } = await setupHttpMocks(page);
       await navigateToTerminal(page);
 
       // Connect then crash
@@ -952,20 +757,6 @@ test.describe("Terminal disconnect and reconnect", () => {
       await expect
         .poll(() => tokenTracker.calls.length, { timeout: 5_000 })
         .toBeGreaterThan(tokenCountBefore);
-
-      // Restart endpoint should be called with correct URL params
-      await expect
-        .poll(() => restartTracker.calls.length, { timeout: 5_000 })
-        .toBeGreaterThanOrEqual(1);
-
-      const restartCall =
-        restartTracker.calls[restartTracker.calls.length - 1];
-      expect(restartCall.url).toContain(
-        `session=${encodeURIComponent(SESSION_NAME)}`,
-      );
-      expect(restartCall.url).toContain(
-        `token=${encodeURIComponent(MOCK_TOKEN)}`,
-      );
 
       // Crash overlay should disappear (crashReason cleared)
       await expect(page.getByTestId("crash-overlay")).not.toBeVisible({
@@ -1074,8 +865,7 @@ test.describe("Terminal disconnect and reconnect", () => {
       await expect(page.getByTestId("crash-overlay")).not.toBeVisible();
     });
 
-    test("manual reconnect from error state", async ({ page }) => {
-      // Exhaust initial retries to reach error state
+    test("manual reconnect from disconnected state", async ({ page }) => {
       await injectWebSocketMock(page, {
         autoCloseCode: 1006,
         speedUpTimers: true,
@@ -1083,13 +873,9 @@ test.describe("Terminal disconnect and reconnect", () => {
       await setupHttpMocks(page);
       await navigateToTerminal(page);
 
-      // Wait for error state
       const overlay = page.getByTestId("terminal-connection-overlay");
-      await expect(overlay).toContainText("Connection failed", {
-        timeout: 10_000,
-      });
+      await expect(overlay).toContainText("Disconnected", { timeout: 10_000 });
 
-      // Click reconnect from error state
       const wsCountBefore = await getWSInstanceCount(page);
       await page.getByTestId("terminal-reconnect-button").click();
 

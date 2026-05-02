@@ -13,18 +13,21 @@ import { test, expect } from "../fixtures";
 import { bootApp, createMockWorkspaces } from "../helpers";
 
 test.describe("Keyboard: Global shortcuts", () => {
-  test("Number keys switch views (3=terminal, 0=settings)", async ({
-    page, mockApi,
+  test("Number keys switch views (2=terminal, 0=settings)", async ({
+    page,
+    mockApi,
   }) => {
     await bootApp(page, mockApi);
 
-    // We start on settings. Verify settings is active.
+    // Press 0 to switch to settings and verify the shortcut works from
+    // whichever view the workspace route initially resolves to.
+    await page.keyboard.press("0");
     var settingsBtn = page.locator('button[aria-label="Settings"]');
     await expect(settingsBtn).toHaveAttribute("data-active", "true");
 
-    // Press 3 to switch to terminal (always has provider, won't lose shortcuts)
-    await page.keyboard.press("3");
-    var terminalBtn = page.locator('button[aria-label="Terminal"]');
+    // Press 2 to switch to terminal (shown as Monitor in the rail).
+    await page.keyboard.press("2");
+    var terminalBtn = page.locator('button[aria-label="Monitor"]');
     await expect(terminalBtn).toHaveAttribute("data-active", "true");
 
     // Press 0 to return to settings
@@ -32,7 +35,10 @@ test.describe("Keyboard: Global shortcuts", () => {
     await expect(settingsBtn).toHaveAttribute("data-active", "true");
   });
 
-  test("? opens cheatsheet when no input focused", async ({ page, mockApi }) => {
+  test("? opens cheatsheet when no input focused", async ({
+    page,
+    mockApi,
+  }) => {
     await bootApp(page, mockApi);
 
     await page.keyboard.press("?");
@@ -56,7 +62,10 @@ test.describe("Keyboard: Global shortcuts", () => {
     await expect(searchInput).toHaveValue("?");
   });
 
-  test("Cmd+K focuses search in single-repo mode", async ({ page, mockApi }) => {
+  test("Cmd+K focuses search in single-repo mode", async ({
+    page,
+    mockApi,
+  }) => {
     await bootApp(page, mockApi); // single-repo (repos=[])
 
     await page.keyboard.press("ControlOrMeta+k");
@@ -66,7 +75,8 @@ test.describe("Keyboard: Global shortcuts", () => {
   });
 
   test("Cmd+K opens WorkspaceSwitcher in multi-repo mode", async ({
-    page, mockApi,
+    page,
+    mockApi,
   }) => {
     await bootApp(page, mockApi, {
       multiWorkspace: true,
@@ -80,7 +90,8 @@ test.describe("Keyboard: Global shortcuts", () => {
   });
 
   test("Cmd+K works even when input is focused (bypass suppression)", async ({
-    page, mockApi,
+    page,
+    mockApi,
   }) => {
     await bootApp(page, mockApi);
 

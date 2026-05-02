@@ -133,6 +133,7 @@ func readGitHeadBranch(repoPath string) string {
 	return after
 }
 
+//nolint:gocognit,cyclop,funlen // Aggregates workspace, repo, agent, and local-state views for the UI.
 func (s *workspaceServiceImpl) ListWorkspaces(ctx context.Context) ([]WorkspaceListItem, error) {
 	// Store is authoritative when set: list its workspaces directly so
 	// the API surface reflects fleet-db's actual contents — not whatever
@@ -266,6 +267,8 @@ func (s *workspaceServiceImpl) GetWorkspace(ctx context.Context, wsID string) (*
 // is found, (nil, false, nil) when the ID is unknown, or (nil, false,
 // err) on a load error. Used by GetWorkspace as the fallback when the
 // multiPool registry has no entry for the workspace.
+//
+//nolint:gocognit,cyclop,funlen // Lookup bridges local state with store data while preserving legacy shape.
 func (s *workspaceServiceImpl) lookupWorkspace(ctx context.Context, wsID string) (*ops.WorkspaceData, bool, error) {
 	// Prefer the store — single Get call, no full-config scan.
 	if s.store != nil {

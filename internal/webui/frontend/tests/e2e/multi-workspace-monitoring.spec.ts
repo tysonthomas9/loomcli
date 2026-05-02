@@ -134,6 +134,11 @@ const issuesB = [
   },
 ];
 
+const issuesByWorkspace = {
+  [WS_A.id]: issuesA,
+  [WS_B.id]: issuesB,
+};
+
 // -- Per-workspace loom status --
 
 const loomStatusA = {
@@ -268,40 +273,6 @@ function ok<T>(data: T): string {
 }
 
 /**
- * Install a browser-level fetch interceptor for workspace-scoped issues.
- * Returns different issues depending on which workspace ID is in the URL.
- */
-async function installIssuesMock(
-  page: Page,
-  issuesByWs: Record<string, unknown[]>,
-) {
-  await page.addInitScript((data: Record<string, unknown[]>) => {
-    (window as any).__issuesByWs = data;
-
-    const originalFetch = window.fetch.bind(window);
-    window.fetch = function (
-      input: RequestInfo | URL,
-      init?: RequestInit,
-    ): Promise<Response> {
-      const url = typeof input === "string" ? input : input.toString();
-      // Match: /api/workspaces/{id}/issues?... but NOT /api/workspaces/{id}/issues/{id}
-      const match = url.match(/\/api\/workspaces\/([^/]+)\/issues(\?|$)/);
-      if (match && (init?.method ?? "GET") === "GET") {
-        const wsId = match[1];
-        const issues = (window as any).__issuesByWs[wsId] ?? [];
-        return Promise.resolve(
-          new Response(JSON.stringify({ success: true, data: issues }), {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          }),
-        );
-      }
-      return originalFetch(input, init);
-    };
-  }, issuesByWs);
-}
-
-/**
  * Set up all API mocks for multi-workspace tests.
  * Returns a `setActiveWorkspace` function to control which workspace's loom data is served.
  *
@@ -310,6 +281,7 @@ async function installIssuesMock(
  */
 async function setupMocks(
   page: Page,
+  issuesByWs: Record<string, typeof issuesA> = {},
 ): Promise<{ setActiveWorkspace: (id: string) => void }> {
   let currentWsId = WS_A.id;
   const setActiveWorkspace = (id: string) => {
@@ -352,19 +324,80 @@ async function setupMocks(
       }
     }
 
-    // /api/workspaces/{id}/stats
-    if (pathname.match(/\/api\/workspaces\/[^/]+\/stats$/)) {
+    const workspaceIssueListMatch = pathname.match(
+      /^\/api\/workspaces\/([^/]+)\/issues$/,
+    );
+    if (workspaceIssueListMatch) {
+      const issues = issuesByWs[workspaceIssueListMatch[1]] ?? [];
       await route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: ok({
-          total_issues: 0,
-          open_issues: 0,
-          in_progress_issues: 0,
-          closed_issues: 0,
+        body: ok(issues),
+      });
+      return;
+    }
+
+    const workspaceReadyMatch = pathname.match(
+      /^\/api\/workspaces\/([^/]+)\/ready$/,
+    );
+    if (workspaceReadyMatch) {
+      const issues = issuesByWs[workspaceReadyMatch[1]] ?? [];
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: ok(issues.filter((issue) => issue.status === "open")),
+      });
+      return;
+    }
+
+    const workspaceGraphMatch = pathname.match(
+      /^\/api\/workspaces\/([^/]+)\/issues\/graph$/,
+    );
+    if (workspaceGraphMatch) {
+      const issues = issuesByWs[workspaceGraphMatch[1]] ?? [];
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: ok(issues),
+      });
+      return;
+    }
+
+    const workspaceIssueDetailMatch = pathname.match(
+      /^\/api\/workspaces\/([^/]+)\/issues\/([^/]+)$/,
+    );
+    if (workspaceIssueDetailMatch) {
+      const [, wsId, issueId] = workspaceIssueDetailMatch;
+      const issue = (issuesByWs[wsId] ?? []).find((item) => item.id === issueId);
+      await route.fulfill({
+        status: issue ? 200 : 404,
+        contentType: "application/json",
+        body: issue
+          ? ok(issue)
+          : JSON.stringify({ success: false, error: "Issue not found" }),
+      });
+      return;
+    }
+
+    // /api/workspaces/{id}/stats
+    if (pathname.match(/\/api\/workspaces\/[^/]+\/stats$/)) {
+      const wsId = pathname.split("/")[3];
+      const issues = issuesByWs[wsId] ?? [];
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          total_issues: issues.length,
+          open_issues: issues.filter((issue) => issue.status === "open").length,
+          in_progress_issues: issues.filter(
+            (issue) => issue.status === "in_progress",
+          ).length,
+          closed_issues: issues.filter((issue) => issue.status === "closed")
+            .length,
           blocked_issues: 0,
           deferred_issues: 0,
-          ready_issues: 0,
+          ready_issues: issues.filter((issue) => issue.status === "open")
+            .length,
           tombstone_issues: 0,
           pinned_issues: 0,
           epics_eligible_for_closure: 0,
@@ -447,6 +480,36 @@ async function setupMocks(
   });
 
   // Health check
+  await page.route("**/api/config", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ mode: "open" }),
+    });
+  });
+
+  await page.route("**/api/backends", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: ok([
+        {
+          name: "shell",
+          display_name: "Shell",
+          available: true,
+        },
+      ]),
+    });
+  });
+
+  await page.route("**/health", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ status: "ok" }),
+    });
+  });
+
   await page.route("**/api/health", async (route) => {
     await route.fulfill({
       status: 200,
@@ -504,12 +567,6 @@ async function setupMocks(
         contentType: "application/json",
         body: JSON.stringify({ agents }),
       });
-    } else if (url.includes("/api/observability/metrics")) {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify(mockMetrics),
-      });
     } else if (url.includes("/api/monitor/usage")) {
       await route.fulfill({
         status: 200,
@@ -544,6 +601,14 @@ async function setupMocks(
     }
   });
 
+  await page.route("**/api/observability/metrics", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(mockMetrics),
+    });
+  });
+
   return { setActiveWorkspace };
 }
 
@@ -552,12 +617,10 @@ test.describe("Multi-Workspace Monitoring Journey", () => {
     test("workspace A loads with correct header and issues", async ({
       page,
     }) => {
-      await installIssuesMock(page, {
-        [WS_A.id]: issuesA,
-        [WS_B.id]: issuesB,
+      await setupMocks(page, issuesByWorkspace);
+      await page.goto(`/ws/${WS_A.id}/kanban`, {
+        waitUntil: "domcontentloaded",
       });
-      await setupMocks(page);
-      await page.goto(`/ws/${WS_A.id}/`, { waitUntil: "domcontentloaded" });
 
       // Header shows workspace name
       await expect(
@@ -576,15 +639,13 @@ test.describe("Multi-Workspace Monitoring Journey", () => {
     test("navigating to workspace B via URL shows workspace B data", async ({
       page,
     }) => {
-      await installIssuesMock(page, {
-        [WS_A.id]: issuesA,
-        [WS_B.id]: issuesB,
-      });
-      const { setActiveWorkspace } = await setupMocks(page);
+      const { setActiveWorkspace } = await setupMocks(page, issuesByWorkspace);
 
       // Navigate directly to workspace B
       setActiveWorkspace(WS_B.id);
-      await page.goto(`/ws/${WS_B.id}/`, { waitUntil: "domcontentloaded" });
+      await page.goto(`/ws/${WS_B.id}/kanban`, {
+        waitUntil: "domcontentloaded",
+      });
 
       // WS_B issues should appear
       await expect(page.getByText("WS-B: Add REST endpoint")).toBeVisible({
@@ -601,25 +662,18 @@ test.describe("Multi-Workspace Monitoring Journey", () => {
     test("Ctrl+K opens switcher, search filters, Enter switches workspace", async ({
       page,
     }) => {
-      await installIssuesMock(page, {
-        [WS_A.id]: issuesA,
-        [WS_B.id]: issuesB,
+      const { setActiveWorkspace } = await setupMocks(page, issuesByWorkspace);
+      await page.goto(`/ws/${WS_A.id}/kanban`, {
+        waitUntil: "domcontentloaded",
       });
-      const { setActiveWorkspace } = await setupMocks(page);
-      await page.goto(`/ws/${WS_A.id}/`, { waitUntil: "domcontentloaded" });
 
       // Wait for board to load and workspace data to resolve
       await expect(page.getByText("WS-A: Build login page")).toBeVisible({
         timeout: 10000,
       });
-      // Wait for workspace API to complete (needed for isMultiRepo → Ctrl+K handler)
-      await page.waitForResponse(
-        (res) =>
-          res.url().includes(`/api/workspaces/${WS_A.id}`) &&
-          !res.url().includes("/events") &&
-          res.status() === 200,
-        { timeout: 10000 },
-      );
+      await expect(
+        page.getByRole("button", { name: /Active workspace: Frontend/ }),
+      ).toBeVisible({ timeout: 10000 });
       // Let React re-render with workspace data
       await page.waitForTimeout(500);
 
@@ -658,12 +712,10 @@ test.describe("Multi-Workspace Monitoring Journey", () => {
     test("switching workspace via URL clears previous workspace data", async ({
       page,
     }) => {
-      await installIssuesMock(page, {
-        [WS_A.id]: issuesA,
-        [WS_B.id]: issuesB,
+      const { setActiveWorkspace } = await setupMocks(page, issuesByWorkspace);
+      await page.goto(`/ws/${WS_A.id}/kanban`, {
+        waitUntil: "domcontentloaded",
       });
-      const { setActiveWorkspace } = await setupMocks(page);
-      await page.goto(`/ws/${WS_A.id}/`, { waitUntil: "domcontentloaded" });
 
       // Confirm WS_A data loaded
       await expect(page.getByText("WS-A: Build login page")).toBeVisible({
@@ -673,7 +725,9 @@ test.describe("Multi-Workspace Monitoring Journey", () => {
 
       // Switch to WS_B via URL navigation
       setActiveWorkspace(WS_B.id);
-      await page.goto(`/ws/${WS_B.id}/`, { waitUntil: "domcontentloaded" });
+      await page.goto(`/ws/${WS_B.id}/kanban`, {
+        waitUntil: "domcontentloaded",
+      });
 
       // WS_B data present
       await expect(page.getByText("WS-B: Add REST endpoint")).toBeVisible({
@@ -689,12 +743,8 @@ test.describe("Multi-Workspace Monitoring Journey", () => {
 
   test.describe("Monitor View", () => {
     test("Monitor view renders dashboard with agent data", async ({ page }) => {
-      await installIssuesMock(page, {
-        [WS_A.id]: issuesA,
-        [WS_B.id]: issuesB,
-      });
-      await setupMocks(page);
-      await page.goto(`/ws/${WS_A.id}/?view=monitor`, {
+      await setupMocks(page, issuesByWorkspace);
+      await page.goto(`/ws/${WS_A.id}/monitor`, {
         waitUntil: "domcontentloaded",
       });
 
@@ -722,12 +772,8 @@ test.describe("Multi-Workspace Monitoring Journey", () => {
     });
 
     test("clicking agent opens AgentDetailPanel", async ({ page }) => {
-      await installIssuesMock(page, {
-        [WS_A.id]: issuesA,
-        [WS_B.id]: issuesB,
-      });
-      await setupMocks(page);
-      await page.goto(`/ws/${WS_A.id}/?view=monitor`, {
+      await setupMocks(page, issuesByWorkspace);
+      await page.goto(`/ws/${WS_A.id}/monitor`, {
         waitUntil: "domcontentloaded",
       });
 
@@ -759,12 +805,8 @@ test.describe("Multi-Workspace Monitoring Journey", () => {
     test("Observability view renders dashboard with metric panels", async ({
       page,
     }) => {
-      await installIssuesMock(page, {
-        [WS_A.id]: issuesA,
-        [WS_B.id]: issuesB,
-      });
-      await setupMocks(page);
-      await page.goto(`/ws/${WS_A.id}/?view=observability`, {
+      await setupMocks(page, issuesByWorkspace);
+      await page.goto(`/ws/${WS_A.id}/observability`, {
         waitUntil: "domcontentloaded",
       });
 
@@ -803,24 +845,18 @@ test.describe("Multi-Workspace Monitoring Journey", () => {
 
   test.describe("Screenshots", () => {
     test("captures workspace switcher screenshot", async ({ page }) => {
-      await installIssuesMock(page, {
-        [WS_A.id]: issuesA,
-        [WS_B.id]: issuesB,
+      await setupMocks(page, issuesByWorkspace);
+      await page.goto(`/ws/${WS_A.id}/kanban`, {
+        waitUntil: "domcontentloaded",
       });
-      await setupMocks(page);
-      await page.goto(`/ws/${WS_A.id}/`, { waitUntil: "domcontentloaded" });
 
       // Wait for board and workspace data
       await expect(page.getByText("WS-A: Build login page")).toBeVisible({
         timeout: 10000,
       });
-      await page.waitForResponse(
-        (res) =>
-          res.url().includes(`/api/workspaces/${WS_A.id}`) &&
-          !res.url().includes("/events") &&
-          res.status() === 200,
-        { timeout: 10000 },
-      );
+      await expect(
+        page.getByRole("button", { name: /Active workspace: Frontend/ }),
+      ).toBeVisible({ timeout: 10000 });
       await page.waitForTimeout(500);
       await page.locator("main").click();
 
@@ -834,12 +870,8 @@ test.describe("Multi-Workspace Monitoring Journey", () => {
     });
 
     test("captures monitor dashboard screenshot", async ({ page }) => {
-      await installIssuesMock(page, {
-        [WS_A.id]: issuesA,
-        [WS_B.id]: issuesB,
-      });
-      await setupMocks(page);
-      await page.goto(`/ws/${WS_A.id}/?view=monitor`, {
+      await setupMocks(page, issuesByWorkspace);
+      await page.goto(`/ws/${WS_A.id}/monitor`, {
         waitUntil: "domcontentloaded",
       });
 
@@ -857,12 +889,8 @@ test.describe("Multi-Workspace Monitoring Journey", () => {
     });
 
     test("captures observability dashboard screenshot", async ({ page }) => {
-      await installIssuesMock(page, {
-        [WS_A.id]: issuesA,
-        [WS_B.id]: issuesB,
-      });
-      await setupMocks(page);
-      await page.goto(`/ws/${WS_A.id}/?view=observability`, {
+      await setupMocks(page, issuesByWorkspace);
+      await page.goto(`/ws/${WS_A.id}/observability`, {
         waitUntil: "domcontentloaded",
       });
 

@@ -1,6 +1,6 @@
 /**
  * Visual regression screenshots for terminal-related components:
- * SessionNamePrompt, WelcomeBanner, HelpPopover, SearchBar.
+ * SessionNamePrompt, WelcomeBanner, and HelpPopover.
  *
  * These components have unit tests but CSS modules are mocked there,
  * so visual regression with real CSS is needed to catch layout regressions.
@@ -11,7 +11,6 @@ import {
   sessionNamePromptUrl,
   welcomeBannerUrl,
   helpPopoverUrl,
-  searchBarUrl,
 } from "../helpers/fixture-routes";
 
 // --- SessionNamePrompt ---------------------------------------------------
@@ -133,54 +132,5 @@ test.describe("Visual Regression - HelpPopover", () => {
     await expect(popover).toBeVisible();
 
     await expect(page).toHaveScreenshot("help-popover-open.png");
-  });
-});
-
-// --- SearchBar -----------------------------------------------------------
-
-test.describe("Visual Regression - SearchBar", () => {
-  test.use({ viewport: { width: 1280, height: 720 } });
-
-  test("empty", async ({ screenshotPage: page }) => {
-    await page.goto(searchBarUrl());
-    await waitForStableContent(page);
-
-    const bar = page.getByTestId("terminal-search-bar");
-    await expect(bar).toBeVisible();
-
-    await expect(page).toHaveScreenshot("search-bar-empty.png");
-  });
-
-  test("with text no matches", async ({ screenshotPage: page }) => {
-    await page.goto(
-      searchBarUrl({ value: "findme", matchIndex: 0, matchCount: 0 }),
-    );
-    await waitForStableContent(page);
-
-    await expect(page).toHaveScreenshot("search-bar-no-matches.png");
-  });
-
-  test("with text and matches", async ({ screenshotPage: page }) => {
-    await page.goto(
-      searchBarUrl({ value: "hello", matchIndex: 2, matchCount: 7 }),
-    );
-    await waitForStableContent(page);
-
-    await expect(page).toHaveScreenshot("search-bar-with-matches.png");
-  });
-
-  test("case and regex toggles active", async ({ screenshotPage: page }) => {
-    await page.goto(
-      searchBarUrl({
-        value: "pattern",
-        matchIndex: 0,
-        matchCount: 3,
-        caseSensitive: true,
-        regex: true,
-      }),
-    );
-    await waitForStableContent(page);
-
-    await expect(page).toHaveScreenshot("search-bar-toggles-active.png");
   });
 });

@@ -51,9 +51,14 @@ export function AgentSection({
     return [...fleetAgents, ...configPlaceholders];
   }, [fleetAgents, workspaceConfigAgents, workspace?.name]);
 
+  if (agents.length === 0) return <></>;
+
   return (
-    <div className={styles.section}>
-      <div className={styles.header}>Agents</div>
+    <div className={`${styles.section} agentSection`}>
+      <div className={`${styles.header} agentSectionHeader`}>
+        <span>Agents</span>
+        <span className="sectionCount">{agents.length}</span>
+      </div>
       <div className={styles.list}>
         {agents.map((agent) => {
           const handleClick = onAgentClick
@@ -80,7 +85,7 @@ export function AgentSection({
             >
               <AgentCard
                 agent={agent}
-                showRepoBadge={false}
+                showRepoBadge={true}
                 taskTitle={agentTasks?.[agent.name]?.title}
               />
               <div className={styles.scopeLine}>

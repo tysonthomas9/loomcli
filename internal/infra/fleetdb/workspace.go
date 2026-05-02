@@ -132,4 +132,3 @@ func (s *workspaceStore) Update(ctx context.Context, key string, patch store.Wor
 func (s *workspaceStore) Delete(ctx context.Context, key string) error {
 	return s.client.do(ctx, "DELETE", "/api/v1/admin/workspaces/"+pathEscape(key)+"?force=true", nil, nil)
 }
-

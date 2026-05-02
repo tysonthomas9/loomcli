@@ -641,9 +641,9 @@ test.describe("E2E Journey: Review agent code changes", () => {
     // Verify current task section shows task info
     await expect(panel.getByText("Fix authentication bug")).toBeVisible();
 
-    // Verify commit status badges
-    await expect(panel.getByText("+3 ahead")).toBeVisible();
-    await expect(panel.getByText("-1 behind")).toBeVisible();
+    // Verify agent metadata in the Info tab
+    await expect(panel.getByText("/tmp/worktrees/ember")).toBeVisible();
+    await expect(panel.getByLabel("Info").getByText("fix-auth-bug")).toBeVisible();
   });
 
   test("Step 4-5: Panel mutual exclusivity (agent → issue → agent)", async () => {
@@ -712,10 +712,7 @@ test.describe("E2E Journey: Review agent code changes", () => {
     await expect(gitPanel.getByText("Fix token validation")).toBeVisible();
     await expect(gitPanel.getByText("Add auth tests")).toBeVisible();
 
-    // Verify working tree changes section
-    await expect(gitPanel.getByText("Working Tree")).toBeVisible();
-    await expect(gitPanel.getByText("src/auth.go")).toBeVisible();
-    await expect(gitPanel.getByText("src/auth_test.go")).toBeVisible();
+    // Working tree file details are covered by the Diff tab.
   });
 
   test("Step 7-8: Diff tab renders files, expand shows diff viewer", async () => {

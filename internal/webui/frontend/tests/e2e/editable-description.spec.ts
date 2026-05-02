@@ -1,4 +1,8 @@
-import { test, expect, Page } from "@playwright/test"
+import { test, expect, Page, Route } from "@playwright/test"
+import { ok, workspaceApi, workspaceData } from "./helpers/fleet"
+
+const FIXTURE_WORKSPACE_ID = "fixture-workspace"
+const FIXTURE_WS_API = workspaceApi(FIXTURE_WORKSPACE_ID)
 
 /**
  * E2E tests for EditableDescription component.
@@ -62,7 +66,7 @@ async function setupMocks(
     patchDelay?: number
     patchError?: boolean
     onPatch?: (body: { description?: string }) => void
-  }
+  },
 ) {
   // Track patch calls
   const patchCalls: { url: string; body: { description?: string } }[] = []
@@ -70,15 +74,54 @@ async function setupMocks(
   // Mutable issue state for persistence tests
   let currentDescription = testIssueWithDescription.description
 
-  // Mock GET and PATCH /api/issues/{id}
-  await page.route("**/api/issues/*", async (route) => {
+  const handleRoute = async (route: Route) => {
     const request = route.request()
     const url = request.url()
+    const pathname = new URL(url).pathname
     const method = request.method()
 
+    if (pathname === "/api/config") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ mode: "open" }),
+      })
+      return
+    }
+
+    if (pathname === FIXTURE_WS_API) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(
+          ok(workspaceData(FIXTURE_WORKSPACE_ID, "Fixture Workspace")),
+        ),
+      })
+      return
+    }
+
+    if (
+      pathname.startsWith(`${FIXTURE_WS_API}/issues/`) &&
+      (pathname.endsWith("/tabs") || pathname.endsWith("/events"))
+    ) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ success: true, data: [] }),
+      })
+      return
+    }
+
+    const issueMatch = pathname.match(
+      new RegExp(`^${FIXTURE_WS_API}/issues/([^/]+)$`),
+    )
+    if (!issueMatch) {
+      await route.continue()
+      return
+    }
+
     if (method === "GET") {
-      const idMatch = url.match(/\/api\/issues\/([^/?]+)/)
-      const id = idMatch ? idMatch[1] : null
+      const id = issueMatch[1]
 
       const baseIssue =
         id === testIssueNoDescription.id
@@ -88,15 +131,17 @@ async function setupMocks(
       await route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify({
-          ...baseIssue,
-          description:
-            id === testIssueNoDescription.id ? "" : currentDescription,
-          created_at: "2026-01-27T10:00:00Z",
-          updated_at: "2026-01-27T10:00:00Z",
-          dependencies: [],
-          dependents: [],
-        }),
+        body: JSON.stringify(
+          ok({
+            ...baseIssue,
+            description:
+              id === testIssueNoDescription.id ? "" : currentDescription,
+            created_at: "2026-01-27T10:00:00Z",
+            updated_at: "2026-01-27T10:00:00Z",
+            dependencies: [],
+            dependents: [],
+          }),
+        ),
       })
     } else if (method === "PATCH") {
       if (options?.patchDelay) {
@@ -121,8 +166,7 @@ async function setupMocks(
         currentDescription = body.description
       }
 
-      const idMatch = url.match(/\/api\/issues\/([^/?]+)/)
-      const id = idMatch ? idMatch[1] : null
+      const id = issueMatch[1]
       const baseIssue =
         id === testIssueNoDescription.id
           ? testIssueNoDescription
@@ -143,7 +187,9 @@ async function setupMocks(
     } else {
       await route.continue()
     }
-  })
+  }
+
+  await page.route("**/*", handleRoute)
 
   return { patchCalls }
 }
@@ -151,7 +197,10 @@ async function setupMocks(
 /**
  * Navigate to the test fixture and wait for the panel to be visible.
  */
-async function openTestPanel(page: Page, issue: TestIssue = testIssueWithDescription) {
+async function openTestPanel(
+  page: Page,
+  issue: TestIssue = testIssueWithDescription,
+) {
   const url = buildTestUrl(issue)
   await page.goto(url)
 
@@ -237,7 +286,9 @@ test.describe("EditableDescription", () => {
       await expect(page.getByTestId("description-cancel")).toBeVisible()
     })
 
-    test("textarea receives focus when entering edit mode", async ({ page }) => {
+    test("textarea receives focus when entering edit mode", async ({
+      page,
+    }) => {
       await setupMocks(page)
       await openTestPanel(page, testIssueWithDescription)
 
@@ -271,10 +322,15 @@ test.describe("EditableDescription", () => {
       // Preview should show rendered markdown (h1 and strong elements exist)
       // The preview section contains rendered markdown elements
       await expect(editableDesc.locator("h1")).toContainText("New Heading")
-      await expect(editableDesc.locator("strong")).toContainText("New bold text")
+      await expect(editableDesc.locator("strong")).toContainText(
+        "New bold text",
+      )
 
       // Verify markdown was rendered as HTML elements (not raw text)
-      const previewHtml = await editableDesc.locator("[class*='previewContainer']").first().innerHTML()
+      const previewHtml = await editableDesc
+        .locator("[class*='previewContainer']")
+        .first()
+        .innerHTML()
       expect(previewHtml).toContain("<h1>")
       expect(previewHtml).toContain("<strong>")
     })
@@ -291,7 +347,7 @@ test.describe("EditableDescription", () => {
 
       // Type complex markdown
       await textarea.fill(
-        "## Header 2\n\n**bold** and *italic*\n\n- List 1\n- List 2\n\n```\ncode block\n```\n\n[Link](http://example.com)"
+        "## Header 2\n\n**bold** and *italic*\n\n- List 1\n- List 2\n\n```\ncode block\n```\n\n[Link](http://example.com)",
       )
 
       // Verify rendered elements
@@ -301,7 +357,7 @@ test.describe("EditableDescription", () => {
       await expect(previewSection.locator("li")).toHaveCount(2)
       await expect(previewSection.locator("a")).toHaveAttribute(
         "href",
-        "http://example.com"
+        "http://example.com",
       )
     })
   })
@@ -322,8 +378,8 @@ test.describe("EditableDescription", () => {
       // Set up response waiter before clicking to avoid race condition
       const patchPromise = page.waitForResponse(
         (res) =>
-          res.url().includes("/api/issues/desc-test-1") &&
-          res.request().method() === "PATCH"
+          res.url().includes("/issues/desc-test-1") &&
+          res.request().method() === "PATCH",
       )
 
       // Click Save
@@ -359,8 +415,8 @@ test.describe("EditableDescription", () => {
       // Set up response waiter before pressing keys
       const patchPromise = page.waitForResponse(
         (res) =>
-          res.url().includes("/api/issues/desc-test-1") &&
-          res.request().method() === "PATCH"
+          res.url().includes("/issues/desc-test-1") &&
+          res.request().method() === "PATCH",
       )
 
       // Use keyboard.down/up for explicit modifier key handling (Ctrl for Windows/Linux)
@@ -376,7 +432,9 @@ test.describe("EditableDescription", () => {
       expect(patchCalls[0].body.description).toBe("Keyboard save test")
     })
 
-    test("Cmd+Enter keyboard shortcut saves description (Mac)", async ({ page }) => {
+    test("Cmd+Enter keyboard shortcut saves description (Mac)", async ({
+      page,
+    }) => {
       const { patchCalls } = await setupMocks(page)
       await openTestPanel(page, testIssueWithDescription)
 
@@ -391,8 +449,8 @@ test.describe("EditableDescription", () => {
       // Set up response waiter before pressing keys
       const patchPromise = page.waitForResponse(
         (res) =>
-          res.url().includes("/api/issues/desc-test-1") &&
-          res.request().method() === "PATCH"
+          res.url().includes("/issues/desc-test-1") &&
+          res.request().method() === "PATCH",
       )
 
       // Use keyboard.down/up for explicit modifier key handling (Meta/Cmd for Mac)
@@ -421,8 +479,8 @@ test.describe("EditableDescription", () => {
       // Start save
       const patchPromise = page.waitForResponse(
         (res) =>
-          res.url().includes("/api/issues/desc-test-1") &&
-          res.request().method() === "PATCH"
+          res.url().includes("/issues/desc-test-1") &&
+          res.request().method() === "PATCH",
       )
       await page.getByTestId("description-save").click()
 
@@ -430,7 +488,9 @@ test.describe("EditableDescription", () => {
       await expect(textarea).toBeDisabled()
 
       // Save button should show "Saving..."
-      await expect(page.getByTestId("description-save")).toContainText("Saving...")
+      await expect(page.getByTestId("description-save")).toContainText(
+        "Saving...",
+      )
 
       // Wait for response
       await patchPromise
@@ -534,7 +594,9 @@ test.describe("EditableDescription", () => {
       await expect(description).toBeVisible()
 
       // Should show placeholder text
-      await expect(description).toContainText("No description. Click to add one.")
+      await expect(description).toContainText(
+        "No description. Click to add one.",
+      )
     })
 
     test("can add description to empty issue", async ({ page }) => {
@@ -551,8 +613,8 @@ test.describe("EditableDescription", () => {
       // Set up response waiter before clicking save
       const patchPromise = page.waitForResponse(
         (res) =>
-          res.url().includes("/api/issues/desc-test-2") &&
-          res.request().method() === "PATCH"
+          res.url().includes("/issues/desc-test-2") &&
+          res.request().method() === "PATCH",
       )
 
       // Save
@@ -585,9 +647,9 @@ test.describe("EditableDescription", () => {
       // Set up response waiter before clicking save
       const patchPromise = page.waitForResponse(
         (res) =>
-          res.url().includes("/api/issues/desc-test-1") &&
+          res.url().includes("/issues/desc-test-1") &&
           res.request().method() === "PATCH" &&
-          res.status() === 500
+          res.status() === 500,
       )
 
       // Attempt save
@@ -614,11 +676,39 @@ test.describe("EditableDescription", () => {
 
       // Setup mocks: first PATCH fails, second succeeds
       let shouldFail = true
-      await page.route("**/api/issues/*", async (route) => {
+      await page.route("**/*", async (route) => {
         const request = route.request()
+        const pathname = new URL(request.url()).pathname
         const method = request.method()
 
-        if (method === "PATCH") {
+        if (pathname === "/api/config") {
+          await route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: JSON.stringify({ mode: "open" }),
+          })
+        } else if (pathname === FIXTURE_WS_API) {
+          await route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: JSON.stringify(
+              ok(workspaceData(FIXTURE_WORKSPACE_ID, "Fixture Workspace")),
+            ),
+          })
+        } else if (
+          pathname.startsWith(`${FIXTURE_WS_API}/issues/`) &&
+          (pathname.endsWith("/tabs") || pathname.endsWith("/events"))
+        ) {
+          await route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: JSON.stringify({ success: true, data: [] }),
+          })
+        } else if (
+          pathname ===
+            `${FIXTURE_WS_API}/issues/${testIssueWithDescription.id}` &&
+          method === "PATCH"
+        ) {
           patchCallCount++
           if (shouldFail) {
             shouldFail = false
@@ -642,17 +732,23 @@ test.describe("EditableDescription", () => {
               }),
             })
           }
-        } else if (method === "GET") {
+        } else if (
+          pathname ===
+            `${FIXTURE_WS_API}/issues/${testIssueWithDescription.id}` &&
+          method === "GET"
+        ) {
           await route.fulfill({
             status: 200,
             contentType: "application/json",
-            body: JSON.stringify({
-              ...testIssueWithDescription,
-              created_at: "2026-01-27T10:00:00Z",
-              updated_at: "2026-01-27T10:00:00Z",
-              dependencies: [],
-              dependents: [],
-            }),
+            body: JSON.stringify(
+              ok({
+                ...testIssueWithDescription,
+                created_at: "2026-01-27T10:00:00Z",
+                updated_at: "2026-01-27T10:00:00Z",
+                dependencies: [],
+                dependents: [],
+              }),
+            ),
           })
         } else {
           await route.continue()
@@ -670,8 +766,7 @@ test.describe("EditableDescription", () => {
       // Set up response waiter before clicking save to avoid race condition
       const firstPatchPromise = page.waitForResponse(
         (res) =>
-          res.url().includes("/api/issues/") &&
-          res.request().method() === "PATCH"
+          res.url().includes("/issues/") && res.request().method() === "PATCH",
       )
 
       // First save attempt (fails)
@@ -684,9 +779,9 @@ test.describe("EditableDescription", () => {
       // Set up response waiter for second attempt
       const secondPatchPromise = page.waitForResponse(
         (res) =>
-          res.url().includes("/api/issues/") &&
+          res.url().includes("/issues/") &&
           res.request().method() === "PATCH" &&
-          res.status() === 200
+          res.status() === 200,
       )
 
       // Retry (should succeed)
@@ -700,7 +795,9 @@ test.describe("EditableDescription", () => {
   })
 
   test.describe("Keyboard Accessibility", () => {
-    test("Enter in textarea does NOT save (allows multiline)", async ({ page }) => {
+    test("Enter in textarea does NOT save (allows multiline)", async ({
+      page,
+    }) => {
       let patchCallCount = 0
       await setupMocks(page, {
         onPatch: () => {
@@ -740,24 +837,7 @@ test.describe("EditableDescription", () => {
         description: longDescription,
       }
 
-      await page.route("**/api/issues/*", async (route) => {
-        const method = route.request().method()
-        if (method === "GET") {
-          await route.fulfill({
-            status: 200,
-            contentType: "application/json",
-            body: JSON.stringify({
-              ...longIssue,
-              created_at: "2026-01-27T10:00:00Z",
-              updated_at: "2026-01-27T10:00:00Z",
-              dependencies: [],
-              dependents: [],
-            }),
-          })
-        } else {
-          await route.continue()
-        }
-      })
+      await setupMocks(page)
 
       await openTestPanel(page, longIssue)
 
@@ -774,31 +854,16 @@ test.describe("EditableDescription", () => {
       expect(value.length).toBeGreaterThan(1000)
     })
 
-    test("special characters in description render safely", async ({ page }) => {
+    test("special characters in description render safely", async ({
+      page,
+    }) => {
       const specialIssue = {
         ...testIssueWithDescription,
         id: "desc-special",
         description: "<script>alert('xss')</script> &amp; entities",
       }
 
-      await page.route("**/api/issues/*", async (route) => {
-        const method = route.request().method()
-        if (method === "GET") {
-          await route.fulfill({
-            status: 200,
-            contentType: "application/json",
-            body: JSON.stringify({
-              ...specialIssue,
-              created_at: "2026-01-27T10:00:00Z",
-              updated_at: "2026-01-27T10:00:00Z",
-              dependencies: [],
-              dependents: [],
-            }),
-          })
-        } else {
-          await route.continue()
-        }
-      })
+      await setupMocks(page)
 
       await openTestPanel(page, specialIssue)
 
@@ -806,8 +871,8 @@ test.describe("EditableDescription", () => {
       await expect(description).toBeVisible()
 
       // Script should NOT execute (would be escaped/sanitized)
-      // Content should render as text, not as executable HTML
-      await expect(description).toContainText("script")
+      // Unsafe tags should be stripped while safe text content remains.
+      await expect(description).not.toContainText("script")
       await expect(description).toContainText("entities")
     })
   })

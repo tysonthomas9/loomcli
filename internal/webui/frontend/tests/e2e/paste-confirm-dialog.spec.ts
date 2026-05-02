@@ -13,6 +13,21 @@ import { pasteConfirmUrl } from "../helpers/fixture-routes"
 const FIXTURE_URL = pasteConfirmUrl()
 
 test.describe("PasteConfirmDialog", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.route("**/api/config", async (route) => {
+      const url = new URL(route.request().url())
+      if (url.pathname !== "/api/config") {
+        await route.fallback()
+        return
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ mode: "open" }),
+      })
+    })
+  })
+
   test.describe("Display", () => {
     test("dialog appears when opened with multi-line text", async ({ page }) => {
       await page.goto(FIXTURE_URL)

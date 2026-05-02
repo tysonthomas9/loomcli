@@ -63,6 +63,7 @@ vi.mock("@/api", () => ({
   addDependency: vi.fn(),
   removeDependency: vi.fn(),
   getIssueEvents: vi.fn().mockImplementation(() => new Promise(() => {})),
+  getTaskLogPhases: vi.fn().mockResolvedValue([]),
 }));
 
 // Mock terminal API for cleanup verification

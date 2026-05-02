@@ -1,13 +1,14 @@
 /**
  * SSE stream mock for simulating real-time events in Playwright E2E tests.
- * Uses page.route() to intercept /api/events and stream SSE data back.
+ * Uses page.route() to intercept workspace-scoped /api/workspaces/:id/events
+ * and stream SSE data back.
  */
 
 import type { Page, Route } from '@playwright/test';
 import type { MutationPayload } from '../../src/api/sse';
 
 export interface SSEMockController {
-  /** Intercepts GET /api/events and holds the response open as an SSE stream. */
+  /** Intercepts GET /api/workspaces/:id/events and holds the response open as an SSE stream. */
   connect(): Promise<void>;
   /** Pushes a `event: mutation` frame to the connected stream. */
   sendMutation(payload: MutationPayload): void;
@@ -25,7 +26,7 @@ export interface SSEMockController {
  * Usage:
  *   const sse = createSSEMock(page);
  *   await sse.connect();
- *   await page.goto('/');
+ *   await page.goto('/ws/default/kanban');
  *   sse.sendConnected();
  *   sse.sendMutation({ type: 'update', issue_id: 'test-001', timestamp: '...' });
  *   sse.close();

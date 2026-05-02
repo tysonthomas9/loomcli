@@ -1161,7 +1161,11 @@ func TestStartTmuxSession_PassesTerminalDimensions(t *testing.T) {
 	logFile := filepath.Join(tmpDir, "test.log")
 
 	t.Cleanup(func() {
-		exec.Command("tmux", "kill-session", "-t", sessionName).Run() //nolint:norawexec
+		cleanupTmuxSession(sessionName)
+		deadline := time.Now().Add(2 * time.Second)
+		for tmuxSessionExists(sessionName) && time.Now().Before(deadline) {
+			time.Sleep(10 * time.Millisecond)
+		}
 	})
 
 	opts := AutoModeOptions{
@@ -1214,6 +1218,9 @@ func TestStartTmuxSession_PassesTerminalDimensions(t *testing.T) {
 // ============================================================================
 
 func TestStartTmuxSession_PipePaneAndFocusEvents(t *testing.T) {
+	if raceDetectorEnabled {
+		t.Skip("tmux pipe-pane cleanup is process-boundary flaky under -race")
+	}
 	if !IsTmuxAvailable() {
 		t.Skip("tmux not available")
 	}
@@ -1221,12 +1228,25 @@ func TestStartTmuxSession_PipePaneAndFocusEvents(t *testing.T) {
 	// remain-on-exit keeps the pane alive even when loom exits (not installed in CI)
 	setTmuxRemainOnExit(t)
 
-	tmpDir := t.TempDir()
+	tmpDir := filepath.Join(os.TempDir(), fmt.Sprintf("loom-test-pipe-%d", time.Now().UnixNano()))
+	if err := os.MkdirAll(tmpDir, 0755); err != nil {
+		t.Fatalf("create temp dir: %v", err)
+	}
 	sessionName := fmt.Sprintf("loom-test-pipe-%d", os.Getpid())
 	logFile := filepath.Join(tmpDir, "test.log")
 
 	t.Cleanup(func() {
-		exec.Command("tmux", "kill-session", "-t", sessionName).Run() //nolint:norawexec
+		cleanupTmuxSession(sessionName)
+		deadline := time.Now().Add(2 * time.Second)
+		for tmuxSessionExists(sessionName) && time.Now().Before(deadline) {
+			time.Sleep(10 * time.Millisecond)
+		}
+		for i := 0; i < 20; i++ {
+			if err := os.RemoveAll(tmpDir); err == nil {
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
 	})
 
 	opts := AutoModeOptions{

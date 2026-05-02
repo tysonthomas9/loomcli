@@ -98,6 +98,7 @@ vi.mock("@/api", async (importOriginal) => {
     addComment: mockAddComment,
     closeIssue: mockCloseIssue,
     getIssueEvents: vi.fn().mockImplementation(() => new Promise(() => {})),
+    getTaskLogPhases: vi.fn().mockResolvedValue([]),
   };
 });
 

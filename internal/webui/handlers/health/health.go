@@ -234,7 +234,7 @@ func HandleStats(pool daemon.Pool) http.HandlerFunc {
 //
 // In fleet mode the pool is empty; without this, the handler returns 503
 // even though backend.IssueBackend.Stats works fine. backendFn may be nil
-// — in that case behaviour is identical to the legacy pool-only path.
+// — in that case behavior is identical to the legacy pool-only path.
 func HandleStatsWithBackendFallback(pool daemon.Pool, backendFn IssueBackendFn) http.HandlerFunc {
 	var poolAdapter StatsConnectionGetter
 	if pool != nil {

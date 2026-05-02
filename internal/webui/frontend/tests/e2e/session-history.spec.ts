@@ -169,7 +169,6 @@ async function setupMocks(page: Page, options: SetupOptions = {}): Promise<void>
     sessionsError = false,
     sessionsDelay = 0,
     scrollbackContent = "$ echo hello\nhello\n$ exit",
-    scrollbackLines = 3,
     scrollbackError = false,
     scrollbackDelay = 0,
   } = options;
@@ -187,6 +186,19 @@ async function setupMocks(page: Page, options: SetupOptions = {}): Promise<void>
   });
 
   // Auth token
+  await page.route("**/api/config", async (route) => {
+    const url = new URL(route.request().url());
+    if (url.pathname !== "/api/config") {
+      await route.fallback();
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ mode: "open" }),
+    });
+  });
+
   await page.route("**/api/auth/token", async (route) => {
     await route.fulfill({
       status: 200,
@@ -233,6 +245,25 @@ async function setupMocks(page: Page, options: SetupOptions = {}): Promise<void>
         return;
       }
 
+      // Terminal metadata/session-map endpoints used during app boot.
+      if (url.includes(WS_PREFIX + "/terminal/tabs")) {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ success: true, data: [] }),
+        });
+        return;
+      }
+
+      if (url.includes(WS_PREFIX + "/terminal/sessions/by-issue")) {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ success: true, data: {} }),
+        });
+        return;
+      }
+
       // Scrollback: /issues/*/sessions/*/scrollback — check BEFORE sessions
       if (url.includes("/sessions/") && url.includes("/scrollback")) {
         if (scrollbackDelay > 0) {
@@ -248,11 +279,8 @@ async function setupMocks(page: Page, options: SetupOptions = {}): Promise<void>
         }
         await route.fulfill({
           status: 200,
-          contentType: "application/json",
-          body: JSON.stringify({
-            success: true,
-            data: { content: scrollbackContent, lines: scrollbackLines },
-          }),
+          contentType: "text/plain",
+          body: scrollbackContent,
         });
         return;
       }
@@ -377,7 +405,7 @@ async function setupMocks(page: Page, options: SetupOptions = {}): Promise<void>
 }
 
 async function navigateToApp(page: Page): Promise<void> {
-  await page.goto(`/ws/${WS_ID}/`);
+  await page.goto(`/ws/${WS_ID}/kanban?groupBy=none`);
   await page.waitForSelector("article", { timeout: 15000 });
 }
 
@@ -639,11 +667,8 @@ test.describe("Session history section", () => {
           await scrollbackPromise;
           await route.fulfill({
             status: 200,
-            contentType: "application/json",
-            body: JSON.stringify({
-              success: true,
-              data: { content: "scrollback data", lines: 1 },
-            }),
+            contentType: "text/plain",
+            body: "scrollback data",
           });
         },
       );

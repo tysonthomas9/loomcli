@@ -1,4 +1,12 @@
-import { test, expect, Page } from "@playwright/test"
+import { test, expect } from "@playwright/test"
+import type { Page } from "@playwright/test"
+import {
+  ok,
+  setupFleetMocks,
+  waitForWorkspaceIssues,
+  workspacePath,
+  WS_API,
+} from "./helpers/fleet"
 
 /**
  * PriorityDropdown E2E Tests
@@ -47,7 +55,7 @@ const mockIssues = [
 ]
 
 /**
- * Full issue details (for GET /api/issues/{id}).
+ * Full issue details for workspace-scoped issue detail requests.
  */
 function getMockIssueDetails(issue: (typeof mockIssues)[0]) {
   return {
@@ -70,21 +78,13 @@ async function setupMocks(
       body: object
     }
     patchDelay?: number
-  }
+  },
 ) {
   const issues = options?.issues ?? mockIssues
 
-  // Mock /api/ready
-  await page.route("**/api/ready", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({ success: true, data: issues }),
-    })
-  })
+  await setupFleetMocks(page, issues.map(getMockIssueDetails))
 
-  // Mock /api/issues/{id} GET and PATCH
-  await page.route("**/api/issues/*", async (route) => {
+  await page.route(`**${WS_API}/issues/*`, async (route) => {
     const method = route.request().method()
     const url = route.request().url()
     const issueId = url.split("/").pop()
@@ -94,7 +94,11 @@ async function setupMocks(
       await route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify(issue ? getMockIssueDetails(issue) : null),
+        body: JSON.stringify(
+          issue
+            ? ok(getMockIssueDetails(issue))
+            : { success: false, error: "Issue not found" },
+        ),
       })
     } else if (method === "PATCH") {
       if (options?.patchDelay) {
@@ -124,16 +128,6 @@ async function setupMocks(
       await route.continue()
     }
   })
-
-  // Mock /api/blocked to return empty array
-  await page.route("**/api/blocked", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({ success: true, data: [] }),
-    })
-  })
-
 }
 
 /**
@@ -144,10 +138,8 @@ async function setupMocks(
 async function openDetailPanelFromTable(page: Page, issueTitle: string) {
   // Wait for API and navigate to table view
   await Promise.all([
-    page.waitForResponse(
-      (res) => res.url().includes("/api/ready") && res.status() === 200
-    ),
-    page.goto("/?view=table"),
+    waitForWorkspaceIssues(page),
+    page.goto("/ws/default/table"),
   ])
 
   // Wait for table to render
@@ -190,10 +182,8 @@ test.describe("PriorityDropdown", () => {
 
       // Navigate to kanban view
       await Promise.all([
-        page.waitForResponse(
-          (res) => res.url().includes("/api/ready") && res.status() === 200
-        ),
-        page.goto("/"),
+        waitForWorkspaceIssues(page),
+        page.goto(workspacePath("/")),
       ])
 
       // Wait for kanban columns
@@ -216,10 +206,8 @@ test.describe("PriorityDropdown", () => {
       await setupMocks(page)
 
       await Promise.all([
-        page.waitForResponse(
-          (res) => res.url().includes("/api/ready") && res.status() === 200
-        ),
-        page.goto("/"),
+        waitForWorkspaceIssues(page),
+        page.goto(workspacePath("/")),
       ])
 
       // P0 card should show "P0" badge
@@ -257,7 +245,8 @@ test.describe("PriorityDropdown", () => {
    * src/components/IssueDetailPanel/__tests__/PriorityDropdown.test.tsx
    */
 
-  test.describe.skip("Dropdown Interaction (requires IssueDetailPanel integration)", () => {
+  test.describe
+    .skip("Dropdown Interaction (requires IssueDetailPanel integration)", () => {
     test("click opens dropdown menu", async ({ page }) => {
       await setupMocks(page)
       await openDetailPanelFromTable(page, "Medium Priority Issue")
@@ -329,8 +318,8 @@ test.describe("PriorityDropdown", () => {
       // Wait for PATCH to complete
       await page.waitForResponse(
         (res) =>
-          res.url().includes("/api/issues/") &&
-          res.request().method() === "PATCH"
+          res.url().includes(`${WS_API}/issues/`) &&
+          res.request().method() === "PATCH",
       )
 
       // Verify API was called with correct priority
@@ -357,8 +346,8 @@ test.describe("PriorityDropdown", () => {
       // Wait for error response
       await page.waitForResponse(
         (res) =>
-          res.url().includes("/api/issues/") &&
-          res.request().method() === "PATCH"
+          res.url().includes(`${WS_API}/issues/`) &&
+          res.request().method() === "PATCH",
       )
 
       // Error message should appear
@@ -374,10 +363,8 @@ test.describe("PriorityDropdown", () => {
       await setupMocks(page)
 
       await Promise.all([
-        page.waitForResponse(
-          (res) => res.url().includes("/api/ready") && res.status() === 200
-        ),
-        page.goto("/"),
+        waitForWorkspaceIssues(page),
+        page.goto(workspacePath("/")),
       ])
 
       // Get priority filter dropdown
@@ -400,10 +387,8 @@ test.describe("PriorityDropdown", () => {
       await setupMocks(page)
 
       await Promise.all([
-        page.waitForResponse(
-          (res) => res.url().includes("/api/ready") && res.status() === 200
-        ),
-        page.goto("/"),
+        waitForWorkspaceIssues(page),
+        page.goto(workspacePath("/")),
       ])
 
       const openColumn = page.locator('section[data-status="ready"]')
@@ -423,7 +408,9 @@ test.describe("PriorityDropdown", () => {
 
       // Only P0 issue should be visible
       await expect(openColumn.locator("article")).toHaveCount(1)
-      await expect(openColumn.getByText("Critical Priority Issue")).toBeVisible()
+      await expect(
+        openColumn.getByText("Critical Priority Issue"),
+      ).toBeVisible()
     })
 
     test("priority filter persists in URL", async ({ page }) => {
@@ -431,10 +418,8 @@ test.describe("PriorityDropdown", () => {
 
       // Navigate with priority filter in URL
       await Promise.all([
-        page.waitForResponse(
-          (res) => res.url().includes("/api/ready") && res.status() === 200
-        ),
-        page.goto("/?priority=2"),
+        waitForWorkspaceIssues(page),
+        page.goto(workspacePath("/?priority=2")),
       ])
 
       // Verify filter is applied

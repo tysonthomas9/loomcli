@@ -45,17 +45,17 @@ type MonitorHandlers struct {
 
 // ServerConfig holds configuration for the web UI server.
 type ServerConfig struct {
-	Port                    int
-	BindAddress             string // Listen address (default: "127.0.0.1"; use "0.0.0.0" for all interfaces)
-	SocketPath              string
-	PoolSize                int
-	CORSEnabled             bool
-	CORSOrigins             []string
-	ShutdownTimeout         time.Duration
-	MaxPortAttempts         int
-	TerminalCmd             string
-	MaxTerminalSessions     int  // Maximum concurrent terminal connections (0 = default 20)
-	FleetEnabled            bool // Register fleet API routes (requires Redis coordination)
+	Port                int
+	BindAddress         string // Listen address (default: "127.0.0.1"; use "0.0.0.0" for all interfaces)
+	SocketPath          string
+	PoolSize            int
+	CORSEnabled         bool
+	CORSOrigins         []string
+	ShutdownTimeout     time.Duration
+	MaxPortAttempts     int
+	TerminalCmd         string
+	MaxTerminalSessions int  // Maximum concurrent terminal connections (0 = default 20)
+	FleetEnabled        bool // Register fleet API routes (requires Redis coordination)
 	// FleetClient is true when this loom server is a fleet-db CLIENT (not a
 	// fleet API server itself). In this mode there is no local bd daemon to
 	// talk to — the IssueBackend is fleet-db over HTTP. Drives the
@@ -63,25 +63,25 @@ type ServerConfig struct {
 	// expected steady state, not a degraded one.
 	FleetClient             bool
 	FleetRedis              *fleet.RedisConfig
-	FleetJWTKey             []byte                                               // Pre-provisioned JWT signing key for fleet auth (optional; if nil, server generates one)
-	FleetAPIKey             string                                               // Pre-shared API key for fleet worker registration (required for fleet register endpoint)
-	HSTSEnabled             bool                                                 // Whether to send Strict-Transport-Security header (use when behind TLS-terminating proxy)
-	ExtAuthURL              string                                               // Auth service base URL (e.g., "https://auth.loomcli.com"); empty = open mode
-	ExtAuthIssuer           string                                               // Expected JWT issuer (validated against "iss" claim; defaults to ExtAuthURL)
-	ExtAuthAudience         string                                               // Expected JWT audience (validated against "aud" claim; defaults to "loom")
-	ExtAuthAllowInsecure    bool                                                 // Allow HTTP for non-loopback --auth-url (escape hatch for Docker networks)
-	MonitorHandlers         MonitorHandlers                                      // Pre-built handlers for monitor/metrics endpoints (injected by cli)
-	GitOps                  ops.GitOps                                           // Git operations interface (optional; nil disables git endpoints)
-	FileOps                 ops.FileOps                                          // File operations interface (optional; nil disables file endpoints)
-	WorkspaceConfigFn       func() (*ops.WorkspaceData, error)                   // Workspace topology supplier; nil = single-repo mode
-	WorkspaceConfigByIDFn   func(string) (*ops.WorkspaceData, error)             // Workspace topology supplier by ID; nil = falls back to WorkspaceConfigFn
-	WorkspaceDeleteFn       func(name string) error                              // Workspace deletion function; nil = deletion unavailable
-	SetDefaultWorkspaceFn   func(name string) error                              // Set default workspace in config; nil = feature disabled
-	ClearDefaultWorkspaceFn func() error                                         // Clear default workspace in config; nil = feature disabled
-	WorkspaceCreateFn       service.WorkspaceCreateFn                            // Workspace creation function; nil = creation unavailable
-	WorkspaceListFn         func() (map[string]string, error)                    // Returns all configured workspaces as id→path (UUID preferred, name fallback for pre-migration); nil = single-workspace mode
-	InitialWorkspaceID      string                                               // Stable UUID of the initial workspace (CWD); if empty, falls back to filepath.Base(cwd)
-	WorkspaceIDResolverFn   WorkspaceIDResolverFn                                // Resolves workspace name → UUID; nil = no resolution available
+	FleetJWTKey             []byte                                   // Pre-provisioned JWT signing key for fleet auth (optional; if nil, server generates one)
+	FleetAPIKey             string                                   // Pre-shared API key for fleet worker registration (required for fleet register endpoint)
+	HSTSEnabled             bool                                     // Whether to send Strict-Transport-Security header (use when behind TLS-terminating proxy)
+	ExtAuthURL              string                                   // Auth service base URL (e.g., "https://auth.loomcli.com"); empty = open mode
+	ExtAuthIssuer           string                                   // Expected JWT issuer (validated against "iss" claim; defaults to ExtAuthURL)
+	ExtAuthAudience         string                                   // Expected JWT audience (validated against "aud" claim; defaults to "loom")
+	ExtAuthAllowInsecure    bool                                     // Allow HTTP for non-loopback --auth-url (escape hatch for Docker networks)
+	MonitorHandlers         MonitorHandlers                          // Pre-built handlers for monitor/metrics endpoints (injected by cli)
+	GitOps                  ops.GitOps                               // Git operations interface (optional; nil disables git endpoints)
+	FileOps                 ops.FileOps                              // File operations interface (optional; nil disables file endpoints)
+	WorkspaceConfigFn       func() (*ops.WorkspaceData, error)       // Workspace topology supplier; nil = single-repo mode
+	WorkspaceConfigByIDFn   func(string) (*ops.WorkspaceData, error) // Workspace topology supplier by ID; nil = falls back to WorkspaceConfigFn
+	WorkspaceDeleteFn       func(name string) error                  // Workspace deletion function; nil = deletion unavailable
+	SetDefaultWorkspaceFn   func(name string) error                  // Set default workspace in config; nil = feature disabled
+	ClearDefaultWorkspaceFn func() error                             // Clear default workspace in config; nil = feature disabled
+	WorkspaceCreateFn       service.WorkspaceCreateFn                // Workspace creation function; nil = creation unavailable
+	WorkspaceListFn         func() (map[string]string, error)        // Returns all configured workspaces as id→path (UUID preferred, name fallback for pre-migration); nil = single-workspace mode
+	InitialWorkspaceID      string                                   // Stable UUID of the initial workspace (CWD); if empty, falls back to filepath.Base(cwd)
+	WorkspaceIDResolverFn   WorkspaceIDResolverFn                    // Resolves workspace name → UUID; nil = no resolution available
 	// Store is the unified state store — workspaces, repos, agents, roles,
 	// daemon profiles. Set by serve.go via bootstrap.OpenStore. When non-nil,
 	// the workspace/agent service implementations source their data from
@@ -91,22 +91,22 @@ type ServerConfig struct {
 	// listed above are scheduled for removal once their consumers have been
 	// switched over to Store. Until then, both fields coexist so partial
 	// migrations stay functional.
-	Store                   store.Store
-	BackendOps              ops.BackendOps                                       // Backend health operations interface (optional; nil disables backend health endpoint)
-	ScrollbackMaxLines      int                                                  // Maximum lines per scrollback buffer (0 = default 10000)
-	NotifyTokenDir          string                                               // Directory to write notify.token (typically beads dir); empty = token file not written
-	AgentControlFn          agentcontrol.AgentControlFn                          // Sends agent lifecycle commands to the daemon control socket; nil in fleet mode or --no-daemon
-	DaemonSupervisorFn      func() (*DaemonSupervisorData, error)                // Returns daemon supervisor state from state file; nil = endpoint unavailable
-	DaemonConfigFn          func() (json.RawMessage, error)                      // Returns effective merged daemon config as JSON; nil = endpoint unavailable
-	AgentQueueFn            func(agentName string) ([]AgentQueueEntry, error)    // Returns scored work queue for named agent; nil = endpoint unavailable
-	FleetMode               bool                                                 // When true, skip beads-specific lifecycle hooks (pools, subscribers); fleet server manages agents
-	FleetClientURL          string                                               // Fleet server URL for fleet-mode workers (e.g., "http://fleet.example.com"); empty = no fleet client
-	FleetClientWorkspace    string                                               // Fleet server workspace ID (e.g., "default"); empty = use "default"
-	FleetClientAPIKey       string                                               // Pre-shared API key for fleet worker backend auth
-	FleetClientActor        string                                               // X-Actor header value for fleet-db --auth-dev-mode (typically the loom agent name)
-	DaemonStartupFn         func(ctx context.Context, onReady func(wsID string)) // Starts daemons for secondary workspaces; calls onReady(wsID) when each is reachable
-	Logger                  *slog.Logger                                         // Structured logger (optional; nil falls back to slog.Default())
-	SentryDSN               string                                               // Sentry/GlitchTip DSN for error tracking (optional; empty disables)
+	Store                store.Store
+	BackendOps           ops.BackendOps                                       // Backend health operations interface (optional; nil disables backend health endpoint)
+	ScrollbackMaxLines   int                                                  // Maximum lines per scrollback buffer (0 = default 10000)
+	NotifyTokenDir       string                                               // Directory to write notify.token (typically beads dir); empty = token file not written
+	AgentControlFn       agentcontrol.AgentControlFn                          // Sends agent lifecycle commands to the daemon control socket; nil in fleet mode or --no-daemon
+	DaemonSupervisorFn   func() (*DaemonSupervisorData, error)                // Returns daemon supervisor state from state file; nil = endpoint unavailable
+	DaemonConfigFn       func() (json.RawMessage, error)                      // Returns effective merged daemon config as JSON; nil = endpoint unavailable
+	AgentQueueFn         func(agentName string) ([]AgentQueueEntry, error)    // Returns scored work queue for named agent; nil = endpoint unavailable
+	FleetMode            bool                                                 // When true, skip beads-specific lifecycle hooks (pools, subscribers); fleet server manages agents
+	FleetClientURL       string                                               // Fleet server URL for fleet-mode workers (e.g., "http://fleet.example.com"); empty = no fleet client
+	FleetClientWorkspace string                                               // Fleet server workspace ID (e.g., "default"); empty = use "default"
+	FleetClientAPIKey    string                                               // Pre-shared API key for fleet worker backend auth
+	FleetClientActor     string                                               // X-Actor header value for fleet-db --auth-dev-mode (typically the loom agent name)
+	DaemonStartupFn      func(ctx context.Context, onReady func(wsID string)) // Starts daemons for secondary workspaces; calls onReady(wsID) when each is reachable
+	Logger               *slog.Logger                                         // Structured logger (optional; nil falls back to slog.Default())
+	SentryDSN            string                                               // Sentry/GlitchTip DSN for error tracking (optional; empty disables)
 	// IssueBackendFn returns the active backend.IssueBackend used by the
 	// webui issue service for the migrated CRUD operations (Get, Create,
 	// Update/Patch, Close, Claim, Delete, AddComment, AddDependency,

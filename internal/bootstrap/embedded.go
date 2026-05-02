@@ -137,6 +137,8 @@ type EmbeddedFleetDB struct {
 // miniredis snapshot lives at <dataDir>/fleet-db/redis-snapshot.json.
 // In cloud mode (LOOM_FLEET_DB_URL set) callers should not call this
 // at all; this function unconditionally spawns a subprocess.
+//
+//nolint:funlen // Process bootstrap needs to keep setup and cleanup ordering explicit.
 func StartEmbedded(ctx context.Context, dataDir string, logger *slog.Logger) (*EmbeddedFleetDB, error) {
 	if logger == nil {
 		logger = slog.Default()

@@ -23,12 +23,11 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-
-	"github.com/tysonthomas9/loomcli/internal/fleethttp"
 	"strings"
 	"sync"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/fleethttp"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 

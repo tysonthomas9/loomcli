@@ -206,7 +206,7 @@ test.describe("Column Redesign: issue distribution across all columns", () => {
       makeIssue({
         id: "review-1",
         title: "[Need Review] Review Task",
-        status: "open",
+        status: "review",
       }),
       // status=review → Needs Review
       makeIssue({
@@ -402,8 +402,8 @@ test.describe("Column Redesign: status badges and header accents", () => {
       makeIssue({ id: "ip-1", title: "IP 1", status: "in_progress" }),
       makeIssue({
         id: "rev-1",
-        title: "[Need Review] Rev 1",
-        status: "open",
+        title: "Rev 1",
+        status: "review",
       }),
       makeIssue({ id: "d-1", title: "Done 1", status: "closed" }),
       makeIssue({ id: "d-2", title: "Done 2", status: "closed" }),
@@ -428,7 +428,7 @@ test.describe("Column Redesign: status badges and header accents", () => {
     await expect(blockedColumn.getByLabel("1 issue")).toBeVisible()
     // In Progress: 1
     await expect(inProgressColumn.getByLabel("1 issue")).toBeVisible()
-    // Review: 1 (title-based)
+    // Review: 1 (status=review)
     await expect(reviewColumn.getByLabel("1 issue")).toBeVisible()
     // Done: 3
     await expect(doneColumn.getByLabel("3 issues")).toBeVisible()
@@ -563,7 +563,7 @@ test.describe("Column Redesign: default group-by-epic view", () => {
       makeIssue({
         id: "e1-review",
         title: "[Need Review] Review Feature",
-        status: "open",
+        status: "review",
         parent: "epic-1",
         parent_title: "Test Epic",
       }),

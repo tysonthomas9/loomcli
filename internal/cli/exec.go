@@ -7,6 +7,8 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+
+	envfilterpkg "github.com/tysonthomas9/loomcli/internal/cli/envfilter"
 )
 
 // CommandResult represents the output of a command execution
@@ -78,4 +80,14 @@ func defaultRunGitWithOutput(dir string, args ...string) error {
 // RunGitCommandWithOutput executes a git command and streams output to stdout/stderr.
 func RunGitCommandWithOutput(dir string, args ...string) error {
 	return RunGitOutput(defaultDeps, dir, args...)
+}
+
+// FilteredEnv returns os.Environ() filtered through the subprocess allowlist.
+func FilteredEnv() []string {
+	return envfilterpkg.FilteredEnv()
+}
+
+// FilterEnv filters an environment slice through the subprocess allowlist.
+func FilterEnv(env []string) []string {
+	return envfilterpkg.FilterEnv(env)
 }

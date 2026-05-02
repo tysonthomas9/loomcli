@@ -1,8 +1,9 @@
 /**
  * Daemon Config API E2E Tests
  *
- * Tests the /api/daemon/status endpoint which exposes daemon runtime configuration.
- * Verifies that the daemon correctly reports its auto-sync settings.
+ * Tests the workspace-scoped /api/workspaces/{ws}/daemon/status endpoint which
+ * exposes daemon runtime configuration. Verifies that the daemon correctly
+ * reports its auto-sync settings.
  */
 
 import { test, expect, isIntegrationEnabled } from './api-client'
@@ -14,7 +15,7 @@ test.skip(!isIntegrationEnabled, 'API E2E tests require RUN_INTEGRATION_TESTS=1'
 test.describe.configure({ mode: 'serial' })
 
 test.describe('Daemon Config API', () => {
-  test('GET /api/daemon/status - returns daemon configuration', async ({ api }) => {
+  test('GET /api/workspaces/{ws}/daemon/status - returns daemon configuration', async ({ api }) => {
     const status = await api.daemonStatus()
 
     // Verify all configuration fields are present

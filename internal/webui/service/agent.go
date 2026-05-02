@@ -81,15 +81,15 @@ type AgentCreateInput struct {
 
 // AgentUpdateInput is the partial-update payload for PATCH /api/agents.
 type AgentUpdateInput struct {
-	RoleName         *string             `json:"role_name,omitempty"`
-	Auto             *bool               `json:"auto,omitempty"`
-	Backend          *string             `json:"backend,omitempty"`
-	FallbackBackends *[]string           `json:"fallback_backends,omitempty"`
-	Repos            *[]string           `json:"repos,omitempty"`
-	RepoGroups       *[]string           `json:"repo_groups,omitempty"`
-	CrossRepo        *bool               `json:"cross_repo,omitempty"`
-	Parent           *string             `json:"parent,omitempty"`
-	State            *domain.AgentState  `json:"state,omitempty"`
+	RoleName         *string            `json:"role_name,omitempty"`
+	Auto             *bool              `json:"auto,omitempty"`
+	Backend          *string            `json:"backend,omitempty"`
+	FallbackBackends *[]string          `json:"fallback_backends,omitempty"`
+	Repos            *[]string          `json:"repos,omitempty"`
+	RepoGroups       *[]string          `json:"repo_groups,omitempty"`
+	CrossRepo        *bool              `json:"cross_repo,omitempty"`
+	Parent           *string            `json:"parent,omitempty"`
+	State            *domain.AgentState `json:"state,omitempty"`
 }
 
 // AgentTerminalInfoResult contains the terminal mode for an agent.

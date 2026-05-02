@@ -14,6 +14,7 @@ import {
   getIssueEvents,
   moveIssue,
   deleteTabMetadata,
+  getTaskLogPhases,
 } from "@/hooks/api";
 import type { IssueTab } from "@/api/issues";
 import {
@@ -44,6 +45,7 @@ import {
   getBackendFromSessionName,
   type ConnectionState,
 } from "@/components/TerminalView";
+import { useTaskLogPolling } from "@/hooks/terminal";
 
 import {
   ActivityLog,
@@ -238,7 +240,7 @@ interface DetailTabMetadata {
 
 interface DetailTab {
   id: string;
-  type: "details" | "terminal" | "sessions";
+  type: "details" | "terminal" | "sessions" | "task-log";
   label: string;
   closable: boolean;
   metadata?: DetailTabMetadata | undefined;
@@ -258,6 +260,46 @@ const SESSIONS_TAB: DetailTab = {
   label: "Sessions",
   closable: false,
 };
+
+function formatPhaseLabel(phase: string): string {
+  return phase.charAt(0).toUpperCase() + phase.slice(1);
+}
+
+function TaskPhaseLogPanel({
+  issueId,
+  phase,
+}: {
+  issueId: string;
+  phase: "planning" | "implementation";
+}): JSX.Element {
+  const { chunks, state } = useTaskLogPolling({
+    taskId: issueId,
+    phase,
+    enabled: true,
+    pollIntervalMs: 500,
+  });
+  const text = useMemo(() => {
+    const decoder = new TextDecoder();
+    return chunks.map((chunk) => decoder.decode(chunk.chunk)).join("");
+  }, [chunks]);
+
+  return (
+    <div
+      className={styles.scrollableContent}
+      role="tabpanel"
+      id={`issue-panel-tabpanel-task-log-${phase}`}
+      aria-labelledby={`issue-panel-tab-task-log-${phase}`}
+    >
+      <div className={styles.section}>
+        <h3 className={styles.sectionTitle}>{formatPhaseLabel(phase)}</h3>
+        <div data-testid="log-viewer">
+          <span data-state={state}>{state}</span>
+          <pre data-testid="terminal-container">{text}</pre>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 /**
  * Default content renderer for issue details.
@@ -305,6 +347,9 @@ function DefaultContent({
     const repoLabel = issue?.labels?.find((l) => l.startsWith("repo:"));
     return repoLabel ? repoLabel.slice(5) : null;
   }, [issue?.labels]);
+  const [taskLogPhases, setTaskLogPhases] = useState<
+    ("planning" | "implementation")[]
+  >([]);
 
   // Tab persistence hook - loads/saves tab state to Redis
   const issueId = issue?.id ?? "";
@@ -324,6 +369,30 @@ function DefaultContent({
   useEffect(() => {
     tabsRef.current = tabs;
   }, [tabs]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setTaskLogPhases([]);
+    if (!issue?.id || issue.issue_type !== "task") return;
+
+    getTaskLogPhases(workspaceId, issue.id)
+      .then((phases) => {
+        if (cancelled) return;
+        setTaskLogPhases(
+          phases.filter(
+            (phase): phase is "planning" | "implementation" =>
+              phase === "planning" || phase === "implementation",
+          ),
+        );
+      })
+      .catch(() => {
+        if (!cancelled) setTaskLogPhases([]);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [issue?.id, issue?.issue_type, workspaceId]);
 
   // Pending close confirmation state
   const [pendingCloseTabId, setPendingCloseTabId] = useState<string | null>(
@@ -475,10 +544,11 @@ function DefaultContent({
       activeTabId === "details";
     if (isDefault) return;
 
-    const tabsToSave: IssueTab[] = tabs.map((t, i) => {
+    const persistableTabs = tabs.filter((t) => t.type !== "task-log");
+    const tabsToSave: IssueTab[] = persistableTabs.map((t, i) => {
       const tab: IssueTab = {
         id: t.id,
-        type: t.type,
+        type: t.type as IssueTab["type"],
         label: t.label,
         sort_order: i,
       };
@@ -492,6 +562,21 @@ function DefaultContent({
     });
     persistTabs(tabsToSave, activeTabId);
   }, [tabs, activeTabId, issue?.id, isLoadingPersistedTabs, persistTabs]);
+  const visibleTabs = useMemo(() => {
+    const phaseTabs: DetailTab[] = taskLogPhases.map((phase) => ({
+      id: `task-log-${phase}`,
+      type: "task-log",
+      label: formatPhaseLabel(phase),
+      closable: false,
+    }));
+    const detailsIndex = tabs.findIndex((tab) => tab.id === "details");
+    if (detailsIndex === -1) return [...phaseTabs, ...tabs];
+    return [
+      ...tabs.slice(0, detailsIndex + 1),
+      ...phaseTabs,
+      ...tabs.slice(detailsIndex + 1),
+    ];
+  }, [tabs, taskLogPhases]);
 
   // Ref to cleanupTerminalTabs so unmount cleanup uses latest without re-registering
   const cleanupRef = useRef(cleanupTerminalTabs);
@@ -974,7 +1059,7 @@ function DefaultContent({
           role="tablist"
           aria-label="Issue detail tabs"
         >
-          {tabs.map((tab) => (
+          {visibleTabs.map((tab) => (
             <div
               key={tab.id}
               role="tab"
@@ -1253,6 +1338,14 @@ function DefaultContent({
             />
           </div>
         </div>
+      )}
+
+      {activeTabId === "task-log-planning" && (
+        <TaskPhaseLogPanel issueId={issue.id} phase="planning" />
+      )}
+
+      {activeTabId === "task-log-implementation" && (
+        <TaskPhaseLogPanel issueId={issue.id} phase="implementation" />
       )}
 
       {activeTabId === "sessions" && (

@@ -12,34 +12,13 @@
 
 import { test, expect } from "../fixtures";
 import type { Page } from "@playwright/test";
+import { WORKSPACE_ID, WS_API, setupFleetMocks } from "./helpers/fleet";
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-const WORKSPACE_ID = "tab-mgmt-ws";
-
-const WORKSPACE_DATA = {
-  id: WORKSPACE_ID,
-  name: "Tab Management Workspace",
-  path: "/tmp/tab-mgmt-ws",
-  repos: [],
-  groups: [],
-  agents: [],
-  workspaces: [
-    {
-      id: WORKSPACE_ID,
-      name: "Tab Management Workspace",
-      path: "/tmp/tab-mgmt-ws",
-      active: true,
-      repo_count: 1,
-      is_default: true,
-    },
-  ],
-  default_workspace: WORKSPACE_ID,
-};
-
-const WS_PREFIX = `/api/workspaces/${WORKSPACE_ID}`;
+const WS_PREFIX = WS_API;
 const DOM_SETTLE_MS = 400;
 
 interface TabMetadata {
@@ -77,20 +56,6 @@ const DEFAULT_TABS: TabMetadata[] = [
   makeTab("lead-claude-3", "lead-claude-3", 2),
 ];
 
-const MOCK_STATS = {
-  total_issues: 0,
-  open_issues: 0,
-  in_progress_issues: 0,
-  closed_issues: 0,
-  blocked_issues: 0,
-  deferred_issues: 0,
-  ready_issues: 0,
-  tombstone_issues: 0,
-  pinned_issues: 0,
-  epics_eligible_for_closure: 0,
-  average_lead_time_hours: 0,
-};
-
 // ---------------------------------------------------------------------------
 // Mock setup
 // ---------------------------------------------------------------------------
@@ -100,13 +65,7 @@ interface SetupOptions {
   activeTab?: string;
 }
 
-interface SpawnCall {
-  url: string;
-  body: unknown;
-}
-
 interface MockTrackers {
-  spawnCalls: SpawnCall[];
   deleteCalls: string[];
   patchCalls: Array<{ url: string; body: unknown }>;
   putCalls: Array<{ url: string; body: unknown }>;
@@ -119,7 +78,6 @@ async function setupTerminalMocks(
 ): Promise<MockTrackers> {
   const tabs = [...(options.initialTabs ?? DEFAULT_TABS)];
   const trackers: MockTrackers = {
-    spawnCalls: [],
     deleteCalls: [],
     patchCalls: [],
     putCalls: [],
@@ -137,6 +95,8 @@ async function setupTerminalMocks(
       return origFetch.call(this, input, init);
     };
   });
+
+  await setupFleetMocks(page, []);
 
   // Auth token
   await page.route("**/api/auth/token", async (route) => {
@@ -164,59 +124,6 @@ async function setupTerminalMocks(
     });
   });
 
-  // Terminal spawn
-  await page.route("**/api/terminal/spawn", async (route) => {
-    const body = route.request().postData();
-    trackers.spawnCalls.push({
-      url: route.request().url(),
-      body: body ? JSON.parse(body) : null,
-    });
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({
-        success: true,
-        session: `lead-claude-${tabs.length + trackers.spawnCalls.length}`,
-      }),
-    });
-  });
-
-  // Terminal token
-  await page.route("**/api/terminal/token**", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({ token: "ws-token-mock" }),
-    });
-  });
-
-  // Terminal state (GET/PATCH)
-  await page.route("**/api/terminal/state", async (route) => {
-    if (route.request().method() === "PATCH") {
-      const body = route.request().postData();
-      trackers.statePatchCalls.push({
-        body: body ? JSON.parse(body) : null,
-      });
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({ success: true }),
-      });
-      return;
-    }
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({
-        success: true,
-        data: {
-          active_tab:
-            options.activeTab ?? tabs[0]?.session_name ?? "",
-        },
-      }),
-    });
-  });
-
   // Workspace-scoped API endpoints (single handler)
   await page.route(
     (url) => {
@@ -226,16 +133,6 @@ async function setupTerminalMocks(
     async (route) => {
       const url = route.request().url();
       const method = route.request().method();
-
-      // Workspace resolution: /api/workspaces/active
-      if (url.includes("/api/workspaces/active")) {
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify({ success: true, data: WORKSPACE_DATA }),
-        });
-        return;
-      }
 
       // SSE events: abort
       if (url.includes(WS_PREFIX + "/events")) {
@@ -340,48 +237,37 @@ async function setupTerminalMocks(
         return;
       }
 
-      // Issues
-      if (url.includes(WS_PREFIX + "/issues/graph")) {
+      if (url.includes(WS_PREFIX + "/terminal/state")) {
+        if (method === "PATCH") {
+          const body = route.request().postData();
+          trackers.statePatchCalls.push({
+            body: body ? JSON.parse(body) : null,
+          });
+          await route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: JSON.stringify({ success: true }),
+          });
+          return;
+        }
         await route.fulfill({
           status: 200,
           contentType: "application/json",
-          body: JSON.stringify({ success: true, data: [] }),
-        });
-        return;
-      }
-      if (url.includes(WS_PREFIX + "/issues")) {
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify({ success: true, data: [] }),
-        });
-        return;
-      }
-
-      // Ready / blocked
-      if (url.includes(WS_PREFIX + "/ready")) {
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify({ success: true, data: [] }),
-        });
-        return;
-      }
-      if (url.includes(WS_PREFIX + "/blocked")) {
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify({ success: true, data: [] }),
+          body: JSON.stringify({
+            success: true,
+            data: {
+              active_tab: options.activeTab ?? tabs[0]?.session_name ?? "",
+            },
+          }),
         });
         return;
       }
 
-      // Stats
-      if (url.includes(WS_PREFIX + "/stats")) {
+      if (url.includes(WS_PREFIX + "/terminal/token")) {
         await route.fulfill({
           status: 200,
           contentType: "application/json",
-          body: JSON.stringify({ success: true, data: MOCK_STATS }),
+          body: JSON.stringify({ token: "ws-token-mock" }),
         });
         return;
       }
@@ -396,22 +282,7 @@ async function setupTerminalMocks(
         return;
       }
 
-      // Exact workspace path
-      if (url.includes(WS_PREFIX)) {
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify({ success: true, data: WORKSPACE_DATA }),
-        });
-        return;
-      }
-
-      // Unknown
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({ success: true, data: [] }),
-      });
+      await route.fallback();
     }
   );
 
@@ -445,7 +316,7 @@ async function setupTerminalMocks(
 }
 
 async function navigateToTerminal(page: Page): Promise<void> {
-  await page.goto(`/ws/${WORKSPACE_ID}/?view=terminal`);
+  await page.goto(`/ws/${WORKSPACE_ID}/terminal`);
   await page.waitForSelector('[role="banner"]', { timeout: 15000 });
   await expect(page.getByTestId("terminal-tab-bar")).toBeVisible({
     timeout: 10000,
@@ -675,7 +546,6 @@ test.describe("Terminal Tab Management", () => {
       await expect(page.getByTestId("context-menu-pin")).toBeVisible();
       await expect(page.getByTestId("context-menu-close")).toBeVisible();
       await expect(page.getByTestId("context-menu-close-others")).toBeVisible();
-      await expect(page.getByTestId("context-menu-close-all")).toBeVisible();
     });
 
     test("clicking Rename from context menu enters edit mode", async ({

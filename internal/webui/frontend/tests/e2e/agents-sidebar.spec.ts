@@ -35,7 +35,7 @@ function createWorkspaceData(
   }> = [
     { name: "nova", repos: ["loomcli"], repo_groups: [], cross_repo: false },
     { name: "falcon", repos: ["loomcli"], repo_groups: [], cross_repo: false },
-  ]
+  ],
 ) {
   return {
     id: WORKSPACE_ID,
@@ -139,9 +139,7 @@ const mockLoomTasks = {
   ready_to_implement: [
     { id: "bd-020", title: "Build login page", priority: 1 },
   ],
-  in_progress: [
-    { id: "bd-101", title: "Implement auth flow", priority: 1 },
-  ],
+  in_progress: [{ id: "bd-101", title: "Implement auth flow", priority: 1 }],
   needs_review: [{ id: "bd-030", title: "Review PR #42", priority: 2 }],
   backlog: [],
   closed: [],
@@ -202,7 +200,7 @@ interface SetupOptions {
 
 async function setupMocks(
   page: Page,
-  options: SetupOptions = {}
+  options: SetupOptions = {},
 ): Promise<void> {
   const {
     loomServerAvailable = true,
@@ -400,7 +398,7 @@ async function setupMocks(
         contentType: "application/json",
         body: ok([]),
       });
-    }
+    },
   );
 
   // Consolidated monitor API handler
@@ -554,7 +552,9 @@ test.describe("Agents Sidebar", () => {
 
       const sb = sidebar(page);
       // Agent names appear in multiple places (agents section + workspace tree)
-      await expect(sb.getByText("nova").first()).toBeVisible({ timeout: 10000 });
+      await expect(sb.getByText("nova").first()).toBeVisible({
+        timeout: 10000,
+      });
       await expect(sb.getByText("falcon").first()).toBeVisible();
       // Agent cards in the main agents section (not workspace tree duplicates)
       const agentSection = sb.locator('[class*="agentSection"]').first();
@@ -621,14 +621,20 @@ test.describe("Agents Sidebar", () => {
       // nova: working agent card shows status, role, and repo
       const workingCard = agentSection.locator('[data-status="working"]');
       await expect(workingCard).toBeVisible({ timeout: 10000 });
-      await expect(workingCard.locator('[class*="statusLine"]')).toContainText("Working");
-      await expect(workingCard.locator('[class*="role"]')).toContainText("Task");
+      await expect(workingCard.locator('[class*="statusLine"]')).toContainText(
+        "Working",
+      );
+      await expect(workingCard.locator('[class*="role"]')).toContainText(
+        "Task",
+      );
       await expect(workingCard.getByText("loomcli")).toBeVisible();
 
       // falcon: ready agent card shows status and role
       const readyCard = agentSection.locator('[data-status="ready"]');
       await expect(readyCard).toBeVisible();
-      await expect(readyCard.locator('[class*="statusLine"]')).toContainText("Ready");
+      await expect(readyCard.locator('[class*="statusLine"]')).toContainText(
+        "Ready",
+      );
       await expect(readyCard.locator('[class*="role"]')).toContainText("Plan");
     });
 
@@ -719,9 +725,7 @@ test.describe("Agents Sidebar", () => {
 
       // Click to collapse
       await workQueueHeader.click();
-      await expect(
-        sb.getByText("Backlog", { exact: true })
-      ).not.toBeVisible();
+      await expect(sb.getByText("Backlog", { exact: true })).not.toBeVisible();
 
       // Click again to expand
       await workQueueHeader.click();
@@ -732,9 +736,7 @@ test.describe("Agents Sidebar", () => {
   // ------- status bar -------
 
   test.describe("status bar", () => {
-    test("status bar shows working/reviewing/idle counts", async ({
-      page,
-    }) => {
+    test("status bar shows working/reviewing/idle counts", async ({ page }) => {
       await setupMocks(page);
       await navigateAndWait(page);
 
@@ -800,9 +802,24 @@ test.describe("Agents Sidebar", () => {
       await setupMocks(page, {
         agents: threeAgents,
         workspaceAgents: [
-          { name: "alpha", repos: ["loomcli"], repo_groups: [], cross_repo: false },
-          { name: "beta", repos: ["loomcli"], repo_groups: [], cross_repo: false },
-          { name: "gamma", repos: ["loomcli"], repo_groups: [], cross_repo: false },
+          {
+            name: "alpha",
+            repos: ["loomcli"],
+            repo_groups: [],
+            cross_repo: false,
+          },
+          {
+            name: "beta",
+            repos: ["loomcli"],
+            repo_groups: [],
+            cross_repo: false,
+          },
+          {
+            name: "gamma",
+            repos: ["loomcli"],
+            repo_groups: [],
+            cross_repo: false,
+          },
         ],
       });
       await navigateAndWait(page);
@@ -856,9 +873,7 @@ test.describe("Agents Sidebar", () => {
       await expect(sb.getByText("Agents")).toBeVisible();
     });
 
-    test("collapsed sidebar shows badge with agent count", async ({
-      page,
-    }) => {
+    test("collapsed sidebar hides healthy badge", async ({ page }) => {
       await setupMocks(page);
       await navigateAndWait(page);
 
@@ -872,10 +887,9 @@ test.describe("Agents Sidebar", () => {
       await toggleIcon.click();
       await expect(sb).toHaveAttribute("data-collapsed", "true");
 
-      // Collapsed badge visible with agent count
+      // Healthy connected state does not need a collapsed warning badge.
       const badge = sb.locator('[class*="collapsedBadge"]');
-      await expect(badge).toBeVisible();
-      await expect(badge).toHaveAttribute("data-health", /.+/);
+      await expect(badge).toHaveCount(0);
     });
   });
 
@@ -901,7 +915,7 @@ test.describe("Agents Sidebar", () => {
       const errorDisplay = page.getByTestId("error-display");
       const errorBadge = sb.locator('[class*="errorBadge"]');
       await expect(
-        reconnecting.or(connectionLost).or(errorDisplay).or(errorBadge)
+        reconnecting.or(connectionLost).or(errorDisplay).or(errorBadge),
       ).toBeVisible({ timeout: 15000 });
     });
 

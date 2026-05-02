@@ -88,6 +88,20 @@ function ok<T>(data: T): string {
  * Uses workspace-scoped URL patterns matching the actual API paths.
  */
 async function setupBaseMocks(page: Page) {
+  // App config (auth mode discovery) — bootstrap fetch in main.tsx.
+  await page.route("**/api/config", async (route) => {
+    const url = new URL(route.request().url());
+    if (url.pathname !== "/api/config") {
+      await route.fallback();
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ mode: "open" }),
+    });
+  });
+
   // Workspace metadata (both /active and /default for redirect + validation)
   await page.route("**/api/workspaces/active", async (route) => {
     await route.fulfill({
@@ -214,7 +228,12 @@ async function installIssuesMock(page: Page, initialIssues: unknown[]) {
         input: RequestInfo | URL,
         init?: RequestInit,
       ): Promise<Response> {
-        const url = typeof input === "string" ? input : input.toString();
+        const url =
+          input instanceof Request
+            ? input.url
+            : typeof input === "string"
+              ? input
+              : input.toString();
         // Match: /api/workspaces/{id}/issues?... but NOT /api/workspaces/{id}/issues/{id}
         if (
           /\/api\/workspaces\/[^/]+\/issues(\?|$)/.test(url) &&
@@ -244,7 +263,9 @@ async function installIssuesMock(page: Page, initialIssues: unknown[]) {
  * Navigate directly to the workspace and wait for the board to be ready.
  */
 async function navigateAndWaitForBoard(page: Page) {
-  await page.goto("/ws/default/", { waitUntil: "domcontentloaded" });
+  await page.goto("/ws/default/kanban?groupBy=none", {
+    waitUntil: "domcontentloaded",
+  });
 }
 
 // -- Tests --
@@ -445,21 +466,23 @@ test.describe("E2E Journey: Review and approve/reject agent plan", () => {
     await textarea.fill("Design needs more error handling detail");
 
     // Submit with Ctrl+Enter (Linux - component handles both metaKey and ctrlKey)
-    await textarea.press("Control+Enter");
-
-    // Wait for comment POST
-    await page.waitForResponse(
+    const commentResponse = page.waitForResponse(
       (res) =>
         res.url().includes("/issues/review-plan-002/comments") &&
         res.request().method() === "POST",
     );
-
-    // Wait for PATCH update
-    await page.waitForResponse(
+    const patchResponse = page.waitForResponse(
       (res) =>
         res.url().includes("/issues/review-plan-002") &&
         res.request().method() === "PATCH",
     );
+    await textarea.press("Control+Enter");
+
+    // Wait for comment POST
+    await commentResponse;
+
+    // Wait for PATCH update
+    await patchResponse;
 
     // Verify comment POST body: "FEEDBACK: <user's text>"
     expect(commentCalls).toHaveLength(1);

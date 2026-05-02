@@ -16,7 +16,37 @@ interface TestComment {
   created_at: string
 }
 
-// Test issue data for /api/ready
+const WORKSPACE_ID = "default"
+const WS_API = `/api/workspaces/${WORKSPACE_ID}`
+
+function ok<T>(data: T): string {
+  return JSON.stringify({ success: true, data })
+}
+
+function workspaceData() {
+  return {
+    id: WORKSPACE_ID,
+    name: WORKSPACE_ID,
+    path: "/tmp/ws",
+    repos: [],
+    groups: [],
+    agents: [],
+    workspaces: [
+      {
+        id: WORKSPACE_ID,
+        name: WORKSPACE_ID,
+        path: "/tmp/ws",
+        active: true,
+        repo_count: 0,
+        is_default: true,
+      },
+    ],
+    workspace_order: [WORKSPACE_ID],
+    default_workspace: WORKSPACE_ID,
+  }
+}
+
+// Test issue data for workspace-scoped issue list
 const mockIssues = [
   {
     id: "comment-form-test-1",
@@ -85,7 +115,7 @@ async function setupMocks(
   options?: {
     initialComments?: TestComment[]
     postDelay?: number
-    postError?: boolean
+    postError?: boolean | ((attempt: number) => boolean)
     onPost?: (body: { text: string }) => void
   }
 ) {
@@ -95,25 +125,167 @@ async function setupMocks(
 
   // Track POST calls
   const postCalls: { url: string; body: { text: string } }[] = []
+  let postAttempt = 0
 
-  // Mock /api/ready to return our test issues
-  await page.route("**/api/ready", async (route) => {
+  await page.route("**/api/config", async (route) => {
+    const url = new URL(route.request().url())
+    if (url.pathname !== "/api/config") {
+      await route.fallback()
+      return
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ mode: "open" }),
+    })
+  })
+
+  await page.route("**/api/health", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ status: "ok", daemon: true }),
+    })
+  })
+
+  await page.route("**/api/auth/token", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ token: "test-token" }),
+    })
+  })
+
+  await page.route("**/api/monitor/**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({}),
+    })
+  })
+
+  await page.route("**/api/workspaces/*/events/token", async (route) => {
+    await route.fulfill({ status: 404, body: "Not Found" })
+  })
+
+  await page.route("**/api/workspaces/*/events**", async (route) => {
+    await route.abort()
+  })
+
+  await page.route("**/api/workspaces/active", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: ok(workspaceData()),
+    })
+  })
+
+  await page.route(`**${WS_API}`, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: ok(workspaceData()),
+    })
+  })
+
+  await page.route(`**${WS_API}/ready**`, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: ok(mockIssues),
+    })
+  })
+
+  await page.route(`**${WS_API}/stats`, async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({
-        success: true,
-        data: mockIssues,
+        total_issues: mockIssues.length,
+        open_issues: mockIssues.length,
+        in_progress_issues: 0,
+        closed_issues: 0,
+        blocked_issues: 0,
+        deferred_issues: 0,
+        ready_issues: mockIssues.length,
+        tombstone_issues: 0,
+        pinned_issues: 0,
+        epics_eligible_for_closure: 0,
+        average_lead_time_hours: 0,
       }),
     })
   })
 
-  // Mock POST /api/issues/{id}/comments - must be registered before GET route
-  await page.route("**/api/issues/*/comments", async (route) => {
+  await page.route(`**${WS_API}/blocked**`, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: ok([]),
+    })
+  })
+
+  await page.route(`**${WS_API}/terminal/tabs`, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: ok([]),
+    })
+  })
+
+  await page.route(`**${WS_API}/terminal/state`, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ active_tab: "" }),
+    })
+  })
+
+  await page.route(`**${WS_API}/terminal/sessions`, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: ok({}),
+    })
+  })
+
+  await page.route(`**${WS_API}/issues/graph`, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: ok([]),
+    })
+  })
+
+  await page.route(
+    (url) => url.pathname === `${WS_API}/issues`,
+    async (route) => {
+      if (route.request().method() !== "GET") {
+        await route.continue()
+        return
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: ok(mockIssues),
+      })
+    }
+  )
+
+  await page.route(`**${WS_API}/issues/*/events`, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: ok([]),
+    })
+  })
+
+  // Mock POST /api/workspaces/{ws}/issues/{id}/comments
+  await page.route(`**${WS_API}/issues/*/comments`, async (route) => {
     const request = route.request()
     const method = request.method()
 
     if (method === "POST") {
+      postAttempt++
       if (options?.postDelay) {
         await new Promise((r) => setTimeout(r, options.postDelay))
       }
@@ -122,7 +294,12 @@ async function setupMocks(
       postCalls.push({ url: request.url(), body })
       options?.onPost?.(body)
 
-      if (options?.postError) {
+      const shouldFail =
+        typeof options?.postError === "function"
+          ? options.postError(postAttempt)
+          : options?.postError
+
+      if (shouldFail) {
         await route.fulfill({
           status: 500,
           contentType: "application/json",
@@ -154,34 +331,37 @@ async function setupMocks(
     }
   })
 
-  // Mock GET /api/issues/{id}
-  await page.route("**/api/issues/*", async (route) => {
-    const request = route.request()
-    const method = request.method()
-    const url = request.url()
+  // Mock GET /api/workspaces/{ws}/issues/{id}
+  await page.route(
+    (url) => /^\/api\/workspaces\/default\/issues\/[^/]+$/.test(url.pathname),
+    async (route) => {
+      const request = route.request()
+      const method = request.method()
+      const url = request.url()
 
-    if (method === "GET") {
-      const idMatch = url.match(/\/api\/issues\/([^/?]+)/)
-      const id = idMatch ? idMatch[1] : null
-      const details = id ? getIssueDetails(id, options) : null
+      if (method === "GET") {
+        const idMatch = url.match(/\/issues\/([^/?]+)/)
+        const id = idMatch ? idMatch[1] : null
+        const details = id ? getIssueDetails(id, options) : null
 
-      if (details) {
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify(details),
-        })
+        if (details) {
+          await route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: ok(details),
+          })
+        } else {
+          await route.fulfill({
+            status: 404,
+            contentType: "application/json",
+            body: JSON.stringify({ success: false, error: "Not found" }),
+          })
+        }
       } else {
-        await route.fulfill({
-          status: 404,
-          contentType: "application/json",
-          body: JSON.stringify({ error: "Not found" }),
-        })
+        await route.continue()
       }
-    } else {
-      await route.continue()
     }
-  })
+  )
 
   return { postCalls }
 }
@@ -191,8 +371,8 @@ async function setupMocks(
  */
 async function navigateToApp(page: Page) {
   await Promise.all([
-    page.waitForResponse((res) => res.url().includes("/api/ready")),
-    page.goto("/"),
+    page.waitForResponse((res) => res.url().includes(`${WS_API}/issues`)),
+    page.goto(`/ws/${WORKSPACE_ID}/kanban?groupBy=none`),
   ])
 
   // Wait for loading to complete
@@ -223,11 +403,11 @@ async function openIssuePanel(page: Page, issueTitle: string) {
 function getCommentForm(page: Page) {
   return {
     form: page.getByTestId("comment-form"),
-    section: page.getByTestId("comments-section"),
+    section: page.getByTestId("activity-log"),
     textarea: page.getByTestId("comment-textarea"),
     submitButton: page.getByTestId("comment-submit"),
     errorMessage: page.getByTestId("comment-error"),
-    commentItems: page.getByTestId("comment-item"),
+    commentItems: page.getByTestId("activity-comment"),
   }
 }
 
@@ -326,7 +506,7 @@ test.describe("CommentForm", () => {
       // Setup response waiter
       const postPromise = page.waitForResponse(
         (res) =>
-          res.url().includes("/api/issues/") &&
+          res.url().includes(`${WS_API}/issues/`) &&
           res.url().includes("/comments") &&
           res.request().method() === "POST"
       )
@@ -639,13 +819,14 @@ test.describe("CommentForm", () => {
 
       await textarea.fill("Error test")
 
-      await submitButton.click()
-
-      await page.waitForResponse(
+      const postPromise = page.waitForResponse(
         (res) =>
           res.url().includes("/comments") &&
           res.request().method() === "POST"
       )
+
+      await submitButton.click()
+      await postPromise
 
       await expect(errorMessage).toHaveAttribute("role", "alert")
     })
@@ -679,73 +860,11 @@ test.describe("CommentForm", () => {
 
     test("can retry after error", async ({ page }) => {
       let postCount = 0
-      let shouldFail = true
-
-      // Custom mock: first fails, second succeeds
-
-      // Mock /api/ready for navigateToApp
-      await page.route("**/api/ready", async (route) => {
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify({
-            success: true,
-            data: mockIssues,
-          }),
-        })
-      })
-
-      // Order matters - more specific routes must be registered first
-      await page.route("**/api/issues/*/comments", async (route) => {
-        const method = route.request().method()
-        if (method === "POST") {
+      await setupMocks(page, {
+        postError: (attempt) => attempt === 1,
+        onPost: () => {
           postCount++
-          if (shouldFail) {
-            shouldFail = false
-            await route.fulfill({
-              status: 500,
-              contentType: "application/json",
-              body: JSON.stringify({ success: false, error: "Server error" }),
-            })
-          } else {
-            await route.fulfill({
-              status: 201,
-              contentType: "application/json",
-              body: JSON.stringify({
-                success: true,
-                data: {
-                  id: 100,
-                  issue_id: "comment-form-test-1",
-                  author: "web-ui",
-                  text: "Retry test",
-                  created_at: new Date().toISOString(),
-                },
-              }),
-            })
-          }
-        } else {
-          await route.continue()
-        }
-      })
-
-      await page.route("**/api/issues/*", async (route) => {
-        const request = route.request()
-        const method = request.method()
-
-        if (method === "GET") {
-          await route.fulfill({
-            status: 200,
-            contentType: "application/json",
-            body: JSON.stringify({
-              ...mockIssues[0],
-              dependencies: [],
-              dependents: [],
-              comments: [],
-            }),
-          })
-        } else {
-          await route.continue()
-        }
+        },
       })
 
       await navigateToApp(page)
@@ -930,13 +1049,15 @@ test.describe("CommentForm", () => {
       const { textarea, submitButton, errorMessage } = getCommentForm(page)
 
       await textarea.fill("Error test")
-      await submitButton.click()
 
-      await page.waitForResponse(
+      const postPromise = page.waitForResponse(
         (res) =>
           res.url().includes("/comments") &&
           res.request().method() === "POST"
       )
+
+      await submitButton.click()
+      await postPromise
 
       await expect(errorMessage).toHaveAttribute("role", "alert")
     })
@@ -1026,7 +1147,7 @@ test.describe("CommentForm", () => {
       const { textarea, submitButton, commentItems } = getCommentForm(page)
 
       // Should show empty state initially
-      await expect(page.getByTestId("comments-empty")).toBeVisible()
+      await expect(page.getByTestId("activity-empty")).toBeVisible()
       await expect(commentItems).toHaveCount(0)
 
       // Add first comment
@@ -1045,7 +1166,7 @@ test.describe("CommentForm", () => {
       await expect(commentItems).toHaveCount(1, { timeout: 5000 })
 
       // Empty state should be gone, comment should appear
-      await expect(page.getByTestId("comments-empty")).not.toBeVisible()
+      await expect(page.getByTestId("activity-empty")).not.toBeVisible()
     })
   })
 })

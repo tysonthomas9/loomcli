@@ -27,25 +27,6 @@ export function helpPopoverUrl(): string {
   return "/test/help-popover";
 }
 
-export function searchBarUrl(opts?: {
-  value?: string;
-  matchIndex?: number;
-  matchCount?: number;
-  caseSensitive?: boolean;
-  regex?: boolean;
-}): string {
-  const params = new URLSearchParams();
-  if (opts?.value !== undefined) params.set("value", opts.value);
-  if (opts?.matchIndex !== undefined)
-    params.set("matchIndex", String(opts.matchIndex));
-  if (opts?.matchCount !== undefined)
-    params.set("matchCount", String(opts.matchCount));
-  if (opts?.caseSensitive) params.set("case", "true");
-  if (opts?.regex) params.set("regex", "true");
-  const qs = params.toString();
-  return `/test/search-bar${qs ? `?${qs}` : ""}`;
-}
-
 export function agentsSidebarUrl(): string {
   return "/test/agents-sidebar";
 }

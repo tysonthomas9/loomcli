@@ -82,6 +82,33 @@ export async function setupFleetMocks(
         contentType: "application/json",
         body: JSON.stringify({ mode: "open" }),
       })
+    } else if (pathname === "/api/backends") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(
+          ok([
+            {
+              name: "claude",
+              available: true,
+              display_name: "Claude",
+            },
+          ]),
+        ),
+      })
+    } else if (pathname === `${api}/config/backend`) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(
+          ok({
+            backend: "claude",
+            source: "workspace",
+            available: ["claude"],
+            agents: [],
+          }),
+        ),
+      })
     } else if (pathname === "/api/workspaces/active" || pathname === api) {
       await route.fulfill({
         status: 200,

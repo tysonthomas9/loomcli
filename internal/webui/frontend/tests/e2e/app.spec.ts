@@ -81,20 +81,17 @@ async function setupAppMocks(page: Page) {
           status: 200,
           contentType: "application/json",
           body: JSON.stringify({
-            success: true,
-            data: {
-              total_issues: 0,
-              open_issues: 0,
-              in_progress_issues: 0,
-              closed_issues: 0,
-              blocked_issues: 0,
-              deferred_issues: 0,
-              ready_issues: 0,
-              tombstone_issues: 0,
-              pinned_issues: 0,
-              epics_eligible_for_closure: 0,
-              average_lead_time_hours: 0,
-            },
+            total_issues: 0,
+            open_issues: 0,
+            in_progress_issues: 0,
+            closed_issues: 0,
+            blocked_issues: 0,
+            deferred_issues: 0,
+            ready_issues: 0,
+            tombstone_issues: 0,
+            pinned_issues: 0,
+            epics_eligible_for_closure: 0,
+            average_lead_time_hours: 0,
           }),
         })
       } else if (url.includes("/blocked")) {
@@ -107,7 +104,7 @@ async function setupAppMocks(page: Page) {
         await route.fulfill({
           status: 200,
           contentType: "application/json",
-          body: JSON.stringify({ success: true, issues: [] }),
+          body: JSON.stringify({ success: true, data: [] }),
         })
       } else if (url.includes("/issues")) {
         await route.fulfill({
@@ -120,6 +117,18 @@ async function setupAppMocks(page: Page) {
           status: 200,
           contentType: "application/json",
           body: JSON.stringify({ success: true, data: {} }),
+        })
+      } else if (url.includes("/terminal/tabs")) {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ success: true, data: [] }),
+        })
+      } else if (url.includes("/terminal/state")) {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ active_tab: "" }),
         })
       } else {
         await route.fulfill({

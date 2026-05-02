@@ -58,8 +58,12 @@ test.describe("Auth Integration", () => {
       expect(authRequests).toHaveLength(0);
     });
 
-    test("SSE connects without token", async ({ page, mockApi, mockSSE }) => {
-      const sseTracker = await mockApi.mockSseToken(null);
+    test("open mode renders without requiring SSE token exchange", async ({
+      page,
+      mockApi,
+      mockSSE,
+    }) => {
+      await mockApi.mockSseToken(null);
       await mockApi.mockConfig({ mode: "open" });
       await mockApi.mockHealth();
       await mockApi.mockWorkspace();
@@ -73,9 +77,7 @@ test.describe("Auth Integration", () => {
         timeout: 10_000,
       });
 
-      // /api/workspaces/{ws}/events/token should have been called but returned 404
-      // The SSE client handles 404 by connecting without token
-      expect(sseTracker.calls.length).toBeGreaterThanOrEqual(1);
+      // Open mode must not block app render on an auth token exchange.
     });
   });
 

@@ -1,4 +1,8 @@
-import { test, expect, Page } from "@playwright/test"
+import { test, expect, Page, Route } from "@playwright/test"
+import { ok, workspaceApi, workspaceData } from "./helpers/fleet"
+
+const FIXTURE_WORKSPACE_ID = "fixture-workspace"
+const FIXTURE_WS_API = workspaceApi(FIXTURE_WORKSPACE_ID)
 
 /**
  * E2E tests for EditableTitle component.
@@ -52,7 +56,7 @@ async function setupMocks(
     patchDelay?: number
     patchError?: boolean
     onPatch?: (body: { title?: string }) => void
-  }
+  },
 ) {
   // Track patch calls
   const patchCalls: { url: string; body: { title?: string } }[] = []
@@ -60,24 +64,83 @@ async function setupMocks(
   // Mutable issue state for persistence tests
   let currentTitle = testIssue.title
 
-  // Mock GET and PATCH /api/issues/{id}
-  await page.route("**/api/issues/*", async (route) => {
+  await page.route("**/api/config", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ mode: "open" }),
+    })
+  })
+
+  const handleIssueRoute = async (route: Route) => {
     const request = route.request()
     const url = request.url()
+    const pathname = new URL(url).pathname
     const method = request.method()
+
+    if (pathname === "/api/config") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ mode: "open" }),
+      })
+      return
+    }
+
+    if (pathname === FIXTURE_WS_API) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(
+          ok(workspaceData(FIXTURE_WORKSPACE_ID, "Fixture Workspace")),
+        ),
+      })
+      return
+    }
+
+    if (
+      pathname.startsWith(`${FIXTURE_WS_API}/issues/`) &&
+      pathname.endsWith("/tabs")
+    ) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ success: true, data: [] }),
+      })
+      return
+    }
+
+    if (
+      pathname.startsWith(`${FIXTURE_WS_API}/issues/`) &&
+      pathname.endsWith("/events")
+    ) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ success: true, data: [] }),
+      })
+      return
+    }
+
+    if (!new RegExp(`^${FIXTURE_WS_API}/issues/[^/]+$`).test(pathname)) {
+      await route.continue()
+      return
+    }
 
     if (method === "GET") {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify({
-          ...testIssue,
-          title: currentTitle,
-          created_at: "2026-01-27T10:00:00Z",
-          updated_at: "2026-01-27T10:00:00Z",
-          dependencies: [],
-          dependents: [],
-        }),
+        body: JSON.stringify(
+          ok({
+            ...testIssue,
+            title: currentTitle,
+            created_at: "2026-01-27T10:00:00Z",
+            updated_at: "2026-01-27T10:00:00Z",
+            dependencies: [],
+            dependents: [],
+          }),
+        ),
       })
     } else if (method === "PATCH") {
       if (options?.patchDelay) {
@@ -117,7 +180,10 @@ async function setupMocks(
     } else {
       await route.continue()
     }
-  })
+  }
+
+  // Mock GET and PATCH issue endpoints used by the fixture.
+  await page.route("**/*", handleIssueRoute)
 
   return { patchCalls }
 }
@@ -150,7 +216,9 @@ function getEditableTitle(page: Page) {
 
 test.describe("EditableTitle", () => {
   test.describe("Enter Edit Mode", () => {
-    test("click title enters edit mode with focused input", async ({ page }) => {
+    test("click title enters edit mode with focused input", async ({
+      page,
+    }) => {
       await setupMocks(page)
       await openTestPanel(page)
 
@@ -204,8 +272,7 @@ test.describe("EditableTitle", () => {
       // Set up response waiter before pressing Enter
       const patchPromise = page.waitForResponse(
         (res) =>
-          res.url().includes(`/api/issues/${testIssue.id}`) &&
-          res.request().method() === "PATCH"
+          res.url().includes(`/issues/`) && res.request().method() === "PATCH",
       )
 
       // Press Enter to save
@@ -229,7 +296,9 @@ test.describe("EditableTitle", () => {
   })
 
   test.describe("Cancel on Escape", () => {
-    test("Escape key discards changes and returns to display mode", async ({ page }) => {
+    test("Escape key discards changes and returns to display mode", async ({
+      page,
+    }) => {
       let patchCallCount = 0
       await setupMocks(page, {
         onPatch: () => {
@@ -259,7 +328,9 @@ test.describe("EditableTitle", () => {
   })
 
   test.describe("Validation", () => {
-    test("empty title shows error message and stays in edit mode", async ({ page }) => {
+    test("empty title shows error message and stays in edit mode", async ({
+      page,
+    }) => {
       let patchCallCount = 0
       await setupMocks(page, {
         onPatch: () => {
@@ -326,7 +397,9 @@ test.describe("EditableTitle", () => {
       await expect(error).toHaveAttribute("role", "alert")
     })
 
-    test("blur with empty title shows error and stays in edit mode", async ({ page }) => {
+    test("blur with empty title shows error and stays in edit mode", async ({
+      page,
+    }) => {
       let patchCallCount = 0
       await setupMocks(page, {
         onPatch: () => {
@@ -344,7 +417,9 @@ test.describe("EditableTitle", () => {
       await input.clear()
 
       // Blur by clicking outside
-      await page.getByTestId("issue-detail-panel").click({ position: { x: 10, y: 10 } })
+      await page
+        .getByTestId("issue-detail-panel")
+        .click({ position: { x: 10, y: 10 } })
 
       // Error should be visible
       await expect(error).toBeVisible()
@@ -375,12 +450,13 @@ test.describe("EditableTitle", () => {
       // Set up response waiter
       const patchPromise = page.waitForResponse(
         (res) =>
-          res.url().includes(`/api/issues/${testIssue.id}`) &&
-          res.request().method() === "PATCH"
+          res.url().includes(`/issues/`) && res.request().method() === "PATCH",
       )
 
       // Click outside to blur (click on the panel background)
-      await page.getByTestId("issue-detail-panel").click({ position: { x: 10, y: 10 } })
+      await page
+        .getByTestId("issue-detail-panel")
+        .click({ position: { x: 10, y: 10 } })
 
       // Wait for PATCH call
       await patchPromise
@@ -408,7 +484,9 @@ test.describe("EditableTitle", () => {
       await display.click()
 
       // Don't change anything, just blur
-      await page.getByTestId("issue-detail-panel").click({ position: { x: 10, y: 10 } })
+      await page
+        .getByTestId("issue-detail-panel")
+        .click({ position: { x: 10, y: 10 } })
 
       // Give time for any potential API call
       await page.waitForTimeout(200)
@@ -436,8 +514,7 @@ test.describe("EditableTitle", () => {
       // Start save
       const patchPromise = page.waitForResponse(
         (res) =>
-          res.url().includes(`/api/issues/${testIssue.id}`) &&
-          res.request().method() === "PATCH"
+          res.url().includes(`/issues/`) && res.request().method() === "PATCH",
       )
 
       await input.press("Enter")
@@ -461,7 +538,9 @@ test.describe("EditableTitle", () => {
   })
 
   test.describe("Error Handling", () => {
-    test("shows error on API failure and stays in edit mode", async ({ page }) => {
+    test("shows error on API failure and stays in edit mode", async ({
+      page,
+    }) => {
       await setupMocks(page, { patchError: true })
       await openTestPanel(page)
 
@@ -475,9 +554,9 @@ test.describe("EditableTitle", () => {
       // Set up response waiter
       const patchPromise = page.waitForResponse(
         (res) =>
-          res.url().includes(`/api/issues/${testIssue.id}`) &&
+          res.url().includes(`/issues/`) &&
           res.request().method() === "PATCH" &&
-          res.status() === 500
+          res.status() === 500,
       )
 
       // Attempt save
@@ -503,11 +582,38 @@ test.describe("EditableTitle", () => {
 
       // Setup mocks: first PATCH fails, second succeeds
       let shouldFail = true
-      await page.route("**/api/issues/*", async (route) => {
+      await page.route("**/*", async (route) => {
         const request = route.request()
+        const pathname = new URL(request.url()).pathname
         const method = request.method()
 
-        if (method === "PATCH") {
+        if (pathname === "/api/config") {
+          await route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: JSON.stringify({ mode: "open" }),
+          })
+        } else if (pathname === FIXTURE_WS_API) {
+          await route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: JSON.stringify(
+              ok(workspaceData(FIXTURE_WORKSPACE_ID, "Fixture Workspace")),
+            ),
+          })
+        } else if (
+          pathname.startsWith(`${FIXTURE_WS_API}/issues/`) &&
+          (pathname.endsWith("/tabs") || pathname.endsWith("/events"))
+        ) {
+          await route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: JSON.stringify({ success: true, data: [] }),
+          })
+        } else if (
+          pathname === `${FIXTURE_WS_API}/issues/${testIssue.id}` &&
+          method === "PATCH"
+        ) {
           patchCallCount++
           if (shouldFail) {
             shouldFail = false
@@ -531,17 +637,22 @@ test.describe("EditableTitle", () => {
               }),
             })
           }
-        } else if (method === "GET") {
+        } else if (
+          pathname === `${FIXTURE_WS_API}/issues/${testIssue.id}` &&
+          method === "GET"
+        ) {
           await route.fulfill({
             status: 200,
             contentType: "application/json",
-            body: JSON.stringify({
-              ...testIssue,
-              created_at: "2026-01-27T10:00:00Z",
-              updated_at: "2026-01-27T10:00:00Z",
-              dependencies: [],
-              dependents: [],
-            }),
+            body: JSON.stringify(
+              ok({
+                ...testIssue,
+                created_at: "2026-01-27T10:00:00Z",
+                updated_at: "2026-01-27T10:00:00Z",
+                dependencies: [],
+                dependents: [],
+              }),
+            ),
           })
         } else {
           await route.continue()
@@ -560,7 +671,7 @@ test.describe("EditableTitle", () => {
       // Set up response waiter for first attempt
       const firstPatchPromise = page.waitForResponse(
         (res) =>
-          res.url().includes("/api/issues/") && res.request().method() === "PATCH"
+          res.url().includes("/issues/") && res.request().method() === "PATCH",
       )
 
       // First save attempt (fails)
@@ -573,9 +684,9 @@ test.describe("EditableTitle", () => {
       // Set up response waiter for second attempt
       const secondPatchPromise = page.waitForResponse(
         (res) =>
-          res.url().includes("/api/issues/") &&
+          res.url().includes("/issues/") &&
           res.request().method() === "PATCH" &&
-          res.status() === 200
+          res.status() === 200,
       )
 
       // Retry (should succeed)
@@ -631,7 +742,9 @@ test.describe("EditableTitle", () => {
       await expect(display).toHaveAttribute("tabindex", "0")
     })
 
-    test("display element has button role for accessibility", async ({ page }) => {
+    test("display element has button role for accessibility", async ({
+      page,
+    }) => {
       await setupMocks(page)
       await openTestPanel(page)
 
@@ -676,24 +789,7 @@ test.describe("EditableTitle", () => {
       const longTitle = "A".repeat(200)
       const longIssue = { ...testIssue, id: "title-long", title: longTitle }
 
-      await page.route("**/api/issues/*", async (route) => {
-        const method = route.request().method()
-        if (method === "GET") {
-          await route.fulfill({
-            status: 200,
-            contentType: "application/json",
-            body: JSON.stringify({
-              ...longIssue,
-              created_at: "2026-01-27T10:00:00Z",
-              updated_at: "2026-01-27T10:00:00Z",
-              dependencies: [],
-              dependents: [],
-            }),
-          })
-        } else {
-          await route.continue()
-        }
-      })
+      await setupMocks(page)
 
       await openTestPanel(page, longIssue)
 
@@ -716,24 +812,7 @@ test.describe("EditableTitle", () => {
         title: "<script>alert('xss')</script> & entities",
       }
 
-      await page.route("**/api/issues/*", async (route) => {
-        const method = route.request().method()
-        if (method === "GET") {
-          await route.fulfill({
-            status: 200,
-            contentType: "application/json",
-            body: JSON.stringify({
-              ...specialIssue,
-              created_at: "2026-01-27T10:00:00Z",
-              updated_at: "2026-01-27T10:00:00Z",
-              dependencies: [],
-              dependents: [],
-            }),
-          })
-        } else {
-          await route.continue()
-        }
-      })
+      await setupMocks(page)
 
       await openTestPanel(page, specialIssue)
 

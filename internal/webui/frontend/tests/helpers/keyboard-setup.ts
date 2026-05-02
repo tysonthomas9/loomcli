@@ -159,6 +159,25 @@ export async function bootApp(
   var wsUrl = "/ws/" + activeId + "/";
   var wsPrefix = "/api/workspaces/" + activeId;
 
+  await page.route("**/api/config", async function (route) {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ mode: "open" }),
+    });
+  });
+
+  await page.route("**/api/backends", async function (route) {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        success: true,
+        data: [{ name: "claude", available: true, display_name: "Claude" }],
+      }),
+    });
+  });
+
   // Auth token
   await page.route("**/api/auth/token", async function (route) {
     await route.fulfill({
@@ -200,6 +219,23 @@ export async function bootApp(
     // SSE events: abort to prevent networkidle timeout
     if (url.includes(wsPrefix + "/events")) {
       await route.abort();
+      return;
+    }
+
+    if (url.includes(wsPrefix + "/config/backend")) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          success: true,
+          data: {
+            backend: "claude",
+            source: "workspace",
+            available: ["claude"],
+            agents: [],
+          },
+        }),
+      });
       return;
     }
 
@@ -253,12 +289,20 @@ export async function bootApp(
       return;
     }
 
-    // Terminal endpoints
-    if (url.includes(wsPrefix + "/terminal/")) {
+    if (url.includes(wsPrefix + "/terminal/tabs")) {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify({ success: true, data: {} }),
+        body: JSON.stringify({ success: true, data: [] }),
+      });
+      return;
+    }
+
+    if (url.includes(wsPrefix + "/terminal/state")) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ active_tab: "" }),
       });
       return;
     }
@@ -290,11 +334,14 @@ export async function bootApp(
     });
   });
 
-  // Navigate to workspace. Use ?view=settings to bypass the empty-kanban state
-  // which doesn't render KeyboardShortcutProvider (pre-existing issue with issue loading).
-  // Settings view always renders the provider regardless of issue count and
-  // doesn't need additional API endpoints.
-  await page.goto(wsUrl + "?view=settings");
+  await page.addInitScript(function () {
+    window.localStorage.clear();
+    window.sessionStorage.clear();
+  });
+
+  // Navigate to workspace settings; it renders the global shortcut provider
+  // without depending on board layout details.
+  await page.goto(wsUrl + "settings");
   await page.waitForSelector('[role="banner"]', { timeout: 15000 });
 
   // Blur any focused input so keyboard shortcuts aren't suppressed

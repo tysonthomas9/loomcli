@@ -526,7 +526,7 @@ func (s *issueServiceImpl) RemoveDependency(ctx context.Context, params RemoveDe
 
 // SearchIssues performs a full-text relevance-ranked search via the
 // backend.IssueBackend.SearchIssues operation and returns the slim issue list
-// marshalled into the same wire shape as the list endpoint (IssueData).
+// marshaled into the same wire shape as the list endpoint (IssueData).
 // Returns ErrValidation if the query is empty, ErrUnavailable if no backend is
 // wired, and translates backend errors via translateBackendError.
 func (s *issueServiceImpl) SearchIssues(ctx context.Context, params SearchIssuesParams) (json.RawMessage, error) {
@@ -616,7 +616,7 @@ func (s *issueServiceImpl) ListComments(ctx context.Context, issueID string) ([]
 }
 
 // ListDependencies returns the dependency list for an issue in the same wire
-// shape used by IssueDetailData.Dependencies (depsToWire). Marshalled to
+// shape used by IssueDetailData.Dependencies (depsToWire). Marshaled to
 // json.RawMessage so handlers can forward it through the usual {success,data}
 // envelope without re-marshaling.
 func (s *issueServiceImpl) ListDependencies(ctx context.Context, issueID string) (json.RawMessage, error) {

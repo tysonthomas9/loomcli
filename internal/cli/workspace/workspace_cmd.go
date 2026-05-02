@@ -346,6 +346,7 @@ func runWorkspaceList(cmd *cobra.Command, args []string) {
 	}
 }
 
+//nolint:gocognit,funlen // CLI table/JSON output branches share one store read path.
 func runFleetWorkspaceList() error {
 	return cmdstore.WithStore(func(ctx context.Context, h *bootstrap.StoreHandle) error {
 		workspaces, err := h.Store.Workspaces().List(ctx)

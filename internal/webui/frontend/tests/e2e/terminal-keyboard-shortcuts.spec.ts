@@ -12,34 +12,13 @@
 
 import { test, expect } from "../fixtures";
 import type { Page } from "@playwright/test";
+import { WORKSPACE_ID, WS_API, setupFleetMocks } from "./helpers/fleet";
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-const WORKSPACE_ID = "kbd-shortcuts-ws";
-
-const WORKSPACE_DATA = {
-  id: WORKSPACE_ID,
-  name: "Keyboard Shortcuts Workspace",
-  path: "/tmp/kbd-shortcuts-ws",
-  repos: [],
-  groups: [],
-  agents: [],
-  workspaces: [
-    {
-      id: WORKSPACE_ID,
-      name: "Keyboard Shortcuts Workspace",
-      path: "/tmp/kbd-shortcuts-ws",
-      active: true,
-      repo_count: 1,
-      is_default: true,
-    },
-  ],
-  default_workspace: WORKSPACE_ID,
-};
-
-const WS_PREFIX = `/api/workspaces/${WORKSPACE_ID}`;
+const WS_PREFIX = WS_API;
 const DOM_SETTLE_MS = 400;
 
 interface TabMetadata {
@@ -79,20 +58,6 @@ const SINGLE_TAB: TabMetadata[] = [
   makeTab("lead-claude-1", "lead-claude-1", 0),
 ];
 
-const MOCK_STATS = {
-  total_issues: 0,
-  open_issues: 0,
-  in_progress_issues: 0,
-  closed_issues: 0,
-  blocked_issues: 0,
-  deferred_issues: 0,
-  ready_issues: 0,
-  tombstone_issues: 0,
-  pinned_issues: 0,
-  epics_eligible_for_closure: 0,
-  average_lead_time_hours: 0,
-};
-
 // ---------------------------------------------------------------------------
 // Mock setup
 // ---------------------------------------------------------------------------
@@ -120,6 +85,8 @@ async function setupTerminalMocks(
     };
   });
 
+  await setupFleetMocks(page, []);
+
   // Auth token
   await page.route("**/api/auth/token", async (route) => {
     await route.fulfill({
@@ -146,49 +113,6 @@ async function setupTerminalMocks(
     });
   });
 
-  // Terminal spawn
-  await page.route("**/api/terminal/spawn", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({
-        success: true,
-        session: `lead-claude-${tabs.length + 1}`,
-      }),
-    });
-  });
-
-  // Terminal token
-  await page.route("**/api/terminal/token**", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({ token: "ws-token-mock" }),
-    });
-  });
-
-  // Terminal state (GET/PATCH)
-  await page.route("**/api/terminal/state", async (route) => {
-    if (route.request().method() === "PATCH") {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({ success: true }),
-      });
-      return;
-    }
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({
-        success: true,
-        data: {
-          active_tab: options.activeTab ?? tabs[0]?.session_name ?? "",
-        },
-      }),
-    });
-  });
-
   // Workspace-scoped API endpoints (single handler)
   await page.route(
     (url) => {
@@ -198,16 +122,6 @@ async function setupTerminalMocks(
     async (route) => {
       const url = route.request().url();
       const method = route.request().method();
-
-      // Workspace resolution: /api/workspaces/active
-      if (url.includes("/api/workspaces/active")) {
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify({ success: true, data: WORKSPACE_DATA }),
-        });
-        return;
-      }
 
       // SSE events: abort
       if (url.includes(WS_PREFIX + "/events")) {
@@ -299,48 +213,33 @@ async function setupTerminalMocks(
         return;
       }
 
-      // Issues / graph
-      if (url.includes(WS_PREFIX + "/issues/graph")) {
+      if (url.includes(WS_PREFIX + "/terminal/state")) {
+        if (method === "PATCH") {
+          await route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: JSON.stringify({ success: true }),
+          });
+          return;
+        }
         await route.fulfill({
           status: 200,
           contentType: "application/json",
-          body: JSON.stringify({ success: true, data: [] }),
-        });
-        return;
-      }
-      if (url.includes(WS_PREFIX + "/issues")) {
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify({ success: true, data: [] }),
-        });
-        return;
-      }
-
-      // Ready / blocked
-      if (url.includes(WS_PREFIX + "/ready")) {
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify({ success: true, data: [] }),
-        });
-        return;
-      }
-      if (url.includes(WS_PREFIX + "/blocked")) {
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify({ success: true, data: [] }),
+          body: JSON.stringify({
+            success: true,
+            data: {
+              active_tab: options.activeTab ?? tabs[0]?.session_name ?? "",
+            },
+          }),
         });
         return;
       }
 
-      // Stats
-      if (url.includes(WS_PREFIX + "/stats")) {
+      if (url.includes(WS_PREFIX + "/terminal/token")) {
         await route.fulfill({
           status: 200,
           contentType: "application/json",
-          body: JSON.stringify({ success: true, data: MOCK_STATS }),
+          body: JSON.stringify({ token: "ws-token-mock" }),
         });
         return;
       }
@@ -355,22 +254,7 @@ async function setupTerminalMocks(
         return;
       }
 
-      // Exact workspace path
-      if (url.includes(WS_PREFIX)) {
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify({ success: true, data: WORKSPACE_DATA }),
-        });
-        return;
-      }
-
-      // Unknown
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({ success: true, data: [] }),
-      });
+      await route.fallback();
     }
   );
 
@@ -443,7 +327,7 @@ async function navigateToTerminal(page: Page): Promise<void> {
   await page.addInitScript(() => {
     localStorage.setItem("terminal-onboarding-dismissed", "1");
   });
-  await page.goto(`/ws/${WORKSPACE_ID}/?view=terminal`);
+  await page.goto(`/ws/${WORKSPACE_ID}/terminal`);
   await page.waitForSelector('[role="banner"]', { timeout: 15000 });
   await expect(page.getByTestId("terminal-tab-bar")).toBeVisible({
     timeout: 10000,
@@ -714,88 +598,6 @@ test.describe("Terminal keyboard shortcuts", () => {
   });
 
   // -----------------------------------------------------------------------
-  // Search shortcuts
-  // -----------------------------------------------------------------------
-  test.describe("Search shortcuts", () => {
-    test("Ctrl+F opens search bar", async ({ page }) => {
-      await setupTerminalMocks(page);
-      await navigateToTerminal(page);
-
-      await page.keyboard.press("Control+f");
-      await page.waitForTimeout(DOM_SETTLE_MS);
-
-      await expect(page.getByTestId("terminal-search-bar")).toBeVisible();
-      await expect(page.getByTestId("terminal-search-input")).toBeFocused();
-    });
-
-    test("Ctrl+F toggles search bar closed when open", async ({ page }) => {
-      await setupTerminalMocks(page);
-      await navigateToTerminal(page);
-
-      // Open
-      await page.keyboard.press("Control+f");
-      await page.waitForTimeout(DOM_SETTLE_MS);
-      await expect(page.getByTestId("terminal-search-bar")).toBeVisible();
-
-      // Close
-      await page.keyboard.press("Control+f");
-      await page.waitForTimeout(DOM_SETTLE_MS);
-      await expect(
-        page.getByTestId("terminal-search-bar")
-      ).not.toBeVisible();
-    });
-
-    test("Escape closes search bar when open", async ({ page }) => {
-      await setupTerminalMocks(page);
-      await navigateToTerminal(page);
-
-      // Open search
-      await page.keyboard.press("Control+f");
-      await page.waitForTimeout(DOM_SETTLE_MS);
-      await expect(page.getByTestId("terminal-search-bar")).toBeVisible();
-
-      // Escape closes search, but terminal view stays
-      await page.keyboard.press("Escape");
-      await page.waitForTimeout(DOM_SETTLE_MS);
-      await expect(
-        page.getByTestId("terminal-search-bar")
-      ).not.toBeVisible();
-      await expect(page.getByTestId("terminal-view")).toBeVisible();
-    });
-
-    test("Enter in search bar retains focus", async ({ page }) => {
-      await setupTerminalMocks(page);
-      await navigateToTerminal(page);
-
-      await page.keyboard.press("Control+f");
-      await page.waitForTimeout(DOM_SETTLE_MS);
-
-      const searchInput = page.getByTestId("terminal-search-input");
-      await searchInput.fill("test query");
-      await searchInput.press("Enter");
-      await page.waitForTimeout(DOM_SETTLE_MS);
-
-      // Search input retains focus (search remains open and active)
-      await expect(searchInput).toBeFocused();
-    });
-
-    test("Shift+Enter in search bar retains focus", async ({ page }) => {
-      await setupTerminalMocks(page);
-      await navigateToTerminal(page);
-
-      await page.keyboard.press("Control+f");
-      await page.waitForTimeout(DOM_SETTLE_MS);
-
-      const searchInput = page.getByTestId("terminal-search-input");
-      await searchInput.fill("test query");
-      await searchInput.press("Shift+Enter");
-      await page.waitForTimeout(DOM_SETTLE_MS);
-
-      await expect(searchInput).toBeFocused();
-    });
-  });
-
-  // -----------------------------------------------------------------------
   // Help popover
   // -----------------------------------------------------------------------
   test.describe("Help popover", () => {
@@ -809,9 +611,6 @@ test.describe("Terminal keyboard shortcuts", () => {
       await expect(page.getByTestId("terminal-help-popover")).toBeVisible();
     });
 
-    // HelpPopover closes on Escape via its own keydown listener.
-    // TerminalView's Escape handler also fires (doesn't guard on isHelpOpen)
-    // but onEscape is a no-op due to loomcli-ynv4y.15 (previousViewRef bug).
     test("Escape closes help popover", async ({ page }) => {
       await setupTerminalMocks(page);
       await navigateToTerminal(page);
@@ -826,7 +625,6 @@ test.describe("Terminal keyboard shortcuts", () => {
       await expect(
         page.getByTestId("terminal-help-popover")
       ).not.toBeVisible();
-      await expect(page.getByTestId("terminal-view")).toBeVisible();
     });
 
     test("Clicking outside closes help popover", async ({ page }) => {
@@ -851,39 +649,14 @@ test.describe("Terminal keyboard shortcuts", () => {
   // Escape key behavior
   // -----------------------------------------------------------------------
   test.describe("Escape key behavior", () => {
-    test("Escape is no-op when no overlays are open", async ({ page }) => {
-      // NOTE: Escape-returns-to-previous-view is broken because
-      // App.tsx previousViewRef tracks the current view, not the prior one.
-      // See loomcli-ynv4y.15.
-      // This test verifies Escape doesn't crash when no overlays are open.
+    test("Escape leaves terminal when no overlays are open", async ({ page }) => {
       await setupTerminalMocks(page);
       await navigateToTerminal(page);
 
       await page.keyboard.press("Escape");
       await page.waitForTimeout(DOM_SETTLE_MS);
 
-      // Terminal view remains visible (Escape fires onEscape but it's a no-op)
-      await expect(page.getByTestId("terminal-view")).toBeVisible();
-    });
-
-    test("Escape closes search bar first, leaving terminal visible", async ({
-      page,
-    }) => {
-      await setupTerminalMocks(page);
-      await navigateToTerminal(page);
-
-      // Open search
-      await page.keyboard.press("Control+f");
-      await page.waitForTimeout(DOM_SETTLE_MS);
-      await expect(page.getByTestId("terminal-search-bar")).toBeVisible();
-
-      // Escape: closes search, terminal stays
-      await page.keyboard.press("Escape");
-      await page.waitForTimeout(DOM_SETTLE_MS);
-      await expect(
-        page.getByTestId("terminal-search-bar")
-      ).not.toBeVisible();
-      await expect(page.getByTestId("terminal-view")).toBeVisible();
+      await expect(page.getByTestId("terminal-view")).toHaveCount(0);
     });
 
     test("Escape closes backend picker prompt first, leaving terminal visible", async ({

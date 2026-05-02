@@ -38,6 +38,8 @@ function apiResponse<T>(data: T): string {
   return JSON.stringify({ success: true, data });
 }
 
+const WORKSPACE_API_PATTERN = "**/api/workspaces/*";
+
 export interface ApiMockHandler {
   mockReady(issues: Issue[]): Promise<MockTracker>;
   mockStats(stats: Statistics): Promise<MockTracker>;
@@ -86,7 +88,7 @@ export function createApiMockHandler(page: Page): ApiMockHandler {
   return {
     async mockReady(issues: Issue[]): Promise<MockTracker> {
       const tracker: MockTracker = { calls: [] };
-      await page.route("**/api/ready", async (route) => {
+      await page.route(`${WORKSPACE_API_PATTERN}/ready`, async (route) => {
         tracker.calls.push(trackRequest(route.request()));
         await route.fulfill({
           status: 200,
@@ -99,7 +101,7 @@ export function createApiMockHandler(page: Page): ApiMockHandler {
 
     async mockStats(stats: Statistics): Promise<MockTracker> {
       const tracker: MockTracker = { calls: [] };
-      await page.route("**/api/stats", async (route) => {
+      await page.route(`${WORKSPACE_API_PATTERN}/stats`, async (route) => {
         tracker.calls.push(trackRequest(route.request()));
         await route.fulfill({
           status: 200,
@@ -112,7 +114,7 @@ export function createApiMockHandler(page: Page): ApiMockHandler {
 
     async mockIssue(id: string, details: IssueDetails): Promise<MockTracker> {
       const tracker: MockTracker = { calls: [] };
-      await page.route(`**/api/issues/${id}`, async (route) => {
+      await page.route(`${WORKSPACE_API_PATTERN}/issues/${id}`, async (route) => {
         if (route.request().method() === "GET") {
           tracker.calls.push(trackRequest(route.request()));
           await route.fulfill({
@@ -129,7 +131,7 @@ export function createApiMockHandler(page: Page): ApiMockHandler {
 
     async mockBlocked(issues: BlockedIssue[]): Promise<MockTracker> {
       const tracker: MockTracker = { calls: [] };
-      await page.route("**/api/blocked", async (route) => {
+      await page.route(`${WORKSPACE_API_PATTERN}/blocked`, async (route) => {
         tracker.calls.push(trackRequest(route.request()));
         await route.fulfill({
           status: 200,
@@ -142,7 +144,7 @@ export function createApiMockHandler(page: Page): ApiMockHandler {
 
     async mockGraph(issues: GraphIssue[]): Promise<MockTracker> {
       const tracker: MockTracker = { calls: [] };
-      await page.route("**/api/issues/graph", async (route) => {
+      await page.route(`${WORKSPACE_API_PATTERN}/issues/graph`, async (route) => {
         tracker.calls.push(trackRequest(route.request()));
         await route.fulfill({
           status: 200,
@@ -155,7 +157,7 @@ export function createApiMockHandler(page: Page): ApiMockHandler {
 
     async mockCreateIssue(response: Issue): Promise<MockTracker> {
       const tracker: MockTracker = { calls: [] };
-      await page.route("**/api/issues", async (route) => {
+      await page.route(`${WORKSPACE_API_PATTERN}/issues`, async (route) => {
         if (route.request().method() === "POST") {
           tracker.calls.push(trackRequest(route.request()));
           await route.fulfill({
@@ -172,7 +174,7 @@ export function createApiMockHandler(page: Page): ApiMockHandler {
 
     async mockUpdateIssue(id: string, response: Issue): Promise<MockTracker> {
       const tracker: MockTracker = { calls: [] };
-      await page.route(`**/api/issues/${id}`, async (route) => {
+      await page.route(`${WORKSPACE_API_PATTERN}/issues/${id}`, async (route) => {
         if (route.request().method() === "PATCH") {
           tracker.calls.push(trackRequest(route.request()));
           await route.fulfill({
@@ -189,7 +191,7 @@ export function createApiMockHandler(page: Page): ApiMockHandler {
 
     async mockCloseIssue(id: string): Promise<MockTracker> {
       const tracker: MockTracker = { calls: [] };
-      await page.route(`**/api/issues/${id}/close`, async (route) => {
+      await page.route(`${WORKSPACE_API_PATTERN}/issues/${id}/close`, async (route) => {
         tracker.calls.push(trackRequest(route.request()));
         await route.fulfill({
           status: 200,
@@ -333,7 +335,7 @@ export function createApiMockHandler(page: Page): ApiMockHandler {
             await route.fulfill({
               status: 200,
               contentType: "application/json",
-              body: apiResponse({
+              body: JSON.stringify({
                 total_issues: 0,
                 open_issues: 0,
                 in_progress_issues: 0,
@@ -361,15 +363,23 @@ export function createApiMockHandler(page: Page): ApiMockHandler {
             await route.fulfill({
               status: 200,
               contentType: "application/json",
-              body: JSON.stringify({ success: true, issues: [] }),
+              body: apiResponse([]),
             });
             return;
           }
-          if (url.includes("/issues")) {
+          if (url.includes("/terminal/tabs")) {
             await route.fulfill({
               status: 200,
               contentType: "application/json",
               body: apiResponse([]),
+            });
+            return;
+          }
+          if (url.includes("/terminal/state")) {
+            await route.fulfill({
+              status: 200,
+              contentType: "application/json",
+              body: JSON.stringify({ active_tab: "" }),
             });
             return;
           }
@@ -378,6 +388,14 @@ export function createApiMockHandler(page: Page): ApiMockHandler {
               status: 200,
               contentType: "application/json",
               body: apiResponse({}),
+            });
+            return;
+          }
+          if (url.includes("/issues")) {
+            await route.fulfill({
+              status: 200,
+              contentType: "application/json",
+              body: apiResponse([]),
             });
             return;
           }

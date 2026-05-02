@@ -37,6 +37,12 @@ async function setupMocks(page: Page) {
     if (url.pathname !== "/api/config") { await route.fallback(); return; }
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ mode: "open" }) });
   });
+  await page.route("**/api/backends", async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: ok([{ name: "claude", available: true, display_name: "Claude" }]) });
+  });
+  await page.route("**/api/config/backend", async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: ok({ backend: "claude", source: "workspace", available: ["claude"], agents: [] }) });
+  });
   await page.route("**/api/health", async (route) => {
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ status: "ok", daemon: true }) });
   });
@@ -47,6 +53,10 @@ async function setupMocks(page: Page) {
       return;
     }
     if (url.includes("/events")) { await route.abort(); return; }
+    if (url.includes(WS_ID + "/config/backend")) {
+      await route.fulfill({ status: 200, contentType: "application/json", body: ok({ backend: "claude", source: "workspace", available: ["claude"], agents: [] }) });
+      return;
+    }
     if (url.includes("/issues") && route.request().method() === "GET") {
       await route.fulfill({ status: 200, contentType: "application/json", body: ok(LIFECYCLE_ISSUES) });
       return;
@@ -60,7 +70,9 @@ async function setupMocks(page: Page) {
       return;
     }
     if (url.includes("/blocked")) { await route.fulfill({ status: 200, contentType: "application/json", body: ok([]) }); return; }
-    if (url.includes("/terminal")) { await route.fulfill({ status: 200, contentType: "application/json", body: ok({}) }); return; }
+    if (url.includes("/terminal/tabs")) { await route.fulfill({ status: 200, contentType: "application/json", body: ok([]) }); return; }
+    if (url.includes("/terminal/state")) { await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ active_tab: "" }) }); return; }
+    if (url.includes("/terminal/sessions/by-issue")) { await route.fulfill({ status: 200, contentType: "application/json", body: ok({}) }); return; }
     await route.fulfill({ status: 200, contentType: "application/json", body: ok(WORKSPACE_DATA) });
   });
   await page.route("**/api/monitor/**", async (route) => {
@@ -95,8 +107,9 @@ test.describe("E2E Journey: Workspace lifecycle", () => {
     // Verify workspace name appears in sidebar
     const sidebar = page.getByRole("complementary");
     await expect(sidebar.getByText("Workspaces")).toBeVisible();
-    // "+ New Workspace" button is visible
-    await expect(page.getByRole("button", { name: "+ New Workspace" })).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: /Active workspace: Lifecycle Workspace/ }),
+    ).toBeVisible();
   });
 
   test("Switch to table view preserves data", async () => {

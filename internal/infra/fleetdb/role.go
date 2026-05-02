@@ -116,6 +116,7 @@ func (s *roleStore) List(ctx context.Context, ws string) ([]*domain.Role, error)
 	return out, nil
 }
 
+//nolint:funlen // Patch serialization mirrors the store.RoleUpdate surface area.
 func (s *roleStore) Update(ctx context.Context, ws, name string, patch store.RoleUpdate) (*domain.Role, error) {
 	// Fleet-db's PATCH role contract uses single-pointer fields plus
 	// explicit Clear* booleans for the *int / *float64 optional fields.

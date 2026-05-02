@@ -152,7 +152,5 @@ func BuildSetDefaultWorkspaceFn(s store.Store) func(string) error {
 // BuildClearDefaultWorkspaceFn clears the per-user active-workspace
 // hint in the state cache.
 func BuildClearDefaultWorkspaceFn() func() error {
-	return func() error {
-		return bootstrap.ClearActiveWorkspaceKey()
-	}
+	return bootstrap.ClearActiveWorkspaceKey
 }

@@ -127,6 +127,22 @@ async function setupMocks(page: Page) {
     });
   });
 
+  await page.route("**/api/backends", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: ok([{ name: "claude", available: true, display_name: "Claude" }]),
+    });
+  });
+
+  await page.route("**/api/config/backend", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: ok({ backend: "claude", source: "workspace", available: ["claude"], agents: [] }),
+    });
+  });
+
   // Health check
   await page.route("**/api/health", async (route) => {
     await route.fulfill({
@@ -220,6 +236,60 @@ async function setupMocks(page: Page) {
       body: JSON.stringify({}),
     });
   });
+
+  await page.route(
+    (url) => {
+      const s = url.toString();
+      return s.includes("/api/workspaces/") && !s.includes("/src/");
+    },
+    async (route) => {
+      const url = route.request().url();
+      const method = route.request().method();
+
+      if (url.includes("/api/workspaces/active")) {
+        await route.fulfill({ status: 200, contentType: "application/json", body: ok(WORKSPACE_DATA) });
+        return;
+      }
+      if (url.includes("/events")) { await route.abort(); return; }
+      if (url.includes(WS_PREFIX + "/config/backend")) {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: ok({ backend: "claude", source: "workspace", available: ["claude"], agents: [] }),
+        });
+        return;
+      }
+      if (url.includes(WS_PREFIX + "/terminal/tabs")) { await route.fulfill({ status: 200, contentType: "application/json", body: ok([]) }); return; }
+      if (url.includes(WS_PREFIX + "/terminal/state")) { await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ active_tab: "" }) }); return; }
+      if (url.includes(WS_PREFIX + "/terminal/sessions/by-issue")) { await route.fulfill({ status: 200, contentType: "application/json", body: ok({}) }); return; }
+      if (url.includes(WS_PREFIX + "/stats")) {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: ok({
+            total_issues: 5,
+            open_issues: 1,
+            in_progress_issues: 1,
+            closed_issues: 1,
+            blocked_issues: 1,
+            deferred_issues: 0,
+            ready_issues: 1,
+            tombstone_issues: 0,
+            pinned_issues: 0,
+            epics_eligible_for_closure: 0,
+            average_lead_time_hours: 24,
+          }),
+        });
+        return;
+      }
+      if (url.includes(WS_PREFIX + "/blocked")) { await route.fulfill({ status: 200, contentType: "application/json", body: ok([]) }); return; }
+      if ((url.includes(WS_PREFIX + "/issues") || url.includes(WS_PREFIX + "/ready")) && method === "GET") {
+        await route.fulfill({ status: 200, contentType: "application/json", body: ok(ISSUES) });
+        return;
+      }
+      await route.fulfill({ status: 200, contentType: "application/json", body: ok(WORKSPACE_DATA) });
+    },
+  );
 }
 
 /**

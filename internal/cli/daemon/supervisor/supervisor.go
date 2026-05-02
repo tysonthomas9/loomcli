@@ -249,6 +249,8 @@ func (s *Supervisor) Stop() {
 }
 
 // superviseAgent is the main loop for a single agent (runs in goroutine).
+//
+//nolint:funlen // The restart loop keeps lifecycle ordering visible.
 func (s *Supervisor) superviseAgent(ap *AgentProcess) {
 	slog.Info("starting agent supervisor", "worktree", ap.Entry.Worktree, "role", ap.Entry.Role)
 

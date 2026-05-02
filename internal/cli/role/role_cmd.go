@@ -242,6 +242,8 @@ func runRoleUnset(_ *cobra.Command, args []string) error {
 // buildRolePatch produces a store.RoleUpdate for a single key. When unset
 // is true, *int / *float64 fields use the clear-via-double-pointer
 // signal (&nil); string fields go to "" / empty slice; bool to false.
+//
+//nolint:cyclop,funlen // Mirrors the supported role patch fields one-to-one.
 func buildRolePatch(key, value string, unset bool) (store.RoleUpdate, error) {
 	var patch store.RoleUpdate
 	switch key {

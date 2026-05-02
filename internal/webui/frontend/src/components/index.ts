@@ -24,6 +24,7 @@ export * from "./ConnectionStatus";
 export * from "./StaleDataBanner";
 export * from "./ConfirmDialog";
 export * from "./CreateWorkspaceModal";
+export * from "./CreateIssueModal";
 export * from "./EmbeddedTerminal";
 export * from "./ErrorBoundary";
 export * from "./ErrorDisplay";

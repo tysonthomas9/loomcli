@@ -109,9 +109,9 @@ type HookConfig struct {
 // field may be nil (e.g., in fleet mode for BeadsPool/Notification, or in
 // non-fleet mode for FleetSubscriber).
 type RegisteredHooks struct {
-	BeadsPool        *hooks.BeadsPoolHook
-	Notification     *hooks.NotificationSubscriberHook
-	FleetSubscriber  *hooks.FleetSubscriberHook
+	BeadsPool       *hooks.BeadsPoolHook
+	Notification    *hooks.NotificationSubscriberHook
+	FleetSubscriber *hooks.FleetSubscriberHook
 }
 
 // RegisterHooks attaches lifecycle hooks to a workspace registry and returns

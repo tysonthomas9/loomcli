@@ -90,7 +90,7 @@ func WithStore(fn func(ctx context.Context, h *bootstrap.StoreHandle) error) err
 	if err != nil {
 		return err
 	}
-	defer h.Close()
+	defer func() { _ = h.Close() }()
 	return fn(ctx, h)
 }
 

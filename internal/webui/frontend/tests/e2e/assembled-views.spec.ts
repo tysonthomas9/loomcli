@@ -23,6 +23,7 @@ import { test, expect, Page } from "@playwright/test"
 
 // SSE endpoint pattern
 const SSE_ENDPOINT = "**/workspaces/*/events**"
+const WORKSPACE_ID = "default"
 
 /**
  * Shared mock issues with varied statuses, priorities, types, and assignees.
@@ -158,6 +159,14 @@ async function setupMocks(page: Page, issues = mockIssues) {
     default_workspace: "default",
   }
 
+  await page.route("**/api/workspaces/*/issues/*/events", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ success: true, data: [] }),
+    })
+  })
+
   // Workspace-scoped routes — single handler with URL dispatch (proven pattern from agents-sidebar)
   await page.route(
     (url) => url.toString().includes("/api/workspaces/") && !url.toString().includes("/events"),
@@ -191,20 +200,17 @@ async function setupMocks(page: Page, issues = mockIssues) {
           status: 200,
           contentType: "application/json",
           body: JSON.stringify({
-            success: true,
-            data: {
-              total_issues: issues.length,
-              open_issues: issues.filter((i) => i.status === "open").length,
-              in_progress_issues: issues.filter((i) => i.status === "in_progress").length,
-              closed_issues: issues.filter((i) => i.status === "closed").length,
-              blocked_issues: 0,
-              deferred_issues: 0,
-              ready_issues: issues.filter((i) => i.status === "open").length,
-              tombstone_issues: 0,
-              pinned_issues: 0,
-              epics_eligible_for_closure: 0,
-              average_lead_time_hours: 0,
-            },
+            total_issues: issues.length,
+            open_issues: issues.filter((i) => i.status === "open").length,
+            in_progress_issues: issues.filter((i) => i.status === "in_progress").length,
+            closed_issues: issues.filter((i) => i.status === "closed").length,
+            blocked_issues: 0,
+            deferred_issues: 0,
+            ready_issues: issues.filter((i) => i.status === "open").length,
+            tombstone_issues: 0,
+            pinned_issues: 0,
+            epics_eligible_for_closure: 0,
+            average_lead_time_hours: 0,
           }),
         })
         return
@@ -226,6 +232,26 @@ async function setupMocks(page: Page, issues = mockIssues) {
           status: 200,
           contentType: "application/json",
           body: JSON.stringify({ success: true, data: {} }),
+        })
+        return
+      }
+
+      // Terminal tabs
+      if (url.includes("/terminal/tabs")) {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ success: true, data: [] }),
+        })
+        return
+      }
+
+      // Terminal state
+      if (url.includes("/terminal/state")) {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ active_tab: "" }),
         })
         return
       }
@@ -309,7 +335,13 @@ async function setupMocks(page: Page, issues = mockIssues) {
  * Navigate and wait for API data to load.
  */
 async function navigateAndWait(page: Page, path = "/") {
-  await page.goto(path)
+  const target =
+    path === "/"
+      ? `/ws/${WORKSPACE_ID}/kanban`
+      : path.startsWith("/?")
+        ? `/ws/${WORKSPACE_ID}/kanban${path.slice(1)}`
+        : path
+  await page.goto(target)
   // Wait for the kanban board to render with issue data
   await page.locator("h1").waitFor({ timeout: 15000 })
   // Wait for issues to load in the board
@@ -555,9 +587,9 @@ test.describe("View switching preserves state", () => {
     await expect(reviewColumn.getByText("Open Bug Beta")).toBeVisible()
     await expect(reviewColumn.getByRole("list").locator("> [role='button']")).toHaveCount(2)
 
-    // Switch to Table view
-    const tableTab = page.getByRole("tab", { name: "List" })
-    await tableTab.click()
+    // Switch to Table view. Use route navigation here because the synthetic
+    // pointer drag can leave the next click focused without activating the tab.
+    await page.goto(`/ws/${WORKSPACE_ID}/table`)
 
     const issueTable = page.getByTestId("issue-table")
     await expect(issueTable).toBeVisible()

@@ -44,6 +44,7 @@ import {
   ThemeToggle,
   KeyboardCheatsheet,
   WorkspaceSwitcher,
+  CreateIssueModal,
   CreateWorkspaceModal,
   UserMenu,
 } from "@/components";
@@ -409,6 +410,7 @@ function App() {
   const [isWorkspaceSwitcherOpen, setIsWorkspaceSwitcherOpen] = useState(false);
 
   // Create workspace modal state
+  const [showCreateIssue, setShowCreateIssue] = useState(false);
   const [showCreateWorkspace, setShowCreateWorkspace] = useState(false);
 
   // Track mount state for async operations (must set true in setup for StrictMode compatibility)
@@ -889,7 +891,7 @@ function App() {
         />
         <button
           className={styles.newIssueButton}
-          onClick={() => setActiveView("terminal")}
+          onClick={() => setShowCreateIssue(true)}
           data-testid="new-issue-button"
         >
           + New Issue
@@ -1012,6 +1014,15 @@ function App() {
             agentTasks={agentTasks}
             onClose={handleAgentPanelClose}
             onTaskClick={handleAgentTaskClick}
+          />
+          <CreateIssueModal
+            isOpen={showCreateIssue}
+            onClose={() => setShowCreateIssue(false)}
+            onSuccess={async (issue) => {
+              await refetch();
+              openPanel({ type: "issue", id: issue.id });
+              fetchIssue(issue.id);
+            }}
           />
           <div
             style={{ display: activeView === "terminal" ? "contents" : "none" }}

@@ -21,6 +21,7 @@
 import { createBrowserRouter, Navigate } from "react-router-dom";
 
 import App from "@/App";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { WorkspaceLayout } from "@/components/WorkspaceLayout";
 import { RedirectToWorkspace } from "@/components/RedirectToWorkspace";
 import { NotFound } from "@/components/NotFound";
@@ -38,6 +39,7 @@ const devRoutes = import.meta.env.DEV
             SessionNamePromptFixture,
             WelcomeBannerFixture,
             HelpPopoverFixture,
+            PasteConfirmFixture,
             WorkspaceTreeFixture,
             SplitDetailSummaryFixture,
           } = await import("@/TestFixtures");
@@ -56,13 +58,17 @@ const devRoutes = import.meta.env.DEV
                 fixture = <WelcomeBannerFixture />;
               else if (path === "/test/help-popover")
                 fixture = <HelpPopoverFixture />;
+              else if (path === "/test/paste-confirm")
+                fixture = <PasteConfirmFixture />;
               else if (path === "/test/workspace-tree")
                 fixture = <WorkspaceTreeFixture />;
               else if (path === "/test/split-detail-summary")
                 fixture = <SplitDetailSummaryFixture />;
               else return <NotFound />;
               return (
-                <KeyboardShortcutProvider>{fixture}</KeyboardShortcutProvider>
+                <ErrorBoundary>
+                  <KeyboardShortcutProvider>{fixture}</KeyboardShortcutProvider>
+                </ErrorBoundary>
               );
             },
           };

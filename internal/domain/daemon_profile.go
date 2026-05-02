@@ -11,15 +11,15 @@ import "time"
 // Truly per-host bootstrap config (where loom finds fleet-db, OTLP
 // endpoint) goes in env vars, never here.
 type DaemonProfile struct {
-	WorkspaceKey   string         `json:"workspace_key"`
-	PIDFile        string         `json:"pid_file,omitempty"`
-	LogDir         string         `json:"log_dir,omitempty"`
-	EventsDir      string         `json:"events_dir,omitempty"`
-	RestartPolicy  RestartPolicy  `json:"restart_policy"`
-	MaxAgents      *int           `json:"max_agents,omitempty"`
-	IssueBackend   string         `json:"issue_backend,omitempty"`
-	StartupTimeout *int           `json:"startup_timeout,omitempty"`
-	OTel           *OTelSettings  `json:"otel,omitempty"`
+	WorkspaceKey   string        `json:"workspace_key"`
+	PIDFile        string        `json:"pid_file,omitempty"`
+	LogDir         string        `json:"log_dir,omitempty"`
+	EventsDir      string        `json:"events_dir,omitempty"`
+	RestartPolicy  RestartPolicy `json:"restart_policy"`
+	MaxAgents      *int          `json:"max_agents,omitempty"`
+	IssueBackend   string        `json:"issue_backend,omitempty"`
+	StartupTimeout *int          `json:"startup_timeout,omitempty"`
+	OTel           *OTelSettings `json:"otel,omitempty"`
 
 	UpdatedAt time.Time `json:"updated_at"`
 }
@@ -35,11 +35,11 @@ type RestartPolicy struct {
 	RateLimitBackoff *int  `json:"rate_limit_backoff,omitempty"`  // seconds
 	RateLimitMaxWait *int  `json:"rate_limit_max_wait,omitempty"` // seconds
 	RateLimitNoCount *bool `json:"rate_limit_no_count,omitempty"`
-	TimeoutBackoff   *int  `json:"timeout_backoff,omitempty"`     // seconds
-	NoWorkBackoff    *int  `json:"no_work_backoff,omitempty"`     // seconds
-	IdlePollInterval *int  `json:"idle_poll_interval,omitempty"`  // seconds
-	YieldTimeout     *int  `json:"yield_timeout,omitempty"`       // seconds
-	SigtermTimeout   *int  `json:"sigterm_timeout,omitempty"`     // seconds
+	TimeoutBackoff   *int  `json:"timeout_backoff,omitempty"`    // seconds
+	NoWorkBackoff    *int  `json:"no_work_backoff,omitempty"`    // seconds
+	IdlePollInterval *int  `json:"idle_poll_interval,omitempty"` // seconds
+	YieldTimeout     *int  `json:"yield_timeout,omitempty"`      // seconds
+	SigtermTimeout   *int  `json:"sigterm_timeout,omitempty"`    // seconds
 }
 
 // OTelSettings configures the OpenTelemetry exporter on the daemon.

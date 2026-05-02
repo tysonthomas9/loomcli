@@ -5,7 +5,7 @@
 // request-building, auth-header, and error-extraction code.
 //
 // What's shared: header construction (Authorization / X-Fleet-API-Key
-// / X-Actor), request body marshalling, response error-message
+// / X-Actor), request body marshaling, response error-message
 // extraction.
 //
 // What's not shared: status→sentinel mapping. The two callers map
@@ -45,7 +45,7 @@ func (a Auth) Apply(req *http.Request) {
 }
 
 // BuildJSONRequest constructs an HTTP request with JSON Content-Type
-// and Accept headers and the supplied auth. body is JSON-marshalled
+// and Accept headers and the supplied auth. body is JSON-marshaled
 // when non-nil. Returns the request ready to be sent.
 func BuildJSONRequest(ctx context.Context, method, url string, auth Auth, body any) (*http.Request, error) {
 	var reader io.Reader

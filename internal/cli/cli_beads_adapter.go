@@ -240,6 +240,7 @@ func (a *cliBeadsAdapter) SearchIssues(_ context.Context, query string, limit in
 
 // --- Mutation methods ---
 
+//nolint:funlen // Legacy adapter maps CLI fields to beads flags in one compatibility boundary.
 func (a *cliBeadsAdapter) Create(_ context.Context, params backend.CreateParams) (*backend.IssueData, error) {
 	if params.Title == "" {
 		return nil, backend.ErrValidation("Create", "title must not be empty")

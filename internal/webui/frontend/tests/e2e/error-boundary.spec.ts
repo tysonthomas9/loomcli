@@ -19,6 +19,13 @@ const CUSTOM_ERROR_URL = `${FIXTURE_BASE}?throw=true&errorMessage=Custom%20test%
 
 test.describe("ErrorBoundary", () => {
   test.beforeEach(async ({ page }) => {
+    await page.route("**/api/config", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ mode: "open" }),
+      })
+    })
   })
 
   test.describe("Catch", () => {

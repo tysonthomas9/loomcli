@@ -89,4 +89,3 @@ func cloneRestartPolicy(rp domain.RestartPolicy) domain.RestartPolicy {
 		SigtermTimeout:   clonePtr(rp.SigtermTimeout),
 	}
 }
-

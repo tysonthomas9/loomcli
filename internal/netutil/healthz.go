@@ -31,8 +31,8 @@ func WaitForHealthz(ctx context.Context, baseURL string, perRequestTimeout time.
 		}
 		resp, err := client.Do(req)
 		if err == nil {
-			io.Copy(io.Discard, resp.Body)
-			resp.Body.Close()
+			_, _ = io.Copy(io.Discard, resp.Body)
+			_ = resp.Body.Close()
 			if resp.StatusCode == http.StatusOK {
 				return nil
 			}

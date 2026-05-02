@@ -95,7 +95,7 @@ func HandleReady(pool daemon.Pool) http.HandlerFunc {
 // The parent_title enrichment performed by the pool path is absent — the
 // FE already tolerates a missing parent_title and falls back to Parent.
 //
-// backendFn may be nil — in that case the behaviour is identical to the
+// backendFn may be nil — in that case the behavior is identical to the
 // legacy HandleReady(pool) path, returning a 503 when the pool is unusable.
 func HandleReadyWithBackendFallback(pool daemon.Pool, backendFn IssueBackendFn) http.HandlerFunc {
 	var poolAdapter readyConnectionGetter
@@ -170,6 +170,8 @@ func (g *readyInterceptor) flushTo(w http.ResponseWriter) {
 // IssueBackend and writes it to w. Returns true when it served the request
 // (including backend errors), false when no backend is wired so the caller
 // can fall through to the pool-error path.
+//
+//nolint:funlen // Handler preserves legacy response shaping around backend ready data.
 func serveReadyViaBackend(w http.ResponseWriter, r *http.Request, backendFn IssueBackendFn) bool {
 	if backendFn == nil {
 		return false

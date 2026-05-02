@@ -19,6 +19,7 @@ import type { Page } from "@playwright/test";
 
 const WORKSPACE_ID = "test-ws";
 const BASE_PATH = `/ws/${WORKSPACE_ID}/`;
+const FLAT_KANBAN_PATH = `/ws/${WORKSPACE_ID}/kanban?groupBy=none`;
 const WS_API = `/api/workspaces/${WORKSPACE_ID}`;
 
 // ---------------------------------------------------------------------------
@@ -155,6 +156,19 @@ async function setupMocks(page: Page, options: SetupOptions = {}) {
     };
   });
 
+  await page.route("**/api/config", async (route) => {
+    const url = new URL(route.request().url());
+    if (url.pathname !== "/api/config") {
+      await route.fallback();
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ mode: "open" }),
+    });
+  });
+
   // Auth token
   await page.route("**/api/auth/token", async (route) => {
     await route.fulfill({
@@ -279,6 +293,14 @@ async function navigateAndWait(page: Page, path: string) {
   expect(response.ok()).toBe(true);
 }
 
+async function openRepoMenu(page: Page) {
+  const menu = page.getByTestId("repo-filter-menu");
+  if (!(await menu.isVisible().catch(() => false))) {
+    await page.getByTestId("repo-filter-trigger").click();
+  }
+  await expect(menu).toBeVisible();
+}
+
 // ---------------------------------------------------------------------------
 // Tests: Visibility
 // ---------------------------------------------------------------------------
@@ -286,7 +308,7 @@ async function navigateAndWait(page: Page, path: string) {
 test.describe("RepoSelector E2E — Visibility", () => {
   test("not visible when workspace has only 1 repo", async ({ page }) => {
     await setupMocks(page, { repos: SINGLE_REPO_REPOS });
-    await navigateAndWait(page, BASE_PATH);
+    await navigateAndWait(page, FLAT_KANBAN_PATH);
 
     // FilterBar should be visible but repo trigger should not
     const trigger = page.getByTestId("repo-filter-trigger");
@@ -295,7 +317,7 @@ test.describe("RepoSelector E2E — Visibility", () => {
 
   test("visible when workspace has 2+ repos", async ({ page }) => {
     await setupMocks(page);
-    await navigateAndWait(page, BASE_PATH);
+    await navigateAndWait(page, FLAT_KANBAN_PATH);
 
     const trigger = page.getByTestId("repo-filter-trigger");
     await expect(trigger).toBeVisible();
@@ -376,7 +398,7 @@ test.describe("RepoSelector E2E — Repo filtering", () => {
   test("selecting a repo filters issues to only that repo", async ({
     page,
   }) => {
-    await navigateAndWait(page, BASE_PATH);
+    await navigateAndWait(page, FLAT_KANBAN_PATH);
 
     const openColumn = page.locator('section[data-status="ready"]');
     await expect(openColumn).toBeVisible();
@@ -387,7 +409,7 @@ test.describe("RepoSelector E2E — Repo filtering", () => {
 
     // Open dropdown and select "frontend" via click (not .check() which races re-render)
     const trigger = page.getByTestId("repo-filter-trigger");
-    await trigger.click();
+    await openRepoMenu(page);
     await page.getByTestId("repo-option-frontend").click();
 
     // Wait for filter to apply by verifying trigger label update
@@ -408,7 +430,7 @@ test.describe("RepoSelector E2E — Repo filtering", () => {
   test("selecting multiple repos shows issues from all selected repos", async ({
     page,
   }) => {
-    await navigateAndWait(page, BASE_PATH);
+    await navigateAndWait(page, FLAT_KANBAN_PATH);
 
     const openColumn = page.locator('section[data-status="ready"]');
     await expect(openColumn).toBeVisible();
@@ -416,12 +438,12 @@ test.describe("RepoSelector E2E — Repo filtering", () => {
     const trigger = page.getByTestId("repo-filter-trigger");
 
     // Select "frontend" — dropdown may close after state update
-    await trigger.click();
+    await openRepoMenu(page);
     await page.getByTestId("repo-option-frontend").click();
     await expect(trigger).toContainText("Repos (1)");
 
     // Reopen dropdown and select "backend"
-    await trigger.click();
+    await openRepoMenu(page);
     await page.getByTestId("repo-option-backend").click();
     await expect(trigger).toContainText("Repos (2)");
 
@@ -437,7 +459,7 @@ test.describe("RepoSelector E2E — Repo filtering", () => {
   });
 
   test("deselecting all repos shows all issues again", async ({ page }) => {
-    await navigateAndWait(page, BASE_PATH);
+    await navigateAndWait(page, FLAT_KANBAN_PATH);
 
     const openColumn = page.locator('section[data-status="ready"]');
     await expect(openColumn).toBeVisible();
@@ -445,7 +467,7 @@ test.describe("RepoSelector E2E — Repo filtering", () => {
     const trigger = page.getByTestId("repo-filter-trigger");
 
     // Select a repo first
-    await trigger.click();
+    await openRepoMenu(page);
     await page.getByTestId("repo-option-frontend").click();
     await expect(trigger).toContainText("Repos (1)");
 
@@ -454,7 +476,7 @@ test.describe("RepoSelector E2E — Repo filtering", () => {
     await expect(openCards).toHaveCount(2);
 
     // Reopen dropdown and deselect frontend (click to uncheck)
-    await trigger.click();
+    await openRepoMenu(page);
     await page.getByTestId("repo-option-frontend").click();
 
     // Trigger should revert to "Repos" with no count
@@ -468,7 +490,7 @@ test.describe("RepoSelector E2E — Repo filtering", () => {
   });
 
   test("trigger label shows count when repos selected", async ({ page }) => {
-    await navigateAndWait(page, BASE_PATH);
+    await navigateAndWait(page, FLAT_KANBAN_PATH);
 
     const trigger = page.getByTestId("repo-filter-trigger");
 
@@ -477,12 +499,12 @@ test.describe("RepoSelector E2E — Repo filtering", () => {
     expect(await trigger.textContent()).not.toContain("(");
 
     // Select first repo
-    await trigger.click();
+    await openRepoMenu(page);
     await page.getByTestId("repo-option-frontend").click();
     await expect(trigger).toContainText("Repos (1)");
 
     // Reopen dropdown and select second repo
-    await trigger.click();
+    await openRepoMenu(page);
     await page.getByTestId("repo-option-backend").click();
 
     // Trigger should show "Repos (2)"
@@ -500,14 +522,14 @@ test.describe("RepoSelector E2E — Filter integration", () => {
   });
 
   test("repo filter combines with priority filter", async ({ page }) => {
-    await navigateAndWait(page, BASE_PATH);
+    await navigateAndWait(page, FLAT_KANBAN_PATH);
 
     const openColumn = page.locator('section[data-status="ready"]');
     await expect(openColumn).toBeVisible();
 
     // Select "frontend" repo
     const trigger = page.getByTestId("repo-filter-trigger");
-    await trigger.click();
+    await openRepoMenu(page);
     await page.getByTestId("repo-option-frontend").click();
     await expect(trigger).toContainText("Repos (1)");
 

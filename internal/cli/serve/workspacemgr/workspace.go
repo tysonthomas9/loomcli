@@ -49,7 +49,7 @@ func mirrorWorkspaceToStore(wsName string, wsID string, repos []config.RepoConfi
 		slog.Debug("store mirror skipped (open store)", "workspace", wsName, "err", err)
 		return
 	}
-	defer h.Close()
+	defer func() { _ = h.Close() }()
 	if _, err := h.Store.Workspaces().Create(ctx, storepkg.WorkspaceCreate{
 		Key:           key,
 		Name:          wsName,
@@ -87,7 +87,7 @@ func mirrorWorkspaceDelete(wsName, wsID string) {
 		slog.Debug("store mirror delete skipped (open store)", "workspace", wsName, "err", err)
 		return
 	}
-	defer h.Close()
+	defer func() { _ = h.Close() }()
 	if err := h.Store.Workspaces().Delete(ctx, key); err != nil && !errors.Is(err, domain.ErrNotFound) {
 		slog.Debug("store mirror delete failed", "workspace", wsName, "err", err)
 	}
@@ -110,10 +110,7 @@ func isValidStoreKey(s string) bool {
 			return false
 		}
 	}
-	if s[len(s)-1] == '-' {
-		return false
-	}
-	return true
+	return s[len(s)-1] != '-'
 }
 
 // DeleteWorkspace removes a workspace from config without deleting git worktrees.
@@ -311,6 +308,7 @@ func BuildStoreBackedCreateWorkspace(s storepkg.Store) service.WorkspaceCreateFn
 	}
 }
 
+//nolint:cyclop,funlen // Orchestrates filesystem, git, and store rollback steps for one workflow.
 func createStoreBackedEmptyWorkspace(ctx context.Context, s storepkg.Store, req service.WorkspaceCreateRequest) (service.WorkspaceCreateResult, error) {
 	if req.Type != "empty" {
 		return service.WorkspaceCreateResult{}, fmt.Errorf("unsupported workspace type: %s", req.Type)
@@ -392,6 +390,7 @@ func createStoreBackedEmptyWorkspace(ctx context.Context, s storepkg.Store, req 
 	return service.WorkspaceCreateResult{WorkspaceID: key, WorkspacePath: wsDir}, nil
 }
 
+//nolint:cyclop,funlen // Orchestrates clone lifecycle state, filesystem cleanup, and store writes.
 func createStoreBackedCloneWorkspace(ctx context.Context, s storepkg.Store, req service.WorkspaceCreateRequest) (service.WorkspaceCreateResult, error) {
 	cloneURLs := req.CloneURLs
 	if len(cloneURLs) == 0 && req.CloneURL != "" {

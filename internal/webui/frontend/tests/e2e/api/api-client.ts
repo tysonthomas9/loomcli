@@ -368,22 +368,24 @@ export interface DaemonStatusResponse {
  * All methods throw on non-2xx responses with descriptive error messages
  * including HTTP status and response body.
  *
- * When a workspaceId is provided, issue CRUD, dependency, ready, blocked,
- * and graph methods route through workspace-scoped endpoints
- * (/api/workspaces/{ws}/...).
+ * Issue CRUD, dependency, stats, ready, blocked, daemon status, and graph
+ * methods route through workspace-scoped endpoints (/api/workspaces/{ws}/...).
+ * The API E2E suite intentionally has no legacy flat /api fallback for these
+ * contracts.
  */
 export class LoomApiClient {
-  /** URL prefix for workspace-scoped endpoints (issues, deps, ready, blocked, graph). */
+  /** URL prefix for workspace-scoped endpoints. */
   readonly wsPrefix: string
 
   constructor(
     private request: APIRequestContext,
     private baseURL: string = '',
-    workspaceId?: string
+    workspaceId: string
   ) {
-    this.wsPrefix = workspaceId
-      ? `${baseURL}/api/workspaces/${workspaceId}`
-      : `${baseURL}/api`
+    if (!workspaceId) {
+      throw new Error('LoomApiClient requires a workspaceId for fleet API E2E tests')
+    }
+    this.wsPrefix = `${baseURL}/api/workspaces/${workspaceId}`
   }
 
   // ===========================================================================
@@ -402,9 +404,9 @@ export class LoomApiClient {
     return this.parseResponse<ApiHealthResponse>(response)
   }
 
-  /** GET /api/stats - Project statistics */
+  /** GET /api/workspaces/{ws}/stats - Project statistics */
   async stats(): Promise<Statistics> {
-    const response = await this.request.get(`${this.baseURL}/api/stats`)
+    const response = await this.request.get(`${this.wsPrefix}/stats`)
     const result = await this.parseResponse<StatsResponse>(response)
     if (!result.success || !result.data) {
       throw new Error(`Stats request failed: ${result.error}`)
@@ -422,9 +424,9 @@ export class LoomApiClient {
     return result.data
   }
 
-  /** GET /api/daemon/status - Daemon runtime configuration */
+  /** GET /api/workspaces/{ws}/daemon/status - Daemon runtime configuration */
   async daemonStatus(): Promise<DaemonStatusData> {
-    const response = await this.request.get(`${this.baseURL}/api/daemon/status`)
+    const response = await this.request.get(`${this.wsPrefix}/daemon/status`)
     const result = await this.parseResponse<DaemonStatusResponse>(response)
     if (!result.success || !result.data) {
       throw new Error(`Daemon status request failed: ${result.error}`)
@@ -699,10 +701,13 @@ export const test = base.extend<ApiFixtures>({
         const active = workspaces.find(w => w.active)
         workspaceId = active?.id ?? workspaces[0]?.id
       } else {
-        console.warn(`[api-client] /api/workspaces returned ${wsResponse.status()} — falling back to /api prefix`)
+        throw new Error(`[api-client] /api/workspaces returned ${wsResponse.status()}`)
       }
-    } catch {
-      // Fall back to non-workspace-scoped routes
+    } catch (err) {
+      throw new Error(`[api-client] failed to resolve workspace for fleet API E2E tests: ${String(err)}`)
+    }
+    if (!workspaceId) {
+      throw new Error('[api-client] no workspace available for fleet API E2E tests')
     }
     const api = new LoomApiClient(request, url, workspaceId)
     await use(api)

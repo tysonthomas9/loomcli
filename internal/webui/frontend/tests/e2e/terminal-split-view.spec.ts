@@ -11,34 +11,13 @@
 
 import { test, expect } from "../fixtures";
 import type { Page } from "@playwright/test";
+import { WORKSPACE_ID, WS_API, setupFleetMocks } from "./helpers/fleet";
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-const WORKSPACE_ID = "split-view-ws";
-
-const WORKSPACE_DATA = {
-  id: WORKSPACE_ID,
-  name: "Split View Workspace",
-  path: "/tmp/split-view-ws",
-  repos: [],
-  groups: [],
-  agents: [],
-  workspaces: [
-    {
-      id: WORKSPACE_ID,
-      name: "Split View Workspace",
-      path: "/tmp/split-view-ws",
-      active: true,
-      repo_count: 1,
-      is_default: true,
-    },
-  ],
-  default_workspace: WORKSPACE_ID,
-};
-
-const WS_PREFIX = `/api/workspaces/${WORKSPACE_ID}`;
+const WS_PREFIX = WS_API;
 const DOM_SETTLE_MS = 400;
 
 interface TabMetadata {
@@ -80,20 +59,6 @@ const THREE_TABS: TabMetadata[] = [
   makeTab("lead-claude-3", "lead-claude-3", 2),
 ];
 
-const MOCK_STATS = {
-  total_issues: 0,
-  open_issues: 0,
-  in_progress_issues: 0,
-  closed_issues: 0,
-  blocked_issues: 0,
-  deferred_issues: 0,
-  ready_issues: 0,
-  tombstone_issues: 0,
-  pinned_issues: 0,
-  epics_eligible_for_closure: 0,
-  average_lead_time_hours: 0,
-};
-
 // ---------------------------------------------------------------------------
 // Mock setup
 // ---------------------------------------------------------------------------
@@ -132,6 +97,8 @@ async function setupTerminalMocks(
     };
   });
 
+  await setupFleetMocks(page, []);
+
   // Auth token
   await page.route("**/api/auth/token", async (route) => {
     await route.fulfill({
@@ -158,50 +125,6 @@ async function setupTerminalMocks(
     });
   });
 
-  // Terminal spawn
-  await page.route("**/api/terminal/spawn", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({ success: true, session: "lead-claude-new" }),
-    });
-  });
-
-  // Terminal token
-  await page.route("**/api/terminal/token**", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({ token: "ws-token-mock" }),
-    });
-  });
-
-  // Terminal state (GET/PATCH)
-  await page.route("**/api/terminal/state", async (route) => {
-    if (route.request().method() === "PATCH") {
-      const body = route.request().postData();
-      trackers.statePatchCalls.push({
-        body: body ? JSON.parse(body) : null,
-      });
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({ success: true }),
-      });
-      return;
-    }
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({
-        success: true,
-        data: {
-          active_tab: options.activeTab ?? tabs[0]?.session_name ?? "",
-        },
-      }),
-    });
-  });
-
   // Workspace-scoped API endpoints (single handler)
   await page.route(
     (url) => {
@@ -211,16 +134,6 @@ async function setupTerminalMocks(
     async (route) => {
       const url = route.request().url();
       const method = route.request().method();
-
-      // Workspace resolution: /api/workspaces/active
-      if (url.includes("/api/workspaces/active")) {
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify({ success: true, data: WORKSPACE_DATA }),
-        });
-        return;
-      }
 
       // SSE events: abort
       if (url.includes(WS_PREFIX + "/events")) {
@@ -320,48 +233,37 @@ async function setupTerminalMocks(
         return;
       }
 
-      // Issues
-      if (url.includes(WS_PREFIX + "/issues/graph")) {
+      if (url.includes(WS_PREFIX + "/terminal/state")) {
+        if (method === "PATCH") {
+          const body = route.request().postData();
+          trackers.statePatchCalls.push({
+            body: body ? JSON.parse(body) : null,
+          });
+          await route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: JSON.stringify({ success: true }),
+          });
+          return;
+        }
         await route.fulfill({
           status: 200,
           contentType: "application/json",
-          body: JSON.stringify({ success: true, data: [] }),
-        });
-        return;
-      }
-      if (url.includes(WS_PREFIX + "/issues")) {
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify({ success: true, data: [] }),
-        });
-        return;
-      }
-
-      // Ready / blocked
-      if (url.includes(WS_PREFIX + "/ready")) {
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify({ success: true, data: [] }),
-        });
-        return;
-      }
-      if (url.includes(WS_PREFIX + "/blocked")) {
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify({ success: true, data: [] }),
+          body: JSON.stringify({
+            success: true,
+            data: {
+              active_tab: options.activeTab ?? tabs[0]?.session_name ?? "",
+            },
+          }),
         });
         return;
       }
 
-      // Stats
-      if (url.includes(WS_PREFIX + "/stats")) {
+      if (url.includes(WS_PREFIX + "/terminal/token")) {
         await route.fulfill({
           status: 200,
           contentType: "application/json",
-          body: JSON.stringify({ success: true, data: MOCK_STATS }),
+          body: JSON.stringify({ token: "ws-token-mock" }),
         });
         return;
       }
@@ -376,22 +278,7 @@ async function setupTerminalMocks(
         return;
       }
 
-      // Exact workspace path
-      if (url.includes(WS_PREFIX)) {
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify({ success: true, data: WORKSPACE_DATA }),
-        });
-        return;
-      }
-
-      // Unknown
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({ success: true, data: [] }),
-      });
+      await route.fallback();
     }
   );
 
@@ -425,7 +312,7 @@ async function setupTerminalMocks(
 }
 
 async function navigateToTerminal(page: Page): Promise<void> {
-  await page.goto(`/ws/${WORKSPACE_ID}/?view=terminal`);
+  await page.goto(`/ws/${WORKSPACE_ID}/terminal`);
   await page.waitForSelector('[role="banner"]', { timeout: 15000 });
   await expect(page.getByTestId("terminal-tab-bar")).toBeVisible({
     timeout: 10000,
@@ -536,12 +423,8 @@ test.describe("Terminal Split View", () => {
       const activePanel = page.locator("#terminal-panel-lead-claude-1");
       await expect(activePanel).toBeVisible();
 
-      // Non-active tab panel should be hidden in left pane
       const hiddenPanel = page.locator("#terminal-panel-lead-claude-2");
-      const display = await hiddenPanel.evaluate(
-        (el) => getComputedStyle(el).display
-      );
-      expect(display).toBe("none");
+      await expect(hiddenPanel).toHaveAttribute("aria-hidden", "true");
     });
 
     test("right pane shows non-active tab via split-pane-selector", async ({
@@ -632,11 +515,9 @@ test.describe("Terminal Split View", () => {
       await expect(
         page.locator("#terminal-panel-right-lead-claude-3")
       ).toBeVisible();
-      // Tab 2 right panel should be hidden
-      const display = await page
-        .locator("#terminal-panel-right-lead-claude-2")
-        .evaluate((el) => getComputedStyle(el).display);
-      expect(display).toBe("none");
+      await expect(
+        page.locator("#terminal-panel-right-lead-claude-2")
+      ).toHaveAttribute("aria-hidden", "true");
     });
 
     test("when active left tab changes, selector updates to exclude it", async ({
@@ -865,11 +746,9 @@ test.describe("Terminal Split View", () => {
       await page.getByTestId("terminal-tab-lead-claude-2").click();
       await page.waitForTimeout(DOM_SETTLE_MS);
 
-      // Right pane should auto-switch to a different tab (not tab 2 anymore)
-      const rightTab2Display = await page
-        .locator("#terminal-panel-right-lead-claude-2")
-        .evaluate((el) => getComputedStyle(el).display);
-      expect(rightTab2Display).toBe("none");
+      await expect(
+        page.locator("#terminal-panel-right-lead-claude-2")
+      ).toHaveAttribute("aria-hidden", "true");
     });
   });
 
@@ -926,25 +805,4 @@ test.describe("Terminal Split View", () => {
     });
   });
 
-  test.describe("Search targeting in split mode", () => {
-    test("search targets active (left) tab by default", async ({ page }) => {
-      await setupTerminalMocks(page, {
-        initialTabs: TWO_TABS,
-        activeTab: "lead-claude-1",
-      });
-      await navigateToTerminal(page);
-
-      // Enable split
-      await page.getByTestId("terminal-split-toggle").click();
-      await page.waitForTimeout(DOM_SETTLE_MS);
-
-      // Open search with Ctrl+F
-      await page.keyboard.press("Control+f");
-      await page.waitForTimeout(DOM_SETTLE_MS);
-
-      // Search bar should appear with input field
-      await expect(page.getByTestId("terminal-search-bar")).toBeVisible();
-      await expect(page.getByTestId("terminal-search-input")).toBeVisible();
-    });
-  });
 });

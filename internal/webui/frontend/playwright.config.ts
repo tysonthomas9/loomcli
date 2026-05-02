@@ -1,48 +1,54 @@
-import * as fs from "fs"
-import * as path from "path"
-import * as os from "os"
-import { defineConfig, devices } from "@playwright/test"
+import * as fs from "fs";
+import * as path from "path";
+import * as os from "os";
+import { defineConfig, devices } from "@playwright/test";
 
-const isCI = !!process.env.CI
-const isIntegration = !!process.env.RUN_INTEGRATION_TESTS
-const isLocalIntegration = !!process.env.RUN_LOCAL_INTEGRATION_TESTS
-const isLocalServer = !!process.env.LOOM_LOCAL_SERVER
-const chromiumExecutablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH
-const useFailureVideo = chromiumExecutablePath ? "off" : "retain-on-failure"
+const isCI = !!process.env.CI;
+const isIntegration = !!process.env.RUN_INTEGRATION_TESTS;
+const isLocalIntegration = !!process.env.RUN_LOCAL_INTEGRATION_TESTS;
+const isLocalServer = !!process.env.LOOM_LOCAL_SERVER;
+const chromiumExecutablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH;
+const useFailureVideo = chromiumExecutablePath ? "off" : "retain-on-failure";
 
 // Self-contained mode: Playwright starts loom serve on a dedicated port (auth disabled by default).
 // Uses port 8090 to avoid conflict with dev server on 8080.
-const isSelfContained = isIntegration && !isLocalServer
-const selfContainedPort = 8090
+const isSelfContained = isIntegration && !isLocalServer;
+const selfContainedPort = 8090;
 // Vite preview serves the frontend for integration tests (backed by preview.proxy).
-const selfContainedFrontendPort = 3100
+const selfContainedFrontendPort = 3100;
 
 /** Resolve API key from env or key file for authenticated test projects. */
 function resolveApiKey(): string {
   // Self-contained mode has auth disabled by default, no key needed
-  if (isSelfContained) return ""
-  if (process.env.LOOM_API_KEY) return process.env.LOOM_API_KEY
+  if (isSelfContained) return "";
+  if (process.env.LOOM_API_KEY) return process.env.LOOM_API_KEY;
   try {
-    return fs.readFileSync(path.join(os.homedir(), ".loom", "webui-api-key"), "utf-8").trim()
+    return fs
+      .readFileSync(path.join(os.homedir(), ".loom", "webui-api-key"), "utf-8")
+      .trim();
   } catch {
-    return ""
+    return "";
   }
 }
 
-const apiKey = resolveApiKey()
+const apiKey = resolveApiKey();
 const apiBaseURL = isSelfContained
   ? `http://localhost:${selfContainedPort}`
-  : process.env.LOOM_BASE_URL || "http://localhost:8080"
+  : process.env.LOOM_BASE_URL || "http://localhost:8080";
 // Integration tests navigate to the frontend via Vite preview (self-contained)
 // or the dev server / user-managed frontend (local modes).
 const frontendBaseURL = isSelfContained
   ? `http://localhost:${selfContainedFrontendPort}`
-  : process.env.LOOM_FRONTEND_BASE_URL || process.env.LOOM_BASE_URL || "http://localhost:3000"
-const authHeaders: Record<string, string> = apiKey ? { Authorization: `Bearer ${apiKey}` } : {}
+  : process.env.LOOM_FRONTEND_BASE_URL ||
+    process.env.LOOM_BASE_URL ||
+    "http://localhost:3000";
+const authHeaders: Record<string, string> = apiKey
+  ? { Authorization: `Bearer ${apiKey}` }
+  : {};
 
 // Propagate base URL to helpers.ts which reads process.env.LOOM_BASE_URL at module load
 if (isSelfContained) {
-  process.env.LOOM_BASE_URL = apiBaseURL
+  process.env.LOOM_BASE_URL = apiBaseURL;
 }
 
 /**
@@ -62,11 +68,11 @@ function resolveWebServer() {
       reuseExistingServer: false,
       timeout: 120_000,
       stdout: "pipe" as const,
-    }
+    };
   }
   if (isIntegration || isLocalIntegration) {
     // Local server mode or local-integration: user manages server
-    return undefined
+    return undefined;
   }
   // Chromium unit tests: Vite dev server
   return {
@@ -74,7 +80,7 @@ function resolveWebServer() {
     url: "http://localhost:3000",
     reuseExistingServer: !isCI,
     timeout: 60_000,
-  }
+  };
 }
 
 export default defineConfig({
@@ -139,7 +145,9 @@ export default defineConfig({
       name: "local-integration",
       testDir: "./tests/e2e/integration",
       testMatch: "**/terminal-parity.integration.spec.ts",
-      testIgnore: isLocalIntegration ? undefined : "**/terminal-parity.integration.spec.ts",
+      testIgnore: isLocalIntegration
+        ? undefined
+        : "**/terminal-parity.integration.spec.ts",
       use: {
         ...devices["Desktop Chrome"],
         ...(chromiumExecutablePath
@@ -165,4 +173,4 @@ export default defineConfig({
   ],
 
   webServer: resolveWebServer(),
-})
+});

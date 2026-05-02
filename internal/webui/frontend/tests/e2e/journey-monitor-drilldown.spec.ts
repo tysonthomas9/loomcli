@@ -60,6 +60,12 @@ async function setupMocks(page: Page) {
     if (url.pathname !== "/api/config") { await route.fallback(); return; }
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ mode: "open" }) });
   });
+  await page.route("**/api/backends", async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: ok([{ name: "claude", available: true, display_name: "Claude" }]) });
+  });
+  await page.route("**/api/config/backend", async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: ok({ backend: "claude", source: "workspace", available: ["claude"], agents: [] }) });
+  });
   await page.route("**/api/health", async (route) => {
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ status: "ok", daemon: true }) });
   });
@@ -74,6 +80,10 @@ async function setupMocks(page: Page) {
       return;
     }
     if (url.includes("/events")) { await route.abort(); return; }
+    if (url.includes(WS_ID + "/config/backend")) {
+      await route.fulfill({ status: 200, contentType: "application/json", body: ok({ backend: "claude", source: "workspace", available: ["claude"], agents: [] }) });
+      return;
+    }
     // Issue sub-resources
     if (url.includes("/issues/") && method === "GET") {
       const afterIssues = url.split("/issues/")[1] ?? "";
@@ -105,7 +115,9 @@ async function setupMocks(page: Page) {
       await route.fulfill({ status: 200, contentType: "application/json", body: ok({ total_issues: 5, open_issues: 2, in_progress_issues: 1, closed_issues: 1, blocked_issues: 1, deferred_issues: 0, ready_issues: 2, tombstone_issues: 0, pinned_issues: 0, epics_eligible_for_closure: 0, average_lead_time_hours: 24 }) });
       return;
     }
-    if (url.includes("/terminal")) { await route.fulfill({ status: 200, contentType: "application/json", body: ok({}) }); return; }
+    if (url.includes("/terminal/tabs")) { await route.fulfill({ status: 200, contentType: "application/json", body: ok([]) }); return; }
+    if (url.includes("/terminal/state")) { await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ active_tab: "" }) }); return; }
+    if (url.includes("/terminal/sessions/by-issue")) { await route.fulfill({ status: 200, contentType: "application/json", body: ok({}) }); return; }
     await route.fulfill({ status: 200, contentType: "application/json", body: ok(WORKSPACE_DATA) });
   });
 

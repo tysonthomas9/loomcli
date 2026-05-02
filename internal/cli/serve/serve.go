@@ -159,6 +159,7 @@ func init() {
 	cli.RegisterCommand(serveCmd)
 }
 
+//nolint:funlen // Serve startup wires process-wide dependencies in a fixed order.
 func runServe(cmd *cobra.Command, args []string) {
 	checkTmuxInstalled()
 
@@ -215,7 +216,7 @@ func runServe(cmd *cobra.Command, args []string) {
 		log.Fatalf("failed to open fleet-db store: %v", storeErr)
 	}
 	if storeHandle != nil {
-		defer storeHandle.Close()
+		defer func() { _ = storeHandle.Close() }()
 	} else {
 		go workspacemgr.PurgeOldSessions()
 		workspacemgr.EnsureProjectRegistered()

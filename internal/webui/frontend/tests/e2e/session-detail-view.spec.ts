@@ -59,7 +59,7 @@ const MOCK_ISSUE_DETAILS = {
 // -- Session mock data --
 
 interface MockSession {
-  id: string;
+  session_id: string;
   agent_name: string;
   backend: string;
   model?: string;
@@ -88,7 +88,7 @@ function createMockSession(
   overrides: Partial<MockSession> = {},
 ): MockSession {
   return {
-    id: "sess-001",
+    session_id: "sess-001",
     agent_name: "agent-alpha",
     backend: "claude",
     model: "opus-4",
@@ -118,7 +118,7 @@ function createMockSession(
 const MOCK_SESSIONS = [
   createMockSession(),
   createMockSession({
-    id: "sess-002",
+    session_id: "sess-002",
     agent_name: "falcon",
     status: "failed",
     model: undefined,
@@ -387,9 +387,9 @@ async function setupSessionMocks(
     }
   });
 
-  // Mock GET /api/tasks/{taskId}/sessions/{sessionId}/transcript
+  // Mock GET /api/workspaces/{ws}/tasks/{taskId}/sessions/{sessionId}/transcript
   // Registered BEFORE broader sessions route for LIFO priority
-  await page.route("**/api/tasks/*/sessions/*/transcript", async (route) => {
+  await page.route("**/api/workspaces/*/tasks/*/sessions/*/transcript", async (route) => {
     if (options.transcriptError) {
       await route.fulfill({
         status: 500,
@@ -412,8 +412,8 @@ async function setupSessionMocks(
     });
   });
 
-  // Mock GET /api/tasks/{taskId}/sessions/{sessionId}/diff — raw text/plain
-  await page.route("**/api/tasks/*/sessions/*/diff", async (route) => {
+  // Mock GET /api/workspaces/{ws}/tasks/{taskId}/sessions/{sessionId}/diff — raw text/plain
+  await page.route("**/api/workspaces/*/tasks/*/sessions/*/diff", async (route) => {
     if (options.diff404) {
       await route.fulfill({
         status: 404,
@@ -440,8 +440,8 @@ async function setupSessionMocks(
     });
   });
 
-  // Mock GET /api/tasks/{taskId}/sessions — session list
-  await page.route("**/api/tasks/*/sessions", async (route) => {
+  // Mock GET /api/workspaces/{ws}/tasks/{taskId}/sessions — session list
+  await page.route("**/api/workspaces/*/tasks/*/sessions", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -453,7 +453,9 @@ async function setupSessionMocks(
 // -- Navigation helpers --
 
 async function navigateToApp(page: Page) {
-  await page.goto("/ws/default/", { waitUntil: "domcontentloaded" });
+  await page.goto("/ws/default/kanban?groupBy=none", {
+    waitUntil: "domcontentloaded",
+  });
 }
 
 async function openIssuePanel(page: Page) {
@@ -759,7 +761,7 @@ test.describe("Session Detail View - Transcript and Diff Tabs", () => {
       await page.getByTestId("session-inner-tab-transcript").click();
       await expect(page.getByTestId("session-transcript")).toBeVisible();
       await expect(page.getByTestId("session-transcript")).toContainText(
-        "Please fix the login bug",
+        "I will investigate the login handler",
       );
     });
 

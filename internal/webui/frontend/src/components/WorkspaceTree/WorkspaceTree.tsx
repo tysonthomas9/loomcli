@@ -21,7 +21,7 @@ import { AgentSection } from "./AgentSection";
 import { RunningSection } from "./RunningSection";
 import { ReposSection } from "./ReposSection";
 import { QueueStatsBar, type WorkQueueCounts } from "./QueueStatsBar";
-import { SidebarStatusBar } from "./nav";
+import { SidebarStatusBar, WorkQueueSection } from "./nav";
 import styles from "./WorkspaceTree.module.css";
 
 /**
@@ -92,6 +92,13 @@ export function WorkspaceTree({
 
   const agentStore = useAgentStoreInstance();
   const agents = useStore(agentStore, (s) => s.agents);
+  const agentHealth =
+    agents.some((agent) => agent.status.startsWith("working")) ||
+    agents.some((agent) => agent.status.startsWith("review"))
+      ? "yellow"
+      : agents.length > 0
+        ? "green"
+        : "none";
 
   // Re-read scoped state when workspace changes (SPA navigation)
   useEffect(() => {
@@ -155,6 +162,8 @@ export function WorkspaceTree({
 
       {!isCollapsed && (
         <div className={styles.content}>
+          <div className={styles.workspaceHeading}>Workspaces</div>
+
           {isLoading && repos.length === 0 && (
             <div className={styles.loading}>
               <div className={styles.skeletonRow} />
@@ -204,6 +213,8 @@ export function WorkspaceTree({
             onAddClick={onAddClick}
           />
 
+          {workQueueCounts && <WorkQueueSection counts={workQueueCounts} />}
+
           {/* Running tasks grouped by epic — only shows when agents active */}
           <RunningSection onSelect={onTreeSelect} />
 
@@ -242,16 +253,19 @@ export function WorkspaceTree({
       {isCollapsed && isDisconnected && (
         <div
           className={styles.collapsedBadge}
-          data-disconnected={true}
+          data-disconnected={isDisconnected || undefined}
+          data-health={agentHealth}
           title={
             connectionLost
               ? "Connection lost"
               : connectionState === "reconnecting"
                 ? "Reconnecting..."
-                : "Disconnected"
+                : isDisconnected
+                  ? "Disconnected"
+                  : `${agents.length} agent${agents.length === 1 ? "" : "s"}`
           }
         >
-          !
+          {isDisconnected ? "!" : agents.length}
         </div>
       )}
 

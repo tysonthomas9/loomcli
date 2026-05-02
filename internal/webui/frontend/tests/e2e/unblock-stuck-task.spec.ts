@@ -229,6 +229,23 @@ async function setupInfrastructureMocks(page: Page) {
     });
   });
 
+  await page.route("**/api/config", async (route) => {
+    const url = new URL(route.request().url());
+    if (url.pathname !== "/api/config") {
+      await route.fallback();
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        mode: "open",
+        auth: { mode: "open" },
+        version: "test",
+      }),
+    });
+  });
+
   await page.route("**/api/config/backend", async (route) => {
     await route.fulfill({
       status: 200,
@@ -287,7 +304,7 @@ async function setupInfrastructureMocks(page: Page) {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: ok({
+      body: JSON.stringify({
         total_issues: 2,
         open_issues: 0,
         in_progress_issues: 1,
@@ -301,6 +318,65 @@ async function setupInfrastructureMocks(page: Page) {
         average_lead_time_hours: 0,
       }),
     });
+  });
+
+  await page.route(`**/api/workspaces/${WORKSPACE_ID}/ready**`, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: ok([blockerIssue, blockedIssue]),
+    });
+  });
+
+  await page.route(`**/api/workspaces/${WORKSPACE_ID}/issues**`, async (route) => {
+    const url = new URL(route.request().url());
+    const method = route.request().method();
+
+    if (method !== "GET") {
+      await route.fallback();
+      return;
+    }
+
+    if (
+      url.pathname === `/api/workspaces/${WORKSPACE_ID}/issues` ||
+      url.pathname === `/api/workspaces/${WORKSPACE_ID}/issues/`
+    ) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: ok([blockerIssue, blockedIssue]),
+      });
+      return;
+    }
+
+    if (url.pathname === `/api/workspaces/${WORKSPACE_ID}/issues/blocked-1`) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: ok(blockedIssueDetail),
+      });
+      return;
+    }
+
+    if (url.pathname === `/api/workspaces/${WORKSPACE_ID}/issues/blocker-1`) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: ok(blockerIssueDetail),
+      });
+      return;
+    }
+
+    if (url.pathname.endsWith("/events")) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: ok([]),
+      });
+      return;
+    }
+
+    await route.fallback();
   });
 
   await page.route(
@@ -366,13 +442,13 @@ test.describe("E2E Journey: Unblock stuck task via dependency navigation", () =>
           });
         } else {
           // GET requests handled by addInitScript interceptor
-          await route.continue();
+          await route.fallback();
         }
       },
     );
 
     // Navigate to table view
-    await page.goto(`/ws/${WORKSPACE_ID}/?view=table`, {
+    await page.goto(`/ws/${WORKSPACE_ID}/table`, {
       waitUntil: "domcontentloaded",
     });
 
@@ -404,10 +480,7 @@ test.describe("E2E Journey: Unblock stuck task via dependency navigation", () =>
 
     const blockedRow = page.getByTestId("issue-row-blocked-1");
     await expect(blockedRow).toBeVisible();
-    const hasBlockedClass = await blockedRow.evaluate((el) =>
-      el.classList.contains("issue-table__row--blocked"),
-    );
-    expect(hasBlockedClass).toBe(true);
+    await expect(blockedRow.getByText("Blocked", { exact: true })).toBeVisible();
 
     await page.screenshot({ path: "blocked-issue-table.png" });
   });

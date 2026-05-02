@@ -152,6 +152,47 @@ async function setupMocks(page: Page, state: MockState): Promise<void> {
     };
   });
 
+  // App config (auth mode discovery)
+  await page.route("**/api/config", async (route) => {
+    const url = new URL(route.request().url());
+    if (url.pathname !== "/api/config") {
+      await route.fallback();
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ mode: "open" }),
+    });
+  });
+
+  await page.route("**/api/backends", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        success: true,
+        data: [{ name: "claude", available: true, display_name: "Claude" }],
+      }),
+    });
+  });
+
+  await page.route("**/api/config/backend", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        success: true,
+        data: {
+          backend: "claude",
+          source: "workspace",
+          available: ["claude"],
+          agents: [],
+        },
+      }),
+    });
+  });
+
   // Auth token
   await page.route("**/api/auth/token", async (route) => {
     await route.fulfill({
@@ -196,6 +237,23 @@ async function setupMocks(page: Page, state: MockState): Promise<void> {
       // SSE events: abort to prevent networkidle timeout
       if (url.includes(WS_PREFIX + "/events")) {
         await route.abort();
+        return;
+      }
+
+      if (url.includes(WS_PREFIX + "/config/backend")) {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            success: true,
+            data: {
+              backend: "claude",
+              source: "workspace",
+              available: ["claude"],
+              agents: [],
+            },
+          }),
+        });
         return;
       }
 
@@ -315,6 +373,33 @@ async function setupMocks(page: Page, state: MockState): Promise<void> {
         return;
       }
 
+      if (url.includes(WS_PREFIX + "/terminal/tabs")) {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ success: true, data: [] }),
+        });
+        return;
+      }
+
+      if (url.includes(WS_PREFIX + "/terminal/state")) {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ active_tab: "" }),
+        });
+        return;
+      }
+
+      if (url.includes(WS_PREFIX + "/terminal/sessions/by-issue")) {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ success: true, data: {} }),
+        });
+        return;
+      }
+
       // Workspace validation (exact workspace path)
       if (url.includes(WS_PREFIX)) {
         await route.fulfill({
@@ -360,7 +445,7 @@ test.describe("Journey: Create issue, drag to column, assign agent", () => {
     };
 
     await setupMocks(page, state);
-    await page.goto(`/ws/${WORKSPACE_ID}/`);
+    await page.goto(`/ws/${WORKSPACE_ID}/kanban`);
     await page.waitForSelector('section[data-status="ready"]', { timeout: 15000 });
 
     // Verify kanban columns are visible
@@ -449,7 +534,7 @@ test.describe("Journey: Create issue, drag to column, assign agent", () => {
       },
     );
 
-    await page.goto(`/ws/${WORKSPACE_ID}/`);
+    await page.goto(`/ws/${WORKSPACE_ID}/kanban`);
     await page.waitForSelector('section[data-status="ready"]', { timeout: 15000 });
 
     const readyColumn = page.locator('section[data-status="ready"]');
@@ -502,7 +587,7 @@ test.describe("Journey: Create issue, drag to column, assign agent", () => {
     };
 
     await setupMocks(page, state);
-    await page.goto(`/ws/${WORKSPACE_ID}/`);
+    await page.goto(`/ws/${WORKSPACE_ID}/kanban`);
     await page.waitForSelector('section[data-status="ready"]', { timeout: 15000 });
 
     const readyColumn = page.locator('section[data-status="ready"]');
@@ -553,7 +638,7 @@ test.describe("Journey: Create issue, drag to column, assign agent", () => {
     };
 
     await setupMocks(page, state);
-    await page.goto(`/ws/${WORKSPACE_ID}/`);
+    await page.goto(`/ws/${WORKSPACE_ID}/kanban`);
     await page.waitForSelector('section[data-status="ready"]', { timeout: 15000 });
 
     // Open detail panel for the issue
@@ -618,7 +703,7 @@ test.describe("Journey: Create issue, drag to column, assign agent", () => {
     };
 
     await setupMocks(page, state);
-    await page.goto(`/ws/${WORKSPACE_ID}/`);
+    await page.goto(`/ws/${WORKSPACE_ID}/kanban`);
     await page.waitForSelector('section[data-status="ready"]', { timeout: 15000 });
 
     const readyColumn = page.locator('section[data-status="ready"]');

@@ -107,7 +107,10 @@ export class BeadsSSEClient {
    * @param since Optional cursor to receive events after
    * @param sourceRepos Optional repo filter for server-side event filtering
    */
-  async connect(since?: string | number, sourceRepos?: string[]): Promise<void> {
+  async connect(
+    since?: string | number,
+    sourceRepos?: string[],
+  ): Promise<void> {
     if (this.destroyed) return;
 
     // Always update stored sourceRepos even if we bail early,

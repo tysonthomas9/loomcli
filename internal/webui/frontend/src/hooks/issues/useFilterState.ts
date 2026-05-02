@@ -4,7 +4,7 @@
  */
 
 import { useCallback, useMemo } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useLocation, useSearchParams } from "react-router-dom";
 
 import type { Priority, IssueType } from "@/types";
 
@@ -227,12 +227,13 @@ function applyFilterToParams(
 export function useFilterState(
   _options: UseFilterStateOptions = {},
 ): UseFilterStateReturn {
-  const [searchParams, setSearchParams] = useSearchParams();
+  const location = useLocation();
+  const [, setSearchParams] = useSearchParams();
 
   // Derive filter state from current search params
   const state = useMemo(
-    () => parseFromSearchParams(searchParams),
-    [searchParams],
+    () => parseFromSearchParams(new URLSearchParams(location.search)),
+    [location.search],
   );
 
   // Helper to update a single filter param with replace semantics

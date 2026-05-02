@@ -1,4 +1,18 @@
-import { test, expect } from "@playwright/test"
+import { test, expect, type Page } from "@playwright/test"
+import {
+  WORKSPACE_ID,
+  WS_API,
+  setupFleetMocks,
+  waitForWorkspaceIssues,
+} from "./helpers/fleet"
+
+async function navigateToKanban(page: Page) {
+  const [response] = await Promise.all([
+    waitForWorkspaceIssues(page),
+    page.goto(`/ws/${WORKSPACE_ID}/kanban?groupBy=none`),
+  ])
+  expect(response.ok()).toBe(true)
+}
 
 /**
  * Mock issues for testing Kanban board rendering.
@@ -49,24 +63,8 @@ const mockIssues = [
 
 test.describe("KanbanBoard", () => {
   test("issues load into correct Kanban columns", async ({ page }) => {
-    // Mock the /api/ready endpoint to return our test data
-    await page.route("**/api/ready", async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({
-          success: true,
-          data: mockIssues,
-        }),
-      })
-    })
-
-    // Navigate to the app and wait for API response
-    const [response] = await Promise.all([
-      page.waitForResponse((res) => res.url().includes("/api/ready") && res.status() === 200),
-      page.goto("/"),
-    ])
-    expect(response.ok()).toBe(true)
+    await setupFleetMocks(page, mockIssues)
+    await navigateToKanban(page)
 
     // Wait for the Kanban board to render (columns should appear)
     // Note: Kanban uses semantic column IDs (ready, pending, in_progress, review, done)
@@ -110,31 +108,11 @@ test.describe("KanbanBoard", () => {
   })
 
   test("handles empty API response gracefully", async ({ page }) => {
-    // Mock the /api/ready endpoint to return empty data
-    await page.route("**/api/ready", async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({
-          success: true,
-          data: [],
-        }),
-      })
-    })
+    await setupFleetMocks(page, [])
+    await navigateToKanban(page)
 
-    // Navigate to the app and wait for API response
-    const [response] = await Promise.all([
-      page.waitForResponse((res) => res.url().includes("/api/ready") && res.status() === 200),
-      page.goto("/"),
-    ])
-    expect(response.ok()).toBe(true)
-
-    // Wait for the Kanban board to render
-    const readyColumn = page.locator('section[data-status="ready"]')
-    await expect(readyColumn).toBeVisible()
-
-    // All columns should have 0 counts (using aria-label for precise matching)
-    await expect(readyColumn.getByLabel("0 issues")).toBeVisible()
+    await expect(page.getByTestId("empty-workspace-board")).toBeVisible()
+    await expect(page.getByRole("heading", { name: "No issues yet" })).toBeVisible()
   })
 
   test("issues without status default to ready column", async ({ page }) => {
@@ -150,23 +128,8 @@ test.describe("KanbanBoard", () => {
       },
     ]
 
-    await page.route("**/api/ready", async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({
-          success: true,
-          data: issueWithoutStatus,
-        }),
-      })
-    })
-
-    // Navigate to the app and wait for API response
-    const [response] = await Promise.all([
-      page.waitForResponse((res) => res.url().includes("/api/ready") && res.status() === 200),
-      page.goto("/"),
-    ])
-    expect(response.ok()).toBe(true)
+    await setupFleetMocks(page, issueWithoutStatus)
+    await navigateToKanban(page)
 
     // The issue should appear in the Ready column (status=open or undefined)
     const readyColumn = page.locator('section[data-status="ready"]')
@@ -176,56 +139,12 @@ test.describe("KanbanBoard", () => {
 
   test("drag issue from Ready to In Progress updates status and persists", async ({ page }) => {
     // Track API calls for verification
-    const patchCalls: { url: string; body: { status?: string } }[] = []
-    let hasReloaded = false
-
-    // Mock /api/ready with dynamic response based on reload state
-    await page.route("**/api/ready", async (route) => {
-      const issues = hasReloaded
-        ? mockIssues.map((issue) =>
-            issue.id === "issue-open-1"
-              ? { ...issue, status: "in_progress" }
-              : issue
-          )
-        : mockIssues
-
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({ success: true, data: issues }),
-      })
-    })
-
-    // Mock PATCH /api/issues/:id and capture the call
-    await page.route("**/api/issues/*", async (route) => {
-      if (route.request().method() === "PATCH") {
-        const url = route.request().url()
-        const body = route.request().postDataJSON() as { status?: string }
-        patchCalls.push({ url, body })
-
-        // Simulate server response with updated timestamp
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify({
-            success: true,
-            data: {
-              ...mockIssues[0],
-              status: body.status,
-              updated_at: new Date().toISOString(),
-            },
-          }),
-        })
-      } else {
-        await route.continue()
-      }
-    })
+    const patchCalls: { url: string; body: object }[] = []
+    const issues = mockIssues.map((issue) => ({ ...issue }))
+    await setupFleetMocks(page, issues, patchCalls)
 
     // Navigate and wait for initial load
-    await Promise.all([
-      page.waitForResponse((res) => res.url().includes("/api/ready")),
-      page.goto("/"),
-    ])
+    await navigateToKanban(page)
 
     // Get column references
     const readyColumn = page.locator('section[data-status="ready"]')
@@ -309,11 +228,13 @@ test.describe("KanbanBoard", () => {
     })
 
     // Wait for the PATCH API call to complete (avoids arbitrary timeout)
-    await page.waitForResponse(
+    const patchResponse = page.waitForResponse(
       (res) =>
-        res.url().includes("/api/issues/issue-open-1") &&
+        new URL(res.url()).pathname === `${WS_API}/issues/issue-open-1` &&
         res.request().method() === "PATCH"
     )
+    await page.getByRole("button", { name: "Skip" }).click()
+    await patchResponse
 
     // Verify UI updated (card moved to In Progress)
     // Wait for visibility first to ensure component has re-rendered
@@ -323,15 +244,23 @@ test.describe("KanbanBoard", () => {
 
     // Verify API call was made correctly
     expect(patchCalls).toHaveLength(1)
-    expect(patchCalls[0].url).toContain("/api/issues/issue-open-1")
+    expect(new URL(patchCalls[0].url).pathname).toBe(`${WS_API}/issues/issue-open-1`)
     expect(patchCalls[0].body).toEqual({ status: "in_progress" })
 
     // Verify persistence on reload
-    hasReloaded = true
+    issues.splice(
+      0,
+      issues.length,
+      ...mockIssues.map((issue) =>
+        issue.id === "issue-open-1"
+          ? { ...issue, status: "in_progress" }
+          : { ...issue }
+      )
+    )
     await page.reload()
 
     // Wait for data to load after reload
-    await page.waitForResponse((res) => res.url().includes("/api/ready"))
+    await waitForWorkspaceIssues(page)
 
     // Verify the card is still in In Progress after reload
     // Wait for visibility first to ensure component has re-rendered
@@ -340,7 +269,7 @@ test.describe("KanbanBoard", () => {
   })
 
   test("shows error toast and rolls back card on drag failure", async ({ page }) => {
-    // Mock /api/ready with a single test issue in 'open' column
+    // Mock workspace issues with a single test issue in 'open' column
     const dragTestIssue = [
       {
         id: "drag-fail-issue",
@@ -352,32 +281,27 @@ test.describe("KanbanBoard", () => {
       },
     ]
 
-    await page.route("**/api/ready", async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({ success: true, data: dragTestIssue }),
-      })
-    })
+    await setupFleetMocks(page, dragTestIssue)
+    await page.route("**/*", async (route) => {
+      const request = route.request()
+      const pathname = new URL(request.url()).pathname
 
-    // Mock PATCH /api/issues/{id} to fail with 500
-    await page.route("**/api/issues/*", async (route) => {
-      if (route.request().method() === "PATCH") {
+      if (
+        request.method() === "PATCH" &&
+        pathname.startsWith(`${WS_API}/issues/`)
+      ) {
         await route.fulfill({
           status: 500,
           contentType: "application/json",
           body: JSON.stringify({ success: false, error: "Server error" }),
         })
       } else {
-        await route.continue()
+        await route.fallback()
       }
     })
 
     // Navigate and wait for board to render
-    await Promise.all([
-      page.waitForResponse((res) => res.url().includes("/api/ready") && res.status() === 200),
-      page.goto("/"),
-    ])
+    await navigateToKanban(page)
 
     const readyColumn = page.locator('section[data-status="ready"]')
     const inProgressColumn = page.locator('section[data-status="in_progress"]')
@@ -389,12 +313,12 @@ test.describe("KanbanBoard", () => {
 
     // Wait for the PATCH request when drag completes
     const patchPromise = page.waitForResponse(
-      (res) => res.url().includes("/api/issues/") && res.request().method() === "PATCH",
+      (res) => new URL(res.url()).pathname.startsWith(`${WS_API}/issues/`) && res.request().method() === "PATCH",
       { timeout: 10000 }
     )
 
     // Find the draggable wrapper using its accessible role and name
-    const draggableWrapper = page.getByRole("button", { name: "Issue: Issue To Drag" })
+    const draggableWrapper = page.getByRole("button", { name: "Issue: Issue To Drag" }).first()
     await expect(draggableWrapper).toBeVisible()
 
     // Get the droppable target
@@ -435,6 +359,8 @@ test.describe("KanbanBoard", () => {
     // Fire pointerup on the page to complete the drag
     await page.mouse.up()
 
+    await page.getByRole("button", { name: "Skip" }).click()
+
     // Wait for PATCH to complete (will fail if drag didn't trigger API call)
     await patchPromise
 
@@ -442,7 +368,7 @@ test.describe("KanbanBoard", () => {
     await page.waitForTimeout(500)
 
     // Wait for and verify error toast appears
-    const toast = page.getByTestId("error-toast")
+    const toast = page.getByTestId("toast-error")
     await expect(toast).toBeVisible({ timeout: 5000 })
     await expect(toast).toHaveAttribute("role", "alert")
 
@@ -464,43 +390,17 @@ test.describe("KanbanBoard", () => {
       },
     ]
 
-    await page.route("**/api/ready", async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({ success: true, data: testIssue }),
-      })
-    })
-
-    // Mock PATCH to succeed (we'll complete the drag)
-    await page.route("**/api/issues/*", async (route) => {
-      if (route.request().method() === "PATCH") {
-        const body = route.request().postDataJSON() as { status?: string }
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify({
-            success: true,
-            data: { ...testIssue[0], status: body.status },
-          }),
-        })
-      } else {
-        await route.continue()
-      }
-    })
+    await setupFleetMocks(page, testIssue)
 
     // Navigate and wait for board to render
-    await Promise.all([
-      page.waitForResponse((res) => res.url().includes("/api/ready") && res.status() === 200),
-      page.goto("/"),
-    ])
+    await navigateToKanban(page)
 
     const readyColumn = page.locator('section[data-status="ready"]')
     const inProgressColumn = page.locator('section[data-status="in_progress"]')
     await expect(readyColumn).toBeVisible()
 
     // Get draggable wrapper (has accessible role)
-    const draggableWrapper = page.getByRole("button", { name: "Issue: Visual Feedback Test" })
+    const draggableWrapper = page.getByRole("button", { name: "Issue: Visual Feedback Test" }).first()
     await expect(draggableWrapper).toBeVisible()
 
     // Get drop target
@@ -605,15 +505,17 @@ test.describe("KanbanBoard", () => {
     })
 
     // Wait for the PATCH API call to complete
-    await page.waitForResponse(
+    const patchResponse = page.waitForResponse(
       (res) =>
-        res.url().includes("/api/issues/visual-test-issue") &&
+        new URL(res.url()).pathname === `${WS_API}/issues/visual-test-issue` &&
         res.request().method() === "PATCH"
     )
+    await page.getByRole("button", { name: "Skip" }).click()
+    await patchResponse
 
     // 8. Verify visual feedback resets
     // The card has moved to the new column, so we check the new draggable
-    const movedCard = inProgressColumn.getByRole("button", { name: "Issue: Visual Feedback Test" })
+    const movedCard = inProgressColumn.getByRole("button", { name: "Issue: Visual Feedback Test" }).first()
     await expect(movedCard).toBeVisible()
 
     // The moved card should not have data-dragging
@@ -655,40 +557,12 @@ test.describe("KanbanBoard", () => {
     ]
 
     // Track PATCH calls
-    const patchCalls: { url: string; body: { status?: string } }[] = []
+    const patchCalls: { url: string; body: object }[] = []
 
-    await page.route("**/api/ready", async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({ success: true, data: reviewIssue }),
-      })
-    })
-
-    await page.route("**/api/issues/*", async (route) => {
-      if (route.request().method() === "PATCH") {
-        const url = route.request().url()
-        const body = route.request().postDataJSON() as { status?: string }
-        patchCalls.push({ url, body })
-
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify({
-            success: true,
-            data: { ...reviewIssue[0], status: body.status },
-          }),
-        })
-      } else {
-        await route.continue()
-      }
-    })
+    await setupFleetMocks(page, reviewIssue, patchCalls)
 
     // Navigate and wait for board to render
-    await Promise.all([
-      page.waitForResponse((res) => res.url().includes("/api/ready") && res.status() === 200),
-      page.goto("/"),
-    ])
+    await navigateToKanban(page)
 
     const reviewColumn = page.locator('section[data-status="review"]')
     const doneColumn = page.locator('section[data-status="done"]')
@@ -751,6 +625,12 @@ test.describe("KanbanBoard", () => {
 
     await page.waitForTimeout(50)
 
+    const patchResponse = page.waitForResponse(
+      (res) =>
+        new URL(res.url()).pathname === `${WS_API}/issues/review-to-closed-issue` &&
+        res.request().method() === "PATCH"
+    )
+
     await page.dispatchEvent("body", "pointerup", {
       clientX: endX,
       clientY: endY,
@@ -762,19 +642,15 @@ test.describe("KanbanBoard", () => {
     })
 
     // Wait for PATCH API call
-    await page.waitForResponse(
-      (res) =>
-        res.url().includes("/api/issues/review-to-closed-issue") &&
-        res.request().method() === "PATCH"
-    )
-
-    // Verify card moved to Done column
-    await expect(doneColumn.getByText("Review to Close Task")).toBeVisible()
-    await expect(reviewColumn.locator("article")).toHaveCount(0)
+    await patchResponse
 
     // Verify API call was made correctly (targetStatus for 'done' column is 'closed')
     expect(patchCalls).toHaveLength(1)
     expect(patchCalls[0].body).toEqual({ status: "closed" })
+
+    // Verify card moved to Done column
+    await expect(doneColumn.getByText("Review to Close Task")).toBeVisible()
+    await expect(reviewColumn.locator("article")).toHaveCount(0)
   })
 
   test("drag issue from Ready to Review updates status", async ({ page }) => {
@@ -791,40 +667,12 @@ test.describe("KanbanBoard", () => {
     ]
 
     // Track PATCH calls
-    const patchCalls: { url: string; body: { status?: string } }[] = []
+    const patchCalls: { url: string; body: object }[] = []
 
-    await page.route("**/api/ready", async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({ success: true, data: openIssue }),
-      })
-    })
-
-    await page.route("**/api/issues/*", async (route) => {
-      if (route.request().method() === "PATCH") {
-        const url = route.request().url()
-        const body = route.request().postDataJSON() as { status?: string }
-        patchCalls.push({ url, body })
-
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify({
-            success: true,
-            data: { ...openIssue[0], status: body.status },
-          }),
-        })
-      } else {
-        await route.continue()
-      }
-    })
+    await setupFleetMocks(page, openIssue, patchCalls)
 
     // Navigate and wait for board to render
-    await Promise.all([
-      page.waitForResponse((res) => res.url().includes("/api/ready") && res.status() === 200),
-      page.goto("/"),
-    ])
+    await navigateToKanban(page)
 
     const readyColumn = page.locator('section[data-status="ready"]')
     const reviewColumn = page.locator('section[data-status="review"]')
@@ -887,6 +735,12 @@ test.describe("KanbanBoard", () => {
 
     await page.waitForTimeout(50)
 
+    const patchResponse = page.waitForResponse(
+      (res) =>
+        new URL(res.url()).pathname === `${WS_API}/issues/open-to-review-issue` &&
+        res.request().method() === "PATCH"
+    )
+
     await page.dispatchEvent("body", "pointerup", {
       clientX: endX,
       clientY: endY,
@@ -898,11 +752,7 @@ test.describe("KanbanBoard", () => {
     })
 
     // Wait for PATCH API call
-    await page.waitForResponse(
-      (res) =>
-        res.url().includes("/api/issues/open-to-review-issue") &&
-        res.request().method() === "PATCH"
-    )
+    await patchResponse
 
     // Verify card moved to Review column
     await expect(reviewColumn.getByText("Open to Review Task")).toBeVisible()

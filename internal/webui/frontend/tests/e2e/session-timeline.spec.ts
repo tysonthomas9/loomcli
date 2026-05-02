@@ -56,7 +56,7 @@ const testIssueDetails = {
 // -- Session mock data --
 
 interface MockSession {
-  id: string;
+  session_id: string;
   agent_name: string;
   backend: string;
   model?: string;
@@ -83,7 +83,7 @@ interface MockSession {
 
 function createMockSession(overrides: Partial<MockSession> = {}): MockSession {
   return {
-    id: "sess-1",
+    session_id: "sess-1",
     agent_name: "nova",
     backend: "claude",
     model: "claude-opus-4-6",
@@ -112,7 +112,7 @@ function createMockSession(overrides: Partial<MockSession> = {}): MockSession {
 
 const mockSessions = [
   createMockSession({
-    id: "sess-1",
+    session_id: "sess-1",
     agent_name: "nova",
     status: "completed",
     phase: "implementation",
@@ -130,7 +130,7 @@ const mockSessions = [
     started_at: "2026-03-28T01:00:00Z",
   }),
   createMockSession({
-    id: "sess-2",
+    session_id: "sess-2",
     agent_name: "drift",
     status: "failed",
     phase: "planning",
@@ -148,7 +148,7 @@ const mockSessions = [
     started_at: "2026-03-28T00:50:00Z",
   }),
   createMockSession({
-    id: "sess-3",
+    session_id: "sess-3",
     agent_name: "spark",
     status: "running",
     phase: undefined,
@@ -168,7 +168,7 @@ const mockSessions = [
     ended_at: undefined,
   }),
   createMockSession({
-    id: "sess-4",
+    session_id: "sess-4",
     agent_name: "echo",
     status: "aborted",
     phase: "implementation",
@@ -427,9 +427,9 @@ async function setupSessionMocks(
     }
   });
 
-  // Mock GET /api/tasks/{taskId}/sessions
+  // Mock GET /api/workspaces/{ws}/tasks/{taskId}/sessions
   // Playwright's * matches a single path segment, so this won't match sub-paths
-  await page.route("**/api/tasks/*/sessions", async (route) => {
+  await page.route("**/api/workspaces/*/tasks/*/sessions", async (route) => {
     if (options.sessionsDelay) {
       await new Promise((r) => setTimeout(r, options.sessionsDelay));
     }
@@ -448,8 +448,8 @@ async function setupSessionMocks(
     });
   });
 
-  // Mock GET /api/tasks/{taskId}/sessions/{sessionId}/transcript
-  await page.route("**/api/tasks/*/sessions/*/transcript", async (route) => {
+  // Mock GET /api/workspaces/{ws}/tasks/{taskId}/sessions/{sessionId}/transcript
+  await page.route("**/api/workspaces/*/tasks/*/sessions/*/transcript", async (route) => {
     const url = route.request().url();
     const sessionIdMatch = url.match(/\/sessions\/([^/]+)\/transcript/);
     const sessionId = sessionIdMatch ? sessionIdMatch[1] : null;
@@ -467,8 +467,8 @@ async function setupSessionMocks(
     });
   });
 
-  // Mock GET /api/tasks/{taskId}/sessions/{sessionId}/diff
-  await page.route("**/api/tasks/*/sessions/*/diff", async (route) => {
+  // Mock GET /api/workspaces/{ws}/tasks/{taskId}/sessions/{sessionId}/diff
+  await page.route("**/api/workspaces/*/tasks/*/sessions/*/diff", async (route) => {
     const diffContent =
       options.diff !== undefined ? options.diff : mockDiffSess1;
     if (diffContent === null) {
@@ -484,7 +484,9 @@ async function setupSessionMocks(
 }
 
 async function navigateAndWaitForBoard(page: Page) {
-  await page.goto("/ws/default/", { waitUntil: "domcontentloaded" });
+  await page.goto("/ws/default/kanban?groupBy=none", {
+    waitUntil: "domcontentloaded",
+  });
 }
 
 async function openIssuePanelAndSwitchToSessions(page: Page) {

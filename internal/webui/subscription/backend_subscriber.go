@@ -62,7 +62,7 @@ type BackendMutationSubscriber struct {
 // stamped onto every outgoing MutationPayload so the hub's per-client
 // workspace filter routes events correctly. b and hub must not be nil.
 func NewBackendMutationSubscriber(b backend.IssueBackend, hub *realtime.Hub, workspaceID string) *BackendMutationSubscriber {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec // Stop owns cancellation for the subscriber lifetime.
 	return &BackendMutationSubscriber{
 		backend:     b,
 		hub:         hub,
@@ -130,6 +130,8 @@ func (s *BackendMutationSubscriber) GetMutationDataSince(since string) []backend
 // lastSince to the max timestamp BEFORE broadcasting (mirrors the daemon
 // path's invariant: a concurrent reader of lastSince must never see a
 // stale cursor while events from that batch are still being broadcast).
+//
+//nolint:gocognit,funlen // Subscription retry/cursor bookkeeping is easier to audit in one loop.
 func (s *BackendMutationSubscriber) loop() {
 	defer s.wg.Done()
 
@@ -153,15 +155,7 @@ func (s *BackendMutationSubscriber) loop() {
 		// per-call context is what actually unblocks WaitForMutations on
 		// timeout — eliminating the 30s vs 30s race that surfaced as
 		// `context canceled` log spam on every empty long-poll.
-		reqCtx, reqCancel := context.WithTimeout(s.ctx, backendWaitTimeout+10*time.Second)
-		var muts []backend.MutationData
-		var err error
-		if cursorBackend, ok := s.backend.(backend.CursorMutationBackend); ok {
-			muts, err = cursorBackend.WaitForMutationsAfter(reqCtx, cursor, timeoutMs)
-		} else {
-			muts, err = s.backend.WaitForMutations(reqCtx, since, timeoutMs)
-		}
-		reqCancel()
+		muts, err := s.waitForMutations(cursor, since, timeoutMs)
 		if err != nil {
 			// Cancellation is the expected exit path on Stop(); don't
 			// retry-spin on it.
@@ -217,6 +211,15 @@ func (s *BackendMutationSubscriber) loop() {
 		slog.Info("broadcast backend mutations to SSE clients",
 			"workspace", s.workspaceID, "count", len(muts), "clients", s.hub.ClientCount())
 	}
+}
+
+func (s *BackendMutationSubscriber) waitForMutations(cursor string, since, timeoutMs int64) ([]backend.MutationData, error) {
+	reqCtx, reqCancel := context.WithTimeout(s.ctx, backendWaitTimeout+10*time.Second)
+	defer reqCancel()
+	if cursorBackend, ok := s.backend.(backend.CursorMutationBackend); ok {
+		return cursorBackend.WaitForMutationsAfter(reqCtx, cursor, timeoutMs)
+	}
+	return s.backend.WaitForMutations(reqCtx, since, timeoutMs)
 }
 
 // waitWithCancel sleeps for d or until the embedded context is canceled,

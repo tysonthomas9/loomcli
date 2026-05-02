@@ -53,6 +53,7 @@ var newCSPReportLimiter = NewCSPReportLimiter
 func handleAuthConfig(extAuthURL string, limiter *AuthConfigLimiter) http.HandlerFunc {
 	return HandleAuthConfig(extAuthURL, limiter, nil)
 }
+
 var handleClientErrors = HandleClientErrors
 var handleCSPReport = HandleCSPReport
 var handleFileRead = HandleFileRead

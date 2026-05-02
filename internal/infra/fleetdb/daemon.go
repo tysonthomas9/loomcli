@@ -25,16 +25,16 @@ var _ store.DaemonProfileStore = (*daemonStore)(nil)
 // cover the full set, or split per-host-only fields out of the domain
 // type.
 type daemonProfileWire struct {
-	WorkspaceKey   string                 `json:"workspace_key"`
-	PIDFile        string                 `json:"pid_file,omitempty"`
-	LogDir         string                 `json:"log_dir,omitempty"`
-	EventsDir      string                 `json:"events_dir,omitempty"`
+	WorkspaceKey   string                  `json:"workspace_key"`
+	PIDFile        string                  `json:"pid_file,omitempty"`
+	LogDir         string                  `json:"log_dir,omitempty"`
+	EventsDir      string                  `json:"events_dir,omitempty"`
 	RestartPolicy  *fleetRestartPolicyWire `json:"restart_policy,omitempty"`
-	MaxAgents      *int                   `json:"max_agents,omitempty"`
-	IssueBackend   string                 `json:"issue_backend,omitempty"`
-	StartupTimeout *int                   `json:"startup_timeout,omitempty"`
-	OTel           *fleetOTelWire         `json:"otel,omitempty"`
-	UpdatedAt      time.Time              `json:"updated_at"`
+	MaxAgents      *int                    `json:"max_agents,omitempty"`
+	IssueBackend   string                  `json:"issue_backend,omitempty"`
+	StartupTimeout *int                    `json:"startup_timeout,omitempty"`
+	OTel           *fleetOTelWire          `json:"otel,omitempty"`
+	UpdatedAt      time.Time               `json:"updated_at"`
 }
 
 // fleetRestartPolicyWire holds only the fields fleet-db understands.

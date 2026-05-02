@@ -550,7 +550,7 @@ func resolveActiveWorkspaceForAutomode() *config.WorkspaceConfig {
 	ctx, cancel := cmdstore.SignalContext()
 	defer cancel()
 	if h, err := cmdstore.OpenStore(ctx); err == nil {
-		defer h.Close()
+		defer func() { _ = h.Close() }()
 		key, keyErr := bootstrap.ResolveActiveWorkspaceKey(ctx, h.Store.Workspaces())
 		if keyErr == nil {
 			ws, _ := h.Store.Workspaces().Get(ctx, key)

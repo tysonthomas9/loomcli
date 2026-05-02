@@ -314,4 +314,3 @@ func eventDataToTypesEvent(d backend.EventData) *types.Event {
 		CreatedAt: d.CreatedAt,
 	}
 }
-

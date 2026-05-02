@@ -168,6 +168,8 @@ func (m *Manager) run(ctx context.Context) {
 // Skips the disk write when the entries hash matches the previous dump
 // (no-op churn detector). DumpedAt is intentionally NOT included in the
 // hash so the dump is content-addressed, not time-addressed.
+//
+//nolint:funlen // Snapshot traversal is linear by Redis type and intentionally explicit.
 func (m *Manager) Dump() error {
 	if m.snapshotPath == "" {
 		return nil
@@ -351,6 +353,7 @@ func (m *Manager) collectEntries(ctx context.Context) ([]snapshotEntry, error) {
 	return entries, nil
 }
 
+//nolint:gocognit,cyclop,funlen // Redis type-specific snapshot reads stay together for symmetry with replay.
 func (m *Manager) readEntry(ctx context.Context, key string) (*snapshotEntry, error) {
 	typ, err := m.client.Type(ctx, key).Result()
 	if err != nil {
@@ -503,6 +506,7 @@ func (m *Manager) load() error {
 	return nil
 }
 
+//nolint:gocognit,cyclop,funlen // Redis type-specific replay stays together to preserve restore ordering.
 func (m *Manager) replay(snap *snapshot) error {
 	// Correct TTLs for elapsed time between dump and load so a key that
 	// had 60s left at dump time won't be reloaded as if it still has 60s
@@ -540,7 +544,7 @@ func (m *Manager) replay(snap *snapshot) error {
 			if len(e.Set) == 0 {
 				continue
 			}
-			m.mr.SetAdd(e.Key, e.Set...)
+			_, _ = m.mr.SetAdd(e.Key, e.Set...)
 		case "list":
 			if len(e.List) == 0 {
 				continue

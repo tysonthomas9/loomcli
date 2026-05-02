@@ -116,17 +116,22 @@ async function installIssuesMock(page: Page, issues: unknown[]) {
         input: RequestInfo | URL,
         init?: RequestInit,
       ): Promise<Response> {
-        const url = typeof input === "string" ? input : input.toString();
+        const url =
+          typeof input === "string"
+            ? input
+            : input instanceof Request
+              ? input.url
+              : input.toString();
         const method = init?.method ?? "GET";
         if (method !== "GET") return originalFetch(input, init);
 
-        // Graph endpoint: returns { success: true, issues: [...] }
+        // Graph endpoint: returns { success: true, data: [...] }
         if (/\/api\/workspaces\/[^/]+\/issues\/graph(\?|$)/.test(url)) {
           return Promise.resolve(
             new Response(
               JSON.stringify({
                 success: true,
-                issues: (window as any).__mockIssues,
+                data: (window as any).__mockIssues,
               }),
               {
                 status: 200,
@@ -176,6 +181,14 @@ async function installIssuesMock(page: Page, issues: unknown[]) {
  * Register all API mocks needed for the app to boot with workspace-scoped routing.
  */
 async function setupMocks(page: Page) {
+  await page.route("**/api/config", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ mode: "open" }),
+    });
+  });
+
   // Workspace metadata
   await page.route("**/api/workspaces/active", async (route) => {
     await route.fulfill({
@@ -284,7 +297,9 @@ test.describe("E2E Journey: Search and filter through Graph view", () => {
     page,
   }) => {
     // Step 1 — Navigate and establish filters in Kanban
-    await page.goto("/ws/default/", { waitUntil: "domcontentloaded" });
+    await page.goto("/ws/default/kanban?groupBy=none", {
+      waitUntil: "domcontentloaded",
+    });
 
     const readyColumn = page.locator('section[data-status="ready"]');
     await expect(readyColumn).toBeVisible();
@@ -307,9 +322,7 @@ test.describe("E2E Journey: Search and filter through Graph view", () => {
     await expect(page).toHaveURL(/priority=1/);
 
     // Step 2 — Confirm table retains filters (lightweight check)
-    // NavRail uses aria-label for button identification
-    const navRail = page.getByRole("navigation", { name: "Primary" });
-    await navRail.getByRole("button", { name: "List" }).click();
+    await page.getByRole("tab", { name: "List" }).click();
     await expect(page.getByTestId("issue-table")).toBeVisible({
       timeout: 10000,
     });
@@ -320,7 +333,7 @@ test.describe("E2E Journey: Search and filter through Graph view", () => {
 
     // Step 3 — Switch to Graph view and verify filtered nodes
     // Graph is not in NavRail, so navigate via URL while preserving filter params
-    await page.goto("/ws/default/?view=graph&search=auth&priority=1", {
+    await page.goto("/ws/default/graph?groupBy=none&search=auth&priority=1", {
       waitUntil: "domcontentloaded",
     });
     // GraphView is lazy-loaded — allow extra time for React.lazy Suspense
@@ -348,7 +361,9 @@ test.describe("E2E Journey: Search and filter through Graph view", () => {
     });
 
     // Step 4 — Return to Kanban and confirm persistence
-    await navRail.getByRole("button", { name: "Kanban" }).click();
+    await page.goto("/ws/default/kanban?groupBy=none&search=auth&priority=1", {
+      waitUntil: "domcontentloaded",
+    });
 
     await expect(readyColumn).toBeVisible({ timeout: 10000 });
     await expect(priorityFilter).toHaveValue("1");

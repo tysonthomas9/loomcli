@@ -201,6 +201,24 @@ async function setupMocks(page: Page) {
     });
   });
 
+  // Boot config
+  await page.route("**/api/config", async (route) => {
+    const url = new URL(route.request().url());
+    if (url.pathname !== "/api/config") {
+      await route.fallback();
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        mode: "open",
+        auth: { mode: "open" },
+        version: "test",
+      }),
+    });
+  });
+
   // Auth token
   await page.route("**/api/auth/token", async (route) => {
     await route.fulfill({
@@ -749,6 +767,23 @@ test.describe("Workspace Switcher Dropdown", () => {
       });
 
       // Set up remaining mocks (health, auth, loom, issues)
+      await page.route("**/api/config", async (route) => {
+        const url = new URL(route.request().url());
+        if (url.pathname !== "/api/config") {
+          await route.fallback();
+          return;
+        }
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            mode: "open",
+            auth: { mode: "open" },
+            version: "test",
+          }),
+        });
+      });
+
       await page.route("**/api/health", async (route) => {
         await route.fulfill({
           status: 200,

@@ -64,9 +64,7 @@ describe("AppLayout", () => {
         </AppLayout>,
       );
 
-      expect(
-        screen.getByRole("heading", { name: "Loom" }),
-      ).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Loom" })).toBeInTheDocument();
     });
 
     it("displays custom title when title prop provided", () => {

@@ -144,7 +144,7 @@ func HandleBlocked(pool daemon.Pool) http.HandlerFunc {
 // from the backend fallback — the FE degrades to "unknown blocker count"
 // rather than crashing.
 //
-// backendFn may be nil — in that case the behaviour is identical to the
+// backendFn may be nil — in that case the behavior is identical to the
 // legacy HandleBlocked(pool) path, returning a 503 when the pool is unusable.
 func HandleBlockedWithBackendFallback(pool daemon.Pool, backendFn IssueBackendFn) http.HandlerFunc {
 	var poolAdapter BlockedConnectionGetter
@@ -322,7 +322,7 @@ func HandleGraph(pool daemon.Pool) http.HandlerFunc {
 // fields plus Dependencies sourced from backend.Get, which is enough for
 // the SPA GraphView to lay out parent-child + blocker edges.
 //
-// backendFn may be nil — in that case the behaviour is identical to the
+// backendFn may be nil — in that case the behavior is identical to the
 // legacy HandleGraph(pool) path, returning a 503 when the pool is unusable.
 func HandleGraphWithBackendFallback(pool daemon.Pool, backendFn IssueBackendFn) http.HandlerFunc {
 	var poolAdapter GraphConnectionGetter
@@ -405,6 +405,8 @@ func (g *graphInterceptor) flushTo(w http.ResponseWriter) {
 // IssueBackend and writes it to w. Returns true when it served the request
 // (success OR backend error), false when no backend is wired so the caller
 // can fall through to the pool-error path.
+//
+//nolint:funlen // Handler translates backend graph data into the established API shape.
 func serveGraphViaBackend(w http.ResponseWriter, r *http.Request, backendFn IssueBackendFn) bool {
 	if backendFn == nil {
 		return false

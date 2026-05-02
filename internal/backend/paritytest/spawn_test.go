@@ -11,10 +11,10 @@ import (
 // TestTerminateProcess_GracefulExit starts a process that exits cleanly on
 // SIGTERM, then asserts terminateProcess returns within the graceful window
 // and calls Wait() exactly once. This guards the B1 regression: before the
-// fix, exec.CommandContext's internal goroutine also called Wait(), and
+// fix, exec.CommandContext's internal goroutine also called Wait(), and //nolint:norawexec // Historical note for process-spawn regression.
 // double-Wait panicked with "wait: no child processes" on Go 1.20+.
 func TestTerminateProcess_GracefulExit(t *testing.T) {
-	cmd := exec.Command("sleep", "30")
+	cmd := exec.Command("sleep", "30") //nolint:norawexec // Test intentionally spawns a process to exercise termination.
 	if err := cmd.Start(); err != nil {
 		t.Skipf("start sleep: %v", err)
 	}
@@ -42,7 +42,7 @@ func TestTerminateProcess_NilCmd(t *testing.T) {
 
 	// An exec.Cmd whose Start() never succeeded has Process == nil. We
 	// mustn't dereference it.
-	cmd := exec.Command("bogus-binary-does-not-exist")
+	cmd := exec.Command("bogus-binary-does-not-exist") //nolint:norawexec // Test intentionally covers failed process startup cleanup.
 	terminateProcess(cmd, time.Second)
 }
 
@@ -53,7 +53,7 @@ func TestTerminateProcess_NilCmd(t *testing.T) {
 func TestTerminateProcess_StubbornProcess(t *testing.T) {
 	// trap "" TERM ignores SIGTERM; sleep 30 keeps the shell alive until
 	// terminateProcess escalates to SIGKILL.
-	cmd := exec.Command("sh", "-c", "trap '' TERM; sleep 30")
+	cmd := exec.Command("sh", "-c", "trap '' TERM; sleep 30") //nolint:norawexec // Test intentionally spawns a TERM-ignoring process.
 	if err := cmd.Start(); err != nil {
 		t.Skipf("start sh: %v", err)
 	}

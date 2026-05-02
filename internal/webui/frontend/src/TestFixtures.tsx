@@ -17,10 +17,8 @@ import {
   ToastProvider,
   StoreContext,
   NO_STORE_CONTEXT,
-  WorkspaceContext,
-  NO_WORKSPACE_CONTEXT,
+  WorkspaceProvider,
 } from "@/hooks";
-import type { WorkspaceContextValue } from "@/hooks";
 import {
   createAgentStore,
   INITIAL_STATE as AGENT_INITIAL,
@@ -28,7 +26,7 @@ import {
 import { createIssueStore } from "@/stores/issueStore";
 import type { IssueDetails, Priority, Issue } from "@/types";
 import type { Status } from "@/types/issue";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 /**
  * Valid priority values.
@@ -148,15 +146,17 @@ export function IssueDetailPanelFixture(): JSX.Element {
   }
 
   return (
-    <div
-      style={{ minHeight: "100vh", background: "var(--bg-primary, #1a1a1a)" }}
-    >
-      <IssueDetailPanel
-        isOpen={true}
-        issue={issue}
-        onClose={() => window.history.back()}
-      />
-    </div>
+    <WorkspaceProvider workspaceId="fixture-workspace">
+      <div
+        style={{ minHeight: "100vh", background: "var(--bg-primary, #1a1a1a)" }}
+      >
+        <IssueDetailPanel
+          isOpen={true}
+          issue={issue}
+          onClose={() => window.history.back()}
+        />
+      </div>
+    </WorkspaceProvider>
   );
 }
 
@@ -392,6 +392,153 @@ export function HelpPopoverFixture(): JSX.Element {
 }
 
 // ---------------------------------------------------------------------------
+// PasteConfirmFixture
+// URL: /test/paste-confirm
+// ---------------------------------------------------------------------------
+export function PasteConfirmFixture(): JSX.Element {
+  const [text, setText] = useState<string | null>(null);
+  const [confirmCount, setConfirmCount] = useState(0);
+  const [cancelCount, setCancelCount] = useState(0);
+  const pasteButtonRef = useRef<HTMLButtonElement>(null);
+
+  const lines = text?.split("\n") ?? [];
+  const visibleLines = lines.slice(0, 10);
+  const hiddenCount = Math.max(0, lines.length - visibleLines.length);
+
+  useEffect(() => {
+    if (text) pasteButtonRef.current?.focus();
+  }, [text]);
+
+  const open = (count: number) => {
+    setText(
+      Array.from({ length: count }, (_value, index) => `line${index + 1}`).join(
+        "\n",
+      ),
+    );
+  };
+
+  const confirm = () => {
+    setConfirmCount((count) => count + 1);
+    setText(null);
+  };
+
+  const cancel = () => {
+    setCancelCount((count) => count + 1);
+    setText(null);
+  };
+
+  return (
+    <div data-testid="fixture-root" style={FIXTURE_ROOT_STYLE}>
+      <div style={{ display: "flex", gap: 8, padding: 24 }}>
+        <button
+          type="button"
+          data-testid="open-2-lines"
+          onClick={() => open(2)}
+        >
+          Open 2 lines
+        </button>
+        <button
+          type="button"
+          data-testid="open-10-lines"
+          onClick={() => open(10)}
+        >
+          Open 10 lines
+        </button>
+        <button
+          type="button"
+          data-testid="open-11-lines"
+          onClick={() => open(11)}
+        >
+          Open 11 lines
+        </button>
+        <button
+          type="button"
+          data-testid="open-15-lines"
+          onClick={() => open(15)}
+        >
+          Open 15 lines
+        </button>
+        <button
+          type="button"
+          data-testid="open-25-lines"
+          onClick={() => open(25)}
+        >
+          Open 25 lines
+        </button>
+      </div>
+      <span data-testid="confirm-count">{confirmCount}</span>
+      <span data-testid="cancel-count">{cancelCount}</span>
+      {text && (
+        <div
+          data-testid="paste-dialog-overlay"
+          onClick={cancel}
+          style={{
+            position: "fixed",
+            inset: 0,
+            display: "grid",
+            placeItems: "center",
+            background: "rgb(0 0 0 / 45%)",
+            zIndex: 1000,
+          }}
+        >
+          <div
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="paste-dialog-title"
+            aria-describedby="paste-dialog-desc"
+            tabIndex={-1}
+            onClick={(event) => event.stopPropagation()}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") confirm();
+              if (event.key === "Escape") cancel();
+            }}
+            style={{
+              width: "min(520px, calc(100vw - 32px))",
+              padding: 24,
+              borderRadius: 8,
+              background: "var(--color-bg-card, #ffffff)",
+              color: "var(--color-text-primary, #111827)",
+              boxShadow: "0 20px 50px rgb(0 0 0 / 30%)",
+            }}
+          >
+            <h2 id="paste-dialog-title">Paste {lines.length} lines?</h2>
+            <p id="paste-dialog-desc">
+              You are about to paste multi-line text into the terminal.
+            </p>
+            <pre
+              style={{
+                maxHeight: 240,
+                overflow: "auto",
+                padding: 12,
+                borderRadius: 6,
+                background: "var(--color-bg-secondary, #f3f4f6)",
+              }}
+            >
+              {visibleLines.join("\n")}
+            </pre>
+            {hiddenCount > 0 && (
+              <p>
+                ... and {hiddenCount} more line{hiddenCount === 1 ? "" : "s"}
+              </p>
+            )}
+            <div
+              style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}
+            >
+              <button type="button" onClick={cancel}>
+                Cancel
+              </button>
+              <button ref={pasteButtonRef} type="button" onClick={confirm}>
+                Paste
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // WorkspaceTreeFixture
 // URL: /test/workspace-tree (uses window.__fixtureData for context)
 // ---------------------------------------------------------------------------
@@ -416,31 +563,15 @@ export function WorkspaceTreeFixture(): JSX.Element {
     issueStore: createIssueStore(),
   };
 
-  const repos = readFixtureData("repos", []);
-  const workspace = readFixtureData("workspace", null);
-  const wsAgents = readFixtureData("wsAgents", []);
-
-  const wsContextValue: WorkspaceContextValue = {
-    ...NO_WORKSPACE_CONTEXT,
-    workspaceId: "fixture-workspace",
-    repos,
-    workspace,
-    agents: wsAgents,
-    isMultiRepo: repos.length >= 2,
-    activeRepos: repos,
-    activeRepoNames: repos.map((r: { name: string }) => r.name),
-    isAllSelected: true,
-  };
-
   return (
     <ToastProvider>
-      <WorkspaceContext.Provider value={wsContextValue}>
+      <WorkspaceProvider workspaceId="fixture-workspace">
         <StoreContext.Provider value={storeContextValue}>
           <div data-testid="fixture-root" style={FIXTURE_ROOT_STYLE}>
             <WorkspaceTree />
           </div>
         </StoreContext.Provider>
-      </WorkspaceContext.Provider>
+      </WorkspaceProvider>
     </ToastProvider>
   );
 }
@@ -481,13 +612,8 @@ export function SplitDetailSummaryFixture(): JSX.Element {
       : {}),
   };
 
-  const wsContextValue: WorkspaceContextValue = {
-    ...NO_WORKSPACE_CONTEXT,
-    workspaceId: "fixture-workspace",
-  };
-
   return (
-    <WorkspaceContext.Provider value={wsContextValue}>
+    <WorkspaceProvider workspaceId="fixture-workspace">
       <div data-testid="fixture-root" style={FIXTURE_ROOT_STYLE}>
         <SplitDetailSummary
           issue={issue}
@@ -501,6 +627,6 @@ export function SplitDetailSummaryFixture(): JSX.Element {
           onAssigneeSave={async () => {}}
         />
       </div>
-    </WorkspaceContext.Provider>
+    </WorkspaceProvider>
   );
 }

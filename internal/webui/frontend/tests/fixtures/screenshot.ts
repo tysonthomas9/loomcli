@@ -11,7 +11,6 @@ interface ScreenshotFixtures {
 
 /**
  * Match API endpoint URLs only (not Vite module paths like /src/api/events.ts).
- * API endpoints are served at /api/... directly (no /src/ prefix).
  */
 function isApiUrl(url: URL, prefix: string): boolean {
   return url.pathname === prefix || url.pathname.startsWith(prefix + "/") || url.pathname.startsWith(prefix + "?");
@@ -43,10 +42,11 @@ export const test = base.extend<ScreenshotFixtures>({
       },
     );
 
-    // Abort SSE to prevent networkidle timeout
-    // Use URL predicate to avoid matching Vite module /src/api/events.ts
+    // Abort workspace SSE to prevent networkidle timeout.
     await page.route(
-      (url) => isApiUrl(url, "/api/events"),
+      (url) =>
+        url.pathname.startsWith("/api/workspaces/") &&
+        url.pathname.endsWith("/events"),
       async (route) => {
         await route.abort();
       },

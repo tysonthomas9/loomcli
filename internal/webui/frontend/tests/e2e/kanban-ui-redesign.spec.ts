@@ -70,7 +70,7 @@ test.describe("Card Styling: in-progress blue border", () => {
     await expect(card).toHaveAttribute("data-priority", "2")
   })
 
-  test("in-progress card has blue left border override", async ({ page }) => {
+  test("in-progress card keeps standard card border width", async ({ page }) => {
     const issues = [
       makeIssue({
         id: "ip-2",
@@ -87,12 +87,11 @@ test.describe("Card Styling: in-progress blue border", () => {
     )
     await expect(card).toBeVisible()
 
-    // CSS rule: .issueCard[data-column='in_progress'][data-priority] { border-left: 3px solid var(--color-primary) }
     const borderLeft = await card.evaluate((el) => {
       const style = window.getComputedStyle(el)
       return style.borderLeftWidth
     })
-    expect(borderLeft).toBe("3px")
+    expect(borderLeft).toBe("1px")
   })
 })
 
@@ -188,9 +187,8 @@ test.describe("Card Styling: hover and selection", () => {
     const detailPanel = page.getByTestId("issue-detail-panel").or(
       page.locator('[class*="issueDetailPanel"]')
     )
-    await expect(
-      detailPanel.or(page.getByText("Selectable Card").nth(1))
-    ).toBeVisible({ timeout: 3000 })
+    await expect(detailPanel.first()).toBeVisible({ timeout: 3000 })
+    await expect(detailPanel.first()).toContainText("Selectable Card")
   })
 })
 
@@ -277,7 +275,7 @@ test.describe("Priority Badges", () => {
     }
   })
 
-  test("P0 card has red-tinted background and 3px left border", async ({
+  test("P0 card keeps standard card border width", async ({
     page,
   }) => {
     const issues = [
@@ -297,7 +295,7 @@ test.describe("Priority Badges", () => {
     const borderLeftWidth = await card.evaluate(
       (el) => window.getComputedStyle(el).borderLeftWidth
     )
-    expect(borderLeftWidth).toBe("3px")
+    expect(borderLeftWidth).toBe("1px")
   })
 })
 
@@ -349,7 +347,7 @@ test.describe("Talk to Lead FAB", () => {
     await expect(fab).toHaveText(/Talk to Lead/)
   })
 
-  test("FAB has coral background color", async ({ page }) => {
+  test("FAB uses coral gradient background", async ({ page }) => {
     const issues = [
       makeIssue({ id: "f-2", title: "Some Task", status: "open" }),
     ]
@@ -359,11 +357,12 @@ test.describe("Talk to Lead FAB", () => {
     const fab = page.getByTestId("talk-to-lead-button")
     await expect(fab).toBeVisible()
 
-    const bgColor = await fab.evaluate(
-      (el) => window.getComputedStyle(el).backgroundColor
+    const backgroundImage = await fab.evaluate(
+      (el) => window.getComputedStyle(el).backgroundImage
     )
-    // #f05d46 → rgb(240, 93, 70)
-    expect(bgColor).toBe("rgb(240, 93, 70)")
+    expect(backgroundImage).toContain("linear-gradient")
+    expect(backgroundImage).toContain("rgb(240, 111, 79)")
+    expect(backgroundImage).toContain("rgb(232, 92, 66)")
   })
 
   test("FAB has aria-label for accessibility", async ({ page }) => {

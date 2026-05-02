@@ -1,4 +1,62 @@
+import { mkdirSync, rmSync, statSync } from "node:fs"
 import { test, expect, Page } from "@playwright/test"
+
+const WORKSPACE_ID = "default"
+const WS_API = `/api/workspaces/${WORKSPACE_ID}`
+const STATUS_FILTER_KEY = `loom:${WORKSPACE_ID}:graph-status-filter`
+const SHOW_CLOSED_KEY = `loom:${WORKSPACE_ID}:graph-show-closed`
+const GRAPH_LOCK_DIR = "/tmp/loomcli-graph-e2e.lock"
+
+test.describe.configure({ mode: "serial" })
+
+async function acquireGraphLock() {
+  const started = Date.now()
+  for (;;) {
+    try {
+      mkdirSync(GRAPH_LOCK_DIR)
+      return
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error
+      try {
+        if (Date.now() - statSync(GRAPH_LOCK_DIR).mtimeMs > 120000) {
+          rmSync(GRAPH_LOCK_DIR, { recursive: true, force: true })
+        }
+      } catch {
+        // Lock disappeared between mkdir attempts.
+      }
+      if (Date.now() - started > 120000) throw error
+      await new Promise((resolve) => setTimeout(resolve, 100))
+    }
+  }
+}
+
+function releaseGraphLock() {
+  rmSync(GRAPH_LOCK_DIR, { recursive: true, force: true })
+}
+
+test.beforeEach(async () => {
+  await acquireGraphLock()
+})
+
+test.afterEach(() => {
+  releaseGraphLock()
+})
+
+function ok<T>(data: T) {
+  return { success: true, data }
+}
+
+function workspaceData() {
+  return {
+    id: WORKSPACE_ID,
+    name: "Default",
+    type: "main",
+    path: "/tmp/loom",
+    is_active: true,
+    created_at: "2026-01-27T10:00:00Z",
+    updated_at: "2026-01-27T10:00:00Z",
+  }
+}
 
 /**
  * Mock issues for testing status filter dropdown in GraphView.
@@ -56,12 +114,76 @@ const mockIssues = [
  * Set up API mocks for status filter tests.
  */
 async function setupMocks(page: Page, issues = mockIssues) {
-  await page.route("**/api/ready", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({ success: true, data: issues }),
-    })
+  await page.route("**/*", async (route) => {
+    const pathname = new URL(route.request().url()).pathname
+    if (pathname === "/api/config") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ mode: "open" }),
+      })
+    } else if (
+      pathname === "/api/workspaces/active" ||
+      pathname === `/api/workspaces/${WORKSPACE_ID}`
+    ) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(ok(workspaceData())),
+      })
+    } else if (pathname === "/api/workspaces") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(ok([workspaceData()])),
+      })
+    } else if (
+      pathname === `${WS_API}/issues` ||
+      pathname === `${WS_API}/issues/graph`
+    ) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(ok(issues)),
+      })
+    } else if (pathname === `${WS_API}/stats`) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          total_issues: issues.length,
+          open_issues: issues.filter((i) => i.status === "open").length,
+          in_progress_issues: issues.filter((i) => i.status === "in_progress").length,
+          closed_issues: issues.filter((i) => i.status === "closed").length,
+          blocked_issues: issues.filter((i) => i.status === "blocked").length,
+          deferred_issues: issues.filter((i) => i.status === "deferred").length,
+          ready_issues: issues.filter((i) => i.status === "open").length,
+          tombstone_issues: 0,
+          pinned_issues: 0,
+          epics_eligible_for_closure: 0,
+          average_lead_time_hours: 0,
+        }),
+      })
+    } else if (
+      pathname === `${WS_API}/blocked` ||
+      pathname === `${WS_API}/terminal/tabs`
+    ) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(ok([])),
+      })
+    } else if (pathname === `${WS_API}/terminal/state`) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ active_tab: "" }),
+      })
+    } else if (pathname.startsWith("/api/") && pathname.includes("/events")) {
+      await route.abort()
+    } else {
+      await route.continue()
+    }
   })
 }
 
@@ -69,15 +191,21 @@ async function setupMocks(page: Page, issues = mockIssues) {
  * Navigate to Graph view and wait for API response.
  */
 async function navigateToGraphView(page: Page, queryParams = "") {
-  const path = queryParams ? `/?view=graph&${queryParams}` : "/?view=graph"
+  const path = queryParams
+    ? `/ws/${WORKSPACE_ID}/graph?${queryParams}`
+    : `/ws/${WORKSPACE_ID}/graph`
   const [response] = await Promise.all([
     page.waitForResponse(
-      (res) => res.url().includes("/api/ready") && res.status() === 200
+      (res) =>
+        new URL(res.url()).pathname === `${WS_API}/issues/graph` &&
+        res.status() === 200
     ),
     page.goto(path),
   ])
   expect(response.ok()).toBe(true)
-  await expect(page.getByTestId("graph-view")).toBeVisible()
+  await expect(
+    page.getByTestId("graph-view").or(page.getByText("No issues yet"))
+  ).toBeVisible()
 }
 
 test.describe("Graph Status Filter Dropdown", () => {
@@ -86,6 +214,8 @@ test.describe("Graph Status Filter Dropdown", () => {
     await page.addInitScript(() => {
       localStorage.removeItem("graph-status-filter")
       localStorage.removeItem("graph-show-closed")
+      localStorage.removeItem("loom:default:graph-status-filter")
+      localStorage.removeItem("loom:default:graph-show-closed")
     })
   })
 
@@ -452,7 +582,7 @@ test.describe("Graph Status Filter Dropdown", () => {
 
       // Verify localStorage key 'graph-status-filter' is 'blocked'
       const value = await page.evaluate(() =>
-        localStorage.getItem("graph-status-filter")
+        localStorage.getItem("loom:default:graph-status-filter")
       )
       expect(value).toBe("blocked")
     })
@@ -460,7 +590,7 @@ test.describe("Graph Status Filter Dropdown", () => {
     test("filter state restores from localStorage", async ({ page }) => {
       // Set localStorage before navigation
       await page.addInitScript(() => {
-        localStorage.setItem("graph-status-filter", "deferred")
+        localStorage.setItem("loom:default:graph-status-filter", "deferred")
       })
 
       await setupMocks(page)
@@ -487,7 +617,7 @@ test.describe("Graph Status Filter Dropdown", () => {
 
       // Override the beforeEach to set a value instead of clearing
       await page.addInitScript(() => {
-        localStorage.setItem("graph-status-filter", "in_progress")
+        localStorage.setItem("loom:default:graph-status-filter", "in_progress")
       })
 
       await setupMocks(page)
@@ -507,7 +637,7 @@ test.describe("Graph Status Filter Dropdown", () => {
     test("invalid localStorage value defaults to 'all'", async ({ page }) => {
       // Set invalid localStorage value before navigation
       await page.addInitScript(() => {
-        localStorage.setItem("graph-status-filter", "invalid_status")
+        localStorage.setItem("loom:default:graph-status-filter", "invalid_status")
       })
 
       await setupMocks(page)
@@ -612,20 +742,9 @@ test.describe("Graph Status Filter Dropdown", () => {
       await setupMocks(page, [])
       await navigateToGraphView(page)
 
-      const statusFilter = page.getByTestId("status-filter")
       const nodes = page.locator(".react-flow__node")
 
-      // Verify dropdown still renders
-      await expect(statusFilter).toBeVisible()
-
-      // Changing filter doesn't cause errors
-      await statusFilter.selectOption("open")
-      await expect(nodes).toHaveCount(0)
-
-      await statusFilter.selectOption("closed")
-      await expect(nodes).toHaveCount(0)
-
-      await statusFilter.selectOption("all")
+      await expect(page.getByText("No issues yet")).toBeVisible()
       await expect(nodes).toHaveCount(0)
     })
 

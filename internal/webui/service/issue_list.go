@@ -330,6 +330,8 @@ func (s *issueServiceImpl) buildKanbanResult(client *rpc.Client, issuesWithCount
 // inflates p95 enough to fail the SSE realtime parity spec. When fleet-db
 // adds a batch list-with-relations endpoint, swap this implementation for
 // it and drop the per-issue degraded mode.
+//
+//nolint:funlen // Backend list adapter preserves the existing issue list response contract.
 func (s *issueServiceImpl) listIssuesViaBackend(
 	ctx context.Context, be backend.IssueBackend, params ListIssuesParams,
 ) (*ListIssuesResult, error) {
@@ -441,8 +443,8 @@ func listArgsToBackendOpts(a *rpc.ListArgs) backend.ListOpts {
 		return backend.ListOpts{}
 	}
 	return backend.ListOpts{
-		Status:    string(a.Status),
-		IssueType: string(a.IssueType),
+		Status:    a.Status,
+		IssueType: a.IssueType,
 		Assignee:  a.Assignee,
 		Labels:    a.Labels,
 		ParentID:  a.ParentID,

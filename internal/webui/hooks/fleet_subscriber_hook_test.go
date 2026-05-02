@@ -152,8 +152,8 @@ type resourceProviderHook struct {
 	value any
 }
 
-func (h *resourceProviderHook) Name() string                                 { return h.name }
-func (h *resourceProviderHook) Critical() bool                               { return false }
+func (h *resourceProviderHook) Name() string   { return h.name }
+func (h *resourceProviderHook) Critical() bool { return false }
 func (h *resourceProviderHook) OnRegister(ctx *coordinator.RegistrationContext) error {
 	ctx.Provide(h.key, h.value)
 	return nil

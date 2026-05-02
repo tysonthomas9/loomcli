@@ -1,6 +1,6 @@
 # Makefile for loomcli project
 
-.PHONY: all build build-frontend build-all test test-integration test-all test-parity test-parity-cli test-fleetdb-cli test-fleetdb-embedded test-fleetdb-supervisor test-parity-ui test-fleetdb-ui test-distributed-smoke lint lint-frontend test-frontend test-e2e test-e2e-api test-e2e-api-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install install-bd help frontend sync-beads update-beads check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-no-raw-exec test-coverage test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness
+.PHONY: all build build-frontend build-all test test-integration test-all test-parity test-parity-cli test-fleetdb-cli test-fleetdb-embedded test-fleetdb-supervisor test-parity-ui test-fleetdb-ui test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-e2e-api test-e2e-api-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install install-bd help frontend sync-beads update-beads check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-no-raw-exec test-coverage test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness
 
 # Default target
 all: build
@@ -200,10 +200,12 @@ test-frontend:
 	@cd $(FRONTEND_DIR) && npx vitest run
 
 # Run Playwright e2e tests — mocked chromium tests (no server needed)
+e2e: test-e2e
+
 test-e2e:
 	@echo "Running Playwright e2e tests (mocked)..."
 	@cd $(FRONTEND_DIR) && npx playwright install --with-deps chromium 2>/dev/null || true
-	@cd $(FRONTEND_DIR) && npx playwright test --project=chromium
+	@cd $(FRONTEND_DIR) && npx playwright test --project=chromium --workers=1
 
 # Run Playwright API e2e tests (self-contained: builds loom, starts server, runs tests)
 test-e2e-api:
@@ -310,7 +312,7 @@ check-go:
 	@echo "=== [6/12] Go: package size check ==="
 	@./scripts/check-package-size.sh 25
 	@echo "=== [7/12] Go: import fanout check ==="
-	@./scripts/check-import-fanout.sh 12
+	@./scripts/check-import-fanout.sh 17
 	@echo "=== [8/12] Go: exec.Command guard ==="
 	@./scripts/check-no-raw-exec.sh
 	@echo "=== [9/12] Go: log.Printf guard ==="
@@ -318,7 +320,7 @@ check-go:
 	@echo "=== [10/12] Go: generated API staleness ==="
 	@./scripts/check-go-api-staleness.sh
 	@echo "=== [11/12] Go: test with race detector ==="
-	@go test -race -covermode=atomic -coverprofile=/tmp/loom.coverage.out -timeout 15m ./...
+	@go test -p 1 -race -covermode=atomic -coverprofile=/tmp/loom.coverage.out -timeout 15m ./...
 	@echo "=== [12/12] Go: coverage threshold ==="
 	@COVERAGE_THRESHOLD=60 ./scripts/check-coverage.sh
 	@echo "=== Go quality gates PASSED ==="

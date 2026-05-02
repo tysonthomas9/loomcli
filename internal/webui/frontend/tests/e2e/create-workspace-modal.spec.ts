@@ -77,6 +77,19 @@ async function setupMocks(
 ) {
   const postCalls: { body: Record<string, unknown> }[] = [];
 
+  await page.route("**/api/config", async (route) => {
+    const url = new URL(route.request().url());
+    if (url.pathname !== "/api/config") {
+      await route.fallback();
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ mode: "open" }),
+    });
+  });
+
   // Workspace resolution
   await page.route("**/api/workspaces/active", async (route) => {
     await route.fulfill({
@@ -176,7 +189,7 @@ async function setupMocks(
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: ok({
+      body: JSON.stringify({
         total_issues: 0,
         open_issues: 0,
         in_progress_issues: 0,
@@ -210,6 +223,38 @@ async function setupMocks(
       });
     },
   );
+
+  await page.route("**/workspaces/*/terminal/tabs", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: ok([]),
+    });
+  });
+
+  await page.route("**/workspaces/*/terminal/state", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ active_tab: "" }),
+    });
+  });
+
+  await page.route("**/workspaces/*/terminal/sessions", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: ok({}),
+    });
+  });
+
+  await page.route("**/workspaces/*/issues/graph", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: ok([]),
+    });
+  });
 
   // SSE events
   await page.route("**/workspaces/*/events**", async (route) => {
@@ -255,12 +300,23 @@ async function navigateToApp(page: Page) {
 }
 
 async function openCreateWorkspaceModal(page: Page) {
-  const newWSButton = page.locator('button:text("+ New Workspace")');
+  await page
+    .getByRole("button", { name: /Active workspace: default/i })
+    .click();
+
+  const newWSButton = page.getByRole("button", { name: "+ New Workspace" });
   await expect(newWSButton).toBeVisible({ timeout: 10_000 });
   await newWSButton.click();
 
   const overlay = page.getByTestId("create-workspace-overlay");
   await expect(overlay).toBeVisible({ timeout: 5_000 });
+}
+
+async function selectWorkspaceType(
+  page: Page,
+  type: "empty" | "clone" | "template",
+) {
+  await page.getByTestId(`create-workspace-type-${type}`).click();
 }
 
 /** Wait for POST /api/workspaces response. */
@@ -281,7 +337,7 @@ test.describe("CreateWorkspaceModal", () => {
       await navigateToApp(page);
       await openCreateWorkspaceModal(page);
 
-      const dialog = page.getByRole("dialog", { name: "Create Workspace" });
+      const dialog = page.getByRole("dialog", { name: "New Workspace" });
       await expect(dialog).toBeVisible();
     });
 
@@ -292,18 +348,18 @@ test.describe("CreateWorkspaceModal", () => {
       await navigateToApp(page);
       await openCreateWorkspaceModal(page);
 
-      const dialog = page.getByRole("dialog", { name: "Create Workspace" });
+      const dialog = page.getByRole("dialog", { name: "New Workspace" });
       await expect(dialog).toHaveAttribute("aria-modal", "true");
-      await expect(dialog).toHaveAttribute("aria-label", "Create Workspace");
+      await expect(dialog).toHaveAttribute("aria-label", "New Workspace");
     });
 
-    test("modal title shows 'Create Workspace'", async ({ page }) => {
+    test("modal title shows 'New Workspace'", async ({ page }) => {
       await setupMocks(page);
       await navigateToApp(page);
       await openCreateWorkspaceModal(page);
 
       await expect(
-        page.locator("h2").filter({ hasText: "Create Workspace" }),
+        page.locator("h2").filter({ hasText: "New Workspace" }),
       ).toBeVisible();
     });
 
@@ -335,7 +391,7 @@ test.describe("CreateWorkspaceModal", () => {
       await navigateToApp(page);
       await openCreateWorkspaceModal(page);
 
-      const dialog = page.getByRole("dialog", { name: "Create Workspace" });
+      const dialog = page.getByRole("dialog", { name: "New Workspace" });
       await dialog.click();
 
       await expect(
@@ -392,8 +448,9 @@ test.describe("CreateWorkspaceModal", () => {
       await navigateToApp(page);
       await openCreateWorkspaceModal(page);
 
-      const cloneRadio = page.locator('input[name="ws-type"][value="clone"]');
-      await expect(cloneRadio).toBeChecked();
+      await expect(
+        page.getByTestId("create-workspace-type-clone"),
+      ).toHaveAttribute("aria-checked", "true");
 
       await expect(
         page.getByTestId("create-workspace-clone-url"),
@@ -407,7 +464,7 @@ test.describe("CreateWorkspaceModal", () => {
       await navigateToApp(page);
       await openCreateWorkspaceModal(page);
 
-      await page.locator('input[name="ws-type"][value="empty"]').click();
+      await selectWorkspaceType(page, "empty");
 
       await expect(
         page.getByTestId("create-workspace-clone-url"),
@@ -417,14 +474,16 @@ test.describe("CreateWorkspaceModal", () => {
       ).toBeVisible();
     });
 
-    test("Template radio is disabled", async ({ page }) => {
+    test("Template type shows coming soon placeholder", async ({ page }) => {
       await setupMocks(page);
       await navigateToApp(page);
       await openCreateWorkspaceModal(page);
 
+      await selectWorkspaceType(page, "template");
       await expect(
-        page.getByTestId("create-workspace-template-radio"),
-      ).toBeDisabled();
+        page.getByTestId("create-workspace-template-placeholder"),
+      ).toBeVisible();
+      await expect(page.getByTestId("create-workspace-submit")).toBeDisabled();
     });
   });
 
@@ -522,7 +581,7 @@ test.describe("CreateWorkspaceModal", () => {
       await navigateToApp(page);
       await openCreateWorkspaceModal(page);
 
-      await page.locator('input[name="ws-type"][value="empty"]').click();
+      await selectWorkspaceType(page, "empty");
 
       const repoInput = page.getByTestId("create-workspace-repo-path");
       await repoInput.fill("/home/user/my-repo");
@@ -538,7 +597,7 @@ test.describe("CreateWorkspaceModal", () => {
       await navigateToApp(page);
       await openCreateWorkspaceModal(page);
 
-      await page.locator('input[name="ws-type"][value="empty"]').click();
+      await selectWorkspaceType(page, "empty");
 
       const repoInput = page.getByTestId("create-workspace-repo-path");
       await repoInput.fill("/home/user/my-repo");
@@ -607,7 +666,7 @@ test.describe("CreateWorkspaceModal", () => {
       ).toBeEnabled();
     });
 
-    test("submit disabled for Local Repos with no paths", async ({
+    test("submit enabled for Empty workspace with no repo paths", async ({
       page,
     }) => {
       await setupMocks(page);
@@ -615,11 +674,11 @@ test.describe("CreateWorkspaceModal", () => {
       await openCreateWorkspaceModal(page);
 
       await page.getByTestId("create-workspace-name").fill("test-workspace");
-      await page.locator('input[name="ws-type"][value="empty"]').click();
+      await selectWorkspaceType(page, "empty");
 
       await expect(
         page.getByTestId("create-workspace-submit"),
-      ).toBeDisabled();
+      ).toBeEnabled();
     });
 
     test("submit enabled for Local Repos with paths", async ({ page }) => {
@@ -628,7 +687,7 @@ test.describe("CreateWorkspaceModal", () => {
       await openCreateWorkspaceModal(page);
 
       await page.getByTestId("create-workspace-name").fill("test-workspace");
-      await page.locator('input[name="ws-type"][value="empty"]').click();
+      await selectWorkspaceType(page, "empty");
 
       const repoInput = page.getByTestId("create-workspace-repo-path");
       await repoInput.fill("/home/user/repo");
@@ -712,7 +771,7 @@ test.describe("CreateWorkspaceModal", () => {
       await openCreateWorkspaceModal(page);
 
       await page.getByTestId("create-workspace-name").fill("local-workspace");
-      await page.locator('input[name="ws-type"][value="empty"]').click();
+      await selectWorkspaceType(page, "empty");
 
       const repoInput = page.getByTestId("create-workspace-repo-path");
       await repoInput.fill("/home/user/repo");
@@ -739,7 +798,7 @@ test.describe("CreateWorkspaceModal", () => {
         .getByTestId("create-workspace-name")
         .fill("custom-workspace");
       await page.getByTestId("create-workspace-path").fill("/custom/path");
-      await page.locator('input[name="ws-type"][value="empty"]').click();
+      await selectWorkspaceType(page, "empty");
 
       const repoInput = page.getByTestId("create-workspace-repo-path");
       await repoInput.fill("/home/user/repo");
@@ -855,7 +914,7 @@ test.describe("CreateWorkspaceModal", () => {
       await expect(errorMsg).toBeVisible();
 
       // Switch type — error should clear
-      await page.locator('input[name="ws-type"][value="empty"]').click();
+      await selectWorkspaceType(page, "empty");
       await expect(errorMsg).not.toBeVisible();
     });
   });
@@ -887,8 +946,8 @@ test.describe("CreateWorkspaceModal", () => {
         page.getByTestId("create-workspace-clone-url"),
       ).toHaveValue("");
       await expect(
-        page.locator('input[name="ws-type"][value="clone"]'),
-      ).toBeChecked();
+        page.getByTestId("create-workspace-type-clone"),
+      ).toHaveAttribute("aria-checked", "true");
       await expect(page.locator('[class*="chipText"]')).toHaveCount(0);
     });
   });

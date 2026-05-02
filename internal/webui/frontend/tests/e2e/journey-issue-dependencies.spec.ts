@@ -121,6 +121,25 @@ async function setupMocks(page: Page, state: MockState) {
     });
   });
 
+  await page.route("**/api/backends", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        success: true,
+        data: [{ name: "claude", available: true, display_name: "Claude" }],
+      }),
+    });
+  });
+
+  await page.route("**/api/config/backend", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: ok({ backend: "claude", source: "workspace", available: ["claude"], agents: [] }),
+    });
+  });
+
   // Health check
   await page.route("**/api/health", async (route) => {
     await route.fulfill({
@@ -156,6 +175,20 @@ async function setupMocks(page: Page, state: MockState) {
         return;
       }
 
+      if (url.includes(WS_PREFIX + "/config/backend")) {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: ok({
+            backend: "claude",
+            source: "workspace",
+            available: ["claude"],
+            agents: [],
+          }),
+        });
+        return;
+      }
+
       // POST /issues/{id}/dependencies — add dependency
       if (url.includes("/issues/deps-main/dependencies") && method === "POST") {
         const body = route.request().postDataJSON();
@@ -177,7 +210,7 @@ async function setupMocks(page: Page, state: MockState) {
         await route.fulfill({
           status: 200,
           contentType: "application/json",
-          body: JSON.stringify({ success: true, issues: graphIssues }),
+          body: ok(graphIssues),
         });
         return;
       }
@@ -273,6 +306,24 @@ async function setupMocks(page: Page, state: MockState) {
       }
 
       // Terminal sessions-by-issue
+      if (url.includes(WS_PREFIX + "/terminal/tabs")) {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: ok([]),
+        });
+        return;
+      }
+
+      if (url.includes(WS_PREFIX + "/terminal/state")) {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ active_tab: "" }),
+        });
+        return;
+      }
+
       if (url.includes("/terminal/sessions/by-issue")) {
         await route.fulfill({
           status: 200,

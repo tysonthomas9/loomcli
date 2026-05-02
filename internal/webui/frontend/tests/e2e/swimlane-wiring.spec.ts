@@ -1,4 +1,5 @@
 import { test, expect, Page } from "@playwright/test"
+import { setupFleetMocks, showMoreFilters, waitForWorkspaceIssues, workspacePath, WS_API } from "./helpers/fleet"
 
 /**
  * Mock issues for testing swim lane wiring in App.tsx.
@@ -45,14 +46,12 @@ const mockIssues = [
 /**
  * Set up API mocks for swim lane wiring tests.
  */
-async function setupMocks(page: Page, issues: object[] = mockIssues) {
-  await page.route("**/api/ready", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({ success: true, data: issues }),
-    })
-  })
+async function setupMocks(
+  page: Page,
+  issues: object[] = mockIssues,
+  patchCalls?: { url: string; body: object }[],
+) {
+  await setupFleetMocks(page, issues, patchCalls)
 }
 
 /**
@@ -60,12 +59,11 @@ async function setupMocks(page: Page, issues: object[] = mockIssues) {
  */
 async function navigateAndWait(page: Page, path = "/") {
   const [response] = await Promise.all([
-    page.waitForResponse(
-      (res) => res.url().includes("/api/ready") && res.status() === 200
-    ),
-    page.goto(path),
+    waitForWorkspaceIssues(page),
+    page.goto(workspacePath(path)),
   ])
   expect(response.ok()).toBe(true)
+  await showMoreFilters(page)
 }
 
 test.describe("Swim Lane Wiring in App.tsx", () => {
@@ -137,9 +135,9 @@ test.describe("Swim Lane Wiring in App.tsx", () => {
       // Verify swim lanes visible initially
       await expect(page.getByTestId("swim-lane-board")).toBeVisible()
 
-      // Select 'none' from dropdown
-      const groupByFilter = page.getByTestId("groupby-filter")
-      await groupByFilter.selectOption("none")
+      const response = waitForWorkspaceIssues(page)
+      await page.goto(workspacePath("/?groupBy=none"))
+      await response
 
       // Verify swim lanes gone
       await expect(page.getByTestId("swim-lane-board")).not.toBeVisible()
@@ -155,7 +153,7 @@ test.describe("Swim Lane Wiring in App.tsx", () => {
       await navigateAndWait(page)
 
       // Select groupBy=priority from dropdown
-      const groupByFilter = page.getByTestId("groupby-filter")
+      const groupByFilter = page.getByLabel("Group issues by")
       await groupByFilter.selectOption("priority")
 
       // Verify URL updated
@@ -174,11 +172,13 @@ test.describe("Swim Lane Wiring in App.tsx", () => {
 
       // Reload page
       await page.reload()
-      await page.waitForResponse((res) => res.url().includes("/api/ready"))
+      await waitForWorkspaceIssues(page)
 
-      // Verify groupBy still selected
-      await expect(groupByFilter).toHaveValue("priority")
+      // Verify groupBy still applied
       await expect(page.getByTestId("swim-lane-board")).toBeVisible()
+      await expect(
+        page.getByRole("heading", { name: "P0 (Critical)" })
+      ).toBeVisible()
     })
 
     test("navigating with groupBy URL param loads swim lanes", async ({
@@ -188,7 +188,7 @@ test.describe("Swim Lane Wiring in App.tsx", () => {
       await navigateAndWait(page, "/?groupBy=assignee")
 
       // Verify dropdown shows correct value
-      await expect(page.getByTestId("groupby-filter")).toHaveValue("assignee")
+      await expect(page.getByLabel("Group issues by")).toHaveValue("assignee")
 
       // Verify swim lanes are visible
       await expect(page.getByTestId("swim-lane-board")).toBeVisible()
@@ -203,32 +203,7 @@ test.describe("Swim Lane Wiring in App.tsx", () => {
       // Track API calls
       const patchCalls: { url: string; body: object }[] = []
 
-      await page.route("**/api/ready", async (route) => {
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify({ success: true, data: mockIssues }),
-        })
-      })
-
-      await page.route("**/api/issues/*", async (route) => {
-        if (route.request().method() === "PATCH") {
-          const url = route.request().url()
-          const body = route.request().postDataJSON() as { status?: string }
-          patchCalls.push({ url, body })
-
-          await route.fulfill({
-            status: 200,
-            contentType: "application/json",
-            body: JSON.stringify({
-              success: true,
-              data: { ...mockIssues[0], status: body.status },
-            }),
-          })
-        } else {
-          await route.continue()
-        }
-      })
+      await setupMocks(page, mockIssues, patchCalls)
 
       await navigateAndWait(page, "/?groupBy=epic")
 
@@ -310,12 +285,13 @@ test.describe("Swim Lane Wiring in App.tsx", () => {
         isPrimary: true,
       })
 
-      // Wait for API call
-      await page.waitForResponse(
+      const patchResponse = page.waitForResponse(
         (res) =>
-          res.url().includes("/api/issues/epic-child-1") &&
+          new URL(res.url()).pathname === `${WS_API}/issues/epic-child-1` &&
           res.request().method() === "PATCH"
       )
+      await page.getByRole("button", { name: "Skip" }).click()
+      await patchResponse
 
       // Verify API call was made correctly
       expect(patchCalls).toHaveLength(1)
@@ -334,31 +310,17 @@ test.describe("Swim Lane Wiring in App.tsx", () => {
       // Verify swim lanes visible in Kanban
       await expect(page.getByTestId("swim-lane-board")).toBeVisible()
 
-      // Switch to Table view
-      const tableTab = page.getByTestId("view-tab-table")
-      await tableTab.click()
+      // Switch to List view
+      await page.getByRole("tab", { name: "List" }).click()
 
       // Verify URL still has groupBy
       expect(page.url()).toContain("groupBy=epic")
-      expect(page.url()).toContain("view=table")
 
       // Verify Table renders
       await expect(page.getByTestId("issue-table")).toBeVisible()
 
-      // Switch to Graph view
-      const graphTab = page.getByTestId("view-tab-graph")
-      await graphTab.click()
-
-      // Verify URL still has groupBy
-      expect(page.url()).toContain("groupBy=epic")
-      expect(page.url()).toContain("view=graph")
-
-      // Verify Graph renders
-      await expect(page.getByTestId("graph-view")).toBeVisible()
-
       // Switch back to Kanban
-      const kanbanTab = page.getByTestId("view-tab-kanban")
-      await kanbanTab.click()
+      await page.getByRole("tab", { name: "Kanban" }).click()
 
       // Verify groupBy still in URL
       expect(page.url()).toContain("groupBy=epic")
@@ -374,10 +336,10 @@ test.describe("Swim Lane Wiring in App.tsx", () => {
       page,
     }) => {
       await setupMocks(page)
-      await navigateAndWait(page, "/?view=table")
+      await navigateAndWait(page, "/ws/default/table")
 
       // Change groupBy while in Table view
-      const groupByFilter = page.getByTestId("groupby-filter")
+      const groupByFilter = page.getByLabel("Group issues by")
       await groupByFilter.selectOption("priority")
 
       // Wait for URL update
@@ -386,8 +348,7 @@ test.describe("Swim Lane Wiring in App.tsx", () => {
       }).toPass({ timeout: 2000 })
 
       // Switch to Kanban
-      const kanbanTab = page.getByTestId("view-tab-kanban")
-      await kanbanTab.click()
+      await page.getByRole("tab", { name: "Kanban" }).click()
 
       // Verify swim lanes render with priority grouping
       await expect(page.getByTestId("swim-lane-board")).toBeVisible()
@@ -477,7 +438,7 @@ test.describe("Swim Lane Wiring in App.tsx", () => {
       await navigateAndWait(page, "/?priority=1&type=feature")
 
       // Change groupBy
-      await page.getByTestId("groupby-filter").selectOption("type")
+      await page.getByLabel("Group issues by").selectOption("type")
 
       // Verify other params still present
       await expect(async () => {
@@ -500,7 +461,7 @@ test.describe("Swim Lane Wiring in App.tsx", () => {
       await expect(page.getByTestId("swim-lane-board")).toBeVisible()
 
       // Verify dropdown shows 'epic' (default)
-      await expect(page.getByTestId("groupby-filter")).toHaveValue("epic")
+      await expect(page.getByLabel("Group issues by")).toHaveValue("epic")
     })
 
     test("empty issues still renders swim lane container", async ({ page }) => {
@@ -517,7 +478,7 @@ test.describe("Swim Lane Wiring in App.tsx", () => {
       await setupMocks(page)
       await navigateAndWait(page)
 
-      const groupByFilter = page.getByTestId("groupby-filter")
+      const groupByFilter = page.getByLabel("Group issues by")
 
       // Rapidly change groupBy options
       await groupByFilter.selectOption("epic")
