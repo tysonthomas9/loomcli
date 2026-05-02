@@ -12,17 +12,14 @@
 
 ARG GO_VERSION=1.25.6
 
-# ── Stage 1: Build loom (and bd) binaries ──
+# ── Stage 1: Build loom binary ──
 FROM golang:${GO_VERSION}-bookworm AS builder
 WORKDIR /src
 COPY . .
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     go mod download \
-    && CGO_ENABLED=0 go build -o /out/loom ./cmd/loom \
-    && if [ -f third_party/beads/cmd/bd/main.go ]; then \
-        cd third_party/beads && CGO_ENABLED=0 go build -o /out/bd ./cmd/bd; \
-    fi
+    && CGO_ENABLED=0 go build -o /out/loom ./cmd/loom
 
 # ── Stage 2: Build frontend dist ──
 #
@@ -49,7 +46,6 @@ RUN --mount=type=cache,target=/root/.npm \
         opencode-ai
 
 COPY --from=builder /out/loom /usr/local/bin/loom
-COPY --from=builder /out/b[d] /usr/local/bin/
 
 # Frontend dist + the node_modules the frontend stage already resolved, so
 # vite preview can read vite.config.ts (imports @vitejs/plugin-react from

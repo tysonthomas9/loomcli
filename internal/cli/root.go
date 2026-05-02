@@ -19,7 +19,7 @@ var worktreesFlag string
 
 // serverFlag stores the --server flag value (remote loom server base URL).
 // When non-empty, the CLI routes issue operations through the api backend
-// instead of the local beads backend. Mirrored into LOOM_SERVER_URL in
+// instead of the local fleet-db backend. Mirrored into LOOM_SERVER_URL in
 // PersistentPreRun so env-based resolution sees the value consistently.
 var serverFlag string
 
@@ -36,21 +36,15 @@ var rootCmd = &cobra.Command{
 Manage Claude Code agents working in parallel across git worktrees.
 
 GETTING STARTED
-  1. Install beads CLI (issue tracker) from vendored source:
-     make install-bd
-
-  2. Initialize beads in your project:
-     bd init
-
-  3. Create worktrees for parallel agent work:
+  1. Create worktrees for parallel agent work:
      mkdir -p worktrees
      git worktree add ./worktrees/falcon -b falcon
      git worktree add ./worktrees/nova -b nova
 
-  4. Create tasks for agents to work on:
-     bd create --title="Add login feature" --type=feature --priority=2
+  2. Create tasks for agents to work on:
+     loom task create --title="Add login feature" --type=feature --priority=2
 
-  5. Run agents:
+  3. Run agents:
      loom plan falcon    # Creates design, sets status=review
      loom lead           # Review and approve plans
      loom task falcon    # Implements approved design
@@ -63,7 +57,7 @@ KEY CONCEPTS
                - 'plan' agent: researches and creates designs
                - 'task' agent: implements approved designs
 
-  Beads        Issue tracker (bd CLI). Tasks flow through states:
+  FleetDB      Issue tracker. Tasks flow through states:
                open → in_progress → review → open → closed
 
   Auto Mode    --auto flag runs agents continuously, processing multiple

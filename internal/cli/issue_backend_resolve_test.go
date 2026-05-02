@@ -89,12 +89,12 @@ func TestResolveIssueBackendType_FleetEnvVar_BeatsFleetDB(t *testing.T) {
 	}
 }
 
-func TestResolveIssueBackendType_BeadsEnvVar_BeatsFleetDB(t *testing.T) {
+func TestResolveIssueBackendType_BeadsEnvVar_IsInvalid(t *testing.T) {
 	t.Setenv("LOOM_ISSUE_BACKEND", "beads")
 	t.Setenv("LOOM_FLEETDB_ENABLED", "true")
 	got := resolveIssueBackendType()
-	if got != "beads" {
-		t.Errorf("resolveIssueBackendType() = %q, want %q (LOOM_ISSUE_BACKEND=beads should beat LOOM_FLEETDB_ENABLED=true)", got, "beads")
+	if got != "fleetdb" {
+		t.Errorf("resolveIssueBackendType() = %q, want fleetdb (LOOM_ISSUE_BACKEND=beads is no longer valid)", got)
 	}
 }
 

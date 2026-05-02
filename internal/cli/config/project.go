@@ -30,7 +30,7 @@ type DaemonSettings struct {
 	RedisURL       string            `yaml:"redis_url,omitempty"` // stale-detector/serve Redis — NOT used by fleet-db (see FleetDBSettings.RedisURL)
 	OTel           *OTelDaemonConfig `yaml:"otel,omitempty"`
 	FleetDB        *FleetDBSettings  `yaml:"fleetdb,omitempty"`         // fleet-db backend config (separate from RedisURL above)
-	IssueBackend   string            `yaml:"issue_backend,omitempty"`   // "beads" (default), "fleetdb", or "fleet"
+	IssueBackend   string            `yaml:"issue_backend,omitempty"`   // "fleetdb", "fleet", or "api"
 	Fleet          *FleetSettings    `yaml:"fleet,omitempty"`           // fleet client config (remote fleet server connection)
 	StartupTimeout *int              `yaml:"startup_timeout,omitempty"` // seconds; how long to wait for daemon readiness (default 30)
 }

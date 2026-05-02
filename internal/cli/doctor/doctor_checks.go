@@ -130,7 +130,7 @@ func checkBdCLI(deps *cli.Deps) CheckResult {
 			Name:    "bd_cli",
 			Status:  StatusFail,
 			Summary: "bd CLI not found",
-			Detail:  "Install with: make install-bd",
+			Detail:  "Install bd separately if using legacy task storage",
 		}
 	}
 
@@ -157,7 +157,7 @@ func checkBdDaemon(deps *cli.Deps) CheckResult {
 			Name:    "bd_daemon",
 			Status:  StatusFail,
 			Summary: "bd not found (cannot check daemon)",
-			Detail:  "Install with: make install-bd",
+			Detail:  "Install bd separately if using legacy task storage",
 		}
 	}
 

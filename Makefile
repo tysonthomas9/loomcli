@@ -1,6 +1,6 @@
 # Makefile for loomcli project
 
-.PHONY: all build build-frontend build-all test test-integration test-all test-parity test-parity-cli test-fleetdb-cli test-fleetdb-embedded test-fleetdb-supervisor test-parity-ui test-fleetdb-ui fleetdb-empty-up fleetdb-empty-down test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-e2e-api test-e2e-api-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install install-bd help frontend sync-beads update-beads check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-no-raw-exec check-no-beads-prod test-coverage test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness
+.PHONY: all build build-frontend build-all test test-integration test-all test-parity test-parity-cli test-fleetdb-cli test-fleetdb-embedded test-fleetdb-supervisor test-parity-ui test-fleetdb-ui fleetdb-empty-up fleetdb-empty-down test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-e2e-api test-e2e-api-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-no-raw-exec check-no-beads-prod test-coverage test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness
 
 # Default target
 all: build
@@ -32,10 +32,8 @@ test-parity:
 	@echo "Running loomcli parity harness..."
 	go test -tags parity -race -timeout 15m -v ./internal/backend/paritytest/...
 
-# Run the CLI-parity harness — exercises bd vs fdb at the CLI boundary
-# (stdout JSON diffs per step). Writes test/parity/ui/cli-report.json.
-# Prerequisites: bd on PATH (`make install-bd`), and both sibling-repo
-# binaries built:
+# Run the CLI parity harness. Writes test/parity/ui/cli-report.json.
+# Prerequisites: fleet-db sibling-repo binaries built:
 #   cd ~/codebase/fleet-db && go build -o /tmp/fleet-db ./cmd/fleet-db
 #   cd ~/codebase/fleet-db && go build -o /tmp/fdb ./cmd/fdb
 test-parity-cli:
@@ -63,7 +61,7 @@ test-fleetdb-supervisor:
 	go test -count=1 ./internal/cli ./internal/cli/data ./internal/cli/agentdef ./internal/cli/daemon ./internal/cli/daemon/supervisor \
 	  -run 'Test(AgentIPCClient|IPCServer_|Data(Ready|ShowClaimClose)_NoServer|ClaimTask_|TaskIDForLifecycle_|Supervisor(Register|Heartbeats|Mirrors)ControlPlane|BuildCommand_SessionEnvVars)'
 
-# Run the UI Parity Test Suite (Playwright; beads :8081 vs fleet :8082).
+# Run the UI parity/regression suite (Playwright; fleet-db mode by default).
 # Assumes docker-compose.parity.yml is already up AND seeded — the suite's
 # preflight will abort with an actionable error if anything is missing
 # (never silently "skip because no stack" — see ui-test-plan.md §0).
@@ -74,7 +72,6 @@ test-fleetdb-supervisor:
 #   make test-parity-ui
 #
 # Environment overrides accepted (see playwright.config.ts):
-#   LOOM_BEADS_URL   default http://localhost:8081
 #   LOOM_FLEET_URL   default http://localhost:8082
 #   FLEET_DB_URL     default http://localhost:8080
 #   PARITY_WORKSPACE default PARITY
@@ -91,7 +88,7 @@ test-parity-ui:
 # Run the UI browser suite in fleet-db-only regression mode. The command
 # assumes the fleet-only subset of docker-compose.parity.yml is up and seeded:
 #   docker compose -f test/parity/docker-compose.parity.yml up -d --build redis fleet-db loom-fleet ui-fleet parity-seed-fleet
-# It does not require loom-beads, bd, or third_party/beads containers.
+# It does not require loom-beads or bd containers.
 test-fleetdb-ui:
 	@echo "Running fleet-db-only UI regression suite (Playwright)..."
 	@cd test/parity/ui && \
@@ -282,12 +279,6 @@ install:
 	@echo "Installing loom to $$(go env GOPATH)/bin..."
 	@bash -c 'build=$$(git rev-parse --short HEAD 2>/dev/null || echo "unknown"); \
 		go install -ldflags="-X github.com/tysonthomas9/loomcli/internal/cli.Build=$$build" ./cmd/loom'
-	@$(MAKE) install-bd
-
-# Install bd (beads CLI) from vendored source
-install-bd:
-	@echo "Installing bd (beads CLI) from vendored source..."
-	cd third_party/beads && go install ./cmd/bd/
 
 # Clean build artifacts
 clean:
@@ -303,11 +294,6 @@ DISTRIBUTED_SMOKE_BIN := $(CURDIR)/tmp/distributed-smoke/bin
 # Git hooks directory (resolves correctly in both regular repos and worktrees)
 GIT_HOOKS_DIR := $(shell git rev-parse --git-path hooks)
 
-# Beads subtree config
-BEADS_REMOTE := https://github.com/tysonthomas9/beads
-BEADS_BRANCH := feature/web-ui
-BEADS_PREFIX := third_party/beads
-
 # Build the frontend dist (requires Node.js >= 20). Go-free.
 build-frontend:
 	@echo "Building frontend..."
@@ -319,17 +305,6 @@ build-all: build build-frontend
 # Deprecated alias — use 'make build-frontend'
 frontend: build-frontend
 	@echo "Note: 'make frontend' is deprecated. Use 'make build-frontend'."
-
-# Sync beads library packages (rewrite imports from vendored copy)
-sync-beads:
-	@echo "Syncing beads library packages..."
-	./scripts/sync-beads.sh
-
-# Pull latest beads from upstream and sync
-update-beads:
-	@echo "Pulling latest beads from $(BEADS_REMOTE) ($(BEADS_BRANCH))..."
-	git subtree pull --prefix=$(BEADS_PREFIX) $(BEADS_REMOTE) $(BEADS_BRANCH) --squash
-	$(MAKE) sync-beads
 
 # Go-only quality gate (no Node, no frontend dist)
 check-go:
@@ -483,11 +458,8 @@ help:
 	@echo "  make test-e2e-integration - Run Playwright integration e2e tests (self-contained)"
 	@echo "  make test-e2e-integration-local - Run Playwright integration e2e tests (needs loom serve)"
 	@echo "  make test-e2e-integration-full - Run ALL integration e2e tests (cross-workspace + terminal-parity)"
-	@echo "  make install    - Install loom + bd to GOPATH/bin"
-	@echo "  make install-bd - Install bd (beads CLI) from vendored source"
+	@echo "  make install    - Install loom to GOPATH/bin"
 	@echo "  make frontend         - DEPRECATED alias for make build-frontend"
-	@echo "  make sync-beads   - Sync beads packages (rewrite imports)"
-	@echo "  make update-beads - Pull latest beads + sync"
 	@echo "  make check        - Unified quality gate (all 14 checks)"
 	@echo "  make check-go     - Go-only quality gate (no Node, no frontend dist)"
 	@echo "  make check-frontend - Frontend-only quality gate"

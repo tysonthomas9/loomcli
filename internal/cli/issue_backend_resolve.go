@@ -20,7 +20,6 @@ import (
 
 // Issue backend type constants.
 const (
-	IssueBackendBeads   = "beads"
 	IssueBackendFleetDB = "fleetdb"
 	IssueBackendFleet   = "fleet"
 	IssueBackendAPI     = "api"
@@ -28,7 +27,6 @@ const (
 
 // validIssueBackends is the set of accepted values for daemon.issue_backend.
 var validIssueBackends = map[string]bool{
-	IssueBackendBeads:   true,
 	IssueBackendFleetDB: true,
 	IssueBackendFleet:   true,
 	IssueBackendAPI:     true,

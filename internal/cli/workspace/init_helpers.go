@@ -12,7 +12,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/hooks"
 )
 
-// checkPrerequisites verifies bd and git are available and we're in a git repo
+// checkPrerequisites verifies git is available and we're in a git repo.
 func checkPrerequisites(deps *cli.Deps) bool {
 	// Check if we're in a git repository
 	result := deps.Exec.Run(".", "git", "rev-parse", "--is-inside-work-tree")
@@ -40,52 +40,15 @@ func checkPrerequisites(deps *cli.Deps) bool {
 		}
 	}
 
-	// Check if bd (beads) CLI is available (skip when fleet or fleet-db is active)
-	if cli.IsFleetActive() {
-		fmt.Println("✓ fleet backend active (bd CLI not required)")
-	} else if cli.IsFleetDBActive() {
-		fmt.Println("✓ fleet-db backend active (bd CLI not required)")
-	} else if result = deps.Exec.Run(".", "bd", "--version"); result.Err != nil {
-		fmt.Println("✗ bd (beads CLI) not found")
-		fmt.Println("\n  Please install beads CLI from the vendored source:")
-		fmt.Println("    make install-bd")
-		return false
-	} else {
-		fmt.Println("✓ bd (beads CLI) found")
-	}
+	fmt.Println("✓ fleet-db issue backend active")
 
 	return true
 }
 
-// initBeads initializes beads if not already done
+// initBeads is retained as an init step hook while fleet-db is canonical.
 func initBeads(deps *cli.Deps) bool {
-	if cli.IsFleetActive() {
-		fmt.Println("→ Skipping beads init (fleet backend active)")
-		return true
-	}
-	if cli.IsFleetDBActive() {
-		fmt.Println("→ Skipping beads init (fleet-db backend active)")
-		return true
-	}
-	if _, err := os.Stat(filepath.Join(cli.GetBeadsDir(), ".beads")); err == nil {
-		fmt.Println("✓ beads already initialized, skipping...")
-		return true
-	}
-
-	if !initYes {
-		if !promptYesNo("Initialize beads issue tracker?", true) {
-			fmt.Println("→ Skipping beads initialization")
-			return true
-		}
-	}
-
-	fmt.Println("→ Creating .beads/ directory...")
-	result := deps.Exec.Run(cli.GetBeadsDir(), "bd", "init")
-	if result.Err != nil {
-		fmt.Fprintf(os.Stderr, "✗ Failed to initialize beads: %s\n", result.Stderr)
-		return false
-	}
-	fmt.Println("✓ beads initialized")
+	_ = deps
+	fmt.Println("→ Fleet-db issue storage is used; no local task database init required")
 	return true
 }
 

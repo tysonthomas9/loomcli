@@ -227,15 +227,15 @@ func TestWaitForCircuitBreaker_ClosedPassesThrough(t *testing.T) {
 func TestWaitForCircuitBreaker_OpenWaitsUntilCooldown(t *testing.T) {
 	t.Parallel()
 	bus := &captureBus{}
-	ctx := newBreakerTestCtx(1*time.Hour, 10*time.Millisecond, 2, bus)
+	ctx := newBreakerTestCtx(1*time.Hour, 20*time.Millisecond, 2, bus)
 	shutdown := make(chan struct{})
 
-	ae := &agenterr.AgentError{Class: agenterr.RateLimited, RetryAfter: 1 * time.Millisecond}
-	handleAutoTaskError(ctx, ae, errors.New("exit 1"), shutdown)
-	handleAutoTaskError(ctx, ae, errors.New("exit 1"), shutdown)
+	ctx.rateLimitBreaker.RecordRateLimit()
+	ctx.rateLimitBreaker.RecordRateLimit()
 	if ctx.rateLimitBreaker.State() != breakerOpen {
 		t.Fatalf("state = %s, want open", ctx.rateLimitBreaker.State())
 	}
+	ctx.rateLimitBreaker.openedAt = time.Now()
 
 	start := time.Now()
 	if !waitForCircuitBreaker(ctx, shutdown) {

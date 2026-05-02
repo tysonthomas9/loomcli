@@ -425,7 +425,7 @@ func TestDoctorJSONOutput(t *testing.T) {
 		Checks: []CheckResult{
 			{Name: "git", Status: StatusPass, Summary: "git 2.44 found"},
 			{Name: "tmux", Status: StatusWarn, Summary: "tmux not installed", Detail: "Required for daemon mode"},
-			{Name: "bd", Status: StatusFail, Summary: "bd not found", Detail: "Install with: make install-bd"},
+			{Name: "fleet-db", Status: StatusFail, Summary: "fleet-db not configured", Detail: "Set LOOM_FLEET_URL"},
 		},
 		Summary: DoctorSummary{Pass: 1, Warn: 1, Fail: 1},
 	}
@@ -554,7 +554,7 @@ func TestCheckIssueBackend(t *testing.T) {
 		}
 	})
 
-	t.Run("beads active", func(t *testing.T) {
+	t.Run("beads env value falls back to fleetdb", func(t *testing.T) {
 		t.Setenv("LOOM_ISSUE_BACKEND", "beads")
 
 		result := checkIssueBackend()
@@ -564,8 +564,8 @@ func TestCheckIssueBackend(t *testing.T) {
 		if result.Status != StatusPass {
 			t.Errorf("expected pass, got %v: %s", result.Status, result.Summary)
 		}
-		if !strings.Contains(result.Summary, "beads") {
-			t.Errorf("expected summary to contain 'beads', got %q", result.Summary)
+		if !strings.Contains(result.Summary, "fleet-db") {
+			t.Errorf("expected summary to contain 'fleet-db', got %q", result.Summary)
 		}
 	})
 

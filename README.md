@@ -1,6 +1,6 @@
 # loom
 
-Agent management CLI for parallel AI coding workflows with [beads](https://github.com/steveyegge/beads).
+Agent management CLI for parallel AI coding workflows backed by fleet-db.
 
 Run multiple AI agents in parallel across git worktrees — each agent works independently on its own branch, picking tasks from a shared issue tracker, then integrating back through a structured push/pull/sync workflow.
 
@@ -122,7 +122,7 @@ repo       Manage repos within a workspace (repo add|remove|list|show)
 role       Manage agent roles (role set|unset|show|list)
 agentdef   Manage agent definitions (agentdef add|remove|update|list|show)
 daemon     Daemon profile + lifecycle (daemon profile show|set|unset)
-init       Guided setup wizard (beads init, worktree creation)
+init       Guided setup wizard (workspace and worktree creation)
 ```
 
 ### Server
@@ -327,10 +327,6 @@ docker compose -f docker-compose.dev.yml up --build
 | `LOOM_WORKTREES_DIR` | `./worktrees` | Worktrees directory |
 | `LOOM_SERVER_PORT` | `8080` | Server port |
 | `LOOM_BIND_ADDR` | `127.0.0.1` | Server bind address |
-
-## Credits
-
-Loom uses [beads](https://github.com/steveyegge/beads) by Steve Yegge as its issue tracker. A compatible version is vendored at `third_party/beads/`.
 
 ## License
 

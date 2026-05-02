@@ -225,18 +225,12 @@ func TestEnsureIssueBackendRunning(t *testing.T) {
 		}
 	})
 
-	t.Run("beads delegates to EnsureBdDaemonRunning", func(t *testing.T) {
+	t.Run("beads env value is ignored and does not start bd", func(t *testing.T) {
 		t.Setenv("LOOM_ISSUE_BACKEND", "beads")
 		deps, _, execR, _, _ := NewTestDeps(t)
 
-		// Mock: daemon already running
 		execR.RunFunc = func(dir, name string, args ...string) CommandResult {
-			if len(args) >= 2 && args[1] == "status" {
-				return CommandResult{
-					Stdout: `{"status":"running","pid":9876}`,
-				}
-			}
-			t.Fatalf("unexpected command: %s %v", name, args)
+			t.Fatalf("execCommand should not be called for invalid beads backend: %s %v", name, args)
 			return CommandResult{}
 		}
 
@@ -245,38 +239,7 @@ func TestEnsureIssueBackendRunning(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		if started {
-			t.Error("expected started=false when daemon already running")
-		}
-	})
-
-	t.Run("beads with daemon not running delegates start", func(t *testing.T) {
-		t.Setenv("LOOM_ISSUE_BACKEND", "beads")
-		deps, _, execR, _, _ := NewTestDeps(t)
-
-		var statusCalls atomic.Int32
-		execR.RunFunc = func(dir, name string, args ...string) CommandResult {
-			if len(args) >= 2 && args[1] == "status" {
-				n := statusCalls.Add(1)
-				if n <= 1 {
-					return CommandResult{Err: fmt.Errorf("not running")}
-				}
-				return CommandResult{
-					Stdout: `{"status":"running","pid":5678}`,
-				}
-			}
-			if len(args) >= 2 && args[1] == "start" {
-				return CommandResult{}
-			}
-			t.Fatalf("unexpected command: %s %v", name, args)
-			return CommandResult{}
-		}
-
-		started, err := EnsureIssueBackendRunning(deps, 2*time.Second)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if !started {
-			t.Error("expected started=true when we started the daemon via beads path")
+			t.Error("expected started=false for invalid beads backend")
 		}
 	})
 }

@@ -3,7 +3,6 @@ package workspace
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 
@@ -158,29 +157,17 @@ func validateWorkspaceExists() config.WorkspaceConfig {
 	return ws
 }
 
-// initWorkspaceBeads handles beads initialization for workspace setup.
+// initWorkspaceBeads is retained as a workspace setup hook while fleet-db is canonical.
 func initWorkspaceBeads(deps *cli.Deps, ws config.WorkspaceConfig) {
-	if cli.IsFleetActive() {
-		fmt.Println("→ Skipping beads init (fleet backend active)")
-	} else if cli.IsFleetDBActive() {
-		fmt.Println("→ Skipping beads init (fleet-db backend active)")
-	} else if _, statErr := os.Stat(filepath.Join(ws.Path, ".beads")); statErr == nil {
-		fmt.Println("✓ beads already initialized in workspace")
-	} else if initYes || promptYesNo("Initialize beads in workspace root?", true) {
-		initBeadsInWorkspace(deps, ws.Path)
-	} else {
-		fmt.Println("→ Skipping beads initialization")
-	}
+	_ = deps
+	_ = ws
+	fmt.Println("→ Fleet-db issue storage is used; no local task database init required")
 }
 
 func initBeadsInWorkspace(deps *cli.Deps, wsPath string) {
-	fmt.Printf("→ Initializing beads in %s...\n", wsPath)
-	result := deps.Exec.Run(wsPath, "bd", "init")
-	if result.Err != nil {
-		fmt.Fprintf(os.Stderr, "✗ Failed to initialize beads: %s\n", result.Stderr)
-		return
-	}
-	fmt.Println("✓ beads initialized in workspace root")
+	_ = deps
+	_ = wsPath
+	fmt.Println("→ Fleet-db issue storage is used; no local task database init required")
 }
 
 func showWorkspaceSummary(ws config.WorkspaceConfig) {

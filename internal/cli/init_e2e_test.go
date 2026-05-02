@@ -256,10 +256,9 @@ func TestE2E_InitCustomWorktreesDir(t *testing.T) {
 	}
 }
 
-func TestE2E_InitBeadsInitialized(t *testing.T) {
+func TestE2E_InitUsesFleetDBStorage(t *testing.T) {
 	t.Parallel()
 	loomBinaryPath(t)
-	requireBdBinary(t)
 	dir := setupInitTestRepo(t)
 
 	stdout, _, exitCode := runLoomInit(t, dir, "--yes")
@@ -267,14 +266,13 @@ func TestE2E_InitBeadsInitialized(t *testing.T) {
 		t.Fatalf("expected exit 0, got %d\nstdout: %s", exitCode, stdout)
 	}
 
-	// Verify .beads directory exists
 	beadsDir := filepath.Join(dir, ".beads")
-	if info, err := os.Stat(beadsDir); err != nil || !info.IsDir() {
-		t.Errorf("expected .beads directory to exist at %s", beadsDir)
+	if _, err := os.Stat(beadsDir); !os.IsNotExist(err) {
+		t.Errorf("expected no .beads directory at %s, stat err=%v", beadsDir, err)
 	}
 
-	if !strings.Contains(stdout, "✓ beads initialized") && !strings.Contains(stdout, "✓ beads already initialized, skipping...") {
-		t.Errorf("expected beads initialization message\nfull output:\n%s", stdout)
+	if !strings.Contains(stdout, "Fleet-db issue storage is used") {
+		t.Errorf("expected fleet-db storage message\nfull output:\n%s", stdout)
 	}
 }
 

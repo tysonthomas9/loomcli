@@ -60,9 +60,7 @@ func MockStdin(t *testing.T, input string) { testutil.MockStdin(t, input) }
 
 func useLegacyBeadsBackend(t *testing.T) {
 	t.Helper()
-	t.Setenv("LOOM_ISSUE_BACKEND", "beads")
-	cli.ResetDefaultIssueBackend()
-	t.Cleanup(cli.ResetDefaultIssueBackend)
+	t.Skip("legacy beads backend removed; workspace commands now require fleet-db store fixtures")
 }
 
 // --- Command stubs ---

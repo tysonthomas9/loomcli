@@ -125,12 +125,11 @@ If the user needs to set up a new project for loom:
 
 **Prerequisites**:
 - Git repository
-- Beads CLI installed: 'make install-bd' (from vendored source)
+- Fleet-db issue storage configured
 
 **Setup Steps**:
-1. Initialize beads: 'bd init' (creates .beads/ directory)
-2. Create worktrees directory: 'mkdir -p worktrees'
-3. Add worktrees for agents:
+1. Create worktrees directory: 'mkdir -p worktrees'
+2. Add worktrees for agents:
    - 'git worktree add ./worktrees/falcon -b falcon'
    - 'git worktree add ./worktrees/nova -b nova'
    (Name them after fast things: falcon, nova, spark, etc.)

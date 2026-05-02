@@ -107,7 +107,7 @@ main() {
     fi
 
     # Remove old loom and bd binaries to avoid stale/quarantined files
-    for bin in loom bd; do
+    for bin in loom; do
         if [ -f "${INSTALL_DIR}/${bin}" ]; then
             if [ -w "$INSTALL_DIR" ]; then
                 rm -f "${INSTALL_DIR}/${bin}"
@@ -117,13 +117,9 @@ main() {
         fi
     done
 
-    # Install both loom and bd (beads CLI) binaries
-    for bin in loom bd; do
+    # Install loom binary
+    for bin in loom; do
         if [ ! -f "${tmpdir}/${bin}" ]; then
-            if [ "$bin" = "bd" ]; then
-                printf "\033[1;33mNote:\033[0m bd binary not found in archive (older release). Install from source: make install-bd\n"
-                continue
-            fi
             error "${bin} binary not found in archive"
         fi
         if [ -w "$INSTALL_DIR" ]; then
@@ -143,14 +139,6 @@ main() {
         printf "\033[1;33mWarning:\033[0m Binary installed but 'loom --version' returned non-zero.\n"
         printf "  Installed to: %s\n" "${INSTALL_DIR}/loom"
     fi
-    if [ -f "${INSTALL_DIR}/bd" ]; then
-        if "${INSTALL_DIR}/bd" --version &>/dev/null; then
-            printf "\033[1;32mSuccess!\033[0m bd (beads CLI) installed to %s\n" "${INSTALL_DIR}/bd"
-        else
-            printf "\033[1;33mWarning:\033[0m bd installed but 'bd --version' returned non-zero.\n"
-        fi
-    fi
-
     # Remind user to add install dir to PATH if needed
     if ! echo "$PATH" | tr ':' '\n' | grep -qx "$INSTALL_DIR"; then
         printf "\n\033[1;33mNote:\033[0m %s is not in your PATH. Add it with:\n" "$INSTALL_DIR"

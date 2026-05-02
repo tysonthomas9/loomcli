@@ -145,33 +145,27 @@ func TestCheckPrerequisites_NotGitRepo(t *testing.T) {
 	}
 }
 
-func TestCheckPrerequisites_NoBd(t *testing.T) {
-	useLegacyBeadsBackend(t)
-
+func TestCheckPrerequisites_DoesNotRequireBd(t *testing.T) {
 	deps, _, _, _, _ := NewTestDeps(t)
 	mock := NewCommandMock(t, []CommandStub{
 		{Name: "git", Args: []string{"rev-parse", "--is-inside-work-tree"}, Stdout: "true"},
 		{Name: "git", Args: []string{"rev-parse", "--git-common-dir"}, Stdout: ".git"},
 		{Name: "git", Args: []string{"rev-parse", "--git-dir"}, Stdout: ".git"},
-		{Name: "bd", Args: []string{"--version"}, Err: errors.New("bd not found")},
 	})
 	mock.InstallOn(deps)
 
 	result := checkPrerequisites(deps)
-	if result {
-		t.Error("checkPrerequisites() should return false when bd not installed")
+	if !result {
+		t.Error("checkPrerequisites() should return true without bd")
 	}
 }
 
 func TestCheckPrerequisites_Success(t *testing.T) {
-	useLegacyBeadsBackend(t)
-
 	deps, _, _, _, _ := NewTestDeps(t)
 	mock := NewCommandMock(t, []CommandStub{
 		{Name: "git", Args: []string{"rev-parse", "--is-inside-work-tree"}, Stdout: "true"},
 		{Name: "git", Args: []string{"rev-parse", "--git-common-dir"}, Stdout: ".git"},
 		{Name: "git", Args: []string{"rev-parse", "--git-dir"}, Stdout: ".git"},
-		{Name: "bd", Args: []string{"--version"}, Stdout: "beads v1.0.0"},
 	})
 	mock.InstallOn(deps)
 
@@ -182,8 +176,6 @@ func TestCheckPrerequisites_Success(t *testing.T) {
 }
 
 func TestInitBeads_AlreadyInitialized(t *testing.T) {
-	useLegacyBeadsBackend(t)
-
 	// Save and restore working directory
 	origDir, _ := os.Getwd()
 	defer os.Chdir(origDir)
@@ -191,21 +183,15 @@ func TestInitBeads_AlreadyInitialized(t *testing.T) {
 	tmpDir := t.TempDir()
 	os.Chdir(tmpDir)
 
-	// Create .beads directory
-	os.MkdirAll(".beads", 0755)
-
 	deps, _, _, _, _ := NewTestDeps(t)
 
-	// No mock needed - should skip without running any commands
 	result := initBeads(deps)
 	if !result {
-		t.Error("initBeads() should return true when already initialized")
+		t.Error("initBeads() should return true in fleet-db mode")
 	}
 }
 
 func TestInitBeads_Initialize(t *testing.T) {
-	useLegacyBeadsBackend(t)
-
 	ResetBeadsDirCache()
 	defer ResetBeadsDirCache()
 
@@ -222,14 +208,12 @@ func TestInitBeads_Initialize(t *testing.T) {
 	defer func() { initYes = origYes }()
 
 	deps, _, _, _, _ := NewTestDeps(t)
-	mock := NewCommandMock(t, []CommandStub{
-		{Name: "bd", Args: []string{"init"}, Stdout: "Initialized beads"},
-	})
+	mock := NewCommandMock(t, nil)
 	mock.InstallOn(deps)
 
 	result := initBeads(deps)
 	if !result {
-		t.Error("initBeads() should return true after successful init")
+		t.Error("initBeads() should return true without local task database init")
 	}
 }
 
@@ -808,8 +792,6 @@ func TestShowSummary_EmptyNames(t *testing.T) {
 // --- Additional coverage tests ---
 
 func TestInitBeads_Failure(t *testing.T) {
-	useLegacyBeadsBackend(t)
-
 	ResetBeadsDirCache()
 	defer ResetBeadsDirCache()
 
@@ -824,14 +806,12 @@ func TestInitBeads_Failure(t *testing.T) {
 	defer func() { initYes = origYes }()
 
 	deps, _, _, _, _ := NewTestDeps(t)
-	mock := NewCommandMock(t, []CommandStub{
-		{Name: "bd", Args: []string{"init"}, Stderr: "failed to init", Err: errors.New("exit 1")},
-	})
+	mock := NewCommandMock(t, nil)
 	mock.InstallOn(deps)
 
 	result := initBeads(deps)
-	if result {
-		t.Error("initBeads() should return false when bd init fails")
+	if !result {
+		t.Error("initBeads() should return true without invoking bd")
 	}
 }
 
@@ -855,14 +835,11 @@ func TestCreateSingleWorktree_RetryFails(t *testing.T) {
 
 func TestCheckPrerequisites_InsideWorktree(t *testing.T) {
 	// Not parallel: captures os.Stdout which is a global.
-	useLegacyBeadsBackend(t)
-
 	deps, _, _, _, _ := NewTestDeps(t)
 	mock := NewCommandMock(t, []CommandStub{
 		{Name: "git", Args: []string{"rev-parse", "--is-inside-work-tree"}, Stdout: "true"},
 		{Name: "git", Args: []string{"rev-parse", "--git-common-dir"}, Stdout: "/repo/.git"},
 		{Name: "git", Args: []string{"rev-parse", "--git-dir"}, Stdout: "/repo/.git/worktrees/falcon"},
-		{Name: "bd", Args: []string{"--version"}, Stdout: "beads v1.0.0"},
 	})
 	mock.InstallOn(deps)
 
