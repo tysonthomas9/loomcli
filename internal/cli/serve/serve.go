@@ -166,11 +166,6 @@ func runServe(cmd *cobra.Command, args []string) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Proactively refresh the monitor cache every 6s so HTTP requests
-	// always read warm data instead of blocking on collectMonitorData.
-	// (TTL is 10s, so 6s refresh leaves a 4s safety margin.)
-	collectDataFn := metricscmd.NewCollectorWithBackground(ctx, 10*time.Second, 6*time.Second)
-
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 
@@ -205,8 +200,6 @@ func runServe(cmd *cobra.Command, args []string) {
 	}
 	initUsageStore()
 
-	monitorHandlers := buildMonitorHandlers(collectDataFn, staleDetectorHandler)
-
 	// Open a fleet-db-backed store handle for the default fleet-db path. Explicit
 	// beads mode remains available until the deletion phase, but it is no longer
 	// selected implicitly.
@@ -220,6 +213,17 @@ func runServe(cmd *cobra.Command, args []string) {
 		go workspacemgr.PurgeOldSessions()
 		workspacemgr.EnsureProjectRegistered()
 	}
+
+	// Proactively refresh the monitor cache every 6s so HTTP requests
+	// always read warm data instead of blocking on collectMonitorData.
+	// (TTL is 10s, so 6s refresh leaves a 4s safety margin.)
+	//
+	// Start this after the primary fleet-db store is open. The monitor
+	// collector also routes through the issue backend; in embedded local
+	// mode, starting it earlier can race the main serve path for the
+	// embedded fleet-db runtime lock before runtime metadata is written.
+	collectDataFn := metricscmd.NewCollectorWithBackground(ctx, 10*time.Second, 6*time.Second)
+	monitorHandlers := buildMonitorHandlers(collectDataFn, staleDetectorHandler)
 
 	webuiErr := make(chan error, 1)
 	go func() {
