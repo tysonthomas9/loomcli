@@ -1,6 +1,6 @@
 # Makefile for loomcli project
 
-.PHONY: all build build-frontend build-all test test-integration test-all test-parity test-parity-cli test-fleetdb-cli test-fleetdb-embedded test-fleetdb-supervisor test-parity-ui test-fleetdb-ui test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-e2e-api test-e2e-api-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install install-bd help frontend sync-beads update-beads check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-no-raw-exec test-coverage test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness
+.PHONY: all build build-frontend build-all test test-integration test-all test-parity test-parity-cli test-fleetdb-cli test-fleetdb-embedded test-fleetdb-supervisor test-parity-ui test-fleetdb-ui fleetdb-empty-up fleetdb-empty-down test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-e2e-api test-e2e-api-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install install-bd help frontend sync-beads update-beads check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-no-raw-exec test-coverage test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness
 
 # Default target
 all: build
@@ -101,6 +101,37 @@ test-fleetdb-ui:
 	    npx playwright install --with-deps chromium || exit 1; \
 	  fi && \
 	  PARITY_MODE=fleet-only npx playwright test
+
+# Start an empty fleet-db-only UI stack for manual new-user testing. This stack
+# has no seeded workspaces or issues; create a workspace from the UI.
+fleetdb-empty-up: build-frontend
+	@echo "Starting empty fleet-db UI stack on http://localhost:$${LOOM_UI_PORT:-8091}..."
+	@set -e; \
+	if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then \
+	  compose="docker compose"; \
+	elif command -v podman-compose >/dev/null 2>&1; then \
+	  compose="podman-compose"; \
+	elif command -v podman >/dev/null 2>&1 && podman compose version >/dev/null 2>&1; then \
+	  compose="podman compose"; \
+	else \
+	  echo "docker compose or podman compose is required" >&2; \
+	  exit 127; \
+	fi; \
+	$$compose -f test/fleetdb/docker-compose.empty.yml up --build
+
+fleetdb-empty-down:
+	@set -e; \
+	if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then \
+	  compose="docker compose"; \
+	elif command -v podman-compose >/dev/null 2>&1; then \
+	  compose="podman-compose"; \
+	elif command -v podman >/dev/null 2>&1 && podman compose version >/dev/null 2>&1; then \
+	  compose="podman compose"; \
+	else \
+	  echo "docker compose or podman compose is required" >&2; \
+	  exit 127; \
+	fi; \
+	$$compose -f test/fleetdb/docker-compose.empty.yml down -v --remove-orphans
 
 # Run the fleet-db distributed smoke stack: shared fleet-db/Redis, two loom
 # serve processes, two local supervisor heartbeat loops, and a one-shot smoke
