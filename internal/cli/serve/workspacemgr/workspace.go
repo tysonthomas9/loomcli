@@ -585,32 +585,34 @@ func createStoreBackedCloneWorkspace(ctx context.Context, s storepkg.Store, req 
 	}); err != nil {
 		return service.WorkspaceCreateResult{}, fmt.Errorf("create workspace in store: %w", err)
 	}
-	_ = updateStoreWorkspaceState(ctx, s, key, domain.WorkspaceStateCreating, "")
-
-	markErr := func(msg string) {
-		if err := updateStoreWorkspaceState(context.Background(), s, key, domain.WorkspaceStateError, msg); err != nil {
-			slog.Warn("failed to mark store workspace error", "workspace", key, "err", err)
+	rollbackStore := func() {
+		deleteLocalWorkspaceState(key)
+		if err := s.Workspaces().Delete(context.Background(), key); err != nil && !errors.Is(err, domain.ErrNotFound) {
+			slog.Warn("failed to rollback store clone workspace create", "workspace", key, "err", err)
 		}
 	}
+	_ = updateStoreWorkspaceState(ctx, s, key, domain.WorkspaceStateCreating, "")
+
 	if err := os.MkdirAll(wsDir, 0755); err != nil {
-		markErr(fmt.Sprintf("cannot create directory: %v", err))
+		rollbackStore()
 		return service.WorkspaceCreateResult{}, fmt.Errorf("cannot create workspace directory: %w", err)
 	}
 
 	if err := updateStoreWorkspaceState(ctx, s, key, domain.WorkspaceStateCloning, ""); err != nil {
 		cleanupCloneDir(wsDir)
+		rollbackStore()
 		return service.WorkspaceCreateResult{}, fmt.Errorf("mark workspace cloning: %w", err)
 	}
 	repos, err := cloneRepos(ctx, cloneURLs, wsDir)
 	if err != nil {
 		cleanupCloneDir(wsDir)
-		markErr(err.Error())
+		rollbackStore()
 		return service.WorkspaceCreateResult{}, err
 	}
 
 	if err := updateStoreWorkspaceState(ctx, s, key, domain.WorkspaceStateInitializing, ""); err != nil {
 		cleanupCloneDir(wsDir)
-		markErr(err.Error())
+		rollbackStore()
 		return service.WorkspaceCreateResult{}, fmt.Errorf("mark workspace initializing: %w", err)
 	}
 	for i, r := range repos {
@@ -626,16 +628,18 @@ func createStoreBackedCloneWorkspace(ctx context.Context, s storepkg.Store, req 
 			SourceRepoID:  r.SourceRepoID,
 		}); err != nil {
 			cleanupCloneDir(wsDir)
-			markErr(err.Error())
+			rollbackStore()
 			return service.WorkspaceCreateResult{}, fmt.Errorf("create repo %q in store: %w", r.Name, err)
 		}
 	}
 	if err := saveLocalWorkspaceState(key, wsDir, repos, true); err != nil {
 		cleanupCloneDir(wsDir)
-		markErr(err.Error())
+		rollbackStore()
 		return service.WorkspaceCreateResult{}, err
 	}
 	if err := updateStoreWorkspaceState(ctx, s, key, domain.WorkspaceStateReady, ""); err != nil {
+		cleanupCloneDir(wsDir)
+		rollbackStore()
 		return service.WorkspaceCreateResult{}, fmt.Errorf("mark workspace ready: %w", err)
 	}
 
@@ -682,6 +686,25 @@ func saveLocalWorkspaceState(key, wsDir string, repos []config.RepoConfig, makeA
 		}
 		return nil
 	})
+}
+
+func deleteLocalWorkspaceState(key string) {
+	if key == "" {
+		return
+	}
+	if err := bootstrap.WithStateLock(func() error {
+		sc, err := bootstrap.LoadStateCache()
+		if err != nil {
+			return fmt.Errorf("load local workspace state: %w", err)
+		}
+		delete(sc.Workspaces, key)
+		if sc.LastWorkspace == key {
+			sc.LastWorkspace = ""
+		}
+		return bootstrap.SaveStateCache(sc)
+	}); err != nil {
+		slog.Warn("failed to rollback local workspace state", "workspace", key, "err", err)
+	}
 }
 
 // loadOrCreateConfig loads the config, creating a fresh one if nil.
@@ -1016,8 +1039,8 @@ func startDaemonAsync(timeout time.Duration, wsName, wsDir string, repos []confi
 	}()
 }
 
-// repoNameFromURL derives a directory name from a git clone URL.
-// e.g. "https://github.com/foo/bar.git" -> "bar"
+// repoNameFromURL derives a fleet-db-safe directory/repo name from a git clone URL.
+// e.g. "https://github.com/foo/Hello-World.git" -> "hello-world"
 func repoNameFromURL(cloneURL string) string {
 	// Strip trailing .git
 	u := strings.TrimSuffix(cloneURL, ".git")
@@ -1031,10 +1054,36 @@ func repoNameFromURL(cloneURL string) string {
 	if idx := strings.LastIndex(u, ":"); idx >= 0 {
 		u = u[idx+1:]
 	}
-	if u == "" {
+	return normalizeRepoName(u)
+}
+
+func normalizeRepoName(name string) string {
+	name = strings.ToLower(strings.TrimSpace(name))
+	var b strings.Builder
+	lastDash := false
+	for _, r := range name {
+		allowed := (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '.' || r == '_' || r == '-'
+		if allowed {
+			b.WriteRune(r)
+			lastDash = r == '-'
+			continue
+		}
+		if !lastDash {
+			b.WriteByte('-')
+			lastDash = true
+		}
+	}
+	out := strings.Trim(b.String(), ".-_")
+	if out == "" {
 		return "repo"
 	}
-	return u
+	if len(out) > 100 {
+		out = strings.Trim(out[:100], ".-_")
+		if out == "" {
+			return "repo"
+		}
+	}
+	return out
 }
 
 // createCloneWorkspace clones one or more repos and creates a workspace from them.
@@ -1087,7 +1136,12 @@ func cloneRepos(ctx context.Context, cloneURLs []string, wsDir string) ([]config
 			return nil, workspaceerrors.New(workspaceerrors.GitFailed, fmt.Sprintf("git clone failed for %s: %s", cloneURL, strings.TrimSpace(string(output))), err)
 		}
 
-		repos = append(repos, config.RepoConfig{Name: repoName, Path: clonePath})
+		repos = append(repos, config.RepoConfig{
+			Name:         repoName,
+			Path:         clonePath,
+			Remote:       "origin",
+			SourceRepoID: repoName,
+		})
 	}
 	return repos, nil
 }
