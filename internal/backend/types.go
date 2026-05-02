@@ -319,6 +319,7 @@ type CreateParams struct {
 	EstimatedMinutes   *int     `json:"estimated_minutes,omitempty"`
 	Labels             []string `json:"labels,omitempty"`
 	Dependencies       []string `json:"dependencies,omitempty"`
+	SourceRepo         string   `json:"source_repo,omitempty"`
 	DueAt              string   `json:"due_at,omitempty"`
 	DeferUntil         string   `json:"defer_until,omitempty"`
 }

@@ -56,6 +56,17 @@ function unwrap<T>(
   return response.data as T;
 }
 
+function normalizeIssueRepo<T extends Issue | IssueDetails>(issue: T): T {
+  if (!issue.repo && issue.source_repo) {
+    return { ...issue, repo: issue.source_repo };
+  }
+  return issue;
+}
+
+function normalizeIssueRepos<T extends Issue | IssueDetails>(issues: T[]): T[] {
+  return issues.map(normalizeIssueRepo);
+}
+
 /**
  * Map WorkFilter to backend query parameter names.
  */
@@ -84,7 +95,7 @@ export async function getIssue(
     { params: { path: { ws: workspaceId, id } } },
   );
   if (error) throw apiErrorFromResponse(error, response);
-  return unwrap(data) as unknown as IssueDetails;
+  return normalizeIssueRepo(unwrap(data) as unknown as IssueDetails);
 }
 
 /**
@@ -117,7 +128,7 @@ export async function getReadyIssues(
     },
   );
   if (error) throw apiErrorFromResponse(error, response);
-  return unwrap(data) as unknown as Issue[];
+  return normalizeIssueRepos(unwrap(data) as unknown as Issue[]);
 }
 
 /**
@@ -200,7 +211,7 @@ export async function getKanbanIssues(
     },
   );
   if (error) throw apiErrorFromResponse(error, response);
-  return unwrap(data) as unknown as Issue[];
+  return normalizeIssueRepos(unwrap(data) as unknown as Issue[]);
 }
 
 // ============= GRAPH OPERATIONS =============
@@ -291,6 +302,7 @@ export interface CreateIssueRequest {
   estimated_minutes?: number;
   labels?: string[];
   dependencies?: string[];
+  source_repo?: string;
   due_at?: string;
   defer_until?: string;
 }
@@ -339,6 +351,7 @@ export async function createIssue(
     estimated_minutes: reqData.estimated_minutes,
     labels: reqData.labels,
     dependencies: reqData.dependencies,
+    source_repo: reqData.source_repo,
     due_at: reqData.due_at,
     defer_until: reqData.defer_until,
   });
@@ -350,7 +363,7 @@ export async function createIssue(
     },
   );
   if (error) throw apiErrorFromResponse(error, response);
-  return unwrap(data) as unknown as Issue;
+  return normalizeIssueRepo(unwrap(data) as unknown as Issue);
 }
 
 /**
@@ -383,7 +396,7 @@ export async function updateIssue(
     },
   );
   if (error) throw apiErrorFromResponse(error, response);
-  return unwrap(data) as unknown as Issue;
+  return normalizeIssueRepo(unwrap(data) as unknown as Issue);
 }
 
 /**

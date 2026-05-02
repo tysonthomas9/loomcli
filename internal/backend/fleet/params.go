@@ -284,6 +284,7 @@ func updateParamsToPatchRequest(params backend.UpdateParams) map[string]interfac
 //   - "parent"      → "parent_id"
 //   - "owner" stays "owner" but fleet-db expects *string (we send the
 //     scalar value directly; omitempty handles the unset case)
+//   - "source_repo" → "repo"
 //
 // Dropped (no equivalent on fleet-db's CreateIssueRequest):
 //   - id, acceptance_criteria, created_by, external_ref,
@@ -306,6 +307,7 @@ func createParamsToBody(params backend.CreateParams) map[string]interface{} {
 		req["labels"] = params.Labels
 	}
 	setNonEmptyStr(req, "parent_id", params.Parent)
+	setNonEmptyStr(req, "repo", params.SourceRepo)
 	setNonEmptyStr(req, "design", params.Design)
 	setNonEmptyStr(req, "notes", params.Notes)
 	return req

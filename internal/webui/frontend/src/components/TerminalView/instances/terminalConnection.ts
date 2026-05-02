@@ -209,6 +209,13 @@ export function connectWebSocket(
           pendingWrites.push(ev.data);
         } else if (ev.data instanceof ArrayBuffer) {
           pendingWrites.push(new Uint8Array(ev.data));
+        } else if (ev.data instanceof Blob) {
+          void ev.data.arrayBuffer().then((buf) => {
+            if (cancelled) return;
+            pendingWrites.push(new Uint8Array(buf));
+            scheduleFlush();
+          });
+          return;
         }
         scheduleFlush();
       };

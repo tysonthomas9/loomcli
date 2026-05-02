@@ -43,14 +43,19 @@ vi.mock("@/hooks/workspace", async () => {
     );
   return {
     ...actual,
-    useWorkspaceContext: () => ({ workspaceId: "test-ws-id" }),
+    useWorkspaceContext: vi.fn(() => ({
+      workspaceId: "test-ws-id",
+      repos: [],
+    })),
   };
 });
 
 import { createIssue } from "@/hooks/api";
+import { useWorkspaceContext } from "@/hooks/workspace";
 import type { Issue } from "@/types";
 
 const mockCreateIssue = vi.mocked(createIssue);
+const mockUseWorkspaceContext = vi.mocked(useWorkspaceContext);
 
 const MOCK_ISSUE: Issue = {
   id: "TST-001",
@@ -71,6 +76,10 @@ describe("CreateIssueModal", () => {
     onClose = vi.fn();
     onSuccess = vi.fn();
     mockCreateIssue.mockReset();
+    mockUseWorkspaceContext.mockReturnValue({
+      workspaceId: "test-ws-id",
+      repos: [],
+    } as ReturnType<typeof useWorkspaceContext>);
   });
 
   describe("rendering", () => {
@@ -325,6 +334,42 @@ describe("CreateIssueModal", () => {
       // description key should not be present in the request
       const callArgs = mockCreateIssue.mock.calls[0][1];
       expect(callArgs).not.toHaveProperty("description");
+    });
+
+    it("includes selected source_repo in multi-repo workspaces", async () => {
+      mockCreateIssue.mockResolvedValue(MOCK_ISSUE);
+      mockUseWorkspaceContext.mockReturnValue({
+        workspaceId: "test-ws-id",
+        repos: [
+          { name: "e2e-app", source_repo_id: "e2e-app" },
+          { name: "e2e-lib", source_repo_id: "e2e-lib" },
+        ],
+      } as ReturnType<typeof useWorkspaceContext>);
+
+      render(
+        <CreateIssueModal
+          isOpen={true}
+          onClose={onClose}
+          onSuccess={onSuccess}
+        />,
+      );
+
+      fireEvent.change(screen.getByTestId("create-issue-title"), {
+        target: { value: "Repo scoped issue" },
+      });
+      fireEvent.change(screen.getByTestId("create-issue-source-repo"), {
+        target: { value: "e2e-lib" },
+      });
+      fireEvent.click(screen.getByTestId("create-issue-submit"));
+
+      await waitFor(() => {
+        expect(mockCreateIssue).toHaveBeenCalledWith("test-ws-id", {
+          title: "Repo scoped issue",
+          issue_type: "task",
+          priority: 2,
+          source_repo: "e2e-lib",
+        });
+      });
     });
   });
 

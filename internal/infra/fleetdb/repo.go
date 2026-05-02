@@ -59,6 +59,12 @@ func (s *repoStore) Create(ctx context.Context, in store.RepoCreate) (*domain.Re
 	if err := s.client.do(ctx, "POST", "/api/v1/"+pathEscape(in.WorkspaceKey)+"/repos", body, &resp); err != nil {
 		return nil, err
 	}
+	if err := s.client.do(ctx, "PATCH", "/api/v1/admin/workspaces/"+pathEscape(in.WorkspaceKey), struct {
+		AddRepos []string `json:"add_repos,omitempty"`
+	}{AddRepos: []string{in.Name}}, nil); err != nil {
+		_ = s.client.do(ctx, "DELETE", "/api/v1/"+pathEscape(in.WorkspaceKey)+"/repos/"+pathEscape(in.Name), nil, nil)
+		return nil, err
+	}
 	return resp.toDomain(), nil
 }
 
@@ -106,5 +112,10 @@ func (s *repoStore) Update(ctx context.Context, ws, name string, patch store.Rep
 }
 
 func (s *repoStore) Delete(ctx context.Context, ws, name string) error {
-	return s.client.do(ctx, "DELETE", "/api/v1/"+pathEscape(ws)+"/repos/"+pathEscape(name), nil, nil)
+	if err := s.client.do(ctx, "DELETE", "/api/v1/"+pathEscape(ws)+"/repos/"+pathEscape(name), nil, nil); err != nil {
+		return err
+	}
+	return s.client.do(ctx, "PATCH", "/api/v1/admin/workspaces/"+pathEscape(ws), struct {
+		DelRepos []string `json:"del_repos,omitempty"`
+	}{DelRepos: []string{name}}, nil)
 }

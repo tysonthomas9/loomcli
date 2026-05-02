@@ -207,6 +207,7 @@ type fleetBatchCreateIssueReq struct {
 	Owner       string   `json:"owner,omitempty"`
 	Labels      []string `json:"labels,omitempty"`
 	ParentID    string   `json:"parent_id,omitempty"`
+	Repo        string   `json:"repo,omitempty"`
 	Design      string   `json:"design,omitempty"`
 	Notes       string   `json:"notes,omitempty"`
 	DueAt       string   `json:"due_at,omitempty"`
@@ -236,6 +237,7 @@ func batchCreateIssueReq(op backend.BatchOp) (fleetBatchCreateIssueReq, error) {
 		Owner:       p.Owner,
 		Labels:      p.Labels,
 		ParentID:    p.Parent,
+		Repo:        p.SourceRepo,
 		Design:      p.Design,
 		Notes:       p.Notes,
 		DueAt:       p.DueAt,

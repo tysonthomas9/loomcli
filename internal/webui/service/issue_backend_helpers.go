@@ -21,11 +21,8 @@ import (
 // --- Param translators (webui → backend) ---
 
 // createParamsToBackend maps the webui-level CreateIssueParams onto the
-// backend-level CreateParams. The SourceRepo field (present on
-// CreateIssueParams) is intentionally dropped here: the IssueBackend
-// interface does not expose it because backends derive source repo from the
-// active workspace context. If multi-repo issue creation needs explicit
-// SourceRepo support, the IssueBackend contract should be extended first.
+// backend-level CreateParams. SourceRepo must flow through for multi-repo
+// workspaces so FleetDB can persist the issue against the selected repo.
 func createParamsToBackend(p *CreateIssueParams) backend.CreateParams {
 	return backend.CreateParams{
 		ID:                 p.ID,
@@ -44,6 +41,7 @@ func createParamsToBackend(p *CreateIssueParams) backend.CreateParams {
 		EstimatedMinutes:   p.EstimatedMinutes,
 		Labels:             p.Labels,
 		Dependencies:       p.Dependencies,
+		SourceRepo:         p.SourceRepo,
 		DueAt:              p.DueAt,
 		DeferUntil:         p.DeferUntil,
 	}
@@ -122,6 +120,7 @@ func addOptionalIssueFields(out map[string]any, d *backend.IssueData) {
 	}
 	if d.SourceRepo != "" {
 		out["source_repo"] = d.SourceRepo
+		out["repo"] = d.SourceRepo
 	}
 	if d.Parent != "" {
 		out["parent"] = d.Parent

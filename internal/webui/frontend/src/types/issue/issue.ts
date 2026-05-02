@@ -93,6 +93,7 @@ interface IssueExtensions {
 
   /** Repository that owns this issue (multi-repo workspaces) */
   repo?: string;
+  source_repo?: string;
 
   // Work Type Fields
   work_type?: WorkType;

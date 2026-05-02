@@ -344,9 +344,11 @@ function DefaultContent({
   const canMove = workspaces.length > 1 && issue?.status !== "closed";
 
   const currentRepo = useMemo(() => {
+    if (issue?.repo) return issue.repo;
+    if (issue?.source_repo) return issue.source_repo;
     const repoLabel = issue?.labels?.find((l) => l.startsWith("repo:"));
     return repoLabel ? repoLabel.slice(5) : null;
-  }, [issue?.labels]);
+  }, [issue?.labels, issue?.repo, issue?.source_repo]);
   const [taskLogPhases, setTaskLogPhases] = useState<
     ("planning" | "implementation")[]
   >([]);

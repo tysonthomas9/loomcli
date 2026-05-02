@@ -698,7 +698,7 @@ func TestCreateIssue_Backend_Success_ReturnsIssueShape(t *testing.T) {
 		getResult: &backend.IssueDetailData{
 			IssueData: backend.IssueData{
 				ID: "loom-x1", Title: "New", Status: "open", Priority: 2,
-				IssueType: "task", CreatedAt: now, UpdatedAt: now,
+				IssueType: "task", SourceRepo: "repo-a", CreatedAt: now, UpdatedAt: now,
 			},
 			Description: "body",
 			Notes:       "note",
@@ -707,9 +707,10 @@ func TestCreateIssue_Backend_Success_ReturnsIssueShape(t *testing.T) {
 	svc := newServiceWithFake(fb)
 
 	raw, err := svc.CreateIssue(context.Background(), CreateIssueParams{
-		Title:     "New",
-		IssueType: "task",
-		Priority:  2,
+		Title:      "New",
+		IssueType:  "task",
+		Priority:   2,
+		SourceRepo: "repo-a",
 	})
 	if err != nil {
 		t.Fatalf("CreateIssue: %v", err)
@@ -729,10 +730,13 @@ func TestCreateIssue_Backend_Success_ReturnsIssueShape(t *testing.T) {
 	if got["notes"] != "note" {
 		t.Errorf("notes = %v, want note", got["notes"])
 	}
+	if got["source_repo"] != "repo-a" || got["repo"] != "repo-a" {
+		t.Errorf("repo aliases = source_repo:%v repo:%v, want repo-a", got["source_repo"], got["repo"])
+	}
 	if len(fb.createParams) != 1 {
 		t.Fatalf("expected 1 backend call, got %d", len(fb.createParams))
 	}
-	if fb.createParams[0].Title != "New" || fb.createParams[0].IssueType != "task" {
+	if fb.createParams[0].Title != "New" || fb.createParams[0].IssueType != "task" || fb.createParams[0].SourceRepo != "repo-a" {
 		t.Errorf("unexpected backend params: %+v", fb.createParams[0])
 	}
 }

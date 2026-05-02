@@ -40,10 +40,11 @@ export function CreateIssueModal({
   onClose,
   onSuccess,
 }: CreateIssueModalProps): JSX.Element | null {
-  const { workspaceId } = useWorkspaceContext();
+  const { workspaceId, repos } = useWorkspaceContext();
   const [title, setTitle] = useState("");
   const [issueType, setIssueType] = useState<IssueType>("task");
   const [priority, setPriority] = useState<Priority>(2);
+  const [sourceRepo, setSourceRepo] = useState("");
   const [description, setDescription] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
@@ -65,6 +66,7 @@ export function CreateIssueModal({
       setTitle("");
       setIssueType("task");
       setPriority(2);
+      setSourceRepo("");
       setDescription("");
       setIsSubmitting(false);
       setError("");
@@ -94,6 +96,9 @@ export function CreateIssueModal({
       if (description.trim()) {
         req.description = description.trim();
       }
+      if (sourceRepo) {
+        req.source_repo = sourceRepo;
+      }
 
       try {
         const issue = await createIssue(workspaceId, req);
@@ -121,10 +126,28 @@ export function CreateIssueModal({
         }
       }
     },
-    [canSubmit, title, issueType, priority, description, onSuccess, onClose],
+    [
+      canSubmit,
+      title,
+      issueType,
+      priority,
+      sourceRepo,
+      description,
+      workspaceId,
+      onSuccess,
+      onClose,
+    ],
   );
 
   if (!isOpen) return null;
+
+  const repoOptions = repos
+    .map((repo) => ({
+      label: repo.name,
+      value: repo.source_repo_id || repo.name,
+    }))
+    .filter((repo) => Boolean(repo.label) && Boolean(repo.value));
+  const showRepoSelector = repoOptions.length > 1;
 
   return createPortal(
     <div
@@ -203,6 +226,29 @@ export function CreateIssueModal({
               </select>
             </div>
           </div>
+
+          {showRepoSelector && (
+            <div className={styles.fieldGroup}>
+              <label className={styles.label} htmlFor="issue-source-repo">
+                Repo
+              </label>
+              <select
+                id="issue-source-repo"
+                className={styles.select}
+                value={sourceRepo}
+                onChange={(e) => setSourceRepo(e.target.value)}
+                disabled={isSubmitting}
+                data-testid="create-issue-source-repo"
+              >
+                <option value="">Workspace</option>
+                {repoOptions.map((repo) => (
+                  <option key={repo.value} value={repo.value}>
+                    {repo.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           <div className={styles.fieldGroup}>
             <label className={styles.label} htmlFor="issue-description">

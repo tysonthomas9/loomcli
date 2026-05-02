@@ -67,12 +67,13 @@ func TestUpdateParamsToPatchRequest_KeepsSupportedFields(t *testing.T) {
 
 func TestCreateParamsToBody_RenamesFields(t *testing.T) {
 	req := createParamsToBody(backend.CreateParams{
-		Title:     "T",
-		IssueType: "task",
-		Parent:    "loom-1",
-		Priority:  3,
+		Title:      "T",
+		IssueType:  "task",
+		Parent:     "loom-1",
+		SourceRepo: "repo-a",
+		Priority:   3,
 	})
-	// Renames: issue_type → type, parent → parent_id.
+	// Renames: issue_type → type, parent → parent_id, source_repo → repo.
 	if _, ok := req["issue_type"]; ok {
 		t.Error("issue_type must be renamed to 'type'")
 	}
@@ -84,6 +85,12 @@ func TestCreateParamsToBody_RenamesFields(t *testing.T) {
 	}
 	if req["parent_id"] != "loom-1" {
 		t.Errorf("parent_id = %v, want %q", req["parent_id"], "loom-1")
+	}
+	if _, ok := req["source_repo"]; ok {
+		t.Error("source_repo must be renamed to 'repo'")
+	}
+	if req["repo"] != "repo-a" {
+		t.Errorf("repo = %v, want %q", req["repo"], "repo-a")
 	}
 	if req["priority"] != 3 {
 		t.Errorf("priority = %v, want 3", req["priority"])
@@ -115,7 +122,7 @@ func TestCreateParamsToBody_DropsLoomOnlyFields(t *testing.T) {
 
 func TestCreateParamsToBody_OmitsZeroValues(t *testing.T) {
 	req := createParamsToBody(backend.CreateParams{Title: "only"})
-	for _, k := range []string{"description", "type", "assignee", "owner", "labels", "parent_id", "design", "notes", "priority"} {
+	for _, k := range []string{"description", "type", "assignee", "owner", "labels", "parent_id", "repo", "design", "notes", "priority"} {
 		if _, ok := req[k]; ok {
 			t.Errorf("zero-value field %q should not appear in body", k)
 		}
