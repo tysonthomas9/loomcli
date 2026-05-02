@@ -67,8 +67,8 @@ func ComputeSocketPath(workspacePath string) (string, error) {
 	return socketPath, nil
 }
 
-// FindBeadsDir locates the .beads directory for a workspace.
-// For worktrees, this returns the main repository's .beads directory.
+// FindBeadsDir locates the legacy .beads directory for a workspace.
+// For worktrees, this returns the main repository's legacy .beads directory.
 func FindBeadsDir(workspacePath string) (string, error) {
 	if workspacePath == "" {
 		return "", ErrInvalidSocketPath
@@ -77,9 +77,9 @@ func FindBeadsDir(workspacePath string) (string, error) {
 	// Walk up the directory tree looking for .beads
 	current := workspacePath
 	for {
-		beadsDir := filepath.Join(current, ".beads")
-		if info, err := os.Stat(beadsDir); err == nil && info.IsDir() {
-			return beadsDir, nil
+		runtimeDir := filepath.Join(current, ".beads")
+		if info, err := os.Stat(runtimeDir); err == nil && info.IsDir() {
+			return runtimeDir, nil
 		}
 
 		parent := filepath.Dir(current)

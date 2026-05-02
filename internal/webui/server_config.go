@@ -57,7 +57,7 @@ type ServerConfig struct {
 	MaxTerminalSessions int  // Maximum concurrent terminal connections (0 = default 40)
 	FleetEnabled        bool // Register fleet API routes (requires Redis coordination)
 	// FleetClient is true when this loom server is a fleet-db CLIENT (not a
-	// fleet API server itself). In this mode there is no local bd daemon to
+	// fleet API server itself). In this mode there is no local issue daemon to
 	// talk to — the IssueBackend is fleet-db over HTTP. Drives the
 	// /api/health handler choice so a missing daemon is reported as the
 	// expected steady state, not a degraded one.
@@ -95,12 +95,12 @@ type ServerConfig struct {
 	Store                store.Store
 	BackendOps           ops.BackendOps                                       // Backend health operations interface (optional; nil disables backend health endpoint)
 	ScrollbackMaxLines   int                                                  // Maximum lines per scrollback buffer (0 = default 10000)
-	NotifyTokenDir       string                                               // Directory to write notify.token (typically beads dir); empty = token file not written
+	NotifyTokenDir       string                                               // Directory to write notify.token (typically runtime dir); empty = token file not written
 	AgentControlFn       agentcontrol.AgentControlFn                          // Sends agent lifecycle commands to the daemon control socket; nil in fleet mode or --no-daemon
 	DaemonSupervisorFn   func() (*DaemonSupervisorData, error)                // Returns daemon supervisor state from state file; nil = endpoint unavailable
 	DaemonConfigFn       func() (json.RawMessage, error)                      // Returns effective merged daemon config as JSON; nil = endpoint unavailable
 	AgentQueueFn         func(agentName string) ([]AgentQueueEntry, error)    // Returns scored work queue for named agent; nil = endpoint unavailable
-	FleetMode            bool                                                 // When true, skip beads-specific lifecycle hooks (pools, subscribers); fleet server manages agents
+	FleetMode            bool                                                 // When true, skip local daemon lifecycle hooks; fleet server manages agents
 	FleetClientURL       string                                               // Fleet server URL for fleet-mode workers (e.g., "http://fleet.example.com"); empty = no fleet client
 	FleetClientWorkspace string                                               // Fleet server workspace ID (e.g., "default"); empty = use "default"
 	FleetClientAPIKey    string                                               // Pre-shared API key for fleet worker backend auth
@@ -121,8 +121,7 @@ type ServerConfig struct {
 	//
 	// The ctx carries the per-request workspace ID via middleware.WithWorkspace,
 	// allowing the closure to construct a per-workspace fleet-db backend in
-	// cloud mode. Beads-mode wirings ignore ctx and return the process-global
-	// backend (loom is single-workspace per process in beads mode).
+	// cloud mode. Local wirings return the process-global fleet-db backend.
 	IssueBackendFn func(ctx context.Context) backend.IssueBackend
 }
 

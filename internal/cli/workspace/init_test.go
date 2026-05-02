@@ -175,7 +175,7 @@ func TestCheckPrerequisites_Success(t *testing.T) {
 	}
 }
 
-func TestInitBeads_AlreadyInitialized(t *testing.T) {
+func TestInitIssueStorage_AlreadyInitialized(t *testing.T) {
 	// Save and restore working directory
 	origDir, _ := os.Getwd()
 	defer os.Chdir(origDir)
@@ -185,15 +185,15 @@ func TestInitBeads_AlreadyInitialized(t *testing.T) {
 
 	deps, _, _, _, _ := NewTestDeps(t)
 
-	result := initBeads(deps)
+	result := initIssueStorage(deps)
 	if !result {
-		t.Error("initBeads() should return true in fleet-db mode")
+		t.Error("initIssueStorage() should return true in fleet-db mode")
 	}
 }
 
-func TestInitBeads_Initialize(t *testing.T) {
-	ResetBeadsDirCache()
-	defer ResetBeadsDirCache()
+func TestInitIssueStorage_Initialize(t *testing.T) {
+	ResetWorkspaceRuntimeDirCache()
+	defer ResetWorkspaceRuntimeDirCache()
 
 	// Save and restore working directory
 	origDir, _ := os.Getwd()
@@ -211,9 +211,9 @@ func TestInitBeads_Initialize(t *testing.T) {
 	mock := NewCommandMock(t, nil)
 	mock.InstallOn(deps)
 
-	result := initBeads(deps)
+	result := initIssueStorage(deps)
 	if !result {
-		t.Error("initBeads() should return true without local task database init")
+		t.Error("initIssueStorage() should return true without local task database init")
 	}
 }
 
@@ -791,9 +791,9 @@ func TestShowSummary_EmptyNames(t *testing.T) {
 
 // --- Additional coverage tests ---
 
-func TestInitBeads_Failure(t *testing.T) {
-	ResetBeadsDirCache()
-	defer ResetBeadsDirCache()
+func TestInitIssueStorage_Failure(t *testing.T) {
+	ResetWorkspaceRuntimeDirCache()
+	defer ResetWorkspaceRuntimeDirCache()
 
 	origDir, _ := os.Getwd()
 	defer os.Chdir(origDir)
@@ -809,9 +809,9 @@ func TestInitBeads_Failure(t *testing.T) {
 	mock := NewCommandMock(t, nil)
 	mock.InstallOn(deps)
 
-	result := initBeads(deps)
+	result := initIssueStorage(deps)
 	if !result {
-		t.Error("initBeads() should return true without invoking bd")
+		t.Error("initIssueStorage() should return true without invoking bd")
 	}
 }
 

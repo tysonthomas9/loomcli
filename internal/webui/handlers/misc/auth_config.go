@@ -168,10 +168,10 @@ func HandleAuthConfig(extAuthURL string, limiter *AuthConfigLimiter, issueBacken
 }
 
 // resolveIssueBackendLabel returns the normalized issue backend family name
-// ("beads", "fleet", "fleetdb", "api", "agent-ipc") for /api/config. The
-// normalization collapses backend-specific suffixes (e.g. "beads-pooled" →
-// "beads", "fleet-db" → "fleet") so the frontend can switch on a small set
-// of stable labels. Falls back to LOOM_ISSUE_BACKEND when no factory is
+// ("fleet", "fleetdb", "api", "agent-ipc") for /api/config. The
+// normalization collapses backend-specific suffixes (e.g. "fleet-db" ->
+// "fleet") so the frontend can switch on a small set of stable labels.
+// Falls back to LOOM_ISSUE_BACKEND when no factory is
 // wired — matches the resolution order used elsewhere in the codebase.
 func resolveIssueBackendLabel(ctx context.Context, issueBackendFn func(ctx context.Context) backend.IssueBackend) string {
 	if issueBackendFn != nil {

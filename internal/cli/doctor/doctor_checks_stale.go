@@ -194,7 +194,7 @@ func queryIndexedSessionIDs(store *sessions.Store) (map[string]bool, error) {
 }
 
 func checkStaleSessionRecords() CheckResult {
-	sessStore, err := sessions.NewStore(cli.GetBeadsDir())
+	sessStore, err := sessions.NewStore(cli.GetWorkspaceRuntimeDir())
 	if err != nil {
 		return CheckResult{} // skip — sessions store not available
 	}

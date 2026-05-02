@@ -45,8 +45,8 @@ func checkPrerequisites(deps *cli.Deps) bool {
 	return true
 }
 
-// initBeads is retained as an init step hook while fleet-db is canonical.
-func initBeads(deps *cli.Deps) bool {
+// initIssueStorage confirms FleetDB-backed issue storage for this workspace.
+func initIssueStorage(deps *cli.Deps) bool {
 	_ = deps
 	fmt.Println("→ Fleet-db issue storage is used; no local task database init required")
 	return true

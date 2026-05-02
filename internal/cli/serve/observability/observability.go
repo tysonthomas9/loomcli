@@ -335,7 +335,7 @@ func ParseIntParam(s string, defaultVal int) (int, error) {
 
 // ResolveEventsDir resolves the events directory from daemon config.
 func ResolveEventsDir() string {
-	loomDir := cli.GetBeadsDir()
+	loomDir := cli.GetWorkspaceRuntimeDir()
 	if loomDir == "" {
 		loomDir = "."
 	}

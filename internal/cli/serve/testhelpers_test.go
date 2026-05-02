@@ -248,23 +248,6 @@ func NewTestDeps(t testing.TB) (*cli.Deps, *clitest.MockGitRunner, *clitest.Mock
 	return clitest.NewTestDeps(t.(*testing.T))
 }
 
-var EnsureBdDaemonRunning = cli.EnsureBdDaemonRunning
-
-// isDaemonRunning checks daemon status via deps.Exec, matching cli.isDaemonRunning.
-func isDaemonRunning(deps *cli.Deps) bool {
-	result := deps.Exec.Run(cli.GetBeadsDir(), "bd", "daemon", "status", "--json")
-	if result.Err != nil {
-		return false
-	}
-	var status struct {
-		Status string `json:"status"`
-	}
-	if err := json.Unmarshal([]byte(result.Stdout), &status); err != nil {
-		return false
-	}
-	return status.Status == "running"
-}
-
 // defaultResolver is a package-level resolver for test compat.
 var defaultResolver *struct{}
 

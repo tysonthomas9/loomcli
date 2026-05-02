@@ -69,7 +69,7 @@ func (m *WorkspaceOpsModule) WithIssueBackendFn(fn func(ctx context.Context) bac
 	return m
 }
 
-// WithDaemonExpected sets whether a bd daemon is expected to be reachable
+// WithDaemonExpected sets whether a local issue daemon is expected to be reachable
 // for this deployment. False in fleet client mode. Returns the module for
 // chaining.
 func (m *WorkspaceOpsModule) WithDaemonExpected(b bool) *WorkspaceOpsModule {

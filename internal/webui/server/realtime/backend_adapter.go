@@ -39,7 +39,7 @@ func BackendMutationToPayload(m backend.MutationData, workspaceID string) *Mutat
 // rpc.MutationEvent. Used by the catch-up path so that
 // MultiWorkspaceSubscriber.GetMutationsSinceForWorkspace can return a single
 // []rpc.MutationEvent regardless of whether the underlying source was the
-// bd daemon or a fleet-db long-poll. The Timestamp is preserved as-is
+// local daemon or a fleet-db long-poll. The Timestamp is preserved as-is
 // (time.Time → time.Time); RPCMutationToPayload formats it into RFC3339.
 func BackendMutationToRPCEvent(m backend.MutationData) rpc.MutationEvent {
 	return rpc.MutationEvent{

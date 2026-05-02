@@ -25,7 +25,7 @@ func createAutoSession(ctx *autoLoopCtx, prompt string) *sessions.Session {
 		EpicID: ctx.opts.ParentID, Prompt: prompt, AttemptNum: ctx.state.TasksCompleted + 1,
 	})
 	if sess != nil {
-		backends.SetActiveSessionEnv(cli.GetBeadsDir(), sess.SessionID())
+		backends.SetActiveSessionRuntimeEnv(cli.GetWorkspaceRuntimeDir(), sess.SessionID())
 		go sessions.NotifyWebUI(context.Background(), backends.ResolveWebUIURL(), "", sess.SessionID(), sessions.StatusRunning, backends.ResolveNotifyToken())
 	}
 	return sess

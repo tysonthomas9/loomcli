@@ -100,7 +100,7 @@ func (s *Supervisor) Start() error {
 	}
 
 	// Sweep orphaned sessions from prior daemon runs before launching agents.
-	if sessStore, err := sessions.NewStore(cli.GetBeadsDir()); err != nil {
+	if sessStore, err := sessions.NewStore(cli.GetWorkspaceRuntimeDir()); err != nil {
 		slog.Warn("session store unavailable, skipping orphan sweep", "err", err)
 	} else {
 		if healed, err := sessStore.SweepOrphans(); err != nil {
@@ -457,8 +457,8 @@ func removeIssueByID(issues []backend.IssueData, id string) []backend.IssueData 
 
 // createAgentSession creates a session for liveness tracking.
 func (s *Supervisor) createAgentSession(ap *AgentProcess, epicID string) {
-	beadsDir := cli.GetBeadsDir()
-	sessStore, err := sessions.NewStore(beadsDir)
+	runtimeDir := cli.GetWorkspaceRuntimeDir()
+	sessStore, err := sessions.NewStore(runtimeDir)
 	if err != nil {
 		slog.Warn("session store unavailable, watchdog will use log file", "worktree", ap.Entry.Worktree, "err", err)
 		return
@@ -480,7 +480,7 @@ func (s *Supervisor) createAgentSession(ap *AgentProcess, epicID string) {
 		slog.Warn("session creation failed, watchdog will use log file", "worktree", ap.Entry.Worktree, "err", err)
 		return
 	}
-	txPath := filepath.Join(beadsDir, "sessions", sess.SessionID(), "transcript.jsonl")
+	txPath := filepath.Join(runtimeDir, "sessions", sess.SessionID(), "transcript.jsonl")
 	bRef := automode.CaptureHEADRef(ap.WorktreePath)
 	ap.Mu.Lock()
 	ap.Session = sess

@@ -9,8 +9,8 @@ import (
 
 // cleanupUsage purges old records from usage.jsonl.
 // Returns (purged count, error).
-func cleanupUsage(beadsDir string, maxAge time.Duration, dryRun bool) (int, error) {
-	store, err := usage.NewStore(beadsDir)
+func cleanupUsage(runtimeDir string, maxAge time.Duration, dryRun bool) (int, error) {
+	store, err := usage.NewStore(runtimeDir)
 	if err != nil {
 		return 0, fmt.Errorf("open usage store: %w", err)
 	}

@@ -15,17 +15,17 @@ import (
 //
 // Designed for use inside hook subprocesses: errors are logged to stderr and
 // the function always returns nil so the hook process exits 0. Returns nil
-// immediately (no-op) when event is nil, or when beadsDir / sessionID are
+// immediately (no-op) when event is nil, or when runtimeDir / sessionID are
 // missing (non-loom agent session).
-func dispatchHookEvent(event *HookEvent, beadsDir, sessionID string) error { //nolint:unparam // always nil by design: hooks must exit 0
+func dispatchHookEvent(event *HookEvent, runtimeDir, sessionID string) error { //nolint:unparam // always nil by design: hooks must exit 0
 	if event == nil {
 		return nil
 	}
-	if beadsDir == "" || sessionID == "" {
+	if runtimeDir == "" || sessionID == "" {
 		return nil
 	}
 
-	store, err := sessions.NewStore(beadsDir)
+	store, err := sessions.NewStore(runtimeDir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "loom hook: failed to create session store: %v\n", err)
 		return nil

@@ -113,7 +113,7 @@ type statusJSONOutput struct {
 	Daemon    statusJSONDaemon    `json:"daemon"`
 	Backend   statusJSONBackend   `json:"backend"`
 	Worktrees statusJSONWorktrees `json:"worktrees"`
-	Beads     statusJSONBeads     `json:"beads"`
+	Tasks     statusJSONTasks     `json:"tasks"`
 	Git       statusJSONGit       `json:"git"`
 	Redis     statusJSONRedis     `json:"redis"`
 	Issues    []json.RawMessage   `json:"issues,omitempty"`
@@ -136,7 +136,7 @@ type statusJSONWorktrees struct {
 	List   []json.RawMessage `json:"list,omitempty"`
 }
 
-type statusJSONBeads struct {
+type statusJSONTasks struct {
 	Open       int `json:"open"`
 	InProgress int `json:"in_progress"`
 	Review     int `json:"review"`
@@ -179,7 +179,7 @@ func TestE2E_StatusHumanOutput(t *testing.T) {
 	stdout, _ := runLoomStatus(t, dir)
 
 	// Verify section headers are present
-	for _, header := range []string{"Daemon:", "Backend:", "Beads:", "Git:", "Redis:"} {
+	for _, header := range []string{"Daemon:", "Backend:", "Tasks:", "Git:", "Redis:"} {
 		if !strings.Contains(stdout, header) {
 			t.Errorf("expected output to contain %q, got:\n%s", header, stdout)
 		}
@@ -195,16 +195,16 @@ func TestE2E_StatusHumanOutput(t *testing.T) {
 		t.Errorf("expected '(via' in backend line, got:\n%s", stdout)
 	}
 
-	// Beads line should use hyphen "in-progress" (human format)
+	// Tasks line should use hyphen "in-progress" (human format)
 	if !strings.Contains(stdout, "in-progress") {
-		t.Errorf("expected 'in-progress' (hyphen) in human Beads line, got:\n%s", stdout)
+		t.Errorf("expected 'in-progress' (hyphen) in human Tasks line, got:\n%s", stdout)
 	}
 
 	// Human output must NOT contain "in_progress" (that's the JSON key)
-	// Only check within the Beads line to avoid false positives
+	// Only check within the Tasks line to avoid false positives
 	for _, line := range strings.Split(stdout, "\n") {
-		if strings.HasPrefix(line, "Beads:") && strings.Contains(line, "in_progress") {
-			t.Errorf("human Beads line should use 'in-progress' (hyphen), not 'in_progress' (underscore), got: %s", line)
+		if strings.HasPrefix(line, "Tasks:") && strings.Contains(line, "in_progress") {
+			t.Errorf("human Tasks line should use 'in-progress' (hyphen), not 'in_progress' (underscore), got: %s", line)
 		}
 	}
 
@@ -253,12 +253,12 @@ func TestE2E_StatusJSONOutput(t *testing.T) {
 	if err := json.Unmarshal([]byte(stdout), &raw); err != nil {
 		t.Fatalf("failed to parse raw JSON: %v", err)
 	}
-	var beadsRaw map[string]json.RawMessage
-	if err := json.Unmarshal(raw["beads"], &beadsRaw); err != nil {
-		t.Fatalf("failed to parse beads JSON: %v", err)
+	var tasksRaw map[string]json.RawMessage
+	if err := json.Unmarshal(raw["tasks"], &tasksRaw); err != nil {
+		t.Fatalf("failed to parse tasks JSON: %v", err)
 	}
-	if _, ok := beadsRaw["in_progress"]; !ok {
-		t.Error("expected 'in_progress' key (underscore) in beads JSON")
+	if _, ok := tasksRaw["in_progress"]; !ok {
+		t.Error("expected 'in_progress' key (underscore) in tasks JSON")
 	}
 }
 
@@ -280,7 +280,7 @@ func TestE2E_StatusJSONBackendName(t *testing.T) {
 	}
 }
 
-func TestE2E_StatusWithBeads(t *testing.T) {
+func TestE2E_StatusWithTasks(t *testing.T) {
 	dir := setupStatusTestWorkspace(t)
 
 	// Create a few tasks via bd create
@@ -292,27 +292,27 @@ func TestE2E_StatusWithBeads(t *testing.T) {
 		}
 	}
 
-	// JSON output should show beads.open > 0
+	// JSON output should show tasks.open > 0
 	stdout, exitCode := runLoomStatus(t, dir, "--json")
 	if exitCode != 0 {
 		t.Errorf("expected exit code 0, got %d", exitCode)
 	}
 
 	data := parseStatusJSON(t, stdout)
-	if data.Beads.Open < 1 {
-		t.Errorf("expected beads.open >= 1 after creating tasks, got %d", data.Beads.Open)
+	if data.Tasks.Open < 1 {
+		t.Errorf("expected tasks.open >= 1 after creating tasks, got %d", data.Tasks.Open)
 	}
 
-	// Human output should contain Beads section with "open" and "in-progress" (hyphen)
+	// Human output should contain Tasks section with "open" and "in-progress" (hyphen)
 	humanOut, _ := runLoomStatus(t, dir)
-	if !strings.Contains(humanOut, "Beads:") {
-		t.Error("expected 'Beads:' in human output")
+	if !strings.Contains(humanOut, "Tasks:") {
+		t.Error("expected 'Tasks:' in human output")
 	}
 	if !strings.Contains(humanOut, "open") {
-		t.Error("expected 'open' in human Beads line")
+		t.Error("expected 'open' in human Tasks line")
 	}
 	if !strings.Contains(humanOut, "in-progress") {
-		t.Error("expected 'in-progress' (hyphen) in human Beads line")
+		t.Error("expected 'in-progress' (hyphen) in human Tasks line")
 	}
 }
 

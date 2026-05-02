@@ -17,7 +17,7 @@ import (
 func (s *issueServiceImpl) ListIssues(ctx context.Context, params ListIssuesParams) (*ListIssuesResult, error) {
 	// Pool-less fleet mode: there is no daemon to connect to, so go
 	// directly through the IssueBackend. The pool path below only runs
-	// in beads mode where multiPool/pool is wired.
+	// when multiPool/pool is wired.
 	if s.pool == nil {
 		if be, _ := s.resolveBackend(ctx); be != nil {
 			return s.listIssuesViaBackend(ctx, be, params)
@@ -25,8 +25,8 @@ func (s *issueServiceImpl) ListIssues(ctx context.Context, params ListIssuesPara
 		return nil, ErrUnavailable("connection pool not initialized")
 	}
 
-	// Mixed deployment: a beads pool exists for the local workspace, but
-	// other workspaces (fleet-db-only) won't have one. When the request's
+	// Mixed deployment: a pool exists for the local workspace, but other
+	// workspaces (fleet-db-only) won't have one. When the request's
 	// workspace isn't in the pool registry, route to the IssueBackend
 	// instead of opening a daemon connection that would return the wrong
 	// workspace's data.
@@ -44,7 +44,7 @@ func (s *issueServiceImpl) ListIssues(ctx context.Context, params ListIssuesPara
 	client, err := s.pool.Get(ctx)
 	if err != nil {
 		// Pool acquisition failed. In fleet mode the pool is intentionally
-		// non-functional (no bd daemon at all), so before bubbling
+		// non-functional (no local issue daemon at all), so before bubbling
 		// "issue backend unavailable" up to the FE, see whether a backend is
 		// wired and serve the list from there.
 		if be, _ := s.resolveBackend(ctx); be != nil {
@@ -314,7 +314,7 @@ func (s *issueServiceImpl) buildKanbanResult(client *rpc.Client, issuesWithCount
 
 // listIssuesViaBackend serves a list request through the IssueBackend
 // abstraction. Used when there is no daemon connection pool to talk to —
-// most importantly, in fleet mode where the bd daemon is intentionally
+// most importantly, in fleet mode where the local issue daemon is intentionally
 // absent and every list query has to hit the fleet HTTP API instead.
 //
 // This is the simplest viable port: it covers the standard (non-kanban)

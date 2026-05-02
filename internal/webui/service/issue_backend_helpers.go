@@ -12,11 +12,10 @@ import (
 // that issue_impl.go stays focused on orchestration.
 //
 // Wire-shape contract: the return shapes here must match the JSON the
-// frontend already consumes — which historically was the JSON the beads
-// daemon emitted directly through *rpc.Client. The webui frontend types
-// (IssueDetails, Issue, Comment, Event) are the source of truth; helpers
-// here map backend.IssueDetailData → those wire shapes verbatim so the
-// migration is a no-op for FE consumers.
+// frontend already consumes. The webui frontend types (IssueDetails, Issue,
+// Comment, Event) are the source of truth; helpers here map
+// backend.IssueDetailData -> those wire shapes verbatim so the migration is a
+// no-op for FE consumers.
 
 // --- Param translators (webui → backend) ---
 
@@ -49,7 +48,7 @@ func createParamsToBackend(p *CreateIssueParams) backend.CreateParams {
 
 // patchParamsToBackendUpdate maps PatchIssueParams onto backend.UpdateParams.
 // Note: backend.UpdateParams does not currently expose a Pinned field — the
-// pin/unpin operation is a beads-RPC-only feature. When the IssueBackend
+// pin/unpin operation is not yet exposed by IssueBackend. When the IssueBackend
 // interface gains explicit pin support, wire it through here. For now we
 // drop p.Pinned and surface a clear log warning so behavior changes are
 // noticed in operation.
@@ -302,7 +301,7 @@ func commentDataToTypesComment(d *backend.CommentData) *types.Comment {
 // backend.EventData.ID is a string but types.Event.ID is int64 (matching
 // the SQLite primary key). We parse-through to preserve the previous wire
 // shape; non-numeric IDs degrade to 0 because no caller currently relies on
-// the ID being valid for non-beads backends.
+// the ID being valid for string-ID backends.
 func eventDataToTypesEvent(d backend.EventData) *types.Event {
 	id, _ := strconv.ParseInt(d.ID, 10, 64)
 	return &types.Event{

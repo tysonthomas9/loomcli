@@ -38,7 +38,7 @@ func setupSessionsTestRepo(t *testing.T) string {
 }
 
 // seedSession creates a session subdirectory with metadata.json and appends to index.jsonl.
-// baseDir is the working directory where loom will run (GetBeadsDir returns "." in legacy mode,
+// baseDir is the working directory where loom will run (GetWorkspaceRuntimeDir returns "." in legacy mode,
 // so sessions are stored at <baseDir>/sessions/).
 func seedSession(t *testing.T, baseDir string, sid string, status string, endedAt *time.Time) {
 	t.Helper()
@@ -120,14 +120,14 @@ func seedSession(t *testing.T, baseDir string, sid string, status string, endedA
 }
 
 // runLoomSessions runs the loom binary as a subprocess with Dir set, LOOM_CONFIG_DIR
-// pointed to an empty temp dir (so GetBeadsDir returns "."), and captures output.
+// pointed to an empty temp dir (so GetWorkspaceRuntimeDir returns "."), and captures output.
 func runLoomSessions(t *testing.T, dir string, args ...string) (stdout, stderr string, exitCode int) {
 	t.Helper()
 	loom := loomBinaryPath(t)
 	cmd := exec.Command(loom, args...)
 	cmd.Dir = dir
 
-	// Point LOOM_CONFIG_DIR to an empty temp dir so GetBeadsDir() returns "."
+	// Point LOOM_CONFIG_DIR to an empty temp dir so GetWorkspaceRuntimeDir() returns "."
 	// (no workspace config => legacy mode => beads dir = cwd).
 	emptyConfigDir := t.TempDir()
 	env := os.Environ()

@@ -56,15 +56,15 @@ func HandleMetrics(collectDataFn func() *monitor.MonitorData) http.HandlerFunc {
 func collectWorkerStatusCounts() map[string]int {
 	counts := map[string]int{"active": 0, "idle": 0, "blocked": 0}
 
-	beadsDir := cli.GetBeadsDir()
-	if beadsDir == "" {
-		beadsDir = "."
+	runtimeDir := cli.GetWorkspaceRuntimeDir()
+	if runtimeDir == "" {
+		runtimeDir = "."
 	}
 
 	// Resolve absolute path for socket discovery
-	absPath, err := filepath.Abs(beadsDir)
+	absPath, err := filepath.Abs(runtimeDir)
 	if err != nil {
-		log.Printf("metrics: failed to resolve beads dir: %v", err)
+		log.Printf("metrics: failed to resolve runtime dir: %v", err)
 		return counts
 	}
 

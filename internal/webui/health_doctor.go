@@ -1,13 +1,9 @@
 package webui
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"log/slog"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"sync"
 	"time"
 
@@ -15,8 +11,8 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 )
 
-// HealthDoctor monitors workspace daemon circuit breakers and automatically
-// restarts daemons that are stuck in an unhealthy state.
+// HealthDoctor monitors workspace daemon circuit breakers and resets breakers
+// that are stuck in an unhealthy state.
 type HealthDoctor struct {
 	multiPool *daemon.MultiPool
 	wsPathsFn func() (map[string]string, error) // wsID → filesystem path
@@ -160,7 +156,7 @@ func (hd *HealthDoctor) markHealthy(wsID string, w *breakerWatch) {
 	w.restartCount = 0
 }
 
-// handleUnhealthy processes an open/half-open breaker, restarting the daemon if stuck past threshold.
+// handleUnhealthy processes an open/half-open breaker, resetting it if stuck past threshold.
 func (hd *HealthDoctor) handleUnhealthy(ctx context.Context, wsID string, pp *daemon.ProtectedPool, w *breakerWatch, state circuitbreaker.State) {
 	now := time.Now()
 
@@ -189,7 +185,7 @@ func (hd *HealthDoctor) handleUnhealthy(ctx context.Context, wsID string, pp *da
 
 // attemptRestart runs a restart cycle, updating watch state and logging outcomes.
 func (hd *HealthDoctor) attemptRestart(ctx context.Context, wsID string, pp *daemon.ProtectedPool, w *breakerWatch, state circuitbreaker.State, stuckDuration time.Duration, now time.Time) {
-	hd.logger.Warn("circuit breaker stuck, attempting daemon restart",
+	hd.logger.Warn("circuit breaker stuck, attempting recovery",
 		"component", "health_doctor",
 		"workspace", wsID,
 		"state", state,
@@ -197,8 +193,8 @@ func (hd *HealthDoctor) attemptRestart(ctx context.Context, wsID string, pp *dae
 		"restart_attempt", w.restartCount+1,
 	)
 
-	if err := hd.restartDaemon(ctx, wsID); err != nil {
-		hd.logger.Error("daemon restart failed",
+	if err := hd.recoverDaemon(ctx, wsID); err != nil {
+		hd.logger.Error("daemon recovery failed",
 			"component", "health_doctor",
 			"workspace", wsID,
 			"err", err,
@@ -214,7 +210,7 @@ func (hd *HealthDoctor) attemptRestart(ctx context.Context, wsID string, pp *dae
 	w.restartCount++
 	w.unhealthySince = time.Time{}
 
-	hd.logger.Info("daemon restarted and breaker reset",
+	hd.logger.Info("daemon breaker reset",
 		"component", "health_doctor",
 		"workspace", wsID,
 		"restart_attempt", w.restartCount,
@@ -235,79 +231,16 @@ func (hd *HealthDoctor) backoffDuration(restartCount int) time.Duration {
 	return d
 }
 
-// restartDaemon stops and restarts the bd daemon for the given workspace.
-func (hd *HealthDoctor) restartDaemon(ctx context.Context, wsID string) error {
+// recoverDaemon validates that the workspace still exists before allowing the
+// breaker to probe the daemon again. FleetDB-backed Loom no longer shells out
+// to a per-workspace issue daemon from WebUI health recovery.
+func (hd *HealthDoctor) recoverDaemon(_ context.Context, wsID string) error {
 	paths, err := hd.wsPathsFn()
 	if err != nil {
 		return fmt.Errorf("resolve workspace paths: %w", err)
 	}
-	wsDir, ok := paths[wsID]
-	if !ok {
+	if _, ok := paths[wsID]; !ok {
 		return fmt.Errorf("workspace %s not found in config", wsID)
 	}
-
-	hd.stopDaemon(ctx, wsDir)
-	time.Sleep(1 * time.Second) // let the socket release
-	hd.startDaemon(ctx, wsID, wsDir)
-	return hd.waitForReady(ctx, wsDir)
-}
-
-// stopDaemon best-effort stops the bd daemon in wsDir.
-func (hd *HealthDoctor) stopDaemon(ctx context.Context, wsDir string) {
-	stopCtx, stopCancel := context.WithTimeout(ctx, 10*time.Second)
-	defer stopCancel()
-	stop := exec.CommandContext(stopCtx, "bd", "daemon", "stop") // #nosec G204 — arguments are fixed strings
-	stop.Dir = wsDir
-	stop.Stdout = nil
-	stop.Stderr = nil
-	_ = stop.Run()
-}
-
-// startDaemon starts the bd daemon in wsDir, logging (but tolerating) errors.
-func (hd *HealthDoctor) startDaemon(ctx context.Context, wsID, wsDir string) {
-	args := []string{"daemon", "start"}
-	if _, err := os.Stat(filepath.Join(wsDir, ".git")); err != nil {
-		args = append(args, "--local")
-	}
-	startCtx, startCancel := context.WithTimeout(ctx, 10*time.Second)
-	defer startCancel()
-	start := exec.CommandContext(startCtx, "bd", args...) // #nosec G204 — arguments are fixed strings
-	start.Dir = wsDir
-	start.Stdout = nil
-	start.Stderr = nil
-	if err := start.Run(); err != nil {
-		hd.logger.Warn("bd daemon start returned error, will poll for readiness",
-			"component", "health_doctor",
-			"workspace", wsID,
-			"err", err,
-		)
-	}
-}
-
-// waitForReady polls `bd daemon status --json` until the daemon reports running or the timeout expires.
-func (hd *HealthDoctor) waitForReady(ctx context.Context, wsDir string) error {
-	pollCtx, pollCancel := context.WithTimeout(ctx, 10*time.Second)
-	defer pollCancel()
-	ticker := time.NewTicker(500 * time.Millisecond)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-pollCtx.Done():
-			return fmt.Errorf("daemon did not become ready within 10s")
-		case <-ticker.C:
-			check := exec.CommandContext(pollCtx, "bd", "daemon", "status", "--json") // #nosec G204 — arguments are fixed strings
-			check.Dir = wsDir
-			out, err := check.Output()
-			if err == nil && isRunning(out) {
-				return nil
-			}
-		}
-	}
-}
-
-// isRunning checks if bd daemon status JSON indicates a running daemon.
-func isRunning(jsonOutput []byte) bool {
-	return bytes.Contains(jsonOutput, []byte(`"status":"running"`)) ||
-		bytes.Contains(jsonOutput, []byte(`"status": "running"`))
+	return nil
 }

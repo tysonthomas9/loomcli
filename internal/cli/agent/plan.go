@@ -201,11 +201,14 @@ func runPlanSingleTask(deps *cli.Deps, worktreePath, agentName string, routerChe
 // adoptOrCreateSession either inherits a parent session or creates a new one.
 func adoptOrCreateSession(agentName, parentID, prompt, phase string) *sessions.Session {
 	if inheritedSID := os.Getenv("LOOM_SESSION_ID"); inheritedSID != "" {
-		inheritedBeads := os.Getenv("LOOM_BEADS_DIR")
-		if inheritedBeads == "" {
-			inheritedBeads = cli.GetBeadsDir()
+		inheritedRuntimeDir := os.Getenv("LOOM_WORKSPACE_RUNTIME_DIR")
+		if inheritedRuntimeDir == "" {
+			inheritedRuntimeDir = os.Getenv("LOOM_BEADS_DIR") // legacy hook compatibility
 		}
-		backends.SetActiveSessionEnv(inheritedBeads, inheritedSID)
+		if inheritedRuntimeDir == "" {
+			inheritedRuntimeDir = cli.GetWorkspaceRuntimeDir()
+		}
+		backends.SetActiveSessionRuntimeEnv(inheritedRuntimeDir, inheritedSID)
 		return nil
 	}
 	return createAgentSession(agentName, parentID, prompt, phase)
@@ -213,7 +216,7 @@ func adoptOrCreateSession(agentName, parentID, prompt, phase string) *sessions.S
 
 // createAgentSession creates a new session for tracking.
 func createAgentSession(agentName, parentID, prompt, phase string) *sessions.Session {
-	sessStore, sessErr := sessions.NewStore(cli.GetBeadsDir())
+	sessStore, sessErr := sessions.NewStore(cli.GetWorkspaceRuntimeDir())
 	if sessErr != nil {
 		log.Printf("[agent] Warning: session store unavailable: %v", sessErr)
 		return nil
@@ -223,7 +226,7 @@ func createAgentSession(agentName, parentID, prompt, phase string) *sessions.Ses
 		EpicID: parentID, Prompt: prompt, Phase: phase,
 	})
 	if sess != nil {
-		backends.SetActiveSessionEnv(cli.GetBeadsDir(), sess.SessionID())
+		backends.SetActiveSessionRuntimeEnv(cli.GetWorkspaceRuntimeDir(), sess.SessionID())
 	}
 	return sess
 }

@@ -22,7 +22,7 @@ type MockIssueBackend = clitest.MockIssueBackend
 
 const LockFileName = cli.LockFileName
 
-var ResetBeadsDirCache = cli.ResetBeadsDirCache
+var ResetWorkspaceRuntimeDirCache = cli.ResetWorkspaceRuntimeDirCache
 
 func NewTestDeps(t *testing.T) (*cli.Deps, *clitest.MockGitRunner, *clitest.MockExecRunner, *clitest.MockFileSystem, *clitest.MockIssueBackend) {
 	return clitest.NewTestDeps(t)

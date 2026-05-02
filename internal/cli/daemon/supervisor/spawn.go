@@ -136,7 +136,8 @@ func appendSessionEnv(env []string, ap *AgentProcess) []string {
 	if sess != nil {
 		env = append(env,
 			fmt.Sprintf("LOOM_SESSION_ID=%s", sess.SessionID()),
-			fmt.Sprintf("LOOM_BEADS_DIR=%s", cli.GetBeadsDir()),
+			fmt.Sprintf("LOOM_WORKSPACE_RUNTIME_DIR=%s", cli.GetWorkspaceRuntimeDir()),
+			fmt.Sprintf("LOOM_BEADS_DIR=%s", cli.GetWorkspaceRuntimeDir()), // legacy hook compatibility
 		)
 	}
 	if ap.AgentLeaseID != "" && ap.AgentLeaseToken != "" {

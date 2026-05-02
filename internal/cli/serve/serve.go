@@ -200,9 +200,7 @@ func runServe(cmd *cobra.Command, args []string) {
 	}
 	initUsageStore()
 
-	// Open a fleet-db-backed store handle for the default fleet-db path. Explicit
-	// beads mode remains available until the deletion phase, but it is no longer
-	// selected implicitly.
+	// Open a fleet-db-backed store handle for the default fleet-db path.
 	storeHandle, storeErr := openServeStore(ctx, fleetState)
 	if storeErr != nil {
 		log.Fatalf("failed to open fleet-db store: %v", storeErr)
@@ -286,10 +284,7 @@ func ensureIssueBackend() bool {
 }
 
 func stopIssueBackend() {
-	result := cli.GetDeps(nil).Exec.Run(cli.GetBeadsDir(), "bd", "daemon", "stop")
-	if result.Err != nil {
-		log.Printf("Warning: failed to stop issue backend daemon: %v", result.Err)
-	}
+	// FleetDB mode does not start a per-workspace issue daemon.
 }
 
 // fleetState bundles fleet-related configuration resolved during startup.
@@ -340,7 +335,7 @@ func warnNonLocalBind() {
 }
 
 func initUsageStore() {
-	dir := cli.GetBeadsDir()
+	dir := cli.GetWorkspaceRuntimeDir()
 	if dir == "" {
 		dir = "."
 	}
@@ -402,10 +397,10 @@ func buildCoreServerConfig(monitorHandlers webui.MonitorHandlers, gitOps *opsimp
 		GitOps:               gitOps,
 		FileOps:              gitOps,
 		BackendOps:           opsimpl.NewBackendOps(),
-		NotifyTokenDir:       cli.GetBeadsDir(),
+		NotifyTokenDir:       cli.GetWorkspaceRuntimeDir(),
 		Logger:               slog.Default(),
 		SentryDSN:            serveSentryDSN,
-		// Wire the active IssueBackend (beads / fleet / fleet-db / api) into
+		// Wire the active IssueBackend (fleet / fleet-db / api) into
 		// the webui service layer so the migrated CRUD endpoints don't
 		// hardcode the rpc.Client path. The closure lets the backend resolve
 		// lazily — important because in fleet mode the backend is created on
@@ -414,8 +409,8 @@ func buildCoreServerConfig(monitorHandlers webui.MonitorHandlers, gitOps *opsimp
 		//
 		// Cloud mode (LOOM_FLEET_DB_URL set) takes the workspace ID from the
 		// request context and constructs a per-workspace fleet-db backend so
-		// /api/workspaces/{ws}/issues stays scoped. Local mode falls back to
-		// the process-global backend (single-workspace beads).
+		// /api/workspaces/{ws}/issues stays scoped. Local mode uses the
+		// process-global fleet-db backend.
 		IssueBackendFn: cli.WorkspaceAwareIssueBackend(),
 	}
 }
@@ -432,7 +427,7 @@ func applyFleetConfig(cfg *webui.ServerConfig, fs fleetState) {
 	cfg.FleetClientActor = fs.clientCfg.Actor
 	// fs.modeDetected is true when LOOM_ISSUE_BACKEND=fleet (or the
 	// equivalent loom.yaml setting). In that mode the IssueBackend is
-	// fleet-db over HTTP and there is no local bd daemon.
+	// fleet-db over HTTP and there is no local issue daemon.
 	cfg.FleetClient = fs.modeDetected
 }
 

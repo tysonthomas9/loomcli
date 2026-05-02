@@ -80,7 +80,7 @@ func shouldPurgeEventFile(entry os.DirEntry, cutoff time.Time, today string) boo
 }
 
 func resolveEventsDir() string {
-	loomDir := cli.GetBeadsDir()
+	loomDir := cli.GetWorkspaceRuntimeDir()
 	if loomDir == "" {
 		loomDir = "."
 	}

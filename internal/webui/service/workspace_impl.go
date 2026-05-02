@@ -174,7 +174,7 @@ func (s *workspaceServiceImpl) ListWorkspaces(ctx context.Context) ([]WorkspaceL
 	// Store is authoritative when set: list its workspaces directly so
 	// the API surface reflects fleet-db's actual contents — not whatever
 	// the legacy multiPool/yaml closures believed at startup. The
-	// multiPool is consulted only to enrich items with beads-pool stats.
+	// multiPool is consulted only to enrich items with daemon-pool stats.
 	if s.store != nil {
 		wsList, err := s.store.Workspaces().List(ctx)
 		if err == nil {
@@ -266,9 +266,9 @@ func (s *workspaceServiceImpl) ListWorkspaces(ctx context.Context) ([]WorkspaceL
 }
 
 func (s *workspaceServiceImpl) GetWorkspace(ctx context.Context, wsID string) (*ops.WorkspaceData, error) {
-	// Primary existence check: the multiPool registry. In beads mode the
-	// daemon pool owns the authoritative list of live workspaces. In fleet
-	// mode the multiPool is intentionally empty (no beads daemon), so the
+	// Primary existence check: the multiPool registry. In daemon-backed mode the
+	// pool owns the authoritative list of live workspaces. In fleet mode the
+	// multiPool is intentionally empty (no local issue daemon), so the
 	// multiPool check alone would 404 every lookup — fall through to a
 	// store/config-based lookup instead.
 	poolKnown := s.multiPool != nil && s.multiPool.PoolForWorkspace(wsID) != nil

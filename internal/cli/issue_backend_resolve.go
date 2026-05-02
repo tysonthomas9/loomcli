@@ -228,8 +228,7 @@ func createAPIIssueBackend() (backend.IssueBackend, error) {
 	// Construct the auth-aware httpclient.Client. This performs eager auth
 	// discovery (GET /api/config) and may initiate the device flow if the
 	// server requires OIDC. If the server is unreachable, this step fails
-	// — the caller reports the error and (in DefaultDeps) falls back to
-	// beads with a warning log.
+	// and the caller reports the error.
 	hc, err := httpclient.New(httpclient.Config{ServerURL: serverURL})
 	if err != nil {
 		return nil, fmt.Errorf("api backend auth setup: %w", err)

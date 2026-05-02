@@ -34,7 +34,7 @@ Stores cleaned:
   - Usage:    old records from usage.jsonl
   - Events:   old day-based event JSONL files
 
-Does NOT touch beads-owned files (issues.jsonl, interactions.jsonl).`,
+Does NOT touch runtime-owned files (issues.jsonl, interactions.jsonl).`,
 	RunE: runCleanup,
 }
 
@@ -47,7 +47,7 @@ func init() {
 }
 
 func runCleanup(_ *cobra.Command, _ []string) error {
-	beadsDir := cli.GetBeadsDir()
+	runtimeDir := cli.GetWorkspaceRuntimeDir()
 
 	sessDur, err := parseDayDuration(cleanupSessionsAge)
 	if err != nil {
@@ -64,10 +64,10 @@ func runCleanup(_ *cobra.Command, _ []string) error {
 
 	var hasError bool
 
-	sp, sc, se := cleanupSessions(beadsDir, sessDur, cleanupDryRun)
+	sp, sc, se := cleanupSessions(runtimeDir, sessDur, cleanupDryRun)
 	hasError = printCleanupResult("Sessions", sp, sc, se) || hasError
 
-	up, ue := cleanupUsage(beadsDir, usageDur, cleanupDryRun)
+	up, ue := cleanupUsage(runtimeDir, usageDur, cleanupDryRun)
 	hasError = printCleanupResult("Usage", up, 0, ue) || hasError
 
 	ep, ee := cleanupEvents(eventsDur, cleanupDryRun)

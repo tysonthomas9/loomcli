@@ -33,16 +33,16 @@ func TestHealthDoctor_BackoffDuration(t *testing.T) {
 }
 
 func TestHealthDoctor_ClosedBreakerNoAction(t *testing.T) {
-	// A healthy breaker should not trigger any restart.
+	// A healthy breaker should not trigger recovery.
 	mp := daemon.NewMultiPool(func(ctx context.Context) string { return "ws1" }, 2)
 	pool := newTestProtectedPool(t)
 	if err := mp.Register("ws1", pool); err != nil {
 		t.Fatal(err)
 	}
 
-	restartCalled := false
+	recoveryCalled := false
 	hd := NewHealthDoctor(mp, func() (map[string]string, error) {
-		restartCalled = true
+		recoveryCalled = true
 		return map[string]string{"ws1": "/tmp/test"}, nil
 	}, slog.Default(), HealthDoctorConfig{
 		CheckInterval:  10 * time.Millisecond,
@@ -53,8 +53,8 @@ func TestHealthDoctor_ClosedBreakerNoAction(t *testing.T) {
 	defer cancel()
 	hd.Run(ctx)
 
-	if restartCalled {
-		t.Error("restart should not be called for healthy breaker")
+	if recoveryCalled {
+		t.Error("recovery should not be called for healthy breaker")
 	}
 }
 
@@ -84,9 +84,7 @@ func TestHealthDoctor_DetectsStuckBreaker(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// The doctor should detect the stuck breaker and attempt a restart.
-	// Since there's no real daemon, the restart will fail, but we can verify
-	// that the watch tracking works correctly.
+	// The doctor should detect the stuck breaker and attempt recovery.
 	hd := NewHealthDoctor(mp, func() (map[string]string, error) {
 		return map[string]string{"ws1": "/nonexistent"}, nil
 	}, slog.Default(), HealthDoctorConfig{
@@ -107,7 +105,7 @@ func TestHealthDoctor_DetectsStuckBreaker(t *testing.T) {
 		t.Fatal("expected watch entry for ws1")
 	}
 	if w.restartCount == 0 {
-		t.Error("expected at least one restart attempt")
+		t.Error("expected at least one recovery attempt")
 	}
 }
 
@@ -142,25 +140,6 @@ func TestHealthDoctor_ClearsOnRecovery(t *testing.T) {
 	}
 	if w.restartCount != 0 {
 		t.Error("restartCount should be reset after recovery")
-	}
-}
-
-func TestIsRunning(t *testing.T) {
-	tests := []struct {
-		input string
-		want  bool
-	}{
-		{`{"status":"running","pid":1234}`, true},
-		{`{"status": "running", "pid": 1234}`, true},
-		{`{"status":"stopped"}`, false},
-		{`{}`, false},
-		{``, false},
-	}
-	for _, tt := range tests {
-		got := isRunning([]byte(tt.input))
-		if got != tt.want {
-			t.Errorf("isRunning(%q) = %v, want %v", tt.input, got, tt.want)
-		}
 	}
 }
 

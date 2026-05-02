@@ -267,13 +267,13 @@ func initAutoLoop(opts AutoModeOptions) *autoLoopCtx {
 		log.Fatal("CustomPromptGen must be set on AutoModeOptions")
 	}
 
-	usageStore, usageErr := usage.NewStore(cli.GetBeadsDir())
+	usageStore, usageErr := usage.NewStore(cli.GetWorkspaceRuntimeDir())
 	if usageErr != nil {
 		fmt.Printf("[auto] Warning: usage tracking disabled: %v\n", usageErr)
 	}
 	ctx.usageStore = usageStore
 
-	sessStore, sessErr := sessions.NewStore(cli.GetBeadsDir())
+	sessStore, sessErr := sessions.NewStore(cli.GetWorkspaceRuntimeDir())
 	if sessErr != nil {
 		log.Printf("[auto] Warning: session store unavailable: %v", sessErr)
 	}

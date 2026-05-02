@@ -144,7 +144,7 @@ func HandleAPIHealth(pool daemon.Pool) http.HandlerFunc {
 }
 
 // HandleAPIHealthNoDaemon is the fleet-mode variant. Skips the pool dial
-// entirely (no bd daemon to talk to in this deployment) and returns 200
+// entirely (no local issue daemon to talk to in this deployment) and returns 200
 // with daemon.connected=false. Avoids both the false-positive 503 and the
 // 2s pool.Get() that would otherwise burn on every probe.
 func HandleAPIHealthNoDaemon() http.HandlerFunc {

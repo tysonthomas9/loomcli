@@ -90,9 +90,9 @@ func TestSupervisorMirrorsAgentSessionToControlPlane(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		_ = os.Chdir(oldWd)
-		cli.ResetBeadsDirCache()
+		cli.ResetWorkspaceRuntimeDirCache()
 	})
-	cli.ResetBeadsDirCache()
+	cli.ResetWorkspaceRuntimeDirCache()
 
 	ap := &AgentProcess{
 		Entry:        cfgpkg.AgentEntry{Worktree: "worker-1", Role: "task", Repo: "repo-a"},

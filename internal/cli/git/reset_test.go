@@ -48,7 +48,7 @@ func TestResetAllWorktrees_PerRepoBranch(t *testing.T) {
 	// In workspace mode with per-repo DefaultBranch values, resetAllWorktrees
 	// should use each repo's own DefaultBranch when explicitTarget=false.
 	// Uses defaultResolver, DiscoverWorktrees (global deps), and resetForce/resetPush globals.
-	ResetBeadsDirCache()
+	ResetWorkspaceRuntimeDirCache()
 
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
@@ -119,7 +119,7 @@ func TestResetAllWorktrees_ExplicitBranchOverridesPerRepo(t *testing.T) {
 	// not parallel: uses global resetForce/resetPush, defaultResolver, mock.Install(), setupWorkspaceConfig
 	// When explicitTarget=true, all repos should use the given branch,
 	// ignoring per-repo DefaultBranch settings.
-	ResetBeadsDirCache()
+	ResetWorkspaceRuntimeDirCache()
 
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
@@ -185,7 +185,7 @@ func TestResetAllWorktrees_MixedDefaultBranch(t *testing.T) {
 	// not parallel: uses global resetForce/resetPush, defaultResolver, mock.Install(), setupWorkspaceConfig
 	// One repo has a custom DefaultBranch, the other has none.
 	// The repo without DefaultBranch should use the global default.
-	ResetBeadsDirCache()
+	ResetWorkspaceRuntimeDirCache()
 
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
@@ -254,7 +254,7 @@ func TestResetAllWorktrees_LegacyMode_NoPerRepoBranch(t *testing.T) {
 	// In legacy mode (no workspace config), all repos use the same target branch
 	// because WorktreeInfo.Repo is nil.
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
-	ResetBeadsDirCache()
+	ResetWorkspaceRuntimeDirCache()
 
 	oldR := cli.TestingResetDefaultResolver()
 	defer cli.TestingSetDefaultResolver(oldR)
@@ -404,7 +404,7 @@ func TestResetWorktree_ReturnsTrue_OnSuccess(t *testing.T) {
 	// not parallel: uses os.Chdir, os.Stdout capture, global resetPush
 	// Verify that resetWorktree returns true on a successful reset (local only, no push).
 	deps, _, _, _, _ := NewTestDeps(t)
-	ResetBeadsDirCache()
+	ResetWorkspaceRuntimeDirCache()
 
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
@@ -451,7 +451,7 @@ func TestResetWorktree_ReturnsFalse_OnFetchError(t *testing.T) {
 	// not parallel: uses os.Chdir, os.Stdout/os.Stderr capture
 	// Verify that resetWorktree returns false when fetch fails.
 	deps, _, _, _, _ := NewTestDeps(t)
-	ResetBeadsDirCache()
+	ResetWorkspaceRuntimeDirCache()
 
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
@@ -498,7 +498,7 @@ func TestResetWorktree_ReturnsFalse_OnResolveError(t *testing.T) {
 	// not parallel: uses os.Chdir, os.Stdout/os.Stderr capture
 	// (e.g., invalid worktree name that doesn't exist).
 	deps, _, _, _, _ := NewTestDeps(t)
-	ResetBeadsDirCache()
+	ResetWorkspaceRuntimeDirCache()
 
 	// Set up a temp dir with no worktrees directory so resolution fails
 	tmpDir := t.TempDir()
@@ -540,7 +540,7 @@ func TestResetWorktree_ReturnsTrue_OnUserAbort(t *testing.T) {
 	// not parallel: uses os.Chdir, os.Stdout capture, MockStdin
 	// A user abort is not an error, so it should return true.
 	deps, _, _, _, _ := NewTestDeps(t)
-	ResetBeadsDirCache()
+	ResetWorkspaceRuntimeDirCache()
 
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
@@ -583,7 +583,7 @@ func TestResetWorktree_ReturnsTrue_OnUserAbort(t *testing.T) {
 // and the failure summary is printed to stderr.
 func TestResetAllWorktrees_PartialFailure_ReturnsError(t *testing.T) {
 	// not parallel: uses global resetForce/resetPush, defaultResolver, mock.Install(), setupWorkspaceConfig, os.Stdout/os.Stderr capture
-	ResetBeadsDirCache()
+	ResetWorkspaceRuntimeDirCache()
 
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
@@ -672,7 +672,7 @@ func TestResetAllWorktrees_PartialFailure_ReturnsError(t *testing.T) {
 // fail, the error includes all worktree names.
 func TestResetAllWorktrees_AllFail_ReturnsError(t *testing.T) {
 	// not parallel: uses global resetForce/resetPush, defaultResolver, mock.Install(), setupWorkspaceConfig, os.Stdout/os.Stderr capture
-	ResetBeadsDirCache()
+	ResetWorkspaceRuntimeDirCache()
 
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
@@ -979,7 +979,7 @@ func TestResetWorktree_FetchError(t *testing.T) {
 func TestResetWorktree_RefusesWithActiveLock(t *testing.T) {
 	// not parallel: uses os.Chdir, os.Stdout/os.Stderr capture, global resetForce
 	deps, _, _, _, _ := NewTestDeps(t)
-	ResetBeadsDirCache()
+	ResetWorkspaceRuntimeDirCache()
 
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
@@ -1043,7 +1043,7 @@ func TestResetWorktree_RefusesWithActiveLock(t *testing.T) {
 func TestResetWorktree_RefusesWithActiveLock_ShowsTaskID(t *testing.T) {
 	// not parallel: uses os.Chdir, os.Stdout/os.Stderr capture, global resetForce
 	deps, _, _, _, _ := NewTestDeps(t)
-	ResetBeadsDirCache()
+	ResetWorkspaceRuntimeDirCache()
 
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
@@ -1098,7 +1098,7 @@ func TestResetWorktree_RefusesWithActiveLock_ShowsTaskID(t *testing.T) {
 func TestResetWorktree_ForceOverridesLock(t *testing.T) {
 	// not parallel: uses os.Chdir, os.Stdout/os.Stderr capture, global resetForce/resetPush
 	deps, _, _, _, _ := NewTestDeps(t)
-	ResetBeadsDirCache()
+	ResetWorkspaceRuntimeDirCache()
 
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
@@ -1167,7 +1167,7 @@ func TestResetWorktree_ForceOverridesLock(t *testing.T) {
 func TestResetWorktree_ProceedsWithStaleLock(t *testing.T) {
 	// not parallel: uses os.Chdir, os.Stdout capture, global resetForce/resetPush
 	deps, _, _, _, _ := NewTestDeps(t)
-	ResetBeadsDirCache()
+	ResetWorkspaceRuntimeDirCache()
 
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
@@ -1228,7 +1228,7 @@ func TestResetWorktree_ProceedsWithStaleLock(t *testing.T) {
 func TestResetWorktree_ProceedsWithNoLock(t *testing.T) {
 	// not parallel: uses os.Chdir, os.Stdout capture, global resetForce/resetPush
 	deps, _, _, _, _ := NewTestDeps(t)
-	ResetBeadsDirCache()
+	ResetWorkspaceRuntimeDirCache()
 
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
@@ -1308,7 +1308,7 @@ func TestResetWorktree_ProtectedBranch_Blocked(t *testing.T) {
 	// When current branch is "main", --push is set but --force is not,
 	// resetWorktree should return false and NOT call GitPushForce.
 	deps, _, _, _, _ := NewTestDeps(t)
-	ResetBeadsDirCache()
+	ResetWorkspaceRuntimeDirCache()
 
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
@@ -1371,7 +1371,7 @@ func TestResetWorktree_ProtectedBranch_Master_Blocked(t *testing.T) {
 	// not parallel: uses os.Chdir, os.Stdout/os.Stderr capture, global resetForce/resetPush
 	// Same as above but with "master" as current branch.
 	deps, _, _, _, _ := NewTestDeps(t)
-	ResetBeadsDirCache()
+	ResetWorkspaceRuntimeDirCache()
 
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
@@ -1435,7 +1435,7 @@ func TestResetWorktree_ProtectedBranch_ForceOverride(t *testing.T) {
 	// When current branch is "main" AND both --push and --force are set,
 	// force push should proceed with a warning.
 	deps, _, _, _, _ := NewTestDeps(t)
-	ResetBeadsDirCache()
+	ResetWorkspaceRuntimeDirCache()
 
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
@@ -1500,7 +1500,7 @@ func TestResetWorktree_NonProtectedBranch_Allowed(t *testing.T) {
 	// A non-protected branch like "feature-x" should push without warnings
 	// or blocks when --push is set (even without --force).
 	deps, _, _, _, _ := NewTestDeps(t)
-	ResetBeadsDirCache()
+	ResetWorkspaceRuntimeDirCache()
 
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir)

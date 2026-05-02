@@ -73,7 +73,7 @@ func init() {
 }
 
 func runUsage(cmd *cobra.Command, _ []string) {
-	loomDir := cli.GetBeadsDir()
+	loomDir := cli.GetWorkspaceRuntimeDir()
 	if loomDir == "" {
 		loomDir = "."
 	}

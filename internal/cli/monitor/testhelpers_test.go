@@ -15,7 +15,7 @@ type MockGitRunner = clitest.MockGitRunner
 type MockFileSystem = clitest.MockFileSystem
 type ExecBridgeGitRunner = clitest.ExecBridgeGitRunner
 
-var ResetBeadsDirCache = cli.ResetBeadsDirCache
+var ResetWorkspaceRuntimeDirCache = cli.ResetWorkspaceRuntimeDirCache
 var resetDefaultIssueBackend = cli.ResetDefaultIssueBackend
 var setDefaultIssueBackend = cli.SetDefaultIssueBackend
 

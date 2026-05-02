@@ -22,7 +22,7 @@ var (
 // store). The registry calls hooks in registration order on Register and in
 // reverse order on Deregister/Rollback.
 type LifecycleHook interface {
-	// Name returns a human-readable name for logging (e.g., "beads-pool",
+	// Name returns a human-readable name for logging (e.g., "daemon-pool",
 	// "notification-subscriber"). Must be unique per registry instance.
 	Name() string
 
@@ -62,7 +62,7 @@ type RegistrationContext struct {
 }
 
 // Provide stores a named resource for downstream hooks to consume.
-// For example, the beads-pool hook provides the daemon.Pool it created,
+// For example, the daemon-pool hook provides the daemon.Pool it created,
 // and the notification-subscriber hook resolves it.
 func (rc *RegistrationContext) Provide(key string, value any) {
 	if rc.resources == nil {

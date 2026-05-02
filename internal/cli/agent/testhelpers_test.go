@@ -36,7 +36,7 @@ type MockAgentInvoker = clitest.MockAgentInvoker
 const LockFileName = cli.LockFileName
 
 var (
-	ResetBeadsDirCache              = cli.ResetBeadsDirCache
+	ResetWorkspaceRuntimeDirCache   = cli.ResetWorkspaceRuntimeDirCache
 	ResolveActiveWorkspace          = config.ResolveActiveWorkspace
 	GetSignalFilePath               = cli.GetSignalFilePath
 	WithDeps                        = cli.WithDeps
@@ -213,7 +213,7 @@ func newExecReadyIssueBackend(m *clitest.MockExecRunner) *commandReadyIssueBacke
 
 func (b *commandReadyIssueBackend) Ready(ctx context.Context, opts backend.ReadyOpts) ([]backend.IssueData, error) {
 	b.MockIssueBackend.Ready(ctx, opts)
-	result := b.run(cli.GetBeadsDir(), "bd", readyArgs(opts)...)
+	result := b.run(cli.GetWorkspaceRuntimeDir(), "bd", readyArgs(opts)...)
 	if result.Err != nil {
 		return nil, result.Err
 	}

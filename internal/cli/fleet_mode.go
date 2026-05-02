@@ -21,7 +21,7 @@ const fleetModeEnvVar = "LOOM_ISSUE_BACKEND"
 
 // isFleetMode returns true when the effective issue backend is "fleet",
 // indicating that a remote fleet server manages agent orchestration and the
-// local daemon should suppress beads-specific subsystems.
+// local daemon should suppress local issue-daemon subsystems.
 //
 // Detection precedence:
 //  1. LOOM_ISSUE_BACKEND=fleet env var (highest — useful for testing before config support lands)

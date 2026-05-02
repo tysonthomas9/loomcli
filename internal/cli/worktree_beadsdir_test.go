@@ -6,20 +6,20 @@ import (
 	"testing"
 )
 
-func TestGetBeadsDir_Legacy(t *testing.T) {
+func TestGetWorkspaceRuntimeDir_Legacy(t *testing.T) {
 	// No config file → legacy mode → returns "."
-	ResetBeadsDirCache()
+	ResetWorkspaceRuntimeDirCache()
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
 
-	got := GetBeadsDir()
+	got := GetWorkspaceRuntimeDir()
 	if got != "." {
-		t.Errorf("GetBeadsDir() = %q, want %q", got, ".")
+		t.Errorf("GetWorkspaceRuntimeDir() = %q, want %q", got, ".")
 	}
 }
 
-func TestGetBeadsDir_Workspace(t *testing.T) {
+func TestGetWorkspaceRuntimeDir_Workspace(t *testing.T) {
 	// Config with workspace and default_workspace set → returns workspace path
-	ResetBeadsDirCache()
+	ResetWorkspaceRuntimeDirCache()
 
 	cfg := &LoomConfig{
 		DefaultWorkspace: "myproject",
@@ -32,15 +32,15 @@ func TestGetBeadsDir_Workspace(t *testing.T) {
 	}
 	setupWorkspaceConfig(t, cfg)
 
-	got := GetBeadsDir()
+	got := GetWorkspaceRuntimeDir()
 	if got != "/home/user/workspaces/myproject" {
-		t.Errorf("GetBeadsDir() = %q, want %q", got, "/home/user/workspaces/myproject")
+		t.Errorf("GetWorkspaceRuntimeDir() = %q, want %q", got, "/home/user/workspaces/myproject")
 	}
 }
 
-func TestGetBeadsDir_NoDefaultWorkspace(t *testing.T) {
+func TestGetWorkspaceRuntimeDir_NoDefaultWorkspace(t *testing.T) {
 	// Config with workspaces but no default → uses first sorted key
-	ResetBeadsDirCache()
+	ResetWorkspaceRuntimeDirCache()
 
 	cfg := &LoomConfig{
 		Workspaces: map[string]WorkspaceConfig{
@@ -50,15 +50,15 @@ func TestGetBeadsDir_NoDefaultWorkspace(t *testing.T) {
 	}
 	setupWorkspaceConfig(t, cfg)
 
-	got := GetBeadsDir()
+	got := GetWorkspaceRuntimeDir()
 	if got != "/tmp/alpha" {
-		t.Errorf("GetBeadsDir() = %q, want %q (first sorted workspace key)", got, "/tmp/alpha")
+		t.Errorf("GetWorkspaceRuntimeDir() = %q, want %q (first sorted workspace key)", got, "/tmp/alpha")
 	}
 }
 
-func TestGetBeadsDir_ConfigError(t *testing.T) {
+func TestGetWorkspaceRuntimeDir_ConfigError(t *testing.T) {
 	// Invalid config file → returns "."
-	ResetBeadsDirCache()
+	ResetWorkspaceRuntimeDirCache()
 
 	dir := t.TempDir()
 	t.Setenv("LOOM_CONFIG_DIR", dir)
@@ -66,15 +66,15 @@ func TestGetBeadsDir_ConfigError(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got := GetBeadsDir()
+	got := GetWorkspaceRuntimeDir()
 	if got != "." {
-		t.Errorf("GetBeadsDir() = %q, want %q", got, ".")
+		t.Errorf("GetWorkspaceRuntimeDir() = %q, want %q", got, ".")
 	}
 }
 
-func TestGetBeadsDir_Cache(t *testing.T) {
+func TestGetWorkspaceRuntimeDir_Cache(t *testing.T) {
 	// Call twice → same result (sync.Once caches)
-	ResetBeadsDirCache()
+	ResetWorkspaceRuntimeDirCache()
 
 	cfg := &LoomConfig{
 		DefaultWorkspace: "ws",
@@ -84,9 +84,9 @@ func TestGetBeadsDir_Cache(t *testing.T) {
 	}
 	setupWorkspaceConfig(t, cfg)
 
-	first := GetBeadsDir()
+	first := GetWorkspaceRuntimeDir()
 	if first != "/tmp/cached" {
-		t.Fatalf("first call: GetBeadsDir() = %q, want %q", first, "/tmp/cached")
+		t.Fatalf("first call: GetWorkspaceRuntimeDir() = %q, want %q", first, "/tmp/cached")
 	}
 
 	// Point config to a different directory; cached value should persist
@@ -98,15 +98,15 @@ func TestGetBeadsDir_Cache(t *testing.T) {
 	}
 	setupWorkspaceConfig(t, cfg2)
 
-	second := GetBeadsDir()
+	second := GetWorkspaceRuntimeDir()
 	if second != first {
-		t.Errorf("second call: GetBeadsDir() = %q, want %q (cached value)", second, first)
+		t.Errorf("second call: GetWorkspaceRuntimeDir() = %q, want %q (cached value)", second, first)
 	}
 }
 
-func TestResetBeadsDirCache(t *testing.T) {
+func TestResetWorkspaceRuntimeDirCache(t *testing.T) {
 	// First call with workspace config
-	ResetBeadsDirCache()
+	ResetWorkspaceRuntimeDirCache()
 
 	cfg := &LoomConfig{
 		DefaultWorkspace: "ws",
@@ -116,13 +116,13 @@ func TestResetBeadsDirCache(t *testing.T) {
 	}
 	setupWorkspaceConfig(t, cfg)
 
-	first := GetBeadsDir()
+	first := GetWorkspaceRuntimeDir()
 	if first != "/tmp/original" {
-		t.Fatalf("first call: GetBeadsDir() = %q, want %q", first, "/tmp/original")
+		t.Fatalf("first call: GetWorkspaceRuntimeDir() = %q, want %q", first, "/tmp/original")
 	}
 
 	// Reset, then change config → should pick up new value
-	ResetBeadsDirCache()
+	ResetWorkspaceRuntimeDirCache()
 
 	cfg2 := &LoomConfig{
 		DefaultWorkspace: "ws2",
@@ -132,8 +132,8 @@ func TestResetBeadsDirCache(t *testing.T) {
 	}
 	setupWorkspaceConfig(t, cfg2)
 
-	second := GetBeadsDir()
+	second := GetWorkspaceRuntimeDir()
 	if second != "/tmp/updated" {
-		t.Errorf("after reset: GetBeadsDir() = %q, want %q", second, "/tmp/updated")
+		t.Errorf("after reset: GetWorkspaceRuntimeDir() = %q, want %q", second, "/tmp/updated")
 	}
 }

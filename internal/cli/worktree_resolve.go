@@ -467,15 +467,15 @@ func (r *Resolver) SetRepoDefaultBranch(repoName, branch string) error {
 	})
 }
 
-// GetBeadsDir returns the directory where .beads/ lives.
-// In workspace mode, this is the workspace root path (shared across repos).
+// GetWorkspaceRuntimeDir returns the workspace root used for runtime files.
+// In workspace mode, this is the configured workspace root path (shared across repos).
 // In legacy mode, this returns "." (current directory).
 // The result is cached for the lifetime of the process.
-func GetBeadsDir() string {
-	beadsDirOnce.Do(func() {
+func GetWorkspaceRuntimeDir() string {
+	workspaceRuntimeDirOnce.Do(func() {
 		cfg, err := config.LoadConfig()
 		if err != nil || cfg == nil || len(cfg.Workspaces) == 0 {
-			beadsDirCache = "."
+			workspaceRuntimeDirCache = "."
 			return
 		}
 
@@ -490,23 +490,37 @@ func GetBeadsDir() string {
 		}
 
 		if wsConfig, ok := cfg.Workspaces[ws]; ok && wsConfig.Path != "" {
-			beadsDirCache = wsConfig.Path
+			workspaceRuntimeDirCache = wsConfig.Path
 		} else {
-			beadsDirCache = "."
+			workspaceRuntimeDirCache = "."
 		}
 	})
-	return beadsDirCache
+	return workspaceRuntimeDirCache
 }
 
-// ResetBeadsDirCache clears the cached beads directory value. For testing only.
+// ResetWorkspaceRuntimeDirCache clears the cached workspace runtime directory value. For testing only.
+func ResetWorkspaceRuntimeDirCache() {
+	workspaceRuntimeDirOnce = sync.Once{}
+	workspaceRuntimeDirCache = ""
+}
+
+// GetBeadsDir is a legacy alias kept for migration-only code paths.
+//
+// Deprecated: use GetWorkspaceRuntimeDir.
+func GetBeadsDir() string {
+	return GetWorkspaceRuntimeDir()
+}
+
+// ResetBeadsDirCache is a legacy test alias.
+//
+// Deprecated: use ResetWorkspaceRuntimeDirCache.
 func ResetBeadsDirCache() {
-	beadsDirOnce = sync.Once{}
-	beadsDirCache = ""
+	ResetWorkspaceRuntimeDirCache()
 }
 
 var (
-	beadsDirCache string
-	beadsDirOnce  sync.Once
+	workspaceRuntimeDirCache string
+	workspaceRuntimeDirOnce  sync.Once
 )
 
 // Package-level default resolver (lazily initialized)

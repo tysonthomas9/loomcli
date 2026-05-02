@@ -11,7 +11,7 @@ import (
 // PurgeOldSessions sweeps orphaned sessions and purges sessions older than 30 days.
 // Intended to be called as a goroutine during server startup.
 func PurgeOldSessions() {
-	sessStore, err := sessions.NewStore(cli.GetBeadsDir())
+	sessStore, err := sessions.NewStore(cli.GetWorkspaceRuntimeDir())
 	if err != nil {
 		return
 	}
@@ -28,10 +28,10 @@ func PurgeOldSessions() {
 	}
 }
 
-// NewSessionStore creates a sessions.Store for the beads directory.
+// NewSessionStore creates a sessions.Store for the runtime directory.
 // Returns nil if the directory is empty or if the store cannot be created.
 func NewSessionStore() *sessions.Store {
-	dir := cli.GetBeadsDir()
+	dir := cli.GetWorkspaceRuntimeDir()
 	if dir == "" {
 		return nil
 	}

@@ -158,8 +158,8 @@ func TestCheckGitRepo(t *testing.T) {
 func TestCheckProjectConfig(t *testing.T) {
 	t.Run("no loom.yaml", func(t *testing.T) {
 		dir := t.TempDir()
-		defer ResetBeadsDirCache()
-		ResetBeadsDirCache()
+		defer ResetWorkspaceRuntimeDirCache()
+		ResetWorkspaceRuntimeDirCache()
 		setupWorkspaceConfig(t, &LoomConfig{DefaultWorkspace: "test", Workspaces: map[string]WorkspaceConfig{"test": {Path: dir}}})
 
 		result := checkProjectConfig()
@@ -170,8 +170,8 @@ func TestCheckProjectConfig(t *testing.T) {
 
 	t.Run("invalid loom.yaml", func(t *testing.T) {
 		dir := t.TempDir()
-		defer ResetBeadsDirCache()
-		ResetBeadsDirCache()
+		defer ResetWorkspaceRuntimeDirCache()
+		ResetWorkspaceRuntimeDirCache()
 		setupWorkspaceConfig(t, &LoomConfig{DefaultWorkspace: "test", Workspaces: map[string]WorkspaceConfig{"test": {Path: dir}}})
 
 		// Write invalid YAML with a missing colon on line 3
@@ -194,8 +194,8 @@ func TestCheckProjectConfig(t *testing.T) {
 
 	t.Run("valid loom.yaml", func(t *testing.T) {
 		dir := t.TempDir()
-		defer ResetBeadsDirCache()
-		ResetBeadsDirCache()
+		defer ResetWorkspaceRuntimeDirCache()
+		ResetWorkspaceRuntimeDirCache()
 		setupWorkspaceConfig(t, &LoomConfig{DefaultWorkspace: "test", Workspaces: map[string]WorkspaceConfig{"test": {Path: dir}}})
 
 		yamlContent := `agents:
@@ -219,7 +219,7 @@ func TestCheckGlobalConfig(t *testing.T) {
 	t.Run("no config", func(t *testing.T) {
 		dir := t.TempDir()
 		t.Setenv("LOOM_CONFIG_DIR", dir)
-		defer ResetBeadsDirCache()
+		defer ResetWorkspaceRuntimeDirCache()
 
 		result := checkGlobalConfig()
 		if result.Status != StatusWarn {
@@ -230,7 +230,7 @@ func TestCheckGlobalConfig(t *testing.T) {
 	t.Run("invalid yaml config", func(t *testing.T) {
 		dir := t.TempDir()
 		t.Setenv("LOOM_CONFIG_DIR", dir)
-		defer ResetBeadsDirCache()
+		defer ResetWorkspaceRuntimeDirCache()
 
 		invalidYAML := "workspaces:\n  dev\n    path: /tmp/dev\n"
 		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(invalidYAML), 0644); err != nil {
@@ -249,7 +249,7 @@ func TestCheckGlobalConfig(t *testing.T) {
 	t.Run("valid config", func(t *testing.T) {
 		dir := t.TempDir()
 		t.Setenv("LOOM_CONFIG_DIR", dir)
-		defer ResetBeadsDirCache()
+		defer ResetWorkspaceRuntimeDirCache()
 
 		yamlContent := `workspaces:
   dev:
@@ -272,7 +272,7 @@ func TestCheckStaleLocks(t *testing.T) {
 		dir := t.TempDir()
 		t.Setenv("LOOM_CONFIG_DIR", dir)
 		t.Setenv("LOOM_WORKTREES_DIR", filepath.Join(dir, "worktrees"))
-		defer ResetBeadsDirCache()
+		defer ResetWorkspaceRuntimeDirCache()
 
 		result := checkStaleLocks()
 		// Empty result (skipped)
@@ -286,7 +286,7 @@ func TestCheckStaleLocks(t *testing.T) {
 		t.Setenv("LOOM_CONFIG_DIR", dir)
 		worktreesDir := filepath.Join(dir, "worktrees")
 		t.Setenv("LOOM_WORKTREES_DIR", worktreesDir)
-		defer ResetBeadsDirCache()
+		defer ResetWorkspaceRuntimeDirCache()
 
 		// Create a worktree with a stale lock (PID that doesn't exist)
 		wtPath := filepath.Join(worktreesDir, "falcon")
@@ -447,7 +447,7 @@ func TestCheckLoomDaemon(t *testing.T) {
 
 		// Prevent real config loading from interfering
 		t.Setenv("LOOM_CONFIG_DIR", dir)
-		defer ResetBeadsDirCache()
+		defer ResetWorkspaceRuntimeDirCache()
 
 		result := checkLoomDaemon()
 		if result.Status != StatusWarn {
@@ -871,7 +871,7 @@ func TestCheckFleetDB_Integration(t *testing.T) {
 		defer func() { _ = os.Chdir(origDir) }()
 
 		t.Setenv("LOOM_CONFIG_DIR", dir)
-		defer ResetBeadsDirCache()
+		defer ResetWorkspaceRuntimeDirCache()
 
 		result := checkFleetDB()
 		if result.Name != "fleetdb" {
@@ -1106,18 +1106,18 @@ func TestCheckStaleSignalFiles_SkipsSubdirectories(t *testing.T) {
 
 // --- Session Record Tests ---
 
-// setupBeadsDirForTest configures GetBeadsDir() to return the given directory.
+// setupBeadsDirForTest configures GetWorkspaceRuntimeDir() to return the given directory.
 // Must not be used with t.Parallel() since it mutates global state.
 func setupBeadsDirForTest(t *testing.T, dir string) {
 	t.Helper()
-	ResetBeadsDirCache()
+	ResetWorkspaceRuntimeDirCache()
 	setupWorkspaceConfig(t, &LoomConfig{
 		DefaultWorkspace: "test",
 		Workspaces: map[string]WorkspaceConfig{
 			"test": {Path: dir},
 		},
 	})
-	t.Cleanup(func() { ResetBeadsDirCache() })
+	t.Cleanup(func() { ResetWorkspaceRuntimeDirCache() })
 }
 
 func TestCheckStaleSessionRecords_NoSessions(t *testing.T) {

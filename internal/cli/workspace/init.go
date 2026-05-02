@@ -80,7 +80,7 @@ func runInit(cmd *cobra.Command, args []string) {
 
 	// Step 2: Confirm issue storage
 	fmt.Println("Step 2: Issue storage")
-	if !initBeads(deps) {
+	if !initIssueStorage(deps) {
 		os.Exit(1)
 	}
 	fmt.Println("")
@@ -121,7 +121,7 @@ func runInitWorkspace(cmd *cobra.Command, _ []string) {
 	fmt.Println("")
 
 	fmt.Println("Step 3: Issue backend")
-	initWorkspaceBeads(deps, ws)
+	initWorkspaceIssueStorage(deps, ws)
 	fmt.Println("")
 
 	showWorkspaceSummary(ws)
@@ -157,14 +157,14 @@ func validateWorkspaceExists() config.WorkspaceConfig {
 	return ws
 }
 
-// initWorkspaceBeads is retained as a workspace setup hook while fleet-db is canonical.
-func initWorkspaceBeads(deps *cli.Deps, ws config.WorkspaceConfig) {
+// initWorkspaceIssueStorage confirms FleetDB-backed issue storage for a named workspace.
+func initWorkspaceIssueStorage(deps *cli.Deps, ws config.WorkspaceConfig) {
 	_ = deps
 	_ = ws
 	fmt.Println("→ Fleet-db issue storage is used; no local task database init required")
 }
 
-func initBeadsInWorkspace(deps *cli.Deps, wsPath string) {
+func initIssueStorageInWorkspace(deps *cli.Deps, wsPath string) {
 	_ = deps
 	_ = wsPath
 	fmt.Println("→ Fleet-db issue storage is used; no local task database init required")

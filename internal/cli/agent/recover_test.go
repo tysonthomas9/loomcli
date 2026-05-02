@@ -828,7 +828,7 @@ func TestRecoverWorktree_StaleLock(t *testing.T) {
 
 func TestRecoverWorktree_LockCheckError(t *testing.T) {
 	// RecoverWorktree uses defaultDeps internally; must use global mocks.
-	ResetBeadsDirCache()
+	ResetWorkspaceRuntimeDirCache()
 	tmpDir := t.TempDir()
 
 	// Create a directory named .agent.lock instead of a file, causing ReadFile to fail
@@ -849,7 +849,7 @@ func TestRecoverWorktree_LockCheckError(t *testing.T) {
 
 func TestRecoverWorktree_EmptyAgentName(t *testing.T) {
 	// RecoverWorktree uses defaultDeps internally; must use global mocks.
-	ResetBeadsDirCache()
+	ResetWorkspaceRuntimeDirCache()
 	tmpDir := t.TempDir()
 
 	// No lock file. Empty agent name means resetOrphanedAgentTasks returns immediately.

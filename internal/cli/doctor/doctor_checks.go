@@ -141,14 +141,14 @@ func checkBackendCLI() CheckResult {
 }
 
 func checkProjectConfig() CheckResult {
-	beadsDir := cli.GetBeadsDir()
-	pf, err := cfgpkg.LoadProjectFile(beadsDir)
+	runtimeDir := cli.GetWorkspaceRuntimeDir()
+	pf, err := cfgpkg.LoadProjectFile(runtimeDir)
 	if err != nil {
 		return CheckResult{
 			Name:    "project_config",
 			Status:  StatusFail,
 			Summary: "loom.yaml has parse errors",
-			Detail:  cfgpkg.FormatYAMLDiagnostic(filepath.Join(beadsDir, "loom.yaml"), err),
+			Detail:  cfgpkg.FormatYAMLDiagnostic(filepath.Join(runtimeDir, "loom.yaml"), err),
 		}
 	}
 
@@ -165,9 +165,9 @@ func checkProjectConfig() CheckResult {
 	summary := fmt.Sprintf("loom.yaml valid (%d agents configured)", agentCount)
 
 	// Run deeper validation if available
-	dc, err := cfgpkg.LoadDaemonConfig(beadsDir)
+	dc, err := cfgpkg.LoadDaemonConfig(runtimeDir)
 	if err == nil && dc != nil {
-		vr := cli.ValidateProjectConfig(dc, beadsDir)
+		vr := cli.ValidateProjectConfig(dc, runtimeDir)
 		if vr.HasErrors() {
 			return CheckResult{
 				Name:    "project_config",

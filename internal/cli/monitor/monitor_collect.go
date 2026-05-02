@@ -24,11 +24,11 @@ func CollectMonitorData(readyLimit int, branch string) *MonitorData {
 func collectMonitorDataDeps(deps *cli.Deps, readyLimit int, branch string) *MonitorData {
 	data := &MonitorData{Timestamp: time.Now()}
 
-	// Start stats and sync bd call in parallel with task collection
+	// Start stats and store sync collection in parallel with task collection.
 	var (
-		stats      MonitorStats
-		syncBdInfo SyncInfo
-		wg         sync.WaitGroup
+		stats    MonitorStats
+		syncInfo SyncInfo
+		wg       sync.WaitGroup
 	)
 
 	wg.Add(2)
@@ -40,7 +40,7 @@ func collectMonitorDataDeps(deps *cli.Deps, readyLimit int, branch string) *Moni
 
 	go func() {
 		defer wg.Done()
-		syncBdInfo = collectSyncBdStatusDeps(deps)
+		syncInfo = collectStoreSyncStatusDeps(deps)
 	}()
 
 	// Collect tasks (internally parallel) to get agent-task mapping
@@ -58,11 +58,11 @@ func collectMonitorDataDeps(deps *cli.Deps, readyLimit int, branch string) *Moni
 		}
 	}
 
-	// Wait for stats and sync bd call to finish
+	// Wait for stats and store sync collection to finish.
 	wg.Wait()
 
-	// Combine sync bd result with agent data for git push/pull counts
-	data.SyncStatus = completeSyncStatus(syncBdInfo, data.Agents)
+	// Combine store sync result with agent data for git push/pull counts.
+	data.SyncStatus = completeSyncStatus(syncInfo, data.Agents)
 	data.Stats = stats
 
 	// Compute Remaining as the sum of work queue categories so it always tallies.
@@ -476,25 +476,21 @@ func processClosedIssues(issues []backend.IssueData, err error) []TaskInfo {
 	return tasks
 }
 
-// collectSyncBdStatus runs the bd sync --status command (safe to call concurrently).
-// Uses execCommand directly since sync is an infrastructure operation, not an issue query.
-func collectSyncBdStatus() SyncInfo {
-	return collectSyncBdStatusDeps(cli.GetDeps(nil))
+// collectStoreSyncStatus reports the active issue store sync state. FleetDB no
+// longer shells out to a local issue tracker; remote sync health is represented
+// by the store/client calls used elsewhere in monitor collection.
+func collectStoreSyncStatus() SyncInfo {
+	return collectStoreSyncStatusDeps(cli.GetDeps(nil))
 }
 
-func collectSyncBdStatusDeps(deps *cli.Deps) SyncInfo {
-	var info SyncInfo
-	result := deps.Exec.Run(cli.GetBeadsDir(), "bd", "sync", "--status")
-	if result.Err == nil {
-		info.DBSynced = !strings.Contains(result.Stdout, "error") && !strings.Contains(result.Stdout, "failed")
-		info.DBLastSync = "recently"
-	} else {
-		info.DBError = "unable to check"
+func collectStoreSyncStatusDeps(_ *cli.Deps) SyncInfo {
+	return SyncInfo{
+		DBSynced:   true,
+		DBLastSync: "live",
 	}
-	return info
 }
 
-// completeSyncStatus combines the bd sync result with agent data for git push/pull counts.
+// completeSyncStatus combines store sync health with agent git push/pull counts.
 func completeSyncStatus(info SyncInfo, agents []AgentStatus) SyncInfo {
 	for _, agent := range agents {
 		if agent.Ahead > 0 {
@@ -517,7 +513,7 @@ func completeSyncStatus(info SyncInfo, agents []AgentStatus) SyncInfo {
 
 // collectSyncStatus is the original sequential version, kept for external callers.
 func collectSyncStatus(agents []AgentStatus) SyncInfo {
-	info := collectSyncBdStatus()
+	info := collectStoreSyncStatus()
 	return completeSyncStatus(info, agents)
 }
 

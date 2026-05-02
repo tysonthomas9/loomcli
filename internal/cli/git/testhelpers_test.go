@@ -33,7 +33,7 @@ var AcquireLock = cli.AcquireLock
 var ReleaseLock = cli.ReleaseLock
 var UpdateLockTask = cli.UpdateLockTask
 var GetDefaultBranch = cli.GetDefaultBranch
-var ResetBeadsDirCache = cli.ResetBeadsDirCache
+var ResetWorkspaceRuntimeDirCache = cli.ResetWorkspaceRuntimeDirCache
 var NewResolver = cli.NewResolver
 
 // --- Type aliases from config ---

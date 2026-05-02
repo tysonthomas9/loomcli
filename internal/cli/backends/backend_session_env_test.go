@@ -8,14 +8,14 @@ import (
 	"testing"
 )
 
-func TestSetActiveSessionEnv(t *testing.T) {
+func TestSetActiveSessionRuntimeEnv(t *testing.T) {
 	t.Cleanup(ClearActiveSessionEnv)
 
-	SetActiveSessionEnv("/path/to/.beads", "20260321-153042-nova-abc-a3f9b2c1")
+	SetActiveSessionRuntimeEnv("/path/to/runtime", "20260321-153042-nova-abc-a3f9b2c1")
 
-	beadsDir, sid := GetActiveSessionEnv()
-	if beadsDir != "/path/to/.beads" {
-		t.Errorf("beadsDir = %q, want %q", beadsDir, "/path/to/.beads")
+	runtimeDir, sid := GetActiveSessionRuntimeEnv()
+	if runtimeDir != "/path/to/runtime" {
+		t.Errorf("runtimeDir = %q, want %q", runtimeDir, "/path/to/runtime")
 	}
 	if sid != "20260321-153042-nova-abc-a3f9b2c1" {
 		t.Errorf("sid = %q, want %q", sid, "20260321-153042-nova-abc-a3f9b2c1")
@@ -25,12 +25,12 @@ func TestSetActiveSessionEnv(t *testing.T) {
 func TestClearActiveSessionEnv(t *testing.T) {
 	t.Cleanup(ClearActiveSessionEnv)
 
-	SetActiveSessionEnv("/path/to/.beads", "some-session-id")
+	SetActiveSessionRuntimeEnv("/path/to/runtime", "some-session-id")
 	ClearActiveSessionEnv()
 
-	beadsDir, sid := GetActiveSessionEnv()
-	if beadsDir != "" {
-		t.Errorf("beadsDir = %q after clear, want empty", beadsDir)
+	runtimeDir, sid := GetActiveSessionRuntimeEnv()
+	if runtimeDir != "" {
+		t.Errorf("runtimeDir = %q after clear, want empty", runtimeDir)
 	}
 	if sid != "" {
 		t.Errorf("sid = %q after clear, want empty", sid)
@@ -40,17 +40,18 @@ func TestClearActiveSessionEnv(t *testing.T) {
 func TestActiveSessionEnvVars_WhenSet(t *testing.T) {
 	t.Cleanup(ClearActiveSessionEnv)
 
-	SetActiveSessionEnv("/home/user/.beads", "sess-123")
+	SetActiveSessionRuntimeEnv("/home/user/runtime", "sess-123")
 
 	vars := activeSessionEnvVars()
-	if len(vars) != 2 {
-		t.Fatalf("expected 2 vars, got %d: %v", len(vars), vars)
+	if len(vars) != 3 {
+		t.Fatalf("expected 3 vars, got %d: %v", len(vars), vars)
 	}
 
 	// Sort for deterministic comparison.
 	sort.Strings(vars)
 	want := []string{
-		"LOOM_BEADS_DIR=/home/user/.beads",
+		"LOOM_BEADS_DIR=/home/user/runtime",
+		"LOOM_WORKSPACE_RUNTIME_DIR=/home/user/runtime",
 		"LOOM_SESSION_ID=sess-123",
 	}
 	sort.Strings(want)
@@ -64,8 +65,8 @@ func TestActiveSessionEnvVars_WhenSet(t *testing.T) {
 func TestActiveSessionEnvVars_PartialSet(t *testing.T) {
 	t.Cleanup(ClearActiveSessionEnv)
 
-	// Only session ID set, no beads dir
-	SetActiveSessionEnv("", "sess-only")
+	// Only session ID set, no runtime dir.
+	SetActiveSessionRuntimeEnv("", "sess-only")
 	vars := activeSessionEnvVars()
 	if len(vars) != 1 {
 		t.Fatalf("expected 1 var, got %d: %v", len(vars), vars)
@@ -74,14 +75,21 @@ func TestActiveSessionEnvVars_PartialSet(t *testing.T) {
 		t.Errorf("vars[0] = %q, want %q", vars[0], "LOOM_SESSION_ID=sess-only")
 	}
 
-	// Only beads dir set, no session ID
-	SetActiveSessionEnv("/path/to/.beads", "")
+	// Only runtime dir set, no session ID
+	SetActiveSessionRuntimeEnv("/path/to/runtime", "")
 	vars = activeSessionEnvVars()
-	if len(vars) != 1 {
-		t.Fatalf("expected 1 var, got %d: %v", len(vars), vars)
+	if len(vars) != 2 {
+		t.Fatalf("expected 2 vars, got %d: %v", len(vars), vars)
 	}
-	if vars[0] != "LOOM_BEADS_DIR=/path/to/.beads" {
-		t.Errorf("vars[0] = %q, want %q", vars[0], "LOOM_BEADS_DIR=/path/to/.beads")
+	sort.Strings(vars)
+	want := []string{
+		"LOOM_BEADS_DIR=/path/to/runtime",
+		"LOOM_WORKSPACE_RUNTIME_DIR=/path/to/runtime",
+	}
+	for i, v := range want {
+		if vars[i] != v {
+			t.Errorf("vars[%d] = %q, want %q", i, vars[i], v)
+		}
 	}
 }
 
@@ -109,7 +117,7 @@ func TestActiveSessionEnvVars_Concurrent(t *testing.T) {
 			defer wg.Done()
 			for j := 0; j < 100; j++ {
 				if j%2 == 0 {
-					SetActiveSessionEnv("/beads", "sid")
+					SetActiveSessionRuntimeEnv("/beads", "sid")
 				} else {
 					ClearActiveSessionEnv()
 				}
@@ -123,7 +131,7 @@ func TestActiveSessionEnvVars_Concurrent(t *testing.T) {
 			defer wg.Done()
 			for j := 0; j < 100; j++ {
 				_ = activeSessionEnvVars()
-				_, _ = GetActiveSessionEnv()
+				_, _ = GetActiveSessionRuntimeEnv()
 			}
 		}()
 	}
@@ -257,8 +265,8 @@ func TestResolveNotifyToken_FileOnDisk(t *testing.T) {
 	// Ensure LOOM_NOTIFY_TOKEN env var is not set.
 	t.Setenv("LOOM_NOTIFY_TOKEN", "")
 
-	// Set up a workspace config so GetBeadsDir() returns a known temp dir.
-	ResetBeadsDirCache()
+	// Set up a workspace config so GetWorkspaceRuntimeDir() returns a known temp dir.
+	ResetWorkspaceRuntimeDirCache()
 	beadsDir := t.TempDir()
 	cfg := &LoomConfig{
 		DefaultWorkspace: "test",
@@ -285,7 +293,7 @@ func TestResolveNotifyToken_BothFail(t *testing.T) {
 	t.Setenv("LOOM_NOTIFY_TOKEN", "")
 
 	// Set up workspace config pointing to a temp dir without notify.token.
-	ResetBeadsDirCache()
+	ResetWorkspaceRuntimeDirCache()
 	beadsDir := t.TempDir()
 	cfg := &LoomConfig{
 		DefaultWorkspace: "test",

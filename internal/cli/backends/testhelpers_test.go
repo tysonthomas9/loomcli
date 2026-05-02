@@ -19,14 +19,14 @@ type LoomConfig = config.LoomConfig
 type WorkspaceConfig = config.WorkspaceConfig
 
 var (
-	RegisterBackend           = cli.RegisterBackend
-	SetBackend                = cli.SetBackend
-	IsRegistered              = cli.IsRegistered
-	GetBackendByName          = cli.GetBackendByName
-	ListBackends              = cli.ListBackends
-	InvokeAgentNonInteractive = cli.InvokeAgentNonInteractive
-	FilteredEnv               = cli.FilteredEnv
-	ResetBeadsDirCache        = cli.ResetBeadsDirCache
+	RegisterBackend               = cli.RegisterBackend
+	SetBackend                    = cli.SetBackend
+	IsRegistered                  = cli.IsRegistered
+	GetBackendByName              = cli.GetBackendByName
+	ListBackends                  = cli.ListBackends
+	InvokeAgentNonInteractive     = cli.InvokeAgentNonInteractive
+	FilteredEnv                   = cli.FilteredEnv
+	ResetWorkspaceRuntimeDirCache = cli.ResetWorkspaceRuntimeDirCache
 )
 
 // backendMu provides access to the cli backend registry mutex.

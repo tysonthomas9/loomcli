@@ -134,7 +134,7 @@ func RegisterHooks(registry *WorkspaceRegistry, cfg HookConfig) RegisteredHooks 
 	// Fleet-mode SSE push: FleetSubscriberHook bridges the per-workspace
 	// FleetBackend (provided by FleetBackendHook above) into the shared
 	// MultiWorkspaceSubscriber so the SSE hub gets push events without a
-	// bd daemon. Skipped when MultiSub is nil (no SSE infrastructure).
+	// local issue daemon. Skipped when MultiSub is nil (no SSE infrastructure).
 	if cfg.FleetMode && cfg.MultiSub != nil && cfg.FleetURL != "" {
 		registered.FleetSubscriber = hooks.NewFleetSubscriberHook(cfg.MultiSub, registry, cfg.Logger)
 		_ = registry.AddHook(registered.FleetSubscriber)

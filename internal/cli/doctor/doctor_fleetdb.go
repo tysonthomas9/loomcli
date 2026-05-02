@@ -39,7 +39,7 @@ func checkFleetDB() CheckResult {
 	if bootstrap.DetectMode() == bootstrap.ModeLocal {
 		return checkEmbeddedFleetDB()
 	}
-	dc, err := cfgpkg.LoadDaemonConfig(cli.GetBeadsDir())
+	dc, err := cfgpkg.LoadDaemonConfig(cli.GetWorkspaceRuntimeDir())
 	if err != nil {
 		cfg, _ := cfgpkg.ResolveFleetDBConfig(&cfgpkg.DaemonSettings{})
 		return reportFleetDBConfig(cfg)
@@ -107,7 +107,7 @@ func reportFleetDBConfig(cfg cfgpkg.FleetDBServerConfig) CheckResult {
 }
 
 func checkFleet() CheckResult {
-	dc, err := cfgpkg.LoadDaemonConfig(cli.GetBeadsDir())
+	dc, err := cfgpkg.LoadDaemonConfig(cli.GetWorkspaceRuntimeDir())
 	var fleetCfg cfgpkg.FleetClientConfig
 	if err != nil {
 		fleetCfg = cfgpkg.ResolveFleetConfig(&cfgpkg.DaemonSettings{})

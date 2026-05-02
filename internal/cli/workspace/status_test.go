@@ -240,11 +240,11 @@ func TestBuildStatusDataWorktreeCounts(t *testing.T) {
 	if len(data.Worktrees.List) != 4 {
 		t.Errorf("list len = %d, want 4", len(data.Worktrees.List))
 	}
-	if data.Beads.Open != 10 {
-		t.Errorf("beads.open = %d, want 10", data.Beads.Open)
+	if data.Tasks.Open != 10 {
+		t.Errorf("tasks.open = %d, want 10", data.Tasks.Open)
 	}
-	if data.Beads.InProgress != 3 {
-		t.Errorf("beads.in_progress = %d, want 3", data.Beads.InProgress)
+	if data.Tasks.InProgress != 3 {
+		t.Errorf("tasks.in_progress = %d, want 3", data.Tasks.InProgress)
 	}
 	if data.Git.NeedsPush != 1 {
 		t.Errorf("git.needs_push = %d, want 1", data.Git.NeedsPush)
@@ -264,8 +264,8 @@ func TestBuildStatusDataNilMonitor(t *testing.T) {
 	if data.Worktrees.Idle != 0 {
 		t.Errorf("idle = %d, want 0", data.Worktrees.Idle)
 	}
-	if data.Beads.Open != 0 {
-		t.Errorf("beads.open = %d, want 0", data.Beads.Open)
+	if data.Tasks.Open != 0 {
+		t.Errorf("tasks.open = %d, want 0", data.Tasks.Open)
 	}
 }
 
@@ -293,7 +293,7 @@ func TestStatusJSON(t *testing.T) {
 				{Name: "ember", Status: "ready"},
 			},
 		},
-		Beads: BeadsSummary{
+		Tasks: TaskSummary{
 			Open:       12,
 			InProgress: 5,
 			Review:     3,

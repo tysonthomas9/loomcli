@@ -68,8 +68,8 @@ type HandlerDeps struct {
 	// route to a per-workspace fleet-db backend; /api/config callers pass
 	// context.Background() since the response is workspace-agnostic.
 	IssueBackendFn func(ctx context.Context) backend.IssueBackend
-	// DaemonExpected is true when this server expects a bd daemon to be
-	// reachable (beads mode). False in fleet mode where the IssueBackend
+	// DaemonExpected is true when this server expects a local issue daemon to
+	// be reachable. False in fleet mode where the IssueBackend
 	// is the canonical issue source and no daemon should exist. Drives
 	// /api/health: when false, daemon checks are skipped entirely so a
 	// missing daemon doesn't false-positive a liveness probe.

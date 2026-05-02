@@ -54,7 +54,7 @@ type StatusData struct {
 	Backend      BackendInfo      `json:"backend"`
 	IssueBackend string           `json:"issue_backend"`
 	Worktrees    WorktreesSummary `json:"worktrees"`
-	Beads        BeadsSummary     `json:"beads"`
+	Tasks        TaskSummary      `json:"tasks"`
 	Git          GitSummary       `json:"git"`
 	Redis        RedisInfo        `json:"redis"`
 	Issues       []StatusIssue    `json:"issues,omitempty"`
@@ -89,8 +89,8 @@ type WorktreeStatusItem struct {
 	Title  string `json:"title,omitempty"`
 }
 
-// BeadsSummary holds task count summaries.
-type BeadsSummary struct {
+// TaskSummary holds task count summaries.
+type TaskSummary struct {
 	Open       int `json:"open"`
 	InProgress int `json:"in_progress"`
 	Review     int `json:"review"`
@@ -192,8 +192,8 @@ func buildStatusData(daemon DaemonInfo, mon *monitor.MonitorData) StatusData {
 			}
 		}
 
-		// Beads
-		data.Beads = BeadsSummary{
+		// Tasks
+		data.Tasks = TaskSummary{
 			Open:       mon.Stats.Open,
 			InProgress: mon.Stats.InProgress,
 			Review:     mon.Stats.Review,
@@ -226,7 +226,7 @@ func resolveBackendSource() string {
 	if os.Getenv("LOOM_BACKEND") != "" {
 		return "env"
 	}
-	if pf, err := config.LoadProjectFile(cli.GetBeadsDir()); err == nil && pf != nil && pf.Backend != "" {
+	if pf, err := config.LoadProjectFile(cli.GetWorkspaceRuntimeDir()); err == nil && pf != nil && pf.Backend != "" {
 		return "project"
 	}
 	cfg, err := config.LoadConfig()
@@ -313,8 +313,8 @@ func renderStatusHuman(data StatusData) {
 	fmt.Printf("Backend:    %s (via %s)\n", data.Backend.Name, data.Backend.Source)
 	fmt.Printf("Issues:     %s\n", data.IssueBackend)
 	renderStatusWorktrees(data.Worktrees)
-	fmt.Printf("Beads:      %d open, %d in-progress, %d review, %d closed\n",
-		data.Beads.Open, data.Beads.InProgress, data.Beads.Review, data.Beads.Closed)
+	fmt.Printf("Tasks:      %d open, %d in-progress, %d review, %d closed\n",
+		data.Tasks.Open, data.Tasks.InProgress, data.Tasks.Review, data.Tasks.Closed)
 	renderStatusGit(data.Git)
 	renderStatusRedis(data.Redis)
 	renderStatusIssues(data.Issues)

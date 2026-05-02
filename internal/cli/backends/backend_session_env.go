@@ -12,9 +12,9 @@ import (
 // Thread-safe package-level state for active session env vars.
 // Set by the parent loom process before invoking an agent, cleared after.
 var (
-	sessionEnvMu    sync.RWMutex
-	sessionBeadsDir string
-	sessionID       string
+	sessionEnvMu      sync.RWMutex
+	sessionRuntimeDir string
+	sessionID         string
 )
 
 // Thread-safe package-level state for Claude session resume.
@@ -80,29 +80,43 @@ func ClearLastCapturedSessionID() {
 	lastCapturedSessionID = ""
 }
 
-// SetActiveSessionEnv sets the beads directory and session ID that will be
+// SetActiveSessionRuntimeEnv sets the workspace runtime directory and session ID that will be
 // injected into agent subprocess environments. Thread-safe.
-func SetActiveSessionEnv(beadsDir, sid string) {
+func SetActiveSessionRuntimeEnv(runtimeDir, sid string) {
 	sessionEnvMu.Lock()
 	defer sessionEnvMu.Unlock()
-	sessionBeadsDir = beadsDir
+	sessionRuntimeDir = runtimeDir
 	sessionID = sid
+}
+
+// SetActiveSessionEnv is a legacy alias kept for migration-only callers.
+//
+// Deprecated: use SetActiveSessionRuntimeEnv.
+func SetActiveSessionEnv(runtimeDir, sid string) {
+	SetActiveSessionRuntimeEnv(runtimeDir, sid)
 }
 
 // ClearActiveSessionEnv clears the active session env vars. Thread-safe.
 func ClearActiveSessionEnv() {
 	sessionEnvMu.Lock()
 	defer sessionEnvMu.Unlock()
-	sessionBeadsDir = ""
+	sessionRuntimeDir = ""
 	sessionID = ""
 }
 
-// GetActiveSessionEnv returns the current beads directory and session ID.
+// GetActiveSessionRuntimeEnv returns the current workspace runtime directory and session ID.
 // Thread-safe.
-func GetActiveSessionEnv() (beadsDir, sid string) {
+func GetActiveSessionRuntimeEnv() (runtimeDir, sid string) {
 	sessionEnvMu.RLock()
 	defer sessionEnvMu.RUnlock()
-	return sessionBeadsDir, sessionID
+	return sessionRuntimeDir, sessionID
+}
+
+// GetActiveSessionEnv is a legacy alias kept for migration-only callers.
+//
+// Deprecated: use GetActiveSessionRuntimeEnv.
+func GetActiveSessionEnv() (runtimeDir, sid string) {
+	return GetActiveSessionRuntimeEnv()
 }
 
 // activeSessionEnvVars returns a slice of "KEY=VALUE" strings for any
@@ -113,8 +127,9 @@ func activeSessionEnvVars() []string {
 	defer sessionEnvMu.RUnlock()
 
 	var vars []string
-	if sessionBeadsDir != "" {
-		vars = append(vars, "LOOM_BEADS_DIR="+sessionBeadsDir)
+	if sessionRuntimeDir != "" {
+		vars = append(vars, "LOOM_WORKSPACE_RUNTIME_DIR="+sessionRuntimeDir)
+		vars = append(vars, "LOOM_BEADS_DIR="+sessionRuntimeDir) // legacy hook compatibility
 	}
 	if sessionID != "" {
 		vars = append(vars, "LOOM_SESSION_ID="+sessionID)
@@ -133,17 +148,17 @@ func ResolveWebUIURL() string {
 
 // resolveNotifyToken returns the bearer token for authenticating to the
 // POST /api/sessions/notify endpoint. Checks LOOM_NOTIFY_TOKEN env var first,
-// then falls back to reading <beads_dir>/notify.token from disk.
+// then falls back to reading <workspace_runtime_dir>/notify.token from disk.
 // Returns empty string if both fail (server will reject with 403).
 func ResolveNotifyToken() string {
 	if token := os.Getenv("LOOM_NOTIFY_TOKEN"); token != "" {
 		return token
 	}
-	beadsDir := cli.GetBeadsDir()
-	if beadsDir == "" {
+	runtimeDir := cli.GetWorkspaceRuntimeDir()
+	if runtimeDir == "" {
 		return ""
 	}
-	data, err := os.ReadFile(filepath.Join(beadsDir, "notify.token")) //nolint:gosec // beadsDir from cli.GetBeadsDir(), filename is constant
+	data, err := os.ReadFile(filepath.Join(runtimeDir, "notify.token")) //nolint:gosec // runtimeDir from cli.GetWorkspaceRuntimeDir(), filename is constant
 	if err != nil {
 		return ""
 	}

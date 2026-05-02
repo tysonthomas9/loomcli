@@ -39,13 +39,13 @@ type TaskInfo = monitor.TaskInfo
 type Deps = cli.Deps
 
 var (
-	LoadConfig           = config.LoadConfig
-	SaveConfig           = config.SaveConfig
-	ResetBeadsDirCache   = cli.ResetBeadsDirCache
-	CurrentConfigVersion = config.CurrentConfigVersion
-	WithDeps             = cli.WithDeps
-	GetWorkspaceDir      = config.GetWorkspaceDir
-	GetWorktreesDir      = cli.GetWorktreesDir
+	LoadConfig                    = config.LoadConfig
+	SaveConfig                    = config.SaveConfig
+	ResetWorkspaceRuntimeDirCache = cli.ResetWorkspaceRuntimeDirCache
+	CurrentConfigVersion          = config.CurrentConfigVersion
+	WithDeps                      = cli.WithDeps
+	GetWorkspaceDir               = config.GetWorkspaceDir
+	GetWorktreesDir               = cli.GetWorktreesDir
 )
 
 func NewTestDeps(t *testing.T) (*cli.Deps, *clitest.MockGitRunner, *clitest.MockExecRunner, *clitest.MockFileSystem, *clitest.MockIssueBackend) {

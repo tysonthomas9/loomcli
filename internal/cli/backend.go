@@ -86,9 +86,9 @@ func ResolveBackendName() string {
 	if env := os.Getenv("LOOM_BACKEND"); env != "" {
 		return env
 	}
-	// 3. Project-local loom.yaml — use GetBeadsDir() so workspace mode
+	// 3. Project-local loom.yaml — use GetWorkspaceRuntimeDir() so workspace mode
 	// resolves to workspace root, legacy mode uses CWD
-	if pf, err := config.LoadProjectFile(GetBeadsDir()); err == nil && pf != nil && pf.Backend != "" {
+	if pf, err := config.LoadProjectFile(GetWorkspaceRuntimeDir()); err == nil && pf != nil && pf.Backend != "" {
 		return pf.Backend
 	}
 	// 4. Global config file backend setting
