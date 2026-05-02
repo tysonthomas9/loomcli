@@ -1,9 +1,13 @@
 package handlermux
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 )
 
 // Compile-time assertion: *WorkspaceOpsModule implements Module.
@@ -65,4 +69,32 @@ func TestWorkspaceOpsModule_NilDeps(t *testing.T) {
 
 	mux := http.NewServeMux()
 	mod.Register(mux) // must not panic during registration
+}
+
+func TestWorkspaceOpsModule_TypedNilPoolUsesBackendFallback(t *testing.T) {
+	var typedNilPool *daemon.MultiPool
+	mod := NewWorkspaceOpsModule(&mockWorkspaceService{}, typedNilPool, nil).
+		WithIssueBackendFn(func(context.Context) backend.IssueBackend {
+			return &stubIssueBackend{}
+		}).
+		WithDaemonExpected(false)
+
+	mux := http.NewServeMux()
+	mod.Register(mux)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/ready", nil)
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /ready status = %d, want %d; body: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+}
+
+type stubIssueBackend struct {
+	backend.IssueBackend
+}
+
+func (s *stubIssueBackend) Ready(_ context.Context, _ backend.ReadyOpts) ([]backend.IssueData, error) {
+	return []backend.IssueData{}, nil
 }

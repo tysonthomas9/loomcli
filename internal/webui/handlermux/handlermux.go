@@ -7,6 +7,7 @@ package handlermux
 import (
 	"context"
 	"net/http"
+	"reflect"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
@@ -43,7 +44,21 @@ type WorkspaceOpsModule struct {
 // fleet client mode so /daemon/status returns a fleet-mode stub instead
 // of 503.
 func NewWorkspaceOpsModule(workspaceSvc service.WorkspaceService, multiPool daemon.Pool, agentQueueH http.HandlerFunc) *WorkspaceOpsModule {
-	return &WorkspaceOpsModule{workspaceSvc: workspaceSvc, multiPool: multiPool, agentQueueH: agentQueueH, daemonExpected: true}
+	return &WorkspaceOpsModule{workspaceSvc: workspaceSvc, multiPool: normalizePool(multiPool), agentQueueH: agentQueueH, daemonExpected: true}
+}
+
+func normalizePool(pool daemon.Pool) daemon.Pool {
+	if pool == nil {
+		return nil
+	}
+	v := reflect.ValueOf(pool)
+	switch v.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		if v.IsNil() {
+			return nil
+		}
+	}
+	return pool
 }
 
 // WithIssueBackendFn injects the IssueBackend factory used by handlers
