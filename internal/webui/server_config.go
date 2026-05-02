@@ -45,17 +45,17 @@ type MonitorHandlers struct {
 
 // ServerConfig holds configuration for the web UI server.
 type ServerConfig struct {
-	Port                int
-	BindAddress         string // Listen address (default: "127.0.0.1"; use "0.0.0.0" for all interfaces)
-	SocketPath          string
-	PoolSize            int
-	CORSEnabled         bool
-	CORSOrigins         []string
-	ShutdownTimeout     time.Duration
-	MaxPortAttempts     int
-	TerminalCmd         string
-	MaxTerminalSessions int  // Maximum concurrent terminal connections (0 = default 20)
-	FleetEnabled        bool // Register fleet API routes (requires Redis coordination)
+	Port                    int
+	BindAddress             string // Listen address (default: "127.0.0.1"; use "0.0.0.0" for all interfaces)
+	SocketPath              string
+	PoolSize                int
+	CORSEnabled             bool
+	CORSOrigins             []string
+	ShutdownTimeout         time.Duration
+	MaxPortAttempts         int
+	TerminalCmd             string
+	MaxTerminalSessions     int  // Maximum concurrent terminal connections (0 = default 40)
+	FleetEnabled            bool // Register fleet API routes (requires Redis coordination)
 	// FleetClient is true when this loom server is a fleet-db CLIENT (not a
 	// fleet API server itself). In this mode there is no local bd daemon to
 	// talk to — the IssueBackend is fleet-db over HTTP. Drives the

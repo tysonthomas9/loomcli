@@ -485,7 +485,11 @@ export const TerminalTabBar = forwardRef<HTMLDivElement, TerminalTabBarProps>(
         <button
           className={styles.actionButton}
           onClick={onNewTab}
+          disabled={maxTabsReached}
           aria-label="New terminal tab"
+          title={
+            maxTabsReached ? "Maximum terminal tabs reached" : "New terminal tab"
+          }
           data-testid="terminal-new-tab-button"
         >
           +

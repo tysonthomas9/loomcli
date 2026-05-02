@@ -7,7 +7,8 @@ import { KNOWN_BACKEND_DEFAULTS } from "@/utils/workspace";
 
 import type { ConnectionState } from "@/components/TerminalView/instances";
 
-export const MAX_TABS = 8;
+// Match the PTY manager's default per-workspace session cap.
+export const MAX_TABS = 40;
 
 /** Split view constants */
 export const MIN_SPLIT_RATIO = 0.2;

@@ -39,7 +39,7 @@ interface TerminalViewProps {
   onIssueContextConsumed?: (() => void) | undefined;
   onActiveSessionCountChange?: (count: number) => void;
   onUnreadChange?: (hasAnyUnread: boolean) => void;
-  onEscape?: () => void;
+  onTabLimitReached?: (message: string) => void;
   onNavigateToSettings?: () => void;
   /** When set, opens or focuses an agent's terminal tab. */
   pendingAgentName?: string | undefined;
@@ -53,7 +53,7 @@ export function TerminalView({
   onIssueContextConsumed,
   onActiveSessionCountChange,
   onUnreadChange,
-  onEscape,
+  onTabLimitReached,
   onNavigateToSettings,
   pendingAgentName,
   onAgentNameConsumed,
@@ -125,6 +125,12 @@ export function TerminalView({
   const announce = useCallback((msg: string) => {
     if (liveRegionRef.current) liveRegionRef.current.textContent = msg;
   }, []);
+
+  const handleTabLimitReached = useCallback(() => {
+    const message = `Maximum terminal tabs reached (${MAX_TABS}). Close a tab before opening another.`;
+    announce(message);
+    onTabLimitReached?.(message);
+  }, [announce, onTabLimitReached]);
 
   // Hook ordering: useSessionSeeding before useConnectionState so
   // trySeedOnConnect is available as the onTabConnected callback.
@@ -258,9 +264,12 @@ export function TerminalView({
   );
 
   const handleNewTabClick = useCallback(() => {
-    if (tabs.length >= MAX_TABS) return;
+    if (tabs.length >= MAX_TABS) {
+      handleTabLimitReached();
+      return;
+    }
     setIsSessionPromptOpen(true);
-  }, [tabs.length]);
+  }, [handleTabLimitReached, tabs.length]);
 
   const handleCycleTab = useCallback(
     (direction: "forward" | "backward") => {
@@ -300,13 +309,11 @@ export function TerminalView({
     isActive,
     tabsRef,
     activeTabIdRef,
-    isSessionPromptOpen,
-    dismissedWelcome,
     onCycleTab: handleCycleTab,
     onSwitchTabByIndex: handleSwitchTabByIndex,
     onNewTab: handleNewTabClick,
     onCloseTab: handleCloseActiveTab,
-    onEscape,
+    onTabLimitReached: handleTabLimitReached,
     announce,
   });
 

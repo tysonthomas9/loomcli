@@ -7,13 +7,11 @@ export interface UseTerminalKeyboardShortcutsOptions {
   isActive: boolean;
   tabsRef: MutableRefObject<TabState[]>;
   activeTabIdRef: MutableRefObject<string>;
-  isSessionPromptOpen: boolean;
-  dismissedWelcome: boolean;
   onCycleTab: (direction: "forward" | "backward") => void;
   onSwitchTabByIndex: (index: number) => void;
   onNewTab: () => void;
   onCloseTab: () => void;
-  onEscape: (() => void) | undefined;
+  onTabLimitReached: () => void;
   announce: (msg: string) => void;
 }
 
@@ -21,13 +19,11 @@ export function useTerminalKeyboardShortcuts({
   isActive,
   tabsRef,
   activeTabIdRef,
-  isSessionPromptOpen,
-  dismissedWelcome,
   onCycleTab,
   onSwitchTabByIndex,
   onNewTab,
   onCloseTab,
-  onEscape,
+  onTabLimitReached,
   announce,
 }: UseTerminalKeyboardShortcutsOptions): void {
   const onCycleTabRef = useRef(onCycleTab);
@@ -38,8 +34,8 @@ export function useTerminalKeyboardShortcuts({
   onNewTabRef.current = onNewTab;
   const onCloseTabRef = useRef(onCloseTab);
   onCloseTabRef.current = onCloseTab;
-  const onEscapeRef = useRef(onEscape);
-  onEscapeRef.current = onEscape;
+  const onTabLimitReachedRef = useRef(onTabLimitReached);
+  onTabLimitReachedRef.current = onTabLimitReached;
   const announceRef = useRef(announce);
   announceRef.current = announce;
 
@@ -56,13 +52,6 @@ export function useTerminalKeyboardShortcuts({
         const goForward =
           e.key === "Tab" ? !e.shiftKey : e.key === "ArrowRight";
         onCycleTabRef.current(goForward ? "forward" : "backward");
-        return;
-      }
-
-      // Escape: return to previous view when nothing else to dismiss
-      if (e.key === "Escape" && !isSessionPromptOpen && dismissedWelcome) {
-        e.preventDefault();
-        onEscapeRef.current?.();
         return;
       }
 
@@ -95,6 +84,8 @@ export function useTerminalKeyboardShortcuts({
         e.preventDefault();
         if (tabsRef.current.length < MAX_TABS) {
           onNewTabRef.current();
+        } else {
+          onTabLimitReachedRef.current();
         }
         return;
       }
@@ -123,11 +114,5 @@ export function useTerminalKeyboardShortcuts({
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [
-    isActive,
-    isSessionPromptOpen,
-    dismissedWelcome,
-    tabsRef,
-    activeTabIdRef,
-  ]);
+  }, [isActive, tabsRef, activeTabIdRef]);
 }

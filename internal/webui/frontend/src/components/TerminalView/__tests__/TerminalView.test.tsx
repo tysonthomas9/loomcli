@@ -19,6 +19,7 @@ import "@testing-library/jest-dom";
 import { KeyboardShortcutProvider } from "@/hooks/ui";
 
 import { TerminalView } from "../TerminalView";
+import { MAX_TABS } from "@/components/TerminalView/tabs/terminalTabUtils";
 import {
   BackendPickerPrompt,
   SessionNamePrompt,
@@ -461,18 +462,22 @@ describe("TerminalView", () => {
       expect(overlay).toHaveAttribute("aria-hidden", "false");
     });
 
-    it("clicking + when 8 tabs exist does not open prompt", () => {
-      const eightTabs = Array.from({ length: 8 }, (_, i) => ({
+    it("clicking + when max tabs exist does not open prompt", () => {
+      const onTabLimitReached = vi.fn();
+      const maxTabs = Array.from({ length: MAX_TABS }, (_, i) => ({
         session_name: `s${i}`,
         label: `S${i}`,
       }));
-      setMetadata(eightTabs);
-      render(<TerminalView />);
+      setMetadata(maxTabs);
+      render(<TerminalView onTabLimitReached={onTabLimitReached} />);
 
       const overlay = screen.getByTestId("backend-picker-prompt-overlay");
       fireEvent.click(screen.getByTestId("new-tab-button"));
 
       expect(overlay).toHaveAttribute("aria-hidden", "true");
+      expect(onTabLimitReached).toHaveBeenCalledWith(
+        `Maximum terminal tabs reached (${MAX_TABS}). Close a tab before opening another.`,
+      );
     });
 
     it("selecting a backend creates a new tab with auto-generated name", async () => {
@@ -1202,34 +1207,12 @@ describe("TerminalView", () => {
   // ── Escape key ──────────────────────────────────────────────────────────
 
   describe("escape key behavior", () => {
-    it("Escape calls onEscape when nothing else is open", () => {
-      const onEscape = vi.fn();
+    it("Escape does not leave the terminal view", () => {
       setMetadata(DEFAULT_METADATA);
-      render(<TerminalView onEscape={onEscape} />);
-
-      fireEvent.keyDown(document, { key: "Escape" });
-
-      expect(onEscape).toHaveBeenCalledTimes(1);
-    });
-
-    it("Escape does NOT call onEscape when isActive=false", () => {
-      const onEscape = vi.fn();
-      setMetadata(DEFAULT_METADATA);
-      render(<TerminalView isActive={false} onEscape={onEscape} />);
-
-      fireEvent.keyDown(document, { key: "Escape" });
-
-      expect(onEscape).not.toHaveBeenCalled();
-    });
-
-    it("Escape does nothing when onEscape is not provided", () => {
-      setMetadata(DEFAULT_METADATA);
-      // Should not throw
       render(<TerminalView />);
 
       fireEvent.keyDown(document, { key: "Escape" });
 
-      // Just verify the component is still rendered (no crash)
       expect(screen.getByTestId("terminal-view")).toBeInTheDocument();
     });
   });

@@ -35,13 +35,11 @@ interface CreateOptionsOverrides {
   isActive?: boolean;
   tabs?: TabState[];
   activeTabId?: string;
-  isSessionPromptOpen?: boolean;
-  dismissedWelcome?: boolean;
   onCycleTab?: (direction: "forward" | "backward") => void;
   onSwitchTabByIndex?: (index: number) => void;
   onNewTab?: () => void;
   onCloseTab?: () => void;
-  onEscape?: (() => void) | undefined;
+  onTabLimitReached?: () => void;
   announce?: (msg: string) => void;
 }
 
@@ -52,13 +50,11 @@ function createOptions(overrides: CreateOptionsOverrides = {}) {
     isActive: overrides.isActive ?? true,
     tabsRef: { current: tabs } as MutableRefObject<TabState[]>,
     activeTabIdRef: { current: activeTabId } as MutableRefObject<string>,
-    isSessionPromptOpen: overrides.isSessionPromptOpen ?? false,
-    dismissedWelcome: overrides.dismissedWelcome ?? true,
     onCycleTab: overrides.onCycleTab ?? vi.fn(),
     onSwitchTabByIndex: overrides.onSwitchTabByIndex ?? vi.fn(),
     onNewTab: overrides.onNewTab ?? vi.fn(),
     onCloseTab: overrides.onCloseTab ?? vi.fn(),
-    onEscape: overrides.onEscape ?? vi.fn(),
+    onTabLimitReached: overrides.onTabLimitReached ?? vi.fn(),
     announce: overrides.announce ?? vi.fn(),
   };
 }
@@ -207,15 +203,21 @@ describe("useTerminalKeyboardShortcuts", () => {
 
     it("does not fire onNewTab when tabs >= MAX_TABS", () => {
       const onNewTab = vi.fn();
+      const onTabLimitReached = vi.fn();
       renderHook(() =>
         useTerminalKeyboardShortcuts(
-          createOptions({ onNewTab, tabs: makeTabs(MAX_TABS) }),
+          createOptions({
+            onNewTab,
+            onTabLimitReached,
+            tabs: makeTabs(MAX_TABS),
+          }),
         ),
       );
 
       fireEvent.keyDown(document, { key: "t", metaKey: true });
 
       expect(onNewTab).not.toHaveBeenCalled();
+      expect(onTabLimitReached).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -267,58 +269,17 @@ describe("useTerminalKeyboardShortcuts", () => {
     });
   });
 
-  describe("Escape: return to previous view", () => {
-    it("fires onEscape when nothing else is open", () => {
-      const onEscape = vi.fn();
-      renderHook(() =>
-        useTerminalKeyboardShortcuts(
-          createOptions({
-            onEscape,
-            isSessionPromptOpen: false,
-            dismissedWelcome: true,
-          }),
-        ),
-      );
+  describe("Escape: pass through to terminal programs", () => {
+    it("does not intercept bare Escape", () => {
+      renderHook(() => useTerminalKeyboardShortcuts(createOptions()));
+      const ev = new KeyboardEvent("keydown", {
+        key: "Escape",
+        cancelable: true,
+      });
 
-      fireEvent.keyDown(document, { key: "Escape" });
+      document.dispatchEvent(ev);
 
-      expect(onEscape).toHaveBeenCalledTimes(1);
-    });
-
-    it("does not fire onEscape when isSessionPromptOpen is true", () => {
-      const onEscape = vi.fn();
-      renderHook(() =>
-        useTerminalKeyboardShortcuts(
-          createOptions({ onEscape, isSessionPromptOpen: true }),
-        ),
-      );
-
-      fireEvent.keyDown(document, { key: "Escape" });
-
-      expect(onEscape).not.toHaveBeenCalled();
-    });
-
-    it("does not fire onEscape when dismissedWelcome is false", () => {
-      const onEscape = vi.fn();
-      renderHook(() =>
-        useTerminalKeyboardShortcuts(
-          createOptions({ onEscape, dismissedWelcome: false }),
-        ),
-      );
-
-      fireEvent.keyDown(document, { key: "Escape" });
-
-      expect(onEscape).not.toHaveBeenCalled();
-    });
-
-    it("does not throw when onEscape is undefined", () => {
-      renderHook(() =>
-        useTerminalKeyboardShortcuts(createOptions({ onEscape: undefined })),
-      );
-
-      expect(() => {
-        fireEvent.keyDown(document, { key: "Escape" });
-      }).not.toThrow();
+      expect(ev.defaultPrevented).toBe(false);
     });
   });
 
@@ -328,7 +289,7 @@ describe("useTerminalKeyboardShortcuts", () => {
       const onSwitchTabByIndex = vi.fn();
       const onNewTab = vi.fn();
       const onCloseTab = vi.fn();
-      const onEscape = vi.fn();
+      const onTabLimitReached = vi.fn();
 
       renderHook(() =>
         useTerminalKeyboardShortcuts(
@@ -338,7 +299,7 @@ describe("useTerminalKeyboardShortcuts", () => {
             onSwitchTabByIndex,
             onNewTab,
             onCloseTab,
-            onEscape,
+            onTabLimitReached,
           }),
         ),
       );
@@ -353,7 +314,7 @@ describe("useTerminalKeyboardShortcuts", () => {
       expect(onSwitchTabByIndex).not.toHaveBeenCalled();
       expect(onNewTab).not.toHaveBeenCalled();
       expect(onCloseTab).not.toHaveBeenCalled();
-      expect(onEscape).not.toHaveBeenCalled();
+      expect(onTabLimitReached).not.toHaveBeenCalled();
     });
   });
 

@@ -1036,13 +1036,9 @@ function App() {
                 onAgentNameConsumed={handleAgentNameConsumed}
                 onActiveSessionCountChange={setActiveSessionCount}
                 onUnreadChange={setHasTerminalUnread}
-                onEscape={() => {
-                  if (window.history.length > 1) {
-                    navigate(-1);
-                  } else {
-                    navigateToView("kanban");
-                  }
-                }}
+                onTabLimitReached={(message) =>
+                  showToast(message, { type: "error" })
+                }
                 onNavigateToSettings={() => navigateToView("settings")}
               />
             </Suspense>
