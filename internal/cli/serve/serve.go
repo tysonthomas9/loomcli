@@ -85,7 +85,7 @@ The frontend is served externally (reverse proxy, CDN, Vite preview, etc.).
 Use --frontend-url (repeatable) to allow cross-origin frontend deployments
 via CORS.
 
-Auto-starts the bd daemon if not running (disable with --no-daemon).
+Starts/opens fleet-db for issue and workspace data unless --no-daemon is set.
 
 ENVIRONMENT VARIABLES
   LOOM_SERVER_PORT     Server port (default: 8080)
@@ -126,7 +126,7 @@ func init() {
 	serveCmd.Flags().StringVar(&serveCorsOrigin, "cors", defaultCors, "CORS allowed origin")
 	serveCmd.Flags().StringSliceVar(&serveFrontendURLs, "frontend-url", parseFrontendURLsEnv(), "Allowed frontend origin(s) for CORS. Repeatable or comma-separated. Env: LOOM_FRONTEND_URL")
 	serveCmd.Flags().StringVar(&serveWebUISocket, "webui-socket", "", "Daemon socket path for webui (auto-detect if empty)")
-	serveCmd.Flags().BoolVar(&serveNoDaemon, "no-daemon", false, "Skip auto-starting the bd daemon")
+	serveCmd.Flags().BoolVar(&serveNoDaemon, "no-daemon", false, "Skip issue backend startup")
 
 	defaultRedisAddr := os.Getenv("LOOM_REDIS_ADDR")
 	serveCmd.Flags().StringVar(&serveRedisAddr, "redis-addr", defaultRedisAddr, "Redis address for fleet coordination (enables stale detector)")
@@ -207,10 +207,9 @@ func runServe(cmd *cobra.Command, args []string) {
 
 	monitorHandlers := buildMonitorHandlers(collectDataFn, staleDetectorHandler)
 
-	// Open a fleet-db-backed store handle only for fleet-backed modes. Beads
-	// mode still serves workspace topology from the legacy yaml config; forcing
-	// a local embedded fleet-db binary there breaks minimal deployments like the
-	// parity container.
+	// Open a fleet-db-backed store handle for the default fleet-db path. Explicit
+	// beads mode remains available until the deletion phase, but it is no longer
+	// selected implicitly.
 	storeHandle, storeErr := openServeStore(ctx, fleetState)
 	if storeErr != nil {
 		log.Fatalf("failed to open fleet-db store: %v", storeErr)

@@ -3,6 +3,7 @@ package terminal
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -257,13 +258,20 @@ func initialTerminalSizeFromRequest(r *http.Request) (uint16, uint16) {
 	parse := func(raw string, fallback int, max int) uint16 {
 		n, err := strconv.Atoi(raw)
 		if err != nil || n <= 0 || n > max {
-			return uint16(fallback)
+			return mustUint16(fallback)
 		}
-		return uint16(n)
+		return mustUint16(n)
 	}
 
 	return parse(r.URL.Query().Get("cols"), defaultCols, realtime.MaxTerminalCols),
 		parse(r.URL.Query().Get("rows"), defaultRows, realtime.MaxTerminalRows)
+}
+
+func mustUint16(n int) uint16 {
+	if n < 0 || n > int(^uint16(0)) {
+		panic(fmt.Sprintf("terminal size %d exceeds uint16 range", n))
+	}
+	return uint16(n)
 }
 
 // attachmentWriter adapts Attachment to realtime.WSToPTY's io.Writer input.

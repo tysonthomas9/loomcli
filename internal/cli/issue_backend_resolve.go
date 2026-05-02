@@ -41,7 +41,7 @@ var validIssueBackends = map[string]bool{
 //  4. Global config daemon.issue_backend (~/.loom/config.yaml)
 //  5. Project config daemon.fleetdb.enabled (existing)
 //  6. Global config daemon.fleetdb.enabled (existing)
-//  7. Default: "beads"
+//  7. Default: "fleetdb"
 func ResolveIssueBackendType() string {
 	if v := resolveIssueBackendFromEnv(); v != "" {
 		return v
@@ -49,7 +49,7 @@ func ResolveIssueBackendType() string {
 	if v := resolveIssueBackendFromConfig(); v != "" {
 		return v
 	}
-	return IssueBackendBeads
+	return IssueBackendFleetDB
 }
 
 // resolveIssueBackendFromEnv checks environment variables for issue backend selection.

@@ -697,7 +697,7 @@ test.describe("KanbanBoard", () => {
 
     const startX = dragBox.x + dragBox.width / 2
     const startY = dragBox.y + dragBox.height / 2
-    const endX = dropBox.x + dropBox.width / 2
+    const endX = dropBox.x + Math.min(dropBox.width * 0.25, 48)
     const endY = dropBox.y + dropBox.height / 2
 
     // Perform drag operation

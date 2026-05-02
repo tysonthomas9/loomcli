@@ -555,7 +555,7 @@ func TestCheckIssueBackend(t *testing.T) {
 	})
 
 	t.Run("beads active", func(t *testing.T) {
-		t.Setenv("LOOM_FLEETDB_ENABLED", "false")
+		t.Setenv("LOOM_ISSUE_BACKEND", "beads")
 
 		result := checkIssueBackend()
 		if result.Name != "issue_backend" {
@@ -569,13 +569,13 @@ func TestCheckIssueBackend(t *testing.T) {
 		}
 	})
 
-	t.Run("empty env var falls through to default beads", func(t *testing.T) {
+	t.Run("empty env var falls through to default fleetdb", func(t *testing.T) {
 		// Empty string is treated as unset — falls through to config/defaults.
 		t.Setenv("LOOM_FLEETDB_ENABLED", "")
 
 		result := checkIssueBackend()
-		if !strings.Contains(result.Summary, "beads") {
-			t.Errorf("expected summary to contain 'beads', got %q", result.Summary)
+		if !strings.Contains(result.Summary, "fleet-db") {
+			t.Errorf("expected summary to contain 'fleet-db', got %q", result.Summary)
 		}
 	})
 }

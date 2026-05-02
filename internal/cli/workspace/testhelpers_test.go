@@ -58,6 +58,13 @@ func slicesEqual(a, b []string) bool { return clitest.SlicesEqual(a, b) }
 
 func MockStdin(t *testing.T, input string) { testutil.MockStdin(t, input) }
 
+func useLegacyBeadsBackend(t *testing.T) {
+	t.Helper()
+	t.Setenv("LOOM_ISSUE_BACKEND", "beads")
+	cli.ResetDefaultIssueBackend()
+	t.Cleanup(cli.ResetDefaultIssueBackend)
+}
+
 // --- Command stubs ---
 
 type CommandStub struct {

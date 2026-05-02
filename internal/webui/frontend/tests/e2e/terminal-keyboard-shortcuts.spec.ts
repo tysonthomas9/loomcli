@@ -656,7 +656,7 @@ test.describe("Terminal keyboard shortcuts", () => {
       await page.keyboard.press("Escape");
       await page.waitForTimeout(DOM_SETTLE_MS);
 
-      await expect(page.getByTestId("terminal-view")).toHaveCount(0);
+      await expect(page.getByTestId("terminal-view")).not.toBeVisible();
     });
 
     test("Escape closes backend picker prompt first, leaving terminal visible", async ({

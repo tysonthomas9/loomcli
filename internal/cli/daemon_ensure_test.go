@@ -226,7 +226,7 @@ func TestEnsureIssueBackendRunning(t *testing.T) {
 	})
 
 	t.Run("beads delegates to EnsureBdDaemonRunning", func(t *testing.T) {
-		t.Setenv("LOOM_FLEETDB_ENABLED", "false")
+		t.Setenv("LOOM_ISSUE_BACKEND", "beads")
 		deps, _, execR, _, _ := NewTestDeps(t)
 
 		// Mock: daemon already running
@@ -250,7 +250,7 @@ func TestEnsureIssueBackendRunning(t *testing.T) {
 	})
 
 	t.Run("beads with daemon not running delegates start", func(t *testing.T) {
-		t.Setenv("LOOM_FLEETDB_ENABLED", "false")
+		t.Setenv("LOOM_ISSUE_BACKEND", "beads")
 		deps, _, execR, _, _ := NewTestDeps(t)
 
 		var statusCalls atomic.Int32

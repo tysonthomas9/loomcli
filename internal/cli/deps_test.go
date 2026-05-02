@@ -237,8 +237,8 @@ func TestDefaultDeps_NonNilFields(t *testing.T) {
 	if d.IssueBackend == nil {
 		t.Error("Tracker is nil")
 	}
-	if d.IssueBackend.BackendName() != "beads" {
-		t.Errorf("Tracker.BackendName() = %q, want beads", d.IssueBackend.BackendName())
+	if d.IssueBackend.BackendName() != "fleet-db" {
+		t.Errorf("Tracker.BackendName() = %q, want fleet-db", d.IssueBackend.BackendName())
 	}
 	if d.LookPath == nil {
 		t.Error("LookPath is nil")
@@ -522,8 +522,196 @@ func TestDefaultDeps_NoBDField(t *testing.T) {
 		}
 	}
 
-	// Verify Tracker is a bdBackend (backed by defaultBDRunnerImpl).
-	if d.IssueBackend.BackendName() != "beads" {
-		t.Errorf("Tracker.BackendName() = %q, want beads", d.IssueBackend.BackendName())
+	// Verify IssueBackend defaults to fleet-db, without constructing a bd adapter.
+	if d.IssueBackend.BackendName() != "fleet-db" {
+		t.Errorf("Tracker.BackendName() = %q, want fleet-db", d.IssueBackend.BackendName())
 	}
+}
+
+func TestDefaultDeps_DefaultsToFleetDB(t *testing.T) {
+	t.Setenv("LOOM_ISSUE_BACKEND", "")
+	t.Setenv("LOOM_FLEETDB_ENABLED", "")
+
+	d := DefaultDeps()
+	if got := d.IssueBackend.BackendName(); got != "fleet-db" {
+		t.Fatalf("DefaultDeps IssueBackend = %q, want fleet-db", got)
+	}
+}
+
+func TestDefaultDeps_FleetConstructionFailureFailsClosed(t *testing.T) {
+	t.Setenv("LOOM_ISSUE_BACKEND", "fleet")
+
+	d := DefaultDeps()
+	if got := d.IssueBackend.BackendName(); got != "fleet-unavailable" {
+		t.Fatalf("DefaultDeps IssueBackend = %q, want fleet-unavailable", got)
+	}
+	_, err := d.IssueBackend.Ready(context.Background(), backend.ReadyOpts{})
+	if !backend.IsKind(err, backend.KindUnavailable) {
+		t.Fatalf("Ready error = %v, want unavailable", err)
+	}
+}
+
+func TestDefaultDeps_APIConstructionFailureFailsClosed(t *testing.T) {
+	t.Setenv("LOOM_ISSUE_BACKEND", "api")
+	t.Setenv("LOOM_SERVER_URL", "")
+
+	d := DefaultDeps()
+	if got := d.IssueBackend.BackendName(); got != "api-unavailable" {
+		t.Fatalf("DefaultDeps IssueBackend = %q, want api-unavailable", got)
+	}
+	_, err := d.IssueBackend.Ready(context.Background(), backend.ReadyOpts{})
+	if !backend.IsKind(err, backend.KindUnavailable) {
+		t.Fatalf("Ready error = %v, want unavailable", err)
+	}
+}
+
+func TestDefaultDeps_ExplicitBeadsStillUsesBeadsAdapter(t *testing.T) {
+	t.Setenv("LOOM_ISSUE_BACKEND", "beads")
+
+	d := DefaultDeps()
+	if got := d.IssueBackend.BackendName(); got != "beads" {
+		t.Fatalf("DefaultDeps IssueBackend = %q, want beads", got)
+	}
+}
+
+func TestUnavailableIssueBackend_AllMethodsFailClosed(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	ib := newUnavailableIssueBackend("test", fmt.Errorf("boom"))
+
+	if got := ib.BackendName(); got != "test-unavailable" {
+		t.Fatalf("BackendName() = %q, want test-unavailable", got)
+	}
+
+	assertUnavailable := func(name string, err error) {
+		t.Helper()
+		if !backend.IsKind(err, backend.KindUnavailable) {
+			t.Fatalf("%s error = %v, want unavailable", name, err)
+		}
+	}
+
+	_, err := ib.Get(ctx, "T-1")
+	assertUnavailable("Get", err)
+	_, err = ib.List(ctx, backend.ListOpts{})
+	assertUnavailable("List", err)
+	_, err = ib.Ready(ctx, backend.ReadyOpts{})
+	assertUnavailable("Ready", err)
+	_, err = ib.Blocked(ctx, backend.BlockedOpts{})
+	assertUnavailable("Blocked", err)
+	_, err = ib.Stats(ctx)
+	assertUnavailable("Stats", err)
+	_, err = ib.Count(ctx, backend.CountOpts{})
+	assertUnavailable("Count", err)
+	_, err = ib.GetChildren(ctx, "T-1")
+	assertUnavailable("GetChildren", err)
+	_, err = ib.SearchIssues(ctx, "query", 10)
+	assertUnavailable("SearchIssues", err)
+	_, err = ib.Create(ctx, backend.CreateParams{})
+	assertUnavailable("Create", err)
+	assertUnavailable("Update", ib.Update(ctx, "T-1", backend.UpdateParams{}))
+	assertUnavailable("ClaimIssue", ib.ClaimIssue(ctx, "T-1", time.Minute))
+	assertUnavailable("DeferIssue", ib.DeferIssue(ctx, "T-1", time.Now()))
+	assertUnavailable("UndeferIssue", ib.UndeferIssue(ctx, "T-1"))
+	_, err = ib.Close(ctx, "T-1", backend.CloseParams{})
+	assertUnavailable("Close", err)
+	assertUnavailable("Reopen", ib.Reopen(ctx, "T-1", backend.ReopenParams{}))
+	assertUnavailable("Delete", ib.Delete(ctx, backend.DeleteParams{}))
+	assertUnavailable("AddDependency", ib.AddDependency(ctx, backend.DepAddParams{}))
+	assertUnavailable("RemoveDependency", ib.RemoveDependency(ctx, backend.DepRemoveParams{}))
+	assertUnavailable("AddLabel", ib.AddLabel(ctx, "T-1", "label"))
+	assertUnavailable("RemoveLabel", ib.RemoveLabel(ctx, "T-1", "label"))
+	_, err = ib.ListComments(ctx, "T-1")
+	assertUnavailable("ListComments", err)
+	_, err = ib.AddComment(ctx, backend.CommentAddParams{})
+	assertUnavailable("AddComment", err)
+	_, err = ib.ListEvents(ctx, "T-1", 10)
+	assertUnavailable("ListEvents", err)
+	_, err = ib.Batch(ctx, []backend.BatchOp{})
+	assertUnavailable("Batch", err)
+	_, err = ib.GetMutations(ctx, 0)
+	assertUnavailable("GetMutations", err)
+	_, err = ib.WaitForMutations(ctx, 0, 1)
+	assertUnavailable("WaitForMutations", err)
+}
+
+func TestFleetDBActorPreference(t *testing.T) {
+	t.Setenv("LOOM_FLEET_DB_ACTOR", "fleet-actor")
+	t.Setenv("LOOM_AGENT_NAME", "agent-name")
+	t.Setenv("USER", "user-name")
+	if got := fleetDBActor(); got != "fleet-actor" {
+		t.Fatalf("fleetDBActor() = %q, want fleet-actor", got)
+	}
+
+	t.Setenv("LOOM_FLEET_DB_ACTOR", "")
+	if got := fleetDBActor(); got != "agent-name" {
+		t.Fatalf("fleetDBActor() = %q, want agent-name", got)
+	}
+
+	t.Setenv("LOOM_AGENT_NAME", "")
+	if got := fleetDBActor(); got != "user-name" {
+		t.Fatalf("fleetDBActor() = %q, want user-name", got)
+	}
+}
+
+func TestFleetDBIssueBackend_FailsClosedWhenStoreUnavailable(t *testing.T) {
+	t.Setenv("FLEET_DB_BIN", "/missing/fleet-db")
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+
+	ctx := context.Background()
+	ib := newFleetDBIssueBackend()
+
+	if got := ib.BackendName(); got != "fleet-db" {
+		t.Fatalf("BackendName() = %q, want fleet-db", got)
+	}
+
+	assertUnavailable := func(name string, err error) {
+		t.Helper()
+		if !backend.IsKind(err, backend.KindUnavailable) {
+			t.Fatalf("%s error = %v, want unavailable", name, err)
+		}
+	}
+
+	_, err := ib.Get(ctx, "T-1")
+	assertUnavailable("Get", err)
+	_, err = ib.List(ctx, backend.ListOpts{})
+	assertUnavailable("List", err)
+	_, err = ib.Ready(ctx, backend.ReadyOpts{})
+	assertUnavailable("Ready", err)
+	_, err = ib.Blocked(ctx, backend.BlockedOpts{})
+	assertUnavailable("Blocked", err)
+	_, err = ib.Stats(ctx)
+	assertUnavailable("Stats", err)
+	_, err = ib.Count(ctx, backend.CountOpts{})
+	assertUnavailable("Count", err)
+	_, err = ib.GetChildren(ctx, "T-1")
+	assertUnavailable("GetChildren", err)
+	_, err = ib.SearchIssues(ctx, "query", 10)
+	assertUnavailable("SearchIssues", err)
+	_, err = ib.Create(ctx, backend.CreateParams{})
+	assertUnavailable("Create", err)
+	assertUnavailable("Update", ib.Update(ctx, "T-1", backend.UpdateParams{}))
+	assertUnavailable("ClaimIssue", ib.ClaimIssue(ctx, "T-1", time.Minute))
+	assertUnavailable("DeferIssue", ib.DeferIssue(ctx, "T-1", time.Now()))
+	assertUnavailable("UndeferIssue", ib.UndeferIssue(ctx, "T-1"))
+	_, err = ib.Close(ctx, "T-1", backend.CloseParams{})
+	assertUnavailable("Close", err)
+	assertUnavailable("Reopen", ib.Reopen(ctx, "T-1", backend.ReopenParams{}))
+	assertUnavailable("Delete", ib.Delete(ctx, backend.DeleteParams{}))
+	assertUnavailable("AddDependency", ib.AddDependency(ctx, backend.DepAddParams{}))
+	assertUnavailable("RemoveDependency", ib.RemoveDependency(ctx, backend.DepRemoveParams{}))
+	assertUnavailable("AddLabel", ib.AddLabel(ctx, "T-1", "label"))
+	assertUnavailable("RemoveLabel", ib.RemoveLabel(ctx, "T-1", "label"))
+	_, err = ib.ListComments(ctx, "T-1")
+	assertUnavailable("ListComments", err)
+	_, err = ib.AddComment(ctx, backend.CommentAddParams{})
+	assertUnavailable("AddComment", err)
+	_, err = ib.ListEvents(ctx, "T-1", 10)
+	assertUnavailable("ListEvents", err)
+	_, err = ib.Batch(ctx, []backend.BatchOp{})
+	assertUnavailable("Batch", err)
+	_, err = ib.GetMutations(ctx, 0)
+	assertUnavailable("GetMutations", err)
+	_, err = ib.WaitForMutations(ctx, 0, 1)
+	assertUnavailable("WaitForMutations", err)
 }

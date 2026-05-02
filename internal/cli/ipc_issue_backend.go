@@ -172,12 +172,13 @@ func (b *ipcIssueBackend) BackendName() string {
 	return "ipc:" + b.fallback.BackendName()
 }
 
-// resolveFallbackBackend encapsulates the defaultDeps.IssueBackend ?? newCliBeadsAdapter() logic.
+// resolveFallbackBackend returns the active default issue backend. It must not
+// silently instantiate beads; DefaultDeps owns explicit backend selection.
 func resolveFallbackBackend() backend.IssueBackend {
 	if t := defaultDeps.IssueBackend; t != nil {
 		return t
 	}
-	return newCliBeadsAdapter(defaultBDRunnerImpl{}, GetBeadsDir())
+	return newFleetDBIssueBackend()
 }
 
 // --- IPC types (merged from ipc_types.go) ---

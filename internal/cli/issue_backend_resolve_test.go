@@ -9,9 +9,9 @@ func TestResolveIssueBackendType(t *testing.T) {
 		t.Setenv("LOOM_FLEETDB_ENABLED", "")
 		got := resolveIssueBackendType()
 		// Empty string is treated as unset — falls through to project/global config.
-		// With no config files matching, defaults to "beads".
-		if got != "beads" {
-			t.Errorf("resolveIssueBackendType() = %q, want %q", got, "beads")
+		// With no config files matching, defaults to "fleetdb".
+		if got != "fleetdb" {
+			t.Errorf("resolveIssueBackendType() = %q, want %q", got, "fleetdb")
 		}
 	})
 
@@ -31,27 +31,27 @@ func TestResolveIssueBackendType(t *testing.T) {
 		}
 	})
 
-	t.Run("env var false returns beads", func(t *testing.T) {
+	t.Run("env var false returns fleetdb default", func(t *testing.T) {
 		t.Setenv("LOOM_FLEETDB_ENABLED", "false")
 		got := resolveIssueBackendType()
-		if got != "beads" {
-			t.Errorf("resolveIssueBackendType() = %q, want %q", got, "beads")
+		if got != "fleetdb" {
+			t.Errorf("resolveIssueBackendType() = %q, want %q", got, "fleetdb")
 		}
 	})
 
-	t.Run("env var 0 returns beads", func(t *testing.T) {
+	t.Run("env var 0 returns fleetdb default", func(t *testing.T) {
 		t.Setenv("LOOM_FLEETDB_ENABLED", "0")
 		got := resolveIssueBackendType()
-		if got != "beads" {
-			t.Errorf("resolveIssueBackendType() = %q, want %q", got, "beads")
+		if got != "fleetdb" {
+			t.Errorf("resolveIssueBackendType() = %q, want %q", got, "fleetdb")
 		}
 	})
 
-	t.Run("env var invalid returns beads", func(t *testing.T) {
+	t.Run("env var invalid returns fleetdb default", func(t *testing.T) {
 		t.Setenv("LOOM_FLEETDB_ENABLED", "garbage")
 		got := resolveIssueBackendType()
-		if got != "beads" {
-			t.Errorf("resolveIssueBackendType() = %q, want %q", got, "beads")
+		if got != "fleetdb" {
+			t.Errorf("resolveIssueBackendType() = %q, want %q", got, "fleetdb")
 		}
 	})
 }
@@ -64,10 +64,10 @@ func TestIsFleetDBActive(t *testing.T) {
 		}
 	})
 
-	t.Run("returns false when beads", func(t *testing.T) {
+	t.Run("returns true when fleetdb default", func(t *testing.T) {
 		t.Setenv("LOOM_FLEETDB_ENABLED", "false")
-		if isFleetDBActive() {
-			t.Error("expected isFleetDBActive() to return false")
+		if !isFleetDBActive() {
+			t.Error("expected isFleetDBActive() to return true")
 		}
 	})
 }
@@ -101,9 +101,9 @@ func TestResolveIssueBackendType_BeadsEnvVar_BeatsFleetDB(t *testing.T) {
 func TestResolveIssueBackendType_InvalidEnvVar(t *testing.T) {
 	t.Setenv("LOOM_ISSUE_BACKEND", "postgres")
 	got := resolveIssueBackendType()
-	// Invalid value is ignored (with a warning log); falls through to default "beads"
-	if got != "beads" {
-		t.Errorf("resolveIssueBackendType() = %q, want %q (invalid LOOM_ISSUE_BACKEND should fall through to default)", got, "beads")
+	// Invalid value is ignored (with a warning log); falls through to default "fleetdb"
+	if got != "fleetdb" {
+		t.Errorf("resolveIssueBackendType() = %q, want %q (invalid LOOM_ISSUE_BACKEND should fall through to default)", got, "fleetdb")
 	}
 }
 
@@ -139,7 +139,7 @@ func TestIsFleetActive(t *testing.T) {
 	})
 
 	t.Run("returns false by default", func(t *testing.T) {
-		// No env vars set; defaults to beads
+		// No env vars set; defaults to fleetdb, not fleet mode.
 		if isFleetActive() {
 			t.Error("expected isFleetActive() to return false by default")
 		}

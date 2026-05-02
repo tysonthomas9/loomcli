@@ -21,6 +21,14 @@ type ClaudeBackend = backends.ClaudeBackend
 type CodexBackend = backends.CodexBackend
 type MockExecRunner = clitest.MockExecRunner
 
+type testBDRunner struct {
+	exec cli.ExecRunner
+}
+
+func (r testBDRunner) Run(dir string, args ...string) cli.CommandResult {
+	return r.exec.Run(dir, "bd", args...)
+}
+
 const (
 	LockFileName = cli.LockFileName
 	StateActive  = cli.StateActive
@@ -61,8 +69,15 @@ func installExecMock(t *testing.T, m *clitest.MockExecRunner) {
 	t.Helper()
 	dd := cli.TestingGetDefaultDeps()
 	orig := dd.Exec
+	origIssueBackend := dd.IssueBackend
 	dd.Exec = m
-	t.Cleanup(func() { dd.Exec = orig })
+	dd.IssueBackend = cli.TestingNewCliBeadsAdapter(testBDRunner{exec: m}, cli.GetBeadsDir())
+	cli.ResetDefaultIssueBackend()
+	t.Cleanup(func() {
+		dd.Exec = orig
+		dd.IssueBackend = origIssueBackend
+		cli.ResetDefaultIssueBackend()
+	})
 }
 
 func installClaudeNonInteractiveMock(t *testing.T, fn func(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error) {

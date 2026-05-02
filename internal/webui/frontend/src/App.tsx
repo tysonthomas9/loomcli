@@ -678,6 +678,14 @@ function App() {
     navigateToView("terminal");
   }, [navigateToView]);
 
+  const handleTerminalEscape = useCallback(() => {
+    if (window.history.length > 1) {
+      navigate(-1);
+    } else {
+      navigateToView("kanban");
+    }
+  }, [navigate, navigateToView]);
+
   const handleIssueContextConsumed = useCallback(() => {
     setPendingIssueContext(undefined);
   }, []);
@@ -1040,6 +1048,7 @@ function App() {
                   showToast(message, { type: "error" })
                 }
                 onNavigateToSettings={() => navigateToView("settings")}
+                onEscape={handleTerminalEscape}
               />
             </Suspense>
           </div>

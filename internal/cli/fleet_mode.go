@@ -27,7 +27,7 @@ const fleetModeEnvVar = "LOOM_ISSUE_BACKEND"
 //  1. LOOM_ISSUE_BACKEND=fleet env var (highest — useful for testing before config support lands)
 //  2. cfg.Backend == "fleet" (config field — added by sibling task .3; currently unused)
 //
-// Returns false for nil config and empty Backend (safe default = beads mode).
+// Returns false for nil config and empty Backend; fleet-db is not fleet mode.
 func IsFleetMode(cfg *config.DaemonConfig) bool {
 	if os.Getenv(fleetModeEnvVar) == BackendFleet {
 		return true

@@ -29,6 +29,14 @@ type MockGitRunner = clitest.MockGitRunner
 type MockFileSystem = clitest.MockFileSystem
 type MockAgentInvoker = clitest.MockAgentInvoker
 
+type testBDRunner struct {
+	exec cli.ExecRunner
+}
+
+func (r testBDRunner) Run(dir string, args ...string) cli.CommandResult {
+	return r.exec.Run(dir, "bd", args...)
+}
+
 const LockFileName = cli.LockFileName
 
 var (
@@ -54,8 +62,15 @@ func installExecMock(t *testing.T, m *clitest.MockExecRunner) {
 	t.Helper()
 	dd := cli.TestingGetDefaultDeps()
 	orig := dd.Exec
+	origIssueBackend := dd.IssueBackend
 	dd.Exec = m
-	t.Cleanup(func() { dd.Exec = orig })
+	dd.IssueBackend = cli.TestingNewCliBeadsAdapter(testBDRunner{exec: m}, cli.GetBeadsDir())
+	cli.ResetDefaultIssueBackend()
+	t.Cleanup(func() {
+		dd.Exec = orig
+		dd.IssueBackend = origIssueBackend
+		cli.ResetDefaultIssueBackend()
+	})
 }
 
 var (
@@ -152,13 +167,33 @@ func (m *CommandMock) Install() {
 func (m *CommandMock) InstallOn(deps *cli.Deps) {
 	origExec := deps.Exec
 	origGit := deps.Git
+	origIssueBackend := deps.IssueBackend
 	deps.Exec = m
 	deps.Git = &clitest.ExecBridgeGitRunner{Exec: m}
+	if m.hasBDStubs() {
+		deps.IssueBackend = cli.TestingNewCliBeadsAdapter(testBDRunner{exec: m}, cli.GetBeadsDir())
+	} else if deps == cli.TestingGetDefaultDeps() {
+		if _, ok := origIssueBackend.(*clitest.MockIssueBackend); !ok {
+			deps.IssueBackend = clitest.NewMockIssueBackend()
+		}
+	}
+	cli.ResetDefaultIssueBackend()
 	m.t.Cleanup(func() {
 		m.Verify()
 		deps.Exec = origExec
 		deps.Git = origGit
+		deps.IssueBackend = origIssueBackend
+		cli.ResetDefaultIssueBackend()
 	})
+}
+
+func (m *CommandMock) hasBDStubs() bool {
+	for _, stub := range m.stubs {
+		if stub.Name == "bd" {
+			return true
+		}
+	}
+	return false
 }
 
 type OutputCommandMock struct {

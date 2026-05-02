@@ -137,9 +137,9 @@ export const TerminalInstance = forwardRef<
   );
 
   const disableRendererBottomFollow = useCallback(() => {
-    const instance = wtermRef.current?.instance as unknown as
-      | { _shouldScrollToBottom?: boolean }
-      | null;
+    const instance = wtermRef.current?.instance as unknown as {
+      _shouldScrollToBottom?: boolean;
+    } | null;
     if (instance) {
       instance._shouldScrollToBottom = false;
     }
@@ -424,21 +424,24 @@ export const TerminalInstance = forwardRef<
     [],
   );
 
-  const handleReady = useCallback((wt: WTerm) => {
-    wtermReadyRef.current = true;
-    if (ptyAlive === false) {
-      setConnectionState("session_ended");
-      return;
-    }
-    const measured = measureTerminalSize(wt);
-    if (measured) {
-      terminalSizeRef.current = measured;
-      if (wt.cols !== measured.cols || wt.rows !== measured.rows) {
-        wt.resize(measured.cols, measured.rows);
+  const handleReady = useCallback(
+    (wt: WTerm) => {
+      wtermReadyRef.current = true;
+      if (ptyAlive === false) {
+        setConnectionState("session_ended");
+        return;
       }
-    }
-    doConnectRef.current?.();
-  }, [measureTerminalSize, ptyAlive]);
+      const measured = measureTerminalSize(wt);
+      if (measured) {
+        terminalSizeRef.current = measured;
+        if (wt.cols !== measured.cols || wt.rows !== measured.rows) {
+          wt.resize(measured.cols, measured.rows);
+        }
+      }
+      doConnectRef.current?.();
+    },
+    [measureTerminalSize, ptyAlive],
+  );
 
   const handleData = useCallback((data: string) => {
     const ws = wsRef.current;

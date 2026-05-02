@@ -16,9 +16,8 @@ import (
 // backend based on the workspace ID carried on ctx. In cloud mode
 // (LOOM_FLEET_DB_URL set) it builds (and caches) a fleet-db backend per
 // workspace so /api/workspaces/{ws}/... handlers see workspace-scoped data
-// instead of the single process-global beads backend. Falls back to
-// DefaultIssueBackend when ctx has no workspace or the env var is unset
-// — preserves legacy single-workspace beads behavior.
+// instead of the process-global default backend. Falls back to
+// DefaultIssueBackend when ctx has no workspace or the env var is unset.
 func WorkspaceAwareIssueBackend() func(ctx context.Context) backend.IssueBackend {
 	return WorkspaceAwareIssueBackendForURL(os.Getenv(bootstrap.EnvFleetDBURL), os.Getenv(bootstrap.EnvFleetDBActor))
 }
@@ -28,8 +27,7 @@ func WorkspaceAwareIssueBackend() func(ctx context.Context) backend.IssueBackend
 // fleet-db is running but LOOM_FLEET_DB_URL intentionally remains unset.
 func WorkspaceAwareIssueBackendForURL(fleetURL, actor string) func(ctx context.Context) backend.IssueBackend {
 	if fleetURL == "" {
-		// Local/beads mode: ctx-aware factory degenerates to the global
-		// backend. Single-workspace beads doesn't multiplex on ctx.
+		// Local mode: ctx-aware factory degenerates to the global backend.
 		return func(_ context.Context) backend.IssueBackend {
 			return DefaultIssueBackend()
 		}
@@ -59,8 +57,8 @@ func WorkspaceAwareIssueBackendForURL(fleetURL, actor string) func(ctx context.C
 			Actor:       actor,
 		})
 		if err != nil {
-			slog.Warn("workspace fleet backend construction failed", "ws", wsID, "err", err)
-			return DefaultIssueBackend()
+			slog.Error("workspace fleet backend construction failed", "ws", wsID, "err", err)
+			return newUnavailableIssueBackend(IssueBackendFleetDB, err)
 		}
 		cache[wsID] = fb
 		return fb

@@ -3,6 +3,7 @@ import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import type { IssueContext } from "@/hooks/api";
 import { patchTerminalState } from "@/hooks/api";
 import { LoadingSkeleton } from "@/components";
+import { LAYER_TERMINAL_PANEL, useRegisterEscapeLayer } from "@/hooks";
 import { useBackendConfig } from "@/hooks/workspace";
 import { useSessionRestore, useTerminalMetadata } from "@/hooks/terminal";
 
@@ -41,6 +42,7 @@ interface TerminalViewProps {
   onUnreadChange?: (hasAnyUnread: boolean) => void;
   onTabLimitReached?: (message: string) => void;
   onNavigateToSettings?: () => void;
+  onEscape?: () => void;
   /** When set, opens or focuses an agent's terminal tab. */
   pendingAgentName?: string | undefined;
   /** Called after pendingAgentName has been processed. */
@@ -55,6 +57,7 @@ export function TerminalView({
   onUnreadChange,
   onTabLimitReached,
   onNavigateToSettings,
+  onEscape,
   pendingAgentName,
   onAgentNameConsumed,
 }: TerminalViewProps): JSX.Element {
@@ -316,6 +319,11 @@ export function TerminalView({
     onTabLimitReached: handleTabLimitReached,
     announce,
   });
+  useRegisterEscapeLayer(
+    LAYER_TERMINAL_PANEL,
+    () => onEscape?.(),
+    isActive && Boolean(onEscape),
+  );
 
   const handleBackendSelect = useCallback(
     (backend: string) => {

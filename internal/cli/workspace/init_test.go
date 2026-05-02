@@ -146,7 +146,8 @@ func TestCheckPrerequisites_NotGitRepo(t *testing.T) {
 }
 
 func TestCheckPrerequisites_NoBd(t *testing.T) {
-	t.Parallel()
+	useLegacyBeadsBackend(t)
+
 	deps, _, _, _, _ := NewTestDeps(t)
 	mock := NewCommandMock(t, []CommandStub{
 		{Name: "git", Args: []string{"rev-parse", "--is-inside-work-tree"}, Stdout: "true"},
@@ -163,7 +164,8 @@ func TestCheckPrerequisites_NoBd(t *testing.T) {
 }
 
 func TestCheckPrerequisites_Success(t *testing.T) {
-	t.Parallel()
+	useLegacyBeadsBackend(t)
+
 	deps, _, _, _, _ := NewTestDeps(t)
 	mock := NewCommandMock(t, []CommandStub{
 		{Name: "git", Args: []string{"rev-parse", "--is-inside-work-tree"}, Stdout: "true"},
@@ -180,6 +182,8 @@ func TestCheckPrerequisites_Success(t *testing.T) {
 }
 
 func TestInitBeads_AlreadyInitialized(t *testing.T) {
+	useLegacyBeadsBackend(t)
+
 	// Save and restore working directory
 	origDir, _ := os.Getwd()
 	defer os.Chdir(origDir)
@@ -200,6 +204,8 @@ func TestInitBeads_AlreadyInitialized(t *testing.T) {
 }
 
 func TestInitBeads_Initialize(t *testing.T) {
+	useLegacyBeadsBackend(t)
+
 	ResetBeadsDirCache()
 	defer ResetBeadsDirCache()
 
@@ -802,6 +808,8 @@ func TestShowSummary_EmptyNames(t *testing.T) {
 // --- Additional coverage tests ---
 
 func TestInitBeads_Failure(t *testing.T) {
+	useLegacyBeadsBackend(t)
+
 	ResetBeadsDirCache()
 	defer ResetBeadsDirCache()
 
@@ -847,6 +855,8 @@ func TestCreateSingleWorktree_RetryFails(t *testing.T) {
 
 func TestCheckPrerequisites_InsideWorktree(t *testing.T) {
 	// Not parallel: captures os.Stdout which is a global.
+	useLegacyBeadsBackend(t)
+
 	deps, _, _, _, _ := NewTestDeps(t)
 	mock := NewCommandMock(t, []CommandStub{
 		{Name: "git", Args: []string{"rev-parse", "--is-inside-work-tree"}, Stdout: "true"},

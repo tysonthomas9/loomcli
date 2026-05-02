@@ -7,7 +7,7 @@ import (
 
 func TestDefaultTracker_ReturnsNonNil(t *testing.T) {
 	// Ensure any previous test override is cleared so defaultIssueBackend()
-	// falls back to defaultDeps.IssueBackend (which DefaultDeps sets to a bdBackend).
+	// falls back to defaultDeps.IssueBackend.
 	resetDefaultIssueBackend()
 	t.Cleanup(resetDefaultIssueBackend)
 
@@ -54,7 +54,6 @@ func TestResetDefaultIssueBackend_ClearsOverride(t *testing.T) {
 	if got == nil {
 		t.Fatal("defaultIssueBackend() returned nil after resetDefaultIssueBackend")
 	}
-	// After reset, it should reinitialize from defaultDeps.IssueBackend which is a bdBackend ("beads").
 	if got.BackendName() == "will-be-cleared" {
 		t.Error("resetDefaultIssueBackend did not clear the override; still returning mock")
 	}
@@ -156,7 +155,6 @@ func TestDefaultTracker_LazyInitFromDefaultDeps(t *testing.T) {
 	resetDefaultIssueBackend()
 	t.Cleanup(resetDefaultIssueBackend)
 
-	// defaultDeps.IssueBackend is initialized by DefaultDeps() to a bdBackend.
 	tracker := defaultIssueBackend()
 	if tracker == nil {
 		t.Fatal("defaultIssueBackend() returned nil on lazy init")
