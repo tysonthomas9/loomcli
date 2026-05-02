@@ -160,6 +160,9 @@ func TestApplyWorkspaceConfig_NilStoreDoesNotWireLegacyFns(t *testing.T) {
 	if cfg.WorkspaceCreateFn != nil {
 		t.Fatal("WorkspaceCreateFn should not fall back to legacy create")
 	}
+	if cfg.DaemonConfigFn != nil {
+		t.Fatal("DaemonConfigFn should not fall back to legacy daemon config")
+	}
 }
 
 func TestApplyWorkspaceConfig_StoreWiresStoreBackedFns(t *testing.T) {
@@ -191,6 +194,9 @@ func TestApplyWorkspaceConfig_StoreWiresStoreBackedFns(t *testing.T) {
 	}
 	if cfg.WorkspaceCreateFn == nil {
 		t.Fatal("WorkspaceCreateFn was nil")
+	}
+	if cfg.DaemonConfigFn == nil {
+		t.Fatal("DaemonConfigFn was nil")
 	}
 }
 

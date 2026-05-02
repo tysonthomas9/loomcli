@@ -11,7 +11,10 @@ import {
   getCachedBackendConfig,
 } from "@/api/common";
 import type { BackendConfigData } from "@/api/common";
-import { getWorkspaceBackendConfig } from "@/api/workspace";
+import {
+  getWorkspaceBackendConfig,
+  updateWorkspaceBackend,
+} from "@/api/workspace";
 
 /**
  * Return type for the useBackendConfig hook.
@@ -107,7 +110,11 @@ export function useBackendConfig(workspaceId?: string): UseBackendConfigReturn {
       setError(null);
 
       try {
-        const updated = await updateBackendConfig(backend);
+        const updated = workspaceId
+          ? await updateWorkspaceBackend(workspaceId, backend).then(() =>
+              getWorkspaceBackendConfig(workspaceId),
+            )
+          : await updateBackendConfig(backend);
         if (mountedRef.current) {
           setConfig(updated);
         }
@@ -129,7 +136,7 @@ export function useBackendConfig(workspaceId?: string): UseBackendConfigReturn {
         }
       }
     },
-    [config],
+    [config, workspaceId],
   );
 
   return {

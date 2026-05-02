@@ -264,8 +264,12 @@ func validateIssueBackend(r *ValidationResult, ib string) {
 	if ib == "" {
 		return
 	}
+	if ib == IssueBackendBeads {
+		r.addError("daemon.issue_backend", `"beads" is no longer supported as an active backend; use "fleetdb" for local mode or "fleet" for remote mode, and run the beads-to-fleetdb migration/import flow for existing data`)
+		return
+	}
 	if !validIssueBackends[ib] {
-		r.addError("daemon.issue_backend", fmt.Sprintf("%q must be one of: beads, fleetdb, fleet", ib))
+		r.addError("daemon.issue_backend", fmt.Sprintf("%q must be one of: fleetdb, fleet", ib))
 	}
 }
 

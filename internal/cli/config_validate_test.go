@@ -1003,7 +1003,7 @@ func TestValidateProjectConfig_AgentRepoGroupsInvalidName(t *testing.T) {
 }
 
 func TestValidateIssueBackend_Valid(t *testing.T) {
-	for _, value := range []string{"beads", "fleetdb", "fleet", ""} {
+	for _, value := range []string{"fleetdb", "fleet", ""} {
 		t.Run(value, func(t *testing.T) {
 			r := &ValidationResult{}
 			validateIssueBackend(r, value)
@@ -1011,6 +1011,20 @@ func TestValidateIssueBackend_Valid(t *testing.T) {
 				t.Errorf("expected no issues for %q, got: %s", value, r.FormatIssues())
 			}
 		})
+	}
+}
+
+func TestValidateIssueBackend_RejectsBeads(t *testing.T) {
+	r := &ValidationResult{}
+	validateIssueBackend(r, "beads")
+	if len(r.Issues) != 1 {
+		t.Fatalf("expected 1 error, got %d: %s", len(r.Issues), r.FormatIssues())
+	}
+	if r.Issues[0].Severity != "error" {
+		t.Errorf("expected error severity, got %s", r.Issues[0].Severity)
+	}
+	if !strings.Contains(r.Issues[0].Message, "beads-to-fleetdb migration/import") {
+		t.Errorf("expected migration/import guidance, got %q", r.Issues[0].Message)
 	}
 }
 

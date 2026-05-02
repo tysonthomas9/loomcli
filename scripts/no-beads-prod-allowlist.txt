@@ -1,0 +1,15 @@
+internal/cli/config/project.go
+internal/cli/config_validate.go
+internal/cli/doctor/doctor_fleetdb.go
+internal/cli/fleetdb_server.go
+internal/cli/migrate/migrate_cmd.go
+internal/cli/migrate/migrate_to_fleet.go
+internal/cli/root.go
+internal/cli/serve/serve.go
+internal/webui/app/server_app.go
+internal/webui/appinfra/appinfra.go
+internal/webui/handlers/misc/auth_config.go
+internal/webui/health_doctor.go
+internal/webui/hooks/beads_pool.go
+internal/webui/server/realtime/backend_adapter.go
+internal/webui/server_config.go

@@ -1,6 +1,6 @@
 # Makefile for loomcli project
 
-.PHONY: all build build-frontend build-all test test-integration test-all test-parity test-parity-cli test-fleetdb-cli test-fleetdb-embedded test-fleetdb-supervisor test-parity-ui test-fleetdb-ui fleetdb-empty-up fleetdb-empty-down test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-e2e-api test-e2e-api-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install install-bd help frontend sync-beads update-beads check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-no-raw-exec test-coverage test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness
+.PHONY: all build build-frontend build-all test test-integration test-all test-parity test-parity-cli test-fleetdb-cli test-fleetdb-embedded test-fleetdb-supervisor test-parity-ui test-fleetdb-ui fleetdb-empty-up fleetdb-empty-down test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-e2e-api test-e2e-api-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install install-bd help frontend sync-beads update-beads check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-no-raw-exec check-no-beads-prod test-coverage test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness
 
 # Default target
 all: build
@@ -203,6 +203,10 @@ check-no-raw-exec:
 	@echo "Checking for raw exec.Command in unit tests..."
 	@./scripts/check-no-raw-exec.sh
 
+check-no-beads-prod:
+	@echo "Checking for new production beads/bd references..."
+	@./scripts/check-no-beads-prod.sh
+
 # Generate Go types from api/openapi.yaml using oapi-codegen (via a 3.1->3.0
 # preprocessor since oapi-codegen v2.6 does not yet fully support 3.1).
 OAPI_CODEGEN_VERSION := v2.6.0
@@ -329,30 +333,32 @@ update-beads:
 
 # Go-only quality gate (no Node, no frontend dist)
 check-go:
-	@echo "=== [1/12] Go: format check ==="
+	@echo "=== [1/13] Go: format check ==="
 	@bad=$$(gofmt -l . 2>/dev/null | grep -v third_party | grep -v worktrees | grep -v vendor | grep -v node_modules | head -20); \
 	if [ -n "$$bad" ]; then echo "gofmt violations:"; echo "$$bad"; exit 1; fi
-	@echo "=== [2/12] Go: vet ==="
+	@echo "=== [2/13] Go: vet ==="
 	@go vet ./...
-	@echo "=== [3/12] Go: build ==="
+	@echo "=== [3/13] Go: build ==="
 	@go build -buildvcs=false ./...
-	@echo "=== [4/12] Go: lint (golangci-lint + depguard) ==="
+	@echo "=== [4/13] Go: lint (golangci-lint + depguard) ==="
 	@golangci-lint run --timeout=5m --allow-parallel-runners
-	@echo "=== [5/12] Go: LOC check ==="
+	@echo "=== [5/13] Go: LOC check ==="
 	@./scripts/check-loc.sh 1000 2500
-	@echo "=== [6/12] Go: package size check ==="
+	@echo "=== [6/13] Go: package size check ==="
 	@./scripts/check-package-size.sh 25
-	@echo "=== [7/12] Go: import fanout check ==="
+	@echo "=== [7/13] Go: import fanout check ==="
 	@./scripts/check-import-fanout.sh 17
-	@echo "=== [8/12] Go: exec.Command guard ==="
+	@echo "=== [8/13] Go: exec.Command guard ==="
 	@./scripts/check-no-raw-exec.sh
-	@echo "=== [9/12] Go: log.Printf guard ==="
+	@echo "=== [9/13] Go: log.Printf guard ==="
 	@./scripts/check-no-log-printf.sh
-	@echo "=== [10/12] Go: generated API staleness ==="
+	@echo "=== [10/13] Go: no new production beads/bd references ==="
+	@./scripts/check-no-beads-prod.sh
+	@echo "=== [11/13] Go: generated API staleness ==="
 	@./scripts/check-go-api-staleness.sh
-	@echo "=== [11/12] Go: test with race detector ==="
+	@echo "=== [12/13] Go: test with race detector ==="
 	@go test -p 1 -race -covermode=atomic -coverprofile=/tmp/loom.coverage.out -timeout 15m ./...
-	@echo "=== [12/12] Go: coverage threshold ==="
+	@echo "=== [13/13] Go: coverage threshold ==="
 	@COVERAGE_THRESHOLD=60 ./scripts/check-coverage.sh
 	@echo "=== Go quality gates PASSED ==="
 

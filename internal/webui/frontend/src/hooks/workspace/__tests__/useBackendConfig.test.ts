@@ -14,7 +14,10 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 import { getBackendConfig, updateBackendConfig } from "@/api/common";
 import type { BackendConfigData } from "@/api/common";
-import { getWorkspaceBackendConfig } from "@/api/workspace";
+import {
+  getWorkspaceBackendConfig,
+  updateWorkspaceBackend,
+} from "@/api/workspace";
 
 import { useBackendConfig } from "../useBackendConfig";
 
@@ -27,11 +30,13 @@ vi.mock("@/api/common", () => ({
 
 vi.mock("@/api/workspace", () => ({
   getWorkspaceBackendConfig: vi.fn(),
+  updateWorkspaceBackend: vi.fn(),
 }));
 
 const mockGetBackendConfig = vi.mocked(getBackendConfig);
 const mockUpdateBackendConfig = vi.mocked(updateBackendConfig);
 const mockGetWorkspaceBackendConfig = vi.mocked(getWorkspaceBackendConfig);
+const mockUpdateWorkspaceBackend = vi.mocked(updateWorkspaceBackend);
 
 function createMockConfig(
   overrides?: Partial<BackendConfigData>,
@@ -552,6 +557,31 @@ describe("useBackendConfig", () => {
       await flushPromises();
 
       expect(result.current.error).toBe("503 daemon unavailable");
+    });
+
+    it("updates via workspace-scoped endpoint when workspaceId is provided", async () => {
+      const initial = createMockConfig({ backend: "claude" });
+      const updated = createMockConfig({ backend: "codex" });
+      mockGetWorkspaceBackendConfig
+        .mockResolvedValueOnce(initial)
+        .mockResolvedValueOnce(updated);
+      mockUpdateWorkspaceBackend.mockResolvedValueOnce({} as never);
+
+      const { result } = renderHook(() => useBackendConfig("ws-fleet-1"));
+      await flushPromises();
+
+      let ok = false;
+      await act(async () => {
+        ok = await result.current.updateBackend("codex");
+      });
+
+      expect(ok).toBe(true);
+      expect(mockUpdateWorkspaceBackend).toHaveBeenCalledWith(
+        "ws-fleet-1",
+        "codex",
+      );
+      expect(mockUpdateBackendConfig).not.toHaveBeenCalled();
+      expect(result.current.config).toEqual(updated);
     });
   });
 });

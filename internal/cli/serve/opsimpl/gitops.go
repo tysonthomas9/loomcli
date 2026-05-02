@@ -1,21 +1,36 @@
 package opsimpl
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/git"
+	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/ops"
+	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/webui/storeadapter"
 )
 
 // GitOpsImpl implements ops.GitOps using the cli package git functions.
-type GitOpsImpl struct{}
+type GitOpsImpl struct {
+	store store.Store
+}
 
 // NewGitOps creates a new GitOps implementation.
 func NewGitOps() *GitOpsImpl {
 	return &GitOpsImpl{}
+}
+
+// WithStore enables FleetDB-backed workspace/agent worktree resolution.
+func (g *GitOpsImpl) WithStore(s store.Store) *GitOpsImpl {
+	g.store = s
+	return g
 }
 
 // resolveWorkspaceConfigName translates a workspace ID (which may be a UUID or a
@@ -52,6 +67,10 @@ func scopeResolverToWorkspace(resolver *cli.Resolver, workspaceID string) error 
 }
 
 func (g *GitOpsImpl) ResolveAgentWorktree(workspaceID, name string) (*ops.AgentWorktree, error) {
+	if aw, err := g.resolveAgentWorktreeFromStore(context.Background(), workspaceID, name); err == nil || !errors.Is(err, domain.ErrNotFound) {
+		return aw, err
+	}
+
 	resolver, err := cli.NewResolver()
 	if err != nil {
 		return nil, fmt.Errorf("creating resolver: %v", err)
@@ -69,6 +88,86 @@ func (g *GitOpsImpl) ResolveAgentWorktree(workspaceID, name string) (*ops.AgentW
 
 	aw := toAgentWorktree(wt)
 	return &aw, nil
+}
+
+func (g *GitOpsImpl) resolveAgentWorktreeFromStore(ctx context.Context, workspaceID, name string) (*ops.AgentWorktree, error) {
+	if g == nil || g.store == nil || workspaceID == "" || name == "" {
+		return nil, domain.ErrNotFound
+	}
+	ws, err := storeadapter.BuildWorkspaceDataForKey(ctx, g.store, workspaceID)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return nil, err
+		}
+		return nil, fmt.Errorf("load fleet-db workspace %q: %w", workspaceID, err)
+	}
+	var agent *ops.WorkspaceAgentInfo
+	for i := range ws.Agents {
+		if ws.Agents[i].Name == name {
+			agent = &ws.Agents[i]
+			break
+		}
+	}
+	if agent == nil {
+		return nil, fmt.Errorf("agent %q in workspace %q: %w", name, workspaceID, domain.ErrNotFound)
+	}
+	repo, err := selectAgentRepo(ws.Repos, *agent)
+	if err != nil {
+		return nil, err
+	}
+	wtPath := filepath.Join(ws.Path, "worktrees", repo.Name, name)
+	if _, err := os.Stat(filepath.Join(wtPath, ".git")); err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("agent %q worktree for repo %q is not checked out on this machine at %s", name, repo.Name, wtPath)
+		}
+		return nil, fmt.Errorf("inspect agent %q worktree: %w", name, err)
+	}
+	branch, err := cli.GetCurrentBranch(wtPath)
+	if err != nil {
+		return nil, fmt.Errorf("get current branch for agent %q: %w", name, err)
+	}
+	db := repo.DefaultBranch
+	if db == "" {
+		db = "main"
+	}
+	return &ops.AgentWorktree{
+		Name:          name,
+		Path:          wtPath,
+		Branch:        branch,
+		DefaultBranch: db,
+		Remote:        repo.Remote,
+		RepoName:      repo.Name,
+		IsWorkspace:   true,
+	}, nil
+}
+
+func selectAgentRepo(repos []ops.WorkspaceRepo, agent ops.WorkspaceAgentInfo) (ops.WorkspaceRepo, error) {
+	if len(repos) == 0 {
+		return ops.WorkspaceRepo{}, fmt.Errorf("workspace has no repos for agent %q", agent.Name)
+	}
+	allowed := make(map[string]bool)
+	for _, name := range agent.Repos {
+		allowed[name] = true
+	}
+	for _, group := range agent.RepoGroups {
+		for _, repo := range repos {
+			for _, repoGroup := range repo.Groups {
+				if repoGroup == group {
+					allowed[repo.Name] = true
+					break
+				}
+			}
+		}
+	}
+	if len(allowed) == 0 {
+		return repos[0], nil
+	}
+	for _, repo := range repos {
+		if allowed[repo.Name] {
+			return repo, nil
+		}
+	}
+	return ops.WorkspaceRepo{}, fmt.Errorf("agent %q repo affinity does not match any workspace repo", agent.Name)
 }
 
 func (g *GitOpsImpl) Push(worktreePath, sourceBranch, targetBranch, remote string) (*ops.GitPushResult, error) {

@@ -372,6 +372,7 @@ func buildServerConfig(monitorHandlers webui.MonitorHandlers, fs fleetState, sto
 	cfg := buildCoreServerConfig(monitorHandlers, gitOps, resolvedBackend)
 	if storeHandle != nil {
 		cfg.Store = storeHandle.Store
+		gitOps.WithStore(storeHandle.Store)
 		if url := storeHandle.URL(); url != "" {
 			cfg.IssueBackendFn = cli.WorkspaceAwareIssueBackendForURL(url, fs.clientCfg.Actor)
 		}
@@ -455,6 +456,7 @@ func applyWorkspaceConfig(cfg *webui.ServerConfig) {
 	cfg.ClearDefaultWorkspaceFn = serveadapter.BuildClearDefaultWorkspaceFn()
 	cfg.WorkspaceCreateFn = workspacemgr.BuildStoreBackedCreateWorkspace(cfg.Store)
 	cfg.WorkspaceAddReposFn = workspacemgr.BuildStoreBackedAddRepos(cfg.Store)
+	cfg.DaemonConfigFn = daemonwire.BuildStoreBackedDaemonConfigFn(cfg.Store)
 }
 
 func applyFleetInitialWorkspaceFallback(cfg *webui.ServerConfig, force bool) {

@@ -2,6 +2,7 @@ package daemonwire
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -11,9 +12,12 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/daemon"
+	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/agentcontrol"
 )
@@ -171,6 +175,175 @@ func BuildDaemonConfigFn() func() (json.RawMessage, error) {
 		}
 		return json.RawMessage(data), nil
 	}
+}
+
+// BuildStoreBackedDaemonConfigFn returns the effective daemon config for the
+// active FleetDB workspace. It preserves the legacy JSON shape consumed by the
+// WebUI while sourcing agents, roles, and profile settings from store data.
+func BuildStoreBackedDaemonConfigFn(s store.Store) func() (json.RawMessage, error) {
+	if s == nil {
+		return nil
+	}
+	return func() (json.RawMessage, error) {
+		ctx := context.Background()
+		wsKey, err := bootstrap.ResolveActiveWorkspaceKey(ctx, s.Workspaces())
+		if err != nil {
+			return nil, fmt.Errorf("resolve active workspace: %w", err)
+		}
+		cfg, err := daemonConfigFromStore(ctx, s, wsKey)
+		if err != nil {
+			return nil, err
+		}
+		data, err := json.Marshal(cfg)
+		if err != nil {
+			return nil, fmt.Errorf("marshal daemon config: %w", err)
+		}
+		return json.RawMessage(data), nil
+	}
+}
+
+func daemonConfigFromStore(ctx context.Context, s store.Store, wsKey string) (*config.DaemonConfig, error) {
+	profile, err := s.Daemon().Get(ctx, wsKey)
+	if err != nil {
+		return nil, fmt.Errorf("get daemon profile: %w", err)
+	}
+	roles, err := s.Roles().List(ctx, wsKey)
+	if err != nil {
+		return nil, fmt.Errorf("list roles: %w", err)
+	}
+	agents, err := s.Agents().List(ctx, wsKey)
+	if err != nil {
+		return nil, fmt.Errorf("list agents: %w", err)
+	}
+
+	cfg := &config.DaemonConfig{
+		Daemon: daemonSettingsFromProfile(profile),
+		Roles:  make(map[string]config.RoleConfig, len(roles)),
+		Agents: make([]config.AgentEntry, 0, len(agents)),
+	}
+	cfg.Backend = cfg.Daemon.IssueBackend
+	for _, r := range roles {
+		cfg.Roles[r.Name] = roleConfigFromDomain(r)
+	}
+	for _, a := range agents {
+		cfg.Agents = append(cfg.Agents, agentEntryFromDomain(a))
+	}
+	return cfg, nil
+}
+
+func daemonSettingsFromProfile(p *domain.DaemonProfile) config.DaemonSettings {
+	if p == nil {
+		return config.DaemonSettings{IssueBackend: "fleetdb"}
+	}
+	issueBackend := p.IssueBackend
+	if issueBackend == "" {
+		issueBackend = "fleetdb"
+	}
+	return config.DaemonSettings{
+		PIDFile:        p.PIDFile,
+		LogDir:         p.LogDir,
+		EventsDir:      p.EventsDir,
+		RestartPolicy:  restartPolicyFromDomain(p.RestartPolicy),
+		MaxAgents:      cloneIntPtr(p.MaxAgents),
+		OTel:           otelFromDomain(p.OTel),
+		IssueBackend:   issueBackend,
+		StartupTimeout: cloneIntPtr(p.StartupTimeout),
+	}
+}
+
+func roleConfigFromDomain(r *domain.Role) config.RoleConfig {
+	if r == nil {
+		return config.RoleConfig{}
+	}
+	return config.RoleConfig{
+		Description:    r.Description,
+		PromptFile:     r.PromptFile,
+		Model:          r.Model,
+		TaskFilter:     r.TaskFilter,
+		Backend:        r.Backend,
+		PathPatterns:   append([]string(nil), r.PathPatterns...),
+		Skills:         append([]string(nil), r.Skills...),
+		MaxPriority:    cloneIntPtr(r.MaxPriority),
+		MaxConcurrency: cloneIntPtr(r.MaxConcurrency),
+		ReadOnly:       r.ReadOnly,
+		AllowedTools:   append([]string(nil), r.AllowedTools...),
+		DeniedTools:    append([]string(nil), r.DeniedTools...),
+		MaxBudgetUSD:   cloneFloatPtr(r.MaxBudgetUSD),
+	}
+}
+
+func agentEntryFromDomain(a *domain.Agent) config.AgentEntry {
+	if a == nil {
+		return config.AgentEntry{}
+	}
+	return config.AgentEntry{
+		Worktree:         a.Name,
+		Role:             a.RoleName,
+		Auto:             a.Auto,
+		Backend:          a.Backend,
+		FallbackBackends: append([]string(nil), a.FallbackBackends...),
+		Repos:            append([]string(nil), a.Repos...),
+		RepoGroups:       append([]string(nil), a.RepoGroups...),
+		CrossRepo:        a.CrossRepo,
+		Parent:           a.Parent,
+	}
+}
+
+func restartPolicyFromDomain(r domain.RestartPolicy) config.RestartPolicy {
+	return config.RestartPolicy{
+		MaxRetries:       cloneIntPtr(r.MaxRetries),
+		BackoffInitial:   cloneIntPtr(r.BackoffInitial),
+		BackoffMax:       cloneIntPtr(r.BackoffMax),
+		OutputTimeout:    cloneIntPtr(r.OutputTimeout),
+		RateLimitBackoff: cloneIntPtr(r.RateLimitBackoff),
+		RateLimitMaxWait: cloneIntPtr(r.RateLimitMaxWait),
+		RateLimitNoCount: cloneBoolPtr(r.RateLimitNoCount),
+		TimeoutBackoff:   cloneIntPtr(r.TimeoutBackoff),
+		NoWorkBackoff:    cloneIntPtr(r.NoWorkBackoff),
+		IdlePollInterval: cloneIntPtr(r.IdlePollInterval),
+		YieldTimeout:     cloneIntPtr(r.YieldTimeout),
+		SigtermTimeout:   cloneIntPtr(r.SigtermTimeout),
+	}
+}
+
+func otelFromDomain(o *domain.OTelSettings) *config.OTelDaemonConfig {
+	if o == nil {
+		return nil
+	}
+	return &config.OTelDaemonConfig{
+		Enabled:         o.Enabled,
+		Endpoint:        o.Endpoint,
+		Protocol:        o.Protocol,
+		ServiceName:     o.ServiceName,
+		SampleRate:      o.SampleRate,
+		FlushIntervalMs: o.FlushIntervalMs,
+		Traces:          cloneBoolPtr(o.Traces),
+		Metrics:         cloneBoolPtr(o.Metrics),
+	}
+}
+
+func cloneIntPtr(v *int) *int {
+	if v == nil {
+		return nil
+	}
+	out := *v
+	return &out
+}
+
+func cloneBoolPtr(v *bool) *bool {
+	if v == nil {
+		return nil
+	}
+	out := *v
+	return &out
+}
+
+func cloneFloatPtr(v *float64) *float64 {
+	if v == nil {
+		return nil
+	}
+	out := *v
+	return &out
 }
 
 // BuildAgentQueueFn returns a callback that fetches and scores ready issues
