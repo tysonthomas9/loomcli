@@ -7,7 +7,7 @@
 export const CURRENT_VERSION = "7";
 export const VERSION_KEY = "cortex-version";
 
-/** V5 key → V6 key mapping */
+/** V5 legacy key -> V6 key mapping. Legacy key names are migration-only. */
 export const V5_TO_V6_KEY_MAP: Record<string, string> = {
   "theme-preference": "cortex:theme",
   "beads-recent-assignees": "cortex:recent-assignees",
@@ -33,7 +33,7 @@ function migrateV5toV6(): void {
       oldValue = localStorage.getItem(v5Key);
       if (oldValue === null) continue;
 
-      // Validate JSON keys that store JSON (beads-recent-assignees)
+      // Validate JSON keys that store JSON.
       if (v5Key === "beads-recent-assignees") {
         try {
           JSON.parse(oldValue);

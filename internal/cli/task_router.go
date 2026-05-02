@@ -72,7 +72,7 @@ func MatchTask(issue backend.IssueData, constraints RoleConstraints) TaskMatch {
 		return TaskMatch{Issue: issue, Score: 0, Reason: "epic"}
 	}
 
-	// Reject non-work types (infrastructure beads like merge-request, gate, etc.)
+	// Reject non-work types (infrastructure records like merge-request, gate, etc.)
 	if IsNonWorkType(issue) {
 		return TaskMatch{Issue: issue, Score: 0, Reason: "non-work type"}
 	}
@@ -282,7 +282,7 @@ func countSkillMatches(labels []string, skills []string) int {
 // FetchReadyIssues fetches issues ready for work.
 func FetchReadyIssues(parentID string, repoLabel string) ([]backend.IssueData, error) {
 	ib := DefaultIssueBackend()
-	// Limit 10000: bd ready mixes open + review + in_progress, and review items
+	// Limit 10000: ready queues include open + review + in_progress, and review items
 	// can crowd out the few truly-workable open tasks past a small cutoff,
 	// causing agents to starve. See monitor_collect.go for the same pattern.
 	opts := backend.ReadyOpts{Limit: 10000, ParentID: parentID}

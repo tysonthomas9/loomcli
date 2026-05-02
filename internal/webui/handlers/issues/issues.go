@@ -19,11 +19,9 @@ type IssuesResponse struct {
 
 // CloseRequest represents the JSON body for the close endpoint.
 //
-// Accepts both "reason" and "close_reason" keys. The fleet-db CLI and
-// some FE paths use "close_reason" (matching the persisted field name),
-// while the beads RPC contract used "reason". Decoding both keeps the
-// endpoint dialect-agnostic; the service layer only sees the resolved
-// Reason string.
+// Accepts both "reason" and "close_reason" keys. Decoding both keeps the
+// endpoint dialect-agnostic; the service layer only sees the resolved Reason
+// string.
 type CloseRequest struct {
 	Reason      string `json:"reason,omitempty"`
 	CloseReason string `json:"close_reason,omitempty"`
@@ -33,7 +31,7 @@ type CloseRequest struct {
 }
 
 // ResolvedReason returns the close reason from whichever JSON key was
-// supplied. "reason" wins when both are set (beads' canonical name).
+// supplied. "reason" wins when both are set.
 func (r CloseRequest) ResolvedReason() string {
 	if r.Reason != "" {
 		return r.Reason

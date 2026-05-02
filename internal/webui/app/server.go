@@ -159,13 +159,10 @@ func (app *Server) buildHandlers() {
 		TerminalIdleMS:     idleMS,
 		TerminalMaxSession: maxSess,
 		IssueBackendFn:     app.config.IssueBackendFn,
-		// Fleet client mode is the only deployment that runs without a bd
-		// daemon — everything else (single-workspace beads, multi-workspace
-		// beads, --no-daemon dev) still expects pool.Get() to succeed.
-		// FleetEnabled (--fleet-mode) is a separate signal — it controls
-		// whether the loom server REGISTERS fleet API routes for other
-		// clients to consume; fleet-mode loom servers still talk to a bd
-		// daemon themselves and expect health probes to gate on it.
+		// Fleet client mode is the only deployment that runs without a local
+		// issue daemon. FleetEnabled (--fleet-mode) is a separate signal: it
+		// controls whether this server registers fleet API routes for other
+		// clients to consume.
 		DaemonExpected: !app.config.FleetClient,
 	})
 }

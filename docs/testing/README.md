@@ -14,7 +14,7 @@ Comprehensive documentation of all tests in the loomcli project.
 
 ## Documents
 
-- **[Go Backend Tests](go-backend-tests.md)** - All Go test files organized by package, every test function, and what it validates
+- **[Go Backend Tests](go-backend-tests.md)** - Current Go test surfaces and FleetDB-focused backend gates
 - **[Frontend Tests](frontend-tests.md)** - Vitest unit tests, Playwright E2E tests, component tests, API tests
 - **[Test Infrastructure](test-infrastructure.md)** - CI/CD, scripts, Makefile targets, configuration files, coverage
 - **[Test Patterns & Conventions](test-patterns.md)** - Common patterns, mocking strategies, helpers, and best practices
@@ -126,7 +126,6 @@ Tests
 │   ├── internal/circuitbreaker/ # 1 test file - State machine, concurrency
 │   ├── internal/lockfile/     # 1 test file - File locking, PID management
 │   ├── internal/debug/        # 1 test file - Debug/verbose/quiet modes
-│   ├── third_party/beads/     # 100+ test files - Beads daemon, storage, doctor
 │   └── makefile_test.go       # Meta-test for build system
 │
 └── Frontend (Vitest + Playwright)

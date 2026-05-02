@@ -96,7 +96,7 @@ Complete breakdown of all frontend test files (Vitest unit tests + Playwright E2
 
 #### `src/api/sse.test.ts` (~629 lines)
 
-**Purpose**: Tests the `BeadsSSEClient` class that handles real-time event streams.
+**Purpose**: Tests the SSE client that handles real-time event streams.
 
 | Test Area | What It Validates |
 |---|---|
@@ -422,7 +422,7 @@ Complete breakdown of all frontend test files (Vitest unit tests + Playwright E2
 
 #### `src/utils/__tests__/formatIssueId.test.ts`
 
-**Purpose**: Tests issue ID formatting (e.g., `beads-abc` display format).
+**Purpose**: Tests issue ID formatting (e.g., `loomcli-abc` display format).
 
 **Why**: Consistent ID display across all views.
 

@@ -57,7 +57,7 @@ func (p *adaptivePoller) hadNoActivity() {
 // When repoLabel is non-empty, filters to tasks labeled repo:<name>.
 func fetchReadyIssues(parentID string, repoLabel string) ([]backend.IssueData, error) {
 	ib := cli.DefaultIssueBackend()
-	// Limit 10000: bd ready mixes open + review + in_progress; a small limit
+	// Limit 10000: ready queues include open + review + in_progress; a small limit
 	// can push the few truly-workable open tasks past the cutoff, starving
 	// auto-mode planners/implementers. Same pattern as monitor_collect.go.
 	opts := backend.ReadyOpts{Limit: 10000, ParentID: parentID}

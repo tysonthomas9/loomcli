@@ -108,7 +108,7 @@ environment with parallel Go + frontend servers.
 
 **Dependency checks**: Validates `air`, `node`, `npm` exist with install instructions.
 
-**Cleanup**: Kills both processes on exit via trap; stops `bd` daemon if started.
+**Cleanup**: Kills both processes on exit via trap.
 
 ### `scripts/dev_test.sh`
 
@@ -151,15 +151,6 @@ make gate
 | `dev-check` | Validates air, node, npm | Check dev dependencies |
 | `hooks` | Copy pre-push hook | Install git hooks |
 
-### Beads Targets
-
-| Target | Command | Purpose |
-|--------|---------|---------|
-| `sync-beads` | `./scripts/sync-beads.sh` | Sync beads with git |
-| `update-beads` | `git subtree pull` + sync | Update beads subtree |
-
----
-
 ## Configuration Files
 
 ### `.golangci.yml`
@@ -196,11 +187,11 @@ tmp_dir = "tmp"
   cmd = "go build -o ./tmp/loom ./cmd/loom"
   args_bin = ["serve", "--no-daemon", "--frontend-url", "http://localhost:3000"]
   exclude_dir = ["tmp", "internal/webui/frontend", "node_modules",
-                 "vendor", "testdata", ".git", "third_party", ".beads"]
+                 "vendor", "testdata", ".git", "third_party"]
   exclude_regex = ["_test\\.go$"]
 ```
 
-**Key exclusions**: Test files, frontend (has its own HMR), third_party, .beads data.
+**Key exclusions**: Test files, frontend (has its own HMR), third_party.
 
 ### `.test-skip`
 
@@ -328,7 +319,7 @@ func TestE2E_Something(t *testing.T) {
 
 **Usage**: `go test -bench=. -tags=bench ./...`
 
-**Files**: 15 benchmark files, primarily in `third_party/beads/internal/storage/sqlite/`.
+**Files**: Benchmark files live with the packages they exercise.
 
 **Guard pattern**:
 ```go
@@ -353,10 +344,6 @@ func BenchmarkGetReadyWork_Large(b *testing.B) {
 
 ### Location
 
-Primarily in `third_party/beads/internal/storage/sqlite/`:
-- `sqlite_bench_test.go` - SQLite operation benchmarks
-
-Also in:
 - `internal/types/` - ID generation benchmarks
 - `internal/rpc/` - RPC performance benchmarks
 
@@ -365,9 +352,6 @@ Also in:
 ```bash
 # All benchmarks
 go test -bench=. -tags=bench ./...
-
-# Specific benchmark
-go test -bench=BenchmarkGetReadyWork -tags=bench ./third_party/beads/...
 
 # With memory allocation reporting
 go test -bench=. -benchmem -tags=bench ./...
@@ -406,9 +390,6 @@ func BenchmarkOperation(b *testing.B) {
 ### Test Data
 
 **Go fixtures**: `internal/cli/testdata/`
-- `bd_stats.json` - Mock `bd stats` output
-- `bd_blocked.json` - Mock `bd blocked` output
-- `bd_in_progress.json` - Mock `bd list --status=in_progress` output
 - `merge_conflict_files.txt` - Mock merge conflict file list
 
 **Frontend fixtures**: `tests/e2e/fixtures/`

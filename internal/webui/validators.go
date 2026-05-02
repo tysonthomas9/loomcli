@@ -9,7 +9,7 @@ import (
 // validGitRef matches safe git ref names: alphanumeric, hyphens, underscores, dots, slashes.
 var validGitRef = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_./-]*$`)
 
-// validTaskID matches task IDs (e.g., "bd-abc123", "loomcli-5y1sd.1").
+// validTaskID matches task IDs (e.g., "loomcli-5y1sd.1").
 var validTaskID = regexp.MustCompile(`^[a-zA-Z0-9._-]+$`)
 
 // validSessionID matches session IDs produced by GenerateSessionID:

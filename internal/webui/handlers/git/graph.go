@@ -450,8 +450,8 @@ func serveGraphViaBackend(w http.ResponseWriter, r *http.Request, backendFn Issu
 			IssueType: d.IssueType,
 			Labels:    d.Labels,
 		}
-		// Fetch detail to pull dependencies; fleet and beads backends both
-		// populate DependencyData from a single Get. If Get fails, leave
+		// Fetch detail to pull dependencies; issue backends populate
+		// DependencyData from a single Get. If Get fails, leave
 		// Dependencies empty so the node still appears without edges.
 		if detail, detErr := be.Get(ctx, d.ID); detErr == nil && detail != nil {
 			deps := make([]*GraphDependency, 0, len(detail.Dependencies))
@@ -463,9 +463,9 @@ func serveGraphViaBackend(w http.ResponseWriter, r *http.Request, backendFn Issu
 			}
 			gi.Dependencies = deps
 		}
-		// Synthesize a parent-child edge when the backend reports a
-		// parent but didn't encode it in Dependencies (beads slim list
-		// path). The FE treats parent-child as a first-class edge type.
+		// Synthesize a parent-child edge when the backend reports a parent but
+		// did not encode it in Dependencies. The FE treats parent-child as a
+		// first-class edge type.
 		if d.Parent != "" {
 			hasParent := false
 			for _, dep := range gi.Dependencies {

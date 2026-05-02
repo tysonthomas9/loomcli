@@ -95,7 +95,7 @@ func runMonitor(cmd *cobra.Command, args []string) {
 		fmt.Print("\033[?25h") // Show cursor
 
 		// Collect first batch before entering loop (loading message visible during this).
-		// Limit 10000: bd ready mixes open + review + in_progress; a small limit can
+		// Limit 10000: ready queues include open + review + in_progress; a small limit can
 		// push the few truly-open tasks past the cutoff when review items are dense.
 		data := CollectMonitorData(10000, monitorBranch)
 		output := renderDashboard(data)

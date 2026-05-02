@@ -202,7 +202,7 @@ func (s *workspaceServiceImpl) ListWorkspaces(ctx context.Context) ([]WorkspaceL
 		return nil, ErrInternal("failed to list workspaces from store", err)
 	}
 
-	// Legacy path: multiPool first (beads), else yaml-derived configFn.
+	// Legacy path: multiPool first, else yaml-derived configFn.
 	var wsMetaByName map[string]ops.WorkspaceSummary
 	var wsMetaByID map[string]ops.WorkspaceSummary
 	var configWorkspaces []ops.WorkspaceSummary

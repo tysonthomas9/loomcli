@@ -439,7 +439,7 @@ func GetLockStatus(worktreePath string) string {
 	return fmt.Sprintf("working: ... (%s)", duration)
 }
 
-// getTaskStatus returns the status of a beads task
+// getTaskStatus returns the status of a task.
 // Returns "needs_review", "closed", "in_progress", "open", or ""
 func getTaskStatus(taskID string) string {
 	d := *defaultDeps

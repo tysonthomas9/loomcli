@@ -9,7 +9,7 @@ import { api, ApiError, apiErrorFromResponse } from "@/api/common";
 
 /**
  * Fetch all sessions for a task.
- * @param taskId The task ID (e.g., "bd-abc123")
+ * @param taskId The task ID (e.g., "loomcli-abc123")
  * @returns Array of session records, newest first.
  */
 export async function getTaskSessions(

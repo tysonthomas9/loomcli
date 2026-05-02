@@ -6,6 +6,7 @@
 import { useState, useCallback, useEffect } from "react";
 
 const STORAGE_KEY = "loom-recent-owners";
+// Migration-only key for users with pre-FleetDB browser state.
 const LEGACY_STORAGE_KEY = "beads-recent-owners";
 const MAX_RECENT = 5;
 

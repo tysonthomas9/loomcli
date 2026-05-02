@@ -43,8 +43,8 @@ const (
 // expected to be safe for concurrent use across goroutines.
 //
 // The ctx carries the per-request workspace ID; cloud-mode providers use it
-// to build a fleet-db backend scoped to the request's workspace. Single-
-// workspace providers (beads) ignore ctx.
+// to build a fleet-db backend scoped to the request's workspace. Local
+// providers may ignore ctx.
 type IssueBackendProvider func(ctx context.Context) backend.IssueBackend
 
 type issueServiceImpl struct {
@@ -320,7 +320,7 @@ func (s *issueServiceImpl) CloseIssue(ctx context.Context, params CloseIssuePara
 // ClaimIssue atomically claims an issue by ID for the server-side actor.
 // Returns 409-equivalent ErrConflict if the issue is already claimed by a
 // different agent. Re-claim by the same actor is idempotent and returns the
-// issue without error (beads ClaimIssue SQL treats self-reclaim as success).
+// issue without error.
 //
 // Implementation note: backend.IssueBackend.ClaimIssue performs only the
 // atomic claim. The previous direct-RPC path also forced status to
@@ -634,7 +634,7 @@ func (s *issueServiceImpl) ListDependencies(ctx context.Context, issueID string)
 
 	// The IssueBackend interface does not expose a standalone ListDependencies;
 	// it returns them embedded in IssueDetailData.Get. That's the canonical
-	// source so both beads and fleet paths reuse their existing machinery.
+	// source so every backend path reuses the same machinery.
 	detail, err := be.Get(ctx, issueID)
 	if err != nil {
 		slog.Error("backend error in ListDependencies", "issue_id", issueID, "err", err)

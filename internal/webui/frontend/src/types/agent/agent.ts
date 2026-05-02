@@ -206,7 +206,7 @@ export interface LoomTaskLists {
  * Parse loom status string into structured data.
  * Examples:
  * - "ready" -> { type: "ready" }
- * - "working: bd-123 (5m)" -> { type: "working", taskId: "bd-123", duration: "5m" }
+ * - "working: loomcli-123 (5m)" -> { type: "working", taskId: "loomcli-123", duration: "5m" }
  * - "2 changes" -> { type: "changes", changeCount: 2 }
  */
 export function parseLoomStatus(status: string): ParsedLoomStatus {
@@ -227,7 +227,7 @@ export function parseLoomStatus(status: string): ParsedLoomStatus {
   }
 
   // Check for status with task ID and duration
-  // Pattern: "working: bd-123 (5m)" or "planning: ... (2m)"
+  // Pattern: "working: loomcli-123 (5m)" or "planning: ... (2m)"
   const taskMatch = status.match(
     /^(working|planning|done|review|error|idle):\s*(.+?)?\s*\(([^)]+)\)$/,
   );

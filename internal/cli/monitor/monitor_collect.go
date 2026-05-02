@@ -66,8 +66,8 @@ func collectMonitorDataDeps(deps *cli.Deps, readyLimit int, branch string) *Moni
 	data.Stats = stats
 
 	// Compute Remaining as the sum of work queue categories so it always tallies.
-	// bd stats computes Remaining by subtraction which can disagree with the
-	// work queue counts due to issues falling between bd ready / bd blocked.
+	// Store stats compute Remaining by subtraction, which can disagree with
+	// work queue counts due to issues falling between ready and blocked views.
 	data.Stats.Remaining = data.Tasks.NeedsPlanning + data.Tasks.ReadyToImplement +
 		data.Tasks.NeedReview + data.Tasks.InProgress + data.Tasks.Backlog
 	data.Stats.Total = data.Stats.Remaining + data.Stats.Closed
@@ -327,8 +327,7 @@ func collectTaskStatusDeps(deps *cli.Deps, readyLimit int) (TaskSummary, []TaskI
 	agentTasks := make(map[string]TaskInfo)
 
 	// Defense-in-depth: build a set of blocked issue IDs from the Blocked() query.
-	// If a ready issue also appears in the blocked set, skip it — bd ready may have
-	// leaked it through due to a missing status in its SQL blocker filter.
+	// If a ready issue also appears in the blocked set, skip it.
 	var blockedIDs map[string]bool
 	if qr.backlogErr == nil {
 		blockedIDs = make(map[string]bool, len(qr.backlogIssues))
@@ -357,9 +356,8 @@ func runParallelTaskQueries(deps *cli.Deps, readyLimit int) taskQueryResults {
 		defer wg.Done()
 		qr.readyIssues, qr.readyErr = ib.Ready(ctx, backend.ReadyOpts{Limit: readyLimit})
 	}()
-	// NOTE: cliBeadsAdapter.List omits --limit when opts.Limit == 0, which makes
-	// bd list fall back to its CLI default of 50. Pass an explicit large limit
-	// so the monitor counts and displayed slices reflect the full queue.
+	// Pass an explicit large limit so the monitor counts and displayed slices
+	// reflect the full queue.
 	go func() {
 		defer wg.Done()
 		qr.inProgressIssues, qr.inProgressErr = ib.List(ctx, backend.ListOpts{Status: "in_progress", Limit: 10000})
@@ -395,8 +393,7 @@ func processReadyIssues(issues []backend.IssueData, err error, summary *TaskSumm
 			continue
 		}
 		// Defense-in-depth: skip issues that the Blocked() query identifies as
-		// blocked, even if bd ready returned them (e.g. due to missing status
-		// in the ready SQL blocker filter).
+		// blocked, even if the ready query returned them.
 		if blockedIDs != nil && blockedIDs[issue.ID] {
 			continue
 		}
@@ -538,14 +535,12 @@ func collectStatisticsDeps(deps *cli.Deps) MonitorStats {
 		}
 
 		// Remaining = total - closed
-		// Note: bd stats total_issues already excludes tombstones
 		stats.Remaining = stats.Total - stats.Closed
 		if stats.Remaining < 0 {
 			stats.Remaining = 0
 		}
 
 		// Review = total - open - inProgress - closed - blocked - deferred - pinned
-		// Note: bd stats total_issues already excludes tombstones
 		stats.Review = stats.Total - stats.Open - stats.InProgress - stats.Closed -
 			stats.Blocked - statsData.DeferredIssues - statsData.PinnedIssues
 		if stats.Review < 0 {

@@ -19,7 +19,7 @@ export interface AgentRowProps {
   avatarColor: string;
   /** Status dot color (only shown when status is available) */
   dotColor?: string | undefined;
-  /** Activity text (e.g., "Working: bd-123") */
+  /** Activity text (e.g., "Working: loomcli-123") */
   activity?: string | undefined;
 }
 

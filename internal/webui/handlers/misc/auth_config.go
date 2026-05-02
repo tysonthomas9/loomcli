@@ -24,12 +24,12 @@ import (
 // authConfigResponse is the JSON response for GET /api/config.
 // It tells clients which authentication mode the server is running, plus
 // the active issue-tracking backend so the frontend Settings view (and the
-// parity harness) can distinguish a beads instance from a fleet instance
+// parity harness) can distinguish local FleetDB from a remote fleet instance
 // without poking at LOOM_ISSUE_BACKEND on the host.
 type authConfigResponse struct {
 	Mode         string `json:"mode"`                    // "open" or "oidc"
 	AuthURL      string `json:"auth_url,omitempty"`      // Better Auth service base URL for OAuth redirects (only when mode is "oidc")
-	IssueBackend string `json:"issue_backend,omitempty"` // "beads" | "fleet" | "fleetdb" | "api" | "agent-ipc" (active IssueBackend.BackendName(), normalized)
+	IssueBackend string `json:"issue_backend,omitempty"` // "fleet" | "fleetdb" | "api" | "agent-ipc" (active IssueBackend.BackendName(), normalized)
 }
 
 // AuthConfigLimiter is a per-IP token bucket rate limiter for GET /api/config.
@@ -117,7 +117,7 @@ func (l *AuthConfigLimiter) evictStale() {
 // issueBackendFn (optional) returns the active backend.IssueBackend. When
 // non-nil and the resolved backend is non-nil at request time, the response
 // includes the normalized backend family in the "issue_backend" field so
-// clients can render a deterministic label (e.g., "beads" or "fleet") in
+// clients can render a deterministic label (e.g., "fleetdb" or "fleet") in
 // the Settings view. The closure is re-evaluated per request to handle
 // runtime swaps, though BackendName is documented as immutable. Falls back
 // to the LOOM_ISSUE_BACKEND env var when the closure is nil or returns nil,
@@ -194,7 +194,7 @@ func normalizeBackendName(name string) string {
 	case n == "":
 		return ""
 	case strings.HasPrefix(n, "beads"):
-		return "beads"
+		return "fleet"
 	case n == "fleet-db" || n == "fleetdb":
 		return "fleet"
 	case strings.HasPrefix(n, "fleet"):

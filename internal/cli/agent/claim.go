@@ -20,14 +20,14 @@ var claimCmd = &cobra.Command{
 	Short: "Update the lock file with the task being worked on",
 	Long: `Update the agent lock file to record which task is being worked on.
 
-This command is called by Claude after picking a task with 'bd update <id> --status in_progress'.
-It updates the lock file so that 'loom monitor' can show which task each agent is working on.
+This command is called after an agent claims a task through Loom. It updates
+the lock file so that 'loom monitor' can show which task each agent is working on.
 
 Arguments:
-  task-id    The beads task ID (e.g., bd-487)
+  task-id    The Loom task ID (e.g., loomcli-487 or loomcli-abc.1)
 
 Examples:
-  loom claim bd-487              # Record that we're working on bd-487`,
+  loom claim loomcli-487         # Record that we're working on loomcli-487`,
 	Args: cobra.ExactArgs(1),
 	Run:  runClaim,
 }
@@ -46,7 +46,7 @@ func runClaim(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	// Get task title from bd show
+	// Resolve the task title through the active issue backend.
 	taskTitle := getTaskTitle(taskID)
 
 	// Update the lock file

@@ -157,7 +157,7 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	//
 	// When the cli wiring supplies an IssueBackend factory, prefer the
 	// backend-aware constructor so migrated CRUD methods route through
-	// backend.IssueBackend (which supports both beads and fleet). The pool
+	// backend.IssueBackend. The pool
 	// stays around to back the not-yet-migrated paths (ListIssues/Kanban
 	// and the cross-workspace MoveIssue helper).
 	if config.IssueBackendFn != nil {
@@ -368,10 +368,10 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	// resolver so a name like "PARITY" still maps to the registered UUID
 	// rather than 404'ing.
 	//
-	// Final fallback: the unified store. Fleet-db-only workspaces (created
-	// post-Phase-4) aren't in the beads registry, so without this check
-	// every `/api/workspaces/{ws}/...` route would 404 before the handler
-	// could read state from fleet-db.
+	// Final fallback: the unified store. Fleet-db-only workspaces may not be in
+	// the daemon registry, so without this check every
+	// `/api/workspaces/{ws}/...` route would 404 before the handler could read
+	// state from fleet-db.
 	wsResolver := config.WorkspaceIDResolverFn
 	wsStore := config.Store
 	app.wsExistsFn = func(id string) bool {
