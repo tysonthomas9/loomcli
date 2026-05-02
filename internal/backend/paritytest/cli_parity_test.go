@@ -18,7 +18,6 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/netutil"
-	"github.com/tysonthomas9/loomcli/internal/rpc"
 )
 
 // cliReportPath is where the Go harness writes its CLI-parity report. Kept
@@ -66,84 +65,10 @@ type cliStep struct {
 	FleetOnly         bool              `json:"fleet_only,omitempty"`
 }
 
-// cliHarness owns the pair of backends (bd workspace dir + fdb HTTP URL)
-// and orchestrates per-step CLI invocations. Subprocess lifecycle is
-// managed by t.Cleanup registered from the underlying spawners.
-type cliHarness struct {
-	bdDir      string
-	fdbBaseURL string
-	fdbWS      string
-	fdbBinary  string
-}
-
 type cliFleetOnlyHarness struct {
 	fdbBaseURL string
 	fdbWS      string
 	fdbBinary  string
-}
-
-// TestCLIParity is the flagship CLI-level harness test. It spawns a bd
-// daemon and a fleet-db HTTP server (with embedded miniredis), then walks
-// every cli-fixtures/*.json fixture, running the bd_args vector against
-// `bd` and the fdb_args vector against `fdb` for each step. Stdout JSON
-// is captured on both sides, normalized to a common shape, and diffed.
-//
-// Semantics (same as the RPC-level suites):
-//   - infra failures (spawn, fixture load) fail the subtest
-//   - diff entries are DATA, not failures — a fixture with N diffs still
-//     passes the subtest; operators inspect cli-report.json for signal
-//
-// The aggregated report is written to test/parity/ui/cli-report.json (UI
-// suite colocates its artifacts there) so the parity audit has both CLI
-// and UI signal in one directory.
-func TestCLIParity(t *testing.T) {
-	h := spawnCLIHarness(t)
-
-	fixtures, err := discoverCLIFixtures("testdata/cli-fixtures")
-	if err != nil {
-		t.Fatalf("discoverCLIFixtures: %v", err)
-	}
-	if len(fixtures) == 0 {
-		t.Fatal("no CLI fixtures found under testdata/cli-fixtures — expected at least one")
-	}
-
-	report := NewReport("1.0.0", "dual_run")
-
-	for _, path := range fixtures {
-		fx, err := loadCLIFixture(path)
-		if err != nil {
-			t.Fatalf("loadCLIFixture(%s): %v", path, err)
-		}
-
-		t.Run(fx.ID, func(t *testing.T) {
-			diffs, err := h.runCLIFixture(t.Context(), *fx)
-			if err != nil {
-				t.Fatalf("runCLIFixture: %v", err)
-			}
-
-			report.AddFixture(fx.ID, fx.Title, diffs, len(fx.Steps))
-
-			t.Logf("fixture %s: %d diffs", fx.ID, len(diffs))
-			for _, d := range diffs {
-				fleetJSON, _ := json.Marshal(d.FleetDB)
-				beadsJSON, _ := json.Marshal(d.Beads)
-				t.Logf("  diff: step=%s field=%s fleet=%s beads=%s verdict=%s",
-					d.StepID, d.Field, string(fleetJSON), string(beadsJSON), d.Verdict)
-			}
-		})
-	}
-
-	report.Finalize()
-	outPath, err := resolveCLIReportPath()
-	if err != nil {
-		t.Fatalf("resolve cli-report path: %v", err)
-	}
-	if err := report.WriteJSON(outPath); err != nil {
-		t.Fatalf("WriteJSON(%s): %v", outPath, err)
-	}
-	t.Logf("cli-parity report: fixtures=%d steps=%d diffs=%d verdict=%s path=%s",
-		report.Summary.FixturesRun, report.Summary.StepsExecuted,
-		report.Summary.DiffsFound, report.Verdict, outPath)
 }
 
 // TestCLIFleetDBOnly is the deletion-gate variant of TestCLIParity. It runs
@@ -265,75 +190,6 @@ func loadCLIFixture(path string) (*cliFixture, error) {
 	return &fx, nil
 }
 
-// spawnCLIHarness spins up both backends in forms that expose their
-// addresses (bd workspace dir / fdb HTTP URL) so CLI subprocesses can be
-// pointed at them. We don't reuse spawnBeads/spawnFleetDB verbatim because
-// those return IssueBackend instances and hide the workspace dir / URL;
-// instead we inline the minimum setup and register the same t.Cleanup
-// pattern.
-func spawnCLIHarness(t *testing.T) *cliHarness {
-	t.Helper()
-
-	// --- bd side ---
-	checkBeadsPrereqs(t)
-	bdDir := t.TempDir()
-	initBeadsWorkspace(t, bdDir)
-
-	daemonCmd := startBeadsDaemon(t, bdDir)
-
-	// Wait for the daemon socket so subsequent bd subprocesses talk to the
-	// same daemon instead of each spawning their own short-lived one.
-	socketPath := cliSocketPath(bdDir)
-	if err := waitForSocketFile(socketPath, beadsSpawnTimeout); err != nil {
-		if buf, ok := daemonCmd.Stderr.(*bytes.Buffer); ok && buf.Len() > 0 {
-			t.Logf("bd daemon stderr: %s", buf.String())
-		}
-		terminateProcess(daemonCmd, 2*time.Second)
-		t.Fatalf("bd daemon did not become ready in %s: %v", beadsSpawnTimeout, err)
-	}
-	t.Cleanup(func() {
-		terminateProcess(daemonCmd, 2*time.Second)
-	})
-
-	// --- fdb / fleet-db side ---
-	fdbBinary := resolveFDBBinary(t)
-	fleetBinary := fleetDBBinary(t)
-	mr := startMiniRedis(t)
-	port := pickFreePortOrFatal(t)
-	addr := fmt.Sprintf("127.0.0.1:%d", port)
-
-	cmd, logPath := startFleetDBProcess(t, fleetBinary, addr, mr.Addr())
-
-	baseURL := "http://" + addr
-	healthCtx, healthCancel := context.WithTimeout(context.Background(), fleetSpawnTimeout)
-	if err := netutil.WaitForHealthz(healthCtx, baseURL, time.Second); err != nil {
-		healthCancel()
-		logDump, _ := os.ReadFile(logPath) // #nosec G304 — test log diagnostic
-		t.Logf("fleet-db log:\n%s", string(logDump))
-		terminateProcess(cmd, 3*time.Second)
-		t.Fatalf("fleet-db did not become healthy in %s: %v", fleetSpawnTimeout, err)
-	}
-	healthCancel()
-	if err := createFleetWorkspace(baseURL, defaultWorkspaceID); err != nil {
-		terminateProcess(cmd, 3*time.Second)
-		t.Fatalf("create workspace: %v", err)
-	}
-	t.Cleanup(func() {
-		terminateProcess(cmd, 3*time.Second)
-	})
-	// mr is registered for Close inside startMiniRedis; retain the handle
-	// locally so a future diagnostic path can poke at redis state without
-	// needing another spawner. Referenced once to keep the Go import live.
-	_ = mr
-
-	return &cliHarness{
-		bdDir:      bdDir,
-		fdbBaseURL: baseURL,
-		fdbWS:      defaultWorkspaceID,
-		fdbBinary:  fdbBinary,
-	}
-}
-
 func spawnCLIFleetOnlyHarness(t *testing.T) *cliFleetOnlyHarness {
 	t.Helper()
 
@@ -371,26 +227,6 @@ func spawnCLIFleetOnlyHarness(t *testing.T) *cliFleetOnlyHarness {
 	}
 }
 
-// cliSocketPath resolves the bd daemon RPC socket for the given workspace
-// dir via loomcli's production rpc helper — same convention spawn.go uses.
-func cliSocketPath(dir string) string {
-	return rpc.ShortSocketPath(dir)
-}
-
-// waitForSocketFile polls until the socket file exists on disk or the
-// timeout expires. We don't need to dial it (bd CLI does that itself);
-// file existence is enough to guarantee the daemon is accepting clients.
-func waitForSocketFile(path string, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		if _, err := os.Stat(path); err == nil {
-			return nil
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	return fmt.Errorf("socket file %q never appeared", path)
-}
-
 // resolveFDBBinary picks the fdb binary path and skips the test if the
 // binary is missing. FDB_BIN overrides the default.
 func resolveFDBBinary(t *testing.T) string {
@@ -403,52 +239,6 @@ func resolveFDBBinary(t *testing.T) string {
 		t.Skipf("fdb binary not found at %s (set FDB_BIN or build: cd ~/codebase/fleet-db && go build -o /tmp/fdb ./cmd/fdb): %v", binary, err)
 	}
 	return binary
-}
-
-// runCLIFixture executes every step in fx against both CLIs and returns
-// per-step DiffEntry rows. Variables captured from bd stdout live in
-// beadsVars; those captured from fdb stdout live in fleetVars. Diffs
-// record both stdout values, unsubstituted variable names appear only if
-// the capture selector missed.
-func (h *cliHarness) runCLIFixture(ctx context.Context, fx cliFixture) ([]DiffEntry, error) {
-	if len(fx.Steps) == 0 {
-		return nil, fmt.Errorf("cli fixture %q: no steps", fx.ID)
-	}
-
-	beadsVars := map[string]string{}
-	fleetVars := map[string]string{}
-
-	var diffs []DiffEntry
-	for _, step := range fx.Steps {
-		if step.FleetOnly {
-			continue
-		}
-		bdArgs := substituteVarArgs(step.BdArgs, beadsVars)
-		fdbArgs := substituteVarArgs(step.FdbArgs, fleetVars)
-
-		bdStdout, bdErr := h.runBD(ctx, bdArgs)
-		fdbStdout, fdbErr := h.runFDB(ctx, fdbArgs)
-
-		// Capture variables from stdout JSON before diffing so a step that
-		// produces a diff can still feed subsequent steps with its own IDs.
-		if step.CaptureVars != nil {
-			if bdErr == nil {
-				captureVarsJSON(bdStdout, step.CaptureVars, beadsVars)
-			}
-			if fdbErr == nil {
-				captureVarsJSON(fdbStdout, step.CaptureVars, fleetVars)
-			}
-		}
-
-		stepDiffs := diffCLIOutputs(
-			fx.ID, step.ID, joinCmd(bdArgs, fdbArgs),
-			bdStdout, fdbStdout,
-			bdErr, fdbErr,
-			step.ExpectError, step.CompareField,
-		)
-		diffs = append(diffs, stepDiffs...)
-	}
-	return diffs, nil
 }
 
 func (h *cliFleetOnlyHarness) runCLIFleetOnlyFixture(ctx context.Context, fx cliFixture) ([]DiffEntry, error) {
@@ -550,33 +340,10 @@ func numberToInt(v any) (int, bool) {
 	}
 }
 
-// runBD invokes `bd <args...>` in the bd workspace dir with a 30s deadline.
-// Stdout is returned verbatim for parsing; non-zero exit is surfaced as an
-// error with combined stdout+stderr in the message so the diff report has
-// enough context to triage.
-func (h *cliHarness) runBD(ctx context.Context, args []string) (string, error) {
-	cctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(cctx, "bd", args...) //nolint:norawexec,gosec
-	cmd.Dir = h.bdDir
-	cmd.Env = append(os.Environ(), "BD_ACTOR="+parityActor)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		return stdout.String(), fmt.Errorf("bd %v: %w (stderr: %s)", args, err, stderr.String())
-	}
-	return stdout.String(), nil
-}
-
 // runFDB invokes `fdb -server <url> -workspace <ws> -actor <actor>
 // <args...>` with a 30s deadline. Global flags are always prepended so
 // the fixture's `fdb_args` stays focused on the subcommand + its flags,
 // mirroring the mental model operators have when invoking fdb manually.
-func (h *cliHarness) runFDB(ctx context.Context, args []string) (string, error) {
-	return runFDBCommand(ctx, h.fdbBinary, h.fdbBaseURL, h.fdbWS, args)
-}
-
 func (h *cliFleetOnlyHarness) runFDB(ctx context.Context, args []string) (string, error) {
 	return runFDBCommand(ctx, h.fdbBinary, h.fdbBaseURL, h.fdbWS, args)
 }
@@ -626,19 +393,6 @@ func fleetOnlyFailure(fixtureID, stepID, method, field string, value any) DiffEn
 		FleetDB:   value,
 		Verdict:   "fail",
 	}
-}
-
-// joinCmd returns a human-readable shorthand for the method label on a
-// DiffEntry. Format: "bd <args> | fdb <args>" truncated to a reasonable
-// length so the report stays scannable.
-func joinCmd(bdArgs, fdbArgs []string) string {
-	bd := "bd " + strings.Join(bdArgs, " ")
-	fdb := "fdb " + strings.Join(fdbArgs, " ")
-	joined := bd + " | " + fdb
-	if len(joined) > 200 {
-		return joined[:200] + "..."
-	}
-	return joined
 }
 
 // cliVarPattern mirrors runner.go's varPattern but works on a single

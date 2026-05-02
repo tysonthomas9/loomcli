@@ -68,6 +68,7 @@ export function WorkspaceTree({
   workQueueCounts,
   onTreeSelect,
 }: WorkspaceTreeProps): JSX.Element {
+  const workspaceContext = useWorkspaceContext();
   const {
     workspaceId,
     activeWorkspaceName,
@@ -76,7 +77,7 @@ export function WorkspaceTree({
     isLoading,
     error,
     refetch,
-  } = useWorkspaceContext();
+  } = workspaceContext;
   const [repoPathInput, setRepoPathInput] = useState("");
   const [isAddingRepo, setIsAddingRepo] = useState(false);
   const [addRepoError, setAddRepoError] = useState<string | null>(null);
@@ -88,18 +89,30 @@ export function WorkspaceTree({
     return stored !== null ? stored === "true" : defaultCollapsed;
   });
 
-  const wsConnectionState = error
-    ? workspace
-      ? "error_lost_connection"
-      : "error_never_connected"
-    : isLoading
-      ? "loading"
-      : "connected";
-  const retryCountdown = null;
-  const retryNow = refetch;
+  const workspaceConnection = workspaceContext as typeof workspaceContext & {
+    connectionState?:
+      | "loading"
+      | "connected"
+      | "error_never_connected"
+      | "error_lost_connection";
+    retryCountdown?: number | null;
+    retryNow?: () => void;
+  };
+  const wsConnectionState =
+    workspaceConnection.connectionState ??
+    (error
+      ? workspace
+        ? "error_lost_connection"
+        : "error_never_connected"
+      : isLoading
+        ? "loading"
+        : "connected");
+  const retryCountdown = workspaceConnection.retryCountdown ?? null;
+  const retryNow = workspaceConnection.retryNow ?? refetch;
 
   const agentStore = useAgentStoreInstance();
   const agents = useStore(agentStore, (s) => s.agents);
+  const workspaceRepos = repos ?? [];
   const agentHealth =
     agents.some((agent) => agent.status.startsWith("working")) ||
     agents.some((agent) => agent.status.startsWith("review"))
@@ -195,7 +208,7 @@ export function WorkspaceTree({
         <div className={styles.content}>
           <div className={styles.workspaceHeading}>Workspaces</div>
 
-          {isLoading && repos.length === 0 && (
+          {isLoading && workspaceRepos.length === 0 && (
             <div className={styles.loading}>
               <div className={styles.skeletonRow} />
               <div className={styles.skeletonRow} />
@@ -233,7 +246,7 @@ export function WorkspaceTree({
             </div>
           )}
 
-          {!isLoading && !error && repos.length === 0 && (
+          {!isLoading && !error && workspaceRepos.length === 0 && (
             <div className={styles.emptyState}>No repos in workspace</div>
           )}
 
@@ -276,7 +289,7 @@ export function WorkspaceTree({
           <RunningSection onSelect={onTreeSelect} />
 
           {/* Static repo inventory */}
-          <ReposSection repos={repos} />
+          <ReposSection repos={workspaceRepos} />
         </div>
       )}
 

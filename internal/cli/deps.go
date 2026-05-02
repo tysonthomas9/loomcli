@@ -34,11 +34,6 @@ type ExecContextRunner interface {
 	Run(ctx context.Context, dir, name string, args ...string) CommandResult
 }
 
-// BDRunner wraps bd (beads) CLI calls.
-type BDRunner interface {
-	Run(dir string, args ...string) CommandResult
-}
-
 // AgentInvoker wraps agent invocation (interactive and non-interactive).
 type AgentInvoker interface {
 	InvokeInteractive(workDir, prompt, agentName string) error
@@ -148,9 +143,6 @@ func DefaultDeps() *Deps {
 		} else {
 			issueBackend = ab
 		}
-	case IssueBackendBeads:
-		bdRunner := defaultBDRunnerImpl{}
-		issueBackend = newCliBeadsAdapter(bdRunner, GetBeadsDir())
 	}
 	if issueBackend == nil {
 		issueBackend = newFleetDBIssueBackend()
@@ -167,14 +159,6 @@ func DefaultDeps() *Deps {
 		ExecCtx:      defaultExecContextRunner{},
 		Agent:        registryAgentInvoker{},
 	}
-}
-
-// defaultBDRunnerImpl implements BDRunner by shelling out to the bd CLI.
-// Used only as the internal runner for bdBackend in DefaultDeps().
-type defaultBDRunnerImpl struct{}
-
-func (defaultBDRunnerImpl) Run(dir string, args ...string) CommandResult {
-	return defaultDeps.Exec.Run(dir, "bd", args...)
 }
 
 // defaultDeps is the package-level Deps instance used by backward-compatible

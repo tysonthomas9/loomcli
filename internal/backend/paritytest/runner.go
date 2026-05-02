@@ -13,12 +13,11 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/backend"
 )
 
-// DualRunner executes a fixture's op sequence against both a beads
-// IssueBackend and a fleet IssueBackend, then diffs the responses.
+// DualRunner executes a fixture's op sequence against two IssueBackend
+// implementations and diffs the responses.
 //
-// Construction is the caller's responsibility — see spawnBeads + spawnFleetDB.
-// This keeps the runner pure (no process lifecycle concerns) and cheap to
-// unit-test with mock backends.
+// Construction is the caller's responsibility. This keeps the runner pure
+// (no process lifecycle concerns) and cheap to unit-test with mock backends.
 type DualRunner struct {
 	beads  backend.IssueBackend
 	fleet  backend.IssueBackend

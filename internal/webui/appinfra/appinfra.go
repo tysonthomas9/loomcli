@@ -105,12 +105,8 @@ type HookConfig struct {
 }
 
 // RegisteredHooks returns references to hooks that require post-registration
-// operations (pre-built pool injection, deferred subscriber activation). Either
-// field may be nil (e.g., in fleet mode for BeadsPool/Notification, or in
-// non-fleet mode for FleetSubscriber).
+// operations. FleetSubscriber may be nil when SSE infrastructure is absent.
 type RegisteredHooks struct {
-	BeadsPool       *hooks.BeadsPoolHook
-	Notification    *hooks.NotificationSubscriberHook
 	FleetSubscriber *hooks.FleetSubscriberHook
 }
 
@@ -118,18 +114,7 @@ type RegisteredHooks struct {
 // the hook references needed for pre-built pool injection and deferred
 // subscriber activation.
 func RegisterHooks(registry *WorkspaceRegistry, cfg HookConfig) RegisteredHooks {
-	if cfg.FleetMode {
-		cfg.Logger.Info("beads pool and notification subscriber suppressed (fleet mode)", "component", "fleet_mode")
-	}
-
 	var registered RegisteredHooks
-	if !cfg.FleetMode && cfg.MultiSub != nil {
-		registered.BeadsPool = hooks.NewBeadsPoolHook(cfg.MultiPool, cfg.PoolSize, cfg.Logger)
-		registered.Notification = hooks.NewNotificationSubscriberHook(cfg.MultiSub, cfg.Logger)
-		_ = registry.AddHook(registered.BeadsPool)
-		_ = registry.AddHook(registered.Notification)
-	}
-
 	if cfg.TermMgr != nil {
 		_ = registry.AddHook(hooks.NewTerminalHook(cfg.TermMgr, cfg.Logger))
 	}
@@ -156,13 +141,6 @@ func RegisterHooks(registry *WorkspaceRegistry, cfg HookConfig) RegisteredHooks 
 	}
 
 	return registered
-}
-
-// SetPrebuiltPool sets a pre-built pool on a beads pool hook for the initial workspace.
-func SetPrebuiltPool(hook *hooks.BeadsPoolHook, wsID string, pool daemon.Pool) {
-	if hook != nil {
-		hook.SetPrebuiltPool(wsID, pool)
-	}
 }
 
 // ReconcileConfigWorkspaces registers all configured workspaces via the
@@ -252,9 +230,6 @@ func NewRedisClient(address, password string) interface{} {
 func GetCwd() (string, error) {
 	return webui.GetCwd()
 }
-
-// BeadsPoolHook re-exports hooks.BeadsPoolHook for type references.
-type BeadsPoolHook = hooks.BeadsPoolHook
 
 // PTYHook re-exports hooks.PTYHook for type references.
 type PTYHook = hooks.PTYHook

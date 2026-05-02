@@ -103,7 +103,16 @@ vi.mock("@/hooks", () => ({
     defaultWorkspaceName: null,
     setDefaultWorkspace: vi.fn(),
     agents: [],
-    workspace: null,
+    workspace: reposOverride.workspace ?? null,
+    repos: reposOverride.repos ?? [],
+    isLoading: reposOverride.isLoading ?? defaultReposReturn.isLoading,
+    error: reposOverride.error ?? defaultReposReturn.error,
+    refetch: reposOverride.refetch ?? defaultReposReturn.refetch,
+    connectionState:
+      reposOverride.connectionState ?? defaultReposReturn.connectionState,
+    retryCountdown:
+      reposOverride.retryCountdown ?? defaultReposReturn.retryCountdown,
+    retryNow: reposOverride.retryNow ?? defaultReposReturn.retryNow,
   }),
   useWorkspaceTree: () => ({
     epics: [],

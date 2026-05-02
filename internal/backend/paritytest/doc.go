@@ -1,6 +1,6 @@
 //go:build parity
 
-// Package paritytest implements a loomcli-side beads-vs-fleet-db parity
+// Package paritytest implements a loomcli-side fleet-db regression
 // harness that exercises the [backend.IssueBackend] surface methods that
 // the upstream fleet-db parity harness in ~/codebase/fleet-db/test/parity/
 // does not cover.
@@ -34,10 +34,10 @@
 //
 // # MVP Scope + Known Limitations
 //
-// This package currently runs ONE fixture (crud_create_show) end-to-end.
-// The first implementation (loomcli-7w9tc.4 + .5) landed the scaffolding:
-// fixture loader, subprocess spawn helpers (bd daemon + fleet-db binary
-// with embedded miniredis), a minimal fleet-db HTTP adapter
+// This package currently runs fleet-db-only regression checks. The original
+// side-by-side beads harness was removed with the beads backend deletion.
+// The remaining scaffolding includes fixture loaders, fleet-db subprocess
+// spawn helpers with embedded miniredis, a minimal fleet-db HTTP adapter
 // (see fleetadapter.go for why loomcli's FleetBackend cannot target
 // fleet-db directly), and a diff engine.
 //

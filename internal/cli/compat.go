@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"text/template"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 )
 
@@ -29,8 +28,6 @@ type ProjectFile = config.ProjectFile
 type FleetSettings = config.FleetSettings
 type FleetClientConfig = config.FleetClientConfig
 type FleetDBSettings = config.FleetDBSettings
-
-// FleetDBServerConfig alias is in fleetdb_server.go
 
 // --- Config constants ---
 
@@ -72,13 +69,6 @@ var resetProjectConfigVersionWarnOnce = config.ResetProjectConfigVersionWarnOnce
 var branchCompletion = BranchCompletion
 var worktreeCompletion = WorktreeCompletion
 var worktreeThenBranchCompletion = WorktreeThenBranchCompletion
-
-// TestingNewCliBeadsAdapter exposes the legacy beads CLI adapter to external
-// package tests that intentionally verify old bd-shell-out behavior while the
-// production default moves to fleet-db.
-func TestingNewCliBeadsAdapter(runner BDRunner, dir string) backend.IssueBackend {
-	return newCliBeadsAdapter(runner, dir)
-}
 
 // PromptData is the template context for custom prompt files.
 // Duplicated here for backward compat with tests that reference it from cli.

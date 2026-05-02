@@ -1,19 +1,18 @@
-# docker-compose.parity.yml — side-by-side beads vs fleet-db for manual
-# and automated parity validation.
+# docker-compose.parity.yml — fleet-db regression stack for manual and
+# automated parity validation after beads removal.
 #
 # Brings up:
 #   - redis         shared Redis for fleet-db (port 6379, host not exposed)
 #   - fleet-db      fleet-db server on :8080 (exposed as :8080 on host)
-#   - loom-beads    loomcli serve with LOOM_ISSUE_BACKEND=beads (host :8081)
-#   - loom-fleet    loomcli serve with LOOM_ISSUE_BACKEND=fleet pointing at
+#   - loom-fleet    loomcli serve with LOOM_ISSUE_BACKEND=fleet-db pointing at
 #                   fleet-db (host :8082)
-#   - parity-seed   one-shot seeder that populates identical fixtures into
-#                   both backends, then exits
+#   - ui-fleet      Caddy frontend sidecar on :8083
+#   - parity-seed-fleet one-shot seeder that populates fleet-db fixtures
 #
 # Usage (from loomcli repo root):
 #   docker compose -f test/parity/docker-compose.parity.yml up --build -d
-#   docker compose -f test/parity/docker-compose.parity.yml run --rm parity-seed
-#   # open http://localhost:8081 (beads) and http://localhost:8082 (fleet)
+#   docker compose -f test/parity/docker-compose.parity.yml run --rm parity-seed-fleet
+#   # open http://localhost:8082 (API) or http://localhost:8083 (UI)
 #   docker compose -f test/parity/docker-compose.parity.yml down -v
 #
 # Build contexts are relative to this compose file's directory. The
@@ -27,10 +26,6 @@ networks:
     driver: bridge
 
 volumes:
-  # bd's SQLite lives in loom-beads container; keep ephemeral per-run so
-  # each compose up starts fresh. Uncomment to persist across up/down:
-  # beads-data:
-  #   driver: local
   redis-data:
     driver: local
 
@@ -82,47 +77,6 @@ services:
     # `loom serve`, so a broken fleet-db cascades to a loom-fleet exit.
     # The Playwright preflight (Step 4) double-checks the routing path.
 
-  loom-beads:
-    build:
-      context: ../..
-      dockerfile: test/parity/Dockerfile.parity
-    environment:
-      LOOM_ISSUE_BACKEND: beads
-      BD_ACTOR: parity-harness
-      # Must NOT be set on this service — if LOOM_FLEET_URL is defined
-      # here, a misconfigured resolver could flip the backend to fleet
-      # silently. We deliberately leave it unset so a fallback is loud.
-    # bd serve path: init a workspace on startup, then loom serve.
-    command:
-      - /bin/sh
-      - -c
-      - |
-        set -e
-        cd /workspace
-        if [ ! -d .beads ]; then
-          git init -q
-          git config user.email "parity-harness@fixture.local"
-          git config user.name  "parity-harness"
-          bd init
-        fi
-        bd daemon start &
-        exec loom serve --bind 0.0.0.0 --port 8080
-    networks: [parity]
-    ports:
-      - "8081:8080"
-    healthcheck:
-      # /api/config now exposes issue_backend (normalized, e.g. "beads" or
-      # "fleet") alongside mode; the Playwright preflight uses that field
-      # to prove each tab is talking to the right backend. Healthcheck
-      # here is just liveness — any 2xx means loom serve is reachable.
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/api/config > /dev/null 2>&1"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-      start_period: 20s
-    # volumes:
-    #   - beads-data:/workspace
-
   loom-fleet:
     build:
       context: ../..
@@ -131,7 +85,7 @@ services:
       fleet-db:
         condition: service_healthy
     environment:
-      LOOM_ISSUE_BACKEND: fleet
+      LOOM_ISSUE_BACKEND: fleet-db
       LOOM_FLEET_URL: http://fleet-db:8080
       # The fleet backend's URL builder uses LOOM_FLEET_WORKSPACE (not
       # LOOM_WORKSPACE) — without this, requests go to .../workspaces/default/
@@ -143,10 +97,6 @@ services:
       # path enabled in this compose). Falls back to LOOM_AGENT_NAME, but
       # being explicit avoids a surprise if someone unsets the agent name.
       #
-      # Match the loom-beads side's git config user.email so issues created
-      # via the live loom-fleet UI carry the same owner string seed.sh and
-      # the bd daemon both produce. Without alignment the parity diff trips
-      # on owner ("parity-harness" vs "parity-harness@fixture.local").
       LOOM_FLEET_ACTOR: parity-harness@fixture.local
       # Fail fast if loom boots thinking it has a local beads backend.
       # Any fallback to an embedded beads path in fleet mode should surface
@@ -173,9 +123,7 @@ services:
         wget -qO- "$$LOOM_FLEET_URL/healthz" > /dev/null || { echo "[loom-fleet] FATAL: fleet-db unreachable"; exit 1; }
 
         # Bootstrap a minimal git repo + PARITY loom workspace so the
-        # webui has something to render. loom-beads does this implicitly
-        # via `bd init` + the auto-registered workspace; loom-fleet needs
-        # it explicit because there's no beads daemon to piggy-back on.
+        # webui has something to render.
         if [ ! -d .git ]; then
           git init -q -b main
           git config user.email "parity@fixture.local"
@@ -193,8 +141,6 @@ services:
     ports:
       - "8082:8080"
     healthcheck:
-      # See loom-beads healthcheck note. Backend verification is in the
-      # Playwright preflight, not this healthcheck.
       test: ["CMD-SHELL", "wget -qO- http://localhost:8080/api/config > /dev/null 2>&1"]
       interval: 5s
       timeout: 3s
@@ -204,12 +150,11 @@ services:
   # ──────────────────────────────────────────────────────────────────
   # Frontend-serving sidecars. loom serve is API-only (Dockerfile.parity
   # intentionally omits Node + the frontend build), so Playwright can't
-  # render any SPA route directly against loom-{beads,fleet}. Each Caddy
+  # render any SPA route directly against loom-fleet. Caddy
   # instance below serves the prebuilt React dist mounted from the host
   # and reverse-proxies /api/*, /healthz, /sse/* to its loom backend.
-  # PARITY_BEADS_URL / PARITY_FLEET_URL in playwright.config can either
-  # point at these sidecars (8083/8084) for full UI-rendering tests, or
-  # at the raw loom ports (8081/8082) for API-only specs.
+  # PARITY_FLEET_URL in playwright.config can either point at this sidecar
+  # (8083) for full UI-rendering tests, or at raw loom port 8082 for API-only specs.
   # ──────────────────────────────────────────────────────────────────
   ui-fleet:
     image: docker.io/library/caddy:2-alpine
@@ -226,47 +171,7 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - ../../internal/webui/frontend/dist:/srv:ro
 
-  ui-beads:
-    image: docker.io/library/caddy:2-alpine
-    depends_on:
-      loom-beads:
-        condition: service_started
-    environment:
-      FRONTEND_PORT: "8080"
-      LOOM_UPSTREAM: http://loom-beads:8080
-    ports:
-      - "8084:8080"
-    networks: [parity]
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - ../../internal/webui/frontend/dist:/srv:ro
-
-  # One-shot fixture seeder. Runs after both loom-* services are up.
-  # Builds a tiny image containing fdb (copied from fleet-db image) and bd
-  # (copied from loom-beads image) so both CLIs are available in one place.
-  parity-seed:
-    build:
-      context: .
-      dockerfile: Dockerfile.seed
-    depends_on:
-      fleet-db:
-        condition: service_healthy
-      loom-beads:
-        condition: service_started
-      loom-fleet:
-        condition: service_started
-    environment:
-      FLEET_URL: http://fleet-db:8080
-      FLEET_WORKSPACE: PARITY
-      BEADS_URL: http://loom-beads:8080
-    networks: [parity]
-    volumes:
-      - ./seed.sh:/seed.sh:ro
-    entrypoint: ["/bin/sh", "/seed.sh"]
-    restart: "no"
-
-  # Fleet-db-only seeder for browser regression mode. It intentionally has no
-  # loom-beads dependency and sets FLEET_ONLY=1 so seed.sh never talks to bd.
+  # Fleet-db-only seeder for browser regression mode.
   parity-seed-fleet:
     image: loomcli-parity_parity-seed-fleet
     build:
@@ -280,7 +185,6 @@ services:
     environment:
       FLEET_URL: http://fleet-db:8080
       FLEET_WORKSPACE: PARITY
-      FLEET_ONLY: "1"
     networks: [parity]
     volumes:
       - ./seed.sh:/seed.sh:ro

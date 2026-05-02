@@ -9,8 +9,6 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/webui/coordinator"
-	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
-	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
 
@@ -108,10 +106,7 @@ func newFleetSubscriberHookEnv(t *testing.T) (*FleetSubscriberHook, *MultiWorksp
 	go hub.Run()
 	t.Cleanup(hub.Stop)
 
-	mp := daemon.NewMultiPool(middleware.WorkspaceFromContext, 1)
-	t.Cleanup(func() { _ = mp.Close() })
-
-	multiSub := NewMultiWorkspaceSubscriber(hub, mp, slog.Default())
+	multiSub := NewMultiWorkspaceSubscriber(hub, slog.Default())
 	t.Cleanup(multiSub.Stop)
 
 	registry := coordinator.NewWorkspaceRegistry(slog.Default())
@@ -327,9 +322,7 @@ func TestFleetSubscriberHook_NilRegistry_Panics(t *testing.T) {
 	hub := realtime.NewHub()
 	go hub.Run()
 	defer hub.Stop()
-	mp := daemon.NewMultiPool(middleware.WorkspaceFromContext, 1)
-	defer mp.Close()
-	multiSub := NewMultiWorkspaceSubscriber(hub, mp, slog.Default())
+	multiSub := NewMultiWorkspaceSubscriber(hub, slog.Default())
 	defer multiSub.Stop()
 	NewFleetSubscriberHook(multiSub, nil, slog.Default())
 }
@@ -338,9 +331,7 @@ func TestFleetSubscriberHook_DefaultLogger(t *testing.T) {
 	hub := realtime.NewHub()
 	go hub.Run()
 	defer hub.Stop()
-	mp := daemon.NewMultiPool(middleware.WorkspaceFromContext, 1)
-	defer mp.Close()
-	multiSub := NewMultiWorkspaceSubscriber(hub, mp, slog.Default())
+	multiSub := NewMultiWorkspaceSubscriber(hub, slog.Default())
 	defer multiSub.Stop()
 	registry := coordinator.NewWorkspaceRegistry(slog.Default())
 

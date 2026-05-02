@@ -390,38 +390,6 @@ func TestDefaultGitRunner_Run_DelegatesToDefaultDepsExec(t *testing.T) {
 	}
 }
 
-// --- defaultBDRunnerImpl.Run() delegates to defaultDeps.Exec.Run() ---
-
-func TestDefaultBDRunnerImpl_Run_DelegatesToDefaultDepsExec(t *testing.T) {
-	origExec := defaultDeps.Exec
-	t.Cleanup(func() { defaultDeps.Exec = origExec })
-
-	mock := &MockExecRunner{
-		Result: CommandResult{Stdout: "bd-output"},
-	}
-	defaultDeps.Exec = mock
-
-	runner := defaultBDRunnerImpl{}
-	result := runner.Run("/work", "list", "--json")
-
-	if result.Stdout != "bd-output" {
-		t.Errorf("stdout = %q, want %q", result.Stdout, "bd-output")
-	}
-	if len(mock.Calls) != 1 {
-		t.Fatalf("expected 1 call, got %d", len(mock.Calls))
-	}
-	// defaultBDRunnerImpl.Run() should prepend "bd" as the command name.
-	if mock.Calls[0].Name != "bd" {
-		t.Errorf("call name = %q, want %q", mock.Calls[0].Name, "bd")
-	}
-	if mock.Calls[0].Dir != "/work" {
-		t.Errorf("call dir = %q, want %q", mock.Calls[0].Dir, "/work")
-	}
-	if !slicesEqual(mock.Calls[0].Args, []string{"list", "--json"}) {
-		t.Errorf("call args = %v, want [list --json]", mock.Calls[0].Args)
-	}
-}
-
 // --- GetDeps(nil) returns the defaultDeps singleton (not a fresh DefaultDeps()) ---
 
 func TestGetDeps_NilCmd_ReturnsSingleton(t *testing.T) {

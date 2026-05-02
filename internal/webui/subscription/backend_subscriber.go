@@ -23,8 +23,7 @@ const (
 	backendWaitTimeout = 10 * time.Second
 
 	// backendRetryDelay is the backoff applied after a non-cancellation
-	// error from WaitForMutations (e.g., transient HTTP failure). Matches
-	// the beads path's subscriptionRetryDelay for parity.
+	// error from WaitForMutations (e.g., transient HTTP failure).
 	backendRetryDelay = 2 * time.Second
 
 	// backendCatchUpTimeout caps the GetMutations call used by the
@@ -34,11 +33,10 @@ const (
 	backendCatchUpTimeout = 5 * time.Second
 )
 
-// BackendMutationSubscriber is the fleet-mode sibling of DaemonSubscriber.
-// It sources mutation events from a backend.IssueBackend.WaitForMutations
-// long-poll and bridges them onto the same realtime.Hub the bd daemon path
-// uses. One goroutine per workspace; the loop exits when ctx is canceled
-// (Stop()).
+// BackendMutationSubscriber sources mutation events from
+// backend.IssueBackend.WaitForMutations and bridges them onto the shared
+// realtime.Hub. One goroutine runs per active workspace; the loop exits
+// when ctx is canceled (Stop()).
 type BackendMutationSubscriber struct {
 	backend     backend.IssueBackend
 	hub         *realtime.Hub
@@ -99,10 +97,7 @@ func (s *BackendMutationSubscriber) Stop() {
 // Returns nil on backend error so the caller can fall through to the
 // connected event without aborting the SSE stream.
 //
-// Method name matches the workspaceSubscriber interface in multi.go (the
-// daemon-path sibling has its own *DaemonSubscriber.GetMutationsSince
-// returning []rpc.MutationEvent, which is depended on by older tests; the
-// two cannot share a name).
+// Method name matches the workspaceSubscriber interface in multi.go.
 func (s *BackendMutationSubscriber) GetMutationDataSince(since string) []backend.MutationData {
 	if s.backend == nil {
 		return nil
@@ -223,8 +218,7 @@ func (s *BackendMutationSubscriber) waitForMutations(cursor string, since, timeo
 }
 
 // waitWithCancel sleeps for d or until the embedded context is canceled,
-// whichever comes first. Mirrors DaemonSubscriber.waitWithDone but keys
-// off ctx.Done() because Stop() cancels ctx before closing done.
+// whichever comes first.
 func (s *BackendMutationSubscriber) waitWithCancel(d time.Duration) {
 	t := time.NewTimer(d)
 	defer t.Stop()

@@ -1,5 +1,5 @@
 /**
- * Identical fixture setup via the existing seed.sh. This wrapper exists so
+ * Fleet-db fixture setup via the existing seed.sh. This wrapper exists so
  * specs don't shell out to docker compose directly — all seeding goes
  * through `ensureSeeded()` which is idempotent and caches the call per
  * suite-run.
@@ -14,7 +14,7 @@ const REPO_ROOT = path.resolve(__dirname, "../../../..");
 let seededAt: number | null = null;
 
 /**
- * Ensure both backends have the seed fixture loaded. Safe to call
+ * Ensure fleet-db has the seed fixture loaded. Safe to call
  * repeatedly. Called from beforeAll (after preflight) and again from
  * beforeEach if the previous test was destructive.
  */
@@ -24,7 +24,7 @@ export async function ensureSeeded(force = false): Promise<void> {
     }
     try {
         execSync(
-            composeRun(`run --rm parity-seed`),
+            composeRun(`run --rm parity-seed-fleet`),
             {
                 cwd: REPO_ROOT,
                 encoding: "utf-8",
@@ -65,6 +65,6 @@ export const SEED_FIXTURE = {
     bugCount: 3, // Fix checkout NPE, Cache invalidation bug, Session timeout edge
     featureCount: 3,
     taskCount: 4,
-    workspaceBeads: "default",
+    workspaceBeads: PARITY_URLS.workspace,
     workspaceFleet: PARITY_URLS.workspace,
 };

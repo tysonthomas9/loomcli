@@ -1,13 +1,10 @@
-# Dockerfile.seed — tiny seeder image carrying both fdb and bd.
+# Dockerfile.seed — tiny seeder image carrying fdb.
 #
 # Built in-place by docker-compose.parity.yml. Multi-stage copies the
 # fdb CLI from the fleet-db image so seed.sh can use it directly
 # instead of hand-rolling curl + JSON. (fdb is the user-facing
 # fleet-db client; using it here also exercises the real CLI path.)
 #
-# The companion bd CLI on the loom-beads side is exercised inside that
-# container; we don't need bd in this seeder image.
-
 # Stage 1: pick fdb out of the fleet-db image.
 FROM localhost/loomcli-parity_fleet-db:latest AS fdb-source
 

@@ -10,11 +10,9 @@ import (
 )
 
 // FleetSubscriberHook implements coordinator.LifecycleHook for per-workspace
-// BackendMutationSubscriber lifecycle in fleet mode. It is the fleet-mode
-// sibling of NotificationSubscriberHook: same deferred-Activate pattern,
-// same MultiWorkspaceSubscriber registry, but sources mutations from a
-// fleet IssueBackend (provided by FleetBackendHook on OnRegister) rather
-// than a bd daemon Pool.
+// BackendMutationSubscriber lifecycle. It uses the same deferred-Activate
+// pattern as other workspace hooks and sources mutations from a fleet
+// IssueBackend provided by FleetBackendHook on OnRegister.
 //
 // Hook ordering matters: FleetBackendHook must register first so that by
 // the time Activate fires, ResourceKeyFleetBackend is in the workspace's

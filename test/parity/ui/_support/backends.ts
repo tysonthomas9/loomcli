@@ -15,7 +15,6 @@ import {
     composeRuntime,
     PARITY_NETWORK,
     PARITY_SEED_FLEET_IMAGE,
-    PARITY_SEED_IMAGE,
 } from "./compose";
 import { isFleetOnlyMode } from "./mode";
 
@@ -320,17 +319,11 @@ async function runSeedScript(): Promise<void> {
     // offline and cascading every subsequent preflight to a 502. Bypass
     // compose entirely and invoke the runtime directly.
     const seedHostPath = path.resolve(REPO_ROOT, "test/parity/seed.sh");
-    const fleetOnly = isFleetOnlyMode();
-    const image = fleetOnly ? PARITY_SEED_FLEET_IMAGE : PARITY_SEED_IMAGE;
+    const image = PARITY_SEED_FLEET_IMAGE;
     const env: string[] = [
         "-e", `FLEET_URL=http://fleet-db:8080`,
         "-e", `FLEET_WORKSPACE=${PARITY_URLS.workspace}`,
     ];
-    if (fleetOnly) {
-        env.push("-e", "FLEET_ONLY=1");
-    } else {
-        env.push("-e", "BEADS_URL=http://loom-beads:8080");
-    }
     const envFlags = env.join(" ");
     const cmd = `${composeRuntime()} run --rm --network ${PARITY_NETWORK} ${envFlags} -v ${seedHostPath}:/seed.sh:ro --entrypoint /bin/sh ${image} /seed.sh`;
     try {

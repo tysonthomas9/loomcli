@@ -174,8 +174,8 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	go app.hub.Run()
 	cleanups = append(cleanups, func() { app.hub.Stop() })
 
-	// Bridge per-workspace daemon mutations to SSE clients.
-	app.multiSub = appstores.NewMultiSub(app.hub, app.multiPool, config.Logger)
+	// Bridge per-workspace backend mutations to SSE clients.
+	app.multiSub = appstores.NewMultiSub(app.hub, config.Logger)
 	cleanups = append(cleanups, func() { app.multiSub.Stop() })
 
 	// Main web terminal manager: one *PTYManager per workspace, dispatched by
@@ -263,7 +263,7 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	app.registry = appinfra.NewWorkspaceRegistry(config.Logger)
 	cleanups = append(cleanups, func() { _ = app.registry.Close() })
 
-	registeredHooks := appinfra.RegisterHooks(app.registry, appinfra.HookConfig{
+	appinfra.RegisterHooks(app.registry, appinfra.HookConfig{
 		MultiPool:   app.multiPool,
 		PoolSize:    config.PoolSize,
 		MultiSub:    app.multiSub,
@@ -280,7 +280,6 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 
 	// Register the initial workspace.
 	if app.pool != nil && shouldRegisterInitialWorkspace(config, app.initialWorkspaceID) {
-		appinfra.SetPrebuiltPool(registeredHooks.BeadsPool, app.initialWorkspaceID, app.pool)
 		var initialWSPath string
 		if config.WorkspaceListFn != nil {
 			if wsMap, listErr := config.WorkspaceListFn(); listErr == nil {

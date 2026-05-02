@@ -174,9 +174,7 @@ func TestBackendMutationToRPCEvent_RoundTripFields(t *testing.T) {
 	}
 }
 
-// TestRPCEventToMutationData_AllFields is the inverse projection. The
-// daemon-path adapter (DaemonSubscriber.GetMutationDataSince) relies on
-// this to satisfy the workspaceSubscriber interface.
+// TestRPCEventToMutationData_AllFields verifies the inverse projection.
 func TestRPCEventToMutationData_AllFields(t *testing.T) {
 	_, rm := makeSharedFixture()
 

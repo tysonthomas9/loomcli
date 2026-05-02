@@ -1,13 +1,17 @@
 package agent
 
 import (
+	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"testing"
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/automode"
 	"github.com/tysonthomas9/loomcli/internal/cli/clitest"
@@ -28,14 +32,6 @@ type MockIssueBackend = clitest.MockIssueBackend
 type MockGitRunner = clitest.MockGitRunner
 type MockFileSystem = clitest.MockFileSystem
 type MockAgentInvoker = clitest.MockAgentInvoker
-
-type testBDRunner struct {
-	exec cli.ExecRunner
-}
-
-func (r testBDRunner) Run(dir string, args ...string) cli.CommandResult {
-	return r.exec.Run(dir, "bd", args...)
-}
 
 const LockFileName = cli.LockFileName
 
@@ -64,7 +60,7 @@ func installExecMock(t *testing.T, m *clitest.MockExecRunner) {
 	orig := dd.Exec
 	origIssueBackend := dd.IssueBackend
 	dd.Exec = m
-	dd.IssueBackend = cli.TestingNewCliBeadsAdapter(testBDRunner{exec: m}, cli.GetBeadsDir())
+	dd.IssueBackend = newExecReadyIssueBackend(m)
 	cli.ResetDefaultIssueBackend()
 	t.Cleanup(func() {
 		dd.Exec = orig
@@ -170,10 +166,10 @@ func (m *CommandMock) InstallOn(deps *cli.Deps) {
 	origIssueBackend := deps.IssueBackend
 	deps.Exec = m
 	deps.Git = &clitest.ExecBridgeGitRunner{Exec: m}
-	if m.hasBDStubs() {
-		deps.IssueBackend = cli.TestingNewCliBeadsAdapter(testBDRunner{exec: m}, cli.GetBeadsDir())
-	} else if deps == cli.TestingGetDefaultDeps() {
-		if _, ok := origIssueBackend.(*clitest.MockIssueBackend); !ok {
+	if deps == cli.TestingGetDefaultDeps() {
+		if m.hasReadyStubs() {
+			deps.IssueBackend = newCommandReadyIssueBackend(m)
+		} else if _, ok := origIssueBackend.(*clitest.MockIssueBackend); !ok {
 			deps.IssueBackend = clitest.NewMockIssueBackend()
 		}
 	}
@@ -187,13 +183,72 @@ func (m *CommandMock) InstallOn(deps *cli.Deps) {
 	})
 }
 
-func (m *CommandMock) hasBDStubs() bool {
+func (m *CommandMock) hasReadyStubs() bool {
 	for _, stub := range m.stubs {
-		if stub.Name == "bd" {
+		if stub.Name == "bd" && len(stub.Args) > 0 && stub.Args[0] == "ready" {
 			return true
 		}
 	}
 	return false
+}
+
+type commandReadyIssueBackend struct {
+	*clitest.MockIssueBackend
+	run func(dir, name string, args ...string) cli.CommandResult
+}
+
+func newCommandReadyIssueBackend(m *CommandMock) *commandReadyIssueBackend {
+	return &commandReadyIssueBackend{
+		MockIssueBackend: clitest.NewMockIssueBackend(),
+		run:              m.Run,
+	}
+}
+
+func newExecReadyIssueBackend(m *clitest.MockExecRunner) *commandReadyIssueBackend {
+	return &commandReadyIssueBackend{
+		MockIssueBackend: clitest.NewMockIssueBackend(),
+		run:              m.Run,
+	}
+}
+
+func (b *commandReadyIssueBackend) Ready(ctx context.Context, opts backend.ReadyOpts) ([]backend.IssueData, error) {
+	b.MockIssueBackend.Ready(ctx, opts)
+	result := b.run(cli.GetBeadsDir(), "bd", readyArgs(opts)...)
+	if result.Err != nil {
+		return nil, result.Err
+	}
+	return parseReadyIssues(result.Stdout)
+}
+
+func readyArgs(opts backend.ReadyOpts) []string {
+	limit := opts.Limit
+	if limit <= 0 {
+		limit = 10000
+	}
+	args := []string{"ready", "--json", "--limit", strconv.Itoa(limit)}
+	if opts.ParentID != "" {
+		args = append(args, "--parent", opts.ParentID)
+	}
+	return args
+}
+
+func parseReadyIssues(stdout string) ([]backend.IssueData, error) {
+	type issueWire struct {
+		backend.IssueData
+		Type string `json:"type,omitempty"`
+	}
+	var wire []issueWire
+	if err := json.Unmarshal([]byte(stdout), &wire); err != nil {
+		return nil, err
+	}
+	issues := make([]backend.IssueData, len(wire))
+	for i, item := range wire {
+		issues[i] = item.IssueData
+		if issues[i].IssueType == "" {
+			issues[i].IssueType = item.Type
+		}
+	}
+	return issues, nil
 }
 
 type OutputCommandMock struct {

@@ -173,10 +173,13 @@ export const TerminalInstance = forwardRef<
     });
   }, []);
 
-  const write = useCallback((data: string | Uint8Array) => {
-    appendTranscript(data);
-    wtermInstanceRef.current?.write(data);
-  }, [appendTranscript]);
+  const write = useCallback(
+    (data: string | Uint8Array) => {
+      appendTranscript(data);
+      wtermInstanceRef.current?.write(data);
+    },
+    [appendTranscript],
+  );
   const focus = useCallback(() => {
     wtermInstanceRef.current?.focus();
   }, []);

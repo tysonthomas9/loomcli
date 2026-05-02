@@ -1,8 +1,12 @@
 package automode
 
 import (
+	"context"
+	"encoding/json"
+	"strconv"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/backends"
 	"github.com/tysonthomas9/loomcli/internal/cli/clitest"
@@ -20,14 +24,6 @@ type LockInfo = cli.LockInfo
 type ClaudeBackend = backends.ClaudeBackend
 type CodexBackend = backends.CodexBackend
 type MockExecRunner = clitest.MockExecRunner
-
-type testBDRunner struct {
-	exec cli.ExecRunner
-}
-
-func (r testBDRunner) Run(dir string, args ...string) cli.CommandResult {
-	return r.exec.Run(dir, "bd", args...)
-}
 
 const (
 	LockFileName = cli.LockFileName
@@ -71,13 +67,65 @@ func installExecMock(t *testing.T, m *clitest.MockExecRunner) {
 	orig := dd.Exec
 	origIssueBackend := dd.IssueBackend
 	dd.Exec = m
-	dd.IssueBackend = cli.TestingNewCliBeadsAdapter(testBDRunner{exec: m}, cli.GetBeadsDir())
+	dd.IssueBackend = newExecReadyIssueBackend(m)
 	cli.ResetDefaultIssueBackend()
 	t.Cleanup(func() {
 		dd.Exec = orig
 		dd.IssueBackend = origIssueBackend
 		cli.ResetDefaultIssueBackend()
 	})
+}
+
+type execReadyIssueBackend struct {
+	*clitest.MockIssueBackend
+	run func(dir, name string, args ...string) cli.CommandResult
+}
+
+func newExecReadyIssueBackend(m *clitest.MockExecRunner) *execReadyIssueBackend {
+	return &execReadyIssueBackend{
+		MockIssueBackend: clitest.NewMockIssueBackend(),
+		run:              m.Run,
+	}
+}
+
+func (b *execReadyIssueBackend) Ready(ctx context.Context, opts backend.ReadyOpts) ([]backend.IssueData, error) {
+	b.MockIssueBackend.Ready(ctx, opts)
+	result := b.run(cli.GetBeadsDir(), "bd", readyArgs(opts)...)
+	if result.Err != nil {
+		return nil, result.Err
+	}
+	return parseReadyIssues(result.Stdout)
+}
+
+func readyArgs(opts backend.ReadyOpts) []string {
+	limit := opts.Limit
+	if limit <= 0 {
+		limit = 10000
+	}
+	args := []string{"ready", "--json", "--limit", strconv.Itoa(limit)}
+	if opts.ParentID != "" {
+		args = append(args, "--parent", opts.ParentID)
+	}
+	return args
+}
+
+func parseReadyIssues(stdout string) ([]backend.IssueData, error) {
+	type issueWire struct {
+		backend.IssueData
+		Type string `json:"type,omitempty"`
+	}
+	var wire []issueWire
+	if err := json.Unmarshal([]byte(stdout), &wire); err != nil {
+		return nil, err
+	}
+	issues := make([]backend.IssueData, len(wire))
+	for i, item := range wire {
+		issues[i] = item.IssueData
+		if issues[i].IssueType == "" {
+			issues[i].IssueType = item.Type
+		}
+	}
+	return issues, nil
 }
 
 func installClaudeNonInteractiveMock(t *testing.T, fn func(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error) {

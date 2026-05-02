@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"log/slog"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -218,12 +217,9 @@ func runDaemon(cmd *cobra.Command, args []string) {
 	defer os.Remove(paths.pidFile)
 	defer os.Remove(paths.stateFile)
 
-	shutdown, daemon, fleetDBSrv := initDaemonServices(config, projectDir, paths)
-	if fleetDBSrv != nil {
-		defer fleetDBSrv.Stop()
-	}
+	shutdown, daemon := initDaemonServices(config, projectDir, paths)
 
-	runDaemonMainLoop(config, projectDir, paths, shutdown, daemon, lockFile, fleetDBSrv)
+	runDaemonMainLoop(config, projectDir, paths, shutdown, daemon, lockFile)
 }
 
 // daemonPaths holds resolved filesystem paths for the daemon.
@@ -256,8 +252,8 @@ func initPIDFile(pidFilePath string) {
 	}
 }
 
-// initDaemonServices sets up shutdown handler, event bus, fleet DB, and creates the daemon.
-func initDaemonServices(config *cfgpkg.DaemonConfig, projectDir string, paths daemonPaths) (chan struct{}, *Daemon, *cli.FleetDBServer) {
+// initDaemonServices sets up shutdown handler, event bus, fleet-db store access, and creates the daemon.
+func initDaemonServices(config *cfgpkg.DaemonConfig, projectDir string, paths daemonPaths) (chan struct{}, *Daemon) {
 	shutdown := setupSignalHandler()
 
 	eventBus := events.NewBus(paths.eventsDir)
@@ -267,12 +263,8 @@ func initDaemonServices(config *cfgpkg.DaemonConfig, projectDir string, paths da
 		_ = otelExp
 	}
 
-	fleetDBSrv := maybeStartFleetDB(config, projectDir)
-
-	// Open fleet-db store best-effort. Failure is non-fatal during the
-	// migration window — the daemon still runs against the yaml-derived
-	// config.Agents list. Once Phase 6 (.25) deletes config/, this
-	// becomes a hard failure.
+	// Open fleet-db store best-effort while yaml-derived agent config still
+	// exists. The issue backend itself is FleetDB by default.
 	storeHandle, storeErr := cmdstore.OpenStore(context.Background())
 	if storeErr != nil {
 		fmt.Printf("Warning: failed to open fleet-db store for daemon: %v (running in legacy yaml-only mode)\n", storeErr)
@@ -288,11 +280,11 @@ func initDaemonServices(config *cfgpkg.DaemonConfig, projectDir string, paths da
 		os.Exit(1)
 	}
 
-	return shutdown, daemon, fleetDBSrv
+	return shutdown, daemon
 }
 
 // runDaemonMainLoop starts the daemon, state updater, and waits for shutdown.
-func runDaemonMainLoop(config *cfgpkg.DaemonConfig, projectDir string, paths daemonPaths, shutdown chan struct{}, daemon *Daemon, lockFile *os.File, fleetDBSrv *cli.FleetDBServer) {
+func runDaemonMainLoop(config *cfgpkg.DaemonConfig, projectDir string, paths daemonPaths, shutdown chan struct{}, daemon *Daemon, lockFile *os.File) {
 	cli.PrintDaemonBanner(config, projectDir)
 
 	maxRetries := 3
@@ -306,7 +298,7 @@ func runDaemonMainLoop(config *cfgpkg.DaemonConfig, projectDir string, paths dae
 	}
 
 	if err := daemon.Start(); err != nil {
-		cleanupOnStartFailure(fleetDBSrv, paths.pidFile, paths.stateFile, lockFile, paths.lockFile)
+		cleanupOnStartFailure(paths.pidFile, paths.stateFile, lockFile, paths.lockFile)
 		fmt.Fprintf(os.Stderr, "Error: starting daemon: %v\n", err)
 		os.Exit(1)
 	}
@@ -347,25 +339,6 @@ func acquireDaemonLock(lockFilePath string) *os.File {
 	_, _ = lf.Write(lockInfo)
 
 	return lf
-}
-
-// maybeStartFleetDB starts the fleet-db backend if enabled. Returns nil on soft failure.
-func maybeStartFleetDB(config *cfgpkg.DaemonConfig, projectDir string) *cli.FleetDBServer {
-	fleetCfg, fleetEnabled := cfgpkg.ResolveFleetDBConfig(&config.Daemon)
-	if !fleetEnabled {
-		return nil
-	}
-
-	fleetCfg.DBPath = filepath.Join(projectDir, ".loom", "fleetdb.sqlite")
-	fleetCfg.SocketPath = filepath.Join(projectDir, ".loom", "fleetdb.sock")
-	srv, err := cli.NewFleetDBServer(fleetCfg, slog.Default())
-	if err != nil {
-		log.Printf("warning: failed to start fleet-db server: %v (continuing without fleet-db)", err)
-		return nil
-	}
-	cli.SetDefaultIssueBackend(srv.Backend())
-	log.Printf("fleet-db backend active (workspace: %s)", fleetCfg.Workspace)
-	return srv
 }
 
 // startDaemonSockets starts the control socket and IPC socket servers.

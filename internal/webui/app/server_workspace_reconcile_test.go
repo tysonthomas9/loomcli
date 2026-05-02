@@ -14,36 +14,26 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/appinfra"
 	"github.com/tysonthomas9/loomcli/internal/webui/coordinator"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
-	"github.com/tysonthomas9/loomcli/internal/webui/hooks"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
-	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
-	"github.com/tysonthomas9/loomcli/internal/webui/subscription"
 )
 
 // newTestCoordinatorRegistry creates a coordinator.WorkspaceRegistry with real
-// hooks for reconciliation tests. Returns the registry, MultiPool, and subscriber.
-func newTestCoordinatorRegistry(t *testing.T) (*coordinator.WorkspaceRegistry, *daemon.MultiPool, *subscription.MultiWorkspaceSubscriber) {
+// hooks for reconciliation tests. Returns the registry and MultiPool.
+func newTestCoordinatorRegistry(t *testing.T) (*coordinator.WorkspaceRegistry, *daemon.MultiPool) {
 	t.Helper()
 	multiPool := daemon.NewMultiPool(middleware.WorkspaceFromContext, 10)
-	hub := realtime.NewHub()
-	go hub.Run()
-	t.Cleanup(func() { hub.Stop() })
-
-	multiSub := subscription.NewMultiWorkspaceSubscriber(hub, multiPool, slog.Default())
-	t.Cleanup(func() { multiSub.Stop() })
 
 	reg := coordinator.NewWorkspaceRegistry(slog.Default())
-	_ = reg.AddHook(hooks.NewBeadsPoolHook(multiPool, 10, slog.Default()))
-	_ = reg.AddHook(hooks.NewNotificationSubscriberHook(multiSub, slog.Default()))
+	_ = reg.AddHook(&testPoolHook{multiPool: multiPool})
 	t.Cleanup(func() { _ = reg.Close() })
 
-	return reg, multiPool, multiSub
+	return reg, multiPool
 }
 
 // --- Registry.Register unit tests ---
 
-func TestRegistry_Register_RegistersInMultiPoolAndSubscriber(t *testing.T) {
-	registry, multiPool, multiSub := newTestCoordinatorRegistry(t)
+func TestRegistry_Register_RegistersInMultiPool(t *testing.T) {
+	registry, multiPool := newTestCoordinatorRegistry(t)
 
 	wsPath := t.TempDir()
 	if err := registry.Register("test-ws", wsPath); err != nil {
@@ -62,27 +52,16 @@ func TestRegistry_Register_RegistersInMultiPoolAndSubscriber(t *testing.T) {
 		t.Errorf("expected WorkspaceIDs=[test-ws], got %v", ids)
 	}
 
-	// Register does NOT start subscriber; ActivateSubscriber does.
-	subIDs := multiSub.WorkspaceIDs()
-	if len(subIDs) != 0 {
-		t.Errorf("expected 0 subscriber IDs before ActivateSubscriber, got %v", subIDs)
-	}
-	_ = registry.ActivateSubscriber("test-ws")
-	subIDs = multiSub.WorkspaceIDs()
-	if len(subIDs) != 1 || subIDs[0] != "test-ws" {
-		t.Errorf("expected subscriber WorkspaceIDs=[test-ws] after ActivateSubscriber, got %v", subIDs)
-	}
 }
 
 func TestRegistry_Register_MultipleWorkspaces(t *testing.T) {
-	registry, multiPool, multiSub := newTestCoordinatorRegistry(t)
+	registry, multiPool := newTestCoordinatorRegistry(t)
 
 	for _, name := range []string{"alpha", "beta", "gamma"} {
 		wsPath := t.TempDir()
 		if err := registry.Register(name, wsPath); err != nil {
 			t.Fatalf("Register(%q) returned error: %v", name, err)
 		}
-		_ = registry.ActivateSubscriber(name)
 	}
 
 	ids := multiPool.WorkspaceIDs()
@@ -97,14 +76,10 @@ func TestRegistry_Register_MultipleWorkspaces(t *testing.T) {
 		}
 	}
 
-	subIDs := multiSub.WorkspaceIDs()
-	if len(subIDs) != 3 {
-		t.Fatalf("expected 3 subscriber IDs, got %d: %v", len(subIDs), subIDs)
-	}
 }
 
 func TestRegistry_Register_DuplicateReplacesExisting(t *testing.T) {
-	registry, multiPool, _ := newTestCoordinatorRegistry(t)
+	registry, multiPool := newTestCoordinatorRegistry(t)
 
 	wsPath1 := t.TempDir()
 	wsPath2 := t.TempDir()
@@ -357,7 +332,7 @@ func TestStartupReconciliation_WorkspaceListFnReturnsEmptyMap(t *testing.T) {
 // without starting a full HTTP server.
 
 func TestReconciliationLogic_SkipsInitialWorkspace(t *testing.T) {
-	registry, multiPool, multiSub := newTestCoordinatorRegistry(t)
+	registry, multiPool := newTestCoordinatorRegistry(t)
 
 	// Simulate the initial workspace already being registered
 	initialWS := "my-project"
@@ -393,18 +368,10 @@ func TestReconciliationLogic_SkipsInitialWorkspace(t *testing.T) {
 		}
 	}
 
-	// Subscribers are NOT started by Register; activate them explicitly.
-	for _, wsName := range expected {
-		_ = registry.ActivateSubscriber(wsName)
-	}
-	subIDs := multiSub.WorkspaceIDs()
-	if len(subIDs) != 3 {
-		t.Errorf("expected 3 subscriber IDs after ActivateSubscriber, got %d: %v", len(subIDs), subIDs)
-	}
 }
 
 func TestReconciliationLogic_EmptyWorkspaceMap(t *testing.T) {
-	registry, multiPool, multiSub := newTestCoordinatorRegistry(t)
+	registry, multiPool := newTestCoordinatorRegistry(t)
 
 	// Simulate empty workspace map (no workspaces configured besides initial)
 	workspaces := map[string]string{}
@@ -422,14 +389,10 @@ func TestReconciliationLogic_EmptyWorkspaceMap(t *testing.T) {
 		t.Errorf("expected 0 workspace IDs for empty map, got %d: %v", len(ids), ids)
 	}
 
-	subIDs := multiSub.WorkspaceIDs()
-	if len(subIDs) != 0 {
-		t.Errorf("expected 0 subscriber IDs for empty map, got %d: %v", len(subIDs), subIDs)
-	}
 }
 
 func TestReconciliationLogic_NilWorkspaceListFn(t *testing.T) {
-	registry, multiPool, _ := newTestCoordinatorRegistry(t)
+	registry, multiPool := newTestCoordinatorRegistry(t)
 
 	// Replicate the guard from StartServer: if WorkspaceListFn is nil, skip.
 	var workspaceListFn func() (map[string]string, error)
@@ -450,7 +413,7 @@ func TestReconciliationLogic_NilWorkspaceListFn(t *testing.T) {
 }
 
 func TestReconciliationLogic_ErrorFromWorkspaceListFn(t *testing.T) {
-	registry, multiPool, _ := newTestCoordinatorRegistry(t)
+	registry, multiPool := newTestCoordinatorRegistry(t)
 
 	// Replicate the reconciliation with an error-returning function
 	workspaceListFn := func() (map[string]string, error) {
@@ -475,7 +438,7 @@ func TestReconciliationLogic_ErrorFromWorkspaceListFn(t *testing.T) {
 }
 
 func TestReconcileConfigWorkspaces_UUIDKeys(t *testing.T) {
-	registry, multiPool, _ := newTestCoordinatorRegistry(t)
+	registry, multiPool := newTestCoordinatorRegistry(t)
 
 	// Simulate initial workspace registered by UUID (as server.go does post-T2)
 	initialUUID := "aaaabbbb-1111-2222-3333-444455556666"
@@ -510,7 +473,7 @@ func TestReconcileConfigWorkspaces_UUIDKeys(t *testing.T) {
 }
 
 func TestReconcileConfigWorkspaces_PreMigrationNameKeys(t *testing.T) {
-	registry, multiPool, _ := newTestCoordinatorRegistry(t)
+	registry, multiPool := newTestCoordinatorRegistry(t)
 
 	// Pre-migration: initial workspace registered by name (no UUID available)
 	initialName := "my-project"
@@ -548,7 +511,7 @@ func TestReconcileConfigWorkspaces_UUIDSkipMatchesInitialID(t *testing.T) {
 	// This was the core bug T2 fixes: previously, map keys were names but
 	// initialID was a UUID, so the skip check failed and the initial workspace
 	// got re-registered (replacing the custom auto-discovered pool).
-	registry, multiPool, _ := newTestCoordinatorRegistry(t)
+	registry, multiPool := newTestCoordinatorRegistry(t)
 
 	initialUUID := "11112222-3333-4444-5555-666677778888"
 	initialPath := t.TempDir()
@@ -582,7 +545,7 @@ func TestReconcileConfigWorkspaces_UUIDSkipMatchesInitialID(t *testing.T) {
 }
 
 func TestReconciliationLogic_OnlyInitialInMap(t *testing.T) {
-	registry, multiPool, _ := newTestCoordinatorRegistry(t)
+	registry, multiPool := newTestCoordinatorRegistry(t)
 
 	initialWS := "my-workspace"
 	initialPath := t.TempDir()

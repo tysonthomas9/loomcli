@@ -58,11 +58,7 @@ func BackendMutationToRPCEvent(m backend.MutationData) rpc.MutationEvent {
 	}
 }
 
-// RPCEventToMutationData is the inverse of BackendMutationToRPCEvent. It is
-// used by the unified workspaceSubscriber interface in subscription/multi.go
-// so that DaemonSubscriber (which natively returns []rpc.MutationEvent) can
-// satisfy a backend.MutationData-typed return without forcing the beads
-// adapter to be rewritten.
+// RPCEventToMutationData is the inverse of BackendMutationToRPCEvent.
 func RPCEventToMutationData(e rpc.MutationEvent) backend.MutationData {
 	return backend.MutationData{
 		Cursor:     e.Cursor,

@@ -5,8 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"syscall"
-
-	"github.com/tysonthomas9/loomcli/internal/cli"
 )
 
 // isolateProcessGroup creates a new process group so signals to the parent's
@@ -32,10 +30,7 @@ func prepareDaemonDirs(pidFilePath, logDir string) {
 }
 
 // cleanupOnStartFailure cleans up resources when daemon.Start fails (os.Exit skips defers).
-func cleanupOnStartFailure(fleetDBSrv *cli.FleetDBServer, pidFilePath, stateFilePath string, lockFile *os.File, lockFilePath string) {
-	if fleetDBSrv != nil {
-		fleetDBSrv.Stop()
-	}
+func cleanupOnStartFailure(pidFilePath, stateFilePath string, lockFile *os.File, lockFilePath string) {
 	os.Remove(pidFilePath)
 	os.Remove(stateFilePath)
 	lockFile.Close()

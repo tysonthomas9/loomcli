@@ -11,27 +11,12 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/rpc"
-	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
 
 const idleDeactivationTimeout = 60 * time.Second
 
-// workspaceSubscriber abstracts a per-workspace mutation source so the
-// MultiWorkspaceSubscriber can host both DaemonSubscriber (beads/bd daemon
-// path) and BackendMutationSubscriber (fleet IssueBackend long-poll path)
-// behind a single registry. The interface is intentionally minimal: the
-// hub is shared across both implementations, so subscribers don't expose
-// it; only the catch-up projection differs (hence GetMutationDataSince
-// returning backend.MutationData, with the daemon adapter projecting
-// rpc.MutationEvent into MutationData via realtime.RPCEventToMutationData).
-//
-// The method is named GetMutationDataSince (not GetMutationsSince) because
-// DaemonSubscriber already has a public GetMutationsSince that returns
-// []rpc.MutationEvent and is depended on by other tests; Go does not permit
-// two methods with the same name on the same receiver. The adapter on
-// DaemonSubscriber wraps the rpc-typed method and projects each event via
-// realtime.RPCEventToMutationData.
+// workspaceSubscriber abstracts a per-workspace backend mutation source.
 type workspaceSubscriber interface {
 	Start()
 	Stop()
@@ -44,11 +29,10 @@ type subscriberEntry struct {
 	idleSince time.Time // when client count first dropped to 0; zero if clients connected
 }
 
-// MultiWorkspaceSubscriber manages per-workspace DaemonSubscribers, each polling
-// its own daemon and broadcasting workspace-tagged mutations to a shared SSEHub.
+// MultiWorkspaceSubscriber manages per-workspace backend subscribers and
+// broadcasts workspace-tagged mutations to a shared SSE hub.
 type MultiWorkspaceSubscriber struct {
 	hub         *realtime.Hub
-	multiPool   *daemon.MultiPool
 	logger      *slog.Logger
 	subscribers map[string]*subscriberEntry // workspace ID → entry
 	mu          sync.RWMutex
@@ -57,43 +41,15 @@ type MultiWorkspaceSubscriber struct {
 }
 
 // NewMultiWorkspaceSubscriber creates a new MultiWorkspaceSubscriber.
-func NewMultiWorkspaceSubscriber(hub *realtime.Hub, multiPool *daemon.MultiPool, logger *slog.Logger) *MultiWorkspaceSubscriber {
+func NewMultiWorkspaceSubscriber(hub *realtime.Hub, logger *slog.Logger) *MultiWorkspaceSubscriber {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	return &MultiWorkspaceSubscriber{
 		hub:         hub,
-		multiPool:   multiPool,
 		logger:      logger,
 		subscribers: make(map[string]*subscriberEntry),
 	}
-}
-
-// AddWorkspace creates and starts a DaemonSubscriber for the given workspace.
-// The subscriber uses the pool from MultiPool and tags all MutationPayloads
-// with the workspace ID. Idempotent: if a subscriber already exists for wsID,
-// returns nil without replacing it (safe to call on every request from the
-// workspace middleware). Returns an error if the workspace pool is not registered.
-func (m *MultiWorkspaceSubscriber) AddWorkspace(wsID string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if _, ok := m.subscribers[wsID]; ok {
-		return nil
-	}
-
-	pool := m.multiPool.PoolForWorkspace(wsID)
-	if pool == nil {
-		return fmt.Errorf("no pool registered for workspace %q", wsID)
-	}
-
-	sub := NewDaemonSubscriber(pool, m.hub)
-	sub.workspaceID = wsID
-	sub.Start()
-	m.subscribers[wsID] = &subscriberEntry{sub: sub}
-
-	m.logger.Info("workspace subscriber started", "workspace", wsID)
-	return nil
 }
 
 // AddWorkspaceWithBackend creates and starts a BackendMutationSubscriber
@@ -188,10 +144,6 @@ func (m *MultiWorkspaceSubscriber) WorkspaceIDs() []string {
 
 // GetMutationsSince retrieves mutations since the given timestamp from all
 // workspace subscribers. Used for SSE client reconnection catch-up.
-//
-// Beads subscribers take the direct shortcut (rpc.MutationEvent → return);
-// fleet subscribers project from backend.MutationData via the workspaceSubscriber
-// interface. The SSE handler's signature is []rpc.MutationEvent regardless.
 func (m *MultiWorkspaceSubscriber) GetMutationsSince(since string) []rpc.MutationEvent {
 	m.mu.RLock()
 	entries := make(map[string]*subscriberEntry, len(m.subscribers))
@@ -202,10 +154,6 @@ func (m *MultiWorkspaceSubscriber) GetMutationsSince(since string) []rpc.Mutatio
 
 	var all []rpc.MutationEvent
 	for _, entry := range entries {
-		if ds, ok := entry.sub.(*DaemonSubscriber); ok {
-			all = append(all, ds.GetMutationsSince(parseCursorMillis(since))...)
-			continue
-		}
 		muts := entry.sub.GetMutationDataSince(since)
 		for _, m := range muts {
 			all = append(all, realtime.BackendMutationToRPCEvent(m))
@@ -264,19 +212,12 @@ func (m *MultiWorkspaceSubscriber) idleDeactivationLoop() {
 // GetMutationsSinceForWorkspace retrieves mutations since the given timestamp
 // from a specific workspace's subscriber only. Returns nil if the workspace
 // has no active subscriber.
-//
-// Beads path returns rpc.MutationEvent directly; fleet path projects from
-// backend.MutationData. Avoids a wasteful rpc → backend → rpc round-trip
-// on every beads-side reconnect.
 func (m *MultiWorkspaceSubscriber) GetMutationsSinceForWorkspace(wsID string, since string) []rpc.MutationEvent {
 	m.mu.RLock()
 	entry, ok := m.subscribers[wsID]
 	m.mu.RUnlock()
 	if !ok {
 		return nil
-	}
-	if ds, ok := entry.sub.(*DaemonSubscriber); ok {
-		return ds.GetMutationsSince(parseCursorMillis(since))
 	}
 	muts := entry.sub.GetMutationDataSince(since)
 	if len(muts) == 0 {

@@ -18,114 +18,17 @@ import (
 	"github.com/alicebob/miniredis/v2"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
-	beadsbackend "github.com/tysonthomas9/loomcli/internal/backend/beads"
-	"github.com/tysonthomas9/loomcli/internal/rpc"
 )
-
-// beadsSpawnTimeout bounds how long we wait for `bd daemon start` to come up.
-const beadsSpawnTimeout = 20 * time.Second
 
 // fleetSpawnTimeout bounds how long we wait for the fleet-db /healthz endpoint.
 const fleetSpawnTimeout = 20 * time.Second
 
-// parityActor is the canonical actor string both backends use for fixture runs.
-// Git user.email on the beads side and X-Actor header on the fleet-db side are
-// both set to this so `created_by`/`actor` fields line up across backends.
+// parityActor is the canonical actor string used for fleet-db fixture runs.
 const parityActor = "parity-harness"
 
 // defaultWorkspaceID is the workspace key created on the fleet-db side. The
-// beads side doesn't have a workspace concept so no matching setup is needed.
+// parity harness creates it before running issue operations.
 const defaultWorkspaceID = "PARITY"
-
-// spawnBeads starts a bd daemon in a fresh temp workspace and returns a
-// BeadsBackend wired to its socket. The daemon process is stopped via
-// t.Cleanup on test exit. See fleet-db/test/parity/beads_caller.go for the
-// reference pattern — this version yields a real *rpc.Client instead of
-// shelling out to bd for each call.
-//
-// Preconditions:
-//   - `bd` is on PATH (install via `make install-bd`)
-//   - `git` is on PATH
-//
-// The workspace dir is isolated per test (t.TempDir()) so daemons don't
-// collide. BD_ACTOR is forced to parityActor; a deterministic git identity
-// is set in the workspace to match.
-func spawnBeads(t *testing.T) (backend.IssueBackend, func()) {
-	t.Helper()
-
-	dir := t.TempDir()
-	checkBeadsPrereqs(t)
-	initBeadsWorkspace(t, dir)
-
-	// Plain exec.Command (not CommandContext) — we manage the process's
-	// lifecycle ourselves via signals + Wait. exec.CommandContext would
-	// spawn its own goroutine that calls cmd.Wait() on ctx cancellation,
-	// and waitForProcessExit would then race with it (double-Wait panics
-	// on Go 1.20+ with "wait: no child processes").
-	daemonCmd := startBeadsDaemon(t, dir)
-
-	socketPath := rpc.ShortSocketPath(dir)
-	client, err := waitForBeadsSocket(socketPath, beadsSpawnTimeout)
-	if err != nil {
-		if buf, ok := daemonCmd.Stderr.(*bytes.Buffer); ok && buf.Len() > 0 {
-			t.Logf("bd daemon stderr: %s", buf.String())
-		}
-		terminateProcess(daemonCmd, 2*time.Second)
-		t.Fatalf("bd daemon did not become ready in %s: %v", beadsSpawnTimeout, err)
-	}
-	client.SetActor(parityActor)
-
-	be := beadsbackend.New(client)
-	cleanup := func() {
-		_ = client.Close()
-		terminateProcess(daemonCmd, 2*time.Second)
-	}
-	t.Cleanup(cleanup)
-
-	return be, cleanup
-}
-
-// checkBeadsPrereqs ensures bd and git are on PATH before we start spawning.
-func checkBeadsPrereqs(t *testing.T) {
-	t.Helper()
-	if _, err := exec.LookPath("bd"); err != nil {
-		t.Fatalf("bd not on PATH (run `make install-bd`): %v", err)
-	}
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Fatalf("git not on PATH: %v", err)
-	}
-}
-
-// initBeadsWorkspace sets up the directory as a git repo + beads workspace.
-// The bd init step inherits the full ambient env (PATH, HOME, XDG_*, etc.)
-// and then layers BD_ACTOR on top — mirroring the pattern used by
-// startBeadsDaemon. A prior version of this helper passed only a tiny
-// map[string]string to envFromMap, which dropped every inherited variable
-// and caused bd to fail to find its config dirs in non-default HOMEs.
-func initBeadsWorkspace(t *testing.T, dir string) {
-	t.Helper()
-	runOrFail(t, "git", []string{"-C", dir, "init", "-q"}, nil)
-	runOrFail(t, "git", []string{"-C", dir, "config", "user.email", parityActor}, nil)
-	runOrFail(t, "git", []string{"-C", dir, "config", "user.name", parityActor}, nil)
-	runOrFail(t, "bd", []string{"init"}, append(os.Environ(), "BD_ACTOR="+parityActor), withDir(dir))
-}
-
-// startBeadsDaemon launches bd daemon in the given workspace. Lifecycle
-// (SIGTERM/SIGKILL + Wait) is caller-managed via terminateProcess — we
-// intentionally avoid exec.CommandContext so there's no hidden goroutine
-// racing with us on cmd.Wait().
-func startBeadsDaemon(t *testing.T, dir string) *exec.Cmd {
-	t.Helper()
-	daemonCmd := exec.Command("bd", "daemon", "start", "--foreground", "--local") //nolint:norawexec
-	daemonCmd.Dir = dir
-	daemonCmd.Env = append(os.Environ(), "BD_ACTOR="+parityActor)
-	daemonCmd.Stdout = &bytes.Buffer{}
-	daemonCmd.Stderr = &bytes.Buffer{}
-	if err := daemonCmd.Start(); err != nil {
-		t.Fatalf("bd daemon start: %v", err)
-	}
-	return daemonCmd
-}
 
 // terminateProcess gracefully shuts down a child process started with
 // plain exec.Command: send SIGTERM, wait up to `timeout` for a clean exit,
@@ -166,25 +69,6 @@ func terminateProcess(cmd *exec.Cmd, timeout time.Duration) {
 	case <-done:
 	case <-time.After(500 * time.Millisecond):
 	}
-}
-
-// waitForBeadsSocket polls until the bd RPC socket is live, or the deadline
-// expires. Returns a connected rpc.Client on success.
-func waitForBeadsSocket(socketPath string, timeout time.Duration) (*rpc.Client, error) {
-	deadline := time.Now().Add(timeout)
-	var lastErr error
-	for time.Now().Before(deadline) {
-		client, err := rpc.TryConnectWithTimeout(socketPath, 500*time.Millisecond)
-		if err == nil && client != nil {
-			return client, nil
-		}
-		lastErr = err
-		time.Sleep(100 * time.Millisecond)
-	}
-	if lastErr != nil {
-		return nil, lastErr
-	}
-	return nil, fmt.Errorf("socket %s never became live", socketPath)
 }
 
 // spawnFleetDB starts an embedded miniredis + a fleet-db subprocess on a

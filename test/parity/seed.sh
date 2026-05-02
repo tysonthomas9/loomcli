@@ -1,48 +1,26 @@
 #!/bin/sh
-# seed.sh — populate identical fixture set into both parity backends.
+# seed.sh — populate the fleet-db parity fixture set.
 #
 # Strategy:
 #   - fleet-db side: use the `fdb` CLI directly (--server URL, --workspace
 #     PARITY, --actor parity-harness). Tests the real user-facing CLI
 #     path, not just the HTTP wire shape.
-#   - loom-beads side: POST to loom-beads webui's
-#     /api/workspaces/{id}/issues path, since bd's CLI lives inside the
-#     loom-beads container and isn't easily callable from here.
-#
 # Workspace bootstrap:
 #   - fleet-db: `fdb workspace create PARITY` via fdb (admin API; fdb
 #     forwards X-Actor as an authenticated identity in --auth-dev-mode)
-#   - loom-beads: discovered at runtime via GET /api/workspaces (loom
-#     auto-creates one called "workspace" on container init)
 #
 # Environment inputs (set by docker-compose.parity.yml):
 #   FLEET_URL        e.g. http://fleet-db:8080
 #   FLEET_WORKSPACE  e.g. PARITY
-#   BEADS_URL        e.g. http://loom-beads:8080 (not required with FLEET_ONLY=1)
-#   FLEET_ONLY       set to 1 to seed only fleet-db
 
 set -eu
 
 : "${FLEET_URL:?must be set}"
 : "${FLEET_WORKSPACE:?must be set}"
-FLEET_ONLY="${FLEET_ONLY:-0}"
-if [ "${FLEET_ONLY}" != "1" ]; then
-    : "${BEADS_URL:?must be set unless FLEET_ONLY=1}"
-fi
 
-# Use the same actor identity beads gets from git config user.email
-# (set to parity-harness@fixture.local in docker-compose.parity.yml).
-# Without this, the parity diff trips on owner/created_by:
-#   beads → "parity-harness@fixture.local"
-#   fleet → "parity-harness"
 ACTOR="parity-harness@fixture.local"
 
 echo "[seed] FLEET_URL=${FLEET_URL}  workspace=${FLEET_WORKSPACE}  actor=${ACTOR}"
-if [ "${FLEET_ONLY}" = "1" ]; then
-    echo "[seed] FLEET_ONLY=1 — skipping loom-beads seed path"
-else
-    echo "[seed] BEADS_URL=${BEADS_URL}"
-fi
 
 # Base invocations. `workspace create` needs --key (admin endpoint),
 # but per-workspace data operations need -workspace.
@@ -70,10 +48,6 @@ done
 # it so the issue list starts at 0. Fleet-db's Redis state survives
 # `podman-compose up` (the redis container is restarted but its Streams
 # data is event-sourced and replayed at boot via fleet-db's own snapshot).
-# Beads' parity always starts clean (loom-beads' bd database lives in the
-# container's filesystem and gets re-init'd on each container creation),
-# so without the drop-and-recreate the parity diff observes
-# fleet=N*13 vs beads=13.
 # ──────────────────────────────────────────────────────────────────
 echo "[seed] resetting fleet-db workspace ${FLEET_WORKSPACE} for a clean seed..."
 DELETE_OUT=$(${FDB_ADMIN} workspace delete "${FLEET_WORKSPACE}" --force 2>&1 || true)
@@ -94,38 +68,13 @@ case "${CREATE_OUT}" in
 esac
 
 # ──────────────────────────────────────────────────────────────────
-# Phase 2: discover loom-beads workspace ID unless fleet-only
-# ──────────────────────────────────────────────────────────────────
-BEADS_WS_ID=""
-if [ "${FLEET_ONLY}" != "1" ]; then
-    BEADS_WS_ID=$(curl -fsS "${BEADS_URL}/api/workspaces" 2>/dev/null \
-        | sed -n 's/.*"id":"\([^"]*\)".*/\1/p' | head -1)
-    if [ -z "${BEADS_WS_ID}" ]; then
-        echo "[seed] FATAL: loom-beads has no workspaces"
-        exit 2
-    fi
-    echo "[seed] loom-beads workspace ID: ${BEADS_WS_ID}"
-fi
-
-# ──────────────────────────────────────────────────────────────────
-# Phase 3: seed fixtures via fdb (fleet) + curl (loom-beads webui)
+# Phase 2: seed fixtures via fdb
 # ──────────────────────────────────────────────────────────────────
 post_issue() {
     local title="$1"; local type="$2"; local priority="$3"
 
     echo "[seed] creating: $title ($type, P$priority)"
 
-    if [ "${FLEET_ONLY}" != "1" ]; then
-        # Loom-beads side via webui (loom-beads has bd internally; we go
-        # through the webui to mirror the fleet path's "client → server" shape).
-        body="{\"title\":\"$title\",\"issue_type\":\"$type\",\"priority\":$priority}"
-        curl -fsS -X POST "${BEADS_URL}/api/workspaces/${BEADS_WS_ID}/issues" \
-            -H 'Content-Type: application/json' \
-            -d "$body" > /dev/null \
-            || { echo "[seed]   FAILED on loom-beads"; exit 3; }
-    fi
-
-    # Fleet side via fdb CLI — this is the "real user CLI" path.
     ${FDB_DATA} create -title "$title" -type "$type" -priority "$priority" > /dev/null 2>&1 \
         || { echo "[seed]   FAILED on fleet-db (fdb)"; exit 4; }
 }
@@ -145,8 +94,4 @@ post_issue "Theme toggle"             feature 3
 post_issue "Flaky test: login_e2e"    task    2
 post_issue "Clarify rate limit docs"  task    4
 
-if [ "${FLEET_ONLY}" = "1" ]; then
-    echo "[seed] done — 13 issues seeded into fleet-db"
-else
-    echo "[seed] done — 13 issues seeded into both backends"
-fi
+echo "[seed] done — 13 issues seeded into fleet-db"

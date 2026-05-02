@@ -9,33 +9,44 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/webui/coordinator"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
-	"github.com/tysonthomas9/loomcli/internal/webui/hooks"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
-	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
-	"github.com/tysonthomas9/loomcli/internal/webui/subscription"
 )
 
 // newTestRegistry creates a coordinator.WorkspaceRegistry with real hooks and
 // supporting infrastructure for testing. Returns the registry, the underlying
-// MultiPool (for pool assertions), and the MultiWorkspaceSubscriber (for
-// subscriber assertions). Cleanup is registered automatically.
-func newTestRegistry(t *testing.T) (*coordinator.WorkspaceRegistry, *daemon.MultiPool, *subscription.MultiWorkspaceSubscriber) {
+// MultiPool (for pool assertions). Cleanup is registered automatically.
+func newTestRegistry(t *testing.T) (*coordinator.WorkspaceRegistry, *daemon.MultiPool) {
 	t.Helper()
 	multiPool := daemon.NewMultiPool(middleware.WorkspaceFromContext, 10)
-	hub := realtime.NewHub()
-	go hub.Run()
-	t.Cleanup(func() { hub.Stop() })
-
-	multiSub := subscription.NewMultiWorkspaceSubscriber(hub, multiPool, slog.Default())
-	t.Cleanup(func() { multiSub.Stop() })
 
 	reg := coordinator.NewWorkspaceRegistry(slog.Default())
-	_ = reg.AddHook(hooks.NewBeadsPoolHook(multiPool, 10, slog.Default()))
-	_ = reg.AddHook(hooks.NewNotificationSubscriberHook(multiSub, slog.Default()))
+	_ = reg.AddHook(&testPoolHook{multiPool: multiPool})
 	t.Cleanup(func() { _ = reg.Close() })
 
-	return reg, multiPool, multiSub
+	return reg, multiPool
+}
+
+type testPoolHook struct {
+	multiPool *daemon.MultiPool
+	nextID    atomic.Int64
+}
+
+func (h *testPoolHook) Name() string   { return "test-pool" }
+func (h *testPoolHook) Critical() bool { return true }
+func (h *testPoolHook) OnRegister(ctx *coordinator.RegistrationContext) error {
+	return h.multiPool.Register(ctx.WorkspaceID, &testRegisteredPool{id: h.nextID.Add(1)})
+}
+func (h *testPoolHook) OnDeregister(ctx coordinator.DeregistrationContext) {
+	h.multiPool.Deregister(ctx.WorkspaceID)
+}
+func (h *testPoolHook) OnRollback(ctx coordinator.DeregistrationContext) {
+	h.OnDeregister(ctx)
+}
+
+type testRegisteredPool struct {
+	stubPool
+	id int64
 }
 
 func TestCreateWarnings_ContextHelpers(t *testing.T) {
@@ -89,7 +100,7 @@ func TestCreateWarnings_ContextHelpers(t *testing.T) {
 }
 
 func TestWrapWorkspaceCreateFn_CollectsWarnings(t *testing.T) {
-	registry, _, _ := newTestRegistry(t)
+	registry, _ := newTestRegistry(t)
 
 	innerCreate := func(ctx context.Context, req service.WorkspaceCreateRequest) (service.WorkspaceCreateResult, error) {
 		return service.WorkspaceCreateResult{}, nil
@@ -126,7 +137,7 @@ func TestWrapWorkspaceCreateFn_CollectsWarnings(t *testing.T) {
 }
 
 func TestWrapWorkspaceCreateFn_NilInner(t *testing.T) {
-	registry, _, _ := newTestRegistry(t)
+	registry, _ := newTestRegistry(t)
 
 	wrapped := wrapWorkspaceCreateFn(nil, registry)
 	if wrapped != nil {
@@ -135,7 +146,7 @@ func TestWrapWorkspaceCreateFn_NilInner(t *testing.T) {
 }
 
 func TestWrapWorkspaceCreateFn_EmptyWorkspaceID_AbortsRegistration(t *testing.T) {
-	registry, multiPool, _ := newTestRegistry(t)
+	registry, multiPool := newTestRegistry(t)
 
 	var innerCalled bool
 	innerCreate := func(ctx context.Context, req service.WorkspaceCreateRequest) (service.WorkspaceCreateResult, error) {
@@ -163,7 +174,7 @@ func TestWrapWorkspaceCreateFn_EmptyWorkspaceID_AbortsRegistration(t *testing.T)
 }
 
 func TestWrapWorkspaceCreateFn_EmptyWorkspaceID_NoError_AbortsRegistration(t *testing.T) {
-	registry, multiPool, _ := newTestRegistry(t)
+	registry, multiPool := newTestRegistry(t)
 
 	var innerCalled bool
 	innerCreate := func(ctx context.Context, req service.WorkspaceCreateRequest) (service.WorkspaceCreateResult, error) {
@@ -187,7 +198,7 @@ func TestWrapWorkspaceCreateFn_EmptyWorkspaceID_NoError_AbortsRegistration(t *te
 }
 
 func TestWrapWorkspaceCreateFn_ZeroResult_AbortsRegistration(t *testing.T) {
-	registry, multiPool, _ := newTestRegistry(t)
+	registry, multiPool := newTestRegistry(t)
 
 	innerCreate := func(ctx context.Context, req service.WorkspaceCreateRequest) (service.WorkspaceCreateResult, error) {
 		return service.WorkspaceCreateResult{}, nil // zero-value result
@@ -206,7 +217,7 @@ func TestWrapWorkspaceCreateFn_ZeroResult_AbortsRegistration(t *testing.T) {
 }
 
 func TestWrapWorkspaceCreateFn_ResultWithID_RegistersByUUID(t *testing.T) {
-	registry, multiPool, multiSub := newTestRegistry(t)
+	registry, multiPool := newTestRegistry(t)
 
 	wsUUID := "eeeeeeee-1111-2222-3333-444444444444"
 	wsName := "new-workspace"
@@ -236,17 +247,10 @@ func TestWrapWorkspaceCreateFn_ResultWithID_RegistersByUUID(t *testing.T) {
 		t.Error("workspace should NOT be registered under name key")
 	}
 
-	// Subscriber is activated asynchronously after daemon becomes reachable,
-	// not immediately at creation time. Verify pool is registered but
-	// subscriber activation is deferred.
-	subIDs := multiSub.WorkspaceIDs()
-	if len(subIDs) != 0 {
-		t.Errorf("expected 0 subscribers immediately after create (deferred activation), got %d: %v", len(subIDs), subIDs)
-	}
 }
 
 func TestWrapWorkspaceCreateFn_InnerCreateFails_NoRegistration(t *testing.T) {
-	registry, multiPool, _ := newTestRegistry(t)
+	registry, multiPool := newTestRegistry(t)
 
 	createErr := fmt.Errorf("disk full")
 	innerCreate := func(ctx context.Context, req service.WorkspaceCreateRequest) (service.WorkspaceCreateResult, error) {
@@ -265,7 +269,7 @@ func TestWrapWorkspaceCreateFn_InnerCreateFails_NoRegistration(t *testing.T) {
 }
 
 func TestWrapWorkspaceCreateFn_RegisterFails_SurfacesWarning(t *testing.T) {
-	registry, multiPool, _ := newTestRegistry(t)
+	registry, multiPool := newTestRegistry(t)
 
 	wsUUID := "aaaaaaaa-2222-3333-4444-555555555555"
 	wsPath := t.TempDir()
@@ -274,7 +278,7 @@ func TestWrapWorkspaceCreateFn_RegisterFails_SurfacesWarning(t *testing.T) {
 		return service.WorkspaceCreateResult{WorkspaceID: wsUUID, WorkspacePath: wsPath}, nil
 	}
 
-	// Close MultiPool so BeadsPoolHook (critical) fails during Register.
+	// Close MultiPool so the critical test pool hook fails during Register.
 	multiPool.Close()
 
 	wrapped := wrapWorkspaceCreateFn(innerCreate, registry)
@@ -303,7 +307,7 @@ func TestWrapWorkspaceCreateFn_RegisterFails_SurfacesWarning(t *testing.T) {
 }
 
 func TestWrapWorkspaceCreateFn_RegisterFails_PlainContext_NoPanic(t *testing.T) {
-	registry, multiPool, _ := newTestRegistry(t)
+	registry, multiPool := newTestRegistry(t)
 
 	wsUUID := "bbbbbbbb-2222-3333-4444-555555555555"
 	wsPath := t.TempDir()
@@ -312,7 +316,7 @@ func TestWrapWorkspaceCreateFn_RegisterFails_PlainContext_NoPanic(t *testing.T) 
 		return service.WorkspaceCreateResult{WorkspaceID: wsUUID, WorkspacePath: wsPath}, nil
 	}
 
-	// Close MultiPool so BeadsPoolHook (critical) fails during Register.
+	// Close MultiPool so the critical test pool hook fails during Register.
 	multiPool.Close()
 
 	wrapped := wrapWorkspaceCreateFn(innerCreate, registry)
@@ -331,7 +335,7 @@ func TestWrapWorkspaceCreateFn_RegisterFails_PlainContext_NoPanic(t *testing.T) 
 }
 
 func TestWrapWorkspaceDeleteFn_NilInner(t *testing.T) {
-	registry, _, _ := newTestRegistry(t)
+	registry, _ := newTestRegistry(t)
 
 	wrapped := wrapWorkspaceDeleteFn(nil, registry, nil)
 	if wrapped != nil {
@@ -340,7 +344,7 @@ func TestWrapWorkspaceDeleteFn_NilInner(t *testing.T) {
 }
 
 func TestWrapWorkspaceDeleteFn_Success(t *testing.T) {
-	registry, multiPool, multiSub := newTestRegistry(t)
+	registry, multiPool := newTestRegistry(t)
 
 	// Register a workspace so we can verify deregistration.
 	wsID := "aaaaaaaa-1111-2222-3333-444444444444"
@@ -349,14 +353,10 @@ func TestWrapWorkspaceDeleteFn_Success(t *testing.T) {
 	if err := registry.Register(wsID, wsPath); err != nil {
 		t.Fatalf("Register returned error: %v", err)
 	}
-	_ = registry.ActivateSubscriber(wsID)
 
 	// Sanity check: workspace is registered.
 	if multiPool.PoolForWorkspace(wsID) == nil {
 		t.Fatal("expected pool to be registered before delete")
-	}
-	if len(multiSub.WorkspaceIDs()) != 1 {
-		t.Fatal("expected subscriber to have 1 workspace before delete")
 	}
 
 	var innerCalled bool
@@ -388,18 +388,14 @@ func TestWrapWorkspaceDeleteFn_Success(t *testing.T) {
 		t.Error("expected innerDelete to be called")
 	}
 
-	// Verify registry.Deregister was called (pool and subscriber removed).
+	// Verify registry.Deregister was called.
 	if multiPool.PoolForWorkspace(wsID) != nil {
 		t.Error("expected pool to be deregistered after delete")
-	}
-	subIDs := multiSub.WorkspaceIDs()
-	if len(subIDs) != 0 {
-		t.Errorf("expected 0 subscriber IDs after delete, got %d: %v", len(subIDs), subIDs)
 	}
 }
 
 func TestWrapWorkspaceDeleteFn_InnerFailSkipsCleanup(t *testing.T) {
-	registry, multiPool, multiSub := newTestRegistry(t)
+	registry, multiPool := newTestRegistry(t)
 
 	wsID := "bbbbbbbb-1111-2222-3333-444444444444"
 	wsName := "fail-workspace"
@@ -407,7 +403,6 @@ func TestWrapWorkspaceDeleteFn_InnerFailSkipsCleanup(t *testing.T) {
 	if err := registry.Register(wsID, wsPath); err != nil {
 		t.Fatalf("Register returned error: %v", err)
 	}
-	_ = registry.ActivateSubscriber(wsID)
 
 	deleteErr := fmt.Errorf("permission denied")
 	innerDelete := func(name string) error {
@@ -427,13 +422,9 @@ func TestWrapWorkspaceDeleteFn_InnerFailSkipsCleanup(t *testing.T) {
 		t.Errorf("expected error %v, got %v", deleteErr, err)
 	}
 
-	// Verify NO cleanup happened: pool and subscriber should still be present.
+	// Verify NO cleanup happened: pool should still be present.
 	if multiPool.PoolForWorkspace(wsID) == nil {
 		t.Error("expected pool to still be registered after inner delete failure")
-	}
-	subIDs := multiSub.WorkspaceIDs()
-	if len(subIDs) != 1 {
-		t.Errorf("expected 1 subscriber ID after inner delete failure, got %d: %v", len(subIDs), subIDs)
 	}
 }
 
@@ -460,7 +451,7 @@ func TestWrapWorkspaceDeleteFn_NilRegistry(t *testing.T) {
 }
 
 func TestWrapWorkspaceDeleteFn_NilFleetRegistry(t *testing.T) {
-	registry, multiPool, multiSub := newTestRegistry(t)
+	registry, multiPool := newTestRegistry(t)
 
 	wsID := "cccccccc-1111-2222-3333-444444444444"
 	wsName := "fleet-nil-workspace"
@@ -468,7 +459,6 @@ func TestWrapWorkspaceDeleteFn_NilFleetRegistry(t *testing.T) {
 	if err := registry.Register(wsID, wsPath); err != nil {
 		t.Fatalf("Register returned error: %v", err)
 	}
-	_ = registry.ActivateSubscriber(wsID)
 
 	innerDelete := func(name string) error {
 		return nil
@@ -488,14 +478,10 @@ func TestWrapWorkspaceDeleteFn_NilFleetRegistry(t *testing.T) {
 	if multiPool.PoolForWorkspace(wsID) != nil {
 		t.Error("expected pool to be deregistered after delete")
 	}
-	subIDs := multiSub.WorkspaceIDs()
-	if len(subIDs) != 0 {
-		t.Errorf("expected 0 subscriber IDs after delete, got %d: %v", len(subIDs), subIDs)
-	}
 }
 
 func TestWrapWorkspaceDeleteFn_UUIDResolutionFails(t *testing.T) {
-	registry, multiPool, multiSub := newTestRegistry(t)
+	registry, multiPool := newTestRegistry(t)
 
 	wsID := "eeeeeeee-1111-2222-3333-444444444444"
 	wsName := "unresolvable-workspace"
@@ -505,7 +491,6 @@ func TestWrapWorkspaceDeleteFn_UUIDResolutionFails(t *testing.T) {
 	if err := registry.Register(wsID, wsPath); err != nil {
 		t.Fatalf("Register returned error: %v", err)
 	}
-	_ = registry.ActivateSubscriber(wsID)
 
 	var innerCalled bool
 	innerDelete := func(name string) error {
@@ -531,13 +516,10 @@ func TestWrapWorkspaceDeleteFn_UUIDResolutionFails(t *testing.T) {
 	if multiPool.PoolForWorkspace(wsID) == nil {
 		t.Error("expected pool to still be registered (cleanup skipped on resolution failure)")
 	}
-	if len(multiSub.WorkspaceIDs()) != 1 {
-		t.Error("expected subscriber to still have 1 workspace (cleanup skipped)")
-	}
 }
 
 func TestWrapWorkspaceDeleteFn_NilResolveID(t *testing.T) {
-	registry, multiPool, multiSub := newTestRegistry(t)
+	registry, multiPool := newTestRegistry(t)
 
 	wsID := "ffffffff-1111-2222-3333-444444444444"
 	wsName := "nil-resolver-workspace"
@@ -547,7 +529,6 @@ func TestWrapWorkspaceDeleteFn_NilResolveID(t *testing.T) {
 	if err := registry.Register(wsID, wsPath); err != nil {
 		t.Fatalf("Register returned error: %v", err)
 	}
-	_ = registry.ActivateSubscriber(wsID)
 
 	var innerCalled bool
 	innerDelete := func(name string) error {
@@ -569,20 +550,16 @@ func TestWrapWorkspaceDeleteFn_NilResolveID(t *testing.T) {
 	if multiPool.PoolForWorkspace(wsID) == nil {
 		t.Error("expected pool to still be registered (cleanup skipped when resolveID is nil)")
 	}
-	if len(multiSub.WorkspaceIDs()) != 1 {
-		t.Error("expected subscriber to still have 1 workspace (cleanup skipped)")
-	}
 }
 
 func TestWrapWorkspaceDeleteFn_NilResolveIDCleansUpWhenDeleteArgumentIsKey(t *testing.T) {
-	registry, multiPool, multiSub := newTestRegistry(t)
+	registry, multiPool := newTestRegistry(t)
 
 	wsID := "ALPHA"
 	wsPath := t.TempDir()
 	if err := registry.Register(wsID, wsPath); err != nil {
 		t.Fatalf("Register returned error: %v", err)
 	}
-	_ = registry.ActivateSubscriber(wsID)
 
 	var innerCalledWith string
 	innerDelete := func(name string) error {
@@ -600,13 +577,10 @@ func TestWrapWorkspaceDeleteFn_NilResolveIDCleansUpWhenDeleteArgumentIsKey(t *te
 	if multiPool.PoolForWorkspace(wsID) != nil {
 		t.Error("expected pool to be deregistered when delete argument is the workspace key")
 	}
-	if len(multiSub.WorkspaceIDs()) != 0 {
-		t.Error("expected subscriber cleanup when delete argument is the workspace key")
-	}
 }
 
 func TestWrapWorkspaceDeleteFn_ResolveIDEmptyString(t *testing.T) {
-	registry, multiPool, multiSub := newTestRegistry(t)
+	registry, multiPool := newTestRegistry(t)
 
 	wsID := "11111111-aaaa-bbbb-cccc-dddddddddddd"
 	wsName := "empty-resolve-workspace"
@@ -615,7 +589,6 @@ func TestWrapWorkspaceDeleteFn_ResolveIDEmptyString(t *testing.T) {
 	if err := registry.Register(wsID, wsPath); err != nil {
 		t.Fatalf("Register returned error: %v", err)
 	}
-	_ = registry.ActivateSubscriber(wsID)
 
 	var innerCalled bool
 	innerDelete := func(name string) error {
@@ -641,13 +614,10 @@ func TestWrapWorkspaceDeleteFn_ResolveIDEmptyString(t *testing.T) {
 	if multiPool.PoolForWorkspace(wsID) == nil {
 		t.Error("expected pool to still be registered (cleanup skipped on empty resolve)")
 	}
-	if len(multiSub.WorkspaceIDs()) != 1 {
-		t.Error("expected subscriber to still have 1 workspace (cleanup skipped)")
-	}
 }
 
 func TestWrapWorkspaceDeleteFn_SkipsCleanupOnResolutionFailure(t *testing.T) {
-	registry, multiPool, multiSub := newTestRegistry(t)
+	registry, multiPool := newTestRegistry(t)
 
 	wsID := "22222222-aaaa-bbbb-cccc-dddddddddddd"
 	wsName := "skip-cleanup-workspace"
@@ -656,7 +626,6 @@ func TestWrapWorkspaceDeleteFn_SkipsCleanupOnResolutionFailure(t *testing.T) {
 	if err := registry.Register(wsID, wsPath); err != nil {
 		t.Fatalf("Register returned error: %v", err)
 	}
-	_ = registry.ActivateSubscriber(wsID)
 
 	var innerCalledWith string
 	innerDelete := func(name string) error {
@@ -686,17 +655,13 @@ func TestWrapWorkspaceDeleteFn_SkipsCleanupOnResolutionFailure(t *testing.T) {
 	if multiPool.PoolForWorkspace(wsID) == nil {
 		t.Error("expected pool to still be registered under UUID (cleanup skipped)")
 	}
-	subIDs := multiSub.WorkspaceIDs()
-	if len(subIDs) != 1 {
-		t.Errorf("expected 1 subscriber ID (cleanup skipped), got %d: %v", len(subIDs), subIDs)
-	}
 }
 
 func TestWrapWorkspaceDeleteFn_UUIDResolvedBeforeDelete(t *testing.T) {
 	// This test verifies that resolveID is called BEFORE innerDelete.
 	// This ordering is critical because innerDelete removes the config entry,
 	// which would make UUID resolution impossible after the fact.
-	registry, _, _ := newTestRegistry(t)
+	registry, _ := newTestRegistry(t)
 
 	wsID := "dddddddd-1111-2222-3333-444444444444"
 	wsName := "order-test-workspace"
@@ -704,7 +669,6 @@ func TestWrapWorkspaceDeleteFn_UUIDResolvedBeforeDelete(t *testing.T) {
 	if err := registry.Register(wsID, wsPath); err != nil {
 		t.Fatalf("Register returned error: %v", err)
 	}
-	_ = registry.ActivateSubscriber(wsID)
 
 	// Track call ordering with a monotonic counter.
 	var seq atomic.Int64
