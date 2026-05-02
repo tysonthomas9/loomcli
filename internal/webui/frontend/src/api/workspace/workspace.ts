@@ -190,6 +190,11 @@ export interface CreateWorkspaceRequest {
   path?: string;
 }
 
+export interface AddWorkspaceReposRequest {
+  repos: string[];
+  branch?: string;
+}
+
 /** 201 sync result: workspace was created immediately. */
 export interface WorkspaceCreateSync {
   kind: "sync";
@@ -247,6 +252,17 @@ export async function createWorkspace(
     result.warnings = warnings;
   }
   return result;
+}
+
+export async function addWorkspaceRepos(
+  workspaceId: string,
+  req: AddWorkspaceReposRequest,
+): Promise<WorkspaceData> {
+  const response = await post<ApiResult<WorkspaceData>>(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/repos`,
+    req,
+  );
+  return unwrap(response);
 }
 
 // ============= Workspace Job Polling =============

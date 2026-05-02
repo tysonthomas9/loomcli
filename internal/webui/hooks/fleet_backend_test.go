@@ -1,7 +1,11 @@
 package hooks
 
 import (
+	"context"
+	"encoding/json"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
@@ -50,6 +54,39 @@ func TestFleetBackendHook_OnRegister_CreatesBackend(t *testing.T) {
 	}
 	if got := be.BackendName(); got != "fleet" {
 		t.Errorf("BackendName() = %q, want %q", got, "fleet")
+	}
+}
+
+func TestFleetBackendHook_OnRegisterScopesBackendToRegisteredWorkspace(t *testing.T) {
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"success": true,
+			"data": map[string]any{
+				"total": 0,
+			},
+		})
+	}))
+	defer srv.Close()
+
+	hook := NewFleetBackendHook(srv.URL, "DEFAULT", "", "test-actor", slog.Default())
+	ctx := regCtx("DEMO-WS", "/tmp/demo")
+	if err := hook.OnRegister(ctx); err != nil {
+		t.Fatalf("OnRegister returned error: %v", err)
+	}
+
+	res, ok := ctx.Resolve(coordinator.ResourceKeyFleetBackend)
+	if !ok {
+		t.Fatal("expected fleet backend resource")
+	}
+	be := res.(backend.IssueBackend)
+	if _, err := be.Count(context.Background(), backend.CountOpts{}); err != nil {
+		t.Fatalf("Count returned error: %v", err)
+	}
+	if gotPath != "/api/v1/DEMO-WS/issues/count" {
+		t.Fatalf("request path = %q, want DEMO-WS scoped backend", gotPath)
 	}
 }
 

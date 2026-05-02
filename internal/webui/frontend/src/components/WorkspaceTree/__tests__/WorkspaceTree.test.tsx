@@ -11,11 +11,15 @@
  * Repo-grouped layout tests were removed in loomcli-8uy0o (sidebar redesign).
  */
 
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 import "@testing-library/jest-dom";
 import { WorkspaceTree } from "../WorkspaceTree";
+
+const { mockAddWorkspaceRepos } = vi.hoisted(() => ({
+  mockAddWorkspaceRepos: vi.fn(),
+}));
 
 // Default mock return values
 const defaultReposReturn = {
@@ -77,7 +81,11 @@ vi.mock("@/hooks", () => ({
     defaultWorkspaceName: null,
     setDefaultWorkspace: vi.fn(),
     agents: [],
-    workspace: null,
+    workspace: reposOverride.workspace ?? null,
+    repos: reposOverride.repos ?? [],
+    isLoading: reposOverride.isLoading ?? defaultReposReturn.isLoading,
+    error: reposOverride.error ?? defaultReposReturn.error,
+    refetch: reposOverride.refetch ?? defaultReposReturn.refetch,
   }),
   useWorkspaceTree: () => ({
     epics: [],
@@ -121,6 +129,10 @@ vi.mock("@/hooks", () => ({
   useFocusReturn: vi.fn(),
 }));
 
+vi.mock("@/hooks/api", () => ({
+  addWorkspaceRepos: (...args: unknown[]) => mockAddWorkspaceRepos(...args),
+}));
+
 vi.mock("@/components/WorkspaceSwitcher", () => ({
   WorkspaceSwitcher: () => null,
 }));
@@ -153,6 +165,7 @@ describe("WorkspaceTree", () => {
     localStorage.setItem("loom:last-workspace-id", TEST_WS_ID);
     reposOverride = {};
     agentOverride = {};
+    mockAddWorkspaceRepos.mockReset();
   });
 
   describe("repo list rendering", () => {
@@ -178,6 +191,26 @@ describe("WorkspaceTree", () => {
 
       expect(screen.getByText("alpha")).toBeInTheDocument();
       expect(screen.getByText("beta")).toBeInTheDocument();
+    });
+
+    it("adds a repository to an empty workspace", async () => {
+      const refetch = vi.fn();
+      mockAddWorkspaceRepos.mockResolvedValue({});
+      reposOverride = { repos: [], refetch };
+
+      render(<WorkspaceTree defaultCollapsed={false} />);
+
+      fireEvent.change(screen.getByLabelText("Repository path"), {
+        target: { value: "/repos/api" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Add Repo" }));
+
+      await waitFor(() => {
+        expect(mockAddWorkspaceRepos).toHaveBeenCalledWith(TEST_WS_ID, {
+          repos: ["/repos/api"],
+        });
+      });
+      expect(refetch).toHaveBeenCalled();
     });
   });
 
@@ -317,7 +350,7 @@ describe("WorkspaceTree", () => {
         error: "Network error",
         connectionState: "error_never_connected",
         retryCountdown: null,
-        retryNow: mockRetryNow,
+        refetch: mockRetryNow,
       };
 
       render(<WorkspaceTree defaultCollapsed={false} />);

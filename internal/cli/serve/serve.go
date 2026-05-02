@@ -450,11 +450,20 @@ func applyWorkspaceConfig(cfg *webui.ServerConfig) {
 	cfg.SetDefaultWorkspaceFn = serveadapter.BuildSetDefaultWorkspaceFn(cfg.Store)
 	cfg.ClearDefaultWorkspaceFn = serveadapter.BuildClearDefaultWorkspaceFn()
 	cfg.WorkspaceCreateFn = workspacemgr.BuildStoreBackedCreateWorkspace(cfg.Store)
+	cfg.WorkspaceAddReposFn = workspacemgr.BuildStoreBackedAddRepos(cfg.Store)
 }
 
 func applyFleetInitialWorkspaceFallback(cfg *webui.ServerConfig, force bool) {
 	if cfg == nil || !cfg.FleetClient || cfg.FleetClientWorkspace == "" {
 		return
+	}
+	if cfg.WorkspaceListFn != nil {
+		workspaces, err := cfg.WorkspaceListFn()
+		if err == nil {
+			if _, ok := workspaces[cfg.FleetClientWorkspace]; !ok {
+				return
+			}
+		}
 	}
 	if force || cfg.InitialWorkspaceID == "" || cfg.InitialWorkspaceID == "workspace" || cfg.InitialWorkspaceID == "default" {
 		cfg.InitialWorkspaceID = cfg.FleetClientWorkspace

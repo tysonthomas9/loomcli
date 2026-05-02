@@ -50,9 +50,8 @@ func validateWorkspaceCreateRequest(req *WorkspaceCreateRequest) *ServiceError {
 
 	switch req.Type {
 	case "empty":
-		if len(req.Repos) == 0 {
-			return ErrValidation("repos is required for empty workspace type")
-		}
+		// Empty workspaces are valid: users can create the project boundary
+		// first and attach one or more repos later.
 	case "clone":
 		if req.CloneURL != "" && len(req.CloneURLs) == 0 {
 			req.CloneURLs = []string{req.CloneURL}

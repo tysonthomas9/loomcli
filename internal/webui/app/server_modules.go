@@ -25,7 +25,11 @@ func (app *Server) buildModules() {
 	// Core modules. When the cli wiring supplies an IssueBackend factory,
 	// plumb it into the ops module so /api/workspaces/{ws}/issues/graph
 	// can serve requests in fleet mode (where the daemon pool is nil).
-	opsModule := handlermux.NewWorkspaceOpsModule(app.workspaceSvc, app.multiPool, agentQueueH).
+	opsPool := app.multiPool
+	if app.config.FleetClient {
+		opsPool = nil
+	}
+	opsModule := handlermux.NewWorkspaceOpsModule(app.workspaceSvc, opsPool, agentQueueH).
 		WithDaemonExpected(!app.config.FleetClient)
 	if app.config.IssueBackendFn != nil {
 		opsModule = opsModule.WithIssueBackendFn(app.config.IssueBackendFn)

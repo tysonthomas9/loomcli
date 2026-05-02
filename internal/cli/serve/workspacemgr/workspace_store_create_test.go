@@ -75,6 +75,60 @@ func TestStoreBackedCreateEmptyWorkspaceCreatesStoreAndLocalState(t *testing.T) 
 	}
 }
 
+func TestStoreBackedAddReposAttachesLocalRepoToEmptyWorkspace(t *testing.T) {
+	loomDir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", loomDir)
+
+	st := memstore.New()
+	createFn := BuildStoreBackedCreateWorkspace(st)
+	wsPath := filepath.Join(loomDir, "workspaces", "my-ws")
+
+	if _, err := createFn(context.Background(), service.WorkspaceCreateRequest{
+		Name: "my-ws",
+		Type: "empty",
+		Path: wsPath,
+	}); err != nil {
+		t.Fatalf("create empty workspace: %v", err)
+	}
+
+	src := initTestGitRepo(t, t.TempDir(), "api")
+	addFn := BuildStoreBackedAddRepos(st)
+	result, err := addFn(context.Background(), service.WorkspaceAddReposRequest{
+		WorkspaceID: "MY-WS",
+		Repos:       []string{src},
+		Branch:      "feature-work",
+	})
+	if err != nil {
+		t.Fatalf("add repo: %v", err)
+	}
+	if result.WorkspaceID != "MY-WS" || result.WorkspacePath != wsPath {
+		t.Fatalf("result = %#v, want MY-WS at %s", result, wsPath)
+	}
+	if _, err := os.Stat(filepath.Join(wsPath, "api", ".git")); err != nil {
+		t.Fatalf("worktree not created: %v", err)
+	}
+
+	repos, err := st.Repos().List(context.Background(), "MY-WS")
+	if err != nil {
+		t.Fatalf("list repos: %v", err)
+	}
+	if len(repos) != 1 || repos[0].Name != "api" || repos[0].DefaultBranch != "feature-work" {
+		t.Fatalf("repos = %#v, want api on feature-work", repos)
+	}
+
+	sc, err := bootstrap.LoadStateCache()
+	if err != nil {
+		t.Fatalf("load state cache: %v", err)
+	}
+	local := sc.Workspaces["MY-WS"]
+	if local.Path != wsPath {
+		t.Fatalf("local path = %q, want %q", local.Path, wsPath)
+	}
+	if local.Repos["api"] != filepath.Join(wsPath, "api") {
+		t.Fatalf("local repo path = %q", local.Repos["api"])
+	}
+}
+
 func TestStoreBackedCreateEmptyWorkspaceRollsBackOnRepoStoreError(t *testing.T) {
 	loomDir := t.TempDir()
 	t.Setenv("LOOM_CONFIG_DIR", loomDir)
@@ -100,6 +154,9 @@ func TestStoreBackedCreateEmptyWorkspaceRollsBackOnRepoStoreError(t *testing.T) 
 	}
 	if _, err := os.Stat(wsPath); !os.IsNotExist(err) {
 		t.Fatalf("workspace path still exists after rollback, stat err=%v", err)
+	}
+	if out := gitOutput(t, src, "branch", "--list", "feature-work"); out != "" {
+		t.Fatalf("rollback left branch feature-work behind: %q", out)
 	}
 	sc, err := bootstrap.LoadStateCache()
 	if err != nil {
@@ -251,4 +308,15 @@ func runGit(t *testing.T, dir string, args ...string) {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git %v failed: %v\n%s", args, err, out)
 	}
+}
+
+func gitOutput(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...) //nolint:norawexec // Test helper creates real git repos for workspace lifecycle coverage.
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v failed: %v\n%s", args, err, out)
+	}
+	return string(out)
 }

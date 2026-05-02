@@ -48,13 +48,15 @@ func (w workspaceWire) toDomain() *domain.Workspace {
 
 func (s *workspaceStore) Create(ctx context.Context, in store.WorkspaceCreate) (*domain.Workspace, error) {
 	body := struct {
-		Key         string `json:"key"`
-		Name        string `json:"name"`
-		Description string `json:"description,omitempty"`
+		Key           string `json:"key"`
+		Name          string `json:"name"`
+		Description   string `json:"description,omitempty"`
+		DefaultBranch string `json:"default_branch,omitempty"`
 	}{
-		Key:         in.Key,
-		Name:        in.Name,
-		Description: in.Description,
+		Key:           in.Key,
+		Name:          in.Name,
+		Description:   in.Description,
+		DefaultBranch: in.DefaultBranch,
 	}
 	var resp workspaceWire
 	if err := s.client.do(ctx, "POST", "/api/v1/admin/workspaces", body, &resp); err != nil {

@@ -1,6 +1,8 @@
 package workspace
 
 import (
+	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -62,5 +64,36 @@ func HandleListWorkspaceRepos(svc service.WorkspaceService) http.HandlerFunc {
 			"success": true,
 			"repos":   data.Repos,
 		})
+	}
+}
+
+// HandleAddWorkspaceRepos returns POST /api/workspaces/{ws}/repos.
+func HandleAddWorkspaceRepos(svc service.WorkspaceService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		wsID := strings.TrimSpace(r.PathValue("ws"))
+		if wsID == "" {
+			handler.RespondError(w, http.StatusBadRequest, "workspace ID is required")
+			return
+		}
+
+		r.Body = http.MaxBytesReader(w, r.Body, handler.MaxRequestBody)
+		var req service.WorkspaceAddReposRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			var maxBytesErr *http.MaxBytesError
+			if errors.As(err, &maxBytesErr) {
+				handler.RespondError(w, http.StatusRequestEntityTooLarge, "request body too large")
+				return
+			}
+			handler.RespondError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+		req.WorkspaceID = wsID
+
+		data, err := svc.AddWorkspaceRepos(r.Context(), req)
+		if err != nil {
+			handler.HandleServiceError(w, err)
+			return
+		}
+		handler.WriteJSON(w, http.StatusCreated, WorkspaceResponse{Success: true, Data: data})
 	}
 }

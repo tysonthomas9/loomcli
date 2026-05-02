@@ -308,6 +308,18 @@ func BuildStoreBackedCreateWorkspace(s storepkg.Store) service.WorkspaceCreateFn
 	}
 }
 
+// BuildStoreBackedAddRepos returns a repo attachment function for fleet-db
+// store mode. It creates git worktrees, then registers those repos in the
+// store and local state cache as one rollback-aware operation.
+func BuildStoreBackedAddRepos(s storepkg.Store) service.WorkspaceAddReposFn {
+	if s == nil {
+		return nil
+	}
+	return func(ctx context.Context, req service.WorkspaceAddReposRequest) (service.WorkspaceCreateResult, error) {
+		return addReposToStoreBackedWorkspace(ctx, s, req)
+	}
+}
+
 //nolint:cyclop,funlen // Orchestrates filesystem, git, and store rollback steps for one workflow.
 func createStoreBackedEmptyWorkspace(ctx context.Context, s storepkg.Store, req service.WorkspaceCreateRequest) (service.WorkspaceCreateResult, error) {
 	if req.Type != "empty" {
@@ -326,9 +338,12 @@ func createStoreBackedEmptyWorkspace(ctx context.Context, s storepkg.Store, req 
 	if err := validateWorkspacePath(wsDir); err != nil {
 		return service.WorkspaceCreateResult{}, err
 	}
-	resolved, err := resolveRepoPaths(req.Repos)
-	if err != nil {
-		return service.WorkspaceCreateResult{}, err
+	var resolved []resolvedRepo
+	if len(req.Repos) > 0 {
+		resolved, err = resolveRepoPaths(req.Repos)
+		if err != nil {
+			return service.WorkspaceCreateResult{}, err
+		}
 	}
 
 	branch := req.Branch
@@ -345,10 +360,14 @@ func createStoreBackedEmptyWorkspace(ctx context.Context, s storepkg.Store, req 
 	if err := os.MkdirAll(wsDir, 0755); err != nil {
 		return service.WorkspaceCreateResult{}, fmt.Errorf("cannot create workspace directory: %w", err)
 	}
-	created, repos, err := addWorktrees(ctx, resolved, wsDir, branch)
-	if err != nil {
-		cleanupWorktrees(wsDir, created)
-		return service.WorkspaceCreateResult{}, err
+	var created []createdWorktree
+	var repos []config.RepoConfig
+	if len(resolved) > 0 {
+		created, repos, err = addWorktrees(ctx, resolved, wsDir, branch)
+		if err != nil {
+			cleanupWorktrees(wsDir, created)
+			return service.WorkspaceCreateResult{}, err
+		}
 	}
 
 	if _, err := s.Workspaces().Create(ctx, storepkg.WorkspaceCreate{
@@ -369,9 +388,15 @@ func createStoreBackedEmptyWorkspace(ctx context.Context, s storepkg.Store, req 
 	}
 
 	for _, r := range repos {
+		remoteName := r.Remote
+		if remoteName == "" {
+			remoteName = "origin"
+		}
 		if _, err := s.Repos().Create(ctx, storepkg.RepoCreate{
 			WorkspaceKey:  key,
 			Name:          r.Name,
+			RemoteURL:     gitRemoteURL(r.Path, remoteName),
+			Remote:        remoteName,
 			DefaultBranch: branch,
 			SourceRepoID:  r.SourceRepoID,
 		}); err != nil {
@@ -386,8 +411,138 @@ func createStoreBackedEmptyWorkspace(ctx context.Context, s storepkg.Store, req 
 		cleanupWorktrees(wsDir, created)
 		return service.WorkspaceCreateResult{}, err
 	}
+	if err := updateStoreWorkspaceState(ctx, s, key, domain.WorkspaceStateReady, ""); err != nil {
+		rollbackStore()
+		cleanupWorktrees(wsDir, created)
+		return service.WorkspaceCreateResult{}, fmt.Errorf("mark workspace ready: %w", err)
+	}
 
 	return service.WorkspaceCreateResult{WorkspaceID: key, WorkspacePath: wsDir}, nil
+}
+
+//nolint:cyclop,funlen // Coordinates local git worktrees, fleet-db repo records, and local state rollback.
+func addReposToStoreBackedWorkspace(ctx context.Context, s storepkg.Store, req service.WorkspaceAddReposRequest) (service.WorkspaceCreateResult, error) {
+	key := strings.TrimSpace(req.WorkspaceID)
+	if key == "" {
+		return service.WorkspaceCreateResult{}, workspaceerrors.New(workspaceerrors.PathNotFound, "workspace ID is required", nil)
+	}
+	ws, err := s.Workspaces().Get(ctx, key)
+	if err != nil {
+		if byName, byNameErr := s.Workspaces().GetByName(ctx, key); byNameErr == nil {
+			ws = byName
+			key = byName.Key
+		} else {
+			return service.WorkspaceCreateResult{}, fmt.Errorf("load workspace %q: %w", req.WorkspaceID, err)
+		}
+	}
+
+	wsDir, err := localWorkspacePath(key)
+	if err != nil {
+		return service.WorkspaceCreateResult{}, err
+	}
+	if err := validateWorkspacePath(wsDir); err != nil {
+		return service.WorkspaceCreateResult{}, err
+	}
+	if err := os.MkdirAll(wsDir, 0755); err != nil {
+		return service.WorkspaceCreateResult{}, fmt.Errorf("cannot create workspace directory: %w", err)
+	}
+
+	resolved, err := resolveRepoPaths(req.Repos)
+	if err != nil {
+		return service.WorkspaceCreateResult{}, err
+	}
+
+	existing, err := s.Repos().List(ctx, key)
+	if err != nil {
+		return service.WorkspaceCreateResult{}, fmt.Errorf("list workspace repos: %w", err)
+	}
+	seen := make(map[string]bool, len(existing))
+	for _, r := range existing {
+		seen[r.Name] = true
+	}
+	for _, r := range resolved {
+		if seen[r.name] {
+			return service.WorkspaceCreateResult{}, workspaceerrors.New(workspaceerrors.AlreadyExists, fmt.Sprintf("repo %q already exists in workspace %q", r.name, key), nil)
+		}
+	}
+
+	branch := req.Branch
+	if branch == "" {
+		branch = ws.DefaultBranch
+	}
+	if branch == "" {
+		branch = ws.Name
+	}
+	if branch == "" {
+		branch = key
+	}
+
+	created, repos, err := addWorktrees(ctx, resolved, wsDir, branch)
+	if err != nil {
+		cleanupAttachedWorktrees(created)
+		return service.WorkspaceCreateResult{}, err
+	}
+
+	var storeRepos []string
+	rollbackStoreRepos := func() {
+		for _, name := range storeRepos {
+			if err := s.Repos().Delete(context.Background(), key, name); err != nil && !errors.Is(err, domain.ErrNotFound) {
+				slog.Warn("failed to rollback store repo create", "workspace", key, "repo", name, "err", err)
+			}
+		}
+	}
+
+	for _, r := range repos {
+		remoteName := r.Remote
+		if remoteName == "" {
+			remoteName = "origin"
+		}
+		if _, err := s.Repos().Create(ctx, storepkg.RepoCreate{
+			WorkspaceKey:  key,
+			Name:          r.Name,
+			RemoteURL:     gitRemoteURL(r.Path, remoteName),
+			Remote:        remoteName,
+			DefaultBranch: branch,
+			SourceRepoID:  r.SourceRepoID,
+		}); err != nil {
+			rollbackStoreRepos()
+			cleanupAttachedWorktrees(created)
+			return service.WorkspaceCreateResult{}, fmt.Errorf("create repo %q in store: %w", r.Name, err)
+		}
+		storeRepos = append(storeRepos, r.Name)
+	}
+
+	if err := saveLocalWorkspaceState(key, wsDir, repos, true); err != nil {
+		rollbackStoreRepos()
+		cleanupAttachedWorktrees(created)
+		return service.WorkspaceCreateResult{}, err
+	}
+
+	return service.WorkspaceCreateResult{WorkspaceID: key, WorkspacePath: wsDir}, nil
+}
+
+func localWorkspacePath(key string) (string, error) {
+	sc, err := bootstrap.LoadStateCache()
+	if err != nil {
+		return "", fmt.Errorf("load local workspace state: %w", err)
+	}
+	if sc != nil {
+		if local, ok := sc.Workspaces[key]; ok && strings.TrimSpace(local.Path) != "" {
+			return local.Path, nil
+		}
+	}
+	return "", workspaceerrors.New(workspaceerrors.PathNotFound, fmt.Sprintf("workspace %q has no local path; open it on this machine before adding repos", key), nil)
+}
+
+func gitRemoteURL(repoPath, remote string) string {
+	if remote == "" {
+		remote = "origin"
+	}
+	out, err := cli.RunGitCommand(repoPath, "remote", "get-url", remote)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(out)
 }
 
 //nolint:cyclop,funlen // Orchestrates clone lifecycle state, filesystem cleanup, and store writes.
@@ -507,13 +662,14 @@ func saveLocalWorkspaceState(key, wsDir string, repos []config.RepoConfig, makeA
 		if sc.Workspaces == nil {
 			sc.Workspaces = make(map[string]bootstrap.WorkspaceLocalState)
 		}
-		repoPaths := make(map[string]string, len(repos))
-		for _, r := range repos {
-			repoPaths[r.Name] = r.Path
-		}
 		local := sc.Workspaces[key]
 		local.Path = wsDir
-		local.Repos = repoPaths
+		if local.Repos == nil {
+			local.Repos = make(map[string]string, len(repos))
+		}
+		for _, r := range repos {
+			local.Repos[r.Name] = r.Path
+		}
 		if local.Agents == nil {
 			local.Agents = make(map[string]bootstrap.AgentLocalState)
 		}
@@ -632,6 +788,7 @@ func resolveRepoPaths(repoPaths []string) ([]resolvedRepo, error) {
 type createdWorktree struct {
 	origRepoPath string
 	worktreePath string
+	branch       string
 }
 
 func createEmptyWorkspace(ctx context.Context, cfg *config.LoomConfig, wsName, wsDir, branch string, repoPaths []string, save func(*config.LoomConfig) error) (service.WorkspaceCreateResult, []config.RepoConfig, []string, error) {
@@ -682,8 +839,14 @@ func addWorktrees(ctx context.Context, resolved []resolvedRepo, wsDir, branch st
 		if _, err := cli.RunGitCommand(repo.path, "worktree", "add", worktreePath, "-b", branch); err != nil {
 			return created, nil, workspaceerrors.New(workspaceerrors.GitFailed, fmt.Sprintf("git worktree add failed for %s", repo.name), err)
 		}
-		created = append(created, createdWorktree{origRepoPath: repo.path, worktreePath: worktreePath})
-		repos = append(repos, config.RepoConfig{Name: repo.name, Path: worktreePath})
+		created = append(created, createdWorktree{origRepoPath: repo.path, worktreePath: worktreePath, branch: branch})
+		repos = append(repos, config.RepoConfig{
+			Name:          repo.name,
+			Path:          worktreePath,
+			Remote:        "origin",
+			DefaultBranch: branch,
+			SourceRepoID:  repo.name,
+		})
 	}
 	return created, repos, nil
 }
@@ -808,10 +971,17 @@ func makeErrorMarker(cfg *config.LoomConfig, wsName string, save func(*config.Lo
 // cleanupWorktrees removes created worktrees and the workspace directory on failure.
 func cleanupWorktrees(wsDir string, created []createdWorktree) {
 	workspace.StopDaemonForWorkspace(cli.GetDeps(nil), wsDir)
+	cleanupAttachedWorktrees(created)
+	_ = os.RemoveAll(wsDir)
+}
+
+func cleanupAttachedWorktrees(created []createdWorktree) {
 	for _, c := range created {
 		_, _ = cli.RunGitCommand(c.origRepoPath, "worktree", "remove", c.worktreePath)
+		if c.branch != "" {
+			_, _ = cli.RunGitCommand(c.origRepoPath, "branch", "-D", c.branch)
+		}
 	}
-	_ = os.RemoveAll(wsDir)
 }
 
 // validateWorkspacePath ensures the workspace directory is under the allowed base.

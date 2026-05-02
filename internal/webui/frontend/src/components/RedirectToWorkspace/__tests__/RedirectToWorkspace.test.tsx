@@ -9,7 +9,7 @@
  * and filtering that workspace out of the candidate list before redirecting.
  */
 
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import "@testing-library/jest-dom";
 import { MemoryRouter } from "react-router-dom";
@@ -57,8 +57,37 @@ vi.mock("@/contexts/AuthContext", () => ({
   useAuth: mockUseAuth,
 }));
 
+const { mockCreateWorkspaceModalProps } = vi.hoisted(() => ({
+  mockCreateWorkspaceModalProps: vi.fn(),
+}));
+
 vi.mock("@/components/CreateWorkspaceModal", () => ({
-  CreateWorkspaceModal: () => null,
+  CreateWorkspaceModal: (props: {
+    isOpen: boolean;
+    onSuccess: (
+      data: ReturnType<typeof makeWorkspaceData>,
+      createdName: string,
+    ) => void;
+  }) => {
+    mockCreateWorkspaceModalProps(props);
+    if (!props.isOpen) return null;
+    return (
+      <button
+        type="button"
+        onClick={() =>
+          props.onSuccess(
+            makeWorkspaceData([
+              { id: "ws-old", is_default: false },
+              { id: "ws-created", is_default: true },
+            ]),
+            "ws-created",
+          )
+        }
+      >
+        Mock create success
+      </button>
+    );
+  },
 }));
 
 const { mockGetLastWorkspaceId, mockClearLastWorkspaceId } = vi.hoisted(() => ({
@@ -356,6 +385,29 @@ describe("RedirectToWorkspace", () => {
       });
 
       expect(mockNavigate).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("empty state workspace creation", () => {
+    it("navigates to the workspace matching the created name", async () => {
+      mockFetchWorkspace.mockResolvedValueOnce(makeWorkspaceData([]));
+
+      renderComponent();
+
+      const createButton = await screen.findByRole("button", {
+        name: "Create Workspace",
+      });
+      fireEvent.click(createButton);
+      fireEvent.click(
+        screen.getByRole("button", { name: "Mock create success" }),
+      );
+
+      expect(mockNavigate).toHaveBeenCalledWith("/ws/ws-created/", {
+        replace: true,
+      });
+      expect(mockNavigate).not.toHaveBeenCalledWith("/ws/ws-old/", {
+        replace: true,
+      });
     });
   });
 

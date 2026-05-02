@@ -41,6 +41,7 @@ export {
   deleteWorkspace,
   reorderWorkspaces,
   createWorkspace,
+  addWorkspaceRepos,
   createWorkspaceEpic,
   createWorkspaceTask,
 } from "@/api/workspace";

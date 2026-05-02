@@ -36,6 +36,7 @@ type WorkspaceServiceConfig struct {
 	ConfigByIDFn   func(string) (*ops.WorkspaceData, error) // Topology supplier by workspace ID
 	MultiPool      *daemon.MultiPool                        // For listing workspaces and existence checks
 	CreateFn       WorkspaceCreateFn                        // Already wrapped with registry hooks
+	AddReposFn     WorkspaceAddReposFn                      // Store-backed repo attachment
 	DeleteFn       func(string) error                       // Already wrapped with cleanup hooks
 	JobStore       JobStore                                 // For async creation; nil = async unavailable
 	SetDefaultFn   func(string) error                       // nil = feature disabled
@@ -48,6 +49,7 @@ type workspaceServiceImpl struct {
 	configByIDFn   func(string) (*ops.WorkspaceData, error)
 	multiPool      *daemon.MultiPool
 	createFn       WorkspaceCreateFn
+	addReposFn     WorkspaceAddReposFn
 	deleteFn       func(string) error
 	jobStore       JobStore
 	setDefaultFn   func(string) error
@@ -62,11 +64,45 @@ func NewWorkspaceService(cfg WorkspaceServiceConfig) WorkspaceService {
 		configByIDFn:   cfg.ConfigByIDFn,
 		multiPool:      cfg.MultiPool,
 		createFn:       cfg.CreateFn,
+		addReposFn:     cfg.AddReposFn,
 		deleteFn:       cfg.DeleteFn,
 		jobStore:       cfg.JobStore,
 		setDefaultFn:   cfg.SetDefaultFn,
 		clearDefaultFn: cfg.ClearDefaultFn,
 	}
+}
+
+func (s *workspaceServiceImpl) AddWorkspaceRepos(ctx context.Context, req WorkspaceAddReposRequest) (*ops.WorkspaceData, error) {
+	if s.addReposFn == nil {
+		return nil, ErrUnavailable("workspace repo attachment is not available")
+	}
+	if req.WorkspaceID == "" {
+		return nil, ErrValidation("workspace ID is required")
+	}
+	if len(req.Repos) == 0 {
+		return nil, ErrValidation("at least one repo path is required")
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, workspaceCreateTimeoutEmpty)
+	defer cancel()
+
+	result, err := s.addReposFn(ctx, req)
+	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			return nil, ErrTimeout("repo attachment timed out")
+		}
+		slog.Warn("workspace repo attachment failed", "workspace", req.WorkspaceID, "err", err)
+		return nil, classifyWorkspaceCreateError(err)
+	}
+	if s.store != nil && result.WorkspaceID != "" {
+		data, buildErr := storeadapter.BuildWorkspaceDataForKey(ctx, s.store, result.WorkspaceID)
+		if buildErr != nil {
+			return nil, ErrInternal("failed to load workspace data", buildErr)
+		}
+		normalizeWorkspaceData(data)
+		return data, nil
+	}
+	return s.GetWorkspace(ctx, req.WorkspaceID)
 }
 
 // loadActiveWorkspace returns the active workspace topology, preferring
@@ -367,10 +403,16 @@ func (s *workspaceServiceImpl) CreateWorkspace(ctx context.Context, req Workspac
 		slog.Warn("workspace creation failed", "name", req.Name, "type", req.Type, "err", err)
 		return nil, nil, classifyWorkspaceCreateError(err)
 	}
-	_ = result // used by wrapWorkspaceCreateFn for registration
 
 	var data *ops.WorkspaceData
-	if s.configFn != nil {
+	if s.store != nil && result.WorkspaceID != "" {
+		d, buildErr := storeadapter.BuildWorkspaceDataForKey(ctx, s.store, result.WorkspaceID)
+		if buildErr != nil {
+			return nil, nil, ErrInternal("failed to load created workspace data", buildErr)
+		}
+		normalizeWorkspaceData(d)
+		data = d
+	} else if s.configFn != nil {
 		d, cfgErr := s.configFn()
 		if cfgErr == nil && d != nil {
 			normalizeWorkspaceData(d)

@@ -115,11 +115,15 @@ export function RedirectToWorkspace() {
         <CreateWorkspaceModal
           isOpen={showCreate}
           onClose={() => setShowCreate(false)}
-          onSuccess={(data) => {
+          onSuccess={(data, createdName) => {
             setShowCreate(false);
-            const ws = data.workspaces[0];
+            const ws = data.workspaces.find(
+              (item) => item.name === createdName,
+            );
             if (ws) {
               navigate(`/ws/${ws.id}/`, { replace: true });
+            } else {
+              resolveWorkspace();
             }
           }}
         />

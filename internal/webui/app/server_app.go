@@ -112,7 +112,7 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 
 	// Initialize the initial workspace connection pool (stable UUID or CWD basename).
 	app.initialWorkspaceID = config.InitialWorkspaceID
-	if app.initialWorkspaceID == "" {
+	if app.initialWorkspaceID == "" && !(config.FleetMode && config.Store != nil) {
 		app.initialWorkspaceID = "default"
 		if cwd, err := os.Getwd(); err == nil {
 			app.initialWorkspaceID = filepath.Base(cwd)
@@ -279,7 +279,7 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	})
 
 	// Register the initial workspace.
-	if app.pool != nil {
+	if app.pool != nil && shouldRegisterInitialWorkspace(config, app.initialWorkspaceID) {
 		appinfra.SetPrebuiltPool(registeredHooks.BeadsPool, app.initialWorkspaceID, app.pool)
 		var initialWSPath string
 		if config.WorkspaceListFn != nil {
@@ -404,6 +404,7 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 		ConfigByIDFn:   config.WorkspaceConfigByIDFn,
 		MultiPool:      app.multiPool,
 		CreateFn:       app.wrappedCreateFn,
+		AddReposFn:     config.WorkspaceAddReposFn,
 		DeleteFn:       app.wrappedDeleteFn,
 		JobStore:       app.jobStore,
 		SetDefaultFn:   config.SetDefaultWorkspaceFn,
@@ -466,4 +467,22 @@ func resolveWorkspaceNameToID(config webui.ServerConfig) map[string]string {
 		}
 	}
 	return nameToID
+}
+
+func shouldRegisterInitialWorkspace(config webui.ServerConfig, workspaceID string) bool {
+	if workspaceID == "" {
+		return false
+	}
+	if !config.FleetMode || config.Store == nil {
+		return true
+	}
+	if config.WorkspaceListFn == nil {
+		return false
+	}
+	workspaces, err := config.WorkspaceListFn()
+	if err != nil {
+		return false
+	}
+	_, ok := workspaces[workspaceID]
+	return ok
 }

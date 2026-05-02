@@ -40,6 +40,9 @@ type WorkspaceService interface {
 	// Returns refreshed workspace data and any non-fatal warnings.
 	CreateWorkspace(ctx context.Context, req WorkspaceCreateRequest) (*ops.WorkspaceData, []string, error)
 
+	// AddWorkspaceRepos attaches one or more local git repos to an existing workspace.
+	AddWorkspaceRepos(ctx context.Context, req WorkspaceAddReposRequest) (*ops.WorkspaceData, error)
+
 	// StartAsyncCreate starts an async workspace creation job for clone workspaces.
 	// Returns the job ID. Validates the request before starting.
 	// Returns ServiceError{Kind: Unavailable} if job store not available.

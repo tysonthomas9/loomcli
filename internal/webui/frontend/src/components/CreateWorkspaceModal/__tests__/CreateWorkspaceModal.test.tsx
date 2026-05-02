@@ -166,7 +166,7 @@ describe("CreateWorkspaceModal", () => {
 
       // Card descriptions
       expect(
-        screen.getByText("New git repository from scratch"),
+        screen.getByText("Attach local repos now or later"),
       ).toBeInTheDocument();
       expect(screen.getByText("Clone from a remote URL")).toBeInTheDocument();
       expect(

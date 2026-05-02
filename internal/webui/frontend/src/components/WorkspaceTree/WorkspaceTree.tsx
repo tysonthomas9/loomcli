@@ -4,17 +4,14 @@
  * EpicTaskTree → ReposSection, with QueueStatsBar pinned at the bottom.
  */
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, type FormEvent } from "react";
 
 import type { ConnectionState } from "@/api/common";
 import { useStore } from "zustand";
-import {
-  useWorkspaceRepos,
-  useWorkspaceContext,
-  useAgentStoreInstance,
-} from "@/hooks";
+import { useWorkspaceContext, useAgentStoreInstance } from "@/hooks";
 import { wsGet, wsSet } from "@/utils/scopedStorage";
 import { ErrorDisplay } from "@/components/ErrorDisplay";
+import { addWorkspaceRepos } from "@/hooks/api";
 
 import { WorkspaceSelectorBar } from "./WorkspaceSelectorBar";
 import { AgentSection } from "./AgentSection";
@@ -71,7 +68,18 @@ export function WorkspaceTree({
   workQueueCounts,
   onTreeSelect,
 }: WorkspaceTreeProps): JSX.Element {
-  const { workspaceId, activeWorkspaceName } = useWorkspaceContext();
+  const {
+    workspaceId,
+    activeWorkspaceName,
+    workspace,
+    repos,
+    isLoading,
+    error,
+    refetch,
+  } = useWorkspaceContext();
+  const [repoPathInput, setRepoPathInput] = useState("");
+  const [isAddingRepo, setIsAddingRepo] = useState(false);
+  const [addRepoError, setAddRepoError] = useState<string | null>(null);
 
   // Load initial collapsed state from scoped localStorage
   const [isCollapsed, setIsCollapsed] = useState(() => {
@@ -80,15 +88,15 @@ export function WorkspaceTree({
     return stored !== null ? stored === "true" : defaultCollapsed;
   });
 
-  const {
-    workspace,
-    repos,
-    isLoading,
-    error,
-    connectionState: wsConnectionState,
-    retryCountdown,
-    retryNow,
-  } = useWorkspaceRepos();
+  const wsConnectionState = error
+    ? workspace
+      ? "error_lost_connection"
+      : "error_never_connected"
+    : isLoading
+      ? "loading"
+      : "connected";
+  const retryCountdown = null;
+  const retryNow = refetch;
 
   const agentStore = useAgentStoreInstance();
   const agents = useStore(agentStore, (s) => s.agents);
@@ -117,6 +125,29 @@ export function WorkspaceTree({
   const handleToggle = useCallback(() => {
     setIsCollapsed((prev) => !prev);
   }, []);
+
+  const handleAddRepo = useCallback(
+    async (e: FormEvent<HTMLFormElement>) => {
+      e.preventDefault();
+      const repoPath = repoPathInput.trim();
+      if (!workspaceId || !repoPath || isAddingRepo) return;
+
+      setIsAddingRepo(true);
+      setAddRepoError(null);
+      try {
+        await addWorkspaceRepos(workspaceId, { repos: [repoPath] });
+        setRepoPathInput("");
+        await refetch();
+      } catch (err) {
+        setAddRepoError(
+          err instanceof Error ? err.message : "Failed to add repository",
+        );
+      } finally {
+        setIsAddingRepo(false);
+      }
+    },
+    [workspaceId, repoPathInput, isAddingRepo, refetch],
+  );
 
   const workspaces = workspace?.workspaces ?? [];
 
@@ -204,6 +235,32 @@ export function WorkspaceTree({
 
           {!isLoading && !error && repos.length === 0 && (
             <div className={styles.emptyState}>No repos in workspace</div>
+          )}
+
+          {!isLoading && !error && workspaceId && (
+            <form className={styles.addRepoForm} onSubmit={handleAddRepo}>
+              <input
+                className={styles.addRepoInput}
+                type="text"
+                value={repoPathInput}
+                onChange={(e) => setRepoPathInput(e.target.value)}
+                placeholder="/path/to/repo"
+                aria-label="Repository path"
+                disabled={isAddingRepo}
+              />
+              <button
+                type="submit"
+                className={styles.addRepoButton}
+                disabled={isAddingRepo || repoPathInput.trim() === ""}
+              >
+                {isAddingRepo ? "Adding..." : "Add Repo"}
+              </button>
+              {addRepoError && (
+                <div className={styles.addRepoError} role="alert">
+                  {addRepoError}
+                </div>
+              )}
+            </form>
           )}
 
           {/* Flat agent list with repo·branch metadata */}

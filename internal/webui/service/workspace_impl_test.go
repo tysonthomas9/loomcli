@@ -267,6 +267,51 @@ func TestGetActiveWorkspace_StoreBackedDoesNotFallbackToLegacyConfig(t *testing.
 	}
 }
 
+func TestCreateWorkspace_StoreBackedReturnsCreatedWorkspaceData(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	t.Setenv("LOOM_WORKSPACE", "")
+
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "ALPHA", Name: "alpha"}); err != nil {
+		t.Fatalf("create alpha: %v", err)
+	}
+	if err := bootstrap.SetActiveWorkspaceKey("ALPHA"); err != nil {
+		t.Fatalf("set active workspace: %v", err)
+	}
+
+	svc := NewWorkspaceService(WorkspaceServiceConfig{
+		Store: st,
+		ConfigFn: func() (*ops.WorkspaceData, error) {
+			t.Fatal("store-backed create should not call legacy configFn")
+			return nil, nil
+		},
+		CreateFn: func(ctx context.Context, req WorkspaceCreateRequest) (WorkspaceCreateResult, error) {
+			if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "BETA", Name: req.Name}); err != nil {
+				return WorkspaceCreateResult{}, err
+			}
+			return WorkspaceCreateResult{WorkspaceID: "BETA"}, nil
+		},
+	})
+
+	data, _, err := svc.CreateWorkspace(ctx, WorkspaceCreateRequest{Name: "beta", Type: "empty"})
+	if err != nil {
+		t.Fatalf("CreateWorkspace returned error: %v", err)
+	}
+	if data == nil {
+		t.Fatal("CreateWorkspace returned nil data")
+	}
+	if data.ID != "BETA" {
+		t.Fatalf("data.ID = %q, want BETA", data.ID)
+	}
+	if data.Name != "beta" {
+		t.Fatalf("data.Name = %q, want beta", data.Name)
+	}
+	if len(data.Workspaces) != 2 {
+		t.Fatalf("workspace summary count = %d, want 2", len(data.Workspaces))
+	}
+}
+
 func TestGetWorkspace_StoreBackedMissDoesNotFallbackToLegacyConfig(t *testing.T) {
 	st := memstore.New()
 	svc := NewWorkspaceService(WorkspaceServiceConfig{

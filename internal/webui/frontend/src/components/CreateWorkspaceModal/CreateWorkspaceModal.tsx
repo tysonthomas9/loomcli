@@ -20,7 +20,7 @@ const TYPE_CARDS: {
   title: string;
   desc: string;
 }[] = [
-  { type: "empty", title: "Empty", desc: "New git repository from scratch" },
+  { type: "empty", title: "Empty", desc: "Attach local repos now or later" },
   { type: "clone", title: "Clone", desc: "Clone from a remote URL" },
   {
     type: "template",
@@ -123,6 +123,8 @@ export interface CreateWorkspaceModalProps {
   ) => void;
 }
 
+const WORKSPACE_NAME_RE = /^[A-Za-z0-9_-]+$/;
+
 export function CreateWorkspaceModal({
   isOpen,
   onClose,
@@ -210,8 +212,13 @@ export function CreateWorkspaceModal({
 
   // Include pending input text in submit eligibility check
   const hasPendingUrl = type === "clone" && urlInput.trim() !== "";
+  const nameError =
+    name.trim() !== "" && !WORKSPACE_NAME_RE.test(name.trim())
+      ? "Use letters, numbers, hyphens, or underscores."
+      : "";
   const canSubmit =
     name.trim() !== "" &&
+    nameError === "" &&
     !isSubmitting &&
     type !== "template" &&
     (type !== "clone" || cloneUrls.length > 0 || hasPendingUrl);
@@ -398,6 +405,7 @@ export function CreateWorkspaceModal({
                 disabled={isSubmitting}
                 data-testid="create-workspace-name"
               />
+              {nameError && <p className={styles.fieldHint}>{nameError}</p>}
             </div>
 
             <div className={styles.fieldGroup}>

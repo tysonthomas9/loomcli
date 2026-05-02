@@ -84,6 +84,12 @@
   opacity: 0.6;
 }
 
+.fieldHint {
+  color: var(--color-danger);
+  font-size: 12px;
+  margin: 4px 0 0;
+}
+
 .locationRow {
   display: flex;
   gap: 6px;

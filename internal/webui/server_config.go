@@ -79,6 +79,7 @@ type ServerConfig struct {
 	SetDefaultWorkspaceFn   func(name string) error                  // Set default workspace in config; nil = feature disabled
 	ClearDefaultWorkspaceFn func() error                             // Clear default workspace in config; nil = feature disabled
 	WorkspaceCreateFn       service.WorkspaceCreateFn                // Workspace creation function; nil = creation unavailable
+	WorkspaceAddReposFn     service.WorkspaceAddReposFn              // Attach local repos to an existing workspace; nil = unavailable
 	WorkspaceListFn         func() (map[string]string, error)        // Returns all configured workspaces as id→path (UUID preferred, name fallback for pre-migration); nil = single-workspace mode
 	InitialWorkspaceID      string                                   // Stable UUID of the initial workspace (CWD); if empty, falls back to filepath.Base(cwd)
 	WorkspaceIDResolverFn   WorkspaceIDResolverFn                    // Resolves workspace name → UUID; nil = no resolution available

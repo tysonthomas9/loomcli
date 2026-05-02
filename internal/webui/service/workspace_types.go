@@ -17,6 +17,13 @@ type WorkspaceCreateRequest struct {
 	Path      string   `json:"path"`       // optional workspace directory override
 }
 
+// WorkspaceAddReposRequest is the JSON body for POST /api/workspaces/{ws}/repos.
+type WorkspaceAddReposRequest struct {
+	WorkspaceID string   `json:"-"`
+	Repos       []string `json:"repos"`
+	Branch      string   `json:"branch"`
+}
+
 // WorkspaceKeyFromName derives the fleet-db workspace key used by store-backed
 // web workspace creation. It intentionally mirrors fleet-db's key regex:
 // uppercase letters/digits/hyphens, starts with a letter, max 32 chars.
@@ -57,6 +64,9 @@ type WorkspaceCreateResult struct {
 // WorkspaceCreateFn is the function signature for creating a workspace.
 // Injected at server startup to decouple webui from CLI internals.
 type WorkspaceCreateFn func(ctx context.Context, req WorkspaceCreateRequest) (WorkspaceCreateResult, error)
+
+// WorkspaceAddReposFn attaches existing local git repos to a workspace.
+type WorkspaceAddReposFn func(ctx context.Context, req WorkspaceAddReposRequest) (WorkspaceCreateResult, error)
 
 // WorkspaceJobStatus represents the current state of a workspace creation job.
 type WorkspaceJobStatus string
