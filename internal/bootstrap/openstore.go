@@ -2,9 +2,11 @@ package bootstrap
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 
 	"github.com/tysonthomas9/loomcli/internal/backend/fleet"
 	"github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
@@ -29,6 +31,7 @@ const EnvAgentName = "LOOM_AGENT_NAME"
 type StoreHandle struct {
 	Store store.Store
 	mode  Mode
+	url   string
 
 	// embedded is the embedded fleet-db handle, set only in ModeLocal.
 	embedded *EmbeddedFleetDB
@@ -44,6 +47,9 @@ func (h *StoreHandle) URL() string {
 	}
 	if h.embedded != nil {
 		return h.embedded.URL()
+	}
+	if h.url != "" {
+		return h.url
 	}
 	return os.Getenv(EnvFleetDBURL)
 }
@@ -94,31 +100,78 @@ func OpenStore(ctx context.Context, dataDir string, logger *slog.Logger) (*Store
 
 	switch mode {
 	case ModeCloud:
-		cfg.BaseURL = os.Getenv(EnvFleetDBURL)
-		client, err := fleetdb.New(cfg)
-		if err != nil {
-			return nil, fmt.Errorf("openstore: cloud: %w", err)
-		}
-		logger.Info("opened cloud fleet-db client", "url", cfg.BaseURL)
-		return &StoreHandle{Store: client, mode: mode}, nil
+		return openCloudStore(cfg, logger)
 
 	case ModeLocal:
-		emb, err := StartEmbedded(ctx, dataDir, logger)
-		if err != nil {
-			return nil, fmt.Errorf("openstore: local: %w", err)
-		}
-		cfg.BaseURL = emb.URL()
-		client, err := fleetdb.New(cfg)
-		if err != nil {
-			_ = emb.Stop()
-			return nil, fmt.Errorf("openstore: local client: %w", err)
-		}
-		logger.Info("opened embedded fleet-db client", "url", cfg.BaseURL)
-		return &StoreHandle{Store: client, mode: mode, embedded: emb}, nil
+		return openLocalStore(ctx, dataDir, cfg, logger)
 
 	default:
 		return nil, fmt.Errorf("openstore: unknown mode %s", mode)
 	}
+}
+
+func openCloudStore(cfg fleetdb.Config, logger *slog.Logger) (*StoreHandle, error) {
+	cfg.BaseURL = os.Getenv(EnvFleetDBURL)
+	client, err := fleetdb.New(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("openstore: cloud: %w", err)
+	}
+	logger.Info("opened cloud fleet-db client", "url", cfg.BaseURL)
+	return &StoreHandle{Store: client, mode: ModeCloud, url: cfg.BaseURL}, nil
+}
+
+func openLocalStore(ctx context.Context, dataDir string, cfg fleetdb.Config, logger *slog.Logger) (*StoreHandle, error) {
+	fleetDir := filepath.Join(dataDir, "fleet-db")
+	if h, ok, err := tryReuseLocalStore(ctx, fleetDir, cfg, logger); ok || err != nil {
+		return h, err
+	}
+
+	emb, err := StartEmbedded(ctx, dataDir, logger)
+	if err != nil {
+		if errors.Is(err, ErrEmbeddedAlreadyRunning) {
+			return waitAndOpenLocalStore(ctx, fleetDir, cfg, logger, err)
+		}
+		return nil, fmt.Errorf("openstore: local: %w", err)
+	}
+	cfg.BaseURL = emb.URL()
+	client, err := fleetdb.New(cfg)
+	if err != nil {
+		_ = emb.Stop()
+		return nil, fmt.Errorf("openstore: local client: %w", err)
+	}
+	logger.Info("opened embedded fleet-db client", "url", cfg.BaseURL)
+	return &StoreHandle{Store: client, mode: ModeLocal, url: cfg.BaseURL, embedded: emb}, nil
+}
+
+func tryReuseLocalStore(ctx context.Context, fleetDir string, cfg fleetdb.Config, logger *slog.Logger) (*StoreHandle, bool, error) {
+	url, ok, reuseErr := reuseEmbeddedRuntime(ctx, fleetDir, logger, healthCheckTimeout)
+	if !ok {
+		if reuseErr != nil {
+			logger.Debug("existing embedded fleet-db runtime is not reusable", "err", reuseErr)
+		}
+		return nil, false, nil
+	}
+	cfg.BaseURL = url
+	client, err := fleetdb.New(cfg)
+	if err != nil {
+		return nil, true, fmt.Errorf("openstore: local reused client: %w", err)
+	}
+	logger.Info("opened existing embedded fleet-db client", "url", cfg.BaseURL)
+	return &StoreHandle{Store: client, mode: ModeLocal, url: cfg.BaseURL}, true, nil
+}
+
+func waitAndOpenLocalStore(ctx context.Context, fleetDir string, cfg fleetdb.Config, logger *slog.Logger, lockErr error) (*StoreHandle, error) {
+	url, waitErr := waitForEmbeddedRuntime(ctx, fleetDir, startupTimeout, logger)
+	if waitErr != nil {
+		return nil, fmt.Errorf("openstore: local: %w; existing runtime did not become healthy: %v", lockErr, waitErr)
+	}
+	cfg.BaseURL = url
+	client, err := fleetdb.New(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("openstore: local waited client: %w", err)
+	}
+	logger.Info("opened existing embedded fleet-db client after startup wait", "url", cfg.BaseURL)
+	return &StoreHandle{Store: client, mode: ModeLocal, url: cfg.BaseURL}, nil
 }
 
 // resolveActor returns the X-Actor identity. Priority:

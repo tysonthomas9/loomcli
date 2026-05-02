@@ -3,6 +3,7 @@ package bootstrap
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -25,6 +26,10 @@ import (
 // discovery skips PATH and the standard locations.
 const EnvFleetDBBin = "FLEET_DB_BIN"
 
+// ErrEmbeddedAlreadyRunning is returned when another process owns the local
+// embedded fleet-db runtime for this loom data directory.
+var ErrEmbeddedAlreadyRunning = errors.New("embedded fleet-db already running")
+
 // fleetDBBinName is the executable name used in PATH lookup and standard
 // install locations.
 const fleetDBBinName = "fleet-db"
@@ -45,6 +50,14 @@ type embeddedRuntimeLock struct {
 	file *os.File
 }
 
+type embeddedRuntimeInfo struct {
+	PID          int       `json:"pid"`
+	URL          string    `json:"url"`
+	RedisAddr    string    `json:"redis_addr,omitempty"`
+	SnapshotPath string    `json:"snapshot_path,omitempty"`
+	StartedAt    time.Time `json:"started_at"`
+}
+
 func acquireEmbeddedRuntimeLock(fleetDir string) (*embeddedRuntimeLock, error) {
 	path := filepath.Join(fleetDir, "embedded.lock")
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0600) //nolint:gosec // user-private runtime lock
@@ -54,7 +67,7 @@ func acquireEmbeddedRuntimeLock(fleetDir string) (*embeddedRuntimeLock, error) {
 	if err := lockfile.TryLockExclusive(f); err != nil {
 		_ = f.Close()
 		if errors.Is(err, lockfile.ErrLocked) {
-			return nil, fmt.Errorf("embedded: fleet-db is already running for this loom data dir (lock %s is held); set %s to a shared fleet-db URL for concurrent clients or stop the existing local process", path, EnvFleetDBURL)
+			return nil, fmt.Errorf("%w: lock %s is held; set %s to a shared fleet-db URL for concurrent clients or stop the existing local process", ErrEmbeddedAlreadyRunning, path, EnvFleetDBURL)
 		}
 		return nil, fmt.Errorf("embedded: lock runtime %s: %w", path, err)
 	}
@@ -92,6 +105,108 @@ func (l *embeddedRuntimeLock) Release() error {
 		return fmt.Errorf("%s: %w", l.path, err)
 	}
 	return nil
+}
+
+func embeddedRuntimePath(fleetDir string) string {
+	return filepath.Join(fleetDir, "runtime.json")
+}
+
+func readEmbeddedRuntime(fleetDir string) (*embeddedRuntimeInfo, error) {
+	path := embeddedRuntimePath(fleetDir)
+	data, err := os.ReadFile(path) //nolint:gosec // path is under loom data dir
+	if err != nil {
+		return nil, err
+	}
+	var info embeddedRuntimeInfo
+	if err := json.Unmarshal(data, &info); err != nil {
+		return nil, fmt.Errorf("parse %s: %w", path, err)
+	}
+	if info.URL == "" {
+		return nil, fmt.Errorf("parse %s: missing url", path)
+	}
+	return &info, nil
+}
+
+func writeEmbeddedRuntime(fleetDir string, info embeddedRuntimeInfo) error {
+	if err := os.MkdirAll(fleetDir, 0755); err != nil {
+		return fmt.Errorf("mkdir runtime dir %s: %w", fleetDir, err)
+	}
+	if info.StartedAt.IsZero() {
+		info.StartedAt = time.Now().UTC()
+	}
+	data, err := json.MarshalIndent(info, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal embedded runtime: %w", err)
+	}
+	path := embeddedRuntimePath(fleetDir)
+	tmpPath := path + ".tmp"
+	if err := os.WriteFile(tmpPath, data, 0600); err != nil { //nolint:gosec // runtime metadata is user-private
+		return fmt.Errorf("write embedded runtime tmp %s: %w", tmpPath, err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("rename embedded runtime %s: %w", path, err)
+	}
+	_ = os.Chmod(path, 0600)
+	return nil
+}
+
+func removeEmbeddedRuntimeIfOwner(fleetDir string, pid int, url string) {
+	info, err := readEmbeddedRuntime(fleetDir)
+	if err != nil {
+		return
+	}
+	if info.PID == pid && info.URL == url {
+		_ = os.Remove(embeddedRuntimePath(fleetDir))
+	}
+}
+
+func reuseEmbeddedRuntime(ctx context.Context, fleetDir string, logger *slog.Logger, timeout time.Duration) (string, bool, error) {
+	info, err := readEmbeddedRuntime(fleetDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", false, nil
+		}
+		return "", false, err
+	}
+	if info.PID <= 0 || !lockfile.IsProcessRunning(info.PID) {
+		_ = os.Remove(embeddedRuntimePath(fleetDir))
+		return "", false, fmt.Errorf("embedded runtime pid %d is not running", info.PID)
+	}
+	healthCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	if err := netutil.WaitForHealthz(healthCtx, info.URL, healthCheckTimeout); err != nil {
+		return "", false, fmt.Errorf("embedded runtime %s pid %d is not healthy: %w", info.URL, info.PID, err)
+	}
+	if logger != nil {
+		logger.Debug("reusing embedded fleet-db runtime", "url", info.URL, "pid", info.PID)
+	}
+	return info.URL, true, nil
+}
+
+func waitForEmbeddedRuntime(ctx context.Context, fleetDir string, timeout time.Duration, logger *slog.Logger) (string, error) {
+	waitCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	var lastErr error
+	for {
+		url, ok, err := reuseEmbeddedRuntime(waitCtx, fleetDir, logger, healthCheckTimeout)
+		if ok {
+			return url, nil
+		}
+		if err != nil {
+			lastErr = err
+		}
+		select {
+		case <-waitCtx.Done():
+			if lastErr != nil {
+				return "", lastErr
+			}
+			return "", waitCtx.Err()
+		case <-ticker.C:
+		}
+	}
 }
 
 // healthCheckTimeout caps the per-attempt HTTP timeout while polling
@@ -238,6 +353,16 @@ func StartEmbedded(ctx context.Context, dataDir string, logger *slog.Logger) (*E
 		return nil, fmt.Errorf("embedded: fleet-db not ready after %s: %w (binary=%s addr=%s redis=%s snapshot=%s stderr=%q stdout=%q)",
 			startupTimeout, err, binPath, httpAddr, redisMgr.Addr(), snapshotPath, stderrTail.String(), stdoutTail.String())
 	}
+	if err := writeEmbeddedRuntime(fleetDir, embeddedRuntimeInfo{
+		PID:          cmd.Process.Pid,
+		URL:          emb.url,
+		RedisAddr:    redisMgr.Addr(),
+		SnapshotPath: snapshotPath,
+		StartedAt:    time.Now().UTC(),
+	}); err != nil {
+		_ = emb.Stop()
+		return nil, fmt.Errorf("embedded: write runtime metadata: %w", err)
+	}
 
 	releaseLockOnError = false
 	return emb, nil
@@ -276,6 +401,13 @@ func (e *EmbeddedFleetDB) Stop() error {
 			if lerr := e.runLock.Release(); lerr != nil && err == nil {
 				err = fmt.Errorf("embedded: release runtime lock: %w", lerr)
 			}
+		}
+		pid := 0
+		if e.cmd != nil && e.cmd.Process != nil {
+			pid = e.cmd.Process.Pid
+		}
+		if e.runLock != nil {
+			removeEmbeddedRuntimeIfOwner(filepath.Dir(e.runLock.path), pid, e.url)
 		}
 		close(e.done)
 	})
