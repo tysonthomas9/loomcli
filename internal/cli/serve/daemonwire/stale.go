@@ -30,9 +30,7 @@ func InitStaleDetectorHandler(ctx context.Context, redisAddr, redisPassword stri
 
 	cfg := kv.DefaultStaleDetectorConfig()
 	serverID := kv.GenerateServerID()
-	reconciler := kv.NewReconciler("")
-
-	detector := kv.NewStaleDetector(kvClient, cfg, serverID, reconciler)
+	detector := kv.NewStaleDetector(kvClient, cfg, serverID)
 
 	go func() {
 		if err := detector.Run(ctx); err != nil && ctx.Err() == nil {
