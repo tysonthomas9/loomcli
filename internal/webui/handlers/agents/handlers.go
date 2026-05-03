@@ -1,6 +1,7 @@
 package agents
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
@@ -55,6 +56,10 @@ func HandleUpdate(agentSvc service.AgentService) http.HandlerFunc {
 			handler.HandleServiceError(w, service.ErrValidation("invalid state"))
 			return
 		}
+		if patch.DesiredState != nil && !validAgentDesiredState(*patch.DesiredState) {
+			handler.HandleServiceError(w, service.ErrValidation("invalid desired_state"))
+			return
+		}
 		updated, err := agentSvc.UpdateAgent(r.Context(), r.PathValue("ws"), r.PathValue("name"), patch)
 		if err != nil {
 			handler.HandleServiceError(w, err)
@@ -74,17 +79,79 @@ func HandleDelete(agentSvc service.AgentService) http.HandlerFunc {
 	}
 }
 
-func HandleLifecycleUnsupported(w http.ResponseWriter, _ *http.Request) {
-	handler.HandleServiceError(w, service.ErrNotImplemented("agent lifecycle control is not available in fleet-db store mode"))
+func HandleStart(agentSvc service.AgentService) http.HandlerFunc {
+	return handleLifecycle(agentSvc, lifecyclePatch{
+		state:   domain.AgentStateActive,
+		desired: domain.AgentDesiredRunning,
+		status:  http.StatusOK,
+		message: "started",
+	})
+}
+
+func HandleStop(agentSvc service.AgentService) http.HandlerFunc {
+	return handleLifecycle(agentSvc, lifecyclePatch{
+		state:   domain.AgentStateStopped,
+		desired: domain.AgentDesiredStopped,
+		status:  http.StatusOK,
+		message: "stopped",
+	})
+}
+
+func HandleRestart(agentSvc service.AgentService) http.HandlerFunc {
+	return handleLifecycle(agentSvc, lifecyclePatch{
+		state:   domain.AgentStateActive,
+		desired: domain.AgentDesiredRunning,
+		status:  http.StatusAccepted,
+		message: "restart requested",
+	})
+}
+
+func HandleYield(agentSvc service.AgentService) http.HandlerFunc {
+	return handleLifecycle(agentSvc, lifecyclePatch{
+		state:   domain.AgentStateIdle,
+		desired: domain.AgentDesiredDraining,
+		status:  http.StatusAccepted,
+		message: "yield requested",
+	})
 }
 
 func HandleQueueUnsupported(w http.ResponseWriter, _ *http.Request) {
 	handler.HandleServiceError(w, service.ErrNotImplemented("agent-specific queue is not available in fleet-db store mode; use monitor task queues"))
 }
 
+type lifecyclePatch struct {
+	state   domain.AgentState
+	desired domain.AgentDesiredState
+	status  int
+	message string
+}
+
+func handleLifecycle(agentSvc service.AgentService, patch lifecyclePatch) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		updated, err := agentSvc.UpdateAgent(r.Context(), r.PathValue("ws"), r.PathValue("name"), service.AgentUpdateInput{
+			State:        &patch.state,
+			DesiredState: &patch.desired,
+		})
+		if err != nil {
+			handler.HandleServiceError(w, err)
+			return
+		}
+		handler.WriteJSON(w, patch.status, dto.NewMessageResponse(fmt.Sprintf("agent %q %s", updated.Name, patch.message)))
+	}
+}
+
 func validAgentState(state domain.AgentState) bool {
 	switch state {
 	case "", domain.AgentStateIdle, domain.AgentStateActive, domain.AgentStateStopped:
+		return true
+	default:
+		return false
+	}
+}
+
+func validAgentDesiredState(state domain.AgentDesiredState) bool {
+	switch state {
+	case "", domain.AgentDesiredStopped, domain.AgentDesiredIdle, domain.AgentDesiredRunning, domain.AgentDesiredDraining:
 		return true
 	default:
 		return false

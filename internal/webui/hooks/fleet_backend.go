@@ -14,14 +14,14 @@ import (
 // resource bag.
 type FleetBackendHook struct {
 	baseURL     string
-	workspaceID string // fallback workspace ID for malformed registrations
+	workspaceID string // default workspace ID for malformed registrations
 	apiKey      string
 	actor       string // X-Actor header (fleet-db --auth-dev-mode); empty = no header
 	logger      *slog.Logger
 }
 
 // NewFleetBackendHook creates a FleetBackendHook. baseURL must not be empty.
-// workspaceID is only a fallback when a registration context has no workspace
+// workspaceID is only used when a registration context has no workspace
 // ID. Normal fleet-db mode scopes each backend to ctx.WorkspaceID. actor is
 // the X-Actor header value used for fleet-db's
 // --auth-dev-mode (typically the loom agent name); empty means no header

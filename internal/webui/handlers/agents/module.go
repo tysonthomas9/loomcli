@@ -25,8 +25,8 @@ func (m *Module) Register(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/workspaces/{ws}/agents/{name}", HandleDelete(m.agentSvc))
 	mux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/queue", HandleQueueUnsupported)
 
-	mux.HandleFunc("POST /api/workspaces/{ws}/agents/{name}/stop", HandleLifecycleUnsupported)
-	mux.HandleFunc("POST /api/workspaces/{ws}/agents/{name}/start", HandleLifecycleUnsupported)
-	mux.HandleFunc("POST /api/workspaces/{ws}/agents/{name}/restart", HandleLifecycleUnsupported)
-	mux.HandleFunc("POST /api/workspaces/{ws}/agents/{name}/yield", HandleLifecycleUnsupported)
+	mux.HandleFunc("POST /api/workspaces/{ws}/agents/{name}/stop", HandleStop(m.agentSvc))
+	mux.HandleFunc("POST /api/workspaces/{ws}/agents/{name}/start", HandleStart(m.agentSvc))
+	mux.HandleFunc("POST /api/workspaces/{ws}/agents/{name}/restart", HandleRestart(m.agentSvc))
+	mux.HandleFunc("POST /api/workspaces/{ws}/agents/{name}/yield", HandleYield(m.agentSvc))
 }

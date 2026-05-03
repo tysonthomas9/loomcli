@@ -67,29 +67,31 @@ type AgentService interface {
 // Mirrors store.AgentCreate but kept distinct so the service contract
 // doesn't leak the persistence type.
 type AgentCreateInput struct {
-	WorkspaceKey     string   `json:"workspace_key"`
-	Name             string   `json:"name"`
-	RoleName         string   `json:"role_name"`
-	Auto             bool     `json:"auto"`
-	Backend          string   `json:"backend,omitempty"`
-	FallbackBackends []string `json:"fallback_backends,omitempty"`
-	Repos            []string `json:"repos,omitempty"`
-	RepoGroups       []string `json:"repo_groups,omitempty"`
-	CrossRepo        bool     `json:"cross_repo,omitempty"`
-	Parent           string   `json:"parent,omitempty"`
+	WorkspaceKey     string                   `json:"workspace_key"`
+	Name             string                   `json:"name"`
+	RoleName         string                   `json:"role_name"`
+	Auto             bool                     `json:"auto"`
+	Backend          string                   `json:"backend,omitempty"`
+	FallbackBackends []string                 `json:"fallback_backends,omitempty"`
+	Repos            []string                 `json:"repos,omitempty"`
+	RepoGroups       []string                 `json:"repo_groups,omitempty"`
+	CrossRepo        bool                     `json:"cross_repo,omitempty"`
+	Parent           string                   `json:"parent,omitempty"`
+	DesiredState     domain.AgentDesiredState `json:"desired_state,omitempty"`
 }
 
 // AgentUpdateInput is the partial-update payload for PATCH /api/agents.
 type AgentUpdateInput struct {
-	RoleName         *string            `json:"role_name,omitempty"`
-	Auto             *bool              `json:"auto,omitempty"`
-	Backend          *string            `json:"backend,omitempty"`
-	FallbackBackends *[]string          `json:"fallback_backends,omitempty"`
-	Repos            *[]string          `json:"repos,omitempty"`
-	RepoGroups       *[]string          `json:"repo_groups,omitempty"`
-	CrossRepo        *bool              `json:"cross_repo,omitempty"`
-	Parent           *string            `json:"parent,omitempty"`
-	State            *domain.AgentState `json:"state,omitempty"`
+	RoleName         *string                   `json:"role_name,omitempty"`
+	Auto             *bool                     `json:"auto,omitempty"`
+	Backend          *string                   `json:"backend,omitempty"`
+	FallbackBackends *[]string                 `json:"fallback_backends,omitempty"`
+	Repos            *[]string                 `json:"repos,omitempty"`
+	RepoGroups       *[]string                 `json:"repo_groups,omitempty"`
+	CrossRepo        *bool                     `json:"cross_repo,omitempty"`
+	Parent           *string                   `json:"parent,omitempty"`
+	State            *domain.AgentState        `json:"state,omitempty"`
+	DesiredState     *domain.AgentDesiredState `json:"desired_state,omitempty"`
 }
 
 // AgentTerminalInfoResult contains the terminal mode for an agent.

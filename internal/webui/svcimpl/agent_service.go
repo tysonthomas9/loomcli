@@ -351,6 +351,7 @@ func (s *agentServiceImpl) CreateAgent(ctx context.Context, in service.AgentCrea
 		RepoGroups:       in.RepoGroups,
 		CrossRepo:        in.CrossRepo,
 		Parent:           in.Parent,
+		DesiredState:     in.DesiredState,
 	})
 	if err != nil {
 		return nil, classifyStoreError("create agent", err)
@@ -510,6 +511,7 @@ func (s *agentServiceImpl) UpdateAgent(ctx context.Context, wsKey, name string, 
 		CrossRepo:        patch.CrossRepo,
 		Parent:           patch.Parent,
 		State:            patch.State,
+		DesiredState:     patch.DesiredState,
 	})
 	if err != nil {
 		return nil, classifyStoreError("update agent", err)

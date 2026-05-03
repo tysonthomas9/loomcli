@@ -78,6 +78,7 @@ func TestFleetDBAgentRoutesUseStoreInsteadOfDaemonControl(t *testing.T) {
 			Name         string `json:"name"`
 			RoleName     string `json:"role_name"`
 			State        string `json:"state"`
+			DesiredState string `json:"desired_state"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(rr.Body.Bytes(), &list); err != nil {
@@ -104,8 +105,39 @@ func TestFleetDBAgentRoutesUseStoreInsteadOfDaemonControl(t *testing.T) {
 	req = httptest.NewRequest(http.MethodPost, "/api/workspaces/PARITY/agents/worker-one/stop", nil)
 	rr = httptest.NewRecorder()
 	app.mux.ServeHTTP(rr, req)
-	if rr.Code != http.StatusNotImplemented {
-		t.Fatalf("lifecycle control status = %d, body = %s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusOK {
+		t.Fatalf("stop agent status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	req = httptest.NewRequest(http.MethodGet, "/api/workspaces/PARITY/agents", nil)
+	rr = httptest.NewRecorder()
+	app.mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("list after stop status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &list); err != nil {
+		t.Fatalf("list after stop JSON: %v", err)
+	}
+	if got := list.Data[0]; got.State != "stopped" || got.DesiredState != "stopped" {
+		t.Fatalf("unexpected stopped agent state: %+v", got)
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/api/workspaces/PARITY/agents/worker-one/start", nil)
+	rr = httptest.NewRecorder()
+	app.mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("start agent status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	req = httptest.NewRequest(http.MethodPost, "/api/workspaces/PARITY/agents/worker-one/yield", nil)
+	rr = httptest.NewRecorder()
+	app.mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("yield agent status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	req = httptest.NewRequest(http.MethodPost, "/api/workspaces/PARITY/agents/worker-one/restart", nil)
+	rr = httptest.NewRecorder()
+	app.mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("restart agent status = %d, body = %s", rr.Code, rr.Body.String())
 	}
 
 	req = httptest.NewRequest(http.MethodGet, "/api/workspaces/PARITY/agents/worker-one/queue", nil)

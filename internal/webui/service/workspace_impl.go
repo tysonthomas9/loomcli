@@ -172,8 +172,8 @@ func readGitHeadBranch(repoPath string) string {
 //nolint:gocognit,cyclop,funlen // Aggregates workspace, repo, agent, and local-state views for the UI.
 func (s *workspaceServiceImpl) ListWorkspaces(ctx context.Context) ([]WorkspaceListItem, error) {
 	// Store is authoritative when set: list its workspaces directly so
-	// the API surface reflects fleet-db's actual contents — not whatever
-	// the legacy multiPool/yaml closures believed at startup. The
+	// the API surface reflects fleet-db's actual contents, independent of
+	// whatever the legacy multiPool/yaml closures believed at startup. The
 	// multiPool is consulted only to enrich items with daemon-pool stats.
 	if s.store != nil {
 		wsList, err := s.store.Workspaces().List(ctx)
@@ -268,9 +268,8 @@ func (s *workspaceServiceImpl) ListWorkspaces(ctx context.Context) ([]WorkspaceL
 func (s *workspaceServiceImpl) GetWorkspace(ctx context.Context, wsID string) (*ops.WorkspaceData, error) {
 	// Primary existence check: the multiPool registry. In daemon-backed mode the
 	// pool owns the authoritative list of live workspaces. In fleet mode the
-	// multiPool is intentionally empty (no local issue daemon), so the
-	// multiPool check alone would 404 every lookup — fall through to a
-	// store/config-based lookup instead.
+	// multiPool is intentionally empty (no local issue daemon), so the lookup
+	// path below resolves against the store/config data source.
 	poolKnown := s.multiPool != nil && s.multiPool.PoolForWorkspace(wsID) != nil
 	if !poolKnown {
 		if data, ok, err := s.lookupWorkspace(ctx, wsID); err != nil {
@@ -299,16 +298,15 @@ func (s *workspaceServiceImpl) GetWorkspace(ctx context.Context, wsID string) (*
 }
 
 // lookupWorkspace resolves a workspace UUID via the store, or via legacy
-// config closures only when no store is configured. Returns (data, true, nil) when a match
-// is found, (nil, false, nil) when the ID is unknown, or (nil, false,
-// err) on a load error. Used by GetWorkspace as the fallback when the
-// multiPool registry has no entry for the workspace.
+// config closures only when no store is configured. Returns (data, true, nil)
+// when a match is found, (nil, false, nil) when the ID is unknown, or
+// (nil, false, err) on a load error.
 //
 //nolint:gocognit,cyclop,funlen // Lookup bridges local state with store data while preserving legacy shape.
 func (s *workspaceServiceImpl) lookupWorkspace(ctx context.Context, wsID string) (*ops.WorkspaceData, bool, error) {
-	// Prefer the store — single Get call, no full-config scan.
 	if s.store != nil {
-		if data, err := storeadapter.BuildWorkspaceDataForKey(ctx, s.store, wsID); err == nil && data != nil {
+		data, err := storeadapter.BuildWorkspaceDataForKey(ctx, s.store, wsID)
+		if err == nil && data != nil {
 			normalizeWorkspaceData(data)
 			for i := range data.Repos {
 				if b := readGitHeadBranch(data.Repos[i].Path); b != "" {
@@ -320,7 +318,10 @@ func (s *workspaceServiceImpl) lookupWorkspace(ctx context.Context, wsID string)
 			}
 			return data, true, nil
 		}
-		return nil, false, nil
+		if errors.Is(err, domain.ErrNotFound) {
+			return nil, false, nil
+		}
+		return nil, false, ErrInternal("failed to load workspace data", err)
 	}
 	// Legacy: by-ID supplier (cheaper than full config scan).
 	if s.configByIDFn != nil {
@@ -338,7 +339,7 @@ func (s *workspaceServiceImpl) lookupWorkspace(ctx context.Context, wsID string)
 		}
 	}
 
-	// Final fallback: scan the full config for a matching UUID.
+	// Legacy: scan the full config for a matching UUID.
 	if s.configFn == nil {
 		return nil, false, nil
 	}

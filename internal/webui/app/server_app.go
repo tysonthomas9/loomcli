@@ -364,12 +364,11 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	//
 	// Workspace IDs in URLs are usually UUIDs, but external callers (CLI
 	// tooling, parity tests, the fdb client) frequently use the workspace
-	// *name* instead. When the direct UUID lookup misses, fall back to the
-	// resolver so a name like "PARITY" still maps to the registered UUID
-	// rather than 404'ing.
+	// *name* instead. When the direct UUID lookup misses, the resolver maps
+	// a name like "PARITY" to the registered UUID rather than 404'ing.
 	//
-	// Final fallback: the unified store. Fleet-db-only workspaces may not be in
-	// the daemon registry, so without this check every
+	// The unified store is also authoritative for fleet-db-only workspaces
+	// that are not in the daemon registry, so without this check every
 	// `/api/workspaces/{ws}/...` route would 404 before the handler could read
 	// state from fleet-db.
 	wsResolver := config.WorkspaceIDResolverFn
