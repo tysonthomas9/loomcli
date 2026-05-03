@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect } from "react";
 import { ErrorDisplay, LoadingSkeleton } from "@/components";
 import { useStore } from "zustand";
 
-import { useAgentStoreInstance } from "@/hooks";
+import { useAgentStoreInstance, useWorkspaceContext } from "@/hooks";
 import { useFileTree, useFileContent } from "@/hooks/common";
 import { FileTree } from "./FileTree";
 import { FileViewer } from "./FileViewer";
@@ -10,7 +10,19 @@ import styles from "./FileExplorer.module.css";
 
 export function FileExplorer() {
   const agentStore = useAgentStoreInstance();
-  const agents = useStore(agentStore, (s) => s.agents);
+  const monitorAgents = useStore(agentStore, (s) => s.agents);
+  const { agents: workspaceAgents } = useWorkspaceContext();
+  const agents = [
+    ...monitorAgents.map((agent) => ({ name: agent.name })),
+    ...workspaceAgents
+      .filter(
+        (agent) =>
+          !monitorAgents.some(
+            (monitorAgent) => monitorAgent.name === agent.name,
+          ),
+      )
+      .map((agent) => ({ name: agent.name })),
+  ];
   const [selectedAgent, setSelectedAgent] = useState<string>("");
 
   // Auto-select first agent when agents load
@@ -109,7 +121,7 @@ export function FileExplorer() {
             />
           </div>
         ) : agents.length === 0 ? (
-          <div className={styles.empty}>No agents running</div>
+          <div className={styles.empty}>No agents configured</div>
         ) : (
           <div className={styles.treeScroll}>
             <FileTree

@@ -172,17 +172,17 @@ func DefaultIssueBackend() backend.IssueBackend {
 		// In fleet mode, use the fleet backend directly — skip IPC wrapping
 		// since the fleet server (not a local daemon) manages issues.
 		if IsFleetActive() {
-			trackerInst = resolveFallbackBackend()
+			trackerInst = resolveDirectIssueBackend()
 		} else if sock := os.Getenv("LOOM_DAEMON_SOCKET"); sock != "" {
 			agentName := os.Getenv("BD_ACTOR")
-			fallback := resolveFallbackBackend()
+			direct := resolveDirectIssueBackend()
 			ipcClient := NewAgentIPCClient(sock, agentName)
 			ipcClient.SessionID = os.Getenv("LOOM_SESSION_ID")
 			ipcClient.LeaseID = os.Getenv("LOOM_AGENT_LEASE_ID")
 			ipcClient.LeaseToken = os.Getenv("LOOM_AGENT_LEASE_TOKEN")
-			trackerInst = newIPCIssueBackend(ipcClient, fallback)
+			trackerInst = newIPCIssueBackend(ipcClient, direct)
 		} else {
-			trackerInst = resolveFallbackBackend()
+			trackerInst = resolveDirectIssueBackend()
 		}
 	}
 	return trackerInst

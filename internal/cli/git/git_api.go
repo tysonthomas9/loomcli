@@ -374,16 +374,20 @@ func getChangedFiles(dir string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	trimmed := strings.TrimSpace(output)
+	trimmed := strings.Trim(output, "\r\n")
 	if trimmed == "" {
 		return nil, nil
 	}
 	lines := strings.Split(trimmed, "\n")
 	files := make([]string, 0, len(lines))
 	for _, line := range lines {
-		if len(line) > 3 {
+		line = strings.TrimRight(line, "\r")
+		if line == "" {
+			continue
+		}
+		if len(line) >= 4 && line[2] == ' ' {
 			files = append(files, line[3:])
-		} else if len(line) > 0 {
+		} else {
 			files = append(files, strings.TrimSpace(line))
 		}
 	}

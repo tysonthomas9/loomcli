@@ -67,8 +67,8 @@ func scopeResolverToWorkspace(resolver *cli.Resolver, workspaceID string) error 
 }
 
 func (g *GitOpsImpl) ResolveAgentWorktree(workspaceID, name string) (*ops.AgentWorktree, error) {
-	if aw, err := g.resolveAgentWorktreeFromStore(context.Background(), workspaceID, name); err == nil || !errors.Is(err, domain.ErrNotFound) {
-		return aw, err
+	if g != nil && g.store != nil {
+		return g.resolveAgentWorktreeFromStore(context.Background(), workspaceID, name)
 	}
 
 	resolver, err := cli.NewResolver()
@@ -269,6 +269,10 @@ func (g *GitOpsImpl) SetRepoDefaultBranch(workspaceID, repoName, branch string) 
 }
 
 func (g *GitOpsImpl) ListAgentWorktrees(workspaceID string) ([]ops.AgentWorktree, error) {
+	if g != nil && g.store != nil {
+		return g.listAgentWorktreesFromStore(context.Background(), workspaceID)
+	}
+
 	resolver, err := cli.NewResolver()
 	if err != nil {
 		return nil, fmt.Errorf("creating resolver: %v", err)
@@ -286,6 +290,22 @@ func (g *GitOpsImpl) ListAgentWorktrees(workspaceID string) ([]ops.AgentWorktree
 	result := make([]ops.AgentWorktree, 0, len(worktrees))
 	for _, wt := range worktrees {
 		result = append(result, toAgentWorktree(wt))
+	}
+	return result, nil
+}
+
+func (g *GitOpsImpl) listAgentWorktreesFromStore(ctx context.Context, workspaceID string) ([]ops.AgentWorktree, error) {
+	ws, err := storeadapter.BuildWorkspaceDataForKey(ctx, g.store, workspaceID)
+	if err != nil {
+		return nil, fmt.Errorf("load fleet-db workspace %q: %w", workspaceID, err)
+	}
+	result := make([]ops.AgentWorktree, 0, len(ws.Agents))
+	for _, agent := range ws.Agents {
+		wt, err := g.resolveAgentWorktreeFromStore(ctx, workspaceID, agent.Name)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, *wt)
 	}
 	return result, nil
 }

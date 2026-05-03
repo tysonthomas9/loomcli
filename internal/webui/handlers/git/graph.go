@@ -19,8 +19,7 @@ import (
 )
 
 // IssueBackendFn returns the active backend.IssueBackend. Passed through to
-// HandleGraph so the handler can fall back to the backend when no daemon
-// pool is available (fleet mode) or pool acquisition fails.
+// handlers that serve pool-less fleet mode.
 //
 // ctx carries the per-request workspace ID so cloud-mode wirings can route
 // to a per-workspace fleet-db backend.
@@ -129,50 +128,29 @@ func (p *graphPoolAdapter) Discard(client GraphClient) {
 
 // HandleBlocked returns issues that have blocking dependencies (waiting on other issues).
 func HandleBlocked(pool daemon.Pool) http.HandlerFunc {
-	return HandleBlockedWithBackendFallback(pool, nil)
+	return HandleBlockedWithBackend(pool, nil)
 }
 
-// HandleBlockedWithBackendFallback returns a handler that serves the blocked
-// endpoint through the daemon pool when available and transparently falls
-// back to the supplied backend.IssueBackend when the pool is nil or the
-// pool-backed RPC path produces a 5xx (fleet mode has no daemon). The
-// fallback emits the {success:true, data:[...]} envelope mirrored from the
-// pool path; each item is serialized directly from backend.IssueData, which
-// overlaps the FE's Issue/BlockedIssue shape on id/title/status/priority/
-// issue_type/assignee/labels/parent/source_repo/created_at/updated_at. Fields
-// only the daemon populates (blocked_by*, blocked_by_details) are absent
-// from the backend fallback — the FE degrades to "unknown blocker count"
-// rather than crashing.
+// HandleBlockedWithBackend returns a handler that serves the blocked endpoint
+// from exactly one configured source: the daemon pool when present, otherwise
+// the supplied backend.IssueBackend for pool-less fleet mode.
 //
 // backendFn may be nil — in that case the behavior is identical to the
-// legacy HandleBlocked(pool) path, returning a 503 when the pool is unusable.
-func HandleBlockedWithBackendFallback(pool daemon.Pool, backendFn IssueBackendFn) http.HandlerFunc {
+// pool-only path, returning a 503 when the pool is unusable.
+func HandleBlockedWithBackend(pool daemon.Pool, backendFn IssueBackendFn) http.HandlerFunc {
 	var poolAdapter BlockedConnectionGetter
 	if pool != nil {
 		poolAdapter = &blockedPoolAdapter{pool: pool}
 	}
 	poolHandler := HandleBlockedWithPool(poolAdapter)
-	if backendFn == nil {
+	if pool != nil || backendFn == nil {
 		return poolHandler
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
-		if pool == nil {
-			if serveBlockedViaBackend(w, r, backendFn) {
-				return
-			}
-			poolHandler(w, r)
-			return
-		}
-		rec := &graphInterceptor{header: http.Header{}}
-		poolHandler(rec, r)
-		if rec.statusCode >= 200 && rec.statusCode < 500 {
-			rec.flushTo(w)
-			return
-		}
 		if serveBlockedViaBackend(w, r, backendFn) {
 			return
 		}
-		rec.flushTo(w)
+		poolHandler(w, r)
 	}
 }
 
@@ -208,7 +186,7 @@ func serveBlockedViaBackend(w http.ResponseWriter, r *http.Request, backendFn Is
 
 	issues, err := be.Blocked(ctx, opts)
 	if err != nil {
-		slog.Error("backend error in HandleBlocked fallback", "err", err)
+		slog.Error("backend error in HandleBlocked", "err", err)
 		handler.WriteJSON(w, http.StatusInternalServerError, map[string]any{
 			"success": false,
 			"error":   "failed to list blocked issues",
@@ -311,55 +289,29 @@ func HandleBlockedWithPool(pool BlockedConnectionGetter) http.HandlerFunc { //no
 
 // HandleGraph returns issues with full dependency data for graph visualization.
 func HandleGraph(pool daemon.Pool) http.HandlerFunc {
-	return HandleGraphWithBackendFallback(pool, nil)
+	return HandleGraphWithBackend(pool, nil)
 }
 
-// HandleGraphWithBackendFallback returns a handler that serves the graph
-// endpoint through the daemon pool when available and transparently falls
-// back to the supplied backend.IssueBackend when the pool is nil or the
-// pool-backed RPC path can't be reached (fleet mode has no daemon). The
-// backend fallback serves a reduced projection: it covers the top-level
-// fields plus Dependencies sourced from backend.Get, which is enough for
-// the SPA GraphView to lay out parent-child + blocker edges.
+// HandleGraphWithBackend returns a handler that serves the graph endpoint
+// from exactly one configured source: the daemon pool when present, otherwise
+// the supplied backend.IssueBackend for pool-less fleet mode.
 //
 // backendFn may be nil — in that case the behavior is identical to the
-// legacy HandleGraph(pool) path, returning a 503 when the pool is unusable.
-func HandleGraphWithBackendFallback(pool daemon.Pool, backendFn IssueBackendFn) http.HandlerFunc {
+// pool-only path, returning a 503 when the pool is unusable.
+func HandleGraphWithBackend(pool daemon.Pool, backendFn IssueBackendFn) http.HandlerFunc {
 	var poolAdapter GraphConnectionGetter
 	if pool != nil {
 		poolAdapter = &graphPoolAdapter{pool: pool}
 	}
 	poolHandler := HandleGraphWithPool(poolAdapter)
-	if backendFn == nil {
+	if pool != nil || backendFn == nil {
 		return poolHandler
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Shortcut fleet mode: no pool at all, serve exclusively from the
-		// backend. Otherwise try the pool path first via a response
-		// recorder so a 503/504 from pool acquisition transparently
-		// degrades to the backend fallback without double-writing.
-		if pool == nil {
-			if serveGraphViaBackend(w, r, backendFn) {
-				return
-			}
-			poolHandler(w, r) // 503 path for nil backend + nil pool
-			return
-		}
-		rec := &graphInterceptor{header: http.Header{}}
-		poolHandler(rec, r)
-		// Pool path succeeded (2xx) or produced a client-authored error
-		// (4xx) — forward as-is, don't second-guess.
-		if rec.statusCode >= 200 && rec.statusCode < 500 {
-			rec.flushTo(w)
-			return
-		}
-		// 5xx from the pool layer — try the backend. If the backend can't
-		// serve either, fall through and return the original pool-layer
-		// error so the FE still sees a coherent response.
 		if serveGraphViaBackend(w, r, backendFn) {
 			return
 		}
-		rec.flushTo(w)
+		poolHandler(w, r)
 	}
 }
 
@@ -429,7 +381,7 @@ func serveGraphViaBackend(w http.ResponseWriter, r *http.Request, backendFn Issu
 
 	list, err := be.List(ctx, backend.ListOpts{})
 	if err != nil {
-		slog.Error("backend error in HandleGraph fallback", "err", err)
+		slog.Error("backend error in HandleGraph", "err", err)
 		handler.WriteJSON(w, http.StatusInternalServerError, GraphResponse{
 			Success: false,
 			Error:   "failed to list issues",
@@ -498,7 +450,7 @@ func serveGraphViaBackend(w http.ResponseWriter, r *http.Request, backendFn Issu
 }
 
 // includeGraphIssue applies the status filter used by parseGraphParams.
-// Mirrors the exclude-set logic in HandleGraphWithPool so the fallback
+// Mirrors the exclude-set logic in HandleGraphWithPool so the backend
 // preserves filter semantics.
 func includeGraphIssue(issueStatus, filter string, includeClosed bool) bool {
 	if issueStatus == "tombstone" {

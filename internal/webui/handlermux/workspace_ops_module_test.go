@@ -71,7 +71,7 @@ func TestWorkspaceOpsModule_NilDeps(t *testing.T) {
 	mod.Register(mux) // must not panic during registration
 }
 
-func TestWorkspaceOpsModule_TypedNilPoolUsesBackendFallback(t *testing.T) {
+func TestWorkspaceOpsModule_TypedNilPoolUsesBackend(t *testing.T) {
 	var typedNilPool *daemon.MultiPool
 	mod := NewWorkspaceOpsModule(&mockWorkspaceService{}, typedNilPool, nil).
 		WithIssueBackendFn(func(context.Context) backend.IssueBackend {

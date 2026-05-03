@@ -46,6 +46,7 @@ import {
   WorkspaceSwitcher,
   CreateIssueModal,
   CreateWorkspaceModal,
+  CreateAgentModal,
   UserMenu,
 } from "@/components";
 import { SearchTermProvider } from "@/contexts/SearchTermContext";
@@ -121,6 +122,7 @@ function App() {
     selectAll,
     selectRepos,
     sourceReposFilter,
+    refetch: refetchWorkspace,
   } = useWorkspaceContext();
 
   // Repo filter URL param sync (deep linking for repo selection)
@@ -412,6 +414,7 @@ function App() {
   // Create workspace modal state
   const [showCreateIssue, setShowCreateIssue] = useState(false);
   const [showCreateWorkspace, setShowCreateWorkspace] = useState(false);
+  const [showCreateAgent, setShowCreateAgent] = useState(false);
 
   // Track mount state for async operations (must set true in setup for StrictMode compatibility)
   useEffect(() => {
@@ -897,14 +900,14 @@ function App() {
           groupBy={filters.groupBy ?? DEFAULT_GROUP_BY}
           onGroupByChange={filterActions.setGroupBy}
         />
-        <button
-          className={styles.newIssueButton}
-          onClick={() => setShowCreateIssue(true)}
-          data-testid="new-issue-button"
-        >
-          + New Issue
-        </button>
       </div>
+      <button
+        className={styles.newIssueButton}
+        onClick={() => setShowCreateIssue(true)}
+        data-testid="new-issue-button"
+      >
+        + New Issue
+      </button>
     </div>
   );
 
@@ -945,7 +948,7 @@ function App() {
       onWorkspaceSwitch={handleWorkspaceSwitch}
       onAgentClick={handleAgentClick}
       agentTasks={agentTasks}
-      onAddClick={() => setShowCreateWorkspace(true)}
+      onAddClick={() => setShowCreateAgent(true)}
       connectionState={connectionState}
       connectionLost={isConnectionLost}
       disconnectedSince={staleBannerDisconnectedSince}
@@ -1084,6 +1087,17 @@ function App() {
               { type: "warning" },
             );
           }
+        }}
+      />
+      <CreateAgentModal
+        isOpen={showCreateAgent}
+        workspaceId={workspaceId}
+        repos={workspaceRepos}
+        onClose={() => setShowCreateAgent(false)}
+        onSuccess={(agent) => {
+          setShowCreateAgent(false);
+          refetchWorkspace();
+          showToast(`Agent "${agent.name}" created`, { type: "success" });
         }}
       />
     </KeyboardShortcutProvider>

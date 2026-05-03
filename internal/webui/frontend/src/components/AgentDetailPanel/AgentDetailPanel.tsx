@@ -18,6 +18,7 @@ import {
   useFocusReturn,
   useFocusTrap,
   useRegisterEscapeLayer,
+  useWorkspaceContext,
   LAYER_AGENT_PANEL,
 } from "@/hooks";
 import type { LoomAgentStatus, LoomTaskInfo } from "@/types";
@@ -81,6 +82,7 @@ export function AgentDetailPanel({
 }: AgentDetailPanelProps): JSX.Element {
   const panelRef = useRef<HTMLElement>(null);
   const [activeTab, setActiveTab] = useState<TabType>("info");
+  const { getAgentByName } = useWorkspaceContext();
 
   // Reset to info tab when agent changes
   useEffect(() => {
@@ -113,9 +115,21 @@ export function AgentDetailPanel({
   );
 
   // Find the agent from the array
-  const agent = agentName
+  const monitorAgent = agentName
     ? agents.find((a) => a.name === agentName)
     : undefined;
+  const workspaceAgent = agentName ? getAgentByName(agentName) : undefined;
+  const agent =
+    monitorAgent ??
+    (workspaceAgent
+      ? ({
+          name: workspaceAgent.name,
+          branch: workspaceAgent.name,
+          status: "idle",
+          repo: workspaceAgent.repos[0],
+          cross_repo: workspaceAgent.cross_repo,
+        } as LoomAgentStatus)
+      : undefined);
   const parsed = agent ? parseLoomStatus(agent.status) : undefined;
   const task = agentName ? agentTasks[agentName] : undefined;
   const currentTaskId = parsed?.taskId;

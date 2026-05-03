@@ -106,9 +106,7 @@ func (s *stubReadyBackend) WaitForMutations(_ context.Context, _ int64, _ int64)
 	return nil, fmt.Errorf("WaitForMutations not implemented in stubReadyBackend")
 }
 
-// errorDaemonPool implements daemon.Pool and always errors from Get. Used
-// to force handleReadyWithPool into its 503 error branch so the wrapper
-// falls through to the backend fallback.
+// errorDaemonPool implements daemon.Pool and always errors from Get.
 type errorDaemonPool struct{ err error }
 
 func (p *errorDaemonPool) Get(_ context.Context) (*rpc.Client, error) { return nil, p.err }
@@ -118,14 +116,14 @@ func (p *errorDaemonPool) Discard(_ *rpc.Client)                      {}
 func (p *errorDaemonPool) Stats() daemon.PoolStats                    { return daemon.PoolStats{} }
 func (p *errorDaemonPool) Close() error                               { return nil }
 
-func TestHandleReady_BackendFallbackWhenNoPool(t *testing.T) {
+func TestHandleReady_BackendWhenNoPool(t *testing.T) {
 	be := &stubReadyBackend{
 		ready: []backend.IssueData{
 			{ID: "RDY-1", Title: "Ready One", Status: "open", Priority: 1, IssueType: "task", Parent: "EPIC-1", SourceRepo: "repoA"},
 			{ID: "RDY-2", Title: "Ready Two", Status: "open", Priority: 2, IssueType: "bug"},
 		},
 	}
-	handler := HandleReadyWithBackendFallback(nil, func(_ context.Context) backend.IssueBackend { return be })
+	handler := HandleReadyWithBackend(nil, func(_ context.Context) backend.IssueBackend { return be })
 
 	req := httptest.NewRequest(http.MethodGet, "/api/ready", nil)
 	rr := httptest.NewRecorder()
@@ -161,48 +159,32 @@ func TestHandleReady_BackendFallbackWhenNoPool(t *testing.T) {
 	}
 }
 
-func TestHandleReady_BackendFallbackOnPoolError(t *testing.T) {
+func TestHandleReady_PoolErrorDoesNotUseBackend(t *testing.T) {
 	dp := &errorDaemonPool{err: errors.New("pool unavailable")}
 	be := &stubReadyBackend{
 		ready: []backend.IssueData{
 			{ID: "BE-1", Title: "Via backend", Status: "open", Priority: 1},
 		},
 	}
-	handler := HandleReadyWithBackendFallback(dp, func(_ context.Context) backend.IssueBackend { return be })
+	handler := HandleReadyWithBackend(dp, func(_ context.Context) backend.IssueBackend { return be })
 
 	req := httptest.NewRequest(http.MethodGet, "/api/ready", nil)
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
 
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
-	}
-	var resp ReadyResponse
-	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if !resp.Success {
-		t.Fatalf("expected success=true; error=%q", resp.Error)
-	}
-	if len(resp.Data) != 1 || resp.Data[0].ID != "BE-1" {
-		ids := make([]string, 0, len(resp.Data))
-		for _, it := range resp.Data {
-			ids = append(ids, it.ID)
-		}
-		t.Errorf("data = %v, want [BE-1]", ids)
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503; body=%s", rr.Code, rr.Body.String())
 	}
 }
 
 func TestHandleReady_PoolPathClientErrorPreserved(t *testing.T) {
-	// When backendFn is non-nil but the pool-layer produces a client-side
-	// 4xx (here: bad priority param), the wrapper must NOT fall through
-	// to the backend — it should surface the 4xx so the FE sees the
-	// parse error rather than a masked happy-path from the backend.
+	// When backendFn is non-nil but a daemon pool is configured, the pool path
+	// remains authoritative and client errors are surfaced directly.
 	dp := &errorDaemonPool{err: errors.New("should not be invoked")}
 	be := &stubReadyBackend{
 		ready: []backend.IssueData{{ID: "SHOULD-NOT-APPEAR"}},
 	}
-	handler := HandleReadyWithBackendFallback(dp, func(_ context.Context) backend.IssueBackend { return be })
+	handler := HandleReadyWithBackend(dp, func(_ context.Context) backend.IssueBackend { return be })
 
 	req := httptest.NewRequest(http.MethodGet, "/api/ready?priority=abc", nil)
 	rr := httptest.NewRecorder()
@@ -214,7 +196,7 @@ func TestHandleReady_PoolPathClientErrorPreserved(t *testing.T) {
 }
 
 func TestHandleReady_NoPoolNoBackendReturns503(t *testing.T) {
-	handler := HandleReadyWithBackendFallback(nil, nil)
+	handler := HandleReadyWithBackend(nil, nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/ready", nil)
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)

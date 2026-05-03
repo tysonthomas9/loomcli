@@ -17,6 +17,12 @@ import { FileViewer } from "../FileViewer";
 // Mutable mock state for agent store
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let mockAgentStoreState: any = {};
+let mockWorkspaceAgents: {
+  name: string;
+  repos: string[];
+  repo_groups: string[];
+  cross_repo: boolean;
+}[] = [];
 
 // Mock zustand's useStore — apply selector to the mock agent store state
 vi.mock("zustand", () => ({
@@ -27,6 +33,7 @@ vi.mock("zustand", () => ({
 
 vi.mock("@/hooks", () => ({
   useAgentStoreInstance: () => ({}),
+  useWorkspaceContext: () => ({ agents: mockWorkspaceAgents }),
   useRegisterEscapeLayer: vi.fn(),
   useKeyboardShortcuts: vi.fn(() => ({
     isCheatsheetOpen: false,
@@ -131,6 +138,7 @@ describe("FileExplorer", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAgentStoreState = defaultAgentsReturn();
+    mockWorkspaceAgents = [];
     mockUseFileTree.mockReturnValue(defaultFileTreeReturn());
     mockUseFileContent.mockReturnValue(defaultFileContentReturn());
   });
@@ -173,10 +181,24 @@ describe("FileExplorer", () => {
     expect(screen.getByText("Connection refused")).toBeInTheDocument();
   });
 
-  it('shows "No agents running" when agents array is empty', () => {
+  it("renders configured workspace agents when no monitor agents are running", () => {
+    mockAgentStoreState = { ...defaultAgentsReturn(), agents: [] };
+    mockWorkspaceAgents = [
+      {
+        name: "seed-agent",
+        repos: ["api"],
+        repo_groups: [],
+        cross_repo: false,
+      },
+    ];
+    render(<FileExplorer />);
+    expect(screen.getByText("seed-agent")).toBeInTheDocument();
+  });
+
+  it('shows "No agents configured" when agent arrays are empty', () => {
     mockAgentStoreState = { ...defaultAgentsReturn(), agents: [] };
     render(<FileExplorer />);
-    expect(screen.getByText("No agents running")).toBeInTheDocument();
+    expect(screen.getByText("No agents configured")).toBeInTheDocument();
   });
 
   it("calls fetchFile when selectedPath changes", () => {

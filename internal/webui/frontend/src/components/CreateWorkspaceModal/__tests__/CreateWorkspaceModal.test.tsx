@@ -633,6 +633,35 @@ describe("CreateWorkspaceModal", () => {
       });
     });
 
+    it("splits multiline pending repo paths when empty workspace is submitted", async () => {
+      mockCreateWorkspace.mockResolvedValue(MOCK_CREATE_RESULT);
+
+      render(
+        <CreateWorkspaceModal
+          isOpen={true}
+          onClose={onClose}
+          onSuccess={onSuccess}
+        />,
+      );
+
+      selectTypeCard("empty");
+      fireEvent.change(screen.getByTestId("create-workspace-name"), {
+        target: { value: "test-ws" },
+      });
+      fireEvent.change(screen.getByTestId("create-workspace-repo-path"), {
+        target: { value: "/workspace/api\n/workspace/web" },
+      });
+      fireEvent.click(screen.getByTestId("create-workspace-submit"));
+
+      await waitFor(() => {
+        expect(mockCreateWorkspace).toHaveBeenCalledWith({
+          name: "test-ws",
+          type: "empty",
+          repos: ["/workspace/api", "/workspace/web"],
+        });
+      });
+    });
+
     it("sends clone_urls when type is clone", async () => {
       mockCreateWorkspace.mockResolvedValue(MOCK_CREATE_RESULT);
 
@@ -658,6 +687,40 @@ describe("CreateWorkspaceModal", () => {
           name: "cloned-ws",
           type: "clone",
           clone_urls: ["https://github.com/example/repo.git"],
+        });
+      });
+    });
+
+    it("splits multiline clone URLs when clone workspace is submitted", async () => {
+      mockCreateWorkspace.mockResolvedValue(MOCK_CREATE_RESULT);
+
+      render(
+        <CreateWorkspaceModal
+          isOpen={true}
+          onClose={onClose}
+          onSuccess={onSuccess}
+        />,
+      );
+
+      fireEvent.change(screen.getByTestId("create-workspace-name"), {
+        target: { value: "cloned-ws" },
+      });
+      fireEvent.change(screen.getByTestId("create-workspace-clone-url"), {
+        target: {
+          value:
+            "https://github.com/example/api.git\nhttps://github.com/example/web.git",
+        },
+      });
+      fireEvent.click(screen.getByTestId("create-workspace-submit"));
+
+      await waitFor(() => {
+        expect(mockCreateWorkspace).toHaveBeenCalledWith({
+          name: "cloned-ws",
+          type: "clone",
+          clone_urls: [
+            "https://github.com/example/api.git",
+            "https://github.com/example/web.git",
+          ],
         });
       });
     });

@@ -112,6 +112,11 @@ func createStoreBackedEmptyWorkspace(ctx context.Context, s storepkg.Store, req 
 			}
 		}
 	}
+	if err := seedBuiltInRoles(ctx, s, key); err != nil {
+		rollbackStore()
+		cleanupWorktrees(wsDir, created)
+		return service.WorkspaceCreateResult{}, fmt.Errorf("seed built-in roles: %w", err)
+	}
 
 	for _, r := range repos {
 		remoteName := r.Remote
@@ -317,6 +322,10 @@ func createStoreBackedCloneWorkspace(ctx context.Context, s storepkg.Store, req 
 			slog.Warn("failed to rollback store clone workspace create", "workspace", key, "err", err)
 		}
 	}
+	if err := seedBuiltInRoles(ctx, s, key); err != nil {
+		rollbackStore()
+		return service.WorkspaceCreateResult{}, fmt.Errorf("seed built-in roles: %w", err)
+	}
 	_ = updateStoreWorkspaceState(ctx, s, key, domain.WorkspaceStateCreating)
 
 	if err := os.MkdirAll(wsDir, 0755); err != nil {
@@ -379,6 +388,28 @@ func updateStoreWorkspaceState(ctx context.Context, s storepkg.Store, key string
 		ErrorMessage: &msg,
 	})
 	return err
+}
+
+func seedBuiltInRoles(ctx context.Context, s storepkg.Store, key string) error {
+	roles := []storepkg.RoleCreate{
+		{
+			WorkspaceKey: key,
+			Name:         "plan",
+			Description:  "Planning agent",
+			ReadOnly:     true,
+		},
+		{
+			WorkspaceKey: key,
+			Name:         "task",
+			Description:  "Task implementation agent",
+		},
+	}
+	for _, role := range roles {
+		if _, err := s.Roles().Create(ctx, role); err != nil {
+			return fmt.Errorf("create role %q: %w", role.Name, err)
+		}
+	}
+	return nil
 }
 
 func saveLocalWorkspaceState(key, wsDir string, repos []config.RepoConfig, makeActive bool) error {

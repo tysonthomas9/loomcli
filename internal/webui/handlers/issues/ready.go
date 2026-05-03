@@ -19,9 +19,8 @@ import (
 )
 
 // IssueBackendFn returns the active backend.IssueBackend. Consumed by
-// HandleReadyWithBackendFallback so the handler can fall back to the backend
-// when no daemon pool is available (fleet mode) or the pool path returns a
-// 5xx. Defined locally to mirror the git package's identical-shape type
+// HandleReadyWithBackend when no daemon pool is available (fleet mode).
+// Defined locally to mirror the git package's identical-shape type
 // without creating a package cross-import in production code.
 //
 // ctx carries the per-request workspace ID so cloud-mode wirings can route
@@ -82,48 +81,29 @@ func (p *readyPoolAdapter) Discard(client readyClient) {
 
 // HandleReady returns issues ready to work on (open/in_progress with no blockers).
 func HandleReady(pool daemon.Pool) http.HandlerFunc {
-	return HandleReadyWithBackendFallback(pool, nil)
+	return HandleReadyWithBackend(pool, nil)
 }
 
-// HandleReadyWithBackendFallback returns a handler that serves the ready
-// endpoint through the daemon pool when available and transparently falls
-// back to the supplied backend.IssueBackend when the pool is nil or the
-// pool-backed RPC path produces a 5xx (fleet mode has no daemon). The
-// fallback emits the {success:true, data:[...]} envelope matching the
-// pool-path ReadyResponse; each item is projected from backend.IssueData
-// and overlays the Parent/Repo fields used by the Kanban epic-swimlane view.
-// The parent_title enrichment performed by the pool path is absent — the
-// FE already tolerates a missing parent_title and falls back to Parent.
+// HandleReadyWithBackend returns a handler that serves the ready endpoint
+// from exactly one configured source: the daemon pool when present, otherwise
+// the supplied backend.IssueBackend for pool-less fleet mode.
 //
 // backendFn may be nil — in that case the behavior is identical to the
-// legacy HandleReady(pool) path, returning a 503 when the pool is unusable.
-func HandleReadyWithBackendFallback(pool daemon.Pool, backendFn IssueBackendFn) http.HandlerFunc {
+// pool-only path, returning a 503 when the pool is unusable.
+func HandleReadyWithBackend(pool daemon.Pool, backendFn IssueBackendFn) http.HandlerFunc {
 	var poolAdapter readyConnectionGetter
 	if pool != nil {
 		poolAdapter = &readyPoolAdapter{pool: pool}
 	}
 	poolHandler := handleReadyWithPool(poolAdapter)
-	if backendFn == nil {
+	if pool != nil || backendFn == nil {
 		return poolHandler
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
-		if pool == nil {
-			if serveReadyViaBackend(w, r, backendFn) {
-				return
-			}
-			poolHandler(w, r)
-			return
-		}
-		rec := &readyInterceptor{header: http.Header{}}
-		poolHandler(rec, r)
-		if rec.statusCode >= 200 && rec.statusCode < 500 {
-			rec.flushTo(w)
-			return
-		}
 		if serveReadyViaBackend(w, r, backendFn) {
 			return
 		}
-		rec.flushTo(w)
+		poolHandler(w, r)
 	}
 }
 
@@ -207,17 +187,15 @@ func serveReadyViaBackend(w http.ResponseWriter, r *http.Request, backendFn Issu
 
 	issues, err := be.Ready(ctx, opts)
 	if err != nil {
-		slog.Error("backend error in HandleReady fallback", "err", err)
+		slog.Error("backend error in HandleReady", "err", err)
 		handler.WriteJSON(w, http.StatusInternalServerError, ReadyResponse{
 			Success: false,
 			Error:   "failed to list ready issues",
 		})
 		return true
 	}
-	// Project each IssueData onto the pool-path wire shape. The backend
-	// fallback has no parent_title enrichment (it would require a per-issue
-	// Get), so Parent/Repo are surfaced from IssueData directly and
-	// ParentTitle is left nil — the FE already tolerates this.
+	// Project each IssueData onto the pool-path wire shape. Parent/Repo are
+	// surfaced from IssueData directly and ParentTitle is left nil.
 	out := make([]*ReadyIssueWithParent, 0, len(issues))
 	for i := range issues {
 		d := &issues[i]

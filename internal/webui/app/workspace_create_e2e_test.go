@@ -119,8 +119,9 @@ func TestWorkspaceCreateE2E_CloneAsync(t *testing.T) {
 	}
 }
 
-// TestWorkspaceCreateE2E_CloneNilJobStoreSync verifies clone falls back to sync.
-func TestWorkspaceCreateE2E_CloneNilJobStoreSync(t *testing.T) {
+// TestWorkspaceCreateE2E_CloneAsyncUnavailable verifies clone reports async
+// unavailability instead of falling back to a synchronous clone path.
+func TestWorkspaceCreateE2E_CloneAsyncUnavailable(t *testing.T) {
 	createCalled := false
 	svc := &mockWorkspaceService{
 		startAsyncCreateFn: func(_ context.Context, _ service.WorkspaceCreateRequest) (string, error) {
@@ -139,11 +140,11 @@ func TestWorkspaceCreateE2E_CloneNilJobStoreSync(t *testing.T) {
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("expected 201, got %d: %s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d: %s", rec.Code, rec.Body.String())
 	}
-	if !createCalled {
-		t.Error("expected createFn to be called synchronously")
+	if createCalled {
+		t.Error("createFn should not be called as a sync clone fallback")
 	}
 }
 

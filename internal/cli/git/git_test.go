@@ -2,6 +2,9 @@ package git
 
 import (
 	"errors"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -199,6 +202,55 @@ func TestGetConflictedFiles(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestGetChangedFilesPreservesPorcelainPaths(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	runGitCommand(t, dir, "init", "-b", "main")
+	runGitCommand(t, dir, "config", "user.email", "test@example.com")
+	runGitCommand(t, dir, "config", "user.name", "Test User")
+	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("initial\n"), 0644); err != nil {
+		t.Fatalf("write README: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "src"), 0755); err != nil {
+		t.Fatalf("mkdir src: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "src/main.go"), []byte("package main\n"), 0644); err != nil {
+		t.Fatalf("write src/main.go: %v", err)
+	}
+	runGitCommand(t, dir, "add", ".")
+	runGitCommand(t, dir, "commit", "-m", "init")
+	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("changed\n"), 0644); err != nil {
+		t.Fatalf("modify README: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "NEW.md"), []byte("new\n"), 0644); err != nil {
+		t.Fatalf("write NEW.md: %v", err)
+	}
+
+	files, err := getChangedFiles(dir)
+	if err != nil {
+		t.Fatalf("getChangedFiles: %v", err)
+	}
+	want := []string{"README.md", "NEW.md"}
+	if len(files) != len(want) {
+		t.Fatalf("files = %#v, want %#v", files, want)
+	}
+	for i := range want {
+		if files[i] != want[i] {
+			t.Fatalf("files = %#v, want %#v", files, want)
+		}
+	}
+}
+
+func runGitCommand(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...) //nolint:norawexec // Test helper uses fixed git commands in a temp repo.
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v failed: %v\n%s", args, err, out)
 	}
 }
 

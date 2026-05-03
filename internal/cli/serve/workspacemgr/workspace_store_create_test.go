@@ -62,6 +62,13 @@ func TestStoreBackedCreateEmptyWorkspaceCreatesStoreAndLocalState(t *testing.T) 
 	if len(repos) != 1 || repos[0].Name != "app" {
 		t.Fatalf("repos = %#v, want app", repos)
 	}
+	roles, err := st.Roles().List(context.Background(), "MY-WS")
+	if err != nil {
+		t.Fatalf("list roles: %v", err)
+	}
+	if len(roles) != 2 || !hasRole(roles, "plan") || !hasRole(roles, "task") {
+		t.Fatalf("roles = %#v, want plan and task", roles)
+	}
 
 	sc, err := bootstrap.LoadStateCache()
 	if err != nil {
@@ -206,6 +213,13 @@ func TestStoreBackedCreateCloneWorkspacePersistsLifecycleAndRepos(t *testing.T) 
 	}
 	if len(repos) != 1 || repos[0].Name != "app" || repos[0].RemoteURL != src || repos[0].SourceRepoID != "app" {
 		t.Fatalf("repos = %#v, want cloned app repo with remote URL", repos)
+	}
+	roles, err := st.Roles().List(context.Background(), "CLONE-WS")
+	if err != nil {
+		t.Fatalf("list roles: %v", err)
+	}
+	if len(roles) != 2 || !hasRole(roles, "plan") || !hasRole(roles, "task") {
+		t.Fatalf("roles = %#v, want plan and task", roles)
 	}
 	if _, err := os.Stat(filepath.Join(wsPath, "app", ".git")); err != nil {
 		t.Fatalf("clone checkout not created: %v", err)
@@ -553,6 +567,15 @@ func (s *repoFailStore) Repos() store.RepoStore {
 
 type repoFailer struct {
 	err error
+}
+
+func hasRole(roles []*domain.Role, name string) bool {
+	for _, role := range roles {
+		if role.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 func (r repoFailer) Create(context.Context, store.RepoCreate) (*domain.Repo, error) {

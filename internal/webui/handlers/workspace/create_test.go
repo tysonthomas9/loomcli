@@ -87,7 +87,7 @@ func TestHandleWorkspaceCreate_CloneType_Async(t *testing.T) {
 	}
 }
 
-func TestHandleWorkspaceCreate_CloneType_FallbackToSync(t *testing.T) {
+func TestHandleWorkspaceCreate_CloneType_AsyncUnavailableReturnsError(t *testing.T) {
 	createCalled := false
 	svc := &mockWorkspaceService{
 		startAsyncCreateFn: func(_ context.Context, _ service.WorkspaceCreateRequest) (string, error) {
@@ -106,11 +106,11 @@ func TestHandleWorkspaceCreate_CloneType_FallbackToSync(t *testing.T) {
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("expected 201, got %d: %s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d: %s", rec.Code, rec.Body.String())
 	}
-	if !createCalled {
-		t.Error("expected sync createFn to be called when async unavailable")
+	if createCalled {
+		t.Error("sync createFn should not be called when async creation is unavailable")
 	}
 }
 

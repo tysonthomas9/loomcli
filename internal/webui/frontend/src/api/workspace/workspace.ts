@@ -36,6 +36,16 @@ export interface WorkspaceAgentInfo {
   cross_repo: boolean;
 }
 
+export interface CreateAgentRequest {
+  name: string;
+  role_name: string;
+  auto?: boolean;
+  backend?: string;
+  repos?: string[];
+  repo_groups?: string[];
+  cross_repo?: boolean;
+}
+
 export type WorkspaceLifecycleState =
   | "creating"
   | "cloning"
@@ -263,6 +273,17 @@ export async function addWorkspaceRepos(
     req,
   );
   return unwrap(response);
+}
+
+export async function createWorkspaceAgent(
+  workspaceId: string,
+  req: CreateAgentRequest,
+): Promise<WorkspaceAgentInfo> {
+  return post<WorkspaceAgentInfo>(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/agents`,
+    req,
+    { timeout: 120_000 },
+  );
 }
 
 // ============= Workspace Job Polling =============

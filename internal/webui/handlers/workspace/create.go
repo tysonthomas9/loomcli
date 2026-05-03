@@ -35,14 +35,8 @@ func HandleWorkspaceCreate(svc service.WorkspaceService) http.HandlerFunc {
 		if req.Type == "clone" {
 			jobID, err := svc.StartAsyncCreate(r.Context(), req)
 			if err != nil {
-				// If Unavailable, fall through to sync path
-				var svcErr *service.ServiceError
-				if errors.As(err, &svcErr) && svcErr.Kind == service.KindUnavailable {
-					// fall through to sync creation below
-				} else {
-					handler.HandleServiceError(w, err)
-					return
-				}
+				handler.HandleServiceError(w, err)
+				return
 			} else {
 				handler.WriteJSON(w, http.StatusAccepted, map[string]any{"success": true, "job_id": jobID})
 				return

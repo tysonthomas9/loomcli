@@ -124,6 +124,24 @@ export interface CreateWorkspaceModalProps {
 }
 
 const WORKSPACE_NAME_RE = /^[A-Za-z0-9_-]+$/;
+const LINE_SPLIT_RE = /\r?\n/;
+
+function splitLineInput(value: string): string[] {
+  return value
+    .split(LINE_SPLIT_RE)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function appendUnique(existing: string[], incoming: string[]): string[] {
+  const next = [...existing];
+  for (const item of incoming) {
+    if (!next.includes(item)) {
+      next.push(item);
+    }
+  }
+  return next;
+}
 
 export function CreateWorkspaceModal({
   isOpen,
@@ -187,9 +205,9 @@ export function CreateWorkspaceModal({
   };
 
   const addCloneUrl = () => {
-    const trimmed = urlInput.trim();
-    if (trimmed && !cloneUrls.includes(trimmed)) {
-      setCloneUrls((prev) => [...prev, trimmed]);
+    const urls = splitLineInput(urlInput);
+    if (urls.length > 0) {
+      setCloneUrls((prev) => appendUnique(prev, urls));
       setUrlInput("");
     }
   };
@@ -199,9 +217,9 @@ export function CreateWorkspaceModal({
   };
 
   const addRepo = () => {
-    const trimmed = repoInput.trim();
-    if (trimmed && !repos.includes(trimmed)) {
-      setRepos((prev) => [...prev, trimmed]);
+    const paths = splitLineInput(repoInput);
+    if (paths.length > 0) {
+      setRepos((prev) => appendUnique(prev, paths));
       setRepoInput("");
     }
   };
@@ -234,10 +252,7 @@ export function CreateWorkspaceModal({
       // Auto-add any pending URL input before submitting
       let finalCloneUrls = cloneUrls;
       if (type === "clone" && urlInput.trim()) {
-        const trimmed = urlInput.trim();
-        if (!cloneUrls.includes(trimmed)) {
-          finalCloneUrls = [...cloneUrls, trimmed];
-        }
+        finalCloneUrls = appendUnique(cloneUrls, splitLineInput(urlInput));
         setUrlInput("");
       }
 
@@ -252,10 +267,7 @@ export function CreateWorkspaceModal({
 
       let finalRepos = repos;
       if (type === "empty" && repoInput.trim()) {
-        const trimmed = repoInput.trim();
-        if (!repos.includes(trimmed)) {
-          finalRepos = [...repos, trimmed];
-        }
+        finalRepos = appendUnique(repos, splitLineInput(repoInput));
         setRepoInput("");
       }
 
@@ -476,10 +488,9 @@ export function CreateWorkspaceModal({
                   Repository URL
                 </label>
                 <div className={styles.addRow}>
-                  <input
+                  <textarea
                     id="ws-clone-url"
                     className={styles.input}
-                    type="text"
                     value={urlInput}
                     onChange={(e) => setUrlInput(e.target.value)}
                     onKeyDown={(e) => {
@@ -489,6 +500,7 @@ export function CreateWorkspaceModal({
                       }
                     }}
                     placeholder="https://github.com/... or git@..."
+                    rows={2}
                     disabled={isSubmitting}
                     data-testid="create-workspace-clone-url"
                   />
@@ -527,10 +539,9 @@ export function CreateWorkspaceModal({
                   Repository Paths
                 </label>
                 <div className={styles.addRow}>
-                  <input
+                  <textarea
                     id="ws-repo-path"
                     className={styles.input}
-                    type="text"
                     value={repoInput}
                     onChange={(e) => setRepoInput(e.target.value)}
                     onKeyDown={(e) => {
@@ -540,6 +551,7 @@ export function CreateWorkspaceModal({
                       }
                     }}
                     placeholder="/path/to/existing/repo"
+                    rows={2}
                     disabled={isSubmitting}
                     data-testid="create-workspace-repo-path"
                   />

@@ -50,8 +50,8 @@ func TestIPCIssueBackend_Update_RoutesToIPC(t *testing.T) {
 			return nil
 		},
 	}
-	fb := NewMockIssueBackend()
-	b := newIPCIssueBackend(ipc, fb)
+	direct := NewMockIssueBackend()
+	b := newIPCIssueBackend(ipc, direct)
 
 	err := b.Update(context.Background(), "task-1", backend.UpdateParams{})
 	if err != nil {
@@ -60,8 +60,8 @@ func TestIPCIssueBackend_Update_RoutesToIPC(t *testing.T) {
 	if !ipcCalled {
 		t.Error("IPC Update was not called")
 	}
-	if fb.Called("Update") {
-		t.Error("fallback Update should NOT have been called")
+	if direct.Called("Update") {
+		t.Error("direct Update should NOT have been called")
 	}
 }
 
@@ -79,8 +79,8 @@ func TestIPCIssueBackend_ClaimIssue_RoutesToIPC(t *testing.T) {
 			return nil
 		},
 	}
-	fb := NewMockIssueBackend()
-	b := newIPCIssueBackend(ipc, fb)
+	direct := NewMockIssueBackend()
+	b := newIPCIssueBackend(ipc, direct)
 
 	err := b.ClaimIssue(context.Background(), "task-2", 5*time.Minute)
 	if err != nil {
@@ -89,8 +89,8 @@ func TestIPCIssueBackend_ClaimIssue_RoutesToIPC(t *testing.T) {
 	if !ipcCalled {
 		t.Error("IPC Claim was not called")
 	}
-	if fb.Called("ClaimIssue") {
-		t.Error("fallback ClaimIssue should NOT have been called")
+	if direct.Called("ClaimIssue") {
+		t.Error("direct ClaimIssue should NOT have been called")
 	}
 }
 
@@ -102,8 +102,8 @@ func TestIPCIssueBackend_Close_RoutesToIPC(t *testing.T) {
 			return want, nil
 		},
 	}
-	fb := NewMockIssueBackend()
-	b := newIPCIssueBackend(ipc, fb)
+	direct := NewMockIssueBackend()
+	b := newIPCIssueBackend(ipc, direct)
 
 	got, err := b.Close(context.Background(), "task-3", backend.CloseParams{Reason: "done"})
 	if err != nil {
@@ -112,74 +112,68 @@ func TestIPCIssueBackend_Close_RoutesToIPC(t *testing.T) {
 	if got.Closed.ID != "task-3" {
 		t.Errorf("got issue ID %q, want task-3", got.Closed.ID)
 	}
-	if fb.Called("Close") {
-		t.Error("fallback Close should NOT have been called")
+	if direct.Called("Close") {
+		t.Error("direct Close should NOT have been called")
 	}
 }
 
-// --- Fallback on KindUnavailable tests ---
+// --- KindUnavailable propagation tests ---
 
-func TestIPCIssueBackend_Update_FallbackOnUnavailable(t *testing.T) {
+func TestIPCIssueBackend_Update_PropagatesUnavailable(t *testing.T) {
 	ipc := &mockIPCMutator{
 		updateFn: func(string, backend.UpdateParams) error {
 			return backend.ErrUnavailable("ipc.update", "daemon not running", nil)
 		},
 	}
-	fb := NewMockIssueBackend()
-	b := newIPCIssueBackend(ipc, fb)
+	direct := NewMockIssueBackend()
+	b := newIPCIssueBackend(ipc, direct)
 
 	err := b.Update(context.Background(), "task-1", backend.UpdateParams{})
-	if err != nil {
-		t.Fatalf("unexpected error from fallback: %v", err)
+	if !backend.IsKind(err, backend.KindUnavailable) {
+		t.Fatalf("expected KindUnavailable, got %v", err)
 	}
-	if !fb.Called("Update") {
-		t.Error("fallback Update should have been called")
+	if direct.Called("Update") {
+		t.Error("direct Update should NOT have been called")
 	}
 }
 
-func TestIPCIssueBackend_ClaimIssue_FallbackOnUnavailable(t *testing.T) {
+func TestIPCIssueBackend_ClaimIssue_PropagatesUnavailable(t *testing.T) {
 	ipc := &mockIPCMutator{
 		claimFn: func(string, time.Duration) error {
 			return backend.ErrUnavailable("ipc.claim", "daemon not running", nil)
 		},
 	}
-	fb := NewMockIssueBackend()
-	b := newIPCIssueBackend(ipc, fb)
+	direct := NewMockIssueBackend()
+	b := newIPCIssueBackend(ipc, direct)
 
 	err := b.ClaimIssue(context.Background(), "task-1", 0)
-	if err != nil {
-		t.Fatalf("unexpected error from fallback: %v", err)
+	if !backend.IsKind(err, backend.KindUnavailable) {
+		t.Fatalf("expected KindUnavailable, got %v", err)
 	}
-	if !fb.Called("ClaimIssue") {
-		t.Error("fallback ClaimIssue should have been called")
+	if direct.Called("ClaimIssue") {
+		t.Error("direct ClaimIssue should NOT have been called")
 	}
 }
 
-func TestIPCIssueBackend_Close_FallbackOnUnavailable(t *testing.T) {
+func TestIPCIssueBackend_Close_PropagatesUnavailable(t *testing.T) {
 	ipc := &mockIPCMutator{
 		completeFn: func(string, backend.CloseParams) (*backend.CloseResult, error) {
 			return nil, backend.ErrUnavailable("ipc.complete", "daemon not running", nil)
 		},
 	}
-	fb := NewMockIssueBackend()
-	fb.CloseResult = &backend.CloseResult{
-		Closed: &backend.IssueData{ID: "task-1", Title: "fallback-closed"},
-	}
-	b := newIPCIssueBackend(ipc, fb)
+	direct := NewMockIssueBackend()
+	b := newIPCIssueBackend(ipc, direct)
 
-	got, err := b.Close(context.Background(), "task-1", backend.CloseParams{})
-	if err != nil {
-		t.Fatalf("unexpected error from fallback: %v", err)
+	_, err := b.Close(context.Background(), "task-1", backend.CloseParams{})
+	if !backend.IsKind(err, backend.KindUnavailable) {
+		t.Fatalf("expected KindUnavailable, got %v", err)
 	}
-	if !fb.Called("Close") {
-		t.Error("fallback Close should have been called")
-	}
-	if got.Closed.Title != "fallback-closed" {
-		t.Errorf("got title %q, want fallback-closed", got.Closed.Title)
+	if direct.Called("Close") {
+		t.Error("direct Close should NOT have been called")
 	}
 }
 
-// --- Error propagation tests (non-Unavailable errors do NOT fall back) ---
+// --- Error propagation tests ---
 
 func TestIPCIssueBackend_Update_PropagatesNonUnavailableError(t *testing.T) {
 	ipc := &mockIPCMutator{
@@ -187,8 +181,8 @@ func TestIPCIssueBackend_Update_PropagatesNonUnavailableError(t *testing.T) {
 			return backend.NewBackendError(backend.KindConflict, "ipc.update", "conflict", nil)
 		},
 	}
-	fb := NewMockIssueBackend()
-	b := newIPCIssueBackend(ipc, fb)
+	direct := NewMockIssueBackend()
+	b := newIPCIssueBackend(ipc, direct)
 
 	err := b.Update(context.Background(), "task-1", backend.UpdateParams{})
 	if err == nil {
@@ -197,8 +191,8 @@ func TestIPCIssueBackend_Update_PropagatesNonUnavailableError(t *testing.T) {
 	if !backend.IsKind(err, backend.KindConflict) {
 		t.Errorf("expected KindConflict, got %v", err)
 	}
-	if fb.Called("Update") {
-		t.Error("fallback should NOT be called on KindConflict")
+	if direct.Called("Update") {
+		t.Error("direct should NOT be called on KindConflict")
 	}
 }
 
@@ -208,8 +202,8 @@ func TestIPCIssueBackend_ClaimIssue_PropagatesConflict(t *testing.T) {
 			return backend.NewBackendError(backend.KindConflict, "ipc.claim", "already claimed", nil)
 		},
 	}
-	fb := NewMockIssueBackend()
-	b := newIPCIssueBackend(ipc, fb)
+	direct := NewMockIssueBackend()
+	b := newIPCIssueBackend(ipc, direct)
 
 	err := b.ClaimIssue(context.Background(), "task-1", 0)
 	if err == nil {
@@ -218,8 +212,8 @@ func TestIPCIssueBackend_ClaimIssue_PropagatesConflict(t *testing.T) {
 	if !backend.IsKind(err, backend.KindConflict) {
 		t.Errorf("expected KindConflict, got %v", err)
 	}
-	if fb.Called("ClaimIssue") {
-		t.Error("fallback should NOT be called on KindConflict")
+	if direct.Called("ClaimIssue") {
+		t.Error("direct should NOT be called on KindConflict")
 	}
 }
 
@@ -229,8 +223,8 @@ func TestIPCIssueBackend_Close_PropagatesNotFound(t *testing.T) {
 			return nil, backend.NewBackendError(backend.KindNotFound, "ipc.complete", "not found", nil)
 		},
 	}
-	fb := NewMockIssueBackend()
-	b := newIPCIssueBackend(ipc, fb)
+	direct := NewMockIssueBackend()
+	b := newIPCIssueBackend(ipc, direct)
 
 	_, err := b.Close(context.Background(), "task-1", backend.CloseParams{})
 	if err == nil {
@@ -239,18 +233,18 @@ func TestIPCIssueBackend_Close_PropagatesNotFound(t *testing.T) {
 	if !backend.IsKind(err, backend.KindNotFound) {
 		t.Errorf("expected KindNotFound, got %v", err)
 	}
-	if fb.Called("Close") {
-		t.Error("fallback should NOT be called on KindNotFound")
+	if direct.Called("Close") {
+		t.Error("direct should NOT be called on KindNotFound")
 	}
 }
 
-// --- Fallback delegation tests ---
+// --- Direct backend delegation tests ---
 
-func TestIPCIssueBackend_Ready_DelegatesToFallback(t *testing.T) {
+func TestIPCIssueBackend_Ready_DelegatesToDirectBackend(t *testing.T) {
 	ipc := &mockIPCMutator{}
-	fb := NewMockIssueBackend()
-	fb.ReadyResult = []backend.IssueData{{ID: "ready-1"}}
-	b := newIPCIssueBackend(ipc, fb)
+	direct := NewMockIssueBackend()
+	direct.ReadyResult = []backend.IssueData{{ID: "ready-1"}}
+	b := newIPCIssueBackend(ipc, direct)
 
 	got, err := b.Ready(context.Background(), backend.ReadyOpts{Limit: 5})
 	if err != nil {
@@ -259,12 +253,12 @@ func TestIPCIssueBackend_Ready_DelegatesToFallback(t *testing.T) {
 	if len(got) != 1 || got[0].ID != "ready-1" {
 		t.Errorf("got %v, want [{ID:ready-1}]", got)
 	}
-	if !fb.Called("Ready") {
-		t.Error("fallback Ready should have been called")
+	if !direct.Called("Ready") {
+		t.Error("direct Ready should have been called")
 	}
 }
 
-func TestIPCIssueBackend_Get_DelegatesToFallback(t *testing.T) {
+func TestIPCIssueBackend_Get_DelegatesToDirectBackend(t *testing.T) {
 	ipc := &mockIPCMutator{}
 	fb := NewMockIssueBackend()
 	fb.GetResult = &backend.IssueDetailData{IssueData: backend.IssueData{ID: "get-1"}}
@@ -279,7 +273,7 @@ func TestIPCIssueBackend_Get_DelegatesToFallback(t *testing.T) {
 	}
 }
 
-func TestIPCIssueBackend_List_DelegatesToFallback(t *testing.T) {
+func TestIPCIssueBackend_List_DelegatesToDirectBackend(t *testing.T) {
 	ipc := &mockIPCMutator{}
 	fb := NewMockIssueBackend()
 	fb.ListResult = []backend.IssueData{{ID: "list-1"}}
@@ -294,7 +288,7 @@ func TestIPCIssueBackend_List_DelegatesToFallback(t *testing.T) {
 	}
 }
 
-func TestIPCIssueBackend_GetChildren_DelegatesToFallback(t *testing.T) {
+func TestIPCIssueBackend_GetChildren_DelegatesToDirectBackend(t *testing.T) {
 	ipc := &mockIPCMutator{}
 	fb := NewMockIssueBackend()
 	fb.GetChildrenResult = []backend.IssueData{{ID: "child-1"}}
@@ -308,11 +302,11 @@ func TestIPCIssueBackend_GetChildren_DelegatesToFallback(t *testing.T) {
 		t.Errorf("got %v, want [{ID:child-1}]", got)
 	}
 	if !fb.Called("GetChildren") {
-		t.Error("fallback GetChildren should have been called")
+		t.Error("direct GetChildren should have been called")
 	}
 }
 
-func TestIPCIssueBackend_SearchIssues_DelegatesToFallback(t *testing.T) {
+func TestIPCIssueBackend_SearchIssues_DelegatesToDirectBackend(t *testing.T) {
 	ipc := &mockIPCMutator{}
 	fb := NewMockIssueBackend()
 	fb.SearchIssuesResult = []backend.IssueData{{ID: "search-1"}}
@@ -326,11 +320,11 @@ func TestIPCIssueBackend_SearchIssues_DelegatesToFallback(t *testing.T) {
 		t.Errorf("got %v, want [{ID:search-1}]", got)
 	}
 	if !fb.Called("SearchIssues") {
-		t.Error("fallback SearchIssues should have been called")
+		t.Error("direct SearchIssues should have been called")
 	}
 }
 
-func TestIPCIssueBackend_DeferIssue_DelegatesToFallback(t *testing.T) {
+func TestIPCIssueBackend_DeferIssue_DelegatesToDirectBackend(t *testing.T) {
 	ipc := &mockIPCMutator{}
 	fb := NewMockIssueBackend()
 	b := newIPCIssueBackend(ipc, fb)
@@ -340,11 +334,11 @@ func TestIPCIssueBackend_DeferIssue_DelegatesToFallback(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !fb.Called("DeferIssue") {
-		t.Error("fallback DeferIssue should have been called")
+		t.Error("direct DeferIssue should have been called")
 	}
 }
 
-func TestIPCIssueBackend_UndeferIssue_DelegatesToFallback(t *testing.T) {
+func TestIPCIssueBackend_UndeferIssue_DelegatesToDirectBackend(t *testing.T) {
 	ipc := &mockIPCMutator{}
 	fb := NewMockIssueBackend()
 	b := newIPCIssueBackend(ipc, fb)
@@ -353,11 +347,11 @@ func TestIPCIssueBackend_UndeferIssue_DelegatesToFallback(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !fb.Called("UndeferIssue") {
-		t.Error("fallback UndeferIssue should have been called")
+		t.Error("direct UndeferIssue should have been called")
 	}
 }
 
-func TestIPCIssueBackend_Create_DelegatesToFallback(t *testing.T) {
+func TestIPCIssueBackend_Create_DelegatesToDirectBackend(t *testing.T) {
 	ipc := &mockIPCMutator{}
 	fb := NewMockIssueBackend()
 	fb.CreateResult = &backend.IssueData{ID: "new-1"}
@@ -377,12 +371,12 @@ func TestIPCIssueBackend_Create_DelegatesToFallback(t *testing.T) {
 func TestIPCIssueBackend_BackendName(t *testing.T) {
 	ipc := &mockIPCMutator{}
 	fb := NewMockIssueBackend()
-	fb.BackendNameResult = "beads"
+	fb.BackendNameResult = "fleetdb"
 	b := newIPCIssueBackend(ipc, fb)
 
 	got := b.BackendName()
-	if got != "ipc:beads" {
-		t.Errorf("got %q, want ipc:beads", got)
+	if got != "ipc:fleetdb" {
+		t.Errorf("got %q, want ipc:fleetdb", got)
 	}
 }
 

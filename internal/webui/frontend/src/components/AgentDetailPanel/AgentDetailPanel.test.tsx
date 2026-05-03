@@ -16,6 +16,9 @@ import type { LoomAgentStatus, LoomTaskInfo } from "@/types";
 import { AgentDetailPanel } from "./AgentDetailPanel";
 
 vi.mock("@/hooks", () => ({
+  useWorkspaceContext: () => ({
+    getAgentByName: () => undefined,
+  }),
   useFocusReturn: vi.fn(),
   useFocusTrap: vi.fn(),
   useRegisterEscapeLayer: vi.fn(),

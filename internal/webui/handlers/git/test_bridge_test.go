@@ -18,7 +18,7 @@ import (
 )
 
 // stubGraphBackend implements backend.IssueBackend with just enough surface
-// area to exercise the HandleGraphWithBackendFallback path in unit tests.
+// area to exercise the HandleGraphWithBackend path in unit tests.
 // Every method not exercised returns a canned error.
 type stubGraphBackend struct {
 	list    []backend.IssueData
@@ -41,7 +41,7 @@ func (s *stubGraphBackend) Get(_ context.Context, id string) (*backend.IssueDeta
 	return &backend.IssueDetailData{IssueData: backend.IssueData{ID: id}}, nil
 }
 
-// Remaining IssueBackend methods — unused in graph-fallback tests, return
+// Remaining IssueBackend methods — unused in graph backend tests, return
 // sentinel errors so accidental use shows up as a test failure rather than
 // a silent empty payload.
 func (s *stubGraphBackend) Ready(_ context.Context, _ backend.ReadyOpts) ([]backend.IssueData, error) {

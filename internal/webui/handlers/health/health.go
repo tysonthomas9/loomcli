@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
@@ -20,9 +19,7 @@ import (
 )
 
 // IssueBackendFn returns the active backend.IssueBackend or nil. Used by
-// HandleStatsWithBackendFallback to serve stats out-of-pool when the
-// daemon connection isn't available (fleet mode). Mirrors the pattern
-// established in handlers/git/graph.go.
+// HandleStatsWithBackend to serve stats in pool-less fleet mode.
 //
 // ctx carries the per-request workspace ID so cloud-mode wirings can route
 // to a per-workspace fleet-db backend.
@@ -225,43 +222,24 @@ func handleAPIHealthImpl(pool daemon.Pool, daemonExpected bool) http.HandlerFunc
 
 // HandleStats returns project statistics from the daemon.
 func HandleStats(pool daemon.Pool) http.HandlerFunc {
-	return HandleStatsWithBackendFallback(pool, nil)
+	return HandleStatsWithBackend(pool, nil)
 }
 
-// HandleStatsWithBackendFallback returns a handler that serves /stats from
-// the daemon connection pool when available and from the IssueBackend
-// otherwise. Mirrors HandleGraphWithBackendFallback / HandleReadyWithBackendFallback.
-//
-// In fleet mode the pool is empty; without this, the handler returns 503
-// even though backend.IssueBackend.Stats works fine. backendFn may be nil
-// — in that case behavior is identical to the legacy pool-only path.
-func HandleStatsWithBackendFallback(pool daemon.Pool, backendFn IssueBackendFn) http.HandlerFunc {
+// HandleStatsWithBackend returns a handler that serves /stats from exactly one
+// configured source: the daemon pool when present, otherwise the IssueBackend
+// for pool-less fleet mode. backendFn may be nil — in that case behavior is
+// identical to the pool-only path.
+func HandleStatsWithBackend(pool daemon.Pool, backendFn IssueBackendFn) http.HandlerFunc {
 	var poolAdapter StatsConnectionGetter
 	if pool != nil {
 		poolAdapter = &statsPoolAdapter{pool: pool}
 	}
 	poolHandler := HandleStatsWithPool(poolAdapter)
-	if backendFn == nil {
+	if poolAdapter != nil || backendFn == nil {
 		return poolHandler
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Shortcut fleet mode: no pool at all, serve from backend.
-		if poolAdapter == nil {
-			serveStatsViaBackend(w, r, backendFn)
-			return
-		}
-		// Try pool path first via a recorder so 5xx falls through.
-		rec := httptest.NewRecorder()
-		poolHandler.ServeHTTP(rec, r)
-		if rec.Code >= 500 {
-			serveStatsViaBackend(w, r, backendFn)
-			return
-		}
-		for k, v := range rec.Header() {
-			w.Header()[k] = v
-		}
-		w.WriteHeader(rec.Code)
-		_, _ = w.Write(rec.Body.Bytes())
+		serveStatsViaBackend(w, r, backendFn)
 	}
 }
 
