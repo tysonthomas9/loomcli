@@ -43,6 +43,7 @@ services:
       retries: 20
 
   fleet-db:
+    image: loomcli-fleetdb-regression-fleet-db:latest
     build:
       context: ../../../fleet-db
       dockerfile: deploy/docker/Dockerfile
@@ -96,6 +97,7 @@ services:
       # being explicit avoids a surprise if someone unsets the agent name.
       #
       LOOM_FLEET_ACTOR: fleetdb-regression-harness@fixture.local
+      LOOM_FLEET_DB_ACTOR: fleetdb-regression-harness@fixture.local
       # Fail fast if loom boots thinking it has a local reference backend.
       # Any fallback to an embedded reference path in fleet mode should surface
       # as a startup error, not a silent re-route.

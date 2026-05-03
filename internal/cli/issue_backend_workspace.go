@@ -34,6 +34,9 @@ func WorkspaceAwareIssueBackendForURL(fleetURL, actor string) func(ctx context.C
 	}
 
 	if actor == "" {
+		actor = os.Getenv(bootstrap.EnvFleetDBActor)
+	}
+	if actor == "" {
 		actor = os.Getenv("USER")
 	}
 	var (

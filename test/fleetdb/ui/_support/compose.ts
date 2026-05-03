@@ -65,7 +65,7 @@ export const FLEETDB_SEED_IMAGE = `${COMPOSE_PROJECT}_fleetdb-regression-seed`;
 export const FLEETDB_SEED_FLEET_IMAGE = `${COMPOSE_PROJECT}_fleetdb-regression-seed-fleet`;
 
 /** Container-name prefix all fleetdb-regression services share. */
-export const FLEETDB_CONTAINER_PREFIX = `${COMPOSE_PROJECT}_`;
+export const FLEETDB_CONTAINER_PREFIX = `${COMPOSE_PROJECT}-`;
 
 /**
  * Build a full compose subcommand string. Concatenated as a string (not

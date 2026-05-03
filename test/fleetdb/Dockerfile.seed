@@ -6,7 +6,7 @@
 # fleet-db client; using it here also exercises the real CLI path.)
 #
 # Stage 1: pick fdb out of the fleet-db image.
-FROM localhost/loomcli-fleetdb-regression_fleet-db:latest AS fdb-source
+FROM loomcli-fleetdb-regression-fleet-db:latest AS fdb-source
 
 # Stage 2: minimal seeder runtime.
 FROM debian:bookworm-slim
