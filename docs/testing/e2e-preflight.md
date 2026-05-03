@@ -13,7 +13,7 @@ Shared setup for `e2e-cli.md` and `e2e-ui.md`. Run this once per testing session
 ## Cloud-mode infra (Phases A, B, D)
 
 ```bash
-# Start a dedicated Redis on host port 6399 (parity stack uses :6379).
+# Start a dedicated Redis on host port 6399 (regression stack uses :6379).
 # Use the default :6379 inside the container; map host :6399 → container :6379.
 podman run -d --rm --name loom-test-redis -p 6399:6379 redis:7-alpine
 
@@ -38,7 +38,7 @@ until curl -sf http://127.0.0.1:18095/healthz; do sleep 0.1; done; echo " ready"
 
 > **`--rpc-socket=/tmp/loom-fleet-db.sock`:** redirects fleet-db's Unix-socket RPC listener to a user-writable path. The default (`/var/run/fleet-db.sock`) requires root and emits a noisy bind-permission ERROR. An empty value is rejected by fleet-db.
 
-> **Why `-p 6399:6379`:** the parity stack uses host `:6379`. Map an alternative host port to the container's standard `:6379`.
+> **Why `-p 6399:6379`:** the regression stack uses host `:6379`. Map an alternative host port to the container's standard `:6379`.
 
 ## Loom env (cloud mode)
 

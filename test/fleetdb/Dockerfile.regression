@@ -1,0 +1,38 @@
+# syntax=docker/dockerfile:1.6
+#
+# Dockerfile.regression — slim loom container for fleet-db regression testing.
+#
+# Unlike Dockerfile.dev this image:
+#   - Does NOT install Node / build the frontend / run AI CLIs
+#   - Only produces a loom binary
+#   - Minimal runtime image so startup and image-push are fast
+#
+# Backend selection is at runtime via LOOM_ISSUE_BACKEND env var, not build-time.
+#
+# Build:  docker build -f test/fleetdb/Dockerfile.regression -t loomcli-fleetdb-regression .
+# Context: the loomcli repo root.
+
+ARG GO_VERSION=1.25.6
+
+# ── Stage 1: build loom ──
+FROM golang:${GO_VERSION}-bookworm AS builder
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod download
+COPY cmd ./cmd
+COPY internal ./internal
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 go build -o /out/loom ./cmd/loom
+
+# ── Stage 2: runtime ──
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates git tmux wget \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=builder /out/loom /usr/local/bin/loom
+WORKDIR /workspace
+# Webui listens on 8080 inside the container; compose maps to host :8082.
+EXPOSE 8080
+# Entrypoint is set per-service in docker-compose.regression.yml.

@@ -50,9 +50,9 @@ services:
 
   fleet-db:
     # Use an already-built fleet-db image by default. For local development,
-    # the parity stack usually creates localhost/loomcli-parity_fleet-db:latest.
+    # the regression stack usually creates localhost/loomcli-fleetdb-regression_fleet-db:latest.
     # Override FLEET_DB_IMAGE to point at a release image or locally built tag.
-    image: ${FLEET_DB_IMAGE:-localhost/loomcli-parity_fleet-db:latest}
+    image: ${FLEET_DB_IMAGE:-localhost/loomcli-fleetdb-regression_fleet-db:latest}
     depends_on:
       redis:
         condition: service_healthy
@@ -73,7 +73,7 @@ services:
   loom:
     build:
       context: ../..
-      dockerfile: test/parity/Dockerfile.parity
+      dockerfile: test/fleetdb/Dockerfile.regression
     depends_on:
       fleet-db:
         condition: service_started

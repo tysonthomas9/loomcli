@@ -186,7 +186,7 @@ services:
     ports:
       - "8093:8080"
     volumes:
-      - ../parity/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ../fleetdb/Caddyfile:/etc/caddy/Caddyfile:ro
       - ../../internal/webui/frontend/dist:/srv:ro
 
   ui-b:
@@ -200,7 +200,7 @@ services:
     ports:
       - "8094:8080"
     volumes:
-      - ../parity/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ../fleetdb/Caddyfile:/etc/caddy/Caddyfile:ro
       - ../../internal/webui/frontend/dist:/srv:ro
 
   distributed-smoke:

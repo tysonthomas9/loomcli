@@ -784,7 +784,7 @@ enforce this architecture.
 - Fix `/api/workspaces/active`, repo listing, delete, and create.
 - Canonicalize workspace keys in middleware.
 - Make `loom workspace list/delete` fleet-db-backed.
-- File or fix UI parity gaps for workspace creation and switching.
+- File or fix UI regression gaps for workspace creation and switching.
 
 ### Phase 2: Split Checkout From Workspace Metadata
 

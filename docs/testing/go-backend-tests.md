@@ -30,11 +30,11 @@ prove behavior through FleetDB-backed stores or explicit migration-only code.
 
 Tests for importing old data may intentionally invoke the legacy CLI from
 `internal/cli/migrate`. Keep those references isolated to migration packages and
-do not use them as parity or deletion-gate evidence.
+do not use them as regression or deletion-gate evidence.
 
 ## Updating This Inventory
 
-When adding new FleetDB parity coverage:
+When adding new FleetDB regression coverage:
 
 - Add or update the focused package test.
 - Name the relevant acceptance gate from

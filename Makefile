@@ -1,6 +1,6 @@
 # Makefile for loomcli project
 
-.PHONY: all build build-frontend build-all test test-integration test-all test-parity test-parity-cli test-fleetdb-cli test-fleetdb-embedded test-fleetdb-supervisor test-parity-ui test-fleetdb-ui fleetdb-empty-up fleetdb-empty-down test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-e2e-api test-e2e-api-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-no-raw-exec check-no-beads-prod test-coverage test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness
+.PHONY: all build build-frontend build-all test test-integration test-all test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui fleetdb-empty-up fleetdb-empty-down test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-e2e-api test-e2e-api-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-no-raw-exec check-no-beads-prod test-coverage test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness
 
 # Default target
 all: build
@@ -25,31 +25,6 @@ test-all:
 	@echo "Running all tests..."
 	@TEST_TAGS=integration,e2e TEST_COVER=1 ./scripts/test.sh
 
-# Run loomcli-side parity harness (covers IssueBackend surface not tested by fleet-db's own harness).
-# Excluded from default test runs via `//go:build parity` tag. Fixture runner + flag
-# parsing (-report-dir) will land when the DualRunner fixture execution is implemented.
-test-parity:
-	@echo "Running loomcli parity harness..."
-	go test -tags parity -race -timeout 15m -v ./internal/backend/paritytest/...
-
-# Run the CLI parity harness. Writes test/parity/ui/cli-report.json.
-# Prerequisites: fleet-db sibling-repo binaries built:
-#   cd ~/codebase/fleet-db && go build -o /tmp/fleet-db ./cmd/fleet-db
-#   cd ~/codebase/fleet-db && go build -o /tmp/fdb ./cmd/fdb
-test-parity-cli:
-	@echo "Running loomcli CLI-parity harness..."
-	go test -tags parity -race -timeout 10m -v ./internal/backend/paritytest/... -run TestCLIParity
-
-# Run the fleet-db-only CLI parity harness — same CLI fixture catalog as
-# test-parity-cli, but starts only fleet-db/miniredis and strips PATH so any
-# accidental bd dependency fails. Writes test/parity/ui/cli-fleetdb-only-report.json.
-# Prerequisites:
-#   cd ~/codebase/fleet-db && go build -o /tmp/fleet-db ./cmd/fleet-db
-#   cd ~/codebase/fleet-db && go build -o /tmp/fdb ./cmd/fdb
-test-fleetdb-cli:
-	@echo "Running fleet-db-only CLI parity harness..."
-	go test -tags parity -race -count=1 -timeout 10m -v ./internal/backend/paritytest/... -run TestCLIFleetDBOnly
-
 # Run clean-checkout embedded local mode smoke. Requires a loom binary and
 # fleet-db binary; override with LOOM_BIN=/path/to/loom FLEET_DB_BIN=/path/to/fleet-db.
 test-fleetdb-embedded: build
@@ -61,43 +36,29 @@ test-fleetdb-supervisor:
 	go test -count=1 ./internal/cli ./internal/cli/data ./internal/cli/agentdef ./internal/cli/daemon ./internal/cli/daemon/supervisor \
 	  -run 'Test(AgentIPCClient|IPCServer_|Data(Ready|ShowClaimClose)_NoServer|ClaimTask_|TaskIDForLifecycle_|Supervisor(Register|Heartbeats|Mirrors)ControlPlane|BuildCommand_SessionEnvVars)'
 
-# Run the UI parity/regression suite (Playwright; fleet-db mode by default).
-# Assumes docker-compose.parity.yml is already up AND seeded — the suite's
+# Run the UI browser suite in fleet-db-only regression mode.
+# Assumes docker-compose.regression.yml is already up AND seeded — the suite's
 # preflight will abort with an actionable error if anything is missing
 # (never silently "skip because no stack" — see ui-test-plan.md §0).
 #
 # Usage:
-#   docker compose -f test/parity/docker-compose.parity.yml up -d
-#   docker compose -f test/parity/docker-compose.parity.yml run --rm parity-seed
-#   make test-parity-ui
+#   docker compose -f test/fleetdb/docker-compose.regression.yml up -d
+#   docker compose -f test/fleetdb/docker-compose.regression.yml run --rm fleetdb-regression-seed-fleet
+#   make test-fleetdb-ui
 #
 # Environment overrides accepted (see playwright.config.ts):
 #   LOOM_FLEET_URL   default http://localhost:8082
 #   FLEET_DB_URL     default http://localhost:8080
-#   PARITY_WORKSPACE default PARITY
-test-parity-ui:
-	@echo "Running UI parity suite (Playwright)..."
-	@cd test/parity/ui && \
-	  if [ ! -d node_modules ]; then \
-	    echo "[test-parity-ui] installing npm deps..."; \
-	    npm install --no-audit --no-fund --silent || exit 1; \
-	    npx playwright install --with-deps chromium || exit 1; \
-	  fi && \
-	  npx playwright test
-
-# Run the UI browser suite in fleet-db-only regression mode. The command
-# assumes the fleet-only subset of docker-compose.parity.yml is up and seeded:
-#   docker compose -f test/parity/docker-compose.parity.yml up -d --build redis fleet-db loom-fleet ui-fleet parity-seed-fleet
-# It does not require loom-beads or bd containers.
+#   FLEETDB_WORKSPACE default FLEETDB
 test-fleetdb-ui:
 	@echo "Running fleet-db-only UI regression suite (Playwright)..."
-	@cd test/parity/ui && \
+	@cd test/fleetdb/ui && \
 	  if [ ! -d node_modules ]; then \
 	    echo "[test-fleetdb-ui] installing npm deps..."; \
 	    npm install --no-audit --no-fund --silent || exit 1; \
 	    npx playwright install --with-deps chromium || exit 1; \
 	  fi && \
-	  PARITY_MODE=fleet-only npx playwright test
+	  FLEETDB_MODE=fleet-only npx playwright test
 
 # Start an empty fleet-db-only UI stack for manual new-user testing. This stack
 # has no seeded workspaces or issues; create a workspace from the UI.
@@ -259,7 +220,7 @@ test-e2e-integration-local:
 	@echo "Running Playwright integration e2e tests (local server)..."
 	@cd $(FRONTEND_DIR) && RUN_INTEGRATION_TESTS=1 LOOM_LOCAL_SERVER=1 npx playwright test --project=integration
 
-# Run ALL Playwright integration e2e tests including cross-workspace and terminal-parity
+# Run ALL Playwright integration e2e tests including cross-workspace and terminal-fleetdb-regression
 test-e2e-integration-full:
 	@echo "Running full Playwright integration e2e tests (self-contained)..."
 	@cd $(FRONTEND_DIR) && RUN_INTEGRATION_TESTS=1 RUN_LOCAL_INTEGRATION_TESTS=1 npx playwright test --project=integration --project=local-integration
@@ -449,7 +410,6 @@ help:
 	@echo "  make lint-frontend     - Run frontend typecheck + ESLint"
 	@echo "  make test-frontend     - Run frontend unit tests (vitest)"
 	@echo "  make test-e2e          - Run Playwright mocked e2e tests (no server)"
-	@echo "  make test-parity-ui    - Run side-by-side UI parity suite"
 	@echo "  make test-fleetdb-ui   - Run fleet-db-only UI regression suite"
 	@echo "  make test-fleetdb-embedded - Run clean-checkout embedded fleet-db smoke"
 	@echo "  make test-distributed-smoke - Run fleet-db distributed compose smoke"
@@ -457,7 +417,7 @@ help:
 	@echo "  make test-e2e-api-local - Run Playwright API e2e tests (needs loom serve)"
 	@echo "  make test-e2e-integration - Run Playwright integration e2e tests (self-contained)"
 	@echo "  make test-e2e-integration-local - Run Playwright integration e2e tests (needs loom serve)"
-	@echo "  make test-e2e-integration-full - Run ALL integration e2e tests (cross-workspace + terminal-parity)"
+	@echo "  make test-e2e-integration-full - Run ALL integration e2e tests (cross-workspace + terminal regression)"
 	@echo "  make install    - Install loom to GOPATH/bin"
 	@echo "  make frontend         - DEPRECATED alias for make build-frontend"
 	@echo "  make check        - Unified quality gate (all 14 checks)"

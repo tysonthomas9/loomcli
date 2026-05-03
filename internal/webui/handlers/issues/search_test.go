@@ -178,7 +178,7 @@ func TestHandleSearchIssues(t *testing.T) {
 }
 
 // TestHandleSearchIssues_EnvelopeShape asserts the concrete wire shape the
-// parity test (test/parity/ui/13-search.spec.ts) consumes:
+// FleetDB UI regression test (test/fleetdb/ui/13-search.spec.ts) consumes:
 //
 //	{ "success": true, "data": [ { "id": ..., "title": ... }, ... ] }
 func TestHandleSearchIssues_EnvelopeShape(t *testing.T) {

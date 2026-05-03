@@ -2,7 +2,7 @@
 
 This stack models a new user setup: fleet-db starts with an empty Redis store,
 Loom runs in fleet mode, and the UI is served through Caddy. No workspace,
-repo, issue, or parity fixture is seeded.
+repo, issue, or regression fixture is seeded.
 
 ## Start
 
@@ -19,7 +19,7 @@ Compose or Podman Compose based on what is installed.
 Open `http://localhost:8091`.
 
 The compose file expects a fleet-db image. By default it uses
-`localhost/loomcli-parity_fleet-db:latest`, which the parity stack builds
+`localhost/loomcli-fleetdb-regression_fleet-db:latest`, which the regression stack builds
 locally. Override it with `FLEET_DB_IMAGE` when using a different tag.
 
 ## Create A Workspace From The UI

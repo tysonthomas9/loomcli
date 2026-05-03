@@ -54,13 +54,13 @@ Each test = a navigation + assertion. Where possible, cross-check via curl again
 | E14b | Tab 1: edit ALPHA's role description. Tab 2: edit BRAVO's role description. Submit both | each save scopes to its workspace; no cross-tab writes |
 | E14c | Refresh both tabs | each tab shows the change made under its own workspace, not the other |
 
-### Lifecycle: delete + parity with CLI
+### Lifecycle: delete + CLI consistency
 
 | ID | Action | Expected |
 |---|---|---|
 | E15 | UI: delete CHARLIE workspace via context menu | success toast; CHARLIE removed from selector |
 | E16 | curl `:18095/api/v1/admin/workspaces` | shows `[ALPHA, BRAVO]` only |
-| E17 | `loom workspace list` from terminal | shows `[ALPHA, BRAVO]` (parity with UI selector) |
+| E17 | `loom workspace list` from terminal | shows `[ALPHA, BRAVO]` (matches UI selector) |
 | E18 | UI: delete ALPHA, then refresh | UI gracefully handles "active workspace deleted" — prompts to pick another, doesn't crash |
 | E19 | UI: under BRAVO, create issue ISSUE-1 (via kanban) | issue appears in BRAVO's kanban |
 | E20 | UI: switch to (whatever's left) and check issue list | ISSUE-1 NOT visible (workspace-scoped) |

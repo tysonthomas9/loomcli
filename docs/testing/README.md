@@ -27,7 +27,7 @@ Reproducible end-to-end plans for the fleet-db-backed architecture. Designed to 
 - **[E2E CLI + curl](e2e-cli.md)** - CLI noun-verb commands, failure modes, embedded mode, direct fleet-db API, multi-workspace isolation
 - **[E2E Web UI](e2e-ui.md)** - multi-workspace lifecycle via agent-browser (gated on Phase 4 of the migration)
 - **[Known issues](known-issues.md)** - documented expected-failures + bug references + test-methodology pitfalls. Read before claiming a clean run
-- **[Fleet-DB acceptance gates](fleetdb-acceptance-gates.md)** - named gates for backend/CLI, browser, SSE, workspace, supervisor, embedded local, remote distributed, and deletion lint parity
+- **[Fleet-DB acceptance gates](fleetdb-acceptance-gates.md)** - named gates for backend/CLI, browser, SSE, workspace, supervisor, embedded local, remote distributed, and deletion lint checks
 
 ## Running Tests
 
