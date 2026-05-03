@@ -1,10 +1,7 @@
 import { useMemo, useState, type FormEvent } from "react";
 
-import {
-  createWorkspaceAgent,
-  type RepoInfo,
-  type WorkspaceAgentInfo,
-} from "@/api/workspace";
+import type { RepoInfo, WorkspaceAgentInfo } from "@/api/workspace";
+import { useCreateWorkspaceAgent } from "@/hooks/agents";
 import { ApiError } from "@/types/common";
 
 import styles from "./CreateAgentModal.module.css";
@@ -31,6 +28,7 @@ export function CreateAgentModal({
   const [crossRepo, setCrossRepo] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const createAgent = useCreateWorkspaceAgent(workspaceId);
 
   const repoOptions = useMemo(() => repos.map((repo) => repo.name), [repos]);
   const selectedRepo = repoName || repoOptions[0] || "";
@@ -65,7 +63,7 @@ export function CreateAgentModal({
         cross_repo: crossRepo,
         repos: crossRepo ? [] : [selectedRepo],
       };
-      const agent = await createWorkspaceAgent(workspaceId, {
+      const agent = await createAgent({
         ...request,
         ...(trimmedBackend ? { backend: trimmedBackend } : {}),
       });

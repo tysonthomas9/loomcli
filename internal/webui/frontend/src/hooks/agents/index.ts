@@ -8,6 +8,8 @@ export type {
   UseAgentDiffStatReturn,
 } from "./useAgentDiffStat";
 
+export { useCreateWorkspaceAgent } from "./useCreateWorkspaceAgent";
+
 export { useIssueSessionMap } from "./useIssueSessionMap";
 export type { UseIssueSessionMapReturn } from "./useIssueSessionMap";
 

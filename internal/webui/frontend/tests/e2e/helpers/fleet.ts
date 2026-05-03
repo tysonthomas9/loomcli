@@ -223,7 +223,8 @@ export async function waitForWorkspaceIssues(page: Page) {
 }
 
 export async function showMoreFilters(page: Page) {
-  if ((await page.getByLabel("Group issues by").count()) > 0) return
+  const groupBy = page.getByLabel("Group issues by")
+  if ((await groupBy.count()) > 0 && (await groupBy.first().isVisible())) return
 
   const moreFilters = page.getByRole("button", { name: "More filters" })
   if (
@@ -231,5 +232,6 @@ export async function showMoreFilters(page: Page) {
     (await moreFilters.first().isVisible())
   ) {
     await moreFilters.first().click({ force: true })
+    await groupBy.first().waitFor({ state: "visible" })
   }
 }

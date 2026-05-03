@@ -35,8 +35,10 @@ export interface WorkspaceTreeProps {
   onAgentClick?: (agentName: string) => void;
   /** Map of agent name to task info for display in AgentCards */
   agentTasks?: Record<string, { title: string }>;
-  /** Callback when the "+" button is clicked */
+  /** Callback when the "+ Add agent" button is clicked */
   onAddClick?: () => void;
+  /** Callback when "+ New Workspace" is clicked in the workspace switcher */
+  onAddWorkspaceClick?: () => void;
   /** SSE connection state */
   connectionState?: ConnectionState;
   /** True when reconnection failed after max attempts */
@@ -61,6 +63,7 @@ export function WorkspaceTree({
   onAgentClick,
   agentTasks,
   onAddClick,
+  onAddWorkspaceClick,
   connectionState,
   connectionLost,
   disconnectedSince,
@@ -188,7 +191,7 @@ export function WorkspaceTree({
             workspaces={workspaces}
             activeWorkspaceId={workspaceId}
             onWorkspaceSwitch={onWorkspaceSwitch ?? (() => {})}
-            onAddWorkspace={onAddClick}
+            onAddWorkspace={onAddWorkspaceClick}
           />
         )}
         <button

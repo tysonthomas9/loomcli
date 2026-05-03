@@ -589,12 +589,7 @@ test.describe("SwimLaneBoard", () => {
 
       await page.waitForTimeout(50)
 
-      // Release at target
-      const patchResponse = page.waitForResponse(
-        (res) =>
-          new URL(res.url()).pathname === `${WS_API}/issues/epic-issue-1` &&
-          res.request().method() === "PATCH"
-      )
+      // Release at target and wait for the assignee prompt that gates status changes.
       await page.dispatchEvent("body", "pointerup", {
         clientX: endX,
         clientY: endY,
@@ -604,7 +599,16 @@ test.describe("SwimLaneBoard", () => {
         pointerType: "mouse",
         isPrimary: true,
       })
-      await page.getByRole("button", { name: "Skip" }).click()
+
+      const skipButton = page.getByRole("button", { name: "Skip" })
+      await expect(skipButton).toBeVisible()
+
+      const patchResponse = page.waitForResponse(
+        (res) =>
+          new URL(res.url()).pathname === `${WS_API}/issues/epic-issue-1` &&
+          res.request().method() === "PATCH"
+      )
+      await skipButton.click()
       await patchResponse
 
       // Verify API call was made correctly

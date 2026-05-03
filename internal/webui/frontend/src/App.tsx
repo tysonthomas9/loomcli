@@ -949,6 +949,7 @@ function App() {
       onAgentClick={handleAgentClick}
       agentTasks={agentTasks}
       onAddClick={() => setShowCreateAgent(true)}
+      onAddWorkspaceClick={() => setShowCreateWorkspace(true)}
       connectionState={connectionState}
       connectionLost={isConnectionLost}
       disconnectedSince={staleBannerDisconnectedSince}
