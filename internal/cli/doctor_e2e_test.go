@@ -34,12 +34,12 @@ func initTempGitRepo(t *testing.T) string {
 	return dir
 }
 
-// initTempGitRepoWithBeads creates a temp git repo with a .beads/ directory.
-func initTempGitRepoWithBeads(t *testing.T) string {
+// initTempGitRepoWithRuntime creates a temp git repo with a .loom/runtime/ directory.
+func initTempGitRepoWithRuntime(t *testing.T) string {
 	t.Helper()
 	dir := initTempGitRepo(t)
-	if err := os.MkdirAll(filepath.Join(dir, ".beads"), 0755); err != nil {
-		t.Fatalf("failed to create .beads: %v", err)
+	if err := os.MkdirAll(filepath.Join(dir, ".loom/runtime"), 0755); err != nil {
+		t.Fatalf("failed to create .loom/runtime: %v", err)
 	}
 	return dir
 }
@@ -132,7 +132,7 @@ func findCheck(output doctorJSONOutput, name string) *doctorJSONCheck {
 }
 
 func TestE2E_DoctorExitZeroOnHealthy(t *testing.T) {
-	dir := initTempGitRepoWithBeads(t)
+	dir := initTempGitRepoWithRuntime(t)
 
 	stdout, _, exitCode := runLoomDoctor(t, dir)
 
@@ -156,7 +156,7 @@ func TestE2E_DoctorExitZeroOnHealthy(t *testing.T) {
 }
 
 func TestE2E_DoctorExitNonZeroOnFailure(t *testing.T) {
-	// Run in a temp dir that is NOT a git repo and has no .beads/
+	// Run in a temp dir that is NOT a git repo and has no .loom/runtime/
 	dir := t.TempDir()
 
 	stdout, _, exitCode := runLoomDoctor(t, dir, "--json")
@@ -173,7 +173,7 @@ func TestE2E_DoctorExitNonZeroOnFailure(t *testing.T) {
 }
 
 func TestE2E_DoctorJSONOutput(t *testing.T) {
-	dir := initTempGitRepoWithBeads(t)
+	dir := initTempGitRepoWithRuntime(t)
 
 	stdout, _, _ := runLoomDoctor(t, dir, "--json")
 
@@ -213,7 +213,7 @@ func TestE2E_DoctorJSONOutput(t *testing.T) {
 }
 
 func TestE2E_DoctorJSONFailureFields(t *testing.T) {
-	// Run in a broken environment (no .beads, not a git repo)
+	// Run in a broken environment (no .loom/runtime, not a git repo)
 	dir := t.TempDir()
 
 	stdout, _, exitCode := runLoomDoctor(t, dir, "--json")
@@ -242,7 +242,7 @@ func TestE2E_DoctorJSONFailureFields(t *testing.T) {
 }
 
 func TestE2E_DoctorHumanOutputFormat(t *testing.T) {
-	dir := initTempGitRepoWithBeads(t)
+	dir := initTempGitRepoWithRuntime(t)
 
 	stdout, _, _ := runLoomDoctor(t, dir)
 
@@ -320,7 +320,7 @@ func TestE2E_DoctorWorktreeDetection(t *testing.T) {
 	}
 }
 
-func TestE2E_DoctorOmitsLegacyBeadsChecks(t *testing.T) {
+func TestE2E_DoctorOmitsLegacyBackendChecks(t *testing.T) {
 	dir := initTempGitRepo(t)
 
 	stdout, _, _ := runLoomDoctor(t, dir, "--json")
@@ -337,7 +337,7 @@ func TestE2E_DoctorOmitsLegacyBeadsChecks(t *testing.T) {
 }
 
 func TestE2E_DoctorProjectConfigValidation(t *testing.T) {
-	dir := initTempGitRepoWithBeads(t)
+	dir := initTempGitRepoWithRuntime(t)
 
 	// a) No loom.yaml → "warn"
 	stdout, _, _ := runLoomDoctor(t, dir, "--json")

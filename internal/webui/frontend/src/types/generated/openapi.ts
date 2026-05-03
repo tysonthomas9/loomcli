@@ -380,7 +380,7 @@ export interface paths {
     put?: never;
     /**
      * Atomically claim an issue for the server-side actor
-     * @description Claims an issue for the BD_ACTOR configured on the server. Returns 409
+     * @description Claims an issue for the configured agent actor. Returns 409
      *     Conflict if the issue is already claimed by another agent. The claim
      *     operation is atomic — only one of N concurrent callers will succeed.
      *     Blocked issues with open ready-work dependencies cannot be claimed.

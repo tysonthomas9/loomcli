@@ -1629,7 +1629,7 @@ All keys use the `fleet:` prefix. When workspace-scoped (`Store.workspaceID` is 
 
 ### Timeout Enforcement
 
-`TimeoutEnforcer` runs a background loop (default: check every 1 minute, timeout after 30 minutes) that releases claims and invokes a callback for timed-out tasks. Claim TTL can be extended via `ExtendClaimTTL` after beads confirmation.
+`TimeoutEnforcer` runs a background loop (default: check every 1 minute, timeout after 30 minutes) that releases claims and invokes a callback for timed-out tasks. Claim TTL can be extended via `ExtendClaimTTL` after claim confirmation.
 
 | Endpoint | Timeout | Purpose |
 |----------|---------|---------|
@@ -1729,11 +1729,11 @@ List all sessions for a task.
 {
   "success": true,
   "data": {
-    "task_id": "bd-xyz789",
+    "task_id": "task-xyz789",
     "sessions": [
       {
         "session_id": "20260322-100000-spark-xyz78-a1b2c3d4",
-        "task_id": "bd-xyz789",
+        "task_id": "task-xyz789",
         "agent_name": "spark",
         "backend": "claude",
         "model": "claude-sonnet-4-6",
@@ -1790,7 +1790,7 @@ Get metadata for a single session.
   "success": true,
   "data": {
     "session_id": "20260322-100000-spark-xyz78-a1b2c3d4",
-    "task_id": "bd-xyz789",
+    "task_id": "task-xyz789",
     "agent_name": "spark",
     "backend": "claude",
     "status": "completed",

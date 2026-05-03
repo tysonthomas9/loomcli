@@ -30,7 +30,7 @@ func runLoomHooks(t *testing.T, dir string, stdinData string, env []string, args
 	filtered := make([]string, 0, len(os.Environ()))
 	for _, e := range os.Environ() {
 		if strings.HasPrefix(e, "LOOM_SESSION_ID=") ||
-			strings.HasPrefix(e, "LOOM_BEADS_DIR=") {
+			strings.HasPrefix(e, "LOOM_WORKSPACE_RUNTIME_DIR=") {
 			continue
 		}
 		filtered = append(filtered, e)
@@ -53,23 +53,23 @@ func runLoomHooks(t *testing.T, dir string, stdinData string, env []string, args
 	return stdoutBuf.String(), stderrBuf.String(), exitCode
 }
 
-// setupHookBeadsDir creates a temp dir structure with sessions/<sessionID>/
-// ready for transcript appending, and returns the beads root path.
-func setupHookBeadsDir(t *testing.T, sessionID string) string {
+// setupHookRuntimeDir creates a temp dir structure with sessions/<sessionID>/
+// ready for transcript appending, and returns the runtime root path.
+func setupHookRuntimeDir(t *testing.T, sessionID string) string {
 	t.Helper()
-	beadsDir := t.TempDir()
-	sessDir := filepath.Join(beadsDir, "sessions", sessionID)
+	runtimeDir := t.TempDir()
+	sessDir := filepath.Join(runtimeDir, "sessions", sessionID)
 	if err := os.MkdirAll(sessDir, 0o700); err != nil {
 		t.Fatalf("create session dir: %v", err)
 	}
-	return beadsDir
+	return runtimeDir
 }
 
 // readTranscriptLines reads transcript.jsonl from the session directory
 // and returns each line as a string. Returns empty slice if the file doesn't exist.
-func readTranscriptLines(t *testing.T, beadsDir, sessionID string) []string {
+func readTranscriptLines(t *testing.T, runtimeDir, sessionID string) []string {
 	t.Helper()
-	txPath := filepath.Join(beadsDir, "sessions", sessionID, "transcript.jsonl")
+	txPath := filepath.Join(runtimeDir, "sessions", sessionID, "transcript.jsonl")
 	data, err := os.ReadFile(txPath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -285,10 +285,10 @@ func TestE2E_HooksClaudeCode_SessionStart(t *testing.T) {
 	loomBinaryPath(t)
 
 	sessionID := "test-session-start"
-	beadsDir := setupHookBeadsDir(t, sessionID)
+	runtimeDir := setupHookRuntimeDir(t, sessionID)
 	env := []string{
 		"LOOM_SESSION_ID=" + sessionID,
-		"LOOM_BEADS_DIR=" + beadsDir,
+		"LOOM_WORKSPACE_RUNTIME_DIR=" + runtimeDir,
 	}
 	stdinJSON := `{"session_id":"abc","transcript_path":"/tmp/t.jsonl","model":"claude-sonnet-4-20250514"}`
 
@@ -297,7 +297,7 @@ func TestE2E_HooksClaudeCode_SessionStart(t *testing.T) {
 		t.Fatalf("expected exit 0, got %d", exitCode)
 	}
 
-	lines := readTranscriptLines(t, beadsDir, sessionID)
+	lines := readTranscriptLines(t, runtimeDir, sessionID)
 	if len(lines) == 0 {
 		t.Fatal("expected at least one transcript entry")
 	}
@@ -311,10 +311,10 @@ func TestE2E_HooksClaudeCode_UserPromptSubmit(t *testing.T) {
 	loomBinaryPath(t)
 
 	sessionID := "test-prompt"
-	beadsDir := setupHookBeadsDir(t, sessionID)
+	runtimeDir := setupHookRuntimeDir(t, sessionID)
 	env := []string{
 		"LOOM_SESSION_ID=" + sessionID,
-		"LOOM_BEADS_DIR=" + beadsDir,
+		"LOOM_WORKSPACE_RUNTIME_DIR=" + runtimeDir,
 	}
 	stdinJSON := `{"session_id":"abc","transcript_path":"/tmp/t.jsonl","prompt":"Write a function"}`
 
@@ -323,7 +323,7 @@ func TestE2E_HooksClaudeCode_UserPromptSubmit(t *testing.T) {
 		t.Fatalf("expected exit 0, got %d", exitCode)
 	}
 
-	lines := readTranscriptLines(t, beadsDir, sessionID)
+	lines := readTranscriptLines(t, runtimeDir, sessionID)
 	if len(lines) == 0 {
 		t.Fatal("expected at least one transcript entry")
 	}
@@ -337,10 +337,10 @@ func TestE2E_HooksClaudeCode_Stop(t *testing.T) {
 	loomBinaryPath(t)
 
 	sessionID := "test-stop"
-	beadsDir := setupHookBeadsDir(t, sessionID)
+	runtimeDir := setupHookRuntimeDir(t, sessionID)
 	env := []string{
 		"LOOM_SESSION_ID=" + sessionID,
-		"LOOM_BEADS_DIR=" + beadsDir,
+		"LOOM_WORKSPACE_RUNTIME_DIR=" + runtimeDir,
 	}
 	stdinJSON := `{"session_id":"abc","transcript_path":"/tmp/t.jsonl"}`
 
@@ -349,7 +349,7 @@ func TestE2E_HooksClaudeCode_Stop(t *testing.T) {
 		t.Fatalf("expected exit 0, got %d", exitCode)
 	}
 
-	lines := readTranscriptLines(t, beadsDir, sessionID)
+	lines := readTranscriptLines(t, runtimeDir, sessionID)
 	if len(lines) == 0 {
 		t.Fatal("expected at least one transcript entry")
 	}
@@ -363,10 +363,10 @@ func TestE2E_HooksClaudeCode_SessionEnd(t *testing.T) {
 	loomBinaryPath(t)
 
 	sessionID := "test-session-end"
-	beadsDir := setupHookBeadsDir(t, sessionID)
+	runtimeDir := setupHookRuntimeDir(t, sessionID)
 	env := []string{
 		"LOOM_SESSION_ID=" + sessionID,
-		"LOOM_BEADS_DIR=" + beadsDir,
+		"LOOM_WORKSPACE_RUNTIME_DIR=" + runtimeDir,
 	}
 	stdinJSON := `{"session_id":"abc","transcript_path":"/tmp/t.jsonl"}`
 
@@ -375,7 +375,7 @@ func TestE2E_HooksClaudeCode_SessionEnd(t *testing.T) {
 		t.Fatalf("expected exit 0, got %d", exitCode)
 	}
 
-	lines := readTranscriptLines(t, beadsDir, sessionID)
+	lines := readTranscriptLines(t, runtimeDir, sessionID)
 	if len(lines) == 0 {
 		t.Fatal("expected at least one transcript entry")
 	}
@@ -389,10 +389,10 @@ func TestE2E_HooksClaudeCode_PreTask(t *testing.T) {
 	loomBinaryPath(t)
 
 	sessionID := "test-pre-task"
-	beadsDir := setupHookBeadsDir(t, sessionID)
+	runtimeDir := setupHookRuntimeDir(t, sessionID)
 	env := []string{
 		"LOOM_SESSION_ID=" + sessionID,
-		"LOOM_BEADS_DIR=" + beadsDir,
+		"LOOM_WORKSPACE_RUNTIME_DIR=" + runtimeDir,
 	}
 	stdinJSON := `{"session_id":"abc","transcript_path":"/tmp/t.jsonl","tool_use_id":"tu_123","tool_input":{"prompt":"do something"}}`
 
@@ -401,7 +401,7 @@ func TestE2E_HooksClaudeCode_PreTask(t *testing.T) {
 		t.Fatalf("expected exit 0, got %d", exitCode)
 	}
 
-	lines := readTranscriptLines(t, beadsDir, sessionID)
+	lines := readTranscriptLines(t, runtimeDir, sessionID)
 	if len(lines) == 0 {
 		t.Fatal("expected at least one transcript entry")
 	}
@@ -415,10 +415,10 @@ func TestE2E_HooksClaudeCode_PostTask(t *testing.T) {
 	loomBinaryPath(t)
 
 	sessionID := "test-post-task"
-	beadsDir := setupHookBeadsDir(t, sessionID)
+	runtimeDir := setupHookRuntimeDir(t, sessionID)
 	env := []string{
 		"LOOM_SESSION_ID=" + sessionID,
-		"LOOM_BEADS_DIR=" + beadsDir,
+		"LOOM_WORKSPACE_RUNTIME_DIR=" + runtimeDir,
 	}
 	stdinJSON := `{"session_id":"abc","transcript_path":"/tmp/t.jsonl","tool_use_id":"tu_456","tool_input":{"prompt":"do something"},"tool_response":{"agentId":"agent-789"}}`
 
@@ -427,7 +427,7 @@ func TestE2E_HooksClaudeCode_PostTask(t *testing.T) {
 		t.Fatalf("expected exit 0, got %d", exitCode)
 	}
 
-	lines := readTranscriptLines(t, beadsDir, sessionID)
+	lines := readTranscriptLines(t, runtimeDir, sessionID)
 	if len(lines) == 0 {
 		t.Fatal("expected at least one transcript entry")
 	}
@@ -441,10 +441,10 @@ func TestE2E_HooksClaudeCode_PostTaskNoAgentID(t *testing.T) {
 	loomBinaryPath(t)
 
 	sessionID := "test-post-task-no-agent"
-	beadsDir := setupHookBeadsDir(t, sessionID)
+	runtimeDir := setupHookRuntimeDir(t, sessionID)
 	env := []string{
 		"LOOM_SESSION_ID=" + sessionID,
-		"LOOM_BEADS_DIR=" + beadsDir,
+		"LOOM_WORKSPACE_RUNTIME_DIR=" + runtimeDir,
 	}
 	stdinJSON := `{"session_id":"abc","transcript_path":"/tmp/t.jsonl","tool_use_id":"tu_456","tool_input":{"prompt":"do something"},"tool_response":{}}`
 
@@ -453,7 +453,7 @@ func TestE2E_HooksClaudeCode_PostTaskNoAgentID(t *testing.T) {
 		t.Fatalf("expected exit 0, got %d", exitCode)
 	}
 
-	lines := readTranscriptLines(t, beadsDir, sessionID)
+	lines := readTranscriptLines(t, runtimeDir, sessionID)
 	if len(lines) == 0 {
 		t.Fatal("expected at least one transcript entry")
 	}
@@ -471,10 +471,10 @@ func TestE2E_HooksClaudeCode_EmptyStdin(t *testing.T) {
 	loomBinaryPath(t)
 
 	sessionID := "test-empty"
-	beadsDir := setupHookBeadsDir(t, sessionID)
+	runtimeDir := setupHookRuntimeDir(t, sessionID)
 	env := []string{
 		"LOOM_SESSION_ID=" + sessionID,
-		"LOOM_BEADS_DIR=" + beadsDir,
+		"LOOM_WORKSPACE_RUNTIME_DIR=" + runtimeDir,
 	}
 
 	_, stderr, exitCode := runLoomHooks(t, ".", "", env, "hooks", "claude-code", "session-start")
@@ -489,7 +489,7 @@ func TestE2E_HooksClaudeCode_EmptyStdin(t *testing.T) {
 	}
 
 	// No transcript should be written
-	lines := readTranscriptLines(t, beadsDir, sessionID)
+	lines := readTranscriptLines(t, runtimeDir, sessionID)
 	if len(lines) > 0 {
 		t.Errorf("expected no transcript entries, got %d", len(lines))
 	}
@@ -500,10 +500,10 @@ func TestE2E_HooksClaudeCode_InvalidJSON(t *testing.T) {
 	loomBinaryPath(t)
 
 	sessionID := "test-invalid-json"
-	beadsDir := setupHookBeadsDir(t, sessionID)
+	runtimeDir := setupHookRuntimeDir(t, sessionID)
 	env := []string{
 		"LOOM_SESSION_ID=" + sessionID,
-		"LOOM_BEADS_DIR=" + beadsDir,
+		"LOOM_WORKSPACE_RUNTIME_DIR=" + runtimeDir,
 	}
 
 	_, stderr, exitCode := runLoomHooks(t, ".", "not valid json", env, "hooks", "claude-code", "stop")
@@ -515,7 +515,7 @@ func TestE2E_HooksClaudeCode_InvalidJSON(t *testing.T) {
 	}
 
 	// No transcript should be written
-	lines := readTranscriptLines(t, beadsDir, sessionID)
+	lines := readTranscriptLines(t, runtimeDir, sessionID)
 	if len(lines) > 0 {
 		t.Errorf("expected no transcript entries, got %d", len(lines))
 	}
@@ -526,7 +526,7 @@ func TestE2E_HooksClaudeCode_MissingEnvVars(t *testing.T) {
 
 	stdinJSON := `{"session_id":"abc","transcript_path":"/tmp/t.jsonl","model":"claude-sonnet-4-20250514"}`
 
-	// Build a clean env that explicitly excludes LOOM_SESSION_ID and LOOM_BEADS_DIR
+	// Build a clean env that explicitly excludes LOOM_SESSION_ID and LOOM_WORKSPACE_RUNTIME_DIR
 	// so the hook handler sees them as unset (silent no-op path).
 	loom := loomBinaryPath(t)
 	cmd := exec.Command(loom, "hooks", "claude-code", "session-start")
@@ -534,7 +534,7 @@ func TestE2E_HooksClaudeCode_MissingEnvVars(t *testing.T) {
 
 	filtered := make([]string, 0)
 	for _, e := range os.Environ() {
-		if strings.HasPrefix(e, "LOOM_SESSION_ID=") || strings.HasPrefix(e, "LOOM_BEADS_DIR=") {
+		if strings.HasPrefix(e, "LOOM_SESSION_ID=") || strings.HasPrefix(e, "LOOM_WORKSPACE_RUNTIME_DIR=") {
 			continue
 		}
 		filtered = append(filtered, e)

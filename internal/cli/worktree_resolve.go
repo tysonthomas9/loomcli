@@ -504,20 +504,6 @@ func ResetWorkspaceRuntimeDirCache() {
 	workspaceRuntimeDirCache = ""
 }
 
-// GetBeadsDir is a legacy alias kept for migration-only code paths.
-//
-// Deprecated: use GetWorkspaceRuntimeDir.
-func GetBeadsDir() string {
-	return GetWorkspaceRuntimeDir()
-}
-
-// ResetBeadsDirCache is a legacy test alias.
-//
-// Deprecated: use ResetWorkspaceRuntimeDirCache.
-func ResetBeadsDirCache() {
-	ResetWorkspaceRuntimeDirCache()
-}
-
 var (
 	workspaceRuntimeDirCache string
 	workspaceRuntimeDirOnce  sync.Once

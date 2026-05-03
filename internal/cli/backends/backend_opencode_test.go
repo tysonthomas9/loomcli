@@ -125,7 +125,7 @@ func TestOpenCodeInvokeInteractive_EnvVars(t *testing.T) {
 	installOpenCodeInvokerMock(t, func(workDir, prompt, agentName string) error {
 		env := append(FilteredEnv(), "LOOM_WORKTREE_PATH="+workDir)
 		if agentName != "" {
-			env = append(env, "BD_ACTOR="+agentName)
+			env = append(env, "LOOM_AGENT_NAME="+agentName)
 		}
 		capturedEnv = env
 		return nil
@@ -140,19 +140,19 @@ func TestOpenCodeInvokeInteractive_EnvVars(t *testing.T) {
 	if !containsSubstring(capturedEnv, "LOOM_WORKTREE_PATH=/my/work") {
 		t.Error("expected LOOM_WORKTREE_PATH=/my/work in env")
 	}
-	if !containsSubstring(capturedEnv, "BD_ACTOR=test-agent") {
-		t.Error("expected BD_ACTOR=test-agent in env")
+	if !containsSubstring(capturedEnv, "LOOM_AGENT_NAME=test-agent") {
+		t.Error("expected LOOM_AGENT_NAME=test-agent in env")
 	}
 }
 
 func TestOpenCodeInvokeInteractive_NoAgentName(t *testing.T) {
 	// Not parallel: mutates global openCodeInvoker and env vars.
-	// Clear any existing BD_ACTOR from the environment first.
-	origBDActor, hadBDActor := os.LookupEnv("BD_ACTOR")
-	os.Unsetenv("BD_ACTOR")
+	// Clear any existing LOOM_AGENT_NAME from the environment first.
+	origBDActor, hadBDActor := os.LookupEnv("LOOM_AGENT_NAME")
+	os.Unsetenv("LOOM_AGENT_NAME")
 	t.Cleanup(func() {
 		if hadBDActor {
-			os.Setenv("BD_ACTOR", origBDActor)
+			os.Setenv("LOOM_AGENT_NAME", origBDActor)
 		}
 	})
 
@@ -160,7 +160,7 @@ func TestOpenCodeInvokeInteractive_NoAgentName(t *testing.T) {
 	installOpenCodeInvokerMock(t, func(workDir, prompt, agentName string) error {
 		env := append(FilteredEnv(), "LOOM_WORKTREE_PATH="+workDir)
 		if agentName != "" {
-			env = append(env, "BD_ACTOR="+agentName)
+			env = append(env, "LOOM_AGENT_NAME="+agentName)
 		}
 		capturedEnv = env
 		return nil
@@ -172,8 +172,8 @@ func TestOpenCodeInvokeInteractive_NoAgentName(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if containsSubstring(capturedEnv, "BD_ACTOR=") {
-		t.Error("expected BD_ACTOR to NOT be in env when agentName is empty")
+	if containsSubstring(capturedEnv, "LOOM_AGENT_NAME=") {
+		t.Error("expected LOOM_AGENT_NAME to NOT be in env when agentName is empty")
 	}
 }
 

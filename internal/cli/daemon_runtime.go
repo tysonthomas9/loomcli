@@ -161,7 +161,6 @@ func detectFromPIDFile(pidFilePath string) (DaemonRuntimeInfo, bool) {
 // never be deleted by cleanup routines (git clean, stash-discard, recovery).
 // These paths contain live daemon state, persistent storage, or required config.
 var ProtectedRuntimePaths = []string{
-	".beads",
 	".loom",
 	"sessions",
 	"loom.yaml",

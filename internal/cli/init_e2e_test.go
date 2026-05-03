@@ -253,9 +253,9 @@ func TestE2E_InitUsesFleetDBStorage(t *testing.T) {
 		t.Fatalf("expected exit 0, got %d\nstdout: %s", exitCode, stdout)
 	}
 
-	beadsDir := filepath.Join(dir, ".beads")
-	if _, err := os.Stat(beadsDir); !os.IsNotExist(err) {
-		t.Errorf("expected no .beads directory at %s, stat err=%v", beadsDir, err)
+	runtimeDir := filepath.Join(dir, ".loom/runtime")
+	if _, err := os.Stat(runtimeDir); !os.IsNotExist(err) {
+		t.Errorf("expected no .loom/runtime directory at %s, stat err=%v", runtimeDir, err)
 	}
 
 	if !strings.Contains(stdout, "Fleet-db issue storage is used") {

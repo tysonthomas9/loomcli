@@ -130,7 +130,7 @@ func defaultCodexNonInteractiveInvoker(workDir, prompt, agentName string, shutdo
 func buildBackendEnv(workDir, agentName string) []string {
 	env := append(cli.FilteredEnv(), "LOOM_WORKTREE_PATH="+workDir)
 	if agentName != "" {
-		env = append(env, "BD_ACTOR="+agentName)
+		env = append(env, "LOOM_AGENT_NAME="+agentName)
 	}
 	return env
 }

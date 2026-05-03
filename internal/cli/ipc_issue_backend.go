@@ -168,7 +168,7 @@ func resolveDirectIssueBackend() backend.IssueBackend {
 // AgentIPCRequest is sent by an agent subprocess to the daemon IPC socket.
 type AgentIPCRequest struct {
 	Operation  string          `json:"operation"`             // "claim", "update", "complete"
-	AgentName  string          `json:"agent_name"`            // BD_ACTOR identity (required)
+	AgentName  string          `json:"agent_name"`            // LOOM_AGENT_NAME identity (required)
 	IssueID    string          `json:"issue_id"`              // target issue (required)
 	SessionID  string          `json:"session_id,omitempty"`  // fleet-db AgentSession id
 	LeaseID    string          `json:"lease_id,omitempty"`    // fleet-db AgentLease id

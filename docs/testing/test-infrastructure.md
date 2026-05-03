@@ -173,7 +173,7 @@ make gate
 | G301 (dir permissions) | General | 0755 is standard for directories |
 | G302 (file permissions) | `internal/cli/lock.go` | Lock file needs specific permissions |
 | G304 (file inclusion) | `automode.go`, `lock.go` | Variable paths are validated |
-| G204 (subprocess) | Multiple | tmux, claude, bd require subprocess exec |
+| G204 (subprocess) | Multiple | tmux and agent backends require subprocess exec |
 
 ### `.air.toml`
 

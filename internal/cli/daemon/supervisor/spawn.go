@@ -31,7 +31,7 @@ func (s *Supervisor) buildCommand(ap *AgentProcess) (*exec.Cmd, error) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	cmd.Env = append(cli.FilteredEnv(),
-		fmt.Sprintf("BD_ACTOR=%s", ap.Entry.Worktree),
+		fmt.Sprintf("LOOM_AGENT_NAME=%s", ap.Entry.Worktree),
 		fmt.Sprintf("LOOM_WORKTREE_PATH=%s", ap.WorktreePath),
 		fmt.Sprintf("LOOM_EVENTS_DIR=%s", ResolveDaemonPath(s.ProjectDir, cfg.Daemon.EventsDir)),
 	)
@@ -137,7 +137,6 @@ func appendSessionEnv(env []string, ap *AgentProcess) []string {
 		env = append(env,
 			fmt.Sprintf("LOOM_SESSION_ID=%s", sess.SessionID()),
 			fmt.Sprintf("LOOM_WORKSPACE_RUNTIME_DIR=%s", cli.GetWorkspaceRuntimeDir()),
-			fmt.Sprintf("LOOM_BEADS_DIR=%s", cli.GetWorkspaceRuntimeDir()), // legacy hook compatibility
 		)
 	}
 	if ap.AgentLeaseID != "" && ap.AgentLeaseToken != "" {

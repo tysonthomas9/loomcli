@@ -89,13 +89,6 @@ func SetActiveSessionRuntimeEnv(runtimeDir, sid string) {
 	sessionID = sid
 }
 
-// SetActiveSessionEnv is a legacy alias kept for migration-only callers.
-//
-// Deprecated: use SetActiveSessionRuntimeEnv.
-func SetActiveSessionEnv(runtimeDir, sid string) {
-	SetActiveSessionRuntimeEnv(runtimeDir, sid)
-}
-
 // ClearActiveSessionEnv clears the active session env vars. Thread-safe.
 func ClearActiveSessionEnv() {
 	sessionEnvMu.Lock()
@@ -112,13 +105,6 @@ func GetActiveSessionRuntimeEnv() (runtimeDir, sid string) {
 	return sessionRuntimeDir, sessionID
 }
 
-// GetActiveSessionEnv is a legacy alias kept for migration-only callers.
-//
-// Deprecated: use GetActiveSessionRuntimeEnv.
-func GetActiveSessionEnv() (runtimeDir, sid string) {
-	return GetActiveSessionRuntimeEnv()
-}
-
 // activeSessionEnvVars returns a slice of "KEY=VALUE" strings for any
 // non-empty session env vars. Used by backend_claude.go (and other backends)
 // when constructing subprocess environments.
@@ -129,7 +115,6 @@ func activeSessionEnvVars() []string {
 	var vars []string
 	if sessionRuntimeDir != "" {
 		vars = append(vars, "LOOM_WORKSPACE_RUNTIME_DIR="+sessionRuntimeDir)
-		vars = append(vars, "LOOM_BEADS_DIR="+sessionRuntimeDir) // legacy hook compatibility
 	}
 	if sessionID != "" {
 		vars = append(vars, "LOOM_SESSION_ID="+sessionID)

@@ -19,7 +19,7 @@ func TestIsFleetMode_EmptyBackend(t *testing.T) {
 	}
 }
 
-func TestIsFleetMode_BeadsBackend(t *testing.T) {
+func TestIsFleetMode_UnsupportedBackend(t *testing.T) {
 	t.Setenv(fleetModeEnvVar, "")
 	cfg := &DaemonConfig{Backend: "beads"}
 	if isFleetMode(cfg) {

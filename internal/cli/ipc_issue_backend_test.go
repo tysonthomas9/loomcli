@@ -395,7 +395,7 @@ func TestIPCIssueBackend_BackendName_DefaultMock(t *testing.T) {
 
 func TestDefaultIssueBackend_WithDaemonSocket(t *testing.T) {
 	t.Setenv("LOOM_DAEMON_SOCKET", "/tmp/test-ipc.sock")
-	t.Setenv("BD_ACTOR", "test-agent")
+	t.Setenv("LOOM_AGENT_NAME", "test-agent")
 
 	resetDefaultIssueBackend()
 	t.Cleanup(resetDefaultIssueBackend)
@@ -421,7 +421,7 @@ func TestDefaultIssueBackend_WithoutDaemonSocket(t *testing.T) {
 
 func TestDefaultIssueBackend_DaemonSocket_BackendName(t *testing.T) {
 	t.Setenv("LOOM_DAEMON_SOCKET", "/tmp/test-ipc.sock")
-	t.Setenv("BD_ACTOR", "test-agent")
+	t.Setenv("LOOM_AGENT_NAME", "test-agent")
 
 	resetDefaultIssueBackend()
 	t.Cleanup(resetDefaultIssueBackend)

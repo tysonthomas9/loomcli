@@ -211,7 +211,7 @@ func AgentEntryFromEnv() config.AgentEntry {
 	if v := os.Getenv("LOOM_AGENT_PATH_PATTERNS"); v != "" {
 		ae.PathPatterns = strings.Split(v, ",")
 	}
-	if v := os.Getenv("BD_ACTOR"); v != "" {
+	if v := os.Getenv("LOOM_AGENT_NAME"); v != "" {
 		ae.Worktree = v
 	}
 	if v := os.Getenv("LOOM_ROLE"); v != "" {

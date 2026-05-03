@@ -154,9 +154,9 @@ func TestPlanSmoke_AgentError_SessionFinalized(t *testing.T) {
 	t.Parallel()
 
 	tmpDir := t.TempDir()
-	beadsDir := filepath.Join(tmpDir, "beads")
+	runtimeDir := filepath.Join(tmpDir, "beads")
 
-	sessStore, err := sessions.NewStore(beadsDir)
+	sessStore, err := sessions.NewStore(runtimeDir)
 	if err != nil {
 		t.Fatalf("failed to create session store: %v", err)
 	}
@@ -190,7 +190,7 @@ func TestPlanSmoke_AgentError_SessionFinalized(t *testing.T) {
 		t.Errorf("session phase should be 'planning', got %q", sess.Meta.Phase)
 	}
 
-	metaPath := filepath.Join(beadsDir, "sessions", sess.SessionID(), "metadata.json")
+	metaPath := filepath.Join(runtimeDir, "sessions", sess.SessionID(), "metadata.json")
 	data, err := os.ReadFile(metaPath)
 	if err != nil {
 		t.Fatalf("failed to read metadata.json: %v", err)

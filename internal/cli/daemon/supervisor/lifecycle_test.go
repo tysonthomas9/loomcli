@@ -821,7 +821,7 @@ func TestSpawnAgent_LogFileSetup(t *testing.T) {
 	}
 }
 
-// TestSpawnAgent_Environment tests that spawnAgent sets BD_ACTOR and
+// TestSpawnAgent_Environment tests that spawnAgent sets LOOM_AGENT_NAME and
 // LOOM_WORKTREE_PATH in the subprocess environment.
 func TestSpawnAgent_Environment(t *testing.T) {
 	tmpDir := t.TempDir()
@@ -1596,10 +1596,10 @@ func TestBuildCommand_CustomRoleAllFlags(t *testing.T) {
 		t.Error("Setpgid not set")
 	}
 
-	// Verify env contains BD_ACTOR and LOOM_WORKTREE_PATH
+	// Verify env contains LOOM_AGENT_NAME and LOOM_WORKTREE_PATH
 	foundActor, foundPath := false, false
 	for _, env := range cmd.Env {
-		if env == "BD_ACTOR=falcon" {
+		if env == "LOOM_AGENT_NAME=falcon" {
 			foundActor = true
 		}
 		if env == "LOOM_WORKTREE_PATH="+tmpDir {
@@ -1607,7 +1607,7 @@ func TestBuildCommand_CustomRoleAllFlags(t *testing.T) {
 		}
 	}
 	if !foundActor {
-		t.Error("BD_ACTOR=falcon not found in cmd.Env")
+		t.Error("LOOM_AGENT_NAME=falcon not found in cmd.Env")
 	}
 	if !foundPath {
 		t.Errorf("LOOM_WORKTREE_PATH=%s not found in cmd.Env", tmpDir)
@@ -2003,15 +2003,15 @@ func TestAddAgent_DuplicateName(t *testing.T) {
 
 // TestAgentsMu_ConcurrentAccess verifies that Agents() and AgentCount() can be
 // called concurrently without data races. Run with `go test -race` to detect races.
-// TestBuildCommand_SessionEnvVars verifies that LOOM_SESSION_ID and LOOM_BEADS_DIR
+// TestBuildCommand_SessionEnvVars verifies that LOOM_SESSION_ID and LOOM_WORKSPACE_RUNTIME_DIR
 // are included in cmd.Env when ap.session is set, and omitted when nil.
 func TestBuildCommand_SessionEnvVars(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	t.Run("session set propagates env vars", func(t *testing.T) {
 		// Create a real session via sessions.NewStore + CreateSession
-		beadsDir := filepath.Join(tmpDir, "beads-set")
-		store, err := sessions.NewStore(beadsDir)
+		runtimeDir := filepath.Join(tmpDir, "runtime-set")
+		store, err := sessions.NewStore(runtimeDir)
 		if err != nil {
 			t.Fatalf("NewStore error: %v", err)
 		}
@@ -2059,15 +2059,15 @@ func TestBuildCommand_SessionEnvVars(t *testing.T) {
 			t.Errorf("%s not found in cmd.Env", wantSessionEnv)
 		}
 
-		// Verify LOOM_BEADS_DIR is present
-		foundBeads := false
+		// Verify LOOM_WORKSPACE_RUNTIME_DIR is present
+		foundRuntimeDir := false
 		for _, env := range cmd.Env {
-			if len(env) > len("LOOM_BEADS_DIR=") && env[:len("LOOM_BEADS_DIR=")] == "LOOM_BEADS_DIR=" {
-				foundBeads = true
+			if len(env) > len("LOOM_WORKSPACE_RUNTIME_DIR=") && env[:len("LOOM_WORKSPACE_RUNTIME_DIR=")] == "LOOM_WORKSPACE_RUNTIME_DIR=" {
+				foundRuntimeDir = true
 			}
 		}
-		if !foundBeads {
-			t.Error("LOOM_BEADS_DIR not found in cmd.Env")
+		if !foundRuntimeDir {
+			t.Error("LOOM_WORKSPACE_RUNTIME_DIR not found in cmd.Env")
 		}
 		for _, want := range []string{"LOOM_AGENT_LEASE_ID=lease-1", "LOOM_AGENT_LEASE_TOKEN=token-1", "LOOM_ASSIGNED_TASK_ID=task-1"} {
 			found := false
@@ -2084,11 +2084,11 @@ func TestBuildCommand_SessionEnvVars(t *testing.T) {
 	})
 
 	t.Run("nil session omits env vars", func(t *testing.T) {
-		// Clear any LOOM_SESSION_ID / LOOM_BEADS_DIR from the parent process
+		// Clear any LOOM_SESSION_ID / LOOM_WORKSPACE_RUNTIME_DIR from the parent process
 		// environment so cli.FilteredEnv() does not leak them into the test.
 		// t.Setenv handles restore-on-cleanup; Unsetenv removes them for the
 		// duration of this subtest.
-		for _, key := range []string{"LOOM_SESSION_ID", "LOOM_BEADS_DIR", "LOOM_AGENT_LEASE_ID", "LOOM_AGENT_LEASE_TOKEN"} {
+		for _, key := range []string{"LOOM_SESSION_ID", "LOOM_WORKSPACE_RUNTIME_DIR", "LOOM_AGENT_LEASE_ID", "LOOM_AGENT_LEASE_TOKEN"} {
 			t.Setenv(key, "") // registers cleanup to restore original value
 			os.Unsetenv(key)  // actually remove from os.Environ()
 		}
@@ -2118,8 +2118,8 @@ func TestBuildCommand_SessionEnvVars(t *testing.T) {
 			if len(env) >= len("LOOM_SESSION_ID=") && env[:len("LOOM_SESSION_ID=")] == "LOOM_SESSION_ID=" {
 				t.Errorf("LOOM_SESSION_ID should not be in cmd.Env when session is nil, got %q", env)
 			}
-			if len(env) >= len("LOOM_BEADS_DIR=") && env[:len("LOOM_BEADS_DIR=")] == "LOOM_BEADS_DIR=" {
-				t.Errorf("LOOM_BEADS_DIR should not be in cmd.Env when session is nil, got %q", env)
+			if len(env) >= len("LOOM_WORKSPACE_RUNTIME_DIR=") && env[:len("LOOM_WORKSPACE_RUNTIME_DIR=")] == "LOOM_WORKSPACE_RUNTIME_DIR=" {
+				t.Errorf("LOOM_WORKSPACE_RUNTIME_DIR should not be in cmd.Env when session is nil, got %q", env)
 			}
 			if len(env) >= len("LOOM_AGENT_LEASE_ID=") && env[:len("LOOM_AGENT_LEASE_ID=")] == "LOOM_AGENT_LEASE_ID=" {
 				t.Errorf("LOOM_AGENT_LEASE_ID should not be in cmd.Env when session is nil, got %q", env)

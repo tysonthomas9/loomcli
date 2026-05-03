@@ -174,7 +174,7 @@ func DefaultIssueBackend() backend.IssueBackend {
 		if IsFleetActive() {
 			trackerInst = resolveDirectIssueBackend()
 		} else if sock := os.Getenv("LOOM_DAEMON_SOCKET"); sock != "" {
-			agentName := os.Getenv("BD_ACTOR")
+			agentName := os.Getenv("LOOM_AGENT_NAME")
 			direct := resolveDirectIssueBackend()
 			ipcClient := NewAgentIPCClient(sock, agentName)
 			ipcClient.SessionID = os.Getenv("LOOM_SESSION_ID")

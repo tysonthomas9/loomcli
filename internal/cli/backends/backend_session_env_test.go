@@ -43,14 +43,13 @@ func TestActiveSessionEnvVars_WhenSet(t *testing.T) {
 	SetActiveSessionRuntimeEnv("/home/user/runtime", "sess-123")
 
 	vars := activeSessionEnvVars()
-	if len(vars) != 3 {
-		t.Fatalf("expected 3 vars, got %d: %v", len(vars), vars)
+	if len(vars) != 2 {
+		t.Fatalf("expected 2 vars, got %d: %v", len(vars), vars)
 	}
 
 	// Sort for deterministic comparison.
 	sort.Strings(vars)
 	want := []string{
-		"LOOM_BEADS_DIR=/home/user/runtime",
 		"LOOM_WORKSPACE_RUNTIME_DIR=/home/user/runtime",
 		"LOOM_SESSION_ID=sess-123",
 	}
@@ -78,12 +77,11 @@ func TestActiveSessionEnvVars_PartialSet(t *testing.T) {
 	// Only runtime dir set, no session ID
 	SetActiveSessionRuntimeEnv("/path/to/runtime", "")
 	vars = activeSessionEnvVars()
-	if len(vars) != 2 {
-		t.Fatalf("expected 2 vars, got %d: %v", len(vars), vars)
+	if len(vars) != 1 {
+		t.Fatalf("expected 1 var, got %d: %v", len(vars), vars)
 	}
 	sort.Strings(vars)
 	want := []string{
-		"LOOM_BEADS_DIR=/path/to/runtime",
 		"LOOM_WORKSPACE_RUNTIME_DIR=/path/to/runtime",
 	}
 	for i, v := range want {
@@ -117,7 +115,7 @@ func TestActiveSessionEnvVars_Concurrent(t *testing.T) {
 			defer wg.Done()
 			for j := 0; j < 100; j++ {
 				if j%2 == 0 {
-					SetActiveSessionRuntimeEnv("/beads", "sid")
+					SetActiveSessionRuntimeEnv("/runtime", "sid")
 				} else {
 					ClearActiveSessionEnv()
 				}
@@ -267,18 +265,18 @@ func TestResolveNotifyToken_FileOnDisk(t *testing.T) {
 
 	// Set up a workspace config so GetWorkspaceRuntimeDir() returns a known temp dir.
 	ResetWorkspaceRuntimeDirCache()
-	beadsDir := t.TempDir()
+	runtimeDir := t.TempDir()
 	cfg := &LoomConfig{
 		DefaultWorkspace: "test",
 		Workspaces: map[string]WorkspaceConfig{
-			"test": {Path: beadsDir},
+			"test": {Path: runtimeDir},
 		},
 	}
 	setupWorkspaceConfig(t, cfg)
 
 	// Write the notify.token file.
 	tokenContent := "token-from-file"
-	if err := os.WriteFile(filepath.Join(beadsDir, "notify.token"), []byte(tokenContent), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(runtimeDir, "notify.token"), []byte(tokenContent), 0o600); err != nil {
 		t.Fatalf("write notify.token: %v", err)
 	}
 
@@ -294,11 +292,11 @@ func TestResolveNotifyToken_BothFail(t *testing.T) {
 
 	// Set up workspace config pointing to a temp dir without notify.token.
 	ResetWorkspaceRuntimeDirCache()
-	beadsDir := t.TempDir()
+	runtimeDir := t.TempDir()
 	cfg := &LoomConfig{
 		DefaultWorkspace: "test",
 		Workspaces: map[string]WorkspaceConfig{
-			"test": {Path: beadsDir},
+			"test": {Path: runtimeDir},
 		},
 	}
 	setupWorkspaceConfig(t, cfg)

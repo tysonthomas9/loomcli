@@ -1106,9 +1106,9 @@ func TestCheckStaleSignalFiles_SkipsSubdirectories(t *testing.T) {
 
 // --- Session Record Tests ---
 
-// setupBeadsDirForTest configures GetWorkspaceRuntimeDir() to return the given directory.
+// setupRuntimeDirForTest configures GetWorkspaceRuntimeDir() to return the given directory.
 // Must not be used with t.Parallel() since it mutates global state.
-func setupBeadsDirForTest(t *testing.T, dir string) {
+func setupRuntimeDirForTest(t *testing.T, dir string) {
 	t.Helper()
 	ResetWorkspaceRuntimeDirCache()
 	setupWorkspaceConfig(t, &LoomConfig{
@@ -1122,7 +1122,7 @@ func setupBeadsDirForTest(t *testing.T, dir string) {
 
 func TestCheckStaleSessionRecords_NoSessions(t *testing.T) {
 	dir := t.TempDir()
-	setupBeadsDirForTest(t, dir)
+	setupRuntimeDirForTest(t, dir)
 
 	origFix := doctorFix
 	doctorFix = false
@@ -1139,7 +1139,7 @@ func TestCheckStaleSessionRecords_NoSessions(t *testing.T) {
 
 func TestCheckStaleSessionRecords_HalfWritten(t *testing.T) {
 	dir := t.TempDir()
-	setupBeadsDirForTest(t, dir)
+	setupRuntimeDirForTest(t, dir)
 
 	origFix := doctorFix
 	doctorFix = false
@@ -1168,7 +1168,7 @@ func TestCheckStaleSessionRecords_HalfWritten(t *testing.T) {
 
 func TestCheckStaleSessionRecords_HalfWrittenFixMode(t *testing.T) {
 	dir := t.TempDir()
-	setupBeadsDirForTest(t, dir)
+	setupRuntimeDirForTest(t, dir)
 
 	origFix := doctorFix
 	doctorFix = true
@@ -1196,7 +1196,7 @@ func TestCheckStaleSessionRecords_HalfWrittenFixMode(t *testing.T) {
 
 func TestCheckStaleSessionRecords_OrphanedDir(t *testing.T) {
 	dir := t.TempDir()
-	setupBeadsDirForTest(t, dir)
+	setupRuntimeDirForTest(t, dir)
 
 	origFix := doctorFix
 	doctorFix = false
@@ -1239,7 +1239,7 @@ func TestCheckStaleSessionRecords_OrphanedDir(t *testing.T) {
 
 func TestCheckStaleSessionRecords_OrphanedDirFixMode(t *testing.T) {
 	dir := t.TempDir()
-	setupBeadsDirForTest(t, dir)
+	setupRuntimeDirForTest(t, dir)
 
 	origFix := doctorFix
 	doctorFix = true
@@ -1297,7 +1297,7 @@ func TestCheckStaleSessionRecords_OrphanedDirFixMode(t *testing.T) {
 
 func TestCheckStaleSessionRecords_LeftoverTmp(t *testing.T) {
 	dir := t.TempDir()
-	setupBeadsDirForTest(t, dir)
+	setupRuntimeDirForTest(t, dir)
 
 	origFix := doctorFix
 	doctorFix = false
@@ -1335,7 +1335,7 @@ func TestCheckStaleSessionRecords_LeftoverTmp(t *testing.T) {
 
 func TestCheckStaleSessionRecords_LeftoverTmpFixMode(t *testing.T) {
 	dir := t.TempDir()
-	setupBeadsDirForTest(t, dir)
+	setupRuntimeDirForTest(t, dir)
 
 	origFix := doctorFix
 	doctorFix = true

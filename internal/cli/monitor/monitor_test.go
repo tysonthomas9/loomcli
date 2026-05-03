@@ -1138,7 +1138,7 @@ func TestCollectAgentStatus(t *testing.T) {
 		os.Chdir(tmpDir)
 		t.Cleanup(func() { os.Chdir(origDir) })
 
-		// Reset cached resolver and beads dir so they use the new CWD
+		// Reset cached resolver and runtime dir so they use the new CWD
 		oldResolver := defaultResolver
 		defaultResolver = nil
 		t.Cleanup(func() { defaultResolver = oldResolver })
@@ -1188,7 +1188,7 @@ func TestCollectAgentStatus(t *testing.T) {
 		os.Chdir(tmpDir)
 		t.Cleanup(func() { os.Chdir(origDir) })
 
-		// Reset cached resolver and beads dir so they use the new CWD
+		// Reset cached resolver and runtime dir so they use the new CWD
 		oldResolver := defaultResolver
 		defaultResolver = nil
 		t.Cleanup(func() { defaultResolver = oldResolver })
@@ -1235,7 +1235,7 @@ func TestCollectAgentStatus(t *testing.T) {
 		os.Chdir(tmpDir)
 		t.Cleanup(func() { os.Chdir(origDir) })
 
-		// Reset cached resolver and beads dir so they use the new CWD
+		// Reset cached resolver and runtime dir so they use the new CWD
 		oldResolver := defaultResolver
 		defaultResolver = nil
 		t.Cleanup(func() { defaultResolver = oldResolver })
@@ -1285,7 +1285,7 @@ func TestCollectAgentStatus(t *testing.T) {
 		os.Chdir(tmpDir)
 		t.Cleanup(func() { os.Chdir(origDir) })
 
-		// Reset cached resolver and beads dir so they use the new CWD
+		// Reset cached resolver and runtime dir so they use the new CWD
 		oldResolver := defaultResolver
 		defaultResolver = nil
 		t.Cleanup(func() { defaultResolver = oldResolver })
@@ -1335,7 +1335,7 @@ func TestCollectAgentStatus(t *testing.T) {
 		os.Chdir(tmpDir)
 		t.Cleanup(func() { os.Chdir(origDir) })
 
-		// Reset cached resolver and beads dir so they use the new CWD
+		// Reset cached resolver and runtime dir so they use the new CWD
 		oldResolver := defaultResolver
 		defaultResolver = nil
 		t.Cleanup(func() { defaultResolver = oldResolver })
@@ -1396,7 +1396,7 @@ func TestCollectMonitorData(t *testing.T) {
 	os.Chdir(tmpDir)
 	t.Cleanup(func() { os.Chdir(origDir) })
 
-	// Reset cached resolver and beads dir so they use the new CWD
+	// Reset cached resolver and runtime dir so they use the new CWD
 	oldResolver := defaultResolver
 	defaultResolver = nil
 	t.Cleanup(func() { defaultResolver = oldResolver })
@@ -1478,7 +1478,7 @@ func TestCollectMonitorDataExported(t *testing.T) {
 	os.Chdir(tmpDir)
 	t.Cleanup(func() { os.Chdir(origDir) })
 
-	// Reset cached resolver and beads dir so they use the new CWD
+	// Reset cached resolver and runtime dir so they use the new CWD
 	oldResolver := defaultResolver
 	defaultResolver = nil
 	t.Cleanup(func() { defaultResolver = oldResolver })
@@ -1531,7 +1531,7 @@ func TestCollectAgentStatusOnlyExported(t *testing.T) {
 	os.Chdir(tmpDir)
 	t.Cleanup(func() { os.Chdir(origDir) })
 
-	// Reset cached resolver and beads dir so they use the new CWD
+	// Reset cached resolver and runtime dir so they use the new CWD
 	oldResolver := defaultResolver
 	defaultResolver = nil
 	t.Cleanup(func() { defaultResolver = oldResolver })
@@ -1817,7 +1817,7 @@ func TestRunMonitorOneShot(t *testing.T) {
 	os.Chdir(tmpDir)
 	t.Cleanup(func() { os.Chdir(origDir) })
 
-	// Reset cached resolver and beads dir so they use the new CWD
+	// Reset cached resolver and runtime dir so they use the new CWD
 	oldResolver := defaultResolver
 	defaultResolver = nil
 	t.Cleanup(func() { defaultResolver = oldResolver })
@@ -2223,7 +2223,7 @@ func TestCollectAgentStatusLockFallback(t *testing.T) {
 			os.Chdir(tmpDir)
 			t.Cleanup(func() { os.Chdir(origDir) })
 
-			// Reset cached resolver and beads dir so they use the new CWD
+			// Reset cached resolver and runtime dir so they use the new CWD
 			oldResolver := defaultResolver
 			defaultResolver = nil
 			t.Cleanup(func() { defaultResolver = oldResolver })

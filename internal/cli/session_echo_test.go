@@ -18,12 +18,12 @@ import (
 // index.jsonl, metadata.json, prompt.txt, and token counts.
 func TestSessionCapture_FullLifecycle(t *testing.T) {
 	env := NewEchoTestEnv(t)
-	beadsDir := filepath.Join(env.WorkDir, ".beads")
-	if err := os.MkdirAll(beadsDir, 0o755); err != nil {
+	runtimeDir := filepath.Join(env.WorkDir, ".loom/runtime")
+	if err := os.MkdirAll(runtimeDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 
-	store, err := sessions.NewStore(beadsDir)
+	store, err := sessions.NewStore(runtimeDir)
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
@@ -153,8 +153,8 @@ func TestSessionCapture_FullLifecycle(t *testing.T) {
 // TestSessionCapture_TranscriptAppend verifies that AppendTranscript
 // writes entries with auto-assigned Seq numbers.
 func TestSessionCapture_TranscriptAppend(t *testing.T) {
-	beadsDir := t.TempDir()
-	store, err := sessions.NewStore(beadsDir)
+	runtimeDir := t.TempDir()
+	store, err := sessions.NewStore(runtimeDir)
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
@@ -209,8 +209,8 @@ func TestSessionCapture_TranscriptAppend(t *testing.T) {
 // TestSessionCapture_HookDispatch verifies the hook dispatch pipeline:
 // parse Claude hook input → dispatch to session transcript.
 func TestSessionCapture_HookDispatch(t *testing.T) {
-	beadsDir := t.TempDir()
-	store, err := sessions.NewStore(beadsDir)
+	runtimeDir := t.TempDir()
+	store, err := sessions.NewStore(runtimeDir)
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
@@ -274,7 +274,7 @@ func TestSessionCapture_HookDispatch(t *testing.T) {
 	}
 
 	for _, ev := range events {
-		_ = dispatchHookEvent(&ev, beadsDir, sid)
+		_ = dispatchHookEvent(&ev, runtimeDir, sid)
 	}
 
 	// Verify transcript was written.
@@ -307,8 +307,8 @@ func TestSessionCapture_HookDispatch(t *testing.T) {
 // multiple sessions for the same task (retry scenario) produces
 // queryable records sorted by StartedAt.
 func TestSessionCapture_MultipleSessionsPerTask(t *testing.T) {
-	beadsDir := t.TempDir()
-	store, err := sessions.NewStore(beadsDir)
+	runtimeDir := t.TempDir()
+	store, err := sessions.NewStore(runtimeDir)
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
@@ -374,12 +374,12 @@ func TestSessionCapture_MultipleSessionsPerTask(t *testing.T) {
 // results in a failed session with correct status in both metadata and index.
 func TestSessionCapture_FailedSession(t *testing.T) {
 	env := NewEchoTestEnv(t)
-	beadsDir := filepath.Join(env.WorkDir, ".beads")
-	if err := os.MkdirAll(beadsDir, 0o755); err != nil {
+	runtimeDir := filepath.Join(env.WorkDir, ".loom/runtime")
+	if err := os.MkdirAll(runtimeDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 
-	store, err := sessions.NewStore(beadsDir)
+	store, err := sessions.NewStore(runtimeDir)
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
@@ -450,8 +450,8 @@ func TestSessionCapture_FailedSession(t *testing.T) {
 // the full lifecycle are correctly queryable via the store's query API,
 // matching what the HTTP handler would return.
 func TestSessionCapture_ApiQuery(t *testing.T) {
-	beadsDir := t.TempDir()
-	store, err := sessions.NewStore(beadsDir)
+	runtimeDir := t.TempDir()
+	store, err := sessions.NewStore(runtimeDir)
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}

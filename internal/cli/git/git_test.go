@@ -2157,8 +2157,8 @@ func TestGitCleanExclude(t *testing.T) {
 		{
 			name:     "with_excludes",
 			dir:      "/repo",
-			excludes: []string{".beads", ".loom", "sessions"},
-			wantArgs: []string{"clean", "-fd", "--exclude=.beads", "--exclude=.loom", "--exclude=sessions"},
+			excludes: []string{".loom", "sessions"},
+			wantArgs: []string{"clean", "-fd", "--exclude=.loom", "--exclude=sessions"},
 			mockErr:  nil,
 			wantErr:  false,
 		},
@@ -2235,8 +2235,8 @@ func TestGitCleanDryRunExclude(t *testing.T) {
 		{
 			name:       "with_excludes",
 			dir:        "/repo",
-			excludes:   []string{".beads", ".loom"},
-			wantArgs:   []string{"clean", "-fdn", "--exclude=.beads", "--exclude=.loom"},
+			excludes:   []string{".loom"},
+			wantArgs:   []string{"clean", "-fdn", "--exclude=.loom"},
 			mockStdout: "Would remove leftover.txt\n",
 			wantOutput: "Would remove leftover.txt\n",
 			wantErr:    false,

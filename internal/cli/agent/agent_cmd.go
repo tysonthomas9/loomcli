@@ -145,9 +145,6 @@ func runAgentDaemon(worktreePath, agentName string, promptGen func(string, *conf
 	if inheritedSID := os.Getenv("LOOM_SESSION_ID"); inheritedSID != "" {
 		inheritedRuntimeDir := os.Getenv("LOOM_WORKSPACE_RUNTIME_DIR")
 		if inheritedRuntimeDir == "" {
-			inheritedRuntimeDir = os.Getenv("LOOM_BEADS_DIR") // legacy hook compatibility
-		}
-		if inheritedRuntimeDir == "" {
 			inheritedRuntimeDir = cli.GetWorkspaceRuntimeDir()
 		}
 		backends.SetActiveSessionRuntimeEnv(inheritedRuntimeDir, inheritedSID)

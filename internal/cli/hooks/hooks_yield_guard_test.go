@@ -104,7 +104,7 @@ func TestRunClaudeHook_StopWithYield(t *testing.T) {
 	}
 	t.Setenv("LOOM_YIELD_FILE", yieldFile)
 	t.Setenv("LOOM_SESSION_ID", "")
-	t.Setenv("LOOM_BEADS_DIR", "")
+	t.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", "")
 
 	// Capture stderr
 	oldStderr := os.Stderr
@@ -134,7 +134,7 @@ func TestRunClaudeHook_StopWithYield(t *testing.T) {
 func TestRunClaudeHook_StopWithoutYield(t *testing.T) {
 	t.Setenv("LOOM_YIELD_FILE", filepath.Join(t.TempDir(), "nonexistent"))
 	t.Setenv("LOOM_SESSION_ID", "")
-	t.Setenv("LOOM_BEADS_DIR", "")
+	t.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", "")
 
 	// Capture stderr
 	oldStderr := os.Stderr
@@ -169,7 +169,7 @@ func TestRunClaudeHook_NonStopIgnoresYield(t *testing.T) {
 	}
 	t.Setenv("LOOM_YIELD_FILE", yieldFile)
 	t.Setenv("LOOM_SESSION_ID", "")
-	t.Setenv("LOOM_BEADS_DIR", "")
+	t.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", "")
 
 	// Capture stderr
 	oldStderr := os.Stderr

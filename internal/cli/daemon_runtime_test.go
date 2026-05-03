@@ -28,8 +28,6 @@ func TestIsProtectedRuntimePath(t *testing.T) {
 		want    bool
 	}{
 		// Protected top-level dirs/files
-		{".beads", true},
-		{".beads/db.sqlite", true},
 		{".loom", true},
 		{".loom/daemon.pid", true},
 		{"sessions", true},
@@ -45,7 +43,6 @@ func TestIsProtectedRuntimePath(t *testing.T) {
 
 		// Normalisation: leading "./" stripped
 		{"./sessions", true},
-		{"./.beads", true},
 		{"./loom.yaml", true},
 		{"./leftover.txt", false},
 

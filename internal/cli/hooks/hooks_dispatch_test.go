@@ -25,7 +25,7 @@ func TestDispatchHookEvent_EmptyBeadsDir(t *testing.T) {
 	}
 	err := dispatchHookEvent(event, "", "sess-123")
 	if err != nil {
-		t.Fatalf("expected nil error for empty beadsDir, got: %v", err)
+		t.Fatalf("expected nil error for empty runtimeDir, got: %v", err)
 	}
 }
 
@@ -42,10 +42,10 @@ func TestDispatchHookEvent_EmptySessionID(t *testing.T) {
 }
 
 func TestDispatchHookEvent_SessionEndCapturesTokenUsage(t *testing.T) {
-	beadsDir := t.TempDir()
+	runtimeDir := t.TempDir()
 	sessionID := "test-session-token-capture"
 
-	sessDir := filepath.Join(beadsDir, "sessions", sessionID)
+	sessDir := filepath.Join(runtimeDir, "sessions", sessionID)
 	if err := os.MkdirAll(sessDir, 0o700); err != nil {
 		t.Fatalf("create session dir: %v", err)
 	}
@@ -84,13 +84,13 @@ func TestDispatchHookEvent_SessionEndCapturesTokenUsage(t *testing.T) {
 		Timestamp:  time.Now(),
 	}
 
-	err := dispatchHookEvent(event, beadsDir, sessionID)
+	err := dispatchHookEvent(event, runtimeDir, sessionID)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	// Verify metadata was patched with token usage.
-	store, err := sessions.NewStore(beadsDir)
+	store, err := sessions.NewStore(runtimeDir)
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
@@ -117,10 +117,10 @@ func TestDispatchHookEvent_SessionEndCapturesTokenUsage(t *testing.T) {
 }
 
 func TestDispatchHookEvent_SessionEndMissingTranscript(t *testing.T) {
-	beadsDir := t.TempDir()
+	runtimeDir := t.TempDir()
 	sessionID := "test-session-missing-tx"
 
-	sessDir := filepath.Join(beadsDir, "sessions", sessionID)
+	sessDir := filepath.Join(runtimeDir, "sessions", sessionID)
 	if err := os.MkdirAll(sessDir, 0o700); err != nil {
 		t.Fatalf("create session dir: %v", err)
 	}
@@ -150,13 +150,13 @@ func TestDispatchHookEvent_SessionEndMissingTranscript(t *testing.T) {
 		Timestamp:  time.Now(),
 	}
 
-	err := dispatchHookEvent(event, beadsDir, sessionID)
+	err := dispatchHookEvent(event, runtimeDir, sessionID)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	// Metadata should remain unchanged (zero tokens → captureTokenUsage skips save).
-	store, err := sessions.NewStore(beadsDir)
+	store, err := sessions.NewStore(runtimeDir)
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
@@ -173,10 +173,10 @@ func TestDispatchHookEvent_SessionEndMissingTranscript(t *testing.T) {
 }
 
 func TestDispatchHookEvent_SessionEndEmptySessionRef(t *testing.T) {
-	beadsDir := t.TempDir()
+	runtimeDir := t.TempDir()
 	sessionID := "test-session-empty-ref"
 
-	sessDir := filepath.Join(beadsDir, "sessions", sessionID)
+	sessDir := filepath.Join(runtimeDir, "sessions", sessionID)
 	if err := os.MkdirAll(sessDir, 0o700); err != nil {
 		t.Fatalf("create session dir: %v", err)
 	}
@@ -206,13 +206,13 @@ func TestDispatchHookEvent_SessionEndEmptySessionRef(t *testing.T) {
 		Timestamp:  time.Now(),
 	}
 
-	err := dispatchHookEvent(event, beadsDir, sessionID)
+	err := dispatchHookEvent(event, runtimeDir, sessionID)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	// Metadata should be unchanged.
-	store, err := sessions.NewStore(beadsDir)
+	store, err := sessions.NewStore(runtimeDir)
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
@@ -229,10 +229,10 @@ func TestDispatchHookEvent_SessionEndEmptySessionRef(t *testing.T) {
 }
 
 func TestDispatchHookEvent_SyncsNativeTranscript(t *testing.T) {
-	beadsDir := t.TempDir()
+	runtimeDir := t.TempDir()
 	sessionID := "20260417-120000-nova-abcd-0123abcd"
 
-	sessDir := filepath.Join(beadsDir, "sessions", sessionID)
+	sessDir := filepath.Join(runtimeDir, "sessions", sessionID)
 	if err := os.MkdirAll(sessDir, 0o700); err != nil {
 		t.Fatalf("create session dir: %v", err)
 	}
@@ -252,7 +252,7 @@ func TestDispatchHookEvent_SyncsNativeTranscript(t *testing.T) {
 		Backend:    "claude",
 		Timestamp:  time.Now(),
 	}
-	if err := dispatchHookEvent(event, beadsDir, sessionID); err != nil {
+	if err := dispatchHookEvent(event, runtimeDir, sessionID); err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
 
@@ -266,10 +266,10 @@ func TestDispatchHookEvent_SyncsNativeTranscript(t *testing.T) {
 }
 
 func TestDispatchHookEvent_SyncsSubagentTranscript(t *testing.T) {
-	beadsDir := t.TempDir()
+	runtimeDir := t.TempDir()
 	sessionID := "20260417-120000-nova-abcd-0123abcd"
 
-	sessDir := filepath.Join(beadsDir, "sessions", sessionID)
+	sessDir := filepath.Join(runtimeDir, "sessions", sessionID)
 	if err := os.MkdirAll(sessDir, 0o700); err != nil {
 		t.Fatalf("create session dir: %v", err)
 	}
@@ -297,7 +297,7 @@ func TestDispatchHookEvent_SyncsSubagentTranscript(t *testing.T) {
 		Backend:    "claude",
 		Timestamp:  time.Now(),
 	}
-	if err := dispatchHookEvent(event, beadsDir, sessionID); err != nil {
+	if err := dispatchHookEvent(event, runtimeDir, sessionID); err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
 
@@ -311,10 +311,10 @@ func TestDispatchHookEvent_SyncsSubagentTranscript(t *testing.T) {
 }
 
 func TestDispatchHookEvent_NoSessionRefSkipsSync(t *testing.T) {
-	beadsDir := t.TempDir()
+	runtimeDir := t.TempDir()
 	sessionID := "20260417-120000-nova-abcd-0123abcd"
 
-	sessDir := filepath.Join(beadsDir, "sessions", sessionID)
+	sessDir := filepath.Join(runtimeDir, "sessions", sessionID)
 	if err := os.MkdirAll(sessDir, 0o700); err != nil {
 		t.Fatalf("create session dir: %v", err)
 	}
@@ -325,7 +325,7 @@ func TestDispatchHookEvent_NoSessionRefSkipsSync(t *testing.T) {
 		Backend:   "claude",
 		Timestamp: time.Now(),
 	}
-	if err := dispatchHookEvent(event, beadsDir, sessionID); err != nil {
+	if err := dispatchHookEvent(event, runtimeDir, sessionID); err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
 

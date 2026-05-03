@@ -38,7 +38,7 @@ func buildCursorInteractiveCmd(workDir, prompt, agentName string) *exec.Cmd {
 	cmd.Dir = workDir
 	env := append(cli.FilteredEnv(), "LOOM_WORKTREE_PATH="+workDir)
 	if agentName != "" {
-		env = append(env, "BD_ACTOR="+agentName)
+		env = append(env, "LOOM_AGENT_NAME="+agentName)
 	}
 	cmd.Env = env
 	cmd.Stdin = os.Stdin
@@ -58,7 +58,7 @@ func defaultCursorInvoker(workDir, prompt, agentName string) error {
 		cmd.Dir = workDir
 		env := append(cli.FilteredEnv(), "LOOM_WORKTREE_PATH="+workDir)
 		if agentName != "" {
-			env = append(env, "BD_ACTOR="+agentName)
+			env = append(env, "LOOM_AGENT_NAME="+agentName)
 		}
 		cmd.Env = env
 		cmd.Stdout = os.Stdout
@@ -79,7 +79,7 @@ func defaultCursorNonInteractiveInvoker(workDir, prompt, agentName string, shutd
 	cmd.Dir = workDir
 	env := append(cli.FilteredEnv(), "LOOM_WORKTREE_PATH="+workDir)
 	if agentName != "" {
-		env = append(env, "BD_ACTOR="+agentName)
+		env = append(env, "LOOM_AGENT_NAME="+agentName)
 	}
 	cmd.Env = env
 

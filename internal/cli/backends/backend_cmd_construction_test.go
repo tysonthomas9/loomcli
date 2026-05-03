@@ -158,7 +158,7 @@ func TestBuildInteractiveCmd_EnvVars(t *testing.T) {
 			agentName: "nova",
 			wantEnv: map[string]string{
 				"LOOM_WORKTREE_PATH": "/projects/myapp",
-				"BD_ACTOR":           "nova",
+				"LOOM_AGENT_NAME":    "nova",
 			},
 		},
 		{
@@ -168,7 +168,7 @@ func TestBuildInteractiveCmd_EnvVars(t *testing.T) {
 			agentName: "nova",
 			wantEnv: map[string]string{
 				"LOOM_WORKTREE_PATH": "/projects/myapp",
-				"BD_ACTOR":           "nova",
+				"LOOM_AGENT_NAME":    "nova",
 			},
 		},
 		{
@@ -178,7 +178,7 @@ func TestBuildInteractiveCmd_EnvVars(t *testing.T) {
 			agentName: "nova",
 			wantEnv: map[string]string{
 				"LOOM_WORKTREE_PATH": "/projects/myapp",
-				"BD_ACTOR":           "nova",
+				"LOOM_AGENT_NAME":    "nova",
 			},
 		},
 		{
@@ -189,18 +189,18 @@ func TestBuildInteractiveCmd_EnvVars(t *testing.T) {
 			wantEnv: map[string]string{
 				"LOOM_WORKTREE_PATH": "/projects/myapp",
 			},
-			wantAbsent: []string{"BD_ACTOR"},
+			wantAbsent: []string{"LOOM_AGENT_NAME"},
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			// Unset BD_ACTOR to avoid leaking from test environment.
-			old, hadBD := os.LookupEnv("BD_ACTOR")
-			os.Unsetenv("BD_ACTOR")
+			// Unset LOOM_AGENT_NAME to avoid leaking from test environment.
+			old, hadBD := os.LookupEnv("LOOM_AGENT_NAME")
+			os.Unsetenv("LOOM_AGENT_NAME")
 			t.Cleanup(func() {
 				if hadBD {
-					os.Setenv("BD_ACTOR", old)
+					os.Setenv("LOOM_AGENT_NAME", old)
 				}
 			})
 

@@ -565,7 +565,7 @@ func TestDefaultDeps_APIConstructionFailureFailsClosed(t *testing.T) {
 	}
 }
 
-func TestDefaultDeps_ExplicitBeadsFallsBackToFleetDB(t *testing.T) {
+func TestDefaultDeps_ExplicitUnsupportedBackendFallsBackToFleetDB(t *testing.T) {
 	t.Setenv("LOOM_ISSUE_BACKEND", "beads")
 
 	d := DefaultDeps()

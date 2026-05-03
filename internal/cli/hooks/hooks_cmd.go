@@ -120,9 +120,6 @@ var hookSessionEndCmd = &cobra.Command{
 func runClaudeHook(cmd *cobra.Command, hookName string) error {
 	sessionID := os.Getenv("LOOM_SESSION_ID")
 	runtimeDir := os.Getenv("LOOM_WORKSPACE_RUNTIME_DIR")
-	if runtimeDir == "" {
-		runtimeDir = os.Getenv("LOOM_BEADS_DIR") // legacy hook compatibility
-	}
 
 	event, err := ParseClaudeHookInput(hookName, cmd.InOrStdin())
 	if err != nil {

@@ -22,7 +22,7 @@ func TestFilterEnv_AllowsExactMatches(t *testing.T) {
 func TestFilterEnv_AllowsPrefixMatches(t *testing.T) {
 	input := []string{
 		"LOOM_WORKTREE_PATH=/foo",
-		"BD_ACTOR=agent1",
+		"LOOM_AGENT_NAME=agent1",
 		"BEADS_DB=/bar",
 	}
 	got := FilterEnv(input)
@@ -56,14 +56,14 @@ func TestFilterEnv_MixedInput(t *testing.T) {
 		"DB_PASSWORD=pass123",
 		"HOME=/root",
 		"UNKNOWN_VAR=hello",
-		"BD_ACTOR=agent1",
+		"LOOM_AGENT_NAME=agent1",
 	}
 	got := FilterEnv(input)
 	want := []string{
 		"PATH=/usr/bin",
 		"LOOM_WORKTREE_PATH=/foo",
 		"HOME=/root",
-		"BD_ACTOR=agent1",
+		"LOOM_AGENT_NAME=agent1",
 	}
 	if len(got) != len(want) {
 		t.Fatalf("FilterEnv() returned %d entries, want %d; got %v", len(got), len(want), got)

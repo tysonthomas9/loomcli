@@ -69,7 +69,7 @@ type IssueBackend interface {
 	Update(ctx context.Context, id string, params UpdateParams) error
 
 	// ClaimIssue atomically claims an issue for the current agent. The
-	// assignee identity comes from the environment (BD_ACTOR) at the backend
+	// assignee identity comes from the configured agent name at the backend
 	// level, not from the caller. lockTTL configures TTL-based lock expiry
 	// for backends that support it (e.g., fleet-db Redis); backends without
 	// TTL support (beads SQLite) accept but ignore the parameter. Pass 0 to

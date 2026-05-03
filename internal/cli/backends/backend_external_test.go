@@ -337,8 +337,8 @@ func TestExternalBackend_EnvPassthrough(t *testing.T) {
 	if !contains(envStr, "LOOM_WORKTREE_PATH="+workDir) {
 		t.Error("expected LOOM_WORKTREE_PATH to be set in subprocess environment")
 	}
-	if !contains(envStr, "BD_ACTOR=myagent") {
-		t.Error("expected BD_ACTOR to be set in subprocess environment")
+	if !contains(envStr, "LOOM_AGENT_NAME=myagent") {
+		t.Error("expected LOOM_AGENT_NAME to be set in subprocess environment")
 	}
 }
 

@@ -8,7 +8,7 @@ import (
 
 func TestRunWorkspaceList_Output(t *testing.T) {
 	resetWorkspaceFlags(t)
-	useLegacyBeadsBackend(t)
+	useLegacyBackendBackend(t)
 
 	tmpDir := t.TempDir()
 	t.Setenv("LOOM_CONFIG_DIR", tmpDir)
@@ -43,7 +43,7 @@ func TestRunWorkspaceList_Output(t *testing.T) {
 
 func TestRunWorkspaceList_JSONOutput(t *testing.T) {
 	resetWorkspaceFlags(t)
-	useLegacyBeadsBackend(t)
+	useLegacyBackendBackend(t)
 
 	tmpDir := t.TempDir()
 	t.Setenv("LOOM_CONFIG_DIR", tmpDir)
@@ -71,7 +71,7 @@ func TestRunWorkspaceList_JSONOutput(t *testing.T) {
 
 func TestRunWorkspaceList_DefaultMarker(t *testing.T) {
 	resetWorkspaceFlags(t)
-	useLegacyBeadsBackend(t)
+	useLegacyBackendBackend(t)
 
 	tmpDir := t.TempDir()
 	t.Setenv("LOOM_CONFIG_DIR", tmpDir)
@@ -107,7 +107,7 @@ func TestRunWorkspaceList_DefaultMarker(t *testing.T) {
 
 func TestRunWorkspaceList_NoWorkspacesMessage(t *testing.T) {
 	resetWorkspaceFlags(t)
-	useLegacyBeadsBackend(t)
+	useLegacyBackendBackend(t)
 
 	tmpDir := t.TempDir()
 	t.Setenv("LOOM_CONFIG_DIR", tmpDir)
@@ -119,7 +119,7 @@ func TestRunWorkspaceList_NoWorkspacesMessage(t *testing.T) {
 
 func TestRunWorkspaceList_MissingDirStatus(t *testing.T) {
 	resetWorkspaceFlags(t)
-	useLegacyBeadsBackend(t)
+	useLegacyBackendBackend(t)
 
 	tmpDir := t.TempDir()
 	t.Setenv("LOOM_CONFIG_DIR", tmpDir)

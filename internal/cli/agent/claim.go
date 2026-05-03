@@ -91,7 +91,7 @@ func emitTaskClaimedEvent(taskID, taskTitle string) {
 	bus := events.NewBus(eventsDir)
 	defer func() { _ = bus.Close() }()
 
-	agentName := os.Getenv("BD_ACTOR")
+	agentName := os.Getenv("LOOM_AGENT_NAME")
 	evt, err := events.NewEvent(events.TaskClaimed, agentName, "", "", events.TaskClaimedData{TaskID: taskID, Title: taskTitle})
 	if err != nil {
 		return

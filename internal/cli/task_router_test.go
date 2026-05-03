@@ -698,7 +698,7 @@ func TestRoleConfigFromEnv_InvalidMaxPriority(t *testing.T) {
 
 func TestAgentEntryFromEnv(t *testing.T) {
 	t.Setenv("LOOM_AGENT_PATH_PATTERNS", "cmd/**,pkg/**")
-	t.Setenv("BD_ACTOR", "falcon")
+	t.Setenv("LOOM_AGENT_NAME", "falcon")
 	t.Setenv("LOOM_ROLE", "task")
 
 	ae := AgentEntryFromEnv()
@@ -716,7 +716,7 @@ func TestAgentEntryFromEnv(t *testing.T) {
 
 func TestAgentEntryFromEnv_Empty(t *testing.T) {
 	t.Setenv("LOOM_AGENT_PATH_PATTERNS", "")
-	t.Setenv("BD_ACTOR", "")
+	t.Setenv("LOOM_AGENT_NAME", "")
 	t.Setenv("LOOM_ROLE", "")
 	t.Setenv("LOOM_AGENT_REPO", "")
 
@@ -735,7 +735,7 @@ func TestAgentEntryFromEnv_Empty(t *testing.T) {
 
 func TestAgentEntryFromEnv_WithLOOM_AGENT_REPO(t *testing.T) {
 	t.Setenv("LOOM_AGENT_PATH_PATTERNS", "")
-	t.Setenv("BD_ACTOR", "")
+	t.Setenv("LOOM_AGENT_NAME", "")
 	t.Setenv("LOOM_ROLE", "")
 	t.Setenv("LOOM_AGENT_REPO", "myrepo")
 
@@ -867,7 +867,7 @@ func TestMergeRoleConstraints_SourceReposPropagated(t *testing.T) {
 func TestAgentEntryFromEnv_SourceRepos(t *testing.T) {
 	t.Setenv("LOOM_SOURCE_REPOS", "repo-a,repo-b")
 	t.Setenv("LOOM_AGENT_PATH_PATTERNS", "")
-	t.Setenv("BD_ACTOR", "")
+	t.Setenv("LOOM_AGENT_NAME", "")
 	t.Setenv("LOOM_ROLE", "")
 	t.Setenv("LOOM_AGENT_REPO", "")
 
