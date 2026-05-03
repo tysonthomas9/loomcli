@@ -18,10 +18,7 @@ COPY . .
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     go mod download \
-    && CGO_ENABLED=0 go build -o /out/loom ./cmd/loom \
-    && if [ -f third_party/beads/cmd/bd/main.go ]; then \
-        cd third_party/beads && CGO_ENABLED=0 go build -o /out/bd ./cmd/bd; \
-    fi
+    && CGO_ENABLED=0 go build -o /out/loom ./cmd/loom
 
 # ─── Stage 2: Build frontend ────────────────────────────────────────────────
 FROM node:20-alpine AS frontend
@@ -50,7 +47,6 @@ RUN --mount=type=cache,target=/root/.npm \
 
 # Copy compiled binaries
 COPY --from=builder /out/loom /usr/local/bin/loom
-COPY --from=builder /out/b[d] /usr/local/bin/
 
 # Source tree (for go test if Go is mounted)
 WORKDIR /src
@@ -64,12 +60,12 @@ RUN --mount=type=cache,target=/root/.npm \
 
 # Install stubs, smoke tests, and orchestrator
 COPY e2e/stubs/claude e2e/stubs/codex e2e/stubs/opencode /usr/local/bin/
-COPY e2e/verify_todo.sh e2e/verify_list.sh e2e/verify_bd.sh /usr/local/bin/
+COPY e2e/verify_todo.sh e2e/verify_list.sh /usr/local/bin/
 COPY e2e/run_test.sh /usr/local/bin/run_test.sh
 RUN mkdir -p /etc/loom \
     && chmod +x /usr/local/bin/claude /usr/local/bin/codex /usr/local/bin/opencode \
         /usr/local/bin/verify_todo.sh /usr/local/bin/verify_list.sh \
-        /usr/local/bin/verify_bd.sh /usr/local/bin/run_test.sh
+        /usr/local/bin/run_test.sh
 COPY e2e/task_template.txt /etc/loom/task_template.txt
 COPY scripts/start-e2e-server.sh /usr/local/bin/start-e2e-server.sh
 RUN chmod +x /usr/local/bin/start-e2e-server.sh

@@ -1,7 +1,7 @@
 
 # Build artifacts
-loom
-loomcli
+/loom
+/loomcli
 *.test
 *.bak
 /logrouter
@@ -16,6 +16,10 @@ internal/webui/frontend/coverage/
 
 # E2E test artifacts
 internal/webui/frontend/tests/e2e/.e2e-state.json
+reports/scratch-*.jsonl
+reports/validation-*.json
+reports/*-verification.md
+docs/design/parity-report-*/
 
 # Loom config (may contain credentials)
 .loom/
@@ -23,8 +27,7 @@ loom.yaml
 
 # Runtime / dev artifacts
 .agent.lock
-.beads/issues.jsonl
-.beads/rpc-token
+.beads/
 .loom-dev.log
 .loom-dev.pid
 .make-dev.log

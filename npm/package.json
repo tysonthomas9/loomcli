@@ -1,7 +1,7 @@
 {
   "name": "loomcli",
   "version": "0.1.0",
-  "description": "Agent management CLI for parallel AI workflows with beads",
+  "description": "Agent management CLI for parallel AI workflows with fleet-db",
   "bin": {
     "loom": "bin/loom"
   },
@@ -12,7 +12,7 @@
     "type": "git",
     "url": "https://github.com/tysonthomas9/loomcli.git"
   },
-  "keywords": ["cli", "ai", "agents", "beads", "claude"],
+  "keywords": ["cli", "ai", "agents", "fleet-db", "claude"],
   "author": "Tyson Thomas",
   "license": "MIT",
   "files": [

@@ -224,7 +224,7 @@ func TestContainer_BinariesExist(t *testing.T) {
 	defer cancel()
 
 	output, exitCode, err := dockerRun(ctx, nil,
-		"sh", "-c", "which loom && which bd && which claude && which codex && which opencode && which tmux && which git && which jq")
+		"sh", "-c", "which loom && which claude && which codex && which opencode && which tmux && which git && which jq")
 	if err != nil {
 		t.Fatalf("docker run failed: %v", err)
 	}

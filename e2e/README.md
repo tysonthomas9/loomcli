@@ -23,7 +23,7 @@ podman run --rm loomcli-e2e run_test.sh --phase playwright
 
 | Tool | Purpose |
 |---|---|
-| `loom`, `bd` | Static Go binaries (CGO_ENABLED=0) |
+| `loom` | Static Go binary (CGO_ENABLED=0) |
 | `chromium-browser` | Alpine's Chromium package |
 | `agent-browser` | Browser automation CLI for AI agents |
 | `@playwright/test` | Playwright test runner |
@@ -36,7 +36,7 @@ The `run_test.sh` orchestrator runs four phases:
 
 | Phase | What it tests | Requirements |
 |---|---|---|
-| `smoke` | Binary existence, stub output, bd CRUD, loom commands | Shell only |
+| `smoke` | Binary existence, stub output, workspace setup, loom commands | Shell only |
 | `unit` | `go test ./...` | Go toolchain (skipped in Alpine image) |
 | `e2e` | `go test -tags e2e ./internal/cli/` per backend | Go or pre-compiled test binary (skipped if neither available) |
 | `playwright` | Mocked chromium tests + self-contained API e2e | Node.js + Chromium |
@@ -87,8 +87,6 @@ podman run --rm loomcli-e2e bash -c '
   git config --global user.email "test@test.com"
   git config --global user.name "Test"
   git init -q && git commit --allow-empty -m seed -q
-  bd init --prefix test --skip-hooks -q
-  bd daemon start && sleep 1
   loom serve --port 8099 &
   sleep 2
 
@@ -97,7 +95,7 @@ podman run --rm loomcli-e2e bash -c '
   agent-browser screenshot /tmp/health.png
   agent-browser snapshot
 
-  kill %1; bd daemon stop
+  kill %1
 '
 ```
 
@@ -121,7 +119,7 @@ The Dockerfile uses a 3-stage build with cache mounts to minimize image size:
 
 ```
 Stage 1: golang:bookworm (builder)
-  └── Compiles loom + bd as static binaries (CGO_ENABLED=0)
+  └── Compiles loom as a static binary (CGO_ENABLED=0)
   └── Cache mounts: /go/pkg/mod, /root/.cache/go-build
 
 Stage 2: node:20-alpine (frontend)
@@ -138,12 +136,11 @@ Cache mounts keep Go modules (~500MB) and build cache (~500MB) out of committed 
 
 ## Smoke Tests
 
-Three verification scripts are included:
+Two verification scripts are included:
 
 ```bash
-podman run --rm loomcli-e2e verify_todo.sh     # binaries, stubs, loom commands
+podman run --rm loomcli-e2e verify_todo.sh     # binaries, stubs, workspace setup, loom commands
 podman run --rm loomcli-e2e verify_list.sh     # loom list behavior
-podman run --rm loomcli-e2e verify_bd.sh       # bd CRUD, deps, comments, stats
 ```
 
 Use `-v` for verbose or `-q` for summary only.

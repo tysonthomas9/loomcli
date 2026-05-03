@@ -12,9 +12,8 @@ ARG GO_VERSION=1.25.6
 FROM golang:${GO_VERSION}-bookworm AS builder
 
 WORKDIR /src
-# Copy the full source first. go.mod has a `replace` directive pointing at
-# ./third_party/beads, so `go mod download` needs that directory present
-# — we can't split the copy into (go.mod + download) → (rest of source).
+# Copy the full source once; this image favors a reliable repo-root build over
+# a split dependency-cache stage.
 COPY . .
 RUN go mod download
 
