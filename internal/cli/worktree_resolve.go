@@ -1,28 +1,30 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"sync"
 
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
+	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
-// Resolver abstracts worktree/repo discovery behind legacy and workspace modes.
+// Resolver abstracts workspace repo discovery.
 type Resolver struct {
 	Mode      ResolverMode
 	Config    *config.LoomConfig
 	Workspace string // active workspace name (workspace mode only)
 }
 
-// NewResolver creates a Resolver, selecting workspace mode if a config with
-// workspaces exists, otherwise falling back to legacy mode.
+// NewResolver creates a workspace resolver from configured workspaces.
 func NewResolver() (*Resolver, error) {
 	cfg, err := config.LoadConfigCached()
 	if err != nil {
-		return &Resolver{Mode: ModeLegacy}, nil
+		return nil, fmt.Errorf("load workspace config: %w", err)
 	}
 	if cfg != nil && len(cfg.Workspaces) > 0 {
 		ws := cfg.DefaultWorkspace
@@ -41,7 +43,7 @@ func NewResolver() (*Resolver, error) {
 			Workspace: ws,
 		}, nil
 	}
-	return &Resolver{Mode: ModeLegacy}, nil
+	return nil, fmt.Errorf("no workspaces configured")
 }
 
 // Mode returns the resolver's current mode.
@@ -50,7 +52,7 @@ func (r *Resolver) GetMode() ResolverMode {
 	return r.Mode
 }
 
-// WorkspaceName returns the active workspace name (empty in legacy mode).
+// WorkspaceName returns the active workspace name.
 func (r *Resolver) WorkspaceName() string {
 	return r.Workspace
 }
@@ -68,64 +70,18 @@ func (r *Resolver) SetWorkspace(name string) error {
 	return nil
 }
 
-// DiscoverWorktrees returns discovered worktrees using the resolver's mode.
+// DiscoverWorktrees returns repos from the active workspace.
 func (r *Resolver) DiscoverWorktrees() ([]WorktreeInfo, error) {
-	if r.Mode == ModeWorkspace {
-		return r.discoverWorkspace()
-	}
-	return r.discoverLegacy()
-}
-
-// discoverLegacy scans the ./worktrees/ directory (existing behavior).
-func (r *Resolver) discoverLegacy() ([]WorktreeInfo, error) {
-	worktreesDir, err := ResolveWorktreesDir()
-	if err != nil {
-		return nil, err
-	}
-	if _, err := os.Stat(worktreesDir); err != nil {
-		return nil, fmt.Errorf("worktrees directory not found: %s", worktreesDir)
-	}
-
-	entries, err := os.ReadDir(worktreesDir)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read worktrees directory: %w", err)
-	}
-
-	var worktrees []WorktreeInfo
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-
-		worktreePath := filepath.Join(worktreesDir, entry.Name())
-
-		// Verify it's a git directory
-		gitDir := filepath.Join(worktreePath, ".git")
-		if _, err := os.Stat(gitDir); err != nil {
-			continue // Not a git worktree
-		}
-
-		// Get the current branch
-		branch, err := GetCurrentBranch(worktreePath)
-		if err != nil {
-			branch = "unknown"
-		}
-
-		worktrees = append(worktrees, WorktreeInfo{
-			Name:             entry.Name(),
-			Path:             worktreePath,
-			Branch:           branch,
-			IsLinkedWorktree: IsGitLinkedWorktree(worktreePath),
-		})
-	}
-
-	return worktrees, nil
+	return r.discoverWorkspace()
 }
 
 // discoverWorkspace reads repos from the active workspace config.
 // Returns repo-level entries only — agent worktrees are discovered
 // separately via DiscoverAgentWorktrees.
 func (r *Resolver) discoverWorkspace() ([]WorktreeInfo, error) {
+	if r == nil || r.Config == nil || len(r.Config.Workspaces) == 0 {
+		return nil, nil
+	}
 	ws, ok := r.Config.Workspaces[r.Workspace]
 	if !ok {
 		return nil, fmt.Errorf("workspace %q not found in config", r.Workspace)
@@ -165,7 +121,7 @@ func (r *Resolver) discoverWorkspace() ([]WorktreeInfo, error) {
 
 // DiscoverAgentWorktrees returns agent worktrees under
 // <wsPath>/worktrees/<repo>/<agent> for the resolver's active workspace.
-// Only valid in workspace mode; returns an error in legacy mode.
+// Only valid when a workspace config is loaded.
 // Each returned WorktreeInfo has Repo set to the parent repo's config,
 // giving callers access to DefaultBranch and Remote.
 // funlen: the 2-pass scan + parallel git dispatch is intentionally one
@@ -322,12 +278,9 @@ func (r *Resolver) ResolveAgentByName(name string) (WorktreeInfo, error) {
 }
 
 // ResolveWorktreePath converts a worktree name to its full path using the
-// resolver's mode.
+// active workspace.
 func (r *Resolver) ResolveWorktreePath(name string) (string, error) {
-	if r.Mode == ModeWorkspace {
-		return r.ResolveWorkspacePath(name)
-	}
-	return resolveLegacyPath(name)
+	return r.ResolveWorkspacePath(name)
 }
 
 // ResolveWorkspaceByName checks if name matches a workspace name and returns
@@ -343,7 +296,6 @@ func (r *Resolver) ResolveWorkspaceByName(name string) (string, bool) {
 }
 
 // WorkspaceNames returns the names of all configured workspaces.
-// Returns nil in legacy mode.
 func (r *Resolver) WorkspaceNames() []string {
 	if r.Mode != ModeWorkspace || r.Config == nil {
 		return nil
@@ -366,6 +318,9 @@ func (r *Resolver) ResolveWorkspacePath(name string) (string, error) {
 			return "", fmt.Errorf("worktree path does not exist: %s", name)
 		}
 		return name, nil
+	}
+	if r == nil || r.Config == nil || len(r.Config.Workspaces) == 0 {
+		return "", fmt.Errorf("repo %q not found: no workspace configured", name)
 	}
 
 	ws, ok := r.Config.Workspaces[r.Workspace]
@@ -400,24 +355,23 @@ func (r *Resolver) ResolveWorkspacePath(name string) (string, error) {
 	return "", fmt.Errorf("repo '%s' not found in workspace %q", name, r.Workspace)
 }
 
-// GetWorktreesDir returns the worktrees directory path using the resolver's mode.
-// In workspace mode, returns the active workspace's path.
+// GetWorktreesDir returns the active workspace root path.
 func (r *Resolver) GetWorktreesDir() string {
-	if r.Mode == ModeWorkspace {
-		if ws, ok := r.Config.Workspaces[r.Workspace]; ok {
+	if r != nil && r.Config != nil {
+		if ws, ok := r.Config.Workspaces[r.Workspace]; ok && ws.Path != "" {
 			return ws.Path
 		}
 	}
-	return getWorktreesDirLegacy()
+	return "."
 }
 
-// GetDefaultBranch returns the default integration branch using the resolver's mode.
-// Resolution order: LOOM_DEFAULT_BRANCH env var > mode-specific logic > "main"
+// GetDefaultBranch returns the default integration branch.
+// Resolution order: LOOM_DEFAULT_BRANCH env var > workspace config > "main"
 func (r *Resolver) GetDefaultBranch() string {
 	if branch := os.Getenv("LOOM_DEFAULT_BRANCH"); branch != "" {
 		return branch
 	}
-	if r.Mode == ModeWorkspace {
+	if r != nil && r.Config != nil {
 		ws, ok := r.Config.Workspaces[r.Workspace]
 		if ok {
 			for _, repo := range ws.Repos {
@@ -428,48 +382,41 @@ func (r *Resolver) GetDefaultBranch() string {
 		}
 		return "main"
 	}
-	worktrees, _ := r.DiscoverWorktrees()
-	return GetDefaultBranchForWorktrees(worktrees)
+	return "main"
 }
 
-// SetRepoDefaultBranch updates the default branch for a named repo in the config.
-// Only works in workspace mode with a persisted config.
-// Reloads config inside the lock to avoid stale-read races.
+// SetRepoDefaultBranch updates the default branch for a named repo in FleetDB.
 func (r *Resolver) SetRepoDefaultBranch(repoName, branch string) error {
 	if r.Mode != ModeWorkspace || r.Config == nil {
 		return fmt.Errorf("target branch update only supported in workspace mode")
 	}
-	return config.WithConfigLock(func() error {
-		cfg, err := config.LoadConfigUnlocked()
-		if err != nil {
-			return err
-		}
-		if cfg == nil {
-			return fmt.Errorf("no config found")
-		}
-		ws, ok := cfg.Workspaces[r.Workspace]
-		if !ok {
-			return fmt.Errorf("workspace %q not found", r.Workspace)
-		}
-		found := false
-		for i, repo := range ws.Repos {
-			if repo.Name == repoName {
+	ctx := context.Background()
+	dataDir := bootstrap.LoomDir()
+	if dataDir == "" {
+		return fmt.Errorf("cannot determine loom data directory")
+	}
+	handle, err := bootstrap.OpenStore(ctx, dataDir, nil)
+	if err != nil {
+		return fmt.Errorf("open fleet-db store: %w", err)
+	}
+	defer func() { _ = handle.Close() }()
+	if _, err := handle.Store.Repos().Update(ctx, r.Workspace, repoName, store.RepoUpdate{DefaultBranch: &branch}); err != nil {
+		return fmt.Errorf("update repo %q default branch in workspace %q: %w", repoName, r.Workspace, err)
+	}
+	if ws, ok := r.Config.Workspaces[r.Workspace]; ok {
+		for i := range ws.Repos {
+			if ws.Repos[i].Name == repoName {
 				ws.Repos[i].DefaultBranch = branch
-				found = true
+				r.Config.Workspaces[r.Workspace] = ws
 				break
 			}
 		}
-		if !found {
-			return fmt.Errorf("repo %q not found in workspace %q", repoName, r.Workspace)
-		}
-		cfg.Workspaces[r.Workspace] = ws
-		return config.SaveConfigUnlocked(cfg)
-	})
+	}
+	return nil
 }
 
 // GetWorkspaceRuntimeDir returns the workspace root used for runtime files.
-// In workspace mode, this is the configured workspace root path (shared across repos).
-// In legacy mode, this returns "." (current directory).
+// This is the configured workspace root path shared across repos.
 // The result is cached for the lifetime of the process.
 func GetWorkspaceRuntimeDir() string {
 	workspaceRuntimeDirOnce.Do(func() {
@@ -516,7 +463,7 @@ func GetDefaultResolver() *Resolver {
 	if defaultResolver == nil {
 		r, err := NewResolver()
 		if err != nil {
-			r = &Resolver{Mode: ModeLegacy}
+			r = &Resolver{Mode: ModeWorkspace, Config: &config.LoomConfig{Workspaces: map[string]config.WorkspaceConfig{}}}
 		}
 		defaultResolver = r
 	}

@@ -32,6 +32,7 @@ type daemonProfileWire struct {
 	RestartPolicy  *fleetRestartPolicyWire `json:"restart_policy,omitempty"`
 	MaxAgents      *int                    `json:"max_agents,omitempty"`
 	IssueBackend   string                  `json:"issue_backend,omitempty"`
+	AgentBackend   string                  `json:"agent_backend,omitempty"`
 	StartupTimeout *int                    `json:"startup_timeout,omitempty"`
 	OTel           *fleetOTelWire          `json:"otel,omitempty"`
 	UpdatedAt      time.Time               `json:"updated_at"`
@@ -63,6 +64,7 @@ func (w daemonProfileWire) toDomain() *domain.DaemonProfile {
 		EventsDir:      w.EventsDir,
 		MaxAgents:      w.MaxAgents,
 		IssueBackend:   w.IssueBackend,
+		AgentBackend:   w.AgentBackend,
 		StartupTimeout: w.StartupTimeout,
 		UpdatedAt:      w.UpdatedAt,
 	}
@@ -98,6 +100,7 @@ type daemonProfileUpsertWire struct {
 	LogDir         string                  `json:"log_dir,omitempty"`
 	EventsDir      string                  `json:"events_dir,omitempty"`
 	IssueBackend   string                  `json:"issue_backend,omitempty"`
+	AgentBackend   string                  `json:"agent_backend,omitempty"`
 	MaxAgents      *int                    `json:"max_agents,omitempty"`
 	StartupTimeout *int                    `json:"startup_timeout,omitempty"`
 	RestartPolicy  *fleetRestartPolicyWire `json:"restart_policy,omitempty"`
@@ -111,6 +114,7 @@ func domainToUpsertWire(p *domain.DaemonProfile) daemonProfileUpsertWire {
 		EventsDir:      p.EventsDir,
 		MaxAgents:      p.MaxAgents,
 		IssueBackend:   p.IssueBackend,
+		AgentBackend:   p.AgentBackend,
 		StartupTimeout: p.StartupTimeout,
 	}
 	if hasRestartPolicy(p.RestartPolicy) {

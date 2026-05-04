@@ -226,13 +226,6 @@ func resolveBackendSource() string {
 	if os.Getenv("LOOM_BACKEND") != "" {
 		return "env"
 	}
-	if pf, err := config.LoadProjectFile(cli.GetWorkspaceRuntimeDir()); err == nil && pf != nil && pf.Backend != "" {
-		return "project"
-	}
-	cfg, err := config.LoadConfig()
-	if err == nil && cfg != nil && cfg.Backend != "" {
-		return "config"
-	}
 	return "default"
 }
 

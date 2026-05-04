@@ -18,6 +18,7 @@ type DaemonProfile struct {
 	RestartPolicy  RestartPolicy `json:"restart_policy"`
 	MaxAgents      *int          `json:"max_agents,omitempty"`
 	IssueBackend   string        `json:"issue_backend,omitempty"`
+	AgentBackend   string        `json:"agent_backend,omitempty"`
 	StartupTimeout *int          `json:"startup_timeout,omitempty"`
 	OTel           *OTelSettings `json:"otel,omitempty"`
 

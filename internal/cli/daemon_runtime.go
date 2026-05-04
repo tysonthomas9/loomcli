@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
@@ -20,13 +19,13 @@ func resolvePath(baseDir, path string) string {
 }
 
 // DaemonRuntimeInfo describes the runtime state of a daemon as detected from
-// multiple sources (lock file, state file, PID file). All daemon lifecycle
+// multiple sources (lock file, state file). All daemon lifecycle
 // commands should derive liveness from this struct instead of checking
 // individual files directly.
 type DaemonRuntimeInfo struct {
 	Running bool   // true if a live daemon process was confirmed
 	PID     int    // PID of the daemon (0 if unknown)
-	Source  string // which source confirmed liveness: "lock", "state", "pid", ""
+	Source  string // which source confirmed liveness: "lock", "state", ""
 }
 
 // DetectDaemonRuntime resolves daemon liveness from authoritative sources in
@@ -36,8 +35,6 @@ type DaemonRuntimeInfo struct {
 //  2. State file (.loom/daemon-agents.json) — if the state file contains a PID
 //     that is alive, the daemon is running (covers the case where the PID file
 //     was removed but the daemon is still up).
-//  3. PID file (.loom/daemon.pid) — backward-compatible fallback for older
-//     daemons that don't write lock/state files.
 //
 // A stale lock file with a dead PID is treated as "not running".
 func DetectDaemonRuntime(projectDir string) DaemonRuntimeInfo {
@@ -52,20 +49,6 @@ func DetectDaemonRuntime(projectDir string) DaemonRuntimeInfo {
 	// --- 2. State file ---
 	stateFilePath := config.ResolveDaemonStatePath(projectDir)
 	if info, ok := detectFromStateFile(stateFilePath); ok {
-		return info
-	}
-
-	// --- 3. PID file (backward-compatible fallback) ---
-	dcfg, err := config.LoadDaemonConfig(projectDir)
-	if err != nil {
-		dcfg = &config.DaemonConfig{
-			Daemon: config.DaemonSettings{
-				PIDFile: ".loom/daemon.pid",
-			},
-		}
-	}
-	pidFilePath := resolvePath(projectDir, dcfg.Daemon.PIDFile)
-	if info, ok := detectFromPIDFile(pidFilePath); ok {
 		return info
 	}
 
@@ -141,29 +124,12 @@ func detectFromStateFile(stateFilePath string) (DaemonRuntimeInfo, bool) {
 	return DaemonRuntimeInfo{}, false
 }
 
-// detectFromPIDFile checks the PID file for a live process.
-func detectFromPIDFile(pidFilePath string) (DaemonRuntimeInfo, bool) {
-	data, err := os.ReadFile(pidFilePath) //nolint:gosec // controlled path
-	if err != nil {
-		return DaemonRuntimeInfo{}, false
-	}
-	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
-	if err != nil || pid <= 0 {
-		return DaemonRuntimeInfo{}, false
-	}
-	if lockfile.IsProcessRunning(pid) {
-		return DaemonRuntimeInfo{Running: true, PID: pid, Source: "pid"}, true
-	}
-	return DaemonRuntimeInfo{}, false
-}
-
 // ProtectedRuntimePaths is the set of top-level directory/file names that must
 // never be deleted by cleanup routines (git clean, stash-discard, recovery).
-// These paths contain live daemon state, persistent storage, or required config.
+// These paths contain live daemon state or persistent local runtime data.
 var ProtectedRuntimePaths = []string{
 	".loom",
 	"sessions",
-	"loom.yaml",
 	"AGENTS.md",
 }
 

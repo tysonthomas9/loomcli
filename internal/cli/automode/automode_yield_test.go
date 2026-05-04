@@ -87,7 +87,7 @@ func TestRunAutoModeLoop_YieldBeforeFirstTask(t *testing.T) {
 	os.WriteFile(yieldFile, []byte(`{"reason":"test_preempt"}`), 0600)
 	t.Setenv("LOOM_YIELD_FILE", yieldFile)
 
-	// Mock bd ready to return tasks (loop would continue without yield)
+	// Mock issue-store ready to return tasks (loop would continue without yield)
 	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 		return CommandResult{
 			Stdout: mustJSON([]backend.IssueData{

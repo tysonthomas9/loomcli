@@ -18,7 +18,7 @@ func IsEpic(issue backend.IssueData) bool {
 }
 
 // IsNonWorkType returns true if the issue type is a non-work internal type that
-// agents should never pick up. These are workflow/infrastructure beads, not tasks.
+// agents should never pick up. These are workflow/infrastructure records, not tasks.
 // SYNC: Must stay aligned with ready.go SQL exclusion list (sqlite/ready.go:48)
 // and memory storage (memory/memory.go:1174).
 func IsNonWorkType(issue backend.IssueData) bool {

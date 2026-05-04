@@ -12,9 +12,8 @@ import (
 // LoomDir returns loom's per-user data directory.
 //
 // Resolution order:
-//  1. LOOM_CONFIG_DIR env var (kept for backwards compatibility with the
-//     pre-fleet-db era — the directory now holds state.json + the
-//     embedded fleet-db data dir, NOT yaml config).
+//  1. LOOM_CONFIG_DIR env var (the directory holds state.json + the
+//     embedded fleet-db data dir, not yaml config).
 //  2. $HOME/.loom
 //
 // Returns "" if the home directory cannot be resolved AND the env var

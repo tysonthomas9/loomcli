@@ -9,7 +9,7 @@ import (
 
 // GenerateHashID creates a deterministic content-based hash ID.
 // Format: prefix-{6-8-char-hex} with progressive extension on collision
-// Examples: bd-a3f2dd (6), bd-a3f2dda (7), bd-a3f2dda8 (8)
+// Examples: TASK-a3f2dd (6), TASK-a3f2dda (7), TASK-a3f2dda8 (8)
 //
 // The hash is computed from:
 // - Title (primary identifier)
@@ -40,7 +40,7 @@ func GenerateHashID(prefix, title, description string, created time.Time, worksp
 }
 
 // GenerateChildID creates a hierarchical child ID.
-// Format: parent.N (e.g., "bd-af78e9a2.1", "bd-af78e9a2.1.2")
+// Format: parent.N (e.g., "TASK-af78e9a2.1", "TASK-af78e9a2.1.2")
 //
 // Max depth: 3 levels (prevents over-decomposition)
 // Max breadth: Unlimited (tested up to 347 children)
@@ -53,9 +53,9 @@ func GenerateChildID(parentID string, childNumber int) string {
 //
 // Examples:
 //
-//	"bd-af78e9a2" → ("bd-af78e9a2", "", 0)
-//	"bd-af78e9a2.1" → ("bd-af78e9a2", "bd-af78e9a2", 1)
-//	"bd-af78e9a2.1.2" → ("bd-af78e9a2", "bd-af78e9a2.1", 2)
+//	"TASK-af78e9a2" → ("TASK-af78e9a2", "", 0)
+//	"TASK-af78e9a2.1" → ("TASK-af78e9a2", "TASK-af78e9a2", 1)
+//	"TASK-af78e9a2.1.2" → ("TASK-af78e9a2", "TASK-af78e9a2.1", 2)
 func ParseHierarchicalID(id string) (rootID, parentID string, depth int) {
 	// Count dots to determine depth
 	depth = 0

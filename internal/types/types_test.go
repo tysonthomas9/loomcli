@@ -395,7 +395,7 @@ func TestValidateWithCustomStatuses(t *testing.T) {
 	}
 }
 
-// TestValidateForImport tests the federation trust model (bd-9ji4z):
+// TestValidateForImport tests the federation trust model (loom-9ji4z):
 // - Built-in types are validated (catch typos)
 // - Non-built-in types are trusted (child repo already validated)
 func TestValidateForImport(t *testing.T) {
@@ -614,7 +614,7 @@ func TestAgentStateIsValid(t *testing.T) {
 	}{
 		{"idle", StateIdle, true},
 		{"running", StateRunning, true},
-		{"empty", AgentState(""), true}, // empty allowed for non-agent beads
+		{"empty", AgentState(""), true}, // empty allowed for non-agent issues
 		{"invalid", AgentState("dormant"), false},
 	}
 	for _, tc := range cases {
@@ -1168,7 +1168,7 @@ func TestIsExpired(t *testing.T) {
 			expired: false,
 		},
 		{
-			name: "negative TTL means immediately expired (bd-4q8 --hard mode)",
+			name: "negative TTL means immediately expired (loom-4q8 --hard mode)",
 			issue: Issue{
 				ID:        "test-14",
 				Title:     "(deleted)",
@@ -1291,7 +1291,7 @@ func TestSetDefaults(t *testing.T) {
 	}
 }
 
-// EntityRef tests (bd-nmch: HOP entity tracking foundation)
+// EntityRef tests (loom-nmch: HOP entity tracking foundation)
 
 func TestEntityRefIsEmpty(t *testing.T) {
 	tests := []struct {
@@ -1389,7 +1389,7 @@ func TestParseEntityURI(t *testing.T) {
 		},
 		{
 			name:      "wrong prefix",
-			uri:       "beads://hop/gastown/steveyegge/polecat-nux",
+			uri:       "invalid://hop/gastown/steveyegge/polecat-nux",
 			expectErr: true,
 		},
 		{
@@ -1458,7 +1458,7 @@ func TestEntityRefRoundTrip(t *testing.T) {
 }
 
 func TestComputeContentHashWithCreator(t *testing.T) {
-	// Test that Creator field affects the content hash (bd-m7ib)
+	// Test that Creator field affects the content hash (loom-m7ib)
 	issue1 := Issue{
 		Title:     "Test Issue",
 		Status:    StatusOpen,
@@ -1496,7 +1496,7 @@ func TestComputeContentHashWithCreator(t *testing.T) {
 	}
 }
 
-// Validation tests (bd-du9h: HOP proof-of-stake)
+// Validation tests (loom-du9h: HOP proof-of-stake)
 
 func TestValidationIsValidOutcome(t *testing.T) {
 	tests := []struct {
@@ -1521,7 +1521,7 @@ func TestValidationIsValidOutcome(t *testing.T) {
 }
 
 func TestComputeContentHashWithValidations(t *testing.T) {
-	// Test that Validations field affects the content hash (bd-du9h)
+	// Test that Validations field affects the content hash (loom-du9h)
 	ts := time.Date(2025, 12, 22, 10, 30, 0, 0, time.UTC)
 
 	issue1 := Issue{
@@ -1601,7 +1601,7 @@ func TestComputeContentHashWithValidations(t *testing.T) {
 
 // TestIssueDetailsJSONStructure verifies that IssueDetails JSON serialization
 // always includes labels, dependencies, dependents, and comments fields,
-// even when they are empty arrays (GH#bd-rrtu).
+// even when they are empty arrays (GH#loom-rrtu).
 //
 // This ensures consistent JSON structure for frontend type guards.
 // The omitempty directive was removed from these fields so they always appear.

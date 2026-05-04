@@ -38,7 +38,7 @@ func TestAuth_Apply(t *testing.T) {
 }
 
 func TestBuildJSONRequest(t *testing.T) {
-	t.Run("nil body has no Content-Type", func(t *testing.T) {
+	t.Run("nil GET body has no Content-Type", func(t *testing.T) {
 		req, err := BuildJSONRequest(context.Background(), http.MethodGet, "http://x/api", Auth{}, nil)
 		if err != nil {
 			t.Fatalf("err: %v", err)
@@ -48,6 +48,15 @@ func TestBuildJSONRequest(t *testing.T) {
 		}
 		if req.Header.Get("Content-Type") != "" {
 			t.Errorf("Content-Type set on body-less request: %q", req.Header.Get("Content-Type"))
+		}
+	})
+	t.Run("nil POST body keeps content-type", func(t *testing.T) {
+		req, err := BuildJSONRequest(context.Background(), http.MethodPost, "http://x/api", Auth{}, nil)
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+		if req.Header.Get("Content-Type") != "application/json" {
+			t.Errorf("Content-Type = %q, want application/json", req.Header.Get("Content-Type"))
 		}
 	})
 	t.Run("body marshals + content-type set", func(t *testing.T) {

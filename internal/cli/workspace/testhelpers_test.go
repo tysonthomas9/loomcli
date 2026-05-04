@@ -3,11 +3,8 @@ package workspace
 import (
 	"os"
 	"os/exec"
-	"path/filepath"
 	"testing"
 	"time"
-
-	"gopkg.in/yaml.v3"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/clitest"
@@ -26,7 +23,6 @@ type RepoConfig = config.RepoConfig
 type WorkspaceConfig = config.WorkspaceConfig
 type AgentEntry = config.AgentEntry
 type RoleConfig = config.RoleConfig
-type ProjectFile = config.ProjectFile
 type MockExecRunner = clitest.MockExecRunner
 type MockGitRunner = clitest.MockGitRunner
 type MockFileSystem = clitest.MockFileSystem
@@ -40,9 +36,7 @@ type Deps = cli.Deps
 
 var (
 	LoadConfig                    = config.LoadConfig
-	SaveConfig                    = config.SaveConfig
 	ResetWorkspaceRuntimeDirCache = cli.ResetWorkspaceRuntimeDirCache
-	CurrentConfigVersion          = config.CurrentConfigVersion
 	WithDeps                      = cli.WithDeps
 	GetWorkspaceDir               = config.GetWorkspaceDir
 	GetWorktreesDir               = cli.GetWorktreesDir
@@ -57,11 +51,6 @@ func NewMockIssueBackend() *clitest.MockIssueBackend { return clitest.NewMockIss
 func slicesEqual(a, b []string) bool { return clitest.SlicesEqual(a, b) }
 
 func MockStdin(t *testing.T, input string) { testutil.MockStdin(t, input) }
-
-func useLegacyBackendBackend(t *testing.T) {
-	t.Helper()
-	t.Skip("legacy beads backend removed; workspace commands now require fleet-db store fixtures")
-}
 
 // --- Command stubs ---
 
@@ -138,19 +127,6 @@ func createGitRepo(t *testing.T, path string) {
 			t.Fatalf("git %v failed: %v\n%s", args, err, out)
 		}
 	}
-}
-
-func setupWorkspaceConfig(t *testing.T, cfg *config.LoomConfig) {
-	t.Helper()
-	configDir := t.TempDir()
-	data, err := yaml.Marshal(cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(configDir, "config.yaml"), data, 0644); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("LOOM_CONFIG_DIR", configDir)
 }
 
 type DaemonAgentStateEntry = monitor.DaemonAgentStateEntry

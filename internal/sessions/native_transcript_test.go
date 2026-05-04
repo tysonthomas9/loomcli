@@ -8,8 +8,8 @@ import (
 
 func newStoreWithSession(t *testing.T, sessionID string) (*Store, string) {
 	t.Helper()
-	beadsDir := t.TempDir()
-	store, err := NewStore(beadsDir)
+	runtimeDir := t.TempDir()
+	store, err := NewStore(runtimeDir)
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
@@ -60,8 +60,8 @@ func TestSyncNativeTranscript_MissingSrcIsNoop(t *testing.T) {
 }
 
 func TestSyncNativeTranscript_RejectsPathTraversal(t *testing.T) {
-	beadsDir := t.TempDir()
-	store, err := NewStore(beadsDir)
+	runtimeDir := t.TempDir()
+	store, err := NewStore(runtimeDir)
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
@@ -71,8 +71,8 @@ func TestSyncNativeTranscript_RejectsPathTraversal(t *testing.T) {
 }
 
 func TestSyncNativeTranscript_RejectsMissingSession(t *testing.T) {
-	beadsDir := t.TempDir()
-	store, err := NewStore(beadsDir)
+	runtimeDir := t.TempDir()
+	store, err := NewStore(runtimeDir)
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}

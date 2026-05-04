@@ -8,7 +8,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
-	"github.com/tysonthomas9/loomcli/internal/cli/config"
 )
 
 var prAll bool
@@ -30,7 +29,7 @@ Arguments:
 
 Flags:
   -a, --all          Create PRs for all worktree branches
-  -W, --workspace    Workspace to operate on (workspace mode only)
+  -W, --workspace    Workspace to operate on
 
 Examples:
   loom pr falcon                        # Create PR from falcon to main
@@ -39,19 +38,6 @@ Examples:
   loom pr --all main                    # Create PRs for all worktrees to main
   loom pr -W myworkspace falcon         # Create PR in specific workspace`,
 	Args: func(cmd *cobra.Command, args []string) error {
-		if config.IsWorkspaceMode() {
-			if prAll {
-				if len(args) > 1 {
-					return fmt.Errorf("--all flag accepts at most 1 argument (target branch)")
-				}
-				return nil
-			}
-			if len(args) < 1 || len(args) > 2 {
-				return fmt.Errorf("requires 1-2 arguments: <worktree> [target]")
-			}
-			return nil
-		}
-		// Legacy mode
 		if prAll {
 			if len(args) > 1 {
 				return fmt.Errorf("--all flag accepts at most 1 argument (target branch)")
@@ -82,11 +68,7 @@ func runPR(cmd *cobra.Command, args []string) error {
 		os.Exit(1)
 	}
 
-	if config.IsWorkspaceMode() {
-		return runPRWorkspaceMode(deps, args, all, ws)
-	}
-
-	return runPRLegacyMode(deps, args, all)
+	return runPRWorkspaceMode(deps, args, all, ws)
 }
 
 func runPRWorkspaceMode(deps *cli.Deps, args []string, all bool, ws string) error {
@@ -125,28 +107,6 @@ func runPRWorkspaceMode(deps *cli.Deps, args []string, all bool, ws string) erro
 	}
 
 	prWorkspaceRepos(deps, resolver, sourceBranch, targetBranch)
-	return nil
-}
-
-func runPRLegacyMode(deps *cli.Deps, args []string, all bool) error {
-	if all {
-		targetBranch := ""
-		if len(args) == 1 {
-			targetBranch = args[0]
-		}
-		prAllWorktrees(deps, targetBranch)
-		return nil
-	}
-
-	sourceBranch := args[0]
-	targetBranch := ""
-	if len(args) == 2 {
-		targetBranch = args[1]
-	}
-	if targetBranch == "" {
-		targetBranch = "main"
-	}
-	prWorktree(deps, sourceBranch, targetBranch)
 	return nil
 }
 
@@ -330,109 +290,6 @@ func createPR(deps *cli.Deps, repoPath, sourceBranch, targetBranch, remote strin
 	prURL := strings.TrimSpace(result.Stdout)
 	fmt.Printf("✓ PR created: %s\n", prURL)
 	return prURL, nil
-}
-
-func createPRLegacy(deps *cli.Deps, repoPath, sourceBranch, targetBranch string) (string, error) {
-	// Validate refs
-	if err := validateGitRef(sourceBranch); err != nil {
-		return "", err
-	}
-	if err := validateGitRef(targetBranch); err != nil {
-		return "", err
-	}
-
-	fmt.Println("=========================================")
-	fmt.Printf("PR: %s -> %s\n", sourceBranch, targetBranch)
-	fmt.Println("=========================================")
-
-	// Fetch latest
-	if err := gitFetch(deps, repoPath); err != nil {
-		return "", fmt.Errorf("fetching: %v", err)
-	}
-
-	// Check if there are commits to create PR for
-	hasCommits, err := hasCommitsBetweenDeps(deps, repoPath, targetBranch, sourceBranch)
-	if err == nil && !hasCommits {
-		fmt.Printf("✓ Already up to date (no new commits in %s)\n", sourceBranch)
-		return "", nil
-	}
-
-	// Push source branch to remote
-	if err := gitPush(deps, repoPath, sourceBranch); err != nil {
-		return "", fmt.Errorf("pushing branch: %v", err)
-	}
-
-	// Generate PR title and body
-	title, body := generatePRInfo(deps, repoPath, "origin", targetBranch, sourceBranch)
-
-	// Create PR using gh CLI
-	result := deps.Exec.Run(repoPath, "gh", "pr", "create",
-		"--base", targetBranch,
-		"--head", sourceBranch,
-		"--title", title,
-		"--body", body)
-
-	if result.Err != nil {
-		// Check if PR already exists
-		errMsg := result.Stderr + result.Stdout
-		if strings.Contains(errMsg, "already exists") {
-			return getExistingPRURL(deps, repoPath, sourceBranch)
-		}
-		return "", fmt.Errorf("creating PR: %s", strings.TrimSpace(errMsg))
-	}
-
-	prURL := strings.TrimSpace(result.Stdout)
-	fmt.Printf("✓ PR created: %s\n", prURL)
-	return prURL, nil
-}
-
-func prAllWorktrees(deps *cli.Deps, targetBranch string) {
-	fmt.Println("=========================================")
-	fmt.Printf("Creating PRs for all worktrees -> %s\n", targetBranchDisplay(targetBranch))
-	fmt.Println("=========================================")
-	fmt.Println("")
-
-	worktrees, err := cli.DiscoverWorktrees()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error discovering worktrees: %v\n", err)
-		os.Exit(1)
-	}
-
-	if len(worktrees) == 0 {
-		fmt.Println("No worktrees found.")
-		return
-	}
-
-	target := targetBranch
-	if target == "" {
-		target = "main"
-	}
-
-	for _, wt := range worktrees {
-		prWorktree(deps, wt.Branch, target)
-		fmt.Println("")
-	}
-
-	fmt.Println("=========================================")
-	fmt.Printf("All worktree PRs created!\n")
-	fmt.Println("=========================================")
-}
-
-func prWorktree(deps *cli.Deps, sourceBranch, targetBranch string) {
-	scriptDir, err := cli.GetScriptDir()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
-	}
-
-	url, prErr := createPRLegacy(deps, scriptDir, sourceBranch, targetBranch)
-	if prErr != nil {
-		fmt.Fprintf(os.Stderr, "Error creating PR: %v\n", prErr)
-		return
-	}
-	if url != "" {
-		fmt.Printf("PR URL: %s\n", url)
-	}
 }
 
 func generatePRInfo(deps *cli.Deps, repoPath, remote, targetBranch, sourceBranch string) (string, string) {

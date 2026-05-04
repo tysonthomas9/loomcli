@@ -57,7 +57,7 @@ func TestHandleAgentCheckpoint_YieldExit(t *testing.T) {
 		PID:       os.Getpid(),
 		Command:   "task",
 		AgentName: "falcon",
-		TaskID:    "bd-yield-100",
+		TaskID:    "loom-yield-100",
 		TaskTitle: "Add yield support",
 		StartedAt: time.Now(),
 	})
@@ -90,8 +90,8 @@ func TestHandleAgentCheckpoint_YieldExit(t *testing.T) {
 	if cp.YieldReason != "config_removed" {
 		t.Errorf("YieldReason: got %q, want %q", cp.YieldReason, "config_removed")
 	}
-	if cp.TaskID != "bd-yield-100" {
-		t.Errorf("TaskID: got %q, want %q", cp.TaskID, "bd-yield-100")
+	if cp.TaskID != "loom-yield-100" {
+		t.Errorf("TaskID: got %q, want %q", cp.TaskID, "loom-yield-100")
 	}
 	if cp.AgentName != "falcon" {
 		t.Errorf("AgentName: got %q, want %q", cp.AgentName, "falcon")
@@ -109,7 +109,7 @@ func TestHandleAgentCheckpoint_NormalSuccess(t *testing.T) {
 		PID:       os.Getpid(),
 		Command:   "task",
 		AgentName: "falcon",
-		TaskID:    "bd-done-200",
+		TaskID:    "loom-done-200",
 		TaskTitle: "Completed task",
 		StartedAt: time.Now(),
 	})
@@ -118,7 +118,7 @@ func TestHandleAgentCheckpoint_NormalSuccess(t *testing.T) {
 	lockDir := cli.ResolveLockDir(tmpDir)
 	oldCp := &config.Checkpoint{
 		AgentName: "falcon",
-		TaskID:    "bd-done-200",
+		TaskID:    "loom-done-200",
 		ExitCode:  1,
 		Timestamp: time.Now(),
 	}
@@ -155,7 +155,7 @@ func TestHandleAgentCheckpoint_CrashWithYieldFile(t *testing.T) {
 		PID:       os.Getpid(),
 		Command:   "task",
 		AgentName: "hawk",
-		TaskID:    "bd-crash-300",
+		TaskID:    "loom-crash-300",
 		TaskTitle: "Crashed task",
 		StartedAt: time.Now(),
 	})
@@ -191,8 +191,8 @@ func TestHandleAgentCheckpoint_CrashWithYieldFile(t *testing.T) {
 	if cp.YieldReason != "" {
 		t.Errorf("YieldReason should be empty for crash checkpoint, got %q", cp.YieldReason)
 	}
-	if cp.TaskID != "bd-crash-300" {
-		t.Errorf("TaskID: got %q, want %q", cp.TaskID, "bd-crash-300")
+	if cp.TaskID != "loom-crash-300" {
+		t.Errorf("TaskID: got %q, want %q", cp.TaskID, "loom-crash-300")
 	}
 }
 
@@ -268,7 +268,7 @@ func TestSaveYieldCheckpoint_CapturesEpicID(t *testing.T) {
 		PID:       os.Getpid(),
 		Command:   "task",
 		AgentName: "falcon",
-		TaskID:    "bd-epic-task-1",
+		TaskID:    "loom-epic-task-1",
 		TaskTitle: "Epic task",
 		StartedAt: time.Now(),
 	})
@@ -280,7 +280,7 @@ func TestSaveYieldCheckpoint_CapturesEpicID(t *testing.T) {
 	ap := &AgentProcess{
 		Entry:          config.AgentEntry{Worktree: "falcon"},
 		WorktreePath:   tmpDir,
-		AssignedEpicID: "bd-epic-42",
+		AssignedEpicID: "loom-epic-42",
 	}
 
 	s.saveYieldCheckpoint(ap)
@@ -294,8 +294,8 @@ func TestSaveYieldCheckpoint_CapturesEpicID(t *testing.T) {
 		t.Fatal("Expected checkpoint to be saved, got nil")
 	}
 
-	if cp.EpicID != "bd-epic-42" {
-		t.Errorf("EpicID: got %q, want %q", cp.EpicID, "bd-epic-42")
+	if cp.EpicID != "loom-epic-42" {
+		t.Errorf("EpicID: got %q, want %q", cp.EpicID, "loom-epic-42")
 	}
 	if cp.YieldReason != "higher_priority" {
 		t.Errorf("YieldReason: got %q, want %q", cp.YieldReason, "higher_priority")
@@ -310,7 +310,7 @@ func TestSaveYieldCheckpoint_NoYieldFile_DefaultsToUnknown(t *testing.T) {
 		PID:       os.Getpid(),
 		Command:   "task",
 		AgentName: "falcon",
-		TaskID:    "bd-noyield-1",
+		TaskID:    "loom-noyield-1",
 		TaskTitle: "No yield file task",
 		StartedAt: time.Now(),
 	})

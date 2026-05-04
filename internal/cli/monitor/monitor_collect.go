@@ -21,6 +21,16 @@ func CollectMonitorData(readyLimit int, branch string) *MonitorData {
 	return collectMonitorDataDeps(&d, readyLimit, branch)
 }
 
+func CollectMonitorDataWithIssueBackend(issueBackend backend.IssueBackend, readyLimit int, branch string) *MonitorData {
+	d := *cli.GetDeps(nil)
+	if issueBackend != nil {
+		d.IssueBackend = issueBackend
+	} else {
+		d.IssueBackend = cli.DefaultIssueBackend()
+	}
+	return collectMonitorDataDeps(&d, readyLimit, branch)
+}
+
 func collectMonitorDataDeps(deps *cli.Deps, readyLimit int, branch string) *MonitorData {
 	data := &MonitorData{Timestamp: time.Now()}
 
@@ -65,18 +75,6 @@ func collectMonitorDataDeps(deps *cli.Deps, readyLimit int, branch string) *Moni
 	data.SyncStatus = completeSyncStatus(syncInfo, data.Agents)
 	data.Stats = stats
 
-	// Compute Remaining as the sum of work queue categories so it always tallies.
-	// Store stats compute Remaining by subtraction, which can disagree with
-	// work queue counts due to issues falling between ready and blocked views.
-	data.Stats.Remaining = data.Tasks.NeedsPlanning + data.Tasks.ReadyToImplement +
-		data.Tasks.NeedReview + data.Tasks.InProgress + data.Tasks.Backlog
-	data.Stats.Total = data.Stats.Remaining + data.Stats.Closed
-	if data.Stats.Total > 0 {
-		data.Stats.Completion = float64(data.Stats.Closed) / float64(data.Stats.Total) * 100
-	} else {
-		data.Stats.Completion = 0
-	}
-
 	return data
 }
 
@@ -91,9 +89,8 @@ func collectAgentStatusDeps(deps *cli.Deps, agentTasks map[string]TaskInfo, bran
 	if err != nil {
 		return nil, nil
 	}
-	// In workspace mode, the config may list both source repos and agent
-	// worktrees. Exclude source repos (non-linked) when linked worktrees
-	// exist. In legacy mode all entries are regular repos — keep them all.
+	// The workspace config may list both source repos and agent worktrees.
+	// Exclude source repos when linked worktrees exist.
 	hasLinked := false
 	for _, wt := range allWorktrees {
 		if wt.IsLinkedWorktree {

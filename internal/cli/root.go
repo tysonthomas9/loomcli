@@ -14,9 +14,6 @@ var (
 	Build   = "unknown"
 )
 
-// worktreesFlag stores the --worktrees flag value for override
-var worktreesFlag string
-
 // serverFlag stores the --server flag value (remote loom server base URL).
 // When non-empty, the CLI routes issue operations through the api backend
 // instead of the local fleet-db backend. Mirrored into LOOM_SERVER_URL in
@@ -24,8 +21,7 @@ var worktreesFlag string
 var serverFlag string
 
 // workspaceFlag stores the --workspace flag value (target workspace ID for
-// --server mode). No shorthand — `-w` is already taken by --worktrees at
-// rootCmd.PersistentFlags below.
+// --server mode).
 var workspaceFlag string
 
 var rootCmd = &cobra.Command{
@@ -33,13 +29,10 @@ var rootCmd = &cobra.Command{
 	Short: "Agent management CLI for parallel Claude Code workflows",
 	Long: `loom - Agent Management CLI
 
-Manage Claude Code agents working in parallel across git worktrees.
+Manage Claude Code agents working in parallel across workspace repos.
 
 GETTING STARTED
-  1. Create worktrees for parallel agent work:
-     mkdir -p worktrees
-     git worktree add ./worktrees/falcon -b falcon
-     git worktree add ./worktrees/nova -b nova
+  1. Select a FleetDB-backed workspace with registered repos.
 
   2. Create tasks for agents to work on:
      loom task create --title="Add login feature" --type=feature --priority=2
@@ -50,8 +43,7 @@ GETTING STARTED
      loom task falcon    # Implements approved design
 
 KEY CONCEPTS
-  Worktrees    Isolated git directories (./worktrees/<name>) where agents
-               work independently. Each has its own branch.
+  Workspaces   FleetDB-backed repo groups where agents work independently.
 
   Agents       Claude processes that work on tasks:
                - 'plan' agent: researches and creates designs
@@ -73,16 +65,14 @@ COMMANDS
   pull         Pull integration branch into worktrees with AI conflict resolution
   sync         Full sync: push all completed work, then pull into all worktrees
   reset        Hard reset worktrees to a specific branch
-  list         List all worktrees and their status
+  list         List all agents and their status
 
 GLOBAL FLAGS
-  -w, --worktrees        Override worktrees directory (takes precedence over env)
-      --backend          AI backend CLI (claude, codex, opencode). Env: LOOM_BACKEND
+      --backend          AI backend CLI (codex, claude, opencode). Env: LOOM_BACKEND
 
 ENVIRONMENT VARIABLES
   LOOM_DEFAULT_BRANCH    Default integration branch (default: main)
-  LOOM_WORKTREES_DIR     Worktrees directory (default: ./worktrees)
-  LOOM_BACKEND           AI backend CLI to use (default: claude)
+  LOOM_BACKEND           AI backend CLI to use (default: codex)
 
 EXAMPLES
   loom plan falcon              # Run planning agent in falcon worktree
@@ -103,8 +93,7 @@ EXAMPLES
 
 func init() {
 	rootCmd.Flags().BoolP("version", "v", false, "Print version information")
-	rootCmd.PersistentFlags().StringVarP(&worktreesFlag, "worktrees", "w", "", "Override worktrees directory (takes precedence over LOOM_WORKTREES_DIR)")
-	rootCmd.PersistentFlags().StringVar(&backendFlag, "backend", "", "AI backend CLI to use (claude, codex, opencode). Env: LOOM_BACKEND")
+	rootCmd.PersistentFlags().StringVar(&backendFlag, "backend", "", "AI backend CLI to use (codex, claude, opencode). Env: LOOM_BACKEND")
 	rootCmd.PersistentFlags().StringVar(&logFormat, "log-format", "text", "Log format (text|json)")
 	rootCmd.PersistentFlags().StringVar(&logOutput, "log-output", "stderr", "Log output destination (stderr|<filepath>)")
 	rootCmd.PersistentFlags().StringVar(&serverFlag, "server", "", "Remote loom server base URL. When set, CLI uses HTTP API backend instead of local FleetDB. Env: LOOM_SERVER_URL")
@@ -182,8 +171,10 @@ func WorktreeCompletion(cmd *cobra.Command, args []string, toComplete string) ([
 	seen := make(map[string]bool)
 	var completions []string
 
-	// In workspace mode, include workspace names first
-	resolver, _ := NewResolver()
+	resolver, err := NewResolver()
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
 	for _, name := range resolver.WorkspaceNames() {
 		completions = append(completions, name+"\tworkspace")
 		seen[name] = true

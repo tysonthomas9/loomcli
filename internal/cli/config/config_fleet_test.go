@@ -1,212 +1,53 @@
 package config
 
-import (
-	"testing"
-)
+import "testing"
 
-func TestOverlayFleetSettings_Empty(t *testing.T) {
-	dst := &FleetSettings{
-		URL:       "https://fleet.example.com",
-		Workspace: "prod",
-		APIKey:    "secret-key",
-	}
-	src := &FleetSettings{} // all empty
-
-	overlayFleetSettings(dst, src)
-
-	if dst.URL != "https://fleet.example.com" {
-		t.Errorf("URL should remain, got %q", dst.URL)
-	}
-	if dst.Workspace != "prod" {
-		t.Errorf("Workspace should remain, got %q", dst.Workspace)
-	}
-	if dst.APIKey != "secret-key" {
-		t.Errorf("APIKey should remain, got %q", dst.APIKey)
-	}
-}
-
-func TestOverlayFleetSettings_Full(t *testing.T) {
-	dst := &FleetSettings{
-		URL:       "https://old.example.com",
-		Workspace: "old-ws",
-		APIKey:    "old-key",
-	}
-	src := &FleetSettings{
-		URL:       "https://new.example.com",
-		Workspace: "new-ws",
-		APIKey:    "new-key",
-	}
-
-	overlayFleetSettings(dst, src)
-
-	if dst.URL != "https://new.example.com" {
-		t.Errorf("URL = %q, want https://new.example.com", dst.URL)
-	}
-	if dst.Workspace != "new-ws" {
-		t.Errorf("Workspace = %q, want new-ws", dst.Workspace)
-	}
-	if dst.APIKey != "new-key" {
-		t.Errorf("APIKey = %q, want new-key", dst.APIKey)
-	}
-}
-
-func TestOverlayFleetSettings_Partial(t *testing.T) {
-	dst := &FleetSettings{
-		URL:       "https://keep.example.com",
-		Workspace: "keep-ws",
-		APIKey:    "keep-key",
-	}
-	src := &FleetSettings{
-		URL: "https://override.example.com",
-		// Workspace and APIKey left empty
-	}
-
-	overlayFleetSettings(dst, src)
-
-	if dst.URL != "https://override.example.com" {
-		t.Errorf("URL should be overridden, got %q", dst.URL)
-	}
-	if dst.Workspace != "keep-ws" {
-		t.Errorf("Workspace should be preserved, got %q", dst.Workspace)
-	}
-	if dst.APIKey != "keep-key" {
-		t.Errorf("APIKey should be preserved, got %q", dst.APIKey)
-	}
-}
-
-func TestOverlayFleetSettings_NilSafe(t *testing.T) {
-	// Neither should panic
-	overlayFleetSettings(nil, nil)
-	overlayFleetSettings(nil, &FleetSettings{URL: "https://x.com"})
-	overlayFleetSettings(&FleetSettings{}, nil)
+func clearFleetEnv(t *testing.T) {
+	t.Helper()
+	t.Setenv("LOOM_FLEET_URL", "")
+	t.Setenv("LOOM_FLEET_WORKSPACE", "")
+	t.Setenv("LOOM_FLEET_API_KEY", "")
+	t.Setenv("LOOM_FLEET_ACTOR", "")
+	t.Setenv("LOOM_AGENT_NAME", "")
 }
 
 func TestResolveFleetConfig_Defaults(t *testing.T) {
-	cfg := ResolveFleetConfig(nil)
+	clearFleetEnv(t)
+
+	cfg := ResolveFleetConfig(&DaemonSettings{})
 
 	if cfg.Workspace != "default" {
-		t.Errorf("Workspace = %q, want %q", cfg.Workspace, "default")
+		t.Errorf("Workspace = %q, want default", cfg.Workspace)
 	}
-	if cfg.URL != "" {
-		t.Errorf("URL = %q, want empty", cfg.URL)
-	}
-	if cfg.APIKey != "" {
-		t.Errorf("APIKey = %q, want empty", cfg.APIKey)
+	if cfg.URL != "" || cfg.APIKey != "" || cfg.Actor != "" {
+		t.Errorf("unexpected fleet config defaults: %+v", cfg)
 	}
 }
 
-func TestResolveFleetConfig_Defaults_NilFleet(t *testing.T) {
-	daemon := &DaemonSettings{Fleet: nil}
-	cfg := ResolveFleetConfig(daemon)
-
-	if cfg.Workspace != "default" {
-		t.Errorf("Workspace = %q, want %q", cfg.Workspace, "default")
-	}
-	if cfg.URL != "" {
-		t.Errorf("URL = %q, want empty", cfg.URL)
-	}
-	if cfg.APIKey != "" {
-		t.Errorf("APIKey = %q, want empty", cfg.APIKey)
-	}
-}
-
-func TestResolveFleetConfig_FromYAML(t *testing.T) {
-	daemon := &DaemonSettings{
-		Fleet: &FleetSettings{
-			URL:       "https://fleet.example.com",
-			Workspace: "staging",
-			APIKey:    "yaml-key",
-		},
-	}
-
-	cfg := ResolveFleetConfig(daemon)
-
-	if cfg.URL != "https://fleet.example.com" {
-		t.Errorf("URL = %q, want https://fleet.example.com", cfg.URL)
-	}
-	if cfg.Workspace != "staging" {
-		t.Errorf("Workspace = %q, want staging", cfg.Workspace)
-	}
-	if cfg.APIKey != "yaml-key" {
-		t.Errorf("APIKey = %q, want yaml-key", cfg.APIKey)
-	}
-}
-
-func TestResolveFleetConfig_EnvOverrides(t *testing.T) {
-	daemon := &DaemonSettings{
-		Fleet: &FleetSettings{
-			URL:       "https://yaml.example.com",
-			Workspace: "yaml-ws",
-			APIKey:    "yaml-key",
-		},
-	}
-
-	t.Setenv("LOOM_FLEET_URL", "https://env.example.com")
-	t.Setenv("LOOM_FLEET_WORKSPACE", "env-ws")
-	t.Setenv("LOOM_FLEET_API_KEY", "env-key")
-
-	cfg := ResolveFleetConfig(daemon)
-
-	if cfg.URL != "https://env.example.com" {
-		t.Errorf("URL = %q, want https://env.example.com", cfg.URL)
-	}
-	if cfg.Workspace != "env-ws" {
-		t.Errorf("Workspace = %q, want env-ws", cfg.Workspace)
-	}
-	if cfg.APIKey != "env-key" {
-		t.Errorf("APIKey = %q, want env-key", cfg.APIKey)
-	}
-}
-
-func TestResolveFleetConfig_URLTrailingSlash(t *testing.T) {
-	daemon := &DaemonSettings{
-		Fleet: &FleetSettings{
-			URL: "https://fleet.example.com/",
-		},
-	}
-
-	cfg := ResolveFleetConfig(daemon)
-
-	if cfg.URL != "https://fleet.example.com" {
-		t.Errorf("URL = %q, want trailing slash trimmed to https://fleet.example.com", cfg.URL)
-	}
-}
-
-func TestResolveFleetConfig_MultipleTrailingSlashes(t *testing.T) {
-	daemon := &DaemonSettings{
-		Fleet: &FleetSettings{
-			URL: "https://fleet.example.com///",
-		},
-	}
-
-	cfg := ResolveFleetConfig(daemon)
-
-	if cfg.URL != "https://fleet.example.com" {
-		t.Errorf("URL = %q, want multiple trailing slashes trimmed to https://fleet.example.com", cfg.URL)
-	}
-}
-
-func TestResolveFleetConfig_EnvURLTrailingSlash(t *testing.T) {
-	t.Setenv("LOOM_FLEET_URL", "https://env.example.com/")
+func TestResolveFleetConfig_Env(t *testing.T) {
+	clearFleetEnv(t)
+	t.Setenv("LOOM_FLEET_URL", "https://fleet.example.com///")
+	t.Setenv("LOOM_FLEET_WORKSPACE", "prod")
+	t.Setenv("LOOM_FLEET_API_KEY", "secret")
+	t.Setenv("LOOM_FLEET_ACTOR", "operator")
 
 	cfg := ResolveFleetConfig(nil)
 
-	if cfg.URL != "https://env.example.com" {
-		t.Errorf("URL = %q, want trailing slash trimmed from env override", cfg.URL)
+	if cfg.URL != "https://fleet.example.com" {
+		t.Errorf("URL = %q, want trimmed fleet URL", cfg.URL)
+	}
+	if cfg.Workspace != "prod" || cfg.APIKey != "secret" || cfg.Actor != "operator" {
+		t.Errorf("env fleet config = %+v", cfg)
 	}
 }
 
-func TestResolveFleetConfig_EmptyWorkspaceDefaults(t *testing.T) {
-	daemon := &DaemonSettings{
-		Fleet: &FleetSettings{
-			URL: "https://fleet.example.com",
-			// Workspace left empty
-		},
-	}
+func TestResolveFleetConfig_AgentNameActorFallback(t *testing.T) {
+	clearFleetEnv(t)
+	t.Setenv("LOOM_AGENT_NAME", "nova")
 
-	cfg := ResolveFleetConfig(daemon)
+	cfg := ResolveFleetConfig(nil)
 
-	if cfg.Workspace != "default" {
-		t.Errorf("Workspace = %q, want %q when not set", cfg.Workspace, "default")
+	if cfg.Actor != "nova" {
+		t.Errorf("Actor = %q, want LOOM_AGENT_NAME fallback", cfg.Actor)
 	}
 }

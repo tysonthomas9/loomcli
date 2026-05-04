@@ -46,7 +46,7 @@ func TestRunClaim_Success(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	runClaim(nil, []string{"bd-123"})
+	runClaim(nil, []string{"loom-123"})
 
 	w.Close()
 	os.Stdout = oldStdout
@@ -55,8 +55,8 @@ func TestRunClaim_Success(t *testing.T) {
 	output := buf.String()
 
 	// Verify output
-	if !strings.Contains(output, "Claimed task: bd-123") {
-		t.Errorf("expected 'Claimed task: bd-123' in output, got: %s", output)
+	if !strings.Contains(output, "Claimed task: loom-123") {
+		t.Errorf("expected 'Claimed task: loom-123' in output, got: %s", output)
 	}
 	if !strings.Contains(output, "Title: Test Task Title") {
 		t.Errorf("expected 'Title: Test Task Title' in output, got: %s", output)
@@ -71,8 +71,8 @@ func TestRunClaim_Success(t *testing.T) {
 	if err := json.Unmarshal(data, &updatedLock); err != nil {
 		t.Fatalf("failed to parse lock file: %v", err)
 	}
-	if updatedLock.TaskID != "bd-123" {
-		t.Errorf("expected TaskID 'bd-123', got %q", updatedLock.TaskID)
+	if updatedLock.TaskID != "loom-123" {
+		t.Errorf("expected TaskID 'loom-123', got %q", updatedLock.TaskID)
 	}
 	if updatedLock.TaskTitle != "Test Task Title" {
 		t.Errorf("expected TaskTitle 'Test Task Title', got %q", updatedLock.TaskTitle)
@@ -101,7 +101,7 @@ func TestRunClaim_NoTitle(t *testing.T) {
 	// Mock IssueTracker returning error
 	mockTracker := &MockIssueBackend{
 		GetFn: func(ctx context.Context, id string) (*backend.IssueDetailData, error) {
-			return nil, errors.New("bd error")
+			return nil, errors.New("issue lookup error")
 		},
 	}
 	setDefaultIssueBackend(mockTracker)
@@ -112,7 +112,7 @@ func TestRunClaim_NoTitle(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	runClaim(nil, []string{"bd-456"})
+	runClaim(nil, []string{"loom-456"})
 
 	w.Close()
 	os.Stdout = oldStdout
@@ -121,11 +121,11 @@ func TestRunClaim_NoTitle(t *testing.T) {
 	output := buf.String()
 
 	// Should show task ID but not title
-	if !strings.Contains(output, "Claimed task: bd-456") {
-		t.Errorf("expected 'Claimed task: bd-456' in output, got: %s", output)
+	if !strings.Contains(output, "Claimed task: loom-456") {
+		t.Errorf("expected 'Claimed task: loom-456' in output, got: %s", output)
 	}
 	if strings.Contains(output, "Title:") {
-		t.Errorf("should not show title when bd show fails, got: %s", output)
+		t.Errorf("should not show title when issue lookup fails, got: %s", output)
 	}
 }
 
@@ -138,22 +138,22 @@ func TestGetTaskTitle_Success(t *testing.T) {
 	setDefaultIssueBackend(mock)
 	t.Cleanup(func() { setDefaultIssueBackend(nil) })
 
-	title := getTaskTitle("bd-789")
+	title := getTaskTitle("loom-789")
 	if title != "My Task Title" {
 		t.Errorf("expected 'My Task Title', got %q", title)
 	}
 }
 
-func TestGetTaskTitle_BdError(t *testing.T) {
+func TestGetTaskTitle_IssueLookupError(t *testing.T) {
 	mock := &MockIssueBackend{
 		GetFn: func(ctx context.Context, id string) (*backend.IssueDetailData, error) {
-			return nil, errors.New("bd error")
+			return nil, errors.New("issue lookup error")
 		},
 	}
 	setDefaultIssueBackend(mock)
 	t.Cleanup(func() { setDefaultIssueBackend(nil) })
 
-	title := getTaskTitle("bd-error")
+	title := getTaskTitle("loom-error")
 	if title != "" {
 		t.Errorf("expected empty string on error, got %q", title)
 	}
@@ -168,7 +168,7 @@ func TestGetTaskTitle_NilIssue(t *testing.T) {
 	setDefaultIssueBackend(mock)
 	t.Cleanup(func() { setDefaultIssueBackend(nil) })
 
-	title := getTaskTitle("bd-empty")
+	title := getTaskTitle("loom-empty")
 	if title != "" {
 		t.Errorf("expected empty string on nil issue, got %q", title)
 	}
@@ -185,8 +185,8 @@ func TestGetTaskTitle_PassesCorrectID(t *testing.T) {
 	setDefaultIssueBackend(mock)
 	t.Cleanup(func() { setDefaultIssueBackend(nil) })
 
-	getTaskTitle("bd-123")
-	if capturedID != "bd-123" {
-		t.Errorf("expected GetIssue called with 'bd-123', got %q", capturedID)
+	getTaskTitle("loom-123")
+	if capturedID != "loom-123" {
+		t.Errorf("expected GetIssue called with 'loom-123', got %q", capturedID)
 	}
 }

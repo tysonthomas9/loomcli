@@ -19,7 +19,7 @@ import (
 // Daemon coordinates multiple supervised agents.
 type Daemon struct {
 	config     *cfgpkg.DaemonConfig
-	projectDir string // directory containing loom.yaml
+	projectDir string // workspace runtime directory
 
 	// sup is the agent supervisor — owns the agent list, supervision goroutines,
 	// health checking, restart policy, and drain logic.
@@ -53,10 +53,8 @@ type Daemon struct {
 
 	issueBackend backend.IssueBackend // pluggable issue data access
 
-	// store is the fleet-db backed source of agent assignments + daemon
-	// profile (Phase 4 of fleet-db migration). When non-nil, the
-	// reconciler may consult store.Agents().List in addition to the
-	// legacy cfgpkg.DaemonConfig path. nil = legacy yaml-only mode.
+	// store is the fleet-db backed source of agent assignments and daemon
+	// profile data.
 	store store.Store
 }
 
@@ -77,17 +75,12 @@ func (d *Daemon) emitEvent(evt events.Event) {
 // NewDaemon creates a daemon from the loaded config.
 // If eventBus is nil, a NopBus is used (events are silently discarded).
 // issueBackend provides issue data access for epic transition checks.
-//
-// Phase 4 of the loom -> fleet-db migration: callers may pass a non-nil
-// st (fleet-db Store) so the reconciler can consult store.Agents().List
-// in addition to the legacy cfgpkg.DaemonConfig path. The full switch
-// to store-only is gated on Phase 6 (.25) which deletes config.Agents.
 func NewDaemon(config *cfgpkg.DaemonConfig, projectDir string, eventBus events.Emitter, issueBackend backend.IssueBackend, st store.Store) (*Daemon, error) {
 	if config == nil {
 		return nil, fmt.Errorf("daemon config is nil")
 	}
 	if len(config.Agents) == 0 {
-		return nil, fmt.Errorf("no agents configured in loom.yaml")
+		return nil, fmt.Errorf("no agents configured")
 	}
 
 	if eventBus == nil {
@@ -202,10 +195,8 @@ func (d *Daemon) isAgentRunning(name string) bool {
 }
 
 // agentExistsInConfig returns true if an agent with the given name
-// exists in the current config. When a fleet-db Store is wired in,
-// also checks store.Agents() so reconciles stay correct after store
-// CRUD writes that haven't been mirrored into yaml yet (Phase 4
-// migration window).
+// exists in the current config. When a fleet-db Store is wired in, also checks
+// store.Agents() so reconciles stay correct after store CRUD writes.
 func (d *Daemon) agentExistsInConfig(name string) bool {
 	cfg := d.configSnapshot()
 	for _, agent := range cfg.Agents {
@@ -222,8 +213,7 @@ func (d *Daemon) agentExistsInConfig(name string) bool {
 }
 
 // agentExistsInStore reports whether the named agent is registered in
-// the store for the daemon's workspace. Best-effort: store-side errors
-// are treated as "not found" so the legacy path can still answer.
+// the store for the daemon's workspace.
 func (d *Daemon) agentExistsInStore(name string) bool {
 	if d.store == nil || d.sup == nil || d.sup.WorkspaceID == "" {
 		return false

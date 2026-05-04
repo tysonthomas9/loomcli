@@ -37,9 +37,9 @@ func TestRunTask_SingleTask_NoTasksAvailable(t *testing.T) {
 	taskAutoMode = false
 	taskDaemonMode = false
 
-	// Mock bd ready returning empty array (no tasks)
+	// Mock issue-store ready returning empty array (no tasks).
 	mock := NewCommandMock(t, []CommandStub{
-		{Name: "bd", Args: []string{"ready", "--json", "--limit", "100"}, Stdout: "[]"},
+		{Name: "issue-store", Args: []string{"ready", "--json", "--limit", "100"}, Stdout: "[]"},
 	})
 	mock.Install()
 
@@ -80,10 +80,10 @@ func TestRunTask_SingleTask_Success(t *testing.T) {
 	taskAutoMode = false
 	taskDaemonMode = false
 
-	// Mock bd ready with available task (status=open, has design, no needs-revision label)
-	taskJSON := `[{"id":"bd-123","status":"open","issue_type":"task","title":"Test task","design":"Implementation plan here"}]`
+	// Mock issue-store ready with available task (status=open, has design, no needs-revision label).
+	taskJSON := `[{"id":"loom-123","status":"open","issue_type":"task","title":"Test task","design":"Implementation plan here"}]`
 	mock := NewCommandMock(t, []CommandStub{
-		{Name: "bd", Args: []string{"ready", "--json", "--limit", "100"}, Stdout: taskJSON},
+		{Name: "issue-store", Args: []string{"ready", "--json", "--limit", "100"}, Stdout: taskJSON},
 		{Name: "git", Args: []string{"rev-parse", "HEAD"}, Stdout: "abc123\n"},
 		{Name: "git", Args: []string{"diff", "--numstat", "abc123..HEAD"}, Stdout: ""},
 	})
@@ -195,10 +195,10 @@ func TestRunTask_SkipsEpics(t *testing.T) {
 	taskAutoMode = false
 	taskDaemonMode = false
 
-	// Mock bd ready with only an epic (should be skipped)
-	taskJSON := `[{"id":"bd-123","status":"open","issue_type":"epic","title":"Test epic","design":"Some design"}]`
+	// Mock issue-store ready with only an epic (should be skipped).
+	taskJSON := `[{"id":"loom-123","status":"open","issue_type":"epic","title":"Test epic","design":"Some design"}]`
 	mock := NewCommandMock(t, []CommandStub{
-		{Name: "bd", Args: []string{"ready", "--json", "--limit", "100"}, Stdout: taskJSON},
+		{Name: "issue-store", Args: []string{"ready", "--json", "--limit", "100"}, Stdout: taskJSON},
 	})
 	mock.Install()
 
@@ -239,10 +239,10 @@ func TestRunTask_SkipsTasksWithoutDesign(t *testing.T) {
 	taskAutoMode = false
 	taskDaemonMode = false
 
-	// Mock bd ready with task that has no design
-	taskJSON := `[{"id":"bd-123","status":"open","issue_type":"task","title":"Test task","design":""}]`
+	// Mock issue-store ready with task that has no design.
+	taskJSON := `[{"id":"loom-123","status":"open","issue_type":"task","title":"Test task","design":""}]`
 	mock := NewCommandMock(t, []CommandStub{
-		{Name: "bd", Args: []string{"ready", "--json", "--limit", "100"}, Stdout: taskJSON},
+		{Name: "issue-store", Args: []string{"ready", "--json", "--limit", "100"}, Stdout: taskJSON},
 	})
 	mock.Install()
 
@@ -283,10 +283,10 @@ func TestRunTask_SkipsTasksWithNeedsRevision(t *testing.T) {
 	taskAutoMode = false
 	taskDaemonMode = false
 
-	// Mock bd ready with task that has needs-revision label
-	taskJSON := `[{"id":"bd-123","status":"open","issue_type":"task","title":"Test task","design":"Some plan","labels":["needs-revision"]}]`
+	// Mock issue-store ready with task that has needs-revision label.
+	taskJSON := `[{"id":"loom-123","status":"open","issue_type":"task","title":"Test task","design":"Some plan","labels":["needs-revision"]}]`
 	mock := NewCommandMock(t, []CommandStub{
-		{Name: "bd", Args: []string{"ready", "--json", "--limit", "100"}, Stdout: taskJSON},
+		{Name: "issue-store", Args: []string{"ready", "--json", "--limit", "100"}, Stdout: taskJSON},
 	})
 	mock.Install()
 
@@ -312,9 +312,9 @@ func TestRunTask_SkipsTasksWithNeedsRevision(t *testing.T) {
 func TestHasAvailableImplementationTasks_Success(t *testing.T) {
 	// not parallel: uses mock.Install() which mutates global defaultDeps.Exec
 	// Task with design and no needs-revision is available for implementation
-	taskJSON := `[{"id":"bd-1","status":"open","issue_type":"task","design":"Implementation plan"}]`
+	taskJSON := `[{"id":"loom-1","status":"open","issue_type":"task","design":"Implementation plan"}]`
 	mock := NewCommandMock(t, []CommandStub{
-		{Name: "bd", Args: []string{"ready", "--json", "--limit", "100"}, Stdout: taskJSON},
+		{Name: "issue-store", Args: []string{"ready", "--json", "--limit", "100"}, Stdout: taskJSON},
 	})
 	mock.Install()
 
@@ -330,9 +330,9 @@ func TestHasAvailableImplementationTasks_Success(t *testing.T) {
 func TestHasAvailableImplementationTasks_SkipsTasksWithoutDesign(t *testing.T) {
 	// not parallel: uses mock.Install() which mutates global defaultDeps.Exec
 	// Task without design should be skipped
-	taskJSON := `[{"id":"bd-1","status":"open","issue_type":"task","design":""}]`
+	taskJSON := `[{"id":"loom-1","status":"open","issue_type":"task","design":""}]`
 	mock := NewCommandMock(t, []CommandStub{
-		{Name: "bd", Args: []string{"ready", "--json", "--limit", "100"}, Stdout: taskJSON},
+		{Name: "issue-store", Args: []string{"ready", "--json", "--limit", "100"}, Stdout: taskJSON},
 	})
 	mock.Install()
 
@@ -348,9 +348,9 @@ func TestHasAvailableImplementationTasks_SkipsTasksWithoutDesign(t *testing.T) {
 func TestHasAvailableImplementationTasks_SkipsNeedsRevision(t *testing.T) {
 	// not parallel: uses mock.Install() which mutates global defaultDeps.Exec
 	// Task with needs-revision label should be skipped
-	taskJSON := `[{"id":"bd-1","status":"open","issue_type":"task","design":"Some plan","labels":["needs-revision"]}]`
+	taskJSON := `[{"id":"loom-1","status":"open","issue_type":"task","design":"Some plan","labels":["needs-revision"]}]`
 	mock := NewCommandMock(t, []CommandStub{
-		{Name: "bd", Args: []string{"ready", "--json", "--limit", "100"}, Stdout: taskJSON},
+		{Name: "issue-store", Args: []string{"ready", "--json", "--limit", "100"}, Stdout: taskJSON},
 	})
 	mock.Install()
 
@@ -363,16 +363,16 @@ func TestHasAvailableImplementationTasks_SkipsNeedsRevision(t *testing.T) {
 	}
 }
 
-func TestHasAvailableImplementationTasks_BdError(t *testing.T) {
+func TestHasAvailableImplementationTasks_ReadyError(t *testing.T) {
 	// not parallel: uses mock.Install() which mutates global defaultDeps.Exec
 	mock := NewCommandMock(t, []CommandStub{
-		{Name: "bd", Args: []string{"ready", "--json", "--limit", "100"}, Err: os.ErrNotExist},
+		{Name: "issue-store", Args: []string{"ready", "--json", "--limit", "100"}, Err: os.ErrNotExist},
 	})
 	mock.Install()
 
 	_, err := HasAvailableImplementationTasks("", "")
 	if err == nil {
-		t.Error("expected error when bd command fails")
+		t.Error("expected error when issue-store command fails")
 	}
 }
 
@@ -382,9 +382,9 @@ func TestHasAvailableImplementationTasks_BdError(t *testing.T) {
 
 func TestGetAvailableImplementationTasks_Success(t *testing.T) {
 	// not parallel: uses mock.Install() which mutates global defaultDeps.Exec
-	taskJSON := `[{"id":"bd-1","status":"open","issue_type":"task","design":"Implementation plan"}]`
+	taskJSON := `[{"id":"loom-1","status":"open","issue_type":"task","design":"Implementation plan"}]`
 	mock := NewCommandMock(t, []CommandStub{
-		{Name: "bd", Args: []string{"ready", "--json", "--limit", "100"}, Stdout: taskJSON},
+		{Name: "issue-store", Args: []string{"ready", "--json", "--limit", "100"}, Stdout: taskJSON},
 	})
 	mock.Install()
 
@@ -395,16 +395,16 @@ func TestGetAvailableImplementationTasks_Success(t *testing.T) {
 	if len(tasks) != 1 {
 		t.Fatalf("expected 1 task, got %d", len(tasks))
 	}
-	if tasks[0].ID != "bd-1" {
-		t.Errorf("expected task ID 'bd-1', got %q", tasks[0].ID)
+	if tasks[0].ID != "loom-1" {
+		t.Errorf("expected task ID 'loom-1', got %q", tasks[0].ID)
 	}
 }
 
 func TestGetAvailableImplementationTasks_ReturnsEmpty(t *testing.T) {
 	// not parallel: uses mock.Install() which mutates global defaultDeps.Exec
-	taskJSON := `[{"id":"bd-1","status":"open","issue_type":"task","design":""}]`
+	taskJSON := `[{"id":"loom-1","status":"open","issue_type":"task","design":""}]`
 	mock := NewCommandMock(t, []CommandStub{
-		{Name: "bd", Args: []string{"ready", "--json", "--limit", "100"}, Stdout: taskJSON},
+		{Name: "issue-store", Args: []string{"ready", "--json", "--limit", "100"}, Stdout: taskJSON},
 	})
 	mock.Install()
 
@@ -419,9 +419,9 @@ func TestGetAvailableImplementationTasks_ReturnsEmpty(t *testing.T) {
 
 func TestGetAvailableImplementationTasks_SkipsNeedsRevision(t *testing.T) {
 	// not parallel: uses mock.Install() which mutates global defaultDeps.Exec
-	taskJSON := `[{"id":"bd-1","status":"open","issue_type":"task","design":"Some plan","labels":["needs-revision"]}]`
+	taskJSON := `[{"id":"loom-1","status":"open","issue_type":"task","design":"Some plan","labels":["needs-revision"]}]`
 	mock := NewCommandMock(t, []CommandStub{
-		{Name: "bd", Args: []string{"ready", "--json", "--limit", "100"}, Stdout: taskJSON},
+		{Name: "issue-store", Args: []string{"ready", "--json", "--limit", "100"}, Stdout: taskJSON},
 	})
 	mock.Install()
 
@@ -434,15 +434,15 @@ func TestGetAvailableImplementationTasks_SkipsNeedsRevision(t *testing.T) {
 	}
 }
 
-func TestGetAvailableImplementationTasks_BdError(t *testing.T) {
+func TestGetAvailableImplementationTasks_ReadyError(t *testing.T) {
 	// not parallel: uses mock.Install() which mutates global defaultDeps.Exec
 	mock := NewCommandMock(t, []CommandStub{
-		{Name: "bd", Args: []string{"ready", "--json", "--limit", "100"}, Err: os.ErrNotExist},
+		{Name: "issue-store", Args: []string{"ready", "--json", "--limit", "100"}, Err: os.ErrNotExist},
 	})
 	mock.Install()
 
 	_, err := GetAvailableImplementationTasks("", "")
 	if err == nil {
-		t.Error("expected error when bd command fails")
+		t.Error("expected error when issue-store command fails")
 	}
 }

@@ -45,7 +45,7 @@ Use --install to write it to the platform-specific location and enable it.
 Use --uninstall to stop and remove a previously installed service.
 
 The service runs loom serve with the specified flags and restarts on failure.
-The working directory is set to the current directory (should contain loom.yaml).`,
+The working directory is set to the current directory.`,
 	GroupID: "config",
 	RunE:    runInstallService,
 }
@@ -198,9 +198,6 @@ func buildServiceConfig() (serviceConfig, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return serviceConfig{}, fmt.Errorf("cannot determine working directory: %w", err)
-	}
-	if _, err := os.Stat(filepath.Join(cwd, "loom.yaml")); os.IsNotExist(err) {
-		fmt.Fprintf(os.Stderr, "Warning: no loom.yaml found in %s. The service may not function correctly. Run from a configured loom project directory.\n", cwd)
 	}
 	return serviceConfig{
 		Name:             buildServiceName(runtime.GOOS),
@@ -400,7 +397,7 @@ func installLaunchd(cfg serviceConfig, plistPath, content string) error {
 	}
 	if err := execCommand("launchctl", "bootstrap", "gui/"+uid, plistPath); err != nil {
 		if err2 := execCommand("launchctl", "load", plistPath); err2 != nil {
-			return fmt.Errorf("loading service: %v (also tried legacy load: %v)", err, err2)
+			return fmt.Errorf("loading service: %v (also tried launchctl load: %v)", err, err2)
 		}
 	}
 	fmt.Printf("Service %s installed and started\n\n", cfg.Name)

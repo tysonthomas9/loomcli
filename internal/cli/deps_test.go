@@ -522,7 +522,7 @@ func TestDefaultDeps_NoBDField(t *testing.T) {
 		}
 	}
 
-	// Verify IssueBackend defaults to fleet-db, without constructing a bd adapter.
+	// Verify IssueBackend defaults to fleet-db without constructing an external adapter.
 	if d.IssueBackend.BackendName() != "fleet-db" {
 		t.Errorf("Tracker.BackendName() = %q, want fleet-db", d.IssueBackend.BackendName())
 	}
@@ -530,7 +530,6 @@ func TestDefaultDeps_NoBDField(t *testing.T) {
 
 func TestDefaultDeps_DefaultsToFleetDB(t *testing.T) {
 	t.Setenv("LOOM_ISSUE_BACKEND", "")
-	t.Setenv("LOOM_FLEETDB_ENABLED", "")
 
 	d := DefaultDeps()
 	if got := d.IssueBackend.BackendName(); got != "fleet-db" {
@@ -562,15 +561,6 @@ func TestDefaultDeps_APIConstructionFailureFailsClosed(t *testing.T) {
 	_, err := d.IssueBackend.Ready(context.Background(), backend.ReadyOpts{})
 	if !backend.IsKind(err, backend.KindUnavailable) {
 		t.Fatalf("Ready error = %v, want unavailable", err)
-	}
-}
-
-func TestDefaultDeps_ExplicitUnsupportedBackendFallsBackToFleetDB(t *testing.T) {
-	t.Setenv("LOOM_ISSUE_BACKEND", "beads")
-
-	d := DefaultDeps()
-	if got := d.IssueBackend.BackendName(); got != "fleet-db" {
-		t.Fatalf("DefaultDeps IssueBackend = %q, want fleet-db", got)
 	}
 }
 

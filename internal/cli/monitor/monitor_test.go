@@ -172,8 +172,8 @@ func TestAgentStatusStates(t *testing.T) {
 		},
 		{
 			name:           "planning_with_task",
-			lockStatus:     "planning: bd-123 (5m)",
-			expectContains: "bd-123",
+			lockStatus:     "planning: loom-123 (5m)",
+			expectContains: "loom-123",
 		},
 		// Implementation agent states
 		{
@@ -183,29 +183,29 @@ func TestAgentStatusStates(t *testing.T) {
 		},
 		{
 			name:           "working_with_task",
-			lockStatus:     "working: bd-456 (5m)",
-			expectContains: "bd-456",
+			lockStatus:     "working: loom-456 (5m)",
+			expectContains: "loom-456",
 		},
 		// Done state
 		{
 			name:           "done_state",
-			lockStatus:     "done: bd-789 (5m)",
+			lockStatus:     "done: loom-789 (5m)",
 			expectPrefix:   "done:",
-			expectContains: "bd-789",
+			expectContains: "loom-789",
 		},
 		// Review state
 		{
 			name:           "review_state",
-			lockStatus:     "review: bd-abc (5m)",
+			lockStatus:     "review: loom-abc (5m)",
 			expectPrefix:   "review:",
-			expectContains: "bd-abc",
+			expectContains: "loom-abc",
 		},
 		// Error state
 		{
 			name:           "error_state",
-			lockStatus:     "error: bd-err",
+			lockStatus:     "error: loom-err",
 			expectPrefix:   "error:",
-			expectContains: "bd-err",
+			expectContains: "loom-err",
 		},
 	}
 
@@ -234,42 +234,42 @@ func TestFallbackLogic(t *testing.T) {
 		{
 			name:       "planning_needs_review_becomes_review",
 			lockStatus: "planning: ... (5m)",
-			taskID:     "bd-123",
+			taskID:     "loom-123",
 			taskStatus: "needs_review",
 			wantPrefix: "review:",
 		},
 		{
 			name:       "working_needs_review_stays_working",
 			lockStatus: "working: ... (5m)",
-			taskID:     "bd-456",
+			taskID:     "loom-456",
 			taskStatus: "needs_review",
 			wantPrefix: "working:",
 		},
 		{
 			name:       "planning_closed_becomes_done",
 			lockStatus: "planning: ... (5m)",
-			taskID:     "bd-789",
+			taskID:     "loom-789",
 			taskStatus: "closed",
 			wantPrefix: "done:",
 		},
 		{
 			name:       "working_closed_becomes_done",
 			lockStatus: "working: ... (5m)",
-			taskID:     "bd-abc",
+			taskID:     "loom-abc",
 			taskStatus: "closed",
 			wantPrefix: "done:",
 		},
 		{
 			name:       "planning_in_progress_keeps_planning",
 			lockStatus: "planning: ... (5m)",
-			taskID:     "bd-def",
+			taskID:     "loom-def",
 			taskStatus: "in_progress",
 			wantPrefix: "planning:",
 		},
 		{
 			name:       "working_in_progress_keeps_working",
 			lockStatus: "working: ... (5m)",
-			taskID:     "bd-ghi",
+			taskID:     "loom-ghi",
 			taskStatus: "in_progress",
 			wantPrefix: "working:",
 		},
@@ -326,32 +326,32 @@ func TestTaskConflictDetection(t *testing.T) {
 		{
 			name: "no_conflicts",
 			taskIDToAgents: map[string][]string{
-				"bd-1": {"cobalt"},
-				"bd-2": {"nova"},
+				"loom-1": {"cobalt"},
+				"loom-2": {"nova"},
 			},
 			expectConflicts: 0,
 		},
 		{
 			name: "one_conflict",
 			taskIDToAgents: map[string][]string{
-				"bd-1": {"cobalt", "nova"},
-				"bd-2": {"ember"},
+				"loom-1": {"cobalt", "nova"},
+				"loom-2": {"ember"},
 			},
 			expectConflicts: 1,
 		},
 		{
 			name: "multiple_conflicts",
 			taskIDToAgents: map[string][]string{
-				"bd-1": {"cobalt", "nova"},
-				"bd-2": {"ember", "falcon"},
-				"bd-3": {"zephyr"},
+				"loom-1": {"cobalt", "nova"},
+				"loom-2": {"ember", "falcon"},
+				"loom-3": {"zephyr"},
 			},
 			expectConflicts: 2,
 		},
 		{
 			name: "three_way_conflict",
 			taskIDToAgents: map[string][]string{
-				"bd-1": {"cobalt", "nova", "ember"},
+				"loom-1": {"cobalt", "nova", "ember"},
 			},
 			expectConflicts: 1,
 		},
@@ -381,7 +381,7 @@ func TestTaskConflictDetection(t *testing.T) {
 func TestRenderConflictWarning(t *testing.T) {
 	t.Parallel()
 	conflicts := map[string][]string{
-		"bd-123": {"cobalt", "nova"},
+		"loom-123": {"cobalt", "nova"},
 	}
 
 	var sb strings.Builder
@@ -397,7 +397,7 @@ func TestRenderConflictWarning(t *testing.T) {
 	if !strings.Contains(result, "TASK CONFLICTS") {
 		t.Error("Expected warning header")
 	}
-	if !strings.Contains(result, "bd-123") {
+	if !strings.Contains(result, "loom-123") {
 		t.Error("Expected task ID in warning")
 	}
 	if !strings.Contains(result, "cobalt") || !strings.Contains(result, "nova") {
@@ -424,7 +424,7 @@ func TestMonitorDataStruct(t *testing.T) {
 	}
 
 	// Test adding a conflict
-	data.TaskConflicts["bd-test"] = []string{"agent1", "agent2"}
+	data.TaskConflicts["loom-test"] = []string{"agent1", "agent2"}
 	if len(data.TaskConflicts) != 1 {
 		t.Error("Expected 1 conflict")
 	}
@@ -450,7 +450,7 @@ func TestTaskInfoStatus(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			task := TaskInfo{
-				ID:       "bd-test",
+				ID:       "loom-test",
 				Title:    "Test Task",
 				Priority: 2,
 				Status:   tc.taskStatus,
@@ -492,14 +492,14 @@ func TestNoClosedTaskFallback(t *testing.T) {
 		{
 			name:           "lock_running_shows_lock_status",
 			hasLock:        true,
-			lockStatus:     "working: bd-123 (5m)",
-			expectedStatus: "working: bd-123 (5m)",
+			lockStatus:     "working: loom-123 (5m)",
+			expectedStatus: "working: loom-123 (5m)",
 		},
 		{
 			name:           "no_lock_in_progress_task_shows_error",
 			hasLock:        false,
 			taskInProgress: true,
-			expectedStatus: "error: bd-456",
+			expectedStatus: "error: loom-456",
 		},
 		{
 			name:           "no_lock_closed_task_clean_shows_ready",
@@ -537,7 +537,7 @@ func TestNoClosedTaskFallback(t *testing.T) {
 			if tc.hasLock && tc.lockStatus != "" {
 				status = tc.lockStatus
 			} else if tc.taskInProgress {
-				status = "error: bd-456"
+				status = "error: loom-456"
 			} else {
 				// No lock and no in_progress task - check git status
 				// (closed tasks intentionally don't trigger "done" here)
@@ -560,8 +560,8 @@ func TestAgentStatusStateMachine(t *testing.T) {
 	t.Parallel()
 	// State transitions:
 	// 1. Agent starts (loom task) -> lock created -> "working: ..."
-	// 2. Agent claims task -> lock updated -> "working: bd-123"
-	// 3. Agent completes task -> task closed -> "done: bd-123" (while lock exists)
+	// 2. Agent claims task -> lock updated -> "working: loom-123"
+	// 3. Agent completes task -> task closed -> "done: loom-123" (while lock exists)
 	// 4. Agent exits -> lock removed -> "ready" (if clean) or "X changes" (if dirty)
 
 	states := []struct {
@@ -584,17 +584,17 @@ func TestAgentStatusStateMachine(t *testing.T) {
 			description:    "agent_claimed_task",
 			lockExists:     true,
 			lockRunning:    true,
-			lockTaskID:     "bd-123",
+			lockTaskID:     "loom-123",
 			taskStatus:     "in_progress",
-			expectedPrefix: "working: bd-123",
+			expectedPrefix: "working: loom-123",
 		},
 		{
 			description:    "agent_completed_task_still_running",
 			lockExists:     true,
 			lockRunning:    true,
-			lockTaskID:     "bd-123",
+			lockTaskID:     "loom-123",
 			taskStatus:     "closed",
-			expectedPrefix: "done: bd-123",
+			expectedPrefix: "done: loom-123",
 		},
 		{
 			description:    "agent_exited_worktree_clean",
@@ -639,7 +639,7 @@ func TestAgentStatusStateMachine(t *testing.T) {
 				}
 			} else if s.taskStatus == "in_progress" {
 				// No lock but task in_progress = agent crashed
-				status = "error: bd-123"
+				status = "error: loom-123"
 			} else {
 				// No lock, check git status
 				if s.gitClean {
@@ -662,13 +662,13 @@ func TestAgentStatusStateMachine(t *testing.T) {
 func TestClosedTaskDoesNotOverrideNewTask(t *testing.T) {
 	t.Parallel()
 	// Scenario:
-	// 1. Agent "alpha" completed task "bd-old" (status=closed, assignee=alpha)
+	// 1. Agent "alpha" completed task "loom-old" (status=closed, assignee=alpha)
 	// 2. Agent "alpha" starts new task with "loom task"
 	// 3. Lock file is created but task not claimed yet
-	// 4. Expected: "working: ..." NOT "done: bd-old"
+	// 4. Expected: "working: ..." NOT "done: loom-old"
 
 	agentTasks := map[string]TaskInfo{
-		"alpha": {ID: "bd-old", Status: "closed"},
+		"alpha": {ID: "loom-old", Status: "closed"},
 	}
 
 	// Simulate lock file exists with running process (new task started)
@@ -697,12 +697,12 @@ func TestClosedTaskDoesNotOverrideNewTask(t *testing.T) {
 	} else if task, ok := agentTasks["alpha"]; ok && task.Status == "in_progress" {
 		status = "error: " + task.ID
 	} else {
-		// Without the fix, this would show "done: bd-old"
+		// Without the fix, this would show "done: loom-old"
 		// With the fix, it shows "ready" (assuming clean worktree)
 		status = "ready"
 	}
 
-	if status == "done: bd-old" {
+	if status == "done: loom-old" {
 		t.Error("Bug: closed task caused 'done' status when lock detection failed")
 	}
 	if status != "ready" {
@@ -714,7 +714,7 @@ func TestClosedTaskDoesNotOverrideNewTask(t *testing.T) {
 // Data Collection Function Tests
 // ===========================================================================
 
-// TestRunBdCommand removed: runBdCommand was deleted as part of typed IssueTracker migration.
+// The old command-runner path was removed as part of typed IssueTracker migration.
 
 func TestCollectStatistics(t *testing.T) {
 	t.Parallel()
@@ -755,7 +755,7 @@ func TestCollectStatistics(t *testing.T) {
 			wantClosed:  5, wantTotal: 5, wantCompl: 100.0,
 		},
 		{
-			name:        "all bd stats fields populated",
+			name:        "all store stats fields populated",
 			statsResult: &backend.StatsData{TotalIssues: 20, OpenIssues: 10, InProgressIssues: 2, ClosedIssues: 5, BlockedIssues: 1},
 			wantOpen:    10, wantClosed: 5, wantTotal: 20, wantCompl: 25.0,
 			wantRemaining: 15, wantInProgress: 2, wantBlocked: 1,
@@ -947,7 +947,7 @@ func TestCollectTaskStatus(t *testing.T) {
 			wantAgentTasksLen:      1,
 		},
 		{
-			name: "blocked tasks from bd blocked",
+			name: "blocked tasks from blocked list",
 			backlogIssues: []backend.IssueData{
 				{ID: "T-1", Title: "Blocked task", Status: "blocked"},
 				{ID: "T-2", Title: "Another blocked", Status: "blocked"},
@@ -1368,10 +1368,6 @@ func TestCollectAgentStatus(t *testing.T) {
 			if name == "git" && len(args) > 0 && args[0] == "rev-list" {
 				return CommandResult{Stdout: "0\t0"}
 			}
-			// bd show for task status
-			if name == "bd" && len(args) > 0 && args[0] == "show" {
-				return CommandResult{Stdout: `[{"title":"Test Task","status":"in_progress"}]`}
-			}
 			return CommandResult{}
 		}}
 		deps.Git = &execBridgeGitRunner{Exec: deps.Exec}
@@ -1444,14 +1440,13 @@ func TestCollectMonitorData(t *testing.T) {
 	if data.Tasks.ReadyToImplement != 1 {
 		t.Errorf("expected ReadyToImplement=1, got %d", data.Tasks.ReadyToImplement)
 	}
-	// Total = work queue Remaining + Closed (excludes epics)
-	// Work queue: Plan(1) + Impl(1) + Review(0) + Active(0) + Backlog(0) = 2
-	// Closed from bd stats: 7 → Total = 9
-	if data.Stats.Total != 9 {
-		t.Errorf("expected Stats.Total=9, got %d", data.Stats.Total)
+	// Stats remain the canonical backend totals. Work-queue slices are reported
+	// separately in data.Tasks.
+	if data.Stats.Total != 10 {
+		t.Errorf("expected Stats.Total=10, got %d", data.Stats.Total)
 	}
-	if data.Stats.Remaining != 2 {
-		t.Errorf("expected Stats.Remaining=2, got %d", data.Stats.Remaining)
+	if data.Stats.Remaining != 3 {
+		t.Errorf("expected Stats.Remaining=3, got %d", data.Stats.Remaining)
 	}
 	if data.SyncStatus.DBSynced != true {
 		t.Error("expected DBSynced=true")
@@ -1514,10 +1509,8 @@ func TestCollectMonitorDataExported(t *testing.T) {
 	if data.Timestamp.IsZero() {
 		t.Error("Timestamp should be set")
 	}
-	// Total = work queue Remaining + Closed
-	// Work queue: all empty = 0. Closed from bd stats: 3 → Total = 3
-	if data.Stats.Total != 3 {
-		t.Errorf("expected Stats.Total=3, got %d", data.Stats.Total)
+	if data.Stats.Total != 5 {
+		t.Errorf("expected Stats.Total=5, got %d", data.Stats.Total)
 	}
 }
 
@@ -1568,7 +1561,7 @@ func TestCollectAgentStatusOnlyExported(t *testing.T) {
 }
 
 // TestBacklogAccumulatesReadyWithBlockersAndBlocked verifies that summary.Backlog
-// counts bd-blocked issues. Issues returned by bd ready are trusted as unblocked
+// counts blocked issues. Issues returned by Ready are trusted as unblocked
 // (no redundant HasUnclosedBlockers re-pass in the monitor).
 func TestBacklogAccumulatesReadyWithBlockersAndBlocked(t *testing.T) {
 	// not parallel: uses os.Chdir, defaultResolver, installExecMock, setDefaultIssueBackend
@@ -1604,7 +1597,7 @@ func TestBacklogAccumulatesReadyWithBlockersAndBlocked(t *testing.T) {
 	}})
 
 	// T-BLOCKER is unclosed (in ready output), so T-BLOCKED-READY has an unclosed blocker.
-	// T-BD-BLOCKED comes from bd blocked output.
+	// T-LOOM-BLOCKED comes from the blocked list.
 	// Both should count toward Backlog, giving Backlog=2.
 	mock := NewMockIssueBackend()
 	mock.ReadyResult = []backend.IssueData{
@@ -1613,7 +1606,7 @@ func TestBacklogAccumulatesReadyWithBlockersAndBlocked(t *testing.T) {
 		{ID: "T-NORMAL", Title: "Normal task", Status: "open", Design: "plan"},
 	}
 	mock.BlockedResult = []backend.IssueData{
-		{ID: "T-BD-BLOCKED", Title: "Blocked by bd", Status: "open"},
+		{ID: "T-LOOM-BLOCKED", Title: "Blocked by dependency", Status: "open"},
 	}
 	mock.StatsResult = &backend.StatsData{TotalIssues: 20, OpenIssues: 10, ClosedIssues: 5}
 	setDefaultIssueBackend(mock)
@@ -1621,27 +1614,26 @@ func TestBacklogAccumulatesReadyWithBlockersAndBlocked(t *testing.T) {
 
 	data := collectMonitorData(100, "")
 
-	// T-BD-BLOCKED from bd blocked = 1 (bd-ready issues are trusted, no re-pass)
+	// T-LOOM-BLOCKED from the blocked list = 1 (ready issues are trusted, no re-pass).
 	if data.Tasks.Backlog != 1 {
-		t.Errorf("expected Backlog=1 (bd-blocked only), got %d", data.Tasks.Backlog)
+		t.Errorf("expected Backlog=1 (blocked list only), got %d", data.Tasks.Backlog)
 	}
-	// All 3 bd-ready open issues trusted as ready-to-implement
+	// All 3 ready open issues trusted as ready-to-implement
 	if data.Tasks.ReadyToImplement != 3 {
 		t.Errorf("expected ReadyToImplement=3, got %d", data.Tasks.ReadyToImplement)
 	}
-	// Remaining = sum of work queue: Plan(0) + Impl(3) + Review(0) + Active(0) + Backlog(1) = 4
-	if data.Stats.Remaining != 4 {
-		t.Errorf("expected Remaining=4, got %d", data.Stats.Remaining)
+	if data.Stats.Remaining != 15 {
+		t.Errorf("expected Remaining=15, got %d", data.Stats.Remaining)
 	}
-	// Total = Remaining(4) + Closed(5) = 9
-	if data.Stats.Total != 9 {
-		t.Errorf("expected Total=9, got %d", data.Stats.Total)
+	if data.Stats.Total != 20 {
+		t.Errorf("expected Total=20, got %d", data.Stats.Total)
 	}
 }
 
-// TestEpicsExcludedFromWorkQueueAndStats verifies that epic issues from bd ready
-// are counted separately and excluded from both work queue categories and Remaining/Total.
-func TestEpicsExcludedFromWorkQueueAndStats(t *testing.T) {
+// TestEpicsExcludedFromWorkQueueButStatsRemainCanonical verifies that epic
+// issues from Ready are counted separately while aggregate stats remain the
+// backend projection used by workspace stats.
+func TestEpicsExcludedFromWorkQueueButStatsRemainCanonical(t *testing.T) {
 	// not parallel: uses os.Chdir, defaultResolver, installExecMock, setDefaultIssueBackend
 	origDir, err := os.Getwd()
 	if err != nil {
@@ -1697,21 +1689,17 @@ func TestEpicsExcludedFromWorkQueueAndStats(t *testing.T) {
 	if data.Tasks.NeedsPlanning != 1 {
 		t.Errorf("expected NeedsPlanning=1, got %d", data.Tasks.NeedsPlanning)
 	}
-	// Remaining = Plan(1) + Impl(1) + Review(0) + Active(0) + Backlog(0) = 2
-	// Epic is NOT included
-	if data.Stats.Remaining != 2 {
-		t.Errorf("expected Remaining=2 (epics excluded), got %d", data.Stats.Remaining)
+	if data.Stats.Remaining != 7 {
+		t.Errorf("expected Remaining=7, got %d", data.Stats.Remaining)
 	}
-	// Total = Remaining(2) + Closed(3) = 5 (NOT 10 from bd stats)
-	if data.Stats.Total != 5 {
-		t.Errorf("expected Total=5 (work-queue-derived), got %d", data.Stats.Total)
+	if data.Stats.Total != 10 {
+		t.Errorf("expected Total=10, got %d", data.Stats.Total)
 	}
 }
 
-// TestRemainingDerivedFromWorkQueue verifies that Remaining = sum of all
-// work queue categories (NeedsPlanning + ReadyToImplement + NeedReview +
-// InProgress + Backlog), not the bd stats subtraction.
-func TestRemainingDerivedFromWorkQueue(t *testing.T) {
+// TestMonitorStatsPreserveBackendTotals verifies that monitor status does not
+// overwrite canonical backend stats with work-queue subtotals.
+func TestMonitorStatsPreserveBackendTotals(t *testing.T) {
 	// not parallel: uses os.Chdir, defaultResolver, installExecMock, setDefaultIssueBackend
 	origDir, err := os.Getwd()
 	if err != nil {
@@ -1768,7 +1756,6 @@ func TestRemainingDerivedFromWorkQueue(t *testing.T) {
 	mock.BlockedResult = []backend.IssueData{
 		{ID: "T-6", Title: "Blocked task", Status: "open"},
 	}
-	// bd stats says 50 total, 40 closed — but Remaining should come from work queue, not subtraction
 	mock.StatsResult = &backend.StatsData{TotalIssues: 50, OpenIssues: 8, ClosedIssues: 40}
 	setDefaultIssueBackend(mock)
 	t.Cleanup(func() { resetDefaultIssueBackend() })
@@ -1792,16 +1779,13 @@ func TestRemainingDerivedFromWorkQueue(t *testing.T) {
 		t.Errorf("Backlog = %d, want 1", data.Tasks.Backlog)
 	}
 
-	// Remaining = 1 + 1 + 1 + 2 + 1 = 6 (NOT 50 - 40 = 10 from bd stats)
-	if data.Stats.Remaining != 6 {
-		t.Errorf("Remaining = %d, want 6 (work-queue-derived, not bd stats subtraction)", data.Stats.Remaining)
+	if data.Stats.Remaining != 10 {
+		t.Errorf("Remaining = %d, want 10", data.Stats.Remaining)
 	}
-	// Total = 6 + 40 = 46 (NOT 50 from bd stats)
-	if data.Stats.Total != 46 {
-		t.Errorf("Total = %d, want 46", data.Stats.Total)
+	if data.Stats.Total != 50 {
+		t.Errorf("Total = %d, want 50", data.Stats.Total)
 	}
-	// Completion = 40/46 * 100
-	wantCompl := float64(40) / float64(46) * 100
+	wantCompl := float64(40) / float64(50) * 100
 	if data.Stats.Completion != wantCompl {
 		t.Errorf("Completion = %.1f, want %.1f", data.Stats.Completion, wantCompl)
 	}
@@ -2105,7 +2089,7 @@ func TestRenderAgentLineAlignment(t *testing.T) {
 	agents := []AgentStatus{
 		{Name: "comet", Branch: "comet", Status: "● 1 changes"},
 		{Name: "spark", Branch: "spark", Status: "ready", Ahead: 2, Behind: 1},
-		{Name: "long-name-agent", Branch: "feature/long-branch", Status: "working: bd-123 (5m)"},
+		{Name: "long-name-agent", Branch: "feature/long-branch", Status: "working: loom-123 (5m)"},
 	}
 
 	for _, agent := range agents {
@@ -2424,7 +2408,7 @@ func TestRenderDashboardWorkspaceMode(t *testing.T) {
 
 func TestRenderDashboardMixedWorkspace(t *testing.T) {
 	t.Parallel()
-	// Agents with empty Workspace get grouped under "(legacy)"
+	// Agents with empty Workspace get grouped under "unassigned".
 	data := &MonitorData{
 		Timestamp: fixedTime(),
 		Agents: []AgentStatus{
@@ -2446,9 +2430,9 @@ func TestRenderDashboardMixedWorkspace(t *testing.T) {
 		t.Errorf("expected '[my-workspace]' workspace header, got:\n%s", output)
 	}
 
-	// Agents without workspace should be in "(legacy)" group
-	if !strings.Contains(output, "[(legacy)]") {
-		t.Errorf("expected '[(legacy)]' group for agents without workspace, got:\n%s", output)
+	// Agents without workspace should be in the "unassigned" group.
+	if !strings.Contains(output, "[unassigned]") {
+		t.Errorf("expected '[unassigned]' group for agents without workspace, got:\n%s", output)
 	}
 
 	// All agents should still be present
@@ -2463,9 +2447,9 @@ func TestRenderDashboardMixedWorkspace(t *testing.T) {
 	}
 }
 
-func TestRenderDashboardLegacyModeNoWorkspace(t *testing.T) {
+func TestRenderDashboardNoWorkspaceUsesUnassigned(t *testing.T) {
 	t.Parallel()
-	// When no agents have Workspace set, should NOT show workspace headers
+	// When no agents have Workspace set, all agents are grouped as unassigned.
 	data := &MonitorData{
 		Timestamp: fixedTime(),
 		Agents: []AgentStatus{
@@ -2481,9 +2465,8 @@ func TestRenderDashboardLegacyModeNoWorkspace(t *testing.T) {
 
 	output := renderDashboard(data)
 
-	// Should NOT have workspace group headers
-	if strings.Contains(output, "[(legacy)]") {
-		t.Errorf("legacy mode should not show workspace group headers, got:\n%s", output)
+	if !strings.Contains(output, "[unassigned]") {
+		t.Errorf("expected unassigned workspace group, got:\n%s", output)
 	}
 
 	// Agents should still render
@@ -2580,7 +2563,7 @@ func TestRenderAgentsWorkspace(t *testing.T) {
 	// Verify workspace groups appear in sorted order
 	wsAIdx := strings.Index(output, "[ws-a]")
 	wsBIdx := strings.Index(output, "[ws-b]")
-	legacyIdx := strings.Index(output, "[(legacy)]")
+	unassignedIdx := strings.Index(output, "[unassigned]")
 
 	if wsAIdx == -1 {
 		t.Error("expected [ws-a] in output")
@@ -2588,13 +2571,12 @@ func TestRenderAgentsWorkspace(t *testing.T) {
 	if wsBIdx == -1 {
 		t.Error("expected [ws-b] in output")
 	}
-	if legacyIdx == -1 {
-		t.Error("expected [(legacy)] in output")
+	if unassignedIdx == -1 {
+		t.Error("expected [unassigned] in output")
 	}
 
-	// (legacy) sorts before ws-a alphabetically
-	if legacyIdx > wsAIdx {
-		t.Errorf("expected (legacy) before ws-a, legacyIdx=%d, wsAIdx=%d", legacyIdx, wsAIdx)
+	if unassignedIdx > wsAIdx {
+		t.Errorf("expected unassigned before ws-a, unassignedIdx=%d, wsAIdx=%d", unassignedIdx, wsAIdx)
 	}
 	if wsAIdx > wsBIdx {
 		t.Errorf("expected ws-a before ws-b, wsAIdx=%d, wsBIdx=%d", wsAIdx, wsBIdx)
@@ -2612,30 +2594,6 @@ func TestRenderAgentsWorkspace(t *testing.T) {
 	}
 	if !strings.Contains(output, "delta") {
 		t.Error("expected 'delta' in output")
-	}
-}
-
-func TestRenderAgentsLegacy(t *testing.T) {
-	t.Parallel()
-	agents := []AgentStatus{
-		{Name: "alpha", Branch: "alpha", Status: "ready"},
-		{Name: "beta", Branch: "beta", Status: "3 changes"},
-	}
-
-	var sb strings.Builder
-	renderAgentsLegacy(&sb, agents)
-	output := sb.String()
-
-	// Should not contain workspace headers
-	if strings.Contains(output, "[") {
-		t.Errorf("legacy mode should not contain bracket headers, got:\n%s", output)
-	}
-
-	if !strings.Contains(output, "alpha") {
-		t.Error("expected 'alpha' in output")
-	}
-	if !strings.Contains(output, "beta") {
-		t.Error("expected 'beta' in output")
 	}
 }
 

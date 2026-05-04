@@ -79,7 +79,7 @@ func reportFleetDBConfig(cfg cfgpkg.FleetDBServerConfig) CheckResult {
 			Name:    "fleetdb",
 			Status:  StatusFail,
 			Summary: "fleet-db enabled but no Redis URL configured and auto-start disabled",
-			Detail:  "Set LOOM_FLEETDB_REDIS_URL or enable daemon.fleetdb.auto_start in config",
+			Detail:  "Set LOOM_FLEETDB_REDIS_URL or LOOM_FLEETDB_AUTO_START=true",
 		}
 	}
 
@@ -120,7 +120,7 @@ func checkFleet() CheckResult {
 			Name:    "fleet",
 			Status:  StatusFail,
 			Summary: "fleet mode active but no fleet URL configured",
-			Detail:  "Set daemon.fleet.url in loom.yaml or LOOM_FLEET_URL env var",
+			Detail:  "Set LOOM_FLEET_URL or the daemon fleet URL in FleetDB",
 		}
 	}
 

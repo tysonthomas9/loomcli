@@ -161,9 +161,8 @@ func DefaultDeps() *Deps {
 	}
 }
 
-// defaultDeps is the package-level Deps instance used by backward-compatible
-// wrapper functions (RunGitCommand, fetchReadyIssues, etc.). Initialized to
-// DefaultDeps() so that production code works without explicit wiring.
+// defaultDeps is the package-level Deps instance used by package helpers.
+// Initialized to DefaultDeps() so production code works without explicit wiring.
 var defaultDeps = DefaultDeps()
 
 // --- cobra context helpers ---

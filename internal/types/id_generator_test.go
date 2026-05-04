@@ -19,7 +19,7 @@ func TestGenerateHashID(t *testing.T) {
 	}{
 		{
 			name:        "basic hash ID",
-			prefix:      "bd",
+			prefix:      "loom",
 			title:       "Fix auth bug",
 			description: "Users can't log in",
 			created:     now,
@@ -60,8 +60,8 @@ func TestGenerateHashID_Deterministic(t *testing.T) {
 	now := time.Date(2025, 10, 30, 12, 0, 0, 0, time.UTC)
 
 	// Same inputs should produce same hash
-	hash1 := GenerateHashID("bd", "Title", "Desc", now, "ws1")
-	hash2 := GenerateHashID("bd", "Title", "Desc", now, "ws1")
+	hash1 := GenerateHashID("loom", "Title", "Desc", now, "ws1")
+	hash2 := GenerateHashID("loom", "Title", "Desc", now, "ws1")
 
 	if hash1 != hash2 {
 		t.Errorf("expected deterministic hash, got %s and %s", hash1, hash2)
@@ -71,7 +71,7 @@ func TestGenerateHashID_Deterministic(t *testing.T) {
 func TestGenerateHashID_DifferentInputs(t *testing.T) {
 	now := time.Date(2025, 10, 30, 12, 0, 0, 0, time.UTC)
 
-	baseHash := GenerateHashID("bd", "Title", "Desc", now, "ws1")
+	baseHash := GenerateHashID("loom", "Title", "Desc", now, "ws1")
 
 	tests := []struct {
 		name        string
@@ -88,7 +88,7 @@ func TestGenerateHashID_DifferentInputs(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			hash := GenerateHashID("bd", tt.title, tt.description, tt.created, tt.workspaceID)
+			hash := GenerateHashID("loom", tt.title, tt.description, tt.created, tt.workspaceID)
 			if hash == baseHash {
 				t.Errorf("expected different hash for %s, got same: %s", tt.name, hash)
 			}
@@ -105,27 +105,27 @@ func TestGenerateChildID(t *testing.T) {
 	}{
 		{
 			name:        "first level child",
-			parentID:    "bd-af78e9a2",
+			parentID:    "loom-af78e9a2",
 			childNumber: 1,
-			want:        "bd-af78e9a2.1",
+			want:        "loom-af78e9a2.1",
 		},
 		{
 			name:        "second level child",
-			parentID:    "bd-af78e9a2.1",
+			parentID:    "loom-af78e9a2.1",
 			childNumber: 2,
-			want:        "bd-af78e9a2.1.2",
+			want:        "loom-af78e9a2.1.2",
 		},
 		{
 			name:        "third level child",
-			parentID:    "bd-af78e9a2.1.2",
+			parentID:    "loom-af78e9a2.1.2",
 			childNumber: 3,
-			want:        "bd-af78e9a2.1.2.3",
+			want:        "loom-af78e9a2.1.2.3",
 		},
 		{
 			name:        "large child number",
-			parentID:    "bd-af78e9a2",
+			parentID:    "loom-af78e9a2",
 			childNumber: 347,
-			want:        "bd-af78e9a2.347",
+			want:        "loom-af78e9a2.347",
 		},
 	}
 
@@ -149,30 +149,30 @@ func TestParseHierarchicalID(t *testing.T) {
 	}{
 		{
 			name:       "root level (no parent)",
-			id:         "bd-af78e9a2",
-			wantRoot:   "bd-af78e9a2",
+			id:         "loom-af78e9a2",
+			wantRoot:   "loom-af78e9a2",
 			wantParent: "",
 			wantDepth:  0,
 		},
 		{
 			name:       "first level child",
-			id:         "bd-af78e9a2.1",
-			wantRoot:   "bd-af78e9a2",
-			wantParent: "bd-af78e9a2",
+			id:         "loom-af78e9a2.1",
+			wantRoot:   "loom-af78e9a2",
+			wantParent: "loom-af78e9a2",
 			wantDepth:  1,
 		},
 		{
 			name:       "second level child",
-			id:         "bd-af78e9a2.1.2",
-			wantRoot:   "bd-af78e9a2",
-			wantParent: "bd-af78e9a2.1",
+			id:         "loom-af78e9a2.1.2",
+			wantRoot:   "loom-af78e9a2",
+			wantParent: "loom-af78e9a2.1",
 			wantDepth:  2,
 		},
 		{
 			name:       "third level child",
-			id:         "bd-af78e9a2.1.2.3",
-			wantRoot:   "bd-af78e9a2",
-			wantParent: "bd-af78e9a2.1.2",
+			id:         "loom-af78e9a2.1.2.3",
+			wantRoot:   "loom-af78e9a2",
+			wantParent: "loom-af78e9a2.1.2",
 			wantDepth:  3,
 		},
 	}
@@ -199,14 +199,14 @@ func BenchmarkGenerateHashID(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = GenerateHashID("bd", "Fix auth bug", "Users can't log in", now, "workspace-1")
+		_ = GenerateHashID("loom", "Fix auth bug", "Users can't log in", now, "workspace-1")
 	}
 }
 
 func BenchmarkGenerateChildID(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		GenerateChildID("bd-af78e9a2", 42)
+		GenerateChildID("loom-af78e9a2", 42)
 	}
 }
 
@@ -219,20 +219,20 @@ func TestCheckHierarchyDepth(t *testing.T) {
 		errMsg   string
 	}{
 		// Default maxDepth (uses MaxHierarchyDepth = 3)
-		{"root parent with default depth", "bd-abc123", 0, false, ""},
-		{"depth 1 parent with default depth", "bd-abc123.1", 0, false, ""},
-		{"depth 2 parent with default depth", "bd-abc123.1.2", 0, false, ""},
-		{"depth 3 parent with default depth - exceeds", "bd-abc123.1.2.3", 0, true, "maximum hierarchy depth (3) exceeded for parent bd-abc123.1.2.3"},
+		{"root parent with default depth", "loom-abc123", 0, false, ""},
+		{"depth 1 parent with default depth", "loom-abc123.1", 0, false, ""},
+		{"depth 2 parent with default depth", "loom-abc123.1.2", 0, false, ""},
+		{"depth 3 parent with default depth - exceeds", "loom-abc123.1.2.3", 0, true, "maximum hierarchy depth (3) exceeded for parent loom-abc123.1.2.3"},
 
 		// Custom maxDepth
-		{"root parent with max=1", "bd-abc123", 1, false, ""},
-		{"depth 1 parent with max=1 - exceeds", "bd-abc123.1", 1, true, "maximum hierarchy depth (1) exceeded for parent bd-abc123.1"},
-		{"depth 3 parent with max=5", "bd-abc123.1.2.3", 5, false, ""},
-		{"depth 4 parent with max=5", "bd-abc123.1.2.3.4", 5, false, ""},
-		{"depth 5 parent with max=5 - exceeds", "bd-abc123.1.2.3.4.5", 5, true, "maximum hierarchy depth (5) exceeded for parent bd-abc123.1.2.3.4.5"},
+		{"root parent with max=1", "loom-abc123", 1, false, ""},
+		{"depth 1 parent with max=1 - exceeds", "loom-abc123.1", 1, true, "maximum hierarchy depth (1) exceeded for parent loom-abc123.1"},
+		{"depth 3 parent with max=5", "loom-abc123.1.2.3", 5, false, ""},
+		{"depth 4 parent with max=5", "loom-abc123.1.2.3.4", 5, false, ""},
+		{"depth 5 parent with max=5 - exceeds", "loom-abc123.1.2.3.4.5", 5, true, "maximum hierarchy depth (5) exceeded for parent loom-abc123.1.2.3.4.5"},
 
 		// Negative maxDepth falls back to default
-		{"negative maxDepth uses default", "bd-abc123.1.2.3", -1, true, "maximum hierarchy depth (3) exceeded for parent bd-abc123.1.2.3"},
+		{"negative maxDepth uses default", "loom-abc123.1.2.3", -1, true, "maximum hierarchy depth (3) exceeded for parent loom-abc123.1.2.3"},
 	}
 
 	for _, tt := range tests {

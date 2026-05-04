@@ -108,21 +108,6 @@ func TestScopeResolverToWorkspace_EmptyWorkspaceID(t *testing.T) {
 	}
 }
 
-func TestScopeResolverToWorkspace_LegacyMode(t *testing.T) {
-	resolver := &cli.Resolver{
-		Mode: cli.ModeLegacy,
-	}
-
-	err := scopeResolverToWorkspace(resolver, "some-ws")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	// Legacy mode: workspace should remain empty (no-op).
-	if resolver.WorkspaceName() != "" {
-		t.Errorf("workspace = %q, want empty (legacy mode no-op)", resolver.WorkspaceName())
-	}
-}
-
 func TestScopeResolverToWorkspace_ValidWorkspaceName(t *testing.T) {
 	cfg := &config.LoomConfig{
 		Workspaces: map[string]config.WorkspaceConfig{

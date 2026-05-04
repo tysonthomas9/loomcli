@@ -65,9 +65,9 @@ var daemonCmd = &cobra.Command{
 	GroupID: "agents",
 	Long: `Start, stop, and monitor the loom agent supervisor daemon.
 
-The daemon reads loom.yaml in the current project directory and supervises
-the configured agents, automatically restarting them on failure with
-exponential backoff.
+The daemon reads FleetDB daemon profiles for the active workspace and
+supervises the configured agents, automatically restarting them on failure
+with exponential backoff.
 
 Commands:
   loom daemon                      Start the supervisor in the foreground
@@ -79,23 +79,7 @@ Commands:
   loom daemon restart <agent>      Restart a single agent with fresh state
   loom daemon queue <agent>        Preview an agent's filtered work queue
 
-Configuration is read from loom.yaml in the current directory:
-  daemon:
-    pid_file: .loom/daemon.pid       # default
-    log_dir: .loom/logs              # default
-    max_agents: 20                   # default; 0 = unlimited
-    restart_policy:
-      max_retries: 3                 # default
-      backoff_initial: 2             # seconds, default
-      backoff_max: 300               # seconds, default
-
-  agents:
-    - worktree: falcon
-      role: plan
-      auto: true
-    - worktree: nova
-      role: task
-      auto: true`,
+Configuration is managed with FleetDB-backed daemon, role, and agent commands.`,
 	Run: runDaemon,
 }
 
@@ -138,11 +122,11 @@ var daemonAgentRestartCmd = &cobra.Command{
 var daemonConfigCmd = &cobra.Command{
 	Use:   "config",
 	Short: "Show effective running configuration",
-	Long: `Display the fully resolved daemon configuration as YAML.
+	Long: `Display the fully resolved FleetDB-backed daemon configuration as YAML.
 
-Shows the merged result of global (~/.loom/cfgpkg.yaml) and local (loom.yaml)
-configuration with all defaults filled in. Sensitive values (Redis URLs) are
-masked. The command works whether or not the daemon is running.`,
+Shows the active workspace daemon profile, roles, agents, and defaults.
+Sensitive values (Redis URLs) are masked. The command works whether or not the
+daemon is running.`,
 	Run: runDaemonConfig,
 }
 
@@ -196,7 +180,7 @@ func runDaemon(cmd *cobra.Command, args []string) {
 	}
 
 	if len(config.Agents) == 0 {
-		fmt.Fprintf(os.Stderr, "Error: no agents configured in loom.yaml\n")
+		fmt.Fprintf(os.Stderr, "Error: no agents configured in FleetDB for the active workspace\n")
 		os.Exit(1)
 	}
 
@@ -263,11 +247,10 @@ func initDaemonServices(config *cfgpkg.DaemonConfig, projectDir string, paths da
 		_ = otelExp
 	}
 
-	// Open fleet-db store best-effort while yaml-derived agent config still
-	// exists. The issue backend itself is FleetDB by default.
 	storeHandle, storeErr := cmdstore.OpenStore(context.Background())
 	if storeErr != nil {
-		fmt.Printf("Warning: failed to open fleet-db store for daemon: %v (running in legacy yaml-only mode)\n", storeErr)
+		fmt.Fprintf(os.Stderr, "Error: failed to open fleet-db store for daemon: %v\n", storeErr)
+		os.Exit(1)
 	}
 	var st store.Store
 	if storeHandle != nil {

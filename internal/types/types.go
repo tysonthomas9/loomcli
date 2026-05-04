@@ -1,4 +1,4 @@
-// Package types defines core data structures for the bd issue tracker.
+// Package types defines core issue-tracking data structures.
 package types
 
 import "time"
@@ -64,7 +64,7 @@ type IssueFilter struct {
 	LabelsAny   []string // OR semantics: issue must have AT LEAST ONE of these labels
 	TitleSearch string
 	IDs         []string // Filter by specific issue IDs
-	IDPrefix    string   // Filter by ID prefix (e.g., "bd-" to match "bd-abc123")
+	IDPrefix    string   // Filter by ID prefix
 	Limit       int
 
 	// Pattern matching

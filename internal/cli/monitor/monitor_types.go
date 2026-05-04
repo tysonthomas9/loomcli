@@ -41,7 +41,7 @@ type AgentStatus struct {
 	Behind        int            `json:"behind"`                   // commits behind integration branch
 	Role          string         `json:"role,omitempty"`           // role from daemon config (e.g., "plan", "task")
 	Repo          string         `json:"repo,omitempty"`           // repository this agent is assigned to (multi-repo)
-	Workspace     string         `json:"workspace"`                // workspace name (empty in legacy mode)
+	Workspace     string         `json:"workspace"`                // workspace name
 	DaemonManaged bool           `json:"daemon_managed,omitempty"` // true if under daemon supervision
 	Commits       []CommitDetail `json:"commits,omitempty"`        // recent commits ahead of integration branch
 	Changes       []FileChange   `json:"changes,omitempty"`        // uncommitted file changes

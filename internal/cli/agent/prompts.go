@@ -26,8 +26,8 @@ type promptTemplateData struct {
 	WorkspaceBlock    string
 	EpicScope         string
 	SafetyBlock       string
-	BdReadyJSON       string
-	BdReadyFallback   string
+	ReadyJSON         string
+	ReadyFallback     string
 	TaskID            string
 	TestStep          string
 	ReviewStep        string
@@ -201,22 +201,22 @@ func buildInspectReviewStep(backendName string) string {
 //
 //	planning: design empty OR has "needs-revision" label
 func GeneratePlanningPrompt(agentName string, workspace *config.WorkspaceConfig, parentID string) string {
-	bdReadyJSON := "loom data ready --limit 200 --output json"
-	bdReadyFallback := "loom data ready --limit 200"
+	readyJSON := "loom data ready --limit 200 --output json"
+	readyFallback := "loom data ready --limit 200"
 	epicScope := ""
 	if parentID != "" {
-		bdReadyJSON = fmt.Sprintf("loom data ready --parent %s --limit 200 --output json", parentID)
-		bdReadyFallback = fmt.Sprintf("loom data ready --parent %s --limit 200", parentID)
+		readyJSON = fmt.Sprintf("loom data ready --parent %s --limit 200 --output json", parentID)
+		readyFallback = fmt.Sprintf("loom data ready --parent %s --limit 200", parentID)
 		epicScope = fmt.Sprintf("\n**Epic scope: %s** — You MUST only select tasks from this epic. Do not work on tasks from other epics.\n", parentID)
 	}
 
 	prompt := renderPrompt("planning", promptTemplateData{
-		AgentName:       agentName,
-		WorkspaceBlock:  buildWorkspaceContextBlock(workspace),
-		EpicScope:       epicScope,
-		SafetyBlock:     buildSafetyGuardrailsBlock(),
-		BdReadyJSON:     bdReadyJSON,
-		BdReadyFallback: bdReadyFallback,
+		AgentName:      agentName,
+		WorkspaceBlock: buildWorkspaceContextBlock(workspace),
+		EpicScope:      epicScope,
+		SafetyBlock:    buildSafetyGuardrailsBlock(),
+		ReadyJSON:      readyJSON,
+		ReadyFallback:  readyFallback,
 	})
 
 	// Inject checkpoint context if available
@@ -236,12 +236,12 @@ func GeneratePlanningPrompt(agentName string, workspace *config.WorkspaceConfig,
 //
 //	implementation: design non-empty AND no "needs-revision" label
 func GenerateTaskPrompt(agentName string, workspace *config.WorkspaceConfig, parentID string, backendName string) string {
-	bdReadyJSON := "loom data ready --limit 200 --output json"
-	bdReadyFallback := "loom data ready --limit 200"
+	readyJSON := "loom data ready --limit 200 --output json"
+	readyFallback := "loom data ready --limit 200"
 	epicScope := ""
 	if parentID != "" {
-		bdReadyJSON = fmt.Sprintf("loom data ready --parent %s --limit 200 --output json", parentID)
-		bdReadyFallback = fmt.Sprintf("loom data ready --parent %s --limit 200", parentID)
+		readyJSON = fmt.Sprintf("loom data ready --parent %s --limit 200 --output json", parentID)
+		readyFallback = fmt.Sprintf("loom data ready --parent %s --limit 200", parentID)
 		epicScope = fmt.Sprintf("\n**Epic scope: %s** — You MUST only select tasks from this epic. Do not work on tasks from other epics.\n", parentID)
 	}
 
@@ -250,8 +250,8 @@ func GenerateTaskPrompt(agentName string, workspace *config.WorkspaceConfig, par
 		WorkspaceBlock:    buildWorkspaceContextBlock(workspace),
 		EpicScope:         epicScope,
 		SafetyBlock:       buildSafetyGuardrailsBlock(),
-		BdReadyJSON:       bdReadyJSON,
-		BdReadyFallback:   bdReadyFallback,
+		ReadyJSON:         readyJSON,
+		ReadyFallback:     readyFallback,
 		TestStep:          buildTestStep(backendName),
 		ReviewStep:        buildReviewStep(backendName),
 		InspectReviewStep: buildInspectReviewStep(backendName),

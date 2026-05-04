@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"strconv"
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/lockfile"
@@ -32,7 +31,6 @@ func TestIsProtectedRuntimePath(t *testing.T) {
 		{".loom/daemon.pid", true},
 		{"sessions", true},
 		{"sessions/abc", true},
-		{"loom.yaml", true},
 		{"AGENTS.md", true},
 
 		// Not protected
@@ -43,16 +41,14 @@ func TestIsProtectedRuntimePath(t *testing.T) {
 
 		// Normalisation: leading "./" stripped
 		{"./sessions", true},
-		{"./loom.yaml", true},
 		{"./leftover.txt", false},
 
 		// Edge cases
 		{"", false},
 		{".", false},
-		{"beads", false},           // no leading dot
-		{"loom.yaml/nested", true}, // under protected file path
-		{"sessionsx", false},       // suffix mismatch
-		{".loomx", false},          // suffix mismatch
+		{"runtime", false},   // no leading dot
+		{"sessionsx", false}, // suffix mismatch
+		{".loomx", false},    // suffix mismatch
 	}
 
 	for _, tc := range tests {
@@ -276,94 +272,7 @@ func TestDetectFromStateFile_InvalidJSON(t *testing.T) {
 	}
 }
 
-// ---------- detectFromPIDFile ----------
-
-func TestDetectFromPIDFile_NoFile(t *testing.T) {
-	info, ok := detectFromPIDFile("/nonexistent/daemon.pid")
-	if ok {
-		t.Error("expected ok=false for missing PID file")
-	}
-	if info.Running {
-		t.Error("expected Running=false")
-	}
-}
-
-func TestDetectFromPIDFile_LiveProcess(t *testing.T) {
-	dir := t.TempDir()
-	pidPath := filepath.Join(dir, "daemon.pid")
-
-	livePID := os.Getpid()
-	if err := os.WriteFile(pidPath, []byte(strconv.Itoa(livePID)+"\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	info, ok := detectFromPIDFile(pidPath)
-	if !ok {
-		t.Fatal("expected ok=true for PID file with live process")
-	}
-	if !info.Running {
-		t.Error("expected Running=true")
-	}
-	if info.PID != livePID {
-		t.Errorf("PID = %d, want %d", info.PID, livePID)
-	}
-	if info.Source != "pid" {
-		t.Errorf("Source = %q, want %q", info.Source, "pid")
-	}
-}
-
-func TestDetectFromPIDFile_DeadProcess(t *testing.T) {
-	dir := t.TempDir()
-	pidPath := filepath.Join(dir, "daemon.pid")
-
-	if err := os.WriteFile(pidPath, []byte("999999999\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	info, ok := detectFromPIDFile(pidPath)
-	if ok {
-		t.Error("expected ok=false for PID file with dead process")
-	}
-	if info.Running {
-		t.Error("expected Running=false")
-	}
-}
-
-func TestDetectFromPIDFile_InvalidContent(t *testing.T) {
-	dir := t.TempDir()
-	pidPath := filepath.Join(dir, "daemon.pid")
-
-	if err := os.WriteFile(pidPath, []byte("notanumber\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	info, ok := detectFromPIDFile(pidPath)
-	if ok {
-		t.Error("expected ok=false for non-numeric PID file")
-	}
-	if info.Running {
-		t.Error("expected Running=false")
-	}
-}
-
-func TestDetectFromPIDFile_NegativePID(t *testing.T) {
-	dir := t.TempDir()
-	pidPath := filepath.Join(dir, "daemon.pid")
-
-	if err := os.WriteFile(pidPath, []byte("-1\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	info, ok := detectFromPIDFile(pidPath)
-	if ok {
-		t.Error("expected ok=false for negative PID")
-	}
-	if info.Running {
-		t.Error("expected Running=false")
-	}
-}
-
-// ---------- DetectDaemonRuntime (integration of all three sources) ----------
+// ---------- DetectDaemonRuntime ----------
 
 func TestDetectDaemonRuntime_NoFiles(t *testing.T) {
 	dir := t.TempDir()
@@ -414,12 +323,6 @@ func TestDetectDaemonRuntime_LockTakesPrecedence(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Also create PID file
-	pidPath := filepath.Join(loomDir, "daemon.pid")
-	if err := os.WriteFile(pidPath, []byte(strconv.Itoa(livePID)+"\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
 	info := DetectDaemonRuntime(dir)
 	if !info.Running {
 		t.Fatal("expected Running=true")
@@ -460,33 +363,6 @@ func TestDetectDaemonRuntime_StateFallback(t *testing.T) {
 	}
 }
 
-func TestDetectDaemonRuntime_PIDFileFallback(t *testing.T) {
-	dir := t.TempDir()
-	loomDir := filepath.Join(dir, ".loom")
-	if err := os.MkdirAll(loomDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-
-	livePID := os.Getpid()
-
-	// No lock file, no state file — only PID file
-	pidPath := filepath.Join(loomDir, "daemon.pid")
-	if err := os.WriteFile(pidPath, []byte(strconv.Itoa(livePID)+"\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	info := DetectDaemonRuntime(dir)
-	if !info.Running {
-		t.Fatal("expected Running=true via PID file")
-	}
-	if info.Source != "pid" {
-		t.Errorf("Source = %q, want %q", info.Source, "pid")
-	}
-	if info.PID != livePID {
-		t.Errorf("PID = %d, want %d", info.PID, livePID)
-	}
-}
-
 func TestDetectDaemonRuntime_StaleLockFallsThrough(t *testing.T) {
 	dir := t.TempDir()
 	loomDir := filepath.Join(dir, ".loom")
@@ -517,14 +393,13 @@ func TestDetectDaemonRuntime_StaleLockFallsThrough(t *testing.T) {
 	}
 }
 
-func TestDetectDaemonRuntime_DeadStateFallsThroughToPID(t *testing.T) {
+func TestDetectDaemonRuntime_DeadStateNotRunning(t *testing.T) {
 	dir := t.TempDir()
 	loomDir := filepath.Join(dir, ".loom")
 	if err := os.MkdirAll(loomDir, 0755); err != nil {
 		t.Fatal(err)
 	}
 
-	livePID := os.Getpid()
 	deadPID := 999999999
 
 	// State file with dead PID
@@ -534,21 +409,12 @@ func TestDetectDaemonRuntime_DeadStateFallsThroughToPID(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// PID file with live PID
-	pidPath := filepath.Join(loomDir, "daemon.pid")
-	if err := os.WriteFile(pidPath, []byte(strconv.Itoa(livePID)+"\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
 	info := DetectDaemonRuntime(dir)
-	if !info.Running {
-		t.Fatal("expected Running=true via PID file after dead state")
+	if info.Running {
+		t.Fatal("expected Running=false for dead state")
 	}
-	if info.Source != "pid" {
-		t.Errorf("Source = %q, want %q", info.Source, "pid")
-	}
-	if info.PID != livePID {
-		t.Errorf("PID = %d, want %d", info.PID, livePID)
+	if info.Source != "" {
+		t.Errorf("Source = %q, want empty", info.Source)
 	}
 }
 
@@ -571,12 +437,6 @@ func TestDetectDaemonRuntime_AllDeadNotRunning(t *testing.T) {
 	statePath := filepath.Join(loomDir, "daemon-agents.json")
 	stateData, _ := json.Marshal(testDaemonState{PID: deadPID})
 	if err := os.WriteFile(statePath, stateData, 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	// PID file with dead PID
-	pidPath := filepath.Join(loomDir, "daemon.pid")
-	if err := os.WriteFile(pidPath, []byte(strconv.Itoa(deadPID)+"\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 

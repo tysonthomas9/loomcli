@@ -8,74 +8,6 @@ import (
 	"testing"
 )
 
-func TestGetWorktreesDir(t *testing.T) {
-	// Save original flag value and reset after test
-	origFlag := worktreesFlag
-	defer func() { worktreesFlag = origFlag }()
-	worktreesFlag = ""
-
-	// Test default value
-	os.Unsetenv("LOOM_WORKTREES_DIR")
-	dir := GetWorktreesDir()
-	if dir != "worktrees" {
-		t.Errorf("GetWorktreesDir() = %q, want 'worktrees'", dir)
-	}
-
-	// Test environment variable override
-	os.Setenv("LOOM_WORKTREES_DIR", "custom-dir")
-	defer os.Unsetenv("LOOM_WORKTREES_DIR")
-
-	dir = GetWorktreesDir()
-	if dir != "custom-dir" {
-		t.Errorf("GetWorktreesDir() = %q, want 'custom-dir'", dir)
-	}
-}
-
-func TestGetWorktreesDirFlagPrecedence(t *testing.T) {
-	// Save original flag value
-	origFlag := worktreesFlag
-	defer func() { worktreesFlag = origFlag }()
-
-	// Test 1: Flag takes precedence over env var
-	os.Setenv("LOOM_WORKTREES_DIR", "env-dir")
-	defer os.Unsetenv("LOOM_WORKTREES_DIR")
-	worktreesFlag = "flag-dir"
-
-	dir := GetWorktreesDir()
-	if dir != "flag-dir" {
-		t.Errorf("GetWorktreesDir() = %q, want 'flag-dir' (flag should override env)", dir)
-	}
-
-	// Test 2: Env var used when flag is empty
-	worktreesFlag = ""
-	dir = GetWorktreesDir()
-	if dir != "env-dir" {
-		t.Errorf("GetWorktreesDir() = %q, want 'env-dir'", dir)
-	}
-
-	// Test 3: Default used when both are empty
-	os.Unsetenv("LOOM_WORKTREES_DIR")
-	dir = GetWorktreesDir()
-	if dir != "worktrees" {
-		t.Errorf("GetWorktreesDir() = %q, want 'worktrees'", dir)
-	}
-
-	// Test 4: Paths are cleaned (trailing slashes removed)
-	worktreesFlag = "my-agents/"
-	dir = GetWorktreesDir()
-	if dir != "my-agents" {
-		t.Errorf("GetWorktreesDir() = %q, want 'my-agents' (trailing slash should be removed)", dir)
-	}
-
-	// Test 5: Env var paths are also cleaned
-	worktreesFlag = ""
-	os.Setenv("LOOM_WORKTREES_DIR", "env-agents/")
-	dir = GetWorktreesDir()
-	if dir != "env-agents" {
-		t.Errorf("GetWorktreesDir() = %q, want 'env-agents' (trailing slash should be removed)", dir)
-	}
-}
-
 func TestGetDefaultBranch(t *testing.T) {
 	// Test default value
 	os.Unsetenv("LOOM_DEFAULT_BRANCH")
@@ -143,6 +75,17 @@ func TestResolveWorktreePathRelative(t *testing.T) {
 	if err := os.MkdirAll(wtDir, 0755); err != nil {
 		t.Fatalf("Failed to create test dir: %v", err)
 	}
+	setupWorkspaceConfig(t, &LoomConfig{
+		DefaultWorkspace: "TEST",
+		Workspaces: map[string]WorkspaceConfig{
+			"TEST": {
+				Path: tmpDir,
+				Repos: []RepoConfig{
+					{Name: "falcon", Path: wtDir},
+				},
+			},
+		},
+	})
 
 	// Test resolution by name
 	path, err := ResolveWorktreePath("falcon")
@@ -404,42 +347,6 @@ func TestValidateWorktreeName(t *testing.T) {
 				t.Errorf("validateWorktreeName(%q) error = %v, want error containing 'path traversal'", tc.name, err)
 			}
 		})
-	}
-}
-
-func TestResolveLegacyPathTraversal(t *testing.T) {
-	// Save and restore working directory
-	origDir, _ := os.Getwd()
-	defer os.Chdir(origDir)
-
-	tmpDir := t.TempDir()
-	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
-	os.Chdir(tmpDir)
-
-	// Create worktrees directory and a target outside it
-	os.MkdirAll(filepath.Join(tmpDir, "worktrees", "falcon"), 0755)
-	os.MkdirAll(filepath.Join(tmpDir, "secret"), 0755)
-
-	// Valid name should work
-	path, err := resolveLegacyPath("falcon")
-	if err != nil {
-		t.Fatalf("resolveLegacyPath(\"falcon\") failed: %v", err)
-	}
-	path, _ = filepath.EvalSymlinks(path)
-	expected := filepath.Join(tmpDir, "worktrees", "falcon")
-	if path != expected {
-		t.Errorf("resolveLegacyPath(\"falcon\") = %q, want %q", path, expected)
-	}
-
-	// Path traversal should be blocked
-	traversalNames := []string{"..", "../secret", "../../etc"}
-	for _, name := range traversalNames {
-		_, err := resolveLegacyPath(name)
-		if err == nil {
-			t.Errorf("resolveLegacyPath(%q) should have returned an error", name)
-		} else if !strings.Contains(err.Error(), "path traversal") {
-			t.Errorf("resolveLegacyPath(%q) error = %v, want error containing 'path traversal'", name, err)
-		}
 	}
 }
 

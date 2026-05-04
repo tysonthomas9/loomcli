@@ -1,9 +1,7 @@
 // Package data contains the `loom data ...` command subtree — thin CLI
 // commands that interact with local and remote loom issue backends.
 //
-// Unlike the legacy top-level commands (`loom show`, `loom list`,
-// `loom monitor`, etc.) which operate on local state via daemon RPC and
-// local file backends, commands in this package are sdk-only: they must
+// Commands in this package are sdk-only: they must
 // NOT import infra packages, cli root or cli sub-packages, or webui. They
 // rely solely on:
 //

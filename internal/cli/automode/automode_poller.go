@@ -28,7 +28,7 @@ func newAdaptivePoller() *adaptivePoller {
 	return &adaptivePoller{
 		minInterval:     100 * time.Millisecond,  // Fast when active
 		maxInterval:     1000 * time.Millisecond, // Slow when idle
-		currentInterval: 200 * time.Millisecond,  // Start at legacy value
+		currentInterval: 200 * time.Millisecond,
 		backoffFactor:   1.5,
 	}
 }

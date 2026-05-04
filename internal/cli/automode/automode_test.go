@@ -48,62 +48,62 @@ func setTmuxRemainOnExit(t *testing.T) {
 
 func TestHasAvailablePlanningTasks(t *testing.T) {
 	tests := []struct {
-		name     string
-		bdOutput string
-		bdErr    error
-		want     bool
-		wantErr  bool
+		name        string
+		readyOutput string
+		readyErr    error
+		want        bool
+		wantErr     bool
 	}{
 		{
 			name: "has task needing planning (no design)",
-			bdOutput: mustJSON([]backend.IssueData{
+			readyOutput: mustJSON([]backend.IssueData{
 				{ID: "T-1", Title: "Add feature", Status: "open", Design: ""},
 			}),
 			want: true,
 		},
 		{
 			name: "task has design - not needing planning",
-			bdOutput: mustJSON([]backend.IssueData{
+			readyOutput: mustJSON([]backend.IssueData{
 				{ID: "T-1", Title: "Add feature", Status: "open", Design: "Some design"},
 			}),
 			want: false,
 		},
 		{
 			name: "include tasks with needs-revision label (revision task)",
-			bdOutput: mustJSON([]backend.IssueData{
+			readyOutput: mustJSON([]backend.IssueData{
 				{ID: "T-1", Title: "Add feature", Status: "open", Design: "existing design", Labels: []string{"needs-revision"}},
 			}),
 			want: true,
 		},
 		{
 			name: "skip in_progress tasks",
-			bdOutput: mustJSON([]backend.IssueData{
+			readyOutput: mustJSON([]backend.IssueData{
 				{ID: "T-1", Title: "Add feature", Status: "in_progress", Design: ""},
 			}),
 			want: false,
 		},
 		{
 			name: "skip review tasks",
-			bdOutput: mustJSON([]backend.IssueData{
+			readyOutput: mustJSON([]backend.IssueData{
 				{ID: "T-1", Title: "In review", Status: "review", Design: ""},
 			}),
 			want: false,
 		},
 		{
 			name: "skip epics",
-			bdOutput: mustJSON([]backend.IssueData{
+			readyOutput: mustJSON([]backend.IssueData{
 				{ID: "T-1", Title: "Big Epic", Status: "open", IssueType: "epic", Design: ""},
 			}),
 			want: false,
 		},
 		{
-			name:     "empty list",
-			bdOutput: "[]",
-			want:     false,
+			name:        "empty list",
+			readyOutput: "[]",
+			want:        false,
 		},
 		{
 			name: "mixed - one valid task",
-			bdOutput: mustJSON([]backend.IssueData{
+			readyOutput: mustJSON([]backend.IssueData{
 				{ID: "T-1", Title: "Has design and needs-revision", Status: "open", Design: "plan", Labels: []string{"needs-revision"}},
 				{ID: "T-2", Title: "Work on me", Status: "open", Design: ""},
 				{ID: "T-3", Title: "Has design", Status: "open", Design: "Already planned"},
@@ -112,21 +112,21 @@ func TestHasAvailablePlanningTasks(t *testing.T) {
 		},
 		{
 			name: "blocked tasks excluded by backend (not in ready results)",
-			bdOutput: mustJSON([]backend.IssueData{
+			readyOutput: mustJSON([]backend.IssueData{
 				{ID: "T-0", Title: "Blocker", Status: "open", Design: "has design"},
 			}),
 			want: false, // T-0 has design so not available for planning; blocked T-1 not returned by backend
 		},
 		{
 			name: "parent-child dependency does not block planning",
-			bdOutput: mustJSON([]backend.IssueData{
+			readyOutput: mustJSON([]backend.IssueData{
 				{ID: "T-1", Title: "Task with parent-child dep", Status: "open", Design: ""},
 			}),
 			want: true,
 		},
 		{
 			name: "task with design and parent-child dep not needing planning",
-			bdOutput: mustJSON([]backend.IssueData{
+			readyOutput: mustJSON([]backend.IssueData{
 				{ID: "T-1", Title: "Task with deps and design", Status: "open", Design: "Approved plan"},
 			}),
 			want: false,
@@ -139,12 +139,12 @@ func TestHasAvailablePlanningTasks(t *testing.T) {
 			t.Cleanup(resetDefaultIssueBackend)
 			mock := NewMockIssueBackend()
 			var issues []backend.IssueData
-			if tt.bdOutput != "" {
-				json.Unmarshal([]byte(tt.bdOutput), &issues)
+			if tt.readyOutput != "" {
+				json.Unmarshal([]byte(tt.readyOutput), &issues)
 			}
-			if tt.bdErr != nil {
-				mock.ReadyErr = tt.bdErr
-				mock.ListErr = tt.bdErr
+			if tt.readyErr != nil {
+				mock.ReadyErr = tt.readyErr
+				mock.ListErr = tt.readyErr
 			} else {
 				mock.ReadyResult = issues
 				mock.ListResult = issues
@@ -165,62 +165,62 @@ func TestHasAvailablePlanningTasks(t *testing.T) {
 
 func TestHasAvailableImplementationTasks(t *testing.T) {
 	tests := []struct {
-		name     string
-		bdOutput string
-		bdErr    error
-		want     bool
-		wantErr  bool
+		name        string
+		readyOutput string
+		readyErr    error
+		want        bool
+		wantErr     bool
 	}{
 		{
 			name: "has task with design - ready for implementation",
-			bdOutput: mustJSON([]backend.IssueData{
+			readyOutput: mustJSON([]backend.IssueData{
 				{ID: "T-1", Title: "Add feature", Status: "open", Design: "Implementation plan here"},
 			}),
 			want: true,
 		},
 		{
 			name: "task has no design - not ready for implementation",
-			bdOutput: mustJSON([]backend.IssueData{
+			readyOutput: mustJSON([]backend.IssueData{
 				{ID: "T-1", Title: "Add feature", Status: "open", Design: ""},
 			}),
 			want: false,
 		},
 		{
 			name: "skip tasks with needs-revision label even with design",
-			bdOutput: mustJSON([]backend.IssueData{
+			readyOutput: mustJSON([]backend.IssueData{
 				{ID: "T-1", Title: "Add feature", Status: "open", Design: "Has design", Labels: []string{"needs-revision"}},
 			}),
 			want: false,
 		},
 		{
 			name: "skip in_progress tasks",
-			bdOutput: mustJSON([]backend.IssueData{
+			readyOutput: mustJSON([]backend.IssueData{
 				{ID: "T-1", Title: "Add feature", Status: "in_progress", Design: "Has design"},
 			}),
 			want: false,
 		},
 		{
 			name: "skip review tasks",
-			bdOutput: mustJSON([]backend.IssueData{
+			readyOutput: mustJSON([]backend.IssueData{
 				{ID: "T-1", Title: "In review", Status: "review", Design: "Has design"},
 			}),
 			want: false,
 		},
 		{
 			name: "skip epics even with design",
-			bdOutput: mustJSON([]backend.IssueData{
+			readyOutput: mustJSON([]backend.IssueData{
 				{ID: "T-1", Title: "Big Epic", Status: "open", IssueType: "epic", Design: "Has design"},
 			}),
 			want: false,
 		},
 		{
-			name:     "empty list",
-			bdOutput: "[]",
-			want:     false,
+			name:        "empty list",
+			readyOutput: "[]",
+			want:        false,
 		},
 		{
 			name: "mixed - one valid task with design",
-			bdOutput: mustJSON([]backend.IssueData{
+			readyOutput: mustJSON([]backend.IssueData{
 				{ID: "T-1", Title: "Has needs-revision label", Status: "open", Design: "Has design", Labels: []string{"needs-revision"}},
 				{ID: "T-2", Title: "No design yet", Status: "open", Design: ""},
 				{ID: "T-3", Title: "Ready to implement", Status: "open", Design: "Detailed plan"},
@@ -229,21 +229,21 @@ func TestHasAvailableImplementationTasks(t *testing.T) {
 		},
 		{
 			name: "blocked tasks excluded by backend (not in ready results)",
-			bdOutput: mustJSON([]backend.IssueData{
+			readyOutput: mustJSON([]backend.IssueData{
 				{ID: "T-0", Title: "Blocker", Status: "open"},
 			}),
 			want: false, // T-0 has no design so not available for implementation; blocked T-1 not returned by backend
 		},
 		{
 			name: "parent-child dependency does not block implementation",
-			bdOutput: mustJSON([]backend.IssueData{
+			readyOutput: mustJSON([]backend.IssueData{
 				{ID: "T-1", Title: "Ready with parent-child dep", Status: "open", Design: "Implementation plan"},
 			}),
 			want: true,
 		},
 		{
 			name: "task with parent-child dep but no design not ready",
-			bdOutput: mustJSON([]backend.IssueData{
+			readyOutput: mustJSON([]backend.IssueData{
 				{ID: "T-1", Title: "Not ready with deps", Status: "open", Design: ""},
 			}),
 			want: false,
@@ -256,12 +256,12 @@ func TestHasAvailableImplementationTasks(t *testing.T) {
 			t.Cleanup(resetDefaultIssueBackend)
 			mock := NewMockIssueBackend()
 			var issues []backend.IssueData
-			if tt.bdOutput != "" {
-				json.Unmarshal([]byte(tt.bdOutput), &issues)
+			if tt.readyOutput != "" {
+				json.Unmarshal([]byte(tt.readyOutput), &issues)
 			}
-			if tt.bdErr != nil {
-				mock.ReadyErr = tt.bdErr
-				mock.ListErr = tt.bdErr
+			if tt.readyErr != nil {
+				mock.ReadyErr = tt.readyErr
+				mock.ListErr = tt.readyErr
 			} else {
 				mock.ReadyResult = issues
 				mock.ListResult = issues
@@ -1089,7 +1089,7 @@ func TestAgentClaimedTask_WithTaskID(t *testing.T) {
 	defer ReleaseLock(tmpDir)
 
 	// Set a task
-	err = UpdateLockTask(tmpDir, "bd-123", "Test Task")
+	err = UpdateLockTask(tmpDir, "loom-123", "Test Task")
 	if err != nil {
 		t.Fatalf("UpdateLockTask failed: %v", err)
 	}
@@ -1136,7 +1136,7 @@ func TestAgentClaimedTask_AfterClear(t *testing.T) {
 	defer ReleaseLock(tmpDir)
 
 	// Set task, then clear it
-	UpdateLockTask(tmpDir, "bd-123", "Test Task")
+	UpdateLockTask(tmpDir, "loom-123", "Test Task")
 	ClearLockTaskID(tmpDir)
 
 	if agentClaimedTask(tmpDir, "", nil) {
@@ -1155,14 +1155,14 @@ func TestAgentClaimedTask_ClearThenReclaim(t *testing.T) {
 	defer ReleaseLock(tmpDir)
 
 	// Simulate auto-mode cycle: clear → agent claims new task
-	UpdateLockTask(tmpDir, "bd-old", "Old Task")
+	UpdateLockTask(tmpDir, "loom-old", "Old Task")
 	ClearLockTaskID(tmpDir)
 
 	if agentClaimedTask(tmpDir, "", nil) {
 		t.Error("after clear: agentClaimedTask() should be false")
 	}
 
-	UpdateLockTask(tmpDir, "bd-new", "New Task")
+	UpdateLockTask(tmpDir, "loom-new", "New Task")
 
 	if !agentClaimedTask(tmpDir, "", nil) {
 		t.Error("after reclaim: agentClaimedTask() should be true")
@@ -1170,8 +1170,8 @@ func TestAgentClaimedTask_ClearThenReclaim(t *testing.T) {
 
 	// Verify it's the new task
 	info, _ := ReadLockFile(tmpDir)
-	if info.TaskID != "bd-new" {
-		t.Errorf("Expected TaskID 'bd-new', got '%s'", info.TaskID)
+	if info.TaskID != "loom-new" {
+		t.Errorf("Expected TaskID 'loom-new', got '%s'", info.TaskID)
 	}
 }
 
@@ -1229,7 +1229,7 @@ func TestTmuxCycle_DaemonClaimsTask(t *testing.T) {
 	}
 
 	// Daemon (Claude) claims a task via loom claim
-	if err := UpdateLockTask(tmpDir, "bd-abc", "Implement feature"); err != nil {
+	if err := UpdateLockTask(tmpDir, "loom-abc", "Implement feature"); err != nil {
 		t.Fatalf("UpdateLockTask failed: %v", err)
 	}
 
@@ -1465,7 +1465,7 @@ func TestRunAutoModeLoop_ShutdownImmediately(t *testing.T) {
 	tmpDir := t.TempDir()
 	setupLockFile(t, tmpDir)
 
-	// Mock bd ready to return tasks (so loop would continue without shutdown)
+	// Mock issue-store ready to return tasks (so loop would continue without shutdown)
 	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 		return CommandResult{
 			Stdout: mustJSON([]backend.IssueData{
@@ -1522,7 +1522,7 @@ func TestRunAutoModeLoop_MaxTasksLimit(t *testing.T) {
 	tmpDir := t.TempDir()
 	setupLockFile(t, tmpDir)
 
-	// Mock bd ready to always return tasks
+	// Mock issue-store ready to always return tasks
 	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 		return CommandResult{
 			Stdout: mustJSON([]backend.IssueData{
@@ -2030,12 +2030,12 @@ func TestRunAutoModeLoop_ErrorRecovery(t *testing.T) {
 	}
 }
 
-func TestRunAutoModeLoop_BdCommandError(t *testing.T) {
+func TestRunAutoModeLoop_ReadyQueryError(t *testing.T) {
 	tmpDir := t.TempDir()
 	setupLockFile(t, tmpDir)
 
-	// CustomTaskCheck returns an error (simulating bd error)
-	bdErrorCount := 0
+	// CustomTaskCheck returns an error (simulating issue-store error)
+	readyErrorCount := 0
 
 	claudeInvocations := 0
 	installClaudeNonInteractiveMock(t, func(workDir, prompt, agentName string, shutdown <-chan struct{}, _ *usage.Collector) error {
@@ -2059,8 +2059,8 @@ func TestRunAutoModeLoop_BdCommandError(t *testing.T) {
 		BackoffBase:  10 * time.Millisecond,
 		TaskPause:    10 * time.Millisecond,
 		CustomTaskCheck: func() (bool, error) {
-			bdErrorCount++
-			return false, fmt.Errorf("bd error")
+			readyErrorCount++
+			return false, fmt.Errorf("issue-store error")
 		},
 		CustomPromptGen: func(name string, _ *WorkspaceConfig) string {
 			return "test-prompt-for-" + name
@@ -2080,7 +2080,7 @@ func TestRunAutoModeLoop_BdCommandError(t *testing.T) {
 	}
 
 	// Should have tried task check
-	if bdErrorCount == 0 {
+	if readyErrorCount == 0 {
 		t.Error("Should have attempted task check")
 	}
 
@@ -2344,62 +2344,62 @@ func TestStartTmuxSession_QuotesShellMetachars(t *testing.T) {
 
 func TestHasAnyAvailableTasks(t *testing.T) {
 	tests := []struct {
-		name     string
-		bdOutput string
-		bdErr    error
-		want     bool
-		wantErr  bool
+		name        string
+		readyOutput string
+		readyErr    error
+		want        bool
+		wantErr     bool
 	}{
 		{
 			name: "task with no design - available",
-			bdOutput: mustJSON([]backend.IssueData{
+			readyOutput: mustJSON([]backend.IssueData{
 				{ID: "T-1", Title: "Add feature", Status: "open", Design: ""},
 			}),
 			want: true,
 		},
 		{
 			name: "task with design - available",
-			bdOutput: mustJSON([]backend.IssueData{
+			readyOutput: mustJSON([]backend.IssueData{
 				{ID: "T-1", Title: "Add feature", Status: "open", Design: "Some design"},
 			}),
 			want: true,
 		},
 		{
 			name: "task with needs-revision label - available (for HasAny)",
-			bdOutput: mustJSON([]backend.IssueData{
+			readyOutput: mustJSON([]backend.IssueData{
 				{ID: "T-1", Title: "Add feature", Status: "open", Design: "", Labels: []string{"needs-revision"}},
 			}),
 			want: true,
 		},
 		{
 			name: "skip in_progress tasks",
-			bdOutput: mustJSON([]backend.IssueData{
+			readyOutput: mustJSON([]backend.IssueData{
 				{ID: "T-1", Title: "Add feature", Status: "in_progress", Design: ""},
 			}),
 			want: false,
 		},
 		{
 			name: "skip review tasks",
-			bdOutput: mustJSON([]backend.IssueData{
+			readyOutput: mustJSON([]backend.IssueData{
 				{ID: "T-1", Title: "In review", Status: "review", Design: ""},
 			}),
 			want: false,
 		},
 		{
 			name: "skip epics",
-			bdOutput: mustJSON([]backend.IssueData{
+			readyOutput: mustJSON([]backend.IssueData{
 				{ID: "T-1", Title: "Big Epic", Status: "open", IssueType: "epic", Design: ""},
 			}),
 			want: false,
 		},
 		{
-			name:     "empty list",
-			bdOutput: "[]",
-			want:     false,
+			name:        "empty list",
+			readyOutput: "[]",
+			want:        false,
 		},
 		{
 			name: "mixed - epic + valid task",
-			bdOutput: mustJSON([]backend.IssueData{
+			readyOutput: mustJSON([]backend.IssueData{
 				{ID: "T-1", Title: "Valid task with revision", Status: "open", Design: "plan", Labels: []string{"needs-revision"}},
 				{ID: "T-2", Title: "Big Epic", Status: "open", IssueType: "epic", Design: ""},
 				{ID: "T-3", Title: "Valid task", Status: "open", Design: ""},
@@ -2408,29 +2408,29 @@ func TestHasAnyAvailableTasks(t *testing.T) {
 		},
 		{
 			name: "blocked tasks excluded by backend (only epics returned)",
-			bdOutput: mustJSON([]backend.IssueData{
+			readyOutput: mustJSON([]backend.IssueData{
 				{ID: "T-0", Title: "Blocker", Status: "open", IssueType: "epic"},
 			}),
 			want: false, // only epic returned; blocked T-1 filtered out by backend
 		},
 		{
 			name: "parent-child dependency does not block",
-			bdOutput: mustJSON([]backend.IssueData{
+			readyOutput: mustJSON([]backend.IssueData{
 				{ID: "T-1", Title: "Child task", Status: "open", Design: ""},
 			}),
 			want: true,
 		},
 		{
-			name:    "bd command error",
-			bdErr:   fmt.Errorf("bd error"),
-			wantErr: true,
+			name:     "issue-store command error",
+			readyErr: fmt.Errorf("issue-store error"),
+			wantErr:  true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
-				return CommandResult{Stdout: tt.bdOutput, Err: tt.bdErr}
+				return CommandResult{Stdout: tt.readyOutput, Err: tt.readyErr}
 			}})
 
 			got, err := HasAnyAvailableTasks("", "")
@@ -2449,6 +2449,6 @@ func TestHasAnyAvailableTasks(t *testing.T) {
 // hasOpenBlockers Tests
 // ============================================================================
 
-// TestHasOpenBlockers is kept for backward compatibility but delegates to
+// TestHasOpenBlockers is kept for existing behavior but delegates to
 // HasUnclosedBlockers (now in taskfilter.go). Comprehensive tests
 // are in taskfilter_test.go TestHasUnclosedBlockers.

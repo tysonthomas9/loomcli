@@ -88,8 +88,6 @@ type Issue struct {
 	SourceLocation string `json:"source_location,omitempty"`
 
 	// ===== Agent Identity Fields =====
-	HookBead     string     `json:"hook_bead,omitempty"`
-	RoleBead     string     `json:"role_bead,omitempty"`
 	AgentState   AgentState `json:"agent_state,omitempty"`
 	LastActivity *time.Time `json:"last_activity,omitempty"`
 	RoleType     string     `json:"role_type,omitempty"`
@@ -327,7 +325,7 @@ const (
 )
 
 // IsValid checks if the agent state value is valid.
-// Empty string is valid (non-agent beads).
+// Empty string is valid for non-agent records.
 func (s AgentState) IsValid() bool {
 	switch s {
 	case StateIdle, StateSpawning, StateRunning, StateWorking, StateStuck,

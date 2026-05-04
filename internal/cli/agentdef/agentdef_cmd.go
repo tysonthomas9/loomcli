@@ -1,9 +1,8 @@
 // Package agentdef registers the `loom agentdef` noun-verb commands for
 // fleet-db-backed agent assignment CRUD within the active workspace.
 //
-// Distinct from `loom agent <worktree>` (existing) which runs an actual
-// agent process with a custom prompt. Phase 6 will fold both surfaces
-// together once the legacy yaml-driven agent runner is replaced.
+// Distinct from `loom agent <worktree>`, which runs an actual agent process
+// with a custom prompt.
 package agentdef
 
 import (

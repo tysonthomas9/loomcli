@@ -2133,7 +2133,7 @@ func TestBuildCommand_RoutingEnvVars(t *testing.T) {
 }
 
 // TestBuildCommand_NoRoutingEnvVars verifies no routing env vars are set when
-// role has no routing config (backward compatibility).
+// role has no routing config (existing behavior).
 func TestBuildCommand_NoRoutingEnvVars(t *testing.T) {
 	tmpDir := t.TempDir()
 

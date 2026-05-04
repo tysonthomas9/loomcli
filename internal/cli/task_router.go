@@ -157,7 +157,7 @@ func SelectBestTask(issues []backend.IssueData, constraints RoleConstraints) *Ta
 			return matches[i].Score > matches[j].Score
 		}
 		// With current scoring, equal scores typically imply equal priorities
-		// when skill matches are equal. Retained for forward-compatibility.
+		// when skill matches are equal.
 		if matches[i].Issue.Priority != matches[j].Issue.Priority {
 			return matches[i].Issue.Priority < matches[j].Issue.Priority
 		}
@@ -176,7 +176,7 @@ func CheckTaskAvailability(routerCheck, defaultCheck func() (bool, error)) (bool
 }
 
 // RouterTaskCheckFromEnv builds a router-based task check from daemon env vars.
-// Returns nil when no routing env vars are set (backward compatible default).
+// Returns nil when no routing env vars are set.
 func RouterTaskCheckFromEnv(parentID string) func() (bool, error) {
 	return BuildRouterTaskCheck(RoleConfigFromEnv(), AgentEntryFromEnv(), parentID)
 }

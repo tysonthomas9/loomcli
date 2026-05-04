@@ -61,7 +61,7 @@ type AgentWorktree struct {
 	Branch        string
 	DefaultBranch string // integration/target branch
 	Remote        string // git remote name (empty = "origin")
-	RepoName      string // workspace repo name (empty in legacy mode)
+	RepoName      string // workspace repo name
 	IsWorkspace   bool   // true if workspace mode
 }
 

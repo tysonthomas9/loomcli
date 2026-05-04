@@ -7,7 +7,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
@@ -25,7 +24,7 @@ type Backend interface {
 
 var (
 	backends      = make(map[string]Backend)
-	activeBackend = "claude"
+	activeBackend = "codex"
 	backendFlag   string // set by --backend persistent flag in root.go
 	backendMu     sync.RWMutex
 )
@@ -76,7 +75,9 @@ func listBackendsLocked() []string {
 }
 
 // ResolveBackendName returns the backend name using the precedence chain:
-// --backend flag > LOOM_BACKEND env > project-local loom.yaml > global config > default ("claude").
+// --backend flag > LOOM_BACKEND env > default ("codex"). Persistent backend
+// settings now live in FleetDB daemon profiles and are applied by the daemon,
+// not read from local YAML during CLI startup.
 func ResolveBackendName() string {
 	// 1. --backend flag (highest priority)
 	if backendFlag != "" {
@@ -86,18 +87,7 @@ func ResolveBackendName() string {
 	if env := os.Getenv("LOOM_BACKEND"); env != "" {
 		return env
 	}
-	// 3. Project-local loom.yaml — use GetWorkspaceRuntimeDir() so workspace mode
-	// resolves to workspace root, legacy mode uses CWD
-	if pf, err := config.LoadProjectFile(GetWorkspaceRuntimeDir()); err == nil && pf != nil && pf.Backend != "" {
-		return pf.Backend
-	}
-	// 4. Global config file backend setting
-	cfg, err := config.LoadConfig()
-	if err == nil && cfg != nil && cfg.Backend != "" {
-		return cfg.Backend
-	}
-	// 5. Default
-	return "claude"
+	return "codex"
 }
 
 // ResolveAndSetBackend resolves the backend name from the precedence chain

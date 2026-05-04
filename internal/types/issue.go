@@ -39,7 +39,7 @@ type Issue struct {
 
 	// ===== Time-Based Scheduling (GH#820) =====
 	DueAt      *time.Time `json:"due_at,omitempty"`      // When this issue should be completed
-	DeferUntil *time.Time `json:"defer_until,omitempty"` // Hide from bd ready until this time
+	DeferUntil *time.Time `json:"defer_until,omitempty"` // Hide from ready work queues until this time
 
 	// ===== External Integration =====
 	ExternalRef  *string `json:"external_ref,omitempty"`  // e.g., "gh-9", "jira-ABC"
@@ -99,9 +99,7 @@ type Issue struct {
 	SourceFormula  string `json:"source_formula,omitempty"`  // Formula name where step was defined
 	SourceLocation string `json:"source_location,omitempty"` // Path: "steps[0]", "advice[0].after"
 
-	// ===== Agent Identity Fields (agent-as-bead support) =====
-	HookBead     string     `json:"hook_bead,omitempty"`     // Current work on agent's hook (0..1)
-	RoleBead     string     `json:"role_bead,omitempty"`     // Role definition bead (required for agents)
+	// ===== Agent Identity Fields =====
 	AgentState   AgentState `json:"agent_state,omitempty"`   // Agent state: idle|running|stuck|stopped
 	LastActivity *time.Time `json:"last_activity,omitempty"` // Updated on each action (timeout detection)
 	RoleType     string     `json:"role_type,omitempty"`     // Role: polecat|crew|witness|refinery|mayor|deacon

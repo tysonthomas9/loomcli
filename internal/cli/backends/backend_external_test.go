@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 )
@@ -264,6 +265,39 @@ func TestExternalBackend_InvokeInteractive(t *testing.T) {
 	}
 	if got := string(stdinData); got != "hello world" {
 		t.Fatalf("expected 'hello world' via stdin, got %q", got)
+	}
+}
+
+func TestExternalBackend_InvokeInteractive_LargePromptDoesNotBlockBeforeStart(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script test helpers not supported on Windows")
+	}
+
+	dir := t.TempDir()
+	startedFile := filepath.Join(dir, "started.txt")
+	script := "#!/bin/sh\necho started > " + startedFile + "\n"
+	binPath := filepath.Join(dir, "loom-backend-test")
+	if err := os.WriteFile(binPath, []byte(script), 0755); err != nil {
+		t.Fatalf("failed to create mock binary: %v", err)
+	}
+
+	eb := &ExternalBackend{name: "test", binPath: binPath}
+	done := make(chan error, 1)
+	go func() {
+		done <- eb.InvokeInteractive(dir, strings.Repeat("x", 2<<20), "agent1")
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("InvokeInteractive blocked before starting backend")
+	}
+
+	if _, err := os.Stat(startedFile); err != nil {
+		t.Fatalf("backend did not start: %v", err)
 	}
 }
 

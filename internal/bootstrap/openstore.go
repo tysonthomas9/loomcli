@@ -18,11 +18,10 @@ import (
 const EnvFleetDBAPIKey = "LOOM_FLEET_DB_API_KEY" //nolint:gosec // env var name, not a credential
 
 // EnvFleetDBActor is the env var holding the X-Actor header value.
-// Defaults to LOOM_AGENT_NAME, then $USER.
+// Defaults to the current agent name, then $USER.
 const EnvFleetDBActor = "LOOM_FLEET_DB_ACTOR"
 
-// EnvAgentName is the legacy env var for the actor identity. Used as a
-// fallback when LOOM_FLEET_DB_ACTOR is unset.
+// EnvAgentName is the env var used to identify the current agent process.
 const EnvAgentName = "LOOM_AGENT_NAME"
 
 // StoreHandle bundles a Store with the cleanup function for any
@@ -174,8 +173,7 @@ func waitAndOpenLocalStore(ctx context.Context, fleetDir string, cfg fleetdb.Con
 	return &StoreHandle{Store: client, mode: ModeLocal, url: cfg.BaseURL}, nil
 }
 
-// resolveActor returns the X-Actor identity. Priority:
-// LOOM_FLEET_DB_ACTOR > LOOM_AGENT_NAME > $USER.
+// resolveActor returns the X-Actor identity.
 func resolveActor() string {
 	if v := os.Getenv(EnvFleetDBActor); v != "" {
 		return v

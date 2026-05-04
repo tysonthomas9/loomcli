@@ -49,9 +49,9 @@ type IssueWithCounts struct {
 }
 
 // IssueDetails extends Issue with labels, dependencies, dependents, and comments.
-// Used for JSON serialization in bd show and RPC responses.
+// Used for JSON serialization in detail and RPC responses.
 // Note: Labels, Dependencies, Dependents, and Comments do NOT use omitempty
-// to ensure consistent JSON structure for frontend type guards (GH#bd-rrtu).
+// to ensure consistent JSON structure for frontend type guards.
 type IssueDetails struct {
 	Issue
 	Labels       []string                       `json:"labels"`
@@ -262,11 +262,10 @@ const (
 
 // ID prefix constants for molecule/wisp instantiation.
 // These prefixes are inserted into issue IDs: <project>-<prefix>-<id>
-// Used by: cmd/bd/pour.go, cmd/bd/wisp.go (ID generation)
-// Exclusion from bd ready is config-driven via ready.exclude_id_patterns (default: -mol-,-wisp-)
+// Exclusion from ready queues is config-driven via ready.exclude_id_patterns.
 const (
-	IDPrefixMol  = "mol"  // Persistent molecules (bd-mol-xxx)
-	IDPrefixWisp = "wisp" // Ephemeral wisps (bd-wisp-xxx)
+	IDPrefixMol  = "mol"  // Persistent molecules
+	IDPrefixWisp = "wisp" // Ephemeral wisps
 )
 
 // EntityRef is a structured reference to an entity (human, agent, or org).

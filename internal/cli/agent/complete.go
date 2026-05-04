@@ -42,7 +42,6 @@ func runComplete(cmd *cobra.Command, args []string) {
 
 		worktreePath, err = findWorktreeRoot(cwd)
 		if err != nil {
-			// Final fallback: use cwd (legacy behavior)
 			worktreePath = cwd
 		}
 	}

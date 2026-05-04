@@ -19,8 +19,8 @@ You are running in a parallel multi-agent environment. Follow these rules strict
 {{ .SafetyBlock }}
 ### Step 1: Select ONE Task
 - Run this command to find tasks ready to implement (has design, not needs-revision):
-  {{ .BdReadyJSON }} | jq -r '.[] | select(.status == "open") | select((.issue_type == "epic") | not) | select(.design) | select((.design == "") | not) | select(((.labels // []) | index("needs-revision")) | not) | "\(.id) [\(.priority)] \(.title)"'
-- If jq fails, fallback: Run '{{ .BdReadyFallback }}' and manually SKIP epics, tasks without a --design field, or tasks with 'needs-revision' label
+  {{ .ReadyJSON }} | jq -r '.[] | select(.status == "open") | select((.issue_type == "epic") | not) | select(.design) | select((.design == "") | not) | select(((.labels // []) | index("needs-revision")) | not) | "\(.id) [\(.priority)] \(.title)"'
+- If jq fails, fallback: Run '{{ .ReadyFallback }}' and manually SKIP epics, tasks without a --design field, or tasks with 'needs-revision' label
 - Run 'loom data list --status in_progress --output json' to check for stale tasks (updated_at >10 hours ago = abandoned, reclaim with 'loom data update <id> --status in_progress --assignee {{ .AgentName }}')
 - IGNORE existing assignees - if status is 'open', the task is available to claim
 - Pick the HIGHEST PRIORITY task (P0 > P1 > P2 > P3 > P4) that is not already in_progress

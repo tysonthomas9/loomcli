@@ -220,20 +220,6 @@ func TestRenderAgentsWorkspace_Coverage(t *testing.T) {
 	}
 }
 
-func TestRenderAgentsLegacy_Coverage(t *testing.T) {
-	var sb strings.Builder
-	agents := []AgentStatus{
-		{Name: "a1", Branch: "b1", Status: "ready"},
-		{Name: "a2", Branch: "b2", Status: "3 changes"},
-	}
-	renderAgentsLegacy(&sb, agents)
-	result := sb.String()
-
-	if !strings.Contains(result, "a1") || !strings.Contains(result, "a2") {
-		t.Error("renderAgentsLegacy should render all agents")
-	}
-}
-
 func TestCompleteSyncStatus_NoAgents(t *testing.T) {
 	info := SyncInfo{DBSynced: true}
 	result := completeSyncStatus(info, []AgentStatus{})

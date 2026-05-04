@@ -249,9 +249,9 @@ func TestResetAllWorktrees_MixedDefaultBranch(t *testing.T) {
 	}
 }
 
-func TestResetAllWorktrees_LegacyMode_NoPerRepoBranch(t *testing.T) {
+func TestResetAllWorktrees_NoWorkspaceConfig_NoPerRepoBranch(t *testing.T) {
 	// not parallel: uses t.Setenv, global resetForce/resetPush, defaultResolver, mock.Install(), os.Chdir
-	// In legacy mode (no workspace config), all repos use the same target branch
+	// In no workspace config (no workspace config), all repos use the same target branch
 	// because WorktreeInfo.Repo is nil.
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
 	ResetWorkspaceRuntimeDirCache()

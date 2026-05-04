@@ -154,7 +154,7 @@ func TestPlanSmoke_AgentError_SessionFinalized(t *testing.T) {
 	t.Parallel()
 
 	tmpDir := t.TempDir()
-	runtimeDir := filepath.Join(tmpDir, "beads")
+	runtimeDir := filepath.Join(tmpDir, "runtime")
 
 	sessStore, err := sessions.NewStore(runtimeDir)
 	if err != nil {

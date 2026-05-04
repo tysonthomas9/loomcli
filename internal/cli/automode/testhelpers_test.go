@@ -90,7 +90,7 @@ func newExecReadyIssueBackend(m *clitest.MockExecRunner) *execReadyIssueBackend 
 
 func (b *execReadyIssueBackend) Ready(ctx context.Context, opts backend.ReadyOpts) ([]backend.IssueData, error) {
 	b.MockIssueBackend.Ready(ctx, opts)
-	result := b.run(cli.GetWorkspaceRuntimeDir(), "bd", readyArgs(opts)...)
+	result := b.run(cli.GetWorkspaceRuntimeDir(), "issue-store", readyArgs(opts)...)
 	if result.Err != nil {
 		return nil, result.Err
 	}

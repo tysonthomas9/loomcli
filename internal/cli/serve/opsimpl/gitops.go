@@ -40,7 +40,7 @@ func resolveWorkspaceConfigName(cfg *config.LoomConfig, wsID string) string {
 	if cfg == nil || wsID == "" {
 		return ""
 	}
-	// Direct name match (pre-T2 compatibility: MultiPool keyed by name)
+	// Direct name match.
 	if _, ok := cfg.Workspaces[wsID]; ok {
 		return wsID
 	}
@@ -53,11 +53,14 @@ func resolveWorkspaceConfigName(cfg *config.LoomConfig, wsID string) string {
 }
 
 // scopeResolverToWorkspace sets the resolver's active workspace based on a
-// workspace ID from the HTTP context. If workspaceID is empty or the resolver
-// is not in workspace mode, this is a no-op (preserving default workspace behavior).
+// workspace ID from the HTTP context. If workspaceID is empty, this preserves
+// the default workspace behavior.
 func scopeResolverToWorkspace(resolver *cli.Resolver, workspaceID string) error {
-	if workspaceID == "" || resolver.Mode != cli.ModeWorkspace {
+	if workspaceID == "" {
 		return nil
+	}
+	if resolver.Mode != cli.ModeWorkspace {
+		return fmt.Errorf("workspace %q requested but resolver is not workspace-scoped", workspaceID)
 	}
 	wsName := resolveWorkspaceConfigName(resolver.Config, workspaceID)
 	if wsName == "" {

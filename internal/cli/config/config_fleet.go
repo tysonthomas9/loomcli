@@ -5,59 +5,21 @@ import (
 	"strings"
 )
 
-// FleetSettings holds fleet client config for use in YAML config files.
-// Used when loom acts as a worker connecting to an external fleet server.
-type FleetSettings struct {
-	URL       string `yaml:"url,omitempty"`
-	Workspace string `yaml:"workspace,omitempty"`
-	APIKey    string `yaml:"api_key,omitempty"` //nolint:gosec // YAML-provided pre-shared key
-	Actor     string `yaml:"actor,omitempty"`   // X-Actor header (used by fleet-db --auth-dev-mode)
-}
-
-// overlayFleetSettings merges src into dst, copying only non-empty string fields.
-func overlayFleetSettings(dst, src *FleetSettings) {
-	if dst == nil || src == nil {
-		return
-	}
-	if src.URL != "" {
-		dst.URL = src.URL
-	}
-	if src.Workspace != "" {
-		dst.Workspace = src.Workspace
-	}
-	if src.APIKey != "" {
-		dst.APIKey = src.APIKey
-	}
-	if src.Actor != "" {
-		dst.Actor = src.Actor
-	}
-}
-
 // FleetClientConfig is the resolved runtime config for connecting to a fleet server.
 type FleetClientConfig struct {
 	URL       string // Fleet server base URL (required in fleet mode)
 	Workspace string // Workspace identifier (default: "default")
 	APIKey    string //nolint:gosec // Pre-shared API key for fleet worker registration
-	Actor     string // X-Actor header (used by fleet-db --auth-dev-mode); falls back to LOOM_AGENT_NAME
+	Actor     string // X-Actor header (used by fleet-db --auth-dev-mode)
 }
 
 // resolveFleetConfig produces the final resolved FleetClientConfig from
-// merged DaemonSettings. It applies env var overrides (highest precedence)
-// and defaults for unset values.
-//
-// Precedence: env vars > loom.yaml > ~/.loom/config.yaml > defaults
+// environment. Fleet server connection config is deployment bootstrap state,
+// not workspace configuration.
 func ResolveFleetConfig(daemon *DaemonSettings) FleetClientConfig {
+	_ = daemon
 	var url, workspace, apiKey, actor string
 
-	// Start with values from daemon.Fleet (already merged via overlay)
-	if daemon != nil && daemon.Fleet != nil {
-		url = daemon.Fleet.URL
-		workspace = daemon.Fleet.Workspace
-		apiKey = daemon.Fleet.APIKey
-		actor = daemon.Fleet.Actor
-	}
-
-	// Override with env vars if set (highest precedence)
 	if v, ok := os.LookupEnv("LOOM_FLEET_URL"); ok {
 		url = v
 	}
@@ -70,9 +32,7 @@ func ResolveFleetConfig(daemon *DaemonSettings) FleetClientConfig {
 	if v, ok := os.LookupEnv("LOOM_FLEET_ACTOR"); ok {
 		actor = v
 	}
-	// Fallback: reuse LOOM_AGENT_NAME if no explicit actor configured. This
-	// keeps the env surface small for callers that already set the agent name
-	// for other purposes (terminal manager, scheduler).
+	// Reuse the current agent name if no explicit actor is configured.
 	if actor == "" {
 		if v, ok := os.LookupEnv("LOOM_AGENT_NAME"); ok {
 			actor = v

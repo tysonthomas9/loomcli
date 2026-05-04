@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
-	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/webui"
@@ -24,7 +23,7 @@ func mockMonitorData() *MonitorData {
 		Timestamp: time.Date(2025, 1, 15, 10, 30, 0, 0, time.UTC),
 		Agents: []AgentStatus{
 			{Name: "falcon", Branch: "falcon", Status: "ready", Ahead: 0, Behind: 0},
-			{Name: "nova", Branch: "nova", Status: "working: bd-123 (5m)", Ahead: 2, Behind: 1},
+			{Name: "nova", Branch: "nova", Status: "working: loom-123 (5m)", Ahead: 2, Behind: 1},
 		},
 		Tasks: TaskSummary{
 			NeedsPlanning:    3,
@@ -34,24 +33,24 @@ func mockMonitorData() *MonitorData {
 			Backlog:          0,
 		},
 		NeedsPlanningTasks: []TaskInfo{
-			{ID: "bd-001", Title: "Add feature X", Priority: 1},
+			{ID: "loom-001", Title: "Add feature X", Priority: 1},
 		},
 		ReadyToImplement: []TaskInfo{
-			{ID: "bd-002", Title: "Fix bug Y", Priority: 2},
+			{ID: "loom-002", Title: "Fix bug Y", Priority: 2},
 		},
 		ReviewTasks: []TaskInfo{
-			{ID: "bd-003", Title: "Review task Z", Priority: 1},
+			{ID: "loom-003", Title: "Review task Z", Priority: 1},
 		},
 		InProgressTasks: []TaskInfo{
-			{ID: "bd-123", Title: "Current task", Priority: 1, Status: "in_progress"},
+			{ID: "loom-123", Title: "Current task", Priority: 1, Status: "in_progress"},
 		},
 		BacklogTasks: []TaskInfo{},
 		ClosedTasks: []TaskInfo{
-			{ID: "bd-010", Title: "Completed task", Priority: 2, Status: "closed"},
-			{ID: "bd-011", Title: "Another done task", Priority: 3, Status: "closed"},
+			{ID: "loom-010", Title: "Completed task", Priority: 2, Status: "closed"},
+			{ID: "loom-011", Title: "Another done task", Priority: 3, Status: "closed"},
 		},
 		AgentTasks: map[string]TaskInfo{
-			"nova": {ID: "bd-123", Title: "Current task", Priority: 1, Status: "in_progress"},
+			"nova": {ID: "loom-123", Title: "Current task", Priority: 1, Status: "in_progress"},
 		},
 		TaskConflicts: map[string][]string{},
 		SyncStatus: SyncInfo{
@@ -131,37 +130,28 @@ func TestWriteJSON(t *testing.T) {
 	}
 }
 
-func TestApplyWorkspaceConfig_NilStoreDoesNotWireLegacyFns(t *testing.T) {
+func TestApplyWorkspaceConfig_NilStoreDoesNotWireWorkspaceFns(t *testing.T) {
 	cfg := webui.ServerConfig{}
 
 	applyWorkspaceConfig(&cfg)
 
-	if cfg.WorkspaceConfigFn != nil {
-		t.Fatal("WorkspaceConfigFn should not fall back to legacy config")
-	}
-	if cfg.WorkspaceConfigByIDFn != nil {
-		t.Fatal("WorkspaceConfigByIDFn should not fall back to legacy config")
-	}
-	if cfg.WorkspaceListFn != nil {
-		t.Fatal("WorkspaceListFn should not fall back to legacy config")
-	}
 	if cfg.WorkspaceIDResolverFn != nil {
-		t.Fatal("WorkspaceIDResolverFn should not fall back to legacy resolver")
+		t.Fatal("WorkspaceIDResolverFn should be nil without store")
 	}
 	if cfg.WorkspaceDeleteFn != nil {
-		t.Fatal("WorkspaceDeleteFn should not fall back to legacy delete")
+		t.Fatal("WorkspaceDeleteFn should be nil without store")
 	}
 	if cfg.SetDefaultWorkspaceFn != nil {
-		t.Fatal("SetDefaultWorkspaceFn should not fall back to legacy default setter")
+		t.Fatal("SetDefaultWorkspaceFn should be nil without store")
 	}
 	if cfg.ClearDefaultWorkspaceFn != nil {
-		t.Fatal("ClearDefaultWorkspaceFn should not fall back to legacy default clearer")
+		t.Fatal("ClearDefaultWorkspaceFn should be nil without store")
 	}
 	if cfg.WorkspaceCreateFn != nil {
-		t.Fatal("WorkspaceCreateFn should not fall back to legacy create")
+		t.Fatal("WorkspaceCreateFn should be nil without store")
 	}
 	if cfg.DaemonConfigFn != nil {
-		t.Fatal("DaemonConfigFn should not fall back to legacy daemon config")
+		t.Fatal("DaemonConfigFn should be nil without store")
 	}
 }
 
@@ -171,15 +161,6 @@ func TestApplyWorkspaceConfig_StoreWiresStoreBackedFns(t *testing.T) {
 
 	applyWorkspaceConfig(&cfg)
 
-	if cfg.WorkspaceConfigFn == nil {
-		t.Fatal("WorkspaceConfigFn was nil")
-	}
-	if cfg.WorkspaceConfigByIDFn == nil {
-		t.Fatal("WorkspaceConfigByIDFn was nil")
-	}
-	if cfg.WorkspaceListFn == nil {
-		t.Fatal("WorkspaceListFn was nil")
-	}
 	if cfg.WorkspaceIDResolverFn == nil {
 		t.Fatal("WorkspaceIDResolverFn was nil")
 	}
@@ -210,6 +191,16 @@ func TestApplyWorkspaceConfig_FleetClientWorkspaceOverridesCwdFallback(t *testin
 
 	if cfg.InitialWorkspaceID != "PARITY" {
 		t.Fatalf("InitialWorkspaceID = %q, want PARITY", cfg.InitialWorkspaceID)
+	}
+}
+
+func TestApplyFleetConfig_StoreBackedServeDoesNotExpectDaemon(t *testing.T) {
+	cfg := webui.ServerConfig{Store: memstore.New()}
+
+	applyFleetConfig(&cfg, fleetState{})
+
+	if !cfg.FleetClient {
+		t.Fatal("FleetClient should be true for store-backed serve")
 	}
 }
 
@@ -813,27 +804,6 @@ func TestServeFlags_NoWebUIRemoved(t *testing.T) {
 	}
 }
 
-func TestGetWorkspaceInfo_LegacyMode(t *testing.T) {
-	// No config file -> legacy mode
-	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
-
-	old := defaultResolver
-	defaultResolver = nil
-	defer func() { defaultResolver = old }()
-
-	info := getWorkspaceInfo()
-
-	if info.Mode != "legacy" {
-		t.Errorf("Mode = %q, want %q", info.Mode, "legacy")
-	}
-	if info.Name != "" {
-		t.Errorf("Name = %q, want empty", info.Name)
-	}
-	if info.Workspaces != nil {
-		t.Errorf("Workspaces = %v, want nil", info.Workspaces)
-	}
-}
-
 func TestGetWorkspaceInfo_WorkspaceMode(t *testing.T) {
 	cfg := &LoomConfig{
 		DefaultWorkspace: "myws",
@@ -849,9 +819,6 @@ func TestGetWorkspaceInfo_WorkspaceMode(t *testing.T) {
 		},
 	}
 	setupWorkspaceConfig(t, cfg)
-
-	oldReal := cli.TestingResetDefaultResolver()
-	defer cli.TestingSetDefaultResolver(oldReal)
 
 	info := getWorkspaceInfo()
 
@@ -892,12 +859,12 @@ func TestGroupAgentsByWorkspace(t *testing.T) {
 			expected: map[string]int{},
 		},
 		{
-			name: "all legacy agents",
+			name: "all unassigned agents",
 			agents: []AgentStatus{
 				{Name: "falcon", Workspace: ""},
 				{Name: "nova", Workspace: ""},
 			},
-			expected: map[string]int{"(legacy)": 2},
+			expected: map[string]int{"unassigned": 2},
 		},
 		{
 			name: "all workspace agents",
@@ -908,14 +875,14 @@ func TestGroupAgentsByWorkspace(t *testing.T) {
 			expected: map[string]int{"myws": 2},
 		},
 		{
-			name: "mixed workspace and legacy agents",
+			name: "mixed workspace and unassigned agents",
 			agents: []AgentStatus{
 				{Name: "falcon", Workspace: ""},
 				{Name: "repo1", Workspace: "myws"},
 				{Name: "repo2", Workspace: "otherws"},
 				{Name: "nova", Workspace: ""},
 			},
-			expected: map[string]int{"(legacy)": 2, "myws": 1, "otherws": 1},
+			expected: map[string]int{"unassigned": 2, "myws": 1, "otherws": 1},
 		},
 		{
 			name: "multiple workspaces",
@@ -948,41 +915,6 @@ func TestGroupAgentsByWorkspace(t *testing.T) {
 	}
 }
 
-func TestHandleWorkspaces_LegacyMode(t *testing.T) {
-	// No config file -> legacy mode
-	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
-
-	oldReal := cli.TestingResetDefaultResolver()
-	defer cli.TestingSetDefaultResolver(oldReal)
-
-	req := httptest.NewRequest("GET", "/api/workspaces", nil)
-	rr := httptest.NewRecorder()
-
-	handleWorkspaces(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Errorf("status code = %d, want %d", rr.Code, http.StatusOK)
-	}
-
-	var resp WorkspacesResponse
-	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("failed to unmarshal response: %v", err)
-	}
-
-	if resp.Mode != "legacy" {
-		t.Errorf("Mode = %q, want %q", resp.Mode, "legacy")
-	}
-	if resp.Default != "" {
-		t.Errorf("Default = %q, want empty", resp.Default)
-	}
-	if len(resp.Workspaces) != 0 {
-		t.Errorf("len(Workspaces) = %d, want 0", len(resp.Workspaces))
-	}
-	if resp.Timestamp.IsZero() {
-		t.Error("Timestamp should not be zero")
-	}
-}
-
 func TestHandleWorkspaces_WorkspaceMode(t *testing.T) {
 	cfg := &LoomConfig{
 		DefaultWorkspace: "primary",
@@ -1003,9 +935,6 @@ func TestHandleWorkspaces_WorkspaceMode(t *testing.T) {
 		},
 	}
 	setupWorkspaceConfig(t, cfg)
-
-	oldReal := cli.TestingResetDefaultResolver()
-	defer cli.TestingSetDefaultResolver(oldReal)
 
 	req := httptest.NewRequest("GET", "/api/workspaces", nil)
 	rr := httptest.NewRecorder()
@@ -1072,16 +1001,13 @@ func TestHandleAgents_WorkspaceMode(t *testing.T) {
 	}
 	setupWorkspaceConfig(t, cfg)
 
-	oldReal := cli.TestingResetDefaultResolver()
-	defer cli.TestingSetDefaultResolver(oldReal)
-
 	// Create mock data with agents that have workspace set
 	mockData := &MonitorData{
 		Timestamp: time.Now(),
 		Agents: []AgentStatus{
 			{Name: "repo1", Branch: "main", Status: "ready", Workspace: "myws"},
 			{Name: "repo2", Branch: "feature", Status: "working", Workspace: "myws"},
-			{Name: "legacy-agent", Branch: "dev", Status: "ready", Workspace: ""},
+			{Name: "unassigned-agent", Branch: "dev", Status: "ready", Workspace: ""},
 		},
 	}
 
@@ -1118,7 +1044,7 @@ func TestHandleAgents_WorkspaceMode(t *testing.T) {
 			t.Fatal("ByWorkspace should not be nil in workspace mode")
 		}
 		if len(resp.ByWorkspace) != 2 {
-			t.Errorf("len(ByWorkspace) = %d, want 2 (myws and (legacy))", len(resp.ByWorkspace))
+			t.Errorf("len(ByWorkspace) = %d, want 2 (myws and unassigned)", len(resp.ByWorkspace))
 		}
 
 		// Verify myws group
@@ -1130,64 +1056,17 @@ func TestHandleAgents_WorkspaceMode(t *testing.T) {
 			t.Errorf("len(ByWorkspace[myws]) = %d, want 2", len(mywsAgents))
 		}
 
-		// Verify legacy group
-		legacyAgents, ok := resp.ByWorkspace["(legacy)"]
+		// Verify unassigned group
+		unassignedAgents, ok := resp.ByWorkspace["unassigned"]
 		if !ok {
-			t.Fatal("missing '(legacy)' in ByWorkspace")
+			t.Fatal("missing 'unassigned' in ByWorkspace")
 		}
-		if len(legacyAgents) != 1 {
-			t.Errorf("len(ByWorkspace[(legacy)]) = %d, want 1", len(legacyAgents))
+		if len(unassignedAgents) != 1 {
+			t.Errorf("len(ByWorkspace[unassigned]) = %d, want 1", len(unassignedAgents))
 		}
 
 		if resp.Timestamp.IsZero() {
 			t.Error("Timestamp should not be zero")
-		}
-	})
-}
-
-func TestHandleAgents_LegacyMode_NoByWorkspace(t *testing.T) {
-	// No config file -> legacy mode
-	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
-
-	oldReal := cli.TestingResetDefaultResolver()
-	defer cli.TestingSetDefaultResolver(oldReal)
-
-	mockData := &MonitorData{
-		Timestamp: time.Now(),
-		Agents: []AgentStatus{
-			{Name: "falcon", Branch: "main", Status: "ready"},
-			{Name: "nova", Branch: "feature", Status: "working"},
-		},
-	}
-
-	withMockData(t, mockData, func() {
-		req := httptest.NewRequest("GET", "/api/agents", nil)
-		rr := httptest.NewRecorder()
-
-		handleAgents(rr, req)
-
-		if rr.Code != http.StatusOK {
-			t.Errorf("status code = %d, want %d", rr.Code, http.StatusOK)
-		}
-
-		var resp AgentsResponse
-		if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
-			t.Fatalf("failed to unmarshal response: %v", err)
-		}
-
-		// Verify legacy mode
-		if resp.Workspace.Mode != "legacy" {
-			t.Errorf("Workspace.Mode = %q, want %q", resp.Workspace.Mode, "legacy")
-		}
-
-		// Verify flat agents list is present
-		if len(resp.Agents) != 2 {
-			t.Errorf("len(Agents) = %d, want 2", len(resp.Agents))
-		}
-
-		// ByWorkspace should be nil in legacy mode
-		if resp.ByWorkspace != nil {
-			t.Errorf("ByWorkspace = %v, want nil in legacy mode", resp.ByWorkspace)
 		}
 	})
 }

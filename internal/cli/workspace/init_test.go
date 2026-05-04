@@ -145,7 +145,7 @@ func TestCheckPrerequisites_NotGitRepo(t *testing.T) {
 	}
 }
 
-func TestCheckPrerequisites_DoesNotRequireBd(t *testing.T) {
+func TestCheckPrerequisites_DoesNotRequireExternalIssueCLI(t *testing.T) {
 	deps, _, _, _, _ := NewTestDeps(t)
 	mock := NewCommandMock(t, []CommandStub{
 		{Name: "git", Args: []string{"rev-parse", "--is-inside-work-tree"}, Stdout: "true"},
@@ -156,7 +156,7 @@ func TestCheckPrerequisites_DoesNotRequireBd(t *testing.T) {
 
 	result := checkPrerequisites(deps)
 	if !result {
-		t.Error("checkPrerequisites() should return true without bd")
+		t.Error("checkPrerequisites() should return true without an external issue CLI")
 	}
 }
 
@@ -811,7 +811,7 @@ func TestInitIssueStorage_Failure(t *testing.T) {
 
 	result := initIssueStorage(deps)
 	if !result {
-		t.Error("initIssueStorage() should return true without invoking bd")
+		t.Error("initIssueStorage() should return true without invoking an external issue CLI")
 	}
 }
 
@@ -865,132 +865,6 @@ func TestCheckPrerequisites_InsideWorktree(t *testing.T) {
 	}
 }
 
-// --- runInitWorkspace tests ---
-
-func TestRunInitWorkspace_NoConfig(t *testing.T) {
-	// Not parallel: uses t.Setenv.
-	// Set up empty config directory (no config.yaml)
-	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
-
-	origYes := initYes
-	origWorkspace := initWorkspace
-	initYes = true
-	initWorkspace = "myws"
-	defer func() {
-		initYes = origYes
-		initWorkspace = origWorkspace
-	}()
-
-	// Verify LoadConfig returns nil for empty config dir
-	// This is the condition that would cause runInitWorkspace to print an error and exit
-	cfg, err := LoadConfig()
-	if err != nil {
-		t.Fatalf("unexpected error from LoadConfig: %v", err)
-	}
-	if cfg != nil {
-		t.Error("expected nil config when config.yaml doesn't exist")
-	}
-
-	// The test verifies the pre-condition that would cause the error:
-	// When config is nil, runInitWorkspace should print:
-	//   "No loom config found. Create a workspace first with: loom workspace create <name> --repos /path/to/repo"
-	// We can't easily test os.Exit without subprocess, but we verify the logic path
-}
-
-func TestRunInitWorkspace_WorkspaceNotFound(t *testing.T) {
-	// Not parallel: uses setupWorkspaceConfig which calls t.Setenv.
-	// Set up config with workspaces, but not the one we're looking for
-	cfg := &LoomConfig{
-		DefaultWorkspace: "existing",
-		Workspaces: map[string]WorkspaceConfig{
-			"existing": {
-				Path:  "/tmp/existing",
-				Repos: []RepoConfig{{Name: "repo1", Path: "/tmp/existing/repo1"}},
-			},
-			"another": {
-				Path:  "/tmp/another",
-				Repos: []RepoConfig{{Name: "repo2", Path: "/tmp/another/repo2"}},
-			},
-		},
-	}
-	setupWorkspaceConfig(t, cfg)
-
-	origYes := initYes
-	origWorkspace := initWorkspace
-	initYes = true
-	initWorkspace = "nonexistent"
-	defer func() {
-		initYes = origYes
-		initWorkspace = origWorkspace
-	}()
-
-	// Verify the workspace doesn't exist in config
-	loadedCfg, err := LoadConfig()
-	if err != nil {
-		t.Fatalf("LoadConfig error: %v", err)
-	}
-	if loadedCfg == nil {
-		t.Fatal("expected non-nil config")
-	}
-
-	_, exists := loadedCfg.Workspaces[initWorkspace]
-	if exists {
-		t.Error("expected workspace 'nonexistent' to not exist in config")
-	}
-
-	// Verify available workspaces would be shown in error message
-	available := make([]string, 0, len(loadedCfg.Workspaces))
-	for name := range loadedCfg.Workspaces {
-		available = append(available, name)
-	}
-	if len(available) != 2 {
-		t.Errorf("expected 2 available workspaces, got %d", len(available))
-	}
-}
-
-func TestRunInitWorkspace_WorkspaceExists(t *testing.T) {
-	// Not parallel: uses setupWorkspaceConfig which calls t.Setenv.
-	tmpDir := t.TempDir()
-	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
-
-	repoPath := filepath.Join(tmpDir, "repo1")
-	createGitRepo(t, repoPath)
-
-	cfg := &LoomConfig{
-		DefaultWorkspace: "myws",
-		Workspaces: map[string]WorkspaceConfig{
-			"myws": {
-				Path:  tmpDir,
-				Repos: []RepoConfig{{Name: "repo1", Path: repoPath}},
-			},
-		},
-	}
-	setupWorkspaceConfig(t, cfg)
-
-	// Verify workspace exists and can be loaded
-	loadedCfg, err := LoadConfig()
-	if err != nil {
-		t.Fatalf("LoadConfig error: %v", err)
-	}
-	if loadedCfg == nil {
-		t.Fatal("expected non-nil config")
-	}
-
-	ws, exists := loadedCfg.Workspaces["myws"]
-	if !exists {
-		t.Fatal("expected workspace 'myws' to exist in config")
-	}
-	if ws.Path != tmpDir {
-		t.Errorf("workspace path = %q, want %q", ws.Path, tmpDir)
-	}
-	if len(ws.Repos) != 1 {
-		t.Errorf("len(ws.Repos) = %d, want 1", len(ws.Repos))
-	}
-	if ws.Repos[0].Name != "repo1" {
-		t.Errorf("ws.Repos[0].Name = %q, want %q", ws.Repos[0].Name, "repo1")
-	}
-}
-
 func TestShowWorkspaceSummary(t *testing.T) {
 	// Not parallel: captures os.Stdout which is a global.
 	ws := WorkspaceConfig{
@@ -1024,9 +898,6 @@ func TestShowWorkspaceSummary(t *testing.T) {
 	}
 	if !strings.Contains(output, ".loom/") {
 		t.Error("showWorkspaceSummary should mention .loom/ runtime state")
-	}
-	if strings.Contains(output, ".beads/") || strings.Contains(output, "bd create") {
-		t.Error("showWorkspaceSummary should not mention legacy beads guidance")
 	}
 	if !strings.Contains(output, "loom agent backend") {
 		t.Error("showWorkspaceSummary should suggest 'loom agent' with first repo name")

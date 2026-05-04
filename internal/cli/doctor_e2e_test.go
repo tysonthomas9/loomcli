@@ -63,13 +63,10 @@ func runLoomDoctor(t *testing.T, dir string, args ...string) (stdout, stderr str
 	cmd := exec.Command(loom, fullArgs...)
 	cmd.Dir = dir
 	// Isolate from host environment that could affect checks.
-	// Filter out variables rather than setting them to empty string,
-	// since empty LOOM_FLEETDB_ENABLED may still fall through to config.
 	env := os.Environ()
 	filtered := env[:0]
 	for _, e := range env {
-		if strings.HasPrefix(e, "LOOM_REDIS_ADDR=") ||
-			strings.HasPrefix(e, "LOOM_FLEETDB_ENABLED=") {
+		if strings.HasPrefix(e, "LOOM_REDIS_ADDR=") {
 			continue
 		}
 		filtered = append(filtered, e)
@@ -136,7 +133,7 @@ func TestE2E_DoctorExitZeroOnHealthy(t *testing.T) {
 
 	stdout, _, exitCode := runLoomDoctor(t, dir)
 
-	// In a minimal temp repo some checks (bd daemon, worktrees, etc.) may warn
+	// In a minimal temp repo some checks may warn
 	// but should not fail on core git/git_repo checks. We just verify the command
 	// runs and produces a summary line.
 	summaryPattern := regexp.MustCompile(`\d+ checks passed, \d+ warnings, \d+ failures`)
@@ -320,17 +317,12 @@ func TestE2E_DoctorWorktreeDetection(t *testing.T) {
 	}
 }
 
-func TestE2E_DoctorOmitsLegacyBackendChecks(t *testing.T) {
+func TestE2E_DoctorIncludesFleetDBCheck(t *testing.T) {
 	dir := initTempGitRepo(t)
 
 	stdout, _, _ := runLoomDoctor(t, dir, "--json")
 	output := parseDoctorJSON(t, stdout)
 
-	for _, name := range []string{"bd_cli", "bd_daemon", "bd_socket", "beads_init"} {
-		if check := findCheck(output, name); check != nil {
-			t.Fatalf("legacy beads check %q should not be present: %+v", name, check)
-		}
-	}
 	if check := findCheck(output, "fleetdb"); check == nil {
 		t.Fatal("fleetdb check should be present")
 	}

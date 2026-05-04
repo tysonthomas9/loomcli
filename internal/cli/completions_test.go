@@ -9,6 +9,19 @@ import (
 	"github.com/spf13/cobra"
 )
 
+func setupCompletionConfig(t *testing.T, workspacePath string, repos ...RepoConfig) {
+	t.Helper()
+	setupWorkspaceConfig(t, &LoomConfig{
+		DefaultWorkspace: "TEST",
+		Workspaces: map[string]WorkspaceConfig{
+			"TEST": {
+				Path:  workspacePath,
+				Repos: repos,
+			},
+		},
+	})
+}
+
 func TestGetGitBranches(t *testing.T) {
 	t.Parallel()
 
@@ -172,9 +185,11 @@ func TestWorktreeCompletion(t *testing.T) {
 
 	t.Run("single_worktree", func(t *testing.T) {
 		tmpDir := t.TempDir()
-		if err := os.MkdirAll(filepath.Join(tmpDir, "worktrees", "falcon", ".git"), 0755); err != nil {
+		wtPath := filepath.Join(tmpDir, "worktrees", "falcon")
+		if err := os.MkdirAll(filepath.Join(wtPath, ".git"), 0755); err != nil {
 			t.Fatalf("failed to create worktree dir: %v", err)
 		}
+		setupCompletionConfig(t, tmpDir, RepoConfig{Name: "falcon", Path: wtPath})
 
 		// Change to temp dir and restore after
 		origDir, _ := os.Getwd()
@@ -196,11 +211,14 @@ func TestWorktreeCompletion(t *testing.T) {
 		if directive != cobra.ShellCompDirectiveNoFileComp {
 			t.Errorf("directive = %v, want NoFileComp", directive)
 		}
-		if len(completions) != 1 {
-			t.Fatalf("got %d completions, want 1", len(completions))
+		if len(completions) != 2 {
+			t.Fatalf("got %d completions, want 2", len(completions))
 		}
-		if completions[0] != "falcon\tfalcon-branch" {
-			t.Errorf("completion = %q, want %q", completions[0], "falcon\tfalcon-branch")
+		if completions[0] != "TEST\tworkspace" {
+			t.Errorf("completion = %q, want %q", completions[0], "TEST\tworkspace")
+		}
+		if completions[1] != "falcon\tfalcon-branch" {
+			t.Errorf("completion = %q, want %q", completions[1], "falcon\tfalcon-branch")
 		}
 	})
 
@@ -212,6 +230,10 @@ func TestWorktreeCompletion(t *testing.T) {
 				t.Fatalf("failed to create worktree dir: %v", err)
 			}
 		}
+		setupCompletionConfig(t, tmpDir,
+			RepoConfig{Name: "alpha", Path: filepath.Join(tmpDir, "worktrees", "alpha")},
+			RepoConfig{Name: "beta", Path: filepath.Join(tmpDir, "worktrees", "beta")},
+		)
 
 		origDir, _ := os.Getwd()
 		if err := os.Chdir(tmpDir); err != nil {
@@ -239,8 +261,8 @@ func TestWorktreeCompletion(t *testing.T) {
 		if directive != cobra.ShellCompDirectiveNoFileComp {
 			t.Errorf("directive = %v, want NoFileComp", directive)
 		}
-		if len(completions) != 2 {
-			t.Errorf("got %d completions, want 2", len(completions))
+		if len(completions) != 3 {
+			t.Errorf("got %d completions, want 3", len(completions))
 		}
 	})
 
@@ -259,8 +281,8 @@ func TestWorktreeCompletion(t *testing.T) {
 		if completions != nil {
 			t.Errorf("expected nil completions, got %v", completions)
 		}
-		if directive != cobra.ShellCompDirectiveError {
-			t.Errorf("directive = %v, want Error", directive)
+		if directive != cobra.ShellCompDirectiveNoFileComp {
+			t.Errorf("directive = %v, want NoFileComp", directive)
 		}
 	})
 
@@ -270,6 +292,7 @@ func TestWorktreeCompletion(t *testing.T) {
 		if err := os.MkdirAll(filepath.Join(tmpDir, "worktrees"), 0755); err != nil {
 			t.Fatalf("failed to create worktrees dir: %v", err)
 		}
+		setupCompletionConfig(t, tmpDir)
 
 		origDir, _ := os.Getwd()
 		if err := os.Chdir(tmpDir); err != nil {
@@ -282,8 +305,11 @@ func TestWorktreeCompletion(t *testing.T) {
 		if directive != cobra.ShellCompDirectiveNoFileComp {
 			t.Errorf("directive = %v, want NoFileComp", directive)
 		}
-		if len(completions) != 0 {
-			t.Errorf("got %d completions, want 0", len(completions))
+		if len(completions) != 1 {
+			t.Errorf("got %d completions, want 1", len(completions))
+		}
+		if completions[0] != "TEST\tworkspace" {
+			t.Errorf("completion = %q, want %q", completions[0], "TEST\tworkspace")
 		}
 	})
 
@@ -298,6 +324,10 @@ func TestWorktreeCompletion(t *testing.T) {
 		if err := os.MkdirAll(invalidWt, 0755); err != nil {
 			t.Fatalf("failed to create invalid dir: %v", err)
 		}
+		setupCompletionConfig(t, tmpDir,
+			RepoConfig{Name: "valid", Path: validWt},
+			RepoConfig{Name: "invalid", Path: invalidWt},
+		)
 
 		origDir, _ := os.Getwd()
 		if err := os.Chdir(tmpDir); err != nil {
@@ -317,19 +347,21 @@ func TestWorktreeCompletion(t *testing.T) {
 		if directive != cobra.ShellCompDirectiveNoFileComp {
 			t.Errorf("directive = %v, want NoFileComp", directive)
 		}
-		if len(completions) != 1 {
-			t.Fatalf("got %d completions, want 1", len(completions))
+		if len(completions) != 2 {
+			t.Fatalf("got %d completions, want 2", len(completions))
 		}
-		if completions[0] != "valid\tvalid-branch" {
-			t.Errorf("completion = %q, want %q", completions[0], "valid\tvalid-branch")
+		if completions[1] != "valid\tvalid-branch" {
+			t.Errorf("completion = %q, want %q", completions[1], "valid\tvalid-branch")
 		}
 	})
 
 	t.Run("git_branch_error_shows_unknown", func(t *testing.T) {
 		tmpDir := t.TempDir()
-		if err := os.MkdirAll(filepath.Join(tmpDir, "worktrees", "falcon", ".git"), 0755); err != nil {
+		wtPath := filepath.Join(tmpDir, "worktrees", "falcon")
+		if err := os.MkdirAll(filepath.Join(wtPath, ".git"), 0755); err != nil {
 			t.Fatalf("failed to create worktree dir: %v", err)
 		}
+		setupCompletionConfig(t, tmpDir, RepoConfig{Name: "falcon", Path: wtPath})
 
 		origDir, _ := os.Getwd()
 		if err := os.Chdir(tmpDir); err != nil {
@@ -350,11 +382,11 @@ func TestWorktreeCompletion(t *testing.T) {
 		if directive != cobra.ShellCompDirectiveNoFileComp {
 			t.Errorf("directive = %v, want NoFileComp", directive)
 		}
-		if len(completions) != 1 {
-			t.Fatalf("got %d completions, want 1", len(completions))
+		if len(completions) != 2 {
+			t.Fatalf("got %d completions, want 2", len(completions))
 		}
-		if completions[0] != "falcon\tunknown" {
-			t.Errorf("completion = %q, want %q", completions[0], "falcon\tunknown")
+		if completions[1] != "falcon\tunknown" {
+			t.Errorf("completion = %q, want %q", completions[1], "falcon\tunknown")
 		}
 	})
 }
@@ -366,6 +398,7 @@ func TestWorktreeThenBranchCompletion(t *testing.T) {
 		if err := os.MkdirAll(filepath.Join(wtDir, ".git"), 0755); err != nil {
 			t.Fatalf("failed to create worktree dir: %v", err)
 		}
+		setupCompletionConfig(t, tmpDir, RepoConfig{Name: "falcon", Path: wtDir})
 
 		origDir, _ := os.Getwd()
 		if err := os.Chdir(tmpDir); err != nil {
@@ -385,8 +418,8 @@ func TestWorktreeThenBranchCompletion(t *testing.T) {
 		if directive != cobra.ShellCompDirectiveNoFileComp {
 			t.Errorf("directive = %v, want NoFileComp", directive)
 		}
-		if len(completions) != 1 {
-			t.Errorf("got %d completions, want 1", len(completions))
+		if len(completions) != 2 {
+			t.Errorf("got %d completions, want 2", len(completions))
 		}
 	})
 

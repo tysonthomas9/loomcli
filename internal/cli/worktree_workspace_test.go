@@ -1,28 +1,99 @@
 package cli
 
 import (
+	"context"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
-	"gopkg.in/yaml.v3"
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
+	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
+	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
-// setupWorkspaceConfig creates a temp config directory with the given config
-// and sets LOOM_CONFIG_DIR to point at it. Returns a cleanup function.
+// setupWorkspaceConfig seeds the FleetDB-backed workspace projection and the
+// machine-local state cache used for repo paths.
 func setupWorkspaceConfig(t *testing.T, cfg *LoomConfig) {
 	t.Helper()
 	configDir := t.TempDir()
 	t.Setenv("LOOM_CONFIG_DIR", configDir)
+	t.Setenv("LOOM_FLEET_DB_ACTOR", "test")
+	cfgpkg.InvalidateConfigCache()
+	oldResolver := TestingResetDefaultResolver()
 
-	data, err := yaml.Marshal(cfg)
+	ctx := context.Background()
+	handle, err := bootstrap.OpenStore(ctx, configDir, nil)
 	if err != nil {
-		t.Fatalf("marshal config: %v", err)
+		t.Fatalf("open fleet-db store: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(configDir, "config.yaml"), data, 0644); err != nil {
-		t.Fatalf("write config: %v", err)
+	t.Cleanup(func() {
+		_ = handle.Close()
+		TestingSetDefaultResolver(oldResolver)
+		cfgpkg.InvalidateConfigCache()
+		ResetWorkspaceRuntimeDirCache()
+	})
+
+	state := &bootstrap.StateCache{Workspaces: make(map[string]bootstrap.WorkspaceLocalState)}
+	if cfg.DefaultWorkspace != "" {
+		state.LastWorkspace = strings.ToUpper(cfg.DefaultWorkspace)
 	}
+
+	names := make([]string, 0, len(cfg.Workspaces))
+	for name := range cfg.Workspaces {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	for _, name := range names {
+		ws := cfg.Workspaces[name]
+		key := strings.ToUpper(name)
+		if _, err := handle.Store.Workspaces().Create(ctx, store.WorkspaceCreate{
+			Key:           key,
+			Name:          name,
+			DefaultBranch: firstRepoDefaultBranch(ws.Repos),
+		}); err != nil {
+			t.Fatalf("create workspace %s: %v", key, err)
+		}
+
+		localRepos := make(map[string]string, len(ws.Repos))
+		for _, repo := range ws.Repos {
+			sourceRepoID := repo.SourceRepoID
+			if sourceRepoID == "" {
+				sourceRepoID = repo.Name
+			}
+			if _, err := handle.Store.Repos().Create(ctx, store.RepoCreate{
+				WorkspaceKey:  key,
+				Name:          repo.Name,
+				Remote:        repo.Remote,
+				DefaultBranch: repo.DefaultBranch,
+				Groups:        repo.Groups,
+				SourceRepoID:  sourceRepoID,
+			}); err != nil {
+				t.Fatalf("create repo %s/%s: %v", key, repo.Name, err)
+			}
+			localRepos[repo.Name] = repo.Path
+		}
+		state.Workspaces[key] = bootstrap.WorkspaceLocalState{
+			Path:  ws.Path,
+			Repos: localRepos,
+		}
+	}
+
+	if err := bootstrap.SaveStateCache(state); err != nil {
+		t.Fatalf("save state cache: %v", err)
+	}
+	cfgpkg.InvalidateConfigCache()
+}
+
+func firstRepoDefaultBranch(repos []RepoConfig) string {
+	for _, repo := range repos {
+		if repo.DefaultBranch != "" {
+			return repo.DefaultBranch
+		}
+	}
+	return ""
 }
 
 // createGitRepo creates a minimal git repo at the given path with an initial commit.
@@ -49,8 +120,8 @@ func createGitRepo(t *testing.T, path string) {
 	}
 }
 
-func TestNewResolver_LegacyMode(t *testing.T) {
-	// No config file → legacy mode
+func TestNewResolver_NoWorkspaceConfig(t *testing.T) {
+	// No FleetDB workspaces configured.
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
 
 	// Reset defaultResolver so it doesn't interfere
@@ -58,15 +129,8 @@ func TestNewResolver_LegacyMode(t *testing.T) {
 	defaultResolver = nil
 	defer func() { defaultResolver = old }()
 
-	r, err := NewResolver()
-	if err != nil {
-		t.Fatalf("NewResolver: %v", err)
-	}
-	if r.GetMode() != ModeLegacy {
-		t.Errorf("expected ModeLegacy, got %d", r.GetMode())
-	}
-	if r.WorkspaceName() != "" {
-		t.Errorf("expected empty workspace name, got %q", r.WorkspaceName())
+	if _, err := NewResolver(); err == nil {
+		t.Fatal("expected error when no workspaces are configured")
 	}
 }
 
@@ -93,8 +157,8 @@ func TestNewResolver_WorkspaceMode(t *testing.T) {
 	if r.GetMode() != ModeWorkspace {
 		t.Errorf("expected ModeWorkspace, got %d", r.GetMode())
 	}
-	if r.WorkspaceName() != "myws" {
-		t.Errorf("expected workspace 'myws', got %q", r.WorkspaceName())
+	if r.WorkspaceName() != "MYWS" {
+		t.Errorf("expected workspace 'MYWS', got %q", r.WorkspaceName())
 	}
 }
 
@@ -119,8 +183,8 @@ func TestNewResolver_WorkspaceMode_NoDefault(t *testing.T) {
 	if r.GetMode() != ModeWorkspace {
 		t.Errorf("expected ModeWorkspace, got %d", r.GetMode())
 	}
-	if r.WorkspaceName() != "alpha" {
-		t.Errorf("expected workspace 'alpha', got %q", r.WorkspaceName())
+	if r.WorkspaceName() != "ALPHA" {
+		t.Errorf("expected workspace 'ALPHA', got %q", r.WorkspaceName())
 	}
 }
 
@@ -143,11 +207,11 @@ func TestResolver_SetWorkspace(t *testing.T) {
 	}
 
 	// Valid workspace switch
-	if err := r.SetWorkspace("ws2"); err != nil {
-		t.Fatalf("SetWorkspace(ws2): %v", err)
+	if err := r.SetWorkspace("WS2"); err != nil {
+		t.Fatalf("SetWorkspace(WS2): %v", err)
 	}
-	if r.WorkspaceName() != "ws2" {
-		t.Errorf("expected 'ws2', got %q", r.WorkspaceName())
+	if r.WorkspaceName() != "WS2" {
+		t.Errorf("expected 'WS2', got %q", r.WorkspaceName())
 	}
 
 	// Invalid workspace
@@ -155,55 +219,10 @@ func TestResolver_SetWorkspace(t *testing.T) {
 		t.Error("expected error for nonexistent workspace")
 	}
 
-	// No config (legacy resolver)
-	legacyR := &Resolver{Mode: ModeLegacy}
-	if err := legacyR.SetWorkspace("any"); err == nil {
+	// No config resolver
+	noConfigR := &Resolver{Mode: ModeWorkspace}
+	if err := noConfigR.SetWorkspace("any"); err == nil {
 		t.Error("expected error when no config loaded")
-	}
-}
-
-func TestResolver_DiscoverWorktrees_Legacy(t *testing.T) {
-	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
-
-	old := defaultResolver
-	defaultResolver = nil
-	defer func() { defaultResolver = old }()
-
-	tmpDir := t.TempDir()
-	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
-
-	origDir, _ := os.Getwd()
-	defer os.Chdir(origDir)
-	os.Chdir(tmpDir)
-
-	// Create worktrees directory with git repos
-	wtDir := filepath.Join(tmpDir, "worktrees")
-	createGitRepo(t, filepath.Join(wtDir, "falcon"))
-	createGitRepo(t, filepath.Join(wtDir, "nova"))
-	// Create a non-git directory (should be skipped)
-	os.MkdirAll(filepath.Join(wtDir, "notgit"), 0755)
-
-	r := &Resolver{Mode: ModeLegacy}
-	worktrees, err := r.DiscoverWorktrees()
-	if err != nil {
-		t.Fatalf("DiscoverWorktrees: %v", err)
-	}
-
-	if len(worktrees) != 2 {
-		t.Fatalf("expected 2 worktrees, got %d", len(worktrees))
-	}
-
-	// Verify fields
-	for _, wt := range worktrees {
-		if wt.Workspace != "" {
-			t.Errorf("expected empty Workspace in legacy mode, got %q", wt.Workspace)
-		}
-		if wt.Repo != nil {
-			t.Errorf("expected nil Repo in legacy mode, got %+v", wt.Repo)
-		}
-		if wt.Branch != "main" {
-			t.Errorf("expected branch 'main', got %q", wt.Branch)
-		}
 	}
 }
 
@@ -252,8 +271,8 @@ func TestResolver_DiscoverWorktrees_Workspace(t *testing.T) {
 	}
 
 	for _, wt := range worktrees {
-		if wt.Workspace != "myws" {
-			t.Errorf("expected Workspace 'myws', got %q", wt.Workspace)
+		if wt.Workspace != "MYWS" {
+			t.Errorf("expected Workspace 'MYWS', got %q", wt.Workspace)
 		}
 		if wt.Repo == nil {
 			t.Error("expected non-nil Repo in workspace mode")
@@ -261,40 +280,6 @@ func TestResolver_DiscoverWorktrees_Workspace(t *testing.T) {
 		if wt.Branch != "main" {
 			t.Errorf("expected branch 'main', got %q", wt.Branch)
 		}
-	}
-}
-
-func TestResolver_ResolveWorktreePath_Legacy(t *testing.T) {
-	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
-
-	old := defaultResolver
-	defaultResolver = nil
-	defer func() { defaultResolver = old }()
-
-	tmpDir := t.TempDir()
-	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
-
-	origDir, _ := os.Getwd()
-	defer os.Chdir(origDir)
-	os.Chdir(tmpDir)
-
-	// Create worktrees/falcon
-	wtPath := filepath.Join(tmpDir, "worktrees", "falcon")
-	os.MkdirAll(wtPath, 0755)
-
-	r := &Resolver{Mode: ModeLegacy}
-	path, err := r.ResolveWorktreePath("falcon")
-	if err != nil {
-		t.Fatalf("ResolveWorktreePath: %v", err)
-	}
-	if path != wtPath {
-		t.Errorf("expected %s, got %s", wtPath, path)
-	}
-
-	// Non-existent
-	_, err = r.ResolveWorktreePath("nonexistent")
-	if err == nil {
-		t.Error("expected error for nonexistent worktree")
 	}
 }
 
@@ -645,7 +630,7 @@ func TestDefaultBranchForWorktree_WithoutRepo(t *testing.T) {
 	}
 	got := DefaultBranchForWorktree(wt)
 	if got != "main" {
-		t.Errorf("DefaultBranchForWorktree() = %q, want %q (legacy fallback)", got, "main")
+		t.Errorf("DefaultBranchForWorktree() = %q, want %q (default fallback)", got, "main")
 	}
 }
 
@@ -746,18 +731,18 @@ func TestGetDefaultBranchForWorktrees_WorkspaceMode_SingleWorktree(t *testing.T)
 	}
 }
 
-func TestGetDefaultBranchForWorktrees_LegacyMode_PreservedBehavior(t *testing.T) {
+func TestGetDefaultBranchForWorktrees_NoWorkspaceConfig_PreservedBehavior(t *testing.T) {
 	t.Setenv("LOOM_DEFAULT_BRANCH", "")
 	resetIntegrationBranchCache()
 	t.Cleanup(resetIntegrationBranchCache)
 
-	// Legacy worktrees have Repo == nil; with fewer than 2 worktrees, returns "main"
+	// Worktrees without repo config have Repo == nil; with fewer than 2 worktrees, returns "main".
 	worktrees := []WorktreeInfo{
 		{Name: "falcon", Path: "/tmp/falcon", Branch: "falcon"},
 	}
 	got := GetDefaultBranchForWorktrees(worktrees)
 	if got != "main" {
-		t.Errorf("GetDefaultBranchForWorktrees() = %q, want %q (legacy single)", got, "main")
+		t.Errorf("GetDefaultBranchForWorktrees() = %q, want %q (default single)", got, "main")
 	}
 }
 
@@ -817,10 +802,10 @@ func TestDetectIntegrationBranch_WorkspaceMode_MixedRepoNil(t *testing.T) {
 			Repo:   &RepoConfig{Name: "api", Path: "/tmp/api"},
 		},
 		{
-			Name:   "legacy-wt",
-			Path:   "/tmp/legacy",
+			Name:   "unassigned-wt",
+			Path:   "/tmp/unassigned",
 			Branch: "feature-b",
-			// Repo is nil (legacy)
+			// Repo is nil when no workspace metadata is present.
 		},
 	}
 	got := DetectIntegrationBranch(worktrees)
@@ -829,7 +814,7 @@ func TestDetectIntegrationBranch_WorkspaceMode_MixedRepoNil(t *testing.T) {
 	}
 }
 
-func TestDetectIntegrationBranch_LegacyMode_NoRepoSet(t *testing.T) {
+func TestDetectIntegrationBranch_NoWorkspaceConfig_NoRepoSet(t *testing.T) {
 	// With no git repo available, DetectIntegrationBranch will fail git commands
 	// and return empty, but the important thing is it doesn't bail out early
 	// (the workspace-mode guard does not trigger)
@@ -846,17 +831,17 @@ func TestDetectIntegrationBranch_LegacyMode_NoRepoSet(t *testing.T) {
 }
 
 func TestWorktreeInfo_WorkspaceFields(t *testing.T) {
-	// Legacy mode: Workspace and Repo should be zero values
-	legacyInfo := WorktreeInfo{
+	// No workspace config: Workspace and Repo should be zero values
+	unassignedInfo := WorktreeInfo{
 		Name:   "test",
 		Path:   "/tmp/test",
 		Branch: "main",
 	}
-	if legacyInfo.Workspace != "" {
-		t.Errorf("expected empty Workspace, got %q", legacyInfo.Workspace)
+	if unassignedInfo.Workspace != "" {
+		t.Errorf("expected empty Workspace, got %q", unassignedInfo.Workspace)
 	}
-	if legacyInfo.Repo != nil {
-		t.Errorf("expected nil Repo, got %+v", legacyInfo.Repo)
+	if unassignedInfo.Repo != nil {
+		t.Errorf("expected nil Repo, got %+v", unassignedInfo.Repo)
 	}
 
 	// Workspace mode: fields populated

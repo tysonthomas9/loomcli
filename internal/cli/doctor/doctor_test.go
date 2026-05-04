@@ -315,7 +315,7 @@ func TestCheckStaleLocks(t *testing.T) {
 
 		result := checkStaleLocks()
 		if result.Name == "" {
-			// checkStaleLocks may return empty if DiscoverWorktrees fails (legacy mode)
+			// checkStaleLocks may return empty if DiscoverWorktrees fails (no workspace config)
 			// without proper git setup; this is acceptable
 			t.Skip("worktree discovery failed in test environment")
 		}
@@ -458,23 +458,6 @@ func TestCheckLoomDaemon(t *testing.T) {
 
 func TestCheckIssueBackend(t *testing.T) {
 	t.Run("fleetdb active", func(t *testing.T) {
-		t.Setenv("LOOM_FLEETDB_ENABLED", "true")
-
-		result := checkIssueBackend()
-		if result.Name != "issue_backend" {
-			t.Errorf("expected name 'issue_backend', got %q", result.Name)
-		}
-		if result.Status != StatusPass {
-			t.Errorf("expected pass, got %v: %s", result.Status, result.Summary)
-		}
-		if !strings.Contains(result.Summary, "fleet-db") {
-			t.Errorf("expected summary to contain 'fleet-db', got %q", result.Summary)
-		}
-	})
-
-	t.Run("beads env value falls back to fleetdb", func(t *testing.T) {
-		t.Setenv("LOOM_ISSUE_BACKEND", "beads")
-
 		result := checkIssueBackend()
 		if result.Name != "issue_backend" {
 			t.Errorf("expected name 'issue_backend', got %q", result.Name)
@@ -488,9 +471,6 @@ func TestCheckIssueBackend(t *testing.T) {
 	})
 
 	t.Run("empty env var falls through to default fleetdb", func(t *testing.T) {
-		// Empty string is treated as unset — falls through to config/defaults.
-		t.Setenv("LOOM_FLEETDB_ENABLED", "")
-
 		result := checkIssueBackend()
 		if !strings.Contains(result.Summary, "fleet-db") {
 			t.Errorf("expected summary to contain 'fleet-db', got %q", result.Summary)

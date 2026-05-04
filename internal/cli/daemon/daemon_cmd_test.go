@@ -255,7 +255,7 @@ func TestReadStateFile_ValidJSON(t *testing.T) {
 				Role:         "plan",
 				PID:          12346,
 				Status:       "running",
-				TaskID:       "bd-123",
+				TaskID:       "loom-123",
 				RestartCount: 0,
 				LastStart:    time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC),
 			},
@@ -288,8 +288,8 @@ func TestReadStateFile_ValidJSON(t *testing.T) {
 	if result.Agents[0].Worktree != "falcon" {
 		t.Errorf("Agents[0].Worktree = %q, want %q", result.Agents[0].Worktree, "falcon")
 	}
-	if result.Agents[0].TaskID != "bd-123" {
-		t.Errorf("Agents[0].TaskID = %q, want %q", result.Agents[0].TaskID, "bd-123")
+	if result.Agents[0].TaskID != "loom-123" {
+		t.Errorf("Agents[0].TaskID = %q, want %q", result.Agents[0].TaskID, "loom-123")
 	}
 	if result.Agents[1].RestartCount != 2 {
 		t.Errorf("Agents[1].RestartCount = %d, want 2", result.Agents[1].RestartCount)
@@ -665,7 +665,7 @@ func TestDaemonAgentStatus_JSONTags(t *testing.T) {
 		Role:         "plan",
 		PID:          12345,
 		Status:       "running",
-		TaskID:       "bd-123",
+		TaskID:       "loom-123",
 		RestartCount: 2,
 		LastStart:    time.Date(2024, 1, 15, 10, 0, 0, 0, time.UTC),
 		LastExit:     time.Date(2024, 1, 15, 11, 0, 0, 0, time.UTC),

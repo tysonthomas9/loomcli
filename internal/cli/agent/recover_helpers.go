@@ -206,7 +206,7 @@ type cleanTarget struct {
 
 // cleanUntrackedFiles checks for and optionally removes untracked files.
 // In workspace mode, it iterates over all repos in the workspace.
-// Protected runtime paths (.loom/, sessions/, loom.yaml, AGENTS.md)
+// Protected runtime paths (.loom/, sessions/, AGENTS.md)
 // are always excluded from cleanup to prevent destroying live daemon state.
 func cleanUntrackedFiles(worktreePath string, force bool) {
 	targets := resolveCleanTargets(worktreePath)

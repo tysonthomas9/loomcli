@@ -2,7 +2,6 @@ package cli
 
 import (
 	"errors"
-	"os"
 	"path/filepath"
 	"testing"
 )
@@ -190,12 +189,12 @@ func TestDiscoverWorkspace_MultipleWorkspaces_SwitchAndDiscover(t *testing.T) {
 	if wt1[0].Name != "repo1" {
 		t.Errorf("expected repo1, got %q", wt1[0].Name)
 	}
-	if wt1[0].Workspace != "workspace1" {
-		t.Errorf("expected workspace 'workspace1', got %q", wt1[0].Workspace)
+	if wt1[0].Workspace != "WORKSPACE1" {
+		t.Errorf("expected workspace 'WORKSPACE1', got %q", wt1[0].Workspace)
 	}
 
 	// Switch to workspace2 and discover
-	if err := r.SetWorkspace("workspace2"); err != nil {
+	if err := r.SetWorkspace("WORKSPACE2"); err != nil {
 		t.Fatalf("SetWorkspace: %v", err)
 	}
 
@@ -209,8 +208,8 @@ func TestDiscoverWorkspace_MultipleWorkspaces_SwitchAndDiscover(t *testing.T) {
 	if wt2[0].Name != "repo2" {
 		t.Errorf("expected repo2, got %q", wt2[0].Name)
 	}
-	if wt2[0].Workspace != "workspace2" {
-		t.Errorf("expected workspace 'workspace2', got %q", wt2[0].Workspace)
+	if wt2[0].Workspace != "WORKSPACE2" {
+		t.Errorf("expected workspace 'WORKSPACE2', got %q", wt2[0].Workspace)
 	}
 }
 
@@ -218,44 +217,6 @@ func TestDiscoverWorkspace_MultipleWorkspaces_SwitchAndDiscover(t *testing.T) {
 // where ResolveAgentTarget lives.
 
 // --- Group 4: DiscoverWorktrees() public API delegation ---
-
-func TestDiscoverWorktrees_PublicAPI_DelegatesLegacy(t *testing.T) {
-	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
-
-	old := defaultResolver
-	defaultResolver = nil
-	defer func() { defaultResolver = old }()
-
-	tmpDir := t.TempDir()
-	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
-
-	origDir, _ := os.Getwd()
-	defer os.Chdir(origDir)
-	os.Chdir(tmpDir)
-
-	// Create worktrees directory with a git repo
-	createGitRepo(t, filepath.Join(tmpDir, "worktrees", "falcon"))
-
-	// Call the package-level function
-	worktrees, err := DiscoverWorktrees()
-	if err != nil {
-		t.Fatalf("DiscoverWorktrees: %v", err)
-	}
-
-	if len(worktrees) != 1 {
-		t.Fatalf("expected 1 worktree, got %d", len(worktrees))
-	}
-	if worktrees[0].Name != "falcon" {
-		t.Errorf("expected name 'falcon', got %q", worktrees[0].Name)
-	}
-	// Legacy mode: Workspace and Repo should be empty/nil
-	if worktrees[0].Workspace != "" {
-		t.Errorf("expected empty Workspace in legacy mode, got %q", worktrees[0].Workspace)
-	}
-	if worktrees[0].Repo != nil {
-		t.Errorf("expected nil Repo in legacy mode, got %+v", worktrees[0].Repo)
-	}
-}
 
 func TestDiscoverWorktrees_PublicAPI_DelegatesWorkspace(t *testing.T) {
 	tmpDir := t.TempDir()
@@ -294,8 +255,8 @@ func TestDiscoverWorktrees_PublicAPI_DelegatesWorkspace(t *testing.T) {
 		t.Errorf("expected name 'myrepo', got %q", worktrees[0].Name)
 	}
 	// Workspace mode: Workspace and Repo should be populated
-	if worktrees[0].Workspace != "ws" {
-		t.Errorf("expected Workspace 'ws', got %q", worktrees[0].Workspace)
+	if worktrees[0].Workspace != "WS" {
+		t.Errorf("expected Workspace 'WS', got %q", worktrees[0].Workspace)
 	}
 	if worktrees[0].Repo == nil {
 		t.Error("expected non-nil Repo in workspace mode")

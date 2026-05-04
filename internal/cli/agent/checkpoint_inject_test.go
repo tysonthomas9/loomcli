@@ -17,7 +17,7 @@ Some preamble text.
 Do stuff here.
 `
 	cp := &config.Checkpoint{
-		TaskID:     "bd-123",
+		TaskID:     "loom-123",
 		ExitCode:   1,
 		ErrorClass: "RateLimited",
 		GitDiff:    "+added line",
@@ -39,7 +39,7 @@ Do stuff here.
 		t.Error("Checkpoint context should appear before Step 1")
 	}
 
-	if !strings.Contains(result, "bd-123") {
+	if !strings.Contains(result, "loom-123") {
 		t.Error("Result should contain task ID")
 	}
 	if !strings.Contains(result, "RateLimited") {
@@ -53,7 +53,7 @@ Do stuff here.
 func TestInjectCheckpointContextNoDiff(t *testing.T) {
 	prompt := `### Step 1: Do something`
 	cp := &config.Checkpoint{
-		TaskID:    "bd-456",
+		TaskID:    "loom-456",
 		ExitCode:  137,
 		Timestamp: time.Now(),
 	}
@@ -68,7 +68,7 @@ func TestInjectCheckpointContextNoStep1(t *testing.T) {
 	// Fallback: append to end when "### Step 1:" is not found
 	prompt := `Some prompt without steps`
 	cp := &config.Checkpoint{
-		TaskID:    "bd-789",
+		TaskID:    "loom-789",
 		ExitCode:  1,
 		GitDiff:   "some diff",
 		Timestamp: time.Now(),
@@ -92,7 +92,7 @@ Some preamble text.
 Do stuff here.
 `
 	cp := &config.Checkpoint{
-		TaskID:      "bd-yield-2",
+		TaskID:      "loom-yield-2",
 		ExitCode:    0,
 		ErrorClass:  "Yielded",
 		YieldReason: "manual_stop",
@@ -142,7 +142,7 @@ func TestInjectCheckpointContext_CrashUnchanged(t *testing.T) {
 Do stuff here.
 `
 	cp := &config.Checkpoint{
-		TaskID:     "bd-crash-1",
+		TaskID:     "loom-crash-1",
 		ExitCode:   1,
 		ErrorClass: "RateLimited",
 		GitDiff:    "+crash change",

@@ -41,9 +41,9 @@ type StatusResponse struct {
 
 // DaemonMode values for StatusResponse.DaemonMode.
 const (
-	DaemonModePoll   = "poll"   // bd daemon polls for changes on SyncInterval
-	DaemonModeEvents = "events" // bd daemon receives push events
-	DaemonModeFleet  = "fleet"  // fleet client mode — no local bd daemon
+	DaemonModePoll   = "poll"   // daemon polls for changes on SyncInterval
+	DaemonModeEvents = "events" // daemon receives push events
+	DaemonModeFleet  = "fleet"  // fleet client mode
 )
 
 // HealthResponse is the response for a health check operation
@@ -52,7 +52,7 @@ type HealthResponse struct {
 	Status         string  `json:"status"`                   // "healthy", "degraded", "unhealthy"
 	Version        string  `json:"version"`                  // Server/daemon version
 	ClientVersion  string  `json:"client_version,omitempty"` // Client version from request
-	Compatible     bool    `json:"compatible"`               // Whether versions are compatible
+	Compatible     bool    `json:"compatible"`               // Whether versions can talk to each other
 	Uptime         float64 `json:"uptime_seconds"`
 	DBResponseTime float64 `json:"db_response_ms"`
 	ActiveConns    int32   `json:"active_connections"`

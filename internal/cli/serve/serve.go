@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"os/exec"
 	"os/signal"
 	"strconv"
 	"strings"
@@ -161,8 +160,6 @@ func init() {
 
 //nolint:funlen // Serve startup wires process-wide dependencies in a fixed order.
 func runServe(cmd *cobra.Command, args []string) {
-	checkTmuxInstalled()
-
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -205,12 +202,7 @@ func runServe(cmd *cobra.Command, args []string) {
 	if storeErr != nil {
 		log.Fatalf("failed to open fleet-db store: %v", storeErr)
 	}
-	if storeHandle != nil {
-		defer func() { _ = storeHandle.Close() }()
-	} else {
-		go workspacemgr.PurgeOldSessions()
-		workspacemgr.EnsureProjectRegistered()
-	}
+	defer func() { _ = storeHandle.Close() }()
 
 	// Proactively refresh the monitor cache every 6s so HTTP requests
 	// always read warm data instead of blocking on collectMonitorData.
@@ -221,18 +213,12 @@ func runServe(cmd *cobra.Command, args []string) {
 	// mode, starting it earlier can race the main serve path for the
 	// embedded fleet-db runtime lock before runtime metadata is written.
 	collectDataFn := metricscmd.NewCollectorWithBackground(ctx, 10*time.Second, 6*time.Second)
-	monitorHandlers := buildMonitorHandlers(collectDataFn, staleDetectorHandler)
+	issueBackendFn := cli.WorkspaceAwareIssueBackendForURL(storeHandle.URL(), fleetState.clientCfg.Actor)
+	monitorHandlers := buildMonitorHandlers(collectDataFn, staleDetectorHandler, storeHandle.Store, issueBackendFn)
 
 	webuiErr := make(chan error, 1)
 	go func() {
-		var st store.Store
-		if storeHandle != nil {
-			st = storeHandle.Store
-		}
 		cfg := buildServerConfig(monitorHandlers, fleetState, storeHandle)
-		if !serveNoDaemon && st == nil {
-			cfg.DaemonStartupFn = workspacemgr.EnsureDaemonsForAllWorkspaces
-		}
 		webuiErr <- webuiapp.StartServer(ctx, cfg)
 	}()
 
@@ -243,9 +229,6 @@ func runServe(cmd *cobra.Command, args []string) {
 func openServeStore(ctx context.Context, fs fleetState) (*bootstrap.StoreHandle, error) {
 	if cli.IsFleetActive() {
 		ensureFleetStoreEnv(fs.clientCfg)
-	}
-	if !cli.IsFleetActive() && !cli.IsFleetDBActive() && os.Getenv(bootstrap.EnvFleetDBURL) == "" {
-		return nil, nil
 	}
 	return cmdstore.OpenStore(ctx)
 }
@@ -259,28 +242,16 @@ func ensureFleetStoreEnv(cfg config.FleetClientConfig) {
 	}
 }
 
-func checkTmuxInstalled() {
-	if _, err := exec.LookPath("tmux"); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: tmux is required but not found in PATH.\nInstall it with: brew install tmux (macOS) or apt install tmux (Linux)\n")
-		os.Exit(1)
-	}
-}
-
 func ensureIssueBackend() bool {
 	if serveNoDaemon {
 		return false
 	}
 	started, err := cli.EnsureIssueBackendRunning(cli.GetDeps(nil), 5*time.Second)
 	if err != nil {
-		log.Printf("Warning: failed to auto-start issue backend: %v (endpoints may return incomplete data)", err)
+		log.Printf("Warning: issue backend readiness check failed: %v", err)
 		return false
 	}
-	if started {
-		log.Printf("Auto-started issue backend daemon")
-		return true
-	}
-	log.Printf("Issue backend daemon already running")
-	return false
+	return started
 }
 
 func stopIssueBackend() {
@@ -342,15 +313,15 @@ func initUsageStore() {
 	usageHandler = usagecmd.HandleUsage(usagecmd.InitStore(dir))
 }
 
-func buildMonitorHandlers(collectDataFn metricscmd.CollectDataFn, staleDetectorHandler http.HandlerFunc) webui.MonitorHandlers {
+func buildMonitorHandlers(collectDataFn metricscmd.CollectDataFn, staleDetectorHandler http.HandlerFunc, st store.Store, issueBackendFn metricscmd.IssueBackendFn) webui.MonitorHandlers {
 	eventsDir := observability.ResolveEventsDir()
 	return webui.MonitorHandlers{
-		Status:               metricscmd.HandleStatus(collectDataFn),
-		Agents:               metricscmd.HandleAgents(collectDataFn),
-		Tasks:                metricscmd.HandleTasks(collectDataFn),
-		Stats:                metricscmd.HandleStats(collectDataFn),
+		Status:               metricscmd.HandleStatusWithBackend(collectDataFn, st, issueBackendFn),
+		Agents:               metricscmd.HandleAgentsWithBackend(collectDataFn, st, issueBackendFn),
+		Tasks:                metricscmd.HandleTasksWithBackend(collectDataFn, issueBackendFn),
+		Stats:                metricscmd.HandleStatsWithBackend(collectDataFn, issueBackendFn),
 		Sync:                 metricscmd.HandleSync(collectDataFn),
-		Workspaces:           metricscmd.HandleWorkspaces(),
+		Workspaces:           metricscmd.HandleWorkspaces(st),
 		StaleDetector:        staleDetectorHandler,
 		Usage:                usageHandler,
 		Metrics:              metricscmd.HandleMetrics(collectDataFn),
@@ -425,24 +396,19 @@ func applyFleetConfig(cfg *webui.ServerConfig, fs fleetState) {
 	cfg.FleetClientWorkspace = fs.clientCfg.Workspace
 	cfg.FleetClientAPIKey = fs.clientCfg.APIKey
 	cfg.FleetClientActor = fs.clientCfg.Actor
-	// fs.modeDetected is true when LOOM_ISSUE_BACKEND=fleet (or the
-	// equivalent loom.yaml setting). In that mode the IssueBackend is
-	// fleet-db over HTTP and there is no local issue daemon.
-	cfg.FleetClient = fs.modeDetected
+	// Store-backed serve uses FleetDB directly, either embedded local or
+	// external cloud. In both shapes there is no local issue daemon for the
+	// web UI to probe.
+	cfg.FleetClient = fs.modeDetected || cfg.Store != nil
 }
 
-// applyWorkspaceConfig wires the workspace-related closures the webui server
-// consumes. Fleet-db-backed serve must use the unified store; nil-store serve
-// leaves workspace management unavailable instead of silently falling back to
-// legacy yaml/workspacemgr paths.
+// applyWorkspaceConfig wires store-backed workspace operations into the webui
+// server. Nil-store serve leaves workspace management unavailable.
 func applyWorkspaceConfig(cfg *webui.ServerConfig) {
 	if cfg.Store == nil {
 		applyFleetInitialWorkspaceFallback(cfg, true)
 		return
 	}
-	cfg.WorkspaceConfigFn = serveadapter.BuildWorkspaceConfigFn(cfg.Store)
-	cfg.WorkspaceConfigByIDFn = serveadapter.BuildWorkspaceConfigByIDFn(cfg.Store)
-	cfg.WorkspaceListFn = serveadapter.BuildWorkspaceListFn(cfg.Store)
 	cfg.WorkspaceIDResolverFn = serveadapter.BuildWorkspaceIDResolverFn(cfg.Store)
 	cfg.InitialWorkspaceID = serveadapter.ResolveInitialWorkspaceID(cfg.Store)
 	applyFleetInitialWorkspaceFallback(cfg, false)
@@ -458,12 +424,9 @@ func applyFleetInitialWorkspaceFallback(cfg *webui.ServerConfig, force bool) {
 	if cfg == nil || !cfg.FleetClient || cfg.FleetClientWorkspace == "" {
 		return
 	}
-	if cfg.WorkspaceListFn != nil {
-		workspaces, err := cfg.WorkspaceListFn()
-		if err == nil {
-			if _, ok := workspaces[cfg.FleetClientWorkspace]; !ok {
-				return
-			}
+	if cfg.Store != nil {
+		if _, err := cfg.Store.Workspaces().Get(context.Background(), cfg.FleetClientWorkspace); err != nil {
+			return
 		}
 	}
 	if force || cfg.InitialWorkspaceID == "" || cfg.InitialWorkspaceID == "workspace" || cfg.InitialWorkspaceID == "default" {

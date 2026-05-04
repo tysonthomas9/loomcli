@@ -156,7 +156,7 @@ func computeAgentStatus(ap supervisor.SupervisedAgentStatus, maxRetries int) str
 	if ap.StopReason == supervisor.StopReasonFatalError || ap.StopReason == supervisor.StopReasonMaxRetries {
 		return "failed"
 	}
-	// Backward compatibility: high restart count without stop reason still means failed
+	// High restart count without stop reason still means failed.
 	if ap.RestartCount > maxRetries {
 		return "failed"
 	}

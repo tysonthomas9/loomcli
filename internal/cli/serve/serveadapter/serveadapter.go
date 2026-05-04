@@ -1,9 +1,4 @@
-// Package serveadapter builds the workspace-related closures
-// webui.ServerConfig expects from a fleet-db Store handle. Replaces the
-// yaml-backed adapters in internal/cli/serve/workspacemgr (loomcli-26v50.23
-// + .25): the read path (config, list, resolver, initial ID) goes through
-// the store; write paths that touch disk (clone repos, create worktrees)
-// remain in workspacemgr until the disk-side flow is reworked.
+// Package serveadapter builds store-backed workspace operations for webui serve.
 package serveadapter
 
 import (
@@ -13,47 +8,8 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/store"
-	"github.com/tysonthomas9/loomcli/internal/webui/storeadapter"
 )
-
-// BuildWorkspaceConfigFn returns a closure satisfying
-// webui.ServerConfig.WorkspaceConfigFn (active-workspace topology).
-// Returns nil, nil when no workspaces exist (single-repo mode preserved).
-func BuildWorkspaceConfigFn(s store.Store) func() (*ops.WorkspaceData, error) {
-	if s == nil {
-		return nil
-	}
-	return func() (*ops.WorkspaceData, error) {
-		return storeadapter.BuildActiveWorkspaceData(context.Background(), s)
-	}
-}
-
-// BuildWorkspaceConfigByIDFn returns a closure satisfying
-// webui.ServerConfig.WorkspaceConfigByIDFn (topology by workspace key).
-func BuildWorkspaceConfigByIDFn(s store.Store) func(string) (*ops.WorkspaceData, error) {
-	if s == nil {
-		return nil
-	}
-	return func(key string) (*ops.WorkspaceData, error) {
-		return storeadapter.BuildWorkspaceDataForKey(context.Background(), s, key)
-	}
-}
-
-// BuildWorkspaceListFn returns a closure satisfying
-// webui.ServerConfig.WorkspaceListFn — id→local checkout path map.
-// Shared workspace metadata lives in fleet-db; per-machine checkout paths
-// come from ~/.loom/state.json and may be empty when this machine has not
-// checked out the workspace.
-func BuildWorkspaceListFn(s store.Store) func() (map[string]string, error) {
-	if s == nil {
-		return nil
-	}
-	return func() (map[string]string, error) {
-		return storeadapter.ListWorkspacePaths(context.Background(), s)
-	}
-}
 
 // BuildWorkspaceIDResolverFn returns a closure satisfying
 // webui.ServerConfig.WorkspaceIDResolverFn — name→key (or pass-through
@@ -71,8 +27,7 @@ func BuildWorkspaceIDResolverFn(s store.Store) func(string) (string, error) {
 		} else if !errors.Is(err, domain.ErrNotFound) {
 			return "", err
 		}
-		// Fallback: name lookup for legacy workspaces with distinct
-		// Name vs Key.
+		// Fallback: name lookup for workspaces with distinct Name vs Key.
 		if ws, err := s.Workspaces().GetByName(ctx, name); err == nil && ws != nil {
 			return ws.Key, nil
 		}

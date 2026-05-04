@@ -42,8 +42,6 @@ type LoomConfig = config.LoomConfig
 type RepoConfig = config.RepoConfig
 type WorkspaceConfig = config.WorkspaceConfig
 
-var IsWorkspaceMode = config.IsWorkspaceMode
-
 // --- Type aliases from clitest ---
 
 type MockExecRunner = clitest.MockExecRunner

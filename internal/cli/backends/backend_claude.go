@@ -145,7 +145,7 @@ func (c *ClaudeBackend) InvokeStreaming(ctx context.Context, workDir, prompt, ag
 type streamReadCloser struct {
 	io.ReadCloser
 	cmd       *exec.Cmd
-	stdinPipe *os.File
+	stdinPipe io.Closer
 	guard     *processGuard
 }
 
@@ -280,8 +280,8 @@ func defaultClaudeNonInteractiveInvoker(workDir, prompt, agentName string, shutd
 }
 
 // setupNonInteractivePipes configures stdin/stdout pipes, starts the process,
-// and prints the launch message. Returns the stdin pipe file and stdout reader.
-func setupNonInteractivePipes(cmd *exec.Cmd, prompt, resumeID string) (*os.File, io.Reader, error) {
+// and prints the launch message. Returns the stdin closer and stdout reader.
+func setupNonInteractivePipes(cmd *exec.Cmd, prompt, resumeID string) (io.ReadCloser, io.Reader, error) {
 	r, err := pipePromptToCmd(cmd, prompt)
 	if err != nil {
 		return nil, nil, err

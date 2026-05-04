@@ -73,8 +73,6 @@ func TestAgent_Validate(t *testing.T) {
 		a := validAgent()
 		a.Description = "A test agent"
 		a.Rig = "rig-1"
-		a.HookBead = "hook-1"
-		a.RoleBead = "role-1"
 		a.LastActivity = &now
 		a.Labels = []string{"test", "dev"}
 		if err := a.Validate(); err != nil {

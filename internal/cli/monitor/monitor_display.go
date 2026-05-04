@@ -55,18 +55,7 @@ func renderDashboardAgents(sb *strings.Builder, data *MonitorData) {
 	sb.WriteString(RenderBoxLine(" AGENTS"))
 	sb.WriteString(RenderBoxSeparator())
 
-	hasWorkspace := false
-	for _, agent := range data.Agents {
-		if agent.Workspace != "" {
-			hasWorkspace = true
-			break
-		}
-	}
-	if hasWorkspace {
-		renderAgentsWorkspace(sb, data.Agents)
-	} else {
-		renderAgentsLegacy(sb, data.Agents)
-	}
+	renderAgentsWorkspace(sb, data.Agents)
 	if len(data.Agents) == 0 {
 		sb.WriteString(RenderBoxLine("  No agents found"))
 	}
@@ -152,7 +141,7 @@ func renderTaskSection(sb *strings.Builder, tasks []TaskInfo) {
 
 func renderTaskLine(sb *strings.Builder, task TaskInfo) {
 	prefix := fmt.Sprintf("    [P%d] %s: ", task.Priority, task.ID)
-	maxTitle := DashboardWidth - 4 - displayWidth(prefix) // content area (66) minus prefix
+	maxTitle := DashboardWidth - 4 - DisplayWidth(prefix) // content area (66) minus prefix
 	title := TruncateToWidth(task.Title, maxTitle)
 	sb.WriteString(RenderBoxLine(prefix + title))
 }
@@ -191,8 +180,8 @@ func RenderAgentLine(sb *strings.Builder, agent AgentStatus, indent string) {
 	contentWidth := DashboardWidth - 4 // 66
 	nameCol := PadRight(TruncateToWidth(displayName, 14), 14)
 	branchCol := PadRight(TruncateToWidth(agent.Branch, 18), 18)
-	syncWidth := displayWidth(syncIndicator)
-	fixedCols := displayWidth(indent) + 14 + 1 + 18 + 1 + 1 + 1 // indent + name + sp + branch + sp + icon + sp
+	syncWidth := DisplayWidth(syncIndicator)
+	fixedCols := DisplayWidth(indent) + 14 + 1 + 18 + 1 + 1 + 1 // indent + name + sp + branch + sp + icon + sp
 	maxStatusWidth := contentWidth - fixedCols - syncWidth
 	if maxStatusWidth < 0 {
 		maxStatusWidth = 0
@@ -202,7 +191,7 @@ func RenderAgentLine(sb *strings.Builder, agent AgentStatus, indent string) {
 	leftPart := indent + nameCol + " " + branchCol + " " + statusIcon + " " + status
 
 	// Right-align sync indicator
-	leftWidth := displayWidth(leftPart)
+	leftWidth := DisplayWidth(leftPart)
 	padding := contentWidth - leftWidth - syncWidth
 	if padding < 0 {
 		padding = 0
@@ -211,19 +200,13 @@ func RenderAgentLine(sb *strings.Builder, agent AgentStatus, indent string) {
 	sb.WriteString(RenderBoxLine(line))
 }
 
-func renderAgentsLegacy(sb *strings.Builder, agents []AgentStatus) {
-	for _, agent := range agents {
-		RenderAgentLine(sb, agent, "  ")
-	}
-}
-
 func renderAgentsWorkspace(sb *strings.Builder, agents []AgentStatus) {
 	// Group agents by workspace
 	groups := make(map[string][]AgentStatus)
 	for _, agent := range agents {
 		ws := agent.Workspace
 		if ws == "" {
-			ws = "(legacy)"
+			ws = "unassigned"
 		}
 		groups[ws] = append(groups[ws], agent)
 	}
@@ -261,12 +244,9 @@ func DisplayWidth(s string) int {
 	return runewidth.StringWidth(s)
 }
 
-// displayWidth is an unexported alias for backward compatibility within the package.
-var displayWidth = DisplayWidth
-
 func RenderBoxLine(content string) string {
 	// Use display width instead of byte length for padding calculation
-	contentWidth := displayWidth(content)
+	contentWidth := DisplayWidth(content)
 	padding := DashboardWidth - 4 - contentWidth
 	if padding < 0 {
 		padding = 0
@@ -275,7 +255,7 @@ func RenderBoxLine(content string) string {
 }
 
 func CenterText(text string, width int) string {
-	textWidth := displayWidth(text)
+	textWidth := DisplayWidth(text)
 	if textWidth >= width {
 		return text
 	}

@@ -31,25 +31,6 @@ func TestSyncCmd_MutuallyExclusiveFlags(t *testing.T) {
 	}
 }
 
-func TestRunLegacySync_NoWorktrees(t *testing.T) {
-	t.Parallel()
-	deps, _, _, _, _ := NewTestDeps(t)
-
-	tmpDir := t.TempDir()
-	if err := os.MkdirAll(tmpDir+"/worktrees", 0755); err != nil {
-		t.Fatalf("failed to create dir: %v", err)
-	}
-
-	SetupTestEnv(t, map[string]string{
-		"LOOM_WORKTREES_DIR": tmpDir + "/worktrees",
-	})
-
-	outputMock := NewOutputCommandMock(t, []OutputCommandStub{})
-	outputMock.InstallOn(deps)
-
-	runLegacySync(deps, false, false)
-}
-
 func TestSyncCmd_Flags(t *testing.T) {
 	t.Parallel()
 	if pushOnlyFlag := syncCmd.Flags().Lookup("push-only"); pushOnlyFlag == nil {

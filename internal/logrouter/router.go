@@ -14,7 +14,7 @@ import (
 const bufferSize = 64 * 1024 // 64KB buffer
 
 // validAgentName matches alphanumeric characters, hyphens, underscores, and dots.
-// Dots are needed for beads-style IDs (e.g., "loomcli-mp5.33").
+// Dots are needed for hierarchical IDs (e.g., "loomcli-mp5.33").
 // The "." and ".." cases are rejected separately to prevent path traversal.
 var validAgentName = regexp.MustCompile(`^[a-zA-Z0-9_.-]+$`)
 

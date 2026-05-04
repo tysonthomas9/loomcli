@@ -14,33 +14,40 @@ import (
 type ResolvedTarget struct {
 	WorkDir   string // directory where Claude should run
 	AgentName string // agent name for locks and prompts
-	Repo      string // repo name (empty in legacy mode or workspace root)
+	Repo      string // repo name (empty when running at workspace root)
 }
 
 // ResolveAgentTarget resolves a CLI argument (workspace name, repo name, or
-// worktree name) into the working directory and agent name. In workspace mode,
-// Claude always runs from the workspace root so loom data commands resolve the
-// active workspace. When repo is non-empty in workspace mode, the agent gets its
+// worktree name) into the working directory and agent name. Claude runs from
+// the workspace root so loom data commands resolve the active workspace.
+// When repo is non-empty, the agent gets its
 // own git worktree under <workspace>/worktrees/<repo>/<name>/.
 func ResolveAgentTarget(name, repo string) (ResolvedTarget, error) {
-	resolver, _ := cli.NewResolver()
-	if resolver.Mode == cli.ModeWorkspace {
-		return resolveWorkspaceTarget(resolver, name, repo)
+	if repo == "" && name != "" && filepath.IsAbs(name) {
+		if _, err := os.Stat(name); err != nil {
+			return ResolvedTarget{}, fmt.Errorf("path does not exist: %s", name)
+		}
+		return ResolvedTarget{
+			WorkDir:   name,
+			AgentName: filepath.Base(name),
+		}, nil
 	}
 
-	// Legacy mode - per-repo routing not supported
-	if repo != "" {
-		return ResolvedTarget{}, fmt.Errorf("per-repo routing requires workspace mode (repo %q specified)", repo)
-	}
-
-	worktreePath, err := cli.ResolveWorktreePath(name)
+	resolver, err := cli.NewResolver()
 	if err != nil {
+		if repo == "" && name == "" {
+			cwd, cwdErr := os.Getwd()
+			if cwdErr != nil {
+				return ResolvedTarget{}, fmt.Errorf("get current directory: %w", cwdErr)
+			}
+			return ResolvedTarget{
+				WorkDir:   cwd,
+				AgentName: filepath.Base(cwd),
+			}, nil
+		}
 		return ResolvedTarget{}, err
 	}
-	return ResolvedTarget{
-		WorkDir:   worktreePath,
-		AgentName: GetWorktreeName(worktreePath),
-	}, nil
+	return resolveWorkspaceTarget(resolver, name, repo)
 }
 
 // resolveWorkspaceTarget handles workspace-mode resolution including per-repo routing.

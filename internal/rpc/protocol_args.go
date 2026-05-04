@@ -79,9 +79,6 @@ type UpdateArgs struct {
 	Pinned *bool `json:"pinned,omitempty"` // If true, issue is a persistent context marker
 	// Reparenting field
 	Parent *string `json:"parent,omitempty"` // New parent issue ID (reparents the issue)
-	// Agent slot fields
-	HookBead *string `json:"hook_bead,omitempty"` // Current work on agent's hook (0..1)
-	RoleBead *string `json:"role_bead,omitempty"` // Role definition bead for agent
 	// Agent state fields
 	AgentState   *string `json:"agent_state,omitempty"`   // Agent state (idle|running|stuck|stopped|dead)
 	LastActivity *bool   `json:"last_activity,omitempty"` // If true, update last_activity to now
@@ -102,7 +99,7 @@ type UpdateArgs struct {
 	AwaitID *string  `json:"await_id,omitempty"` // Condition identifier for gates (run ID, PR number, etc.)
 	Waiters []string `json:"waiters,omitempty"`  // Mail addresses to notify when gate clears
 	// Slot fields
-	Holder *string `json:"holder,omitempty"` // Who currently holds the slot (for type=slot beads)
+	Holder *string `json:"holder,omitempty"` // Who currently holds the slot
 }
 
 // CloseArgs represents arguments for the close operation
@@ -116,7 +113,7 @@ type CloseArgs struct {
 }
 
 // CloseResult is returned when SuggestNext is true (GH#679)
-// When SuggestNext is false, just the closed issue is returned for backward compatibility
+// When SuggestNext is false, just the closed issue is returned.
 
 type DeleteArgs struct {
 	IDs     []string `json:"ids"`               // Issue IDs to delete
@@ -180,7 +177,7 @@ type ListArgs struct {
 	// Status exclusion (for default non-closed behavior, GH#788)
 	ExcludeStatus []string `json:"exclude_status,omitempty"`
 
-	// Type exclusion (for hiding internal types like gates, bd-7zka.2)
+	// Type exclusion (for hiding internal types like gates)
 	ExcludeTypes []string `json:"exclude_types,omitempty"`
 
 	// Time-based scheduling filters (GH#820)
@@ -191,7 +188,7 @@ type ListArgs struct {
 	DueBefore   string `json:"due_before,omitempty"`   // ISO 8601 format
 	Overdue     bool   `json:"overdue,omitempty"`      // Filter issues where due_at < now
 
-	// Staleness control (bd-dpkdm)
+	// Staleness control
 	AllowStale bool `json:"allow_stale,omitempty"` // Skip staleness check, return potentially stale data
 
 	// Multi-repo filtering

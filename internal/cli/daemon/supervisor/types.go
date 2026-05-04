@@ -16,7 +16,7 @@ import (
 
 // AgentProcess tracks a single supervised agent subprocess.
 type AgentProcess struct {
-	Entry        cfgpkg.AgentEntry  // config from loom.yaml
+	Entry        cfgpkg.AgentEntry  // agent configuration from FleetDB
 	RoleConfig   cfgpkg.RoleConfig  // resolved role configuration
 	WorktreePath string             // resolved worktree path
 	RepoConfig   *cfgpkg.RepoConfig // per-repo config (nil in non-workspace mode)

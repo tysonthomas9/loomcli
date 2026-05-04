@@ -17,8 +17,8 @@ type WorktreeInfo struct {
 	Name             string
 	Path             string
 	Branch           string
-	Workspace        string             // workspace name (empty in legacy mode)
-	Repo             *config.RepoConfig // source repo config (nil in legacy mode)
+	Workspace        string             // workspace name
+	Repo             *config.RepoConfig // source repo config
 	IsLinkedWorktree bool               // true if .git is a file (linked worktree), false if .git is a directory (source repo)
 }
 
@@ -36,8 +36,7 @@ func IsGitLinkedWorktree(repoPath string) bool {
 type ResolverMode int
 
 const (
-	ModeLegacy    ResolverMode = iota // scan ./worktrees/ directory
-	ModeWorkspace                     // read from ~/.loom/config.yaml
+	ModeWorkspace ResolverMode = iota
 )
 
 // validateWorktreeName checks that a worktree name does not contain path
@@ -50,60 +49,7 @@ func ValidateWorktreeName(name string) error {
 	return nil
 }
 
-// resolveLegacyPath is the original ResolveWorktreePath logic.
-func resolveLegacyPath(name string) (string, error) {
-	if name == "" {
-		return os.Getwd()
-	}
-
-	// Absolute path - use as-is
-	if filepath.IsAbs(name) {
-		if _, err := os.Stat(name); err != nil {
-			return "", fmt.Errorf("worktree path does not exist: %s", name)
-		}
-		return name, nil
-	}
-
-	// Validate name does not traverse outside worktrees directory
-	if err := ValidateWorktreeName(name); err != nil {
-		return "", err
-	}
-
-	// Relative name - resolve to worktrees directory
-	worktreesDir, err := ResolveWorktreesDir()
-	if err != nil {
-		return "", err
-	}
-
-	worktreePath := filepath.Clean(filepath.Join(worktreesDir, name))
-
-	// Defense-in-depth: verify resolved path is within worktrees directory
-	absWorktreesDir := filepath.Clean(worktreesDir)
-	if !strings.HasPrefix(worktreePath, absWorktreesDir+string(filepath.Separator)) &&
-		worktreePath != absWorktreesDir {
-		return "", fmt.Errorf("invalid worktree name %q: resolved path escapes worktrees directory", name)
-	}
-
-	if _, err := os.Stat(worktreePath); err != nil {
-		return "", fmt.Errorf("worktree '%s' not found at %s", name, worktreePath)
-	}
-
-	return worktreePath, nil
-}
-
-// getWorktreesDirLegacy is the original GetWorktreesDir logic.
-func getWorktreesDirLegacy() string {
-	if worktreesFlag != "" {
-		return filepath.Clean(worktreesFlag)
-	}
-	if dir := os.Getenv("LOOM_WORKTREES_DIR"); dir != "" {
-		return filepath.Clean(dir)
-	}
-	return "worktrees"
-}
-
-// GetWorktreesDir returns the worktrees directory path
-// Priority: --worktrees flag > LOOM_WORKTREES_DIR env var > default "worktrees"
+// GetWorktreesDir returns the active workspace root path.
 func GetWorktreesDir() string {
 	return GetDefaultResolver().GetWorktreesDir()
 }
@@ -116,18 +62,9 @@ func GetDefaultBranch() string {
 	return GetDefaultResolver().GetDefaultBranch()
 }
 
-// ResolveWorktreesDir returns the absolute path to the worktrees directory
-// If the configured path is absolute, use it directly; otherwise join with scriptDir
+// ResolveWorktreesDir returns the active workspace root path.
 func ResolveWorktreesDir() (string, error) {
-	dir := getWorktreesDirLegacy()
-	if filepath.IsAbs(dir) {
-		return dir, nil
-	}
-	scriptDir, err := GetScriptDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(scriptDir, dir), nil
+	return GetDefaultResolver().GetWorktreesDir(), nil
 }
 
 // GetScriptDir returns the directory where loom is run from
@@ -181,8 +118,7 @@ var (
 )
 
 // DefaultBranchForWorktree returns the default branch for a single worktree.
-// In workspace mode (Repo != nil), uses RepoConfig.DefaultBranch with "main" fallback.
-// In legacy mode, returns "main" (caller should use GetDefaultBranchForWorktrees for auto-detection).
+// When Repo is set, uses RepoConfig.DefaultBranch with "main" fallback.
 func DefaultBranchForWorktree(wt WorktreeInfo) string {
 	if branch := os.Getenv("LOOM_DEFAULT_BRANCH"); branch != "" {
 		return branch
@@ -199,7 +135,7 @@ func GetDefaultBranchForWorktrees(worktrees []WorktreeInfo) string {
 	if branch := os.Getenv("LOOM_DEFAULT_BRANCH"); branch != "" {
 		return branch
 	}
-	// In workspace mode, worktrees may span multiple repos.
+	// Worktrees may span multiple repos.
 	// DetectIntegrationBranch uses worktrees[0].Path for all git ops,
 	// which is meaningless across repos. Use per-repo config instead.
 	for _, wt := range worktrees {

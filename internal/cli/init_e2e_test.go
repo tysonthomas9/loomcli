@@ -41,8 +41,7 @@ func runLoomInit(t *testing.T, dir string, args ...string) (stdout, stderr strin
 	filtered := env[:0]
 	for _, e := range env {
 		if strings.HasPrefix(e, "LOOM_BACKEND=") ||
-			strings.HasPrefix(e, "LOOM_WORKTREES_DIR=") ||
-			strings.HasPrefix(e, "LOOM_FLEETDB_ENABLED=") {
+			strings.HasPrefix(e, "LOOM_WORKTREES_DIR=") {
 			continue
 		}
 		filtered = append(filtered, e)
@@ -66,7 +65,7 @@ func runLoomInit(t *testing.T, dir string, args ...string) (stdout, stderr strin
 	return stdoutBuf.String(), stderrBuf.String(), exitCode
 }
 
-func TestE2E_InitLegacyNonInteractive(t *testing.T) {
+func TestE2E_InitNonInteractive(t *testing.T) {
 	t.Parallel()
 	loomBinaryPath(t)
 	dir := setupInitTestRepo(t)

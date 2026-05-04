@@ -18,8 +18,7 @@ var monitorCmd = &cobra.Command{
 	Short: "Show monitor dashboard from a loom server (HTTP, single-shot)",
 	Long: `Fetch /api/monitor/status from the configured loom server and render
 a simplified dashboard. This command is single-shot — it does not live-refresh
-or draw terminal boxes. Use the legacy 'loom monitor' command for the full
-interactive dashboard against a local checkout.`,
+or draw terminal boxes.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()

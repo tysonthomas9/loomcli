@@ -6,8 +6,8 @@ import (
 	"testing"
 )
 
-func TestGetWorkspaceRuntimeDir_Legacy(t *testing.T) {
-	// No config file → legacy mode → returns "."
+func TestGetWorkspaceRuntimeDir_NoWorkspaceConfig(t *testing.T) {
+	// No config file → no workspace config → returns "."
 	ResetWorkspaceRuntimeDirCache()
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
 

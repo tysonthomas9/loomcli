@@ -5,11 +5,8 @@ import (
 	"encoding/json"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strconv"
 	"testing"
-
-	"gopkg.in/yaml.v3"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli"
@@ -185,7 +182,7 @@ func (m *CommandMock) InstallOn(deps *cli.Deps) {
 
 func (m *CommandMock) hasReadyStubs() bool {
 	for _, stub := range m.stubs {
-		if stub.Name == "bd" && len(stub.Args) > 0 && stub.Args[0] == "ready" {
+		if stub.Name == "issue-store" && len(stub.Args) > 0 && stub.Args[0] == "ready" {
 			return true
 		}
 	}
@@ -213,7 +210,7 @@ func newExecReadyIssueBackend(m *clitest.MockExecRunner) *commandReadyIssueBacke
 
 func (b *commandReadyIssueBackend) Ready(ctx context.Context, opts backend.ReadyOpts) ([]backend.IssueData, error) {
 	b.MockIssueBackend.Ready(ctx, opts)
-	result := b.run(cli.GetWorkspaceRuntimeDir(), "bd", readyArgs(opts)...)
+	result := b.run(cli.GetWorkspaceRuntimeDir(), "issue-store", readyArgs(opts)...)
 	if result.Err != nil {
 		return nil, result.Err
 	}
@@ -342,23 +339,6 @@ func createGitRepo(t *testing.T, path string) {
 			t.Fatalf("git %v failed: %v\n%s", args, err, out)
 		}
 	}
-}
-
-func setupWorkspaceConfig(t *testing.T, cfg *config.LoomConfig) {
-	t.Helper()
-	configDir := t.TempDir()
-	data, err := yaml.Marshal(cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(configDir, "config.yaml"), data, 0644); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("LOOM_CONFIG_DIR", configDir)
-}
-
-func setupLockWorkspaceConfig(t *testing.T, cfg *config.LoomConfig) {
-	setupWorkspaceConfig(t, cfg)
 }
 
 func workspaceHash(name string) string {

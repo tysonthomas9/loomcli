@@ -4,13 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
-	"path/filepath"
+	"sort"
 	"time"
 
 	"testing"
-
-	"gopkg.in/yaml.v3"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/clitest"
@@ -28,12 +25,14 @@ type LoomConfig = config.LoomConfig
 type RepoConfig = config.RepoConfig
 type WorkspaceConfig = config.WorkspaceConfig
 
-// --- Serve test compat types ---
+// --- Serve test types ---
 
 // collectDataFunc is a pluggable function for tests.
 var collectDataFunc func() *monitor.MonitorData
 
-// HealthResponse is a backward-compat type for serve tests.
+var testWorkspaceConfig *config.LoomConfig
+
+// HealthResponse is a type for serve tests.
 type HealthResponse struct {
 	Status    string    `json:"status"`
 	Timestamp time.Time `json:"timestamp"`
@@ -92,13 +91,13 @@ type WorkspacesResponse struct {
 	Timestamp  time.Time                  `json:"timestamp"`
 }
 
-// groupAgentsByWorkspace groups agents by their workspace field (test compat).
+// groupAgentsByWorkspace groups agents by their workspace field.
 func groupAgentsByWorkspace(agents []monitor.AgentStatus) map[string][]monitor.AgentStatus {
 	groups := make(map[string][]monitor.AgentStatus)
 	for _, agent := range agents {
 		ws := agent.Workspace
 		if ws == "" {
-			ws = "(legacy)"
+			ws = "unassigned"
 		}
 		groups[ws] = append(groups[ws], agent)
 	}
@@ -111,7 +110,6 @@ func writeJSON(w http.ResponseWriter, v any) {
 	json.NewEncoder(w).Encode(v) //nolint:errcheck
 }
 
-// handleStatus is a test-compat handler stub.
 func handleStatus(w http.ResponseWriter, r *http.Request) {
 	data := collectDataFunc()
 	if data == nil {
@@ -213,18 +211,12 @@ func handleUsage(w http.ResponseWriter, r *http.Request) {
 
 func handleWorkspaces(w http.ResponseWriter, r *http.Request) {
 	response := WorkspacesResponse{
+		Mode:       "workspace",
 		Workspaces: make(map[string]WorkspaceDetail),
 		Timestamp:  time.Now(),
 	}
-	resolver, err := cli.NewResolver()
-	if err != nil || resolver.Mode != cli.ModeWorkspace {
-		response.Mode = "legacy"
-		writeJSON(w, response)
-		return
-	}
-	response.Mode = "workspace"
-	cfg, err := config.LoadConfig()
-	if err != nil || cfg == nil {
+	cfg := testWorkspaceConfig
+	if cfg == nil {
 		writeJSON(w, response)
 		return
 	}
@@ -248,7 +240,7 @@ func NewTestDeps(t testing.TB) (*cli.Deps, *clitest.MockGitRunner, *clitest.Mock
 	return clitest.NewTestDeps(t.(*testing.T))
 }
 
-// defaultResolver is a package-level resolver for test compat.
+// defaultResolver is a package-level resolver for tests.
 var defaultResolver *struct{}
 
 // WorkspaceInfo represents workspace metadata for test compat.
@@ -258,17 +250,20 @@ type WorkspaceInfo struct {
 	Workspaces []string `json:"workspaces,omitempty"`
 }
 
-// getWorkspaceInfo resolves workspace metadata from config for test compat.
+// getWorkspaceInfo resolves workspace metadata from the test workspace config.
 func getWorkspaceInfo() WorkspaceInfo {
-	resolver, err := cli.NewResolver()
-	if err != nil || resolver.Mode != cli.ModeWorkspace {
-		return WorkspaceInfo{Mode: "legacy"}
+	info := WorkspaceInfo{Mode: "workspace"}
+	cfg := testWorkspaceConfig
+	if cfg == nil {
+		return info
 	}
-	return WorkspaceInfo{
-		Mode:       "workspace",
-		Name:       resolver.WorkspaceName(),
-		Workspaces: resolver.WorkspaceNames(),
+	info.Name = cfg.DefaultWorkspace
+	info.Workspaces = make([]string, 0, len(cfg.Workspaces))
+	for name := range cfg.Workspaces {
+		info.Workspaces = append(info.Workspaces, name)
 	}
+	sort.Strings(info.Workspaces)
+	return info
 }
 
 // collectWorkerStatusCounts is a stub for serve test compat.
@@ -276,15 +271,9 @@ func collectWorkerStatusCounts() map[string]int {
 	return map[string]int{"active": 0, "idle": 0, "blocked": 0}
 }
 
-func setupWorkspaceConfig(t interface {
-	Helper()
-	TempDir() string
-	Setenv(string, string)
-}, cfg *config.LoomConfig) {
+func setupWorkspaceConfig(t *testing.T, cfg *config.LoomConfig) {
 	t.Helper()
-	configDir := t.TempDir()
-	data, _ := yaml.Marshal(cfg)
-	os.MkdirAll(configDir, 0755)
-	os.WriteFile(filepath.Join(configDir, "config.yaml"), data, 0644)
-	t.Setenv("LOOM_CONFIG_DIR", configDir)
+	old := testWorkspaceConfig
+	testWorkspaceConfig = cfg
+	t.Cleanup(func() { testWorkspaceConfig = old })
 }

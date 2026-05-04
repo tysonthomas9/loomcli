@@ -8,13 +8,11 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"strconv"
 	"sync"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/backend/api"
-	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/httpclient"
 )
 
@@ -32,19 +30,12 @@ var validIssueBackends = map[string]bool{
 	IssueBackendAPI:     true,
 }
 
-// resolveIssueBackendType returns the active issue backend type based on config precedence:
+// resolveIssueBackendType returns the active issue backend type based on precedence:
 //  1. LOOM_ISSUE_BACKEND env var (highest — if set and valid)
-//  2. LOOM_FLEETDB_ENABLED env var (existing — returns "fleetdb" if true)
-//  3. Project config daemon.issue_backend (loom.yaml)
-//  4. Global config daemon.issue_backend (~/.loom/config.yaml)
-//  5. Project config daemon.fleetdb.enabled (existing)
-//  6. Global config daemon.fleetdb.enabled (existing)
-//  7. Default: "fleetdb"
+//  2. LOOM_SERVER_URL env var (remote HTTP API mode)
+//  3. Default: "fleetdb"
 func ResolveIssueBackendType() string {
 	if v := resolveIssueBackendFromEnv(); v != "" {
-		return v
-	}
-	if v := resolveIssueBackendFromConfig(); v != "" {
 		return v
 	}
 	return IssueBackendFleetDB
@@ -68,70 +59,7 @@ func resolveIssueBackendFromEnv() string {
 		return IssueBackendAPI
 	}
 
-	// 3. LOOM_FLEETDB_ENABLED env var (backward compat)
-	if v, ok := os.LookupEnv("LOOM_FLEETDB_ENABLED"); ok && v != "" {
-		parsed, err := strconv.ParseBool(v)
-		if err == nil && parsed {
-			return IssueBackendFleetDB
-		}
-	}
-
 	return ""
-}
-
-// resolveIssueBackendFromConfig checks project and global config files for issue backend selection.
-// Returns "" if no config determines the backend.
-func resolveIssueBackendFromConfig() string {
-	// 3. Project config daemon.issue_backend
-	pf, pfErr := config.LoadProjectFile(".")
-
-	if pfErr == nil && pf != nil && pf.Daemon != nil {
-		if pf.Daemon.IssueBackend != "" && validIssueBackends[pf.Daemon.IssueBackend] {
-			return pf.Daemon.IssueBackend
-		}
-	}
-
-	// 4. Global config daemon.issue_backend
-	cfg, cfgErr := config.LoadConfig()
-
-	if cfgErr == nil && cfg != nil && cfg.Daemon != nil {
-		if cfg.Daemon.IssueBackend != "" && validIssueBackends[cfg.Daemon.IssueBackend] {
-			return cfg.Daemon.IssueBackend
-		}
-	}
-
-	// 5. Project config daemon.fleetdb.enabled (existing)
-	if pfErr == nil && fleetDBEnabledInDaemon(projectDaemon(pf)) {
-		return IssueBackendFleetDB
-	}
-
-	// 6. Global config daemon.fleetdb.enabled (existing)
-	if cfgErr == nil && fleetDBEnabledInDaemon(globalDaemon(cfg)) {
-		return IssueBackendFleetDB
-	}
-
-	return ""
-}
-
-// fleetDBEnabledInDaemon returns true if ds has FleetDB.Enabled set to true.
-func fleetDBEnabledInDaemon(ds *config.DaemonSettings) bool {
-	return ds != nil && ds.FleetDB != nil && ds.FleetDB.Enabled != nil && *ds.FleetDB.Enabled
-}
-
-// projectDaemon extracts the config.DaemonSettings from a config.ProjectFile, or nil.
-func projectDaemon(pf *config.ProjectFile) *config.DaemonSettings {
-	if pf == nil {
-		return nil
-	}
-	return pf.Daemon
-}
-
-// globalDaemon extracts the config.DaemonSettings from a config.LoomConfig, or nil.
-func globalDaemon(cfg *config.LoomConfig) *config.DaemonSettings {
-	if cfg == nil {
-		return nil
-	}
-	return cfg.Daemon
 }
 
 // isFleetActive returns true if the fleet backend (remote fleet server) is active.
@@ -201,9 +129,6 @@ func ResetDefaultIssueBackend() {
 	defer trackerMu.Unlock()
 	trackerInst = nil
 }
-
-// resetDefaultIssueBackend is the unexported alias for backward compatibility.
-var resetDefaultIssueBackend = ResetDefaultIssueBackend
 
 // --- API backend factory (remote --server mode) ---
 

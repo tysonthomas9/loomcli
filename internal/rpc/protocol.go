@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 )
 
-// Operation constants for all bd commands
+// Operation constants for daemon RPC commands.
 const (
 	OpPing        = "ping"
 	OpStatus      = "status"
@@ -63,7 +63,7 @@ type Request struct {
 	Actor         string          `json:"actor,omitempty"`
 	RequestID     string          `json:"request_id,omitempty"`
 	Cwd           string          `json:"cwd,omitempty"`            // Working directory for database discovery
-	ClientVersion string          `json:"client_version,omitempty"` // Client version for compatibility checks
+	ClientVersion string          `json:"client_version,omitempty"` // Client version for protocol checks
 	ExpectedDB    string          `json:"expected_db,omitempty"`    // Expected database path for validation (absolute)
 	AuthToken     string          `json:"auth_token,omitempty"`     //nolint:gosec // G117 — must serialize for RPC wire protocol
 }

@@ -11,7 +11,7 @@ import (
 )
 
 func TestDispatchHookEvent_NilEvent(t *testing.T) {
-	err := dispatchHookEvent(nil, "/tmp/beads", "sess-123")
+	err := dispatchHookEvent(nil, "/tmp/loom-runtime", "sess-123")
 	if err != nil {
 		t.Fatalf("expected nil error for nil event, got: %v", err)
 	}
@@ -35,7 +35,7 @@ func TestDispatchHookEvent_EmptySessionID(t *testing.T) {
 		Prompt:    "hello",
 		Timestamp: time.Now(),
 	}
-	err := dispatchHookEvent(event, "/tmp/beads", "")
+	err := dispatchHookEvent(event, "/tmp/loom-runtime", "")
 	if err != nil {
 		t.Fatalf("expected nil error for empty sessionID, got: %v", err)
 	}

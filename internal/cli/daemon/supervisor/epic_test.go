@@ -124,9 +124,9 @@ func TestHandleEpicTransition_ConfigDriven_Exhausted_DoesNotMaskCrashError(t *te
 	}
 }
 
-func TestHandleEpicTransition_ConfigDriven_BdReadyFails(t *testing.T) {
+func TestHandleEpicTransition_ConfigDriven_ReadyQueryFails(t *testing.T) {
 	s := newEpicTestSupervisor(func(epicID string) (bool, error) {
-		return false, fmt.Errorf("bd command failed")
+		return false, fmt.Errorf("ready query failed")
 	})
 
 	ap := &AgentProcess{

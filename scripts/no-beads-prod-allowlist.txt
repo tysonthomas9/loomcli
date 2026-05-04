@@ -1,3 +1,0 @@
-internal/cli/config_validate.go
-internal/cli/migrate/migrate_cmd.go
-internal/cli/migrate/migrate_to_fleet.go

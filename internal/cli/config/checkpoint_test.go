@@ -15,8 +15,8 @@ func TestSaveAndLoadCheckpoint(t *testing.T) {
 
 	cp := &Checkpoint{
 		AgentName:  "falcon",
-		TaskID:     "bd-123",
-		EpicID:     "bd-epic1",
+		TaskID:     "loom-123",
+		EpicID:     "loom-epic1",
 		GitDiff:    "diff --git a/main.go\n+added line",
 		ExitCode:   1,
 		ErrorClass: "RateLimited",
@@ -76,7 +76,7 @@ func TestClearCheckpoint(t *testing.T) {
 	// Save then clear
 	cp := &Checkpoint{
 		AgentName: "falcon",
-		TaskID:    "bd-456",
+		TaskID:    "loom-456",
 		ExitCode:  1,
 		Timestamp: time.Now(),
 	}
@@ -111,7 +111,7 @@ func TestSaveCheckpointAtomicity(t *testing.T) {
 
 	cp := &Checkpoint{
 		AgentName: "test",
-		TaskID:    "bd-789",
+		TaskID:    "loom-789",
 		ExitCode:  137,
 		Timestamp: time.Now(),
 	}
@@ -269,8 +269,8 @@ func TestSaveAndLoadCheckpoint_WithYieldReason(t *testing.T) {
 
 	cp := &Checkpoint{
 		AgentName:   "falcon",
-		TaskID:      "bd-yield-1",
-		EpicID:      "bd-epic1",
+		TaskID:      "loom-yield-1",
+		EpicID:      "loom-epic1",
 		GitDiff:     "+yielded change",
 		ExitCode:    0,
 		ErrorClass:  "Yielded",
@@ -317,7 +317,7 @@ func TestLoadCheckpoint_BackwardsCompatible(t *testing.T) {
 	// simulating a checkpoint from an older version of the code.
 	oldJSON := `{
   "agent_name": "hawk",
-  "task_id": "bd-old-1",
+  "task_id": "loom-old-1",
   "git_diff": "+old change",
   "exit_code": 1,
   "error_class": "RateLimited",

@@ -17,20 +17,20 @@ const (
 	sessFilePerm = 0o600
 )
 
-// Store provides session storage under a beadsDir/sessions/ directory.
+// Store provides session storage under a runtimeDir/sessions/ directory.
 // Each session gets its own subdirectory containing metadata.json,
 // transcript.jsonl, and prompt.txt.
 type Store struct {
-	dir string // absolute path to <beadsDir>/sessions/
+	dir string // absolute path to <runtimeDir>/sessions/
 }
 
 // Dir returns the absolute path to the sessions directory.
 func (s *Store) Dir() string { return s.dir }
 
-// NewStore creates a Store rooted at beadsDir/sessions/.
+// NewStore creates a Store rooted at runtimeDir/sessions/.
 // It creates the sessions/ directory if it does not exist.
-func NewStore(beadsDir string) (*Store, error) {
-	dir := filepath.Join(beadsDir, "sessions")
+func NewStore(runtimeDir string) (*Store, error) {
+	dir := filepath.Join(runtimeDir, "sessions")
 	if err := os.MkdirAll(dir, sessDirPerm); err != nil {
 		return nil, fmt.Errorf("create sessions dir: %w", err)
 	}

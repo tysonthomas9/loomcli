@@ -259,8 +259,8 @@ func TestGenerateLeadPrompt(t *testing.T) {
 		}
 	}
 
-	if strings.Contains(prompt, "bd ") {
-		t.Errorf("prompt should not include legacy bd commands:\n%s", prompt)
+	if strings.Contains(prompt, "loom data claim <id>") {
+		t.Errorf("prompt should not include explicit claim placeholder:\n%s", prompt)
 	}
 }
 
@@ -468,8 +468,8 @@ func TestAllPromptsContainSafetyRules(t *testing.T) {
 	prompts := map[string]string{
 		"planning":            GeneratePlanningPrompt("test", nil, ""),
 		"task":                GenerateTaskPrompt("test", nil, "", "claude"),
-		"fleet_planning":      GenerateFleetPlanningPrompt("test", "bd-test.1", nil),
-		"fleet_task":          GenerateFleetTaskPrompt("test", "bd-test.1", nil, "claude"),
+		"fleet_planning":      GenerateFleetPlanningPrompt("test", "loom-test.1", nil),
+		"fleet_task":          GenerateFleetTaskPrompt("test", "loom-test.1", nil, "claude"),
 		"conflict_resolution": GenerateConflictResolutionPrompt("feature", "main", []string{"file.go"}),
 		"lead":                GenerateLeadPrompt(),
 	}
@@ -723,7 +723,7 @@ func TestGenerateFleetPlanningPrompt_Workspace(t *testing.T) {
 		},
 	}
 
-	prompt := GenerateFleetPlanningPrompt("falcon", "bd-abc.1", ws)
+	prompt := GenerateFleetPlanningPrompt("falcon", "loom-abc.1", ws)
 
 	wantParts := []string{
 		"Workspace Mode: Multi-Repo Environment",
@@ -742,7 +742,7 @@ func TestGenerateFleetPlanningPrompt_Workspace(t *testing.T) {
 		"Step 6:",
 		// Fleet-specific
 		"pre-assigned",
-		"bd-abc.1",
+		"loom-abc.1",
 	}
 
 	for _, part := range wantParts {
@@ -761,7 +761,7 @@ func TestGenerateFleetTaskPrompt_Workspace(t *testing.T) {
 		},
 	}
 
-	prompt := GenerateFleetTaskPrompt("nova", "bd-xyz.3", ws, "claude")
+	prompt := GenerateFleetTaskPrompt("nova", "loom-xyz.3", ws, "claude")
 
 	wantParts := []string{
 		"Workspace Mode: Multi-Repo Environment",
@@ -783,7 +783,7 @@ func TestGenerateFleetTaskPrompt_Workspace(t *testing.T) {
 		"Step 8:",
 		// Fleet-specific
 		"pre-assigned",
-		"bd-xyz.3",
+		"loom-xyz.3",
 	}
 
 	for _, part := range wantParts {
@@ -831,7 +831,7 @@ func TestGenerateFleetTaskPrompt_BackendAware(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			prompt := GenerateFleetTaskPrompt("test", "bd-test.1", nil, tc.backendName)
+			prompt := GenerateFleetTaskPrompt("test", "loom-test.1", nil, tc.backendName)
 
 			for _, part := range tc.wantParts {
 				if !strings.Contains(prompt, part) {
@@ -849,7 +849,7 @@ func TestGenerateFleetTaskPrompt_BackendAware(t *testing.T) {
 
 func TestFleetPromptStructure(t *testing.T) {
 	t.Run("fleet planning prompt has required sections", func(t *testing.T) {
-		prompt := GenerateFleetPlanningPrompt("test", "bd-test.1", nil)
+		prompt := GenerateFleetPlanningPrompt("test", "loom-test.1", nil)
 		sections := []string{
 			"Step 1:",
 			"Step 1.5:",
@@ -868,7 +868,7 @@ func TestFleetPromptStructure(t *testing.T) {
 	})
 
 	t.Run("fleet task prompt has required sections", func(t *testing.T) {
-		prompt := GenerateFleetTaskPrompt("test", "bd-test.1", nil, "claude")
+		prompt := GenerateFleetTaskPrompt("test", "loom-test.1", nil, "claude")
 		sections := []string{
 			"Step 1:",
 			"Step 2:",
@@ -890,12 +890,12 @@ func TestFleetPromptStructure(t *testing.T) {
 }
 
 func TestFleetPromptsNoClaimCommand(t *testing.T) {
-	planPrompt := GenerateFleetPlanningPrompt("test", "bd-test.1", nil)
-	taskPrompt := GenerateFleetTaskPrompt("test", "bd-test.1", nil, "claude")
+	planPrompt := GenerateFleetPlanningPrompt("test", "loom-test.1", nil)
+	taskPrompt := GenerateFleetTaskPrompt("test", "loom-test.1", nil, "claude")
 
 	notWantParts := []string{
-		"bd update <id> --claim",
-		"bd ready --json",
+		"loom data claim <id>",
+		"loom data ready --json",
 	}
 
 	for _, part := range notWantParts {
@@ -982,10 +982,10 @@ func TestRenderPrompt_EmbeddedTemplate(t *testing.T) {
 		name string
 		data promptTemplateData
 	}{
-		{"planning", promptTemplateData{AgentName: "test", BdReadyJSON: "loom data ready --limit 200 --output json", BdReadyFallback: "loom data ready --limit 200"}},
-		{"task", promptTemplateData{AgentName: "test", BdReadyJSON: "loom data ready --limit 200 --output json", BdReadyFallback: "loom data ready --limit 200", TestStep: "test step", ReviewStep: "review step"}},
-		{"fleet_planning", promptTemplateData{AgentName: "test", TaskID: "bd-test.1"}},
-		{"fleet_task", promptTemplateData{AgentName: "test", TaskID: "bd-test.1", TestStep: "test step", ReviewStep: "review step"}},
+		{"planning", promptTemplateData{AgentName: "test", ReadyJSON: "loom data ready --limit 200 --output json", ReadyFallback: "loom data ready --limit 200"}},
+		{"task", promptTemplateData{AgentName: "test", ReadyJSON: "loom data ready --limit 200 --output json", ReadyFallback: "loom data ready --limit 200", TestStep: "test step", ReviewStep: "review step"}},
+		{"fleet_planning", promptTemplateData{AgentName: "test", TaskID: "loom-test.1"}},
+		{"fleet_task", promptTemplateData{AgentName: "test", TaskID: "loom-test.1", TestStep: "test step", ReviewStep: "review step"}},
 		{"conflict_resolution", promptTemplateData{SourceBranch: "feature", TargetBranch: "main", ConflictList: "file.go", PushRef: "main"}},
 		{"lead", promptTemplateData{}},
 	}
@@ -1080,19 +1080,19 @@ func TestRenderPrompt_OverrideNotFound(t *testing.T) {
 func TestAllTemplatesRender(t *testing.T) {
 	// Verify all 6 templates parse and render with fully-populated data
 	data := promptTemplateData{
-		AgentName:       "testAgent",
-		WorkspaceBlock:  "workspace block content",
-		EpicScope:       "epic scope content",
-		SafetyBlock:     "safety block content",
-		BdReadyJSON:     "loom data ready --parent epic-123 --limit 200 --output json",
-		BdReadyFallback: "loom data ready --parent epic-123 --limit 200",
-		TaskID:          "task-456",
-		TestStep:        "### Step 5: Write Tests\n- test content",
-		ReviewStep:      "### Step 6: Code Review\n- review content",
-		SourceBranch:    "feature/test",
-		TargetBranch:    "main",
-		ConflictList:    "file1.go\nfile2.go",
-		PushRef:         "HEAD:main",
+		AgentName:      "testAgent",
+		WorkspaceBlock: "workspace block content",
+		EpicScope:      "epic scope content",
+		SafetyBlock:    "safety block content",
+		ReadyJSON:      "loom data ready --parent epic-123 --limit 200 --output json",
+		ReadyFallback:  "loom data ready --parent epic-123 --limit 200",
+		TaskID:         "task-456",
+		TestStep:       "### Step 5: Write Tests\n- test content",
+		ReviewStep:     "### Step 6: Code Review\n- review content",
+		SourceBranch:   "feature/test",
+		TargetBranch:   "main",
+		ConflictList:   "file1.go\nfile2.go",
+		PushRef:        "HEAD:main",
 	}
 
 	templates := []string{"planning", "task", "fleet_planning", "fleet_task", "conflict_resolution", "lead"}

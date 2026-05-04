@@ -35,14 +35,14 @@ func TestMutationEvent_JSONRoundTrip(t *testing.T) {
 
 	original := MutationEvent{
 		Type:      MutationUpdate,
-		IssueID:   "bd-123",
+		IssueID:   "loom-123",
 		Title:     "Test Issue",
 		Assignee:  "alice",
 		Actor:     "bob",
 		Timestamp: now,
 		OldStatus: "open",
 		NewStatus: "in_progress",
-		ParentID:  "bd-parent",
+		ParentID:  "loom-parent",
 		StepCount: 5,
 	}
 
@@ -94,7 +94,7 @@ func TestMutationEvent_OmitEmpty(t *testing.T) {
 	// Minimal event - optional fields should be omitted
 	event := MutationEvent{
 		Type:      MutationCreate,
-		IssueID:   "bd-123",
+		IssueID:   "loom-123",
 		Timestamp: time.Now(),
 	}
 
@@ -142,14 +142,14 @@ func TestMutationEvent_JSONTagConsistency(t *testing.T) {
 	// Verify all fields use consistent snake_case JSON tags
 	event := MutationEvent{
 		Type:      MutationStatus,
-		IssueID:   "bd-123",
+		IssueID:   "loom-123",
 		Title:     "Test Issue",
 		Assignee:  "alice",
 		Actor:     "bob",
 		Timestamp: time.Now(),
 		OldStatus: "open",
 		NewStatus: "closed",
-		ParentID:  "bd-parent",
+		ParentID:  "loom-parent",
 		StepCount: 3,
 	}
 
@@ -215,7 +215,7 @@ func TestMutationEvent_AllTypes(t *testing.T) {
 		t.Run(mutationType, func(t *testing.T) {
 			event := MutationEvent{
 				Type:      mutationType,
-				IssueID:   "bd-test",
+				IssueID:   "loom-test",
 				Timestamp: time.Now(),
 			}
 

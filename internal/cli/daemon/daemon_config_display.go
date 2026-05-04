@@ -52,12 +52,6 @@ func maskDaemonSecrets(ds *config.DaemonSettings) {
 	if ds.RedisURL != "" {
 		ds.RedisURL = "***"
 	}
-	if ds.FleetDB != nil && ds.FleetDB.RedisURL != "" {
-		ds.FleetDB.RedisURL = "***"
-	}
-	if ds.Fleet != nil && ds.Fleet.APIKey != "" {
-		ds.Fleet.APIKey = "***"
-	}
 }
 
 // deepCopyRestartPolicy returns a deep copy of src with all pointer fields cloned.
@@ -135,14 +129,6 @@ func resolvedConfigForDisplay(cfg *config.DaemonConfig) config.DaemonConfig {
 	if cfg.Daemon.OTel != nil {
 		otelCopy := *cfg.Daemon.OTel
 		out.Daemon.OTel = &otelCopy
-	}
-	if cfg.Daemon.FleetDB != nil {
-		fleetCopy := *cfg.Daemon.FleetDB
-		out.Daemon.FleetDB = &fleetCopy
-	}
-	if cfg.Daemon.Fleet != nil {
-		fleetClientCopy := *cfg.Daemon.Fleet
-		out.Daemon.Fleet = &fleetClientCopy
 	}
 
 	// Copy Roles map

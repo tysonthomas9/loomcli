@@ -15,14 +15,14 @@ func TestTokenFilePath(t *testing.T) {
 		want       string
 	}{
 		{
-			name:       "standard beads path",
-			socketPath: "/home/user/project/.beads/bd.sock",
-			want:       "/home/user/project/.beads/rpc-token",
+			name:       "standard runtime path",
+			socketPath: "/home/user/project/.loom/loom.sock",
+			want:       "/home/user/project/.loom/rpc-token",
 		},
 		{
 			name:       "tmp path",
-			socketPath: "/tmp/beads-abc123/bd.sock",
-			want:       "/tmp/beads-abc123/rpc-token",
+			socketPath: "/tmp/loom-abc123/loom.sock",
+			want:       "/tmp/loom-abc123/rpc-token",
 		},
 	}
 
@@ -41,7 +41,7 @@ func TestLoadAuthToken(t *testing.T) {
 
 	t.Run("file does not exist", func(t *testing.T) {
 		t.Parallel()
-		token := loadAuthToken("/nonexistent/path/bd.sock")
+		token := loadAuthToken("/nonexistent/path/loom.sock")
 		if token != "" {
 			t.Errorf("loadAuthToken() = %q, want empty string for missing file", token)
 		}
@@ -50,7 +50,7 @@ func TestLoadAuthToken(t *testing.T) {
 	t.Run("file exists with token", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
-		socketPath := filepath.Join(dir, "bd.sock")
+		socketPath := filepath.Join(dir, "loom.sock")
 		tokenPath := filepath.Join(dir, tokenFileName)
 
 		if err := os.WriteFile(tokenPath, []byte("secret-token-123"), 0600); err != nil {
@@ -66,7 +66,7 @@ func TestLoadAuthToken(t *testing.T) {
 	t.Run("file with whitespace trimmed", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
-		socketPath := filepath.Join(dir, "bd.sock")
+		socketPath := filepath.Join(dir, "loom.sock")
 		tokenPath := filepath.Join(dir, tokenFileName)
 
 		if err := os.WriteFile(tokenPath, []byte("  my-token  \n"), 0600); err != nil {
@@ -82,7 +82,7 @@ func TestLoadAuthToken(t *testing.T) {
 	t.Run("empty file", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
-		socketPath := filepath.Join(dir, "bd.sock")
+		socketPath := filepath.Join(dir, "loom.sock")
 		tokenPath := filepath.Join(dir, tokenFileName)
 
 		if err := os.WriteFile(tokenPath, []byte(""), 0600); err != nil {

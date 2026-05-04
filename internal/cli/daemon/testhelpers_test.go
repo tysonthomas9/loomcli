@@ -14,8 +14,6 @@ type DaemonConfig = config.DaemonConfig
 type DaemonSettings = config.DaemonSettings
 type RestartPolicy = config.RestartPolicy
 type RepoConfig = config.RepoConfig
-type FleetSettings = config.FleetSettings
-type FleetDBSettings = config.FleetDBSettings
 
 func intPtr(v int) *int    { return config.IntPtr(v) }
 func boolPtr(v bool) *bool { return config.BoolPtr(v) }

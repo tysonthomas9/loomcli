@@ -181,61 +181,6 @@ func TestCreatePR_PushFails(t *testing.T) {
 	}
 }
 
-func TestCreatePRLegacy_Success(t *testing.T) {
-	t.Parallel()
-	deps, _, _, _, _ := NewTestDeps(t)
-
-	outputStubs := []OutputCommandStub{
-		{Args: []string{"fetch", "origin"}, Err: nil},
-		{Args: []string{"push", "origin", "feature"}, Err: nil},
-	}
-
-	commandStubs := []CommandStub{
-		{Name: "git", Args: []string{"log", "main..feature", "--oneline"}, Stdout: "abc123 some commit\n"},
-		{Name: "git", Args: []string{"log", "origin/main..origin/feature", "--format=%s", "--reverse"}, Stdout: "Add legacy feature\n"},
-		{Name: "gh", Args: []string{"pr", "create", "--base", "main", "--head", "feature", "--title", "Add legacy feature", "--body", "---\nCreated with [loom](https://github.com/tysonthomas9/loomcli)"}, Stdout: "https://github.com/user/repo/pull/99\n"},
-	}
-
-	cmdMock := NewCommandMock(t, commandStubs)
-	cmdMock.InstallOn(deps)
-	outputMock := NewOutputCommandMock(t, outputStubs)
-	outputMock.InstallOn(deps)
-
-	url, err := createPRLegacy(deps, "/repo", "feature", "main")
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
-	}
-	if url != "https://github.com/user/repo/pull/99" {
-		t.Errorf("expected PR URL, got %q", url)
-	}
-}
-
-func TestCreatePRLegacy_NoCommits(t *testing.T) {
-	t.Parallel()
-	deps, _, _, _, _ := NewTestDeps(t)
-
-	outputStubs := []OutputCommandStub{
-		{Args: []string{"fetch", "origin"}, Err: nil},
-	}
-
-	commandStubs := []CommandStub{
-		{Name: "git", Args: []string{"log", "main..feature", "--oneline"}, Stdout: ""},
-	}
-
-	cmdMock := NewCommandMock(t, commandStubs)
-	cmdMock.InstallOn(deps)
-	outputMock := NewOutputCommandMock(t, outputStubs)
-	outputMock.InstallOn(deps)
-
-	url, err := createPRLegacy(deps, "/repo", "feature", "main")
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
-	}
-	if url != "" {
-		t.Errorf("expected empty URL for no commits, got %q", url)
-	}
-}
-
 func TestPrWorkspaceWorktrees_IteratesAllRepos(t *testing.T) {
 	t.Parallel()
 	deps, _, _, _, _ := NewTestDeps(t)

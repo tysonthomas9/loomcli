@@ -20,8 +20,7 @@ import (
 // BuildStoreBackedCreateWorkspace returns a create function for fleet-db store
 // mode. Existing-dir ("empty") creation writes workspace/repo metadata to the
 // store as the source of truth and records only local checkout paths in
-// ~/.loom/state.json. Clone creation still uses the legacy flow until the clone
-// parity ticket moves disk cloning to store-primary semantics.
+// ~/.loom/state.json.
 func BuildStoreBackedCreateWorkspace(s storepkg.Store) service.WorkspaceCreateFn {
 	if s == nil {
 		return nil
@@ -279,9 +278,6 @@ func gitRemoteURL(repoPath, remote string) string {
 //nolint:cyclop,funlen // Orchestrates clone lifecycle state, filesystem cleanup, and store writes.
 func createStoreBackedCloneWorkspace(ctx context.Context, s storepkg.Store, req service.WorkspaceCreateRequest) (service.WorkspaceCreateResult, error) {
 	cloneURLs := req.CloneURLs
-	if len(cloneURLs) == 0 && req.CloneURL != "" {
-		cloneURLs = []string{req.CloneURL}
-	}
 	if len(cloneURLs) == 0 {
 		return service.WorkspaceCreateResult{}, workspaceerrors.New(workspaceerrors.PathNotFound, "no clone URLs specified", nil)
 	}

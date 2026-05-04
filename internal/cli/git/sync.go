@@ -7,7 +7,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
-	"github.com/tysonthomas9/loomcli/internal/cli/config"
 )
 
 var syncPushOnly bool
@@ -30,7 +29,7 @@ This is the recommended way to keep worktrees in sync with the main branch.
 Flags:
   --push-only        Only push (skip pulling)
   --pull-only        Only pull (skip pushing)
-  -W, --workspace    Workspace to operate on (workspace mode only)
+  -W, --workspace    Workspace to operate on
 
 Examples:
   loom sync                      # Full sync: push all ready + pull all
@@ -59,12 +58,7 @@ func runFullSync(cmd *cobra.Command, args []string) error {
 		os.Exit(1)
 	}
 
-	if config.IsWorkspaceMode() {
-		runWorkspaceSync(deps, pushOnly, pullOnly, ws)
-		return nil
-	}
-
-	runLegacySync(deps, pushOnly, pullOnly)
+	runWorkspaceSync(deps, pushOnly, pullOnly, ws)
 	return nil
 }
 
@@ -138,53 +132,4 @@ func syncSingleWorkspace(deps *cli.Deps, resolver *cli.Resolver, pushOnly, pullO
 		fmt.Println("--- Phase 2: Pull ---")
 		pullWorkspaceWorktrees(deps, worktrees, "")
 	}
-}
-
-func runLegacySync(deps *cli.Deps, pushOnly, pullOnly bool) {
-	fmt.Println("=========================================")
-	fmt.Println("Full Sync: All Worktrees")
-	fmt.Println("=========================================")
-	fmt.Println("")
-
-	worktrees, err := cli.DiscoverWorktrees()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error discovering worktrees: %v\n", err)
-		os.Exit(1)
-	}
-
-	if len(worktrees) == 0 {
-		fmt.Println("No worktrees found.")
-		return
-	}
-
-	// Get the default branch
-	defaultBranch := cli.GetDefaultBranch()
-
-	// Phase 1: Push all worktrees (unless pull-only)
-	if !pullOnly {
-		fmt.Println("--- Phase 1: Push ---")
-		fmt.Printf("Pushing all worktrees -> %s\n", defaultBranch)
-		fmt.Println("")
-
-		for _, wt := range worktrees {
-			pushBranch(deps, wt.Branch, defaultBranch)
-			fmt.Println("")
-		}
-	}
-
-	// Phase 2: Pull into all worktrees (unless push-only)
-	if !pushOnly {
-		fmt.Println("--- Phase 2: Pull ---")
-		fmt.Printf("Pulling %s -> all worktrees\n", defaultBranch)
-		fmt.Println("")
-
-		for _, wt := range worktrees {
-			pullWorktree(deps, wt.Name, defaultBranch)
-			fmt.Println("")
-		}
-	}
-
-	fmt.Println("=========================================")
-	fmt.Println("Full sync complete!")
-	fmt.Println("=========================================")
 }

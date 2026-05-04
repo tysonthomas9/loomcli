@@ -16,7 +16,7 @@ import (
 // CommandStub represents an expected command call and its response
 type CommandStub struct {
 	Dir    string   // expected directory (empty = any)
-	Name   string   // expected command (e.g., "git", "bd")
+	Name   string   // expected command (e.g., "git", "issue-store")
 	Args   []string // expected arguments (nil = any)
 	Stdout string   // response stdout
 	Stderr string   // response stderr

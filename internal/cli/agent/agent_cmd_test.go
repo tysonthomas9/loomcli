@@ -93,56 +93,56 @@ func TestMapTaskFilter_WithParentID(t *testing.T) {
 			name:           "needs_design with parent ID",
 			filter:         "needs_design",
 			parentID:       "EPIC-111",
-			expectedArgs:   []string{"bd", "ready", "--json", "--limit", "10000", "--parent", "EPIC-111"},
+			expectedArgs:   []string{"issue-store", "ready", "--json", "--limit", "10000", "--parent", "EPIC-111"},
 			expectedResult: true,
 		},
 		{
 			name:           "needs_design without parent ID",
 			filter:         "needs_design",
 			parentID:       "",
-			expectedArgs:   []string{"bd", "ready", "--json", "--limit", "10000"},
+			expectedArgs:   []string{"issue-store", "ready", "--json", "--limit", "10000"},
 			expectedResult: true,
 		},
 		{
 			name:           "has_design with parent ID",
 			filter:         "has_design",
 			parentID:       "EPIC-222",
-			expectedArgs:   []string{"bd", "ready", "--json", "--limit", "10000", "--parent", "EPIC-222"},
+			expectedArgs:   []string{"issue-store", "ready", "--json", "--limit", "10000", "--parent", "EPIC-222"},
 			expectedResult: true,
 		},
 		{
 			name:           "has_design without parent ID",
 			filter:         "has_design",
 			parentID:       "",
-			expectedArgs:   []string{"bd", "ready", "--json", "--limit", "10000"},
+			expectedArgs:   []string{"issue-store", "ready", "--json", "--limit", "10000"},
 			expectedResult: true,
 		},
 		{
 			name:           "any with parent ID",
 			filter:         "any",
 			parentID:       "EPIC-333",
-			expectedArgs:   []string{"bd", "ready", "--json", "--limit", "10000", "--parent", "EPIC-333"},
+			expectedArgs:   []string{"issue-store", "ready", "--json", "--limit", "10000", "--parent", "EPIC-333"},
 			expectedResult: true,
 		},
 		{
 			name:           "any without parent ID",
 			filter:         "any",
 			parentID:       "",
-			expectedArgs:   []string{"bd", "ready", "--json", "--limit", "10000"},
+			expectedArgs:   []string{"issue-store", "ready", "--json", "--limit", "10000"},
 			expectedResult: true,
 		},
 		{
 			name:           "empty filter defaults to any with parent ID",
 			filter:         "",
 			parentID:       "EPIC-444",
-			expectedArgs:   []string{"bd", "ready", "--json", "--limit", "10000", "--parent", "EPIC-444"},
+			expectedArgs:   []string{"issue-store", "ready", "--json", "--limit", "10000", "--parent", "EPIC-444"},
 			expectedResult: true,
 		},
 		{
 			name:           "empty filter defaults to any without parent ID",
 			filter:         "",
 			parentID:       "",
-			expectedArgs:   []string{"bd", "ready", "--json", "--limit", "10000"},
+			expectedArgs:   []string{"issue-store", "ready", "--json", "--limit", "10000"},
 			expectedResult: true,
 		},
 	}
@@ -153,7 +153,7 @@ func TestMapTaskFilter_WithParentID(t *testing.T) {
 			callCount := 0
 			installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 				callCount++
-				// Capture only the first call (bd ready) args for parentID verification
+				// Capture only the first issue-store ready call for parentID verification.
 				if callCount == 1 {
 					capturedArgs = append([]string{name}, args...)
 				}
@@ -214,7 +214,7 @@ func TestMapTaskFilter_ParentIDCapturedInClosure(t *testing.T) {
 
 	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 		fullArgs := append([]string{name}, args...)
-		// Only capture bd ready calls (not bd list calls used for unclosed issue checking)
+		// Only capture issue-store ready calls.
 		if len(args) > 0 && args[0] == "ready" {
 			readyCapturedArgs = append(readyCapturedArgs, fullArgs)
 		}
@@ -240,13 +240,13 @@ func TestMapTaskFilter_ParentIDCapturedInClosure(t *testing.T) {
 		}
 	}
 
-	// Verify bd ready was called 3 times (once per taskCheckFn call)
+	// Verify issue-store ready was called 3 times (once per taskCheckFn call).
 	if len(readyCapturedArgs) != 3 {
-		t.Errorf("Expected 3 bd ready calls, got %d", len(readyCapturedArgs))
+		t.Errorf("Expected 3 issue-store ready calls, got %d", len(readyCapturedArgs))
 	}
 
-	// Verify all bd ready calls included the parentID
-	expectedArgs := []string{"bd", "ready", "--json", "--limit", "10000", "--parent", "EPIC-555"}
+	// Verify all issue-store ready calls included the parentID.
+	expectedArgs := []string{"issue-store", "ready", "--json", "--limit", "10000", "--parent", "EPIC-555"}
 	for i, capturedArgs := range readyCapturedArgs {
 		if len(capturedArgs) != len(expectedArgs) {
 			t.Errorf("Call %d: args length = %d, want %d", i, len(capturedArgs), len(expectedArgs))

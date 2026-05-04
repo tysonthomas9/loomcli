@@ -53,10 +53,6 @@ type Agent struct {
 	RoleType RoleType `json:"role_type,omitempty"`
 	Rig      string   `json:"rig,omitempty"`
 
-	// ===== Slot Fields =====
-	HookBead string `json:"hook_bead,omitempty"`
-	RoleBead string `json:"role_bead,omitempty"`
-
 	// ===== Activity Tracking =====
 	LastActivity *time.Time `json:"last_activity,omitempty"`
 

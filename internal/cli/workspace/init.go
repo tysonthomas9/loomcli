@@ -1,14 +1,15 @@
 package workspace
 
 import (
+	"context"
 	"fmt"
 	"os"
-	"sort"
-	"strings"
 
 	"github.com/spf13/cobra"
 
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 )
 
@@ -31,17 +32,16 @@ var initCmd = &cobra.Command{
 This command helps new users set up loom agents:
   - Checks prerequisites (git, fleet-db local mode)
   - Confirms fleet-db issue storage
-  - Creates worktrees for agents (legacy mode)
-  - Or validates workspace setup (workspace mode)
+  - Validates workspace setup
 
 Flags:
   -y, --yes              Non-interactive mode with defaults
-  --worktrees-dir DIR    Override worktrees directory (legacy mode only)
-  --names NAMES          Comma-separated worktree names (legacy mode only)
+  --worktrees-dir DIR    Override worktrees directory
+  --names NAMES          Comma-separated worktree names
   --workspace NAME       Initialize within an existing workspace
 
 Examples:
-  loom init                           # Interactive legacy setup
+  loom init                           # Interactive setup
   loom init --yes                     # Non-interactive with defaults
   loom init --workspace myws          # Workspace-aware setup
   loom init --workspace myws --yes    # Non-interactive workspace setup`,
@@ -127,34 +127,37 @@ func runInitWorkspace(cmd *cobra.Command, _ []string) {
 	showWorkspaceSummary(ws)
 }
 
-// validateWorkspaceExists loads config and validates the workspace exists.
+// validateWorkspaceExists loads FleetDB workspace metadata and validates the
+// workspace exists locally on this machine.
 func validateWorkspaceExists() config.WorkspaceConfig {
-	cfg, err := config.LoadConfig()
-	if err != nil || cfg == nil {
-		fmt.Fprintf(os.Stderr, "✗ No loom config found. Create a workspace first with:\n")
+	var out config.WorkspaceConfig
+	if err := cmdstore.WithStore(func(ctx context.Context, h *bootstrap.StoreHandle) error {
+		ws, err := h.Store.Workspaces().Get(ctx, initWorkspace)
+		if err != nil {
+			if byName, byNameErr := h.Store.Workspaces().GetByName(ctx, initWorkspace); byNameErr == nil {
+				ws = byName
+			} else {
+				return fmt.Errorf("workspace %q not found: %w", initWorkspace, err)
+			}
+		}
+		cfg, err := workspaceLocalConfig(ctx, h, ws.Key)
+		if err != nil {
+			return err
+		}
+		out = cfg
+		return nil
+	}); err != nil {
+		fmt.Fprintf(os.Stderr, "✗ %v\n", err)
+		fmt.Fprintf(os.Stderr, "  Create a workspace first with:\n")
 		fmt.Fprintf(os.Stderr, "  loom workspace create %s --repos /path/to/repo\n", initWorkspace)
 		os.Exit(1)
 	}
-
-	ws, exists := cfg.Workspaces[initWorkspace]
-	if !exists {
-		available := make([]string, 0, len(cfg.Workspaces))
-		for name := range cfg.Workspaces {
-			available = append(available, name)
-		}
-		sort.Strings(available)
-		fmt.Fprintf(os.Stderr, "✗ Workspace %q not found.\n", initWorkspace)
-		if len(available) > 0 {
-			fmt.Fprintf(os.Stderr, "  Available workspaces: %s\n", strings.Join(available, ", "))
-		}
-		os.Exit(1)
-	}
-	fmt.Printf("✓ Workspace %q found at %s\n", initWorkspace, ws.Path)
-	fmt.Printf("  Repos: %d\n", len(ws.Repos))
-	for _, repo := range ws.Repos {
+	fmt.Printf("✓ Workspace %q found at %s\n", initWorkspace, out.Path)
+	fmt.Printf("  Repos: %d\n", len(out.Repos))
+	for _, repo := range out.Repos {
 		fmt.Printf("    - %s\n", repo.Name)
 	}
-	return ws
+	return out
 }
 
 // initWorkspaceIssueStorage confirms FleetDB-backed issue storage for a named workspace.

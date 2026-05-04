@@ -23,11 +23,10 @@ func TestFilterEnv_AllowsPrefixMatches(t *testing.T) {
 	input := []string{
 		"LOOM_WORKTREE_PATH=/foo",
 		"LOOM_AGENT_NAME=agent1",
-		"BEADS_DB=/bar",
 	}
 	got := FilterEnv(input)
-	if len(got) != 3 {
-		t.Fatalf("FilterEnv() returned %d entries, want 3", len(got))
+	if len(got) != 2 {
+		t.Fatalf("FilterEnv() returned %d entries, want 2", len(got))
 	}
 	for i, want := range input {
 		if got[i] != want {

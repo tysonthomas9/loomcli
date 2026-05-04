@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"unsafe"
@@ -135,19 +136,11 @@ func buildBackendEnv(workDir, agentName string) []string {
 	return env
 }
 
-// pipePromptToCmd writes the prompt to a pipe and attaches it to cmd.Stdin.
-// Returns the read end (caller must close) or an error.
-func pipePromptToCmd(cmd *exec.Cmd, prompt string) (*os.File, error) {
-	r, w, err := os.Pipe()
-	if err != nil {
-		return nil, fmt.Errorf("failed to create pipe: %w", err)
-	}
-	if _, err := io.WriteString(w, prompt); err != nil {
-		w.Close()
-		r.Close()
-		return nil, fmt.Errorf("failed to write prompt to stdin: %w", err)
-	}
-	w.Close()
+// pipePromptToCmd attaches the prompt to cmd.Stdin without exposing it in CLI args.
+// Do not pre-write to an OS pipe here: large prompts can exceed the pipe buffer
+// and deadlock before the child process starts reading.
+func pipePromptToCmd(cmd *exec.Cmd, prompt string) (io.ReadCloser, error) {
+	r := io.NopCloser(strings.NewReader(prompt))
 	cmd.Stdin = r
 	return r, nil
 }
@@ -176,10 +169,10 @@ func (c *CodexBackend) HealthCheck() HealthStatus {
 		issues = append(issues, "codex binary not found on PATH")
 	}
 
-	if os.Getenv("OPENAI_API_KEY") != "" {
+	if os.Getenv("OPENAI_API_KEY") != "" || hasCodexAuthFile() {
 		hs.APIKeySet = true
 	} else {
-		issues = append(issues, "OPENAI_API_KEY not set")
+		issues = append(issues, "OPENAI_API_KEY not set and codex auth.json not found")
 	}
 
 	hs.Healthy = hs.Installed && hs.APIKeySet
@@ -189,6 +182,26 @@ func (c *CodexBackend) HealthCheck() HealthStatus {
 		hs.Message = "ready"
 	}
 	return hs
+}
+
+func hasCodexAuthFile() bool {
+	path := codexAuthFilePath()
+	if path == "" {
+		return false
+	}
+	info, err := os.Stat(path)
+	return err == nil && info.Mode().IsRegular() && info.Size() > 0
+}
+
+func codexAuthFilePath() string {
+	if home := strings.TrimSpace(os.Getenv("CODEX_HOME")); home != "" {
+		return filepath.Join(home, "auth.json")
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return ""
+	}
+	return filepath.Join(home, ".codex", "auth.json")
 }
 
 func init() {

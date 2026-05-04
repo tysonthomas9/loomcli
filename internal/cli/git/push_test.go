@@ -2,7 +2,6 @@ package git
 
 import (
 	"errors"
-	"os"
 	"strings"
 	"testing"
 )
@@ -19,20 +18,18 @@ func TestPushCmd_ArgsValidation(t *testing.T) {
 		wantError bool
 		errorMsg  string
 	}{
-		// Without --all flag: requires exactly 2 args (source, target)
 		{
 			name:      "without --all, no args",
 			args:      []string{},
 			allFlag:   false,
 			wantError: true,
-			errorMsg:  "requires exactly 2 arguments",
+			errorMsg:  "requires 1-2 arguments",
 		},
 		{
-			name:      "without --all, one arg",
+			name:      "without --all, one arg (success)",
 			args:      []string{"feature/branch"},
 			allFlag:   false,
-			wantError: true,
-			errorMsg:  "requires exactly 2 arguments",
+			wantError: false,
 		},
 		{
 			name:      "without --all, two args (success)",
@@ -45,16 +42,13 @@ func TestPushCmd_ArgsValidation(t *testing.T) {
 			args:      []string{"feature/branch", "main", "extra"},
 			allFlag:   false,
 			wantError: true,
-			errorMsg:  "requires exactly 2 arguments",
+			errorMsg:  "requires 1-2 arguments",
 		},
-
-		// With --all flag: requires exactly 1 arg (target)
 		{
-			name:      "with --all, no args",
+			name:      "with --all, no args (success)",
 			args:      []string{},
 			allFlag:   true,
-			wantError: true,
-			errorMsg:  "--all flag requires exactly 1 argument",
+			wantError: false,
 		},
 		{
 			name:      "with --all, one arg (success)",
@@ -67,7 +61,7 @@ func TestPushCmd_ArgsValidation(t *testing.T) {
 			args:      []string{"main", "extra"},
 			allFlag:   true,
 			wantError: true,
-			errorMsg:  "--all flag requires exactly 1 argument",
+			errorMsg:  "--all flag accepts at most 1 argument",
 		},
 	}
 
@@ -90,314 +84,6 @@ func TestPushCmd_ArgsValidation(t *testing.T) {
 			} else if err != nil {
 				t.Errorf("expected no error, got %v", err)
 			}
-		})
-	}
-}
-
-func TestPushBranch(t *testing.T) {
-	tests := []struct {
-		name         string
-		sourceBranch string
-		targetBranch string
-		outputStubs  []OutputCommandStub // for GitFetch, GitCheckout, GitPull, GitMerge, GitPush
-		commandStubs []CommandStub       // for GetCurrentBranch, HasCommitsBetween, GetConflictedFiles
-		claudeCalled bool                // whether claude should be invoked
-		claudeErr    error               // error from claude invocation
-	}{
-		{
-			name:         "successful push no conflicts",
-			sourceBranch: "feature/test",
-			targetBranch: "main",
-			outputStubs: []OutputCommandStub{
-				{Args: []string{"fetch", "origin"}, Err: nil},        // GitFetch
-				{Args: []string{"stash"}, Err: nil},                  // GitStash (no-op)
-				{Args: []string{"checkout", "main"}, Err: nil},       // GitCheckout
-				{Args: []string{"pull", "origin", "main"}, Err: nil}, // GitPull
-				{Args: []string{"merge", "-m", "Merge feature/test into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>", "--", "feature/test"}, Err: nil}, // GitMerge
-				{Args: []string{"push", "origin", "main"}, Err: nil},   // GitPush
-				{Args: []string{"checkout", "feature/test"}, Err: nil}, // branch restore defer
-			},
-			commandStubs: []CommandStub{
-				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                              // getStashCount (before)
-				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                              // getStashCount (after, same = not stashed)
-				{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "feature/test\n"},                     // GetCurrentBranch
-				{Name: "git", Args: []string{"log", "main..feature/test", "--oneline"}, Stdout: "abc123 some commit\n"}, // HasCommitsBetween
-			},
-		},
-		{
-			name:         "already up to date",
-			sourceBranch: "feature/test",
-			targetBranch: "main",
-			outputStubs: []OutputCommandStub{
-				{Args: []string{"fetch", "origin"}, Err: nil},
-				{Args: []string{"stash"}, Err: nil},
-				{Args: []string{"checkout", "main"}, Err: nil},
-				{Args: []string{"pull", "origin", "main"}, Err: nil},
-				// No merge or push since already up to date
-				{Args: []string{"checkout", "feature/test"}, Err: nil}, // branch restore defer
-			},
-			commandStubs: []CommandStub{
-				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                          // getStashCount (before)
-				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                          // getStashCount (after)
-				{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "feature/test\n"}, // GetCurrentBranch
-				{Name: "git", Args: []string{"log", "main..feature/test", "--oneline"}, Stdout: ""}, // no commits
-			},
-		},
-		{
-			name:         "fetch fails",
-			sourceBranch: "feature/test",
-			targetBranch: "main",
-			outputStubs: []OutputCommandStub{
-				{Args: []string{"fetch", "origin"}, Err: errors.New("network error")},
-			},
-			commandStubs: []CommandStub{},
-		},
-		{
-			name:         "checkout fails",
-			sourceBranch: "feature/test",
-			targetBranch: "main",
-			outputStubs: []OutputCommandStub{
-				{Args: []string{"fetch", "origin"}, Err: nil},
-				{Args: []string{"stash"}, Err: nil},
-				{Args: []string{"checkout", "main"}, Err: errors.New("checkout failed")},
-				{Args: []string{"checkout", "feature/test"}, Err: nil}, // branch restore defer
-			},
-			commandStubs: []CommandStub{
-				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                          // getStashCount (before)
-				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                          // getStashCount (after)
-				{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "feature/test\n"}, // GetCurrentBranch
-			},
-		},
-		{
-			name:         "pull fails",
-			sourceBranch: "feature/test",
-			targetBranch: "main",
-			outputStubs: []OutputCommandStub{
-				{Args: []string{"fetch", "origin"}, Err: nil},
-				{Args: []string{"stash"}, Err: nil},
-				{Args: []string{"checkout", "main"}, Err: nil},
-				{Args: []string{"pull", "origin", "main"}, Err: errors.New("pull failed")},
-				{Args: []string{"checkout", "feature/test"}, Err: nil}, // branch restore defer
-			},
-			commandStubs: []CommandStub{
-				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                          // getStashCount (before)
-				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                          // getStashCount (after)
-				{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "feature/test\n"}, // GetCurrentBranch
-			},
-		},
-		{
-			name:         "merge with conflicts invokes claude",
-			sourceBranch: "feature/test",
-			targetBranch: "main",
-			outputStubs: []OutputCommandStub{
-				{Args: []string{"fetch", "origin"}, Err: nil},
-				{Args: []string{"stash"}, Err: nil},
-				{Args: []string{"checkout", "main"}, Err: nil},
-				{Args: []string{"pull", "origin", "main"}, Err: nil},
-				{Args: []string{"merge", "-m", "Merge feature/test into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>", "--", "feature/test"}, Err: errors.New("CONFLICT")},
-				// No push after conflicts
-				{Args: []string{"checkout", "feature/test"}, Err: nil}, // branch restore defer
-			},
-			commandStubs: []CommandStub{
-				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                          // getStashCount (before)
-				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                          // getStashCount (after)
-				{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "feature/test\n"}, // GetCurrentBranch
-				{Name: "git", Args: []string{"log", "main..feature/test", "--oneline"}, Stdout: "abc123 commit\n"},
-				{Name: "git", Args: []string{"diff", "--name-only", "--diff-filter=U"}, Stdout: "file1.go\nfile2.go\n"},
-			},
-			claudeCalled: true,
-		},
-		{
-			name:         "merge fails no conflicts returns error",
-			sourceBranch: "feature/test",
-			targetBranch: "main",
-			outputStubs: []OutputCommandStub{
-				{Args: []string{"fetch", "origin"}, Err: nil},
-				{Args: []string{"stash"}, Err: nil},
-				{Args: []string{"checkout", "main"}, Err: nil},
-				{Args: []string{"pull", "origin", "main"}, Err: nil},
-				{Args: []string{"merge", "-m", "Merge feature/test into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>", "--", "feature/test"}, Err: errors.New("merge failed")},
-				{Args: []string{"checkout", "feature/test"}, Err: nil}, // branch restore defer
-			},
-			commandStubs: []CommandStub{
-				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                          // getStashCount (before)
-				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                          // getStashCount (after)
-				{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "feature/test\n"}, // GetCurrentBranch
-				{Name: "git", Args: []string{"log", "main..feature/test", "--oneline"}, Stdout: "abc123 commit\n"},
-				{Name: "git", Args: []string{"diff", "--name-only", "--diff-filter=U"}, Stdout: ""}, // no conflict files
-			},
-		},
-		{
-			name:         "push fails after successful merge",
-			sourceBranch: "feature/test",
-			targetBranch: "main",
-			outputStubs: []OutputCommandStub{
-				{Args: []string{"fetch", "origin"}, Err: nil},
-				{Args: []string{"stash"}, Err: nil},
-				{Args: []string{"checkout", "main"}, Err: nil},
-				{Args: []string{"pull", "origin", "main"}, Err: nil},
-				{Args: []string{"merge", "-m", "Merge feature/test into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>", "--", "feature/test"}, Err: nil},
-				{Args: []string{"push", "origin", "main"}, Err: errors.New("push rejected")},
-				{Args: []string{"checkout", "feature/test"}, Err: nil}, // branch restore defer
-			},
-			commandStubs: []CommandStub{
-				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                          // getStashCount (before)
-				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                          // getStashCount (after)
-				{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "feature/test\n"}, // GetCurrentBranch
-				{Name: "git", Args: []string{"log", "main..feature/test", "--oneline"}, Stdout: "abc123 commit\n"},
-			},
-		},
-		{
-			name:         "merge conflicts with claude error",
-			sourceBranch: "feature/test",
-			targetBranch: "main",
-			outputStubs: []OutputCommandStub{
-				{Args: []string{"fetch", "origin"}, Err: nil},
-				{Args: []string{"stash"}, Err: nil},
-				{Args: []string{"checkout", "main"}, Err: nil},
-				{Args: []string{"pull", "origin", "main"}, Err: nil},
-				{Args: []string{"merge", "-m", "Merge feature/test into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>", "--", "feature/test"}, Err: errors.New("CONFLICT")},
-				{Args: []string{"checkout", "feature/test"}, Err: nil}, // branch restore defer
-			},
-			commandStubs: []CommandStub{
-				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                          // getStashCount (before)
-				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                          // getStashCount (after)
-				{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "feature/test\n"}, // GetCurrentBranch
-				{Name: "git", Args: []string{"log", "main..feature/test", "--oneline"}, Stdout: "abc123 commit\n"},
-				{Name: "git", Args: []string{"diff", "--name-only", "--diff-filter=U"}, Stdout: "file1.go\n"},
-			},
-			claudeCalled: true,
-			claudeErr:    errors.New("claude failed"),
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			deps, _, _, _, _ := NewTestDeps(t)
-
-			// Install command mock (captured git commands) - must be before output mock
-			if len(tc.commandStubs) > 0 {
-				cmdMock := NewCommandMock(t, tc.commandStubs)
-				cmdMock.InstallOn(deps)
-			}
-
-			// Install output command mock (streaming git commands)
-			outputMock := NewOutputCommandMock(t, tc.outputStubs)
-			outputMock.InstallOn(deps)
-
-			// Mock claude invoker
-			claudeCalled := false
-			deps.Agent = &MockAgentInvoker{InteractiveFunc: func(workDir, prompt, agentName string) error {
-				claudeCalled = true
-				return tc.claudeErr
-			}}
-
-			// Call the function under test
-			pushBranch(deps, tc.sourceBranch, tc.targetBranch)
-
-			if tc.claudeCalled && !claudeCalled {
-				t.Error("expected claude to be invoked, but it was not")
-			}
-			if !tc.claudeCalled && claudeCalled {
-				t.Error("expected claude NOT to be invoked, but it was")
-			}
-		})
-	}
-}
-
-func TestPushAllWorktrees(t *testing.T) {
-	tests := []struct {
-		name         string
-		targetBranch string
-		worktrees    []WorktreeInfo
-		outputStubs  []OutputCommandStub
-		commandStubs []CommandStub
-	}{
-		{
-			name:         "multiple worktrees",
-			targetBranch: "main",
-			worktrees: []WorktreeInfo{
-				{Name: "alpha", Path: "/worktrees/alpha", Branch: "alpha-branch"},
-				{Name: "beta", Path: "/worktrees/beta", Branch: "beta-branch"},
-			},
-			outputStubs: []OutputCommandStub{
-				// First worktree push: alpha-branch -> main
-				{Args: []string{"fetch", "origin"}, Err: nil},
-				{Args: []string{"stash"}, Err: nil},
-				{Args: []string{"checkout", "main"}, Err: nil},
-				{Args: []string{"pull", "origin", "main"}, Err: nil},
-				{Args: []string{"merge", "-m", "Merge alpha-branch into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>", "--", "alpha-branch"}, Err: nil},
-				{Args: []string{"push", "origin", "main"}, Err: nil},
-				{Args: []string{"checkout", "alpha-branch"}, Err: nil}, // branch restore defer
-				// Second worktree push: beta-branch -> main
-				{Args: []string{"fetch", "origin"}, Err: nil},
-				{Args: []string{"stash"}, Err: nil},
-				{Args: []string{"checkout", "main"}, Err: nil},
-				{Args: []string{"pull", "origin", "main"}, Err: nil},
-				{Args: []string{"merge", "-m", "Merge beta-branch into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>", "--", "beta-branch"}, Err: nil},
-				{Args: []string{"push", "origin", "main"}, Err: nil},
-				{Args: []string{"checkout", "beta-branch"}, Err: nil}, // branch restore defer
-			},
-			commandStubs: []CommandStub{
-				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                          // getStashCount before (alpha)
-				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                          // getStashCount after (alpha)
-				{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "alpha-branch\n"}, // GetCurrentBranch (alpha)
-				{Name: "git", Args: []string{"log", "main..alpha-branch", "--oneline"}, Stdout: "abc commit\n"},
-				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                         // getStashCount before (beta)
-				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                         // getStashCount after (beta)
-				{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "beta-branch\n"}, // GetCurrentBranch (beta)
-				{Name: "git", Args: []string{"log", "main..beta-branch", "--oneline"}, Stdout: "def commit\n"},
-			},
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			// Uses SetupTestEnv + DiscoverWorktrees (global) - no t.Parallel()
-
-			// Set up a temp dir with worktree directories
-			tmpDir := t.TempDir()
-
-			// Create worktrees/<name>/.git for each test worktree
-			for _, wt := range tc.worktrees {
-				wtPath := tmpDir + "/worktrees/" + wt.Name + "/.git"
-				if err := os.MkdirAll(wtPath, 0755); err != nil {
-					t.Fatalf("failed to create worktree dir: %v", err)
-				}
-			}
-
-			// Set LOOM_WORKTREES_DIR to point to our temp worktrees
-			SetupTestEnv(t, map[string]string{
-				"LOOM_WORKTREES_DIR": tmpDir + "/worktrees",
-			})
-
-			// Install command mock globally - DiscoverWorktrees uses global state
-			var allCmdStubs []CommandStub
-			// First: GetCurrentBranch for each worktree (during DiscoverWorktrees)
-			for _, wt := range tc.worktrees {
-				allCmdStubs = append(allCmdStubs, CommandStub{
-					Name:   "git",
-					Args:   []string{"branch", "--show-current"},
-					Stdout: wt.Branch + "\n",
-				})
-			}
-			// Then: HasCommitsBetween for each pushBranch call
-			allCmdStubs = append(allCmdStubs, tc.commandStubs...)
-			cmdMock := NewCommandMock(t, allCmdStubs)
-			cmdMock.Install()
-
-			// Install output command mock globally
-			outputMock := NewOutputCommandMock(t, tc.outputStubs)
-			outputMock.Install()
-
-			// Mock claude invoker
-			installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
-				t.Error("unexpected claude invocation")
-				return nil
-			})
-
-			pushAllWorktrees(defaultDeps, tc.targetBranch)
 		})
 	}
 }
@@ -639,44 +325,6 @@ func TestPushWorkspaceWorktrees_CustomRemote(t *testing.T) {
 	pushWorkspaceWorktrees(deps, worktrees, "", "main")
 }
 
-func TestRunPush_LegacyMode(t *testing.T) {
-	t.Parallel()
-	deps, _, _, _, _ := NewTestDeps(t)
-
-	// When no workspace config exists, runPush falls through to legacy pushBranch.
-	// We test the legacy path by calling pushBranch directly.
-	// This test verifies the same git command sequence with hardcoded "origin".
-
-	outputStubs := []OutputCommandStub{
-		{Args: []string{"fetch", "origin"}, Err: nil},
-		{Args: []string{"stash"}, Err: nil},
-		{Args: []string{"checkout", "main"}, Err: nil},
-		{Args: []string{"pull", "origin", "main"}, Err: nil},
-		{Args: []string{"merge", "-m", "Merge feature/test into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>", "--", "feature/test"}, Err: nil},
-		{Args: []string{"push", "origin", "main"}, Err: nil},
-		{Args: []string{"checkout", "feature/test"}, Err: nil}, // branch restore defer
-	}
-
-	commandStubs := []CommandStub{
-		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},
-		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},
-		{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "feature/test\n"},
-		{Name: "git", Args: []string{"log", "main..feature/test", "--oneline"}, Stdout: "abc123 commit\n"},
-	}
-
-	cmdMock := NewCommandMock(t, commandStubs)
-	cmdMock.InstallOn(deps)
-	outputMock := NewOutputCommandMock(t, outputStubs)
-	outputMock.InstallOn(deps)
-
-	deps.Agent = &MockAgentInvoker{InteractiveFunc: func(workDir, prompt, agentName string) error {
-		t.Error("unexpected claude invocation")
-		return nil
-	}}
-
-	pushBranch(deps, "feature/test", "main")
-}
-
 func TestPushWorkspaceWorktrees_SkipsNilRepo(t *testing.T) {
 	t.Parallel()
 	deps, _, _, _, _ := NewTestDeps(t)
@@ -725,113 +373,6 @@ func TestPushWorkspaceWorktrees_SkipsNilRepo(t *testing.T) {
 	}}
 
 	pushWorkspaceWorktrees(deps, worktrees, "", "main")
-}
-
-func TestPushBranch_DirtyWorkingTree_StashesAndPops(t *testing.T) {
-	t.Parallel()
-	deps, _, _, _, _ := NewTestDeps(t)
-
-	// Test that when working tree is dirty, pushBranch stashes before checkout
-	// and pops stash after merge completes successfully
-	outputStubs := []OutputCommandStub{
-		{Args: []string{"fetch", "origin"}, Err: nil},
-		{Args: []string{"stash"}, Err: nil}, // GitStash
-		{Args: []string{"checkout", "main"}, Err: nil},
-		{Args: []string{"pull", "origin", "main"}, Err: nil},
-		{Args: []string{"merge", "-m", "Merge feature/test into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>", "--", "feature/test"}, Err: nil},
-		{Args: []string{"push", "origin", "main"}, Err: nil},
-		{Args: []string{"checkout", "feature/test"}, Err: nil}, // branch restore defer (runs first, LIFO)
-		{Args: []string{"stash", "pop"}, Err: nil},             // GitStashPop (runs second, LIFO)
-	}
-
-	commandStubs := []CommandStub{
-		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                  // getStashCount (before, 0)
-		{Name: "git", Args: []string{"stash", "list"}, Stdout: "stash@{0}: WIP on main: abc1234\n"}, // getStashCount (after, 1 = stashed)
-		{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "feature/test\n"},         // GetCurrentBranch
-		{Name: "git", Args: []string{"log", "main..feature/test", "--oneline"}, Stdout: "abc123 commit\n"},
-	}
-
-	cmdMock := NewCommandMock(t, commandStubs)
-	cmdMock.InstallOn(deps)
-	outputMock := NewOutputCommandMock(t, outputStubs)
-	outputMock.InstallOn(deps)
-
-	deps.Agent = &MockAgentInvoker{InteractiveFunc: func(workDir, prompt, agentName string) error {
-		t.Error("unexpected claude invocation")
-		return nil
-	}}
-
-	pushBranch(deps, "feature/test", "main")
-}
-
-func TestPushBranch_StashPopConflicts_WarnsButSucceeds(t *testing.T) {
-	t.Parallel()
-	deps, _, _, _, _ := NewTestDeps(t)
-
-	// Test that when stash pop fails due to conflicts, a warning is printed
-	// but the merge itself succeeds (no error returned to caller)
-	outputStubs := []OutputCommandStub{
-		{Args: []string{"fetch", "origin"}, Err: nil},
-		{Args: []string{"stash"}, Err: nil},
-		{Args: []string{"checkout", "main"}, Err: nil},
-		{Args: []string{"pull", "origin", "main"}, Err: nil},
-		{Args: []string{"merge", "-m", "Merge feature/test into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>", "--", "feature/test"}, Err: nil},
-		{Args: []string{"push", "origin", "main"}, Err: nil},
-		{Args: []string{"checkout", "feature/test"}, Err: nil},                         // branch restore defer (runs first, LIFO)
-		{Args: []string{"stash", "pop"}, Err: errors.New("conflict during stash pop")}, // stash pop fails (runs second, LIFO)
-	}
-
-	commandStubs := []CommandStub{
-		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                  // getStashCount (before)
-		{Name: "git", Args: []string{"stash", "list"}, Stdout: "stash@{0}: WIP on main: abc1234\n"}, // getStashCount (after, stashed)
-		{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "feature/test\n"},         // GetCurrentBranch
-		{Name: "git", Args: []string{"log", "main..feature/test", "--oneline"}, Stdout: "abc123 commit\n"},
-		{Name: "git", Args: []string{"diff", "--name-only", "--diff-filter=U"}, Stdout: "dirty.go\n"}, // HasUnmergedFiles returns true
-	}
-
-	cmdMock := NewCommandMock(t, commandStubs)
-	cmdMock.InstallOn(deps)
-	outputMock := NewOutputCommandMock(t, outputStubs)
-	outputMock.InstallOn(deps)
-
-	deps.Agent = &MockAgentInvoker{InteractiveFunc: func(workDir, prompt, agentName string) error {
-		t.Error("unexpected claude invocation")
-		return nil
-	}}
-
-	// pushBranch doesn't return an error, it just prints to stderr
-	// The test verifies the correct sequence of commands is called
-	pushBranch(deps, "feature/test", "main")
-}
-
-func TestPushBranch_StashFails_ReturnsEarly(t *testing.T) {
-	t.Parallel()
-	deps, _, _, _, _ := NewTestDeps(t)
-
-	// Test that when GitStash fails, pushBranch returns early without proceeding to checkout
-	outputStubs := []OutputCommandStub{
-		{Args: []string{"fetch", "origin"}, Err: nil},
-		{Args: []string{"stash"}, Err: errors.New("stash failed: no local changes")}, // GitStash fails
-		// No checkout, pull, merge, push - should return early
-	}
-
-	commandStubs := []CommandStub{
-		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""}, // getStashCount (before)
-		// No second stash list - git stash command fails before it
-	}
-
-	cmdMock := NewCommandMock(t, commandStubs)
-	cmdMock.InstallOn(deps)
-	outputMock := NewOutputCommandMock(t, outputStubs)
-	outputMock.InstallOn(deps)
-
-	deps.Agent = &MockAgentInvoker{InteractiveFunc: func(workDir, prompt, agentName string) error {
-		t.Error("unexpected claude invocation")
-		return nil
-	}}
-
-	// pushBranch prints error and returns early - no panic
-	pushBranch(deps, "feature/test", "main")
 }
 
 func TestPushBranchInRepo_DirtyWorkingTree_StashesAndPops(t *testing.T) {
@@ -1039,31 +580,6 @@ func TestPushCmd_Flags(t *testing.T) {
 	if wsFlag := pushCmd.Flags().ShorthandLookup("W"); wsFlag == nil {
 		t.Error("expected -W shorthand flag to be registered")
 	}
-}
-
-func TestPushAllWorktrees_EmptyList(t *testing.T) {
-	// Uses SetupTestEnv (env mutation) - no t.Parallel()
-	deps, _, _, _, _ := NewTestDeps(t)
-
-	tmpDir := t.TempDir()
-
-	// Create empty worktrees directory
-	if err := os.MkdirAll(tmpDir+"/worktrees", 0755); err != nil {
-		t.Fatalf("failed to create dir: %v", err)
-	}
-
-	SetupTestEnv(t, map[string]string{
-		"LOOM_WORKTREES_DIR": tmpDir + "/worktrees",
-	})
-
-	// No mocks needed - should return early when no worktrees found
-	outputMock := NewOutputCommandMock(t, []OutputCommandStub{})
-	cmdMock := NewCommandMock(t, []CommandStub{})
-	cmdMock.InstallOn(deps)
-	outputMock.InstallOn(deps)
-
-	// Should not panic when no worktrees
-	pushAllWorktrees(deps, "main")
 }
 
 func TestPushWorkspaceWorktrees_EmptyList(t *testing.T) {
@@ -1306,158 +822,6 @@ func TestPushBranchInRepoDetached_CustomRemote(t *testing.T) {
 	}
 }
 
-func TestPushBranch_WorktreeConflict_UsesDetached(t *testing.T) {
-	t.Parallel()
-	deps, _, _, _, _ := NewTestDeps(t)
-
-	// When checkout fails because the target branch is checked out in another
-	// worktree, pushBranch should fall back to pushBranchDetached.
-	outputStubs := []OutputCommandStub{
-		{Args: []string{"fetch", "origin"}, Err: nil}, // GitFetch
-		{Args: []string{"stash"}, Err: nil},           // GitStash (no-op)
-		{Args: []string{"checkout", "main"}, Err: errors.New("fatal: 'main' is already used by worktree at '/home/user/project'")}, // GitCheckout fails → fallback
-		// Detached flow:
-		{Args: nil, Err: nil}, // GitCheckoutDetached (origin/main)
-		{Args: nil, Err: nil}, // GitCreateBranchFromHead (temp branch)
-		{Args: nil, Err: nil}, // GitMerge
-		{Args: nil, Err: nil}, // GitPushRefspec (temp:main)
-		{Args: nil, Err: nil}, // GitDeleteBranch (cleanup temp, detached defer LIFO)
-		{Args: nil, Err: nil}, // GitCheckout (source, detached defer LIFO)
-		{Args: nil, Err: nil}, // GitCheckout (restore original, caller defer)
-	}
-
-	commandStubs := []CommandStub{
-		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                         // getStashCount (before)
-		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                         // getStashCount (after)
-		{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "feature/test\n"},                // GetCurrentBranch
-		{Name: "git", Args: []string{"log", "main..feature/test", "--oneline"}, Stdout: "abc123 commit\n"}, // HasCommitsBetween
-	}
-
-	cmdMock := NewCommandMock(t, commandStubs)
-	cmdMock.InstallOn(deps)
-	outputMock := NewOutputCommandMock(t, outputStubs)
-	outputMock.InstallOn(deps)
-
-	deps.Agent = &MockAgentInvoker{InteractiveFunc: func(workDir, prompt, agentName string) error {
-		t.Error("unexpected claude invocation")
-		return nil
-	}}
-
-	// pushBranch doesn't return an error - it prints to stderr
-	pushBranch(deps, "feature/test", "main")
-}
-
-func TestPushBranchDetached_AlreadyUpToDate(t *testing.T) {
-	t.Parallel()
-	deps, _, _, _, _ := NewTestDeps(t)
-
-	// Legacy pushBranchDetached should return early when no commits to merge
-	// No temp branch is created when already up to date
-	outputStubs := []OutputCommandStub{
-		{Args: nil, Err: nil}, // GitCheckoutDetached (origin/main)
-		// No create branch, merge, or push - already up to date
-		{Args: nil, Err: nil}, // GitCheckout (source, defer - always runs)
-	}
-
-	commandStubs := []CommandStub{
-		{Name: "git", Args: []string{"log", "main..feature", "--oneline"}, Stdout: ""}, // HasCommitsBetween - no commits
-	}
-
-	cmdMock := NewCommandMock(t, commandStubs)
-	cmdMock.InstallOn(deps)
-	outputMock := NewOutputCommandMock(t, outputStubs)
-	outputMock.InstallOn(deps)
-
-	deps.Agent = &MockAgentInvoker{InteractiveFunc: func(workDir, prompt, agentName string) error {
-		t.Error("unexpected claude invocation")
-		return nil
-	}}
-
-	err := pushBranchDetached(deps, "/tmp/test-dir", "feature", "main")
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
-	}
-}
-
-func TestPushBranchDetached_Success(t *testing.T) {
-	t.Parallel()
-	deps, _, _, _, _ := NewTestDeps(t)
-
-	// Full detached push flow in legacy mode (uses origin, HasCommitsBetween, GitMerge)
-	outputStubs := []OutputCommandStub{
-		{Args: nil, Err: nil}, // GitCheckoutDetached (origin/main)
-		{Args: nil, Err: nil}, // GitCreateBranchFromHead (temp branch)
-		{Args: nil, Err: nil}, // GitMerge (feature)
-		{Args: nil, Err: nil}, // GitPushRefspec (temp:main via origin)
-		{Args: nil, Err: nil}, // GitDeleteBranch (cleanup temp, defer LIFO - runs first)
-		{Args: nil, Err: nil}, // GitCheckout (source, defer LIFO - runs second)
-	}
-
-	commandStubs := []CommandStub{
-		{Name: "git", Args: []string{"log", "main..feature", "--oneline"}, Stdout: "abc commit\n"}, // HasCommitsBetween
-	}
-
-	cmdMock := NewCommandMock(t, commandStubs)
-	cmdMock.InstallOn(deps)
-	outputMock := NewOutputCommandMock(t, outputStubs)
-	outputMock.InstallOn(deps)
-
-	deps.Agent = &MockAgentInvoker{InteractiveFunc: func(workDir, prompt, agentName string) error {
-		t.Error("unexpected claude invocation")
-		return nil
-	}}
-
-	err := pushBranchDetached(deps, "/tmp/test-dir", "feature", "main")
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
-	}
-}
-
-func TestPushBranchDetached_MergeConflicts_InvokesClaude(t *testing.T) {
-	t.Parallel()
-	deps, _, _, _, _ := NewTestDeps(t)
-
-	// When merge fails with conflicts in the legacy detached flow,
-	// Claude should be invoked with HEAD:<targetBranch> push ref
-	outputStubs := []OutputCommandStub{
-		{Args: nil, Err: nil},                    // GitCheckoutDetached (origin/main)
-		{Args: nil, Err: nil},                    // GitCreateBranchFromHead (temp branch)
-		{Args: nil, Err: errors.New("CONFLICT")}, // GitMerge fails
-		// No push - conflicts
-		{Args: nil, Err: nil}, // GitDeleteBranch (cleanup temp, defer LIFO - runs first)
-		{Args: nil, Err: nil}, // GitCheckout (source, defer LIFO - runs second)
-	}
-
-	commandStubs := []CommandStub{
-		{Name: "git", Args: []string{"log", "main..feature", "--oneline"}, Stdout: "abc commit\n"},              // HasCommitsBetween
-		{Name: "git", Args: []string{"diff", "--name-only", "--diff-filter=U"}, Stdout: "file1.go\nfile2.go\n"}, // GetConflictedFiles
-	}
-
-	cmdMock := NewCommandMock(t, commandStubs)
-	cmdMock.InstallOn(deps)
-	outputMock := NewOutputCommandMock(t, outputStubs)
-	outputMock.InstallOn(deps)
-
-	claudeCalled := false
-	var capturedPrompt string
-	deps.Agent = &MockAgentInvoker{InteractiveFunc: func(workDir, prompt, agentName string) error {
-		claudeCalled = true
-		capturedPrompt = prompt
-		return nil
-	}}
-
-	err := pushBranchDetached(deps, "/tmp/test-dir", "feature", "main")
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
-	}
-	if !claudeCalled {
-		t.Error("expected claude to be invoked for conflict resolution")
-	}
-	if !strings.Contains(capturedPrompt, "HEAD:main") {
-		t.Errorf("expected prompt to contain 'HEAD:main' push ref, but it did not")
-	}
-}
-
 func TestPushBranchInRepo_CheckoutAlreadyCheckedOut_UsesDetached(t *testing.T) {
 	t.Parallel()
 	deps, _, _, _, _ := NewTestDeps(t)
@@ -1498,161 +862,5 @@ func TestPushBranchInRepo_CheckoutAlreadyCheckedOut_UsesDetached(t *testing.T) {
 	err := pushBranchInRepo(deps, "/repo", "feature", "main", "")
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
-	}
-}
-
-func TestPushBranch_CheckoutAlreadyCheckedOut_UsesDetached(t *testing.T) {
-	t.Parallel()
-	deps, _, _, _, _ := NewTestDeps(t)
-
-	// When checkout fails with the alternate "already checked out" message,
-	// pushBranch should fall back to pushBranchDetached.
-	outputStubs := []OutputCommandStub{
-		{Args: []string{"fetch", "origin"}, Err: nil}, // GitFetch
-		{Args: []string{"stash"}, Err: nil},           // GitStash (no-op)
-		{Args: []string{"checkout", "main"}, Err: errors.New("fatal: 'main' is already checked out at '/home/user/other'")}, // GitCheckout fails → fallback
-		// Detached flow:
-		{Args: nil, Err: nil}, // GitCheckoutDetached (origin/main)
-		{Args: nil, Err: nil}, // GitCreateBranchFromHead (temp branch)
-		{Args: nil, Err: nil}, // GitMerge
-		{Args: nil, Err: nil}, // GitPushRefspec (temp:main)
-		{Args: nil, Err: nil}, // GitDeleteBranch (cleanup temp, detached defer LIFO)
-		{Args: nil, Err: nil}, // GitCheckout (source, detached defer LIFO)
-		{Args: nil, Err: nil}, // GitCheckout (restore original, caller defer)
-	}
-
-	commandStubs := []CommandStub{
-		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                         // getStashCount (before)
-		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                         // getStashCount (after)
-		{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "feature/test\n"},                // GetCurrentBranch
-		{Name: "git", Args: []string{"log", "main..feature/test", "--oneline"}, Stdout: "abc123 commit\n"}, // HasCommitsBetween
-	}
-
-	cmdMock := NewCommandMock(t, commandStubs)
-	cmdMock.InstallOn(deps)
-	outputMock := NewOutputCommandMock(t, outputStubs)
-	outputMock.InstallOn(deps)
-
-	deps.Agent = &MockAgentInvoker{InteractiveFunc: func(workDir, prompt, agentName string) error {
-		t.Error("unexpected claude invocation")
-		return nil
-	}}
-
-	// pushBranch doesn't return an error - it prints to stderr
-	pushBranch(deps, "feature/test", "main")
-}
-
-func TestPushCmd_WorkspaceModeArgsValidation(t *testing.T) {
-	// Save and restore the global flags
-	origPushAll := pushAll
-	origPushWorkspace := pushWorkspace
-	defer func() {
-		pushAll = origPushAll
-		pushWorkspace = origPushWorkspace
-	}()
-
-	// Create a temp config directory with config.yaml to enable workspace mode
-	tmpDir := t.TempDir()
-	configDir := tmpDir + "/.loom"
-	if err := os.MkdirAll(configDir, 0755); err != nil {
-		t.Fatalf("failed to create config dir: %v", err)
-	}
-
-	configContent := `workspaces:
-  test:
-    path: /tmp/test
-    repos:
-      - name: repo1
-        path: repo1
-`
-	configPath := configDir + "/config.yaml"
-	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
-		t.Fatalf("failed to write config: %v", err)
-	}
-
-	SetupTestEnv(t, map[string]string{
-		"LOOM_CONFIG_DIR": configDir,
-	})
-
-	// Verify workspace mode is enabled
-	if !IsWorkspaceMode() {
-		t.Skip("workspace mode not enabled - config not loaded properly")
-	}
-
-	tests := []struct {
-		name        string
-		args        []string
-		allFlag     bool
-		wantError   bool
-		errorSubstr string
-	}{
-		// Workspace mode with --all flag
-		{
-			name:      "workspace mode with --all, no args (success)",
-			args:      []string{},
-			allFlag:   true,
-			wantError: false,
-		},
-		{
-			name:      "workspace mode with --all, one arg (target branch, success)",
-			args:      []string{"main"},
-			allFlag:   true,
-			wantError: false,
-		},
-		{
-			name:        "workspace mode with --all, two args (error)",
-			args:        []string{"main", "extra"},
-			allFlag:     true,
-			wantError:   true,
-			errorSubstr: "--all flag accepts at most 1 argument",
-		},
-		// Workspace mode without --all flag
-		{
-			name:        "workspace mode without --all, no args",
-			args:        []string{},
-			allFlag:     false,
-			wantError:   true,
-			errorSubstr: "requires 1-2 arguments",
-		},
-		{
-			name:      "workspace mode without --all, one arg (worktree only, success)",
-			args:      []string{"falcon"},
-			allFlag:   false,
-			wantError: false,
-		},
-		{
-			name:      "workspace mode without --all, two args (success)",
-			args:      []string{"falcon", "main"},
-			allFlag:   false,
-			wantError: false,
-		},
-		{
-			name:        "workspace mode without --all, three args",
-			args:        []string{"falcon", "main", "extra"},
-			allFlag:     false,
-			wantError:   true,
-			errorSubstr: "requires 1-2 arguments",
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			pushAll = tc.allFlag
-			pushWorkspace = ""
-
-			err := pushCmd.Args(pushCmd, tc.args)
-
-			if tc.wantError {
-				if err == nil {
-					t.Errorf("expected error containing %q, got nil", tc.errorSubstr)
-					return
-				}
-				if tc.errorSubstr != "" && !strings.Contains(err.Error(), tc.errorSubstr) {
-					t.Errorf("expected error containing %q, got %q", tc.errorSubstr, err.Error())
-				}
-			} else if err != nil {
-				t.Errorf("expected no error, got %v", err)
-			}
-		})
 	}
 }

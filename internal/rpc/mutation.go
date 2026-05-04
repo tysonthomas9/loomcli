@@ -21,7 +21,7 @@ const (
 type MutationEvent struct {
 	Cursor    string    `json:"cursor,omitempty"`   // Durable stream cursor for reconnect catch-up when available
 	Type      string    `json:"type"`               // One of the Mutation* constants
-	IssueID   string    `json:"issue_id"`           // e.g., "bd-42"
+	IssueID   string    `json:"issue_id"`           // Issue identifier
 	Title     string    `json:"title,omitempty"`    // Issue title for display context (may be empty for some operations)
 	Assignee  string    `json:"assignee,omitempty"` // Issue assignee for display context (may be empty)
 	Actor     string    `json:"actor,omitempty"`    // Who performed the action (may differ from assignee)

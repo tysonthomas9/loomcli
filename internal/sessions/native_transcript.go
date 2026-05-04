@@ -20,8 +20,7 @@ func redactionEnabled() bool {
 
 // NativeTranscriptFile is the filename used for the backend's own JSONL
 // transcript inside a session directory. Captured by SyncNativeTranscript
-// on every hook invocation. Distinct from the legacy thin transcript.jsonl
-// written by AppendTranscript for lifecycle breadcrumbs.
+// on every hook invocation. Distinct from the lifecycle breadcrumb transcript.
 const NativeTranscriptFile = "agent_transcript.jsonl"
 
 // SyncNativeTranscript mirrors the agent's native JSONL transcript (from

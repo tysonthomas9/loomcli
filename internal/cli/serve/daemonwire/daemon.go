@@ -178,7 +178,7 @@ func BuildDaemonConfigFn() func() (json.RawMessage, error) {
 }
 
 // BuildStoreBackedDaemonConfigFn returns the effective daemon config for the
-// active FleetDB workspace. It preserves the legacy JSON shape consumed by the
+// active FleetDB workspace. It preserves the JSON shape consumed by the
 // WebUI while sourcing agents, roles, and profile settings from store data.
 func BuildStoreBackedDaemonConfigFn(s store.Store) func() (json.RawMessage, error) {
 	if s == nil {

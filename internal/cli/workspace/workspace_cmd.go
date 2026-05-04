@@ -2,7 +2,6 @@ package workspace
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -15,7 +14,8 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
-	"github.com/tysonthomas9/loomcli/internal/configlock"
+	"github.com/tysonthomas9/loomcli/internal/cli/serve/workspacemgr"
+	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 var (
@@ -53,7 +53,8 @@ var workspaceCreateCmd = &cobra.Command{
 	Long: `Create a new workspace that groups multiple repositories together.
 
 For each repo, a git worktree is created under the workspace directory.
-The workspace is registered in ~/.loom/config.yaml.
+The workspace is registered in FleetDB and local checkout paths are cached in
+~/.loom/state.json.
 
 Examples:
   loom workspace create myws --repos /path/to/frontend,/path/to/backend
@@ -116,30 +117,28 @@ func isValidWorkspaceName(name string) bool {
 }
 
 func runWorkspaceCreate(cmd *cobra.Command, args []string) {
-	deps := cli.GetDeps(cmd)
 	wsName := args[0]
 	branch := validateCreateInputs(wsName)
 	repoPaths := parseRepoPaths()
 
-	unlock := acquireConfigLock()
-	defer unlock()
-
-	cfg := loadOrInitConfig()
-	if _, exists := cfg.Workspaces[wsName]; exists {
-		fmt.Fprintf(os.Stderr, "Error: workspace %q already exists. Use a different name.\n", wsName)
+	if err := cmdstore.WithStore(func(ctx context.Context, h *bootstrap.StoreHandle) error {
+		create := workspacemgr.BuildStoreBackedCreateWorkspace(h.Store)
+		result, err := create(ctx, service.WorkspaceCreateRequest{
+			Name:   wsName,
+			Type:   "empty",
+			Repos:  repoPaths,
+			Path:   wsCreatePath,
+			Branch: branch,
+		})
+		if err != nil {
+			return err
+		}
+		fmt.Printf("Workspace %q created at %s.\n", result.WorkspaceID, result.WorkspacePath)
+		return nil
+	}); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
-
-	wsDir := wsCreatePath
-	if wsDir == "" {
-		wsDir = config.GetWorkspaceDir(wsName)
-	}
-
-	resolvedRepos := resolveAndValidateRepos(repoPaths)
-	repos := createWorkspaceWorktrees(deps, wsDir, resolvedRepos, branch)
-
-	saveWorkspaceConfig(cfg, wsName, wsDir, repos)
-	fmt.Printf("Workspace %q created at %s with %d repo(s).\n", wsName, wsDir, len(repos))
 }
 
 func validateCreateInputs(wsName string) string {
@@ -167,177 +166,10 @@ func parseRepoPaths() []string {
 	return repoPaths
 }
 
-func acquireConfigLock() func() {
-	configDir := config.GetConfigDir()
-	if configDir == "" {
-		fmt.Fprintf(os.Stderr, "Error: cannot determine config directory\n")
-		os.Exit(1)
-	}
-	unlock, err := configlock.ConfigLock(configDir)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
-	}
-	return unlock
-}
-
-func loadOrInitConfig() *config.LoomConfig {
-	cfg, err := config.LoadConfigUnlocked()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
-	}
-	if cfg == nil {
-		cfg = &config.LoomConfig{Workspaces: make(map[string]config.WorkspaceConfig)}
-	}
-	if cfg.Workspaces == nil {
-		cfg.Workspaces = make(map[string]config.WorkspaceConfig)
-	}
-	return cfg
-}
-
-type cliResolvedRepo struct {
-	path string
-	name string
-}
-
-func resolveAndValidateRepos(repoPaths []string) []cliResolvedRepo {
-	var resolved []cliResolvedRepo
-	seenNames := make(map[string]string)
-
-	for _, rp := range repoPaths {
-		rp = strings.TrimSpace(rp)
-		if rp == "" {
-			continue
-		}
-		absPath, err := filepath.Abs(rp)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: cannot resolve path %q: %v\n", rp, err)
-			os.Exit(1)
-		}
-		validateRepoPath(absPath)
-		baseName := filepath.Base(absPath)
-		if prev, exists := seenNames[baseName]; exists {
-			fmt.Fprintf(os.Stderr, "Error: duplicate repo name %q from paths %s and %s. Repos must have unique directory names.\n", baseName, prev, absPath)
-			os.Exit(1)
-		}
-		seenNames[baseName] = absPath
-		resolved = append(resolved, cliResolvedRepo{path: absPath, name: baseName})
-	}
-	if len(resolved) == 0 {
-		fmt.Fprintf(os.Stderr, "Error: no valid repos specified\n")
-		os.Exit(1)
-	}
-	return resolved
-}
-
-func validateRepoPath(absPath string) {
-	info, err := os.Stat(absPath)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: repo path does not exist: %s\n", absPath)
-		os.Exit(1)
-	}
-	if !info.IsDir() {
-		fmt.Fprintf(os.Stderr, "Error: repo path is not a directory: %s\n", absPath)
-		os.Exit(1)
-	}
-	if _, err := os.Stat(filepath.Join(absPath, ".git")); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: not a git repository: %s\n", absPath)
-		os.Exit(1)
-	}
-}
-
-type cliCreatedWorktree struct {
-	origRepoPath string
-	worktreePath string
-}
-
-func createWorkspaceWorktrees(deps *cli.Deps, wsDir string, resolvedRepos []cliResolvedRepo, branch string) []config.RepoConfig {
-	if err := os.MkdirAll(wsDir, 0755); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: cannot create workspace directory %s: %v\n", wsDir, err)
-		os.Exit(1)
-	}
-
-	var created []cliCreatedWorktree
-	var repos []config.RepoConfig
-	for _, repo := range resolvedRepos {
-		worktreePath := filepath.Join(wsDir, repo.name)
-		if _, err := cli.RunGit(deps, repo.path, "worktree", "add", worktreePath, "-b", branch); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: git worktree add failed for %s: %v\n", repo.name, err)
-			for _, c := range created {
-				_, _ = cli.RunGit(deps, c.origRepoPath, "worktree", "remove", c.worktreePath)
-			}
-			_ = os.RemoveAll(wsDir)
-			os.Exit(1)
-		}
-		created = append(created, cliCreatedWorktree{origRepoPath: repo.path, worktreePath: worktreePath})
-		repos = append(repos, config.RepoConfig{Name: repo.name, Path: worktreePath})
-		fmt.Printf("  Created worktree: %s -> %s\n", repo.name, worktreePath)
-	}
-	return repos
-}
-
-func saveWorkspaceConfig(cfg *config.LoomConfig, wsName, wsDir string, repos []config.RepoConfig) {
-	cfg.Workspaces[wsName] = config.WorkspaceConfig{ID: config.NewWorkspaceID(), Path: wsDir, Repos: repos}
-	if wsCreateDefault || len(cfg.Workspaces) == 1 {
-		cfg.DefaultWorkspace = wsName
-	}
-	if err := config.SaveConfigUnlocked(cfg); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
-	}
-}
-
 func runWorkspaceList(cmd *cobra.Command, args []string) {
-	if cli.IsFleetDBActive() || cli.IsFleetActive() {
-		if err := runFleetWorkspaceList(); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
-		}
-		return
-	}
-
-	cfg, err := config.LoadConfig()
-	if err != nil {
+	if err := runFleetWorkspaceList(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
-	}
-	if cfg == nil || len(cfg.Workspaces) == 0 {
-		fmt.Println("No workspaces configured. Run 'loom workspace create' to create one.")
-		return
-	}
-
-	if wsListJSON {
-		data, err := json.MarshalIndent(cfg.Workspaces, "", "  ")
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
-		}
-		fmt.Println(string(data))
-		return
-	}
-
-	// Sort workspace names for deterministic output
-	names := make([]string, 0, len(cfg.Workspaces))
-	for name := range cfg.Workspaces {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-
-	for _, name := range names {
-		ws := cfg.Workspaces[name]
-		defaultMarker := ""
-		if name == cfg.DefaultWorkspace {
-			defaultMarker = " *"
-		}
-
-		// Check if directory exists
-		dirStatus := "ok"
-		if _, err := os.Stat(ws.Path); err != nil {
-			dirStatus = "missing"
-		}
-
-		fmt.Printf("%-20s %s (%d repos, %s)%s\n", name, ws.Path, len(ws.Repos), dirStatus, defaultMarker)
 	}
 }
 
@@ -421,48 +253,83 @@ func runFleetWorkspaceList() error {
 func runWorkspaceRemove(cmd *cobra.Command, args []string) {
 	deps := cli.GetDeps(cmd)
 	wsName := args[0]
-
-	unlock := acquireConfigLock()
-	defer unlock()
-
-	cfg := loadConfigForRemove()
-	ws := findWorkspaceOrExit(cfg, wsName)
-	checkRunningAgentsOrExit(ws)
-
-	if !wsRemoveKeepWorktrees {
-		removeWorktrees(deps, ws)
-	}
-
-	updateConfigAfterRemove(cfg, wsName)
-	fmt.Printf("Workspace %q removed.\n", wsName)
-}
-
-func loadConfigForRemove() *config.LoomConfig {
-	cfg, err := config.LoadConfigUnlocked()
-	if err != nil {
+	if err := cmdstore.WithStore(func(ctx context.Context, h *bootstrap.StoreHandle) error {
+		ws, err := h.Store.Workspaces().Get(ctx, wsName)
+		if err != nil {
+			if byName, byNameErr := h.Store.Workspaces().GetByName(ctx, wsName); byNameErr == nil {
+				ws = byName
+			} else {
+				return fmt.Errorf("workspace %q not found: %w", wsName, err)
+			}
+		}
+		local, err := workspaceLocalConfig(ctx, h, ws.Key)
+		if err != nil {
+			return err
+		}
+		if !wsRemoveKeepWorktrees {
+			checkRunningAgentsOrExit(local)
+			removeWorktrees(deps, local)
+		}
+		if err := h.Store.Workspaces().Delete(ctx, ws.Key); err != nil && !cmdstore.IsNotFound(err) {
+			return fmt.Errorf("delete workspace from fleet-db: %w", err)
+		}
+		if err := deleteWorkspaceLocalState(ws.Key); err != nil {
+			return err
+		}
+		fmt.Printf("Workspace %q removed.\n", ws.Key)
+		return nil
+	}); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
-	if cfg == nil {
-		fmt.Fprintf(os.Stderr, "No config found. Nothing to remove.\n")
-		os.Exit(1)
-	}
-	return cfg
 }
 
-func findWorkspaceOrExit(cfg *config.LoomConfig, wsName string) config.WorkspaceConfig {
-	ws, ok := cfg.Workspaces[wsName]
-	if ok {
-		return ws
+func workspaceLocalConfig(ctx context.Context, h *bootstrap.StoreHandle, key string) (config.WorkspaceConfig, error) {
+	sc, _ := bootstrap.LoadStateCache()
+	local := bootstrap.WorkspaceLocalState{}
+	if sc != nil {
+		local = sc.Workspaces[key]
 	}
-	available := make([]string, 0, len(cfg.Workspaces))
-	for name := range cfg.Workspaces {
-		available = append(available, name)
+	repoRows, err := h.Store.Repos().List(ctx, key)
+	if err != nil {
+		return config.WorkspaceConfig{}, fmt.Errorf("list repos for %s: %w", key, err)
 	}
-	sort.Strings(available)
-	fmt.Fprintf(os.Stderr, "Workspace %q not found. Available: %s\n", wsName, strings.Join(available, ", "))
-	os.Exit(1)
-	return config.WorkspaceConfig{} // unreachable
+	repos := make([]config.RepoConfig, 0, len(repoRows))
+	for _, repo := range repoRows {
+		if repo == nil {
+			continue
+		}
+		path := local.Repos[repo.Name]
+		if path == "" && local.Path != "" {
+			path = filepath.Join(local.Path, repo.Name)
+		}
+		repos = append(repos, config.RepoConfig{
+			Name:          repo.Name,
+			Path:          path,
+			DefaultBranch: repo.DefaultBranch,
+			Remote:        repo.Remote,
+			Groups:        append([]string(nil), repo.Groups...),
+			SourceRepoID:  repo.SourceRepoID,
+		})
+	}
+	return config.WorkspaceConfig{ID: key, Path: local.Path, Repos: repos}, nil
+}
+
+func deleteWorkspaceLocalState(key string) error {
+	return bootstrap.WithStateLock(func() error {
+		sc, err := bootstrap.LoadStateCache()
+		if err != nil {
+			return fmt.Errorf("load local workspace state: %w", err)
+		}
+		delete(sc.Workspaces, key)
+		if sc.LastWorkspace == key {
+			sc.LastWorkspace = ""
+		}
+		if err := bootstrap.SaveStateCache(sc); err != nil {
+			return fmt.Errorf("save local workspace state: %w", err)
+		}
+		return nil
+	})
 }
 
 func checkRunningAgentsOrExit(ws config.WorkspaceConfig) {
@@ -516,25 +383,6 @@ func removeOneWorktree(deps *cli.Deps, repoPath, repoName string) error {
 		return fmt.Errorf("  %s: %v", repoName, err)
 	}
 	return nil
-}
-
-func updateConfigAfterRemove(cfg *config.LoomConfig, wsName string) {
-	delete(cfg.Workspaces, wsName)
-	if cfg.DefaultWorkspace == wsName {
-		cfg.DefaultWorkspace = ""
-		names := make([]string, 0, len(cfg.Workspaces))
-		for name := range cfg.Workspaces {
-			names = append(names, name)
-		}
-		if len(names) > 0 {
-			sort.Strings(names)
-			cfg.DefaultWorkspace = names[0]
-		}
-	}
-	if err := config.SaveConfigUnlocked(cfg); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
-	}
 }
 
 // findMainRepoPath reads the .git file in a worktree to find the main repo's path.

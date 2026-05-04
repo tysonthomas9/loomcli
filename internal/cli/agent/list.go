@@ -48,34 +48,7 @@ func runList(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	// Detect workspace mode: if any worktree has a non-empty Workspace, use grouped display
-	isWorkspaceMode := false
-	for _, wt := range worktrees {
-		if wt.Workspace != "" {
-			isWorkspaceMode = true
-			break
-		}
-	}
-
-	if isWorkspaceMode {
-		renderListWorkspace(worktrees)
-	} else {
-		renderListLegacy(worktrees)
-	}
-}
-
-func renderListLegacy(worktrees []cli.WorktreeInfo) {
-	fmt.Println("Agents (Worktrees):")
-	fmt.Println("-------------------")
-
-	for _, wt := range worktrees {
-		status := getWorktreeListStatus(wt)
-		fmt.Printf("  %-12s  %-20s  %s\n", wt.Name, wt.Branch, status)
-	}
-
-	fmt.Println("")
-	fmt.Printf("Total: %d agents\n", len(worktrees))
-	fmt.Printf("Default branch: %s\n", cli.GetDefaultBranchForWorktrees(worktrees))
+	renderListWorkspace(worktrees)
 }
 
 func renderListWorkspace(worktrees []cli.WorktreeInfo) {
@@ -84,7 +57,7 @@ func renderListWorkspace(worktrees []cli.WorktreeInfo) {
 	for _, wt := range worktrees {
 		ws := wt.Workspace
 		if ws == "" {
-			ws = "(legacy)"
+			ws = "unassigned"
 		}
 		groups[ws] = append(groups[ws], wt)
 	}

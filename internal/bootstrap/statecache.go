@@ -65,7 +65,7 @@ func LoadStateCache() (*StateCache, error) {
 	data, err := os.ReadFile(path) //nolint:gosec // path is constructed from LoomDir
 	if err != nil {
 		if os.IsNotExist(err) {
-			return &StateCache{Version: stateCacheVersion}, nil
+			return &StateCache{Version: stateCacheVersion, Workspaces: make(map[string]WorkspaceLocalState)}, nil
 		}
 		return nil, fmt.Errorf("statecache: read %s: %w", path, err)
 	}
@@ -112,8 +112,7 @@ func SaveStateCache(sc *StateCache) error {
 // WithStateLock acquires the loom directory lock, runs fn, releases.
 // Use to wrap Load+mutate+Save sequences so concurrent CLI invocations
 // don't clobber each other's writes. The lock file lives in LoomDir
-// and is independent of any other lock files (e.g., the legacy yaml
-// config lock at config.lock).
+// and is independent of other lock files.
 func WithStateLock(fn func() error) error {
 	dir := LoomDir()
 	if dir == "" {

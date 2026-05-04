@@ -18,13 +18,13 @@ import (
 // maxClientMessageSize is the maximum size of a single RPC response the client will read (100 MB).
 const maxClientMessageSize int64 = 100 * 1024 * 1024
 
-// rpcDebugEnabled returns true if BD_DEBUG_RPC environment variable is set
+// rpcDebugEnabled returns true if LOOM_DEBUG_RPC environment variable is set.
 func rpcDebugEnabled() bool {
-	val := os.Getenv("BD_DEBUG_RPC")
+	val := os.Getenv("LOOM_DEBUG_RPC")
 	return val == "1" || val == "true"
 }
 
-// rpcDebugLog logs to stderr if BD_DEBUG_RPC is enabled
+// rpcDebugLog logs to stderr if LOOM_DEBUG_RPC is enabled.
 func rpcDebugLog(format string, args ...interface{}) {
 	if rpcDebugEnabled() {
 		fmt.Fprintf(os.Stderr, "[RPC DEBUG] "+format+"\n", args...)
@@ -37,8 +37,8 @@ func rpcDebugLog(format string, args ...interface{}) {
 var ErrDaemonStarting = fmt.Errorf("daemon starting")
 
 // ClientVersion is the version of this RPC client
-// This should match the bd CLI version for proper compatibility checks
-// It's set dynamically by main.go from cmd/bd/version.go before making RPC calls
+// This should match the CLI version for protocol checks.
+// It's set dynamically by main.go before making RPC calls.
 var ClientVersion = "0.0.0" // Placeholder; overridden at startup
 
 // Client represents an RPC client that connects to the daemon.
@@ -68,18 +68,18 @@ func TryConnectWithTimeout(socketPath string, dialTimeout time.Duration) (*Clien
 
 	// Fast probe: check daemon lock before attempting RPC connection if socket doesn't exist
 	// This eliminates unnecessary connection attempts when no daemon is running
-	// If socket exists, we skip lock check for backwards compatibility and test scenarios
+	// If the socket exists, attempt the connection directly; stale sockets are cleaned up below.
 	socketExists := endpointExists(socketPath)
 	rpcDebugLog("socket exists check: %v", socketExists)
 
 	if !socketExists {
-		beadsDir := filepath.Dir(socketPath)
-		running, _ := lockfile.TryDaemonLock(beadsDir)
+		runtimeDir := filepath.Dir(socketPath)
+		running, _ := lockfile.TryDaemonLock(runtimeDir)
 		if !running {
 			debug.Logf("daemon lock not held and socket missing (no daemon running)")
 			rpcDebugLog("daemon lock not held (no daemon running)")
 			// Self-heal: clean up stale artifacts when lock is free and socket is missing
-			cleanupStaleDaemonArtifacts(beadsDir)
+			cleanupStaleDaemonArtifacts(runtimeDir)
 			return nil, nil
 		}
 		// Lock is held but socket was missing - re-check socket existence atomically
@@ -110,11 +110,11 @@ func TryConnectWithTimeout(socketPath string, dialTimeout time.Duration) (*Clien
 
 		// Fast-fail: socket exists but dial failed - check if daemon actually alive
 		// If lock is not held, daemon crashed and left stale socket - clean up immediately
-		beadsDir := filepath.Dir(socketPath)
-		running, _ := lockfile.TryDaemonLock(beadsDir)
+		runtimeDir := filepath.Dir(socketPath)
+		running, _ := lockfile.TryDaemonLock(runtimeDir)
 		if !running {
 			rpcDebugLog("daemon not running (lock free) - cleaning up stale socket")
-			cleanupStaleDaemonArtifacts(beadsDir)
+			cleanupStaleDaemonArtifacts(runtimeDir)
 			_ = os.Remove(socketPath) // Also remove stale socket
 		}
 		return nil, nil
@@ -122,7 +122,7 @@ func TryConnectWithTimeout(socketPath string, dialTimeout time.Duration) (*Clien
 
 	rpcDebugLog("dial succeeded in %v", dialDuration)
 
-	// Load auth token from file next to socket (empty if not found = backward compat)
+	// Load auth token from file next to socket.
 	authToken := loadAuthToken(socketPath)
 	rpcDebugLog("auth token loaded: %v", authToken != "")
 
@@ -290,8 +290,8 @@ func (c *Client) executeWithTimeout(operation string, args interface{}, cwd stri
 // cleanupStaleDaemonArtifacts removes stale daemon.pid file when socket is missing and lock is free.
 // This prevents stale artifacts from accumulating after daemon crashes.
 // Only removes pid file - lock file is managed by OS (released on process exit).
-func cleanupStaleDaemonArtifacts(beadsDir string) {
-	pidFile := filepath.Join(beadsDir, "daemon.pid")
+func cleanupStaleDaemonArtifacts(runtimeDir string) {
+	pidFile := filepath.Join(runtimeDir, "daemon.pid")
 
 	// Check if pid file exists
 	if _, err := os.Stat(pidFile); err != nil {

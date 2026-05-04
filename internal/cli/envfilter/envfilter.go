@@ -28,6 +28,7 @@ var envAllowlistExact = map[string]bool{
 	// AI backend keys
 	"ANTHROPIC_API_KEY": true, "OPENAI_API_KEY": true,
 	"GEMINI_API_KEY": true, "GOOGLE_API_KEY": true, "CURSOR_API_KEY": true,
+	"CODEX_HOME": true,
 	// Git hosting tokens (needed by container agents for git push)
 	"GITHUB_TOKEN": true,
 	// Editor
@@ -71,8 +72,6 @@ var envBlocklistPrefixes = []string{
 // that are allowed to be passed to spawned agent subprocesses.
 var envAllowlistPrefixes = []string{
 	"LOOM_",
-	"BD_",
-	"BEADS_",
 }
 
 // FilteredEnv returns os.Environ() filtered through the allowlist.

@@ -1,6 +1,3 @@
-// compat.go provides backward-compatible type aliases and function wrappers
-// for types and functions that moved from the cli package to subpackages during
-// the v2 refactoring. This prevents breakage in test files and external callers.
 package cli
 
 import (
@@ -13,8 +10,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 )
 
-// --- Type aliases for config types ---
-
 type AgentEntry = config.AgentEntry
 type DaemonConfig = config.DaemonConfig
 type DaemonSettings = config.DaemonSettings
@@ -24,23 +19,11 @@ type RepoConfig = config.RepoConfig
 type WorkspaceConfig = config.WorkspaceConfig
 type LoomConfig = config.LoomConfig
 type Checkpoint = config.Checkpoint
-type ProjectFile = config.ProjectFile
-type FleetSettings = config.FleetSettings
 type FleetClientConfig = config.FleetClientConfig
-type FleetDBSettings = config.FleetDBSettings
-
-// --- Config constants ---
-
-var CurrentConfigVersion = config.CurrentConfigVersion
-
-// --- Function wrappers for config functions ---
 
 var LoadConfig = config.LoadConfig
-var SaveConfig = config.SaveConfig
 var LoadDaemonConfig = config.LoadDaemonConfig
-var LoadProjectFile = config.LoadProjectFile
 var ResolveActiveWorkspace = config.ResolveActiveWorkspace
-var IsWorkspaceMode = config.IsWorkspaceMode
 var ResolveDaemonStatePath = config.ResolveDaemonStatePath
 var ValidateRemoteName = config.ValidateRemoteName
 var GetWorkspaceDir = config.GetWorkspaceDir
@@ -60,18 +43,16 @@ var isFleetMode = IsFleetMode
 var isFleetModeFromEnv = IsFleetModeFromEnv
 var resolveIssueBackendType = ResolveIssueBackendType
 var defaultIssueBackend = DefaultIssueBackend
+var resetDefaultIssueBackend = ResetDefaultIssueBackend
 var isFleetActive = IsFleetActive
 var isFleetDBActive = IsFleetDBActive
 var ensureSignalDir = EnsureSignalDir
 var validateSignalDir = ValidateSignalDir
 var validateWorktreeName = ValidateWorktreeName
-var resetProjectConfigVersionWarnOnce = config.ResetProjectConfigVersionWarnOnce
 var branchCompletion = BranchCompletion
 var worktreeCompletion = WorktreeCompletion
 var worktreeThenBranchCompletion = WorktreeThenBranchCompletion
 
-// PromptData is the template context for custom prompt files.
-// Duplicated here for backward compat with tests that reference it from cli.
 type PromptData struct {
 	AgentName    string
 	WorktreeName string
@@ -79,8 +60,6 @@ type PromptData struct {
 	TaskID       string
 }
 
-// LoadPromptTemplate reads a prompt template file and executes it.
-// Duplicated here for backward compat with tests that reference it from cli.
 func LoadPromptTemplate(path string, data PromptData) (string, error) {
 	content, err := os.ReadFile(path) // #nosec G304
 	if err != nil {
@@ -97,8 +76,6 @@ func LoadPromptTemplate(path string, data PromptData) (string, error) {
 	return buf.String(), nil
 }
 
-// InvokeAgentForConflicts invokes the active backend to resolve merge conflicts.
-// This was moved during refactoring; this stub maintains backward compat.
 func InvokeAgentForConflicts(workDir, featureBranch, targetBranch string, conflicts []string) error {
 	prompt := fmt.Sprintf("Resolve merge conflicts in: %s -> %s\n\nConflicted files:\n", featureBranch, targetBranch)
 	for _, f := range conflicts {

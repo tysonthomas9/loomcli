@@ -19,7 +19,7 @@ var daemonQueueCmd = &cobra.Command{
 	Short: "Preview an agent's filtered work queue",
 	Long: `Show what tasks a specific agent would pick up next.
 
-This command loads loom.yaml, resolves the named agent's role constraints
+This command loads daemon configuration from FleetDB, resolves the named agent's role constraints
 (task filter, skills, max priority, source repos), fetches ready issues,
 scores them through the task router, and displays the results.
 
@@ -52,7 +52,7 @@ func findAgentEntryStatic(config *cfgpkg.DaemonConfig, worktreeName string) (*cf
 	for _, a := range config.Agents {
 		available = append(available, a.Worktree)
 	}
-	return nil, fmt.Errorf("agent %q not found in loom.yaml agents; available: %s", worktreeName, strings.Join(available, ", "))
+	return nil, fmt.Errorf("agent %q not found in FleetDB daemon agents; available: %s", worktreeName, strings.Join(available, ", "))
 }
 
 func runDaemonQueue(cmd *cobra.Command, args []string) {

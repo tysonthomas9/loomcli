@@ -1,8 +1,6 @@
 package git
 
 import (
-	"errors"
-	"os"
 	"strings"
 	"testing"
 )
@@ -19,20 +17,18 @@ func TestPullCmd_ArgsValidation(t *testing.T) {
 		wantError bool
 		errorMsg  string
 	}{
-		// Without --all flag: requires exactly 2 args (worktree, branch)
 		{
 			name:      "without --all, no args",
 			args:      []string{},
 			allFlag:   false,
 			wantError: true,
-			errorMsg:  "requires exactly 2 arguments",
+			errorMsg:  "requires 1-2 arguments",
 		},
 		{
-			name:      "without --all, one arg",
+			name:      "without --all, one arg (success)",
 			args:      []string{"falcon"},
 			allFlag:   false,
-			wantError: true,
-			errorMsg:  "requires exactly 2 arguments",
+			wantError: false,
 		},
 		{
 			name:      "without --all, two args (success)",
@@ -45,16 +41,13 @@ func TestPullCmd_ArgsValidation(t *testing.T) {
 			args:      []string{"falcon", "main", "extra"},
 			allFlag:   false,
 			wantError: true,
-			errorMsg:  "requires exactly 2 arguments",
+			errorMsg:  "requires 1-2 arguments",
 		},
-
-		// With --all flag: requires exactly 1 arg (branch)
 		{
-			name:      "with --all, no args",
+			name:      "with --all, no args (success)",
 			args:      []string{},
 			allFlag:   true,
-			wantError: true,
-			errorMsg:  "--all flag requires exactly 1 argument",
+			wantError: false,
 		},
 		{
 			name:      "with --all, one arg (success)",
@@ -67,7 +60,7 @@ func TestPullCmd_ArgsValidation(t *testing.T) {
 			args:      []string{"main", "extra"},
 			allFlag:   true,
 			wantError: true,
-			errorMsg:  "--all flag requires exactly 1 argument",
+			errorMsg:  "--all flag accepts at most 1 argument",
 		},
 	}
 
@@ -92,256 +85,6 @@ func TestPullCmd_ArgsValidation(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestPullWorktree(t *testing.T) {
-	tests := []struct {
-		name         string
-		worktreeName string
-		sourceBranch string
-		outputStubs  []OutputCommandStub
-		commandStubs []CommandStub
-		claudeCalled bool
-		claudeErr    error
-	}{
-		{
-			name:         "successful pull no conflicts",
-			worktreeName: "falcon",
-			sourceBranch: "main",
-			outputStubs: []OutputCommandStub{
-				{Args: []string{"fetch", "origin"}, Err: nil},
-				{Args: []string{"merge", "origin/main", "-m", "Pull from main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
-				{Args: []string{"push", "origin", "falcon-branch"}, Err: nil},
-			},
-			commandStubs: []CommandStub{
-				{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "falcon-branch\n"},
-			},
-		},
-		{
-			name:         "fetch fails",
-			worktreeName: "falcon",
-			sourceBranch: "main",
-			outputStubs: []OutputCommandStub{
-				{Args: []string{"fetch", "origin"}, Err: errors.New("network error")},
-			},
-			commandStubs: []CommandStub{
-				{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "falcon-branch\n"},
-			},
-		},
-		{
-			name:         "merge with conflicts invokes claude",
-			worktreeName: "falcon",
-			sourceBranch: "main",
-			outputStubs: []OutputCommandStub{
-				{Args: []string{"fetch", "origin"}, Err: nil},
-				{Args: []string{"merge", "origin/main", "-m", "Pull from main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: errors.New("CONFLICT")},
-			},
-			commandStubs: []CommandStub{
-				{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "falcon-branch\n"},
-				{Name: "git", Args: []string{"diff", "--name-only", "--diff-filter=U"}, Stdout: "file1.go\n"},
-			},
-			claudeCalled: true,
-		},
-		{
-			name:         "merge fails no conflicts",
-			worktreeName: "falcon",
-			sourceBranch: "main",
-			outputStubs: []OutputCommandStub{
-				{Args: []string{"fetch", "origin"}, Err: nil},
-				{Args: []string{"merge", "origin/main", "-m", "Pull from main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: errors.New("merge failed")},
-			},
-			commandStubs: []CommandStub{
-				{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "falcon-branch\n"},
-				{Name: "git", Args: []string{"diff", "--name-only", "--diff-filter=U"}, Stdout: ""},
-			},
-		},
-		{
-			name:         "push fails after successful pull",
-			worktreeName: "falcon",
-			sourceBranch: "main",
-			outputStubs: []OutputCommandStub{
-				{Args: []string{"fetch", "origin"}, Err: nil},
-				{Args: []string{"merge", "origin/main", "-m", "Pull from main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
-				{Args: []string{"push", "origin", "falcon-branch"}, Err: errors.New("push rejected")},
-			},
-			commandStubs: []CommandStub{
-				{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "falcon-branch\n"},
-			},
-		},
-		{
-			name:         "conflicts with claude error",
-			worktreeName: "falcon",
-			sourceBranch: "main",
-			outputStubs: []OutputCommandStub{
-				{Args: []string{"fetch", "origin"}, Err: nil},
-				{Args: []string{"merge", "origin/main", "-m", "Pull from main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: errors.New("CONFLICT")},
-			},
-			commandStubs: []CommandStub{
-				{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "falcon-branch\n"},
-				{Name: "git", Args: []string{"diff", "--name-only", "--diff-filter=U"}, Stdout: "file1.go\n"},
-			},
-			claudeCalled: true,
-			claudeErr:    errors.New("claude failed"),
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			// Uses SetupTestEnv (env mutation) - no t.Parallel()
-			deps, _, _, _, _ := NewTestDeps(t)
-
-			// Create a temp dir with the worktree
-			tmpDir := t.TempDir()
-			wtPath := tmpDir + "/" + tc.worktreeName
-			if err := os.MkdirAll(wtPath+"/.git", 0755); err != nil {
-				t.Fatalf("failed to create worktree: %v", err)
-			}
-
-			// Point LOOM_WORKTREES_DIR to our temp dir
-			SetupTestEnv(t, map[string]string{
-				"LOOM_WORKTREES_DIR": tmpDir,
-			})
-
-			// Install command mock (before output mock)
-			cmdMock := NewCommandMock(t, tc.commandStubs)
-			cmdMock.InstallOn(deps)
-
-			// Install output command mock
-			outputMock := NewOutputCommandMock(t, tc.outputStubs)
-			outputMock.InstallOn(deps)
-
-			// Mock claude invoker
-			claudeCalled := false
-			deps.Agent = &MockAgentInvoker{InteractiveFunc: func(workDir, prompt, agentName string) error {
-				claudeCalled = true
-				return tc.claudeErr
-			}}
-
-			pullWorktree(deps, tc.worktreeName, tc.sourceBranch)
-
-			if tc.claudeCalled && !claudeCalled {
-				t.Error("expected claude to be invoked, but it was not")
-			}
-			if !tc.claudeCalled && claudeCalled {
-				t.Error("expected claude NOT to be invoked, but it was")
-			}
-		})
-	}
-}
-
-func TestPullWorktree_NotFound(t *testing.T) {
-	// Uses SetupTestEnv (env mutation) - no t.Parallel()
-	deps, _, _, _, _ := NewTestDeps(t)
-
-	// Set LOOM_WORKTREES_DIR to a temp dir without the worktree
-	tmpDir := t.TempDir()
-	SetupTestEnv(t, map[string]string{
-		"LOOM_WORKTREES_DIR": tmpDir,
-	})
-
-	// No mocks needed - should return before any git operations
-	cmdMock := NewCommandMock(t, []CommandStub{})
-	cmdMock.InstallOn(deps)
-	outputMock := NewOutputCommandMock(t, []OutputCommandStub{})
-	outputMock.InstallOn(deps)
-
-	// Should handle error gracefully
-	pullWorktree(deps, "nonexistent", "main")
-}
-
-func TestPullAllWorktrees(t *testing.T) {
-	tests := []struct {
-		name         string
-		sourceBranch string
-		worktrees    []WorktreeInfo
-		outputStubs  []OutputCommandStub
-		commandStubs []CommandStub
-	}{
-		{
-			name:         "multiple worktrees",
-			sourceBranch: "main",
-			worktrees: []WorktreeInfo{
-				{Name: "alpha", Branch: "alpha-branch"},
-				{Name: "beta", Branch: "beta-branch"},
-			},
-			outputStubs: []OutputCommandStub{
-				// First worktree pull: main -> alpha
-				{Args: []string{"fetch", "origin"}, Err: nil},
-				{Args: []string{"merge", "origin/main", "-m", "Pull from main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
-				{Args: []string{"push", "origin", "alpha-branch"}, Err: nil},
-				// Second worktree pull: main -> beta
-				{Args: []string{"fetch", "origin"}, Err: nil},
-				{Args: []string{"merge", "origin/main", "-m", "Pull from main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
-				{Args: []string{"push", "origin", "beta-branch"}, Err: nil},
-			},
-			commandStubs: []CommandStub{
-				// DiscoverWorktrees calls GetCurrentBranch for each
-				{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "alpha-branch\n"},
-				{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "beta-branch\n"},
-				// pullWorktree calls GetCurrentBranch for alpha
-				{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "alpha-branch\n"},
-				// pullWorktree calls GetCurrentBranch for beta
-				{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "beta-branch\n"},
-			},
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			// Uses SetupTestEnv + DiscoverWorktrees (global) - no t.Parallel()
-
-			tmpDir := t.TempDir()
-
-			// Create worktree directories
-			for _, wt := range tc.worktrees {
-				if err := os.MkdirAll(tmpDir+"/"+wt.Name+"/.git", 0755); err != nil {
-					t.Fatalf("failed to create worktree dir: %v", err)
-				}
-			}
-
-			SetupTestEnv(t, map[string]string{
-				"LOOM_WORKTREES_DIR": tmpDir,
-			})
-
-			// Install globally — DiscoverWorktrees uses global state
-			cmdMock := NewCommandMock(t, tc.commandStubs)
-			cmdMock.Install()
-
-			outputMock := NewOutputCommandMock(t, tc.outputStubs)
-			outputMock.Install()
-
-			// Mock claude
-			installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
-				t.Error("unexpected claude invocation")
-				return nil
-			})
-
-			pullAllWorktrees(defaultDeps, tc.sourceBranch)
-		})
-	}
-}
-
-func TestPullAllWorktrees_NoWorktrees(t *testing.T) {
-	// Uses SetupTestEnv + DiscoverWorktrees (global) - no t.Parallel()
-
-	tmpDir := t.TempDir()
-
-	// Create the worktrees dir but leave it empty
-	if err := os.MkdirAll(tmpDir+"/worktrees", 0755); err != nil {
-		t.Fatalf("failed to create dir: %v", err)
-	}
-
-	SetupTestEnv(t, map[string]string{
-		"LOOM_WORKTREES_DIR": tmpDir + "/worktrees",
-	})
-
-	// No mocks needed - should return early
-	cmdMock := NewCommandMock(t, []CommandStub{})
-	cmdMock.Install()
-	outputMock := NewOutputCommandMock(t, []OutputCommandStub{})
-	outputMock.Install()
-
-	pullAllWorktrees(defaultDeps, "main")
 }
 
 func TestSourceBranchDisplay(t *testing.T) {
@@ -505,44 +248,6 @@ func TestPullRepoWorktree_EmptyRemoteDefaultsToOrigin(t *testing.T) {
 	}
 }
 
-func TestRunPull_LegacyMode(t *testing.T) {
-	// Uses SetupTestEnv (env mutation) - no t.Parallel()
-	deps, _, _, _, _ := NewTestDeps(t)
-
-	// Test legacy pullWorktree path - same as existing TestPullWorktree "successful pull" case
-	tmpDir := t.TempDir()
-	wtPath := tmpDir + "/falcon"
-	if err := os.MkdirAll(wtPath+"/.git", 0755); err != nil {
-		t.Fatalf("failed to create worktree: %v", err)
-	}
-
-	SetupTestEnv(t, map[string]string{
-		"LOOM_WORKTREES_DIR": tmpDir,
-	})
-
-	outputStubs := []OutputCommandStub{
-		{Args: []string{"fetch", "origin"}, Err: nil},
-		{Args: []string{"merge", "origin/main", "-m", "Pull from main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
-		{Args: []string{"push", "origin", "falcon-branch"}, Err: nil},
-	}
-
-	commandStubs := []CommandStub{
-		{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "falcon-branch\n"},
-	}
-
-	cmdMock := NewCommandMock(t, commandStubs)
-	cmdMock.InstallOn(deps)
-	outputMock := NewOutputCommandMock(t, outputStubs)
-	outputMock.InstallOn(deps)
-
-	deps.Agent = &MockAgentInvoker{InteractiveFunc: func(workDir, prompt, agentName string) error {
-		t.Error("unexpected claude invocation")
-		return nil
-	}}
-
-	pullWorktree(deps, "falcon", "main")
-}
-
 func TestPullWorkspaceWorktrees_SkipsNilRepo(t *testing.T) {
 	t.Parallel()
 	deps, _, _, _, _ := NewTestDeps(t)
@@ -662,119 +367,4 @@ func TestPullWorkspaceWorktrees_EmptyList(t *testing.T) {
 
 	// Should not panic or call any commands
 	pullWorkspaceWorktrees(deps, worktrees, "main")
-}
-
-func TestPullCmd_WorkspaceModeArgsValidation(t *testing.T) {
-	// Save and restore the global flags
-	origPullAll := pullAll
-	origPullWorkspace := pullWorkspace
-	defer func() {
-		pullAll = origPullAll
-		pullWorkspace = origPullWorkspace
-	}()
-
-	// Create a temp config directory with config.yaml to enable workspace mode
-	tmpDir := t.TempDir()
-	configDir := tmpDir + "/.loom"
-	if err := os.MkdirAll(configDir, 0755); err != nil {
-		t.Fatalf("failed to create config dir: %v", err)
-	}
-
-	configContent := `workspaces:
-  test:
-    path: /tmp/test
-    repos:
-      - name: repo1
-        path: repo1
-`
-	configPath := configDir + "/config.yaml"
-	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
-		t.Fatalf("failed to write config: %v", err)
-	}
-
-	SetupTestEnv(t, map[string]string{
-		"LOOM_CONFIG_DIR": configDir,
-	})
-
-	// Verify workspace mode is enabled
-	if !IsWorkspaceMode() {
-		t.Skip("workspace mode not enabled - config not loaded properly")
-	}
-
-	tests := []struct {
-		name        string
-		args        []string
-		allFlag     bool
-		wantError   bool
-		errorSubstr string
-	}{
-		// Workspace mode with --all flag
-		{
-			name:      "workspace mode with --all, no args (success)",
-			args:      []string{},
-			allFlag:   true,
-			wantError: false,
-		},
-		{
-			name:      "workspace mode with --all, one arg (source branch, success)",
-			args:      []string{"main"},
-			allFlag:   true,
-			wantError: false,
-		},
-		{
-			name:        "workspace mode with --all, two args (error)",
-			args:        []string{"main", "extra"},
-			allFlag:     true,
-			wantError:   true,
-			errorSubstr: "--all flag accepts at most 1 argument",
-		},
-		// Workspace mode without --all flag
-		{
-			name:        "workspace mode without --all, no args",
-			args:        []string{},
-			allFlag:     false,
-			wantError:   true,
-			errorSubstr: "requires 1-2 arguments",
-		},
-		{
-			name:      "workspace mode without --all, one arg (worktree only, success)",
-			args:      []string{"falcon"},
-			allFlag:   false,
-			wantError: false,
-		},
-		{
-			name:      "workspace mode without --all, two args (success)",
-			args:      []string{"falcon", "main"},
-			allFlag:   false,
-			wantError: false,
-		},
-		{
-			name:        "workspace mode without --all, three args",
-			args:        []string{"falcon", "main", "extra"},
-			allFlag:     false,
-			wantError:   true,
-			errorSubstr: "requires 1-2 arguments",
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			pullAll = tc.allFlag
-			pullWorkspace = ""
-
-			err := pullCmd.Args(pullCmd, tc.args)
-
-			if tc.wantError {
-				if err == nil {
-					t.Errorf("expected error containing %q, got nil", tc.errorSubstr)
-					return
-				}
-				if tc.errorSubstr != "" && !strings.Contains(err.Error(), tc.errorSubstr) {
-					t.Errorf("expected error containing %q, got %q", tc.errorSubstr, err.Error())
-				}
-			} else if err != nil {
-				t.Errorf("expected no error, got %v", err)
-			}
-		})
-	}
 }

@@ -24,10 +24,8 @@ const fleetModeEnvVar = "LOOM_ISSUE_BACKEND"
 // local daemon should suppress local issue-daemon subsystems.
 //
 // Detection precedence:
-//  1. LOOM_ISSUE_BACKEND=fleet env var (highest — useful for testing before config support lands)
-//  2. cfg.Backend == "fleet" (config field — added by sibling task .3; currently unused)
-//
-// Returns false for nil config and empty Backend; fleet-db is not fleet mode.
+//  1. LOOM_ISSUE_BACKEND=fleet env var
+//  2. cfg.Backend == "fleet" from the active FleetDB daemon profile
 func IsFleetMode(cfg *config.DaemonConfig) bool {
 	if os.Getenv(fleetModeEnvVar) == BackendFleet {
 		return true
@@ -45,12 +43,12 @@ func PrintDaemonBanner(config *config.DaemonConfig, projectDir string) {
 	if IsFleetMode(config) {
 		fmt.Println("Loom Agent Supervisor — Fleet Mode")
 		fmt.Printf("PID: %d\n", os.Getpid())
-		fmt.Printf("Config: %s/loom.yaml\n", projectDir)
+		fmt.Printf("Workspace: %s\n", projectDir)
 		fmt.Println("Agent supervision disabled — agents managed by fleet server")
 	} else {
 		fmt.Println("Loom Agent Supervisor")
 		fmt.Printf("PID: %d\n", os.Getpid())
-		fmt.Printf("Config: %s/loom.yaml\n", projectDir)
+		fmt.Printf("Workspace: %s\n", projectDir)
 		fmt.Printf("Agents: %d\n", len(config.Agents))
 		for _, a := range config.Agents {
 			fmt.Printf("  - %s (%s)\n", a.Worktree, a.Role)
@@ -60,20 +58,9 @@ func PrintDaemonBanner(config *config.DaemonConfig, projectDir string) {
 	fmt.Println("═══════════════════════════════════════════════════════════════")
 }
 
-// isFleetModeFromEnv checks fleet mode without a loaded config. Used in
-// contexts where config.DaemonConfig is not available (e.g., loom init, hooks install).
-//
-// Checks LOOM_ISSUE_BACKEND env var first, then falls back to loading project config.
+// isFleetModeFromEnv checks fleet mode without a loaded config.
 func IsFleetModeFromEnv() bool {
-	if os.Getenv(fleetModeEnvVar) == BackendFleet {
-		return true
-	}
-	// Fall back to project config
-	pf, err := config.LoadProjectFile(".")
-	if err == nil && pf != nil && pf.Backend == BackendFleet {
-		return true
-	}
-	return false
+	return os.Getenv(fleetModeEnvVar) == BackendFleet
 }
 
 // --- Fleet backend adapter (merged from cli_fleet_adapter.go) ---
@@ -82,13 +69,7 @@ func IsFleetModeFromEnv() bool {
 // vars, then constructs a FleetBackend. Returns an error if the fleet URL is
 // not configured.
 func createFleetIssueBackend() (backend.IssueBackend, error) {
-	dc, err := config.LoadDaemonConfig(".")
-	var daemon *config.DaemonSettings
-	if err == nil && dc != nil {
-		daemon = &dc.Daemon
-	}
-
-	cfg := config.ResolveFleetConfig(daemon)
+	cfg := config.ResolveFleetConfig(nil)
 	return createFleetIssueBackendFromConfig(cfg)
 }
 

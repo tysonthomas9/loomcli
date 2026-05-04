@@ -87,8 +87,6 @@ func (i *Issue) ComputeContentHash() string {
 	w.str(i.Holder)
 
 	// Agent identity fields
-	w.str(i.HookBead)
-	w.str(i.RoleBead)
 	w.str(string(i.AgentState))
 	w.str(i.RoleType)
 	w.str(i.Rig)

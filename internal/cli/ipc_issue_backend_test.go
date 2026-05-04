@@ -330,7 +330,7 @@ func TestIPCIssueBackend_DeferIssue_DelegatesToDirectBackend(t *testing.T) {
 	b := newIPCIssueBackend(ipc, fb)
 
 	until := time.Date(2026, 4, 10, 0, 0, 0, 0, time.UTC)
-	if err := b.DeferIssue(context.Background(), "bd-1", until); err != nil {
+	if err := b.DeferIssue(context.Background(), "loom-1", until); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !fb.Called("DeferIssue") {
@@ -343,7 +343,7 @@ func TestIPCIssueBackend_UndeferIssue_DelegatesToDirectBackend(t *testing.T) {
 	fb := NewMockIssueBackend()
 	b := newIPCIssueBackend(ipc, fb)
 
-	if err := b.UndeferIssue(context.Background(), "bd-1"); err != nil {
+	if err := b.UndeferIssue(context.Background(), "loom-1"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !fb.Called("UndeferIssue") {

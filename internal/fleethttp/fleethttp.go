@@ -46,7 +46,9 @@ func (a Auth) Apply(req *http.Request) {
 
 // BuildJSONRequest constructs an HTTP request with JSON Content-Type
 // and Accept headers and the supplied auth. body is JSON-marshaled
-// when non-nil. Returns the request ready to be sent.
+// when non-nil. Mutation requests keep the JSON Content-Type even with
+// an empty body because fleet-db validates write request content types.
+// Returns the request ready to be sent.
 func BuildJSONRequest(ctx context.Context, method, url string, auth Auth, body any) (*http.Request, error) {
 	var reader io.Reader
 	if body != nil {
@@ -61,19 +63,28 @@ func BuildJSONRequest(ctx context.Context, method, url string, auth Auth, body a
 		return nil, fmt.Errorf("build request: %w", err)
 	}
 	req.Header.Set("Accept", "application/json")
-	if reader != nil {
+	if reader != nil || methodExpectsJSONContent(method) {
 		req.Header.Set("Content-Type", "application/json")
 	}
 	auth.Apply(req)
 	return req, nil
 }
 
-// ExtractErrorMessage parses fleet-db's two error-envelope shapes and
+func methodExpectsJSONContent(method string) bool {
+	switch method {
+	case http.MethodPost, http.MethodPut, http.MethodPatch:
+		return true
+	default:
+		return false
+	}
+}
+
+// ExtractErrorMessage parses fleet-db's error-envelope shapes and
 // returns the human-readable message. Returns "" when the body is
 // empty or matches neither shape.
 //
 // Shapes:
-//   - Wrapper:    {"success":false,"error":"..."}  (legacy)
+//   - Wrapper:    {"success":false,"error":"..."}
 //   - Structured: {"error":{"code":"...","message":"..."}}
 func ExtractErrorMessage(body []byte) string {
 	if len(bytes.TrimSpace(body)) == 0 {

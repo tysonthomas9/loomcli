@@ -21,9 +21,9 @@ func TestIsFleetMode_EmptyBackend(t *testing.T) {
 
 func TestIsFleetMode_UnsupportedBackend(t *testing.T) {
 	t.Setenv(fleetModeEnvVar, "")
-	cfg := &DaemonConfig{Backend: "beads"}
+	cfg := &DaemonConfig{Backend: "unknown"}
 	if isFleetMode(cfg) {
-		t.Error("isFleetMode with backend=beads = true, want false")
+		t.Error("isFleetMode with backend=unknown = true, want false")
 	}
 }
 
@@ -52,17 +52,17 @@ func TestIsFleetMode_EnvVarOverride(t *testing.T) {
 	if !isFleetMode(nil) {
 		t.Error("isFleetMode with LOOM_ISSUE_BACKEND=fleet and nil config = false, want true")
 	}
-	cfg := &DaemonConfig{Backend: "beads"}
+	cfg := &DaemonConfig{Backend: "unknown"}
 	if !isFleetMode(cfg) {
-		t.Error("isFleetMode with LOOM_ISSUE_BACKEND=fleet and backend=beads = false, want true")
+		t.Error("isFleetMode with LOOM_ISSUE_BACKEND=fleet and backend=unknown = false, want true")
 	}
 }
 
 func TestIsFleetMode_EnvVarOtherValue(t *testing.T) {
-	t.Setenv(fleetModeEnvVar, "beads")
+	t.Setenv(fleetModeEnvVar, "unknown")
 	cfg := &DaemonConfig{Backend: ""}
 	if isFleetMode(cfg) {
-		t.Error("isFleetMode with LOOM_ISSUE_BACKEND=beads = true, want false")
+		t.Error("isFleetMode with LOOM_ISSUE_BACKEND=unknown = true, want false")
 	}
 }
 

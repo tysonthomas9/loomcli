@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -142,54 +141,23 @@ func checkBackendCLI() CheckResult {
 
 func checkProjectConfig() CheckResult {
 	runtimeDir := cli.GetWorkspaceRuntimeDir()
-	pf, err := cfgpkg.LoadProjectFile(runtimeDir)
+	dc, err := cfgpkg.LoadDaemonConfig(runtimeDir)
 	if err != nil {
 		return CheckResult{
 			Name:    "project_config",
 			Status:  StatusFail,
-			Summary: "loom.yaml has parse errors",
-			Detail:  cfgpkg.FormatYAMLDiagnostic(filepath.Join(runtimeDir, "loom.yaml"), err),
+			Summary: "FleetDB daemon profile unavailable",
+			Detail:  err.Error(),
 		}
 	}
-
-	if pf == nil {
-		return CheckResult{
-			Name:    "project_config",
-			Status:  StatusWarn,
-			Summary: "no loom.yaml found (optional)",
-			Detail:  "Needed for daemon mode agent configuration",
-		}
+	agentCount := 0
+	if dc != nil {
+		agentCount = len(dc.Agents)
 	}
-
-	agentCount := len(pf.Agents)
-	summary := fmt.Sprintf("loom.yaml valid (%d agents configured)", agentCount)
-
-	// Run deeper validation if available
-	dc, err := cfgpkg.LoadDaemonConfig(runtimeDir)
-	if err == nil && dc != nil {
-		vr := cli.ValidateProjectConfig(dc, runtimeDir)
-		if vr.HasErrors() {
-			return CheckResult{
-				Name:    "project_config",
-				Status:  StatusFail,
-				Summary: "loom.yaml has validation errors",
-				Detail:  vr.FormatIssues(),
-			}
-		}
-		if len(vr.Issues) > 0 {
-			return CheckResult{
-				Name:    "project_config",
-				Status:  StatusWarn,
-				Summary: summary + " (with warnings)",
-				Detail:  vr.FormatIssues(),
-			}
-		}
-	}
-
 	return CheckResult{
 		Name:    "project_config",
 		Status:  StatusPass,
-		Summary: summary,
+		Summary: fmt.Sprintf("FleetDB daemon profile loaded (%d agents configured)", agentCount),
 	}
 }
 
@@ -199,43 +167,24 @@ func checkGlobalConfig() CheckResult {
 		return CheckResult{
 			Name:    "global_config",
 			Status:  StatusFail,
-			Summary: "~/.loom/cfgpkg.yaml has errors",
-			Detail:  cfgpkg.FormatYAMLDiagnostic(cfgpkg.GetConfigPath(), err),
+			Summary: "FleetDB workspace metadata unavailable",
+			Detail:  err.Error(),
 		}
 	}
 
-	if cfg == nil {
+	if cfg == nil || len(cfg.Workspaces) == 0 {
 		return CheckResult{
 			Name:    "global_config",
 			Status:  StatusWarn,
-			Summary: "no global config found (optional)",
-			Detail:  "Create with: loom config init",
-		}
-	}
-
-	// Run validation
-	vr := cli.ValidateGlobalConfig(cfg)
-	if vr.HasErrors() {
-		return CheckResult{
-			Name:    "global_config",
-			Status:  StatusFail,
-			Summary: "~/.loom/cfgpkg.yaml has validation errors",
-			Detail:  vr.FormatIssues(),
-		}
-	}
-	if len(vr.Issues) > 0 {
-		return CheckResult{
-			Name:    "global_config",
-			Status:  StatusWarn,
-			Summary: "~/.loom/cfgpkg.yaml valid (with warnings)",
-			Detail:  vr.FormatIssues(),
+			Summary: "no FleetDB workspaces found",
+			Detail:  "Create with: loom workspace create <name> --repos /path/to/repo",
 		}
 	}
 
 	return CheckResult{
 		Name:    "global_config",
 		Status:  StatusPass,
-		Summary: "~/.loom/cfgpkg.yaml valid",
+		Summary: fmt.Sprintf("FleetDB workspace metadata loaded (%d workspaces)", len(cfg.Workspaces)),
 	}
 }
 

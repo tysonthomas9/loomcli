@@ -48,8 +48,8 @@ type execBridgeGitRunner = clitest.ExecBridgeGitRunner
 var getWorktreeGitSyncStatus = GetWorktreeGitSyncStatus
 
 var collectReadyTasksByPriority = CollectReadyTasksByPriority
+var displayWidth = DisplayWidth
 
-// Lowercase aliases for backward compat with tests using old names.
 // --- Command stubs for monitor tests ---
 
 type CommandStub struct {

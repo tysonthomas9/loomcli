@@ -116,8 +116,7 @@ func printDryRunInfo(config *config.DaemonConfig, pidFile, logDir, stateFile str
 	fmt.Println("  TasksMax=256           # max tasks (processes+threads)")
 }
 
-// ResolveDaemonPath delegates to supervisor.ResolveDaemonPath for backward compatibility
-// with external callers (serve, doctor packages).
+// ResolveDaemonPath delegates to supervisor.ResolveDaemonPath for daemon callers.
 func ResolveDaemonPath(projectDir, path string) string {
 	return supervisor.ResolveDaemonPath(projectDir, path)
 }

@@ -9,7 +9,7 @@ import (
 
 func TestMain(m *testing.M) {
 	// Isolate all tests from the host's ~/.loom/config.yaml so the resolver
-	// uses legacy mode instead of workspace mode. Without this, tests fail
+	// uses no workspace config instead of workspace mode. Without this, tests fail
 	// because GetWorkspaceRuntimeDir() and the workspace resolver pick up the host
 	// workspace config instead of the test fixtures.
 	tmpCfg, err := os.MkdirTemp("", "loom-workspace-test-config-*")

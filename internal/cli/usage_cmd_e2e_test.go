@@ -64,8 +64,7 @@ func runLoomUsage(t *testing.T, dir string, args ...string) (stdout, stderr stri
 	for _, e := range env {
 		if strings.HasPrefix(e, "LOOM_CONFIG_DIR=") ||
 			strings.HasPrefix(e, "LOOM_BACKEND=") ||
-			strings.HasPrefix(e, "LOOM_WORKTREES_DIR=") ||
-			strings.HasPrefix(e, "LOOM_FLEETDB_ENABLED=") {
+			strings.HasPrefix(e, "LOOM_WORKTREES_DIR=") {
 			continue
 		}
 		filtered = append(filtered, e)

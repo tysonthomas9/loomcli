@@ -1,24 +1,18 @@
 package config
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
-	"sync"
 	"time"
 
-	"gopkg.in/yaml.v3"
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
+	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/store"
 )
-
-var projectConfigVersionWarnOnce sync.Once
-
-// ResetProjectConfigVersionWarnOnce resets the once guard for testing.
-func ResetProjectConfigVersionWarnOnce() {
-	projectConfigVersionWarnOnce = sync.Once{}
-}
-
-var resetProjectConfigVersionWarnOnce = ResetProjectConfigVersionWarnOnce
 
 // DaemonSettings holds daemon-specific config fields.
 type DaemonSettings struct {
@@ -27,11 +21,9 @@ type DaemonSettings struct {
 	EventsDir      string            `yaml:"events_dir,omitempty"`
 	RestartPolicy  RestartPolicy     `yaml:"restart_policy,omitempty"`
 	MaxAgents      *int              `yaml:"max_agents,omitempty"`
-	RedisURL       string            `yaml:"redis_url,omitempty"` // stale-detector/serve Redis — NOT used by fleet-db (see FleetDBSettings.RedisURL)
+	RedisURL       string            `yaml:"redis_url,omitempty"` // stale-detector/serve Redis
 	OTel           *OTelDaemonConfig `yaml:"otel,omitempty"`
-	FleetDB        *FleetDBSettings  `yaml:"fleetdb,omitempty"`         // fleet-db backend config (separate from RedisURL above)
 	IssueBackend   string            `yaml:"issue_backend,omitempty"`   // "fleetdb", "fleet", or "api"
-	Fleet          *FleetSettings    `yaml:"fleet,omitempty"`           // fleet client config (remote fleet server connection)
 	StartupTimeout *int              `yaml:"startup_timeout,omitempty"` // seconds; how long to wait for daemon readiness (default 30)
 }
 
@@ -96,7 +88,7 @@ type RoleConfig struct {
 //	repo_groups: ["infra", "data"]         # bind to groups defined in RepoConfig
 //	cross_repo: true                       # agent can pick up tasks spanning repos
 //
-// An agent with neither repos nor repo_groups can work on any repo (backward compatible).
+// An agent with neither repos nor repo_groups can work on any repo.
 type AgentEntry struct {
 	Worktree         string   `yaml:"worktree"`
 	Role             string   `yaml:"role"`
@@ -120,15 +112,6 @@ func (a AgentEntry) Equal(b AgentEntry) bool {
 		slices.Equal(a.Repos, b.Repos) && slices.Equal(a.RepoGroups, b.RepoGroups)
 }
 
-// ProjectFile represents the project-local loom.yaml.
-type ProjectFile struct {
-	Version int                   `yaml:"version,omitempty"`
-	Backend string                `yaml:"backend,omitempty"`
-	Daemon  *DaemonSettings       `yaml:"daemon,omitempty"`
-	Roles   map[string]RoleConfig `yaml:"roles,omitempty"`
-	Agents  []AgentEntry          `yaml:"agents,omitempty"`
-}
-
 // DaemonConfig is the merged, resolved configuration used by callers.
 type DaemonConfig struct {
 	Backend string                `yaml:"backend,omitempty"`
@@ -137,76 +120,30 @@ type DaemonConfig struct {
 	Agents  []AgentEntry          `yaml:"agents,omitempty"`
 }
 
-// LoadProjectFile reads and parses the project-local loom.yaml from dir.
-// Returns (nil, nil) if the file does not exist.
-func LoadProjectFile(dir string) (*ProjectFile, error) {
-	path := filepath.Join(dir, "loom.yaml")
-	data, err := os.ReadFile(path) //nolint:gosec // G304: path is from project config directory
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("reading project file %s: %w", path, err)
-	}
-
-	data, err = ExpandConfigBytes(data)
-	if err != nil {
-		return nil, fmt.Errorf("expanding env vars in %s: %w", path, err)
-	}
-
-	resolver := NewSecretResolver()
-	data, err = ResolveSecretsInBytes(data, resolver)
-	if err != nil {
-		return nil, fmt.Errorf("resolving secrets in %s: %w", path, err)
-	}
-
-	var pf ProjectFile
-	if err := yaml.Unmarshal(data, &pf); err != nil {
-		return nil, fmt.Errorf("parsing project file %s: %w", path, err)
-	}
-	if pf.Version < CurrentConfigVersion {
-		projectConfigVersionWarnOnce.Do(func() {
-			fmt.Fprintf(os.Stderr, "Warning: project config %s is version %d (current: %d). Run 'loom config migrate' to upgrade.\n", path, pf.Version, CurrentConfigVersion)
-		})
-	}
-	return &pf, nil
-}
-
-// LoadDaemonConfig merges global (~/.loom/config.yaml) and local (loom.yaml) config.
-// Local values override global. Returns defaults if neither file exists.
+// LoadDaemonConfig returns the active workspace daemon configuration from
+// FleetDB. If no active workspace is selected, it returns built-in defaults so
+// first-run commands can still render help and diagnostics.
 func LoadDaemonConfig(projectDir string) (*DaemonConfig, error) {
-	// Load global config
-	globalCfg, err := LoadConfig()
-	if err != nil {
-		return nil, fmt.Errorf("loading global config: %w", err)
-	}
-
-	// Load project-local config
-	projectFile, err := LoadProjectFile(projectDir)
-	if err != nil {
-		return nil, fmt.Errorf("loading project config: %w", err)
-	}
-
+	ctx := context.Background()
 	dc := newDefaultDaemonConfig()
-	overlayGlobalConfig(dc, globalCfg)
-	overlayProjectFile(dc, projectFile)
-
-	if err := validateAgents(dc.Agents, dc.Daemon.MaxAgents); err != nil {
-		return nil, err
-	}
-
-	if err := ValidateAgentRepos(dc.Agents); err != nil {
-		return nil, err
-	}
-
-	// Run comprehensive validation if a validator is registered.
-	if projectConfigValidator != nil {
-		if err := projectConfigValidator(dc, projectDir); err != nil {
-			return nil, err
+	key, err := bootstrap.ResolveActiveWorkspaceKey(ctx, nil)
+	if err != nil {
+		if errors.Is(err, bootstrap.ErrNoActiveWorkspace) {
+			return dc, nil
 		}
+		return nil, fmt.Errorf("resolve active workspace: %w", err)
 	}
+	dataDir := bootstrap.LoomDir()
+	if dataDir == "" {
+		return nil, errors.New("cannot determine loom data directory")
+	}
+	handle, err := bootstrap.OpenStore(ctx, dataDir, nil)
+	if err != nil {
+		return nil, fmt.Errorf("open fleet-db store: %w", err)
+	}
+	defer func() { _ = handle.Close() }()
 
-	return dc, nil
+	return loadDaemonConfigFromStore(ctx, handle.Store, key, dc, projectDir)
 }
 
 // newDefaultDaemonConfig returns a DaemonConfig with sensible defaults.
@@ -228,38 +165,166 @@ func newDefaultDaemonConfig() *DaemonConfig {
 	}
 }
 
-// overlayGlobalConfig applies global config settings onto the daemon config.
-func overlayGlobalConfig(dc *DaemonConfig, globalCfg *LoomConfig) {
-	if globalCfg == nil {
-		return
+func loadDaemonConfigFromStore(ctx context.Context, st store.Store, wsKey string, dc *DaemonConfig, projectDir string) (*DaemonConfig, error) {
+	if dc == nil {
+		dc = newDefaultDaemonConfig()
 	}
-	if globalCfg.Backend != "" {
-		dc.Backend = globalCfg.Backend
+	profile, err := st.Daemon().Get(ctx, wsKey)
+	if err != nil && !errors.Is(err, domain.ErrNotFound) {
+		return nil, fmt.Errorf("get daemon profile: %w", err)
 	}
-	if globalCfg.Daemon != nil {
-		OverlayDaemonSettings(&dc.Daemon, globalCfg.Daemon)
+	if profile != nil {
+		OverlayDaemonSettings(&dc.Daemon, daemonSettingsFromDomain(profile))
+		if profile.AgentBackend != "" {
+			dc.Backend = profile.AgentBackend
+		}
+	}
+	if dc.Daemon.IssueBackend == "" {
+		dc.Daemon.IssueBackend = "fleetdb"
+	}
+
+	roles, err := st.Roles().List(ctx, wsKey)
+	if err != nil {
+		return nil, fmt.Errorf("list roles: %w", err)
+	}
+	for _, role := range roles {
+		if role == nil {
+			continue
+		}
+		dc.Roles[role.Name] = roleConfigFromDomain(role)
+	}
+
+	agents, err := st.Agents().List(ctx, wsKey)
+	if err != nil {
+		return nil, fmt.Errorf("list agents: %w", err)
+	}
+	dc.Agents = make([]AgentEntry, 0, len(agents))
+	for _, agent := range agents {
+		if agent == nil {
+			continue
+		}
+		dc.Agents = append(dc.Agents, agentEntryFromDomain(agent))
+	}
+
+	if err := validateAgents(dc.Agents, dc.Daemon.MaxAgents); err != nil {
+		return nil, err
+	}
+	if err := ValidateAgentRepos(dc.Agents); err != nil {
+		return nil, err
+	}
+	_ = projectDir
+	return dc, nil
+}
+
+func daemonSettingsFromDomain(p *domain.DaemonProfile) *DaemonSettings {
+	if p == nil {
+		return nil
+	}
+	return &DaemonSettings{
+		PIDFile:        p.PIDFile,
+		LogDir:         p.LogDir,
+		EventsDir:      p.EventsDir,
+		RestartPolicy:  restartPolicyFromDomain(p.RestartPolicy),
+		MaxAgents:      cloneIntPtr(p.MaxAgents),
+		IssueBackend:   p.IssueBackend,
+		StartupTimeout: cloneIntPtr(p.StartupTimeout),
+		OTel:           otelFromDomain(p.OTel),
 	}
 }
 
-// overlayProjectFile applies project-local settings onto the daemon config.
-func overlayProjectFile(dc *DaemonConfig, projectFile *ProjectFile) {
-	if projectFile == nil {
-		return
+func restartPolicyFromDomain(r domain.RestartPolicy) RestartPolicy {
+	return RestartPolicy{
+		MaxRetries:       cloneIntPtr(r.MaxRetries),
+		BackoffInitial:   cloneIntPtr(r.BackoffInitial),
+		BackoffMax:       cloneIntPtr(r.BackoffMax),
+		OutputTimeout:    cloneIntPtr(r.OutputTimeout),
+		RateLimitBackoff: cloneIntPtr(r.RateLimitBackoff),
+		RateLimitMaxWait: cloneIntPtr(r.RateLimitMaxWait),
+		RateLimitNoCount: cloneBoolPtr(r.RateLimitNoCount),
+		TimeoutBackoff:   cloneIntPtr(r.TimeoutBackoff),
+		NoWorkBackoff:    cloneIntPtr(r.NoWorkBackoff),
+		IdlePollInterval: cloneIntPtr(r.IdlePollInterval),
+		YieldTimeout:     cloneIntPtr(r.YieldTimeout),
+		SigtermTimeout:   cloneIntPtr(r.SigtermTimeout),
 	}
-	if projectFile.Backend != "" {
-		dc.Backend = projectFile.Backend
-	}
-	if projectFile.Daemon != nil {
-		OverlayDaemonSettings(&dc.Daemon, projectFile.Daemon)
-	}
+}
 
-	// Merge roles: local replaces entire role entry by key
-	for k, v := range projectFile.Roles {
-		dc.Roles[k] = v
+func roleConfigFromDomain(r *domain.Role) RoleConfig {
+	if r == nil {
+		return RoleConfig{}
 	}
+	return RoleConfig{
+		Description:    r.Description,
+		PromptFile:     r.PromptFile,
+		Model:          r.Model,
+		TaskFilter:     r.TaskFilter,
+		Backend:        r.Backend,
+		PathPatterns:   append([]string(nil), r.PathPatterns...),
+		Skills:         append([]string(nil), r.Skills...),
+		MaxPriority:    cloneIntPtr(r.MaxPriority),
+		MaxConcurrency: cloneIntPtr(r.MaxConcurrency),
+		ReadOnly:       r.ReadOnly,
+		AllowedTools:   append([]string(nil), r.AllowedTools...),
+		DeniedTools:    append([]string(nil), r.DeniedTools...),
+		MaxBudgetUSD:   cloneFloatPtr(r.MaxBudgetUSD),
+	}
+}
 
-	// Agents come from local only
-	dc.Agents = projectFile.Agents
+func agentEntryFromDomain(a *domain.Agent) AgentEntry {
+	if a == nil {
+		return AgentEntry{}
+	}
+	return AgentEntry{
+		Worktree:         a.Name,
+		Role:             a.RoleName,
+		Auto:             a.Auto,
+		Backend:          a.Backend,
+		FallbackBackends: append([]string(nil), a.FallbackBackends...),
+		Repos:            append([]string(nil), a.Repos...),
+		RepoGroups:       append([]string(nil), a.RepoGroups...),
+		CrossRepo:        a.CrossRepo,
+		Parent:           a.Parent,
+	}
+}
+
+func otelFromDomain(o *domain.OTelSettings) *OTelDaemonConfig {
+	if o == nil {
+		return nil
+	}
+	return &OTelDaemonConfig{
+		Enabled:         o.Enabled,
+		Endpoint:        o.Endpoint,
+		Protocol:        o.Protocol,
+		ServiceName:     o.ServiceName,
+		SampleRate:      o.SampleRate,
+		FlushIntervalMs: o.FlushIntervalMs,
+		Traces:          cloneBoolPtr(o.Traces),
+		Metrics:         cloneBoolPtr(o.Metrics),
+	}
+}
+
+func cloneIntPtr(v *int) *int {
+	if v == nil {
+		return nil
+	}
+	out := *v
+	return &out
+}
+
+func cloneBoolPtr(v *bool) *bool {
+	if v == nil {
+		return nil
+	}
+	out := *v
+	return &out
+}
+
+func cloneFloatPtr(v *float64) *float64 {
+	if v == nil {
+		return nil
+	}
+	out := *v
+	return &out
 }
 
 // validateAgents checks that agent entries and max_agents limits are valid.
@@ -383,20 +448,8 @@ func OverlayDaemonSettings(dst *DaemonSettings, src *DaemonSettings) {
 		}
 		overlayOTelConfig(dst.OTel, src.OTel)
 	}
-	if src.FleetDB != nil {
-		if dst.FleetDB == nil {
-			dst.FleetDB = &FleetDBSettings{}
-		}
-		overlayFleetDBSettings(dst.FleetDB, src.FleetDB)
-	}
 	if src.IssueBackend != "" {
 		dst.IssueBackend = src.IssueBackend
-	}
-	if src.Fleet != nil {
-		if dst.Fleet == nil {
-			dst.Fleet = &FleetSettings{}
-		}
-		overlayFleetSettings(dst.Fleet, src.Fleet)
 	}
 	if src.StartupTimeout != nil {
 		dst.StartupTimeout = src.StartupTimeout

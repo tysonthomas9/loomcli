@@ -389,10 +389,6 @@ func runAutoTask(ctx *autoLoopCtx, shutdown chan struct{}) bool {
 	fmt.Printf("\n[auto] === Starting task %d ===\n\n", ctx.state.TasksCompleted+1)
 
 	beforeRef := CaptureHEADRef(ctx.opts.WorktreePath)
-	// Phase 4 of fleet-db migration: resolve the active workspace via
-	// store first, falling back to the legacy yaml-derived config when
-	// the store is unreachable. The prompt generator still consumes
-	// *config.WorkspaceConfig, so we synthesize one from store data.
 	workspace := resolveActiveWorkspaceForAutomode()
 	prompt := ctx.generatePrompt(ctx.opts.AgentName, workspace)
 	sess := createAutoSession(ctx, prompt)
@@ -537,16 +533,11 @@ func formatTimeout(timeout int) string {
 	return fmt.Sprintf("%dm", timeout)
 }
 
-// resolveActiveWorkspaceForAutomode returns the active workspace as a
-// *config.WorkspaceConfig, preferring the fleet-db store when
-// available. Phase 4 of the loom -> fleet-db migration.
-//
-// Failure to open the store falls back to the legacy yaml path so the
-// auto-loop keeps running on dev machines that haven't switched over.
+// resolveActiveWorkspaceForAutomode returns the active FleetDB workspace as a
+// *config.WorkspaceConfig.
 // The synthesized *config.WorkspaceConfig only carries fields used by
 // the prompt builders (Repos, Path, ID).
 func resolveActiveWorkspaceForAutomode() *config.WorkspaceConfig {
-	// Prefer store: avoids parsing yaml + tolerates partial migrations.
 	ctx, cancel := cmdstore.SignalContext()
 	defer cancel()
 	if h, err := cmdstore.OpenStore(ctx); err == nil {
@@ -573,7 +564,5 @@ func resolveActiveWorkspaceForAutomode() *config.WorkspaceConfig {
 			}
 		}
 	}
-	// Legacy fallback.
-	ws, _ := config.ResolveActiveWorkspace()
-	return ws
+	return nil
 }

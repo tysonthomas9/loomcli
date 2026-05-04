@@ -1,53 +1,22 @@
 package config
 
 import (
+	"context"
+	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
-	"sync"
 
-	"github.com/google/uuid"
-	"gopkg.in/yaml.v3"
-
-	"github.com/tysonthomas9/loomcli/internal/atomicfile"
-	"github.com/tysonthomas9/loomcli/internal/configlock"
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
+	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
-var configVersionWarnOnce sync.Once
-
-// Validator hooks — set by root package init to break import cycle.
-var (
-	// globalConfigValidator validates a LoomConfig after loading. Set by root.
-	globalConfigValidator func(cfg *LoomConfig) error
-	// projectConfigValidator validates a DaemonConfig after loading. Set by root.
-	projectConfigValidator func(dc *DaemonConfig, projectDir string) error
-)
-
-// SetGlobalConfigValidator registers the global config validator.
-func SetGlobalConfigValidator(fn func(cfg *LoomConfig) error) {
-	globalConfigValidator = fn
-}
-
-// SetProjectConfigValidator registers the project config validator.
-func SetProjectConfigValidator(fn func(dc *DaemonConfig, projectDir string) error) {
-	projectConfigValidator = fn
-}
-
-func resetConfigVersionWarnOnce() {
-	configVersionWarnOnce = sync.Once{}
-}
-
-// LoomConfig is the top-level configuration from ~/.loom/config.yaml
+// LoomConfig is a FleetDB-backed workspace view used by older command code
+// while the internal DTOs are collapsed onto domain types.
 type LoomConfig struct {
-	Version          int                        `yaml:"version,omitempty"`
 	DefaultWorkspace string                     `yaml:"default_workspace,omitempty"`
-	WorkspaceOrder   []string                   `yaml:"workspace_order,omitempty"`
-	Backend          string                     `yaml:"backend,omitempty"`
 	Workspaces       map[string]WorkspaceConfig `yaml:"workspaces"`
-	Daemon           *DaemonSettings            `yaml:"daemon,omitempty"`
 
 	// DefaultWorkspaceID is the UUID of the default workspace, resolved at load time.
-	// Not serialized to YAML.
 	DefaultWorkspaceID string `yaml:"-" json:"-"`
 }
 
@@ -70,7 +39,6 @@ type WorkspaceConfig struct {
 	Repos        []RepoConfig   `yaml:"repos" json:"repos"`                                     // Repositories in this workspace
 	State        WorkspaceState `yaml:"state,omitempty" json:"state,omitempty"`                 // Lifecycle state (empty/"" = ready)
 	ErrorMessage string         `yaml:"error_message,omitempty" json:"error_message,omitempty"` // Error detail when State=error
-	CloneURLs    []string       `yaml:"clone_urls,omitempty" json:"clone_urls,omitempty"`       // Original clone URLs (for retry)
 }
 
 // RepoConfig defines a single repository within a workspace
@@ -113,11 +81,6 @@ func ValidateRemoteName(name string) error {
 	return nil
 }
 
-// NewWorkspaceID generates a new UUID v4 for a workspace.
-func NewWorkspaceID() string {
-	return uuid.New().String()
-}
-
 // WorkspaceByID finds a workspace by its stable UUID.
 // Returns the workspace name, config, and true if found; empty name, nil, false otherwise.
 func WorkspaceByID(cfg *LoomConfig, id string) (string, *WorkspaceConfig, bool) {
@@ -136,138 +99,23 @@ func WorkspaceByID(cfg *LoomConfig, id string) (string, *WorkspaceConfig, bool) 
 // GetConfigDir returns the loom config directory path.
 // Respects LOOM_CONFIG_DIR env var, otherwise defaults to ~/.loom.
 func GetConfigDir() string {
-	if dir := os.Getenv("LOOM_CONFIG_DIR"); dir != "" {
-		return dir
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(home, ".loom")
+	return bootstrap.LoomDir()
 }
 
-// GetConfigPath returns the full path to the loom config file.
-func GetConfigPath() string {
-	return filepath.Join(GetConfigDir(), "config.yaml")
-}
-
-// WithConfigLock acquires an exclusive file lock on the config lock file,
-// runs fn, then releases the lock. Use this to wrap load-mutate-save
-// sequences to prevent concurrent config mutations from clobbering each other.
-//
-// Within fn, use loadConfigUnlocked and saveConfigUnlocked instead of
-// LoadConfig and SaveConfig to avoid deadlock from nested lock acquisition
-// (POSIX flock does NOT allow re-locking from the same process via a
-// different file descriptor).
-//
-// WithConfigLock is NOT reentrant — do not call from within an already-locked
-// section.
-func WithConfigLock(fn func() error) error {
-	dir := GetConfigDir()
-	if dir == "" {
-		return fmt.Errorf("cannot determine config directory for lock")
-	}
-	return configlock.WithLock(dir, fn)
-}
-
-// loadConfigUnlocked reads and parses the config file without acquiring
-// the config lock. Must only be called while the lock is held (e.g., within
-// WithConfigLock) or by LoadConfig which acquires its own lock.
-func LoadConfigUnlocked() (*LoomConfig, error) {
-	path := GetConfigPath()
-	data, err := os.ReadFile(path) //nolint:gosec // G304: path is from known config directory
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("reading config %s: %w", path, err)
-	}
-
-	data, err = preprocessConfigBytes(path, data)
-	if err != nil {
-		return nil, err
-	}
-
-	var cfg LoomConfig
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("parsing config %s: %w", path, err)
-	}
-
-	if err := validateWorkspaceRepos(&cfg, path); err != nil {
-		return nil, err
-	}
-
-	// Resolve DefaultWorkspaceID from the default workspace name
-	if cfg.DefaultWorkspace != "" {
-		if ws, ok := cfg.Workspaces[cfg.DefaultWorkspace]; ok {
-			cfg.DefaultWorkspaceID = ws.ID
-		}
-	}
-
-	// Run comprehensive validation if a validator is registered.
-	if globalConfigValidator != nil {
-		if err := globalConfigValidator(&cfg); err != nil {
-			return nil, err
-		}
-	}
-
-	return &cfg, nil
-}
-
-// preprocessConfigBytes runs auto-migration, env expansion, and secret resolution on raw config bytes.
-func preprocessConfigBytes(path string, data []byte) ([]byte, error) {
-	// Auto-migrate non-destructive config changes before parsing
-	data, err := autoMigrateFile(path, data)
-	if err != nil {
-		return nil, err
-	}
-
-	data, err = ExpandConfigBytes(data)
-	if err != nil {
-		return nil, fmt.Errorf("expanding env vars in %s: %w", path, err)
-	}
-
-	resolver := NewSecretResolver()
-	data, err = ResolveSecretsInBytes(data, resolver)
-	if err != nil {
-		return nil, fmt.Errorf("resolving secrets in %s: %w", path, err)
-	}
-
-	return data, nil
-}
-
-// validateWorkspaceRepos validates remote names and defaults SourceRepoID for all workspace repos.
-func validateWorkspaceRepos(cfg *LoomConfig, path string) error {
-	for wsName, ws := range cfg.Workspaces {
-		for i, repo := range ws.Repos {
-			if err := ValidateRemoteName(repo.Remote); err != nil {
-				return fmt.Errorf("invalid config %s: workspace %q repo %d (%q): %w", path, wsName, i, repo.Name, err)
-			}
-			// Default SourceRepoID to Name if not explicitly set
-			if repo.SourceRepoID == "" {
-				ws.Repos[i].SourceRepoID = repo.Name
-			}
-		}
-		cfg.Workspaces[wsName] = ws
-	}
-	return nil
-}
-
-// LoadConfig reads and parses the loom config file.
-// Returns (nil, nil) if the config file does not exist.
-// Returns (nil, error) on read or parse errors.
+// LoadConfig reads the workspace topology from FleetDB and overlays
+// machine-local checkout paths from bootstrap state.json.
 func LoadConfig() (*LoomConfig, error) {
-	dir := GetConfigDir()
-	if dir == "" {
-		return nil, fmt.Errorf("cannot determine config directory for lock")
+	ctx := context.Background()
+	dataDir := bootstrap.LoomDir()
+	if dataDir == "" {
+		return nil, errors.New("cannot determine loom data directory")
 	}
-	unlock, err := configlock.ConfigLock(dir)
+	handle, err := bootstrap.OpenStore(ctx, dataDir, nil)
 	if err != nil {
-		return nil, fmt.Errorf("config lock: %w", err)
+		return nil, fmt.Errorf("open fleet-db store: %w", err)
 	}
-	defer unlock()
-
-	return LoadConfigUnlocked()
+	defer func() { _ = handle.Close() }()
+	return loadConfigFromStore(ctx, handle.Store)
 }
 
 // GetWorkspaceDir returns the directory path for a named workspace.
@@ -275,77 +123,100 @@ func GetWorkspaceDir(name string) string {
 	return filepath.Join(GetConfigDir(), "workspaces", name)
 }
 
-// saveConfigUnlocked writes the config file without acquiring the config lock.
-// Must only be called while the lock is held (e.g., within WithConfigLock)
-// or by SaveConfig which acquires its own lock.
-func SaveConfigUnlocked(cfg *LoomConfig) error {
-	data, err := yaml.Marshal(cfg)
-	if err != nil {
-		return fmt.Errorf("marshaling config: %w", err)
-	}
-	dir := GetConfigDir()
-	if dir == "" {
-		return fmt.Errorf("cannot determine config directory")
-	}
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("creating config dir %s: %w", dir, err)
-	}
-	path := GetConfigPath()
-	if err := atomicfile.WriteFile(path, data, 0644); err != nil {
-		return fmt.Errorf("writing config %s: %w", path, err)
-	}
-	InvalidateConfigCache()
-	return nil
-}
-
-// SaveConfig writes the loom config to the config file.
-// Creates the config directory if it doesn't exist.
-func SaveConfig(cfg *LoomConfig) error {
-	dir := GetConfigDir()
-	if dir == "" {
-		return fmt.Errorf("cannot determine config directory")
-	}
-	unlock, err := configlock.ConfigLock(dir)
-	if err != nil {
-		return fmt.Errorf("config lock: %w", err)
-	}
-	defer unlock()
-	return SaveConfigUnlocked(cfg)
-}
-
-// IsWorkspaceMode returns true if a config file exists with at least one workspace defined.
-func IsWorkspaceMode() bool {
-	cfg, err := LoadConfig()
-	if err != nil || cfg == nil {
-		return false
-	}
-	return len(cfg.Workspaces) > 0
-}
-
-// ResolveActiveWorkspace loads the config and returns the active workspace config.
-// Returns (nil, nil) if not in workspace mode (no config or no workspaces defined).
-// Uses DefaultWorkspace if set, otherwise uses the first workspace in the map.
+// ResolveActiveWorkspace returns the active FleetDB workspace projected into the
+// historical WorkspaceConfig DTO used by prompt and daemon code.
 func ResolveActiveWorkspace() (*WorkspaceConfig, error) {
-	cfg, err := LoadConfig()
+	ctx := context.Background()
+	key, err := bootstrap.ResolveActiveWorkspaceKey(ctx, nil)
+	if err != nil {
+		if errors.Is(err, bootstrap.ErrNoActiveWorkspace) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	dataDir := bootstrap.LoomDir()
+	if dataDir == "" {
+		return nil, errors.New("cannot determine loom data directory")
+	}
+	handle, err := bootstrap.OpenStore(ctx, dataDir, nil)
+	if err != nil {
+		return nil, fmt.Errorf("open fleet-db store: %w", err)
+	}
+	defer func() { _ = handle.Close() }()
+
+	cfg, err := loadConfigFromStore(ctx, handle.Store)
 	if err != nil {
 		return nil, err
 	}
-	if cfg == nil || len(cfg.Workspaces) == 0 {
-		return nil, nil
+	ws, ok := cfg.Workspaces[key]
+	if !ok {
+		return nil, fmt.Errorf("active workspace %q not found in fleet-db", key)
 	}
+	return &ws, nil
+}
 
-	// Use default workspace if set
+func loadConfigFromStore(ctx context.Context, st store.Store) (*LoomConfig, error) {
+	workspaces, err := st.Workspaces().List(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list fleet-db workspaces: %w", err)
+	}
+	sc, _ := bootstrap.LoadStateCache()
+	cfg := &LoomConfig{
+		Workspaces: make(map[string]WorkspaceConfig, len(workspaces)),
+	}
+	if sc != nil {
+		cfg.DefaultWorkspace = sc.LastWorkspace
+	}
+	for _, ws := range workspaces {
+		if ws == nil {
+			continue
+		}
+		local := bootstrap.WorkspaceLocalState{}
+		if sc != nil {
+			local = sc.Workspaces[ws.Key]
+		}
+		repoRows, err := st.Repos().List(ctx, ws.Key)
+		if err != nil {
+			return nil, fmt.Errorf("list repos for workspace %s: %w", ws.Key, err)
+		}
+		repos := make([]RepoConfig, 0, len(repoRows))
+		for _, r := range repoRows {
+			if r == nil {
+				continue
+			}
+			path := local.Repos[r.Name]
+			if path == "" {
+				path = r.Name
+			}
+			sourceRepoID := r.SourceRepoID
+			if sourceRepoID == "" {
+				sourceRepoID = r.Name
+			}
+			repos = append(repos, RepoConfig{
+				Name:          r.Name,
+				Path:          path,
+				DefaultBranch: r.DefaultBranch,
+				Remote:        r.Remote,
+				Groups:        append([]string(nil), r.Groups...),
+				SourceRepoID:  sourceRepoID,
+			})
+		}
+		wsc := WorkspaceConfig{
+			ID:           ws.Key,
+			Path:         local.Path,
+			Repos:        repos,
+			State:        WorkspaceState(ws.State),
+			ErrorMessage: ws.ErrorMessage,
+		}
+		if profile, err := st.Daemon().Get(ctx, ws.Key); err == nil && profile != nil {
+			wsc.Backend = profile.AgentBackend
+		}
+		cfg.Workspaces[ws.Key] = wsc
+	}
 	if cfg.DefaultWorkspace != "" {
 		if ws, ok := cfg.Workspaces[cfg.DefaultWorkspace]; ok {
-			return &ws, nil
+			cfg.DefaultWorkspaceID = ws.ID
 		}
-		return nil, fmt.Errorf("default workspace %q not found in config", cfg.DefaultWorkspace)
 	}
-
-	// Use first workspace in map
-	for _, ws := range cfg.Workspaces {
-		wsCopy := ws
-		return &wsCopy, nil
-	}
-	return nil, nil
+	return cfg, nil
 }

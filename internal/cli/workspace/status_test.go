@@ -112,8 +112,8 @@ func TestStatusBackendDefault(t *testing.T) {
 
 	info := collectBackendInfo()
 
-	if info.Name != "claude" {
-		t.Errorf("name = %q, want %q", info.Name, "claude")
+	if info.Name != "codex" {
+		t.Errorf("name = %q, want %q", info.Name, "codex")
 	}
 	if info.Source != "default" {
 		t.Errorf("source = %q, want %q", info.Source, "default")

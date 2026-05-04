@@ -7,7 +7,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
-	"github.com/tysonthomas9/loomcli/internal/cli/config"
 )
 
 var pullAll bool
@@ -30,7 +29,7 @@ Arguments:
 
 Flags:
   -a, --all          Pull into all worktrees
-  -W, --workspace    Workspace to operate on (workspace mode only)
+  -W, --workspace    Workspace to operate on
 
 Examples:
   loom pull falcon                        # Pull main (or per-repo default) into falcon
@@ -39,27 +38,14 @@ Examples:
   loom pull --all main                    # Pull main into all worktrees
   loom pull -W myworkspace falcon         # Pull in specific workspace`,
 	Args: func(cmd *cobra.Command, args []string) error {
-		if config.IsWorkspaceMode() {
-			if pullAll {
-				if len(args) > 1 {
-					return fmt.Errorf("--all flag accepts at most 1 argument (source branch)")
-				}
-				return nil
-			}
-			if len(args) < 1 || len(args) > 2 {
-				return fmt.Errorf("requires 1-2 arguments: <worktree> [branch]")
-			}
-			return nil
-		}
-		// Legacy mode
 		if pullAll {
-			if len(args) != 1 {
-				return fmt.Errorf("--all flag requires exactly 1 argument (source branch)")
+			if len(args) > 1 {
+				return fmt.Errorf("--all flag accepts at most 1 argument (source branch)")
 			}
 			return nil
 		}
-		if len(args) != 2 {
-			return fmt.Errorf("requires exactly 2 arguments: <worktree> <branch>")
+		if len(args) < 1 || len(args) > 2 {
+			return fmt.Errorf("requires 1-2 arguments: <worktree> [branch]")
 		}
 		return nil
 	},
@@ -77,52 +63,42 @@ func runPull(cmd *cobra.Command, args []string) error {
 	all, _ := cmd.Flags().GetBool("all")
 	ws, _ := cmd.Flags().GetString("workspace")
 
-	if config.IsWorkspaceMode() {
-		if all && ws != "" {
-			fmt.Fprintln(os.Stderr, "Error: --all and --workspace are mutually exclusive")
-			os.Exit(1)
+	if all && ws != "" {
+		fmt.Fprintln(os.Stderr, "Error: --all and --workspace are mutually exclusive")
+		os.Exit(1)
+	}
+
+	sourceBranch := ""
+	worktreeName := ""
+
+	if all {
+		if len(args) == 1 {
+			sourceBranch = args[0]
 		}
-
-		sourceBranch := ""
-		worktreeName := ""
-
-		if all {
-			if len(args) == 1 {
-				sourceBranch = args[0]
-			}
-			pullAllWorkspaces(deps, sourceBranch)
-		} else {
-			worktreeName = args[0]
-			if len(args) == 2 {
-				sourceBranch = args[1]
-			}
-
-			resolver, err := cli.NewResolver()
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error creating resolver: %v\n", err)
-				os.Exit(1)
-			}
-
-			wsName := ws
-			if wsName != "" {
-				if err := resolver.SetWorkspace(wsName); err != nil {
-					available := resolver.WorkspaceNames()
-					fmt.Fprintf(os.Stderr, "Error: workspace %q not found. Available: %v\n", wsName, available)
-					os.Exit(1)
-				}
-			}
-
-			pullWorkspaceRepo(deps, resolver, worktreeName, sourceBranch)
-		}
+		pullAllWorkspaces(deps, sourceBranch)
 		return nil
 	}
 
-	// Legacy mode
-	if all {
-		pullAllWorktrees(deps, args[0])
-	} else {
-		pullWorktree(deps, args[0], args[1])
+	worktreeName = args[0]
+	if len(args) == 2 {
+		sourceBranch = args[1]
 	}
+
+	resolver, err := cli.NewResolver()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error creating resolver: %v\n", err)
+		os.Exit(1)
+	}
+
+	if ws != "" {
+		if err := resolver.SetWorkspace(ws); err != nil {
+			available := resolver.WorkspaceNames()
+			fmt.Fprintf(os.Stderr, "Error: workspace %q not found. Available: %v\n", ws, available)
+			os.Exit(1)
+		}
+	}
+
+	pullWorkspaceRepo(deps, resolver, worktreeName, sourceBranch)
 	return nil
 }
 
@@ -195,13 +171,8 @@ func pullWorkspaceRepo(deps *cli.Deps, resolver *cli.Resolver, worktreeName, sou
 	}
 
 	if matched == nil || matched.Repo == nil {
-		// Fall back to basic pull without repo config
-		source := sourceBranch
-		if source == "" {
-			source = "main"
-		}
-		pullWorktree(deps, worktreeName, source)
-		return
+		fmt.Fprintf(os.Stderr, "Error: repo %q is missing FleetDB repo metadata in workspace %q\n", worktreeName, resolver.WorkspaceName())
+		os.Exit(1)
 	}
 
 	source := sourceBranch
@@ -322,90 +293,4 @@ func sourceBranchDisplay(source string) string {
 		return "(per-repo default)"
 	}
 	return source
-}
-
-func pullAllWorktrees(deps *cli.Deps, sourceBranch string) {
-	fmt.Println("=========================================")
-	fmt.Printf("Pulling all worktrees <- %s\n", sourceBranch)
-	fmt.Println("=========================================")
-	fmt.Println("")
-
-	worktrees, err := cli.DiscoverWorktrees()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error discovering worktrees: %v\n", err)
-		os.Exit(1)
-	}
-
-	if len(worktrees) == 0 {
-		fmt.Println("No worktrees found.")
-		return
-	}
-
-	// Pull into each worktree
-	for _, wt := range worktrees {
-		pullWorktree(deps, wt.Name, sourceBranch)
-		fmt.Println("")
-	}
-
-	fmt.Println("=========================================")
-	fmt.Println("All worktrees pulled!")
-	fmt.Println("=========================================")
-}
-
-func pullWorktree(deps *cli.Deps, worktreeName, sourceBranch string) {
-	worktreePath, err := cli.ResolveWorktreePath(worktreeName)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		return
-	}
-
-	fmt.Println("=========================================")
-	fmt.Printf("Pulling: %s <- %s\n", worktreeName, sourceBranch)
-	fmt.Println("=========================================")
-
-	currentBranch, err := getCurrentBranchViaDeps(deps, worktreePath)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error getting current branch: %v\n", err)
-		return
-	}
-
-	if err := gitFetch(deps, worktreePath); err != nil {
-		fmt.Fprintf(os.Stderr, "Error fetching: %v\n", err)
-		return
-	}
-
-	mergeMsg := fmt.Sprintf("Pull from %s\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>", sourceBranch)
-	if err := gitMergeOrigin(deps, worktreePath, sourceBranch, mergeMsg); err != nil {
-		handlePullConflicts(deps, worktreePath, sourceBranch, currentBranch, err)
-		return
-	}
-
-	fmt.Println("✓ Pull completed successfully (no conflicts)")
-	if err := gitPush(deps, worktreePath, currentBranch); err != nil {
-		fmt.Fprintf(os.Stderr, "Error pushing: %v\n", err)
-		return
-	}
-	fmt.Printf("✓ Pushed to origin/%s\n", currentBranch)
-}
-
-// handlePullConflicts checks for merge conflicts and invokes the agent to resolve them.
-func handlePullConflicts(deps *cli.Deps, worktreePath, sourceBranch, currentBranch string, mergeErr error) {
-	conflicts, conflictErr := getConflictedFilesDeps(deps, worktreePath)
-	if conflictErr != nil || len(conflicts) == 0 {
-		fmt.Fprintf(os.Stderr, "Pull failed: %v\n", mergeErr)
-		return
-	}
-
-	fmt.Println("")
-	fmt.Println("⚠ Merge conflicts detected. Launching AI agent to resolve...")
-	fmt.Println("")
-	fmt.Println("Conflicted files:")
-	for _, f := range conflicts {
-		fmt.Printf("  - %s\n", f)
-	}
-	fmt.Println("")
-
-	if err := invokeAgentForConflictsDeps(deps, worktreePath, sourceBranch, currentBranch, conflicts); err != nil {
-		fmt.Fprintf(os.Stderr, "Error resolving conflicts: %v\n", err)
-	}
 }

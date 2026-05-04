@@ -2181,8 +2181,8 @@ func TestGitCleanExclude(t *testing.T) {
 		{
 			name:     "single_exclude",
 			dir:      "/repo",
-			excludes: []string{"loom.yaml"},
-			wantArgs: []string{"clean", "-fd", "--exclude=loom.yaml"},
+			excludes: []string{"AGENTS.md"},
+			wantArgs: []string{"clean", "-fd", "--exclude=AGENTS.md"},
 			mockErr:  nil,
 			wantErr:  false,
 		},

@@ -28,7 +28,7 @@ func startMockServer(t *testing.T, handler func(req Request) Response) string {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
 	t.Cleanup(func() { os.RemoveAll(dir) })
-	socketPath := filepath.Join(dir, "bd.sock")
+	socketPath := filepath.Join(dir, "loom.sock")
 
 	listener, err := net.Listen("unix", socketPath)
 	if err != nil {
@@ -106,7 +106,7 @@ func TestTryConnect_NoSocket(t *testing.T) {
 	t.Parallel()
 
 	// Non-existent socket path should return nil, nil
-	client, err := TryConnect("/nonexistent/path/bd.sock")
+	client, err := TryConnect("/nonexistent/path/loom.sock")
 
 	if err != nil {
 		t.Errorf("TryConnect() error: %v", err)
@@ -122,7 +122,7 @@ func TestTryConnectWithTimeout_NoSocket(t *testing.T) {
 	t.Parallel()
 
 	// Non-existent socket path with custom timeout
-	client, err := TryConnectWithTimeout("/nonexistent/path/bd.sock", 100*time.Millisecond)
+	client, err := TryConnectWithTimeout("/nonexistent/path/loom.sock", 100*time.Millisecond)
 
 	if err != nil {
 		t.Errorf("TryConnectWithTimeout() error: %v", err)
@@ -539,7 +539,7 @@ func TestTryConnectWithTimeout_HealthyServer(t *testing.T) {
 	}
 	t.Cleanup(func() { os.RemoveAll(dir) })
 
-	socketPath := filepath.Join(dir, "bd.sock")
+	socketPath := filepath.Join(dir, "loom.sock")
 
 	listener, err := net.Listen("unix", socketPath)
 	if err != nil {
@@ -604,7 +604,7 @@ func TestTryConnectWithTimeout_UnhealthyServer(t *testing.T) {
 	}
 	t.Cleanup(func() { os.RemoveAll(dir) })
 
-	socketPath := filepath.Join(dir, "bd.sock")
+	socketPath := filepath.Join(dir, "loom.sock")
 
 	listener, err := net.Listen("unix", socketPath)
 	if err != nil {
@@ -656,7 +656,7 @@ func TestTryConnectWithTimeout_NegativeTimeout(t *testing.T) {
 	t.Parallel()
 
 	// Negative timeout should use default 200ms
-	client, err := TryConnectWithTimeout("/nonexistent/path/bd.sock", -1)
+	client, err := TryConnectWithTimeout("/nonexistent/path/loom.sock", -1)
 	if err != nil {
 		t.Errorf("TryConnectWithTimeout() error: %v", err)
 	}
@@ -671,13 +671,13 @@ func TestTryConnectWithTimeout_DialFailureCleanup(t *testing.T) {
 
 	// Test lines 102-114 of client.go: socket exists but dial fails (daemon crashed),
 	// and lock is NOT held. Code should clean up stale socket and pid files.
-	beadsDir, err := os.MkdirTemp("/tmp", "rpc-dialfail-*")
+	runtimeDir, err := os.MkdirTemp("/tmp", "rpc-dialfail-*")
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
-	t.Cleanup(func() { os.RemoveAll(beadsDir) })
+	t.Cleanup(func() { os.RemoveAll(runtimeDir) })
 
-	socketPath := filepath.Join(beadsDir, "bd.sock")
+	socketPath := filepath.Join(runtimeDir, "loom.sock")
 
 	// Create a regular file as fake socket — causes dial to fail
 	if err := os.WriteFile(socketPath, []byte("not a real socket"), 0644); err != nil {
@@ -685,7 +685,7 @@ func TestTryConnectWithTimeout_DialFailureCleanup(t *testing.T) {
 	}
 
 	// Create a stale daemon.pid with a non-running PID
-	pidFile := filepath.Join(beadsDir, "daemon.pid")
+	pidFile := filepath.Join(runtimeDir, "daemon.pid")
 	if err := os.WriteFile(pidFile, []byte("999999999"), 0644); err != nil {
 		t.Fatalf("failed to create pid file: %v", err)
 	}
@@ -778,7 +778,7 @@ func TestClient_Execute_ErrorResponse(t *testing.T) {
 	}
 	defer client.Close()
 
-	resp, err := client.Execute(OpShow, &ShowArgs{ID: "bd-nonexistent"})
+	resp, err := client.Execute(OpShow, &ShowArgs{ID: "loom-nonexistent"})
 	if err == nil {
 		t.Fatal("Execute() should return error for failed response")
 	}
@@ -1010,7 +1010,7 @@ func TestClient_Create(t *testing.T) {
 	var capturedOp string
 	socketPath := startMockServer(t, func(req Request) Response {
 		capturedOp = req.Operation
-		data, _ := json.Marshal(map[string]string{"id": "bd-new"})
+		data, _ := json.Marshal(map[string]string{"id": "loom-new"})
 		return Response{Success: true, Data: data}
 	})
 
@@ -1052,7 +1052,7 @@ func TestClient_Update(t *testing.T) {
 	defer client.Close()
 
 	title := "Updated"
-	_, err = client.Update(&UpdateArgs{ID: "bd-1", Title: &title})
+	_, err = client.Update(&UpdateArgs{ID: "loom-1", Title: &title})
 	if err != nil {
 		t.Fatalf("Update() error: %v", err)
 	}
@@ -1078,7 +1078,7 @@ func TestClient_CloseIssue(t *testing.T) {
 	client := &Client{conn: conn, socketPath: socketPath, timeout: 5 * time.Second}
 	defer client.Close()
 
-	_, err = client.CloseIssue(&CloseArgs{ID: "bd-1", Reason: "done"})
+	_, err = client.CloseIssue(&CloseArgs{ID: "loom-1", Reason: "done"})
 	if err != nil {
 		t.Fatalf("CloseIssue() error: %v", err)
 	}
@@ -1104,7 +1104,7 @@ func TestClient_Delete(t *testing.T) {
 	client := &Client{conn: conn, socketPath: socketPath, timeout: 5 * time.Second}
 	defer client.Close()
 
-	_, err = client.Delete(&DeleteArgs{IDs: []string{"bd-1", "bd-2"}, Force: true})
+	_, err = client.Delete(&DeleteArgs{IDs: []string{"loom-1", "loom-2"}, Force: true})
 	if err != nil {
 		t.Fatalf("Delete() error: %v", err)
 	}
@@ -1156,7 +1156,7 @@ func TestClient_Show(t *testing.T) {
 	client := &Client{conn: conn, socketPath: socketPath, timeout: 5 * time.Second}
 	defer client.Close()
 
-	_, err = client.Show(&ShowArgs{ID: "bd-1"})
+	_, err = client.Show(&ShowArgs{ID: "loom-1"})
 	if err != nil {
 		t.Fatalf("Show() error: %v", err)
 	}
@@ -1370,7 +1370,7 @@ func TestClient_RemainingWrappers(t *testing.T) {
 		invoke func(c *Client) error
 	}{
 		{"Count", OpCount, func(c *Client) error { _, err := c.Count(&CountArgs{}); return err }},
-		{"ResolveID", OpResolveID, func(c *Client) error { _, err := c.ResolveID(&ResolveIDArgs{ID: "bd"}); return err }},
+		{"ResolveID", OpResolveID, func(c *Client) error { _, err := c.ResolveID(&ResolveIDArgs{ID: "loom"}); return err }},
 		{"Blocked", OpBlocked, func(c *Client) error { _, err := c.Blocked(&BlockedArgs{}); return err }},
 		{"Stale", OpStale, func(c *Client) error { _, err := c.Stale(&StaleArgs{}); return err }},
 		{"GetMutations", OpGetMutations, func(c *Client) error { _, err := c.GetMutations(&GetMutationsArgs{}); return err }},
@@ -1434,7 +1434,7 @@ func TestClient_GetParentIDs(t *testing.T) {
 		return Response{Success: true, Data: data}
 	})
 
-	result, err := client.GetParentIDs(&GetParentIDsArgs{IssueIDs: []string{"bd-1"}})
+	result, err := client.GetParentIDs(&GetParentIDsArgs{IssueIDs: []string{"loom-1"}})
 	if err != nil {
 		t.Fatalf("GetParentIDs() error: %v", err)
 	}
@@ -1587,7 +1587,7 @@ func TestClient_UnmarshalErrorPaths(t *testing.T) {
 	t.Run("GetParentIDs unmarshal error", func(t *testing.T) {
 		t.Parallel()
 		client := newMockClient(t, invalidDataHandler)
-		_, err := client.GetParentIDs(&GetParentIDsArgs{IssueIDs: []string{"bd-1"}})
+		_, err := client.GetParentIDs(&GetParentIDsArgs{IssueIDs: []string{"loom-1"}})
 		if err == nil {
 			t.Error("GetParentIDs() should fail with invalid JSON data")
 		}
@@ -1681,41 +1681,41 @@ func TestEndpointExists(t *testing.T) {
 func TestRpcDebugEnabled(t *testing.T) {
 	// Cannot run parallel due to env var mutation
 	t.Run("disabled by default", func(t *testing.T) {
-		t.Setenv("BD_DEBUG_RPC", "")
+		t.Setenv("LOOM_DEBUG_RPC", "")
 		if rpcDebugEnabled() {
-			t.Error("should be disabled when BD_DEBUG_RPC is empty")
+			t.Error("should be disabled when LOOM_DEBUG_RPC is empty")
 		}
 	})
 
 	t.Run("enabled with 1", func(t *testing.T) {
-		t.Setenv("BD_DEBUG_RPC", "1")
+		t.Setenv("LOOM_DEBUG_RPC", "1")
 		if !rpcDebugEnabled() {
-			t.Error("should be enabled when BD_DEBUG_RPC=1")
+			t.Error("should be enabled when LOOM_DEBUG_RPC=1")
 		}
 	})
 
 	t.Run("enabled with true", func(t *testing.T) {
-		t.Setenv("BD_DEBUG_RPC", "true")
+		t.Setenv("LOOM_DEBUG_RPC", "true")
 		if !rpcDebugEnabled() {
-			t.Error("should be enabled when BD_DEBUG_RPC=true")
+			t.Error("should be enabled when LOOM_DEBUG_RPC=true")
 		}
 	})
 
 	t.Run("disabled with other values", func(t *testing.T) {
-		t.Setenv("BD_DEBUG_RPC", "yes")
+		t.Setenv("LOOM_DEBUG_RPC", "yes")
 		if rpcDebugEnabled() {
-			t.Error("should be disabled with BD_DEBUG_RPC=yes")
+			t.Error("should be disabled with LOOM_DEBUG_RPC=yes")
 		}
 	})
 }
 
 func TestRpcDebugLog(t *testing.T) {
 	// Test that rpcDebugLog doesn't panic when enabled
-	t.Setenv("BD_DEBUG_RPC", "1")
+	t.Setenv("LOOM_DEBUG_RPC", "1")
 	rpcDebugLog("test message: %s %d", "hello", 42)
 
 	// And when disabled
-	t.Setenv("BD_DEBUG_RPC", "")
+	t.Setenv("LOOM_DEBUG_RPC", "")
 	rpcDebugLog("should not print: %s", "ignored")
 }
 
@@ -1786,7 +1786,7 @@ func TestClient_ExecuteErrorPaths(t *testing.T) {
 	t.Run("GetParentIDs execute error", func(t *testing.T) {
 		t.Parallel()
 		client := newMockClient(t, errorHandler)
-		_, err := client.GetParentIDs(&GetParentIDsArgs{IssueIDs: []string{"bd-1"}})
+		_, err := client.GetParentIDs(&GetParentIDsArgs{IssueIDs: []string{"loom-1"}})
 		if err == nil {
 			t.Error("GetParentIDs() should fail")
 		}
@@ -1810,7 +1810,7 @@ func TestClient_ConcurrentMixedOperations(t *testing.T) {
 
 	client := &Client{
 		timeout: 30 * time.Second,
-		dbPath:  "/var/db/beads.sqlite",
+		dbPath:  "/var/db/loom.sqlite",
 		actor:   "cli",
 	}
 

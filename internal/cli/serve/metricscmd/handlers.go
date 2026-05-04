@@ -1,26 +1,31 @@
 package metricscmd
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"net/http"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/cli"
-	"github.com/tysonthomas9/loomcli/internal/cli/config"
+	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli/monitor"
+	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
+	"github.com/tysonthomas9/loomcli/internal/webui/storeadapter"
 )
 
 // WorkspaceInfo represents workspace metadata for API responses.
 type WorkspaceInfo struct {
-	Mode       string   `json:"mode"`                 // "workspace" or "legacy"
-	Name       string   `json:"name,omitempty"`       // workspace name (workspace mode only)
-	Workspaces []string `json:"workspaces,omitempty"` // all workspace names (workspace mode only)
+	Mode       string   `json:"mode"`
+	Name       string   `json:"name,omitempty"`
+	Workspaces []string `json:"workspaces,omitempty"`
 }
 
 // WorkspacesResponse lists all configured workspaces.
 type WorkspacesResponse struct {
-	Mode       string                     `json:"mode"`       // "workspace" or "legacy"
+	Mode       string                     `json:"mode"`
 	Default    string                     `json:"default"`    // default workspace name
 	Workspaces map[string]WorkspaceDetail `json:"workspaces"` // workspace details
 	Timestamp  time.Time                  `json:"timestamp"`
@@ -76,19 +81,27 @@ type StatusResponse struct {
 	Timestamp      time.Time                   `json:"timestamp"`
 }
 
+type IssueBackendFn func(ctx context.Context) backend.IssueBackend
+
 // HandleStatus returns an HTTP handler for the full status endpoint.
-func HandleStatus(collectDataFn func() *monitor.MonitorData) http.HandlerFunc {
+func HandleStatus(collectDataFn func() *monitor.MonitorData, st store.Store) http.HandlerFunc {
+	return HandleStatusWithBackend(collectDataFn, st, nil)
+}
+
+func HandleStatusWithBackend(collectDataFn func() *monitor.MonitorData, st store.Store, backendFn IssueBackendFn) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		data := collectDataFn()
+		data := monitorDataForRequest(r, collectDataFn, backendFn)
 		if data == nil {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusServiceUnavailable)
 			_, _ = w.Write([]byte(`{"error":"data collection unavailable"}`))
 			return
 		}
+		workspaceHint := r.URL.Query().Get("workspace")
+		agents := mergeStoreAgents(r.Context(), st, data.Agents, workspaceHint)
 		writeJSON(w, StatusResponse{
-			Workspace:      getWorkspaceInfo(),
-			Agents:         data.Agents,
+			Workspace:      getWorkspaceInfo(r.Context(), st, workspaceHint),
+			Agents:         agents,
 			Tasks:          data.Tasks,
 			InProgressList: data.InProgressTasks,
 			AgentTasks:     data.AgentTasks,
@@ -100,27 +113,30 @@ func HandleStatus(collectDataFn func() *monitor.MonitorData) http.HandlerFunc {
 }
 
 // HandleAgents returns an HTTP handler for the agents endpoint.
-func HandleAgents(collectDataFn func() *monitor.MonitorData) http.HandlerFunc {
+func HandleAgents(collectDataFn func() *monitor.MonitorData, st store.Store) http.HandlerFunc {
+	return HandleAgentsWithBackend(collectDataFn, st, nil)
+}
+
+func HandleAgentsWithBackend(collectDataFn func() *monitor.MonitorData, st store.Store, backendFn IssueBackendFn) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		data := collectDataFn()
+		data := monitorDataForRequest(r, collectDataFn, backendFn)
 		if data == nil {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusServiceUnavailable)
 			_, _ = w.Write([]byte(`{"error":"data collection unavailable"}`))
 			return
 		}
-		wsInfo := getWorkspaceInfo()
+		workspaceHint := r.URL.Query().Get("workspace")
+		wsInfo := getWorkspaceInfo(r.Context(), st, workspaceHint)
+		agents := mergeStoreAgents(r.Context(), st, data.Agents, workspaceHint)
 
 		response := AgentsResponse{
 			Workspace: wsInfo,
-			Agents:    data.Agents,
+			Agents:    agents,
 			Timestamp: data.Timestamp,
 		}
 
-		// Group agents by workspace if in workspace mode
-		if wsInfo.Mode == "workspace" {
-			response.ByWorkspace = groupAgentsByWorkspace(data.Agents)
-		}
+		response.ByWorkspace = groupAgentsByWorkspace(agents)
 
 		writeJSON(w, response)
 	}
@@ -128,8 +144,12 @@ func HandleAgents(collectDataFn func() *monitor.MonitorData) http.HandlerFunc {
 
 // HandleTasks returns an HTTP handler for the tasks endpoint.
 func HandleTasks(collectDataFn func() *monitor.MonitorData) http.HandlerFunc {
+	return HandleTasksWithBackend(collectDataFn, nil)
+}
+
+func HandleTasksWithBackend(collectDataFn func() *monitor.MonitorData, backendFn IssueBackendFn) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		data := collectDataFn()
+		data := monitorDataForRequest(r, collectDataFn, backendFn)
 		if data == nil {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusServiceUnavailable)
@@ -151,8 +171,12 @@ func HandleTasks(collectDataFn func() *monitor.MonitorData) http.HandlerFunc {
 
 // HandleStats returns an HTTP handler for the stats endpoint.
 func HandleStats(collectDataFn func() *monitor.MonitorData) http.HandlerFunc {
+	return HandleStatsWithBackend(collectDataFn, nil)
+}
+
+func HandleStatsWithBackend(collectDataFn func() *monitor.MonitorData, backendFn IssueBackendFn) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		data := collectDataFn()
+		data := monitorDataForRequest(r, collectDataFn, backendFn)
 		if data == nil {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusServiceUnavailable)
@@ -164,6 +188,18 @@ func HandleStats(collectDataFn func() *monitor.MonitorData) http.HandlerFunc {
 			Timestamp: data.Timestamp,
 		})
 	}
+}
+
+func monitorDataForRequest(r *http.Request, collectDataFn func() *monitor.MonitorData, backendFn IssueBackendFn) *monitor.MonitorData {
+	workspaceHint := r.URL.Query().Get("workspace")
+	if workspaceHint == "" || backendFn == nil {
+		return collectDataFn()
+	}
+	ctx := middleware.WithWorkspace(r.Context(), workspaceHint)
+	if be := backendFn(ctx); be != nil {
+		return monitor.CollectMonitorDataWithIssueBackend(be, 10000, "")
+	}
+	return collectDataFn()
 }
 
 // HandleSync returns an HTTP handler for the sync endpoint.
@@ -184,35 +220,42 @@ func HandleSync(collectDataFn func() *monitor.MonitorData) http.HandlerFunc {
 }
 
 // HandleWorkspaces returns an HTTP handler for the workspaces endpoint.
-func HandleWorkspaces() http.HandlerFunc {
+func HandleWorkspaces(st store.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		response := WorkspacesResponse{
+			Mode:       "workspace",
 			Workspaces: make(map[string]WorkspaceDetail),
 			Timestamp:  time.Now(),
 		}
 
-		resolver, err := cli.NewResolver()
-		if err != nil || resolver.Mode != cli.ModeWorkspace {
-			response.Mode = "legacy"
+		if st == nil {
 			writeJSON(w, response)
 			return
 		}
 
-		response.Mode = "workspace"
-		cfg, err := config.LoadConfig()
-		if err != nil || cfg == nil {
-			writeJSON(w, response)
-			return
-		}
-
-		response.Default = cfg.DefaultWorkspace
-		for name, ws := range cfg.Workspaces {
-			repos := make([]string, len(ws.Repos))
-			for i, repo := range ws.Repos {
-				repos[i] = repo.Name
+		active, err := bootstrap.ResolveActiveWorkspaceKey(r.Context(), st.Workspaces())
+		if err == nil {
+			if ws, getErr := st.Workspaces().Get(r.Context(), active); getErr == nil && ws != nil {
+				response.Default = ws.Name
 			}
-			response.Workspaces[name] = WorkspaceDetail{
-				Path:  ws.Path,
+		}
+
+		workspaces, err := st.Workspaces().List(r.Context())
+		if err != nil {
+			writeJSON(w, response)
+			return
+		}
+
+		for _, ws := range workspaces {
+			storeRepos, repoErr := st.Repos().List(r.Context(), ws.Key)
+			repos := make([]string, 0, len(storeRepos))
+			if repoErr == nil {
+				for _, repo := range storeRepos {
+					repos = append(repos, repo.Name)
+				}
+			}
+			response.Workspaces[ws.Name] = WorkspaceDetail{
+				Path:  storeadapter.ResolveWorkspacePath(ws.Key),
 				Repos: repos,
 			}
 		}
@@ -230,16 +273,23 @@ func writeJSON(w http.ResponseWriter, v any) {
 }
 
 // getWorkspaceInfo returns workspace metadata for API responses.
-func getWorkspaceInfo() WorkspaceInfo {
-	resolver, err := cli.NewResolver()
-	if err != nil || resolver.Mode != cli.ModeWorkspace {
-		return WorkspaceInfo{Mode: "legacy"}
+func getWorkspaceInfo(ctx context.Context, st store.Store, workspaceHint string) WorkspaceInfo {
+	info := WorkspaceInfo{Mode: "workspace"}
+	if st == nil {
+		return info
 	}
-	return WorkspaceInfo{
-		Mode:       "workspace",
-		Name:       resolver.WorkspaceName(),
-		Workspaces: resolver.WorkspaceNames(),
+	workspaces, err := st.Workspaces().List(ctx)
+	if err != nil {
+		return info
 	}
+	info.Workspaces = make([]string, 0, len(workspaces))
+	for _, ws := range workspaces {
+		info.Workspaces = append(info.Workspaces, ws.Name)
+	}
+	if _, wsName, ok := resolveMonitorWorkspace(ctx, st, workspaceHint); ok {
+		info.Name = wsName
+	}
+	return info
 }
 
 // groupAgentsByWorkspace groups agents by their workspace field.
@@ -248,9 +298,120 @@ func groupAgentsByWorkspace(agents []monitor.AgentStatus) map[string][]monitor.A
 	for _, agent := range agents {
 		ws := agent.Workspace
 		if ws == "" {
-			ws = "(legacy)"
+			ws = "unassigned"
 		}
 		groups[ws] = append(groups[ws], agent)
 	}
 	return groups
+}
+
+func mergeStoreAgents(ctx context.Context, st store.Store, agents []monitor.AgentStatus, workspaceHint string) []monitor.AgentStatus {
+	if st == nil {
+		return agents
+	}
+	wsKey, wsName, ok := resolveMonitorWorkspace(ctx, st, workspaceHint)
+	if !ok {
+		return agents
+	}
+	assignments, err := st.Agents().List(ctx, wsKey)
+	if err != nil {
+		log.Printf("Failed to list store agents for monitor response: %v", err)
+		return agents
+	}
+	if len(assignments) == 0 {
+		return agents
+	}
+
+	assignmentsByName := make(map[string]*domain.Agent, len(assignments))
+	for _, assignment := range assignments {
+		if assignment != nil {
+			assignmentsByName[assignment.Name] = assignment
+		}
+	}
+
+	merged := make([]monitor.AgentStatus, 0, len(agents)+len(assignments))
+	byName := make(map[string]int, len(merged))
+	for _, agent := range agents {
+		if workspaceHint != "" {
+			_, assignedToWorkspace := assignmentsByName[agent.Name]
+			if !assignedToWorkspace && agent.Workspace != wsName && agent.Workspace != wsKey {
+				continue
+			}
+		}
+		byName[agent.Name] = len(merged)
+		merged = append(merged, agent)
+	}
+	for _, assignment := range assignments {
+		if assignment == nil {
+			continue
+		}
+		if idx, exists := byName[assignment.Name]; exists {
+			enrichRuntimeAgent(&merged[idx], assignment, wsName)
+			continue
+		}
+		merged = append(merged, monitor.AgentStatus{
+			Name:      assignment.Name,
+			Branch:    "unknown",
+			Status:    monitorStatusFromAgentState(assignment.State),
+			Role:      assignment.RoleName,
+			Repo:      monitorRepoFromAgent(assignment),
+			Workspace: wsName,
+		})
+	}
+	return merged
+}
+
+func enrichRuntimeAgent(agent *monitor.AgentStatus, assignment *domain.Agent, wsName string) {
+	if agent == nil || assignment == nil {
+		return
+	}
+	if agent.Role == "" {
+		agent.Role = assignment.RoleName
+	}
+	if agent.Repo == "" {
+		agent.Repo = monitorRepoFromAgent(assignment)
+	}
+	if agent.Workspace == "" {
+		agent.Workspace = wsName
+	}
+}
+
+func monitorStatusFromAgentState(state domain.AgentState) string {
+	switch state {
+	case domain.AgentStateActive:
+		return "working"
+	default:
+		return "idle"
+	}
+}
+
+func monitorRepoFromAgent(agent *domain.Agent) string {
+	if agent == nil || agent.CrossRepo || len(agent.Repos) != 1 {
+		return ""
+	}
+	return agent.Repos[0]
+}
+
+func resolveMonitorWorkspace(ctx context.Context, st store.Store, workspaceHint string) (key string, name string, ok bool) {
+	if st == nil {
+		return "", "", false
+	}
+	if workspaceHint != "" {
+		if ws, err := st.Workspaces().Get(ctx, workspaceHint); err == nil && ws != nil {
+			return ws.Key, ws.Name, true
+		}
+		if ws, err := st.Workspaces().GetByName(ctx, workspaceHint); err == nil && ws != nil {
+			return ws.Key, ws.Name, true
+		}
+		return "", "", false
+	}
+	key, err := bootstrap.ResolveActiveWorkspaceKey(ctx, st.Workspaces())
+	if err != nil {
+		return "", "", false
+	}
+	ws, err := st.Workspaces().Get(ctx, key)
+	if err != nil || ws == nil {
+		return "", "", false
+	}
+	return key, ws.Name, true
 }

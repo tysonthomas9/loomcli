@@ -5,105 +5,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"path/filepath"
-	"sync"
-	"sync/atomic"
 	"time"
-
-	"github.com/fsnotify/fsnotify"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/events"
 )
 
-// configReconciler watches config files for changes and reconciles agents.
+// configReconciler polls FleetDB-backed daemon config and reconciles agents.
 // It runs as a goroutine, started from Daemon.Start().
 func (d *Daemon) configReconciler() {
-	watcher, err := fsnotify.NewWatcher()
-	if err != nil {
-		slog.Warn("failed to create config watcher, falling back to polling", "err", err)
-		d.configPollingFallback()
-		return
-	}
-	defer func() { _ = watcher.Close() }()
-
-	d.watchConfigDirs(watcher)
-
-	var debounceTimer *time.Timer
-	var debounceMu sync.Mutex
-	var stopped atomic.Bool
-
-	for {
-		select {
-		case <-d.sup.Shutdown:
-			stopped.Store(true)
-			debounceMu.Lock()
-			if debounceTimer != nil {
-				debounceTimer.Stop()
-			}
-			debounceMu.Unlock()
-			return
-
-		case event, ok := <-watcher.Events:
-			if !ok {
-				return
-			}
-			d.handleConfigEvent(event, &debounceTimer, &debounceMu, &stopped)
-
-		case err, ok := <-watcher.Errors:
-			if !ok {
-				return
-			}
-			slog.Warn("config watcher error", "err", err)
-		}
-	}
-}
-
-// handleConfigEvent processes a single fsnotify event, debouncing config reloads.
-func (d *Daemon) handleConfigEvent(event fsnotify.Event, debounceTimer **time.Timer, debounceMu *sync.Mutex, stopped *atomic.Bool) {
-	if !isConfigFileEvent(event) {
-		return
-	}
-	slog.Info("config file change detected", "file", event.Name, "op", event.Op)
-
-	debounceMu.Lock()
-	if *debounceTimer != nil {
-		(*debounceTimer).Stop()
-	}
-	*debounceTimer = time.AfterFunc(500*time.Millisecond, func() {
-		if !stopped.Load() {
-			d.reloadAndReconcile()
-		}
-	})
-	debounceMu.Unlock()
-}
-
-// watchConfigDirs adds the project and global config directories to the watcher.
-// Watches directories (not files) because editors like vim delete and recreate files.
-func (d *Daemon) watchConfigDirs(watcher *fsnotify.Watcher) {
-	projectConfigDir := d.projectDir
-	globalConfigDir := config.GetConfigDir()
-
-	if err := watcher.Add(projectConfigDir); err != nil {
-		slog.Warn("failed to watch project dir", "path", projectConfigDir, "err", err)
-	}
-	if globalConfigDir != "" && globalConfigDir != projectConfigDir {
-		if err := watcher.Add(globalConfigDir); err != nil {
-			slog.Warn("failed to watch global config dir", "path", globalConfigDir, "err", err)
-		}
-	}
-
-	slog.Info("config watcher started", "project_dir", projectConfigDir, "global_dir", globalConfigDir)
-}
-
-// isConfigFileEvent returns true if the fsnotify event is for a config file we care about.
-func isConfigFileEvent(event fsnotify.Event) bool {
-	base := filepath.Base(event.Name)
-	if base != "loom.yaml" && base != "config.yaml" {
-		return false
-	}
-	return event.Op&(fsnotify.Write|fsnotify.Create|fsnotify.Rename) != 0
+	d.configPollingFallback()
 }
 
 // configPollingFallback polls for config changes every 30 seconds.
@@ -122,10 +34,8 @@ func (d *Daemon) configPollingFallback() {
 	}
 }
 
-// reloadAndReconcile loads the config, checks for changes, and reconciles agents.
-// Config loading (I/O) happens outside the lock; only the diff+mutate phase is serialized.
+// reloadAndReconcile loads FleetDB config, checks for changes, and reconciles agents.
 func (d *Daemon) reloadAndReconcile() {
-	// Load config outside the lock — this does file I/O, env expansion, secret resolution.
 	newConfig, err := config.LoadDaemonConfig(d.projectDir)
 	if err != nil {
 		slog.Warn("config reload failed, keeping current config", "err", err)
