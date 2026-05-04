@@ -7,8 +7,11 @@ This document captures the open epic and task set that blocks treating FleetDB a
 ## Summary
 
 - Open actionable blocker tickets: 11
+- Blocked child tickets still attached to `loomcli-26v50`: 2
 - Open blocker epics: 3
-- Total open blocker items including epics: 14
+- Total unresolved blocker items including epics: 16
+- Closed child tickets captured for future reference: 57
+- Total child tickets captured across `loomcli-7w9tc` and `loomcli-26v50`: 69
 
 ## Recommended Order
 
@@ -36,6 +39,7 @@ Validate fleet-db feature parity with beads across three surfaces:
 This epic is the evidence gate before deleting beads paths. The key risk is not just whether the UI appears to work, but whether the production FleetBackend covers the same behavioral surface that loom currently expects from beads.
 
 Open child tickets: 10
+Closed child tickets: 13
 
 ### `loomcli-26v50` - Move loom state to fleet-db (clean architecture, no yaml)
 
@@ -55,6 +59,8 @@ Acceptance criteria still relevant:
 - `gopkg.in/yaml.v3` is removed from `go.mod`.
 
 Open child tickets: 0
+Blocked child tickets: 2
+Closed child tickets: 44
 
 Note: this epic has no open children, but the epic itself remains open because the acceptance criteria are not fully met.
 
@@ -276,4 +282,76 @@ Before implementation continues, split them into concrete tasks for:
 - removal of `gopkg.in/yaml.v3`
 - quality gate proving no YAML reads/writes remain
 - final no-beads/no-fallback validation path
+
+## Closed Ticket Ledger
+
+These closed tickets are included so future cleanup can check whether anything was prematurely closed, partially implemented, or superseded by later architecture decisions.
+
+### Closed `loomcli-7w9tc` Children
+
+- `loomcli-7w9tc.1` P1 task closed - P1.1 Run fleet-db parity harness with bd available
+- `loomcli-7w9tc.2` P2 task closed - P1.2 Commit parity report artifacts to loomcli docs
+- `loomcli-7w9tc.3` P2 task closed - P2.1 Scaffold internal/backend/paritytest/ with parity build tag
+- `loomcli-7w9tc.4` P2 task closed - P2.2 Write fixtures for loomcli-extended IssueBackend methods
+- `loomcli-7w9tc.5` P2 task closed - P2.3 Implement DualRunner: instantiate beads + fleet, execute fixtures
+- `loomcli-7w9tc.6` P2 task closed - P2.4 Emit diff report in fleet-db-compatible format
+- `loomcli-7w9tc.7` P3 task closed - P2.5 Add 'make test-parity' target to loomcli Makefile
+- `loomcli-7w9tc.8` P3 task closed - P2.6 Generate loomcli-gaps.md from harness output
+- `loomcli-7w9tc.9` P2 task closed - P3.1 Write test/parity/docker-compose.parity.yml
+- `loomcli-7w9tc.10` P2 task closed - P3.2 Write test/parity/seed.sh fixture loader
+- `loomcli-7w9tc.11` P3 task closed - P3.3 Write test/parity/browse.md webui parity checklist
+- `loomcli-7w9tc.14` P2 bug closed - Loomcli beads adapter: closeResultToData returns null for closed-issue fields
+- `loomcli-7w9tc.15` P2 bug closed - Loomcli beads adapter: classifies 'issue not found' as KindUnavailable instead of KindNotFound
+
+### `loomcli-26v50` Children Not Closed
+
+- `loomcli-26v50.29` P3 feature blocked - loomcli: PID-file + Unix-socket reuse for embedded fleet-db
+- `loomcli-26v50.30` P3 chore blocked - Unify 'loom agent' (runner) with 'loom agentdef' (CRUD)
+
+### Closed `loomcli-26v50` Children
+
+- `loomcli-26v50.1` P1 feature closed - fleet-db: Add Agent as first-class entity
+- `loomcli-26v50.2` P1 feature closed - fleet-db: Add Role as first-class entity
+- `loomcli-26v50.3` P1 feature closed - fleet-db: Add DaemonProfile as first-class entity
+- `loomcli-26v50.4` P1 feature closed - loomcli: Create internal/domain package (pure types)
+- `loomcli-26v50.5` P1 feature closed - loomcli: Create internal/store package (repository interfaces)
+- `loomcli-26v50.6` P1 feature closed - fleet-db: Add Repo as first-class entity
+- `loomcli-26v50.7` P1 feature closed - loomcli: Create internal/bootstrap/mode.go (active workspace resolver)
+- `loomcli-26v50.8` P1 feature closed - loomcli: Create internal/bootstrap/embedded.go (subprocess fleet-db lifecycle)
+- `loomcli-26v50.9` P1 feature closed - loomcli: Create internal/bootstrap/statecache.go
+- `loomcli-26v50.10` P1 feature closed - loomcli: Create internal/infra/fleetdb HTTP client (implements all stores)
+- `loomcli-26v50.11` P1 task closed - loomcli: Rewrite workspacemgr to use store
+- `loomcli-26v50.12` P1 task closed - loomcli: Update automode + agent runner to use store
+- `loomcli-26v50.13` P1 task closed - loomcli: webui - rewrite svcimpl/workspace_service to use store
+- `loomcli-26v50.14` P1 task closed - loomcli: Rewrite daemon agent reconciler to use store
+- `loomcli-26v50.15` P1 task closed - loomcli: webui - rewrite svcimpl/agent_service to use store
+- `loomcli-26v50.16` P1 task closed - loomcli: webui - replace ServerConfig closure bag with Store field
+- `loomcli-26v50.17` P1 feature closed - loomcli: New CLI 'loom workspace' commands (add/list/use/remove/show/status)
+- `loomcli-26v50.18` P1 feature closed - loomcli: New CLI 'loom daemon config' commands (per-workspace)
+- `loomcli-26v50.19` P1 feature closed - loomcli: New CLI 'loom agent' commands (add/list/remove/start/stop/show)
+- `loomcli-26v50.20` P1 feature closed - loomcli: New CLI 'loom role' commands (add/list/remove/show/set)
+- `loomcli-26v50.21` P1 feature closed - loomcli: New CLI 'loom repo' commands (add/list/remove/show)
+- `loomcli-26v50.22` P2 chore closed - loomcli: Update docs + READMEs (no more loom.yaml references)
+- `loomcli-26v50.23` P2 chore closed - loomcli: Delete internal/cli/serve/workspacemgr/
+- `loomcli-26v50.24` P2 chore closed - loomcli: Remove gopkg.in/yaml.v3 dependency from go.mod
+- `loomcli-26v50.25` P2 chore closed - loomcli: Delete internal/cli/config/ (config.go, project.go, daemon.go)
+- `loomcli-26v50.26` P2 feature closed - loomcli: Daemon auto-start with ownership filtering (cloud-ready)
+- `loomcli-26v50.27` P3 feature closed - loom role set <key> <value>: per-field updater
+- `loomcli-26v50.28` P3 feature closed - loom agentdef start/stop: integrate with daemon signal
+- `loomcli-26v50.31` P3 feature closed - loom daemon profile: --unset / clear-field support
+- `loomcli-26v50.32` P3 chore closed - loomcli: convert new CLI commands from Run to RunE
+- `loomcli-26v50.33` P3 chore closed - localredis: bound stream snapshot size with XRevRangeN cap
+- `loomcli-26v50.34` P3 chore closed - localredis: skip snapshot rewrite when keyspace unchanged
+- `loomcli-26v50.35` P4 chore closed - Rebuild parity-test fleet-db container with current schema
+- `loomcli-26v50.36` P4 chore closed - internal/netutil: promote pickFreePort + waitForHealthz
+- `loomcli-26v50.37` P3 feature closed - fleet-db: PATCH/PUT endpoints should return canonical entity body
+- `loomcli-26v50.38` P3 chore closed - Share fleet HTTP plumbing between internal/backend/fleet and internal/infra/fleetdb
+- `loomcli-26v50.39` P4 bug closed - embedded fleet-db: fix 'waitid: no child processes' race on shutdown
+- `loomcli-26v50.40` P2 bug closed - fleet-db: handleDaemonUpdate projector loses fields on PUT
+- `loomcli-26v50.41` P3 bug closed - localredis: dirty-flag skip is no-op for embedded-CLI use
+- `loomcli-26v50.42` P1 bug closed - loom serve /api/workspaces still reads yaml, not fleet-db store (Phase 4 incomplete)
+- `loomcli-26v50.43` P2 task closed - Migrate remaining webui endpoints off multiPool/yaml (issues, agents detail, kanban)
+- `loomcli-26v50.44` P2 task closed - Document fleet-db distributed control-plane architecture
+- `loomcli-26v50.45` P2 task closed - Document distributed control-plane data model for review
+- `loomcli-26v50.46` P2 task closed - Fix fleet-db workspace browser E2E parity
 
