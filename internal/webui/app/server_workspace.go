@@ -7,11 +7,12 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/tysonthomas9/loomcli/internal/ops"
+	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/appinfra"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlermux"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/webui/storeadapter"
 )
 
 func wrapWorkspaceCreateFn(
@@ -121,43 +122,43 @@ func safeLogPath(basePath, agent string) string {
 }
 
 func (app *Server) registerWorkerAPIRoutes() {
-	configFn := app.config.WorkspaceConfigFn
-
 	workerToken := os.Getenv("LOOM_WORKER_TOKEN")
 	if workerToken == "" {
 		return
 	}
 
 	handlermux.SetupWorkerAPIRoutes(app.mux, workerToken,
-		workerResolveWorktree(configFn),
-		workerResolveEventsDir(configFn),
-		workerResolveLogPath(configFn),
-		workerValidateWorkspace(configFn),
+		workerResolveWorktree(app.config.Store),
+		workerResolveEventsDir(app.config.Store),
+		workerResolveLogPath(app.config.Store),
+		workerValidateWorkspace(app.config.Store),
 	)
 	logger.Info("worker API routes registered", "component", "worker")
 }
 
 // workerValidateWorkspace returns a function that checks whether a workspace ID
-// exists in the workspace config.
-func workerValidateWorkspace(configFn func() (*ops.WorkspaceData, error)) func(string) bool {
+// exists in FleetDB.
+func workerValidateWorkspace(st store.Store) func(string) bool {
 	return func(id string) bool {
-		if configFn == nil {
+		if st == nil {
 			return false
 		}
-		wsData, err := configFn()
-		if err != nil {
-			logger.Warn("workspace validation failed due to config error", "workspace_id", id, "err", err)
+		if _, err := st.Workspaces().Get(context.Background(), id); err != nil {
+			logger.Warn("workspace validation failed", "workspace_id", id, "err", err)
 			return false
 		}
-		return wsData != nil && service.FindWorkspacePathByID(wsData, id) != ""
+		return storeadapter.ResolveWorkspacePath(id) != ""
 	}
 }
 
 // workerResolveWorktree returns a function that resolves a safe worktree path
 // for the given workspace and agent, creating the directory if needed.
-func workerResolveWorktree(configFn func() (*ops.WorkspaceData, error)) func(string, string) string {
+func workerResolveWorktree(st store.Store) func(string, string) string {
 	return func(workspace, agent string) string {
-		wsPath := service.ResolveWorkspacePath(configFn, workspace)
+		if st == nil {
+			return ""
+		}
+		wsPath := storeadapter.ResolveWorkspacePath(workspace)
 		if wsPath == "" || agent == "" {
 			return ""
 		}
@@ -182,9 +183,12 @@ func workerResolveWorktree(configFn func() (*ops.WorkspaceData, error)) func(str
 
 // workerResolveEventsDir returns a function that resolves the events directory
 // path for a workspace.
-func workerResolveEventsDir(configFn func() (*ops.WorkspaceData, error)) func(string) string {
+func workerResolveEventsDir(st store.Store) func(string) string {
 	return func(workspace string) string {
-		path := service.ResolveWorkspacePath(configFn, workspace)
+		if st == nil {
+			return ""
+		}
+		path := storeadapter.ResolveWorkspacePath(workspace)
 		if path == "" {
 			return ""
 		}
@@ -194,9 +198,12 @@ func workerResolveEventsDir(configFn func() (*ops.WorkspaceData, error)) func(st
 
 // workerResolveLogPath returns a function that resolves a safe log file path
 // for a workspace agent.
-func workerResolveLogPath(configFn func() (*ops.WorkspaceData, error)) func(string, string) string {
+func workerResolveLogPath(st store.Store) func(string, string) string {
 	return func(workspace, agent string) string {
-		path := service.ResolveWorkspacePath(configFn, workspace)
+		if st == nil {
+			return ""
+		}
+		path := storeadapter.ResolveWorkspacePath(workspace)
 		if path == "" {
 			return ""
 		}

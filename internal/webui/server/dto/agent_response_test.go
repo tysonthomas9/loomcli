@@ -18,8 +18,6 @@ func TestAgentStatusResponse_JSONRoundTrip(t *testing.T) {
 		State:        "running",
 		RoleType:     "crew",
 		Rig:          "standard",
-		HookBead:     "hook-abc",
-		RoleBead:     "role-xyz",
 		LastActivity: &lastActivity,
 		CreatedAt:    now,
 		UpdatedAt:    now,
@@ -56,12 +54,6 @@ func TestAgentStatusResponse_JSONRoundTrip(t *testing.T) {
 	}
 	if got.Rig != resp.Rig {
 		t.Errorf("Rig = %q, want %q", got.Rig, resp.Rig)
-	}
-	if got.HookBead != resp.HookBead {
-		t.Errorf("HookBead = %q, want %q", got.HookBead, resp.HookBead)
-	}
-	if got.RoleBead != resp.RoleBead {
-		t.Errorf("RoleBead = %q, want %q", got.RoleBead, resp.RoleBead)
 	}
 	if got.LastActivity == nil || !got.LastActivity.Equal(lastActivity) {
 		t.Errorf("LastActivity = %v, want %v", got.LastActivity, lastActivity)
@@ -146,7 +138,7 @@ func TestAgentStatusResponse_OptionalFieldsOmitted(t *testing.T) {
 
 	for _, field := range []string{
 		"description", "status", "agent_state",
-		"role_type", "rig", "hook_bead", "role_bead",
+		"role_type", "rig",
 		"last_activity",
 	} {
 		if _, ok := raw[field]; ok {

@@ -180,7 +180,7 @@ func TestGet_HappyPath(t *testing.T) {
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		// Get fires three requests: the primary /issues/{id} (returning
 		// the slim record that fleet-db ships), then /deps and /comments
-		// to populate the embedded relations that beads' IssueDetails
+		// to populate the embedded relations that IssueDetails
 		// carries inline but fleet-db doesn't. The deps/comments calls
 		// are tolerated with empty-list responses — the test only
 		// asserts that the primary issue fetch happened correctly.
@@ -681,7 +681,7 @@ func TestStats_AllStatuses(t *testing.T) {
 	if result.PinnedIssues != 3 {
 		t.Errorf("PinnedIssues = %d, want 3", result.PinnedIssues)
 	}
-	// review and hooked have no BdStats field — silently ignored.
+	// review and hooked have no extra stats field, so it is silently ignored.
 }
 
 func TestStats_EmptyWorkspace(t *testing.T) {
@@ -877,6 +877,85 @@ func TestUpdate_ClaimFalseAllowed(t *testing.T) {
 	}
 }
 
+func TestUpdate_StatusInProgressWithAssigneeClaimsAsAssignee(t *testing.T) {
+	var gotActor string
+	var gotClaim bool
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/issues/test-1"):
+			respondOK(w, types.Issue{ID: "test-1", Title: "T", Status: types.StatusOpen, CreatedAt: time.Now(), UpdatedAt: time.Now()})
+		case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/issues/test-1/claim"):
+			gotClaim = true
+			gotActor = r.Header.Get("X-Actor")
+			respondOK(w, json.RawMessage(`{}`))
+		default:
+			respondErr(w, http.StatusNotFound, "not found")
+		}
+	})
+	defer ts.Close()
+
+	status := "in_progress"
+	assignee := "[H] Tyson"
+	err := fb.Update(context.Background(), "test-1", backend.UpdateParams{
+		Status:   &status,
+		Assignee: &assignee,
+	})
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if !gotClaim {
+		t.Fatal("expected claim endpoint to be called")
+	}
+	if gotActor != "[H] Tyson" {
+		t.Errorf("X-Actor = %q, want %q", gotActor, "[H] Tyson")
+	}
+}
+
+func TestUpdate_AssigneeOnlyUsesAssignEndpoint(t *testing.T) {
+	var gotBody struct {
+		Assignee string `json:"assignee"`
+	}
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" || !strings.HasSuffix(r.URL.Path, "/issues/test-1/assign") {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		respondOK(w, json.RawMessage(`{}`))
+	})
+	defer ts.Close()
+
+	assignee := "alice"
+	err := fb.Update(context.Background(), "test-1", backend.UpdateParams{Assignee: &assignee})
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if gotBody.Assignee != "alice" {
+		t.Errorf("assignee = %q, want alice", gotBody.Assignee)
+	}
+}
+
+func TestUpdate_LabelOnlyUsesLabelEndpoint(t *testing.T) {
+	var gotPath string
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		if r.Method != "POST" || !strings.HasSuffix(r.URL.Path, "/issues/test-1/labels") {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		respondOK(w, json.RawMessage(`{}`))
+	})
+	defer ts.Close()
+
+	err := fb.Update(context.Background(), "test-1", backend.UpdateParams{AddLabels: []string{"frontend"}})
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if !strings.HasSuffix(gotPath, "/issues/test-1/labels") {
+		t.Errorf("path = %q", gotPath)
+	}
+}
+
 // --- ClaimIssue tests ---
 
 func TestClaimIssue_HappyPath(t *testing.T) {
@@ -983,6 +1062,37 @@ func TestClaimIssue_Conflict(t *testing.T) {
 	}
 }
 
+func TestDeferIssue_UsesDedicatedEndpointWithoutDate(t *testing.T) {
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" || !strings.HasSuffix(r.URL.Path, "/issues/test-1/defer") {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		if r.ContentLength > 0 {
+			t.Fatalf("zero defer date should omit body, content length = %d", r.ContentLength)
+		}
+		respondOK(w, json.RawMessage(`{}`))
+	})
+	defer ts.Close()
+
+	if err := fb.DeferIssue(context.Background(), "test-1", time.Time{}); err != nil {
+		t.Fatalf("DeferIssue: %v", err)
+	}
+}
+
+func TestRemoveLabel_UsesDedicatedEndpoint(t *testing.T) {
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "DELETE" || !strings.HasSuffix(r.URL.Path, "/issues/test-1/labels/backend") {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		respondOK(w, json.RawMessage(`{}`))
+	})
+	defer ts.Close()
+
+	if err := fb.RemoveLabel(context.Background(), "test-1", "backend"); err != nil {
+		t.Fatalf("RemoveLabel: %v", err)
+	}
+}
+
 // --- Close tests ---
 
 func TestClose_HappyPath(t *testing.T) {
@@ -1037,6 +1147,25 @@ func TestClose_NoUnblockedIssues(t *testing.T) {
 	}
 	if len(result.Unblocked) != 0 {
 		t.Errorf("Unblocked len = %d, want 0", len(result.Unblocked))
+	}
+}
+
+func TestClose_BareIssueResponse(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		respondOK(w, types.Issue{ID: "T-11", Title: "Done", Status: types.StatusClosed, CreatedAt: now, UpdatedAt: now, ClosedAt: &now})
+	})
+	defer ts.Close()
+
+	result, err := fb.Close(context.Background(), "T-11", backend.CloseParams{Reason: "done"})
+	if err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if result.Closed == nil || result.Closed.ID != "T-11" {
+		t.Errorf("Closed.ID = %v, want T-11", result.Closed)
+	}
+	if result.Unblocked == nil {
+		t.Fatal("Unblocked must be non-nil (empty slice, not nil)")
 	}
 }
 
@@ -1186,11 +1315,11 @@ func TestRemoveDependency(t *testing.T) {
 // --- Label tests ---
 
 func TestAddLabel(t *testing.T) {
+	var gotPath, gotMethod string
 	var gotBody map[string]interface{}
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != "PATCH" {
-			t.Errorf("Method = %q, want PATCH", r.Method)
-		}
+		gotPath = r.URL.Path
+		gotMethod = r.Method
 		json.NewDecoder(r.Body).Decode(&gotBody) //nolint:errcheck
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(apiResponse{ //nolint:errcheck
@@ -1204,16 +1333,22 @@ func TestAddLabel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AddLabel: %v", err)
 	}
-	labels, ok := gotBody["add_labels"].([]interface{})
-	if !ok || len(labels) != 1 || labels[0] != "urgent" {
-		t.Errorf("add_labels = %v, want [urgent]", gotBody["add_labels"])
+	if gotMethod != http.MethodPost {
+		t.Errorf("Method = %q, want POST", gotMethod)
+	}
+	if !strings.HasSuffix(gotPath, "/issues/test-1/labels") {
+		t.Errorf("path = %q, want suffix /issues/test-1/labels", gotPath)
+	}
+	if gotBody["label"] != "urgent" {
+		t.Errorf("label = %v, want urgent", gotBody["label"])
 	}
 }
 
 func TestRemoveLabel(t *testing.T) {
-	var gotBody map[string]interface{}
+	var gotPath, gotMethod string
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-		json.NewDecoder(r.Body).Decode(&gotBody) //nolint:errcheck
+		gotPath = r.URL.Path
+		gotMethod = r.Method
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(apiResponse{ //nolint:errcheck
 			Success: true,
@@ -1226,9 +1361,11 @@ func TestRemoveLabel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RemoveLabel: %v", err)
 	}
-	labels, ok := gotBody["remove_labels"].([]interface{})
-	if !ok || len(labels) != 1 || labels[0] != "urgent" {
-		t.Errorf("remove_labels = %v, want [urgent]", gotBody["remove_labels"])
+	if gotMethod != http.MethodDelete {
+		t.Errorf("Method = %q, want DELETE", gotMethod)
+	}
+	if !strings.HasSuffix(gotPath, "/issues/test-1/labels/urgent") {
+		t.Errorf("path = %q, want suffix /issues/test-1/labels/urgent", gotPath)
 	}
 }
 
@@ -1240,12 +1377,12 @@ func TestAddComment_HappyPath(t *testing.T) {
 		if r.Method != "POST" {
 			t.Errorf("Method = %q, want POST", r.Method)
 		}
-		respondOK(w, types.Comment{
-			ID:        1,
-			IssueID:   "test-1",
-			Author:    "user",
-			Text:      "hello",
-			CreatedAt: now,
+		respondOK(w, map[string]interface{}{
+			"id":         1,
+			"issue_id":   "test-1",
+			"author":     "user",
+			"body":       "hello",
+			"created_at": now,
 		})
 	})
 	defer ts.Close()
@@ -1548,17 +1685,14 @@ func TestDeferIssue_WithUntil(t *testing.T) {
 	})
 	defer ts.Close()
 
-	if err := fb.DeferIssue(context.Background(), "bd-1", until); err != nil {
+	if err := fb.DeferIssue(context.Background(), "loom-1", until); err != nil {
 		t.Fatalf("DeferIssue: %v", err)
 	}
-	if gotMethod != "PATCH" {
-		t.Errorf("method = %q, want PATCH", gotMethod)
+	if gotMethod != http.MethodPost {
+		t.Errorf("method = %q, want POST", gotMethod)
 	}
-	if !strings.HasSuffix(gotPath, "/issues/bd-1") {
-		t.Errorf("path = %q, want suffix /issues/bd-1", gotPath)
-	}
-	if gotBody["status"] != "deferred" {
-		t.Errorf("status = %v, want deferred", gotBody["status"])
+	if !strings.HasSuffix(gotPath, "/issues/loom-1/defer") {
+		t.Errorf("path = %q, want suffix /issues/loom-1/defer", gotPath)
 	}
 	if gotBody["defer_until"] != wantUntil {
 		t.Errorf("defer_until = %v, want %q", gotBody["defer_until"], wantUntil)
@@ -1566,20 +1700,26 @@ func TestDeferIssue_WithUntil(t *testing.T) {
 }
 
 func TestDeferIssue_ZeroUntil(t *testing.T) {
+	var gotPath, gotMethod string
 	var gotBody map[string]interface{}
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotMethod = r.Method
 		_ = json.NewDecoder(r.Body).Decode(&gotBody)
 		respondOK(w, map[string]interface{}{})
 	})
 	defer ts.Close()
 
-	if err := fb.DeferIssue(context.Background(), "bd-1", time.Time{}); err != nil {
+	if err := fb.DeferIssue(context.Background(), "loom-1", time.Time{}); err != nil {
 		t.Fatalf("DeferIssue: %v", err)
 	}
-	if gotBody["status"] != "deferred" {
-		t.Errorf("status = %v, want deferred", gotBody["status"])
+	if gotMethod != http.MethodPost {
+		t.Errorf("method = %q, want POST", gotMethod)
 	}
-	if _, ok := gotBody["defer_until"]; ok {
+	if !strings.HasSuffix(gotPath, "/issues/loom-1/defer") {
+		t.Errorf("path = %q, want suffix /issues/loom-1/defer", gotPath)
+	}
+	if gotBody != nil {
 		t.Errorf("defer_until should not be set for zero until, got %v", gotBody["defer_until"])
 	}
 }
@@ -1599,21 +1739,22 @@ func TestDeferIssue_EmptyID(t *testing.T) {
 }
 
 func TestUndeferIssue_Success(t *testing.T) {
-	var gotBody map[string]interface{}
+	var gotPath, gotMethod string
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		gotPath = r.URL.Path
+		gotMethod = r.Method
 		respondOK(w, map[string]interface{}{})
 	})
 	defer ts.Close()
 
-	if err := fb.UndeferIssue(context.Background(), "bd-1"); err != nil {
+	if err := fb.UndeferIssue(context.Background(), "loom-1"); err != nil {
 		t.Fatalf("UndeferIssue: %v", err)
 	}
-	if gotBody["status"] != "open" {
-		t.Errorf("status = %v, want open", gotBody["status"])
+	if gotMethod != http.MethodPost {
+		t.Errorf("method = %q, want POST", gotMethod)
 	}
-	if gotBody["defer_until"] != "" {
-		t.Errorf("defer_until = %v, want empty string", gotBody["defer_until"])
+	if !strings.HasSuffix(gotPath, "/issues/loom-1/undefer") {
+		t.Errorf("path = %q, want suffix /issues/loom-1/undefer", gotPath)
 	}
 }
 
@@ -1743,7 +1884,7 @@ func TestGetMutations_HappyPath(t *testing.T) {
 					Actor:      "agent-a",
 					Action:     "issue.create",
 					EntityType: "issue",
-					EntityID:   "bd-1",
+					EntityID:   "loom-1",
 					After:      `{"title":"New issue","status":"open","parent":"ep-1","repo":"org/repo"}`,
 				},
 				{
@@ -1752,7 +1893,7 @@ func TestGetMutations_HappyPath(t *testing.T) {
 					Actor:      "agent-b",
 					Action:     "issue.close",
 					EntityType: "issue",
-					EntityID:   "bd-2",
+					EntityID:   "loom-2",
 					Before:     `{"status":"open"}`,
 					After:      `{"status":"closed"}`,
 				},
@@ -1779,7 +1920,7 @@ func TestGetMutations_HappyPath(t *testing.T) {
 	if got[0].Type != backend.MutationCreate {
 		t.Errorf("got[0].Type = %q, want %q", got[0].Type, backend.MutationCreate)
 	}
-	if got[0].IssueID != "bd-1" || got[0].Title != "New issue" || got[0].ParentID != "ep-1" || got[0].SourceRepo != "org/repo" {
+	if got[0].IssueID != "loom-1" || got[0].Title != "New issue" || got[0].ParentID != "ep-1" || got[0].SourceRepo != "org/repo" {
 		t.Errorf("got[0] = %+v, after-snapshot fields not extracted", got[0])
 	}
 	if got[1].Type != backend.MutationStatus {
@@ -2082,8 +2223,8 @@ func TestBatch_Closes_Aggregated(t *testing.T) {
 	defer ts.Close()
 
 	ops := []backend.BatchOp{
-		{Operation: "close", Args: json.RawMessage(`{"id":"bd-1","reason":"done"}`)},
-		{Operation: "close", Args: json.RawMessage(`{"id":"bd-2"}`)},
+		{Operation: "close", Args: json.RawMessage(`{"id":"loom-1","reason":"done"}`)},
+		{Operation: "close", Args: json.RawMessage(`{"id":"loom-2"}`)},
 	}
 	results, err := fb.Batch(context.Background(), ops)
 	if err != nil {
@@ -2123,7 +2264,7 @@ func TestBatch_Mixed_FanOut(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(apiResponse{Success: true})
 		case strings.Contains(r.URL.Path, "/issues/") && r.Method == "PATCH":
-			respondOK(w, map[string]interface{}{"id": "bd-u"})
+			respondOK(w, map[string]interface{}{"id": "loom-u"})
 		case strings.Contains(r.URL.Path, "/issues/") && r.Method == "DELETE":
 			respondOK(w, map[string]interface{}{})
 		default:
@@ -2135,14 +2276,14 @@ func TestBatch_Mixed_FanOut(t *testing.T) {
 
 	newTitle := "New Title"
 	updateArgs, _ := json.Marshal(map[string]interface{}{
-		"id":    "bd-u",
+		"id":    "loom-u",
 		"title": newTitle,
 	})
 	ops := []backend.BatchOp{
 		{Operation: "create", Args: json.RawMessage(`{"title":"Created","issue_type":"task","priority":2}`)},
 		{Operation: "update", Args: updateArgs},
-		{Operation: "close", Args: json.RawMessage(`{"id":"bd-c"}`)},
-		{Operation: "delete", Args: json.RawMessage(`{"id":"bd-d","force":true}`)},
+		{Operation: "close", Args: json.RawMessage(`{"id":"loom-c"}`)},
+		{Operation: "delete", Args: json.RawMessage(`{"id":"loom-d","force":true}`)},
 	}
 	results, err := fb.Batch(context.Background(), ops)
 	if err != nil {
@@ -2230,9 +2371,9 @@ func TestBatch_Update_NestedParamsShape(t *testing.T) {
 	})
 	defer ts.Close()
 
-	// Nested params shape: {"id": "bd-1", "params": {...UpdateParams...}}
+	// Nested params shape: {"id": "loom-1", "params": {...UpdateParams...}}
 	args, _ := json.Marshal(map[string]interface{}{
-		"id":     "bd-1",
+		"id":     "loom-1",
 		"params": map[string]interface{}{"title": "Nested Title"},
 	})
 	results, err := fb.Batch(context.Background(), []backend.BatchOp{

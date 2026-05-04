@@ -3,7 +3,7 @@ package issues
 import (
 	"net/http"
 
-	"github.com/tysonthomas9/loomcli/internal/ops"
+	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
@@ -17,17 +17,17 @@ import (
 // Register must be called at most once per mux; calling it twice on the same
 // mux will panic (duplicate route patterns in Go 1.22+ ServeMux).
 type IssueModule struct {
-	svc               service.IssueService
-	workspaceConfigFn func() (*ops.WorkspaceData, error)
+	svc   service.IssueService
+	store store.Store
 }
 
 // NewIssueModule returns an IssueModule that will register routes using the
-// given service and workspace config function. Nil values are accepted — the
+// given service and store handle. Nil values are accepted — the
 // underlying handler functions handle nil deps at request time.
-func NewIssueModule(svc service.IssueService, workspaceConfigFn func() (*ops.WorkspaceData, error)) *IssueModule {
+func NewIssueModule(svc service.IssueService, st store.Store) *IssueModule {
 	return &IssueModule{
-		svc:               svc,
-		workspaceConfigFn: workspaceConfigFn,
+		svc:   svc,
+		store: st,
 	}
 }
 
@@ -46,7 +46,7 @@ func (m *IssueModule) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/workspaces/{ws}/issues/{id}/close", HandleCloseIssue(m.svc))
 	mux.HandleFunc("POST /api/workspaces/{ws}/issues/{id}/reopen", HandleReopenIssue(m.svc))
 	mux.HandleFunc("POST /api/workspaces/{ws}/issues/{id}/claim", HandleClaimIssue(m.svc))
-	mux.HandleFunc("POST /api/workspaces/{ws}/issues/{id}/move", HandleMoveIssue(m.svc, m.workspaceConfigFn))
+	mux.HandleFunc("POST /api/workspaces/{ws}/issues/{id}/move", HandleMoveIssue(m.svc, m.store))
 	mux.HandleFunc("DELETE /api/workspaces/{ws}/issues/{id}", HandleDeleteIssue(m.svc))
 
 	// Comments

@@ -17,9 +17,8 @@
 //   - the child process exits on its own (bash `exit`, process death);
 //   - a client explicitly calls Kill (e.g. from a tab-close).
 //
-// The legacy tmux-backed manager lives alongside in agent_tmux.go purely for
-// the live agent-terminal view — it is not used by the main web terminal
-// path.
+// The tmux-backed manager lives alongside in agent_tmux.go for the live
+// agent-terminal view; it is not used by the main web terminal path.
 package terminal
 
 import (

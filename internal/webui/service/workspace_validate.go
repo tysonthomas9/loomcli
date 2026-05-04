@@ -53,9 +53,6 @@ func validateWorkspaceCreateRequest(req *WorkspaceCreateRequest) *ServiceError {
 		// Empty workspaces are valid: users can create the project boundary
 		// first and attach one or more repos later.
 	case "clone":
-		if req.CloneURL != "" && len(req.CloneURLs) == 0 {
-			req.CloneURLs = []string{req.CloneURL}
-		}
 		if len(req.CloneURLs) == 0 {
 			return ErrValidation("at least one clone URL is required for clone workspace type")
 		}

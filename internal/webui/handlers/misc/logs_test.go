@@ -66,14 +66,14 @@ func TestValidTaskIDRegex(t *testing.T) {
 	}{
 		{"simple alpha", "task", true},
 		{"simple numeric", "123", true},
-		{"uuid-like", "bd-abc123", true},
+		{"uuid-like", "loom-abc123", true},
 		{"with hyphen", "task-123", true},
 		{"with underscore", "task_123", true},
 		{"mixed case", "TaskID", true},
 		{"all valid chars", "Task_ID-123", true},
 		{"single char", "a", true},
 		{"with dot", "task.123", true},
-		{"beads subtask", "loomcli-5y1sd.1", true},
+		{"dotted subtask", "loomcli-5y1sd.1", true},
 
 		{"empty", "", false},
 		{"with space", "task 123", false},

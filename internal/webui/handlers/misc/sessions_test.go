@@ -56,8 +56,8 @@ func TestListTaskSessions_Empty(t *testing.T) {
 	store := newTestSessionStore(t)
 	handler := handleListTaskSessions(NewSessionService(store, nil))
 
-	req := httptest.NewRequest(http.MethodGet, "/api/tasks/bd-abc123/sessions", nil)
-	req.SetPathValue("taskId", "bd-abc123")
+	req := httptest.NewRequest(http.MethodGet, "/api/tasks/loom-abc123/sessions", nil)
+	req.SetPathValue("taskId", "loom-abc123")
 	rr := httptest.NewRecorder()
 
 	handler.ServeHTTP(rr, req)
@@ -76,8 +76,8 @@ func TestListTaskSessions_Empty(t *testing.T) {
 	if resp.Data == nil {
 		t.Fatal("data is nil")
 	}
-	if resp.Data.TaskID != "bd-abc123" {
-		t.Errorf("task_id = %q, want %q", resp.Data.TaskID, "bd-abc123")
+	if resp.Data.TaskID != "loom-abc123" {
+		t.Errorf("task_id = %q, want %q", resp.Data.TaskID, "loom-abc123")
 	}
 	if len(resp.Data.Sessions) != 0 {
 		t.Errorf("sessions length = %d, want 0", len(resp.Data.Sessions))
@@ -86,12 +86,12 @@ func TestListTaskSessions_Empty(t *testing.T) {
 
 func TestListTaskSessions_WithData(t *testing.T) {
 	store := newTestSessionStore(t)
-	sess := createTestSession(t, store, "bd-xyz789")
+	sess := createTestSession(t, store, "loom-xyz789")
 
 	handler := handleListTaskSessions(NewSessionService(store, nil))
 
-	req := httptest.NewRequest(http.MethodGet, "/api/tasks/bd-xyz789/sessions", nil)
-	req.SetPathValue("taskId", "bd-xyz789")
+	req := httptest.NewRequest(http.MethodGet, "/api/tasks/loom-xyz789/sessions", nil)
+	req.SetPathValue("taskId", "loom-xyz789")
 	rr := httptest.NewRecorder()
 
 	handler.ServeHTTP(rr, req)
@@ -116,8 +116,8 @@ func TestListTaskSessions_WithData(t *testing.T) {
 	if resp.Data.Sessions[0].SessionID != sess.SessionID() {
 		t.Errorf("session_id = %q, want %q", resp.Data.Sessions[0].SessionID, sess.SessionID())
 	}
-	if resp.Data.Sessions[0].TaskID != "bd-xyz789" {
-		t.Errorf("task_id = %q, want %q", resp.Data.Sessions[0].TaskID, "bd-xyz789")
+	if resp.Data.Sessions[0].TaskID != "loom-xyz789" {
+		t.Errorf("task_id = %q, want %q", resp.Data.Sessions[0].TaskID, "loom-xyz789")
 	}
 }
 
@@ -125,8 +125,8 @@ func TestGetSession_NotFound(t *testing.T) {
 	store := newTestSessionStore(t)
 	handler := handleGetSession(NewSessionService(store, nil))
 
-	req := httptest.NewRequest(http.MethodGet, "/api/tasks/bd-abc/sessions/nonexistent-session", nil)
-	req.SetPathValue("taskId", "bd-abc")
+	req := httptest.NewRequest(http.MethodGet, "/api/tasks/loom-abc/sessions/nonexistent-session", nil)
+	req.SetPathValue("taskId", "loom-abc")
 	req.SetPathValue("sessionId", "nonexistent-session")
 	rr := httptest.NewRecorder()
 
@@ -147,12 +147,12 @@ func TestGetSession_NotFound(t *testing.T) {
 
 func TestGetSession_Found(t *testing.T) {
 	store := newTestSessionStore(t)
-	sess := createTestSession(t, store, "bd-task1")
+	sess := createTestSession(t, store, "loom-task1")
 
 	handler := handleGetSession(NewSessionService(store, nil))
 
-	req := httptest.NewRequest(http.MethodGet, "/api/tasks/bd-task1/sessions/"+sess.SessionID(), nil)
-	req.SetPathValue("taskId", "bd-task1")
+	req := httptest.NewRequest(http.MethodGet, "/api/tasks/loom-task1/sessions/"+sess.SessionID(), nil)
+	req.SetPathValue("taskId", "loom-task1")
 	req.SetPathValue("sessionId", sess.SessionID())
 	rr := httptest.NewRecorder()
 
@@ -185,7 +185,7 @@ func TestGetSessionTranscript(t *testing.T) {
 	t.Setenv("LOOM_REDACT_TRANSCRIPTS", "off")
 
 	store := newTestSessionStore(t)
-	sess := createTestSession(t, store, "bd-task2")
+	sess := createTestSession(t, store, "loom-task2")
 
 	// Seed a Claude Code native transcript and sync it into the session.
 	native := filepath.Join(t.TempDir(), "native.jsonl")
@@ -199,8 +199,8 @@ func TestGetSessionTranscript(t *testing.T) {
 
 	handler := handleGetSessionTranscript(NewSessionService(store, nil))
 
-	req := httptest.NewRequest(http.MethodGet, "/api/tasks/bd-task2/sessions/"+sess.SessionID()+"/transcript", nil)
-	req.SetPathValue("taskId", "bd-task2")
+	req := httptest.NewRequest(http.MethodGet, "/api/tasks/loom-task2/sessions/"+sess.SessionID()+"/transcript", nil)
+	req.SetPathValue("taskId", "loom-task2")
 	req.SetPathValue("sessionId", sess.SessionID())
 	rr := httptest.NewRecorder()
 
@@ -241,7 +241,7 @@ func TestGetSessionDiff_NoDiff(t *testing.T) {
 	}
 	// Finalize without DiffPatch.
 	err = sess.Finalize(sessions.FinalizeOptions{
-		TaskID:   "bd-nodiff",
+		TaskID:   "loom-nodiff",
 		ExitCode: 0,
 	})
 	if err != nil {
@@ -250,8 +250,8 @@ func TestGetSessionDiff_NoDiff(t *testing.T) {
 
 	handler := handleGetSessionDiff(NewSessionService(store, nil))
 
-	req := httptest.NewRequest(http.MethodGet, "/api/tasks/bd-nodiff/sessions/"+sess.SessionID()+"/diff", nil)
-	req.SetPathValue("taskId", "bd-nodiff")
+	req := httptest.NewRequest(http.MethodGet, "/api/tasks/loom-nodiff/sessions/"+sess.SessionID()+"/diff", nil)
+	req.SetPathValue("taskId", "loom-nodiff")
 	req.SetPathValue("sessionId", sess.SessionID())
 	rr := httptest.NewRecorder()
 
@@ -264,12 +264,12 @@ func TestGetSessionDiff_NoDiff(t *testing.T) {
 
 func TestGetSessionDiff_WithDiff(t *testing.T) {
 	store := newTestSessionStore(t)
-	sess := createTestSession(t, store, "bd-withdiff")
+	sess := createTestSession(t, store, "loom-withdiff")
 
 	handler := handleGetSessionDiff(NewSessionService(store, nil))
 
-	req := httptest.NewRequest(http.MethodGet, "/api/tasks/bd-withdiff/sessions/"+sess.SessionID()+"/diff", nil)
-	req.SetPathValue("taskId", "bd-withdiff")
+	req := httptest.NewRequest(http.MethodGet, "/api/tasks/loom-withdiff/sessions/"+sess.SessionID()+"/diff", nil)
+	req.SetPathValue("taskId", "loom-withdiff")
 	req.SetPathValue("sessionId", sess.SessionID())
 	rr := httptest.NewRecorder()
 
@@ -296,16 +296,16 @@ func TestNilStore_503(t *testing.T) {
 		handler http.HandlerFunc
 		path    string
 	}{
-		{"ListTaskSessions", handleListTaskSessions(NewSessionService(nil, nil)), "/api/tasks/bd-abc/sessions"},
-		{"GetSession", handleGetSession(NewSessionService(nil, nil)), "/api/tasks/bd-abc/sessions/some-session"},
-		{"GetSessionTranscript", handleGetSessionTranscript(NewSessionService(nil, nil)), "/api/tasks/bd-abc/sessions/some-session/transcript"},
-		{"GetSessionDiff", handleGetSessionDiff(NewSessionService(nil, nil)), "/api/tasks/bd-abc/sessions/some-session/diff"},
+		{"ListTaskSessions", handleListTaskSessions(NewSessionService(nil, nil)), "/api/tasks/loom-abc/sessions"},
+		{"GetSession", handleGetSession(NewSessionService(nil, nil)), "/api/tasks/loom-abc/sessions/some-session"},
+		{"GetSessionTranscript", handleGetSessionTranscript(NewSessionService(nil, nil)), "/api/tasks/loom-abc/sessions/some-session/transcript"},
+		{"GetSessionDiff", handleGetSessionDiff(NewSessionService(nil, nil)), "/api/tasks/loom-abc/sessions/some-session/diff"},
 	}
 
 	for _, h := range handlers {
 		t.Run(h.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, h.path, nil)
-			req.SetPathValue("taskId", "bd-abc")
+			req.SetPathValue("taskId", "loom-abc")
 			req.SetPathValue("sessionId", "some-session")
 			rr := httptest.NewRecorder()
 
@@ -350,8 +350,8 @@ func TestListTaskSessions_EmptyArrayNotNull(t *testing.T) {
 	store := newTestSessionStore(t)
 	handler := handleListTaskSessions(NewSessionService(store, nil))
 
-	req := httptest.NewRequest(http.MethodGet, "/api/tasks/bd-unknown/sessions", nil)
-	req.SetPathValue("taskId", "bd-unknown")
+	req := httptest.NewRequest(http.MethodGet, "/api/tasks/loom-unknown/sessions", nil)
+	req.SetPathValue("taskId", "loom-unknown")
 	rr := httptest.NewRecorder()
 
 	handler.ServeHTTP(rr, req)
@@ -378,12 +378,12 @@ func TestListTaskSessions_EmptyArrayNotNull(t *testing.T) {
 
 func TestGetSessionTranscript_EmptyEntries(t *testing.T) {
 	store := newTestSessionStore(t)
-	sess := createTestSession(t, store, "bd-noentries")
+	sess := createTestSession(t, store, "loom-noentries")
 
 	handler := handleGetSessionTranscript(NewSessionService(store, nil))
 
-	req := httptest.NewRequest(http.MethodGet, "/api/tasks/bd-noentries/sessions/"+sess.SessionID()+"/transcript", nil)
-	req.SetPathValue("taskId", "bd-noentries")
+	req := httptest.NewRequest(http.MethodGet, "/api/tasks/loom-noentries/sessions/"+sess.SessionID()+"/transcript", nil)
+	req.SetPathValue("taskId", "loom-noentries")
 	req.SetPathValue("sessionId", sess.SessionID())
 	rr := httptest.NewRecorder()
 
@@ -422,7 +422,7 @@ func TestGetSession_IsActive(t *testing.T) {
 	}
 
 	// Set TaskID on metadata so ownership check passes.
-	sess.Meta.TaskID = "bd-active"
+	sess.Meta.TaskID = "loom-active"
 	metaJSON, _ := json.Marshal(sess.Meta)
 	metaPath := filepath.Join(store.Dir(), sess.SessionID(), "metadata.json")
 	if err := os.WriteFile(metaPath, metaJSON, 0o600); err != nil {
@@ -431,8 +431,8 @@ func TestGetSession_IsActive(t *testing.T) {
 
 	handler := handleGetSession(NewSessionService(store, nil))
 
-	req := httptest.NewRequest(http.MethodGet, "/api/tasks/bd-active/sessions/"+sess.SessionID(), nil)
-	req.SetPathValue("taskId", "bd-active")
+	req := httptest.NewRequest(http.MethodGet, "/api/tasks/loom-active/sessions/"+sess.SessionID(), nil)
+	req.SetPathValue("taskId", "loom-active")
 	req.SetPathValue("sessionId", sess.SessionID())
 	rr := httptest.NewRecorder()
 

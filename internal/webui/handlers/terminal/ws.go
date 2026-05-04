@@ -11,7 +11,7 @@ import (
 
 	"nhooyr.io/websocket" //nolint:staticcheck // SA1019: websocket migration tracked separately
 
-	"github.com/tysonthomas9/loomcli/internal/ops"
+	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
@@ -21,13 +21,13 @@ import (
 
 // terminalWSParams holds the dependencies for a terminal WebSocket handler.
 type terminalWSParams struct {
-	manager               webuterminal.PTYSource
-	auth                  *realtime.TerminalAuth
-	patterns              []string
-	loomServerURL         string
-	workspaceConfigByIDFn func(string) (*ops.WorkspaceData, error)
-	tabMetaStore          *tabmeta.Store
-	hub                   *realtime.Hub
+	manager       webuterminal.PTYSource
+	auth          *realtime.TerminalAuth
+	patterns      []string
+	loomServerURL string
+	store         store.Store
+	tabMetaStore  *tabmeta.Store
+	hub           *realtime.Hub
 	// serverStartedAt is used to distinguish "tab metadata from a prior
 	// server process whose PTY is long gone" from "tab metadata just
 	// created in this process that hasn't spawned yet". Only the former
@@ -46,16 +46,16 @@ type terminalWSParams struct {
 // on disconnect the PTY and child process stay alive for a grace period so a
 // reconnecting client gets its shell and scrollback back. See PTYManager for
 // the lifecycle details.
-func HandleTerminalWS(manager webuterminal.PTYSource, auth *realtime.TerminalAuth, allowedOrigins []string, loomServerURL string, workspaceConfigByIDFn func(string) (*ops.WorkspaceData, error), tabMetaStore *tabmeta.Store, hub *realtime.Hub, serverStartedAt time.Time) http.HandlerFunc {
+func HandleTerminalWS(manager webuterminal.PTYSource, auth *realtime.TerminalAuth, allowedOrigins []string, loomServerURL string, st store.Store, tabMetaStore *tabmeta.Store, hub *realtime.Hub, serverStartedAt time.Time) http.HandlerFunc {
 	p := &terminalWSParams{
-		manager:               manager,
-		auth:                  auth,
-		patterns:              originHosts(allowedOrigins),
-		loomServerURL:         loomServerURL,
-		workspaceConfigByIDFn: workspaceConfigByIDFn,
-		tabMetaStore:          tabMetaStore,
-		hub:                   hub,
-		serverStartedAt:       serverStartedAt,
+		manager:         manager,
+		auth:            auth,
+		patterns:        originHosts(allowedOrigins),
+		loomServerURL:   loomServerURL,
+		store:           st,
+		tabMetaStore:    tabMetaStore,
+		hub:             hub,
+		serverStartedAt: serverStartedAt,
 	}
 
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -205,13 +205,7 @@ func runTerminalRelay(reqCtx context.Context, conn *websocket.Conn, p *terminalW
 	// part of the scrollback replay.
 	if !reattach && session == "talk-to-lead" && p.loomServerURL != "" {
 		wsID := middleware.WorkspaceFromContext(reqCtx)
-		wsConfigFn := func() (*ops.WorkspaceData, error) {
-			if p.workspaceConfigByIDFn == nil {
-				return nil, errors.New("no workspace config resolver")
-			}
-			return p.workspaceConfigByIDFn(wsID)
-		}
-		injectTerminalContextBanner(att, p.loomServerURL, wsConfigFn)
+		injectTerminalContextBanner(att, p.loomServerURL, workspaceNameFromStore(reqCtx, p.store, wsID))
 	}
 
 	realtime.BroadcastSessionIssueEvent(p.tabMetaStore, p.hub, workspace, session)
@@ -300,24 +294,26 @@ func maybeEmitStaleRestartBanner(reqCtx context.Context, conn *websocket.Conn, p
 
 // injectTerminalContextBanner fetches project context from the loom server
 // and writes a formatted banner to the newly attached session.
-func injectTerminalContextBanner(att webuterminal.Attachment, loomServerURL string, workspaceConfigFn func() (*ops.WorkspaceData, error)) {
+func injectTerminalContextBanner(att webuterminal.Attachment, loomServerURL string, wsName string) {
 	tc, err := webuterminal.FetchTerminalContext(loomServerURL)
 	if err != nil {
 		slog.Error("terminal context fetch failed, skipping banner", "err", err)
 		return
 	}
 
-	var wsName string
-	if workspaceConfigFn != nil {
-		if wsData, wsErr := workspaceConfigFn(); wsErr == nil && wsData != nil {
-			wsName = wsData.Name
-		} else if wsErr != nil {
-			slog.Warn("workspace config unavailable for terminal context", "err", wsErr)
-		}
-	}
-
 	banner := webuterminal.FormatContextBanner(tc, wsName)
 	if _, writeErr := att.WriteInput([]byte(banner)); writeErr != nil {
 		slog.Warn("failed to write context banner to pty", "err", writeErr)
 	}
+}
+
+func workspaceNameFromStore(ctx context.Context, st store.Store, wsID string) string {
+	if st == nil || wsID == "" {
+		return ""
+	}
+	ws, err := st.Workspaces().Get(ctx, wsID)
+	if err != nil || ws == nil {
+		return ""
+	}
+	return ws.Name
 }

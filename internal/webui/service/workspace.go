@@ -72,6 +72,9 @@ type WorkspaceService interface {
 	// Returns refreshed workspace data.
 	ClearDefaultWorkspace(ctx context.Context) (*ops.WorkspaceData, error)
 
+	// GetWorkspaceBackend returns a workspace's AI backend config setting.
+	GetWorkspaceBackend(ctx context.Context, wsID string) (*BackendConfigData, error)
+
 	// PatchWorkspaceBackend updates a workspace's AI backend config setting.
 	// Caller must pre-validate the backend name (isValidBackend).
 	// Returns refreshed workspace data.

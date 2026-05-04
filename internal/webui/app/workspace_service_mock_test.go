@@ -21,6 +21,7 @@ type mockWorkspaceService struct {
 	reorderWorkspacesFn     func(ctx context.Context, order []string) (*ops.WorkspaceData, error)
 	setDefaultWorkspaceFn   func(ctx context.Context, name string) (*ops.WorkspaceData, error)
 	clearDefaultWorkspaceFn func(ctx context.Context) (*ops.WorkspaceData, error)
+	getWorkspaceBackendFn   func(ctx context.Context, wsID string) (*service.BackendConfigData, error)
 	patchWorkspaceBackendFn func(ctx context.Context, wsID string, backend string) (*ops.WorkspaceData, error)
 }
 
@@ -104,6 +105,13 @@ func (m *mockWorkspaceService) SetDefaultWorkspace(ctx context.Context, name str
 func (m *mockWorkspaceService) ClearDefaultWorkspace(ctx context.Context) (*ops.WorkspaceData, error) {
 	if m.clearDefaultWorkspaceFn != nil {
 		return m.clearDefaultWorkspaceFn(ctx)
+	}
+	return nil, service.ErrUnavailable("not available")
+}
+
+func (m *mockWorkspaceService) GetWorkspaceBackend(ctx context.Context, wsID string) (*service.BackendConfigData, error) {
+	if m.getWorkspaceBackendFn != nil {
+		return m.getWorkspaceBackendFn(ctx, wsID)
 	}
 	return nil, service.ErrUnavailable("not available")
 }

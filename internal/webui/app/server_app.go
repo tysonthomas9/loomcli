@@ -6,8 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -18,6 +16,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/webui/storeadapter"
 	"github.com/tysonthomas9/loomcli/internal/webui/svcimpl"
 	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
@@ -76,10 +75,13 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 
 	// Log configuration
 	logger.Info("starting web UI server", "port", config.Port, "pool_size", config.PoolSize, "bind_address", config.BindAddress)
-	if config.SocketPath != "" {
+	daemonExpected := !config.FleetClient
+	if config.SocketPath != "" && daemonExpected {
 		logger.Info("daemon socket configured", "socket", config.SocketPath)
-	} else {
+	} else if daemonExpected {
 		logger.Info("daemon socket: auto-detect")
+	} else {
+		logger.Info("issue daemon disabled; using FleetDB-backed issue service")
 	}
 	if app.corsConfig.Enabled {
 		logger.Info("CORS enabled", "origins", app.corsConfig.AllowedOrigins)
@@ -110,47 +112,45 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	app.multiPool = appinfra.NewMultiPool(middleware.WorkspaceFromContext, config.PoolSize)
 	cleanups = append(cleanups, func() { _ = app.multiPool.Close() })
 
-	// Initialize the initial workspace connection pool (stable UUID or CWD basename).
+	// Initialize the initial workspace connection pool only for daemon-backed
+	// deployments. Store-backed local/cloud modes route issue traffic through
+	// FleetDB and must not probe or trip a local daemon circuit breaker.
 	app.initialWorkspaceID = config.InitialWorkspaceID
-	if app.initialWorkspaceID == "" && !(config.FleetMode && config.Store != nil) {
-		app.initialWorkspaceID = "default"
-		if cwd, err := os.Getwd(); err == nil {
-			app.initialWorkspaceID = filepath.Base(cwd)
-		}
-	}
 	var rawPool *appinfra.ConnectionPool
 	var poolErr error
 
-	if config.SocketPath != "" {
-		rawPool, poolErr = appinfra.NewConnectionPool(config.SocketPath, config.PoolSize)
-	} else {
-		cwd, err := appinfra.GetCwd()
-		if err != nil {
-			logger.Warn("failed to get current directory", "err", err)
+	if daemonExpected {
+		if config.SocketPath != "" {
+			rawPool, poolErr = appinfra.NewConnectionPool(config.SocketPath, config.PoolSize)
 		} else {
-			rawPool, poolErr = appinfra.NewConnectionPoolAutoDiscover(cwd, config.PoolSize)
-		}
-	}
-
-	if poolErr != nil {
-		logger.Warn("failed to initialize daemon connection pool", "err", poolErr)
-		logger.Info("web UI will start but API endpoints may not work until daemon is available")
-	} else {
-		app.pool = appinfra.InitProtectedPool(rawPool, config.Logger)
-		logger.Info("daemon connection pool initialized with circuit breaker")
-
-		func() {
-			testCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-			defer cancel()
-			client, err := app.pool.Get(testCtx)
+			cwd, err := appinfra.GetCwd()
 			if err != nil {
-				logger.Warn("daemon not available at startup", "err", err)
-				logger.Info("API endpoints will attempt to connect when called")
+				logger.Warn("failed to get current directory", "err", err)
 			} else {
-				app.pool.Put(client)
-				logger.Info("daemon connection verified")
+				rawPool, poolErr = appinfra.NewConnectionPoolAutoDiscover(cwd, config.PoolSize)
 			}
-		}()
+		}
+
+		if poolErr != nil {
+			logger.Warn("failed to initialize daemon connection pool", "err", poolErr)
+			logger.Info("web UI will start but API endpoints may not work until daemon is available")
+		} else {
+			app.pool = appinfra.InitProtectedPool(rawPool, config.Logger)
+			logger.Info("daemon connection pool initialized with circuit breaker")
+
+			func() {
+				testCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				defer cancel()
+				client, err := app.pool.Get(testCtx)
+				if err != nil {
+					logger.Warn("daemon not available at startup", "err", err)
+					logger.Info("API endpoints will attempt to connect when called")
+				} else {
+					app.pool.Put(client)
+					logger.Info("daemon connection verified")
+				}
+			}()
+		}
 	}
 
 	// Initialize issue service layer.
@@ -278,17 +278,14 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 		Logger:      config.Logger,
 	})
 
+	workspacePathsFn := storeWorkspacePathsFn(ctx, config)
+
 	// Register the initial workspace.
-	if app.pool != nil && shouldRegisterInitialWorkspace(config, app.initialWorkspaceID) {
+	if app.pool != nil && shouldRegisterInitialWorkspace(workspacePathsFn, app.initialWorkspaceID) {
 		var initialWSPath string
-		if config.WorkspaceListFn != nil {
-			if wsMap, listErr := config.WorkspaceListFn(); listErr == nil {
+		if workspacePathsFn != nil {
+			if wsMap, listErr := workspacePathsFn(); listErr == nil {
 				initialWSPath = wsMap[app.initialWorkspaceID]
-			}
-		}
-		if initialWSPath == "" {
-			if cwd, cwdErr := appinfra.GetCwd(); cwdErr == nil {
-				initialWSPath = cwd
 			}
 		}
 		if err := app.registry.Register(app.initialWorkspaceID, initialWSPath); err != nil {
@@ -300,9 +297,9 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 		app.getMutationsSince = appstores.GetMutationsSinceFn(app.multiSub)
 	}
 
-	// Reconcile all config workspaces. Subscribers for secondary workspaces
+	// Reconcile all store workspaces. Subscribers for secondary workspaces
 	// activate lazily via the workspace middleware on the first API request.
-	appinfra.ReconcileConfigWorkspaces(config.WorkspaceListFn, app.initialWorkspaceID, app.pool != nil, app.registry, config.Logger)
+	appinfra.ReconcileStoreWorkspaces(workspacePathsFn, app.initialWorkspaceID, app.pool != nil, app.registry, config.Logger)
 
 	if config.DaemonStartupFn != nil {
 		onReady := func(wsID string) { _ = app.registry.ActivateSubscriber(wsID) }
@@ -310,8 +307,8 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	}
 
 	// Start health doctor to auto-restart daemons with stuck circuit breakers.
-	if config.WorkspaceListFn != nil {
-		doctor := webui.NewHealthDoctor(app.multiPool, config.WorkspaceListFn, config.Logger, webui.DefaultHealthDoctorConfig())
+	if daemonExpected && workspacePathsFn != nil {
+		doctor := webui.NewHealthDoctor(app.multiPool, workspacePathsFn, config.Logger, webui.DefaultHealthDoctorConfig())
 		go doctor.Run(ctx)
 	}
 
@@ -328,9 +325,8 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	}
 
 	if config.FleetRedis != nil {
-		nameToID := resolveWorkspaceNameToID(config)
 		var tmCleanup func()
-		app.tabMetaStore, tmCleanup = appstores.InitTabMeta(ctx, config.FleetRedis, nameToID, config.Logger)
+		app.tabMetaStore, tmCleanup = appstores.InitTabMeta(ctx, config.FleetRedis, config.Logger)
 		cleanups = append(cleanups, tmCleanup)
 	}
 
@@ -392,14 +388,10 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 		return false
 	}
 
-	// Initialize workspace service layer. Store is the preferred read
-	// source (Phase 4 of fleet-db migration); the legacy ConfigFn /
-	// ConfigByIDFn closures stay wired during the transition for code
-	// paths that haven't yet been moved to store reads.
+	// Initialize workspace service layer. FleetDB Store is the authoritative
+	// workspace source in both local and distributed modes.
 	app.workspaceSvc = service.NewWorkspaceService(service.WorkspaceServiceConfig{
 		Store:          config.Store,
-		ConfigFn:       config.WorkspaceConfigFn,
-		ConfigByIDFn:   config.WorkspaceConfigByIDFn,
 		MultiPool:      app.multiPool,
 		CreateFn:       app.wrappedCreateFn,
 		AddReposFn:     config.WorkspaceAddReposFn,
@@ -436,7 +428,7 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	}
 
 	// Initialize session service layer (always constructed; stores may be nil internally)
-	app.sessSvc = svcimpl.NewSessionService(config.WorkspaceConfigByIDFn, app.sessionHistoryStore)
+	app.sessSvc = svcimpl.NewSessionService(config.Store, app.sessionHistoryStore)
 
 	app.buildHandlers()
 	app.buildModules()
@@ -449,38 +441,26 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	return app, nil
 }
 
-// resolveWorkspaceNameToID creates a name-to-ID mapping from workspace config.
-func resolveWorkspaceNameToID(config webui.ServerConfig) map[string]string {
-	if config.WorkspaceConfigFn == nil {
+func storeWorkspacePathsFn(ctx context.Context, config webui.ServerConfig) func() (map[string]string, error) {
+	if config.Store == nil {
 		return nil
 	}
-	wsData, err := config.WorkspaceConfigFn()
-	if err != nil || wsData == nil {
-		return nil
+	return func() (map[string]string, error) {
+		return storeadapter.ListWorkspacePaths(ctx, config.Store)
 	}
-	nameToID := make(map[string]string, len(wsData.Workspaces))
-	for _, ws := range wsData.Workspaces {
-		if ws.Name != "" && ws.ID != "" {
-			nameToID[ws.Name] = ws.ID
-		}
-	}
-	return nameToID
 }
 
-func shouldRegisterInitialWorkspace(config webui.ServerConfig, workspaceID string) bool {
+func shouldRegisterInitialWorkspace(workspacePathsFn func() (map[string]string, error), workspaceID string) bool {
 	if workspaceID == "" {
 		return false
 	}
-	if !config.FleetMode || config.Store == nil {
-		return true
-	}
-	if config.WorkspaceListFn == nil {
+	if workspacePathsFn == nil {
 		return false
 	}
-	workspaces, err := config.WorkspaceListFn()
+	workspaces, err := workspacePathsFn()
 	if err != nil {
 		return false
 	}
-	_, ok := workspaces[workspaceID]
-	return ok
+	path, ok := workspaces[workspaceID]
+	return ok && path != ""
 }

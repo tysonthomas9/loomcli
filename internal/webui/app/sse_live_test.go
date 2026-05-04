@@ -282,7 +282,7 @@ func TestSSELive_MutationDelivery(t *testing.T) {
 	// Broadcast a mutation
 	hub.Broadcast(&realtime.MutationPayload{
 		Type:        "create",
-		IssueID:     "bd-live-1",
+		IssueID:     "loom-live-1",
 		Title:       "Live Test Issue",
 		Timestamp:   time.Now().UTC().Format(time.RFC3339),
 		WorkspaceID: testWorkspaceID,
@@ -307,8 +307,8 @@ func TestSSELive_MutationDelivery(t *testing.T) {
 	if payload.Type != "create" {
 		t.Errorf("expected type 'create', got %q", payload.Type)
 	}
-	if payload.IssueID != "bd-live-1" {
-		t.Errorf("expected issue_id 'bd-live-1', got %q", payload.IssueID)
+	if payload.IssueID != "loom-live-1" {
+		t.Errorf("expected issue_id 'loom-live-1', got %q", payload.IssueID)
 	}
 	if payload.Title != "Live Test Issue" {
 		t.Errorf("expected title 'Live Test Issue', got %q", payload.Title)
@@ -352,7 +352,7 @@ func TestSSELive_MultipleClients(t *testing.T) {
 	// Broadcast
 	hub.Broadcast(&realtime.MutationPayload{
 		Type:        "create",
-		IssueID:     "bd-multi-1",
+		IssueID:     "loom-multi-1",
 		Title:       "Multi-client Test",
 		Timestamp:   time.Now().UTC().Format(time.RFC3339),
 		WorkspaceID: testWorkspaceID,
@@ -371,8 +371,8 @@ func TestSSELive_MultipleClients(t *testing.T) {
 		if err != nil {
 			t.Fatalf("client %d: failed to parse payload: %v", i, err)
 		}
-		if payload.IssueID != "bd-multi-1" {
-			t.Errorf("client %d: expected issue_id 'bd-multi-1', got %q", i, payload.IssueID)
+		if payload.IssueID != "loom-multi-1" {
+			t.Errorf("client %d: expected issue_id 'loom-multi-1', got %q", i, payload.IssueID)
 		}
 	}
 }
@@ -403,10 +403,10 @@ func TestSSELive_MultipleMutationTypes(t *testing.T) {
 	}
 
 	mutations := []realtime.MutationPayload{
-		{Type: "create", IssueID: "bd-types-1", Title: "Created", Timestamp: time.Now().UTC().Format(time.RFC3339), WorkspaceID: testWorkspaceID},
-		{Type: "update", IssueID: "bd-types-1", Title: "Updated", Timestamp: time.Now().UTC().Format(time.RFC3339), WorkspaceID: testWorkspaceID},
-		{Type: "status", IssueID: "bd-types-1", OldStatus: "open", NewStatus: "in_progress", Timestamp: time.Now().UTC().Format(time.RFC3339), WorkspaceID: testWorkspaceID},
-		{Type: "delete", IssueID: "bd-types-1", Timestamp: time.Now().UTC().Format(time.RFC3339), WorkspaceID: testWorkspaceID},
+		{Type: "create", IssueID: "loom-types-1", Title: "Created", Timestamp: time.Now().UTC().Format(time.RFC3339), WorkspaceID: testWorkspaceID},
+		{Type: "update", IssueID: "loom-types-1", Title: "Updated", Timestamp: time.Now().UTC().Format(time.RFC3339), WorkspaceID: testWorkspaceID},
+		{Type: "status", IssueID: "loom-types-1", OldStatus: "open", NewStatus: "in_progress", Timestamp: time.Now().UTC().Format(time.RFC3339), WorkspaceID: testWorkspaceID},
+		{Type: "delete", IssueID: "loom-types-1", Timestamp: time.Now().UTC().Format(time.RFC3339), WorkspaceID: testWorkspaceID},
 	}
 
 	for i := range mutations {
@@ -446,13 +446,13 @@ func TestSSELive_CatchUpOnReconnect(t *testing.T) {
 	catchUpEvents := []rpc.MutationEvent{
 		{
 			Type:      "create",
-			IssueID:   "bd-catchup-1",
+			IssueID:   "loom-catchup-1",
 			Title:     "Catchup Issue 1",
 			Timestamp: time.Now().UTC().Add(-2 * time.Minute),
 		},
 		{
 			Type:      "update",
-			IssueID:   "bd-catchup-2",
+			IssueID:   "loom-catchup-2",
 			Title:     "Catchup Issue 2",
 			Timestamp: time.Now().UTC().Add(-1 * time.Minute),
 		},
@@ -478,8 +478,8 @@ func TestSSELive_CatchUpOnReconnect(t *testing.T) {
 		t.Errorf("expected first event to be 'mutation' (catch-up), got %q", evt1.Event)
 	}
 	p1, _ := parseMutationPayload(evt1.Data)
-	if p1 == nil || p1.IssueID != "bd-catchup-1" {
-		t.Errorf("expected catch-up issue 'bd-catchup-1', got %v", p1)
+	if p1 == nil || p1.IssueID != "loom-catchup-1" {
+		t.Errorf("expected catch-up issue 'loom-catchup-1', got %v", p1)
 	}
 
 	evt2, err := client.readEvent(3 * time.Second)
@@ -490,8 +490,8 @@ func TestSSELive_CatchUpOnReconnect(t *testing.T) {
 		t.Errorf("expected second event to be 'mutation' (catch-up), got %q", evt2.Event)
 	}
 	p2, _ := parseMutationPayload(evt2.Data)
-	if p2 == nil || p2.IssueID != "bd-catchup-2" {
-		t.Errorf("expected catch-up issue 'bd-catchup-2', got %v", p2)
+	if p2 == nil || p2.IssueID != "loom-catchup-2" {
+		t.Errorf("expected catch-up issue 'loom-catchup-2', got %v", p2)
 	}
 
 	// Then the connected event
@@ -563,7 +563,7 @@ func TestSSELive_MonotonicEventIDs(t *testing.T) {
 	for i := 0; i < numMutations; i++ {
 		hub.Broadcast(&realtime.MutationPayload{
 			Type:        "create",
-			IssueID:     fmt.Sprintf("bd-mono-%d", i),
+			IssueID:     fmt.Sprintf("loom-mono-%d", i),
 			Timestamp:   time.Now().UTC().Format(time.RFC3339),
 			WorkspaceID: testWorkspaceID,
 		})

@@ -11,7 +11,6 @@ type WorkspaceCreateRequest struct {
 	Name      string   `json:"name"`
 	Type      string   `json:"type"`       // "empty", "clone", "template"
 	Repos     []string `json:"repos"`      // repo paths (for empty type)
-	CloneURL  string   `json:"clone_url"`  // single git URL (backward compat)
 	CloneURLs []string `json:"clone_urls"` // multiple git URLs (for clone type)
 	Branch    string   `json:"branch"`     // optional branch name
 	Path      string   `json:"path"`       // optional workspace directory override
@@ -22,6 +21,21 @@ type WorkspaceAddReposRequest struct {
 	WorkspaceID string   `json:"-"`
 	Repos       []string `json:"repos"`
 	Branch      string   `json:"branch"`
+}
+
+// BackendConfigData is the response payload for workspace backend settings.
+type BackendConfigData struct {
+	Backend   string                 `json:"backend"`
+	Source    string                 `json:"source"`
+	Available []string               `json:"available"`
+	Agents    []AgentBackendOverride `json:"agents"`
+}
+
+// AgentBackendOverride represents a per-agent backend override.
+type AgentBackendOverride struct {
+	Worktree string `json:"worktree"`
+	Role     string `json:"role"`
+	Backend  string `json:"backend"`
 }
 
 // WorkspaceKeyFromName derives the fleet-db workspace key used by store-backed

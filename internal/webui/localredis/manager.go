@@ -510,8 +510,7 @@ func (m *Manager) load() error {
 func (m *Manager) replay(snap *snapshot) error {
 	// Correct TTLs for elapsed time between dump and load so a key that
 	// had 60s left at dump time won't be reloaded as if it still has 60s
-	// after a 5-minute restart. Older snapshots without DumpedAt get
-	// zero elapsed (IsZero), which keeps backward compat.
+	// after a 5-minute restart. Snapshots without DumpedAt get zero elapsed.
 	var elapsed time.Duration
 	if !snap.DumpedAt.IsZero() {
 		elapsed = time.Since(snap.DumpedAt)

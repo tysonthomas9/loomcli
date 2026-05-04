@@ -8,12 +8,13 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
 	"github.com/tysonthomas9/loomcli/internal/sessions/transcript/backends"
+	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 	"github.com/tysonthomas9/loomcli/internal/webui/sessionhistory"
+	"github.com/tysonthomas9/loomcli/internal/webui/storeadapter"
 )
 
 // Compile-time check.
@@ -21,23 +22,23 @@ var _ service.SessionService = (*sessionServiceImpl)(nil)
 
 // sessionServiceImpl is the concrete implementation of SessionService.
 type sessionServiceImpl struct {
-	configByIDFn func(string) (*ops.WorkspaceData, error)
-	histStore    *sessionhistory.Store
+	store     store.Store
+	histStore *sessionhistory.Store
 }
 
 // NewSessionService creates a new SessionService implementation.
-func NewSessionService(configByIDFn func(string) (*ops.WorkspaceData, error), histStore *sessionhistory.Store) service.SessionService {
-	return &sessionServiceImpl{configByIDFn: configByIDFn, histStore: histStore}
+func NewSessionService(st store.Store, histStore *sessionhistory.Store) service.SessionService {
+	return &sessionServiceImpl{store: st, histStore: histStore}
 }
 
 // storesForWorkspace returns session stores for all repos in the workspace.
 // Agent worktrees store sessions in their own directories, so we need to
 // search across all repos to find sessions for a given task.
-func (s *sessionServiceImpl) storesForWorkspace(wsID string) ([]*sessions.Store, error) {
-	if s.configByIDFn == nil {
+func (s *sessionServiceImpl) storesForWorkspace(ctx context.Context, wsID string) ([]*sessions.Store, error) {
+	if s.store == nil {
 		return nil, service.ErrUnavailable("session store not available")
 	}
-	wsData, err := s.configByIDFn(wsID)
+	wsData, err := storeadapter.BuildWorkspaceDataForKey(ctx, s.store, wsID)
 	if err != nil || wsData == nil {
 		return nil, service.ErrNotFound("workspace not found")
 	}
@@ -62,8 +63,8 @@ func (s *sessionServiceImpl) storesForWorkspace(wsID string) ([]*sessions.Store,
 }
 
 // findStoreForSession returns the first store that has metadata for the given session.
-func (s *sessionServiceImpl) findStoreForSession(wsID, sessionID string) (*sessions.Store, error) {
-	stores, err := s.storesForWorkspace(wsID)
+func (s *sessionServiceImpl) findStoreForSession(ctx context.Context, wsID, sessionID string) (*sessions.Store, error) {
+	stores, err := s.storesForWorkspace(ctx, wsID)
 	if err != nil {
 		return nil, err
 	}
@@ -75,8 +76,8 @@ func (s *sessionServiceImpl) findStoreForSession(wsID, sessionID string) (*sessi
 	return nil, service.ErrNotFound("session not found")
 }
 
-func (s *sessionServiceImpl) ListTaskSessions(_ context.Context, wsID, taskID string) ([]service.SessionListItem, error) {
-	stores, err := s.storesForWorkspace(wsID)
+func (s *sessionServiceImpl) ListTaskSessions(ctx context.Context, wsID, taskID string) ([]service.SessionListItem, error) {
+	stores, err := s.storesForWorkspace(ctx, wsID)
 	if err != nil {
 		return nil, err
 	}
@@ -107,14 +108,14 @@ func (s *sessionServiceImpl) ListTaskSessions(_ context.Context, wsID, taskID st
 	return items, nil
 }
 
-func (s *sessionServiceImpl) GetSession(_ context.Context, wsID, taskID, sessionID string) (*service.SessionDetailData, error) {
+func (s *sessionServiceImpl) GetSession(ctx context.Context, wsID, taskID, sessionID string) (*service.SessionDetailData, error) {
 	if taskID == "" || !validTaskID.MatchString(taskID) {
 		return nil, service.ErrValidation("invalid task ID")
 	}
 	if sessionID == "" || !validSessionID.MatchString(sessionID) {
 		return nil, service.ErrValidation("invalid session ID")
 	}
-	store, err := s.findStoreForSession(wsID, sessionID)
+	store, err := s.findStoreForSession(ctx, wsID, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -139,8 +140,8 @@ func (s *sessionServiceImpl) GetSession(_ context.Context, wsID, taskID, session
 	}, nil
 }
 
-func (s *sessionServiceImpl) GetSessionTranscript(_ context.Context, wsID, taskID, sessionID string) ([]transcript.Event, error) {
-	store, _, err := s.authorizedSessionStore(wsID, taskID, sessionID)
+func (s *sessionServiceImpl) GetSessionTranscript(ctx context.Context, wsID, taskID, sessionID string) ([]transcript.Event, error) {
+	store, _, err := s.authorizedSessionStore(ctx, wsID, taskID, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -155,8 +156,8 @@ func (s *sessionServiceImpl) GetSessionTranscript(_ context.Context, wsID, taskI
 	return events, nil
 }
 
-func (s *sessionServiceImpl) ListSessionSubagents(_ context.Context, wsID, taskID, sessionID string) ([]string, error) {
-	store, _, err := s.authorizedSessionStore(wsID, taskID, sessionID)
+func (s *sessionServiceImpl) ListSessionSubagents(ctx context.Context, wsID, taskID, sessionID string) ([]string, error) {
+	store, _, err := s.authorizedSessionStore(ctx, wsID, taskID, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -176,8 +177,8 @@ func (s *sessionServiceImpl) ListSessionSubagents(_ context.Context, wsID, taskI
 	return ids, nil
 }
 
-func (s *sessionServiceImpl) GetSessionSubagentTranscript(_ context.Context, wsID, taskID, sessionID, subagentID string) ([]transcript.Event, error) {
-	store, meta, err := s.authorizedSessionStore(wsID, taskID, sessionID)
+func (s *sessionServiceImpl) GetSessionSubagentTranscript(ctx context.Context, wsID, taskID, sessionID, subagentID string) ([]transcript.Event, error) {
+	store, meta, err := s.authorizedSessionStore(ctx, wsID, taskID, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -207,14 +208,14 @@ func (s *sessionServiceImpl) GetSessionSubagentTranscript(_ context.Context, wsI
 // authorizedSessionStore looks up the session's store and metadata, enforces
 // task ownership, and validates the IDs. Shared by transcript and diff
 // endpoints to cut boilerplate.
-func (s *sessionServiceImpl) authorizedSessionStore(wsID, taskID, sessionID string) (*sessions.Store, *sessions.SessionMetadata, error) {
+func (s *sessionServiceImpl) authorizedSessionStore(ctx context.Context, wsID, taskID, sessionID string) (*sessions.Store, *sessions.SessionMetadata, error) {
 	if taskID == "" || !validTaskID.MatchString(taskID) {
 		return nil, nil, service.ErrValidation("invalid task ID")
 	}
 	if sessionID == "" || !validSessionID.MatchString(sessionID) {
 		return nil, nil, service.ErrValidation("invalid session ID")
 	}
-	store, err := s.findStoreForSession(wsID, sessionID)
+	store, err := s.findStoreForSession(ctx, wsID, sessionID)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -232,14 +233,14 @@ func (s *sessionServiceImpl) authorizedSessionStore(wsID, taskID, sessionID stri
 	return store, meta, nil
 }
 
-func (s *sessionServiceImpl) GetSessionDiff(_ context.Context, wsID, taskID, sessionID string) (string, error) {
+func (s *sessionServiceImpl) GetSessionDiff(ctx context.Context, wsID, taskID, sessionID string) (string, error) {
 	if taskID == "" || !validTaskID.MatchString(taskID) {
 		return "", service.ErrValidation("invalid task ID")
 	}
 	if sessionID == "" || !validSessionID.MatchString(sessionID) {
 		return "", service.ErrValidation("invalid session ID")
 	}
-	store, err := s.findStoreForSession(wsID, sessionID)
+	store, err := s.findStoreForSession(ctx, wsID, sessionID)
 	if err != nil {
 		return "", err
 	}

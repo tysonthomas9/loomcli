@@ -187,9 +187,6 @@ func TestNormalizeBackendName(t *testing.T) {
 		in, want string
 	}{
 		{"", ""},
-		{"beads", "fleet"},
-		{"beads-pooled", "fleet"},
-		{"Beads-Pooled", "fleet"},
 		{"fleet", "fleet"},
 		{"fleet-db", "fleet"},
 		{"fleetdb", "fleet"},

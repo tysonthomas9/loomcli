@@ -193,8 +193,6 @@ func normalizeBackendName(name string) string {
 	switch {
 	case n == "":
 		return ""
-	case strings.HasPrefix(n, "beads"):
-		return "fleet"
 	case n == "fleet-db" || n == "fleetdb":
 		return "fleet"
 	case strings.HasPrefix(n, "fleet"):

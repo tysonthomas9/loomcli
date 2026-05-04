@@ -3,24 +3,31 @@ package issues
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/ops"
+	storepkg "github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
-// testWorkspaceConfigFn returns a workspace config function for testing.
-func testWorkspaceConfigFn(name string, workspaces []ops.WorkspaceSummary) func() (*ops.WorkspaceData, error) {
-	return func() (*ops.WorkspaceData, error) {
-		return &ops.WorkspaceData{
-			Name:       name,
-			Workspaces: workspaces,
-		}, nil
+// testWorkspaceStore returns a FleetDB-style workspace store for testing.
+func testWorkspaceStore(_ string, workspaces []ops.WorkspaceSummary) storepkg.Store {
+	st := memstore.New()
+	for _, ws := range workspaces {
+		key := ws.ID
+		if key == "" {
+			key = ws.Name
+		}
+		if key == "" {
+			continue
+		}
+		_, _ = st.Workspaces().Create(context.Background(), storepkg.WorkspaceCreate{Key: key, Name: ws.Name})
 	}
+	return st
 }
 
 // defaultWorkspaces returns a standard set of workspaces for tests.
@@ -48,11 +55,12 @@ func TestHandleMoveIssue_Success(t *testing.T) {
 			}, nil
 		},
 	}
-	wsCfg := testWorkspaceConfigFn("alpha", defaultWorkspaces())
+	wsCfg := testWorkspaceStore("alpha", defaultWorkspaces())
 	handler := handleMoveIssue(svc, wsCfg)
 
 	body := `{"target_workspace":"beta"}`
-	req := httptest.NewRequest(http.MethodPost, "/api/issues/src-001/move", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/alpha/issues/src-001/move", strings.NewReader(body))
+	req.SetPathValue("ws", "alpha")
 	req.SetPathValue("id", "src-001")
 	rec := httptest.NewRecorder()
 
@@ -87,7 +95,7 @@ func TestHandleMoveIssue_Success(t *testing.T) {
 // TestHandleMoveIssue_MissingIssueID verifies 400 when issue ID is empty in path.
 func TestHandleMoveIssue_MissingIssueID(t *testing.T) {
 	svc := &mockIssueService{}
-	wsCfg := testWorkspaceConfigFn("alpha", defaultWorkspaces())
+	wsCfg := testWorkspaceStore("alpha", defaultWorkspaces())
 	handler := handleMoveIssue(svc, wsCfg)
 
 	body := `{"target_workspace":"beta"}`
@@ -111,7 +119,7 @@ func TestHandleMoveIssue_MissingIssueID(t *testing.T) {
 // TestHandleMoveIssue_MissingTargetWorkspace verifies 400 when target_workspace is empty.
 func TestHandleMoveIssue_MissingTargetWorkspace(t *testing.T) {
 	svc := &mockIssueService{}
-	wsCfg := testWorkspaceConfigFn("alpha", defaultWorkspaces())
+	wsCfg := testWorkspaceStore("alpha", defaultWorkspaces())
 	handler := handleMoveIssue(svc, wsCfg)
 
 	body := `{"target_workspace":""}`
@@ -144,7 +152,7 @@ func TestHandleMoveIssue_TargetWorkspaceNotFound(t *testing.T) {
 			return nil, nil
 		},
 	}
-	wsCfg := testWorkspaceConfigFn("alpha", defaultWorkspaces())
+	wsCfg := testWorkspaceStore("alpha", defaultWorkspaces())
 	handler := handleMoveIssue(svc, wsCfg)
 
 	body := `{"target_workspace":"nonexistent"}`
@@ -177,11 +185,12 @@ func TestHandleMoveIssue_SameWorkspaceRejected(t *testing.T) {
 			return nil, nil
 		},
 	}
-	wsCfg := testWorkspaceConfigFn("alpha", defaultWorkspaces())
+	wsCfg := testWorkspaceStore("alpha", defaultWorkspaces())
 	handler := handleMoveIssue(svc, wsCfg)
 
 	body := `{"target_workspace":"alpha"}`
-	req := httptest.NewRequest(http.MethodPost, "/api/issues/src-001/move", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/alpha/issues/src-001/move", strings.NewReader(body))
+	req.SetPathValue("ws", "alpha")
 	req.SetPathValue("id", "src-001")
 	rec := httptest.NewRecorder()
 
@@ -206,7 +215,7 @@ func TestHandleMoveIssue_SourceIssueNotFound(t *testing.T) {
 			return nil, service.ErrNotFound("issue not found: src-999")
 		},
 	}
-	wsCfg := testWorkspaceConfigFn("alpha", defaultWorkspaces())
+	wsCfg := testWorkspaceStore("alpha", defaultWorkspaces())
 	handler := handleMoveIssue(svc, wsCfg)
 
 	body := `{"target_workspace":"beta"}`
@@ -228,11 +237,12 @@ func TestHandleMoveIssue_SourceIssueClosed(t *testing.T) {
 			return nil, service.ErrValidation("cannot move a closed issue")
 		},
 	}
-	wsCfg := testWorkspaceConfigFn("alpha", defaultWorkspaces())
+	wsCfg := testWorkspaceStore("alpha", defaultWorkspaces())
 	handler := handleMoveIssue(svc, wsCfg)
 
 	body := `{"target_workspace":"beta"}`
-	req := httptest.NewRequest(http.MethodPost, "/api/issues/src-001/move", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/alpha/issues/src-001/move", strings.NewReader(body))
+	req.SetPathValue("ws", "alpha")
 	req.SetPathValue("id", "src-001")
 	rec := httptest.NewRecorder()
 
@@ -255,7 +265,7 @@ func TestHandleMoveIssue_PartialFailure_CloseFails(t *testing.T) {
 			}, nil
 		},
 	}
-	wsCfg := testWorkspaceConfigFn("alpha", defaultWorkspaces())
+	wsCfg := testWorkspaceStore("alpha", defaultWorkspaces())
 	handler := handleMoveIssue(svc, wsCfg)
 
 	body := `{"target_workspace":"beta"}`
@@ -304,7 +314,7 @@ func TestHandleMoveIssue_ServiceTimeout(t *testing.T) {
 			return nil, service.ErrTimeout("daemon not available")
 		},
 	}
-	wsCfg := testWorkspaceConfigFn("alpha", defaultWorkspaces())
+	wsCfg := testWorkspaceStore("alpha", defaultWorkspaces())
 	handler := handleMoveIssue(svc, wsCfg)
 
 	body := `{"target_workspace":"beta"}`
@@ -352,7 +362,7 @@ func TestHandleMoveIssue_CreateFails(t *testing.T) {
 			return nil, service.ErrInternal("failed to create issue in target workspace", nil)
 		},
 	}
-	wsCfg := testWorkspaceConfigFn("alpha", defaultWorkspaces())
+	wsCfg := testWorkspaceStore("alpha", defaultWorkspaces())
 	handler := handleMoveIssue(svc, wsCfg)
 
 	body := `{"target_workspace":"beta"}`
@@ -379,7 +389,7 @@ func TestHandleMoveIssue_AssigneeWarning(t *testing.T) {
 			}, nil
 		},
 	}
-	wsCfg := testWorkspaceConfigFn("alpha", defaultWorkspaces())
+	wsCfg := testWorkspaceStore("alpha", defaultWorkspaces())
 	handler := handleMoveIssue(svc, wsCfg)
 
 	body := `{"target_workspace":"beta"}`
@@ -415,7 +425,7 @@ func TestHandleMoveIssue_AssigneeWarning(t *testing.T) {
 // TestHandleMoveIssue_InvalidRequestBody verifies 400 for invalid JSON.
 func TestHandleMoveIssue_InvalidRequestBody(t *testing.T) {
 	svc := &mockIssueService{}
-	wsCfg := testWorkspaceConfigFn("alpha", defaultWorkspaces())
+	wsCfg := testWorkspaceStore("alpha", defaultWorkspaces())
 	handler := handleMoveIssue(svc, wsCfg)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/issues/src-001/move", strings.NewReader(`{not json`))
@@ -442,7 +452,7 @@ func TestHandleMoveIssue_ServiceUnavailable(t *testing.T) {
 			return nil, service.ErrUnavailable("daemon not available")
 		},
 	}
-	wsCfg := testWorkspaceConfigFn("alpha", defaultWorkspaces())
+	wsCfg := testWorkspaceStore("alpha", defaultWorkspaces())
 	handler := handleMoveIssue(svc, wsCfg)
 
 	body := `{"target_workspace":"beta"}`
@@ -469,7 +479,7 @@ func TestHandleMoveIssue_AddCommentFails_StillSucceeds(t *testing.T) {
 			}, nil
 		},
 	}
-	wsCfg := testWorkspaceConfigFn("alpha", defaultWorkspaces())
+	wsCfg := testWorkspaceStore("alpha", defaultWorkspaces())
 	handler := handleMoveIssue(svc, wsCfg)
 
 	body := `{"target_workspace":"beta"}`
@@ -502,9 +512,7 @@ func TestHandleMoveIssue_AddCommentFails_StillSucceeds(t *testing.T) {
 	}
 }
 
-// TestHandleMoveIssue_WorkspaceConfigError verifies 500 when workspaceConfigFn
-// returns an error.
-func TestHandleMoveIssue_WorkspaceConfigError(t *testing.T) {
+func TestHandleMoveIssue_WorkspaceStoreUnavailable(t *testing.T) {
 	svc := &mockIssueService{
 		moveIssueFunc: func(ctx context.Context, params service.MoveIssueParams) (*service.MoveIssueResult, error) {
 			_, err := params.Validator.ValidateTarget(params.TargetWorkspace)
@@ -514,10 +522,7 @@ func TestHandleMoveIssue_WorkspaceConfigError(t *testing.T) {
 			return nil, nil
 		},
 	}
-	errCfg := func() (*ops.WorkspaceData, error) {
-		return nil, errors.New("config file not found")
-	}
-	handler := handleMoveIssue(svc, errCfg)
+	handler := handleMoveIssue(svc, nil)
 
 	body := `{"target_workspace":"beta"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/issues/src-001/move", strings.NewReader(body))
@@ -526,8 +531,8 @@ func TestHandleMoveIssue_WorkspaceConfigError(t *testing.T) {
 
 	handler.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("expected 500, got %d: %s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -538,7 +543,7 @@ func TestHandleMoveIssue_ShowGenericError(t *testing.T) {
 			return nil, service.ErrInternal("database connection lost", nil)
 		},
 	}
-	wsCfg := testWorkspaceConfigFn("alpha", defaultWorkspaces())
+	wsCfg := testWorkspaceStore("alpha", defaultWorkspaces())
 	handler := handleMoveIssue(svc, wsCfg)
 
 	body := `{"target_workspace":"beta"}`
@@ -561,7 +566,7 @@ func TestHandleMoveIssue_ResponseHasJSONContentType(t *testing.T) {
 			return nil, service.ErrUnavailable("not available")
 		},
 	}
-	handler := handleMoveIssue(svc, testWorkspaceConfigFn("alpha", defaultWorkspaces()))
+	handler := handleMoveIssue(svc, testWorkspaceStore("alpha", defaultWorkspaces()))
 
 	body := `{"target_workspace":"beta"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/issues/src-001/move", strings.NewReader(body))
@@ -589,11 +594,12 @@ func TestHandleMoveIssue_ValidatorPassedToService(t *testing.T) {
 			}, nil
 		},
 	}
-	wsCfg := testWorkspaceConfigFn("alpha", defaultWorkspaces())
+	wsCfg := testWorkspaceStore("alpha", defaultWorkspaces())
 	handler := handleMoveIssue(svc, wsCfg)
 
 	body := `{"target_workspace":"beta"}`
-	req := httptest.NewRequest(http.MethodPost, "/api/issues/src-001/move", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/alpha/issues/src-001/move", strings.NewReader(body))
+	req.SetPathValue("ws", "alpha")
 	req.SetPathValue("id", "src-001")
 	rec := httptest.NewRecorder()
 

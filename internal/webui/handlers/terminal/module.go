@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/ops"
+	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
@@ -21,17 +21,17 @@ import (
 // session-status) are gone — each WebSocket now owns a fresh PTY with
 // wterm-style wire, so there are no persistent sessions to manage.
 type Module struct {
-	termSvc               service.TerminalService
-	agentSvc              service.AgentService // may be nil — agent routes skipped
-	ptyMgr                webuterminal.PTYSource
-	agentTmuxMgr          *webuterminal.AgentTmuxManager // may be nil — tmux missing
-	termAuth              *realtime.TerminalAuth         // may be nil — token routes skipped
-	allowedOrigins        []string
-	loomServerURL         string
-	workspaceConfigByIDFn func(string) (*ops.WorkspaceData, error)
-	tabMetaStore          *tabmeta.Store
-	hub                   *realtime.Hub
-	serverStartedAt       time.Time
+	termSvc         service.TerminalService
+	agentSvc        service.AgentService // may be nil — agent routes skipped
+	ptyMgr          webuterminal.PTYSource
+	agentTmuxMgr    *webuterminal.AgentTmuxManager // may be nil — tmux missing
+	termAuth        *realtime.TerminalAuth         // may be nil — token routes skipped
+	allowedOrigins  []string
+	loomServerURL   string
+	store           store.Store
+	tabMetaStore    *tabmeta.Store
+	hub             *realtime.Hub
+	serverStartedAt time.Time
 }
 
 // NewModule returns a Module. Any of agentSvc, agentTmuxMgr, and termAuth
@@ -46,23 +46,23 @@ func NewModule(
 	termAuth *realtime.TerminalAuth,
 	allowedOrigins []string,
 	loomServerURL string,
-	workspaceConfigByIDFn func(string) (*ops.WorkspaceData, error),
+	st store.Store,
 	tabMetaStore *tabmeta.Store,
 	hub *realtime.Hub,
 	serverStartedAt time.Time,
 ) *Module {
 	return &Module{
-		termSvc:               termSvc,
-		agentSvc:              agentSvc,
-		ptyMgr:                ptyMgr,
-		agentTmuxMgr:          agentTmuxMgr,
-		termAuth:              termAuth,
-		allowedOrigins:        allowedOrigins,
-		loomServerURL:         loomServerURL,
-		workspaceConfigByIDFn: workspaceConfigByIDFn,
-		tabMetaStore:          tabMetaStore,
-		hub:                   hub,
-		serverStartedAt:       serverStartedAt,
+		termSvc:         termSvc,
+		agentSvc:        agentSvc,
+		ptyMgr:          ptyMgr,
+		agentTmuxMgr:    agentTmuxMgr,
+		termAuth:        termAuth,
+		allowedOrigins:  allowedOrigins,
+		loomServerURL:   loomServerURL,
+		store:           st,
+		tabMetaStore:    tabMetaStore,
+		hub:             hub,
+		serverStartedAt: serverStartedAt,
 	}
 }
 
@@ -84,6 +84,6 @@ func (m *Module) Register(mux *http.ServeMux) {
 		mux.HandleFunc("GET /api/workspaces/{ws}/terminal/token", HandleTerminalToken(m.termSvc))
 	}
 	if m.ptyMgr != nil {
-		mux.HandleFunc("GET /api/workspaces/{ws}/terminal/ws", HandleTerminalWS(m.ptyMgr, m.termAuth, m.allowedOrigins, m.loomServerURL, m.workspaceConfigByIDFn, m.tabMetaStore, m.hub, m.serverStartedAt))
+		mux.HandleFunc("GET /api/workspaces/{ws}/terminal/ws", HandleTerminalWS(m.ptyMgr, m.termAuth, m.allowedOrigins, m.loomServerURL, m.store, m.tabMetaStore, m.hub, m.serverStartedAt))
 	}
 }

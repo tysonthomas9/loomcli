@@ -111,9 +111,6 @@ func TestStartupReconciliation_SkipsInitialWorkspace(t *testing.T) {
 	defer cancel()
 
 	// The reconciliation loop in StartServer skips the initialWorkspaceID.
-	// By default, initialWorkspaceID = basename of cwd. We provide
-	// WorkspaceListFn that returns a map including the initial workspace to
-	// verify it is skipped (i.e., not double-registered).
 	registered := make(map[string]bool)
 	config := webui.ServerConfig{
 		Port:            port,
@@ -121,14 +118,6 @@ func TestStartupReconciliation_SkipsInitialWorkspace(t *testing.T) {
 		PoolSize:        1,
 		ShutdownTimeout: 1 * time.Second,
 		MaxPortAttempts: 5,
-		WorkspaceListFn: func() (map[string]string, error) {
-			// "comet" will match the cwd basename in our worktree.
-			// We also include the literal "default" just in case.
-			// Both should be skipped if they match initialWorkspaceID.
-			return map[string]string{
-				"extra-ws": t.TempDir(),
-			}, nil
-		},
 	}
 
 	serverDone := make(chan error, 1)
@@ -156,7 +145,7 @@ func TestStartupReconciliation_SkipsInitialWorkspace(t *testing.T) {
 	}
 
 	_ = registered
-	// Server started successfully with WorkspaceListFn; shut it down.
+	// Server started successfully; shut it down.
 	cancel()
 
 	select {
@@ -169,7 +158,7 @@ func TestStartupReconciliation_SkipsInitialWorkspace(t *testing.T) {
 	}
 }
 
-func TestStartupReconciliation_NilWorkspaceListFn(t *testing.T) {
+func TestStartupReconciliation_NoStore(t *testing.T) {
 	port := grabEphemeralPort(t)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -181,7 +170,6 @@ func TestStartupReconciliation_NilWorkspaceListFn(t *testing.T) {
 		PoolSize:        1,
 		ShutdownTimeout: 1 * time.Second,
 		MaxPortAttempts: 5,
-		WorkspaceListFn: nil, // single-workspace mode
 	}
 
 	serverDone := make(chan error, 1)
@@ -207,7 +195,7 @@ func TestStartupReconciliation_NilWorkspaceListFn(t *testing.T) {
 		t.Fatal("server did not become ready within timeout")
 	}
 
-	// Server started successfully in single-workspace mode; shut it down.
+	// Server started successfully without a workspace store; shut it down.
 	cancel()
 
 	select {
@@ -220,7 +208,7 @@ func TestStartupReconciliation_NilWorkspaceListFn(t *testing.T) {
 	}
 }
 
-func TestStartupReconciliation_WorkspaceListFnReturnsError(t *testing.T) {
+func TestStartupReconciliation_NoStoreSecondCase(t *testing.T) {
 	port := grabEphemeralPort(t)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -232,9 +220,6 @@ func TestStartupReconciliation_WorkspaceListFnReturnsError(t *testing.T) {
 		PoolSize:        1,
 		ShutdownTimeout: 1 * time.Second,
 		MaxPortAttempts: 5,
-		WorkspaceListFn: func() (map[string]string, error) {
-			return nil, fmt.Errorf("config file corrupt")
-		},
 	}
 
 	serverDone := make(chan error, 1)
@@ -260,8 +245,7 @@ func TestStartupReconciliation_WorkspaceListFnReturnsError(t *testing.T) {
 		t.Fatal("server did not become ready within timeout")
 	}
 
-	// Server started successfully despite WorkspaceListFn error; reconciliation
-	// was skipped gracefully.
+	// Server started successfully without store-backed workspace reconciliation.
 	cancel()
 
 	select {
@@ -274,7 +258,7 @@ func TestStartupReconciliation_WorkspaceListFnReturnsError(t *testing.T) {
 	}
 }
 
-func TestStartupReconciliation_WorkspaceListFnReturnsEmptyMap(t *testing.T) {
+func TestStartupReconciliation_NoStoreEmptyCase(t *testing.T) {
 	port := grabEphemeralPort(t)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -286,9 +270,6 @@ func TestStartupReconciliation_WorkspaceListFnReturnsEmptyMap(t *testing.T) {
 		PoolSize:        1,
 		ShutdownTimeout: 1 * time.Second,
 		MaxPortAttempts: 5,
-		WorkspaceListFn: func() (map[string]string, error) {
-			return map[string]string{}, nil
-		},
 	}
 
 	serverDone := make(chan error, 1)
@@ -339,7 +320,7 @@ func TestReconciliationLogic_SkipsInitialWorkspace(t *testing.T) {
 	initialPath := t.TempDir()
 	_ = registry.Register(initialWS, initialPath)
 
-	// Simulate WorkspaceListFn returning a map that includes the initial workspace
+	// Simulate the store path map including the initial workspace.
 	workspaces := map[string]string{
 		"my-project": initialPath,
 		"extra-1":    t.TempDir(),
@@ -391,13 +372,13 @@ func TestReconciliationLogic_EmptyWorkspaceMap(t *testing.T) {
 
 }
 
-func TestReconciliationLogic_NilWorkspaceListFn(t *testing.T) {
+func TestReconciliationLogic_NilStorePathList(t *testing.T) {
 	registry, multiPool := newTestCoordinatorRegistry(t)
 
-	// Replicate the guard from StartServer: if WorkspaceListFn is nil, skip.
-	var workspaceListFn func() (map[string]string, error)
-	if workspaceListFn != nil {
-		workspaces, err := workspaceListFn()
+	// Replicate the guard from StartServer: if the store path list is nil, skip.
+	var storePathList func() (map[string]string, error)
+	if storePathList != nil {
+		workspaces, err := storePathList()
 		if err == nil {
 			for wsName, wsPath := range workspaces {
 				_ = registry.Register(wsName, wsPath)
@@ -408,22 +389,22 @@ func TestReconciliationLogic_NilWorkspaceListFn(t *testing.T) {
 	// No pools should have been registered
 	ids := multiPool.WorkspaceIDs()
 	if len(ids) != 0 {
-		t.Errorf("expected 0 workspace IDs when WorkspaceListFn is nil, got %d", len(ids))
+		t.Errorf("expected 0 workspace IDs when store path list is nil, got %d", len(ids))
 	}
 }
 
-func TestReconciliationLogic_ErrorFromWorkspaceListFn(t *testing.T) {
+func TestReconciliationLogic_ErrorFromStorePathList(t *testing.T) {
 	registry, multiPool := newTestCoordinatorRegistry(t)
 
 	// Replicate the reconciliation with an error-returning function
-	workspaceListFn := func() (map[string]string, error) {
+	storePathList := func() (map[string]string, error) {
 		return nil, fmt.Errorf("disk I/O error")
 	}
 
-	workspaces, err := workspaceListFn()
+	workspaces, err := storePathList()
 	if err != nil {
 		// Mimic server behavior: log and skip
-		t.Logf("WorkspaceListFn returned error (expected): %v", err)
+		t.Logf("store path list returned error (expected): %v", err)
 	} else {
 		for wsName, wsPath := range workspaces {
 			_ = registry.Register(wsName, wsPath)
@@ -433,11 +414,11 @@ func TestReconciliationLogic_ErrorFromWorkspaceListFn(t *testing.T) {
 	// No pools should have been registered
 	ids := multiPool.WorkspaceIDs()
 	if len(ids) != 0 {
-		t.Errorf("expected 0 workspace IDs when WorkspaceListFn errors, got %d", len(ids))
+		t.Errorf("expected 0 workspace IDs when store path list errors, got %d", len(ids))
 	}
 }
 
-func TestReconcileConfigWorkspaces_UUIDKeys(t *testing.T) {
+func TestReconcileStoreWorkspaces_UUIDKeys(t *testing.T) {
 	registry, multiPool := newTestCoordinatorRegistry(t)
 
 	// Simulate initial workspace registered by UUID (as server.go does post-T2)
@@ -448,7 +429,7 @@ func TestReconcileConfigWorkspaces_UUIDKeys(t *testing.T) {
 	extraUUID := "ccccdddd-5555-6666-7777-888899990000"
 	extraPath := t.TempDir()
 
-	// WorkspaceListFn now returns uuid→path
+	// Store path listing returns uuid-to-path.
 	listFn := func() (map[string]string, error) {
 		return map[string]string{
 			initialUUID: initialPath,
@@ -456,7 +437,7 @@ func TestReconcileConfigWorkspaces_UUIDKeys(t *testing.T) {
 		}, nil
 	}
 
-	appinfra.ReconcileConfigWorkspaces(listFn, initialUUID, true, registry, slog.Default())
+	appinfra.ReconcileStoreWorkspaces(listFn, initialUUID, true, registry, slog.Default())
 
 	// Verify: initial workspace not double-registered, extra workspace added
 	ids := multiPool.WorkspaceIDs()
@@ -472,10 +453,10 @@ func TestReconcileConfigWorkspaces_UUIDKeys(t *testing.T) {
 	}
 }
 
-func TestReconcileConfigWorkspaces_PreMigrationNameKeys(t *testing.T) {
+func TestReconcileStoreWorkspaces_NameKeys(t *testing.T) {
 	registry, multiPool := newTestCoordinatorRegistry(t)
 
-	// Pre-migration: initial workspace registered by name (no UUID available)
+	// Name keys are valid when the workspace key was derived from its name.
 	initialName := "my-project"
 	initialPath := t.TempDir()
 	_ = registry.Register(initialName, initialPath)
@@ -483,7 +464,7 @@ func TestReconcileConfigWorkspaces_PreMigrationNameKeys(t *testing.T) {
 	extraName := "other-project"
 	extraPath := t.TempDir()
 
-	// WorkspaceListFn returns name→path (pre-migration fallback)
+	// Store path listing can return name-to-path.
 	listFn := func() (map[string]string, error) {
 		return map[string]string{
 			initialName: initialPath,
@@ -491,7 +472,7 @@ func TestReconcileConfigWorkspaces_PreMigrationNameKeys(t *testing.T) {
 		}, nil
 	}
 
-	appinfra.ReconcileConfigWorkspaces(listFn, initialName, true, registry, slog.Default())
+	appinfra.ReconcileStoreWorkspaces(listFn, initialName, true, registry, slog.Default())
 
 	ids := multiPool.WorkspaceIDs()
 	sort.Strings(ids)
@@ -506,7 +487,7 @@ func TestReconcileConfigWorkspaces_PreMigrationNameKeys(t *testing.T) {
 	}
 }
 
-func TestReconcileConfigWorkspaces_UUIDSkipMatchesInitialID(t *testing.T) {
+func TestReconcileStoreWorkspaces_UUIDSkipMatchesInitialID(t *testing.T) {
 	// Verifies the skip logic works when both initialID and map keys are UUIDs.
 	// This was the core bug T2 fixes: previously, map keys were names but
 	// initialID was a UUID, so the skip check failed and the initial workspace
@@ -529,7 +510,7 @@ func TestReconcileConfigWorkspaces_UUIDSkipMatchesInitialID(t *testing.T) {
 			initialUUID: initialPath,
 		}, nil
 	}
-	appinfra.ReconcileConfigWorkspaces(listFn, initialUUID, true, registry, slog.Default())
+	appinfra.ReconcileStoreWorkspaces(listFn, initialUUID, true, registry, slog.Default())
 
 	// The pool should NOT have been replaced (skip logic worked)
 	poolAfter := multiPool.PoolForWorkspace(initialUUID)
@@ -551,7 +532,7 @@ func TestReconciliationLogic_OnlyInitialInMap(t *testing.T) {
 	initialPath := t.TempDir()
 	_ = registry.Register(initialWS, initialPath)
 
-	// WorkspaceListFn returns only the initial workspace
+	// Store path listing returns only the initial workspace.
 	workspaces := map[string]string{
 		"my-workspace": initialPath,
 	}

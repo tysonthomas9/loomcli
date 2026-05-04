@@ -1,12 +1,5 @@
 // Package storeadapter exposes ops.WorkspaceData-shaped views over a
-// store.Store handle. The webui legacy contracts (REST endpoints,
-// service.WorkspaceService) all consume *ops.WorkspaceData; this
-// package provides the transformation from domain entities to that
-// view-model so the rest of webui stays oblivious to the migration.
-//
-// Phase 4 of the loom -> fleet-db migration uses this adapter to swap
-// the yaml-derived ConfigFn closures in webui.ServerConfig for Store
-// calls without rewriting every consumer simultaneously.
+// store.Store handle.
 package storeadapter
 
 import (
@@ -124,8 +117,7 @@ func ResolveWorkspaceKeyByName(ctx context.Context, s store.Store, name string) 
 	if s == nil {
 		return "", errors.New("storeadapter: nil store")
 	}
-	// Try Get first — names that satisfy the key regex frequently double
-	// as keys (legacy single-workspace setups).
+	// Try Get first because generated keys can also be valid workspace names.
 	if ws, err := s.Workspaces().Get(ctx, name); err == nil {
 		return ws.Key, nil
 	}
@@ -207,6 +199,10 @@ func loadSummaries(ctx context.Context, s store.Store, activeKey string) ([]ops.
 		if repos, repoErr := s.Repos().List(ctx, ws.Key); repoErr == nil {
 			repoCount = len(repos)
 		}
+		backend := ""
+		if profile, profileErr := s.Daemon().Get(ctx, ws.Key); profileErr == nil && profile != nil {
+			backend = profile.AgentBackend
+		}
 		out = append(out, ops.WorkspaceSummary{
 			ID:           ws.Key,
 			Name:         ws.Name,
@@ -214,6 +210,7 @@ func loadSummaries(ctx context.Context, s store.Store, activeKey string) ([]ops.
 			Active:       ws.Key == activeKey,
 			RepoCount:    repoCount,
 			IsDefault:    ws.Key == def,
+			Backend:      backend,
 			State:        string(ws.State),
 			ErrorMessage: ws.ErrorMessage,
 		})
@@ -238,11 +235,10 @@ func firstWorkspaceKey(ctx context.Context, s store.Store) (string, error) {
 // state cache. Returns "" if the cache is unreadable or has no entry.
 func resolveWorkspacePath(key string) string {
 	sc, err := bootstrap.LoadStateCache()
-	if err != nil || sc == nil {
-		return ""
-	}
-	if local, ok := sc.Workspaces[key]; ok {
-		return local.Path
+	if err == nil && sc != nil {
+		if local, ok := sc.Workspaces[key]; ok && local.Path != "" {
+			return local.Path
+		}
 	}
 	return ""
 }
@@ -257,12 +253,11 @@ func ResolveWorkspacePath(key string) string {
 // a workspace from the state cache. Returns "" if missing.
 func resolveRepoPath(wsKey, repoName string) string {
 	sc, err := bootstrap.LoadStateCache()
-	if err != nil || sc == nil {
-		return ""
-	}
-	if local, ok := sc.Workspaces[wsKey]; ok {
-		if path, ok := local.Repos[repoName]; ok {
-			return path
+	if err == nil && sc != nil {
+		if local, ok := sc.Workspaces[wsKey]; ok {
+			if path, ok := local.Repos[repoName]; ok && path != "" {
+				return path
+			}
 		}
 	}
 	return ""

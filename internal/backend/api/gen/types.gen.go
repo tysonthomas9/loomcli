@@ -373,15 +373,12 @@ func (e MessageResponseSuccess) Valid() bool {
 
 // Defines values for MonitorWorkspaceInfoMode.
 const (
-	MonitorWorkspaceInfoModeLegacy    MonitorWorkspaceInfoMode = "legacy"
 	MonitorWorkspaceInfoModeWorkspace MonitorWorkspaceInfoMode = "workspace"
 )
 
 // Valid indicates whether the value is a known member of the MonitorWorkspaceInfoMode enum.
 func (e MonitorWorkspaceInfoMode) Valid() bool {
 	switch e {
-	case MonitorWorkspaceInfoModeLegacy:
-		return true
 	case MonitorWorkspaceInfoModeWorkspace:
 		return true
 	default:
@@ -391,15 +388,12 @@ func (e MonitorWorkspaceInfoMode) Valid() bool {
 
 // Defines values for MonitorWorkspacesResponseMode.
 const (
-	MonitorWorkspacesResponseModeLegacy    MonitorWorkspacesResponseMode = "legacy"
 	MonitorWorkspacesResponseModeWorkspace MonitorWorkspacesResponseMode = "workspace"
 )
 
 // Valid indicates whether the value is a known member of the MonitorWorkspacesResponseMode enum.
 func (e MonitorWorkspacesResponseMode) Valid() bool {
 	switch e {
-	case MonitorWorkspacesResponseModeLegacy:
-		return true
 	case MonitorWorkspacesResponseModeWorkspace:
 		return true
 	default:
@@ -939,12 +933,10 @@ type AgentStatusResponse struct {
 	AgentState   *AgentStatusResponseAgentState `json:"agent_state,omitempty"`
 	CreatedAt    time.Time                      `json:"created_at"`
 	Description  *string                        `json:"description,omitempty"`
-	HookBead     *string                        `json:"hook_bead,omitempty"`
 	Id           string                         `json:"id"`
 	Labels       []string                       `json:"labels"`
 	LastActivity *time.Time                     `json:"last_activity,omitempty"`
 	Rig          *string                        `json:"rig,omitempty"`
-	RoleBead     *string                        `json:"role_bead,omitempty"`
 	RoleType     *string                        `json:"role_type,omitempty"`
 	Status       *string                        `json:"status,omitempty"`
 	Title        string                         `json:"title"`
@@ -953,11 +945,6 @@ type AgentStatusResponse struct {
 
 // AgentStatusResponseAgentState defines model for AgentStatusResponse.AgentState.
 type AgentStatusResponseAgentState string
-
-// BackendConfigPatchRequest defines model for BackendConfigPatchRequest.
-type BackendConfigPatchRequest struct {
-	Backend string `json:"backend"`
-}
 
 // BackendConfigResponse defines model for BackendConfigResponse.
 type BackendConfigResponse struct {
@@ -991,7 +978,6 @@ type BlockedIssue struct {
 	DueAt              *time.Time              `json:"due_at,omitempty"`
 	EstimatedMinutes   *int                    `json:"estimated_minutes,omitempty"`
 	ExternalRef        *string                 `json:"external_ref,omitempty"`
-	HookBead           *string                 `json:"hook_bead,omitempty"`
 	Id                 string                  `json:"id"`
 	IssueType          *BlockedIssueIssueType  `json:"issue_type,omitempty"`
 	Labels             *[]string               `json:"labels,omitempty"`
@@ -1003,7 +989,6 @@ type BlockedIssue struct {
 	Pinned             *bool                   `json:"pinned,omitempty"`
 	Priority           int                     `json:"priority"`
 	Rig                *string                 `json:"rig,omitempty"`
-	RoleBead           *string                 `json:"role_bead,omitempty"`
 	RoleType           *string                 `json:"role_type,omitempty"`
 	SourceRepo         *string                 `json:"source_repo,omitempty"`
 	SourceSystem       *string                 `json:"source_system,omitempty"`
@@ -1165,7 +1150,6 @@ type Issue struct {
 	DueAt              *time.Time       `json:"due_at,omitempty"`
 	EstimatedMinutes   *int             `json:"estimated_minutes,omitempty"`
 	ExternalRef        *string          `json:"external_ref,omitempty"`
-	HookBead           *string          `json:"hook_bead,omitempty"`
 	Id                 string           `json:"id"`
 	IssueType          *IssueIssueType  `json:"issue_type,omitempty"`
 	Labels             *[]string        `json:"labels,omitempty"`
@@ -1177,7 +1161,6 @@ type Issue struct {
 	Pinned             *bool            `json:"pinned,omitempty"`
 	Priority           int              `json:"priority"`
 	Rig                *string          `json:"rig,omitempty"`
-	RoleBead           *string          `json:"role_bead,omitempty"`
 	RoleType           *string          `json:"role_type,omitempty"`
 	SourceRepo         *string          `json:"source_repo,omitempty"`
 	SourceSystem       *string          `json:"source_system,omitempty"`
@@ -1747,7 +1730,6 @@ type TreeNode struct {
 	DueAt              *time.Time          `json:"due_at,omitempty"`
 	EstimatedMinutes   *int                `json:"estimated_minutes,omitempty"`
 	ExternalRef        *string             `json:"external_ref,omitempty"`
-	HookBead           *string             `json:"hook_bead,omitempty"`
 	Id                 string              `json:"id"`
 	IssueType          *TreeNodeIssueType  `json:"issue_type,omitempty"`
 	Labels             *[]string           `json:"labels,omitempty"`
@@ -1760,7 +1742,6 @@ type TreeNode struct {
 	Pinned             *bool               `json:"pinned,omitempty"`
 	Priority           int                 `json:"priority"`
 	Rig                *string             `json:"rig,omitempty"`
-	RoleBead           *string             `json:"role_bead,omitempty"`
 	RoleType           *string             `json:"role_type,omitempty"`
 	SourceRepo         *string             `json:"source_repo,omitempty"`
 	SourceSystem       *string             `json:"source_system,omitempty"`
@@ -2189,9 +2170,6 @@ type ConnectTerminalWSParams struct {
 
 // ReportClientErrorJSONRequestBody defines body for ReportClientError for application/json ContentType.
 type ReportClientErrorJSONRequestBody = ReportClientErrorJSONBody
-
-// PatchBackendConfigJSONRequestBody defines body for PatchBackendConfig for application/json ContentType.
-type PatchBackendConfigJSONRequestBody = BackendConfigPatchRequest
 
 // ReportCSPViolationJSONRequestBody defines body for ReportCSPViolation for application/json ContentType.
 type ReportCSPViolationJSONRequestBody = ReportCSPViolationJSONBody

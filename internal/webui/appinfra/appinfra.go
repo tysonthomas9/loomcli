@@ -143,9 +143,9 @@ func RegisterHooks(registry *WorkspaceRegistry, cfg HookConfig) RegisteredHooks 
 	return registered
 }
 
-// ReconcileConfigWorkspaces registers all configured workspaces via the
+// ReconcileStoreWorkspaces registers all FleetDB workspaces via the
 // WorkspaceRegistry at startup.
-func ReconcileConfigWorkspaces(
+func ReconcileStoreWorkspaces(
 	listFn func() (map[string]string, error),
 	initialID string,
 	initialRegistered bool,

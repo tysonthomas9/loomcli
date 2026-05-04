@@ -11,7 +11,6 @@ import (
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/ops"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 // ---------------------------------------------------------------------------
@@ -1834,10 +1833,22 @@ func TestAppendToLogFile_ReadOnlyParent(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// findWorkspacePathByID tests (loomcli-n28bt.10)
+// workspacePathByID tests (loomcli-n28bt.10)
 // ---------------------------------------------------------------------------
 
-func TestFindWorkspacePathByID(t *testing.T) {
+func workspacePathByID(wsData *ops.WorkspaceData, id string) string {
+	if wsData == nil || id == "" {
+		return ""
+	}
+	for _, ws := range wsData.Workspaces {
+		if ws.ID == id {
+			return ws.Path
+		}
+	}
+	return ""
+}
+
+func TestWorkspacePathByID(t *testing.T) {
 	wsData := &ops.WorkspaceData{
 		Path: "/default/path",
 		Workspaces: []ops.WorkspaceSummary{
@@ -1901,9 +1912,9 @@ func TestFindWorkspacePathByID(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := service.FindWorkspacePathByID(tt.wsData, tt.id)
+			got := workspacePathByID(tt.wsData, tt.id)
 			if got != tt.want {
-				t.Errorf("service.FindWorkspacePathByID() = %q, want %q", got, tt.want)
+				t.Errorf("workspacePathByID() = %q, want %q", got, tt.want)
 			}
 		})
 	}
@@ -2026,24 +2037,24 @@ func TestResolveWorktreePath_UsesWorkspaceUUID(t *testing.T) {
 	}
 
 	resolveWT := func(workspace, agent string) string {
-		return service.FindWorkspacePathByID(wsData, workspace)
+		return workspacePathByID(wsData, workspace)
 	}
 	resolveEvt := func(workspace string) string {
-		path := service.FindWorkspacePathByID(wsData, workspace)
+		path := workspacePathByID(wsData, workspace)
 		if path == "" {
 			return ""
 		}
 		return filepath.Join(path, ".loom", "events")
 	}
 	resolveLog := func(workspace, agent string) string {
-		path := service.FindWorkspacePathByID(wsData, workspace)
+		path := workspacePathByID(wsData, workspace)
 		if path == "" {
 			return ""
 		}
 		return filepath.Join(path, ".loom", "logs", "task-"+agent+".log")
 	}
 	validator := func(id string) bool {
-		return service.FindWorkspacePathByID(wsData, id) != ""
+		return workspacePathByID(wsData, id) != ""
 	}
 
 	mux := http.NewServeMux()

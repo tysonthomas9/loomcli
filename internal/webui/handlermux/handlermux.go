@@ -15,7 +15,6 @@ import (
 	healthhandlers "github.com/tysonthomas9/loomcli/internal/webui/handlers/health"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/issues"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/misc"
-	hterminal "github.com/tysonthomas9/loomcli/internal/webui/handlers/terminal"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/workspace"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
@@ -32,7 +31,6 @@ type WorkspaceOpsModule struct {
 	agentQueueH    http.HandlerFunc
 	issueBackendFn func(ctx context.Context) backend.IssueBackend
 	daemonExpected bool
-	wsPathFn       hterminal.WorkspacePathResolver
 }
 
 // NewWorkspaceOpsModule creates a WorkspaceOpsModule. Callers that support
@@ -75,14 +73,6 @@ func (m *WorkspaceOpsModule) WithDaemonExpected(b bool) *WorkspaceOpsModule {
 	return m
 }
 
-// WithWorkspacePathResolver injects the workspace-id → filesystem-path
-// resolver used by /config/backend so it can read loom.yaml without a
-// daemon RPC. Returns the module for chaining.
-func (m *WorkspaceOpsModule) WithWorkspacePathResolver(fn hterminal.WorkspacePathResolver) *WorkspaceOpsModule {
-	m.wsPathFn = fn
-	return m
-}
-
 // Register implements Module.
 func (m *WorkspaceOpsModule) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/workspaces/{ws}/repos", workspace.HandleListWorkspaceRepos(m.workspaceSvc))
@@ -96,7 +86,7 @@ func (m *WorkspaceOpsModule) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/workspaces/{ws}/issues/graph",
 		githandlers.HandleGraphWithBackend(m.multiPool, githandlers.IssueBackendFn(m.issueBackendFn)))
 	mux.HandleFunc("GET /api/workspaces/{ws}/daemon/status", healthhandlers.HandleDaemonStatusWithMode(m.multiPool, m.daemonExpected))
-	mux.HandleFunc("GET /api/workspaces/{ws}/config/backend", hterminal.HandleGetBackendConfigWithResolver(m.multiPool, m.wsPathFn))
+	mux.HandleFunc("GET /api/workspaces/{ws}/config/backend", workspace.HandleWorkspaceBackendGet(m.workspaceSvc))
 	if m.agentQueueH != nil {
 		mux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/queue", m.agentQueueH)
 	}
@@ -136,6 +126,9 @@ func HandleWorkspaceDelete(svc service.WorkspaceService) http.HandlerFunc {
 }
 func HandleWorkspaceRename(svc service.WorkspaceService) http.HandlerFunc {
 	return workspace.HandleWorkspaceRename(svc)
+}
+func HandleWorkspaceBackendGet(svc service.WorkspaceService) http.HandlerFunc {
+	return workspace.HandleWorkspaceBackendGet(svc)
 }
 func HandleWorkspaceBackendPatch(svc service.WorkspaceService) http.HandlerFunc {
 	return workspace.HandleWorkspaceBackendPatch(svc)

@@ -19,7 +19,6 @@ type fleetCommentWire struct {
 	IssueID   string          `json:"issue_id"`
 	Author    string          `json:"author"`
 	Body      string          `json:"body"`
-	Text      string          `json:"text,omitempty"` // legacy alias; some envelopes still emit "text"
 	CreatedAt time.Time       `json:"created_at"`
 }
 
@@ -34,15 +33,11 @@ func (w fleetCommentWire) toTypesComment() types.Comment {
 			id = n
 		}
 	}
-	text := w.Body
-	if text == "" {
-		text = w.Text
-	}
 	return types.Comment{
 		ID:        id,
 		IssueID:   w.IssueID,
 		Author:    w.Author,
-		Text:      text,
+		Text:      w.Body,
 		CreatedAt: w.CreatedAt,
 	}
 }
@@ -99,15 +94,14 @@ func (b *FleetBackend) ListEvents(ctx context.Context, id string, limit int) ([]
 //     endpoints. This costs N round-trips per group but lets each op report an
 //     independent outcome in its BatchResult slot.
 //
-// Semantic caveats versus beads:
+// Semantic caveats:
 //   - Fleet-db does NOT provide a polymorphic batch endpoint, so this method
 //     is NOT transactionally atomic across operation types: a failure inside
 //     the create batch does not roll back earlier close/update/delete calls
 //     (or vice versa). Within a single create batch, fleet-db does roll back
 //     on validation failure, so callers expecting "all-or-nothing" for pure
 //     create batches still get that semantic. This is acceptable for P2
-//     parity goals; a polymorphic batch endpoint can be added to fleet-db
-//     later (see fleet-08yg follow-ups).
+//     parity goals; a polymorphic batch endpoint can be added to fleet-db later.
 //   - Result ordering preserves the caller's input order regardless of which
 //     sub-call actually executed each op.
 //
@@ -329,12 +323,9 @@ func (b *FleetBackend) runBatchCloses(ctx context.Context, ops []backend.BatchOp
 // runSingleUpdate executes a single update op via Update() and wraps the
 // outcome in a BatchResult.
 func (b *FleetBackend) runSingleUpdate(ctx context.Context, op backend.BatchOp) backend.BatchResult {
-	// Support two shapes for args:
+	// Support both fleet batch update shapes:
 	//   1. Nested: {"id": "...", "params": {<UpdateParams fields>}}
 	//   2. Flat:   {"id": "...", <UpdateParams fields at top level>}
-	// The beads backend accepts both (callers in the codebase use the flat
-	// form for historical reasons); we unmarshal into the nested struct first
-	// and fall back to flat if "params" is absent.
 	var nested struct {
 		ID     string                `json:"id"`
 		Params *backend.UpdateParams `json:"params"`

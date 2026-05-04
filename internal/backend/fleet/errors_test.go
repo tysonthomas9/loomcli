@@ -54,7 +54,7 @@ func TestClassifyHTTPError_SuccessFalseStringMatching(t *testing.T) {
 		{"not found", apiResponse{Error: "issue not found"}, backend.KindNotFound},
 		{"already claimed", apiResponse{Error: "task already claimed by another"}, backend.KindConflict},
 		{"already closed", apiResponse{Error: "issue is already closed"}, backend.KindConflict},
-		{"is closed", apiResponse{Error: "issue bd-x-01 is closed"}, backend.KindConflict},
+		{"is closed", apiResponse{Error: "issue loom-x-01 is closed"}, backend.KindConflict},
 		{"validation", apiResponse{Error: "validation failed"}, backend.KindValidation},
 		{"invalid", apiResponse{Error: "invalid input"}, backend.KindValidation},
 		{"other", apiResponse{Error: "something unexpected"}, backend.KindInternal},

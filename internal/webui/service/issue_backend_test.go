@@ -70,6 +70,19 @@ type claimCall struct {
 	lockTTL time.Duration
 }
 
+type testWorkspaceValidator struct {
+	targetID string
+	err      error
+}
+
+func (v testWorkspaceValidator) ValidateTarget(_ string) (string, error) {
+	return v.targetID, v.err
+}
+
+func (v testWorkspaceValidator) CurrentWorkspace() string {
+	return "source-ws"
+}
+
 func (f *fakeIssueBackend) Get(_ context.Context, id string) (*backend.IssueDetailData, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -348,6 +361,94 @@ func TestRemoveDependency_Backend_NotFound_MapsTo404(t *testing.T) {
 	var sErr *ServiceError
 	if !errors.As(err, &sErr) || sErr.Kind != KindNotFound {
 		t.Fatalf("expected NotFoundError, got %v", err)
+	}
+}
+
+// --- MoveIssue ---
+
+func TestMoveIssue_Backend_Success_UsesBackendWithoutDaemonPool(t *testing.T) {
+	now := time.Now().UTC()
+	source := &fakeIssueBackend{
+		getResult: &backend.IssueDetailData{
+			IssueData: backend.IssueData{
+				ID: "SRC-1", Title: "Move me", Status: "open", Priority: 2, IssueType: "task",
+				Assignee: "[H] Tyson", Labels: []string{"ui"}, CreatedAt: now, UpdatedAt: now,
+			},
+			Description: "details",
+		},
+		addCommentResult: &backend.CommentData{ID: 1, IssueID: "SRC-1", Author: "web-ui", Text: "moved", CreatedAt: now},
+		closeResult:      &backend.CloseResult{Closed: &backend.IssueData{ID: "SRC-1", Status: "closed"}},
+	}
+	target := &fakeIssueBackend{
+		createResult: &backend.IssueData{ID: "DST-9", Title: "Move me", Status: "open", CreatedAt: now, UpdatedAt: now},
+	}
+
+	type workspaceKey struct{}
+	withWorkspace := func(ctx context.Context, wsID string) context.Context {
+		return context.WithValue(ctx, workspaceKey{}, wsID)
+	}
+	provider := func(ctx context.Context) backend.IssueBackend {
+		if wsID, _ := ctx.Value(workspaceKey{}).(string); wsID == "target-ws" {
+			return target
+		}
+		return source
+	}
+	svc := NewIssueServiceWithBackend(nil, nil, withWorkspace, provider)
+
+	result, err := svc.MoveIssue(context.Background(), MoveIssueParams{
+		IssueID:         "SRC-1",
+		TargetWorkspace: "Target",
+		Validator:       testWorkspaceValidator{targetID: "target-ws"},
+	})
+	if err != nil {
+		t.Fatalf("MoveIssue: %v", err)
+	}
+	if result.SourceID != "SRC-1" || result.TargetID != "DST-9" {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+	if len(result.Warnings) != 1 || !strings.Contains(result.Warnings[0], "[H] Tyson") {
+		t.Fatalf("expected active agent warning, got %+v", result.Warnings)
+	}
+	if len(target.createParams) != 1 {
+		t.Fatalf("expected 1 target create call, got %d", len(target.createParams))
+	}
+	create := target.createParams[0]
+	if create.Title != "Move me" || create.IssueType != "task" || create.CreatedBy != "web-ui" {
+		t.Errorf("unexpected create params: %+v", create)
+	}
+	if !strings.Contains(create.Description, "(Moved from SRC-1)") {
+		t.Errorf("description missing move marker: %q", create.Description)
+	}
+	if len(create.Labels) != 1 || create.Labels[0] != "ui" {
+		t.Errorf("labels = %+v, want [ui]", create.Labels)
+	}
+	if len(source.addCommentParams) != 1 || !strings.Contains(source.addCommentParams[0].Text, "DST-9") {
+		t.Errorf("unexpected source comment params: %+v", source.addCommentParams)
+	}
+	if len(source.closeCalls) != 1 || !source.closeCalls[0].params.Force {
+		t.Errorf("unexpected source close calls: %+v", source.closeCalls)
+	}
+}
+
+func TestMoveIssue_Backend_ClosedSource_Validation(t *testing.T) {
+	now := time.Now().UTC()
+	fb := &fakeIssueBackend{
+		getResult: &backend.IssueDetailData{
+			IssueData: backend.IssueData{
+				ID: "SRC-1", Title: "Closed", Status: "closed", Priority: 1, IssueType: "task", CreatedAt: now, UpdatedAt: now,
+			},
+		},
+	}
+	svc := newServiceWithFake(fb)
+
+	_, err := svc.MoveIssue(context.Background(), MoveIssueParams{
+		IssueID:         "SRC-1",
+		TargetWorkspace: "Target",
+		Validator:       testWorkspaceValidator{targetID: "target-ws"},
+	})
+	var sErr *ServiceError
+	if !errors.As(err, &sErr) || sErr.Kind != KindValidation {
+		t.Fatalf("expected ValidationError, got %v", err)
 	}
 }
 
@@ -936,13 +1037,13 @@ func TestTranslateBackendError_NilReturnsNil(t *testing.T) {
 	}
 }
 
-// --- NewIssueService (legacy) returns ErrUnavailable for backend-only paths ---
+// --- NewIssueService without a backend returns ErrUnavailable for backend-only paths ---
 
-func TestNewIssueService_Legacy_ListEvents_Unavailable(t *testing.T) {
+func TestNewIssueService_NoBackend_ListEvents_Unavailable(t *testing.T) {
 	svc := NewIssueService(nil, nil, nil)
 	_, err := svc.ListEvents(context.Background(), EventListParams{IssueID: "x"})
 	var sErr *ServiceError
 	if !errors.As(err, &sErr) || sErr.Kind != KindUnavailable {
-		t.Fatalf("expected ErrUnavailable from legacy constructor, got %v", err)
+		t.Fatalf("expected ErrUnavailable from no-backend constructor, got %v", err)
 	}
 }

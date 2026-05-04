@@ -70,8 +70,6 @@ func fullIssue() *types.Issue {
 		Holder:         "holder-1",
 		SourceFormula:  "formula-1",
 		SourceLocation: "steps[0]",
-		HookBead:       "hook-1",
-		RoleBead:       "role-1",
 		AgentState:     types.StateRunning,
 		LastActivity:   &now,
 		RoleType:       "polecat",
@@ -207,8 +205,6 @@ func TestIssueToEntity_FullFidelity(t *testing.T) {
 	assertEqual(t, "SourceLocation", e.SourceLocation, "steps[0]")
 
 	// Agent Identity Fields
-	assertEqual(t, "HookBead", e.HookBead, "hook-1")
-	assertEqual(t, "RoleBead", e.RoleBead, "role-1")
 	assertEqual(t, "AgentState", string(e.AgentState), "running")
 	if e.LastActivity == nil || !e.LastActivity.Equal(testTime()) {
 		t.Errorf("LastActivity mismatch")

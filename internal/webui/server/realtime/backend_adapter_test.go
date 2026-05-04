@@ -20,27 +20,27 @@ var sharedFixtureTimestamp = time.Date(2026, 4, 25, 10, 30, 45, 0, time.UTC)
 func makeSharedFixture() (backend.MutationData, rpc.MutationEvent) {
 	bm := backend.MutationData{
 		Type:       "status",
-		IssueID:    "bd-fleet-42",
+		IssueID:    "loom-fleet-42",
 		Title:      "Implement SSE fleet subscriber",
 		Assignee:   "agent-alpha",
 		Actor:      "agent-beta",
 		Timestamp:  sharedFixtureTimestamp,
 		OldStatus:  "open",
 		NewStatus:  "in_progress",
-		ParentID:   "bd-epic-7",
+		ParentID:   "loom-epic-7",
 		StepCount:  3,
 		SourceRepo: "loomcli",
 	}
 	rm := rpc.MutationEvent{
 		Type:       "status",
-		IssueID:    "bd-fleet-42",
+		IssueID:    "loom-fleet-42",
 		Title:      "Implement SSE fleet subscriber",
 		Assignee:   "agent-alpha",
 		Actor:      "agent-beta",
 		Timestamp:  sharedFixtureTimestamp,
 		OldStatus:  "open",
 		NewStatus:  "in_progress",
-		ParentID:   "bd-epic-7",
+		ParentID:   "loom-epic-7",
 		StepCount:  3,
 		SourceRepo: "loomcli",
 	}
@@ -58,13 +58,13 @@ func TestBackendMutationToPayload_AllFields(t *testing.T) {
 		actual, expected any
 	}{
 		"Type":        {got.Type, "status"},
-		"IssueID":     {got.IssueID, "bd-fleet-42"},
+		"IssueID":     {got.IssueID, "loom-fleet-42"},
 		"Title":       {got.Title, "Implement SSE fleet subscriber"},
 		"Assignee":    {got.Assignee, "agent-alpha"},
 		"Actor":       {got.Actor, "agent-beta"},
 		"OldStatus":   {got.OldStatus, "open"},
 		"NewStatus":   {got.NewStatus, "in_progress"},
-		"ParentID":    {got.ParentID, "bd-epic-7"},
+		"ParentID":    {got.ParentID, "loom-epic-7"},
 		"StepCount":   {got.StepCount, 3},
 		"SourceRepo":  {got.SourceRepo, "loomcli"},
 		"WorkspaceID": {got.WorkspaceID, "ws-fleet-1"},
@@ -93,7 +93,7 @@ func TestBackendMutationToPayload_TimestampNonUTC(t *testing.T) {
 	// 2026-04-25T10:30:45Z is 2026-04-25T06:30:45-04:00
 	bm := backend.MutationData{
 		Type:      "create",
-		IssueID:   "bd-1",
+		IssueID:   "loom-1",
 		Timestamp: sharedFixtureTimestamp.In(loc),
 	}
 	got := BackendMutationToPayload(bm, "ws-1")
@@ -108,7 +108,7 @@ func TestBackendMutationToPayload_TimestampNonUTC(t *testing.T) {
 func TestBackendMutationToPayload_EmptyOptionalFields(t *testing.T) {
 	bm := backend.MutationData{
 		Type:      "create",
-		IssueID:   "bd-7",
+		IssueID:   "loom-7",
 		Timestamp: sharedFixtureTimestamp,
 	}
 	got := BackendMutationToPayload(bm, "ws-min")
@@ -130,7 +130,7 @@ func TestBackendMutationToPayload_EmptyOptionalFields(t *testing.T) {
 // the SSE handler — we apply the same workspaceID by hand here).
 //
 // Any field-projection drift (renamed JSON tag, missing field, different
-// time format, etc.) breaks reconnect catch-up where beads-sourced and
+// time format, etc.) breaks reconnect catch-up where store-sourced and
 // fleet-sourced events flow through the same SSE stream.
 func TestBackendMutationToPayload_WireFormatStability(t *testing.T) {
 	bm, rm := makeSharedFixture()

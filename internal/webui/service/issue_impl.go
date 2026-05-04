@@ -31,7 +31,6 @@ const (
 	maxDependencies  = 100
 	maxCommentLength = 64 * 1024 // 64KB
 	maxListLimit     = 1000
-	parentBatchSize  = 1000
 )
 
 // IssueBackendProvider returns the active backend.IssueBackend.

@@ -6,9 +6,9 @@ import (
 	"testing"
 )
 
-func TestReconcileConfigWorkspacesRegistersConfiguredWorkspaces(t *testing.T) {
+func TestReconcileStoreWorkspacesRegistersConfiguredWorkspaces(t *testing.T) {
 	registry := NewWorkspaceRegistry(slog.Default())
-	ReconcileConfigWorkspaces(
+	ReconcileStoreWorkspaces(
 		func() (map[string]string, error) {
 			return map[string]string{"ws-1": t.TempDir()}, nil
 		},
@@ -24,9 +24,9 @@ func TestReconcileConfigWorkspacesRegistersConfiguredWorkspaces(t *testing.T) {
 	}
 }
 
-func TestReconcileConfigWorkspacesSkipsInitialWorkspace(t *testing.T) {
+func TestReconcileStoreWorkspacesSkipsInitialWorkspace(t *testing.T) {
 	registry := NewWorkspaceRegistry(slog.Default())
-	ReconcileConfigWorkspaces(
+	ReconcileStoreWorkspaces(
 		func() (map[string]string, error) {
 			return map[string]string{"initial": t.TempDir()}, nil
 		},
@@ -41,14 +41,14 @@ func TestReconcileConfigWorkspacesSkipsInitialWorkspace(t *testing.T) {
 	}
 }
 
-func TestReconcileConfigWorkspacesIgnoresNilAndFailedList(t *testing.T) {
+func TestReconcileStoreWorkspacesIgnoresNilAndFailedList(t *testing.T) {
 	registry := NewWorkspaceRegistry(slog.Default())
-	ReconcileConfigWorkspaces(nil, "", false, registry, nil)
+	ReconcileStoreWorkspaces(nil, "", false, registry, nil)
 	if ids := registry.WorkspaceIDs(); len(ids) != 0 {
 		t.Fatalf("WorkspaceIDs() after nil list = %#v, want none", ids)
 	}
 
-	ReconcileConfigWorkspaces(
+	ReconcileStoreWorkspaces(
 		func() (map[string]string, error) { return nil, errors.New("boom") },
 		"",
 		false,

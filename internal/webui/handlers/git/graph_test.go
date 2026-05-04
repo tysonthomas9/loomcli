@@ -122,7 +122,7 @@ func TestHandleBlocked(t *testing.T) {
 				getFunc: func(ctx context.Context) (BlockedClient, error) {
 					return &mockBlockedClient{
 						blockedFunc: func(args *rpc.BlockedArgs) (*rpc.Response, error) {
-							data := `[{"id":"bd-1","title":"Blocked task","status":"blocked","priority":1,"blocked_by_count":2,"blocked_by":["bd-a","bd-b"],"blocked_by_details":[{"id":"bd-a","title":"Blocker A","priority":0},{"id":"bd-b","title":"Blocker B","priority":1}]}]`
+							data := `[{"id":"loom-1","title":"Blocked task","status":"blocked","priority":1,"blocked_by_count":2,"blocked_by":["loom-a","loom-b"],"blocked_by_details":[{"id":"loom-a","title":"Blocker A","priority":0},{"id":"loom-b","title":"Blocker B","priority":1}]}]`
 							return &rpc.Response{
 								Success: true,
 								Data:    json.RawMessage(data),
@@ -252,7 +252,7 @@ func TestHandleBlocked_QueryParamsPassed(t *testing.T) {
 
 	handler := handleBlockedWithPool(pool)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/blocked?assignee=alice&type=bug&parent_id=bd-root&priority=2&limit=50", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/blocked?assignee=alice&type=bug&parent_id=loom-root&priority=2&limit=50", nil)
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
 
@@ -269,8 +269,8 @@ func TestHandleBlocked_QueryParamsPassed(t *testing.T) {
 	if capturedArgs.Type != "bug" {
 		t.Errorf("Type = %q, want %q", capturedArgs.Type, "bug")
 	}
-	if capturedArgs.ParentID != "bd-root" {
-		t.Errorf("ParentID = %q, want %q", capturedArgs.ParentID, "bd-root")
+	if capturedArgs.ParentID != "loom-root" {
+		t.Errorf("ParentID = %q, want %q", capturedArgs.ParentID, "loom-root")
 	}
 	if capturedArgs.Priority == nil || *capturedArgs.Priority != 2 {
 		t.Errorf("Priority = %v, want 2", capturedArgs.Priority)
@@ -308,7 +308,7 @@ func TestHandleBlocked_ClientReturnedToPoolOnError(t *testing.T) {
 }
 
 func TestHandleBlocked_BlockerDetailsInResponse(t *testing.T) {
-	data := `[{"id":"bd-1","title":"Task","status":"blocked","priority":1,"blocked_by_count":1,"blocked_by":["bd-x"],"blocked_by_details":[{"id":"bd-x","title":"Blocker X","priority":0}]}]`
+	data := `[{"id":"loom-1","title":"Task","status":"blocked","priority":1,"blocked_by_count":1,"blocked_by":["loom-x"],"blocked_by_details":[{"id":"loom-x","title":"Blocker X","priority":0}]}]`
 
 	pool := &mockBlockedPool{
 		getFunc: func(ctx context.Context) (BlockedClient, error) {
@@ -342,8 +342,8 @@ func TestHandleBlocked_BlockerDetailsInResponse(t *testing.T) {
 		t.Fatalf("data length = %d, want 1", len(resp.Data))
 	}
 	issue := resp.Data[0]
-	if issue.ID != "bd-1" {
-		t.Errorf("ID = %q, want %q", issue.ID, "bd-1")
+	if issue.ID != "loom-1" {
+		t.Errorf("ID = %q, want %q", issue.ID, "loom-1")
 	}
 	if issue.BlockedByCount != 1 {
 		t.Errorf("BlockedByCount = %d, want 1", issue.BlockedByCount)
@@ -351,8 +351,8 @@ func TestHandleBlocked_BlockerDetailsInResponse(t *testing.T) {
 	if len(issue.BlockedByDetails) != 1 {
 		t.Fatalf("BlockedByDetails length = %d, want 1", len(issue.BlockedByDetails))
 	}
-	if issue.BlockedByDetails[0].ID != "bd-x" {
-		t.Errorf("BlockedByDetails[0].ID = %q, want %q", issue.BlockedByDetails[0].ID, "bd-x")
+	if issue.BlockedByDetails[0].ID != "loom-x" {
+		t.Errorf("BlockedByDetails[0].ID = %q, want %q", issue.BlockedByDetails[0].ID, "loom-x")
 	}
 }
 
@@ -460,18 +460,18 @@ func TestHandleGraph(t *testing.T) {
 							return &rpc.GetGraphDataResponse{
 								Issues: []rpc.GraphIssueSummary{
 									{
-										ID:        "bd-1",
+										ID:        "loom-1",
 										Title:     "Task A",
 										Status:    "open",
 										Priority:  1,
 										IssueType: "task",
 										Labels:    []string{"backend"},
 										Dependencies: []rpc.GraphDependency{
-											{DependsOnID: "bd-2", Type: "blocks"},
+											{DependsOnID: "loom-2", Type: "blocks"},
 										},
 									},
 									{
-										ID:        "bd-2",
+										ID:        "loom-2",
 										Title:     "Task B",
 										Status:    "open",
 										Priority:  2,
@@ -533,7 +533,7 @@ func TestHandleGraph_ResponseStructure(t *testing.T) {
 					return &rpc.GetGraphDataResponse{
 						Issues: []rpc.GraphIssueSummary{
 							{
-								ID:         "bd-1",
+								ID:         "loom-1",
 								Title:      "Frontend",
 								Status:     "open",
 								Priority:   0,
@@ -542,8 +542,8 @@ func TestHandleGraph_ResponseStructure(t *testing.T) {
 								DeferUntil: "2026-04-01",
 								DueAt:      "2026-05-01",
 								Dependencies: []rpc.GraphDependency{
-									{DependsOnID: "bd-2", Type: "blocks"},
-									{DependsOnID: "bd-3", Type: "depends_on"},
+									{DependsOnID: "loom-2", Type: "blocks"},
+									{DependsOnID: "loom-3", Type: "depends_on"},
 								},
 							},
 						},
@@ -575,8 +575,8 @@ func TestHandleGraph_ResponseStructure(t *testing.T) {
 		t.Fatalf("issues length = %d, want 1", len(resp.Data))
 	}
 	issue := resp.Data[0]
-	if issue.ID != "bd-1" {
-		t.Errorf("ID = %q, want %q", issue.ID, "bd-1")
+	if issue.ID != "loom-1" {
+		t.Errorf("ID = %q, want %q", issue.ID, "loom-1")
 	}
 	if issue.Title != "Frontend" {
 		t.Errorf("Title = %q, want %q", issue.Title, "Frontend")
@@ -602,8 +602,8 @@ func TestHandleGraph_ResponseStructure(t *testing.T) {
 	if len(issue.Dependencies) != 2 {
 		t.Fatalf("Dependencies length = %d, want 2", len(issue.Dependencies))
 	}
-	if issue.Dependencies[0].DependsOnID != "bd-2" {
-		t.Errorf("Dependencies[0].DependsOnID = %q, want %q", issue.Dependencies[0].DependsOnID, "bd-2")
+	if issue.Dependencies[0].DependsOnID != "loom-2" {
+		t.Errorf("Dependencies[0].DependsOnID = %q, want %q", issue.Dependencies[0].DependsOnID, "loom-2")
 	}
 	if issue.Dependencies[0].Type != "blocks" {
 		t.Errorf("Dependencies[0].Type = %q, want %q", issue.Dependencies[0].Type, "blocks")
@@ -773,10 +773,10 @@ func TestParseBlockedParams(t *testing.T) {
 		},
 		{
 			name: "all valid params",
-			url:  "/api/blocked?parent_id=bd-root&assignee=bob&type=feature&priority=3&limit=25",
+			url:  "/api/blocked?parent_id=loom-root&assignee=bob&type=feature&priority=3&limit=25",
 			checkArgs: func(t *testing.T, args *rpc.BlockedArgs) {
-				if args.ParentID != "bd-root" {
-					t.Errorf("ParentID = %q, want %q", args.ParentID, "bd-root")
+				if args.ParentID != "loom-root" {
+					t.Errorf("ParentID = %q, want %q", args.ParentID, "loom-root")
 				}
 				if args.Assignee != "bob" {
 					t.Errorf("Assignee = %q, want %q", args.Assignee, "bob")

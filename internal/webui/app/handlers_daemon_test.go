@@ -188,7 +188,7 @@ func TestHandleDaemonConfig_HappyPath(t *testing.T) {
 
 func TestHandleDaemonConfig_LoadError(t *testing.T) {
 	fn := func() (json.RawMessage, error) {
-		return nil, errors.New("syntax error in loom.yaml")
+		return nil, errors.New("daemon config load failed")
 	}
 
 	h := webui.HandleDaemonConfig(fn)

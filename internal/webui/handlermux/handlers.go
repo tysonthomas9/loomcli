@@ -24,8 +24,6 @@ type Handlers struct {
 	CSPReport           http.HandlerFunc
 	AuthConfig          http.HandlerFunc
 	Metrics             http.HandlerFunc // pre-built by caller (requires fleet types)
-	GetBackendConfig    http.HandlerFunc
-	PatchBackendConfig  http.HandlerFunc
 	GetTerminalConfig   http.HandlerFunc
 	GetBackendsHealth   http.HandlerFunc // pre-built by caller (requires ops types), may be nil
 	ListEditors         http.HandlerFunc
@@ -89,14 +87,12 @@ func BuildHandlers(deps HandlerDeps) *Handlers {
 		apiHealth = healthhandlers.HandleAPIHealthNoDaemon()
 	}
 	h := &Handlers{
-		Health:             healthhandlers.HandleHealth(deps.Pool),
-		APIHealth:          apiHealth,
-		ClientErrors:       misc.HandleClientErrors(clientErrLimiter),
-		CSPReport:          misc.HandleCSPReport(cspLimiter),
-		AuthConfig:         misc.HandleAuthConfig(deps.ExtAuthURL, authCfgLimiter, deps.IssueBackendFn),
-		Metrics:            healthhandlers.HandleMetrics(deps.Hub, deps.FleetTimeoutsFn, deps.ClaimMetrics),
-		GetBackendConfig:   hterminal.HandleGetBackendConfig(deps.Pool),
-		PatchBackendConfig: hterminal.HandlePatchBackendConfig(deps.Pool),
+		Health:       healthhandlers.HandleHealth(deps.Pool),
+		APIHealth:    apiHealth,
+		ClientErrors: misc.HandleClientErrors(clientErrLimiter),
+		CSPReport:    misc.HandleCSPReport(cspLimiter),
+		AuthConfig:   misc.HandleAuthConfig(deps.ExtAuthURL, authCfgLimiter, deps.IssueBackendFn),
+		Metrics:      healthhandlers.HandleMetrics(deps.Hub, deps.FleetTimeoutsFn, deps.ClaimMetrics),
 		GetTerminalConfig: hterminal.HandleGetTerminalConfig(hterminal.TerminalLifecycleConfig{
 			GracePeriodMS: deps.TerminalGraceMS,
 			IdleTimeoutMS: deps.TerminalIdleMS,

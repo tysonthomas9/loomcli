@@ -92,8 +92,6 @@ func issuePopulateExtended(e *entity.Issue, issue *types.Issue) {
 	e.Holder = issue.Holder
 	e.SourceFormula = issue.SourceFormula
 	e.SourceLocation = issue.SourceLocation
-	e.HookBead = issue.HookBead
-	e.RoleBead = issue.RoleBead
 	e.AgentState = entity.AgentState(issue.AgentState)
 	e.LastActivity = issue.LastActivity
 	e.RoleType = issue.RoleType

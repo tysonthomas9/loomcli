@@ -42,7 +42,7 @@ func startHandlersMockServer(t *testing.T, handler func(req rpc.Request) rpc.Res
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
 	t.Cleanup(func() { os.RemoveAll(dir) })
-	socketPath := filepath.Join(dir, "bd.sock")
+	socketPath := filepath.Join(dir, "loom.sock")
 
 	listener, err := net.Listen("unix", socketPath)
 	if err != nil {

@@ -15,8 +15,7 @@ import (
 //
 // This function MUST produce a MutationPayload that, when JSON-marshaled,
 // is byte-identical to RPCMutationToPayload's output for the same logical
-// event. Any drift breaks reconnection catch-up where beads-sourced and
-// fleet-sourced events are intermixed in the SSE stream.
+// event. Any drift breaks reconnection catch-up across RPC and backend streams.
 func BackendMutationToPayload(m backend.MutationData, workspaceID string) *MutationPayload {
 	return &MutationPayload{
 		Cursor:      m.Cursor,

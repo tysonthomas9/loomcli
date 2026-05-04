@@ -24,6 +24,7 @@ import (
 	hterminal "github.com/tysonthomas9/loomcli/internal/webui/handlers/terminal"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
+	"github.com/tysonthomas9/loomcli/internal/webui/service"
 	"github.com/tysonthomas9/loomcli/internal/webui/svcimpl"
 	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
@@ -620,7 +621,7 @@ func TestDaemonStatus_OptionalFieldsOmitted(t *testing.T) {
 
 // TestHandleAPIHealth_NilPool tests API health endpoint with nil pool.
 //
-// Pool-less mode is the steady state for fleet (no bd daemon to connect to),
+// Pool-less mode is the steady state for fleet (no daemon to connect to),
 // so we expect 200 OK with daemon.connected=false rather than the historical
 // 503 + "connection pool not initialized" error response.
 func TestHandleAPIHealth_NilPool(t *testing.T) {
@@ -1175,7 +1176,7 @@ func startRoutesMockServer(t *testing.T, handler func(req rpc.Request) rpc.Respo
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
 	t.Cleanup(func() { os.RemoveAll(dir) })
-	socketPath := filepath.Join(dir, "bd.sock")
+	socketPath := filepath.Join(dir, "loom.sock")
 
 	listener, err := net.Listen("unix", socketPath)
 	if err != nil {
@@ -1230,8 +1231,8 @@ func TestHandleDaemonStatus_Success(t *testing.T) {
 	statusResp := &rpc.StatusResponse{
 		Version:       "1.2.3",
 		WorkspacePath: "/tmp/workspace",
-		DatabasePath:  "/tmp/workspace/.beads/db.sqlite",
-		SocketPath:    "/tmp/workspace/.beads/bd.sock",
+		DatabasePath:  "/tmp/workspace/.loom/db.sqlite",
+		SocketPath:    "/tmp/workspace/.loom/loom.sock",
 		PID:           12345,
 		UptimeSeconds: 3600.5,
 		AutoCommit:    true,
@@ -1396,9 +1397,9 @@ func TestHandleAPIHealth_SuccessWithMockServer(t *testing.T) {
 
 // --- SSE route conditional registration tests ---
 
-// TestSetupRoutes_LegacySSEEndpointReturns404 verifies that GET /api/events
-// (legacy endpoint) returns 404 now that SSE is workspace-scoped.
-func TestSetupRoutes_LegacySSEEndpointReturns404(t *testing.T) {
+// TestSetupRoutes_RemovedSSEEndpointReturns404 verifies that GET /api/events
+// The flat endpoint returns 404 now that SSE is workspace-scoped.
+func TestSetupRoutes_RemovedSSEEndpointReturns404(t *testing.T) {
 	app := &Server{}
 	setupTestRoutes(t, app)
 
@@ -1406,7 +1407,7 @@ func TestSetupRoutes_LegacySSEEndpointReturns404(t *testing.T) {
 	rr := httptest.NewRecorder()
 	app.mux.ServeHTTP(rr, req)
 
-	// Legacy SSE endpoint removed; SPA catch-all rejects /api/* with 404 JSON
+	// Removed SSE endpoint; SPA catch-all rejects /api/* with 404 JSON.
 	if rr.Code != http.StatusNotFound {
 		t.Errorf("expected /api/events to return 404, got %d", rr.Code)
 	}
@@ -1450,6 +1451,54 @@ func TestSetupRoutes_SSEEndpointRegisteredOnWorkspaceScope(t *testing.T) {
 	}
 }
 
+func TestSetupRoutes_WorkspaceBackendGetEndpoint(t *testing.T) {
+	multiPool := daemon.NewMultiPool(middleware.WorkspaceFromContext, 1)
+	_ = multiPool.Register("test-ws", &stubPool{})
+
+	wsExistsFn := func(id string) bool { return multiPool.PoolForWorkspace(id) != nil }
+	wsSvc := &mockWorkspaceService{
+		getWorkspaceBackendFn: func(_ context.Context, wsID string) (*service.BackendConfigData, error) {
+			if wsID != "test-ws" {
+				t.Errorf("workspace id = %q, want test-ws", wsID)
+			}
+			return &service.BackendConfigData{
+				Backend:   "codex",
+				Source:    "workspace",
+				Available: []string{"claude", "codex"},
+			}, nil
+		},
+	}
+	app := &Server{multiPool: multiPool, config: webui.ServerConfig{}, wsExistsFn: wsExistsFn, workspaceSvc: wsSvc}
+	app.sessSvc = svcimpl.NewSessionService(nil, nil)
+	setupTestRoutes(t, app)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/config/backend", nil)
+	rr := httptest.NewRecorder()
+	app.mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d, body=%s", rr.Code, rr.Body.String())
+	}
+	if rr.Header().Get("Content-Type") == "text/html; charset=utf-8" {
+		t.Fatal("expected workspace backend GET route to be registered, but request fell through to frontend handler")
+	}
+
+	var body map[string]interface{}
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("failed to parse response JSON: %v", err)
+	}
+	if success, _ := body["success"].(bool); !success {
+		t.Fatalf("response success = false, want true; body=%v", body)
+	}
+	data, ok := body["data"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("response missing data object: %v", body)
+	}
+	if backend, _ := data["backend"].(string); backend != "codex" {
+		t.Errorf("data.backend = %q, want codex", backend)
+	}
+}
+
 // TestSetupRoutes_WorkspaceBackendPatchEndpoint verifies that
 // PATCH /api/workspaces/{ws}/config/backend is handled by handleWorkspaceBackendPatch
 // (which returns workspaceResponse shape) rather than handlePatchBackendConfig.
@@ -1458,15 +1507,12 @@ func TestSetupRoutes_WorkspaceBackendPatchEndpoint(t *testing.T) {
 	_ = multiPool.Register("test-ws", &stubPool{})
 
 	wsExistsFn := func(id string) bool { return multiPool.PoolForWorkspace(id) != nil }
-	workspaceConfigFn := func() (*ops.WorkspaceData, error) {
-		return &ops.WorkspaceData{Name: "test-ws", Path: "/tmp/test"}, nil
-	}
 	wsSvc := &mockWorkspaceService{
 		patchWorkspaceBackendFn: func(_ context.Context, _ string, _ string) (*ops.WorkspaceData, error) {
 			return &ops.WorkspaceData{Name: "test-ws", Path: "/tmp/test"}, nil
 		},
 	}
-	app := &Server{multiPool: multiPool, config: webui.ServerConfig{WorkspaceConfigFn: workspaceConfigFn}, wsExistsFn: wsExistsFn, workspaceSvc: wsSvc}
+	app := &Server{multiPool: multiPool, config: webui.ServerConfig{}, wsExistsFn: wsExistsFn, workspaceSvc: wsSvc}
 	app.sessSvc = svcimpl.NewSessionService(nil, nil)
 	setupTestRoutes(t, app)
 
@@ -1517,9 +1563,6 @@ func TestSetupRoutes_WorkspaceRenamePatchEndpoint(t *testing.T) {
 	_ = multiPool.Register("test-ws", &stubPool{})
 
 	wsExistsFn := func(id string) bool { return multiPool.PoolForWorkspace(id) != nil }
-	workspaceConfigFn := func() (*ops.WorkspaceData, error) {
-		return &ops.WorkspaceData{Name: "test-ws", Path: "/tmp/test"}, nil
-	}
 
 	var capturedNewName string
 	wsSvc := &mockWorkspaceService{
@@ -1528,7 +1571,7 @@ func TestSetupRoutes_WorkspaceRenamePatchEndpoint(t *testing.T) {
 			return &ops.WorkspaceData{Name: newName, Path: "/tmp/test"}, nil
 		},
 	}
-	app := &Server{multiPool: multiPool, config: webui.ServerConfig{WorkspaceConfigFn: workspaceConfigFn}, wsExistsFn: wsExistsFn, workspaceSvc: wsSvc}
+	app := &Server{multiPool: multiPool, config: webui.ServerConfig{}, wsExistsFn: wsExistsFn, workspaceSvc: wsSvc}
 	app.sessSvc = svcimpl.NewSessionService(nil, nil)
 	setupTestRoutes(t, app)
 
@@ -1577,9 +1620,6 @@ func TestSetupRoutes_WorkspaceBackendPatchReadsBody(t *testing.T) {
 	_ = multiPool.Register("test-ws", &stubPool{})
 
 	wsExistsFn := func(id string) bool { return multiPool.PoolForWorkspace(id) != nil }
-	workspaceConfigFn := func() (*ops.WorkspaceData, error) {
-		return &ops.WorkspaceData{Name: "test-ws", Path: "/tmp/test"}, nil
-	}
 
 	var capturedBackend string
 	wsSvc := &mockWorkspaceService{
@@ -1588,7 +1628,7 @@ func TestSetupRoutes_WorkspaceBackendPatchReadsBody(t *testing.T) {
 			return &ops.WorkspaceData{Name: "test-ws", Path: "/tmp/test"}, nil
 		},
 	}
-	app := &Server{multiPool: multiPool, config: webui.ServerConfig{WorkspaceConfigFn: workspaceConfigFn}, wsExistsFn: wsExistsFn, workspaceSvc: wsSvc}
+	app := &Server{multiPool: multiPool, config: webui.ServerConfig{}, wsExistsFn: wsExistsFn, workspaceSvc: wsSvc}
 	app.sessSvc = svcimpl.NewSessionService(nil, nil)
 	setupTestRoutes(t, app)
 
@@ -1881,11 +1921,11 @@ func TestSetupRoutes_TabMetadataReturns404WhenStoreNil(t *testing.T) {
 	}
 }
 
-// TestLegacyFlatAgentRoutesRemoved verifies that the legacy flat agent routes
+// TestFlatAgentRoutesRemoved verifies that the flat agent routes
 // (e.g. POST /api/agents/{name}/git/push) have been removed and return 404,
 // while the workspace-scoped equivalents (e.g.
 // POST /api/workspaces/{ws}/agents/{name}/git/push) still work.
-func TestLegacyFlatAgentRoutesRemoved(t *testing.T) {
+func TestFlatAgentRoutesRemoved(t *testing.T) {
 	// Set up a multiPool with a registered workspace so workspace-scoped routes
 	// are functional.
 	multiPool := daemon.NewMultiPool(middleware.WorkspaceFromContext, 1)
@@ -1902,8 +1942,8 @@ func TestLegacyFlatAgentRoutesRemoved(t *testing.T) {
 	app.sessSvc = svcimpl.NewSessionService(nil, nil)
 	setupTestRoutes(t, app)
 
-	// Legacy flat routes that should have been removed — each must return 404.
-	legacyRoutes := []struct {
+	// Removed flat routes; each must return 404.
+	noConfigRoutes := []struct {
 		method string
 		path   string
 	}{
@@ -1924,20 +1964,20 @@ func TestLegacyFlatAgentRoutesRemoved(t *testing.T) {
 		{http.MethodPut, "/api/agents/alice/files"},
 	}
 
-	for _, tc := range legacyRoutes {
+	for _, tc := range noConfigRoutes {
 		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
 			req := httptest.NewRequest(tc.method, tc.path, nil)
 			rr := httptest.NewRecorder()
 			app.mux.ServeHTTP(rr, req)
 
 			if rr.Code != http.StatusNotFound {
-				t.Errorf("legacy route %s %s: expected status %d, got %d",
+				t.Errorf("removed route %s %s: expected status %d, got %d",
 					tc.method, tc.path, http.StatusNotFound, rr.Code)
 			}
 
 			ct := rr.Header().Get("Content-Type")
 			if ct != "application/json" {
-				t.Errorf("legacy route %s %s: expected Content-Type 'application/json', got %q",
+				t.Errorf("removed route %s %s: expected Content-Type 'application/json', got %q",
 					tc.method, tc.path, ct)
 			}
 		})

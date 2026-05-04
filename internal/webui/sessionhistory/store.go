@@ -11,7 +11,6 @@ import (
 	"log/slog"
 	"regexp"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -165,46 +164,6 @@ func (s *Store) getHistory(ctx context.Context, key string) (*SessionHistory, er
 		return nil, fmt.Errorf("unmarshal: %w", err)
 	}
 	return &history, nil
-}
-
-// MigrateLegacyKeys scans for keys in the old format (issue:sessions:{issueID})
-// and renames them to the workspace-namespaced format (ws:{workspaceID}:issue:sessions:{issueID}).
-// Returns the count of migrated keys. Idempotent — skips keys already namespaced.
-func (s *Store) MigrateLegacyKeys(ctx context.Context, targetWorkspaceID string) (int, error) {
-	var cursor uint64
-	migrated := 0
-
-	for {
-		keys, nextCursor, err := s.client.Scan(ctx, cursor, keyPrefix+"*", 100).Result()
-		if err != nil {
-			return migrated, fmt.Errorf("scan legacy keys: %w", err)
-		}
-
-		for _, key := range keys {
-			// Skip keys that already have the workspace prefix.
-			if strings.HasPrefix(key, "ws:") {
-				continue
-			}
-
-			// Extract issueID from "issue:sessions:{issueID}".
-			id := strings.TrimPrefix(key, keyPrefix)
-			newKey := issueKey(targetWorkspaceID, id)
-
-			if err := s.client.Rename(ctx, key, newKey).Err(); err != nil {
-				// Key may have been renamed by a concurrent process — skip.
-				s.logger.Warn("failed to rename legacy key", "key", key, "err", err)
-				continue
-			}
-			migrated++
-		}
-
-		cursor = nextCursor
-		if cursor == 0 {
-			break
-		}
-	}
-
-	return migrated, nil
 }
 
 func (s *Store) saveHistory(ctx context.Context, key string, history *SessionHistory) error {

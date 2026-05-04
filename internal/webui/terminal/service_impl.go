@@ -2,6 +2,7 @@ package terminal
 
 import (
 	"context"
+	"regexp"
 
 	"github.com/redis/go-redis/v9"
 
@@ -9,6 +10,8 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 )
+
+var validTerminalSession = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
 // terminalServiceImpl is the concrete implementation of TerminalService.
 // After the tmux removal, the service only handles Redis-backed tab

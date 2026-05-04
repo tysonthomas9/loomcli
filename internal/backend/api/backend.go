@@ -1,6 +1,6 @@
 // Package api implements backend.IssueBackend as an HTTP REST client against
 // a loom server's workspace-scoped API endpoints. It is the remote-mode
-// counterpart to the local beads backend: when a CLI command is run with
+// counterpart to the local FleetDB backend: when a CLI command is run with
 // --server URL, it dispatches issue operations through this backend.
 //
 // Unlike the fleet backend (which talks to a dedicated fleet coordinator),

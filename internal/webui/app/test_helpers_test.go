@@ -6,9 +6,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
+	storepkg "github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
@@ -133,14 +135,20 @@ func createTestSession(t *testing.T, store *sessions.Store, taskID string) *sess
 	return sess
 }
 
-// testWorkspaceConfigFn returns a workspace config function for testing.
-func testWorkspaceConfigFn(name string, workspaces []ops.WorkspaceSummary) func() (*ops.WorkspaceData, error) {
-	return func() (*ops.WorkspaceData, error) {
-		return &ops.WorkspaceData{
-			Name:       name,
-			Workspaces: workspaces,
-		}, nil
+// testWorkspaceStore returns a FleetDB-style workspace store for testing.
+func testWorkspaceStore(_ string, workspaces []ops.WorkspaceSummary) storepkg.Store {
+	st := memstore.New()
+	for _, ws := range workspaces {
+		key := ws.ID
+		if key == "" {
+			key = ws.Name
+		}
+		if key == "" {
+			continue
+		}
+		_, _ = st.Workspaces().Create(context.Background(), storepkg.WorkspaceCreate{Key: key, Name: ws.Name})
 	}
+	return st
 }
 
 // testWorktree returns a standard ops.AgentWorktree used across tests.

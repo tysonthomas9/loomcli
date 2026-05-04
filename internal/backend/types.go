@@ -1,7 +1,7 @@
 // Package backend defines the pluggable data access interface for issue tracking.
 //
 // The backend package sits between the service layer (which owns business logic)
-// and the underlying data stores (beads CLI, fleet-db, future Redis). It defines
+// and the underlying data stores (fleet-db, future Redis). It defines
 // wire types for data transfer, option/param structs for queries and mutations,
 // and a structured error type for classified failures.
 //
@@ -32,16 +32,13 @@ type IssueData struct {
 	Labels     []string `json:"labels,omitempty"`
 	SourceRepo string   `json:"source_repo,omitempty"`
 	Parent     string   `json:"parent,omitempty"`
-	// Populated by backends that include design in list queries (e.g., beads daemon).
+	// Populated by backends that include design in list queries.
 	Design     string     `json:"design,omitempty"`
 	CreatedAt  time.Time  `json:"created_at"`
 	UpdatedAt  time.Time  `json:"updated_at"`
 	DueAt      *time.Time `json:"due_at,omitempty"`
 	DeferUntil *time.Time `json:"defer_until,omitempty"`
-	// Lifecycle fields. Beads sends these on slim list responses (daemon
-	// RPC unmarshals straight into types.IssueWithCounts and serializes
-	// every field), so the kanban + filter UIs depend on them being
-	// present. Fleet must populate them via the wire type as well.
+	// Lifecycle fields used by kanban and filter UIs.
 	CreatedBy   string     `json:"created_by,omitempty"`
 	ClosedAt    *time.Time `json:"closed_at,omitempty"`
 	CloseReason string     `json:"close_reason,omitempty"`

@@ -1,12 +1,15 @@
 package app
 
 import (
+	"context"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
@@ -78,6 +81,42 @@ func TestServer_RegisterRoutes_HealthRegistered(t *testing.T) {
 	}
 }
 
+func TestNewServer_FleetClientSkipsDaemonPoolAndHealthProbe(t *testing.T) {
+	app, err := NewServer(context.Background(), webui.ServerConfig{
+		Port:            freeTCPPort(t),
+		BindAddress:     "127.0.0.1",
+		MaxPortAttempts: 1,
+		FleetClient:     true,
+		Store:           memstore.New(),
+	})
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	t.Cleanup(func() { app.Close() })
+
+	if app.pool != nil {
+		t.Fatal("daemon pool should be nil in FleetDB-backed mode")
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/health", nil)
+	rec := httptest.NewRecorder()
+	app.mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("/api/health status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode /api/health: %v", err)
+	}
+	if body["status"] != "ok" {
+		t.Fatalf("/api/health status field = %v, want ok", body["status"])
+	}
+	if _, ok := body["pool"]; ok {
+		t.Fatal("/api/health should not report daemon pool stats in FleetDB-backed mode")
+	}
+}
+
 // TestServer_ConfigDefaults_Port verifies that NewServer applies the
 // default port when the config has Port=0.
 func TestServer_ConfigDefaults_Port(t *testing.T) {
@@ -91,6 +130,16 @@ func TestServer_ConfigDefaults_Port(t *testing.T) {
 	if config.Port != 8080 {
 		t.Errorf("default Port = %d, want 8080", config.Port)
 	}
+}
+
+func freeTCPPort(t *testing.T) int {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen on ephemeral port: %v", err)
+	}
+	defer l.Close()
+	return l.Addr().(*net.TCPAddr).Port
 }
 
 // TestServer_ConfigDefaults_PoolSize verifies that the default pool size is

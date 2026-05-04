@@ -26,7 +26,7 @@ func startMockDaemonServer(t *testing.T) string {
 	}
 	t.Cleanup(func() { os.RemoveAll(dir) })
 
-	socketPath := filepath.Join(dir, "bd.sock")
+	socketPath := filepath.Join(dir, "loom.sock")
 
 	listener, err := net.Listen("unix", socketPath)
 	if err != nil {

@@ -17,42 +17,31 @@ import (
 // buildModules conditionally constructs workspace-scoped route modules
 // and assigns them to app.wsModules.
 func (app *Server) buildModules() {
+	storeBacked := app.config.Store != nil
+	poollessIssueBackend := app.config.FleetClient || storeBacked
+
 	var agentQueueH http.HandlerFunc
-	if app.config.AgentQueueFn != nil && app.config.Store == nil && !app.config.FleetClient {
+	if app.config.AgentQueueFn != nil && !storeBacked && !app.config.FleetClient {
 		agentQueueH = webui.HandleAgentQueue(app.config.AgentQueueFn)
 	}
 
-	// Core modules. When the cli wiring supplies an IssueBackend factory,
-	// plumb it into the ops module so /api/workspaces/{ws}/issues/graph
-	// can serve requests in fleet mode (where the daemon pool is nil).
+	// Core modules. FleetDB-backed serve opens the unified store instead of
+	// per-workspace daemons, so issue ops must use IssueBackendFn even when
+	// a daemon pool object was constructed during startup.
 	opsPool := app.multiPool
-	if app.config.FleetClient {
+	if poollessIssueBackend {
 		opsPool = nil
 	}
 	opsModule := handlermux.NewWorkspaceOpsModule(app.workspaceSvc, opsPool, agentQueueH).
-		WithDaemonExpected(!app.config.FleetClient)
+		WithDaemonExpected(!poollessIssueBackend)
 	if app.config.IssueBackendFn != nil {
 		opsModule = opsModule.WithIssueBackendFn(app.config.IssueBackendFn)
-	}
-	if app.config.WorkspaceListFn != nil {
-		opsModule = opsModule.WithWorkspacePathResolver(func(wsID string) (string, bool) {
-			// WorkspaceListFn returns id→path directly from one LoadConfig
-			// pass — strictly less work than WorkspaceConfigByIDFn (which
-			// also walks repos, loads agents, builds summaries) just to
-			// surface the same path field.
-			paths, err := app.config.WorkspaceListFn()
-			if err != nil {
-				return "", false
-			}
-			p, ok := paths[wsID]
-			return p, ok && p != ""
-		})
 	}
 	app.wsModules = append(app.wsModules, opsModule)
 
 	// Issue + session modules
 	app.wsModules = append(app.wsModules,
-		modbuilder.NewIssueModules(app.issueSvc, app.sessSvc, app.config.WorkspaceConfigFn)...)
+		modbuilder.NewIssueModules(app.issueSvc, app.sessSvc, app.config.Store)...)
 
 	// Log module (always added — handles nil agentSvc gracefully)
 	app.wsModules = append(app.wsModules, svcimpl.NewLogModule(app.agentSvc))
@@ -81,7 +70,7 @@ func (app *Server) buildTerminalModules() {
 				TermAuth:        app.termAuth,
 				CORSOrigins:     app.corsConfig.AllowedOrigins,
 				SelfURL:         fmt.Sprintf("http://localhost:%d", app.actualPort),
-				ConfigByIDFn:    app.config.WorkspaceConfigByIDFn,
+				Store:           app.config.Store,
 				TabMetaStore:    app.tabMetaStore,
 				Hub:             app.hub,
 				ServerStartedAt: app.startedAt,
@@ -97,6 +86,8 @@ func (app *Server) buildTerminalModules() {
 // buildInfraModules adds fleet, diff, file, and agent control modules
 // when their dependencies are available.
 func (app *Server) buildInfraModules() {
+	storeBacked := app.config.Store != nil
+
 	if app.fleetRegistry != nil {
 		app.wsModules = append(app.wsModules,
 			appinfra.NewFleetModule(app.fleetRegistry, app.tokenCfg,
@@ -111,7 +102,7 @@ func (app *Server) buildInfraModules() {
 		app.wsModules = append(app.wsModules, modbuilder.NewFileModule(app.fileSvc))
 	}
 
-	if app.config.Store != nil {
+	if storeBacked {
 		app.wsModules = append(app.wsModules, agents.NewModule(app.agentSvc))
 	} else if app.config.AgentControlFn != nil {
 		app.wsModules = append(app.wsModules, webui.NewAgentControlModule(app.config.AgentControlFn))

@@ -97,7 +97,7 @@ func TestWorkspaceCreateE2E_CloneAsync(t *testing.T) {
 
 	handler := workspace.HandleWorkspaceCreate(svc)
 
-	body := strings.NewReader(`{"name":"async-e2e","type":"clone","clone_url":"https://github.com/user/repo.git"}`)
+	body := strings.NewReader(`{"name":"async-e2e","type":"clone","clone_urls":["https://github.com/user/repo.git"]}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/workspaces", body)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
@@ -135,7 +135,7 @@ func TestWorkspaceCreateE2E_CloneAsyncUnavailable(t *testing.T) {
 
 	handler := workspace.HandleWorkspaceCreate(svc)
 
-	body := strings.NewReader(`{"name":"sync-e2e","type":"clone","clone_url":"https://github.com/user/repo.git"}`)
+	body := strings.NewReader(`{"name":"sync-e2e","type":"clone","clone_urls":["https://github.com/user/repo.git"]}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/workspaces", body)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)

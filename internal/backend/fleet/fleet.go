@@ -155,14 +155,39 @@ func (b *FleetBackend) doRequest(ctx context.Context, method, path string, body 
 	return apiResp, resp.StatusCode, nil
 }
 
+func (b *FleetBackend) doRequestAsActor(ctx context.Context, method, path string, body interface{}, actor string) (*apiResponse, int, error) {
+	b.mu.RLock()
+	auth := fleethttp.Auth{BearerToken: b.authToken, APIKey: b.apiKey, Actor: b.actor}
+	b.mu.RUnlock()
+	if actor != "" {
+		auth.Actor = actor
+	}
+
+	req, err := fleethttp.BuildJSONRequest(ctx, method, b.baseWorkspaceURL+path, auth, body)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	resp, err := b.client.Do(req)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBody))
+	if err != nil {
+		return nil, resp.StatusCode, fmt.Errorf("read response body: %w", err)
+	}
+
+	apiResp, err := parseFleetResponse(respBody, resp.StatusCode)
+	if err != nil {
+		return nil, resp.StatusCode, err
+	}
+	return apiResp, resp.StatusCode, nil
+}
+
 // parseFleetResponse turns a fleet-db response body into the apiResponse
-// envelope downstream code expects. fleet-db speaks two dialects:
-//   - Legacy/wrapper: {"success":true,"data":...}  or  {"success":false,"error":"..."}
-//   - Native:        the raw entity (e.g. an Issue) on 2xx, or
-//     {"error":{"code":"...","message":"..."}} on 4xx
-//
-// Both are valid; we synthesize a uniform apiResponse so callers don't have
-// to care which dialect fired.
+// envelope downstream code expects.
 func parseFleetResponse(body []byte, statusCode int) (*apiResponse, error) {
 	// Try envelope first.
 	var env apiResponse
@@ -226,6 +251,17 @@ func (b *FleetBackend) execURL(ctx context.Context, op, method, rawURL string, b
 	return apiResp, nil
 }
 
+func (b *FleetBackend) execAsActor(ctx context.Context, op, method, path string, body interface{}, actor string) (*apiResponse, error) {
+	apiResp, statusCode, err := b.doRequestAsActor(ctx, method, path, body, actor)
+	if err != nil {
+		return nil, classifyTransportError(op, err)
+	}
+	if cerr := classifyHTTPError(op, statusCode, *apiResp); cerr != nil {
+		return nil, cerr
+	}
+	return apiResp, nil
+}
+
 // hasData returns true if the response Data field is present and non-null.
 func hasData(resp *apiResponse) bool {
 	return resp != nil && resp.Data != nil && string(resp.Data) != "null"
@@ -234,9 +270,7 @@ func hasData(resp *apiResponse) bool {
 // unmarshalIssueList unmarshals a []*types.IssueWithCounts response and
 // converts to []backend.IssueData. Used by List, GetChildren, and SearchIssues.
 //
-// fleet-db speaks two list dialects:
-//   - Bare array: [{...}, {...}]                 (legacy / wrapper-envelope path)
-//   - Wrapped:   {"issues": [{...}, {...}]}      (native v1 list responses)
+// fleet-db list endpoints may return a bare array or {"issues": [...]}.
 //
 // Try the bare array first; on a JSON unmarshal type mismatch, fall back
 // to the wrapper. Anything else is a real parse failure.
@@ -305,12 +339,9 @@ func (b *FleetBackend) Get(ctx context.Context, id string) (*backend.IssueDetail
 	result.IssueData.DependencyCount = wire.DependencyCount
 	result.IssueData.DependentCount = wire.DependentCount
 
-	// fleet-db's GET /issues/{id} response is the slim issue record — no
-	// inline dependencies or comments (beads' IssueDetails embeds both).
-	// Fetch them via the dedicated list endpoints so the returned
-	// IssueDetailData matches the beads contract callers rely on
-	// (webui/service/issue_impl.go#ListDependencies projects off
-	// result.Dependencies, and the /issues/{id} UI route does the same).
+	// fleet-db's GET /issues/{id} response is the slim issue record. Fetch
+	// related data via dedicated list endpoints so IssueDetailData is fully
+	// populated for callers that project dependencies/comments from Get().
 	// Failures are non-fatal: the primary Get already succeeded and
 	// empty-list is a reasonable degraded mode.
 	if deps, err := b.fetchDependencies(ctx, id); err == nil {
@@ -524,10 +555,210 @@ func (b *FleetBackend) Update(ctx context.Context, id string, params backend.Upd
 	if params.Claim {
 		return backend.ErrValidation("Update", "Claim field is not supported in FleetBackend.Update; use ClaimIssue instead")
 	}
-	// Map UpdateParams to the PatchIssueRequest format the server expects.
+	if id == "" {
+		return backend.ErrValidation("Update", "id must not be empty")
+	}
+	handled := false
+
 	req := updateParamsToPatchRequest(params)
-	_, err := b.exec(ctx, "Update", "PATCH", "/issues/"+url.PathEscape(id), req)
+	if len(req) > 0 {
+		if _, err := b.exec(ctx, "Update", "PATCH", "/issues/"+url.PathEscape(id), req); err != nil {
+			return err
+		}
+		handled = true
+	}
+
+	if err := b.applyLabelUpdates(ctx, id, params); err != nil {
+		return err
+	}
+	if hasLabelUpdate(params) {
+		handled = true
+	}
+
+	assignBeforeStatus := params.Assignee != nil && params.Status != nil && *params.Status != "in_progress" && *params.Status != "open"
+	if assignBeforeStatus {
+		if err := b.assignIssue(ctx, id, *params.Assignee); err != nil {
+			return err
+		}
+		handled = true
+	}
+
+	assigneeHandledByStatus, err := b.applyStatusUpdate(ctx, id, params)
+	if err != nil {
+		return err
+	}
+	if params.Status != nil {
+		handled = true
+	}
+
+	if params.Assignee != nil && !assignBeforeStatus && !assigneeHandledByStatus {
+		if err := b.assignIssue(ctx, id, *params.Assignee); err != nil {
+			return err
+		}
+		handled = true
+	}
+
+	if !handled {
+		return backend.ErrValidation("Update", "no FleetDB-supported fields were provided")
+	}
+	return nil
+}
+
+func (b *FleetBackend) applyStatusUpdate(ctx context.Context, id string, params backend.UpdateParams) (bool, error) {
+	if params.Status == nil {
+		return false, nil
+	}
+	target := strings.TrimSpace(*params.Status)
+	if target == "" {
+		return false, backend.ErrValidation("Update", "status must not be empty")
+	}
+
+	current, err := b.Get(ctx, id)
+	if err != nil {
+		return false, err
+	}
+	if current != nil && current.Status == target {
+		return target == "in_progress" && params.Assignee != nil, nil
+	}
+
+	switch target {
+	case "in_progress":
+		actor := b.claimActor(params.Assignee, current)
+		if actor == "" {
+			return false, backend.ErrValidation("Update", "assignee or configured actor is required to claim an issue")
+		}
+		_, err := b.execAsActor(ctx, "Update", "POST", "/issues/"+url.PathEscape(id)+"/claim", nil, actor)
+		return true, err
+	case "open":
+		return false, b.transitionToOpen(ctx, id, current)
+	case "closed":
+		_, err := b.exec(ctx, "Update", "POST", "/issues/"+url.PathEscape(id)+"/close", map[string]interface{}{})
+		return false, err
+	case "deferred":
+		until, err := parseOptionalFleetTime(params.DeferUntil)
+		if err != nil {
+			return false, err
+		}
+		return false, b.deferIssue(ctx, id, until)
+	case "blocked", "review":
+		_, err := b.exec(ctx, "Update", "PATCH", "/issues/"+url.PathEscape(id), map[string]interface{}{"status": target})
+		return false, err
+	default:
+		return false, backend.ErrValidation("Update", "unsupported status for FleetDB workflow: "+target)
+	}
+}
+
+func (b *FleetBackend) transitionToOpen(ctx context.Context, id string, current *backend.IssueDetailData) error {
+	if current == nil {
+		return backend.ErrNotFound("Update", "issue not found")
+	}
+	switch current.Status {
+	case "closed":
+		_, err := b.exec(ctx, "Update", "POST", "/issues/"+url.PathEscape(id)+"/reopen", map[string]interface{}{})
+		return err
+	case "deferred":
+		_, err := b.exec(ctx, "Update", "POST", "/issues/"+url.PathEscape(id)+"/undefer", nil)
+		return err
+	case "in_progress":
+		if current.Assignee != "" {
+			_, err := b.execAsActor(ctx, "Update", "POST", "/issues/"+url.PathEscape(id)+"/release", nil, current.Assignee)
+			return err
+		}
+	}
+	_, err := b.exec(ctx, "Update", "PATCH", "/issues/"+url.PathEscape(id), map[string]interface{}{"status": "open"})
 	return err
+}
+
+func (b *FleetBackend) claimActor(assignee *string, current *backend.IssueDetailData) string {
+	if assignee != nil && *assignee != "" {
+		return *assignee
+	}
+	if current != nil && current.Assignee != "" {
+		return current.Assignee
+	}
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return b.actor
+}
+
+func (b *FleetBackend) assignIssue(ctx context.Context, id, assignee string) error {
+	body := struct {
+		Assignee string `json:"assignee"`
+	}{Assignee: assignee}
+	_, err := b.exec(ctx, "Update", "POST", "/issues/"+url.PathEscape(id)+"/assign", body)
+	return err
+}
+
+func (b *FleetBackend) deferIssue(ctx context.Context, id string, until time.Time) error {
+	var body interface{}
+	if !until.IsZero() {
+		body = struct {
+			DeferUntil time.Time `json:"defer_until"`
+		}{DeferUntil: until}
+	}
+	_, err := b.exec(ctx, "DeferIssue", "POST", "/issues/"+url.PathEscape(id)+"/defer", body)
+	return err
+}
+
+func parseOptionalFleetTime(raw *string) (time.Time, error) {
+	if raw == nil || strings.TrimSpace(*raw) == "" {
+		return time.Time{}, nil
+	}
+	if t, err := time.Parse(time.RFC3339Nano, *raw); err == nil {
+		return t, nil
+	}
+	if t, err := time.Parse(time.RFC3339, *raw); err == nil {
+		return t, nil
+	}
+	return time.Time{}, backend.ErrValidation("Update", "defer_until must be RFC3339")
+}
+
+func (b *FleetBackend) applyLabelUpdates(ctx context.Context, id string, params backend.UpdateParams) error {
+	for _, label := range params.AddLabels {
+		if err := b.AddLabel(ctx, id, label); err != nil {
+			return err
+		}
+	}
+	for _, label := range params.RemoveLabels {
+		if err := b.RemoveLabel(ctx, id, label); err != nil {
+			return err
+		}
+	}
+	if len(params.SetLabels) == 0 {
+		return nil
+	}
+	current, err := b.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	for _, label := range current.Labels {
+		if !containsString(params.SetLabels, label) {
+			if err := b.RemoveLabel(ctx, id, label); err != nil {
+				return err
+			}
+		}
+	}
+	for _, label := range params.SetLabels {
+		if !containsString(current.Labels, label) {
+			if err := b.AddLabel(ctx, id, label); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func hasLabelUpdate(params backend.UpdateParams) bool {
+	return len(params.AddLabels) > 0 || len(params.RemoveLabels) > 0 || len(params.SetLabels) > 0
+}
+
+func containsString(values []string, needle string) bool {
+	for _, value := range values {
+		if value == needle {
+			return true
+		}
+	}
+	return false
 }
 
 // ClaimIssue atomically claims an issue via the fleet claim endpoint.
@@ -561,34 +792,21 @@ func claimIssueBody(lockTTL time.Duration) (interface{}, error) {
 	}{LockTTL: seconds}, nil
 }
 
-// DeferIssue defers an issue via PATCH with status="deferred" and optional
-// defer_until. A zero until means status-only defer with no end date. The
-// fleet server has no dedicated defer route; PATCH /issues/{id} is used.
+// DeferIssue defers an issue via fleet-db's workflow endpoint. A zero until
+// means status-only defer with no end date.
 func (b *FleetBackend) DeferIssue(ctx context.Context, id string, until time.Time) error {
 	if id == "" {
 		return backend.ErrValidation("DeferIssue", "id must not be empty")
 	}
-	req := map[string]interface{}{
-		"status": "deferred",
-	}
-	if !until.IsZero() {
-		req["defer_until"] = until.Format(time.RFC3339)
-	}
-	_, callErr := b.exec(ctx, "DeferIssue", "PATCH", "/issues/"+url.PathEscape(id), req)
-	return callErr
+	return b.deferIssue(ctx, id, until)
 }
 
-// UndeferIssue restores a deferred issue to "open" status and clears the
-// defer_until field by sending an empty string (matching bd undefer behavior).
+// UndeferIssue restores a deferred issue to "open" status and clears defer_until.
 func (b *FleetBackend) UndeferIssue(ctx context.Context, id string) error {
 	if id == "" {
 		return backend.ErrValidation("UndeferIssue", "id must not be empty")
 	}
-	req := map[string]interface{}{
-		"status":      "open",
-		"defer_until": "",
-	}
-	_, callErr := b.exec(ctx, "UndeferIssue", "PATCH", "/issues/"+url.PathEscape(id), req)
+	_, callErr := b.exec(ctx, "UndeferIssue", "POST", "/issues/"+url.PathEscape(id)+"/undefer", nil)
 	return callErr
 }
 
@@ -619,6 +837,13 @@ func (b *FleetBackend) Close(ctx context.Context, id string, params backend.Clos
 	if err := json.Unmarshal(resp.Data, &cr); err != nil {
 		return nil, backend.ErrInternal("Close", "unmarshal response", err)
 	}
+	if cr.Closed == nil && len(cr.Unblocked) == 0 {
+		var issue types.Issue
+		if err := json.Unmarshal(resp.Data, &issue); err == nil && issue.ID != "" {
+			closed := issueToData(&issue)
+			return &backend.CloseResult{Closed: &closed, Unblocked: []backend.IssueData{}}, nil
+		}
+	}
 	return closeResultJSONToData(&cr), nil
 }
 
@@ -638,9 +863,7 @@ func (b *FleetBackend) Reopen(ctx context.Context, id string, params backend.Reo
 		return err
 	}
 	// Record reason as a comment per the IssueBackend interface contract.
-	// Best-effort: the status transition already succeeded. fleet-db
-	// expects "body" here (see CreateCommentRequest), not the beads-
-	// dialect "text".
+	// Best-effort: the status transition already succeeded.
 	if params.Reason != "" {
 		type commentReq struct {
 			Body string `json:"body"`
@@ -695,28 +918,22 @@ func (b *FleetBackend) RemoveDependency(ctx context.Context, params backend.DepR
 // --- Label operations ---
 
 func (b *FleetBackend) AddLabel(ctx context.Context, id string, label string) error {
-	req := map[string]interface{}{
-		"add_labels": []string{label},
-	}
-	_, err := b.exec(ctx, "AddLabel", "PATCH", "/issues/"+url.PathEscape(id), req)
+	req := struct {
+		Label string `json:"label"`
+	}{Label: label}
+	_, err := b.exec(ctx, "AddLabel", "POST", "/issues/"+url.PathEscape(id)+"/labels", req)
 	return err
 }
 
 func (b *FleetBackend) RemoveLabel(ctx context.Context, id string, label string) error {
-	req := map[string]interface{}{
-		"remove_labels": []string{label},
-	}
-	_, err := b.exec(ctx, "RemoveLabel", "PATCH", "/issues/"+url.PathEscape(id), req)
+	_, err := b.exec(ctx, "RemoveLabel", "DELETE", "/issues/"+url.PathEscape(id)+"/labels/"+url.PathEscape(label), nil)
 	return err
 }
 
 // --- Comment operations ---
 
 func (b *FleetBackend) ListComments(ctx context.Context, id string) ([]backend.CommentData, error) {
-	// fleet-db exposes GET /issues/{id}/comments as a first-class endpoint
-	// that returns {"comments": [...]}. The Get response does NOT include
-	// comments inline (unlike beads' IssueDetails), so using Get here
-	// returned an empty list even when comments existed.
+	// fleet-db exposes GET /issues/{id}/comments as a first-class endpoint.
 	resp, err := b.exec(ctx, "ListComments", "GET", "/issues/"+url.PathEscape(id)+"/comments", nil)
 	if err != nil {
 		return nil, err
@@ -751,13 +968,10 @@ func (b *FleetBackend) ListComments(ctx context.Context, id string) ([]backend.C
 }
 
 func (b *FleetBackend) AddComment(ctx context.Context, params backend.CommentAddParams) (*backend.CommentData, error) {
-	// Request body: fleet-db names the content field "body". Earlier
-	// drafts of this client sent "text" (beads' dialect); fleet-db's
-	// strict JSON validation (disallowUnknownFields) rejected it with
-	// 400 "unknown field text". Response body: fleet-db returns a
-	// "body" field + string ID; loom's canonical types.Comment has
-	// "text" + int64 ID. Unmarshal into a local struct that mirrors
-	// fleet-db's wire shape, then project to types.Comment.
+	// Response body: fleet-db returns a "body" field + string ID; loom's
+	// canonical types.Comment has "text" + int64 ID. Unmarshal into a
+	// local struct that mirrors fleet-db's wire shape, then project to
+	// types.Comment.
 	type commentReq struct {
 		Body string `json:"body"`
 	}
@@ -778,8 +992,8 @@ func (b *FleetBackend) AddComment(ctx context.Context, params backend.CommentAdd
 }
 
 // fleetCommentWire mirrors fleet-db's comment response shape so the
-// unmarshal path doesn't collide with types.Comment's beads-dialect
-// field tags. Fleet-db can emit ID as either string (per-issue sequence
-// like "2") or number (legacy envelope wrappers); json.RawMessage
-// tolerates both and the toTypesComment projection normalizes to int64.
+// unmarshal path doesn't collide with types.Comment field tags. Fleet-db
+// can emit ID as either string (per-issue sequence like "2") or number;
+// json.RawMessage tolerates both and the toTypesComment projection
+// normalizes to int64.
 // Field rename: body → Text.

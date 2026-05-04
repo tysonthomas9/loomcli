@@ -86,8 +86,6 @@ func TestIssueFromData(t *testing.T) {
 				require.Empty(t, e.Holder)
 				require.Empty(t, e.SourceFormula)
 				require.Empty(t, e.SourceLocation)
-				require.Empty(t, e.HookBead)
-				require.Empty(t, e.RoleBead)
 				require.Empty(t, string(e.AgentState))
 				require.Nil(t, e.LastActivity)
 				require.Empty(t, e.RoleType)
@@ -383,8 +381,6 @@ func TestIssueToData(t *testing.T) {
 				Holder:         "holder-1",
 				SourceFormula:  "formula",
 				SourceLocation: "loc",
-				HookBead:       "hook",
-				RoleBead:       "role",
 				AgentState:     entity.StateRunning,
 				MolType:        entity.MolTypeSwarm,
 				WorkType:       entity.WorkTypeMutex,
@@ -568,8 +564,6 @@ func TestIssueRoundTrip_Lossy(t *testing.T) {
 		Holder:         "holder",
 		SourceFormula:  "formula",
 		SourceLocation: "loc",
-		HookBead:       "hook",
-		RoleBead:       "role",
 		AgentState:     entity.StateRunning,
 		MolType:        entity.MolTypeSwarm,
 		WorkType:       entity.WorkTypeMutex,
@@ -624,8 +618,6 @@ func TestIssueRoundTrip_Lossy(t *testing.T) {
 	require.Empty(t, roundTripped.Holder)
 	require.Empty(t, roundTripped.SourceFormula)
 	require.Empty(t, roundTripped.SourceLocation)
-	require.Empty(t, roundTripped.HookBead)
-	require.Empty(t, roundTripped.RoleBead)
 	require.Empty(t, string(roundTripped.AgentState))
 	require.Empty(t, string(roundTripped.MolType))
 	require.Empty(t, string(roundTripped.WorkType))

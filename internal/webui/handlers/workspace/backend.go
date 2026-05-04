@@ -9,14 +9,19 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	webuiterminal "github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
 
-// validBackends is the list of supported AI backend names.
-var validBackends = []string{"claude", "codex", "opencode", "gemini", "cursor"}
+// BackendConfigResponse wraps the backend config data for JSON response.
+type BackendConfigResponse struct {
+	Success bool                       `json:"success"`
+	Data    *service.BackendConfigData `json:"data,omitempty"`
+	Error   string                     `json:"error,omitempty"`
+}
 
 // isValidBackend checks if the backend name is in the allowed list.
 func isValidBackend(name string) bool {
-	for _, b := range validBackends {
+	for _, b := range webuiterminal.ValidBackends {
 		if b == name {
 			return true
 		}
@@ -29,8 +34,25 @@ type WorkspaceBackendPatchRequest struct {
 	Backend string `json:"backend"`
 }
 
+// HandleWorkspaceBackendGet returns the store-backed workspace backend config.
+func HandleWorkspaceBackendGet(svc service.WorkspaceService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		wsID := middleware.WorkspaceFromContext(r.Context())
+		if wsID == "" {
+			handler.WriteJSON(w, http.StatusBadRequest, BackendConfigResponse{Success: false, Error: "workspace ID is required"})
+			return
+		}
+		data, err := svc.GetWorkspaceBackend(r.Context(), wsID)
+		if err != nil {
+			handler.HandleServiceError(w, err)
+			return
+		}
+		handler.WriteJSON(w, http.StatusOK, BackendConfigResponse{Success: true, Data: data})
+	}
+}
+
 // HandleWorkspaceBackendPatch returns a handler that updates a workspace's backend
-// in the global config.
+// in the FleetDB-backed workspace config.
 func HandleWorkspaceBackendPatch(svc service.WorkspaceService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		wsID := middleware.WorkspaceFromContext(r.Context())
@@ -60,7 +82,7 @@ func HandleWorkspaceBackendPatch(svc service.WorkspaceService) http.HandlerFunc 
 		if !isValidBackend(req.Backend) {
 			handler.WriteJSON(w, http.StatusBadRequest, WorkspaceResponse{
 				Success: false,
-				Error:   fmt.Sprintf("invalid backend %q; valid options: %v", req.Backend, validBackends),
+				Error:   fmt.Sprintf("invalid backend %q; valid options: %v", req.Backend, webuiterminal.ValidBackends),
 			})
 			return
 		}

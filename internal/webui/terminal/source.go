@@ -78,8 +78,7 @@ type Attachment interface {
 	Scrollback() []byte
 
 	// Resize satisfies realtime.Resizer so the WS handler can pass the
-	// Attachment directly to realtime.WSToPTY. connID is accepted for
-	// interface compatibility; implementations may ignore it.
+	// Attachment directly to realtime.WSToPTY. Implementations may ignore connID.
 	Resize(connID string, cols, rows uint16) error
 
 	// ExitReason returns the reason the owning session closed. Values are

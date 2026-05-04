@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/ops"
+	"github.com/tysonthomas9/loomcli/internal/store"
 	githandlers "github.com/tysonthomas9/loomcli/internal/webui/handlers/git"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/issues"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/misc"
@@ -20,9 +20,9 @@ import (
 )
 
 // NewIssueModules creates the issue and session modules.
-func NewIssueModules(issueSvc service.IssueService, sessSvc service.SessionService, workspaceConfigFn func() (*ops.WorkspaceData, error)) []interface{ Register(*http.ServeMux) } {
+func NewIssueModules(issueSvc service.IssueService, sessSvc service.SessionService, st store.Store) []interface{ Register(*http.ServeMux) } {
 	return []interface{ Register(*http.ServeMux) }{
-		issues.NewIssueModule(issueSvc, workspaceConfigFn),
+		issues.NewIssueModule(issueSvc, st),
 		issues.NewSessionModule(sessSvc, issues.SessionModuleOpts{
 			ListTaskSessions:     misc.HandleListTaskSessions(sessSvc),
 			GetSession:           misc.HandleGetSession(sessSvc),
@@ -43,7 +43,7 @@ type TerminalModuleDeps struct {
 	TermAuth        *realtime.TerminalAuth
 	CORSOrigins     []string
 	SelfURL         string
-	ConfigByIDFn    func(string) (*ops.WorkspaceData, error)
+	Store           store.Store
 	TabMetaStore    *tabmeta.Store
 	Hub             *realtime.Hub
 	ServerStartedAt time.Time
@@ -56,7 +56,7 @@ func NewTerminalModules(deps TerminalModuleDeps) []interface{ Register(*http.Ser
 		hterminal.NewModule(
 			deps.TermSvc, deps.AgentSvc, deps.PTYMgr, deps.AgentTmuxMgr,
 			deps.TermAuth, deps.CORSOrigins,
-			deps.SelfURL, deps.ConfigByIDFn,
+			deps.SelfURL, deps.Store,
 			deps.TabMetaStore, deps.Hub, deps.ServerStartedAt),
 	}
 }

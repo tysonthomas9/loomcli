@@ -10,21 +10,18 @@ import (
 )
 
 // fleetIssueWire mirrors fleet-db's wire shape so unmarshal captures
-// `type` (fleet-db dialect) into a struct field. types.Issue tags the
-// same field as `issue_type` (beads dialect) and silently drops `type`,
-// leaving every fleet response's IssueType empty for downstream UIs.
+// `type` into a struct field. types.Issue tags the same field as
+// `issue_type`, so fleet responses need this projection step.
 type fleetIssueWire struct {
 	ID          string     `json:"id,omitempty"`
 	Title       string     `json:"title,omitempty"`
 	Status      string     `json:"status,omitempty"`
 	Priority    int        `json:"priority,omitempty"`
-	Type        string     `json:"type,omitempty"`       // fleet-db dialect
-	IssueType   string     `json:"issue_type,omitempty"` // beads dialect, kept for symmetry
+	Type        string     `json:"type,omitempty"`
 	Assignee    string     `json:"assignee,omitempty"`
 	Owner       string     `json:"owner,omitempty"`
 	Labels      []string   `json:"labels,omitempty"`
-	SourceRepo  string     `json:"source_repo,omitempty"` // beads/loom dialect
-	Repo        string     `json:"repo,omitempty"`        // fleet-db dialect, same value
+	Repo        string     `json:"repo,omitempty"`
 	Design      string     `json:"design,omitempty"`
 	Description string     `json:"description,omitempty"`
 	CreatedAt   time.Time  `json:"created_at,omitempty"`
@@ -36,30 +33,19 @@ type fleetIssueWire struct {
 	CloseReason string     `json:"close_reason,omitempty"`
 }
 
-// toIssue projects the wire shape to the canonical types.Issue. For dual-tag
-// fields (`type`/`issue_type`, `repo`/`source_repo`) fleet-db's dialect wins
-// when both are present; the alias kicks in only when the native key is
-// absent.
+// toIssue projects the wire shape to the canonical types.Issue.
 func (w fleetIssueWire) toIssue() types.Issue {
-	kind := w.Type
-	if kind == "" {
-		kind = w.IssueType
-	}
-	repo := w.Repo
-	if repo == "" {
-		repo = w.SourceRepo
-	}
 	return types.Issue{
 		ID:          w.ID,
 		Title:       w.Title,
 		Description: w.Description,
 		Status:      types.Status(w.Status),
 		Priority:    w.Priority,
-		IssueType:   types.IssueType(kind),
+		IssueType:   types.IssueType(w.Type),
 		Assignee:    w.Assignee,
 		Owner:       w.Owner,
 		Labels:      w.Labels,
-		SourceRepo:  repo,
+		SourceRepo:  w.Repo,
 		Design:      w.Design,
 		CreatedAt:   w.CreatedAt,
 		CreatedBy:   w.CreatedBy,

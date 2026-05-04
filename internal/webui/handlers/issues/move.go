@@ -1,14 +1,17 @@
 package issues
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 
-	"github.com/tysonthomas9/loomcli/internal/ops"
+	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
@@ -31,61 +34,43 @@ type MoveResult struct {
 	Warnings []string `json:"warnings,omitempty"`
 }
 
-// workspaceValidatorImpl implements service.WorkspaceValidator using the webui workspace config.
+// workspaceValidatorImpl implements service.WorkspaceValidator using FleetDB.
 type workspaceValidatorImpl struct {
-	workspaceConfigFn func() (*ops.WorkspaceData, error)
+	store            store.Store
+	currentWorkspace string
 }
 
 func (v *workspaceValidatorImpl) ValidateTarget(targetWorkspace string) (string, error) {
-	if v.workspaceConfigFn == nil {
-		return "", service.ErrValidation("workspace configuration not available")
+	if v.store == nil {
+		return "", service.ErrValidation("workspace store not available")
 	}
 
-	wsData, err := v.workspaceConfigFn()
+	targetKey, targetName, err := resolveWorkspaceRef(context.Background(), v.store, targetWorkspace)
 	if err != nil {
-		return "", service.ErrInternal("failed to load workspace config", err)
-	}
-
-	found := false
-	for _, ws := range wsData.Workspaces {
-		if ws.Name == targetWorkspace {
-			found = true
-			break
+		if errors.Is(err, domain.ErrNotFound) {
+			return "", service.ErrValidation(fmt.Sprintf("workspace %q not found", targetWorkspace))
 		}
-	}
-	if !found {
-		return "", service.ErrValidation(fmt.Sprintf("workspace %q not found", targetWorkspace))
+		return "", service.ErrInternal("failed to load workspace", err)
 	}
 
-	if wsData.Name == targetWorkspace {
-		return "", service.ErrValidation("cannot move issue to the same workspace")
-	}
-
-	// Resolve workspace name → ID
-	for _, ws := range wsData.Workspaces {
-		if ws.Name == targetWorkspace {
-			if ws.ID != "" {
-				return ws.ID, nil
+	if v.currentWorkspace != "" {
+		currentKey, currentName, currentErr := resolveWorkspaceRef(context.Background(), v.store, v.currentWorkspace)
+		if currentErr == nil {
+			if targetKey == currentKey || (targetName != "" && targetName == currentName) {
+				return "", service.ErrValidation("cannot move issue to the same workspace")
 			}
-			return ws.Name, nil
 		}
 	}
-	return targetWorkspace, nil
+
+	return targetKey, nil
 }
 
 func (v *workspaceValidatorImpl) CurrentWorkspace() string {
-	if v.workspaceConfigFn == nil {
-		return ""
-	}
-	wsData, err := v.workspaceConfigFn()
-	if err != nil {
-		return ""
-	}
-	return wsData.Name
+	return v.currentWorkspace
 }
 
 // handleMoveIssue returns a handler that moves an issue to a different workspace.
-func HandleMoveIssue(svc service.IssueService, workspaceConfigFn func() (*ops.WorkspaceData, error)) http.HandlerFunc {
+func HandleMoveIssue(svc service.IssueService, st store.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		issueID := r.PathValue("id")
 		if issueID == "" {
@@ -111,7 +96,11 @@ func HandleMoveIssue(svc service.IssueService, workspaceConfigFn func() (*ops.Wo
 			return
 		}
 
-		validator := &workspaceValidatorImpl{workspaceConfigFn: workspaceConfigFn}
+		currentWorkspace := middleware.WorkspaceFromContext(r.Context())
+		if currentWorkspace == "" {
+			currentWorkspace = r.PathValue("ws")
+		}
+		validator := &workspaceValidatorImpl{store: st, currentWorkspace: currentWorkspace}
 
 		result, err := svc.MoveIssue(r.Context(), service.MoveIssueParams{
 			IssueID:         issueID,
@@ -120,6 +109,10 @@ func HandleMoveIssue(svc service.IssueService, workspaceConfigFn func() (*ops.Wo
 		})
 		if err != nil {
 			handler.HandleServiceError(w, err)
+			return
+		}
+		if result == nil {
+			handler.HandleServiceError(w, service.ErrInternal("move issue returned no result", nil))
 			return
 		}
 
@@ -132,4 +125,23 @@ func HandleMoveIssue(svc service.IssueService, workspaceConfigFn func() (*ops.Wo
 			},
 		})
 	}
+}
+
+func resolveWorkspaceRef(ctx context.Context, st store.Store, ref string) (string, string, error) {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return "", "", domain.ErrNotFound
+	}
+	ws, err := st.Workspaces().Get(ctx, ref)
+	if err == nil && ws != nil {
+		return ws.Key, ws.Name, nil
+	}
+	if err != nil && !errors.Is(err, domain.ErrNotFound) && !errors.Is(err, domain.ErrInvalid) {
+		return "", "", err
+	}
+	ws, err = st.Workspaces().GetByName(ctx, ref)
+	if err != nil {
+		return "", "", err
+	}
+	return ws.Key, ws.Name, nil
 }

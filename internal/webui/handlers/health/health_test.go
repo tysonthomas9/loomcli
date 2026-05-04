@@ -13,8 +13,7 @@ import (
 )
 
 // stubDeadDaemonPool models the production "daemon expected, daemon dead"
-// scenario: pool exists, pool.Get() always errors. This is the case the
-// reviewer flagged: a beads-mode deploy whose bd daemon dies must surface
+// scenario: pool exists, pool.Get() always errors. The handler must surface
 // 503 from /api/health so liveness probes restart the pod.
 type stubDeadDaemonPool struct{}
 
@@ -49,8 +48,8 @@ func TestHandleAPIHealthNoDaemon(t *testing.T) {
 	if body.Daemon.Connected {
 		t.Errorf("Daemon.Connected = true, want false")
 	}
-	// Pool stats must NOT be reported in NoDaemon mode — the absence is
-	// the signal that this deployment doesn't use a bd daemon at all.
+	// Pool stats must NOT be reported in NoDaemon mode; the absence is
+	// the signal that this deployment doesn't use a daemon at all.
 	if body.Pool != nil {
 		t.Errorf("Pool stats present in NoDaemon mode: %+v", body.Pool)
 	}
@@ -99,7 +98,7 @@ func TestHandleDaemonStatus_NoDaemonMode(t *testing.T) {
 
 // TestHandleDaemonStatus_DaemonExpectedNilPool keeps the daemon-mode
 // contract intact: when daemonExpected=true and no pool is wired, the
-// handler returns 503 — beads-mode operators rely on this signal.
+// handler returns 503 so operators can detect daemon-mode misconfiguration.
 func TestHandleDaemonStatus_DaemonExpectedNilPool(t *testing.T) {
 	handler := HandleDaemonStatusWithMode(nil, true)
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/x/daemon/status", nil)
@@ -111,8 +110,8 @@ func TestHandleDaemonStatus_DaemonExpectedNilPool(t *testing.T) {
 }
 
 // TestHandleAPIHealth_DaemonDead is the prod-regression guard for the
-// daemon-mode 503 contract. A wired pool whose Get() errors (bd daemon
-// died) MUST 503 so k8s/load-balancer liveness probes restart the pod —
+// daemon-mode 503 contract. A wired pool whose Get() errors MUST 503 so
+// k8s/load-balancer liveness probes restart the pod —
 // silently masking this would ship a degraded production.
 func TestHandleAPIHealth_DaemonDead(t *testing.T) {
 	handler := HandleAPIHealth(stubDeadDaemonPool{})
@@ -139,7 +138,7 @@ func TestHandleAPIHealth_DaemonDead(t *testing.T) {
 
 // TestHandleDaemonStatus_DaemonDead mirrors the /api/health regression
 // guard for the workspace-scoped daemon-status route. With a wired pool
-// whose Get() always errors and daemonExpected=true (beads mode), the
+// whose Get() always errors and daemonExpected=true, the
 // response MUST be 503 so the FE badge correctly renders "daemon down,
 // please restart" rather than the fleet-stub "no daemon expected" state.
 func TestHandleDaemonStatus_DaemonDead(t *testing.T) {

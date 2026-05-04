@@ -6,7 +6,7 @@ import (
 )
 
 // IssueBackend is the pluggable data access interface for issue tracking.
-// It abstracts the underlying storage (beads CLI, fleet-db, Redis, etc.) behind
+// It abstracts the underlying storage (fleet-db, Redis, etc.) behind
 // a uniform set of query, mutation, and subscription operations.
 //
 // IssueBackend operates at the data access level, below the service layer but
@@ -51,8 +51,8 @@ type IssueBackend interface {
 	// SearchIssues performs a full-text relevance-ranked search across issue
 	// title, description, and ID. Unlike List with a Query filter (substring
 	// matching among other filters), this is a dedicated search operation;
-	// backends with a ranked search endpoint (e.g., fleet-db FT.SEARCH, beads
-	// SQLite FTS) use it here. Pass limit=0 to use the backend default. Returns
+	// backends with a ranked search endpoint (e.g., fleet-db FT.SEARCH) use it
+	// here. Pass limit=0 to use the backend default. Returns
 	// KindValidation if query is empty or limit is negative.
 	SearchIssues(ctx context.Context, query string, limit int) ([]IssueData, error)
 
@@ -71,9 +71,8 @@ type IssueBackend interface {
 	// ClaimIssue atomically claims an issue for the current agent. The
 	// assignee identity comes from the configured agent name at the backend
 	// level, not from the caller. lockTTL configures TTL-based lock expiry
-	// for backends that support it (e.g., fleet-db Redis); backends without
-	// TTL support (beads SQLite) accept but ignore the parameter. Pass 0 to
-	// use the backend's default TTL. Returns KindConflict if the issue is
+	// for backends that support it. Pass 0 to use the backend's default TTL.
+	// Returns KindConflict if the issue is
 	// already claimed by another agent.
 	ClaimIssue(ctx context.Context, id string, lockTTL time.Duration) error
 
@@ -163,6 +162,6 @@ type IssueBackend interface {
 	// --- Metadata ---
 
 	// BackendName returns a string identifying this backend implementation
-	// (e.g., "beads", "fleet-db"). The value is immutable after construction.
+	// (e.g., "fleet-db"). The value is immutable after construction.
 	BackendName() string
 }

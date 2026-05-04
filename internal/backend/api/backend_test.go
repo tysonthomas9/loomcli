@@ -743,14 +743,14 @@ func TestDeferIssue_WithUntil(t *testing.T) {
 	})
 	defer ts.Close()
 
-	if err := ab.DeferIssue(context.Background(), "bd-1", until); err != nil {
+	if err := ab.DeferIssue(context.Background(), "loom-1", until); err != nil {
 		t.Fatalf("DeferIssue: %v", err)
 	}
 	if gotMethod != http.MethodPatch {
 		t.Errorf("method = %q, want PATCH", gotMethod)
 	}
-	if !strings.HasSuffix(gotPath, "/issues/bd-1") {
-		t.Errorf("path = %q, want suffix /issues/bd-1", gotPath)
+	if !strings.HasSuffix(gotPath, "/issues/loom-1") {
+		t.Errorf("path = %q, want suffix /issues/loom-1", gotPath)
 	}
 	if gotBody.Status == nil || string(*gotBody.Status) != "deferred" {
 		t.Errorf("status = %v, want deferred", gotBody.Status)
@@ -768,7 +768,7 @@ func TestDeferIssue_ZeroUntil(t *testing.T) {
 	})
 	defer ts.Close()
 
-	if err := ab.DeferIssue(context.Background(), "bd-1", time.Time{}); err != nil {
+	if err := ab.DeferIssue(context.Background(), "loom-1", time.Time{}); err != nil {
 		t.Fatalf("DeferIssue: %v", err)
 	}
 	if gotBody.Status == nil || string(*gotBody.Status) != "deferred" {
@@ -801,7 +801,7 @@ func TestUndeferIssue_Success(t *testing.T) {
 	})
 	defer ts.Close()
 
-	if err := ab.UndeferIssue(context.Background(), "bd-1"); err != nil {
+	if err := ab.UndeferIssue(context.Background(), "loom-1"); err != nil {
 		t.Fatalf("UndeferIssue: %v", err)
 	}
 	if gotBody.Status == nil || string(*gotBody.Status) != "open" {

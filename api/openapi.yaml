@@ -151,36 +151,6 @@ paths:
               schema:
                 type: integer
 
-  /api/config/backend:
-    get:
-      operationId: getBackendConfig
-      tags: [config]
-      summary: Get backend configuration
-      responses:
-        "200":
-          description: Backend config
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/BackendConfigResponse"
-    patch:
-      operationId: patchBackendConfig
-      tags: [config]
-      summary: Update default backend
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/BackendConfigPatchRequest"
-      responses:
-        "200":
-          description: Updated
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/MessageResponse"
-
   /api/backends:
     get:
       operationId: getBackendsHealth
@@ -3272,10 +3242,6 @@ components:
           type: string
         rig:
           type: string
-        hook_bead:
-          type: string
-        role_bead:
-          type: string
         mol_type:
           type: string
         parent:
@@ -3864,13 +3830,6 @@ components:
         backend:
           type: string
 
-    BackendConfigPatchRequest:
-      type: object
-      required: [backend]
-      properties:
-        backend:
-          type: string
-
     # ── Agent Schemas ───────────────────────────────────────────────────
     AgentStatusResponse:
       type: object
@@ -3891,10 +3850,6 @@ components:
         role_type:
           type: string
         rig:
-          type: string
-        hook_bead:
-          type: string
-        role_bead:
           type: string
         last_activity:
           type: [string, "null"]
@@ -4447,7 +4402,7 @@ components:
       properties:
         mode:
           type: string
-          enum: [workspace, legacy]
+          enum: [workspace]
         default:
           type: string
         workspaces:
@@ -4464,7 +4419,7 @@ components:
       properties:
         mode:
           type: string
-          enum: [workspace, legacy]
+          enum: [workspace]
         name:
           type: string
         workspaces:

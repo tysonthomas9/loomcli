@@ -355,8 +355,7 @@ func (h *Hub) drainRetryQueue() {
 }
 
 // ParseLastSince extracts the reconnection catch-up cursor from the request.
-// It preserves opaque cursors (fleet-db v2) and still supports numeric
-// millisecond cursors for beads / legacy callers. If both header and query are
+// It preserves opaque cursors (fleet-db v2). If both header and query are
 // present and both are numeric, the larger value wins; otherwise the explicit
 // query parameter wins over Last-Event-ID.
 func ParseLastSince(r *http.Request) string {

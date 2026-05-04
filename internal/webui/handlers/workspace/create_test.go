@@ -71,7 +71,7 @@ func TestHandleWorkspaceCreate_CloneType_Async(t *testing.T) {
 
 	handler := handleWorkspaceCreate(svc)
 
-	body := strings.NewReader(`{"name":"cloned-ws","type":"clone","clone_url":"https://github.com/user/repo.git","branch":"main"}`)
+	body := strings.NewReader(`{"name":"cloned-ws","type":"clone","clone_urls":["https://github.com/user/repo.git"],"branch":"main"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/workspaces", body)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
@@ -101,7 +101,7 @@ func TestHandleWorkspaceCreate_CloneType_AsyncUnavailableReturnsError(t *testing
 
 	handler := handleWorkspaceCreate(svc)
 
-	body := strings.NewReader(`{"name":"cloned-ws","type":"clone","clone_url":"https://github.com/user/repo.git"}`)
+	body := strings.NewReader(`{"name":"cloned-ws","type":"clone","clone_urls":["https://github.com/user/repo.git"]}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/workspaces", body)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)

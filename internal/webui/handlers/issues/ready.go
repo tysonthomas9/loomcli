@@ -151,7 +151,7 @@ func (g *readyInterceptor) flushTo(w http.ResponseWriter) {
 // (including backend errors), false when no backend is wired so the caller
 // can fall through to the pool-error path.
 //
-//nolint:funlen // Handler preserves legacy response shaping around backend ready data.
+//nolint:funlen // Handler keeps the ready response shaping in one place.
 func serveReadyViaBackend(w http.ResponseWriter, r *http.Request, backendFn IssueBackendFn) bool {
 	if backendFn == nil {
 		return false

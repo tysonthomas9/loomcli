@@ -107,7 +107,7 @@ func NewStore(cfg RedisConfig, logger *slog.Logger) (*Store, error) {
 		logger = slog.Default()
 	}
 
-	// Resolve password: YAML config > FLEET_REDIS_PASSWORD > LOOM_REDIS_PASSWORD
+	// Resolve password: explicit config > FLEET_REDIS_PASSWORD > LOOM_REDIS_PASSWORD
 	password := cfg.Password
 	if password == "" {
 		if p := os.Getenv("FLEET_REDIS_PASSWORD"); p != "" {

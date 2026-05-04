@@ -240,7 +240,7 @@ func (hd *HealthDoctor) recoverDaemon(_ context.Context, wsID string) error {
 		return fmt.Errorf("resolve workspace paths: %w", err)
 	}
 	if _, ok := paths[wsID]; !ok {
-		return fmt.Errorf("workspace %s not found in config", wsID)
+		return fmt.Errorf("workspace %s not found in store", wsID)
 	}
 	return nil
 }

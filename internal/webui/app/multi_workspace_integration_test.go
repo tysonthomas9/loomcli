@@ -439,7 +439,7 @@ func TestMultiWorkspace_TwoTabSSEIndependence(t *testing.T) {
 	t.Run("alpha mutation reaches only tab1", func(t *testing.T) {
 		hub.Broadcast(&realtime.MutationPayload{
 			Type:        "create",
-			IssueID:     "bd-alpha-1",
+			IssueID:     "loom-alpha-1",
 			Timestamp:   time.Now().UTC().Format(time.RFC3339),
 			WorkspaceID: "ws-alpha",
 		})
@@ -450,8 +450,8 @@ func TestMultiWorkspace_TwoTabSSEIndependence(t *testing.T) {
 		if err != nil {
 			t.Fatalf("tab1 should receive ws-alpha mutation: %v", err)
 		}
-		if m.IssueID != "bd-alpha-1" {
-			t.Errorf("tab1: expected bd-alpha-1, got %s", m.IssueID)
+		if m.IssueID != "loom-alpha-1" {
+			t.Errorf("tab1: expected loom-alpha-1, got %s", m.IssueID)
 		}
 
 		extra := tab2.DrainMutations()
@@ -463,7 +463,7 @@ func TestMultiWorkspace_TwoTabSSEIndependence(t *testing.T) {
 	t.Run("beta mutation reaches only tab2", func(t *testing.T) {
 		hub.Broadcast(&realtime.MutationPayload{
 			Type:        "update",
-			IssueID:     "bd-beta-1",
+			IssueID:     "loom-beta-1",
 			Timestamp:   time.Now().UTC().Format(time.RFC3339),
 			WorkspaceID: "ws-beta",
 		})
@@ -474,8 +474,8 @@ func TestMultiWorkspace_TwoTabSSEIndependence(t *testing.T) {
 		if err != nil {
 			t.Fatalf("tab2 should receive ws-beta mutation: %v", err)
 		}
-		if m.IssueID != "bd-beta-1" {
-			t.Errorf("tab2: expected bd-beta-1, got %s", m.IssueID)
+		if m.IssueID != "loom-beta-1" {
+			t.Errorf("tab2: expected loom-beta-1, got %s", m.IssueID)
 		}
 
 		extra := tab1.DrainMutations()
@@ -487,7 +487,7 @@ func TestMultiWorkspace_TwoTabSSEIndependence(t *testing.T) {
 	t.Run("untagged mutation reaches neither tab", func(t *testing.T) {
 		hub.Broadcast(&realtime.MutationPayload{
 			Type:        "create",
-			IssueID:     "bd-untagged",
+			IssueID:     "loom-untagged",
 			Timestamp:   time.Now().UTC().Format(time.RFC3339),
 			WorkspaceID: "", // empty = untagged
 		})
@@ -513,7 +513,7 @@ func TestMultiWorkspace_TwoTabSSEIndependence(t *testing.T) {
 		// with the same UUID should still be delivered to tab1.
 		hub.Broadcast(&realtime.MutationPayload{
 			Type:        "status",
-			IssueID:     "bd-post-rename",
+			IssueID:     "loom-post-rename",
 			Timestamp:   time.Now().UTC().Format(time.RFC3339),
 			WorkspaceID: "ws-alpha", // UUID unchanged
 		})
@@ -524,8 +524,8 @@ func TestMultiWorkspace_TwoTabSSEIndependence(t *testing.T) {
 		if err != nil {
 			t.Fatalf("tab1 should still receive ws-alpha mutations after rename: %v", err)
 		}
-		if m.IssueID != "bd-post-rename" {
-			t.Errorf("tab1: expected bd-post-rename, got %s", m.IssueID)
+		if m.IssueID != "loom-post-rename" {
+			t.Errorf("tab1: expected loom-post-rename, got %s", m.IssueID)
 		}
 	})
 
@@ -539,7 +539,7 @@ func TestMultiWorkspace_TwoTabSSEIndependence(t *testing.T) {
 
 		hub.Broadcast(&realtime.MutationPayload{
 			Type:        "create",
-			IssueID:     "bd-stale",
+			IssueID:     "loom-stale",
 			Timestamp:   time.Now().UTC().Format(time.RFC3339),
 			WorkspaceID: "ws-alpha",
 		})
@@ -579,7 +579,7 @@ func TestMultiWorkspace_CrossWorkspaceMove(t *testing.T) {
 			{ID: "ws-alpha-uuid", Name: "alpha", Path: "/ws/alpha", Active: true},
 			{ID: "ws-beta-uuid", Name: "beta", Path: "/ws/beta", Active: false},
 		}
-		wsCfg := testWorkspaceConfigFn("alpha", workspaces)
+		wsCfg := testWorkspaceStore("alpha", workspaces)
 
 		handler := issues.HandleMoveIssue(svc, wsCfg)
 
@@ -623,12 +623,13 @@ func TestMultiWorkspace_CrossWorkspaceMove(t *testing.T) {
 		workspaces := []ops.WorkspaceSummary{
 			{Name: "alpha", Path: "/ws/alpha", Active: true},
 		}
-		wsCfg := testWorkspaceConfigFn("alpha", workspaces)
+		wsCfg := testWorkspaceStore("alpha", workspaces)
 
 		handler := issues.HandleMoveIssue(svc, wsCfg)
 
 		body := `{"target_workspace":"nonexistent"}`
-		req := httptest.NewRequest(http.MethodPost, "/api/issues/src-001/move", strings.NewReader(body))
+		req := httptest.NewRequest(http.MethodPost, "/api/workspaces/alpha/issues/src-001/move", strings.NewReader(body))
+		req.SetPathValue("ws", "alpha")
 		req.SetPathValue("id", "src-001")
 		rec := httptest.NewRecorder()
 
@@ -654,12 +655,13 @@ func TestMultiWorkspace_CrossWorkspaceMove(t *testing.T) {
 			{Name: "alpha", Path: "/ws/alpha", Active: true},
 			{Name: "beta", Path: "/ws/beta", Active: false},
 		}
-		wsCfg := testWorkspaceConfigFn("alpha", workspaces)
+		wsCfg := testWorkspaceStore("alpha", workspaces)
 
 		handler := issues.HandleMoveIssue(svc, wsCfg)
 
 		body := `{"target_workspace":"alpha"}`
-		req := httptest.NewRequest(http.MethodPost, "/api/issues/src-001/move", strings.NewReader(body))
+		req := httptest.NewRequest(http.MethodPost, "/api/workspaces/alpha/issues/src-001/move", strings.NewReader(body))
+		req.SetPathValue("ws", "alpha")
 		req.SetPathValue("id", "src-001")
 		rec := httptest.NewRecorder()
 

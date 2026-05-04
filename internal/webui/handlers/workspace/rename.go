@@ -15,7 +15,7 @@ type WorkspaceRenameRequest struct {
 	NewName string `json:"new_name"`
 }
 
-// HandleWorkspaceRename returns a handler that renames a workspace in the global config.
+// HandleWorkspaceRename returns a handler that renames a workspace in FleetDB.
 func HandleWorkspaceRename(svc service.WorkspaceService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		wsID := middleware.WorkspaceFromContext(r.Context())

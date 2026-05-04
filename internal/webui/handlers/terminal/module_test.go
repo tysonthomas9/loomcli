@@ -29,7 +29,7 @@ func TestModule_Register_TerminalWSRoute_WithMultiPTYManager(t *testing.T) {
 		nil, // termAuth
 		nil, // allowedOrigins
 		"",  // loomServerURL
-		nil, // workspaceConfigByIDFn
+		nil, // store
 		nil, // tabMetaStore
 		nil, // hub
 		time.Time{},

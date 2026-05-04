@@ -257,7 +257,7 @@ func TestBackendMutationSubscriber_Broadcast(t *testing.T) {
 			}()
 			return []backend.MutationData{{
 				Type:      "create",
-				IssueID:   "bd-broadcast-1",
+				IssueID:   "loom-broadcast-1",
 				Title:     "broadcast test",
 				Timestamp: ts,
 			}}, nil
@@ -277,8 +277,8 @@ func TestBackendMutationSubscriber_Broadcast(t *testing.T) {
 
 	select {
 	case got := <-client.Send():
-		if got.IssueID != "bd-broadcast-1" {
-			t.Errorf("got IssueID %q, want bd-broadcast-1", got.IssueID)
+		if got.IssueID != "loom-broadcast-1" {
+			t.Errorf("got IssueID %q, want loom-broadcast-1", got.IssueID)
 		}
 		if got.WorkspaceID != "ws-test" {
 			t.Errorf("got WorkspaceID %q, want ws-test", got.WorkspaceID)
@@ -313,8 +313,8 @@ func TestBackendMutationSubscriber_LastSinceAdvances(t *testing.T) {
 				}
 			}()
 			return []backend.MutationData{
-				{Type: "create", IssueID: "bd-a", Timestamp: earlyTs},
-				{Type: "update", IssueID: "bd-b", Timestamp: lateTs},
+				{Type: "create", IssueID: "loom-a", Timestamp: earlyTs},
+				{Type: "update", IssueID: "loom-b", Timestamp: lateTs},
 			}, nil
 		}
 		<-ctx.Done()
@@ -405,8 +405,8 @@ func TestBackendMutationSubscriber_GetMutationDataSince_HappyPath(t *testing.T) 
 			t.Errorf("GetMutations called with since=%d, want 100", since)
 		}
 		return []backend.MutationData{
-			{Type: "create", IssueID: "bd-1", Timestamp: ts},
-			{Type: "update", IssueID: "bd-2", Timestamp: ts},
+			{Type: "create", IssueID: "loom-1", Timestamp: ts},
+			{Type: "update", IssueID: "loom-2", Timestamp: ts},
 		}, nil
 	}
 
@@ -414,7 +414,7 @@ func TestBackendMutationSubscriber_GetMutationDataSince_HappyPath(t *testing.T) 
 	if len(got) != 2 {
 		t.Fatalf("got %d, want 2", len(got))
 	}
-	if got[0].IssueID != "bd-1" || got[1].IssueID != "bd-2" {
+	if got[0].IssueID != "loom-1" || got[1].IssueID != "loom-2" {
 		t.Errorf("unexpected IDs: %v", got)
 	}
 }

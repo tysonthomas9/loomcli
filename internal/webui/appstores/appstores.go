@@ -69,15 +69,11 @@ func GetMutationsSinceFn(sub *MultiWorkspaceSubscriber) func(wsID string, since 
 }
 
 // InitTabMeta creates the tab metadata store from Redis config.
-func InitTabMeta(ctx context.Context, redisCfg *fleet.RedisConfig, nameToID map[string]string, logger *slog.Logger) (*TabMetaStore, func()) {
+func InitTabMeta(_ context.Context, redisCfg *fleet.RedisConfig, logger *slog.Logger) (*TabMetaStore, func()) {
 	tmClient := fleet.NewRedisClient(redisCfg.Address, redisCfg.Password, 0)
 	store := tabmeta.NewStore(tmClient, nil)
 	cleanup := func() { _ = store.Close() }
 	logger.Info("tab metadata store initialized", "redis_address", redisCfg.Address)
-	_ = store.MigrateLegacyKeys(ctx, "default")
-	if len(nameToID) > 0 {
-		_ = store.MigrateNamedKeys(ctx, nameToID)
-	}
 	return store, cleanup
 }
 
@@ -87,7 +83,6 @@ func InitIssueTabs(ctx context.Context, redisCfg *fleet.RedisConfig, initialWSID
 	store := issuetabs.NewStore(itClient, nil)
 	cleanup := func() { _ = store.Close() }
 	logger.Info("issue tab store initialized", "redis_address", redisCfg.Address)
-	_, _ = store.MigrateLegacyKeys(ctx, initialWSID)
 	return store, cleanup
 }
 
@@ -97,9 +92,6 @@ func InitSessionHistory(ctx context.Context, redisCfg *fleet.RedisConfig, initia
 	store := sessionhistory.NewStore(shClient, nil)
 	cleanup := func() { _ = store.Close() }
 	logger.Info("session history store initialized", "redis_address", redisCfg.Address)
-	if n, err := store.MigrateLegacyKeys(ctx, initialWSID); err == nil && n > 0 {
-		logger.Info("session history legacy keys migrated", "count", n)
-	}
 	return store, cleanup
 }
 

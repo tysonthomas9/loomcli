@@ -369,7 +369,11 @@ func (s *agentServiceImpl) ensureLocalAgentWorktrees(ctx context.Context, agent 
 		return service.ErrInternal("load workspace for agent worktree", err)
 	}
 	if ws.Path == "" {
-		return service.ErrValidation("workspace has no local path on this machine")
+		// Distributed/cloud workspaces can be managed by this server without a
+		// checkout mounted locally. In that shape the agent assignment is still
+		// valid fleet-db state; local worktrees are created only on machines that
+		// have workspace paths.
+		return nil
 	}
 	repos, err := selectAgentReposForLocalWorktrees(ws.Repos, agent)
 	if err != nil {

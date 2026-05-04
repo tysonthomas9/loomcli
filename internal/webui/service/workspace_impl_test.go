@@ -8,7 +8,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
-	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 )
@@ -61,120 +60,6 @@ func TestPoolStatsFromDaemon_Zero(t *testing.T) {
 	}
 }
 
-// TestGetWorkspace_FleetModeFallback reproduces the bug where
-// GET /api/workspaces/{uuid} returned 404 in fleet mode because the
-// multiPool is intentionally empty (no beads daemon) even though the
-// workspace is registered and reachable via configByIDFn.
-//
-// With the fix, GetWorkspace falls back to configByIDFn / configFn when
-// the multiPool has no entry for the workspace.
-func TestGetWorkspace_FleetModeFallback(t *testing.T) {
-	const (
-		wsID   = "11111111-2222-3333-4444-555555555555"
-		wsName = "PARITY"
-		wsPath = "/tmp/parity-workspace"
-	)
-
-	fleetData := &ops.WorkspaceData{
-		ID:   wsID,
-		Name: wsName,
-		Path: wsPath,
-		Workspaces: []ops.WorkspaceSummary{
-			{ID: wsID, Name: wsName, Path: wsPath},
-		},
-	}
-
-	configByIDCalls := 0
-	svc := NewWorkspaceService(WorkspaceServiceConfig{
-		MultiPool: nil, // fleet mode: no beads daemon, so no multiPool
-		ConfigByIDFn: func(id string) (*ops.WorkspaceData, error) {
-			configByIDCalls++
-			if id != wsID {
-				return nil, errors.New("workspace not found: " + id)
-			}
-			return fleetData, nil
-		},
-		ConfigFn: func() (*ops.WorkspaceData, error) {
-			return fleetData, nil
-		},
-	})
-
-	got, err := svc.GetWorkspace(context.Background(), wsID)
-	if err != nil {
-		t.Fatalf("GetWorkspace returned error in fleet mode: %v", err)
-	}
-	if got == nil {
-		t.Fatal("GetWorkspace returned nil data in fleet mode")
-	}
-	if got.ID != wsID {
-		t.Errorf("got.ID = %q, want %q", got.ID, wsID)
-	}
-	if got.Name != wsName {
-		t.Errorf("got.Name = %q, want %q", got.Name, wsName)
-	}
-	if configByIDCalls == 0 {
-		t.Error("configByIDFn was not consulted during fleet-mode fallback")
-	}
-
-	// Sanity: unknown UUID still 404s.
-	if _, err := svc.GetWorkspace(context.Background(), "not-a-real-uuid"); err == nil {
-		t.Error("GetWorkspace for unknown UUID should return error, got nil")
-	} else {
-		var se *ServiceError
-		if !errors.As(err, &se) || se.Kind != KindNotFound {
-			t.Errorf("GetWorkspace for unknown UUID: got %v, want NotFound", err)
-		}
-	}
-}
-
-// TestGetWorkspace_ConfigFnFallback covers the path where configByIDFn is
-// unwired but configFn still has the workspace — the service should
-// synthesize a WorkspaceData from the summary rather than 404.
-func TestGetWorkspace_ConfigFnFallback(t *testing.T) {
-	const wsID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-
-	svc := NewWorkspaceService(WorkspaceServiceConfig{
-		MultiPool:    nil,
-		ConfigByIDFn: nil,
-		ConfigFn: func() (*ops.WorkspaceData, error) {
-			return &ops.WorkspaceData{
-				Workspaces: []ops.WorkspaceSummary{
-					{ID: wsID, Name: "alpha", Path: "/tmp/alpha"},
-					{ID: "other-id", Name: "beta", Path: "/tmp/beta"},
-				},
-			}, nil
-		},
-	})
-
-	got, err := svc.GetWorkspace(context.Background(), wsID)
-	if err != nil {
-		t.Fatalf("GetWorkspace returned error: %v", err)
-	}
-	if got == nil {
-		t.Fatal("GetWorkspace returned nil data")
-	}
-	if got.ID != wsID {
-		t.Errorf("got.ID = %q, want %q", got.ID, wsID)
-	}
-	if got.Name != "alpha" {
-		t.Errorf("got.Name = %q, want %q", got.Name, "alpha")
-	}
-
-	// Workspaces summary list should mark the matched one active.
-	activeCount := 0
-	for _, ws := range got.Workspaces {
-		if ws.Active {
-			activeCount++
-			if ws.ID != wsID {
-				t.Errorf("wrong workspace marked active: %q", ws.ID)
-			}
-		}
-	}
-	if activeCount != 1 {
-		t.Errorf("expected exactly 1 active workspace, got %d", activeCount)
-	}
-}
-
 func TestDeleteWorkspace_StoreBackedUsesWorkspaceKey(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
@@ -220,10 +105,6 @@ func TestListWorkspaces_StoreBackedMarksActiveAndDefault(t *testing.T) {
 
 	svc := NewWorkspaceService(WorkspaceServiceConfig{
 		Store: st,
-		ConfigFn: func() (*ops.WorkspaceData, error) {
-			t.Fatal("store-backed list should not call legacy configFn")
-			return nil, nil
-		},
 	})
 
 	items, err := svc.ListWorkspaces(ctx)
@@ -245,17 +126,13 @@ func TestListWorkspaces_StoreBackedMarksActiveAndDefault(t *testing.T) {
 	}
 }
 
-func TestGetActiveWorkspace_StoreBackedDoesNotFallbackToLegacyConfig(t *testing.T) {
+func TestGetActiveWorkspace_StoreBackedReturnsData(t *testing.T) {
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
 	t.Setenv("LOOM_WORKSPACE", "")
 
 	st := memstore.New()
 	svc := NewWorkspaceService(WorkspaceServiceConfig{
 		Store: st,
-		ConfigFn: func() (*ops.WorkspaceData, error) {
-			t.Fatal("store-backed active workspace should not call legacy configFn")
-			return nil, nil
-		},
 	})
 
 	data, err := svc.GetActiveWorkspace(context.Background())
@@ -282,10 +159,6 @@ func TestCreateWorkspace_StoreBackedReturnsCreatedWorkspaceData(t *testing.T) {
 
 	svc := NewWorkspaceService(WorkspaceServiceConfig{
 		Store: st,
-		ConfigFn: func() (*ops.WorkspaceData, error) {
-			t.Fatal("store-backed create should not call legacy configFn")
-			return nil, nil
-		},
 		CreateFn: func(ctx context.Context, req WorkspaceCreateRequest) (WorkspaceCreateResult, error) {
 			if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "BETA", Name: req.Name}); err != nil {
 				return WorkspaceCreateResult{}, err
@@ -312,24 +185,83 @@ func TestCreateWorkspace_StoreBackedReturnsCreatedWorkspaceData(t *testing.T) {
 	}
 }
 
-func TestGetWorkspace_StoreBackedMissDoesNotFallbackToLegacyConfig(t *testing.T) {
+func TestGetWorkspace_StoreBackedMissReturnsNotFound(t *testing.T) {
 	st := memstore.New()
 	svc := NewWorkspaceService(WorkspaceServiceConfig{
 		Store: st,
-		ConfigByIDFn: func(string) (*ops.WorkspaceData, error) {
-			t.Fatal("store-backed workspace lookup should not call legacy configByIDFn")
-			return nil, nil
-		},
-		ConfigFn: func() (*ops.WorkspaceData, error) {
-			t.Fatal("store-backed workspace lookup should not call legacy configFn")
-			return nil, nil
-		},
 	})
 
 	_, err := svc.GetWorkspace(context.Background(), "MISSING")
 	var se *ServiceError
 	if !errors.As(err, &se) || se.Kind != KindNotFound {
 		t.Fatalf("err = %v, want NotFound", err)
+	}
+}
+
+func TestGetWorkspaceBackend_StoreBackedReadsDaemonProfile(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "ALPHA", Name: "Alpha Project"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if _, err := st.Daemon().Upsert(ctx, &domain.DaemonProfile{WorkspaceKey: "ALPHA", AgentBackend: "codex"}); err != nil {
+		t.Fatalf("upsert daemon profile: %v", err)
+	}
+
+	svc := NewWorkspaceService(WorkspaceServiceConfig{Store: st})
+	cfg, err := svc.GetWorkspaceBackend(ctx, "ALPHA")
+	if err != nil {
+		t.Fatalf("GetWorkspaceBackend: %v", err)
+	}
+	if cfg.Backend != "codex" {
+		t.Fatalf("Backend = %q, want codex", cfg.Backend)
+	}
+	if cfg.Source != "fleetdb" {
+		t.Fatalf("Source = %q, want fleetdb", cfg.Source)
+	}
+}
+
+func TestGetWorkspaceBackend_StoreBackedDefaultsToCodex(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "ALPHA", Name: "Alpha Project"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+
+	svc := NewWorkspaceService(WorkspaceServiceConfig{Store: st})
+	cfg, err := svc.GetWorkspaceBackend(ctx, "ALPHA")
+	if err != nil {
+		t.Fatalf("GetWorkspaceBackend: %v", err)
+	}
+	if cfg.Backend != "codex" {
+		t.Fatalf("Backend = %q, want codex", cfg.Backend)
+	}
+	if cfg.Source != "default" {
+		t.Fatalf("Source = %q, want default", cfg.Source)
+	}
+}
+
+func TestPatchWorkspaceBackend_StoreBackedWritesDaemonProfile(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "ALPHA", Name: "Alpha Project"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+
+	svc := NewWorkspaceService(WorkspaceServiceConfig{Store: st})
+	data, err := svc.PatchWorkspaceBackend(ctx, "ALPHA", "codex")
+	if err != nil {
+		t.Fatalf("PatchWorkspaceBackend: %v", err)
+	}
+	if data.ID != "ALPHA" {
+		t.Fatalf("data.ID = %q, want ALPHA", data.ID)
+	}
+	profile, err := st.Daemon().Get(ctx, "ALPHA")
+	if err != nil {
+		t.Fatalf("get daemon profile: %v", err)
+	}
+	if profile.AgentBackend != "codex" {
+		t.Fatalf("AgentBackend = %q, want codex", profile.AgentBackend)
 	}
 }
 
@@ -346,7 +278,7 @@ func TestSetDefaultWorkspace_StoreBackedResolvesNameAndReturnsStoreData(t *testi
 	svc := NewWorkspaceService(WorkspaceServiceConfig{
 		Store: st,
 		SetDefaultFn: func(string) error {
-			t.Fatal("store-backed set default should not call legacy SetDefaultFn")
+			t.Fatal("store-backed set default should not call old SetDefaultFn")
 			return nil
 		},
 	})
@@ -384,7 +316,7 @@ func TestClearDefaultWorkspace_StoreBackedClearsStateCache(t *testing.T) {
 	svc := NewWorkspaceService(WorkspaceServiceConfig{
 		Store: st,
 		ClearDefaultFn: func() error {
-			t.Fatal("store-backed clear default should not call legacy ClearDefaultFn")
+			t.Fatal("store-backed clear default should not call old ClearDefaultFn")
 			return nil
 		},
 	})

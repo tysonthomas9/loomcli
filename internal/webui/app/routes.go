@@ -43,8 +43,6 @@ func (app *Server) registerCoreAPIRoutes(h *handlermux.Handlers) {
 	app.mux.HandleFunc("POST /api/csp-report", h.CSPReport)
 	app.mux.HandleFunc("GET /api/config", h.AuthConfig)
 	app.mux.HandleFunc("GET /api/metrics", h.Metrics)
-	app.mux.HandleFunc("GET /api/config/backend", h.GetBackendConfig)
-	app.mux.HandleFunc("PATCH /api/config/backend", h.PatchBackendConfig)
 	app.mux.HandleFunc("GET /api/config/terminal", h.GetTerminalConfig)
 	if h.GetBackendsHealth != nil {
 		app.mux.HandleFunc("GET /api/backends", h.GetBackendsHealth)
@@ -147,6 +145,7 @@ func (app *Server) registerWorkspaceRoutes() {
 	// because Go 1.22+ http.ServeMux has a bug where r.Body.Read() hangs for
 	// PATCH requests routed through a nested mux via wildcard subtree pattern.
 	app.mux.Handle("PATCH /api/workspaces/{ws}/name", middleware.Workspace(app.wsExistsFn)(handlermux.HandleWorkspaceRename(app.workspaceSvc)))
+	app.mux.Handle("GET /api/workspaces/{ws}/config/backend", middleware.Workspace(app.wsExistsFn)(handlermux.HandleWorkspaceBackendGet(app.workspaceSvc)))
 	app.mux.Handle("PATCH /api/workspaces/{ws}/config/backend", middleware.Workspace(app.wsExistsFn)(handlermux.HandleWorkspaceBackendPatch(app.workspaceSvc)))
 
 	wsMux := http.NewServeMux()
