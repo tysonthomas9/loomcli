@@ -21,7 +21,7 @@ Redesign the Cortex web UI to be workspace-centric rather than agent-centric. Th
 - IssueDetailPanel (slide-out) with editable fields, design/notes, dependencies, comments
 - AgentDetailPanel with Info/Diff/Log/Git tabs
 - Flat AgentsSidebar listing all agents as "Agent"
-- TerminalPanel (legacy slide-out) for Talk to Lead
+- TerminalPanel (previous slide-out) for Talk to Lead
 - TerminalView with multi-tab (comet worktree — in progress)
 - NavRail with kanban/table/graph/monitor/observability/settings
 - Open in Editor (13 editors), File Explorer + CodeMirror editor (in progress)
@@ -458,7 +458,7 @@ Acceptance criteria:
 Acceptance criteria:
 - Agent role shown below agent name in sidebar (e.g., "falcon / Developer")
 - Role configurable in `.loom.yaml` per-agent
-- Default role is "Agent" for backward compatibility
+- Default role is "Agent" for existing behavior
 - Role displayed in: sidebar, agent detail panel, assignee dropdown
 
 ---

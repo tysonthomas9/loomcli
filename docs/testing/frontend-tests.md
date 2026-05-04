@@ -220,7 +220,7 @@ Complete breakdown of all frontend test files (Vitest unit tests + Playwright E2
 | `src/hooks/__tests__/useRecentAssignees.test.ts` | Recently-used assignee tracking |
 | `src/hooks/__tests__/useStats.test.ts` | Project statistics fetching |
 | `src/hooks/__tests__/useToast.test.tsx` | Toast notification context and dispatching |
-| `src/hooks/__tests__/useViewState.test.ts` | View state persistence (Kanban/table/graph) |
+| `src/hooks/__tests__/useRouteView.test.ts` | Route-backed view state (Kanban/table/graph) |
 | `src/hooks/useAutoLayout.test.ts` | Graph auto-layout algorithm |
 | `src/hooks/useBlockedIssues.test.ts` | Blocked issue filtering and display |
 | `src/hooks/useBulkClose.test.ts` | Bulk close operation for multiple issues |

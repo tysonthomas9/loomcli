@@ -59,9 +59,9 @@ Assessment:
 - Missing: no checkout health metadata.
 - Missing: no local node identity or tool inventory.
 - Underused: fleet-db commands set `LastWorkspace`, but repo and agent
-  path bindings are still mostly resolved through legacy config.
+  path bindings are still mostly resolved through runtime config.
 
-### Legacy YAML Models
+### YAML Models
 
 These are the main distributed-design blocker.
 
@@ -979,7 +979,7 @@ For each proposed model, verify:
 ## Summary
 
 Current loom has useful global metadata models for workspace, repo, and
-role. It has a promising local state cache. It also has legacy YAML and
+role. It has a promising local state cache. It also has YAML and
 local daemon models that conflict with distributed execution.
 
 The proposed model splits the overloaded pieces:

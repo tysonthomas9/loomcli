@@ -83,7 +83,7 @@ TerminalView lives outside the keyed boundary, so WebSockets and the
 | **Loader + layered providers** | ✅ | ✅ | ✅ | ✅ |
 
 - `flushSync` is the symptom-layer escape hatch the codebase already uses in
-  `useViewState.ts:98`. It works but does not prevent the next developer from
+  `useRouteView.ts`. It works but does not prevent the next developer from
   hitting the same class of bug when they add workspace-scoped state.
 - `key={workspaceId}` on `<WorkspaceLayout>` unmounts the entire tree
   including TerminalView, destroying terminal tab memory and re-establishing
@@ -177,7 +177,7 @@ TerminalView lives outside the keyed boundary, so WebSockets and the
   - `App.tsx:641, 888, 900, 1350`
   - `RedirectToWorkspace.tsx` (4 sites)
 
-**Step 7. Reassess `flushSync` in `useViewState.ts:98`.**
+**Step 7. Reassess `flushSync` in `useRouteView.ts`.**
 - With the loader pattern, route transitions commit atomically regardless of
   terminal render pressure. The `flushSync: true` may become dead defense.
 - Try deleting it. If the bug returns, leave it with a comment:
@@ -196,7 +196,7 @@ TerminalView lives outside the keyed boundary, so WebSockets and the
 - `useWorkspaceContext.tsx:166-186` — `activeWorkspaceName` useState + sync effect
 - `useWorkspaceContext.tsx:218-223` — `defaultWorkspaceName` sync effect
 - `useWorkspace.ts` — initial-fetch branch + visibility handler (loader + revalidator replace them)
-- `useViewState.ts:98`'s `flushSync: true` (after Step 7 verification)
+- `useRouteView.ts`'s `flushSync: true` (after Step 7 verification)
 
 ## What Stays Unchanged
 
@@ -233,7 +233,7 @@ After PR #1:
    in PR #2.
 
 After PR #2:
-1. Re-verify Step 7: if `flushSync` was removed from `useViewState`, confirm
+1. Re-verify Step 7: if `flushSync` was removed from `useRouteView`, confirm
    view switching in terminal view still works under heavy WebSocket load.
 2. Confirm non-route refreshers (create-workspace flow) still end up with
    fresh data after completion.

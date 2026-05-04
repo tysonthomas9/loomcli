@@ -15,7 +15,6 @@ WORKDIR /src
 # Copy the full source once; this image favors a reliable repo-root build over
 # a split dependency-cache stage.
 COPY . .
-RUN go mod download
 
 # NOTE: `.git/` is excluded from the build context via .dockerignore, so
 # the `git rev-parse` fallback always resolves to "docker". This is
@@ -23,9 +22,13 @@ RUN go mod download
 # not this Dockerfile. If you need accurate build provenance for a local
 # docker build, pass --build-arg BUILD_COMMIT=$(git rev-parse --short HEAD)
 # and wire it into the ldflags line below.
-RUN CGO_ENABLED=0 go build \
-    -ldflags="-s -w -X github.com/tysonthomas9/loomcli/internal/cli.Build=docker" \
-    -o /out/loom ./cmd/loom
+RUN set -eux; \
+    export GOMODCACHE=/tmp/go-mod-cache GOCACHE=/tmp/go-build-cache; \
+    go mod download; \
+    CGO_ENABLED=0 go build \
+        -ldflags="-s -w -X github.com/tysonthomas9/loomcli/internal/cli.Build=docker" \
+        -o /out/loom ./cmd/loom; \
+    rm -rf "$GOMODCACHE" "$GOCACHE" /root/.cache/go-build /go/pkg/mod
 
 # ─── Stage 2: Runtime ────────────────────────────────────────────────────────
 FROM gcr.io/distroless/static-debian12:nonroot AS runtime

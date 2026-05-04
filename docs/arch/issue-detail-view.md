@@ -27,9 +27,9 @@ The panel renders as `position: fixed` anchored right, width `min(100%, 840px)` 
 
 ### IssueDetailView (Full-page)
 
-**Trigger:** `navigateToView("issue-detail", { issueId, previousView })` via `useViewState`.
+**Trigger:** route navigation to `/ws/:workspaceId/issue/:issueId` via `useRouteView`.
 
-URL: `?view=issue-detail&issue={id}`
+URL: `/ws/:workspaceId/issue/:issueId`
 
 A lighter read-mostly component without the tabbed interface, embedded terminal, session history, or editable fields for owner/assignee. Includes "Open in Terminal" action that switches to Terminal view with issue context seeded via `pendingIssueContext`.
 
@@ -224,11 +224,11 @@ Includes agent list with reassignment confirmation dialog. Human assignments sto
 
 ### Back Navigation
 
-From `IssueDetailView`: `window.history.back()` → `popstate` fires → `useViewState.onPopState` restores `previousView`. Scroll position restored from `scrollPositionCache` via `requestAnimationFrame`.
+From `IssueDetailView`: `window.history.back()` returns to the previous route. Scroll position is restored from `scrollPositionCache` via `requestAnimationFrame`.
 
 ### Deep-link URLs
 
-`?view=issue-detail&issue={issueId}` — built by `buildShareUrl()`. On page load, `useViewState` reads the URL and `App.tsx` fetches the issue.
+`/ws/:workspaceId/issue/:issueId` is built by `buildShareUrl()`. On page load, route params provide the issue id and `App.tsx` fetches the issue.
 
 ### Dependency Navigation
 

@@ -964,7 +964,6 @@ Create a new workspace.
   "name": "string (required)",
   "type": "empty|clone|template (required)",
   "repos": ["path/to/repo"],
-  "clone_url": "https://github.com/org/repo",
   "clone_urls": ["https://github.com/org/repo1", "git@github.com:org/repo2"],
   "branch": "string (optional)",
   "path": "string (optional workspace directory)"
@@ -976,7 +975,6 @@ Create a new workspace.
 | `name` | string | yes | Workspace name (alphanumeric, hyphens, underscores; max 64 chars) |
 | `type` | string | yes | `"empty"`, `"clone"`, or `"template"` |
 | `repos` | []string | for empty | Repository paths (required when type is `"empty"`) |
-| `clone_url` | string | no | Single git URL (backward compat; merged into `clone_urls` if empty) |
 | `clone_urls` | []string | for clone | Git URLs to clone (at least one required when type is `"clone"`) |
 | `branch` | string | no | Branch name to check out after clone |
 | `path` | string | no | Custom workspace directory path |
@@ -3168,8 +3166,6 @@ Workspace-scoped REST API for agent worktree diff and code-review operations. Th
 
 All endpoints are registered on `wsMux` under `/api/workspaces/{ws}/...` behind `WorkspaceMiddleware`. They are **conditionally available** — when `gitOps` is nil (no worktree configuration), none of these endpoints exist and requests fall through to the SPA catch-all.
 
-**Note on legacy flat routes:** Legacy flat routes (`/api/agents/{name}/diff/...`) still exist on the main mux for backward compatibility but are slated for removal by loomcli-n28bt.41. This spec documents only the workspace-scoped routes, which are the authoritative API surface.
-
 **Note on response envelope:** Unlike the Git Operations endpoints above (which respond with raw structs), all diff endpoints use the `diffResponse` envelope: `{success: true, data: T}` on success or `{success: false, error: "msg"}` on error. This matches the frontend's `ApiResult<T>` pattern. The one exception is `resolveAgent()` errors, which use the raw `{"error": "msg"}` format (no `success` field) since they go through `respondError`, not `respondDiffError`.
 
 ### Cross-Cutting: Workspace Routing
@@ -3820,7 +3816,7 @@ Move an issue to a different workspace.
 
 1. Validates source issue exists and is not closed
 2. Validates target workspace exists and differs from source
-3. Resolves workspace name to stable UUID (backward compat with pre-UUID names)
+3. Resolves the target workspace identifier to a stable UUID
 4. Creates copy in target workspace (title, description, priority, type, labels, design, acceptance_criteria, notes, assignee, owner, external_ref, estimated_minutes, due_at, defer_until) with "(Moved from {source-id})" appended to description
 5. Adds comment on source: "Moved to {target-id} in workspace '{target-name}'"
 6. Closes source issue with `force=true`

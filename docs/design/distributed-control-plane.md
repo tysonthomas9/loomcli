@@ -770,7 +770,7 @@ enforce this architecture.
 | `workspace create/list/remove` still mutates `~/.loom/config.yaml`. | Control-plane metadata and local checkout effects are coupled. |
 | `agentdef` writes fleet-db, but `agent/task/plan` resolve YAML worktrees. | Agent definitions do not drive execution. |
 | Daemon boots from `loom.yaml` and watches YAML files. | No distributed desired-state reconciler exists. |
-| Web UI falls back from store errors to legacy config. | Fleet-db outages can look like stale data or 404. |
+| Web UI falls back from store errors to runtime config. | Fleet-db outages can look like stale data or 404. |
 | Workspace middleware validates but does not canonicalize `{ws}`. | Name/key ambiguity leaks into backend routing. |
 | Fleet worker claim path still uses local daemon RPC pool. | Redis claim primitives are not the authoritative execution lease. |
 | Worker JWT claims are not consistently enforced in handlers. | Valid workers may impersonate other worker IDs. |
@@ -792,7 +792,7 @@ enforce this architecture.
 - Move repo and agent worktree paths into `state.json` or node-local
   storage.
 - Keep `workspace delete` metadata-only by default.
-- Quarantine or rename legacy worktree commands.
+- Quarantine or rename old worktree commands.
 
 ### Phase 3: Unify Agent/Worker Surface
 

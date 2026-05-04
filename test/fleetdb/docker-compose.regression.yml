@@ -28,6 +28,8 @@ networks:
 volumes:
   redis-data:
     driver: local
+  codex-runtime:
+    driver: local
 
 services:
   redis:
@@ -91,6 +93,8 @@ services:
       # and 404 because fleet-db has no "default" workspace seeded.
       LOOM_FLEET_WORKSPACE: FLEETDB
       LOOM_WORKSPACE: FLEETDB
+      LOOM_BACKEND: codex
+      CODEX_HOME: /root/.codex
       LOOM_AGENT_NAME: fleetdb-regression-harness
       # X-Actor header required by fleet-db's --auth-dev-mode (the only auth
       # path enabled in this compose). Falls back to LOOM_AGENT_NAME, but
@@ -108,6 +112,11 @@ services:
       - |
         set -e
         cd /workspace
+        mkdir -p "$$CODEX_HOME"
+        if [ -f /run/secrets/codex-auth.json ]; then
+          cp /run/secrets/codex-auth.json "$$CODEX_HOME/auth.json"
+          chmod 600 "$$CODEX_HOME/auth.json" || true
+        fi
         # Pre-flight: confirm fleet-db is reachable from inside this
         # container before starting loom. If fleet-db isn't responding,
         # stop now rather than letting loom come up with a broken backend.
@@ -140,6 +149,12 @@ services:
     networks: [fleetdb-regression]
     ports:
       - "8082:8080"
+    volumes:
+      - codex-runtime:/root/.codex
+      - type: bind
+        source: ${CODEX_AUTH_JSON:-${HOME}/.codex/auth.json}
+        target: /run/secrets/codex-auth.json
+        read_only: true
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:8080/api/config > /dev/null 2>&1"]
       interval: 5s

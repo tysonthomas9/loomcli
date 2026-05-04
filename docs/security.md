@@ -44,7 +44,7 @@ For production Redis deployments:
 
 ### Config File Security Hardening
 
-- **Atomic writes**: `SaveConfig` and `MigrateConfigFile` use tmp+rename to prevent partial writes on crash.
+- **Atomic writes**: `SaveConfig` uses tmp+rename to prevent partial writes on crash.
 - **File locking**: flock-based config file locking (`internal/configlock`) prevents concurrent write corruption from parallel agents.
 - **Parse failure protection**: `LoadConfig` refuses to overwrite config after parse/read failures, preventing data loss from corrupted reads.
 - **Session file permissions**: Session audit trail files are created with `0o600` permissions. Session directories use `0o700`.
@@ -59,7 +59,7 @@ Redis configuration changes require restarting `loom serve` — there is no hot-
 - When binding `loom serve` to a non-localhost address (`--bind 0.0.0.0`), a warning is logged. Ensure this is intentional and that appropriate network controls are in place.
 - Use `--auth-url` to point at an external auth service for JWT-based authentication. Always enable external auth in production.
 - Use `--fleet-api-key` (or `LOOM_FLEET_API_KEY` env var) to authenticate fleet worker registration.
-- The legacy API key auth system has been removed. Authentication is now handled exclusively via external OIDC (`--auth-url`) or open mode.
+- API key auth has been removed. Authentication is handled exclusively via external OIDC (`--auth-url`) or open mode.
 
 ## Agent IPC Security
 

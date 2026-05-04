@@ -6,7 +6,7 @@ Run from the loomcli repo root:
 make test-distributed-smoke
 ```
 
-This stack runs without beads. It starts shared Redis and fleet-db, two
+This stack runs without a sidecar issue backend. It starts shared Redis and fleet-db, two
 `loom serve` processes in fleet mode, two lightweight local supervisor heartbeat
 loops, two WebUI proxy sidecars, and a one-shot smoke runner.
 

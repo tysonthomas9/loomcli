@@ -3,7 +3,7 @@
 # Usage from the loomcli repo root:
 #   make test-distributed-smoke
 #
-# The stack intentionally runs without beads. It exercises one shared fleet-db,
+# The stack intentionally runs without a sidecar issue backend. It exercises one shared fleet-db,
 # two loom serve processes, two local supervisor heartbeat loops, and one
 # smoke runner that validates auth/audit, claim contention, SSE reconnect
 # catch-up across loom instances, and WebUI/API health.

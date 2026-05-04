@@ -3,7 +3,7 @@
 # Dockerfile.regression — slim loom container for fleet-db regression testing.
 #
 # Unlike Dockerfile.dev this image:
-#   - Does NOT install Node / build the frontend / run AI CLIs
+#   - Does NOT build the frontend
 #   - Only produces a loom binary
 #   - Minimal runtime image so startup and image-push are fast
 #
@@ -13,6 +13,7 @@
 # Context: the loomcli repo root.
 
 ARG GO_VERSION=1.25.6
+ARG CODEX_CLI_VERSION=0.128.0
 
 # ── Stage 1: build loom ──
 FROM golang:${GO_VERSION}-bookworm AS builder
@@ -29,7 +30,9 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 # ── Stage 2: runtime ──
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        ca-certificates git tmux wget \
+        ca-certificates git nodejs npm tmux wget \
+    && npm install -g @openai/codex@${CODEX_CLI_VERSION} \
+    && npm cache clean --force \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /out/loom /usr/local/bin/loom
 WORKDIR /workspace

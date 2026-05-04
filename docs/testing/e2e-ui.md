@@ -2,7 +2,7 @@
 
 Tests the loom webui as the user actually experiences it: opening a browser, creating workspaces, switching between them, and verifying state isolation.
 
-**Status:** gated on Phase 4 (`.13` `.15` `.16`) of the fleet-db migration. Until those land, the webui still reads yaml config and these tests exercise the legacy path. Re-run once the migration ships.
+**Status:** validates the FleetDB-backed web UI path.
 
 **Prerequisites:** complete `e2e-preflight.md` setup. The fleet-db should already have at least one workspace from the CLI test plan (`e2e-cli.md` → ACME), so the UI can render something.
 
