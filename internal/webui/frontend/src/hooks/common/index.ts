@@ -55,6 +55,3 @@ export {
   NO_STORE_CONTEXT,
 } from "./useStoreContext";
 export type { StoreContextValue, StoreProviderProps } from "./useStoreContext";
-
-export { useViewState } from "./useViewState";
-export type { UseViewStateOptions, UseViewStateReturn } from "./useViewState";

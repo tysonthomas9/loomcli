@@ -88,7 +88,7 @@ describe("BlockingNode", () => {
   describe("rendering", () => {
     it("renders issue ID, title, and description", () => {
       const issue = createTestIssue({
-        id: "bd-short",
+        id: "loom-short",
         title: "My Task",
         description: "A detailed description",
       });
@@ -97,7 +97,7 @@ describe("BlockingNode", () => {
       });
       renderWithProvider(props);
 
-      expect(screen.getByText("bd-short")).toBeInTheDocument();
+      expect(screen.getByText("loom-short")).toBeInTheDocument();
       expect(
         screen.getByRole("heading", { name: "My Task" }),
       ).toBeInTheDocument();

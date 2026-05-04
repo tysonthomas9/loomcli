@@ -65,7 +65,7 @@ test.describe('Project Health', () => {
     // Current fleet stats are served from the workspace-scoped endpoint, but
     // the CLI-backed fleet adapter does not yet reflect same-test issue
     // mutations in the stats snapshot. Keep the route contract covered above
-    // without falling back to the legacy flat stats endpoint.
+    // without falling back to flat stats endpoints.
     test.skip('stats updates after creating an issue', async ({ api }) => {
       // Capture initial counts
       const before = await api.stats()

@@ -2,9 +2,7 @@
  * useRouteView — derives the active ViewMode from the current route path
  * and provides navigation helpers for view switching.
  *
- * Replaces useViewState's query-param approach (?view=kanban) with
- * route-segment URLs (/ws/:id/kanban). Eliminates the flushSync workaround
- * since route navigation via navigate() is synchronous in React Router.
+ * Uses route-segment URLs (/ws/:id/kanban) as the view state source.
  */
 
 import { useCallback, useMemo } from "react";

@@ -211,7 +211,7 @@ test.describe('Agent Monitoring (Loom)', () => {
       // Wait for loom to sync with loom daemon
       // Loom polls periodically, so we need to retry.
       // In self-contained E2E, the loom API server may read from a separate
-      // beads instance — if initial total is 0 the loom server isn't wired to
+      // store instance. If initial total is 0, the loom server isn't wired to
       // the test workspace, so verify the count is at least non-negative
       // rather than asserting exact delta.
       await expect(async () => {
@@ -219,10 +219,10 @@ test.describe('Agent Monitoring (Loom)', () => {
         const body = await response.json()
 
         if (initialTotal > 0) {
-          // Loom server sees the same beads DB — expect exact delta
+          // Loom server sees the same issue store, so expect exact delta.
           expect(body.stats.total).toBe(initialTotal + 1)
         } else {
-          // Loom server may use a separate beads DB in self-contained E2E —
+          // Loom server may use a separate issue store in self-contained E2E,
           // verify the endpoint is functional and returns valid structure
           expect(typeof body.stats.total).toBe('number')
           expect(body.stats.total).toBeGreaterThanOrEqual(0)

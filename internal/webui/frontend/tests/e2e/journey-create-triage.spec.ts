@@ -177,7 +177,7 @@ async function setupMocks(page: Page, state: MockState): Promise<void> {
     });
   });
 
-  await page.route("**/api/config/backend", async (route) => {
+  await page.route("**/api/workspaces/*/config/backend", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",

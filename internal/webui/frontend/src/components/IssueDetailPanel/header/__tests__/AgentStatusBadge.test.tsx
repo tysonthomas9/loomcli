@@ -64,7 +64,7 @@ describe("AgentStatusBadge", () => {
   describe("rendering", () => {
     it("renders badge with correct status for working agent", () => {
       mockGetAgentByName.mockReturnValue(
-        makeAgent("nova", "working: BD-100 (5m)"),
+        makeAgent("nova", "working: LOOM-100 (5m)"),
       );
 
       render(<AgentStatusBadge agentName="nova" />);
@@ -77,7 +77,7 @@ describe("AgentStatusBadge", () => {
 
     it("renders badge with planning status", () => {
       mockGetAgentByName.mockReturnValue(
-        makeAgent("nova", "planning: BD-200 (2m)"),
+        makeAgent("nova", "planning: LOOM-200 (2m)"),
       );
 
       render(<AgentStatusBadge agentName="nova" />);
@@ -121,7 +121,7 @@ describe("AgentStatusBadge", () => {
 
     it("shows duration when available", () => {
       mockGetAgentByName.mockReturnValue(
-        makeAgent("nova", "working: BD-100 (5m)"),
+        makeAgent("nova", "working: LOOM-100 (5m)"),
       );
 
       render(<AgentStatusBadge agentName="nova" />);
@@ -163,7 +163,7 @@ describe("AgentStatusBadge", () => {
   describe("interaction", () => {
     it("calls onOpenTerminal when clicked", () => {
       mockGetAgentByName.mockReturnValue(
-        makeAgent("nova", "working: BD-100 (5m)"),
+        makeAgent("nova", "working: LOOM-100 (5m)"),
       );
       const onOpenTerminal = vi.fn();
 
@@ -177,7 +177,7 @@ describe("AgentStatusBadge", () => {
 
     it("calls onOpenTerminal on Enter key", () => {
       mockGetAgentByName.mockReturnValue(
-        makeAgent("nova", "working: BD-100 (5m)"),
+        makeAgent("nova", "working: LOOM-100 (5m)"),
       );
       const onOpenTerminal = vi.fn();
 
@@ -193,7 +193,7 @@ describe("AgentStatusBadge", () => {
 
     it("calls onOpenTerminal on Space key", () => {
       mockGetAgentByName.mockReturnValue(
-        makeAgent("nova", "working: BD-100 (5m)"),
+        makeAgent("nova", "working: LOOM-100 (5m)"),
       );
       const onOpenTerminal = vi.fn();
 
@@ -209,7 +209,7 @@ describe("AgentStatusBadge", () => {
 
     it("does not crash when onOpenTerminal is not provided", () => {
       mockGetAgentByName.mockReturnValue(
-        makeAgent("nova", "working: BD-100 (5m)"),
+        makeAgent("nova", "working: LOOM-100 (5m)"),
       );
 
       render(<AgentStatusBadge agentName="nova" />);
@@ -222,7 +222,7 @@ describe("AgentStatusBadge", () => {
   describe("accessibility", () => {
     it("has correct role and aria-label", () => {
       mockGetAgentByName.mockReturnValue(
-        makeAgent("nova", "working: BD-100 (5m)"),
+        makeAgent("nova", "working: LOOM-100 (5m)"),
       );
 
       render(<AgentStatusBadge agentName="nova" />);
@@ -250,7 +250,7 @@ describe("AgentStatusBadge", () => {
   describe("status updates", () => {
     it("updates when agent status changes", () => {
       mockGetAgentByName.mockReturnValue(
-        makeAgent("nova", "working: BD-100 (5m)"),
+        makeAgent("nova", "working: LOOM-100 (5m)"),
       );
 
       const { rerender } = render(<AgentStatusBadge agentName="nova" />);

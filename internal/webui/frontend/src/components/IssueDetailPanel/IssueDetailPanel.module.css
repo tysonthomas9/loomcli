@@ -285,7 +285,7 @@
   }
 }
 
-/* Status Row - kept for backward compatibility, may be removed */
+/* Status Row */
 .statusRow {
   display: flex;
   flex-wrap: wrap;

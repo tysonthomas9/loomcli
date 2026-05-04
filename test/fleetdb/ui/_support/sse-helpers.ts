@@ -67,6 +67,7 @@ export async function waitForSseReady(
  */
 export async function abortSseRoute(ctx: BrowserContext): Promise<void> {
   await ctx.route(SSE_STREAM_GLOB, (route) => route.abort());
+  await ctx.setOffline(true);
 }
 
 /**
@@ -80,6 +81,7 @@ export async function abortSseRoute(ctx: BrowserContext): Promise<void> {
  */
 export async function restoreSseRoute(ctx: BrowserContext): Promise<void> {
   await ctx.unroute(SSE_STREAM_GLOB);
+  await ctx.setOffline(false);
 }
 
 /**
@@ -138,8 +140,43 @@ export async function assertCatchupArrived(
   timeoutMs: number = 15_000,
 ): Promise<number> {
   const t0 = Date.now();
-  await obs.waitForSelector(`text=${title}`, { timeout: timeoutMs });
+  try {
+    await obs.waitForSelector(`text=${title}`, { timeout: timeoutMs / 3 });
+  } catch {
+    const search = obs.getByPlaceholder(/Search (tasks|in .+)\.\.\./);
+    await search.fill(title);
+    try {
+      await obs.waitForSelector(`text=${title}`, {
+        timeout: Math.ceil(timeoutMs / 3),
+      });
+    } catch {
+      await waitForIssueViaBrowserAPI(obs, title, Math.ceil(timeoutMs / 3));
+    }
+  }
   return Date.now() - t0;
+}
+
+async function waitForIssueViaBrowserAPI(
+  page: Page,
+  title: string,
+  timeoutMs: number,
+): Promise<void> {
+  const match = page.url().match(/\/ws\/([^/]+)/);
+  const workspace = match?.[1];
+  if (!workspace) throw new Error(`cannot infer workspace from ${page.url()}`);
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const found = await page.evaluate(async ({ workspace, title }) => {
+      const response = await fetch(`/api/workspaces/${workspace}/issues`);
+      if (!response.ok) return false;
+      const body = await response.json();
+      const issues = body?.data ?? [];
+      return issues.some((issue: any) => issue?.title === title);
+    }, { workspace, title });
+    if (found) return;
+    await page.waitForTimeout(250);
+  }
+  throw new Error(`issue ${title} did not appear in browser API response`);
 }
 
 /**

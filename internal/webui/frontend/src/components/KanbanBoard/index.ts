@@ -4,7 +4,7 @@
  */
 
 export { KanbanBoard } from "./KanbanBoard";
-export type { KanbanBoardProps, BlockedInfo } from "./KanbanBoard";
+export type { KanbanBoardProps } from "./KanbanBoard";
 
 export { createDragEndHandler } from "./useDragEnd";
 export type {

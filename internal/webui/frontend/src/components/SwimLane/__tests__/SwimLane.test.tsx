@@ -11,7 +11,8 @@ import "@testing-library/jest-dom";
 import { render, screen, within, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-import type { BlockedInfo, KanbanColumnConfig } from "@/components/KanbanBoard";
+import type { KanbanColumnConfig } from "@/components/KanbanBoard";
+import type { BlockedInfo } from "@/types/issue";
 import type { Issue, Status } from "@/types";
 
 import { SwimLane } from "../SwimLane";
@@ -54,9 +55,9 @@ function createMockIssues(statuses: Status[]): Issue[] {
 
 /**
  * Helper to convert statuses to column configs for testing.
- * Handles undefined status as 'open' for backward compatibility.
+ * Handles undefined status as 'open'
  */
-function statusesToColumns(statuses: Status[]): KanbanColumnConfig[] {
+function columnsFromStatuses(statuses: Status[]): KanbanColumnConfig[] {
   return statuses.map((s) => ({
     id: s,
     label: s.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
@@ -69,9 +70,9 @@ function statusesToColumns(statuses: Status[]): KanbanColumnConfig[] {
 }
 
 /**
- * Default columns for testing (3-status layout for backward compatibility).
+ * Default columns for testing (configured three-column layout).
  */
-const defaultColumns = statusesToColumns(["open", "in_progress", "closed"]);
+const defaultColumns = columnsFromStatuses(["open", "in_progress", "closed"]);
 
 describe("SwimLane", () => {
   beforeEach(() => {
@@ -117,7 +118,7 @@ describe("SwimLane", () => {
     });
 
     it("renders all status columns", () => {
-      const columns = statusesToColumns([
+      const columns = columnsFromStatuses([
         "open",
         "in_progress",
         "closed",
@@ -671,7 +672,7 @@ describe("SwimLane", () => {
     });
 
     it("works with multiple SwimLanes in same DndContext", () => {
-      const twoColumns = statusesToColumns(["open", "closed"]);
+      const twoColumns = columnsFromStatuses(["open", "closed"]);
       render(
         <DndContext>
           <SwimLane
@@ -698,7 +699,7 @@ describe("SwimLane", () => {
   describe("backlog column (Pending→Backlog rename)", () => {
     it('passes columnType="backlog" to StatusColumn for backlog column', () => {
       const columns: KanbanColumnConfig[] = [
-        ...statusesToColumns(["open", "in_progress"]),
+        ...columnsFromStatuses(["open", "in_progress"]),
         {
           id: "backlog",
           label: "Backlog",
@@ -732,7 +733,7 @@ describe("SwimLane", () => {
       });
 
       const columns: KanbanColumnConfig[] = [
-        ...statusesToColumns(["open", "in_progress"]),
+        ...columnsFromStatuses(["open", "in_progress"]),
         {
           id: "backlog",
           label: "Backlog",
@@ -766,7 +767,7 @@ describe("SwimLane", () => {
       });
 
       const columns: KanbanColumnConfig[] = [
-        ...statusesToColumns(["open", "in_progress"]),
+        ...columnsFromStatuses(["open", "in_progress"]),
         {
           id: "backlog",
           label: "Backlog",
@@ -792,7 +793,7 @@ describe("SwimLane", () => {
 
     it("renders EmptyColumn with backlog status for empty backlog column", () => {
       const columns: KanbanColumnConfig[] = [
-        ...statusesToColumns(["open"]),
+        ...columnsFromStatuses(["open"]),
         {
           id: "backlog",
           label: "Backlog",

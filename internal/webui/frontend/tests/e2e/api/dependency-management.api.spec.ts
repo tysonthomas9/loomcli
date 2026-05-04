@@ -15,7 +15,7 @@ test.describe.configure({ mode: 'serial' })
 
 // Current fleet API exposes workspace-scoped dependency routes, but dependency
 // mutation through the CLI-backed fleet adapter returns 501 not_implemented.
-// Keep this contract disabled instead of falling back to legacy flat beads
+// Keep this contract disabled instead of falling back to flat
 // endpoints.
 test.describe.skip('Dependency Management', () => {
   // Track created issues for cleanup

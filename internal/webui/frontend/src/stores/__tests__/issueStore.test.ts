@@ -1161,6 +1161,20 @@ describe("issueStore", () => {
       );
     });
 
+    it("refetches on reconnection when no catch-up mutations arrived", async () => {
+      mockGetReadyIssues.mockResolvedValue([]);
+      await store.getState().fetchIssues({ workspaceId: "ws1", mode: "ready" });
+
+      const refetchSpy = vi
+        .spyOn(store.getState(), "refetch")
+        .mockResolvedValue();
+
+      store.getState().setConnectionState("reconnecting");
+      store.getState().setConnectionState("connected");
+
+      expect(refetchSpy).toHaveBeenCalled();
+    });
+
     it("records disconnectedSince on transition to reconnecting", () => {
       const now = Date.now();
       store.getState().setConnectionState("reconnecting");

@@ -18,7 +18,7 @@ import {
 } from "../useRepoFilterParam";
 
 /**
- * Mock window.location for parseRepoFilterFromUrl tests (legacy helper).
+ * Mock window.location for parseRepoFilterFromUrl tests.
  */
 function mockWindowLocation(search = ""): void {
   Object.defineProperty(window, "location", {

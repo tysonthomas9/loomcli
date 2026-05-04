@@ -147,7 +147,7 @@ const loomStatusA = {
       name: "alpha",
       status: "working",
       branch: "feat/login",
-      task: "bd-101",
+      task: "loom-101",
       ahead: 1,
       behind: 0,
       last_seen: "2026-01-15T12:00:00Z",
@@ -170,7 +170,7 @@ const loomStatusA = {
     blocked: 0,
   },
   agent_tasks: {
-    alpha: { id: "bd-101", title: "WS-A: Build login page", priority: 2 },
+    alpha: { id: "loom-101", title: "WS-A: Build login page", priority: 2 },
   },
   sync: {
     db_synced: true,
@@ -188,7 +188,7 @@ const loomStatusB = {
       name: "gamma",
       status: "working",
       branch: "feat/api",
-      task: "bd-201",
+      task: "loom-201",
       ahead: 2,
       behind: 0,
       last_seen: "2026-01-15T12:00:00Z",
@@ -202,7 +202,7 @@ const loomStatusB = {
     blocked: 0,
   },
   agent_tasks: {
-    gamma: { id: "bd-201", title: "WS-B: Add REST endpoint", priority: 1 },
+    gamma: { id: "loom-201", title: "WS-B: Add REST endpoint", priority: 1 },
   },
   sync: {
     db_synced: true,
@@ -217,23 +217,23 @@ const loomStatusB = {
 // -- Loom tasks per workspace --
 
 const loomTasksA = {
-  needs_planning: [{ id: "bd-010", title: "Plan feature", priority: 2 }],
+  needs_planning: [{ id: "loom-010", title: "Plan feature", priority: 2 }],
   ready_to_implement: [
-    { id: "bd-020", title: "Implement login", priority: 1 },
-    { id: "bd-021", title: "Add tests", priority: 2 },
+    { id: "loom-020", title: "Implement login", priority: 1 },
+    { id: "loom-021", title: "Add tests", priority: 2 },
   ],
-  in_progress: [{ id: "bd-101", title: "WS-A: Build login page", priority: 2 }],
+  in_progress: [{ id: "loom-101", title: "WS-A: Build login page", priority: 2 }],
   needs_review: [],
   blocked: [],
 };
 
 const loomTasksB = {
   needs_planning: [],
-  ready_to_implement: [{ id: "bd-030", title: "Add endpoint", priority: 1 }],
+  ready_to_implement: [{ id: "loom-030", title: "Add endpoint", priority: 1 }],
   in_progress: [
-    { id: "bd-201", title: "WS-B: Add REST endpoint", priority: 1 },
+    { id: "loom-201", title: "WS-B: Add REST endpoint", priority: 1 },
   ],
-  needs_review: [{ id: "bd-031", title: "Review migration", priority: 2 }],
+  needs_review: [{ id: "loom-031", title: "Review migration", priority: 2 }],
   blocked: [],
 };
 
@@ -519,7 +519,7 @@ async function setupMocks(
   });
 
   // Global backend config
-  await page.route("**/api/config/backend", async (route) => {
+  await page.route("**/api/workspaces/*/config/backend", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",

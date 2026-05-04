@@ -1,6 +1,5 @@
 export {
   AgentCard,
-  getAvatarColor,
   getStatusDotColor,
   getStatusLabel,
 } from "./AgentCard";

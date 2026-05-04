@@ -35,9 +35,9 @@ function createParsedStatus(
 ): ParsedLoomStatus {
   return {
     type: "working",
-    taskId: "bd-123",
+    taskId: "loom-123",
     duration: "5m",
-    raw: "working: bd-123 (5m)",
+    raw: "working: loom-123 (5m)",
     ...overrides,
   };
 }
@@ -109,12 +109,12 @@ describe("AgentRow", () => {
         <AgentRow
           {...createProps({
             status: createParsedStatus(),
-            activity: "Working: bd-123",
+            activity: "Working: loom-123",
           })}
         />,
       );
 
-      expect(screen.getByText("Working: bd-123")).toBeInTheDocument();
+      expect(screen.getByText("Working: loom-123")).toBeInTheDocument();
     });
 
     it("activity text has title attribute", () => {
@@ -122,13 +122,13 @@ describe("AgentRow", () => {
         <AgentRow
           {...createProps({
             status: createParsedStatus(),
-            activity: "Working: bd-123",
+            activity: "Working: loom-123",
           })}
         />,
       );
 
-      const activityEl = screen.getByText("Working: bd-123");
-      expect(activityEl).toHaveAttribute("title", "Working: bd-123");
+      const activityEl = screen.getByText("Working: loom-123");
+      expect(activityEl).toHaveAttribute("title", "Working: loom-123");
     });
   });
 

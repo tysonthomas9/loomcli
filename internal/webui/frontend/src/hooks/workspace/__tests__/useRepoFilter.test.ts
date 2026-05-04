@@ -15,7 +15,7 @@ import { RouterWrapper } from "@/test-utils/router-wrapper";
 import { useRepoFilter, parseReposFromUrl } from "../useRepoFilter";
 
 /**
- * Mock window.location for parseReposFromUrl tests (legacy helper).
+ * Mock window.location for parseReposFromUrl tests.
  */
 function mockWindowLocation(search = ""): void {
   Object.defineProperty(window, "location", {

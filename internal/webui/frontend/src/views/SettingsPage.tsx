@@ -1,9 +1,10 @@
 import { lazy, Suspense } from "react";
-import { ErrorBoundary, LoadingSkeleton } from "@/components";
-import { useRouteView } from "@/hooks";
+import { ErrorBoundary } from "@/components/ErrorBoundary/ErrorBoundary";
+import { LoadingSkeleton } from "@/components/LoadingSkeleton/LoadingSkeleton";
+import { useRouteView } from "@/hooks/common/useRouteView";
 
 const SettingsView = lazy(() =>
-  import("@/components/SettingsView").then((m) => ({
+  import("@/components/SettingsView/SettingsView").then((m) => ({
     default: m.SettingsView,
   })),
 );

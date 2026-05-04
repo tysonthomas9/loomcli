@@ -7,9 +7,9 @@ import {
   useFleetDBHooks,
 } from "./_support/spec-harness";
 import {
-  apiResponseDiff,
   captureBothTabs,
   discoverWorkspaceId,
+  diffIssueLists,
   visualDiff,
   REQUIRED_FIELDS,
   SEED_FIXTURE,
@@ -76,9 +76,13 @@ test.describe("06 issue detail fleetdb-regression", () => {
     ]);
     expect(bOne?.data ?? bOne, "reference single-issue fetch").toBeTruthy();
     expect(fOne?.data ?? fOne, "fleet single-issue fetch").toBeTruthy();
-    // List diff across every required field — auto-persisted to
-    // artifacts/reports/data-diffs.json.
-    const apiDiff = await apiResponseDiff("issues");
+    // List diff across every required field using the exact list payloads
+    // that resolved the detail IDs above.
+    const apiDiff = diffIssueLists(
+      referenceList.data ?? [],
+      fleetList.data ?? [],
+      REQUIRED_FIELDS,
+    );
     expect(apiDiff.count_reference).toBeGreaterThan(0);
     expect(apiDiff.count_fleet).toBeGreaterThan(0);
 

@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 
 import type { RepoInfo, WorkspaceAgentInfo } from "@/api/workspace";
 import { useCreateWorkspaceAgent } from "@/hooks/agents";
@@ -10,6 +10,7 @@ export interface CreateAgentModalProps {
   isOpen: boolean;
   workspaceId: string;
   repos: RepoInfo[];
+  defaultBackend?: string;
   onClose: () => void;
   onSuccess: (agent: WorkspaceAgentInfo) => void;
 }
@@ -18,12 +19,14 @@ export function CreateAgentModal({
   isOpen,
   workspaceId,
   repos,
+  defaultBackend,
   onClose,
   onSuccess,
 }: CreateAgentModalProps): JSX.Element | null {
+  const resolvedDefaultBackend = defaultBackend?.trim() || "codex";
   const [name, setName] = useState("");
   const [roleName, setRoleName] = useState("task");
-  const [backend, setBackend] = useState("claude");
+  const [backend, setBackend] = useState(resolvedDefaultBackend);
   const [repoName, setRepoName] = useState("");
   const [crossRepo, setCrossRepo] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -32,6 +35,12 @@ export function CreateAgentModal({
 
   const repoOptions = useMemo(() => repos.map((repo) => repo.name), [repos]);
   const selectedRepo = repoName || repoOptions[0] || "";
+
+  useEffect(() => {
+    if (isOpen) {
+      setBackend(resolvedDefaultBackend);
+    }
+  }, [isOpen, resolvedDefaultBackend]);
 
   if (!isOpen) return null;
 
@@ -70,7 +79,7 @@ export function CreateAgentModal({
       onSuccess(agent);
       setName("");
       setRoleName("task");
-      setBackend("claude");
+      setBackend(resolvedDefaultBackend);
       setRepoName("");
       setCrossRepo(false);
     } catch (err) {

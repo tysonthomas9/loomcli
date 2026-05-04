@@ -1,6 +1,6 @@
 /**
  * API function for issue diff-stat endpoint.
- * Uses legacy fetch wrapper (spec responses are untyped Record<string, never>).
+ * Uses the untyped fetch wrapper because spec responses are Record<string, never>.
  */
 
 import { get, wsUrl } from "@/api/common";

@@ -99,24 +99,6 @@ describe("useRecentOwners", () => {
       expect(result.current.recentOwners).toEqual(["Alice", "Bob", "Charlie"]);
     });
 
-    it("migrates initial state from legacy localStorage key", () => {
-      mockStorage.store.set(
-        "beads-recent-owners",
-        JSON.stringify(["Alice", "Bob", "Charlie"]),
-      );
-
-      const { result } = renderHook(() => useRecentOwners());
-
-      expect(result.current.recentOwners).toEqual(["Alice", "Bob", "Charlie"]);
-      expect(mockStorage.setItem).toHaveBeenCalledWith(
-        "loom-recent-owners",
-        JSON.stringify(["Alice", "Bob", "Charlie"]),
-      );
-      expect(mockStorage.removeItem).toHaveBeenCalledWith(
-        "beads-recent-owners",
-      );
-    });
-
     it("handles invalid JSON in localStorage gracefully", () => {
       mockStorage.store.set("loom-recent-owners", "not valid json {{{");
 
@@ -308,9 +290,6 @@ describe("useRecentOwners", () => {
         "loom-recent-owners",
         "[]",
       );
-      expect(mockStorage.removeItem).toHaveBeenCalledWith(
-        "beads-recent-owners",
-      );
     });
   });
 
@@ -325,9 +304,6 @@ describe("useRecentOwners", () => {
       expect(mockStorage.setItem).toHaveBeenCalledWith(
         "loom-recent-owners",
         JSON.stringify(["Alice"]),
-      );
-      expect(mockStorage.removeItem).toHaveBeenCalledWith(
-        "beads-recent-owners",
       );
     });
 

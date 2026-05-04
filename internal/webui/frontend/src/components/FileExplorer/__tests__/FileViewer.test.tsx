@@ -171,7 +171,7 @@ describe("FileViewer", () => {
 
   it("detects YAML language for .yaml files", async () => {
     const yamlData: FileReadData = {
-      path: "config.yaml",
+      path: "settings.yml",
       content: "key: value",
       size: 10,
       binary: false,
@@ -180,7 +180,7 @@ describe("FileViewer", () => {
       <FileViewer
         {...defaultProps}
         isOpen={true}
-        path="config.yaml"
+        path="settings.yml"
         fileData={yamlData}
       />,
     );

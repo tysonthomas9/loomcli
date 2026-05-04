@@ -3,7 +3,7 @@ import type { FileReadData } from "@/api/workspace";
 import styles from "./FileExplorer.module.css";
 
 const CodeMirrorEditor = lazy(() =>
-  import("@/components/CodeMirrorEditor").then((m) => ({
+  import("@/components/CodeMirrorEditor/CodeMirrorEditor").then((m) => ({
     default: m.CodeMirrorEditor,
   })),
 );

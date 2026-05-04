@@ -370,7 +370,7 @@ export interface DaemonStatusResponse {
  *
  * Issue CRUD, dependency, stats, ready, blocked, daemon status, and graph
  * methods route through workspace-scoped endpoints (/api/workspaces/{ws}/...).
- * The API E2E suite intentionally has no legacy flat /api fallback for these
+ * The API E2E suite intentionally has no flat /api fallback for these
  * contracts.
  */
 export class LoomApiClient {

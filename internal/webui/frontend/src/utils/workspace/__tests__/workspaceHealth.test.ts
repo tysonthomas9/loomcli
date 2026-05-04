@@ -39,14 +39,14 @@ describe("computeRepoHealth", () => {
   });
 
   it("returns yellow for working agent", () => {
-    const agents = [makeAgent("ready"), makeAgent("working: bd-123 (5m)")];
+    const agents = [makeAgent("ready"), makeAgent("working: loom-123 (5m)")];
     const result = computeRepoHealth(agents);
     expect(result.healthColor).toBe("yellow");
     expect(result.activeCount).toBe(1);
   });
 
   it("returns yellow for planning agent", () => {
-    const agents = [makeAgent("planning: bd-456 (2m)")];
+    const agents = [makeAgent("planning: loom-456 (2m)")];
     const result = computeRepoHealth(agents);
     expect(result.healthColor).toBe("yellow");
     expect(result.activeCount).toBe(1);
@@ -75,7 +75,7 @@ describe("computeRepoHealth", () => {
 
   it("returns red when error mixed with working", () => {
     const agents = [
-      makeAgent("working: bd-123 (5m)"),
+      makeAgent("working: loom-123 (5m)"),
       makeAgent("error: crash (1m)"),
     ];
     const result = computeRepoHealth(agents);
@@ -100,14 +100,14 @@ describe("computeRepoHealth", () => {
   });
 
   it("returns green for done agents", () => {
-    const agents = [makeAgent("done: bd-789 (1m)")];
+    const agents = [makeAgent("done: loom-789 (1m)")];
     const result = computeRepoHealth(agents);
     expect(result.healthColor).toBe("green");
     expect(result.activeCount).toBe(0);
   });
 
   it("returns green for review agents", () => {
-    const agents = [makeAgent("review: bd-101 (3m)")];
+    const agents = [makeAgent("review: loom-101 (3m)")];
     const result = computeRepoHealth(agents);
     expect(result.healthColor).toBe("green");
     expect(result.activeCount).toBe(0);
@@ -115,8 +115,8 @@ describe("computeRepoHealth", () => {
 
   it("counts multiple active agents correctly", () => {
     const agents = [
-      makeAgent("working: bd-1 (1m)"),
-      makeAgent("planning: bd-2 (2m)"),
+      makeAgent("working: loom-1 (1m)"),
+      makeAgent("planning: loom-2 (2m)"),
       makeAgent("dirty"),
       makeAgent("ready"),
     ];

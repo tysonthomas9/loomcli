@@ -1,7 +1,7 @@
 /**
  * API client for backend health endpoint.
  * Stateless — no module-level caches. Caching belongs in backendsStore.
- * Uses legacy fetch wrapper (spec response is untyped Record<string, never>).
+ * Uses raw fetch because the spec response is untyped Record<string, never>.
  */
 
 import { get, ApiError } from "@/api/common";

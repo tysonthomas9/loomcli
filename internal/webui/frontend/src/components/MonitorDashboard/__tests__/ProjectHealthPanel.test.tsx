@@ -757,7 +757,7 @@ describe("ProjectHealthPanel", () => {
     });
 
     it("handles mixed data where some issues have details and others do not", () => {
-      // Some issues have blocked_by_details (new format), others only have blocked_by (legacy format)
+      // Some issues have blocked_by_details, others only have blocked_by.
       const blockedIssues = [
         // Issues with blocked_by_details (new format with titles)
         createBlockedIssue({
@@ -774,16 +774,16 @@ describe("ProjectHealthPanel", () => {
             { id: "bn-titled", title: "Titled Blocker", priority: 1 },
           ],
         }),
-        // Issues without blocked_by_details (legacy format without titles)
+        // Issues without blocked_by_details.
         createBlockedIssue({
           id: "blocked-3",
-          blocked_by: ["bn-legacy"],
-          // No blocked_by_details - uses legacy format
+          blocked_by: ["bn-fallback"],
+          // No blocked_by_details.
         }),
         createBlockedIssue({
           id: "blocked-4",
-          blocked_by: ["bn-legacy"],
-          // No blocked_by_details - uses legacy format
+          blocked_by: ["bn-fallback"],
+          // No blocked_by_details.
         }),
       ];
 
@@ -797,8 +797,8 @@ describe("ProjectHealthPanel", () => {
 
       // bn-titled blocks 2 issues, should show title from blocked_by_details
       expect(screen.getByText("Titled Blocker")).toBeInTheDocument();
-      // bn-legacy blocks 2 issues, should show ID as fallback (no details)
-      expect(screen.getByText("bn-legacy")).toBeInTheDocument();
+      // bn-fallback blocks 2 issues, should show ID as fallback (no details)
+      expect(screen.getByText("bn-fallback")).toBeInTheDocument();
     });
 
     it("uses priority from blocked_by_details when available", () => {
@@ -865,14 +865,14 @@ describe("ProjectHealthPanel", () => {
       expect(screen.getByText("bn-empty-title")).toBeInTheDocument();
     });
 
-    it("backward compatibility: existing tests with only blocked_by still work", () => {
-      // This test verifies that the original blocked_by-only data format still works
+    it("handles data with only blocked_by", () => {
+      // This test verifies that blocked_by-only data still works.
       const blockedIssues = [
-        createBlockedIssue({ id: "issue-1", blocked_by: ["legacy-blocker"] }),
-        createBlockedIssue({ id: "issue-2", blocked_by: ["legacy-blocker"] }),
+        createBlockedIssue({ id: "issue-1", blocked_by: ["fallback-blocker"] }),
+        createBlockedIssue({ id: "issue-2", blocked_by: ["fallback-blocker"] }),
         createBlockedIssue({
           id: "issue-3",
-          blocked_by: ["legacy-blocker", "another"],
+          blocked_by: ["fallback-blocker", "another"],
         }),
       ];
 
@@ -884,8 +884,8 @@ describe("ProjectHealthPanel", () => {
         />,
       );
 
-      // legacy-blocker blocks 3 issues
-      expect(screen.getByText("legacy-blocker")).toBeInTheDocument();
+      // fallback-blocker blocks 3 issues
+      expect(screen.getByText("fallback-blocker")).toBeInTheDocument();
       expect(screen.getByText("blocks 3")).toBeInTheDocument();
     });
   });

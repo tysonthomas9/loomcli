@@ -1,6 +1,6 @@
 /**
  * API functions for git endpoints.
- * Uses legacy fetch wrapper (most spec responses are untyped Record<string, never>).
+ * Uses raw fetch because most spec responses are untyped Record<string, never>.
  */
 
 import { get, post, patch, wsUrl } from "@/api/common";

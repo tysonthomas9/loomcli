@@ -25,7 +25,7 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { WorkspaceLayout } from "@/components/WorkspaceLayout";
 import { RedirectToWorkspace } from "@/components/RedirectToWorkspace";
 import { NotFound } from "@/components/NotFound";
-import { KeyboardShortcutProvider } from "@/hooks";
+import { KeyboardShortcutProvider } from "@/hooks/ui/useKeyboardShortcuts";
 
 const devRoutes = import.meta.env.DEV
   ? [

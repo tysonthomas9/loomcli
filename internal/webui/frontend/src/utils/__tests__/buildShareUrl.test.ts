@@ -116,11 +116,11 @@ describe("buildShareUrl", () => {
     expect(url.pathname).toBe("/ws/test-ws/table");
   });
 
-  it("removes legacy view query param if present", () => {
-    mockLocation("http://localhost:3000/ws/test-ws/kanban?view=kanban");
+  it("preserves existing query params when switching views", () => {
+    mockLocation("http://localhost:3000/ws/test-ws/kanban?filter=mine");
     const result = buildShareUrl({ view: "table" });
     const url = new URL(result);
-    expect(url.searchParams.has("view")).toBe(false);
+    expect(url.searchParams.get("filter")).toBe("mine");
     expect(url.pathname).toBe("/ws/test-ws/table");
   });
 

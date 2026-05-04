@@ -13,7 +13,7 @@ import { describe, it, expect } from "vitest";
 import type { Issue } from "@/types";
 
 import { DEFAULT_COLUMNS, createColumns } from "../columnConfigs";
-import type { BlockedInfo } from "../KanbanBoard";
+import type { BlockedInfo } from "@/types/issue";
 
 /**
  * Create a mock issue for testing column filters.
@@ -152,7 +152,7 @@ describe("columnConfigs", () => {
       expect(review.filter(issue, notBlocked)).toBe(true);
     });
 
-    it("does NOT match open issues with [Need Review] in title (legacy prefix removed)", () => {
+    it("does NOT match open issues with [Need Review] in title", () => {
       const issue = createMockIssue({
         title: "[Need Review] Update docs",
         status: "open",
@@ -192,7 +192,7 @@ describe("columnConfigs", () => {
       expect(open.filter(issue, blocked)).toBe(false);
     });
 
-    it("matches open issues even with [Need Review] in title (legacy prefix no longer used)", () => {
+    it("matches open issues even with [Need Review] in title", () => {
       const issue = createMockIssue({
         title: "[Need Review] Refactor API",
         status: "open",
@@ -629,9 +629,9 @@ describe("columnConfigs", () => {
   });
 
   // ---------------------------------------------------------------
-  // DEFAULT_COLUMNS backward compatibility
+  // DEFAULT_COLUMNS existing behavior
   // ---------------------------------------------------------------
-  describe("DEFAULT_COLUMNS backward compatibility", () => {
+  describe("DEFAULT_COLUMNS existing behavior", () => {
     it("DEFAULT_COLUMNS is defined as createColumns() with no args", () => {
       // DEFAULT_COLUMNS should produce the same column IDs and labels
       const freshDefault = createColumns();

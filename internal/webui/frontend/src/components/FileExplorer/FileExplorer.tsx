@@ -1,9 +1,12 @@
 import { useState, useCallback, useEffect } from "react";
-import { ErrorDisplay, LoadingSkeleton } from "@/components";
+import { ErrorDisplay } from "@/components/ErrorDisplay/ErrorDisplay";
+import { LoadingSkeleton } from "@/components/LoadingSkeleton/LoadingSkeleton";
 import { useStore } from "zustand";
 
-import { useAgentStoreInstance, useWorkspaceContext } from "@/hooks";
-import { useFileTree, useFileContent } from "@/hooks/common";
+import { useAgentStoreInstance } from "@/hooks/common/useStoreContext";
+import { useFileTree } from "@/hooks/common/useFileTree";
+import { useFileContent } from "@/hooks/common/useFileContent";
+import { useWorkspaceContext } from "@/hooks/workspace/useWorkspaceContext";
 import { FileTree } from "./FileTree";
 import { FileViewer } from "./FileViewer";
 import styles from "./FileExplorer.module.css";

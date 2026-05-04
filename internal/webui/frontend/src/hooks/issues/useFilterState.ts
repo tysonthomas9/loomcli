@@ -348,7 +348,7 @@ export function useFilterState(
   return [state, actions];
 }
 
-// Keep legacy parseFromUrl for backward compat (tests, etc.)
+// Window-location parser used by tests.
 function parseFromUrl(): FilterState {
   if (typeof window === "undefined" || !window.location) return {};
   return parseFromSearchParams(new URLSearchParams(window.location.search));

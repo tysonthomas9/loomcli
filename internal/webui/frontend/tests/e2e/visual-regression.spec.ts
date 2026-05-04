@@ -81,7 +81,7 @@ test.use({ viewport: { width: 1280, height: 720 } })
  *
  * Uses workspace-scoped routing: navigation targets /ws/default/kanban, and
  * API mocks return data from /api/workspaces/:id/... endpoints. Keeps
- * /api/auth/token, /api/health, /api/config/backend, and /api/monitor
+ * /api/auth/token, /api/health, /api/workspaces/{ws}/config/backend, and /api/monitor
  * un-scoped because those are global endpoints, not workspace-scoped.
  */
 async function setupMocks(
@@ -171,7 +171,7 @@ async function setupMocks(
   })
 
   // Mock global backend config endpoint
-  await page.route("**/api/config/backend", async (route) => {
+  await page.route("**/api/workspaces/*/config/backend", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",

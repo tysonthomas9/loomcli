@@ -54,10 +54,10 @@ describe("EmptyState", () => {
   });
 
   describe("variant descriptions", () => {
-    it("no-workspaces variant includes loom.yaml guidance", () => {
+    it("no-workspaces variant includes FleetDB guidance", () => {
       render(<EmptyState variant="no-workspaces" />);
 
-      expect(screen.getByText(/loom\.yaml/)).toBeInTheDocument();
+      expect(screen.getByText(/FleetDB/)).toBeInTheDocument();
       expect(screen.getByText(/loom init/)).toBeInTheDocument();
     });
 

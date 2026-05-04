@@ -5,7 +5,7 @@
 /**
  * Unit tests for WorkspaceTree connection status indicator feature.
  * Covers daemon prompt rendering, retry button, collapsed badge
- * disconnected state, and backward compatibility when props are omitted.
+ * disconnected state, and existing behavior when props are omitted.
  */
 
 import { render, screen, fireEvent } from "@testing-library/react";
@@ -335,7 +335,7 @@ describe("WorkspaceTree connection status", () => {
     });
   });
 
-  describe("backward compatibility", () => {
+  describe("existing behavior", () => {
     it("renders normally when no connection props are provided", () => {
       reposOverride = { repos: oneRepo };
       agentOverride = {

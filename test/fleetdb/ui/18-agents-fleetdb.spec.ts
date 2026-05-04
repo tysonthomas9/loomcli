@@ -135,15 +135,11 @@ test.describe("18 agents fleet-db acceptance", () => {
     recordRouteHit(
       `${FLEETDB_URLS.fleet}/api/workspaces/${fleetWs}/agents/${agentName}/stop`,
     );
-    expect(control.status, "fleet agent control unsupported status").toBe(501);
+    expect(control.status, "fleet agent control status").toBe(200);
     const controlBody = await control.json();
-    expect(controlBody.kind, "fleet agent control error kind").toBe(
-      "not_implemented",
+    expect(controlBody.message, "fleet agent control message").toContain(
+      "stopped",
     );
-    expect(
-      controlBody.error,
-      "fleet agent control does not report daemon unavailable",
-    ).not.toContain("daemon is not running");
 
     await tabs.fleet.goto(`${FLEETDB_URLS.fleet}/ws/${fleetWs}/monitor`);
     await assertMonitorAndSidebar(tabs.fleet);

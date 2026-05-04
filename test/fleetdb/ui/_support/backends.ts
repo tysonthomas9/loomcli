@@ -13,6 +13,7 @@ import { execSync } from "node:child_process";
 import { FLEETDB_URLS, ARTIFACTS_DIR } from "../playwright.config";
 import {
   composeRuntime,
+  composeRun,
   FLEETDB_NETWORK,
   FLEETDB_SEED_FLEET_IMAGE,
 } from "./compose";
@@ -186,6 +187,7 @@ export async function resetBothBackends(
   resetInFlight = (async () => {
     if (isFleetOnlyMode() && opts.reseed !== false) {
       await resetFleetOnlyFixture();
+      await repairFleetWorkspaceMapping();
       return;
     }
     const fleetWs = await discoverWorkspaceId(FLEETDB_URLS.fleet);
@@ -304,7 +306,7 @@ async function deleteAllIssues(
     const issues: any[] = j?.data ?? [];
 
     // Issue per-id DELETEs in capped batches. Parallel-everything
-    // hammered the legacy SQLite-backed store hard enough that ~30% of DELETEs
+    // hammered the old SQLite-backed store hard enough that ~30% of DELETEs
     // failed silently (caught) under the prior `Promise.all(map)`
     // pattern, leaving reference with a growing residue across the
     // suite — which then blew the 90 s test budget on later
@@ -357,6 +359,134 @@ async function runSeedScript(): Promise<void> {
     // eslint-disable-next-line no-console
     console.warn(`[backends] reseed failed: ${(e as Error)?.message ?? e}`);
   }
+  await repairFleetWorkspaceMapping();
+}
+
+async function repairFleetWorkspaceMapping(): Promise<void> {
+  const workspace = FLEETDB_URLS.workspace;
+
+  // The seed resets shared FleetDB workspace rows. Reattach this loom
+  // process' local checkout metadata so file/diff and agent creation routes
+  // can prove real store-backed behavior instead of falling back to shims.
+  execSync(
+    composeRun(
+      `exec -T loom-fleet sh -lc ${shellQuote(
+        `cd /workspace && loom workspace create ${workspace} --repos /workspace >/tmp/loom-workspace-repair.log 2>&1 || true`,
+      )}`,
+    ),
+    {
+      cwd: REPO_ROOT,
+      encoding: "utf-8",
+      timeout: 60_000,
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
+
+  await ensureFleetRole(workspace, "fleetdb-regression-workspace");
+  await ensureFleetRepoAttached(workspace);
+  await ensureFleetWorkspaceAgent(workspace);
+}
+
+async function ensureFleetRepoAttached(workspace: string): Promise<void> {
+  const repos = await fetch(
+    `${FLEETDB_URLS.fleet}/api/workspaces/${encodeURIComponent(workspace)}/repos`,
+  ).then((r) => (r.ok ? r.json() : null));
+  if ((repos?.repos ?? []).length > 0) return;
+
+  const response = await fetch(
+    `${FLEETDB_URLS.fleet}/api/workspaces/${encodeURIComponent(workspace)}/repos`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ repos: ["/workspace"], branch: "main" }),
+    },
+  );
+  if (!response.ok && response.status !== 409) {
+    throw new Error(
+      `fleet workspace repo repair failed: HTTP ${response.status} ${await response.text()}`,
+    );
+  }
+  await response.body?.cancel().catch(() => undefined);
+}
+
+async function ensureFleetWorkspaceAgent(workspace: string): Promise<void> {
+  const list = await fetch(
+    `${FLEETDB_URLS.fleet}/api/workspaces/${encodeURIComponent(workspace)}/agents`,
+  ).then((r) => (r.ok ? r.json() : null));
+  const agents: any[] = list?.data ?? [];
+  if (agents.some((agent) => agent.name === "workspace")) return;
+
+  const response = await fetch(
+    `${FLEETDB_URLS.fleet}/api/workspaces/${encodeURIComponent(workspace)}/agents`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "workspace",
+        role_name: "fleetdb-regression-workspace",
+        auto: true,
+        backend: "claude",
+        cross_repo: true,
+      }),
+    },
+  );
+  if (!response.ok && response.status !== 409) {
+    throw new Error(
+      `fleet workspace agent repair failed: HTTP ${response.status} ${await response.text()}`,
+    );
+  }
+  await response.body?.cancel().catch(() => undefined);
+}
+
+async function ensureFleetRole(
+  workspace: string,
+  roleName: string,
+): Promise<void> {
+  const response = await fetch(
+    `${FLEETDB_URLS.fleetDB}/api/v1/${encodeURIComponent(workspace)}/roles`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Actor": "fleetdb-regression-harness@fixture.local",
+      },
+      body: JSON.stringify({
+        name: roleName,
+        description: "FleetDB regression workspace agent role",
+        backend: "claude",
+      }),
+    },
+  );
+  if (!response.ok && response.status !== 409) {
+    throw new Error(
+      `fleet role repair failed: HTTP ${response.status} ${await response.text()}`,
+    );
+  }
+  await response.body?.cancel().catch(() => undefined);
+  await waitForFleetRole(workspace, roleName);
+}
+
+async function waitForFleetRole(
+  workspace: string,
+  roleName: string,
+): Promise<void> {
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const response = await fetch(
+      `${FLEETDB_URLS.fleetDB}/api/v1/${encodeURIComponent(workspace)}/roles`,
+      { headers: { "X-Actor": "fleetdb-regression-harness@fixture.local" } },
+    ).catch(() => null);
+    if (response?.ok) {
+      const body = await response.json();
+      const roles: any[] = body?.roles ?? body?.data ?? [];
+      if (roles.some((role) => role.name === roleName)) return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250 + attempt * 100));
+  }
+  throw new Error(`fleet role repair did not become visible: ${roleName}`);
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
 /**

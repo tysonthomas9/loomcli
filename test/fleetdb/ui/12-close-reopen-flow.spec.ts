@@ -1,7 +1,7 @@
 /**
  * 12 Close / reopen fleetdb-regression — close reason displays; reopen clears.
  *
- * This spec is sensitive to a past divergence where the legacy backend returned
+ * This spec is sensitive to a past divergence where the previous backend returned
  * close_reason="Closed" regardless of input while fleet-db returned the
  * actual reason. Per webui-gaps.md "Known signals", that's now aligned;
  * we assert it here to catch regressions.

@@ -20,7 +20,7 @@ import { renderCellContent } from "../cellRenderers";
  */
 function createMockIssue(overrides: Partial<Issue> = {}): Issue {
   return {
-    id: "bd-abc",
+    id: "loom-abc",
     title: "Test Issue",
     priority: 2,
     status: "open",

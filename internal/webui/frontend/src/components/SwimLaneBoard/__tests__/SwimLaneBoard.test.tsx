@@ -10,8 +10,10 @@ import { render, screen, fireEvent, cleanup } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import "@testing-library/jest-dom";
 
-import type { BlockedInfo } from "@/components/KanbanBoard";
+import type { KanbanColumnConfig } from "@/components/KanbanBoard";
 import type { Issue, Status } from "@/types";
+import type { BlockedInfo } from "@/types/issue";
+import { formatStatusLabel } from "@/utils/issue";
 
 import { SwimLaneBoard } from "../SwimLaneBoard";
 
@@ -48,6 +50,19 @@ function createBlockedIssuesMap(
  * Default statuses for testing.
  */
 const defaultStatuses: Status[] = ["open", "in_progress", "closed"];
+const defaultColumns = columnsFromStatuses(defaultStatuses);
+
+function columnsFromStatuses(statuses: Status[]): KanbanColumnConfig[] {
+  return statuses.map((status) => ({
+    id: status,
+    label: formatStatusLabel(status),
+    filter: (issue: Issue) =>
+      status === "open"
+        ? issue.status === status || issue.status === undefined
+        : issue.status === status,
+    targetStatus: status,
+  }));
+}
 
 describe("SwimLaneBoard", () => {
   beforeEach(() => {
@@ -76,7 +91,7 @@ describe("SwimLaneBoard", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="none"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
         />,
       );
 
@@ -106,7 +121,7 @@ describe("SwimLaneBoard", () => {
         <SwimLaneBoard
           issues={[issue]}
           groupBy="none"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
           onIssueClick={handleIssueClick}
         />,
       );
@@ -139,7 +154,7 @@ describe("SwimLaneBoard", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="assignee"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
         />,
       );
 
@@ -163,7 +178,7 @@ describe("SwimLaneBoard", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="assignee"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
         />,
       );
 
@@ -186,7 +201,7 @@ describe("SwimLaneBoard", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="priority"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
         />,
       );
 
@@ -212,7 +227,7 @@ describe("SwimLaneBoard", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="type"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
         />,
       );
 
@@ -239,7 +254,7 @@ describe("SwimLaneBoard", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="epic"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
         />,
       );
 
@@ -262,7 +277,7 @@ describe("SwimLaneBoard", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="label"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
         />,
       );
 
@@ -290,7 +305,7 @@ describe("SwimLaneBoard", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="assignee"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
           sortLanesBy="title"
         />,
       );
@@ -329,7 +344,7 @@ describe("SwimLaneBoard", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="priority"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
           sortLanesBy="count"
         />,
       );
@@ -353,7 +368,7 @@ describe("SwimLaneBoard", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="assignee"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
         />,
       );
 
@@ -382,7 +397,7 @@ describe("SwimLaneBoard", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="assignee"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
         />,
       );
 
@@ -405,7 +420,7 @@ describe("SwimLaneBoard", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="assignee"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
           defaultCollapsed={true}
         />,
       );
@@ -429,7 +444,7 @@ describe("SwimLaneBoard", () => {
         <SwimLaneBoard
           issues={[issue]}
           groupBy="assignee"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
           onIssueClick={handleIssueClick}
         />,
       );
@@ -466,7 +481,7 @@ describe("SwimLaneBoard", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="assignee"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
           onIssueClick={handleIssueClick}
         />,
       );
@@ -512,7 +527,7 @@ describe("SwimLaneBoard", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="assignee"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
           blockedIssues={blockedIssues}
         />,
       );
@@ -542,7 +557,7 @@ describe("SwimLaneBoard", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="assignee"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
           blockedIssues={blockedIssues}
           showBlocked={false}
         />,
@@ -561,7 +576,7 @@ describe("SwimLaneBoard", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="assignee"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
           className="custom-board-class"
         />,
       );
@@ -570,8 +585,9 @@ describe("SwimLaneBoard", () => {
       expect(board).toHaveClass("custom-board-class");
     });
 
-    it("uses custom statuses", () => {
+    it("uses custom status columns", () => {
       const customStatuses: Status[] = ["blocked", "deferred"];
+      const customColumns = columnsFromStatuses(customStatuses);
       const issues = [
         createMockIssue({
           id: "issue-1",
@@ -584,7 +600,7 @@ describe("SwimLaneBoard", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="assignee"
-          statuses={customStatuses}
+          columns={customColumns}
         />,
       );
 
@@ -610,7 +626,7 @@ describe("SwimLaneBoard", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="assignee"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
           sortLanesBy="title"
         />,
       );
@@ -638,7 +654,7 @@ describe("SwimLaneBoard", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="assignee"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
           sortLanesBy="count"
         />,
       );
@@ -660,7 +676,7 @@ describe("SwimLaneBoard", () => {
         <SwimLaneBoard
           issues={[]}
           groupBy="assignee"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
         />,
       );
 
@@ -691,7 +707,7 @@ describe("SwimLaneBoard", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="label"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
         />,
       );
 
@@ -721,7 +737,7 @@ describe("SwimLaneBoard", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="assignee"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
         />,
       );
 
@@ -748,7 +764,7 @@ describe("SwimLaneBoard", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="assignee"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
         />,
       );
 
@@ -770,7 +786,7 @@ describe("SwimLaneBoard", () => {
           <SwimLaneBoard
             issues={issues}
             groupBy="assignee"
-            statuses={defaultStatuses}
+            columns={defaultColumns}
             onDragEnd={handleDragEnd}
           />,
         );
@@ -911,8 +927,7 @@ describe("SwimLaneBoard", () => {
       expect(screen.getByText("Epic Issue")).toBeInTheDocument();
     });
 
-    it("uses legacy statuses when provided, ignoring includeEpics logic", () => {
-      // When statuses prop is provided, statusesToColumns is used instead
+    it("uses explicit columns when provided, ignoring includeEpics logic", () => {
       const issues = [
         createMockIssue({
           id: "epic-1",
@@ -927,11 +942,11 @@ describe("SwimLaneBoard", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="assignee"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
         />,
       );
 
-      // Legacy statuses columns don't filter epics, so it should be visible
+      // Explicit status columns don't filter epics, so it should be visible
       expect(screen.getByText("Epic Issue")).toBeInTheDocument();
     });
   });

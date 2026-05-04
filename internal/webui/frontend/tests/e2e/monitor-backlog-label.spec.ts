@@ -32,7 +32,7 @@ const mockLoomStatusWithBacklog = {
       name: "dev1",
       status: "working",
       branch: "feature-1",
-      task: "bd-001",
+      task: "loom-001",
       ahead: 0,
       behind: 0,
       last_seen: "2026-01-24T12:00:00Z",
@@ -47,7 +47,7 @@ const mockLoomStatusWithBacklog = {
   },
   agent_tasks: {
     dev1: {
-      id: "bd-001",
+      id: "loom-001",
       title: "Implement feature X",
       priority: 2,
     },
@@ -77,20 +77,20 @@ const mockLoomStatusZeroBlocked = {
 
 const mockLoomTasksWithBacklog = {
   needs_planning: [
-    { id: "bd-010", title: "Plan new feature", priority: 2 },
-    { id: "bd-011", title: "Design API", priority: 1 },
+    { id: "loom-010", title: "Plan new feature", priority: 2 },
+    { id: "loom-011", title: "Design API", priority: 1 },
   ],
   ready_to_implement: [
-    { id: "bd-020", title: "Implement login", priority: 1 },
-    { id: "bd-021", title: "Add tests", priority: 2 },
-    { id: "bd-022", title: "Fix bug", priority: 3 },
+    { id: "loom-020", title: "Implement login", priority: 1 },
+    { id: "loom-021", title: "Add tests", priority: 2 },
+    { id: "loom-022", title: "Fix bug", priority: 3 },
   ],
-  in_progress: [{ id: "bd-001", title: "Implement feature X", priority: 2 }],
-  needs_review: [{ id: "bd-030", title: "Review PR", priority: 2 }],
+  in_progress: [{ id: "loom-001", title: "Implement feature X", priority: 2 }],
+  needs_review: [{ id: "loom-030", title: "Review PR", priority: 2 }],
   blocked: [
-    { id: "bd-040", title: "Setup database schema", priority: 1 },
-    { id: "bd-041", title: "Configure CI pipeline", priority: 2 },
-    { id: "bd-042", title: "Write integration tests", priority: 3 },
+    { id: "loom-040", title: "Setup database schema", priority: 1 },
+    { id: "loom-041", title: "Configure CI pipeline", priority: 2 },
+    { id: "loom-042", title: "Write integration tests", priority: 3 },
   ],
 };
 

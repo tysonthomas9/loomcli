@@ -26,9 +26,9 @@ test.describe('Team Collaboration', () => {
   })
 
   // Current fleet comment route is workspace-scoped, but the CLI-backed fleet
-  // adapter invokes the removed `bd comment` command and returns an error.
+  // adapter invokes a removed comment command and returns an error.
   // Disable comment contracts until the fleet adapter uses the current comments
-  // API; do not fall back to legacy flat beads endpoints.
+  // API; do not fall back to flat endpoints.
   test.describe.skip('Comments', () => {
     test('add comment to issue (POST /api/workspaces/{ws}/issues/:id/comments)', async ({ api }) => {
       // Create an issue
@@ -93,7 +93,7 @@ test.describe('Team Collaboration', () => {
 
   // Current fleet issue PATCH accepts these workspace-scoped requests, but the
   // CLI-backed adapter does not round-trip collaboration fields yet. Keep these
-  // disabled instead of asserting legacy daemon behavior.
+  // disabled instead of asserting daemon fallback behavior.
   test.describe.skip('Notes Field', () => {
     test('update notes field via PATCH', async ({ api }) => {
       // Create an issue without notes

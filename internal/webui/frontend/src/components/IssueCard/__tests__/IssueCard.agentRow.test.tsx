@@ -54,11 +54,14 @@ vi.mock("@/hooks", async (importOriginal) => {
   };
 });
 
-// Mock AgentCard utility functions to return predictable values
+// Mock AgentCard status helpers to return predictable values.
 vi.mock("@/components/AgentCard", () => ({
-  getAvatarColor: vi.fn((name: string) => `#color-${name}`),
   getStatusDotColor: vi.fn(() => "#22c55e"),
   getStatusLabel: vi.fn(() => "Working"),
+}));
+
+vi.mock("@/utils/colorUtils", () => ({
+  getAvatarColor: vi.fn((name: string) => `#color-${name}`),
 }));
 
 /**
@@ -83,8 +86,8 @@ function createMockAgent(
 ): LoomAgentStatus {
   return {
     name: "nova",
-    branch: "feature/bd-123",
-    status: "working: bd-123 (5m)",
+    branch: "feature/loom-123",
+    status: "working: loom-123 (5m)",
     ahead: 2,
     behind: 0,
     ...overrides,

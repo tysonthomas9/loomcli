@@ -246,7 +246,7 @@ export function createApiMockHandler(page: Page): ApiMockHandler {
     ): Promise<MockTracker> {
       const tracker: MockTracker = { calls: [] };
       await page.route("**/api/config", async (route) => {
-        // Only intercept GET requests to /api/config (not /api/config/backend etc.)
+        // Only intercept GET requests to /api/config (not /api/workspaces/{ws}/config/backend etc.)
         const url = new URL(route.request().url());
         if (url.pathname !== "/api/config") {
           await route.fallback();

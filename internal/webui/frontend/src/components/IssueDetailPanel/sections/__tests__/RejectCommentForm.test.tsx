@@ -59,10 +59,10 @@ describe("RejectCommentForm (IssueDetailPanel)", () => {
     });
 
     it("has accessible aria-label on form", () => {
-      render(<RejectCommentForm {...defaultProps} issueId="bd-xyz123" />);
+      render(<RejectCommentForm {...defaultProps} issueId="loom-xyz123" />);
 
       expect(
-        screen.getByLabelText("Rejection feedback for issue bd-xyz123"),
+        screen.getByLabelText("Rejection feedback for issue loom-xyz123"),
       ).toBeInTheDocument();
     });
 

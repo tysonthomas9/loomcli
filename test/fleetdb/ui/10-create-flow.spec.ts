@@ -42,7 +42,7 @@ test.describe("10 create-flow fleetdb-regression", () => {
 
     // Comparing fleet and reference list counts is meaningless here because
     // reference accumulates tombstoned issues from earlier tests in the
-    // same suite (legacy delete behavior left tombstones that still appeared in the
+    // same suite (old delete behavior left tombstones that still appeared in the
     // list). The semantic check is "fleet grew by exactly 1, reference
     // didn't grow at all" — assert that directly via the snapshots.
     await apiResponseDiff("issues"); // still useful for the diff report

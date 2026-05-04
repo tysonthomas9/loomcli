@@ -7,7 +7,7 @@ import { useState } from "react";
 
 import { ErrorDisplay } from "@/components/ErrorDisplay";
 import { LoadingSkeleton } from "@/components/LoadingSkeleton";
-import type { ViewMode } from "@/components/ViewSwitcher";
+import type { ViewMode } from "@/types";
 import { useBackendConfig, useWorkspaceContext } from "@/hooks/workspace";
 import {
   useTerminalFont,
@@ -158,9 +158,7 @@ export function SettingsView({
                 ))}
               </select>
               <span className={styles.sourceTag}>
-                {config.source === "project"
-                  ? "From project loom.yaml"
-                  : "Default"}
+                {config.source === "fleetdb" ? "From FleetDB" : "Default"}
               </span>
             </div>
           </div>

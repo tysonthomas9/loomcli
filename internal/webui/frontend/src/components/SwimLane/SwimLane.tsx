@@ -8,7 +8,7 @@ import { useMemo, useState } from "react";
 
 import { DraggableIssueCard } from "@/components/DraggableIssueCard";
 import { EmptyColumn } from "@/components/EmptyColumn";
-import type { BlockedInfo } from "@/components/KanbanBoard";
+import type { BlockedInfo } from "@/types/issue";
 import type { KanbanColumnConfig } from "@/components/KanbanBoard/types";
 import { StatusColumn } from "@/components/StatusColumn";
 import type { Issue } from "@/types";

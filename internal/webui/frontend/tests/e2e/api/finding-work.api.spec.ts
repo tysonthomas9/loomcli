@@ -112,7 +112,7 @@ test.describe('Finding Work', () => {
 
     // Dependency mutation is not implemented in the current fleet CLI adapter.
     // Model a blocked item via status so this ready-list contract stays on the
-    // workspace-scoped fleet API without falling back to flat beads endpoints.
+    // workspace-scoped fleet API without falling back to flat issue endpoints.
     const blocked = await api.createIssue({
       title: `Blocked Issue ${testId}`,
       issue_type: 'task',

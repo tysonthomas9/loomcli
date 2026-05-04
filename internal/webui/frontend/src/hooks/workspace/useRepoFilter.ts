@@ -34,7 +34,7 @@ function parseReposFromSearchParams(params: URLSearchParams): string[] {
 }
 
 /**
- * Parse repos from URL search parameters (legacy compat).
+ * Parse repos from URL search parameters.
  */
 export function parseReposFromUrl(): string[] {
   if (typeof window === "undefined" || !window.location) return [];

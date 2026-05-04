@@ -3,7 +3,7 @@
  * Icon-only navigation rail for switching between views.
  */
 
-import type { ViewMode } from "@/components/ViewSwitcher";
+import type { ViewMode } from "@/types";
 
 import styles from "./NavRail.module.css";
 

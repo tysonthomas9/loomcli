@@ -78,8 +78,7 @@ export const DraggableIssueCard = memo(function DraggableIssueCard({
       disabled: isOverlay,
     });
 
-  // Build IssueCard props, only including optional fields if defined
-  // (required for exactOptionalPropertyTypes compatibility)
+  // Build IssueCard props, only including optional fields if defined.
   const cardProps = {
     issue,
     ...(onClick !== undefined && { onClick }),

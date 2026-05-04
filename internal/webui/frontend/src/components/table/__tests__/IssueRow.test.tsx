@@ -22,7 +22,7 @@ import { IssueRow } from "../IssueRow";
 // Helper to create mock issues for testing
 function createMockIssue(overrides: Partial<Issue> = {}): Issue {
   return {
-    id: "bd-abc",
+    id: "loom-abc",
     title: "Test Issue",
     priority: 2,
     status: "open",
@@ -50,13 +50,13 @@ function renderIssueRow(props: IssueRowProps<Issue>) {
 describe("IssueRow", () => {
   describe("rendering", () => {
     it("renders tr element with correct data-testid", () => {
-      const issue = createMockIssue({ id: "bd-test-123" });
+      const issue = createMockIssue({ id: "loom-test-123" });
       renderIssueRow({
         issue,
         columns: DEFAULT_ISSUE_COLUMNS,
       });
 
-      const row = screen.getByTestId("issue-row-bd-test-123");
+      const row = screen.getByTestId("issue-row-loom-test-123");
       expect(row).toBeInTheDocument();
       expect(row.tagName).toBe("TR");
     });
@@ -89,7 +89,7 @@ describe("IssueRow", () => {
 
     it("renders cell content correctly for each column type", () => {
       const issue = createMockIssue({
-        id: "bd-xyz",
+        id: "loom-xyz",
         title: "My Title",
         priority: 1,
         status: "in_progress",
@@ -103,7 +103,7 @@ describe("IssueRow", () => {
 
       // Check ID cell
       expect(container.querySelector('[data-column="id"]')).toHaveTextContent(
-        "bd-xyz",
+        "loom-xyz",
       );
 
       // Check priority cell
@@ -325,7 +325,7 @@ describe("IssueRow", () => {
     });
 
     it("onClick called with issue data when row clicked", () => {
-      const issue = createMockIssue({ id: "bd-click-test" });
+      const issue = createMockIssue({ id: "loom-click-test" });
       const handleClick = vi.fn();
       const { container } = renderIssueRow({
         issue,
@@ -590,7 +590,7 @@ describe("IssueRow", () => {
 
     describe("ID cell", () => {
       it("ID displayed with issue-table__id class", () => {
-        const issue = createMockIssue({ id: "bd-test-id" });
+        const issue = createMockIssue({ id: "loom-test-id" });
         const { container } = renderIssueRow({
           issue,
           columns: DEFAULT_ISSUE_COLUMNS,
@@ -600,14 +600,14 @@ describe("IssueRow", () => {
         const idSpan = idCell?.querySelector(".issue-table__id");
 
         expect(idSpan).toBeInTheDocument();
-        expect(idSpan).toHaveTextContent("bd-test-id");
+        expect(idSpan).toHaveTextContent("loom-test-id");
       });
     });
 
     describe("missing fields", () => {
       it('missing status shows "-" placeholder', () => {
         const issue: Issue = {
-          id: "bd-no-status",
+          id: "loom-no-status",
           title: "No Status Issue",
           priority: 2,
           created_at: "2024-01-15T10:30:00Z",
@@ -625,7 +625,7 @@ describe("IssueRow", () => {
 
       it('missing assignee shows "-" placeholder', () => {
         const issue: Issue = {
-          id: "bd-no-assignee",
+          id: "loom-no-assignee",
           title: "No Assignee Issue",
           priority: 2,
           created_at: "2024-01-15T10:30:00Z",
@@ -645,7 +645,7 @@ describe("IssueRow", () => {
 
       it('missing issue_type shows "-" placeholder', () => {
         const issue: Issue = {
-          id: "bd-no-type",
+          id: "loom-no-type",
           title: "No Type Issue",
           priority: 2,
           created_at: "2024-01-15T10:30:00Z",
@@ -728,7 +728,7 @@ describe("IssueRow", () => {
 
   describe("custom column accessors", () => {
     it("supports function accessor", () => {
-      const issue = createMockIssue({ id: "bd-001", title: "Test" });
+      const issue = createMockIssue({ id: "loom-001", title: "Test" });
       const customColumns: ColumnDef<Issue>[] = [
         {
           id: "combined",
@@ -742,7 +742,7 @@ describe("IssueRow", () => {
       });
 
       const cell = container.querySelector('[data-column="combined"]');
-      expect(cell).toHaveTextContent("bd-001 - Test");
+      expect(cell).toHaveTextContent("loom-001 - Test");
     });
 
     it("renders unknown column id with stringified value", () => {
@@ -837,7 +837,7 @@ describe("IssueRow", () => {
 
     it("handles issue with all optional fields missing", () => {
       const minimalIssue: Issue = {
-        id: "bd-minimal",
+        id: "loom-minimal",
         title: "Minimal",
         priority: 0,
         created_at: "2024-01-01T00:00:00Z",
@@ -862,7 +862,7 @@ describe("IssueRow", () => {
     });
 
     it("handles very long issue IDs", () => {
-      const longId = "bd-" + "a".repeat(100);
+      const longId = "loom-" + "a".repeat(100);
       const issue = createMockIssue({ id: longId });
       renderIssueRow({
         issue,
@@ -959,7 +959,7 @@ describe("IssueRow", () => {
     });
 
     it("onSelectionChange called with issue id and true when checked", () => {
-      const issue = createMockIssue({ id: "bd-check-test" });
+      const issue = createMockIssue({ id: "loom-check-test" });
       const handleSelectionChange = vi.fn();
       const { container } = renderIssueRow({
         issue,
@@ -975,11 +975,11 @@ describe("IssueRow", () => {
       fireEvent.click(checkbox);
 
       expect(handleSelectionChange).toHaveBeenCalledTimes(1);
-      expect(handleSelectionChange).toHaveBeenCalledWith("bd-check-test", true);
+      expect(handleSelectionChange).toHaveBeenCalledWith("loom-check-test", true);
     });
 
     it("onSelectionChange called with issue id and false when unchecked", () => {
-      const issue = createMockIssue({ id: "bd-uncheck-test" });
+      const issue = createMockIssue({ id: "loom-uncheck-test" });
       const handleSelectionChange = vi.fn();
       const { container } = renderIssueRow({
         issue,
@@ -996,7 +996,7 @@ describe("IssueRow", () => {
 
       expect(handleSelectionChange).toHaveBeenCalledTimes(1);
       expect(handleSelectionChange).toHaveBeenCalledWith(
-        "bd-uncheck-test",
+        "loom-uncheck-test",
         false,
       );
     });
@@ -1024,7 +1024,7 @@ describe("IssueRow", () => {
     });
 
     it("checkbox has correct aria-label", () => {
-      const issue = createMockIssue({ id: "bd-aria-test" });
+      const issue = createMockIssue({ id: "loom-aria-test" });
       const { container } = renderIssueRow({
         issue,
         columns: DEFAULT_ISSUE_COLUMNS,
@@ -1034,7 +1034,7 @@ describe("IssueRow", () => {
       const checkbox = container.querySelector(".issue-table__checkbox");
       expect(checkbox).toHaveAttribute(
         "aria-label",
-        "Select issue bd-aria-test",
+        "Select issue loom-aria-test",
       );
     });
 

@@ -29,7 +29,7 @@ import {
 const skipIntegration = !process.env.RUN_INTEGRATION_TESTS;
 test.skip(skipIntegration, "Integration tests require RUN_INTEGRATION_TESTS=1");
 
-// Run tests serially — workspace mutations are global (modify ~/.loom/config.yaml)
+// Run tests serially because workspace mutations share local FleetDB-backed state.
 test.describe.configure({ mode: "serial" });
 
 

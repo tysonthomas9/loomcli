@@ -24,7 +24,6 @@ import { DraggableIssueCard } from "@/components/DraggableIssueCard";
 import { EmptyColumn } from "@/components/EmptyColumn";
 import { EmptyWorkspaceBoard } from "@/components/EmptyWorkspaceBoard";
 import { StatusColumn, VirtualizedCardList } from "@/components/StatusColumn";
-import { formatStatusLabel } from "@/utils/issue";
 import type { FilterState } from "@/hooks/issues";
 import type { Issue, Status } from "@/types";
 import type { BlockedInfo } from "@/types/issue";
@@ -32,10 +31,6 @@ import type { BlockedInfo } from "@/types/issue";
 import { DEFAULT_COLUMNS } from "./columnConfigs";
 import styles from "./KanbanBoard.module.css";
 import type { KanbanColumnConfig } from "./types";
-
-// Re-export so consumers that imported BlockedInfo from KanbanBoard
-// (pre-Phase 7) keep compiling. New code should import from @/types.
-export type { BlockedInfo } from "@/types/issue";
 
 const LOAD_MORE_BATCH = 50;
 
@@ -47,8 +42,6 @@ export interface KanbanBoardProps {
   issues: Issue[];
   /** Column configurations (default: 6-column kanban layout) */
   columns?: KanbanColumnConfig[];
-  /** @deprecated Use columns prop instead. Status columns for backward compatibility */
-  statuses?: Status[];
   /** Optional filter state to apply to issues */
   filters?: FilterState;
   /** Callback when card is clicked */
@@ -68,22 +61,6 @@ export interface KanbanBoardProps {
 }
 
 /**
- * Convert legacy statuses prop to column configs for backward compatibility.
- * Handles undefined status as 'open' for backward compatibility.
- */
-function statusesToColumns(statuses: Status[]): KanbanColumnConfig[] {
-  return statuses.map((s) => ({
-    id: s,
-    label: formatStatusLabel(s),
-    filter: (issue: Issue) =>
-      s === "open"
-        ? issue.status === s || issue.status === undefined
-        : issue.status === s,
-    targetStatus: s,
-  }));
-}
-
-/**
  * KanbanBoard displays issues in a horizontal drag-and-drop layout.
  * Issues are grouped by columns (which may be status-based or computed from dependencies).
  * The board uses @dnd-kit for accessible drag-and-drop functionality.
@@ -91,7 +68,6 @@ function statusesToColumns(statuses: Status[]): KanbanColumnConfig[] {
 export function KanbanBoard({
   issues,
   columns: propColumns,
-  statuses,
   filters,
   onIssueClick,
   onDragEnd,
@@ -120,12 +96,11 @@ export function KanbanBoard({
     return ref;
   }, []);
 
-  // Resolve columns: props.columns > props.statuses (legacy) > DEFAULT_COLUMNS
+  // Resolve columns: props.columns > DEFAULT_COLUMNS
   const columns = useMemo(() => {
     if (propColumns) return propColumns;
-    if (statuses) return statusesToColumns(statuses);
     return DEFAULT_COLUMNS;
-  }, [propColumns, statuses]);
+  }, [propColumns]);
 
   // Configure drag sensors with activation constraints
   const sensors = useSensors(

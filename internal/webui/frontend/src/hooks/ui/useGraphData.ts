@@ -18,7 +18,7 @@ import type {
   DependencyEdge,
 } from "@/types";
 
-import { computeAllBlockedCounts } from "@/hooks/issues";
+import { computeAllBlockedCounts } from "@/hooks/issues/useBlockedChain";
 
 /**
  * Blocking dependency types that affect ready work calculation.

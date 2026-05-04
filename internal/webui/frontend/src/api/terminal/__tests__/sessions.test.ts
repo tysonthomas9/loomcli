@@ -80,13 +80,13 @@ describe("sessions API", () => {
         response: new Response(),
       } as never);
 
-      const result = await getTaskSessions("test-ws-id", "bd-abc123");
+      const result = await getTaskSessions("test-ws-id", "loom-abc123");
 
       expect(result).toEqual(sessions);
       expect(mockApiGet).toHaveBeenCalledWith(
         "/api/workspaces/{ws}/tasks/{taskId}/sessions",
         {
-          params: { path: { ws: "test-ws-id", taskId: "bd-abc123" } },
+          params: { path: { ws: "test-ws-id", taskId: "loom-abc123" } },
         },
       );
     });
@@ -98,7 +98,7 @@ describe("sessions API", () => {
         response: new Response(),
       } as never);
 
-      const result = await getTaskSessions("test-ws-id", "bd-abc123");
+      const result = await getTaskSessions("test-ws-id", "loom-abc123");
 
       expect(result).toEqual([]);
     });
@@ -112,7 +112,7 @@ describe("sessions API", () => {
         response: new Response(),
       } as never);
 
-      const result = await getTaskSessions("test-ws-id", "bd-abc123");
+      const result = await getTaskSessions("test-ws-id", "loom-abc123");
 
       expect(result).toEqual([]);
     });
@@ -124,7 +124,7 @@ describe("sessions API", () => {
         response: new Response(null, { status: 404, statusText: "Not Found" }),
       } as never);
 
-      const result = await getTaskSessions("test-ws-id", "bd-nonexistent");
+      const result = await getTaskSessions("test-ws-id", "loom-nonexistent");
 
       expect(result).toEqual([]);
     });
@@ -139,7 +139,7 @@ describe("sessions API", () => {
         }),
       } as never);
 
-      await expect(getTaskSessions("test-ws-id", "bd-err")).rejects.toThrow(
+      await expect(getTaskSessions("test-ws-id", "loom-err")).rejects.toThrow(
         ApiError,
       );
     });
@@ -147,7 +147,7 @@ describe("sessions API", () => {
     it("throws on network errors", async () => {
       mockApiGet.mockRejectedValueOnce(new Error("Network error"));
 
-      await expect(getTaskSessions("test-ws-id", "bd-err")).rejects.toThrow(
+      await expect(getTaskSessions("test-ws-id", "loom-err")).rejects.toThrow(
         "Network error",
       );
     });
@@ -203,14 +203,14 @@ describe("sessions API", () => {
         response: new Response(),
       } as never);
 
-      const result = await getSession("test-ws-id", "bd-123", "s1");
+      const result = await getSession("test-ws-id", "loom-123", "s1");
 
       expect(result).toEqual(session);
       expect(mockApiGet).toHaveBeenCalledWith(
         "/api/workspaces/{ws}/tasks/{taskId}/sessions/{sessionId}",
         {
           params: {
-            path: { ws: "test-ws-id", taskId: "bd-123", sessionId: "s1" },
+            path: { ws: "test-ws-id", taskId: "loom-123", sessionId: "s1" },
           },
         },
       );
@@ -223,7 +223,7 @@ describe("sessions API", () => {
         response: new Response(),
       } as never);
 
-      const result = await getSession("test-ws-id", "bd-123", "s-missing");
+      const result = await getSession("test-ws-id", "loom-123", "s-missing");
 
       expect(result).toBeNull();
     });
@@ -235,7 +235,7 @@ describe("sessions API", () => {
         response: new Response(null, { status: 404, statusText: "Not Found" }),
       } as never);
 
-      const result = await getSession("test-ws-id", "bd-123", "s-nonexistent");
+      const result = await getSession("test-ws-id", "loom-123", "s-nonexistent");
 
       expect(result).toBeNull();
     });
@@ -250,7 +250,7 @@ describe("sessions API", () => {
         }),
       } as never);
 
-      await expect(getSession("test-ws-id", "bd-123", "s1")).rejects.toThrow(
+      await expect(getSession("test-ws-id", "loom-123", "s1")).rejects.toThrow(
         ApiError,
       );
     });
@@ -308,14 +308,14 @@ describe("sessions API", () => {
         response: new Response(),
       } as never);
 
-      const result = await getSessionTranscript("test-ws-id", "bd-123", "s1");
+      const result = await getSessionTranscript("test-ws-id", "loom-123", "s1");
 
       expect(result).toEqual(entries);
       expect(mockApiGet).toHaveBeenCalledWith(
         "/api/workspaces/{ws}/tasks/{taskId}/sessions/{sessionId}/transcript",
         {
           params: {
-            path: { ws: "test-ws-id", taskId: "bd-123", sessionId: "s1" },
+            path: { ws: "test-ws-id", taskId: "loom-123", sessionId: "s1" },
           },
         },
       );
@@ -328,7 +328,7 @@ describe("sessions API", () => {
         response: new Response(),
       } as never);
 
-      const result = await getSessionTranscript("test-ws-id", "bd-123", "s1");
+      const result = await getSessionTranscript("test-ws-id", "loom-123", "s1");
 
       expect(result).toEqual([]);
     });
@@ -342,7 +342,7 @@ describe("sessions API", () => {
         response: new Response(),
       } as never);
 
-      const result = await getSessionTranscript("test-ws-id", "bd-123", "s1");
+      const result = await getSessionTranscript("test-ws-id", "loom-123", "s1");
 
       expect(result).toEqual([]);
     });
@@ -356,7 +356,7 @@ describe("sessions API", () => {
 
       const result = await getSessionTranscript(
         "test-ws-id",
-        "bd-123",
+        "loom-123",
         "s-missing",
       );
 
@@ -374,7 +374,7 @@ describe("sessions API", () => {
       } as never);
 
       await expect(
-        getSessionTranscript("test-ws-id", "bd-123", "s1"),
+        getSessionTranscript("test-ws-id", "loom-123", "s1"),
       ).rejects.toThrow(ApiError);
     });
 
@@ -412,14 +412,14 @@ describe("sessions API", () => {
         response: new Response(),
       } as never);
 
-      const result = await getSessionDiff("test-ws-id", "bd-123", "s1");
+      const result = await getSessionDiff("test-ws-id", "loom-123", "s1");
 
       expect(result).toBe("diff --git a/file.ts b/file.ts\n+added line\n");
       expect(mockApiGet).toHaveBeenCalledWith(
         "/api/workspaces/{ws}/tasks/{taskId}/sessions/{sessionId}/diff",
         {
           params: {
-            path: { ws: "test-ws-id", taskId: "bd-123", sessionId: "s1" },
+            path: { ws: "test-ws-id", taskId: "loom-123", sessionId: "s1" },
           },
           parseAs: "text",
         },
@@ -433,7 +433,7 @@ describe("sessions API", () => {
         response: new Response(null, { status: 404, statusText: "Not Found" }),
       } as never);
 
-      const result = await getSessionDiff("test-ws-id", "bd-123", "s-missing");
+      const result = await getSessionDiff("test-ws-id", "loom-123", "s-missing");
 
       expect(result).toBeNull();
     });
@@ -449,7 +449,7 @@ describe("sessions API", () => {
       } as never);
 
       await expect(
-        getSessionDiff("test-ws-id", "bd-123", "s1"),
+        getSessionDiff("test-ws-id", "loom-123", "s1"),
       ).rejects.toThrow(ApiError);
     });
 
@@ -460,7 +460,7 @@ describe("sessions API", () => {
         response: new Response(),
       } as never);
 
-      const result = await getSessionDiff("test-ws-id", "bd-123", "s1");
+      const result = await getSessionDiff("test-ws-id", "loom-123", "s1");
 
       // Note: empty string is falsy, so getSessionDiff returns null for it
       // based on the implementation: `return data ?? null;`

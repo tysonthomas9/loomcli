@@ -12,10 +12,12 @@ import "@xyflow/react/dist/style.css";
 import {
   useAutoLayout,
   type UseAutoLayoutOptions,
+} from "@/hooks/ui/useAutoLayout";
+import {
   useGraphData,
   type UseGraphDataOptions,
-} from "@/hooks/ui";
-import { useBlockedIssues } from "@/hooks/issues";
+} from "@/hooks/ui/useGraphData";
+import { useBlockedIssues } from "@/hooks/issues/useBlockedIssues";
 import type {
   Issue,
   IssueNode as IssueNodeType,

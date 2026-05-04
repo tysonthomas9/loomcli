@@ -1,7 +1,8 @@
 import { useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { ErrorBoundary, IssueDetailView } from "@/components";
+import { ErrorBoundary } from "@/components/ErrorBoundary/ErrorBoundary";
+import { IssueDetailView } from "@/components/IssueDetailView/IssueDetailView";
 import type { Issue, IssueDetails } from "@/types";
 import type { IssueContext } from "@/api/terminal";
 import {

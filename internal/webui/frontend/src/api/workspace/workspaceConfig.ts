@@ -4,14 +4,12 @@
  */
 
 import { api, ApiError, apiErrorFromResponse } from "@/api/common";
+import { cacheBackendConfig } from "@/api/common/config";
 import type { BackendConfigData } from "@/api/common";
 import type { WorkspaceData } from "./workspace";
 
 /**
- * Get the backend config for a specific workspace. Workspace-scoped
- * variant of getBackendConfig — works in fleet client mode where the
- * unscoped /api/config/backend endpoint can't reach a daemon to resolve
- * the workspace path.
+ * Get the store-backed backend config for a specific workspace.
  */
 export async function getWorkspaceBackendConfig(
   workspaceId: string,
@@ -29,6 +27,7 @@ export async function getWorkspaceBackendConfig(
   if (!envelope.success || !envelope.data) {
     throw new ApiError(0, envelope.error ?? "Unknown error");
   }
+  cacheBackendConfig(envelope.data);
   return envelope.data;
 }
 

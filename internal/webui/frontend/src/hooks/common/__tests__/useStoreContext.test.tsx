@@ -390,6 +390,7 @@ describe("useStoreContext", () => {
       renderHook(() => useAgentStoreInstance(), { wrapper });
 
       expect(agentMethodsRef.current.startPolling).toHaveBeenCalledWith({
+        workspaceId: "test-ws-id",
         pollInterval: 5000,
       });
     });
@@ -421,6 +422,7 @@ describe("useStoreContext", () => {
       // fetchIssues is NOT called by StoreWiring — App.tsx drives mode-based fetching
       expect(issueMethodsRef.current.fetchIssues).not.toHaveBeenCalled();
       expect(agentMethodsRef.current.startPolling).toHaveBeenCalledWith({
+        workspaceId: "new-ws-id",
         pollInterval: 5000,
       });
     });

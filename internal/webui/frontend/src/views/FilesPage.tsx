@@ -1,9 +1,10 @@
 import { lazy, Suspense } from "react";
-import { ErrorBoundary, LoadingSkeleton } from "@/components";
-import { useRouteView } from "@/hooks";
+import { ErrorBoundary } from "@/components/ErrorBoundary/ErrorBoundary";
+import { LoadingSkeleton } from "@/components/LoadingSkeleton/LoadingSkeleton";
+import { useRouteView } from "@/hooks/common/useRouteView";
 
 const FileExplorer = lazy(() =>
-  import("@/components/FileExplorer").then((m) => ({
+  import("@/components/FileExplorer/FileExplorer").then((m) => ({
     default: m.FileExplorer,
   })),
 );

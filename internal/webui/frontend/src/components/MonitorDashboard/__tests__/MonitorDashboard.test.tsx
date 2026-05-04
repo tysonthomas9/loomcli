@@ -11,7 +11,6 @@ import type { Priority } from "@/types";
 import { MonitorDashboard } from "../MonitorDashboard";
 
 // Mock the hooks to prevent API calls in tests
-const mockSetActiveView = vi.fn();
 let mockBlockedIssuesData: unknown[] = [];
 
 // Mock zustand's useStore — apply selector to the mock agent store state
@@ -73,7 +72,6 @@ vi.mock("@/hooks", () => ({
     error: null,
     refetch: vi.fn(),
   }),
-  useViewState: () => ["monitor", mockSetActiveView],
   useRegisterEscapeLayer: vi.fn(),
   useKeyboardShortcuts: vi.fn(() => ({
     isCheatsheetOpen: false,
@@ -200,7 +198,7 @@ describe("MonitorDashboard", () => {
   });
 
   describe("onIssueClick prop", () => {
-    it("renders without onIssueClick (backward compatibility)", () => {
+    it("renders without onIssueClick (existing behavior)", () => {
       render(<MonitorDashboard />);
 
       expect(screen.getByTestId("monitor-dashboard")).toBeInTheDocument();

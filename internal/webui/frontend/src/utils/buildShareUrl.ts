@@ -48,9 +48,6 @@ export function buildShareUrl(params: ShareUrlParams = {}): string {
   const url = new URL(window.location.href);
   const wsBase = getWorkspaceBase(url.pathname);
 
-  // Remove legacy view query param if present
-  url.searchParams.delete("view");
-
   // Build the path based on view
   if (params.view !== undefined) {
     if (params.view === "issue-detail" && params.issue) {

@@ -66,7 +66,7 @@ function createMockConfig(
 ): BackendConfigData {
   return {
     backend: "anthropic",
-    source: "project",
+    source: "fleetdb",
     available: ["anthropic", "openai", "local"],
     agents: [],
     ...overrides,
@@ -193,16 +193,16 @@ describe("SettingsView", () => {
       expect(options[3]).toHaveTextContent("azure");
     });
 
-    it("renders source tag with config source", () => {
+    it("renders FleetDB source tag for store-backed config", () => {
       mockUseBackendConfig.mockReturnValue(
         createMockHookReturn({
-          config: createMockConfig({ source: "project" }),
+          config: createMockConfig({ source: "fleetdb" }),
         }),
       );
 
       render(<SettingsView />);
 
-      expect(screen.getByText("From project loom.yaml")).toBeInTheDocument();
+      expect(screen.getByText("From FleetDB")).toBeInTheDocument();
     });
 
     it('renders "Default" source tag when source is not project', () => {

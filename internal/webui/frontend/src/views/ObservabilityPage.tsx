@@ -1,11 +1,14 @@
 import { lazy, Suspense } from "react";
-import { ErrorBoundary, LoadingSkeleton } from "@/components";
-import { useRouteView } from "@/hooks";
+import { ErrorBoundary } from "@/components/ErrorBoundary/ErrorBoundary";
+import { LoadingSkeleton } from "@/components/LoadingSkeleton/LoadingSkeleton";
+import { useRouteView } from "@/hooks/common/useRouteView";
 
 const ObservabilityDashboard = lazy(() =>
-  import("@/components/ObservabilityDashboard").then((m) => ({
-    default: m.ObservabilityDashboard,
-  })),
+  import("@/components/ObservabilityDashboard/ObservabilityDashboard").then(
+    (m) => ({
+      default: m.ObservabilityDashboard,
+    }),
+  ),
 );
 
 export function ObservabilityPage() {

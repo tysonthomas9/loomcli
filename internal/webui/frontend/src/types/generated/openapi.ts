@@ -72,24 +72,6 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/config/backend": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /** Get backend configuration */
-    get: operations["getBackendConfig"];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    /** Update default backend */
-    patch: operations["patchBackendConfig"];
-    trace?: never;
-  };
   "/api/backends": {
     parameters: {
       query?: never;
@@ -1959,8 +1941,6 @@ export interface components {
       last_activity?: string | null;
       role_type?: string;
       rig?: string;
-      hook_bead?: string;
-      role_bead?: string;
       mol_type?: string;
       parent?: string;
     };
@@ -2246,9 +2226,6 @@ export interface components {
       role: string;
       backend: string;
     };
-    BackendConfigPatchRequest: {
-      backend: string;
-    };
     /** @description Agent entity from dto.AgentStatusResponse */
     AgentStatusResponse: {
       id: string;
@@ -2267,8 +2244,6 @@ export interface components {
         | "dead";
       role_type?: string;
       rig?: string;
-      hook_bead?: string;
-      role_bead?: string;
       /** Format: date-time */
       last_activity?: string | null;
       /** Format: date-time */
@@ -2549,7 +2524,7 @@ export interface components {
     };
     MonitorWorkspacesResponse: {
       /** @enum {string} */
-      mode: "workspace" | "legacy";
+      mode: "workspace";
       default?: string;
       workspaces: {
         [key: string]: components["schemas"]["MonitorWorkspaceDetail"];
@@ -2559,7 +2534,7 @@ export interface components {
     };
     MonitorWorkspaceInfo: {
       /** @enum {string} */
-      mode: "workspace" | "legacy";
+      mode: "workspace";
       name?: string;
       workspaces?: string[];
     };
@@ -2888,50 +2863,6 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
-      };
-    };
-  };
-  getBackendConfig: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Backend config */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["BackendConfigResponse"];
-        };
-      };
-    };
-  };
-  patchBackendConfig: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["BackendConfigPatchRequest"];
-      };
-    };
-    responses: {
-      /** @description Updated */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["MessageResponse"];
-        };
       };
     };
   };

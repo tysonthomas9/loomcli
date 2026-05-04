@@ -45,7 +45,7 @@ async function getWorkspaceId(request: Parameters<Parameters<typeof test>[2]>[0]
 }
 
 test.describe('Task Logs API', () => {
-  const testTaskId = 'bd-test-task-logs'
+  const testTaskId = 'loom-test-task-logs'
   const invalidTaskId = '../../../etc/passwd'
 
   test.describe('Phase Listing', () => {

@@ -1,7 +1,7 @@
 /**
  * API functions for log streaming endpoints.
  * Uses openapi-fetch generated client where types are available,
- * legacy fetch wrapper for untyped endpoints.
+ * raw fetch wrapper for untyped endpoints.
  */
 
 import {
@@ -74,7 +74,7 @@ export async function getTaskLogContent(
 
 /**
  * Fetch whether agent logs should use live tmux streaming or archive fallback.
- * Uses legacy client (spec response is untyped).
+ * Uses raw fetch because the spec response is untyped.
  */
 export async function getAgentTerminalInfo(
   workspaceId: string,

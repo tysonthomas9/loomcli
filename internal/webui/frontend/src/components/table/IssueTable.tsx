@@ -5,7 +5,7 @@
 
 import { useMemo, useRef } from "react";
 
-import type { BlockedInfo } from "@/components/KanbanBoard";
+import type { BlockedInfo } from "@/types/issue";
 import type { SortDirection } from "@/hooks";
 import { useSort } from "@/hooks";
 import { useWorkspaceContext } from "@/hooks/workspace";
@@ -36,7 +36,7 @@ export interface IssueTableProps {
   selectedIds?: Set<string>;
   /** Callback when checkbox selection changes */
   onSelectionChange?: (issueId: string, selected: boolean) => void;
-  /** Enable sorting functionality (default: false for backwards compatibility) */
+  /** Enable sorting functionality (default: false) */
   sortable?: boolean;
   /** Initial sort configuration (only used when sortable=true) */
   initialSort?: {

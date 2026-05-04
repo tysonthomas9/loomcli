@@ -1,9 +1,6 @@
 /**
- * API functions for backend configuration.
- * Uses openapi-fetch generated client.
+ * Shared types and cache helpers for store-backed backend configuration.
  */
-
-import { api, ApiError, apiErrorFromResponse } from "./client";
 
 // ============= Types =============
 
@@ -24,13 +21,6 @@ export interface BackendConfigData {
   source: string;
   available: string[];
   agents: AgentBackendOverride[];
-}
-
-/**
- * Request body for PATCH /api/config/backend.
- */
-export interface BackendConfigPatchRequest {
-  backend: string;
 }
 
 // ============= Cache =============
@@ -63,53 +53,10 @@ export function getCachedBackendConfig(): BackendConfigData | null {
 }
 
 /** Cache backend config in localStorage. */
-function cacheBackendConfig(data: BackendConfigData): void {
+export function cacheBackendConfig(data: BackendConfigData): void {
   try {
     localStorage.setItem(CONFIG_CACHE_KEY, JSON.stringify(data));
   } catch {
     // localStorage may be unavailable (private browsing, quota exceeded) — ignore
   }
-}
-
-// ============= API Functions =============
-
-/**
- * Get the current backend configuration.
- * Caches the response in localStorage for offline access.
- */
-export async function getBackendConfig(): Promise<BackendConfigData> {
-  const { data, error, response } = await api.GET("/api/config/backend");
-  if (error) throw apiErrorFromResponse(error, response);
-  // BackendConfigResponse has {success, data?, error?} shape
-  const envelope = data as {
-    success?: boolean;
-    data?: BackendConfigData;
-    error?: string;
-  };
-  if (!envelope.success || !envelope.data) {
-    throw new ApiError(0, envelope.error ?? "Unknown error");
-  }
-  cacheBackendConfig(envelope.data);
-  return envelope.data;
-}
-
-/**
- * Update the project default backend.
- */
-export async function updateBackendConfig(
-  backend: string,
-): Promise<BackendConfigData> {
-  const { data, error, response } = await api.PATCH("/api/config/backend", {
-    body: { backend },
-  });
-  if (error) throw apiErrorFromResponse(error, response);
-  const envelope = data as {
-    success?: boolean;
-    data?: BackendConfigData;
-    error?: string;
-  };
-  if (!envelope.success || !envelope.data) {
-    throw new ApiError(0, envelope.error ?? "Unknown error");
-  }
-  return envelope.data;
 }

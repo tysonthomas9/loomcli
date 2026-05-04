@@ -111,7 +111,7 @@ const mockIssues = [
   },
   {
     id: "proj-008",
-    title: "Deferred: legacy cleanup",
+    title: "Deferred: cleanup",
     status: "deferred",
     priority: 4,
     issue_type: "task",
@@ -235,7 +235,7 @@ const mockLoomTasks = {
     { id: "proj-004", title: "Implement authentication flow", priority: 1 },
     { id: "proj-003", title: "Update API documentation", priority: 2 },
   ],
-  backlog: [{ id: "proj-bl-1", title: "Legacy cleanup", priority: 4 }],
+  backlog: [{ id: "proj-bl-1", title: "Configuration cleanup", priority: 4 }],
   closed: [{ id: "proj-006", title: "Initial project setup", priority: 3 }],
   timestamp: "2026-01-15T10:00:00Z",
 };
@@ -287,7 +287,7 @@ async function setupBaseMocks(page: Page) {
     });
   });
 
-  await page.route("**/api/config/backend", async (route) => {
+  await page.route("**/api/workspaces/*/config/backend", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",

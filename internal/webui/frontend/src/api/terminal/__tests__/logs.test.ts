@@ -164,7 +164,7 @@ describe("logs API", () => {
   });
 
   describe("agent terminal endpoints", () => {
-    it("fetches agent terminal mode (legacy get)", async () => {
+    it("fetches agent terminal mode", async () => {
       mockGet.mockResolvedValueOnce({
         success: true,
         data: { agent: "ember", mode: "tmux" },

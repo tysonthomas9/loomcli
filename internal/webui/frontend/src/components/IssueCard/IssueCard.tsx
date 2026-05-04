@@ -5,15 +5,12 @@
 
 import { memo } from "react";
 
-import {
-  getAvatarColor,
-  getStatusDotColor,
-  getStatusLabel,
-} from "@/components/AgentCard";
+import { getStatusDotColor, getStatusLabel } from "@/components/AgentCard";
 import { BlockedBadge } from "@/components/BlockedBadge";
 import { HighlightText } from "@/components/HighlightText";
 import { RepoBadge } from "@/components/RepoBadge";
 import { TypeIcon } from "@/components/TypeIcon";
+import { getAvatarColor } from "@/utils/colorUtils";
 import { useHasActiveSession } from "@/contexts/IssueSessionContext";
 import { useSearchTerm } from "@/contexts/SearchTermContext";
 import { useStore } from "zustand";

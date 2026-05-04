@@ -16,67 +16,67 @@ import {
 
 import { useStore } from "zustand";
 
-import { useParams, useNavigate, useLocation, Outlet } from "react-router-dom";
+import { useParams, useNavigate, Outlet } from "react-router-dom";
 
 import { updateIssue, addComment, closeIssue } from "@/api";
 import type { IssueContext } from "@/api/terminal";
 import { buildShareUrl } from "@/utils/buildShareUrl";
 import { getReviewType } from "@/utils/issue";
 import { buildWorkspaceSwitchUrl } from "@/utils/workspaceUrl";
-import {
-  AppLayout,
-  WorkspaceBreadcrumb,
-  LoadingSkeleton,
-  ConnectionStatus,
-  StaleDataBanner,
-  WorkspaceStatusBadge,
-  ToastContainer,
-  FilterBar,
-  MoreFiltersMenu,
-  SearchInput,
-  SearchScopeIndicator,
-  IssueDetailPanel,
-  AgentDetailPanel,
-  WorkspaceTree,
-  TalkToLeadButton,
-  NavRail,
-  ViewSubSwitcher,
-  ThemeToggle,
-  KeyboardCheatsheet,
-  WorkspaceSwitcher,
-  CreateIssueModal,
-  CreateWorkspaceModal,
-  CreateAgentModal,
-  UserMenu,
-} from "@/components";
+import { AppLayout } from "@/components/AppLayout/AppLayout";
+import { WorkspaceBreadcrumb } from "@/components/WorkspaceBreadcrumb/WorkspaceBreadcrumb";
+import { LoadingSkeleton } from "@/components/LoadingSkeleton/LoadingSkeleton";
+import { ConnectionStatus } from "@/components/ConnectionStatus/ConnectionStatus";
+import { StaleDataBanner } from "@/components/StaleDataBanner/StaleDataBanner";
+import { WorkspaceStatusBadge } from "@/components/WorkspaceStatusBadge/WorkspaceStatusBadge";
+import { ToastContainer } from "@/components/Toast/ToastContainer";
+import { FilterBar } from "@/components/FilterBar/FilterBar";
+import { MoreFiltersMenu } from "@/components/MoreFiltersMenu/MoreFiltersMenu";
+import { SearchInput } from "@/components/search/SearchInput";
+import { SearchScopeIndicator } from "@/components/search/SearchScopeIndicator";
+import { IssueDetailPanel } from "@/components/IssueDetailPanel/IssueDetailPanel";
+import { AgentDetailPanel } from "@/components/AgentDetailPanel/AgentDetailPanel";
+import { WorkspaceTree } from "@/components/WorkspaceTree/WorkspaceTree";
+import { TalkToLeadButton } from "@/components/TalkToLeadButton/TalkToLeadButton";
+import { NavRail } from "@/components/NavRail/NavRail";
+import { ViewSubSwitcher } from "@/components/ViewSubSwitcher/ViewSubSwitcher";
+import { ThemeToggle } from "@/components/ThemeToggle/ThemeToggle";
+import { KeyboardCheatsheet } from "@/components/KeyboardCheatsheet/KeyboardCheatsheet";
+import { WorkspaceSwitcher } from "@/components/WorkspaceSwitcher/WorkspaceSwitcher";
+import { CreateIssueModal } from "@/components/CreateIssueModal/CreateIssueModal";
+import { CreateWorkspaceModal } from "@/components/CreateWorkspaceModal/CreateWorkspaceModal";
+import { CreateAgentModal } from "@/components/CreateAgentModal/CreateAgentModal";
+import { UserMenu } from "@/components/UserMenu/UserMenu";
 import { SearchTermProvider } from "@/contexts/SearchTermContext";
 import {
   WorkspaceViewProvider,
   type WorkspaceViewData,
   type WorkspaceViewActions,
 } from "@/contexts/WorkspaceViewContext";
-import type { BlockedInfo } from "@/components/KanbanBoard";
-import type { ViewMode } from "@/components/ViewSwitcher";
+import type { BlockedInfo } from "@/types/issue";
+import type { ViewMode } from "@/types";
 import {
   useIssueStoreInstance,
   useAgentStoreInstance,
-  useRouteView,
+} from "@/hooks/common/useStoreContext";
+import { useRouteView } from "@/hooks/common/useRouteView";
+import { useDebounce } from "@/hooks/common/useDebounce";
+import {
   useFilterState,
   DEFAULT_GROUP_BY,
-  useIssueFilter,
-  useDebounce,
-  useBlockedIssues,
-  useIssueDetail,
-  useToast,
-  useTheme,
-  useWorkspaceContext,
-  useWorkspaceState,
-  useRepoFilterParam,
-  useSearchScope,
-  useWorkspaceHealth,
-  usePanelManager,
-  KeyboardShortcutProvider,
-} from "@/hooks";
+} from "@/hooks/issues/useFilterState";
+import { useIssueFilter } from "@/hooks/issues/useIssueFilter";
+import { useBlockedIssues } from "@/hooks/issues/useBlockedIssues";
+import { useIssueDetail } from "@/hooks/issues/useIssueDetail";
+import { useSearchScope } from "@/hooks/issues/useSearchScope";
+import { useToast } from "@/hooks/ui/useToast";
+import { useTheme } from "@/hooks/ui/useTheme";
+import { usePanelManager } from "@/hooks/ui/usePanelManager";
+import { KeyboardShortcutProvider } from "@/hooks/ui/useKeyboardShortcuts";
+import { useWorkspaceContext } from "@/hooks/workspace/useWorkspaceContext";
+import { useWorkspaceState } from "@/hooks/workspace/useWorkspaceState";
+import { useRepoFilterParam } from "@/hooks/workspace/useRepoFilterParam";
+import { useWorkspaceHealth } from "@/hooks/workspace/useWorkspaceHealth";
 import type { Issue, Status } from "@/types";
 
 import styles from "./App.module.css";
@@ -84,7 +84,7 @@ import styles from "./App.module.css";
 // Lazy load TerminalView (xterm.js ~100KB) — stays in App.tsx because terminal
 // is always-mounted in the shell to preserve WebSocket connections across views.
 const TerminalView = lazy(() =>
-  import("@/components/TerminalView").then((m) => ({
+  import("@/components/TerminalView/TerminalView").then((m) => ({
     default: m.TerminalView,
   })),
 );
@@ -96,7 +96,6 @@ function App() {
     issueId: string;
   }>();
   const navigate = useNavigate();
-  const location = useLocation();
 
   // Workspace service health monitoring
   const {
@@ -133,6 +132,13 @@ function App() {
     () => workspaceRepos.map((r) => r.name),
     [workspaceRepos],
   );
+
+  const agentDefaultBackend = useMemo(() => {
+    const activeWorkspace = workspace?.workspaces?.find(
+      (ws) => ws.id === workspaceId || ws.name === activeWorkspaceName,
+    );
+    return activeWorkspace?.backend?.trim() || "codex";
+  }, [workspace?.workspaces, workspaceId, activeWorkspaceName]);
 
   // Convert Set<string> to string[] for components that expect arrays
   const selectedRepoNamesArray = useMemo(
@@ -330,7 +336,7 @@ function App() {
   const { activePanel, pendingPanel, openPanel, closePanel, isOpen } =
     usePanelManager();
 
-  // Derive backwards-compatible booleans from panel state.
+  // Derive panel visibility booleans from the centralized panel state.
   const isPanelOpen = activePanel?.type === "issue";
   const isAgentPanelOpen = activePanel?.type === "agent";
   const selectedAgentName =
@@ -416,7 +422,7 @@ function App() {
   const [showCreateWorkspace, setShowCreateWorkspace] = useState(false);
   const [showCreateAgent, setShowCreateAgent] = useState(false);
 
-  // Track mount state for async operations (must set true in setup for StrictMode compatibility)
+  // Track mount state for async operations.
   useEffect(() => {
     mountedRef.current = true;
     return () => {
@@ -430,22 +436,6 @@ function App() {
       setHasTerminalUnread(false);
     }
   }, [activeView]);
-
-  // Legacy ?view= migration: redirect old-format URLs to route segments.
-  // E.g. /ws/abc/?view=terminal → /ws/abc/terminal
-  useEffect(() => {
-    const params = new URLSearchParams(location.search);
-    const legacyView = params.get("view");
-    if (legacyView) {
-      params.delete("view");
-      const remaining = params.toString();
-      const segment = legacyView === "issue-detail" ? "" : legacyView;
-      navigate(
-        `/ws/${workspaceId}/${segment}${remaining ? `?${remaining}` : ""}`,
-        { replace: true },
-      );
-    }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Redirect away from workspace view in single-repo mode (e.g. stale URL bookmark)
   // Note: In multi-repo mode, the sidebar always shows the workspace tree,
@@ -475,7 +465,7 @@ function App() {
     }
   }, [repoFilterParam]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Deep-link: auto-fetch issue from URL; handle back/forward via popstate → useViewState
+  // Deep-link: auto-fetch issue from URL; route changes are handled by useRouteView.
   useEffect(() => {
     if (selectedIssueId) fetchIssue(selectedIssueId);
     else if (activeView !== "issue-detail") clearIssue();
@@ -1094,6 +1084,7 @@ function App() {
         isOpen={showCreateAgent}
         workspaceId={workspaceId}
         repos={workspaceRepos}
+        defaultBackend={agentDefaultBackend}
         onClose={() => setShowCreateAgent(false)}
         onSuccess={(agent) => {
           setShowCreateAgent(false);

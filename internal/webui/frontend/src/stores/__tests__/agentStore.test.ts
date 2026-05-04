@@ -333,6 +333,18 @@ describe("agentStore", () => {
       await vi.advanceTimersByTimeAsync(30000);
       expect(mockFetchAgents).toHaveBeenCalledOnce();
     });
+
+    it("passes workspaceId to monitor API fetches", async () => {
+      setupSuccessfulMocks();
+
+      store.getState().startPolling({ workspaceId: "ws-1", pollInterval: 0 });
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.runAllTimersAsync();
+
+      expect(mockFetchAgents).toHaveBeenCalledWith("ws-1");
+      expect(mockFetchStatus).toHaveBeenCalledWith("ws-1");
+      expect(mockFetchTasks).toHaveBeenCalledWith("ws-1");
+    });
   });
 
   // -----------------------------------------------------------------------

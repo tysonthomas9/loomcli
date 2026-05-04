@@ -6,8 +6,6 @@
 import { useState, useCallback, useEffect } from "react";
 
 const STORAGE_KEY = "loom-recent-owners";
-// Migration-only key for users with pre-FleetDB browser state.
-const LEGACY_STORAGE_KEY = "beads-recent-owners";
 const MAX_RECENT = 5;
 
 /**
@@ -27,9 +25,7 @@ export interface UseRecentOwnersReturn {
  */
 function loadFromStorage(): string[] {
   try {
-    const stored =
-      localStorage.getItem(STORAGE_KEY) ??
-      localStorage.getItem(LEGACY_STORAGE_KEY);
+    const stored = localStorage.getItem(STORAGE_KEY);
     if (!stored) return [];
     const parsed = JSON.parse(stored);
     if (!Array.isArray(parsed)) return [];
@@ -45,7 +41,6 @@ function loadFromStorage(): string[] {
 function saveToStorage(names: string[]): void {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(names));
-    localStorage.removeItem(LEGACY_STORAGE_KEY);
   } catch {
     // Graceful degradation - no persistence
   }

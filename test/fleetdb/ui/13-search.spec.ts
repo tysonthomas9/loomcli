@@ -30,7 +30,7 @@ test.describe("13 search fleetdb-regression", () => {
     const fTitles = (f.data ?? []).map((i: any) => i.title).sort();
     // Strict toEqual is unrealistic — reference has historical state from
     // earlier tests' creates that resetBothBackends doesn't fully clear
-    // (legacy delete behavior left tombstones that still match search). What
+    // (old delete behavior left tombstones that still match search). What
     // matters for fleetdb-regression is that BOTH backends return the seeded match
     // for the query, and neither returns garbage that the other doesn't.
     expect(bTitles.some((t: string) => /checkout/i.test(t))).toBeTruthy();

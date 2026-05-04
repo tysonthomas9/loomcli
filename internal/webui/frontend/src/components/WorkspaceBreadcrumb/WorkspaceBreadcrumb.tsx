@@ -4,7 +4,7 @@
  * Falls back to "Aether" when no workspace is available.
  */
 
-import type { ViewMode } from "@/components/ViewSwitcher";
+import type { ViewMode } from "@/types";
 
 import styles from "./WorkspaceBreadcrumb.module.css";
 

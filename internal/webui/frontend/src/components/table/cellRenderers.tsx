@@ -6,7 +6,7 @@
 import type { ReactNode } from "react";
 
 import { HighlightText } from "@/components/HighlightText";
-import type { BlockedInfo } from "@/components/KanbanBoard";
+import type { BlockedInfo } from "@/types/issue";
 import type { Issue, Priority, Status, IssueType } from "@/types";
 
 import { BlockedCell } from "./BlockedCell";

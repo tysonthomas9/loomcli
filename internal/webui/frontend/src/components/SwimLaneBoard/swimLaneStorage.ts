@@ -8,8 +8,6 @@ import {
   createColumns,
   type KanbanColumnConfig,
 } from "@/components/KanbanBoard";
-import type { Issue, Status } from "@/types";
-import { formatStatusLabel } from "@/utils/issue";
 import { wsGet, wsSet } from "@/utils/scopedStorage";
 
 import type { GroupByField } from "./groupingUtils";
@@ -60,33 +58,15 @@ export function saveCollapsedLanes(
 }
 
 /**
- * Convert legacy statuses to column configs for backward compatibility.
- * Handles undefined status as 'open' for backward compatibility.
- */
-export function statusesToColumns(statuses: Status[]): KanbanColumnConfig[] {
-  return statuses.map((s) => ({
-    id: s,
-    label: formatStatusLabel(s),
-    filter: (issue: Issue) =>
-      s === "open"
-        ? issue.status === s || issue.status === undefined
-        : issue.status === s,
-    targetStatus: s,
-  }));
-}
-
-/**
  * Resolve the final column configuration for a SwimLaneBoard.
- * Priority: props.columns > props.statuses (legacy) > includeEpics when
- * swim lanes are active > default 5-column layout.
+ * Priority: props.columns > includeEpics when swim lanes are active >
+ * default 5-column layout.
  */
 export function resolveColumns(
   propColumns: KanbanColumnConfig[] | undefined,
-  statuses: Status[] | undefined,
   groupBy: GroupByField,
 ): KanbanColumnConfig[] {
   if (propColumns) return propColumns;
-  if (statuses) return statusesToColumns(statuses);
   if (groupBy !== "none") return createColumns({ includeEpics: true });
   return DEFAULT_COLUMNS;
 }

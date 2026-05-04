@@ -93,14 +93,14 @@ export type LoomFileChange = components["schemas"]["MonitorFileChange"];
 
 /**
  * Agent status from the loom server.
- * Based on generated MonitorAgentStatus, with workspace made optional (legacy/single-repo mode
- * sends empty string or omits it) and extended with cross_repo, path, worktree_path fields not in spec.
+ * Based on generated MonitorAgentStatus, with workspace made optional for
+ * unassigned agents and extended with cross_repo, path, worktree_path fields not in spec.
  */
 export type LoomAgentStatus = Omit<
   components["schemas"]["MonitorAgentStatus"],
   "workspace"
 > & {
-  /** Workspace name from daemon config (empty string in legacy/single-repo mode) */
+  /** Workspace name from daemon config, when assigned */
   workspace?: string;
   /** Whether agent works across multiple repos */
   cross_repo?: boolean;

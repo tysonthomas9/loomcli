@@ -22,14 +22,11 @@ import { useWorkspaceContext } from "@/hooks/workspace";
 import { wsGet, wsSet } from "@/utils/scopedStorage";
 import { DraggableIssueCard } from "@/components/DraggableIssueCard";
 import { EmptyWorkspaceBoard } from "@/components/EmptyWorkspaceBoard";
-import {
-  KanbanBoard,
-  type BlockedInfo,
-  type KanbanColumnConfig,
-} from "@/components/KanbanBoard";
+import { KanbanBoard, type KanbanColumnConfig } from "@/components/KanbanBoard";
 import { SwimLane } from "@/components/SwimLane";
 import type { FilterState } from "@/hooks/issues";
 import type { Issue, Status } from "@/types";
+import type { BlockedInfo } from "@/types/issue";
 
 import {
   groupIssuesByField,
@@ -54,8 +51,6 @@ export interface SwimLaneBoardProps {
   groupBy: GroupByField;
   /** Column configurations (default: 5-column kanban layout) */
   columns?: KanbanColumnConfig[];
-  /** @deprecated Use columns prop instead. Status columns for backward compatibility */
-  statuses?: Status[];
   /** Optional filter state (used by KanbanBoard fallback) */
   filters?: FilterState;
   /** Callback when an issue card is clicked */
@@ -89,7 +84,6 @@ export function SwimLaneBoard({
   issues,
   groupBy,
   columns: propColumns,
-  statuses,
   filters,
   onIssueClick,
   onDragEnd,
@@ -103,8 +97,8 @@ export function SwimLaneBoard({
   isMultiRepo,
 }: SwimLaneBoardProps): JSX.Element {
   const columns = useMemo(
-    () => resolveColumns(propColumns, statuses, groupBy),
-    [propColumns, statuses, groupBy],
+    () => resolveColumns(propColumns, groupBy),
+    [propColumns, groupBy],
   );
 
   // When groupBy='none', delegate to KanbanBoard
@@ -163,7 +157,7 @@ function SwimLaneBoardContent({
   cardLimit,
   pendingIds,
   isMultiRepo,
-}: Omit<SwimLaneBoardProps, "filters" | "groupBy" | "statuses"> & {
+}: Omit<SwimLaneBoardProps, "filters" | "groupBy"> & {
   groupBy: Exclude<GroupByField, "none">;
   columns: KanbanColumnConfig[];
 }): JSX.Element {

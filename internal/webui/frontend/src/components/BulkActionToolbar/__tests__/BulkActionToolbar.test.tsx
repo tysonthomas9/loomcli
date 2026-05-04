@@ -11,7 +11,9 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import "@testing-library/jest-dom";
 
 import { expectNoA11yViolations } from "@/test-utils/a11y-helpers";
-import { BulkActionToolbar, type BulkAction } from "../BulkActionToolbar";
+import type { BulkAction } from "@/types";
+
+import { BulkActionToolbar } from "../BulkActionToolbar";
 
 describe("BulkActionToolbar", () => {
   const defaultProps = {

@@ -58,7 +58,7 @@ docker compose -f test/fleetdb/docker-compose.regression.yml down -v
 
 After side-by-side regression has passed, the same browser suite can run against
 only fleet-db-backed loom. This path does not start or require `loom-reference`,
-or any legacy issue-store sidecar.
+or any old issue-store sidecar.
 
 ```bash
 docker compose -f test/fleetdb/docker-compose.regression.yml up -d --build redis fleet-db loom-fleet ui-fleet fleetdb-regression-seed-fleet

@@ -473,7 +473,7 @@ describe("checkLoc", () => {
     expect(result.violations).toHaveLength(2);
   });
 
-  it("accepts a single number threshold for backward compatibility", () => {
+  it("accepts a single number threshold for existing behavior", () => {
     writeFile(srcDir, "big.tsx", 250);
     const result = checkLoc(root, srcDir, new Map(), 200);
     expect(result.violations).toHaveLength(1);

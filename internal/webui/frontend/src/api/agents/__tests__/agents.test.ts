@@ -59,7 +59,7 @@ describe("fetchAgents", () => {
       {
         name: "ember",
         branch: "main",
-        status: "working:bd-123",
+        status: "working:loom-123",
         ahead: 1,
         behind: 0,
       },
@@ -76,6 +76,32 @@ describe("fetchAgents", () => {
     expect(result).toEqual(agents);
     expect(result).toHaveLength(2);
     expect(result[0].name).toBe("nova");
+  });
+
+  it("passes workspace scope as monitor query parameter", async () => {
+    mockGet.mockResolvedValueOnce({
+      agents: [
+        {
+          name: "nova",
+          branch: "main",
+          status: "idle",
+          ahead: 0,
+          behind: 0,
+          workspace: "Test",
+        },
+      ],
+      timestamp: "2024-01-15T12:30:00Z",
+      workspace: { mode: "workspace", name: "Test" },
+    });
+
+    const result = await fetchAgents("TEST 2");
+
+    expect(result).toHaveLength(1);
+    expect(mockGet).toHaveBeenCalledWith(
+      "/api/monitor/agents?workspace=TEST%202",
+      { signal: expect.any(AbortSignal) },
+    );
+    expect(mockApiGet).not.toHaveBeenCalled();
   });
 
   it("returns empty array when API returns null agents", async () => {
@@ -348,7 +374,7 @@ describe("fetchStatus", () => {
         },
         agent_tasks: {
           nova: {
-            id: "bd-123",
+            id: "loom-123",
             title: "Test",
             priority: 1,
             status: "in_progress",
@@ -440,11 +466,11 @@ describe("fetchTasks", () => {
   it("successfully fetches task lists from API", async () => {
     const taskLists = {
       needsPlanning: [
-        { id: "bd-001", title: "Plan feature", priority: 2, status: "open" },
+        { id: "loom-001", title: "Plan feature", priority: 2, status: "open" },
       ],
       readyToImplement: [
         {
-          id: "bd-002",
+          id: "loom-002",
           title: "Implement feature",
           priority: 1,
           status: "open",
@@ -452,17 +478,17 @@ describe("fetchTasks", () => {
       ],
       inProgress: [
         {
-          id: "bd-003",
+          id: "loom-003",
           title: "In progress task",
           priority: 0,
           status: "in_progress",
         },
       ],
       needsReview: [
-        { id: "bd-004", title: "Review code", priority: 1, status: "review" },
+        { id: "loom-004", title: "Review code", priority: 1, status: "review" },
       ],
       backlog: [
-        { id: "bd-005", title: "Blocked task", priority: 3, status: "blocked" },
+        { id: "loom-005", title: "Blocked task", priority: 3, status: "blocked" },
       ],
     };
 
@@ -490,13 +516,13 @@ describe("fetchTasks", () => {
   it("passes through backlog field directly from API", async () => {
     const backlogTasks = [
       {
-        id: "bd-100",
+        id: "loom-100",
         title: "First blocked task",
         priority: 2,
         status: "blocked",
       },
       {
-        id: "bd-101",
+        id: "loom-101",
         title: "Second blocked task",
         priority: 3,
         status: "blocked",
@@ -541,7 +567,7 @@ describe("fetchTasks", () => {
 
   it("returns backlog array with multiple tasks", async () => {
     const backlogTasks = Array.from({ length: 5 }, (_, i) => ({
-      id: `bd-${200 + i}`,
+      id: `loom-${200 + i}`,
       title: `Blocked task ${i + 1}`,
       priority: Math.floor(Math.random() * 5),
       status: "blocked" as const,
@@ -568,20 +594,20 @@ describe("fetchTasks", () => {
   it("preserves all other task lists", async () => {
     const taskLists = {
       needsPlanning: [
-        { id: "bd-010", title: "Plan", priority: 1, status: "open" },
+        { id: "loom-010", title: "Plan", priority: 1, status: "open" },
       ],
       readyToImplement: [
-        { id: "bd-020", title: "Ready 1", priority: 0, status: "open" },
-        { id: "bd-021", title: "Ready 2", priority: 1, status: "open" },
+        { id: "loom-020", title: "Ready 1", priority: 0, status: "open" },
+        { id: "loom-021", title: "Ready 2", priority: 1, status: "open" },
       ],
       inProgress: [
-        { id: "bd-030", title: "Working", priority: 0, status: "in_progress" },
+        { id: "loom-030", title: "Working", priority: 0, status: "in_progress" },
       ],
       needsReview: [
-        { id: "bd-040", title: "Review", priority: 1, status: "review" },
+        { id: "loom-040", title: "Review", priority: 1, status: "review" },
       ],
       backlog: [
-        { id: "bd-050", title: "Blocked", priority: 2, status: "blocked" },
+        { id: "loom-050", title: "Blocked", priority: 2, status: "blocked" },
       ],
     };
 
@@ -609,24 +635,24 @@ describe("fetchTasks", () => {
   it("returns complete LoomTaskLists with all properties", async () => {
     const taskLists = {
       needsPlanning: [
-        { id: "bd-001", title: "Plan", priority: 2, status: "open" },
+        { id: "loom-001", title: "Plan", priority: 2, status: "open" },
       ],
       readyToImplement: [
-        { id: "bd-002", title: "Implement", priority: 1, status: "open" },
+        { id: "loom-002", title: "Implement", priority: 1, status: "open" },
       ],
       inProgress: [
         {
-          id: "bd-003",
+          id: "loom-003",
           title: "In progress",
           priority: 0,
           status: "in_progress",
         },
       ],
       needsReview: [
-        { id: "bd-004", title: "Review", priority: 1, status: "review" },
+        { id: "loom-004", title: "Review", priority: 1, status: "review" },
       ],
       backlog: [
-        { id: "bd-005", title: "Blocked", priority: 3, status: "blocked" },
+        { id: "loom-005", title: "Blocked", priority: 3, status: "blocked" },
       ],
     };
 
@@ -740,7 +766,7 @@ describe("API field consistency", () => {
         in_progress: null,
         needs_review: null,
         backlog: [
-          { id: "bd-100", title: "Blocked", priority: 0, status: "blocked" },
+          { id: "loom-100", title: "Blocked", priority: 0, status: "blocked" },
         ],
       },
       error: undefined,
@@ -750,6 +776,6 @@ describe("API field consistency", () => {
     const tasksResult = await fetchTasks();
 
     expect(tasksResult.backlog).toHaveLength(1);
-    expect(tasksResult.backlog[0].id).toBe("bd-100");
+    expect(tasksResult.backlog[0].id).toBe("loom-100");
   });
 });

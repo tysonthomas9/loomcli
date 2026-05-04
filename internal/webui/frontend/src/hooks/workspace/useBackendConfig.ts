@@ -5,11 +5,7 @@
 
 import { useState, useCallback, useEffect, useRef } from "react";
 
-import {
-  getBackendConfig,
-  updateBackendConfig,
-  getCachedBackendConfig,
-} from "@/api/common";
+import { getCachedBackendConfig } from "@/api/common";
 import type { BackendConfigData } from "@/api/common";
 import {
   getWorkspaceBackendConfig,
@@ -39,12 +35,8 @@ export interface UseBackendConfigReturn {
 /**
  * React hook for managing backend configuration state.
  *
- * When a workspaceId is provided, fetches from the workspace-scoped
- * /api/workspaces/{ws}/config/backend (works in fleet client mode).
- * When omitted, falls back to the unscoped /api/config/backend (legacy
- * single-workspace dev mode); that endpoint requires a daemon and will
- * 503 in fleet mode, so callers in workspace-aware UIs should always
- * pass a workspaceId.
+ * Fetches from the workspace-scoped /api/workspaces/{ws}/config/backend.
+ * Runtime backend config is store-backed; callers must provide a workspace ID.
  */
 export function useBackendConfig(workspaceId?: string): UseBackendConfigReturn {
   const [initialCache] = useState(() => getCachedBackendConfig());
@@ -70,9 +62,10 @@ export function useBackendConfig(workspaceId?: string): UseBackendConfigReturn {
     setError(null);
 
     try {
-      const data = workspaceId
-        ? await getWorkspaceBackendConfig(workspaceId)
-        : await getBackendConfig();
+      if (!workspaceId) {
+        throw new Error("workspace ID is required");
+      }
+      const data = await getWorkspaceBackendConfig(workspaceId);
       if (mountedRef.current) {
         setConfig(data);
         setIsCached(false);
@@ -110,11 +103,12 @@ export function useBackendConfig(workspaceId?: string): UseBackendConfigReturn {
       setError(null);
 
       try {
-        const updated = workspaceId
-          ? await updateWorkspaceBackend(workspaceId, backend).then(() =>
-              getWorkspaceBackendConfig(workspaceId),
-            )
-          : await updateBackendConfig(backend);
+        if (!workspaceId) {
+          throw new Error("workspace ID is required");
+        }
+        const updated = await updateWorkspaceBackend(workspaceId, backend).then(
+          () => getWorkspaceBackendConfig(workspaceId),
+        );
         if (mountedRef.current) {
           setConfig(updated);
         }

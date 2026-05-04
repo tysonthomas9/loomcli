@@ -8,7 +8,7 @@ import { join, relative, extname, sep, dirname, normalize } from "path";
 import { fileURLToPath } from "url";
 import ts from "typescript";
 
-// Known legacy violations allowlisted by { source, target } pairs.
+// Known boundary exceptions allowlisted by { source, target } pairs.
 // source = relative path from frontend root (e.g. "src/components/SwimLaneBoard/SwimLaneBoard.tsx")
 // target = the internal import path (e.g. "@/components/KanbanBoard/columnConfigs")
 export const ALLOWLIST = [

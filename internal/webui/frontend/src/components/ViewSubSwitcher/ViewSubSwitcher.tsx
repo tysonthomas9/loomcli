@@ -6,7 +6,7 @@
 
 import type { KeyboardEvent } from "react";
 
-import type { ViewMode } from "@/components/ViewSwitcher";
+import type { ViewMode } from "@/types";
 
 import styles from "./ViewSubSwitcher.module.css";
 

@@ -5,7 +5,7 @@
 
 import type { KeyboardEvent, ChangeEvent, MouseEvent } from "react";
 
-import type { BlockedInfo } from "@/components/KanbanBoard";
+import type { BlockedInfo } from "@/types/issue";
 import type { Issue } from "@/types";
 
 import { renderCellContent } from "./cellRenderers";

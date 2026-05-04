@@ -40,7 +40,7 @@ async function setupMocks(page: Page) {
   await page.route("**/api/backends", async (route) => {
     await route.fulfill({ status: 200, contentType: "application/json", body: ok([{ name: "claude", available: true, display_name: "Claude" }]) });
   });
-  await page.route("**/api/config/backend", async (route) => {
+  await page.route("**/api/workspaces/*/config/backend", async (route) => {
     await route.fulfill({ status: 200, contentType: "application/json", body: ok({ backend: "claude", source: "workspace", available: ["claude"], agents: [] }) });
   });
   await page.route("**/api/health", async (route) => {

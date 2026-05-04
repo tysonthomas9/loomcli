@@ -153,13 +153,13 @@ describe("FileTree", () => {
 
   it("filters out non-matching entries", () => {
     const treeData = new Map<string, FileEntry[]>([
-      ["", [makeFileEntry("main.go"), makeFileEntry("config.yaml")]],
+      ["", [makeFileEntry("main.go"), makeFileEntry("settings.yml")]],
     ]);
     render(
-      <FileTree {...defaultProps} treeData={treeData} filterText="config" />,
+      <FileTree {...defaultProps} treeData={treeData} filterText="settings" />,
     );
     expect(screen.queryByLabelText("main.go")).not.toBeInTheDocument();
-    expect(screen.getByLabelText("config.yaml")).toBeInTheDocument();
+    expect(screen.getByLabelText("settings.yml")).toBeInTheDocument();
   });
 
   it("shows 'No matches' message when filter matches nothing", () => {

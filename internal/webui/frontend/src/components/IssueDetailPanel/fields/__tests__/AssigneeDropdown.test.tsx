@@ -1006,7 +1006,7 @@ describe("AssigneeDropdown", () => {
     const busyAgent: LoomAgentStatus = {
       name: "falcon",
       branch: "falcon",
-      status: "working: bd-123 (5m)",
+      status: "working: loom-123 (5m)",
       ahead: 1,
       behind: 0,
       role: "task",

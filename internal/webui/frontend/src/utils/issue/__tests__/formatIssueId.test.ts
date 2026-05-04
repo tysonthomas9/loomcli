@@ -59,7 +59,7 @@ describe("formatIssueId", () => {
   });
 
   it("returns short ID without hyphen as-is", () => {
-    expect(formatIssueId("bd-xyz")).toBe("bd-xyz");
+    expect(formatIssueId("loom-xyz")).toBe("loom-xyz");
   });
 
   it("warns in development for empty ID", () => {

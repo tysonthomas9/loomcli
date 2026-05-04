@@ -3,13 +3,14 @@
  * git diff APIs keep working when fleet-db owns the workspace metadata.
  */
 import { execSync } from "node:child_process";
+import * as path from "node:path";
 import type { Page } from "@playwright/test";
 import {
   fleetdbTest as test,
   expect,
   useFleetDBHooks,
 } from "./_support/spec-harness";
-import { composeRuntime } from "./_support/compose";
+import { composeRun } from "./_support/compose";
 import { discoverWorkspaceId } from "./_support";
 import { FLEETDB_URLS } from "./playwright.config";
 
@@ -130,7 +131,7 @@ function commitFleetWorktreeChange(
   filePath: string,
   commitSubject: string,
 ): void {
-  const worktree = "/root/.loom/workspaces/FLEETDB/workspace";
+  const worktree = "/root/.loom/workspaces/FLEETDB/worktrees/workspace/workspace";
   const command = [
     `cd ${shellQuote(worktree)}`,
     `git config user.email ${shellQuote("fleetdb-regression@fixture.local")}`,
@@ -140,8 +141,9 @@ function commitFleetWorktreeChange(
     `git commit -q -m ${shellQuote(commitSubject)} -- ${shellQuote(filePath)}`,
   ].join(" && ");
   execSync(
-    `${composeRuntime()} exec loomcli-fleetdb-regression_loom-fleet_1 sh -lc ${shellQuote(command)}`,
+    composeRun(`exec -T loom-fleet sh -lc ${shellQuote(command)}`),
     {
+      cwd: path.resolve(__dirname, "../../.."),
       encoding: "utf-8",
       timeout: 15_000,
       stdio: ["ignore", "pipe", "pipe"],
@@ -179,7 +181,7 @@ async function fetchReachable(
   for (let attempt = 0; attempt < 8; attempt++) {
     const response = await fetch(url, init);
     last = response;
-    if (response.ok || ![429, 500, 503].includes(response.status)) {
+    if (response.ok || ![404, 429, 500, 503].includes(response.status)) {
       return response;
     }
     await response.body?.cancel().catch(() => undefined);

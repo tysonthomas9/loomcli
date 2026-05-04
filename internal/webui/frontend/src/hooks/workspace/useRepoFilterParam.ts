@@ -25,7 +25,7 @@ export type UseRepoFilterParamReturn = [
 ];
 
 /**
- * Parse repo filter from URL search parameters (legacy compat).
+ * Parse repo filter from URL search parameters.
  */
 export function parseRepoFilterFromUrl(): string | null {
   if (typeof window === "undefined" || !window.location) return null;

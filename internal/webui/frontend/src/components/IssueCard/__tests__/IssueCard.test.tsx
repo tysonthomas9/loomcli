@@ -49,10 +49,10 @@ describe("IssueCard", () => {
     });
 
     it("renders short ID as-is", () => {
-      const issue = createTestIssue({ id: "bd-xyz" });
+      const issue = createTestIssue({ id: "loom-xyz" });
       render(<IssueCard issue={issue} />);
 
-      expect(screen.getByText("bd-xyz")).toBeInTheDocument();
+      expect(screen.getByText("loom-xyz")).toBeInTheDocument();
     });
 
     it("renders priority badge with correct text", () => {
@@ -146,7 +146,7 @@ describe("IssueCard", () => {
       expect(priorityBadge.className).toMatch(/priority2/);
     });
 
-    it("priority badge has data-priority attribute for backwards compatibility", () => {
+    it("priority badge has data-priority attribute for existing behavior", () => {
       const issue = createTestIssue({ priority: 1 });
       render(<IssueCard issue={issue} />);
 

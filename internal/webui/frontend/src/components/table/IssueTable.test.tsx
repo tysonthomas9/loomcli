@@ -59,7 +59,7 @@ vi.mock("@/hooks/workspace", async () => {
 // Helper to create mock issues for testing
 function createMockIssue(overrides: Partial<Issue> = {}): Issue {
   return {
-    id: "bd-abc",
+    id: "loom-abc",
     title: "Test Issue",
     priority: 2,
     status: "open",
@@ -237,7 +237,7 @@ describe("columns.ts helpers", () => {
     it("returns undefined for missing optional field", () => {
       // Create issue without assignee by omitting it
       const issueWithoutAssignee: Issue = {
-        id: "bd-no-assignee",
+        id: "loom-no-assignee",
         title: "Test Issue",
         priority: 2,
         created_at: "2024-01-15T10:30:00Z",
@@ -331,9 +331,9 @@ describe("IssueTable", () => {
     it("accepts selectedId prop", () => {
       const props: IssueTableProps = {
         issues: [createMockIssue()],
-        selectedId: "bd-abc",
+        selectedId: "loom-abc",
       };
-      expect(props.selectedId).toBe("bd-abc");
+      expect(props.selectedId).toBe("loom-abc");
     });
 
     it("accepts className prop", () => {
@@ -363,9 +363,9 @@ describe("IssueTable", () => {
     it("handles multiple issues", () => {
       const props: IssueTableProps = {
         issues: [
-          createMockIssue({ id: "bd-001" }),
-          createMockIssue({ id: "bd-002" }),
-          createMockIssue({ id: "bd-003" }),
+          createMockIssue({ id: "loom-001" }),
+          createMockIssue({ id: "loom-002" }),
+          createMockIssue({ id: "loom-003" }),
         ],
       };
       expect(props.issues).toHaveLength(3);
@@ -374,7 +374,7 @@ describe("IssueTable", () => {
     it("handles issues with missing optional fields", () => {
       // Create issue with optional fields omitted (not set to undefined)
       const issueWithMissingFields: Issue = {
-        id: "bd-minimal",
+        id: "loom-minimal",
         title: "Minimal Issue",
         priority: 2,
         created_at: "2024-01-15T10:30:00Z",
@@ -422,23 +422,23 @@ describe("IssueTable", () => {
   describe("row selection", () => {
     it("identifies selected row by ID", () => {
       const issues = [
-        createMockIssue({ id: "bd-001" }),
-        createMockIssue({ id: "bd-002" }),
-        createMockIssue({ id: "bd-003" }),
+        createMockIssue({ id: "loom-001" }),
+        createMockIssue({ id: "loom-002" }),
+        createMockIssue({ id: "loom-003" }),
       ];
       const props: IssueTableProps = {
         issues,
-        selectedId: "bd-002",
+        selectedId: "loom-002",
       };
       const selectedIssue = props.issues.find((i) => i.id === props.selectedId);
-      expect(selectedIssue?.id).toBe("bd-002");
+      expect(selectedIssue?.id).toBe("loom-002");
     });
 
     it("handles selectedId not in issues list", () => {
-      const issues = [createMockIssue({ id: "bd-001" })];
+      const issues = [createMockIssue({ id: "loom-001" })];
       const props: IssueTableProps = {
         issues,
-        selectedId: "bd-999",
+        selectedId: "loom-999",
       };
       const selectedIssue = props.issues.find((i) => i.id === props.selectedId);
       expect(selectedIssue).toBeUndefined();
@@ -454,9 +454,9 @@ describe("IssueTable", () => {
           accessor: (issue) => `${issue.id} - ${issue.title}`,
         },
       ];
-      const issue = createMockIssue({ id: "bd-abc", title: "Test" });
+      const issue = createMockIssue({ id: "loom-abc", title: "Test" });
       const value = getCellValue(issue, customColumns[0]!);
-      expect(value).toBe("bd-abc - Test");
+      expect(value).toBe("loom-abc - Test");
     });
 
     it("supports column alignment options", () => {
@@ -518,19 +518,19 @@ describe("IssueTable", () => {
     });
 
     it("accepts selectedIds Set prop", () => {
-      const selectedIds = new Set(["bd-001", "bd-002"]);
+      const selectedIds = new Set(["loom-001", "loom-002"]);
       const props: IssueTableProps = {
         issues: [
-          createMockIssue({ id: "bd-001" }),
-          createMockIssue({ id: "bd-002" }),
-          createMockIssue({ id: "bd-003" }),
+          createMockIssue({ id: "loom-001" }),
+          createMockIssue({ id: "loom-002" }),
+          createMockIssue({ id: "loom-003" }),
         ],
         showCheckbox: true,
         selectedIds,
       };
-      expect(props.selectedIds?.has("bd-001")).toBe(true);
-      expect(props.selectedIds?.has("bd-002")).toBe(true);
-      expect(props.selectedIds?.has("bd-003")).toBe(false);
+      expect(props.selectedIds?.has("loom-001")).toBe(true);
+      expect(props.selectedIds?.has("loom-002")).toBe(true);
+      expect(props.selectedIds?.has("loom-003")).toBe(false);
     });
 
     it("accepts onSelectionChange callback", () => {
@@ -650,25 +650,25 @@ describe("IssueTable", () => {
   describe("sorting behavior", () => {
     it("without sortable prop, issues maintain original order", () => {
       const issues = [
-        createMockIssue({ id: "bd-003", priority: 3 }),
-        createMockIssue({ id: "bd-001", priority: 1 }),
-        createMockIssue({ id: "bd-002", priority: 2 }),
+        createMockIssue({ id: "loom-003", priority: 3 }),
+        createMockIssue({ id: "loom-001", priority: 1 }),
+        createMockIssue({ id: "loom-002", priority: 2 }),
       ];
       const props: IssueTableProps = {
         issues,
         // sortable is false by default
       };
       // Without sorting, issues should be in original order
-      expect(props.issues[0]?.id).toBe("bd-003");
-      expect(props.issues[1]?.id).toBe("bd-001");
-      expect(props.issues[2]?.id).toBe("bd-002");
+      expect(props.issues[0]?.id).toBe("loom-003");
+      expect(props.issues[1]?.id).toBe("loom-001");
+      expect(props.issues[2]?.id).toBe("loom-002");
     });
 
     it("with sortable=true and initialSort, issues can be sorted", () => {
       const issues = [
-        createMockIssue({ id: "bd-003", priority: 3 }),
-        createMockIssue({ id: "bd-001", priority: 1 }),
-        createMockIssue({ id: "bd-002", priority: 2 }),
+        createMockIssue({ id: "loom-003", priority: 3 }),
+        createMockIssue({ id: "loom-001", priority: 1 }),
+        createMockIssue({ id: "loom-002", priority: 2 }),
       ];
       const props: IssueTableProps = {
         issues,
@@ -682,14 +682,14 @@ describe("IssueTable", () => {
       expect(props.initialSort?.key).toBe("priority");
     });
 
-    it("backwards compatibility: existing usage without sortable works", () => {
+    it("existing behavior: existing usage without sortable works", () => {
       // This test ensures existing code using IssueTable without sortable prop still works
       const issues = [createMockIssue()];
       const onRowClick = vi.fn();
       const props: IssueTableProps = {
         issues,
         onRowClick,
-        selectedId: "bd-abc",
+        selectedId: "loom-abc",
         className: "my-table",
       };
       expect(props.sortable).toBeUndefined();
@@ -702,7 +702,7 @@ describe("IssueTable", () => {
         issues: [createMockIssue()],
         sortable: true,
         showCheckbox: true,
-        selectedIds: new Set(["bd-abc"]),
+        selectedIds: new Set(["loom-abc"]),
         initialSort: {
           key: "priority",
           direction: "asc",
@@ -710,7 +710,7 @@ describe("IssueTable", () => {
       };
       expect(props.sortable).toBe(true);
       expect(props.showCheckbox).toBe(true);
-      expect(props.selectedIds?.has("bd-abc")).toBe(true);
+      expect(props.selectedIds?.has("loom-abc")).toBe(true);
     });
   });
 
@@ -738,9 +738,9 @@ describe("IssueTable", () => {
 
     it('ID column body cells have data-column="id" attribute for CSS sticky targeting', () => {
       const issues = [
-        createMockIssue({ id: "bd-001" }),
-        createMockIssue({ id: "bd-002" }),
-        createMockIssue({ id: "bd-003" }),
+        createMockIssue({ id: "loom-001" }),
+        createMockIssue({ id: "loom-002" }),
+        createMockIssue({ id: "loom-003" }),
       ];
       const { container } = render(
         <IssueTable issues={issues} columns={DEFAULT_ISSUE_COLUMNS} />,

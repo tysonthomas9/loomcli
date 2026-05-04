@@ -7,11 +7,14 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import {
   useFileTree,
+  type UseFileTreeReturn,
+} from "@/hooks/common/useFileTree";
+import {
   useFileContent,
-  useToast,
-  useWorkspaceContext,
-} from "@/hooks";
-import type { UseFileTreeReturn, UseFileContentReturn } from "@/hooks";
+  type UseFileContentReturn,
+} from "@/hooks/common/useFileContent";
+import { useToast } from "@/hooks/ui/useToast";
+import { useWorkspaceContext } from "@/hooks/workspace/useWorkspaceContext";
 import { writeWorktreeFile } from "@/hooks/api";
 
 interface PendingAction {

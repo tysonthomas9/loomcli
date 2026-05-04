@@ -1,13 +1,16 @@
 import { lazy, Suspense } from "react";
-import { ErrorBoundary, LoadingSkeleton } from "@/components";
-import { IssueViewGuard } from "@/components/IssueViewGuard";
+import { ErrorBoundary } from "@/components/ErrorBoundary/ErrorBoundary";
+import { LoadingSkeleton } from "@/components/LoadingSkeleton/LoadingSkeleton";
+import { IssueViewGuard } from "@/components/IssueViewGuard/IssueViewGuard";
 import {
   useWorkspaceViewData,
   useWorkspaceViewActions,
 } from "@/contexts/WorkspaceViewContext";
 
 const GraphView = lazy(() =>
-  import("@/components/GraphView").then((m) => ({ default: m.GraphView })),
+  import("@/components/GraphView/GraphView").then((m) => ({
+    default: m.GraphView,
+  })),
 );
 
 export function GraphPage() {

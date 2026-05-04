@@ -40,9 +40,7 @@ function getVariantContent(variant: EmptyStateVariant): VariantContent {
         title: "No workspaces configured",
         description: (
           <>
-            Add workspaces to your{" "}
-            <code className={styles.code}>loom.yaml</code> config to manage
-            multiple repositories. Run{" "}
+            Add workspaces to FleetDB to manage multiple repositories. Run{" "}
             <code className={styles.code}>loom init</code> to get started.
           </>
         ),

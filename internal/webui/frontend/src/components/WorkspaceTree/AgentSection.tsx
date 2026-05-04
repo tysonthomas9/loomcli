@@ -51,7 +51,7 @@ export function AgentSection({
     return [...fleetAgents, ...configPlaceholders];
   }, [fleetAgents, workspaceConfigAgents, workspace?.name]);
 
-  if (agents.length === 0) return <></>;
+  if (agents.length === 0 && !onAddClick) return <></>;
 
   return (
     <div className={`${styles.section} agentSection`}>

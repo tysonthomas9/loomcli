@@ -119,10 +119,10 @@ describe("NodeTooltip", () => {
     });
 
     it("displays short ID as-is", () => {
-      const issue = createTestIssue({ id: "bd-xyz" });
+      const issue = createTestIssue({ id: "loom-xyz" });
       render(<NodeTooltip issue={issue} position={defaultPosition} />);
 
-      expect(screen.getByText("bd-xyz")).toBeInTheDocument();
+      expect(screen.getByText("loom-xyz")).toBeInTheDocument();
     });
 
     it('displays "unknown" for empty ID', () => {
@@ -151,11 +151,11 @@ describe("NodeTooltip", () => {
     });
 
     it("title attribute matches display text for short IDs", () => {
-      const issue = createTestIssue({ id: "bd-xyz" });
+      const issue = createTestIssue({ id: "loom-xyz" });
       render(<NodeTooltip issue={issue} position={defaultPosition} />);
 
-      const idSpan = screen.getByText("bd-xyz");
-      expect(idSpan).toHaveAttribute("title", "bd-xyz");
+      const idSpan = screen.getByText("loom-xyz");
+      expect(idSpan).toHaveAttribute("title", "loom-xyz");
     });
   });
 

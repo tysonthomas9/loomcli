@@ -17,7 +17,7 @@ import {
 } from "../useFilterState";
 
 /**
- * Mock window.location for parseFromUrl tests (legacy helper that reads window.location).
+ * Mock window.location for parseFromUrl tests.
  */
 function mockWindowLocation(search = ""): void {
   Object.defineProperty(window, "location", {

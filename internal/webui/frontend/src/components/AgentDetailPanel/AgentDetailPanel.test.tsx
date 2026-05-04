@@ -131,7 +131,7 @@ describe("AgentDetailPanel", () => {
       renderPanel({
         path: "worktrees/falcon",
         branch: "feature-branch",
-        status: "working: bd-123 (5m)",
+        status: "working: loom-123 (5m)",
       });
 
       // Path should be present

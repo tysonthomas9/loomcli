@@ -11,9 +11,6 @@ import { useAgentDiffStat } from "@/hooks";
 
 import styles from "./AgentCard.module.css";
 
-// Re-export for backward compatibility (consumed by IssueCard, etc.)
-export { getAvatarColor } from "@/utils/colorUtils";
-
 /**
  * Props for the AgentCard component.
  */

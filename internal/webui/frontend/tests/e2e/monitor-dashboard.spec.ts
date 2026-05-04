@@ -53,7 +53,7 @@ const mockLoomStatus = {
       name: "dev1",
       status: "working",
       branch: "feature-1",
-      task: "bd-001",
+      task: "loom-001",
       ahead: 0,
       behind: 0,
       last_seen: "2026-01-24T12:00:00Z",
@@ -77,7 +77,7 @@ const mockLoomStatus = {
   },
   agent_tasks: {
     dev1: {
-      id: "bd-001",
+      id: "loom-001",
       title: "Implement feature X",
       priority: 2,
     },
@@ -102,16 +102,16 @@ const mockLoomStatus = {
  */
 const mockLoomTasks = {
   needs_planning: [
-    { id: "bd-010", title: "Plan new feature", priority: 2 },
-    { id: "bd-011", title: "Design API", priority: 1 },
+    { id: "loom-010", title: "Plan new feature", priority: 2 },
+    { id: "loom-011", title: "Design API", priority: 1 },
   ],
   ready_to_implement: [
-    { id: "bd-020", title: "Implement login", priority: 1 },
-    { id: "bd-021", title: "Add tests", priority: 2 },
-    { id: "bd-022", title: "Fix bug", priority: 3 },
+    { id: "loom-020", title: "Implement login", priority: 1 },
+    { id: "loom-021", title: "Add tests", priority: 2 },
+    { id: "loom-022", title: "Fix bug", priority: 3 },
   ],
-  in_progress: [{ id: "bd-001", title: "Implement feature X", priority: 2 }],
-  needs_review: [{ id: "bd-030", title: "Review PR", priority: 2 }],
+  in_progress: [{ id: "loom-001", title: "Implement feature X", priority: 2 }],
+  needs_review: [{ id: "loom-030", title: "Review PR", priority: 2 }],
   blocked: [],
 };
 
@@ -487,8 +487,8 @@ test.describe("MonitorDashboard", () => {
       const tasksWithBlocked = {
         ...mockLoomTasks,
         blocked: [
-          { id: "bd-040", title: "Blocked task A", priority: 1 },
-          { id: "bd-041", title: "Blocked task B", priority: 2 },
+          { id: "loom-040", title: "Blocked task A", priority: 1 },
+          { id: "loom-041", title: "Blocked task B", priority: 2 },
         ],
       };
 
@@ -662,25 +662,25 @@ test.describe("MonitorDashboard", () => {
 
       // Plan row
       await expect(rows.nth(0)).toContainText("Plan");
-      await expect(rows.nth(0)).toContainText("bd-010");
+      await expect(rows.nth(0)).toContainText("loom-010");
       await expect(rows.nth(0)).toContainText("Plan new feature");
       await expect(rows.nth(0)).toContainText("P2");
 
       // Ready row
       await expect(rows.nth(1)).toContainText("Ready");
-      await expect(rows.nth(1)).toContainText("bd-020");
+      await expect(rows.nth(1)).toContainText("loom-020");
       await expect(rows.nth(1)).toContainText("Implement login");
       await expect(rows.nth(1)).toContainText("P1");
 
       // In Progress row
       await expect(rows.nth(2)).toContainText("In Progress");
-      await expect(rows.nth(2)).toContainText("bd-001");
+      await expect(rows.nth(2)).toContainText("loom-001");
       await expect(rows.nth(2)).toContainText("Implement feature X");
       await expect(rows.nth(2)).toContainText("P2");
 
       // Review row
       await expect(rows.nth(3)).toContainText("Review");
-      await expect(rows.nth(3)).toContainText("bd-030");
+      await expect(rows.nth(3)).toContainText("loom-030");
       await expect(rows.nth(3)).toContainText("Review PR");
       await expect(rows.nth(3)).toContainText("P2");
     });

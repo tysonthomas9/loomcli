@@ -71,7 +71,7 @@ const mockAgents = [
   {
     name: "nova",
     branch: "feature-auth",
-    status: "working: bd-101 (5m)",
+    status: "working: loom-101 (5m)",
     ahead: 2,
     behind: 0,
     role: "task",
@@ -102,7 +102,7 @@ const mockLoomStatus = {
   in_progress_list: null,
   agent_tasks: {
     nova: {
-      id: "bd-101",
+      id: "loom-101",
       title: "Implement auth flow",
       priority: 1,
       status: "in_progress",
@@ -135,12 +135,12 @@ const mockLoomTasks = {
     need_review: 1,
     backlog: 0,
   },
-  needs_planning: [{ id: "bd-010", title: "Plan auth", priority: 1 }],
+  needs_planning: [{ id: "loom-010", title: "Plan auth", priority: 1 }],
   ready_to_implement: [
-    { id: "bd-020", title: "Build login page", priority: 1 },
+    { id: "loom-020", title: "Build login page", priority: 1 },
   ],
-  in_progress: [{ id: "bd-101", title: "Implement auth flow", priority: 1 }],
-  needs_review: [{ id: "bd-030", title: "Review PR #42", priority: 2 }],
+  in_progress: [{ id: "loom-101", title: "Implement auth flow", priority: 1 }],
+  needs_review: [{ id: "loom-030", title: "Review PR #42", priority: 2 }],
   backlog: [],
   closed: [],
   timestamp: "2026-01-24T12:00:00Z",
@@ -770,7 +770,7 @@ test.describe("Agents Sidebar", () => {
         {
           name: "alpha",
           branch: "feat-a",
-          status: "working: bd-201 (3m)",
+          status: "working: loom-201 (3m)",
           ahead: 1,
           behind: 0,
           role: "task",
@@ -780,7 +780,7 @@ test.describe("Agents Sidebar", () => {
         {
           name: "beta",
           branch: "feat-b",
-          status: "working: bd-202 (7m)",
+          status: "working: loom-202 (7m)",
           ahead: 0,
           behind: 0,
           role: "task",

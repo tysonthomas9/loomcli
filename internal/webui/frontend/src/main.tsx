@@ -6,16 +6,16 @@ import "@/styles/index.css";
 import { migrateLocalStorage } from "@/utils/migrateLocalStorage";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { BootError } from "@/components/BootError";
-import { initErrorReporter, reportError } from "@/api/common";
-import { ToastProvider } from "@/hooks";
+import { initErrorReporter, reportError } from "@/api/common/errorReporter";
+import { ToastProvider } from "@/hooks/ui/useToast";
 import { router } from "@/router";
 import {
   fetchAppConfig,
   AppConfigError,
   AUTH_MODE_OIDC,
   type AppConfig,
-} from "@/api/common";
-import { initExternalAuth } from "@/api/common";
+} from "@/api/common/appConfig";
+import { initExternalAuth } from "@/api/common/authClient";
 import { ExternalAuthProvider, NoAuthProvider } from "@/contexts/AuthContext";
 import { AuthGate } from "@/components/AuthGate";
 

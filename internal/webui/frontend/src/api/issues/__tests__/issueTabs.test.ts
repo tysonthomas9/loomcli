@@ -314,7 +314,7 @@ describe("issueTabs API", () => {
       expect(sentTabs[1].backend).toBe("claude");
     });
 
-    it("sends terminal tab without backend for legacy format", async () => {
+    it("sends terminal tab without backend", async () => {
       mockApiPut.mockResolvedValueOnce({
         data: {},
         error: undefined,

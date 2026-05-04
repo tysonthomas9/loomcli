@@ -1737,7 +1737,7 @@ describe("issues API", () => {
       //   if (error) throw apiErrorFromResponse(error, response);
       // It does NOT call unwrap. So success:false in body won't cause a throw.
       // We need to simulate an HTTP error instead.
-      // For backward compatibility with the test intent (server rejects the close),
+      // For existing behavior with the test intent (server rejects the close),
       // mock an HTTP error response instead.
     });
 

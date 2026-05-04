@@ -1,6 +1,6 @@
 /**
  * API client for workspace endpoints.
- * Uses openapi-fetch for typed endpoints, legacy client where spec diverges.
+ * Uses openapi-fetch for typed endpoints and raw fetch where the spec diverges.
  */
 
 import {
@@ -194,7 +194,6 @@ export interface CreateWorkspaceRequest {
   name: string;
   type: "empty" | "clone" | "template";
   repos?: string[];
-  clone_url?: string;
   clone_urls?: string[];
   branch?: string;
   path?: string;

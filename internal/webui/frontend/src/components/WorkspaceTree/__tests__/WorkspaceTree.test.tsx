@@ -214,6 +214,20 @@ describe("WorkspaceTree", () => {
     });
   });
 
+  describe("agent creation entrypoint", () => {
+    it("shows the add-agent button even when no agents exist", () => {
+      const onAddClick = vi.fn();
+
+      render(
+        <WorkspaceTree defaultCollapsed={false} onAddClick={onAddClick} />,
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: "+ Add agent" }));
+
+      expect(onAddClick).toHaveBeenCalledOnce();
+    });
+  });
+
   describe("collapse toggle", () => {
     it("hides content when collapsed", () => {
       reposOverride = {

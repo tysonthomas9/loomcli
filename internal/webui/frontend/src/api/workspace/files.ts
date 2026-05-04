@@ -1,6 +1,6 @@
 /**
  * API functions for agent worktree file operations.
- * Uses legacy fetch wrapper for tree endpoint (untyped spec),
+ * Uses raw fetch for the tree endpoint (untyped spec),
  * openapi-fetch for read/write endpoints.
  */
 
@@ -31,7 +31,7 @@ export interface FileReadData {
 
 /**
  * List files in an agent worktree directory (one level).
- * Uses legacy client (spec response is untyped).
+ * Uses raw fetch because the spec response is untyped.
  */
 export async function listWorktreeDir(
   workspaceId: string,

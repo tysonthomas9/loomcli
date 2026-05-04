@@ -40,7 +40,7 @@ function makeAgent(
 
 describe("StartWorkButton", () => {
   const defaultProps = {
-    issueId: "BD-100",
+    issueId: "LOOM-100",
     issueStatus: "open" as const,
     currentAssignee: undefined as string | undefined,
     agents: [
@@ -284,10 +284,10 @@ describe("StartWorkButton", () => {
 
   describe("Agent list - busy agents", () => {
     it("renders busy agents as div (not button), not clickable", () => {
-      const agents = [makeAgent("alpha", "working: BD-50 (5m)", "task")];
+      const agents = [makeAgent("alpha", "working: LOOM-50 (5m)", "task")];
       const agentTasks: Record<string, LoomTaskInfo> = {
         alpha: {
-          id: "BD-50",
+          id: "LOOM-50",
           title: "Fix login bug",
           priority: 2,
           status: "in_progress",
@@ -308,7 +308,7 @@ describe("StartWorkButton", () => {
     });
 
     it("renders planning agents as busy", () => {
-      const agents = [makeAgent("alpha", "planning: BD-60 (2m)", "task")];
+      const agents = [makeAgent("alpha", "planning: LOOM-60 (2m)", "task")];
       render(<StartWorkButton {...defaultProps} agents={agents} />);
       fireEvent.click(screen.getByTestId("start-work-button"));
 
@@ -318,7 +318,7 @@ describe("StartWorkButton", () => {
     });
 
     it("renders review agents as busy", () => {
-      const agents = [makeAgent("alpha", "review: BD-70 (10m)", "task")];
+      const agents = [makeAgent("alpha", "review: LOOM-70 (10m)", "task")];
       render(<StartWorkButton {...defaultProps} agents={agents} />);
       fireEvent.click(screen.getByTestId("start-work-button"));
 
@@ -328,10 +328,10 @@ describe("StartWorkButton", () => {
     });
 
     it("shows task ID for busy agents with task info", () => {
-      const agents = [makeAgent("alpha", "working: BD-50 (5m)", "task")];
+      const agents = [makeAgent("alpha", "working: LOOM-50 (5m)", "task")];
       const agentTasks: Record<string, LoomTaskInfo> = {
         alpha: {
-          id: "BD-50",
+          id: "LOOM-50",
           title: "Fix login bug",
           priority: 2,
           status: "in_progress",
@@ -347,7 +347,7 @@ describe("StartWorkButton", () => {
       fireEvent.click(screen.getByTestId("start-work-button"));
 
       const option = screen.getByTestId("agent-option-alpha");
-      expect(option).toHaveTextContent("BD-50");
+      expect(option).toHaveTextContent("LOOM-50");
     });
   });
 
@@ -452,8 +452,8 @@ describe("StartWorkButton", () => {
 
     it('shows "All N agents busy" when all agents are busy', () => {
       const agents = [
-        makeAgent("alpha", "working: BD-50 (5m)", "task"),
-        makeAgent("beta", "planning: BD-60 (2m)", "task"),
+        makeAgent("alpha", "working: LOOM-50 (5m)", "task"),
+        makeAgent("beta", "planning: LOOM-60 (2m)", "task"),
       ];
       render(<StartWorkButton {...defaultProps} agents={agents} />);
       fireEvent.click(screen.getByTestId("start-work-button"));
@@ -462,7 +462,7 @@ describe("StartWorkButton", () => {
     });
 
     it('shows "All 1 agent busy" for a single busy agent', () => {
-      const agents = [makeAgent("alpha", "working: BD-50 (5m)", "task")];
+      const agents = [makeAgent("alpha", "working: LOOM-50 (5m)", "task")];
       render(<StartWorkButton {...defaultProps} agents={agents} />);
       fireEvent.click(screen.getByTestId("start-work-button"));
 
@@ -472,7 +472,7 @@ describe("StartWorkButton", () => {
     it("does not show busy message when some agents are available", () => {
       const agents = [
         makeAgent("alpha", "ready", "task"),
-        makeAgent("beta", "working: BD-50 (5m)", "task"),
+        makeAgent("beta", "working: LOOM-50 (5m)", "task"),
       ];
       render(<StartWorkButton {...defaultProps} agents={agents} />);
       fireEvent.click(screen.getByTestId("start-work-button"));
@@ -748,12 +748,12 @@ describe("StartWorkButton", () => {
     it("shows available, warning, and busy agents together", () => {
       const agents = [
         makeAgent("alpha", "ready", "task"),
-        makeAgent("beta", "working: BD-50 (5m)", "task"),
+        makeAgent("beta", "working: LOOM-50 (5m)", "task"),
         makeAgent("gamma", "error", "task"),
       ];
       const agentTasks: Record<string, LoomTaskInfo> = {
         beta: {
-          id: "BD-50",
+          id: "LOOM-50",
           title: "Fix bug",
           priority: 2,
           status: "in_progress",
@@ -794,8 +794,8 @@ describe("StartWorkButton", () => {
     it("shows popover header with available and busy counts", () => {
       const agents = [
         makeAgent("alpha", "ready", "task"),
-        makeAgent("beta", "working: BD-50 (5m)", "task"),
-        makeAgent("gamma", "planning: BD-60 (2m)", "task"),
+        makeAgent("beta", "working: LOOM-50 (5m)", "task"),
+        makeAgent("gamma", "planning: LOOM-60 (2m)", "task"),
       ];
 
       render(<StartWorkButton {...defaultProps} agents={agents} />);

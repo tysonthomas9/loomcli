@@ -86,7 +86,7 @@ describe("AgentActivityPanel", () => {
     it("renders all agent cards", () => {
       const agents = [
         createAgent({ name: "nova", status: "ready" }),
-        createAgent({ name: "falcon", status: "working: bd-123 (5m)" }),
+        createAgent({ name: "falcon", status: "working: loom-123 (5m)" }),
         createAgent({ name: "ember", status: "idle" }),
       ];
 
@@ -107,16 +107,16 @@ describe("AgentActivityPanel", () => {
   describe("summary counts", () => {
     it("shows correct summary counts (active, idle, error, needsPush)", () => {
       const agents = [
-        createAgent({ name: "active-1", status: "working: bd-1 (5m)" }),
-        createAgent({ name: "active-2", status: "planning: bd-2 (2m)" }),
+        createAgent({ name: "active-1", status: "working: loom-1 (5m)" }),
+        createAgent({ name: "active-2", status: "planning: loom-2 (2m)" }),
         createAgent({ name: "idle-1", status: "ready" }),
         createAgent({ name: "idle-2", status: "idle" }),
-        createAgent({ name: "idle-3", status: "done: bd-3 (10m)" }),
-        createAgent({ name: "error-1", status: "error: bd-4 (1m)" }),
+        createAgent({ name: "idle-3", status: "done: loom-3 (10m)" }),
+        createAgent({ name: "error-1", status: "error: loom-4 (1m)" }),
         createAgent({ name: "needs-push-1", status: "ready", ahead: 2 }),
         createAgent({
           name: "needs-push-2",
-          status: "working: bd-5 (3m)",
+          status: "working: loom-5 (3m)",
           ahead: 1,
         }),
       ];
@@ -152,7 +152,7 @@ describe("AgentActivityPanel", () => {
     it("hides error count when no errors", () => {
       const agents = [
         createAgent({ name: "agent-1", status: "ready" }),
-        createAgent({ name: "agent-2", status: "working: bd-1 (5m)" }),
+        createAgent({ name: "agent-2", status: "working: loom-1 (5m)" }),
       ];
 
       render(<AgentActivityPanel {...defaultProps} agents={agents} />);
@@ -165,7 +165,7 @@ describe("AgentActivityPanel", () => {
         createAgent({ name: "agent-1", status: "ready", ahead: 0 }),
         createAgent({
           name: "agent-2",
-          status: "working: bd-1 (5m)",
+          status: "working: loom-1 (5m)",
           ahead: 0,
         }),
       ];
@@ -365,12 +365,12 @@ describe("AgentActivityPanel", () => {
   describe("task titles", () => {
     it("shows task titles from agentTasks", () => {
       const agents = [
-        createAgent({ name: "nova", status: "working: bd-123 (5m)" }),
-        createAgent({ name: "falcon", status: "planning: bd-456 (2m)" }),
+        createAgent({ name: "nova", status: "working: loom-123 (5m)" }),
+        createAgent({ name: "falcon", status: "planning: loom-456 (2m)" }),
       ];
       const agentTasks = createAgentTasks({
-        nova: { id: "bd-123", title: "Fix the login bug" },
-        falcon: { id: "bd-456", title: "Add new feature" },
+        nova: { id: "loom-123", title: "Fix the login bug" },
+        falcon: { id: "loom-456", title: "Add new feature" },
       });
 
       render(
@@ -387,7 +387,7 @@ describe("AgentActivityPanel", () => {
 
     it("handles missing task info gracefully", () => {
       const agents = [
-        createAgent({ name: "nova", status: "working: bd-123 (5m)" }),
+        createAgent({ name: "nova", status: "working: loom-123 (5m)" }),
       ];
       // Empty agentTasks - no task info for nova
       const agentTasks = {};
@@ -436,12 +436,12 @@ describe("AgentActivityPanel", () => {
     it("handles agents with all status types", () => {
       const agents = [
         createAgent({ name: "ready-agent", status: "ready" }),
-        createAgent({ name: "working-agent", status: "working: bd-1 (5m)" }),
-        createAgent({ name: "planning-agent", status: "planning: bd-2 (2m)" }),
-        createAgent({ name: "done-agent", status: "done: bd-3 (10m)" }),
-        createAgent({ name: "review-agent", status: "review: bd-4 (1h)" }),
+        createAgent({ name: "working-agent", status: "working: loom-1 (5m)" }),
+        createAgent({ name: "planning-agent", status: "planning: loom-2 (2m)" }),
+        createAgent({ name: "done-agent", status: "done: loom-3 (10m)" }),
+        createAgent({ name: "review-agent", status: "review: loom-4 (1h)" }),
         createAgent({ name: "idle-agent", status: "idle" }),
-        createAgent({ name: "error-agent", status: "error: bd-5 (3m)" }),
+        createAgent({ name: "error-agent", status: "error: loom-5 (3m)" }),
         createAgent({ name: "dirty-agent", status: "dirty" }),
         createAgent({ name: "changes-agent", status: "5 changes" }),
       ];
@@ -476,7 +476,7 @@ describe("AgentActivityPanel", () => {
   describe("summary computation", () => {
     it("counts working agents as active", () => {
       const agents = [
-        createAgent({ name: "agent-1", status: "working: bd-1 (5m)" }),
+        createAgent({ name: "agent-1", status: "working: loom-1 (5m)" }),
       ];
 
       render(<AgentActivityPanel {...defaultProps} agents={agents} />);
@@ -487,7 +487,7 @@ describe("AgentActivityPanel", () => {
 
     it("counts planning agents as active", () => {
       const agents = [
-        createAgent({ name: "agent-1", status: "planning: bd-1 (5m)" }),
+        createAgent({ name: "agent-1", status: "planning: loom-1 (5m)" }),
       ];
 
       render(<AgentActivityPanel {...defaultProps} agents={agents} />);
@@ -508,7 +508,7 @@ describe("AgentActivityPanel", () => {
 
     it("counts done agents as idle", () => {
       const agents = [
-        createAgent({ name: "agent-1", status: "done: bd-1 (10m)" }),
+        createAgent({ name: "agent-1", status: "done: loom-1 (10m)" }),
       ];
 
       render(<AgentActivityPanel {...defaultProps} agents={agents} />);
@@ -538,9 +538,9 @@ describe("AgentActivityPanel", () => {
   describe("colored summary dots", () => {
     it("renders colored dots in summary bar for each status", () => {
       const agents = [
-        createAgent({ name: "a1", status: "working: bd-1 (5m)" }),
+        createAgent({ name: "a1", status: "working: loom-1 (5m)" }),
         createAgent({ name: "a2", status: "ready" }),
-        createAgent({ name: "a3", status: "error: bd-2 (1m)" }),
+        createAgent({ name: "a3", status: "error: loom-2 (1m)" }),
         createAgent({ name: "a4", status: "ready", ahead: 2 }),
       ];
 
@@ -554,9 +554,9 @@ describe("AgentActivityPanel", () => {
 
     it("renders dots with correct data-type attributes", () => {
       const agents = [
-        createAgent({ name: "a1", status: "working: bd-1 (5m)" }),
+        createAgent({ name: "a1", status: "working: loom-1 (5m)" }),
         createAgent({ name: "a2", status: "ready" }),
-        createAgent({ name: "a3", status: "error: bd-2 (1m)" }),
+        createAgent({ name: "a3", status: "error: loom-2 (1m)" }),
         createAgent({ name: "a4", status: "ready", ahead: 1 }),
       ];
 
@@ -573,7 +573,7 @@ describe("AgentActivityPanel", () => {
 
     it("only renders active and idle dots when no errors or push needed", () => {
       const agents = [
-        createAgent({ name: "a1", status: "working: bd-1 (5m)" }),
+        createAgent({ name: "a1", status: "working: loom-1 (5m)" }),
         createAgent({ name: "a2", status: "ready" }),
       ];
 

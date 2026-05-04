@@ -10,7 +10,9 @@ import { render, screen, fireEvent, cleanup } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import "@testing-library/jest-dom";
 
+import type { KanbanColumnConfig } from "@/components/KanbanBoard";
 import type { Issue, Status } from "@/types";
+import { formatStatusLabel } from "@/utils/issue";
 
 import { SwimLaneBoard } from "../SwimLaneBoard";
 
@@ -49,6 +51,19 @@ function createMockIssue(overrides: Partial<Issue> = {}): Issue {
  * Default statuses for testing.
  */
 const defaultStatuses: Status[] = ["open", "in_progress", "closed"];
+const defaultColumns = columnsFromStatuses(defaultStatuses);
+
+function columnsFromStatuses(statuses: Status[]): KanbanColumnConfig[] {
+  return statuses.map((status) => ({
+    id: status,
+    label: formatStatusLabel(status),
+    filter: (issue: Issue) =>
+      status === "open"
+        ? issue.status === status || issue.status === undefined
+        : issue.status === status,
+    targetStatus: status,
+  }));
+}
 
 /**
  * Mock localStorage implementation for testing.
@@ -134,7 +149,7 @@ describe("SwimLaneBoard persistence", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="assignee"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
         />,
       );
 
@@ -171,7 +186,7 @@ describe("SwimLaneBoard persistence", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="assignee"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
         />,
       );
 
@@ -208,7 +223,7 @@ describe("SwimLaneBoard persistence", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="assignee"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
         />,
       );
 
@@ -224,7 +239,7 @@ describe("SwimLaneBoard persistence", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="assignee"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
         />,
       );
 
@@ -257,7 +272,7 @@ describe("SwimLaneBoard persistence", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="assignee"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
         />,
       );
 
@@ -279,7 +294,7 @@ describe("SwimLaneBoard persistence", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="priority"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
         />,
       );
 
@@ -325,7 +340,7 @@ describe("SwimLaneBoard persistence", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="assignee"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
         />,
       );
 
@@ -340,7 +355,7 @@ describe("SwimLaneBoard persistence", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="priority"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
         />,
       );
 
@@ -369,7 +384,7 @@ describe("SwimLaneBoard persistence", () => {
           <SwimLaneBoard
             issues={issues}
             groupBy="assignee"
-            statuses={defaultStatuses}
+            columns={defaultColumns}
           />,
         );
       }).not.toThrow();
@@ -393,7 +408,7 @@ describe("SwimLaneBoard persistence", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="assignee"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
         />,
       );
 
@@ -424,7 +439,7 @@ describe("SwimLaneBoard persistence", () => {
           <SwimLaneBoard
             issues={issues}
             groupBy="assignee"
-            statuses={defaultStatuses}
+            columns={defaultColumns}
           />,
         );
       }).not.toThrow();
@@ -451,7 +466,7 @@ describe("SwimLaneBoard persistence", () => {
           <SwimLaneBoard
             issues={issues}
             groupBy="assignee"
-            statuses={defaultStatuses}
+            columns={defaultColumns}
           />,
         );
       }).not.toThrow();
@@ -478,7 +493,7 @@ describe("SwimLaneBoard persistence", () => {
           <SwimLaneBoard
             issues={issues}
             groupBy="assignee"
-            statuses={defaultStatuses}
+            columns={defaultColumns}
           />,
         );
       }).not.toThrow();
@@ -507,7 +522,7 @@ describe("SwimLaneBoard persistence", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="assignee"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
         />,
       );
 
@@ -539,7 +554,7 @@ describe("SwimLaneBoard persistence", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="assignee"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
         />,
       );
 
@@ -576,7 +591,7 @@ describe("SwimLaneBoard persistence", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="assignee"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
         />,
       );
 
@@ -603,7 +618,7 @@ describe("SwimLaneBoard persistence", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="assignee"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
         />,
       );
 
@@ -631,7 +646,7 @@ describe("SwimLaneBoard persistence", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="assignee"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
           defaultCollapsed={true}
         />,
       );
@@ -668,7 +683,7 @@ describe("SwimLaneBoard persistence", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="assignee"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
           defaultCollapsed={true}
         />,
       );
@@ -703,7 +718,7 @@ describe("SwimLaneBoard persistence", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="none"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
         />,
       );
 

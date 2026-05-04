@@ -1,5 +1,6 @@
 import createClient, { type Middleware } from "openapi-fetch";
 import type { paths } from "@/types/generated/openapi";
+import { reportError } from "./errorReporter";
 
 const DEFAULT_TIMEOUT = 30000;
 
@@ -26,8 +27,7 @@ export const API_BASE_URL: string = "";
  * same bundle works on any host/port the SPA is served from.
  *
  * In non-browser environments (Node-based unit tests) where `window` is
- * unavailable, falls back to "http://localhost" — matching the legacy
- * behavior the old helpers exposed to tests.
+ * unavailable, falls back to "http://localhost".
  */
 export function getApiOrigin(): string {
   if (typeof window !== "undefined" && window.location) {
@@ -238,15 +238,9 @@ const apiMiddleware: Middleware = {
         response.status >= 500 &&
         !url.pathname.endsWith("/api/client-errors")
       ) {
-        import("./errorReporter")
-          .then(({ reportError }) => {
-            reportError(
-              "api-error",
-              `${response.status} ${response.statusText}`,
-              { url: url.pathname },
-            );
-          })
-          .catch(() => {}); // silent
+        reportError("api-error", `${response.status} ${response.statusText}`, {
+          url: url.pathname,
+        });
       }
     }
     return response;
@@ -303,7 +297,7 @@ export function cleanQuery<Q = any>(obj: Record<string, unknown>): Q {
   return result as Q;
 }
 
-// ============= Legacy fetchApi (kept for non-OpenAPI endpoints) =============
+// ============= Fetch Helpers For Non-OpenAPI Endpoints =============
 
 async function fetchApi<T>(
   method: string,
@@ -362,17 +356,9 @@ async function fetchApi<T>(
 
       // Report 5xx errors (but not errors about the error endpoint itself)
       if (response.status >= 500 && path !== "/api/client-errors") {
-        import("./errorReporter")
-          .then(({ reportError }) => {
-            reportError(
-              "api-error",
-              `${response.status} ${response.statusText}`,
-              {
-                url: path,
-              },
-            );
-          })
-          .catch(() => {}); // silent - error reporting must never throw
+        reportError("api-error", `${response.status} ${response.statusText}`, {
+          url: path,
+        });
       }
 
       let errorBody: unknown;

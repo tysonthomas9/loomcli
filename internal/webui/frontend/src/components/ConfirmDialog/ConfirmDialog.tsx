@@ -89,7 +89,7 @@ export function ConfirmDialog({
         onKeyDown={handleKeyDown}
       >
         <h2 className={styles.title}>{title}</h2>
-        <p className={styles.message}>{message}</p>
+        <div className={styles.message}>{message}</div>
         <div className={styles.actions}>
           <button
             ref={cancelRef}

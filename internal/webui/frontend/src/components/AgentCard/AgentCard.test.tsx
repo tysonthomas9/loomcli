@@ -109,7 +109,7 @@ describe("AgentCard", () => {
 
     it("has a background color style", () => {
       const { container } = render(
-        <AgentCard agent={makeAgent({ status: "working: bd-123 (5m)" })} />,
+        <AgentCard agent={makeAgent({ status: "working: loom-123 (5m)" })} />,
       );
 
       const dot = container.querySelector('[aria-hidden="true"]');
@@ -175,7 +175,7 @@ describe("AgentCard", () => {
     it('shows "Working" for working with task ID', () => {
       render(
         <AgentCard
-          agent={makeAgent({ status: "working: bd-123 (5m)", branch: "b" })}
+          agent={makeAgent({ status: "working: loom-123 (5m)", branch: "b" })}
         />,
       );
 
@@ -193,7 +193,7 @@ describe("AgentCard", () => {
     it('shows "Planning" for planning with task ID', () => {
       render(
         <AgentCard
-          agent={makeAgent({ status: "planning: bd-456 (2m)", branch: "b" })}
+          agent={makeAgent({ status: "planning: loom-456 (2m)", branch: "b" })}
         />,
       );
 
@@ -381,7 +381,7 @@ describe("AgentCard", () => {
 
     it("sets data-status to working for working status", () => {
       const { container } = render(
-        <AgentCard agent={makeAgent({ status: "working: bd-123 (5m)" })} />,
+        <AgentCard agent={makeAgent({ status: "working: loom-123 (5m)" })} />,
       );
 
       expect(container.firstChild).toHaveAttribute("data-status", "working");
@@ -475,7 +475,7 @@ describe("AgentCard", () => {
     it("uses taskTitle as title attribute on status line when provided", () => {
       render(
         <AgentCard
-          agent={makeAgent({ status: "working: bd-123 (5m)", branch: "b" })}
+          agent={makeAgent({ status: "working: loom-123 (5m)", branch: "b" })}
           taskTitle="Fix the login bug"
         />,
       );

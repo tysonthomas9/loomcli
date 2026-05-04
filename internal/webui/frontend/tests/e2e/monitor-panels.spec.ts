@@ -15,7 +15,7 @@ const mockAgents = [
     name: "nova",
     status: "working",
     branch: "feature-auth",
-    task: "bd-101",
+    task: "loom-101",
     ahead: 2,
     behind: 0,
     last_seen: "2026-01-24T12:00:00Z",
@@ -33,7 +33,7 @@ const mockAgents = [
     name: "cobalt",
     status: "planning",
     branch: "feature-ui",
-    task: "bd-102",
+    task: "loom-102",
     ahead: 0,
     behind: 0,
     last_seen: "2026-01-24T12:01:00Z",
@@ -42,7 +42,7 @@ const mockAgents = [
     name: "ember",
     status: "error",
     branch: "fix-bug",
-    task: "bd-103",
+    task: "loom-103",
     ahead: 1,
     behind: 1,
     last_seen: "2026-01-24T11:00:00Z",
@@ -62,9 +62,9 @@ const mockAgentTasks: Record<
   string,
   { id: string; title: string; priority: number }
 > = {
-  nova: { id: "bd-101", title: "Implement authentication", priority: 1 },
-  cobalt: { id: "bd-102", title: "Design UI components", priority: 2 },
-  ember: { id: "bd-103", title: "Fix critical bug", priority: 0 },
+  nova: { id: "loom-101", title: "Implement authentication", priority: 1 },
+  cobalt: { id: "loom-102", title: "Design UI components", priority: 2 },
+  ember: { id: "loom-103", title: "Fix critical bug", priority: 0 },
 };
 
 const mockLoomStatus = {
@@ -107,12 +107,12 @@ const mockIssues = [
 
 const mockLoomTasks = {
   needs_planning: [
-    { id: "bd-010", title: "Plan new feature", priority: 2 },
-    { id: "bd-011", title: "Design API", priority: 1 },
+    { id: "loom-010", title: "Plan new feature", priority: 2 },
+    { id: "loom-011", title: "Design API", priority: 1 },
   ],
-  ready_to_implement: [{ id: "bd-020", title: "Implement login", priority: 1 }],
-  in_progress: [{ id: "bd-001", title: "Implement feature X", priority: 2 }],
-  needs_review: [{ id: "bd-030", title: "Review PR", priority: 2 }],
+  ready_to_implement: [{ id: "loom-020", title: "Implement login", priority: 1 }],
+  in_progress: [{ id: "loom-001", title: "Implement feature X", priority: 2 }],
+  needs_review: [{ id: "loom-030", title: "Review PR", priority: 2 }],
   blocked: [],
 };
 

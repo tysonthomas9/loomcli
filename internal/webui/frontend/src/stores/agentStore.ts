@@ -80,6 +80,7 @@ export interface AgentStoreConfig {
 
 export interface PollingOptions {
   pollInterval?: number; // ms, default 5000
+  workspaceId?: string;
 }
 
 export interface AgentStoreState {
@@ -198,6 +199,7 @@ export function createAgentStore(
   let pollIntervalId: ReturnType<typeof setInterval> | null = null;
   let retryTimeoutId: ReturnType<typeof setTimeout> | null = null;
   let countdownIntervalId: ReturnType<typeof setInterval> | null = null;
+  let activeWorkspaceId: string | undefined;
   let staleBannerTimeoutId: ReturnType<typeof setTimeout> | null = null;
   let fetchInProgress = false;
   let fetchStartTime = 0;
@@ -327,7 +329,7 @@ export function createAgentStore(
 
       try {
         const agentsResult = await withTimeout(
-          fetchAgents(),
+          fetchAgents(activeWorkspaceId),
           FETCH_TIMEOUT_MS,
           "Agent fetch",
         );
@@ -359,7 +361,7 @@ export function createAgentStore(
         void (async () => {
           try {
             const statusResult = await withTimeout(
-              fetchStatus(),
+              fetchStatus(activeWorkspaceId),
               FETCH_TIMEOUT_MS,
               "Status fetch",
             );
@@ -382,7 +384,7 @@ export function createAgentStore(
         void (async () => {
           try {
             const tasksResult = await withTimeout(
-              fetchTasks(),
+              fetchTasks(activeWorkspaceId),
               FETCH_TIMEOUT_MS,
               "Tasks fetch",
             );
@@ -428,6 +430,7 @@ export function createAgentStore(
         get().stopPolling();
       }
 
+      activeWorkspaceId = options?.workspaceId;
       const interval = options?.pollInterval ?? 5000;
       isPolling = true;
 
@@ -513,6 +516,7 @@ export function createAgentStore(
       currentRetryDelay = INITIAL_RETRY_DELAY_S;
       consecutiveFailuresAtCeiling = 0;
       isPolling = false;
+      activeWorkspaceId = undefined;
 
       set({ ...INITIAL_STATE });
     },

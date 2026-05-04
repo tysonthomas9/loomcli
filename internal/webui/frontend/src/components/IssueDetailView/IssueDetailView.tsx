@@ -8,7 +8,7 @@
 import { useEffect, useState, useCallback } from "react";
 
 import type { Issue, IssueDetails, IssueWithDependencyMetadata } from "@/types";
-import type { ViewMode } from "@/components/ViewSwitcher";
+import type { ViewMode } from "@/types";
 import type { Status } from "@/types/issue";
 import { useRegisterEscapeLayer, LAYER_ISSUE_PANEL } from "@/hooks";
 import { getReviewType } from "@/utils/issue";

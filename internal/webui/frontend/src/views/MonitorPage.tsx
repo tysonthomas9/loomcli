@@ -1,12 +1,13 @@
 import { lazy, Suspense } from "react";
-import { ErrorBoundary, LoadingSkeleton } from "@/components";
+import { ErrorBoundary } from "@/components/ErrorBoundary/ErrorBoundary";
+import { LoadingSkeleton } from "@/components/LoadingSkeleton/LoadingSkeleton";
 import {
   useWorkspaceViewData,
   useWorkspaceViewActions,
 } from "@/contexts/WorkspaceViewContext";
 
 const MonitorDashboard = lazy(() =>
-  import("@/components/MonitorDashboard").then((m) => ({
+  import("@/components/MonitorDashboard/MonitorDashboard").then((m) => ({
     default: m.MonitorDashboard,
   })),
 );

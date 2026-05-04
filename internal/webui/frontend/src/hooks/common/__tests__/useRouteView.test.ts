@@ -6,7 +6,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { createElement, type ReactNode } from "react";
 
-import { DEFAULT_VIEW } from "@/components/ViewSwitcher";
+import { DEFAULT_VIEW } from "@/types";
 
 import { useRouteView } from "../useRouteView";
 

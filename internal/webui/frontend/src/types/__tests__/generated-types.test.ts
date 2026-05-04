@@ -51,7 +51,7 @@ describe("Generated openapi.ts exports", () => {
     // Type-level: if this compiles, `components` has a `schemas` member.
     const _schema: components["schemas"]["Comment"] = {
       id: 1,
-      issue_id: "bd-1",
+      issue_id: "loom-1",
       author: "alice",
       text: "hello",
       created_at: "2024-01-01T00:00:00Z",
@@ -75,14 +75,14 @@ describe("Comment alias", () => {
   it("has expected fields from generated Comment schema", () => {
     const comment: Comment = {
       id: 42,
-      issue_id: "bd-100",
+      issue_id: "loom-100",
       author: "bob",
       text: "Looks good",
       created_at: "2024-06-15T09:00:00Z",
     };
 
     expect(comment.id).toBe(42);
-    expect(comment.issue_id).toBe("bd-100");
+    expect(comment.issue_id).toBe("loom-100");
     expect(comment.author).toBe("bob");
     expect(comment.text).toBe("Looks good");
     expect(comment.created_at).toBe("2024-06-15T09:00:00Z");
@@ -115,7 +115,7 @@ describe("SessionRecord alias", () => {
   it("has session_id and task_id fields (not id)", () => {
     const session: SessionRecord = {
       session_id: "sess-abc",
-      task_id: "bd-200",
+      task_id: "loom-200",
       agent_name: "nova",
       backend: "claude",
       started_at: "2024-07-01T10:00:00Z",
@@ -133,7 +133,7 @@ describe("SessionRecord alias", () => {
     };
 
     expect(session.session_id).toBe("sess-abc");
-    expect(session.task_id).toBe("bd-200");
+    expect(session.task_id).toBe("loom-200");
     // Confirm there is no `id` field at runtime
     expect("id" in session).toBe(false);
   });
@@ -141,7 +141,7 @@ describe("SessionRecord alias", () => {
   it("supports optional fields", () => {
     const session: SessionRecord = {
       session_id: "sess-def",
-      task_id: "bd-201",
+      task_id: "loom-201",
       agent_name: "falcon",
       backend: "openai",
       model: "gpt-4",
@@ -248,11 +248,11 @@ describe("Usage type aliases", () => {
       ended_at: "2024-08-01T00:30:00Z",
       exit_code: 0,
       session_id: "sess-123",
-      task_id: "bd-50",
+      task_id: "loom-50",
     };
 
     expect(usage.session_id).toBe("sess-123");
-    expect(usage.task_id).toBe("bd-50");
+    expect(usage.task_id).toBe("loom-50");
   });
 
   it("UsageAgentSummary has expected fields", () => {
@@ -395,22 +395,22 @@ describe("Observability type aliases", () => {
 describe("Dependency alias", () => {
   it("has expected fields from generated Dependency schema", () => {
     const dep: Dependency = {
-      issue_id: "bd-10",
-      depends_on_id: "bd-20",
+      issue_id: "loom-10",
+      depends_on_id: "loom-20",
       type: "blocks",
       created_at: "2024-01-01T00:00:00Z",
     };
 
-    expect(dep.issue_id).toBe("bd-10");
-    expect(dep.depends_on_id).toBe("bd-20");
+    expect(dep.issue_id).toBe("loom-10");
+    expect(dep.depends_on_id).toBe("loom-20");
     expect(dep.type).toBe("blocks");
     expect(dep.created_at).toBe("2024-01-01T00:00:00Z");
   });
 
   it("supports optional fields", () => {
     const dep: Dependency = {
-      issue_id: "bd-10",
-      depends_on_id: "bd-20",
+      issue_id: "loom-10",
+      depends_on_id: "loom-20",
       type: "blocks",
       created_at: "2024-01-01T00:00:00Z",
       created_by: "alice",
@@ -431,14 +431,14 @@ describe("Event alias (IssueEvent)", () => {
   it("has expected fields from generated IssueEvent schema", () => {
     const event: Event = {
       id: 1,
-      issue_id: "bd-5",
+      issue_id: "loom-5",
       event_type: "issue.created",
       actor: "alice",
       created_at: "2024-03-01T12:00:00Z",
     };
 
     expect(event.id).toBe(1);
-    expect(event.issue_id).toBe("bd-5");
+    expect(event.issue_id).toBe("loom-5");
     expect(event.event_type).toBe("issue.created");
     expect(event.actor).toBe("alice");
   });
@@ -446,7 +446,7 @@ describe("Event alias (IssueEvent)", () => {
   it("supports optional old_value/new_value/comment", () => {
     const event: Event = {
       id: 2,
-      issue_id: "bd-5",
+      issue_id: "loom-5",
       event_type: "issue.status_changed",
       actor: "bob",
       old_value: "open",
@@ -467,21 +467,21 @@ describe("Event alias (IssueEvent)", () => {
 describe("Issue type (Omit + IssueExtensions)", () => {
   it("has base fields from generated schema", () => {
     const issue: Issue = {
-      id: "bd-1",
+      id: "loom-1",
       title: "Fix login bug",
       priority: 2,
       created_at: "2024-01-01T00:00:00Z",
       updated_at: "2024-01-01T00:00:00Z",
     };
 
-    expect(issue.id).toBe("bd-1");
+    expect(issue.id).toBe("loom-1");
     expect(issue.title).toBe("Fix login bug");
     expect(issue.priority).toBe(2);
   });
 
   it("accepts extension fields not in generated schema", () => {
     const issue: Issue = {
-      id: "bd-2",
+      id: "loom-2",
       title: "HOP validated issue",
       priority: 1,
       created_at: "2024-01-01T00:00:00Z",
@@ -503,7 +503,7 @@ describe("Issue type (Omit + IssueExtensions)", () => {
     // The IssueExtensions type widens status to the full Status union,
     // including internal statuses like tombstone, pinned, hooked.
     const issue: Issue = {
-      id: "bd-3",
+      id: "loom-3",
       title: "Tombstoned issue",
       priority: 3,
       status: "tombstone",
@@ -518,12 +518,12 @@ describe("Issue type (Omit + IssueExtensions)", () => {
 describe("BlockerRef alias", () => {
   it("has expected fields from generated BlockerRef schema", () => {
     const blocker: BlockerRef = {
-      id: "bd-99",
+      id: "loom-99",
       title: "Blocking dependency",
       priority: 1,
     };
 
-    expect(blocker.id).toBe("bd-99");
+    expect(blocker.id).toBe("loom-99");
     expect(blocker.title).toBe("Blocking dependency");
     expect(blocker.priority).toBe(1);
   });
@@ -571,7 +571,7 @@ describe("Agent type aliases", () => {
     expect(agent.worktree_path).toBe("/home/user/repo/.worktrees/nova");
   });
 
-  it("LoomAgentStatus workspace is optional (legacy mode)", () => {
+  it("LoomAgentStatus workspace is optional for unassigned agents", () => {
     const agent: LoomAgentStatus = {
       name: "falcon",
       branch: "main",
@@ -585,13 +585,13 @@ describe("Agent type aliases", () => {
 
   it("LoomTaskInfo has expected fields", () => {
     const task: LoomTaskInfo = {
-      id: "bd-50",
+      id: "loom-50",
       title: "Implement search",
       priority: 2,
       status: "open",
     };
 
-    expect(task.id).toBe("bd-50");
+    expect(task.id).toBe("loom-50");
     expect(task.title).toBe("Implement search");
   });
 
@@ -686,7 +686,7 @@ describe("Agent type aliases", () => {
 
   it("LoomAgentsResponse has expected fields", () => {
     const response: LoomAgentsResponse = {
-      workspace: { mode: "legacy" },
+      workspace: { mode: "workspace" },
       agents: [
         {
           name: "nova",
@@ -715,12 +715,12 @@ describe("Agent type aliases", () => {
         epics: 1,
       },
       needs_planning: [
-        { id: "bd-1", title: "Plan X", priority: 1, status: "open" },
+        { id: "loom-1", title: "Plan X", priority: 1, status: "open" },
       ],
       ready_to_implement: [],
       needs_review: [],
       in_progress: [
-        { id: "bd-2", title: "Build Y", priority: 2, status: "in_progress" },
+        { id: "loom-2", title: "Build Y", priority: 2, status: "in_progress" },
       ],
       backlog: [],
       done: [],
@@ -740,7 +740,7 @@ describe("Structural compatibility", () => {
   it("generated Comment schema object satisfies Comment alias", () => {
     const raw: components["schemas"]["Comment"] = {
       id: 1,
-      issue_id: "bd-1",
+      issue_id: "loom-1",
       author: "test",
       text: "test",
       created_at: "2024-01-01T00:00:00Z",
@@ -807,7 +807,7 @@ describe("Structural compatibility", () => {
   it("generated IssueEvent schema object satisfies Event alias", () => {
     const raw: components["schemas"]["IssueEvent"] = {
       id: 1,
-      issue_id: "bd-1",
+      issue_id: "loom-1",
       event_type: "issue.created",
       actor: "system",
       created_at: "2024-01-01T00:00:00Z",
@@ -818,8 +818,8 @@ describe("Structural compatibility", () => {
 
   it("generated Dependency schema object satisfies Dependency alias", () => {
     const raw: components["schemas"]["Dependency"] = {
-      issue_id: "bd-1",
-      depends_on_id: "bd-2",
+      issue_id: "loom-1",
+      depends_on_id: "loom-2",
       type: "blocks",
       created_at: "2024-01-01T00:00:00Z",
     };
@@ -829,7 +829,7 @@ describe("Structural compatibility", () => {
 
   it("generated BlockerRef schema object satisfies BlockerRef alias", () => {
     const raw: components["schemas"]["BlockerRef"] = {
-      id: "bd-1",
+      id: "loom-1",
       title: "Blocker",
       priority: 1,
     };

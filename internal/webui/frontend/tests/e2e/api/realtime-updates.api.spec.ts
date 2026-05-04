@@ -8,7 +8,7 @@
  * SSE Wire Format:
  *   id: <timestamp>
  *   event: mutation
- *   data: {"type":"create","issue_id":"bd-xxx",...}
+ *   data: {"type":"create","issue_id":"loom-xxx",...}
  */
 
 import * as http from 'http'
@@ -245,7 +245,7 @@ test.describe('Real-time Updates (SSE)', () => {
 
   // Current fleet SSE is workspace-scoped and establishes successfully, but
   // issue mutation events are not emitted by the CLI-backed fleet adapter.
-  // Keep these contracts disabled instead of falling back to the legacy flat SSE endpoint.
+  // Keep these contracts disabled instead of falling back to flat SSE endpoints.
   test.describe.skip('Mutation Events', () => {
     test('create event received after POST /api/workspaces/{ws}/issues', async ({ api }) => {
       // Connect SSE first

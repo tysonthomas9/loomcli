@@ -1,6 +1,6 @@
 /**
  * API functions for git diff endpoints.
- * Uses legacy fetch wrapper (spec responses are untyped Record<string, never>).
+ * Uses the untyped fetch wrapper because spec responses are Record<string, never>.
  */
 
 import { get, ApiError, wsUrl } from "@/api/common";

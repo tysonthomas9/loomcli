@@ -1,4 +1,4 @@
-/** Terminal API functions. openapi-fetch for typed endpoints, legacy for untyped.
+/** Terminal API functions. openapi-fetch for typed endpoints, raw fetch for untyped.
  *
  * The tmux-era endpoints (spawn, restart, kill, session-status, seed,
  * lead-session, close-all, scrollback, scrollback-info, export,
@@ -191,7 +191,7 @@ export async function deleteTabMetadata(
 /**
  * List sessions grouped by issue ID from GET /api/workspaces/{workspace}/terminal/sessions/by-issue.
  * Returns a map of issue_id → session_name[].
- * Uses legacy client (spec response is untyped).
+ * Uses raw fetch because the spec response is untyped.
  */
 export async function listSessionsByIssue(
   workspaceId: string,

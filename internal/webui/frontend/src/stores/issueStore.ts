@@ -534,6 +534,7 @@ export function createIssueStore(
               { type: "info", duration: 3000 },
             );
           } else {
+            void get().refetch();
             onToast?.("Connection restored.", { type: "info", duration: 3000 });
           }
         }

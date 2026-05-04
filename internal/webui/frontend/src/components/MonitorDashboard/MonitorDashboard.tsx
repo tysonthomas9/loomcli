@@ -9,11 +9,12 @@
 
 import { lazy, Suspense } from "react";
 
-import { LoadingSkeleton } from "@/components";
-import type { ViewMode } from "@/components/ViewSwitcher";
+import { LoadingSkeleton } from "@/components/LoadingSkeleton/LoadingSkeleton";
+import type { ViewMode } from "@/types";
 import { useStore } from "zustand";
 
-import { useAgentStoreInstance, useBlockedIssues } from "@/hooks";
+import { useAgentStoreInstance } from "@/hooks/common/useStoreContext";
+import { useBlockedIssues } from "@/hooks/issues/useBlockedIssues";
 import type { Issue } from "@/types";
 
 import { AgentActivityPanel } from "./AgentActivityPanel";
@@ -22,7 +23,7 @@ import styles from "./MonitorDashboard.module.css";
 import { ProjectHealthPanel } from "./ProjectHealthPanel";
 
 const UsageDashboard = lazy(() =>
-  import("@/components/UsageDashboard").then((m) => ({
+  import("@/components/UsageDashboard/UsageDashboard").then((m) => ({
     default: m.UsageDashboard,
   })),
 );

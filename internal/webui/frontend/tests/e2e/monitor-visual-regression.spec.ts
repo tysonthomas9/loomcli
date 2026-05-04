@@ -73,7 +73,7 @@ const mockAllAgents = [
     name: "dev1",
     status: "working",
     branch: "feature-x",
-    task: "bd-001",
+    task: "loom-001",
     ahead: 0,
     behind: 0,
     last_seen: "2026-01-24T12:00:00Z",
@@ -91,7 +91,7 @@ const mockAllAgents = [
     name: "dev3",
     status: "error",
     branch: "bugfix-y",
-    task: "bd-003",
+    task: "loom-003",
     ahead: 0,
     behind: 0,
     last_seen: "2026-01-24T11:00:00Z",
@@ -100,7 +100,7 @@ const mockAllAgents = [
     name: "dev4",
     status: "planning",
     branch: "feature-z",
-    task: "bd-004",
+    task: "loom-004",
     ahead: 2,
     behind: 0,
     last_seen: "2026-01-24T12:05:00Z",
@@ -108,9 +108,9 @@ const mockAllAgents = [
 ]
 
 const mockAllAgentTasks: Record<string, { id: string; title: string; priority: number }> = {
-  dev1: { id: "bd-001", title: "Implement feature X", priority: 2 },
-  dev3: { id: "bd-003", title: "Fix critical bug in authentication module", priority: 0 },
-  dev4: { id: "bd-004", title: "Plan architecture redesign for scalability improvements", priority: 1 },
+  dev1: { id: "loom-001", title: "Implement feature X", priority: 2 },
+  dev3: { id: "loom-003", title: "Fix critical bug in authentication module", priority: 0 },
+  dev4: { id: "loom-004", title: "Plan architecture redesign for scalability improvements", priority: 1 },
 }
 
 const mockLoomStatus = {
@@ -140,19 +140,19 @@ const mockLoomStatus = {
 
 const mockLoomTasks = {
   needs_planning: [
-    { id: "bd-010", title: "Plan new feature", priority: 2 },
-    { id: "bd-011", title: "Design API", priority: 1 },
+    { id: "loom-010", title: "Plan new feature", priority: 2 },
+    { id: "loom-011", title: "Design API", priority: 1 },
   ],
   ready_to_implement: [
-    { id: "bd-020", title: "Implement login", priority: 1 },
-    { id: "bd-021", title: "Add tests", priority: 2 },
-    { id: "bd-022", title: "Fix bug", priority: 3 },
+    { id: "loom-020", title: "Implement login", priority: 1 },
+    { id: "loom-021", title: "Add tests", priority: 2 },
+    { id: "loom-022", title: "Fix bug", priority: 3 },
   ],
-  in_progress: [{ id: "bd-001", title: "Implement feature X", priority: 2 }],
-  needs_review: [{ id: "bd-030", title: "Review PR", priority: 2 }],
+  in_progress: [{ id: "loom-001", title: "Implement feature X", priority: 2 }],
+  needs_review: [{ id: "loom-030", title: "Review PR", priority: 2 }],
   blocked: [
-    { id: "bd-040", title: "Blocked task A", priority: 1 },
-    { id: "bd-041", title: "Blocked task B", priority: 2 },
+    { id: "loom-040", title: "Blocked task A", priority: 1 },
+    { id: "loom-041", title: "Blocked task B", priority: 2 },
   ],
 }
 
@@ -336,7 +336,7 @@ async function setupMocks(
   })
 
   // Mock global backend config endpoint
-  await page.route("**/api/config/backend", async (route) => {
+  await page.route("**/api/workspaces/*/config/backend", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",

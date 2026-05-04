@@ -107,13 +107,13 @@ describe("IssueNode", () => {
     });
 
     it("renders short ID as-is", () => {
-      const issue = createTestIssue({ id: "bd-xyz" });
+      const issue = createTestIssue({ id: "loom-xyz" });
       const props = createTestProps({
         data: createTestNodeData({ issue }),
       });
       renderWithProvider(props);
 
-      expect(screen.getByText("bd-xyz")).toBeInTheDocument();
+      expect(screen.getByText("loom-xyz")).toBeInTheDocument();
     });
 
     it("renders priority badge with correct text", () => {
@@ -287,7 +287,7 @@ describe("IssueNode", () => {
       expect(priorityBadge.className).toMatch(/priority2/);
     });
 
-    it("priority badge has data-priority attribute for backwards compatibility", () => {
+    it("priority badge has data-priority attribute for existing behavior", () => {
       const issue = createTestIssue({ priority: 1 });
       const props = createTestProps({
         data: createTestNodeData({ issue, priority: 1 }),

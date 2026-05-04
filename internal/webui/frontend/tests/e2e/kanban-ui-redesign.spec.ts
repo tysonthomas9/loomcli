@@ -6,7 +6,7 @@ import {
 } from "./helpers/fleet"
 
 /**
- * E2E tests for the Kanban Board UI Redesign (bd-spq5).
+ * E2E tests for the Kanban Board UI Redesign (loom-spq5).
  *
  * Covers card styling, hover/selection states, priority badges,
  * Talk to Lead FAB, sidebar rendering, and review column features.

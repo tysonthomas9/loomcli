@@ -29,6 +29,8 @@ RUN npm run build
 FROM nginx:1.27-alpine AS runtime
 
 COPY deploy/frontend/nginx.conf /etc/nginx/conf.d/default.conf
+COPY deploy/frontend/99-render-nginx-resolver.sh /docker-entrypoint.d/99-render-nginx-resolver.sh
+RUN chmod +x /docker-entrypoint.d/99-render-nginx-resolver.sh
 COPY --from=builder /app/dist /usr/share/nginx/html
 
 EXPOSE 80

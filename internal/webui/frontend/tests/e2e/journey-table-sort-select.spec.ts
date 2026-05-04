@@ -73,7 +73,7 @@ const ISSUES = [
   },
   {
     id: "sort-004",
-    title: "Cleanup legacy endpoints",
+    title: "Cleanup endpoints",
     status: "closed",
     priority: 3,
     issue_type: "chore",
@@ -135,7 +135,7 @@ async function setupMocks(page: Page) {
     });
   });
 
-  await page.route("**/api/config/backend", async (route) => {
+  await page.route("**/api/workspaces/*/config/backend", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",

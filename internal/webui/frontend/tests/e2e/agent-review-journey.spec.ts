@@ -40,7 +40,7 @@ const mockWorkspaceData = {
 
 const mockAgent = {
   name: "ember",
-  status: "working: bd-103 (30s)",
+  status: "working: loom-103 (30s)",
   branch: "fix-auth-bug",
   path: "/tmp/worktrees/ember",
   repo: "loomcli",
@@ -60,7 +60,7 @@ const mockAgent = {
 };
 
 const mockAgentTask = {
-  id: "bd-103",
+  id: "loom-103",
   title: "Fix authentication bug",
   priority: 1,
 };
@@ -75,7 +75,7 @@ const mockLoomStatus = {
     backlog: 0,
   },
   in_progress_list: [
-    { id: "bd-103", title: "Fix authentication bug", priority: 1 },
+    { id: "loom-103", title: "Fix authentication bug", priority: 1 },
   ],
   agent_tasks: { ember: mockAgentTask },
   stats: {
@@ -102,10 +102,10 @@ const mockLoomTasks = {
   summary: mockLoomStatus.tasks,
   needs_planning: [],
   ready_to_implement: [
-    { id: "bd-104", title: "Add rate limiter", priority: 2 },
+    { id: "loom-104", title: "Add rate limiter", priority: 2 },
   ],
   needs_review: [],
-  in_progress: [{ id: "bd-103", title: "Fix authentication bug", priority: 1 }],
+  in_progress: [{ id: "loom-103", title: "Fix authentication bug", priority: 1 }],
   backlog: [],
   closed: [],
   timestamp: "2026-01-15T10:00:00Z",
@@ -115,7 +115,7 @@ const mockLoomTasks = {
 
 const mockIssues = [
   {
-    id: "bd-103",
+    id: "loom-103",
     title: "Fix authentication bug",
     status: "in_progress",
     priority: 1,
@@ -125,7 +125,7 @@ const mockIssues = [
     updated_at: "2026-01-15T10:00:00Z",
   },
   {
-    id: "bd-104",
+    id: "loom-104",
     title: "Add rate limiter",
     status: "open",
     priority: 2,
@@ -197,7 +197,7 @@ const mockDiffFiles = [
     deletions: 0,
   },
   {
-    path: "config.yaml",
+    path: "settings.yml",
     status: "M" as const,
     additions: 3,
     deletions: 1,
@@ -427,7 +427,7 @@ async function setupBaseMocks(page: Page) {
   });
 
   // Issue detail endpoint (for task click navigation)
-  await page.route("**/workspaces/*/issues/bd-103", async (route) => {
+  await page.route("**/workspaces/*/issues/loom-103", async (route) => {
     if (route.request().method() === "GET") {
       await route.fulfill({
         status: 200,
@@ -659,10 +659,10 @@ test.describe("E2E Journey: Review agent code changes", () => {
     // Wait for agent panel to close
     await expect(panel).toHaveAttribute("data-state", "closed");
 
-    // Verify IssueDetailPanel opens with bd-103
+    // Verify IssueDetailPanel opens with loom-103
     const issuePanel = page.getByTestId("issue-detail-panel");
     await expect(issuePanel).toHaveAttribute("data-state", "open");
-    await expect(page.getByTestId("issue-id")).toContainText("bd-103");
+    await expect(page.getByTestId("issue-id")).toContainText("loom-103");
 
     // Verify agent panel is NOT open while issue panel is open (mutual exclusivity)
     await expect(panel).toHaveAttribute("data-state", "closed");
@@ -741,7 +741,7 @@ test.describe("E2E Journey: Review agent code changes", () => {
     // Verify file rows render with status badges and paths
     await expect(diffPanel.getByText("src/auth.go")).toBeVisible();
     await expect(diffPanel.getByText("src/auth_test.go")).toBeVisible();
-    await expect(diffPanel.getByText("config.yaml")).toBeVisible();
+    await expect(diffPanel.getByText("settings.yml")).toBeVisible();
 
     // Click first file row (src/auth.go) to expand
     // DiffFileRow uses <div role="button"> — must use getByRole, not locator("button")
