@@ -85,9 +85,15 @@ func collectAgentStatus(agentTasks map[string]TaskInfo, branch string) ([]AgentS
 }
 
 func collectAgentStatusDeps(deps *cli.Deps, agentTasks map[string]TaskInfo, branch string) ([]AgentStatus, map[string][]string) {
-	allWorktrees, err := cli.DiscoverWorktrees()
+	allWorktrees, err := cli.DiscoverAgentWorktrees()
 	if err != nil {
-		return nil, nil
+		allWorktrees = nil
+	}
+	if len(allWorktrees) == 0 {
+		allWorktrees, err = cli.DiscoverWorktrees()
+		if err != nil {
+			return nil, nil
+		}
 	}
 	// The workspace config may list both source repos and agent worktrees.
 	// Exclude source repos when linked worktrees exist.

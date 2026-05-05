@@ -286,6 +286,7 @@ func agentEntryFromDomain(a *domain.Agent) config.AgentEntry {
 		RepoGroups:       append([]string(nil), a.RepoGroups...),
 		CrossRepo:        a.CrossRepo,
 		Parent:           a.Parent,
+		DesiredState:     a.DesiredState,
 	}
 }
 

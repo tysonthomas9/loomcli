@@ -102,6 +102,33 @@ func TestActiveSessionEnvVars_WhenEmpty(t *testing.T) {
 	}
 }
 
+func TestBuildBackendEnv_IncludesActiveSessionEnv(t *testing.T) {
+	t.Cleanup(ClearActiveSessionEnv)
+
+	SetActiveSessionRuntimeEnv("/runtime", "sess-123")
+
+	env := buildBackendEnv("/worktree", "local-planner")
+	for _, want := range []string{
+		"LOOM_WORKTREE_PATH=/worktree",
+		"LOOM_AGENT_NAME=local-planner",
+		"LOOM_WORKSPACE_RUNTIME_DIR=/runtime",
+		"LOOM_SESSION_ID=sess-123",
+	} {
+		if !envHas(env, want) {
+			t.Fatalf("buildBackendEnv missing %q in %v", want, env)
+		}
+	}
+}
+
+func envHas(env []string, want string) bool {
+	for _, got := range env {
+		if got == want {
+			return true
+		}
+	}
+	return false
+}
+
 func TestActiveSessionEnvVars_Concurrent(t *testing.T) {
 	t.Cleanup(ClearActiveSessionEnv)
 

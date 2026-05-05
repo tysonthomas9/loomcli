@@ -69,9 +69,12 @@ func TestCreateParamsToBody_RenamesFields(t *testing.T) {
 	req := createParamsToBody(backend.CreateParams{
 		Title:      "T",
 		IssueType:  "task",
+		Status:     "deferred",
 		Parent:     "loom-1",
 		SourceRepo: "repo-a",
 		Priority:   3,
+		DeferUntil: "2026-05-01T00:00:00Z",
+		DueAt:      "2026-06-01T00:00:00Z",
 	})
 	// Renames: issue_type → type, parent → parent_id, source_repo → repo.
 	if _, ok := req["issue_type"]; ok {
@@ -95,6 +98,15 @@ func TestCreateParamsToBody_RenamesFields(t *testing.T) {
 	if req["priority"] != 3 {
 		t.Errorf("priority = %v, want 3", req["priority"])
 	}
+	if req["status"] != "deferred" {
+		t.Errorf("status = %v, want deferred", req["status"])
+	}
+	if req["defer_until"] != "2026-05-01T00:00:00Z" {
+		t.Errorf("defer_until = %v, want RFC3339", req["defer_until"])
+	}
+	if req["due_at"] != "2026-06-01T00:00:00Z" {
+		t.Errorf("due_at = %v, want RFC3339", req["due_at"])
+	}
 }
 
 func TestCreateParamsToBody_DropsLoomOnlyFields(t *testing.T) {
@@ -108,11 +120,10 @@ func TestCreateParamsToBody_DropsLoomOnlyFields(t *testing.T) {
 		ExternalRef:        "JIRA-1",
 		EstimatedMinutes:   &estim,
 		Dependencies:       []string{"loom-2"},
-		DueAt:              "2026-05-01",
 	})
 	for _, k := range []string{
 		"id", "acceptance_criteria", "created_by",
-		"external_ref", "estimated_minutes", "dependencies", "due_at",
+		"external_ref", "estimated_minutes", "dependencies",
 	} {
 		if _, ok := req[k]; ok {
 			t.Errorf("field %q must be dropped — not on fleet-db CreateIssueRequest", k)
@@ -122,7 +133,7 @@ func TestCreateParamsToBody_DropsLoomOnlyFields(t *testing.T) {
 
 func TestCreateParamsToBody_OmitsZeroValues(t *testing.T) {
 	req := createParamsToBody(backend.CreateParams{Title: "only"})
-	for _, k := range []string{"description", "type", "assignee", "owner", "labels", "parent_id", "repo", "design", "notes", "priority"} {
+	for _, k := range []string{"description", "status", "type", "assignee", "owner", "labels", "parent_id", "repo", "design", "notes", "defer_until", "due_at", "priority"} {
 		if _, ok := req[k]; ok {
 			t.Errorf("zero-value field %q should not appear in body", k)
 		}

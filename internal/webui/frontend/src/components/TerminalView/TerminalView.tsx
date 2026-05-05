@@ -3,7 +3,6 @@ import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import type { IssueContext } from "@/hooks/api";
 import { patchTerminalState } from "@/hooks/api";
 import { LoadingSkeleton } from "@/components";
-import { LAYER_TERMINAL_PANEL, useRegisterEscapeLayer } from "@/hooks";
 import { useBackendConfig } from "@/hooks/workspace";
 import { useSessionRestore, useTerminalMetadata } from "@/hooks/terminal";
 
@@ -12,7 +11,7 @@ import {
   NoBackendsEmptyState,
   useSplitView,
 } from "./layout";
-import { HelpPopover, useTerminalKeyboardShortcuts } from "./controls";
+import { HelpPopover } from "./controls";
 import {
   TerminalPane,
   TerminalPaneArea,
@@ -42,7 +41,6 @@ interface TerminalViewProps {
   onUnreadChange?: (hasAnyUnread: boolean) => void;
   onTabLimitReached?: (message: string) => void;
   onNavigateToSettings?: () => void;
-  onEscape?: () => void;
   /** When set, opens or focuses an agent's terminal tab. */
   pendingAgentName?: string | undefined;
   /** Called after pendingAgentName has been processed. */
@@ -57,14 +55,13 @@ export function TerminalView({
   onUnreadChange,
   onTabLimitReached,
   onNavigateToSettings,
-  onEscape,
   pendingAgentName,
   onAgentNameConsumed,
 }: TerminalViewProps): JSX.Element {
   const [tabs, setTabs] = useState<TabState[]>([]);
   const [activeTabId, setActiveTabId] = useState<string>("");
   const initializedRef = useRef(false);
-  const { name: workspace, id: workspaceId } = useWorkspaceTabState({
+  const { id: workspaceId } = useWorkspaceTabState({
     tabs,
     activeTabId,
     setTabs,
@@ -181,7 +178,7 @@ export function TerminalView({
     setTabs,
     setActiveTabId,
     initializedRef,
-    workspace,
+    workspace: workspaceId,
     isViewActive: isActive ?? false,
   });
 
@@ -274,61 +271,14 @@ export function TerminalView({
     setIsSessionPromptOpen(true);
   }, [handleTabLimitReached, tabs.length]);
 
-  const handleCycleTab = useCallback(
-    (direction: "forward" | "backward") => {
-      const currentTabs = tabsRef.current;
-      if (currentTabs.length <= 1) return;
-      const currentIdx = currentTabs.findIndex(
-        (t) => t.id === activeTabIdRef.current,
-      );
-      const nextIdx =
-        direction === "forward"
-          ? currentIdx < currentTabs.length - 1
-            ? currentIdx + 1
-            : 0
-          : currentIdx > 0
-            ? currentIdx - 1
-            : currentTabs.length - 1;
-      const nextTab = currentTabs[nextIdx];
-      if (nextTab) setActiveTabId(nextTab.id);
-    },
-    [tabsRef, activeTabIdRef],
-  );
-
-  const handleSwitchTabByIndex = useCallback(
-    (index: number) => {
-      const currentTabs = tabsRef.current;
-      const targetTab = currentTabs[index];
-      if (targetTab) handleTabChange(targetTab.id);
-    },
-    [tabsRef, handleTabChange],
-  );
-
-  const handleCloseActiveTab = useCallback(() => {
-    handleTabClose(activeTabIdRef.current);
-  }, [handleTabClose, activeTabIdRef]);
-
-  useTerminalKeyboardShortcuts({
-    isActive,
-    tabsRef,
-    activeTabIdRef,
-    onCycleTab: handleCycleTab,
-    onSwitchTabByIndex: handleSwitchTabByIndex,
-    onNewTab: handleNewTabClick,
-    onCloseTab: handleCloseActiveTab,
-    onTabLimitReached: handleTabLimitReached,
-    announce,
-  });
-  useRegisterEscapeLayer(
-    LAYER_TERMINAL_PANEL,
-    () => onEscape?.(),
-    isActive && Boolean(onEscape),
-  );
-
   const handleBackendSelect = useCallback(
     (backend: string) => {
       setIsSessionPromptOpen(false);
-      const { sessionName, label } = generateTabName(backend, tabs, workspace);
+      const { sessionName, label } = generateTabName(
+        backend,
+        tabs,
+        workspaceId,
+      );
       // Persist the tab so it survives a refresh. The WS handler spawns
       // the PTY on connect; this PUT is just metadata so the server can
       // return the tab in ListTabs on reload.
@@ -348,7 +298,7 @@ export function TerminalView({
       setActiveTabId(sessionName);
       announce(`New tab ${label} created`);
     },
-    [createTab, tabs, workspace, announce],
+    [createTab, tabs, workspaceId, announce],
   );
 
   const handleSessionPromptCancel = useCallback(() => {
@@ -550,6 +500,7 @@ export function TerminalView({
       <BackendPickerPrompt
         isOpen={isSessionPromptOpen}
         availableBackends={config?.available ?? []}
+        preferredBackend={config?.backend}
         isLoading={configLoading}
         onSelect={handleBackendSelect}
         onCancel={handleSessionPromptCancel}

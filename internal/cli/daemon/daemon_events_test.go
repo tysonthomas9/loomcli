@@ -44,7 +44,7 @@ func (s *SpyEmitter) EventsByType(t events.EventType) []events.Event {
 	return result
 }
 
-func setupTestWorktree(t *testing.T, name string) string {
+func setupTestWorktree(t *testing.T, name string) (string, string) {
 	t.Helper()
 	tmpDir := t.TempDir()
 	wtDir := filepath.Join(tmpDir, "worktrees", name)
@@ -53,13 +53,13 @@ func setupTestWorktree(t *testing.T, name string) string {
 	}
 	t.Setenv("LOOM_WORKTREES_DIR", filepath.Join(tmpDir, "worktrees"))
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
-	return tmpDir
+	return tmpDir, wtDir
 }
 
 func TestDaemon_NewDaemon_StoresEventBus(t *testing.T) {
 	spy := &SpyEmitter{}
-	agents := []AgentEntry{{Worktree: "falcon", Role: "plan"}}
-	tmpDir := setupTestWorktree(t, "falcon")
+	tmpDir, wtDir := setupTestWorktree(t, "falcon")
+	agents := []AgentEntry{{Worktree: wtDir, Role: "plan"}}
 	config := makeDaemonConfig(agents, nil)
 
 	daemon, err := NewDaemon(config, tmpDir, spy, nil, nil)
@@ -72,8 +72,8 @@ func TestDaemon_NewDaemon_StoresEventBus(t *testing.T) {
 }
 
 func TestDaemon_NewDaemon_NilBusDefaultsToNop(t *testing.T) {
-	agents := []AgentEntry{{Worktree: "falcon", Role: "plan"}}
-	tmpDir := setupTestWorktree(t, "falcon")
+	tmpDir, wtDir := setupTestWorktree(t, "falcon")
+	agents := []AgentEntry{{Worktree: wtDir, Role: "plan"}}
 	config := makeDaemonConfig(agents, nil)
 
 	daemon, err := NewDaemon(config, tmpDir, nil, nil, nil)

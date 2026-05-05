@@ -148,6 +148,24 @@ describe("BackendPickerPrompt", () => {
       expect(select).toHaveValue("claude");
     });
 
+    it("defaults to the preferred backend when it is available", () => {
+      render(
+        <BackendPickerPrompt {...defaultProps} preferredBackend="codex" />,
+      );
+
+      const select = screen.getByTestId("backend-picker-select");
+      expect(select).toHaveValue("codex");
+    });
+
+    it("falls back to the first available backend when the preferred backend is unavailable", () => {
+      render(
+        <BackendPickerPrompt {...defaultProps} preferredBackend="opencode" />,
+      );
+
+      const select = screen.getByTestId("backend-picker-select");
+      expect(select).toHaveValue("claude");
+    });
+
     it("allows changing the selected backend", () => {
       render(<BackendPickerPrompt {...defaultProps} />);
 

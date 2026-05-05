@@ -28,6 +28,7 @@ func createParamsToBackend(p *CreateIssueParams) backend.CreateParams {
 		Parent:             p.Parent,
 		Title:              p.Title,
 		Description:        p.Description,
+		Status:             p.Status,
 		IssueType:          p.IssueType,
 		Priority:           p.Priority,
 		Design:             p.Design,

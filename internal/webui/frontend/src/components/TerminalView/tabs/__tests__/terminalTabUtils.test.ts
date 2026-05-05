@@ -169,6 +169,12 @@ describe("generateTabName (shell backend)", () => {
     expect(result.label).toBe("lead-claude-1");
   });
 
+  it("sanitizes workspace prefix before building session name", () => {
+    const result = generateTabName("claude", [], "FleetDB Regression Fixture");
+    expect(result.sessionName).toBe("FleetDBRegressionFixture--lead-claude-1");
+    expect(result.label).toBe("lead-claude-1");
+  });
+
   it("does not prefix for default workspace", () => {
     const result = generateTabName("claude", [], "default");
     expect(result.sessionName).toBe("lead-claude-1");

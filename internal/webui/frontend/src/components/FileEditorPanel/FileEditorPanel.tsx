@@ -5,7 +5,7 @@
 
 import type { FileEntry } from "@/api/workspace";
 import type { UseFileTreeReturn } from "@/hooks/common/useFileTree";
-import { CodeMirrorEditor } from "@/components/CodeMirrorEditor/CodeMirrorEditor";
+import { CodeMirrorEditor } from "@/components/CodeMirrorEditor";
 import { useFileEditor } from "./useFileEditor";
 import type { UseFileEditorReturn } from "./useFileEditor";
 import styles from "./FileEditorPanel.module.css";

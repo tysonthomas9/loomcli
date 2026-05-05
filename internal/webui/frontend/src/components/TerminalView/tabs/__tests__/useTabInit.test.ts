@@ -245,6 +245,42 @@ describe("useTabInit", () => {
     expect(createTab).toHaveBeenCalledTimes(1);
   });
 
+  it("sanitizes workspace prefix for auto-created tab sessions", () => {
+    const setTabs = vi.fn();
+    const setActiveTabId = vi.fn();
+    const createTab = vi.fn().mockResolvedValue(undefined);
+
+    const args = createArgs({
+      workspace: "FleetDB Regression Fixture",
+      config: {
+        backend: "claude",
+        source: "config",
+        available: ["claude"],
+        agents: [],
+      },
+      setTabs: setTabs as unknown as React.Dispatch<
+        React.SetStateAction<TabState[]>
+      >,
+      setActiveTabId: setActiveTabId as unknown as React.Dispatch<
+        React.SetStateAction<string>
+      >,
+      createTab,
+    });
+
+    renderHook(() => useTabInit(args));
+
+    const tabs = setTabs.mock.calls[0][0] as TabState[];
+    expect(tabs[0].sessionName).toBe("FleetDBRegressionFixture--lead-claude-1");
+    expect(setActiveTabId).toHaveBeenCalledWith(
+      "FleetDBRegressionFixture--lead-claude-1",
+    );
+    expect(createTab).toHaveBeenCalledWith(
+      "FleetDBRegressionFixture--lead-claude-1",
+      "lead-claude-1",
+      0,
+    );
+  });
+
   it("creates tab for configured default backend", () => {
     const setActiveTabId = vi.fn();
     const setTabs = vi.fn();

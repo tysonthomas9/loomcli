@@ -661,7 +661,7 @@ Located in `tests/e2e/integration/`. These run against a real Podman Compose sta
 | `vi.mock('@/api')` | Hook tests | Isolate hooks from network calls |
 | Custom MockEventSource | SSE tests | Simulate browser EventSource API |
 | `vi.hoisted()` mock pattern | Component tests | Consistent mock access across test files |
-| Heavy component mocking | App tests | Prevent ResizeObserver/xterm issues in jsdom |
+| Heavy component mocking | App tests | Prevent ResizeObserver/terminal renderer issues in jsdom |
 | Playwright route interception | E2E tests | Control API responses in browser |
 
 ### Key Testing Patterns

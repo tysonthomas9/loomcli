@@ -1,11 +1,9 @@
 import { lazy, Suspense } from "react";
-import { ErrorBoundary } from "@/components/ErrorBoundary/ErrorBoundary";
-import { LoadingSkeleton } from "@/components/LoadingSkeleton/LoadingSkeleton";
-import { useRouteView } from "@/hooks/common/useRouteView";
-import { useWorkspaceContext } from "@/hooks/workspace/useWorkspaceContext";
+import { ErrorBoundary, LoadingSkeleton } from "@/components";
+import { useRouteView, useWorkspaceContext } from "@/hooks";
 
 const WorkspaceView = lazy(() =>
-  import("@/components/WorkspaceView/WorkspaceView").then((m) => ({
+  import("@/components/WorkspaceView").then((m) => ({
     default: m.WorkspaceView,
   })),
 );

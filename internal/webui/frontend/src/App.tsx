@@ -81,7 +81,7 @@ import type { Issue, Status } from "@/types";
 
 import styles from "./App.module.css";
 
-// Lazy load TerminalView (xterm.js ~100KB) — stays in App.tsx because terminal
+// Lazy load TerminalView; it stays in App.tsx because terminal
 // is always-mounted in the shell to preserve WebSocket connections across views.
 const TerminalView = lazy(() =>
   import("@/components/TerminalView/TerminalView").then((m) => ({
@@ -671,14 +671,6 @@ function App() {
     navigateToView("terminal");
   }, [navigateToView]);
 
-  const handleTerminalEscape = useCallback(() => {
-    if (window.history.length > 1) {
-      navigate(-1);
-    } else {
-      navigateToView("kanban");
-    }
-  }, [navigate, navigateToView]);
-
   const handleIssueContextConsumed = useCallback(() => {
     setPendingIssueContext(undefined);
   }, []);
@@ -1042,7 +1034,6 @@ function App() {
                   showToast(message, { type: "error" })
                 }
                 onNavigateToSettings={() => navigateToView("settings")}
-                onEscape={handleTerminalEscape}
               />
             </Suspense>
           </div>

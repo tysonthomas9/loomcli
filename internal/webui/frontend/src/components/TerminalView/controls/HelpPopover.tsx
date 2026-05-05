@@ -1,6 +1,6 @@
 /**
  * HelpPopover component.
- * Shows keyboard shortcuts and slash commands for the terminal.
+ * Shows browser/terminal-native shortcuts and slash commands.
  */
 
 import { useCallback, useEffect, useRef } from "react";
@@ -14,13 +14,8 @@ interface HelpPopoverProps {
 
 const SHORTCUTS: Array<{ label: string; keys: string }> = [
   { label: "Search in terminal", keys: "Ctrl+F" },
-  { label: "Toggle search", keys: "Ctrl+Shift+F" },
   { label: "Copy", keys: "Ctrl+Shift+C" },
   { label: "Paste", keys: "Ctrl+Shift+V" },
-  { label: "New tab", keys: "Ctrl+T" },
-  { label: "Close tab", keys: "Ctrl+W" },
-  { label: "Next tab", keys: "Ctrl+Tab" },
-  { label: "Previous tab", keys: "Ctrl+Shift+Tab" },
 ];
 
 const SLASH_COMMANDS: Array<{ command: string; description: string }> = [

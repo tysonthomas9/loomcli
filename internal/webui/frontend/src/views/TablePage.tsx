@@ -1,8 +1,6 @@
-import { ErrorBoundary } from "@/components/ErrorBoundary/ErrorBoundary";
-import { IssueTable } from "@/components/table/IssueTable";
-import { BulkActionToolbar } from "@/components/BulkActionToolbar/BulkActionToolbar";
-import { IssueViewGuard } from "@/components/IssueViewGuard/IssueViewGuard";
-import { useSelection } from "@/hooks/issues/useSelection";
+import { ErrorBoundary, IssueTable, BulkActionToolbar } from "@/components";
+import { IssueViewGuard } from "@/components/IssueViewGuard";
+import { useSelection } from "@/hooks";
 import {
   useWorkspaceViewData,
   useWorkspaceViewActions,

@@ -61,7 +61,9 @@ export function generateTabName(
   existingTabs: TabState[],
   workspace?: string,
 ): { sessionName: string; label: string } {
-  const wsPrefix = workspace && workspace !== "default" ? `${workspace}--` : "";
+  const safeWorkspace = workspace ? sanitizeSessionName(workspace) : "";
+  const wsPrefix =
+    safeWorkspace && safeWorkspace !== "default" ? `${safeWorkspace}--` : "";
   const prefix = `lead-${backend}-`;
   const fullPrefix = `${wsPrefix}${prefix}`;
   let max = 0;

@@ -129,6 +129,10 @@ func (d *Daemon) drainAgents(entries []config.AgentEntry, label string) {
 // addNewAgents starts agents, skipping those manually stopped.
 func (d *Daemon) addNewAgents(entries []config.AgentEntry, label string) {
 	for _, entry := range entries {
+		if !entry.ShouldSupervise() {
+			slog.Info("skipping "+label+" of agent with non-running desired state", "worktree", entry.Worktree, "desired_state", entry.DesiredState)
+			continue
+		}
 		if d.isAgentStopped(entry.Worktree) {
 			slog.Info("skipping "+label+" of manually stopped agent", "worktree", entry.Worktree)
 			continue

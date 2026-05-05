@@ -12,6 +12,7 @@ type CreateIssueRequest struct {
 	ID                 string   `json:"id,omitempty"`
 	Parent             string   `json:"parent,omitempty"`
 	Description        string   `json:"description,omitempty"`
+	Status             string   `json:"status,omitempty"`
 	Design             string   `json:"design,omitempty"`
 	AcceptanceCriteria string   `json:"acceptance_criteria,omitempty"`
 	Notes              string   `json:"notes,omitempty"`

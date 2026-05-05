@@ -71,7 +71,7 @@ IssueDetailPanel (slide-out overlay)
           +-- ResizeDivider (draggable, keyboard-accessible)
           +-- EmbeddedTerminal
               +-- TerminalHeader (backend label, connection dot, git actions)
-              +-- TerminalInstance (xterm.js WebSocket terminal)
+              +-- TerminalInstance (wterm WebSocket terminal)
 
 IssueDetailView (full-page)
   +-- headerBar (back button, ID, status, title, "Open in Terminal", copy link)
@@ -130,7 +130,7 @@ Tab state persisted per-issue via `useIssueTabPersistence`:
 
 ### EmbeddedTerminal Component
 
-`forwardRef` wrapper around `TerminalInstance` (xterm.js). Adds:
+`forwardRef` wrapper around `TerminalInstance` (wterm). Adds:
 - `TerminalHeader` — backend brand dot, connection dot, worktree breadcrumb, maximize button, git action buttons
 - Clipboard UX — `useClipboard`, `CopyToast`, `PasteConfirmDialog`, `TerminalContextMenu`
 
@@ -283,7 +283,7 @@ Renders markdown design content with:
 | Method | Path | Description |
 |--------|------|-------------|
 | POST | `/api/terminal/spawn` | Create tmux session |
-| GET | `/api/terminal/ws` | WebSocket upgrade for xterm.js |
+| GET | `/api/terminal/ws` | WebSocket upgrade for terminal relay |
 | DELETE | `/api/terminal/tabs/{session}` | Remove tab metadata |
 | POST | `/api/terminal/sessions/{session}/kill` | Deferred session kill |
 | GET | `/api/issues/{id}/sessions` | Session history records |

@@ -1149,6 +1149,7 @@ func TestCollectAgentStatus(t *testing.T) {
 		if err := os.MkdirAll(filepath.Join(wtDir, ".git"), 0755); err != nil {
 			t.Fatal(err)
 		}
+		setupMonitorWorkspaceConfig(t, tmpDir, "falcon")
 
 		deps.Exec = &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 			// git branch --show-current
@@ -1198,6 +1199,7 @@ func TestCollectAgentStatus(t *testing.T) {
 		if err := os.MkdirAll(filepath.Join(wtDir, ".git"), 0755); err != nil {
 			t.Fatal(err)
 		}
+		setupMonitorWorkspaceConfig(t, tmpDir, "nova")
 
 		deps.Exec = &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 			if name == "git" && len(args) > 0 && args[0] == "branch" {
@@ -1245,6 +1247,7 @@ func TestCollectAgentStatus(t *testing.T) {
 		if err := os.MkdirAll(filepath.Join(wtDir, ".git"), 0755); err != nil {
 			t.Fatal(err)
 		}
+		setupMonitorWorkspaceConfig(t, tmpDir, "spark")
 
 		deps.Exec = &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 			if name == "git" && len(args) > 0 && args[0] == "branch" {
@@ -1295,6 +1298,7 @@ func TestCollectAgentStatus(t *testing.T) {
 		if err := os.MkdirAll(filepath.Join(wtDir, ".git"), 0755); err != nil {
 			t.Fatal(err)
 		}
+		setupMonitorWorkspaceConfig(t, tmpDir, "flux")
 
 		deps.Exec = &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 			if name == "git" && len(args) > 0 && args[0] == "branch" {
@@ -1357,6 +1361,7 @@ func TestCollectAgentStatus(t *testing.T) {
 			lockData, _ := json.Marshal(lockInfo)
 			os.WriteFile(filepath.Join(wtDir, ".agent.lock"), lockData, 0644)
 		}
+		setupMonitorWorkspaceConfig(t, tmpDir, "falcon", "nova")
 
 		deps.Exec = &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 			if name == "git" && len(args) > 0 && args[0] == "branch" {
@@ -1402,6 +1407,7 @@ func TestCollectMonitorData(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(wtDir, ".git"), 0755); err != nil {
 		t.Fatal(err)
 	}
+	setupMonitorWorkspaceConfig(t, tmpDir, "test-agent")
 
 	deps.Exec = &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 		if name == "git" && len(args) > 0 && args[0] == "branch" {
@@ -1483,6 +1489,7 @@ func TestCollectMonitorDataExported(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(wtDir, ".git"), 0755); err != nil {
 		t.Fatal(err)
 	}
+	setupMonitorWorkspaceConfig(t, tmpDir, "test-agent")
 
 	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 		if name == "git" && len(args) > 0 && args[0] == "branch" {
@@ -1534,6 +1541,7 @@ func TestCollectAgentStatusOnlyExported(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(wtDir, ".git"), 0755); err != nil {
 		t.Fatal(err)
 	}
+	setupMonitorWorkspaceConfig(t, tmpDir, "solo")
 
 	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 		if name == "git" && len(args) > 0 && args[0] == "branch" {
@@ -1582,6 +1590,7 @@ func TestBacklogAccumulatesReadyWithBlockersAndBlocked(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(wtDir, ".git"), 0755); err != nil {
 		t.Fatal(err)
 	}
+	setupMonitorWorkspaceConfig(t, tmpDir, "agent1")
 
 	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 		if name == "git" && len(args) > 0 && args[0] == "branch" {
@@ -1652,6 +1661,7 @@ func TestEpicsExcludedFromWorkQueueButStatsRemainCanonical(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(wtDir, ".git"), 0755); err != nil {
 		t.Fatal(err)
 	}
+	setupMonitorWorkspaceConfig(t, tmpDir, "agent1")
 
 	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 		if name == "git" && len(args) > 0 && args[0] == "branch" {
@@ -1718,6 +1728,7 @@ func TestMonitorStatsPreserveBackendTotals(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(wtDir, ".git"), 0755); err != nil {
 		t.Fatal(err)
 	}
+	setupMonitorWorkspaceConfig(t, tmpDir, "agent1")
 
 	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 		if name == "git" && len(args) > 0 && args[0] == "branch" {
@@ -1811,6 +1822,7 @@ func TestRunMonitorOneShot(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(wtDir, ".git"), 0755); err != nil {
 		t.Fatal(err)
 	}
+	setupMonitorWorkspaceConfig(t, tmpDir, "oneshot")
 
 	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 		if name == "git" && len(args) > 0 && args[0] == "branch" {
@@ -2217,6 +2229,7 @@ func TestCollectAgentStatusLockFallback(t *testing.T) {
 			if err := os.MkdirAll(filepath.Join(wtDir, ".git"), 0755); err != nil {
 				t.Fatal(err)
 			}
+			setupMonitorWorkspaceConfig(t, tmpDir, "alpha")
 
 			// Create lock file with empty TaskID - triggers "..." in status
 			lockInfo := LockInfo{

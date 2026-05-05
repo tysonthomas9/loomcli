@@ -251,15 +251,15 @@ func (b *FleetBackend) execURL(ctx context.Context, op, method, rawURL string, b
 	return apiResp, nil
 }
 
-func (b *FleetBackend) execAsActor(ctx context.Context, op, method, path string, body interface{}, actor string) (*apiResponse, error) {
+func (b *FleetBackend) execAsActor(ctx context.Context, op, method, path string, body interface{}, actor string) error {
 	apiResp, statusCode, err := b.doRequestAsActor(ctx, method, path, body, actor)
 	if err != nil {
-		return nil, classifyTransportError(op, err)
+		return classifyTransportError(op, err)
 	}
 	if cerr := classifyHTTPError(op, statusCode, *apiResp); cerr != nil {
-		return nil, cerr
+		return cerr
 	}
-	return apiResp, nil
+	return nil
 }
 
 // hasData returns true if the response Data field is present and non-null.
@@ -400,7 +400,7 @@ func (b *FleetBackend) List(ctx context.Context, opts backend.ListOpts) ([]backe
 }
 
 func (b *FleetBackend) Ready(ctx context.Context, opts backend.ReadyOpts) ([]backend.IssueData, error) {
-	path := "/ready?" + readyOptsToQuery(opts)
+	path := "/issues/ready?" + readyOptsToQuery(opts)
 	resp, err := b.exec(ctx, "Ready", "GET", path, nil)
 	if err != nil {
 		return nil, err
@@ -416,7 +416,7 @@ func (b *FleetBackend) Ready(ctx context.Context, opts backend.ReadyOpts) ([]bac
 }
 
 func (b *FleetBackend) Blocked(ctx context.Context, opts backend.BlockedOpts) ([]backend.IssueData, error) {
-	path := "/blocked?" + blockedOptsToQuery(opts)
+	path := "/issues/blocked?" + blockedOptsToQuery(opts)
 	resp, err := b.exec(ctx, "Blocked", "GET", path, nil)
 	if err != nil {
 		return nil, err
@@ -476,6 +476,9 @@ func (b *FleetBackend) Count(ctx context.Context, opts backend.CountOpts) (int, 
 	if opts.GroupBy != "" {
 		return 0, backend.ErrNotImplemented("Count",
 			"group_by is not supported by Count (use Stats for grouped status counts)")
+	}
+	if err := checkFleetUnsupportedCountFilters(opts); err != nil {
+		return 0, err
 	}
 	path := "/issues/count"
 	if q := countOptsToQuery(opts); q != "" {
@@ -627,8 +630,7 @@ func (b *FleetBackend) applyStatusUpdate(ctx context.Context, id string, params 
 		if actor == "" {
 			return false, backend.ErrValidation("Update", "assignee or configured actor is required to claim an issue")
 		}
-		_, err := b.execAsActor(ctx, "Update", "POST", "/issues/"+url.PathEscape(id)+"/claim", nil, actor)
-		return true, err
+		return true, b.execAsActor(ctx, "Update", "POST", "/issues/"+url.PathEscape(id)+"/claim", nil, actor)
 	case "open":
 		return false, b.transitionToOpen(ctx, id, current)
 	case "closed":
@@ -661,8 +663,7 @@ func (b *FleetBackend) transitionToOpen(ctx context.Context, id string, current 
 		return err
 	case "in_progress":
 		if current.Assignee != "" {
-			_, err := b.execAsActor(ctx, "Update", "POST", "/issues/"+url.PathEscape(id)+"/release", nil, current.Assignee)
-			return err
+			return b.execAsActor(ctx, "Update", "POST", "/issues/"+url.PathEscape(id)+"/release", nil, current.Assignee)
 		}
 	}
 	_, err := b.exec(ctx, "Update", "PATCH", "/issues/"+url.PathEscape(id), map[string]interface{}{"status": "open"})
@@ -812,16 +813,10 @@ func (b *FleetBackend) UndeferIssue(ctx context.Context, id string) error {
 
 func (b *FleetBackend) Close(ctx context.Context, id string, params backend.CloseParams) (*backend.CloseResult, error) {
 	type closeReq struct {
-		Reason      string `json:"reason,omitempty"`
-		Session     string `json:"session,omitempty"`
-		SuggestNext bool   `json:"suggest_next,omitempty"`
-		Force       bool   `json:"force,omitempty"`
+		Reason string `json:"reason,omitempty"`
 	}
 	req := closeReq{
-		Reason:      params.Reason,
-		Session:     params.Session,
-		SuggestNext: params.SuggestNext,
-		Force:       params.Force,
+		Reason: params.Reason,
 	}
 	resp, err := b.exec(ctx, "Close", "POST", "/issues/"+url.PathEscape(id)+"/close", req)
 	if err != nil {

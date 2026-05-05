@@ -21,7 +21,10 @@ describe("BlockedCell", () => {
 
     it("renders badge with count when blockedByCount > 0", () => {
       render(
-        <BlockedCell blockedByCount={3} blockedBy={["loom-1", "loom-2", "loom-3"]} />,
+        <BlockedCell
+          blockedByCount={3}
+          blockedBy={["loom-1", "loom-2", "loom-3"]}
+        />,
       );
       expect(screen.getByText("3")).toBeInTheDocument();
       expect(screen.getByText("⛔")).toBeInTheDocument();
@@ -33,7 +36,9 @@ describe("BlockedCell", () => {
     });
 
     it("has correct aria-label when blocked", () => {
-      render(<BlockedCell blockedByCount={2} blockedBy={["loom-1", "loom-2"]} />);
+      render(
+        <BlockedCell blockedByCount={2} blockedBy={["loom-1", "loom-2"]} />,
+      );
       expect(screen.getByLabelText("Blocked by 2 issues")).toBeInTheDocument();
     });
 

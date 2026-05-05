@@ -65,6 +65,13 @@ func TestStoreBackedCreateEmptyWorkspaceCreatesStoreAndLocalState(t *testing.T) 
 	if len(roles) != 2 || !hasRole(roles, "plan") || !hasRole(roles, "task") {
 		t.Fatalf("roles = %#v, want plan and task", roles)
 	}
+	roleByName := rolesByName(roles)
+	if roleByName["plan"].TaskFilter != "needs_plan" {
+		t.Fatalf("plan task filter = %q, want needs_plan", roleByName["plan"].TaskFilter)
+	}
+	if roleByName["task"].TaskFilter != "has_design" {
+		t.Fatalf("task task filter = %q, want has_design", roleByName["task"].TaskFilter)
+	}
 
 	sc, err := bootstrap.LoadStateCache()
 	if err != nil {
@@ -317,6 +324,14 @@ func hasRole(roles []*domain.Role, name string) bool {
 		}
 	}
 	return false
+}
+
+func rolesByName(roles []*domain.Role) map[string]*domain.Role {
+	out := make(map[string]*domain.Role, len(roles))
+	for _, role := range roles {
+		out[role.Name] = role
+	}
+	return out
 }
 
 func (r repoFailer) Create(context.Context, store.RepoCreate) (*domain.Repo, error) {

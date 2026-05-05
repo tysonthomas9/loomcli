@@ -66,6 +66,7 @@ type AgentSessionFilter struct {
 
 type AgentSessionUpdate struct {
 	NodeID        *string
+	TaskID        *string
 	Status        *domain.AgentSessionStatus
 	Phase         *string
 	LastHeartbeat *time.Time

@@ -29,12 +29,10 @@ TerminalView (TerminalView.tsx)            <- orchestrator
   |    +-- SortableTab (dnd-kit)           <- drag-and-drop per tab
   |    +-- TabContextMenu                  <- right-click: duplicate/rename/pin/close
   |
-  +-- [per tab] TerminalInstance           <- single xterm.js + WebSocket pane
-  |    +-- SearchAddon (@xterm/addon-search)
-  |    +-- FitAddon   (@xterm/addon-fit)
-  |    +-- WebLinksAddon
-  |    +-- WebglAddon (falls back to canvas)
-  |    +-- SlashCommandInterceptor         <- /create-issue /assign /status /help
+  +-- [per tab] TerminalInstance           <- single wterm + WebSocket pane
+  |    +-- wterm DOM renderer
+  |    +-- Native DOM selection/copy/paste
+  |    +-- Auto-resize via wterm
   |
   +-- [per tab overlays]
   |    +-- TerminalConnectionOverlay       <- connecting/disconnected/error states
@@ -283,12 +281,8 @@ Results are written with ANSI coloring (`\x1b[32m` green for success, `\x1b[31m`
 
 ### Terminal Search
 
-Search is powered by `@xterm/addon-search`. The `SearchBar` UI provides:
-- Case-sensitive toggle ("Aa" button)
-- Regular expression toggle (".*" button)
-- Up/Down arrows for findPrevious/findNext
-- N-of-M counter shown as "X of Y"
-- Escape closes via the layered escape system (`LAYER_TERMINAL_SEARCH`)
+Search uses the browser's native find-in-page against wterm's DOM-rendered cells.
+The app does not intercept Cmd/Ctrl+F.
 
 Search decorations use orange for active match (`#EE8B17`) and gray for other matches (`#515C6A`).
 
@@ -478,7 +472,7 @@ A separate `"terminal_session_change"` event is broadcast when issue linkage cha
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/terminal/token` | Generate one-time HMAC-SHA256 WS auth token |
-| GET | `/api/terminal/ws` | WebSocket upgrade for xterm.js relay |
+| GET | `/api/terminal/ws` | WebSocket upgrade for terminal relay |
 | POST | `/api/terminal/spawn` | Pre-create tmux session for shell tabs |
 | POST | `/api/terminal/restart` | Kill + recreate tmux session |
 | POST | `/api/terminal/kill` | Kill terminal session |
@@ -521,18 +515,17 @@ A separate `"terminal_session_change"` event is broadcast when issue linkage cha
 
 | File | Responsibility |
 |------|---------------|
-| `components/TerminalView/TerminalView.tsx` | Root orchestrator; tab state, keyboard shortcuts, unread tracking |
-| `components/TerminalView/TerminalTabBar.tsx` | WAI-ARIA tablist with dnd-kit drag-and-drop |
-| `components/TerminalView/SortableTab.tsx` | dnd-kit `useSortable` wrapper for tab elements |
-| `components/TerminalView/TabContextMenu.tsx` | Right-click context menu |
-| `components/TerminalView/TerminalInstance.tsx` | Single xterm.js terminal with WebSocket |
-| `components/TerminalView/terminalConnection.ts` | WebSocket lifecycle: token fetch, URL build, `encodeResize` |
-| `components/TerminalView/terminalTabUtils.ts` | Constants (MAX_TABS=8), TabState type, session name generators |
-| `components/TerminalView/terminalTheme.ts` | xterm.js theme from CSS variables |
-| `components/TerminalView/slashCommands.ts` | Command registry: /create-issue /assign /status /help |
-| `components/TerminalView/slashCommandInterceptor.ts` | Input stream interceptor state machine |
-| `components/TerminalView/BackendPickerPrompt.tsx` | Modal for selecting backend for new tab |
-| `components/TerminalView/WelcomeBanner.tsx` | First-time onboarding overlay |
+| `components/TerminalView/TerminalView.tsx` | Root orchestrator; tab state, unread tracking |
+| `components/TerminalView/tabs/TerminalTabBar.tsx` | WAI-ARIA tablist with dnd-kit drag-and-drop |
+| `components/TerminalView/tabs/SortableTab.tsx` | dnd-kit `useSortable` wrapper for tab elements |
+| `components/TerminalView/tabs/TabContextMenu.tsx` | Right-click context menu |
+| `components/TerminalView/instances/TerminalInstance.tsx` | Single wterm terminal with WebSocket |
+| `components/TerminalView/instances/terminalConnection.ts` | WebSocket lifecycle: token fetch, URL build, `encodeResize` |
+| `components/TerminalView/tabs/terminalTabUtils.ts` | Constants, TabState type, session name generators |
+| `components/TerminalView/layout/BackendPickerPrompt.tsx` | Modal for selecting backend for new tab |
+| `components/TerminalView/layout/WelcomeBanner.tsx` | First-time onboarding overlay |
+| `components/TerminalView/controls/HelpPopover.tsx` | Terminal help popover |
+| `components/TerminalView/controls/NotesBar.tsx` | Per-tab notes editor |
 | `components/TerminalView/CrashOverlay.tsx` | Backend-exited overlay with Restart / Close |
 | `components/TerminalView/ReconnectingOverlay.tsx` | Reconnect countdown overlay |
 | `components/TerminalView/TerminalConnectionOverlay.tsx` | Connecting/disconnected/error overlays |

@@ -13,7 +13,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/automode"
 	"github.com/tysonthomas9/loomcli/internal/cli/backends"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
-	"github.com/tysonthomas9/loomcli/internal/cli/git"
+	"github.com/tysonthomas9/loomcli/internal/cli/sessionfinalize"
 	"github.com/tysonthomas9/loomcli/internal/cli/workspace"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 )
@@ -205,6 +205,11 @@ func adoptOrCreateSession(agentName, parentID, prompt, phase string) *sessions.S
 		if inheritedRuntimeDir == "" {
 			inheritedRuntimeDir = cli.GetWorkspaceRuntimeDir()
 		}
+		if prompt != "" {
+			if sessStore, err := sessions.NewStore(inheritedRuntimeDir); err == nil {
+				_ = sessStore.UpdatePrompt(inheritedSID, prompt)
+			}
+		}
 		backends.SetActiveSessionRuntimeEnv(inheritedRuntimeDir, inheritedSID)
 		return nil
 	}
@@ -245,12 +250,11 @@ func finalizeAgentSession(sess *sessions.Session, worktreePath, beforeRef string
 	if info, lockErr := cli.ReadLockFile(worktreePath); lockErr == nil {
 		taskID = info.TaskID
 	}
-	diffStats := git.ComputeDiffStats(worktreePath, beforeRef)
-	_ = sess.Finalize(sessions.FinalizeOptions{
-		TaskID: taskID, ExitCode: exitCode, FilesTouched: diffStats.FilesTouched,
-		DiffStats: sessions.DiffStats{
-			FilesChanged: diffStats.FilesChanged, LinesAdded: diffStats.LinesAdded, LinesRemoved: diffStats.LinesRemoved,
-		},
+	_, _ = sessionfinalize.WithWorktree(sess, sessionfinalize.WithWorktreeOptions{
+		WorktreePath: worktreePath,
+		BeforeRef:    beforeRef,
+		TaskID:       taskID,
+		ExitCode:     exitCode,
 	})
 	backends.ClearActiveSessionEnv()
 }

@@ -392,12 +392,14 @@ func seedBuiltInRoles(ctx context.Context, s storepkg.Store, key string) error {
 			WorkspaceKey: key,
 			Name:         "plan",
 			Description:  "Planning agent",
+			TaskFilter:   "needs_plan",
 			ReadOnly:     true,
 		},
 		{
 			WorkspaceKey: key,
 			Name:         "task",
 			Description:  "Task implementation agent",
+			TaskFilter:   "has_design",
 		},
 	}
 	for _, role := range roles {

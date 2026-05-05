@@ -36,7 +36,6 @@ vi.mock("@/hooks", () => ({
   LAYER_TERMINAL_PANEL: 30,
   LAYER_AGENT_PANEL: 20,
   LAYER_ISSUE_PANEL: 10,
-  LAYER_TERMINAL_SEARCH: 5,
 }));
 
 // Mock OpenInEditor to avoid its hook dependencies (useEditors)
@@ -61,7 +60,7 @@ vi.mock("./DiffTab", () => ({
 }));
 
 // Mock FileEditorPanel to avoid pulling in CodeMirror and editor stack
-vi.mock("@/components/FileEditorPanel", () => ({
+vi.mock("@/components/FileEditorPanel/FileEditorPanel", () => ({
   FileEditorPanel: ({
     agentName,
     isActive,

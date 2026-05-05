@@ -167,6 +167,11 @@ test.describe('Deterministic Terminal Parity', () => {
       const talkTerminal = talkOverlay.getByTestId('terminal-container');
       await forceTerminalViewportSize(talkTerminal);
       await page.waitForTimeout(LAYOUT_SETTLE_MS);
+      await expect(talkTerminal.locator('.wterm')).toHaveCount(1);
+      await expect(
+        talkTerminal.locator('[class*="transcriptOverlay"]'),
+      ).toHaveCount(0);
+      await expect(talkTerminal.locator('.wterm')).not.toContainText('?2004');
       const talkShot = await talkTerminal.screenshot({ animations: 'disabled' });
 
       await page.getByTestId('terminal-close-button').click();

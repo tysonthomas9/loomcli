@@ -3,8 +3,7 @@
  * Handles token fetching, URL building, resize encoding, and WebSocket lifecycle.
  *
  * Renderer-agnostic: the caller provides a `write` function (for output) and
- * wires input directly (e.g. wterm's `onData` → ws.send). No xterm Terminal
- * / FitAddon / interceptor references live here after the wterm migration.
+ * wires input directly (e.g. wterm's `onData` → ws.send).
  */
 
 import {

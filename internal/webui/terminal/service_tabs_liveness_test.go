@@ -66,12 +66,17 @@ func newLivenessTestSvc(t *testing.T) (*terminalServiceImpl, *fakePTYSource, *mi
 
 func putTestTab(t *testing.T, svc *terminalServiceImpl, wsID, name string) {
 	t.Helper()
+	putTestTabAt(t, svc, wsID, name, time.Now().UTC())
+}
+
+func putTestTabAt(t *testing.T, svc *terminalServiceImpl, wsID, name string, at time.Time) {
+	t.Helper()
 	meta := &tabmeta.TabMetadata{
 		SessionName: name,
 		Workspace:   wsID,
 		Label:       name,
-		CreatedAt:   time.Now().UTC(),
-		UpdatedAt:   time.Now().UTC(),
+		CreatedAt:   at,
+		UpdatedAt:   at,
 	}
 	// Write via the store directly to bypass the service-level liveness
 	// guard — tests want to set up arbitrary states.
@@ -105,6 +110,32 @@ func TestListTabs_AnnotatesPTYAlive(t *testing.T) {
 	}
 }
 
+func TestListTabs_TreatsCurrentProcessMetadataAsAttachable(t *testing.T) {
+	svc, _, _ := newLivenessTestSvc(t)
+	ctx := context.Background()
+	const ws = "w"
+	startedAt := time.Date(2026, 5, 5, 1, 0, 0, 0, time.UTC)
+	svc.startedAt = startedAt
+
+	putTestTabAt(t, svc, ws, "fresh-tab", startedAt.Add(time.Second))
+	putTestTabAt(t, svc, ws, "stale-tab", startedAt.Add(-time.Second))
+
+	tabs, err := svc.ListTabs(ctx, ws)
+	if err != nil {
+		t.Fatalf("ListTabs: %v", err)
+	}
+	got := map[string]bool{}
+	for _, tb := range tabs {
+		got[tb.SessionName] = tb.PTYAlive
+	}
+	if !got["fresh-tab"] {
+		t.Errorf("fresh-tab: expected pty_alive=true so the UI can spawn it, got false")
+	}
+	if got["stale-tab"] {
+		t.Errorf("stale-tab: expected pty_alive=false after server restart, got true")
+	}
+}
+
 func TestGetTab_AnnotatesPTYAlive(t *testing.T) {
 	svc, fake, _ := newLivenessTestSvc(t)
 	ctx := context.Background()
@@ -128,12 +159,34 @@ func TestPutTab_RejectsOverwriteWhenPTYIsLive(t *testing.T) {
 	const ws = "w"
 
 	// Live session: PutTab should refuse to replace.
+	putTestTab(t, svc, ws, "sess")
 	fake.alive[SessionKey{Workspace: ws, Name: "sess"}] = true
 	meta := &tabmeta.TabMetadata{SessionName: "sess", Workspace: ws, Label: "replacement"}
 	err := svc.PutTab(ctx, ws, meta)
 	var svcErr *service.ServiceError
 	if !errors.As(err, &svcErr) || svcErr.Kind != service.KindConflict {
 		t.Fatalf("expected ServiceError.Kind=Conflict, got %v", err)
+	}
+}
+
+func TestPutTab_AllowsCreateWhenPTYIsLiveButMetadataMissing(t *testing.T) {
+	svc, fake, _ := newLivenessTestSvc(t)
+	ctx := context.Background()
+	const ws = "w"
+
+	// The frontend can open the WebSocket before its metadata PUT completes.
+	// In that race the PTY exists, but this is still a create, not a replace.
+	fake.alive[SessionKey{Workspace: ws, Name: "sess"}] = true
+	meta := &tabmeta.TabMetadata{SessionName: "sess", Workspace: ws, Label: "new tab"}
+	if err := svc.PutTab(ctx, ws, meta); err != nil {
+		t.Fatalf("PutTab create with live PTY but missing metadata: %v", err)
+	}
+	got, err := svc.GetTab(ctx, ws, "sess")
+	if err != nil {
+		t.Fatalf("GetTab after live-PTY create: %v", err)
+	}
+	if got.Label != "new tab" {
+		t.Errorf("label after create: got %q, want %q", got.Label, "new tab")
 	}
 }
 

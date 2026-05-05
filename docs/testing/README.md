@@ -26,6 +26,7 @@ Reproducible end-to-end plans for the fleet-db-backed architecture. Designed to 
 - **[E2E preflight](e2e-preflight.md)** - shared setup (binaries, podman Redis, fleet-db subprocess, env vars, runner conventions, cleanup)
 - **[E2E CLI + curl](e2e-cli.md)** - CLI noun-verb commands, failure modes, embedded mode, direct fleet-db API, multi-workspace isolation
 - **[E2E Web UI](e2e-ui.md)** - multi-workspace lifecycle via agent-browser (gated on Phase 4 of the migration)
+- **[Local Mode Podman E2E](local-mode-podman-e2e.md)** - one-command Podman stack for FleetDB-backed local planner/coder dogfood runs, including the Codex CLI variant
 - **[Known issues](known-issues.md)** - documented expected-failures + bug references + test-methodology pitfalls. Read before claiming a clean run
 - **[Fleet-DB acceptance gates](fleetdb-acceptance-gates.md)** - named gates for backend/CLI, browser, SSE, workspace, supervisor, embedded local, remote distributed, and deletion lint checks
 

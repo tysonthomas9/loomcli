@@ -40,16 +40,13 @@ func (e *ExternalBackend) InvokeInteractive(workDir, prompt, agentName string) e
 	// Pass prompt via stdin pipe (not CLI args) to avoid exposure in process listings.
 	// MultiReader delivers the prompt first, then falls through to os.Stdin
 	// for interactive terminal input.
-	r, err := pipePromptToCmd(cmd, prompt)
-	if err != nil {
-		return err
-	}
+	r := pipePromptToCmd(cmd, prompt)
 	cmd.Stdin = io.MultiReader(r, os.Stdin)
 
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
-	err = cmd.Run()
+	err := cmd.Run()
 	r.Close()
 	return err
 }
@@ -59,10 +56,7 @@ func (e *ExternalBackend) InvokeNonInteractive(workDir, prompt, agentName string
 	cmd.Dir = workDir
 	cmd.Env = buildBackendEnv(workDir, agentName)
 
-	r, err := pipePromptToCmd(cmd, prompt)
-	if err != nil {
-		return wrapInvocationError(err, "")
-	}
+	r := pipePromptToCmd(cmd, prompt)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

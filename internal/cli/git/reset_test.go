@@ -14,6 +14,21 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli"
 )
 
+func setupResetWorktreeConfig(t *testing.T, workspaceDir, wtName, wtPath string) {
+	t.Helper()
+	setupWorkspaceConfig(t, &LoomConfig{
+		DefaultWorkspace: "testws",
+		Workspaces: map[string]WorkspaceConfig{
+			"testws": {
+				Path: workspaceDir,
+				Repos: []RepoConfig{
+					{Name: wtName, Path: wtPath, DefaultBranch: "main"},
+				},
+			},
+		},
+	})
+}
+
 // ============================================================================
 // Help Text Regression Tests
 // ============================================================================
@@ -250,10 +265,8 @@ func TestResetAllWorktrees_MixedDefaultBranch(t *testing.T) {
 }
 
 func TestResetAllWorktrees_NoWorkspaceConfig_NoPerRepoBranch(t *testing.T) {
-	// not parallel: uses t.Setenv, global resetForce/resetPush, defaultResolver, mock.Install(), os.Chdir
-	// In no workspace config (no workspace config), all repos use the same target branch
-	// because WorktreeInfo.Repo is nil.
-	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	// not parallel: uses global resetForce/resetPush, defaultResolver, mock.Install(), os.Chdir
+	// Repos without per-repo default branches use the explicit target branch.
 	ResetWorkspaceRuntimeDirCache()
 
 	oldR := cli.TestingResetDefaultResolver()
@@ -270,6 +283,18 @@ func TestResetAllWorktrees_NoWorkspaceConfig_NoPerRepoBranch(t *testing.T) {
 	wt2 := filepath.Join(tmpDir, "worktrees", "beta")
 	createGitRepo(t, wt1)
 	createGitRepo(t, wt2)
+	setupWorkspaceConfig(t, &LoomConfig{
+		DefaultWorkspace: "testws",
+		Workspaces: map[string]WorkspaceConfig{
+			"testws": {
+				Path: tmpDir,
+				Repos: []RepoConfig{
+					{Name: "alpha", Path: wt1},
+					{Name: "beta", Path: wt2},
+				},
+			},
+		},
+	})
 
 	mock := NewCommandMock(t, []CommandStub{
 		// DiscoverWorktrees: GetCurrentBranch for each
@@ -411,6 +436,7 @@ func TestResetWorktree_ReturnsTrue_OnSuccess(t *testing.T) {
 
 	wtPath := filepath.Join(tmpDir, "worktrees", "test-wt")
 	createGitRepo(t, wtPath)
+	setupResetWorktreeConfig(t, tmpDir, "test-wt", wtPath)
 
 	origDir, _ := os.Getwd()
 	os.Chdir(tmpDir)
@@ -458,6 +484,7 @@ func TestResetWorktree_ReturnsFalse_OnFetchError(t *testing.T) {
 
 	wtPath := filepath.Join(tmpDir, "worktrees", "test-wt")
 	createGitRepo(t, wtPath)
+	setupResetWorktreeConfig(t, tmpDir, "test-wt", wtPath)
 
 	origDir, _ := os.Getwd()
 	os.Chdir(tmpDir)
@@ -547,6 +574,7 @@ func TestResetWorktree_ReturnsTrue_OnUserAbort(t *testing.T) {
 
 	wtPath := filepath.Join(tmpDir, "worktrees", "test-wt")
 	createGitRepo(t, wtPath)
+	setupResetWorktreeConfig(t, tmpDir, "test-wt", wtPath)
 
 	origDir, _ := os.Getwd()
 	os.Chdir(tmpDir)
@@ -890,6 +918,7 @@ func TestResetWorktree_Success(t *testing.T) {
 
 	wtPath := filepath.Join(tmpDir, "worktrees", "test-wt")
 	createGitRepo(t, wtPath)
+	setupResetWorktreeConfig(t, tmpDir, "test-wt", wtPath)
 
 	origDir, _ := os.Getwd()
 	os.Chdir(tmpDir)
@@ -931,6 +960,7 @@ func TestResetWorktree_FetchError(t *testing.T) {
 
 	wtPath := filepath.Join(tmpDir, "worktrees", "test-wt")
 	createGitRepo(t, wtPath)
+	setupResetWorktreeConfig(t, tmpDir, "test-wt", wtPath)
 
 	origDir, _ := os.Getwd()
 	os.Chdir(tmpDir)
@@ -986,6 +1016,7 @@ func TestResetWorktree_RefusesWithActiveLock(t *testing.T) {
 
 	wtPath := filepath.Join(tmpDir, "worktrees", "test-wt")
 	createGitRepo(t, wtPath)
+	setupResetWorktreeConfig(t, tmpDir, "test-wt", wtPath)
 
 	origDir, _ := os.Getwd()
 	os.Chdir(tmpDir)
@@ -1050,6 +1081,7 @@ func TestResetWorktree_RefusesWithActiveLock_ShowsTaskID(t *testing.T) {
 
 	wtPath := filepath.Join(tmpDir, "worktrees", "test-wt")
 	createGitRepo(t, wtPath)
+	setupResetWorktreeConfig(t, tmpDir, "test-wt", wtPath)
 
 	origDir, _ := os.Getwd()
 	os.Chdir(tmpDir)
@@ -1105,6 +1137,7 @@ func TestResetWorktree_ForceOverridesLock(t *testing.T) {
 
 	wtPath := filepath.Join(tmpDir, "worktrees", "test-wt")
 	createGitRepo(t, wtPath)
+	setupResetWorktreeConfig(t, tmpDir, "test-wt", wtPath)
 
 	origDir, _ := os.Getwd()
 	os.Chdir(tmpDir)
@@ -1174,6 +1207,7 @@ func TestResetWorktree_ProceedsWithStaleLock(t *testing.T) {
 
 	wtPath := filepath.Join(tmpDir, "worktrees", "test-wt")
 	createGitRepo(t, wtPath)
+	setupResetWorktreeConfig(t, tmpDir, "test-wt", wtPath)
 
 	origDir, _ := os.Getwd()
 	os.Chdir(tmpDir)
@@ -1235,6 +1269,7 @@ func TestResetWorktree_ProceedsWithNoLock(t *testing.T) {
 
 	wtPath := filepath.Join(tmpDir, "worktrees", "test-wt")
 	createGitRepo(t, wtPath)
+	setupResetWorktreeConfig(t, tmpDir, "test-wt", wtPath)
 
 	origDir, _ := os.Getwd()
 	os.Chdir(tmpDir)
@@ -1315,6 +1350,7 @@ func TestResetWorktree_ProtectedBranch_Blocked(t *testing.T) {
 
 	wtPath := filepath.Join(tmpDir, "worktrees", "test-wt")
 	createGitRepo(t, wtPath)
+	setupResetWorktreeConfig(t, tmpDir, "test-wt", wtPath)
 
 	origDir, _ := os.Getwd()
 	os.Chdir(tmpDir)
@@ -1378,6 +1414,7 @@ func TestResetWorktree_ProtectedBranch_Master_Blocked(t *testing.T) {
 
 	wtPath := filepath.Join(tmpDir, "worktrees", "test-wt")
 	createGitRepo(t, wtPath)
+	setupResetWorktreeConfig(t, tmpDir, "test-wt", wtPath)
 
 	origDir, _ := os.Getwd()
 	os.Chdir(tmpDir)
@@ -1442,6 +1479,7 @@ func TestResetWorktree_ProtectedBranch_ForceOverride(t *testing.T) {
 
 	wtPath := filepath.Join(tmpDir, "worktrees", "test-wt")
 	createGitRepo(t, wtPath)
+	setupResetWorktreeConfig(t, tmpDir, "test-wt", wtPath)
 
 	origDir, _ := os.Getwd()
 	os.Chdir(tmpDir)
@@ -1507,6 +1545,7 @@ func TestResetWorktree_NonProtectedBranch_Allowed(t *testing.T) {
 
 	wtPath := filepath.Join(tmpDir, "worktrees", "test-wt")
 	createGitRepo(t, wtPath)
+	setupResetWorktreeConfig(t, tmpDir, "test-wt", wtPath)
 
 	origDir, _ := os.Getwd()
 	os.Chdir(tmpDir)

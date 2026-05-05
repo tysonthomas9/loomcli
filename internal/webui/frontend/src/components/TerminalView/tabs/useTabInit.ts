@@ -4,7 +4,11 @@ import type { TabMetadata } from "@/hooks/api";
 import type { BackendConfigData } from "@/api/common";
 
 import type { ConnectionState } from "@/components/TerminalView/instances";
-import { getBackendFromSessionName, type TabState } from "./terminalTabUtils";
+import {
+  getBackendFromSessionName,
+  sanitizeSessionName,
+  type TabState,
+} from "./terminalTabUtils";
 
 interface TabInitArgs {
   tabMetadata: TabMetadata[];
@@ -15,7 +19,7 @@ interface TabInitArgs {
   setTabs: React.Dispatch<React.SetStateAction<TabState[]>>;
   setActiveTabId: React.Dispatch<React.SetStateAction<string>>;
   initializedRef: MutableRefObject<boolean>;
-  /** Active workspace name, used to namespace auto-generated session names */
+  /** Active workspace identifier, used to namespace auto-generated session names */
   workspace?: string;
   /** Whether the Terminal view is currently visible — defer init until user navigates to Terminal */
   isViewActive: boolean;
@@ -81,8 +85,11 @@ export function useTabInit(args: TabInitArgs) {
       // Workspace prefix for session names: namespace tmux sessions per workspace
       // to prevent cross-workspace session leakage. The prefix is omitted from
       // display labels for cleaner UI.
+      const safeWorkspace = workspace ? sanitizeSessionName(workspace) : "";
       const wsPrefix =
-        workspace && workspace !== "default" ? `${workspace}--` : "";
+        safeWorkspace && safeWorkspace !== "default"
+          ? `${safeWorkspace}--`
+          : "";
 
       // Only auto-create a single tab for the default backend.
       // Users can add more backend tabs via the "+" button.

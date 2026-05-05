@@ -975,7 +975,10 @@ describe("IssueRow", () => {
       fireEvent.click(checkbox);
 
       expect(handleSelectionChange).toHaveBeenCalledTimes(1);
-      expect(handleSelectionChange).toHaveBeenCalledWith("loom-check-test", true);
+      expect(handleSelectionChange).toHaveBeenCalledWith(
+        "loom-check-test",
+        true,
+      );
     });
 
     it("onSelectionChange called with issue id and false when unchecked", () => {

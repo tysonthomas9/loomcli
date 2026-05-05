@@ -1,6 +1,6 @@
 # Makefile for loomcli project
 
-.PHONY: all build build-frontend build-all test test-integration test-all test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui fleetdb-empty-up fleetdb-empty-down test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-e2e-api test-e2e-api-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-no-raw-exec check-no-beads-prod test-coverage test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness
+.PHONY: all build build-frontend build-all test test-integration test-all test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui fleetdb-empty-up fleetdb-empty-down local-mode-up local-mode-codex-up local-mode-down local-mode-logs test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-e2e-api test-e2e-api-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-no-raw-exec check-no-beads-prod test-coverage test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness
 
 # Default target
 all: build
@@ -90,6 +90,76 @@ fleetdb-empty-down:
 	  exit 127; \
 	fi; \
 	$$compose -f test/fleetdb/docker-compose.empty.yml down -v --remove-orphans
+
+# Start the local-mode dogfood stack: fleet-db, loom serve, loom daemon, a
+# deterministic planner/coder backend, and the Web UI.
+local-mode-up:
+	@echo "Starting local-mode dogfood stack on http://localhost:$${LOCAL_MODE_UI_PORT:-8283}/ws/LOCALMODE/kanban..."
+	@set -e; \
+	if [ ! -f internal/webui/frontend/dist/index.html ]; then \
+	  echo "Web UI dist is missing; building it once on the host..."; \
+	  cd internal/webui/frontend && npm install && npm run build; \
+	  cd - >/dev/null; \
+	fi; \
+	if command -v podman >/dev/null 2>&1 && podman compose version >/dev/null 2>&1; then \
+	  compose="podman compose"; \
+	elif command -v podman-compose >/dev/null 2>&1; then \
+	  compose="podman-compose"; \
+	elif command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then \
+	  compose="docker compose"; \
+	else \
+	  echo "podman compose or docker compose is required" >&2; \
+	  exit 127; \
+	fi; \
+	$$compose -f test/local-mode/docker-compose.yml up --build
+
+local-mode-codex-up:
+	@echo "Starting local-mode Codex dogfood stack on http://localhost:$${LOCAL_MODE_UI_PORT:-8283}/ws/LOCALMODE/kanban..."
+	@set -e; \
+	if [ ! -f internal/webui/frontend/dist/index.html ]; then \
+	  echo "Web UI dist is missing; building it once on the host..."; \
+	  cd internal/webui/frontend && npm install && npm run build; \
+	  cd - >/dev/null; \
+	fi; \
+	if command -v podman >/dev/null 2>&1 && podman compose version >/dev/null 2>&1; then \
+	  compose="podman compose"; \
+	elif command -v podman-compose >/dev/null 2>&1; then \
+	  compose="podman-compose"; \
+	elif command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then \
+	  compose="docker compose"; \
+	else \
+	  echo "podman compose or docker compose is required" >&2; \
+	  exit 127; \
+	fi; \
+	$$compose -f test/local-mode/docker-compose.yml -f test/local-mode/docker-compose.codex.yml up --build
+
+local-mode-down:
+	@set -e; \
+	if command -v podman >/dev/null 2>&1 && podman compose version >/dev/null 2>&1; then \
+	  compose="podman compose"; \
+	elif command -v podman-compose >/dev/null 2>&1; then \
+	  compose="podman-compose"; \
+	elif command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then \
+	  compose="docker compose"; \
+	else \
+	  echo "podman compose or docker compose is required" >&2; \
+	  exit 127; \
+	fi; \
+	$$compose -f test/local-mode/docker-compose.yml down -v --remove-orphans
+
+local-mode-logs:
+	@set -e; \
+	if command -v podman >/dev/null 2>&1 && podman compose version >/dev/null 2>&1; then \
+	  compose="podman compose"; \
+	elif command -v podman-compose >/dev/null 2>&1; then \
+	  compose="podman-compose"; \
+	elif command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then \
+	  compose="docker compose"; \
+	else \
+	  echo "podman compose or docker compose is required" >&2; \
+	  exit 127; \
+	fi; \
+	$$compose -f test/local-mode/docker-compose.yml logs -f loom-local ui-local
 
 # Run the fleet-db distributed smoke stack: shared fleet-db/Redis, two loom
 # serve processes, two local supervisor heartbeat loops, and a one-shot smoke

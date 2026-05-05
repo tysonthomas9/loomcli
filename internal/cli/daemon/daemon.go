@@ -297,6 +297,10 @@ func loadSupervisorWorkspace(sup *supervisor.Supervisor) {
 // initSupervisorAgents creates agent processes from config entries.
 func initSupervisorAgents(sup *supervisor.Supervisor, agents []cfgpkg.AgentEntry) error {
 	for i, entry := range agents {
+		if !entry.ShouldSupervise() {
+			slog.Info("skipping agent with non-running desired state", "worktree", entry.Worktree, "desired_state", entry.DesiredState)
+			continue
+		}
 		ap, err := sup.NewAgent(entry, i)
 		if err != nil {
 			return err

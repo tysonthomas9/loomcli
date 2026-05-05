@@ -170,6 +170,24 @@ func (e CreateIssueRequestIssueType) Valid() bool {
 	}
 }
 
+// Defines values for CreateIssueRequestStatus.
+const (
+	CreateIssueRequestStatusDeferred CreateIssueRequestStatus = "deferred"
+	CreateIssueRequestStatusOpen     CreateIssueRequestStatus = "open"
+)
+
+// Valid indicates whether the value is a known member of the CreateIssueRequestStatus enum.
+func (e CreateIssueRequestStatus) Valid() bool {
+	switch e {
+	case CreateIssueRequestStatusDeferred:
+		return true
+	case CreateIssueRequestStatusOpen:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ErrorResponseSuccess.
 const (
 	False ErrorResponseSuccess = false
@@ -820,19 +838,19 @@ func (e ListIssuesParamsType) Valid() bool {
 
 // Defines values for GetGraphParamsStatus.
 const (
-	All    GetGraphParamsStatus = "all"
-	Closed GetGraphParamsStatus = "closed"
-	Open   GetGraphParamsStatus = "open"
+	GetGraphParamsStatusAll    GetGraphParamsStatus = "all"
+	GetGraphParamsStatusClosed GetGraphParamsStatus = "closed"
+	GetGraphParamsStatusOpen   GetGraphParamsStatus = "open"
 )
 
 // Valid indicates whether the value is a known member of the GetGraphParamsStatus enum.
 func (e GetGraphParamsStatus) Valid() bool {
 	switch e {
-	case All:
+	case GetGraphParamsStatusAll:
 		return true
-	case Closed:
+	case GetGraphParamsStatusClosed:
 		return true
-	case Open:
+	case GetGraphParamsStatusOpen:
 		return true
 	default:
 		return false
@@ -1068,11 +1086,15 @@ type CreateIssueRequest struct {
 	Owner              *string                     `json:"owner,omitempty"`
 	Parent             *string                     `json:"parent,omitempty"`
 	Priority           int                         `json:"priority"`
+	Status             *CreateIssueRequestStatus   `json:"status,omitempty"`
 	Title              string                      `json:"title"`
 }
 
 // CreateIssueRequestIssueType defines model for CreateIssueRequest.IssueType.
 type CreateIssueRequestIssueType string
+
+// CreateIssueRequestStatus defines model for CreateIssueRequest.Status.
+type CreateIssueRequestStatus string
 
 // Dependency Full dependency relation from types.Dependency
 type Dependency struct {

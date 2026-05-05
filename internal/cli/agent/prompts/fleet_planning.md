@@ -11,7 +11,7 @@ Follow this workflow EXACTLY for ONE task.
 - The supervisor or Fleet API has already claimed this task
 - Run 'loom claim {{ .TaskID }}' to register with the agent monitor
 - IMPORTANT: Do NOT run 'loom data ready' — your task is already assigned
-- If the task does not exist or is not in 'open' status:
+- If the task does not exist or its status is neither 'open' nor the expected pre-claimed 'in_progress':
   1. Print the error
   2. Run 'loom complete'
   3. EXIT immediately

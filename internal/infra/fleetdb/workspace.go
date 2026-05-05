@@ -48,21 +48,23 @@ func (w workspaceWire) toDomain() *domain.Workspace {
 
 func (s *workspaceStore) Create(ctx context.Context, in store.WorkspaceCreate) (*domain.Workspace, error) {
 	body := struct {
-		Key           string `json:"key"`
-		Name          string `json:"name"`
-		Description   string `json:"description,omitempty"`
-		DefaultBranch string `json:"default_branch,omitempty"`
+		Key         string `json:"key"`
+		Name        string `json:"name"`
+		Description string `json:"description,omitempty"`
 	}{
-		Key:           in.Key,
-		Name:          in.Name,
-		Description:   in.Description,
-		DefaultBranch: in.DefaultBranch,
+		Key:         in.Key,
+		Name:        in.Name,
+		Description: in.Description,
 	}
 	var resp workspaceWire
 	if err := s.client.do(ctx, "POST", "/api/v1/admin/workspaces", body, &resp); err != nil {
 		return nil, err
 	}
-	return resp.toDomain(), nil
+	ws := resp.toDomain()
+	if ws.DefaultBranch == "" {
+		ws.DefaultBranch = in.DefaultBranch
+	}
+	return ws, nil
 }
 
 func (s *workspaceStore) Get(ctx context.Context, key string) (*domain.Workspace, error) {
@@ -104,31 +106,26 @@ func (s *workspaceStore) List(ctx context.Context) ([]*domain.Workspace, error) 
 }
 
 func (s *workspaceStore) Update(ctx context.Context, key string, patch store.WorkspaceUpdate) (*domain.Workspace, error) {
+	if patch.Name == nil && patch.Description == nil && patch.DefaultBranch == nil && patch.State == nil && patch.ErrorMessage == nil {
+		return s.Get(ctx, key)
+	}
 	body := struct {
-		Name *string `json:"name,omitempty"`
-		// fleet-db's existing PATCH route does not yet accept Description / State / DefaultBranch / ErrorMessage.
-		// Sending them is silently ignored; once fleet-db's PATCH route
-		// grows those fields, the JSON-omitempty wire shape lets loom
-		// adopt them without code changes here.
-		Description   *string `json:"description,omitempty"`
-		DefaultBranch *string `json:"default_branch,omitempty"`
-		State         *string `json:"state,omitempty"`
-		ErrorMessage  *string `json:"error_message,omitempty"`
+		Name          *string                `json:"name,omitempty"`
+		Description   *string                `json:"description,omitempty"`
+		DefaultBranch *string                `json:"default_branch,omitempty"`
+		State         *domain.WorkspaceState `json:"state,omitempty"`
+		ErrorMessage  *string                `json:"error_message,omitempty"`
 	}{
 		Name:          patch.Name,
 		Description:   patch.Description,
 		DefaultBranch: patch.DefaultBranch,
+		State:         patch.State,
 		ErrorMessage:  patch.ErrorMessage,
 	}
-	if patch.State != nil {
-		s := string(*patch.State)
-		body.State = &s
-	}
-	var resp workspaceWire
-	if err := s.client.do(ctx, "PATCH", "/api/v1/admin/workspaces/"+pathEscape(key), body, &resp); err != nil {
+	if err := s.client.do(ctx, "PATCH", "/api/v1/admin/workspaces/"+pathEscape(key), body, nil); err != nil {
 		return nil, err
 	}
-	return resp.toDomain(), nil
+	return s.Get(ctx, key)
 }
 
 func (s *workspaceStore) Delete(ctx context.Context, key string) error {

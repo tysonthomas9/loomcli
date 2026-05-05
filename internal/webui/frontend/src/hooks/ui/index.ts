@@ -34,7 +34,6 @@ export {
   LAYER_TERMINAL_PANEL,
   LAYER_AGENT_PANEL,
   LAYER_ISSUE_PANEL,
-  LAYER_TERMINAL_SEARCH,
 } from "./useKeyboardShortcuts";
 export type {
   KeyboardShortcutProviderProps,

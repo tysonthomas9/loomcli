@@ -214,3 +214,68 @@ func TestGetAgentLogPath_EmptyWorkspace_UsesDefault(t *testing.T) {
 		t.Errorf("expected path to contain '_default', got %q", logPath)
 	}
 }
+
+func TestValidatePathWithinDir_AllowsSymlinkedAllowedDir(t *testing.T) {
+	root := t.TempDir()
+	realDir := filepath.Join(root, "real")
+	if err := os.MkdirAll(realDir, 0o755); err != nil {
+		t.Fatalf("failed to create real dir: %v", err)
+	}
+	linkDir := filepath.Join(root, "link")
+	if err := os.Symlink(realDir, linkDir); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	filePath := filepath.Join(linkDir, "file.txt")
+	if err := os.WriteFile(filePath, []byte("ok"), 0o644); err != nil {
+		t.Fatalf("failed to write file: %v", err)
+	}
+
+	if err := ValidatePathWithinDir(filePath, linkDir); err != nil {
+		t.Fatalf("ValidatePathWithinDir() error = %v", err)
+	}
+}
+
+func TestValidatePathWithinDir_AllowsMissingPathUnderSymlinkedAllowedDir(t *testing.T) {
+	root := t.TempDir()
+	realDir := filepath.Join(root, "real")
+	if err := os.MkdirAll(realDir, 0o755); err != nil {
+		t.Fatalf("failed to create real dir: %v", err)
+	}
+	linkDir := filepath.Join(root, "link")
+	if err := os.Symlink(realDir, linkDir); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+
+	filePath := filepath.Join(linkDir, "new-file.txt")
+	if err := ValidatePathWithinDir(filePath, linkDir); err != nil {
+		t.Fatalf("ValidatePathWithinDir() error = %v", err)
+	}
+}
+
+func TestValidatePathWithinDir_DeniesSymlinkEscape(t *testing.T) {
+	root := t.TempDir()
+	allowedDir := filepath.Join(root, "allowed")
+	outsideDir := filepath.Join(root, "outside")
+	if err := os.MkdirAll(allowedDir, 0o755); err != nil {
+		t.Fatalf("failed to create allowed dir: %v", err)
+	}
+	if err := os.MkdirAll(outsideDir, 0o755); err != nil {
+		t.Fatalf("failed to create outside dir: %v", err)
+	}
+	outsideFile := filepath.Join(outsideDir, "secret.txt")
+	if err := os.WriteFile(outsideFile, []byte("secret"), 0o644); err != nil {
+		t.Fatalf("failed to write outside file: %v", err)
+	}
+	linkPath := filepath.Join(allowedDir, "escape")
+	if err := os.Symlink(outsideDir, linkPath); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+
+	err := ValidatePathWithinDir(filepath.Join(linkPath, "secret.txt"), allowedDir)
+	if err == nil {
+		t.Fatal("expected error for symlink escape, got nil")
+	}
+	if !strings.Contains(err.Error(), "outside allowed directory") {
+		t.Fatalf("error = %q, want outside allowed directory", err.Error())
+	}
+}

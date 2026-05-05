@@ -18,7 +18,7 @@ import (
 // CodexBackend implements the Backend interface for the OpenAI Codex CLI.
 type CodexBackend struct{}
 
-func (c *CodexBackend) Name() string { return "codex" }
+func (c *CodexBackend) Name() string { return NameCodex }
 
 func (c *CodexBackend) InvokeInteractive(workDir, prompt, agentName string) error {
 	return codexInvoker(workDir, prompt, agentName)
@@ -60,15 +60,8 @@ func defaultCodexInvoker(workDir, prompt, agentName string) error {
 	// mode fails with "stdin is not a terminal". Fall back to non-interactive
 	// exec mode which works headlessly.
 	if !isTerminal(os.Stdin) {
-		fmt.Println("Launching Codex agent (non-interactive, no TTY)...")
-		fmt.Println("")
-
-		cmd := exec.Command("codex", "exec", "--dangerously-bypass-approvals-and-sandbox", prompt)
-		cmd.Dir = workDir
-		cmd.Env = buildBackendEnv(workDir, agentName)
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		return cmd.Run()
+		shutdown := make(chan struct{})
+		return defaultCodexNonInteractiveInvoker(workDir, prompt, agentName, shutdown, nil)
 	}
 
 	cmd := buildCodexInteractiveCmd(workDir, prompt, agentName)
@@ -84,10 +77,7 @@ func defaultCodexNonInteractiveInvoker(workDir, prompt, agentName string, shutdo
 	cmd.Dir = workDir
 	cmd.Env = buildBackendEnv(workDir, agentName)
 
-	r, err := pipePromptToCmd(cmd, prompt)
-	if err != nil {
-		return wrapInvocationError(err, "")
-	}
+	r := pipePromptToCmd(cmd, prompt)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -133,16 +123,17 @@ func buildBackendEnv(workDir, agentName string) []string {
 	if agentName != "" {
 		env = append(env, "LOOM_AGENT_NAME="+agentName)
 	}
+	env = append(env, activeSessionEnvVars()...)
 	return env
 }
 
 // pipePromptToCmd attaches the prompt to cmd.Stdin without exposing it in CLI args.
 // Do not pre-write to an OS pipe here: large prompts can exceed the pipe buffer
 // and deadlock before the child process starts reading.
-func pipePromptToCmd(cmd *exec.Cmd, prompt string) (io.ReadCloser, error) {
+func pipePromptToCmd(cmd *exec.Cmd, prompt string) io.ReadCloser {
 	r := io.NopCloser(strings.NewReader(prompt))
 	cmd.Stdin = r
-	return r, nil
+	return r
 }
 
 // Meta returns descriptive metadata about the Codex backend.

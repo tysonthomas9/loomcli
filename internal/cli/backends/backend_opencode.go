@@ -59,10 +59,7 @@ func defaultOpenCodeNonInteractiveInvoker(workDir, prompt, agentName string, shu
 	cmd.Dir = workDir
 	cmd.Env = buildBackendEnv(workDir, agentName)
 
-	r, err := pipePromptToCmd(cmd, prompt)
-	if err != nil {
-		return wrapInvocationError(err, "")
-	}
+	r := pipePromptToCmd(cmd, prompt)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

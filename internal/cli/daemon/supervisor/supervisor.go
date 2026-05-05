@@ -14,7 +14,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/automode"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
-	"github.com/tysonthomas9/loomcli/internal/cli/git"
+	"github.com/tysonthomas9/loomcli/internal/cli/sessionfinalize"
 	"github.com/tysonthomas9/loomcli/internal/cli/workspace"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/events"
@@ -150,6 +150,8 @@ const (
 	defaultLeaseTTL     = 2 * time.Minute
 )
 
+var controlPlaneOperationTimeout = 2 * time.Second
+
 func (s *Supervisor) startControlPlaneNode() error {
 	if s.ControlStore == nil || s.WorkspaceID == "" {
 		return nil
@@ -164,7 +166,7 @@ func (s *Supervisor) startControlPlaneNode() error {
 		interval = defaultNodeInterval
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), controlPlaneOperationTimeout)
 	defer cancel()
 	if _, err := s.ControlStore.Nodes().Create(ctx, store.NodeCreate{
 		WorkspaceKey:    s.WorkspaceID,
@@ -196,7 +198,7 @@ func (s *Supervisor) runNodeHeartbeat(nodeID string, ttl, interval time.Duration
 		case <-s.Shutdown:
 			return
 		case <-ticker.C:
-			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), controlPlaneOperationTimeout)
 			_, err := s.ControlStore.Nodes().Heartbeat(ctx, s.WorkspaceID, nodeID, ttl)
 			cancel()
 			if err != nil {
@@ -480,7 +482,7 @@ func (s *Supervisor) createAgentSession(ap *AgentProcess, epicID string) {
 		slog.Warn("session creation failed, watchdog will use log file", "worktree", ap.Entry.Worktree, "err", err)
 		return
 	}
-	txPath := filepath.Join(runtimeDir, "sessions", sess.SessionID(), "transcript.jsonl")
+	txPath := sessStore.NativeTranscriptPath(sess.SessionID())
 	bRef := automode.CaptureHEADRef(ap.WorktreePath)
 	ap.Mu.Lock()
 	ap.Session = sess
@@ -496,24 +498,30 @@ func (s *Supervisor) createControlPlaneAgentSession(ap *AgentProcess, sessionID,
 	if s.ControlStore == nil || s.WorkspaceID == "" || sessionID == "" {
 		return
 	}
+	taskID := s.taskIDForLifecycle(ap, nil)
 	metadata := s.agentSessionMetadata(ap, epicID)
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	if _, err := s.ControlStore.AgentSessions().Create(ctx, store.AgentSessionCreate{
+	createCtx, createCancel := context.WithTimeout(context.Background(), controlPlaneOperationTimeout)
+	if _, err := s.ControlStore.AgentSessions().Create(createCtx, store.AgentSessionCreate{
 		WorkspaceKey: s.WorkspaceID,
 		SessionID:    sessionID,
 		AgentID:      ap.Entry.Worktree,
 		NodeID:       s.NodeID,
 		Kind:         domain.AgentSessionKindTask,
+		TaskID:       taskID,
 		Status:       domain.AgentSessionStarting,
 		Phase:        phase,
 		Attempt:      attempt,
 		Metadata:     metadata,
 	}); err != nil {
+		createCancel()
 		slog.Warn("control-plane agent session creation failed", "worktree", ap.Entry.Worktree, "session_id", sessionID, "err", err)
 		return
 	}
-	lease, err := s.ControlStore.AgentLeases().Create(ctx, store.AgentLeaseCreate{
+	createCancel()
+
+	leaseCtx, leaseCancel := context.WithTimeout(context.Background(), controlPlaneOperationTimeout)
+	defer leaseCancel()
+	lease, err := s.ControlStore.AgentLeases().Create(leaseCtx, store.AgentLeaseCreate{
 		WorkspaceKey: s.WorkspaceID,
 		SessionID:    sessionID,
 		LeaseID:      sessionID + "-lease",
@@ -547,7 +555,7 @@ func (s *Supervisor) markControlPlaneAgentSessionRunning(ap *AgentProcess) {
 	}
 	now := time.Now().UTC()
 	status := domain.AgentSessionRunning
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), controlPlaneOperationTimeout)
 	defer cancel()
 	if _, err := s.ControlStore.AgentSessions().Update(ctx, s.WorkspaceID, sessionID, store.AgentSessionUpdate{
 		Status:        &status,
@@ -577,6 +585,9 @@ func (s *Supervisor) agentSessionMetadataLocked(ap *AgentProcess, backend string
 	if ap.AssignedEpicID != "" {
 		metadata["epic_id"] = ap.AssignedEpicID
 	}
+	if ap.AssignedTaskID != "" {
+		metadata["task_id"] = ap.AssignedTaskID
+	}
 	if ap.Entry.Repo != "" {
 		metadata["repo"] = ap.Entry.Repo
 	}
@@ -589,30 +600,56 @@ func (s *Supervisor) agentSessionMetadataLocked(ap *AgentProcess, backend string
 	return metadata
 }
 
-func (s *Supervisor) completeControlPlaneAgentSession(ap *AgentProcess, sessionID, leaseID, leaseToken string, exitCode int, errClass string) {
-	if s.ControlStore == nil || s.WorkspaceID == "" || sessionID == "" {
+type agentSessionCompletionInput struct {
+	sessionID  string
+	leaseID    string
+	leaseToken string
+	exitCode   int
+	errClass   string
+	taskID     string
+	diffResult sessionfinalize.WithWorktreeResult
+}
+
+func (s *Supervisor) completeControlPlaneAgentSession(ap *AgentProcess, input agentSessionCompletionInput) {
+	if s.ControlStore == nil || s.WorkspaceID == "" || input.sessionID == "" {
 		return
 	}
 	status := domain.AgentSessionCompleted
-	if exitCode != 0 {
+	if input.exitCode != 0 {
 		status = domain.AgentSessionFailed
 	}
 	finishedAt := time.Now().UTC()
 	finishedAtPtr := &finishedAt
-	exitCodePtr := &exitCode
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	if _, err := s.ControlStore.AgentSessions().Update(ctx, s.WorkspaceID, sessionID, store.AgentSessionUpdate{
-		Status:     &status,
-		FinishedAt: &finishedAtPtr,
-		ErrorClass: &errClass,
-		ExitCode:   &exitCodePtr,
-	}); err != nil {
-		slog.Warn("control-plane agent session completion failed", "worktree", ap.Entry.Worktree, "session_id", sessionID, "err", err)
+	exitCodePtr := &input.exitCode
+	var taskIDPtr *string
+	if input.taskID != "" {
+		taskIDPtr = &input.taskID
 	}
-	if leaseID != "" && leaseToken != "" {
-		if _, err := s.ControlStore.AgentLeases().Release(ctx, s.WorkspaceID, leaseID, leaseToken); err != nil {
-			slog.Warn("control-plane agent lease release failed", "worktree", ap.Entry.Worktree, "session_id", sessionID, "lease_id", leaseID, "err", err)
+
+	backend := s.GetEffectiveBackend(ap)
+	ap.Mu.Lock()
+	if input.taskID != "" {
+		ap.AssignedTaskID = input.taskID
+	}
+	metadata := s.agentSessionMetadataLocked(ap, backend)
+	ap.Mu.Unlock()
+	sessions.EncodeDiffStatsMetadata(metadata, input.diffResult.DiffStats, input.diffResult.FilesTouched, input.diffResult.HasDiffPatch)
+
+	ctx, cancel := context.WithTimeout(context.Background(), controlPlaneOperationTimeout)
+	defer cancel()
+	if _, err := s.ControlStore.AgentSessions().Update(ctx, s.WorkspaceID, input.sessionID, store.AgentSessionUpdate{
+		Status:     &status,
+		TaskID:     taskIDPtr,
+		FinishedAt: &finishedAtPtr,
+		ErrorClass: &input.errClass,
+		ExitCode:   &exitCodePtr,
+		Metadata:   &metadata,
+	}); err != nil {
+		slog.Warn("control-plane agent session completion failed", "worktree", ap.Entry.Worktree, "session_id", input.sessionID, "err", err)
+	}
+	if input.leaseID != "" && input.leaseToken != "" {
+		if _, err := s.ControlStore.AgentLeases().Release(ctx, s.WorkspaceID, input.leaseID, input.leaseToken); err != nil {
+			slog.Warn("control-plane agent lease release failed", "worktree", ap.Entry.Worktree, "session_id", input.sessionID, "lease_id", input.leaseID, "err", err)
 		}
 	}
 }
@@ -634,7 +671,14 @@ func (s *Supervisor) spawnAndWait(ap *AgentProcess) bool {
 		if orphanSess != nil {
 			_ = orphanSess.Finalize(sessions.FinalizeOptions{ExitCode: -1, ErrorClass: "spawn_failure"})
 		}
-		s.completeControlPlaneAgentSession(ap, orphanSessionID, orphanLeaseID, orphanLeaseToken, -1, "spawn_failure")
+		s.completeControlPlaneAgentSession(ap, agentSessionCompletionInput{
+			sessionID:  orphanSessionID,
+			leaseID:    orphanLeaseID,
+			leaseToken: orphanLeaseToken,
+			exitCode:   -1,
+			errClass:   "spawn_failure",
+			taskID:     s.taskIDForLifecycle(ap, nil),
+		})
 		s.Concurrency.Release(ap.Entry.Role)
 		return s.handleRestartAfterError(ap)
 	}
@@ -649,24 +693,52 @@ func (s *Supervisor) spawnAndWait(ap *AgentProcess) bool {
 	return true
 }
 
+type agentSessionFinalizeState struct {
+	session    *sessions.Session
+	sessionID  string
+	leaseID    string
+	leaseToken string
+	beforeRef  string
+}
+
 // finalizeAgentSession finalizes the daemon-created session after agent exit.
 func (s *Supervisor) finalizeAgentSession(ap *AgentProcess, exitCode int) {
+	state := takeAgentSessionForFinalize(ap)
+	if state.session == nil && state.sessionID == "" {
+		return
+	}
+	taskID := s.taskIDForFinalize(ap)
+	errClass := agentErrorClass(ap)
+	diffResult := finalizeLocalSession(state.session, ap, state.beforeRef, taskID, exitCode, errClass)
+	s.completeControlPlaneAgentSession(ap, agentSessionCompletionInput{
+		sessionID:  state.sessionID,
+		leaseID:    state.leaseID,
+		leaseToken: state.leaseToken,
+		exitCode:   exitCode,
+		errClass:   errClass,
+		taskID:     taskID,
+		diffResult: diffResult,
+	})
+}
+
+func takeAgentSessionForFinalize(ap *AgentProcess) agentSessionFinalizeState {
 	ap.Mu.Lock()
-	sess := ap.Session
-	agentSessionID := ap.AgentSessionID
-	agentLeaseID := ap.AgentLeaseID
-	agentLeaseToken := ap.AgentLeaseToken
-	bRef := ap.BeforeRef
+	state := agentSessionFinalizeState{
+		session:    ap.Session,
+		sessionID:  ap.AgentSessionID,
+		leaseID:    ap.AgentLeaseID,
+		leaseToken: ap.AgentLeaseToken,
+		beforeRef:  ap.BeforeRef,
+	}
 	ap.Session = nil
 	ap.AgentSessionID = ""
 	ap.AgentLeaseID = ""
 	ap.AgentLeaseToken = ""
 	ap.Mu.Unlock()
+	return state
+}
 
-	if sess == nil && agentSessionID == "" {
-		return
-	}
-
+func (s *Supervisor) taskIDForFinalize(ap *AgentProcess) string {
 	taskID := ""
 	if info, lockErr := cli.ReadLockFile(ap.WorktreePath); lockErr == nil {
 		taskID = info.TaskID
@@ -674,27 +746,38 @@ func (s *Supervisor) finalizeAgentSession(ap *AgentProcess, exitCode int) {
 	if taskID == "" {
 		taskID = s.taskIDForLifecycle(ap, nil)
 	}
-	diffStats := git.ComputeDiffStats(ap.WorktreePath, bRef)
+	return taskID
+}
 
+func agentErrorClass(ap *AgentProcess) string {
 	ap.Mu.Lock()
 	errClass := ""
 	if ap.LastError != nil {
 		errClass = ap.LastError.Class.String()
 	}
 	ap.Mu.Unlock()
+	return errClass
+}
 
-	if sess != nil {
-		if err := sess.Finalize(sessions.FinalizeOptions{
-			TaskID: taskID, ExitCode: exitCode, ErrorClass: errClass,
-			FilesTouched: diffStats.FilesTouched,
-			DiffStats: sessions.DiffStats{
-				FilesChanged: diffStats.FilesChanged, LinesAdded: diffStats.LinesAdded, LinesRemoved: diffStats.LinesRemoved,
-			},
-		}); err != nil {
-			slog.Warn("session finalization failed", "worktree", ap.Entry.Worktree, "err", err)
-		}
+func finalizeLocalSession(
+	sess *sessions.Session,
+	ap *AgentProcess,
+	beforeRef string,
+	taskID string,
+	exitCode int,
+	errClass string,
+) sessionfinalize.WithWorktreeResult {
+	result, err := sessionfinalize.WithWorktree(sess, sessionfinalize.WithWorktreeOptions{
+		WorktreePath: ap.WorktreePath,
+		BeforeRef:    beforeRef,
+		TaskID:       taskID,
+		ExitCode:     exitCode,
+		ErrorClass:   errClass,
+	})
+	if err != nil {
+		slog.Warn("session finalization failed", "worktree", ap.Entry.Worktree, "err", err)
 	}
-	s.completeControlPlaneAgentSession(ap, agentSessionID, agentLeaseID, agentLeaseToken, exitCode, errClass)
+	return result
 }
 
 // postMortemRecovery runs recovery after agent exit, skipping for yield exits.

@@ -34,6 +34,7 @@ func HandleCreateIssue(svc service.IssueService) http.HandlerFunc {
 			ID:                 req.ID,
 			Parent:             req.Parent,
 			Description:        req.Description,
+			Status:             req.Status,
 			Design:             req.Design,
 			AcceptanceCriteria: req.AcceptanceCriteria,
 			Notes:              req.Notes,

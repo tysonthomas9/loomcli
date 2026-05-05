@@ -8,25 +8,18 @@ import (
 func TestSyncSingleWorkspace_PushAndPull(t *testing.T) {
 	// not parallel: uses SetupTestEnv, mock.Install(), defaultDeps.Agent mutation
 	tmpDir := t.TempDir()
-	configDir := tmpDir + "/.loom"
-	os.MkdirAll(configDir, 0755)
-
 	wsDir := tmpDir + "/ws"
 	repo1 := wsDir + "/api"
 	os.MkdirAll(repo1+"/.git", 0755)
 
-	configContent := `workspaces:
-  ws1:
-    path: ` + wsDir + `
-    repos:
-      - name: api
-        path: ` + repo1 + `
-        default_branch: main
-`
-	os.WriteFile(configDir+"/config.yaml", []byte(configContent), 0644)
-
-	SetupTestEnv(t, map[string]string{
-		"LOOM_CONFIG_DIR": configDir,
+	setupWorkspaceConfig(t, &LoomConfig{
+		DefaultWorkspace: "ws1",
+		Workspaces: map[string]WorkspaceConfig{
+			"ws1": {
+				Path:  wsDir,
+				Repos: []RepoConfig{{Name: "api", Path: repo1, DefaultBranch: "main"}},
+			},
+		},
 	})
 
 	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
@@ -80,25 +73,18 @@ func TestSyncSingleWorkspace_PushAndPull(t *testing.T) {
 func TestSyncSingleWorkspace_PushOnly(t *testing.T) {
 	// not parallel: uses SetupTestEnv, mock.Install(), defaultDeps.Agent mutation
 	tmpDir := t.TempDir()
-	configDir := tmpDir + "/.loom"
-	os.MkdirAll(configDir, 0755)
-
 	wsDir := tmpDir + "/ws"
 	repo1 := wsDir + "/api"
 	os.MkdirAll(repo1+"/.git", 0755)
 
-	configContent := `workspaces:
-  ws1:
-    path: ` + wsDir + `
-    repos:
-      - name: api
-        path: ` + repo1 + `
-        default_branch: main
-`
-	os.WriteFile(configDir+"/config.yaml", []byte(configContent), 0644)
-
-	SetupTestEnv(t, map[string]string{
-		"LOOM_CONFIG_DIR": configDir,
+	setupWorkspaceConfig(t, &LoomConfig{
+		DefaultWorkspace: "ws1",
+		Workspaces: map[string]WorkspaceConfig{
+			"ws1": {
+				Path:  wsDir,
+				Repos: []RepoConfig{{Name: "api", Path: repo1, DefaultBranch: "main"}},
+			},
+		},
 	})
 
 	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
@@ -145,25 +131,18 @@ func TestSyncSingleWorkspace_PushOnly(t *testing.T) {
 func TestSyncSingleWorkspace_PullOnly(t *testing.T) {
 	// not parallel: uses SetupTestEnv, mock.Install(), defaultDeps.Agent mutation
 	tmpDir := t.TempDir()
-	configDir := tmpDir + "/.loom"
-	os.MkdirAll(configDir, 0755)
-
 	wsDir := tmpDir + "/ws"
 	repo1 := wsDir + "/api"
 	os.MkdirAll(repo1+"/.git", 0755)
 
-	configContent := `workspaces:
-  ws1:
-    path: ` + wsDir + `
-    repos:
-      - name: api
-        path: ` + repo1 + `
-        default_branch: main
-`
-	os.WriteFile(configDir+"/config.yaml", []byte(configContent), 0644)
-
-	SetupTestEnv(t, map[string]string{
-		"LOOM_CONFIG_DIR": configDir,
+	setupWorkspaceConfig(t, &LoomConfig{
+		DefaultWorkspace: "ws1",
+		Workspaces: map[string]WorkspaceConfig{
+			"ws1": {
+				Path:  wsDir,
+				Repos: []RepoConfig{{Name: "api", Path: repo1, DefaultBranch: "main"}},
+			},
+		},
 	})
 
 	outputMock := NewOutputCommandMock(t, []OutputCommandStub{

@@ -6,8 +6,10 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
+	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
 	"github.com/tysonthomas9/loomcli/internal/sessions/transcript/backends"
@@ -19,6 +21,8 @@ import (
 
 // Compile-time check.
 var _ service.SessionService = (*sessionServiceImpl)(nil)
+
+var userHomeDir = os.UserHomeDir
 
 // sessionServiceImpl is the concrete implementation of SessionService.
 type sessionServiceImpl struct {
@@ -77,17 +81,21 @@ func (s *sessionServiceImpl) findStoreForSession(ctx context.Context, wsID, sess
 }
 
 func (s *sessionServiceImpl) ListTaskSessions(ctx context.Context, wsID, taskID string) ([]service.SessionListItem, error) {
+	if taskID == "" || !validTaskID.MatchString(taskID) {
+		return nil, service.ErrValidation("invalid task ID: must match [a-zA-Z0-9._-]+")
+	}
+	if items, err := s.controlPlaneTaskSessions(ctx, wsID, taskID); err == nil && len(items) > 0 {
+		return items, nil
+	}
+
 	stores, err := s.storesForWorkspace(ctx, wsID)
 	if err != nil {
 		return nil, err
 	}
-	if taskID == "" || !validTaskID.MatchString(taskID) {
-		return nil, service.ErrValidation("invalid task ID: must match [a-zA-Z0-9._-]+")
-	}
 
 	var items []service.SessionListItem
-	for _, store := range stores {
-		records, err := store.SessionsByTask(taskID)
+	for _, sessStore := range stores {
+		records, err := sessStore.SessionsByTask(taskID)
 		if err != nil {
 			continue
 		}
@@ -96,16 +104,109 @@ func (s *sessionServiceImpl) ListTaskSessions(ctx context.Context, wsID, taskID 
 				SessionRecord: rec,
 				IsActive:      rec.Status == sessions.StatusRunning,
 			}
-			if info, err := os.Stat(store.NativeTranscriptPath(rec.SessionID)); err == nil && info.Size() > 0 {
+			if info, err := os.Stat(sessStore.NativeTranscriptPath(rec.SessionID)); err == nil && info.Size() > 0 {
 				item.HasTranscript = true
 			}
-			if diff, err := store.ReadDiff(rec.SessionID); err == nil && diff != "" {
+			if diff, err := sessStore.ReadDiff(rec.SessionID); err == nil && diff != "" {
 				item.HasDiff = true
 			}
 			items = append(items, item)
 		}
 	}
 	return items, nil
+}
+
+func (s *sessionServiceImpl) controlPlaneTaskSessions(ctx context.Context, wsID, taskID string) ([]service.SessionListItem, error) {
+	if s.store == nil {
+		return nil, nil
+	}
+	records, err := s.store.AgentSessions().List(ctx, wsID, store.AgentSessionFilter{TaskID: taskID})
+	if err != nil {
+		return nil, err
+	}
+	items := make([]service.SessionListItem, 0, len(records))
+	for _, rec := range records {
+		if rec == nil {
+			continue
+		}
+		item := service.SessionListItem{
+			SessionRecord: sessionRecordFromAgentSession(rec),
+			IsActive:      isActiveAgentSession(rec.Status),
+		}
+		if rec.Metadata != nil {
+			item.HasTranscript = rec.Metadata["transcript_path"] != ""
+			item.HasDiff = rec.Metadata["diff_path"] != "" || rec.Metadata["diff_artifact_id"] != ""
+		}
+		items = append(items, item)
+	}
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].StartedAt.After(items[j].StartedAt)
+	})
+	return items, nil
+}
+
+func sessionRecordFromAgentSession(rec *domain.AgentSession) sessions.SessionRecord {
+	startedAt := rec.StartedAt
+	if startedAt.IsZero() {
+		startedAt = rec.CreatedAt
+	}
+	taskID := rec.TaskID
+	backend := ""
+	if rec.Metadata != nil {
+		if taskID == "" {
+			taskID = rec.Metadata["task_id"]
+		}
+		backend = rec.Metadata["backend"]
+	}
+	diffMeta := sessions.DecodeDiffStatsMetadata(rec.Metadata)
+	out := sessions.SessionRecord{
+		SchemaVersion: sessions.CurrentSchemaVersion,
+		SessionID:     rec.SessionID,
+		TaskID:        taskID,
+		AgentName:     rec.AgentID,
+		Backend:       backend,
+		Phase:         rec.Phase,
+		StartedAt:     startedAt,
+		Status:        sessionStatusFromAgentSession(rec.Status),
+		AttemptNum:    rec.Attempt,
+		ErrorClass:    rec.ErrorClass,
+		FilesChanged:  diffMeta.FilesChanged,
+		LinesAdded:    diffMeta.LinesAdded,
+		LinesRemoved:  diffMeta.LinesRemoved,
+		FilesTouched:  diffMeta.FilesTouched,
+	}
+	if rec.FinishedAt != nil {
+		out.EndedAt = rec.FinishedAt
+		if !startedAt.IsZero() {
+			out.DurationS = rec.FinishedAt.Sub(startedAt).Seconds()
+		}
+	}
+	if rec.ExitCode != nil {
+		out.ExitCode = *rec.ExitCode
+	}
+	return out
+}
+
+func sessionStatusFromAgentSession(status domain.AgentSessionStatus) sessions.SessionStatus {
+	switch status {
+	case domain.AgentSessionCompleted:
+		return sessions.StatusCompleted
+	case domain.AgentSessionFailed:
+		return sessions.StatusFailed
+	case domain.AgentSessionCancelled, domain.AgentSessionExpired:
+		return sessions.StatusAborted
+	default:
+		return sessions.StatusRunning
+	}
+}
+
+func isActiveAgentSession(status domain.AgentSessionStatus) bool {
+	switch status {
+	case domain.AgentSessionCompleted, domain.AgentSessionFailed, domain.AgentSessionCancelled, domain.AgentSessionExpired:
+		return false
+	default:
+		return true
+	}
 }
 
 func (s *sessionServiceImpl) GetSession(ctx context.Context, wsID, taskID, sessionID string) (*service.SessionDetailData, error) {
@@ -326,7 +427,13 @@ func findSessionRecord(records []sessionhistory.SessionRecord, id string) *sessi
 
 // readScrollbackFile validates the path, reads the file, and returns the result.
 func readScrollbackFile(scrollbackPath string) (*service.SessionScrollbackResult, error) {
-	homeDir, _ := os.UserHomeDir()
+	homeDir, err := userHomeDir()
+	if err != nil {
+		return nil, service.ErrInternal("resolve home directory", err)
+	}
+	if strings.TrimSpace(homeDir) == "" {
+		return nil, service.ErrInternal("resolve home directory", errors.New("empty home directory"))
+	}
 	expectedPrefix := filepath.Clean(homeDir+"/.loom/session-scrollback") + string(os.PathSeparator)
 	cleanPath := filepath.Clean(scrollbackPath)
 	if !strings.HasPrefix(cleanPath+string(os.PathSeparator), expectedPrefix) {

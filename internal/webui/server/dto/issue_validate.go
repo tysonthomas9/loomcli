@@ -17,56 +17,57 @@ func (r *CreateIssueRequest) Validate() error {
 
 	var b validationBuilder
 
-	// title: required, max length (checked on trimmed value)
+	validateCreateIssueCore(&b, r)
+	validateCreateIssueLimits(&b, r)
+	validateCreateIssueTimes(&b, r)
+
+	return b.build()
+}
+
+func validateCreateIssueCore(b *validationBuilder, r *CreateIssueRequest) {
 	trimmed := strings.TrimSpace(r.Title)
 	if trimmed == "" {
 		b.add("title", "is required")
 	} else if len(trimmed) > MaxTitleLength {
 		b.add("title", fmt.Sprintf("must be %d characters or less (got %d)", MaxTitleLength, len(trimmed)))
 	}
-
-	// issue_type: required, must be valid entity type
 	if r.IssueType == "" {
 		b.add("issue_type", "is required")
 	} else if !entity.IssueType(r.IssueType).IsValid() {
 		b.add("issue_type", "must be one of: bug, feature, task, epic, chore")
 	}
-
-	// priority: 0-4 inclusive
 	if r.Priority < 0 || r.Priority > 4 {
 		b.add("priority", fmt.Sprintf("must be between 0 and 4 (got %d)", r.Priority))
 	}
+	if r.Status != "" && r.Status != "open" && r.Status != "deferred" {
+		b.add("status", "must be open or deferred")
+	}
+}
 
-	// labels: size limit
+func validateCreateIssueLimits(b *validationBuilder, r *CreateIssueRequest) {
 	if len(r.Labels) > MaxLabels {
 		b.add("labels", fmt.Sprintf("too many (max %d, got %d)", MaxLabels, len(r.Labels)))
 	}
-
-	// dependencies: size limit
 	if len(r.Dependencies) > MaxDependencies {
 		b.add("dependencies", fmt.Sprintf("too many (max %d, got %d)", MaxDependencies, len(r.Dependencies)))
 	}
-
-	// estimated_minutes: non-negative
 	if r.EstimatedMinutes != nil && *r.EstimatedMinutes < 0 {
 		b.add("estimated_minutes", "cannot be negative")
 	}
+}
 
-	// due_at: valid RFC3339
-	if r.DueAt != "" {
-		if _, err := time.Parse(time.RFC3339, r.DueAt); err != nil {
-			b.add("due_at", "must be a valid RFC 3339 timestamp (e.g., 2024-01-15T10:30:00Z)")
-		}
+func validateCreateIssueTimes(b *validationBuilder, r *CreateIssueRequest) {
+	validateRFC3339Field(b, "due_at", r.DueAt)
+	validateRFC3339Field(b, "defer_until", r.DeferUntil)
+}
+
+func validateRFC3339Field(b *validationBuilder, field, value string) {
+	if value == "" {
+		return
 	}
-
-	// defer_until: valid RFC3339
-	if r.DeferUntil != "" {
-		if _, err := time.Parse(time.RFC3339, r.DeferUntil); err != nil {
-			b.add("defer_until", "must be a valid RFC 3339 timestamp (e.g., 2024-01-15T10:30:00Z)")
-		}
+	if _, err := time.Parse(time.RFC3339, value); err != nil {
+		b.add(field, "must be a valid RFC 3339 timestamp (e.g., 2024-01-15T10:30:00Z)")
 	}
-
-	return b.build()
 }
 
 // Validate checks that the PatchIssueRequest is well-formed.

@@ -106,22 +106,24 @@ func GetTaskLogDir(workspaceID, taskID string) (string, error) {
 // validatePathWithinDir checks that the resolved path stays within the allowed directory.
 // This prevents symlink attacks where a symlink could point outside the log directory.
 func ValidatePathWithinDir(path, allowedDir string) error {
+	resolvedAllowedDir, err := resolvePathForComparison(allowedDir)
+	if err != nil {
+		return fmt.Errorf("failed to resolve allowed directory: %w", err)
+	}
+
 	// Resolve any symlinks in the path
 	resolvedPath, err := filepath.EvalSymlinks(path)
 	if err != nil {
 		// If file doesn't exist yet, check the parent directory
 		if os.IsNotExist(err) {
 			parentDir := filepath.Dir(path)
-			resolvedParent, err := filepath.EvalSymlinks(parentDir)
-			if err != nil && !os.IsNotExist(err) {
+			resolvedParent, err := resolvePathForComparison(parentDir)
+			if err != nil {
 				return fmt.Errorf("failed to resolve parent path: %w", err)
 			}
-			if err == nil {
-				// Check parent stays within allowed dir
-				if !strings.HasPrefix(resolvedParent+string(filepath.Separator), allowedDir+string(filepath.Separator)) &&
-					resolvedParent != allowedDir {
-					return fmt.Errorf("path outside allowed directory")
-				}
+			// Check parent stays within allowed dir
+			if !pathWithinDir(resolvedParent, resolvedAllowedDir) {
+				return fmt.Errorf("path outside allowed directory")
 			}
 			return nil
 		}
@@ -129,12 +131,39 @@ func ValidatePathWithinDir(path, allowedDir string) error {
 	}
 
 	// Ensure resolved path is within the allowed directory
-	if !strings.HasPrefix(resolvedPath+string(filepath.Separator), allowedDir+string(filepath.Separator)) &&
-		resolvedPath != allowedDir {
+	if !pathWithinDir(resolvedPath, resolvedAllowedDir) {
 		return fmt.Errorf("path outside allowed directory")
 	}
 
 	return nil
+}
+
+func resolvePathForComparison(path string) (string, error) {
+	cleaned := filepath.Clean(path)
+	resolved, err := filepath.EvalSymlinks(cleaned)
+	if err == nil {
+		return resolved, nil
+	}
+	if !os.IsNotExist(err) {
+		return "", err
+	}
+	parent := filepath.Dir(cleaned)
+	if parent == cleaned {
+		return cleaned, nil
+	}
+	resolvedParent, err := resolvePathForComparison(parent)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(resolvedParent, filepath.Base(cleaned)), nil
+}
+
+func pathWithinDir(path, allowedDir string) bool {
+	rel, err := filepath.Rel(allowedDir, path)
+	if err != nil {
+		return false
+	}
+	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel))
 }
 
 // listTaskPhases returns the available log phases for a task, scoped by workspace.

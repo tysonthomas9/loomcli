@@ -1,15 +1,19 @@
 package supervisor
 
 import (
+	"context"
 	"os"
 	"testing"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
+	"github.com/tysonthomas9/loomcli/internal/cli/sessionfinalize"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/events"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/sessions"
+	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 func TestSupervisorRegistersControlPlaneNodeOnStart(t *testing.T) {
@@ -95,9 +99,10 @@ func TestSupervisorMirrorsAgentSessionToControlPlane(t *testing.T) {
 	cli.ResetWorkspaceRuntimeDirCache()
 
 	ap := &AgentProcess{
-		Entry:        cfgpkg.AgentEntry{Worktree: "worker-1", Role: "task", Repo: "repo-a"},
-		RoleConfig:   cfgpkg.RoleConfig{Backend: "claude"},
-		WorktreePath: worktree,
+		Entry:          cfgpkg.AgentEntry{Worktree: "worker-1", Role: "task", Repo: "repo-a"},
+		RoleConfig:     cfgpkg.RoleConfig{Backend: "claude"},
+		WorktreePath:   worktree,
+		AssignedTaskID: "task-1",
 	}
 
 	s.createAgentSession(ap, "epic-1")
@@ -117,8 +122,11 @@ func TestSupervisorMirrorsAgentSessionToControlPlane(t *testing.T) {
 	if session.Status != domain.AgentSessionStarting {
 		t.Fatalf("status = %q, want starting", session.Status)
 	}
-	if session.Metadata["epic_id"] != "epic-1" || session.Metadata["repo"] != "repo-a" {
-		t.Fatalf("metadata = %#v, want epic/repo", session.Metadata)
+	if session.TaskID != "task-1" {
+		t.Fatalf("task id = %q, want task-1", session.TaskID)
+	}
+	if session.Metadata["epic_id"] != "epic-1" || session.Metadata["task_id"] != "task-1" || session.Metadata["repo"] != "repo-a" {
+		t.Fatalf("metadata = %#v, want epic/task/repo", session.Metadata)
 	}
 	lease, err := st.AgentLeases().Get(t.Context(), "WS", ap.AgentLeaseID)
 	if err != nil {
@@ -149,10 +157,28 @@ func TestSupervisorMirrorsAgentSessionToControlPlane(t *testing.T) {
 	sessionID := ap.AgentSessionID
 	leaseID := ap.AgentLeaseID
 	leaseToken := ap.AgentLeaseToken
-	s.completeControlPlaneAgentSession(ap, sessionID, leaseID, leaseToken, 7, "Fatal")
+	s.completeControlPlaneAgentSession(ap, agentSessionCompletionInput{
+		sessionID:  sessionID,
+		leaseID:    leaseID,
+		leaseToken: leaseToken,
+		exitCode:   7,
+		errClass:   "Fatal",
+		taskID:     "task-final",
+		diffResult: sessionfinalize.WithWorktreeResult{
+			DiffStats: sessions.DiffStats{
+				FilesChanged: 1,
+				LinesAdded:   2,
+				LinesRemoved: 3,
+			},
+			FilesTouched: []string{"file.txt"},
+		},
+	})
 	session, err = st.AgentSessions().Get(t.Context(), "WS", sessionID)
 	if err != nil {
 		t.Fatalf("get completed agent session: %v", err)
+	}
+	if session.TaskID != "task-final" {
+		t.Fatalf("completed task id = %q, want task-final", session.TaskID)
 	}
 	if session.Status != domain.AgentSessionFailed {
 		t.Fatalf("status = %q, want failed", session.Status)
@@ -166,12 +192,46 @@ func TestSupervisorMirrorsAgentSessionToControlPlane(t *testing.T) {
 	if session.FinishedAt == nil {
 		t.Fatal("FinishedAt was not set")
 	}
+	if session.Metadata["files_changed"] != "1" || session.Metadata["lines_added"] != "2" || session.Metadata["lines_removed"] != "3" || session.Metadata["files_touched"] != "file.txt" {
+		t.Fatalf("diff metadata = %#v", session.Metadata)
+	}
 	lease, err = st.AgentLeases().Get(t.Context(), "WS", leaseID)
 	if err != nil {
 		t.Fatalf("get released lease: %v", err)
 	}
 	if lease.Status != domain.AgentLeaseReleased {
 		t.Fatalf("lease status = %q, want released", lease.Status)
+	}
+}
+
+func TestCreateControlPlaneAgentSessionUsesFreshLeaseContext(t *testing.T) {
+	base := memstore.New()
+	sessionStore := &contextConsumingAgentSessionStore{AgentSessionStore: base.AgentSessions()}
+	leaseStore := &rejectExpiredAgentLeaseStore{AgentLeaseStore: base.AgentLeases()}
+	st := &controlPlaneStoreOverrides{
+		Store:    base,
+		sessions: sessionStore,
+		leases:   leaseStore,
+	}
+	s := newControlPlaneTestSupervisor(base)
+	s.ControlStore = st
+
+	oldTimeout := controlPlaneOperationTimeout
+	controlPlaneOperationTimeout = 20 * time.Millisecond
+	t.Cleanup(func() { controlPlaneOperationTimeout = oldTimeout })
+
+	ap := &AgentProcess{
+		Entry: cfgpkg.AgentEntry{Worktree: "worker-1", Role: "task"},
+	}
+	ap.AgentSessionID = "sess-fresh-lease-context"
+
+	s.createControlPlaneAgentSession(ap, ap.AgentSessionID, "", "implementation", 0)
+
+	if leaseStore.sawExpiredContext {
+		t.Fatal("lease create received an already-expired context")
+	}
+	if ap.AgentLeaseID == "" || ap.AgentLeaseToken == "" {
+		t.Fatalf("lease id/token not set: %q/%q", ap.AgentLeaseID, ap.AgentLeaseToken)
 	}
 }
 
@@ -191,4 +251,40 @@ func newControlPlaneTestSupervisor(st *memstore.Store) *Supervisor {
 		Concurrency:   NewConcurrencyTracker(nil),
 		EmitEvent:     func(events.Event) {},
 	}
+}
+
+type controlPlaneStoreOverrides struct {
+	*memstore.Store
+	sessions store.AgentSessionStore
+	leases   store.AgentLeaseStore
+}
+
+func (s *controlPlaneStoreOverrides) AgentSessions() store.AgentSessionStore {
+	return s.sessions
+}
+
+func (s *controlPlaneStoreOverrides) AgentLeases() store.AgentLeaseStore {
+	return s.leases
+}
+
+type contextConsumingAgentSessionStore struct {
+	store.AgentSessionStore
+}
+
+func (s *contextConsumingAgentSessionStore) Create(ctx context.Context, in store.AgentSessionCreate) (*domain.AgentSession, error) {
+	<-ctx.Done()
+	return s.AgentSessionStore.Create(context.Background(), in)
+}
+
+type rejectExpiredAgentLeaseStore struct {
+	store.AgentLeaseStore
+	sawExpiredContext bool
+}
+
+func (s *rejectExpiredAgentLeaseStore) Create(ctx context.Context, in store.AgentLeaseCreate) (*domain.AgentLease, error) {
+	if err := ctx.Err(); err != nil {
+		s.sawExpiredContext = true
+		return nil, err
+	}
+	return s.AgentLeaseStore.Create(ctx, in)
 }

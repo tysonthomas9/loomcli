@@ -811,6 +811,7 @@ func TestCreateIssue_Backend_Success_ReturnsIssueShape(t *testing.T) {
 		Title:      "New",
 		IssueType:  "task",
 		Priority:   2,
+		Status:     "deferred",
 		SourceRepo: "repo-a",
 	})
 	if err != nil {
@@ -837,7 +838,7 @@ func TestCreateIssue_Backend_Success_ReturnsIssueShape(t *testing.T) {
 	if len(fb.createParams) != 1 {
 		t.Fatalf("expected 1 backend call, got %d", len(fb.createParams))
 	}
-	if fb.createParams[0].Title != "New" || fb.createParams[0].IssueType != "task" || fb.createParams[0].SourceRepo != "repo-a" {
+	if fb.createParams[0].Title != "New" || fb.createParams[0].IssueType != "task" || fb.createParams[0].Status != "deferred" || fb.createParams[0].SourceRepo != "repo-a" {
 		t.Errorf("unexpected backend params: %+v", fb.createParams[0])
 	}
 }
@@ -881,6 +882,24 @@ func TestCreateIssue_Backend_ValidationFails_DoesNotCallBackend(t *testing.T) {
 		// Missing required Title triggers validation error.
 		IssueType: "task",
 		Priority:  2,
+	})
+	var sErr *ServiceError
+	if !errors.As(err, &sErr) || sErr.Kind != KindValidation {
+		t.Fatalf("expected ValidationError, got %v", err)
+	}
+	if len(fb.createParams) != 0 {
+		t.Errorf("backend should not be called when validation fails")
+	}
+}
+
+func TestCreateIssue_Backend_InvalidStatusFails(t *testing.T) {
+	fb := &fakeIssueBackend{}
+	svc := newServiceWithFake(fb)
+	_, err := svc.CreateIssue(context.Background(), CreateIssueParams{
+		Title:     "Invalid",
+		IssueType: "task",
+		Priority:  2,
+		Status:    "in_progress",
 	})
 	var sErr *ServiceError
 	if !errors.As(err, &sErr) || sErr.Kind != KindValidation {

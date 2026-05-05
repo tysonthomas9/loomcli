@@ -385,6 +385,7 @@ async function repairFleetWorkspaceMapping(): Promise<void> {
   await ensureFleetRole(workspace, "fleetdb-regression-workspace");
   await ensureFleetRepoAttached(workspace);
   await ensureFleetWorkspaceAgent(workspace);
+  ensureFleetWorkspaceAgentWorktree(workspace, "workspace", "workspace");
 }
 
 async function ensureFleetRepoAttached(workspace: string): Promise<void> {
@@ -436,6 +437,34 @@ async function ensureFleetWorkspaceAgent(workspace: string): Promise<void> {
     );
   }
   await response.body?.cancel().catch(() => undefined);
+}
+
+function ensureFleetWorkspaceAgentWorktree(
+  workspace: string,
+  repoName: string,
+  agentName: string,
+): void {
+  if (!/^[A-Za-z0-9._/-]+$/.test(agentName) || agentName.includes("..")) {
+    throw new Error(`unsafe agent worktree branch: ${agentName}`);
+  }
+  const workspaceRoot = `/root/.loom/workspaces/${workspace}`;
+  const repo = `${workspaceRoot}/${repoName}`;
+  const worktree = `${workspaceRoot}/worktrees/${repoName}/${agentName}`;
+  const command = [
+    "set -e",
+    `repo=${shellQuote(repo)}`,
+    `worktree=${shellQuote(worktree)}`,
+    `branch=${shellQuote(agentName)}`,
+    'mkdir -p "$(dirname "$worktree")"',
+    'if [ ! -e "$worktree/.git" ]; then git -C "$repo" worktree prune; if git -C "$repo" show-ref --verify --quiet "refs/heads/$branch"; then git -C "$repo" worktree add "$worktree" "$branch"; else git -C "$repo" worktree add "$worktree" -b "$branch"; fi; fi',
+    'git -C "$worktree" status --short --branch >/dev/null',
+  ].join("; ");
+  execSync(composeRun(`exec -T loom-fleet sh -lc ${shellQuote(command)}`), {
+    cwd: REPO_ROOT,
+    encoding: "utf-8",
+    timeout: 30_000,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
 }
 
 async function ensureFleetRole(

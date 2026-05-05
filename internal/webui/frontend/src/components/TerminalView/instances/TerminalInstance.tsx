@@ -25,7 +25,6 @@ import {
 
 import { getTerminalConfig } from "@/hooks/api";
 import { useWorkspaceContext } from "@/hooks/workspace";
-import { stripAnsi } from "@/utils/stripAnsi";
 import {
   startAutoReconnect,
   type ReconnectConfig,
@@ -55,7 +54,6 @@ const INITIAL_CONNECT_CONFIG: ReconnectConfig = {
  */
 const UNBOUNDED_RECONNECT_TIMEOUT_MS = 60 * 60 * 1000; // 1 h when server disables its own timeout
 const SCROLL_BOTTOM_THRESHOLD_PX = 24;
-const MAX_TRANSCRIPT_CHARS = 200_000;
 
 export type ConnectionState =
   | "disconnected"
@@ -156,30 +154,9 @@ export const TerminalInstance = forwardRef<
     });
   }, [getViewportElement]);
 
-  const textDecoderRef = useRef(new TextDecoder());
-  const [transcript, setTranscript] = useState("");
-
-  const appendTranscript = useCallback((data: string | Uint8Array) => {
-    const raw =
-      typeof data === "string" ? data : textDecoderRef.current.decode(data);
-    const text = stripAnsi(raw).replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-    if (!text) return;
-
-    setTranscript((prev) => {
-      const next = prev + text;
-      return next.length > MAX_TRANSCRIPT_CHARS
-        ? next.slice(next.length - MAX_TRANSCRIPT_CHARS)
-        : next;
-    });
+  const write = useCallback((data: string | Uint8Array) => {
+    wtermInstanceRef.current?.write(data);
   }, []);
-
-  const write = useCallback(
-    (data: string | Uint8Array) => {
-      appendTranscript(data);
-      wtermInstanceRef.current?.write(data);
-    },
-    [appendTranscript],
-  );
   const focus = useCallback(() => {
     wtermInstanceRef.current?.focus();
   }, []);
@@ -399,7 +376,6 @@ export const TerminalInstance = forwardRef<
     beingKilledRef.current = false;
     hasConnectedRef.current = false;
     initialViewportSyncDoneRef.current = false;
-    setTranscript("");
     // Connection normally begins in the onReady handler. If we're in a
     // StrictMode remount (wterm already fired onReady, and its cached
     // WASM means it won't fire again), re-kick the connection here —
@@ -558,11 +534,6 @@ export const TerminalInstance = forwardRef<
         onResize={handleResize}
         className={styles.container}
       />
-      {transcript && (
-        <pre className={styles.transcriptOverlay} aria-hidden="true">
-          {transcript}
-        </pre>
-      )}
     </div>
   );
 });

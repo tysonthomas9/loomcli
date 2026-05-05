@@ -86,32 +86,19 @@ func TestSyncCmd_MutuallyExclusiveFlagsRuntime(t *testing.T) {
 }
 
 func TestSyncSingleWorkspace_EmptyWorktrees(t *testing.T) {
-	t.Parallel()
 	deps, _, _, _, _ := NewTestDeps(t)
 
 	tmpDir := t.TempDir()
-	configDir := tmpDir + "/.loom"
-	if err := os.MkdirAll(configDir, 0755); err != nil {
-		t.Fatalf("failed to create config dir: %v", err)
-	}
-
 	wsDir := tmpDir + "/empty"
 	if err := os.MkdirAll(wsDir, 0755); err != nil {
 		t.Fatalf("failed to create workspace dir: %v", err)
 	}
 
-	configContent := `workspaces:
-  empty:
-    path: ` + wsDir + `
-    repos: []
-`
-	configPath := configDir + "/config.yaml"
-	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
-		t.Fatalf("failed to write config: %v", err)
-	}
-
-	SetupTestEnv(t, map[string]string{
-		"LOOM_CONFIG_DIR": configDir,
+	setupWorkspaceConfig(t, &LoomConfig{
+		DefaultWorkspace: "empty",
+		Workspaces: map[string]WorkspaceConfig{
+			"empty": {Path: wsDir},
+		},
 	})
 
 	outputMock := NewOutputCommandMock(t, []OutputCommandStub{})

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"path/filepath"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
@@ -322,36 +323,19 @@ func mergeStoreAgents(ctx context.Context, st store.Store, agents []monitor.Agen
 		return agents
 	}
 
-	assignmentsByName := make(map[string]*domain.Agent, len(assignments))
-	for _, assignment := range assignments {
-		if assignment != nil {
-			assignmentsByName[assignment.Name] = assignment
-		}
-	}
-
-	merged := make([]monitor.AgentStatus, 0, len(agents)+len(assignments))
-	byName := make(map[string]int, len(merged))
-	for _, agent := range agents {
-		if workspaceHint != "" {
-			_, assignedToWorkspace := assignmentsByName[agent.Name]
-			if !assignedToWorkspace && agent.Workspace != wsName && agent.Workspace != wsKey {
-				continue
-			}
-		}
-		byName[agent.Name] = len(merged)
-		merged = append(merged, agent)
-	}
+	assignmentsByName := agentsByName(assignments)
+	merged, byName := filterRuntimeAgents(agents, assignmentsByName, workspaceHint, wsKey, wsName)
 	for _, assignment := range assignments {
 		if assignment == nil {
 			continue
 		}
 		if idx, exists := byName[assignment.Name]; exists {
-			enrichRuntimeAgent(&merged[idx], assignment, wsName)
+			enrichRuntimeAgent(&merged[idx], assignment, wsKey, wsName)
 			continue
 		}
 		merged = append(merged, monitor.AgentStatus{
 			Name:      assignment.Name,
-			Branch:    "unknown",
+			Branch:    monitorBranchFromStoreAgent(wsKey, assignment),
 			Status:    monitorStatusFromAgentState(assignment.State),
 			Role:      assignment.RoleName,
 			Repo:      monitorRepoFromAgent(assignment),
@@ -361,9 +345,51 @@ func mergeStoreAgents(ctx context.Context, st store.Store, agents []monitor.Agen
 	return merged
 }
 
-func enrichRuntimeAgent(agent *monitor.AgentStatus, assignment *domain.Agent, wsName string) {
+func agentsByName(assignments []*domain.Agent) map[string]*domain.Agent {
+	byName := make(map[string]*domain.Agent, len(assignments))
+	for _, assignment := range assignments {
+		if assignment != nil {
+			byName[assignment.Name] = assignment
+		}
+	}
+	return byName
+}
+
+func filterRuntimeAgents(
+	agents []monitor.AgentStatus,
+	assignmentsByName map[string]*domain.Agent,
+	workspaceHint, wsKey, wsName string,
+) ([]monitor.AgentStatus, map[string]int) {
+	merged := make([]monitor.AgentStatus, 0, len(agents)+len(assignmentsByName))
+	byName := make(map[string]int, len(agents))
+	for _, agent := range agents {
+		if !shouldKeepRuntimeAgent(agent, assignmentsByName, workspaceHint, wsKey, wsName) {
+			continue
+		}
+		byName[agent.Name] = len(merged)
+		merged = append(merged, agent)
+	}
+	return merged, byName
+}
+
+func shouldKeepRuntimeAgent(
+	agent monitor.AgentStatus,
+	assignmentsByName map[string]*domain.Agent,
+	workspaceHint, wsKey, wsName string,
+) bool {
+	if workspaceHint == "" {
+		return true
+	}
+	_, assignedToWorkspace := assignmentsByName[agent.Name]
+	return assignedToWorkspace || agent.Workspace == wsName || agent.Workspace == wsKey
+}
+
+func enrichRuntimeAgent(agent *monitor.AgentStatus, assignment *domain.Agent, wsKey, wsName string) {
 	if agent == nil || assignment == nil {
 		return
+	}
+	if agent.Branch == "" || agent.Branch == "unknown" {
+		agent.Branch = monitorBranchFromStoreAgent(wsKey, assignment)
 	}
 	if agent.Role == "" {
 		agent.Role = assignment.RoleName
@@ -374,6 +400,23 @@ func enrichRuntimeAgent(agent *monitor.AgentStatus, assignment *domain.Agent, ws
 	if agent.Workspace == "" {
 		agent.Workspace = wsName
 	}
+}
+
+func monitorBranchFromStoreAgent(wsKey string, agent *domain.Agent) string {
+	const unknownBranch = "unknown"
+	repoName := monitorRepoFromAgent(agent)
+	if wsKey == "" || repoName == "" || agent == nil {
+		return unknownBranch
+	}
+	workspacePath := storeadapter.ResolveWorkspacePath(wsKey)
+	if workspacePath == "" {
+		return unknownBranch
+	}
+	branch, err := monitor.ReadBranchFromFS(filepath.Join(workspacePath, "worktrees", repoName, agent.Name))
+	if err != nil || branch == "" {
+		return unknownBranch
+	}
+	return branch
 }
 
 func monitorStatusFromAgentState(state domain.AgentState) string {

@@ -38,6 +38,12 @@ func respondOK(w http.ResponseWriter, data interface{}) {
 	json.NewEncoder(w).Encode(apiResponse{Success: true, Data: raw}) //nolint:errcheck
 }
 
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {
+	return f(r)
+}
+
 // respondErr writes an error JSON envelope with the given status code.
 func respondErr(w http.ResponseWriter, code int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
@@ -779,10 +785,12 @@ func TestStats_JSONNullResponse(t *testing.T) {
 
 func TestCreate_HappyPath(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
+	var gotBody map[string]interface{}
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "POST" {
 			t.Errorf("Method = %q, want POST", r.Method)
 		}
+		json.NewDecoder(r.Body).Decode(&gotBody) //nolint:errcheck
 		respondOK(w, types.Issue{
 			ID:        "new-1",
 			Title:     "New Issue",
@@ -797,6 +805,7 @@ func TestCreate_HappyPath(t *testing.T) {
 
 	result, err := fb.Create(context.Background(), backend.CreateParams{
 		Title:     "New Issue",
+		Status:    "deferred",
 		IssueType: "task",
 		Priority:  2,
 	})
@@ -805,6 +814,9 @@ func TestCreate_HappyPath(t *testing.T) {
 	}
 	if result.ID != "new-1" {
 		t.Errorf("ID = %q, want %q", result.ID, "new-1")
+	}
+	if gotBody["status"] != "deferred" {
+		t.Errorf("body.status = %v, want deferred", gotBody["status"])
 	}
 }
 
@@ -1101,6 +1113,18 @@ func TestClose_HappyPath(t *testing.T) {
 		if r.Method != "POST" {
 			t.Errorf("Method = %q, want POST", r.Method)
 		}
+		var gotBody map[string]interface{}
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		if gotBody["reason"] != "done" {
+			t.Errorf("reason = %v, want done", gotBody["reason"])
+		}
+		for _, unsupported := range []string{"session", "suggest_next", "force"} {
+			if _, ok := gotBody[unsupported]; ok {
+				t.Errorf("close body included unsupported fleet-db field %q", unsupported)
+			}
+		}
 		respondOK(w, closeResultJSON{
 			Closed: &types.Issue{ID: "test-1", Title: "Done", Status: types.StatusClosed, CreatedAt: now, UpdatedAt: now, ClosedAt: &now},
 			Unblocked: []*types.Issue{
@@ -1110,7 +1134,7 @@ func TestClose_HappyPath(t *testing.T) {
 	})
 	defer ts.Close()
 
-	result, err := fb.Close(context.Background(), "test-1", backend.CloseParams{Reason: "done"})
+	result, err := fb.Close(context.Background(), "test-1", backend.CloseParams{Reason: "done", Session: "session-1", SuggestNext: true, Force: true})
 	if err != nil {
 		t.Fatalf("Close: %v", err)
 	}
@@ -1549,7 +1573,10 @@ func TestReopen_EmptyID(t *testing.T) {
 func TestReady_HappyPath(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	parent := "epic-1"
-	fb, ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if got, want := r.URL.Path, "/api/v1/test-ws/issues/ready"; got != want {
+			t.Errorf("path = %q, want %q", got, want)
+		}
 		respondOK(w, []*readyIssueWithParent{
 			{
 				fleetIssueWire: fleetIssueWire{ID: "r-1", Title: "Ready", Status: string(types.StatusOpen), CreatedAt: now, UpdatedAt: now},
@@ -1575,7 +1602,10 @@ func TestReady_HappyPath(t *testing.T) {
 
 func TestBlocked_HappyPath(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
-	fb, ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if got, want := r.URL.Path, "/api/v1/test-ws/issues/blocked"; got != want {
+			t.Errorf("path = %q, want %q", got, want)
+		}
 		respondOK(w, []*types.BlockedIssue{
 			{
 				Issue:          types.Issue{ID: "b-1", Title: "Blocked", Status: types.StatusBlocked, CreatedAt: now, UpdatedAt: now},
@@ -1822,6 +1852,30 @@ func TestCount_WithFilters(t *testing.T) {
 		if !strings.Contains(gotQuery, want) {
 			t.Errorf("query %q missing %q", gotQuery, want)
 		}
+	}
+}
+
+func TestCount_MultipleLabelsRejected(t *testing.T) {
+	fb, err := New(Config{
+		BaseURL:     "http://fleet.test",
+		WorkspaceID: "test-ws",
+		HTTPClient: &http.Client{Transport: roundTripFunc(func(_ *http.Request) (*http.Response, error) {
+			t.Fatal("server should not be called when multiple labels are unsupported")
+			return nil, nil
+		})},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	_, err = fb.Count(context.Background(), backend.CountOpts{
+		Labels: []string{"urgent", "bug"},
+	})
+	if err == nil {
+		t.Fatal("expected error for multiple labels")
+	}
+	if !errors.Is(err, backend.ErrFilterNotSupported) {
+		t.Fatalf("error = %v, want ErrFilterNotSupported", err)
 	}
 }
 

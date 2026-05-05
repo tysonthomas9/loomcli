@@ -85,6 +85,7 @@ type CreateIssueParams struct {
 	ID                 string
 	Parent             string
 	Description        string
+	Status             string
 	Design             string
 	AcceptanceCriteria string
 	Notes              string

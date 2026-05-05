@@ -90,26 +90,39 @@ type RoleConfig struct {
 //
 // An agent with neither repos nor repo_groups can work on any repo.
 type AgentEntry struct {
-	Worktree         string   `yaml:"worktree"`
-	Role             string   `yaml:"role"`
-	Repo             string   `yaml:"repo,omitempty"`
-	Auto             bool     `yaml:"auto,omitempty"`
-	Backend          string   `yaml:"backend,omitempty"`
-	FallbackBackends []string `yaml:"fallback_backends,omitempty"`
-	PathPatterns     []string `yaml:"path_patterns,omitempty"`
-	SourceRepos      []string `yaml:"-" json:"-"` // resolved repo IDs; env-only transport, not persisted in YAML
-	Repos            []string `yaml:"repos,omitempty"`
-	RepoGroups       []string `yaml:"repo_groups,omitempty"`
-	CrossRepo        bool     `yaml:"cross_repo,omitempty"`
-	Parent           string   `yaml:"parent,omitempty"` // epic ID to scope this agent to; empty = no epic assignment
+	Worktree         string                   `yaml:"worktree"`
+	Role             string                   `yaml:"role"`
+	Repo             string                   `yaml:"repo,omitempty"`
+	Auto             bool                     `yaml:"auto,omitempty"`
+	Backend          string                   `yaml:"backend,omitempty"`
+	FallbackBackends []string                 `yaml:"fallback_backends,omitempty"`
+	PathPatterns     []string                 `yaml:"path_patterns,omitempty"`
+	SourceRepos      []string                 `yaml:"-" json:"-"` // resolved repo IDs; env-only transport, not persisted in YAML
+	Repos            []string                 `yaml:"repos,omitempty"`
+	RepoGroups       []string                 `yaml:"repo_groups,omitempty"`
+	CrossRepo        bool                     `yaml:"cross_repo,omitempty"`
+	Parent           string                   `yaml:"parent,omitempty"` // epic ID to scope this agent to; empty = no epic assignment
+	DesiredState     domain.AgentDesiredState `yaml:"desired_state,omitempty"`
 }
 
 // Equal compares persisted config fields only (excludes SourceRepos). Update when adding fields.
 func (a AgentEntry) Equal(b AgentEntry) bool {
 	return a.Worktree == b.Worktree && a.Role == b.Role && a.Repo == b.Repo &&
 		a.Auto == b.Auto && a.Backend == b.Backend && a.CrossRepo == b.CrossRepo && a.Parent == b.Parent &&
+		a.DesiredState == b.DesiredState &&
 		slices.Equal(a.FallbackBackends, b.FallbackBackends) && slices.Equal(a.PathPatterns, b.PathPatterns) &&
 		slices.Equal(a.Repos, b.Repos) && slices.Equal(a.RepoGroups, b.RepoGroups)
+}
+
+// ShouldSupervise reports whether the local daemon should run this agent.
+// Empty desired_state preserves legacy behavior for existing agent definitions.
+func (a AgentEntry) ShouldSupervise() bool {
+	switch a.DesiredState {
+	case domain.AgentDesiredStopped, domain.AgentDesiredDraining:
+		return false
+	default:
+		return true
+	}
 }
 
 // DaemonConfig is the merged, resolved configuration used by callers.
@@ -284,6 +297,7 @@ func agentEntryFromDomain(a *domain.Agent) AgentEntry {
 		RepoGroups:       append([]string(nil), a.RepoGroups...),
 		CrossRepo:        a.CrossRepo,
 		Parent:           a.Parent,
+		DesiredState:     a.DesiredState,
 	}
 }
 
@@ -345,8 +359,14 @@ func validateAgents(agents []AgentEntry, maxAgents *int) error {
 	if maxAgents != nil && *maxAgents < 0 {
 		return fmt.Errorf("max_agents must be non-negative, got %d", *maxAgents)
 	}
-	if maxAgents != nil && *maxAgents > 0 && len(agents) > *maxAgents {
-		return fmt.Errorf("too many agents configured: %d exceeds max_agents limit of %d", len(agents), *maxAgents)
+	runnable := 0
+	for _, a := range agents {
+		if a.ShouldSupervise() {
+			runnable++
+		}
+	}
+	if maxAgents != nil && *maxAgents > 0 && runnable > *maxAgents {
+		return fmt.Errorf("too many runnable agents configured: %d exceeds max_agents limit of %d", runnable, *maxAgents)
 	}
 	return nil
 }

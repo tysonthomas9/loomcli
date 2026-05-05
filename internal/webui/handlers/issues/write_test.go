@@ -430,6 +430,29 @@ func TestHandleCreateIssueW_WithParent(t *testing.T) {
 	}
 }
 
+func TestHandleCreateIssueW_WithStatus(t *testing.T) {
+	svc := &mockIssueService{
+		createIssueFunc: func(ctx context.Context, params service.CreateIssueParams) (json.RawMessage, error) {
+			if params.Status != "deferred" {
+				t.Errorf("CreateIssue() Status = %q, want %q", params.Status, "deferred")
+			}
+			return json.RawMessage(`{"id":"deferred-1","title":"Deferred Task","status":"deferred"}`), nil
+		},
+	}
+	handler := handleCreateIssue(svc)
+
+	body := `{"title":"Deferred Task","issue_type":"task","priority":2,"status":"deferred"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/issues", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusCreated)
+	}
+}
+
 func TestHandleCreateIssueW_MissingRequiredFields(t *testing.T) {
 	tests := []struct {
 		name        string

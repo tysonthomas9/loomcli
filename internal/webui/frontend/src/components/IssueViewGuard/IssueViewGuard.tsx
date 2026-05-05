@@ -1,8 +1,10 @@
 import type { ReactNode } from "react";
 
-import { LoadingSkeleton } from "@/components/LoadingSkeleton/LoadingSkeleton";
-import { ErrorDisplay } from "@/components/ErrorDisplay/ErrorDisplay";
-import { EmptyWorkspaceBoard } from "@/components/EmptyWorkspaceBoard/EmptyWorkspaceBoard";
+import {
+  LoadingSkeleton,
+  ErrorDisplay,
+  EmptyWorkspaceBoard,
+} from "@/components";
 import type { Issue } from "@/types";
 
 import styles from "./IssueViewGuard.module.css";

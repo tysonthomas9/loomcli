@@ -292,6 +292,7 @@ export interface CreateIssueRequest {
   id?: string;
   parent?: string;
   description?: string;
+  status?: "open" | "deferred";
   design?: string;
   acceptance_criteria?: string;
   notes?: string;

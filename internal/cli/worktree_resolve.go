@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
@@ -63,11 +64,16 @@ func (r *Resolver) SetWorkspace(name string) error {
 	if r.Config == nil {
 		return fmt.Errorf("no config loaded; cannot set workspace")
 	}
-	if _, ok := r.Config.Workspaces[name]; !ok {
-		return fmt.Errorf("workspace %q not found in config", name)
+	if _, ok := r.Config.Workspaces[name]; ok {
+		r.Workspace = name
+		return nil
 	}
-	r.Workspace = name
-	return nil
+	normalized := strings.ToUpper(name)
+	if _, ok := r.Config.Workspaces[normalized]; ok {
+		r.Workspace = normalized
+		return nil
+	}
+	return fmt.Errorf("workspace %q not found in config", name)
 }
 
 // DiscoverWorktrees returns repos from the active workspace.
@@ -124,10 +130,6 @@ func (r *Resolver) discoverWorkspace() ([]WorktreeInfo, error) {
 // Only valid when a workspace config is loaded.
 // Each returned WorktreeInfo has Repo set to the parent repo's config,
 // giving callers access to DefaultBranch and Remote.
-// funlen: the 2-pass scan + parallel git dispatch is intentionally one
-// function to keep the candidate lifecycle in scope.
-//
-//nolint:funlen
 func (r *Resolver) DiscoverAgentWorktrees() ([]WorktreeInfo, error) {
 	if r.Mode != ModeWorkspace || r.Config == nil {
 		return nil, fmt.Errorf("agent worktree discovery requires workspace mode")
@@ -137,13 +139,59 @@ func (r *Resolver) DiscoverAgentWorktrees() ([]WorktreeInfo, error) {
 		return nil, fmt.Errorf("workspace %q not found in config", r.Workspace)
 	}
 
-	// Pass 1: collect candidates with cheap OS reads (no subprocesses).
-	type candidate struct {
-		name string
-		path string
-		repo *config.RepoConfig
+	candidates := r.agentWorktreeCandidates(ws)
+	if len(candidates) == 0 {
+		return nil, nil
 	}
-	var candidates []candidate
+	return r.agentWorktreeInfos(candidates), nil
+}
+
+type agentWorktreeCandidate struct {
+	name string
+	path string
+	repo *config.RepoConfig
+}
+
+func (r *Resolver) agentWorktreeCandidates(ws config.WorkspaceConfig) []agentWorktreeCandidate {
+	var candidates []agentWorktreeCandidate
+	seen := make(map[string]struct{})
+	for _, c := range stateAgentWorktreeCandidates(r.Workspace, ws) {
+		candidates = appendAgentCandidate(candidates, seen, c)
+	}
+	for _, c := range nestedAgentWorktreeCandidates(ws) {
+		candidates = appendAgentCandidate(candidates, seen, c)
+	}
+	for _, c := range linkedRepoAgentWorktreeCandidates(ws, seen) {
+		candidates = appendAgentCandidate(candidates, seen, c)
+	}
+	return candidates
+}
+
+func stateAgentWorktreeCandidates(workspace string, ws config.WorkspaceConfig) []agentWorktreeCandidate {
+	var candidates []agentWorktreeCandidate
+	if sc, err := bootstrap.LoadStateCache(); err == nil && sc != nil {
+		local := sc.Workspaces[workspace]
+		names := make([]string, 0, len(local.Agents))
+		for name := range local.Agents {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			agentPath := local.Agents[name].Worktree
+			if agentPath == "" {
+				continue
+			}
+			if _, err := os.Stat(filepath.Join(agentPath, ".git")); err != nil {
+				continue
+			}
+			candidates = append(candidates, agentWorktreeCandidate{name: name, path: agentPath, repo: repoForAgentWorktree(ws, name, agentPath)})
+		}
+	}
+	return candidates
+}
+
+func nestedAgentWorktreeCandidates(ws config.WorkspaceConfig) []agentWorktreeCandidate {
+	var candidates []agentWorktreeCandidate
 	for i := range ws.Repos {
 		repo := &ws.Repos[i]
 		agentsDir := filepath.Join(ws.Path, "worktrees", repo.Name)
@@ -159,14 +207,14 @@ func (r *Resolver) DiscoverAgentWorktrees() ([]WorktreeInfo, error) {
 			if _, err := os.Stat(filepath.Join(agentPath, ".git")); err != nil {
 				continue
 			}
-			candidates = append(candidates, candidate{entry.Name(), agentPath, repo})
+			candidates = append(candidates, agentWorktreeCandidate{entry.Name(), agentPath, repo})
 		}
 	}
-	// Flat-layout pass: repos registered directly as linked worktrees.
-	seen := make(map[string]struct{}, len(candidates))
-	for _, c := range candidates {
-		seen[c.path] = struct{}{}
-	}
+	return candidates
+}
+
+func linkedRepoAgentWorktreeCandidates(ws config.WorkspaceConfig, seen map[string]struct{}) []agentWorktreeCandidate {
+	var candidates []agentWorktreeCandidate
 	for i := range ws.Repos {
 		repo := &ws.Repos[i]
 		repoPath := repo.Path
@@ -179,19 +227,30 @@ func (r *Resolver) DiscoverAgentWorktrees() ([]WorktreeInfo, error) {
 		if !IsGitLinkedWorktree(repoPath) {
 			continue
 		}
-		candidates = append(candidates, candidate{repo.Name, repoPath, repo})
+		candidates = append(candidates, agentWorktreeCandidate{repo.Name, repoPath, repo})
 	}
+	return candidates
+}
 
-	if len(candidates) == 0 {
-		return nil, nil
+func appendAgentCandidate(
+	candidates []agentWorktreeCandidate,
+	seen map[string]struct{},
+	candidate agentWorktreeCandidate,
+) []agentWorktreeCandidate {
+	key := filepath.Clean(candidate.path)
+	if _, ok := seen[key]; ok {
+		return candidates
 	}
+	seen[key] = struct{}{}
+	return append(candidates, candidate)
+}
 
-	// Pass 2: fan out git calls in parallel.
+func (r *Resolver) agentWorktreeInfos(candidates []agentWorktreeCandidate) []WorktreeInfo {
 	agents := make([]WorktreeInfo, len(candidates))
 	var wg sync.WaitGroup
 	wg.Add(len(candidates))
 	for i, c := range candidates {
-		go func(idx int, cand candidate) {
+		go func(idx int, cand agentWorktreeCandidate) {
 			defer wg.Done()
 			branch, err := GetCurrentBranch(cand.path)
 			if err != nil {
@@ -203,12 +262,26 @@ func (r *Resolver) DiscoverAgentWorktrees() ([]WorktreeInfo, error) {
 				Branch:           branch,
 				Workspace:        r.Workspace,
 				Repo:             cand.repo,
-				IsLinkedWorktree: true,
+				IsLinkedWorktree: IsGitLinkedWorktree(cand.path),
 			}
 		}(i, c)
 	}
 	wg.Wait()
-	return agents, nil
+	return agents
+}
+
+func repoForAgentWorktree(ws config.WorkspaceConfig, agentName, agentPath string) *config.RepoConfig {
+	for i := range ws.Repos {
+		repo := &ws.Repos[i]
+		nestedPath := filepath.Join(ws.Path, "worktrees", repo.Name, agentName)
+		if filepath.Clean(agentPath) == filepath.Clean(nestedPath) {
+			return repo
+		}
+	}
+	if len(ws.Repos) > 0 {
+		return &ws.Repos[0]
+	}
+	return nil
 }
 
 // ResolveAgentByName finds a single agent worktree by name via direct path
@@ -223,6 +296,25 @@ func (r *Resolver) ResolveAgentByName(name string) (WorktreeInfo, error) {
 	ws, ok := r.Config.Workspaces[r.Workspace]
 	if !ok {
 		return WorktreeInfo{}, fmt.Errorf("workspace %q not found in config", r.Workspace)
+	}
+
+	if sc, err := bootstrap.LoadStateCache(); err == nil && sc != nil {
+		if localAgent := sc.Workspaces[r.Workspace].Agents[name]; localAgent.Worktree != "" {
+			if _, err := os.Stat(filepath.Join(localAgent.Worktree, ".git")); err == nil {
+				branch, err := GetCurrentBranch(localAgent.Worktree)
+				if err != nil {
+					branch = "unknown"
+				}
+				return WorktreeInfo{
+					Name:             name,
+					Path:             localAgent.Worktree,
+					Branch:           branch,
+					Workspace:        r.Workspace,
+					Repo:             repoForAgentWorktree(ws, name, localAgent.Worktree),
+					IsLinkedWorktree: IsGitLinkedWorktree(localAgent.Worktree),
+				}, nil
+			}
+		}
 	}
 
 	// First: check nested agent worktrees at <wsPath>/worktrees/<repo>/<name>/
@@ -280,6 +372,11 @@ func (r *Resolver) ResolveAgentByName(name string) (WorktreeInfo, error) {
 // ResolveWorktreePath converts a worktree name to its full path using the
 // active workspace.
 func (r *Resolver) ResolveWorktreePath(name string) (string, error) {
+	if name != "" {
+		if wt, err := r.ResolveAgentByName(name); err == nil {
+			return wt.Path, nil
+		}
+	}
 	return r.ResolveWorkspacePath(name)
 }
 

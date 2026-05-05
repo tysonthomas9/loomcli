@@ -63,14 +63,10 @@ describe("HelpPopover", () => {
       expect(screen.getByText("Ctrl+Shift+C")).toBeInTheDocument();
       expect(screen.getByText("Paste")).toBeInTheDocument();
       expect(screen.getByText("Ctrl+Shift+V")).toBeInTheDocument();
-      expect(screen.getByText("New tab")).toBeInTheDocument();
-      expect(screen.getByText("Ctrl+T")).toBeInTheDocument();
-      expect(screen.getByText("Close tab")).toBeInTheDocument();
-      expect(screen.getByText("Ctrl+W")).toBeInTheDocument();
-      expect(screen.getByText("Next tab")).toBeInTheDocument();
-      expect(screen.getByText("Ctrl+Tab")).toBeInTheDocument();
-      expect(screen.getByText("Previous tab")).toBeInTheDocument();
-      expect(screen.getByText("Ctrl+Shift+Tab")).toBeInTheDocument();
+      expect(screen.queryByText("New tab")).not.toBeInTheDocument();
+      expect(screen.queryByText("Ctrl+T")).not.toBeInTheDocument();
+      expect(screen.queryByText("Close tab")).not.toBeInTheDocument();
+      expect(screen.queryByText("Ctrl+W")).not.toBeInTheDocument();
     });
   });
 

@@ -445,7 +445,7 @@ func TestHandleTerminalToken_ValidSession(t *testing.T) {
 	ta := newTestTerminalAuth()
 	defer ta.Stop()
 
-	handler := hterminal.HandleTerminalToken(terminal.NewTerminalService(ta, nil, nil, nil, nil))
+	handler := hterminal.HandleTerminalToken(terminal.NewTerminalService(ta, nil, nil, nil, nil, time.Now()))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/terminal/token?session=my-session", nil)
 	w := httptest.NewRecorder()
@@ -486,7 +486,7 @@ func TestHandleTerminalToken_EmptySession(t *testing.T) {
 	ta := newTestTerminalAuth()
 	defer ta.Stop()
 
-	handler := hterminal.HandleTerminalToken(terminal.NewTerminalService(ta, nil, nil, nil, nil))
+	handler := hterminal.HandleTerminalToken(terminal.NewTerminalService(ta, nil, nil, nil, nil, time.Now()))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/terminal/token", nil)
 	w := httptest.NewRecorder()
@@ -513,7 +513,7 @@ func TestHandleTerminalToken_InvalidSessionChars(t *testing.T) {
 	ta := newTestTerminalAuth()
 	defer ta.Stop()
 
-	handler := hterminal.HandleTerminalToken(terminal.NewTerminalService(ta, nil, nil, nil, nil))
+	handler := hterminal.HandleTerminalToken(terminal.NewTerminalService(ta, nil, nil, nil, nil, time.Now()))
 
 	tests := []struct {
 		name    string
@@ -740,7 +740,7 @@ func TestHandleTerminalToken_ValidSessionNames(t *testing.T) {
 	ta := newTestTerminalAuth()
 	defer ta.Stop()
 
-	handler := hterminal.HandleTerminalToken(terminal.NewTerminalService(ta, nil, nil, nil, nil))
+	handler := hterminal.HandleTerminalToken(terminal.NewTerminalService(ta, nil, nil, nil, nil, time.Now()))
 
 	tests := []struct {
 		name    string
@@ -827,7 +827,7 @@ func TestHandleTerminalToken_WithUserIdentity(t *testing.T) {
 	ta := newTestTerminalAuth()
 	defer ta.Stop()
 
-	handler := hterminal.HandleTerminalToken(terminal.NewTerminalService(ta, nil, nil, nil, nil))
+	handler := hterminal.HandleTerminalToken(terminal.NewTerminalService(ta, nil, nil, nil, nil, time.Now()))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/terminal/token?session=oidc-test", nil)
 	identity := middleware.UserIdentity{UserID: "test-user", Email: "test@example.com"}
@@ -874,7 +874,7 @@ func TestHandleTerminalToken_NoUserIdentity(t *testing.T) {
 	ta := newTestTerminalAuth()
 	defer ta.Stop()
 
-	handler := hterminal.HandleTerminalToken(terminal.NewTerminalService(ta, nil, nil, nil, nil))
+	handler := hterminal.HandleTerminalToken(terminal.NewTerminalService(ta, nil, nil, nil, nil, time.Now()))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/terminal/token?session=open-test", nil)
 	w := httptest.NewRecorder()

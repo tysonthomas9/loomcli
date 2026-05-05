@@ -328,6 +328,7 @@ func TestCreateParamsToCreateRequest_AllFields(t *testing.T) {
 		Parent:             "epic-1",
 		Title:              "Do the thing",
 		Description:        "description",
+		Status:             "deferred",
 		IssueType:          "task",
 		Priority:           2,
 		Design:             "design text",
@@ -361,6 +362,9 @@ func TestCreateParamsToCreateRequest_AllFields(t *testing.T) {
 	}
 	if req.Description == nil || *req.Description != "description" {
 		t.Errorf("Description = %v", req.Description)
+	}
+	if req.Status == nil || *req.Status != "deferred" {
+		t.Errorf("Status = %v", req.Status)
 	}
 	if req.Design == nil || *req.Design != "design text" {
 		t.Errorf("Design = %v", req.Design)

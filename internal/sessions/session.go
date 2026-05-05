@@ -1,5 +1,7 @@
 package sessions
 
+import "time"
+
 // Session is a handle to an in-progress session.
 // Created by Store.CreateSession and used by the parent process
 // to track and finalize a running agent session.
@@ -11,4 +13,12 @@ type Session struct {
 // SessionID returns the session's unique identifier.
 func (s *Session) SessionID() string {
 	return s.Meta.SessionID
+}
+
+// SyncLatestCodexRollout mirrors the matching Codex rollout into this session.
+func (s *Session) SyncLatestCodexRollout(workDir string, since time.Time) (string, error) {
+	if s == nil || s.store == nil {
+		return "", nil
+	}
+	return s.store.SyncLatestCodexRollout(s.Meta.SessionID, workDir, since)
 }

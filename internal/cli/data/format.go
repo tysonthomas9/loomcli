@@ -51,6 +51,9 @@ func printIssueDetail(w io.Writer, d *backend.IssueDetailData, format string) er
 	if d.Description != "" {
 		fmt.Fprintf(w, "\nDescription:\n%s\n", d.Description)
 	}
+	if d.Design != "" {
+		fmt.Fprintf(w, "\nDesign (--design):\n%s\n", d.Design)
+	}
 	if d.AcceptanceCriteria != "" {
 		fmt.Fprintf(w, "\nAcceptance Criteria:\n%s\n", d.AcceptanceCriteria)
 	}

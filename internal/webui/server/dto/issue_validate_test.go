@@ -32,6 +32,7 @@ func TestCreateIssueRequest_Validate_ValidAllFields(t *testing.T) {
 		Title:            "Full issue",
 		IssueType:        "bug",
 		Priority:         0,
+		Status:           "deferred",
 		Labels:           []string{"urgent"},
 		Dependencies:     []string{"dep-1"},
 		EstimatedMinutes: intPtr(60),
@@ -41,6 +42,12 @@ func TestCreateIssueRequest_Validate_ValidAllFields(t *testing.T) {
 	if err := r.Validate(); err != nil {
 		t.Errorf("Validate() = %v, want nil", err)
 	}
+}
+
+func TestCreateIssueRequest_Validate_InvalidStatus(t *testing.T) {
+	r := validCreate()
+	r.Status = "in_progress"
+	assertFieldError(t, r.Validate(), "status", "must be open or deferred")
 }
 
 func TestCreateIssueRequest_Validate_EmptyTitle(t *testing.T) {

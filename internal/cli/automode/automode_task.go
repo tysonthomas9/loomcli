@@ -12,6 +12,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/backends"
 	"github.com/tysonthomas9/loomcli/internal/cli/git"
+	"github.com/tysonthomas9/loomcli/internal/cli/sessionfinalize"
 	"github.com/tysonthomas9/loomcli/internal/events"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 )
@@ -47,12 +48,11 @@ func finalizeAutoSession(ctx *autoLoopCtx, sess *sessions.Session, beforeRef str
 	if info, lockErr := ctx.readLock(); lockErr == nil && info != nil {
 		taskID = info.TaskID
 	}
-	diffStats := git.ComputeDiffStats(ctx.opts.WorktreePath, beforeRef)
-	_ = sess.Finalize(sessions.FinalizeOptions{
-		TaskID: taskID, ExitCode: exitCode, FilesTouched: diffStats.FilesTouched,
-		DiffStats: sessions.DiffStats{
-			FilesChanged: diffStats.FilesChanged, LinesAdded: diffStats.LinesAdded, LinesRemoved: diffStats.LinesRemoved,
-		},
+	_, _ = sessionfinalize.WithWorktree(sess, sessionfinalize.WithWorktreeOptions{
+		WorktreePath:     ctx.opts.WorktreePath,
+		BeforeRef:        beforeRef,
+		TaskID:           taskID,
+		ExitCode:         exitCode,
 		InputTokens:      inputTokens,
 		OutputTokens:     outputTokens,
 		CacheReadTokens:  cacheReadTokens,

@@ -280,7 +280,7 @@ export function WorkspaceProvider({
   //
   // flushSync: true is REQUIRED here, not optional. React Router v7 wraps
   // navigate() in startTransition by default. When the user is on the
-  // terminal view, xterm.js + WebSocket-driven re-renders feed React's
+  // terminal view, renderer + WebSocket-driven re-renders feed React's
   // urgent-work queue continuously, and the transition gets indefinitely
   // deferred. The browser URL updates via history.pushState (visible in the
   // address bar), but useParams() never commits the new value, so

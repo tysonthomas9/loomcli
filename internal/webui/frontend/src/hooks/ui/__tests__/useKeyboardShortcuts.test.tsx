@@ -108,6 +108,23 @@ describe("KeyboardShortcutProvider", () => {
 
       expect(onWorkspaceSwitcher).toHaveBeenCalledTimes(1);
     });
+
+    it("does not steal Ctrl+K from wterm input", () => {
+      const onWorkspaceSwitcher = vi.fn();
+
+      render(
+        <KeyboardShortcutProvider onWorkspaceSwitcher={onWorkspaceSwitcher}>
+          <div className="wterm" data-testid="terminal-target" />
+        </KeyboardShortcutProvider>,
+      );
+
+      fireEvent.keyDown(screen.getByTestId("terminal-target"), {
+        key: "k",
+        ctrlKey: true,
+      });
+
+      expect(onWorkspaceSwitcher).not.toHaveBeenCalled();
+    });
   });
 
   describe("Cmd/Ctrl+Shift+1-9 workspace positional switching", () => {
@@ -222,6 +239,26 @@ describe("KeyboardShortcutProvider", () => {
       expect(onWorkspacePositionalSwitch).toHaveBeenCalledWith(1);
     });
 
+    it("does not steal positional shortcuts from wterm input", () => {
+      const onWorkspacePositionalSwitch = vi.fn();
+
+      render(
+        <KeyboardShortcutProvider
+          onWorkspacePositionalSwitch={onWorkspacePositionalSwitch}
+        >
+          <div className="wterm" data-testid="terminal-target" />
+        </KeyboardShortcutProvider>,
+      );
+
+      fireEvent.keyDown(screen.getByTestId("terminal-target"), {
+        key: "2",
+        metaKey: true,
+        shiftKey: true,
+      });
+
+      expect(onWorkspacePositionalSwitch).not.toHaveBeenCalled();
+    });
+
     it("calls with correct indices for all digits 1-9", () => {
       const onWorkspacePositionalSwitch = vi.fn();
 
@@ -258,6 +295,20 @@ describe("KeyboardShortcutProvider", () => {
       expect(onViewChange).toHaveBeenCalledTimes(1);
       expect(onViewChange).toHaveBeenCalledWith("kanban");
       expect(onWorkspacePositionalSwitch).not.toHaveBeenCalled();
+    });
+
+    it("plain digit keys do not switch views from wterm input", () => {
+      const onViewChange = vi.fn();
+
+      render(
+        <KeyboardShortcutProvider onViewChange={onViewChange}>
+          <div className="wterm" data-testid="terminal-target" />
+        </KeyboardShortcutProvider>,
+      );
+
+      fireEvent.keyDown(screen.getByTestId("terminal-target"), { key: "1" });
+
+      expect(onViewChange).not.toHaveBeenCalled();
     });
 
     it("Cmd+Shift+1 does not call onViewChange", () => {

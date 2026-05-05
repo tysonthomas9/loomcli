@@ -10,6 +10,7 @@ type CreateArgs struct {
 	Parent             string   `json:"parent,omitempty"` // Parent ID for hierarchical issues
 	Title              string   `json:"title"`
 	Description        string   `json:"description,omitempty"`
+	Status             string   `json:"status,omitempty"`
 	IssueType          string   `json:"issue_type"`
 	Priority           int      `json:"priority"`
 	Design             string   `json:"design,omitempty"`

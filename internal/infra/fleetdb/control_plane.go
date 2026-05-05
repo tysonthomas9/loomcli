@@ -80,7 +80,7 @@ func (s *nodeStore) Heartbeat(ctx context.Context, ws, nodeID string, ttl time.D
 
 func (s *nodeStore) Update(ctx context.Context, ws, nodeID string, patch store.NodeUpdate) (*domain.Node, error) {
 	var out domain.Node
-	if err := s.client.do(ctx, "PATCH", "/api/v1/"+pathEscape(ws)+"/nodes/"+pathEscape(nodeID), patch, &out); err != nil {
+	if err := s.client.do(ctx, "PATCH", "/api/v1/"+pathEscape(ws)+"/nodes/"+pathEscape(nodeID), nodeUpdateBody(patch), &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -174,7 +174,7 @@ func (s *agentSessionStore) Heartbeat(ctx context.Context, ws, sessionID string)
 
 func (s *agentSessionStore) Update(ctx context.Context, ws, sessionID string, patch store.AgentSessionUpdate) (*domain.AgentSession, error) {
 	var out domain.AgentSession
-	if err := s.client.do(ctx, "PATCH", "/api/v1/"+pathEscape(ws)+"/agent-sessions/"+pathEscape(sessionID), patch, &out); err != nil {
+	if err := s.client.do(ctx, "PATCH", "/api/v1/"+pathEscape(ws)+"/agent-sessions/"+pathEscape(sessionID), agentSessionUpdateBody(patch), &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -260,7 +260,7 @@ func (s *terminalSessionStore) List(ctx context.Context, ws string, filter store
 
 func (s *terminalSessionStore) Update(ctx context.Context, ws, terminalID string, patch store.TerminalSessionUpdate) (*domain.TerminalSession, error) {
 	var out domain.TerminalSession
-	if err := s.client.do(ctx, "PATCH", "/api/v1/"+pathEscape(ws)+"/terminal-sessions/"+pathEscape(terminalID), patch, &out); err != nil {
+	if err := s.client.do(ctx, "PATCH", "/api/v1/"+pathEscape(ws)+"/terminal-sessions/"+pathEscape(terminalID), terminalSessionUpdateBody(patch), &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -338,10 +338,162 @@ func (s *artifactStore) List(ctx context.Context, ws string, filter store.Artifa
 
 func (s *artifactStore) Update(ctx context.Context, ws, artifactID string, patch store.ArtifactUpdate) (*domain.Artifact, error) {
 	var out domain.Artifact
-	if err := s.client.do(ctx, "PATCH", "/api/v1/"+pathEscape(ws)+"/artifacts/"+pathEscape(artifactID), patch, &out); err != nil {
+	if err := s.client.do(ctx, "PATCH", "/api/v1/"+pathEscape(ws)+"/artifacts/"+pathEscape(artifactID), artifactUpdateBody(patch), &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
+}
+
+func nodeUpdateBody(patch store.NodeUpdate) map[string]any {
+	body := map[string]any{}
+	if patch.OwnerActor != nil {
+		body["owner_actor"] = *patch.OwnerActor
+	}
+	if patch.RuntimeProvider != nil {
+		body["runtime_provider"] = *patch.RuntimeProvider
+	}
+	if patch.Labels != nil {
+		body["labels"] = *patch.Labels
+	}
+	if patch.Capabilities != nil {
+		body["capabilities"] = *patch.Capabilities
+	}
+	if patch.ToolInventory != nil {
+		body["tool_inventory"] = *patch.ToolInventory
+	}
+	if patch.Version != nil {
+		body["version"] = *patch.Version
+	}
+	if patch.Capacity != nil {
+		body["capacity"] = *patch.Capacity
+	}
+	if patch.DrainState != nil {
+		body["drain_state"] = *patch.DrainState
+	}
+	if patch.ExpiresAt != nil {
+		body["expires_at"] = *patch.ExpiresAt
+	}
+	return body
+}
+
+func agentSessionUpdateBody(patch store.AgentSessionUpdate) map[string]any {
+	body := map[string]any{}
+	if patch.NodeID != nil {
+		body["node_id"] = *patch.NodeID
+	}
+	if patch.TaskID != nil {
+		body["task_id"] = *patch.TaskID
+	}
+	if patch.Status != nil {
+		body["status"] = *patch.Status
+	}
+	if patch.Phase != nil {
+		body["phase"] = *patch.Phase
+	}
+	if patch.LastHeartbeat != nil {
+		body["last_heartbeat"] = *patch.LastHeartbeat
+	}
+	if patch.FinishedAt != nil {
+		body["finished_at"] = *patch.FinishedAt
+	}
+	if patch.Summary != nil {
+		body["summary"] = *patch.Summary
+	}
+	if patch.ErrorClass != nil {
+		body["error_class"] = *patch.ErrorClass
+	}
+	if patch.ExitCode != nil {
+		body["exit_code"] = *patch.ExitCode
+	}
+	if patch.Metadata != nil {
+		body["metadata"] = *patch.Metadata
+	}
+	return body
+}
+
+func terminalSessionUpdateBody(patch store.TerminalSessionUpdate) map[string]any {
+	body := map[string]any{}
+	if patch.AgentID != nil {
+		body["agent_id"] = *patch.AgentID
+	}
+	if patch.SessionID != nil {
+		body["session_id"] = *patch.SessionID
+	}
+	if patch.NodeID != nil {
+		body["node_id"] = *patch.NodeID
+	}
+	if patch.TaskID != nil {
+		body["task_id"] = *patch.TaskID
+	}
+	if patch.Title != nil {
+		body["title"] = *patch.Title
+	}
+	if patch.Kind != nil {
+		body["kind"] = *patch.Kind
+	}
+	if patch.Status != nil {
+		body["status"] = *patch.Status
+	}
+	if patch.PTYProvider != nil {
+		body["pty_provider"] = *patch.PTYProvider
+	}
+	if patch.StreamRef != nil {
+		body["stream_ref"] = *patch.StreamRef
+	}
+	if patch.TranscriptRef != nil {
+		body["transcript_ref"] = *patch.TranscriptRef
+	}
+	if patch.AttachedClients != nil {
+		body["attached_clients"] = *patch.AttachedClients
+	}
+	if patch.LastSeenAt != nil {
+		body["last_seen_at"] = *patch.LastSeenAt
+	}
+	if patch.EndedAt != nil {
+		body["ended_at"] = *patch.EndedAt
+	}
+	if patch.Metadata != nil {
+		body["metadata"] = *patch.Metadata
+	}
+	return body
+}
+
+func artifactUpdateBody(patch store.ArtifactUpdate) map[string]any {
+	body := map[string]any{}
+	if patch.AgentID != nil {
+		body["agent_id"] = *patch.AgentID
+	}
+	if patch.SessionID != nil {
+		body["session_id"] = *patch.SessionID
+	}
+	if patch.TerminalID != nil {
+		body["terminal_id"] = *patch.TerminalID
+	}
+	if patch.TaskID != nil {
+		body["task_id"] = *patch.TaskID
+	}
+	if patch.Type != nil {
+		body["type"] = *patch.Type
+	}
+	if patch.URI != nil {
+		body["uri"] = *patch.URI
+	}
+	if patch.Summary != nil {
+		body["summary"] = *patch.Summary
+	}
+	if patch.MIMEType != nil {
+		body["mime_type"] = *patch.MIMEType
+	}
+	if patch.SizeBytes != nil {
+		body["size_bytes"] = *patch.SizeBytes
+	}
+	if patch.Checksum != nil {
+		body["checksum"] = *patch.Checksum
+	}
+	if patch.Metadata != nil {
+		body["metadata"] = *patch.Metadata
+	}
+	return body
 }
 
 type agentLeaseStore struct{ client *Client }

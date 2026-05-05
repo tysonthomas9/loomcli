@@ -591,6 +591,43 @@ func TestResolver_WorkspaceRepoRelativePaths(t *testing.T) {
 	}
 }
 
+func TestResolver_ResolveWorktreePath_WorkspaceAgentWorktree(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
+
+	repoPath := filepath.Join(tmpDir, "source-repo")
+	createGitRepo(t, repoPath)
+
+	agentPath := filepath.Join(tmpDir, "worktrees", "source-repo", "local-planner")
+	if err := os.MkdirAll(filepath.Dir(agentPath), 0755); err != nil {
+		t.Fatalf("mkdir agent parent: %v", err)
+	}
+	if _, err := RunGitCommand(repoPath, "worktree", "add", agentPath, "-b", "local-planner"); err != nil {
+		t.Fatalf("git worktree add agent: %v", err)
+	}
+
+	cfg := &LoomConfig{
+		DefaultWorkspace: "ws",
+		Workspaces: map[string]WorkspaceConfig{
+			"ws": {
+				Path: tmpDir,
+				Repos: []RepoConfig{
+					{Name: "source-repo", Path: repoPath},
+				},
+			},
+		},
+	}
+	r := &Resolver{Mode: ModeWorkspace, Config: cfg, Workspace: "ws"}
+
+	path, err := r.ResolveWorktreePath("local-planner")
+	if err != nil {
+		t.Fatalf("ResolveWorktreePath: %v", err)
+	}
+	if path != agentPath {
+		t.Errorf("ResolveWorktreePath() = %q, want %q", path, agentPath)
+	}
+}
+
 // --- DefaultBranchForWorktree tests ---
 
 func TestDefaultBranchForWorktree_WithRepoDefaultBranch(t *testing.T) {

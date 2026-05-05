@@ -1,0 +1,21 @@
+# Codex override for the local-mode dogfood stack.
+#
+# Usage:
+#   make local-mode-codex-up
+
+services:
+  loom-local:
+    image: loomcli-local-mode-loom-codex:latest
+    build:
+      args:
+        INSTALL_CODEX: "true"
+        CODEX_CLI_VERSION: "${LOCAL_MODE_CODEX_CLI_VERSION:-0.128.0}"
+    environment:
+      LOOM_BACKEND: codex
+      LOOM_LOCAL_MODE_BACKEND: codex
+      LOOM_LOCAL_MODE_PLAN_AGENT: codex-planner
+      LOOM_LOCAL_MODE_CODE_AGENT: codex-coder
+      LOOM_LOCAL_MODE_PLAN_TASK_ID: LOCALMODE-1
+      LOOM_LOCAL_MODE_CODE_TASK_ID: LOCALMODE-2
+    volumes:
+      - ${LOCAL_MODE_CODEX_HOME:-${HOME}/.codex}:/codex-host:ro

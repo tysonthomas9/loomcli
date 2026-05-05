@@ -673,6 +673,9 @@ func TestResolveRoleConfig(t *testing.T) {
 		if !strings.Contains(rc.Description, "plan") {
 			t.Errorf("Description = %q, want contains 'plan'", rc.Description)
 		}
+		if rc.TaskFilter != "needs_plan" {
+			t.Errorf("TaskFilter = %q, want needs_plan", rc.TaskFilter)
+		}
 	})
 
 	t.Run("built-in role task returns valid config", func(t *testing.T) {
@@ -689,6 +692,9 @@ func TestResolveRoleConfig(t *testing.T) {
 		}
 		if !strings.Contains(rc.Description, "task") {
 			t.Errorf("Description = %q, want contains 'task'", rc.Description)
+		}
+		if rc.TaskFilter != "has_design" {
+			t.Errorf("TaskFilter = %q, want has_design", rc.TaskFilter)
 		}
 	})
 

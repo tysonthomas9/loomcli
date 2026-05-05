@@ -90,6 +90,11 @@ func DiscoverWorktrees() ([]WorktreeInfo, error) {
 	return GetDefaultResolver().DiscoverWorktrees()
 }
 
+// DiscoverAgentWorktrees finds agent worktrees in the active workspace.
+func DiscoverAgentWorktrees() ([]WorktreeInfo, error) {
+	return GetDefaultResolver().DiscoverAgentWorktrees()
+}
+
 // getCurrentBranchDeps is the deps-aware implementation of GetCurrentBranch.
 func getCurrentBranchDeps(deps *Deps, path string) (string, error) {
 	output, err := RunGit(deps, path, "branch", "--show-current")

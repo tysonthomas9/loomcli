@@ -2,7 +2,9 @@ package supervisor
 
 import (
 	"fmt"
+	"runtime"
 	"strings"
+	"sync"
 	"testing"
 
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
@@ -80,4 +82,32 @@ func TestAppendRoleEnv_MaxBudgetUSD(t *testing.T) {
 			t.Errorf("expected LOOM_MAX_BUDGET_USD=0.00 in env, got %v", env)
 		}
 	})
+}
+
+func TestAppendSessionEnvConcurrentLeaseAccess(t *testing.T) {
+	ap := &AgentProcess{}
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 10000; i++ {
+			ap.Mu.Lock()
+			ap.AgentLeaseID = fmt.Sprintf("lease-%d", i)
+			ap.AgentLeaseToken = fmt.Sprintf("token-%d", i)
+			ap.Mu.Unlock()
+			runtime.Gosched()
+		}
+	}()
+
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 10000; i++ {
+			_ = appendSessionEnv(nil, ap)
+			runtime.Gosched()
+		}
+	}()
+
+	wg.Wait()
 }

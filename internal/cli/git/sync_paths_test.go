@@ -8,9 +8,6 @@ import (
 
 func TestRunWorkspaceSync_MultipleWorkspaces(t *testing.T) {
 	tmpDir := t.TempDir()
-	configDir := tmpDir + "/.loom"
-	os.MkdirAll(configDir, 0755)
-
 	wsADir := tmpDir + "/ws-a"
 	repoA := wsADir + "/repo-a"
 	os.MkdirAll(repoA+"/.git", 0755)
@@ -19,24 +16,18 @@ func TestRunWorkspaceSync_MultipleWorkspaces(t *testing.T) {
 	repoB := wsBDir + "/repo-b"
 	os.MkdirAll(repoB+"/.git", 0755)
 
-	configContent := `workspaces:
-  ws-a:
-    path: ` + wsADir + `
-    repos:
-      - name: repo-a
-        path: ` + repoA + `
-        default_branch: main
-  ws-b:
-    path: ` + wsBDir + `
-    repos:
-      - name: repo-b
-        path: ` + repoB + `
-        default_branch: main
-`
-	os.WriteFile(configDir+"/config.yaml", []byte(configContent), 0644)
-
-	SetupTestEnv(t, map[string]string{
-		"LOOM_CONFIG_DIR": configDir,
+	setupWorkspaceConfig(t, &LoomConfig{
+		DefaultWorkspace: "ws-a",
+		Workspaces: map[string]WorkspaceConfig{
+			"ws-a": {
+				Path:  wsADir,
+				Repos: []RepoConfig{{Name: "repo-a", Path: repoA, DefaultBranch: "main"}},
+			},
+			"ws-b": {
+				Path:  wsBDir,
+				Repos: []RepoConfig{{Name: "repo-b", Path: repoB, DefaultBranch: "main"}},
+			},
+		},
 	})
 
 	origResolver := defaultResolver
@@ -73,9 +64,6 @@ func TestRunWorkspaceSync_MultipleWorkspaces(t *testing.T) {
 
 func TestRunWorkspaceSync_SpecificWorkspaceFlag(t *testing.T) {
 	tmpDir := t.TempDir()
-	configDir := tmpDir + "/.loom"
-	os.MkdirAll(configDir, 0755)
-
 	wsADir := tmpDir + "/ws-a"
 	repoA := wsADir + "/repo-a"
 	os.MkdirAll(repoA+"/.git", 0755)
@@ -84,24 +72,18 @@ func TestRunWorkspaceSync_SpecificWorkspaceFlag(t *testing.T) {
 	repoB := wsBDir + "/repo-b"
 	os.MkdirAll(repoB+"/.git", 0755)
 
-	configContent := `workspaces:
-  ws-a:
-    path: ` + wsADir + `
-    repos:
-      - name: repo-a
-        path: ` + repoA + `
-        default_branch: main
-  ws-b:
-    path: ` + wsBDir + `
-    repos:
-      - name: repo-b
-        path: ` + repoB + `
-        default_branch: main
-`
-	os.WriteFile(configDir+"/config.yaml", []byte(configContent), 0644)
-
-	SetupTestEnv(t, map[string]string{
-		"LOOM_CONFIG_DIR": configDir,
+	setupWorkspaceConfig(t, &LoomConfig{
+		DefaultWorkspace: "ws-a",
+		Workspaces: map[string]WorkspaceConfig{
+			"ws-a": {
+				Path:  wsADir,
+				Repos: []RepoConfig{{Name: "repo-a", Path: repoA, DefaultBranch: "main"}},
+			},
+			"ws-b": {
+				Path:  wsBDir,
+				Repos: []RepoConfig{{Name: "repo-b", Path: repoB, DefaultBranch: "main"}},
+			},
+		},
 	})
 
 	origResolver := defaultResolver
@@ -134,7 +116,6 @@ func TestRunWorkspaceSync_SpecificWorkspaceFlag(t *testing.T) {
 }
 
 func TestRunWorkspaceSync_UnknownWorkspace(t *testing.T) {
-	t.Parallel()
 	if os.Getenv("TEST_SUBPROCESS") == "1" {
 		tmpDir := os.Getenv("TEST_TMPDIR")
 		configDir := tmpDir + "/.loom"
@@ -148,17 +129,15 @@ func TestRunWorkspaceSync_UnknownWorkspace(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	configDir := tmpDir + "/.loom"
-	os.MkdirAll(configDir, 0755)
-
 	wsDir := tmpDir + "/ws-a"
 	os.MkdirAll(wsDir, 0755)
 
-	configContent := `workspaces:
-  ws-a:
-    path: ` + wsDir + `
-    repos: []
-`
-	os.WriteFile(configDir+"/config.yaml", []byte(configContent), 0644)
+	setupWorkspaceConfigInDir(t, configDir, &LoomConfig{
+		DefaultWorkspace: "ws-a",
+		Workspaces: map[string]WorkspaceConfig{
+			"ws-a": {Path: wsDir},
+		},
+	})
 
 	cmd := exec.Command(os.Args[0], "-test.run=TestRunWorkspaceSync_UnknownWorkspace") //nolint:norawexec // subprocess pattern for testing os.Exit
 	cmd.Env = append(os.Environ(),
@@ -183,25 +162,18 @@ func TestRunWorkspaceSync_UnknownWorkspace(t *testing.T) {
 
 func TestRunFullSync_DispatchesToWorkspaceMode(t *testing.T) {
 	tmpDir := t.TempDir()
-	configDir := tmpDir + "/.loom"
-	os.MkdirAll(configDir, 0755)
-
 	wsDir := tmpDir + "/ws"
 	repo := wsDir + "/api"
 	os.MkdirAll(repo+"/.git", 0755)
 
-	configContent := `workspaces:
-  myws:
-    path: ` + wsDir + `
-    repos:
-      - name: api
-        path: ` + repo + `
-        default_branch: main
-`
-	os.WriteFile(configDir+"/config.yaml", []byte(configContent), 0644)
-
-	SetupTestEnv(t, map[string]string{
-		"LOOM_CONFIG_DIR": configDir,
+	setupWorkspaceConfig(t, &LoomConfig{
+		DefaultWorkspace: "myws",
+		Workspaces: map[string]WorkspaceConfig{
+			"myws": {
+				Path:  wsDir,
+				Repos: []RepoConfig{{Name: "api", Path: repo, DefaultBranch: "main"}},
+			},
+		},
 	})
 
 	origResolver := defaultResolver

@@ -17,12 +17,10 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import "@testing-library/jest-dom";
 
 import type { ConnectionState } from "@/api/common";
-import {
-  useFilterState,
-  useIssueDetail,
-  useRouteView,
-  useWorkspaceContext,
-} from "@/hooks";
+import { useRouteView } from "@/hooks/common/useRouteView";
+import { useFilterState } from "@/hooks/issues/useFilterState";
+import { useIssueDetail } from "@/hooks/issues/useIssueDetail";
+import { useWorkspaceContext } from "@/hooks/workspace/useWorkspaceContext";
 import type { Issue, Status } from "@/types";
 
 import App from "../App";
@@ -131,19 +129,21 @@ vi.mock("@/components/MonitorDashboard", () => ({
   ),
 }));
 
-// Mock TerminalView to avoid xterm.js browser dependencies in jsdom
+// Mock TerminalView to avoid terminal renderer and WebSocket dependencies in jsdom
 vi.mock("@/components/TerminalView", () => ({
-  TerminalView: ({
-    isActive,
-    onEscape,
-  }: {
-    isActive?: boolean;
-    onEscape?: () => void;
-  }) => (
+  TerminalView: ({ isActive }: { isActive?: boolean }) => (
     <div
       data-testid="terminal-view"
       data-active={isActive ? "true" : undefined}
-      onClick={onEscape}
+    />
+  ),
+}));
+
+vi.mock("@/components/TerminalView/TerminalView", () => ({
+  TerminalView: ({ isActive }: { isActive?: boolean }) => (
+    <div
+      data-testid="terminal-view"
+      data-active={isActive ? "true" : undefined}
     />
   ),
 }));
@@ -390,7 +390,6 @@ vi.mock("@/hooks", () => ({
   LAYER_TERMINAL_PANEL: 30,
   LAYER_AGENT_PANEL: 20,
   LAYER_ISSUE_PANEL: 10,
-  LAYER_TERMINAL_SEARCH: 5,
   useDebouncedCallback: (fn: (...args: unknown[]) => unknown) => fn,
   useAgentDiffStat: () => ({
     data: null,
@@ -398,6 +397,153 @@ vi.mock("@/hooks", () => ({
     error: null,
     refetch: vi.fn(),
   }),
+}));
+
+vi.mock("@/hooks/common/useStoreContext", () => ({
+  useIssueStoreInstance: () => mockIssueStore,
+  useAgentStoreInstance: () => mockIssueStore,
+}));
+
+vi.mock("@/hooks/common/useRouteView", () => ({
+  useRouteView: mockUseRouteView,
+}));
+
+vi.mock("@/hooks/common/useDebounce", () => ({
+  useDebounce: vi.fn((value: unknown) => value),
+}));
+
+vi.mock("@/hooks/issues/useFilterState", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@/hooks/issues/useFilterState")>();
+  return {
+    ...actual,
+    DEFAULT_GROUP_BY: "epic",
+    useFilterState: vi.fn(() => [
+      {},
+      {
+        setPriority: vi.fn(),
+        setType: vi.fn(),
+        setLabels: vi.fn(),
+        setSearch: vi.fn(),
+        setShowBlocked: vi.fn(),
+        setGroupBy: vi.fn(),
+        clearFilter: vi.fn(),
+        clearAll: vi.fn(),
+      },
+    ]),
+  };
+});
+
+vi.mock("@/hooks/issues/useIssueFilter", () => ({
+  useIssueFilter: vi.fn((issues: unknown[]) => ({
+    filteredIssues: issues,
+    count: Array.isArray(issues) ? issues.length : 0,
+    totalCount: Array.isArray(issues) ? issues.length : 0,
+    hasActiveFilters: false,
+    activeFilters: [],
+  })),
+}));
+
+vi.mock("@/hooks/issues/useBlockedIssues", () => ({
+  useBlockedIssues: vi.fn(() => ({
+    data: null,
+    loading: false,
+    error: null,
+    refetch: vi.fn(),
+  })),
+}));
+
+vi.mock("@/hooks/issues/useIssueDetail", () => ({
+  useIssueDetail: mockUseIssueDetail,
+}));
+
+vi.mock("@/hooks/issues/useSearchScope", () => ({
+  useSearchScope: vi.fn(() => ({
+    scopeName: undefined,
+    clearScope: vi.fn(),
+  })),
+}));
+
+vi.mock("@/hooks/ui/useToast", () => ({
+  useToast: mockUseToast,
+}));
+
+vi.mock("@/hooks/ui/useTheme", () => ({
+  useTheme: vi.fn(() => ({
+    theme: "light" as const,
+    toggleTheme: vi.fn(),
+    setTheme: vi.fn(),
+  })),
+}));
+
+vi.mock("@/hooks/ui/usePanelManager", () => ({
+  usePanelManager: mockUsePanelManager,
+}));
+
+vi.mock("@/hooks/ui/useKeyboardShortcuts", () => ({
+  KeyboardShortcutProvider: ({ children }: { children: React.ReactNode }) =>
+    children,
+  useKeyboardShortcuts: vi.fn(() => ({
+    isCheatsheetOpen: false,
+    toggleCheatsheet: vi.fn(),
+    closeCheatsheet: vi.fn(),
+  })),
+  useRegisterEscapeLayer: vi.fn(),
+  LAYER_CONFIRM_DIALOG: 60,
+  LAYER_TOAST: 50,
+  LAYER_CHEATSHEET: 45,
+  LAYER_WORKSPACE_SWITCHER: 42,
+  LAYER_MODAL: 40,
+  LAYER_TERMINAL_PANEL: 30,
+  LAYER_AGENT_PANEL: 20,
+  LAYER_ISSUE_PANEL: 10,
+}));
+
+vi.mock("@/hooks/workspace/useWorkspaceContext", () => ({
+  useWorkspaceContext: vi.fn(() => ({
+    workspaceId: "test-ws-id",
+    workspace: null,
+    repos: [],
+    groups: [],
+    agents: [],
+    isLoading: false,
+    error: null,
+    refetch: vi.fn(),
+    getRepoByName: vi.fn(),
+    getReposByGroup: vi.fn(() => []),
+    getAgentByName: vi.fn(),
+    activeWorkspaceName: null,
+    setActiveWorkspace: vi.fn(),
+    selectedRepoNames: new Set<string>(),
+    activeRepos: [],
+    activeRepoNames: [],
+    isAllSelected: true,
+    selectRepos: vi.fn(),
+    selectAll: vi.fn(),
+    toggleRepo: vi.fn(),
+    sourceReposFilter: undefined,
+    isMultiRepo: false,
+  })),
+}));
+
+vi.mock("@/hooks/workspace/useWorkspaceState", () => ({
+  useWorkspaceState: vi.fn(),
+}));
+
+vi.mock("@/hooks/workspace/useRepoFilterParam", () => ({
+  useRepoFilterParam: vi.fn(() => [null, vi.fn()]),
+}));
+
+vi.mock("@/hooks/workspace/useWorkspaceHealth", () => ({
+  useWorkspaceHealth: vi.fn(() => ({
+    isWorkspaceAvailable: true,
+    isChecking: false,
+    wasEverConnected: true,
+    connectionMode: "connected" as const,
+    retryCountdown: 0,
+    lastError: null,
+    retryNow: vi.fn(),
+  })),
 }));
 
 vi.mock("@/hooks/ui", async (importOriginal) => {
@@ -560,8 +706,51 @@ describe("App", () => {
     mockStoreState = createMockUseIssuesReturn({});
     // Set up default useRouteView mock (kanban is the default view)
     mockUseRouteView.mockReturnValue(createViewStateReturn("kanban"));
+    vi.mocked(useFilterState).mockReturnValue([
+      {},
+      {
+        setPriority: vi.fn(),
+        setType: vi.fn(),
+        setLabels: vi.fn(),
+        setSearch: vi.fn(),
+        setShowBlocked: vi.fn(),
+        setGroupBy: vi.fn(),
+        clearFilter: vi.fn(),
+        clearAll: vi.fn(),
+      },
+    ] as ReturnType<typeof useFilterState>);
     // Set up default useIssueDetail mock
     mockUseIssueDetail.mockReturnValue(createMockUseIssueDetailReturn());
+    mockUseToast.mockReturnValue({
+      toasts: [],
+      showToast: vi.fn(),
+      dismissToast: vi.fn(),
+      dismissAll: vi.fn(),
+    });
+    vi.mocked(useWorkspaceContext).mockReturnValue({
+      workspaceId: "test-ws-id",
+      workspace: null,
+      repos: [],
+      groups: [],
+      agents: [],
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+      getRepoByName: vi.fn(),
+      getReposByGroup: vi.fn(() => []),
+      getAgentByName: vi.fn(),
+      activeWorkspaceName: null,
+      setActiveWorkspace: vi.fn(),
+      selectedRepoNames: new Set<string>(),
+      activeRepos: [],
+      activeRepoNames: [],
+      isAllSelected: true,
+      selectRepos: vi.fn(),
+      selectAll: vi.fn(),
+      toggleRepo: vi.fn(),
+      sourceReposFilter: undefined,
+      isMultiRepo: false,
+    } as ReturnType<typeof useWorkspaceContext>);
     // Set up default usePanelManager mock
     mockUsePanelManager.mockReturnValue({
       activePanel: null,
@@ -1957,28 +2146,28 @@ describe("App", () => {
       expect(button).toHaveAttribute("aria-pressed", "true");
     });
 
-    it("TerminalView is always mounted in the DOM", () => {
+    it("TerminalView is always mounted in the DOM", async () => {
       const mockReturn = createMockUseIssuesReturn({});
       mockStoreState = mockReturn;
 
       render(<App />);
 
       // TerminalView should be present even when view is kanban
-      expect(screen.getByTestId("terminal-view")).toBeInTheDocument();
+      expect(await screen.findByTestId("terminal-view")).toBeInTheDocument();
     });
 
-    it("TerminalView wrapper has display:none when view is not terminal", () => {
+    it("TerminalView wrapper has display:none when view is not terminal", async () => {
       const mockReturn = createMockUseIssuesReturn({});
       mockStoreState = mockReturn;
 
       render(<App />);
 
-      const terminalView = screen.getByTestId("terminal-view");
+      const terminalView = await screen.findByTestId("terminal-view");
       const wrapper = terminalView.parentElement;
       expect(wrapper).toHaveStyle({ display: "none" });
     });
 
-    it("TerminalView wrapper has display:contents when view is terminal", () => {
+    it("TerminalView wrapper has display:contents when view is terminal", async () => {
       const mockReturn = createMockUseIssuesReturn({});
       mockStoreState = mockReturn;
       vi.mocked(useRouteView).mockReturnValue(
@@ -1987,12 +2176,12 @@ describe("App", () => {
 
       render(<App />);
 
-      const terminalView = screen.getByTestId("terminal-view");
+      const terminalView = await screen.findByTestId("terminal-view");
       const wrapper = terminalView.parentElement;
       expect(wrapper).toHaveStyle({ display: "contents" });
     });
 
-    it("TerminalView receives isActive=true when view is terminal", () => {
+    it("TerminalView receives isActive=true when view is terminal", async () => {
       const mockReturn = createMockUseIssuesReturn({});
       mockStoreState = mockReturn;
       vi.mocked(useRouteView).mockReturnValue(
@@ -2001,63 +2190,30 @@ describe("App", () => {
 
       render(<App />);
 
-      const terminalView = screen.getByTestId("terminal-view");
+      const terminalView = await screen.findByTestId("terminal-view");
       expect(terminalView).toHaveAttribute("data-active", "true");
     });
 
-    it("TerminalView receives isActive=false when view is kanban", () => {
+    it("TerminalView receives isActive=false when view is kanban", async () => {
       const mockReturn = createMockUseIssuesReturn({});
       mockStoreState = mockReturn;
 
       render(<App />);
 
-      const terminalView = screen.getByTestId("terminal-view");
+      const terminalView = await screen.findByTestId("terminal-view");
       expect(terminalView).not.toHaveAttribute("data-active");
     });
 
-    describe("terminal escape uses browser history", () => {
-      it("escape from terminal calls navigate(-1) when history is available", () => {
-        const mockReturn = createMockUseIssuesReturn({});
-        mockStoreState = mockReturn;
-        mockUseRouteView.mockReturnValue(createViewStateReturn("terminal"));
+    it("TerminalView does not receive a route-level Escape callback", async () => {
+      const mockReturn = createMockUseIssuesReturn({});
+      mockStoreState = mockReturn;
+      mockUseRouteView.mockReturnValue(createViewStateReturn("terminal"));
 
-        // Simulate browser with history entries
-        Object.defineProperty(window, "history", {
-          value: { length: 3 },
-          writable: true,
-          configurable: true,
-        });
+      render(<App />);
 
-        render(<App />);
-
-        fireEvent.click(screen.getByTestId("terminal-view"));
-        expect(mockNavigate).toHaveBeenCalledWith(-1);
-
-        // Restore
-        Object.defineProperty(window, "history", {
-          value: { length: 1 },
-          writable: true,
-          configurable: true,
-        });
-      });
-
-      it("escape from terminal navigates to kanban when no history", () => {
-        const mockReturn = createMockUseIssuesReturn({});
-        mockStoreState = mockReturn;
-        mockUseRouteView.mockReturnValue(createViewStateReturn("terminal"));
-
-        // history.length <= 1 means no back entry
-        Object.defineProperty(window, "history", {
-          value: { length: 1 },
-          writable: true,
-          configurable: true,
-        });
-
-        render(<App />);
-
-        fireEvent.click(screen.getByTestId("terminal-view"));
-        expect(mockNavigateToView).toHaveBeenCalledWith("kanban");
-      });
+      fireEvent.click(await screen.findByTestId("terminal-view"));
+      expect(mockNavigate).not.toHaveBeenCalledWith(-1);
+      expect(mockNavigateToView).not.toHaveBeenCalledWith("kanban");
     });
   });
 

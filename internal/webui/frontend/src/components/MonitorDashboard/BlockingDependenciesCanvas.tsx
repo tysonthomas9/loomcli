@@ -9,15 +9,9 @@ import { ReactFlow, Controls, type NodeMouseHandler } from "@xyflow/react";
 import { useMemo, useCallback } from "react";
 
 import "@xyflow/react/dist/style.css";
-import {
-  useAutoLayout,
-  type UseAutoLayoutOptions,
-} from "@/hooks/ui/useAutoLayout";
-import {
-  useGraphData,
-  type UseGraphDataOptions,
-} from "@/hooks/ui/useGraphData";
-import { useBlockedIssues } from "@/hooks/issues/useBlockedIssues";
+import { useAutoLayout, type UseAutoLayoutOptions } from "@/hooks/ui";
+import { useGraphData, type UseGraphDataOptions } from "@/hooks/ui";
+import { useBlockedIssues } from "@/hooks/issues";
 import type {
   Issue,
   IssueNode as IssueNodeType,

@@ -500,7 +500,9 @@ describe("KanbanBoard", () => {
         }),
       );
 
-      render(<KanbanBoard issues={manyIssues} columns={THREE_COLUMN_COLUMNS} />);
+      render(
+        <KanbanBoard issues={manyIssues} columns={THREE_COLUMN_COLUMNS} />,
+      );
 
       // Should render without crashing
       const openColumn = screen.getByRole("region", { name: "Open issues" });

@@ -7,6 +7,8 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli"
 )
 
+const maxSessionDiffPatchBytes = 2 * 1024 * 1024
+
 // DiffStats holds the summary of changes between two git refs.
 type DiffStats struct {
 	FilesChanged int
@@ -28,6 +30,22 @@ func ComputeDiffStats(worktreePath, fromRef string) DiffStats {
 	}
 
 	return parseDiffNumstat(out)
+}
+
+// ComputeDiffPatch returns the unified diff from fromRef to HEAD. The patch is
+// capped so session finalization cannot write unbounded artifacts.
+func ComputeDiffPatch(worktreePath, fromRef string) string {
+	if fromRef == "" {
+		return ""
+	}
+	out, err := cli.RunGitCommand(worktreePath, "diff", "--binary", fromRef+"..HEAD")
+	if err != nil || out == "" {
+		return ""
+	}
+	if len(out) > maxSessionDiffPatchBytes {
+		return out[:maxSessionDiffPatchBytes] + "\n[loom: diff truncated]\n"
+	}
+	return out
 }
 
 // parseDiffNumstat parses the output of `git diff --numstat`.

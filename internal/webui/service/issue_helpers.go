@@ -22,6 +22,9 @@ func validateCreateParams(params *CreateIssueParams) *ServiceError {
 	if params.Priority < 0 || params.Priority > 4 {
 		return ErrValidation(fmt.Sprintf("priority must be between 0 and 4 (got %d)", params.Priority))
 	}
+	if params.Status != "" && params.Status != string(types.StatusOpen) && params.Status != string(types.StatusDeferred) {
+		return ErrValidation("status must be open or deferred")
+	}
 	if len(params.Labels) > maxLabels {
 		return ErrValidation(fmt.Sprintf("too many labels (max %d, got %d)", maxLabels, len(params.Labels)))
 	}
@@ -37,6 +40,7 @@ func toCreateArgs(params *CreateIssueParams) *rpc.CreateArgs {
 		Parent:             params.Parent,
 		Title:              params.Title,
 		Description:        params.Description,
+		Status:             params.Status,
 		IssueType:          params.IssueType,
 		Priority:           params.Priority,
 		Design:             params.Design,

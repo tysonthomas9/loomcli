@@ -1,12 +1,10 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 
-import { ErrorBoundary } from "@/components/ErrorBoundary/ErrorBoundary";
-import { SwimLaneBoard } from "@/components/SwimLaneBoard/SwimLaneBoard";
-import { AssigneePrompt } from "@/components/AssigneePrompt/AssigneePrompt";
-import { IssueViewGuard } from "@/components/IssueViewGuard/IssueViewGuard";
+import { ErrorBoundary, SwimLaneBoard, AssigneePrompt } from "@/components";
+import { IssueViewGuard } from "@/components/IssueViewGuard";
 import type { Status } from "@/types";
 import { updateIssue } from "@/api";
-import { useRecentAssignees } from "@/hooks/issues/useRecentAssignees";
+import { useRecentAssignees } from "@/hooks";
 import {
   useWorkspaceViewData,
   useWorkspaceViewActions,

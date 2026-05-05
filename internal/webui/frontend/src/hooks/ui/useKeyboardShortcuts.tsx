@@ -9,8 +9,8 @@
  * - Arrow key navigation delegation
  *
  * All shortcuts are suppressed when focus is inside an input, textarea,
- * contenteditable, CodeMirror editor, or xterm terminal — except for
- * Escape and Cmd/Ctrl+K which always work.
+ * contenteditable, CodeMirror editor, or terminal renderer. Cmd/Ctrl+K still
+ * works from ordinary form fields, but terminal input always wins.
  *
  * The Escape layer system requires a KeyboardShortcutProvider ancestor.
  * The provider adds view switching, search focus, and cheatsheet functionality.
@@ -39,7 +39,6 @@ export const LAYER_MODAL = 40;
 export const LAYER_TERMINAL_PANEL = 30;
 export const LAYER_AGENT_PANEL = 20;
 export const LAYER_ISSUE_PANEL = 10;
-export const LAYER_TERMINAL_SEARCH = 5;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -95,7 +94,26 @@ function isInputFocused(event: KeyboardEvent): boolean {
 
   if (target.isContentEditable) return true;
   if (target.closest(".cm-editor")) return true;
-  if (target.closest(".xterm")) return true;
+  if (isTerminalFocused(event)) return true;
+
+  return false;
+}
+
+function isTerminalFocused(event: KeyboardEvent): boolean {
+  const target = event.target as HTMLElement | null;
+  if (!(target instanceof HTMLElement)) return false;
+
+  if (target.closest(".wterm")) return true;
+  if (target.closest('[role="textbox"][aria-label="Terminal"]')) return true;
+
+  // wterm focuses a hidden textarea while keeping the visible terminal marked
+  // as focused. Treat that event as terminal input too.
+  if (
+    target.tagName === "TEXTAREA" &&
+    document.querySelector(".wterm.focused")
+  ) {
+    return true;
+  }
 
   return false;
 }
@@ -220,6 +238,8 @@ export function KeyboardShortcutProvider({
     function handleKeyDown(event: KeyboardEvent) {
       // Escape is handled by the layer registry's own listener — skip here
       if (event.key === "Escape") return;
+
+      if (isTerminalFocused(event)) return;
 
       const inInput = isInputFocused(event);
 

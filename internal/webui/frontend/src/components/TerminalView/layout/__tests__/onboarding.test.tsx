@@ -315,8 +315,8 @@ describe("HelpPopover", () => {
       expect(screen.getByText("Keyboard Shortcuts")).toBeInTheDocument();
       expect(screen.getByText("Search in terminal")).toBeInTheDocument();
       expect(screen.getByText("Ctrl+F")).toBeInTheDocument();
-      expect(screen.getByText("New tab")).toBeInTheDocument();
-      expect(screen.getByText("Ctrl+T")).toBeInTheDocument();
+      expect(screen.queryByText("New tab")).not.toBeInTheDocument();
+      expect(screen.queryByText("Ctrl+T")).not.toBeInTheDocument();
     });
 
     it("renders slash commands section", () => {

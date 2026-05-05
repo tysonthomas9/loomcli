@@ -131,18 +131,23 @@ func appendRoutingEnv(env []string, ap *AgentProcess) []string {
 // appendSessionEnv adds session-related env vars for transcript-based liveness tracking.
 func appendSessionEnv(env []string, ap *AgentProcess) []string {
 	ap.Mu.Lock()
-	sess := ap.Session
+	sessionID := ""
+	if ap.Session != nil {
+		sessionID = ap.Session.SessionID()
+	}
+	leaseID := ap.AgentLeaseID
+	leaseToken := ap.AgentLeaseToken
 	ap.Mu.Unlock()
-	if sess != nil {
+	if sessionID != "" {
 		env = append(env,
-			fmt.Sprintf("LOOM_SESSION_ID=%s", sess.SessionID()),
+			fmt.Sprintf("LOOM_SESSION_ID=%s", sessionID),
 			fmt.Sprintf("LOOM_WORKSPACE_RUNTIME_DIR=%s", cli.GetWorkspaceRuntimeDir()),
 		)
 	}
-	if ap.AgentLeaseID != "" && ap.AgentLeaseToken != "" {
+	if leaseID != "" && leaseToken != "" {
 		env = append(env,
-			fmt.Sprintf("LOOM_AGENT_LEASE_ID=%s", ap.AgentLeaseID),
-			fmt.Sprintf("LOOM_AGENT_LEASE_TOKEN=%s", ap.AgentLeaseToken),
+			fmt.Sprintf("LOOM_AGENT_LEASE_ID=%s", leaseID),
+			fmt.Sprintf("LOOM_AGENT_LEASE_TOKEN=%s", leaseToken),
 		)
 	}
 	return env

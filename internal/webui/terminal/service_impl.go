@@ -3,6 +3,7 @@ package terminal
 import (
 	"context"
 	"regexp"
+	"time"
 
 	"github.com/redis/go-redis/v9"
 
@@ -28,6 +29,7 @@ type terminalServiceImpl struct {
 	hub         *realtime.Hub
 	redisClient *redis.Client
 	ptyMgr      PTYSource
+	startedAt   time.Time
 }
 
 // NewTerminalService creates a new TerminalService implementation.
@@ -37,6 +39,7 @@ func NewTerminalService(
 	hub *realtime.Hub,
 	redisClient *redis.Client,
 	ptyMgr PTYSource,
+	startedAt time.Time,
 ) service.TerminalService {
 	return &terminalServiceImpl{
 		termAuth:    termAuth,
@@ -44,6 +47,7 @@ func NewTerminalService(
 		hub:         hub,
 		redisClient: redisClient,
 		ptyMgr:      ptyMgr,
+		startedAt:   startedAt,
 	}
 }
 
@@ -54,6 +58,24 @@ func (s *terminalServiceImpl) ptyAlive(wsID, session string) bool {
 		return false
 	}
 	return s.ptyMgr.HasSession(SessionKey{Workspace: wsID, Name: session})
+}
+
+// ptyAttachable reports the value exposed as pty_alive to the UI. A live
+// PTY is attachable. Metadata created during this server process is also
+// attachable because the PTY may not exist until the first WebSocket connects.
+// Metadata from before this server started and without a PTY remains false,
+// which preserves stale-session protection after a server restart.
+func (s *terminalServiceImpl) ptyAttachable(wsID string, meta *tabmeta.TabMetadata) bool {
+	if meta == nil {
+		return false
+	}
+	if s.ptyAlive(wsID, meta.SessionName) {
+		return true
+	}
+	if s.startedAt.IsZero() || meta.CreatedAt.IsZero() {
+		return false
+	}
+	return !meta.CreatedAt.Before(s.startedAt)
 }
 
 // attachedClients reports the number of WebSocket clients currently

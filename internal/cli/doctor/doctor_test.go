@@ -163,12 +163,15 @@ func TestCheckProjectConfig(t *testing.T) {
 		setupWorkspaceConfig(t, &LoomConfig{DefaultWorkspace: "test", Workspaces: map[string]WorkspaceConfig{"test": {Path: dir}}})
 
 		result := checkProjectConfig()
-		if result.Status != StatusWarn {
-			t.Errorf("expected warn for missing loom.yaml, got %v: %s", result.Status, result.Summary)
+		if result.Status != StatusPass {
+			t.Errorf("expected pass for FleetDB daemon config defaults, got %v: %s", result.Status, result.Summary)
+		}
+		if !strings.Contains(result.Summary, "FleetDB daemon profile loaded") {
+			t.Errorf("expected FleetDB daemon profile summary, got: %s", result.Summary)
 		}
 	})
 
-	t.Run("invalid loom.yaml", func(t *testing.T) {
+	t.Run("invalid loom.yaml ignored by FleetDB config", func(t *testing.T) {
 		dir := t.TempDir()
 		defer ResetWorkspaceRuntimeDirCache()
 		ResetWorkspaceRuntimeDirCache()
@@ -181,14 +184,8 @@ func TestCheckProjectConfig(t *testing.T) {
 		}
 
 		result := checkProjectConfig()
-		if result.Status != StatusFail {
-			t.Errorf("expected fail for invalid loom.yaml, got %v: %s", result.Status, result.Summary)
-		}
-		if !strings.Contains(result.Detail, ">>>") {
-			t.Errorf("expected detail to contain context marker '>>>', got: %s", result.Detail)
-		}
-		if !strings.Contains(result.Detail, "Fix:") {
-			t.Errorf("expected detail to contain 'Fix:' suggestion, got: %s", result.Detail)
+		if result.Status != StatusPass {
+			t.Errorf("expected pass because daemon config is FleetDB-backed, got %v: %s", result.Status, result.Summary)
 		}
 	})
 
@@ -227,7 +224,7 @@ func TestCheckGlobalConfig(t *testing.T) {
 		}
 	})
 
-	t.Run("invalid yaml config", func(t *testing.T) {
+	t.Run("legacy yaml config ignored by FleetDB metadata", func(t *testing.T) {
 		dir := t.TempDir()
 		t.Setenv("LOOM_CONFIG_DIR", dir)
 		defer ResetWorkspaceRuntimeDirCache()
@@ -238,11 +235,11 @@ func TestCheckGlobalConfig(t *testing.T) {
 		}
 
 		result := checkGlobalConfig()
-		if result.Status != StatusFail {
-			t.Errorf("expected fail for invalid yaml, got %v: %s", result.Status, result.Summary)
+		if result.Status != StatusWarn {
+			t.Errorf("expected warn for empty FleetDB workspace metadata, got %v: %s", result.Status, result.Summary)
 		}
-		if !strings.Contains(result.Detail, ">>>") {
-			t.Errorf("expected detail to contain context marker '>>>', got: %s", result.Detail)
+		if !strings.Contains(result.Summary, "no FleetDB workspaces found") {
+			t.Errorf("expected summary about empty FleetDB metadata, got: %s", result.Summary)
 		}
 	})
 
@@ -841,8 +838,7 @@ func TestCheckOrphanedTmuxSessions_FixModePartialFailure(t *testing.T) {
 }
 
 func TestCheckFleetDB_Integration(t *testing.T) {
-	t.Run("checkFleetDB with no config falls back to defaults", func(t *testing.T) {
-		// Use a temp dir so LoadDaemonConfig fails (no loom.yaml)
+	t.Run("local mode checks embedded binary without daemon config", func(t *testing.T) {
 		dir := t.TempDir()
 		origDir, _ := os.Getwd()
 		if err := os.Chdir(dir); err != nil {
@@ -850,17 +846,25 @@ func TestCheckFleetDB_Integration(t *testing.T) {
 		}
 		defer func() { _ = os.Chdir(origDir) }()
 
-		t.Setenv("LOOM_CONFIG_DIR", dir)
+		fleetDBBin := filepath.Join(dir, "fleet-db")
+		if err := os.WriteFile(fleetDBBin, []byte("#!/bin/sh\necho 'fleet-db test help'\n"), 0755); err != nil {
+			t.Fatal(err)
+		}
+
 		defer ResetWorkspaceRuntimeDirCache()
+		t.Setenv("LOOM_CONFIG_DIR", dir)
+		t.Setenv("LOOM_FLEET_DB_URL", "")
+		t.Setenv("FLEET_DB_BIN", fleetDBBin)
 
 		result := checkFleetDB()
 		if result.Name != "fleetdb" {
 			t.Errorf("expected name 'fleetdb', got %q", result.Name)
 		}
-		// With no config, defaults are AutoStart=false and RedisURL="",
-		// so this should fail.
-		if result.Status != StatusFail {
-			t.Errorf("expected fail with default config (no redis, no autostart), got %v: %s", result.Status, result.Summary)
+		if result.Status != StatusPass {
+			t.Errorf("expected pass with runnable embedded binary, got %v: %s", result.Status, result.Summary)
+		}
+		if !strings.Contains(result.Summary, "embedded fleet-db ready") {
+			t.Errorf("expected embedded fleet-db summary, got %q", result.Summary)
 		}
 	})
 }

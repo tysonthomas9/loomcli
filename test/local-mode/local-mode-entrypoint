@@ -1,0 +1,271 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+WORKSPACE="${LOOM_WORKSPACE:-LOCALMODE}"
+SOURCE_REPO="${LOOM_LOCAL_MODE_SOURCE_REPO:-/workspace/source-repo}"
+ORIGIN_REPO="${LOOM_LOCAL_MODE_ORIGIN_REPO:-/workspace/source-repo-origin.git}"
+WORKSPACE_ROOT="${LOOM_LOCAL_MODE_WORKSPACE_ROOT:-/root/.loom/workspaces/${WORKSPACE}}"
+WORKSPACE_REPO="${WORKSPACE_ROOT}/source-repo"
+AGENT_BACKEND="${LOOM_LOCAL_MODE_BACKEND:-${LOOM_BACKEND:-localdogfood}}"
+case "$AGENT_BACKEND" in
+  codex)
+    DEFAULT_PLAN_AGENT="codex-planner"
+    DEFAULT_CODE_AGENT="codex-coder"
+    ;;
+  *)
+    DEFAULT_PLAN_AGENT="local-planner"
+    DEFAULT_CODE_AGENT="local-coder"
+    ;;
+esac
+PLAN_AGENT="${LOOM_LOCAL_MODE_PLAN_AGENT:-$DEFAULT_PLAN_AGENT}"
+CODE_AGENT="${LOOM_LOCAL_MODE_CODE_AGENT:-$DEFAULT_CODE_AGENT}"
+PLAN_TASK_ID="${LOOM_LOCAL_MODE_PLAN_TASK_ID:-${WORKSPACE}-1}"
+CODE_TASK_ID="${LOOM_LOCAL_MODE_CODE_TASK_ID:-${WORKSPACE}-2}"
+LOOM_BIND="${LOOM_LOCAL_MODE_BIND:-0.0.0.0}"
+LOOM_PORT="${LOOM_LOCAL_MODE_API_PORT:-8080}"
+export LOOM_BACKEND="$AGENT_BACKEND"
+
+http_get() {
+  url="$1"
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsS --max-time 2 "$url"
+    return $?
+  fi
+  wget -qO- --timeout=2 --tries=1 "$url"
+}
+
+http_post_json() {
+  url="$1"
+  body="$2"
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsS --max-time 5 -H "Content-Type: application/json" --data "$body" "$url"
+    return $?
+  fi
+  wget -qO- --timeout=5 --tries=1 --header="Content-Type: application/json" --post-data="$body" "$url"
+}
+
+wait_for_url() {
+  url="$1"
+  label="$2"
+  i=1
+  while [ "$i" -le 60 ]; do
+    if http_get "$url" >/dev/null 2>&1; then
+      return 0
+    fi
+    echo "[local-mode] waiting for ${label} (${i}/60)"
+    sleep 1
+    i=$((i + 1))
+  done
+  echo "[local-mode] FATAL: ${label} did not become reachable at ${url}" >&2
+  return 1
+}
+
+ensure_local_origin() {
+  if [ ! -d "$ORIGIN_REPO" ]; then
+    mkdir -p "$(dirname "$ORIGIN_REPO")"
+    git init -q --bare "$ORIGIN_REPO"
+  fi
+}
+
+configure_origin_remote() {
+  path="$1"
+  ensure_local_origin
+  if git -C "$path" remote get-url origin >/dev/null 2>&1; then
+    git -C "$path" remote set-url origin "$ORIGIN_REPO"
+  else
+    git -C "$path" remote add origin "$ORIGIN_REPO"
+  fi
+}
+
+push_current_branch() {
+  path="$1"
+  branch="$(git -C "$path" branch --show-current)"
+  if [ "$branch" != "" ]; then
+    git -C "$path" push -u origin "$branch" >/dev/null
+  fi
+}
+
+create_source_repo() {
+  if [ -d "${SOURCE_REPO}/.git" ]; then
+    configure_origin_remote "$SOURCE_REPO"
+    return 0
+  fi
+  mkdir -p "$SOURCE_REPO"
+  git -C "$SOURCE_REPO" init -q -b main
+  git -C "$SOURCE_REPO" config user.email "local-mode@fixture.local"
+  git -C "$SOURCE_REPO" config user.name "local-mode"
+  printf '# Local Mode Dogfood Repo\n' > "${SOURCE_REPO}/README.md"
+  cat > "${SOURCE_REPO}/Makefile" <<'EOF'
+gate:
+	@echo "local mode gate ok"
+EOF
+  git -C "$SOURCE_REPO" add README.md Makefile
+  git -C "$SOURCE_REPO" commit -q -m "Initial local mode fixture"
+  configure_origin_remote "$SOURCE_REPO"
+  push_current_branch "$SOURCE_REPO"
+}
+
+create_workspace() {
+  mkdir -p "$(dirname "$WORKSPACE_ROOT")"
+  if [ ! -e "${WORKSPACE_REPO}/.git" ]; then
+    loom workspace create "$WORKSPACE" --repos "$SOURCE_REPO" --path "$WORKSPACE_ROOT" --branch localmode
+  else
+    loom workspace list >/dev/null
+  fi
+  configure_origin_remote "$WORKSPACE_REPO"
+  push_current_branch "$WORKSPACE_REPO"
+}
+
+create_agent_worktree() {
+  agent="$1"
+  path="${WORKSPACE_ROOT}/worktrees/source-repo/${agent}"
+  mkdir -p "$(dirname "$path")"
+  if [ ! -e "${path}/.git" ]; then
+    if git -C "$WORKSPACE_REPO" show-ref --verify --quiet "refs/heads/${agent}"; then
+      git -C "$WORKSPACE_REPO" worktree add "$path" "$agent"
+    else
+      git -C "$WORKSPACE_REPO" worktree add "$path" -b "$agent"
+    fi
+  fi
+  git -C "$path" config user.email "local-mode@fixture.local"
+  git -C "$path" config user.name "local-mode"
+}
+
+toml_escape() {
+  printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
+}
+
+trust_codex_project_path() {
+  path="$1"
+  config="/root/.codex/config.toml"
+  escaped_path="$(toml_escape "$path")"
+
+  mkdir -p /root/.codex
+  if [ -f "$config" ] && grep -Fqx "[projects.\"${escaped_path}\"]" "$config"; then
+    return 0
+  fi
+  {
+    printf '\n[projects."%s"]\n' "$escaped_path"
+    printf 'trust_level = "trusted"\n'
+  } >> "$config"
+}
+
+trust_codex_local_mode_paths() {
+  if [ "$AGENT_BACKEND" != "codex" ]; then
+    return 0
+  fi
+
+  trust_codex_project_path "$SOURCE_REPO"
+  trust_codex_project_path "$WORKSPACE_ROOT"
+  trust_codex_project_path "$WORKSPACE_REPO"
+  trust_codex_project_path "${WORKSPACE_ROOT}/worktrees/source-repo/${PLAN_AGENT}"
+  trust_codex_project_path "${WORKSPACE_ROOT}/worktrees/source-repo/${CODE_AGENT}"
+}
+
+register_agents() {
+  loom daemon profile set issue_backend fleetdb
+  loom daemon profile set log_dir "${WORKSPACE_ROOT}/.loom/daemon-logs"
+  loom daemon profile set events_dir "${WORKSPACE_ROOT}/.loom/events"
+  loom daemon profile set max_agents 2
+  loom daemon profile set startup_timeout 30
+
+  if [ "$AGENT_BACKEND" = "codex" ]; then
+    [ "$PLAN_AGENT" = "local-planner" ] || loom agentdef remove local-planner >/dev/null 2>&1 || true
+    [ "$CODE_AGENT" = "local-coder" ] || loom agentdef remove local-coder >/dev/null 2>&1 || true
+  fi
+
+  loom agentdef remove "$PLAN_AGENT" >/dev/null 2>&1 || true
+  loom agentdef remove "$CODE_AGENT" >/dev/null 2>&1 || true
+  loom agentdef add "$PLAN_AGENT" --role plan --auto --backend "$AGENT_BACKEND" --repos source-repo
+  loom agentdef add "$CODE_AGENT" --role task --auto --backend "$AGENT_BACKEND" --repos source-repo
+}
+
+prepare_codex_credentials() {
+  if [ "$AGENT_BACKEND" != "codex" ]; then
+    return 0
+  fi
+  if ! command -v codex >/dev/null 2>&1; then
+    echo "[local-mode] FATAL: codex binary is not installed in the image" >&2
+    return 1
+  fi
+  mkdir -p /root/.codex
+  if [ -f /codex-host/auth.json ]; then
+    cp /codex-host/auth.json /root/.codex/auth.json
+    chmod 600 /root/.codex/auth.json
+  fi
+  if [ -f /codex-host/config.toml ]; then
+    cp /codex-host/config.toml /root/.codex/config.toml
+    chmod 600 /root/.codex/config.toml
+  fi
+  if [ ! -s /root/.codex/auth.json ]; then
+    echo "[local-mode] FATAL: codex auth missing. Mount local CODEX_HOME at /codex-host or set LOCAL_MODE_CODEX_HOME." >&2
+    return 1
+  fi
+  codex --version || true
+}
+
+seed_issue_if_missing() {
+  id="$1"
+  body="$2"
+  api="http://127.0.0.1:${LOOM_PORT}/api/workspaces/${WORKSPACE}"
+  if http_get "${api}/issues/${id}" >/dev/null 2>&1; then
+    echo "[local-mode] task ${id} already exists"
+    return 0
+  fi
+  if http_post_json "${api}/issues" "$body" >/tmp/local-mode-seed.out 2>/tmp/local-mode-seed.err; then
+    echo "[local-mode] seeded task ${id}"
+    return 0
+  fi
+  echo "[local-mode] FATAL: failed to seed task ${id}" >&2
+  cat /tmp/local-mode-seed.err >&2 || true
+  cat /tmp/local-mode-seed.out >&2 || true
+  return 1
+}
+
+seed_tasks() {
+  plan_body="$(printf '{"id":"%s","title":"Local mode planner dogfood","issue_type":"task","priority":0,"source_repo":"source-repo","description":"Planner agent should claim this task and write an approved implementation design.","acceptance_criteria":"Design field is populated and the task moves to review."}' "$PLAN_TASK_ID")"
+  code_body="$(printf '{"id":"%s","title":"Local mode coder dogfood","issue_type":"task","priority":0,"source_repo":"source-repo","description":"Coder agent should claim this task and make a small committed fixture change.","design":"Approved design: append a short local-mode dogfood result to local-mode-agent-output.txt, commit it, then close the task.","acceptance_criteria":"A commit exists in the coder worktree and the task is closed."}' "$CODE_TASK_ID")"
+  seed_issue_if_missing "$PLAN_TASK_ID" "$plan_body"
+  seed_issue_if_missing "$CODE_TASK_ID" "$code_body"
+}
+
+start_serve() {
+  cd "$WORKSPACE_ROOT"
+  loom serve --bind "$LOOM_BIND" --port "$LOOM_PORT" --fleet-mode >/tmp/loom-serve.log 2>&1 &
+  serve_pid="$!"
+  wait_for_url "http://127.0.0.1:${LOOM_PORT}/api/config" "loom serve"
+}
+
+cleanup() {
+  if [ "${serve_pid:-}" != "" ]; then
+    kill "$serve_pid" >/dev/null 2>&1 || true
+  fi
+}
+
+trap 'cleanup; exit 0' INT TERM
+trap cleanup EXIT
+
+mkdir -p "${HOME:-/root}" "${LOOM_CONFIG_DIR:-/root/.loom}"
+git config --global user.email "local-mode@fixture.local"
+git config --global user.name "local-mode"
+git config --global --add safe.directory "*" >/dev/null 2>&1 || true
+
+wait_for_url "${LOOM_FLEET_DB_URL:-http://fleet-db:8080}/healthz" "fleet-db"
+prepare_codex_credentials
+create_source_repo
+create_workspace
+create_agent_worktree "$PLAN_AGENT"
+create_agent_worktree "$CODE_AGENT"
+trust_codex_local_mode_paths
+register_agents
+start_serve
+seed_tasks
+
+echo "[local-mode] ready"
+echo "[local-mode] UI:  ${LOCAL_MODE_UI_URL:-http://localhost:8283}/ws/${WORKSPACE}/kanban"
+echo "[local-mode] API: ${LOCAL_MODE_API_URL:-http://localhost:8282}"
+echo "[local-mode] planner task: ${PLAN_TASK_ID}"
+echo "[local-mode] coder task:   ${CODE_TASK_ID}"
+
+cd "$WORKSPACE_ROOT"
+loom daemon

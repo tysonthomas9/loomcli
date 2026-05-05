@@ -1,0 +1,107 @@
+# Local-mode dogfood stack.
+#
+# One command from the repo root:
+#   make local-mode-up
+#
+# Host URLs:
+#   UI:  http://localhost:8283/ws/LOCALMODE/kanban
+#   API: http://localhost:8282
+
+name: loomcli-local-mode
+
+networks:
+  local-mode:
+    driver: bridge
+
+volumes:
+  redis-data:
+    driver: local
+  loom-data:
+    driver: local
+  loom-workspace:
+    driver: local
+
+services:
+  redis:
+    image: docker.io/library/redis:7-alpine
+    command: ["redis-server", "--appendonly", "no", "--save", ""]
+    networks: [local-mode]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 1s
+      retries: 20
+
+  fleet-db:
+    image: loomcli-local-mode-fleet-db:latest
+    build:
+      context: ../../../fleet-db
+      dockerfile: deploy/docker/Dockerfile
+    depends_on:
+      redis:
+        condition: service_healthy
+    command:
+      - "--redis-addr"
+      - "redis:6379"
+      - "--addr"
+      - ":8080"
+      - "--auth-dev-mode"
+      - "--authz-enabled=false"
+    networks: [local-mode]
+    ports:
+      - "${LOCAL_MODE_FLEETDB_PORT:-8280}:8080"
+
+  loom-local:
+    image: loomcli-local-mode-loom:latest
+    build:
+      context: ../..
+      dockerfile: test/local-mode/Dockerfile
+    depends_on:
+      fleet-db:
+        condition: service_started
+    environment:
+      HOME: /root
+      LOOM_CONFIG_DIR: /root/.loom
+      LOOM_WORKSPACE: LOCALMODE
+      LOOM_ISSUE_BACKEND: fleetdb
+      LOOM_FLEET_DB_URL: http://fleet-db:8080
+      LOOM_FLEET_URL: http://fleet-db:8080
+      LOOM_FLEET_DB_ACTOR: local-mode-harness@fixture.local
+      LOOM_FLEET_ACTOR: local-mode-harness@fixture.local
+      LOOM_BACKEND: localdogfood
+      LOOM_SERVER_URL: http://127.0.0.1:8080
+      LOOM_WEBUI_URL: http://127.0.0.1:8080
+      LOCAL_MODE_API_URL: "http://localhost:${LOCAL_MODE_API_PORT:-8282}"
+      LOCAL_MODE_UI_URL: "http://localhost:${LOCAL_MODE_UI_PORT:-8283}"
+      LOOM_LOCAL_MODE_PLAN_TASK_ID: LM-PLAN-1
+      LOOM_LOCAL_MODE_CODE_TASK_ID: LM-CODE-1
+      LOOM_LOCAL_MODE_STEP_DELAY: "2"
+    networks: [local-mode]
+    ports:
+      - "${LOCAL_MODE_API_PORT:-8282}:8080"
+    volumes:
+      - loom-data:/root/.loom
+      - loom-workspace:/workspace
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/api/config > /dev/null 2>&1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 20s
+
+  ui-local:
+    image: docker.io/library/caddy:2-alpine
+    depends_on:
+      loom-local:
+        condition: service_started
+    environment:
+      FRONTEND_PORT: "8080"
+      LOOM_UPSTREAM: http://loom-local:8080
+    ports:
+      - "${LOCAL_MODE_UI_PORT:-8283}:8080"
+    networks: [local-mode]
+    volumes:
+      - ../fleetdb/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ../../internal/webui/frontend/dist:/srv:ro

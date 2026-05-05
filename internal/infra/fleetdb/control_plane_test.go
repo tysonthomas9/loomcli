@@ -88,6 +88,69 @@ func TestControlPlaneClientAgentSessionListQuery(t *testing.T) {
 	}
 }
 
+func TestControlPlaneClientAgentSessionUpdateBodyUsesWireNames(t *testing.T) {
+	finishedAt := time.Now().UTC()
+	exitCode := 7
+	finishedAtPtr := &finishedAt
+	exitCodePtr := &exitCode
+	status := domain.AgentSessionFailed
+	taskID := "T-1"
+	errClass := "Fatal"
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPatch || r.URL.Path != "/api/v1/WS/agent-sessions/sess-1" {
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.String())
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode update: %v", err)
+		}
+		if _, ok := body["Status"]; ok {
+			t.Fatalf("body contains Go field name Status: %#v", body)
+		}
+		if _, ok := body["NodeID"]; ok {
+			t.Fatalf("body contains nil Go field NodeID: %#v", body)
+		}
+		if _, ok := body["node_id"]; ok {
+			t.Fatalf("body contains nil wire field node_id: %#v", body)
+		}
+		if body["task_id"] != "T-1" || body["status"] != "failed" || body["error_class"] != "Fatal" || body["exit_code"] != float64(7) {
+			t.Fatalf("body = %#v", body)
+		}
+		if body["finished_at"] == nil {
+			t.Fatalf("body missing finished_at: %#v", body)
+		}
+		writeJSON(t, w, domain.AgentSession{
+			WorkspaceKey: "WS",
+			SessionID:    "sess-1",
+			AgentID:      "agent-1",
+			TaskID:       "T-1",
+			Status:       domain.AgentSessionFailed,
+			ExitCode:     &exitCode,
+			FinishedAt:   &finishedAt,
+		})
+	}))
+	defer ts.Close()
+
+	client, err := New(Config{BaseURL: ts.URL, Actor: "tester"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := client.AgentSessions().Update(t.Context(), "WS", "sess-1", store.AgentSessionUpdate{
+		TaskID:     &taskID,
+		Status:     &status,
+		FinishedAt: &finishedAtPtr,
+		ErrorClass: &errClass,
+		ExitCode:   &exitCodePtr,
+	})
+	if err != nil {
+		t.Fatalf("update session: %v", err)
+	}
+	if session.TaskID != "T-1" || session.Status != domain.AgentSessionFailed {
+		t.Fatalf("session = %+v", session)
+	}
+}
+
 func writeJSON(t *testing.T, w http.ResponseWriter, v any) {
 	t.Helper()
 	w.Header().Set("Content-Type", "application/json")

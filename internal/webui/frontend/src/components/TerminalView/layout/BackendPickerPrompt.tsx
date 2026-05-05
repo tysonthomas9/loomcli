@@ -13,6 +13,7 @@ import styles from "./BackendPickerPrompt.module.css";
 export interface BackendPickerPromptProps {
   isOpen: boolean;
   availableBackends: string[];
+  preferredBackend?: string | undefined;
   isLoading: boolean;
   onSelect: (backend: string) => void;
   onCancel: () => void;
@@ -21,6 +22,7 @@ export interface BackendPickerPromptProps {
 export function BackendPickerPrompt({
   isOpen,
   availableBackends,
+  preferredBackend,
   isLoading,
   onSelect,
   onCancel,
@@ -31,14 +33,17 @@ export function BackendPickerPrompt({
 
   useEffect(() => {
     if (isOpen) {
-      // Default to the first available backend
-      setSelected(availableBackends[0] ?? "");
+      const defaultBackend =
+        preferredBackend && availableBackends.includes(preferredBackend)
+          ? preferredBackend
+          : (availableBackends[0] ?? "");
+      setSelected(defaultBackend);
       const timer = setTimeout(() => {
         selectRef.current?.focus();
       }, 100);
       return () => clearTimeout(timer);
     }
-  }, [isOpen, availableBackends]);
+  }, [isOpen, availableBackends, preferredBackend]);
 
   // Escape key via global shortcut layer system
   useRegisterEscapeLayer(LAYER_MODAL, onCancel, isOpen);

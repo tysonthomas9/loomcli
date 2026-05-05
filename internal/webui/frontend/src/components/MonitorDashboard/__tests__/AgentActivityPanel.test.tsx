@@ -437,7 +437,10 @@ describe("AgentActivityPanel", () => {
       const agents = [
         createAgent({ name: "ready-agent", status: "ready" }),
         createAgent({ name: "working-agent", status: "working: loom-1 (5m)" }),
-        createAgent({ name: "planning-agent", status: "planning: loom-2 (2m)" }),
+        createAgent({
+          name: "planning-agent",
+          status: "planning: loom-2 (2m)",
+        }),
         createAgent({ name: "done-agent", status: "done: loom-3 (10m)" }),
         createAgent({ name: "review-agent", status: "review: loom-4 (1h)" }),
         createAgent({ name: "idle-agent", status: "idle" }),

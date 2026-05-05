@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/tysonthomas9/loomcli/internal/backendnames"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
@@ -24,7 +25,7 @@ type Backend interface {
 
 var (
 	backends      = make(map[string]Backend)
-	activeBackend = "codex"
+	activeBackend = backendnames.Codex
 	backendFlag   string // set by --backend persistent flag in root.go
 	backendMu     sync.RWMutex
 )
@@ -75,7 +76,7 @@ func listBackendsLocked() []string {
 }
 
 // ResolveBackendName returns the backend name using the precedence chain:
-// --backend flag > LOOM_BACKEND env > default ("codex"). Persistent backend
+// --backend flag > LOOM_BACKEND env > default backend. Persistent backend
 // settings now live in FleetDB daemon profiles and are applied by the daemon,
 // not read from local YAML during CLI startup.
 func ResolveBackendName() string {
@@ -87,7 +88,7 @@ func ResolveBackendName() string {
 	if env := os.Getenv("LOOM_BACKEND"); env != "" {
 		return env
 	}
-	return "codex"
+	return backendnames.Codex
 }
 
 // ResolveAndSetBackend resolves the backend name from the precedence chain

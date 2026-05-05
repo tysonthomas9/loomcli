@@ -165,7 +165,7 @@ func initGitRepo(t *testing.T, path string) {
 
 func runGitTest(t *testing.T, dir string, args ...string) {
 	t.Helper()
-	cmd := exec.Command("git", args...)
+	cmd := exec.Command("git", args...) //nolint:norawexec // Test fixture setup shells out to git.
 	cmd.Dir = dir
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git %v failed: %v\n%s", args, err, out)

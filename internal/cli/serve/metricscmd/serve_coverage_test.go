@@ -5,10 +5,13 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli/clitest"
 	"github.com/tysonthomas9/loomcli/internal/cli/monitor"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
@@ -121,6 +124,62 @@ func TestHandleAgents_MergesStoreAgentAssignments(t *testing.T) {
 	}
 	if len(resp.ByWorkspace["Test"]) != 2 {
 		t.Fatalf("by_workspace[Test] = %+v, want both agents", resp.ByWorkspace["Test"])
+	}
+}
+
+func TestHandleAgents_SynthesizesStoreAgentBranchFromLocalWorktree(t *testing.T) {
+	t.Setenv("LOOM_WORKSPACE", "WS1")
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS1", Name: "Test"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Agents().Create(ctx, store.AgentCreate{
+		WorkspaceKey: "WS1",
+		Name:         "cobalt",
+		RoleName:     "task",
+		Repos:        []string{"repo-a"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	wsRoot := t.TempDir()
+	wtGitDir := filepath.Join(wsRoot, "worktrees", "repo-a", "cobalt", ".git")
+	if err := os.MkdirAll(wtGitDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wtGitDir, "HEAD"), []byte("ref: refs/heads/feature/cobalt\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := bootstrap.SaveStateCache(&bootstrap.StateCache{
+		Version:       1,
+		LastWorkspace: "WS1",
+		Workspaces: map[string]bootstrap.WorkspaceLocalState{
+			"WS1": {Path: wsRoot},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/monitor/agents?workspace=WS1", nil)
+	rr := httptest.NewRecorder()
+	HandleAgents(func() *monitor.MonitorData {
+		return &monitor.MonitorData{Timestamp: time.Unix(1, 0).UTC()}
+	}, st).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+	var resp AgentsResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("json unmarshal: %v", err)
+	}
+	if len(resp.Agents) != 1 {
+		t.Fatalf("agents = %+v, want one synthesized agent", resp.Agents)
+	}
+	if got := resp.Agents[0]; got.Name != "cobalt" || got.Branch != "feature/cobalt" {
+		t.Fatalf("agent = %+v, want cobalt on feature/cobalt", got)
 	}
 }
 

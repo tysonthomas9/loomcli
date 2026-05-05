@@ -3554,6 +3554,9 @@ components:
           type: string
         description:
           type: string
+        status:
+          type: string
+          enum: [open, deferred]
         design:
           type: string
         acceptance_criteria:

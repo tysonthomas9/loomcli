@@ -1,0 +1,87 @@
+#!/bin/sh
+set -eu
+
+cmd="${1:-}"
+
+json_escape() {
+  printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
+}
+
+write_transcript() {
+  text="$1"
+  if [ "${LOOM_WORKSPACE_RUNTIME_DIR:-}" = "" ] || [ "${LOOM_SESSION_ID:-}" = "" ]; then
+    return 0
+  fi
+  dir="${LOOM_WORKSPACE_RUNTIME_DIR}/sessions/${LOOM_SESSION_ID}"
+  mkdir -p "$dir"
+  escaped="$(json_escape "$text")"
+  ts="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+  printf '{"type":"assistant","timestamp":"%s","message":{"content":[{"type":"text","text":"%s"}]}}\n' "$ts" "$escaped" >> "${dir}/agent_transcript.jsonl"
+}
+
+run_planner() {
+  task_id="${LOOM_ASSIGNED_TASK_ID:-${LOOM_LOCAL_MODE_PLAN_TASK_ID:-LM-PLAN-1}}"
+  agent="${LOOM_AGENT_NAME:-local-planner}"
+  design="Approved design: local mode planner verified the supervised run loop. The coder should append a short result to local-mode-agent-output.txt, commit it, and close the task."
+
+  echo "[localdogfood] planner ${agent} handling ${task_id}"
+  write_transcript "Planner ${agent} claimed ${task_id}."
+  loom claim "$task_id" || true
+  sleep "${LOOM_LOCAL_MODE_STEP_DELAY:-2}"
+  loom data update "$task_id" --design "$design" --status review
+  write_transcript "Planner ${agent} wrote design and moved ${task_id} to review."
+  loom complete
+}
+
+run_coder() {
+  task_id="${LOOM_ASSIGNED_TASK_ID:-${LOOM_LOCAL_MODE_CODE_TASK_ID:-LM-CODE-1}}"
+  agent="${LOOM_AGENT_NAME:-local-coder}"
+  output_file="local-mode-agent-output.txt"
+
+  echo "[localdogfood] coder ${agent} handling ${task_id}"
+  write_transcript "Coder ${agent} claimed ${task_id}."
+  loom claim "$task_id" || true
+  sleep "${LOOM_LOCAL_MODE_STEP_DELAY:-2}"
+
+  {
+    printf 'Task: %s\n' "$task_id"
+    printf 'Agent: %s\n' "$agent"
+    printf 'Result: local mode deterministic backend produced a committed artifact.\n'
+    printf 'Updated: %s\n\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+  } >> "$output_file"
+
+  git add "$output_file"
+  git commit -m "Local mode dogfood implementation (${task_id})" || true
+  loom data close "$task_id" --session "${LOOM_SESSION_ID:-}" --reason "Local mode dogfood implementation completed."
+  write_transcript "Coder ${agent} committed ${output_file} and closed ${task_id}."
+  loom complete
+}
+
+case "$cmd" in
+  meta)
+    printf '{"display_name":"Local Dogfood","version":"1","description":"Deterministic local-mode backend","binary_name":"loom-backend-localdogfood"}\n'
+    ;;
+  health)
+    printf '{"installed":true,"healthy":true,"message":"ready"}\n'
+    ;;
+  invoke)
+    case "${LOOM_ROLE:-}" in
+      plan)
+        run_planner
+        ;;
+      task)
+        run_coder
+        ;;
+      *)
+        case "${LOOM_AGENT_NAME:-}" in
+          *planner*) run_planner ;;
+          *) run_coder ;;
+        esac
+        ;;
+    esac
+    ;;
+  *)
+    echo "usage: loom-backend-localdogfood {meta|health|invoke}" >&2
+    exit 2
+    ;;
+esac

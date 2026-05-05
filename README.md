@@ -87,7 +87,7 @@ The `LOOM_FLEET_MODE=true` env var is equivalent to `--fleet-mode`.
 - **Settings** — backend configuration per-project and per-agent
 
 **Features:**
-- **Talk to Lead** — built-in terminal running `loom lead` (xterm.js + tmux via WebSocket)
+- **Talk to Lead** — built-in terminal running `loom lead` (wterm + tmux via WebSocket)
 - **Real-time updates** — SSE pushes mutations to all connected browsers
 - **Per-agent terminals** — attach to live agent tmux sessions
 - **Authentication** — external auth via `--auth-url` (RS256 JWT verification)

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
+	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -175,41 +176,9 @@ func loadConfigFromStore(ctx context.Context, st store.Store) (*LoomConfig, erro
 		if sc != nil {
 			local = sc.Workspaces[ws.Key]
 		}
-		repoRows, err := st.Repos().List(ctx, ws.Key)
+		wsc, err := workspaceConfigFromStore(ctx, st, ws, local)
 		if err != nil {
-			return nil, fmt.Errorf("list repos for workspace %s: %w", ws.Key, err)
-		}
-		repos := make([]RepoConfig, 0, len(repoRows))
-		for _, r := range repoRows {
-			if r == nil {
-				continue
-			}
-			path := local.Repos[r.Name]
-			if path == "" {
-				path = r.Name
-			}
-			sourceRepoID := r.SourceRepoID
-			if sourceRepoID == "" {
-				sourceRepoID = r.Name
-			}
-			repos = append(repos, RepoConfig{
-				Name:          r.Name,
-				Path:          path,
-				DefaultBranch: r.DefaultBranch,
-				Remote:        r.Remote,
-				Groups:        append([]string(nil), r.Groups...),
-				SourceRepoID:  sourceRepoID,
-			})
-		}
-		wsc := WorkspaceConfig{
-			ID:           ws.Key,
-			Path:         local.Path,
-			Repos:        repos,
-			State:        WorkspaceState(ws.State),
-			ErrorMessage: ws.ErrorMessage,
-		}
-		if profile, err := st.Daemon().Get(ctx, ws.Key); err == nil && profile != nil {
-			wsc.Backend = profile.AgentBackend
+			return nil, err
 		}
 		cfg.Workspaces[ws.Key] = wsc
 	}
@@ -219,4 +188,66 @@ func loadConfigFromStore(ctx context.Context, st store.Store) (*LoomConfig, erro
 		}
 	}
 	return cfg, nil
+}
+
+func workspaceConfigFromStore(
+	ctx context.Context,
+	st store.Store,
+	ws *domain.Workspace,
+	local bootstrap.WorkspaceLocalState,
+) (WorkspaceConfig, error) {
+	repos, err := repoConfigsFromStore(ctx, st, ws.Key, local)
+	if err != nil {
+		return WorkspaceConfig{}, err
+	}
+	wsc := WorkspaceConfig{
+		ID:           ws.Key,
+		Path:         local.Path,
+		Repos:        repos,
+		State:        WorkspaceState(ws.State),
+		ErrorMessage: ws.ErrorMessage,
+	}
+	if profile, err := st.Daemon().Get(ctx, ws.Key); err == nil && profile != nil {
+		wsc.Backend = profile.AgentBackend
+	}
+	return wsc, nil
+}
+
+func repoConfigsFromStore(
+	ctx context.Context,
+	st store.Store,
+	wsKey string,
+	local bootstrap.WorkspaceLocalState,
+) ([]RepoConfig, error) {
+	repoRows, err := st.Repos().List(ctx, wsKey)
+	if err != nil {
+		return nil, fmt.Errorf("list repos for workspace %s: %w", wsKey, err)
+	}
+	repos := make([]RepoConfig, 0, len(repoRows))
+	for _, r := range repoRows {
+		if r == nil {
+			continue
+		}
+		repos = append(repos, repoConfigFromStore(r, local))
+	}
+	return repos, nil
+}
+
+func repoConfigFromStore(r *domain.Repo, local bootstrap.WorkspaceLocalState) RepoConfig {
+	path := local.Repos[r.Name]
+	if path == "" {
+		path = r.Name
+	}
+	sourceRepoID := r.SourceRepoID
+	if sourceRepoID == "" {
+		sourceRepoID = r.Name
+	}
+	return RepoConfig{
+		Name:          r.Name,
+		Path:          path,
+		DefaultBranch: r.DefaultBranch,
+		Remote:        r.Remote,
+		Groups:        append([]string(nil), r.Groups...),
+		SourceRepoID:  sourceRepoID,
+	}
 }

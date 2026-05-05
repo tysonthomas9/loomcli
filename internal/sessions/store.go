@@ -90,6 +90,27 @@ func (s *Store) CreateSession(opts CreateOptions) (*Session, error) {
 	return &Session{store: s, Meta: meta}, nil
 }
 
+// UpdatePrompt replaces prompt.txt for an existing session. This lets a
+// daemon-created parent session be filled by the child CLI after it renders the
+// final role/task prompt.
+func (s *Store) UpdatePrompt(sessionID, prompt string) error {
+	if err := validateSessionID(sessionID); err != nil {
+		return err
+	}
+	sessDir := filepath.Join(s.dir, sessionID)
+	if _, err := os.Stat(sessDir); err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("session %q does not exist", sessionID)
+		}
+		return fmt.Errorf("stat session dir: %w", err)
+	}
+	promptPath := filepath.Join(sessDir, "prompt.txt")
+	if err := os.WriteFile(promptPath, []byte(prompt), sessFilePerm); err != nil {
+		return fmt.Errorf("write prompt.txt: %w", err)
+	}
+	return nil
+}
+
 // AppendTranscript appends a single TranscriptEntry to
 // sessions/<sessionID>/transcript.jsonl using flock for concurrency safety.
 // The Seq field is auto-assigned from a counter file (seq) in the session

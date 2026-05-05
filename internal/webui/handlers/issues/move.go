@@ -78,15 +78,8 @@ func HandleMoveIssue(svc service.IssueService, st store.Store) http.HandlerFunc 
 			return
 		}
 
-		r.Body = http.MaxBytesReader(w, r.Body, handler.MaxRequestBody)
-		var req MoveIssueRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			var maxBytesErr *http.MaxBytesError
-			if errors.As(err, &maxBytesErr) {
-				handler.WriteJSON(w, http.StatusRequestEntityTooLarge, MoveIssueResponse{Success: false, Error: "request body too large (max 1MB)"})
-				return
-			}
-			handler.WriteJSON(w, http.StatusBadRequest, MoveIssueResponse{Success: false, Error: "invalid request body"})
+		req, ok := decodeMoveIssueRequest(w, r)
+		if !ok {
 			return
 		}
 
@@ -125,6 +118,21 @@ func HandleMoveIssue(svc service.IssueService, st store.Store) http.HandlerFunc 
 			},
 		})
 	}
+}
+
+func decodeMoveIssueRequest(w http.ResponseWriter, r *http.Request) (MoveIssueRequest, bool) {
+	r.Body = http.MaxBytesReader(w, r.Body, handler.MaxRequestBody)
+	var req MoveIssueRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			handler.WriteJSON(w, http.StatusRequestEntityTooLarge, MoveIssueResponse{Success: false, Error: "request body too large (max 1MB)"})
+			return MoveIssueRequest{}, false
+		}
+		handler.WriteJSON(w, http.StatusBadRequest, MoveIssueResponse{Success: false, Error: "invalid request body"})
+		return MoveIssueRequest{}, false
+	}
+	return req, true
 }
 
 func resolveWorkspaceRef(ctx context.Context, st store.Store, ref string) (string, string, error) {

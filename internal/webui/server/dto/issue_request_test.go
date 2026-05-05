@@ -14,6 +14,7 @@ func TestCreateIssueRequest_RoundTrip(t *testing.T) {
 		ID:                 "proj-123",
 		Parent:             "proj-100",
 		Description:        "Users can't log in",
+		Status:             "deferred",
 		Design:             "## Design\nFix the auth flow",
 		AcceptanceCriteria: "Login works",
 		Notes:              "Urgent",
@@ -55,6 +56,9 @@ func TestCreateIssueRequest_RoundTrip(t *testing.T) {
 	}
 	if got.Description != req.Description {
 		t.Errorf("Description = %q, want %q", got.Description, req.Description)
+	}
+	if got.Status != req.Status {
+		t.Errorf("Status = %q, want %q", got.Status, req.Status)
 	}
 	if got.Design != req.Design {
 		t.Errorf("Design = %q, want %q", got.Design, req.Design)

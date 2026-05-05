@@ -19,11 +19,10 @@ func SecurityHeaders(cfg SecurityConfig) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			h := w.Header()
-			// Note: 'unsafe-inline' is required in style-src because @xterm/xterm
-			// dynamically injects <style> elements for terminal theming. This library
-			// does not support CSP nonces. The risk is mitigated by img-src 'self'
-			// which prevents CSS-based data exfiltration via background-image URLs.
-			// To remove: wait for @xterm/xterm nonce support or replace the terminal library.
+			// Note: 'unsafe-inline' is required in style-src for renderer and app
+			// inline styles that do not support CSP nonces. The risk is mitigated
+			// by img-src 'self' which prevents CSS-based data exfiltration via
+			// background-image URLs.
 			//
 			// The sha256 hash allows the inline theme-detection script in index.html
 			// (prevents flash-of-wrong-theme). If that script changes, regenerate with:

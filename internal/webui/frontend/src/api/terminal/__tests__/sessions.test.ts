@@ -235,7 +235,11 @@ describe("sessions API", () => {
         response: new Response(null, { status: 404, statusText: "Not Found" }),
       } as never);
 
-      const result = await getSession("test-ws-id", "loom-123", "s-nonexistent");
+      const result = await getSession(
+        "test-ws-id",
+        "loom-123",
+        "s-nonexistent",
+      );
 
       expect(result).toBeNull();
     });
@@ -433,7 +437,11 @@ describe("sessions API", () => {
         response: new Response(null, { status: 404, statusText: "Not Found" }),
       } as never);
 
-      const result = await getSessionDiff("test-ws-id", "loom-123", "s-missing");
+      const result = await getSessionDiff(
+        "test-ws-id",
+        "loom-123",
+        "s-missing",
+      );
 
       expect(result).toBeNull();
     });

@@ -25,7 +25,7 @@ import type { LoomAgentStatus, LoomTaskInfo } from "@/types";
 import { parseLoomStatus } from "@/types";
 
 const FileEditorPanel = lazy(() =>
-  import("@/components/FileEditorPanel/FileEditorPanel").then((m) => ({
+  import("@/components/FileEditorPanel").then((m) => ({
     default: m.FileEditorPanel,
   })),
 );

@@ -362,7 +362,7 @@ export interface paths {
     put?: never;
     /**
      * Atomically claim an issue for the server-side actor
-     * @description Claims an issue for the configured agent actor. Returns 409
+     * @description Claims an issue for the LOOM_AGENT_NAME configured on the server. Returns 409
      *     Conflict if the issue is already claimed by another agent. The claim
      *     operation is atomic — only one of N concurrent callers will succeed.
      *     Blocked issues with open ready-work dependencies cannot be claimed.
@@ -2089,6 +2089,8 @@ export interface components {
       id?: string;
       parent?: string;
       description?: string;
+      /** @enum {string} */
+      status?: "open" | "deferred";
       design?: string;
       acceptance_criteria?: string;
       notes?: string;

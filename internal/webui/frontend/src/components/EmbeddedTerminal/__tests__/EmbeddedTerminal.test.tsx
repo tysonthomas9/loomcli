@@ -58,7 +58,7 @@ const hoisted = vi.hoisted(() => {
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
-// Mock TerminalInstance since it uses xterm.js / WebSocket
+// Mock TerminalInstance since it uses the terminal renderer / WebSocket
 vi.mock("@/components/TerminalView/instances/TerminalInstance", () => ({
   TerminalInstance: vi.fn(
     ({

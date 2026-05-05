@@ -488,7 +488,12 @@ describe("fetchTasks", () => {
         { id: "loom-004", title: "Review code", priority: 1, status: "review" },
       ],
       backlog: [
-        { id: "loom-005", title: "Blocked task", priority: 3, status: "blocked" },
+        {
+          id: "loom-005",
+          title: "Blocked task",
+          priority: 3,
+          status: "blocked",
+        },
       ],
     };
 
@@ -601,7 +606,12 @@ describe("fetchTasks", () => {
         { id: "loom-021", title: "Ready 2", priority: 1, status: "open" },
       ],
       inProgress: [
-        { id: "loom-030", title: "Working", priority: 0, status: "in_progress" },
+        {
+          id: "loom-030",
+          title: "Working",
+          priority: 0,
+          status: "in_progress",
+        },
       ],
       needsReview: [
         { id: "loom-040", title: "Review", priority: 1, status: "review" },

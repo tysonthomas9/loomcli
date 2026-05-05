@@ -413,7 +413,7 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 			rc = app.tabMetaStore.RedisClient()
 		}
 		app.termSvc = terminal.NewTerminalService(
-			app.termAuth, app.tabMetaStore, app.hub, rc, app.ptyMgr,
+			app.termAuth, app.tabMetaStore, app.hub, rc, app.ptyMgr, app.startedAt,
 		)
 	}
 

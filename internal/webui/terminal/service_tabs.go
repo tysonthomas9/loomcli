@@ -31,7 +31,7 @@ func (s *terminalServiceImpl) ListTabs(ctx context.Context, wsID string) ([]tabm
 		tabs = []tabmeta.TabMetadata{}
 	}
 	for i := range tabs {
-		tabs[i].PTYAlive = s.ptyAlive(wsID, tabs[i].SessionName)
+		tabs[i].PTYAlive = s.ptyAttachable(wsID, &tabs[i])
 		tabs[i].AttachedClients = s.attachedClients(wsID, tabs[i].SessionName)
 	}
 	return tabs, nil
@@ -52,7 +52,7 @@ func (s *terminalServiceImpl) GetTab(ctx context.Context, wsID, session string) 
 	if meta == nil {
 		return nil, service.ErrNotFound("tab metadata not found")
 	}
-	meta.PTYAlive = s.ptyAlive(wsID, session)
+	meta.PTYAlive = s.ptyAttachable(wsID, meta)
 	meta.AttachedClients = s.attachedClients(wsID, session)
 	return meta, nil
 }
@@ -73,7 +73,7 @@ func (s *terminalServiceImpl) PatchTab(ctx context.Context, wsID, session string
 		return nil, service.ErrInternal("failed to update tab metadata", err)
 	}
 	if meta != nil {
-		meta.PTYAlive = s.ptyAlive(wsID, session)
+		meta.PTYAlive = s.ptyAttachable(wsID, meta)
 		meta.AttachedClients = s.attachedClients(wsID, session)
 	}
 
@@ -104,12 +104,19 @@ func (s *terminalServiceImpl) PutTab(ctx context.Context, wsID string, meta *tab
 		return service.ErrValidation(err.Error())
 	}
 
-	// Reject replace when a live PTY owns the name so label/pinning
-	// changes can't happen under a running shell; callers use PATCH for
-	// that. Replace is still allowed when the PTY is already dead — lets
-	// users recycle a name after a restart.
+	// Reject replace when a live PTY already has metadata for the name so
+	// label/pinning changes can't happen under a running shell; callers use
+	// PATCH for that. If the PTY is live but metadata is missing, allow the
+	// create: the frontend can legitimately race metadata PUT with the first
+	// WebSocket attach that spawns the PTY.
 	if s.ptyAlive(wsID, meta.SessionName) {
-		return service.ErrConflict("tab metadata already exists with a live PTY; use PATCH to update")
+		existing, err := s.tabStore.Get(ctx, wsID, meta.SessionName)
+		if err != nil {
+			return service.ErrInternal("failed to get existing tab metadata", err)
+		}
+		if existing != nil {
+			return service.ErrConflict("tab metadata already exists with a live PTY; use PATCH to update")
+		}
 	}
 
 	if err := s.tabStore.Set(ctx, meta); err != nil {

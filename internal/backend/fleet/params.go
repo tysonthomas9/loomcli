@@ -215,9 +215,8 @@ func readyOptsToQuery(opts backend.ReadyOpts) string {
 
 // countOptsToQuery serializes the subset of backend.CountOpts fields that the
 // fleet-db count endpoint evaluates server-side (see openapi.yaml
-// /issues/count). Unsupported fields are silently dropped here; callers
-// validate via checkFleetUnsupportedCountFilters before invoking if they need
-// strict "filter actually applied" semantics.
+// /issues/count). Callers validate fields that would otherwise be lossy via
+// checkFleetUnsupportedCountFilters before invoking this serializer.
 //
 // Supported: Status, IssueType (mapped to "type"), Assignee, Labels
 // (mapped to singular "label"; fleet's count endpoint accepts a single label
@@ -227,7 +226,8 @@ func countOptsToQuery(opts backend.CountOpts) string {
 	setNonEmpty(q, "status", opts.Status)
 	setNonEmpty(q, "type", opts.IssueType)
 	setNonEmpty(q, "assignee", opts.Assignee)
-	// fleet-db's count endpoint takes a single label/repo; take the first if set.
+	// fleet-db's count endpoint takes a single label/repo; validation rejects
+	// multi-value inputs before this serializer runs.
 	if len(opts.Labels) > 0 {
 		q.Set("label", opts.Labels[0])
 	}
@@ -236,6 +236,21 @@ func countOptsToQuery(opts backend.CountOpts) string {
 	}
 	setNonEmpty(q, "group_by", opts.GroupBy)
 	return q.Encode()
+}
+
+func checkFleetUnsupportedCountFilters(opts backend.CountOpts) error {
+	var unsupported []string
+	if len(opts.Labels) > 1 {
+		unsupported = append(unsupported, "Labels")
+	}
+	if len(opts.SourceRepos) > 1 {
+		unsupported = append(unsupported, "SourceRepos")
+	}
+	if len(unsupported) > 0 {
+		return fmt.Errorf("fleet-db: unsupported count filters [%s]: %w",
+			strings.Join(unsupported, ", "), backend.ErrFilterNotSupported)
+	}
+	return nil
 }
 
 func blockedOptsToQuery(opts backend.BlockedOpts) string {
@@ -288,8 +303,7 @@ func updateParamsToPatchRequest(params backend.UpdateParams) map[string]interfac
 //
 // Dropped (no equivalent on fleet-db's CreateIssueRequest):
 //   - id, acceptance_criteria, created_by, external_ref,
-//     estimated_minutes, dependencies, due_at
-//   - DeferUntil is dropped at create time; defer is a separate op
+//     estimated_minutes, dependencies
 //
 // If any of those need round-tripping, file a fleet-db ticket to extend
 // the CreateIssueRequest schema rather than smuggling them through here.
@@ -297,6 +311,7 @@ func createParamsToBody(params backend.CreateParams) map[string]interface{} {
 	req := make(map[string]interface{})
 	setNonEmptyStr(req, "title", params.Title)
 	setNonEmptyStr(req, "description", params.Description)
+	setNonEmptyStr(req, "status", params.Status)
 	if params.Priority != 0 {
 		req["priority"] = params.Priority
 	}
@@ -310,6 +325,8 @@ func createParamsToBody(params backend.CreateParams) map[string]interface{} {
 	setNonEmptyStr(req, "repo", params.SourceRepo)
 	setNonEmptyStr(req, "design", params.Design)
 	setNonEmptyStr(req, "notes", params.Notes)
+	setNonEmptyStr(req, "defer_until", params.DeferUntil)
+	setNonEmptyStr(req, "due_at", params.DueAt)
 	return req
 }
 

@@ -13,7 +13,7 @@ import (
 // For custom roles, requires a prompt_file that must exist.
 func ResolveRoleConfigStatic(roleName string, config *cfgpkg.DaemonConfig, projectDir string) (cfgpkg.RoleConfig, error) {
 	if BuiltInRoles[roleName] {
-		rc := cfgpkg.RoleConfig{Description: fmt.Sprintf("Built-in %s agent", roleName)}
+		rc := builtInRoleConfig(roleName)
 		if userRC, ok := config.ResolveRole(roleName); ok {
 			rc = MergeRoleConfig(rc, userRC)
 		}
@@ -39,6 +39,17 @@ func ResolveRoleConfigStatic(roleName string, config *cfgpkg.DaemonConfig, proje
 	rc.PromptFile = promptPath
 
 	return rc, nil
+}
+
+func builtInRoleConfig(roleName string) cfgpkg.RoleConfig {
+	rc := cfgpkg.RoleConfig{Description: fmt.Sprintf("Built-in %s agent", roleName)}
+	switch roleName {
+	case "plan":
+		rc.TaskFilter = "needs_plan"
+	case "task":
+		rc.TaskFilter = "has_design"
+	}
+	return rc
 }
 
 // MergeRoleConfig applies non-zero overlay fields onto base.

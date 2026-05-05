@@ -167,6 +167,10 @@ func setCreateStringFields(req *gen.CreateIssueRequest, params backend.CreatePar
 	if params.Description != "" {
 		req.Description = &params.Description
 	}
+	if params.Status != "" {
+		status := gen.CreateIssueRequestStatus(params.Status)
+		req.Status = &status
+	}
 	if params.Design != "" {
 		req.Design = &params.Design
 	}
