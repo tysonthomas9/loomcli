@@ -91,6 +91,19 @@ func printIssueList(w io.Writer, items []backend.IssueData, format string) error
 	return nil
 }
 
+// printCreatedIssue renders the issue returned by a create call. JSON mode
+// emits the canonical issue object; text mode keeps the created ID prominent.
+func printCreatedIssue(w io.Writer, issue *backend.IssueData, format string) error {
+	if issue == nil {
+		return fmt.Errorf("created issue is nil")
+	}
+	if format == formatJSON {
+		return writeJSON(w, issue)
+	}
+	fmt.Fprintf(w, "created %s\n", issue.ID)
+	return printIssueList(w, []backend.IssueData{*issue}, format)
+}
+
 // printAgentList renders a []gen.AgentControlEntry in the requested format.
 func printAgentList(w io.Writer, entries []gen.AgentControlEntry, format string) error {
 	if entries == nil {

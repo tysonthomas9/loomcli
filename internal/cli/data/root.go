@@ -51,6 +51,7 @@ func init() {
 	dataRootCmd.PersistentFlags().StringVarP(&outputFormat, "output", "o", "text", "Output format: text|json")
 
 	dataRootCmd.AddCommand(
+		createCmd,
 		showCmd,
 		listCmd,
 		readyCmd,

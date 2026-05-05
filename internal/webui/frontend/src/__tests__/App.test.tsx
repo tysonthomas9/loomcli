@@ -1997,14 +1997,14 @@ describe("App", () => {
       );
     });
 
-    it('calls fetchIssues with mode: "ready" when activeView is "table"', () => {
+    it('calls fetchIssues with mode: "kanban" when activeView is "table"', () => {
       mockStoreState = createMockUseIssuesReturn({});
       vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("table"));
 
       render(<App />);
 
       expect(mockStoreState.fetchIssues).toHaveBeenCalledWith(
-        expect.objectContaining({ mode: "ready" }),
+        expect.objectContaining({ mode: "kanban" }),
       );
     });
 
@@ -2068,23 +2068,25 @@ describe("App", () => {
       rerender(<App />);
 
       expect(mockStoreState.fetchIssues).toHaveBeenCalledWith(
-        expect.objectContaining({ mode: "ready" }),
+        expect.objectContaining({ mode: "kanban" }),
       );
     });
 
-    it("switches from kanban mode to ready mode when view changes from kanban to table", () => {
+    it("does not refetch when view changes from kanban to table", () => {
       mockStoreState = createMockUseIssuesReturn({});
       vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("kanban"));
 
       const { rerender } = render(<App />);
 
+      expect(mockStoreState.fetchIssues).toHaveBeenCalledWith(
+        expect.objectContaining({ mode: "kanban" }),
+      );
+
       mockStoreState.fetchIssues.mockClear();
       vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("table"));
       rerender(<App />);
 
-      expect(mockStoreState.fetchIssues).toHaveBeenCalledWith(
-        expect.objectContaining({ mode: "ready" }),
-      );
+      expect(mockStoreState.fetchIssues).not.toHaveBeenCalled();
     });
 
     it('calls fetchIssues with mode: "ready" when activeView is "monitor"', () => {

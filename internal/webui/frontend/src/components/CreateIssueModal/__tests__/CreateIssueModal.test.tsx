@@ -371,6 +371,37 @@ describe("CreateIssueModal", () => {
         });
       });
     });
+
+    it("defaults source_repo in single-repo workspaces", async () => {
+      mockCreateIssue.mockResolvedValue(MOCK_ISSUE);
+      mockUseWorkspaceContext.mockReturnValue({
+        workspaceId: "test-ws-id",
+        repos: [{ name: "hello-world", source_repo_id: "hello-world" }],
+      } as ReturnType<typeof useWorkspaceContext>);
+
+      render(
+        <CreateIssueModal
+          isOpen={true}
+          onClose={onClose}
+          onSuccess={onSuccess}
+        />,
+      );
+
+      expect(screen.getByTestId("create-issue-source-repo")).toBeDisabled();
+      fireEvent.change(screen.getByTestId("create-issue-title"), {
+        target: { value: "Single repo issue" },
+      });
+      fireEvent.click(screen.getByTestId("create-issue-submit"));
+
+      await waitFor(() => {
+        expect(mockCreateIssue).toHaveBeenCalledWith("test-ws-id", {
+          title: "Single repo issue",
+          issue_type: "task",
+          priority: 2,
+          source_repo: "hello-world",
+        });
+      });
+    });
   });
 
   describe("interactions", () => {

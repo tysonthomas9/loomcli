@@ -54,6 +54,7 @@ const (
 // child process. xterm-256color gives child shells color support by default
 // and is what tmux 3.6+ requires to start.
 const termEnv = "TERM=xterm-256color"
+const workspaceEnvPrefix = "LOOM_WORKSPACE="
 
 func terminalSpawnEnv(base []string) []string {
 	env := make([]string, 0, len(base)+1)
@@ -68,6 +69,20 @@ func terminalSpawnEnv(base []string) []string {
 		}
 	}
 	return append(env, termEnv)
+}
+
+func terminalSessionEnv(base []string, key SessionKey) []string {
+	env := make([]string, 0, len(base)+1)
+	for _, entry := range base {
+		if strings.HasPrefix(entry, workspaceEnvPrefix) {
+			continue
+		}
+		env = append(env, entry)
+	}
+	if key.Workspace != "" {
+		env = append(env, workspaceEnvPrefix+key.Workspace)
+	}
+	return env
 }
 
 // SessionKey identifies a persistent terminal session. Two WebSockets opened
@@ -242,7 +257,7 @@ func (m *PTYManager) spawnSession(key SessionKey, cols, rows uint16, argv []stri
 		useArgv = m.argv
 	}
 	cmd := exec.Command(m.shell, useArgv...) //nolint:gosec // shell + argv sourced from server config, not request data
-	cmd.Env = m.env
+	cmd.Env = terminalSessionEnv(m.env, key)
 	cmd.Dir = m.cwd
 
 	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Cols: cols, Rows: rows})

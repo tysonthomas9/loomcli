@@ -47,9 +47,15 @@ func HandlePatchIssue(svc service.IssueService) http.HandlerFunc {
 			return
 		}
 
+		data, err := svc.GetIssue(r.Context(), issueID)
+		if err != nil {
+			handler.HandleServiceError(w, err)
+			return
+		}
+
 		handler.WriteJSON(w, http.StatusOK, PatchIssueResponse{
 			Success: true,
-			Data:    map[string]string{"id": issueID, "status": "updated"},
+			Data:    data,
 		})
 	}
 }

@@ -21,6 +21,7 @@ type localBackendStub struct {
 	calls       []localBackendCall
 	readyItems  []backend.IssueData
 	detail      *backend.IssueDetailData
+	createItem  *backend.IssueData
 	closeResult *backend.CloseResult
 }
 
@@ -58,8 +59,21 @@ func (b *localBackendStub) GetChildren(context.Context, string) ([]backend.Issue
 func (b *localBackendStub) SearchIssues(context.Context, string, int) ([]backend.IssueData, error) {
 	return nil, nil
 }
-func (b *localBackendStub) Create(context.Context, backend.CreateParams) (*backend.IssueData, error) {
-	return nil, nil
+func (b *localBackendStub) Create(_ context.Context, params backend.CreateParams) (*backend.IssueData, error) {
+	b.record("Create", "", params)
+	if b.createItem != nil {
+		return b.createItem, nil
+	}
+	return &backend.IssueData{
+		ID:         params.ID,
+		Title:      params.Title,
+		Status:     params.Status,
+		IssueType:  params.IssueType,
+		Priority:   params.Priority,
+		Parent:     params.Parent,
+		Labels:     append([]string(nil), params.Labels...),
+		SourceRepo: params.SourceRepo,
+	}, nil
 }
 func (b *localBackendStub) Update(_ context.Context, id string, params backend.UpdateParams) error {
 	b.record("Update", id, params)

@@ -15,6 +15,7 @@ import styles from "./KanbanPage.module.css";
 export function KanbanPage() {
   const {
     filteredIssues,
+    hasActiveFilters,
     issues,
     isLoading,
     error,
@@ -116,10 +117,12 @@ export function KanbanPage() {
         <div className={styles.kanbanShell}>
           <SwimLaneBoard
             issues={filteredIssues}
+            filters={filters}
             groupBy={groupBy}
             onDragEnd={handleDragEnd}
             onIssueClick={handleIssueClick}
             isMultiRepo={isMultiRepo}
+            hasFiltersActive={hasActiveFilters}
             {...(blockedIssuesMap !== undefined && {
               blockedIssues: blockedIssuesMap,
             })}

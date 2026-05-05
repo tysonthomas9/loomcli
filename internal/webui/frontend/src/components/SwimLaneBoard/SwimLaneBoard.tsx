@@ -73,6 +73,8 @@ export interface SwimLaneBoardProps {
   pendingIds?: Set<string>;
   /** Whether the app is in multi-repo mode (affects empty state text) */
   isMultiRepo?: boolean;
+  /** Whether caller-applied filters/search are active */
+  hasFiltersActive?: boolean;
 }
 
 /**
@@ -95,6 +97,7 @@ export function SwimLaneBoard({
   cardLimit,
   pendingIds,
   isMultiRepo,
+  hasFiltersActive,
 }: SwimLaneBoardProps): JSX.Element {
   const columns = useMemo(
     () => resolveColumns(propColumns, groupBy),
@@ -134,6 +137,7 @@ export function SwimLaneBoard({
     ...(cardLimit !== undefined && { cardLimit }),
     ...(pendingIds !== undefined && { pendingIds }),
     ...(isMultiRepo !== undefined && { isMultiRepo }),
+    ...(hasFiltersActive !== undefined && { hasFiltersActive }),
   };
 
   return <SwimLaneBoardContent {...contentProps} />;
@@ -157,6 +161,7 @@ function SwimLaneBoardContent({
   cardLimit,
   pendingIds,
   isMultiRepo,
+  hasFiltersActive,
 }: Omit<SwimLaneBoardProps, "filters" | "groupBy"> & {
   groupBy: Exclude<GroupByField, "none">;
   columns: KanbanColumnConfig[];
@@ -338,13 +343,12 @@ function SwimLaneBoardContent({
     [onDragEnd, columns, sourceColumnId],
   );
 
-  // Board-level empty state in swim lane mode
-  // SwimLaneBoardContent only applies showBlocked filtering, not user-driven filters,
-  // so hasFiltersActive is not set here — the caller is responsible for filtering issues.
+  // Board-level empty state in swim lane mode.
   if (filteredIssues.length === 0) {
     return (
       <EmptyWorkspaceBoard
         {...(isMultiRepo !== undefined && { isMultiRepo })}
+        hasFiltersActive={hasFiltersActive === true}
       />
     );
   }

@@ -205,7 +205,9 @@ function App() {
   const issueMode =
     activeView === "graph"
       ? "graph"
-      : activeView === "kanban"
+      : activeView === "kanban" ||
+          activeView === "table" ||
+          activeView === "issue-detail"
         ? "kanban"
         : ("ready" as const);
 
@@ -251,7 +253,10 @@ function App() {
   if (filters.labels !== undefined) filterOptions.labels = filters.labels;
   if (sourceReposFilter !== undefined) filterOptions.repos = sourceReposFilter;
 
-  const { filteredIssues } = useIssueFilter(issues, filterOptions);
+  const { filteredIssues, hasActiveFilters } = useIssueFilter(
+    issues,
+    filterOptions,
+  );
 
   // Only fetch blocked issues separately when NOT in kanban mode (kanban mode includes it inline)
   const { data: blockedIssuesData } = useBlockedIssues({
@@ -743,6 +748,7 @@ function App() {
     () => ({
       issues,
       filteredIssues,
+      hasActiveFilters,
       isLoading,
       error,
       retryCount,
@@ -768,6 +774,7 @@ function App() {
     [
       issues,
       filteredIssues,
+      hasActiveFilters,
       isLoading,
       error,
       retryCount,

@@ -66,6 +66,35 @@ func TestTerminalSpawnEnv_StripsStaleGeometryAndOverridesTERM(t *testing.T) {
 	}
 }
 
+func TestTerminalSessionEnv_ScopesWorkspace(t *testing.T) {
+	env := terminalSessionEnv([]string{
+		"PATH=/usr/bin",
+		"LOOM_WORKSPACE=stale",
+		termEnv,
+	}, SessionKey{Workspace: "DOGFOODUI", Name: "lead-codex-1"})
+
+	joined := strings.Join(env, "\n")
+	if strings.Contains(joined, "LOOM_WORKSPACE=stale") {
+		t.Fatalf("terminalSessionEnv() leaked stale workspace: %q", joined)
+	}
+	if !strings.Contains(joined, "LOOM_WORKSPACE=DOGFOODUI") {
+		t.Fatalf("terminalSessionEnv() missing workspace override: %q", joined)
+	}
+}
+
+func TestTerminalSessionEnv_UnscopedStripsWorkspace(t *testing.T) {
+	env := terminalSessionEnv([]string{
+		"PATH=/usr/bin",
+		"LOOM_WORKSPACE=stale",
+		termEnv,
+	}, SessionKey{Name: "shell"})
+
+	joined := strings.Join(env, "\n")
+	if strings.Contains(joined, "LOOM_WORKSPACE=") {
+		t.Fatalf("terminalSessionEnv() leaked workspace into unscoped session: %q", joined)
+	}
+}
+
 // newTestManager returns a manager configured to spawn `/bin/bash -c "cat"`.
 // cat echoes stdin to stdout so tests can deterministically drive the PTY.
 func newTestManager(t *testing.T) *PTYManager {

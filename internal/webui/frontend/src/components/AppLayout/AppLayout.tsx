@@ -68,7 +68,7 @@ export function AppLayout({
       </header>
       <div className={styles.contentWrapper}>
         {navRail}
-        {sidebar}
+        {sidebar && <aside className={styles.sidebarSlot}>{sidebar}</aside>}
         <main className={styles.main} role="main" id="main-content">
           {children}
         </main>

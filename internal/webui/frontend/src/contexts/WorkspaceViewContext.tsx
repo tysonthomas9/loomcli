@@ -24,6 +24,7 @@ import type { IssueContext } from "@/api/terminal";
 export interface WorkspaceViewData {
   issues: Issue[];
   filteredIssues: Issue[];
+  hasActiveFilters: boolean;
   isLoading: boolean;
   error: string | null;
   retryCount: number;
@@ -83,6 +84,7 @@ const asyncNoop = async () => {};
 export const NO_WORKSPACE_VIEW_DATA: WorkspaceViewData = {
   issues: [],
   filteredIssues: [],
+  hasActiveFilters: false,
   isLoading: false,
   error: null,
   retryCount: 0,

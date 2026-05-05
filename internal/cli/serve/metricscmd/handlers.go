@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
-	"path/filepath"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
@@ -99,7 +98,7 @@ func HandleStatusWithBackend(collectDataFn func() *monitor.MonitorData, st store
 			return
 		}
 		workspaceHint := r.URL.Query().Get("workspace")
-		agents := mergeStoreAgents(r.Context(), st, data.Agents, workspaceHint)
+		agents := storeAgentsForMonitor(r.Context(), st, workspaceHint)
 		writeJSON(w, StatusResponse{
 			Workspace:      getWorkspaceInfo(r.Context(), st, workspaceHint),
 			Agents:         agents,
@@ -129,7 +128,7 @@ func HandleAgentsWithBackend(collectDataFn func() *monitor.MonitorData, st store
 		}
 		workspaceHint := r.URL.Query().Get("workspace")
 		wsInfo := getWorkspaceInfo(r.Context(), st, workspaceHint)
-		agents := mergeStoreAgents(r.Context(), st, data.Agents, workspaceHint)
+		agents := storeAgentsForMonitor(r.Context(), st, workspaceHint)
 
 		response := AgentsResponse{
 			Workspace: wsInfo,
@@ -306,7 +305,8 @@ func groupAgentsByWorkspace(agents []monitor.AgentStatus) map[string][]monitor.A
 	return groups
 }
 
-func mergeStoreAgents(ctx context.Context, st store.Store, agents []monitor.AgentStatus, workspaceHint string) []monitor.AgentStatus {
+func storeAgentsForMonitor(ctx context.Context, st store.Store, workspaceHint string) []monitor.AgentStatus {
+	agents := make([]monitor.AgentStatus, 0)
 	if st == nil {
 		return agents
 	}
@@ -319,104 +319,21 @@ func mergeStoreAgents(ctx context.Context, st store.Store, agents []monitor.Agen
 		log.Printf("Failed to list store agents for monitor response: %v", err)
 		return agents
 	}
-	if len(assignments) == 0 {
-		return agents
-	}
 
-	assignmentsByName := agentsByName(assignments)
-	merged, byName := filterRuntimeAgents(agents, assignmentsByName, workspaceHint, wsKey, wsName)
 	for _, assignment := range assignments {
 		if assignment == nil {
 			continue
 		}
-		if idx, exists := byName[assignment.Name]; exists {
-			enrichRuntimeAgent(&merged[idx], assignment, wsKey, wsName)
-			continue
-		}
-		merged = append(merged, monitor.AgentStatus{
+		agents = append(agents, monitor.AgentStatus{
 			Name:      assignment.Name,
-			Branch:    monitorBranchFromStoreAgent(wsKey, assignment),
+			Branch:    "unknown",
 			Status:    monitorStatusFromAgentState(assignment.State),
 			Role:      assignment.RoleName,
 			Repo:      monitorRepoFromAgent(assignment),
 			Workspace: wsName,
 		})
 	}
-	return merged
-}
-
-func agentsByName(assignments []*domain.Agent) map[string]*domain.Agent {
-	byName := make(map[string]*domain.Agent, len(assignments))
-	for _, assignment := range assignments {
-		if assignment != nil {
-			byName[assignment.Name] = assignment
-		}
-	}
-	return byName
-}
-
-func filterRuntimeAgents(
-	agents []monitor.AgentStatus,
-	assignmentsByName map[string]*domain.Agent,
-	workspaceHint, wsKey, wsName string,
-) ([]monitor.AgentStatus, map[string]int) {
-	merged := make([]monitor.AgentStatus, 0, len(agents)+len(assignmentsByName))
-	byName := make(map[string]int, len(agents))
-	for _, agent := range agents {
-		if !shouldKeepRuntimeAgent(agent, assignmentsByName, workspaceHint, wsKey, wsName) {
-			continue
-		}
-		byName[agent.Name] = len(merged)
-		merged = append(merged, agent)
-	}
-	return merged, byName
-}
-
-func shouldKeepRuntimeAgent(
-	agent monitor.AgentStatus,
-	assignmentsByName map[string]*domain.Agent,
-	workspaceHint, wsKey, wsName string,
-) bool {
-	if workspaceHint == "" {
-		return true
-	}
-	_, assignedToWorkspace := assignmentsByName[agent.Name]
-	return assignedToWorkspace || agent.Workspace == wsName || agent.Workspace == wsKey
-}
-
-func enrichRuntimeAgent(agent *monitor.AgentStatus, assignment *domain.Agent, wsKey, wsName string) {
-	if agent == nil || assignment == nil {
-		return
-	}
-	if agent.Branch == "" || agent.Branch == "unknown" {
-		agent.Branch = monitorBranchFromStoreAgent(wsKey, assignment)
-	}
-	if agent.Role == "" {
-		agent.Role = assignment.RoleName
-	}
-	if agent.Repo == "" {
-		agent.Repo = monitorRepoFromAgent(assignment)
-	}
-	if agent.Workspace == "" {
-		agent.Workspace = wsName
-	}
-}
-
-func monitorBranchFromStoreAgent(wsKey string, agent *domain.Agent) string {
-	const unknownBranch = "unknown"
-	repoName := monitorRepoFromAgent(agent)
-	if wsKey == "" || repoName == "" || agent == nil {
-		return unknownBranch
-	}
-	workspacePath := storeadapter.ResolveWorkspacePath(wsKey)
-	if workspacePath == "" {
-		return unknownBranch
-	}
-	branch, err := monitor.ReadBranchFromFS(filepath.Join(workspacePath, "worktrees", repoName, agent.Name))
-	if err != nil || branch == "" {
-		return unknownBranch
-	}
-	return branch
+	return agents
 }
 
 func monitorStatusFromAgentState(state domain.AgentState) string {

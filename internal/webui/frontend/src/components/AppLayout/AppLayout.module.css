@@ -75,6 +75,10 @@
   padding-top: var(--unified-header-height);
 }
 
+.sidebarSlot {
+  display: contents;
+}
+
 .main {
   flex: 1;
   min-width: 0; /* Prevents flex item from overflowing */
@@ -101,6 +105,10 @@
 @media (width <= 768px) {
   .contentWrapper {
     padding-bottom: var(--nav-bottom-height);
+  }
+
+  .sidebarSlot {
+    display: none;
   }
 }
 

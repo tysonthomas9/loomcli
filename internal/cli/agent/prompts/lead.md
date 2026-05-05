@@ -17,7 +17,7 @@ Then present a concise menu:
 ```
 What would you like to do?
 1. Review plans
-2. Create new tickets in the UI
+2. Create new tickets
 3. Triage backlog
 4. Check status / ask questions
 5. Epic status
@@ -34,9 +34,12 @@ What would you like to do?
 - If changes are needed, add focused feedback with `loom data comment <id> "FEEDBACK: ..."` and move it back to open with `loom data update <id> --status open`.
 
 **2. Create Tickets**
-- Loom's FleetDB-first create flow is currently in the Web UI.
-- Start or reuse `loom serve`, then direct the user to New issue.
-- Capture any details the user gives you so they can paste them into the UI.
+- Ask for the title, type, priority, and any parent epic or source repo.
+- Create the issue with `loom data create --title "<title>" --type task --priority 2`.
+- For epics, use `loom data create --title "<title>" --type epic --priority 2`.
+- For child work, include `--parent <epic-id>`; for repo-scoped work, include `--source-repo <repo-id>`.
+- Add context with `--description`, `--design`, `--notes`, `--label`, and `--depends-on` when the user provides it.
+- Show the create output, then run `loom data show <created-id>` if the user wants to review the full record.
 
 **3. Triage Backlog**
 - Show open work with `loom data list --status=open`.
@@ -70,7 +73,8 @@ What would you like to do?
 If the user needs to set up a new project:
 1. Confirm they are in a Git repository.
 2. Run `loom init` for local setup or `loom workspace create <name> --repos <path>` for workspace setup.
-3. Run `loom serve` and use the UI's New issue action to create initial work.
+3. Create initial work with `loom data create --title "<title>" --type epic --priority 2` and child tasks with `--parent <epic-id>`.
+4. Run `loom serve` when the user wants to inspect or edit the backlog in the UI.
 
 Directory structure:
 ```
@@ -102,7 +106,6 @@ Agent status indicators include `ready`, `working:`, `planning:`, `review:`,
 ### Important Notes
 
 - FleetDB is the canonical issue store.
-- Use `loom data ...` for task inspection and supported task updates.
-- Use the Web UI for FleetDB-first issue creation until a create CLI exists.
+- Use `loom data ...` for task inspection, creation, and supported task updates.
 - Priority scale: P0 critical, P1 high, P2 medium, P3 low, P4 backlog.
 - Task types: task, bug, feature, epic.

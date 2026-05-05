@@ -5,15 +5,13 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
-	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli/clitest"
 	"github.com/tysonthomas9/loomcli/internal/cli/monitor"
+	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/usage"
@@ -64,7 +62,7 @@ func TestGroupAgentsByWorkspace_AllSameWorkspace(t *testing.T) {
 	}
 }
 
-func TestHandleAgents_MergesStoreAgentAssignments(t *testing.T) {
+func TestHandleAgents_UsesStoreAgentsAsSourceOfTruth(t *testing.T) {
 	t.Setenv("LOOM_WORKSPACE", "WS1")
 	ctx := context.Background()
 	st := memstore.New()
@@ -87,15 +85,17 @@ func TestHandleAgents_MergesStoreAgentAssignments(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	active := domain.AgentStateActive
+	if _, err := st.Agents().Update(ctx, "WS1", "falcon", store.AgentUpdate{State: &active}); err != nil {
+		t.Fatal(err)
+	}
 
 	data := &monitor.MonitorData{
 		Timestamp: time.Unix(1, 0).UTC(),
-		Agents: []monitor.AgentStatus{{
-			Name:   "falcon",
-			Branch: "feature/falcon",
-			Status: "ready",
-			Ahead:  1,
-		}},
+		Agents: []monitor.AgentStatus{
+			{Name: "falcon", Branch: "feature/falcon", Status: "ready", Ahead: 1},
+			{Name: "stray", Branch: "feature/stray", Status: "ready", Workspace: "Test"},
+		},
 	}
 	req := httptest.NewRequest(http.MethodGet, "/api/monitor/agents", nil)
 	rr := httptest.NewRecorder()
@@ -114,58 +114,39 @@ func TestHandleAgents_MergesStoreAgentAssignments(t *testing.T) {
 		byName[agent.Name] = agent
 	}
 	if len(byName) != 2 {
-		t.Fatalf("agents = %+v, want runtime + store assignment", resp.Agents)
+		t.Fatalf("agents = %+v, want only store assignments", resp.Agents)
 	}
-	if got := byName["falcon"]; got.Role != "task" || got.Repo != "repo-a" || got.Workspace != "Test" || got.Status != "ready" {
-		t.Fatalf("falcon not enriched from store: %+v", got)
+	if _, exists := byName["stray"]; exists {
+		t.Fatalf("unregistered runtime agent leaked into response: %+v", resp.Agents)
+	}
+	if got := byName["falcon"]; got.Role != "task" || got.Repo != "repo-a" || got.Workspace != "Test" || got.Status != "working" || got.Branch != "unknown" {
+		t.Fatalf("falcon not sourced from store: %+v", got)
 	}
 	if got := byName["nova"]; got.Role != "plan" || got.Status != "idle" || got.Workspace != "Test" {
-		t.Fatalf("nova not synthesized from store: %+v", got)
+		t.Fatalf("nova not sourced from store: %+v", got)
 	}
 	if len(resp.ByWorkspace["Test"]) != 2 {
 		t.Fatalf("by_workspace[Test] = %+v, want both agents", resp.ByWorkspace["Test"])
 	}
 }
 
-func TestHandleAgents_SynthesizesStoreAgentBranchFromLocalWorktree(t *testing.T) {
+func TestHandleAgents_EmptyWorkspaceDoesNotLeakRuntimeAgents(t *testing.T) {
 	t.Setenv("LOOM_WORKSPACE", "WS1")
-	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
 	ctx := context.Background()
 	st := memstore.New()
 	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS1", Name: "Test"}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.Agents().Create(ctx, store.AgentCreate{
-		WorkspaceKey: "WS1",
-		Name:         "cobalt",
-		RoleName:     "task",
-		Repos:        []string{"repo-a"},
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	wsRoot := t.TempDir()
-	wtGitDir := filepath.Join(wsRoot, "worktrees", "repo-a", "cobalt", ".git")
-	if err := os.MkdirAll(wtGitDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(wtGitDir, "HEAD"), []byte("ref: refs/heads/feature/cobalt\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := bootstrap.SaveStateCache(&bootstrap.StateCache{
-		Version:       1,
-		LastWorkspace: "WS1",
-		Workspaces: map[string]bootstrap.WorkspaceLocalState{
-			"WS1": {Path: wsRoot},
-		},
-	}); err != nil {
 		t.Fatal(err)
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/monitor/agents?workspace=WS1", nil)
 	rr := httptest.NewRecorder()
 	HandleAgents(func() *monitor.MonitorData {
-		return &monitor.MonitorData{Timestamp: time.Unix(1, 0).UTC()}
+		return &monitor.MonitorData{
+			Timestamp: time.Unix(1, 0).UTC(),
+			Agents: []monitor.AgentStatus{
+				{Name: "local-only", Branch: "main", Status: "ready", Workspace: "Test"},
+			},
+		}
 	}, st).ServeHTTP(rr, req)
 
 	if rr.Code != http.StatusOK {
@@ -175,11 +156,8 @@ func TestHandleAgents_SynthesizesStoreAgentBranchFromLocalWorktree(t *testing.T)
 	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("json unmarshal: %v", err)
 	}
-	if len(resp.Agents) != 1 {
-		t.Fatalf("agents = %+v, want one synthesized agent", resp.Agents)
-	}
-	if got := resp.Agents[0]; got.Name != "cobalt" || got.Branch != "feature/cobalt" {
-		t.Fatalf("agent = %+v, want cobalt on feature/cobalt", got)
+	if len(resp.Agents) != 0 {
+		t.Fatalf("agents = %+v, want no agents for empty store workspace", resp.Agents)
 	}
 }
 

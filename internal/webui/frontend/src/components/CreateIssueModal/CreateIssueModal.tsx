@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { createPortal } from "react-dom";
 
 import { createIssue } from "@/hooks/api";
@@ -60,6 +60,19 @@ export function CreateIssueModal({
     };
   }, []);
 
+  const repoOptions = useMemo(
+    () =>
+      repos
+        .map((repo) => ({
+          label: repo.name,
+          value: repo.source_repo_id || repo.name,
+        }))
+        .filter((repo) => Boolean(repo.label) && Boolean(repo.value)),
+    [repos],
+  );
+  const defaultSourceRepo =
+    repoOptions.length === 1 ? (repoOptions[0]?.value ?? "") : "";
+
   // Reset form state when modal opens
   useEffect(() => {
     if (isOpen) {
@@ -72,6 +85,15 @@ export function CreateIssueModal({
       setError("");
     }
   }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    if (repoOptions.length === 1) {
+      setSourceRepo(defaultSourceRepo);
+    } else if (repoOptions.length === 0) {
+      setSourceRepo("");
+    }
+  }, [isOpen, repoOptions.length, defaultSourceRepo]);
 
   useRegisterEscapeLayer(LAYER_MODAL, onClose, isOpen);
   useFocusTrap(dialogRef, isOpen, { initialFocus: titleRef });
@@ -141,13 +163,8 @@ export function CreateIssueModal({
 
   if (!isOpen) return null;
 
-  const repoOptions = repos
-    .map((repo) => ({
-      label: repo.name,
-      value: repo.source_repo_id || repo.name,
-    }))
-    .filter((repo) => Boolean(repo.label) && Boolean(repo.value));
   const showRepoSelector = repoOptions.length > 1;
+  const showSingleRepo = repoOptions.length === 1;
 
   return createPortal(
     <div
@@ -241,6 +258,27 @@ export function CreateIssueModal({
                 data-testid="create-issue-source-repo"
               >
                 <option value="">Workspace</option>
+                {repoOptions.map((repo) => (
+                  <option key={repo.value} value={repo.value}>
+                    {repo.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {showSingleRepo && (
+            <div className={styles.fieldGroup}>
+              <label className={styles.label} htmlFor="issue-source-repo">
+                Repo
+              </label>
+              <select
+                id="issue-source-repo"
+                className={styles.select}
+                value={sourceRepo}
+                disabled
+                data-testid="create-issue-source-repo"
+              >
                 {repoOptions.map((repo) => (
                   <option key={repo.value} value={repo.value}>
                     {repo.label}

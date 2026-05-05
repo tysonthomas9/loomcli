@@ -83,6 +83,50 @@ func TestHandlePatchIssueW_UpdateTitle(t *testing.T) {
 	assertEnvelopeSuccess(t, result)
 }
 
+func TestHandlePatchIssueW_ReturnsUpdatedIssue(t *testing.T) {
+	updatedIssue := json.RawMessage(`{"id":"issue-42","title":"Existing title","source_repo":"hello-world"}`)
+	svc := &mockIssueService{
+		patchIssueFunc: func(ctx context.Context, params service.PatchIssueParams) error {
+			if params.IssueID != "issue-42" {
+				t.Errorf("PatchIssue() IssueID = %q, want %q", params.IssueID, "issue-42")
+			}
+			return nil
+		},
+		getIssueFunc: func(ctx context.Context, issueID string) (json.RawMessage, error) {
+			if issueID != "issue-42" {
+				t.Errorf("GetIssue() issueID = %q, want %q", issueID, "issue-42")
+			}
+			return updatedIssue, nil
+		},
+	}
+	handler := handlePatchIssue(svc)
+
+	body := `{"set_labels":["repo:hello-world"]}`
+	req := httptest.NewRequest(http.MethodPatch, "/api/issues/issue-42", strings.NewReader(body))
+	req.SetPathValue("id", "issue-42")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+	var resp PatchIssueResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !resp.Success {
+		t.Fatal("expected success=true")
+	}
+	data, ok := resp.Data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("data = %#v, want object", resp.Data)
+	}
+	if got := data["title"]; got != "Existing title" {
+		t.Fatalf("data.title = %v, want Existing title", got)
+	}
+}
+
 func TestHandlePatchIssueW_UpdatePriority(t *testing.T) {
 	svc := &mockIssueService{
 		patchIssueFunc: func(ctx context.Context, params service.PatchIssueParams) error {

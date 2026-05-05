@@ -687,6 +687,22 @@ describe("SwimLaneBoard", () => {
       ).toBeInTheDocument();
     });
 
+    it("renders filtered empty state when caller filters are active", () => {
+      render(
+        <SwimLaneBoard
+          issues={[]}
+          groupBy="assignee"
+          columns={defaultColumns}
+          hasFiltersActive
+        />,
+      );
+
+      expect(screen.getByTestId("empty-workspace-board")).toBeInTheDocument();
+      expect(
+        screen.getByRole("heading", { name: "No issues match your filters" }),
+      ).toBeInTheDocument();
+    });
+
     it("handles issues appearing in multiple label lanes", () => {
       const issues = [
         createMockIssue({

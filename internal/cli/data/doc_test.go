@@ -4,7 +4,7 @@ import "testing"
 
 // TestCommandsShape asserts the exported Commands() contract that main.go
 // depends on: returns exactly one top-level command (`data`) whose child
-// set matches the documented 10 sub-commands.
+// set matches the documented 11 sub-commands.
 func TestCommandsShape(t *testing.T) {
 	t.Parallel()
 	cmds := Commands()
@@ -16,6 +16,7 @@ func TestCommandsShape(t *testing.T) {
 		t.Errorf("Commands()[0].Use = %q, want %q", root.Use, "data")
 	}
 	want := map[string]bool{
+		"create":  false,
 		"show":    false,
 		"list":    false,
 		"ready":   false,
