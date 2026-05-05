@@ -16,7 +16,7 @@ import styles from "./CreateIssueModal.module.css";
 export interface CreateIssueModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSuccess: (issue: Issue) => void;
+  onSuccess: (issue: Issue) => void | Promise<void>;
 }
 
 const ISSUE_TYPES: { value: IssueType; label: string }[] = [
@@ -125,7 +125,8 @@ export function CreateIssueModal({
       try {
         const issue = await createIssue(workspaceId, req);
         if (!mountedRef.current) return;
-        onSuccess(issue);
+        await onSuccess(issue);
+        if (!mountedRef.current) return;
         onClose();
       } catch (err: unknown) {
         if (!mountedRef.current) return;
@@ -244,7 +245,7 @@ export function CreateIssueModal({
             </div>
           </div>
 
-          {showRepoSelector && (
+          {(showRepoSelector || showSingleRepo) && (
             <div className={styles.fieldGroup}>
               <label className={styles.label} htmlFor="issue-source-repo">
                 Repo
@@ -254,31 +255,10 @@ export function CreateIssueModal({
                 className={styles.select}
                 value={sourceRepo}
                 onChange={(e) => setSourceRepo(e.target.value)}
-                disabled={isSubmitting}
+                disabled={isSubmitting || showSingleRepo}
                 data-testid="create-issue-source-repo"
               >
-                <option value="">Workspace</option>
-                {repoOptions.map((repo) => (
-                  <option key={repo.value} value={repo.value}>
-                    {repo.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
-
-          {showSingleRepo && (
-            <div className={styles.fieldGroup}>
-              <label className={styles.label} htmlFor="issue-source-repo">
-                Repo
-              </label>
-              <select
-                id="issue-source-repo"
-                className={styles.select}
-                value={sourceRepo}
-                disabled
-                data-testid="create-issue-source-repo"
-              >
+                {!showSingleRepo && <option value="">Workspace</option>}
                 {repoOptions.map((repo) => (
                   <option key={repo.value} value={repo.value}>
                     {repo.label}

@@ -753,7 +753,7 @@ describe("useWorkspaceContext", () => {
       expect(result.current.isMultiRepo).toBe(false);
     });
 
-    it("is true when 1 repo", async () => {
+    it("is false when 1 repo", async () => {
       setupMockWorkspaceApi({ repos: [createMockRepo({ name: "api" })] });
 
       const { result } = renderHook(() => useWorkspaceContext(), {
@@ -762,7 +762,7 @@ describe("useWorkspaceContext", () => {
 
       await flushPromises();
 
-      expect(result.current.isMultiRepo).toBe(true);
+      expect(result.current.isMultiRepo).toBe(false);
     });
 
     it("is true when 2+ repos", async () => {

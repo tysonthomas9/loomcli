@@ -280,6 +280,68 @@ describe("CreateIssueModal", () => {
       expect(onClose).toHaveBeenCalledTimes(1);
     });
 
+    it("waits for async onSuccess before closing", async () => {
+      mockCreateIssue.mockResolvedValue(MOCK_ISSUE);
+      let resolveSuccess!: () => void;
+      onSuccess.mockImplementation(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveSuccess = resolve;
+          }),
+      );
+
+      render(
+        <CreateIssueModal
+          isOpen={true}
+          onClose={onClose}
+          onSuccess={onSuccess}
+        />,
+      );
+
+      fireEvent.change(screen.getByTestId("create-issue-title"), {
+        target: { value: "Test issue" },
+      });
+      fireEvent.click(screen.getByTestId("create-issue-submit"));
+
+      await waitFor(() => {
+        expect(onSuccess).toHaveBeenCalledWith(MOCK_ISSUE);
+      });
+      expect(onClose).not.toHaveBeenCalled();
+
+      await act(async () => {
+        resolveSuccess();
+      });
+
+      await waitFor(() => {
+        expect(onClose).toHaveBeenCalledTimes(1);
+      });
+    });
+
+    it("surfaces async onSuccess failures without closing", async () => {
+      mockCreateIssue.mockResolvedValue(MOCK_ISSUE);
+      onSuccess.mockRejectedValue(new Error("Refresh failed"));
+
+      render(
+        <CreateIssueModal
+          isOpen={true}
+          onClose={onClose}
+          onSuccess={onSuccess}
+        />,
+      );
+
+      fireEvent.change(screen.getByTestId("create-issue-title"), {
+        target: { value: "Test issue" },
+      });
+      fireEvent.click(screen.getByTestId("create-issue-submit"));
+
+      await waitFor(() => {
+        expect(screen.getByTestId("create-issue-error")).toHaveTextContent(
+          "Refresh failed",
+        );
+      });
+      expect(onClose).not.toHaveBeenCalled();
+    });
+
     it("displays error message when createIssue fails", async () => {
       mockCreateIssue.mockRejectedValue(new Error("Network error"));
 

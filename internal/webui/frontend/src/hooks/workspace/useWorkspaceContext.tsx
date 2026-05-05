@@ -303,7 +303,7 @@ export function WorkspaceProvider({
   const repos = workspace?.repos ?? EMPTY_REPOS;
   const groups = workspace?.groups ?? EMPTY_GROUPS;
   const agents = workspace?.agents ?? EMPTY_AGENTS;
-  const isMultiRepo = repos.length >= 1;
+  const isMultiRepo = repos.length > 1;
 
   const getRepoByName = useCallback(
     (name: string): RepoInfo | undefined => repos.find((r) => r.name === name),

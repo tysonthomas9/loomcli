@@ -139,6 +139,7 @@ function App() {
     );
     return activeWorkspace?.backend?.trim() || "codex";
   }, [workspace?.workspaces, workspaceId, activeWorkspaceName]);
+  const hasMultipleWorkspaces = (workspace?.workspaces?.length ?? 0) > 1;
 
   // Convert Set<string> to string[] for components that expect arrays
   const selectedRepoNamesArray = useMemo(
@@ -202,14 +203,13 @@ function App() {
   );
 
   // Drive issue fetching based on active view mode, workspace, and source repos
-  const issueMode =
-    activeView === "graph"
-      ? "graph"
-      : activeView === "kanban" ||
-          activeView === "table" ||
-          activeView === "issue-detail"
-        ? "kanban"
-        : ("ready" as const);
+  const issueModeByView: Record<string, "graph" | "kanban"> = {
+    graph: "graph",
+    kanban: "kanban",
+    table: "kanban",
+    "issue-detail": "kanban",
+  };
+  const issueMode = issueModeByView[activeView] ?? ("ready" as const);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -952,7 +952,7 @@ function App() {
     <KeyboardShortcutProvider
       onViewChange={handleNavChange}
       onSearchFocus={handleSearchFocus}
-      {...(isMultiRepo && {
+      {...(hasMultipleWorkspaces && {
         onWorkspaceSwitcher: handleWorkspaceSwitcherToggle,
         onWorkspacePositionalSwitch: handleWorkspacePositionalSwitch,
       })}
@@ -1052,7 +1052,7 @@ function App() {
         </AppLayout>
       </SearchTermProvider>
       <KeyboardCheatsheet />
-      {isMultiRepo && (
+      {hasMultipleWorkspaces && (
         <WorkspaceSwitcher
           isOpen={isWorkspaceSwitcherOpen}
           workspaces={workspace?.workspaces ?? []}
