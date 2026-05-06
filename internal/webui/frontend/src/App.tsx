@@ -476,6 +476,40 @@ function App() {
     else if (activeView !== "issue-detail") clearIssue();
   }, [selectedIssueId]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Keep the open detail panel in sync with live issue-list mutations.
+  // The panel fetches full issue details, while SSE updates land in issuesMap.
+  useEffect(() => {
+    if (!issueDetails) return;
+    const latestIssue = issuesMap.get(issueDetails.id);
+    if (!latestIssue) return;
+
+    const latestUpdatedAt = latestIssue.updated_at
+      ? Date.parse(latestIssue.updated_at)
+      : NaN;
+    const detailUpdatedAt = issueDetails.updated_at
+      ? Date.parse(issueDetails.updated_at)
+      : NaN;
+    if (
+      !Number.isNaN(latestUpdatedAt) &&
+      !Number.isNaN(detailUpdatedAt) &&
+      latestUpdatedAt < detailUpdatedAt
+    ) {
+      return;
+    }
+
+    if (
+      latestIssue.title !== issueDetails.title ||
+      latestIssue.status !== issueDetails.status ||
+      latestIssue.priority !== issueDetails.priority ||
+      latestIssue.issue_type !== issueDetails.issue_type ||
+      latestIssue.assignee !== issueDetails.assignee ||
+      latestIssue.owner !== issueDetails.owner ||
+      latestIssue.updated_at !== issueDetails.updated_at
+    ) {
+      updateIssueDetails(latestIssue);
+    }
+  }, [issueDetails, issuesMap, updateIssueDetails]);
+
   // Deep-link error: toast + navigate away when a deep-linked issue fails to load
   useEffect(() => {
     if (!detailError || activeView !== "issue-detail" || !selectedIssueId)
@@ -893,6 +927,7 @@ function App() {
       <button
         className={styles.newIssueButton}
         onClick={() => setShowCreateIssue(true)}
+        aria-label="New Issue"
         data-testid="new-issue-button"
       >
         + New Issue

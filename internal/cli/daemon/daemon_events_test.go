@@ -84,3 +84,19 @@ func TestDaemon_NewDaemon_NilBusDefaultsToNop(t *testing.T) {
 		t.Errorf("expected NopBus, got %T", daemon.sup.EventBus)
 	}
 }
+
+func TestDaemon_NewDaemon_PrecomputesAgentIPCSocketPath(t *testing.T) {
+	tmpDir, wtDir := setupTestWorktree(t, "falcon")
+	agents := []AgentEntry{{Worktree: wtDir, Role: "plan"}}
+	config := makeDaemonConfig(agents, nil)
+
+	daemon, err := NewDaemon(config, tmpDir, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("NewDaemon() error = %v", err)
+	}
+
+	want := resolveAgentIPCSocketPath(tmpDir, config.Daemon.PIDFile)
+	if daemon.sup.IpcSocketPath != want {
+		t.Fatalf("IpcSocketPath = %q, want %q before daemon.Start", daemon.sup.IpcSocketPath, want)
+	}
+}

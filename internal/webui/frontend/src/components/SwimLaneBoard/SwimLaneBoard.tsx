@@ -437,6 +437,11 @@ function SwimLaneBoardContent({
             isCollapsed: isLaneCollapsed(lane.id),
             onToggleCollapse: () => toggleLaneCollapse(lane.id),
             ...(onIssueClick !== undefined && { onIssueClick }),
+            ...(lane.groupIssue !== undefined &&
+              onIssueClick !== undefined && {
+                headerIssue: lane.groupIssue,
+                onHeaderIssueClick: onIssueClick,
+              }),
             ...(blockedIssues !== undefined && { blockedIssues }),
             ...(showBlocked !== undefined && { showBlocked }),
             ...(cardLimit !== undefined && { cardLimit }),

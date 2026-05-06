@@ -179,21 +179,20 @@ export default defineConfig(({ mode }) => ({
   preview: {
     port: 3000,
     strictPort: true,
-    // Proxy API calls and WebSocket traffic to the Go server during e2e tests.
-    // Disabled during Playwright unit tests so page.route() mocks can intercept requests.
-    proxy: process.env.PLAYWRIGHT_TEST
-      ? undefined
-      : {
-          "/api": {
-            target: process.env.E2E_API_URL || "http://localhost:8080",
-            changeOrigin: true,
-            ws: true,
-          },
-          "/health": {
-            target: process.env.E2E_API_URL || "http://localhost:8080",
-            changeOrigin: true,
-          },
-        },
+    // Vite preview is used only for real integration tests, where the built
+    // frontend must talk to the Go server. Keep this proxy enabled even when
+    // Playwright is the parent process.
+    proxy: {
+      "/api": {
+        target: process.env.E2E_API_URL || "http://localhost:8080",
+        changeOrigin: true,
+        ws: true,
+      },
+      "/health": {
+        target: process.env.E2E_API_URL || "http://localhost:8080",
+        changeOrigin: true,
+      },
+    },
   },
 
   test: {

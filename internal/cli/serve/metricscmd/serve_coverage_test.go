@@ -5,10 +5,14 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli/clitest"
 	"github.com/tysonthomas9/loomcli/internal/cli/monitor"
 	"github.com/tysonthomas9/loomcli/internal/domain"
@@ -64,9 +68,19 @@ func TestGroupAgentsByWorkspace_AllSameWorkspace(t *testing.T) {
 
 func TestHandleAgents_UsesStoreAgentsAsSourceOfTruth(t *testing.T) {
 	t.Setenv("LOOM_WORKSPACE", "WS1")
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
 	ctx := context.Background()
 	st := memstore.New()
+	wsRoot := t.TempDir()
 	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS1", Name: "Test"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Repos().Create(ctx, store.RepoCreate{
+		WorkspaceKey:  "WS1",
+		Name:          "repo-a",
+		DefaultBranch: "main",
+		Remote:        "origin",
+	}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := st.Agents().Create(ctx, store.AgentCreate{
@@ -89,11 +103,27 @@ func TestHandleAgents_UsesStoreAgentsAsSourceOfTruth(t *testing.T) {
 	if _, err := st.Agents().Update(ctx, "WS1", "falcon", store.AgentUpdate{State: &active}); err != nil {
 		t.Fatal(err)
 	}
+	falconWorktree := filepath.Join(wsRoot, "worktrees", "repo-a", "falcon")
+	if err := runGitForMetricsTest(t, falconWorktree, "init", "-b", "feature/falcon"); err != nil {
+		t.Fatalf("init falcon worktree: %v", err)
+	}
+	if err := bootstrap.SaveStateCache(&bootstrap.StateCache{
+		Version:       1,
+		LastWorkspace: "WS1",
+		Workspaces: map[string]bootstrap.WorkspaceLocalState{
+			"WS1": {
+				Path:  wsRoot,
+				Repos: map[string]string{"repo-a": filepath.Join(wsRoot, "repo-a")},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("save state cache: %v", err)
+	}
 
 	data := &monitor.MonitorData{
 		Timestamp: time.Unix(1, 0).UTC(),
 		Agents: []monitor.AgentStatus{
-			{Name: "falcon", Branch: "feature/falcon", Status: "ready", Ahead: 1},
+			{Name: "falcon", Branch: "runtime/stale", Status: "ready", Ahead: 1},
 			{Name: "stray", Branch: "feature/stray", Status: "ready", Workspace: "Test"},
 		},
 	}
@@ -119,7 +149,7 @@ func TestHandleAgents_UsesStoreAgentsAsSourceOfTruth(t *testing.T) {
 	if _, exists := byName["stray"]; exists {
 		t.Fatalf("unregistered runtime agent leaked into response: %+v", resp.Agents)
 	}
-	if got := byName["falcon"]; got.Role != "task" || got.Repo != "repo-a" || got.Workspace != "Test" || got.Status != "working" || got.Branch != "unknown" {
+	if got := byName["falcon"]; got.Role != "task" || got.Repo != "repo-a" || got.Workspace != "Test" || got.Status != "working" || got.Branch != "feature/falcon" {
 		t.Fatalf("falcon not sourced from store: %+v", got)
 	}
 	if got := byName["nova"]; got.Role != "plan" || got.Status != "idle" || got.Workspace != "Test" {
@@ -128,6 +158,22 @@ func TestHandleAgents_UsesStoreAgentsAsSourceOfTruth(t *testing.T) {
 	if len(resp.ByWorkspace["Test"]) != 2 {
 		t.Fatalf("by_workspace[Test] = %+v, want both agents", resp.ByWorkspace["Test"])
 	}
+}
+
+func runGitForMetricsTest(t *testing.T, dir string, args ...string) error {
+	t.Helper()
+	if len(args) > 0 && args[0] == "init" {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return err
+		}
+	}
+	cmd := exec.Command("git", args...) //nolint:norawexec // test helper shells out to git with fixed args from tests.
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Logf("git %v output: %s", args, out)
+	}
+	return err
 }
 
 func TestHandleAgents_EmptyWorkspaceDoesNotLeakRuntimeAgents(t *testing.T) {

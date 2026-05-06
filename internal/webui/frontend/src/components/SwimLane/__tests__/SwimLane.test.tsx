@@ -95,6 +95,37 @@ describe("SwimLane", () => {
       ).toBeInTheDocument();
     });
 
+    it("calls onHeaderIssueClick when clickable lane title is clicked", () => {
+      const handleHeaderIssueClick = vi.fn();
+      const epic = createMockIssue({
+        id: "epic-1",
+        title: "Epic: User Authentication",
+        issue_type: "epic",
+      });
+
+      renderWithDndContext(
+        <SwimLane
+          id="test-lane"
+          title="Epic: User Authentication"
+          issues={[]}
+          columns={defaultColumns}
+          headerIssue={epic}
+          onHeaderIssueClick={handleHeaderIssueClick}
+        />,
+      );
+
+      fireEvent.click(
+        screen.getByRole("button", {
+          name: "Open epic: Epic: User Authentication",
+        }),
+      );
+
+      expect(handleHeaderIssueClick).toHaveBeenCalledTimes(1);
+      expect(handleHeaderIssueClick).toHaveBeenCalledWith(
+        expect.objectContaining({ id: "epic-1" }),
+      );
+    });
+
     it("shows correct issue count", () => {
       const issues = createMockIssues([
         "open",

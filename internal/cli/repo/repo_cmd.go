@@ -30,8 +30,9 @@ var repoCmd = &cobra.Command{
 	Short: "Manage repos within the active workspace",
 	Long: `Manage repositories tied to the active workspace.
 
-The active workspace is resolved from LOOM_WORKSPACE env var, falling
-back to ~/.loom/state.json's last_workspace.`,
+The active workspace is resolved from the --workspace root flag or
+LOOM_WORKSPACE env var. Runtime repo commands do not use
+~/.loom/state.json's last_workspace.`,
 	GroupID: "workspace",
 }
 

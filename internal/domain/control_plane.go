@@ -172,6 +172,22 @@ type AgentLease struct {
 	UpdatedAt     time.Time        `json:"updated_at"`
 }
 
+type AgentOwnershipLease struct {
+	WorkspaceKey    string           `json:"workspace_key"`
+	AgentID         string           `json:"agent_id"`
+	LeaseID         string           `json:"lease_id"`
+	OwnerID         string           `json:"owner_id,omitempty"`
+	RuntimeProvider RuntimeProvider  `json:"runtime_provider,omitempty"`
+	NodeID          string           `json:"node_id,omitempty"`
+	Token           string           `json:"token,omitempty"`
+	FencingToken    int64            `json:"fencing_token"`
+	Status          AgentLeaseStatus `json:"status"`
+	ExpiresAt       time.Time        `json:"expires_at"`
+	LastHeartbeat   time.Time        `json:"last_heartbeat"`
+	CreatedAt       time.Time        `json:"created_at"`
+	UpdatedAt       time.Time        `json:"updated_at"`
+}
+
 type AgentCommandStatus string
 
 const (

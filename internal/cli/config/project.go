@@ -133,9 +133,9 @@ type DaemonConfig struct {
 	Agents  []AgentEntry          `yaml:"agents,omitempty"`
 }
 
-// LoadDaemonConfig returns the active workspace daemon configuration from
-// FleetDB. If no active workspace is selected, it returns built-in defaults so
-// first-run commands can still render help and diagnostics.
+// LoadDaemonConfig returns the explicit workspace daemon configuration from
+// FleetDB. If no workspace is set, it returns built-in defaults so first-run
+// commands can still render help and diagnostics.
 func LoadDaemonConfig(projectDir string) (*DaemonConfig, error) {
 	ctx := context.Background()
 	dc := newDefaultDaemonConfig()

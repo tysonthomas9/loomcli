@@ -117,6 +117,58 @@ describe("groupIssuesByField", () => {
       expect(ungroupedLane?.id).toBe("lane-epic-__ungrouped__");
     });
 
+    it("uses epic issues as lane metadata instead of ungrouped cards", () => {
+      const issues = [
+        createMockIssue({
+          id: "epic-1",
+          title: "Epic One",
+          issue_type: "epic",
+        }),
+        createMockIssue({
+          id: "task-1",
+          title: "Child Task",
+          parent: "epic-1",
+          parent_title: "Epic One",
+        }),
+        createMockIssue({
+          id: "task-2",
+          title: "Orphan Task",
+          parent: undefined,
+        }),
+      ];
+
+      const result = groupIssuesByField(issues, "epic");
+
+      const epicLane = result.find((lane) => lane.id === "lane-epic-epic-1");
+      expect(epicLane).toBeDefined();
+      expect(epicLane?.title).toBe("Epic One");
+      expect(epicLane?.groupIssue?.id).toBe("epic-1");
+      expect(epicLane?.issues.map((issue) => issue.id)).toEqual(["task-1"]);
+
+      const ungroupedLane = result.find((lane) => lane.title === "Ungrouped");
+      expect(ungroupedLane?.issues.map((issue) => issue.id)).toEqual([
+        "task-2",
+      ]);
+    });
+
+    it("creates an empty clickable lane for an epic without children", () => {
+      const issues = [
+        createMockIssue({
+          id: "epic-empty",
+          title: "Empty Epic",
+          issue_type: "epic",
+        }),
+      ];
+
+      const result = groupIssuesByField(issues, "epic");
+
+      expect(result).toHaveLength(1);
+      expect(result[0].id).toBe("lane-epic-epic-empty");
+      expect(result[0].title).toBe("Empty Epic");
+      expect(result[0].issues).toHaveLength(0);
+      expect(result[0].groupIssue?.id).toBe("epic-empty");
+    });
+
     it("uses parent ID as title when parent_title is not available", () => {
       const issues = [
         createMockIssue({ id: "issue-1", parent: "epic-id-123" }),

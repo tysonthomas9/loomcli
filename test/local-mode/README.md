@@ -34,13 +34,18 @@ What starts:
 - `fleet-db`: shared control plane and issue store.
 - `loom-local`: creates a local workspace, source repo, planner/coder
   worktrees, daemon profile, agent definitions, seeded tasks, `loom serve`,
-  and `loom daemon`.
+  and a workspace-daemon manager.
 - `ui-local`: Caddy serving `internal/webui/frontend/dist` from the host and
   proxying API traffic to `loom-local`.
 - `loom-backend-localdogfood`: deterministic external backend used by the
   two agents so the run does not require Codex credentials.
 - Codex variant: real `codex-planner` and `codex-coder` agent definitions
   using the same daemon/session path as the deterministic backend.
+
+The daemon manager keeps one workspace-scoped `loom daemon` running for every
+local workspace that has at least one `auto=true` agent assignment. It scans
+FleetDB periodically, so a workspace created later through the CLI or UI can
+start picking up work without restarting the stack.
 
 Expected dogfood flow:
 
@@ -53,9 +58,16 @@ Expected dogfood flow:
 Useful commands:
 
 ```sh
+make local-mode-verify
 make local-mode-logs
 make local-mode-down
 ```
+
+`make local-mode-verify` polls the running stack and asserts that the seeded
+planner/coder tasks completed the daemon path, recorded sessions, exposed
+transcripts, and produced the coder diff artifact. Override
+`LOCAL_MODE_API_URL`, `LOOM_WORKSPACE`, `LOOM_LOCAL_MODE_PLAN_TASK_ID`, and
+`LOOM_LOCAL_MODE_CODE_TASK_ID` when verifying a non-default stack.
 
 The stack uses Docker/Podman volumes, so sessions and workspace files survive
 container restarts until `make local-mode-down` removes the stack volumes.

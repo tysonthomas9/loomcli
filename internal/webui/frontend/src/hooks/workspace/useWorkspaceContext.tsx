@@ -18,10 +18,6 @@
  *     agent state, and the WebSocket tree — which live outside the keyed
  *     boundary — stay mounted. No terminal teardown+reconnect per switch.
  *
- *   - defaultWorkspaceName is a cross-workspace preference. Derived from
- *     workspace.default_workspace (server truth) with a ref-based optimistic
- *     override for in-flight user updates — no useState + effect-sync.
- *
  *   - setActiveWorkspace navigates with `flushSync: true` and preserves the
  *     `view=` query param. React Router v7 wraps navigate() in
  *     startTransition by default; during heavy terminal/WebSocket work the
@@ -52,10 +48,6 @@ import type {
   WorkspaceAgentInfo,
   WorkspaceData,
 } from "@/api/workspace";
-import {
-  setDefaultWorkspace as setDefaultWorkspaceApi,
-  clearDefaultWorkspace as clearDefaultWorkspaceApi,
-} from "@/api/workspace";
 import { setLastWorkspaceId } from "@/utils/scopedStorage";
 import { createWorkspaceStore } from "@/stores";
 import { buildWorkspaceSwitchUrl } from "@/utils/workspaceUrl";
@@ -66,31 +58,10 @@ import {
   PerWorkspacePrefsProvider,
 } from "./PerWorkspacePrefsProvider";
 
-// localStorage keys
-const LS_DEFAULT_WORKSPACE = "loom-default-workspace";
-
 // Stable empty arrays — avoid new [] references when workspace fields are empty
 const EMPTY_REPOS: RepoInfo[] = [];
 const EMPTY_GROUPS: string[] = [];
 const EMPTY_AGENTS: WorkspaceAgentInfo[] = [];
-
-// -------------------- localStorage helpers --------------------
-
-function lsGet(key: string): string | null {
-  try {
-    return localStorage.getItem(key);
-  } catch {
-    return null;
-  }
-}
-
-function lsSet(key: string, value: string): void {
-  try {
-    localStorage.setItem(key, value);
-  } catch {
-    // Private browsing or quota exceeded — silently ignore
-  }
-}
 
 // -------------------- Public value shape --------------------
 
@@ -203,74 +174,12 @@ export function WorkspaceProvider({
   const workspaceRef = useRef<WorkspaceData | null>(workspace);
   workspaceRef.current = workspace;
 
-  // Default workspace is derived from workspace.default_workspace (server
-  // ground truth) with a ref-based optimistic override for in-flight user
-  // updates. No useState + effect-sync dance; satisfies
-  // `rerender-derived-state-no-effect`.
-  const optimisticOverrideRef = useRef<{ value: string | null } | null>(null);
-  const [, setOverrideTick] = useState(0);
-  const bumpOverride = useCallback(() => {
-    setOverrideTick((t) => t + 1);
-  }, []);
+  const defaultWorkspaceName = null;
 
-  const defaultWorkspaceName = useMemo<string | null>(() => {
-    if (optimisticOverrideRef.current !== null) {
-      return optimisticOverrideRef.current.value;
-    }
-    const serverValue = workspace?.default_workspace;
-    if (serverValue && serverValue.length > 0) return serverValue;
-    return lsGet(LS_DEFAULT_WORKSPACE);
-    // The override is mutated outside React's tracking; bumpOverride() forces
-    // a re-render and we re-read the ref here. workspace?.default_workspace
-    // covers the store-driven refresh path.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workspace?.default_workspace]);
-
-  // Keep localStorage fast-path in sync with server truth. Write-only; we
-  // don't mirror into React state.
-  useEffect(() => {
-    const serverValue = workspace?.default_workspace;
-    if (serverValue !== undefined) {
-      lsSet(LS_DEFAULT_WORKSPACE, serverValue);
-    }
-  }, [workspace?.default_workspace]);
-
-  // setDefaultWorkspace reads server truth via workspaceRef so its identity
-  // is stable across renders (empty deps). Without this, every server-pushed
-  // change to default_workspace would create a new callback and cascade
-  // re-renders through outerValue.
   const setDefaultWorkspace = useCallback(
-    async (name: string | null) => {
-      const currentServer = workspaceRef.current?.default_workspace;
-      const previous = optimisticOverrideRef.current
-        ? optimisticOverrideRef.current.value
-        : currentServer || lsGet(LS_DEFAULT_WORKSPACE);
-
-      optimisticOverrideRef.current = { value: name };
-      lsSet(LS_DEFAULT_WORKSPACE, name ?? "");
-      bumpOverride();
-
-      try {
-        if (name) {
-          await setDefaultWorkspaceApi(name);
-        } else {
-          await clearDefaultWorkspaceApi();
-        }
-        // Clear override; store refetch will bring fresh server truth.
-        optimisticOverrideRef.current = null;
-        bumpOverride();
-        store.getState().refetch();
-      } catch (err) {
-        optimisticOverrideRef.current = { value: previous };
-        lsSet(LS_DEFAULT_WORKSPACE, previous ?? "");
-        bumpOverride();
-        throw err;
-      }
+    async (_name: string | null) => {
+      throw new Error("Default workspace selection has been removed");
     },
-    // workspaceRef is stable; store is stable for provider lifetime; bumpOverride
-    // is stable (empty deps). Empty dep array gives setDefaultWorkspace a
-    // permanent identity.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   );
 

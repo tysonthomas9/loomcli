@@ -55,6 +55,17 @@ Follow logs:
 make local-mode-logs
 ```
 
+Verify the seeded daemon/agent/session flow from the host:
+
+```sh
+make local-mode-verify
+```
+
+The verifier polls the running stack until the planner task is in review with
+a design, the coder task is closed, both tasks have completed sessions and
+transcript entries, and the coder session exposes a diff containing
+`local-mode-agent-output.txt`.
+
 ## Prerequisites
 
 - Podman with Compose support, or `podman-compose`.
@@ -80,12 +91,12 @@ data.
 
 The Compose project is `loomcli-local-mode`.
 
-| Service | Responsibility | Host port |
-|---|---|---|
-| `redis` | FleetDB backing store for the dogfood stack. | none |
-| `fleet-db` | Shared issue store and control-plane API. Loom talks to this through the same FleetDB client used by distributed mode. | `8280` |
-| `loom-local` | Builds and runs `loom`, creates the `LOCALMODE` workspace, creates fixture repos and worktrees, registers planner/coder agent definitions, seeds tasks, starts `loom serve`, then runs `loom daemon`. | `8282` |
-| `ui-local` | Caddy serving `internal/webui/frontend/dist` and proxying API/WebSocket traffic to `loom-local`. | `8283` |
+| Service      | Responsibility                                                                                                                                                                                        | Host port |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
+| `redis`      | FleetDB backing store for the dogfood stack.                                                                                                                                                          | none      |
+| `fleet-db`   | Shared issue store and control-plane API. Loom talks to this through the same FleetDB client used by distributed mode.                                                                                | `8280`    |
+| `loom-local` | Builds and runs `loom`, creates the `LOCALMODE` workspace, creates fixture repos and worktrees, registers planner/coder agent definitions, seeds tasks, starts `loom serve`, then runs `loom daemon`. | `8282`    |
+| `ui-local`   | Caddy serving `internal/webui/frontend/dist` and proxying API/WebSocket traffic to `loom-local`.                                                                                                      | `8283`    |
 
 The deterministic backend is not its own container. In `make local-mode-up`,
 `loom-local` uses the `loom-backend-localdogfood` command as the model

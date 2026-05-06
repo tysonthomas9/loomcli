@@ -35,8 +35,8 @@ type WorkspaceServiceConfig struct {
 	AddReposFn     WorkspaceAddReposFn // Store-backed repo attachment
 	DeleteFn       func(string) error  // Already wrapped with cleanup hooks
 	JobStore       JobStore            // For async creation; nil = async unavailable
-	SetDefaultFn   func(string) error  // nil = feature disabled
-	ClearDefaultFn func() error        // nil = feature disabled
+	SetDefaultFn   func(string) error  // Deprecated compatibility hook; default workspace selection is disabled.
+	ClearDefaultFn func() error        // Deprecated compatibility hook; default workspace selection is disabled.
 }
 
 type workspaceServiceImpl struct {
@@ -161,7 +161,6 @@ func (s *workspaceServiceImpl) ListWorkspaces(ctx context.Context) ([]WorkspaceL
 		wsList, err := s.store.Workspaces().List(ctx)
 		if err == nil {
 			activeKey, _ := bootstrap.ResolveActiveWorkspaceKey(ctx, s.store.Workspaces())
-			defaultKey := storeadapter.DefaultWorkspaceKey()
 			items := make([]WorkspaceListItem, 0, len(wsList))
 			for _, ws := range wsList {
 				item := WorkspaceListItem{
@@ -169,7 +168,7 @@ func (s *workspaceServiceImpl) ListWorkspaces(ctx context.Context) ([]WorkspaceL
 					Name:      ws.Name,
 					Path:      storeadapter.ResolveWorkspacePath(ws.Key),
 					Active:    ws.Key == activeKey,
-					IsDefault: ws.Key == defaultKey,
+					IsDefault: false,
 				}
 				if s.multiPool != nil {
 					if p := s.multiPool.PoolForWorkspace(ws.Key); p != nil {
@@ -437,42 +436,14 @@ func (s *workspaceServiceImpl) ReorderWorkspaces(_ context.Context, order []stri
 }
 
 func (s *workspaceServiceImpl) SetDefaultWorkspace(ctx context.Context, name string) (*ops.WorkspaceData, error) {
-	if s.store != nil {
-		ws, err := s.resolveStoreWorkspaceForDefault(ctx, name)
-		if err != nil {
-			return nil, err
-		}
-		if err := bootstrap.SetActiveWorkspaceKey(ws.Key); err != nil {
-			return nil, ErrInternal("failed to save default workspace", err)
-		}
-		data, buildErr := storeadapter.BuildWorkspaceDataForKey(ctx, s.store, ws.Key)
-		if buildErr != nil {
-			return nil, ErrInternal("failed to load workspace data", buildErr)
-		}
-		normalizeWorkspaceData(data)
-		return data, nil
-	}
-
-	return nil, ErrUnavailable("workspace store unavailable")
+	_ = ctx
+	_ = name
+	return nil, ErrUnavailable("default workspace selection has been removed; use explicit workspace routes, --workspace, or LOOM_WORKSPACE")
 }
 
 func (s *workspaceServiceImpl) ClearDefaultWorkspace(ctx context.Context) (*ops.WorkspaceData, error) {
-	if s.store != nil {
-		if err := bootstrap.ClearActiveWorkspaceKey(); err != nil {
-			return nil, ErrInternal("failed to clear default workspace", err)
-		}
-		data, err := storeadapter.BuildActiveWorkspaceData(ctx, s.store)
-		if err != nil {
-			return nil, ErrInternal("failed to load workspace data", err)
-		}
-		if data == nil {
-			data = &ops.WorkspaceData{}
-		}
-		normalizeWorkspaceData(data)
-		return data, nil
-	}
-
-	return nil, ErrUnavailable("workspace store unavailable")
+	_ = ctx
+	return nil, ErrUnavailable("default workspace selection has been removed; use explicit workspace routes, --workspace, or LOOM_WORKSPACE")
 }
 
 func (s *workspaceServiceImpl) resolveStoreWorkspaceForDefault(ctx context.Context, name string) (*domain.Workspace, *ServiceError) {

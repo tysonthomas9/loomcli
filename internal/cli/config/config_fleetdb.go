@@ -4,6 +4,7 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"strings"
 )
 
 // FleetDBServerConfig holds configuration for FleetDBServer.
@@ -38,14 +39,19 @@ func ResolveFleetDBConfig(daemon *DaemonSettings) (FleetDBServerConfig, bool) {
 		autoStart = parsed
 	}
 
-	// Apply defaults for unset values
-	if workspace == "" {
-		workspace = "default"
-	}
+	workspace = normalizeExplicitFleetWorkspace(workspace)
 
 	return FleetDBServerConfig{
 		RedisURL:  redisURL,
 		Workspace: workspace,
 		AutoStart: autoStart,
 	}, enabled
+}
+
+func normalizeExplicitFleetWorkspace(workspace string) string {
+	workspace = strings.TrimSpace(workspace)
+	if strings.EqualFold(workspace, "default") {
+		return "DEFAULT"
+	}
+	return workspace
 }

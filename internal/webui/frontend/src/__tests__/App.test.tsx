@@ -687,6 +687,7 @@ function createMockUseIssueDetailReturn(
     error: string | null;
     fetchIssue: ReturnType<typeof vi.fn>;
     clearIssue: ReturnType<typeof vi.fn>;
+    updateIssueDetails: ReturnType<typeof vi.fn>;
   }> = {},
 ) {
   return {
@@ -695,6 +696,7 @@ function createMockUseIssueDetailReturn(
     error: null,
     fetchIssue: vi.fn(),
     clearIssue: vi.fn(),
+    updateIssueDetails: vi.fn(),
     ...overrides,
   };
 }
@@ -1912,6 +1914,37 @@ describe("App", () => {
 
       // Panel should show the issue title
       expect(screen.getByText("Detail Issue Title")).toBeInTheDocument();
+    });
+
+    it("syncs loaded issue details from fresher live issue store updates", async () => {
+      const updateIssueDetails = vi.fn();
+      const liveIssue = createMockIssue({
+        id: "issue-1",
+        title: "Live Detail Issue",
+        status: "in_progress",
+        updated_at: "2024-01-01T00:01:00Z",
+      });
+      mockStoreState = createMockUseIssuesReturn({ issues: [liveIssue] });
+      vi.mocked(useIssueDetail).mockReturnValue(
+        createMockUseIssueDetailReturn({
+          issueDetails: {
+            id: "issue-1",
+            title: "Live Detail Issue",
+            priority: 2,
+            status: "open",
+            issue_type: "task",
+            created_at: "2024-01-01T00:00:00Z",
+            updated_at: "2024-01-01T00:00:00Z",
+          },
+          updateIssueDetails,
+        }),
+      );
+
+      render(<App />);
+
+      await waitFor(() => {
+        expect(updateIssueDetails).toHaveBeenCalledWith(liveIssue);
+      });
     });
 
     it("passes error state to IssueDetailPanel when fetch fails", () => {

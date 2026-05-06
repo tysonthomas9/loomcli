@@ -55,9 +55,10 @@ func SignalContext() (context.Context, context.CancelFunc) {
 	return signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 }
 
-// ActiveWorkspace resolves the active workspace key (LOOM_WORKSPACE env
-// > state cache) and verifies it exists in the store. Returns an
-// actionable error on any failure path.
+// ActiveWorkspace resolves the explicit active workspace key
+// (LOOM_WORKSPACE / --workspace) and verifies it exists in the store.
+// It intentionally does not consult state.json's last_workspace because
+// runtime commands must not silently cross workspace boundaries.
 func ActiveWorkspace(ctx context.Context, s store.Store) (string, error) {
 	return bootstrap.ResolveActiveWorkspaceKey(ctx, s.Workspaces())
 }
@@ -94,10 +95,8 @@ func WithStore(fn func(ctx context.Context, h *bootstrap.StoreHandle) error) err
 	return fn(ctx, h)
 }
 
-// WithActiveWorkspace opens a Store, resolves the active workspace key
-// (LOOM_WORKSPACE env > state cache), and runs fn with both. Most
-// noun-verb subcommands operate inside an implicit workspace and want
-// this exact composition.
+// WithActiveWorkspace opens a Store, resolves the explicit active
+// workspace key, and runs fn with both.
 func WithActiveWorkspace(fn func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error) error {
 	return WithStore(func(ctx context.Context, h *bootstrap.StoreHandle) error {
 		ws, err := ActiveWorkspace(ctx, h.Store)

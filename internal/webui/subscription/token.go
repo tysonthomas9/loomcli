@@ -12,8 +12,19 @@ import (
 // HandleSSEToken creates an HTTP handler that exchanges a valid JWT for a
 // short-lived opaque SSE token. The JWT is validated by ExtAuth middleware
 // upstream; this handler extracts UserIdentity from the request context.
+//
+// When store is nil, SSE token auth is disabled. The route still returns a
+// successful disabled response so browser clients do not treat open mode as a
+// missing static/API resource.
 func HandleSSEToken(store *realtime.TokenStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+
+		if store == nil {
+			handler.WriteJSON(w, http.StatusOK, map[string]bool{"disabled": true})
+			return
+		}
+
 		identity, ok := middleware.UserIdentityFromContext(r.Context())
 		if !ok || identity.UserID == "" {
 			handler.RespondError(w, http.StatusUnauthorized, "authentication required")
@@ -29,7 +40,6 @@ func HandleSSEToken(store *realtime.TokenStore) http.HandlerFunc {
 			return
 		}
 
-		w.Header().Set("Cache-Control", "no-store")
 		handler.WriteJSON(w, http.StatusOK, map[string]string{"token": token})
 	}
 }

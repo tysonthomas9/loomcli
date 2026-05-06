@@ -102,6 +102,29 @@ func TestBackendMutationToPayload_TimestampNonUTC(t *testing.T) {
 	}
 }
 
+func TestMutationPayloadPreservesSubsecondTimestamp(t *testing.T) {
+	ts := time.Date(2026, 4, 25, 10, 30, 45, 987654321, time.UTC)
+	want := "2026-04-25T10:30:45.987654321Z"
+
+	backendPayload := BackendMutationToPayload(backend.MutationData{
+		Type:      "status",
+		IssueID:   "loom-1",
+		Timestamp: ts,
+	}, "ws-1")
+	if backendPayload.Timestamp != want {
+		t.Errorf("backend timestamp = %q, want %q", backendPayload.Timestamp, want)
+	}
+
+	rpcPayload := RPCMutationToPayload(rpc.MutationEvent{
+		Type:      "status",
+		IssueID:   "loom-1",
+		Timestamp: ts,
+	})
+	if rpcPayload.Timestamp != want {
+		t.Errorf("rpc timestamp = %q, want %q", rpcPayload.Timestamp, want)
+	}
+}
+
 // TestBackendMutationToPayload_EmptyOptionalFields verifies that empty
 // optional fields stay empty so omitempty produces minimal JSON, matching
 // what RPCMutationToPayload produces for a minimal event.

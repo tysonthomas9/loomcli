@@ -87,9 +87,9 @@ func TestDeleteWorkspace_StoreBackedUsesWorkspaceKey(t *testing.T) {
 	}
 }
 
-func TestListWorkspaces_StoreBackedMarksActiveAndDefault(t *testing.T) {
+func TestListWorkspaces_StoreBackedMarksActiveWithoutDefault(t *testing.T) {
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
-	t.Setenv("LOOM_WORKSPACE", "")
+	t.Setenv("LOOM_WORKSPACE", "BETA")
 
 	ctx := context.Background()
 	st := memstore.New()
@@ -99,10 +99,6 @@ func TestListWorkspaces_StoreBackedMarksActiveAndDefault(t *testing.T) {
 	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "BETA", Name: "Beta Project"}); err != nil {
 		t.Fatalf("create beta: %v", err)
 	}
-	if err := bootstrap.SetActiveWorkspaceKey("BETA"); err != nil {
-		t.Fatalf("set active workspace: %v", err)
-	}
-
 	svc := NewWorkspaceService(WorkspaceServiceConfig{
 		Store: st,
 	})
@@ -119,8 +115,8 @@ func TestListWorkspaces_StoreBackedMarksActiveAndDefault(t *testing.T) {
 			if !item.Active {
 				t.Fatalf("BETA should be active: %+v", item)
 			}
-			if !item.IsDefault {
-				t.Fatalf("BETA should be default: %+v", item)
+			if item.IsDefault {
+				t.Fatalf("BETA should not be marked default: %+v", item)
 			}
 		}
 	}
@@ -265,9 +261,8 @@ func TestPatchWorkspaceBackend_StoreBackedWritesDaemonProfile(t *testing.T) {
 	}
 }
 
-func TestSetDefaultWorkspace_StoreBackedResolvesNameAndReturnsStoreData(t *testing.T) {
+func TestSetDefaultWorkspace_Removed(t *testing.T) {
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
-	t.Setenv("LOOM_WORKSPACE", "")
 
 	ctx := context.Background()
 	st := memstore.New()
@@ -275,67 +270,35 @@ func TestSetDefaultWorkspace_StoreBackedResolvesNameAndReturnsStoreData(t *testi
 		t.Fatalf("create alpha: %v", err)
 	}
 
-	svc := NewWorkspaceService(WorkspaceServiceConfig{
-		Store: st,
-		SetDefaultFn: func(string) error {
-			t.Fatal("store-backed set default should not call old SetDefaultFn")
-			return nil
-		},
-	})
+	svc := NewWorkspaceService(WorkspaceServiceConfig{Store: st})
 
 	data, err := svc.SetDefaultWorkspace(ctx, "Alpha Project")
-	if err != nil {
-		t.Fatalf("SetDefaultWorkspace: %v", err)
+	if data != nil {
+		t.Fatalf("data = %+v, want nil", data)
 	}
-	if data.ID != "ALPHA" {
-		t.Fatalf("data.ID = %q, want ALPHA", data.ID)
-	}
-	if data.DefaultWorkspace != "Alpha Project" {
-		t.Fatalf("DefaultWorkspace = %q, want display name", data.DefaultWorkspace)
-	}
-	for _, ws := range data.Workspaces {
-		if ws.ID == "ALPHA" && !ws.IsDefault {
-			t.Fatalf("ALPHA summary should be default: %+v", ws)
-		}
+	var serr *ServiceError
+	if !errors.As(err, &serr) || serr.Kind != KindUnavailable {
+		t.Fatalf("SetDefaultWorkspace err = %v, want unavailable ServiceError", err)
 	}
 }
 
-func TestClearDefaultWorkspace_StoreBackedClearsStateCache(t *testing.T) {
+func TestClearDefaultWorkspace_Removed(t *testing.T) {
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
-	t.Setenv("LOOM_WORKSPACE", "")
 
 	ctx := context.Background()
 	st := memstore.New()
 	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "ALPHA", Name: "Alpha Project"}); err != nil {
 		t.Fatalf("create alpha: %v", err)
 	}
-	if err := bootstrap.SetActiveWorkspaceKey("ALPHA"); err != nil {
-		t.Fatalf("set active workspace: %v", err)
-	}
-
-	svc := NewWorkspaceService(WorkspaceServiceConfig{
-		Store: st,
-		ClearDefaultFn: func() error {
-			t.Fatal("store-backed clear default should not call old ClearDefaultFn")
-			return nil
-		},
-	})
+	svc := NewWorkspaceService(WorkspaceServiceConfig{Store: st})
 
 	data, err := svc.ClearDefaultWorkspace(ctx)
-	if err != nil {
-		t.Fatalf("ClearDefaultWorkspace: %v", err)
+	if data != nil {
+		t.Fatalf("data = %+v, want nil", data)
 	}
-	if data.DefaultWorkspace != "" {
-		t.Fatalf("DefaultWorkspace = %q, want empty", data.DefaultWorkspace)
-	}
-	items, err := svc.ListWorkspaces(ctx)
-	if err != nil {
-		t.Fatalf("ListWorkspaces: %v", err)
-	}
-	for _, item := range items {
-		if item.IsDefault {
-			t.Fatalf("no workspace should remain default after clear: %+v", item)
-		}
+	var serr *ServiceError
+	if !errors.As(err, &serr) || serr.Kind != KindUnavailable {
+		t.Fatalf("ClearDefaultWorkspace err = %v, want unavailable ServiceError", err)
 	}
 }
 

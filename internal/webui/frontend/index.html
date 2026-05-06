@@ -1,23 +1,29 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="dark light" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>Loom</title>
   </head>
   <body>
     <script>
       // Prevent flash of wrong theme before React hydrates
-      (function() {
+      (function () {
         try {
-          var t = localStorage.getItem('cortex:theme') || localStorage.getItem('theme-preference');
-          var theme = (t === 'light' || t === 'dark') ? t
-            : window.matchMedia('(prefers-color-scheme: light)').matches ? 'light'
-            : 'dark';
+          var t =
+            localStorage.getItem("cortex:theme") ||
+            localStorage.getItem("theme-preference");
+          var theme =
+            t === "light" || t === "dark"
+              ? t
+              : window.matchMedia("(prefers-color-scheme: light)").matches
+                ? "light"
+                : "dark";
           document.documentElement.dataset.theme = theme;
           document.documentElement.style.colorScheme = theme;
-        } catch(e) {}
+        } catch (e) {}
       })();
     </script>
     <div id="root"></div>

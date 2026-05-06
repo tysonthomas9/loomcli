@@ -27,6 +27,58 @@ export function resolveApiKey(): string {
 
 const API_KEY = resolveApiKey();
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isRetryableResponse(response: Response, body: string): boolean {
+  if (response.status === 408 || response.status === 429) return true;
+  if (
+    response.status === 502 ||
+    response.status === 503 ||
+    response.status === 504
+  ) {
+    return true;
+  }
+  return (
+    response.status >= 500 &&
+    /rate limit|temporar|failed to load workspace data/i.test(body)
+  );
+}
+
+async function fetchWithRetry(
+  input: RequestInfo | URL,
+  init?: RequestInit,
+  options?: { attempts?: number; baseDelayMs?: number },
+): Promise<Response> {
+  const attempts = options?.attempts ?? 5;
+  const baseDelayMs = options?.baseDelayMs ?? 150;
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    try {
+      const response = await fetch(input, init);
+      if (attempt < attempts - 1 && !response.ok) {
+        const body = await response
+          .clone()
+          .text()
+          .catch(() => "");
+        if (isRetryableResponse(response, body)) {
+          await sleep(baseDelayMs * Math.pow(2, attempt));
+          continue;
+        }
+      }
+      return response;
+    } catch (err) {
+      lastError = err;
+      if (attempt >= attempts - 1) break;
+      await sleep(baseDelayMs * Math.pow(2, attempt));
+    }
+  }
+
+  throw lastError;
+}
+
 /**
  * Build headers with optional auth and extra headers.
  */
@@ -93,6 +145,7 @@ export interface WorkspaceSummary {
 export interface WorkspaceRepo {
   name: string;
   path: string;
+  source_repo_id?: string;
   default_branch: string;
   remote: string;
   groups: string[];
@@ -135,7 +188,7 @@ export interface WorkspaceListResponse {
  * List all workspaces via GET /api/workspaces.
  */
 export async function listWorkspaces(): Promise<WorkspaceListResponse> {
-  const response = await fetch(`${BASE_URL}/api/workspaces`, {
+  const response = await fetchWithRetry(`${BASE_URL}/api/workspaces`, {
     headers: authHeaders(),
   });
   if (!response.ok) {
@@ -149,7 +202,7 @@ export async function listWorkspaces(): Promise<WorkspaceListResponse> {
  * Get the active workspace topology via GET /api/workspaces/active.
  */
 export async function getActiveWorkspace(): Promise<WorkspaceResponse> {
-  const response = await fetch(`${BASE_URL}/api/workspaces/active`, {
+  const response = await fetchWithRetry(`${BASE_URL}/api/workspaces/active`, {
     headers: authHeaders(),
   });
   if (!response.ok) {
@@ -165,7 +218,7 @@ export async function getActiveWorkspace(): Promise<WorkspaceResponse> {
  * Get a specific workspace by ID via GET /api/workspaces/{id}.
  */
 export async function getWorkspaceById(id: string): Promise<WorkspaceResponse> {
-  const response = await fetch(
+  const response = await fetchWithRetry(
     `${BASE_URL}/api/workspaces/${encodeURIComponent(id)}`,
     {
       headers: authHeaders(),
@@ -192,7 +245,7 @@ export async function createTestWorkspace(
   options?: { type?: string; repos?: string[]; clone_urls?: string[] },
 ): Promise<Response> {
   try {
-    return await fetch(`${BASE_URL}/api/workspaces`, {
+    return await fetchWithRetry(`${BASE_URL}/api/workspaces`, {
       method: "POST",
       headers: authHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({
@@ -211,9 +264,12 @@ export async function createTestWorkspace(
     while (Date.now() < deadline) {
       await new Promise((r) => setTimeout(r, 2_000));
       try {
-        const active = await fetch(`${BASE_URL}/api/workspaces/active`, {
-          headers: authHeaders(),
-        });
+        const active = await fetchWithRetry(
+          `${BASE_URL}/api/workspaces/active`,
+          {
+            headers: authHeaders(),
+          },
+        );
         if (!active.ok) continue;
         const body = await active.json();
         const ws = body?.data?.workspaces?.find(
@@ -243,7 +299,7 @@ export async function createTestWorkspace(
  */
 export async function deleteTestWorkspace(id: string): Promise<void> {
   try {
-    const response = await fetch(
+    const response = await fetchWithRetry(
       `${BASE_URL}/api/workspaces/${encodeURIComponent(id)}`,
       {
         method: "DELETE",
@@ -262,7 +318,7 @@ export async function deleteTestWorkspace(id: string): Promise<void> {
  * Set the default workspace via PUT /api/workspaces/default.
  */
 export async function setDefaultWorkspace(name: string): Promise<Response> {
-  return fetch(`${BASE_URL}/api/workspaces/default`, {
+  return fetchWithRetry(`${BASE_URL}/api/workspaces/default`, {
     method: "PUT",
     headers: authHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ name }),
@@ -273,7 +329,7 @@ export async function setDefaultWorkspace(name: string): Promise<Response> {
  * Clear the default workspace via DELETE /api/workspaces/default.
  */
 export async function clearDefaultWorkspace(): Promise<Response> {
-  return fetch(`${BASE_URL}/api/workspaces/default`, {
+  return fetchWithRetry(`${BASE_URL}/api/workspaces/default`, {
     method: "DELETE",
     headers: authHeaders(),
   });
@@ -286,18 +342,21 @@ export async function renameWorkspace(
   id: string,
   newName: string,
 ): Promise<Response> {
-  return fetch(`${BASE_URL}/api/workspaces/${encodeURIComponent(id)}/name`, {
-    method: "PATCH",
-    headers: authHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify({ new_name: newName }),
-  });
+  return fetchWithRetry(
+    `${BASE_URL}/api/workspaces/${encodeURIComponent(id)}/name`,
+    {
+      method: "PATCH",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ new_name: newName }),
+    },
+  );
 }
 
 /**
  * Reorder workspaces via PUT /api/workspaces/order.
  */
 export async function reorderWorkspaces(order: string[]): Promise<Response> {
-  return fetch(`${BASE_URL}/api/workspaces/order`, {
+  return fetchWithRetry(`${BASE_URL}/api/workspaces/order`, {
     method: "PUT",
     headers: authHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ order }),
@@ -311,7 +370,7 @@ export async function updateWorkspaceBackend(
   id: string,
   backend: string,
 ): Promise<Response> {
-  return fetch(
+  return fetchWithRetry(
     `${BASE_URL}/api/workspaces/${encodeURIComponent(id)}/config/backend`,
     {
       method: "PATCH",
@@ -330,7 +389,7 @@ export async function updateWorkspaceBackend(
  * Calls GET /api/workspaces/active and returns the workspace ID.
  */
 export async function resolveWorkspaceId(): Promise<string> {
-  const response = await fetch(`${BASE_URL}/api/workspaces/active`, {
+  const response = await fetchWithRetry(`${BASE_URL}/api/workspaces/active`, {
     headers: authHeaders(),
   });
   if (!response.ok) {
@@ -390,7 +449,7 @@ export async function createTestIssueInWorkspace(
   options?: { priority?: number },
 ): Promise<string> {
   const sourceRepo = await resolveDefaultSourceRepo(workspaceId);
-  const response = await fetch(
+  const response = await fetchWithRetry(
     `${BASE_URL}/api/workspaces/${encodeURIComponent(workspaceId)}/issues`,
     {
       method: "POST",
@@ -427,7 +486,7 @@ export async function updateIssueStatusInWorkspace(
   id: string,
   status: string,
 ): Promise<void> {
-  const response = await fetch(
+  const response = await fetchWithRetry(
     `${BASE_URL}/api/workspaces/${encodeURIComponent(workspaceId)}/issues/${encodeURIComponent(id)}`,
     {
       method: "PATCH",
@@ -452,14 +511,14 @@ export async function closeTestIssueInWorkspace(
   id: string,
 ): Promise<void> {
   try {
-    const response = await fetch(
+    const response = await fetchWithRetry(
       `${BASE_URL}/api/workspaces/${encodeURIComponent(workspaceId)}/issues/${encodeURIComponent(id)}/close`,
       {
         method: "POST",
         headers: authHeaders(),
       },
     );
-    if (!response.ok && response.status !== 404) {
+    if (!response.ok && response.status !== 404 && response.status !== 409) {
       console.warn(
         `Failed to close issue ${id} in workspace ${workspaceId}: ${response.status}`,
       );
@@ -481,9 +540,13 @@ export async function createWsIssue(
     labels?: string[];
     assignee?: string;
     owner?: string;
+    sourceRepo?: string | null;
   },
 ): Promise<string> {
-  const sourceRepo = await resolveDefaultSourceRepo(wsId);
+  const sourceRepo =
+    options?.sourceRepo === undefined
+      ? await resolveDefaultSourceRepo(wsId)
+      : options.sourceRepo;
   const body: Record<string, unknown> = {
     title,
     issue_type: "task",
@@ -495,7 +558,7 @@ export async function createWsIssue(
   if (options?.assignee) body.assignee = options.assignee;
   if (options?.owner) body.owner = options.owner;
 
-  const response = await fetch(
+  const response = await fetchWithRetry(
     `${BASE_URL}/api/workspaces/${encodeURIComponent(wsId)}/issues`,
     {
       method: "POST",
@@ -526,7 +589,7 @@ export async function getWsIssue(
   wsId: string,
   id: string,
 ): Promise<Record<string, unknown>> {
-  const response = await fetch(
+  const response = await fetchWithRetry(
     `${BASE_URL}/api/workspaces/${encodeURIComponent(wsId)}/issues/${encodeURIComponent(id)}`,
     {
       headers: authHeaders(),
@@ -564,7 +627,7 @@ export async function moveWsIssue(
     error?: string;
   };
 }> {
-  const response = await fetch(
+  const response = await fetchWithRetry(
     `${BASE_URL}/api/workspaces/${encodeURIComponent(wsId)}/issues/${encodeURIComponent(id)}/move`,
     {
       method: "POST",
@@ -587,7 +650,7 @@ export async function patchWsIssue(
   id: string,
   body: Record<string, unknown>,
 ): Promise<void> {
-  const response = await fetch(
+  const response = await fetchWithRetry(
     `${BASE_URL}/api/workspaces/${encodeURIComponent(wsId)}/issues/${encodeURIComponent(id)}`,
     {
       method: "PATCH",
@@ -607,12 +670,9 @@ export async function patchWsIssue(
 /**
  * Delete an issue in a workspace. Swallows 404 errors for safe cleanup.
  */
-export async function deleteWsIssue(
-  wsId: string,
-  id: string,
-): Promise<void> {
+export async function deleteWsIssue(wsId: string, id: string): Promise<void> {
   try {
-    const response = await fetch(
+    const response = await fetchWithRetry(
       `${BASE_URL}/api/workspaces/${encodeURIComponent(wsId)}/issues/${encodeURIComponent(id)}`,
       {
         method: "DELETE",

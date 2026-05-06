@@ -620,7 +620,11 @@ func (b *FleetBackend) applyStatusUpdate(ctx context.Context, id string, params 
 	if err != nil {
 		return false, err
 	}
+	clearAssigneeOnOpen := target == "open" && params.Assignee == nil
 	if current != nil && current.Status == target {
+		if clearAssigneeOnOpen && current.Assignee != "" {
+			return false, b.assignIssue(ctx, id, "")
+		}
 		return target == "in_progress" && params.Assignee != nil, nil
 	}
 
@@ -632,7 +636,7 @@ func (b *FleetBackend) applyStatusUpdate(ctx context.Context, id string, params 
 		}
 		return true, b.execAsActor(ctx, "Update", "POST", "/issues/"+url.PathEscape(id)+"/claim", nil, actor)
 	case "open":
-		return false, b.transitionToOpen(ctx, id, current)
+		return false, b.transitionToOpen(ctx, id, current, clearAssigneeOnOpen)
 	case "closed":
 		_, err := b.exec(ctx, "Update", "POST", "/issues/"+url.PathEscape(id)+"/close", map[string]interface{}{})
 		return false, err
@@ -650,24 +654,32 @@ func (b *FleetBackend) applyStatusUpdate(ctx context.Context, id string, params 
 	}
 }
 
-func (b *FleetBackend) transitionToOpen(ctx context.Context, id string, current *backend.IssueDetailData) error {
+func (b *FleetBackend) transitionToOpen(ctx context.Context, id string, current *backend.IssueDetailData, clearAssignee bool) error {
 	if current == nil {
 		return backend.ErrNotFound("Update", "issue not found")
 	}
+	clearAfterTransition := clearAssignee && current.Assignee != "" && current.Status != "in_progress"
+	var err error
 	switch current.Status {
 	case "closed":
-		_, err := b.exec(ctx, "Update", "POST", "/issues/"+url.PathEscape(id)+"/reopen", map[string]interface{}{})
-		return err
+		_, err = b.exec(ctx, "Update", "POST", "/issues/"+url.PathEscape(id)+"/reopen", map[string]interface{}{})
 	case "deferred":
-		_, err := b.exec(ctx, "Update", "POST", "/issues/"+url.PathEscape(id)+"/undefer", nil)
-		return err
+		_, err = b.exec(ctx, "Update", "POST", "/issues/"+url.PathEscape(id)+"/undefer", nil)
 	case "in_progress":
 		if current.Assignee != "" {
 			return b.execAsActor(ctx, "Update", "POST", "/issues/"+url.PathEscape(id)+"/release", nil, current.Assignee)
 		}
+		_, err = b.exec(ctx, "Update", "PATCH", "/issues/"+url.PathEscape(id), map[string]interface{}{"status": "open"})
+	default:
+		_, err = b.exec(ctx, "Update", "PATCH", "/issues/"+url.PathEscape(id), map[string]interface{}{"status": "open"})
 	}
-	_, err := b.exec(ctx, "Update", "PATCH", "/issues/"+url.PathEscape(id), map[string]interface{}{"status": "open"})
-	return err
+	if err != nil {
+		return err
+	}
+	if clearAfterTransition {
+		return b.assignIssue(ctx, id, "")
+	}
+	return nil
 }
 
 func (b *FleetBackend) claimActor(assignee *string, current *backend.IssueDetailData) string {

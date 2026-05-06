@@ -1186,22 +1186,23 @@ paths:
     get:
       operationId: getSSEToken
       tags: [events]
-      summary: Get one-time SSE auth token (external auth mode only)
+      summary: Get one-time SSE auth token status
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
       responses:
         "200":
-          description: One-time token
+          description: One-time token in external auth mode, or disabled marker in open mode
           content:
             application/json:
               schema:
                 type: object
-                required: [token]
                 properties:
                   token:
                     type: string
-        "404":
-          description: SSE token exchange not available (not in external auth mode)
+                    description: One-time SSE auth token
+                  disabled:
+                    type: boolean
+                    description: True when SSE token exchange is disabled in open mode
 
   # ── Session History (Issue-Scoped) ──────────────────────────────────────
   /api/workspaces/{ws}/issues/{issueId}/sessions:

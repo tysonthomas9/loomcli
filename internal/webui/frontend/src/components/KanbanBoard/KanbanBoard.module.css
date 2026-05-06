@@ -10,6 +10,9 @@
   gap: 0;
   padding: 0;
   flex: 1;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
   min-height: 0; /* Allow flex item to shrink below content height */
   overflow-x: auto;
   overflow-y: hidden;
@@ -35,6 +38,7 @@
 @media (width <= 768px) {
   .board {
     -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
     scroll-snap-type: x proximity;
   }
 }

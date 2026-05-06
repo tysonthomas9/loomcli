@@ -1,15 +1,10 @@
 package cli
 
 import (
-	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
-	"net/http"
 	"os"
 	"sync"
-	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/backend/api"
@@ -134,8 +129,7 @@ func ResetDefaultIssueBackend() {
 
 // createAPIIssueBackend constructs an api.Backend for remote HTTP mode. It
 // resolves the server URL from --server / LOOM_SERVER_URL and the workspace
-// ID from --workspace / LOOM_WORKSPACE. If the workspace is not explicitly
-// set, it attempts auto-discovery via GET /api/workspaces/active.
+// ID from --workspace / LOOM_WORKSPACE.
 //
 // Returns an error if the server URL is missing or invalid, the workspace
 // cannot be resolved, or if http client construction fails. On success, the
@@ -167,11 +161,7 @@ func createAPIIssueBackend() (backend.IssueBackend, error) {
 		workspaceID = workspaceFlag
 	}
 	if workspaceID == "" {
-		resolved, err := discoverActiveWorkspace(httpCli, serverURL)
-		if err != nil {
-			return nil, fmt.Errorf("api backend workspace discovery: %w", err)
-		}
-		workspaceID = resolved
+		return nil, fmt.Errorf("api backend requires --workspace or LOOM_WORKSPACE")
 	}
 
 	ab, err := api.New(api.Config{
@@ -185,49 +175,4 @@ func createAPIIssueBackend() (backend.IssueBackend, error) {
 
 	slog.Info("api issue backend created", "url", serverURL, "workspace", workspaceID)
 	return ab, nil
-}
-
-// discoverActiveWorkspace queries GET /api/workspaces/active and returns the
-// active workspace ID. Returns an error if the server returns 404 (no
-// active workspace) or any non-2xx response.
-func discoverActiveWorkspace(client *http.Client, serverURL string) (string, error) {
-	// Bound discovery with a per-request deadline rather than mutating
-	// client.Timeout — the client is shared with the long-lived api.Backend
-	// and changing its fields post-construction would be both racy and would
-	// permanently cap every subsequent issue call at this discovery bound.
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, serverURL+"/api/workspaces/active", nil)
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == http.StatusNotFound {
-		return "", fmt.Errorf("no active workspace on server; specify --workspace <id>")
-	}
-	if resp.StatusCode >= 400 {
-		return "", fmt.Errorf("discover active workspace: HTTP %d", resp.StatusCode)
-	}
-
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err != nil {
-		return "", fmt.Errorf("read active workspace response: %w", err)
-	}
-	var ws struct {
-		ID string `json:"id"`
-	}
-	if err := json.Unmarshal(body, &ws); err != nil {
-		return "", fmt.Errorf("parse active workspace response: %w", err)
-	}
-	if ws.ID == "" {
-		return "", fmt.Errorf("server returned active workspace with empty id; specify --workspace <id>")
-	}
-	return ws.ID, nil
 }

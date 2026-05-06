@@ -4,6 +4,7 @@
 **Date:** 2026-05-04
 **Related:** `docs/product/README.md`,
 `docs/product/local-mode-product-spec.md`,
+`docs/product/daemon-agent-runtime-architecture.md`,
 `docs/product/agent-run-ux-spec.md`,
 `docs/product/session-artifact-contract.md`,
 `docs/design/agent-run-visibility-plan.md`,

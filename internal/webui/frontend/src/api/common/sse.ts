@@ -16,10 +16,13 @@ export async function fetchSseToken(
   workspaceId: string,
 ): Promise<SseTokenResult> {
   try {
-    const resp = await get<{ token: string }>(
+    const resp = await get<{ token?: string; disabled?: boolean }>(
       wsUrl(workspaceId, "/events/token"),
     );
-    return { kind: "token", token: resp.token };
+    if (resp.token) {
+      return { kind: "token", token: resp.token };
+    }
+    return { kind: "disabled" };
   } catch (err) {
     if (err instanceof ApiError && err.status === 404) {
       return { kind: "disabled" };

@@ -17,11 +17,22 @@ func TestResolveFleetDBConfig_Defaults(t *testing.T) {
 	if enabled {
 		t.Error("enabled should default to false")
 	}
-	if cfg.Workspace != "default" {
-		t.Errorf("Workspace = %q, want default", cfg.Workspace)
+	if cfg.Workspace != "" {
+		t.Errorf("Workspace = %q, want empty", cfg.Workspace)
 	}
 	if cfg.RedisURL != "" || cfg.AutoStart {
 		t.Errorf("unexpected FleetDB defaults: %+v", cfg)
+	}
+}
+
+func TestResolveFleetDBConfig_NormalizesDefaultWorkspace(t *testing.T) {
+	clearFleetDBEnv(t)
+	t.Setenv("LOOM_FLEETDB_WORKSPACE", " default ")
+
+	cfg, _ := ResolveFleetDBConfig(nil)
+
+	if cfg.Workspace != "DEFAULT" {
+		t.Errorf("Workspace = %q, want DEFAULT", cfg.Workspace)
 	}
 }
 

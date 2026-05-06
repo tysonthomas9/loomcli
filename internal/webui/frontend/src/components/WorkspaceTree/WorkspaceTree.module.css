@@ -60,12 +60,6 @@
   gap: 0.25rem;
 }
 
-/* Default workspace star indicator */
-.defaultStar {
-  color: var(--color-warning, #f59e0b);
-  font-size: 0.75rem;
-}
-
 .sectionCount {
   min-width: 20px;
   text-align: center;
@@ -459,12 +453,6 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-/* Default workspace star in entry name */
-.workspaceEntryName .defaultStar {
-  color: var(--color-warning, #f59e0b);
-  font-size: 0.625rem;
 }
 
 .workspaceEntryMeta {

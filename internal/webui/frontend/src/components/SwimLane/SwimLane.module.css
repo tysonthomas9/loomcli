@@ -64,6 +64,7 @@
 
 .laneTitle {
   flex: 1;
+  min-width: 0;
   margin: 0;
   font-size: var(--font-size-sm);
   font-weight: var(--font-weight-semibold);
@@ -72,6 +73,35 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.laneTitleButton {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  padding: var(--space-1) 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: inherit;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+
+.laneTitleButton:hover {
+  color: var(--color-primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.laneTitleButton:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
 }
 
 .laneCount {

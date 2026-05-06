@@ -4,6 +4,9 @@ import (
 	"errors"
 	"log/slog"
 	"testing"
+
+	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
+	"github.com/tysonthomas9/loomcli/internal/webui/subscription"
 )
 
 func TestReconcileStoreWorkspacesRegistersConfiguredWorkspaces(t *testing.T) {
@@ -57,5 +60,22 @@ func TestReconcileStoreWorkspacesIgnoresNilAndFailedList(t *testing.T) {
 	)
 	if ids := registry.WorkspaceIDs(); len(ids) != 0 {
 		t.Fatalf("WorkspaceIDs() after failed list = %#v, want none", ids)
+	}
+}
+
+func TestRegisterHooksRegistersFleetSubscriberForFleetDBClient(t *testing.T) {
+	registry := NewWorkspaceRegistry(slog.Default())
+	hub := realtime.NewHub()
+	multiSub := subscription.NewMultiWorkspaceSubscriber(hub, slog.Default())
+	t.Cleanup(multiSub.Stop)
+
+	registered := RegisterHooks(registry, HookConfig{
+		MultiSub: multiSub,
+		FleetURL: "http://fleet-db:8080",
+		Logger:   slog.Default(),
+	})
+
+	if registered.FleetSubscriber == nil {
+		t.Fatal("FleetSubscriber was nil; fleet-db clients need SSE mutation streaming even when FleetMode is false")
 	}
 }

@@ -1,6 +1,6 @@
 # Makefile for loomcli project
 
-.PHONY: all build build-frontend build-all test test-integration test-all test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui fleetdb-empty-up fleetdb-empty-down local-mode-up local-mode-codex-up local-mode-down local-mode-logs test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-e2e-api test-e2e-api-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-no-raw-exec check-no-beads-prod test-coverage test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness
+.PHONY: all build build-frontend build-all test test-integration test-all test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui fleetdb-empty-up fleetdb-empty-down local-mode-up local-mode-codex-up local-mode-down local-mode-logs local-mode-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-no-raw-exec check-no-beads-prod test-coverage test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness
 
 # Default target
 all: build
@@ -91,8 +91,8 @@ fleetdb-empty-down:
 	fi; \
 	$$compose -f test/fleetdb/docker-compose.empty.yml down -v --remove-orphans
 
-# Start the local-mode dogfood stack: fleet-db, loom serve, loom daemon, a
-# deterministic planner/coder backend, and the Web UI.
+# Start the local-mode dogfood stack: fleet-db, loom serve, workspace daemon
+# manager, a deterministic planner/coder backend, and the Web UI.
 local-mode-up:
 	@echo "Starting local-mode dogfood stack on http://localhost:$${LOCAL_MODE_UI_PORT:-8283}/ws/LOCALMODE/kanban..."
 	@set -e; \
@@ -160,6 +160,11 @@ local-mode-logs:
 	  exit 127; \
 	fi; \
 	$$compose -f test/local-mode/docker-compose.yml logs -f loom-local ui-local
+
+local-mode-verify:
+	@test/local-mode/verify-local-mode.sh
+
+test-local-mode-harness: local-mode-verify
 
 # Run the fleet-db distributed smoke stack: shared fleet-db/Redis, two loom
 # serve processes, two local supervisor heartbeat loops, and a one-shot smoke
@@ -279,6 +284,26 @@ test-e2e-api:
 test-e2e-api-local:
 	@echo "Running Playwright API e2e tests (local server)..."
 	@cd $(FRONTEND_DIR) && RUN_INTEGRATION_TESTS=1 LOOM_LOCAL_SERVER=1 npx playwright test --project=api
+
+# Run the real Playwright smoke suite: browser + API contracts against FleetDB-backed loom serve.
+test-e2e-real-smoke:
+	@echo "Running real Playwright smoke tests (self-contained)..."
+	@cd $(FRONTEND_DIR) && RUN_INTEGRATION_TESTS=1 npx playwright test --project=integration-smoke --project=api-smoke
+
+# Run the real Playwright smoke suite against an already-running loom serve/UI.
+test-e2e-real-smoke-local:
+	@echo "Running real Playwright smoke tests (local server)..."
+	@cd $(FRONTEND_DIR) && RUN_INTEGRATION_TESTS=1 LOOM_LOCAL_SERVER=1 npx playwright test --project=integration-smoke --project=api-smoke
+
+# Run the real Playwright regression suite: slower browser + API contracts.
+test-e2e-real-regression:
+	@echo "Running real Playwright regression tests (self-contained)..."
+	@cd $(FRONTEND_DIR) && RUN_INTEGRATION_TESTS=1 npx playwright test --project=integration-regression --project=api-regression
+
+# Run the real Playwright regression suite against an already-running loom serve/UI.
+test-e2e-real-regression-local:
+	@echo "Running real Playwright regression tests (local server)..."
+	@cd $(FRONTEND_DIR) && RUN_INTEGRATION_TESTS=1 LOOM_LOCAL_SERVER=1 npx playwright test --project=integration-regression --project=api-regression
 
 # Run Playwright integration e2e tests (self-contained, starts loom serve automatically)
 test-e2e-integration:
@@ -414,7 +439,7 @@ gate: check
 # Extended quality gate — gate + self-contained e2e tests
 gate-e2e: gate
 	@echo "=== E2E Gate ==="
-	@$(MAKE) test-e2e-api
+	@$(MAKE) test-e2e-real-smoke
 	@echo "=== E2E Gate PASSED ==="
 
 # Full quality gate — gate-e2e + Docker container tests
@@ -485,6 +510,10 @@ help:
 	@echo "  make test-distributed-smoke - Run fleet-db distributed compose smoke"
 	@echo "  make test-e2e-api      - Run Playwright API e2e tests (self-contained)"
 	@echo "  make test-e2e-api-local - Run Playwright API e2e tests (needs loom serve)"
+	@echo "  make test-e2e-real-smoke - Run real Playwright smoke tests (browser + API)"
+	@echo "  make test-e2e-real-smoke-local - Run real Playwright smoke tests (needs loom serve/UI)"
+	@echo "  make test-e2e-real-regression - Run real Playwright regression tests"
+	@echo "  make test-e2e-real-regression-local - Run real Playwright regression tests (needs loom serve/UI)"
 	@echo "  make test-e2e-integration - Run Playwright integration e2e tests (self-contained)"
 	@echo "  make test-e2e-integration-local - Run Playwright integration e2e tests (needs loom serve)"
 	@echo "  make test-e2e-integration-full - Run ALL integration e2e tests (cross-workspace + terminal regression)"

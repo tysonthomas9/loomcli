@@ -84,7 +84,10 @@ func (b *MutationBuffer) Stop() {
 	})
 }
 
-// GetSince returns mutations with timestamp after sinceMs (Unix milliseconds).
+// GetSince returns mutations with timestamp at or after sinceMs (Unix
+// milliseconds). The timestamp-only control socket cursor is inclusive to avoid
+// dropping multiple mutations that share the same millisecond; callers should
+// dedupe repeated mutations when reconnecting from a millisecond cursor.
 // Returns nil if the buffer is empty or no mutations match.
 func (b *MutationBuffer) GetSince(sinceMs int64) []backend.MutationData {
 	b.mu.RLock()
@@ -104,7 +107,7 @@ func (b *MutationBuffer) GetSince(sinceMs int64) []backend.MutationData {
 	}
 	for i := 0; i < b.count; i++ {
 		idx := (start + i) % b.capacity
-		if b.buf[idx].Timestamp.After(sinceTime) {
+		if !b.buf[idx].Timestamp.Before(sinceTime) {
 			result = append(result, b.buf[idx])
 		}
 	}

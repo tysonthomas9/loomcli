@@ -38,12 +38,16 @@ func TestFleetIssueWire_FieldDriftGuard(t *testing.T) {
 			wireKeys["repo_canonical"] = true
 			continue
 		}
+		if key == "parent_id" {
+			wireKeys["parent"] = true
+			continue
+		}
 		wireKeys[key] = true
 	}
 	canonical := map[string]bool{
 		"id": true, "title": true, "status": true, "priority": true,
 		"kind": true, "assignee": true, "owner": true, "labels": true,
-		"repo_canonical": true, "design": true, "description": true,
+		"repo_canonical": true, "parent": true, "design": true, "description": true,
 		"created_at": true, "created_by": true, "updated_at": true,
 		"due_at": true, "defer_until": true, "closed_at": true,
 		"close_reason": true,
@@ -87,6 +91,7 @@ func TestFleetIssueWire_RoundTrip(t *testing.T) {
 		Owner:       "owner@example.com",
 		Labels:      []string{"x", "y"},
 		Repo:        "repo",
+		ParentID:    "EPIC-1",
 		Design:      "design notes",
 		Description: "desc",
 		CreatedAt:   now,
@@ -97,20 +102,19 @@ func TestFleetIssueWire_RoundTrip(t *testing.T) {
 		ClosedAt:    &closed,
 		CloseReason: "fixed",
 	}
-	issue := wire.toIssue()
-	d := issueToData(&issue)
+	d := fleetIssueWithCountsWire{fleetIssueWire: wire}.toIssueData()
 	want := map[string]any{
 		"ID": "PARITY-1", "Title": "round-trip", "Status": "closed",
 		"Priority": 1, "IssueType": "bug",
 		"Assignee": "agent-a", "Owner": "owner@example.com",
-		"SourceRepo": "repo", "Design": "design notes",
+		"SourceRepo": "repo", "Parent": "EPIC-1", "Design": "design notes",
 		"CreatedBy": "creator", "CloseReason": "fixed",
 	}
 	got := map[string]any{
 		"ID": d.ID, "Title": d.Title, "Status": d.Status,
 		"Priority": d.Priority, "IssueType": d.IssueType,
 		"Assignee": d.Assignee, "Owner": d.Owner,
-		"SourceRepo": d.SourceRepo, "Design": d.Design,
+		"SourceRepo": d.SourceRepo, "Parent": d.Parent, "Design": d.Design,
 		"CreatedBy": d.CreatedBy, "CloseReason": d.CloseReason,
 	}
 	for k, v := range want {

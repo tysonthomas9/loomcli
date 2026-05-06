@@ -27,6 +27,8 @@ export interface LaneGroup {
   title: string;
   /** Issues in this lane */
   issues: Issue[];
+  /** Issue represented by the lane header, when the group is itself clickable */
+  groupIssue?: Issue;
 }
 
 /**
@@ -70,6 +72,10 @@ export function groupIssuesByField(
     ];
   }
 
+  if (groupBy === "epic") {
+    return groupIssuesByEpic(issues);
+  }
+
   const groupMap = new Map<string, Issue[]>();
 
   for (const issue of issues) {
@@ -92,6 +98,71 @@ export function groupIssuesByField(
       id: getLaneId(groupBy, key),
       title: getLaneTitle(groupBy, key, groupIssues),
       issues: groupIssues,
+    });
+  }
+
+  return lanes;
+}
+
+/**
+ * Group issues by epic while treating epic issues as lane headers, not cards.
+ */
+function groupIssuesByEpic(issues: Issue[]): LaneGroup[] {
+  const epicIssues = new Map<string, Issue>();
+  const childGroups = new Map<string, Issue[]>();
+  const parentTitles = new Map<string, string>();
+  const laneKeys: string[] = [];
+  const ungrouped: Issue[] = [];
+
+  const registerLaneKey = (key: string): void => {
+    if (!laneKeys.includes(key)) {
+      laneKeys.push(key);
+    }
+  };
+
+  for (const issue of issues) {
+    if (issue.issue_type === "epic") {
+      epicIssues.set(issue.id, issue);
+      registerLaneKey(issue.id);
+      continue;
+    }
+
+    const parent = issue.parent;
+    if (!parent) {
+      ungrouped.push(issue);
+      continue;
+    }
+
+    registerLaneKey(parent);
+    const existing = childGroups.get(parent);
+    if (existing) {
+      existing.push(issue);
+    } else {
+      childGroups.set(parent, [issue]);
+    }
+    if (issue.parent_title && !parentTitles.has(parent)) {
+      parentTitles.set(parent, issue.parent_title);
+    }
+  }
+
+  const lanes: LaneGroup[] = [];
+  for (const key of laneKeys) {
+    const groupIssue = epicIssues.get(key);
+    const groupIssues = childGroups.get(key) ?? [];
+    const title = groupIssue?.title ?? parentTitles.get(key) ?? key;
+    lanes.push({
+      id: getLaneId("epic", key),
+      title,
+      issues: groupIssues,
+      ...(groupIssue !== undefined && { groupIssue }),
+    });
+  }
+
+  if (ungrouped.length > 0) {
+    lanes.push({
+      id: getLaneId("epic", "__ungrouped__"),
+      title: "Ungrouped",
+      issues: ungrouped,
     });
   }
 

@@ -5,7 +5,7 @@
 /**
  * Unit tests for SortableWorkspaceEntry component.
  * Verifies drag handle, display/edit modes, keyboard shortcuts,
- * context menu, overflow button, and default star badge.
+ * context menu, and overflow button.
  */
 
 import { render, screen, fireEvent } from "@testing-library/react";
@@ -48,7 +48,6 @@ function defaultProps(
   return {
     ws: makeWorkspace(),
     isActive: false,
-    isDefault: false,
     isEditing: false,
     draftName: "",
     isSaving: false,
@@ -130,20 +129,6 @@ describe("SortableWorkspaceEntry", () => {
       expect(screen.queryByText("active")).not.toBeInTheDocument();
     });
 
-    it("shows default star when isDefault is true", () => {
-      render(<SortableWorkspaceEntry {...defaultProps({ isDefault: true })} />);
-
-      const star = screen.getByTitle("Default workspace");
-      expect(star).toBeInTheDocument();
-    });
-
-    it("does not show default star when isDefault is false", () => {
-      render(
-        <SortableWorkspaceEntry {...defaultProps({ isDefault: false })} />,
-      );
-
-      expect(screen.queryByTitle("Default workspace")).not.toBeInTheDocument();
-    });
   });
 
   describe("click handling", () => {

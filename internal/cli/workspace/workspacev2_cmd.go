@@ -37,9 +37,10 @@ Examples:
 
 var workspaceUseCmd = &cobra.Command{
 	Use:   "use <KEY>",
-	Short: "Set the active workspace for this user",
-	Long: `Persist KEY in ~/.loom/state.json so subsequent commands default
-to it. Override per-shell by exporting LOOM_WORKSPACE.`,
+	Short: "Remember the last selected workspace for UI convenience",
+	Long: `Persist KEY in ~/.loom/state.json as a UI selection hint.
+Runtime commands no longer use this as an implicit default; set
+LOOM_WORKSPACE or pass --workspace for command execution.`,
 	Args: cobra.ExactArgs(1),
 	RunE: runWorkspaceUse,
 }
@@ -83,7 +84,7 @@ func runWorkspaceAdd(_ *cobra.Command, args []string) error {
 			return fmt.Errorf("create workspace: %w", err)
 		}
 		if err := bootstrap.SetActiveWorkspaceKey(key); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: workspace created but state cache update failed (run 'loom workspace use %s' to retry): %v\n", key, err)
+			fmt.Fprintf(os.Stderr, "Warning: workspace created but selected-workspace hint update failed (run 'loom workspace use %s' to retry): %v\n", key, err)
 		}
 		fmt.Printf("Created workspace %s (mode=%s)\n", ws.Key, h.Mode())
 		return nil
@@ -100,10 +101,10 @@ func runWorkspaceUse(_ *cobra.Command, args []string) error {
 			return err
 		}
 		if err := bootstrap.SetActiveWorkspaceKey(key); err != nil {
-			return fmt.Errorf("save active workspace: %w", err)
+			return fmt.Errorf("save selected workspace: %w", err)
 		}
-		fmt.Printf("Active workspace: %s\n", key)
-		fmt.Printf("(override per-shell: export %s=%s)\n", bootstrap.EnvWorkspace, key)
+		fmt.Printf("Selected workspace: %s\n", key)
+		fmt.Printf("For runtime commands: export %s=%s\n", bootstrap.EnvWorkspace, key)
 		return nil
 	})
 }

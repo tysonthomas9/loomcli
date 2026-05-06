@@ -292,6 +292,85 @@ test.describe("SSE event handling", () => {
     expect(requestCount).toBeGreaterThanOrEqual(1);
   });
 
+  test("status mutation moves a kanban card without reload or refetch", async ({
+    page,
+  }) => {
+    const api = workspaceApi();
+    const title = "Live Agent Task";
+    const issue = {
+      id: "live-agent-task",
+      title,
+      status: "open",
+      priority: 2,
+      issue_type: "task",
+      created_at: "2026-05-05T22:00:00Z",
+      updated_at: "2026-05-05T22:00:00Z",
+    };
+    const mutation = {
+      type: "status",
+      issue_id: issue.id,
+      workspace_id: "default",
+      old_status: "open",
+      new_status: "in_progress",
+      timestamp: "2026-05-05T22:01:00Z",
+    };
+    let releaseSSE!: () => void;
+    const sseRelease = new Promise<void>((resolve) => {
+      releaseSSE = resolve;
+    });
+    let sseRequestCount = 0;
+    let issueFetchCount = 0;
+
+    page.on("request", (request) => {
+      if (new URL(request.url()).pathname === `${api}/issues`) {
+        issueFetchCount++;
+      }
+    });
+
+    await page.route(SSE_ENDPOINT, async (route) => {
+      const pathname = new URL(route.request().url()).pathname;
+      if (pathname.endsWith("/events/token")) {
+        await route.fulfill({ status: 404, body: "not found" });
+        return;
+      }
+
+      sseRequestCount++;
+      if (sseRequestCount === 1) {
+        await sseRelease;
+        await route.fulfill({
+          status: 200,
+          contentType: "text/event-stream",
+          body: `event: connected\ndata: {}\n\nevent: mutation\ndata: ${JSON.stringify(
+            mutation,
+          )}\nid: ${Date.now()}\n\n`,
+        });
+        return;
+      }
+
+      await route.abort();
+    });
+
+    await mockReadyAPI(page, [issue]);
+
+    await page.goto(workspacePath("/?groupBy=none"));
+    await page.waitForLoadState("domcontentloaded");
+
+    const openColumn = page.getByRole("region", { name: "Open issues" });
+    const inProgressColumn = page.getByRole("region", {
+      name: "In Progress issues",
+    });
+
+    await expect(openColumn).toContainText(title);
+    await expect(inProgressColumn).not.toContainText(title);
+    const fetchesAfterInitialRender = issueFetchCount;
+
+    releaseSSE();
+
+    await expect(inProgressColumn).toContainText(title, { timeout: 5000 });
+    await expect(openColumn).not.toContainText(title);
+    expect(issueFetchCount).toBe(fetchesAfterInitialRender);
+  });
+
   test("malformed SSE data does not crash the app", async ({ page }) => {
     const consoleErrors: string[] = [];
     page.on("console", (msg) => {

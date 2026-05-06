@@ -426,7 +426,7 @@ func BroadcastSessionIssueEvent(tabMetaStore *tabmeta.Store, hub *Hub, workspace
 	hub.Broadcast(&MutationPayload{
 		Type:        "terminal_session_change",
 		IssueID:     meta.IssueID,
-		Timestamp:   time.Now().UTC().Format(time.RFC3339),
+		Timestamp:   time.Now().UTC().Format(time.RFC3339Nano),
 		WorkspaceID: meta.Workspace,
 	})
 }

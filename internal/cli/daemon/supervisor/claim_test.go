@@ -35,7 +35,7 @@ func TestClaimTask_SelectsEligibleTaskAndClaims(t *testing.T) {
 		t.Fatalf("calls = %#v, want Ready and ClaimIssue", mock.Calls)
 	}
 	opts := mock.Calls[0].Args[0].(backend.ReadyOpts)
-	if opts.ParentID != "parent-1" || opts.Limit != 10000 {
+	if opts.ParentID != "parent-1" || opts.Limit != claimReadyLimit {
 		t.Fatalf("ReadyOpts = %#v", opts)
 	}
 	if mock.Calls[1].Method != "ClaimIssue" || mock.Calls[1].Args[0] != "task-1" {
@@ -69,6 +69,40 @@ func TestClaimTask_SkipsConflictedCandidate(t *testing.T) {
 	}
 	if ap.AssignedTaskID != "task-2" {
 		t.Fatalf("AssignedTaskID = %q, want task-2", ap.AssignedTaskID)
+	}
+}
+
+func TestClaimTask_CapsConflictRetries(t *testing.T) {
+	mock := clitest.NewMockIssueBackend()
+	for i := 0; i < claimConflictRetryLimit+5; i++ {
+		mock.ReadyResult = append(mock.ReadyResult, backend.IssueData{
+			ID:        "task-" + string(rune('a'+i)),
+			IssueType: "task",
+			Status:    "open",
+			Priority:  1,
+			Title:     "Conflicted",
+			Design:    "plan",
+		})
+	}
+	claimCalls := 0
+	mock.ClaimIssueFn = func(_ context.Context, _ string, _ time.Duration) error {
+		claimCalls++
+		return backend.ErrConflict("ClaimIssue", "claimed")
+	}
+	s := &Supervisor{IssueBackend: mock}
+	ap := &AgentProcess{
+		Entry:      cfgpkg.AgentEntry{Worktree: "falcon", Role: "task"},
+		RoleConfig: cfgpkg.RoleConfig{TaskFilter: "has_design"},
+	}
+
+	if s.claimTask(ap, "") {
+		t.Fatal("claimTask returned true after all candidates conflicted")
+	}
+	if claimCalls != claimConflictRetryLimit {
+		t.Fatalf("claim calls = %d, want capped at %d", claimCalls, claimConflictRetryLimit)
+	}
+	if ap.LastError == nil || ap.LastError.Class != agenterr.NoWork {
+		t.Fatalf("LastError = %#v, want NoWork after conflict retry cap", ap.LastError)
 	}
 }
 
@@ -107,6 +141,43 @@ func TestClaimTask_SkipsLongLivedRoleWithoutTaskFilter(t *testing.T) {
 	}
 	if len(mock.Calls) != 0 {
 		t.Fatalf("backend calls = %#v, want none", mock.Calls)
+	}
+}
+
+func TestClaimTask_CancelsReadyOnShutdown(t *testing.T) {
+	mock := clitest.NewMockIssueBackend()
+	readyStarted := make(chan struct{})
+	mock.ReadyFn = func(ctx context.Context, _ backend.ReadyOpts) ([]backend.IssueData, error) {
+		close(readyStarted)
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(500 * time.Millisecond):
+			return nil, context.DeadlineExceeded
+		}
+	}
+	shutdown := make(chan struct{})
+	s := &Supervisor{IssueBackend: mock, Shutdown: shutdown}
+	ap := &AgentProcess{
+		Entry:      cfgpkg.AgentEntry{Worktree: "falcon", Role: "task"},
+		RoleConfig: cfgpkg.RoleConfig{TaskFilter: "has_design"},
+	}
+
+	done := make(chan bool, 1)
+	go func() {
+		done <- s.claimTask(ap, "")
+	}()
+
+	<-readyStarted
+	close(shutdown)
+
+	select {
+	case ok := <-done:
+		if ok {
+			t.Fatal("claimTask returned true after shutdown")
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("claimTask did not cancel Ready promptly after shutdown")
 	}
 }
 

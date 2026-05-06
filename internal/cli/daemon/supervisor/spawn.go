@@ -137,6 +137,8 @@ func appendSessionEnv(env []string, ap *AgentProcess) []string {
 	}
 	leaseID := ap.AgentLeaseID
 	leaseToken := ap.AgentLeaseToken
+	ownershipLeaseID := ap.OwnershipLeaseID
+	ownershipFencingToken := ap.OwnershipFencingToken
 	ap.Mu.Unlock()
 	if sessionID != "" {
 		env = append(env,
@@ -148,6 +150,12 @@ func appendSessionEnv(env []string, ap *AgentProcess) []string {
 		env = append(env,
 			fmt.Sprintf("LOOM_AGENT_LEASE_ID=%s", leaseID),
 			fmt.Sprintf("LOOM_AGENT_LEASE_TOKEN=%s", leaseToken),
+		)
+	}
+	if ownershipLeaseID != "" {
+		env = append(env,
+			fmt.Sprintf("LOOM_AGENT_OWNERSHIP_LEASE_ID=%s", ownershipLeaseID),
+			fmt.Sprintf("LOOM_AGENT_OWNERSHIP_FENCING_TOKEN=%d", ownershipFencingToken),
 		)
 	}
 	return env
@@ -294,7 +302,10 @@ func (s *Supervisor) recoverAgent(ap *AgentProcess, exitCode int) error {
 // to the given env slice. Values are only set when non-empty.
 func (s *Supervisor) appendDaemonEnv(env []string) []string {
 	if s.WorkspaceID != "" {
-		env = append(env, fmt.Sprintf("LOOM_WORKSPACE_ID=%s", s.WorkspaceID))
+		env = append(env,
+			fmt.Sprintf("LOOM_WORKSPACE=%s", s.WorkspaceID),
+			fmt.Sprintf("LOOM_WORKSPACE_ID=%s", s.WorkspaceID),
+		)
 	}
 	if s.IpcSocketPath != "" {
 		env = append(env, fmt.Sprintf("LOOM_DAEMON_SOCKET=%s", s.IpcSocketPath))

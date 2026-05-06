@@ -59,7 +59,7 @@ The workspace is registered in FleetDB and local checkout paths are cached in
 Examples:
   loom workspace create myws --repos /path/to/frontend,/path/to/backend
   loom workspace create myws --repos /path/to/repo --branch feature-x
-  loom workspace create myws --repos /path/to/repo --path /custom/path --default`,
+  loom workspace create myws --repos /path/to/repo --path /custom/path`,
 	Args: cobra.ExactArgs(1),
 	Run:  runWorkspaceCreate,
 }
@@ -91,7 +91,7 @@ func init() {
 	workspaceCreateCmd.Flags().StringVar(&wsCreateRepos, "repos", "", "Comma-separated list of repo paths (required)")
 	_ = workspaceCreateCmd.MarkFlagRequired("repos")
 	workspaceCreateCmd.Flags().StringVar(&wsCreatePath, "path", "", "Workspace directory path (default: ~/.loom/workspaces/<name>)")
-	workspaceCreateCmd.Flags().BoolVar(&wsCreateDefault, "default", false, "Set as default workspace")
+	workspaceCreateCmd.Flags().BoolVar(&wsCreateDefault, "default", false, "Deprecated no-op; default workspace selection has been removed")
 	workspaceCreateCmd.Flags().StringVar(&wsCreateBranch, "branch", "", "Branch name for worktrees (default: workspace name)")
 
 	workspaceListCmd.Flags().BoolVar(&wsListJSON, "json", false, "Output as JSON")
@@ -187,9 +187,7 @@ func runFleetWorkspaceList() error {
 
 		sc, _ := bootstrap.LoadStateCache()
 		pathByKey := map[string]string{}
-		activeKey := ""
 		if sc != nil {
-			activeKey = sc.LastWorkspace
 			for key, local := range sc.Workspaces {
 				pathByKey[key] = local.Path
 			}
@@ -221,7 +219,7 @@ func runFleetWorkspaceList() error {
 					Path:      pathByKey[ws.Key],
 					Repos:     len(repos),
 					State:     state,
-					IsDefault: ws.Key == activeKey,
+					IsDefault: false,
 				})
 			}
 			return cmdstore.WriteJSON(items)
@@ -236,15 +234,11 @@ func runFleetWorkspaceList() error {
 			if state == "" {
 				state = "ready"
 			}
-			defaultMarker := ""
-			if ws.Key == activeKey {
-				defaultMarker = " *"
-			}
 			path := pathByKey[ws.Key]
 			if path == "" {
 				path = "(no local checkout)"
 			}
-			fmt.Printf("%-20s %s (%d repos, %s)%s\n", ws.Key, path, len(repos), state, defaultMarker)
+			fmt.Printf("%-20s %s (%d repos, %s)\n", ws.Key, path, len(repos), state)
 		}
 		return nil
 	})

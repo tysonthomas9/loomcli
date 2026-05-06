@@ -1,6 +1,7 @@
 package serve
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -167,11 +168,11 @@ func TestApplyWorkspaceConfig_StoreWiresStoreBackedFns(t *testing.T) {
 	if cfg.WorkspaceDeleteFn == nil {
 		t.Fatal("WorkspaceDeleteFn was nil")
 	}
-	if cfg.SetDefaultWorkspaceFn == nil {
-		t.Fatal("SetDefaultWorkspaceFn was nil")
+	if cfg.SetDefaultWorkspaceFn != nil {
+		t.Fatal("SetDefaultWorkspaceFn should be nil; default workspace selection is removed")
 	}
-	if cfg.ClearDefaultWorkspaceFn == nil {
-		t.Fatal("ClearDefaultWorkspaceFn was nil")
+	if cfg.ClearDefaultWorkspaceFn != nil {
+		t.Fatal("ClearDefaultWorkspaceFn should be nil; default workspace selection is removed")
 	}
 	if cfg.WorkspaceCreateFn == nil {
 		t.Fatal("WorkspaceCreateFn was nil")
@@ -201,6 +202,51 @@ func TestApplyFleetConfig_StoreBackedServeDoesNotExpectDaemon(t *testing.T) {
 
 	if !cfg.FleetClient {
 		t.Fatal("FleetClient should be true for store-backed serve")
+	}
+}
+
+func TestWithStoreFleetURLUsesEmbeddedStoreURL(t *testing.T) {
+	fs := withStoreFleetURL(fleetState{}, "http://127.0.0.1:19090")
+
+	if fs.clientCfg.URL != "http://127.0.0.1:19090" {
+		t.Fatalf("clientCfg.URL = %q, want embedded store URL", fs.clientCfg.URL)
+	}
+}
+
+func TestWithStoreFleetURLKeepsExplicitURL(t *testing.T) {
+	fs := withStoreFleetURL(fleetState{
+		clientCfg: config.FleetClientConfig{URL: "http://fleet-db:8080"},
+	}, "http://127.0.0.1:19090")
+
+	if fs.clientCfg.URL != "http://fleet-db:8080" {
+		t.Fatalf("clientCfg.URL = %q, want explicit fleet URL", fs.clientCfg.URL)
+	}
+}
+
+func TestResolveFleetStateResolvesClientConfigOutsideFleetMode(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	t.Setenv(bootstrap.EnvWorkspace, "")
+	t.Setenv(bootstrap.EnvFleetDBURL, "")
+	t.Setenv(bootstrap.EnvFleetDBActor, "")
+	t.Setenv("LOOM_ISSUE_BACKEND", "fleetdb")
+	t.Setenv("LOOM_FLEET_URL", "http://fleet-db:8080")
+	t.Setenv("LOOM_FLEET_ACTOR", "local-mode-harness")
+	oldRedisAddr, oldRedisPassword := serveRedisAddr, serveRedisPassword
+	serveRedisAddr, serveRedisPassword = "", ""
+	t.Cleanup(func() {
+		serveRedisAddr, serveRedisPassword = oldRedisAddr, oldRedisPassword
+	})
+
+	fs := resolveFleetState(context.Background())
+
+	if fs.modeDetected {
+		t.Fatal("modeDetected should be false for LOOM_ISSUE_BACKEND=fleetdb")
+	}
+	if fs.clientCfg.URL != "http://fleet-db:8080" {
+		t.Fatalf("clientCfg.URL = %q, want fleet URL", fs.clientCfg.URL)
+	}
+	if fs.clientCfg.Actor != "local-mode-harness" {
+		t.Fatalf("clientCfg.Actor = %q, want local-mode-harness", fs.clientCfg.Actor)
 	}
 }
 

@@ -25,25 +25,28 @@ import (
 
 // DaemonAgentStatus represents the status of a single supervised agent
 type DaemonAgentStatus struct {
-	Worktree       string    `json:"worktree"`
-	Role           string    `json:"role"`
-	Repo           string    `json:"repo,omitempty"`
-	PID            int       `json:"pid"`
-	Status         string    `json:"status"` // "running", "starting", "stopped", "failed"
-	TaskID         string    `json:"task_id,omitempty"`
-	EpicID         string    `json:"epic_id,omitempty"`
-	CurrentBackend string    `json:"current_backend,omitempty"`
-	RestartCount   int       `json:"restart_count"`
-	LastStart      time.Time `json:"last_start,omitempty"`
-	LastExit       time.Time `json:"last_exit,omitempty"`
-	LastExitCode   int       `json:"last_exit_code,omitempty"`
-	StopReason     string    `json:"stop_reason,omitempty"`
-	StoppedAt      time.Time `json:"stopped_at,omitempty"`
-	WorktreePath   string    `json:"worktree_path,omitempty"`
-	LastErrorClass string    `json:"last_error_class,omitempty"`
-	NoWorkCount    int       `json:"no_work_count,omitempty"`
-	BackoffUntil   time.Time `json:"backoff_until,omitempty"`
-	RemoteBranch   string    `json:"remote_branch,omitempty"`
+	Worktree               string    `json:"worktree"`
+	Role                   string    `json:"role"`
+	Repo                   string    `json:"repo,omitempty"`
+	PID                    int       `json:"pid"`
+	Status                 string    `json:"status"` // "running", "starting", "stopped", "failed"
+	TaskID                 string    `json:"task_id,omitempty"`
+	EpicID                 string    `json:"epic_id,omitempty"`
+	CurrentBackend         string    `json:"current_backend,omitempty"`
+	RestartCount           int       `json:"restart_count"`
+	LastStart              time.Time `json:"last_start,omitempty"`
+	LastExit               time.Time `json:"last_exit,omitempty"`
+	LastExitCode           int       `json:"last_exit_code,omitempty"`
+	StopReason             string    `json:"stop_reason,omitempty"`
+	StoppedAt              time.Time `json:"stopped_at,omitempty"`
+	WorktreePath           string    `json:"worktree_path,omitempty"`
+	LastErrorClass         string    `json:"last_error_class,omitempty"`
+	NoWorkCount            int       `json:"no_work_count,omitempty"`
+	BackoffUntil           time.Time `json:"backoff_until,omitempty"`
+	RemoteBranch           string    `json:"remote_branch,omitempty"`
+	OwnershipLeaseID       string    `json:"ownership_lease_id,omitempty"`
+	OwnershipFencingToken  int64     `json:"ownership_fencing_token,omitempty"`
+	OwnershipLastHeartbeat time.Time `json:"ownership_last_heartbeat,omitempty"`
 }
 
 // DaemonState represents the complete daemon state in daemon-agents.json
@@ -199,6 +202,8 @@ func runDaemon(cmd *cobra.Command, args []string) {
 
 	initPIDFile(paths.pidFile)
 	defer os.Remove(paths.pidFile)
+	// runDaemonMainLoop waits for the state updater to stop before returning;
+	// keep that invariant so this deferred cleanup cannot race a state write.
 	defer os.Remove(paths.stateFile)
 
 	shutdown, daemon := initDaemonServices(config, projectDir, paths)

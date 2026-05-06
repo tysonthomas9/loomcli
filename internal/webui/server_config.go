@@ -74,8 +74,8 @@ type ServerConfig struct {
 	GitOps                  ops.GitOps                  // Git operations interface (optional; nil disables git endpoints)
 	FileOps                 ops.FileOps                 // File operations interface (optional; nil disables file endpoints)
 	WorkspaceDeleteFn       func(name string) error     // Workspace deletion function; nil = deletion unavailable
-	SetDefaultWorkspaceFn   func(name string) error     // Set default workspace in config; nil = feature disabled
-	ClearDefaultWorkspaceFn func() error                // Clear default workspace in config; nil = feature disabled
+	SetDefaultWorkspaceFn   func(name string) error     // Deprecated compatibility hook; default workspace selection is disabled.
+	ClearDefaultWorkspaceFn func() error                // Deprecated compatibility hook; default workspace selection is disabled.
 	WorkspaceCreateFn       service.WorkspaceCreateFn   // Workspace creation function; nil = creation unavailable
 	WorkspaceAddReposFn     service.WorkspaceAddReposFn // Attach local repos to an existing workspace; nil = unavailable
 	InitialWorkspaceID      string                      // Stable key of the initial workspace
@@ -93,7 +93,7 @@ type ServerConfig struct {
 	AgentQueueFn         func(agentName string) ([]AgentQueueEntry, error)    // Returns scored work queue for named agent; nil = endpoint unavailable
 	FleetMode            bool                                                 // When true, skip local daemon lifecycle hooks; fleet server manages agents
 	FleetClientURL       string                                               // Fleet server URL for fleet-mode workers (e.g., "http://fleet.example.com"); empty = no fleet client
-	FleetClientWorkspace string                                               // Fleet server workspace ID (e.g., "default"); empty = use "default"
+	FleetClientWorkspace string                                               // Explicit fleet server workspace ID; empty = unset.
 	FleetClientAPIKey    string                                               // Pre-shared API key for fleet worker backend auth
 	FleetClientActor     string                                               // X-Actor header value for fleet-db --auth-dev-mode (typically the loom agent name)
 	DaemonStartupFn      func(ctx context.Context, onReady func(wsID string)) // Starts daemons for secondary workspaces; calls onReady(wsID) when each is reachable

@@ -664,6 +664,32 @@ describe("issueStore", () => {
       expect(store.getState().issuesMap.get("a")!.status).toBe("in_progress");
     });
 
+    it("applies same-second status mutations when subsecond timestamp is newer", () => {
+      store.setState({
+        issuesMap: new Map([
+          [
+            "a",
+            makeIssue({
+              id: "a",
+              status: "open",
+              updated_at: "2026-02-01T00:00:00.250Z",
+            }),
+          ],
+        ]),
+      });
+
+      store.getState().applyMutation(
+        makeMutation({
+          type: "status",
+          issue_id: "a",
+          new_status: "in_progress",
+          timestamp: "2026-02-01T00:00:00.750Z",
+        }),
+      );
+
+      expect(store.getState().issuesMap.get("a")!.status).toBe("in_progress");
+    });
+
     it("skips stale mutations", () => {
       store.setState({
         issuesMap: new Map([
@@ -932,6 +958,54 @@ describe("issueStore", () => {
       );
 
       expect(store.getState().issuesMap.has("new-1")).toBe(true);
+    });
+
+    it("moves a kanban issue to in_progress from an SSE status mutation without refetching", async () => {
+      mockGetKanbanIssues.mockResolvedValue([
+        makeIssue({
+          id: "task-1",
+          title: "Live agent task",
+          status: "open",
+          updated_at: "2026-05-05T22:00:00Z",
+        }),
+      ]);
+
+      await store.getState().fetchIssues({
+        workspaceId: "ws1",
+        mode: "kanban",
+      });
+
+      expect(mockGetKanbanIssues).toHaveBeenCalledTimes(1);
+      expect(store.getState().issuesMap.get("task-1")!.status).toBe("open");
+
+      let capturedCallback: ((mutation: MutationPayload) => void) | null = null;
+      const mockSubscribe = vi.fn((cb: (mutation: MutationPayload) => void) => {
+        capturedCallback = cb;
+        return () => {
+          capturedCallback = null;
+        };
+      });
+
+      const unsubscribe = store.getState().connectToEvents(mockSubscribe);
+
+      capturedCallback!(
+        makeMutation({
+          type: "status",
+          issue_id: "task-1",
+          workspace_id: "ws1",
+          old_status: "open",
+          new_status: "in_progress",
+          timestamp: "2026-05-05T22:01:00Z",
+        }),
+      );
+
+      expect(store.getState().issuesMap.get("task-1")!.status).toBe(
+        "in_progress",
+      );
+      expect(store.getState().mutationCount).toBe(1);
+      expect(mockGetKanbanIssues).toHaveBeenCalledTimes(1);
+
+      unsubscribe();
     });
 
     it("returns existing unsubscribe on duplicate call", () => {

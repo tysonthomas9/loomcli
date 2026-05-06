@@ -1190,6 +1190,18 @@ describe("WorkspaceSSEClient", () => {
       expect(MockEventSource.lastInstance?.url).not.toContain("token=");
     });
 
+    it("connect() in open mode disabled response creates EventSource without token", async () => {
+      mockGet.mockResolvedValue({ disabled: true });
+
+      const client = new WorkspaceSSEClient("test-ws-id");
+      await client.connect();
+
+      expect(mockGet).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/events/token",
+      );
+      expect(MockEventSource.lastInstance?.url).not.toContain("token=");
+    });
+
     it("connect() with token error emits onError and sets disconnected", async () => {
       mockGet.mockRejectedValue(new ApiError(500, "Internal Server Error"));
 

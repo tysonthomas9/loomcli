@@ -14,10 +14,13 @@ import (
 // LoomConfig is a FleetDB-backed workspace view used by older command code
 // while the internal DTOs are collapsed onto domain types.
 type LoomConfig struct {
+	// DefaultWorkspace is a legacy field populated from the per-machine
+	// LastWorkspace UI hint. Runtime selection must use LOOM_WORKSPACE or
+	// --workspace.
 	DefaultWorkspace string                     `yaml:"default_workspace,omitempty"`
 	Workspaces       map[string]WorkspaceConfig `yaml:"workspaces"`
 
-	// DefaultWorkspaceID is the UUID of the default workspace, resolved at load time.
+	// DefaultWorkspaceID is the ID for the legacy DefaultWorkspace hint.
 	DefaultWorkspaceID string `yaml:"-" json:"-"`
 }
 

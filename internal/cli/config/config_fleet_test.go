@@ -16,11 +16,22 @@ func TestResolveFleetConfig_Defaults(t *testing.T) {
 
 	cfg := ResolveFleetConfig(&DaemonSettings{})
 
-	if cfg.Workspace != "default" {
-		t.Errorf("Workspace = %q, want default", cfg.Workspace)
+	if cfg.Workspace != "" {
+		t.Errorf("Workspace = %q, want empty", cfg.Workspace)
 	}
 	if cfg.URL != "" || cfg.APIKey != "" || cfg.Actor != "" {
 		t.Errorf("unexpected fleet config defaults: %+v", cfg)
+	}
+}
+
+func TestResolveFleetConfig_NormalizesDefaultWorkspace(t *testing.T) {
+	clearFleetEnv(t)
+	t.Setenv("LOOM_FLEET_WORKSPACE", " default ")
+
+	cfg := ResolveFleetConfig(nil)
+
+	if cfg.Workspace != "DEFAULT" {
+		t.Errorf("Workspace = %q, want DEFAULT", cfg.Workspace)
 	}
 }
 

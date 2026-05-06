@@ -24,7 +24,7 @@ UI-only snapshots use `0o644`.
 
 | File | Scope | Contents |
 |------|-------|----------|
-| `~/.loom/state.json` | User-level cache | Last-active workspace key (regenerable, not config) |
+| `~/.loom/state.json` | User-level cache | Local checkout paths and last selected workspace hint (regenerable, not config) |
 | `~/.loom/fleet-db/redis-snapshot.json` | Local-mode storage | Embedded fleet-db's miniredis snapshot — workspaces, repos, agents, roles, daemon profiles, issues |
 | `.loom/` | User config directory | Runtime state, daemon PID files |
 

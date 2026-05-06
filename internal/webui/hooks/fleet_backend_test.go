@@ -90,6 +90,18 @@ func TestFleetBackendHook_OnRegisterScopesBackendToRegisteredWorkspace(t *testin
 	}
 }
 
+func TestFleetBackendHook_EmptyWorkspaceRequiresExplicitWorkspace(t *testing.T) {
+	hook := NewFleetBackendHook(testFleetURL, "", "", "test-actor", slog.Default())
+	ctx := regCtx("", "/tmp/demo")
+
+	if err := hook.OnRegister(ctx); err == nil {
+		t.Fatal("OnRegister returned nil, want missing workspace error")
+	}
+	if _, ok := ctx.Resolve(coordinator.ResourceKeyFleetBackend); ok {
+		t.Fatal("unexpected fleet backend resource for empty workspace")
+	}
+}
+
 func TestFleetBackendHook_OnRegister_Error(t *testing.T) {
 	// Empty baseURL causes fleet.New to fail.
 	hook := NewFleetBackendHook("", "test-ws", "test-key", "test-actor", slog.Default())

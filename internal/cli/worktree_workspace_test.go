@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"sort"
@@ -37,7 +38,9 @@ func setupWorkspaceConfig(t *testing.T, cfg *LoomConfig) {
 
 	state := &bootstrap.StateCache{Workspaces: make(map[string]bootstrap.WorkspaceLocalState)}
 	if cfg.DefaultWorkspace != "" {
-		state.LastWorkspace = strings.ToUpper(cfg.DefaultWorkspace)
+		key := strings.ToUpper(cfg.DefaultWorkspace)
+		state.LastWorkspace = key
+		t.Setenv(bootstrap.EnvWorkspace, key)
 	}
 
 	names := make([]string, 0, len(cfg.Workspaces))
@@ -162,8 +165,7 @@ func TestNewResolver_WorkspaceMode(t *testing.T) {
 	}
 }
 
-func TestNewResolver_WorkspaceMode_NoDefault(t *testing.T) {
-	// No default_workspace set → uses first alphabetically
+func TestNewResolver_WorkspaceMode_NoExplicitWorkspace(t *testing.T) {
 	cfg := &LoomConfig{
 		Workspaces: map[string]WorkspaceConfig{
 			"zebra": {Path: "/tmp/z"},
@@ -176,15 +178,61 @@ func TestNewResolver_WorkspaceMode_NoDefault(t *testing.T) {
 	defaultResolver = nil
 	defer func() { defaultResolver = old }()
 
+	if _, err := NewResolver(); !errors.Is(err, bootstrap.ErrNoActiveWorkspace) {
+		t.Fatalf("NewResolver() error = %v, want ErrNoActiveWorkspace", err)
+	}
+}
+
+func TestNewResolver_InfersWorkspaceFromCWD(t *testing.T) {
+	alphaDir := t.TempDir()
+	betaDir := t.TempDir()
+	childDir := filepath.Join(betaDir, "repo")
+	if err := os.MkdirAll(childDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &LoomConfig{
+		Workspaces: map[string]WorkspaceConfig{
+			"alpha": {Path: alphaDir},
+			"beta":  {Path: betaDir},
+		},
+	}
+	setupWorkspaceConfig(t, cfg)
+	t.Chdir(childDir)
+
+	old := defaultResolver
+	defaultResolver = nil
+	defer func() { defaultResolver = old }()
+
 	r, err := NewResolver()
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
 	}
-	if r.GetMode() != ModeWorkspace {
-		t.Errorf("expected ModeWorkspace, got %d", r.GetMode())
+	if r.WorkspaceName() != "BETA" {
+		t.Errorf("expected workspace 'BETA', got %q", r.WorkspaceName())
 	}
-	if r.WorkspaceName() != "ALPHA" {
-		t.Errorf("expected workspace 'ALPHA', got %q", r.WorkspaceName())
+}
+
+func TestNewResolver_HonorsEnvWorkspace(t *testing.T) {
+	cfg := &LoomConfig{
+		DefaultWorkspace: "alpha",
+		Workspaces: map[string]WorkspaceConfig{
+			"alpha": {Path: "/tmp/a"},
+			"beta":  {Path: "/tmp/b"},
+		},
+	}
+	setupWorkspaceConfig(t, cfg)
+	t.Setenv(bootstrap.EnvWorkspace, "BETA")
+
+	old := defaultResolver
+	defaultResolver = nil
+	defer func() { defaultResolver = old }()
+
+	r, err := NewResolver()
+	if err != nil {
+		t.Fatalf("NewResolver: %v", err)
+	}
+	if r.WorkspaceName() != "BETA" {
+		t.Errorf("expected workspace 'BETA', got %q", r.WorkspaceName())
 	}
 }
 
@@ -196,6 +244,7 @@ func TestResolver_SetWorkspace(t *testing.T) {
 		},
 	}
 	setupWorkspaceConfig(t, cfg)
+	t.Setenv(bootstrap.EnvWorkspace, "WS1")
 
 	old := defaultResolver
 	defaultResolver = nil

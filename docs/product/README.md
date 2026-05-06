@@ -4,7 +4,7 @@
 **Date:** 2026-05-04
 
 This folder captures the product plan for making agent execution visible,
-controllable, and debuggable across local and containerized runs.
+controllable, and debuggable across local and cloud/containerized runs.
 
 Read these in order:
 
@@ -22,13 +22,16 @@ Read these in order:
 5. `session-artifact-contract.md`
    The evidence every run must leave behind: transcript, logs, token usage,
    diff, commit, test result, and error class.
-6. `agent-lifecycle-state-machine.md`
+6. `daemon-agent-runtime-architecture.md`
+   How the daemon, agent runner, local mode, cloud mode, ownership leases,
+   and decentralized task claiming fit together.
+7. `agent-lifecycle-state-machine.md`
    Canonical agent, run, and task states plus allowed transitions.
-7. `failure-modes-recovery-ux.md`
+8. `failure-modes-recovery-ux.md`
    User-visible failure states and recovery actions.
-8. `container-runner-mvp-spec.md`
+9. `container-runner-mvp-spec.md`
    Podman/container runner behavior after local mode is reliable.
-9. `dogfood-agent-execution-test-plan.md`
+10. `dogfood-agent-execution-test-plan.md`
    End-to-end dogfood scenarios used to validate the product.
 
 Related design docs:

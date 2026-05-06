@@ -53,8 +53,8 @@ func resolveWorkspaceConfigName(cfg *config.LoomConfig, wsID string) string {
 }
 
 // scopeResolverToWorkspace sets the resolver's active workspace based on a
-// workspace ID from the HTTP context. If workspaceID is empty, this preserves
-// the default workspace behavior.
+// workspace ID from the HTTP context. If workspaceID is empty, the caller keeps
+// the resolver's existing explicit scope.
 func scopeResolverToWorkspace(resolver *cli.Resolver, workspaceID string) error {
 	if workspaceID == "" {
 		return nil

@@ -47,7 +47,7 @@ func Commands() []*cobra.Command {
 
 func init() {
 	dataRootCmd.PersistentFlags().StringVar(&serverURL, "server", "", "Loom server base URL (or LOOM_SERVER_URL env var)")
-	dataRootCmd.PersistentFlags().StringVar(&workspaceID, "workspace", "", "Workspace ID (or LOOM_WORKSPACE env var; auto-discovers if unset)")
+	dataRootCmd.PersistentFlags().StringVar(&workspaceID, "workspace", "", "Workspace ID (or LOOM_WORKSPACE env var)")
 	dataRootCmd.PersistentFlags().StringVarP(&outputFormat, "output", "o", "text", "Output format: text|json")
 
 	dataRootCmd.AddCommand(

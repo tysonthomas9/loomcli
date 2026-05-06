@@ -14,7 +14,7 @@ import (
 // resource bag.
 type FleetBackendHook struct {
 	baseURL     string
-	workspaceID string // default workspace ID for malformed registrations
+	workspaceID string // explicit fallback workspace ID for legacy registrations
 	apiKey      string
 	actor       string // X-Actor header (fleet-db --auth-dev-mode); empty = no header
 	logger      *slog.Logger
@@ -30,9 +30,6 @@ type FleetBackendHook struct {
 func NewFleetBackendHook(baseURL, workspaceID, apiKey, actor string, logger *slog.Logger) *FleetBackendHook {
 	if logger == nil {
 		logger = slog.Default()
-	}
-	if workspaceID == "" {
-		workspaceID = "default"
 	}
 	return &FleetBackendHook{
 		baseURL:     baseURL,

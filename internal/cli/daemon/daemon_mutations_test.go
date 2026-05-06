@@ -117,6 +117,24 @@ func TestMutationBuffer_GetSince_Filtered(t *testing.T) {
 	}
 }
 
+func TestMutationBuffer_GetSince_DoesNotDropSameMillisecondMutations(t *testing.T) {
+	bus := notify.New()
+	defer bus.Close()
+
+	buf := NewMutationBuffer(16, bus, "ws-1")
+	buf.Start()
+	defer buf.Stop()
+
+	ts := time.UnixMilli(1707001234567).UTC()
+	buf.append(backend.MutationData{Type: "claim", IssueID: "a", Timestamp: ts})
+	buf.append(backend.MutationData{Type: "status", IssueID: "b", Timestamp: ts})
+
+	result := buf.GetSince(ts.UnixMilli())
+	if len(result) != 2 {
+		t.Fatalf("expected both same-millisecond mutations to be returned, got %d: %#v", len(result), result)
+	}
+}
+
 func TestMutationBuffer_WaitSince_Immediate(t *testing.T) {
 	bus := notify.New()
 	defer bus.Close()

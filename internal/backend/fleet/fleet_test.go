@@ -923,6 +923,98 @@ func TestUpdate_StatusInProgressWithAssigneeClaimsAsAssignee(t *testing.T) {
 	}
 }
 
+func TestUpdate_StatusOpenClearsAssigneeOnAlreadyOpenIssue(t *testing.T) {
+	var gotAssign bool
+	var gotBody struct {
+		Assignee string `json:"assignee"`
+	}
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/issues/test-1"):
+			respondOK(w, types.Issue{
+				ID:        "test-1",
+				Title:     "T",
+				Status:    types.StatusOpen,
+				Assignee:  "old-agent",
+				CreatedAt: time.Now(),
+				UpdatedAt: time.Now(),
+			})
+		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/issues/test-1/deps"):
+			respondOK(w, map[string]interface{}{"dependencies": []interface{}{}})
+		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/issues/test-1/comments"):
+			respondOK(w, []interface{}{})
+		case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/issues/test-1/assign"):
+			gotAssign = true
+			if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+				t.Fatalf("decode body: %v", err)
+			}
+			respondOK(w, json.RawMessage(`{}`))
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	})
+	defer ts.Close()
+
+	status := "open"
+	if err := fb.Update(context.Background(), "test-1", backend.UpdateParams{Status: &status}); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if !gotAssign {
+		t.Fatal("expected assign endpoint to be called")
+	}
+	if gotBody.Assignee != "" {
+		t.Errorf("assignee = %q, want empty", gotBody.Assignee)
+	}
+}
+
+func TestUpdate_StatusOpenAfterReopenClearsAssignee(t *testing.T) {
+	var sawReopen bool
+	var sawClearAssign bool
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/issues/test-1"):
+			respondOK(w, types.Issue{
+				ID:        "test-1",
+				Title:     "T",
+				Status:    types.StatusClosed,
+				Assignee:  "old-agent",
+				CreatedAt: time.Now(),
+				UpdatedAt: time.Now(),
+			})
+		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/issues/test-1/deps"):
+			respondOK(w, map[string]interface{}{"dependencies": []interface{}{}})
+		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/issues/test-1/comments"):
+			respondOK(w, []interface{}{})
+		case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/issues/test-1/reopen"):
+			sawReopen = true
+			respondOK(w, json.RawMessage(`{}`))
+		case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/issues/test-1/assign"):
+			var body struct {
+				Assignee string `json:"assignee"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode body: %v", err)
+			}
+			sawClearAssign = body.Assignee == ""
+			respondOK(w, json.RawMessage(`{}`))
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	})
+	defer ts.Close()
+
+	status := "open"
+	if err := fb.Update(context.Background(), "test-1", backend.UpdateParams{Status: &status}); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if !sawReopen {
+		t.Fatal("expected reopen endpoint to be called")
+	}
+	if !sawClearAssign {
+		t.Fatal("expected assignment to be cleared after reopen")
+	}
+}
+
 func TestUpdate_AssigneeOnlyUsesAssignEndpoint(t *testing.T) {
 	var gotBody struct {
 		Assignee string `json:"assignee"`

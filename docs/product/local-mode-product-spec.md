@@ -3,6 +3,7 @@
 **Status:** Draft
 **Date:** 2026-05-04
 **Related:** `docs/product/agent-execution-prd.md`,
+`docs/product/daemon-agent-runtime-architecture.md`,
 `docs/product/desktop-app-runtime-spec.md`,
 `docs/product/agent-run-ux-spec.md`,
 `docs/design/agent-run-visibility-plan.md`

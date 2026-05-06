@@ -10,6 +10,8 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
+var agentCommandPollTimeout = 5 * time.Second
+
 func (d *Daemon) startAgentCommandPoller() {
 	if d.store == nil || d.sup.WorkspaceID == "" || d.store.AgentCommands() == nil {
 		return
@@ -31,7 +33,7 @@ func (d *Daemon) startAgentCommandPoller() {
 }
 
 func (d *Daemon) pollAgentCommands() {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), agentCommandPollTimeout)
 	defer cancel()
 	cmds, err := d.store.AgentCommands().List(ctx, d.sup.WorkspaceID, store.AgentCommandFilter{
 		Status: domain.AgentCommandQueued,
@@ -45,11 +47,14 @@ func (d *Daemon) pollAgentCommands() {
 		if cmd.TargetNodeID != "" && cmd.TargetNodeID != d.sup.NodeID {
 			continue
 		}
-		d.handleAgentCommand(ctx, cmd)
+		d.handleAgentCommand(cmd)
 	}
 }
 
-func (d *Daemon) handleAgentCommand(ctx context.Context, cmd *domain.AgentCommand) {
+func (d *Daemon) handleAgentCommand(cmd *domain.AgentCommand) {
+	ctx, cancel := context.WithTimeout(context.Background(), agentCommandPollTimeout)
+	defer cancel()
+
 	if _, err := d.store.AgentCommands().Ack(ctx, cmd.WorkspaceKey, cmd.CommandID); err != nil {
 		slog.Warn("agent command ack failed", "command_id", cmd.CommandID, "err", err)
 		return

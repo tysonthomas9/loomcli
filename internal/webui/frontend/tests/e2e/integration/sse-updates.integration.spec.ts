@@ -1,5 +1,11 @@
-import { test, expect } from '@playwright/test'
-import { generateTestId, createTestIssue, updateIssueStatus, closeTestIssue } from './helpers'
+import { test, expect, type Page } from '@playwright/test'
+import {
+  generateTestId,
+  createTestIssue,
+  updateIssueStatus,
+  closeTestIssue,
+  resolveWorkspaceId,
+} from './helpers'
 
 /**
  * Integration tests for SSE live updates against real backend.
@@ -18,6 +24,11 @@ test.skip(skipIntegration, 'Integration tests require RUN_INTEGRATION_TESTS=1')
 // Run tests serially to avoid data conflicts
 test.describe.configure({ mode: 'serial' })
 
+async function gotoKanban(page: Page, query = '') {
+  const workspaceId = await resolveWorkspaceId()
+  await page.goto(`/ws/${encodeURIComponent(workspaceId)}/kanban${query}`)
+}
+
 test.describe('SSE Live Updates Integration', () => {
   const testIssueIds: string[] = []
 
@@ -29,9 +40,9 @@ test.describe('SSE Live Updates Integration', () => {
     testIssueIds.length = 0
   })
 
-  test('SSE connection establishes on page load', async ({ page }) => {
+  test('SSE connection establishes on page load @smoke', async ({ page }) => {
     // Navigate to Kanban board
-    await page.goto('/')
+    await gotoKanban(page)
 
     // Wait for SSE connection status to show connected
     // The connection indicator uses data-state="connected"
@@ -45,14 +56,22 @@ test.describe('SSE Live Updates Integration', () => {
     })
   })
 
-  test('API-created issue appears via SSE without reload', async ({ page }) => {
+  test('API-created issue appears via SSE without reload @smoke', async ({ page }) => {
     // Create initial issue so Kanban renders columns (not empty state)
     const seedTitle = `SSE Seed ${generateTestId()}`
     const seedId = await createTestIssue(seedTitle)
     testIssueIds.push(seedId)
 
+    let issueFetchCount = 0
+    page.on('request', request => {
+      const url = new URL(request.url())
+      if (request.method() === 'GET' && url.pathname.match(/\/api\/workspaces\/[^/]+\/issues$/)) {
+        issueFetchCount++
+      }
+    })
+
     // Navigate to Kanban — initial API fetch picks up the seed issue
-    await page.goto('/')
+    await gotoKanban(page, '?groupBy=none')
     await page.waitForLoadState('domcontentloaded')
 
     // Wait for SSE connection and ready column
@@ -60,6 +79,7 @@ test.describe('SSE Live Updates Integration', () => {
     await expect(connectionStatus).toBeVisible({ timeout: 10000 })
     const readyColumn = page.locator('section[data-status="ready"]')
     await expect(readyColumn).toBeVisible({ timeout: 15000 })
+    const fetchesAfterInitialRender = issueFetchCount
 
     // Allow SSE connection to stabilize after initial page load
     await page.waitForTimeout(2000)
@@ -71,16 +91,25 @@ test.describe('SSE Live Updates Integration', () => {
 
     // Verify the new issue card appears without reload
     await expect(readyColumn.getByText(uniqueTitle)).toBeVisible({ timeout: 15000 })
+    expect(issueFetchCount).toBe(fetchesAfterInitialRender)
   })
 
-  test('status change via API updates UI via SSE', async ({ page }) => {
+  test('status change via API moves card without reload or refetch @smoke', async ({ page }) => {
     // Create test issue via API (open status by default -> appears in ready)
     const uniqueTitle = `Status Change Test ${generateTestId()}`
     const issueId = await createTestIssue(uniqueTitle)
     testIssueIds.push(issueId)
 
+    let issueFetchCount = 0
+    page.on('request', request => {
+      const url = new URL(request.url())
+      if (request.method() === 'GET' && url.pathname.match(/\/api\/workspaces\/[^/]+\/issues$/)) {
+        issueFetchCount++
+      }
+    })
+
     // Navigate to Kanban
-    await page.goto('/')
+    await gotoKanban(page, '?groupBy=none')
     await page.waitForLoadState('domcontentloaded')
 
     // Wait for SSE connection
@@ -92,6 +121,7 @@ test.describe('SSE Live Updates Integration', () => {
     const inProgressColumn = page.locator('section[data-status="in_progress"]')
 
     await expect(readyColumn.getByText(uniqueTitle)).toBeVisible({ timeout: 10000 })
+    const fetchesAfterInitialRender = issueFetchCount
 
     // Verify issue is NOT in in_progress column initially
     await expect(inProgressColumn.getByText(uniqueTitle)).not.toBeVisible()
@@ -99,27 +129,15 @@ test.describe('SSE Live Updates Integration', () => {
     // Update status via API to in_progress
     await updateIssueStatus(issueId, 'in_progress')
 
-    // Wait for card to move to in_progress column via SSE (with reload fallback
-    // for intermittent SSE delivery lag)
-    try {
-      await expect(async () => {
-        await expect(inProgressColumn.getByText(uniqueTitle)).toBeVisible()
-      }).toPass({ timeout: 10000, intervals: [500, 1000, 2000] })
-    } catch {
-      await page.reload()
-      await page.waitForLoadState('domcontentloaded')
-      await expect(async () => {
-        await expect(inProgressColumn.getByText(uniqueTitle)).toBeVisible()
-      }).toPass({ timeout: 10000, intervals: [500, 1000, 2000] })
-    }
-
-    // Verify card is no longer in ready column
+    // Wait for card to move to in_progress via the live SSE stream only.
+    await expect(inProgressColumn.getByText(uniqueTitle)).toBeVisible({ timeout: 15000 })
     await expect(readyColumn.getByText(uniqueTitle)).not.toBeVisible()
+    expect(issueFetchCount).toBe(fetchesAfterInitialRender)
   })
 
-  test('multiple rapid updates via API are reflected in UI', async ({ page }) => {
+  test('multiple rapid updates via API are reflected in UI @regression', async ({ page }) => {
     // Navigate to Kanban and wait for connection
-    await page.goto('/')
+    await gotoKanban(page)
     await page.waitForLoadState('domcontentloaded')
 
     const connectionStatus = page.locator('[data-state="connected"]')
@@ -149,14 +167,14 @@ test.describe('SSE Live Updates Integration', () => {
     }
   })
 
-  test('closed issue disappears from open columns', async ({ page }) => {
+  test('closed issue disappears from open columns @regression', async ({ page }) => {
     // Create test issue
     const uniqueTitle = `Close via SSE Test ${generateTestId()}`
     const issueId = await createTestIssue(uniqueTitle)
     testIssueIds.push(issueId)
 
     // Navigate to Kanban
-    await page.goto('/')
+    await gotoKanban(page)
     await page.waitForLoadState('domcontentloaded')
 
     // Wait for SSE connection

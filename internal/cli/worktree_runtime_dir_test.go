@@ -38,8 +38,8 @@ func TestGetWorkspaceRuntimeDir_Workspace(t *testing.T) {
 	}
 }
 
-func TestGetWorkspaceRuntimeDir_NoDefaultWorkspace(t *testing.T) {
-	// Config with workspaces but no default → uses first sorted key
+func TestGetWorkspaceRuntimeDir_NoExplicitWorkspace(t *testing.T) {
+	// Config with workspaces but no explicit runtime workspace → returns "."
 	ResetWorkspaceRuntimeDirCache()
 
 	cfg := &LoomConfig{
@@ -51,8 +51,51 @@ func TestGetWorkspaceRuntimeDir_NoDefaultWorkspace(t *testing.T) {
 	setupWorkspaceConfig(t, cfg)
 
 	got := GetWorkspaceRuntimeDir()
-	if got != "/tmp/alpha" {
-		t.Errorf("GetWorkspaceRuntimeDir() = %q, want %q (first sorted workspace key)", got, "/tmp/alpha")
+	if got != "." {
+		t.Errorf("GetWorkspaceRuntimeDir() = %q, want %q", got, ".")
+	}
+}
+
+func TestGetWorkspaceRuntimeDir_InfersWorkspaceFromCWD(t *testing.T) {
+	ResetWorkspaceRuntimeDirCache()
+
+	alphaDir := t.TempDir()
+	betaDir := t.TempDir()
+	childDir := filepath.Join(betaDir, "repo")
+	if err := os.MkdirAll(childDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &LoomConfig{
+		Workspaces: map[string]WorkspaceConfig{
+			"alpha": {Path: alphaDir, Repos: []RepoConfig{{Name: "r", Path: filepath.Join(alphaDir, "r")}}},
+			"beta":  {Path: betaDir, Repos: []RepoConfig{{Name: "r2", Path: filepath.Join(betaDir, "r2")}}},
+		},
+	}
+	setupWorkspaceConfig(t, cfg)
+	t.Chdir(childDir)
+
+	got := GetWorkspaceRuntimeDir()
+	if got != betaDir {
+		t.Errorf("GetWorkspaceRuntimeDir() = %q, want %q", got, betaDir)
+	}
+}
+
+func TestGetWorkspaceRuntimeDir_HonorsEnvWorkspace(t *testing.T) {
+	ResetWorkspaceRuntimeDirCache()
+
+	cfg := &LoomConfig{
+		DefaultWorkspace: "alpha",
+		Workspaces: map[string]WorkspaceConfig{
+			"alpha": {Path: "/tmp/alpha", Repos: []RepoConfig{{Name: "r", Path: "/tmp/r"}}},
+			"beta":  {Path: "/tmp/beta", Repos: []RepoConfig{{Name: "r2", Path: "/tmp/r2"}}},
+		},
+	}
+	setupWorkspaceConfig(t, cfg)
+	t.Setenv("LOOM_WORKSPACE", "BETA")
+
+	got := GetWorkspaceRuntimeDir()
+	if got != "/tmp/beta" {
+		t.Errorf("GetWorkspaceRuntimeDir() = %q, want %q", got, "/tmp/beta")
 	}
 }
 

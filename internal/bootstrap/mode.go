@@ -13,9 +13,9 @@ import (
 // Env vars consumed by bootstrap. Defined as constants so callers can
 // reference them in error messages and docs.
 const (
-	// EnvWorkspace overrides the active workspace for one process.
-	// Wins over the state cache. Set in shell to scope a session to a
-	// specific workspace: `LOOM_WORKSPACE=MYWS loom agent list`.
+	// EnvWorkspace selects the active workspace for one process. Set in
+	// shell to scope a session to a specific workspace:
+	// `LOOM_WORKSPACE=MYWS loom agent list`.
 	EnvWorkspace = "LOOM_WORKSPACE"
 
 	// EnvFleetDBURL switches loom into cloud mode — the embedded
@@ -59,32 +59,22 @@ func DetectMode() Mode {
 }
 
 // ErrNoActiveWorkspace is returned when ResolveActiveWorkspaceKey can't
-// find a candidate workspace and the caller is not interactive (no TTY
-// to prompt). Wrap-friendly so handlers can match via errors.Is.
-var ErrNoActiveWorkspace = errors.New("no active workspace: set " + EnvWorkspace + " or run `loom workspace use <name>`")
+// find an explicit workspace. Wrap-friendly so handlers can match via
+// errors.Is.
+var ErrNoActiveWorkspace = errors.New("no active workspace: set " + EnvWorkspace + " or pass --workspace")
 
-// ResolveActiveWorkspaceKey returns the loom workspace key the current
-// invocation should operate on.
+// ResolveActiveWorkspaceKey returns the explicit loom workspace key the
+// current invocation should operate on.
 //
 // Resolution priority:
-//  1. LOOM_WORKSPACE env var (highest — scopes a single shell)
-//  2. StateCache.LastWorkspace (set by `loom workspace use <name>`)
-//  3. ErrNoActiveWorkspace
+//  1. LOOM_WORKSPACE env var
+//  2. ErrNoActiveWorkspace
 //
 // When ws != nil the resolved key is validated against the store (so a
-// stale state cache pointing at a deleted workspace returns ErrNotFound
-// instead of silently routing to a missing key). Pass nil to skip
-// validation — useful for offline `loom workspace list` style commands
-// where the resolved key isn't actually used for I/O.
+// stale env value returns ErrNotFound instead of silently routing to a
+// missing key). Pass nil to skip validation.
 func ResolveActiveWorkspaceKey(ctx context.Context, ws store.WorkspaceStore) (string, error) {
 	key := os.Getenv(EnvWorkspace)
-	if key == "" {
-		sc, err := LoadStateCache()
-		if err != nil {
-			return "", fmt.Errorf("resolve active workspace: %w", err)
-		}
-		key = sc.LastWorkspace
-	}
 	if key == "" {
 		return "", ErrNoActiveWorkspace
 	}
@@ -93,7 +83,7 @@ func ResolveActiveWorkspaceKey(ctx context.Context, ws store.WorkspaceStore) (st
 	}
 	if _, err := ws.Get(ctx, key); err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
-			return "", fmt.Errorf("active workspace %q not found in fleet-db (clear stale state with `loom workspace use <other>`): %w", key, err)
+			return "", fmt.Errorf("active workspace %q not found in fleet-db: %w", key, err)
 		}
 		return "", fmt.Errorf("validate active workspace %q: %w", key, err)
 	}
@@ -101,7 +91,8 @@ func ResolveActiveWorkspaceKey(ctx context.Context, ws store.WorkspaceStore) (st
 }
 
 // SetActiveWorkspaceKey persists the chosen workspace as the new
-// LastWorkspace in the state cache. Used by `loom workspace use <name>`.
+// LastWorkspace UI hint in the state cache. Used by
+// `loom workspace use <name>`.
 //
 // Caller is responsible for ensuring the key exists in fleet-db before
 // calling this — SetActiveWorkspaceKey does NOT validate. This keeps
@@ -121,7 +112,7 @@ func SetActiveWorkspaceKey(key string) error {
 	})
 }
 
-// ClearActiveWorkspaceKey removes the per-user active/default workspace hint.
+// ClearActiveWorkspaceKey removes the per-user selected-workspace hint.
 func ClearActiveWorkspaceKey() error {
 	return WithStateLock(func() error {
 		sc, err := LoadStateCache()

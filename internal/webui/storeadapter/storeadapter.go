@@ -17,11 +17,11 @@ import (
 
 // BuildActiveWorkspaceData materializes the active workspace topology as
 // an *ops.WorkspaceData using the supplied Store. The "active" workspace
-// key resolution mirrors bootstrap.ResolveActiveWorkspaceKey
-// (LOOM_WORKSPACE env > state cache).
+// key comes from the explicit runtime workspace. If no runtime workspace is
+// set, the web UI falls back to the first workspace for initial rendering.
 //
-// Returns nil, nil when no active workspace can be resolved (no env,
-// empty state cache) — single-repo / un-initialized mode.
+// Returns nil, nil when no workspace exists — single-repo /
+// un-initialized mode.
 func BuildActiveWorkspaceData(ctx context.Context, s store.Store) (*ops.WorkspaceData, error) {
 	if s == nil {
 		return nil, nil
@@ -69,11 +69,6 @@ func BuildWorkspaceDataForKey(ctx context.Context, s store.Store, key string) (*
 
 	wsPath := resolveWorkspacePath(ws.Key)
 
-	defaultName, err := defaultWorkspaceName(ctx, s)
-	if err != nil {
-		return nil, err
-	}
-
 	return &ops.WorkspaceData{
 		ID:               ws.Key,
 		Name:             ws.Name,
@@ -83,7 +78,7 @@ func BuildWorkspaceDataForKey(ctx context.Context, s store.Store, key string) (*
 		Agents:           agents,
 		Workspaces:       summaries,
 		WorkspaceOrder:   nil, // TODO(.16): persist order in DaemonProfile or similar
-		DefaultWorkspace: defaultName,
+		DefaultWorkspace: "",
 	}, nil
 }
 
@@ -192,7 +187,6 @@ func loadSummaries(ctx context.Context, s store.Store, activeKey string) ([]ops.
 	if err != nil {
 		return nil, fmt.Errorf("storeadapter: list workspaces: %w", err)
 	}
-	def := defaultWorkspaceKey()
 	out := make([]ops.WorkspaceSummary, 0, len(all))
 	for _, ws := range all {
 		repoCount := 0
@@ -209,7 +203,7 @@ func loadSummaries(ctx context.Context, s store.Store, activeKey string) ([]ops.
 			Path:         resolveWorkspacePath(ws.Key),
 			Active:       ws.Key == activeKey,
 			RepoCount:    repoCount,
-			IsDefault:    ws.Key == def,
+			IsDefault:    false,
 			Backend:      backend,
 			State:        string(ws.State),
 			ErrorMessage: ws.ErrorMessage,
@@ -263,35 +257,8 @@ func resolveRepoPath(wsKey, repoName string) string {
 	return ""
 }
 
-// defaultWorkspaceKey returns the workspace key that should be marked
-// IsDefault in summaries. Currently sourced from the state cache's
-// LastWorkspace; the "default" concept is a UI affordance, not store
-// state.
-func defaultWorkspaceKey() string {
-	sc, err := bootstrap.LoadStateCache()
-	if err != nil || sc == nil {
-		return ""
-	}
-	return sc.LastWorkspace
-}
-
-// DefaultWorkspaceKey returns the workspace key stored in the per-user state
-// cache as the default/active workspace hint.
+// DefaultWorkspaceKey is retained for compatibility with older callers.
+// Default workspace selection has been removed, so it always returns empty.
 func DefaultWorkspaceKey() string {
-	return defaultWorkspaceKey()
-}
-
-func defaultWorkspaceName(ctx context.Context, s store.Store) (string, error) {
-	key := defaultWorkspaceKey()
-	if key == "" {
-		return "", nil
-	}
-	ws, err := s.Workspaces().Get(ctx, key)
-	if err != nil {
-		if errors.Is(err, domain.ErrNotFound) {
-			return "", nil
-		}
-		return "", fmt.Errorf("storeadapter: get default workspace: %w", err)
-	}
-	return ws.Name, nil
+	return ""
 }

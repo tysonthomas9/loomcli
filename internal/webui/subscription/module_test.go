@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/rpc"
@@ -57,19 +58,24 @@ func TestModule_ConditionalRoutes(t *testing.T) {
 	getMutations := func(_ string, _ string) []rpc.MutationEvent { return nil }
 	wsFromCtx := func(_ context.Context) string { return "test-ws" }
 
-	t.Run("nil sseTokens omits token route", func(t *testing.T) {
+	t.Run("nil sseTokens returns disabled token response", func(t *testing.T) {
 		mod := NewModule(hub, getMutations, wsFromCtx, nil)
 
 		mux := http.NewServeMux()
 		mod.Register(mux)
 
-		// Token route should NOT be registered
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest("GET", "/api/workspaces/test-ws/events/token", nil)
 		mux.ServeHTTP(rec, req)
 
-		if rec.Code != http.StatusNotFound {
-			t.Errorf("token route with nil sseTokens: expected 404, got %d", rec.Code)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("token route with nil sseTokens: expected 200, got %d", rec.Code)
+		}
+		if got := rec.Header().Get("Cache-Control"); got != "no-store" {
+			t.Errorf("Cache-Control = %q, want no-store", got)
+		}
+		if body := rec.Body.String(); body == "" || !containsAll(body, `"disabled"`, `true`) {
+			t.Errorf("disabled token response body = %q", body)
 		}
 
 		// Events route registration is verified by checking that a wrong method
@@ -110,4 +116,13 @@ func TestModule_WrongMethod_Returns405(t *testing.T) {
 	if rec.Code != http.StatusMethodNotAllowed {
 		t.Errorf("POST .../events/token: expected 405, got %d", rec.Code)
 	}
+}
+
+func containsAll(s string, needles ...string) bool {
+	for _, needle := range needles {
+		if !strings.Contains(s, needle) {
+			return false
+		}
+	}
+	return true
 }

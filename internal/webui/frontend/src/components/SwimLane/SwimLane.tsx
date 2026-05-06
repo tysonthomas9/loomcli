@@ -39,6 +39,10 @@ export interface SwimLaneProps {
   onToggleCollapse?: () => void;
   /** Callback when an issue card is clicked */
   onIssueClick?: (issue: Issue) => void;
+  /** Issue represented by the lane header, when the title is clickable */
+  headerIssue?: Issue;
+  /** Callback when the clickable lane title is clicked */
+  onHeaderIssueClick?: (issue: Issue) => void;
   /** Map of issue ID to blocked info */
   blockedIssues?: Map<string, BlockedInfo>;
   /** Whether to show blocked issues */
@@ -64,6 +68,8 @@ export function SwimLane({
   isCollapsed = false,
   onToggleCollapse,
   onIssueClick,
+  headerIssue,
+  onHeaderIssueClick,
   blockedIssues,
   showBlocked = true,
   className,
@@ -114,6 +120,13 @@ export function SwimLane({
 
   const headerId = `lane-header-${id}`;
   const rootClassName = [styles.swimLane, className].filter(Boolean).join(" ");
+  const isHeaderClickable =
+    headerIssue !== undefined && onHeaderIssueClick !== undefined;
+  const handleHeaderIssueClick = (): void => {
+    if (headerIssue && onHeaderIssueClick) {
+      onHeaderIssueClick(headerIssue);
+    }
+  };
 
   return (
     <section
@@ -147,7 +160,21 @@ export function SwimLane({
             />
           </svg>
         </button>
-        <h3 className={styles.laneTitle}>{title}</h3>
+        <h3 className={styles.laneTitle}>
+          {isHeaderClickable ? (
+            <button
+              type="button"
+              className={styles.laneTitleButton}
+              onClick={handleHeaderIssueClick}
+              aria-label={`Open epic: ${title}`}
+              data-testid="lane-title-button"
+            >
+              {title}
+            </button>
+          ) : (
+            title
+          )}
+        </h3>
         <span
           className={styles.laneCount}
           aria-label={`${filteredIssues.length} issues`}

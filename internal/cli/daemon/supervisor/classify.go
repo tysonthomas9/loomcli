@@ -30,13 +30,16 @@ func (s *Supervisor) classifyAgentExit(ap *AgentProcess, exitCode int) {
 	ap.Mu.Lock()
 	backend := ap.Entry.Backend
 	logPath := ap.LogFilePath
+	stopReason := ap.StopReason
 	ap.Mu.Unlock()
 	if backend == "" {
 		backend = s.ConfigSnapshot().Backend
 	}
 
-	if exitCode == 0 && taskID == "" {
-		// No work available — exit 0 with no task claimed
+	if taskID == "" && (exitCode == 0 || stopReason == StopReasonWatchdog) {
+		// No work available — no task was claimed. A watchdog stop can make an
+		// otherwise idle agent exit non-zero, so prefer NoWork over log-pattern
+		// timeout classification when there is no task context.
 		ap.Mu.Lock()
 		ap.LastError = &agenterr.AgentError{
 			Class:   agenterr.NoWork,

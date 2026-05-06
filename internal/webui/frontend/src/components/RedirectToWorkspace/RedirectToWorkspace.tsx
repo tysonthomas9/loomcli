@@ -50,10 +50,9 @@ export function RedirectToWorkspace() {
         }
 
         if (lastId) clearLastWorkspaceId(lastId);
-        const defaultWs =
-          workspaces.find((ws) => ws.is_default) ?? workspaces[0];
-        if (defaultWs) {
-          navigate(`/ws/${defaultWs.id}/kanban`, { replace: true });
+        const firstWorkspace = workspaces[0];
+        if (firstWorkspace) {
+          navigate(`/ws/${firstWorkspace.id}/kanban`, { replace: true });
         } else {
           setResolving(false);
         }

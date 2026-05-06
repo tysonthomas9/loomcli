@@ -26,6 +26,5 @@
 // Server selection: commands use --server or LOOM_SERVER_URL when present.
 // Without a server, issue commands use an injected local backend provider.
 // The --workspace flag / LOOM_WORKSPACE env var selects the target remote
-// workspace; if unset the package discovers it via GET /api/workspaces/active
-// on the server.
+// workspace. Remote commands require this selection explicitly.
 package data

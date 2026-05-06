@@ -27,6 +27,7 @@ type Store interface {
 	TerminalSessions() TerminalSessionStore
 	Artifacts() ArtifactStore
 	AgentLeases() AgentLeaseStore
+	AgentOwnershipLeases() AgentOwnershipLeaseStore
 	AgentCommands() AgentCommandStore
 	Roles() RoleStore
 	Daemon() DaemonProfileStore

@@ -2,8 +2,10 @@ package supervisor
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -604,6 +606,29 @@ func TestShouldRestart(t *testing.T) {
 		}
 	})
 
+	t.Run("NoWork on fallback periodically retries primary backend", func(t *testing.T) {
+		config := makeSupervisorConfig(
+			[]cfgpkg.AgentEntry{{Worktree: "test", Role: "plan", FallbackBackends: []string{"codex"}}},
+			nil,
+		)
+		cfg := config
+		s := &Supervisor{ConfigSnapshot: func() *cfgpkg.DaemonConfig { return cfg }, Shutdown: make(chan struct{}), StoppedAgents: make(map[string]struct{}), Agents: make([]*AgentProcess, 0), EmitEvent: func(events.Event) {}}
+
+		ap := &AgentProcess{
+			CurrentBackendIdx: 1,
+			NoWorkCount:       2,
+			LastExitCode:      0,
+			LastError:         &agenterr.AgentError{Class: agenterr.NoWork, Message: "no claimable tasks"},
+		}
+
+		if !s.shouldRestart(ap) {
+			t.Fatal("shouldRestart() = false, want true for NoWork")
+		}
+		if ap.CurrentBackendIdx != 0 {
+			t.Errorf("currentBackendIdx = %d, want 0 after repeated NoWork on fallback", ap.CurrentBackendIdx)
+		}
+	})
+
 	t.Run("nil lastError counts toward retries normally", func(t *testing.T) {
 		config := makeSupervisorConfig(
 			[]cfgpkg.AgentEntry{{Worktree: "test", Role: "plan"}},
@@ -695,6 +720,28 @@ func TestResolveRoleConfig(t *testing.T) {
 		}
 		if rc.TaskFilter != "has_design" {
 			t.Errorf("TaskFilter = %q, want has_design", rc.TaskFilter)
+		}
+	})
+
+	t.Run("built-in role with prompt_file returns explicit error", func(t *testing.T) {
+		config := makeSupervisorConfig(
+			nil,
+			map[string]cfgpkg.RoleConfig{
+				"plan": {
+					Description: "custom planner",
+					PromptFile:  "prompts/plan.md",
+				},
+			},
+		)
+		cfg := config
+		s := &Supervisor{ConfigSnapshot: func() *cfgpkg.DaemonConfig { return cfg }, ProjectDir: "/tmp", Shutdown: make(chan struct{}), StoppedAgents: make(map[string]struct{}), Agents: make([]*AgentProcess, 0), EmitEvent: func(events.Event) {}}
+
+		_, err := s.resolveRoleConfig("plan", 0)
+		if err == nil {
+			t.Fatal("resolveRoleConfig(plan) error = nil, want explicit built-in prompt_file error")
+		}
+		if !strings.Contains(err.Error(), "built-in role") || !strings.Contains(err.Error(), "prompt_file") {
+			t.Fatalf("error = %q, want built-in role prompt_file message", err.Error())
 		}
 	})
 
@@ -844,6 +891,41 @@ func TestBuiltInRoles(t *testing.T) {
 			t.Error("BuiltInRoles[reviewer] = true, want false")
 		}
 	})
+}
+
+func TestClassifyAgentExit_WatchdogIdleNoTaskIsNoWork(t *testing.T) {
+	tmpDir := t.TempDir()
+	logPath := filepath.Join(tmpDir, "agent.log")
+	if err := os.WriteFile(logPath, []byte("request timed out while idle\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	config := makeSupervisorConfig(
+		[]cfgpkg.AgentEntry{{Worktree: "test", Role: "plan", Backend: "codex"}},
+		nil,
+	)
+	cfg := config
+	s := &Supervisor{
+		ConfigSnapshot: func() *cfgpkg.DaemonConfig { return cfg },
+		Shutdown:       make(chan struct{}),
+		StoppedAgents:  make(map[string]struct{}),
+		Agents:         make([]*AgentProcess, 0),
+		EmitEvent:      func(events.Event) {},
+	}
+	ap := &AgentProcess{
+		Entry:        cfgpkg.AgentEntry{Worktree: "test", Role: "plan", Backend: "codex"},
+		WorktreePath: tmpDir,
+		LogFilePath:  logPath,
+		StopReason:   StopReasonWatchdog,
+	}
+
+	s.classifyAgentExit(ap, 137)
+
+	if ap.LastError == nil || ap.LastError.Class != agenterr.NoWork {
+		t.Fatalf("LastError = %#v, want NoWork for watchdog-stopped idle agent", ap.LastError)
+	}
+	if !ap.LastNoWork {
+		t.Fatal("LastNoWork = false, want true")
+	}
 }
 
 func TestAgentProcess(t *testing.T) {
@@ -1268,6 +1350,68 @@ func TestCheckAgentHealth_Watchdog(t *testing.T) {
 		ap.Mu.Unlock()
 		if pid != 99999999 {
 			t.Errorf("pid = %d, want 99999999 (nonexistent transcript should fall back to fresh log)", pid)
+		}
+	})
+
+	t.Run("uses latest activity when transcript is stale but log is fresh", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		oldTime := time.Now().Add(-20 * time.Minute)
+
+		txPath := filepath.Join(tmpDir, "transcript.jsonl")
+		if err := os.WriteFile(txPath, []byte("startup hook\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(txPath, oldTime, oldTime); err != nil {
+			t.Fatal(err)
+		}
+
+		logPath := filepath.Join(tmpDir, "task-test.log")
+		if err := os.WriteFile(logPath, []byte("fresh stdout\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		freshTime := time.Now()
+		if err := os.Chtimes(logPath, freshTime, freshTime); err != nil {
+			t.Fatal(err)
+		}
+
+		cmd := exec.Command("sleep", "30")
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		if err := cmd.Start(); err != nil {
+			t.Fatalf("start sleep: %v", err)
+		}
+		done := make(chan struct{})
+		ap := &AgentProcess{
+			Entry:          cfgpkg.AgentEntry{Worktree: "test", Role: "task"},
+			Cmd:            cmd,
+			Pid:            cmd.Process.Pid,
+			LogFilePath:    logPath,
+			TranscriptPath: txPath,
+			LastStart:      time.Now().Add(-25 * time.Minute),
+		}
+		go func() {
+			_ = cmd.Wait()
+			ap.Mu.Lock()
+			ap.Pid = 0
+			ap.Cmd = nil
+			ap.Mu.Unlock()
+			close(done)
+		}()
+		t.Cleanup(func() {
+			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+			select {
+			case <-done:
+			case <-time.After(2 * time.Second):
+				t.Fatalf("sleep process did not exit")
+			}
+		})
+
+		s := &Supervisor{EmitEvent: func(events.Event) {}}
+		s.checkWatchdog(ap, 60, logPath, ap.LastStart, ap.Entry.Worktree)
+
+		select {
+		case <-done:
+			t.Fatal("watchdog killed agent even though the log file had newer activity")
+		default:
 		}
 	})
 

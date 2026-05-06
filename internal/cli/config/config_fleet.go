@@ -8,7 +8,7 @@ import (
 // FleetClientConfig is the resolved runtime config for connecting to a fleet server.
 type FleetClientConfig struct {
 	URL       string // Fleet server base URL (required in fleet mode)
-	Workspace string // Workspace identifier (default: "default")
+	Workspace string // Fleet workspace identifier; empty when unset.
 	APIKey    string //nolint:gosec // Pre-shared API key for fleet worker registration
 	Actor     string // X-Actor header (used by fleet-db --auth-dev-mode)
 }
@@ -39,10 +39,7 @@ func ResolveFleetConfig(daemon *DaemonSettings) FleetClientConfig {
 		}
 	}
 
-	// Apply defaults
-	if workspace == "" {
-		workspace = "default"
-	}
+	workspace = normalizeExplicitFleetWorkspace(workspace)
 
 	// Trim trailing slashes from URL
 	url = strings.TrimRight(url, "/")

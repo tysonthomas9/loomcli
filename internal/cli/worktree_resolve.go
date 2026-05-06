@@ -28,15 +28,9 @@ func NewResolver() (*Resolver, error) {
 		return nil, fmt.Errorf("load workspace config: %w", err)
 	}
 	if cfg != nil && len(cfg.Workspaces) > 0 {
-		ws := cfg.DefaultWorkspace
-		if ws == "" {
-			// Use first workspace alphabetically for determinism
-			names := make([]string, 0, len(cfg.Workspaces))
-			for name := range cfg.Workspaces {
-				names = append(names, name)
-			}
-			sort.Strings(names)
-			ws = names[0]
+		ws, err := resolveActiveWorkspaceName(cfg)
+		if err != nil {
+			return nil, err
 		}
 		return &Resolver{
 			Mode:      ModeWorkspace,
@@ -45,6 +39,74 @@ func NewResolver() (*Resolver, error) {
 		}, nil
 	}
 	return nil, fmt.Errorf("no workspaces configured")
+}
+
+func resolveActiveWorkspaceName(cfg *config.LoomConfig) (string, error) {
+	if cfg == nil || len(cfg.Workspaces) == 0 {
+		return "", fmt.Errorf("no workspaces configured")
+	}
+	if ws := strings.TrimSpace(os.Getenv(bootstrap.EnvWorkspace)); ws != "" {
+		return normalizeWorkspaceName(cfg, ws)
+	}
+	if ws := workspaceNameFromCWD(cfg); ws != "" {
+		return ws, nil
+	}
+	return "", bootstrap.ErrNoActiveWorkspace
+}
+
+func normalizeWorkspaceName(cfg *config.LoomConfig, name string) (string, error) {
+	if _, ok := cfg.Workspaces[name]; ok {
+		return name, nil
+	}
+	normalized := strings.ToUpper(name)
+	if _, ok := cfg.Workspaces[normalized]; ok {
+		return normalized, nil
+	}
+	for key := range cfg.Workspaces {
+		if strings.EqualFold(key, name) {
+			return key, nil
+		}
+	}
+	return "", fmt.Errorf("workspace %q not found in config", name)
+}
+
+func workspaceNameFromCWD(cfg *config.LoomConfig) string {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	cwd, err = filepath.Abs(cwd)
+	if err != nil {
+		return ""
+	}
+
+	bestName := ""
+	bestLen := -1
+	for name, ws := range cfg.Workspaces {
+		if ws.Path == "" {
+			continue
+		}
+		root := ws.Path
+		if !filepath.IsAbs(root) {
+			if abs, err := filepath.Abs(root); err == nil {
+				root = abs
+			}
+		}
+		root = filepath.Clean(root)
+		if pathContains(root, cwd) && len(root) > bestLen {
+			bestName = name
+			bestLen = len(root)
+		}
+	}
+	return bestName
+}
+
+func pathContains(root, path string) bool {
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		return false
+	}
+	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
 }
 
 // Mode returns the resolver's current mode.
@@ -523,14 +585,10 @@ func GetWorkspaceRuntimeDir() string {
 			return
 		}
 
-		ws := cfg.DefaultWorkspace
-		if ws == "" {
-			names := make([]string, 0, len(cfg.Workspaces))
-			for name := range cfg.Workspaces {
-				names = append(names, name)
-			}
-			sort.Strings(names)
-			ws = names[0]
+		ws, err := resolveActiveWorkspaceName(cfg)
+		if err != nil {
+			workspaceRuntimeDirCache = "."
+			return
 		}
 
 		if wsConfig, ok := cfg.Workspaces[ws]; ok && wsConfig.Path != "" {

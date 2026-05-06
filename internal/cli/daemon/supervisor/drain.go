@@ -21,12 +21,28 @@ const DefaultYieldTimeout = 60 // seconds
 func (s *Supervisor) DrainWithGrace(ap *AgentProcess, reason string, yieldTimeout, sigtermTimeout time.Duration) bool {
 	slog.Info("requesting yield", "worktree", ap.Entry.Worktree, "reason", reason, "timeout", yieldTimeout)
 
+	ap.Mu.Lock()
+	pid := ap.Pid
+	ap.Mu.Unlock()
+	if pid == 0 || !lockfile.IsProcessRunning(pid) {
+		if err := ClearYieldFile(ap.WorktreePath); err != nil {
+			slog.Warn("failed to clear stale yield file", "worktree", ap.Entry.Worktree, "err", err)
+		}
+		slog.Info("agent already stopped before yield", "worktree", ap.Entry.Worktree)
+		return true
+	}
+
 	// Phase 1: Write yield file
 	if err := s.RequestYield(ap, reason); err != nil {
 		slog.Warn("yield file write failed, falling back to SIGTERM", "worktree", ap.Entry.Worktree, "err", err)
 		s.StopAgent(ap, sigtermTimeout)
 		return false
 	}
+	defer func() {
+		if err := ClearYieldFile(ap.WorktreePath); err != nil {
+			slog.Warn("failed to clear yield file after drain", "worktree", ap.Entry.Worktree, "err", err)
+		}
+	}()
 
 	// Phase 2: Poll for voluntary exit
 	deadline := time.Now().Add(yieldTimeout)

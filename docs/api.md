@@ -854,7 +854,7 @@ Full workspace topology returned by `GET /api/workspaces/active` and `GET /api/w
 | `agents` | []WorkspaceAgentInfo | Agent assignments |
 | `workspaces` | []WorkspaceSummary | All configured workspaces |
 | `workspace_order` | []string | Custom display ordering (omitted if empty) |
-| `default_workspace` | string | Name of the default workspace |
+| `default_workspace` | string | Deprecated compatibility field; always empty |
 
 All array fields marshal as `[]` (never `null`).
 
@@ -867,7 +867,7 @@ All array fields marshal as `[]` (never `null`).
 | `path` | string | Absolute filesystem path |
 | `active` | bool | Whether this is the currently selected workspace |
 | `repo_count` | int | Number of repositories |
-| `is_default` | bool | Whether this is the default workspace |
+| `is_default` | bool | Deprecated compatibility field; always false |
 | `backend` | string | AI backend override (omitted if not set) |
 
 #### WorkspaceRepo
@@ -1089,52 +1089,11 @@ Accepts both workspace names and UUIDs. UUIDs are resolved to names internally. 
   - `413` — request body too large
   - `500` — failed to load/save config
 
-### `PUT /api/workspaces/default`
+### Removed: `/api/workspaces/default`
 
-Set the default workspace.
-
-- **Auth:** Required
-- **Request Body:**
-
-```json
-{
-  "name": "workspace-name (required)"
-}
-```
-
-- **Response:** `200 OK`
-
-```json
-{
-  "success": true,
-  "data": { /* WorkspaceData */ }
-}
-```
-
-- **Errors:**
-  - `400` — name is required
-  - `404` — workspace not found
-  - `501` — set default not available
-  - `500` — failed to save config
-
-### `DELETE /api/workspaces/default`
-
-Clear the default workspace, reverting to first-in-order behavior.
-
-- **Auth:** Required
-- **No request body**
-- **Response:** `200 OK`
-
-```json
-{
-  "success": true,
-  "data": { /* WorkspaceData */ }
-}
-```
-
-- **Errors:**
-  - `501` — clear default not available
-  - `500` — failed to save config
+Default workspace selection has been removed. Runtime commands and daemons
+must use explicit workspace scope via `--workspace`, `LOOM_WORKSPACE`, or
+workspace-specific routes such as `/ws/{workspace}/...`.
 
 ### `PATCH /api/workspaces/{ws}/config/backend`
 

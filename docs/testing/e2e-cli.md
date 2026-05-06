@@ -12,7 +12,8 @@ Tests CLI writes are visible at the API layer (cross-checked via curl). State is
 |---|---|---|---|
 | A1 | `loom workspace add ACME --description "ACME demo"` | stdout matches `^Created workspace ACME` | `curl :18095/api/v1/admin/workspaces/ACME` → JSON `key:"ACME"` |
 | A1.cache | (after A1) `cat $LOOM_CONFIG_DIR/state.json` | contains `"last_workspace": "ACME"` | — |
-| A2 | `loom workspace use ACME` | stdout matches `^Active workspace: ACME$` | state.json `last_workspace=ACME` |
+| A2 | `loom workspace use ACME` | stdout includes `Selected workspace: ACME` and `export LOOM_WORKSPACE=ACME` | state.json `last_workspace=ACME` as a UI hint only |
+| A2.env | `export LOOM_WORKSPACE=ACME` | subsequent workspace-scoped commands target ACME | — |
 | A3 | `loom repo add backend git@github.com:acme/backend.git --groups infra` | `^Created repo ACME/backend` | `curl :18095/api/v1/ACME/repos/backend` → `name:"backend"` |
 | A4 | `loom repo add frontend git@github.com:acme/frontend.git` | `^Created repo ACME/frontend` | `loom repo list` shows both |
 | A5 | `loom role add task --description Implementer --backend claude --max-concurrency 5` | `^Created role ACME/task` | `curl :18095/api/v1/ACME/roles/task` → `max_concurrency:5` |
@@ -35,11 +36,11 @@ Tests every error path produces an actionable, parseable message.
 | B2 | `loom workspace add ACME` (after A1) | `HTTP 409` AND `already exists` | — |
 | B3 | `loom agentdef add bad --role nonexistent` | error references the role | fleet-db's referential validation |
 | B4 | `loom repo show nope` | `HTTP 404` AND `not found` | — |
-| B5 | (env without `LOOM_WORKSPACE` and empty state.json) `loom repo list` | `^Error: no active workspace: set LOOM_WORKSPACE` | actionable prompt for state-cache miss |
+| B5 | (env without `LOOM_WORKSPACE`) `loom repo list` | `^Error: no active workspace: set LOOM_WORKSPACE` | runtime commands ignore state-cache defaults |
 | B6 | `loom role set task no_such_key value` | `^Error: unknown key "no_such_key"` | — |
-| **B7** | **`loom workspace remove ACME` (delete active workspace)** | success | **then** `loom repo list` → `^Error: active workspace "ACME" not found in fleet-db` (state cache becomes stale) |
+| **B7** | **`loom workspace remove ACME` with `LOOM_WORKSPACE=ACME`** | success | **then** `loom repo list` → `^Error: active workspace "ACME" not found in fleet-db` (explicit env becomes stale) |
 | **B8** | (corrupt state.json) `echo '{bad json' > $LOOM_CONFIG_DIR/state.json && loom repo list` | error mentions `parse` and the file path | malformed-cache recovery |
-| **B9** | (B8 fix-up: write valid state.json with `last_workspace: "DELETED-WS"`) `loom repo list` | error mentions "not found in fleet-db" — NOT a panic | stale-pointer recovery |
+| **B9** | (B8 fix-up: write valid state.json with `last_workspace: "DELETED-WS"` and unset `LOOM_WORKSPACE`) `loom repo list` | `^Error: no active workspace` — NOT a panic | stale state cache is ignored by runtime selection |
 | **B10** | `curl -X PATCH :18095/api/v1/ACME/roles/task -d '{"clear_max_priority":true,"max_priority":7}'` | API returns 400 (mutually-exclusive flags) OR documents which wins | edge case in fleet-db's PATCH semantics |
 
 ## Phase C — Embedded mode
@@ -80,12 +81,12 @@ The CLI surface needs the same isolation guarantees the UI does.
 
 | ID | Test | Pass criteria |
 |---|---|---|
-| F1 | `loom workspace add ALPHA && loom workspace use ALPHA && loom repo add alpha-repo git@x:y/a.git` | repo created in ALPHA |
-| F2 | `loom workspace add BRAVO && loom workspace use BRAVO && loom repo add bravo-repo git@x:y/b.git` | repo created in BRAVO |
-| F3 | `loom workspace use ALPHA && loom repo list` | shows ONLY `alpha-repo` (NOT `bravo-repo`) |
-| F4 | `loom workspace use BRAVO && loom repo list` | shows ONLY `bravo-repo` |
+| F1 | `loom workspace add ALPHA && LOOM_WORKSPACE=ALPHA loom repo add alpha-repo git@x:y/a.git` | repo created in ALPHA |
+| F2 | `loom workspace add BRAVO && LOOM_WORKSPACE=BRAVO loom repo add bravo-repo git@x:y/b.git` | repo created in BRAVO |
+| F3 | `LOOM_WORKSPACE=ALPHA loom repo list` | shows ONLY `alpha-repo` (NOT `bravo-repo`) |
+| F4 | `LOOM_WORKSPACE=BRAVO loom repo list` | shows ONLY `bravo-repo` |
 | F5 | `curl :18095/api/v1/ALPHA/repos` and `…/BRAVO/repos` | each has exactly its own repo |
-| F6 | Concurrent: `loom workspace use ALPHA &; loom workspace use BRAVO &; wait` | state.json contains exactly one of ALPHA/BRAVO (file lock works); no corruption |
+| F6 | Concurrent: `loom workspace use ALPHA &; loom workspace use BRAVO &; wait` | state.json contains exactly one of ALPHA/BRAVO as a UI hint (file lock works); runtime commands still require `LOOM_WORKSPACE` |
 | F7 | `loom workspace remove BRAVO --force` | deletion succeeds; `loom workspace list` shows ALPHA only |
 | F8 | (after F7) `curl :18095/api/v1/BRAVO/repos` | 404 (workspace + cascaded data gone) |
 

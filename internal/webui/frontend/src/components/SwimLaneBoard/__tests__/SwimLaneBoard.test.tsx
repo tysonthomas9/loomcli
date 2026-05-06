@@ -6,7 +6,13 @@
  * Unit tests for SwimLaneBoard component.
  */
 
-import { render, screen, fireEvent, cleanup } from "@testing-library/react";
+import {
+  render,
+  screen,
+  fireEvent,
+  cleanup,
+  within,
+} from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import "@testing-library/jest-dom";
 
@@ -135,6 +141,58 @@ describe("SwimLaneBoard", () => {
       expect(handleIssueClick).toHaveBeenCalledWith(
         expect.objectContaining({ id: "click-test" }),
       );
+    });
+
+    it("moves a card from Open to In Progress when its status prop changes", () => {
+      const issue = createMockIssue({
+        id: "live-task",
+        title: "Live Agent Task",
+        status: "open",
+      });
+
+      const { rerender } = render(
+        <SwimLaneBoard
+          issues={[issue]}
+          groupBy="none"
+          columns={defaultColumns}
+        />,
+      );
+
+      expect(
+        within(
+          screen.getByRole("region", { name: "Open issues" }),
+        ).getByText("Live Agent Task"),
+      ).toBeInTheDocument();
+      expect(
+        within(
+          screen.getByRole("region", { name: "In Progress issues" }),
+        ).queryByText("Live Agent Task"),
+      ).not.toBeInTheDocument();
+
+      rerender(
+        <SwimLaneBoard
+          issues={[
+            {
+              ...issue,
+              status: "in_progress",
+              updated_at: "2024-01-01T00:01:00Z",
+            },
+          ]}
+          groupBy="none"
+          columns={defaultColumns}
+        />,
+      );
+
+      expect(
+        within(
+          screen.getByRole("region", { name: "Open issues" }),
+        ).queryByText("Live Agent Task"),
+      ).not.toBeInTheDocument();
+      expect(
+        within(
+          screen.getByRole("region", { name: "In Progress issues" }),
+        ).getByText("Live Agent Task"),
+      ).toBeInTheDocument();
     });
   });
 
@@ -503,6 +561,44 @@ describe("SwimLaneBoard", () => {
 
       expect(handleIssueClick).toHaveBeenCalledTimes(2);
     });
+
+    it("opens the epic issue when an epic lane title is clicked", () => {
+      const handleIssueClick = vi.fn();
+      const issues = [
+        createMockIssue({
+          id: "epic-1",
+          title: "Epic One",
+          issue_type: "epic",
+          status: "open",
+        }),
+        createMockIssue({
+          id: "task-1",
+          title: "Child Task",
+          issue_type: "task",
+          parent: "epic-1",
+          parent_title: "Epic One",
+          status: "open",
+        }),
+      ];
+
+      render(
+        <SwimLaneBoard
+          issues={issues}
+          groupBy="epic"
+          columns={defaultColumns}
+          onIssueClick={handleIssueClick}
+        />,
+      );
+
+      fireEvent.click(
+        screen.getByRole("button", { name: "Open epic: Epic One" }),
+      );
+
+      expect(handleIssueClick).toHaveBeenCalledTimes(1);
+      expect(handleIssueClick).toHaveBeenCalledWith(
+        expect.objectContaining({ id: "epic-1", title: "Epic One" }),
+      );
+    });
   });
 
   describe("blocked issues filtering", () => {
@@ -868,6 +964,32 @@ describe("SwimLaneBoard", () => {
       expect(screen.getByText("Epic Open")).toBeInTheDocument();
       expect(screen.getByText("Epic In Progress")).toBeInTheDocument();
       expect(screen.getByText("Epic Closed")).toBeInTheDocument();
+    });
+
+    it("hides epic issues from ungrouped cards when grouping by epic", () => {
+      const issues = [
+        createMockIssue({
+          id: "epic-1",
+          title: "Epic Issue",
+          issue_type: "epic",
+          status: "open",
+        }),
+        createMockIssue({
+          id: "task-1",
+          title: "Task Issue",
+          issue_type: "task",
+          parent: "epic-1",
+          parent_title: "Epic Issue",
+          status: "open",
+        }),
+      ];
+
+      render(<SwimLaneBoard issues={issues} groupBy="epic" />);
+
+      expect(screen.queryByText("Ungrouped")).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /Issue: Epic Issue/i }))
+        .not.toBeInTheDocument();
+      expect(screen.getByText("Task Issue")).toBeInTheDocument();
     });
 
     it("filters epic issues from flat kanban when groupBy=none (uses DEFAULT_COLUMNS)", () => {

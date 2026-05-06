@@ -21,8 +21,8 @@ const stateCacheVersion = 1
 // This is NOT loom config. The source of truth for workspace/repo/agent
 // existence is fleet-db. The cache exists to hold local-only
 // information that fleet-db can't (and shouldn't) know:
-//   - which workspace the user touched last (so the CLI can default the
-//     active workspace without an explicit -w flag)
+//   - which workspace the user touched last (a UI hint only; runtime
+//     commands require LOOM_WORKSPACE or --workspace)
 //   - where each workspace's checkout lives on this machine
 //   - where each repo within a workspace is checked out on this machine
 //   - where each agent's git worktree lives on this machine

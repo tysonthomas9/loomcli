@@ -5,12 +5,16 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
+	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/monitor"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/storeadapter"
@@ -26,7 +30,7 @@ type WorkspaceInfo struct {
 // WorkspacesResponse lists all configured workspaces.
 type WorkspacesResponse struct {
 	Mode       string                     `json:"mode"`
-	Default    string                     `json:"default"`    // default workspace name
+	Default    string                     `json:"default"`    // deprecated legacy workspace hint
 	Workspaces map[string]WorkspaceDetail `json:"workspaces"` // workspace details
 	Timestamp  time.Time                  `json:"timestamp"`
 }
@@ -319,6 +323,10 @@ func storeAgentsForMonitor(ctx context.Context, st store.Store, workspaceHint st
 		log.Printf("Failed to list store agents for monitor response: %v", err)
 		return agents
 	}
+	workspaceData, err := storeadapter.BuildWorkspaceDataForKey(ctx, st, wsKey)
+	if err != nil {
+		log.Printf("Failed to load workspace data for monitor response: %v", err)
+	}
 
 	for _, assignment := range assignments {
 		if assignment == nil {
@@ -326,7 +334,7 @@ func storeAgentsForMonitor(ctx context.Context, st store.Store, workspaceHint st
 		}
 		agents = append(agents, monitor.AgentStatus{
 			Name:      assignment.Name,
-			Branch:    "unknown",
+			Branch:    monitorBranchFromAgent(workspaceData, assignment),
 			Status:    monitorStatusFromAgentState(assignment.State),
 			Role:      assignment.RoleName,
 			Repo:      monitorRepoFromAgent(assignment),
@@ -343,6 +351,59 @@ func monitorStatusFromAgentState(state domain.AgentState) string {
 	default:
 		return "idle"
 	}
+}
+
+func monitorBranchFromAgent(ws *ops.WorkspaceData, agent *domain.Agent) string {
+	if ws == nil || agent == nil || ws.Path == "" {
+		return "unknown"
+	}
+	repo, ok := selectMonitorAgentRepo(ws.Repos, ops.WorkspaceAgentInfo{
+		Name:       agent.Name,
+		Repos:      agent.Repos,
+		RepoGroups: agent.RepoGroups,
+		CrossRepo:  agent.CrossRepo,
+	})
+	if !ok || repo.Name == "" {
+		return "unknown"
+	}
+	worktreePath := filepath.Join(ws.Path, "worktrees", repo.Name, agent.Name)
+	if _, err := os.Stat(filepath.Join(worktreePath, ".git")); err != nil {
+		return "unknown"
+	}
+	branch, err := cli.GetCurrentBranch(worktreePath)
+	if err != nil || branch == "" {
+		return "unknown"
+	}
+	return branch
+}
+
+func selectMonitorAgentRepo(repos []ops.WorkspaceRepo, agent ops.WorkspaceAgentInfo) (ops.WorkspaceRepo, bool) {
+	if len(repos) == 0 {
+		return ops.WorkspaceRepo{}, false
+	}
+	allowed := make(map[string]bool)
+	for _, name := range agent.Repos {
+		allowed[name] = true
+	}
+	for _, group := range agent.RepoGroups {
+		for _, repo := range repos {
+			for _, repoGroup := range repo.Groups {
+				if repoGroup == group {
+					allowed[repo.Name] = true
+					break
+				}
+			}
+		}
+	}
+	if len(allowed) == 0 {
+		return repos[0], true
+	}
+	for _, repo := range repos {
+		if allowed[repo.Name] {
+			return repo, true
+		}
+	}
+	return ops.WorkspaceRepo{}, false
 }
 
 func monitorRepoFromAgent(agent *domain.Agent) string {

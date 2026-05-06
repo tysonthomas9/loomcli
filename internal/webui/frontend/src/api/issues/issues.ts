@@ -56,15 +56,58 @@ function unwrap<T>(
   return response.data as T;
 }
 
-function normalizeIssueRepo<T extends Issue | IssueDetails>(issue: T): T {
-  if (!issue.repo && issue.source_repo) {
-    return { ...issue, repo: issue.source_repo };
+type IssueWireFields = {
+  parent_id?: string;
+  parent?: string | null;
+  parent_title?: string | null;
+  type?: IssueType | null;
+  issue_type?: IssueType | null;
+};
+
+function getWireIssueType(issue: Issue | IssueDetails): IssueType | undefined {
+  const wire = issue as IssueWireFields;
+  return wire.issue_type ?? wire.type ?? undefined;
+}
+
+function normalizeIssue(
+  issue: Issue | IssueDetails,
+  epicTitles?: Map<string, string>,
+): Issue | IssueDetails {
+  const wire = issue as IssueWireFields;
+  const parent = wire.parent ?? wire.parent_id;
+  const parentTitle =
+    wire.parent_title ?? (parent ? epicTitles?.get(parent) : undefined);
+  const issueType = getWireIssueType(issue);
+
+  if (
+    (!issue.repo && issue.source_repo) ||
+    (issueType !== undefined && issue.issue_type !== issueType) ||
+    (parent !== undefined && wire.parent !== parent) ||
+    (parentTitle !== undefined && wire.parent_title !== parentTitle)
+  ) {
+    return {
+      ...issue,
+      ...(!issue.repo && issue.source_repo ? { repo: issue.source_repo } : {}),
+      ...(issueType !== undefined ? { issue_type: issueType } : {}),
+      ...(parent !== undefined ? { parent } : {}),
+      ...(parentTitle !== undefined ? { parent_title: parentTitle } : {}),
+    };
   }
   return issue;
 }
 
+function normalizeIssueRepo<T extends Issue | IssueDetails>(issue: T): T {
+  return normalizeIssue(issue) as T;
+}
+
 function normalizeIssueRepos<T extends Issue | IssueDetails>(issues: T[]): T[] {
-  return issues.map(normalizeIssueRepo);
+  const epicTitles = new Map<string, string>();
+  for (const issue of issues) {
+    if (getWireIssueType(issue) === "epic") {
+      epicTitles.set(issue.id, issue.title);
+    }
+  }
+  return issues.map((issue) => normalizeIssue(issue, epicTitles) as T);
 }
 
 /**

@@ -259,8 +259,9 @@ daemon profiles, issues). Edit it via the noun-verb CLI:
 ```bash
 # Workspace lifecycle
 loom workspace add ACME                                  # Create workspace ACME
-loom workspace use ACME                                  # Set ACME as the active workspace
-loom workspace show                                      # Show the active workspace + state
+export LOOM_WORKSPACE=ACME                               # Select workspace for runtime commands
+loom workspace use ACME                                  # Remember ACME as a UI selection hint
+loom workspace show ACME                                 # Show workspace state
 loom workspace list                                      # All workspaces in the fleet-db
 
 # Repos (workspace-scoped)
@@ -293,8 +294,10 @@ loom daemon profile unset --max-agents                   # Clear an int field
 | **Local** (default) | `LOOM_FLEET_DB_URL` unset | Embedded subprocess auto-spawned per CLI invocation. Backed by an in-process miniredis with a JSON snapshot at `~/.loom/fleet-db/redis-snapshot.json`. | Zero-install. The miniredis snapshot is the source of truth for backups — copy that file. |
 | **Cloud** | `LOOM_FLEET_DB_URL=<https://...>` | External fleet-db (shared across loom installs). Requires `LOOM_FLEET_DB_API_KEY` for auth, or `LOOM_FLEET_DB_ACTOR=<name>` in dev mode. | Multi-user / multi-machine. State stays on the server. |
 
-`~/.loom/state.json` is a per-user cache of the last-active workspace key
-and is regenerable — not config. Safe to delete.
+`~/.loom/state.json` is a per-user cache of local checkout paths and the last
+selected workspace hint. Runtime commands do not use it as an implicit default;
+set `LOOM_WORKSPACE` or pass `--workspace`. The cache is regenerable — not
+config. Safe to delete.
 
 ## API Reference
 

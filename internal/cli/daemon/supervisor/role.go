@@ -15,6 +15,9 @@ func ResolveRoleConfigStatic(roleName string, config *cfgpkg.DaemonConfig, proje
 	if BuiltInRoles[roleName] {
 		rc := builtInRoleConfig(roleName)
 		if userRC, ok := config.ResolveRole(roleName); ok {
+			if userRC.PromptFile != "" {
+				return cfgpkg.RoleConfig{}, fmt.Errorf("built-in role %q cannot set prompt_file; use a custom role name for prompt-based agents", roleName)
+			}
 			rc = MergeRoleConfig(rc, userRC)
 		}
 		return rc, nil

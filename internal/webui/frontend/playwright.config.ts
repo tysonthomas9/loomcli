@@ -142,6 +142,42 @@ export default defineConfig({
       workers: 1,
     },
     {
+      name: "integration-smoke",
+      testDir: "./tests/e2e/integration",
+      testMatch: "**/*.integration.spec.ts",
+      grep: /@smoke/,
+      use: {
+        ...devices["Desktop Chrome"],
+        ...(chromiumExecutablePath
+          ? { launchOptions: { executablePath: chromiumExecutablePath } }
+          : {}),
+        baseURL: frontendBaseURL,
+        extraHTTPHeaders: authHeaders,
+      },
+      globalSetup: "./tests/e2e/global-setup.ts",
+      globalTeardown: "./tests/e2e/integration/global-teardown.ts",
+      timeout: 60000,
+      workers: 1,
+    },
+    {
+      name: "integration-regression",
+      testDir: "./tests/e2e/integration",
+      testMatch: "**/*.integration.spec.ts",
+      grep: /@regression/,
+      use: {
+        ...devices["Desktop Chrome"],
+        ...(chromiumExecutablePath
+          ? { launchOptions: { executablePath: chromiumExecutablePath } }
+          : {}),
+        baseURL: frontendBaseURL,
+        extraHTTPHeaders: authHeaders,
+      },
+      globalSetup: "./tests/e2e/global-setup.ts",
+      globalTeardown: "./tests/e2e/integration/global-teardown.ts",
+      timeout: 60000,
+      workers: 1,
+    },
+    {
       name: "local-integration",
       testDir: "./tests/e2e/integration",
       testMatch: "**/terminal-parity.integration.spec.ts",
@@ -163,6 +199,32 @@ export default defineConfig({
       testDir: "./tests/e2e/api",
       testMatch: "**/*.api.spec.ts",
       testIgnore: isIntegration ? undefined : "**/*.api.spec.ts",
+      use: {
+        baseURL: apiBaseURL,
+        extraHTTPHeaders: authHeaders,
+      },
+      timeout: 60000,
+      workers: 1,
+    },
+    {
+      name: "api-smoke",
+      testDir: "./tests/e2e/api",
+      testMatch: "**/*.api.spec.ts",
+      testIgnore: isIntegration ? undefined : "**/*.api.spec.ts",
+      grep: /@smoke/,
+      use: {
+        baseURL: apiBaseURL,
+        extraHTTPHeaders: authHeaders,
+      },
+      timeout: 60000,
+      workers: 1,
+    },
+    {
+      name: "api-regression",
+      testDir: "./tests/e2e/api",
+      testMatch: "**/*.api.spec.ts",
+      testIgnore: isIntegration ? undefined : "**/*.api.spec.ts",
+      grep: /@regression/,
       use: {
         baseURL: apiBaseURL,
         extraHTTPHeaders: authHeaders,

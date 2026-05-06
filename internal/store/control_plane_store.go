@@ -206,6 +206,32 @@ type AgentLeaseStore interface {
 	Release(ctx context.Context, workspaceKey, leaseID, token string) (*domain.AgentLease, error)
 }
 
+type AgentOwnershipLeaseAcquire struct {
+	WorkspaceKey    string
+	AgentID         string
+	LeaseID         string
+	OwnerID         string
+	RuntimeProvider domain.RuntimeProvider
+	NodeID          string
+	TTL             time.Duration
+}
+
+type AgentOwnershipLeaseFilter struct {
+	OwnerID         string
+	NodeID          string
+	RuntimeProvider domain.RuntimeProvider
+	Status          domain.AgentLeaseStatus
+	Limit           int
+}
+
+type AgentOwnershipLeaseStore interface {
+	Acquire(ctx context.Context, in AgentOwnershipLeaseAcquire) (*domain.AgentOwnershipLease, error)
+	Get(ctx context.Context, workspaceKey, agentID string) (*domain.AgentOwnershipLease, error)
+	List(ctx context.Context, workspaceKey string, filter AgentOwnershipLeaseFilter) ([]*domain.AgentOwnershipLease, error)
+	Heartbeat(ctx context.Context, workspaceKey, agentID, token string, ttl time.Duration) (*domain.AgentOwnershipLease, error)
+	Release(ctx context.Context, workspaceKey, agentID, token string) (*domain.AgentOwnershipLease, error)
+}
+
 type AgentCommandCreate struct {
 	WorkspaceKey  string
 	CommandID     string

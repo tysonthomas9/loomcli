@@ -24,7 +24,7 @@ func BackendMutationToPayload(m backend.MutationData, workspaceID string) *Mutat
 		Title:       m.Title,
 		Assignee:    m.Assignee,
 		Actor:       m.Actor,
-		Timestamp:   m.Timestamp.UTC().Format(time.RFC3339),
+		Timestamp:   m.Timestamp.UTC().Format(time.RFC3339Nano),
 		OldStatus:   m.OldStatus,
 		NewStatus:   m.NewStatus,
 		ParentID:    m.ParentID,

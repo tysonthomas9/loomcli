@@ -15,12 +15,11 @@ import (
 // configReconciler polls FleetDB-backed daemon config and reconciles agents.
 // It runs as a goroutine, started from Daemon.Start().
 func (d *Daemon) configReconciler() {
-	d.configPollingFallback()
+	d.configPollingLoop()
 }
 
-// configPollingFallback polls for config changes every 30 seconds.
-// Used when fsnotify is unavailable (e.g., NFS, containers).
-func (d *Daemon) configPollingFallback() {
+// configPollingLoop polls for config changes every 30 seconds.
+func (d *Daemon) configPollingLoop() {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 

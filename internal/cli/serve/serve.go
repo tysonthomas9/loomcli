@@ -278,8 +278,12 @@ func resolveFleetState(ctx context.Context) fleetState {
 	} else {
 		fs.modeDetected = cli.IsFleetModeFromEnv()
 	}
-	if fs.modeDetected {
-		fs.clientCfg = config.ResolveFleetConfig(fs.daemonSettings)
+	fs.clientCfg = config.ResolveFleetConfig(fs.daemonSettings)
+	if fs.clientCfg.URL == "" {
+		fs.clientCfg.URL = os.Getenv(bootstrap.EnvFleetDBURL)
+	}
+	if fs.clientCfg.Actor == "" {
+		fs.clientCfg.Actor = os.Getenv(bootstrap.EnvFleetDBActor)
 	}
 
 	fs.jwtKey, fs.redisConfig = daemonwire.ResolveFleetJWTKey(ctx, serveRedisAddr, serveRedisPassword)
@@ -341,6 +345,7 @@ func buildServerConfig(monitorHandlers webui.MonitorHandlers, fs fleetState, sto
 		gitOps.WithStore(storeHandle.Store)
 		if url := storeHandle.URL(); url != "" {
 			cfg.IssueBackendFn = cli.WorkspaceAwareIssueBackendForURL(url, fs.clientCfg.Actor)
+			fs = withStoreFleetURL(fs, url)
 		}
 	}
 	applyFleetConfig(&cfg, fs)
@@ -386,6 +391,13 @@ func buildCoreServerConfig(monitorHandlers webui.MonitorHandlers, gitOps *opsimp
 	}
 }
 
+func withStoreFleetURL(fs fleetState, storeURL string) fleetState {
+	if fs.clientCfg.URL == "" {
+		fs.clientCfg.URL = storeURL
+	}
+	return fs
+}
+
 func applyFleetConfig(cfg *webui.ServerConfig, fs fleetState) {
 	cfg.FleetEnabled = serveFleetMode
 	cfg.FleetRedis = fs.redisConfig
@@ -413,8 +425,8 @@ func applyWorkspaceConfig(cfg *webui.ServerConfig) {
 	cfg.InitialWorkspaceID = serveadapter.ResolveInitialWorkspaceID(cfg.Store)
 	applyFleetInitialWorkspaceFallback(cfg, false)
 	cfg.WorkspaceDeleteFn = serveadapter.BuildWorkspaceDeleteFn(cfg.Store)
-	cfg.SetDefaultWorkspaceFn = serveadapter.BuildSetDefaultWorkspaceFn(cfg.Store)
-	cfg.ClearDefaultWorkspaceFn = serveadapter.BuildClearDefaultWorkspaceFn()
+	cfg.SetDefaultWorkspaceFn = nil
+	cfg.ClearDefaultWorkspaceFn = nil
 	cfg.WorkspaceCreateFn = workspacemgr.BuildStoreBackedCreateWorkspace(cfg.Store)
 	cfg.WorkspaceAddReposFn = workspacemgr.BuildStoreBackedAddRepos(cfg.Store)
 	cfg.DaemonConfigFn = daemonwire.BuildStoreBackedDaemonConfigFn(cfg.Store)

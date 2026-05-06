@@ -2,6 +2,8 @@
 set -euo pipefail
 
 WORKSPACE="${LOOM_WORKSPACE:-LOCALMODE}"
+export LOOM_WORKSPACE="$WORKSPACE"
+export LOOM_WORKSPACE_ID="$WORKSPACE"
 SOURCE_REPO="${LOOM_LOCAL_MODE_SOURCE_REPO:-/workspace/source-repo}"
 ORIGIN_REPO="${LOOM_LOCAL_MODE_ORIGIN_REPO:-/workspace/source-repo-origin.git}"
 WORKSPACE_ROOT="${LOOM_LOCAL_MODE_WORKSPACE_ROOT:-/root/.loom/workspaces/${WORKSPACE}}"
@@ -23,6 +25,8 @@ PLAN_TASK_ID="${LOOM_LOCAL_MODE_PLAN_TASK_ID:-${WORKSPACE}-1}"
 CODE_TASK_ID="${LOOM_LOCAL_MODE_CODE_TASK_ID:-${WORKSPACE}-2}"
 LOOM_BIND="${LOOM_LOCAL_MODE_BIND:-0.0.0.0}"
 LOOM_PORT="${LOOM_LOCAL_MODE_API_PORT:-8080}"
+DAEMON_SCAN_INTERVAL="${LOOM_LOCAL_MODE_DAEMON_SCAN_INTERVAL:-5}"
+DAEMON_STDOUT_DIR="${LOOM_LOCAL_MODE_DAEMON_STDOUT_DIR:-/tmp/loom-local-mode-daemons}"
 export LOOM_BACKEND="$AGENT_BACKEND"
 
 http_get() {
@@ -236,7 +240,106 @@ start_serve() {
   wait_for_url "http://127.0.0.1:${LOOM_PORT}/api/config" "loom serve"
 }
 
+workspace_daemon_pid() {
+  ws_path="$1"
+  pid_file="${ws_path}/.loom/daemon.pid"
+  if [ ! -f "$pid_file" ]; then
+    return 1
+  fi
+
+  pid="$(tr -dc '0-9' < "$pid_file" || true)"
+  if [ "$pid" = "" ]; then
+    return 1
+  fi
+  if kill -0 "$pid" >/dev/null 2>&1; then
+    printf '%s\n' "$pid"
+    return 0
+  fi
+  return 1
+}
+
+workspace_has_auto_agents() {
+  ws_key="$1"
+  agents_json="$(LOOM_WORKSPACE="$ws_key" LOOM_WORKSPACE_ID="$ws_key" loom agentdef list --json 2>/tmp/local-mode-agentdef.err || true)"
+  if [ "$agents_json" = "" ]; then
+    return 1
+  fi
+  auto_count="$(printf '%s' "$agents_json" | jq '[.[] | select(.auto == true)] | length' 2>/dev/null || printf '0')"
+  [ "${auto_count:-0}" -gt 0 ]
+}
+
+start_workspace_daemon() {
+  ws_key="$1"
+  ws_path="$2"
+  mkdir -p "${ws_path}/.loom" "$DAEMON_STDOUT_DIR"
+
+  log_file="${DAEMON_STDOUT_DIR}/${ws_key}.log"
+  echo "[local-mode] starting daemon for workspace ${ws_key} (${ws_path})"
+  (
+    cd "$ws_path"
+    export LOOM_WORKSPACE="$ws_key"
+    export LOOM_WORKSPACE_ID="$ws_key"
+    export LOOM_BACKEND="$AGENT_BACKEND"
+    export LOOM_ISSUE_BACKEND=fleetdb
+    export LOOM_FLEET_DB_URL="${LOOM_FLEET_DB_URL:-http://fleet-db:8080}"
+    export LOOM_FLEET_URL="${LOOM_FLEET_URL:-http://fleet-db:8080}"
+    export LOOM_FLEET_DB_ACTOR="${LOOM_FLEET_DB_ACTOR:-local-mode-harness@fixture.local}"
+    export LOOM_FLEET_ACTOR="${LOOM_FLEET_ACTOR:-local-mode-harness@fixture.local}"
+    loom daemon
+  ) >>"$log_file" 2>&1 &
+}
+
+reconcile_workspace_daemons() {
+  workspace_json="$(loom workspace list --json 2>/tmp/local-mode-workspaces.err || true)"
+  if [ "$workspace_json" = "" ]; then
+    echo "[local-mode] workspace daemon manager: no workspaces returned"
+    return 0
+  fi
+
+  printf '%s' "$workspace_json" |
+    jq -r '.[] | select((.path // "") != "") | [.key, .path] | @tsv' 2>/tmp/local-mode-workspaces-jq.err |
+    while IFS="$(printf '\t')" read -r ws_key ws_path; do
+      if [ "$ws_key" = "" ] || [ "$ws_path" = "" ]; then
+        continue
+      fi
+      if ! workspace_has_auto_agents "$ws_key"; then
+        continue
+      fi
+      if workspace_daemon_pid "$ws_path" >/dev/null 2>&1; then
+        continue
+      fi
+      start_workspace_daemon "$ws_key" "$ws_path"
+    done
+}
+
+run_daemon_manager() {
+  echo "[local-mode] daemon manager: keeping daemons alive for workspaces with auto agents"
+  echo "[local-mode] daemon manager: scan interval ${DAEMON_SCAN_INTERVAL}s"
+  while true; do
+    reconcile_workspace_daemons || true
+    sleep "$DAEMON_SCAN_INTERVAL" &
+    wait "$!" || return 0
+  done
+}
+
+stop_workspace_daemons() {
+  workspace_json="$(loom workspace list --json 2>/dev/null || true)"
+  if [ "$workspace_json" = "" ]; then
+    return 0
+  fi
+
+  printf '%s' "$workspace_json" |
+    jq -r '.[] | select((.path // "") != "") | .path' 2>/dev/null |
+    while read -r ws_path; do
+      pid="$(workspace_daemon_pid "$ws_path" || true)"
+      if [ "$pid" != "" ]; then
+        kill "$pid" >/dev/null 2>&1 || true
+      fi
+    done
+}
+
 cleanup() {
+  stop_workspace_daemons || true
   if [ "${serve_pid:-}" != "" ]; then
     kill "$serve_pid" >/dev/null 2>&1 || true
   fi
@@ -267,5 +370,4 @@ echo "[local-mode] API: ${LOCAL_MODE_API_URL:-http://localhost:8282}"
 echo "[local-mode] planner task: ${PLAN_TASK_ID}"
 echo "[local-mode] coder task:   ${CODE_TASK_ID}"
 
-cd "$WORKSPACE_ROOT"
-loom daemon
+run_daemon_manager

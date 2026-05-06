@@ -13,7 +13,6 @@ import styles from "../WorkspaceTree.module.css";
 export interface SortableWorkspaceEntryProps {
   ws: WorkspaceSummary;
   isActive: boolean;
-  isDefault: boolean;
   isEditing: boolean;
   draftName: string;
   isSaving: boolean;
@@ -32,7 +31,6 @@ export interface SortableWorkspaceEntryProps {
 export function SortableWorkspaceEntry({
   ws,
   isActive,
-  isDefault,
   isEditing,
   draftName,
   isSaving,
@@ -185,12 +183,6 @@ export function SortableWorkspaceEntry({
           aria-label={`Switch to workspace ${ws.name}`}
         >
           {ws.name}
-          {isDefault && (
-            <span className={styles.defaultStar} title="Default workspace">
-              {" "}
-              &#9733;
-            </span>
-          )}
         </a>
       )}
       {ws.state === "error" && (

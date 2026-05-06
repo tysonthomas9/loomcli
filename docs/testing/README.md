@@ -16,6 +16,7 @@ Comprehensive documentation of all tests in the loomcli project.
 
 - **[Go Backend Tests](go-backend-tests.md)** - Current Go test surfaces and FleetDB-focused backend gates
 - **[Frontend Tests](frontend-tests.md)** - Vitest unit tests, Playwright E2E tests, component tests, API tests
+- **[Dogfood to Playwright Coverage](dogfood-playwright-coverage.md)** - Maps `dogfood-output/` findings to automated smoke/regression coverage and pending gaps
 - **[Test Infrastructure](test-infrastructure.md)** - CI/CD, scripts, Makefile targets, configuration files, coverage
 - **[Test Patterns & Conventions](test-patterns.md)** - Common patterns, mocking strategies, helpers, and best practices
 

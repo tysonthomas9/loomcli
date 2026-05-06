@@ -31,6 +31,9 @@ func printAgentStatus(agent DaemonAgentStatus) {
 	if agent.TaskID != "" {
 		fmt.Printf("      Task: %s\n", agent.TaskID)
 	}
+	if agent.OwnershipLeaseID != "" {
+		fmt.Printf("      Ownership: fence %d\n", agent.OwnershipFencingToken)
+	}
 
 	// Branch line with git sync info (read-time git ops)
 	printAgentBranchInfo(agent)

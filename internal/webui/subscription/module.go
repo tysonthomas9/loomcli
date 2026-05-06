@@ -11,17 +11,17 @@ import (
 // Module registers the workspace-scoped SSE event stream routes on a
 // [*http.ServeMux]. The module is only constructed when hub is non-nil.
 //
-// The SSE token exchange route is conditional on sseTokens being non-nil
-// (external auth mode only).
+// The SSE token exchange route is always registered. In open mode, when
+// sseTokens is nil, it returns a cache-disabled "disabled" response so browsers
+// do not emit noisy 404 console errors before connecting directly.
 type Module struct {
 	hub               *realtime.Hub
 	getMutationsSince func(wsID string, since string) []rpc.MutationEvent
 	workspaceFromCtx  func(context.Context) string
-	sseTokens         *realtime.TokenStore // may be nil — token route skipped
+	sseTokens         *realtime.TokenStore // may be nil in open auth mode
 }
 
-// NewModule returns a Module. sseTokens may be nil — the token
-// exchange route will simply not be registered.
+// NewModule returns a Module. sseTokens may be nil in open auth mode.
 func NewModule(hub *realtime.Hub, getMutationsSince func(string, string) []rpc.MutationEvent, workspaceFromCtx func(context.Context) string, sseTokens *realtime.TokenStore) *Module {
 	return &Module{
 		hub:               hub,
@@ -31,7 +31,7 @@ func NewModule(hub *realtime.Hub, getMutationsSince func(string, string) []rpc.M
 	}
 }
 
-// Register implements [Module] by registering 1–2 SSE routes.
+// Register implements [Module] by registering workspace-scoped SSE routes.
 func (m *Module) Register(mux *http.ServeMux) {
 	// SSE event stream — uses mux.Handle because realtime.NewHandler returns http.Handler
 	sseHandler := realtime.NewHandler(realtime.HandlerConfig{
@@ -42,8 +42,5 @@ func (m *Module) Register(mux *http.ServeMux) {
 	})
 	mux.Handle("GET /api/workspaces/{ws}/events", sseHandler)
 
-	// SSE token exchange — conditional on external auth mode
-	if m.sseTokens != nil {
-		mux.HandleFunc("GET /api/workspaces/{ws}/events/token", HandleSSEToken(m.sseTokens))
-	}
+	mux.HandleFunc("GET /api/workspaces/{ws}/events/token", HandleSSEToken(m.sseTokens))
 }

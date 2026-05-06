@@ -22,6 +22,8 @@ type fleetIssueWire struct {
 	Owner       string     `json:"owner,omitempty"`
 	Labels      []string   `json:"labels,omitempty"`
 	Repo        string     `json:"repo,omitempty"`
+	ParentID    string     `json:"parent_id,omitempty"`
+	Parent      string     `json:"parent,omitempty"`
 	Design      string     `json:"design,omitempty"`
 	Description string     `json:"description,omitempty"`
 	CreatedAt   time.Time  `json:"created_at,omitempty"`
@@ -57,6 +59,13 @@ func (w fleetIssueWire) toIssue() types.Issue {
 	}
 }
 
+func (w fleetIssueWire) parent() string {
+	if w.ParentID != "" {
+		return w.ParentID
+	}
+	return w.Parent
+}
+
 // fleetIssueWithCountsWire mirrors fleet-db's IssueWithCounts wrapper.
 type fleetIssueWithCountsWire struct {
 	fleetIssueWire
@@ -71,6 +80,9 @@ type fleetIssueWithCountsWire struct {
 func (w fleetIssueWithCountsWire) toIssueData() backend.IssueData {
 	issue := w.toIssue()
 	d := issueToData(&issue)
+	if parent := w.parent(); parent != "" {
+		d.Parent = parent
+	}
 	d.DependencyCount = w.DependencyCount
 	d.DependentCount = w.DependentCount
 	return d
@@ -292,6 +304,9 @@ func readyIssuesToData(issues []*readyIssueWithParent) []backend.IssueData {
 		}
 		issue := riwp.fleetIssueWire.toIssue()
 		d := issueToData(&issue)
+		if parent := riwp.fleetIssueWire.parent(); parent != "" {
+			d.Parent = parent
+		}
 		if riwp.Parent != nil {
 			d.Parent = *riwp.Parent
 		}
@@ -308,7 +323,11 @@ func blockedIssuesToData(issues []*blockedIssueWire) []backend.IssueData {
 			continue
 		}
 		issue := bi.fleetIssueWire.toIssue()
-		result = append(result, issueToData(&issue))
+		d := issueToData(&issue)
+		if parent := bi.fleetIssueWire.parent(); parent != "" {
+			d.Parent = parent
+		}
+		result = append(result, d)
 	}
 	return result
 }

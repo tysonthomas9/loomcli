@@ -80,10 +80,18 @@ func TestGetYieldTimeout_Negative(t *testing.T) {
 
 func TestDrainWithGrace_PIDZero(t *testing.T) {
 	s := newDrainTestSupervisor(&config.DaemonConfig{})
+	dir := t.TempDir()
+	if err := WriteYieldFile(dir, &YieldRequest{
+		Reason:      "stale",
+		RequestedAt: time.Now(),
+		RequestedBy: "test",
+	}); err != nil {
+		t.Fatalf("WriteYieldFile: %v", err)
+	}
 	ap := &AgentProcess{
 		Entry:        config.AgentEntry{Worktree: "test"},
 		Pid:          0,
-		WorktreePath: t.TempDir(),
+		WorktreePath: dir,
 	}
 
 	start := time.Now()
@@ -97,9 +105,9 @@ func TestDrainWithGrace_PIDZero(t *testing.T) {
 		t.Errorf("DrainWithGrace took %v, want < 100ms for pid=0", elapsed)
 	}
 
-	// Verify yield file was written even though pid was 0
-	if !IsYieldRequested(ap.WorktreePath) {
-		t.Error("yield file should have been written before detecting pid=0")
+	// Idle agents should not leave a stale yield marker that makes git status dirty.
+	if IsYieldRequested(ap.WorktreePath) {
+		t.Error("yield file should have been cleared for pid=0")
 	}
 }
 
@@ -145,6 +153,9 @@ func TestDrainWithGrace_AgentExitsDuringYield(t *testing.T) {
 	}
 	if elapsed > 5*time.Second {
 		t.Errorf("DrainWithGrace took %v, want < 5s", elapsed)
+	}
+	if IsYieldRequested(ap.WorktreePath) {
+		t.Error("yield file should be cleared after graceful drain")
 	}
 
 	// Wait for waitForAgent goroutine to finish

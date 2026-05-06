@@ -166,7 +166,7 @@ export async function reorderWorkspaces(
 }
 
 /**
- * Set the default workspace.
+ * Deprecated: default workspace selection has been removed.
  */
 export async function setDefaultWorkspace(
   name: string,
@@ -179,7 +179,7 @@ export async function setDefaultWorkspace(
 }
 
 /**
- * Clear the default workspace.
+ * Deprecated: default workspace selection has been removed.
  */
 export async function clearDefaultWorkspace(): Promise<WorkspaceData> {
   const response = await del<ApiResult<WorkspaceData>>(

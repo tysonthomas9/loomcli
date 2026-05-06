@@ -21,17 +21,21 @@ type AgentProcess struct {
 	WorktreePath string             // resolved worktree path
 	RepoConfig   *cfgpkg.RepoConfig // per-repo config (nil in non-workspace mode)
 
-	Cmd             *exec.Cmd         // current subprocess (nil when not running)
-	Pid             int               // PID of current subprocess (0 when not running)
-	LogFile         *os.File          // log file handle for subprocess output (nil if not logging)
-	LogFilePath     string            // path to agent log file for watchdog stat checks
-	TranscriptPath  string            // path to session transcript.jsonl for watchdog liveness (set by superviseAgent)
-	Session         *sessions.Session // daemon-created session handle (nil when no session active)
-	AgentSessionID  string            // fleet-db control-plane session id (empty when no session active)
-	AgentLeaseID    string            // fleet-db control-plane lease id (empty when no lease active)
-	AgentLeaseToken string            // fleet-db control-plane lease token (empty when no lease active)
-	BeforeRef       string            // git HEAD ref before spawn (for diff stats at finalization)
-	AssignedTaskID  string            // task claimed by supervisor preflight for this run
+	Cmd                    *exec.Cmd         // current subprocess (nil when not running)
+	Pid                    int               // PID of current subprocess (0 when not running)
+	LogFile                *os.File          // log file handle for subprocess output (nil if not logging)
+	LogFilePath            string            // path to agent log file for watchdog stat checks
+	TranscriptPath         string            // path to session transcript.jsonl for watchdog liveness (set by superviseAgent)
+	Session                *sessions.Session // daemon-created session handle (nil when no session active)
+	AgentSessionID         string            // fleet-db control-plane session id (empty when no session active)
+	AgentLeaseID           string            // fleet-db control-plane lease id (empty when no lease active)
+	AgentLeaseToken        string            // fleet-db control-plane lease token (empty when no lease active)
+	OwnershipLeaseID       string            // fleet-db logical-agent ownership lease id (empty when not owner)
+	OwnershipLeaseToken    string            // fleet-db logical-agent ownership lease token (empty when not owner)
+	OwnershipFencingToken  int64             // fencing token for logical-agent ownership
+	OwnershipLastHeartbeat time.Time         // last successful ownership heartbeat
+	BeforeRef              string            // git HEAD ref before spawn (for diff stats at finalization)
+	AssignedTaskID         string            // task claimed by supervisor preflight for this run
 
 	RestartCount   int       // consecutive restart attempts
 	LastStart      time.Time // when subprocess was last spawned
@@ -53,7 +57,7 @@ type AgentProcess struct {
 
 	StopReason StopReason // why the agent was stopped (set at decision site, empty while running)
 
-	Mu sync.Mutex // protects Cmd, Pid, LogFile, restart tracking, AssignedEpicID, AssignedTaskID, LastError, CurrentBackendIdx, Session, AgentSessionID, AgentLeaseID, AgentLeaseToken, TranscriptPath, BeforeRef, StopReason
+	Mu sync.Mutex // protects Cmd, Pid, LogFile, restart tracking, AssignedEpicID, AssignedTaskID, LastError, CurrentBackendIdx, Session, AgentSessionID, AgentLeaseID, AgentLeaseToken, ownership fields, TranscriptPath, BeforeRef, StopReason
 }
 
 // StopReason identifies why an agent was stopped.
@@ -68,6 +72,7 @@ const (
 	StopReasonConfigRemoved StopReason = "config_removed"
 	StopReasonShutdown      StopReason = "shutdown"
 	StopReasonYielded       StopReason = "yielded"
+	StopReasonWatchdog      StopReason = "watchdog"
 )
 
 // resolveRemote returns the git remote name for this agent.
@@ -100,22 +105,25 @@ func (ap *AgentProcess) ResolveRemoteBranch() string {
 // SupervisedAgentStatus is a snapshot of a supervised agent's state for external inspection.
 // This type is safe to copy and does not contain a mutex.
 type SupervisedAgentStatus struct {
-	Worktree       string
-	Role           string
-	Repo           string
-	WorktreePath   string
-	PID            int
-	RestartCount   int
-	LastStart      time.Time
-	LastExit       time.Time
-	LastExitCode   int
-	AssignedEpicID string
-	CurrentBackend string     // effective backend (includes failover state)
-	StopReason     StopReason // why the agent stopped (empty while running)
-	LastErrorClass string     // string representation of last error class (e.g. "RateLimited")
-	NoWorkCount    int        // consecutive NoWork exits
-	BackoffUntil   time.Time  // when backoff sleep ends (zero if not in backoff)
-	RemoteBranch   string     // remote tracking ref (e.g. "origin/main")
+	Worktree               string
+	Role                   string
+	Repo                   string
+	WorktreePath           string
+	PID                    int
+	RestartCount           int
+	LastStart              time.Time
+	LastExit               time.Time
+	LastExitCode           int
+	AssignedEpicID         string
+	CurrentBackend         string     // effective backend (includes failover state)
+	StopReason             StopReason // why the agent stopped (empty while running)
+	LastErrorClass         string     // string representation of last error class (e.g. "RateLimited")
+	NoWorkCount            int        // consecutive NoWork exits
+	BackoffUntil           time.Time  // when backoff sleep ends (zero if not in backoff)
+	RemoteBranch           string     // remote tracking ref (e.g. "origin/main")
+	OwnershipLeaseID       string
+	OwnershipFencingToken  int64
+	OwnershipLastHeartbeat time.Time
 }
 
 // BuiltInRoles defines the built-in role names that use loom <role> command.

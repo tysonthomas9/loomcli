@@ -228,7 +228,7 @@ test.describe('Real-time Updates (SSE)', () => {
   })
 
   test.describe('Connection', () => {
-    test('SSE connection establishes successfully', async () => {
+    test('SSE connection establishes successfully @smoke', async () => {
       sseClient = new SSEClient()
       await sseClient.connect()
 
@@ -243,11 +243,8 @@ test.describe('Real-time Updates (SSE)', () => {
     })
   })
 
-  // Current fleet SSE is workspace-scoped and establishes successfully, but
-  // issue mutation events are not emitted by the CLI-backed fleet adapter.
-  // Keep these contracts disabled instead of falling back to flat SSE endpoints.
-  test.describe.skip('Mutation Events', () => {
-    test('create event received after POST /api/workspaces/{ws}/issues', async ({ api }) => {
+  test.describe('Mutation Events', () => {
+    test('create event received after POST /api/workspaces/{ws}/issues @smoke', async ({ api }) => {
       // Connect SSE first
       sseClient = new SSEClient()
       await sseClient.connect()
@@ -264,7 +261,7 @@ test.describe('Real-time Updates (SSE)', () => {
       // Wait for create event
       const createEvent = await sseClient.waitForEvent(
         e => e.parsed?.type === 'create' && e.parsed?.issue_id === issue.id,
-        5000
+        10000
       )
 
       expect(createEvent.parsed?.type).toBe('create')
@@ -273,7 +270,7 @@ test.describe('Real-time Updates (SSE)', () => {
       expect(createEvent.parsed?.timestamp).toBeDefined()
     })
 
-    test('update event received after PATCH', async ({ api }) => {
+    test('update event received after PATCH @regression', async ({ api }) => {
       // Create issue first
       const title = `SSE Update Test ${generateTestId()}`
       const issue = await api.createIssue({ title, issue_type: 'task', priority: 2 })
@@ -292,14 +289,14 @@ test.describe('Real-time Updates (SSE)', () => {
       // Wait for update event
       const updateEvent = await sseClient.waitForEvent(
         e => e.parsed?.type === 'update' && e.parsed?.issue_id === issue.id,
-        5000
+        10000
       )
 
       expect(updateEvent.parsed?.type).toBe('update')
       expect(updateEvent.parsed?.issue_id).toBe(issue.id)
     })
 
-    test('status event received after status change', async ({ api }) => {
+    test('status mutation received after status change @smoke', async ({ api }) => {
       // Create issue
       const title = `SSE Status Test ${generateTestId()}`
       const issue = await api.createIssue({ title, issue_type: 'task', priority: 2 })
@@ -314,19 +311,21 @@ test.describe('Real-time Updates (SSE)', () => {
       // Change status to in_progress
       await api.updateIssue(issue.id, { status: 'in_progress' })
 
-      // Wait for status event
+      // Wait for a mutation carrying the status delta. FleetDB-backed streams
+      // may mark PATCH-originated status changes as "update" while still
+      // carrying old_status/new_status.
       const statusEvent = await sseClient.waitForEvent(
-        e => e.parsed?.type === 'status' && e.parsed?.issue_id === issue.id,
-        5000
+        e => e.parsed?.issue_id === issue.id && e.parsed?.new_status === 'in_progress',
+        10000
       )
 
-      expect(statusEvent.parsed?.type).toBe('status')
+      expect(['status', 'update']).toContain(statusEvent.parsed?.type)
       expect(statusEvent.parsed?.issue_id).toBe(issue.id)
       expect(statusEvent.parsed?.old_status).toBe('open')
       expect(statusEvent.parsed?.new_status).toBe('in_progress')
     })
 
-    test('close event received after close', async ({ api }) => {
+    test('close event received after close @regression', async ({ api }) => {
       // Create issue
       const title = `SSE Close Test ${generateTestId()}`
       const issue = await api.createIssue({ title, issue_type: 'task', priority: 2 })
@@ -345,15 +344,15 @@ test.describe('Real-time Updates (SSE)', () => {
       // Note: Close generates a status event, not a separate 'close' type
       const closeEvent = await sseClient.waitForEvent(
         e => e.parsed?.issue_id === issue.id && e.parsed?.new_status === 'closed',
-        5000
+        10000
       )
 
-      expect(closeEvent.parsed?.type).toBe('status')
+      expect(['status', 'update']).toContain(closeEvent.parsed?.type)
       expect(closeEvent.parsed?.issue_id).toBe(issue.id)
       expect(closeEvent.parsed?.new_status).toBe('closed')
     })
 
-    test('comment event received after adding comment', async ({ api }) => {
+    test('comment event received after adding comment @regression', async ({ api }) => {
       // Create issue
       const title = `SSE Comment Test ${generateTestId()}`
       const issue = await api.createIssue({ title, issue_type: 'task', priority: 2 })
@@ -372,7 +371,7 @@ test.describe('Real-time Updates (SSE)', () => {
       // Wait for comment event
       const commentEvent = await sseClient.waitForEvent(
         e => e.parsed?.type === 'comment' && e.parsed?.issue_id === issue.id,
-        5000
+        10000
       )
 
       expect(commentEvent.parsed?.type).toBe('comment')

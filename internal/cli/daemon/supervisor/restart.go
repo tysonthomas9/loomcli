@@ -7,6 +7,8 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
 )
 
+const primaryBackendRetryCooldown = time.Minute
+
 // handleRestartAfterError handles restart logic after spawn failure.
 // Returns true if the supervisor should continue, false if it should exit.
 func (s *Supervisor) handleRestartAfterError(ap *AgentProcess) bool {
@@ -78,6 +80,9 @@ func (s *Supervisor) shouldRestart(ap *AgentProcess) bool {
 		ap.RestartCount = 0
 		ap.RateRetryCount = 0
 		ap.NoWorkCount++
+		if ap.CurrentBackendIdx > 0 && shouldRetryPrimaryAfterNoWork(ap.NoWorkCount, s.getNoWorkBackoff()) {
+			ap.CurrentBackendIdx = 0
+		}
 		ap.StopReason = ""
 		return true
 	}
@@ -166,6 +171,13 @@ func (s *Supervisor) computeBackoff(ap *AgentProcess) time.Duration {
 	}
 
 	return backoff
+}
+
+func shouldRetryPrimaryAfterNoWork(noWorkCount, noWorkBackoffSeconds int) bool {
+	if noWorkCount <= 0 || noWorkBackoffSeconds <= 0 {
+		return false
+	}
+	return time.Duration(noWorkCount)*time.Duration(noWorkBackoffSeconds)*time.Second >= primaryBackendRetryCooldown
 }
 
 // Helper functions to safely access config.RestartPolicy fields with defaults.

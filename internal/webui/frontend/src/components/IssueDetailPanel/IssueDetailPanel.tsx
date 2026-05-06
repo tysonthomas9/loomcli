@@ -814,7 +814,10 @@ function DefaultContent({
       const updatedIssue = await updateIssue(workspaceId, issue.id, {
         add_labels: [label],
       });
-      onIssueUpdate?.(updatedIssue);
+      const labels = updatedIssue.labels?.includes(label)
+        ? updatedIssue.labels
+        : [...(updatedIssue.labels ?? issue.labels ?? []), label];
+      onIssueUpdate?.({ ...updatedIssue, labels });
     },
     [issue, onIssueUpdate],
   );
@@ -825,7 +828,10 @@ function DefaultContent({
       const updatedIssue = await updateIssue(workspaceId, issue.id, {
         remove_labels: [label],
       });
-      onIssueUpdate?.(updatedIssue);
+      const labels = (updatedIssue.labels ?? issue.labels ?? []).filter(
+        (current) => current !== label,
+      );
+      onIssueUpdate?.({ ...updatedIssue, labels });
     },
     [issue, onIssueUpdate],
   );

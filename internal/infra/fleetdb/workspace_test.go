@@ -70,7 +70,7 @@ func TestWorkspaceStoreCreateOmitsUnsupportedFleetDBFields(t *testing.T) {
 	}
 }
 
-func TestWorkspaceStoreUpdateSendsAllWorkspaceFields(t *testing.T) {
+func TestWorkspaceStoreUpdateSendsSupportedFleetDBFields(t *testing.T) {
 	now := time.Now().UTC()
 	state := domain.WorkspaceStateReady
 	description := "dogfood workspace"
@@ -85,20 +85,8 @@ func TestWorkspaceStoreUpdateSendsAllWorkspaceFields(t *testing.T) {
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 				t.Fatalf("decode patch: %v", err)
 			}
-			want := map[string]any{
-				"name":           "Renamed",
-				"description":    "dogfood workspace",
-				"default_branch": "localmode",
-				"state":          "ready",
-				"error_message":  "clear",
-			}
-			for key, value := range want {
-				if body[key] != value {
-					t.Fatalf("patch body[%q] = %v, want %v (body=%+v)", key, body[key], value, body)
-				}
-			}
-			if len(body) != len(want) {
-				t.Fatalf("patch body = %+v, want exactly %+v", body, want)
+			if len(body) != 1 || body["name"] != "Renamed" {
+				t.Fatalf("patch body = %+v, want name only", body)
 			}
 			w.WriteHeader(http.StatusNoContent)
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/admin/workspaces/LOCALMODE":
@@ -143,22 +131,13 @@ func TestWorkspaceStoreUpdateSendsAllWorkspaceFields(t *testing.T) {
 	}
 }
 
-func TestWorkspaceStoreUpdateStateOnlySendsPatch(t *testing.T) {
+func TestWorkspaceStoreUpdateStateOnlySkipsUnsupportedFleetDBPatch(t *testing.T) {
 	now := time.Now().UTC()
 	state := domain.WorkspaceStateReady
-	var sawPatch bool
 	httpClient := newWorkspaceHTTPClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodPatch && r.URL.Path == "/api/v1/admin/workspaces/LOCALMODE":
-			sawPatch = true
-			var body map[string]any
-			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-				t.Fatalf("decode patch: %v", err)
-			}
-			if len(body) != 1 || body["state"] != "ready" {
-				t.Fatalf("patch body = %+v, want state only", body)
-			}
-			w.WriteHeader(http.StatusNoContent)
+			t.Fatalf("state-only update must not PATCH unsupported fleet-db fields")
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/admin/workspaces/LOCALMODE":
 			writeJSON(t, w, domain.Workspace{Key: "LOCALMODE", Name: "Local Mode", State: state, CreatedAt: now, UpdatedAt: now})
 		default:
@@ -173,9 +152,6 @@ func TestWorkspaceStoreUpdateStateOnlySendsPatch(t *testing.T) {
 	ws, err := client.Workspaces().Update(t.Context(), "LOCALMODE", store.WorkspaceUpdate{State: &state})
 	if err != nil {
 		t.Fatalf("update workspace: %v", err)
-	}
-	if !sawPatch {
-		t.Fatal("expected PATCH request")
 	}
 	if ws.Name != "Local Mode" {
 		t.Fatalf("Name = %q, want Local Mode", ws.Name)

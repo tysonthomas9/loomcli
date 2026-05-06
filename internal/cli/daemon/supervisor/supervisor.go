@@ -25,6 +25,12 @@ import (
 // EventEmitter is the interface for emitting observability events.
 type EventEmitter = events.Emitter
 
+const (
+	claimReadyLimit         = 256
+	claimConflictRetryLimit = 16
+	claimOperationTimeout   = 10 * time.Second
+)
+
 // Supervisor manages agent subprocess lifecycle: spawning, health-checking,
 // restart logic, and graceful drain. It is created by the daemon and owns
 // the agent process list and supervision goroutines.
@@ -72,7 +78,11 @@ type Supervisor struct {
 // NewAgent creates an AgentProcess from an agent entry, resolving the worktree path
 // and role config. The idx is used for error messages only.
 func (s *Supervisor) NewAgent(entry config.AgentEntry, idx int) (*AgentProcess, error) {
-	target, err := workspace.ResolveAgentTarget(entry.Worktree, entry.Repo)
+	repoName := entry.Repo
+	if repoName == "" && len(entry.Repos) == 1 && !entry.CrossRepo {
+		repoName = entry.Repos[0]
+	}
+	target, err := workspace.ResolveAgentTarget(entry.Worktree, repoName)
 	if err != nil {
 		return nil, fmt.Errorf("agent[%d] worktree %q: %w", idx, entry.Worktree, err)
 	}
@@ -86,7 +96,7 @@ func (s *Supervisor) NewAgent(entry config.AgentEntry, idx int) (*AgentProcess, 
 		Entry:        entry,
 		RoleConfig:   roleConfig,
 		WorktreePath: target.WorkDir,
-		RepoConfig:   s.FindRepoConfig(entry.Repo),
+		RepoConfig:   s.FindRepoConfig(repoName),
 	}
 	return ap, nil
 }
@@ -263,7 +273,20 @@ func (s *Supervisor) superviseAgent(ap *AgentProcess) {
 
 		s.clearAgentSessionState(ap)
 
+		if !s.acquireAgentOwnership(ap) {
+			if !s.sleepBeforeOwnershipRetry(ap) {
+				return
+			}
+			continue
+		}
+		stopOwnershipHeartbeat := s.startOwnershipHeartbeat(ap)
+		releaseOwnership := func() {
+			stopOwnershipHeartbeat()
+			s.releaseAgentOwnership(ap)
+		}
+
 		if !s.Concurrency.Acquire(ap.Entry.Role) {
+			releaseOwnership()
 			slog.Info("concurrency tracker closed, exiting", "worktree", ap.Entry.Worktree)
 			s.setStopReason(ap, StopReasonShutdown)
 			return
@@ -271,6 +294,7 @@ func (s *Supervisor) superviseAgent(ap *AgentProcess) {
 
 		if !s.preFlightSetup(ap) {
 			s.Concurrency.Release(ap.Entry.Role)
+			releaseOwnership()
 			s.postExitCleanup(ap)
 			if !s.shouldRestart(ap) {
 				return
@@ -282,9 +306,11 @@ func (s *Supervisor) superviseAgent(ap *AgentProcess) {
 		}
 
 		if !s.spawnAndWait(ap) {
+			releaseOwnership()
 			continue
 		}
 
+		releaseOwnership()
 		s.postExitCleanup(ap)
 
 		if s.checkAgentStopSignals(ap) {
@@ -358,15 +384,15 @@ func (s *Supervisor) preFlightSetup(ap *AgentProcess) bool {
 		slog.Warn("pre-flight recovery failed", "worktree", ap.Entry.Worktree, "err", err)
 	}
 
+	if err := ClearYieldFile(ap.WorktreePath); err != nil {
+		slog.Warn("failed to clear stale yield file", "worktree", ap.Entry.Worktree, "err", err)
+	}
+
 	epicID := s.assignEpic(ap)
 	if !s.claimTask(ap, epicID) {
 		return false
 	}
 	s.createAgentSession(ap, epicID)
-
-	if err := ClearYieldFile(ap.WorktreePath); err != nil {
-		slog.Warn("failed to clear stale yield file", "worktree", ap.Entry.Worktree, "err", err)
-	}
 	return true
 }
 
@@ -400,26 +426,37 @@ func (s *Supervisor) claimTask(ap *AgentProcess, epicID string) bool {
 		slog.Warn("failed to resolve agent repos for task claim", "worktree", ap.Entry.Worktree, "err", err)
 	}
 	constraints := cli.MergeRoleConstraints(ap.RoleConfig, ae)
-	opts := backend.ReadyOpts{Limit: 10000, ParentID: epicID}
+	opts := backend.ReadyOpts{Limit: claimReadyLimit, ParentID: epicID}
 	if ap.Entry.Repo != "" {
 		opts.Labels = []string{"repo:" + ap.Entry.Repo}
 	}
 	if len(ae.SourceRepos) > 0 {
 		opts.SourceRepos = ae.SourceRepos
 	}
-	issues, err := s.IssueBackend.Ready(context.Background(), opts)
+	readyCtx, readyCancel := s.operationContext(claimOperationTimeout)
+	issues, err := s.IssueBackend.Ready(readyCtx, opts)
+	readyCancel()
 	if err != nil {
 		s.setPreflightError(ap, agenterr.Unknown, fmt.Sprintf("ready query failed: %v", err))
 		return false
 	}
+	conflicts := 0
 	for {
 		match := cli.SelectBestTask(issues, constraints)
 		if match == nil {
 			s.setPreflightError(ap, agenterr.NoWork, "no claimable tasks")
 			return false
 		}
-		if err := s.IssueBackend.ClaimIssue(context.Background(), match.Issue.ID, 0); err != nil {
+		claimCtx, claimCancel := s.operationContext(claimOperationTimeout)
+		err := s.IssueBackend.ClaimIssue(claimCtx, match.Issue.ID, 0)
+		claimCancel()
+		if err != nil {
 			if backend.IsKind(err, backend.KindConflict) {
+				conflicts++
+				if conflicts >= claimConflictRetryLimit {
+					s.setPreflightError(ap, agenterr.NoWork, "no claimable tasks after claim conflicts")
+					return false
+				}
 				issues = removeIssueByID(issues, match.Issue.ID)
 				continue
 			}
@@ -431,6 +468,29 @@ func (s *Supervisor) claimTask(ap *AgentProcess, epicID string) bool {
 		ap.Mu.Unlock()
 		slog.Info("claimed task for agent", "worktree", ap.Entry.Worktree, "task_id", match.Issue.ID, "reason", match.Reason)
 		return true
+	}
+}
+
+func (s *Supervisor) operationContext(timeout time.Duration) (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	if s.Shutdown == nil {
+		return ctx, cancel
+	}
+	done := make(chan struct{})
+	var once sync.Once
+	go func() {
+		select {
+		case <-s.Shutdown:
+			cancel()
+		case <-done:
+		case <-ctx.Done():
+		}
+	}()
+	return ctx, func() {
+		once.Do(func() {
+			close(done)
+			cancel()
+		})
 	}
 }
 
@@ -857,19 +917,22 @@ func (s *Supervisor) GetAgents() []SupervisedAgentStatus {
 	for i, ap := range snapshot {
 		ap.Mu.Lock()
 		result[i] = SupervisedAgentStatus{
-			Worktree:       ap.Entry.Worktree,
-			Role:           ap.Entry.Role,
-			Repo:           ap.Entry.Repo,
-			WorktreePath:   ap.WorktreePath,
-			PID:            ap.Pid,
-			RestartCount:   ap.RestartCount,
-			LastStart:      ap.LastStart,
-			LastExit:       ap.LastExit,
-			LastExitCode:   ap.LastExitCode,
-			AssignedEpicID: ap.AssignedEpicID,
-			StopReason:     ap.StopReason,
-			NoWorkCount:    ap.NoWorkCount,
-			BackoffUntil:   ap.BackoffUntil,
+			Worktree:               ap.Entry.Worktree,
+			Role:                   ap.Entry.Role,
+			Repo:                   ap.Entry.Repo,
+			WorktreePath:           ap.WorktreePath,
+			PID:                    ap.Pid,
+			RestartCount:           ap.RestartCount,
+			LastStart:              ap.LastStart,
+			LastExit:               ap.LastExit,
+			LastExitCode:           ap.LastExitCode,
+			AssignedEpicID:         ap.AssignedEpicID,
+			StopReason:             ap.StopReason,
+			NoWorkCount:            ap.NoWorkCount,
+			BackoffUntil:           ap.BackoffUntil,
+			OwnershipLeaseID:       ap.OwnershipLeaseID,
+			OwnershipFencingToken:  ap.OwnershipFencingToken,
+			OwnershipLastHeartbeat: ap.OwnershipLastHeartbeat,
 		}
 		if ap.LastError != nil {
 			result[i].LastErrorClass = ap.LastError.Class.String()

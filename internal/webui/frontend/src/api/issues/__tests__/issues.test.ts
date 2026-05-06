@@ -616,6 +616,42 @@ describe("issues API", () => {
       expect(result).toEqual(mockIssues);
     });
 
+    it("normalizes FleetDB type and parent_id fields for grouping", async () => {
+      const issues = [
+        {
+          id: "EPIC-1",
+          title: "Checkout flow",
+          type: "epic",
+          priority: 2,
+          status: "open",
+          labels: [],
+          created_at: "2024-01-01T00:00:00Z",
+          updated_at: "2024-01-01T00:00:00Z",
+        },
+        {
+          id: "TASK-1",
+          title: "Add payment button",
+          type: "task",
+          priority: 2,
+          status: "open",
+          labels: [],
+          parent_id: "EPIC-1",
+          created_at: "2024-01-02T00:00:00Z",
+          updated_at: "2024-01-02T00:00:00Z",
+        },
+      ];
+      mockApiGet.mockResolvedValue(okResponse({ success: true, data: issues }));
+
+      const result = await getKanbanIssues("test-ws-id");
+
+      expect(result[1]).toMatchObject({
+        id: "TASK-1",
+        issue_type: "task",
+        parent: "EPIC-1",
+        parent_title: "Checkout flow",
+      });
+    });
+
     it("returns empty array when no issues", async () => {
       mockApiGet.mockResolvedValue(okResponse({ success: true, data: [] }));
 

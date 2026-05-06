@@ -71,9 +71,9 @@ func (s *Supervisor) StopAgent(ap *AgentProcess, sigtermTimeout time.Duration) {
 	}
 }
 
-// checkWatchdog checks transcript mtime first (more reliable — updated by hooks
-// on every turn), falls back to log file mtime (stdout output). Kills the agent
-// if no activity signal is newer than outputTimeout seconds.
+// checkWatchdog checks both transcript mtime (updated by hooks on every turn)
+// and log file mtime (stdout output). Kills the agent if no activity signal is
+// newer than outputTimeout seconds.
 func (s *Supervisor) checkWatchdog(ap *AgentProcess, outputTimeout int, logPath string, lastStart time.Time, worktreeName string) {
 	var lastActivity time.Time
 	activitySource := "none"
@@ -87,14 +87,16 @@ func (s *Supervisor) checkWatchdog(ap *AgentProcess, outputTimeout int, logPath 
 			lastActivity = info.ModTime()
 			activitySource = "transcript"
 		}
-		// If transcript doesn't exist yet (no hooks fired), fall through to log
 	}
 
-	// Tier 2: Fall back to log file mtime (stdout output)
-	if activitySource == "none" && logPath != "" {
+	// Tier 2: Check log file mtime (stdout output). Use the newest signal so a
+	// stale hook transcript does not mask active stdout.
+	if logPath != "" {
 		if info, err := os.Stat(logPath); err == nil {
-			lastActivity = info.ModTime()
-			activitySource = "log"
+			if activitySource == "none" || info.ModTime().After(lastActivity) {
+				lastActivity = info.ModTime()
+				activitySource = "log"
+			}
 		}
 	}
 
@@ -110,6 +112,7 @@ func (s *Supervisor) checkWatchdog(ap *AgentProcess, outputTimeout int, logPath 
 			slog.Error("killing hung process, no activity detected",
 				"worktree", worktreeName, "silent_duration", silent.Truncate(time.Second),
 				"threshold_sec", outputTimeout, "source", activitySource)
+			s.setStopReasonDefault(ap, StopReasonWatchdog)
 			s.StopAgent(ap, 10*time.Second)
 		}
 	}

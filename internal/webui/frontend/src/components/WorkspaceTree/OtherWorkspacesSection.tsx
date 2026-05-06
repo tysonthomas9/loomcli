@@ -27,7 +27,7 @@ import {
   reorderWorkspaces,
 } from "@/hooks/api";
 import type { WorkspaceSummary } from "@/api/workspace";
-import { useWorkspaceContext, useToast } from "@/hooks";
+import { useToast } from "@/hooks";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 
 import { SortableWorkspaceEntry } from "./nav/SortableWorkspaceEntry";
@@ -51,7 +51,6 @@ export function OtherWorkspacesSection({
   onWorkspaceSwitch,
   refetchWorkspaces,
 }: OtherWorkspacesSectionProps): JSX.Element | null {
-  const { defaultWorkspaceName, setDefaultWorkspace } = useWorkspaceContext();
   const { showToast } = useToast();
 
   // Filter to non-active workspaces (memoized for stable dep)
@@ -298,25 +297,6 @@ export function OtherWorkspacesSection({
     });
   }, [pendingDeleteName, refetchWorkspaces, showToast, wsIdByName]);
 
-  // Default workspace handlers
-  const handleSetDefault = useCallback(() => {
-    if (contextMenu) {
-      setDefaultWorkspace(contextMenu.workspaceName).catch((err: unknown) => {
-        const message =
-          err instanceof Error ? err.message : "Failed to set default";
-        showToast(message, { type: "error" });
-      });
-    }
-  }, [contextMenu, setDefaultWorkspace, showToast]);
-
-  const handleClearDefault = useCallback(() => {
-    setDefaultWorkspace(null).catch((err: unknown) => {
-      const message =
-        err instanceof Error ? err.message : "Failed to clear default";
-      showToast(message, { type: "error" });
-    });
-  }, [setDefaultWorkspace, showToast]);
-
   if (otherWorkspaces.length === 0) return null;
 
   return (
@@ -340,7 +320,6 @@ export function OtherWorkspacesSection({
                   key={ws.name}
                   ws={ws}
                   isActive={false}
-                  isDefault={ws.name === defaultWorkspaceName}
                   isEditing={editingWorkspace === ws.name}
                   draftName={draftName}
                   isSaving={isSaving}
@@ -371,12 +350,6 @@ export function OtherWorkspacesSection({
         onRename={handleStartRename}
         onRemove={handleStartRemove}
         onClose={handleCloseContextMenu}
-        isDefault={
-          contextMenu != null &&
-          contextMenu.workspaceName === defaultWorkspaceName
-        }
-        onSetDefault={handleSetDefault}
-        onClearDefault={handleClearDefault}
       />
 
       <ConfirmDialog

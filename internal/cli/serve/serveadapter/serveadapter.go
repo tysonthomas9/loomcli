@@ -35,8 +35,8 @@ func BuildWorkspaceIDResolverFn(s store.Store) func(string) (string, error) {
 	}
 }
 
-// ResolveInitialWorkspaceID returns the active workspace key (LOOM_WORKSPACE
-// env > state cache) or "" when no workspace is active. Used as the
+// ResolveInitialWorkspaceID returns the explicit workspace key (LOOM_WORKSPACE)
+// or "" when no workspace is active. Used as the
 // InitialWorkspaceID for the webui server bootstrap.
 func ResolveInitialWorkspaceID(s store.Store) string {
 	if s == nil {
@@ -53,7 +53,7 @@ func ResolveInitialWorkspaceID(s store.Store) string {
 // webui.ServerConfig.WorkspaceDeleteFn — store-backed delete. The
 // store cascades repo/agent/role/daemon-profile deletion server-side.
 // Local checkout paths are removed from the per-machine state cache so
-// default selection and path lookups cannot point at a deleted workspace.
+// selected-workspace hints and path lookups cannot point at a deleted workspace.
 func BuildWorkspaceDeleteFn(s store.Store) func(string) error {
 	if s == nil {
 		return nil
@@ -86,11 +86,8 @@ func deleteWorkspaceLocalState(key string) error {
 	})
 }
 
-// BuildSetDefaultWorkspaceFn satisfies SetDefaultWorkspaceFn by
-// recording the choice in the per-user state cache (regenerable;
-// cloud deployments will eventually move this to a per-user
-// preference store, but state.json suffices for single-user local
-// mode).
+// BuildSetDefaultWorkspaceFn is retained for compatibility with older server
+// wiring. Default workspace selection is disabled in the service layer.
 func BuildSetDefaultWorkspaceFn(s store.Store) func(string) error {
 	if s == nil {
 		return nil
@@ -104,8 +101,8 @@ func BuildSetDefaultWorkspaceFn(s store.Store) func(string) error {
 	}
 }
 
-// BuildClearDefaultWorkspaceFn clears the per-user active-workspace
-// hint in the state cache.
+// BuildClearDefaultWorkspaceFn is retained for compatibility with older server
+// wiring. Default workspace selection is disabled in the service layer.
 func BuildClearDefaultWorkspaceFn() func() error {
 	return bootstrap.ClearActiveWorkspaceKey
 }

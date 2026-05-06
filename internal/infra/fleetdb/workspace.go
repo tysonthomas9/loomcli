@@ -109,18 +109,16 @@ func (s *workspaceStore) Update(ctx context.Context, key string, patch store.Wor
 	if patch.Name == nil && patch.Description == nil && patch.DefaultBranch == nil && patch.State == nil && patch.ErrorMessage == nil {
 		return s.Get(ctx, key)
 	}
+	// fleet-db's current admin PATCH contract is strict and only accepts name
+	// changes from this client-side patch shape. Lifecycle/default-branch fields
+	// are supported by in-process stores but are not persisted through fleet-db.
+	if patch.Name == nil {
+		return s.Get(ctx, key)
+	}
 	body := struct {
-		Name          *string                `json:"name,omitempty"`
-		Description   *string                `json:"description,omitempty"`
-		DefaultBranch *string                `json:"default_branch,omitempty"`
-		State         *domain.WorkspaceState `json:"state,omitempty"`
-		ErrorMessage  *string                `json:"error_message,omitempty"`
+		Name *string `json:"name,omitempty"`
 	}{
-		Name:          patch.Name,
-		Description:   patch.Description,
-		DefaultBranch: patch.DefaultBranch,
-		State:         patch.State,
-		ErrorMessage:  patch.ErrorMessage,
+		Name: patch.Name,
 	}
 	if err := s.client.do(ctx, "PATCH", "/api/v1/admin/workspaces/"+pathEscape(key), body, nil); err != nil {
 		return nil, err
