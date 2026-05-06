@@ -16,22 +16,25 @@ Read these in order:
 3. `desktop-app-runtime-spec.md`
    How the macOS Tauri app, LaunchAgent-backed background service, bundled
    CLI/runtime, updates, persistence, and multi-window workspaces fit together.
-4. `agent-run-ux-spec.md`
+4. `desktop-installation-runbook.md`
+   How to build, install, verify, troubleshoot, and update the macOS Tauri app
+   during development and early release packaging.
+5. `agent-run-ux-spec.md`
    What the UI should show for agents, sessions, task timelines, logs,
    diffs, failures, empty states, and stale/offline states.
-5. `session-artifact-contract.md`
+6. `session-artifact-contract.md`
    The evidence every run must leave behind: transcript, logs, token usage,
    diff, commit, test result, and error class.
-6. `daemon-agent-runtime-architecture.md`
+7. `daemon-agent-runtime-architecture.md`
    How the daemon, agent runner, local mode, cloud mode, ownership leases,
    and decentralized task claiming fit together.
-7. `agent-lifecycle-state-machine.md`
+8. `agent-lifecycle-state-machine.md`
    Canonical agent, run, and task states plus allowed transitions.
-8. `failure-modes-recovery-ux.md`
+9. `failure-modes-recovery-ux.md`
    User-visible failure states and recovery actions.
-9. `container-runner-mvp-spec.md`
+10. `container-runner-mvp-spec.md`
    Podman/container runner behavior after local mode is reliable.
-10. `dogfood-agent-execution-test-plan.md`
+11. `dogfood-agent-execution-test-plan.md`
    End-to-end dogfood scenarios used to validate the product.
 
 Related design docs:

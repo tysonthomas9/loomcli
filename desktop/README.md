@@ -57,3 +57,6 @@ The initial desktop shell can:
 Updater wiring, real drain enforcement, workspace daemon restoration, and
 multi-window restoration are still tracked by
 `docs/product/desktop-app-runtime-spec.md`.
+
+For install, release packaging, verification, update, and troubleshooting
+steps, see `docs/product/desktop-installation-runbook.md`.
