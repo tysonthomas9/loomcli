@@ -13,19 +13,22 @@ Read these in order:
 2. `local-mode-product-spec.md`
    The first shippable slice: supervised agents running on one machine
    while still using FleetDB as the shared distributed control plane.
-3. `agent-run-ux-spec.md`
+3. `desktop-app-runtime-spec.md`
+   How the macOS Tauri app, LaunchAgent-backed background service, bundled
+   CLI/runtime, updates, persistence, and multi-window workspaces fit together.
+4. `agent-run-ux-spec.md`
    What the UI should show for agents, sessions, task timelines, logs,
    diffs, failures, empty states, and stale/offline states.
-4. `session-artifact-contract.md`
+5. `session-artifact-contract.md`
    The evidence every run must leave behind: transcript, logs, token usage,
    diff, commit, test result, and error class.
-5. `agent-lifecycle-state-machine.md`
+6. `agent-lifecycle-state-machine.md`
    Canonical agent, run, and task states plus allowed transitions.
-6. `failure-modes-recovery-ux.md`
+7. `failure-modes-recovery-ux.md`
    User-visible failure states and recovery actions.
-7. `container-runner-mvp-spec.md`
+8. `container-runner-mvp-spec.md`
    Podman/container runner behavior after local mode is reliable.
-8. `dogfood-agent-execution-test-plan.md`
+9. `dogfood-agent-execution-test-plan.md`
    End-to-end dogfood scenarios used to validate the product.
 
 Related design docs:

@@ -3,6 +3,7 @@
 **Status:** Draft
 **Date:** 2026-05-04
 **Related:** `docs/product/agent-execution-prd.md`,
+`docs/product/desktop-app-runtime-spec.md`,
 `docs/product/agent-run-ux-spec.md`,
 `docs/design/agent-run-visibility-plan.md`
 
@@ -71,6 +72,28 @@ The first shippable local mode should start this topology with one command:
 
 This topology is intentionally close to distributed mode. The only local
 assumptions are process placement and filesystem access.
+
+## Desktop App Relationship
+
+The installable macOS app is a packaging and lifecycle layer for this same
+local-mode topology. It must not introduce a second persistence model.
+
+In the desktop shape:
+
+- Tauri owns windows, tray/menu state, preferences, updates, and service
+  controls.
+- A per-user macOS LaunchAgent runs `loom local service` so background agents
+  survive app quit, logout/login, and reboot after the user logs in again.
+- The bundled `loom` runtime starts embedded FleetDB/miniredis, the Loom
+  web/API server, and the workspace daemon manager.
+- FleetDB remains the source of truth for workspaces, issues, agents,
+  sessions, leases, commands, and artifacts.
+- Desktop app data lives under
+  `~/Library/Application Support/Loom/`, with `LOOM_CONFIG_DIR` set
+  explicitly for the app-managed runtime.
+
+See `docs/product/desktop-app-runtime-spec.md` for the desktop runtime,
+LaunchAgent, CLI coexistence, update, and multi-window contract.
 
 ## FleetDB Local Mode Contract
 
