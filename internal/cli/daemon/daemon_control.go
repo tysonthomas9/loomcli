@@ -113,7 +113,7 @@ func (d *Daemon) handleControlConnection(conn net.Conn) {
 		}
 		resp = d.handleAgentControlStop(req.AgentName, req.Force)
 	case ctrlOpAgentStart:
-		resp = d.handleAgentControlStart(req.AgentName)
+		resp = d.handleAgentControlStart(req.AgentName, "")
 	case ctrlOpAgentRestart:
 		_ = conn.SetWriteDeadline(time.Now().Add(d.sup.GetYieldTimeout() + 10*time.Second))
 		resp = d.handleAgentControlRestart(req.AgentName)
@@ -175,7 +175,11 @@ func (d *Daemon) handleAgentControlStop(name string, force bool) DaemonControlRe
 }
 
 // handleAgentControlStart starts a previously stopped agent.
-func (d *Daemon) handleAgentControlStart(name string) DaemonControlResponse {
+func (d *Daemon) handleAgentControlStart(name string, taskIDs ...string) DaemonControlResponse {
+	taskID := ""
+	if len(taskIDs) > 0 {
+		taskID = taskIDs[0]
+	}
 	if name == "" {
 		return DaemonControlResponse{Error: "agent name is required"}
 	}
@@ -202,7 +206,7 @@ func (d *Daemon) handleAgentControlStart(name string) DaemonControlResponse {
 	d.sup.AgentsMu.Unlock()
 
 	d.drainAddMu.Lock()
-	err := d.sup.AddAgent(entry)
+	err := d.sup.AddAgentForTask(entry, taskID)
 	d.drainAddMu.Unlock()
 	if err != nil {
 		// Re-add to StoppedAgents on failure

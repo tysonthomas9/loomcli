@@ -123,6 +123,10 @@ func (m *mockAgentService) UpdateAgent(_ context.Context, _, _ string, _ service
 	return nil, nil
 }
 
+func (m *mockAgentService) RequestAgentLifecycle(_ context.Context, _, _ string, _ service.AgentLifecycleInput) (*domain.Agent, error) {
+	return nil, nil
+}
+
 func (m *mockAgentService) DeleteAgent(_ context.Context, _, _ string) error {
 	return nil
 }

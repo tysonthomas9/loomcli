@@ -110,7 +110,12 @@ export async function getAgentTerminalToken(
     },
   );
   if (error) throw apiErrorFromResponse(error, response);
-  return data.token;
+  const payload = data as { token?: string; data?: { token?: string } };
+  const token = payload.data?.token ?? payload.token;
+  if (!token) {
+    throw new Error("Agent terminal token response was missing a token");
+  }
+  return token;
 }
 
 /**

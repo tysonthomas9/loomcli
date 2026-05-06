@@ -25,6 +25,10 @@ import (
 // EventEmitter is the interface for emitting observability events.
 type EventEmitter = events.Emitter
 
+type actorClaimBackend interface {
+	ClaimIssueAsActor(ctx context.Context, id string, lockTTL time.Duration, actor string) error
+}
+
 const (
 	claimReadyLimit         = 256
 	claimConflictRetryLimit = 16
@@ -433,42 +437,131 @@ func (s *Supervisor) claimTask(ap *AgentProcess, epicID string) bool {
 	if len(ae.SourceRepos) > 0 {
 		opts.SourceRepos = ae.SourceRepos
 	}
-	readyCtx, readyCancel := s.operationContext(claimOperationTimeout)
-	issues, err := s.IssueBackend.Ready(readyCtx, opts)
-	readyCancel()
+
+	ap.Mu.Lock()
+	requestedTaskID := ap.RequestedTaskID
+	ap.Mu.Unlock()
+	if requestedTaskID != "" {
+		return s.claimRequestedTask(ap, opts, requestedTaskID)
+	}
+
+	if ap.Entry.Worktree != "" {
+		assignedOpts := opts
+		assignedOpts.Assignee = ap.Entry.Worktree
+		assignedIssues, err := s.readyIssues(assignedOpts)
+		if err != nil {
+			s.setPreflightError(ap, agenterr.Unknown, fmt.Sprintf("ready query failed: %v", err))
+			return false
+		}
+		claimed, failed := s.tryClaimBestTask(ap, assignedIssues, constraints)
+		if claimed {
+			return true
+		}
+		if failed {
+			return false
+		}
+	}
+
+	issues, err := s.readyIssues(opts)
 	if err != nil {
 		s.setPreflightError(ap, agenterr.Unknown, fmt.Sprintf("ready query failed: %v", err))
 		return false
 	}
+	claimed, failed := s.tryClaimBestTask(ap, issues, constraints)
+	if claimed {
+		return true
+	}
+	if failed {
+		return false
+	}
+	s.setPreflightError(ap, agenterr.NoWork, "no claimable tasks")
+	return false
+}
+
+func (s *Supervisor) readyIssues(opts backend.ReadyOpts) ([]backend.IssueData, error) {
+	readyCtx, readyCancel := s.operationContext(claimOperationTimeout)
+	issues, err := s.IssueBackend.Ready(readyCtx, opts)
+	readyCancel()
+	return issues, err
+}
+
+func (s *Supervisor) claimRequestedTask(ap *AgentProcess, opts backend.ReadyOpts, taskID string) bool {
+	if ap.Entry.Worktree != "" {
+		opts.Assignee = ap.Entry.Worktree
+	}
+	issues, err := s.readyIssues(opts)
+	if err != nil {
+		s.setPreflightError(ap, agenterr.Unknown, fmt.Sprintf("ready query failed: %v", err))
+		return false
+	}
+	for _, issue := range issues {
+		if issue.ID != taskID {
+			continue
+		}
+		if !cli.IsWorkableTask(issue) {
+			s.setPreflightError(ap, agenterr.NoWork, fmt.Sprintf("requested task %s is not claimable", taskID))
+			return false
+		}
+		if err := s.claimIssueForAgent(ap, taskID, "requested task"); err != nil {
+			if backend.IsKind(err, backend.KindConflict) {
+				s.setPreflightError(ap, agenterr.NoWork, fmt.Sprintf("requested task %s was already claimed", taskID))
+				return false
+			}
+			s.setPreflightError(ap, agenterr.Unknown, fmt.Sprintf("claim failed for %s: %v", taskID, err))
+			return false
+		}
+		return true
+	}
+	s.setPreflightError(ap, agenterr.NoWork, fmt.Sprintf("requested task %s is not ready", taskID))
+	return false
+}
+
+func (s *Supervisor) tryClaimBestTask(ap *AgentProcess, issues []backend.IssueData, constraints cli.RoleConstraints) (bool, bool) {
 	conflicts := 0
 	for {
 		match := cli.SelectBestTask(issues, constraints)
 		if match == nil {
-			s.setPreflightError(ap, agenterr.NoWork, "no claimable tasks")
-			return false
+			return false, false
 		}
-		claimCtx, claimCancel := s.operationContext(claimOperationTimeout)
-		err := s.IssueBackend.ClaimIssue(claimCtx, match.Issue.ID, 0)
-		claimCancel()
-		if err != nil {
+		if err := s.claimIssueForAgent(ap, match.Issue.ID, match.Reason); err != nil {
 			if backend.IsKind(err, backend.KindConflict) {
 				conflicts++
 				if conflicts >= claimConflictRetryLimit {
 					s.setPreflightError(ap, agenterr.NoWork, "no claimable tasks after claim conflicts")
-					return false
+					return false, true
 				}
 				issues = removeIssueByID(issues, match.Issue.ID)
 				continue
 			}
 			s.setPreflightError(ap, agenterr.Unknown, fmt.Sprintf("claim failed for %s: %v", match.Issue.ID, err))
-			return false
+			return false, true
 		}
-		ap.Mu.Lock()
-		ap.AssignedTaskID = match.Issue.ID
-		ap.Mu.Unlock()
-		slog.Info("claimed task for agent", "worktree", ap.Entry.Worktree, "task_id", match.Issue.ID, "reason", match.Reason)
-		return true
+		return true, false
 	}
+}
+
+func (s *Supervisor) claimIssueForAgent(ap *AgentProcess, taskID, reason string) error {
+	claimCtx, claimCancel := s.operationContext(claimOperationTimeout)
+	var err error
+	if ap.Entry.Worktree != "" {
+		if actorBackend, ok := s.IssueBackend.(actorClaimBackend); ok {
+			err = actorBackend.ClaimIssueAsActor(claimCtx, taskID, 0, ap.Entry.Worktree)
+		} else {
+			err = s.IssueBackend.ClaimIssue(claimCtx, taskID, 0)
+		}
+	} else {
+		err = s.IssueBackend.ClaimIssue(claimCtx, taskID, 0)
+	}
+	claimCancel()
+	if err != nil {
+		return err
+	}
+	ap.Mu.Lock()
+	ap.AssignedTaskID = taskID
+	ap.RequestedTaskID = ""
+	ap.Mu.Unlock()
+	slog.Info("claimed task for agent", "worktree", ap.Entry.Worktree, "task_id", taskID, "reason", reason)
+	return nil
 }
 
 func (s *Supervisor) operationContext(timeout time.Duration) (context.Context, context.CancelFunc) {

@@ -26,40 +26,65 @@ var userHomeDir = os.UserHomeDir
 
 // sessionServiceImpl is the concrete implementation of SessionService.
 type sessionServiceImpl struct {
-	store     store.Store
-	histStore *sessionhistory.Store
+	store      store.Store
+	histStore  *sessionhistory.Store
+	runtimeDir string
 }
 
 // NewSessionService creates a new SessionService implementation.
 func NewSessionService(st store.Store, histStore *sessionhistory.Store) service.SessionService {
-	return &sessionServiceImpl{store: st, histStore: histStore}
+	return NewSessionServiceWithRuntimeDir(st, histStore, "")
+}
+
+// NewSessionServiceWithRuntimeDir creates a SessionService that also searches
+// the daemon/runtime session store used by local desktop mode.
+func NewSessionServiceWithRuntimeDir(st store.Store, histStore *sessionhistory.Store, runtimeDir string) service.SessionService {
+	return &sessionServiceImpl{store: st, histStore: histStore, runtimeDir: runtimeDir}
 }
 
 // storesForWorkspace returns session stores for all repos in the workspace.
 // Agent worktrees store sessions in their own directories, so we need to
 // search across all repos to find sessions for a given task.
 func (s *sessionServiceImpl) storesForWorkspace(ctx context.Context, wsID string) ([]*sessions.Store, error) {
-	if s.store == nil {
-		return nil, service.ErrUnavailable("session store not available")
-	}
-	wsData, err := storeadapter.BuildWorkspaceDataForKey(ctx, s.store, wsID)
-	if err != nil || wsData == nil {
-		return nil, service.ErrNotFound("workspace not found")
-	}
 	var stores []*sessions.Store
-	// Include workspace root
-	if st, err := sessions.NewStore(wsData.Path); err == nil {
-		stores = append(stores, st)
-	}
-	// Include each repo (agent worktrees have their own sessions dir)
-	for _, repo := range wsData.Repos {
-		if repo.Path == wsData.Path {
-			continue // already added
+	seen := make(map[string]struct{})
+	addStore := func(runtimeDir string) {
+		if runtimeDir == "" {
+			return
 		}
-		if st, err := sessions.NewStore(repo.Path); err == nil {
+		key := filepath.Clean(runtimeDir)
+		if abs, err := filepath.Abs(runtimeDir); err == nil {
+			key = filepath.Clean(abs)
+		}
+		if _, ok := seen[key]; ok {
+			return
+		}
+		seen[key] = struct{}{}
+		if st, err := sessions.NewStore(runtimeDir); err == nil {
 			stores = append(stores, st)
 		}
 	}
+
+	addStore(s.runtimeDir)
+
+	if s.store != nil {
+		wsData, err := storeadapter.BuildWorkspaceDataForKey(ctx, s.store, wsID)
+		if err != nil || wsData == nil {
+			if len(stores) == 0 {
+				return nil, service.ErrNotFound("workspace not found")
+			}
+		} else {
+			// Include workspace root.
+			addStore(wsData.Path)
+			// Include each repo (agent worktrees may have their own sessions dir).
+			for _, repo := range wsData.Repos {
+				addStore(repo.Path)
+			}
+		}
+	} else if len(stores) == 0 {
+		return nil, service.ErrUnavailable("session store not available")
+	}
+
 	if len(stores) == 0 {
 		return nil, service.ErrInternal("no session stores available", nil)
 	}

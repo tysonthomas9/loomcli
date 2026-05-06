@@ -17,7 +17,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import "@testing-library/jest-dom";
 
 import type { Issue, IssueDetails, IssueWithDependencyMetadata } from "@/types";
-import { updateIssue } from "@/api";
+import { updateIssue, startAgent } from "@/api";
+import { createAgentStore } from "@/stores/agentStore";
 
 import { IssueDetailPanel } from "../IssueDetailPanel";
 
@@ -28,6 +29,7 @@ const {
   mockScheduleSessionKill,
   mockUseIssueTabPersistence,
   mockUseWorkspaceContext,
+  mockUseAgentStoreInstance,
 } = vi.hoisted(() => ({
   mockUseRegisterEscapeLayer: vi.fn(),
   mockDeleteTabMetadata: vi.fn(() => Promise.resolve()),
@@ -55,11 +57,13 @@ const {
     defaultWorkspaceName: null,
     setDefaultWorkspace: () => Promise.resolve(),
   })),
+  mockUseAgentStoreInstance: vi.fn(),
 }));
 
 // Mock the API module
 vi.mock("@/api", () => ({
   updateIssue: vi.fn(),
+  startAgent: vi.fn().mockResolvedValue(undefined),
   addDependency: vi.fn(),
   removeDependency: vi.fn(),
   getIssueEvents: vi.fn().mockImplementation(() => new Promise(() => {})),
@@ -87,6 +91,12 @@ vi.mock("@/hooks/workspace", async () => {
       "@/hooks/workspace",
     );
   return { ...actual, useWorkspaceContext: mockUseWorkspaceContext };
+});
+
+vi.mock("@/hooks/common", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/hooks/common")>("@/hooks/common");
+  return { ...actual, useAgentStoreInstance: mockUseAgentStoreInstance };
 });
 
 vi.mock("@/hooks", async (importOriginal) => {
@@ -162,7 +172,36 @@ function createTestDependency(
   };
 }
 
+function createWorkspaceContext(overrides: Record<string, unknown> = {}) {
+  return {
+    workspace: null,
+    repos: [],
+    groups: [],
+    agents: [],
+    isLoading: false,
+    error: null,
+    refetch: () => {},
+    getRepoByName: () => undefined,
+    getReposByGroup: () => [],
+    getAgentByName: () => undefined,
+    workspaceId: "",
+    activeWorkspaceName: null,
+    setActiveWorkspace: () => {},
+    defaultWorkspaceName: null,
+    setDefaultWorkspace: () => Promise.resolve(),
+    ...overrides,
+  };
+}
+
 describe("IssueDetailPanel", () => {
+  beforeEach(() => {
+    const agentStore = createAgentStore();
+    mockUseAgentStoreInstance.mockReset();
+    mockUseAgentStoreInstance.mockReturnValue(agentStore);
+    mockUseWorkspaceContext.mockReset();
+    mockUseWorkspaceContext.mockImplementation(() => createWorkspaceContext());
+  });
+
   // Reset body overflow after each test
   afterEach(() => {
     document.body.style.overflow = "";
@@ -963,6 +1002,76 @@ describe("IssueDetailPanel", () => {
     });
   });
 
+  describe("Start Work", () => {
+    it("assigns the issue and asks the daemon to claim the requested task", async () => {
+      const mockUpdateIssue = updateIssue as ReturnType<typeof vi.fn>;
+      const mockStartAgent = startAgent as ReturnType<typeof vi.fn>;
+      mockUpdateIssue.mockReset();
+      mockStartAgent.mockReset();
+      mockStartAgent.mockResolvedValue(undefined);
+      const refetchAgents = vi.fn().mockResolvedValue(undefined);
+      const agentStore = createAgentStore();
+      agentStore.setState({
+        agents: [
+          {
+            name: "desktopqa",
+            branch: "main",
+            status: "idle",
+            ahead: 0,
+            behind: 0,
+            role: "task",
+            workspace: "Desktop QA",
+          },
+        ],
+        isConnected: true,
+        wasEverConnected: true,
+        connectionState: "connected",
+        fetchData: refetchAgents,
+      });
+      mockUseAgentStoreInstance.mockReturnValue(agentStore);
+      mockUseWorkspaceContext.mockImplementation(() =>
+        createWorkspaceContext({ workspaceId: "DESKTOP-QA" }),
+      );
+
+      const issue = createTestIssueDetails({
+        id: "DESKTOP-QA-3",
+        status: "open",
+        issue_type: "task",
+        assignee: "",
+      });
+      const updatedIssue = { ...issue, assignee: "desktopqa" };
+      mockUpdateIssue.mockResolvedValueOnce(updatedIssue);
+      const onIssueUpdate = vi.fn();
+
+      render(
+        <IssueDetailPanel
+          isOpen={true}
+          issue={issue}
+          onClose={() => {}}
+          onIssueUpdate={onIssueUpdate}
+        />,
+      );
+
+      fireEvent.click(screen.getByTestId("start-work-button"));
+      fireEvent.click(screen.getByTestId("agent-option-desktopqa"));
+
+      await waitFor(() => {
+        expect(mockUpdateIssue).toHaveBeenCalledWith(
+          "DESKTOP-QA",
+          "DESKTOP-QA-3",
+          { assignee: "desktopqa" },
+        );
+      });
+      await waitFor(() => {
+        expect(mockStartAgent).toHaveBeenCalledWith("DESKTOP-QA", "desktopqa", {
+          taskId: "DESKTOP-QA-3",
+        });
+      });
+      expect(onIssueUpdate).toHaveBeenCalledWith(updatedIssue);
+      expect(refetchAgents).toHaveBeenCalled();
+    });
+  });
+
   describe("PR links via IssueHeader", () => {
     it("passes PR props to IssueHeader when issue has PR external_ref", () => {
       const mockIssue = createTestIssueDetails({
@@ -1424,6 +1533,55 @@ describe("IssueDetailPanel", () => {
         "aria-selected",
         "true",
       );
+    });
+
+    it("falls back to Details when restored active tab has no renderer", async () => {
+      mockUseIssueTabPersistence.mockReturnValue({
+        savedState: {
+          issue_id: "test-123",
+          tabs: [
+            {
+              id: "details",
+              type: "details" as const,
+              label: "Details",
+              sort_order: 0,
+            },
+            {
+              id: "sessions",
+              type: "sessions" as const,
+              label: "Sessions",
+              sort_order: 1,
+            },
+            {
+              id: "terminal-sess-unknown",
+              type: "terminal" as const,
+              label: "Terminal",
+              session_name: "sess-unknown",
+              sort_order: 2,
+            },
+          ],
+          active_tab_id: "terminal-sess-unknown",
+          updated_at: "2026-01-23T00:00:00Z",
+        },
+        isLoading: false,
+        saveTabs: vi.fn(),
+        clearTabs: vi.fn(),
+      });
+
+      const mockIssue = createTestIssueDetails({
+        description: "Visible details content",
+      });
+      render(
+        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByRole("tab", { name: "Details" })).toHaveAttribute(
+          "aria-selected",
+          "true",
+        );
+      });
+      expect(screen.getByText("Visible details content")).toBeInTheDocument();
     });
 
     it("preserves both tabs across multiple issue changes", () => {

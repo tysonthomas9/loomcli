@@ -41,7 +41,7 @@ const BUSY_TYPES = new Set(["working", "planning", "review"]);
 
 /**
  * StartWorkButton renders a button that opens a popover listing available agents.
- * Selecting an idle agent assigns the issue to that agent and sets status to in_progress.
+ * Selecting an idle agent assigns the issue to that agent and asks the daemon to claim it.
  */
 export function StartWorkButton({
   issueId: _issueId,

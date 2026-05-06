@@ -56,6 +56,12 @@
   overflow-y: auto;
 }
 
+.container:global(.wterm) :global(.term-grid),
+.container:global(.wterm) :global(.term-row) {
+  contain: none;
+  will-change: auto;
+}
+
 .container:global(.wterm)::-webkit-scrollbar {
   width: 8px;
 }

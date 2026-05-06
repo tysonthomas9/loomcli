@@ -227,22 +227,52 @@ function App() {
   const [filters, filterActions] = useFilterState();
 
   // Local search state with debouncing
-  const [searchValue, setSearchValue] = useState(filters.search ?? "");
+  const [searchValue, setSearchValueState] = useState(filters.search ?? "");
+  const hasPendingSearchEditRef = useRef(false);
+  const pendingSearchCommitRef = useRef<{ value: string | undefined } | null>(
+    null,
+  );
+  const setSearchValue = useCallback((value: string) => {
+    pendingSearchCommitRef.current = null;
+    hasPendingSearchEditRef.current = true;
+    setSearchValueState(value);
+  }, []);
   const debouncedSearch = useDebounce(searchValue, 300);
 
   // Sync debounced search to filter state
   useEffect(() => {
-    filterActions.setSearch(debouncedSearch || undefined);
-  }, [debouncedSearch, filterActions]);
+    if (!hasPendingSearchEditRef.current) return;
+    if (debouncedSearch !== searchValue) return;
+    const nextSearch = debouncedSearch || undefined;
+    if (filters.search === nextSearch) {
+      hasPendingSearchEditRef.current = false;
+      pendingSearchCommitRef.current = null;
+      return;
+    }
+    pendingSearchCommitRef.current = { value: nextSearch };
+    filterActions.setSearch(nextSearch);
+  }, [debouncedSearch, searchValue, filters.search, filterActions]);
 
   // Sync search value from filter state (e.g., when Clear filters is clicked)
   useEffect(() => {
-    const filterSearch = filters.search ?? "";
-    // Only sync if it's an external change (differs from both local states)
-    if (filterSearch !== searchValue && filterSearch !== debouncedSearch) {
-      setSearchValue(filterSearch);
+    const pendingCommit = pendingSearchCommitRef.current;
+    if (pendingCommit) {
+      if (filters.search === pendingCommit.value) {
+        pendingSearchCommitRef.current = null;
+        hasPendingSearchEditRef.current = false;
+      } else {
+        return;
+      }
     }
-  }, [filters.search, searchValue, debouncedSearch]);
+
+    if (hasPendingSearchEditRef.current) return;
+
+    const filterSearch = filters.search ?? "";
+    if (filterSearch !== searchValue) {
+      setSearchValueState(filterSearch);
+    }
+  }, [filters.search, searchValue]);
+  const activeSearchTerm = filters.search ?? "";
 
   // Apply filters to issues
   // Build filter options conditionally to satisfy exactOptionalPropertyTypes
@@ -558,9 +588,39 @@ function App() {
 
   // Handle search clear to sync both local and filter state
   const handleSearchClear = useCallback(() => {
-    setSearchValue("");
+    hasPendingSearchEditRef.current = false;
+    pendingSearchCommitRef.current = { value: undefined };
+    setSearchValueState("");
     filterActions.setSearch(undefined);
   }, [filterActions]);
+
+  const syncedFilterActions = useMemo(
+    () => ({
+      ...filterActions,
+      setSearch: (search: string | undefined) => {
+        const nextSearch = search || undefined;
+        hasPendingSearchEditRef.current = false;
+        pendingSearchCommitRef.current = { value: nextSearch };
+        setSearchValueState(nextSearch ?? "");
+        filterActions.setSearch(nextSearch);
+      },
+      clearFilter: (key: keyof typeof filters) => {
+        if (key === "search") {
+          hasPendingSearchEditRef.current = false;
+          pendingSearchCommitRef.current = { value: undefined };
+          setSearchValueState("");
+        }
+        filterActions.clearFilter(key);
+      },
+      clearAll: () => {
+        hasPendingSearchEditRef.current = false;
+        pendingSearchCommitRef.current = { value: undefined };
+        setSearchValueState("");
+        filterActions.clearAll();
+      },
+    }),
+    [filterActions],
+  );
 
   // Handle issue click from SwimLaneBoard/IssueTable
   const handleIssueClick = useCallback(
@@ -686,6 +746,12 @@ function App() {
     clearIssue();
   }, [closePanel, clearIssue]);
 
+  useEffect(() => {
+    if (activeView === "terminal") {
+      closeAllPanels();
+    }
+  }, [activeView, closeAllPanels]);
+
   // Workspace state preservation: save/restore ephemeral per-workspace UI state on switch
   useWorkspaceState({
     scrollContainerRef: mainContentRef,
@@ -707,8 +773,9 @@ function App() {
 
   // Handle Talk to Lead button click
   const handleTalkToLeadClick = useCallback(() => {
+    closeAllPanels();
     navigateToView("terminal");
-  }, [navigateToView]);
+  }, [closeAllPanels, navigateToView]);
 
   const handleIssueContextConsumed = useCallback(() => {
     setPendingIssueContext(undefined);
@@ -793,7 +860,7 @@ function App() {
       blockedIssuesMap,
       filters,
       groupBy: filters.groupBy ?? DEFAULT_GROUP_BY,
-      debouncedSearch,
+      debouncedSearch: activeSearchTerm,
       activeView,
       selectedIssueId,
       workspaceId,
@@ -818,7 +885,7 @@ function App() {
       pendingIds,
       blockedIssuesMap,
       filters,
-      debouncedSearch,
+      activeSearchTerm,
       activeView,
       selectedIssueId,
       workspaceId,
@@ -907,7 +974,7 @@ function App() {
       <div className={styles.filtersWrapper}>
         <FilterBar
           filters={filters}
-          actions={filterActions}
+          actions={syncedFilterActions}
           showPriority={true}
           showType={true}
           showLabels={false}
@@ -921,7 +988,7 @@ function App() {
         />
         <MoreFiltersMenu
           groupBy={filters.groupBy ?? DEFAULT_GROUP_BY}
-          onGroupByChange={filterActions.setGroupBy}
+          onGroupByChange={syncedFilterActions.setGroupBy}
         />
       </div>
       <button
@@ -992,7 +1059,7 @@ function App() {
         onWorkspacePositionalSwitch: handleWorkspacePositionalSwitch,
       })}
     >
-      <SearchTermProvider value={debouncedSearch}>
+      <SearchTermProvider value={activeSearchTerm}>
         <AppLayout
           title={headerTitle}
           navigation={headerNavigation}

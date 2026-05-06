@@ -13,13 +13,14 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 
 import type { LoomTaskLists } from "@/types";
 
-import { ApiError, api, get } from "@/api/common";
+import { ApiError, api, get, post } from "@/api/common";
 
 import {
   fetchAgents,
   fetchStatus,
   fetchTasks,
   checkLoomHealth,
+  startAgent,
   type FetchStatusResult,
 } from "../agents";
 
@@ -36,11 +37,13 @@ vi.mock("@/api/common", async (importOriginal) => {
       DELETE: vi.fn(),
       use: vi.fn(),
     },
+    post: vi.fn(),
   };
 });
 
 const mockApiGet = vi.mocked(api.GET);
 const mockGet = vi.mocked(get);
+const mockPost = vi.mocked(post);
 
 describe("fetchAgents", () => {
   beforeEach(() => {
@@ -208,6 +211,40 @@ describe("checkLoomHealth", () => {
     const result = await checkLoomHealth();
 
     expect(result).toBe(false);
+  });
+});
+
+describe("startAgent", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("posts to the workspace-scoped start endpoint", async () => {
+    mockPost.mockResolvedValueOnce({ message: "agent started" });
+
+    await startAgent("TEST 2", "nova");
+
+    expect(mockPost).toHaveBeenCalledWith(
+      "/api/workspaces/TEST%202/agents/nova/start",
+      undefined,
+    );
+  });
+
+  it("can include a requested task id", async () => {
+    mockPost.mockResolvedValueOnce({ message: "agent started" });
+
+    await startAgent("TEST 2", "nova", { taskId: "TEST-1" });
+
+    expect(mockPost).toHaveBeenCalledWith(
+      "/api/workspaces/TEST%202/agents/nova/start",
+      { payload: { task_id: "TEST-1" } },
+    );
+  });
+
+  it("throws on start errors", async () => {
+    mockPost.mockRejectedValueOnce(new ApiError(404, "Not Found"));
+
+    await expect(startAgent("TEST", "missing")).rejects.toThrow(ApiError);
   });
 });
 

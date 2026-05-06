@@ -55,6 +55,17 @@ const INITIAL_CONNECT_CONFIG: ReconnectConfig = {
 const UNBOUNDED_RECONNECT_TIMEOUT_MS = 60 * 60 * 1000; // 1 h when server disables its own timeout
 const SCROLL_BOTTOM_THRESHOLD_PX = 24;
 
+function isSocketOpenOrConnecting(ws: WebSocket | null): boolean {
+  return (
+    ws?.readyState === WebSocket.OPEN ||
+    ws?.readyState === WebSocket.CONNECTING
+  );
+}
+
+type WTermRenderAdapter = {
+  _doRender?: () => void;
+};
+
 export type ConnectionState =
   | "disconnected"
   | "connecting"
@@ -87,6 +98,8 @@ export interface TerminalInstanceProps {
    * the pre-liveness behavior of connecting immediately.
    */
   ptyAlive?: boolean | undefined;
+  /** When true, stale PTYs are automatically replaced with a fresh shell. */
+  autoStartStaleSession?: boolean | undefined;
 }
 
 export interface TerminalInstanceHandle {
@@ -114,14 +127,23 @@ export const TerminalInstance = forwardRef<
     onTerminalFocus,
     agentName,
     ptyAlive,
+    autoStartStaleSession,
   },
   ref,
 ) {
   const { workspaceId } = useWorkspaceContext();
   const wtermRef = useRef<TerminalHandle | null>(null);
   const wtermInstanceRef = useRef<WTerm | null>(null);
+  const pendingRendererWritesRef = useRef<Array<string | Uint8Array>>([]);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const terminalSizeRef = useRef({ cols: 80, rows: 24 });
+
+  const forceRendererPaint = useCallback((wt: WTerm | null) => {
+    const render = (wt as unknown as WTermRenderAdapter | null)?._doRender;
+    if (typeof render === "function") {
+      render.call(wt);
+    }
+  }, []);
 
   const getViewportElement = useCallback((): HTMLElement | null => {
     return wrapperRef.current?.querySelector<HTMLElement>(".wterm") ?? null;
@@ -155,8 +177,14 @@ export const TerminalInstance = forwardRef<
   }, [getViewportElement]);
 
   const write = useCallback((data: string | Uint8Array) => {
-    wtermInstanceRef.current?.write(data);
-  }, []);
+    const wt = wtermInstanceRef.current;
+    if (wt) {
+      wt.write(data);
+      forceRendererPaint(wt);
+      return;
+    }
+    pendingRendererWritesRef.current.push(data);
+  }, [forceRendererPaint]);
   const focus = useCallback(() => {
     wtermInstanceRef.current?.focus();
   }, []);
@@ -194,6 +222,7 @@ export const TerminalInstance = forwardRef<
   const initialViewportSyncDoneRef = useRef(false);
   const [connectionState, setConnectionState] =
     useState<ConnectionState>("disconnected");
+  const [readyVersion, setReadyVersion] = useState(0);
 
   // Stable refs for parent callbacks so the lifecycle effect's dep array
   // stays minimal.
@@ -381,16 +410,26 @@ export const TerminalInstance = forwardRef<
     // WASM means it won't fire again), re-kick the connection here —
     // otherwise the tab would stay stuck at "connecting" because the
     // prior cleanup cancelled its in-flight WebSocket.
-    if (wtermReadyRef.current && ptyAlive !== false) {
+    if (
+      wtermReadyRef.current &&
+      (ptyAlive !== false || autoStartStaleSession)
+    ) {
       doConnectRef.current?.();
     }
     return () => {
       wtermInstanceRef.current = null;
+      pendingRendererWritesRef.current = [];
       clearReconnectTimers();
       wsCleanupRef.current?.();
       wsCleanupRef.current = null;
     };
-  }, [sessionName, clearReconnectTimers, ptyAlive]);
+  }, [sessionName, clearReconnectTimers, ptyAlive, autoStartStaleSession]);
+
+  useEffect(() => {
+    if (ptyAlive === false && !autoStartStaleSession) {
+      setConnectionState("session_ended");
+    }
+  }, [ptyAlive, autoStartStaleSession]);
 
   // handleReady and the reconnect imperative method both read the latest
   // doConnect via doConnectRef so neither hands the wterm <Terminal> a new
@@ -430,7 +469,13 @@ export const TerminalInstance = forwardRef<
     (wt: WTerm) => {
       wtermReadyRef.current = true;
       wtermInstanceRef.current = wt;
-      if (ptyAlive === false) {
+      const pendingWrites = pendingRendererWritesRef.current.splice(0);
+      for (const data of pendingWrites) {
+        wt.write(data);
+      }
+      forceRendererPaint(wt);
+      setReadyVersion((value) => value + 1);
+      if (ptyAlive === false && !autoStartStaleSession) {
         setConnectionState("session_ended");
         return;
       }
@@ -441,10 +486,39 @@ export const TerminalInstance = forwardRef<
           wt.resize(measured.cols, measured.rows);
         }
       }
-      doConnectRef.current?.();
+      if (!wsCleanupRef.current && !isSocketOpenOrConnecting(wsRef.current)) {
+        doConnectRef.current?.();
+      }
     },
-    [measureTerminalSize, ptyAlive],
+    [measureTerminalSize, ptyAlive, autoStartStaleSession],
   );
+
+  // In the desktop shell, a terminal can be mounted before the renderer's
+  // ready event fires. Kick one connection attempt as soon as the pane is
+  // active; output is still written once the renderer instance is available.
+  useEffect(() => {
+    if (!isActive) return;
+    if (ptyAlive === false && !autoStartStaleSession) return;
+    if (connectionState !== "disconnected") return;
+    if (reconnectCancelRef.current) return;
+    if (wsCleanupRef.current || isSocketOpenOrConnecting(wsRef.current)) {
+      return;
+    }
+
+    const timeout = setTimeout(() => {
+      if (connectionState !== "disconnected") return;
+      if (reconnectCancelRef.current) return;
+      if (wsCleanupRef.current || isSocketOpenOrConnecting(wsRef.current)) {
+        return;
+      }
+
+      doConnectRef.current?.();
+    }, 0);
+
+    return () => {
+      clearTimeout(timeout);
+    };
+  }, [isActive, ptyAlive, connectionState, readyVersion]);
 
   const handleData = useCallback((data: string) => {
     const ws = wsRef.current;
@@ -461,12 +535,51 @@ export const TerminalInstance = forwardRef<
     }
   }, []);
 
-  // Re-focus when this tab becomes active.
+  // Tauri can reveal an already-mounted terminal after it measured while
+  // hidden. Resync once visible so the PTY has the real grid size and focus.
   useEffect(() => {
-    if (isActive) {
+    if (!isActive) return;
+
+    let cancelled = false;
+    let firstFrame = 0;
+    let secondFrame = 0;
+
+    const syncActiveLayout = () => {
+      if (cancelled) return;
+      const wt = wtermInstanceRef.current;
+      if (!wt) return;
+      const measured = measureTerminalSize(wt);
+      if (measured) {
+        terminalSizeRef.current = measured;
+        if (wt.cols !== measured.cols || wt.rows !== measured.rows) {
+          wt.resize(measured.cols, measured.rows);
+        }
+        handleResize(measured.cols, measured.rows);
+      }
+      forceRendererPaint(wt);
       focus();
-    }
-  }, [isActive, focus]);
+      syncViewportToBottom();
+    };
+
+    firstFrame = requestAnimationFrame(() => {
+      syncActiveLayout();
+      secondFrame = requestAnimationFrame(syncActiveLayout);
+    });
+
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(firstFrame);
+      cancelAnimationFrame(secondFrame);
+    };
+  }, [
+    isActive,
+    readyVersion,
+    focus,
+    forceRendererPaint,
+    handleResize,
+    measureTerminalSize,
+    syncViewportToBottom,
+  ]);
 
   useImperativeHandle(
     ref,

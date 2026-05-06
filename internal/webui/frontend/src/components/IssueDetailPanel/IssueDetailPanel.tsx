@@ -15,6 +15,7 @@ import {
   moveIssue,
   deleteTabMetadata,
   getTaskLogPhases,
+  startAgent,
 } from "@/hooks/api";
 import type { IssueTab } from "@/api/issues";
 import {
@@ -265,6 +266,20 @@ function formatPhaseLabel(phase: string): string {
   return phase.charAt(0).toUpperCase() + phase.slice(1);
 }
 
+function canRenderDetailTab(tab: DetailTab | undefined): boolean {
+  if (!tab) return false;
+  switch (tab.type) {
+    case "details":
+    case "sessions":
+    case "task-log":
+      return true;
+    case "terminal":
+      return Boolean(tab.metadata?.sessionName && tab.metadata.backend);
+    default:
+      return false;
+  }
+}
+
 function TaskPhaseLogPanel({
   issueId,
   phase,
@@ -459,6 +474,7 @@ function DefaultContent({
   const agents = useStore(agentStore, (s) => s.agents);
   const agentTasks = useStore(agentStore, (s) => s.agentTasks);
   const isLoomConnected = useStore(agentStore, (s) => s.isConnected);
+  const refetchAgents = useStore(agentStore, (s) => s.fetchData);
 
   // Reset tabs when issue changes — clean up orphaned terminal sessions first
   useEffect(() => {
@@ -562,8 +578,12 @@ function DefaultContent({
       }
       return tab;
     });
-    persistTabs(tabsToSave, activeTabId);
+    const activeTabIsPersistable = persistableTabs.some(
+      (t) => t.id === activeTabId && canRenderDetailTab(t),
+    );
+    persistTabs(tabsToSave, activeTabIsPersistable ? activeTabId : "details");
   }, [tabs, activeTabId, issue?.id, isLoadingPersistedTabs, persistTabs]);
+
   const visibleTabs = useMemo(() => {
     const phaseTabs: DetailTab[] = taskLogPhases.map((phase) => ({
       id: `task-log-${phase}`,
@@ -579,6 +599,19 @@ function DefaultContent({
       ...tabs.slice(detailsIndex + 1),
     ];
   }, [tabs, taskLogPhases]);
+  const activeTab = useMemo(
+    () => visibleTabs.find((tab) => tab.id === activeTabId),
+    [activeTabId, visibleTabs],
+  );
+  const renderedActiveTabId = canRenderDetailTab(activeTab)
+    ? activeTabId
+    : "details";
+
+  useEffect(() => {
+    if (activeTabId !== renderedActiveTabId) {
+      setActiveTabId(renderedActiveTabId);
+    }
+  }, [activeTabId, renderedActiveTabId]);
 
   // Ref to cleanupTerminalTabs so unmount cleanup uses latest without re-registering
   const cleanupRef = useRef(cleanupTerminalTabs);
@@ -783,11 +816,12 @@ function DefaultContent({
 
       const updatedIssue = await updateIssue(workspaceId, issue.id, {
         assignee: agentName,
-        status: "in_progress",
       });
       onIssueUpdate?.(updatedIssue);
+      await startAgent(workspaceId, agentName, { taskId: issue.id });
+      void refetchAgents();
     },
-    [issue, onIssueUpdate],
+    [issue, onIssueUpdate, refetchAgents, workspaceId],
   );
 
   const handleAddDependency = useCallback(
@@ -1071,8 +1105,8 @@ function DefaultContent({
             <div
               key={tab.id}
               role="tab"
-              className={`${styles.tab} ${activeTabId === tab.id ? styles.activeTab : ""}`}
-              aria-selected={activeTabId === tab.id}
+              className={`${styles.tab} ${renderedActiveTabId === tab.id ? styles.activeTab : ""}`}
+              aria-selected={renderedActiveTabId === tab.id}
               aria-controls={`issue-panel-tabpanel-${tab.id}`}
               id={`issue-panel-tab-${tab.id}`}
               onClick={() => setActiveTabId(tab.id)}
@@ -1082,7 +1116,7 @@ function DefaultContent({
                   setActiveTabId(tab.id);
                 }
               }}
-              tabIndex={activeTabId === tab.id ? 0 : -1}
+              tabIndex={renderedActiveTabId === tab.id ? 0 : -1}
             >
               {tab.type === "terminal" && tab.connectionState && (
                 <span
@@ -1119,9 +1153,9 @@ function DefaultContent({
       </div>
 
       {/* Terminal tab content — split view: details on top, terminal on bottom */}
-      {activeTabId.startsWith("terminal-") &&
+      {renderedActiveTabId.startsWith("terminal-") &&
         (() => {
-          const activeTab = tabs.find((t) => t.id === activeTabId);
+          const activeTab = tabs.find((t) => t.id === renderedActiveTabId);
           if (!activeTab?.metadata?.sessionName || !activeTab.metadata.backend)
             return null;
           return (
@@ -1129,8 +1163,8 @@ function DefaultContent({
               ref={splitContainerRef}
               className={styles.splitContainer}
               role="tabpanel"
-              id={`issue-panel-tabpanel-${activeTabId}`}
-              aria-labelledby={`issue-panel-tab-${activeTabId}`}
+              id={`issue-panel-tabpanel-${renderedActiveTabId}`}
+              aria-labelledby={`issue-panel-tab-${renderedActiveTabId}`}
             >
               <div
                 className={styles.splitTop}
@@ -1177,7 +1211,7 @@ function DefaultContent({
           );
         })()}
 
-      {activeTabId === "details" && (
+      {renderedActiveTabId === "details" && (
         <div
           className={styles.scrollableContent}
           role="tabpanel"
@@ -1224,7 +1258,7 @@ function DefaultContent({
                   {issue.assignee && !issue.assignee.startsWith("[H]") && (
                     <AgentStatusBadge
                       agentName={issue.assignee}
-                      onOpenTerminal={() => setActiveTabId("terminal")}
+                      onOpenTerminal={() => setActiveTabId("sessions")}
                     />
                   )}
                   <StartWorkButton
@@ -1348,15 +1382,15 @@ function DefaultContent({
         </div>
       )}
 
-      {activeTabId === "task-log-planning" && (
+      {renderedActiveTabId === "task-log-planning" && (
         <TaskPhaseLogPanel issueId={issue.id} phase="planning" />
       )}
 
-      {activeTabId === "task-log-implementation" && (
+      {renderedActiveTabId === "task-log-implementation" && (
         <TaskPhaseLogPanel issueId={issue.id} phase="implementation" />
       )}
 
-      {activeTabId === "sessions" && (
+      {renderedActiveTabId === "sessions" && (
         <div
           className={styles.logsContainer}
           role="tabpanel"

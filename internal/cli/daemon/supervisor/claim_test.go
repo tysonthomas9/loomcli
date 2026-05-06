@@ -46,6 +46,99 @@ func TestClaimTask_SelectsEligibleTaskAndClaims(t *testing.T) {
 	}
 }
 
+func TestClaimTask_ClaimsRequestedTaskIgnoringRoleFilter(t *testing.T) {
+	mock := clitest.NewMockIssueBackend()
+	mock.ReadyResult = []backend.IssueData{
+		{ID: "task-1", IssueType: "task", Status: "open", Priority: 1, Title: "No design", Assignee: "falcon"},
+		{ID: "task-2", IssueType: "task", Status: "open", Priority: 0, Title: "Ready", Design: "plan"},
+	}
+	s := &Supervisor{IssueBackend: mock}
+	ap := &AgentProcess{
+		Entry:           cfgpkg.AgentEntry{Worktree: "falcon", Role: "task"},
+		RoleConfig:      cfgpkg.RoleConfig{TaskFilter: "has_design"},
+		RequestedTaskID: "task-1",
+	}
+
+	if !s.claimTask(ap, "") {
+		t.Fatal("claimTask returned false")
+	}
+	if ap.AssignedTaskID != "task-1" {
+		t.Fatalf("AssignedTaskID = %q, want task-1", ap.AssignedTaskID)
+	}
+	if ap.RequestedTaskID != "" {
+		t.Fatalf("RequestedTaskID = %q, want empty", ap.RequestedTaskID)
+	}
+	if len(mock.Calls) != 2 {
+		t.Fatalf("calls = %#v, want Ready and ClaimIssue", mock.Calls)
+	}
+	opts := mock.Calls[0].Args[0].(backend.ReadyOpts)
+	if opts.Assignee != "falcon" {
+		t.Fatalf("ReadyOpts.Assignee = %q, want falcon", opts.Assignee)
+	}
+	if mock.Calls[1].Method != "ClaimIssue" || mock.Calls[1].Args[0] != "task-1" {
+		t.Fatalf("claim call = %#v", mock.Calls[1])
+	}
+}
+
+func TestClaimTask_RequestedTaskNotReadyDoesNotClaimFallback(t *testing.T) {
+	mock := clitest.NewMockIssueBackend()
+	mock.ReadyResult = []backend.IssueData{
+		{ID: "task-2", IssueType: "task", Status: "open", Priority: 0, Title: "Ready", Design: "plan"},
+	}
+	s := &Supervisor{IssueBackend: mock}
+	ap := &AgentProcess{
+		Entry:           cfgpkg.AgentEntry{Worktree: "falcon", Role: "task"},
+		RoleConfig:      cfgpkg.RoleConfig{TaskFilter: "has_design"},
+		RequestedTaskID: "task-1",
+	}
+
+	if s.claimTask(ap, "") {
+		t.Fatal("claimTask returned true")
+	}
+	if ap.AssignedTaskID != "" {
+		t.Fatalf("AssignedTaskID = %q, want empty", ap.AssignedTaskID)
+	}
+	if len(mock.Calls) != 1 {
+		t.Fatalf("calls = %#v, want only requested-task Ready", mock.Calls)
+	}
+	if ap.LastError == nil || ap.LastError.Class != agenterr.NoWork {
+		t.Fatalf("LastError = %#v, want NoWork", ap.LastError)
+	}
+}
+
+func TestClaimTask_PrefersAssignedTasksBeforeGeneralQueue(t *testing.T) {
+	mock := clitest.NewMockIssueBackend()
+	mock.ReadyFn = func(_ context.Context, opts backend.ReadyOpts) ([]backend.IssueData, error) {
+		if opts.Assignee == "falcon" {
+			return []backend.IssueData{
+				{ID: "task-assigned", IssueType: "task", Status: "open", Priority: 3, Title: "Assigned", Design: "plan", Assignee: "falcon"},
+			}, nil
+		}
+		return []backend.IssueData{
+			{ID: "task-general", IssueType: "task", Status: "open", Priority: 0, Title: "General", Design: "plan"},
+		}, nil
+	}
+	s := &Supervisor{IssueBackend: mock}
+	ap := &AgentProcess{
+		Entry:      cfgpkg.AgentEntry{Worktree: "falcon", Role: "task"},
+		RoleConfig: cfgpkg.RoleConfig{TaskFilter: "has_design"},
+	}
+
+	if !s.claimTask(ap, "") {
+		t.Fatal("claimTask returned false")
+	}
+	if ap.AssignedTaskID != "task-assigned" {
+		t.Fatalf("AssignedTaskID = %q, want task-assigned", ap.AssignedTaskID)
+	}
+	if len(mock.Calls) != 2 {
+		t.Fatalf("calls = %#v, want assigned Ready and ClaimIssue", mock.Calls)
+	}
+	opts := mock.Calls[0].Args[0].(backend.ReadyOpts)
+	if opts.Assignee != "falcon" {
+		t.Fatalf("ReadyOpts.Assignee = %q, want falcon", opts.Assignee)
+	}
+}
+
 func TestClaimTask_SkipsConflictedCandidate(t *testing.T) {
 	mock := clitest.NewMockIssueBackend()
 	mock.ReadyResult = []backend.IssueData{

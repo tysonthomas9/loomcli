@@ -14,7 +14,7 @@ import type {
   LoomStats,
   LoomStatusResponse,
 } from "@/types";
-import { api, apiErrorFromResponse, get } from "@/api/common";
+import { api, apiErrorFromResponse, get, post, wsUrl } from "@/api/common";
 
 function monitorPath(path: string, workspaceId?: string): string {
   if (!workspaceId) return path;
@@ -53,6 +53,20 @@ export async function checkLoomHealth(): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/**
+ * Request that a workspace agent starts or resumes work.
+ */
+export async function startAgent(
+  workspaceId: string,
+  agentName: string,
+  options?: { taskId?: string },
+): Promise<void> {
+  await post<unknown>(
+    wsUrl(workspaceId, `/agents/${encodeURIComponent(agentName)}/start`),
+    options?.taskId ? { payload: { task_id: options.taskId } } : undefined,
+  );
 }
 
 /**

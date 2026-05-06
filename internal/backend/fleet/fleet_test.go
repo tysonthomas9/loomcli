@@ -1082,6 +1082,23 @@ func TestClaimIssue_HappyPath(t *testing.T) {
 	}
 }
 
+func TestClaimIssueAsActor_OverridesActorHeader(t *testing.T) {
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" || !strings.HasSuffix(r.URL.Path, "/issues/test-1/claim") {
+			t.Errorf("unexpected: %s %s", r.Method, r.URL.Path)
+		}
+		if got := r.Header.Get("X-Actor"); got != "desktopqa" {
+			t.Fatalf("X-Actor = %q, want desktopqa", got)
+		}
+		respondOK(w, json.RawMessage(`{}`))
+	})
+	defer ts.Close()
+
+	if err := fb.ClaimIssueAsActor(context.Background(), "test-1", 0, "desktopqa"); err != nil {
+		t.Fatalf("ClaimIssueAsActor: %v", err)
+	}
+}
+
 func TestClaimIssue_ForwardsLockTTL(t *testing.T) {
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "POST" || !strings.HasSuffix(r.URL.Path, "/issues/test-1/claim") {

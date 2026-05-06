@@ -41,6 +41,7 @@ var (
 	serveBindAddr          string
 	serveCorsOrigin        string
 	serveFrontendURLs      []string
+	serveFrontendDir       string
 	serveWebUISocket       string
 	serveNoDaemon          bool
 	serveRedisAddr         string
@@ -124,6 +125,7 @@ func init() {
 	serveCmd.Flags().StringVar(&serveBindAddr, "bind", defaultBind, "Bind address (use 0.0.0.0 for all interfaces)")
 	serveCmd.Flags().StringVar(&serveCorsOrigin, "cors", defaultCors, "CORS allowed origin")
 	serveCmd.Flags().StringSliceVar(&serveFrontendURLs, "frontend-url", parseFrontendURLsEnv(), "Allowed frontend origin(s) for CORS. Repeatable or comma-separated. Env: LOOM_FRONTEND_URL")
+	serveCmd.Flags().StringVar(&serveFrontendDir, "frontend-dir", os.Getenv("LOOM_FRONTEND_DIR"), "Built web UI directory to serve for non-API routes. Env: LOOM_FRONTEND_DIR")
 	serveCmd.Flags().StringVar(&serveWebUISocket, "webui-socket", "", "Daemon socket path for webui (auto-detect if empty)")
 	serveCmd.Flags().BoolVar(&serveNoDaemon, "no-daemon", false, "Skip issue backend startup")
 
@@ -283,11 +285,21 @@ func resolveFleetState(ctx context.Context) fleetState {
 		fs.clientCfg.URL = os.Getenv(bootstrap.EnvFleetDBURL)
 	}
 	if fs.clientCfg.Actor == "" {
-		fs.clientCfg.Actor = os.Getenv(bootstrap.EnvFleetDBActor)
+		fs.clientCfg.Actor = resolveFleetClientActorFallback()
 	}
 
 	fs.jwtKey, fs.redisConfig = daemonwire.ResolveFleetJWTKey(ctx, serveRedisAddr, serveRedisPassword)
 	return fs
+}
+
+func resolveFleetClientActorFallback() string {
+	if v := os.Getenv(bootstrap.EnvFleetDBActor); v != "" {
+		return v
+	}
+	if v := os.Getenv(bootstrap.EnvAgentName); v != "" {
+		return v
+	}
+	return os.Getenv("USER")
 }
 
 func applyAuthDefaults() {
@@ -359,6 +371,7 @@ func buildCoreServerConfig(monitorHandlers webui.MonitorHandlers, gitOps *opsimp
 		Port:                 servePort,
 		BindAddress:          serveBindAddr,
 		SocketPath:           serveWebUISocket,
+		FrontendDir:          serveFrontendDir,
 		MonitorHandlers:      monitorHandlers,
 		AgentControlFn:       daemonwire.BuildAgentControlFn(),
 		DaemonSupervisorFn:   daemonwire.BuildDaemonSupervisorFn(),
@@ -374,6 +387,7 @@ func buildCoreServerConfig(monitorHandlers webui.MonitorHandlers, gitOps *opsimp
 		FileOps:              gitOps,
 		BackendOps:           opsimpl.NewBackendOps(),
 		NotifyTokenDir:       cli.GetWorkspaceRuntimeDir(),
+		SessionRuntimeDir:    cli.GetWorkspaceRuntimeDir(),
 		Logger:               slog.Default(),
 		SentryDSN:            serveSentryDSN,
 		// Wire the active IssueBackend (fleet / fleet-db / api) into

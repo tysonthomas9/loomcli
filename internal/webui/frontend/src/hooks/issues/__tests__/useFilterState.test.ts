@@ -939,6 +939,10 @@ describe("isEmptyFilter", () => {
     expect(isEmptyFilter({ search: "test" })).toBe(false);
   });
 
+  it("returns false when show blocked is enabled", () => {
+    expect(isEmptyFilter({ showBlocked: true })).toBe(false);
+  });
+
   it("returns true when groupBy is none", () => {
     expect(isEmptyFilter({ groupBy: "none" })).toBe(true);
   });

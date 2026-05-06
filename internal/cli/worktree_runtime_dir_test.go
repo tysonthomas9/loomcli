@@ -17,6 +17,16 @@ func TestGetWorkspaceRuntimeDir_NoWorkspaceConfig(t *testing.T) {
 	}
 }
 
+func TestGetWorkspaceRuntimeDir_HonorsRuntimeDirEnv(t *testing.T) {
+	ResetWorkspaceRuntimeDirCache()
+	t.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", "/tmp/loom-runtime")
+
+	got := GetWorkspaceRuntimeDir()
+	if got != "/tmp/loom-runtime" {
+		t.Errorf("GetWorkspaceRuntimeDir() = %q, want %q", got, "/tmp/loom-runtime")
+	}
+}
+
 func TestGetWorkspaceRuntimeDir_Workspace(t *testing.T) {
 	// Config with workspace and default_workspace set → returns workspace path
 	ResetWorkspaceRuntimeDirCache()

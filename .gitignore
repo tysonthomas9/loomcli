@@ -14,6 +14,11 @@ internal/webui/frontend/dist/
 internal/webui/frontend/playwright-report/
 internal/webui/frontend/test-results/
 internal/webui/frontend/coverage/
+desktop/node_modules/
+desktop/dist/
+desktop/src-tauri/target/
+desktop/src-tauri/binaries/
+desktop/src-tauri/resources/webui/
 
 # E2E test artifacts
 internal/webui/frontend/tests/e2e/.e2e-state.json

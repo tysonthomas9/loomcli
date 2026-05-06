@@ -579,6 +579,11 @@ func (r *Resolver) SetRepoDefaultBranch(repoName, branch string) error {
 // The result is cached for the lifetime of the process.
 func GetWorkspaceRuntimeDir() string {
 	workspaceRuntimeDirOnce.Do(func() {
+		if dir := os.Getenv("LOOM_WORKSPACE_RUNTIME_DIR"); dir != "" {
+			workspaceRuntimeDirCache = dir
+			return
+		}
+
 		cfg, err := config.LoadConfig()
 		if err != nil || cfg == nil || len(cfg.Workspaces) == 0 {
 			workspaceRuntimeDirCache = "."

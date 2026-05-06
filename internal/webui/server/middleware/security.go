@@ -32,7 +32,7 @@ func SecurityHeaders(cfg SecurityConfig) Middleware {
 				connectSrc += " " + cfg.ExtAuthOrigin
 			}
 			h.Set("Content-Security-Policy",
-				fmt.Sprintf("default-src 'self'; script-src 'self' 'sha256-E907z9SPF4o7blRe1MXfQVC2tBrJopXOXrMYZvksy/o='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src %s; font-src 'self'; frame-ancestors 'none'; report-uri /api/csp-report", connectSrc))
+				fmt.Sprintf("default-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'sha256-E907z9SPF4o7blRe1MXfQVC2tBrJopXOXrMYZvksy/o='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src %s; font-src 'self'; frame-ancestors 'none'; report-uri /api/csp-report", connectSrc))
 			h.Set("X-Content-Type-Options", "nosniff")
 			h.Set("Referrer-Policy", "strict-origin-when-cross-origin")
 			h.Set("X-Frame-Options", "DENY")

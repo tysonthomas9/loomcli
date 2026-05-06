@@ -250,6 +250,27 @@ func TestResolveFleetStateResolvesClientConfigOutsideFleetMode(t *testing.T) {
 	}
 }
 
+func TestResolveFleetStateUsesLocalActorFallback(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	t.Setenv(bootstrap.EnvWorkspace, "")
+	t.Setenv(bootstrap.EnvFleetDBURL, "")
+	t.Setenv(bootstrap.EnvFleetDBActor, "")
+	t.Setenv(bootstrap.EnvAgentName, "")
+	t.Setenv("LOOM_FLEET_ACTOR", "")
+	t.Setenv("USER", "local-user")
+	oldRedisAddr, oldRedisPassword := serveRedisAddr, serveRedisPassword
+	serveRedisAddr, serveRedisPassword = "", ""
+	t.Cleanup(func() {
+		serveRedisAddr, serveRedisPassword = oldRedisAddr, oldRedisPassword
+	})
+
+	fs := resolveFleetState(context.Background())
+
+	if fs.clientCfg.Actor != "local-user" {
+		t.Fatalf("clientCfg.Actor = %q, want local-user", fs.clientCfg.Actor)
+	}
+}
+
 func TestEnsureFleetStoreEnv_UsesFleetClientConfig(t *testing.T) {
 	t.Setenv(bootstrap.EnvFleetDBURL, "")
 	t.Setenv(bootstrap.EnvFleetDBActor, "")
@@ -754,6 +775,14 @@ func TestServeFlags_Defaults(t *testing.T) {
 	if len(frontendURLs) != 0 {
 		t.Errorf("frontend-url default = %v, want empty", frontendURLs)
 	}
+
+	frontendDir, err := f.GetString("frontend-dir")
+	if err != nil {
+		t.Fatalf("failed to get frontend-dir flag: %v", err)
+	}
+	if frontendDir != "" {
+		t.Errorf("frontend-dir default = %q, want empty", frontendDir)
+	}
 }
 
 func TestServeFlags_FrontendURL(t *testing.T) {
@@ -764,6 +793,17 @@ func TestServeFlags_FrontendURL(t *testing.T) {
 
 	if f.Value.Type() != "stringSlice" {
 		t.Errorf("frontend-url type = %q, want %q", f.Value.Type(), "stringSlice")
+	}
+}
+
+func TestServeFlags_FrontendDir(t *testing.T) {
+	f := serveCmd.Flags().Lookup("frontend-dir")
+	if f == nil {
+		t.Fatal("frontend-dir flag not registered on serveCmd")
+	}
+
+	if f.Value.Type() != "string" {
+		t.Errorf("frontend-dir type = %q, want %q", f.Value.Type(), "string")
 	}
 }
 

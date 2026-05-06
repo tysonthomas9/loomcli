@@ -1,0 +1,26 @@
+[package]
+name = "loom-desktop"
+version = "0.1.0"
+description = "Loom desktop shell"
+authors = ["Loom"]
+edition = "2021"
+
+[lib]
+name = "loom_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-shell = "2"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = [
+  "NSApplication",
+  "NSResponder",
+  "NSRunningApplication",
+  "NSWindow"
+] }

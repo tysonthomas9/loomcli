@@ -523,6 +523,39 @@ func (s *agentServiceImpl) UpdateAgent(ctx context.Context, wsKey, name string, 
 	return updated, nil
 }
 
+// RequestAgentLifecycle updates FleetDB state and creates a queued command for
+// the daemon poller that owns this workspace.
+func (s *agentServiceImpl) RequestAgentLifecycle(ctx context.Context, wsKey, name string, in service.AgentLifecycleInput) (*domain.Agent, error) {
+	if s.store == nil {
+		return nil, service.ErrUnavailable("fleet-db store not configured")
+	}
+	if err := validateAgentName(name); err != nil {
+		return nil, err
+	}
+	if err := validateAgentCommandType(in.CommandType); err != nil {
+		return nil, err
+	}
+	updated, err := s.UpdateAgent(ctx, wsKey, name, service.AgentUpdateInput{
+		State:        &in.State,
+		DesiredState: &in.DesiredState,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if s.store.AgentCommands() == nil {
+		return updated, nil
+	}
+	if _, err := s.store.AgentCommands().Create(ctx, store.AgentCommandCreate{
+		WorkspaceKey:  wsKey,
+		TargetAgentID: name,
+		Type:          in.CommandType,
+		Payload:       in.Payload,
+	}); err != nil {
+		return nil, classifyStoreError("create agent command", err)
+	}
+	return updated, nil
+}
+
 // DeleteAgent removes an agent assignment from the fleet-db store.
 func (s *agentServiceImpl) DeleteAgent(ctx context.Context, wsKey, name string) error {
 	if s.store == nil {
@@ -535,6 +568,15 @@ func (s *agentServiceImpl) DeleteAgent(ctx context.Context, wsKey, name string) 
 		return classifyStoreError("delete agent", err)
 	}
 	return nil
+}
+
+func validateAgentCommandType(commandType string) error {
+	switch commandType {
+	case "start", "stop", "restart", "yield":
+		return nil
+	default:
+		return service.ErrValidation("invalid agent command type")
+	}
 }
 
 // validateAgentCreateInput checks required fields on an agent create payload.

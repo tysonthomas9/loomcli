@@ -45,6 +45,8 @@ export interface TerminalPaneProps {
    * in to spawning a new shell.
    */
   ptyAlive?: boolean | undefined;
+  /** Automatically replace stale PTYs for tabs where losing old scrollback is acceptable. */
+  autoStartStaleSession?: boolean | undefined;
 }
 
 export function TerminalPane({
@@ -68,6 +70,7 @@ export function TerminalPane({
   onSaveNotes,
   isMetaLoading,
   ptyAlive,
+  autoStartStaleSession,
 }: TerminalPaneProps) {
   return (
     <>
@@ -82,6 +85,7 @@ export function TerminalPane({
         onTerminalFocus={onTerminalFocus}
         agentName={tab.agentName}
         ptyAlive={ptyAlive}
+        autoStartStaleSession={autoStartStaleSession}
       />
       {tab.crashReason != null ? (
         <CrashOverlay

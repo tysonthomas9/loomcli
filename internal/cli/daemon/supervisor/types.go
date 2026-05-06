@@ -36,6 +36,7 @@ type AgentProcess struct {
 	OwnershipLastHeartbeat time.Time         // last successful ownership heartbeat
 	BeforeRef              string            // git HEAD ref before spawn (for diff stats at finalization)
 	AssignedTaskID         string            // task claimed by supervisor preflight for this run
+	RequestedTaskID        string            // task requested by a lifecycle command before normal queue selection
 
 	RestartCount   int       // consecutive restart attempts
 	LastStart      time.Time // when subprocess was last spawned

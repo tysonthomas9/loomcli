@@ -349,6 +349,17 @@ func (b *fleetDBIssueBackend) ClaimIssue(ctx context.Context, id string, lockTTL
 	})
 }
 
+func (b *fleetDBIssueBackend) ClaimIssueAsActor(ctx context.Context, id string, lockTTL time.Duration, actor string) error {
+	return b.withBackend(ctx, "ClaimIssue", func(ib backend.IssueBackend) error {
+		if actorBackend, ok := ib.(interface {
+			ClaimIssueAsActor(context.Context, string, time.Duration, string) error
+		}); ok {
+			return actorBackend.ClaimIssueAsActor(ctx, id, lockTTL, actor)
+		}
+		return ib.ClaimIssue(ctx, id, lockTTL)
+	})
+}
+
 func (b *fleetDBIssueBackend) DeferIssue(ctx context.Context, id string, until time.Time) error {
 	return b.withBackend(ctx, "DeferIssue", func(ib backend.IssueBackend) error {
 		return ib.DeferIssue(ctx, id, until)

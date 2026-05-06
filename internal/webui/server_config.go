@@ -48,6 +48,7 @@ type ServerConfig struct {
 	Port                int
 	BindAddress         string // Listen address (default: "127.0.0.1"; use "0.0.0.0" for all interfaces)
 	SocketPath          string
+	FrontendDir         string // Optional built SPA directory served for non-API routes
 	PoolSize            int
 	CORSEnabled         bool
 	CORSOrigins         []string
@@ -87,6 +88,7 @@ type ServerConfig struct {
 	BackendOps           ops.BackendOps                                       // Backend health operations interface (optional; nil disables backend health endpoint)
 	ScrollbackMaxLines   int                                                  // Maximum lines per scrollback buffer (0 = default 10000)
 	NotifyTokenDir       string                                               // Directory to write notify.token (typically runtime dir); empty = token file not written
+	SessionRuntimeDir    string                                               // Runtime dir searched for local agent sessions; empty = workspace/repo stores only
 	AgentControlFn       agentcontrol.AgentControlFn                          // Sends agent lifecycle commands to the daemon control socket; nil in fleet mode or --no-daemon
 	DaemonSupervisorFn   func() (*DaemonSupervisorData, error)                // Returns daemon supervisor state from state file; nil = endpoint unavailable
 	DaemonConfigFn       func() (json.RawMessage, error)                      // Returns effective merged daemon config as JSON; nil = endpoint unavailable

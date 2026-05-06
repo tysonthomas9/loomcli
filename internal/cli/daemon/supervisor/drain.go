@@ -272,6 +272,12 @@ func (s *Supervisor) DrainAgentForceful(name string, reason StopReason) error {
 // AddAgent creates and starts a new agent at runtime.
 // The agent begins its superviseAgent loop immediately.
 func (s *Supervisor) AddAgent(entry config.AgentEntry) error {
+	return s.AddAgentForTask(entry, "")
+}
+
+// AddAgentForTask creates and starts a new agent with an optional first task
+// requested by the control plane.
+func (s *Supervisor) AddAgentForTask(entry config.AgentEntry, taskID string) error {
 	// Early duplicate check (avoids unnecessary I/O; authoritative check is below under Lock)
 	s.AgentsMu.RLock()
 	for _, ap := range s.Agents {
@@ -299,12 +305,13 @@ func (s *Supervisor) AddAgent(entry config.AgentEntry) error {
 	}
 
 	ap := &AgentProcess{
-		Entry:        entry,
-		RoleConfig:   roleConfig,
-		WorktreePath: target.WorkDir,
-		RepoConfig:   s.FindRepoConfig(entry.Repo),
-		StopCh:       make(chan struct{}),
-		Done:         make(chan struct{}),
+		Entry:           entry,
+		RoleConfig:      roleConfig,
+		WorktreePath:    target.WorkDir,
+		RepoConfig:      s.FindRepoConfig(entry.Repo),
+		RequestedTaskID: taskID,
+		StopCh:          make(chan struct{}),
+		Done:            make(chan struct{}),
 	}
 
 	// Check for duplicate, add to slice, and increment WaitGroup atomically

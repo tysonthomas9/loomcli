@@ -59,6 +59,10 @@ type AgentService interface {
 	// UpdateAgent applies a partial-update to an existing agent.
 	UpdateAgent(ctx context.Context, wsKey, name string, patch AgentUpdateInput) (*domain.Agent, error)
 
+	// RequestAgentLifecycle updates desired agent state and enqueues a daemon
+	// command for the corresponding lifecycle action.
+	RequestAgentLifecycle(ctx context.Context, wsKey, name string, in AgentLifecycleInput) (*domain.Agent, error)
+
 	// DeleteAgent removes an agent assignment from the store.
 	DeleteAgent(ctx context.Context, wsKey, name string) error
 }
@@ -92,6 +96,15 @@ type AgentUpdateInput struct {
 	Parent           *string                   `json:"parent,omitempty"`
 	State            *domain.AgentState        `json:"state,omitempty"`
 	DesiredState     *domain.AgentDesiredState `json:"desired_state,omitempty"`
+}
+
+// AgentLifecycleInput describes an agent lifecycle request that should be
+// persisted as agent state plus a queued daemon command.
+type AgentLifecycleInput struct {
+	State        domain.AgentState
+	DesiredState domain.AgentDesiredState
+	CommandType  string
+	Payload      map[string]string
 }
 
 // AgentTerminalInfoResult contains the terminal mode for an agent.

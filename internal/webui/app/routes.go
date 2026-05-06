@@ -33,6 +33,7 @@ func (app *Server) registerRoutes() {
 		w.WriteHeader(http.StatusNotFound)
 		_, _ = w.Write([]byte(`{"error":"not found"}`))
 	}))
+	app.registerFrontendRoutes()
 }
 
 // registerCoreAPIRoutes registers health, config, and error reporting endpoints.

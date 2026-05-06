@@ -199,6 +199,7 @@ function isEmptyFilter(state: FilterState): boolean {
     state.type === undefined &&
     (state.labels === undefined || state.labels.length === 0) &&
     (state.search === undefined || state.search === "") &&
+    state.showBlocked === undefined &&
     (state.groupBy === undefined ||
       state.groupBy === "none" ||
       state.groupBy === DEFAULT_GROUP_BY)

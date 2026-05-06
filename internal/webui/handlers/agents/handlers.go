@@ -1,6 +1,7 @@
 package agents
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 
@@ -81,37 +82,41 @@ func HandleDelete(agentSvc service.AgentService) http.HandlerFunc {
 
 func HandleStart(agentSvc service.AgentService) http.HandlerFunc {
 	return handleLifecycle(agentSvc, lifecyclePatch{
-		state:   domain.AgentStateActive,
-		desired: domain.AgentDesiredRunning,
-		status:  http.StatusOK,
-		message: "started",
+		state:       domain.AgentStateActive,
+		desired:     domain.AgentDesiredRunning,
+		commandType: "start",
+		status:      http.StatusOK,
+		message:     "started",
 	})
 }
 
 func HandleStop(agentSvc service.AgentService) http.HandlerFunc {
 	return handleLifecycle(agentSvc, lifecyclePatch{
-		state:   domain.AgentStateStopped,
-		desired: domain.AgentDesiredStopped,
-		status:  http.StatusOK,
-		message: "stopped",
+		state:       domain.AgentStateStopped,
+		desired:     domain.AgentDesiredStopped,
+		commandType: "stop",
+		status:      http.StatusOK,
+		message:     "stopped",
 	})
 }
 
 func HandleRestart(agentSvc service.AgentService) http.HandlerFunc {
 	return handleLifecycle(agentSvc, lifecyclePatch{
-		state:   domain.AgentStateActive,
-		desired: domain.AgentDesiredRunning,
-		status:  http.StatusAccepted,
-		message: "restart requested",
+		state:       domain.AgentStateActive,
+		desired:     domain.AgentDesiredRunning,
+		commandType: "restart",
+		status:      http.StatusAccepted,
+		message:     "restart requested",
 	})
 }
 
 func HandleYield(agentSvc service.AgentService) http.HandlerFunc {
 	return handleLifecycle(agentSvc, lifecyclePatch{
-		state:   domain.AgentStateIdle,
-		desired: domain.AgentDesiredDraining,
-		status:  http.StatusAccepted,
-		message: "yield requested",
+		state:       domain.AgentStateIdle,
+		desired:     domain.AgentDesiredDraining,
+		commandType: "yield",
+		status:      http.StatusAccepted,
+		message:     "yield requested",
 	})
 }
 
@@ -120,17 +125,49 @@ func HandleQueueUnsupported(w http.ResponseWriter, _ *http.Request) {
 }
 
 type lifecyclePatch struct {
-	state   domain.AgentState
-	desired domain.AgentDesiredState
-	status  int
-	message string
+	state       domain.AgentState
+	desired     domain.AgentDesiredState
+	commandType string
+	payload     map[string]string
+	status      int
+	message     string
+}
+
+type lifecycleRequest struct {
+	Payload map[string]string `json:"payload,omitempty"`
+	TaskID  string            `json:"task_id,omitempty"`
 }
 
 func handleLifecycle(agentSvc service.AgentService, patch lifecyclePatch) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		updated, err := agentSvc.UpdateAgent(r.Context(), r.PathValue("ws"), r.PathValue("name"), service.AgentUpdateInput{
-			State:        &patch.state,
-			DesiredState: &patch.desired,
+		payload := patch.payload
+		if r.Body != nil && r.ContentLength != 0 {
+			var req lifecycleRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				handler.HandleServiceError(w, service.ErrValidation("invalid request body"))
+				return
+			}
+			if len(req.Payload) > 0 {
+				payload = map[string]string{}
+				for k, v := range patch.payload {
+					payload[k] = v
+				}
+				for k, v := range req.Payload {
+					payload[k] = v
+				}
+			}
+			if req.TaskID != "" {
+				if payload == nil {
+					payload = map[string]string{}
+				}
+				payload["task_id"] = req.TaskID
+			}
+		}
+		updated, err := agentSvc.RequestAgentLifecycle(r.Context(), r.PathValue("ws"), r.PathValue("name"), service.AgentLifecycleInput{
+			State:        patch.state,
+			DesiredState: patch.desired,
+			CommandType:  patch.commandType,
+			Payload:      payload,
 		})
 		if err != nil {
 			handler.HandleServiceError(w, err)

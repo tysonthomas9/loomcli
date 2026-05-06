@@ -180,7 +180,7 @@ describe("logs API", () => {
 
     it("fetches one-time agent terminal token", async () => {
       mockApiGet.mockResolvedValueOnce({
-        data: { token: "abc123" },
+        data: { success: true, data: { token: "abc123" } },
         error: undefined,
         response: new Response(),
       } as never);

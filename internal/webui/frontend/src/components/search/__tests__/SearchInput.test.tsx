@@ -436,11 +436,12 @@ describe("SearchInput", () => {
       expect(clearButton).toBeInTheDocument();
     });
 
-    it('input has type="search"', () => {
+    it("uses a text input with searchbox semantics", () => {
       render(<SearchInput />);
 
       const input = screen.getByTestId("search-input-field");
-      expect(input).toHaveAttribute("type", "search");
+      expect(input).toHaveAttribute("type", "text");
+      expect(input).toHaveAttribute("role", "searchbox");
     });
 
     it("custom aria-label overrides placeholder", () => {

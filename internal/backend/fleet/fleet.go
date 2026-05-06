@@ -792,6 +792,22 @@ func (b *FleetBackend) ClaimIssue(ctx context.Context, id string, lockTTL time.D
 	return err
 }
 
+// ClaimIssueAsActor atomically claims an issue while overriding the configured
+// FleetDB actor for this request.
+func (b *FleetBackend) ClaimIssueAsActor(ctx context.Context, id string, lockTTL time.Duration, actor string) error {
+	if id == "" {
+		return backend.ErrValidation("ClaimIssue", "id must not be empty")
+	}
+	if actor == "" {
+		return backend.ErrValidation("ClaimIssue", "actor must not be empty")
+	}
+	body, err := claimIssueBody(lockTTL)
+	if err != nil {
+		return err
+	}
+	return b.execAsActor(ctx, "ClaimIssue", "POST", "/issues/"+url.PathEscape(id)+"/claim", body, actor)
+}
+
 func claimIssueBody(lockTTL time.Duration) (interface{}, error) {
 	if lockTTL < 0 {
 		return nil, backend.ErrValidation("ClaimIssue", "lockTTL must not be negative")

@@ -43,6 +43,23 @@ func TestGetWorkspaceLogDir(t *testing.T) {
 	})
 }
 
+func TestGetLogDirUsesWorkspaceRuntimeDir(t *testing.T) {
+	runtimeDir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("failed to resolve temp dir: %v", err)
+	}
+	t.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", runtimeDir)
+
+	dir, err := GetLogDir()
+	if err != nil {
+		t.Fatalf("GetLogDir() error = %v", err)
+	}
+	expected := filepath.Join(runtimeDir, ".loom", "logs")
+	if dir != expected {
+		t.Errorf("GetLogDir() = %q, want %q", dir, expected)
+	}
+}
+
 // TestGetAgentLogPath_WithWorkspace verifies agent log path includes workspace ID.
 func TestGetAgentLogPath_WithWorkspace(t *testing.T) {
 	tmpHome, err := filepath.EvalSymlinks(t.TempDir())

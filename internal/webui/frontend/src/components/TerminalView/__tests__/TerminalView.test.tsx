@@ -19,6 +19,7 @@ import "@testing-library/jest-dom";
 import { KeyboardShortcutProvider } from "@/hooks/ui";
 
 import { TerminalView } from "../TerminalView";
+import { TerminalInstance } from "../instances/TerminalInstance";
 import { MAX_TABS } from "@/components/TerminalView/tabs/terminalTabUtils";
 import {
   BackendPickerPrompt,
@@ -33,6 +34,9 @@ const mockMetadataHook = vi.hoisted(() => ({
     label: string;
     notes: string;
     sort_order: number;
+    pinned: boolean;
+    pty_alive: boolean;
+    attached_clients: number;
     created_at: string;
     updated_at: string;
   }>,
@@ -158,6 +162,9 @@ function setMetadata(
     label: string;
     notes?: string;
     sort_order?: number;
+    pinned?: boolean;
+    pty_alive?: boolean;
+    attached_clients?: number;
   }>,
   isLoading = false,
 ) {
@@ -167,6 +174,9 @@ function setMetadata(
     label: t.label,
     notes: t.notes ?? "",
     sort_order: t.sort_order ?? i,
+    pinned: t.pinned ?? false,
+    pty_alive: t.pty_alive ?? true,
+    attached_clients: t.attached_clients ?? 0,
     created_at: now,
     updated_at: now,
   }));
@@ -237,6 +247,37 @@ describe("TerminalView", () => {
 
       expect(screen.getByTestId("tab-session-1")).toBeInTheDocument();
       expect(screen.getByTestId("tab-session-2")).toBeInTheDocument();
+    });
+
+    it("auto-starts stale lead tabs but not stale issue tabs", () => {
+      setMetadata([
+        {
+          session_name: "DESKTOP-QA--lead-codex-1",
+          label: "lead-codex-1",
+          pty_alive: false,
+        },
+        {
+          session_name: "issue-PROJ-42",
+          label: "issue-PROJ-42",
+          pty_alive: false,
+        },
+      ]);
+      render(<TerminalView />);
+
+      const calls = vi.mocked(TerminalInstance).mock.calls.map(([props]) => {
+        return props as {
+          sessionName: string;
+          autoStartStaleSession?: boolean;
+        };
+      });
+      expect(
+        calls.find((props) => props.sessionName === "DESKTOP-QA--lead-codex-1")
+          ?.autoStartStaleSession,
+      ).toBe(true);
+      expect(
+        calls.find((props) => props.sessionName === "issue-PROJ-42")
+          ?.autoStartStaleSession,
+      ).toBe(false);
     });
 
     it("auto-creates only default backend tab on first open (empty metadata)", () => {

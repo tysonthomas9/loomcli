@@ -92,7 +92,11 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	if config.ExtAuthURL == "" && config.BindAddress != "127.0.0.1" && config.BindAddress != "::1" {
 		logger.Warn("no authentication configured and server is exposed to network", "bind_address", config.BindAddress)
 	}
-	logger.Info("api-only mode — frontend served externally")
+	if config.FrontendDir == "" {
+		logger.Info("api-only mode — frontend served externally")
+	} else {
+		logger.Info("serving bundled frontend", "dir", config.FrontendDir)
+	}
 	if config.FleetEnabled {
 		logger.Info("fleet routes enabled")
 	}
@@ -428,7 +432,7 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	}
 
 	// Initialize session service layer (always constructed; stores may be nil internally)
-	app.sessSvc = svcimpl.NewSessionService(config.Store, app.sessionHistoryStore)
+	app.sessSvc = svcimpl.NewSessionServiceWithRuntimeDir(config.Store, app.sessionHistoryStore, config.SessionRuntimeDir)
 
 	app.buildHandlers()
 	app.buildModules()

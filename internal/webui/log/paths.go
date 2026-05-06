@@ -14,6 +14,11 @@ const defaultWorkspaceDir = "_default"
 
 // getLogDir returns the base log directory (~/.loom/logs).
 func GetLogDir() (string, error) {
+	for _, env := range []string{"LOOM_WORKSPACE_RUNTIME_DIR", "LOOM_CONFIG_DIR"} {
+		if base := os.Getenv(env); base != "" {
+			return filepath.Join(base, ".loom", "logs"), nil
+		}
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("failed to get home directory: %w", err)

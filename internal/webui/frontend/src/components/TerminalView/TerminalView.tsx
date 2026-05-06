@@ -47,6 +47,10 @@ interface TerminalViewProps {
   onAgentNameConsumed?: (() => void) | undefined;
 }
 
+function isLeadSessionName(sessionName: string): boolean {
+  return /(?:^|--)lead-[^-]+-\d+$/.test(sessionName);
+}
+
 export function TerminalView({
   isActive = true,
   pendingIssueContext,
@@ -377,6 +381,7 @@ export function TerminalView({
           isActive={paneIsActive}
           instanceRef={setInstanceRef(tab.id)}
           ptyAlive={ptyAlive}
+          autoStartStaleSession={isLeadSessionName(tab.sessionName)}
           onConnectionStateChange={(state, hasConnected) =>
             handleConnectionStateChange(tab.id, state, hasConnected)
           }

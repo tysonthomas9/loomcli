@@ -1456,6 +1456,67 @@ describe("App", () => {
         expect(searchInput.value).toBe("");
       });
     });
+
+    it("does not rewrite search URL state when the debounced search already matches the filter", () => {
+      const issues = [
+        createMockIssue({ id: "issue-1", title: "Test Issue", status: "open" }),
+      ];
+      const mockReturn = createMockUseIssuesReturn({ issues });
+      mockStoreState = mockReturn;
+
+      const filterActions = {
+        setPriority: vi.fn(),
+        setType: vi.fn(),
+        setLabels: vi.fn(),
+        setSearch: vi.fn(),
+        setShowBlocked: vi.fn(),
+        setGroupBy: vi.fn(),
+        clearFilter: vi.fn(),
+        clearAll: vi.fn(),
+      };
+
+      vi.mocked(useFilterState).mockReturnValue([
+        { search: "test query" },
+        filterActions,
+      ]);
+
+      render(<App />);
+
+      expect(filterActions.setSearch).not.toHaveBeenCalled();
+    });
+
+    it("keeps typed search text visible while the debounced URL update is pending", async () => {
+      const issues = [
+        createMockIssue({ id: "issue-1", title: "Test Issue", status: "open" }),
+      ];
+      const mockReturn = createMockUseIssuesReturn({ issues });
+      mockStoreState = mockReturn;
+
+      const filterActions = {
+        setPriority: vi.fn(),
+        setType: vi.fn(),
+        setLabels: vi.fn(),
+        setSearch: vi.fn(),
+        setShowBlocked: vi.fn(),
+        setGroupBy: vi.fn(),
+        clearFilter: vi.fn(),
+        clearAll: vi.fn(),
+      };
+
+      vi.mocked(useFilterState).mockReturnValue([{}, filterActions]);
+
+      render(<App />);
+
+      const searchInput = screen.getByTestId(
+        "search-input-field",
+      ) as HTMLInputElement;
+      fireEvent.change(searchInput, { target: { value: "zzzz-no-match" } });
+
+      await waitFor(() => {
+        expect(filterActions.setSearch).toHaveBeenCalledWith("zzzz-no-match");
+      });
+      expect(searchInput.value).toBe("zzzz-no-match");
+    });
   });
 
   describe("swim lane integration", () => {

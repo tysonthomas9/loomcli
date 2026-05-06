@@ -147,6 +147,52 @@ func TestSessionServiceListTaskSessionsFallsBackToFileStores(t *testing.T) {
 	}
 }
 
+func TestSessionServiceListTaskSessionsSearchesRuntimeDir(t *testing.T) {
+	ctx := t.Context()
+	workspacePath := t.TempDir()
+	runtimeDir := t.TempDir()
+
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS", Name: "Workspace"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := bootstrap.SaveStateCache(&bootstrap.StateCache{
+		Workspaces: map[string]bootstrap.WorkspaceLocalState{
+			"WS": {Path: workspacePath},
+		},
+	}); err != nil {
+		t.Fatalf("save state cache: %v", err)
+	}
+
+	sessStore, err := sessions.NewStore(runtimeDir)
+	if err != nil {
+		t.Fatalf("new runtime session store: %v", err)
+	}
+	sess, err := sessStore.CreateSession(sessions.CreateOptions{
+		AgentName: "desktopqa",
+		Backend:   "codex",
+		Phase:     "implementation",
+	})
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	if err := sess.Finalize(sessions.FinalizeOptions{TaskID: "DESKTOP-QA-3", ExitCode: 0}); err != nil {
+		t.Fatalf("finalize session: %v", err)
+	}
+
+	svc := NewSessionServiceWithRuntimeDir(st, nil, runtimeDir)
+	items, err := svc.ListTaskSessions(ctx, "WS", "DESKTOP-QA-3")
+	if err != nil {
+		t.Fatalf("ListTaskSessions: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("items = %d, want 1", len(items))
+	}
+	if items[0].SessionID != sess.SessionID() || items[0].TaskID != "DESKTOP-QA-3" || items[0].AgentName != "desktopqa" {
+		t.Fatalf("item identity = %+v", items[0].SessionRecord)
+	}
+}
+
 func TestReadScrollbackFileReturnsInternalWhenHomeDirUnavailable(t *testing.T) {
 	oldUserHomeDir := userHomeDir
 	userHomeDir = func() (string, error) {
