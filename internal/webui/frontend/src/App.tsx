@@ -708,14 +708,24 @@ function App() {
   activeViewRef.current = activeView;
   const selectedIssueIdRef = useRef(selectedIssueId);
   selectedIssueIdRef.current = selectedIssueId;
+  // When the issue detail panel is open as an overlay (kanban/table/graph),
+  // the route does not carry the issue id — fall back to the panel's issue id.
+  const activePanelRef = useRef(activePanel);
+  activePanelRef.current = activePanel;
 
-  // Copy link handler: copies a clean shareable URL to clipboard
+  // Copy link handler: copies a clean shareable URL to clipboard.
+  // For an open issue (route or overlay panel), the link always points at the
+  // dedicated issue-detail route so the recipient lands on that task.
   const handleCopyLink = useCallback(async () => {
     try {
+      const panel = activePanelRef.current;
+      const panelIssueId = panel?.type === "issue" ? panel.id : null;
+      const issueId = selectedIssueIdRef.current ?? panelIssueId;
+      const view = issueId ? "issue-detail" : activeViewRef.current;
       await navigator.clipboard.writeText(
         buildShareUrl({
-          view: activeViewRef.current,
-          issue: selectedIssueIdRef.current,
+          view,
+          issue: issueId,
         }),
       );
       showToast("Link copied to clipboard", { type: "success" });
