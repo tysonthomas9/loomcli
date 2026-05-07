@@ -57,8 +57,15 @@ check_deps
 
 export LOOM_ISSUE_BACKEND="${LOOM_ISSUE_BACKEND:-fleetdb}"
 
-# Install node_modules if missing
-if [[ ! -d "$FRONTEND_DIR/node_modules" ]]; then
+# Install frontend deps when out of sync. A bare existence check on
+# node_modules/ misses the case where package.json or package-lock.json
+# was updated since the last install (e.g., after `git pull`), leaving
+# Vite to fail at import time on a missing dependency.
+node_modules_marker="$FRONTEND_DIR/node_modules/.package-lock.json"
+if [[ ! -d "$FRONTEND_DIR/node_modules" ]] \
+    || [[ ! -f "$node_modules_marker" ]] \
+    || [[ "$FRONTEND_DIR/package-lock.json" -nt "$node_modules_marker" ]] \
+    || [[ "$FRONTEND_DIR/package.json" -nt "$node_modules_marker" ]]; then
     echo "Installing frontend dependencies..."
     (cd "$FRONTEND_DIR" && npm install)
 fi
