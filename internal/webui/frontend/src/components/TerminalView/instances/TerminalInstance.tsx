@@ -409,11 +409,20 @@ export const TerminalInstance = forwardRef<
     // StrictMode remount (wterm already fired onReady, and its cached
     // WASM means it won't fire again), re-kick the connection here —
     // otherwise the tab would stay stuck at "connecting" because the
-    // prior cleanup cancelled its in-flight WebSocket.
+    // prior cleanup cancelled its in-flight WebSocket. The same hazard
+    // applies to wtermInstanceRef: cleanup nulled it, but onReady won't
+    // fire to re-set it, so write() would silently drop every replayed
+    // byte. Restore from the still-alive TerminalHandle.
     if (
       wtermReadyRef.current &&
       (ptyAlive !== false || autoStartStaleSession)
     ) {
+      if (wtermInstanceRef.current == null) {
+        const instance = wtermRef.current?.instance as WTerm | undefined;
+        if (instance) {
+          wtermInstanceRef.current = instance;
+        }
+      }
       doConnectRef.current?.();
     }
     return () => {
