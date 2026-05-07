@@ -15,6 +15,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/cli/local"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -300,13 +301,7 @@ func workspaceStateString(state domain.WorkspaceState) string {
 }
 
 func repoLocalPath(localState bootstrap.WorkspaceLocalState, name string) string {
-	if localState.Repos != nil && localState.Repos[name] != "" {
-		return localState.Repos[name]
-	}
-	if localState.Path != "" {
-		return filepath.Join(localState.Path, name)
-	}
-	return ""
+	return localworkspace.RepoPath(localState, name)
 }
 
 func workspaceOpsAgentStatus(
@@ -386,13 +381,13 @@ func agentWorktreePath(localState bootstrap.WorkspaceLocalState, repoByName map[
 		}
 	}
 	for _, repoName := range repoNames {
-		candidate := filepath.Join(localState.Path, "worktrees", repoName, agent.Name)
+		candidate := localworkspace.AgentWorktreePath(localState.Path, repoName, agent.Name)
 		if _, err := os.Stat(filepath.Join(candidate, ".git")); err == nil {
 			return candidate
 		}
 	}
 	if len(repoNames) > 0 {
-		return filepath.Join(localState.Path, "worktrees", repoNames[0], agent.Name)
+		return localworkspace.AgentWorktreePath(localState.Path, repoNames[0], agent.Name)
 	}
 	return ""
 }

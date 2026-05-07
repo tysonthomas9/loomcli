@@ -3,13 +3,9 @@ package svcimpl
 import (
 	"context"
 	"fmt"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"strings"
 
-	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	webuilog "github.com/tysonthomas9/loomcli/internal/webui/log"
@@ -375,9 +371,17 @@ func (s *agentServiceImpl) ensureLocalAgentWorktrees(ctx context.Context, agent 
 		// have workspace paths.
 		return nil
 	}
-	repos, err := selectAgentReposForLocalWorktrees(ws.Repos, agent)
+	localRepos := make([]localworkspace.Repo, 0, len(ws.Repos))
+	for _, repo := range ws.Repos {
+		localRepos = append(localRepos, localworkspace.Repo{
+			Name:   repo.Name,
+			Path:   repo.Path,
+			Groups: append([]string(nil), repo.Groups...),
+		})
+	}
+	repos, err := localworkspace.SelectAgentRepos(localRepos, agent)
 	if err != nil {
-		return err
+		return service.ErrValidation(err.Error())
 	}
 	if len(repos) == 0 {
 		return service.ErrValidation("workspace has no repos for agent")
@@ -387,114 +391,16 @@ func (s *agentServiceImpl) ensureLocalAgentWorktrees(ctx context.Context, agent 
 		if repo.Path == "" {
 			return service.ErrValidation(fmt.Sprintf("repo %q has no local path on this machine", repo.Name))
 		}
-		target := filepath.Join(ws.Path, "worktrees", repo.Name, agent.Name)
-		if err := ensureGitWorktree(repo.Path, target, agent.Name); err != nil {
+		target := localworkspace.AgentWorktreePath(ws.Path, repo.Name, agent.Name)
+		if err := localworkspace.EnsureGitWorktree(repo.Path, target, agent.Name); err != nil {
 			return service.ErrInternal(fmt.Sprintf("create worktree for repo %q", repo.Name), err)
 		}
 		createdPaths[repo.Name] = target
 	}
-	if err := rememberAgentWorktree(agent.WorkspaceKey, agent.Name, firstWorktreePath(createdPaths)); err != nil {
+	if err := localworkspace.RememberAgentWorktree(agent.WorkspaceKey, agent.Name, localworkspace.FirstWorktreePath(createdPaths)); err != nil {
 		return service.ErrInternal("update local agent state", err)
 	}
 	return nil
-}
-
-func selectAgentReposForLocalWorktrees(repos []ops.WorkspaceRepo, agent domain.Agent) ([]ops.WorkspaceRepo, error) {
-	if len(repos) == 0 {
-		return nil, nil
-	}
-	if agent.CrossRepo {
-		return repos, nil
-	}
-	allowed := make(map[string]bool)
-	for _, name := range agent.Repos {
-		allowed[name] = true
-	}
-	for _, group := range agent.RepoGroups {
-		for _, repo := range repos {
-			for _, repoGroup := range repo.Groups {
-				if repoGroup == group {
-					allowed[repo.Name] = true
-					break
-				}
-			}
-		}
-	}
-	if len(allowed) == 0 {
-		return []ops.WorkspaceRepo{repos[0]}, nil
-	}
-	out := make([]ops.WorkspaceRepo, 0, len(allowed))
-	for _, repo := range repos {
-		if allowed[repo.Name] {
-			out = append(out, repo)
-		}
-	}
-	if len(out) == 0 {
-		return nil, service.ErrValidation("agent repo affinity does not match any workspace repo")
-	}
-	return out, nil
-}
-
-func ensureGitWorktree(repoPath, targetPath, branchName string) error {
-	if _, err := os.Stat(filepath.Join(targetPath, ".git")); err == nil {
-		return nil
-	}
-	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
-		return fmt.Errorf("creating worktree parent: %w", err)
-	}
-	if out, err := runGit(repoPath, "worktree", "add", targetPath, "-b", branchName); err == nil {
-		return nil
-	} else if !branchAlreadyExists(out, err) {
-		return err
-	}
-	if _, err := runGit(repoPath, "worktree", "add", targetPath, branchName); err != nil {
-		return err
-	}
-	return nil
-}
-
-func runGit(dir string, args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return string(out), fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
-	}
-	return string(out), nil
-}
-
-func branchAlreadyExists(out string, err error) bool {
-	msg := out
-	if err != nil {
-		msg += "\n" + err.Error()
-	}
-	return strings.Contains(msg, "already exists") || strings.Contains(msg, "already a worktree")
-}
-
-func rememberAgentWorktree(wsKey, agentName, worktreePath string) error {
-	return bootstrap.WithStateLock(func() error {
-		sc, err := bootstrap.LoadStateCache()
-		if err != nil {
-			return err
-		}
-		if sc.Workspaces == nil {
-			sc.Workspaces = make(map[string]bootstrap.WorkspaceLocalState)
-		}
-		local := sc.Workspaces[wsKey]
-		if local.Agents == nil {
-			local.Agents = make(map[string]bootstrap.AgentLocalState)
-		}
-		local.Agents[agentName] = bootstrap.AgentLocalState{Worktree: worktreePath}
-		sc.Workspaces[wsKey] = local
-		return bootstrap.SaveStateCache(sc)
-	})
-}
-
-func firstWorktreePath(paths map[string]string) string {
-	for _, path := range paths {
-		return path
-	}
-	return ""
 }
 
 // UpdateAgent applies a partial update to an existing agent.

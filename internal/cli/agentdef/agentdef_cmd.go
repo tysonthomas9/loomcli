@@ -8,8 +8,6 @@ package agentdef
 import (
 	"context"
 	"fmt"
-	"path/filepath"
-	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -17,8 +15,8 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
-	workspacecmd "github.com/tysonthomas9/loomcli/internal/cli/workspace"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -157,7 +155,18 @@ func ensureAgentDefinitionLocalWorktrees(ctx context.Context, st store.Store, ag
 	if err != nil {
 		return fmt.Errorf("list workspace repos: %w", err)
 	}
-	selected, err := selectAgentDefinitionRepos(repos, agent)
+	localRepos := make([]localworkspace.Repo, 0, len(repos))
+	for _, repo := range repos {
+		if repo == nil {
+			continue
+		}
+		localRepos = append(localRepos, localworkspace.Repo{
+			Name:   repo.Name,
+			Path:   localworkspace.RepoPath(local, repo.Name),
+			Groups: append([]string(nil), repo.Groups...),
+		})
+	}
+	selected, err := localworkspace.SelectAgentRepos(localRepos, agent)
 	if err != nil {
 		return err
 	}
@@ -167,96 +176,13 @@ func ensureAgentDefinitionLocalWorktrees(ctx context.Context, st store.Store, ag
 
 	created := make(map[string]string, len(selected))
 	for _, repo := range selected {
-		repoPath := local.Repos[repo.Name]
-		if repoPath == "" {
-			repoPath = filepath.Join(local.Path, repo.Name)
-		}
-		target := filepath.Join(local.Path, "worktrees", repo.Name, agent.Name)
-		if err := workspacecmd.EnsureRepoWorktree(repoPath, target, agent.Name); err != nil {
+		target := localworkspace.AgentWorktreePath(local.Path, repo.Name, agent.Name)
+		if err := localworkspace.EnsureGitWorktree(repo.Path, target, agent.Name); err != nil {
 			return fmt.Errorf("create worktree for repo %q: %w", repo.Name, err)
 		}
 		created[repo.Name] = target
 	}
-	return rememberAgentDefinitionWorktree(agent.WorkspaceKey, agent.Name, firstAgentDefinitionWorktree(created))
-}
-
-func selectAgentDefinitionRepos(repos []*domain.Repo, agent domain.Agent) ([]*domain.Repo, error) {
-	if len(repos) == 0 {
-		return nil, nil
-	}
-	if agent.CrossRepo {
-		return repos, nil
-	}
-	allowed := make(map[string]struct{})
-	for _, name := range agent.Repos {
-		allowed[name] = struct{}{}
-	}
-	for _, group := range agent.RepoGroups {
-		for _, repo := range repos {
-			if repo == nil {
-				continue
-			}
-			for _, repoGroup := range repo.Groups {
-				if repoGroup == group {
-					allowed[repo.Name] = struct{}{}
-				}
-			}
-		}
-	}
-	if len(allowed) == 0 {
-		return []*domain.Repo{repos[0]}, nil
-	}
-	selected := make([]*domain.Repo, 0, len(allowed))
-	for _, repo := range repos {
-		if repo == nil {
-			continue
-		}
-		if _, ok := allowed[repo.Name]; ok {
-			selected = append(selected, repo)
-		}
-	}
-	if len(selected) == 0 {
-		names := make([]string, 0, len(repos))
-		for _, repo := range repos {
-			if repo != nil {
-				names = append(names, repo.Name)
-			}
-		}
-		sort.Strings(names)
-		return nil, fmt.Errorf("agent repo affinity does not match any workspace repo; available repos: %s", strings.Join(names, ", "))
-	}
-	return selected, nil
-}
-
-func rememberAgentDefinitionWorktree(wsKey, agentName, worktreePath string) error {
-	return bootstrap.WithStateLock(func() error {
-		sc, err := bootstrap.LoadStateCache()
-		if err != nil {
-			return err
-		}
-		if sc.Workspaces == nil {
-			sc.Workspaces = make(map[string]bootstrap.WorkspaceLocalState)
-		}
-		local := sc.Workspaces[wsKey]
-		if local.Agents == nil {
-			local.Agents = make(map[string]bootstrap.AgentLocalState)
-		}
-		local.Agents[agentName] = bootstrap.AgentLocalState{Worktree: worktreePath}
-		sc.Workspaces[wsKey] = local
-		return bootstrap.SaveStateCache(sc)
-	})
-}
-
-func firstAgentDefinitionWorktree(paths map[string]string) string {
-	if len(paths) == 0 {
-		return ""
-	}
-	names := make([]string, 0, len(paths))
-	for name := range paths {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	return paths[names[0]]
+	return localworkspace.RememberAgentWorktree(agent.WorkspaceKey, agent.Name, localworkspace.FirstWorktreePath(created))
 }
 
 func runAgentList(_ *cobra.Command, _ []string) error {

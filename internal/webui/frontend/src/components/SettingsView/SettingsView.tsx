@@ -29,6 +29,24 @@ export interface SettingsViewProps {
   onNavigate?: (view: ViewMode) => void;
 }
 
+interface RedisFormState {
+  enabled: boolean;
+  url: string;
+  addr: string;
+  password: string;
+  db: string;
+  tls: boolean;
+}
+
+const EMPTY_REDIS_FORM: RedisFormState = {
+  enabled: false,
+  url: "",
+  addr: "",
+  password: "",
+  db: "0",
+  tls: false,
+};
+
 export function SettingsView({
   className,
   onNavigate,
@@ -52,12 +70,8 @@ export function SettingsView({
     updateRedis,
   } = useLocalSettings();
   const redisSettings = localSettings?.fleetdb_redis;
-  const [redisEnabled, setRedisEnabled] = useState(false);
-  const [redisUrl, setRedisUrl] = useState("");
-  const [redisAddr, setRedisAddr] = useState("");
-  const [redisPassword, setRedisPassword] = useState("");
-  const [redisDB, setRedisDB] = useState("0");
-  const [redisTLS, setRedisTLS] = useState(false);
+  const [redisForm, setRedisForm] =
+    useState<RedisFormState>(EMPTY_REDIS_FORM);
 
   const { fontFamily, fontSize, setFontFamily, setFontSize } =
     useTerminalFont();
@@ -75,12 +89,14 @@ export function SettingsView({
 
   useEffect(() => {
     if (!redisSettings) return;
-    setRedisEnabled(redisSettings.enabled);
-    setRedisAddr(redisSettings.addr ?? "");
-    setRedisDB(String(redisSettings.db ?? 0));
-    setRedisTLS(redisSettings.tls);
-    setRedisPassword("");
-    setRedisUrl("");
+    setRedisForm({
+      enabled: redisSettings.enabled,
+      addr: redisSettings.addr ?? "",
+      db: String(redisSettings.db ?? 0),
+      tls: redisSettings.tls,
+      password: "",
+      url: "",
+    });
   }, [redisSettings]);
 
   const rootClassName = [styles.settingsView, className]
@@ -147,34 +163,37 @@ export function SettingsView({
   };
 
   const handleRedisUrlChange = (value: string) => {
-    setRedisUrl(value);
     const trimmed = value.trim();
-    if (trimmed.startsWith("rediss://") || /(^|\s)--tls(\s|$)/.test(value)) {
-      setRedisTLS(true);
-    }
+    setRedisForm((current) => ({
+      ...current,
+      url: value,
+      tls:
+        current.tls ||
+        trimmed.startsWith("rediss://") ||
+        /(^|\s)--tls(\s|$)/.test(value),
+    }));
   };
 
   const handleRedisSave = async () => {
     if (isSavingLocalSettings) return;
-    const db = Number(redisDB);
+    const db = Number(redisForm.db);
     if (!Number.isInteger(db) || db < 0) {
       showToast("Redis DB must be 0 or greater", { type: "error" });
       return;
     }
     const payload = {
-      enabled: redisEnabled,
+      enabled: redisForm.enabled,
       db,
-      tls: redisTLS,
-      ...(redisUrl.trim() ? { redis_url: redisUrl.trim() } : {}),
-      ...(!redisUrl.trim() && redisAddr.trim()
-        ? { addr: redisAddr.trim() }
+      tls: redisForm.tls,
+      ...(redisForm.url.trim() ? { redis_url: redisForm.url.trim() } : {}),
+      ...(!redisForm.url.trim() && redisForm.addr.trim()
+        ? { addr: redisForm.addr.trim() }
         : {}),
-      ...(redisPassword ? { password: redisPassword } : {}),
+      ...(redisForm.password ? { password: redisForm.password } : {}),
     };
     const ok = await updateRedis(payload);
     if (ok) {
-      setRedisPassword("");
-      setRedisUrl("");
+      setRedisForm((current) => ({ ...current, password: "", url: "" }));
       showToast("Redis settings saved. Restart Loom to apply them.", {
         type: "success",
       });
@@ -289,8 +308,13 @@ export function SettingsView({
             <label className={styles.checkboxLabel}>
               <input
                 type="checkbox"
-                checked={redisEnabled}
-                onChange={(e) => setRedisEnabled(e.target.checked)}
+                checked={redisForm.enabled}
+                onChange={(e) =>
+                  setRedisForm((current) => ({
+                    ...current,
+                    enabled: e.target.checked,
+                  }))
+                }
                 data-testid="redis-enabled-checkbox"
               />
               Use external Redis for FleetDB
@@ -300,7 +324,7 @@ export function SettingsView({
               instance instead of local embedded Redis.
             </p>
           </div>
-          {redisEnabled && (
+          {redisForm.enabled && (
             <>
               <div className={styles.formGroup}>
                 <label className={styles.label} htmlFor="redis-url-input">
@@ -314,7 +338,7 @@ export function SettingsView({
                   id="redis-url-input"
                   type="password"
                   className={styles.input}
-                  value={redisUrl}
+                  value={redisForm.url}
                   onChange={(e) => handleRedisUrlChange(e.target.value)}
                   placeholder="redis://default:password@host:6379"
                   data-testid="redis-url-input"
@@ -329,8 +353,13 @@ export function SettingsView({
                     id="redis-addr-input"
                     type="text"
                     className={styles.input}
-                    value={redisAddr}
-                    onChange={(e) => setRedisAddr(e.target.value)}
+                    value={redisForm.addr}
+                    onChange={(e) =>
+                      setRedisForm((current) => ({
+                        ...current,
+                        addr: e.target.value,
+                      }))
+                    }
                     placeholder="host:6379"
                     data-testid="redis-addr-input"
                   />
@@ -344,8 +373,13 @@ export function SettingsView({
                     type="number"
                     min={0}
                     className={styles.input}
-                    value={redisDB}
-                    onChange={(e) => setRedisDB(e.target.value)}
+                    value={redisForm.db}
+                    onChange={(e) =>
+                      setRedisForm((current) => ({
+                        ...current,
+                        db: e.target.value,
+                      }))
+                    }
                     data-testid="redis-db-input"
                   />
                 </div>
@@ -360,8 +394,13 @@ export function SettingsView({
                     id="redis-password-input"
                     type="password"
                     className={styles.input}
-                    value={redisPassword}
-                    onChange={(e) => setRedisPassword(e.target.value)}
+                    value={redisForm.password}
+                    onChange={(e) =>
+                      setRedisForm((current) => ({
+                        ...current,
+                        password: e.target.value,
+                      }))
+                    }
                     placeholder={
                       redisSettings?.password_set
                         ? "Saved password unchanged"
@@ -375,8 +414,13 @@ export function SettingsView({
                 <label className={styles.checkboxLabel}>
                   <input
                     type="checkbox"
-                    checked={redisTLS}
-                    onChange={(e) => setRedisTLS(e.target.checked)}
+                    checked={redisForm.tls}
+                    onChange={(e) =>
+                      setRedisForm((current) => ({
+                        ...current,
+                        tls: e.target.checked,
+                      }))
+                    }
                     data-testid="redis-tls-checkbox"
                   />
                   Use TLS

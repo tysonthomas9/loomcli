@@ -120,3 +120,29 @@ func WithStateLock(fn func() error) error {
 	}
 	return configlock.WithLock(dir, fn)
 }
+
+// MutateWorkspaceLocalState wraps the common state-cache transaction for
+// updating one workspace's machine-local state.
+func MutateWorkspaceLocalState(wsKey string, fn func(*WorkspaceLocalState) error) error {
+	if wsKey == "" {
+		return errors.New("statecache: workspace key is required")
+	}
+	if fn == nil {
+		return errors.New("statecache: mutate function is required")
+	}
+	return WithStateLock(func() error {
+		sc, err := LoadStateCache()
+		if err != nil {
+			return err
+		}
+		if sc.Workspaces == nil {
+			sc.Workspaces = make(map[string]WorkspaceLocalState)
+		}
+		local := sc.Workspaces[wsKey]
+		if err := fn(&local); err != nil {
+			return err
+		}
+		sc.Workspaces[wsKey] = local
+		return SaveStateCache(sc)
+	})
+}

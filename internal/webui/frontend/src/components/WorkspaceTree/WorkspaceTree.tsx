@@ -6,13 +6,10 @@
 
 import { useState, useCallback, useEffect, type FormEvent } from "react";
 
-import {
-  isDesktopRuntime,
-  pickDesktopFolder,
-  type ConnectionState,
-} from "@/api/common";
+import { type ConnectionState } from "@/api/common";
 import { useStore } from "zustand";
 import { useWorkspaceContext, useAgentStoreInstance } from "@/hooks";
+import { useFolderPicker } from "@/hooks/common";
 import { wsGet, wsSet } from "@/utils/scopedStorage";
 import { ErrorDisplay } from "@/components/ErrorDisplay";
 import { addWorkspaceRepos } from "@/hooks/api";
@@ -88,7 +85,6 @@ export function WorkspaceTree({
   } = workspaceContext;
   const [repoPathInput, setRepoPathInput] = useState("");
   const [isAddingRepo, setIsAddingRepo] = useState(false);
-  const [isBrowsingRepo, setIsBrowsingRepo] = useState(false);
   const [addRepoError, setAddRepoError] = useState<string | null>(null);
 
   // Load initial collapsed state from scoped localStorage
@@ -176,26 +172,12 @@ export function WorkspaceTree({
     [workspaceId, repoPathInput, isAddingRepo, refetch],
   );
 
-  const canBrowseFolders = isDesktopRuntime();
-
-  const handleBrowseRepo = useCallback(async () => {
-    if (!canBrowseFolders || isAddingRepo || isBrowsingRepo) return;
-
-    setIsBrowsingRepo(true);
-    setAddRepoError(null);
-    try {
-      const selectedPath = await pickDesktopFolder();
-      if (selectedPath) {
-        setRepoPathInput(selectedPath);
-      }
-    } catch (err) {
-      setAddRepoError(
-        err instanceof Error ? err.message : "Failed to open folder picker",
-      );
-    } finally {
-      setIsBrowsingRepo(false);
-    }
-  }, [canBrowseFolders, isAddingRepo, isBrowsingRepo]);
+  const repoFolderPicker = useFolderPicker({
+    disabled: isAddingRepo,
+    onStart: () => setAddRepoError(null),
+    onPick: setRepoPathInput,
+    onError: setAddRepoError,
+  });
 
   const workspaces = workspace?.workspaces ?? [];
 
@@ -299,10 +281,14 @@ export function WorkspaceTree({
               <button
                 type="button"
                 className={styles.browseRepoButton}
-                onClick={handleBrowseRepo}
-                disabled={!canBrowseFolders || isAddingRepo || isBrowsingRepo}
+                onClick={repoFolderPicker.browseFolder}
+                disabled={
+                  !repoFolderPicker.canBrowseFolders ||
+                  isAddingRepo ||
+                  repoFolderPicker.isBrowsing
+                }
                 title={
-                  canBrowseFolders
+                  repoFolderPicker.canBrowseFolders
                     ? "Browse for repository folder"
                     : "Filesystem browsing is only available in the desktop app"
                 }

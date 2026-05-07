@@ -11,6 +11,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
+	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -93,20 +94,12 @@ func workspaceNameFromCWD(cfg *config.LoomConfig) string {
 			}
 		}
 		root = filepath.Clean(root)
-		if pathContains(root, cwd) && len(root) > bestLen {
+		if localworkspace.PathContains(root, cwd) && len(root) > bestLen {
 			bestName = name
 			bestLen = len(root)
 		}
 	}
 	return bestName
-}
-
-func pathContains(root, path string) bool {
-	rel, err := filepath.Rel(root, path)
-	if err != nil {
-		return false
-	}
-	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
 }
 
 // Mode returns the resolver's current mode.

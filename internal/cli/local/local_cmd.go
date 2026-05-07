@@ -242,15 +242,15 @@ func runStart(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	pid, alreadyRunning, url, err := StartRuntime(dataDir, portFlag)
+	result, err := StartRuntime(dataDir, portFlag)
 	if err != nil {
 		return err
 	}
-	if alreadyRunning {
-		fmt.Fprintf(cmd.OutOrStdout(), "Loom local runtime already running: %s\n", url)
+	if result.AlreadyRunning {
+		fmt.Fprintf(cmd.OutOrStdout(), "Loom local runtime already running: %s\n", result.URL)
 		return nil
 	}
-	fmt.Fprintf(cmd.OutOrStdout(), "Started Loom local service (pid %d)\n", pid)
+	fmt.Fprintf(cmd.OutOrStdout(), "Started Loom local service (pid %d)\n", result.PID)
 	return nil
 }
 
@@ -301,37 +301,48 @@ func ReadRuntimeStatus(ctx context.Context, dataDir string) (*RuntimeStatusSnaps
 	return status, nil
 }
 
+// RuntimeStartResult describes the outcome of starting the local runtime.
+type RuntimeStartResult struct {
+	PID            int    `json:"pid"`
+	URL            string `json:"url,omitempty"`
+	AlreadyRunning bool   `json:"already_running"`
+}
+
 // StartRuntime starts the local runtime service if it is not already running.
-func StartRuntime(dataDir string, port int) (pid int, alreadyRunning bool, url string, err error) {
+func StartRuntime(dataDir string, port int) (*RuntimeStartResult, error) {
 	if dataDir == "" {
+		var err error
 		dataDir, err = resolveDataDir("")
 		if err != nil {
-			return 0, false, "", err
+			return nil, err
 		}
-	}
-	identity := currentExecutableIdentity()
-	redisHash, err := currentFleetDBRedisHash(dataDir)
-	if err != nil {
-		return 0, false, "", fmt.Errorf("load FleetDB Redis settings: %w", err)
 	}
 	if info, err := readRuntime(dataDir); err == nil && processRunning(info.PID) {
+		identity := currentExecutableIdentity()
+		redisHash, err := currentFleetDBRedisHash(dataDir)
+		if err != nil {
+			return nil, fmt.Errorf("load FleetDB Redis settings: %w", err)
+		}
 		if runtimeMatchesExecutable(info, identity) && runtimeMatchesFleetDBRedisSettings(info, redisHash) {
-			return info.PID, true, info.URL, nil
+			return &RuntimeStartResult{PID: info.PID, URL: info.URL, AlreadyRunning: true}, nil
 		}
 		if err := stopRuntimeProcess(info.PID, 15*time.Second); err != nil {
-			return 0, false, "", fmt.Errorf("stop stale local runtime: %w", err)
+			return nil, fmt.Errorf("stop stale local runtime: %w", err)
 		}
 	}
+	if _, err := currentFleetDBRedisHash(dataDir); err != nil {
+		return nil, fmt.Errorf("load FleetDB Redis settings: %w", err)
+	}
 	if err := ensureRuntimeDirs(dataDir); err != nil {
-		return 0, false, "", err
+		return nil, err
 	}
 	exe, err := os.Executable()
 	if err != nil {
-		return 0, false, "", fmt.Errorf("resolve loom executable: %w", err)
+		return nil, fmt.Errorf("resolve loom executable: %w", err)
 	}
 	logFile, err := os.OpenFile(serviceLogPath(dataDir), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
-		return 0, false, "", fmt.Errorf("open service log: %w", err)
+		return nil, fmt.Errorf("open service log: %w", err)
 	}
 	defer func() { _ = logFile.Close() }()
 
@@ -345,13 +356,13 @@ func StartRuntime(dataDir string, port int) (pid int, alreadyRunning bool, url s
 	service.Stderr = logFile
 	service.SysProcAttr = newDetachedSysProcAttr()
 	if err := service.Start(); err != nil {
-		return 0, false, "", fmt.Errorf("start local service: %w", err)
+		return nil, fmt.Errorf("start local service: %w", err)
 	}
-	pid = service.Process.Pid
+	pid := service.Process.Pid
 	if err := service.Process.Release(); err != nil {
-		return 0, false, "", fmt.Errorf("release local service process: %w", err)
+		return nil, fmt.Errorf("release local service process: %w", err)
 	}
-	return pid, false, "", nil
+	return &RuntimeStartResult{PID: pid}, nil
 }
 
 // EnsureRuntimeStarted starts the local runtime if needed and waits until it
@@ -368,7 +379,7 @@ func EnsureRuntimeStarted(ctx context.Context, dataDir string, port int) (*Runti
 	if err == nil && status.Healthy {
 		return status, nil
 	}
-	if _, _, _, err := StartRuntime(dataDir, port); err != nil {
+	if _, err := StartRuntime(dataDir, port); err != nil {
 		return status, err
 	}
 	ticker := time.NewTicker(250 * time.Millisecond)

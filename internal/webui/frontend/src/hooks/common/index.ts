@@ -30,6 +30,12 @@ export type { UseFileContentReturn } from "./useFileContent";
 export { useFileTree } from "./useFileTree";
 export type { UseFileTreeReturn } from "./useFileTree";
 
+export { useFolderPicker } from "./useFolderPicker";
+export type {
+  UseFolderPickerOptions,
+  UseFolderPickerReturn,
+} from "./useFolderPicker";
+
 export { usePollingWithBackoff } from "./usePollingWithBackoff";
 export type {
   UsePollingWithBackoffOptions,

@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
+	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 )
 
 // ResolvedTarget holds the result of workspace-aware argument resolution.
@@ -128,48 +128,10 @@ func GetWorktreeName(path string) string {
 	return filepath.Base(path)
 }
 
-// ensureRepoWorktreeDeps creates a git worktree at targetPath from repoPath if it
-// doesn't already exist. The worktree is created on branch branchName.
-func ensureRepoWorktreeDeps(deps *cli.Deps, repoPath, targetPath, branchName string) error {
-	// Check if worktree already exists
-	gitFile := filepath.Join(targetPath, ".git")
-	if _, err := os.Stat(gitFile); err == nil {
-		return nil // already created
-	}
-
-	// Create parent directories
-	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
-		return fmt.Errorf("creating worktree parent directory: %w", err)
-	}
-
-	// Try creating with new branch
-	_, err := cli.RunGit(deps, repoPath, "worktree", "add", targetPath, "-b", branchName)
-	if err == nil {
-		return nil
-	}
-
-	errStr := err.Error()
-	if strings.Contains(errStr, "already exists") || strings.Contains(errStr, "already a worktree") {
-		// Branch exists — try attaching to existing branch
-		_, err = cli.RunGit(deps, repoPath, "worktree", "add", targetPath, branchName)
-		if err == nil {
-			return nil
-		}
-		errStr = err.Error()
-		if strings.Contains(errStr, "already exists") ||
-			strings.Contains(errStr, "already a worktree") ||
-			strings.Contains(errStr, "already checked out") {
-			return fmt.Errorf("worktree or branch %q conflict: %w", branchName, err)
-		}
-	}
-
-	return err
-}
-
 // ensureRepoWorktree creates a git worktree at targetPath from repoPath if it
 // doesn't already exist. The worktree is created on branch branchName.
 func ensureRepoWorktree(repoPath, targetPath, branchName string) error {
-	return ensureRepoWorktreeDeps(cli.GetDeps(nil), repoPath, targetPath, branchName)
+	return localworkspace.EnsureGitWorktree(repoPath, targetPath, branchName)
 }
 
 // EnsureRepoWorktree creates a git worktree at targetPath from repoPath if it

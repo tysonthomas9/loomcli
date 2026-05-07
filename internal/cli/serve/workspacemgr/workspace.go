@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
+	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 	"github.com/tysonthomas9/loomcli/internal/workspaceerrors"
 )
 
@@ -79,7 +79,7 @@ func validateWorkspaceCreatePath(wsDir string) error {
 	}
 
 	parent := filepath.Dir(wsDir)
-	if isPathWithin(wsDir, defaultWorkspaceBase()) {
+	if localworkspace.PathContains(defaultWorkspaceBase(), wsDir) {
 		return nil
 	}
 	info, err := os.Stat(parent)
@@ -237,16 +237,6 @@ func defaultWorkspaceBase() string {
 	return base
 }
 
-func isPathWithin(path, base string) bool {
-	path = filepath.Clean(path)
-	base = filepath.Clean(base)
-	rel, err := filepath.Rel(base, path)
-	if err != nil {
-		return false
-	}
-	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
-}
-
 // repoNameFromURL derives a fleet-db-safe directory/repo name from a git clone URL.
 // e.g. "https://github.com/foo/Hello-World.git" -> "hello-world"
 func repoNameFromURL(cloneURL string) string {
@@ -315,10 +305,9 @@ func cloneReposWithSeen(ctx context.Context, cloneURLs []string, wsDir string, s
 		seenNames[repoName] = true
 
 		clonePath := filepath.Join(wsDir, repoName)
-		cmd := exec.CommandContext(ctx, "git", "clone", cloneURL, clonePath) //nolint:gosec // URL validated: prefix (https://|git@), no control chars, no dash-prefixed path segments, SSRF hostname blocklist
-		if output, err := cmd.CombinedOutput(); err != nil {
+		if err := localworkspace.CloneRepoTo(ctx, cloneURL, clonePath); err != nil {
 			cleanupClonedRepos(repos)
-			return nil, workspaceerrors.New(workspaceerrors.GitFailed, fmt.Sprintf("git clone failed for %s: %s", cloneURL, strings.TrimSpace(string(output))), err)
+			return nil, workspaceerrors.New(workspaceerrors.GitFailed, err.Error(), err)
 		}
 
 		repos = append(repos, config.RepoConfig{

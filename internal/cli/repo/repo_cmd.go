@@ -6,7 +6,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -15,6 +14,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
+	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
@@ -135,7 +135,7 @@ func ensureRepoLocalCheckout(ctx context.Context, ws, name, remoteURL string) (p
 	if local.Repos != nil && local.Repos[name] != "" {
 		return local.Repos[name], false, nil
 	}
-	target, err := safeRepoCheckoutPath(local.Path, name)
+	target, err := localworkspace.RepoCheckoutPath(local.Path, name)
 	if err != nil {
 		return "", false, err
 	}
@@ -147,62 +147,14 @@ func ensureRepoLocalCheckout(ctx context.Context, ws, name, remoteURL string) (p
 	} else if !os.IsNotExist(err) {
 		return "", false, fmt.Errorf("inspect repo checkout path: %w", err)
 	}
-	if err := os.MkdirAll(local.Path, 0o755); err != nil {
-		return "", false, fmt.Errorf("create workspace directory: %w", err)
-	}
-	cmd := exec.CommandContext(ctx, "git", "clone", remoteURL, target) //nolint:gosec // URL is validated and passed as argv, not through a shell.
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return "", false, fmt.Errorf("git clone failed for %s: %s", remoteURL, strings.TrimSpace(string(output)))
+	if err := localworkspace.CloneRepoTo(ctx, remoteURL, target); err != nil {
+		return "", false, err
 	}
 	return target, true, nil
 }
 
-func safeRepoCheckoutPath(workspacePath, name string) (string, error) {
-	if strings.TrimSpace(workspacePath) == "" {
-		return "", fmt.Errorf("workspace path is empty")
-	}
-	if strings.TrimSpace(name) == "" {
-		return "", fmt.Errorf("repo name is empty")
-	}
-	if filepath.IsAbs(name) || strings.Contains(name, string(filepath.Separator)) {
-		return "", fmt.Errorf("repo name must not be a path: %s", name)
-	}
-	root, err := filepath.Abs(workspacePath)
-	if err != nil {
-		return "", err
-	}
-	target, err := filepath.Abs(filepath.Join(root, name))
-	if err != nil {
-		return "", err
-	}
-	rel, err := filepath.Rel(root, target)
-	if err != nil {
-		return "", err
-	}
-	if rel == "." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." {
-		return "", fmt.Errorf("repo checkout path escapes workspace: %s", target)
-	}
-	return target, nil
-}
-
 func rememberRepoLocalPath(ws, name, repoPath string) error {
-	return bootstrap.WithStateLock(func() error {
-		sc, err := bootstrap.LoadStateCache()
-		if err != nil {
-			return err
-		}
-		if sc.Workspaces == nil {
-			sc.Workspaces = make(map[string]bootstrap.WorkspaceLocalState)
-		}
-		local := sc.Workspaces[ws]
-		if local.Repos == nil {
-			local.Repos = make(map[string]string)
-		}
-		local.Repos[name] = repoPath
-		sc.Workspaces[ws] = local
-		return bootstrap.SaveStateCache(sc)
-	})
+	return localworkspace.RememberRepoPath(ws, name, repoPath)
 }
 
 func runRepoList(_ *cobra.Command, _ []string) error {

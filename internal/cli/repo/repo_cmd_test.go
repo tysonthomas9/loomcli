@@ -5,14 +5,16 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 )
 
 func TestSafeRepoCheckoutPathReturnsWorkspaceChild(t *testing.T) {
 	root := t.TempDir()
 
-	got, err := safeRepoCheckoutPath(root, "hello-world")
+	got, err := localworkspace.RepoCheckoutPath(root, "hello-world")
 	if err != nil {
-		t.Fatalf("safeRepoCheckoutPath returned error: %v", err)
+		t.Fatalf("RepoCheckoutPath returned error: %v", err)
 	}
 	want := filepath.Join(root, "hello-world")
 	if got != want {
@@ -30,8 +32,8 @@ func TestSafeRepoCheckoutPathRejectsPathNames(t *testing.T) {
 
 	for _, name := range cases {
 		t.Run(strings.ReplaceAll(name, string(filepath.Separator), "_"), func(t *testing.T) {
-			if _, err := safeRepoCheckoutPath(root, name); err == nil {
-				t.Fatalf("safeRepoCheckoutPath(%q) succeeded, want error", name)
+			if _, err := localworkspace.RepoCheckoutPath(root, name); err == nil {
+				t.Fatalf("RepoCheckoutPath(%q) succeeded, want error", name)
 			}
 		})
 	}

@@ -9,8 +9,12 @@ import { createPortal } from "react-dom";
 
 import { createWorkspace } from "@/hooks/api";
 import type { CreateWorkspaceRequest, WorkspaceData } from "@/api/workspace";
-import { isDesktopRuntime, pickDesktopFolder } from "@/api/common";
-import { useRegisterEscapeLayer, LAYER_MODAL, useJobPolling } from "@/hooks";
+import {
+  useRegisterEscapeLayer,
+  LAYER_MODAL,
+  useJobPolling,
+} from "@/hooks";
+import { useFolderPicker } from "@/hooks/common";
 import { useFocusTrap, useFocusReturn } from "@/hooks/ui";
 import styles from "./CreateWorkspaceModal.module.css";
 
@@ -153,8 +157,6 @@ export function CreateWorkspaceModal({
   const [type, setType] = useState<WorkspaceType>("clone");
   const [path, setPath] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isBrowsingLocation, setIsBrowsingLocation] = useState(false);
-  const [isBrowsingRepo, setIsBrowsingRepo] = useState(false);
   const [error, setError] = useState("");
 
   // Multi-URL input for clone type
@@ -182,8 +184,6 @@ export function CreateWorkspaceModal({
       setType("clone");
       setPath("");
       setIsSubmitting(false);
-      setIsBrowsingLocation(false);
-      setIsBrowsingRepo(false);
       setError("");
       setCloneUrls([]);
       setUrlInput("");
@@ -233,45 +233,21 @@ export function CreateWorkspaceModal({
     setRepos((prev) => prev.filter((r) => r !== repo));
   };
 
-  const canBrowseFolders = isDesktopRuntime();
-
-  const handleBrowseLocation = async () => {
-    if (!canBrowseFolders || isSubmitting || isBrowsingLocation) return;
-
-    setIsBrowsingLocation(true);
-    setError("");
-    try {
-      const selectedPath = await pickDesktopFolder();
-      if (selectedPath) {
-        setPath(selectedPath);
-      }
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Failed to open folder picker",
-      );
-    } finally {
-      setIsBrowsingLocation(false);
-    }
-  };
-
-  const handleBrowseRepo = async () => {
-    if (!canBrowseFolders || isSubmitting || isBrowsingRepo) return;
-
-    setIsBrowsingRepo(true);
-    setError("");
-    try {
-      const selectedPath = await pickDesktopFolder();
-      if (selectedPath) {
-        setRepoInput(selectedPath);
-      }
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Failed to open folder picker",
-      );
-    } finally {
-      setIsBrowsingRepo(false);
-    }
-  };
+  const handleFolderPickerError = useCallback((message: string) => {
+    setError(message);
+  }, []);
+  const workspaceFolderPicker = useFolderPicker({
+    disabled: isSubmitting,
+    onStart: () => setError(""),
+    onPick: setPath,
+    onError: handleFolderPickerError,
+  });
+  const repoFolderPicker = useFolderPicker({
+    disabled: isSubmitting,
+    onStart: () => setError(""),
+    onPick: setRepoInput,
+    onError: handleFolderPickerError,
+  });
 
   // Include pending input text in submit eligibility check
   const hasPendingUrl = type === "clone" && urlInput.trim() !== "";
@@ -487,12 +463,14 @@ export function CreateWorkspaceModal({
                 <button
                   type="button"
                   className={styles.browseButton}
-                  onClick={handleBrowseLocation}
+                  onClick={workspaceFolderPicker.browseFolder}
                   disabled={
-                    !canBrowseFolders || isSubmitting || isBrowsingLocation
+                    !workspaceFolderPicker.canBrowseFolders ||
+                    isSubmitting ||
+                    workspaceFolderPicker.isBrowsing
                   }
                   title={
-                    canBrowseFolders
+                    workspaceFolderPicker.canBrowseFolders
                       ? "Browse for workspace folder"
                       : "Filesystem browsing is only available in the desktop app"
                   }
@@ -610,12 +588,14 @@ export function CreateWorkspaceModal({
                   <button
                     type="button"
                     className={styles.browseButton}
-                    onClick={handleBrowseRepo}
+                    onClick={repoFolderPicker.browseFolder}
                     disabled={
-                      !canBrowseFolders || isSubmitting || isBrowsingRepo
+                      !repoFolderPicker.canBrowseFolders ||
+                      isSubmitting ||
+                      repoFolderPicker.isBrowsing
                     }
                     title={
-                      canBrowseFolders
+                      repoFolderPicker.canBrowseFolders
                         ? "Browse for repository folder"
                         : "Filesystem browsing is only available in the desktop app"
                     }

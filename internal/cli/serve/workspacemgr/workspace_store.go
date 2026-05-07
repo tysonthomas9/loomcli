@@ -430,15 +430,7 @@ func saveLocalWorkspaceState(key, wsDir string, repos []config.RepoConfig, makeA
 	if key == "" {
 		return errors.New("save local workspace state: key must not be empty")
 	}
-	return bootstrap.WithStateLock(func() error {
-		sc, err := bootstrap.LoadStateCache()
-		if err != nil {
-			return fmt.Errorf("load local workspace state: %w", err)
-		}
-		if sc.Workspaces == nil {
-			sc.Workspaces = make(map[string]bootstrap.WorkspaceLocalState)
-		}
-		local := sc.Workspaces[key]
+	if err := bootstrap.MutateWorkspaceLocalState(key, func(local *bootstrap.WorkspaceLocalState) error {
 		local.Path = wsDir
 		if local.Repos == nil {
 			local.Repos = make(map[string]string, len(repos))
@@ -449,15 +441,14 @@ func saveLocalWorkspaceState(key, wsDir string, repos []config.RepoConfig, makeA
 		if local.Agents == nil {
 			local.Agents = make(map[string]bootstrap.AgentLocalState)
 		}
-		sc.Workspaces[key] = local
-		if makeActive {
-			sc.LastWorkspace = key
-		}
-		if err := bootstrap.SaveStateCache(sc); err != nil {
-			return fmt.Errorf("save local workspace state: %w", err)
-		}
 		return nil
-	})
+	}); err != nil {
+		return fmt.Errorf("save local workspace state: %w", err)
+	}
+	if makeActive {
+		return bootstrap.SetActiveWorkspaceKey(key)
+	}
+	return nil
 }
 
 func deleteLocalWorkspaceState(key string) {
