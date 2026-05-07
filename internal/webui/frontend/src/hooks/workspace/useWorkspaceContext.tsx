@@ -176,12 +176,9 @@ export function WorkspaceProvider({
 
   const defaultWorkspaceName = null;
 
-  const setDefaultWorkspace = useCallback(
-    async (_name: string | null) => {
-      throw new Error("Default workspace selection has been removed");
-    },
-    [],
-  );
+  const setDefaultWorkspace = useCallback(async (_name: string | null) => {
+    throw new Error("Default workspace selection has been removed");
+  }, []);
 
   // Workspace switch: build the destination URL via buildWorkspaceSwitchUrl
   // (preserves `view=`, drops everything else) and navigate with
