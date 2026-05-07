@@ -1,0 +1,500 @@
+package workspace
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/spf13/cobra"
+
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
+	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
+	"github.com/tysonthomas9/loomcli/internal/cli/local"
+	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/store"
+)
+
+var (
+	workspaceOpsJSON       bool
+	workspaceOpsTimeoutSec int
+)
+
+var workspaceOpsCmd = &cobra.Command{
+	Use:   "ops",
+	Short: "Agent-safe workspace operations",
+	Long: `Agent-safe workspace operations expose one-shot JSON-friendly status,
+diagnostics, and runtime repair for local/desktop workspaces.`,
+}
+
+var workspaceOpsStatusCmd = &cobra.Command{
+	Use:   "status [KEY]",
+	Short: "Show workspace runtime status",
+	Args:  cobra.MaximumNArgs(1),
+	RunE:  runWorkspaceOpsStatus,
+}
+
+var workspaceOpsDiagnoseCmd = &cobra.Command{
+	Use:   "diagnose [KEY]",
+	Short: "Diagnose workspace runtime and agent configuration",
+	Args:  cobra.MaximumNArgs(1),
+	RunE:  runWorkspaceOpsStatus,
+}
+
+var workspaceOpsEnsureRuntimeCmd = &cobra.Command{
+	Use:   "ensure-runtime [KEY]",
+	Short: "Ensure the local runtime and workspace daemon are running",
+	Args:  cobra.MaximumNArgs(1),
+	RunE:  runWorkspaceOpsEnsureRuntime,
+}
+
+func init() {
+	workspaceOpsCmd.PersistentFlags().BoolVar(&workspaceOpsJSON, "json", false, "Output JSON")
+	workspaceOpsEnsureRuntimeCmd.Flags().IntVar(&workspaceOpsTimeoutSec, "timeout", 20, "Seconds to wait for runtime and daemon readiness")
+	workspaceOpsCmd.AddCommand(workspaceOpsStatusCmd, workspaceOpsDiagnoseCmd, workspaceOpsEnsureRuntimeCmd)
+	workspaceCmd.AddCommand(workspaceOpsCmd)
+}
+
+type WorkspaceOpsStatus struct {
+	OK           bool                         `json:"ok"`
+	Workspace    WorkspaceOpsWorkspace        `json:"workspace"`
+	LocalRuntime *local.RuntimeStatusSnapshot `json:"local_runtime,omitempty"`
+	Daemon       WorkspaceOpsDaemon           `json:"daemon"`
+	Repos        []WorkspaceOpsRepo           `json:"repos"`
+	Agents       []WorkspaceOpsAgent          `json:"agents"`
+	Problems     []WorkspaceOpsProblem        `json:"problems,omitempty"`
+}
+
+type WorkspaceOpsWorkspace struct {
+	Key       string `json:"key"`
+	Name      string `json:"name,omitempty"`
+	State     string `json:"state"`
+	LocalPath string `json:"local_path,omitempty"`
+}
+
+type WorkspaceOpsDaemon struct {
+	AppData        DaemonInfo `json:"app_data"`
+	WorkspaceLocal DaemonInfo `json:"workspace_local,omitempty"`
+	DataDir        string     `json:"data_dir,omitempty"`
+}
+
+type WorkspaceOpsRepo struct {
+	Name       string   `json:"name"`
+	LocalPath  string   `json:"local_path,omitempty"`
+	RemoteURL  string   `json:"remote_url,omitempty"`
+	Groups     []string `json:"groups,omitempty"`
+	SourceRepo string   `json:"source_repo_id,omitempty"`
+}
+
+type WorkspaceOpsAgent struct {
+	Name          string `json:"name"`
+	Role          string `json:"role"`
+	State         string `json:"state"`
+	DesiredState  string `json:"desired_state,omitempty"`
+	Mode          string `json:"mode,omitempty"`
+	Auto          bool   `json:"auto,omitempty"`
+	Parent        string `json:"parent,omitempty"`
+	Runnable      bool   `json:"runnable"`
+	WorktreePath  string `json:"worktree_path,omitempty"`
+	WorktreeReady bool   `json:"worktree_ready"`
+	Reason        string `json:"reason,omitempty"`
+}
+
+type WorkspaceOpsProblem struct {
+	Severity string `json:"severity"`
+	Code     string `json:"code"`
+	Message  string `json:"message"`
+	Agent    string `json:"agent,omitempty"`
+	Fix      string `json:"fix,omitempty"`
+}
+
+func runWorkspaceOpsStatus(cmd *cobra.Command, args []string) error {
+	return withWorkspaceOpsStatus(cmd, args, func(status *WorkspaceOpsStatus) error {
+		return renderWorkspaceOpsStatus(cmd, status)
+	})
+}
+
+func runWorkspaceOpsEnsureRuntime(cmd *cobra.Command, args []string) error {
+	initial, err := workspaceOpsStatusForArgs(args)
+	if err != nil {
+		return err
+	}
+	key := initial.Workspace.Key
+	if err := bootstrap.SetActiveWorkspaceKey(key); err != nil {
+		return fmt.Errorf("select workspace for local runtime: %w", err)
+	}
+	if err := os.Setenv(bootstrap.EnvWorkspace, key); err != nil {
+		return err
+	}
+
+	timeout := time.Duration(workspaceOpsTimeoutSec) * time.Second
+	if timeout <= 0 {
+		timeout = 20 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(cmd.Context(), timeout)
+	defer cancel()
+	if _, err := local.EnsureRuntimeStarted(ctx, initial.Daemon.DataDir, 0); err != nil {
+		return fmt.Errorf("ensure local runtime: %w", err)
+	}
+
+	status := initial
+	deadline := time.Now().Add(timeout)
+	for {
+		refreshed, err := loadWorkspaceOpsStatus(cmd.Context(), key)
+		if err != nil {
+			return err
+		}
+		status = refreshed
+		if !statusNeedsDaemonWait(status) || status.Daemon.AppData.Running || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	return renderWorkspaceOpsStatus(cmd, status)
+}
+
+func withWorkspaceOpsStatus(cmd *cobra.Command, args []string, fn func(*WorkspaceOpsStatus) error) error {
+	status, err := workspaceOpsStatusForArgs(args)
+	if err != nil {
+		return err
+	}
+	return fn(status)
+}
+
+func workspaceOpsStatusForArgs(args []string) (*WorkspaceOpsStatus, error) {
+	var loaded *WorkspaceOpsStatus
+	err := cmdstore.WithStore(func(ctx context.Context, h *bootstrap.StoreHandle) error {
+		key, err := pickWorkspaceKey(ctx, h.Store, args)
+		if err != nil {
+			return err
+		}
+		if err := os.Setenv(bootstrap.EnvWorkspace, key); err != nil {
+			return err
+		}
+		ws, repos, agents, roles, err := gatherWorkspaceDetails(ctx, h.Store, key)
+		if err != nil {
+			return err
+		}
+		status, err := buildWorkspaceOpsStatus(ctx, h.Store, ws, repos, agents, roles)
+		if err != nil {
+			return err
+		}
+		loaded = status
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if loaded == nil {
+		return nil, fmt.Errorf("load workspace ops status: no status returned")
+	}
+	return loaded, nil
+}
+
+func loadWorkspaceOpsStatus(ctx context.Context, key string) (*WorkspaceOpsStatus, error) {
+	var loaded *WorkspaceOpsStatus
+	err := cmdstore.WithStore(func(ctx context.Context, h *bootstrap.StoreHandle) error {
+		ws, repos, agents, roles, err := gatherWorkspaceDetails(ctx, h.Store, key)
+		if err != nil {
+			return err
+		}
+		status, err := buildWorkspaceOpsStatus(ctx, h.Store, ws, repos, agents, roles)
+		if err != nil {
+			return err
+		}
+		loaded = status
+		return nil
+	})
+	return loaded, err
+}
+
+func buildWorkspaceOpsStatus(
+	ctx context.Context,
+	st store.Store,
+	ws *domain.Workspace,
+	repos []*domain.Repo,
+	agents []*domain.Agent,
+	roles []*domain.Role,
+) (*WorkspaceOpsStatus, error) {
+	sc, _ := bootstrap.LoadStateCache()
+	localState := bootstrap.WorkspaceLocalState{}
+	if sc != nil {
+		localState = sc.Workspaces[ws.Key]
+	}
+	dataDir, err := local.DefaultDataDir()
+	if err != nil {
+		return nil, err
+	}
+	runtime, runtimeErr := local.ReadRuntimeStatus(ctx, dataDir)
+
+	status := &WorkspaceOpsStatus{
+		Workspace: WorkspaceOpsWorkspace{
+			Key:       ws.Key,
+			Name:      ws.Name,
+			State:     workspaceStateString(ws.State),
+			LocalPath: localState.Path,
+		},
+		LocalRuntime: runtime,
+		Daemon: WorkspaceOpsDaemon{
+			AppData: collectDaemonStatusForDir(dataDir),
+			DataDir: dataDir,
+		},
+		Repos:  make([]WorkspaceOpsRepo, 0, len(repos)),
+		Agents: make([]WorkspaceOpsAgent, 0, len(agents)),
+	}
+	if localState.Path != "" {
+		status.Daemon.WorkspaceLocal = collectDaemonStatusForDir(localState.Path)
+	}
+	if runtimeErr != nil || runtime == nil || !runtime.Healthy {
+		status.Problems = append(status.Problems, WorkspaceOpsProblem{
+			Severity: "warning",
+			Code:     "local_runtime_unhealthy",
+			Message:  "local desktop runtime is not healthy",
+			Fix:      "run `loom workspace ops ensure-runtime --json`",
+		})
+	}
+
+	repoByName := map[string]*domain.Repo{}
+	for _, repo := range repos {
+		if repo == nil {
+			continue
+		}
+		repoByName[repo.Name] = repo
+		status.Repos = append(status.Repos, WorkspaceOpsRepo{
+			Name:       repo.Name,
+			LocalPath:  repoLocalPath(localState, repo.Name),
+			RemoteURL:  repo.RemoteURL,
+			Groups:     append([]string(nil), repo.Groups...),
+			SourceRepo: repo.SourceRepoID,
+		})
+	}
+	roleNames := map[string]struct{}{}
+	for _, role := range roles {
+		if role != nil {
+			roleNames[role.Name] = struct{}{}
+		}
+	}
+
+	for _, agent := range agents {
+		if agent == nil {
+			continue
+		}
+		item, problems := workspaceOpsAgentStatus(localState, repoByName, roleNames, agent)
+		status.Agents = append(status.Agents, item)
+		status.Problems = append(status.Problems, problems...)
+	}
+	status.Problems = append(status.Problems, workspaceOpsGlobalProblems(status)...)
+	_ = st
+	status.OK = !hasErrorProblem(status.Problems)
+	return status, nil
+}
+
+func workspaceStateString(state domain.WorkspaceState) string {
+	if state == "" {
+		return "ready"
+	}
+	return string(state)
+}
+
+func repoLocalPath(localState bootstrap.WorkspaceLocalState, name string) string {
+	if localState.Repos != nil && localState.Repos[name] != "" {
+		return localState.Repos[name]
+	}
+	if localState.Path != "" {
+		return filepath.Join(localState.Path, name)
+	}
+	return ""
+}
+
+func workspaceOpsAgentStatus(
+	localState bootstrap.WorkspaceLocalState,
+	repoByName map[string]*domain.Repo,
+	roleNames map[string]struct{},
+	agent *domain.Agent,
+) (WorkspaceOpsAgent, []WorkspaceOpsProblem) {
+	item := WorkspaceOpsAgent{
+		Name:          agent.Name,
+		Role:          agent.RoleName,
+		State:         string(agent.State),
+		DesiredState:  string(agent.DesiredState),
+		Mode:          string(agent.Mode),
+		Auto:          agent.Auto,
+		Parent:        agent.Parent,
+		Runnable:      agentDesiredRunnable(agent),
+		WorktreePath:  agentWorktreePath(localState, repoByName, agent),
+		WorktreeReady: false,
+	}
+	if item.WorktreePath != "" {
+		if _, err := os.Stat(filepath.Join(item.WorktreePath, ".git")); err == nil {
+			item.WorktreeReady = true
+		}
+	}
+	var problems []WorkspaceOpsProblem
+	if _, ok := roleNames[agent.RoleName]; !ok {
+		item.Runnable = false
+		item.Reason = "unknown_role"
+		problems = append(problems, WorkspaceOpsProblem{
+			Severity: "error",
+			Code:     "agent_unknown_role",
+			Message:  fmt.Sprintf("agent %q references unknown role %q", agent.Name, agent.RoleName),
+			Agent:    agent.Name,
+			Fix:      "use `loom role list` and update the agent role",
+		})
+	}
+	if item.Runnable && localState.Path != "" && !item.WorktreeReady {
+		if item.Reason == "" {
+			item.Reason = "missing_local_worktree"
+		}
+		problems = append(problems, WorkspaceOpsProblem{
+			Severity: "error",
+			Code:     "agent_missing_worktree",
+			Message:  fmt.Sprintf("agent %q has no local git worktree", agent.Name),
+			Agent:    agent.Name,
+			Fix:      "remove and recreate the agent with `loom agentdef add ... --auto` so Loom creates the local worktree",
+		})
+	}
+	if !item.Runnable && item.Reason == "" {
+		item.Reason = "desired_state_not_running"
+	}
+	return item, problems
+}
+
+func agentDesiredRunnable(agent *domain.Agent) bool {
+	switch agent.DesiredState {
+	case domain.AgentDesiredStopped, domain.AgentDesiredDraining:
+		return false
+	default:
+		return agent.State != domain.AgentStateStopped
+	}
+}
+
+func agentWorktreePath(localState bootstrap.WorkspaceLocalState, repoByName map[string]*domain.Repo, agent *domain.Agent) string {
+	if localState.Agents != nil && localState.Agents[agent.Name].Worktree != "" {
+		return localState.Agents[agent.Name].Worktree
+	}
+	if localState.Path == "" {
+		return ""
+	}
+	repoNames := agent.Repos
+	if agent.CrossRepo || len(repoNames) == 0 {
+		repoNames = make([]string, 0, len(repoByName))
+		for name := range repoByName {
+			repoNames = append(repoNames, name)
+		}
+	}
+	for _, repoName := range repoNames {
+		candidate := filepath.Join(localState.Path, "worktrees", repoName, agent.Name)
+		if _, err := os.Stat(filepath.Join(candidate, ".git")); err == nil {
+			return candidate
+		}
+	}
+	if len(repoNames) > 0 {
+		return filepath.Join(localState.Path, "worktrees", repoNames[0], agent.Name)
+	}
+	return ""
+}
+
+func workspaceOpsGlobalProblems(status *WorkspaceOpsStatus) []WorkspaceOpsProblem {
+	var problems []WorkspaceOpsProblem
+	if len(status.Repos) == 0 {
+		problems = append(problems, WorkspaceOpsProblem{
+			Severity: "info",
+			Code:     "workspace_has_no_repos",
+			Message:  "workspace has no repositories",
+			Fix:      "add a repository before creating runnable agents",
+		})
+	}
+	if len(status.Agents) == 0 {
+		problems = append(problems, WorkspaceOpsProblem{
+			Severity: "info",
+			Code:     "workspace_has_no_agents",
+			Message:  "workspace has no agent definitions",
+			Fix:      "create planner/worker agents for background work",
+		})
+	}
+	if statusNeedsDaemonWait(status) && !status.Daemon.AppData.Running {
+		problems = append(problems, WorkspaceOpsProblem{
+			Severity: "error",
+			Code:     "daemon_not_running",
+			Message:  "workspace has runnable agents but the desktop-owned daemon is not running",
+			Fix:      "run `loom workspace ops ensure-runtime --json`",
+		})
+	}
+	if status.Daemon.AppData.Running && status.Daemon.WorkspaceLocal.Running &&
+		status.Daemon.AppData.PID != 0 && status.Daemon.WorkspaceLocal.PID != 0 &&
+		status.Daemon.AppData.PID != status.Daemon.WorkspaceLocal.PID {
+		problems = append(problems, WorkspaceOpsProblem{
+			Severity: "warning",
+			Code:     "duplicate_daemon_ownership",
+			Message:  "both desktop-owned and workspace-local daemons appear to be running",
+			Fix:      "stop the manual workspace-local daemon and let desktop local runtime supervise agents",
+		})
+	}
+	return problems
+}
+
+func statusNeedsDaemonWait(status *WorkspaceOpsStatus) bool {
+	for _, agent := range status.Agents {
+		if agent.Runnable {
+			return true
+		}
+	}
+	return false
+}
+
+func hasErrorProblem(problems []WorkspaceOpsProblem) bool {
+	for _, problem := range problems {
+		if problem.Severity == "error" {
+			return true
+		}
+	}
+	return false
+}
+
+func renderWorkspaceOpsStatus(cmd *cobra.Command, status *WorkspaceOpsStatus) error {
+	if workspaceOpsJSON {
+		enc := json.NewEncoder(cmd.OutOrStdout())
+		enc.SetIndent("", "  ")
+		return enc.Encode(status)
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "Workspace: %s (%s)\n", status.Workspace.Key, status.Workspace.State)
+	if status.LocalRuntime != nil && status.LocalRuntime.Runtime != nil {
+		fmt.Fprintf(cmd.OutOrStdout(), "Runtime:   healthy=%t url=%s pid=%d\n",
+			status.LocalRuntime.Healthy, status.LocalRuntime.Runtime.URL, status.LocalRuntime.Runtime.PID)
+	} else {
+		fmt.Fprintln(cmd.OutOrStdout(), "Runtime:   unavailable")
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "Daemon:    desktop=%s workspace=%s\n",
+		daemonHuman(status.Daemon.AppData), daemonHuman(status.Daemon.WorkspaceLocal))
+	fmt.Fprintf(cmd.OutOrStdout(), "Repos:     %d\nAgents:    %d\n", len(status.Repos), len(status.Agents))
+	if len(status.Problems) > 0 {
+		fmt.Fprintf(cmd.OutOrStdout(), "Problems:  %d\n", len(status.Problems))
+		for _, problem := range status.Problems {
+			parts := []string{problem.Severity, problem.Code}
+			if problem.Agent != "" {
+				parts = append(parts, "agent="+problem.Agent)
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "  - %s: %s\n", strings.Join(parts, " "), problem.Message)
+			if problem.Fix != "" {
+				fmt.Fprintf(cmd.OutOrStdout(), "    fix: %s\n", problem.Fix)
+			}
+		}
+	}
+	return nil
+}
+
+func daemonHuman(info DaemonInfo) string {
+	if info.Running {
+		if info.PID != 0 {
+			return fmt.Sprintf("running(pid=%d)", info.PID)
+		}
+		return "running"
+	}
+	if info.StalePID {
+		return "stale"
+	}
+	return "stopped"
+}

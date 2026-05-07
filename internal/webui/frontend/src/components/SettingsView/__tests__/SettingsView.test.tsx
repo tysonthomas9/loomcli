@@ -13,7 +13,10 @@ import { render, screen, fireEvent, within, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import "@testing-library/jest-dom";
 
-import type { UseBackendConfigReturn } from "@/hooks/workspace";
+import type {
+  UseBackendConfigReturn,
+  UseLocalSettingsReturn,
+} from "@/hooks/workspace";
 import type { UseTerminalFontReturn } from "@/hooks/terminal";
 import type { BackendConfigData } from "@/api/common";
 
@@ -25,7 +28,7 @@ vi.mock("@/hooks/workspace", async () => {
     await vi.importActual<typeof import("@/hooks/workspace")>(
       "@/hooks/workspace",
     );
-  return { ...actual, useBackendConfig: vi.fn() };
+  return { ...actual, useBackendConfig: vi.fn(), useLocalSettings: vi.fn() };
 });
 
 vi.mock("@/hooks/terminal", async () => {
@@ -50,11 +53,12 @@ vi.mock("@/hooks/ui", async () => {
   };
 });
 
-import { useBackendConfig } from "@/hooks/workspace";
+import { useBackendConfig, useLocalSettings } from "@/hooks/workspace";
 import { useTerminalFont } from "@/hooks/terminal";
 import { useToast } from "@/hooks/ui";
 
 const mockUseBackendConfig = vi.mocked(useBackendConfig);
+const mockUseLocalSettings = vi.mocked(useLocalSettings);
 const mockUseTerminalFont = vi.mocked(useTerminalFont);
 const mockUseToast = vi.mocked(useToast);
 
@@ -91,6 +95,28 @@ function createMockHookReturn(
   };
 }
 
+function createMockLocalSettingsReturn(
+  overrides?: Partial<UseLocalSettingsReturn>,
+): UseLocalSettingsReturn {
+  return {
+    settings: {
+      version: 1,
+      fleetdb_redis: {
+        enabled: false,
+        db: 0,
+        tls: false,
+        password_set: false,
+      },
+    },
+    isLoading: false,
+    isSaving: false,
+    error: null,
+    updateRedis: vi.fn().mockResolvedValue(true),
+    refetch: vi.fn(),
+    ...overrides,
+  };
+}
+
 describe("SettingsView", () => {
   const mockShowToast = vi.fn();
 
@@ -118,6 +144,7 @@ describe("SettingsView", () => {
       dismissAll: vi.fn(),
     });
     mockUseTerminalFont.mockReturnValue(createMockFontReturn());
+    mockUseLocalSettings.mockReturnValue(createMockLocalSettingsReturn());
   });
 
   describe("loading state", () => {
@@ -357,6 +384,84 @@ describe("SettingsView", () => {
       expect(
         screen.getByText("No per-agent overrides configured."),
       ).toBeInTheDocument();
+    });
+  });
+
+  describe("FleetDB Redis panel", () => {
+    it("renders disabled Redis settings by default", () => {
+      mockUseBackendConfig.mockReturnValue(createMockHookReturn());
+
+      render(<SettingsView />);
+
+      expect(screen.getByTestId("fleetdb-redis-panel")).toBeInTheDocument();
+      expect(screen.getByText("FleetDB Redis")).toBeInTheDocument();
+      expect(screen.getByTestId("redis-enabled-checkbox")).not.toBeChecked();
+      expect(screen.queryByTestId("redis-url-input")).not.toBeInTheDocument();
+    });
+
+    it("shows saved Redis connection metadata without the password", () => {
+      mockUseBackendConfig.mockReturnValue(createMockHookReturn());
+      mockUseLocalSettings.mockReturnValue(
+        createMockLocalSettingsReturn({
+          settings: {
+            version: 1,
+            fleetdb_redis: {
+              enabled: true,
+              addr: "example.redis:6379",
+              db: 2,
+              tls: true,
+              password_set: true,
+            },
+          },
+        }),
+      );
+
+      render(<SettingsView />);
+
+      expect(screen.getByTestId("redis-enabled-checkbox")).toBeChecked();
+      expect(screen.getByTestId("redis-current")).toHaveTextContent(
+        "example.redis:6379",
+      );
+      expect(screen.getByTestId("redis-current")).toHaveTextContent(
+        "database 2",
+      );
+      expect(screen.getByTestId("redis-current")).toHaveTextContent("TLS");
+      expect(screen.getByTestId("redis-current")).toHaveTextContent(
+        "password saved",
+      );
+    });
+
+    it("saves a pasted redis-cli TLS command", async () => {
+      const mockUpdateRedis = vi.fn().mockResolvedValue(true);
+      mockUseBackendConfig.mockReturnValue(createMockHookReturn());
+      mockUseLocalSettings.mockReturnValue(
+        createMockLocalSettingsReturn({ updateRedis: mockUpdateRedis }),
+      );
+
+      render(<SettingsView />);
+
+      fireEvent.click(screen.getByTestId("redis-enabled-checkbox"));
+      expect(screen.getByLabelText("Database index")).toBeInTheDocument();
+      fireEvent.change(screen.getByTestId("redis-url-input"), {
+        target: {
+          value: "redis-cli --tls -u redis://default:secret@example.redis:6379",
+        },
+      });
+      fireEvent.change(screen.getByTestId("redis-db-input"), {
+        target: { value: "1" },
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("redis-save-button"));
+      });
+
+      expect(mockUpdateRedis).toHaveBeenCalledWith({
+        enabled: true,
+        db: 1,
+        tls: true,
+        redis_url:
+          "redis-cli --tls -u redis://default:secret@example.redis:6379",
+      });
     });
   });
 

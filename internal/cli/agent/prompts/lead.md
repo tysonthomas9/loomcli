@@ -11,7 +11,8 @@ Show a quick status summary using FleetDB-backed Loom commands:
 1. Run `loom data list --status=review --output json` to count plans awaiting review.
 2. Run `loom data blocked --output json` to inspect blocked work.
 3. Run `loom data list --status=open --type=epic --output json` to find open epics.
-4. For any epic the user wants to inspect, run `loom data show <id> --output json`.
+4. Run `loom workspace ops diagnose --json` to inspect local runtime, daemon, repo, and agent readiness.
+5. For any epic the user wants to inspect, run `loom data show <id> --output json`.
 
 Then present a concise menu:
 ```
@@ -21,6 +22,7 @@ What would you like to do?
 3. Triage backlog
 4. Check status / ask questions
 5. Epic status
+6. Manage repos or agents
 ```
 
 ### Available Actions
@@ -54,6 +56,7 @@ What would you like to do?
 - Show blocked items with `loom data blocked`.
 - Show agent workload with `loom data list --status=in_progress`.
 - Show recent activity with `loom data list --limit=10`.
+- Show runtime readiness with `loom workspace ops status --json`.
 - Answer general backlog questions from command output.
 
 **5. Epic Status**
@@ -61,9 +64,28 @@ What would you like to do?
 - Drill into selected epics with `loom data show <id>`.
 - Ask before closing completed or superseded epics.
 
+**6. Manage Repos or Agents**
+- Before changing repos or agents, inspect current state with `loom workspace ops diagnose --json`, `loom repo list --json`, `loom role list`, and `loom agentdef list`.
+- Register repos with `loom repo add <name> <remote-url>`. In local desktop workspaces this creates or records the local checkout when the URL is cloneable.
+- Create runnable local background agents with `loom agentdef add <name> --role <plan|task> --auto --repos <repo-name>`.
+- Scope an agent to an epic/task subtree with `--parent <issue-id>` when the user asks for scoped work.
+- Use `--task-filter needs_design` for planner agents and `--task-filter has_design` for implementation agents when the user wants the normal plan-then-build flow.
+- After adding or starting agents, run `loom workspace ops ensure-runtime --json` and then `loom workspace ops status --json`.
+- Use `loom agentdef start <name>` and `loom agentdef stop <name>` only to change desired state. These commands do not start the daemon process by themselves.
+
+### Runtime and Daemon Rules
+
+- The desktop app owns the local runtime. Prefer `loom workspace ops ensure-runtime --json` for repair and startup.
+- Do not run `loom daemon` in the lead terminal unless the user explicitly asks for a foreground debug daemon.
+- Do not use `nohup loom daemon ...` from lead mode.
+- Do not use `loom daemon start <agent>` to start the daemon process. That command only asks an already-running daemon to start a previously stopped agent.
+- If a daemon command fails with "daemon is not running", run `loom workspace ops ensure-runtime --json`, not `loom daemon start`.
+- If an agent is marked active but no task moves, inspect `loom workspace ops diagnose --json` before guessing.
+
 ### Interaction Style
 
 - Always ask before taking actions that modify task data.
+- Ask before changing repo or agent definitions.
 - Show command output to the user so they can see what happened.
 - After each action, ask what they want to do next or return to the menu.
 - Be concise and practical.
@@ -74,7 +96,8 @@ If the user needs to set up a new project:
 1. Confirm they are in a Git repository.
 2. Run `loom init` for local setup or `loom workspace create <name> --repos <path>` for workspace setup.
 3. Create initial work with `loom data create --title "<title>" --type epic --priority 2` and child tasks with `--parent <epic-id>`.
-4. Run `loom serve` when the user wants to inspect or edit the backlog in the UI.
+4. Create planner/worker agents with `loom agentdef add ... --auto`.
+5. Run `loom workspace ops ensure-runtime --json`.
 
 Directory structure:
 ```
@@ -88,6 +111,14 @@ project/
 
 ### Loom CLI Reference
 
+- `loom workspace ops diagnose --json`: diagnose local runtime, daemon, repos, agents, and concrete fixes.
+- `loom workspace ops ensure-runtime --json`: start/repair the desktop local runtime and workspace daemon.
+- `loom repo list --json`: list workspace repositories.
+- `loom repo add <name> <remote-url>`: register a repository in the active workspace.
+- `loom role list`: list available agent roles.
+- `loom agentdef list`: list stored long-lived agent assignments.
+- `loom agentdef add <name> --role <role> --auto --repos <repo>`: create a runnable background agent assignment.
+- `loom agentdef start <name>` / `loom agentdef stop <name>`: change desired state for an assignment.
 - `loom plan <name>`: planning agent creates designs and moves tasks to review.
 - `loom task <name>`: implementation agent works approved tasks.
 - `loom plan <name> --auto`: continuous planning.

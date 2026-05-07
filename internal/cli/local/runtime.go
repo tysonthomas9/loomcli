@@ -2,6 +2,8 @@ package local
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,6 +16,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/localsettings"
 	"github.com/tysonthomas9/loomcli/internal/lockfile"
 )
 
@@ -23,23 +27,84 @@ const (
 )
 
 type runtimeInfo struct {
-	Version      int       `json:"version"`
-	Status       string    `json:"status"`
-	PID          int       `json:"pid"`
-	ServePID     int       `json:"serve_pid,omitempty"`
-	DataDir      string    `json:"data_dir"`
-	URL          string    `json:"url,omitempty"`
-	Port         int       `json:"port,omitempty"`
-	ClaimsPaused bool      `json:"claims_paused,omitempty"`
-	StartedAt    time.Time `json:"started_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
-	Error        string    `json:"error,omitempty"`
+	Version          int       `json:"version"`
+	Status           string    `json:"status"`
+	PID              int       `json:"pid"`
+	ServePID         int       `json:"serve_pid,omitempty"`
+	DataDir          string    `json:"data_dir"`
+	URL              string    `json:"url,omitempty"`
+	Port             int       `json:"port,omitempty"`
+	Executable       string    `json:"executable,omitempty"`
+	BinaryHash       string    `json:"binary_hash,omitempty"`
+	Build            string    `json:"build,omitempty"`
+	FleetDBRedisHash string    `json:"fleetdb_redis_hash,omitempty"`
+	ClaimsPaused     bool      `json:"claims_paused,omitempty"`
+	StartedAt        time.Time `json:"started_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
+	Error            string    `json:"error,omitempty"`
 }
 
 type runtimeStatus struct {
 	Runtime *runtimeInfo `json:"runtime,omitempty"`
 	Healthy bool         `json:"healthy"`
 	Error   string       `json:"error,omitempty"`
+}
+
+// RuntimeSnapshot is the exported, JSON-stable view of the local runtime
+// state used by higher-level workspace diagnostics.
+type RuntimeSnapshot struct {
+	Version          int       `json:"version"`
+	Status           string    `json:"status"`
+	PID              int       `json:"pid"`
+	ServePID         int       `json:"serve_pid,omitempty"`
+	DataDir          string    `json:"data_dir"`
+	URL              string    `json:"url,omitempty"`
+	Port             int       `json:"port,omitempty"`
+	Executable       string    `json:"executable,omitempty"`
+	BinaryHash       string    `json:"binary_hash,omitempty"`
+	Build            string    `json:"build,omitempty"`
+	FleetDBRedisHash string    `json:"fleetdb_redis_hash,omitempty"`
+	ClaimsPaused     bool      `json:"claims_paused,omitempty"`
+	StartedAt        time.Time `json:"started_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
+	Error            string    `json:"error,omitempty"`
+}
+
+// RuntimeStatusSnapshot is the exported status payload shared by
+// `loom local status` and workspace ops commands.
+type RuntimeStatusSnapshot struct {
+	Runtime *RuntimeSnapshot `json:"runtime,omitempty"`
+	Healthy bool             `json:"healthy"`
+	Error   string           `json:"error,omitempty"`
+}
+
+func runtimeSnapshot(info *runtimeInfo) *RuntimeSnapshot {
+	if info == nil {
+		return nil
+	}
+	return &RuntimeSnapshot{
+		Version:          info.Version,
+		Status:           info.Status,
+		PID:              info.PID,
+		ServePID:         info.ServePID,
+		DataDir:          info.DataDir,
+		URL:              info.URL,
+		Port:             info.Port,
+		Executable:       info.Executable,
+		BinaryHash:       info.BinaryHash,
+		Build:            info.Build,
+		FleetDBRedisHash: info.FleetDBRedisHash,
+		ClaimsPaused:     info.ClaimsPaused,
+		StartedAt:        info.StartedAt,
+		UpdatedAt:        info.UpdatedAt,
+		Error:            info.Error,
+	}
+}
+
+// DefaultDataDir returns the local desktop runtime data directory after
+// applying LOOM_DESKTOP_DATA_DIR / LOOM_CONFIG_DIR overrides.
+func DefaultDataDir() (string, error) {
+	return resolveDataDir("")
 }
 
 func resolveDataDir(flagValue string) (string, error) {
@@ -126,6 +191,70 @@ func writeRuntime(dataDir string, info *runtimeInfo) error {
 		return fmt.Errorf("rename %s: %w", path, err)
 	}
 	return nil
+}
+
+type executableIdentity struct {
+	Path  string
+	Hash  string
+	Build string
+}
+
+func currentExecutableIdentity() executableIdentity {
+	exe, err := os.Executable()
+	if err != nil {
+		return executableIdentity{Build: cli.Build}
+	}
+	hash := executableHash(exe)
+	return executableIdentity{Path: exe, Hash: hash, Build: cli.Build}
+}
+
+func executableHash(path string) string {
+	file, err := os.Open(path) //nolint:gosec // hashing the current Loom executable
+	if err != nil {
+		return ""
+	}
+	defer func() { _ = file.Close() }()
+	sum := sha256.New()
+	if _, err := io.Copy(sum, file); err != nil {
+		return ""
+	}
+	return hex.EncodeToString(sum.Sum(nil))
+}
+
+func applyExecutableIdentity(info *runtimeInfo, identity executableIdentity) {
+	if info == nil {
+		return
+	}
+	info.Executable = identity.Path
+	info.BinaryHash = identity.Hash
+	info.Build = identity.Build
+}
+
+func runtimeMatchesExecutable(info *runtimeInfo, identity executableIdentity) bool {
+	if info == nil {
+		return false
+	}
+	if identity.Hash == "" {
+		// If we cannot fingerprint the current binary, avoid restarting a
+		// healthy runtime just because the host filesystem denied the hash read.
+		return true
+	}
+	return info.BinaryHash == identity.Hash
+}
+
+func currentFleetDBRedisHash(dataDir string) (string, error) {
+	settings, err := localsettings.Load(dataDir)
+	if err != nil {
+		return "", err
+	}
+	return localsettings.RuntimeHash(settings.FleetDBRedis), nil
+}
+
+func runtimeMatchesFleetDBRedisSettings(info *runtimeInfo, currentHash string) bool {
+	if info == nil {
+		return false
+	}
+	return info.FleetDBRedisHash == currentHash
 }
 
 func checkRuntimeHealth(ctx context.Context, url string) error {

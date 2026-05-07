@@ -3,6 +3,7 @@ package workspacemgr
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,19 +14,95 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/workspaceerrors"
 )
 
-// resolveSecureWorkspaceDir resolves and validates the workspace directory path.
-func resolveSecureWorkspaceDir(reqPath, wsName string) (string, error) {
-	wsDir := reqPath
+type workspaceDirPlan struct {
+	path                 string
+	removeRootOnRollback bool
+}
+
+// resolveWorkspaceDirForCreate resolves and validates the workspace directory
+// path for a new workspace. Explicit desktop/UI paths may live outside Loom's
+// app data directory, but they must point at a safe workspace root: an empty
+// directory, or a not-yet-created leaf under an existing parent.
+func resolveWorkspaceDirForCreate(reqPath, wsName string) (workspaceDirPlan, error) {
+	wsDir := strings.TrimSpace(reqPath)
 	if wsDir == "" {
 		wsDir = config.GetWorkspaceDir(wsName)
 	}
-	wsDir = filepath.Clean(wsDir)
+	wsDir = expandUserPath(wsDir)
 
-	allowedBase := filepath.Join(config.GetConfigDir(), "workspaces")
-	if !strings.HasPrefix(wsDir, allowedBase+string(filepath.Separator)) && wsDir != allowedBase {
-		return "", workspaceerrors.New(workspaceerrors.SecurityViolation, fmt.Sprintf("workspace path must be under %s", allowedBase), nil)
+	absDir, err := filepath.Abs(filepath.Clean(wsDir))
+	if err != nil {
+		return workspaceDirPlan{}, workspaceerrors.New(workspaceerrors.PathNotFound, fmt.Sprintf("cannot resolve workspace path %q", wsDir), err)
 	}
-	return wsDir, nil
+	if err := validateWorkspaceCreatePath(absDir); err != nil {
+		return workspaceDirPlan{}, err
+	}
+
+	_, statErr := os.Stat(absDir)
+	return workspaceDirPlan{path: absDir, removeRootOnRollback: os.IsNotExist(statErr)}, nil
+}
+
+func expandUserPath(path string) string {
+	if path == "~" || strings.HasPrefix(path, "~/") {
+		if home, err := os.UserHomeDir(); err == nil && home != "" {
+			if path == "~" {
+				return home
+			}
+			return filepath.Join(home, strings.TrimPrefix(path, "~/"))
+		}
+	}
+	return path
+}
+
+func validateWorkspaceCreatePath(wsDir string) error {
+	if err := validateWorkspacePath(wsDir); err != nil {
+		return err
+	}
+
+	if info, err := os.Stat(wsDir); err == nil {
+		if !info.IsDir() {
+			return workspaceerrors.New(workspaceerrors.PathNotFound, fmt.Sprintf("workspace path is not a directory: %s", wsDir), nil)
+		}
+		if _, err := os.Stat(filepath.Join(wsDir, ".git")); err == nil {
+			return workspaceerrors.New(workspaceerrors.SecurityViolation, fmt.Sprintf("workspace path must not be an existing git repository: %s", wsDir), nil)
+		}
+		empty, err := dirIsEmpty(wsDir)
+		if err != nil {
+			return workspaceerrors.New(workspaceerrors.PathNotFound, fmt.Sprintf("cannot inspect workspace path: %s", wsDir), err)
+		}
+		if !empty {
+			return workspaceerrors.New(workspaceerrors.SecurityViolation, fmt.Sprintf("workspace path must be empty or not exist: %s", wsDir), nil)
+		}
+		return nil
+	} else if !os.IsNotExist(err) {
+		return workspaceerrors.New(workspaceerrors.PathNotFound, fmt.Sprintf("cannot inspect workspace path: %s", wsDir), err)
+	}
+
+	parent := filepath.Dir(wsDir)
+	if isPathWithin(wsDir, defaultWorkspaceBase()) {
+		return nil
+	}
+	info, err := os.Stat(parent)
+	if err != nil {
+		return workspaceerrors.New(workspaceerrors.PathNotFound, fmt.Sprintf("workspace parent directory does not exist: %s", parent), err)
+	}
+	if !info.IsDir() {
+		return workspaceerrors.New(workspaceerrors.PathNotFound, fmt.Sprintf("workspace parent path is not a directory: %s", parent), nil)
+	}
+	return nil
+}
+
+func dirIsEmpty(path string) (bool, error) {
+	f, err := os.Open(path) //nolint:gosec // path is validated as a user-selected workspace directory.
+	if err != nil {
+		return false, err
+	}
+	defer f.Close()
+	_, err = f.Readdirnames(1)
+	if err == io.EOF {
+		return true, nil
+	}
+	return false, err
 }
 
 type resolvedRepo struct {
@@ -109,10 +186,11 @@ func addWorktrees(ctx context.Context, resolved []resolvedRepo, wsDir, branch st
 	return created, repos, nil
 }
 
-// cleanupWorktrees removes created worktrees and the workspace directory on failure.
-func cleanupWorktrees(wsDir string, created []createdWorktree) {
+// cleanupWorktrees removes created worktrees and, only when Loom created it,
+// the workspace directory on failure.
+func cleanupWorktrees(plan workspaceDirPlan, created []createdWorktree) {
 	cleanupAttachedWorktrees(created)
-	_ = os.RemoveAll(wsDir)
+	cleanupWorkspaceRoot(plan)
 }
 
 func cleanupAttachedWorktrees(created []createdWorktree) {
@@ -124,13 +202,49 @@ func cleanupAttachedWorktrees(created []createdWorktree) {
 	}
 }
 
-// validateWorkspacePath ensures the workspace directory is under the allowed base.
+// validateWorkspacePath ensures a workspace directory points at a safe local
+// workspace root. Workspace roots may be custom user-selected directories in
+// desktop mode, but they must not be broad container directories that rollback
+// or repo operations could affect unexpectedly.
 func validateWorkspacePath(wsDir string) error {
-	allowedBase := filepath.Join(config.GetConfigDir(), "workspaces")
-	if !strings.HasPrefix(wsDir, allowedBase+string(filepath.Separator)) && wsDir != allowedBase {
-		return workspaceerrors.New(workspaceerrors.SecurityViolation, fmt.Sprintf("workspace path must be under %s", allowedBase), nil)
+	wsDir = filepath.Clean(expandUserPath(wsDir))
+	absDir, err := filepath.Abs(wsDir)
+	if err != nil {
+		return workspaceerrors.New(workspaceerrors.PathNotFound, fmt.Sprintf("cannot resolve workspace path %q", wsDir), err)
+	}
+	volumeRoot := filepath.VolumeName(absDir) + string(filepath.Separator)
+	if absDir == volumeRoot {
+		return workspaceerrors.New(workspaceerrors.SecurityViolation, fmt.Sprintf("workspace path is too broad: %s", absDir), nil)
+	}
+	if home, err := os.UserHomeDir(); err == nil && home != "" && absDir == filepath.Clean(home) {
+		return workspaceerrors.New(workspaceerrors.SecurityViolation, fmt.Sprintf("workspace path is too broad: %s", absDir), nil)
+	}
+	configDir := filepath.Clean(config.GetConfigDir())
+	if absConfigDir, err := filepath.Abs(configDir); err == nil && absDir == absConfigDir {
+		return workspaceerrors.New(workspaceerrors.SecurityViolation, fmt.Sprintf("workspace path is too broad: %s", absDir), nil)
+	}
+	if absDir == defaultWorkspaceBase() {
+		return workspaceerrors.New(workspaceerrors.SecurityViolation, fmt.Sprintf("workspace path must be a workspace-specific folder under %s", defaultWorkspaceBase()), nil)
 	}
 	return nil
+}
+
+func defaultWorkspaceBase() string {
+	base, err := filepath.Abs(filepath.Join(config.GetConfigDir(), "workspaces"))
+	if err != nil {
+		return filepath.Clean(filepath.Join(config.GetConfigDir(), "workspaces"))
+	}
+	return base
+}
+
+func isPathWithin(path, base string) bool {
+	path = filepath.Clean(path)
+	base = filepath.Clean(base)
+	rel, err := filepath.Rel(base, path)
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 // repoNameFromURL derives a fleet-db-safe directory/repo name from a git clone URL.
@@ -182,11 +296,18 @@ func normalizeRepoName(name string) string {
 
 // cloneRepos clones each URL into the workspace directory, deduplicating names.
 func cloneRepos(ctx context.Context, cloneURLs []string, wsDir string) ([]config.RepoConfig, error) {
+	return cloneReposWithSeen(ctx, cloneURLs, wsDir, make(map[string]bool))
+}
+
+func cloneReposWithSeen(ctx context.Context, cloneURLs []string, wsDir string, seenNames map[string]bool) ([]config.RepoConfig, error) {
 	var repos []config.RepoConfig
-	seenNames := make(map[string]bool)
+	if seenNames == nil {
+		seenNames = make(map[string]bool)
+	}
 
 	for _, cloneURL := range cloneURLs {
 		if ctx.Err() != nil {
+			cleanupClonedRepos(repos)
 			return nil, ctx.Err()
 		}
 
@@ -196,6 +317,7 @@ func cloneRepos(ctx context.Context, cloneURLs []string, wsDir string) ([]config
 		clonePath := filepath.Join(wsDir, repoName)
 		cmd := exec.CommandContext(ctx, "git", "clone", cloneURL, clonePath) //nolint:gosec // URL validated: prefix (https://|git@), no control chars, no dash-prefixed path segments, SSRF hostname blocklist
 		if output, err := cmd.CombinedOutput(); err != nil {
+			cleanupClonedRepos(repos)
 			return nil, workspaceerrors.New(workspaceerrors.GitFailed, fmt.Sprintf("git clone failed for %s: %s", cloneURL, strings.TrimSpace(string(output))), err)
 		}
 
@@ -207,6 +329,14 @@ func cloneRepos(ctx context.Context, cloneURLs []string, wsDir string) ([]config
 		})
 	}
 	return repos, nil
+}
+
+func cleanupClonedRepos(repos []config.RepoConfig) {
+	for _, repo := range repos {
+		if repo.Path != "" {
+			_ = os.RemoveAll(repo.Path)
+		}
+	}
 }
 
 // deduplicateRepoName appends a numeric suffix if the name is already taken.
@@ -222,6 +352,13 @@ func deduplicateRepoName(name string, seen map[string]bool) string {
 	}
 }
 
-func cleanupCloneDir(wsDir string) {
-	_ = os.RemoveAll(wsDir)
+func cleanupWorkspaceRoot(plan workspaceDirPlan) {
+	if plan.removeRootOnRollback && plan.path != "" {
+		_ = os.RemoveAll(plan.path)
+	}
+}
+
+func cleanupCloneWorkspace(plan workspaceDirPlan, repos []config.RepoConfig) {
+	cleanupClonedRepos(repos)
+	cleanupWorkspaceRoot(plan)
 }

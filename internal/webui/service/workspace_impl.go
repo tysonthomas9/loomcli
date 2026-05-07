@@ -68,14 +68,16 @@ func (s *workspaceServiceImpl) AddWorkspaceRepos(ctx context.Context, req Worksp
 	if s.addReposFn == nil {
 		return nil, ErrUnavailable("workspace repo attachment is not available")
 	}
-	if req.WorkspaceID == "" {
-		return nil, ErrValidation("workspace ID is required")
-	}
-	if len(req.Repos) == 0 {
-		return nil, ErrValidation("at least one repo path is required")
+	req = normalizeWorkspaceAddReposRequest(req)
+	if err := validateWorkspaceAddReposRequest(&req); err != nil {
+		return nil, err
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, workspaceCreateTimeoutEmpty)
+	timeout := workspaceCreateTimeoutEmpty
+	if len(req.CloneURLs) > 0 {
+		timeout = workspaceCreateTimeoutClone
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	result, err := s.addReposFn(ctx, req)

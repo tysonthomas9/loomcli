@@ -6,7 +6,11 @@
 
 import { useState, useCallback, useEffect, type FormEvent } from "react";
 
-import type { ConnectionState } from "@/api/common";
+import {
+  isDesktopRuntime,
+  pickDesktopFolder,
+  type ConnectionState,
+} from "@/api/common";
 import { useStore } from "zustand";
 import { useWorkspaceContext, useAgentStoreInstance } from "@/hooks";
 import { wsGet, wsSet } from "@/utils/scopedStorage";
@@ -55,6 +59,7 @@ export interface WorkspaceTreeProps {
 
 // Scoped key suffix for workspace-specific collapse state
 const SK_COLLAPSED = "tree-collapsed";
+const CLONE_URL_RE = /^(https:\/\/|git@)/;
 
 export function WorkspaceTree({
   className,
@@ -83,6 +88,7 @@ export function WorkspaceTree({
   } = workspaceContext;
   const [repoPathInput, setRepoPathInput] = useState("");
   const [isAddingRepo, setIsAddingRepo] = useState(false);
+  const [isBrowsingRepo, setIsBrowsingRepo] = useState(false);
   const [addRepoError, setAddRepoError] = useState<string | null>(null);
 
   // Load initial collapsed state from scoped localStorage
@@ -151,7 +157,12 @@ export function WorkspaceTree({
       setIsAddingRepo(true);
       setAddRepoError(null);
       try {
-        await addWorkspaceRepos(workspaceId, { repos: [repoPath] });
+        await addWorkspaceRepos(
+          workspaceId,
+          CLONE_URL_RE.test(repoPath)
+            ? { clone_urls: [repoPath] }
+            : { repos: [repoPath] },
+        );
         setRepoPathInput("");
         await refetch();
       } catch (err) {
@@ -164,6 +175,27 @@ export function WorkspaceTree({
     },
     [workspaceId, repoPathInput, isAddingRepo, refetch],
   );
+
+  const canBrowseFolders = isDesktopRuntime();
+
+  const handleBrowseRepo = useCallback(async () => {
+    if (!canBrowseFolders || isAddingRepo || isBrowsingRepo) return;
+
+    setIsBrowsingRepo(true);
+    setAddRepoError(null);
+    try {
+      const selectedPath = await pickDesktopFolder();
+      if (selectedPath) {
+        setRepoPathInput(selectedPath);
+      }
+    } catch (err) {
+      setAddRepoError(
+        err instanceof Error ? err.message : "Failed to open folder picker",
+      );
+    } finally {
+      setIsBrowsingRepo(false);
+    }
+  }, [canBrowseFolders, isAddingRepo, isBrowsingRepo]);
 
   const workspaces = workspace?.workspaces ?? [];
 
@@ -260,10 +292,24 @@ export function WorkspaceTree({
                 type="text"
                 value={repoPathInput}
                 onChange={(e) => setRepoPathInput(e.target.value)}
-                placeholder="/path/to/repo"
-                aria-label="Repository path"
+                placeholder="https://github.com/... or /path/to/repo"
+                aria-label="Repository path or URL"
                 disabled={isAddingRepo}
               />
+              <button
+                type="button"
+                className={styles.browseRepoButton}
+                onClick={handleBrowseRepo}
+                disabled={!canBrowseFolders || isAddingRepo || isBrowsingRepo}
+                title={
+                  canBrowseFolders
+                    ? "Browse for repository folder"
+                    : "Filesystem browsing is only available in the desktop app"
+                }
+                aria-label="Browse for repository folder"
+              >
+                Browse
+              </button>
               <button
                 type="submit"
                 className={styles.addRepoButton}

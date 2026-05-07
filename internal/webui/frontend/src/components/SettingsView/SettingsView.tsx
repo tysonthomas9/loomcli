@@ -3,12 +3,16 @@
  * Displays project backend configuration with a dropdown and per-agent overrides table.
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { ErrorDisplay } from "@/components/ErrorDisplay";
 import { LoadingSkeleton } from "@/components/LoadingSkeleton";
 import type { ViewMode } from "@/types";
-import { useBackendConfig, useWorkspaceContext } from "@/hooks/workspace";
+import {
+  useBackendConfig,
+  useLocalSettings,
+  useWorkspaceContext,
+} from "@/hooks/workspace";
 import {
   useTerminalFont,
   FONT_FAMILY_OPTIONS,
@@ -41,6 +45,19 @@ export function SettingsView({
   } = useBackendConfig(workspaceId);
   const { showToast } = useToast();
   const [selectedBackend, setSelectedBackend] = useState<string | null>(null);
+  const {
+    settings: localSettings,
+    isSaving: isSavingLocalSettings,
+    error: localSettingsError,
+    updateRedis,
+  } = useLocalSettings();
+  const redisSettings = localSettings?.fleetdb_redis;
+  const [redisEnabled, setRedisEnabled] = useState(false);
+  const [redisUrl, setRedisUrl] = useState("");
+  const [redisAddr, setRedisAddr] = useState("");
+  const [redisPassword, setRedisPassword] = useState("");
+  const [redisDB, setRedisDB] = useState("0");
+  const [redisTLS, setRedisTLS] = useState(false);
 
   const { fontFamily, fontSize, setFontFamily, setFontSize } =
     useTerminalFont();
@@ -55,6 +72,16 @@ export function SettingsView({
   const fontSelectValue =
     isPresetFont && !customFontMode ? fontFamily : CUSTOM_FONT_SENTINEL;
   const showCustomFontInput = customFontMode || !isPresetFont;
+
+  useEffect(() => {
+    if (!redisSettings) return;
+    setRedisEnabled(redisSettings.enabled);
+    setRedisAddr(redisSettings.addr ?? "");
+    setRedisDB(String(redisSettings.db ?? 0));
+    setRedisTLS(redisSettings.tls);
+    setRedisPassword("");
+    setRedisUrl("");
+  }, [redisSettings]);
 
   const rootClassName = [styles.settingsView, className]
     .filter(Boolean)
@@ -116,6 +143,43 @@ export function SettingsView({
       showToast("Backend updated successfully", { type: "success" });
     } else {
       showToast("Failed to update backend", { type: "error" });
+    }
+  };
+
+  const handleRedisUrlChange = (value: string) => {
+    setRedisUrl(value);
+    const trimmed = value.trim();
+    if (trimmed.startsWith("rediss://") || /(^|\s)--tls(\s|$)/.test(value)) {
+      setRedisTLS(true);
+    }
+  };
+
+  const handleRedisSave = async () => {
+    if (isSavingLocalSettings) return;
+    const db = Number(redisDB);
+    if (!Number.isInteger(db) || db < 0) {
+      showToast("Redis DB must be 0 or greater", { type: "error" });
+      return;
+    }
+    const payload = {
+      enabled: redisEnabled,
+      db,
+      tls: redisTLS,
+      ...(redisUrl.trim() ? { redis_url: redisUrl.trim() } : {}),
+      ...(!redisUrl.trim() && redisAddr.trim()
+        ? { addr: redisAddr.trim() }
+        : {}),
+      ...(redisPassword ? { password: redisPassword } : {}),
+    };
+    const ok = await updateRedis(payload);
+    if (ok) {
+      setRedisPassword("");
+      setRedisUrl("");
+      showToast("Redis settings saved. Restart Loom to apply them.", {
+        type: "success",
+      });
+    } else {
+      showToast("Failed to save Redis settings", { type: "error" });
     }
   };
 
@@ -212,6 +276,140 @@ export function SettingsView({
               No per-agent overrides configured.
             </p>
           )}
+        </div>
+      </div>
+
+      {/* FleetDB Redis */}
+      <div className={styles.panel} data-testid="fleetdb-redis-panel">
+        <div className={styles.panelHeader}>
+          <h3 className={styles.panelTitle}>FleetDB Redis</h3>
+        </div>
+        <div className={styles.panelContent}>
+          <div className={styles.formGroup}>
+            <label className={styles.checkboxLabel}>
+              <input
+                type="checkbox"
+                checked={redisEnabled}
+                onChange={(e) => setRedisEnabled(e.target.checked)}
+                data-testid="redis-enabled-checkbox"
+              />
+              Use external Redis for FleetDB
+            </label>
+            <p className={styles.description}>
+              Stores workspace, task, repo, and agent state in a managed Redis
+              instance instead of local embedded Redis.
+            </p>
+          </div>
+          {redisEnabled && (
+            <>
+              <div className={styles.formGroup}>
+                <label className={styles.label} htmlFor="redis-url-input">
+                  Redis URL
+                </label>
+                <p className={styles.description}>
+                  Paste a redis://, rediss://, or redis-cli -u command. The
+                  saved password is never returned to the browser.
+                </p>
+                <input
+                  id="redis-url-input"
+                  type="password"
+                  className={styles.input}
+                  value={redisUrl}
+                  onChange={(e) => handleRedisUrlChange(e.target.value)}
+                  placeholder="redis://default:password@host:6379"
+                  data-testid="redis-url-input"
+                />
+              </div>
+              <div className={styles.fieldGrid}>
+                <div className={styles.formGroup}>
+                  <label className={styles.label} htmlFor="redis-addr-input">
+                    Address
+                  </label>
+                  <input
+                    id="redis-addr-input"
+                    type="text"
+                    className={styles.input}
+                    value={redisAddr}
+                    onChange={(e) => setRedisAddr(e.target.value)}
+                    placeholder="host:6379"
+                    data-testid="redis-addr-input"
+                  />
+                </div>
+                <div className={styles.formGroup}>
+                  <label className={styles.label} htmlFor="redis-db-input">
+                    Database index
+                  </label>
+                  <input
+                    id="redis-db-input"
+                    type="number"
+                    min={0}
+                    className={styles.input}
+                    value={redisDB}
+                    onChange={(e) => setRedisDB(e.target.value)}
+                    data-testid="redis-db-input"
+                  />
+                </div>
+                <div className={styles.formGroup}>
+                  <label
+                    className={styles.label}
+                    htmlFor="redis-password-input"
+                  >
+                    Password
+                  </label>
+                  <input
+                    id="redis-password-input"
+                    type="password"
+                    className={styles.input}
+                    value={redisPassword}
+                    onChange={(e) => setRedisPassword(e.target.value)}
+                    placeholder={
+                      redisSettings?.password_set
+                        ? "Saved password unchanged"
+                        : "Optional"
+                    }
+                    data-testid="redis-password-input"
+                  />
+                </div>
+              </div>
+              <div className={styles.formGroup}>
+                <label className={styles.checkboxLabel}>
+                  <input
+                    type="checkbox"
+                    checked={redisTLS}
+                    onChange={(e) => setRedisTLS(e.target.checked)}
+                    data-testid="redis-tls-checkbox"
+                  />
+                  Use TLS
+                </label>
+              </div>
+            </>
+          )}
+          {redisSettings?.enabled && (
+            <p className={styles.description} data-testid="redis-current">
+              Current: {redisSettings.addr || "not configured"} | database{" "}
+              {redisSettings.db} | {redisSettings.tls ? "TLS" : "no TLS"} |{" "}
+              {redisSettings.password_set ? "password saved" : "no password"}
+            </p>
+          )}
+          {localSettingsError && (
+            <p className={styles.errorText} data-testid="redis-settings-error">
+              {localSettingsError}
+            </p>
+          )}
+          <div className={styles.formGroup}>
+            <button
+              type="button"
+              className={styles.saveButton}
+              disabled={isSavingLocalSettings}
+              onClick={handleRedisSave}
+              data-testid="redis-save-button"
+            >
+              {isSavingLocalSettings ? "Saving..." : "Save Redis Settings"}
+            </button>
+            <p className={styles.restartNote}>
+              Restart the local runtime after changing Redis settings.
+            </p>
+          </div>
         </div>
       </div>
 

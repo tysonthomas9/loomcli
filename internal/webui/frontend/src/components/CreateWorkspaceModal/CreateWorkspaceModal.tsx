@@ -9,6 +9,7 @@ import { createPortal } from "react-dom";
 
 import { createWorkspace } from "@/hooks/api";
 import type { CreateWorkspaceRequest, WorkspaceData } from "@/api/workspace";
+import { isDesktopRuntime, pickDesktopFolder } from "@/api/common";
 import { useRegisterEscapeLayer, LAYER_MODAL, useJobPolling } from "@/hooks";
 import { useFocusTrap, useFocusReturn } from "@/hooks/ui";
 import styles from "./CreateWorkspaceModal.module.css";
@@ -152,6 +153,8 @@ export function CreateWorkspaceModal({
   const [type, setType] = useState<WorkspaceType>("clone");
   const [path, setPath] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isBrowsingLocation, setIsBrowsingLocation] = useState(false);
+  const [isBrowsingRepo, setIsBrowsingRepo] = useState(false);
   const [error, setError] = useState("");
 
   // Multi-URL input for clone type
@@ -179,6 +182,8 @@ export function CreateWorkspaceModal({
       setType("clone");
       setPath("");
       setIsSubmitting(false);
+      setIsBrowsingLocation(false);
+      setIsBrowsingRepo(false);
       setError("");
       setCloneUrls([]);
       setUrlInput("");
@@ -226,6 +231,46 @@ export function CreateWorkspaceModal({
 
   const removeRepo = (repo: string) => {
     setRepos((prev) => prev.filter((r) => r !== repo));
+  };
+
+  const canBrowseFolders = isDesktopRuntime();
+
+  const handleBrowseLocation = async () => {
+    if (!canBrowseFolders || isSubmitting || isBrowsingLocation) return;
+
+    setIsBrowsingLocation(true);
+    setError("");
+    try {
+      const selectedPath = await pickDesktopFolder();
+      if (selectedPath) {
+        setPath(selectedPath);
+      }
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Failed to open folder picker",
+      );
+    } finally {
+      setIsBrowsingLocation(false);
+    }
+  };
+
+  const handleBrowseRepo = async () => {
+    if (!canBrowseFolders || isSubmitting || isBrowsingRepo) return;
+
+    setIsBrowsingRepo(true);
+    setError("");
+    try {
+      const selectedPath = await pickDesktopFolder();
+      if (selectedPath) {
+        setRepoInput(selectedPath);
+      }
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Failed to open folder picker",
+      );
+    } finally {
+      setIsBrowsingRepo(false);
+    }
   };
 
   // Include pending input text in submit eligibility check
@@ -442,8 +487,15 @@ export function CreateWorkspaceModal({
                 <button
                   type="button"
                   className={styles.browseButton}
-                  disabled
-                  title="Filesystem browsing is not available in the browser"
+                  onClick={handleBrowseLocation}
+                  disabled={
+                    !canBrowseFolders || isSubmitting || isBrowsingLocation
+                  }
+                  title={
+                    canBrowseFolders
+                      ? "Browse for workspace folder"
+                      : "Filesystem browsing is only available in the desktop app"
+                  }
                   aria-label="Browse for folder"
                   data-testid="create-workspace-browse"
                 >
@@ -555,6 +607,23 @@ export function CreateWorkspaceModal({
                     disabled={isSubmitting}
                     data-testid="create-workspace-repo-path"
                   />
+                  <button
+                    type="button"
+                    className={styles.browseButton}
+                    onClick={handleBrowseRepo}
+                    disabled={
+                      !canBrowseFolders || isSubmitting || isBrowsingRepo
+                    }
+                    title={
+                      canBrowseFolders
+                        ? "Browse for repository folder"
+                        : "Filesystem browsing is only available in the desktop app"
+                    }
+                    aria-label="Browse for repository folder"
+                    data-testid="create-workspace-repo-browse"
+                  >
+                    <FolderBrowseIcon />
+                  </button>
                   <button
                     type="button"
                     className={styles.addButton}

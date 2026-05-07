@@ -5,6 +5,9 @@
 export { useBackendConfig } from "./useBackendConfig";
 export type { UseBackendConfigReturn } from "./useBackendConfig";
 
+export { useLocalSettings } from "./useLocalSettings";
+export type { UseLocalSettingsReturn } from "./useLocalSettings";
+
 export { useBackends } from "./useBackends";
 export type { UseBackendsReturn } from "./useBackends";
 

@@ -154,6 +154,11 @@ func runService(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return fmt.Errorf("resolve loom executable: %w", err)
 	}
+	identity := currentExecutableIdentity()
+	redisHash, err := currentFleetDBRedisHash(dataDir)
+	if err != nil {
+		return fmt.Errorf("load FleetDB Redis settings: %w", err)
+	}
 	logFile, err := os.OpenFile(serveLogPath(dataDir), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
 		return fmt.Errorf("open serve log: %w", err)
@@ -169,6 +174,8 @@ func runService(cmd *cobra.Command, _ []string) error {
 		Port:      port,
 		StartedAt: time.Now().UTC(),
 	}
+	applyExecutableIdentity(info, identity)
+	info.FleetDBRedisHash = redisHash
 	if err := writeRuntime(dataDir, info); err != nil {
 		return err
 	}
@@ -235,38 +242,13 @@ func runStart(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	if info, err := readRuntime(dataDir); err == nil && processRunning(info.PID) {
-		fmt.Fprintf(cmd.OutOrStdout(), "Loom local runtime already running: %s\n", info.URL)
-		return nil
-	}
-	if err := ensureRuntimeDirs(dataDir); err != nil {
+	pid, alreadyRunning, url, err := StartRuntime(dataDir, portFlag)
+	if err != nil {
 		return err
 	}
-	exe, err := os.Executable()
-	if err != nil {
-		return fmt.Errorf("resolve loom executable: %w", err)
-	}
-	logFile, err := os.OpenFile(serviceLogPath(dataDir), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
-	if err != nil {
-		return fmt.Errorf("open service log: %w", err)
-	}
-	defer func() { _ = logFile.Close() }()
-
-	args := []string{"local", "--data-dir", dataDir, "service"}
-	if portFlag > 0 {
-		args = append(args, "--port", strconv.Itoa(portFlag))
-	}
-	service := exec.Command(exe, args...)
-	service.Env = append(os.Environ(), "LOOM_CONFIG_DIR="+dataDir)
-	service.Stdout = logFile
-	service.Stderr = logFile
-	service.SysProcAttr = newDetachedSysProcAttr()
-	if err := service.Start(); err != nil {
-		return fmt.Errorf("start local service: %w", err)
-	}
-	pid := service.Process.Pid
-	if err := service.Process.Release(); err != nil {
-		return fmt.Errorf("release local service process: %w", err)
+	if alreadyRunning {
+		fmt.Fprintf(cmd.OutOrStdout(), "Loom local runtime already running: %s\n", url)
+		return nil
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "Started Loom local service (pid %d)\n", pid)
 	return nil
@@ -277,28 +259,134 @@ func runStatus(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	info, err := readRuntime(dataDir)
-	status := runtimeStatus{Runtime: info}
+	status, err := ReadRuntimeStatus(cmd.Context(), dataDir)
 	if err != nil {
-		status.Error = err.Error()
+		status = &RuntimeStatusSnapshot{Error: err.Error()}
 		if jsonFlag {
 			return writeJSON(cmd.OutOrStdout(), status)
 		}
 		return fmt.Errorf("local runtime status unavailable: %w", err)
 	}
-	healthCtx, cancel := context.WithTimeout(cmd.Context(), 2*time.Second)
+	if jsonFlag {
+		return writeJSON(cmd.OutOrStdout(), status)
+	}
+	info := status.Runtime
+	fmt.Fprintf(cmd.OutOrStdout(), "status: %s\nurl: %s\npid: %d\nserve_pid: %d\nhealthy: %t\ndata_dir: %s\n",
+		info.Status, info.URL, info.PID, info.ServePID, status.Healthy, info.DataDir)
+	return nil
+}
+
+// ReadRuntimeStatus returns a one-shot local runtime status snapshot.
+func ReadRuntimeStatus(ctx context.Context, dataDir string) (*RuntimeStatusSnapshot, error) {
+	if dataDir == "" {
+		var err error
+		dataDir, err = resolveDataDir("")
+		if err != nil {
+			return nil, err
+		}
+	}
+	info, err := readRuntime(dataDir)
+	status := &RuntimeStatusSnapshot{Runtime: runtimeSnapshot(info)}
+	if err != nil {
+		status.Error = err.Error()
+		return status, err
+	}
+	healthCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
 	if err := checkRuntimeHealth(healthCtx, info.URL); err != nil {
 		status.Error = err.Error()
 	} else {
 		status.Healthy = true
 	}
-	cancel()
-	if jsonFlag {
-		return writeJSON(cmd.OutOrStdout(), status)
+	return status, nil
+}
+
+// StartRuntime starts the local runtime service if it is not already running.
+func StartRuntime(dataDir string, port int) (pid int, alreadyRunning bool, url string, err error) {
+	if dataDir == "" {
+		dataDir, err = resolveDataDir("")
+		if err != nil {
+			return 0, false, "", err
+		}
 	}
-	fmt.Fprintf(cmd.OutOrStdout(), "status: %s\nurl: %s\npid: %d\nserve_pid: %d\nhealthy: %t\ndata_dir: %s\n",
-		info.Status, info.URL, info.PID, info.ServePID, status.Healthy, info.DataDir)
-	return nil
+	identity := currentExecutableIdentity()
+	redisHash, err := currentFleetDBRedisHash(dataDir)
+	if err != nil {
+		return 0, false, "", fmt.Errorf("load FleetDB Redis settings: %w", err)
+	}
+	if info, err := readRuntime(dataDir); err == nil && processRunning(info.PID) {
+		if runtimeMatchesExecutable(info, identity) && runtimeMatchesFleetDBRedisSettings(info, redisHash) {
+			return info.PID, true, info.URL, nil
+		}
+		if err := stopRuntimeProcess(info.PID, 15*time.Second); err != nil {
+			return 0, false, "", fmt.Errorf("stop stale local runtime: %w", err)
+		}
+	}
+	if err := ensureRuntimeDirs(dataDir); err != nil {
+		return 0, false, "", err
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return 0, false, "", fmt.Errorf("resolve loom executable: %w", err)
+	}
+	logFile, err := os.OpenFile(serviceLogPath(dataDir), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		return 0, false, "", fmt.Errorf("open service log: %w", err)
+	}
+	defer func() { _ = logFile.Close() }()
+
+	args := []string{"local", "--data-dir", dataDir, "service"}
+	if port > 0 {
+		args = append(args, "--port", strconv.Itoa(port))
+	}
+	service := exec.Command(exe, args...)
+	service.Env = append(os.Environ(), "LOOM_CONFIG_DIR="+dataDir)
+	service.Stdout = logFile
+	service.Stderr = logFile
+	service.SysProcAttr = newDetachedSysProcAttr()
+	if err := service.Start(); err != nil {
+		return 0, false, "", fmt.Errorf("start local service: %w", err)
+	}
+	pid = service.Process.Pid
+	if err := service.Process.Release(); err != nil {
+		return 0, false, "", fmt.Errorf("release local service process: %w", err)
+	}
+	return pid, false, "", nil
+}
+
+// EnsureRuntimeStarted starts the local runtime if needed and waits until it
+// reports healthy or the caller's context expires.
+func EnsureRuntimeStarted(ctx context.Context, dataDir string, port int) (*RuntimeStatusSnapshot, error) {
+	if dataDir == "" {
+		var err error
+		dataDir, err = resolveDataDir("")
+		if err != nil {
+			return nil, err
+		}
+	}
+	status, err := ReadRuntimeStatus(ctx, dataDir)
+	if err == nil && status.Healthy {
+		return status, nil
+	}
+	if _, _, _, err := StartRuntime(dataDir, port); err != nil {
+		return status, err
+	}
+	ticker := time.NewTicker(250 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		status, err = ReadRuntimeStatus(ctx, dataDir)
+		if err == nil && status.Healthy {
+			return status, nil
+		}
+		select {
+		case <-ctx.Done():
+			if err != nil {
+				return status, err
+			}
+			return status, ctx.Err()
+		case <-ticker.C:
+		}
+	}
 }
 
 func runStop(cmd *cobra.Command, _ []string) error {
@@ -316,22 +404,29 @@ func runStop(cmd *cobra.Command, _ []string) error {
 		fmt.Fprintln(cmd.OutOrStdout(), "Loom local runtime is not running.")
 		return nil
 	}
-	proc, err := os.FindProcess(info.PID)
+	if err := stopRuntimeProcess(info.PID, 15*time.Second); err != nil {
+		return err
+	}
+	fmt.Fprintln(cmd.OutOrStdout(), "Loom local runtime stopped.")
+	return nil
+}
+
+func stopRuntimeProcess(pid int, timeout time.Duration) error {
+	proc, err := os.FindProcess(pid)
 	if err != nil {
-		return fmt.Errorf("find process %d: %w", info.PID, err)
+		return fmt.Errorf("find process %d: %w", pid, err)
 	}
 	if err := proc.Signal(syscall.SIGTERM); err != nil {
-		return fmt.Errorf("stop process %d: %w", info.PID, err)
+		return fmt.Errorf("stop process %d: %w", pid, err)
 	}
-	deadline := time.Now().Add(15 * time.Second)
+	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		if !processRunning(info.PID) {
-			fmt.Fprintln(cmd.OutOrStdout(), "Loom local runtime stopped.")
+		if !processRunning(pid) {
 			return nil
 		}
 		time.Sleep(250 * time.Millisecond)
 	}
-	return fmt.Errorf("local runtime did not stop within 15s")
+	return fmt.Errorf("local runtime did not stop within %s", timeout)
 }
 
 func runInstallService(cmd *cobra.Command, _ []string) error {

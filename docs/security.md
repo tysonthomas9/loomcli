@@ -4,7 +4,7 @@
 
 ### Redis Passwords
 
-Loom connects to Redis for terminal-state persistence and — when fleet mode is enabled — fleet coordination and stale detection. **Never store Redis passwords in committed config files.**
+Loom connects to Redis for terminal-state persistence and, when fleet mode is enabled, fleet coordination and stale detection. The desktop local runtime can also connect embedded FleetDB to an external Redis backing store. **Never store Redis passwords in committed config files.**
 
 Redis is configured via `loom serve` flags and environment variables:
 
@@ -13,6 +13,12 @@ Redis is configured via `loom serve` flags and environment variables:
 | `--redis-addr` | `LOOM_REDIS_ADDR` | Redis address for terminal-state storage (and fleet coordination when `--fleet-mode` is set) |
 | `--redis-password` | `LOOM_REDIS_PASSWORD` | Redis password (prefer env var to avoid leaking in process list) |
 | `--fleet-mode` | `LOOM_FLEET_MODE=true` | Enable fleet coordination (task claims, stale detector, fleet worker API, JWT signing). Off by default. |
+
+The desktop app's Settings page can configure external Redis for embedded
+FleetDB. That setting is stored outside the repo in the local runtime data
+directory as `local-settings.json` with `0o600` permissions. The UI accepts
+`redis://`, `rediss://`, or `redis-cli --tls -u ...` values, stores the
+password locally, and never returns the password to the browser after saving.
 
 When `--redis-addr` is empty, terminal state persists to an in-process
 miniredis and is dumped to `~/.loom/terminal-state/snapshot.json`. When
@@ -25,7 +31,8 @@ UI-only snapshots use `0o644`.
 | File | Scope | Contents |
 |------|-------|----------|
 | `~/.loom/state.json` | User-level cache | Local checkout paths and last selected workspace hint (regenerable, not config) |
-| `~/.loom/fleet-db/redis-snapshot.json` | Local-mode storage | Embedded fleet-db's miniredis snapshot — workspaces, repos, agents, roles, daemon profiles, issues |
+| `~/.loom/fleet-db/redis-snapshot.json` | Local-mode storage | Embedded fleet-db's miniredis snapshot - workspaces, repos, agents, roles, daemon profiles, issues |
+| `~/.loom/local-settings.json` or app data equivalent | Desktop-local config | Optional external Redis settings for embedded FleetDB; may contain a Redis password |
 | `.loom/` | User config directory | Runtime state, daemon PID files |
 
 The miniredis snapshot may include an embedded fleet JWT signing key (when fleet mode is on); the writer chmods it to `0o600` in that case. Plain UI snapshots stay `0o644`.
@@ -40,7 +47,7 @@ For production Redis deployments:
 
 1. **Enable `requirepass`** in `redis.conf` to require password authentication.
 2. **Bind to localhost** or a private network interface — avoid exposing Redis on `0.0.0.0`.
-3. **Use a TLS-terminating proxy** (e.g., stunnel, HAProxy) if Redis is accessed over a network. Loom does not natively configure TLS on Redis connections.
+3. **Use TLS** when Redis is accessed over a network. The desktop embedded FleetDB Redis setting supports TLS; `loom serve --redis-addr` terminal-state Redis does not currently expose a TLS flag.
 
 ### Config File Security Hardening
 

@@ -135,6 +135,52 @@
   outline-offset: 2px;
 }
 
+.fieldGrid {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(96px, 120px) minmax(
+      220px,
+      1fr
+    );
+  gap: var(--space-3);
+  align-items: start;
+}
+
+.fieldGrid .formGroup {
+  margin-bottom: 0;
+}
+
+.fieldGrid .input {
+  width: 100%;
+  min-width: 0;
+  margin-top: 0;
+}
+
+.checkboxLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text);
+}
+
+.checkboxLabel input {
+  width: 16px;
+  height: 16px;
+}
+
+.errorText {
+  margin: 0 0 var(--space-3) 0;
+  color: var(--color-error);
+  font-size: var(--font-size-sm);
+}
+
+.restartNote {
+  margin: var(--space-2) 0 0 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+}
+
 /* Save button */
 .saveButton {
   padding: var(--space-2) var(--space-4);
@@ -233,5 +279,9 @@
 @media (width <= 768px) {
   .settingsView {
     padding: var(--space-4);
+  }
+
+  .fieldGrid {
+    grid-template-columns: 1fr;
   }
 }

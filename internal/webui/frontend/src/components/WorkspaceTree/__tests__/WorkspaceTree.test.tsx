@@ -199,7 +199,7 @@ describe("WorkspaceTree", () => {
 
       render(<WorkspaceTree defaultCollapsed={false} />);
 
-      fireEvent.change(screen.getByLabelText("Repository path"), {
+      fireEvent.change(screen.getByLabelText("Repository path or URL"), {
         target: { value: "/repos/api" },
       });
       fireEvent.click(screen.getByRole("button", { name: "Add Repo" }));
@@ -207,6 +207,26 @@ describe("WorkspaceTree", () => {
       await waitFor(() => {
         expect(mockAddWorkspaceRepos).toHaveBeenCalledWith(TEST_WS_ID, {
           repos: ["/repos/api"],
+        });
+      });
+      expect(refetch).toHaveBeenCalled();
+    });
+
+    it("clones a remote repository URL into an empty workspace", async () => {
+      const refetch = vi.fn();
+      mockAddWorkspaceRepos.mockResolvedValue({});
+      reposOverride = { repos: [], refetch };
+
+      render(<WorkspaceTree defaultCollapsed={false} />);
+
+      fireEvent.change(screen.getByLabelText("Repository path or URL"), {
+        target: { value: "https://github.com/octocat/Hello-World" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Add Repo" }));
+
+      await waitFor(() => {
+        expect(mockAddWorkspaceRepos).toHaveBeenCalledWith(TEST_WS_ID, {
+          clone_urls: ["https://github.com/octocat/Hello-World"],
         });
       });
       expect(refetch).toHaveBeenCalled();

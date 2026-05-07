@@ -15,6 +15,21 @@ const maxWorkspaceNameLen = 64
 
 var cloneURLPattern = regexp.MustCompile(`^(https://|git@)`)
 
+// IsCloneURL reports whether a value uses one of Loom's supported git clone
+// URL forms.
+func IsCloneURL(u string) bool {
+	return cloneURLPattern.MatchString(u)
+}
+
+// ValidateCloneURL validates a git clone URL before any command shells out to
+// git. Keep this shared so CLI and web paths enforce the same boundary.
+func ValidateCloneURL(u string) error {
+	if !IsCloneURL(u) {
+		return fmt.Errorf("clone URL must start with https:// or git@: %s", u)
+	}
+	return validateCloneURL(u)
+}
+
 func validateWorkspaceName(name string) *ServiceError {
 	if name == "" {
 		return ErrValidation("name cannot be empty")
@@ -57,10 +72,7 @@ func validateWorkspaceCreateRequest(req *WorkspaceCreateRequest) *ServiceError {
 			return ErrValidation("at least one clone URL is required for clone workspace type")
 		}
 		for _, u := range req.CloneURLs {
-			if !cloneURLPattern.MatchString(u) {
-				return ErrValidation(fmt.Sprintf("clone URL must start with https:// or git@: %s", u))
-			}
-			if err := validateCloneURL(u); err != nil {
+			if err := ValidateCloneURL(u); err != nil {
 				return ErrValidation(err.Error())
 			}
 		}
@@ -73,6 +85,50 @@ func validateWorkspaceCreateRequest(req *WorkspaceCreateRequest) *ServiceError {
 	}
 
 	return nil
+}
+
+func normalizeWorkspaceAddReposRequest(req WorkspaceAddReposRequest) WorkspaceAddReposRequest {
+	normalized := req
+	normalized.Repos = nil
+	normalized.CloneURLs = trimNonEmpty(req.CloneURLs)
+	for _, repo := range req.Repos {
+		repo = strings.TrimSpace(repo)
+		if repo == "" {
+			continue
+		}
+		if IsCloneURL(repo) {
+			normalized.CloneURLs = append(normalized.CloneURLs, repo)
+			continue
+		}
+		normalized.Repos = append(normalized.Repos, repo)
+	}
+	return normalized
+}
+
+func validateWorkspaceAddReposRequest(req *WorkspaceAddReposRequest) *ServiceError {
+	if req.WorkspaceID == "" {
+		return ErrValidation("workspace ID is required")
+	}
+	if len(req.Repos) == 0 && len(req.CloneURLs) == 0 {
+		return ErrValidation("at least one repo path or clone URL is required")
+	}
+	for _, u := range req.CloneURLs {
+		if err := ValidateCloneURL(u); err != nil {
+			return ErrValidation(err.Error())
+		}
+	}
+	return nil
+}
+
+func trimNonEmpty(values []string) []string {
+	var out []string
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			out = append(out, value)
+		}
+	}
+	return out
 }
 
 // SECURITY: Clone URL validation defends against:

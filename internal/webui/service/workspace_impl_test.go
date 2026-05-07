@@ -181,6 +181,36 @@ func TestCreateWorkspace_StoreBackedReturnsCreatedWorkspaceData(t *testing.T) {
 	}
 }
 
+func TestAddWorkspaceReposNormalizesCloneURLInput(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "ALPHA", Name: "alpha"}); err != nil {
+		t.Fatalf("create alpha: %v", err)
+	}
+
+	var got WorkspaceAddReposRequest
+	svc := NewWorkspaceService(WorkspaceServiceConfig{
+		Store: st,
+		AddReposFn: func(_ context.Context, req WorkspaceAddReposRequest) (WorkspaceCreateResult, error) {
+			got = req
+			return WorkspaceCreateResult{WorkspaceID: "ALPHA"}, nil
+		},
+	})
+
+	if _, err := svc.AddWorkspaceRepos(ctx, WorkspaceAddReposRequest{
+		WorkspaceID: "ALPHA",
+		Repos:       []string{" https://github.com/octocat/Hello-World "},
+	}); err != nil {
+		t.Fatalf("AddWorkspaceRepos returned error: %v", err)
+	}
+	if len(got.Repos) != 0 {
+		t.Fatalf("Repos = %#v, want none", got.Repos)
+	}
+	if len(got.CloneURLs) != 1 || got.CloneURLs[0] != "https://github.com/octocat/Hello-World" {
+		t.Fatalf("CloneURLs = %#v, want GitHub URL", got.CloneURLs)
+	}
+}
+
 func TestGetWorkspace_StoreBackedMissReturnsNotFound(t *testing.T) {
 	st := memstore.New()
 	svc := NewWorkspaceService(WorkspaceServiceConfig{

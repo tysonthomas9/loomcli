@@ -56,13 +56,11 @@ func createStoreBackedEmptyWorkspace(ctx context.Context, s storepkg.Store, req 
 		return service.WorkspaceCreateResult{}, fmt.Errorf("check workspace name: %w", err)
 	}
 
-	wsDir, err := resolveSecureWorkspaceDir(req.Path, req.Name)
+	wsPlan, err := resolveWorkspaceDirForCreate(req.Path, req.Name)
 	if err != nil {
 		return service.WorkspaceCreateResult{}, err
 	}
-	if err := validateWorkspacePath(wsDir); err != nil {
-		return service.WorkspaceCreateResult{}, err
-	}
+	wsDir := wsPlan.path
 	var resolved []resolvedRepo
 	if len(req.Repos) > 0 {
 		resolved, err = resolveRepoPaths(req.Repos)
@@ -90,7 +88,7 @@ func createStoreBackedEmptyWorkspace(ctx context.Context, s storepkg.Store, req 
 	if len(resolved) > 0 {
 		created, repos, err = addWorktrees(ctx, resolved, wsDir, branch)
 		if err != nil {
-			cleanupWorktrees(wsDir, created)
+			cleanupWorktrees(wsPlan, created)
 			return service.WorkspaceCreateResult{}, err
 		}
 	}
@@ -100,7 +98,7 @@ func createStoreBackedEmptyWorkspace(ctx context.Context, s storepkg.Store, req 
 		Name:          req.Name,
 		DefaultBranch: branch,
 	}); err != nil {
-		cleanupWorktrees(wsDir, created)
+		cleanupWorktrees(wsPlan, created)
 		return service.WorkspaceCreateResult{}, fmt.Errorf("create workspace in store: %w", err)
 	}
 	storeCreated := true
@@ -113,7 +111,7 @@ func createStoreBackedEmptyWorkspace(ctx context.Context, s storepkg.Store, req 
 	}
 	if err := seedBuiltInRoles(ctx, s, key); err != nil {
 		rollbackStore()
-		cleanupWorktrees(wsDir, created)
+		cleanupWorktrees(wsPlan, created)
 		return service.WorkspaceCreateResult{}, fmt.Errorf("seed built-in roles: %w", err)
 	}
 
@@ -131,19 +129,19 @@ func createStoreBackedEmptyWorkspace(ctx context.Context, s storepkg.Store, req 
 			SourceRepoID:  r.SourceRepoID,
 		}); err != nil {
 			rollbackStore()
-			cleanupWorktrees(wsDir, created)
+			cleanupWorktrees(wsPlan, created)
 			return service.WorkspaceCreateResult{}, fmt.Errorf("create repo %q in store: %w", r.Name, err)
 		}
 	}
 
 	if err := saveLocalWorkspaceState(key, wsDir, repos, true); err != nil {
 		rollbackStore()
-		cleanupWorktrees(wsDir, created)
+		cleanupWorktrees(wsPlan, created)
 		return service.WorkspaceCreateResult{}, err
 	}
 	if err := updateStoreWorkspaceState(ctx, s, key, domain.WorkspaceStateReady); err != nil {
 		rollbackStore()
-		cleanupWorktrees(wsDir, created)
+		cleanupWorktrees(wsPlan, created)
 		return service.WorkspaceCreateResult{}, fmt.Errorf("mark workspace ready: %w", err)
 	}
 
@@ -177,9 +175,12 @@ func addReposToStoreBackedWorkspace(ctx context.Context, s storepkg.Store, req s
 		return service.WorkspaceCreateResult{}, fmt.Errorf("cannot create workspace directory: %w", err)
 	}
 
-	resolved, err := resolveRepoPaths(req.Repos)
-	if err != nil {
-		return service.WorkspaceCreateResult{}, err
+	var resolved []resolvedRepo
+	if len(req.Repos) > 0 {
+		resolved, err = resolveRepoPaths(req.Repos)
+		if err != nil {
+			return service.WorkspaceCreateResult{}, err
+		}
 	}
 
 	existing, err := s.Repos().List(ctx, key)
@@ -194,6 +195,7 @@ func addReposToStoreBackedWorkspace(ctx context.Context, s storepkg.Store, req s
 		if seen[r.name] {
 			return service.WorkspaceCreateResult{}, workspaceerrors.New(workspaceerrors.AlreadyExists, fmt.Sprintf("repo %q already exists in workspace %q", r.name, key), nil)
 		}
+		seen[r.name] = true
 	}
 
 	branch := req.Branch
@@ -207,10 +209,24 @@ func addReposToStoreBackedWorkspace(ctx context.Context, s storepkg.Store, req s
 		branch = key
 	}
 
-	created, repos, err := addWorktrees(ctx, resolved, wsDir, branch)
-	if err != nil {
-		cleanupAttachedWorktrees(created)
-		return service.WorkspaceCreateResult{}, err
+	var created []createdWorktree
+	var repos []config.RepoConfig
+	if len(resolved) > 0 {
+		created, repos, err = addWorktrees(ctx, resolved, wsDir, branch)
+		if err != nil {
+			cleanupAttachedWorktrees(created)
+			return service.WorkspaceCreateResult{}, err
+		}
+	}
+
+	var clonedRepos []config.RepoConfig
+	if len(req.CloneURLs) > 0 {
+		clonedRepos, err = cloneReposWithSeen(ctx, req.CloneURLs, wsDir, seen)
+		if err != nil {
+			cleanupAttachedWorktrees(created)
+			return service.WorkspaceCreateResult{}, err
+		}
+		repos = append(repos, clonedRepos...)
 	}
 
 	var storeRepos []string
@@ -237,6 +253,7 @@ func addReposToStoreBackedWorkspace(ctx context.Context, s storepkg.Store, req s
 		}); err != nil {
 			rollbackStoreRepos()
 			cleanupAttachedWorktrees(created)
+			cleanupClonedRepos(clonedRepos)
 			return service.WorkspaceCreateResult{}, fmt.Errorf("create repo %q in store: %w", r.Name, err)
 		}
 		storeRepos = append(storeRepos, r.Name)
@@ -245,6 +262,7 @@ func addReposToStoreBackedWorkspace(ctx context.Context, s storepkg.Store, req s
 	if err := saveLocalWorkspaceState(key, wsDir, repos, true); err != nil {
 		rollbackStoreRepos()
 		cleanupAttachedWorktrees(created)
+		cleanupClonedRepos(clonedRepos)
 		return service.WorkspaceCreateResult{}, err
 	}
 
@@ -287,13 +305,11 @@ func createStoreBackedCloneWorkspace(ctx context.Context, s storepkg.Store, req 
 		return service.WorkspaceCreateResult{}, fmt.Errorf("check workspace name: %w", err)
 	}
 
-	wsDir, err := resolveSecureWorkspaceDir(req.Path, req.Name)
+	wsPlan, err := resolveWorkspaceDirForCreate(req.Path, req.Name)
 	if err != nil {
 		return service.WorkspaceCreateResult{}, err
 	}
-	if err := validateWorkspacePath(wsDir); err != nil {
-		return service.WorkspaceCreateResult{}, err
-	}
+	wsDir := wsPlan.path
 	branch := req.Branch
 	if branch == "" {
 		branch = "main"
@@ -330,19 +346,19 @@ func createStoreBackedCloneWorkspace(ctx context.Context, s storepkg.Store, req 
 	}
 
 	if err := updateStoreWorkspaceState(ctx, s, key, domain.WorkspaceStateCloning); err != nil {
-		cleanupCloneDir(wsDir)
+		cleanupWorkspaceRoot(wsPlan)
 		rollbackStore()
 		return service.WorkspaceCreateResult{}, fmt.Errorf("mark workspace cloning: %w", err)
 	}
 	repos, err := cloneRepos(ctx, cloneURLs, wsDir)
 	if err != nil {
-		cleanupCloneDir(wsDir)
+		cleanupWorkspaceRoot(wsPlan)
 		rollbackStore()
 		return service.WorkspaceCreateResult{}, err
 	}
 
 	if err := updateStoreWorkspaceState(ctx, s, key, domain.WorkspaceStateInitializing); err != nil {
-		cleanupCloneDir(wsDir)
+		cleanupCloneWorkspace(wsPlan, repos)
 		rollbackStore()
 		return service.WorkspaceCreateResult{}, fmt.Errorf("mark workspace initializing: %w", err)
 	}
@@ -358,18 +374,18 @@ func createStoreBackedCloneWorkspace(ctx context.Context, s storepkg.Store, req 
 			DefaultBranch: branch,
 			SourceRepoID:  r.SourceRepoID,
 		}); err != nil {
-			cleanupCloneDir(wsDir)
+			cleanupCloneWorkspace(wsPlan, repos)
 			rollbackStore()
 			return service.WorkspaceCreateResult{}, fmt.Errorf("create repo %q in store: %w", r.Name, err)
 		}
 	}
 	if err := saveLocalWorkspaceState(key, wsDir, repos, true); err != nil {
-		cleanupCloneDir(wsDir)
+		cleanupCloneWorkspace(wsPlan, repos)
 		rollbackStore()
 		return service.WorkspaceCreateResult{}, err
 	}
 	if err := updateStoreWorkspaceState(ctx, s, key, domain.WorkspaceStateReady); err != nil {
-		cleanupCloneDir(wsDir)
+		cleanupCloneWorkspace(wsPlan, repos)
 		rollbackStore()
 		return service.WorkspaceCreateResult{}, fmt.Errorf("mark workspace ready: %w", err)
 	}

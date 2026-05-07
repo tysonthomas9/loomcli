@@ -12,7 +12,10 @@ const PRIMARY_WORKSPACE_WINDOW_LABEL: &str = "main";
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
-        .invoke_handler(tauri::generate_handler![open_workspace_window])
+        .invoke_handler(tauri::generate_handler![
+            open_workspace_window,
+            pick_folder
+        ])
         .menu(build_menu)
         .on_menu_event(|app, event| match event.id().as_ref() {
             MENU_NEW_WORKSPACE_WINDOW | MENU_NEW_WORKSPACE_WINDOW_ALT => {
@@ -46,6 +49,57 @@ fn open_workspace_window<R: Runtime>(
     force_new: bool,
 ) -> Result<(), String> {
     open_workspace_window_native(&app, &runtime_url, force_new).map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+fn pick_folder<R: Runtime>(app: AppHandle<R>) -> Result<Option<String>, String> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    app.run_on_main_thread(move || {
+        let _ = tx.send(pick_folder_native());
+    })
+    .map_err(|err| err.to_string())?;
+
+    rx.recv()
+        .map_err(|err| format!("folder picker did not return: {err}"))?
+}
+
+#[cfg(target_os = "macos")]
+fn pick_folder_native() -> Result<Option<String>, String> {
+    use objc2::rc::autoreleasepool;
+    use objc2_foundation::NSString;
+
+    autoreleasepool(|_| {
+        // SAFETY: Tauri schedules this function through run_on_main_thread
+        // before touching AppKit.
+        let mtm = unsafe { objc2::MainThreadMarker::new_unchecked() };
+        let panel = objc2_app_kit::NSOpenPanel::openPanel(mtm);
+        panel.setCanChooseFiles(false);
+        panel.setCanChooseDirectories(true);
+        panel.setAllowsMultipleSelection(false);
+        panel.setCanCreateDirectories(true);
+
+        let title = NSString::from_str("Choose Folder");
+        let prompt = NSString::from_str("Choose");
+        panel.setTitle(Some(&title));
+        panel.setPrompt(Some(&prompt));
+
+        if panel.runModal() != objc2_app_kit::NSModalResponseOK {
+            return Ok(None);
+        }
+
+        let Some(url) = panel.URLs().firstObject() else {
+            return Ok(None);
+        };
+        let Some(path) = url.path() else {
+            return Ok(None);
+        };
+        Ok(Some(path.to_string()))
+    })
+}
+
+#[cfg(not(target_os = "macos"))]
+fn pick_folder_native() -> Result<Option<String>, String> {
+    Err("folder picker is only implemented for the macOS desktop app".to_string())
 }
 
 fn build_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {

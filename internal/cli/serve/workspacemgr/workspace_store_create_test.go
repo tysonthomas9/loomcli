@@ -89,6 +89,67 @@ func TestStoreBackedCreateEmptyWorkspaceCreatesStoreAndLocalState(t *testing.T) 
 	}
 }
 
+func TestStoreBackedCreateEmptyWorkspaceAllowsExternalEmptyPath(t *testing.T) {
+	loomDir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", loomDir)
+
+	externalPath := filepath.Join(t.TempDir(), "picked-workspace")
+	if err := os.MkdirAll(externalPath, 0755); err != nil {
+		t.Fatalf("mkdir external path: %v", err)
+	}
+
+	st := memstore.New()
+	createFn := BuildStoreBackedCreateWorkspace(st)
+
+	result, err := createFn(context.Background(), service.WorkspaceCreateRequest{
+		Name: "external-ws",
+		Type: "empty",
+		Path: externalPath,
+	})
+	if err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if result.WorkspaceID != "EXTERNAL-WS" || result.WorkspacePath != externalPath {
+		t.Fatalf("result = %#v, want EXTERNAL-WS at %s", result, externalPath)
+	}
+
+	sc, err := bootstrap.LoadStateCache()
+	if err != nil {
+		t.Fatalf("load state cache: %v", err)
+	}
+	if sc.Workspaces["EXTERNAL-WS"].Path != externalPath {
+		t.Fatalf("local path = %q, want %q", sc.Workspaces["EXTERNAL-WS"].Path, externalPath)
+	}
+}
+
+func TestStoreBackedCreateWorkspaceRejectsExternalNonEmptyPath(t *testing.T) {
+	loomDir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", loomDir)
+
+	externalPath := filepath.Join(t.TempDir(), "documents")
+	if err := os.MkdirAll(externalPath, 0755); err != nil {
+		t.Fatalf("mkdir external path: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(externalPath, "keep.txt"), []byte("do not remove\n"), 0644); err != nil {
+		t.Fatalf("write external file: %v", err)
+	}
+
+	st := memstore.New()
+	createFn := BuildStoreBackedCreateWorkspace(st)
+
+	_, err := createFn(context.Background(), service.WorkspaceCreateRequest{
+		Name: "external-ws",
+		Type: "empty",
+		Path: externalPath,
+	})
+	if err == nil {
+		t.Fatal("create workspace succeeded, want non-empty path validation error")
+	}
+	if _, statErr := os.Stat(filepath.Join(externalPath, "keep.txt")); statErr != nil {
+		t.Fatalf("non-empty external path was modified, stat err=%v", statErr)
+	}
+}
+
 func TestStoreBackedAddReposAttachesLocalRepoToEmptyWorkspace(t *testing.T) {
 	loomDir := t.TempDir()
 	t.Setenv("LOOM_CONFIG_DIR", loomDir)
@@ -140,6 +201,56 @@ func TestStoreBackedAddReposAttachesLocalRepoToEmptyWorkspace(t *testing.T) {
 	}
 	if local.Repos["api"] != filepath.Join(wsPath, "api") {
 		t.Fatalf("local repo path = %q", local.Repos["api"])
+	}
+}
+
+func TestStoreBackedAddReposClonesRemoteRepoToEmptyWorkspace(t *testing.T) {
+	loomDir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", loomDir)
+
+	st := memstore.New()
+	createFn := BuildStoreBackedCreateWorkspace(st)
+	wsPath := filepath.Join(loomDir, "workspaces", "my-ws")
+
+	if _, err := createFn(context.Background(), service.WorkspaceCreateRequest{
+		Name: "my-ws",
+		Type: "empty",
+		Path: wsPath,
+	}); err != nil {
+		t.Fatalf("create empty workspace: %v", err)
+	}
+
+	src := initTestGitRepo(t, t.TempDir(), "Hello-World")
+	addFn := BuildStoreBackedAddRepos(st)
+	result, err := addFn(context.Background(), service.WorkspaceAddReposRequest{
+		WorkspaceID: "MY-WS",
+		CloneURLs:   []string{src},
+	})
+	if err != nil {
+		t.Fatalf("add clone repo: %v", err)
+	}
+	if result.WorkspaceID != "MY-WS" || result.WorkspacePath != wsPath {
+		t.Fatalf("result = %#v, want MY-WS at %s", result, wsPath)
+	}
+	if _, err := os.Stat(filepath.Join(wsPath, "hello-world", ".git")); err != nil {
+		t.Fatalf("clone checkout not created: %v", err)
+	}
+
+	repos, err := st.Repos().List(context.Background(), "MY-WS")
+	if err != nil {
+		t.Fatalf("list repos: %v", err)
+	}
+	if len(repos) != 1 || repos[0].Name != "hello-world" || repos[0].RemoteURL != src || repos[0].SourceRepoID != "hello-world" {
+		t.Fatalf("repos = %#v, want cloned hello-world repo", repos)
+	}
+
+	sc, err := bootstrap.LoadStateCache()
+	if err != nil {
+		t.Fatalf("load state cache: %v", err)
+	}
+	local := sc.Workspaces["MY-WS"]
+	if local.Repos["hello-world"] != filepath.Join(wsPath, "hello-world") {
+		t.Fatalf("local repo path = %q", local.Repos["hello-world"])
 	}
 }
 
@@ -301,6 +412,32 @@ func TestStoreBackedCreateCloneWorkspaceRollsBackStoreOnCloneFailure(t *testing.
 	}
 	if sc.LastWorkspace != "" || len(sc.Workspaces) != 0 {
 		t.Fatalf("state cache was written on clone rollback: %#v", sc)
+	}
+}
+
+func TestStoreBackedCreateCloneWorkspaceKeepsPreexistingExternalRootOnFailure(t *testing.T) {
+	loomDir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", loomDir)
+
+	externalPath := filepath.Join(t.TempDir(), "picked-workspace")
+	if err := os.MkdirAll(externalPath, 0755); err != nil {
+		t.Fatalf("mkdir external path: %v", err)
+	}
+
+	st := memstore.New()
+	createFn := BuildStoreBackedCreateWorkspace(st)
+
+	_, err := createFn(context.Background(), service.WorkspaceCreateRequest{
+		Name:      "clone-ws",
+		Type:      "clone",
+		CloneURLs: []string{filepath.Join(t.TempDir(), "missing")},
+		Path:      externalPath,
+	})
+	if err == nil {
+		t.Fatal("clone workspace succeeded, want git clone error")
+	}
+	if info, statErr := os.Stat(externalPath); statErr != nil || !info.IsDir() {
+		t.Fatalf("pre-existing external workspace root was removed, info=%v err=%v", info, statErr)
 	}
 }
 

@@ -200,7 +200,8 @@ export interface CreateWorkspaceRequest {
 }
 
 export interface AddWorkspaceReposRequest {
-  repos: string[];
+  repos?: string[];
+  clone_urls?: string[];
   branch?: string;
 }
 

@@ -19,7 +19,8 @@ type WorkspaceCreateRequest struct {
 // WorkspaceAddReposRequest is the JSON body for POST /api/workspaces/{ws}/repos.
 type WorkspaceAddReposRequest struct {
 	WorkspaceID string   `json:"-"`
-	Repos       []string `json:"repos"`
+	Repos       []string `json:"repos"`      // existing local repo paths
+	CloneURLs   []string `json:"clone_urls"` // remote git URLs to clone into the workspace
 	Branch      string   `json:"branch"`
 }
 
@@ -79,7 +80,8 @@ type WorkspaceCreateResult struct {
 // Injected at server startup to decouple webui from CLI internals.
 type WorkspaceCreateFn func(ctx context.Context, req WorkspaceCreateRequest) (WorkspaceCreateResult, error)
 
-// WorkspaceAddReposFn attaches existing local git repos to a workspace.
+// WorkspaceAddReposFn attaches existing local git repos or cloned remote repos
+// to a workspace.
 type WorkspaceAddReposFn func(ctx context.Context, req WorkspaceAddReposRequest) (WorkspaceCreateResult, error)
 
 // WorkspaceJobStatus represents the current state of a workspace creation job.

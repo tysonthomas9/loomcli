@@ -106,6 +106,8 @@ describe("CreateWorkspaceModal", () => {
     mockCreateWorkspace.mockReset();
     mockPollWorkspaceJob.mockReset();
     mockFetchWorkspaceApi.mockReset();
+    Reflect.deleteProperty(window, "__TAURI__");
+    Reflect.deleteProperty(window, "__TAURI_INTERNALS__");
   });
 
   describe("rendering", () => {
@@ -208,7 +210,7 @@ describe("CreateWorkspaceModal", () => {
       expect(templateCard).toHaveAttribute("aria-checked", "false");
     });
 
-    it("browse button is disabled with tooltip", () => {
+    it("browse button is disabled outside the desktop app", () => {
       render(
         <CreateWorkspaceModal
           isOpen={true}
@@ -221,8 +223,53 @@ describe("CreateWorkspaceModal", () => {
       expect(browseBtn).toBeDisabled();
       expect(browseBtn).toHaveAttribute(
         "title",
-        "Filesystem browsing is not available in the browser",
+        "Filesystem browsing is only available in the desktop app",
       );
+    });
+
+    it("fills the workspace location from the desktop folder picker", async () => {
+      const invoke = vi.fn().mockResolvedValue("/Users/test/workspaces/demo");
+      window.__TAURI__ = { core: { invoke } };
+
+      render(
+        <CreateWorkspaceModal
+          isOpen={true}
+          onClose={onClose}
+          onSuccess={onSuccess}
+        />,
+      );
+
+      fireEvent.click(screen.getByTestId("create-workspace-browse"));
+
+      await waitFor(() => {
+        expect(screen.getByTestId("create-workspace-path")).toHaveValue(
+          "/Users/test/workspaces/demo",
+        );
+      });
+      expect(invoke).toHaveBeenCalledWith("pick_folder");
+    });
+
+    it("fills an empty workspace repository path from the desktop folder picker", async () => {
+      const invoke = vi.fn().mockResolvedValue("/Users/test/repos/api");
+      window.__TAURI__ = { core: { invoke } };
+
+      render(
+        <CreateWorkspaceModal
+          isOpen={true}
+          onClose={onClose}
+          onSuccess={onSuccess}
+        />,
+      );
+
+      selectTypeCard("empty");
+      fireEvent.click(screen.getByTestId("create-workspace-repo-browse"));
+
+      await waitFor(() => {
+        expect(screen.getByTestId("create-workspace-repo-path")).toHaveValue(
+          "/Users/test/repos/api",
+        );
+      });
+      expect(invoke).toHaveBeenCalledWith("pick_folder");
     });
 
     it("template card is selectable and shows coming-soon placeholder", () => {

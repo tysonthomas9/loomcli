@@ -153,11 +153,7 @@ async function ensureRuntime() {
   });
   renderRuntime(initial);
 
-  if (initial.healthy && initial.runtime?.url) {
-    return initial;
-  }
-
-  setStage("starting", "Starting Loom", "Launching the local runtime.");
+  setStage("starting", "Starting Loom", "Ensuring the local runtime matches this app.");
   const start = await runLoom(["local", "start"]);
   renderRuntime(initial, `${start.stdout}\n${start.stderr}`);
   if (start.code !== 0) {

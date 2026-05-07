@@ -5,6 +5,9 @@ package repo
 import (
 	"context"
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -13,6 +16,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 var (
@@ -79,6 +83,15 @@ func init() {
 
 func runRepoAdd(_ *cobra.Command, args []string) error {
 	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
+		localPath, cloned, err := ensureRepoLocalCheckout(ctx, ws, args[0], args[1])
+		if err != nil {
+			return err
+		}
+		rollbackClone := func() {
+			if cloned && localPath != "" {
+				_ = os.RemoveAll(localPath)
+			}
+		}
 		r, err := h.Store.Repos().Create(ctx, store.RepoCreate{
 			WorkspaceKey:  ws,
 			Name:          args[0],
@@ -89,10 +102,106 @@ func runRepoAdd(_ *cobra.Command, args []string) error {
 			SourceRepoID:  repoAddSourceID,
 		})
 		if err != nil {
+			rollbackClone()
 			return fmt.Errorf("create repo: %w", err)
+		}
+		if localPath != "" {
+			if err := rememberRepoLocalPath(ws, args[0], localPath); err != nil {
+				_ = h.Store.Repos().Delete(context.Background(), ws, args[0])
+				rollbackClone()
+				return err
+			}
 		}
 		fmt.Printf("Created repo %s/%s (remote: %s)\n", r.WorkspaceKey, r.Name, r.RemoteURL)
 		return nil
+	})
+}
+
+func ensureRepoLocalCheckout(ctx context.Context, ws, name, remoteURL string) (path string, cloned bool, err error) {
+	if !service.IsCloneURL(remoteURL) {
+		return "", false, nil
+	}
+	if err := service.ValidateCloneURL(remoteURL); err != nil {
+		return "", false, err
+	}
+	sc, err := bootstrap.LoadStateCache()
+	if err != nil {
+		return "", false, fmt.Errorf("load local workspace state: %w", err)
+	}
+	local := sc.Workspaces[ws]
+	if strings.TrimSpace(local.Path) == "" {
+		return "", false, nil
+	}
+	if local.Repos != nil && local.Repos[name] != "" {
+		return local.Repos[name], false, nil
+	}
+	target, err := safeRepoCheckoutPath(local.Path, name)
+	if err != nil {
+		return "", false, err
+	}
+	if _, err := os.Stat(filepath.Join(target, ".git")); err == nil {
+		return target, false, nil
+	}
+	if _, err := os.Stat(target); err == nil {
+		return "", false, fmt.Errorf("repo checkout path already exists and is not a git repo: %s", target)
+	} else if !os.IsNotExist(err) {
+		return "", false, fmt.Errorf("inspect repo checkout path: %w", err)
+	}
+	if err := os.MkdirAll(local.Path, 0o755); err != nil {
+		return "", false, fmt.Errorf("create workspace directory: %w", err)
+	}
+	cmd := exec.CommandContext(ctx, "git", "clone", remoteURL, target) //nolint:gosec // URL is validated and passed as argv, not through a shell.
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", false, fmt.Errorf("git clone failed for %s: %s", remoteURL, strings.TrimSpace(string(output)))
+	}
+	return target, true, nil
+}
+
+func safeRepoCheckoutPath(workspacePath, name string) (string, error) {
+	if strings.TrimSpace(workspacePath) == "" {
+		return "", fmt.Errorf("workspace path is empty")
+	}
+	if strings.TrimSpace(name) == "" {
+		return "", fmt.Errorf("repo name is empty")
+	}
+	if filepath.IsAbs(name) || strings.Contains(name, string(filepath.Separator)) {
+		return "", fmt.Errorf("repo name must not be a path: %s", name)
+	}
+	root, err := filepath.Abs(workspacePath)
+	if err != nil {
+		return "", err
+	}
+	target, err := filepath.Abs(filepath.Join(root, name))
+	if err != nil {
+		return "", err
+	}
+	rel, err := filepath.Rel(root, target)
+	if err != nil {
+		return "", err
+	}
+	if rel == "." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." {
+		return "", fmt.Errorf("repo checkout path escapes workspace: %s", target)
+	}
+	return target, nil
+}
+
+func rememberRepoLocalPath(ws, name, repoPath string) error {
+	return bootstrap.WithStateLock(func() error {
+		sc, err := bootstrap.LoadStateCache()
+		if err != nil {
+			return err
+		}
+		if sc.Workspaces == nil {
+			sc.Workspaces = make(map[string]bootstrap.WorkspaceLocalState)
+		}
+		local := sc.Workspaces[ws]
+		if local.Repos == nil {
+			local.Repos = make(map[string]string)
+		}
+		local.Repos[name] = repoPath
+		sc.Workspaces[ws] = local
+		return bootstrap.SaveStateCache(sc)
 	})
 }
 

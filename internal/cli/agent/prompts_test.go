@@ -213,6 +213,8 @@ func TestGenerateLeadPrompt(t *testing.T) {
 		"Create Tickets",
 		"Triage Backlog",
 		"Check Status",
+		"Manage Repos or Agents",
+		"Runtime and Daemon Rules",
 		"Interaction Style",
 		"Loom CLI Reference",
 		"Important Notes",
@@ -228,6 +230,9 @@ func TestGenerateLeadPrompt(t *testing.T) {
 	loomCommands := []string{
 		"loom plan",
 		"loom task",
+		"loom workspace ops",
+		"loom repo list",
+		"loom agentdef add",
 		"loom monitor",
 		"loom merge",
 		"loom sync",

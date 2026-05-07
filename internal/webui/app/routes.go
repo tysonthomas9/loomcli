@@ -5,6 +5,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlermux"
+	locsettings "github.com/tysonthomas9/loomcli/internal/webui/handlers/localsettings"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
@@ -45,6 +46,10 @@ func (app *Server) registerCoreAPIRoutes(h *handlermux.Handlers) {
 	app.mux.HandleFunc("GET /api/config", h.AuthConfig)
 	app.mux.HandleFunc("GET /api/metrics", h.Metrics)
 	app.mux.HandleFunc("GET /api/config/terminal", h.GetTerminalConfig)
+	if app.config.LocalSettingsDir != "" {
+		app.mux.HandleFunc("GET /api/local/settings", locsettings.HandleGet(app.config.LocalSettingsDir))
+		app.mux.HandleFunc("PATCH /api/local/settings", locsettings.HandlePatch(app.config.LocalSettingsDir))
+	}
 	if h.GetBackendsHealth != nil {
 		app.mux.HandleFunc("GET /api/backends", h.GetBackendsHealth)
 	}

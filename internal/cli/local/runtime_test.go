@@ -118,6 +118,83 @@ func TestLocalEnvForcesLocalFleetDBBackend(t *testing.T) {
 	}
 }
 
+func TestRuntimeMatchesExecutableRequiresStoredBinaryHash(t *testing.T) {
+	identity := executableIdentity{
+		Path:  "/Applications/Loom.app/Contents/MacOS/loom",
+		Hash:  "current-hash",
+		Build: "current-build",
+	}
+
+	tests := []struct {
+		name string
+		info *runtimeInfo
+		want bool
+	}{
+		{
+			name: "matching hash",
+			info: &runtimeInfo{BinaryHash: "current-hash"},
+			want: true,
+		},
+		{
+			name: "different hash",
+			info: &runtimeInfo{BinaryHash: "old-hash"},
+			want: false,
+		},
+		{
+			name: "missing hash from older runtime",
+			info: &runtimeInfo{},
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := runtimeMatchesExecutable(tt.info, identity); got != tt.want {
+				t.Fatalf("runtimeMatchesExecutable() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRuntimeMatchesExecutableAllowsUnknownCurrentHash(t *testing.T) {
+	if !runtimeMatchesExecutable(&runtimeInfo{}, executableIdentity{}) {
+		t.Fatal("runtimeMatchesExecutable() should not force restart when current hash cannot be computed")
+	}
+}
+
+func TestApplyExecutableIdentityPersistsBuildFingerprint(t *testing.T) {
+	info := &runtimeInfo{}
+	applyExecutableIdentity(info, executableIdentity{
+		Path:  "/Applications/Loom.app/Contents/MacOS/loom",
+		Hash:  "abc123",
+		Build: "git123",
+	})
+
+	if info.Executable != "/Applications/Loom.app/Contents/MacOS/loom" {
+		t.Fatalf("Executable = %q", info.Executable)
+	}
+	if info.BinaryHash != "abc123" {
+		t.Fatalf("BinaryHash = %q", info.BinaryHash)
+	}
+	if info.Build != "git123" {
+		t.Fatalf("Build = %q", info.Build)
+	}
+}
+
+func TestRuntimeMatchesFleetDBRedisSettings(t *testing.T) {
+	if !runtimeMatchesFleetDBRedisSettings(&runtimeInfo{FleetDBRedisHash: "same"}, "same") {
+		t.Fatal("runtimeMatchesFleetDBRedisSettings() should match equal hashes")
+	}
+	if runtimeMatchesFleetDBRedisSettings(&runtimeInfo{FleetDBRedisHash: "old"}, "new") {
+		t.Fatal("runtimeMatchesFleetDBRedisSettings() should reject changed settings")
+	}
+	if runtimeMatchesFleetDBRedisSettings(&runtimeInfo{}, "new") {
+		t.Fatal("runtimeMatchesFleetDBRedisSettings() should reject missing hash when settings are enabled")
+	}
+	if !runtimeMatchesFleetDBRedisSettings(&runtimeInfo{}, "") {
+		t.Fatal("runtimeMatchesFleetDBRedisSettings() should allow missing hash when settings are disabled")
+	}
+}
+
 func containsEnv(env []string, needle string) bool {
 	for _, entry := range env {
 		if entry == needle {

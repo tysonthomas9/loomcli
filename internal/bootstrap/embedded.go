@@ -17,6 +17,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/localsettings"
 	"github.com/tysonthomas9/loomcli/internal/lockfile"
 	"github.com/tysonthomas9/loomcli/internal/netutil"
 	"github.com/tysonthomas9/loomcli/internal/webui/localredis"
@@ -51,11 +52,15 @@ type embeddedRuntimeLock struct {
 }
 
 type embeddedRuntimeInfo struct {
-	PID          int       `json:"pid"`
-	URL          string    `json:"url"`
-	RedisAddr    string    `json:"redis_addr,omitempty"`
-	SnapshotPath string    `json:"snapshot_path,omitempty"`
-	StartedAt    time.Time `json:"started_at"`
+	PID             int       `json:"pid"`
+	URL             string    `json:"url"`
+	RedisAddr       string    `json:"redis_addr,omitempty"`
+	RedisExternal   bool      `json:"redis_external,omitempty"`
+	RedisDB         int       `json:"redis_db,omitempty"`
+	RedisTLS        bool      `json:"redis_tls,omitempty"`
+	RedisConfigHash string    `json:"redis_config_hash,omitempty"`
+	SnapshotPath    string    `json:"snapshot_path,omitempty"`
+	StartedAt       time.Time `json:"started_at"`
 }
 
 func acquireEmbeddedRuntimeLock(fleetDir string) (*embeddedRuntimeLock, error) {
@@ -173,6 +178,14 @@ func reuseEmbeddedRuntime(ctx context.Context, fleetDir string, logger *slog.Log
 		_ = os.Remove(embeddedRuntimePath(fleetDir))
 		return "", false, fmt.Errorf("embedded runtime pid %d is not running", info.PID)
 	}
+	dataDir := filepath.Dir(fleetDir)
+	redisCfg, err := desiredEmbeddedRedisConfig(dataDir)
+	if err != nil {
+		return "", false, err
+	}
+	if !embeddedRuntimeRedisMatches(info, redisCfg) {
+		return "", false, fmt.Errorf("embedded runtime redis settings changed; restart local runtime to apply")
+	}
 	healthCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	if err := netutil.WaitForHealthz(healthCtx, info.URL, healthCheckTimeout); err != nil {
@@ -207,6 +220,32 @@ func waitForEmbeddedRuntime(ctx context.Context, fleetDir string, timeout time.D
 		case <-ticker.C:
 		}
 	}
+}
+
+func desiredEmbeddedRedisConfig(dataDir string) (localsettings.RedisConfig, error) {
+	settings, err := localsettings.Load(dataDir)
+	if err != nil {
+		return localsettings.RedisConfig{}, err
+	}
+	return settings.FleetDBRedis, nil
+}
+
+func embeddedRuntimeRedisMatches(info *embeddedRuntimeInfo, cfg localsettings.RedisConfig) bool {
+	if cfg.Enabled {
+		return info.RedisExternal &&
+			info.RedisAddr == strings.TrimSpace(cfg.Addr) &&
+			info.RedisDB == cfg.DB &&
+			info.RedisTLS == cfg.TLS &&
+			info.RedisConfigHash == localsettings.RuntimeHash(cfg)
+	}
+	return !info.RedisExternal && info.RedisConfigHash == ""
+}
+
+func embeddedSnapshotPath(cfg localsettings.RedisConfig, snapshotPath string) string {
+	if cfg.Enabled {
+		return ""
+	}
+	return snapshotPath
 }
 
 // healthCheckTimeout caps the per-attempt HTTP timeout while polling
@@ -284,14 +323,25 @@ func StartEmbedded(ctx context.Context, dataDir string, logger *slog.Logger) (*E
 	}()
 
 	snapshotPath := filepath.Join(fleetDir, "redis-snapshot.json")
-	// fleetKeys=true so the snapshot persists fleet-db's keyspace
-	// across CLI invocations (each `loom <cmd>` re-boots a fleet-db
-	// subprocess against this same on-disk snapshot).
-	redisMgr, err := localredis.NewManager(snapshotPath, true /* fleetKeys */, logger)
+	redisCfg, err := desiredEmbeddedRedisConfig(dataDir)
 	if err != nil {
-		return nil, fmt.Errorf("embedded: start miniredis: %w", err)
+		return nil, fmt.Errorf("embedded: load local settings: %w", err)
 	}
-	redisMgr.Start(ctx)
+	var redisMgr *localredis.Manager
+	redisAddr := strings.TrimSpace(redisCfg.Addr)
+	if !redisCfg.Enabled {
+		// fleetKeys=true so the snapshot persists fleet-db's keyspace
+		// across CLI invocations (each `loom <cmd>` re-boots a fleet-db
+		// subprocess against this same on-disk snapshot).
+		redisMgr, err = localredis.NewManager(snapshotPath, true /* fleetKeys */, logger)
+		if err != nil {
+			return nil, fmt.Errorf("embedded: start miniredis: %w", err)
+		}
+		redisMgr.Start(ctx)
+		redisAddr = redisMgr.Addr()
+	} else if err := localsettings.Validate(redisCfg); err != nil {
+		return nil, fmt.Errorf("embedded: invalid external Redis settings: %w", err)
+	}
 
 	httpAddr, _, err := netutil.PickFreeLoopbackPort()
 	if err != nil {
@@ -314,8 +364,17 @@ func StartEmbedded(ctx context.Context, dataDir string, logger *slog.Logger) (*E
 	)
 	cmd.Env = append(os.Environ(),
 		"FLEET_SERVER_ADDR="+httpAddr,
-		"FLEET_REDIS_ADDR="+redisMgr.Addr(),
+		"FLEET_REDIS_ADDR="+redisAddr,
 	)
+	if redisCfg.Enabled {
+		cmd.Env = append(cmd.Env,
+			"FLEET_REDIS_DB="+fmt.Sprintf("%d", redisCfg.DB),
+			"FLEET_REDIS_TLS_ENABLED="+fmt.Sprintf("%t", redisCfg.TLS),
+		)
+		if redisCfg.Password != "" {
+			cmd.Env = append(cmd.Env, "FLEET_REDIS_PASSWORD="+redisCfg.Password)
+		}
+	}
 	// Pipe stderr/stdout into the loom logger so the user sees fleet-db
 	// startup errors in their loom serve log.
 	stdoutTail := newTailWriter(4096)
@@ -326,10 +385,12 @@ func StartEmbedded(ctx context.Context, dataDir string, logger *slog.Logger) (*E
 	cmd.SysProcAttr = newDetachedSysProcAttr()
 
 	if err := cmd.Start(); err != nil {
-		_ = redisMgr.Close()
+		if redisMgr != nil {
+			_ = redisMgr.Close()
+		}
 		return nil, fmt.Errorf("embedded: start %s: %w", binPath, err)
 	}
-	logger.Info("embedded fleet-db started", "pid", cmd.Process.Pid, "addr", httpAddr, "redis", redisMgr.Addr(), "binary", binPath)
+	logger.Info("embedded fleet-db started", "pid", cmd.Process.Pid, "addr", httpAddr, "redis", redisAddr, "redis_external", redisCfg.Enabled, "binary", binPath)
 
 	emb := &EmbeddedFleetDB{
 		url:      "http://" + httpAddr,
@@ -351,14 +412,18 @@ func StartEmbedded(ctx context.Context, dataDir string, logger *slog.Logger) (*E
 	if err := netutil.WaitForHealthz(healthCtx, emb.url, healthCheckTimeout); err != nil {
 		_ = emb.Stop()
 		return nil, fmt.Errorf("embedded: fleet-db not ready after %s: %w (binary=%s addr=%s redis=%s snapshot=%s stderr=%q stdout=%q)",
-			startupTimeout, err, binPath, httpAddr, redisMgr.Addr(), snapshotPath, stderrTail.String(), stdoutTail.String())
+			startupTimeout, err, binPath, httpAddr, redisAddr, embeddedSnapshotPath(redisCfg, snapshotPath), stderrTail.String(), stdoutTail.String())
 	}
 	if err := writeEmbeddedRuntime(fleetDir, embeddedRuntimeInfo{
-		PID:          cmd.Process.Pid,
-		URL:          emb.url,
-		RedisAddr:    redisMgr.Addr(),
-		SnapshotPath: snapshotPath,
-		StartedAt:    time.Now().UTC(),
+		PID:             cmd.Process.Pid,
+		URL:             emb.url,
+		RedisAddr:       redisAddr,
+		RedisExternal:   redisCfg.Enabled,
+		RedisDB:         redisCfg.DB,
+		RedisTLS:        redisCfg.TLS,
+		RedisConfigHash: localsettings.RuntimeHash(redisCfg),
+		SnapshotPath:    embeddedSnapshotPath(redisCfg, snapshotPath),
+		StartedAt:       time.Now().UTC(),
 	}); err != nil {
 		_ = emb.Stop()
 		return nil, fmt.Errorf("embedded: write runtime metadata: %w", err)

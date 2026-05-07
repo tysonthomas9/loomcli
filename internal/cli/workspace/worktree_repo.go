@@ -171,3 +171,10 @@ func ensureRepoWorktreeDeps(deps *cli.Deps, repoPath, targetPath, branchName str
 func ensureRepoWorktree(repoPath, targetPath, branchName string) error {
 	return ensureRepoWorktreeDeps(cli.GetDeps(nil), repoPath, targetPath, branchName)
 }
+
+// EnsureRepoWorktree creates a git worktree at targetPath from repoPath if it
+// does not already exist. It is exported for agent-definition commands that
+// need to make a stored agent runnable by the local daemon.
+func EnsureRepoWorktree(repoPath, targetPath, branchName string) error {
+	return ensureRepoWorktree(repoPath, targetPath, branchName)
+}
