@@ -584,7 +584,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get one-time SSE auth token (external auth mode only) */
+    /** Get one-time SSE auth token status */
     get: operations["getSSEToken"];
     put?: never;
     post?: never;
@@ -4036,23 +4036,19 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description One-time token */
+      /** @description One-time token in external auth mode, or disabled marker in open mode */
       200: {
         headers: {
           [name: string]: unknown;
         };
         content: {
           "application/json": {
-            token: string;
+            /** @description One-time SSE auth token */
+            token?: string;
+            /** @description True when SSE token exchange is disabled in open mode */
+            disabled?: boolean;
           };
         };
-      };
-      /** @description SSE token exchange not available (not in external auth mode) */
-      404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
       };
     };
   };
