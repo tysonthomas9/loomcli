@@ -82,7 +82,7 @@ function AgentsPageInner(): JSX.Element {
       {selectedTask ? (
         <div
           style={{
-            width: 460,
+            width: 420,
             flexShrink: 0,
             borderLeft: "1px solid var(--color-border, #ddd)",
             display: "flex",

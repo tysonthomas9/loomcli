@@ -121,7 +121,7 @@ export function AgentWorkPanel({
     return (
       <div
         style={{
-          width: 360,
+          width: 420,
           flexShrink: 0,
           padding: 16,
           color: "var(--color-text-muted, #888)",
@@ -140,7 +140,7 @@ export function AgentWorkPanel({
   return (
     <div
       style={{
-        width: 360,
+        width: 420,
         flexShrink: 0,
         background: "var(--color-bg-soft, #faf8f3)",
         display: "flex",
