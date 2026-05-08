@@ -4,12 +4,19 @@
  * EpicTaskTree → ReposSection, with QueueStatsBar pinned at the bottom.
  */
 
-import { useState, useCallback, useEffect, type FormEvent } from "react";
+import {
+  useState,
+  useCallback,
+  useEffect,
+  useRef,
+  type FormEvent,
+} from "react";
 
 import { useStore } from "zustand";
 import { useWorkspaceContext, useAgentStoreInstance } from "@/hooks";
 import { useFolderPicker, type ConnectionState } from "@/hooks/common";
 import { wsGet, wsSet } from "@/utils/scopedStorage";
+import { ONBOARDING_REPO_URL } from "@/utils/onboardingDefaults";
 import { ErrorDisplay } from "@/components/ErrorDisplay";
 import { addWorkspaceRepos } from "@/hooks/api";
 
@@ -85,6 +92,7 @@ export function WorkspaceTree({
   const [repoPathInput, setRepoPathInput] = useState("");
   const [isAddingRepo, setIsAddingRepo] = useState(false);
   const [addRepoError, setAddRepoError] = useState<string | null>(null);
+  const prefilledAddRepoWorkspaceRef = useRef<string | null>(null);
 
   // Load initial collapsed state from scoped localStorage
   const [isCollapsed, setIsCollapsed] = useState(() => {
@@ -117,6 +125,22 @@ export function WorkspaceTree({
   const agentStore = useAgentStoreInstance();
   const agents = useStore(agentStore, (s) => s.agents);
   const workspaceRepos = repos ?? [];
+
+  useEffect(() => {
+    if (
+      !workspaceId ||
+      workspaceRepos.length > 0 ||
+      prefilledAddRepoWorkspaceRef.current === workspaceId
+    ) {
+      return;
+    }
+
+    prefilledAddRepoWorkspaceRef.current = workspaceId;
+    setRepoPathInput((current) =>
+      current.trim() ? current : ONBOARDING_REPO_URL,
+    );
+  }, [workspaceId, workspaceRepos.length]);
+
   const agentHealth =
     agents.some((agent) => agent.status.startsWith("working")) ||
     agents.some((agent) => agent.status.startsWith("review"))

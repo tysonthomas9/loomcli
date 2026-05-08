@@ -17,6 +17,13 @@ export interface CreateIssueModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess: (issue: Issue) => void | Promise<void>;
+  initialValues?: {
+    title?: string;
+    description?: string;
+    issueType?: IssueType;
+    priority?: Priority;
+    sourceRepo?: string;
+  };
 }
 
 const ISSUE_TYPES: { value: IssueType; label: string }[] = [
@@ -39,6 +46,7 @@ export function CreateIssueModal({
   isOpen,
   onClose,
   onSuccess,
+  initialValues,
 }: CreateIssueModalProps): JSX.Element | null {
   const { workspaceId, repos } = useWorkspaceContext();
   const [title, setTitle] = useState("");
@@ -52,6 +60,7 @@ export function CreateIssueModal({
   const dialogRef = useRef<HTMLDivElement>(null);
   const titleRef = useRef<HTMLInputElement>(null);
   const mountedRef = useRef(true);
+  const wasOpenRef = useRef(false);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -75,16 +84,28 @@ export function CreateIssueModal({
 
   // Reset form state when modal opens
   useEffect(() => {
-    if (isOpen) {
-      setTitle("");
-      setIssueType("task");
-      setPriority(2);
-      setSourceRepo("");
-      setDescription("");
-      setIsSubmitting(false);
-      setError("");
+    if (!isOpen) {
+      wasOpenRef.current = false;
+      return;
     }
-  }, [isOpen]);
+
+    if (wasOpenRef.current) return;
+    wasOpenRef.current = true;
+    setTitle(initialValues?.title ?? "");
+    setIssueType(initialValues?.issueType ?? "task");
+    setPriority(initialValues?.priority ?? 2);
+    setSourceRepo(initialValues?.sourceRepo ?? "");
+    setDescription(initialValues?.description ?? "");
+    setIsSubmitting(false);
+    setError("");
+  }, [
+    isOpen,
+    initialValues?.title,
+    initialValues?.issueType,
+    initialValues?.priority,
+    initialValues?.sourceRepo,
+    initialValues?.description,
+  ]);
 
   useEffect(() => {
     if (!isOpen) return;
