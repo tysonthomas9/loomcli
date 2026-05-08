@@ -384,6 +384,16 @@ describe("RedirectToWorkspace", () => {
         expect(screen.getByText(/No workspaces found/i)).toBeInTheDocument();
       });
 
+      expect(screen.getByTestId("onboarding-flow")).toBeInTheDocument();
+      expect(
+        screen.getByRole("heading", { name: "Create workspace with repo" }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("heading", { name: "Set up AI CLI" }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("heading", { name: "Create first issue" }),
+      ).toBeInTheDocument();
       expect(mockNavigate).not.toHaveBeenCalled();
     });
   });

@@ -55,6 +55,10 @@ import { WorkspaceSwitcher } from "@/components/WorkspaceSwitcher/WorkspaceSwitc
 import { CreateIssueModal } from "@/components/CreateIssueModal/CreateIssueModal";
 import { CreateWorkspaceModal } from "@/components/CreateWorkspaceModal/CreateWorkspaceModal";
 import { CreateAgentModal } from "@/components/CreateAgentModal/CreateAgentModal";
+import {
+  OnboardingFlow,
+  type OnboardingStep,
+} from "@/components/OnboardingFlow";
 import { UserMenu } from "@/components/UserMenu/UserMenu";
 import { SearchTermProvider } from "@/contexts/SearchTermContext";
 import {
@@ -814,6 +818,80 @@ function App() {
     navigateToView("terminal");
   }, [closeAllPanels, navigateToView]);
 
+  const hasWorkspaceRepo = workspaceRepos.length > 0;
+  const hasWorkspaceAgent = (workspace?.agents?.length ?? 0) > 0;
+  const hasWorkspaceIssue = issues.length > 0;
+  const shouldShowWorkspaceOnboarding =
+    activeView === "kanban" &&
+    !isLoading &&
+    !error &&
+    !hasActiveFilters &&
+    (workspaceRepos.length === 0 || hasOnboardingRepo) &&
+    (!hasWorkspaceRepo || !hasWorkspaceAgent || !hasWorkspaceIssue);
+  const workspaceOnboardingSteps: OnboardingStep[] = useMemo(
+    () => [
+      {
+        id: "workspace-repo",
+        title: "Create workspace with repo",
+        description: hasWorkspaceRepo
+          ? "The sample repo is attached to this workspace."
+          : "Add the sample repo from the workspace tree; the URL is prefilled for first-run setup.",
+        status: hasWorkspaceRepo ? "complete" : "current",
+      },
+      {
+        id: "verify-repo",
+        title: "Verify repository",
+        description: hasWorkspaceRepo
+          ? "The repo is visible to Loom and ready for the next setup step."
+          : "Repository checks run after a repo has been attached.",
+        status: hasWorkspaceRepo ? "complete" : "blocked",
+      },
+      {
+        id: "setup-backend",
+        title: "Set up AI CLI",
+        description:
+          "Use the terminal to install or login to the selected CLI if this machine is not configured yet.",
+        status: hasWorkspaceRepo ? "actionable" : "blocked",
+        actionLabel: "Open Terminal",
+        onAction: handleTalkToLeadClick,
+      },
+      {
+        id: "create-agent",
+        title: "Create agent",
+        description: hasWorkspaceAgent
+          ? "The first agent definition exists for this workspace."
+          : "Create a prefilled planner agent for the sample repo.",
+        status: hasWorkspaceAgent
+          ? "complete"
+          : hasWorkspaceRepo
+            ? "current"
+            : "blocked",
+        actionLabel: "Create Agent",
+        onAction: () => setShowCreateAgent(true),
+      },
+      {
+        id: "create-issue",
+        title: "Create first issue",
+        description: hasWorkspaceIssue
+          ? "The first issue is ready for agent work."
+          : "Create the prefilled sample task for the first agent run.",
+        status: hasWorkspaceIssue
+          ? "complete"
+          : hasWorkspaceAgent
+            ? "current"
+            : "blocked",
+        actionLabel: "Create Issue",
+        onAction: () => setShowCreateIssue(true),
+      },
+    ],
+    [
+      handleTalkToLeadClick,
+      hasWorkspaceAgent,
+      hasWorkspaceIssue,
+      hasWorkspaceRepo,
+    ],
+  );
+
   const handleIssueContextConsumed = useCallback(() => {
     setPendingIssueContext(undefined);
   }, []);
@@ -830,6 +908,11 @@ function App() {
   const handleAgentNameConsumed = useCallback(() => {
     setPendingAgentName(undefined);
   }, []);
+
+  const refetchWorkspaceAfterAgentCreate = useCallback(() => {
+    refetchWorkspace();
+    window.setTimeout(refetchWorkspace, 750);
+  }, [refetchWorkspace]);
 
   // Focus search input (for Cmd/Ctrl+K shortcut in single-repo mode)
   const handleSearchFocus = useCallback(() => {
@@ -1130,9 +1213,19 @@ function App() {
             data={workspaceViewData}
             actions={workspaceViewActions}
           >
-            <Suspense fallback={<LoadingSkeleton.Column />}>
-              <Outlet />
-            </Suspense>
+            {shouldShowWorkspaceOnboarding ? (
+              <OnboardingFlow
+                className={styles.workspaceOnboarding ?? ""}
+                title="Finish onboarding"
+                subtitle="Continue the fixed first-run flow from the sample workspace. The repo step stays complete while the remaining setup actions stay visible."
+                repoUrl={ONBOARDING_REPO_URL}
+                steps={workspaceOnboardingSteps}
+              />
+            ) : (
+              <Suspense fallback={<LoadingSkeleton.Column />}>
+                <Outlet />
+              </Suspense>
+            )}
           </WorkspaceViewProvider>
           <ToastContainer toasts={toasts} onDismiss={dismissToast} />
           <IssueDetailPanel
@@ -1235,7 +1328,7 @@ function App() {
         onClose={() => setShowCreateAgent(false)}
         onSuccess={(agent) => {
           setShowCreateAgent(false);
-          refetchWorkspace();
+          refetchWorkspaceAfterAgentCreate();
           showToast(`Agent "${agent.name}" created`, { type: "success" });
         }}
       />
