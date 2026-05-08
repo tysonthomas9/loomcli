@@ -1,0 +1,326 @@
+/**
+ * AgentWorkPanel — themed to match the rest of the app.
+ *
+ * Uses the same design tokens (--color-status-*, --color-priority-*,
+ * --space-*, --font-size-*, --color-bg-*, --color-border, --radius-*)
+ * that IssueCard, AgentCard, MonitorDashboard etc. consume, so the
+ * panel respects light/dark theme + any global token tweaks.
+ */
+
+.panel {
+  width: 420px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--color-bg-secondary);
+  border-left: 1px solid var(--color-border);
+  font-family: var(--font-main);
+  color: var(--color-text-primary);
+}
+
+.empty {
+  width: 420px;
+  flex-shrink: 0;
+  padding: var(--space-4);
+  background: var(--color-bg-secondary);
+  border-left: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  font-family: var(--font-main);
+}
+
+/* ============= Header ============= */
+
+.header {
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg-card);
+}
+
+.label {
+  font-size: 0.6875rem; /* 11px */
+  font-weight: var(--font-weight-bold);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.activeEpicTag {
+  font-size: 0.625rem; /* 10px */
+  font-weight: var(--font-weight-bold);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-status-working);
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.activeEpicTagDot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: var(--color-status-working);
+  display: inline-block;
+}
+
+.activeEpicTitle {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  margin-top: 2px;
+}
+
+.countRow {
+  display: flex;
+  gap: var(--space-1);
+  margin-top: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.countChip {
+  font-size: 0.625rem; /* 10px */
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  background: var(--color-bg-card);
+  line-height: 1.4;
+}
+
+.progressBar {
+  margin-top: var(--space-2);
+  height: 4px;
+  background: var(--color-bg-tertiary);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.progressBarFill {
+  height: 100%;
+  background: var(--color-status-done);
+  transition: width 200ms ease;
+}
+
+/* ============= Body ============= */
+
+.body {
+  flex: 1;
+  overflow: auto;
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-height: 0;
+}
+
+.emptyState {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  text-align: center;
+  padding: var(--space-6);
+}
+
+/* ============= Epic group ============= */
+
+.group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.groupHeader {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.epicChip {
+  font-size: 0.625rem; /* 10px */
+  font-weight: var(--font-weight-bold);
+  letter-spacing: 0.04em;
+  background: color-mix(in srgb, var(--color-type-epic) 14%, transparent);
+  color: var(--color-type-epic);
+  border: 1px solid color-mix(in srgb, var(--color-type-epic) 36%, transparent);
+  border-radius: var(--radius-sm);
+  padding: 2px var(--space-2);
+  line-height: 1.4;
+  flex-shrink: 0;
+}
+
+.epicTitle {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.epicCount {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.epicProgress {
+  margin: 2px 0 var(--space-1);
+  height: 3px;
+  background: var(--color-bg-tertiary);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.epicProgressFill {
+  height: 100%;
+  background: var(--color-status-done);
+  transition: width 200ms ease;
+}
+
+/* ============= Task card ============= */
+
+.taskCard {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  color: inherit;
+  transition:
+    border-color var(--transition-fast),
+    background-color var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+
+.taskCard:hover {
+  background: var(--color-bg-hover);
+  border-color: var(--color-border-hover);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 12%);
+}
+
+.taskCard:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.taskCard[data-status="in_progress"],
+.taskCard[data-status="active"] {
+  border-left-color: var(--color-status-working);
+}
+
+.taskCard[data-status="blocked"] {
+  border-left-color: var(--color-status-error);
+}
+
+.taskCard[data-status="review"] {
+  border-left-color: var(--color-status-review);
+}
+
+.taskCard[data-status="closed"],
+.taskCard[data-status="done"] {
+  border-left-color: var(--color-status-done);
+  opacity: 0.72;
+}
+
+.taskCard[data-status="open"],
+.taskCard[data-status="ready"] {
+  border-left-color: var(--color-status-ready);
+}
+
+.taskMeta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.statusGlyph {
+  font-size: 0.6875rem; /* 11px */
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+  width: 10px;
+  display: inline-block;
+}
+
+.taskCard[data-status="in_progress"] .statusGlyph,
+.taskCard[data-status="active"] .statusGlyph {
+  color: var(--color-status-working);
+}
+
+.taskCard[data-status="blocked"] .statusGlyph {
+  color: var(--color-status-error);
+}
+
+.taskCard[data-status="review"] .statusGlyph {
+  color: var(--color-status-review);
+}
+
+.taskCard[data-status="closed"] .statusGlyph,
+.taskCard[data-status="done"] .statusGlyph {
+  color: var(--color-status-done);
+}
+
+.taskId {
+  font-family: var(--font-family-mono);
+  font-size: 0.6875rem; /* 11px */
+  color: var(--color-text-muted);
+  letter-spacing: 0;
+}
+
+.priorityChip {
+  font-size: 0.625rem; /* 10px */
+  font-weight: var(--font-weight-semibold);
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-sm);
+  line-height: 1.4;
+  flex-shrink: 0;
+}
+
+.priority0 {
+  background: var(--color-priority-0);
+  color: #fff;
+}
+.priority1 {
+  background: var(--color-priority-1);
+  color: #fff;
+}
+.priority2 {
+  background: var(--color-priority-2);
+  color: var(--color-text);
+}
+.priority3 {
+  background: color-mix(in srgb, var(--color-priority-3) 22%, transparent);
+  color: var(--color-priority-3);
+  border: 1px solid color-mix(in srgb, var(--color-priority-3) 50%, transparent);
+}
+.priority4 {
+  background: color-mix(in srgb, var(--color-priority-4) 22%, transparent);
+  color: var(--color-text-muted);
+  border: 1px solid color-mix(in srgb, var(--color-priority-4) 50%, transparent);
+}
+
+.taskTitle {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-primary);
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  margin-top: 2px;
+}
+
+.taskCard[data-status="closed"] .taskTitle,
+.taskCard[data-status="done"] .taskTitle {
+  text-decoration: line-through;
+  color: var(--color-text-muted);
+}
