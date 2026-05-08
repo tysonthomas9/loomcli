@@ -150,6 +150,7 @@ func (app *Server) buildHandlers() {
 		Hub:                app.hub,
 		ExtAuthURL:         app.config.ExtAuthURL,
 		BackendsHealthH:    backendsHealthH,
+		OnboardingH:        app.buildOnboardingHandler(),
 		NotifyToken:        app.notifyToken,
 		DaemonSupervisor:   daemonSupervisorH,
 		DaemonConfig:       daemonConfigH,

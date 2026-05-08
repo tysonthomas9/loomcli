@@ -26,6 +26,7 @@ type Handlers struct {
 	Metrics             http.HandlerFunc // pre-built by caller (requires fleet types)
 	GetTerminalConfig   http.HandlerFunc
 	GetBackendsHealth   http.HandlerFunc // pre-built by caller (requires ops types), may be nil
+	Onboarding          http.HandlerFunc // pre-built by caller (uses workspace + ops + issue backend), may be nil
 	ListEditors         http.HandlerFunc
 	OpenEditor          http.HandlerFunc
 	NotifySessionChange http.HandlerFunc // pre-built by caller, may be nil
@@ -49,6 +50,7 @@ type HandlerDeps struct {
 	Hub                *realtime.Hub // may be nil
 	ExtAuthURL         string
 	BackendsHealthH    http.HandlerFunc // pre-built; nil disables endpoint
+	OnboardingH        http.HandlerFunc // pre-built; nil disables endpoints
 	NotifyToken        string
 	DaemonSupervisor   http.HandlerFunc    // pre-built; nil = disabled
 	DaemonConfig       http.HandlerFunc    // pre-built; nil = disabled
@@ -108,6 +110,7 @@ func BuildHandlers(deps HandlerDeps) *Handlers {
 	}
 
 	h.GetBackendsHealth = deps.BackendsHealthH
+	h.Onboarding = deps.OnboardingH
 	if deps.Hub != nil {
 		h.NotifySessionChange = misc.HandleNotifySessionChange(deps.Hub, deps.NotifyToken)
 	}

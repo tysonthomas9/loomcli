@@ -53,6 +53,9 @@ func (app *Server) registerCoreAPIRoutes(h *handlermux.Handlers) {
 	if h.GetBackendsHealth != nil {
 		app.mux.HandleFunc("GET /api/backends", h.GetBackendsHealth)
 	}
+	if h.Onboarding != nil {
+		app.mux.HandleFunc("GET /api/onboarding/status", h.Onboarding)
+	}
 }
 
 // registerDaemonRoutes registers daemon supervisor and config endpoints.
@@ -149,6 +152,9 @@ func (app *Server) registerWorkspaceRoutes() {
 	// because Go 1.22+ http.ServeMux has a bug where r.Body.Read() hangs for
 	// PATCH requests routed through a nested mux via wildcard subtree pattern.
 	app.mux.Handle("PATCH /api/workspaces/{ws}/name", middleware.Workspace(app.wsExistsFn)(handlermux.HandleWorkspaceRename(app.workspaceSvc)))
+	if app.handlers.Onboarding != nil {
+		app.mux.Handle("GET /api/workspaces/{ws}/onboarding/status", middleware.Workspace(app.wsExistsFn)(app.handlers.Onboarding))
+	}
 	app.mux.Handle("GET /api/workspaces/{ws}/config/backend", middleware.Workspace(app.wsExistsFn)(handlermux.HandleWorkspaceBackendGet(app.workspaceSvc)))
 	app.mux.Handle("PATCH /api/workspaces/{ws}/config/backend", middleware.Workspace(app.wsExistsFn)(handlermux.HandleWorkspaceBackendPatch(app.workspaceSvc)))
 
