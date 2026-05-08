@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 
+	"go.opentelemetry.io/otel/attribute"
+
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/dto"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
@@ -24,21 +26,32 @@ func HandleList(agentSvc service.AgentService) http.HandlerFunc {
 
 func HandleCreate(agentSvc service.AgentService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		ws := r.PathValue("ws")
+		ctx, span := startSpan(r.Context(), "service.Agent.Create",
+			attribute.String("loom.workspace", ws))
+		defer span.End()
+
 		var in service.AgentCreateInput
 		if err := handler.ReadJSON(w, r, &in); err != nil {
+			recordErr(span, err)
 			handler.HandleServiceError(w, err)
 			return
 		}
-		ws := r.PathValue("ws")
 		if in.WorkspaceKey == "" {
 			in.WorkspaceKey = ws
 		}
 		if in.WorkspaceKey != ws {
-			handler.HandleServiceError(w, service.ErrValidation("workspace_key must match request workspace"))
+			err := service.ErrValidation("workspace_key must match request workspace")
+			recordErr(span, err)
+			handler.HandleServiceError(w, err)
 			return
 		}
-		created, err := agentSvc.CreateAgent(r.Context(), in)
+		// Agent name is an internal short identifier (per-workspace handle like
+		// "falcon"), not user-supplied free-form text — safe to record.
+		span.SetAttributes(attribute.String("loom.agent", in.Name))
+		created, err := agentSvc.CreateAgent(ctx, in)
 		if err != nil {
+			recordErr(span, err)
 			handler.HandleServiceError(w, err)
 			return
 		}

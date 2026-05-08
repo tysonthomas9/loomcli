@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/lockfile"
 )
 
@@ -30,8 +31,12 @@ func (s *Store) Dir() string { return s.dir }
 // NewStore creates a Store rooted at runtimeDir/sessions/.
 // It creates the sessions/ directory if it does not exist.
 func NewStore(runtimeDir string) (*Store, error) {
+	_, span := startSpan(cmdstore.RootContext(), "service.Sessions.NewStore")
+	defer span.End()
+
 	dir := filepath.Join(runtimeDir, "sessions")
 	if err := os.MkdirAll(dir, sessDirPerm); err != nil {
+		recordErr(span, err)
 		return nil, fmt.Errorf("create sessions dir: %w", err)
 	}
 	return &Store{dir: dir}, nil
@@ -41,22 +46,32 @@ func NewStore(runtimeDir string) (*Store, error) {
 // metadata.json (status=running). Returns a Session handle for the caller
 // to use during the agent run.
 func (s *Store) CreateSession(opts CreateOptions) (*Session, error) {
+	_, span := startSpan(cmdstore.RootContext(), "service.Sessions.CreateSession",
+		attrLoomAgent(opts.AgentName),
+		attrLoomBackend(opts.Backend),
+	)
+	defer span.End()
+
 	// Derive a short task identifier (empty string is fine — design allows it).
 	taskShort := ""
 
 	sid, err := GenerateSessionID(opts.AgentName, taskShort)
 	if err != nil {
+		recordErr(span, err)
 		return nil, fmt.Errorf("generate session ID: %w", err)
 	}
+	span.SetAttributes(attrLoomSessionID(sid))
 
 	sessDir := filepath.Join(s.dir, sid)
 	if err := os.MkdirAll(sessDir, sessDirPerm); err != nil {
+		recordErr(span, err)
 		return nil, fmt.Errorf("create session dir: %w", err)
 	}
 
 	// Write prompt.txt.
 	promptPath := filepath.Join(sessDir, "prompt.txt")
 	if err := os.WriteFile(promptPath, []byte(opts.Prompt), sessFilePerm); err != nil {
+		recordErr(span, err)
 		return nil, fmt.Errorf("write prompt.txt: %w", err)
 	}
 
@@ -78,6 +93,7 @@ func (s *Store) CreateSession(opts CreateOptions) (*Session, error) {
 
 	// Write metadata.json atomically (temp + rename).
 	if err := writeMetadataAtomic(sessDir, meta); err != nil {
+		recordErr(span, err)
 		return nil, fmt.Errorf("write metadata.json: %w", err)
 	}
 
@@ -94,7 +110,13 @@ func (s *Store) CreateSession(opts CreateOptions) (*Session, error) {
 // daemon-created parent session be filled by the child CLI after it renders the
 // final role/task prompt.
 func (s *Store) UpdatePrompt(sessionID, prompt string) error {
+	_, span := startSpan(cmdstore.RootContext(), "service.Sessions.UpdatePrompt",
+		attrLoomSessionID(sessionID),
+	)
+	defer span.End()
+
 	if err := validateSessionID(sessionID); err != nil {
+		recordErr(span, err)
 		return err
 	}
 	sessDir := filepath.Join(s.dir, sessionID)
@@ -102,10 +124,12 @@ func (s *Store) UpdatePrompt(sessionID, prompt string) error {
 		if os.IsNotExist(err) {
 			return fmt.Errorf("session %q does not exist", sessionID)
 		}
+		recordErr(span, err)
 		return fmt.Errorf("stat session dir: %w", err)
 	}
 	promptPath := filepath.Join(sessDir, "prompt.txt")
 	if err := os.WriteFile(promptPath, []byte(prompt), sessFilePerm); err != nil {
+		recordErr(span, err)
 		return fmt.Errorf("write prompt.txt: %w", err)
 	}
 	return nil
@@ -116,9 +140,16 @@ func (s *Store) UpdatePrompt(sessionID, prompt string) error {
 // The Seq field is auto-assigned from a counter file (seq) in the session
 // directory, ensuring monotonic ordering even across concurrent processes.
 func (s *Store) AppendTranscript(sessionID string, entry TranscriptEntry) error {
+	_, span := startSpan(cmdstore.RootContext(), "service.Sessions.AppendTranscript",
+		attrLoomSessionID(sessionID),
+	)
+	defer span.End()
+
 	// Reject session IDs containing path separators to prevent traversal.
 	if strings.ContainsAny(sessionID, "/\\") {
-		return fmt.Errorf("invalid session ID %q: contains path separator", sessionID)
+		err := fmt.Errorf("invalid session ID %q: contains path separator", sessionID)
+		recordErr(span, err)
+		return err
 	}
 
 	sessDir := filepath.Join(s.dir, sessionID)
@@ -126,7 +157,9 @@ func (s *Store) AppendTranscript(sessionID string, entry TranscriptEntry) error 
 	// Verify the resolved path is still under the store directory.
 	cleanDir := filepath.Clean(sessDir)
 	if !strings.HasPrefix(cleanDir+string(os.PathSeparator), filepath.Clean(s.dir)+string(os.PathSeparator)) {
-		return fmt.Errorf("invalid session ID %q", sessionID)
+		err := fmt.Errorf("invalid session ID %q", sessionID)
+		recordErr(span, err)
+		return err
 	}
 
 	// Verify the session directory exists.
@@ -134,6 +167,7 @@ func (s *Store) AppendTranscript(sessionID string, entry TranscriptEntry) error 
 		if os.IsNotExist(err) {
 			return fmt.Errorf("session %q does not exist", sessionID)
 		}
+		recordErr(span, err)
 		return fmt.Errorf("stat session dir: %w", err)
 	}
 
@@ -142,11 +176,13 @@ func (s *Store) AppendTranscript(sessionID string, entry TranscriptEntry) error 
 	// #nosec G304 — path constructed from trusted store directory
 	f, err := os.OpenFile(txPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, sessFilePerm)
 	if err != nil {
+		recordErr(span, err)
 		return fmt.Errorf("open transcript file: %w", err)
 	}
 	defer func() { _ = f.Close() }()
 
 	if err := lockfile.FlockExclusiveBlocking(f); err != nil {
+		recordErr(span, err)
 		return fmt.Errorf("flock transcript file: %w", err)
 	}
 	defer func() { _ = lockfile.FlockUnlock(f) }()
@@ -158,11 +194,13 @@ func (s *Store) AppendTranscript(sessionID string, entry TranscriptEntry) error 
 	// Marshal with the assigned seq.
 	data, err := json.Marshal(entry)
 	if err != nil {
+		recordErr(span, err)
 		return fmt.Errorf("marshal transcript entry: %w", err)
 	}
 	data = append(data, '\n')
 
 	if _, err := f.Write(data); err != nil {
+		recordErr(span, err)
 		return fmt.Errorf("write transcript entry: %w", err)
 	}
 	return nil
@@ -191,11 +229,21 @@ func readAndIncrementSeq(sessDir string) int {
 // specified session. This is used by hook handlers to patch metadata (e.g.,
 // token usage) outside of the normal Finalize flow.
 func (s *Store) SaveMetadata(sessionID string, meta *SessionMetadata) error {
+	_, span := startSpan(cmdstore.RootContext(), "service.Sessions.SaveMetadata",
+		attrLoomSessionID(sessionID),
+	)
+	defer span.End()
+
 	if err := validateSessionID(sessionID); err != nil {
+		recordErr(span, err)
 		return err
 	}
 	sessDir := filepath.Join(s.dir, sessionID)
-	return writeMetadataAtomic(sessDir, *meta)
+	if err := writeMetadataAtomic(sessDir, *meta); err != nil {
+		recordErr(span, err)
+		return err
+	}
+	return nil
 }
 
 // writeMetadataAtomic writes metadata.json using temp file + rename

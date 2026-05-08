@@ -36,6 +36,10 @@ Read these in order:
    Podman/container runner behavior after local mode is reliable.
 11. `dogfood-agent-execution-test-plan.md`
    End-to-end dogfood scenarios used to validate the product.
+12. `web-onboarding-spec.md`
+   Web UI redesign that turns the new-user journey from `loom serve` into a
+   guided, dismissable checklist with backend-status visibility, scoped to
+   the local-dev audience.
 
 Related design docs:
 

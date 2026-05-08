@@ -1,7 +1,6 @@
 package monitor
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -10,6 +9,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 )
 
@@ -352,7 +352,7 @@ func runParallelTaskQueries(deps *cli.Deps, readyLimit int) taskQueryResults {
 	var qr taskQueryResults
 	var wg sync.WaitGroup
 	ib := deps.IssueBackend
-	ctx := context.Background()
+	ctx := cmdstore.RootContext()
 
 	wg.Add(5)
 	go func() {
@@ -526,7 +526,7 @@ func collectStatistics() MonitorStats {
 func collectStatisticsDeps(deps *cli.Deps) MonitorStats {
 	var stats MonitorStats
 
-	statsData, err := deps.IssueBackend.Stats(context.Background())
+	statsData, err := deps.IssueBackend.Stats(cmdstore.RootContext())
 	if err == nil && statsData != nil {
 		stats.Open = statsData.OpenIssues
 		stats.Closed = statsData.ClosedIssues
@@ -564,7 +564,7 @@ func CollectReadyTasksByPriority(readyLimit int) map[int]int {
 		counts[i] = 0
 	}
 
-	issues, err := cli.DefaultIssueBackend().Ready(context.Background(), backend.ReadyOpts{Limit: readyLimit})
+	issues, err := cli.DefaultIssueBackend().Ready(cmdstore.RootContext(), backend.ReadyOpts{Limit: readyLimit})
 	if err != nil {
 		return counts
 	}

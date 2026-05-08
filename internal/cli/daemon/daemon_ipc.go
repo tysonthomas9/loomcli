@@ -145,17 +145,37 @@ func validateIPCRequest(req AgentIPCRequest) (AgentIPCResponse, bool) {
 }
 
 // dispatchIPCOperation routes to the appropriate handler based on operation.
+//
+// Method-not-found cases short-circuit BEFORE a tracing span is started:
+// emitting one span per unknown-operation attempt would inflate the
+// rpc.method label cardinality with arbitrary attacker-supplied values.
+// Known methods are wrapped in an OTel span (see startIPCSpan); the
+// returned ctx is currently unused by the per-method handlers (which
+// build their own context.WithTimeout) but is set up so future refactors
+// can thread it through to inherit the span as parent.
 func (d *Daemon) dispatchIPCOperation(req AgentIPCRequest) AgentIPCResponse {
 	switch req.Operation {
-	case ipcOpClaim:
-		return d.handleIPCClaim(req)
-	case ipcOpUpdate:
-		return d.handleIPCUpdate(req)
-	case ipcOpComplete:
-		return d.handleIPCComplete(req)
+	case ipcOpClaim, ipcOpUpdate, ipcOpComplete:
+		// known method — fall through to traced dispatch below
 	default:
 		return AgentIPCResponse{Error: fmt.Sprintf("unknown operation: %q", req.Operation)}
 	}
+
+	ctx, span := d.startIPCSpan(context.Background(), req.Operation, req.AgentName)
+	defer span.End()
+	_ = ctx // reserved for future use; per-method handlers build their own timeout ctx
+
+	var resp AgentIPCResponse
+	switch req.Operation {
+	case ipcOpClaim:
+		resp = d.handleIPCClaim(req)
+	case ipcOpUpdate:
+		resp = d.handleIPCUpdate(req)
+	case ipcOpComplete:
+		resp = d.handleIPCComplete(req)
+	}
+	recordIPCErr(span, resp)
+	return resp
 }
 
 // handleIPCClaim handles the "claim" operation.

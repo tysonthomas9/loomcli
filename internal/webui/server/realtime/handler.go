@@ -3,6 +3,7 @@ package realtime
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -10,7 +11,25 @@ import (
 	"sync/atomic"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/tysonthomas9/loomcli/internal/rpc"
+)
+
+// tracerName is the instrumentation library name reported on every span
+// emitted from this package. Stable so dashboards filtering on it don't
+// break.
+const tracerName = "github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
+
+// Disconnect reasons reported on `sse.disconnect` spans. Bounded enum so the
+// `disconnect.reason` attribute stays low-cardinality.
+const (
+	disconnectReasonClientClose = "client_close"
+	disconnectReasonServerClose = "server_close"
+	disconnectReasonError       = "error"
 )
 
 // HandlerConfig configures the SSE Handler.
@@ -75,11 +94,25 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		slog.Warn("SSE client connected with empty workspace_id — will not receive mutations (fail-closed)", "client_id", clientID, "remote_addr", r.RemoteAddr)
 	}
 
+	// Short-lived child span covering the SSE handshake — catch-up replay
+	// + retry frame + connected event. End BEFORE entering the long-lived
+	// streamLoop so we don't keep a multi-minute (or multi-hour) span open
+	// in Jaeger. The streamLoop itself is unspanned; per-event spans would
+	// flood the collector. See docs/observability/tracing-contract.md §3.
+	handshakeCtx, handshakeSpan := otel.Tracer(tracerName).Start(r.Context(), "sse.handshake",
+		trace.WithAttributes(
+			attribute.String("loom.workspace", workspaceID),
+			attribute.String("network.peer.address", r.RemoteAddr),
+		),
+	)
+
 	client := NewClient(clientID, ClientSendBuf, lastSince, sourceRepos, workspaceID)
 
 	// Check if shutting down before registering
 	select {
 	case <-r.Context().Done():
+		handshakeSpan.SetAttributes(attribute.String("disconnect.reason", disconnectReasonClientClose))
+		handshakeSpan.End()
 		return
 	default:
 	}
@@ -94,20 +127,49 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.sendCatchUp(sw, lastSince, workspaceID, sourceRepos); err != nil {
 		slog.Error("SSE client catch-up write failed", "client_id", client.id, "err", err)
+		handshakeSpan.RecordError(err)
+		handshakeSpan.SetStatus(codes.Error, "network")
+		handshakeSpan.End()
 		return
 	}
 	if err := sw.WriteRetry(RetryMs); err != nil {
 		slog.Error("SSE client retry write failed", "client_id", client.id, "err", err)
+		handshakeSpan.RecordError(err)
+		handshakeSpan.SetStatus(codes.Error, "network")
+		handshakeSpan.End()
 		return
 	}
 	// Connected event has no id: field -- it's a control event, not a mutation
 	connFrame := fmt.Sprintf("event: connected\ndata: {\"clientId\":%d}\n\n", client.id)
 	if _, err := io.WriteString(sw.W, connFrame); err != nil {
 		slog.Error("SSE client connected event write failed", "client_id", client.id, "err", err)
+		handshakeSpan.RecordError(err)
+		handshakeSpan.SetStatus(codes.Error, "network")
+		handshakeSpan.End()
 		return
 	}
 	sw.Flusher.Flush()
-	h.streamLoop(sw, client, r.Context())
+	// Handshake complete — end the span before the long-lived stream loop.
+	handshakeSpan.End()
+	_ = handshakeCtx
+
+	reason, loopErr := h.streamLoop(sw, client, r.Context())
+
+	// Short-lived sibling span at disconnect so we record duration of the
+	// connection (via the gap between handshake.end and disconnect.start)
+	// without holding a span open for the lifetime of the stream.
+	_, discSpan := otel.Tracer(tracerName).Start(context.Background(), "sse.disconnect",
+		trace.WithLinks(trace.LinkFromContext(handshakeCtx)),
+		trace.WithAttributes(
+			attribute.String("loom.workspace", workspaceID),
+			attribute.String("disconnect.reason", reason),
+		),
+	)
+	if loopErr != nil {
+		discSpan.RecordError(loopErr)
+		discSpan.SetStatus(codes.Error, "network")
+	}
+	discSpan.End()
 }
 
 func (h *Handler) sendCatchUp(sw *Writer, since string, workspaceID string, sourceRepos []string) error {
@@ -127,7 +189,12 @@ func (h *Handler) sendCatchUp(sw *Writer, since string, workspaceID string, sour
 	return nil
 }
 
-func (h *Handler) streamLoop(sw *Writer, client *Client, ctx context.Context) {
+// streamLoop runs the long-lived event pump and returns the disconnect
+// reason (one of the bounded disconnectReason* enum values) plus any
+// non-cancellation error encountered. The reason is reported on the
+// `sse.disconnect` span so dashboards can group disconnects by cause
+// without keeping the span open for the connection lifetime.
+func (h *Handler) streamLoop(sw *Writer, client *Client, ctx context.Context) (string, error) {
 	interval := h.heartbeatInterval
 	if interval == 0 {
 		interval = HeartbeatInterval
@@ -138,20 +205,27 @@ func (h *Handler) streamLoop(sw *Writer, client *Client, ctx context.Context) {
 		select {
 		case mutation, ok := <-client.send:
 			if !ok {
-				return
+				// Hub-side close: client.send was closed by UnregisterClient
+				// (server shutdown or hub-driven eviction).
+				return disconnectReasonServerClose, nil
 			}
 			if err := writeSSEEvent(sw, mutation); err != nil {
 				slog.Error("SSE client write failed", "client_id", client.id, "err", err)
-				return
+				return disconnectReasonError, err
 			}
 		case <-heartbeatTicker.C:
 			if err := sw.WriteComment("heartbeat"); err != nil {
 				slog.Error("SSE client heartbeat failed", "client_id", client.id, "err", err)
-				return
+				return disconnectReasonError, err
 			}
 		case <-ctx.Done():
 			slog.Info("SSE client disconnected", "client_id", client.id)
-			return
+			// Cancellation is the normal close path (browser navigated away
+			// or shutdown); per the trace contract §7 it is NOT an error.
+			if err := ctx.Err(); err != nil && !errors.Is(err, context.Canceled) {
+				return disconnectReasonError, err
+			}
+			return disconnectReasonClientClose, nil
 		}
 	}
 }
