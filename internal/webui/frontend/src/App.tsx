@@ -22,6 +22,15 @@ import { updateIssue, addComment, closeIssue } from "@/api";
 import type { IssueContext } from "@/api/terminal";
 import { buildShareUrl } from "@/utils/buildShareUrl";
 import { getReviewType } from "@/utils/issue";
+import {
+  isOnboardingRepo,
+  ONBOARDING_AGENT_NAME,
+  ONBOARDING_AGENT_ROLE,
+  ONBOARDING_ISSUE_DESCRIPTION,
+  ONBOARDING_ISSUE_TITLE,
+  ONBOARDING_REPO_URL,
+  ONBOARDING_WORKSPACE_NAME,
+} from "@/utils/onboardingDefaults";
 import { buildWorkspaceSwitchUrl } from "@/utils/workspaceUrl";
 import { AppLayout } from "@/components/AppLayout/AppLayout";
 import { WorkspaceBreadcrumb } from "@/components/WorkspaceBreadcrumb/WorkspaceBreadcrumb";
@@ -175,6 +184,34 @@ function App() {
 
   const issuesMap = useStore(issueStore, (s) => s.issuesMap);
   const issues = useMemo(() => [...issuesMap.values()], [issuesMap]);
+  const hasOnboardingRepo = useMemo(
+    () => workspaceRepos.some((repo) => isOnboardingRepo(repo)),
+    [workspaceRepos],
+  );
+  const shouldPrefillOnboardingIssue =
+    hasOnboardingRepo && issues.length === 0;
+  const shouldPrefillOnboardingAgent =
+    hasOnboardingRepo && (workspace?.agents?.length ?? 0) === 0;
+  const onboardingWorkspaceInitialValues = useMemo(
+    () => ({
+      name: ONBOARDING_WORKSPACE_NAME,
+      type: "clone" as const,
+      urlInput: ONBOARDING_REPO_URL,
+    }),
+    [],
+  );
+  const onboardingIssueInitialValues = useMemo(
+    () =>
+      shouldPrefillOnboardingIssue
+        ? {
+            title: ONBOARDING_ISSUE_TITLE,
+            description: ONBOARDING_ISSUE_DESCRIPTION,
+            issueType: "task" as const,
+            priority: 2 as const,
+          }
+        : undefined,
+    [shouldPrefillOnboardingIssue],
+  );
   const isLoading = useStore(issueStore, (s) => s.isLoading);
   const error = useStore(issueStore, (s) => s.error);
   const retryCount = useStore(issueStore, (s) => s.retryCount);
@@ -1136,6 +1173,9 @@ function App() {
               openPanel({ type: "issue", id: issue.id });
               fetchIssue(issue.id);
             }}
+            {...(onboardingIssueInitialValues
+              ? { initialValues: onboardingIssueInitialValues }
+              : {})}
           />
           <div
             style={{ display: activeView === "terminal" ? "contents" : "none" }}
@@ -1176,6 +1216,7 @@ function App() {
       <CreateWorkspaceModal
         isOpen={showCreateWorkspace}
         onClose={() => setShowCreateWorkspace(false)}
+        initialValues={onboardingWorkspaceInitialValues}
         onSuccess={(data, createdName, warnings) => {
           setShowCreateWorkspace(false);
           const newWs = data.workspaces?.find((ws) => ws.name === createdName);
@@ -1195,6 +1236,12 @@ function App() {
         workspaceId={workspaceId}
         repos={workspaceRepos}
         defaultBackend={agentDefaultBackend}
+        {...(shouldPrefillOnboardingAgent
+          ? {
+              defaultName: ONBOARDING_AGENT_NAME,
+              defaultRoleName: ONBOARDING_AGENT_ROLE,
+            }
+          : {})}
         onClose={() => setShowCreateAgent(false)}
         onSuccess={(agent) => {
           setShowCreateAgent(false);
