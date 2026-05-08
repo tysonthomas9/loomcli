@@ -208,6 +208,9 @@ function App() {
     kanban: "kanban",
     table: "kanban",
     "issue-detail": "kanban",
+    // Agents view filters issues by assignee + groups by parent epic, so it
+    // needs the same broad fetch the kanban view uses.
+    agents: "kanban",
   };
   const issueMode = issueModeByView[activeView] ?? ("ready" as const);
 
