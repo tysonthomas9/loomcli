@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strings"
 
+	"go.opentelemetry.io/otel/attribute"
+
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
@@ -14,11 +16,16 @@ import (
 // workspaces with basic status information.
 func HandleListWorkspaces(svc service.WorkspaceService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		items, err := svc.ListWorkspaces(r.Context())
+		ctx, span := startSpan(r.Context(), "service.Workspace.List")
+		defer span.End()
+
+		items, err := svc.ListWorkspaces(ctx)
 		if err != nil {
+			recordErr(span, err)
 			handler.HandleServiceError(w, err)
 			return
 		}
+		span.SetAttributes(attribute.Int("result.count", len(items)))
 		handler.WriteJSON(w, http.StatusOK, map[string]interface{}{
 			"success":    true,
 			"workspaces": items,
@@ -32,12 +39,17 @@ func HandleListWorkspaces(svc service.WorkspaceService) http.HandlerFunc {
 func HandleGetWorkspace(svc service.WorkspaceService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		wsID := strings.TrimSpace(r.PathValue("ws"))
+		ctx, span := startSpan(r.Context(), "service.Workspace.Get",
+			attribute.String("loom.workspace", wsID))
+		defer span.End()
+
 		if wsID == "" {
 			handler.RespondError(w, http.StatusBadRequest, "workspace ID is required")
 			return
 		}
-		data, err := svc.GetWorkspace(r.Context(), wsID)
+		data, err := svc.GetWorkspace(ctx, wsID)
 		if err != nil {
+			recordErr(span, err)
 			handler.HandleServiceError(w, err)
 			return
 		}
@@ -71,6 +83,10 @@ func HandleListWorkspaceRepos(svc service.WorkspaceService) http.HandlerFunc {
 func HandleAddWorkspaceRepos(svc service.WorkspaceService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		wsID := strings.TrimSpace(r.PathValue("ws"))
+		ctx, span := startSpan(r.Context(), "service.Repo.Add",
+			attribute.String("loom.workspace", wsID))
+		defer span.End()
+
 		if wsID == "" {
 			handler.RespondError(w, http.StatusBadRequest, "workspace ID is required")
 			return
@@ -88,9 +104,14 @@ func HandleAddWorkspaceRepos(svc service.WorkspaceService) http.HandlerFunc {
 			return
 		}
 		req.WorkspaceID = wsID
+		// Annotate the span with how many repos this call adds. Names/URLs of
+		// repos are user-supplied free-form strings (per redaction policy) so
+		// we only emit the count here.
+		span.SetAttributes(attribute.Int("repo.count", len(req.Repos)+len(req.CloneURLs)))
 
-		data, err := svc.AddWorkspaceRepos(r.Context(), req)
+		data, err := svc.AddWorkspaceRepos(ctx, req)
 		if err != nil {
+			recordErr(span, err)
 			handler.HandleServiceError(w, err)
 			return
 		}

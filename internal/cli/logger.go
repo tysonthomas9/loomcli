@@ -1,9 +1,12 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
+
+	"go.opentelemetry.io/otel/trace"
 )
 
 // logFormat and logOutput are bound to persistent CLI flags in root.go.
@@ -42,10 +45,42 @@ func InitLogger(format, output string) error {
 		handler = slog.NewTextHandler(w, opts)
 	}
 
+	// Inject trace_id / span_id from context. Pass-through when no active
+	// span is present in context, so non-traced runs are unchanged.
+	handler = &traceContextHandler{inner: handler}
+
 	slog.SetDefault(slog.New(handler))
 
 	// Bridge existing log.Printf calls through slog
 	slog.SetLogLoggerLevel(slog.LevelInfo)
 
 	return nil
+}
+
+type traceContextHandler struct {
+	inner slog.Handler
+}
+
+func (h *traceContextHandler) Enabled(ctx context.Context, lvl slog.Level) bool {
+	return h.inner.Enabled(ctx, lvl)
+}
+
+func (h *traceContextHandler) Handle(ctx context.Context, r slog.Record) error {
+	sc := trace.SpanContextFromContext(ctx)
+	if !sc.IsValid() {
+		return h.inner.Handle(ctx, r)
+	}
+	r.AddAttrs(
+		slog.String("trace_id", sc.TraceID().String()),
+		slog.String("span_id", sc.SpanID().String()),
+	)
+	return h.inner.Handle(ctx, r)
+}
+
+func (h *traceContextHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	return &traceContextHandler{inner: h.inner.WithAttrs(attrs)}
+}
+
+func (h *traceContextHandler) WithGroup(name string) slog.Handler {
+	return &traceContextHandler{inner: h.inner.WithGroup(name)}
 }

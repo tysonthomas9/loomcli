@@ -9,6 +9,10 @@ import (
 	"strconv"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 	"nhooyr.io/websocket" //nolint:staticcheck // SA1019: websocket migration tracked separately
 
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -18,6 +22,40 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 	webuterminal "github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
+
+// terminalTracerName is the instrumentation library name for terminal WS
+// spans. Stable so dashboards filtering on it don't break.
+const terminalTracerName = "github.com/tysonthomas9/loomcli/internal/webui/handlers/terminal"
+
+// Disconnect reasons reported on `ws.disconnect` spans. Bounded enum so
+// the `disconnect.reason` attribute stays low-cardinality. See
+// docs/observability/tracing-contract.md §3.
+const (
+	wsDisconnectReasonClientClose   = "client_close"
+	wsDisconnectReasonServerClose   = "server_close"
+	wsDisconnectReasonBackendExited = "backend_exited"
+	wsDisconnectReasonSessionKilled = "session_killed"
+	wsDisconnectReasonError         = "error"
+)
+
+// wsCloseReason maps a websocket close status to one of the bounded
+// disconnectReason* enum values. Anything we don't explicitly recognise
+// collapses to "error" so the cardinality of `disconnect.reason` stays
+// tied to the enum, not the (effectively unbounded) close-code space.
+func wsCloseReason(status websocket.StatusCode) string { //nolint:staticcheck // SA1019
+	switch status {
+	case websocket.StatusNormalClosure: //nolint:staticcheck // SA1019
+		return wsDisconnectReasonClientClose
+	case websocket.StatusGoingAway: //nolint:staticcheck // SA1019
+		return wsDisconnectReasonServerClose
+	case websocket.StatusCode(realtime.WSCloseBackendExited): //nolint:staticcheck // SA1019
+		return wsDisconnectReasonBackendExited
+	case websocket.StatusCode(realtime.WSCloseSessionKilled): //nolint:staticcheck // SA1019
+		return wsDisconnectReasonSessionKilled
+	default:
+		return wsDisconnectReasonError
+	}
+}
 
 // terminalWSParams holds the dependencies for a terminal WebSocket handler.
 type terminalWSParams struct {
@@ -65,15 +103,50 @@ func HandleTerminalWS(manager webuterminal.PTYSource, auth *realtime.TerminalAut
 		}
 		initialCols, initialRows := initialTerminalSizeFromRequest(r)
 
+		// Short-lived child span covering ONLY the WS upgrade handshake.
+		// We end this before entering the bidirectional relay so we don't
+		// hold a multi-minute (or multi-hour) span open in Jaeger. The
+		// long-lived relay is unspanned by design — per-message spans
+		// would flood the collector. See
+		// docs/observability/tracing-contract.md §3.
+		upgradeCtx, upgradeSpan := otel.Tracer(terminalTracerName).Start(r.Context(), "ws.upgrade",
+			trace.WithAttributes(
+				attribute.String("loom.workspace", workspace),
+				attribute.String("loom.session_id", session),
+				attribute.String("network.peer.address", r.RemoteAddr),
+			),
+		)
+
 		conn, ok := upgradeTerminalWS(w, r, p.patterns)
 		if !ok {
+			upgradeSpan.SetStatus(codes.Error, "network")
+			upgradeSpan.End()
 			return
 		}
+		upgradeSpan.End()
+		_ = upgradeCtx
 
 		closeStatus := websocket.StatusInternalError
 		closeReason := "connection closed"
 		defer func() {
 			_ = conn.Close(closeStatus, closeReason) //nolint:staticcheck // SA1019: websocket migration tracked separately
+
+			// Sibling disconnect span: short-lived. Records the close
+			// reason as a bounded enum so dashboards can group
+			// disconnects without keeping a span open for the lifetime
+			// of the relay.
+			_, discSpan := otel.Tracer(terminalTracerName).Start(context.Background(), "ws.disconnect",
+				trace.WithLinks(trace.LinkFromContext(upgradeCtx)),
+				trace.WithAttributes(
+					attribute.String("loom.workspace", workspace),
+					attribute.String("loom.session_id", session),
+					attribute.String("disconnect.reason", wsCloseReason(closeStatus)),
+				),
+			)
+			if closeStatus == websocket.StatusInternalError { //nolint:staticcheck // SA1019
+				discSpan.SetStatus(codes.Error, "crash")
+			}
+			discSpan.End()
 		}()
 
 		closeStatus, closeReason = runTerminalRelay(

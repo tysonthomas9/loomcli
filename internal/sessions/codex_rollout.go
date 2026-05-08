@@ -9,12 +9,20 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 )
 
 // SyncLatestCodexRollout mirrors the newest Codex rollout for workDir into the
 // Loom session as agent_transcript.jsonl. It is best-effort and returns an
 // empty path when no matching rollout is available.
 func (s *Store) SyncLatestCodexRollout(sessionID, workDir string, since time.Time) (string, error) {
+	_, span := startSpan(cmdstore.RootContext(), "service.Sessions.SyncLatestCodexRollout",
+		attrLoomSessionID(sessionID),
+		attrLoomBackend("codex"),
+	)
+	defer span.End()
+
 	root := codexSessionsRoot()
 	if root == "" {
 		return "", nil
@@ -49,6 +57,7 @@ func (s *Store) SyncLatestCodexRollout(sessionID, workDir string, since time.Tim
 			return nil
 		})
 		if err != nil {
+			recordErr(span, err)
 			return "", err
 		}
 	}
@@ -56,6 +65,7 @@ func (s *Store) SyncLatestCodexRollout(sessionID, workDir string, since time.Tim
 		return "", nil
 	}
 	if err := s.SyncNativeTranscript(sessionID, bestPath); err != nil {
+		recordErr(span, err)
 		return "", err
 	}
 	return bestPath, nil

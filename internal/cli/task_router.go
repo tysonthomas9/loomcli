@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"context"
 	"fmt"
 	"log"
 	"os"
@@ -10,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 )
 
@@ -292,7 +292,7 @@ func FetchReadyIssues(parentID string, repoLabel string) ([]backend.IssueData, e
 	if sourceRepos := os.Getenv("LOOM_SOURCE_REPOS"); sourceRepos != "" {
 		opts.SourceRepos = strings.Split(sourceRepos, ",")
 	}
-	issues, err := ib.Ready(context.Background(), opts)
+	issues, err := ib.Ready(cmdstore.RootContext(), opts)
 	if err != nil {
 		return nil, fmt.Errorf("failed to check ready tasks: %w", err)
 	}

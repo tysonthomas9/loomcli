@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,6 +10,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/cli/git"
 	"github.com/tysonthomas9/loomcli/internal/lockfile"
 )
@@ -40,7 +40,7 @@ func handleOrphanedTask(deps *cli.Deps, worktreePath, taskID string, analyze boo
 // In workspace mode, it searches git logs across ALL repos in the workspace
 // to give Claude the most complete picture of relevant commits.
 func analyzeTaskCompletion(deps *cli.Deps, worktreePath, taskID string) (completed bool, reason string) {
-	detail, err := deps.IssueBackend.Get(context.Background(), taskID)
+	detail, err := deps.IssueBackend.Get(cmdstore.RootContext(), taskID)
 	if err != nil || detail == nil {
 		return false, "Could not fetch task details"
 	}
@@ -126,7 +126,7 @@ func parseCompletionResponse(stdout string) (completed bool, reason string) {
 // closeTask closes a completed task
 func closeTask(deps *cli.Deps, taskID, reason string) {
 	closeReason := fmt.Sprintf("Completed (verified by recovery analysis): %s", reason)
-	_, err := deps.IssueBackend.Close(context.Background(), taskID, backend.CloseParams{Reason: closeReason})
+	_, err := deps.IssueBackend.Close(cmdstore.RootContext(), taskID, backend.CloseParams{Reason: closeReason})
 	if err != nil {
 		fmt.Printf("Warning: failed to close task: %v\n", err)
 	} else {
@@ -139,7 +139,7 @@ func closeTask(deps *cli.Deps, taskID, reason string) {
 // processed and should not be reset.
 func resetTask(deps *cli.Deps, taskID string) {
 	ib := deps.IssueBackend
-	ctx := context.Background()
+	ctx := cmdstore.RootContext()
 
 	// Check current status before resetting
 	detail, err := ib.Get(ctx, taskID)
@@ -291,7 +291,7 @@ func resetOrphanedAgentTasks(deps *cli.Deps, worktreePath, agentName, alreadyHan
 		return
 	}
 
-	issues, err := deps.IssueBackend.List(context.Background(), backend.ListOpts{Assignee: agentName, Status: "in_progress"})
+	issues, err := deps.IssueBackend.List(cmdstore.RootContext(), backend.ListOpts{Assignee: agentName, Status: "in_progress"})
 	if err != nil {
 		fmt.Printf("Warning: could not check for orphaned tasks: %v\n", err)
 		return

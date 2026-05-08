@@ -13,6 +13,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/backend/fleet"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
+	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
@@ -148,8 +149,18 @@ func DefaultDeps() *Deps {
 		issueBackend = newFleetDBIssueBackend()
 	}
 
+	// Wrap the resolved IssueBackend with tracing so every method call
+	// emits a `service.IssueBackend.<Method>` sub-span under the active
+	// CLI / HTTP-server / agent span. Applied after backend selection so
+	// fleet-db, fleet, and api backends all get the same instrumentation.
+	// See issue_backend_tracing.go.
+	issueBackend = wrapIssueBackendWithTracing(issueBackend)
+
 	return &Deps{
-		Git:          defaultGitRunner{},
+		// Wrap the default git runner with tracing so every git subprocess
+		// (push/pull/fetch/merge/status/etc.) emits a sub-span under the
+		// active loom.cli span. See git_runner_tracing.go.
+		Git:          wrapGitRunnerWithTracing(defaultGitRunner{}),
 		Exec:         defaultExecRunner{},
 		FS:           defaultFileSystem{},
 		Logger:       slog.Default(),
@@ -157,7 +168,10 @@ func DefaultDeps() *Deps {
 		IssueBackend: issueBackend,
 		LookPath:     exec.LookPath,
 		ExecCtx:      defaultExecContextRunner{},
-		Agent:        registryAgentInvoker{},
+		// Wrap the registry-backed invoker with tracing so every backend call
+		// from agent flows (plan/task/automode/etc.) emits a sub-span under
+		// the active loom.cli span. See agent_invoker_tracing.go.
+		Agent: wrapAgentInvokerWithTracing(registryAgentInvoker{}),
 	}
 }
 
@@ -219,6 +233,8 @@ func (b *fleetDBIssueBackend) withBackend(ctx context.Context, op string, fn fun
 	if err != nil {
 		return backend.ErrUnavailable(op, "open fleet-db store", err)
 	}
+	// Apply store-level tracing here (this path bypasses cmdstore.OpenStore).
+	handle.Store = cmdstore.WrapStoreWithTracing(handle.Store)
 	defer func() { _ = handle.Close() }()
 
 	ws, err := bootstrap.ResolveActiveWorkspaceKey(ctx, handle.Store.Workspaces())

@@ -1,16 +1,14 @@
 package agent
 
 import (
-	"context"
 	"fmt"
 	"log"
 	"os"
-	"path/filepath"
-	"strings"
 
 	"github.com/spf13/cobra"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/events"
 )
@@ -43,7 +41,7 @@ func runClaim(cmd *cobra.Command, args []string) {
 	cwd, err := os.Getwd()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error getting current directory: %v\n", err)
-		os.Exit(1)
+		cli.ExitWithFlush(1)
 	}
 
 	// Resolve the task title through the active issue backend.
@@ -52,7 +50,7 @@ func runClaim(cmd *cobra.Command, args []string) {
 	// Update the lock file
 	if err := cli.UpdateLockTask(cwd, taskID, taskTitle); err != nil {
 		fmt.Fprintf(os.Stderr, "Error updating lock: %v\n", err)
-		os.Exit(1)
+		cli.ExitWithFlush(1)
 	}
 
 	// Emit task_claimed event (best-effort)
@@ -71,26 +69,19 @@ func runClaim(cmd *cobra.Command, args []string) {
 	}
 }
 
-// emitTaskClaimedEvent creates a temporary event bus and emits a task_claimed event.
-// Uses LOOM_EVENTS_DIR env var, falling back to .loom/events relative to git toplevel.
+// emitTaskClaimedEvent emits a task_claimed event via the process-wide
+// AgentEventBus singleton. The singleton is subscribed to otelexport, so this
+// emission produces a loom.task span under the active trace context.
+//
+// LOOM_EVENTS_DIR is honored by the singleton's lazy init in
+// cli.initAgentEventBus, so the previous fallback behavior is preserved.
+// When the bus is unavailable (mkdir failure on first use) emission is
+// skipped silently — same best-effort contract as before.
 func emitTaskClaimedEvent(taskID, taskTitle string) {
-	eventsDir := os.Getenv("LOOM_EVENTS_DIR")
-	if eventsDir == "" {
-		// Fall back to .loom/events relative to git toplevel
-		cmd := cli.GetDeps(nil).Exec.Run("", "git", "rev-parse", "--show-toplevel")
-		if cmd.Err != nil {
-			return
-		}
-		toplevel := strings.TrimSpace(cmd.Stdout)
-		if toplevel == "" {
-			return
-		}
-		eventsDir = filepath.Join(toplevel, ".loom", "events")
+	bus := cli.AgentEventBus()
+	if bus == nil {
+		return
 	}
-
-	bus := events.NewBus(eventsDir)
-	defer func() { _ = bus.Close() }()
-
 	agentName := os.Getenv("LOOM_AGENT_NAME")
 	evt, err := events.NewEvent(events.TaskClaimed, agentName, "", "", events.TaskClaimedData{TaskID: taskID, Title: taskTitle})
 	if err != nil {
@@ -102,7 +93,9 @@ func emitTaskClaimedEvent(taskID, taskTitle string) {
 }
 
 func getTaskTitle(taskID string) string {
-	detail, err := cli.DefaultIssueBackend().Get(context.Background(), taskID)
+	ctx, cancel := cmdstore.SignalContext()
+	defer cancel()
+	detail, err := cli.DefaultIssueBackend().Get(ctx, taskID)
 	if err != nil || detail == nil {
 		return ""
 	}
