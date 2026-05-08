@@ -18,6 +18,7 @@ import type {
   BackendEnvVarHint,
 } from "@/api/workspace";
 import { useBackendsSetup } from "@/hooks/workspace/useBackendsSetup";
+import { useWorkspaceContext } from "@/hooks/workspace/useWorkspaceContext";
 
 import styles from "./BackendSetupPanel.module.css";
 
@@ -220,6 +221,7 @@ function CommandRow({
   testId: string;
 }): JSX.Element {
   const [copied, setCopied] = useState(false);
+  const { workspaceId } = useWorkspaceContext();
 
   const handleCopy = useCallback(() => {
     navigator.clipboard.writeText(action.command).then(
@@ -233,12 +235,36 @@ function CommandRow({
     );
   }, [action.command]);
 
+  // "Run in terminal" copies the command and navigates to the
+  // workspace terminal view, where the user can paste into a session.
+  // Full server-side command-injection into a fresh terminal session
+  // (as the spec calls for) needs new WebSocket plumbing and is
+  // tracked as a follow-up. Until then this is the cleanest path that
+  // doesn't leave the user back at "what do I do with this command?"
+  const handleRun = useCallback(() => {
+    navigator.clipboard.writeText(action.command).catch(() => {});
+    if (workspaceId) {
+      window.location.assign(`/ws/${workspaceId}/terminal`);
+    }
+  }, [action.command, workspaceId]);
+
   return (
     <div className={styles.command} data-testid={testId}>
       <span className={styles.commandText}>{action.command}</span>
       <button type="button" className={styles.copyButton} onClick={handleCopy}>
         {copied ? "Copied" : "Copy"}
       </button>
+      {workspaceId && action.interactive ? (
+        <button
+          type="button"
+          className={styles.copyButton}
+          onClick={handleRun}
+          data-testid={`${testId}-run`}
+          title="Copy command and open the workspace terminal so you can paste it"
+        >
+          Run in terminal
+        </button>
+      ) : null}
     </div>
   );
 }

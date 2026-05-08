@@ -6,6 +6,7 @@
 import { useEffect, useState } from "react";
 
 import { BackendSetupPanel } from "@/components/BackendSetupPanel";
+import { RepoChecksPanel } from "@/components/RepoChecksPanel";
 import { ErrorDisplay } from "@/components/ErrorDisplay";
 import { LoadingSkeleton } from "@/components/LoadingSkeleton";
 import type { ViewMode } from "@/types";
@@ -212,8 +213,22 @@ export function SettingsView({
           can see how to install/authenticate one before they get to
           choosing a default. */}
       <div className={styles.panel}>
+        <div className={styles.panelHeader}>
+          <h3 className={styles.panelTitle}>AI Backends</h3>
+        </div>
         <div className={styles.panelContent}>
           <BackendSetupPanel />
+        </div>
+      </div>
+
+      {/* Repo preflight checks. The onboarding open_repo_checks
+          action navigates here via the #repo-checks anchor. */}
+      <div className={styles.panel}>
+        <div className={styles.panelHeader}>
+          <h3 className={styles.panelTitle}>Repo Checks</h3>
+        </div>
+        <div className={styles.panelContent}>
+          <RepoChecksPanel />
         </div>
       </div>
 
