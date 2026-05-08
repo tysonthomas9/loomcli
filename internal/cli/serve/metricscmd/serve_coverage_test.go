@@ -295,6 +295,60 @@ func TestHandleStatusWithBackend_UsesWorkspaceScopedIssueBackend(t *testing.T) {
 	}
 }
 
+func TestMonitorDataSource_CachesWorkspaceCollectionAcrossEndpoints(t *testing.T) {
+	t.Setenv("LOOM_WORKSPACE", "WS1")
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS1", Name: "First"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS2", Name: "Second"}); err != nil {
+		t.Fatal(err)
+	}
+
+	scopedBackend := clitest.NewMockIssueBackend()
+	scopedBackend.ReadyResult = []backend.IssueData{
+		{ID: "T-1", Title: "Scoped task", Status: "open", Design: ""},
+	}
+	scopedBackend.StatsResult = &backend.StatsData{TotalIssues: 7, OpenIssues: 6, ClosedIssues: 1}
+
+	backendFnCalls := 0
+	backendFn := func(ctx context.Context) backend.IssueBackend {
+		backendFnCalls++
+		if got := middleware.WorkspaceFromContext(ctx); got != "WS2" {
+			t.Fatalf("workspace context = %q, want WS2", got)
+		}
+		return scopedBackend
+	}
+	dataSource := NewMonitorDataSourceWithTTL(func() *monitor.MonitorData {
+		t.Fatal("fallback collector should not be used for workspace request")
+		return nil
+	}, backendFn, time.Minute)
+
+	for _, handler := range []http.HandlerFunc{
+		HandleStatusWithDataSource(dataSource, st),
+		HandleTasksWithDataSource(dataSource),
+		HandleStatsWithDataSource(dataSource),
+	} {
+		req := httptest.NewRequest(http.MethodGet, "/api/monitor/test?workspace=WS2", nil)
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200, body = %s", rr.Code, rr.Body.String())
+		}
+	}
+
+	if backendFnCalls != 1 {
+		t.Fatalf("backendFn calls = %d, want 1 shared workspace collection", backendFnCalls)
+	}
+	if got := scopedBackend.CallCount("Ready"); got != 1 {
+		t.Fatalf("Ready calls = %d, want 1 shared workspace collection", got)
+	}
+	if got := scopedBackend.CallCount("Stats"); got != 1 {
+		t.Fatalf("Stats calls = %d, want 1 shared workspace collection", got)
+	}
+}
+
 func TestWriteJSON_Coverage(t *testing.T) {
 	rr := httptest.NewRecorder()
 
