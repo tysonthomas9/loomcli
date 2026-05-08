@@ -49,6 +49,24 @@ export function getWsBaseUrl(): string {
 let authToken: string | null = null;
 
 /**
+ * Generate a W3C traceparent header value. Format:
+ *   <version>-<trace-id (16 bytes hex)>-<span-id (8 bytes hex)>-<flags>
+ * Per the trace contract (§5) we set sampled=1 so server-side honors
+ * the trace; sampling is enforced server-side via OTEL_TRACES_SAMPLER.
+ */
+function makeTraceparent(): string {
+  const traceId = randomHex(16);
+  const spanId = randomHex(8);
+  return `00-${traceId}-${spanId}-01`;
+}
+
+function randomHex(byteCount: number): string {
+  const bytes = new Uint8Array(byteCount);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/**
  * Build a workspace-scoped API URL path.
  * All workspace-scoped API functions use this to construct paths like
  * /api/workspaces/{wsId}/issues/... instead of flat /api/issues/...
@@ -175,6 +193,13 @@ const apiMiddleware: Middleware = {
     // Inject auth token
     if (authToken && !request.headers.get("Authorization")) {
       request.headers.set("Authorization", `Bearer ${authToken}`);
+    }
+
+    // Inject W3C traceparent so server-side spans connect to a stable
+    // browser-side trace ID. Propagation-only — no client-side spans.
+    // See docs/observability/tracing-contract.md §5.
+    if (!request.headers.get("traceparent")) {
+      request.headers.set("traceparent", makeTraceparent());
     }
 
     // Apply default timeout for openapi-fetch calls. Request always has a
@@ -347,6 +372,11 @@ async function fetchApi<T>(
 
     if (body !== undefined) {
       headers["Content-Type"] = "application/json";
+    }
+
+    // Inject W3C traceparent (mirrors the openapi-fetch middleware).
+    if (!headers["traceparent"]) {
+      headers["traceparent"] = makeTraceparent();
     }
 
     const requestBody = body !== undefined ? JSON.stringify(body) : null;

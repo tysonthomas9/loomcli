@@ -59,6 +59,34 @@ describe("API Client", () => {
       );
     });
 
+    it("injects a W3C traceparent header on every request", async () => {
+      // Every browser-initiated request must carry a traceparent so
+      // server-side spans connect to a stable browser-side trace ID.
+      // See docs/observability/tracing-contract.md §5.
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({}),
+      });
+
+      await get("/api/test");
+
+      const mockFn = global.fetch as ReturnType<typeof vi.fn>;
+      const init = mockFn.mock.calls[0][1] as RequestInit;
+      const headers = init.headers as Record<string, string>;
+      const tp = headers["traceparent"] ?? headers["Traceparent"];
+      expect(tp).toBeDefined();
+      // W3C format: 00-<32 hex>-<16 hex>-01
+      expect(tp).toMatch(/^00-[0-9a-f]{32}-[0-9a-f]{16}-01$/);
+
+      // Two independent calls must produce two independent trace IDs.
+      await get("/api/test2");
+      const init2 = mockFn.mock.calls[1][1] as RequestInit;
+      const headers2 = init2.headers as Record<string, string>;
+      const tp2 = headers2["traceparent"] ?? headers2["Traceparent"];
+      expect(tp2).not.toBe(tp);
+    });
+
     it("does not include Content-Type header for requests without body", async () => {
       global.fetch = vi.fn().mockResolvedValue({
         ok: true,

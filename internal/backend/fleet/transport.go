@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"sync"
 	"time"
+
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 // sharedTransport is a process-wide *http.Transport used by every
@@ -44,7 +46,7 @@ var (
 func SharedHTTPClient() *http.Client {
 	sharedClientOnce.Do(func() {
 		sharedClient = &http.Client{
-			Transport: sharedTransport,
+			Transport: otelhttp.NewTransport(sharedTransport),
 			Timeout:   65 * time.Second,
 		}
 	})

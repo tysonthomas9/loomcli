@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"time"
@@ -29,6 +30,12 @@ func NotifyWebUI(ctx context.Context, serverURL, taskID, sessionID string, statu
 		return
 	}
 
+	ctx, span := startSpan(ctx, "service.Sessions.NotifyWebUI",
+		attrLoomSessionID(sessionID),
+		attrLoomTaskID(taskID),
+	)
+	defer span.End()
+
 	payload := sessionNotifyPayload{
 		TaskID:    taskID,
 		SessionID: sessionID,
@@ -37,6 +44,7 @@ func NotifyWebUI(ctx context.Context, serverURL, taskID, sessionID string, statu
 
 	body, err := json.Marshal(payload)
 	if err != nil {
+		recordErr(span, err)
 		log.Printf("sessions.NotifyWebUI: marshal error: %v", err)
 		return
 	}
@@ -47,6 +55,7 @@ func NotifyWebUI(ctx context.Context, serverURL, taskID, sessionID string, statu
 	url := serverURL + NotifyPath
 	req, err := http.NewRequestWithContext(notifyCtx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
+		recordErr(span, err)
 		log.Printf("sessions.NotifyWebUI: request error: %v", err)
 		return
 	}
@@ -57,12 +66,14 @@ func NotifyWebUI(ctx context.Context, serverURL, taskID, sessionID string, statu
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
+		recordErr(span, err)
 		log.Printf("sessions.NotifyWebUI: POST %s failed: %v", url, err)
 		return
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 300 {
+		recordErr(span, fmt.Errorf("status %d", resp.StatusCode))
 		log.Printf("sessions.NotifyWebUI: POST %s returned %d", url, resp.StatusCode)
 	}
 }

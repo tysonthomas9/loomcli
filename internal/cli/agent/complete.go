@@ -37,7 +37,7 @@ func runComplete(cmd *cobra.Command, args []string) {
 		cwd, err := os.Getwd()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error getting current directory: %v\n", err)
-			os.Exit(1)
+			cli.ExitWithFlush(1)
 		}
 
 		worktreePath, err = findWorktreeRoot(cwd)
@@ -61,13 +61,13 @@ func runComplete(cmd *cobra.Command, args []string) {
 
 	if err := cli.EnsureSignalDir(signalDir); err != nil {
 		fmt.Fprintf(os.Stderr, "Error creating signal directory: %v\n", err)
-		os.Exit(1)
+		cli.ExitWithFlush(1)
 	}
 
 	// Write the worktree path to the signal file (for debugging/verification)
 	if err := os.WriteFile(signalFile, []byte(worktreePath), 0600); err != nil {
 		fmt.Fprintf(os.Stderr, "Error writing signal file: %v\n", err)
-		os.Exit(1)
+		cli.ExitWithFlush(1)
 	}
 
 	fmt.Println("Task completion signaled")

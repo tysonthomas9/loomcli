@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
@@ -94,6 +96,12 @@ func HandleStatus(collectDataFn func() *monitor.MonitorData, st store.Store) htt
 
 func HandleStatusWithBackend(collectDataFn func() *monitor.MonitorData, st store.Store, backendFn IssueBackendFn) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		workspaceHint := r.URL.Query().Get("workspace")
+		ctx, span := startSpan(r.Context(), "service.Monitor.Status",
+			attribute.String("loom.workspace", workspaceHint))
+		defer span.End()
+		r = r.WithContext(ctx)
+
 		data := monitorDataForRequest(r, collectDataFn, backendFn)
 		if data == nil {
 			w.Header().Set("Content-Type", "application/json")
@@ -101,10 +109,10 @@ func HandleStatusWithBackend(collectDataFn func() *monitor.MonitorData, st store
 			_, _ = w.Write([]byte(`{"error":"data collection unavailable"}`))
 			return
 		}
-		workspaceHint := r.URL.Query().Get("workspace")
-		agents := storeAgentsForMonitor(r.Context(), st, workspaceHint)
+		agents := storeAgentsForMonitor(ctx, st, workspaceHint)
+		span.SetAttributes(attribute.Int("result.count", len(agents)))
 		writeJSON(w, StatusResponse{
-			Workspace:      getWorkspaceInfo(r.Context(), st, workspaceHint),
+			Workspace:      getWorkspaceInfo(ctx, st, workspaceHint),
 			Agents:         agents,
 			Tasks:          data.Tasks,
 			InProgressList: data.InProgressTasks,
@@ -123,6 +131,12 @@ func HandleAgents(collectDataFn func() *monitor.MonitorData, st store.Store) htt
 
 func HandleAgentsWithBackend(collectDataFn func() *monitor.MonitorData, st store.Store, backendFn IssueBackendFn) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		workspaceHint := r.URL.Query().Get("workspace")
+		ctx, span := startSpan(r.Context(), "service.Monitor.Agents",
+			attribute.String("loom.workspace", workspaceHint))
+		defer span.End()
+		r = r.WithContext(ctx)
+
 		data := monitorDataForRequest(r, collectDataFn, backendFn)
 		if data == nil {
 			w.Header().Set("Content-Type", "application/json")
@@ -130,9 +144,8 @@ func HandleAgentsWithBackend(collectDataFn func() *monitor.MonitorData, st store
 			_, _ = w.Write([]byte(`{"error":"data collection unavailable"}`))
 			return
 		}
-		workspaceHint := r.URL.Query().Get("workspace")
-		wsInfo := getWorkspaceInfo(r.Context(), st, workspaceHint)
-		agents := storeAgentsForMonitor(r.Context(), st, workspaceHint)
+		wsInfo := getWorkspaceInfo(ctx, st, workspaceHint)
+		agents := storeAgentsForMonitor(ctx, st, workspaceHint)
 
 		response := AgentsResponse{
 			Workspace: wsInfo,
@@ -142,6 +155,7 @@ func HandleAgentsWithBackend(collectDataFn func() *monitor.MonitorData, st store
 
 		response.ByWorkspace = groupAgentsByWorkspace(agents)
 
+		span.SetAttributes(attribute.Int("result.count", len(agents)))
 		writeJSON(w, response)
 	}
 }
@@ -153,6 +167,12 @@ func HandleTasks(collectDataFn func() *monitor.MonitorData) http.HandlerFunc {
 
 func HandleTasksWithBackend(collectDataFn func() *monitor.MonitorData, backendFn IssueBackendFn) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		workspaceHint := r.URL.Query().Get("workspace")
+		ctx, span := startSpan(r.Context(), "service.Monitor.Tasks",
+			attribute.String("loom.workspace", workspaceHint))
+		defer span.End()
+		r = r.WithContext(ctx)
+
 		data := monitorDataForRequest(r, collectDataFn, backendFn)
 		if data == nil {
 			w.Header().Set("Content-Type", "application/json")
@@ -160,6 +180,12 @@ func HandleTasksWithBackend(collectDataFn func() *monitor.MonitorData, backendFn
 			_, _ = w.Write([]byte(`{"error":"data collection unavailable"}`))
 			return
 		}
+		// result.count = total task entries surfaced across the buckets so
+		// dashboards can see how chatty this endpoint is per workspace.
+		span.SetAttributes(attribute.Int("result.count",
+			len(data.NeedsPlanningTasks)+len(data.ReadyToImplement)+
+				len(data.ReviewTasks)+len(data.InProgressTasks)+
+				len(data.BacklogTasks)+len(data.ClosedTasks)))
 		writeJSON(w, TasksResponse{
 			Summary:          data.Tasks,
 			NeedsPlanning:    data.NeedsPlanningTasks,
