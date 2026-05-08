@@ -293,6 +293,12 @@ func TestHandleStatusWithBackend_UsesWorkspaceScopedIssueBackend(t *testing.T) {
 	if resp.Tasks.NeedsPlanning != 1 {
 		t.Fatalf("needs_planning = %d, want scoped ready task", resp.Tasks.NeedsPlanning)
 	}
+	if len(resp.NeedsPlanning) != 1 || resp.NeedsPlanning[0].ID != "T-1" {
+		t.Fatalf("needs_planning list = %+v, want scoped ready task", resp.NeedsPlanning)
+	}
+	if resp.ReadyToImplement == nil || resp.Backlog == nil || resp.Closed == nil {
+		t.Fatalf("empty task buckets must serialize as arrays, got ready=%v backlog=%v closed=%v", resp.ReadyToImplement, resp.Backlog, resp.Closed)
+	}
 }
 
 func TestMonitorDataSource_CachesWorkspaceCollectionAcrossEndpoints(t *testing.T) {
@@ -346,6 +352,30 @@ func TestMonitorDataSource_CachesWorkspaceCollectionAcrossEndpoints(t *testing.T
 	}
 	if got := scopedBackend.CallCount("Stats"); got != 1 {
 		t.Fatalf("Stats calls = %d, want 1 shared workspace collection", got)
+	}
+}
+
+func TestMonitorDataSource_DefaultWorkspaceUsesWarmCollector(t *testing.T) {
+	collectCalls := 0
+	backendFnCalls := 0
+	dataSource := NewMonitorDataSourceWithDefaultWorkspace(func() *monitor.MonitorData {
+		collectCalls++
+		return &monitor.MonitorData{Timestamp: time.Unix(1, 0).UTC()}
+	}, func(ctx context.Context) backend.IssueBackend {
+		backendFnCalls++
+		return nil
+	}, "WS2")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/monitor/status?workspace=WS2", nil)
+	if data := dataSource.Resolve(req); data == nil {
+		t.Fatal("Resolve returned nil")
+	}
+
+	if collectCalls != 1 {
+		t.Fatalf("collect calls = %d, want 1 warm collector read", collectCalls)
+	}
+	if backendFnCalls != 0 {
+		t.Fatalf("backendFn calls = %d, want 0 duplicate workspace collection", backendFnCalls)
 	}
 }
 

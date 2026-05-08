@@ -1371,14 +1371,20 @@ type MonitorStatsResponse struct {
 
 // MonitorStatusResponse defines model for MonitorStatusResponse.
 type MonitorStatusResponse struct {
-	AgentTasks     map[string]MonitorTaskInfo `json:"agent_tasks"`
-	Agents         []MonitorAgentStatus       `json:"agents"`
-	InProgressList []MonitorTaskInfo          `json:"in_progress_list"`
-	Stats          MonitorStats               `json:"stats"`
-	Sync           MonitorSyncInfo            `json:"sync"`
-	Tasks          MonitorTaskSummary         `json:"tasks"`
-	Timestamp      time.Time                  `json:"timestamp"`
-	Workspace      MonitorWorkspaceInfo       `json:"workspace"`
+	AgentTasks       map[string]MonitorTaskInfo `json:"agent_tasks"`
+	Agents           []MonitorAgentStatus       `json:"agents"`
+	Backlog          []MonitorTaskInfo          `json:"backlog"`
+	Closed           []MonitorTaskInfo          `json:"closed"`
+	InProgress       []MonitorTaskInfo          `json:"in_progress"`
+	InProgressList   []MonitorTaskInfo          `json:"in_progress_list"`
+	NeedsPlanning    []MonitorTaskInfo          `json:"needs_planning"`
+	NeedsReview      []MonitorTaskInfo          `json:"needs_review"`
+	ReadyToImplement []MonitorTaskInfo          `json:"ready_to_implement"`
+	Stats            MonitorStats               `json:"stats"`
+	Sync             MonitorSyncInfo            `json:"sync"`
+	Tasks            MonitorTaskSummary         `json:"tasks"`
+	Timestamp        time.Time                  `json:"timestamp"`
+	Workspace        MonitorWorkspaceInfo       `json:"workspace"`
 }
 
 // MonitorSyncInfo defines model for MonitorSyncInfo.

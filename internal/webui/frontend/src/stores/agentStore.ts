@@ -7,7 +7,7 @@
 
 import { createStore, type StoreApi } from "zustand/vanilla";
 
-import { fetchAgents, fetchStatus, fetchTasks } from "../api/agents";
+import { fetchStatus } from "../api/agents";
 import type {
   LoomAgentStatus,
   LoomTaskSummary,
@@ -328,16 +328,21 @@ export function createAgentStore(
       set({ isLoading: true });
 
       try {
-        const agentsResult = await withTimeout(
-          fetchAgents(activeWorkspaceId),
+        const statusResult = await withTimeout(
+          fetchStatus(activeWorkspaceId),
           FETCH_TIMEOUT_MS,
-          "Agent fetch",
+          "Status fetch",
         );
 
         // Primary success
         const now = Date.now();
         set({
-          agents: agentsResult,
+          agents: statusResult.agents,
+          tasks: statusResult.tasks,
+          taskLists: statusResult.taskLists,
+          agentTasks: statusResult.agentTasks,
+          sync: statusResult.sync,
+          stats: statusResult.stats,
           isConnected: true,
           error: null,
           lastUpdated: now,
@@ -356,48 +361,6 @@ export function createAgentStore(
             state.retryCountdown,
           ),
         });
-
-        // Fire secondary fetches (fire-and-forget)
-        void (async () => {
-          try {
-            const statusResult = await withTimeout(
-              fetchStatus(activeWorkspaceId),
-              FETCH_TIMEOUT_MS,
-              "Status fetch",
-            );
-            set({
-              tasks: statusResult.tasks,
-              agentTasks: statusResult.agentTasks,
-              sync: statusResult.sync,
-              stats: statusResult.stats,
-            });
-          } catch (statusError) {
-            console.warn(
-              "Loom status fetch failed:",
-              statusError instanceof Error
-                ? statusError.message
-                : String(statusError),
-            );
-          }
-        })();
-
-        void (async () => {
-          try {
-            const tasksResult = await withTimeout(
-              fetchTasks(activeWorkspaceId),
-              FETCH_TIMEOUT_MS,
-              "Tasks fetch",
-            );
-            set({ taskLists: tasksResult });
-          } catch (taskError) {
-            console.warn(
-              "Loom tasks fetch failed:",
-              taskError instanceof Error
-                ? taskError.message
-                : String(taskError),
-            );
-          }
-        })();
       } catch (err) {
         // Primary failure
         const error = err instanceof Error ? err : new Error(String(err));
