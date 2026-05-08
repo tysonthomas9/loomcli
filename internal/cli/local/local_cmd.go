@@ -24,6 +24,9 @@ var (
 	portFlag    int
 	bindFlag    string
 	jsonFlag    bool
+
+	readRuntimeStatusFn = ReadRuntimeStatus
+	restartRuntimeFn    = RestartRuntime
 )
 
 var localCmd = &cobra.Command{
@@ -310,6 +313,15 @@ type RuntimeStartResult struct {
 
 // StartRuntime starts the local runtime service if it is not already running.
 func StartRuntime(dataDir string, port int) (*RuntimeStartResult, error) {
+	return startRuntime(dataDir, port, false)
+}
+
+// RestartRuntime stops any recorded live runtime process and starts a new one.
+func RestartRuntime(dataDir string, port int) (*RuntimeStartResult, error) {
+	return startRuntime(dataDir, port, true)
+}
+
+func startRuntime(dataDir string, port int, force bool) (*RuntimeStartResult, error) {
 	if dataDir == "" {
 		var err error
 		dataDir, err = resolveDataDir("")
@@ -318,13 +330,15 @@ func StartRuntime(dataDir string, port int) (*RuntimeStartResult, error) {
 		}
 	}
 	if info, err := readRuntime(dataDir); err == nil && processRunning(info.PID) {
-		identity := currentExecutableIdentity()
-		redisHash, err := currentFleetDBRedisHash(dataDir)
-		if err != nil {
-			return nil, fmt.Errorf("load FleetDB Redis settings: %w", err)
-		}
-		if runtimeMatchesExecutable(info, identity) && runtimeMatchesFleetDBRedisSettings(info, redisHash) {
-			return &RuntimeStartResult{PID: info.PID, URL: info.URL, AlreadyRunning: true}, nil
+		if !force {
+			identity := currentExecutableIdentity()
+			redisHash, err := currentFleetDBRedisHash(dataDir)
+			if err != nil {
+				return nil, fmt.Errorf("load FleetDB Redis settings: %w", err)
+			}
+			if runtimeMatchesExecutable(info, identity) && runtimeMatchesFleetDBRedisSettings(info, redisHash) {
+				return &RuntimeStartResult{PID: info.PID, URL: info.URL, AlreadyRunning: true}, nil
+			}
 		}
 		if err := stopRuntimeProcess(info.PID, 15*time.Second); err != nil {
 			return nil, fmt.Errorf("stop stale local runtime: %w", err)
@@ -375,17 +389,21 @@ func EnsureRuntimeStarted(ctx context.Context, dataDir string, port int) (*Runti
 			return nil, err
 		}
 	}
-	status, err := ReadRuntimeStatus(ctx, dataDir)
+	status, err := readRuntimeStatusFn(ctx, dataDir)
 	if err == nil && status.Healthy {
 		return status, nil
 	}
-	if _, err := StartRuntime(dataDir, port); err != nil {
+	if status != nil && status.Runtime != nil && status.Runtime.PID > 0 {
+		if _, err := restartRuntimeFn(dataDir, port); err != nil {
+			return status, err
+		}
+	} else if _, err := StartRuntime(dataDir, port); err != nil {
 		return status, err
 	}
 	ticker := time.NewTicker(250 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		status, err = ReadRuntimeStatus(ctx, dataDir)
+		status, err = readRuntimeStatusFn(ctx, dataDir)
 		if err == nil && status.Healthy {
 			return status, nil
 		}

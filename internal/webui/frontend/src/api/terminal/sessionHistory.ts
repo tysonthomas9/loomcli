@@ -36,7 +36,7 @@ export async function listSessionHistory(
     },
   );
   if (error) throw apiErrorFromResponse(error, response);
-  return (unwrapResponse(data) ?? []) as SessionRecord[];
+  return (unwrapResponse(data, response) ?? []) as SessionRecord[];
 }
 
 /**

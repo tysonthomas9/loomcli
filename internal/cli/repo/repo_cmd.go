@@ -133,7 +133,16 @@ func ensureRepoLocalCheckout(ctx context.Context, ws, name, remoteURL string) (p
 		return "", false, nil
 	}
 	if local.Repos != nil && local.Repos[name] != "" {
-		return local.Repos[name], false, nil
+		cachedPath := local.Repos[name]
+		if _, err := os.Stat(filepath.Join(cachedPath, ".git")); err == nil {
+			return cachedPath, false, nil
+		}
+		if _, err := os.Stat(cachedPath); os.IsNotExist(err) {
+			return "", false, fmt.Errorf("cached repo checkout does not exist: %s", cachedPath)
+		} else if err != nil {
+			return "", false, fmt.Errorf("inspect cached repo checkout: %w", err)
+		}
+		return "", false, fmt.Errorf("cached repo checkout is not a git repo: %s", cachedPath)
 	}
 	target, err := localworkspace.RepoCheckoutPath(local.Path, name)
 	if err != nil {

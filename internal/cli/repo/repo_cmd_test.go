@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 )
 
@@ -48,5 +49,27 @@ func TestEnsureRepoLocalCheckoutNoopsWithoutLocalWorkspacePath(t *testing.T) {
 	}
 	if path != "" || cloned {
 		t.Fatalf("path=%q cloned=%t, want no-op", path, cloned)
+	}
+}
+
+func TestEnsureRepoLocalCheckoutRejectsMissingCachedPath(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	missingPath := filepath.Join(t.TempDir(), "missing-checkout")
+	if err := bootstrap.MutateWorkspaceLocalState("TEST", func(local *bootstrap.WorkspaceLocalState) error {
+		local.Path = t.TempDir()
+		local.Repos = map[string]string{
+			"hello-world": missingPath,
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("MutateWorkspaceLocalState returned error: %v", err)
+	}
+
+	path, cloned, err := ensureRepoLocalCheckout(context.Background(), "TEST", "hello-world", "https://github.com/octocat/Hello-World")
+	if err == nil {
+		t.Fatalf("ensureRepoLocalCheckout returned path=%q cloned=%t, want stale cached checkout error", path, cloned)
+	}
+	if !strings.Contains(err.Error(), "cached repo checkout does not exist") {
+		t.Fatalf("ensureRepoLocalCheckout error = %q, want stale cached checkout message", err)
 	}
 }

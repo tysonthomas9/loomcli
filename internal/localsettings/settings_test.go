@@ -2,6 +2,7 @@ package localsettings
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -69,5 +70,27 @@ func TestSaveUsesPrivatePermissionsAndSanitizesPassword(t *testing.T) {
 	safe := Sanitize(loaded)
 	if !safe.FleetDBRedis.PasswordSet {
 		t.Fatal("expected sanitized settings to report password_set")
+	}
+}
+
+func TestSaveCreatesPrivateSettingsDir(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "loom-data")
+	settings := Default()
+	settings.FleetDBRedis = RedisConfig{
+		Enabled:  true,
+		Addr:     "example.upstash.io:6379",
+		Password: "secret",
+		TLS:      true,
+	}
+
+	if err := Save(dir, settings); err != nil {
+		t.Fatalf("Save returned error: %v", err)
+	}
+	info, err := os.Stat(dir)
+	if err != nil {
+		t.Fatalf("stat settings dir: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0700 {
+		t.Fatalf("settings dir mode = %#o, want 0700", got)
 	}
 }

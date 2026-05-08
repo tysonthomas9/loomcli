@@ -25,7 +25,11 @@ export async function getWorkspaceBackendConfig(
     error?: string;
   };
   if (!envelope.success || !envelope.data) {
-    throw new ApiError(0, envelope.error ?? "Unknown error");
+    throw new ApiError(
+      response?.status ?? 0,
+      response?.statusText || envelope.error || "Unknown error",
+      envelope.error,
+    );
   }
   cacheBackendConfig(envelope.data);
   return envelope.data;
@@ -51,7 +55,11 @@ export async function updateWorkspaceBackend(
   if (data && typeof data === "object" && "success" in data) {
     const msg = data as { success: boolean; message?: string };
     if (!msg.success) {
-      throw new ApiError(0, msg.message ?? "Unknown error");
+      throw new ApiError(
+        response?.status ?? 0,
+        response?.statusText || msg.message || "Unknown error",
+        msg.message,
+      );
     }
   }
   // Refetch full workspace data after backend update

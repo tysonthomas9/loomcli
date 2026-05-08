@@ -36,16 +36,32 @@ function createMockWorkspaceData(
   overrides?: Partial<WorkspaceData>,
 ): WorkspaceData {
   return {
+    id: "test-ws",
     name: "test-ws",
     path: "/tmp/test",
     repos: [],
     groups: [],
     agents: [],
     workspaces: [
-      { name: "alpha", path: "/tmp/alpha", active: true, repo_count: 1 },
-      { name: "beta", path: "/tmp/beta", active: false, repo_count: 2 },
+      {
+        id: "alpha",
+        name: "alpha",
+        path: "/tmp/alpha",
+        active: true,
+        repo_count: 1,
+        is_default: false,
+      },
+      {
+        id: "beta",
+        name: "beta",
+        path: "/tmp/beta",
+        active: false,
+        repo_count: 2,
+        is_default: false,
+      },
     ],
     workspace_order: ["beta", "alpha"],
+    default_workspace: "test-ws",
     ...overrides,
   };
 }

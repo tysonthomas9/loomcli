@@ -95,9 +95,10 @@ func Save(dataDir string, settings Settings) error {
 	if err := Validate(settings.FleetDBRedis); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(dataDir, 0755); err != nil {
+	if err := os.MkdirAll(dataDir, 0700); err != nil {
 		return fmt.Errorf("mkdir local settings dir: %w", err)
 	}
+	_ = os.Chmod(dataDir, 0700)
 	data, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal local settings: %w", err)

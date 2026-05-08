@@ -195,6 +195,60 @@ func TestRuntimeMatchesFleetDBRedisSettings(t *testing.T) {
 	}
 }
 
+func TestEnsureRuntimeStartedRestartsUnhealthyRecordedRuntime(t *testing.T) {
+	originalRead := readRuntimeStatusFn
+	originalRestart := restartRuntimeFn
+	t.Cleanup(func() {
+		readRuntimeStatusFn = originalRead
+		restartRuntimeFn = originalRestart
+	})
+
+	reads := 0
+	readRuntimeStatusFn = func(context.Context, string) (*RuntimeStatusSnapshot, error) {
+		reads++
+		if reads == 1 {
+			return &RuntimeStatusSnapshot{
+				Runtime: &RuntimeSnapshot{
+					PID: 123,
+					URL: "http://127.0.0.1:9",
+				},
+				Healthy: false,
+				Error:   "health check timed out",
+			}, nil
+		}
+		return &RuntimeStatusSnapshot{
+			Runtime: &RuntimeSnapshot{
+				PID: 456,
+				URL: "http://127.0.0.1:4321",
+			},
+			Healthy: true,
+		}, nil
+	}
+
+	restarted := false
+	restartRuntimeFn = func(dataDir string, port int) (*RuntimeStartResult, error) {
+		restarted = true
+		if dataDir != "/tmp/loom-data" {
+			t.Fatalf("restart dataDir = %q, want /tmp/loom-data", dataDir)
+		}
+		if port != 4321 {
+			t.Fatalf("restart port = %d, want 4321", port)
+		}
+		return &RuntimeStartResult{PID: 456}, nil
+	}
+
+	status, err := EnsureRuntimeStarted(context.Background(), "/tmp/loom-data", 4321)
+	if err != nil {
+		t.Fatalf("EnsureRuntimeStarted returned error: %v", err)
+	}
+	if !restarted {
+		t.Fatal("EnsureRuntimeStarted did not restart unhealthy recorded runtime")
+	}
+	if status == nil || !status.Healthy || status.Runtime == nil || status.Runtime.PID != 456 {
+		t.Fatalf("status = %#v, want healthy restarted runtime", status)
+	}
+}
+
 func containsEnv(env []string, needle string) bool {
 	for _, entry := range env {
 		if entry == needle {

@@ -48,10 +48,15 @@ function buildQueryString(params: Record<string, unknown>): string {
  */
 function unwrap<T>(
   response: { success: boolean; data?: T; error?: string } | undefined,
+  httpResponse?: Response,
 ): T {
   if (!response) throw new ApiError(0, "Empty response");
   if (!response.success) {
-    throw new ApiError(0, response.error ?? "Unknown error");
+    throw new ApiError(
+      httpResponse?.status ?? 0,
+      httpResponse?.statusText || response.error || "Unknown error",
+      response.error,
+    );
   }
   return response.data as T;
 }
@@ -138,7 +143,7 @@ export async function getIssue(
     { params: { path: { ws: workspaceId, id } } },
   );
   if (error) throw apiErrorFromResponse(error, response);
-  return normalizeIssueRepo(unwrap(data) as unknown as IssueDetails);
+  return normalizeIssueRepo(unwrap(data, response) as unknown as IssueDetails);
 }
 
 /**
@@ -171,7 +176,7 @@ export async function getReadyIssues(
     },
   );
   if (error) throw apiErrorFromResponse(error, response);
-  return normalizeIssueRepos(unwrap(data) as unknown as Issue[]);
+  return normalizeIssueRepos(unwrap(data, response) as unknown as Issue[]);
 }
 
 /**
@@ -219,7 +224,7 @@ export async function getBlockedIssues(
     },
   );
   if (error) throw apiErrorFromResponse(error, response);
-  return unwrap(data) as unknown as BlockedIssue[];
+  return unwrap(data, response) as unknown as BlockedIssue[];
 }
 
 /**
@@ -254,7 +259,7 @@ export async function getKanbanIssues(
     },
   );
   if (error) throw apiErrorFromResponse(error, response);
-  return normalizeIssueRepos(unwrap(data) as unknown as Issue[]);
+  return normalizeIssueRepos(unwrap(data, response) as unknown as Issue[]);
 }
 
 // ============= GRAPH OPERATIONS =============
@@ -291,7 +296,11 @@ export async function fetchGraphIssues(
   if (error) throw apiErrorFromResponse(error, response);
 
   if (!data || !data.success) {
-    throw new ApiError(0, "Unknown error");
+    throw new ApiError(
+      response?.status ?? 0,
+      response?.statusText || "Unknown error",
+      "Unknown error",
+    );
   }
 
   if (data.data === undefined && process.env.NODE_ENV === "development") {
@@ -407,7 +416,7 @@ export async function createIssue(
     },
   );
   if (error) throw apiErrorFromResponse(error, response);
-  return normalizeIssueRepo(unwrap(data) as unknown as Issue);
+  return normalizeIssueRepo(unwrap(data, response) as unknown as Issue);
 }
 
 /**
@@ -440,7 +449,7 @@ export async function updateIssue(
     },
   );
   if (error) throw apiErrorFromResponse(error, response);
-  return normalizeIssueRepo(unwrap(data) as unknown as Issue);
+  return normalizeIssueRepo(unwrap(data, response) as unknown as Issue);
 }
 
 /**
@@ -514,7 +523,7 @@ export async function moveIssue(
     },
   );
   if (error) throw apiErrorFromResponse(error, response);
-  return unwrap(data) as MoveIssueResult;
+  return unwrap(data, response) as MoveIssueResult;
 }
 
 // ============= COMMENT OPERATIONS =============
@@ -536,7 +545,7 @@ export async function addComment(
     },
   );
   if (error) throw apiErrorFromResponse(error, response);
-  return unwrap(data) as unknown as Comment;
+  return unwrap(data, response) as unknown as Comment;
 }
 
 // ============= EXPORTS FOR TESTING =============
