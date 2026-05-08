@@ -1,7 +1,6 @@
 package daemon
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -252,7 +251,7 @@ func initDaemonServices(config *cfgpkg.DaemonConfig, projectDir string, paths da
 		_ = otelExp
 	}
 
-	storeHandle, storeErr := cmdstore.OpenStore(context.Background())
+	storeHandle, storeErr := cmdstore.OpenStore(cmdstore.RootContext())
 	if storeErr != nil {
 		fmt.Fprintf(os.Stderr, "Error: failed to open fleet-db store for daemon: %v\n", storeErr)
 		os.Exit(1)

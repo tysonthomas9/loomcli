@@ -24,6 +24,8 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/backend/api/gen"
+
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 // maxResponseBody limits response body reads to 50MB to prevent OOM on
@@ -67,9 +69,16 @@ func New(cfg Config) (*APIBackend, error) {
 		return nil, fmt.Errorf("api.New: invalid server URL %q", cfg.BaseURL)
 	}
 
+	// Use caller-supplied HTTPClient as-is (e.g. NewAuthHTTPClient wraps an
+	// httpclient.Client whose own transport is already otelhttp-wrapped, so
+	// re-wrapping here would double-emit spans). Otherwise, build a default
+	// client whose transport carries OpenTelemetry instrumentation.
 	httpClient := cfg.HTTPClient
 	if httpClient == nil {
-		httpClient = &http.Client{Timeout: 30 * time.Second}
+		httpClient = &http.Client{
+			Transport: otelhttp.NewTransport(http.DefaultTransport),
+			Timeout:   30 * time.Second,
+		}
 	}
 
 	return &APIBackend{

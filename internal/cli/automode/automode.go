@@ -231,7 +231,14 @@ func applyAutoModeDefaults(opts *AutoModeOptions) {
 		opts.TaskPause = 2 * time.Second
 	}
 	if opts.EventBus == nil {
-		opts.EventBus = events.NopBus{}
+		// Use the process-wide agent bus so emitted task/agent events flow
+		// to its otelexport subscriber. Falls back to NopBus when the bus
+		// can't be constructed (e.g., events dir not writable).
+		if bus := cli.AgentEventBus(); bus != nil {
+			opts.EventBus = bus
+		} else {
+			opts.EventBus = events.NopBus{}
+		}
 	}
 	if opts.RateLimitWindow == 0 {
 		opts.RateLimitWindow = 10 * time.Minute

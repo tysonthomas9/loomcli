@@ -7,12 +7,20 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/lockfile"
 )
 
 // Finalize completes a session by setting final metadata, writing it to disk,
 // and appending the finalized SessionRecord to index.jsonl.
 func (s *Session) Finalize(opts FinalizeOptions) error {
+	_, span := startSpan(cmdstore.RootContext(), "service.Sessions.Finalize",
+		attrLoomSessionID(s.Meta.SessionID),
+		attrLoomAgent(s.Meta.AgentName),
+		attrLoomTaskID(opts.TaskID),
+	)
+	defer span.End()
+
 	now := time.Now().UTC()
 
 	// Set task and outcome fields.
@@ -62,6 +70,7 @@ func (s *Session) Finalize(opts FinalizeOptions) error {
 	// Write final metadata.json atomically.
 	sessDir := filepath.Join(s.store.dir, s.Meta.SessionID)
 	if err := writeMetadataAtomic(sessDir, s.Meta); err != nil {
+		recordErr(span, err)
 		return fmt.Errorf("write metadata.json: %w", err)
 	}
 
@@ -69,12 +78,14 @@ func (s *Session) Finalize(opts FinalizeOptions) error {
 	if opts.DiffPatch != "" {
 		diffPath := filepath.Join(sessDir, "diff.patch")
 		if err := os.WriteFile(diffPath, []byte(opts.DiffPatch), sessFilePerm); err != nil {
+			recordErr(span, err)
 			return fmt.Errorf("write diff.patch: %w", err)
 		}
 	}
 
 	// Append finalized record to index.jsonl.
 	if err := s.store.appendIndex(s.Meta.SessionRecord); err != nil {
+		recordErr(span, err)
 		return fmt.Errorf("append index: %w", err)
 	}
 
@@ -115,7 +126,16 @@ func (s *Store) appendIndex(rec SessionRecord) error {
 // to re-index orphaned session directories that exist on disk but are
 // missing from the index.
 func (s *Store) ReIndex(rec SessionRecord) error {
-	return s.appendIndex(rec)
+	_, span := startSpan(cmdstore.RootContext(), "service.Sessions.ReIndex",
+		attrLoomSessionID(rec.SessionID),
+	)
+	defer span.End()
+
+	if err := s.appendIndex(rec); err != nil {
+		recordErr(span, err)
+		return err
+	}
+	return nil
 }
 
 // mergeTokenVal returns opts if non-zero, otherwise disk.

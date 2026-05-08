@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/atomicfile"
+	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/sessions/redact"
 )
 
@@ -37,19 +38,29 @@ func (s *Store) SyncNativeTranscript(sessionID, srcPath string) error {
 	if srcPath == "" {
 		return nil
 	}
+	_, span := startSpan(cmdstore.RootContext(), "service.Sessions.SyncNativeTranscript",
+		attrLoomSessionID(sessionID),
+	)
+	defer span.End()
+
 	if strings.ContainsAny(sessionID, "/\\") {
-		return fmt.Errorf("invalid session ID %q: contains path separator", sessionID)
+		err := fmt.Errorf("invalid session ID %q: contains path separator", sessionID)
+		recordErr(span, err)
+		return err
 	}
 
 	sessDir := filepath.Join(s.dir, sessionID)
 	cleanDir := filepath.Clean(sessDir)
 	if !strings.HasPrefix(cleanDir+string(os.PathSeparator), filepath.Clean(s.dir)+string(os.PathSeparator)) {
-		return fmt.Errorf("invalid session ID %q", sessionID)
+		err := fmt.Errorf("invalid session ID %q", sessionID)
+		recordErr(span, err)
+		return err
 	}
 	if _, err := os.Stat(sessDir); err != nil {
 		if os.IsNotExist(err) {
 			return fmt.Errorf("session %q does not exist", sessionID)
 		}
+		recordErr(span, err)
 		return fmt.Errorf("stat session dir: %w", err)
 	}
 
@@ -57,6 +68,7 @@ func (s *Store) SyncNativeTranscript(sessionID, srcPath string) error {
 		if os.IsNotExist(err) {
 			return nil
 		}
+		recordErr(span, err)
 		return fmt.Errorf("stat source transcript: %w", err)
 	}
 
@@ -65,18 +77,21 @@ func (s *Store) SyncNativeTranscript(sessionID, srcPath string) error {
 	// #nosec G304 — srcPath comes from the agent hook payload (trusted)
 	data, err := os.ReadFile(srcPath)
 	if err != nil {
+		recordErr(span, err)
 		return fmt.Errorf("read source transcript: %w", err)
 	}
 
 	if redactionEnabled() {
 		redacted, rerr := redact.JSONLBytes(data)
 		if rerr != nil {
+			recordErr(span, rerr)
 			return fmt.Errorf("redact native transcript: %w", rerr)
 		}
 		data = redacted
 	}
 
 	if err := atomicfile.WriteFile(dstPath, data, sessFilePerm); err != nil {
+		recordErr(span, err)
 		return fmt.Errorf("write native transcript: %w", err)
 	}
 	return nil

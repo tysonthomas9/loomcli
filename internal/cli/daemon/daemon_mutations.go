@@ -7,7 +7,9 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/notify"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 // Control socket operation names for mutation queries.
@@ -116,24 +118,41 @@ func (b *MutationBuffer) GetSince(sinceMs int64) []backend.MutationData {
 
 // WaitSince returns mutations after sinceMs, blocking up to timeout if none are immediately available.
 // Returns empty slice on timeout or context cancellation.
+//
+// One span per call (`daemon.mutations.cycle`) — one drain cycle of the
+// mutation buffer, even when the call returns zero mutations on timeout
+// or shutdown. The span ends when this function returns.
 func (b *MutationBuffer) WaitSince(ctx context.Context, sinceMs int64, timeout time.Duration) []backend.MutationData {
+	cycleStart := time.Now()
+	ctx, span := startMutationsCycleSpan(ctx)
+	defer span.End()
+	span.SetAttributes(attribute.Int64("since_ms", sinceMs))
+
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 
+	finalize := func(out []backend.MutationData) []backend.MutationData {
+		span.SetAttributes(
+			attribute.Int("mutations.count", len(out)),
+			attribute.Int64("cycle.duration_ms", time.Since(cycleStart).Milliseconds()),
+		)
+		return out
+	}
+
 	for {
 		if result := b.GetSince(sinceMs); len(result) > 0 {
-			return result
+			return finalize(result)
 		}
 
 		select {
 		case <-b.notify:
 			// Notification received — loop back to re-check buffer
 		case <-timer.C:
-			return nil
+			return finalize(nil)
 		case <-ctx.Done():
-			return nil
+			return finalize(nil)
 		case <-b.done:
-			return nil
+			return finalize(nil)
 		}
 	}
 }
@@ -226,7 +245,7 @@ func (d *Daemon) handleControlWaitForMutations(args json.RawMessage) DaemonContr
 		timeout = maxWaitTimeout
 	}
 
-	mutations := d.mutBuf.WaitSince(context.Background(), sinceMs, timeout)
+	mutations := d.mutBuf.WaitSince(cmdstore.RootContext(), sinceMs, timeout)
 	if mutations == nil {
 		mutations = []backend.MutationData{}
 	}

@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+
+	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 )
 
 // TokenUsage holds aggregated token counts from a Claude transcript.
@@ -40,12 +42,16 @@ type claudeTranscriptEntry struct {
 // On I/O errors mid-scan, returns partial results alongside the error.
 // Callers that need exact totals should check the error before using the result.
 func SumTranscriptUsage(transcriptPath string) (TokenUsage, error) {
+	_, span := startSpan(cmdstore.RootContext(), "service.Sessions.SumTranscriptUsage")
+	defer span.End()
+
 	// #nosec G304 — transcriptPath comes from Claude's hook payload (trusted)
 	f, err := os.Open(transcriptPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return TokenUsage{}, nil
 		}
+		recordErr(span, err)
 		return TokenUsage{}, fmt.Errorf("open transcript: %w", err)
 	}
 	defer func() { _ = f.Close() }()
@@ -98,6 +104,7 @@ func SumTranscriptUsage(transcriptPath string) (TokenUsage, error) {
 	}
 
 	if err := scanner.Err(); err != nil {
+		recordErr(span, err)
 		return total, fmt.Errorf("scan transcript: %w", err)
 	}
 

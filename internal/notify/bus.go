@@ -1,10 +1,13 @@
 package notify
 
 import (
+	"context"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"go.opentelemetry.io/otel/attribute"
 )
 
 // DefaultBufferSize is the default per-subscriber channel buffer size.
@@ -110,6 +113,11 @@ func New(opts ...Option) *Bus {
 // Publish delivers an event to all matching subscribers. Non-blocking: if a
 // subscriber's buffer is full, the event is dropped for that subscriber.
 // After Close, Publish is a no-op.
+//
+// Emits one notify.fanout span covering the entire fan-out loop. Each
+// subscriber dispatch is a non-blocking channel send, so per-subscriber
+// child spans would add more overhead than they yield observability —
+// subscribers.count and the dropped counters captured below are sufficient.
 func (b *Bus) Publish(e Event) {
 	if e.Timestamp.IsZero() {
 		e.Timestamp = time.Now()
@@ -122,16 +130,31 @@ func (b *Bus) Publish(e Event) {
 		return
 	}
 
+	_, span := startSpan(context.Background(),
+		"notify.fanout",
+		attribute.String("notify.event_type", e.Topic),
+		attribute.String("loom.workspace", e.WorkspaceID),
+	)
+	defer span.End()
+
+	delivered := 0
+	dropped := 0
 	for _, sub := range b.subs {
 		if !matches(sub, e) {
 			continue
 		}
 		select {
 		case sub.ch <- e:
+			delivered++
 		default:
 			sub.dropped.Add(1)
+			dropped++
 		}
 	}
+	span.SetAttributes(
+		attribute.Int("subscribers.count", delivered),
+		attribute.Int("subscribers.dropped", dropped),
+	)
 }
 
 // Subscribe creates a subscription scoped to the given workspace and topic

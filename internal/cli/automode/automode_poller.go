@@ -1,7 +1,6 @@
 package automode
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -9,7 +8,9 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 // useFixedPolling allows reverting to fixed 200ms polling via environment variable
@@ -55,7 +56,15 @@ func (p *adaptivePoller) hadNoActivity() {
 // fetchReadyIssues returns parsed ready issues via the IssueBackend.
 // When parentID is non-empty, filters to tasks under that epic.
 // When repoLabel is non-empty, filters to tasks labeled repo:<name>.
+//
+// One span per call (`automode.poll.cycle`) — one cycle of the poller, even
+// when the result set is empty. The span ends when this function returns;
+// downstream IssueBackend calls inherit it as parent.
 func fetchReadyIssues(parentID string, repoLabel string) ([]backend.IssueData, error) {
+	cycleStart := time.Now()
+	ctx, span := startPollSpan(cmdstore.RootContext(), parentID, repoLabel)
+	defer span.End()
+
 	ib := cli.DefaultIssueBackend()
 	// Limit 10000: ready queues include open + review + in_progress; a small limit
 	// can push the few truly-workable open tasks past the cutoff, starving
@@ -67,10 +76,19 @@ func fetchReadyIssues(parentID string, repoLabel string) ([]backend.IssueData, e
 	if sourceRepos := os.Getenv("LOOM_SOURCE_REPOS"); sourceRepos != "" {
 		opts.SourceRepos = strings.Split(sourceRepos, ",")
 	}
-	issues, err := ib.Ready(context.Background(), opts)
+	issues, err := ib.Ready(ctx, opts)
 	if err != nil {
+		recordPollErr(span, err)
+		span.SetAttributes(
+			attribute.Int("result.count", 0),
+			attribute.Int64("cycle.duration_ms", time.Since(cycleStart).Milliseconds()),
+		)
 		return nil, fmt.Errorf("failed to check ready tasks: %w", err)
 	}
+	span.SetAttributes(
+		attribute.Int("result.count", len(issues)),
+		attribute.Int64("cycle.duration_ms", time.Since(cycleStart).Milliseconds()),
+	)
 	return issues, nil
 }
 

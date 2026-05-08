@@ -1,7 +1,6 @@
 package automode
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"log"
@@ -11,6 +10,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/backends"
+	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/cli/git"
 	"github.com/tysonthomas9/loomcli/internal/cli/sessionfinalize"
 	"github.com/tysonthomas9/loomcli/internal/events"
@@ -27,7 +27,7 @@ func createAutoSession(ctx *autoLoopCtx, prompt string) *sessions.Session {
 	})
 	if sess != nil {
 		backends.SetActiveSessionRuntimeEnv(cli.GetWorkspaceRuntimeDir(), sess.SessionID())
-		go sessions.NotifyWebUI(context.Background(), backends.ResolveWebUIURL(), "", sess.SessionID(), sessions.StatusRunning, backends.ResolveNotifyToken())
+		go sessions.NotifyWebUI(cmdstore.RootContext(), backends.ResolveWebUIURL(), "", sess.SessionID(), sessions.StatusRunning, backends.ResolveNotifyToken())
 	}
 	return sess
 }
@@ -60,7 +60,7 @@ func finalizeAutoSession(ctx *autoLoopCtx, sess *sessions.Session, beforeRef str
 		EstimatedCostUSD: estimatedCostUSD,
 	})
 	backends.ClearActiveSessionEnv()
-	go sessions.NotifyWebUI(context.Background(), backends.ResolveWebUIURL(), taskID, sess.SessionID(), sess.Meta.Status, backends.ResolveNotifyToken())
+	go sessions.NotifyWebUI(cmdstore.RootContext(), backends.ResolveWebUIURL(), taskID, sess.SessionID(), sess.Meta.Status, backends.ResolveNotifyToken())
 }
 
 // maxSameTaskFailures is the consecutive same-task-ID failure threshold that

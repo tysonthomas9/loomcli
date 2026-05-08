@@ -32,6 +32,12 @@ func OpenStore(ctx context.Context) (*bootstrap.StoreHandle, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open store: %w", err)
 	}
+	// Wrap the store so every method call emits a
+	// `service.Store.<SubStore>.<Method>` span. nil-safe; no-op when
+	// tracing is disabled. Lives on the cmdstore side because
+	// internal/cli (where the spec asked for it) cannot be imported by
+	// cmdstore without a cycle. See store_tracing.go.
+	handle.Store = WrapStoreWithTracing(handle.Store)
 	return handle, nil
 }
 
@@ -48,11 +54,37 @@ func ensureFleetDBEnvFromFleetEnv() {
 	}
 }
 
+// rootCtx is the process-wide parent context for CLI commands. Set once by
+// SetRootContext before rootCmd.Execute runs; read by SignalContext so any
+// trace span (or other context-attached value) installed at the CLI entry
+// point is inherited by every subcommand without each subcommand having to
+// thread cmd.Context() down through every helper.
+var rootCtx context.Context = context.Background()
+
+// SetRootContext installs the parent context that SignalContext-derived
+// contexts inherit from. Call from cli.Execute before dispatching to Cobra.
+func SetRootContext(ctx context.Context) {
+	if ctx != nil {
+		rootCtx = ctx
+	}
+}
+
+// RootContext returns the process-wide root context. Use this from helper
+// functions that don't have access to a cobra cmd or a parent ctx but want
+// to inherit the active trace span / cancellation chain set up at CLI
+// entry. Prefer threading ctx through call sites where possible; this is
+// for the long tail of utility helpers where that's not practical.
+func RootContext() context.Context {
+	return rootCtx
+}
+
 // SignalContext returns a context cancelled on SIGINT/SIGTERM. CLI
 // commands use this so Ctrl+C propagates cleanly to fleet-db RPCs and
-// the embedded subprocess shutdown.
+// the embedded subprocess shutdown. Inherits from the root context set
+// by SetRootContext, which lets a trace span installed at CLI startup
+// parent every command's context-attached spans.
 func SignalContext() (context.Context, context.CancelFunc) {
-	return signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	return signal.NotifyContext(rootCtx, os.Interrupt, syscall.SIGTERM)
 }
 
 // ActiveWorkspace resolves the explicit active workspace key

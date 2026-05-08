@@ -7,14 +7,24 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/events"
 	"github.com/tysonthomas9/loomcli/internal/lockfile"
+
+	"go.opentelemetry.io/otel/attribute"
 )
 
 // StopAgent sends SIGTERM then SIGKILL to a single agent and its entire process group.
 // This function is safe to call concurrently with waitForAgent.
 // It uses polling instead of cmd.Wait() to avoid double-wait issues.
 // The process group kill ensures child processes (e.g. codex) are not orphaned.
+//
+// Wrapped in a daemon.supervisor.stop span. The span attaches loom.exit_code
+// at end (as observed by waitForAgent and recorded on the AgentProcess) and
+// loom.stop_reason from the AgentProcess.StopReason set by the caller. The
+// span ends when StopAgent returns; the actual exec.Cmd.Wait happens on the
+// supervise goroutine concurrently — see the long-lived monitoring goroutine
+// note in the comment on superviseAgent.
 func (s *Supervisor) StopAgent(ap *AgentProcess, sigtermTimeout time.Duration) {
 	ap.Mu.Lock()
 	proc := ap.Cmd
@@ -24,6 +34,23 @@ func (s *Supervisor) StopAgent(ap *AgentProcess, sigtermTimeout time.Duration) {
 	if proc == nil || proc.Process == nil || pid == 0 {
 		return
 	}
+
+	_, span := startSpan(cmdstore.RootContext(),
+		"daemon.supervisor.stop",
+		attribute.String("loom.agent", ap.Entry.Worktree),
+		attribute.String("loom.workspace", s.WorkspaceID),
+	)
+	defer func() {
+		ap.Mu.Lock()
+		exitCode := ap.LastExitCode
+		stopReason := string(ap.StopReason)
+		ap.Mu.Unlock()
+		span.SetAttributes(
+			attribute.Int("loom.exit_code", exitCode),
+			attribute.String("loom.stop_reason", stopReason),
+		)
+		span.End()
+	}()
 
 	slog.Info("sending signal to process group", "worktree", ap.Entry.Worktree, "signal", "SIGTERM", "pid", pid)
 
