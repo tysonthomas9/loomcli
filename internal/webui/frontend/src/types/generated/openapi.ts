@@ -106,23 +106,6 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/csp-report": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /** CSP violation reporting (rate-limited, 60 req/min/IP) */
-    post: operations["reportCSPViolation"];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
   "/api/workspaces/{ws}/stats": {
     parameters: {
       query?: never;
@@ -188,6 +171,23 @@ export interface paths {
     post?: never;
     /** Delete a workspace */
     delete: operations["deleteWorkspace"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/monitor/status": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Full monitor dashboard data for a workspace */
+    get: operations["getWorkspaceMonitorStatus"];
+    put?: never;
+    post?: never;
+    delete?: never;
     options?: never;
     head?: never;
     patch?: never;
@@ -2923,35 +2923,6 @@ export interface operations {
       };
     };
   };
-  reportCSPViolation: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        "application/json": Record<string, never>;
-      };
-    };
-    responses: {
-      /** @description Report recorded */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-      /** @description Rate limited */
-      429: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-    };
-  };
   getWorkspaceStats: {
     parameters: {
       query?: never;
@@ -3117,6 +3088,43 @@ export interface operations {
       };
       /** @description Workspace not found */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  getWorkspaceMonitorStatus: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Dashboard status */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MonitorStatusResponse"];
+        };
+      };
+      /** @description Workspace not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Data collection unavailable */
+      503: {
         headers: {
           [name: string]: unknown;
         };

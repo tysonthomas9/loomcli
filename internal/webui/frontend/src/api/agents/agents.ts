@@ -91,8 +91,10 @@ export async function fetchStatus(
 ): Promise<FetchStatusResult> {
   if (workspaceId) {
     const d = await get<LoomStatusResponse>(
-      monitorPath("/api/monitor/status", workspaceId),
-      { signal: AbortSignal.timeout(15000) },
+      wsUrl(workspaceId, "/monitor/status"),
+      {
+        signal: AbortSignal.timeout(15000),
+      },
     );
     return statusResponseToResult(d);
   }

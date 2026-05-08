@@ -42,7 +42,6 @@ func (app *Server) registerCoreAPIRoutes(h *handlermux.Handlers) {
 	app.mux.HandleFunc("GET /health", h.Health)
 	app.mux.HandleFunc("GET /api/health", h.APIHealth)
 	app.mux.HandleFunc("POST /api/client-errors", h.ClientErrors)
-	app.mux.HandleFunc("POST /api/csp-report", h.CSPReport)
 	app.mux.HandleFunc("GET /api/config", h.AuthConfig)
 	app.mux.HandleFunc("GET /api/metrics", h.Metrics)
 	app.mux.HandleFunc("GET /api/config/terminal", h.GetTerminalConfig)
@@ -151,6 +150,19 @@ func (app *Server) registerWorkspaceRoutes() {
 	app.mux.Handle("PATCH /api/workspaces/{ws}/name", middleware.Workspace(app.wsExistsFn)(handlermux.HandleWorkspaceRename(app.workspaceSvc)))
 	app.mux.Handle("GET /api/workspaces/{ws}/config/backend", middleware.Workspace(app.wsExistsFn)(handlermux.HandleWorkspaceBackendGet(app.workspaceSvc)))
 	app.mux.Handle("PATCH /api/workspaces/{ws}/config/backend", middleware.Workspace(app.wsExistsFn)(handlermux.HandleWorkspaceBackendPatch(app.workspaceSvc)))
+	if statusHandler := app.config.MonitorHandlers.Status; statusHandler != nil {
+		app.mux.Handle("GET /api/workspaces/{ws}/monitor/status", middleware.Workspace(app.wsExistsFn)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			q := r.URL.Query()
+			if q.Get("workspace") == "" {
+				q.Set("workspace", middleware.WorkspaceFromContext(r.Context()))
+			}
+			r2 := r.Clone(r.Context())
+			u := *r.URL
+			u.RawQuery = q.Encode()
+			r2.URL = &u
+			statusHandler(w, r2)
+		})))
+	}
 
 	wsMux := http.NewServeMux()
 	for _, mod := range app.wsModules {

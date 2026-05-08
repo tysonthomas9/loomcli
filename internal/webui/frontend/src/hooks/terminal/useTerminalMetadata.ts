@@ -30,13 +30,19 @@ export interface UseTerminalMetadataReturn {
   handleMutation: (mutation: MutationPayload) => void;
 }
 
+export interface UseTerminalMetadataOptions {
+  enabled?: boolean;
+}
+
 const DEBOUNCE_MS = 100;
 
 export function useTerminalMetadata(
   workspace: string,
+  options: UseTerminalMetadataOptions = {},
 ): UseTerminalMetadataReturn {
+  const enabled = options.enabled ?? true;
   const [tabs, setTabs] = useState<TabMetadata[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(enabled);
   const [error, setError] = useState<Error | null>(null);
   const mountedRef = useRef(true);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -52,6 +58,10 @@ export function useTerminalMetadata(
   }, []);
 
   const fetchTabs = useCallback(async () => {
+    if (!enabled) {
+      setIsLoading(false);
+      return;
+    }
     if (!workspace) {
       // Workspace not resolved yet — stay in the loading state so
       // downstream consumers (e.g. useTabInit) don't see
@@ -75,14 +85,22 @@ export function useTerminalMetadata(
         setIsLoading(false);
       }
     }
-  }, [workspace]);
+  }, [enabled, workspace]);
 
   // Re-fetch when workspace changes
   useEffect(() => {
+    if (!enabled) {
+      if (debounceRef.current) {
+        clearTimeout(debounceRef.current);
+        debounceRef.current = null;
+      }
+      setIsLoading(false);
+      return;
+    }
     setTabs([]);
     setIsLoading(true);
     fetchTabs();
-  }, [fetchTabs]);
+  }, [enabled, fetchTabs]);
 
   const createTab = useCallback(
     async (session: string, label: string, sortOrder: number) => {
@@ -281,6 +299,7 @@ export function useTerminalMetadata(
 
   const handleMutation = useCallback(
     (mutation: MutationPayload) => {
+      if (!enabled) return;
       if (mutation.type !== "terminal_metadata") return;
       // Debounce refetch to collapse multiple rapid events (e.g., reorder)
       if (debounceRef.current) {
@@ -290,7 +309,7 @@ export function useTerminalMetadata(
         fetchTabs();
       }, DEBOUNCE_MS);
     },
-    [fetchTabs],
+    [enabled, fetchTabs],
   );
 
   return {

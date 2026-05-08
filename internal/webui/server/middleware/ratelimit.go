@@ -146,7 +146,7 @@ func (rl *RateLimiter) evictStale() {
 
 // isExcludedFromRateLimit returns true for paths that should never be rate limited.
 func isExcludedFromRateLimit(path string) bool {
-	return path == "/health" || path == "/api/health" || path == "/api/client-errors" || path == "/api/csp-report"
+	return path == "/health" || path == "/api/health" || path == "/api/client-errors"
 }
 
 // isMutatingMethod returns true for HTTP methods that modify server state.

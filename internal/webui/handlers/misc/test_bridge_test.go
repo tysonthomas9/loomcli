@@ -40,9 +40,6 @@ var NewFileModule = NewModule
 // maxRequestBody is the maximum request body size (1MB).
 const maxRequestBody = 1 << 20
 
-// newCSPReportLimiter → NewCSPReportLimiter
-var newCSPReportLimiter = NewCSPReportLimiter
-
 // ---------------------------------------------------------------------------
 // Handler function aliases (handleXxx → HandleXxx)
 // ---------------------------------------------------------------------------
@@ -55,7 +52,6 @@ func handleAuthConfig(extAuthURL string, limiter *AuthConfigLimiter) http.Handle
 }
 
 var handleClientErrors = HandleClientErrors
-var handleCSPReport = HandleCSPReport
 var handleFileRead = HandleFileRead
 var handleFileTree = HandleFileTree
 var handleFileWrite = HandleFileWrite

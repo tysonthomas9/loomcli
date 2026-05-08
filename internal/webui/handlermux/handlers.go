@@ -21,7 +21,6 @@ type Handlers struct {
 	Health              http.HandlerFunc
 	APIHealth           http.HandlerFunc
 	ClientErrors        http.HandlerFunc
-	CSPReport           http.HandlerFunc
 	AuthConfig          http.HandlerFunc
 	Metrics             http.HandlerFunc // pre-built by caller (requires fleet types)
 	GetTerminalConfig   http.HandlerFunc
@@ -34,7 +33,6 @@ type Handlers struct {
 
 	// Closers for cleanup
 	ClientErrLimiter Stopper
-	CSPLimiter       Stopper
 	AuthCfgLimiter   Stopper
 }
 
@@ -77,7 +75,6 @@ type HandlerDeps struct {
 // BuildHandlers constructs all top-level HTTP handlers.
 func BuildHandlers(deps HandlerDeps) *Handlers {
 	clientErrLimiter := misc.NewClientErrorLimiter(rate.Limit(10.0/60.0), 10, 5*time.Minute, 10*time.Minute)
-	cspLimiter := misc.NewCSPReportLimiter(rate.Limit(1.0), 20, 5*time.Minute, 10*time.Minute)
 	authCfgLimiter := misc.NewAuthConfigLimiter(rate.Limit(5), 10, 5*time.Minute, 10*time.Minute)
 
 	editorCache := misc.NewDefaultEditorCache()
@@ -90,7 +87,6 @@ func BuildHandlers(deps HandlerDeps) *Handlers {
 		Health:       healthhandlers.HandleHealth(deps.Pool),
 		APIHealth:    apiHealth,
 		ClientErrors: misc.HandleClientErrors(clientErrLimiter),
-		CSPReport:    misc.HandleCSPReport(cspLimiter),
 		AuthConfig:   misc.HandleAuthConfig(deps.ExtAuthURL, authCfgLimiter, deps.IssueBackendFn),
 		Metrics:      healthhandlers.HandleMetrics(deps.Hub, deps.FleetTimeoutsFn, deps.ClaimMetrics),
 		GetTerminalConfig: hterminal.HandleGetTerminalConfig(hterminal.TerminalLifecycleConfig{
@@ -103,7 +99,6 @@ func BuildHandlers(deps HandlerDeps) *Handlers {
 		DaemonSupervisor: deps.DaemonSupervisor,
 		DaemonConfig:     deps.DaemonConfig,
 		ClientErrLimiter: clientErrLimiter,
-		CSPLimiter:       cspLimiter,
 		AuthCfgLimiter:   authCfgLimiter,
 	}
 

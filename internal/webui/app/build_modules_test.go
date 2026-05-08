@@ -78,7 +78,6 @@ func TestRegisterWorkspaceRoutes_IteratesModules(t *testing.T) {
 	app.buildHandlers()
 	t.Cleanup(func() {
 		app.handlers.ClientErrLimiter.Stop()
-		app.handlers.CSPLimiter.Stop()
 		app.handlers.AuthCfgLimiter.Stop()
 	})
 

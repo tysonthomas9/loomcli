@@ -36,11 +36,6 @@ func isPublicRoute(method, path string) bool {
 		return true
 	}
 
-	// CSP violation reports are sent by browsers automatically without auth headers
-	if method == http.MethodPost && normalizedPath == "/api/csp-report" {
-		return true
-	}
-
 	// Session notifications use their own auth mechanism
 	if method == http.MethodPost && normalizedPath == sessions.NotifyPath {
 		return true
