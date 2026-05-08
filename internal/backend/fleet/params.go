@@ -301,9 +301,13 @@ func updateParamsToPatchRequest(params backend.UpdateParams) map[string]interfac
 //     scalar value directly; omitempty handles the unset case)
 //   - "source_repo" → "repo"
 //
-// Dropped (no equivalent on fleet-db's CreateIssueRequest):
-//   - id, acceptance_criteria, created_by, external_ref,
+// Dropped from the POST body (no equivalent on fleet-db's CreateIssueRequest):
+//   - id, status, acceptance_criteria, created_by, external_ref,
 //     estimated_minutes, dependencies
+//
+// Status and dependencies are still applied by FleetBackend.Create after the
+// issue exists via workflow endpoints. They are only omitted from this strict
+// POST body.
 //
 // If any of those need round-tripping, file a fleet-db ticket to extend
 // the CreateIssueRequest schema rather than smuggling them through here.
@@ -311,7 +315,6 @@ func createParamsToBody(params backend.CreateParams) map[string]interface{} {
 	req := make(map[string]interface{})
 	setNonEmptyStr(req, "title", params.Title)
 	setNonEmptyStr(req, "description", params.Description)
-	setNonEmptyStr(req, "status", params.Status)
 	if params.Priority != 0 {
 		req["priority"] = params.Priority
 	}

@@ -19,9 +19,12 @@ func TestNewDaemon_EmptyAgents(t *testing.T) {
 	cfg := &DaemonConfig{
 		Agents: []AgentEntry{},
 	}
-	_, err := NewDaemon(cfg, "/tmp", nil, nil, nil)
-	if err == nil {
-		t.Error("expected error for empty agents, got nil")
+	d, err := NewDaemon(cfg, "/tmp", nil, nil, nil)
+	if err != nil {
+		t.Fatalf("NewDaemon empty agents: %v", err)
+	}
+	if d.config != cfg {
+		t.Fatal("daemon config was not preserved")
 	}
 }
 

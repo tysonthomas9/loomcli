@@ -38,6 +38,11 @@ func (s *Supervisor) acquireAgentOwnership(ap *AgentProcess) bool {
 			slog.Info("agent ownership held by another daemon", "worktree", ap.Entry.Worktree, "workspace", s.WorkspaceID, "err", err)
 			return false
 		}
+		if errors.Is(err, domain.ErrNotFound) {
+			clearAgentOwnershipLeaseState(ap)
+			slog.Info("agent ownership leases unavailable; continuing without ownership guard", "worktree", ap.Entry.Worktree, "workspace", s.WorkspaceID, "err", err)
+			return true
+		}
 		slog.Warn("agent ownership acquire failed", "worktree", ap.Entry.Worktree, "workspace", s.WorkspaceID, "err", err)
 		return false
 	}
@@ -49,6 +54,15 @@ func (s *Supervisor) acquireAgentOwnership(ap *AgentProcess) bool {
 	ap.Mu.Unlock()
 	slog.Debug("agent ownership acquired", "worktree", ap.Entry.Worktree, "workspace", s.WorkspaceID, "node_id", nodeID, "fencing_token", lease.FencingToken)
 	return true
+}
+
+func clearAgentOwnershipLeaseState(ap *AgentProcess) {
+	ap.Mu.Lock()
+	ap.OwnershipLeaseID = ""
+	ap.OwnershipLeaseToken = ""
+	ap.OwnershipFencingToken = 0
+	ap.OwnershipLastHeartbeat = time.Time{}
+	ap.Mu.Unlock()
 }
 
 func (s *Supervisor) releaseAgentOwnership(ap *AgentProcess) {

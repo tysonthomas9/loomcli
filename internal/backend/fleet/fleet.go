@@ -551,7 +551,35 @@ func (b *FleetBackend) Create(ctx context.Context, params backend.CreateParams) 
 		return nil, backend.ErrInternal("Create", "unmarshal response", err)
 	}
 	result := issueToData(&issue)
+	for _, depID := range params.Dependencies {
+		if strings.TrimSpace(depID) == "" {
+			continue
+		}
+		if err := b.AddDependency(ctx, backend.DepAddParams{
+			FromID:  result.ID,
+			ToID:    depID,
+			DepType: "blocks",
+		}); err != nil {
+			return nil, err
+		}
+	}
+	if err := b.applyCreateStatus(ctx, result.ID, params); err != nil {
+		return nil, err
+	}
 	return &result, nil
+}
+
+func (b *FleetBackend) applyCreateStatus(ctx context.Context, id string, params backend.CreateParams) error {
+	target := strings.TrimSpace(params.Status)
+	if target == "" || target == "open" {
+		return nil
+	}
+	update := backend.UpdateParams{Status: &target}
+	if params.DeferUntil != "" {
+		update.DeferUntil = &params.DeferUntil
+	}
+	_, err := b.applyStatusUpdate(ctx, id, update)
+	return err
 }
 
 func (b *FleetBackend) Update(ctx context.Context, id string, params backend.UpdateParams) error {

@@ -151,6 +151,53 @@ func TestControlPlaneClientAgentSessionUpdateBodyUsesWireNames(t *testing.T) {
 	}
 }
 
+func TestControlPlaneClientAgentCommandCreateQueuesCommand(t *testing.T) {
+	now := time.Now().UTC()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/WS/agent-commands" {
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.String())
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode create: %v", err)
+		}
+		if body["status"] != string(domain.AgentCommandQueued) {
+			t.Fatalf("command create status = %#v, want queued; body=%#v", body["status"], body)
+		}
+		if body["target_agent_id"] != "agent-1" || body["target_node_id"] != "node-1" || body["type"] != "start" {
+			t.Fatalf("body = %#v", body)
+		}
+		writeJSON(t, w, domain.AgentCommand{
+			WorkspaceKey:  "WS",
+			CommandID:     "cmd-1",
+			TargetAgentID: "agent-1",
+			TargetNodeID:  "node-1",
+			Type:          "start",
+			Status:        domain.AgentCommandQueued,
+			CreatedAt:     now,
+			UpdatedAt:     now,
+		})
+	}))
+	defer ts.Close()
+
+	client, err := New(Config{BaseURL: ts.URL, Actor: "tester"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd, err := client.AgentCommands().Create(t.Context(), store.AgentCommandCreate{
+		WorkspaceKey:  "WS",
+		TargetAgentID: "agent-1",
+		TargetNodeID:  "node-1",
+		Type:          "start",
+	})
+	if err != nil {
+		t.Fatalf("create command: %v", err)
+	}
+	if cmd.Status != domain.AgentCommandQueued {
+		t.Fatalf("status = %q, want queued", cmd.Status)
+	}
+}
+
 func writeJSON(t *testing.T, w http.ResponseWriter, v any) {
 	t.Helper()
 	w.Header().Set("Content-Type", "application/json")

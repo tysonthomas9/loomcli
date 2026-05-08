@@ -34,7 +34,7 @@ FROM node:20-alpine AS runtime
 
 # System packages
 RUN apk add --no-cache \
-    tmux git jq curl ca-certificates bash chromium \
+    tmux git jq curl ca-certificates bash coreutils make chromium \
     nss freetype harfbuzz ttf-freefont
 
 # Playwright: use system chromium instead of downloading
@@ -62,10 +62,11 @@ RUN --mount=type=cache,target=/root/.npm \
 COPY e2e/stubs/claude e2e/stubs/codex e2e/stubs/opencode /usr/local/bin/
 COPY e2e/verify_todo.sh e2e/verify_list.sh /usr/local/bin/
 COPY e2e/run_test.sh /usr/local/bin/run_test.sh
+COPY e2e/epic_runner_codex.sh /usr/local/bin/epic_runner_codex.sh
 RUN mkdir -p /etc/loom \
     && chmod +x /usr/local/bin/claude /usr/local/bin/codex /usr/local/bin/opencode \
         /usr/local/bin/verify_todo.sh /usr/local/bin/verify_list.sh \
-        /usr/local/bin/run_test.sh
+        /usr/local/bin/run_test.sh /usr/local/bin/epic_runner_codex.sh
 COPY e2e/task_template.txt /etc/loom/task_template.txt
 COPY scripts/start-e2e-server.sh /usr/local/bin/start-e2e-server.sh
 RUN chmod +x /usr/local/bin/start-e2e-server.sh

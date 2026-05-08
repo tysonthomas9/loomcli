@@ -269,6 +269,8 @@ func (s *Supervisor) Stop() {
 //nolint:funlen // The restart loop keeps lifecycle ordering visible.
 func (s *Supervisor) superviseAgent(ap *AgentProcess) {
 	slog.Info("starting agent supervisor", "worktree", ap.Entry.Worktree, "role", ap.Entry.Role)
+	s.markAgentActive(ap)
+	defer s.markAgentStoppedOnExit(ap)
 
 	for {
 		if s.checkAgentStopSignals(ap) {
@@ -486,9 +488,6 @@ func (s *Supervisor) readyIssues(opts backend.ReadyOpts) ([]backend.IssueData, e
 }
 
 func (s *Supervisor) claimRequestedTask(ap *AgentProcess, opts backend.ReadyOpts, taskID string) bool {
-	if ap.Entry.Worktree != "" {
-		opts.Assignee = ap.Entry.Worktree
-	}
 	issues, err := s.readyIssues(opts)
 	if err != nil {
 		s.setPreflightError(ap, agenterr.Unknown, fmt.Sprintf("ready query failed: %v", err))

@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -11,6 +12,8 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/cli/daemon/supervisor"
+	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 // DaemonControlRequest is sent by the CLI client to the daemon control socket.
@@ -184,20 +187,20 @@ func (d *Daemon) handleAgentControlStart(name string, taskIDs ...string) DaemonC
 		return DaemonControlResponse{Error: "agent name is required"}
 	}
 
-	// Validate agent exists in config
-	if !d.agentExistsInConfig(name) {
+	// Command-created agents may have been written to fleet-db after the last
+	// config poll. Pull config once synchronously so a queued start command can
+	// materialize the new local worker immediately.
+	entry, ok := d.findAgentEntry(name)
+	if !ok {
+		d.reloadAndReconcile()
+		entry, ok = d.findAgentEntry(name)
+	}
+	if !ok {
 		return DaemonControlResponse{Error: fmt.Sprintf("agent %q not found in daemon config", name)}
 	}
 
-	// Must be in StoppedAgents set
-	if !d.isAgentStopped(name) {
-		return DaemonControlResponse{Error: fmt.Sprintf("agent %q is not stopped (use restart to reset a running agent)", name)}
-	}
-
-	// Look up the config.AgentEntry from current config
-	entry, ok := d.findAgentEntry(name)
-	if !ok {
-		return DaemonControlResponse{Error: fmt.Sprintf("agent %q not found in current config", name)}
+	if d.isAgentRunning(name) {
+		return DaemonControlResponse{Error: fmt.Sprintf("agent %q is already running (use restart to reset a running agent)", name)}
 	}
 
 	// Remove from StoppedAgents and add agent
@@ -215,9 +218,43 @@ func (d *Daemon) handleAgentControlStart(name string, taskIDs ...string) DaemonC
 		d.sup.AgentsMu.Unlock()
 		return DaemonControlResponse{Error: fmt.Sprintf("failed to start agent %q: %v", name, err)}
 	}
+	d.markAgentStartAccepted(name)
 
 	slog.Info("agent started via control socket", "worktree", name)
 	return DaemonControlResponse{Success: true}
+}
+
+func (d *Daemon) markAgentStartAccepted(name string) {
+	if d.store == nil || d.sup == nil || d.sup.WorkspaceID == "" {
+		return
+	}
+	desired := domain.AgentDesiredRunning
+	state := domain.AgentStateActive
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if _, err := d.store.Agents().Update(ctx, d.sup.WorkspaceID, name, store.AgentUpdate{
+		DesiredState: &desired,
+		State:        &state,
+	}); err != nil {
+		slog.Warn("failed to mark agent start accepted", "worktree", name, "err", err)
+		return
+	}
+	d.setConfigAgentDesiredState(name, desired)
+}
+
+func (d *Daemon) setConfigAgentDesiredState(name string, desired domain.AgentDesiredState) {
+	d.reconcileMu.Lock()
+	defer d.reconcileMu.Unlock()
+	if d.config == nil {
+		return
+	}
+	for i := range d.config.Agents {
+		if d.config.Agents[i].Worktree == name {
+			d.config.Agents[i].DesiredState = desired
+			d.configHash = computeConfigHash(d.config)
+			return
+		}
+	}
 }
 
 // handleAgentControlRestart restarts an agent (works for both running and stopped agents).

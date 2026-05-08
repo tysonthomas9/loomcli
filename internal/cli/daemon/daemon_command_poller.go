@@ -86,5 +86,7 @@ func (d *Daemon) handleAgentCommand(cmd *domain.AgentCommand) {
 		ErrorClass: errClass,
 	}); err != nil {
 		slog.Warn("agent command completion failed", "command_id", cmd.CommandID, "err", err)
+	} else {
+		slog.Info("agent command completed", "command_id", cmd.CommandID, "type", cmd.Type, "target_agent_id", cmd.TargetAgentID, "status", status, "result", result)
 	}
 }

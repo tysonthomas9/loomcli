@@ -130,6 +130,10 @@ func runAgentAdd(_ *cobra.Command, args []string) error {
 		if orchestratorID == "" {
 			orchestratorID = os.Getenv(envOrchestratorSessionID)
 		}
+		desiredState := domain.AgentDesiredState("")
+		if agentAddTask != "" {
+			desiredState = domain.AgentDesiredStopped
+		}
 		a, err := h.Store.Agents().Create(ctx, store.AgentCreate{
 			WorkspaceKey:          ws,
 			Name:                  args[0],
@@ -145,6 +149,7 @@ func runAgentAdd(_ *cobra.Command, args []string) error {
 			TaskFilter:            agentAddTaskFilter,
 			MaxConcurrency:        agentAddMaxConc,
 			BudgetPolicy:          agentAddBudget,
+			DesiredState:          desiredState,
 		})
 		if err != nil {
 			return fmt.Errorf("create agent: %w", err)

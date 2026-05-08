@@ -182,11 +182,6 @@ func runDaemon(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	if len(config.Agents) == 0 {
-		fmt.Fprintf(os.Stderr, "Error: no agents configured in FleetDB for the active workspace\n")
-		os.Exit(1)
-	}
-
 	paths := resolveDaemonPaths(projectDir, config)
 	ValidateDaemonPaths(projectDir, paths.pidFile, paths.logDir)
 
@@ -264,9 +259,13 @@ func initDaemonServices(config *cfgpkg.DaemonConfig, projectDir string, paths da
 
 	daemon, err := NewDaemon(config, projectDir, eventBus, cli.DefaultIssueBackend(), st)
 	if err != nil {
+		if storeHandle != nil {
+			_ = storeHandle.Close()
+		}
 		fmt.Fprintf(os.Stderr, "Error: creating daemon: %v\n", err)
 		os.Exit(1)
 	}
+	daemon.storeHandle = storeHandle
 
 	return shutdown, daemon
 }

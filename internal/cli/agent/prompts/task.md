@@ -154,9 +154,9 @@ This ensures the task is properly tracked as blocked, not orphaned in error stat
   make gate
 - If it fails, fix ALL failures and re-run until it passes
 - Do NOT commit or push with failing tests
-- Run 'loom data close <id> --reason "Completed with tests and code review"'
 - Stage and commit: git add <files> && git commit -m "<brief description> (<task-id>)"
-- Push: git push origin HEAD
+- Integrate to the workspace target branch: loom push "{{ .AgentName }}"
+- Run 'loom data close <id> --reason "Completed with tests and code review"'
 - Signal completion: loom complete
 
 ### CRITICAL: STOP

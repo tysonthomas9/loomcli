@@ -47,6 +47,24 @@ func TestFilterEnv_BlocksSensitiveVars(t *testing.T) {
 	}
 }
 
+func TestFilterEnv_AllowsCodexE2EStubControls(t *testing.T) {
+	input := []string{
+		"STUB_CODEX_EPIC_RUNNER=1",
+		"STUB_CODEX_INVOCATIONS=/tmp/codex.log",
+		"STUB_CODEX_RESPONSE=blocked",
+	}
+	got := FilterEnv(input)
+	want := input[:2]
+	if len(got) != len(want) {
+		t.Fatalf("FilterEnv() returned %d entries, want %d; got %v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("got[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
 func TestFilterEnv_MixedInput(t *testing.T) {
 	input := []string{
 		"PATH=/usr/bin",

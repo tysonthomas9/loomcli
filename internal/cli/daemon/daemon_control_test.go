@@ -270,8 +270,8 @@ func TestControlServer_StartNotStopped(t *testing.T) {
 	if resp.Success {
 		t.Fatal("expected error when starting a running agent")
 	}
-	if !strings.Contains(resp.Error, "not stopped") {
-		t.Errorf("error = %q, want contains 'not stopped'", resp.Error)
+	if !strings.Contains(resp.Error, "already running") {
+		t.Errorf("error = %q, want contains 'already running'", resp.Error)
 	}
 }
 

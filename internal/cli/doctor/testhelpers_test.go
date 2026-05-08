@@ -103,6 +103,9 @@ func setupWorkspaceConfig(t *testing.T, cfg *config.LoomConfig) {
 	if err := bootstrap.SaveStateCache(state); err != nil {
 		t.Fatalf("save state cache: %v", err)
 	}
+	if cfg.DefaultWorkspace != "" {
+		t.Setenv("LOOM_WORKSPACE", strings.ToUpper(cfg.DefaultWorkspace))
+	}
 	config.InvalidateConfigCache()
 	cli.ResetWorkspaceRuntimeDirCache()
 	cli.TestingResetDefaultResolver()

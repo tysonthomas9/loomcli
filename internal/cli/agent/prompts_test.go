@@ -63,7 +63,7 @@ func TestGenerateTaskPrompt(t *testing.T) {
 				"--assignee ember", // Reclaiming stale tasks still sets assignee.
 				"Implementation Task",
 				"--design",
-				"git push origin HEAD",
+				"loom push \"ember\"",
 				"loom plan",
 			},
 		},
@@ -690,7 +690,7 @@ func TestGenerateFleetTaskPrompt(t *testing.T) {
 				"loom data show loomcli-kv6.4",
 				"already claimed",
 				"--design",
-				"git push origin HEAD",
+				"loom push \"spark\"",
 			},
 		},
 		{

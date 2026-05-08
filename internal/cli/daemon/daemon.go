@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/daemon/supervisor"
 	"github.com/tysonthomas9/loomcli/internal/events"
@@ -55,7 +56,8 @@ type Daemon struct {
 
 	// store is the fleet-db backed source of agent assignments and daemon
 	// profile data.
-	store store.Store
+	store       store.Store
+	storeHandle *bootstrap.StoreHandle
 }
 
 // configSnapshot returns a snapshot of the current config pointer under RLock.
@@ -78,9 +80,6 @@ func (d *Daemon) emitEvent(evt events.Event) {
 func NewDaemon(config *cfgpkg.DaemonConfig, projectDir string, eventBus events.Emitter, issueBackend backend.IssueBackend, st store.Store) (*Daemon, error) {
 	if config == nil {
 		return nil, fmt.Errorf("daemon config is nil")
-	}
-	if len(config.Agents) == 0 {
-		return nil, fmt.Errorf("no agents configured")
 	}
 
 	if eventBus == nil {
@@ -163,6 +162,11 @@ func (d *Daemon) Stop() {
 	}
 
 	d.sup.Stop()
+
+	if d.storeHandle != nil {
+		_ = d.storeHandle.Close()
+		d.storeHandle = nil
+	}
 }
 
 // Agents returns a snapshot of all agent statuses for inspection.

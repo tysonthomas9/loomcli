@@ -72,8 +72,8 @@ func TestClaimTask_ClaimsRequestedTaskIgnoringRoleFilter(t *testing.T) {
 		t.Fatalf("calls = %#v, want Ready and ClaimIssue", mock.Calls)
 	}
 	opts := mock.Calls[0].Args[0].(backend.ReadyOpts)
-	if opts.Assignee != "falcon" {
-		t.Fatalf("ReadyOpts.Assignee = %q, want falcon", opts.Assignee)
+	if opts.Assignee != "" {
+		t.Fatalf("ReadyOpts.Assignee = %q, want empty for requested task lookup", opts.Assignee)
 	}
 	if mock.Calls[1].Method != "ClaimIssue" || mock.Calls[1].Args[0] != "task-1" {
 		t.Fatalf("claim call = %#v", mock.Calls[1])

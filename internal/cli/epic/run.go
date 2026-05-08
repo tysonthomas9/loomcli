@@ -8,6 +8,8 @@ package epic
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -23,6 +25,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -35,6 +38,7 @@ var (
 	runIntervalSeconds int
 	runRole            string
 	runDryRun          bool
+	runNodeID          string
 )
 
 var epicCmd = &cobra.Command{
@@ -77,6 +81,7 @@ func init() {
 	epicRunCmd.Flags().StringVar(&runWorkerPrefix, "worker-prefix", "", "Prefix for spawned worker names (default derived from --parent)")
 	epicRunCmd.Flags().IntVar(&runIntervalSeconds, "interval-seconds", 5, "Seconds between reconcile passes")
 	epicRunCmd.Flags().StringVar(&runRole, "role", "task", "Role to spawn workers under")
+	epicRunCmd.Flags().StringVar(&runNodeID, "node-id", "", "Daemon node ID to run spawned workers on (default: the single active local node)")
 	epicRunCmd.Flags().BoolVar(&runDryRun, "dry-run", false, "Print what would be spawned but don't actually create agents")
 
 	epicCmd.AddCommand(epicRunCmd)
@@ -118,6 +123,14 @@ func runEpicRun(cmd *cobra.Command, _ []string) error {
 		return errors.New("no issue backend available")
 	}
 
+	nodeID := runNodeID
+	if nodeID == "" && handle.Store.AgentCommands() != nil && !runDryRun {
+		nodeID, err = selectTargetNodeID(ctx, handle.Store, ws)
+		if err != nil {
+			return err
+		}
+	}
+
 	orchestratorID := os.Getenv(envOrchestratorSessionID)
 	r := &runner{
 		store:                 handle.Store,
@@ -129,6 +142,7 @@ func runEpicRun(cmd *cobra.Command, _ []string) error {
 		maxConcurrency:        runMaxConcurrency,
 		interval:              time.Duration(runIntervalSeconds) * time.Second,
 		orchestratorSessionID: orchestratorID,
+		targetNodeID:          nodeID,
 		dryRun:                runDryRun,
 		spawned:               make(map[string]string),
 	}
@@ -147,6 +161,7 @@ type runner struct {
 	maxConcurrency        int
 	interval              time.Duration
 	orchestratorSessionID string
+	targetNodeID          string
 	dryRun                bool
 
 	// spawned tracks task_id -> worker_name for tasks this runner has already
@@ -167,6 +182,9 @@ func (r *runner) printHeader() {
 		fmt.Printf("  orchestrator:     %s\n", r.orchestratorSessionID)
 	} else {
 		fmt.Printf("  orchestrator:     (none — workers will be unattached)\n")
+	}
+	if r.targetNodeID != "" {
+		fmt.Printf("  target node:      %s\n", r.targetNodeID)
 	}
 	if r.dryRun {
 		fmt.Printf("  dry-run:          true\n")
@@ -214,21 +232,19 @@ func (r *runner) reconcileOnce(ctx context.Context) (done bool, err error) {
 		return false, fmt.Errorf("blocked query: %w", err)
 	}
 
-	openOrInProgress := 0
-	for _, t := range ready {
-		if t.Status != "closed" && t.Status != "deferred" {
-			openOrInProgress++
-		}
-	}
-	for _, t := range blocked {
-		if t.Status != "closed" && t.Status != "deferred" {
-			openOrInProgress++
-		}
+	openOrInProgress, err := r.countOpenChildren(ctx)
+	if err != nil {
+		return false, err
 	}
 
-	// Drain when no work remains anywhere AND every task we spawned has settled.
-	// We approximate "settled" by checking that the task isn't in ready or blocked.
+	// Drain only after no child work remains and every worker spawned by this
+	// runner has stopped, so downstream orchestration can trust the lifecycle.
 	if openOrInProgress == 0 {
+		activeSpawned := r.countActiveSpawned(ctx)
+		if activeSpawned > 0 {
+			fmt.Printf("[epic-run] child work closed; waiting for %d spawned worker(s) to stop\n", activeSpawned)
+			return false, nil
+		}
 		return true, nil
 	}
 
@@ -245,13 +261,19 @@ func (r *runner) reconcileOnce(ctx context.Context) (done bool, err error) {
 		if dispatched >= slots {
 			break
 		}
-		if _, alreadySpawned := r.spawned[task.ID]; alreadySpawned {
-			continue
-		}
 		if task.Status == "in_progress" {
 			// Someone else is already working on it (could be a peer agent or a
-			// re-run of this command). Track but don't spawn.
-			r.spawned[task.ID] = ""
+			// re-run of this command). If it reopens, a later pass can dispatch it.
+			continue
+		}
+		if task.Status == "closed" || task.Status == "deferred" {
+			continue
+		}
+		if _, alreadySpawned := r.spawned[task.ID]; alreadySpawned {
+			// This runner invocation already assigned a worker to the task. Do
+			// not enqueue duplicate starts while the daemon is converging; if
+			// the worker fails, restarting the runner will retry the
+			// deterministic worker name.
 			continue
 		}
 		if err := r.spawnWorker(ctx, task); err != nil {
@@ -266,25 +288,42 @@ func (r *runner) reconcileOnce(ctx context.Context) (done bool, err error) {
 	return false, nil
 }
 
+func (r *runner) countOpenChildren(ctx context.Context) (int, error) {
+	issues, err := r.ib.List(ctx, backend.ListOpts{ParentID: r.parent, Limit: 10000})
+	if err != nil {
+		return 0, fmt.Errorf("list child work: %w", err)
+	}
+	count := 0
+	for _, t := range issues {
+		if t.Status != "closed" && t.Status != "deferred" {
+			count++
+		}
+	}
+	return count, nil
+}
+
 // countActiveSpawned returns how many of the workers this runner has spawned
 // are still actively running (not stopped). Best-effort — on store error,
 // assume all spawned are still active to err on the side of not over-spawning.
 func (r *runner) countActiveSpawned(ctx context.Context) int {
 	count := 0
 	for _, name := range r.spawned {
-		if name == "" {
-			continue // task was already in_progress when we observed it
-		}
-		a, err := r.store.Agents().Get(ctx, r.workspace, name)
-		if err != nil || a == nil {
-			count++ // assume active if we can't tell
-			continue
-		}
-		if a.State != domain.AgentStateStopped {
+		if r.workerStillActive(ctx, name) {
 			count++
 		}
 	}
 	return count
+}
+
+func (r *runner) workerStillActive(ctx context.Context, name string) bool {
+	if name == "" {
+		return false
+	}
+	a, err := r.store.Agents().Get(ctx, r.workspace, name)
+	if err != nil || a == nil {
+		return true // assume active if we can't tell
+	}
+	return a.State != domain.AgentStateStopped
 }
 
 // spawnWorker creates an ephemeral worker agent pinned to the given task and
@@ -300,7 +339,11 @@ func (r *runner) spawnWorker(ctx context.Context, task backend.IssueData) error 
 	}
 
 	mode := domain.AgentModeEphemeral
-	_, err := r.store.Agents().Create(ctx, store.AgentCreate{
+	desired := domain.AgentDesiredStopped
+	if r.store.AgentCommands() == nil {
+		desired = domain.AgentDesiredRunning
+	}
+	agent, err := r.store.Agents().Create(ctx, store.AgentCreate{
 		WorkspaceKey:          r.workspace,
 		Name:                  name,
 		RoleName:              r.role,
@@ -308,10 +351,22 @@ func (r *runner) spawnWorker(ctx context.Context, task backend.IssueData) error 
 		Parent:                r.parent,
 		OrchestratorSessionID: r.orchestratorSessionID,
 		Mode:                  mode,
-		DesiredState:          domain.AgentDesiredRunning,
+		DesiredState:          desired,
 	})
 	if err != nil && !errors.Is(err, domain.ErrAlreadyExists) {
 		return fmt.Errorf("create agent %s: %w", name, err)
+	}
+	if errors.Is(err, domain.ErrAlreadyExists) {
+		agent, err = r.store.Agents().Get(ctx, r.workspace, name)
+		if err != nil {
+			return fmt.Errorf("get existing agent %s: %w", name, err)
+		}
+	}
+	if agent == nil {
+		return fmt.Errorf("create agent %s returned nil", name)
+	}
+	if err := r.ensureLocalWorkerWorktrees(ctx, *agent); err != nil {
+		return err
 	}
 
 	if r.store.AgentCommands() == nil {
@@ -325,6 +380,7 @@ func (r *runner) spawnWorker(ctx context.Context, task backend.IssueData) error 
 	if _, err := r.store.AgentCommands().Create(ctx, store.AgentCommandCreate{
 		WorkspaceKey:  r.workspace,
 		TargetAgentID: name,
+		TargetNodeID:  r.targetNodeID,
 		Type:          "start",
 		Payload:       map[string]string{"task_id": task.ID},
 	}); err != nil {
@@ -336,11 +392,68 @@ func (r *runner) spawnWorker(ctx context.Context, task backend.IssueData) error 
 	return nil
 }
 
+func (r *runner) ensureLocalWorkerWorktrees(ctx context.Context, agent domain.Agent) error {
+	sc, err := bootstrap.LoadStateCache()
+	if err != nil {
+		return fmt.Errorf("load local workspace state: %w", err)
+	}
+	local := sc.Workspaces[agent.WorkspaceKey]
+	if local.Path == "" {
+		return nil
+	}
+	repos, err := r.store.Repos().List(ctx, agent.WorkspaceKey)
+	if err != nil {
+		return fmt.Errorf("list workspace repos: %w", err)
+	}
+	localRepos := make([]localworkspace.Repo, 0, len(repos))
+	for _, repo := range repos {
+		if repo == nil {
+			continue
+		}
+		localRepos = append(localRepos, localworkspace.Repo{
+			Name:   repo.Name,
+			Path:   localworkspace.RepoPath(local, repo.Name),
+			Groups: append([]string(nil), repo.Groups...),
+		})
+	}
+	selected, err := localworkspace.SelectAgentRepos(localRepos, agent)
+	if err != nil {
+		return err
+	}
+	if len(selected) == 0 {
+		return fmt.Errorf("workspace %s has no repos for agent %q", agent.WorkspaceKey, agent.Name)
+	}
+
+	created := make(map[string]string, len(selected))
+	for _, repo := range selected {
+		target := localworkspace.AgentWorktreePath(local.Path, repo.Name, agent.Name)
+		if err := localworkspace.EnsureGitWorktree(repo.Path, target, agent.Name); err != nil {
+			return fmt.Errorf("create worktree for repo %q: %w", repo.Name, err)
+		}
+		created[repo.Name] = target
+	}
+	if err := localworkspace.RememberAgentWorktree(agent.WorkspaceKey, agent.Name, localworkspace.FirstWorktreePath(created)); err != nil {
+		return fmt.Errorf("remember agent worktree: %w", err)
+	}
+	return nil
+}
+
 // workerName derives a deterministic agent name from prefix + task ID. Idempotent
 // per task — re-running the command produces the same name, so fleet-db's
 // unique-name constraint becomes our restart safety net.
 func workerName(prefix, taskID string) string {
-	return prefix + "-" + sanitizePrefix(taskID)
+	hashBytes := sha256.Sum256([]byte(taskID))
+	hash := hex.EncodeToString(hashBytes[:])[:8]
+	base := sanitizePrefix(prefix + "-" + taskID)
+	const maxNameLen = 63
+	suffix := "-" + hash
+	if len(base)+len(suffix) > maxNameLen {
+		base = strings.TrimRight(base[:maxNameLen-len(suffix)], "-")
+	}
+	if base == "" {
+		base = "task"
+	}
+	return base + suffix
 }
 
 // sanitizePrefix lowercases and strips characters that aren't valid in an agent
@@ -359,6 +472,38 @@ func sanitizePrefix(s string) string {
 		}
 	}
 	return string(out)
+}
+
+func selectTargetNodeID(ctx context.Context, st store.Store, workspace string) (string, error) {
+	if st.Nodes() == nil {
+		return "", nil
+	}
+	nodes, err := st.Nodes().List(ctx, workspace)
+	if err != nil {
+		return "", fmt.Errorf("list daemon nodes: %w", err)
+	}
+	now := time.Now().UTC()
+	active := make([]string, 0, len(nodes))
+	for _, node := range nodes {
+		if node == nil {
+			continue
+		}
+		if node.DrainState != domain.NodeDrainActive {
+			continue
+		}
+		if !node.ExpiresAt.IsZero() && node.ExpiresAt.Before(now) {
+			continue
+		}
+		active = append(active, node.NodeID)
+	}
+	switch len(active) {
+	case 0:
+		return "", errors.New("no active daemon node registered for this workspace; start `loom daemon` before running `loom epic run`")
+	case 1:
+		return active[0], nil
+	default:
+		return "", fmt.Errorf("multiple active daemon nodes found (%s); rerun with --node-id", strings.Join(active, ", "))
+	}
 }
 
 // signalContext returns a context cancelled by Ctrl-C / SIGTERM so the loop

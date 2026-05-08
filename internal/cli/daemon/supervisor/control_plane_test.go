@@ -255,16 +255,30 @@ func newControlPlaneTestSupervisor(st *memstore.Store) *Supervisor {
 
 type controlPlaneStoreOverrides struct {
 	*memstore.Store
-	sessions store.AgentSessionStore
-	leases   store.AgentLeaseStore
+	sessions  store.AgentSessionStore
+	leases    store.AgentLeaseStore
+	ownership store.AgentOwnershipLeaseStore
 }
 
 func (s *controlPlaneStoreOverrides) AgentSessions() store.AgentSessionStore {
+	if s.sessions == nil {
+		return s.Store.AgentSessions()
+	}
 	return s.sessions
 }
 
 func (s *controlPlaneStoreOverrides) AgentLeases() store.AgentLeaseStore {
+	if s.leases == nil {
+		return s.Store.AgentLeases()
+	}
 	return s.leases
+}
+
+func (s *controlPlaneStoreOverrides) AgentOwnershipLeases() store.AgentOwnershipLeaseStore {
+	if s.ownership == nil {
+		return s.Store.AgentOwnershipLeases()
+	}
+	return s.ownership
 }
 
 type contextConsumingAgentSessionStore struct {

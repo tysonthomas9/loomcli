@@ -31,6 +31,8 @@ var envAllowlistExact = map[string]bool{
 	"CODEX_HOME": true,
 	// Git hosting tokens (needed by container agents for git push)
 	"GITHUB_TOKEN": true,
+	// E2E test stubs. Exact matches keep arbitrary STUB_* values out.
+	"STUB_CODEX_EPIC_RUNNER": true, "STUB_CODEX_INVOCATIONS": true,
 	// Editor
 	"EDITOR": true, "VISUAL": true,
 }

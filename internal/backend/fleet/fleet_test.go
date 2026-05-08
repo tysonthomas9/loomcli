@@ -805,7 +805,7 @@ func TestCreate_HappyPath(t *testing.T) {
 
 	result, err := fb.Create(context.Background(), backend.CreateParams{
 		Title:     "New Issue",
-		Status:    "deferred",
+		Status:    "open",
 		IssueType: "task",
 		Priority:  2,
 	})
@@ -815,8 +815,63 @@ func TestCreate_HappyPath(t *testing.T) {
 	if result.ID != "new-1" {
 		t.Errorf("ID = %q, want %q", result.ID, "new-1")
 	}
-	if gotBody["status"] != "deferred" {
-		t.Errorf("body.status = %v, want deferred", gotBody["status"])
+	if _, ok := gotBody["status"]; ok {
+		t.Errorf("body.status = %v, want omitted", gotBody["status"])
+	}
+}
+
+func TestCreate_AppliesDependenciesAfterCreate(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	var paths []string
+	var depBodies []map[string]string
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.Method+" "+r.URL.Path)
+		switch r.URL.Path {
+		case "/api/v1/test-ws/issues":
+			respondOK(w, types.Issue{
+				ID:        "new-1",
+				Title:     "New Issue",
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+				CreatedAt: now,
+				UpdatedAt: now,
+			})
+		case "/api/v1/test-ws/issues/new-1/deps":
+			var body map[string]string
+			json.NewDecoder(r.Body).Decode(&body) //nolint:errcheck
+			depBodies = append(depBodies, body)
+			respondOK(w, json.RawMessage(`{}`))
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	})
+	defer ts.Close()
+
+	result, err := fb.Create(context.Background(), backend.CreateParams{
+		Title:        "New Issue",
+		IssueType:    "task",
+		Dependencies: []string{"dep-1", "dep-2"},
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if result.ID != "new-1" {
+		t.Fatalf("ID = %q, want new-1", result.ID)
+	}
+	wantPaths := []string{
+		"POST /api/v1/test-ws/issues",
+		"POST /api/v1/test-ws/issues/new-1/deps",
+		"POST /api/v1/test-ws/issues/new-1/deps",
+	}
+	if strings.Join(paths, "\n") != strings.Join(wantPaths, "\n") {
+		t.Fatalf("paths = %#v, want %#v", paths, wantPaths)
+	}
+	if len(depBodies) != 2 || depBodies[0]["depends_on_id"] != "dep-1" || depBodies[1]["depends_on_id"] != "dep-2" {
+		t.Fatalf("dependency bodies = %#v", depBodies)
+	}
+	if depBodies[0]["type"] != "blocks" || depBodies[1]["type"] != "blocks" {
+		t.Fatalf("dependency types = %#v, want blocks", depBodies)
 	}
 }
 

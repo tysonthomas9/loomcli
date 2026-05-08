@@ -64,9 +64,7 @@ Do NOT leave the task in_progress. Instead:
 3. Change status to blocked:
    loom data update <id> --status blocked
 4. Commit any partial work (if meaningful):
-   git add -A && git commit -m "WIP: <task-id> - blocked on <reason>
-
-Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"
+   git add <files> && git commit -m "WIP: <task-id> - blocked on <reason>"
    git push origin HEAD
 5. Signal completion: loom complete
 6. EXIT immediately
@@ -78,11 +76,9 @@ This ensures the task is properly tracked as blocked, not orphaned in error stat
   make gate
 - If it fails, fix ALL failures and re-run until it passes
 - Do NOT commit or push with failing tests
+- Stage and commit: git add <files> && git commit -m "<brief description> (<task-id>)"
+- Integrate to the workspace target branch: loom push "{{ .AgentName }}"
 - Run 'loom data close <id> --reason "Completed with tests and code review"'
-- Stage and commit: git add -A && git commit -m "<brief description> (<task-id>)
-
-Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"
-- Push: git push origin HEAD
 - Signal completion: loom complete
 
 ### CRITICAL: STOP

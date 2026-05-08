@@ -6,6 +6,7 @@
 #   STUB_CODEX_EXIT_CODE  - exit code (default: 0)
 #   STUB_CODEX_RESPONSE   - custom response text (default: built-in)
 #   STUB_CODEX_DELAY      - seconds to sleep before responding (default: 0)
+#   STUB_CODEX_EPIC_RUNNER - when 1, perform the deterministic epic-runner task flow
 
 set -e
 
@@ -32,7 +33,101 @@ while [ $# -gt 0 ]; do
     shift
 done
 
+extract_design_value() {
+    key="$1"
+    printf '%s\n' "$DESIGN" | sed -n "s/^${key}=//p" | head -n 1
+}
+
+validate_relative_path() {
+    path="$1"
+    case "$path" in
+        ""|/*|*../*|../*)
+            echo "unsafe or empty path: $path" >&2
+            exit 1
+            ;;
+    esac
+}
+
+run_epic_runner_task() {
+    prompt_file="$(mktemp)"
+    if [ ! -t 0 ]; then
+        cat > "$prompt_file"
+    else
+        : > "$prompt_file"
+    fi
+
+    task_id="${LOOM_ASSIGNED_TASK_ID:-}"
+    if [ -z "$task_id" ]; then
+        task_id="$(sed -n 's/.*pre-assigned[^:]*: \([^[:space:]]*\).*/\1/p' "$prompt_file" | head -n 1)"
+    fi
+    if [ -z "$task_id" ]; then
+        echo "STUB_CODEX_EPIC_RUNNER requires LOOM_ASSIGNED_TASK_ID or a pre-assigned task in the prompt" >&2
+        exit 1
+    fi
+
+    agent_name="${LOOM_AGENT_NAME:-}"
+    if [ -z "$agent_name" ]; then
+        echo "STUB_CODEX_EPIC_RUNNER requires LOOM_AGENT_NAME" >&2
+        exit 1
+    fi
+
+    if [ -n "${STUB_CODEX_INVOCATIONS:-}" ]; then
+        {
+            printf 'task=%s\n' "$task_id"
+            printf 'agent=%s\n' "$agent_name"
+            printf 'workdir=%s\n' "$(pwd)"
+            printf '\n'
+        } >> "$STUB_CODEX_INVOCATIONS"
+    fi
+
+    if [ -z "${LOOM_ASSIGNED_TASK_ID:-}" ]; then
+        loom claim "$task_id"
+    fi
+    DESIGN="$(loom data --output json show "$task_id" | jq -r '.design // ""')"
+
+    require_path="$(extract_design_value STUB_CODEX_REQUIRE)"
+    if [ -n "$require_path" ]; then
+        validate_relative_path "$require_path"
+        if [ ! -f "$require_path" ]; then
+            echo "required file is missing before task $task_id: $require_path" >&2
+            exit 1
+        fi
+    fi
+
+    write_path="$(extract_design_value STUB_CODEX_WRITE)"
+    if [ -z "$write_path" ]; then
+        write_path="epic-runner-output/${task_id}.txt"
+    fi
+    validate_relative_path "$write_path"
+
+    mkdir -p "$(dirname "$write_path")"
+    {
+        printf 'task=%s\n' "$task_id"
+        printf 'agent=%s\n' "$agent_name"
+        printf 'workdir=%s\n' "$(pwd)"
+        if [ -n "$require_path" ]; then
+            printf 'required=%s\n' "$require_path"
+        fi
+    } > "$write_path"
+    printf '%s\n' "$task_id" >> epic-runner-output/order.log
+
+    make gate
+    git status --short
+    git add -- "$write_path" epic-runner-output/order.log
+    git commit -m "Complete ${task_id}"
+    loom push "$agent_name"
+    loom data close "$task_id" --reason "Completed by Codex E2E stub"
+    loom complete
+
+    jq -nc --arg o "completed ${task_id}" '{"status":"completed","output":$o}'
+}
+
 if [ "$IS_EXEC" = "true" ] && [ "$IS_JSON" = "true" ]; then
+    if [ "${STUB_CODEX_EPIC_RUNNER:-0}" = "1" ]; then
+        run_epic_runner_task
+        exit "$EXIT_CODE"
+    fi
+
     # Non-interactive JSON mode: read prompt from stdin
     if [ ! -t 0 ]; then
         cat > /dev/null
