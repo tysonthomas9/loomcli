@@ -38,6 +38,11 @@ import (
 // fleet-aware issue routing at a different layer.
 const envLoomFleetMode = "LOOM_FLEET_MODE"
 
+const (
+	monitorCollectionCacheTTL        = 10 * time.Second
+	monitorCollectionRefreshInterval = 8 * time.Second
+)
+
 var (
 	servePort              int
 	serveBindAddr          string
@@ -233,10 +238,10 @@ func buildMonitorCollectDataFn(ctx context.Context, st store.Store, fallbackWork
 		}
 		return monitor.CollectMonitorData(10000, "")
 	}
-	// Proactively refresh the monitor cache every 6s so HTTP requests
-	// always read warm data instead of blocking on collectMonitorData.
-	// (TTL is 10s, so 6s refresh leaves a 4s safety margin.)
-	return metricscmd.NewCollectorWithBackgroundFunc(ctx, 10*time.Second, 6*time.Second, collectFn)
+	// Proactively refresh the monitor cache so HTTP requests usually read warm
+	// data instead of blocking on collectMonitorData. Keep the refresh interval
+	// below the TTL so the frontend does not observe stale monitor state.
+	return metricscmd.NewCollectorWithBackgroundFunc(ctx, monitorCollectionCacheTTL, monitorCollectionRefreshInterval, collectFn)
 }
 
 func resolveMonitorCollectorWorkspace(st store.Store, fallbackWorkspace string) string {
@@ -356,9 +361,10 @@ func initUsageStore() {
 func buildMonitorHandlers(collectDataFn metricscmd.CollectDataFn, staleDetectorHandler http.HandlerFunc, st store.Store, issueBackendFn metricscmd.IssueBackendFn) webui.MonitorHandlers {
 	eventsDir := observability.ResolveEventsDir()
 	monitorDataSource := metricscmd.NewMonitorDataSource(collectDataFn, issueBackendFn)
+	monitorStoreDataSource := metricscmd.NewMonitorStoreDataSource(st)
 	return webui.MonitorHandlers{
-		Status:               metricscmd.HandleStatusWithDataSource(monitorDataSource, st),
-		Agents:               metricscmd.HandleAgentsWithDataSource(monitorDataSource, st),
+		Status:               metricscmd.HandleStatusWithSources(monitorDataSource, monitorStoreDataSource),
+		Agents:               metricscmd.HandleAgentsWithSources(monitorDataSource, monitorStoreDataSource),
 		Tasks:                metricscmd.HandleTasksWithDataSource(monitorDataSource),
 		Stats:                metricscmd.HandleStatsWithDataSource(monitorDataSource),
 		Sync:                 metricscmd.HandleSync(collectDataFn),

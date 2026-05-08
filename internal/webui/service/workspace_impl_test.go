@@ -224,6 +224,65 @@ func TestGetWorkspace_StoreBackedMissReturnsNotFound(t *testing.T) {
 	}
 }
 
+func TestGetWorkspace_StoreBackedCachesTopologyAcrossRepeatedCalls(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	ctx := context.Background()
+	base := memstore.New()
+	if _, err := base.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "ALPHA", Name: "Alpha Project"}); err != nil {
+		t.Fatalf("create alpha: %v", err)
+	}
+	if _, err := base.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "BETA", Name: "Beta Project"}); err != nil {
+		t.Fatalf("create beta: %v", err)
+	}
+	if _, err := base.Repos().Create(ctx, store.RepoCreate{WorkspaceKey: "ALPHA", Name: "repo-a"}); err != nil {
+		t.Fatalf("create alpha repo: %v", err)
+	}
+	if _, err := base.Repos().Create(ctx, store.RepoCreate{WorkspaceKey: "BETA", Name: "repo-b"}); err != nil {
+		t.Fatalf("create beta repo: %v", err)
+	}
+	if _, err := base.Daemon().Upsert(ctx, &domain.DaemonProfile{WorkspaceKey: "BETA", AgentBackend: "codex"}); err != nil {
+		t.Fatalf("upsert beta daemon: %v", err)
+	}
+
+	counted := newWorkspaceCountingStore(base)
+	svc := NewWorkspaceService(WorkspaceServiceConfig{Store: counted})
+
+	first, err := svc.GetWorkspace(ctx, "ALPHA")
+	if err != nil {
+		t.Fatalf("GetWorkspace first: %v", err)
+	}
+	if len(first.Repos) != 1 || first.Repos[0].Name != "repo-a" {
+		t.Fatalf("first repos = %+v, want repo-a", first.Repos)
+	}
+	first.Repos[0].Name = "mutated"
+
+	for i := 0; i < 2; i++ {
+		data, err := svc.GetWorkspace(ctx, "ALPHA")
+		if err != nil {
+			t.Fatalf("GetWorkspace cached %d: %v", i, err)
+		}
+		if len(data.Repos) != 1 || data.Repos[0].Name != "repo-a" {
+			t.Fatalf("cached repos = %+v, want independent cached copy", data.Repos)
+		}
+	}
+
+	if got := counted.workspaces.getCalls; got != 1 {
+		t.Fatalf("workspace Get calls = %d, want one cached topology load", got)
+	}
+	if got := counted.workspaces.listCalls; got != 1 {
+		t.Fatalf("workspace List calls = %d, want one summary load", got)
+	}
+	if got := counted.repos.listByWorkspace["ALPHA"]; got != 2 {
+		t.Fatalf("ALPHA repo List calls = %d, want active workspace repos plus summary", got)
+	}
+	if got := counted.repos.listByWorkspace["BETA"]; got != 1 {
+		t.Fatalf("BETA repo List calls = %d, want one cross-workspace summary read", got)
+	}
+	if got := counted.daemon.getByWorkspace["BETA"]; got != 1 {
+		t.Fatalf("BETA daemon Get calls = %d, want one cross-workspace summary read", got)
+	}
+}
+
 func TestGetWorkspaceBackend_StoreBackedReadsDaemonProfile(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
@@ -385,4 +444,60 @@ func TestGetWorkspaceJob_StoreFallbackReturnsFailedForErrorWorkspace(t *testing.
 	if job.Error != msg {
 		t.Fatalf("error = %q, want %q", job.Error, msg)
 	}
+}
+
+type workspaceCountingStore struct {
+	store.Store
+	workspaces *workspaceCountingWorkspaceStore
+	repos      *workspaceCountingRepoStore
+	daemon     *workspaceCountingDaemonStore
+}
+
+func newWorkspaceCountingStore(base store.Store) *workspaceCountingStore {
+	return &workspaceCountingStore{
+		Store:      base,
+		workspaces: &workspaceCountingWorkspaceStore{WorkspaceStore: base.Workspaces()},
+		repos:      &workspaceCountingRepoStore{RepoStore: base.Repos(), listByWorkspace: make(map[string]int)},
+		daemon:     &workspaceCountingDaemonStore{DaemonProfileStore: base.Daemon(), getByWorkspace: make(map[string]int)},
+	}
+}
+
+func (s *workspaceCountingStore) Workspaces() store.WorkspaceStore { return s.workspaces }
+func (s *workspaceCountingStore) Repos() store.RepoStore           { return s.repos }
+func (s *workspaceCountingStore) Daemon() store.DaemonProfileStore { return s.daemon }
+
+type workspaceCountingWorkspaceStore struct {
+	store.WorkspaceStore
+	getCalls  int
+	listCalls int
+}
+
+func (s *workspaceCountingWorkspaceStore) Get(ctx context.Context, key string) (*domain.Workspace, error) {
+	s.getCalls++
+	return s.WorkspaceStore.Get(ctx, key)
+}
+
+func (s *workspaceCountingWorkspaceStore) List(ctx context.Context) ([]*domain.Workspace, error) {
+	s.listCalls++
+	return s.WorkspaceStore.List(ctx)
+}
+
+type workspaceCountingRepoStore struct {
+	store.RepoStore
+	listByWorkspace map[string]int
+}
+
+func (s *workspaceCountingRepoStore) List(ctx context.Context, workspaceKey string) ([]*domain.Repo, error) {
+	s.listByWorkspace[workspaceKey]++
+	return s.RepoStore.List(ctx, workspaceKey)
+}
+
+type workspaceCountingDaemonStore struct {
+	store.DaemonProfileStore
+	getByWorkspace map[string]int
+}
+
+func (s *workspaceCountingDaemonStore) Get(ctx context.Context, workspaceKey string) (*domain.DaemonProfile, error) {
+	s.getByWorkspace[workspaceKey]++
+	return s.DaemonProfileStore.Get(ctx, workspaceKey)
 }
