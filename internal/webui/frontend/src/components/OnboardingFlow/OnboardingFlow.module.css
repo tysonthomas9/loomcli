@@ -228,20 +228,27 @@
 .panel {
   width: 100%;
   margin: 0;
-  padding: var(--space-4);
+  padding: var(--space-3);
 }
 
 .panel .header {
   grid-template-columns: 1fr;
-  gap: var(--space-4);
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.panel .kicker {
+  margin-bottom: 2px;
 }
 
 .panel .title {
-  font-size: 1.05rem;
+  font-size: 1rem;
 }
 
 .panel .subtitle {
+  margin-top: var(--space-1);
   font-size: var(--font-size-xs);
+  line-height: 1.35;
 }
 
 .panel .headerAside,
@@ -250,21 +257,23 @@
 }
 
 .panel .repoStrip {
-  align-items: flex-start;
-  flex-direction: column;
-  gap: var(--space-1);
+  display: none;
+}
+
+.panel .steps {
+  gap: var(--space-2);
 }
 
 .panel .step {
-  grid-template-columns: 28px minmax(0, 1fr);
+  grid-template-columns: 24px minmax(0, 1fr);
   align-items: start;
-  gap: var(--space-3);
-  padding: var(--space-3);
+  gap: var(--space-2);
+  padding: var(--space-2);
 }
 
 .panel .stepIndex {
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
   font-size: var(--font-size-xs);
 }
 
@@ -276,6 +285,23 @@
   grid-column: 2;
   width: fit-content;
   min-width: 0;
+  padding: 6px 10px;
+  font-size: var(--font-size-xs);
+}
+
+.panel .stepDescription {
+  font-size: var(--font-size-xs);
+  line-height: 1.35;
+}
+
+.panel .complete,
+.panel .blocked {
+  align-items: center;
+}
+
+.panel .complete .stepDescription,
+.panel .blocked .stepDescription {
+  display: none;
 }
 
 @media (width <= 720px) {

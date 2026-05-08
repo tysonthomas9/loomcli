@@ -77,8 +77,7 @@
 }
 
 .workspaceOnboarding {
-  height: 100%;
-  overflow: auto;
+  min-height: 0;
 }
 
 .workspaceContent {
@@ -86,6 +85,7 @@
   flex: 1;
   min-height: 0;
   min-width: 0;
+  overflow: hidden;
 }
 
 .workspaceContentWithOnboarding {
@@ -94,6 +94,7 @@
   flex: 1;
   min-height: 0;
   min-width: 0;
+  overflow: hidden;
 }
 
 .workspaceMainContent {
@@ -109,6 +110,9 @@
   flex-direction: column;
   min-width: 0;
   min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
   background: var(--color-bg);
   border-left: 1px solid var(--color-border);
 }
