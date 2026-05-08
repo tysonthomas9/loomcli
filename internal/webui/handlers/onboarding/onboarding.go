@@ -222,18 +222,29 @@ func evalSetupBackend(ctx context.Context, deps Deps, unblocked bool) (StepStatu
 	if len(healths) == 0 {
 		return StatusActionable, "No AI backends are registered yet."
 	}
+	// `Available` is the canonical "ready to use" signal from each
+	// backend's HealthCheck. Some backends (e.g. opencode) report
+	// Available=true without APIKeySet because they don't need a Loom-
+	// owned env var. Trust the backend, not a synthetic two-field check.
 	for _, h := range healths {
-		if h.Available && h.APIKeySet {
+		if h.Available {
 			return StatusComplete, ""
 		}
 	}
-	// At least one backend is registered but none are ready.
+	// No ready backend. Pick the most informative actionable backend
+	// to surface in the message — installed-but-no-key is the common
+	// case the user can act on immediately.
 	for _, h := range healths {
 		if h.Installed && !h.APIKeySet {
 			return StatusActionable, h.DisplayName + " is installed but authentication is missing."
 		}
 	}
-	return StatusActionable, "No backend is installed and authenticated yet."
+	for _, h := range healths {
+		if h.Installed && h.Message != "" {
+			return StatusActionable, h.DisplayName + ": " + h.Message
+		}
+	}
+	return StatusActionable, "No backend is installed and ready yet."
 }
 
 func evalCreateAgentStep(ws *ops.WorkspaceData, unblocked bool) Step {

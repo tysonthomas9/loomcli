@@ -57,19 +57,30 @@ func HandleGetBackendsHealth(backendOps ops.BackendOps) http.HandlerFunc {
 
 // decorateBackend joins live health data with curated setup metadata.
 //
-// Authenticated is currently aliased to APIKeySet because that is the
-// only auth signal the CLI plumbing surfaces today. Once the CLI
-// exposes a separate "auth file present" or `<backend> status` signal,
-// this is the seam to thread it through.
+// `Ready` follows the backend's own Available signal — that is the
+// canonical "this backend will work right now" boolean each
+// HealthCheck implementation produces. Backends that need an env var
+// (claude, codex) flip Available true only when APIKeySet is true;
+// keyless backends (opencode) flip it on Installed alone. Trust the
+// backend, not a synthetic two-field check.
+//
+// `Authenticated` reports whether the auth requirement specific to
+// this backend is satisfied: APIKeySet for env-var backends, the
+// Available signal for keyless ones.
 func decorateBackend(h ops.BackendHealth) BackendSetupData {
+	meta, hasMeta := LookupBackendSetupMetadata(h.Name)
+	requiresEnvVar := hasMeta && len(meta.EnvVars) > 0
+
 	authenticated := h.APIKeySet
-	ready := h.Installed && authenticated
+	if !requiresEnvVar {
+		authenticated = h.Available
+	}
 	out := BackendSetupData{
 		BackendHealth: h,
 		Authenticated: authenticated,
-		Ready:         ready,
+		Ready:         h.Available,
 	}
-	if meta, ok := LookupBackendSetupMetadata(h.Name); ok {
+	if hasMeta {
 		out.Description = meta.Description
 		out.InstallActions = meta.InstallActions
 		out.LoginActions = meta.LoginActions

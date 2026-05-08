@@ -17,16 +17,24 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import {
-  createWorkspace,
-  type CreateWorkspaceRequest,
-  type WorkspaceData,
+import { createWorkspace, addWorkspaceRepos } from "@/hooks/api";
+import type {
+  CreateWorkspaceRequest,
+  WorkspaceData,
 } from "@/api/workspace";
 import { useJobPolling } from "@/hooks/agents/useJobPolling";
 
 import styles from "./WorkspaceRepoWizard.module.css";
 
 export type RepoSource = "local" | "clone";
+
+export type WizardMode =
+  | { kind: "create-workspace" }
+  | {
+      kind: "add-repo";
+      workspaceId: string;
+      workspaceName: string;
+    };
 
 export interface WorkspaceRepoWizardProps {
   isOpen: boolean;
@@ -36,14 +44,25 @@ export interface WorkspaceRepoWizardProps {
     createdName: string,
     warnings?: string[],
   ) => void;
+  /**
+   * Mode controls whether the wizard creates a new workspace (default,
+   * onboarding step 1 from no-workspace state) or attaches a repo to
+   * an existing workspace (onboarding step 1 when the workspace is
+   * present but has no repos).
+   */
+  mode?: WizardMode;
 }
 
 export function WorkspaceRepoWizard({
   isOpen,
   onClose,
   onSuccess,
+  mode = { kind: "create-workspace" },
 }: WorkspaceRepoWizardProps): JSX.Element | null {
-  const [name, setName] = useState("");
+  const isAddRepo = mode.kind === "add-repo";
+  const initialName = isAddRepo ? mode.workspaceName : "";
+
+  const [name, setName] = useState(initialName);
   const [source, setSource] = useState<RepoSource>("local");
   const [localPath, setLocalPath] = useState("");
   const [cloneUrl, setCloneUrl] = useState("");
@@ -58,10 +77,11 @@ export function WorkspaceRepoWizard({
   });
 
   const nameRef = useRef<HTMLInputElement>(null);
+  const pathRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!isOpen) return;
-    setName("");
+    setName(initialName);
     setSource("local");
     setLocalPath("");
     setCloneUrl("");
@@ -69,16 +89,25 @@ export function WorkspaceRepoWizard({
     setError("");
     setIsSubmitting(false);
     job.reset();
-    // Focus the name field on open.
-    window.setTimeout(() => nameRef.current?.focus(), 0);
+    // Focus the name field on open for create flow; the path field
+    // for add-repo (the workspace name is locked).
+    window.setTimeout(() => {
+      if (isAddRepo) {
+        pathRef.current?.focus();
+      } else {
+        nameRef.current?.focus();
+      }
+    }, 0);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- job.reset is stable
-  }, [isOpen]);
+  }, [isOpen, initialName, isAddRepo]);
 
   const canSubmit =
     !isSubmitting &&
     !job.isPolling &&
     name.trim().length > 0 &&
-    (source === "local" ? localPath.trim().length > 0 : cloneUrl.trim().length > 0);
+    (source === "local"
+      ? localPath.trim().length > 0
+      : cloneUrl.trim().length > 0);
 
   const handleSubmit = useCallback(
     async (e: React.FormEvent) => {
@@ -88,17 +117,36 @@ export function WorkspaceRepoWizard({
       setError("");
       setIsSubmitting(true);
 
-      const req: CreateWorkspaceRequest =
-        source === "local"
-          ? { name: name.trim(), type: "empty", repos: [localPath.trim()] }
-          : {
-              name: name.trim(),
-              type: "clone",
-              clone_urls: [cloneUrl.trim()],
-              ...(branch.trim() ? { branch: branch.trim() } : {}),
-            };
-
       try {
+        if (mode.kind === "add-repo") {
+          // Existing-workspace path: attach a repo without going through
+          // the workspace job machinery.
+          const data = await addWorkspaceRepos(mode.workspaceId, {
+            ...(source === "local"
+              ? { repos: [localPath.trim()] }
+              : { clone_urls: [cloneUrl.trim()] }),
+            ...(branch.trim() ? { branch: branch.trim() } : {}),
+          });
+          setIsSubmitting(false);
+          try {
+            onSuccess(data, name.trim());
+          } catch {
+            // ignore
+          }
+          onClose();
+          return;
+        }
+
+        const req: CreateWorkspaceRequest =
+          source === "local"
+            ? { name: name.trim(), type: "empty", repos: [localPath.trim()] }
+            : {
+                name: name.trim(),
+                type: "clone",
+                clone_urls: [cloneUrl.trim()],
+                ...(branch.trim() ? { branch: branch.trim() } : {}),
+              };
+
         const result = await createWorkspace(req);
         if (result.kind === "async") {
           job.startJob(result.jobId);
@@ -114,11 +162,27 @@ export function WorkspaceRepoWizard({
       } catch (err: unknown) {
         setIsSubmitting(false);
         const message =
-          err instanceof Error ? err.message : "Failed to create workspace";
+          err instanceof Error
+            ? err.message
+            : isAddRepo
+              ? "Failed to add repo"
+              : "Failed to create workspace";
         setError(message);
       }
     },
-    [canSubmit, name, source, localPath, cloneUrl, branch, onSuccess, onClose, job],
+    [
+      canSubmit,
+      mode,
+      name,
+      source,
+      localPath,
+      cloneUrl,
+      branch,
+      onSuccess,
+      onClose,
+      job,
+      isAddRepo,
+    ],
   );
 
   if (!isOpen) return null;
@@ -140,12 +204,17 @@ export function WorkspaceRepoWizard({
         role="document"
       >
         <header>
-          <h2 id="workspace-wizard-heading" className={styles.heading}>
-            {polling ? "Creating workspace…" : "Create your first workspace"}
+          <h2 id="workspace-wizard-heading" className={styles.title}>
+            {polling
+              ? "Cloning repository…"
+              : isAddRepo
+                ? `Add a repo to ${mode.kind === "add-repo" ? mode.workspaceName : ""}`
+                : "Create a workspace"}
           </h2>
           <p className={styles.subtitle}>
-            A workspace ties together one or more repos and the agents that work
-            in them.
+            {isAddRepo
+              ? "Attach a local repo path or git URL to this workspace."
+              : "A workspace ties together one or more repos and the agents that work in them."}
           </p>
         </header>
 
@@ -155,21 +224,23 @@ export function WorkspaceRepoWizard({
           </p>
         ) : (
           <form className={styles.form} onSubmit={handleSubmit}>
-            <div className={styles.fieldGroup}>
-              <label className={styles.label} htmlFor="wizard-name">
-                Workspace name
-              </label>
-              <input
-                ref={nameRef}
-                id="wizard-name"
-                type="text"
-                className={styles.input}
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="my-project"
-                data-testid="wizard-name"
-              />
-            </div>
+            {isAddRepo ? null : (
+              <div className={styles.fieldGroup}>
+                <label className={styles.label} htmlFor="wizard-name">
+                  Workspace name
+                </label>
+                <input
+                  ref={nameRef}
+                  id="wizard-name"
+                  type="text"
+                  className={styles.input}
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="my-project"
+                  data-testid="wizard-name"
+                />
+              </div>
+            )}
 
             <div className={styles.fieldGroup}>
               <span className={styles.label}>Repo source</span>
@@ -203,6 +274,7 @@ export function WorkspaceRepoWizard({
                   Local repo path
                 </label>
                 <input
+                  ref={pathRef}
                   id="wizard-local-path"
                   type="text"
                   className={styles.input}

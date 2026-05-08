@@ -64,12 +64,13 @@ describe("BackendSetupPanel", () => {
   it("renders the panel with backend name and badges", () => {
     render(<BackendSetupPanel />);
     expect(screen.getByTestId("backend-setup-panel")).toBeInTheDocument();
-    expect(screen.getByTestId("backend-row-claude")).toBeInTheDocument();
+    const row = screen.getByTestId("backend-row-claude");
+    expect(row).toBeInTheDocument();
     expect(screen.getByText("Claude")).toBeInTheDocument();
-    // Three status badges visible.
-    expect(screen.getByText(/installed/i)).toBeInTheDocument();
-    expect(screen.getByText(/authenticated/i)).toBeInTheDocument();
-    expect(screen.getByText(/ready/i)).toBeInTheDocument();
+    // Three status badges visible inside the row.
+    expect(row).toHaveTextContent(/installed/i);
+    expect(row).toHaveTextContent(/authenticated/i);
+    expect(row).toHaveTextContent(/ready/i);
   });
 
   it("hides setup detail by default and shows it on toggle", () => {
@@ -142,10 +143,18 @@ describe("BackendSetupPanel", () => {
     render(<BackendSetupPanel />);
     const row = screen.getByTestId("backend-row-claude");
     expect(row.getAttribute("data-ready")).toBe("false");
-    // Installed badge should be on, authenticated/ready off.
-    const installedBadge = screen.getByText(/installed/i).closest("span");
+    // Installed badge should be on, authenticated/ready off. Scope
+    // selector to the row's badge container so the install_actions
+    // section doesn't match.
+    const badges = row.querySelectorAll("[data-on]");
+    expect(badges.length).toBeGreaterThanOrEqual(3);
+    const installedBadge = Array.from(badges).find((el) =>
+      /installed/i.test(el.textContent ?? ""),
+    );
     expect(installedBadge?.getAttribute("data-on")).toBe("true");
-    const authBadge = screen.getByText(/authenticated/i).closest("span");
+    const authBadge = Array.from(badges).find((el) =>
+      /authenticated/i.test(el.textContent ?? ""),
+    );
     expect(authBadge?.getAttribute("data-on")).toBe("false");
   });
 

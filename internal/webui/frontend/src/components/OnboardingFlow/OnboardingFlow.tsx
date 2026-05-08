@@ -10,6 +10,8 @@
  * which component owns each side effect.
  */
 
+import { useState } from "react";
+
 import { useOnboardingActions } from "@/contexts/OnboardingActionsContext";
 import {
   useOnboardingStatus,
@@ -19,16 +21,27 @@ import { type OnboardingStepStatus } from "@/types/onboarding";
 
 import styles from "./OnboardingFlow.module.css";
 
-export type OnboardingFlowContext = "no-workspace" | "empty-kanban";
+export type OnboardingFlowContext =
+  | "no-workspace"
+  | "empty-kanban"
+  | "kanban-banner";
 
 interface OnboardingFlowProps {
   context: OnboardingFlowContext;
   workspaceId?: string;
+  /**
+   * When true, the body of the flow (step list, footer) is hidden
+   * behind an expand toggle. Header + progress bar still render. Used
+   * by the kanban-banner placement so the flow can sit above a
+   * populated board without dominating it.
+   */
+  startCollapsed?: boolean;
 }
 
 export function OnboardingFlow({
   context,
   workspaceId,
+  startCollapsed = false,
 }: OnboardingFlowProps): JSX.Element | null {
   const { dispatch } = useOnboardingActions();
   const {
@@ -39,6 +52,8 @@ export function OnboardingFlow({
     isDismissed,
     dismiss,
   } = useOnboardingStatus(workspaceId);
+
+  const [isExpanded, setIsExpanded] = useState(!startCollapsed);
 
   if (isDismissed) return null;
   // While loading the very first time we render nothing rather than a
@@ -51,7 +66,9 @@ export function OnboardingFlow({
   const subtitle =
     context === "no-workspace"
       ? "Get from zero to your first agent run."
-      : "Finish setup to run your first agent in this workspace.";
+      : context === "kanban-banner"
+        ? "Finish onboarding to run your first agent."
+        : "Finish setup to run your first agent in this workspace.";
 
   const completeCount = steps.filter(
     (s) => s.status === "complete" || s.status === "warning",
@@ -90,6 +107,17 @@ export function OnboardingFlow({
               style={{ width: `${percent}%` }}
             />
           </div>
+          {context === "kanban-banner" ? (
+            <button
+              type="button"
+              className={styles.expandToggle}
+              onClick={() => setIsExpanded((v) => !v)}
+              aria-expanded={isExpanded}
+              data-testid="onboarding-expand"
+            >
+              {isExpanded ? "Hide" : "Show"} steps
+            </button>
+          ) : null}
         </div>
       </header>
 
@@ -99,29 +127,33 @@ export function OnboardingFlow({
         </p>
       ) : null}
 
-      <ol className={styles.list}>
-        {steps.map((step, index) => (
-          <Row
-            key={step.id}
-            step={step}
-            index={index + 1}
-            onCta={() => dispatch(step.action)}
-          />
-        ))}
-      </ol>
+      {isExpanded ? (
+        <>
+          <ol className={styles.list}>
+            {steps.map((step, index) => (
+              <Row
+                key={step.id}
+                step={step}
+                index={index + 1}
+                onCta={() => dispatch(step.action)}
+              />
+            ))}
+          </ol>
 
-      {workspaceId ? (
-        <div className={styles.footer}>
-          <button
-            type="button"
-            className={styles.dismiss}
-            onClick={dismiss}
-            data-testid="onboarding-dismiss"
-            aria-label="Dismiss onboarding"
-          >
-            Hide checklist
-          </button>
-        </div>
+          {workspaceId ? (
+            <div className={styles.footer}>
+              <button
+                type="button"
+                className={styles.dismiss}
+                onClick={dismiss}
+                data-testid="onboarding-dismiss"
+                aria-label="Dismiss onboarding"
+              >
+                Hide checklist
+              </button>
+            </div>
+          ) : null}
+        </>
       ) : null}
     </section>
   );

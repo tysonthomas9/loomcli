@@ -52,8 +52,9 @@ export function BackendSetupPanel(): JSX.Element {
       <header>
         <h3 className={styles.heading}>AI Backends</h3>
         <p className={styles.subtitle}>
-          Loom reads backend status from your shell at startup. After
-          changing an env var, restart Loom or click Refresh.
+          Loom reads env vars from your shell at startup, so changing an
+          env var requires a Loom restart. Refresh re-checks installed
+          binaries and CLI auth files only.
         </p>
       </header>
 

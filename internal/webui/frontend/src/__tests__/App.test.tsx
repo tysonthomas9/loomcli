@@ -99,6 +99,13 @@ vi.mock("@/contexts/OnboardingActionsContext", () => ({
 vi.mock("@/components/OnboardingFlow", () => ({
   OnboardingFlow: () => null,
 }));
+// App also mounts the WorkspaceRepoWizard for the workspace-scoped
+// onboarding step 1. The wizard depends on useJobPolling and a
+// workspace-create API; stub it out so unrelated App tests don't have
+// to wire those.
+vi.mock("@/components/WorkspaceRepoWizard", () => ({
+  WorkspaceRepoWizard: () => null,
+}));
 
 // Mock @/api functions used by handleApprove and handleReject
 vi.mock("@/api", async (importOriginal) => {

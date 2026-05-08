@@ -47,6 +47,7 @@ import { useRegisterOnboardingAction } from "@/contexts/OnboardingActionsContext
 import { CreateIssueModal } from "@/components/CreateIssueModal/CreateIssueModal";
 import { CreateWorkspaceModal } from "@/components/CreateWorkspaceModal/CreateWorkspaceModal";
 import { CreateAgentModal } from "@/components/CreateAgentModal/CreateAgentModal";
+import { WorkspaceRepoWizard } from "@/components/WorkspaceRepoWizard";
 import { UserMenu } from "@/components/UserMenu/UserMenu";
 import { SearchTermProvider } from "@/contexts/SearchTermContext";
 import {
@@ -456,14 +457,13 @@ function App() {
   // Create workspace modal state
   const [showCreateIssue, setShowCreateIssue] = useState(false);
   const [showCreateWorkspace, setShowCreateWorkspace] = useState(false);
+  const [showAddRepoWizard, setShowAddRepoWizard] = useState(false);
   const [showCreateAgent, setShowCreateAgent] = useState(false);
 
   // Onboarding CTAs dispatch through OnboardingActionsContext. App.tsx
   // owns the workspace-scoped modals and is the place to register the
   // handlers. RedirectToWorkspace handles the no-workspace case
-  // separately. start_first_agent and open_repo_checks land in a
-  // follow-up — for now they navigate the user somewhere actionable so
-  // the CTA isn't a dead click.
+  // separately.
   useRegisterOnboardingAction("open_create_issue", () => {
     setShowCreateIssue(true);
   });
@@ -471,15 +471,26 @@ function App() {
     setShowCreateAgent(true);
   });
   useRegisterOnboardingAction("open_workspace_repo_wizard", () => {
-    setShowCreateWorkspace(true);
+    // Workspace-scoped step 1 means the workspace exists but has no
+    // repos — open WorkspaceRepoWizard in add-repo mode rather than
+    // the legacy create-workspace modal.
+    setShowAddRepoWizard(true);
   });
   useRegisterOnboardingAction("open_backend_setup", () => {
     navigate(`/ws/${workspaceId}/settings`);
   });
   useRegisterOnboardingAction("open_repo_checks", () => {
-    navigate(`/ws/${workspaceId}/workspace`);
+    // Settings is the canonical destination today; the dedicated
+    // RepoChecksPanel mounts there. /workspace is redirected away in
+    // single-repo mode, which made the previous target a dead end.
+    navigate(`/ws/${workspaceId}/settings#repo-checks`);
   });
   useRegisterOnboardingAction("start_first_agent", () => {
+    // The terminal-view switch is the deepest state we can land in
+    // without hooking into the run-orchestrator. The OnboardingFlow
+    // step transitions to "complete" once the server detects a
+    // session for this workspace; until that wiring lands the user
+    // can kick off an agent manually from the terminal.
     setActiveView("terminal");
   });
 
@@ -1216,6 +1227,20 @@ function App() {
           setShowCreateAgent(false);
           refetchWorkspace();
           showToast(`Agent "${agent.name}" created`, { type: "success" });
+        }}
+      />
+      <WorkspaceRepoWizard
+        isOpen={showAddRepoWizard}
+        mode={{
+          kind: "add-repo",
+          workspaceId,
+          workspaceName: activeWorkspaceName ?? workspaceId,
+        }}
+        onClose={() => setShowAddRepoWizard(false)}
+        onSuccess={() => {
+          setShowAddRepoWizard(false);
+          refetchWorkspace();
+          showToast("Repo attached", { type: "success" });
         }}
       />
     </KeyboardShortcutProvider>

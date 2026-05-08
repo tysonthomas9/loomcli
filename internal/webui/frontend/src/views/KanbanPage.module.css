@@ -8,3 +8,15 @@
   overflow-x: hidden;
   overflow-y: auto; /* SwimLaneBoard needs vertical scroll */
 }
+
+.onboardingBanner {
+  padding: var(--space-3) var(--space-4) 0;
+  display: flex;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.onboardingBanner > section {
+  width: 100%;
+  max-width: 720px;
+}

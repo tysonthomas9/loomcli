@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useRef } from "react";
 
 import { ErrorBoundary, SwimLaneBoard, AssigneePrompt } from "@/components";
 import { IssueViewGuard } from "@/components/IssueViewGuard";
+import { OnboardingFlow } from "@/components/OnboardingFlow";
 import type { Status } from "@/types";
 import { updateIssue } from "@/api";
 import { useRecentAssignees } from "@/hooks";
@@ -102,8 +103,24 @@ export function KanbanPage() {
     }
   }, [pendingDragData, updateIssueStatus]);
 
+  // Onboarding banner: persistent across the empty-board → has-issues
+  // transition so the final "run first agent" step stays reachable
+  // after the first issue lands. The OnboardingFlow itself returns null
+  // when dismissed or all-complete, so this is a no-op when the user
+  // is past onboarding.
+  const showOnboardingBanner = !hasActiveFilters && !isLoading;
+
   return (
     <ErrorBoundary resetOnChange={[activeView]}>
+      {showOnboardingBanner ? (
+        <div className={styles.onboardingBanner}>
+          <OnboardingFlow
+            context="kanban-banner"
+            workspaceId={workspaceId}
+            startCollapsed={issues.length > 0}
+          />
+        </div>
+      ) : null}
       <IssueViewGuard
         issues={issues}
         isLoading={isLoading}

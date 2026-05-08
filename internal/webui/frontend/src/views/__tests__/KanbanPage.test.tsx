@@ -45,6 +45,13 @@ vi.mock("@/components/IssueViewGuard", () => ({
   ),
 }));
 
+// KanbanPage now renders an OnboardingFlow banner above the view
+// guard. The flow needs an OnboardingActionsProvider; tests stub it
+// to null so they stay focused on the kanban-page behavior.
+vi.mock("@/components/OnboardingFlow", () => ({
+  OnboardingFlow: () => null,
+}));
+
 vi.mock("@/hooks", () => ({
   useRecentAssignees: () => ({
     recentAssignees: [],
