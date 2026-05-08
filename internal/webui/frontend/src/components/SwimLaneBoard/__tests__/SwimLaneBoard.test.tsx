@@ -159,9 +159,9 @@ describe("SwimLaneBoard", () => {
       );
 
       expect(
-        within(
-          screen.getByRole("region", { name: "Open issues" }),
-        ).getByText("Live Agent Task"),
+        within(screen.getByRole("region", { name: "Open issues" })).getByText(
+          "Live Agent Task",
+        ),
       ).toBeInTheDocument();
       expect(
         within(
@@ -184,9 +184,9 @@ describe("SwimLaneBoard", () => {
       );
 
       expect(
-        within(
-          screen.getByRole("region", { name: "Open issues" }),
-        ).queryByText("Live Agent Task"),
+        within(screen.getByRole("region", { name: "Open issues" })).queryByText(
+          "Live Agent Task",
+        ),
       ).not.toBeInTheDocument();
       expect(
         within(
@@ -987,8 +987,9 @@ describe("SwimLaneBoard", () => {
       render(<SwimLaneBoard issues={issues} groupBy="epic" />);
 
       expect(screen.queryByText("Ungrouped")).not.toBeInTheDocument();
-      expect(screen.queryByRole("button", { name: /Issue: Epic Issue/i }))
-        .not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: /Issue: Epic Issue/i }),
+      ).not.toBeInTheDocument();
       expect(screen.getByText("Task Issue")).toBeInTheDocument();
     });
 
