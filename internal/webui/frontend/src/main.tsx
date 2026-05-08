@@ -17,6 +17,7 @@ import {
 } from "@/api/common/appConfig";
 import { initExternalAuth } from "@/api/common/authClient";
 import { ExternalAuthProvider, NoAuthProvider } from "@/contexts/AuthContext";
+import { OnboardingActionsProvider } from "@/contexts/OnboardingActionsContext";
 import { AuthGate } from "@/components/AuthGate";
 
 // Run localStorage migration before anything reads storage.
@@ -47,7 +48,14 @@ function renderBootError(error: unknown): void {
 }
 
 function renderApp(config: AppConfig): void {
-  const routerElement = <RouterProvider router={router} />;
+  // OnboardingActionsProvider wraps the entire route tree (including
+  // RedirectToWorkspace at "/") so onboarding CTAs can dispatch through
+  // a single channel from any surface.
+  const routerElement = (
+    <OnboardingActionsProvider>
+      <RouterProvider router={router} />
+    </OnboardingActionsProvider>
+  );
 
   const authWrapped =
     config.mode === AUTH_MODE_OIDC ? (
