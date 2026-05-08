@@ -31,6 +31,12 @@ import {
   ONBOARDING_REPO_URL,
   ONBOARDING_WORKSPACE_NAME,
 } from "@/utils/onboardingDefaults";
+import {
+  dismissOnboarding,
+  isOnboardingDismissed,
+  ONBOARDING_RESTART_EVENT,
+  type OnboardingRestartDetail,
+} from "@/utils/onboardingState";
 import { buildWorkspaceSwitchUrl } from "@/utils/workspaceUrl";
 import { AppLayout } from "@/components/AppLayout/AppLayout";
 import { WorkspaceBreadcrumb } from "@/components/WorkspaceBreadcrumb/WorkspaceBreadcrumb";
@@ -497,7 +503,7 @@ function App() {
   const [showCreateIssue, setShowCreateIssue] = useState(false);
   const [showCreateWorkspace, setShowCreateWorkspace] = useState(false);
   const [showCreateAgent, setShowCreateAgent] = useState(false);
-  const [showOnboardingTerminal, setShowOnboardingTerminal] = useState(false);
+  const [onboardingDismissed, setOnboardingDismissed] = useState(false);
 
   // Track mount state for async operations.
   useEffect(() => {
@@ -729,7 +735,7 @@ function App() {
         }
       }
     },
-    [updateIssueStatus, refetch, handlePanelClose, showToast],
+    [workspaceId, updateIssueStatus, refetch, handlePanelClose, showToast],
   );
 
   // Handle reject button submission on review cards
@@ -757,7 +763,7 @@ function App() {
         showToast(message, { type: "error" });
       }
     },
-    [refetch, handlePanelClose, showToast],
+    [workspaceId, refetch, handlePanelClose, showToast],
   );
 
   // Handle agent click from MonitorDashboard
@@ -790,7 +796,6 @@ function App() {
 
   useEffect(() => {
     if (activeView === "terminal") {
-      setShowOnboardingTerminal(false);
       closeAllPanels();
     }
   }, [activeView, closeAllPanels]);
@@ -820,30 +825,20 @@ function App() {
     navigateToView("terminal");
   }, [closeAllPanels, navigateToView]);
 
-  const handleOnboardingTerminalOpen = useCallback(() => {
-    closeAllPanels();
-    setShowOnboardingTerminal(true);
-  }, [closeAllPanels]);
-
-  const handleOnboardingTerminalClose = useCallback(() => {
-    setShowOnboardingTerminal(false);
-  }, []);
-
-  const handleOnboardingTerminalExpand = useCallback(() => {
-    setShowOnboardingTerminal(false);
-    navigateToView("terminal");
-  }, [navigateToView]);
-
   const hasWorkspaceRepo = workspaceRepos.length > 0;
   const hasWorkspaceAgent = (workspace?.agents?.length ?? 0) > 0;
   const hasWorkspaceIssue = issues.length > 0;
+  const isWorkspaceOnboardingComplete =
+    hasWorkspaceRepo && hasWorkspaceAgent && hasWorkspaceIssue;
   const shouldShowWorkspaceOnboarding =
-    activeView === "kanban" &&
-    !isLoading &&
-    !error &&
-    !hasActiveFilters &&
+    !onboardingDismissed &&
+    !isWorkspaceOnboardingComplete &&
     (workspaceRepos.length === 0 || hasOnboardingRepo) &&
     (!hasWorkspaceRepo || !hasWorkspaceAgent || !hasWorkspaceIssue);
+  const handleOnboardingDismiss = useCallback(() => {
+    dismissOnboarding(workspaceId);
+    setOnboardingDismissed(true);
+  }, [workspaceId]);
   const workspaceOnboardingSteps: OnboardingStep[] = useMemo(
     () => [
       {
@@ -869,7 +864,7 @@ function App() {
           "Use the terminal to install or login to the selected CLI if this machine is not configured yet.",
         status: hasWorkspaceRepo ? "actionable" : "blocked",
         actionLabel: "Set Up CLI",
-        onAction: handleOnboardingTerminalOpen,
+        onAction: () => navigateToView("terminal"),
       },
       {
         id: "create-agent",
@@ -901,18 +896,35 @@ function App() {
       },
     ],
     [
-      handleOnboardingTerminalOpen,
       hasWorkspaceAgent,
       hasWorkspaceIssue,
       hasWorkspaceRepo,
+      navigateToView,
     ],
   );
 
   useEffect(() => {
-    if (!shouldShowWorkspaceOnboarding && activeView !== "terminal") {
-      setShowOnboardingTerminal(false);
+    setOnboardingDismissed(isOnboardingDismissed(workspaceId));
+  }, [workspaceId]);
+
+  useEffect(() => {
+    const handleRestart = (event: Event) => {
+      const detail = (event as CustomEvent<OnboardingRestartDetail>).detail;
+      if (!detail?.workspaceId || detail.workspaceId === workspaceId) {
+        setOnboardingDismissed(false);
+      }
+    };
+    window.addEventListener(ONBOARDING_RESTART_EVENT, handleRestart);
+    return () => {
+      window.removeEventListener(ONBOARDING_RESTART_EVENT, handleRestart);
+    };
+  }, [workspaceId]);
+
+  useEffect(() => {
+    if (isWorkspaceOnboardingComplete) {
+      setOnboardingDismissed(false);
     }
-  }, [activeView, shouldShowWorkspaceOnboarding]);
+  }, [isWorkspaceOnboardingComplete]);
 
   const handleIssueContextConsumed = useCallback(() => {
     setPendingIssueContext(undefined);
@@ -1195,11 +1207,8 @@ function App() {
   const terminalContainerClassName =
     activeView === "terminal"
       ? styles.terminalRouteContainer
-      : showOnboardingTerminal
-        ? styles.onboardingTerminalPanel
-        : styles.terminalHidden;
-  const isTerminalActive =
-    activeView === "terminal" || showOnboardingTerminal;
+      : styles.terminalHidden;
+  const isTerminalActive = activeView === "terminal";
 
   return (
     <KeyboardShortcutProvider
@@ -1225,39 +1234,75 @@ function App() {
           }
           sidebar={sidebarContent}
         >
-          <ViewSubSwitcher activeView={activeView} onChange={navigateToView} />
-          {(showStaleBanner || isConnectionLost) &&
-            staleBannerDisconnectedSince !== null &&
-            !(
-              issues.length === 0 &&
-              !isLoading &&
-              !error &&
-              isIssueBasedView
-            ) && (
-              <StaleDataBanner
-                disconnectedSince={staleBannerDisconnectedSince}
-                onRetry={staleBannerRetry}
-                connectionLost={isConnectionLost}
-              />
-            )}
-          <WorkspaceViewProvider
-            data={workspaceViewData}
-            actions={workspaceViewActions}
+          <div
+            className={
+              shouldShowWorkspaceOnboarding
+                ? styles.workspaceContentWithOnboarding
+                : styles.workspaceContent
+            }
           >
-            {shouldShowWorkspaceOnboarding ? (
-              <OnboardingFlow
-                className={styles.workspaceOnboarding ?? ""}
-                title="Finish onboarding"
-                subtitle="Continue the fixed first-run flow from the sample workspace. The repo step stays complete while the remaining setup actions stay visible."
-                repoUrl={ONBOARDING_REPO_URL}
-                steps={workspaceOnboardingSteps}
+            <div className={styles.workspaceMainContent}>
+              <ViewSubSwitcher
+                activeView={activeView}
+                onChange={navigateToView}
               />
-            ) : (
-              <Suspense fallback={<LoadingSkeleton.Column />}>
-                <Outlet />
-              </Suspense>
+              {(showStaleBanner || isConnectionLost) &&
+                staleBannerDisconnectedSince !== null &&
+                !(
+                  issues.length === 0 &&
+                  !isLoading &&
+                  !error &&
+                  isIssueBasedView
+                ) && (
+                  <StaleDataBanner
+                    disconnectedSince={staleBannerDisconnectedSince}
+                    onRetry={staleBannerRetry}
+                    connectionLost={isConnectionLost}
+                  />
+                )}
+              <WorkspaceViewProvider
+                data={workspaceViewData}
+                actions={workspaceViewActions}
+              >
+                <Suspense fallback={<LoadingSkeleton.Column />}>
+                  <Outlet />
+                </Suspense>
+              </WorkspaceViewProvider>
+              <div className={terminalContainerClassName}>
+                <Suspense fallback={<LoadingSkeleton.Terminal />}>
+                  <TerminalView
+                    isActive={isTerminalActive}
+                    pendingIssueContext={pendingIssueContext}
+                    onIssueContextConsumed={handleIssueContextConsumed}
+                    pendingAgentName={pendingAgentName}
+                    onAgentNameConsumed={handleAgentNameConsumed}
+                    onActiveSessionCountChange={setActiveSessionCount}
+                    onUnreadChange={setHasTerminalUnread}
+                    onTabLimitReached={(message) =>
+                      showToast(message, { type: "error" })
+                    }
+                    onNavigateToSettings={() => navigateToView("settings")}
+                  />
+                </Suspense>
+              </div>
+            </div>
+            {shouldShowWorkspaceOnboarding && (
+              <aside
+                className={styles.onboardingSidePanel}
+                aria-label="Onboarding checklist"
+              >
+                <OnboardingFlow
+                  className={styles.workspaceOnboarding ?? ""}
+                  variant="panel"
+                  title="Finish onboarding"
+                  subtitle="Keep this checklist open while you move through Loom. Setup actions switch the main view without losing progress."
+                  repoUrl={ONBOARDING_REPO_URL}
+                  steps={workspaceOnboardingSteps}
+                  onDismiss={handleOnboardingDismiss}
+                />
+              </aside>
             )}
-          </WorkspaceViewProvider>
+          </div>
           <ToastContainer toasts={toasts} onDismiss={dismissToast} />
           <IssueDetailPanel
             isOpen={isPanelOpen}
@@ -1291,59 +1336,11 @@ function App() {
               ? { initialValues: onboardingIssueInitialValues }
               : {})}
           />
-          <div className={terminalContainerClassName}>
-            {showOnboardingTerminal && activeView !== "terminal" && (
-              <div className={styles.onboardingTerminalHeader}>
-                <div>
-                  <h2 className={styles.onboardingTerminalTitle}>
-                    Set up AI CLI
-                  </h2>
-                  <p className={styles.onboardingTerminalSubtitle}>
-                    Install, login, or configure the backend without leaving
-                    onboarding.
-                  </p>
-                </div>
-                <div className={styles.onboardingTerminalActions}>
-                  <button
-                    type="button"
-                    className={styles.onboardingTerminalSecondaryButton}
-                    onClick={handleOnboardingTerminalExpand}
-                  >
-                    Full View
-                  </button>
-                  <button
-                    type="button"
-                    className={styles.onboardingTerminalCloseButton}
-                    onClick={handleOnboardingTerminalClose}
-                    aria-label="Close CLI setup panel"
-                  >
-                    Close
-                  </button>
-                </div>
-              </div>
-            )}
-            <div className={styles.onboardingTerminalBody}>
-              <Suspense fallback={<LoadingSkeleton.Terminal />}>
-                <TerminalView
-                  isActive={isTerminalActive}
-                  pendingIssueContext={pendingIssueContext}
-                  onIssueContextConsumed={handleIssueContextConsumed}
-                  pendingAgentName={pendingAgentName}
-                  onAgentNameConsumed={handleAgentNameConsumed}
-                  onActiveSessionCountChange={setActiveSessionCount}
-                  onUnreadChange={setHasTerminalUnread}
-                  onTabLimitReached={(message) =>
-                    showToast(message, { type: "error" })
-                  }
-                  onNavigateToSettings={() => navigateToView("settings")}
-                />
-              </Suspense>
-            </div>
-          </div>
           <TalkToLeadButton
             onClick={handleTalkToLeadClick}
             isActive={activeView === "terminal"}
             sessionCount={activeSessionCount}
+            avoidSidePanel={shouldShowWorkspaceOnboarding}
           />
         </AppLayout>
       </SearchTermProvider>

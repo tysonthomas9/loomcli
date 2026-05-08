@@ -21,6 +21,9 @@ export interface OnboardingFlowProps {
   repoUrl: string;
   steps: OnboardingStep[];
   className?: string;
+  variant?: "page" | "panel";
+  onDismiss?: () => void;
+  dismissLabel?: string;
 }
 
 const STATUS_LABELS: Record<OnboardingStepStatus, string> = {
@@ -40,12 +43,19 @@ export function OnboardingFlow({
   repoUrl,
   steps,
   className,
+  variant = "page",
+  onDismiss,
+  dismissLabel = "Dismiss",
 }: OnboardingFlowProps): JSX.Element {
   const completedCount = steps.filter((step) => step.status === "complete")
     .length;
-  const rootClassName = className
-    ? `${styles.onboardingFlow} ${className}`
-    : styles.onboardingFlow;
+  const rootClassName = [
+    styles.onboardingFlow,
+    variant === "panel" ? styles.panel : "",
+    className ?? "",
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   return (
     <section
@@ -61,11 +71,22 @@ export function OnboardingFlow({
           </h2>
           <p className={styles.subtitle}>{subtitle}</p>
         </div>
-        <div className={styles.progress} aria-label="Onboarding progress">
-          <strong>
-            {completedCount}/{steps.length}
-          </strong>
-          <span>complete</span>
+        <div className={styles.headerAside}>
+          <div className={styles.progress} aria-label="Onboarding progress">
+            <strong>
+              {completedCount}/{steps.length}
+            </strong>
+            <span>complete</span>
+          </div>
+          {onDismiss && (
+            <button
+              type="button"
+              className={styles.dismissButton}
+              onClick={onDismiss}
+            >
+              {dismissLabel}
+            </button>
+          )}
         </div>
       </div>
 
@@ -77,7 +98,8 @@ export function OnboardingFlow({
       <ol className={styles.steps}>
         {steps.map((step, index) => {
           const isBlocked = step.status === "blocked";
-          const hasAction = step.actionLabel && step.onAction;
+          const hasAction =
+            step.status !== "complete" && step.actionLabel && step.onAction;
 
           return (
             <li key={step.id} className={stepClassName(step.status)}>

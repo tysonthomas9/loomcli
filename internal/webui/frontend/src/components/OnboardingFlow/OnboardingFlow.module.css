@@ -54,6 +54,25 @@
   line-height: 1;
 }
 
+.headerAside {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--space-3);
+}
+
+.dismissButton {
+  height: 32px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+}
+
 .repoStrip {
   display: flex;
   align-items: center;
@@ -206,6 +225,59 @@
   opacity: 0.68;
 }
 
+.panel {
+  width: 100%;
+  margin: 0;
+  padding: var(--space-4);
+}
+
+.panel .header {
+  grid-template-columns: 1fr;
+  gap: var(--space-4);
+}
+
+.panel .title {
+  font-size: 1.05rem;
+}
+
+.panel .subtitle {
+  font-size: var(--font-size-xs);
+}
+
+.panel .headerAside,
+.panel .progress {
+  align-items: flex-start;
+}
+
+.panel .repoStrip {
+  align-items: flex-start;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.panel .step {
+  grid-template-columns: 28px minmax(0, 1fr);
+  align-items: start;
+  gap: var(--space-3);
+  padding: var(--space-3);
+}
+
+.panel .stepIndex {
+  width: 28px;
+  height: 28px;
+  font-size: var(--font-size-xs);
+}
+
+.panel .stepTitleRow {
+  align-items: flex-start;
+}
+
+.panel .stepAction {
+  grid-column: 2;
+  width: fit-content;
+  min-width: 0;
+}
+
 @media (width <= 720px) {
   .onboardingFlow {
     width: 100%;
@@ -217,6 +289,10 @@
   }
 
   .progress {
+    align-items: flex-start;
+  }
+
+  .headerAside {
     align-items: flex-start;
   }
 

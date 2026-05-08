@@ -81,10 +81,19 @@ describe("OnboardingFlow", () => {
   it("fires available actions and keeps blocked actions disabled", () => {
     const onCurrent = vi.fn();
     const onBlocked = vi.fn();
+    const onComplete = vi.fn();
     render(
       <OnboardingFlow
         repoUrl="https://github.com/octocat/Hello-World"
         steps={[
+          {
+            id: "complete",
+            title: "Complete",
+            description: "Complete step",
+            status: "complete",
+            actionLabel: "Run Complete",
+            onAction: onComplete,
+          },
           {
             id: "current",
             title: "Current",
@@ -112,5 +121,10 @@ describe("OnboardingFlow", () => {
     expect(blockedButton).toBeDisabled();
     fireEvent.click(blockedButton);
     expect(onBlocked).not.toHaveBeenCalled();
+
+    expect(
+      screen.queryByRole("button", { name: "Run Complete" }),
+    ).not.toBeInTheDocument();
+    expect(onComplete).not.toHaveBeenCalled();
   });
 });
