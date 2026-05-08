@@ -127,9 +127,17 @@ export function WorkspaceTree({
   const workspaceRepos = repos ?? [];
 
   useEffect(() => {
+    if (workspaceRepos.length > 0) {
+      setRepoPathInput((current) =>
+        current === ONBOARDING_REPO_URL ? "" : current,
+      );
+      return;
+    }
+
     if (
       !workspaceId ||
-      workspaceRepos.length > 0 ||
+      isLoading ||
+      error ||
       prefilledAddRepoWorkspaceRef.current === workspaceId
     ) {
       return;
@@ -139,7 +147,7 @@ export function WorkspaceTree({
     setRepoPathInput((current) =>
       current.trim() ? current : ONBOARDING_REPO_URL,
     );
-  }, [workspaceId, workspaceRepos.length]);
+  }, [workspaceId, workspaceRepos.length, isLoading, error]);
 
   const agentHealth =
     agents.some((agent) => agent.status.startsWith("working")) ||
