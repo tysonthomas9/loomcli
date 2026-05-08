@@ -50,8 +50,7 @@ export function BackendSetupPanel(): JSX.Element {
       data-testid="backend-setup-panel"
     >
       <header>
-        <p className={styles.eyebrow}>The Catalog</p>
-        <h3 className={styles.heading}>AI Backends.</h3>
+        <h3 className={styles.heading}>AI Backends</h3>
         <p className={styles.subtitle}>
           Loom reads backend status from your shell at startup. After
           changing an env var, restart Loom or click Refresh.
@@ -106,10 +105,12 @@ function BackendRow({
       <div className={styles.summary}>
         <div className={styles.identity}>
           <span className={styles.name}>
+            <span
+              className={styles.statusDot}
+              data-ready={ready}
+              aria-hidden="true"
+            />
             {backend.display_name || backend.name}
-            <span className={styles.statusLabel} data-ready={ready}>
-              {ready ? "Ready" : "Setup needed"}
-            </span>
           </span>
           {backend.description ? (
             <span className={styles.description}>{backend.description}</span>

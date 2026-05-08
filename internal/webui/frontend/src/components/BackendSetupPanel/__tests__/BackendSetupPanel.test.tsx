@@ -64,13 +64,12 @@ describe("BackendSetupPanel", () => {
   it("renders the panel with backend name and badges", () => {
     render(<BackendSetupPanel />);
     expect(screen.getByTestId("backend-setup-panel")).toBeInTheDocument();
-    const row = screen.getByTestId("backend-row-claude");
-    expect(row).toBeInTheDocument();
+    expect(screen.getByTestId("backend-row-claude")).toBeInTheDocument();
     expect(screen.getByText("Claude")).toBeInTheDocument();
-    // Three status badges visible inside the row.
-    expect(row).toHaveTextContent(/installed/i);
-    expect(row).toHaveTextContent(/authenticated/i);
-    expect(row).toHaveTextContent(/ready/i);
+    // Three status badges visible.
+    expect(screen.getByText(/installed/i)).toBeInTheDocument();
+    expect(screen.getByText(/authenticated/i)).toBeInTheDocument();
+    expect(screen.getByText(/ready/i)).toBeInTheDocument();
   });
 
   it("hides setup detail by default and shows it on toggle", () => {
