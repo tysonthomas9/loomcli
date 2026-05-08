@@ -4300,7 +4300,7 @@ components:
     # ── Monitor Schemas ─────────────────────────────────────────────────
     MonitorStatusResponse:
       type: object
-      required: [workspace, agents, tasks, in_progress_list, agent_tasks, stats, sync, timestamp]
+      required: [workspace, agents, tasks, needs_planning, ready_to_implement, needs_review, in_progress, in_progress_list, backlog, closed, agent_tasks, stats, sync, timestamp]
       properties:
         workspace:
           $ref: "#/components/schemas/MonitorWorkspaceInfo"
@@ -4310,7 +4310,31 @@ components:
             $ref: "#/components/schemas/MonitorAgentStatus"
         tasks:
           $ref: "#/components/schemas/MonitorTaskSummary"
+        needs_planning:
+          type: array
+          items:
+            $ref: "#/components/schemas/MonitorTaskInfo"
+        ready_to_implement:
+          type: array
+          items:
+            $ref: "#/components/schemas/MonitorTaskInfo"
+        needs_review:
+          type: array
+          items:
+            $ref: "#/components/schemas/MonitorTaskInfo"
+        in_progress:
+          type: array
+          items:
+            $ref: "#/components/schemas/MonitorTaskInfo"
         in_progress_list:
+          type: array
+          items:
+            $ref: "#/components/schemas/MonitorTaskInfo"
+        backlog:
+          type: array
+          items:
+            $ref: "#/components/schemas/MonitorTaskInfo"
+        closed:
           type: array
           items:
             $ref: "#/components/schemas/MonitorTaskInfo"

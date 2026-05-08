@@ -2485,7 +2485,13 @@ export interface components {
       workspace: components["schemas"]["MonitorWorkspaceInfo"];
       agents: components["schemas"]["MonitorAgentStatus"][];
       tasks: components["schemas"]["MonitorTaskSummary"];
+      needs_planning: components["schemas"]["MonitorTaskInfo"][];
+      ready_to_implement: components["schemas"]["MonitorTaskInfo"][];
+      needs_review: components["schemas"]["MonitorTaskInfo"][];
+      in_progress: components["schemas"]["MonitorTaskInfo"][];
       in_progress_list: components["schemas"]["MonitorTaskInfo"][];
+      backlog: components["schemas"]["MonitorTaskInfo"][];
+      closed: components["schemas"]["MonitorTaskInfo"][];
       agent_tasks: {
         [key: string]: components["schemas"]["MonitorTaskInfo"];
       };

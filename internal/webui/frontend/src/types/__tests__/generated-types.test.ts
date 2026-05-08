@@ -670,7 +670,13 @@ describe("Agent type aliases", () => {
         backlog: 0,
         epics: 0,
       },
+      needs_planning: [],
+      ready_to_implement: [],
+      needs_review: [],
+      in_progress: [],
       in_progress_list: [],
+      backlog: [],
+      closed: [],
       agent_tasks: {},
       stats: {
         open: 0,
@@ -734,7 +740,7 @@ describe("Agent type aliases", () => {
         { id: "loom-2", title: "Build Y", priority: 2, status: "in_progress" },
       ],
       backlog: [],
-      done: [],
+      closed: [],
       timestamp: "2024-08-01T12:00:00Z",
     };
 

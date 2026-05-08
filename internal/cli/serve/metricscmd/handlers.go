@@ -62,6 +62,20 @@ type TasksResponse struct {
 	Timestamp        time.Time           `json:"timestamp"`
 }
 
+func taskInfoList(in []monitor.TaskInfo) []monitor.TaskInfo {
+	if in == nil {
+		return []monitor.TaskInfo{}
+	}
+	return in
+}
+
+func taskInfoMap(in map[string]monitor.TaskInfo) map[string]monitor.TaskInfo {
+	if in == nil {
+		return map[string]monitor.TaskInfo{}
+	}
+	return in
+}
+
 // StatsResponse wraps statistics.
 type StatsResponse struct {
 	Stats     monitor.MonitorStats `json:"stats"`
@@ -76,14 +90,20 @@ type SyncResponse struct {
 
 // StatusResponse is the full status (like monitor dashboard).
 type StatusResponse struct {
-	Workspace      WorkspaceInfo               `json:"workspace"`
-	Agents         []monitor.AgentStatus       `json:"agents"`
-	Tasks          monitor.TaskSummary         `json:"tasks"`
-	InProgressList []monitor.TaskInfo          `json:"in_progress_list"`
-	AgentTasks     map[string]monitor.TaskInfo `json:"agent_tasks"`
-	Stats          monitor.MonitorStats        `json:"stats"`
-	Sync           monitor.SyncInfo            `json:"sync"`
-	Timestamp      time.Time                   `json:"timestamp"`
+	Workspace        WorkspaceInfo               `json:"workspace"`
+	Agents           []monitor.AgentStatus       `json:"agents"`
+	Tasks            monitor.TaskSummary         `json:"tasks"`
+	NeedsPlanning    []monitor.TaskInfo          `json:"needs_planning"`
+	ReadyToImplement []monitor.TaskInfo          `json:"ready_to_implement"`
+	NeedsReview      []monitor.TaskInfo          `json:"needs_review"`
+	InProgress       []monitor.TaskInfo          `json:"in_progress"`
+	InProgressList   []monitor.TaskInfo          `json:"in_progress_list"`
+	Backlog          []monitor.TaskInfo          `json:"backlog"`
+	Closed           []monitor.TaskInfo          `json:"closed"`
+	AgentTasks       map[string]monitor.TaskInfo `json:"agent_tasks"`
+	Stats            monitor.MonitorStats        `json:"stats"`
+	Sync             monitor.SyncInfo            `json:"sync"`
+	Timestamp        time.Time                   `json:"timestamp"`
 }
 
 type IssueBackendFn func(ctx context.Context) backend.IssueBackend
@@ -119,14 +139,20 @@ func HandleStatusWithSources(dataSource *MonitorDataSource, storeDataSource *Mon
 		storeData := storeDataSource.Resolve(ctx, workspaceHint)
 		span.SetAttributes(attribute.Int("result.count", len(storeData.Agents)))
 		writeJSON(w, StatusResponse{
-			Workspace:      storeData.Workspace,
-			Agents:         storeData.Agents,
-			Tasks:          data.Tasks,
-			InProgressList: data.InProgressTasks,
-			AgentTasks:     data.AgentTasks,
-			Stats:          data.Stats,
-			Sync:           data.SyncStatus,
-			Timestamp:      data.Timestamp,
+			Workspace:        storeData.Workspace,
+			Agents:           storeData.Agents,
+			Tasks:            data.Tasks,
+			NeedsPlanning:    taskInfoList(data.NeedsPlanningTasks),
+			ReadyToImplement: taskInfoList(data.ReadyToImplement),
+			NeedsReview:      taskInfoList(data.ReviewTasks),
+			InProgress:       taskInfoList(data.InProgressTasks),
+			InProgressList:   taskInfoList(data.InProgressTasks),
+			Backlog:          taskInfoList(data.BacklogTasks),
+			Closed:           taskInfoList(data.ClosedTasks),
+			AgentTasks:       taskInfoMap(data.AgentTasks),
+			Stats:            data.Stats,
+			Sync:             data.SyncStatus,
+			Timestamp:        data.Timestamp,
 		})
 	}
 }
@@ -206,12 +232,12 @@ func HandleTasksWithDataSource(dataSource *MonitorDataSource) http.HandlerFunc {
 				len(data.BacklogTasks)+len(data.ClosedTasks)))
 		writeJSON(w, TasksResponse{
 			Summary:          data.Tasks,
-			NeedsPlanning:    data.NeedsPlanningTasks,
-			ReadyToImplement: data.ReadyToImplement,
-			NeedsReview:      data.ReviewTasks,
-			InProgress:       data.InProgressTasks,
-			Backlog:          data.BacklogTasks,
-			Closed:           data.ClosedTasks,
+			NeedsPlanning:    taskInfoList(data.NeedsPlanningTasks),
+			ReadyToImplement: taskInfoList(data.ReadyToImplement),
+			NeedsReview:      taskInfoList(data.ReviewTasks),
+			InProgress:       taskInfoList(data.InProgressTasks),
+			Backlog:          taskInfoList(data.BacklogTasks),
+			Closed:           taskInfoList(data.ClosedTasks),
 			Timestamp:        data.Timestamp,
 		})
 	}

@@ -10,6 +10,7 @@ import { createAgentStore, INITIAL_STATE } from "../agentStore";
 import type { AgentStore } from "../agentStore";
 import type { StoreApi } from "zustand/vanilla";
 import type { LoomAgentStatus } from "../../types";
+import type { FetchStatusResult } from "../../api/agents";
 
 // ---------------------------------------------------------------------------
 // Minimal document mock for visibility change tests
@@ -73,9 +74,10 @@ function makeAgent(overrides: Partial<LoomAgentStatus> = {}): LoomAgentStatus {
   };
 }
 
-function setupSuccessfulMocks(): void {
-  mockFetchAgents.mockResolvedValue([makeAgent()]);
-  mockFetchStatus.mockResolvedValue({
+function makeStatusResult(
+  overrides: Partial<FetchStatusResult> = {},
+): FetchStatusResult {
+  return {
     agents: [makeAgent()],
     tasks: {
       needs_planning: 1,
@@ -87,6 +89,16 @@ function setupSuccessfulMocks(): void {
     },
     agentTasks: {
       nova: { id: "task-1", title: "Test Task", priority: 1, status: "open" },
+    },
+    taskLists: {
+      needsPlanning: [],
+      readyToImplement: [
+        { id: "task-1", title: "Test Task", priority: 1, status: "open" },
+      ],
+      needsReview: [],
+      inProgress: [],
+      backlog: [],
+      done: [],
     },
     sync: {
       db_synced: true,
@@ -105,17 +117,12 @@ function setupSuccessfulMocks(): void {
       blocked: 0,
     },
     timestamp: "2026-01-01T00:00:00Z",
-  });
-  mockFetchTasks.mockResolvedValue({
-    needsPlanning: [],
-    readyToImplement: [
-      { id: "task-1", title: "Test Task", priority: 1, status: "open" },
-    ],
-    needsReview: [],
-    inProgress: [],
-    backlog: [],
-    done: [],
-  });
+    ...overrides,
+  };
+}
+
+function setupSuccessfulMocks(): void {
+  mockFetchStatus.mockResolvedValue(makeStatusResult());
 }
 
 // ---------------------------------------------------------------------------
@@ -186,20 +193,18 @@ describe("agentStore", () => {
     });
 
     // -----------------------------------------------------------------------
-    // 3. fetchData — secondary fetches fire
+    // 3. fetchData — status response hydrates full monitor state
     // -----------------------------------------------------------------------
 
-    it("fires secondary fetches and populates their state", async () => {
+    it("uses one status fetch and populates full monitor state", async () => {
       setupSuccessfulMocks();
 
       await store.getState().fetchData();
-      // Let secondary fire-and-forget promises resolve
-      await vi.runAllTimersAsync();
 
       const state = store.getState();
-      expect(mockFetchAgents).toHaveBeenCalledOnce();
       expect(mockFetchStatus).toHaveBeenCalledOnce();
-      expect(mockFetchTasks).toHaveBeenCalledOnce();
+      expect(mockFetchAgents).not.toHaveBeenCalled();
+      expect(mockFetchTasks).not.toHaveBeenCalled();
 
       expect(state.tasks.needs_planning).toBe(1);
       expect(state.tasks.ready_to_implement).toBe(2);
@@ -214,7 +219,7 @@ describe("agentStore", () => {
     // -----------------------------------------------------------------------
 
     it("sets error and disconnected state on primary failure", async () => {
-      mockFetchAgents.mockRejectedValue(new Error("Network error"));
+      mockFetchStatus.mockRejectedValue(new Error("Network error"));
 
       await store.getState().fetchData();
 
@@ -227,26 +232,19 @@ describe("agentStore", () => {
     });
 
     // -----------------------------------------------------------------------
-    // 5. fetchData — secondary failure
+    // 5. fetchData — split endpoint reduction
     // -----------------------------------------------------------------------
 
-    it("maintains connection on secondary fetch failure", async () => {
-      mockFetchAgents.mockResolvedValue([makeAgent()]);
-      mockFetchStatus.mockRejectedValue(new Error("Status failed"));
-      mockFetchTasks.mockRejectedValue(new Error("Tasks failed"));
-
-      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    it("does not use split agents or tasks endpoints", async () => {
+      setupSuccessfulMocks();
 
       await store.getState().fetchData();
-      await vi.runAllTimersAsync();
 
       const state = store.getState();
       expect(state.isConnected).toBe(true);
-      expect(state.tasks).toEqual(INITIAL_STATE.tasks); // retains default
-      expect(state.taskLists).toEqual(INITIAL_STATE.taskLists);
-      expect(warnSpy).toHaveBeenCalledTimes(2);
-
-      warnSpy.mockRestore();
+      expect(mockFetchStatus).toHaveBeenCalledOnce();
+      expect(mockFetchAgents).not.toHaveBeenCalled();
+      expect(mockFetchTasks).not.toHaveBeenCalled();
     });
 
     // -----------------------------------------------------------------------
@@ -254,9 +252,9 @@ describe("agentStore", () => {
     // -----------------------------------------------------------------------
 
     it("prevents overlapping fetches", async () => {
-      let resolve!: (value: LoomAgentStatus[]) => void;
-      mockFetchAgents.mockReturnValue(
-        new Promise<LoomAgentStatus[]>((r) => {
+      let resolve!: (value: FetchStatusResult) => void;
+      mockFetchStatus.mockReturnValue(
+        new Promise<FetchStatusResult>((r) => {
           resolve = r;
         }),
       );
@@ -266,11 +264,11 @@ describe("agentStore", () => {
       // Second call should be no-op
       const p2 = store.getState().fetchData();
 
-      resolve([makeAgent()]);
+      resolve(makeStatusResult());
       await p1;
       await p2;
 
-      expect(mockFetchAgents).toHaveBeenCalledOnce();
+      expect(mockFetchStatus).toHaveBeenCalledOnce();
     });
   });
 
@@ -285,13 +283,13 @@ describe("agentStore", () => {
       store.getState().startPolling({ pollInterval: 5000 });
       await vi.advanceTimersByTimeAsync(0); // initial fetch
 
-      expect(mockFetchAgents).toHaveBeenCalledOnce();
+      expect(mockFetchStatus).toHaveBeenCalledOnce();
 
       await vi.advanceTimersByTimeAsync(5000); // first interval
-      expect(mockFetchAgents).toHaveBeenCalledTimes(2);
+      expect(mockFetchStatus).toHaveBeenCalledTimes(2);
 
       await vi.advanceTimersByTimeAsync(5000); // second interval
-      expect(mockFetchAgents).toHaveBeenCalledTimes(3);
+      expect(mockFetchStatus).toHaveBeenCalledTimes(3);
     });
 
     it("restarts polling when called again", async () => {
@@ -299,15 +297,15 @@ describe("agentStore", () => {
 
       store.getState().startPolling({ pollInterval: 5000 });
       await vi.advanceTimersByTimeAsync(0);
-      expect(mockFetchAgents).toHaveBeenCalledOnce();
+      expect(mockFetchStatus).toHaveBeenCalledOnce();
 
       store.getState().startPolling({ pollInterval: 10000 });
       await vi.advanceTimersByTimeAsync(0); // new initial fetch
-      expect(mockFetchAgents).toHaveBeenCalledTimes(2);
+      expect(mockFetchStatus).toHaveBeenCalledTimes(2);
 
       // At 10s only the new interval fires (not the old 5s one)
       await vi.advanceTimersByTimeAsync(10000);
-      expect(mockFetchAgents).toHaveBeenCalledTimes(3);
+      expect(mockFetchStatus).toHaveBeenCalledTimes(3);
     });
 
     it("stops polling and clears timers", async () => {
@@ -315,12 +313,12 @@ describe("agentStore", () => {
 
       store.getState().startPolling({ pollInterval: 5000 });
       await vi.advanceTimersByTimeAsync(0);
-      expect(mockFetchAgents).toHaveBeenCalledOnce();
+      expect(mockFetchStatus).toHaveBeenCalledOnce();
 
       store.getState().stopPolling();
       await vi.advanceTimersByTimeAsync(60000);
       // No additional fetches after stop
-      expect(mockFetchAgents).toHaveBeenCalledOnce();
+      expect(mockFetchStatus).toHaveBeenCalledOnce();
     });
 
     it("starts with pollInterval=0 (initial fetch only)", async () => {
@@ -328,10 +326,10 @@ describe("agentStore", () => {
 
       store.getState().startPolling({ pollInterval: 0 });
       await vi.advanceTimersByTimeAsync(0);
-      expect(mockFetchAgents).toHaveBeenCalledOnce();
+      expect(mockFetchStatus).toHaveBeenCalledOnce();
 
       await vi.advanceTimersByTimeAsync(30000);
-      expect(mockFetchAgents).toHaveBeenCalledOnce();
+      expect(mockFetchStatus).toHaveBeenCalledOnce();
     });
 
     it("passes workspaceId to monitor API fetches", async () => {
@@ -341,9 +339,9 @@ describe("agentStore", () => {
       await vi.advanceTimersByTimeAsync(0);
       await vi.runAllTimersAsync();
 
-      expect(mockFetchAgents).toHaveBeenCalledWith("ws-1");
       expect(mockFetchStatus).toHaveBeenCalledWith("ws-1");
-      expect(mockFetchTasks).toHaveBeenCalledWith("ws-1");
+      expect(mockFetchAgents).not.toHaveBeenCalled();
+      expect(mockFetchTasks).not.toHaveBeenCalled();
     });
   });
 
@@ -359,7 +357,7 @@ describe("agentStore", () => {
       expect(store.getState().isConnected).toBe(true);
 
       // Then: fail
-      mockFetchAgents.mockRejectedValue(new Error("fail"));
+      mockFetchStatus.mockRejectedValue(new Error("fail"));
       await store.getState().fetchData();
 
       expect(store.getState().retryCountdown).toBe(5);
@@ -369,9 +367,9 @@ describe("agentStore", () => {
       expect(store.getState().retryCountdown).toBe(4);
 
       // Retry fires after full delay
-      mockFetchAgents.mockResolvedValue([makeAgent()]);
+      mockFetchStatus.mockResolvedValue(makeStatusResult());
       await vi.advanceTimersByTimeAsync(4000);
-      expect(mockFetchAgents).toHaveBeenCalledTimes(3); // initial + fail + retry
+      expect(mockFetchStatus).toHaveBeenCalledTimes(3); // initial + fail + retry
     });
 
     it("follows exponential backoff progression", async () => {
@@ -379,7 +377,7 @@ describe("agentStore", () => {
       setupSuccessfulMocks();
       await store.getState().fetchData();
 
-      mockFetchAgents.mockRejectedValue(new Error("fail"));
+      mockFetchStatus.mockRejectedValue(new Error("fail"));
 
       // First failure: 5s retry
       await store.getState().fetchData();
@@ -412,7 +410,7 @@ describe("agentStore", () => {
     });
 
     it("does not schedule retry before first connection", async () => {
-      mockFetchAgents.mockRejectedValue(new Error("fail"));
+      mockFetchStatus.mockRejectedValue(new Error("fail"));
 
       await store.getState().fetchData();
 
@@ -421,7 +419,7 @@ describe("agentStore", () => {
 
       // Advance 60s — no retry
       await vi.advanceTimersByTimeAsync(60000);
-      expect(mockFetchAgents).toHaveBeenCalledOnce();
+      expect(mockFetchStatus).toHaveBeenCalledOnce();
     });
   });
 
@@ -435,18 +433,18 @@ describe("agentStore", () => {
       setupSuccessfulMocks();
       await store.getState().fetchData();
 
-      mockFetchAgents.mockRejectedValue(new Error("fail"));
+      mockFetchStatus.mockRejectedValue(new Error("fail"));
       await store.getState().fetchData();
       expect(store.getState().retryCountdown).toBe(5);
 
       // retryNow
-      mockFetchAgents.mockResolvedValue([makeAgent()]);
+      mockFetchStatus.mockResolvedValue(makeStatusResult());
       store.getState().retryNow();
       await vi.advanceTimersByTimeAsync(0);
 
       expect(store.getState().connectionLost).toBe(false);
       expect(store.getState().retryCountdown).toBe(0);
-      expect(mockFetchAgents).toHaveBeenCalledTimes(3);
+      expect(mockFetchStatus).toHaveBeenCalledTimes(3);
     });
   });
 
@@ -461,7 +459,7 @@ describe("agentStore", () => {
       await store.getState().fetchData();
 
       // Fail
-      mockFetchAgents.mockRejectedValue(new Error("fail"));
+      mockFetchStatus.mockRejectedValue(new Error("fail"));
       await store.getState().fetchData();
 
       expect(store.getState().showStaleBanner).toBe(false);
@@ -477,13 +475,13 @@ describe("agentStore", () => {
       setupSuccessfulMocks();
       await store.getState().fetchData();
 
-      mockFetchAgents.mockRejectedValue(new Error("fail"));
+      mockFetchStatus.mockRejectedValue(new Error("fail"));
       await store.getState().fetchData();
       await vi.advanceTimersByTimeAsync(5000);
       expect(store.getState().showStaleBanner).toBe(true);
 
       // Reconnect
-      mockFetchAgents.mockResolvedValue([makeAgent()]);
+      mockFetchStatus.mockResolvedValue(makeStatusResult());
       await store.getState().fetchData();
 
       expect(store.getState().showStaleBanner).toBe(false);
@@ -495,7 +493,7 @@ describe("agentStore", () => {
       setupSuccessfulMocks();
       await store.getState().fetchData();
 
-      mockFetchAgents.mockRejectedValue(new Error("fail"));
+      mockFetchStatus.mockRejectedValue(new Error("fail"));
       await store.getState().fetchData();
 
       // Advance 3s (less than 5s)
@@ -503,7 +501,7 @@ describe("agentStore", () => {
       expect(store.getState().showStaleBanner).toBe(false);
 
       // Recover
-      mockFetchAgents.mockResolvedValue([makeAgent()]);
+      mockFetchStatus.mockResolvedValue(makeStatusResult());
       await store.getState().fetchData();
       expect(store.getState().showStaleBanner).toBe(false);
 
@@ -523,7 +521,7 @@ describe("agentStore", () => {
       setupSuccessfulMocks();
       await store.getState().fetchData();
 
-      mockFetchAgents.mockRejectedValue(new Error("fail"));
+      mockFetchStatus.mockRejectedValue(new Error("fail"));
 
       // Exhaust backoff to reach 60s ceiling: 5→10→20→40→60
       // Each retry fires fetchData again automatically
@@ -552,7 +550,7 @@ describe("agentStore", () => {
       setupSuccessfulMocks();
       await store.getState().fetchData();
 
-      mockFetchAgents.mockRejectedValue(new Error("fail"));
+      mockFetchStatus.mockRejectedValue(new Error("fail"));
       await store.getState().fetchData();
       // Manually advance through backoff to get to ceiling and accumulate failures
       for (let i = 0; i < 20; i++) {
@@ -561,7 +559,7 @@ describe("agentStore", () => {
       }
 
       // retryNow resets
-      mockFetchAgents.mockResolvedValue([makeAgent()]);
+      mockFetchStatus.mockResolvedValue(makeStatusResult());
       store.getState().retryNow();
       await vi.advanceTimersByTimeAsync(0);
       expect(store.getState().connectionLost).toBe(false);
@@ -577,20 +575,20 @@ describe("agentStore", () => {
       const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
       // First call hangs (never resolves) — withTimeout will reject it at 15s
-      mockFetchAgents.mockReturnValueOnce(
-        new Promise<LoomAgentStatus[]>(() => {}),
+      mockFetchStatus.mockReturnValueOnce(
+        new Promise<FetchStatusResult>(() => {}),
       );
 
       store.getState().startPolling({ pollInterval: 5000 });
 
       // At 15s, withTimeout fires, rejecting the fetch and resetting fetchInProgress
       // At 20s, next poll fires and should succeed
-      mockFetchAgents.mockResolvedValue([makeAgent()]);
+      mockFetchStatus.mockResolvedValue(makeStatusResult());
       await vi.advanceTimersByTimeAsync(20000);
 
       // The system recovered: subsequent fetch succeeded
       expect(store.getState().error).toBeNull();
-      expect(mockFetchAgents.mock.calls.length).toBeGreaterThan(1);
+      expect(mockFetchStatus.mock.calls.length).toBeGreaterThan(1);
 
       warnSpy.mockRestore();
     });
@@ -607,14 +605,14 @@ describe("agentStore", () => {
       store.getState().startPolling({ pollInterval: 5000 });
       await vi.advanceTimersByTimeAsync(0); // initial fetch
 
-      expect(mockFetchAgents).toHaveBeenCalledOnce();
+      expect(mockFetchStatus).toHaveBeenCalledOnce();
 
       // Simulate visibility change
       mockVisibilityState = "visible";
       document.dispatchEvent(new Event("visibilitychange"));
       await vi.advanceTimersByTimeAsync(0);
 
-      expect(mockFetchAgents).toHaveBeenCalledTimes(2);
+      expect(mockFetchStatus).toHaveBeenCalledTimes(2);
     });
 
     it("does not refetch when polling is stopped", async () => {
@@ -624,13 +622,13 @@ describe("agentStore", () => {
       await vi.advanceTimersByTimeAsync(0);
       store.getState().stopPolling();
 
-      mockFetchAgents.mockClear();
+      mockFetchStatus.mockClear();
 
       mockVisibilityState = "visible";
       document.dispatchEvent(new Event("visibilitychange"));
       await vi.advanceTimersByTimeAsync(0);
 
-      expect(mockFetchAgents).not.toHaveBeenCalled();
+      expect(mockFetchStatus).not.toHaveBeenCalled();
     });
   });
 
@@ -678,9 +676,9 @@ describe("agentStore", () => {
       expect(state.lastUpdated).toBeNull();
 
       // Verify timers cleared
-      mockFetchAgents.mockClear();
+      mockFetchStatus.mockClear();
       await vi.advanceTimersByTimeAsync(60000);
-      expect(mockFetchAgents).not.toHaveBeenCalled();
+      expect(mockFetchStatus).not.toHaveBeenCalled();
     });
   });
 
@@ -692,10 +690,14 @@ describe("agentStore", () => {
     it("creates independent stores", async () => {
       const store2 = createAgentStore();
 
-      mockFetchAgents.mockResolvedValue([makeAgent({ name: "alpha" })]);
+      mockFetchStatus.mockResolvedValue(
+        makeStatusResult({ agents: [makeAgent({ name: "alpha" })] }),
+      );
       await store.getState().fetchData();
 
-      mockFetchAgents.mockResolvedValue([makeAgent({ name: "beta" })]);
+      mockFetchStatus.mockResolvedValue(
+        makeStatusResult({ agents: [makeAgent({ name: "beta" })] }),
+      );
       await store2.getState().fetchData();
 
       expect(store.getState().agents[0]!.name).toBe("alpha");
@@ -721,7 +723,7 @@ describe("agentStore", () => {
     });
 
     it("is 'never_connected' on first failure", async () => {
-      mockFetchAgents.mockRejectedValue(new Error("fail"));
+      mockFetchStatus.mockRejectedValue(new Error("fail"));
       await store.getState().fetchData();
       expect(store.getState().connectionState).toBe("never_connected");
     });
@@ -730,7 +732,7 @@ describe("agentStore", () => {
       setupSuccessfulMocks();
       await store.getState().fetchData();
 
-      mockFetchAgents.mockRejectedValue(new Error("fail"));
+      mockFetchStatus.mockRejectedValue(new Error("fail"));
       await store.getState().fetchData();
 
       expect(store.getState().retryCountdown).toBeGreaterThan(0);
@@ -741,7 +743,7 @@ describe("agentStore", () => {
       setupSuccessfulMocks();
       await store.getState().fetchData();
 
-      mockFetchAgents.mockRejectedValue(new Error("fail"));
+      mockFetchStatus.mockRejectedValue(new Error("fail"));
       await store.getState().fetchData();
 
       // stopPolling clears retry timers and re-derives connectionState

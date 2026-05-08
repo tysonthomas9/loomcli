@@ -214,8 +214,9 @@ func runServe(cmd *cobra.Command, args []string) {
 	defer func() { _ = storeHandle.Close() }()
 
 	issueBackendFn := cli.WorkspaceAwareIssueBackendForURL(storeHandle.URL(), fleetState.clientCfg.Actor)
-	collectDataFn := buildMonitorCollectDataFn(ctx, storeHandle.Store, fleetState.clientCfg.Workspace, issueBackendFn)
-	monitorHandlers := buildMonitorHandlers(collectDataFn, staleDetectorHandler, storeHandle.Store, issueBackendFn)
+	monitorDefaultWorkspace := resolveMonitorCollectorWorkspace(storeHandle.Store, fleetState.clientCfg.Workspace)
+	collectDataFn := buildMonitorCollectDataFn(ctx, monitorDefaultWorkspace, issueBackendFn)
+	monitorHandlers := buildMonitorHandlers(collectDataFn, staleDetectorHandler, storeHandle.Store, issueBackendFn, monitorDefaultWorkspace)
 
 	webuiErr := make(chan error, 1)
 	go func() {
@@ -227,8 +228,7 @@ func runServe(cmd *cobra.Command, args []string) {
 	awaitShutdown(cmd, stop, webuiErr, cancel)
 }
 
-func buildMonitorCollectDataFn(ctx context.Context, st store.Store, fallbackWorkspace string, issueBackendFn metricscmd.IssueBackendFn) metricscmd.CollectDataFn {
-	workspaceHint := resolveMonitorCollectorWorkspace(st, fallbackWorkspace)
+func buildMonitorCollectDataFn(ctx context.Context, workspaceHint string, issueBackendFn metricscmd.IssueBackendFn) metricscmd.CollectDataFn {
 	collectFn := func() *monitor.MonitorData {
 		if workspaceHint != "" && issueBackendFn != nil {
 			ctx := middleware.WithWorkspace(context.Background(), workspaceHint)
@@ -358,9 +358,9 @@ func initUsageStore() {
 	usageHandler = usagecmd.HandleUsage(usagecmd.InitStore(dir))
 }
 
-func buildMonitorHandlers(collectDataFn metricscmd.CollectDataFn, staleDetectorHandler http.HandlerFunc, st store.Store, issueBackendFn metricscmd.IssueBackendFn) webui.MonitorHandlers {
+func buildMonitorHandlers(collectDataFn metricscmd.CollectDataFn, staleDetectorHandler http.HandlerFunc, st store.Store, issueBackendFn metricscmd.IssueBackendFn, defaultWorkspace string) webui.MonitorHandlers {
 	eventsDir := observability.ResolveEventsDir()
-	monitorDataSource := metricscmd.NewMonitorDataSource(collectDataFn, issueBackendFn)
+	monitorDataSource := metricscmd.NewMonitorDataSourceWithDefaultWorkspace(collectDataFn, issueBackendFn, defaultWorkspace)
 	monitorStoreDataSource := metricscmd.NewMonitorStoreDataSource(st)
 	return webui.MonitorHandlers{
 		Status:               metricscmd.HandleStatusWithSources(monitorDataSource, monitorStoreDataSource),
