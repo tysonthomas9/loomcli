@@ -19,6 +19,12 @@ export interface BackendInfo {
   brandColor: string;
   /** Whether the backend is currently available */
   available: boolean;
+  /** Whether the CLI binary is installed on PATH. */
+  installed?: boolean;
+  /** Whether credentials are configured, when the backend requires them. */
+  apiKeySet?: boolean;
+  /** Optional detected CLI version. */
+  version?: string;
   /** Optional health/status message */
   healthMessage?: string;
 }
@@ -85,6 +91,9 @@ export function toBackendInfo(
     provider: apiData?.provider ?? defaults?.provider ?? "Unknown",
     brandColor: apiData?.brandColor ?? defaults?.brandColor ?? "#888888",
     available: apiData?.available ?? true,
+    ...(apiData?.installed != null ? { installed: apiData.installed } : {}),
+    ...(apiData?.apiKeySet != null ? { apiKeySet: apiData.apiKeySet } : {}),
+    ...(apiData?.version != null ? { version: apiData.version } : {}),
     ...(apiData?.healthMessage != null
       ? { healthMessage: apiData.healthMessage }
       : {}),

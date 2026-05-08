@@ -104,6 +104,8 @@ describe("useBackends", () => {
       expect(backend.name).toBe("claude");
       expect(backend.displayName).toBe("Claude");
       expect(backend.available).toBe(true);
+      expect(backend.installed).toBe(true);
+      expect(backend.apiKeySet).toBe(true);
       // Known backend "claude" should get its brand defaults
       expect(backend.provider).toBe("Anthropic");
       expect(backend.brandColor).toBe("#d4a574");

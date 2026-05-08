@@ -9,10 +9,16 @@ import { ErrorDisplay } from "@/components/ErrorDisplay";
 import { LoadingSkeleton } from "@/components/LoadingSkeleton";
 import type { ViewMode } from "@/types";
 import {
+  AIBackendSetupList,
+  type AIBackendSetupAction,
+} from "@/components/AIBackendSetupList";
+import {
   useBackendConfig,
+  useBackends,
   useLocalSettings,
   useWorkspaceContext,
 } from "@/hooks/workspace";
+import type { BackendInfo } from "@/utils/workspace";
 import {
   useTerminalFont,
   FONT_FAMILY_OPTIONS,
@@ -62,6 +68,12 @@ export function SettingsView({
     updateBackend,
     refetch,
   } = useBackendConfig(workspaceId);
+  const {
+    backends,
+    isLoading: isLoadingBackends,
+    error: backendsError,
+    refetch: refetchBackends,
+  } = useBackends();
   const { showToast } = useToast();
   const [selectedBackend, setSelectedBackend] = useState<string | null>(null);
   const {
@@ -168,6 +180,28 @@ export function SettingsView({
     showToast("Onboarding checklist restored", { type: "success" });
   };
 
+  const handleBackendSetupAction = async (
+    backend: BackendInfo,
+    action: AIBackendSetupAction,
+  ) => {
+    if (action === "set-default") {
+      const ok = await updateBackend(backend.name);
+      if (ok) {
+        setSelectedBackend(null);
+        refetchBackends();
+        showToast(`${backend.displayName} set as default`, {
+          type: "success",
+        });
+      } else {
+        showToast(`Failed to set ${backend.displayName} as default`, {
+          type: "error",
+        });
+      }
+      return;
+    }
+    onNavigate?.("terminal");
+  };
+
   const handleRedisUrlChange = (value: string) => {
     const trimmed = value.trim();
     setRedisForm((current) => ({
@@ -230,6 +264,24 @@ export function SettingsView({
           >
             Show Onboarding Checklist
           </button>
+        </div>
+      </div>
+
+      {/* AI CLI status */}
+      <div className={styles.panel}>
+        <div className={styles.panelHeader}>
+          <h3 className={styles.panelTitle}>AI CLIs</h3>
+        </div>
+        <div className={styles.panelContent}>
+          <AIBackendSetupList
+            backends={backends}
+            defaultBackend={config.backend}
+            variant="matrix"
+            isLoading={isLoadingBackends}
+            error={backendsError}
+            isSavingDefault={isSaving}
+            onAction={handleBackendSetupAction}
+          />
         </div>
       </div>
 

@@ -526,6 +526,42 @@ vi.mock("@/hooks/workspace/useWorkspaceContext", () => ({
   })),
 }));
 
+vi.mock("@/hooks/workspace/useBackends", () => ({
+  useBackends: vi.fn(() => ({
+    backends: [
+      {
+        name: "claude",
+        displayName: "Claude",
+        provider: "Anthropic",
+        brandColor: "#d4a574",
+        available: true,
+        installed: true,
+        apiKeySet: true,
+      },
+    ],
+    isLoading: false,
+    error: null,
+    refetch: vi.fn(),
+  })),
+}));
+
+vi.mock("@/hooks/workspace/useBackendConfig", () => ({
+  useBackendConfig: vi.fn(() => ({
+    config: {
+      backend: "claude",
+      source: "project",
+      available: ["claude"],
+      agents: [],
+    },
+    isLoading: false,
+    error: null,
+    isSaving: false,
+    isCached: false,
+    updateBackend: vi.fn().mockResolvedValue(true),
+    refetch: vi.fn(),
+  })),
+}));
+
 vi.mock("@/hooks/workspace/useWorkspaceState", () => ({
   useWorkspaceState: vi.fn(),
 }));

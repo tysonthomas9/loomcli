@@ -11,6 +11,7 @@ import {
   useMemo,
   lazy,
   Suspense,
+  type CSSProperties,
   type RefObject,
 } from "react";
 
@@ -65,6 +66,10 @@ import {
   OnboardingFlow,
   type OnboardingStep,
 } from "@/components/OnboardingFlow";
+import {
+  AIBackendSetupList,
+  type AIBackendSetupAction,
+} from "@/components/AIBackendSetupList";
 import { UserMenu } from "@/components/UserMenu/UserMenu";
 import { SearchTermProvider } from "@/contexts/SearchTermContext";
 import {
@@ -96,6 +101,9 @@ import { useWorkspaceContext } from "@/hooks/workspace/useWorkspaceContext";
 import { useWorkspaceState } from "@/hooks/workspace/useWorkspaceState";
 import { useRepoFilterParam } from "@/hooks/workspace/useRepoFilterParam";
 import { useWorkspaceHealth } from "@/hooks/workspace/useWorkspaceHealth";
+import { useBackends } from "@/hooks/workspace/useBackends";
+import { useBackendConfig } from "@/hooks/workspace/useBackendConfig";
+import type { BackendInfo } from "@/utils/workspace";
 import type { Issue, Status } from "@/types";
 
 import styles from "./App.module.css";
@@ -142,6 +150,18 @@ function App() {
     sourceReposFilter,
     refetch: refetchWorkspace,
   } = useWorkspaceContext();
+  const {
+    backends: aiBackends,
+    isLoading: aiBackendsLoading,
+    error: aiBackendsError,
+    refetch: refetchAiBackends,
+  } = useBackends();
+  const {
+    config: onboardingBackendConfig,
+    isLoading: onboardingBackendConfigLoading,
+    isSaving: isSavingOnboardingBackend,
+    updateBackend: updateOnboardingBackend,
+  } = useBackendConfig(workspaceId, { enabled: Boolean(workspaceId) });
 
   // Repo filter URL param sync (deep linking for repo selection)
   const [repoFilterParam] = useRepoFilterParam();
@@ -828,6 +848,11 @@ function App() {
   const hasWorkspaceRepo = workspaceRepos.length > 0;
   const hasWorkspaceAgent = (workspace?.agents?.length ?? 0) > 0;
   const hasWorkspaceIssue = issues.length > 0;
+  const defaultBackend = onboardingBackendConfig?.backend;
+  const defaultBackendStatus = aiBackends.find(
+    (backend) => backend.name === defaultBackend,
+  );
+  const isDefaultBackendReady = defaultBackendStatus?.available === true;
   const isWorkspaceOnboardingComplete =
     hasWorkspaceRepo && hasWorkspaceAgent && hasWorkspaceIssue;
   const shouldShowWorkspaceOnboarding =
@@ -839,6 +864,26 @@ function App() {
     dismissOnboarding(workspaceId);
     setOnboardingDismissed(true);
   }, [workspaceId]);
+  const handleBackendSetupAction = useCallback(
+    async (backend: BackendInfo, action: AIBackendSetupAction) => {
+      if (action === "set-default") {
+        const ok = await updateOnboardingBackend(backend.name);
+        if (ok) {
+          showToast(`${backend.displayName} set as default`, {
+            type: "success",
+          });
+          refetchAiBackends();
+        } else {
+          showToast(`Failed to set ${backend.displayName} as default`, {
+            type: "error",
+          });
+        }
+        return;
+      }
+      navigateToView("terminal");
+    },
+    [navigateToView, refetchAiBackends, showToast, updateOnboardingBackend],
+  );
   const workspaceOnboardingSteps: OnboardingStep[] = useMemo(
     () => [
       {
@@ -859,12 +904,25 @@ function App() {
       },
       {
         id: "setup-backend",
-        title: "Set up AI CLI",
-        description:
-          "Use the terminal to install or login to the selected CLI if this machine is not configured yet.",
-        status: hasWorkspaceRepo ? "actionable" : "blocked",
-        actionLabel: "Set Up CLI",
-        onAction: () => navigateToView("terminal"),
+        title: "Set up AI CLIs",
+        description: isDefaultBackendReady
+          ? `${defaultBackendStatus?.displayName ?? "The default CLI"} is ready.`
+          : "Install, login, or choose a ready CLI.",
+        status: !hasWorkspaceRepo
+          ? "blocked"
+          : isDefaultBackendReady
+            ? "complete"
+            : "actionable",
+        detail: hasWorkspaceRepo ? (
+          <AIBackendSetupList
+            backends={aiBackends}
+            defaultBackend={defaultBackend}
+            isLoading={aiBackendsLoading || onboardingBackendConfigLoading}
+            error={aiBackendsError}
+            isSavingDefault={isSavingOnboardingBackend}
+            onAction={handleBackendSetupAction}
+          />
+        ) : undefined,
       },
       {
         id: "create-agent",
@@ -899,7 +957,15 @@ function App() {
       hasWorkspaceAgent,
       hasWorkspaceIssue,
       hasWorkspaceRepo,
-      navigateToView,
+      isDefaultBackendReady,
+      defaultBackendStatus,
+      aiBackends,
+      defaultBackend,
+      aiBackendsLoading,
+      onboardingBackendConfigLoading,
+      aiBackendsError,
+      isSavingOnboardingBackend,
+      handleBackendSetupAction,
     ],
   );
 
@@ -1208,6 +1274,8 @@ function App() {
     activeView === "terminal"
       ? styles.terminalRouteContainer
       : styles.terminalHidden;
+  const terminalContainerStyle: CSSProperties =
+    activeView === "terminal" ? { display: "contents" } : { display: "none" };
   const isTerminalActive = activeView === "terminal";
 
   return (
@@ -1268,7 +1336,10 @@ function App() {
                   <Outlet />
                 </Suspense>
               </WorkspaceViewProvider>
-              <div className={terminalContainerClassName}>
+              <div
+                className={terminalContainerClassName}
+                style={terminalContainerStyle}
+              >
                 <Suspense fallback={<LoadingSkeleton.Terminal />}>
                   <TerminalView
                     isActive={isTerminalActive}
