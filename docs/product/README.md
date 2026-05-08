@@ -22,19 +22,22 @@ Read these in order:
 5. `agent-run-ux-spec.md`
    What the UI should show for agents, sessions, task timelines, logs,
    diffs, failures, empty states, and stale/offline states.
-6. `session-artifact-contract.md`
+6. `lead-agent-epic-runner-spec.md`
+   How first-class lead agents run one epic at a time through the existing
+   terminal UI, with scoped workers and epic/task panels.
+7. `session-artifact-contract.md`
    The evidence every run must leave behind: transcript, logs, token usage,
    diff, commit, test result, and error class.
-7. `daemon-agent-runtime-architecture.md`
+8. `daemon-agent-runtime-architecture.md`
    How the daemon, agent runner, local mode, cloud mode, ownership leases,
    and decentralized task claiming fit together.
-8. `agent-lifecycle-state-machine.md`
+9. `agent-lifecycle-state-machine.md`
    Canonical agent, run, and task states plus allowed transitions.
-9. `failure-modes-recovery-ux.md`
+10. `failure-modes-recovery-ux.md`
    User-visible failure states and recovery actions.
-10. `container-runner-mvp-spec.md`
+11. `container-runner-mvp-spec.md`
    Podman/container runner behavior after local mode is reliable.
-11. `dogfood-agent-execution-test-plan.md`
+12. `dogfood-agent-execution-test-plan.md`
    End-to-end dogfood scenarios used to validate the product.
 
 Related design docs:
