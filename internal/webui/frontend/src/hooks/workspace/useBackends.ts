@@ -31,9 +31,14 @@ export function useBackends(): UseBackendsReturn {
   const backends = useMemo(
     () =>
       rawBackends.map((item: BackendHealthData) => {
-        const apiData: Partial<BackendInfo> = { available: item.available };
+        const apiData: Partial<BackendInfo> = {
+          available: item.available,
+          installed: item.installed,
+          apiKeySet: item.api_key_set,
+        };
         if (item.display_name) apiData.displayName = item.display_name;
         if (item.message) apiData.healthMessage = item.message;
+        if (item.version) apiData.version = item.version;
         return toBackendInfo(item.name, apiData);
       }),
     [rawBackends],

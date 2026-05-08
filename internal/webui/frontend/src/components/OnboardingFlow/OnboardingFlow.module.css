@@ -160,6 +160,10 @@
   line-height: var(--line-height-normal);
 }
 
+.stepDetail {
+  margin-top: var(--space-3);
+}
+
 .statusBadge {
   flex: 0 0 auto;
   padding: 2px 8px;
@@ -292,6 +296,10 @@
 .panel .stepDescription {
   font-size: var(--font-size-xs);
   line-height: 1.35;
+}
+
+.panel .stepDetail {
+  margin-top: var(--space-2);
 }
 
 .panel .complete,

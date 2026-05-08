@@ -122,6 +122,7 @@
 }
 
 .terminalRouteContainer {
+  display: contents;
   flex: 1;
   min-height: 0;
 }

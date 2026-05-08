@@ -1,3 +1,5 @@
+import type { ReactNode } from "react";
+
 import styles from "./OnboardingFlow.module.css";
 
 export type OnboardingStepStatus =
@@ -13,6 +15,7 @@ export interface OnboardingStep {
   status: OnboardingStepStatus;
   actionLabel?: string;
   onAction?: () => void;
+  detail?: ReactNode;
 }
 
 export interface OnboardingFlowProps {
@@ -114,6 +117,9 @@ export function OnboardingFlow({
                   </span>
                 </div>
                 <p className={styles.stepDescription}>{step.description}</p>
+                {step.detail && (
+                  <div className={styles.stepDetail}>{step.detail}</div>
+                )}
               </div>
               {hasAction && (
                 <button
