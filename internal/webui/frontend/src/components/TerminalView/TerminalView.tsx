@@ -45,6 +45,12 @@ interface TerminalViewProps {
   pendingAgentName?: string | undefined;
   /** Called after pendingAgentName has been processed. */
   onAgentNameConsumed?: (() => void) | undefined;
+  /**
+   * When true, hide the tab bar above the terminal pane. Used by embedded
+   * surfaces (e.g. the /agents view) where the parent already provides agent
+   * selection — tabs would just be a redundant second picker.
+   */
+  hideTabs?: boolean;
 }
 
 function isLeadSessionName(sessionName: string): boolean {
@@ -61,6 +67,7 @@ export function TerminalView({
   onNavigateToSettings,
   pendingAgentName,
   onAgentNameConsumed,
+  hideTabs = false,
 }: TerminalViewProps): JSX.Element {
   const [tabs, setTabs] = useState<TabState[]>([]);
   const [activeTabId, setActiveTabId] = useState<string>("");
@@ -456,35 +463,37 @@ export function TerminalView({
         />
       ) : (
         <>
-          <TerminalTabBar
-            tabs={tabs.map((t) => {
-              const color = BACKEND_BRAND_COLORS[t.backendName];
-              return {
-                id: t.id,
-                label: t.label,
-                connectionState: t.connectionState,
-                ...(color != null && { brandColor: color }),
-                ...(tabUnread.get(t.id) && { hasUnread: true }),
-                ...(t.pinned && { isPinned: true }),
-              };
-            })}
-            activeTabId={activeTabId}
-            onTabChange={handleTabChange}
-            onTabClose={handleTabClose}
-            onNewTab={handleNewTabClick}
-            onToggleFullHeight={handleToggleFullHeight}
-            isFullHeight={isFullHeight}
-            onTabRename={handleTabRename}
-            onDuplicateTab={handleDuplicateTab}
-            maxTabsReached={tabs.length >= MAX_TABS}
-            onTabPin={handleTabPin}
-            onCloseOthers={handleCloseOthers}
-            onReorderTabs={handleReorderTabs}
-            isSplitView={isSplitView}
-            canSplit={canSplit}
-            onToggleSplit={handleToggleSplit}
-            onHelpClick={handleToggleHelp}
-          />
+          {!hideTabs && (
+            <TerminalTabBar
+              tabs={tabs.map((t) => {
+                const color = BACKEND_BRAND_COLORS[t.backendName];
+                return {
+                  id: t.id,
+                  label: t.label,
+                  connectionState: t.connectionState,
+                  ...(color != null && { brandColor: color }),
+                  ...(tabUnread.get(t.id) && { hasUnread: true }),
+                  ...(t.pinned && { isPinned: true }),
+                };
+              })}
+              activeTabId={activeTabId}
+              onTabChange={handleTabChange}
+              onTabClose={handleTabClose}
+              onNewTab={handleNewTabClick}
+              onToggleFullHeight={handleToggleFullHeight}
+              isFullHeight={isFullHeight}
+              onTabRename={handleTabRename}
+              onDuplicateTab={handleDuplicateTab}
+              maxTabsReached={tabs.length >= MAX_TABS}
+              onTabPin={handleTabPin}
+              onCloseOthers={handleCloseOthers}
+              onReorderTabs={handleReorderTabs}
+              isSplitView={isSplitView}
+              canSplit={canSplit}
+              onToggleSplit={handleToggleSplit}
+              onHelpClick={handleToggleHelp}
+            />
+          )}
           <HelpPopover
             isOpen={isHelpOpen}
             onClose={() => setIsHelpOpen(false)}

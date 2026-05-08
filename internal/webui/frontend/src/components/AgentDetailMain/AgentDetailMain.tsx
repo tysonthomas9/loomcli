@@ -103,6 +103,7 @@ export function AgentDetailMain({ agentName }: AgentDetailMainProps): JSX.Elemen
             isActive={true}
             pendingAgentName={pendingAgentName}
             onAgentNameConsumed={handleAgentNameConsumed}
+            hideTabs
           />
         </Suspense>
       </div>
