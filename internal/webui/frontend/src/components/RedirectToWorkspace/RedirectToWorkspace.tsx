@@ -23,6 +23,8 @@ import { WorkspaceRepoWizard } from "@/components/WorkspaceRepoWizard";
 import { KeyboardShortcutProvider } from "@/hooks";
 import { AUTH_MODE_OPEN } from "@/types/common";
 
+import styles from "./RedirectToWorkspace.module.css";
+
 export function RedirectToWorkspace() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -90,36 +92,30 @@ export function RedirectToWorkspace() {
     // outside App's provider, so wrap locally.
     return (
       <KeyboardShortcutProvider>
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            justifyContent: "center",
-            minHeight: "100vh",
-            padding: "32px 16px",
-          }}
-        >
+        <main className={styles.scene}>
           {/* Visually-hidden heading preserves the existing
               accessibility/test contract ("No workspaces found") without
               competing with the OnboardingFlow's own heading. */}
-          <h1
-            style={{
-              position: "absolute",
-              width: "1px",
-              height: "1px",
-              padding: 0,
-              margin: "-1px",
-              overflow: "hidden",
-              clip: "rect(0,0,0,0)",
-              whiteSpace: "nowrap",
-              border: 0,
-            }}
-          >
+          <h1 className={styles.srOnly}>
             No workspaces found. Create one to get started.
           </h1>
-          <OnboardingFlow context="no-workspace" />
-        </div>
+
+          {/* Imprint mark — top-left masthead. */}
+          <div className={styles.imprint} aria-hidden="true">
+            <span className={styles.imprintMark}>Volume I</span>
+            <span className={styles.imprintTitle}>Loom &mdash; First Run</span>
+          </div>
+
+          {/* Colophon — bottom-left signature. */}
+          <div className={styles.colophon} aria-hidden="true">
+            <div>Bound &amp; set in {new Date().getFullYear()}</div>
+            <div className={styles.colophonRule} />
+          </div>
+
+          <div className={styles.flowWrapper}>
+            <OnboardingFlow context="no-workspace" />
+          </div>
+        </main>
         <WorkspaceRepoWizard
           isOpen={showCreate}
           onClose={() => setShowCreate(false)}
