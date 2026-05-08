@@ -395,9 +395,18 @@ describe("RedirectToWorkspace", () => {
       renderComponent();
 
       const createButton = await screen.findByRole("button", {
-        name: "Create Workspace",
+        name: "Create Sample Workspace",
       });
       fireEvent.click(createButton);
+      expect(mockCreateWorkspaceModalProps).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          initialValues: expect.objectContaining({
+            name: "Hello-World",
+            type: "clone",
+            urlInput: "https://github.com/octocat/Hello-World",
+          }),
+        }),
+      );
       fireEvent.click(
         screen.getByRole("button", { name: "Mock create success" }),
       );
