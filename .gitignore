@@ -53,3 +53,4 @@ services/auth/dist/
 worktrees/
 .agent.yield
 node_modules/
+.fleet-db-linux-arm64
