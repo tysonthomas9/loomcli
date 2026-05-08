@@ -98,6 +98,10 @@ func HandleStatusWithBackend(collectDataFn func() *monitor.MonitorData, st store
 }
 
 func HandleStatusWithDataSource(dataSource *MonitorDataSource, st store.Store) http.HandlerFunc {
+	return HandleStatusWithSources(dataSource, NewMonitorStoreDataSource(st))
+}
+
+func HandleStatusWithSources(dataSource *MonitorDataSource, storeDataSource *MonitorStoreDataSource) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		workspaceHint := r.URL.Query().Get("workspace")
 		ctx, span := startSpan(r.Context(), "service.Monitor.Status",
@@ -112,11 +116,11 @@ func HandleStatusWithDataSource(dataSource *MonitorDataSource, st store.Store) h
 			_, _ = w.Write([]byte(`{"error":"data collection unavailable"}`))
 			return
 		}
-		agents := storeAgentsForMonitor(ctx, st, workspaceHint)
-		span.SetAttributes(attribute.Int("result.count", len(agents)))
+		storeData := storeDataSource.Resolve(ctx, workspaceHint)
+		span.SetAttributes(attribute.Int("result.count", len(storeData.Agents)))
 		writeJSON(w, StatusResponse{
-			Workspace:      getWorkspaceInfo(ctx, st, workspaceHint),
-			Agents:         agents,
+			Workspace:      storeData.Workspace,
+			Agents:         storeData.Agents,
 			Tasks:          data.Tasks,
 			InProgressList: data.InProgressTasks,
 			AgentTasks:     data.AgentTasks,
@@ -137,6 +141,10 @@ func HandleAgentsWithBackend(collectDataFn func() *monitor.MonitorData, st store
 }
 
 func HandleAgentsWithDataSource(dataSource *MonitorDataSource, st store.Store) http.HandlerFunc {
+	return HandleAgentsWithSources(dataSource, NewMonitorStoreDataSource(st))
+}
+
+func HandleAgentsWithSources(dataSource *MonitorDataSource, storeDataSource *MonitorStoreDataSource) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		workspaceHint := r.URL.Query().Get("workspace")
 		ctx, span := startSpan(r.Context(), "service.Monitor.Agents",
@@ -151,18 +159,17 @@ func HandleAgentsWithDataSource(dataSource *MonitorDataSource, st store.Store) h
 			_, _ = w.Write([]byte(`{"error":"data collection unavailable"}`))
 			return
 		}
-		wsInfo := getWorkspaceInfo(ctx, st, workspaceHint)
-		agents := storeAgentsForMonitor(ctx, st, workspaceHint)
+		storeData := storeDataSource.Resolve(ctx, workspaceHint)
 
 		response := AgentsResponse{
-			Workspace: wsInfo,
-			Agents:    agents,
+			Workspace: storeData.Workspace,
+			Agents:    storeData.Agents,
 			Timestamp: data.Timestamp,
 		}
 
-		response.ByWorkspace = groupAgentsByWorkspace(agents)
+		response.ByWorkspace = groupAgentsByWorkspace(storeData.Agents)
 
-		span.SetAttributes(attribute.Int("result.count", len(agents)))
+		span.SetAttributes(attribute.Int("result.count", len(storeData.Agents)))
 		writeJSON(w, response)
 	}
 }
@@ -343,38 +350,7 @@ func groupAgentsByWorkspace(agents []monitor.AgentStatus) map[string][]monitor.A
 }
 
 func storeAgentsForMonitor(ctx context.Context, st store.Store, workspaceHint string) []monitor.AgentStatus {
-	agents := make([]monitor.AgentStatus, 0)
-	if st == nil {
-		return agents
-	}
-	wsKey, wsName, ok := resolveMonitorWorkspace(ctx, st, workspaceHint)
-	if !ok {
-		return agents
-	}
-	assignments, err := st.Agents().List(ctx, wsKey)
-	if err != nil {
-		log.Printf("Failed to list store agents for monitor response: %v", err)
-		return agents
-	}
-	workspaceData, err := storeadapter.BuildWorkspaceDataForKey(ctx, st, wsKey)
-	if err != nil {
-		log.Printf("Failed to load workspace data for monitor response: %v", err)
-	}
-
-	for _, assignment := range assignments {
-		if assignment == nil {
-			continue
-		}
-		agents = append(agents, monitor.AgentStatus{
-			Name:      assignment.Name,
-			Branch:    monitorBranchFromAgent(workspaceData, assignment),
-			Status:    monitorStatusFromAgentState(assignment.State),
-			Role:      assignment.RoleName,
-			Repo:      monitorRepoFromAgent(assignment),
-			Workspace: wsName,
-		})
-	}
-	return agents
+	return collectMonitorStoreData(ctx, st, workspaceHint).Agents
 }
 
 func monitorStatusFromAgentState(state domain.AgentState) string {
