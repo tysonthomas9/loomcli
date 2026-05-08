@@ -54,3 +54,4 @@ worktrees/
 .agent.yield
 node_modules/
 .fleet-db-linux-arm64
+internal/webui/frontend/node_modules

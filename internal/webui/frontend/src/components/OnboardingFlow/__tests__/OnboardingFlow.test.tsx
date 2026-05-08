@@ -98,16 +98,22 @@ describe("OnboardingFlow", () => {
     expect(onUnregistered).toHaveBeenCalledWith("open_backend_setup");
   });
 
-  it("disables the CTA for complete and blocked steps", async () => {
+  it("renders 'Done' for complete steps and no CTA for blocked steps", async () => {
     renderFlow(partialWire());
 
-    const completeCta = await screen.findByTestId(
+    // Complete steps show a "Done" indicator instead of a disabled
+    // button — completed work shouldn't show another action.
+    const completeIndicator = await screen.findByTestId(
       "onboarding-cta-workspace-repo",
     );
-    expect(completeCta).toBeDisabled();
+    expect(completeIndicator).toHaveTextContent(/done/i);
+    expect(completeIndicator.tagName).not.toBe("BUTTON");
 
-    const blockedCta = screen.getByTestId("onboarding-cta-create-agent");
-    expect(blockedCta).toBeDisabled();
+    // Blocked steps emit no CTA at all (so users can't click into a
+    // dead-end action). The row stays for hierarchy/visibility.
+    expect(
+      screen.queryByTestId("onboarding-cta-create-agent"),
+    ).not.toBeInTheDocument();
   });
 
   it("dismiss button writes the per-workspace flag and removes the flow", async () => {

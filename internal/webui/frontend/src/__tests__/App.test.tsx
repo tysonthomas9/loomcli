@@ -1007,18 +1007,19 @@ describe("App", () => {
       expect(screen.queryByTestId("loading-container")).not.toBeInTheDocument();
     });
 
-    it("renders EmptyState when issues array is empty", () => {
+    it("renders EmptyWorkspaceBoard when issues array is empty", () => {
       const mockReturn = createMockUseIssuesReturn({ issues: [] });
       mockStoreState = mockReturn;
 
       render(<App />);
 
-      // Should render EmptyWorkspaceBoard in the main content area
+      // Should render EmptyWorkspaceBoard in the main content area.
+      // The legacy "No issues yet" heading is intentionally hidden when
+      // a workspace context is present — the OnboardingFlow takes over
+      // and shows its own header. App tests stub OnboardingFlow to null
+      // so the board container is what we assert on.
       const emptyBoard = screen.getByTestId("empty-workspace-board");
       expect(emptyBoard).toBeInTheDocument();
-      expect(
-        screen.getByRole("heading", { name: "No issues yet" }),
-      ).toBeInTheDocument();
     });
   });
 

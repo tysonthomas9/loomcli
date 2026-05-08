@@ -105,6 +105,11 @@ function BackendRow({
       <div className={styles.summary}>
         <div className={styles.identity}>
           <span className={styles.name}>
+            <span
+              className={styles.statusDot}
+              data-ready={ready}
+              aria-hidden="true"
+            />
             {backend.display_name || backend.name}
           </span>
           {backend.description ? (
@@ -121,21 +126,21 @@ function BackendRow({
       <div className={styles.actions}>
         <button
           type="button"
-          className={styles.toggle}
-          onClick={onToggle}
-          aria-expanded={expanded}
-          data-testid={`backend-toggle-${backend.name}`}
-        >
-          {expanded ? "Hide setup" : "Configure"}
-        </button>
-        <button
-          type="button"
           className={styles.refresh}
           onClick={onRefresh}
           disabled={refreshing}
           data-testid={`backend-refresh-${backend.name}`}
         >
           {refreshing ? "Refreshing…" : "Refresh status"}
+        </button>
+        <button
+          type="button"
+          className={`${styles.toggle} ${ready ? styles.toggleSecondary : ""}`}
+          onClick={onToggle}
+          aria-expanded={expanded}
+          data-testid={`backend-toggle-${backend.name}`}
+        >
+          {expanded ? "Hide setup" : ready ? "View setup" : "Configure"}
         </button>
       </div>
 
@@ -193,7 +198,7 @@ function CommandSection({
   testIdPrefix,
 }: CommandSectionProps): JSX.Element {
   return (
-    <div>
+    <div className={styles.section}>
       <span className={styles.sectionLabel}>{label}</span>
       {actions.map((action) => (
         <CommandRow
@@ -245,14 +250,18 @@ function EnvVarSection({
   backendName: string;
 }): JSX.Element {
   return (
-    <div>
+    <div className={styles.section}>
       <span className={styles.sectionLabel}>Environment variables</span>
       {envVars.map((env) => (
-        <div key={env.name} data-testid={`backend-envvar-${backendName}-${env.name}`}>
+        <div
+          key={env.name}
+          className={styles.envVarRow}
+          data-testid={`backend-envvar-${backendName}-${env.name}`}
+        >
           <code className={styles.envVar}>{env.name}</code>
           {env.restart_required ? (
             <span className={styles.note}>
-              {" "}— set in your shell, then restart Loom
+              set in your shell, then restart Loom
             </span>
           ) : null}
         </div>

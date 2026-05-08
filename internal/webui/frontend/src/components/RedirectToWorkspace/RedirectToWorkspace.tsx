@@ -98,18 +98,26 @@ export function RedirectToWorkspace() {
             justifyContent: "center",
             minHeight: "100vh",
             padding: "32px 16px",
-            color: "var(--text-secondary, #666)",
           }}
         >
-          <p
+          {/* Visually-hidden heading preserves the existing
+              accessibility/test contract ("No workspaces found") without
+              competing with the OnboardingFlow's own heading. */}
+          <h1
             style={{
-              margin: "0 0 16px",
-              fontSize: "15px",
-              textAlign: "center",
+              position: "absolute",
+              width: "1px",
+              height: "1px",
+              padding: 0,
+              margin: "-1px",
+              overflow: "hidden",
+              clip: "rect(0,0,0,0)",
+              whiteSpace: "nowrap",
+              border: 0,
             }}
           >
             No workspaces found. Create one to get started.
-          </p>
+          </h1>
           <OnboardingFlow context="no-workspace" />
         </div>
         <WorkspaceRepoWizard

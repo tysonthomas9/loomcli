@@ -58,32 +58,35 @@ export function EmptyWorkspaceBoard({
       aria-label={headline}
       data-testid="empty-workspace-board"
     >
-      <div className={styles.icon} aria-hidden="true">
-        <svg
-          width="48"
-          height="48"
-          viewBox="0 0 48 48"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.5"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          {/* Kanban board outline */}
-          <rect x="4" y="6" width="40" height="36" rx="3" />
-          <line x1="17.5" y1="6" x2="17.5" y2="42" />
-          <line x1="30.5" y1="6" x2="30.5" y2="42" />
-          {/* Card placeholders */}
-          <rect x="8" y="12" width="6" height="4" rx="1" opacity="0.4" />
-          <rect x="21" y="12" width="6" height="4" rx="1" opacity="0.4" />
-          <rect x="34" y="12" width="6" height="4" rx="1" opacity="0.4" />
-        </svg>
-      </div>
-      <h3 className={styles.headline}>{headline}</h3>
-      <p className={styles.subtitle}>{subtitle}</p>
       {showOnboarding ? (
         <OnboardingFlow context="empty-kanban" workspaceId={workspaceId} />
-      ) : null}
+      ) : (
+        <>
+          <div className={styles.icon} aria-hidden="true">
+            <svg
+              width="48"
+              height="48"
+              viewBox="0 0 48 48"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              {/* Kanban board outline */}
+              <rect x="4" y="6" width="40" height="36" rx="3" />
+              <line x1="17.5" y1="6" x2="17.5" y2="42" />
+              <line x1="30.5" y1="6" x2="30.5" y2="42" />
+              {/* Card placeholders */}
+              <rect x="8" y="12" width="6" height="4" rx="1" opacity="0.4" />
+              <rect x="21" y="12" width="6" height="4" rx="1" opacity="0.4" />
+              <rect x="34" y="12" width="6" height="4" rx="1" opacity="0.4" />
+            </svg>
+          </div>
+          <h3 className={styles.headline}>{headline}</h3>
+          <p className={styles.subtitle}>{subtitle}</p>
+        </>
+      )}
     </div>
   );
 }

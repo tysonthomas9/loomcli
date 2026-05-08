@@ -53,6 +53,12 @@ export function OnboardingFlow({
       ? "Get from zero to your first agent run."
       : "Finish setup to run your first agent in this workspace.";
 
+  const completeCount = steps.filter(
+    (s) => s.status === "complete" || s.status === "warning",
+  ).length;
+  const totalSteps = steps.length;
+  const percent = totalSteps > 0 ? Math.round((completeCount / totalSteps) * 100) : 0;
+
   return (
     <section
       className={styles.container}
@@ -61,22 +67,27 @@ export function OnboardingFlow({
       data-testid="onboarding-flow"
     >
       <header className={styles.header}>
-        <div>
+        <div className={styles.headerText}>
           <h2 className={styles.heading}>You&rsquo;re almost ready</h2>
           <p className={styles.subtitle}>{subtitle}</p>
         </div>
-        {workspaceId ? (
-          <button
-            type="button"
-            className={styles.dismiss}
-            onClick={dismiss}
-            data-testid="onboarding-dismiss"
-            aria-label="Dismiss onboarding"
-          >
-            Dismiss
-          </button>
-        ) : null}
+        <span
+          className={styles.progress}
+          aria-label={`${completeCount} of ${totalSteps} steps complete`}
+        >
+          {completeCount}/{totalSteps} done
+        </span>
       </header>
+
+      <div
+        className={styles.progressBar}
+        role="progressbar"
+        aria-valuenow={completeCount}
+        aria-valuemin={0}
+        aria-valuemax={totalSteps}
+      >
+        <div className={styles.progressFill} style={{ width: `${percent}%` }} />
+      </div>
 
       <ol className={styles.list}>
         {steps.map((step, index) => (
@@ -94,6 +105,20 @@ export function OnboardingFlow({
           Could not load onboarding status. The checklist may be out of date.
         </p>
       ) : null}
+
+      {workspaceId ? (
+        <div style={{ display: "flex", justifyContent: "flex-end" }}>
+          <button
+            type="button"
+            className={styles.dismiss}
+            onClick={dismiss}
+            data-testid="onboarding-dismiss"
+            aria-label="Dismiss onboarding"
+          >
+            Hide checklist
+          </button>
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -106,12 +131,12 @@ interface RowProps {
 
 function Row({ step, index, onCta }: RowProps): JSX.Element {
   const status = step.status;
-  const isBlocked = status === "blocked";
-  const ctaDisabled = !canActOnStep(status);
+  const showCta = canActOnStep(status);
+  const isComplete = status === "complete" || status === "warning";
 
   return (
     <li
-      className={`${styles.row}${isBlocked ? ` ${styles.blocked}` : ""}`}
+      className={`${styles.row} ${styles[status] ?? ""}`}
       aria-current={status === "actionable" ? "step" : undefined}
       data-step-id={step.id}
       data-status={status}
@@ -120,7 +145,7 @@ function Row({ step, index, onCta }: RowProps): JSX.Element {
         className={`${styles.indicator} ${styles[status] ?? ""}`}
         aria-hidden="true"
       >
-        {status === "complete" || status === "warning" ? "✓" : index}
+        {isComplete ? "✓" : index}
       </span>
       <span className={styles.label}>
         <span className={styles.labelText}>{step.label}</span>
@@ -128,15 +153,26 @@ function Row({ step, index, onCta }: RowProps): JSX.Element {
           {step.message ?? step.description}
         </span>
       </span>
-      <button
-        type="button"
-        className={styles.cta}
-        onClick={onCta}
-        disabled={ctaDisabled}
-        data-testid={`onboarding-cta-${step.id}`}
-      >
-        {step.ctaLabel}
-      </button>
+      {showCta ? (
+        <button
+          type="button"
+          className={styles.cta}
+          onClick={onCta}
+          data-testid={`onboarding-cta-${step.id}`}
+        >
+          {step.ctaLabel}
+        </button>
+      ) : status === "complete" ? (
+        <span
+          className={styles.ctaDone}
+          data-testid={`onboarding-cta-${step.id}`}
+          aria-label="Done"
+        >
+          Done
+        </span>
+      ) : (
+        <span className={styles.ctaPlaceholder} aria-hidden="true" />
+      )}
     </li>
   );
 }
