@@ -68,26 +68,36 @@ export function OnboardingFlow({
     >
       <header className={styles.header}>
         <div className={styles.headerText}>
-          <h2 className={styles.heading}>You&rsquo;re almost ready</h2>
+          <h2 className={styles.title}>Get started</h2>
           <p className={styles.subtitle}>{subtitle}</p>
         </div>
-        <span
+        <div
           className={styles.progress}
           aria-label={`${completeCount} of ${totalSteps} steps complete`}
         >
-          {completeCount}/{totalSteps} done
-        </span>
+          <span className={styles.progressCount}>
+            {completeCount}/{totalSteps}
+          </span>
+          <div
+            className={styles.progressBar}
+            role="progressbar"
+            aria-valuenow={completeCount}
+            aria-valuemin={0}
+            aria-valuemax={totalSteps}
+          >
+            <div
+              className={styles.progressFill}
+              style={{ width: `${percent}%` }}
+            />
+          </div>
+        </div>
       </header>
 
-      <div
-        className={styles.progressBar}
-        role="progressbar"
-        aria-valuenow={completeCount}
-        aria-valuemin={0}
-        aria-valuemax={totalSteps}
-      >
-        <div className={styles.progressFill} style={{ width: `${percent}%` }} />
-      </div>
+      {error ? (
+        <p className={styles.error} role="alert">
+          Could not load onboarding status. The checklist may be out of date.
+        </p>
+      ) : null}
 
       <ol className={styles.list}>
         {steps.map((step, index) => (
@@ -100,14 +110,8 @@ export function OnboardingFlow({
         ))}
       </ol>
 
-      {error ? (
-        <p className={styles.error} role="alert">
-          Could not load onboarding status. The checklist may be out of date.
-        </p>
-      ) : null}
-
       {workspaceId ? (
-        <div style={{ display: "flex", justifyContent: "flex-end" }}>
+        <div className={styles.footer}>
           <button
             type="button"
             className={styles.dismiss}

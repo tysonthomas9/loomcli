@@ -1,100 +1,87 @@
+/*
+ * BackendSetupPanel — uses the same panel chrome as the rest of
+ * SettingsView. No bespoke borders or status dots; backend rows are
+ * separated by --color-border-light and status comes from the
+ * existing badge style.
+ */
+
 .container {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4, 16px);
+  font-family: var(--font-main);
 }
 
 .heading {
   margin: 0;
-  font-size: 1.05rem;
-  font-weight: 600;
-  color: var(--color-text-primary);
-  letter-spacing: -0.01em;
+  font-size: 0.95rem;
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text);
 }
 
 .subtitle {
-  margin: 4px 0 0;
-  font-size: 0.85rem;
+  margin: var(--space-1) 0 0;
+  font-size: var(--font-size-xs);
   color: var(--color-text-muted);
-  line-height: 1.45;
+  line-height: 1.5;
 }
 
 .list {
   display: flex;
   flex-direction: column;
-  gap: var(--space-3, 12px);
+  margin-top: var(--space-3);
 }
 
 .row {
   display: flex;
   flex-direction: column;
-  gap: var(--space-3, 12px);
-  padding: var(--space-4, 16px);
-  border: 1px solid color-mix(in srgb, var(--color-text-muted) 18%, transparent);
-  border-radius: 10px;
-  background: var(--color-surface);
-  transition: border-color 120ms ease, box-shadow 120ms ease;
+  gap: var(--space-2);
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--color-border-light);
 }
 
-.row[data-ready="true"] {
-  border-color: color-mix(in srgb, var(--color-success, #16a34a) 35%, transparent);
+.row:first-child {
+  padding-top: 0;
 }
 
-.row[data-ready="false"] {
-  border-color: color-mix(in srgb, var(--color-warning, #d97706) 35%, transparent);
+.row:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
 }
 
 .summary {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: var(--space-3, 12px);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-3);
 }
 
 .identity {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
   min-width: 0;
 }
 
 .name {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 8px;
-  font-size: 1rem;
-  font-weight: 600;
-  color: var(--color-text-primary);
-  letter-spacing: -0.005em;
+  gap: var(--space-2);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text);
 }
 
 .statusDot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--color-text-muted);
-  flex-shrink: 0;
-}
-
-.statusDot[data-ready="true"] {
-  background: var(--color-success, #16a34a);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-success, #16a34a) 18%, transparent);
-}
-
-.statusDot[data-ready="false"] {
-  background: var(--color-warning, #d97706);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-warning, #d97706) 18%, transparent);
+  display: none;
 }
 
 .description {
-  font-size: 0.82rem;
+  font-size: var(--font-size-xs);
   color: var(--color-text-muted);
   line-height: 1.45;
 }
 
 .badges {
   display: flex;
-  gap: 6px;
+  gap: var(--space-1);
   flex-wrap: wrap;
   flex-shrink: 0;
 }
@@ -103,174 +90,181 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 3px 9px;
-  border-radius: 999px;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
   font-size: 0.7rem;
-  font-weight: 600;
+  font-weight: var(--font-weight-medium);
   border: 1px solid currentColor;
-  letter-spacing: 0.01em;
   text-transform: capitalize;
+  font-variant-numeric: tabular-nums;
 }
 
 .badge.on {
-  background: color-mix(in srgb, var(--color-success, #16a34a) 14%, transparent);
-  color: var(--color-success, #16a34a);
-  border-color: color-mix(in srgb, var(--color-success, #16a34a) 35%, transparent);
+  color: var(--color-success);
+  background: var(--color-success-bg);
+  border-color: var(--color-success);
 }
 
 .badge.off {
   color: var(--color-text-muted);
-  border-color: color-mix(in srgb, var(--color-text-muted) 30%, transparent);
-  opacity: 0.7;
+  border-color: var(--color-border);
+  opacity: 0.75;
 }
 
 .actions {
   display: flex;
-  gap: 8px;
+  gap: var(--space-2);
   align-items: center;
   justify-content: flex-end;
 }
 
 .toggle {
-  background: var(--bg-accent, #1976d2);
-  color: white;
+  padding: 4px var(--space-3);
+  font-size: var(--font-size-xs);
+  font-family: var(--font-main);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-inverse);
+  background-color: var(--color-status-open);
   border: none;
-  border-radius: 8px;
-  padding: 7px 14px;
+  border-radius: var(--radius-md);
   cursor: pointer;
-  font-size: 0.85rem;
-  font-weight: 600;
-  transition: filter 120ms ease;
+  transition: opacity var(--transition-fast);
 }
 
 .toggle:hover {
-  filter: brightness(1.06);
+  opacity: 0.9;
 }
 
 .toggle.toggleSecondary {
+  color: var(--color-text);
   background: transparent;
-  color: var(--color-text-primary);
-  border: 1px solid color-mix(in srgb, var(--color-text-muted) 28%, transparent);
+  border: 1px solid var(--color-border);
 }
 
 .toggle.toggleSecondary:hover {
-  border-color: var(--color-text-primary);
-  filter: none;
+  opacity: 1;
+  border-color: var(--color-border-hover);
 }
 
 .refresh {
   background: none;
   border: none;
+  font-family: var(--font-main);
+  font-size: var(--font-size-xs);
   color: var(--color-text-muted);
   cursor: pointer;
-  font-size: 0.8rem;
-  padding: 7px 6px;
+  padding: 4px var(--space-2);
+  border-radius: var(--radius-sm);
+  transition: color var(--transition-fast);
 }
 
 .refresh:hover:not(:disabled) {
-  color: var(--color-text-primary);
+  color: var(--color-text);
 }
 
 .refresh:disabled {
-  opacity: 0.5;
+  opacity: 0.4;
   cursor: not-allowed;
 }
 
 .detail {
   display: flex;
   flex-direction: column;
-  gap: var(--space-3, 12px);
-  padding-top: var(--space-3, 12px);
-  border-top: 1px dashed color-mix(in srgb, var(--color-text-muted) 22%, transparent);
+  gap: var(--space-3);
+  padding: var(--space-3);
+  margin-top: var(--space-2);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
 }
 
 .message {
-  font-size: 0.85rem;
-  color: var(--color-text-muted);
   margin: 0;
-  padding: 8px 12px;
-  background: color-mix(in srgb, var(--color-text-muted) 7%, transparent);
-  border-radius: 6px;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
 }
 
 .section {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .sectionLabel {
-  font-size: 0.7rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--color-text-muted);
   margin: 0;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
 .command {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 9px 12px;
-  background: color-mix(in srgb, var(--color-text-muted) 8%, transparent);
-  border: 1px solid color-mix(in srgb, var(--color-text-muted) 12%, transparent);
-  border-radius: 8px;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
   font-family: var(--font-mono, ui-monospace, monospace);
-  font-size: 0.85rem;
+  font-size: var(--font-size-xs);
 }
 
 .commandText {
   flex: 1;
   overflow-x: auto;
   white-space: nowrap;
-  color: var(--color-text-primary);
+  color: var(--color-text);
 }
 
 .copyButton {
+  padding: 2px var(--space-2);
+  font-size: 0.7rem;
+  font-family: var(--font-main);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-inverse);
+  background: var(--color-status-open);
   border: none;
-  background: var(--bg-accent, #1976d2);
-  color: white;
-  padding: 5px 12px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
-  font-size: 0.75rem;
-  font-weight: 600;
+  transition: opacity var(--transition-fast);
   flex-shrink: 0;
-  transition: filter 120ms ease;
 }
 
 .copyButton:hover {
-  filter: brightness(1.06);
+  opacity: 0.9;
 }
 
 .envVarRow {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  background: color-mix(in srgb, var(--color-text-muted) 6%, transparent);
-  border-radius: 6px;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
 }
 
 .envVar {
   font-family: var(--font-mono, ui-monospace, monospace);
-  font-size: 0.85rem;
-  color: var(--color-text-primary);
-  font-weight: 600;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text);
 }
 
 .note {
-  font-size: 0.8rem;
+  font-size: var(--font-size-xs);
   color: var(--color-text-muted);
 }
 
 .error {
-  color: var(--color-danger, #dc2626);
-  font-size: 0.85rem;
-  padding: 8px 12px;
-  background: color-mix(in srgb, var(--color-danger, #dc2626) 8%, transparent);
-  border-radius: 6px;
   margin: 0;
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--font-size-xs);
+  color: var(--color-danger);
+  background: var(--color-danger-bg);
+  border: 1px solid var(--color-danger);
+  border-radius: var(--radius-md);
 }

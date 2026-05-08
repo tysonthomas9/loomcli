@@ -1,42 +1,49 @@
-.backdrop {
+/*
+ * WorkspaceRepoWizard — adopts the same modal vocabulary as
+ * CreateWorkspaceModal so the two coexist consistently.
+ */
+
+.overlay {
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.5);
+  z-index: 1000;
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 1000;
 }
 
 .dialog {
-  background: var(--color-surface, #fff);
-  color: var(--color-text-primary);
-  border-radius: 12px;
-  width: 100%;
+  background: var(--color-panel-bg, var(--color-bg-card));
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: var(--space-5);
   max-width: 480px;
-  padding: var(--space-6, 24px);
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.18);
+  width: 90%;
+  font-family: var(--font-main);
   display: flex;
   flex-direction: column;
-  gap: var(--space-4, 16px);
+  gap: var(--space-4);
 }
 
-.heading {
+.title {
   margin: 0;
-  font-size: 1.1rem;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
+  font-size: var(--font-size-base);
+  color: var(--color-text);
 }
 
 .subtitle {
-  margin: 0;
-  font-size: 0.85rem;
+  margin: var(--space-1) 0 0;
+  font-size: var(--font-size-xs);
   color: var(--color-text-muted);
+  line-height: 1.5;
 }
 
 .form {
   display: flex;
   flex-direction: column;
-  gap: var(--space-3, 12px);
+  gap: var(--space-3);
 }
 
 .fieldGroup {
@@ -46,91 +53,137 @@
 }
 
 .label {
-  font-size: 0.85rem;
-  font-weight: 500;
-  color: var(--color-text-primary);
+  display: block;
+  font-size: 13px;
+  color: var(--color-text-muted);
 }
 
 .input {
-  padding: 8px 10px;
-  border: 1px solid color-mix(in srgb, var(--color-text-muted) 30%, transparent);
-  border-radius: 6px;
-  font-size: 0.9rem;
-  background: var(--color-surface);
-  color: var(--color-text-primary);
+  width: 100%;
+  padding: 6px 10px;
+  font-size: 13px;
+  font-family: var(--font-main);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border);
+  background: transparent;
+  color: var(--color-text);
+  outline: none;
+  box-sizing: border-box;
+  transition: border-color var(--transition-fast);
 }
 
 .input:focus {
-  outline: 2px solid var(--bg-accent, #1976d2);
-  outline-offset: -1px;
+  border-color: var(--color-primary, var(--color-status-open));
+}
+
+.input::placeholder {
+  color: var(--color-text-muted);
+  opacity: 0.6;
 }
 
 .sourceRow {
-  display: flex;
-  gap: 8px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-2);
 }
 
 .sourceOption {
-  flex: 1;
-  padding: 8px 12px;
-  border: 1px solid color-mix(in srgb, var(--color-text-muted) 30%, transparent);
-  border-radius: 6px;
-  background: var(--color-surface);
-  color: var(--color-text-primary);
+  padding: 6px 10px;
+  background: transparent;
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
   cursor: pointer;
-  font-size: 0.85rem;
-  text-align: center;
+  font-family: var(--font-main);
+  font-size: 13px;
+  transition:
+    color var(--transition-fast),
+    border-color var(--transition-fast),
+    background var(--transition-fast);
+}
+
+.sourceOption:hover {
+  color: var(--color-text);
+  border-color: var(--color-border-hover);
 }
 
 .sourceOption.active {
-  border-color: var(--bg-accent, #1976d2);
-  background: color-mix(in srgb, var(--bg-accent, #1976d2) 10%, transparent);
-  font-weight: 500;
+  color: var(--color-text-inverse);
+  background: var(--color-status-open);
+  border-color: var(--color-status-open);
 }
 
 .actions {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
-}
-
-.cancel,
-.submit {
-  padding: 8px 16px;
-  border-radius: 6px;
-  font-size: 0.9rem;
-  cursor: pointer;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
 }
 
 .cancel {
-  background: none;
-  border: 1px solid color-mix(in srgb, var(--color-text-muted) 30%, transparent);
-  color: var(--color-text-primary);
+  padding: 6px var(--space-3);
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-main);
+  font-size: 13px;
+  color: var(--color-text);
+  cursor: pointer;
+  transition: border-color var(--transition-fast);
+}
+
+.cancel:hover {
+  border-color: var(--color-border-hover);
 }
 
 .submit {
-  background: var(--bg-accent, #1976d2);
+  padding: 6px var(--space-4);
+  font-size: 13px;
+  font-family: var(--font-main);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-inverse);
+  background-color: var(--color-status-open);
   border: none;
-  color: white;
-  font-weight: 500;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: opacity var(--transition-fast);
+}
+
+.submit:hover:not(:disabled) {
+  opacity: 0.9;
 }
 
 .submit:disabled {
-  opacity: 0.5;
+  opacity: 0.4;
   cursor: not-allowed;
 }
 
 .error {
-  color: var(--color-danger, #dc2626);
-  font-size: 0.85rem;
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--font-size-xs);
+  color: var(--color-danger);
+  background: var(--color-danger-bg);
+  border: 1px solid var(--color-danger);
+  border-radius: var(--radius-sm);
 }
 
 .progress {
-  font-size: 0.85rem;
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  font-size: 13px;
   color: var(--color-text-muted);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm);
 }
 
 .hint {
-  font-size: 0.75rem;
+  font-size: var(--font-size-xs);
   color: var(--color-text-muted);
+}
+
+/* Backdrop alias for back-compat with existing markup. */
+.backdrop {
+  composes: overlay;
 }
