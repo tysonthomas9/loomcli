@@ -112,7 +112,7 @@
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
-  scrollbar-gutter: stable;
+  scrollbar-gutter: auto;
   background: var(--color-bg);
   border-left: 1px solid var(--color-border);
 }
