@@ -1075,7 +1075,7 @@ function App() {
               badges={{ terminal: hasTerminalUnread }}
             />
           }
-          sidebar={sidebarContent}
+          sidebar={activeView === "agents" ? null : sidebarContent}
         >
           <ViewSubSwitcher activeView={activeView} onChange={navigateToView} />
           {(showStaleBanner || isConnectionLost) &&
@@ -1130,25 +1130,27 @@ function App() {
               fetchIssue(issue.id);
             }}
           />
-          <div
-            style={{ display: activeView === "terminal" ? "contents" : "none" }}
-          >
-            <Suspense fallback={<LoadingSkeleton.Terminal />}>
-              <TerminalView
-                isActive={activeView === "terminal"}
-                pendingIssueContext={pendingIssueContext}
-                onIssueContextConsumed={handleIssueContextConsumed}
-                pendingAgentName={pendingAgentName}
-                onAgentNameConsumed={handleAgentNameConsumed}
-                onActiveSessionCountChange={setActiveSessionCount}
-                onUnreadChange={setHasTerminalUnread}
-                onTabLimitReached={(message) =>
-                  showToast(message, { type: "error" })
-                }
-                onNavigateToSettings={() => navigateToView("settings")}
-              />
-            </Suspense>
-          </div>
+          {activeView !== "agents" && (
+            <div
+              style={{ display: activeView === "terminal" ? "contents" : "none" }}
+            >
+              <Suspense fallback={<LoadingSkeleton.Terminal />}>
+                <TerminalView
+                  isActive={activeView === "terminal"}
+                  pendingIssueContext={pendingIssueContext}
+                  onIssueContextConsumed={handleIssueContextConsumed}
+                  pendingAgentName={pendingAgentName}
+                  onAgentNameConsumed={handleAgentNameConsumed}
+                  onActiveSessionCountChange={setActiveSessionCount}
+                  onUnreadChange={setHasTerminalUnread}
+                  onTabLimitReached={(message) =>
+                    showToast(message, { type: "error" })
+                  }
+                  onNavigateToSettings={() => navigateToView("settings")}
+                />
+              </Suspense>
+            </div>
+          )}
           <TalkToLeadButton
             onClick={handleTalkToLeadClick}
             isActive={activeView === "terminal"}

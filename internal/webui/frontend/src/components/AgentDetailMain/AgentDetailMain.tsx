@@ -1,21 +1,31 @@
 /**
- * AgentDetailMain — Direction J middle panel.
+ * AgentDetailMain — Direction J middle panel (live terminal).
  *
- * Header with agent identity (avatar, name, status, branch, role) followed by
- * a metadata card (current task, repo, worktree path) and quick-access buttons
- * to existing surfaces (Terminal for live logs, full-page issue detail for the
- * agent's current task). The Aether wireframe shows a chat-style middle pane;
- * the live chat surface is a richer follow-up. This panel ships the
- * "selected agent context" value without inventing a new chat component.
+ * Renders a slim agent header (avatar, name, status, branch, role) plus an
+ * embedded TerminalView that auto-focuses the selected agent's tmux session
+ * via pendingAgentName. When the user switches agents in the rail, the
+ * pendingAgentName change tells TerminalView to switch tabs to that agent.
+ *
+ * The App-level TerminalView is conditionally skipped when activeView ===
+ * "agents" (see App.tsx) so only one TerminalView instance is mounted at a
+ * time. Switching between /terminal and /agents causes one reconnect, but
+ * within the agents view itself the terminal stays mounted across rail
+ * selection changes (only pendingAgentName updates).
  */
 
-import { useMemo } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useStore } from "zustand";
 
+import { LoadingSkeleton } from "@/components";
 import { useAgentStoreInstance } from "@/hooks";
 import { type LoomAgentStatus, parseLoomStatus } from "@/types";
 import { getAvatarColor, shouldUseWhiteText } from "@/utils/colorUtils";
+
+const TerminalView = lazy(() =>
+  import("@/components/TerminalView/TerminalView").then((m) => ({
+    default: m.TerminalView,
+  })),
+);
 
 interface AgentDetailMainProps {
   agentName: string | undefined;
@@ -34,8 +44,6 @@ const STATUS_DOT_COLOR: Record<string, string> = {
 };
 
 export function AgentDetailMain({ agentName }: AgentDetailMainProps): JSX.Element {
-  const { workspaceId = "" } = useParams<{ workspaceId: string }>();
-  const navigate = useNavigate();
   const agentStore = useAgentStoreInstance();
   const agents = useStore(agentStore, (s) => s.agents);
 
@@ -44,24 +52,28 @@ export function AgentDetailMain({ agentName }: AgentDetailMainProps): JSX.Elemen
     [agents, agentName],
   );
 
-  if (!agentName) {
-    return <EmptyState message="Select an agent" detail="Pick an agent from the rail to view their work." />;
-  }
+  // Drive TerminalView's pendingAgentName from rail selection. Cleared via the
+  // onAgentNameConsumed callback so TerminalView only switches tabs once per
+  // selection change.
+  const [pendingAgentName, setPendingAgentName] = useState<string | undefined>(
+    agentName,
+  );
+  useEffect(() => {
+    if (agentName) setPendingAgentName(agentName);
+  }, [agentName]);
+  const handleAgentNameConsumed = useCallback(
+    () => setPendingAgentName(undefined),
+    [],
+  );
 
-  if (!agent) {
+  if (!agentName) {
     return (
       <EmptyState
-        message="Agent not found"
-        detail={`No agent named "${agentName}" exists in this workspace. It may have been deleted, or the URL is stale.`}
+        message="Select an agent"
+        detail="Pick an agent from the rail to attach to their terminal session."
       />
     );
   }
-
-  const parsed = parseLoomStatus(agent.status ?? "");
-  const dotColor = STATUS_DOT_COLOR[parsed.type] ?? "var(--color-status-idle, #888)";
-  const initial = (agent.name?.[0] ?? "?").toUpperCase();
-  const avatarBg = getAvatarColor(agent.name ?? "");
-  const avatarFg = shouldUseWhiteText(avatarBg) ? "#fff" : "#1a1a1a";
 
   return (
     <div
@@ -75,37 +87,24 @@ export function AgentDetailMain({ agentName }: AgentDetailMainProps): JSX.Elemen
         minHeight: 0,
       }}
     >
-      <Header
-        agent={agent}
-        initial={initial}
-        avatarBg={avatarBg}
-        avatarFg={avatarFg}
-        statusType={parsed.type}
-        statusDotColor={dotColor}
-      />
-
+      <Header agent={agent} agentName={agentName} />
       <div
         style={{
           flex: 1,
-          padding: 20,
-          overflow: "auto",
+          minHeight: 0,
+          minWidth: 0,
           display: "flex",
           flexDirection: "column",
-          gap: 16,
+          position: "relative",
         }}
       >
-        <MetadataCard agent={agent} parsedTaskId={parsed.taskId} />
-
-        <ActionsCard
-          agent={agent}
-          parsedTaskId={parsed.taskId}
-          onGoToTask={(taskId) =>
-            navigate(`/ws/${workspaceId}/issues/${encodeURIComponent(taskId)}`)
-          }
-          onOpenTerminal={() => navigate(`/ws/${workspaceId}/terminal`)}
-        />
-
-        <ChatPlaceholder agentName={agent.name} />
+        <Suspense fallback={<LoadingSkeleton.Terminal />}>
+          <TerminalView
+            isActive={true}
+            pendingAgentName={pendingAgentName}
+            onAgentNameConsumed={handleAgentNameConsumed}
+          />
+        </Suspense>
       </div>
     </div>
   );
@@ -113,34 +112,36 @@ export function AgentDetailMain({ agentName }: AgentDetailMainProps): JSX.Elemen
 
 function Header({
   agent,
-  initial,
-  avatarBg,
-  avatarFg,
-  statusType,
-  statusDotColor,
+  agentName,
 }: {
-  agent: LoomAgentStatus;
-  initial: string;
-  avatarBg: string;
-  avatarFg: string;
-  statusType: string;
-  statusDotColor: string;
+  agent: LoomAgentStatus | undefined;
+  agentName: string;
 }): JSX.Element {
+  const parsed = useMemo(
+    () => parseLoomStatus(agent?.status ?? ""),
+    [agent?.status],
+  );
+  const dotColor = STATUS_DOT_COLOR[parsed.type] ?? "var(--color-status-idle, #888)";
+  const initial = (agentName[0] ?? "?").toUpperCase();
+  const avatarBg = getAvatarColor(agentName);
+  const avatarFg = shouldUseWhiteText(avatarBg) ? "#fff" : "#1a1a1a";
+
   return (
     <div
       style={{
-        padding: "12px 18px",
+        padding: "10px 16px",
         borderBottom: "1px solid var(--color-border, #ddd)",
         display: "flex",
         alignItems: "center",
-        gap: 12,
+        gap: 10,
+        flexShrink: 0,
       }}
     >
       <span
         aria-hidden="true"
         style={{
-          width: 36,
-          height: 36,
+          width: 32,
+          height: 32,
           borderRadius: "50%",
           background: avatarBg,
           color: avatarFg,
@@ -148,7 +149,7 @@ function Header({
           alignItems: "center",
           justifyContent: "center",
           fontWeight: 700,
-          fontSize: 16,
+          fontSize: 14,
           flexShrink: 0,
           border: "1px solid rgba(0,0,0,0.18)",
         }}
@@ -156,7 +157,7 @@ function Header({
         {initial}
       </span>
       <div style={{ display: "flex", flexDirection: "column", flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 15, fontWeight: 700 }}>{agent.name}</div>
+        <div style={{ fontSize: 14, fontWeight: 700 }}>{agentName}</div>
         <div
           style={{
             fontSize: 11,
@@ -169,15 +170,15 @@ function Header({
           <span
             aria-hidden="true"
             style={{
-              width: 8,
-              height: 8,
+              width: 7,
+              height: 7,
               borderRadius: "50%",
-              background: statusDotColor,
+              background: dotColor,
               display: "inline-block",
             }}
           />
-          <span>{statusType}</span>
-          {agent.branch ? (
+          <span>{parsed.type || "unknown"}</span>
+          {agent?.branch ? (
             <>
               <span>·</span>
               <code style={{ fontFamily: "var(--font-mono, ui-monospace, monospace)" }}>
@@ -185,103 +186,23 @@ function Header({
               </code>
             </>
           ) : null}
-          {agent.role ? (
+          {agent?.role ? (
             <>
               <span>·</span>
               <span>{agent.role}</span>
             </>
           ) : null}
+          {parsed.taskId ? (
+            <>
+              <span>·</span>
+              <code style={{ fontFamily: "var(--font-mono, ui-monospace, monospace)" }}>
+                {parsed.taskId}
+              </code>
+            </>
+          ) : null}
         </div>
       </div>
     </div>
-  );
-}
-
-function MetadataCard({
-  agent,
-  parsedTaskId,
-}: {
-  agent: LoomAgentStatus;
-  parsedTaskId: string | undefined;
-}): JSX.Element {
-  return (
-    <Card label="Agent">
-      <Row label="Role" value={agent.role ?? "—"} />
-      <Row label="Repo" value={agent.repo ?? "—"} />
-      <Row
-        label="Current task"
-        value={parsedTaskId ?? "(none)"}
-        mono={Boolean(parsedTaskId)}
-      />
-      {agent.cross_repo ? <Row label="Cross-repo" value="yes" /> : null}
-      {agent.worktree_path ? (
-        <Row label="Worktree" value={agent.worktree_path} mono />
-      ) : null}
-    </Card>
-  );
-}
-
-function ActionsCard({
-  agent,
-  parsedTaskId,
-  onGoToTask,
-  onOpenTerminal,
-}: {
-  agent: LoomAgentStatus;
-  parsedTaskId: string | undefined;
-  onGoToTask: (taskId: string) => void;
-  onOpenTerminal: () => void;
-}): JSX.Element {
-  return (
-    <Card label="Quick actions">
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        {parsedTaskId ? (
-          <ActionButton onClick={() => onGoToTask(parsedTaskId)}>
-            Open current task ↗
-          </ActionButton>
-        ) : null}
-        <ActionButton onClick={onOpenTerminal}>Open Terminal ↗</ActionButton>
-        {/* Diff/Logs/Files surfaces live in the existing AgentDetailPanel slide-out;
-            we leave room for those affordances in a follow-up that wires them up. */}
-      </div>
-      <div
-        style={{
-          fontSize: 11,
-          color: "var(--color-text-muted, #888)",
-          marginTop: 8,
-        }}
-      >
-        Selected agent: <code style={{ fontFamily: "var(--font-mono, ui-monospace, monospace)" }}>{agent.name}</code>
-      </div>
-    </Card>
-  );
-}
-
-function ChatPlaceholder({ agentName }: { agentName: string }): JSX.Element {
-  return (
-    <Card label="Chat (preview)">
-      <div style={{ fontSize: 12, color: "var(--color-text-muted, #888)" }}>
-        Live chat with <strong>{agentName}</strong> lands in a follow-up. For
-        now, use <em>Open Terminal</em> above to attach to the agent's session,
-        or open the agent's current task to see what it's working on.
-      </div>
-      <div
-        style={{
-          fontSize: 11,
-          color: "var(--color-text-muted, #888)",
-          marginTop: 8,
-          fontStyle: "italic",
-        }}
-      >
-        Coming next: orchestrator-lineage chip ("spawned by lead-…") and live
-        epic-run progress, once the monitor API surfaces{" "}
-        <code style={{ fontFamily: "var(--font-mono, ui-monospace, monospace)" }}>mode</code>{" "}
-        and{" "}
-        <code style={{ fontFamily: "var(--font-mono, ui-monospace, monospace)" }}>orchestrator_session_id</code>{" "}
-        on agent status (the Go fields exist; OpenAPI extension is the
-        remaining hook-up).
-      </div>
-    </Card>
   );
 }
 
@@ -312,101 +233,5 @@ function EmptyState({
         {detail}
       </div>
     </div>
-  );
-}
-
-function Card({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}): JSX.Element {
-  return (
-    <div
-      style={{
-        border: "1px solid var(--color-border, #ddd)",
-        borderRadius: 6,
-        padding: "10px 14px",
-        background: "var(--color-bg-soft, #faf8f3)",
-      }}
-    >
-      <div
-        style={{
-          fontSize: 11,
-          fontWeight: 700,
-          letterSpacing: 0.4,
-          textTransform: "uppercase",
-          color: "var(--color-text-muted, #666)",
-          marginBottom: 8,
-        }}
-      >
-        {label}
-      </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-        {children}
-      </div>
-    </div>
-  );
-}
-
-function Row({
-  label,
-  value,
-  mono = false,
-}: {
-  label: string;
-  value: string;
-  mono?: boolean;
-}): JSX.Element {
-  return (
-    <div style={{ display: "flex", gap: 12, fontSize: 12 }}>
-      <span
-        style={{
-          width: 110,
-          flexShrink: 0,
-          color: "var(--color-text-muted, #666)",
-        }}
-      >
-        {label}
-      </span>
-      <span
-        style={{
-          flex: 1,
-          minWidth: 0,
-          fontFamily: mono ? "var(--font-mono, ui-monospace, monospace)" : "inherit",
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          whiteSpace: "nowrap",
-        }}
-      >
-        {value}
-      </span>
-    </div>
-  );
-}
-
-function ActionButton({
-  onClick,
-  children,
-}: {
-  onClick: () => void;
-  children: React.ReactNode;
-}): JSX.Element {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      style={{
-        padding: "6px 10px",
-        fontSize: 12,
-        border: "1px solid var(--color-border, #888)",
-        borderRadius: 4,
-        background: "var(--color-bg, #fff)",
-        cursor: "pointer",
-      }}
-    >
-      {children}
-    </button>
   );
 }

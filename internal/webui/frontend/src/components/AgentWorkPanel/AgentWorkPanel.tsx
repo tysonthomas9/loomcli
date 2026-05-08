@@ -14,8 +14,8 @@ import { useMemo } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useStore } from "zustand";
 
-import { useIssueStoreInstance } from "@/hooks";
-import type { Issue } from "@/types";
+import { useAgentStoreInstance, useIssueStoreInstance } from "@/hooks";
+import { type Issue, parseLoomStatus } from "@/types";
 
 interface AgentWorkPanelProps {
   agentName: string | undefined;
@@ -68,11 +68,31 @@ export function AgentWorkPanel({ agentName }: AgentWorkPanelProps): JSX.Element 
   const navigate = useNavigate();
   const issueStore = useIssueStoreInstance();
   const issuesMap = useStore(issueStore, (s) => s.issuesMap);
+  const agentStore = useAgentStoreInstance();
+  const agents = useStore(agentStore, (s) => s.agents);
 
-  const { groups, counts, totalTasks } = useMemo(
-    () => groupAgentTasksByEpic(issuesMap, agentName),
-    [issuesMap, agentName],
-  );
+  // Detect the agent's "active epic": parse its current-task ID from status,
+  // look the task up, walk to its parent. When set, the panel focuses on that
+  // single epic and all its child tasks (not just the agent's own) so the
+  // user sees the full DAG the agent is working under.
+  const activeEpicId = useMemo<string | undefined>(() => {
+    if (!agentName) return undefined;
+    const a = agents.find((x) => x.name === agentName);
+    if (!a) return undefined;
+    const parsed = parseLoomStatus(a.status ?? "");
+    if (!parsed.taskId) return undefined;
+    const task = issuesMap.get(parsed.taskId);
+    return task?.parent || undefined;
+  }, [agentName, agents, issuesMap]);
+
+  const { groups, counts, totalTasks, focused } = useMemo(() => {
+    if (activeEpicId) {
+      const focusedView = scopeToEpic(issuesMap, activeEpicId);
+      return { ...focusedView, focused: true };
+    }
+    const fallback = groupAgentTasksByEpic(issuesMap, agentName);
+    return { ...fallback, focused: false };
+  }, [issuesMap, agentName, activeEpicId]);
 
   if (!agentName) {
     return (
@@ -112,19 +132,51 @@ export function AgentWorkPanel({ agentName }: AgentWorkPanelProps): JSX.Element 
           borderBottom: "1px solid var(--color-border, #ddd)",
         }}
       >
-        <div
-          style={{
-            fontSize: 11,
-            fontWeight: 700,
-            letterSpacing: 0.4,
-            textTransform: "uppercase",
-            color: "var(--color-text-muted, #666)",
-          }}
-        >
-          {agentName}'s work · {groups.length} epic{groups.length === 1 ? "" : "s"}
-          {" · "}
-          {totalTasks} task{totalTasks === 1 ? "" : "s"}
-        </div>
+        {focused && groups[0] ? (
+          <>
+            <div
+              style={{
+                fontSize: 10,
+                fontWeight: 700,
+                letterSpacing: 0.4,
+                textTransform: "uppercase",
+                color: "#c96442",
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+              }}
+            >
+              <span
+                aria-hidden="true"
+                style={{
+                  width: 6,
+                  height: 6,
+                  borderRadius: "50%",
+                  background: "#c96442",
+                  display: "inline-block",
+                }}
+              />
+              Active epic
+            </div>
+            <div style={{ fontSize: 14, fontWeight: 700, marginTop: 2 }}>
+              {groups[0].epicTitle}
+            </div>
+          </>
+        ) : (
+          <div
+            style={{
+              fontSize: 11,
+              fontWeight: 700,
+              letterSpacing: 0.4,
+              textTransform: "uppercase",
+              color: "var(--color-text-muted, #666)",
+            }}
+          >
+            {agentName}'s work · {groups.length} epic{groups.length === 1 ? "" : "s"}
+            {" · "}
+            {totalTasks} task{totalTasks === 1 ? "" : "s"}
+          </div>
+        )}
 
         <div style={{ display: "flex", gap: 4, marginTop: 6, flexWrap: "wrap" }}>
           <CountChip label={`${counts.done} done`} />
@@ -156,7 +208,9 @@ export function AgentWorkPanel({ agentName }: AgentWorkPanelProps): JSX.Element 
               padding: 24,
             }}
           >
-            No tasks assigned to {agentName} yet.
+            {focused
+              ? "Active epic has no child tasks."
+              : `No tasks assigned to ${agentName} yet.`}
           </div>
         ) : (
           groups.map((group) => (
@@ -406,6 +460,49 @@ export function groupAgentTasksByEpic(
 
 function taskSortRank(a: Issue, b: Issue): number {
   return statusRank(a.status) - statusRank(b.status);
+}
+
+/**
+ * scopeToEpic returns a single-group view focused on one epic and ALL its
+ * child tasks (regardless of assignee). Used when the selected agent has an
+ * active task — the panel zooms into the broader DAG the agent is contributing
+ * to so the user sees siblings, blockers, and downstream work in context.
+ */
+export function scopeToEpic(
+  issuesMap: Map<string, Issue>,
+  epicId: string,
+): { groups: EpicGroup[]; counts: Counts; totalTasks: number } {
+  const counts: Counts = { active: 0, done: 0, open: 0, blocked: 0 };
+  const tasks: Issue[] = [];
+
+  for (const issue of issuesMap.values()) {
+    if (issue.parent !== epicId) continue;
+    if (issue.issue_type === "epic") continue;
+    tasks.push(issue);
+    const status = (issue.status ?? "open").toLowerCase();
+    if (status === "in_progress" || status === "active") counts.active++;
+    else if (status === "closed" || status === "done") counts.done++;
+    else if (status === "blocked") counts.blocked++;
+    else counts.open++;
+  }
+
+  tasks.sort(taskSortRank);
+
+  const epicIssue = issuesMap.get(epicId);
+  const doneCount = tasks.filter((t) => {
+    const s = (t.status ?? "").toLowerCase();
+    return s === "closed" || s === "done";
+  }).length;
+
+  const group: EpicGroup = {
+    epicId,
+    epicTitle: epicIssue?.title ?? epicId,
+    tasks,
+    doneCount,
+    totalCount: tasks.length,
+  };
+
+  return { groups: [group], counts, totalTasks: tasks.length };
 }
 
 function statusRank(status: string | undefined): number {
