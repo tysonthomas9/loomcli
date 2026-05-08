@@ -21,22 +21,23 @@ type AgentProcess struct {
 	WorktreePath string             // resolved worktree path
 	RepoConfig   *cfgpkg.RepoConfig // per-repo config (nil in non-workspace mode)
 
-	Cmd                    *exec.Cmd         // current subprocess (nil when not running)
-	Pid                    int               // PID of current subprocess (0 when not running)
-	LogFile                *os.File          // log file handle for subprocess output (nil if not logging)
-	LogFilePath            string            // path to agent log file for watchdog stat checks
-	TranscriptPath         string            // path to session transcript.jsonl for watchdog liveness (set by superviseAgent)
-	Session                *sessions.Session // daemon-created session handle (nil when no session active)
-	AgentSessionID         string            // fleet-db control-plane session id (empty when no session active)
-	AgentLeaseID           string            // fleet-db control-plane lease id (empty when no lease active)
-	AgentLeaseToken        string            // fleet-db control-plane lease token (empty when no lease active)
-	OwnershipLeaseID       string            // fleet-db logical-agent ownership lease id (empty when not owner)
-	OwnershipLeaseToken    string            // fleet-db logical-agent ownership lease token (empty when not owner)
-	OwnershipFencingToken  int64             // fencing token for logical-agent ownership
-	OwnershipLastHeartbeat time.Time         // last successful ownership heartbeat
-	BeforeRef              string            // git HEAD ref before spawn (for diff stats at finalization)
-	AssignedTaskID         string            // task claimed by supervisor preflight for this run
-	RequestedTaskID        string            // task requested by a lifecycle command before normal queue selection
+	Cmd                     *exec.Cmd         // current subprocess (nil when not running)
+	Pid                     int               // PID of current subprocess (0 when not running)
+	LogFile                 *os.File          // log file handle for subprocess output (nil if not logging)
+	LogFilePath             string            // path to agent log file for watchdog stat checks
+	TranscriptPath          string            // path to session transcript.jsonl for watchdog liveness (set by superviseAgent)
+	Session                 *sessions.Session // daemon-created session handle (nil when no session active)
+	AgentSessionID          string            // fleet-db control-plane session id (empty when no session active)
+	AgentLeaseID            string            // fleet-db control-plane lease id (empty when no lease active)
+	AgentLeaseToken         string            // fleet-db control-plane lease token (empty when no lease active)
+	AgentLeaseHeartbeatStop func()            // stops the periodic agent-lease heartbeat goroutine (nil when no heartbeat active)
+	OwnershipLeaseID        string            // fleet-db logical-agent ownership lease id (empty when not owner)
+	OwnershipLeaseToken     string            // fleet-db logical-agent ownership lease token (empty when not owner)
+	OwnershipFencingToken   int64             // fencing token for logical-agent ownership
+	OwnershipLastHeartbeat  time.Time         // last successful ownership heartbeat
+	BeforeRef               string            // git HEAD ref before spawn (for diff stats at finalization)
+	AssignedTaskID          string            // task claimed by supervisor preflight for this run
+	RequestedTaskID         string            // task requested by a lifecycle command before normal queue selection
 
 	RestartCount   int       // consecutive restart attempts
 	LastStart      time.Time // when subprocess was last spawned

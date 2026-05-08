@@ -371,6 +371,7 @@ func (s *Supervisor) setStopReasonDefault(ap *AgentProcess, reason StopReason) {
 
 // clearAgentSessionState resets session state between supervision cycles.
 func (s *Supervisor) clearAgentSessionState(ap *AgentProcess) {
+	stopAgentLeaseHeartbeat(ap)
 	ap.Mu.Lock()
 	ap.Session = nil
 	ap.AgentSessionID = ""
@@ -687,11 +688,26 @@ func (s *Supervisor) createControlPlaneAgentSession(ap *AgentProcess, sessionID,
 		return
 	}
 	ap.Mu.Lock()
-	if ap.AgentSessionID == sessionID {
+	stillCurrent := ap.AgentSessionID == sessionID
+	if stillCurrent {
 		ap.AgentLeaseID = lease.LeaseID
 		ap.AgentLeaseToken = lease.Token
 	}
 	ap.Mu.Unlock()
+	if stillCurrent {
+		stop := s.startAgentLeaseHeartbeat(ap)
+		ap.Mu.Lock()
+		// If the session was swapped out between our check above and now, the
+		// new owner has its own lease — don't overwrite their stop function.
+		if ap.AgentSessionID == sessionID {
+			ap.AgentLeaseHeartbeatStop = stop
+		} else {
+			ap.Mu.Unlock()
+			stop()
+			return
+		}
+		ap.Mu.Unlock()
+	}
 }
 
 func (s *Supervisor) markControlPlaneAgentSessionRunning(ap *AgentProcess) {
@@ -811,6 +827,7 @@ func (s *Supervisor) completeControlPlaneAgentSession(ap *AgentProcess, input ag
 func (s *Supervisor) spawnAndWait(ap *AgentProcess) bool {
 	if err := s.spawnAgent(ap); err != nil {
 		slog.Warn("spawn failed", "worktree", ap.Entry.Worktree, "err", err)
+		stopAgentLeaseHeartbeat(ap)
 		ap.Mu.Lock()
 		orphanSess := ap.Session
 		ap.Session = nil
@@ -875,6 +892,7 @@ func (s *Supervisor) finalizeAgentSession(ap *AgentProcess, exitCode int) {
 }
 
 func takeAgentSessionForFinalize(ap *AgentProcess) agentSessionFinalizeState {
+	stopAgentLeaseHeartbeat(ap)
 	ap.Mu.Lock()
 	state := agentSessionFinalizeState{
 		session:    ap.Session,
