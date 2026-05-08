@@ -9,7 +9,31 @@ import { get, ApiError } from "@/api/common";
 // ============= Types =============
 
 /**
+ * One curated install or login command for a backend. Mirrors
+ * misc.SetupAction in internal/webui/handlers/misc/backend_setup_metadata.go.
+ */
+export interface BackendSetupAction {
+  id: string;
+  label: string;
+  command: string;
+  interactive: boolean;
+}
+
+/** Env-var hint advertised by a backend. */
+export interface BackendEnvVarHint {
+  name: string;
+  restart_required: boolean;
+}
+
+/**
  * Backend health data returned by the API.
+ *
+ * The base health booleans (name, display_name, available, installed,
+ * api_key_set, version, message) are populated by every server. The
+ * setup-related fields (description, authenticated, ready,
+ * install_actions, login_actions, env_vars) are added server-side from
+ * the curated registry; they are optional so older clients/responses
+ * still type-check.
  */
 export interface BackendHealthData {
   name: string;
@@ -20,6 +44,12 @@ export interface BackendHealthData {
   api_key_set: boolean;
   version?: string;
   message?: string;
+  description?: string;
+  authenticated?: boolean;
+  ready?: boolean;
+  install_actions?: BackendSetupAction[];
+  login_actions?: BackendSetupAction[];
+  env_vars?: BackendEnvVarHint[];
 }
 
 // ============= Response Types =============

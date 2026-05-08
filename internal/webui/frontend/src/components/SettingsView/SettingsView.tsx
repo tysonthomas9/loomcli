@@ -5,6 +5,7 @@
 
 import { useEffect, useState } from "react";
 
+import { BackendSetupPanel } from "@/components/BackendSetupPanel";
 import { ErrorDisplay } from "@/components/ErrorDisplay";
 import { LoadingSkeleton } from "@/components/LoadingSkeleton";
 import type { ViewMode } from "@/types";
@@ -205,6 +206,16 @@ export function SettingsView({
   return (
     <div className={rootClassName} data-testid="settings-view">
       <h2 className={styles.pageTitle}>Settings</h2>
+
+      {/* AI Backend status and curated setup actions. Above the
+          default-backend selector so a user without any ready backend
+          can see how to install/authenticate one before they get to
+          choosing a default. */}
+      <div className={styles.panel}>
+        <div className={styles.panelContent}>
+          <BackendSetupPanel />
+        </div>
+      </div>
 
       {/* Project Default Backend */}
       <div className={styles.panel}>
