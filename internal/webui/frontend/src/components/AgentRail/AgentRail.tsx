@@ -150,6 +150,8 @@ function AgentRow({ agent, selected, onClick }: AgentRowProps): JSX.Element {
     <button
       type="button"
       onClick={onClick}
+      data-agent-name={agent.name}
+      data-selected={selected || undefined}
       style={{
         display: "flex",
         alignItems: "center",
@@ -166,6 +168,14 @@ function AgentRow({ agent, selected, onClick }: AgentRowProps): JSX.Element {
         cursor: "pointer",
         textAlign: "left",
         fontSize: 12,
+        transition: "background 120ms ease",
+      }}
+      onMouseEnter={(e) => {
+        if (!selected)
+          e.currentTarget.style.background = "var(--color-hover-bg, rgba(0,0,0,0.04))";
+      }}
+      onMouseLeave={(e) => {
+        if (!selected) e.currentTarget.style.background = "transparent";
       }}
     >
       <span

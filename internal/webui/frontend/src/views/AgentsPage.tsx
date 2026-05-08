@@ -16,6 +16,8 @@ import { useNavigate, useParams } from "react-router-dom";
 
 import { ErrorBoundary, LoadingSkeleton } from "@/components";
 import { AgentRail } from "@/components/AgentRail/AgentRail";
+import { AgentDetailMain } from "@/components/AgentDetailMain/AgentDetailMain";
+import { AgentWorkPanel } from "@/components/AgentWorkPanel/AgentWorkPanel";
 
 export function AgentsPage(): JSX.Element {
   return (
@@ -57,80 +59,11 @@ function AgentsPageInner(): JSX.Element {
         onSelectAgent={selectAgent}
         autoSelectFirst={!agentName}
       />
-      <MiddlePlaceholder agentName={agentName} />
-      <RightPlaceholder agentName={agentName} />
+      <AgentDetailMain agentName={agentName} />
+      <AgentWorkPanel agentName={agentName} />
     </div>
   );
 }
 
-function MiddlePlaceholder({
-  agentName,
-}: {
-  agentName: string | undefined;
-}): JSX.Element {
-  return (
-    <div
-      style={{
-        flex: 1,
-        minWidth: 0,
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "center",
-        color: "var(--color-text-muted, #888)",
-        padding: 32,
-        borderRight: "1px solid var(--color-border, #ddd)",
-      }}
-    >
-      {!agentName ? (
-        <>
-          <div style={{ fontSize: 14, fontWeight: 600 }}>Select an agent</div>
-          <div style={{ fontSize: 12, marginTop: 6 }}>
-            Pick an agent from the rail to view their work.
-          </div>
-        </>
-      ) : (
-        <>
-          <div style={{ fontSize: 14, fontWeight: 600 }}>
-            Chat with {agentName} — coming in F3
-          </div>
-          <div style={{ fontSize: 12, marginTop: 6, textAlign: "center" }}>
-            For lead agents this will embed the existing TerminalView attached
-            to the lead's tmux session.
-            <br />
-            For task agents it will render the agent's most recent transcript
-            in read-only mode.
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
 
-function RightPlaceholder({
-  agentName,
-}: {
-  agentName: string | undefined;
-}): JSX.Element {
-  return (
-    <div
-      style={{
-        width: 360,
-        flexShrink: 0,
-        padding: 16,
-        color: "var(--color-text-muted, #888)",
-        background: "var(--color-bg-soft, #faf8f3)",
-      }}
-    >
-      <div
-        style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.4, textTransform: "uppercase" }}
-      >
-        {agentName ? `${agentName}'s work` : "No selection"}
-      </div>
-      <div style={{ fontSize: 12, marginTop: 12 }}>
-        Tasks grouped by epic — coming in F2.
-      </div>
-    </div>
-  );
-}
 
