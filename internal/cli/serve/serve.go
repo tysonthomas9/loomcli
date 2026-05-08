@@ -38,10 +38,7 @@ import (
 // fleet-aware issue routing at a different layer.
 const envLoomFleetMode = "LOOM_FLEET_MODE"
 
-const (
-	monitorCollectionCacheTTL        = 10 * time.Second
-	monitorCollectionRefreshInterval = 8 * time.Second
-)
+const monitorCollectionCacheTTL = 10 * time.Second
 
 var (
 	servePort              int
@@ -215,7 +212,7 @@ func runServe(cmd *cobra.Command, args []string) {
 
 	issueBackendFn := cli.WorkspaceAwareIssueBackendForURL(storeHandle.URL(), fleetState.clientCfg.Actor)
 	monitorDefaultWorkspace := resolveMonitorCollectorWorkspace(storeHandle.Store, fleetState.clientCfg.Workspace)
-	collectDataFn := buildMonitorCollectDataFn(ctx, monitorDefaultWorkspace, issueBackendFn)
+	collectDataFn := buildMonitorCollectDataFn(monitorDefaultWorkspace, issueBackendFn)
 	monitorHandlers := buildMonitorHandlers(collectDataFn, staleDetectorHandler, storeHandle.Store, issueBackendFn, monitorDefaultWorkspace)
 
 	webuiErr := make(chan error, 1)
@@ -228,7 +225,7 @@ func runServe(cmd *cobra.Command, args []string) {
 	awaitShutdown(cmd, stop, webuiErr, cancel)
 }
 
-func buildMonitorCollectDataFn(ctx context.Context, workspaceHint string, issueBackendFn metricscmd.IssueBackendFn) metricscmd.CollectDataFn {
+func buildMonitorCollectDataFn(workspaceHint string, issueBackendFn metricscmd.IssueBackendFn) metricscmd.CollectDataFn {
 	collectFn := func() *monitor.MonitorData {
 		if workspaceHint != "" && issueBackendFn != nil {
 			ctx := middleware.WithWorkspace(context.Background(), workspaceHint)
@@ -238,10 +235,11 @@ func buildMonitorCollectDataFn(ctx context.Context, workspaceHint string, issueB
 		}
 		return monitor.CollectMonitorData(10000, "")
 	}
-	// Proactively refresh the monitor cache so HTTP requests usually read warm
-	// data instead of blocking on collectMonitorData. Keep the refresh interval
-	// below the TTL so the frontend does not observe stale monitor state.
-	return metricscmd.NewCollectorWithBackgroundFunc(ctx, monitorCollectionCacheTTL, monitorCollectionRefreshInterval, collectFn)
+	// Refresh monitor data only when the UI asks for it. The frontend performs
+	// one initial fetch and then uses workspace SSE mutations to trigger
+	// additional refreshes, so an unconditional server-side warmer just creates
+	// idle fleet-db fanout and OTEL spans.
+	return metricscmd.NewCollectorFunc(monitorCollectionCacheTTL, collectFn)
 }
 
 func resolveMonitorCollectorWorkspace(st store.Store, fallbackWorkspace string) string {
