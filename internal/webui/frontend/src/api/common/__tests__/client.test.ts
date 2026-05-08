@@ -17,6 +17,8 @@ import {
   API_BASE_URL,
   getApiOrigin,
   getWsBaseUrl,
+  unwrapResponse,
+  api,
 } from "../client";
 
 describe("API Client", () => {
@@ -164,6 +166,52 @@ describe("API Client", () => {
   });
 
   describe("Error handling", () => {
+    it("unwrapResponse throws ApiError for a missing response envelope", () => {
+      expect(() =>
+        unwrapResponse(
+          undefined,
+          new Response(null, { status: 200, statusText: "OK" }),
+        ),
+      ).toThrow(ApiError);
+
+      try {
+        unwrapResponse(
+          undefined,
+          new Response(null, { status: 200, statusText: "OK" }),
+        );
+        throw new Error("Should have thrown");
+      } catch (error) {
+        expect(error).toMatchObject({
+          status: 200,
+          statusText: "OK",
+          body: "missing response envelope",
+        });
+      }
+    });
+
+    it("unwrapResponse preserves HTTP status when an envelope reports failure", () => {
+      expect(() =>
+        unwrapResponse(
+          { success: false, error: "conflicting write" },
+          new Response(null, { status: 409, statusText: "Conflict" }),
+        ),
+      ).toThrow(ApiError);
+
+      try {
+        unwrapResponse(
+          { success: false, error: "conflicting write" },
+          new Response(null, { status: 409, statusText: "Conflict" }),
+        );
+        throw new Error("Should have thrown");
+      } catch (error) {
+        expect(error).toMatchObject({
+          status: 409,
+          statusText: "Conflict",
+          body: "conflicting write",
+        });
+      }
+    });
+
     it("throws ApiError with status 404 for not found", async () => {
       const errorBody = { error: "Not found" };
       global.fetch = vi.fn().mockResolvedValue({
@@ -290,6 +338,30 @@ describe("API Client", () => {
         status: 400,
         body: errorBody,
       });
+    });
+  });
+
+  describe("openapi-fetch middleware", () => {
+    it("aborts requests after the default timeout when no caller signal is provided", async () => {
+      const mockFetch = vi.fn((_request: Request) => {
+        return new Promise<Response>(() => {
+          // Keep the request pending so only the middleware timeout can abort it.
+        });
+      });
+
+      const requestPromise = api.GET("/api/workspaces/active", {
+        baseUrl: "http://localhost",
+        fetch: mockFetch,
+      });
+      requestPromise.catch(() => undefined);
+
+      await vi.waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(1));
+      const request = mockFetch.mock.calls[0]?.[0] as Request;
+      expect(request.signal.aborted).toBe(false);
+
+      vi.advanceTimersByTime(30_000);
+
+      expect(request.signal.aborted).toBe(true);
     });
   });
 

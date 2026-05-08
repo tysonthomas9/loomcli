@@ -100,7 +100,7 @@ export async function listTabMetadata(
       },
     );
     if (error) throw apiErrorFromResponse(error, response);
-    return (unwrapResponse(data) ?? []) as unknown as TabMetadata[];
+    return (unwrapResponse(data, response) ?? []) as unknown as TabMetadata[];
   } catch (error) {
     if (
       error instanceof ApiError &&
@@ -126,7 +126,7 @@ export async function getTabMetadata(
     },
   );
   if (error) throw apiErrorFromResponse(error, response);
-  return unwrapResponse(data!) as unknown as TabMetadata;
+  return unwrapResponse(data, response) as unknown as TabMetadata;
 }
 
 /**
@@ -147,7 +147,7 @@ export async function patchTabMetadata(
     },
   );
   if (error) throw apiErrorFromResponse(error, response);
-  return unwrapResponse(data!) as unknown as TabMetadata;
+  return unwrapResponse(data, response) as unknown as TabMetadata;
 }
 
 /**

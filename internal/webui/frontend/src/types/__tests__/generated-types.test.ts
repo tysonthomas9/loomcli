@@ -66,6 +66,17 @@ describe("Generated openapi.ts exports", () => {
     const check: boolean = true as HealthPath extends object ? true : false;
     expect(check).toBe(true);
   });
+
+  it("IssueTab generated type includes the built-in sessions tab", () => {
+    const tab: components["schemas"]["IssueTab"] = {
+      id: "sessions",
+      type: "sessions",
+      label: "Sessions",
+      sort_order: 1,
+    };
+
+    expect(tab.type).toBe("sessions");
+  });
 });
 
 // ---------------------------------------------------------------------------

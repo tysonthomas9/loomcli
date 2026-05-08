@@ -177,46 +177,33 @@ const apiMiddleware: Middleware = {
       request.headers.set("Authorization", `Bearer ${authToken}`);
     }
 
-    // Apply default timeout if no signal is already set.
-    // When a per-call signal is provided via fetch options, openapi-fetch
-    // passes it on the request already — skip adding a duplicate timeout.
-    if (!request.signal || !request.signal.aborted) {
-      // We attach a timeout controller via a custom header so the
-      // onResponse handler can clear it. openapi-fetch doesn't provide
-      // a context bag, so we stash the timeout ID on the request.
-      const hasCustomSignal =
-        request.signal && request.signal !== AbortSignal.prototype;
+    // Apply default timeout for openapi-fetch calls. Request always has a
+    // signal, so combine with it instead of treating presence as caller-owned.
+    if (!request.signal.aborted) {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT);
+      (
+        controller as unknown as { _timeoutId: ReturnType<typeof setTimeout> }
+      )._timeoutId = timeoutId;
 
-      if (!hasCustomSignal) {
-        // No custom signal — add default timeout
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT);
-        // Store cleanup function on the controller for later
-        (
-          controller as unknown as { _timeoutId: ReturnType<typeof setTimeout> }
-        )._timeoutId = timeoutId;
-        // Replace signal
-        const newReq = new Request(request, { signal: controller.signal });
-        // Copy over the timeout cleanup ref
-        (
-          newReq as unknown as { _timeoutController: AbortController }
-        )._timeoutController = controller;
-        return newReq;
-      }
+      const signal = AbortSignal.any([
+        request.signal,
+        controller.signal,
+      ]);
+      const newReq = new Request(request, { signal });
+      (
+        newReq as unknown as { _timeoutController: AbortController }
+      )._timeoutController = controller;
+      return newReq;
     }
     return request;
   },
+  async onError({ request }) {
+    clearOpenAPITimeout(request);
+  },
   async onResponse({ request, response }) {
     // Clean up timeout if we created one
-    const controller = (
-      request as unknown as { _timeoutController?: AbortController }
-    )._timeoutController;
-    if (controller) {
-      clearTimeout(
-        (controller as unknown as { _timeoutId: ReturnType<typeof setTimeout> })
-          ._timeoutId,
-      );
-    }
+    clearOpenAPITimeout(request);
 
     if (!response.ok) {
       // 401 interceptor
@@ -247,6 +234,18 @@ const apiMiddleware: Middleware = {
   },
 };
 
+function clearOpenAPITimeout(request: Request): void {
+  const controller = (
+    request as unknown as { _timeoutController?: AbortController }
+  )._timeoutController;
+  if (controller) {
+    clearTimeout(
+      (controller as unknown as { _timeoutId: ReturnType<typeof setTimeout> })
+        ._timeoutId,
+    );
+  }
+}
+
 /** Typed openapi-fetch client for all REST API calls. */
 export const api = createClient<paths>({ baseUrl: API_BASE_URL });
 api.use(apiMiddleware);
@@ -271,13 +270,27 @@ export function apiErrorFromResponse(
  * Unwrap the standard {success, data} response envelope.
  * Throws ApiError if success is false.
  */
-export function unwrapResponse<T>(envelope: {
-  success: boolean;
-  data?: T;
-  error?: string;
-}): T {
+export function unwrapResponse<T>(
+  envelope: {
+    success: boolean;
+    data?: T;
+    error?: string;
+  } | null | undefined,
+  response?: Response,
+): T {
+  if (envelope == null) {
+    throw new ApiError(
+      response?.status ?? 0,
+      response?.statusText || "Invalid API response",
+      "missing response envelope",
+    );
+  }
   if (!envelope.success) {
-    throw new ApiError(0, envelope.error ?? "Unknown error");
+    throw new ApiError(
+      response?.status ?? 0,
+      response?.statusText || envelope.error || "Unknown error",
+      envelope.error,
+    );
   }
   return envelope.data as T;
 }

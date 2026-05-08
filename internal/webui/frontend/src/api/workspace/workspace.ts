@@ -92,9 +92,23 @@ interface ApiFailure {
 
 type ApiResult<T> = ApiSuccess<T> | ApiFailure;
 
-function unwrap<T>(response: ApiResult<T>): T {
+function unwrap<T>(
+  response: ApiResult<T> | null | undefined,
+  httpResponse?: Response,
+): T {
+  if (response == null) {
+    throw new ApiError(
+      httpResponse?.status ?? 0,
+      httpResponse?.statusText || "Invalid API response",
+      "missing response envelope",
+    );
+  }
   if (!response.success) {
-    throw new ApiError(0, response.error);
+    throw new ApiError(
+      httpResponse?.status ?? 0,
+      httpResponse?.statusText || response.error,
+      response.error,
+    );
   }
   return response.data;
 }
@@ -112,11 +126,11 @@ export async function fetchWorkspaceApi(
       params: { path: { ws: workspaceId } },
     });
     if (error) throw apiErrorFromResponse(error, response);
-    return unwrap(data as unknown as ApiResult<WorkspaceData>);
+    return unwrap(data as unknown as ApiResult<WorkspaceData>, response);
   }
   const { data, error, response } = await api.GET("/api/workspaces/active");
   if (error) throw apiErrorFromResponse(error, response);
-  return unwrap(data as unknown as ApiResult<WorkspaceData>);
+  return unwrap(data as unknown as ApiResult<WorkspaceData>, response);
 }
 
 /**
@@ -146,10 +160,7 @@ export async function deleteWorkspace(
   const response = await del<ApiResult<WorkspaceData>>(
     `/api/workspaces/${encodeURIComponent(workspaceId)}`,
   );
-  if (!response.success) {
-    throw new ApiError(0, response.error);
-  }
-  return response.data;
+  return unwrap(response);
 }
 
 /**

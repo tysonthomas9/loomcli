@@ -99,14 +99,15 @@ func createStoreBackedEmptyWorkspace(ctx context.Context, s storepkg.Store, req 
 		DefaultBranch: branch,
 	}); err != nil {
 		cleanupWorktrees(wsPlan, created)
+		if errors.Is(err, domain.ErrAlreadyExists) {
+			return service.WorkspaceCreateResult{}, workspaceerrors.New(workspaceerrors.AlreadyExists, fmt.Sprintf("workspace %q already exists", req.Name), err)
+		}
 		return service.WorkspaceCreateResult{}, fmt.Errorf("create workspace in store: %w", err)
 	}
-	storeCreated := true
 	rollbackStore := func() {
-		if storeCreated {
-			if err := s.Workspaces().Delete(context.Background(), key); err != nil && !errors.Is(err, domain.ErrNotFound) {
-				slog.Warn("failed to rollback store workspace create", "workspace", key, "err", err)
-			}
+		deleteLocalWorkspaceState(key)
+		if err := s.Workspaces().Delete(context.Background(), key); err != nil && !errors.Is(err, domain.ErrNotFound) {
+			slog.Warn("failed to rollback store workspace create", "workspace", key, "err", err)
 		}
 	}
 	if err := seedBuiltInRoles(ctx, s, key); err != nil {
@@ -326,6 +327,9 @@ func createStoreBackedCloneWorkspace(ctx context.Context, s storepkg.Store, req 
 		Name:          req.Name,
 		DefaultBranch: branch,
 	}); err != nil {
+		if errors.Is(err, domain.ErrAlreadyExists) {
+			return service.WorkspaceCreateResult{}, workspaceerrors.New(workspaceerrors.AlreadyExists, fmt.Sprintf("workspace %q already exists", req.Name), err)
+		}
 		return service.WorkspaceCreateResult{}, fmt.Errorf("create workspace in store: %w", err)
 	}
 	rollbackStore := func() {
@@ -362,11 +366,8 @@ func createStoreBackedCloneWorkspace(ctx context.Context, s storepkg.Store, req 
 		rollbackStore()
 		return service.WorkspaceCreateResult{}, fmt.Errorf("mark workspace initializing: %w", err)
 	}
-	for i, r := range repos {
-		remoteURL := ""
-		if i < len(cloneURLs) {
-			remoteURL = cloneURLs[i]
-		}
+	for _, r := range repos {
+		remoteURL := gitRemoteURL(r.Path, "origin")
 		if _, err := s.Repos().Create(ctx, storepkg.RepoCreate{
 			WorkspaceKey:  key,
 			Name:          r.Name,

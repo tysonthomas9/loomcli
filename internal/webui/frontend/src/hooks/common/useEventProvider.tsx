@@ -25,6 +25,8 @@ import {
 } from "@/api/common";
 import { useWorkspaceContext } from "@/hooks/workspace";
 
+export type { ConnectionState } from "@/api/common";
+
 /**
  * Options for filtering which mutation events a subscriber receives.
  */

@@ -16,7 +16,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/local"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 var (
@@ -141,18 +140,9 @@ func runWorkspaceOpsEnsureRuntime(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("ensure local runtime: %w", err)
 	}
 
-	status := initial
-	deadline := time.Now().Add(timeout)
-	for {
-		refreshed, err := loadWorkspaceOpsStatus(cmd.Context(), key)
-		if err != nil {
-			return err
-		}
-		status = refreshed
-		if !statusNeedsDaemonWait(status) || status.Daemon.AppData.Running || time.Now().After(deadline) {
-			break
-		}
-		time.Sleep(500 * time.Millisecond)
+	status, err := waitForWorkspaceOpsDaemon(ctx, key, initial, loadWorkspaceOpsStatus)
+	if err != nil {
+		return fmt.Errorf("wait for workspace daemon: %w", err)
 	}
 	return renderWorkspaceOpsStatus(cmd, status)
 }
@@ -179,7 +169,7 @@ func workspaceOpsStatusForArgs(args []string) (*WorkspaceOpsStatus, error) {
 		if err != nil {
 			return err
 		}
-		status, err := buildWorkspaceOpsStatus(ctx, h.Store, ws, repos, agents, roles)
+		status, err := buildWorkspaceOpsStatus(ctx, ws, repos, agents, roles)
 		if err != nil {
 			return err
 		}
@@ -196,25 +186,53 @@ func workspaceOpsStatusForArgs(args []string) (*WorkspaceOpsStatus, error) {
 }
 
 func loadWorkspaceOpsStatus(ctx context.Context, key string) (*WorkspaceOpsStatus, error) {
-	var loaded *WorkspaceOpsStatus
-	err := cmdstore.WithStore(func(ctx context.Context, h *bootstrap.StoreHandle) error {
-		ws, repos, agents, roles, err := gatherWorkspaceDetails(ctx, h.Store, key)
-		if err != nil {
-			return err
+	h, err := cmdstore.OpenStore(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = h.Close() }()
+	ws, repos, agents, roles, err := gatherWorkspaceDetails(ctx, h.Store, key)
+	if err != nil {
+		return nil, err
+	}
+	return buildWorkspaceOpsStatus(ctx, ws, repos, agents, roles)
+}
+
+type workspaceOpsStatusLoader func(context.Context, string) (*WorkspaceOpsStatus, error)
+
+func waitForWorkspaceOpsDaemon(
+	ctx context.Context,
+	key string,
+	initial *WorkspaceOpsStatus,
+	load workspaceOpsStatusLoader,
+) (*WorkspaceOpsStatus, error) {
+	status := initial
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return status, ctx.Err()
+		default:
 		}
-		status, err := buildWorkspaceOpsStatus(ctx, h.Store, ws, repos, agents, roles)
+		refreshed, err := load(ctx, key)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		loaded = status
-		return nil
-	})
-	return loaded, err
+		status = refreshed
+		if !statusNeedsDaemonWait(status) || status.Daemon.AppData.Running {
+			return status, nil
+		}
+		select {
+		case <-ctx.Done():
+			return status, ctx.Err()
+		case <-ticker.C:
+		}
+	}
 }
 
 func buildWorkspaceOpsStatus(
 	ctx context.Context,
-	st store.Store,
 	ws *domain.Workspace,
 	repos []*domain.Repo,
 	agents []*domain.Agent,
@@ -288,7 +306,6 @@ func buildWorkspaceOpsStatus(
 		status.Problems = append(status.Problems, problems...)
 	}
 	status.Problems = append(status.Problems, workspaceOpsGlobalProblems(status)...)
-	_ = st
 	status.OK = !hasErrorProblem(status.Problems)
 	return status, nil
 }

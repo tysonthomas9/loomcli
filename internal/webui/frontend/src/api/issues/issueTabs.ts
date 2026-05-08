@@ -42,7 +42,7 @@ export async function fetchIssueTabState(
     },
   );
   if (error) throw apiErrorFromResponse(error, response);
-  return (unwrapResponse(data) as IssueTabState | null) ?? null;
+  return (unwrapResponse(data, response) as IssueTabState | null) ?? null;
 }
 
 /**
@@ -62,16 +62,9 @@ export async function saveIssueTabState(
       },
       body: {
         tabs: tabs.map((t) => {
-          const tab: {
-            id: string;
-            type: "details" | "logs" | "terminal";
-            label: string;
-            sort_order: number;
-            session_name?: string;
-            backend?: string;
-          } = {
+          const tab: IssueTab = {
             id: t.id,
-            type: t.type as "details" | "logs" | "terminal",
+            type: t.type,
             label: t.label,
             sort_order: t.sort_order,
           };

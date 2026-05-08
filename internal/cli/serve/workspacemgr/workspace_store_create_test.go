@@ -13,6 +13,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/workspaceerrors"
 )
 
 func TestStoreBackedCreateEmptyWorkspaceCreatesStoreAndLocalState(t *testing.T) {
@@ -292,6 +293,57 @@ func TestStoreBackedCreateEmptyWorkspaceRollsBackOnRepoStoreError(t *testing.T) 
 	}
 }
 
+func TestStoreBackedCreateEmptyWorkspaceClassifiesCreateRace(t *testing.T) {
+	loomDir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", loomDir)
+
+	st := &workspaceCreateRaceStore{Store: memstore.New()}
+	createFn := BuildStoreBackedCreateWorkspace(st)
+
+	_, err := createFn(context.Background(), service.WorkspaceCreateRequest{
+		Name: "my-ws",
+		Type: "empty",
+		Path: filepath.Join(loomDir, "workspaces", "my-ws"),
+	})
+	var createErr *workspaceerrors.CreateError
+	if !errors.As(err, &createErr) {
+		t.Fatalf("error = %v, want workspace create error", err)
+	}
+	if createErr.Code != workspaceerrors.AlreadyExists {
+		t.Fatalf("error code = %s, want AlreadyExists", createErr.Code)
+	}
+}
+
+func TestStoreBackedCreateEmptyWorkspaceRollsBackLocalStateOnReadyUpdateError(t *testing.T) {
+	loomDir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", loomDir)
+
+	st := &workspaceReadyUpdateFailStore{Store: memstore.New()}
+	createFn := BuildStoreBackedCreateWorkspace(st)
+
+	_, err := createFn(context.Background(), service.WorkspaceCreateRequest{
+		Name: "rollback-ws",
+		Type: "empty",
+		Path: filepath.Join(loomDir, "workspaces", "rollback-ws"),
+	})
+	if err == nil {
+		t.Fatal("create workspace succeeded, want ready update error")
+	}
+	if _, getErr := st.Store.Workspaces().Get(context.Background(), "ROLLBACK-WS"); !errors.Is(getErr, domain.ErrNotFound) {
+		t.Fatalf("store workspace get err = %v, want ErrNotFound", getErr)
+	}
+	sc, loadErr := bootstrap.LoadStateCache()
+	if loadErr != nil {
+		t.Fatalf("load state cache: %v", loadErr)
+	}
+	if _, ok := sc.Workspaces["ROLLBACK-WS"]; ok {
+		t.Fatalf("local state still contains ROLLBACK-WS: %#v", sc.Workspaces["ROLLBACK-WS"])
+	}
+	if sc.LastWorkspace == "ROLLBACK-WS" {
+		t.Fatalf("LastWorkspace = %q, want rollback to clear active workspace", sc.LastWorkspace)
+	}
+}
+
 func TestStoreBackedCreateCloneWorkspacePersistsLifecycleAndRepos(t *testing.T) {
 	loomDir := t.TempDir()
 	t.Setenv("LOOM_CONFIG_DIR", loomDir)
@@ -382,6 +434,29 @@ func TestStoreBackedCreateCloneWorkspaceNormalizesRepoNameForFleetStore(t *testi
 	}
 }
 
+func TestStoreBackedCreateCloneWorkspaceClassifiesCreateRace(t *testing.T) {
+	loomDir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", loomDir)
+
+	st := &workspaceCreateRaceStore{Store: memstore.New()}
+	createFn := BuildStoreBackedCreateWorkspace(st)
+	src := initTestGitRepo(t, t.TempDir(), "app")
+
+	_, err := createFn(context.Background(), service.WorkspaceCreateRequest{
+		Name:      "clone-ws",
+		Type:      "clone",
+		CloneURLs: []string{src},
+		Path:      filepath.Join(loomDir, "workspaces", "clone-ws"),
+	})
+	var createErr *workspaceerrors.CreateError
+	if !errors.As(err, &createErr) {
+		t.Fatalf("error = %v, want workspace create error", err)
+	}
+	if createErr.Code != workspaceerrors.AlreadyExists {
+		t.Fatalf("error code = %s, want AlreadyExists", createErr.Code)
+	}
+}
+
 func TestStoreBackedCreateCloneWorkspaceRollsBackStoreOnCloneFailure(t *testing.T) {
 	loomDir := t.TempDir()
 	t.Setenv("LOOM_CONFIG_DIR", loomDir)
@@ -448,6 +523,41 @@ type repoFailStore struct {
 
 func (s *repoFailStore) Repos() store.RepoStore {
 	return repoFailer{err: s.err}
+}
+
+type workspaceCreateRaceStore struct {
+	*memstore.Store
+}
+
+func (s *workspaceCreateRaceStore) Workspaces() store.WorkspaceStore {
+	return workspaceCreateRaceWorkspaceStore{WorkspaceStore: s.Store.Workspaces()}
+}
+
+type workspaceCreateRaceWorkspaceStore struct {
+	store.WorkspaceStore
+}
+
+func (s workspaceCreateRaceWorkspaceStore) Create(context.Context, store.WorkspaceCreate) (*domain.Workspace, error) {
+	return nil, domain.ErrAlreadyExists
+}
+
+type workspaceReadyUpdateFailStore struct {
+	*memstore.Store
+}
+
+func (s *workspaceReadyUpdateFailStore) Workspaces() store.WorkspaceStore {
+	return workspaceReadyUpdateFailWorkspaceStore{WorkspaceStore: s.Store.Workspaces()}
+}
+
+type workspaceReadyUpdateFailWorkspaceStore struct {
+	store.WorkspaceStore
+}
+
+func (s workspaceReadyUpdateFailWorkspaceStore) Update(ctx context.Context, key string, patch store.WorkspaceUpdate) (*domain.Workspace, error) {
+	if patch.State != nil && *patch.State == domain.WorkspaceStateReady {
+		return nil, errors.New("ready update failed")
+	}
+	return s.WorkspaceStore.Update(ctx, key, patch)
 }
 
 type repoFailer struct {

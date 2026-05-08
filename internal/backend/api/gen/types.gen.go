@@ -357,6 +357,7 @@ func (e IssueResponseStatus) Valid() bool {
 const (
 	Details  IssueTabType = "details"
 	Logs     IssueTabType = "logs"
+	Sessions IssueTabType = "sessions"
 	Terminal IssueTabType = "terminal"
 )
 
@@ -366,6 +367,8 @@ func (e IssueTabType) Valid() bool {
 	case Details:
 		return true
 	case Logs:
+		return true
+	case Sessions:
 		return true
 	case Terminal:
 		return true
@@ -1260,7 +1263,7 @@ type IssueTab struct {
 	// Backend For terminal tabs only
 	Backend *string `json:"backend,omitempty"`
 
-	// Id "details", "logs", or "terminal-{session}"
+	// Id "details", "sessions", "logs", or "terminal-{session}"
 	Id    string `json:"id"`
 	Label string `json:"label"`
 

@@ -4163,10 +4163,10 @@ components:
       properties:
         id:
           type: string
-          description: '"details", "logs", or "terminal-{session}"'
+          description: '"details", "sessions", "logs", or "terminal-{session}"'
         type:
           type: string
-          enum: [details, logs, terminal]
+          enum: [details, sessions, logs, terminal]
         label:
           type: string
         session_name:

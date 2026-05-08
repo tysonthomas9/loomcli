@@ -19,6 +19,7 @@ export {
   NO_EVENT_CONTEXT,
 } from "./useEventProvider";
 export type {
+  ConnectionState,
   EventContextValue,
   EventProviderProps,
   SubscriptionOptions,

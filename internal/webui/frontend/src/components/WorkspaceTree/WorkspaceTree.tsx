@@ -6,10 +6,9 @@
 
 import { useState, useCallback, useEffect, type FormEvent } from "react";
 
-import { type ConnectionState } from "@/api/common";
 import { useStore } from "zustand";
 import { useWorkspaceContext, useAgentStoreInstance } from "@/hooks";
-import { useFolderPicker } from "@/hooks/common";
+import { useFolderPicker, type ConnectionState } from "@/hooks/common";
 import { wsGet, wsSet } from "@/utils/scopedStorage";
 import { ErrorDisplay } from "@/components/ErrorDisplay";
 import { addWorkspaceRepos } from "@/hooks/api";
