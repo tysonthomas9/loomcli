@@ -497,6 +497,7 @@ function App() {
   const [showCreateIssue, setShowCreateIssue] = useState(false);
   const [showCreateWorkspace, setShowCreateWorkspace] = useState(false);
   const [showCreateAgent, setShowCreateAgent] = useState(false);
+  const [showOnboardingTerminal, setShowOnboardingTerminal] = useState(false);
 
   // Track mount state for async operations.
   useEffect(() => {
@@ -789,6 +790,7 @@ function App() {
 
   useEffect(() => {
     if (activeView === "terminal") {
+      setShowOnboardingTerminal(false);
       closeAllPanels();
     }
   }, [activeView, closeAllPanels]);
@@ -817,6 +819,20 @@ function App() {
     closeAllPanels();
     navigateToView("terminal");
   }, [closeAllPanels, navigateToView]);
+
+  const handleOnboardingTerminalOpen = useCallback(() => {
+    closeAllPanels();
+    setShowOnboardingTerminal(true);
+  }, [closeAllPanels]);
+
+  const handleOnboardingTerminalClose = useCallback(() => {
+    setShowOnboardingTerminal(false);
+  }, []);
+
+  const handleOnboardingTerminalExpand = useCallback(() => {
+    setShowOnboardingTerminal(false);
+    navigateToView("terminal");
+  }, [navigateToView]);
 
   const hasWorkspaceRepo = workspaceRepos.length > 0;
   const hasWorkspaceAgent = (workspace?.agents?.length ?? 0) > 0;
@@ -852,8 +868,8 @@ function App() {
         description:
           "Use the terminal to install or login to the selected CLI if this machine is not configured yet.",
         status: hasWorkspaceRepo ? "actionable" : "blocked",
-        actionLabel: "Open Terminal",
-        onAction: handleTalkToLeadClick,
+        actionLabel: "Set Up CLI",
+        onAction: handleOnboardingTerminalOpen,
       },
       {
         id: "create-agent",
@@ -885,12 +901,18 @@ function App() {
       },
     ],
     [
-      handleTalkToLeadClick,
+      handleOnboardingTerminalOpen,
       hasWorkspaceAgent,
       hasWorkspaceIssue,
       hasWorkspaceRepo,
     ],
   );
+
+  useEffect(() => {
+    if (!shouldShowWorkspaceOnboarding && activeView !== "terminal") {
+      setShowOnboardingTerminal(false);
+    }
+  }, [activeView, shouldShowWorkspaceOnboarding]);
 
   const handleIssueContextConsumed = useCallback(() => {
     setPendingIssueContext(undefined);
@@ -1170,6 +1192,15 @@ function App() {
     />
   );
 
+  const terminalContainerClassName =
+    activeView === "terminal"
+      ? styles.terminalRouteContainer
+      : showOnboardingTerminal
+        ? styles.onboardingTerminalPanel
+        : styles.terminalHidden;
+  const isTerminalActive =
+    activeView === "terminal" || showOnboardingTerminal;
+
   return (
     <KeyboardShortcutProvider
       onViewChange={handleNavChange}
@@ -1260,24 +1291,54 @@ function App() {
               ? { initialValues: onboardingIssueInitialValues }
               : {})}
           />
-          <div
-            style={{ display: activeView === "terminal" ? "contents" : "none" }}
-          >
-            <Suspense fallback={<LoadingSkeleton.Terminal />}>
-              <TerminalView
-                isActive={activeView === "terminal"}
-                pendingIssueContext={pendingIssueContext}
-                onIssueContextConsumed={handleIssueContextConsumed}
-                pendingAgentName={pendingAgentName}
-                onAgentNameConsumed={handleAgentNameConsumed}
-                onActiveSessionCountChange={setActiveSessionCount}
-                onUnreadChange={setHasTerminalUnread}
-                onTabLimitReached={(message) =>
-                  showToast(message, { type: "error" })
-                }
-                onNavigateToSettings={() => navigateToView("settings")}
-              />
-            </Suspense>
+          <div className={terminalContainerClassName}>
+            {showOnboardingTerminal && activeView !== "terminal" && (
+              <div className={styles.onboardingTerminalHeader}>
+                <div>
+                  <h2 className={styles.onboardingTerminalTitle}>
+                    Set up AI CLI
+                  </h2>
+                  <p className={styles.onboardingTerminalSubtitle}>
+                    Install, login, or configure the backend without leaving
+                    onboarding.
+                  </p>
+                </div>
+                <div className={styles.onboardingTerminalActions}>
+                  <button
+                    type="button"
+                    className={styles.onboardingTerminalSecondaryButton}
+                    onClick={handleOnboardingTerminalExpand}
+                  >
+                    Full View
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.onboardingTerminalCloseButton}
+                    onClick={handleOnboardingTerminalClose}
+                    aria-label="Close CLI setup panel"
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            )}
+            <div className={styles.onboardingTerminalBody}>
+              <Suspense fallback={<LoadingSkeleton.Terminal />}>
+                <TerminalView
+                  isActive={isTerminalActive}
+                  pendingIssueContext={pendingIssueContext}
+                  onIssueContextConsumed={handleIssueContextConsumed}
+                  pendingAgentName={pendingAgentName}
+                  onAgentNameConsumed={handleAgentNameConsumed}
+                  onActiveSessionCountChange={setActiveSessionCount}
+                  onUnreadChange={setHasTerminalUnread}
+                  onTabLimitReached={(message) =>
+                    showToast(message, { type: "error" })
+                  }
+                  onNavigateToSettings={() => navigateToView("settings")}
+                />
+              </Suspense>
+            </div>
           </div>
           <TalkToLeadButton
             onClick={handleTalkToLeadClick}

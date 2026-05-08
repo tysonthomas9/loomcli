@@ -81,6 +81,93 @@
   padding-bottom: var(--space-6);
 }
 
+.terminalHidden {
+  display: none;
+}
+
+.terminalRouteContainer {
+  display: contents;
+}
+
+.terminalRouteContainer .onboardingTerminalBody {
+  display: contents;
+}
+
+.onboardingTerminalPanel {
+  position: fixed;
+  top: var(--unified-header-height);
+  right: 0;
+  bottom: 0;
+  z-index: var(--z-overlay);
+  display: flex;
+  flex-direction: column;
+  width: min(720px, 44vw);
+  min-width: 520px;
+  background: var(--terminal-bg);
+  border-left: 1px solid var(--color-border);
+  box-shadow: -16px 0 36px rgb(15 23 42 / 16%);
+}
+
+.onboardingTerminalHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  min-height: 64px;
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-bg);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.onboardingTerminalTitle {
+  margin: 0;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  line-height: var(--line-height-tight);
+}
+
+.onboardingTerminalSubtitle {
+  margin: var(--space-1) 0 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  line-height: var(--line-height-normal);
+}
+
+.onboardingTerminalActions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: 0 0 auto;
+}
+
+.onboardingTerminalSecondaryButton,
+.onboardingTerminalCloseButton {
+  height: 32px;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+}
+
+.onboardingTerminalSecondaryButton {
+  color: var(--color-text-primary);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+}
+
+.onboardingTerminalCloseButton {
+  color: var(--color-text-inverse);
+  background: var(--color-primary);
+  border: 1px solid var(--color-primary);
+}
+
+.onboardingTerminalBody {
+  flex: 1;
+  min-height: 0;
+}
+
 @media (width <= 1024px) {
   .headerControls {
     gap: var(--space-3);
