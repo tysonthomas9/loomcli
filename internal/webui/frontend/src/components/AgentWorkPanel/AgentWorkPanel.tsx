@@ -11,9 +11,9 @@
  */
 
 import { useMemo } from "react";
-import { useNavigate, useParams } from "react-router-dom";
 import { useStore } from "zustand";
 
+import { useWorkspaceViewActions } from "@/contexts/WorkspaceViewContext";
 import { useAgentStoreInstance, useIssueStoreInstance } from "@/hooks";
 import { type Issue, parseLoomStatus } from "@/types";
 
@@ -64,8 +64,7 @@ const PRIORITY_STYLE: Record<
 };
 
 export function AgentWorkPanel({ agentName }: AgentWorkPanelProps): JSX.Element {
-  const { workspaceId = "" } = useParams<{ workspaceId: string }>();
-  const navigate = useNavigate();
+  const { handleIssueClick } = useWorkspaceViewActions();
   const issueStore = useIssueStoreInstance();
   const issuesMap = useStore(issueStore, (s) => s.issuesMap);
   const agentStore = useAgentStoreInstance();
@@ -233,9 +232,7 @@ export function AgentWorkPanel({ agentName }: AgentWorkPanelProps): JSX.Element 
             <EpicGroupCard
               key={group.epicId}
               group={group}
-              onTaskClick={(taskId) =>
-                navigate(`/ws/${workspaceId}/issues/${encodeURIComponent(taskId)}`)
-              }
+              onTaskClick={(task) => handleIssueClick(task)}
             />
           ))
         )}
@@ -249,7 +246,7 @@ function EpicGroupCard({
   onTaskClick,
 }: {
   group: EpicGroup;
-  onTaskClick: (taskId: string) => void;
+  onTaskClick: (task: Issue) => void;
 }): JSX.Element {
   const pct =
     group.totalCount > 0 ? (group.doneCount / group.totalCount) * 100 : 0;
@@ -281,7 +278,7 @@ function EpicGroupCard({
         <TaskCard
           key={task.id}
           task={task}
-          onClick={() => onTaskClick(task.id)}
+          onClick={() => onTaskClick(task)}
         />
       ))}
     </div>
