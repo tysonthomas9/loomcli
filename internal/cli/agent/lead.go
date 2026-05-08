@@ -1,16 +1,33 @@
 package agent
 
 import (
+	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
+	"sync"
 	"syscall"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/backends"
+	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
+	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/store"
 )
+
+// envOrchestratorSessionID is the env var lead injects so descendants
+// (e.g. agents created by `loom agentdef add` from within this lead's tmux
+// session) auto-attribute back to this lead session via OrchestratorSessionID.
+const envOrchestratorSessionID = "LOOM_ORCHESTRATOR_SESSION_ID"
+
+const leadHeartbeatInterval = 30 * time.Second
+const leadStoreOpTimeout = 10 * time.Second
 
 // leadMessage is an optional initial user request appended to the lead system
 // prompt so the agent starts with a concrete task to address. Populated by the
@@ -68,6 +85,12 @@ func runLead(cmd *cobra.Command, args []string) {
 	fmt.Println("=========================================")
 	fmt.Println()
 
+	// Best-effort: register this lead as an orchestrator session so workers
+	// the AI spawns via `loom agentdef add` are attributed back to it. Skips
+	// silently if there is no active workspace or fleet-db is unreachable.
+	finalize := registerLeadOrchestratorSession(context.Background(), workDir)
+	defer finalize()
+
 	// Generate the lead prompt and append the user's initial request if provided.
 	prompt := GenerateLeadPrompt()
 	if leadMessage != "" {
@@ -80,6 +103,102 @@ func runLead(cmd *cobra.Command, args []string) {
 		fmt.Fprintf(os.Stderr, "Error running agent: %v\n", err)
 		fmt.Fprintf(os.Stderr, "\nDropping into a shell. Fix the issue and run 'loom lead' to retry.\n\n")
 		execShell(workDir)
+	}
+}
+
+// registerLeadOrchestratorSession opens fleet-db, creates an
+// AgentSession{Kind:orchestration}, and starts a heartbeat goroutine. Returns a
+// finalize fn the caller defers to mark the session completed and stop the
+// heartbeat. Best-effort: any error returns a no-op finalize so lead always runs.
+func registerLeadOrchestratorSession(ctx context.Context, workDir string) func() {
+	noop := func() {}
+
+	handle, err := cmdstore.OpenStore(ctx)
+	if err != nil {
+		slog.Debug("lead orchestrator session: store unavailable, continuing without registration", "err", err)
+		return noop
+	}
+
+	ws, err := bootstrap.ResolveActiveWorkspaceKey(ctx, handle.Store.Workspaces())
+	if err != nil {
+		_ = handle.Close()
+		slog.Debug("lead orchestrator session: no active workspace, continuing without registration", "err", err)
+		return noop
+	}
+
+	sid := "lead-" + uuid.New().String()
+	actor := os.Getenv("USER")
+	if actor == "" {
+		actor = "unknown"
+	}
+
+	createCtx, createCancel := context.WithTimeout(ctx, leadStoreOpTimeout)
+	_, err = handle.Store.AgentSessions().Create(createCtx, store.AgentSessionCreate{
+		WorkspaceKey: ws,
+		SessionID:    sid,
+		Kind:         domain.AgentSessionKindOrchestration,
+		Status:       domain.AgentSessionRunning,
+		Metadata: map[string]string{
+			"actor":        actor,
+			"lead_workdir": workDir,
+		},
+	})
+	createCancel()
+	if err != nil {
+		_ = handle.Close()
+		slog.Warn("lead orchestrator session: create failed, continuing without registration", "err", err)
+		return noop
+	}
+
+	// Inject env so child agents (`loom agentdef add` from within this tmux
+	// session) auto-stamp OrchestratorSessionID = this session's ID.
+	if err := os.Setenv(envOrchestratorSessionID, sid); err != nil {
+		slog.Warn("lead orchestrator session: setenv failed", "err", err)
+	}
+
+	fmt.Printf("Lead session: %s (orchestrator linkage active)\n\n", sid)
+
+	stopHB := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go heartbeatLeadSession(handle, ws, sid, stopHB, &wg)
+
+	return func() {
+		close(stopHB)
+		wg.Wait()
+		finCtx, finCancel := context.WithTimeout(context.Background(), leadStoreOpTimeout)
+		defer finCancel()
+		status := domain.AgentSessionCompleted
+		now := time.Now().UTC()
+		finishedAt := &now
+		if _, err := handle.Store.AgentSessions().Update(finCtx, ws, sid, store.AgentSessionUpdate{
+			Status:     &status,
+			FinishedAt: &finishedAt,
+		}); err != nil {
+			slog.Debug("lead orchestrator session: finalize failed", "err", err)
+		}
+		_ = handle.Close()
+	}
+}
+
+// heartbeatLeadSession periodically refreshes the lead session's last_heartbeat
+// so observers can detect a stale lead (e.g. tmux force-killed). Stops on stopHB
+// close. Best-effort — heartbeat failures are logged at debug only.
+func heartbeatLeadSession(handle *bootstrap.StoreHandle, ws, sid string, stopHB <-chan struct{}, wg *sync.WaitGroup) {
+	defer wg.Done()
+	ticker := time.NewTicker(leadHeartbeatInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-stopHB:
+			return
+		case <-ticker.C:
+			hbCtx, cancel := context.WithTimeout(context.Background(), leadStoreOpTimeout)
+			if _, err := handle.Store.AgentSessions().Heartbeat(hbCtx, ws, sid); err != nil {
+				slog.Debug("lead orchestrator session: heartbeat failed", "err", err)
+			}
+			cancel()
+		}
 	}
 }
 

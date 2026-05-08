@@ -36,24 +36,25 @@ func (s *agentStore) Create(_ context.Context, in store.AgentCreate) (*domain.Ag
 	}
 	now := time.Now().UTC()
 	a := &domain.Agent{
-		WorkspaceKey:     in.WorkspaceKey,
-		Name:             in.Name,
-		RoleName:         in.RoleName,
-		Auto:             in.Auto,
-		Backend:          in.Backend,
-		FallbackBackends: append([]string(nil), in.FallbackBackends...),
-		Repos:            append([]string(nil), in.Repos...),
-		RepoGroups:       append([]string(nil), in.RepoGroups...),
-		CrossRepo:        in.CrossRepo,
-		Parent:           in.Parent,
-		State:            domain.AgentStateIdle,
-		Mode:             in.Mode,
-		TaskFilter:       in.TaskFilter,
-		MaxConcurrency:   in.MaxConcurrency,
-		BudgetPolicy:     in.BudgetPolicy,
-		DesiredState:     in.DesiredState,
-		CreatedAt:        now,
-		UpdatedAt:        now,
+		WorkspaceKey:          in.WorkspaceKey,
+		Name:                  in.Name,
+		RoleName:              in.RoleName,
+		Auto:                  in.Auto,
+		Backend:               in.Backend,
+		FallbackBackends:      append([]string(nil), in.FallbackBackends...),
+		Repos:                 append([]string(nil), in.Repos...),
+		RepoGroups:            append([]string(nil), in.RepoGroups...),
+		CrossRepo:             in.CrossRepo,
+		Parent:                in.Parent,
+		OrchestratorSessionID: in.OrchestratorSessionID,
+		State:                 domain.AgentStateIdle,
+		Mode:                  in.Mode,
+		TaskFilter:            in.TaskFilter,
+		MaxConcurrency:        in.MaxConcurrency,
+		BudgetPolicy:          in.BudgetPolicy,
+		DesiredState:          in.DesiredState,
+		CreatedAt:             now,
+		UpdatedAt:             now,
 	}
 	s.items[in.WorkspaceKey][in.Name] = a
 	return cloneAgent(a), nil
@@ -111,6 +112,9 @@ func (s *agentStore) Update(_ context.Context, ws, name string, patch store.Agen
 	}
 	if patch.Parent != nil {
 		a.Parent = *patch.Parent
+	}
+	if patch.OrchestratorSessionID != nil {
+		a.OrchestratorSessionID = *patch.OrchestratorSessionID
 	}
 	if patch.State != nil {
 		a.State = *patch.State

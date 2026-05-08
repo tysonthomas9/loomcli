@@ -65,15 +65,16 @@ type AgentProcess struct {
 type StopReason string
 
 const (
-	StopReasonNoWork        StopReason = "no_work"
-	StopReasonRateLimited   StopReason = "rate_limited"
-	StopReasonMaxRetries    StopReason = "max_retries"
-	StopReasonFatalError    StopReason = "fatal_error"
-	StopReasonManualStop    StopReason = "manual_stop"
-	StopReasonConfigRemoved StopReason = "config_removed"
-	StopReasonShutdown      StopReason = "shutdown"
-	StopReasonYielded       StopReason = "yielded"
-	StopReasonWatchdog      StopReason = "watchdog"
+	StopReasonNoWork         StopReason = "no_work"
+	StopReasonRateLimited    StopReason = "rate_limited"
+	StopReasonMaxRetries     StopReason = "max_retries"
+	StopReasonFatalError     StopReason = "fatal_error"
+	StopReasonManualStop     StopReason = "manual_stop"
+	StopReasonConfigRemoved  StopReason = "config_removed"
+	StopReasonShutdown       StopReason = "shutdown"
+	StopReasonYielded        StopReason = "yielded"
+	StopReasonWatchdog       StopReason = "watchdog"
+	StopReasonEphemeralDone  StopReason = "ephemeral_done"  // ephemeral-mode agent exited cleanly after one successful task
 )
 
 // resolveRemote returns the git remote name for this agent.

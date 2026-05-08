@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
+	"github.com/tysonthomas9/loomcli/internal/domain"
 )
 
 const primaryBackendRetryCooldown = time.Minute
@@ -59,6 +60,22 @@ func (s *Supervisor) shouldRestart(ap *AgentProcess) bool {
 
 	ap.Mu.Lock()
 	defer ap.Mu.Unlock()
+
+	// Ephemeral mode: exit cleanly after one successful task cycle.
+	// Worker stays in fleet-db (state=stopped) for audit; no restart, no GC.
+	// Triggered only when the agent actually claimed and ran a task — a NoWork
+	// exit on an ephemeral agent still falls through to the NoWork branch below
+	// so it can re-poll until a task arrives.
+	if ap.Entry.Mode == domain.AgentModeEphemeral &&
+		ap.LastExitCode == 0 && ap.LastError == nil &&
+		ap.AssignedTaskID != "" {
+		ap.RestartCount = 0
+		ap.RateRetryCount = 0
+		ap.NoWorkCount = 0
+		ap.StopReason = StopReasonEphemeralDone
+		log.Printf("[daemon] Agent %s: ephemeral task complete, exiting supervisor", ap.Entry.Worktree)
+		return false
+	}
 
 	// Clean success (exit 0, no error): always restart, reset counters.
 	// Long runs (>1 minute) also reset primary backend.

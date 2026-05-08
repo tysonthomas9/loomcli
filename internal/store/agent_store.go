@@ -10,39 +10,41 @@ import (
 // and RoleName are required; RoleName must reference an existing Role
 // in the same workspace.
 type AgentCreate struct {
-	WorkspaceKey     string
-	Name             string
-	RoleName         string
-	Auto             bool
-	Backend          string
-	FallbackBackends []string
-	Repos            []string
-	RepoGroups       []string
-	CrossRepo        bool
-	Parent           string
-	Mode             domain.AgentMode
-	TaskFilter       string
-	MaxConcurrency   int
-	BudgetPolicy     string
-	DesiredState     domain.AgentDesiredState
+	WorkspaceKey          string
+	Name                  string
+	RoleName              string
+	Auto                  bool
+	Backend               string
+	FallbackBackends      []string
+	Repos                 []string
+	RepoGroups            []string
+	CrossRepo             bool
+	Parent                string
+	OrchestratorSessionID string
+	Mode                  domain.AgentMode
+	TaskFilter            string
+	MaxConcurrency        int
+	BudgetPolicy          string
+	DesiredState          domain.AgentDesiredState
 }
 
 // AgentUpdate is the partial-update payload for agents.
 type AgentUpdate struct {
-	RoleName         *string
-	Auto             *bool
-	Backend          *string
-	FallbackBackends *[]string
-	Repos            *[]string
-	RepoGroups       *[]string
-	CrossRepo        *bool
-	Parent           *string
-	State            *domain.AgentState
-	Mode             *domain.AgentMode
-	TaskFilter       *string
-	MaxConcurrency   *int
-	BudgetPolicy     *string
-	DesiredState     *domain.AgentDesiredState
+	RoleName              *string
+	Auto                  *bool
+	Backend               *string
+	FallbackBackends      *[]string
+	Repos                 *[]string
+	RepoGroups            *[]string
+	CrossRepo             *bool
+	Parent                *string
+	OrchestratorSessionID *string
+	State                 *domain.AgentState
+	Mode                  *domain.AgentMode
+	TaskFilter            *string
+	MaxConcurrency        *int
+	BudgetPolicy          *string
+	DesiredState          *domain.AgentDesiredState
 }
 
 // AgentStore is the persistence interface for Agent assignments.

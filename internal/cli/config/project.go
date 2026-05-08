@@ -102,6 +102,7 @@ type AgentEntry struct {
 	RepoGroups       []string                 `yaml:"repo_groups,omitempty"`
 	CrossRepo        bool                     `yaml:"cross_repo,omitempty"`
 	Parent           string                   `yaml:"parent,omitempty"` // epic ID to scope this agent to; empty = no epic assignment
+	Mode             domain.AgentMode         `yaml:"mode,omitempty"`   // ephemeral: exit cleanly after one successful task; service: loop forever (default)
 	DesiredState     domain.AgentDesiredState `yaml:"desired_state,omitempty"`
 }
 
@@ -109,6 +110,7 @@ type AgentEntry struct {
 func (a AgentEntry) Equal(b AgentEntry) bool {
 	return a.Worktree == b.Worktree && a.Role == b.Role && a.Repo == b.Repo &&
 		a.Auto == b.Auto && a.Backend == b.Backend && a.CrossRepo == b.CrossRepo && a.Parent == b.Parent &&
+		a.Mode == b.Mode &&
 		a.DesiredState == b.DesiredState &&
 		slices.Equal(a.FallbackBackends, b.FallbackBackends) && slices.Equal(a.PathPatterns, b.PathPatterns) &&
 		slices.Equal(a.Repos, b.Repos) && slices.Equal(a.RepoGroups, b.RepoGroups)
@@ -297,6 +299,7 @@ func agentEntryFromDomain(a *domain.Agent) AgentEntry {
 		RepoGroups:       append([]string(nil), a.RepoGroups...),
 		CrossRepo:        a.CrossRepo,
 		Parent:           a.Parent,
+		Mode:             a.Mode,
 		DesiredState:     a.DesiredState,
 	}
 }
