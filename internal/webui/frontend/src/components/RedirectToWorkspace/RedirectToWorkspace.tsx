@@ -17,7 +17,9 @@ import {
 } from "@/utils/scopedStorage";
 import { fetchWorkspaceApi } from "@/hooks/api";
 import { useAuth } from "@/contexts/AuthContext";
+import { useRegisterOnboardingAction } from "@/contexts/OnboardingActionsContext";
 import { CreateWorkspaceModal } from "@/components/CreateWorkspaceModal";
+import { OnboardingFlow } from "@/components/OnboardingFlow";
 import { KeyboardShortcutProvider } from "@/hooks";
 import { AUTH_MODE_OPEN } from "@/types/common";
 
@@ -75,6 +77,13 @@ export function RedirectToWorkspace() {
     return resolveWorkspace();
   }, [mode, isAuthenticated, isLoading, resolveWorkspace]);
 
+  // Register the workspace-repo CTA so OnboardingFlow's step-1 button
+  // opens the existing CreateWorkspaceModal. WorkspaceRepoWizard (the
+  // fixed-path replacement called for in the spec) lands in a follow-up.
+  useRegisterOnboardingAction("open_workspace_repo_wizard", () => {
+    setShowCreate(true);
+  });
+
   if (!resolving) {
     // CreateWorkspaceModal uses useRegisterEscapeLayer which requires a
     // KeyboardShortcutProvider ancestor. The root "/" route renders
@@ -87,29 +96,21 @@ export function RedirectToWorkspace() {
             flexDirection: "column",
             alignItems: "center",
             justifyContent: "center",
-            height: "100vh",
-            gap: "16px",
+            minHeight: "100vh",
+            padding: "32px 16px",
             color: "var(--text-secondary, #666)",
           }}
         >
-          <p style={{ margin: 0, fontSize: "15px" }}>
-            No workspaces found. Create one to get started.
-          </p>
-          <button
-            onClick={() => setShowCreate(true)}
+          <p
             style={{
-              padding: "10px 24px",
-              border: "none",
-              borderRadius: "8px",
-              background: "var(--bg-accent, #1976d2)",
-              color: "#fff",
-              fontSize: "14px",
-              fontWeight: 500,
-              cursor: "pointer",
+              margin: "0 0 16px",
+              fontSize: "15px",
+              textAlign: "center",
             }}
           >
-            Create Workspace
-          </button>
+            No workspaces found. Create one to get started.
+          </p>
+          <OnboardingFlow context="no-workspace" />
         </div>
         <CreateWorkspaceModal
           isOpen={showCreate}

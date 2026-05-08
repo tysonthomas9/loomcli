@@ -90,6 +90,40 @@ vi.mock("@/components/CreateWorkspaceModal", () => ({
   },
 }));
 
+// Stub the OnboardingFlow — it has its own dedicated tests and
+// requires a fetch mock that would distract from the redirect logic
+// under test here. The stub still exposes a button labelled
+// "Create Workspace" so existing assertions around that button keep
+// reading naturally.
+const { mockDispatchWorkspaceRepo } = vi.hoisted(() => ({
+  mockDispatchWorkspaceRepo: vi.fn(),
+}));
+vi.mock("@/components/OnboardingFlow", () => ({
+  OnboardingFlow: () => (
+    <button
+      type="button"
+      onClick={() => mockDispatchWorkspaceRepo()}
+    >
+      Create Workspace
+    </button>
+  ),
+}));
+
+// Capture handler registration so the create-workspace test can
+// trigger the registered action without depending on the real
+// OnboardingActionsProvider.
+const { mockRegisterAction } = vi.hoisted(() => ({
+  mockRegisterAction: vi.fn(),
+}));
+vi.mock("@/contexts/OnboardingActionsContext", () => ({
+  useRegisterOnboardingAction: (
+    action: string,
+    handler: () => void,
+  ) => {
+    mockRegisterAction(action, handler);
+  },
+}));
+
 const { mockGetLastWorkspaceId, mockClearLastWorkspaceId } = vi.hoisted(() => ({
   mockGetLastWorkspaceId: vi.fn(() => null as string | null),
   mockClearLastWorkspaceId: vi.fn(),
@@ -389,18 +423,29 @@ describe("RedirectToWorkspace", () => {
   });
 
   describe("empty state workspace creation", () => {
-    it("navigates to the workspace matching the created name", async () => {
+    it("opens the create modal when the registered onboarding action fires", async () => {
       mockFetchWorkspace.mockResolvedValueOnce(makeWorkspaceData([]));
 
       renderComponent();
 
-      const createButton = await screen.findByRole("button", {
-        name: "Create Workspace",
-      });
-      fireEvent.click(createButton);
-      fireEvent.click(
-        screen.getByRole("button", { name: "Mock create success" }),
+      // Wait for the OnboardingFlow stub to render so the action has
+      // been registered.
+      await screen.findByRole("button", { name: /create workspace/i });
+
+      // Find the registered handler and invoke it directly — this is
+      // the path a real OnboardingFlow CTA would take through the
+      // dispatch context.
+      const registration = mockRegisterAction.mock.calls.find(
+        ([action]) => action === "open_workspace_repo_wizard",
       );
+      expect(registration).toBeDefined();
+      const handler = registration![1] as () => void;
+      handler();
+
+      const successButton = await screen.findByRole("button", {
+        name: "Mock create success",
+      });
+      fireEvent.click(successButton);
 
       expect(mockNavigate).toHaveBeenCalledWith("/ws/ws-created/", {
         replace: true,
