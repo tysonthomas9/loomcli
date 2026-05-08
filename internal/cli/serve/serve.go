@@ -19,6 +19,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
+	"github.com/tysonthomas9/loomcli/internal/cli/monitor"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/daemonwire"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/metricscmd"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/observability"
@@ -29,6 +30,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	webuiapp "github.com/tysonthomas9/loomcli/internal/webui/app"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
 // envLoomFleetMode is the env var that toggles --fleet-mode when no flag is
@@ -206,16 +208,8 @@ func runServe(cmd *cobra.Command, args []string) {
 	}
 	defer func() { _ = storeHandle.Close() }()
 
-	// Proactively refresh the monitor cache every 6s so HTTP requests
-	// always read warm data instead of blocking on collectMonitorData.
-	// (TTL is 10s, so 6s refresh leaves a 4s safety margin.)
-	//
-	// Start this after the primary fleet-db store is open. The monitor
-	// collector also routes through the issue backend; in embedded local
-	// mode, starting it earlier can race the main serve path for the
-	// embedded fleet-db runtime lock before runtime metadata is written.
-	collectDataFn := metricscmd.NewCollectorWithBackground(ctx, 10*time.Second, 6*time.Second)
 	issueBackendFn := cli.WorkspaceAwareIssueBackendForURL(storeHandle.URL(), fleetState.clientCfg.Actor)
+	collectDataFn := buildMonitorCollectDataFn(ctx, storeHandle.Store, fleetState.clientCfg.Workspace, issueBackendFn)
 	monitorHandlers := buildMonitorHandlers(collectDataFn, staleDetectorHandler, storeHandle.Store, issueBackendFn)
 
 	webuiErr := make(chan error, 1)
@@ -226,6 +220,36 @@ func runServe(cmd *cobra.Command, args []string) {
 
 	logServerStartup()
 	awaitShutdown(cmd, stop, webuiErr, cancel)
+}
+
+func buildMonitorCollectDataFn(ctx context.Context, st store.Store, fallbackWorkspace string, issueBackendFn metricscmd.IssueBackendFn) metricscmd.CollectDataFn {
+	workspaceHint := resolveMonitorCollectorWorkspace(st, fallbackWorkspace)
+	collectFn := func() *monitor.MonitorData {
+		if workspaceHint != "" && issueBackendFn != nil {
+			ctx := middleware.WithWorkspace(context.Background(), workspaceHint)
+			if be := issueBackendFn(ctx); be != nil {
+				return monitor.CollectMonitorDataWithIssueBackend(be, 10000, "")
+			}
+		}
+		return monitor.CollectMonitorData(10000, "")
+	}
+	// Proactively refresh the monitor cache every 6s so HTTP requests
+	// always read warm data instead of blocking on collectMonitorData.
+	// (TTL is 10s, so 6s refresh leaves a 4s safety margin.)
+	return metricscmd.NewCollectorWithBackgroundFunc(ctx, 10*time.Second, 6*time.Second, collectFn)
+}
+
+func resolveMonitorCollectorWorkspace(st store.Store, fallbackWorkspace string) string {
+	if workspace := os.Getenv(bootstrap.EnvWorkspace); workspace != "" {
+		return workspace
+	}
+	if fallbackWorkspace != "" {
+		return fallbackWorkspace
+	}
+	if st == nil {
+		return ""
+	}
+	return serveadapter.ResolveInitialWorkspaceID(st)
 }
 
 func openServeStore(ctx context.Context, fs fleetState) (*bootstrap.StoreHandle, error) {
@@ -331,11 +355,12 @@ func initUsageStore() {
 
 func buildMonitorHandlers(collectDataFn metricscmd.CollectDataFn, staleDetectorHandler http.HandlerFunc, st store.Store, issueBackendFn metricscmd.IssueBackendFn) webui.MonitorHandlers {
 	eventsDir := observability.ResolveEventsDir()
+	monitorDataSource := metricscmd.NewMonitorDataSource(collectDataFn, issueBackendFn)
 	return webui.MonitorHandlers{
-		Status:               metricscmd.HandleStatusWithBackend(collectDataFn, st, issueBackendFn),
-		Agents:               metricscmd.HandleAgentsWithBackend(collectDataFn, st, issueBackendFn),
-		Tasks:                metricscmd.HandleTasksWithBackend(collectDataFn, issueBackendFn),
-		Stats:                metricscmd.HandleStatsWithBackend(collectDataFn, issueBackendFn),
+		Status:               metricscmd.HandleStatusWithDataSource(monitorDataSource, st),
+		Agents:               metricscmd.HandleAgentsWithDataSource(monitorDataSource, st),
+		Tasks:                metricscmd.HandleTasksWithDataSource(monitorDataSource),
+		Stats:                metricscmd.HandleStatsWithDataSource(monitorDataSource),
 		Sync:                 metricscmd.HandleSync(collectDataFn),
 		Workspaces:           metricscmd.HandleWorkspaces(st),
 		StaleDetector:        staleDetectorHandler,

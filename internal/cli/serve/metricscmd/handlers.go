@@ -18,7 +18,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/store"
-	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/storeadapter"
 )
 
@@ -95,6 +94,10 @@ func HandleStatus(collectDataFn func() *monitor.MonitorData, st store.Store) htt
 }
 
 func HandleStatusWithBackend(collectDataFn func() *monitor.MonitorData, st store.Store, backendFn IssueBackendFn) http.HandlerFunc {
+	return HandleStatusWithDataSource(NewMonitorDataSource(collectDataFn, backendFn), st)
+}
+
+func HandleStatusWithDataSource(dataSource *MonitorDataSource, st store.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		workspaceHint := r.URL.Query().Get("workspace")
 		ctx, span := startSpan(r.Context(), "service.Monitor.Status",
@@ -102,7 +105,7 @@ func HandleStatusWithBackend(collectDataFn func() *monitor.MonitorData, st store
 		defer span.End()
 		r = r.WithContext(ctx)
 
-		data := monitorDataForRequest(r, collectDataFn, backendFn)
+		data := dataSource.Resolve(r)
 		if data == nil {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusServiceUnavailable)
@@ -130,6 +133,10 @@ func HandleAgents(collectDataFn func() *monitor.MonitorData, st store.Store) htt
 }
 
 func HandleAgentsWithBackend(collectDataFn func() *monitor.MonitorData, st store.Store, backendFn IssueBackendFn) http.HandlerFunc {
+	return HandleAgentsWithDataSource(NewMonitorDataSource(collectDataFn, backendFn), st)
+}
+
+func HandleAgentsWithDataSource(dataSource *MonitorDataSource, st store.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		workspaceHint := r.URL.Query().Get("workspace")
 		ctx, span := startSpan(r.Context(), "service.Monitor.Agents",
@@ -137,7 +144,7 @@ func HandleAgentsWithBackend(collectDataFn func() *monitor.MonitorData, st store
 		defer span.End()
 		r = r.WithContext(ctx)
 
-		data := monitorDataForRequest(r, collectDataFn, backendFn)
+		data := dataSource.Resolve(r)
 		if data == nil {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusServiceUnavailable)
@@ -166,6 +173,10 @@ func HandleTasks(collectDataFn func() *monitor.MonitorData) http.HandlerFunc {
 }
 
 func HandleTasksWithBackend(collectDataFn func() *monitor.MonitorData, backendFn IssueBackendFn) http.HandlerFunc {
+	return HandleTasksWithDataSource(NewMonitorDataSource(collectDataFn, backendFn))
+}
+
+func HandleTasksWithDataSource(dataSource *MonitorDataSource) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		workspaceHint := r.URL.Query().Get("workspace")
 		ctx, span := startSpan(r.Context(), "service.Monitor.Tasks",
@@ -173,7 +184,7 @@ func HandleTasksWithBackend(collectDataFn func() *monitor.MonitorData, backendFn
 		defer span.End()
 		r = r.WithContext(ctx)
 
-		data := monitorDataForRequest(r, collectDataFn, backendFn)
+		data := dataSource.Resolve(r)
 		if data == nil {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusServiceUnavailable)
@@ -205,8 +216,12 @@ func HandleStats(collectDataFn func() *monitor.MonitorData) http.HandlerFunc {
 }
 
 func HandleStatsWithBackend(collectDataFn func() *monitor.MonitorData, backendFn IssueBackendFn) http.HandlerFunc {
+	return HandleStatsWithDataSource(NewMonitorDataSource(collectDataFn, backendFn))
+}
+
+func HandleStatsWithDataSource(dataSource *MonitorDataSource) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		data := monitorDataForRequest(r, collectDataFn, backendFn)
+		data := dataSource.Resolve(r)
 		if data == nil {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusServiceUnavailable)
@@ -221,15 +236,7 @@ func HandleStatsWithBackend(collectDataFn func() *monitor.MonitorData, backendFn
 }
 
 func monitorDataForRequest(r *http.Request, collectDataFn func() *monitor.MonitorData, backendFn IssueBackendFn) *monitor.MonitorData {
-	workspaceHint := r.URL.Query().Get("workspace")
-	if workspaceHint == "" || backendFn == nil {
-		return collectDataFn()
-	}
-	ctx := middleware.WithWorkspace(r.Context(), workspaceHint)
-	if be := backendFn(ctx); be != nil {
-		return monitor.CollectMonitorDataWithIssueBackend(be, 10000, "")
-	}
-	return collectDataFn()
+	return NewMonitorDataSource(collectDataFn, backendFn).Resolve(r)
 }
 
 // HandleSync returns an HTTP handler for the sync endpoint.
