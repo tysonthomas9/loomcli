@@ -53,11 +53,11 @@ describe("NavRail", () => {
       expect(screen.queryByLabelText("Workspace")).not.toBeInTheDocument();
     });
 
-    it("renders exactly three navigation buttons", () => {
+    it("renders exactly four navigation buttons", () => {
       render(<NavRail activeView="kanban" onChange={() => {}} />);
 
       const buttons = screen.getAllByRole("button");
-      expect(buttons).toHaveLength(3);
+      expect(buttons).toHaveLength(4);
     });
 
     it("renders tooltips for each button", () => {
@@ -91,13 +91,20 @@ describe("NavRail", () => {
       );
     });
 
-    it("renders buttons in correct order: Workspaces, Monitor, Settings", () => {
+    it("renders buttons in correct order: Workspaces, Agents, Monitor, Settings", () => {
       render(<NavRail activeView="kanban" onChange={() => {}} />);
 
       const buttons = screen.getAllByRole("button");
       expect(buttons[0]).toHaveAccessibleName("Workspaces");
-      expect(buttons[1]).toHaveAccessibleName("Monitor");
-      expect(buttons[2]).toHaveAccessibleName("Settings");
+      expect(buttons[1]).toHaveAccessibleName("Agents");
+      expect(buttons[2]).toHaveAccessibleName("Monitor");
+      expect(buttons[3]).toHaveAccessibleName("Settings");
+    });
+
+    it("renders an Agents button", () => {
+      render(<NavRail activeView="kanban" onChange={() => {}} />);
+
+      expect(screen.getByLabelText("Agents")).toBeInTheDocument();
     });
 
     it("has navigation landmark with aria-label", () => {

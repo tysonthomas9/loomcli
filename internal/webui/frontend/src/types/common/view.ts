@@ -18,7 +18,8 @@ export type ViewMode =
   | "workspace"
   | "settings"
   | "files"
-  | "issue-detail";
+  | "issue-detail"
+  | "agents";
 
 /**
  * Default view when none is specified.

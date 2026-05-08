@@ -19,6 +19,7 @@ const VIEW_LABELS: Record<ViewMode, string> = {
   settings: "Settings",
   files: "Files",
   "issue-detail": "Issue",
+  agents: "Agents",
 };
 
 export interface WorkspaceBreadcrumbProps {

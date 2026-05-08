@@ -146,6 +146,16 @@ const viewRoutes = [
         Component: m.IssueDetailPage,
       })),
   },
+  {
+    path: "agents",
+    lazy: () =>
+      import("@/views/AgentsPage").then((m) => ({ Component: m.AgentsPage })),
+  },
+  {
+    path: "agents/:agentName",
+    lazy: () =>
+      import("@/views/AgentsPage").then((m) => ({ Component: m.AgentsPage })),
+  },
   { path: "*", element: <Navigate to="kanban" replace /> },
 ];
 
