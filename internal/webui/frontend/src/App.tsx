@@ -721,9 +721,20 @@ function App() {
     [refetch, handlePanelClose, showToast],
   );
 
-  // Handle agent click from MonitorDashboard
+  // Handle agent click from MonitorDashboard / WorkspaceTree.
+  //
+  // On the /agents view the click is a primary navigation action — we update
+  // the URL so the embedded TerminalView can switch sessions and the right
+  // panel re-derives its scope. Opening the AgentDetailPanel slide-out on top
+  // of that would just be a redundant second surface.
+  //
+  // On every other view the legacy slide-out behavior is preserved.
   const handleAgentClick = useCallback(
     (agentName: string) => {
+      if (activeView === "agents") {
+        navigate(`/ws/${workspaceId}/agents/${encodeURIComponent(agentName)}`);
+        return;
+      }
       const hadIssuePanel = isOpen("issue");
       // Mutual exclusivity + no-op guard handled by usePanelManager
       openPanel({ type: "agent", name: agentName });
@@ -735,7 +746,7 @@ function App() {
         }, 300);
       }
     },
-    [openPanel, isOpen, clearIssue],
+    [activeView, navigate, workspaceId, openPanel, isOpen, clearIssue],
   );
 
   // Handle agent panel close
@@ -1075,7 +1086,7 @@ function App() {
               badges={{ terminal: hasTerminalUnread }}
             />
           }
-          sidebar={activeView === "agents" ? null : sidebarContent}
+          sidebar={sidebarContent}
         >
           <ViewSubSwitcher activeView={activeView} onChange={navigateToView} />
           {(showStaleBanner || isConnectionLost) &&

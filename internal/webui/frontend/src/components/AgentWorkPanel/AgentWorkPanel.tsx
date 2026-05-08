@@ -85,14 +85,28 @@ export function AgentWorkPanel({ agentName }: AgentWorkPanelProps): JSX.Element 
     return task?.parent || undefined;
   }, [agentName, agents, issuesMap]);
 
-  const { groups, counts, totalTasks, focused } = useMemo(() => {
+  // Three rendering modes:
+  //   1. activeEpic — agent is working a task; zoom into that epic and show
+  //      ALL its child tasks (regardless of assignee) so siblings/blockers
+  //      are visible.
+  //   2. agent-scoped — agent is idle but has tasks assigned; group those by
+  //      epic, fall back to "Unassigned" for orphans. (Original F2 behavior.)
+  //   3. workspace-wide — agent is idle and has nothing assigned; show all
+  //      workspace issues grouped by epic so the panel still has useful
+  //      context. Triggered when groupAgentTasksByEpic returns 0 tasks.
+  const { groups, counts, totalTasks, mode } = useMemo(() => {
     if (activeEpicId) {
-      const focusedView = scopeToEpic(issuesMap, activeEpicId);
-      return { ...focusedView, focused: true };
+      const v = scopeToEpic(issuesMap, activeEpicId);
+      return { ...v, mode: "epic" as const };
     }
-    const fallback = groupAgentTasksByEpic(issuesMap, agentName);
-    return { ...fallback, focused: false };
+    const agentScoped = groupAgentTasksByEpic(issuesMap, agentName);
+    if (agentScoped.totalTasks > 0) {
+      return { ...agentScoped, mode: "agent" as const };
+    }
+    const wide = groupAllByEpic(issuesMap);
+    return { ...wide, mode: "workspace" as const };
   }, [issuesMap, agentName, activeEpicId]);
+  const focused = mode === "epic";
 
   if (!agentName) {
     return (
@@ -172,9 +186,9 @@ export function AgentWorkPanel({ agentName }: AgentWorkPanelProps): JSX.Element 
               color: "var(--color-text-muted, #666)",
             }}
           >
-            {agentName}'s work · {groups.length} epic{groups.length === 1 ? "" : "s"}
-            {" · "}
-            {totalTasks} task{totalTasks === 1 ? "" : "s"}
+            {mode === "workspace"
+              ? `Workspace queue · ${groups.length} epic${groups.length === 1 ? "" : "s"} · ${totalTasks} task${totalTasks === 1 ? "" : "s"}`
+              : `${agentName}'s work · ${groups.length} epic${groups.length === 1 ? "" : "s"} · ${totalTasks} task${totalTasks === 1 ? "" : "s"}`}
           </div>
         )}
 
@@ -210,7 +224,9 @@ export function AgentWorkPanel({ agentName }: AgentWorkPanelProps): JSX.Element 
           >
             {focused
               ? "Active epic has no child tasks."
-              : `No tasks assigned to ${agentName} yet.`}
+              : mode === "workspace"
+                ? "No issues in this workspace yet."
+                : `No tasks assigned to ${agentName} yet.`}
           </div>
         ) : (
           groups.map((group) => (
@@ -460,6 +476,68 @@ export function groupAgentTasksByEpic(
 
 function taskSortRank(a: Issue, b: Issue): number {
   return statusRank(a.status) - statusRank(b.status);
+}
+
+/**
+ * groupAllByEpic returns a workspace-wide view: every non-epic issue grouped
+ * by its parent epic. Used when the selected agent has nothing assigned and
+ * no active task — the right panel still shows useful context (the broader
+ * workspace queue) instead of going empty.
+ */
+export function groupAllByEpic(
+  issuesMap: Map<string, Issue>,
+): { groups: EpicGroup[]; counts: Counts; totalTasks: number } {
+  const counts: Counts = { active: 0, done: 0, open: 0, blocked: 0 };
+  const byEpic = new Map<string, Issue[]>();
+  let totalTasks = 0;
+
+  for (const issue of issuesMap.values()) {
+    if (issue.issue_type === "epic") continue;
+    totalTasks++;
+    const status = (issue.status ?? "open").toLowerCase();
+    if (status === "in_progress" || status === "active") counts.active++;
+    else if (status === "closed" || status === "done") counts.done++;
+    else if (status === "blocked") counts.blocked++;
+    else counts.open++;
+
+    const epicKey = issue.parent || ORPHAN_EPIC_KEY;
+    const list = byEpic.get(epicKey) ?? [];
+    list.push(issue);
+    byEpic.set(epicKey, list);
+  }
+
+  const groups: EpicGroup[] = [];
+  for (const [epicKey, tasks] of byEpic.entries()) {
+    const epicIssue =
+      epicKey === ORPHAN_EPIC_KEY ? undefined : issuesMap.get(epicKey);
+    const epicTitle =
+      epicKey === ORPHAN_EPIC_KEY
+        ? "Unassigned"
+        : (epicIssue?.title ?? epicKey);
+
+    let doneCount = 0;
+    for (const t of tasks) {
+      const s = (t.status ?? "open").toLowerCase();
+      if (s === "closed" || s === "done") doneCount++;
+    }
+    tasks.sort(taskSortRank);
+
+    groups.push({
+      epicId: epicKey,
+      epicTitle,
+      tasks,
+      doneCount,
+      totalCount: tasks.length,
+    });
+  }
+
+  groups.sort((a, b) => {
+    if (a.epicId === ORPHAN_EPIC_KEY) return 1;
+    if (b.epicId === ORPHAN_EPIC_KEY) return -1;
+    return a.epicTitle.localeCompare(b.epicTitle);
+  });
+
+  return { groups, counts, totalTasks };
 }
 
 /**

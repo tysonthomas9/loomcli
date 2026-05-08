@@ -1,23 +1,26 @@
 /**
- * AgentsPage — Direction J layout: agent rail · selected agent's chat ·
- * tasks grouped by epic.
+ * AgentsPage — agent terminal + work-context view.
  *
- * F1 scope (this commit): route shell + left rail + URL-driven selection.
- * Middle and right panels render placeholders until F2 (tasks-by-epic) and
- * F3 (TerminalView/transcript) ship.
+ * Layout (driven by App.tsx):
+ *   [WorkspaceTree sidebar (App-level)]   ← agent picker lives here on this view too
+ *   [AgentDetailMain — embedded TerminalView attached to the selected agent]
+ *   [AgentWorkPanel — right panel, scope depends on whether the selected
+ *    agent has an active epic vs is idle]
  *
- * Route: /ws/:workspaceId/agents/:agentName?
- *   - no agent in URL → first agent gets auto-selected
- *   - agent name not found → show "agent not found" state in middle pane
+ * The selected agent is URL-driven (:agentName). Clicks on the WorkspaceTree's
+ * AGENTS section are intercepted by App's handleAgentClick when activeView ===
+ * "agents" so they navigate to /agents/<name> instead of opening the slide-out
+ * panel. If the URL has no :agentName, the first agent is auto-selected.
  */
 
-import { Suspense, useMemo } from "react";
+import { Suspense, useEffect, useMemo } from "react";
 import { useNavigate, useParams } from "react-router-dom";
+import { useStore } from "zustand";
 
 import { ErrorBoundary, LoadingSkeleton } from "@/components";
-import { AgentRail } from "@/components/AgentRail/AgentRail";
 import { AgentDetailMain } from "@/components/AgentDetailMain/AgentDetailMain";
 import { AgentWorkPanel } from "@/components/AgentWorkPanel/AgentWorkPanel";
+import { useAgentStoreInstance } from "@/hooks";
 
 export function AgentsPage(): JSX.Element {
   return (
@@ -35,13 +38,23 @@ function AgentsPageInner(): JSX.Element {
     agentName?: string;
   }>();
   const navigate = useNavigate();
+  const agentStore = useAgentStoreInstance();
+  const agents = useStore(agentStore, (s) => s.agents);
 
-  const selectAgent = useMemo(
-    () => (name: string) => {
-      navigate(`/ws/${workspaceId}/agents/${encodeURIComponent(name)}`);
-    },
-    [navigate, workspaceId],
+  // Auto-select first agent when URL is bare /agents.
+  // The page never shows a blank middle pane.
+  const firstAgentName = useMemo(
+    () => (agents.length > 0 ? agents[0]?.name : undefined),
+    [agents],
   );
+  useEffect(() => {
+    if (!agentName && firstAgentName) {
+      navigate(
+        `/ws/${workspaceId}/agents/${encodeURIComponent(firstAgentName)}`,
+        { replace: true },
+      );
+    }
+  }, [agentName, firstAgentName, navigate, workspaceId]);
 
   return (
     <div
@@ -54,16 +67,8 @@ function AgentsPageInner(): JSX.Element {
         background: "var(--color-bg, #fdfcf8)",
       }}
     >
-      <AgentRail
-        selectedAgent={agentName}
-        onSelectAgent={selectAgent}
-        autoSelectFirst={!agentName}
-      />
       <AgentDetailMain agentName={agentName} />
       <AgentWorkPanel agentName={agentName} />
     </div>
   );
 }
-
-
-
