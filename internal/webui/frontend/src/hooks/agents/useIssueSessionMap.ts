@@ -16,9 +16,16 @@ export interface UseIssueSessionMapReturn {
   handleMutation: (mutation: MutationPayload) => void;
 }
 
+export interface UseIssueSessionMapOptions {
+  enabled?: boolean;
+}
+
 const DEBOUNCE_MS = 200;
 
-export function useIssueSessionMap(): UseIssueSessionMapReturn {
+export function useIssueSessionMap(
+  options: UseIssueSessionMapOptions = {},
+): UseIssueSessionMapReturn {
+  const enabled = options.enabled ?? true;
   const { workspaceId: workspace } = useWorkspaceContext();
   const [issueSessionMap, setIssueSessionMap] = useState<
     Record<string, string[]>
@@ -37,6 +44,7 @@ export function useIssueSessionMap(): UseIssueSessionMapReturn {
   }, []);
 
   const fetchMap = useCallback(async () => {
+    if (!enabled) return;
     if (!workspace) return; // Wait until workspace ID is known
     try {
       const data = await listSessionsByIssue(workspace);
@@ -46,11 +54,12 @@ export function useIssueSessionMap(): UseIssueSessionMapReturn {
     } catch {
       // Silently fail — session map is non-critical UI enhancement
     }
-  }, [workspace]);
+  }, [enabled, workspace]);
 
   useEffect(() => {
+    if (!enabled) return;
     fetchMap();
-  }, [fetchMap]);
+  }, [enabled, fetchMap]);
 
   const hasActiveSession = useCallback(
     (issueId: string): boolean => {
@@ -62,6 +71,7 @@ export function useIssueSessionMap(): UseIssueSessionMapReturn {
 
   const handleMutation = useCallback(
     (mutation: MutationPayload) => {
+      if (!enabled) return;
       if (
         mutation.type !== "terminal_session_change" &&
         mutation.type !== "terminal_metadata"
@@ -74,7 +84,7 @@ export function useIssueSessionMap(): UseIssueSessionMapReturn {
         fetchMap();
       }, DEBOUNCE_MS);
     },
-    [fetchMap],
+    [enabled, fetchMap],
   );
 
   useEventSubscription(handleMutation, {

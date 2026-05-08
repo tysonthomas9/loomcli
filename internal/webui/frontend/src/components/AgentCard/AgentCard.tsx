@@ -7,7 +7,6 @@ import type { LoomAgentStatus, ParsedLoomStatus } from "@/types";
 import { parseLoomStatus } from "@/types";
 import { RepoBadge } from "@/components/RepoBadge";
 import { getAvatarColor, shouldUseWhiteText } from "@/utils/colorUtils";
-import { useAgentDiffStat } from "@/hooks";
 
 import styles from "./AgentCard.module.css";
 
@@ -97,10 +96,6 @@ export function AgentCard({
   const roleLabel = agent.role
     ? agent.role.charAt(0).toUpperCase() + agent.role.slice(1)
     : "Agent";
-  const { data: diffStat } = useAgentDiffStat({
-    agentName: agent.name,
-    pollInterval: 60000,
-  });
 
   const rootClassName = [styles.card, className].filter(Boolean).join(" ");
 
@@ -158,19 +153,6 @@ export function AgentCard({
       </div>
 
       <div className={styles.meta}>
-        {diffStat && (diffStat.added > 0 || diffStat.removed > 0) && (
-          <div
-            className={styles.diffStats}
-            title={`${diffStat.added} lines added, ${diffStat.removed} lines removed`}
-          >
-            {diffStat.added > 0 && (
-              <span className={styles.linesAdded}>+{diffStat.added}</span>
-            )}
-            {diffStat.removed > 0 && (
-              <span className={styles.linesRemoved}>-{diffStat.removed}</span>
-            )}
-          </div>
-        )}
         <span
           className={styles.statusLine}
           data-error={isError || undefined}

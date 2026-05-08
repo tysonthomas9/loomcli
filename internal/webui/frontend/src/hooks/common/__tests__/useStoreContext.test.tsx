@@ -1,7 +1,7 @@
 /**
  * @vitest-environment jsdom
  */
-import { renderHook } from "@testing-library/react";
+import { act, renderHook } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React from "react";
 
@@ -39,6 +39,7 @@ const {
     reset: vi.fn(),
     startPolling: vi.fn(),
     stopPolling: vi.fn(),
+    fetchData: vi.fn(() => Promise.resolve()),
     isLoading: false,
   });
 
@@ -195,6 +196,7 @@ describe("useStoreContext", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
@@ -275,6 +277,64 @@ describe("useStoreContext", () => {
       expect(issueMethodsRef.current.connectToEvents).toHaveBeenCalledWith(
         mockEvent.subscribe,
       );
+    });
+  });
+
+  describe("Monitor status refresh", () => {
+    it("refreshes agent data from workspace SSE mutations", () => {
+      vi.useFakeTimers();
+
+      renderHook(() => useAgentStoreInstance(), { wrapper });
+
+      const monitorCallback = mockEvent.subscribe.mock.calls[0]?.[0] as
+        | ((mutation: {
+            type: string;
+            issue_id: string;
+            timestamp: string;
+          }) => void)
+        | undefined;
+      expect(monitorCallback).toBeDefined();
+
+      monitorCallback?.({
+        type: "status",
+        issue_id: "loom-123",
+        timestamp: new Date().toISOString(),
+      });
+
+      expect(agentMethodsRef.current.fetchData).not.toHaveBeenCalled();
+
+      act(() => {
+        vi.advanceTimersByTime(250);
+      });
+
+      expect(agentMethodsRef.current.fetchData).toHaveBeenCalledTimes(1);
+    });
+
+    it("ignores terminal-only SSE mutations for monitor refresh", () => {
+      vi.useFakeTimers();
+
+      renderHook(() => useAgentStoreInstance(), { wrapper });
+
+      const monitorCallback = mockEvent.subscribe.mock.calls[0]?.[0] as
+        | ((mutation: {
+            type: string;
+            issue_id: string;
+            timestamp: string;
+          }) => void)
+        | undefined;
+      expect(monitorCallback).toBeDefined();
+
+      monitorCallback?.({
+        type: "terminal_metadata",
+        issue_id: "loom-123",
+        timestamp: new Date().toISOString(),
+      });
+
+      act(() => {
+        vi.advanceTimersByTime(250);
+      });
+
+      expect(agentMethodsRef.current.fetchData).not.toHaveBeenCalled();
     });
   });
 
@@ -386,12 +446,12 @@ describe("useStoreContext", () => {
   // -----------------------------------------------------------------------
 
   describe("Initial polling", () => {
-    it("calls startPolling with pollInterval 5000", () => {
+    it("calls startPolling with initial fetch only", () => {
       renderHook(() => useAgentStoreInstance(), { wrapper });
 
       expect(agentMethodsRef.current.startPolling).toHaveBeenCalledWith({
         workspaceId: "test-ws-id",
-        pollInterval: 5000,
+        pollInterval: 0,
       });
     });
   });
@@ -423,7 +483,7 @@ describe("useStoreContext", () => {
       expect(issueMethodsRef.current.fetchIssues).not.toHaveBeenCalled();
       expect(agentMethodsRef.current.startPolling).toHaveBeenCalledWith({
         workspaceId: "new-ws-id",
-        pollInterval: 5000,
+        pollInterval: 0,
       });
     });
   });

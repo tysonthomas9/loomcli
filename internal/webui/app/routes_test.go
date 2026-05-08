@@ -42,9 +42,6 @@ func setupTestRoutes(t *testing.T, app *Server) {
 			if app.handlers.ClientErrLimiter != nil {
 				app.handlers.ClientErrLimiter.Stop()
 			}
-			if app.handlers.CSPLimiter != nil {
-				app.handlers.CSPLimiter.Stop()
-			}
 			if app.handlers.AuthCfgLimiter != nil {
 				app.handlers.AuthCfgLimiter.Stop()
 			}
@@ -1448,6 +1445,44 @@ func TestSetupRoutes_SSEEndpointRegisteredOnWorkspaceScope(t *testing.T) {
 	ct := rr.Header().Get("Content-Type")
 	if ct == "text/html; charset=utf-8" {
 		t.Error("expected SSE route to be registered, but request fell through to frontend handler")
+	}
+}
+
+func TestSetupRoutes_WorkspaceMonitorStatusInjectsWorkspace(t *testing.T) {
+	multiPool := daemon.NewMultiPool(middleware.WorkspaceFromContext, 1)
+	_ = multiPool.Register("test-ws", &stubPool{})
+
+	wsExistsFn := func(id string) bool { return multiPool.PoolForWorkspace(id) != nil }
+	app := &Server{
+		multiPool:  multiPool,
+		wsExistsFn: wsExistsFn,
+		config: webui.ServerConfig{
+			MonitorHandlers: webui.MonitorHandlers{
+				Status: func(w http.ResponseWriter, r *http.Request) {
+					if got := middleware.WorkspaceFromContext(r.Context()); got != "test-ws" {
+						t.Errorf("workspace context = %q, want test-ws", got)
+					}
+					if got := r.URL.Query().Get("workspace"); got != "test-ws" {
+						t.Errorf("workspace query = %q, want test-ws", got)
+					}
+					w.Header().Set("Content-Type", "application/json")
+					_, _ = w.Write([]byte(`{"ok":true}`))
+				},
+			},
+		},
+	}
+	app.sessSvc = svcimpl.NewSessionService(nil, nil)
+	setupTestRoutes(t, app)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/monitor/status", nil)
+	rr := httptest.NewRecorder()
+	app.mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d, body=%s", rr.Code, rr.Body.String())
+	}
+	if ct := rr.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("Content-Type = %q, want application/json", ct)
 	}
 }
 

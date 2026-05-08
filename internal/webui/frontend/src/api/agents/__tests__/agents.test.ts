@@ -171,6 +171,27 @@ describe("fetchAgents", () => {
       signal: expect.any(AbortSignal),
     });
   });
+
+  it("uses workspace-scoped monitor status when workspace is provided", async () => {
+    mockGet.mockResolvedValueOnce({
+      agents: null,
+      tasks: {},
+      agent_tasks: null,
+      sync: {},
+      stats: {},
+      timestamp: "",
+    } as never);
+
+    await fetchStatus("test-ws");
+
+    expect(mockGet).toHaveBeenCalledWith(
+      "/api/workspaces/test-ws/monitor/status",
+      {
+        signal: expect.any(AbortSignal),
+      },
+    );
+    expect(mockApiGet).not.toHaveBeenCalled();
+  });
 });
 
 describe("checkLoomHealth", () => {

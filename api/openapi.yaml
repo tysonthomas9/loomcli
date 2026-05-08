@@ -183,24 +183,6 @@ paths:
         "429":
           description: Rate limited
 
-  /api/csp-report:
-    post:
-      operationId: reportCSPViolation
-      tags: [health]
-      summary: CSP violation reporting (rate-limited, 60 req/min/IP)
-      security: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-      responses:
-        "200":
-          description: Report recorded
-        "429":
-          description: Rate limited
-
   # ── Stats ───────────────────────────────────────────────────────────────
   /api/workspaces/{ws}/stats:
     get:
@@ -319,6 +301,25 @@ paths:
                 $ref: "#/components/schemas/MessageResponse"
         "404":
           description: Workspace not found
+
+  /api/workspaces/{ws}/monitor/status:
+    get:
+      operationId: getWorkspaceMonitorStatus
+      tags: [monitor]
+      summary: Full monitor dashboard data for a workspace
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: Dashboard status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MonitorStatusResponse"
+        "404":
+          description: Workspace not found
+        "503":
+          description: Data collection unavailable
 
   /api/workspaces/jobs/{id}:
     get:

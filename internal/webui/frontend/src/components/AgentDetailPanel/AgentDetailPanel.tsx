@@ -19,6 +19,7 @@ import {
   useFocusTrap,
   useRegisterEscapeLayer,
   useWorkspaceContext,
+  useAgentDiffStat,
   LAYER_AGENT_PANEL,
 } from "@/hooks";
 import type { LoomAgentStatus, LoomTaskInfo } from "@/types";
@@ -134,6 +135,13 @@ export function AgentDetailPanel({
   const task = agentName ? agentTasks[agentName] : undefined;
   const currentTaskId = parsed?.taskId;
   const isActive = parsed?.type === "working" || parsed?.type === "planning";
+  const { data: diffStat } = useAgentDiffStat({
+    agentName: agent?.name ?? "",
+    enabled: isOpen && !!agent,
+    pollInterval: 60000,
+  });
+  const hasDiffStat =
+    diffStat !== null && (diffStat.added > 0 || diffStat.removed > 0);
 
   const rootClassName = [styles.overlay, isOpen && styles.open]
     .filter(Boolean)
@@ -207,14 +215,25 @@ export function AgentDetailPanel({
                 </button>
               </div>
 
-              {/* Metadata Bar (hide when branch matches agent name to avoid duplicate label) */}
-              {agent.branch && agent.branch !== agent.name && (
+              {(agent.branch && agent.branch !== agent.name) || hasDiffStat ? (
                 <div className={styles.metadataBar}>
-                  <span className={styles.metadataItem}>
-                    <span className={styles.branchName}>{agent.branch}</span>
-                  </span>
+                  {agent.branch && agent.branch !== agent.name && (
+                    <span className={styles.metadataItem}>
+                      <span className={styles.branchName}>{agent.branch}</span>
+                    </span>
+                  )}
+                  {hasDiffStat && diffStat && (
+                    <span
+                      className={styles.metadataItem}
+                      title={`${diffStat.added} lines added, ${diffStat.removed} lines removed`}
+                    >
+                      {diffStat.added > 0 && <span>+{diffStat.added}</span>}
+                      {diffStat.added > 0 && diffStat.removed > 0 && " "}
+                      {diffStat.removed > 0 && <span>-{diffStat.removed}</span>}
+                    </span>
+                  )}
                 </div>
-              )}
+              ) : null}
 
               {/* Tab Bar */}
               <div

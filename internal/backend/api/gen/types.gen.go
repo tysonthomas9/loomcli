@@ -1931,9 +1931,6 @@ type WorkspaceId = string
 // ReportClientErrorJSONBody defines parameters for ReportClientError.
 type ReportClientErrorJSONBody = map[string]interface{}
 
-// ReportCSPViolationJSONBody defines parameters for ReportCSPViolation.
-type ReportCSPViolationJSONBody = map[string]interface{}
-
 // PushWorkerEventsJSONBody defines parameters for PushWorkerEvents.
 type PushWorkerEventsJSONBody = map[string]interface{}
 
@@ -2201,9 +2198,6 @@ type ConnectTerminalWSParams struct {
 
 // ReportClientErrorJSONRequestBody defines body for ReportClientError for application/json ContentType.
 type ReportClientErrorJSONRequestBody = ReportClientErrorJSONBody
-
-// ReportCSPViolationJSONRequestBody defines body for ReportCSPViolation for application/json ContentType.
-type ReportCSPViolationJSONRequestBody = ReportCSPViolationJSONBody
 
 // OpenEditorJSONRequestBody defines body for OpenEditor for application/json ContentType.
 type OpenEditorJSONRequestBody = EditorOpenRequest

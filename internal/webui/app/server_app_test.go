@@ -46,16 +46,12 @@ func TestServer_RegisterRoutes_ZeroValue(t *testing.T) {
 	if app.handlers.ClientErrLimiter == nil {
 		t.Fatal("buildHandlers produced nil ClientErrLimiter")
 	}
-	if app.handlers.CSPLimiter == nil {
-		t.Fatal("buildHandlers produced nil CSPLimiter")
-	}
 	if app.handlers.AuthCfgLimiter == nil {
 		t.Fatal("buildHandlers produced nil AuthCfgLimiter")
 	}
 
 	// Clean up background goroutines.
 	app.handlers.ClientErrLimiter.Stop()
-	app.handlers.CSPLimiter.Stop()
 	app.handlers.AuthCfgLimiter.Stop()
 }
 
@@ -67,7 +63,6 @@ func TestServer_RegisterRoutes_HealthRegistered(t *testing.T) {
 	app.buildHandlers()
 	app.registerRoutes()
 	defer app.handlers.ClientErrLimiter.Stop()
-	defer app.handlers.CSPLimiter.Stop()
 	defer app.handlers.AuthCfgLimiter.Stop()
 
 	// Build a request for /api/health and verify the mux finds a handler.
@@ -245,7 +240,6 @@ func TestServer_BuildHandlers_MultiPTYManagerEmpty(t *testing.T) {
 	app.buildHandlers()
 	t.Cleanup(func() {
 		app.handlers.ClientErrLimiter.Stop()
-		app.handlers.CSPLimiter.Stop()
 		app.handlers.AuthCfgLimiter.Stop()
 	})
 
@@ -303,7 +297,6 @@ func TestServer_BuildHandlers_MultiPTYManagerCustom(t *testing.T) {
 	app.buildHandlers()
 	t.Cleanup(func() {
 		app.handlers.ClientErrLimiter.Stop()
-		app.handlers.CSPLimiter.Stop()
 		app.handlers.AuthCfgLimiter.Stop()
 	})
 

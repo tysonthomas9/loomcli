@@ -196,9 +196,6 @@ func (app *Server) Close() {
 		if app.handlers.ClientErrLimiter != nil {
 			app.handlers.ClientErrLimiter.Stop()
 		}
-		if app.handlers.CSPLimiter != nil {
-			app.handlers.CSPLimiter.Stop()
-		}
 		if app.handlers.AuthCfgLimiter != nil {
 			app.handlers.AuthCfgLimiter.Stop()
 		}
