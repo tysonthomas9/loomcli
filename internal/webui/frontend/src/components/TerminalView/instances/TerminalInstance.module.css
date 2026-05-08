@@ -37,7 +37,8 @@
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
-  scrollbar-gutter: stable;
+  scrollbar-gutter: auto;
+  scrollbar-width: none;
 
   --term-bg: var(--terminal-bg);
   --term-fg: var(--terminal-fg);
@@ -63,7 +64,8 @@
 }
 
 .container:global(.wterm)::-webkit-scrollbar {
-  width: 8px;
+  width: 0;
+  height: 0;
 }
 
 .container:global(.wterm)::-webkit-scrollbar-track {
