@@ -6,6 +6,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/ops"
+	"github.com/tysonthomas9/loomcli/internal/webui/appstores"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/onboarding"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
@@ -16,6 +17,10 @@ type onboardingAdapter struct {
 	workspaceSvc service.WorkspaceService
 	backendOps   ops.BackendOps
 	issueCounter onboarding.IssueBackendCounter
+	// sessionStore is nil when Redis isn't configured for this server;
+	// in that case HasAnyAgentRun reports false (the run-agent step
+	// stays actionable, which is the safe default).
+	sessionStore *appstores.SessionHistoryStore
 }
 
 func (a *onboardingAdapter) HasAnyWorkspace(ctx context.Context) (bool, error) {
@@ -44,6 +49,13 @@ func (a *onboardingAdapter) IssueCount(ctx context.Context) (int, error) {
 	return a.issueCounter.Count(ctx)
 }
 
+func (a *onboardingAdapter) HasAnyAgentRun(ctx context.Context, wsID string) (bool, error) {
+	if a.sessionStore == nil {
+		return false, nil
+	}
+	return a.sessionStore.HasAnyForWorkspace(ctx, wsID)
+}
+
 // buildOnboardingHandler wires the onboarding endpoint handler from the
 // server's existing dependencies. Returns nil when workspaceSvc is
 // unavailable; callers gate route registration on the nil result.
@@ -62,6 +74,7 @@ func (app *Server) buildOnboardingHandler() http.HandlerFunc {
 				return app.config.IssueBackendFn(ctx)
 			},
 		},
+		sessionStore: app.sessionHistoryStore,
 	}
 	return onboarding.HandleStatus(deps)
 }

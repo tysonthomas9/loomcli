@@ -90,6 +90,12 @@ type Deps interface {
 	// IssueCount returns the number of issues in the workspace context
 	// carried by ctx (workspace ID is injected upstream by middleware).
 	IssueCount(ctx context.Context) (int, error)
+	// HasAnyAgentRun reports whether at least one terminal session has
+	// been recorded for any issue in the workspace. Used to flip the
+	// "run-agent" step to complete. Implementations may return
+	// (false, nil) when the session store is unavailable; in that case
+	// the step stays actionable.
+	HasAnyAgentRun(ctx context.Context, wsID string) (bool, error)
 }
 
 // ComputeStatus is a pure function over Deps. workspaceID is the empty
@@ -142,7 +148,7 @@ func computeWorkspaceScoped(ctx context.Context, deps Deps, wsID string) Status 
 
 	steps = append(steps, evalCreateAgentStep(ws, prevUnblocks(steps)))
 	steps = append(steps, evalCreateIssueStep(ctx, deps, prevUnblocks(steps)))
-	steps = append(steps, evalRunAgentStep(prevUnblocks(steps)))
+	steps = append(steps, evalRunAgentStep(ctx, deps, wsID, prevUnblocks(steps)))
 
 	return Status{
 		WorkspaceID: wsID,
@@ -281,16 +287,23 @@ func evalCreateIssueStep(ctx context.Context, deps Deps, unblocked bool) Step {
 	return step
 }
 
-func evalRunAgentStep(unblocked bool) Step {
+func evalRunAgentStep(ctx context.Context, deps Deps, wsID string, unblocked bool) Step {
 	step := Step{ID: StepRunAgent, Action: ActionStartFirstAgent}
 	if !unblocked {
 		step.Status = StatusBlocked
 		return step
 	}
-	// Phase 1: detecting "an agent has run" requires the run/session
-	// inspection plumbing landed in Phase 6. Until then, this step is
-	// always actionable once unblocked, and the frontend treats a
-	// successful "start agent" call as the implicit completion signal.
+	hasRun, err := deps.HasAnyAgentRun(ctx, wsID)
+	if err != nil {
+		// Surface unknown rather than block — failing the session-store
+		// scan shouldn't prevent the user from acting on the step.
+		step.Status = StatusActionable
+		return step
+	}
+	if hasRun {
+		step.Status = StatusComplete
+		return step
+	}
 	step.Status = StatusActionable
 	return step
 }

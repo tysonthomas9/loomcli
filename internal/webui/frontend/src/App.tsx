@@ -486,12 +486,19 @@ function App() {
     navigate(`/ws/${workspaceId}/settings#repo-checks`);
   });
   useRegisterOnboardingAction("start_first_agent", () => {
-    // The terminal-view switch is the deepest state we can land in
-    // without hooking into the run-orchestrator. The OnboardingFlow
-    // step transitions to "complete" once the server detects a
-    // session for this workspace; until that wiring lands the user
-    // can kick off an agent manually from the terminal.
-    setActiveView("terminal");
+    // The OnboardingFlow step transitions to "complete" once the
+    // server detects any session in the workspace via the session
+    // history store. Until then, the most useful thing we can do is
+    // take the user to a place where they can actually start an
+    // agent. If there's at least one issue, open its detail panel —
+    // that's where Start Work / claim flows live. Otherwise fall back
+    // to the terminal view so the user can spawn a session manually.
+    const firstIssue = issues[0];
+    if (firstIssue) {
+      navigate(`/ws/${workspaceId}/issues/${firstIssue.id}`);
+    } else {
+      setActiveView("terminal");
+    }
   });
 
   // Track mount state for async operations.

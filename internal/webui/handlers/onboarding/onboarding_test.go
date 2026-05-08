@@ -17,6 +17,7 @@ type stubDeps struct {
 	getWorkspace    func(ctx context.Context, wsID string) (*ops.WorkspaceData, error)
 	backendsHealth  func(ctx context.Context) ([]ops.BackendHealth, error)
 	issueCount      func(ctx context.Context) (int, error)
+	hasAnyAgentRun  func(ctx context.Context, wsID string) (bool, error)
 }
 
 func (s stubDeps) HasAnyWorkspace(ctx context.Context) (bool, error) {
@@ -45,6 +46,13 @@ func (s stubDeps) IssueCount(ctx context.Context) (int, error) {
 		return s.issueCount(ctx)
 	}
 	return 0, nil
+}
+
+func (s stubDeps) HasAnyAgentRun(ctx context.Context, wsID string) (bool, error) {
+	if s.hasAnyAgentRun != nil {
+		return s.hasAnyAgentRun(ctx, wsID)
+	}
+	return false, nil
 }
 
 func stepByID(t *testing.T, s Status, id StepID) Step {
@@ -227,7 +235,7 @@ func TestComputeStatus_BackendsHealthError(t *testing.T) {
 	}
 }
 
-func TestComputeStatus_AllComplete(t *testing.T) {
+func TestComputeStatus_AllStepsCompleteExceptRun(t *testing.T) {
 	deps := stubDeps{
 		getWorkspace: func(ctx context.Context, wsID string) (*ops.WorkspaceData, error) {
 			return &ops.WorkspaceData{
@@ -239,6 +247,10 @@ func TestComputeStatus_AllComplete(t *testing.T) {
 			return []ops.BackendHealth{{Name: "claude", Available: true, Installed: true, APIKeySet: true}}, nil
 		},
 		issueCount: func(ctx context.Context) (int, error) { return 3, nil },
+		// No sessions yet: step 6 stays actionable.
+		hasAnyAgentRun: func(ctx context.Context, wsID string) (bool, error) {
+			return false, nil
+		},
 	}
 	got := ComputeStatus(context.Background(), deps, "ws-1")
 
@@ -248,13 +260,40 @@ func TestComputeStatus_AllComplete(t *testing.T) {
 			t.Errorf("step %s = %s, want complete", id, s.Status)
 		}
 	}
-	// Run-agent stays actionable until session detection lands (Phase 6).
 	run := stepByID(t, got, StepRunAgent)
 	if run.Status != StatusActionable {
-		t.Errorf("run-agent = %s, want actionable (Phase 1 stub)", run.Status)
+		t.Errorf("run-agent = %s, want actionable (no session yet)", run.Status)
 	}
 	if got.AllComplete {
 		t.Error("AllComplete should be false while run-agent is actionable")
+	}
+}
+
+func TestComputeStatus_RunAgentCompleteAfterSession(t *testing.T) {
+	deps := stubDeps{
+		getWorkspace: func(ctx context.Context, wsID string) (*ops.WorkspaceData, error) {
+			return &ops.WorkspaceData{
+				Repos:  []ops.WorkspaceRepo{{Name: "r", DefaultBranch: "main"}},
+				Agents: []ops.WorkspaceAgentInfo{{Name: "falcon"}},
+			}, nil
+		},
+		backendsHealth: func(ctx context.Context) ([]ops.BackendHealth, error) {
+			return []ops.BackendHealth{{Name: "claude", Available: true, Installed: true, APIKeySet: true}}, nil
+		},
+		issueCount: func(ctx context.Context) (int, error) { return 1, nil },
+		// Session exists: step 6 should flip to complete and AllComplete is true.
+		hasAnyAgentRun: func(ctx context.Context, wsID string) (bool, error) {
+			return true, nil
+		},
+	}
+	got := ComputeStatus(context.Background(), deps, "ws-1")
+
+	run := stepByID(t, got, StepRunAgent)
+	if run.Status != StatusComplete {
+		t.Errorf("run-agent = %s, want complete (session exists)", run.Status)
+	}
+	if !got.AllComplete {
+		t.Error("AllComplete should be true when every step is complete")
 	}
 }
 

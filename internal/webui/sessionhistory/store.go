@@ -119,6 +119,35 @@ func (s *Store) List(ctx context.Context, workspaceID, issueID string) ([]Sessio
 	return sessions, nil
 }
 
+// HasAnyForWorkspace reports whether at least one session record exists
+// for any issue in the workspace. Used by the onboarding endpoint to
+// flip the "run-agent" step to complete once a session has been
+// recorded. Uses Redis SCAN on the workspace prefix; returns false +
+// nil error when the prefix has no matching keys.
+func (s *Store) HasAnyForWorkspace(ctx context.Context, workspaceID string) (bool, error) {
+	if workspaceID == "" {
+		return false, nil
+	}
+	pattern := "ws:" + workspaceID + ":" + keyPrefix + "*"
+	iter := s.client.Scan(ctx, 0, pattern, 1).Iterator()
+	if iter.Next(ctx) {
+		// Verify the key actually has a non-empty session list — an
+		// empty SessionHistory blob would not represent a real run.
+		key := iter.Val()
+		hist, err := s.getHistory(ctx, key)
+		if err != nil {
+			return false, fmt.Errorf("read session history at %q: %w", key, err)
+		}
+		if hist != nil && len(hist.Sessions) > 0 {
+			return true, nil
+		}
+	}
+	if err := iter.Err(); err != nil {
+		return false, fmt.Errorf("scan session keys: %w", err)
+	}
+	return false, nil
+}
+
 // Complete marks an active session as completed, setting EndedAt and ScrollbackPath.
 func (s *Store) Complete(ctx context.Context, workspaceID, issueID, sessionName, scrollbackPath string) error {
 	if err := ValidateIssueID(issueID); err != nil {
