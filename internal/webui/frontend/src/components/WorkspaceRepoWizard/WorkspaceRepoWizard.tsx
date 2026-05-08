@@ -140,8 +140,9 @@ export function WorkspaceRepoWizard({
         role="document"
       >
         <header>
+          <p className={styles.eyebrow}>Chapter I</p>
           <h2 id="workspace-wizard-heading" className={styles.heading}>
-            {polling ? "Creating workspace…" : "Create your first workspace"}
+            {polling ? "Cloning your repository…" : "Create a workspace."}
           </h2>
           <p className={styles.subtitle}>
             A workspace ties together one or more repos and the agents that work
