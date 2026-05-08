@@ -76,6 +76,11 @@
   outline-offset: 1px;
 }
 
+.workspaceOnboarding {
+  padding-top: var(--space-6);
+  padding-bottom: var(--space-6);
+}
+
 @media (width <= 1024px) {
   .headerControls {
     gap: var(--space-3);
