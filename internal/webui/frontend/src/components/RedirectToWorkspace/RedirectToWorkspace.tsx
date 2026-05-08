@@ -18,8 +18,8 @@ import {
 import { fetchWorkspaceApi } from "@/hooks/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { useRegisterOnboardingAction } from "@/contexts/OnboardingActionsContext";
-import { CreateWorkspaceModal } from "@/components/CreateWorkspaceModal";
 import { OnboardingFlow } from "@/components/OnboardingFlow";
+import { WorkspaceRepoWizard } from "@/components/WorkspaceRepoWizard";
 import { KeyboardShortcutProvider } from "@/hooks";
 import { AUTH_MODE_OPEN } from "@/types/common";
 
@@ -112,7 +112,7 @@ export function RedirectToWorkspace() {
           </p>
           <OnboardingFlow context="no-workspace" />
         </div>
-        <CreateWorkspaceModal
+        <WorkspaceRepoWizard
           isOpen={showCreate}
           onClose={() => setShowCreate(false)}
           onSuccess={(data, createdName) => {

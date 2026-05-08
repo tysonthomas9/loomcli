@@ -61,8 +61,8 @@ const { mockCreateWorkspaceModalProps } = vi.hoisted(() => ({
   mockCreateWorkspaceModalProps: vi.fn(),
 }));
 
-vi.mock("@/components/CreateWorkspaceModal", () => ({
-  CreateWorkspaceModal: (props: {
+vi.mock("@/components/WorkspaceRepoWizard", () => ({
+  WorkspaceRepoWizard: (props: {
     isOpen: boolean;
     onSuccess: (
       data: ReturnType<typeof makeWorkspaceData>,

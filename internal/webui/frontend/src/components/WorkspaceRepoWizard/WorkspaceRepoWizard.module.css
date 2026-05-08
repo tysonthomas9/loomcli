@@ -1,0 +1,136 @@
+.backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.dialog {
+  background: var(--color-surface, #fff);
+  color: var(--color-text-primary);
+  border-radius: 12px;
+  width: 100%;
+  max-width: 480px;
+  padding: var(--space-6, 24px);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.18);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4, 16px);
+}
+
+.heading {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.subtitle {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3, 12px);
+}
+
+.fieldGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.label {
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--color-text-primary);
+}
+
+.input {
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--color-text-muted) 30%, transparent);
+  border-radius: 6px;
+  font-size: 0.9rem;
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+}
+
+.input:focus {
+  outline: 2px solid var(--bg-accent, #1976d2);
+  outline-offset: -1px;
+}
+
+.sourceRow {
+  display: flex;
+  gap: 8px;
+}
+
+.sourceOption {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid color-mix(in srgb, var(--color-text-muted) 30%, transparent);
+  border-radius: 6px;
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+  cursor: pointer;
+  font-size: 0.85rem;
+  text-align: center;
+}
+
+.sourceOption.active {
+  border-color: var(--bg-accent, #1976d2);
+  background: color-mix(in srgb, var(--bg-accent, #1976d2) 10%, transparent);
+  font-weight: 500;
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.cancel,
+.submit {
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.cancel {
+  background: none;
+  border: 1px solid color-mix(in srgb, var(--color-text-muted) 30%, transparent);
+  color: var(--color-text-primary);
+}
+
+.submit {
+  background: var(--bg-accent, #1976d2);
+  border: none;
+  color: white;
+  font-weight: 500;
+}
+
+.submit:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.error {
+  color: var(--color-danger, #dc2626);
+  font-size: 0.85rem;
+}
+
+.progress {
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+}
+
+.hint {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+}
