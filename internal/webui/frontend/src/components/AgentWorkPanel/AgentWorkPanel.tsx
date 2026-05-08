@@ -19,6 +19,12 @@ import { type Issue, parseLoomStatus } from "@/types";
 
 interface AgentWorkPanelProps {
   agentName: string | undefined;
+  /**
+   * Override the default task-card click behavior. When provided, the panel
+   * calls this instead of WorkspaceViewActions.handleIssueClick — used by
+   * /agents to surface the IssueDetailPanel inline rather than as a slide-out.
+   */
+  onTaskClick?: (task: Issue) => void;
 }
 
 interface EpicGroup {
@@ -63,8 +69,12 @@ const PRIORITY_STYLE: Record<
   4: { label: "P4", color: "#888", border: "#aaa" },
 };
 
-export function AgentWorkPanel({ agentName }: AgentWorkPanelProps): JSX.Element {
+export function AgentWorkPanel({
+  agentName,
+  onTaskClick,
+}: AgentWorkPanelProps): JSX.Element {
   const { handleIssueClick } = useWorkspaceViewActions();
+  const dispatchClick = onTaskClick ?? handleIssueClick;
   const issueStore = useIssueStoreInstance();
   const issuesMap = useStore(issueStore, (s) => s.issuesMap);
   const agentStore = useAgentStoreInstance();
@@ -232,7 +242,7 @@ export function AgentWorkPanel({ agentName }: AgentWorkPanelProps): JSX.Element 
             <EpicGroupCard
               key={group.epicId}
               group={group}
-              onTaskClick={(task) => handleIssueClick(task)}
+              onTaskClick={(task) => dispatchClick(task)}
             />
           ))
         )}

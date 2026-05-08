@@ -32,6 +32,13 @@ export const ALLOWLIST = [
     source: "src/components/AppLayout/AppLayout.tsx",
     target: "@/components/LiveRegion/LiveRegion",
   },
+  {
+    // AgentDetailMain embeds the TerminalView inside the /agents middle pane
+    // (Direction J layout). Cross-component import is intentional — this is
+    // the intended composition surface for embedding live PTY sessions.
+    source: "src/components/AgentDetailMain/AgentDetailMain.tsx",
+    target: "@/components/TerminalView/TerminalView",
+  },
 ];
 
 /**

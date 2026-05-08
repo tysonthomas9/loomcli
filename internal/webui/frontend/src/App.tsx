@@ -36,6 +36,7 @@ import { SearchInput } from "@/components/search/SearchInput";
 import { SearchScopeIndicator } from "@/components/search/SearchScopeIndicator";
 import { IssueDetailPanel } from "@/components/IssueDetailPanel/IssueDetailPanel";
 import { AgentDetailPanel } from "@/components/AgentDetailPanel/AgentDetailPanel";
+import { AgentIconRail } from "@/components/AgentIconRail/AgentIconRail";
 import { WorkspaceTree } from "@/components/WorkspaceTree/WorkspaceTree";
 import { TalkToLeadButton } from "@/components/TalkToLeadButton/TalkToLeadButton";
 import { NavRail } from "@/components/NavRail/NavRail";
@@ -1086,7 +1087,7 @@ function App() {
               badges={{ terminal: hasTerminalUnread }}
             />
           }
-          sidebar={sidebarContent}
+          sidebar={activeView === "agents" ? <AgentIconRail /> : sidebarContent}
         >
           <ViewSubSwitcher activeView={activeView} onChange={navigateToView} />
           {(showStaleBanner || isConnectionLost) &&

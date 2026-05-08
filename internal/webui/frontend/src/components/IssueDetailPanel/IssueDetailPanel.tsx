@@ -150,6 +150,13 @@ export interface IssueDetailPanelProps {
   onCopyLink?: () => void;
   /** Callback when a dependency/dependent issue is clicked for navigation */
   onNavigateToIssue?: (issue: Issue) => void;
+  /**
+   * When true, renders the panel inline (no fixed-position overlay, no
+   * slide-out animation, no backdrop). Used by the /agents view to embed
+   * task details as a regular layout column. Default is false — every
+   * other surface keeps the slide-out behavior.
+   */
+  inline?: boolean;
 }
 
 /**
@@ -1471,33 +1478,29 @@ export function IssueDetailPanel({
   onIssueUpdate,
   onCopyLink,
   onNavigateToIssue,
+  inline = false,
 }: IssueDetailPanelProps): JSX.Element {
   const panelRef = useRef<HTMLElement>(null);
 
-  // Handle Escape key to close panel via global shortcut layer system
-  useRegisterEscapeLayer(LAYER_ISSUE_PANEL, onClose, isOpen);
+  // Handle Escape key to close panel via global shortcut layer system.
+  // Inline mode skips this — the embedding view owns close semantics.
+  useRegisterEscapeLayer(LAYER_ISSUE_PANEL, onClose, isOpen && !inline);
 
-  // Lock body scroll when open, restoring previous value on close.
-  // Note: Only ONE panel should be open at a time. Multiple concurrent panels
-  // would require a scroll lock manager to handle overflow restoration properly.
+  // Lock body scroll when open as a slide-out overlay. Inline mode is part
+  // of the page flow, so don't lock scroll.
   useEffect(() => {
-    if (isOpen) {
+    if (isOpen && !inline) {
       const previousOverflow = document.body.style.overflow;
       document.body.style.overflow = "hidden";
       return () => {
         document.body.style.overflow = previousOverflow;
       };
     }
-  }, [isOpen]);
+  }, [isOpen, inline]);
 
-  // Focus management: focus the panel when opened, restore focus on close
-  useFocusReturn(isOpen, { focusTarget: panelRef });
-  useFocusTrap(panelRef, isOpen);
-
-  // Build root class name
-  const rootClassName = [styles.overlay, isOpen && styles.open, className]
-    .filter(Boolean)
-    .join(" ");
+  // Focus management: only meaningful for the slide-out overlay.
+  useFocusReturn(isOpen && !inline, { focusTarget: panelRef });
+  useFocusTrap(panelRef, isOpen && !inline);
 
   // Determine content: children override default, otherwise render default content
   const content = children ?? (
@@ -1513,6 +1516,40 @@ export function IssueDetailPanel({
       {...(onNavigateToIssue !== undefined && { onNavigateToIssue })}
     />
   );
+
+  // Inline mode: render a regular column without overlay, backdrop, or
+  // slide-out animation. The embedding layout reserves the space.
+  if (inline) {
+    return (
+      <aside
+        ref={panelRef}
+        className={[styles.panel, className].filter(Boolean).join(" ")}
+        role="region"
+        aria-label={issue ? `Details for ${issue.title}` : "Issue details"}
+        data-testid="issue-detail-panel"
+        data-state={isOpen ? "open" : "closed"}
+        data-loading={isLoading ? "true" : "false"}
+        data-error={error ? "true" : "false"}
+        data-inline="true"
+        style={{
+          position: "static",
+          width: "100%",
+          height: "100%",
+          maxWidth: "none",
+          flexShrink: 0,
+          transform: "none",
+          boxShadow: "none",
+        }}
+      >
+        <div className={styles.content}>{content}</div>
+      </aside>
+    );
+  }
+
+  // Build root class name
+  const rootClassName = [styles.overlay, isOpen && styles.open, className]
+    .filter(Boolean)
+    .join(" ");
 
   return (
     <div
