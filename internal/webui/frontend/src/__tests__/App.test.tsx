@@ -87,6 +87,19 @@ vi.mock("zustand", () => ({
     selector(mockStoreState),
 }));
 
+// App registers onboarding actions; the context is owned by main.tsx's
+// provider in production. Tests render App directly so we stub the
+// registration as a no-op rather than wrap each render in the provider.
+vi.mock("@/contexts/OnboardingActionsContext", () => ({
+  useRegisterOnboardingAction: () => {},
+}));
+// EmptyWorkspaceBoard now embeds OnboardingFlow which fires a network
+// request. Stub OnboardingFlow to null so empty-state tests don't have
+// to mock the onboarding API.
+vi.mock("@/components/OnboardingFlow", () => ({
+  OnboardingFlow: () => null,
+}));
+
 // Mock @/api functions used by handleApprove and handleReject
 vi.mock("@/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/api")>();

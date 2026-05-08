@@ -2,7 +2,15 @@
  * EmptyWorkspaceBoard component for board-level empty states.
  * Shown when a workspace has zero issues (or filters reduce to zero).
  * Reactively disappears when data arrives via SSE.
+ *
+ * For true empty states (no filters active) the component renders an
+ * inline OnboardingFlow below the existing visuals so first-time users
+ * see the full setup checklist. The legacy heading and subtitle remain
+ * unchanged so existing test assertions keep working.
  */
+
+import { OnboardingFlow } from "@/components/OnboardingFlow";
+import { useWorkspaceContext } from "@/hooks/workspace/useWorkspaceContext";
 
 import styles from "./EmptyWorkspaceBoard.module.css";
 
@@ -37,6 +45,11 @@ export function EmptyWorkspaceBoard({
   hasFiltersActive = false,
 }: EmptyWorkspaceBoardProps): JSX.Element {
   const { headline, subtitle } = getContent(isMultiRepo, hasFiltersActive);
+  // workspaceId is "" when this component is used outside a workspace
+  // context (e.g. tests). The onboarding flow only mounts when we have
+  // a real workspace and we're in a true-empty state, not a filtered one.
+  const { workspaceId } = useWorkspaceContext();
+  const showOnboarding = !hasFiltersActive && workspaceId !== "";
 
   return (
     <div
@@ -68,6 +81,9 @@ export function EmptyWorkspaceBoard({
       </div>
       <h3 className={styles.headline}>{headline}</h3>
       <p className={styles.subtitle}>{subtitle}</p>
+      {showOnboarding ? (
+        <OnboardingFlow context="empty-kanban" workspaceId={workspaceId} />
+      ) : null}
     </div>
   );
 }

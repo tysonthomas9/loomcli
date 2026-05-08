@@ -43,6 +43,7 @@ import { ViewSubSwitcher } from "@/components/ViewSubSwitcher/ViewSubSwitcher";
 import { ThemeToggle } from "@/components/ThemeToggle/ThemeToggle";
 import { KeyboardCheatsheet } from "@/components/KeyboardCheatsheet/KeyboardCheatsheet";
 import { WorkspaceSwitcher } from "@/components/WorkspaceSwitcher/WorkspaceSwitcher";
+import { useRegisterOnboardingAction } from "@/contexts/OnboardingActionsContext";
 import { CreateIssueModal } from "@/components/CreateIssueModal/CreateIssueModal";
 import { CreateWorkspaceModal } from "@/components/CreateWorkspaceModal/CreateWorkspaceModal";
 import { CreateAgentModal } from "@/components/CreateAgentModal/CreateAgentModal";
@@ -456,6 +457,31 @@ function App() {
   const [showCreateIssue, setShowCreateIssue] = useState(false);
   const [showCreateWorkspace, setShowCreateWorkspace] = useState(false);
   const [showCreateAgent, setShowCreateAgent] = useState(false);
+
+  // Onboarding CTAs dispatch through OnboardingActionsContext. App.tsx
+  // owns the workspace-scoped modals and is the place to register the
+  // handlers. RedirectToWorkspace handles the no-workspace case
+  // separately. start_first_agent and open_repo_checks land in a
+  // follow-up — for now they navigate the user somewhere actionable so
+  // the CTA isn't a dead click.
+  useRegisterOnboardingAction("open_create_issue", () => {
+    setShowCreateIssue(true);
+  });
+  useRegisterOnboardingAction("open_create_agent", () => {
+    setShowCreateAgent(true);
+  });
+  useRegisterOnboardingAction("open_workspace_repo_wizard", () => {
+    setShowCreateWorkspace(true);
+  });
+  useRegisterOnboardingAction("open_backend_setup", () => {
+    navigate(`/ws/${workspaceId}/settings`);
+  });
+  useRegisterOnboardingAction("open_repo_checks", () => {
+    navigate(`/ws/${workspaceId}/workspace`);
+  });
+  useRegisterOnboardingAction("start_first_agent", () => {
+    setActiveView("terminal");
+  });
 
   // Track mount state for async operations.
   useEffect(() => {
