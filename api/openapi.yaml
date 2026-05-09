@@ -4464,6 +4464,18 @@ components:
           type: string
         daemon_managed:
           type: boolean
+        parent:
+          type: string
+          description: Active epic assignment for lead/workers.
+        orchestrator_session_id:
+          type: string
+          description: Lead/orchestrator session that spawned or owns the agent.
+        mode:
+          type: string
+          description: Assignment mode, such as persistent or ephemeral.
+        desired_state:
+          type: string
+          description: Requested daemon state for the agent.
         commits:
           type: array
           items:

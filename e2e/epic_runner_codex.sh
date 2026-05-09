@@ -63,6 +63,7 @@ export LOOM_ISSUE_BACKEND="fleetdb"
 export LOOM_FLEET_DB_ACTOR="epic-runner-e2e"
 export STUB_CODEX_EPIC_RUNNER="1"
 export STUB_CODEX_INVOCATIONS="$ROOT/codex-invocations.log"
+export LEAD_SESSION_ID="lead-session-e2e"
 export GIT_AUTHOR_NAME="Loom E2E"
 export GIT_AUTHOR_EMAIL="loom-e2e@example.test"
 export GIT_COMMITTER_NAME="$GIT_AUTHOR_NAME"
@@ -141,8 +142,12 @@ TASK_B="$(create_issue \
     --depends-on "$TASK_A" \
     --design "$DESIGN_B")"
 
-timeout "$EPIC_RUNNER_TIMEOUT" loom epic run \
+loom role add lead --description "Lead orchestration agent" --backend codex
+loom agentdef add nova --role lead --auto --repos app
+
+LOOM_ORCHESTRATOR_SESSION_ID="$LEAD_SESSION_ID" timeout "$EPIC_RUNNER_TIMEOUT" loom epic run \
     --parent "$EPIC_ID" \
+    --lead nova \
     --max-concurrency 1 \
     --interval-seconds 1 \
     --node-id "$NODE_ID" \
@@ -180,5 +185,27 @@ done
 
 loom workspace show --json "$LOOM_WORKSPACE" | jq -e \
     '[.agents[] | select(.mode == "ephemeral" and .desired_state == "stopped" and .state == "stopped")] | length == 2' >/dev/null
+
+loom workspace show --json "$LOOM_WORKSPACE" | jq -e \
+    --arg epic "$EPIC_ID" \
+    --arg session "$LEAD_SESSION_ID" \
+    '.agents[] | select(.name == "nova" and .role_name == "lead" and .parent == $epic and .orchestrator_session_id == $session)' >/dev/null
+
+loom workspace show --json "$LOOM_WORKSPACE" | jq -e \
+    --arg epic "$EPIC_ID" \
+    --arg session "$LEAD_SESSION_ID" \
+    '[.agents[] | select(.mode == "ephemeral" and .parent == $epic and .orchestrator_session_id == $session)] | length == 2' >/dev/null
+
+OTHER_EPIC_ID="$(create_issue \
+    --title "Other epic" \
+    --type epic \
+    --status open)"
+
+if loom epic run --parent "$OTHER_EPIC_ID" --lead nova --dry-run >/tmp/loom-epic-runner-conflict.out 2>&1; then
+    echo "expected lead conflict when nova already owns $EPIC_ID" >&2
+    cat /tmp/loom-epic-runner-conflict.out >&2
+    exit 1
+fi
+grep -q "already running epic $EPIC_ID" /tmp/loom-epic-runner-conflict.out
 
 echo "PASS epic runner Codex E2E"

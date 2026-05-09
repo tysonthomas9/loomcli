@@ -85,6 +85,11 @@ export function AgentWorkPanel({
   const issuesMap = useStore(issueStore, (s) => s.issuesMap);
   const agentStore = useAgentStoreInstance();
   const agents = useStore(agentStore, (s) => s.agents);
+  const selectedAgent = useMemo(
+    () => (agentName ? agents.find((x) => x.name === agentName) : undefined),
+    [agentName, agents],
+  );
+  const selectedAgentIsLead = isLeadRole(selectedAgent?.role);
 
   // Detect the agent's "active epic": parse its current-task ID from status,
   // look the task up, walk to its parent. When set, the panel focuses on that
@@ -92,13 +97,13 @@ export function AgentWorkPanel({
   // user sees the full DAG the agent is working under.
   const activeEpicId = useMemo<string | undefined>(() => {
     if (!agentName) return undefined;
-    const a = agents.find((x) => x.name === agentName);
-    if (!a) return undefined;
-    const parsed = parseLoomStatus(a.status ?? "");
+    if (!selectedAgent) return undefined;
+    if (selectedAgent.parent) return selectedAgent.parent;
+    const parsed = parseLoomStatus(selectedAgent.status ?? "");
     if (!parsed.taskId) return undefined;
     const task = issuesMap.get(parsed.taskId);
     return task?.parent || undefined;
-  }, [agentName, agents, issuesMap]);
+  }, [agentName, selectedAgent, issuesMap]);
 
   // Three rendering modes:
   //   1. activeEpic — agent is working a task; zoom into that epic and show
@@ -114,13 +119,17 @@ export function AgentWorkPanel({
       const v = scopeToEpic(issuesMap, activeEpicId);
       return { ...v, mode: "epic" as const };
     }
+    if (selectedAgentIsLead) {
+      const v = groupOpenByEpic(issuesMap);
+      return { ...v, mode: "lead-open" as const };
+    }
     const agentScoped = groupAgentTasksByEpic(issuesMap, agentName);
     if (agentScoped.totalTasks > 0) {
       return { ...agentScoped, mode: "agent" as const };
     }
     const wide = groupAllByEpic(issuesMap);
     return { ...wide, mode: "workspace" as const };
-  }, [issuesMap, agentName, activeEpicId]);
+  }, [issuesMap, agentName, activeEpicId, selectedAgentIsLead]);
   const focused = mode === "epic";
 
   if (!agentName) {
@@ -146,9 +155,11 @@ export function AgentWorkPanel({
           </>
         ) : (
           <div className={styles.label}>
-            {mode === "workspace"
-              ? `Workspace queue · ${groups.length} epic${groups.length === 1 ? "" : "s"} · ${totalTasks} task${totalTasks === 1 ? "" : "s"}`
-              : `${agentName}'s work · ${groups.length} epic${groups.length === 1 ? "" : "s"} · ${totalTasks} task${totalTasks === 1 ? "" : "s"}`}
+            {mode === "lead-open"
+              ? `Open queue · ${groups.length} epic${groups.length === 1 ? "" : "s"} · ${totalTasks} task${totalTasks === 1 ? "" : "s"}`
+              : mode === "workspace"
+                ? `Workspace queue · ${groups.length} epic${groups.length === 1 ? "" : "s"} · ${totalTasks} task${totalTasks === 1 ? "" : "s"}`
+                : `${agentName}'s work · ${groups.length} epic${groups.length === 1 ? "" : "s"} · ${totalTasks} task${totalTasks === 1 ? "" : "s"}`}
           </div>
         )}
 
@@ -168,13 +179,15 @@ export function AgentWorkPanel({
       </div>
 
       <div className={styles.body}>
-        {totalTasks === 0 ? (
+        {groups.length === 0 ? (
           <div className={styles.emptyState}>
             {focused
               ? "Active epic has no child tasks."
-              : mode === "workspace"
-                ? "No issues in this workspace yet."
-                : `No tasks assigned to ${agentName} yet.`}
+              : mode === "lead-open"
+                ? "No open epics or tasks in this workspace."
+                : mode === "workspace"
+                  ? "No issues in this workspace yet."
+                  : `No tasks assigned to ${agentName} yet.`}
           </div>
         ) : (
           groups.map((group) => (
@@ -215,11 +228,7 @@ function EpicGroupCard({
         />
       </div>
       {group.tasks.map((task) => (
-        <TaskCard
-          key={task.id}
-          task={task}
-          onClick={() => onTaskClick(task)}
-        />
+        <TaskCard key={task.id} task={task} onClick={() => onTaskClick(task)} />
       ))}
     </div>
   );
@@ -261,6 +270,11 @@ function TaskCard({
 
 function CountChip({ label }: { label: string }): JSX.Element {
   return <span className={styles.countChip}>{label}</span>;
+}
+
+function isLeadRole(role: string | undefined): boolean {
+  const normalized = (role ?? "").trim().toLowerCase();
+  return normalized === "lead" || normalized === "orchestrator";
 }
 
 /**
@@ -353,9 +367,11 @@ function taskSortRank(a: Issue, b: Issue): number {
  * no active task — the right panel still shows useful context (the broader
  * workspace queue) instead of going empty.
  */
-export function groupAllByEpic(
-  issuesMap: Map<string, Issue>,
-): { groups: EpicGroup[]; counts: Counts; totalTasks: number } {
+export function groupAllByEpic(issuesMap: Map<string, Issue>): {
+  groups: EpicGroup[];
+  counts: Counts;
+  totalTasks: number;
+} {
   const counts: Counts = { active: 0, done: 0, open: 0, blocked: 0 };
   const byEpic = new Map<string, Issue[]>();
   let totalTasks = 0;
@@ -410,6 +426,67 @@ export function groupAllByEpic(
 }
 
 /**
+ * groupOpenByEpic returns open epics plus their non-closed child tasks. This
+ * is the idle lead view: it shows what a lead can pick up next without mixing
+ * in completed history.
+ */
+export function groupOpenByEpic(issuesMap: Map<string, Issue>): {
+  groups: EpicGroup[];
+  counts: Counts;
+  totalTasks: number;
+} {
+  const counts: Counts = { active: 0, done: 0, open: 0, blocked: 0 };
+  const byEpic = new Map<string, Issue[]>();
+  let totalTasks = 0;
+
+  for (const issue of issuesMap.values()) {
+    if (issue.issue_type === "epic") {
+      if (isOpenIssue(issue)) {
+        byEpic.set(issue.id, byEpic.get(issue.id) ?? []);
+      }
+      continue;
+    }
+    if (!isOpenIssue(issue)) continue;
+    totalTasks++;
+    const status = (issue.status ?? "open").toLowerCase();
+    if (status === "in_progress" || status === "active") counts.active++;
+    else if (status === "blocked") counts.blocked++;
+    else counts.open++;
+
+    const epicKey = issue.parent || ORPHAN_EPIC_KEY;
+    const list = byEpic.get(epicKey) ?? [];
+    list.push(issue);
+    byEpic.set(epicKey, list);
+  }
+
+  const groups: EpicGroup[] = [];
+  for (const [epicKey, tasks] of byEpic.entries()) {
+    const epicIssue =
+      epicKey === ORPHAN_EPIC_KEY ? undefined : issuesMap.get(epicKey);
+    const epicTitle =
+      epicKey === ORPHAN_EPIC_KEY
+        ? "Unassigned"
+        : (epicIssue?.title ?? epicKey);
+    tasks.sort(taskSortRank);
+    groups.push({
+      epicId: epicKey,
+      epicTitle,
+      tasks,
+      doneCount: 0,
+      totalCount: tasks.length,
+    });
+  }
+
+  groups.sort((a, b) => {
+    if (a.epicId === ORPHAN_EPIC_KEY) return 1;
+    if (b.epicId === ORPHAN_EPIC_KEY) return -1;
+    return a.epicTitle.localeCompare(b.epicTitle);
+  });
+
+  return { groups, counts, totalTasks };
+}
+
+/**
  * scopeToEpic returns a single-group view focused on one epic and ALL its
  * child tasks (regardless of assignee). Used when the selected agent has an
  * active task — the panel zooms into the broader DAG the agent is contributing
@@ -450,6 +527,11 @@ export function scopeToEpic(
   };
 
   return { groups: [group], counts, totalTasks: tasks.length };
+}
+
+function isOpenIssue(issue: Issue): boolean {
+  const status = (issue.status ?? "open").toLowerCase();
+  return status !== "closed" && status !== "done" && status !== "deferred";
 }
 
 function statusRank(status: string | undefined): number {

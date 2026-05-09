@@ -2,6 +2,7 @@ package epic
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -22,6 +23,108 @@ func TestWorkerNameAddsHashToAvoidSanitizedCollisions(t *testing.T) {
 	}
 	if strings.ContainsAny(a, "/:") || strings.ContainsAny(b, "/:") {
 		t.Fatalf("workerName contains unsanitized chars: %q %q", a, b)
+	}
+}
+
+func TestBindLeadAgentAssignsEmptyParent(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	createTestLead(t, st, "ws", "nova", "", "")
+
+	leadName, orch, err := bindLeadAgent(ctx, st, "ws", "nova", "EPIC-1", "session-1", true)
+	if err != nil {
+		t.Fatalf("bindLeadAgent() error = %v", err)
+	}
+	if leadName != "nova" || orch != "session-1" {
+		t.Fatalf("bindLeadAgent() = (%q, %q), want nova/session-1", leadName, orch)
+	}
+	got, err := st.Agents().Get(ctx, "ws", "nova")
+	if err != nil {
+		t.Fatalf("get lead: %v", err)
+	}
+	if got.Parent != "EPIC-1" {
+		t.Fatalf("lead parent = %q, want EPIC-1", got.Parent)
+	}
+	if got.OrchestratorSessionID != "session-1" {
+		t.Fatalf("lead orchestrator = %q, want session-1", got.OrchestratorSessionID)
+	}
+}
+
+func TestBindLeadAgentAllowsSameParent(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	createTestLead(t, st, "ws", "nova", "EPIC-1", "session-1")
+
+	_, orch, err := bindLeadAgent(ctx, st, "ws", "nova", "EPIC-1", "", true)
+	if err != nil {
+		t.Fatalf("bindLeadAgent() error = %v", err)
+	}
+	if orch != "session-1" {
+		t.Fatalf("orchestrator = %q, want existing session-1", orch)
+	}
+}
+
+func TestBindLeadAgentRejectsDifferentParent(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	createTestLead(t, st, "ws", "nova", "EPIC-1", "")
+
+	_, _, err := bindLeadAgent(ctx, st, "ws", "nova", "EPIC-2", "", true)
+	if err == nil {
+		t.Fatal("bindLeadAgent() error = nil, want conflict")
+	}
+	if !strings.Contains(err.Error(), "already running epic EPIC-1") {
+		t.Fatalf("error = %v, want active epic message", err)
+	}
+}
+
+func TestBindLeadAgentRejectsNonLeadRole(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Agents().Create(ctx, store.AgentCreate{
+		WorkspaceKey: "ws",
+		Name:         "worker",
+		RoleName:     "task",
+	}); err != nil {
+		t.Fatalf("create task agent: %v", err)
+	}
+
+	_, _, err := bindLeadAgent(ctx, st, "ws", "worker", "EPIC-1", "", true)
+	if err == nil {
+		t.Fatal("bindLeadAgent() error = nil, want non-lead role error")
+	}
+	if !strings.Contains(err.Error(), "requires a lead agent") {
+		t.Fatalf("error = %v, want lead role message", err)
+	}
+}
+
+func TestBindLeadAgentDryRunDoesNotAssignParent(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	createTestLead(t, st, "ws", "nova", "", "")
+
+	if _, _, err := bindLeadAgent(ctx, st, "ws", "nova", "EPIC-1", "", false); err != nil {
+		t.Fatalf("bindLeadAgent() error = %v", err)
+	}
+	got, err := st.Agents().Get(ctx, "ws", "nova")
+	if err != nil {
+		t.Fatalf("get lead: %v", err)
+	}
+	if got.Parent != "" {
+		t.Fatalf("lead parent = %q, want empty in dry-run", got.Parent)
+	}
+}
+
+func TestBindLeadAgentMissingLead(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+
+	_, _, err := bindLeadAgent(ctx, st, "ws", "missing", "EPIC-1", "", true)
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("bindLeadAgent() error = %v, want ErrNotFound", err)
+	}
+	if !strings.Contains(err.Error(), "was not found") {
+		t.Fatalf("error = %v, want not found message", err)
 	}
 }
 
@@ -58,5 +161,19 @@ func TestSelectTargetNodeIDRequiresSingleActiveNode(t *testing.T) {
 	}
 	if _, err := selectTargetNodeID(ctx, st, "ws"); err == nil {
 		t.Fatal("selectTargetNodeID() error = nil, want multiple-node error")
+	}
+}
+
+func createTestLead(t *testing.T, st store.Store, workspace, name, parent, orchestrator string) {
+	t.Helper()
+	_, err := st.Agents().Create(context.Background(), store.AgentCreate{
+		WorkspaceKey:          workspace,
+		Name:                  name,
+		RoleName:              "lead",
+		Parent:                parent,
+		OrchestratorSessionID: orchestrator,
+	})
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
 	}
 }

@@ -2554,6 +2554,14 @@ export interface components {
       repo?: string;
       workspace: string;
       daemon_managed?: boolean;
+      /** @description Active epic assignment for lead/workers. */
+      parent?: string;
+      /** @description Lead/orchestrator session that spawned or owns the agent. */
+      orchestrator_session_id?: string;
+      /** @description Assignment mode, such as persistent or ephemeral. */
+      mode?: string;
+      /** @description Requested daemon state for the agent. */
+      desired_state?: string;
       commits?: components["schemas"]["MonitorCommitDetail"][];
       changes?: components["schemas"]["MonitorFileChange"][];
     };

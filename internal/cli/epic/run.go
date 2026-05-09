@@ -29,7 +29,10 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
-const envOrchestratorSessionID = "LOOM_ORCHESTRATOR_SESSION_ID"
+const (
+	envAgentName             = "LOOM_AGENT_NAME"
+	envOrchestratorSessionID = "LOOM_ORCHESTRATOR_SESSION_ID"
+)
 
 var (
 	runParent          string
@@ -39,6 +42,7 @@ var (
 	runRole            string
 	runDryRun          bool
 	runNodeID          string
+	runLead            string
 )
 
 var epicCmd = &cobra.Command{
@@ -82,6 +86,7 @@ func init() {
 	epicRunCmd.Flags().IntVar(&runIntervalSeconds, "interval-seconds", 5, "Seconds between reconcile passes")
 	epicRunCmd.Flags().StringVar(&runRole, "role", "task", "Role to spawn workers under")
 	epicRunCmd.Flags().StringVar(&runNodeID, "node-id", "", "Daemon node ID to run spawned workers on (default: the single active local node)")
+	epicRunCmd.Flags().StringVar(&runLead, "lead", "", "Lead agent running this epic (default: $LOOM_AGENT_NAME when set)")
 	epicRunCmd.Flags().BoolVar(&runDryRun, "dry-run", false, "Print what would be spawned but don't actually create agents")
 
 	epicCmd.AddCommand(epicRunCmd)
@@ -123,6 +128,12 @@ func runEpicRun(cmd *cobra.Command, _ []string) error {
 		return errors.New("no issue backend available")
 	}
 
+	orchestratorID := strings.TrimSpace(os.Getenv(envOrchestratorSessionID))
+	leadName, orchestratorID, err := bindLeadAgent(ctx, handle.Store, ws, resolveLeadName(runLead), runParent, orchestratorID, !runDryRun)
+	if err != nil {
+		return err
+	}
+
 	nodeID := runNodeID
 	if nodeID == "" && handle.Store.AgentCommands() != nil && !runDryRun {
 		nodeID, err = selectTargetNodeID(ctx, handle.Store, ws)
@@ -131,12 +142,12 @@ func runEpicRun(cmd *cobra.Command, _ []string) error {
 		}
 	}
 
-	orchestratorID := os.Getenv(envOrchestratorSessionID)
 	r := &runner{
 		store:                 handle.Store,
 		ib:                    ib,
 		workspace:             ws,
 		parent:                runParent,
+		leadName:              leadName,
 		role:                  runRole,
 		prefix:                prefix,
 		maxConcurrency:        runMaxConcurrency,
@@ -156,6 +167,7 @@ type runner struct {
 	ib                    backend.IssueBackend
 	workspace             string
 	parent                string
+	leadName              string
 	role                  string
 	prefix                string
 	maxConcurrency        int
@@ -174,6 +186,9 @@ func (r *runner) printHeader() {
 	fmt.Printf("Epic runner\n")
 	fmt.Printf("  workspace:        %s\n", r.workspace)
 	fmt.Printf("  parent epic:      %s\n", r.parent)
+	if r.leadName != "" {
+		fmt.Printf("  lead agent:       %s\n", r.leadName)
+	}
 	fmt.Printf("  role:             %s\n", r.role)
 	fmt.Printf("  worker prefix:    %s\n", r.prefix)
 	fmt.Printf("  max concurrency:  %d\n", r.maxConcurrency)
@@ -190,6 +205,87 @@ func (r *runner) printHeader() {
 		fmt.Printf("  dry-run:          true\n")
 	}
 	fmt.Printf("\n")
+}
+
+func resolveLeadName(flagValue string) string {
+	if lead := strings.TrimSpace(flagValue); lead != "" {
+		return lead
+	}
+	return strings.TrimSpace(os.Getenv(envAgentName))
+}
+
+func bindLeadAgent(ctx context.Context, st store.Store, workspace, leadName, parent, orchestratorID string, mutate bool) (string, string, error) {
+	leadName = strings.TrimSpace(leadName)
+	if leadName == "" {
+		return "", orchestratorID, nil
+	}
+
+	lead, err := st.Agents().Get(ctx, workspace, leadName)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return "", "", fmt.Errorf("lead agent %q was not found in workspace %s; create it with `loom agentdef add %s --role lead` or rerun without --lead: %w", leadName, workspace, leadName, domain.ErrNotFound)
+		}
+		return "", "", fmt.Errorf("load lead agent %q: %w", leadName, err)
+	}
+	if lead == nil {
+		return "", "", fmt.Errorf("lead agent %q lookup returned nil", leadName)
+	}
+	if !isLeadRole(lead.RoleName) {
+		return "", "", fmt.Errorf("agent %q has role %q; `loom epic run` requires a lead agent when --lead or %s is set", leadName, lead.RoleName, envAgentName)
+	}
+	if lead.Parent != "" && lead.Parent != parent {
+		return "", "", fmt.Errorf("lead agent %q is already running epic %s; ask the lead to clear or finish that epic before running %s", leadName, lead.Parent, parent)
+	}
+
+	effectiveOrchestratorID := strings.TrimSpace(orchestratorID)
+	if effectiveOrchestratorID == "" {
+		effectiveOrchestratorID = strings.TrimSpace(lead.OrchestratorSessionID)
+	}
+
+	if !mutate {
+		if lead.Parent == "" {
+			fmt.Printf("[epic-run] DRY-RUN would assign lead %s to epic %s\n", leadName, parent)
+		}
+		return leadName, effectiveOrchestratorID, nil
+	}
+
+	patch := store.AgentUpdate{}
+	needsUpdate := false
+	if lead.Parent == "" {
+		patch.Parent = &parent
+		needsUpdate = true
+	}
+	if effectiveOrchestratorID != "" && lead.OrchestratorSessionID != effectiveOrchestratorID {
+		patch.OrchestratorSessionID = &effectiveOrchestratorID
+		needsUpdate = true
+	}
+	if !needsUpdate {
+		return leadName, effectiveOrchestratorID, nil
+	}
+
+	updated, err := st.Agents().Update(ctx, workspace, leadName, patch)
+	if err != nil {
+		return "", "", fmt.Errorf("bind lead agent %q to epic %s: %w", leadName, parent, err)
+	}
+	if updated == nil {
+		return "", "", fmt.Errorf("bind lead agent %q returned nil", leadName)
+	}
+	if updated.Parent != parent {
+		return "", "", fmt.Errorf("lead agent %q is already running epic %s; ask the lead to clear or finish that epic before running %s", leadName, updated.Parent, parent)
+	}
+	if effectiveOrchestratorID == "" {
+		effectiveOrchestratorID = strings.TrimSpace(updated.OrchestratorSessionID)
+	}
+	return leadName, effectiveOrchestratorID, nil
+}
+
+func isLeadRole(role string) bool {
+	switch strings.ToLower(strings.TrimSpace(role)) {
+	case "lead", "orchestrator":
+		return true
+	default:
+		return false
+	}
 }
 
 // reconcileLoop is the core loop: query Ready, dispatch any ungraduated tasks,
@@ -411,9 +507,11 @@ func (r *runner) ensureLocalWorkerWorktrees(ctx context.Context, agent domain.Ag
 			continue
 		}
 		localRepos = append(localRepos, localworkspace.Repo{
-			Name:   repo.Name,
-			Path:   localworkspace.RepoPath(local, repo.Name),
-			Groups: append([]string(nil), repo.Groups...),
+			Name:          repo.Name,
+			Path:          localworkspace.RepoPath(local, repo.Name),
+			Remote:        repo.Remote,
+			DefaultBranch: repo.DefaultBranch,
+			Groups:        append([]string(nil), repo.Groups...),
 		})
 	}
 	selected, err := localworkspace.SelectAgentRepos(localRepos, agent)
@@ -427,7 +525,7 @@ func (r *runner) ensureLocalWorkerWorktrees(ctx context.Context, agent domain.Ag
 	created := make(map[string]string, len(selected))
 	for _, repo := range selected {
 		target := localworkspace.AgentWorktreePath(local.Path, repo.Name, agent.Name)
-		if err := localworkspace.EnsureGitWorktree(repo.Path, target, agent.Name); err != nil {
+		if err := localworkspace.EnsureGitWorktreeFromBranch(repo.Path, target, agent.Name, repo.Remote, repo.DefaultBranch); err != nil {
 			return fmt.Errorf("create worktree for repo %q: %w", repo.Name, err)
 		}
 		created[repo.Name] = target

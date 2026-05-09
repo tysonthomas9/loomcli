@@ -39,6 +39,10 @@ export function AgentIconRail(): JSX.Element {
   const navigate = useNavigate();
   const agentStore = useAgentStoreInstance();
   const agents = useStore(agentStore, (s) => s.agents);
+  const orderedAgents = useMemo(
+    () => orderAgentsForEpicRunner(agents),
+    [agents],
+  );
 
   const handleClick = useMemo(
     () => (name: string) =>
@@ -88,7 +92,7 @@ export function AgentIconRail(): JSX.Element {
           None yet
         </div>
       ) : (
-        agents.map((agent) => (
+        orderedAgents.map((agent) => (
           <AgentIcon
             key={agent.name}
             agent={agent}
@@ -99,6 +103,31 @@ export function AgentIconRail(): JSX.Element {
       )}
     </nav>
   );
+}
+
+export function orderAgentsForEpicRunner(
+  agents: LoomAgentStatus[],
+): LoomAgentStatus[] {
+  return [...agents].sort((a, b) => {
+    const aRank = agentRailRank(a);
+    const bRank = agentRailRank(b);
+    if (aRank !== bRank) return aRank - bRank;
+    const aParent = a.parent ?? "";
+    const bParent = b.parent ?? "";
+    if (aParent !== bParent) return aParent.localeCompare(bParent);
+    return a.name.localeCompare(b.name);
+  });
+}
+
+function agentRailRank(agent: LoomAgentStatus): number {
+  if (isLeadRole(agent.role)) return 0;
+  if (agent.orchestrator_session_id || agent.parent) return 1;
+  return 2;
+}
+
+function isLeadRole(role: string | undefined): boolean {
+  const normalized = (role ?? "").trim().toLowerCase();
+  return normalized === "lead" || normalized === "orchestrator";
 }
 
 function AgentIcon({
@@ -121,7 +150,9 @@ function AgentIcon({
   const tooltip =
     parsed.taskId && parsed.taskId.length > 0
       ? `${agent.name} — ${parsed.type} · ${parsed.taskId}`
-      : `${agent.name} — ${parsed.type || "idle"}`;
+      : agent.parent
+        ? `${agent.name} — ${parsed.type || "idle"} · ${agent.parent}`
+        : `${agent.name} — ${parsed.type || "idle"}`;
 
   return (
     <button

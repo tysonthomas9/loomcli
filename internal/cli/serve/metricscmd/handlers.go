@@ -333,12 +333,17 @@ func storeAgentsForMonitor(ctx context.Context, st store.Store, workspaceHint st
 			continue
 		}
 		agents = append(agents, monitor.AgentStatus{
-			Name:      assignment.Name,
-			Branch:    monitorBranchFromAgent(workspaceData, assignment),
-			Status:    monitorStatusFromAgentState(assignment.State),
-			Role:      assignment.RoleName,
-			Repo:      monitorRepoFromAgent(assignment),
-			Workspace: wsName,
+			Name:                  assignment.Name,
+			Branch:                monitorBranchFromAgent(workspaceData, assignment),
+			Status:                monitorStatusFromAgentState(assignment.State),
+			Role:                  assignment.RoleName,
+			Repo:                  monitorRepoFromAgent(assignment),
+			Workspace:             wsName,
+			DaemonManaged:         assignment.Auto,
+			Parent:                assignment.Parent,
+			OrchestratorSessionID: assignment.OrchestratorSessionID,
+			Mode:                  string(assignment.Mode),
+			DesiredState:          string(assignment.DesiredState),
 		})
 	}
 	return agents

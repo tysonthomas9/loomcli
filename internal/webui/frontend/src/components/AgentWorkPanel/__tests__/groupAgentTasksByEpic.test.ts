@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 
 import type { Issue } from "@/types";
-import { groupAgentTasksByEpic } from "../AgentWorkPanel";
+import { groupAgentTasksByEpic, groupOpenByEpic } from "../AgentWorkPanel";
 
 // Minimal Issue factory — fills in just the fields the grouping function reads.
 function issue(overrides: Partial<Issue> & Pick<Issue, "id">): Issue {
@@ -57,7 +57,12 @@ describe("groupAgentTasksByEpic", () => {
       issue({ id: "API", title: "API Spec", issue_type: "epic" }),
       issue({ id: "T1", assignee: "nova", parent: "AUTH", status: "open" }),
       issue({ id: "T2", assignee: "nova", parent: "AUTH", status: "closed" }),
-      issue({ id: "T3", assignee: "nova", parent: "API", status: "in_progress" }),
+      issue({
+        id: "T3",
+        assignee: "nova",
+        parent: "API",
+        status: "in_progress",
+      }),
     );
     const res = groupAgentTasksByEpic(m, "nova");
     expect(res.groups).toHaveLength(2);
@@ -97,10 +102,25 @@ describe("groupAgentTasksByEpic", () => {
   it("sorts tasks within an epic by status: active, open, blocked, review, done", () => {
     const m = buildMap(
       issue({ id: "EPIC", title: "E", issue_type: "epic" }),
-      issue({ id: "T-DONE", assignee: "nova", parent: "EPIC", status: "closed" }),
+      issue({
+        id: "T-DONE",
+        assignee: "nova",
+        parent: "EPIC",
+        status: "closed",
+      }),
       issue({ id: "T-OPEN", assignee: "nova", parent: "EPIC", status: "open" }),
-      issue({ id: "T-ACTIVE", assignee: "nova", parent: "EPIC", status: "in_progress" }),
-      issue({ id: "T-BLOCKED", assignee: "nova", parent: "EPIC", status: "blocked" }),
+      issue({
+        id: "T-ACTIVE",
+        assignee: "nova",
+        parent: "EPIC",
+        status: "in_progress",
+      }),
+      issue({
+        id: "T-BLOCKED",
+        assignee: "nova",
+        parent: "EPIC",
+        status: "blocked",
+      }),
     );
     const res = groupAgentTasksByEpic(m, "nova");
     expect(res.groups[0]?.tasks.map((t) => t.id)).toEqual([
@@ -113,9 +133,52 @@ describe("groupAgentTasksByEpic", () => {
 
   it("handles missing epic title gracefully (falls back to ID)", () => {
     const m = buildMap(
-      issue({ id: "T1", assignee: "nova", parent: "EPIC-MISSING", status: "open" }),
+      issue({
+        id: "T1",
+        assignee: "nova",
+        parent: "EPIC-MISSING",
+        status: "open",
+      }),
     );
     const res = groupAgentTasksByEpic(m, "nova");
     expect(res.groups[0]?.epicTitle).toBe("EPIC-MISSING");
+  });
+});
+
+describe("groupOpenByEpic", () => {
+  it("shows open epics even when they have no child tasks", () => {
+    const m = buildMap(
+      issue({
+        id: "EPIC-1",
+        title: "Active Epic",
+        issue_type: "epic",
+        status: "open",
+      }),
+      issue({
+        id: "EPIC-2",
+        title: "Closed Epic",
+        issue_type: "epic",
+        status: "closed",
+      }),
+    );
+    const res = groupOpenByEpic(m);
+    expect(res.totalTasks).toBe(0);
+    expect(res.groups.map((g) => g.epicId)).toEqual(["EPIC-1"]);
+  });
+
+  it("excludes closed tasks from the idle lead queue", () => {
+    const m = buildMap(
+      issue({ id: "EPIC", title: "E", issue_type: "epic", status: "open" }),
+      issue({ id: "T-OPEN", parent: "EPIC", status: "open" }),
+      issue({ id: "T-BLOCKED", parent: "EPIC", status: "blocked" }),
+      issue({ id: "T-DONE", parent: "EPIC", status: "closed" }),
+    );
+    const res = groupOpenByEpic(m);
+    expect(res.totalTasks).toBe(2);
+    expect(res.counts).toEqual({ active: 0, done: 0, open: 1, blocked: 1 });
+    expect(res.groups[0]?.tasks.map((t) => t.id)).toEqual([
+      "T-OPEN",
+      "T-BLOCKED",
+    ]);
   });
 });

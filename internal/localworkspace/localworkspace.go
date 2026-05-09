@@ -16,9 +16,11 @@ import (
 
 // Repo is the local filesystem view of a workspace repository.
 type Repo struct {
-	Name   string
-	Path   string
-	Groups []string
+	Name          string
+	Path          string
+	Remote        string
+	DefaultBranch string
+	Groups        []string
 }
 
 // RepoPath returns the best-known local path for a repo in a workspace.
@@ -86,13 +88,31 @@ func CloneRepoTo(ctx context.Context, cloneURL, targetPath string) error {
 
 // EnsureGitWorktree creates a git worktree at targetPath from repoPath.
 func EnsureGitWorktree(repoPath, targetPath, branchName string) error {
+	return EnsureGitWorktreeFromBranch(repoPath, targetPath, branchName, "", "")
+}
+
+// EnsureGitWorktreeFromBranch creates a git worktree at targetPath. When
+// defaultBranch is provided, the new branch is created from the latest fetched
+// remote/defaultBranch ref when available, falling back to the local branch.
+// Existing worktrees are left untouched.
+func EnsureGitWorktreeFromBranch(repoPath, targetPath, branchName, remoteName, defaultBranch string) error {
 	if _, err := os.Stat(filepath.Join(targetPath, ".git")); err == nil {
 		return nil
 	}
 	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
 		return fmt.Errorf("creating worktree parent: %w", err)
 	}
-	if out, err := runGit(repoPath, "worktree", "add", targetPath, "-b", branchName); err == nil {
+
+	baseRef, err := resolveFreshBaseRef(repoPath, remoteName, defaultBranch)
+	if err != nil {
+		return err
+	}
+
+	args := []string{"worktree", "add", targetPath, "-b", branchName}
+	if baseRef != "" {
+		args = append(args, baseRef)
+	}
+	if out, err := runGit(repoPath, args...); err == nil {
 		return nil
 	} else if !branchAlreadyExists(out, err) {
 		return err
@@ -101,6 +121,32 @@ func EnsureGitWorktree(repoPath, targetPath, branchName string) error {
 		return err
 	}
 	return nil
+}
+
+func resolveFreshBaseRef(repoPath, remoteName, defaultBranch string) (string, error) {
+	defaultBranch = strings.TrimSpace(defaultBranch)
+	if defaultBranch == "" {
+		return "", nil
+	}
+	remoteName = strings.TrimSpace(remoteName)
+	if remoteName == "" {
+		remoteName = "origin"
+	}
+
+	if _, err := runGit(repoPath, "remote", "get-url", remoteName); err == nil {
+		if _, err := runGit(repoPath, "fetch", remoteName, defaultBranch); err != nil {
+			return "", fmt.Errorf("fetch base branch %q from %q: %w", defaultBranch, remoteName, err)
+		}
+		return remoteName + "/" + defaultBranch, nil
+	}
+
+	if _, err := runGit(repoPath, "fetch", remoteName, defaultBranch); err == nil {
+		return remoteName + "/" + defaultBranch, nil
+	}
+	if _, err := runGit(repoPath, "rev-parse", "--verify", defaultBranch); err != nil {
+		return "", fmt.Errorf("resolve base branch %q: %w", defaultBranch, err)
+	}
+	return defaultBranch, nil
 }
 
 func runGit(dir string, args ...string) (string, error) {

@@ -1321,11 +1321,23 @@ type MonitorAgentStatus struct {
 	Changes       *[]MonitorFileChange   `json:"changes,omitempty"`
 	Commits       *[]MonitorCommitDetail `json:"commits,omitempty"`
 	DaemonManaged *bool                  `json:"daemon_managed,omitempty"`
-	Name          string                 `json:"name"`
-	Repo          *string                `json:"repo,omitempty"`
-	Role          *string                `json:"role,omitempty"`
-	Status        string                 `json:"status"`
-	Workspace     string                 `json:"workspace"`
+
+	// DesiredState Requested daemon state for the agent.
+	DesiredState *string `json:"desired_state,omitempty"`
+
+	// Mode Assignment mode, such as persistent or ephemeral.
+	Mode *string `json:"mode,omitempty"`
+	Name string  `json:"name"`
+
+	// OrchestratorSessionId Lead/orchestrator session that spawned or owns the agent.
+	OrchestratorSessionId *string `json:"orchestrator_session_id,omitempty"`
+
+	// Parent Active epic assignment for lead/workers.
+	Parent    *string `json:"parent,omitempty"`
+	Repo      *string `json:"repo,omitempty"`
+	Role      *string `json:"role,omitempty"`
+	Status    string  `json:"status"`
+	Workspace string  `json:"workspace"`
 }
 
 // MonitorAgentsResponse defines model for MonitorAgentsResponse.

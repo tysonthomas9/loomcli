@@ -84,10 +84,14 @@ func TestHandleAgents_UsesStoreAgentsAsSourceOfTruth(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := st.Agents().Create(ctx, store.AgentCreate{
-		WorkspaceKey: "WS1",
-		Name:         "falcon",
-		RoleName:     "task",
-		Repos:        []string{"repo-a"},
+		WorkspaceKey:          "WS1",
+		Name:                  "falcon",
+		RoleName:              "task",
+		Repos:                 []string{"repo-a"},
+		Parent:                "EPIC-1",
+		OrchestratorSessionID: "lead-session",
+		Mode:                  domain.AgentModeEphemeral,
+		DesiredState:          domain.AgentDesiredStopped,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -151,6 +155,9 @@ func TestHandleAgents_UsesStoreAgentsAsSourceOfTruth(t *testing.T) {
 	}
 	if got := byName["falcon"]; got.Role != "task" || got.Repo != "repo-a" || got.Workspace != "Test" || got.Status != "working" || got.Branch != "feature/falcon" {
 		t.Fatalf("falcon not sourced from store: %+v", got)
+	}
+	if got := byName["falcon"]; got.Parent != "EPIC-1" || got.OrchestratorSessionID != "lead-session" || got.Mode != "ephemeral" || got.DesiredState != "stopped" {
+		t.Fatalf("falcon orchestration fields not sourced from store: %+v", got)
 	}
 	if got := byName["nova"]; got.Role != "plan" || got.Status != "idle" || got.Workspace != "Test" {
 		t.Fatalf("nova not sourced from store: %+v", got)

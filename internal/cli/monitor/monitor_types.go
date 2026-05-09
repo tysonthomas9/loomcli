@@ -34,17 +34,21 @@ type FileChange struct {
 
 // AgentStatus represents a single agent/worktree status
 type AgentStatus struct {
-	Name          string         `json:"name"`
-	Branch        string         `json:"branch"`
-	Status        string         `json:"status"`                   // "ready", "3 changes", "running (plan, 5m ago)"
-	Ahead         int            `json:"ahead"`                    // commits ahead of integration branch
-	Behind        int            `json:"behind"`                   // commits behind integration branch
-	Role          string         `json:"role,omitempty"`           // role from daemon config (e.g., "plan", "task")
-	Repo          string         `json:"repo,omitempty"`           // repository this agent is assigned to (multi-repo)
-	Workspace     string         `json:"workspace"`                // workspace name
-	DaemonManaged bool           `json:"daemon_managed,omitempty"` // true if under daemon supervision
-	Commits       []CommitDetail `json:"commits,omitempty"`        // recent commits ahead of integration branch
-	Changes       []FileChange   `json:"changes,omitempty"`        // uncommitted file changes
+	Name                  string         `json:"name"`
+	Branch                string         `json:"branch"`
+	Status                string         `json:"status"`                            // "ready", "3 changes", "running (plan, 5m ago)"
+	Ahead                 int            `json:"ahead"`                             // commits ahead of integration branch
+	Behind                int            `json:"behind"`                            // commits behind integration branch
+	Role                  string         `json:"role,omitempty"`                    // role from daemon config (e.g., "plan", "task")
+	Repo                  string         `json:"repo,omitempty"`                    // repository this agent is assigned to (multi-repo)
+	Workspace             string         `json:"workspace"`                         // workspace name
+	DaemonManaged         bool           `json:"daemon_managed,omitempty"`          // true if under daemon supervision
+	Parent                string         `json:"parent,omitempty"`                  // active epic for leads/workers
+	OrchestratorSessionID string         `json:"orchestrator_session_id,omitempty"` // lead/orchestrator session attribution
+	Mode                  string         `json:"mode,omitempty"`                    // persistent/ephemeral assignment mode
+	DesiredState          string         `json:"desired_state,omitempty"`           // requested daemon state
+	Commits               []CommitDetail `json:"commits,omitempty"`                 // recent commits ahead of integration branch
+	Changes               []FileChange   `json:"changes,omitempty"`                 // uncommitted file changes
 }
 
 // TaskInfo represents a task with basic info
