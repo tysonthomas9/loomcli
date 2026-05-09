@@ -155,22 +155,6 @@ export function TerminalView({
   } = useSplitView({ tabs, activeTabId });
   const splitContainerRef = useRef<HTMLDivElement>(null);
   const [isSessionPromptOpen, setIsSessionPromptOpen] = useState(false);
-  const [dismissedWelcome, setDismissedWelcome] = useState<boolean>(() => {
-    try {
-      if (localStorage.getItem("terminal-onboarding-dismissed") === "1")
-        return true;
-      for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i);
-        if (key?.startsWith("terminal-welcome-dismissed-")) {
-          localStorage.setItem("terminal-onboarding-dismissed", "1");
-          return true;
-        }
-      }
-    } catch {
-      // localStorage unavailable — show banners every session
-    }
-    return false;
-  });
   const [isHelpOpen, setIsHelpOpen] = useState(false);
   const [cliSetupGuide, setCliSetupGuide] = useState<CliSetupGuide | null>(
     null,
@@ -581,22 +565,6 @@ export function TerminalView({
     setIsSessionPromptOpen(false);
   }, []);
 
-  const handleDismissWelcome = useCallback(() => {
-    setDismissedWelcome(true);
-    try {
-      localStorage.setItem("terminal-onboarding-dismissed", "1");
-    } catch {
-      // localStorage unavailable
-    }
-  }, []);
-
-  // Auto-dismiss the welcome banner when sessions already exist.
-  useEffect(() => {
-    if (!dismissedWelcome && !metaLoading && tabMetadata.length > 0) {
-      handleDismissWelcome();
-    }
-  }, [dismissedWelcome, metaLoading, tabMetadata.length, handleDismissWelcome]);
-
   const handleToggleHelp = useCallback(() => {
     setIsHelpOpen((prev) => !prev);
   }, []);
@@ -664,12 +632,6 @@ export function TerminalView({
           }
           hasConnected={tabHasConnected.get(tab.id) ?? false}
           reconnectState={tabReconnectState.get(tab.id) ?? null}
-          dismissedWelcome={dismissedWelcome}
-          onDismissWelcome={handleDismissWelcome}
-          onExampleClick={(text) => {
-            instanceRefs.current.get(tab.id)?.pasteText(text);
-            handleDismissWelcome();
-          }}
           notes={meta?.notes ?? ""}
           onSaveNotes={(text) => updateNotes(tab.sessionName, text)}
           isMetaLoading={metaLoading}
@@ -694,8 +656,6 @@ export function TerminalView({
       metaLoading,
       setFocusedLeft,
       setFocusedRight,
-      dismissedWelcome,
-      handleDismissWelcome,
     ],
   );
 

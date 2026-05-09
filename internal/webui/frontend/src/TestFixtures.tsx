@@ -7,10 +7,7 @@
 import { IssueDetailPanel, ToastContainer } from "@/components";
 import { WorkspaceTree } from "@/components/WorkspaceTree";
 import { SplitDetailSummary } from "@/components/IssueDetailPanel";
-import {
-  SessionNamePrompt,
-  WelcomeBanner,
-} from "@/components/TerminalView/layout";
+import { SessionNamePrompt } from "@/components/TerminalView/layout";
 import { HelpPopover } from "@/components/TerminalView/controls";
 import {
   useToast,
@@ -352,26 +349,6 @@ export function SessionNamePromptFixture(): JSX.Element {
       />
       <span data-testid="confirmed-names">{confirmedNames.join(",")}</span>
       <span data-testid="cancel-count">{cancelCount}</span>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// WelcomeBannerFixture
-// URL: /test/welcome-banner?backend=claude|codex|opencode|unknown
-// ---------------------------------------------------------------------------
-export function WelcomeBannerFixture(): JSX.Element {
-  const params = new URLSearchParams(window.location.search);
-  const backend = params.get("backend") ?? "claude";
-
-  return (
-    <div data-testid="fixture-root" style={FIXTURE_ROOT_STYLE}>
-      <WelcomeBanner
-        backendName={backend}
-        isActive={true}
-        onDismiss={() => {}}
-        onExampleClick={() => {}}
-      />
     </div>
   );
 }
