@@ -817,9 +817,21 @@ function DefaultContent({
       const updatedIssue = await updateIssue(workspaceId, issue.id, {
         assignee: agentName,
       });
-      onIssueUpdate?.(updatedIssue);
-      await startAgent(workspaceId, agentName, { taskId: issue.id });
-      void refetchAgents();
+      try {
+        await startAgent(workspaceId, agentName, { taskId: issue.id });
+        onIssueUpdate?.(updatedIssue);
+        void refetchAgents();
+      } catch (err) {
+        try {
+          const rolledBackIssue = await updateIssue(workspaceId, issue.id, {
+            assignee: "",
+          });
+          onIssueUpdate?.(rolledBackIssue);
+        } catch {
+          // Keep the original start failure visible to the Start Work control.
+        }
+        throw err;
+      }
     },
     [issue, onIssueUpdate, refetchAgents, workspaceId],
   );

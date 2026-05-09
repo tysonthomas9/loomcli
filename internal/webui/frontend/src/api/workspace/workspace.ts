@@ -34,6 +34,8 @@ export interface WorkspaceAgentInfo {
   repos: string[];
   repo_groups: string[];
   cross_repo: boolean;
+  role_name?: string;
+  backend?: string;
 }
 
 export interface CreateAgentRequest {
