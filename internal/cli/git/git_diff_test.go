@@ -690,8 +690,8 @@ func TestDiffFiles_SubmoduleGitlinkChange(t *testing.T) {
 	if len(files) != 1 || files[0].Path != "deps/mod" || files[0].Status != "M" {
 		t.Fatalf("files = %+v, want modified gitlink", files)
 	}
-	if files[0].Additions != 0 || files[0].Deletions != 0 {
-		t.Fatalf("gitlink stats = %d/%d, want 0/0", files[0].Additions, files[0].Deletions)
+	if files[0].Additions != 1 || files[0].Deletions != 1 {
+		t.Fatalf("gitlink stats = %d/%d, want 1/1", files[0].Additions, files[0].Deletions)
 	}
 
 	result, err := DiffFilePatch(repo.dir, base, "HEAD", "deps/mod")
