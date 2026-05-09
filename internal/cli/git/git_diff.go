@@ -261,6 +261,20 @@ func diffFileResult(change *object.Change) (ops.DiffFileResult, bool) {
 }
 
 func diffFileStats(change *object.Change) (int, int) {
+	if changeHasNonFileTreeEntry(change) {
+		action, err := change.Action()
+		if err != nil {
+			return 0, 0
+		}
+		switch action {
+		case merkletrie.Insert:
+			return 1, 0
+		case merkletrie.Delete:
+			return 0, 1
+		case merkletrie.Modify:
+			return 1, 1
+		}
+	}
 	patch, err := change.Patch()
 	if err != nil {
 		return 0, 0
