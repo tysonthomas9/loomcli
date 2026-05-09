@@ -52,6 +52,9 @@ func (s *stubTerminalService) GetTerminalState(_ context.Context, _ string) (str
 	return "", nil
 }
 func (s *stubTerminalService) PatchTerminalState(_ context.Context, _, _ string) error { return nil }
+func (s *stubTerminalService) StartSetup(_ context.Context, _ string, req service.TerminalSetupRequest) (*service.TerminalSetupResult, error) {
+	return &service.TerminalSetupResult{Backend: req.Backend, Action: req.Action}, nil
+}
 
 // stubSessionService implements SessionService with no-op defaults for module tests.
 type stubSessionService struct{}

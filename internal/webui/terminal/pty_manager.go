@@ -38,6 +38,10 @@ import (
 // session limit has been hit.
 var ErrPTYMaxSessionsReached = errors.New("maximum terminal sessions reached")
 
+// ErrPTYSessionNotFound is returned when backend-owned input targets a
+// session that is not live in this manager.
+var ErrPTYSessionNotFound = errors.New("terminal session not found")
+
 const (
 	defaultPTYMaxSessions = 40
 	// Local `loom serve` keeps detached sessions alive indefinitely: no
@@ -248,6 +252,58 @@ func (m *PTYManager) AttachSession(key SessionKey, cols, rows uint16, argv []str
 		// Session was closed between lookup and attach. Retry.
 	}
 	return nil, false, fmt.Errorf("terminal attach: session %q repeatedly closed during attach", key)
+}
+
+// EnsureSession starts the session for key if it does not already exist. It
+// does not create a browser attachment; the session's drain goroutine still
+// captures output into scrollback so a later WebSocket attach can replay it.
+func (m *PTYManager) EnsureSession(key SessionKey, cols, rows uint16, argv []string) (bool, error) {
+	if cols == 0 {
+		cols = 80
+	}
+	if rows == 0 {
+		rows = 24
+	}
+
+	m.mu.Lock()
+	if m.closed {
+		m.mu.Unlock()
+		return false, ErrPTYManagerClosed
+	}
+	sess, existed := m.sessions[key]
+	if !existed {
+		if len(m.sessions) >= m.max {
+			m.mu.Unlock()
+			return false, ErrPTYMaxSessionsReached
+		}
+		newSess, spawnErr := m.spawnSession(key, cols, rows, argv)
+		if spawnErr != nil {
+			m.mu.Unlock()
+			return false, spawnErr
+		}
+		m.sessions[key] = newSess
+		m.mu.Unlock()
+		return true, nil
+	}
+	m.mu.Unlock()
+
+	_ = pty.Setsize(sess.pty, &pty.Winsize{Cols: cols, Rows: rows})
+	sess.cancelKillTimer()
+	return false, nil
+}
+
+// WriteToSession writes backend-owned input into a live session's PTY. The
+// user sees the exact same bytes in the attached web terminal and can
+// interrupt or continue from there.
+func (m *PTYManager) WriteToSession(key SessionKey, p []byte) error {
+	m.mu.Lock()
+	sess := m.sessions[key]
+	m.mu.Unlock()
+	if sess == nil {
+		return ErrPTYSessionNotFound
+	}
+	_, err := sess.pty.Write(p)
+	return err
 }
 
 // spawnSession must be called with m.mu held.

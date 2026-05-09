@@ -52,6 +52,31 @@ const mockMetadataHook = vi.hoisted(() => ({
   handleMutation: vi.fn(),
 }));
 
+const mockTerminalApi = vi.hoisted(() => ({
+  patchTerminalState: vi.fn().mockResolvedValue(undefined),
+  startTerminalSetup: vi.fn().mockResolvedValue({
+    session_name: "lead-shell-setup-codex",
+    label: "Codex setup",
+    backend: "codex",
+    action: "install",
+    command: "npm install -g @openai/codex",
+    title: "Install Codex",
+    message:
+      "The backend started this command in the setup terminal. You can take control there if it prompts or fails.",
+    created: true,
+  }),
+}));
+
+vi.mock("@/hooks/api", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/hooks/api")>("@/hooks/api");
+  return {
+    ...actual,
+    patchTerminalState: mockTerminalApi.patchTerminalState,
+    startTerminalSetup: mockTerminalApi.startTerminalSetup,
+  };
+});
+
 vi.mock("@/hooks/terminal", async () => {
   const actual =
     await vi.importActual<typeof import("@/hooks/terminal")>(
@@ -78,12 +103,23 @@ const mockBackendConfigHook = vi.hoisted(() => ({
   refetch: vi.fn(),
 }));
 
+const mockBackendsHook = vi.hoisted(() => ({
+  backends: [],
+  isLoading: false,
+  error: null as string | null,
+  refetch: vi.fn(),
+}));
+
 vi.mock("@/hooks/workspace", async () => {
   const actual =
     await vi.importActual<typeof import("@/hooks/workspace")>(
       "@/hooks/workspace",
     );
-  return { ...actual, useBackendConfig: () => mockBackendConfigHook };
+  return {
+    ...actual,
+    useBackendConfig: () => mockBackendConfigHook,
+    useBackends: () => mockBackendsHook,
+  };
 });
 
 const mockSessionRestoreHook = vi.hoisted(() => ({
@@ -200,6 +236,17 @@ describe("TerminalView", () => {
     mockMetadataHook.isLoading = true;
     mockMetadataHook.error = null;
     mockMetadataHook.createTab = vi.fn().mockResolvedValue(undefined);
+    mockTerminalApi.startTerminalSetup.mockResolvedValue({
+      session_name: "lead-shell-setup-codex",
+      label: "Codex setup",
+      backend: "codex",
+      action: "install",
+      command: "npm install -g @openai/codex",
+      title: "Install Codex",
+      message:
+        "The backend started this command in the setup terminal. You can take control there if it prompts or fails.",
+      created: true,
+    });
     mockBackendConfigHook.isLoading = false;
     mockBackendConfigHook.config = {
       backend: "claude",
@@ -372,17 +419,21 @@ describe("TerminalView", () => {
       expect(
         screen.getByText("npm install -g @openai/codex"),
       ).toBeInTheDocument();
+      await waitFor(() => {
+        expect(mockTerminalApi.startTerminalSetup).toHaveBeenCalledWith(
+          expect.any(String),
+          "codex",
+          "install",
+        );
+      });
+      expect(screen.getByText("Running in terminal")).toBeInTheDocument();
       expect(
         screen.getByTestId("tab-lead-shell-setup-codex"),
       ).toBeInTheDocument();
       expect(screen.getByTestId("active-tab-id").textContent).toBe(
         "lead-shell-setup-codex",
       );
-      expect(mockMetadataHook.createTab).toHaveBeenCalledWith(
-        "lead-shell-setup-codex",
-        "Codex setup",
-        2,
-      );
+      expect(mockMetadataHook.createTab).not.toHaveBeenCalled();
       expect(sessionStorage.getItem(CLI_SETUP_REQUEST_KEY)).toBeNull();
     });
 
@@ -409,12 +460,7 @@ describe("TerminalView", () => {
         screen.getByTestId("tab-lead-shell-setup-codex"),
       ).toBeInTheDocument();
       expect(screen.queryByTestId("tab-lead-claude-1")).not.toBeInTheDocument();
-      expect(mockMetadataHook.createTab).toHaveBeenCalledTimes(1);
-      expect(mockMetadataHook.createTab).toHaveBeenCalledWith(
-        "lead-shell-setup-codex",
-        "Codex setup",
-        0,
-      );
+      expect(mockMetadataHook.createTab).not.toHaveBeenCalled();
     });
 
     it("does not initialize tabs when isActive is false", () => {

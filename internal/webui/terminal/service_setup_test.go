@@ -1,0 +1,183 @@
+package terminal
+
+import (
+	"context"
+	"strings"
+	"testing"
+
+	"github.com/alicebob/miniredis/v2"
+	"github.com/redis/go-redis/v9"
+
+	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
+)
+
+type setupEnsureCall struct {
+	key  SessionKey
+	argv []string
+}
+
+type setupWriteCall struct {
+	key  SessionKey
+	data string
+}
+
+type fakeSetupPTYSource struct {
+	alive       map[SessionKey]bool
+	created     bool
+	ensureCalls []setupEnsureCall
+	writeCalls  []setupWriteCall
+}
+
+func newFakeSetupPTYSource(created bool) *fakeSetupPTYSource {
+	return &fakeSetupPTYSource{alive: map[SessionKey]bool{}, created: created}
+}
+
+func (f *fakeSetupPTYSource) AttachSession(_ SessionKey, _, _ uint16, _ []string) (Attachment, bool, error) {
+	panic("AttachSession not used in setup service tests")
+}
+func (f *fakeSetupPTYSource) Detach(_ SessionKey, _ string) {}
+func (f *fakeSetupPTYSource) Kill(key SessionKey) error {
+	delete(f.alive, key)
+	return nil
+}
+func (f *fakeSetupPTYSource) HasSession(key SessionKey) bool { return f.alive[key] }
+func (f *fakeSetupPTYSource) AttachmentCount(key SessionKey) int {
+	if f.alive[key] {
+		return 1
+	}
+	return 0
+}
+func (f *fakeSetupPTYSource) SessionCount() int            { return len(f.alive) }
+func (f *fakeSetupPTYSource) SessionCountFor(_ string) int { return len(f.alive) }
+func (f *fakeSetupPTYSource) MaxSessions() int             { return 100 }
+func (f *fakeSetupPTYSource) EnsureSession(key SessionKey, _ uint16, _ uint16, argv []string) (bool, error) {
+	f.ensureCalls = append(f.ensureCalls, setupEnsureCall{key: key, argv: argv})
+	f.alive[key] = true
+	return f.created, nil
+}
+func (f *fakeSetupPTYSource) WriteToSession(key SessionKey, p []byte) error {
+	f.writeCalls = append(f.writeCalls, setupWriteCall{key: key, data: string(p)})
+	return nil
+}
+
+func newSetupTestSvc(t *testing.T, fake *fakeSetupPTYSource) (*terminalServiceImpl, *miniredis.Miniredis) {
+	t.Helper()
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+	return &terminalServiceImpl{
+		tabStore:    tabmeta.NewStore(rdb, nil),
+		redisClient: rdb,
+		ptyMgr:      fake,
+	}, mr
+}
+
+func TestStartSetupCreatesTabAndStartsSetupSession(t *testing.T) {
+	fake := newFakeSetupPTYSource(true)
+	svc, mr := newSetupTestSvc(t, fake)
+
+	result, err := svc.StartSetup(context.Background(), "HELLO-WORLD", service.TerminalSetupRequest{
+		Backend: "codex",
+		Action:  "install",
+	})
+	if err != nil {
+		t.Fatalf("StartSetup: %v", err)
+	}
+
+	wantSession := "HELLO-WORLD--lead-shell-setup-codex"
+	if result.SessionName != wantSession {
+		t.Fatalf("SessionName = %q, want %q", result.SessionName, wantSession)
+	}
+	if result.Command != "npm install -g @openai/codex" {
+		t.Fatalf("Command = %q", result.Command)
+	}
+	if len(fake.ensureCalls) != 1 {
+		t.Fatalf("EnsureSession calls = %d, want 1", len(fake.ensureCalls))
+	}
+	if fake.ensureCalls[0].key != (SessionKey{Workspace: "HELLO-WORLD", Name: wantSession}) {
+		t.Fatalf("EnsureSession key = %+v", fake.ensureCalls[0].key)
+	}
+	if got := strings.Join(fake.ensureCalls[0].argv, "\n"); !strings.Contains(got, result.Command) || !strings.Contains(got, "exec \"${SHELL:-/bin/sh}\" -l") {
+		t.Fatalf("setup argv did not include command and final shell: %q", got)
+	}
+	if len(fake.writeCalls) != 0 {
+		t.Fatalf("new setup session should not receive duplicate WriteToSession, got %d", len(fake.writeCalls))
+	}
+
+	meta, err := svc.tabStore.Get(context.Background(), "HELLO-WORLD", wantSession)
+	if err != nil {
+		t.Fatalf("Get setup tab: %v", err)
+	}
+	if meta == nil || meta.Label != "Codex setup" {
+		t.Fatalf("setup tab metadata = %+v", meta)
+	}
+	if got := mr.HGet(terminalUIStateKey("HELLO-WORLD"), "active_tab"); got != wantSession {
+		t.Fatalf("active_tab = %q, want %q", got, wantSession)
+	}
+}
+
+func TestStartSetupWritesCommandIntoExistingSetupSession(t *testing.T) {
+	fake := newFakeSetupPTYSource(false)
+	svc, _ := newSetupTestSvc(t, fake)
+
+	result, err := svc.StartSetup(context.Background(), "HELLO-WORLD", service.TerminalSetupRequest{
+		Backend: "codex",
+		Action:  "login",
+	})
+	if err != nil {
+		t.Fatalf("StartSetup: %v", err)
+	}
+
+	if len(fake.ensureCalls) != 1 {
+		t.Fatalf("EnsureSession calls = %d, want 1", len(fake.ensureCalls))
+	}
+	if len(fake.writeCalls) != 1 {
+		t.Fatalf("WriteToSession calls = %d, want 1", len(fake.writeCalls))
+	}
+	if fake.writeCalls[0].data != "codex login\n" {
+		t.Fatalf("WriteToSession data = %q", fake.writeCalls[0].data)
+	}
+	if result.Created {
+		t.Fatal("Created = true, want false for existing session")
+	}
+}
+
+func TestStartSetupSupportsCursorGuidance(t *testing.T) {
+	fake := newFakeSetupPTYSource(true)
+	svc, _ := newSetupTestSvc(t, fake)
+
+	result, err := svc.StartSetup(context.Background(), "HELLO-WORLD", service.TerminalSetupRequest{
+		Backend: "cursor",
+		Action:  "install",
+	})
+	if err != nil {
+		t.Fatalf("StartSetup: %v", err)
+	}
+
+	if result.SessionName != "HELLO-WORLD--lead-shell-setup-cursor" {
+		t.Fatalf("SessionName = %q", result.SessionName)
+	}
+	if !strings.Contains(result.Command, "Cursor CLI setup is not fully automated") {
+		t.Fatalf("Command = %q", result.Command)
+	}
+	if !strings.Contains(result.Message, "supported Cursor CLI install step") {
+		t.Fatalf("Message = %q", result.Message)
+	}
+}
+
+func TestStartSetupRejectsUnsupportedBackend(t *testing.T) {
+	fake := newFakeSetupPTYSource(true)
+	svc, _ := newSetupTestSvc(t, fake)
+
+	_, err := svc.StartSetup(context.Background(), "HELLO-WORLD", service.TerminalSetupRequest{
+		Backend: "unknown",
+		Action:  "install",
+	})
+	if err == nil {
+		t.Fatal("StartSetup unexpectedly succeeded")
+	}
+	if len(fake.ensureCalls) != 0 {
+		t.Fatalf("EnsureSession should not be called for invalid backend, got %d", len(fake.ensureCalls))
+	}
+}

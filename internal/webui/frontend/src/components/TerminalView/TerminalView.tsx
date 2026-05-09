@@ -1,9 +1,9 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 
-import type { IssueContext } from "@/hooks/api";
-import { patchTerminalState } from "@/hooks/api";
+import type { IssueContext, TerminalSetupResult } from "@/hooks/api";
+import { patchTerminalState, startTerminalSetup } from "@/hooks/api";
 import { LoadingSkeleton } from "@/components";
-import { useBackendConfig } from "@/hooks/workspace";
+import { useBackendConfig, useBackends } from "@/hooks/workspace";
 import { useSessionRestore, useTerminalMetadata } from "@/hooks/terminal";
 import {
   CLI_SETUP_REQUEST_EVENT,
@@ -60,6 +60,8 @@ interface CliSetupGuide extends CliSetupRequest {
   tabId: string;
   instructions: CliSetupInstructions;
   hasRun: boolean;
+  status: "starting" | "running" | "failed";
+  error?: string | undefined;
 }
 
 function isLeadSessionName(sessionName: string): boolean {
@@ -75,6 +77,29 @@ function buildCliSetupSessionName(
     safeWorkspace && safeWorkspace !== "default" ? `${safeWorkspace}--` : "";
   const safeBackend = sanitizeSessionName(backendName) || "cli";
   return `${wsPrefix}lead-shell-setup-${safeBackend}`;
+}
+
+function setupErrorMessage(error: unknown): string {
+  return error instanceof Error
+    ? error.message
+    : "Failed to start setup terminal";
+}
+
+function setupInstructionsFromResult(
+  request: CliSetupRequest,
+  result: TerminalSetupResult,
+): CliSetupInstructions {
+  const fallback = getCliSetupInstructions(request);
+  const command = result.command || fallback.command;
+  const instructions: CliSetupInstructions = {
+    title: result.title || fallback.title,
+    description: result.message || fallback.description,
+    buttonLabel: fallback.buttonLabel,
+  };
+  if (command) {
+    instructions.command = command;
+  }
+  return instructions;
 }
 
 export function TerminalView({
@@ -111,6 +136,7 @@ export function TerminalView({
   const { config, isLoading: configLoading } = useBackendConfig(workspaceId, {
     enabled: isActive,
   });
+  const { refetch: refetchAiBackends } = useBackends();
   const { activeTabId: restoredTabId, isRestoring } = useSessionRestore({
     enabled: isActive,
   });
@@ -157,12 +183,45 @@ export function TerminalView({
   tabsRef.current = tabs;
   const workspaceIdRef = useRef(workspaceId);
   workspaceIdRef.current = workspaceId;
+  const backendStatusPollRef = useRef<ReturnType<typeof setInterval> | null>(
+    null,
+  );
 
   // ARIA live region for screen reader announcements
   const liveRegionRef = useRef<HTMLDivElement>(null);
   const announce = useCallback((msg: string) => {
     if (liveRegionRef.current) liveRegionRef.current.textContent = msg;
   }, []);
+
+  const stopBackendStatusPolling = useCallback(() => {
+    if (backendStatusPollRef.current == null) return;
+    clearInterval(backendStatusPollRef.current);
+    backendStatusPollRef.current = null;
+  }, []);
+
+  const startBackendStatusPolling = useCallback(() => {
+    stopBackendStatusPolling();
+    refetchAiBackends();
+    let remainingTicks = 24;
+    backendStatusPollRef.current = setInterval(() => {
+      refetchAiBackends();
+      remainingTicks -= 1;
+      if (remainingTicks <= 0) {
+        stopBackendStatusPolling();
+      }
+    }, 5000);
+  }, [refetchAiBackends, stopBackendStatusPolling]);
+
+  useEffect(() => {
+    return () => {
+      stopBackendStatusPolling();
+    };
+  }, [stopBackendStatusPolling]);
+
+  const refreshCliStatus = useCallback(() => {
+    refetchAiBackends();
+    announce("CLI status refresh started");
+  }, [announce, refetchAiBackends]);
 
   const handleTabLimitReached = useCallback(() => {
     const message = `Maximum terminal tabs reached (${MAX_TABS}). Close a tab before opening another.`;
@@ -303,6 +362,56 @@ export function TerminalView({
     },
   );
 
+  const applyCliSetupResult = useCallback(
+    (request: CliSetupRequest, result: TerminalSetupResult) => {
+      const instructions = setupInstructionsFromResult(request, result);
+      setCliSetupGuide((current) =>
+        current?.id === request.id
+          ? {
+              ...current,
+              tabId: result.session_name || current.tabId,
+              instructions,
+              hasRun: true,
+              status: "running",
+              error: undefined,
+            }
+          : current,
+      );
+      startBackendStatusPolling();
+      announce(`${request.displayName} setup command started`);
+    },
+    [announce, startBackendStatusPolling],
+  );
+
+  const startCliSetup = useCallback(
+    (request: CliSetupRequest) => {
+      setCliSetupGuide((current) =>
+        current?.id === request.id
+          ? { ...current, status: "starting", error: undefined }
+          : current,
+      );
+      void startTerminalSetup(
+        workspaceIdRef.current,
+        request.backendName,
+        request.action,
+      ).then(
+        (result) => {
+          applyCliSetupResult(request, result);
+        },
+        (error) => {
+          const message = setupErrorMessage(error);
+          setCliSetupGuide((current) =>
+            current?.id === request.id
+              ? { ...current, status: "failed", error: message }
+              : current,
+          );
+          announce(`${request.displayName} setup failed`);
+        },
+      );
+    },
+    [announce, applyCliSetupResult],
+  );
+
   const processCliSetupRequest = useCallback(
     (request: CliSetupRequest): boolean => {
       if (!initializedRef.current) return false;
@@ -361,9 +470,6 @@ export function TerminalView({
             : [...prev, newTab],
         );
         setActiveTabId(sessionName);
-        createTab(sessionName, label, tabCount).catch((err) =>
-          console.error(`Failed to persist setup tab ${sessionName}:`, err),
-        );
       }
 
       try {
@@ -379,16 +485,18 @@ export function TerminalView({
         tabId: sessionName,
         instructions: getCliSetupInstructions(request),
         hasRun: false,
+        status: "starting",
       });
+      startCliSetup(request);
       announce(`${request.displayName} setup opened`);
       return true;
     },
     [
       announce,
-      createTab,
       handleTabLimitReached,
       setActiveTabId,
       setTabs,
+      startCliSetup,
       tabMetadata,
       updateLabel,
     ],
@@ -419,43 +527,13 @@ export function TerminalView({
 
   const runCliSetupCommand = useCallback(
     (guide: CliSetupGuide) => {
-      const handle = instanceRefs.current.get(guide.tabId);
       setActiveTabId(guide.tabId);
-      if (!handle) {
-        announce("Setup terminal is still connecting");
-        return;
-      }
-
-      handle.focus();
-      const command = guide.instructions.command;
-      if (!command) return;
-      handle.pasteText(`${command}\n`);
-      setCliSetupGuide((current) =>
-        current?.id === guide.id ? { ...current, hasRun: true } : current,
-      );
-      announce(`${guide.displayName} setup command sent`);
+      instanceRefs.current.get(guide.tabId)?.focus();
+      startCliSetup(guide);
+      announce(`${guide.displayName} setup command requested`);
     },
-    [announce],
+    [announce, startCliSetup],
   );
-
-  useEffect(() => {
-    if (
-      !cliSetupGuide ||
-      cliSetupGuide.hasRun ||
-      !cliSetupGuide.instructions.command
-    ) {
-      return;
-    }
-    const setupTab = tabs.find((tab) => tab.id === cliSetupGuide.tabId);
-    if (setupTab?.connectionState !== "connected") return;
-
-    const timer = setTimeout(() => {
-      runCliSetupCommand(cliSetupGuide);
-    }, 250);
-    return () => {
-      clearTimeout(timer);
-    };
-  }, [cliSetupGuide, runCliSetupCommand, tabs]);
 
   const handleNewTabClick = useCallback(() => {
     if (tabs.length >= MAX_TABS) {
@@ -623,12 +701,6 @@ export function TerminalView({
   ]
     .filter(Boolean)
     .join(" ");
-  const cliSetupTab =
-    cliSetupGuide != null
-      ? tabs.find((tab) => tab.id === cliSetupGuide.tabId)
-      : undefined;
-  const isCliSetupTerminalReady = cliSetupTab?.connectionState === "connected";
-
   return (
     <div className={containerClassName} data-testid="terminal-view">
       {(metaLoading || configLoading) && tabs.length === 0 ? (
@@ -689,20 +761,35 @@ export function TerminalView({
                 {cliSetupGuide.instructions.command && (
                   <code>{cliSetupGuide.instructions.command}</code>
                 )}
+                <span
+                  className={`${styles.cliSetupStatus} ${
+                    styles[cliSetupGuide.status]
+                  }`}
+                >
+                  {cliSetupGuide.status === "starting"
+                    ? "Starting in terminal..."
+                    : cliSetupGuide.status === "failed"
+                      ? `Failed: ${cliSetupGuide.error ?? "setup did not start"}`
+                      : "Running in terminal"}
+                </span>
               </div>
               <div className={styles.cliSetupActions}>
                 <button
                   type="button"
                   className={styles.cliSetupButton}
                   onClick={() => runCliSetupCommand(cliSetupGuide)}
-                  disabled={
-                    Boolean(cliSetupGuide.instructions.command) &&
-                    !isCliSetupTerminalReady
-                  }
+                  disabled={cliSetupGuide.status === "starting"}
                 >
                   {cliSetupGuide.hasRun
                     ? "Run again"
                     : cliSetupGuide.instructions.buttonLabel}
+                </button>
+                <button
+                  type="button"
+                  className={styles.cliSetupDismiss}
+                  onClick={refreshCliStatus}
+                >
+                  Recheck
                 </button>
                 <button
                   type="button"
