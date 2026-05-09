@@ -37,7 +37,6 @@ const devRoutes = import.meta.env.DEV
             ErrorTriggerFixture,
             ToastTestFixture,
             SessionNamePromptFixture,
-            WelcomeBannerFixture,
             HelpPopoverFixture,
             PasteConfirmFixture,
             WorkspaceTreeFixture,
@@ -54,8 +53,6 @@ const devRoutes = import.meta.env.DEV
               else if (path === "/test/toast") fixture = <ToastTestFixture />;
               else if (path === "/test/session-name-prompt")
                 fixture = <SessionNamePromptFixture />;
-              else if (path === "/test/welcome-banner")
-                fixture = <WelcomeBannerFixture />;
               else if (path === "/test/help-popover")
                 fixture = <HelpPopoverFixture />;
               else if (path === "/test/paste-confirm")
