@@ -51,6 +51,11 @@ const { mockCloseIssue, mockUpdateIssue, mockAddComment } = vi.hoisted(() => ({
   mockAddComment: vi.fn(),
 }));
 
+// Create hoisted mocks for modal API functions.
+const { mockCreateIssue } = vi.hoisted(() => ({
+  mockCreateIssue: vi.fn(),
+}));
+
 // Create hoisted mocks for usePanelManager return values
 const { mockOpenPanel, mockClosePanel, mockIsOpen, mockUsePanelManager } =
   vi.hoisted(() => ({
@@ -97,6 +102,14 @@ vi.mock("@/api", async (importOriginal) => {
     closeIssue: mockCloseIssue,
     getIssueEvents: vi.fn().mockImplementation(() => new Promise(() => {})),
     getTaskLogPhases: vi.fn().mockResolvedValue([]),
+  };
+});
+
+vi.mock("@/hooks/api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/hooks/api")>();
+  return {
+    ...actual,
+    createIssue: mockCreateIssue,
   };
 });
 
@@ -800,6 +813,7 @@ describe("App", () => {
     // Set up default API mocks (resolve by default so existing tests aren't affected)
     mockUpdateIssue.mockResolvedValue({});
     mockAddComment.mockResolvedValue({});
+    mockCreateIssue.mockResolvedValue(createMockIssue({ id: "created-issue" }));
   });
 
   describe("loading state", () => {
@@ -2346,6 +2360,88 @@ describe("App", () => {
       fireEvent.click(await screen.findByTestId("terminal-view"));
       expect(mockNavigate).not.toHaveBeenCalledWith(-1);
       expect(mockNavigateToView).not.toHaveBeenCalledWith("kanban");
+    });
+  });
+
+  describe("onboarding issue creation", () => {
+    it("switches to kanban instead of opening the issue panel after the first onboarding task is created", async () => {
+      localStorage.clear();
+      const refetch = vi.fn().mockResolvedValue(undefined);
+      const fetchIssue = vi.fn();
+      const createdIssue = createMockIssue({
+        id: "onboarding-task",
+        title: "Explore Hello-World onboarding",
+        issue_type: "task",
+      });
+      mockCreateIssue.mockResolvedValue(createdIssue);
+      mockStoreState = createMockUseIssuesReturn({
+        issues: [],
+        refetch,
+      });
+      mockUseRouteView.mockReturnValue(createViewStateReturn("terminal"));
+      vi.mocked(useIssueDetail).mockReturnValue(
+        createMockUseIssueDetailReturn({ fetchIssue }),
+      );
+      vi.mocked(useWorkspaceContext).mockReturnValue({
+        workspaceId: "test-ws-id",
+        workspace: {
+          name: "Hello-World",
+          agents: [{ name: "planner" }],
+          workspaces: [],
+        },
+        repos: [
+          {
+            name: "Hello-World",
+            remote: "https://github.com/octocat/Hello-World",
+          },
+        ],
+        groups: [],
+        agents: [{ name: "planner" }],
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+        getRepoByName: vi.fn(),
+        getReposByGroup: vi.fn(() => []),
+        getAgentByName: vi.fn(),
+        activeWorkspaceName: "Hello-World",
+        setActiveWorkspace: vi.fn(),
+        selectedRepoNames: new Set<string>(["Hello-World"]),
+        activeRepos: [
+          {
+            name: "Hello-World",
+            remote: "https://github.com/octocat/Hello-World",
+          },
+        ],
+        activeRepoNames: ["Hello-World"],
+        isAllSelected: true,
+        selectRepos: vi.fn(),
+        selectAll: vi.fn(),
+        toggleRepo: vi.fn(),
+        sourceReposFilter: undefined,
+        isMultiRepo: false,
+      } as ReturnType<typeof useWorkspaceContext>);
+
+      render(<App />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Create Issue" }));
+      fireEvent.click(await screen.findByTestId("create-issue-submit"));
+
+      await waitFor(() => {
+        expect(mockCreateIssue).toHaveBeenCalledWith(
+          "test-ws-id",
+          expect.objectContaining({
+            title: "Explore Hello-World onboarding",
+            issue_type: "task",
+          }),
+        );
+      });
+      await waitFor(() => {
+        expect(mockNavigateToView).toHaveBeenCalledWith("kanban");
+      });
+
+      expect(refetch).toHaveBeenCalledTimes(1);
+      expect(mockOpenPanel).not.toHaveBeenCalled();
+      expect(fetchIssue).not.toHaveBeenCalled();
     });
   });
 

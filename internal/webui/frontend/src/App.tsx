@@ -885,6 +885,29 @@ function App() {
     },
     [navigateToView, refetchAiBackends, showToast, updateOnboardingBackend],
   );
+  const handleCreateIssueSuccess = useCallback(
+    async (issue: Issue) => {
+      await refetch();
+
+      if (shouldShowWorkspaceOnboarding && shouldPrefillOnboardingIssue) {
+        closeAllPanels();
+        navigateToView("kanban");
+        return;
+      }
+
+      openPanel({ type: "issue", id: issue.id });
+      fetchIssue(issue.id);
+    },
+    [
+      closeAllPanels,
+      fetchIssue,
+      navigateToView,
+      openPanel,
+      refetch,
+      shouldPrefillOnboardingIssue,
+      shouldShowWorkspaceOnboarding,
+    ],
+  );
   const workspaceOnboardingSteps: OnboardingStep[] = useMemo(
     () => [
       {
@@ -1399,11 +1422,7 @@ function App() {
           <CreateIssueModal
             isOpen={showCreateIssue}
             onClose={() => setShowCreateIssue(false)}
-            onSuccess={async (issue) => {
-              await refetch();
-              openPanel({ type: "issue", id: issue.id });
-              fetchIssue(issue.id);
-            }}
+            onSuccess={handleCreateIssueSuccess}
             {...(onboardingIssueInitialValues
               ? { initialValues: onboardingIssueInitialValues }
               : {})}
