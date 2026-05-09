@@ -69,7 +69,7 @@ func (s *Supervisor) heartbeatAgentLease(ap *AgentProcess, ttl time.Duration) bo
 		return false
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), controlPlaneOperationTimeout)
-	_, err := s.ControlStore.AgentLeases().Heartbeat(ctx, s.WorkspaceID, leaseID, token, ttl)
+	lease, err := s.ControlStore.AgentLeases().Heartbeat(ctx, s.WorkspaceID, leaseID, token, ttl)
 	cancel()
 	if err != nil {
 		slog.Warn("agent lease heartbeat failed; stopping agent process", "worktree", ap.Entry.Worktree, "workspace", s.WorkspaceID, "lease_id", leaseID, "err", err)
@@ -86,15 +86,23 @@ func (s *Supervisor) heartbeatAgentLease(ap *AgentProcess, ttl time.Duration) bo
 		s.StopAgent(ap, s.GetSigtermTimeout())
 		return false
 	}
+	if lease != nil {
+		ap.Mu.Lock()
+		ap.AgentLeaseLastHeartbeat = lease.LastHeartbeat
+		ap.Mu.Unlock()
+	}
 	return true
 }
 
 // stopAgentLeaseHeartbeat invokes and clears any heartbeat-stop function
-// stored on ap. Safe to call multiple times.
+// stored on ap. Also resets AgentLeaseLastHeartbeat so a stale timestamp
+// is not surfaced to the UI after the agent has exited. Safe to call
+// multiple times.
 func stopAgentLeaseHeartbeat(ap *AgentProcess) {
 	ap.Mu.Lock()
 	stop := ap.AgentLeaseHeartbeatStop
 	ap.AgentLeaseHeartbeatStop = nil
+	ap.AgentLeaseLastHeartbeat = time.Time{}
 	ap.Mu.Unlock()
 	if stop != nil {
 		stop()

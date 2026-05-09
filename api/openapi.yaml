@@ -4472,6 +4472,13 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/MonitorFileChange"
+        agent_lease_last_heartbeat:
+          type: string
+          description: |
+            RFC3339 timestamp of the supervisor's most recent successful
+            agent-lease heartbeat. Empty when no live lease (agent not
+            running or supervisor's heartbeat goroutine is stopped).
+            Useful for surfacing supervisor liveness in the UI.
 
     MonitorCommitDetail:
       type: object

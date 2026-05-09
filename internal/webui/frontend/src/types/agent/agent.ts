@@ -108,6 +108,13 @@ export type LoomAgentStatus = Omit<
   path?: string;
   /** Absolute path to the agent's worktree */
   worktree_path?: string;
+  /**
+   * RFC3339 timestamp of the supervisor's most recent successful agent-lease
+   * heartbeat. Empty/undefined when no live lease (agent not running or
+   * supervisor's heartbeat goroutine is stopped). Manually mirrored here
+   * until openapi types are regenerated.
+   */
+  agent_lease_last_heartbeat?: string;
 };
 
 /**

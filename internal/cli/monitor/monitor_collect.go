@@ -141,6 +141,7 @@ func buildAgentStatus(deps *cli.Deps, wt cli.WorktreeInfo, daemonManaged map[str
 	agent := AgentStatus{
 		Name: wt.Name, Branch: wt.Branch, Workspace: wt.Workspace,
 		Role: daemonInfo.Role, Repo: daemonInfo.Repo, DaemonManaged: daemonInfo.Managed,
+		AgentLeaseLastHeartbeat: daemonInfo.AgentLeaseLastHeartbeat,
 	}
 
 	if lockInfo, running, _ := cli.CheckLock(wt.Path); running && lockInfo != nil && lockInfo.TaskID != "" {

@@ -34,17 +34,18 @@ type FileChange struct {
 
 // AgentStatus represents a single agent/worktree status
 type AgentStatus struct {
-	Name          string         `json:"name"`
-	Branch        string         `json:"branch"`
-	Status        string         `json:"status"`                   // "ready", "3 changes", "running (plan, 5m ago)"
-	Ahead         int            `json:"ahead"`                    // commits ahead of integration branch
-	Behind        int            `json:"behind"`                   // commits behind integration branch
-	Role          string         `json:"role,omitempty"`           // role from daemon config (e.g., "plan", "task")
-	Repo          string         `json:"repo,omitempty"`           // repository this agent is assigned to (multi-repo)
-	Workspace     string         `json:"workspace"`                // workspace name
-	DaemonManaged bool           `json:"daemon_managed,omitempty"` // true if under daemon supervision
-	Commits       []CommitDetail `json:"commits,omitempty"`        // recent commits ahead of integration branch
-	Changes       []FileChange   `json:"changes,omitempty"`        // uncommitted file changes
+	Name                    string         `json:"name"`
+	Branch                  string         `json:"branch"`
+	Status                  string         `json:"status"`                               // "ready", "3 changes", "running (plan, 5m ago)"
+	Ahead                   int            `json:"ahead"`                                // commits ahead of integration branch
+	Behind                  int            `json:"behind"`                               // commits behind integration branch
+	Role                    string         `json:"role,omitempty"`                       // role from daemon config (e.g., "plan", "task")
+	Repo                    string         `json:"repo,omitempty"`                       // repository this agent is assigned to (multi-repo)
+	Workspace               string         `json:"workspace"`                            // workspace name
+	DaemonManaged           bool           `json:"daemon_managed,omitempty"`             // true if under daemon supervision
+	Commits                 []CommitDetail `json:"commits,omitempty"`                    // recent commits ahead of integration branch
+	Changes                 []FileChange   `json:"changes,omitempty"`                    // uncommitted file changes
+	AgentLeaseLastHeartbeat string         `json:"agent_lease_last_heartbeat,omitempty"` // RFC3339 timestamp of the supervisor's last successful agent-lease heartbeat (empty when no live lease)
 }
 
 // TaskInfo represents a task with basic info
@@ -103,15 +104,17 @@ type DaemonAgentState struct {
 
 // DaemonAgentStateEntry represents a single agent in daemon-agents.json
 type DaemonAgentStateEntry struct {
-	Worktree string `json:"worktree"`
-	Status   string `json:"status"`
-	Role     string `json:"role"`
-	Repo     string `json:"repo,omitempty"`
+	Worktree                string `json:"worktree"`
+	Status                  string `json:"status"`
+	Role                    string `json:"role"`
+	Repo                    string `json:"repo,omitempty"`
+	AgentLeaseLastHeartbeat string `json:"agent_lease_last_heartbeat,omitempty"`
 }
 
 // DaemonAgentInfo carries daemon supervision metadata for a worktree.
 type DaemonAgentInfo struct {
-	Managed bool
-	Role    string
-	Repo    string
+	Managed                 bool
+	Role                    string
+	Repo                    string
+	AgentLeaseLastHeartbeat string // RFC3339 timestamp of last successful agent-lease heartbeat (empty when no lease)
 }

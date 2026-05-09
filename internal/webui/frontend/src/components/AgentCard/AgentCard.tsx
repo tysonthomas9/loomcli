@@ -51,6 +51,34 @@ export function getStatusDotColor(type: ParsedLoomStatus["type"]): string {
 }
 
 /**
+ * Format a heartbeat timestamp as a short "Xs ago" / "Xm ago" string. Returns
+ * undefined when the timestamp is empty, invalid, or zero. The supervisor
+ * heartbeats every ttl/4 (default 30 s); a fresh value is < 30 s old, while a
+ * stale value > 30 s indicates the heartbeat goroutine is no longer ticking.
+ */
+export function formatHeartbeatAge(
+  timestamp: string | undefined,
+  now: Date = new Date(),
+): string | undefined {
+  if (!timestamp) return undefined;
+  // Backend writes Go's zero time as "0001-01-01T00:00:00Z" because
+  // json.Marshal does not omit zero time.Time even with `omitempty`. Treat
+  // any pre-1970 timestamp as "no heartbeat yet" rather than displaying a
+  // misleading "57 years ago".
+  if (timestamp.startsWith("0001-")) return undefined;
+  const ts = new Date(timestamp);
+  if (Number.isNaN(ts.getTime()) || ts.getFullYear() < 1970) return undefined;
+  const ageMs = now.getTime() - ts.getTime();
+  if (ageMs < 0) return "0s ago";
+  const seconds = Math.floor(ageMs / 1000);
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours}h ago`;
+}
+
+/**
  * Build the status label text for the right-hand meta column.
  */
 export function getStatusLabel(parsed: ParsedLoomStatus): string {
@@ -97,6 +125,14 @@ export function AgentCard({
   const roleLabel = agent.role
     ? agent.role.charAt(0).toUpperCase() + agent.role.slice(1)
     : "Agent";
+  const heartbeatAge = formatHeartbeatAge(agent.agent_lease_last_heartbeat);
+  // Heartbeats tick every 30s; > 60s is stale and warrants a visible warning.
+  // Only meaningful when heartbeatAge resolved to a real value (filters out
+  // Go's zero-time "0001-..." and missing values).
+  const heartbeatStale =
+    heartbeatAge !== undefined &&
+    Date.now() - new Date(agent.agent_lease_last_heartbeat ?? 0).getTime() >
+      60_000;
   const { data: diffStat } = useAgentDiffStat({
     agentName: agent.name,
     pollInterval: 60000,
@@ -178,6 +214,16 @@ export function AgentCard({
         >
           {statusLabel}
         </span>
+        {heartbeatAge && (
+          <span
+            className={styles.heartbeat}
+            data-stale={heartbeatStale || undefined}
+            title={`Supervisor agent-lease last heartbeat: ${agent.agent_lease_last_heartbeat}${heartbeatStale ? " (stale — heartbeat goroutine may have stopped)" : ""}`}
+            aria-label={`Heartbeat ${heartbeatAge}`}
+          >
+            ♥ {heartbeatAge}
+          </span>
+        )}
       </div>
     </div>
   );

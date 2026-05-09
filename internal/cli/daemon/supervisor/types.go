@@ -31,6 +31,7 @@ type AgentProcess struct {
 	AgentLeaseID            string            // fleet-db control-plane lease id (empty when no lease active)
 	AgentLeaseToken         string            // fleet-db control-plane lease token (empty when no lease active)
 	AgentLeaseHeartbeatStop func()            // stops the periodic agent-lease heartbeat goroutine (nil when no heartbeat active)
+	AgentLeaseLastHeartbeat time.Time         // last successful agent-lease heartbeat from the supervisor goroutine (zero when no heartbeat has succeeded yet)
 	OwnershipLeaseID        string            // fleet-db logical-agent ownership lease id (empty when not owner)
 	OwnershipLeaseToken     string            // fleet-db logical-agent ownership lease token (empty when not owner)
 	OwnershipFencingToken   int64             // fencing token for logical-agent ownership
@@ -107,25 +108,26 @@ func (ap *AgentProcess) ResolveRemoteBranch() string {
 // SupervisedAgentStatus is a snapshot of a supervised agent's state for external inspection.
 // This type is safe to copy and does not contain a mutex.
 type SupervisedAgentStatus struct {
-	Worktree               string
-	Role                   string
-	Repo                   string
-	WorktreePath           string
-	PID                    int
-	RestartCount           int
-	LastStart              time.Time
-	LastExit               time.Time
-	LastExitCode           int
-	AssignedEpicID         string
-	CurrentBackend         string     // effective backend (includes failover state)
-	StopReason             StopReason // why the agent stopped (empty while running)
-	LastErrorClass         string     // string representation of last error class (e.g. "RateLimited")
-	NoWorkCount            int        // consecutive NoWork exits
-	BackoffUntil           time.Time  // when backoff sleep ends (zero if not in backoff)
-	RemoteBranch           string     // remote tracking ref (e.g. "origin/main")
-	OwnershipLeaseID       string
-	OwnershipFencingToken  int64
-	OwnershipLastHeartbeat time.Time
+	Worktree                string
+	Role                    string
+	Repo                    string
+	WorktreePath            string
+	PID                     int
+	RestartCount            int
+	LastStart               time.Time
+	LastExit                time.Time
+	LastExitCode            int
+	AssignedEpicID          string
+	CurrentBackend          string     // effective backend (includes failover state)
+	StopReason              StopReason // why the agent stopped (empty while running)
+	LastErrorClass          string     // string representation of last error class (e.g. "RateLimited")
+	NoWorkCount             int        // consecutive NoWork exits
+	BackoffUntil            time.Time  // when backoff sleep ends (zero if not in backoff)
+	RemoteBranch            string     // remote tracking ref (e.g. "origin/main")
+	OwnershipLeaseID        string
+	OwnershipFencingToken   int64
+	OwnershipLastHeartbeat  time.Time
+	AgentLeaseLastHeartbeat time.Time // last successful agent-lease heartbeat (per-session lease, distinct from ownership)
 }
 
 // BuiltInRoles defines the built-in role names that use loom <role> command.

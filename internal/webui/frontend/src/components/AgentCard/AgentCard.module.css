@@ -139,6 +139,22 @@
   color: var(--color-status-error, #ef4444);
 }
 
+/* Supervisor heartbeat freshness indicator. Green when fresh (heartbeat
+ * goroutine is alive), amber when stale (> 60s, supervisor may be wedged). */
+.heartbeat {
+  font-size: 0.65rem;
+  color: var(--color-text-tertiary, #9ca3af);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+  white-space: nowrap;
+  cursor: help;
+}
+
+.heartbeat[data-stale="true"] {
+  color: var(--color-status-error, #facc15);
+  font-weight: var(--font-weight-semibold, 600);
+}
+
 /* Diff stats container */
 .diffStats {
   display: flex;
