@@ -29,6 +29,16 @@ type actorClaimBackend interface {
 	ClaimIssueAsActor(ctx context.Context, id string, lockTTL time.Duration, actor string) error
 }
 
+// actorReleaseBackend is the optional symmetric counterpart of
+// actorClaimBackend. Backends that support this method allow the supervisor
+// to release the claim lock on a task when the agent that holds it exits,
+// rather than waiting for the lock's TTL to expire. Without this, an exited
+// agent's lock blocks every subsequent claim attempt for that issue (whether
+// from the same worktree or a different one) until the TTL elapses.
+type actorReleaseBackend interface {
+	ReleaseIssueAsActor(ctx context.Context, id string, actor string) error
+}
+
 const (
 	claimReadyLimit         = 256
 	claimConflictRetryLimit = 16
@@ -820,6 +830,31 @@ func (s *Supervisor) completeControlPlaneAgentSession(ap *AgentProcess, input ag
 		if _, err := s.ControlStore.AgentLeases().Release(ctx, s.WorkspaceID, input.leaseID, input.leaseToken); err != nil {
 			slog.Warn("control-plane agent lease release failed", "worktree", ap.Entry.Worktree, "session_id", input.sessionID, "lease_id", input.leaseID, "err", err)
 		}
+	}
+	s.releaseAssignedTaskClaim(ap, input.taskID)
+}
+
+// releaseAssignedTaskClaim releases the issue-claim lock held by this agent on
+// the given task. Called from completeControlPlaneAgentSession when the agent
+// process exits. Without this, fleet-db's per-issue claim lock leaks until its
+// TTL expires (~30 min), so the next agent — even with a fresh assignee — gets
+// HTTP 409 KindConflict on every ClaimIssue attempt and silently NoWorks in
+// the supervisor's restart backoff. The release is best-effort: if the backend
+// does not support actor-scoped release, or if the lock is already gone (e.g.
+// the agent already moved status to closed which auto-releases), this logs at
+// debug level and returns without affecting the cleanup path.
+func (s *Supervisor) releaseAssignedTaskClaim(ap *AgentProcess, taskID string) {
+	if taskID == "" || ap.Entry.Worktree == "" || s.IssueBackend == nil {
+		return
+	}
+	releaser, ok := s.IssueBackend.(actorReleaseBackend)
+	if !ok {
+		return
+	}
+	ctx, cancel := s.operationContext(claimOperationTimeout)
+	defer cancel()
+	if err := releaser.ReleaseIssueAsActor(ctx, taskID, ap.Entry.Worktree); err != nil {
+		slog.Debug("agent task claim release skipped", "worktree", ap.Entry.Worktree, "task_id", taskID, "err", err)
 	}
 }
 

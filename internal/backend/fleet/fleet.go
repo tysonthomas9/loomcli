@@ -808,6 +808,22 @@ func (b *FleetBackend) ClaimIssueAsActor(ctx context.Context, id string, lockTTL
 	return b.execAsActor(ctx, "ClaimIssue", "POST", "/issues/"+url.PathEscape(id)+"/claim", body, actor)
 }
 
+// ReleaseIssueAsActor releases the claim lock on an issue, overriding the
+// configured FleetDB actor for this request. fleet-db's release endpoint
+// is per-issue: POST /issues/{id}/release with empty body. The actor must
+// match the current claim holder, otherwise fleet-db returns a not-owner
+// error. Used by the daemon supervisor to symmetrically free a claim it
+// acquired in claimIssueForAgent when the agent process exits.
+func (b *FleetBackend) ReleaseIssueAsActor(ctx context.Context, id string, actor string) error {
+	if id == "" {
+		return backend.ErrValidation("ReleaseIssue", "id must not be empty")
+	}
+	if actor == "" {
+		return backend.ErrValidation("ReleaseIssue", "actor must not be empty")
+	}
+	return b.execAsActor(ctx, "ReleaseIssue", "POST", "/issues/"+url.PathEscape(id)+"/release", nil, actor)
+}
+
 func claimIssueBody(lockTTL time.Duration) (interface{}, error) {
 	if lockTTL < 0 {
 		return nil, backend.ErrValidation("ClaimIssue", "lockTTL must not be negative")
