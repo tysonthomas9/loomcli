@@ -28,6 +28,7 @@ import {
 } from "@/hooks/terminal";
 import { useToast } from "@/hooks/ui";
 import { restartOnboarding } from "@/utils/onboardingState";
+import { requestCliSetup } from "@/utils/cliSetup";
 
 import styles from "./SettingsView.module.css";
 
@@ -83,8 +84,7 @@ export function SettingsView({
     updateRedis,
   } = useLocalSettings();
   const redisSettings = localSettings?.fleetdb_redis;
-  const [redisForm, setRedisForm] =
-    useState<RedisFormState>(EMPTY_REDIS_FORM);
+  const [redisForm, setRedisForm] = useState<RedisFormState>(EMPTY_REDIS_FORM);
 
   const { fontFamily, fontSize, setFontFamily, setFontSize } =
     useTerminalFont();
@@ -199,6 +199,7 @@ export function SettingsView({
       }
       return;
     }
+    requestCliSetup(backend, action);
     onNavigate?.("terminal");
   };
 

@@ -5,6 +5,14 @@ import { patchTerminalState } from "@/hooks/api";
 import { LoadingSkeleton } from "@/components";
 import { useBackendConfig } from "@/hooks/workspace";
 import { useSessionRestore, useTerminalMetadata } from "@/hooks/terminal";
+import {
+  CLI_SETUP_REQUEST_EVENT,
+  clearPendingCliSetupRequest,
+  getCliSetupInstructions,
+  readPendingCliSetupRequest,
+  type CliSetupInstructions,
+  type CliSetupRequest,
+} from "@/utils/cliSetup";
 
 import {
   BackendPickerPrompt,
@@ -25,6 +33,7 @@ import {
   BACKEND_BRAND_COLORS,
   type TabState,
   generateTabName,
+  sanitizeSessionName,
   useTabOrdering,
   useTabActions,
   useTabInit,
@@ -47,8 +56,25 @@ interface TerminalViewProps {
   onAgentNameConsumed?: (() => void) | undefined;
 }
 
+interface CliSetupGuide extends CliSetupRequest {
+  tabId: string;
+  instructions: CliSetupInstructions;
+  hasRun: boolean;
+}
+
 function isLeadSessionName(sessionName: string): boolean {
   return /(?:^|--)lead-[^-]+-\d+$/.test(sessionName);
+}
+
+function buildCliSetupSessionName(
+  workspaceId: string,
+  backendName: string,
+): string {
+  const safeWorkspace = workspaceId ? sanitizeSessionName(workspaceId) : "";
+  const wsPrefix =
+    safeWorkspace && safeWorkspace !== "default" ? `${safeWorkspace}--` : "";
+  const safeBackend = sanitizeSessionName(backendName) || "cli";
+  return `${wsPrefix}lead-shell-setup-${safeBackend}`;
 }
 
 export function TerminalView({
@@ -120,7 +146,11 @@ export function TerminalView({
     return false;
   });
   const [isHelpOpen, setIsHelpOpen] = useState(false);
+  const [cliSetupGuide, setCliSetupGuide] = useState<CliSetupGuide | null>(
+    null,
+  );
   const instanceRefs = useRef<Map<string, TerminalInstanceHandle>>(new Map());
+  const processedCliSetupIdRef = useRef<string | null>(null);
   const activeTabIdRef = useRef(activeTabId);
   activeTabIdRef.current = activeTabId;
   const tabsRef = useRef(tabs);
@@ -176,6 +206,7 @@ export function TerminalView({
     isActive,
     onUnreadChange,
   });
+  const hasPendingCliSetupRequest = readPendingCliSetupRequest() != null;
 
   useTabInit({
     tabMetadata,
@@ -188,6 +219,7 @@ export function TerminalView({
     initializedRef,
     workspace: workspaceId,
     isViewActive: isActive ?? false,
+    skipDefaultTabInit: hasPendingCliSetupRequest,
   });
 
   // Apply server-restored active tab after initialization.
@@ -215,7 +247,7 @@ export function TerminalView({
     return () => {
       if (patchDebounceRef.current) clearTimeout(patchDebounceRef.current);
     };
-  }, [activeTabId]);
+  }, [activeTabId, workspaceId]);
 
   // Report active (connected) session count to parent
   useEffect(() => {
@@ -271,6 +303,160 @@ export function TerminalView({
     },
   );
 
+  const processCliSetupRequest = useCallback(
+    (request: CliSetupRequest): boolean => {
+      if (!initializedRef.current) return false;
+      if (processedCliSetupIdRef.current === request.id) {
+        clearPendingCliSetupRequest(request.id);
+        return true;
+      }
+
+      const currentTabs = tabsRef.current;
+      const sessionName = buildCliSetupSessionName(
+        workspaceIdRef.current,
+        request.backendName,
+      );
+      const label = `${request.displayName} setup`;
+      const existingTab = currentTabs.find(
+        (tab) => tab.sessionName === sessionName,
+      );
+      const existingMetadata = tabMetadata.find(
+        (tab) => tab.session_name === sessionName,
+      );
+      const tabCount = Math.max(currentTabs.length, tabMetadata.length);
+
+      if (!existingTab && !existingMetadata && tabCount >= MAX_TABS) {
+        processedCliSetupIdRef.current = request.id;
+        clearPendingCliSetupRequest(request.id);
+        handleTabLimitReached();
+        return true;
+      }
+
+      if (existingTab || existingMetadata) {
+        const tabId = existingTab?.id ?? sessionName;
+        const existingLabel = existingTab?.label ?? existingMetadata?.label;
+        setActiveTabId(tabId);
+        if (existingLabel !== label) {
+          setTabs((prev) =>
+            prev.map((tab) => (tab.id === tabId ? { ...tab, label } : tab)),
+          );
+          updateLabel(sessionName, label).catch((err) =>
+            console.error(
+              `Failed to persist setup tab label ${sessionName}:`,
+              err,
+            ),
+          );
+        }
+      } else {
+        const newTab: TabState = {
+          id: sessionName,
+          label,
+          sessionName,
+          connectionState: "disconnected" as const,
+          backendName: "shell",
+        };
+        setTabs((prev) =>
+          prev.some((tab) => tab.sessionName === sessionName)
+            ? prev
+            : [...prev, newTab],
+        );
+        setActiveTabId(sessionName);
+        createTab(sessionName, label, tabCount).catch((err) =>
+          console.error(`Failed to persist setup tab ${sessionName}:`, err),
+        );
+      }
+
+      try {
+        sessionStorage.setItem("terminal-active-tab", sessionName);
+      } catch {
+        // sessionStorage unavailable
+      }
+
+      processedCliSetupIdRef.current = request.id;
+      clearPendingCliSetupRequest(request.id);
+      setCliSetupGuide({
+        ...request,
+        tabId: sessionName,
+        instructions: getCliSetupInstructions(request),
+        hasRun: false,
+      });
+      announce(`${request.displayName} setup opened`);
+      return true;
+    },
+    [
+      announce,
+      createTab,
+      handleTabLimitReached,
+      setActiveTabId,
+      setTabs,
+      tabMetadata,
+      updateLabel,
+    ],
+  );
+
+  useEffect(() => {
+    if (!isActive || !initializedRef.current) return;
+    const request = readPendingCliSetupRequest();
+    if (request) processCliSetupRequest(request);
+  }, [isActive, tabs, processCliSetupRequest]);
+
+  useEffect(() => {
+    const handleCliSetupRequest = (event: Event) => {
+      const request =
+        (event as CustomEvent<CliSetupRequest>).detail ??
+        readPendingCliSetupRequest();
+      if (!request || !isActive || !initializedRef.current) return;
+      processCliSetupRequest(request);
+    };
+    window.addEventListener(CLI_SETUP_REQUEST_EVENT, handleCliSetupRequest);
+    return () => {
+      window.removeEventListener(
+        CLI_SETUP_REQUEST_EVENT,
+        handleCliSetupRequest,
+      );
+    };
+  }, [isActive, processCliSetupRequest]);
+
+  const runCliSetupCommand = useCallback(
+    (guide: CliSetupGuide) => {
+      const handle = instanceRefs.current.get(guide.tabId);
+      setActiveTabId(guide.tabId);
+      if (!handle) {
+        announce("Setup terminal is still connecting");
+        return;
+      }
+
+      handle.focus();
+      const command = guide.instructions.command;
+      if (!command) return;
+      handle.pasteText(`${command}\n`);
+      setCliSetupGuide((current) =>
+        current?.id === guide.id ? { ...current, hasRun: true } : current,
+      );
+      announce(`${guide.displayName} setup command sent`);
+    },
+    [announce],
+  );
+
+  useEffect(() => {
+    if (
+      !cliSetupGuide ||
+      cliSetupGuide.hasRun ||
+      !cliSetupGuide.instructions.command
+    ) {
+      return;
+    }
+    const setupTab = tabs.find((tab) => tab.id === cliSetupGuide.tabId);
+    if (setupTab?.connectionState !== "connected") return;
+
+    const timer = setTimeout(() => {
+      runCliSetupCommand(cliSetupGuide);
+    }, 250);
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [cliSetupGuide, runCliSetupCommand, tabs]);
+
   const handleNewTabClick = useCallback(() => {
     if (tabs.length >= MAX_TABS) {
       handleTabLimitReached();
@@ -324,20 +510,10 @@ export function TerminalView({
 
   // Auto-dismiss the welcome banner when sessions already exist.
   useEffect(() => {
-    if (
-      !dismissedWelcome &&
-      !metaLoading &&
-      tabMetadata &&
-      tabMetadata.length > 0
-    ) {
+    if (!dismissedWelcome && !metaLoading && tabMetadata.length > 0) {
       handleDismissWelcome();
     }
-  }, [
-    dismissedWelcome,
-    metaLoading,
-    tabMetadata?.length,
-    handleDismissWelcome,
-  ]);
+  }, [dismissedWelcome, metaLoading, tabMetadata.length, handleDismissWelcome]);
 
   const handleToggleHelp = useCallback(() => {
     setIsHelpOpen((prev) => !prev);
@@ -447,6 +623,11 @@ export function TerminalView({
   ]
     .filter(Boolean)
     .join(" ");
+  const cliSetupTab =
+    cliSetupGuide != null
+      ? tabs.find((tab) => tab.id === cliSetupGuide.tabId)
+      : undefined;
+  const isCliSetupTerminalReady = cliSetupTab?.connectionState === "connected";
 
   return (
     <div className={containerClassName} data-testid="terminal-view">
@@ -489,6 +670,51 @@ export function TerminalView({
             onToggleSplit={handleToggleSplit}
             onHelpClick={handleToggleHelp}
           />
+          {cliSetupGuide && (
+            <div
+              className={styles.cliSetupBanner}
+              data-testid="cli-setup-banner"
+            >
+              <span
+                className={styles.cliSetupDot}
+                style={{ backgroundColor: cliSetupGuide.brandColor }}
+                aria-hidden="true"
+              />
+              <div className={styles.cliSetupBody}>
+                <div className={styles.cliSetupHeader}>
+                  <strong>{cliSetupGuide.instructions.title}</strong>
+                  <span>{cliSetupGuide.provider}</span>
+                </div>
+                <p>{cliSetupGuide.instructions.description}</p>
+                {cliSetupGuide.instructions.command && (
+                  <code>{cliSetupGuide.instructions.command}</code>
+                )}
+              </div>
+              <div className={styles.cliSetupActions}>
+                <button
+                  type="button"
+                  className={styles.cliSetupButton}
+                  onClick={() => runCliSetupCommand(cliSetupGuide)}
+                  disabled={
+                    Boolean(cliSetupGuide.instructions.command) &&
+                    !isCliSetupTerminalReady
+                  }
+                >
+                  {cliSetupGuide.hasRun
+                    ? "Run again"
+                    : cliSetupGuide.instructions.buttonLabel}
+                </button>
+                <button
+                  type="button"
+                  className={styles.cliSetupDismiss}
+                  onClick={() => setCliSetupGuide(null)}
+                  aria-label="Dismiss CLI setup"
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          )}
           <HelpPopover
             isOpen={isHelpOpen}
             onClose={() => setIsHelpOpen(false)}

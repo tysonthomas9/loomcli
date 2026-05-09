@@ -21,6 +21,7 @@ import { KeyboardShortcutProvider } from "@/hooks/ui";
 import { TerminalView } from "../TerminalView";
 import { TerminalInstance } from "../instances/TerminalInstance";
 import { MAX_TABS } from "@/components/TerminalView/tabs/terminalTabUtils";
+import { CLI_SETUP_REQUEST_KEY } from "@/utils/cliSetup";
 import {
   BackendPickerPrompt,
   SessionNamePrompt,
@@ -346,6 +347,74 @@ describe("TerminalView", () => {
       render(<TerminalView />);
 
       expect(mockMetadataHook.createTab).not.toHaveBeenCalled();
+    });
+
+    it("opens a shell setup tab from a pending CLI setup request", async () => {
+      setMetadata(DEFAULT_METADATA);
+      sessionStorage.setItem(
+        CLI_SETUP_REQUEST_KEY,
+        JSON.stringify({
+          id: "setup-1",
+          backendName: "codex",
+          displayName: "Codex",
+          provider: "OpenAI",
+          brandColor: "#10a37f",
+          action: "install",
+        }),
+      );
+
+      render(<TerminalView />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId("cli-setup-banner")).toBeInTheDocument();
+      });
+      expect(screen.getByText("Install Codex")).toBeInTheDocument();
+      expect(
+        screen.getByText("npm install -g @openai/codex"),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByTestId("tab-lead-shell-setup-codex"),
+      ).toBeInTheDocument();
+      expect(screen.getByTestId("active-tab-id").textContent).toBe(
+        "lead-shell-setup-codex",
+      );
+      expect(mockMetadataHook.createTab).toHaveBeenCalledWith(
+        "lead-shell-setup-codex",
+        "Codex setup",
+        2,
+      );
+      expect(sessionStorage.getItem(CLI_SETUP_REQUEST_KEY)).toBeNull();
+    });
+
+    it("does not auto-create a lead tab when opening terminal for CLI setup", async () => {
+      setMetadata([]);
+      sessionStorage.setItem(
+        CLI_SETUP_REQUEST_KEY,
+        JSON.stringify({
+          id: "setup-2",
+          backendName: "codex",
+          displayName: "Codex",
+          provider: "OpenAI",
+          brandColor: "#10a37f",
+          action: "install",
+        }),
+      );
+
+      render(<TerminalView />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId("cli-setup-banner")).toBeInTheDocument();
+      });
+      expect(
+        screen.getByTestId("tab-lead-shell-setup-codex"),
+      ).toBeInTheDocument();
+      expect(screen.queryByTestId("tab-lead-claude-1")).not.toBeInTheDocument();
+      expect(mockMetadataHook.createTab).toHaveBeenCalledTimes(1);
+      expect(mockMetadataHook.createTab).toHaveBeenCalledWith(
+        "lead-shell-setup-codex",
+        "Codex setup",
+        0,
+      );
     });
 
     it("does not initialize tabs when isActive is false", () => {
