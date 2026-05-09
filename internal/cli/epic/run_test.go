@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/cli/clitest"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -202,10 +204,136 @@ func TestSelectTargetNodeIDRequiresSingleActiveNode(t *testing.T) {
 	}
 }
 
+func TestReconcileOnceFailsWhenSpawnedWorkerStoppedWithInProgressTask(t *testing.T) {
+	ctx := context.Background()
+	st := newTestStore(t)
+	taskID := "EPIC-2"
+	worker := workerName("epic-1", taskID)
+	createStoppedWorker(t, st, "ws", worker)
+
+	ib := clitest.NewMockIssueBackend()
+	ib.ListResult = []backend.IssueData{{
+		ID:       taskID,
+		Title:    "second task",
+		Status:   "in_progress",
+		Assignee: worker,
+	}}
+
+	r := &runner{
+		store:          st,
+		ib:             ib,
+		workspace:      "ws",
+		parent:         "EPIC-1",
+		prefix:         "epic-1",
+		maxConcurrency: 1,
+		spawned:        map[string]string{taskID: worker},
+	}
+
+	done, err := r.reconcileOnce(ctx)
+	if done {
+		t.Fatal("reconcileOnce done = true, want false")
+	}
+	if !errors.Is(err, errStalledWorker) {
+		t.Fatalf("reconcileOnce error = %v, want errStalledWorker", err)
+	}
+}
+
+func TestReconcileOnceDetectsStoppedDeterministicWorkerAfterRestart(t *testing.T) {
+	ctx := context.Background()
+	st := newTestStore(t)
+	taskID := "EPIC-2"
+	worker := workerName("epic-1", taskID)
+	createStoppedWorker(t, st, "ws", worker)
+
+	ib := clitest.NewMockIssueBackend()
+	ib.ListResult = []backend.IssueData{{
+		ID:       taskID,
+		Title:    "second task",
+		Status:   "in_progress",
+		Assignee: worker,
+	}}
+
+	r := &runner{
+		store:          st,
+		ib:             ib,
+		workspace:      "ws",
+		parent:         "EPIC-1",
+		prefix:         "epic-1",
+		maxConcurrency: 1,
+		spawned:        map[string]string{},
+	}
+
+	_, err := r.reconcileOnce(ctx)
+	if !errors.Is(err, errStalledWorker) {
+		t.Fatalf("reconcileOnce error = %v, want errStalledWorker", err)
+	}
+}
+
+func TestReconcileOnceRetriesOpenTaskWhenSpawnedWorkerMissing(t *testing.T) {
+	ctx := context.Background()
+	st := newTestStore(t)
+	taskID := "EPIC-2"
+	oldWorker := workerName("epic-1", taskID)
+	task := backend.IssueData{ID: taskID, Title: "retry task", Status: "open"}
+
+	ib := clitest.NewMockIssueBackend()
+	ib.ReadyResult = []backend.IssueData{task}
+	ib.ListResult = []backend.IssueData{task}
+
+	r := &runner{
+		store:          st,
+		ib:             ib,
+		workspace:      "ws",
+		parent:         "EPIC-1",
+		prefix:         "epic-1",
+		role:           "task",
+		maxConcurrency: 1,
+		spawned:        map[string]string{taskID: oldWorker},
+	}
+
+	done, err := r.reconcileOnce(ctx)
+	if err != nil {
+		t.Fatalf("reconcileOnce error = %v", err)
+	}
+	if done {
+		t.Fatal("reconcileOnce done = true, want false")
+	}
+
+	newWorker := workerName("epic-1", taskID)
+	if _, err := st.Agents().Get(ctx, "ws", newWorker); err != nil {
+		t.Fatalf("expected retry to create worker %q: %v", newWorker, err)
+	}
+	cmds, err := st.AgentCommands().List(ctx, "ws", store.AgentCommandFilter{TargetAgentID: newWorker})
+	if err != nil {
+		t.Fatalf("list agent commands: %v", err)
+	}
+	if len(cmds) != 1 || cmds[0].Payload["task_id"] != taskID {
+		t.Fatalf("commands = %#v, want one start command for %s", cmds, taskID)
+	}
+}
+
 func newTestStore(t *testing.T) store.Store {
 	t.Helper()
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
 	return memstore.New()
+}
+
+func createStoppedWorker(t *testing.T, st store.Store, workspace, name string) {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := st.Agents().Create(ctx, store.AgentCreate{
+		WorkspaceKey: workspace,
+		Name:         name,
+		RoleName:     "task",
+		Mode:         domain.AgentModeEphemeral,
+		DesiredState: domain.AgentDesiredStopped,
+	}); err != nil {
+		t.Fatalf("create stopped worker: %v", err)
+	}
+	stopped := domain.AgentStateStopped
+	if _, err := st.Agents().Update(ctx, workspace, name, store.AgentUpdate{State: &stopped}); err != nil {
+		t.Fatalf("mark worker stopped: %v", err)
+	}
 }
 
 func createTestLead(t *testing.T, st store.Store, workspace, name, parent, orchestrator string) {

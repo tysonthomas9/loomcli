@@ -2,6 +2,9 @@ package daemon
 
 import (
 	"testing"
+
+	"github.com/tysonthomas9/loomcli/internal/cli/daemon/supervisor"
+	"github.com/tysonthomas9/loomcli/internal/domain"
 )
 
 func TestDiffAgents_NoChanges(t *testing.T) {
@@ -356,6 +359,53 @@ func TestComputeConfigHash_AgentChanges(t *testing.T) {
 	h2 := computeConfigHash(dc2)
 	if h1 == h2 {
 		t.Error("expected different hashes when agents differ")
+	}
+}
+
+func TestModifiedAgentsToDrain_DefersActiveEphemeralTask(t *testing.T) {
+	d := &Daemon{
+		sup: &supervisor.Supervisor{
+			Agents: []*supervisor.AgentProcess{{
+				Entry:           AgentEntry{Worktree: "worker", Role: "task", Mode: domain.AgentModeEphemeral},
+				RequestedTaskID: "TASK-1",
+				Done:            make(chan struct{}),
+			}},
+		},
+	}
+
+	got := d.modifiedAgentsToDrain([]AgentEntry{{
+		Worktree:     "worker",
+		Role:         "task",
+		Mode:         domain.AgentModeEphemeral,
+		DesiredState: domain.AgentDesiredRunning,
+	}})
+	if len(got) != 0 {
+		t.Fatalf("modifiedAgentsToDrain returned %d entries, want 0 while ephemeral task is active", len(got))
+	}
+}
+
+func TestModifiedAgentsToDrain_DrainsCompletedEphemeralTask(t *testing.T) {
+	done := make(chan struct{})
+	close(done)
+	d := &Daemon{
+		sup: &supervisor.Supervisor{
+			Agents: []*supervisor.AgentProcess{{
+				Entry:          AgentEntry{Worktree: "worker", Role: "task", Mode: domain.AgentModeEphemeral},
+				AssignedTaskID: "TASK-1",
+				Done:           done,
+			}},
+		},
+	}
+
+	entries := []AgentEntry{{
+		Worktree:     "worker",
+		Role:         "task",
+		Mode:         domain.AgentModeEphemeral,
+		DesiredState: domain.AgentDesiredStopped,
+	}}
+	got := d.modifiedAgentsToDrain(entries)
+	if len(got) != 1 || got[0].Worktree != "worker" {
+		t.Fatalf("modifiedAgentsToDrain = %#v, want completed worker to drain", got)
 	}
 }
 

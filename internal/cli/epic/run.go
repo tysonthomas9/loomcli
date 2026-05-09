@@ -47,6 +47,8 @@ var (
 	runLead            string
 )
 
+var errStalledWorker = errors.New("spawned worker stopped before completing its task")
+
 var epicCmd = &cobra.Command{
 	Use:     "epic",
 	Short:   "Manage epic-scoped work",
@@ -337,6 +339,9 @@ func (r *runner) reconcileLoop(ctx context.Context) error {
 		// Run one reconcile pass immediately, then on each tick.
 		done, err := r.reconcileOnce(ctx)
 		if err != nil {
+			if errors.Is(err, errStalledWorker) {
+				return err
+			}
 			fmt.Fprintf(os.Stderr, "[epic-run] reconcile error: %v (continuing)\n", err)
 		}
 		if done {
@@ -366,14 +371,14 @@ func (r *runner) reconcileOnce(ctx context.Context) (done bool, err error) {
 		return false, fmt.Errorf("blocked query: %w", err)
 	}
 
-	openOrInProgress, err := r.countOpenChildren(ctx)
+	openChildren, err := r.openChildren(ctx)
 	if err != nil {
 		return false, err
 	}
 
 	// Drain only after no child work remains and every worker spawned by this
 	// runner has stopped, so downstream orchestration can trust the lifecycle.
-	if openOrInProgress == 0 {
+	if len(openChildren) == 0 {
 		activeSpawned := r.countActiveSpawned(ctx)
 		if activeSpawned > 0 {
 			fmt.Printf("[epic-run] child work closed; waiting for %d spawned worker(s) to stop\n", activeSpawned)
@@ -384,6 +389,9 @@ func (r *runner) reconcileOnce(ctx context.Context) (done bool, err error) {
 
 	// Spawn for new ready tasks, respecting concurrency.
 	activeSpawned := r.countActiveSpawned(ctx)
+	if stalled := r.stalledSpawnedTasks(ctx, openChildren); len(stalled) > 0 {
+		return false, fmt.Errorf("%w: %s", errStalledWorker, strings.Join(stalled, "; "))
+	}
 	slots := r.maxConcurrency - activeSpawned
 	if slots <= 0 {
 		fmt.Printf("[epic-run] %d ready, %d blocked, %d active workers (at cap)\n", len(ready), len(blocked), activeSpawned)
@@ -403,12 +411,16 @@ func (r *runner) reconcileOnce(ctx context.Context) (done bool, err error) {
 		if task.Status == "closed" || task.Status == "deferred" {
 			continue
 		}
-		if _, alreadySpawned := r.spawned[task.ID]; alreadySpawned {
-			// This runner invocation already assigned a worker to the task. Do
-			// not enqueue duplicate starts while the daemon is converging; if
-			// the worker fails, restarting the runner will retry the
-			// deterministic worker name.
-			continue
+		if name, alreadySpawned := r.spawned[task.ID]; alreadySpawned {
+			if task.Status == "open" && !r.workerStillActive(ctx, name) {
+				delete(r.spawned, task.ID)
+			} else {
+				// This runner invocation already assigned a worker to the task. Do
+				// not enqueue duplicate starts while the daemon is converging; if
+				// the worker fails, restarting the runner will retry the
+				// deterministic worker name.
+				continue
+			}
 		}
 		if err := r.spawnWorker(ctx, task); err != nil {
 			fmt.Fprintf(os.Stderr, "[epic-run] spawn for %s failed: %v\n", task.ID, err)
@@ -422,18 +434,18 @@ func (r *runner) reconcileOnce(ctx context.Context) (done bool, err error) {
 	return false, nil
 }
 
-func (r *runner) countOpenChildren(ctx context.Context) (int, error) {
+func (r *runner) openChildren(ctx context.Context) ([]backend.IssueData, error) {
 	issues, err := r.ib.List(ctx, backend.ListOpts{ParentID: r.parent, Limit: 10000})
 	if err != nil {
-		return 0, fmt.Errorf("list child work: %w", err)
+		return nil, fmt.Errorf("list child work: %w", err)
 	}
-	count := 0
+	open := make([]backend.IssueData, 0, len(issues))
 	for _, t := range issues {
 		if t.Status != "closed" && t.Status != "deferred" {
-			count++
+			open = append(open, t)
 		}
 	}
-	return count, nil
+	return open, nil
 }
 
 // countActiveSpawned returns how many of the workers this runner has spawned
@@ -454,10 +466,31 @@ func (r *runner) workerStillActive(ctx context.Context, name string) bool {
 		return false
 	}
 	a, err := r.store.Agents().Get(ctx, r.workspace, name)
-	if err != nil || a == nil {
+	if errors.Is(err, domain.ErrNotFound) || a == nil {
+		return false
+	}
+	if err != nil {
 		return true // assume active if we can't tell
 	}
 	return a.State != domain.AgentStateStopped
+}
+
+func (r *runner) stalledSpawnedTasks(ctx context.Context, openChildren []backend.IssueData) []string {
+	var stalled []string
+	for _, task := range openChildren {
+		if task.Status != "in_progress" {
+			continue
+		}
+		name := r.spawned[task.ID]
+		if name == "" && task.Assignee == workerName(r.prefix, task.ID) {
+			name = task.Assignee
+		}
+		if name == "" || r.workerStillActive(ctx, name) {
+			continue
+		}
+		stalled = append(stalled, fmt.Sprintf("%s (%s) assigned to stopped worker %s", task.ID, task.Title, name))
+	}
+	return stalled
 }
 
 // spawnWorker creates an ephemeral worker agent pinned to the given task and

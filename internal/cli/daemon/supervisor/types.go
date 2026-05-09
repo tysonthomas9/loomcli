@@ -58,23 +58,23 @@ type AgentProcess struct {
 
 	StopReason StopReason // why the agent was stopped (set at decision site, empty while running)
 
-	Mu sync.Mutex // protects Cmd, Pid, LogFile, restart tracking, AssignedEpicID, AssignedTaskID, LastError, CurrentBackendIdx, Session, AgentSessionID, AgentLeaseID, AgentLeaseToken, ownership fields, TranscriptPath, BeforeRef, StopReason
+	Mu sync.Mutex // protects Cmd, Pid, LogFile, restart tracking, AssignedEpicID, AssignedTaskID, RequestedTaskID, LastError, CurrentBackendIdx, Session, AgentSessionID, AgentLeaseID, AgentLeaseToken, ownership fields, TranscriptPath, BeforeRef, StopReason
 }
 
 // StopReason identifies why an agent was stopped.
 type StopReason string
 
 const (
-	StopReasonNoWork         StopReason = "no_work"
-	StopReasonRateLimited    StopReason = "rate_limited"
-	StopReasonMaxRetries     StopReason = "max_retries"
-	StopReasonFatalError     StopReason = "fatal_error"
-	StopReasonManualStop     StopReason = "manual_stop"
-	StopReasonConfigRemoved  StopReason = "config_removed"
-	StopReasonShutdown       StopReason = "shutdown"
-	StopReasonYielded        StopReason = "yielded"
-	StopReasonWatchdog       StopReason = "watchdog"
-	StopReasonEphemeralDone  StopReason = "ephemeral_done"  // ephemeral-mode agent exited cleanly after one successful task
+	StopReasonNoWork        StopReason = "no_work"
+	StopReasonRateLimited   StopReason = "rate_limited"
+	StopReasonMaxRetries    StopReason = "max_retries"
+	StopReasonFatalError    StopReason = "fatal_error"
+	StopReasonManualStop    StopReason = "manual_stop"
+	StopReasonConfigRemoved StopReason = "config_removed"
+	StopReasonShutdown      StopReason = "shutdown"
+	StopReasonYielded       StopReason = "yielded"
+	StopReasonWatchdog      StopReason = "watchdog"
+	StopReasonEphemeralDone StopReason = "ephemeral_done" // ephemeral-mode agent exited cleanly after one successful task
 )
 
 // resolveRemote returns the git remote name for this agent.

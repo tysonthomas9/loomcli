@@ -232,6 +232,9 @@ func (d *Daemon) markAgentStartAccepted(name string) {
 	state := domain.AgentStateActive
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
+
+	d.reconcileMu.Lock()
+	defer d.reconcileMu.Unlock()
 	if _, err := d.store.Agents().Update(ctx, d.sup.WorkspaceID, name, store.AgentUpdate{
 		DesiredState: &desired,
 		State:        &state,
@@ -239,12 +242,16 @@ func (d *Daemon) markAgentStartAccepted(name string) {
 		slog.Warn("failed to mark agent start accepted", "worktree", name, "err", err)
 		return
 	}
-	d.setConfigAgentDesiredState(name, desired)
+	d.setConfigAgentDesiredStateLocked(name, desired)
 }
 
 func (d *Daemon) setConfigAgentDesiredState(name string, desired domain.AgentDesiredState) {
 	d.reconcileMu.Lock()
 	defer d.reconcileMu.Unlock()
+	d.setConfigAgentDesiredStateLocked(name, desired)
+}
+
+func (d *Daemon) setConfigAgentDesiredStateLocked(name string, desired domain.AgentDesiredState) {
 	if d.config == nil {
 		return
 	}

@@ -109,11 +109,27 @@ func (d *Daemon) applyAgentChanges(added, removed, modified []config.AgentEntry)
 	d.drainAddMu.Lock()
 	defer d.drainAddMu.Unlock()
 
+	modifiedToDrain := d.modifiedAgentsToDrain(modified)
 	d.drainAgents(removed, "removed")
-	d.drainAgents(modified, "modified")
+	d.drainAgents(modifiedToDrain, "modified")
 
 	d.addNewAgents(added, "add")
-	d.addNewAgents(modified, "re-add modified")
+	d.addNewAgents(modifiedToDrain, "re-add modified")
+}
+
+func (d *Daemon) modifiedAgentsToDrain(entries []config.AgentEntry) []config.AgentEntry {
+	if len(entries) == 0 {
+		return nil
+	}
+	out := make([]config.AgentEntry, 0, len(entries))
+	for _, entry := range entries {
+		if d.sup.HasActiveEphemeralTask(entry.Worktree) {
+			slog.Info("deferring modified agent reconcile while ephemeral task is active", "worktree", entry.Worktree)
+			continue
+		}
+		out = append(out, entry)
+	}
+	return out
 }
 
 // drainAgents stops a list of agents, logging errors.
