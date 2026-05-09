@@ -27,10 +27,33 @@ type TerminalService interface {
 	// --- Terminal UI state (Redis) ---
 	GetTerminalState(ctx context.Context, wsID string) (string, error)
 	PatchTerminalState(ctx context.Context, wsID, activeTab string) error
+
+	// --- Backend-owned setup terminal ---
+	StartSetup(ctx context.Context, wsID string, req TerminalSetupRequest) (*TerminalSetupResult, error)
 }
 
 // PatchTabResult contains the patched tab and whether the issue ID changed.
 type PatchTabResult struct {
 	Tab            *tabmeta.TabMetadata
 	IssueIDChanged bool
+}
+
+// TerminalSetupRequest asks the backend to start a known setup command in a
+// workspace-scoped terminal session.
+type TerminalSetupRequest struct {
+	Backend string
+	Action  string
+}
+
+// TerminalSetupResult describes the setup terminal session the frontend
+// should attach to and the command the backend started there.
+type TerminalSetupResult struct {
+	SessionName string `json:"session_name"`
+	Label       string `json:"label"`
+	Backend     string `json:"backend"`
+	Action      string `json:"action"`
+	Command     string `json:"command"`
+	Title       string `json:"title"`
+	Message     string `json:"message"`
+	Created     bool   `json:"created"`
 }

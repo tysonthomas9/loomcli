@@ -95,8 +95,8 @@ export function getCliSetupInstructions(
     title: `${action} ${request.displayName}`,
     description:
       request.action === "install"
-        ? "The setup shell will run this install command. Leave the terminal open until it finishes, then refresh CLI status from Settings if needed."
-        : "The setup shell will run this interactive command. Follow the prompts in the terminal.",
+        ? "The backend will start this install command in a setup terminal. Leave it open until it finishes."
+        : "The backend will start this interactive command in a setup terminal. Follow the prompts there.",
     command,
     buttonLabel: request.action === "install" ? "Run install" : "Run command",
   };

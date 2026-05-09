@@ -129,6 +129,25 @@
   white-space: nowrap;
 }
 
+.cliSetupStatus {
+  width: fit-content;
+  max-width: 100%;
+  font-size: var(--font-xs);
+  font-weight: 650;
+}
+
+.starting {
+  color: #facc15;
+}
+
+.running {
+  color: #34d399;
+}
+
+.failed {
+  color: #fb7185;
+}
+
 .cliSetupActions {
   display: flex;
   align-items: center;

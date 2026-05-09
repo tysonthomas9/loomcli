@@ -6,8 +6,8 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
-// TabModule registers the 8 workspace-scoped terminal tab metadata
-// and UI state routes on a [*http.ServeMux].
+// TabModule registers workspace-scoped terminal tab metadata, UI state, and
+// setup-control routes on a [*http.ServeMux].
 //
 // The module is only constructed when termSvc is non-nil. All routes are
 // unconditional within this module.
@@ -21,7 +21,7 @@ func NewTabModule(termSvc service.TerminalService) *TabModule {
 	return &TabModule{termSvc: termSvc}
 }
 
-// Register implements [Module] by registering 8 terminal tab and state routes.
+// Register implements [Module] by registering terminal tab, state, and setup routes.
 func (m *TabModule) Register(mux *http.ServeMux) {
 	// Tab metadata CRUD
 	mux.HandleFunc("GET /api/workspaces/{ws}/terminal/tabs", HandleListTerminalTabs(m.termSvc))
@@ -36,4 +36,7 @@ func (m *TabModule) Register(mux *http.ServeMux) {
 	// Terminal UI state (active tab persistence)
 	mux.HandleFunc("GET /api/workspaces/{ws}/terminal/state", HandleGetTerminalState(m.termSvc))
 	mux.HandleFunc("PATCH /api/workspaces/{ws}/terminal/state", HandlePatchTerminalState(m.termSvc))
+
+	// Backend-owned setup command runner.
+	mux.HandleFunc("POST /api/workspaces/{ws}/terminal/setup", HandleStartTerminalSetup(m.termSvc))
 }
