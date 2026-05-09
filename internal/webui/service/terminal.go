@@ -55,5 +55,6 @@ type TerminalSetupResult struct {
 	Command     string `json:"command"`
 	Title       string `json:"title"`
 	Message     string `json:"message"`
+	Manual      bool   `json:"manual"`
 	Created     bool   `json:"created"`
 }

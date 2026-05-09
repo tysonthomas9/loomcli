@@ -94,6 +94,7 @@ export interface TerminalSetupResult {
   command: string;
   title: string;
   message: string;
+  manual: boolean;
   created: boolean;
 }
 

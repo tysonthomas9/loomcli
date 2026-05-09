@@ -161,7 +161,13 @@ func TestStartSetupSupportsCursorGuidance(t *testing.T) {
 	if !strings.Contains(result.Command, "Cursor CLI setup is not fully automated") {
 		t.Fatalf("Command = %q", result.Command)
 	}
-	if !strings.Contains(result.Message, "supported Cursor CLI install step") {
+	if !result.Manual {
+		t.Fatal("Manual = false, want true for Cursor install guidance")
+	}
+	if result.Title != "Set up Cursor manually" {
+		t.Fatalf("Title = %q", result.Title)
+	}
+	if !strings.Contains(result.Message, "manual Cursor CLI setup steps") {
 		t.Fatalf("Message = %q", result.Message)
 	}
 }
