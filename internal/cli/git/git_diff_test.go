@@ -100,12 +100,123 @@ func TestResolveMergeBase_Success(t *testing.T) {
 	}
 }
 
-func TestResolveMergeBase_InvalidBranch(t *testing.T) {
+func TestResolveMergeBase_InvalidRef(t *testing.T) {
 	dir, _ := setupDiffTestRepo(t)
 
-	_, err := ResolveMergeBase(dir, "nonexistent-branch")
+	_, err := ResolveMergeBase(dir, "../bad")
 	if err == nil {
-		t.Error("expected error for nonexistent branch, got nil")
+		t.Error("expected error for invalid ref, got nil")
+	}
+}
+
+func TestResolveMergeBase_FallsBackToRemoteDefaultWhenConfiguredBranchMissing(t *testing.T) {
+	clearGitEnvVars(t)
+	root := t.TempDir()
+	origin := filepath.Join(root, "origin.git")
+	clone := filepath.Join(root, "clone")
+
+	runIn := func(dir string, args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", args...) //nolint:norawexec
+		cmd.Dir = dir
+		cmd.Env = gitSafeEnv(
+			"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@test.com",
+			"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@test.com",
+		)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v failed: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	write := func(dir, name, content string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	runIn(root, "init", "--bare", "--initial-branch=master", origin)
+	runIn(root, "clone", origin, clone)
+	runIn(clone, "config", "user.email", "test@test.com")
+	runIn(clone, "config", "user.name", "test")
+	write(clone, "README.md", "base\n")
+	runIn(clone, "add", ".")
+	runIn(clone, "commit", "-m", "base")
+	runIn(clone, "push", "-u", "origin", "master")
+	expectedBase := runIn(clone, "rev-parse", "HEAD")
+
+	runIn(clone, "checkout", "-b", "feature")
+	write(clone, "feature.txt", "feature\n")
+	runIn(clone, "add", ".")
+	runIn(clone, "commit", "-m", "feature")
+
+	got, err := ResolveMergeBase(clone, "main")
+	if err != nil {
+		t.Fatalf("ResolveMergeBase failed: %v", err)
+	}
+	if got != expectedBase {
+		t.Fatalf("merge-base = %q, want %q", got, expectedBase)
+	}
+}
+
+func TestGoGitDiffSupportsLinkedWorktree(t *testing.T) {
+	clearGitEnvVars(t)
+	root := t.TempDir()
+	repo := filepath.Join(root, "repo")
+	worktree := filepath.Join(root, "worktree-feature")
+
+	runIn := func(dir string, args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", args...) //nolint:norawexec
+		cmd.Dir = dir
+		cmd.Env = gitSafeEnv(
+			"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@test.com",
+			"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@test.com",
+		)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v failed: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	write := func(dir, name, content string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := os.MkdirAll(repo, 0700); err != nil {
+		t.Fatal(err)
+	}
+	runIn(repo, "init", "-b", "main")
+	runIn(repo, "config", "user.email", "test@test.com")
+	runIn(repo, "config", "user.name", "test")
+	write(repo, "base.txt", "base\n")
+	runIn(repo, "add", ".")
+	runIn(repo, "commit", "-m", "base")
+	expectedBase := runIn(repo, "rev-parse", "HEAD")
+
+	runIn(repo, "worktree", "add", "-b", "feature", worktree, "main")
+	write(worktree, "feature.txt", "feature\n")
+	runIn(worktree, "add", ".")
+	runIn(worktree, "commit", "-m", "feature")
+
+	got, err := ResolveMergeBase(worktree, "main")
+	if err != nil {
+		t.Fatalf("ResolveMergeBase on linked worktree failed: %v", err)
+	}
+	if got != expectedBase {
+		t.Fatalf("merge-base = %q, want %q", got, expectedBase)
+	}
+
+	files, err := DiffFiles(worktree, got, "HEAD")
+	if err != nil {
+		t.Fatalf("DiffFiles on linked worktree failed: %v", err)
+	}
+	if len(files) != 1 || files[0].Path != "feature.txt" || files[0].Status != "A" {
+		t.Fatalf("files = %+v, want added feature.txt", files)
 	}
 }
 
@@ -264,6 +375,62 @@ func TestDiffFiles_WithRename(t *testing.T) {
 	}
 	if !found {
 		t.Error("renamed.txt not found in diff files")
+	}
+}
+
+func TestDiffFiles_WithSpecialCharacterFilenames(t *testing.T) {
+	clearGitEnvVars(t)
+	dir := t.TempDir()
+	run := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", args...) //nolint:norawexec
+		cmd.Dir = dir
+		cmd.Env = gitSafeEnv(
+			"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@test.com",
+			"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@test.com",
+		)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v failed: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	write := func(name, content string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	run("init", "-b", "main")
+	run("config", "user.email", "test@test.com")
+	run("config", "user.name", "test")
+	write("base.txt", "base\n")
+	run("add", ".")
+	run("commit", "-m", "base")
+	base := run("rev-parse", "HEAD")
+
+	run("checkout", "-b", "feature")
+	tabPath := "tab\tfile.txt"
+	newlinePath := "line\nfile.txt"
+	write(tabPath, "tab\n")
+	write(newlinePath, "newline\n")
+	run("add", ".")
+	run("commit", "-m", "special filenames")
+
+	files, err := DiffFiles(dir, base, "HEAD")
+	if err != nil {
+		t.Fatalf("DiffFiles failed: %v", err)
+	}
+	seen := map[string]string{}
+	for _, file := range files {
+		seen[file.Path] = file.Status
+	}
+	if seen[tabPath] != "A" {
+		t.Fatalf("tab filename status = %q, want A; files=%+v", seen[tabPath], files)
+	}
+	if seen[newlinePath] != "A" {
+		t.Fatalf("newline filename status = %q, want A; files=%+v", seen[newlinePath], files)
 	}
 }
 
