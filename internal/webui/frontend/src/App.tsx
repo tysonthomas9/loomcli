@@ -20,6 +20,7 @@ import { useStore } from "zustand";
 import { useParams, useNavigate, Outlet } from "react-router-dom";
 
 import { updateIssue, addComment, closeIssue, startAgent } from "@/api";
+import { fetchWorkspaceApi, type WorkspaceAgentInfo } from "@/api/workspace";
 import type { IssueContext } from "@/api/terminal";
 import { buildShareUrl } from "@/utils/buildShareUrl";
 import { getReviewType } from "@/utils/issue";
@@ -116,6 +117,51 @@ const TerminalView = lazy(() =>
     default: m.TerminalView,
   })),
 );
+
+type CreateIssueMode = "manual" | "onboarding";
+
+function isOnboardingPlannerAgent(agent: WorkspaceAgentInfo): boolean {
+  const roleName = agent.role_name?.trim();
+  if (roleName) {
+    return roleName === ONBOARDING_AGENT_ROLE;
+  }
+  return agent.name === ONBOARDING_AGENT_NAME;
+}
+
+function getOnboardingPlannerName(
+  agents: readonly WorkspaceAgentInfo[] | undefined,
+): string | undefined {
+  const agentList = agents ?? [];
+  return (
+    agentList.find(
+      (agent) =>
+        agent.name === ONBOARDING_AGENT_NAME &&
+        (!agent.role_name || agent.role_name === ONBOARDING_AGENT_ROLE),
+    )?.name ?? agentList.find(isOnboardingPlannerAgent)?.name
+  );
+}
+
+async function assignAndStartAgent(
+  workspaceId: string,
+  issueId: string,
+  agentName: string,
+): Promise<void> {
+  let assigned = false;
+  try {
+    await updateIssue(workspaceId, issueId, { assignee: agentName });
+    assigned = true;
+    await startAgent(workspaceId, agentName, { taskId: issueId });
+  } catch (err) {
+    if (assigned) {
+      try {
+        await updateIssue(workspaceId, issueId, { assignee: "" });
+      } catch {
+        // Preserve the original start error; the user can still unassign manually.
+      }
+    }
+    throw err;
+  }
+}
 
 function App() {
   // Route params: issueId present on /ws/:id/issues/:issueId
@@ -236,7 +282,7 @@ function App() {
   );
   const shouldPrefillOnboardingIssue = hasOnboardingRepo && issues.length === 0;
   const shouldPrefillOnboardingAgent =
-    hasOnboardingRepo && (workspace?.agents?.length ?? 0) === 0;
+    hasOnboardingRepo && !getOnboardingPlannerName(workspace?.agents);
   const onboardingWorkspaceInitialValues = useMemo(
     () => ({
       name: ONBOARDING_WORKSPACE_NAME,
@@ -536,6 +582,8 @@ function App() {
 
   // Create workspace modal state
   const [showCreateIssue, setShowCreateIssue] = useState(false);
+  const [createIssueMode, setCreateIssueMode] =
+    useState<CreateIssueMode>("manual");
   const [showCreateWorkspace, setShowCreateWorkspace] = useState(false);
   const [showCreateAgent, setShowCreateAgent] = useState(false);
   const [onboardingDismissed, setOnboardingDismissed] = useState(false);
@@ -861,7 +909,9 @@ function App() {
   }, [closeAllPanels, navigateToView]);
 
   const hasWorkspaceRepo = workspaceRepos.length > 0;
-  const hasWorkspaceAgent = (workspace?.agents?.length ?? 0) > 0;
+  const hasWorkspaceAgent = Boolean(
+    getOnboardingPlannerName(workspace?.agents),
+  );
   const hasWorkspaceIssue = issues.length > 0;
   const defaultBackend = onboardingBackendConfig?.backend;
   const defaultBackendStatus = aiBackends.find(
@@ -869,7 +919,10 @@ function App() {
   );
   const isDefaultBackendReady = defaultBackendStatus?.available === true;
   const isWorkspaceOnboardingComplete =
-    hasWorkspaceRepo && hasWorkspaceAgent && hasWorkspaceIssue;
+    hasWorkspaceRepo &&
+    hasWorkspaceAgent &&
+    hasWorkspaceIssue &&
+    isDefaultBackendReady;
   const shouldShowWorkspaceOnboarding =
     !onboardingDismissed &&
     !isWorkspaceOnboardingComplete &&
@@ -904,22 +957,24 @@ function App() {
     async (issue: Issue) => {
       await refetch();
 
-      if (shouldShowWorkspaceOnboarding && shouldPrefillOnboardingIssue) {
+      if (
+        createIssueMode === "onboarding" &&
+        shouldShowWorkspaceOnboarding &&
+        shouldPrefillOnboardingIssue
+      ) {
         closeAllPanels();
         navigateToView("kanban");
-        const onboardingAgent =
-          workspace?.agents?.find(
-            (agent) => agent.name === ONBOARDING_AGENT_NAME,
-          )?.name ?? workspace?.agents?.[0]?.name;
+        let latestAgents = workspace?.agents ?? [];
+        try {
+          latestAgents = (await fetchWorkspaceApi(workspaceId)).agents ?? [];
+        } catch {
+          // Fall back to the context snapshot; the toast below covers missing agents.
+        }
+        const onboardingAgent = getOnboardingPlannerName(latestAgents);
 
         if (onboardingAgent) {
           try {
-            await updateIssue(workspaceId, issue.id, {
-              assignee: onboardingAgent,
-            });
-            await startAgent(workspaceId, onboardingAgent, {
-              taskId: issue.id,
-            });
+            await assignAndStartAgent(workspaceId, issue.id, onboardingAgent);
             showToast(`Started ${onboardingAgent} on ${issue.id}`, {
               type: "success",
             });
@@ -930,6 +985,11 @@ function App() {
               type: "error",
             });
           }
+        } else {
+          showToast(
+            "Task created, but no planner agent is available. Create a plan agent to start it.",
+            { type: "warning" },
+          );
         }
         return;
       }
@@ -939,6 +999,7 @@ function App() {
     },
     [
       closeAllPanels,
+      createIssueMode,
       fetchIssue,
       navigateToView,
       openPanel,
@@ -998,7 +1059,7 @@ function App() {
           : "Create a prefilled planner agent for the sample repo.",
         status: hasWorkspaceAgent
           ? "complete"
-          : hasWorkspaceRepo
+          : hasWorkspaceRepo && isDefaultBackendReady
             ? "current"
             : "blocked",
         actionLabel: "Create Agent",
@@ -1012,11 +1073,14 @@ function App() {
           : "Create the prefilled sample task for the first agent run.",
         status: hasWorkspaceIssue
           ? "complete"
-          : hasWorkspaceAgent
+          : hasWorkspaceAgent && isDefaultBackendReady
             ? "current"
             : "blocked",
         actionLabel: "Create Issue",
-        onAction: () => setShowCreateIssue(true),
+        onAction: () => {
+          setCreateIssueMode("onboarding");
+          setShowCreateIssue(true);
+        },
       },
     ],
     [
@@ -1279,7 +1343,10 @@ function App() {
       </div>
       <button
         className={styles.newIssueButton}
-        onClick={() => setShowCreateIssue(true)}
+        onClick={() => {
+          setCreateIssueMode("manual");
+          setShowCreateIssue(true);
+        }}
         aria-label="New Issue"
         data-testid="new-issue-button"
       >
@@ -1463,9 +1530,13 @@ function App() {
           />
           <CreateIssueModal
             isOpen={showCreateIssue}
-            onClose={() => setShowCreateIssue(false)}
+            onClose={() => {
+              setShowCreateIssue(false);
+              setCreateIssueMode("manual");
+            }}
             onSuccess={handleCreateIssueSuccess}
-            {...(onboardingIssueInitialValues
+            {...(createIssueMode === "onboarding" &&
+            onboardingIssueInitialValues
               ? { initialValues: onboardingIssueInitialValues }
               : {})}
           />

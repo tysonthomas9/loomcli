@@ -55,6 +55,10 @@ const { mockStartAgent } = vi.hoisted(() => ({
   mockStartAgent: vi.fn(),
 }));
 
+const { mockFetchWorkspaceApi } = vi.hoisted(() => ({
+  mockFetchWorkspaceApi: vi.fn(),
+}));
+
 // Create hoisted mocks for modal API functions.
 const { mockCreateIssue } = vi.hoisted(() => ({
   mockCreateIssue: vi.fn(),
@@ -107,6 +111,14 @@ vi.mock("@/api", async (importOriginal) => {
     startAgent: mockStartAgent,
     getIssueEvents: vi.fn().mockImplementation(() => new Promise(() => {})),
     getTaskLogPhases: vi.fn().mockResolvedValue([]),
+  };
+});
+
+vi.mock("@/api/workspace", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/api/workspace")>();
+  return {
+    ...actual,
+    fetchWorkspaceApi: mockFetchWorkspaceApi,
   };
 });
 
@@ -820,6 +832,16 @@ describe("App", () => {
     mockAddComment.mockResolvedValue({});
     mockCreateIssue.mockResolvedValue(createMockIssue({ id: "created-issue" }));
     mockStartAgent.mockResolvedValue(undefined);
+    mockFetchWorkspaceApi.mockResolvedValue({
+      id: "test-ws-id",
+      name: "Test Workspace",
+      path: "/tmp/test",
+      repos: [],
+      groups: [],
+      agents: [],
+      workspaces: [],
+      default_workspace: "Test Workspace",
+    });
   });
 
   describe("loading state", () => {
@@ -2380,6 +2402,16 @@ describe("App", () => {
         issue_type: "task",
       });
       mockCreateIssue.mockResolvedValue(createdIssue);
+      mockFetchWorkspaceApi.mockResolvedValue({
+        id: "test-ws-id",
+        name: "Hello-World",
+        path: "/tmp/hello-world",
+        repos: [],
+        groups: [],
+        agents: [{ name: "planner", role_name: "plan" }],
+        workspaces: [],
+        default_workspace: "Hello-World",
+      });
       mockStoreState = createMockUseIssuesReturn({
         issues: [],
         refetch,
@@ -2456,6 +2488,92 @@ describe("App", () => {
       });
       expect(mockOpenPanel).not.toHaveBeenCalled();
       expect(fetchIssue).not.toHaveBeenCalled();
+    });
+
+    it("does not auto-start agents for manually-created first issues in the onboarding workspace", async () => {
+      localStorage.clear();
+      const refetch = vi.fn().mockResolvedValue(undefined);
+      const fetchIssue = vi.fn();
+      const createdIssue = createMockIssue({
+        id: "manual-task",
+        title: "Manual first task",
+        issue_type: "task",
+      });
+      mockCreateIssue.mockResolvedValue(createdIssue);
+      mockStoreState = createMockUseIssuesReturn({
+        issues: [],
+        refetch,
+      });
+      vi.mocked(useIssueDetail).mockReturnValue(
+        createMockUseIssueDetailReturn({ fetchIssue }),
+      );
+      vi.mocked(useWorkspaceContext).mockReturnValue({
+        workspaceId: "test-ws-id",
+        workspace: {
+          name: "Hello-World",
+          agents: [{ name: "planner", role_name: "plan" }],
+          workspaces: [],
+        },
+        repos: [
+          {
+            name: "Hello-World",
+            remote: "https://github.com/octocat/Hello-World",
+          },
+        ],
+        groups: [],
+        agents: [{ name: "planner", role_name: "plan" }],
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+        getRepoByName: vi.fn(),
+        getReposByGroup: vi.fn(() => []),
+        getAgentByName: vi.fn(),
+        activeWorkspaceName: "Hello-World",
+        setActiveWorkspace: vi.fn(),
+        selectedRepoNames: new Set<string>(["Hello-World"]),
+        activeRepos: [
+          {
+            name: "Hello-World",
+            remote: "https://github.com/octocat/Hello-World",
+          },
+        ],
+        activeRepoNames: ["Hello-World"],
+        isAllSelected: true,
+        selectRepos: vi.fn(),
+        selectAll: vi.fn(),
+        toggleRepo: vi.fn(),
+        sourceReposFilter: undefined,
+        isMultiRepo: false,
+      } as ReturnType<typeof useWorkspaceContext>);
+
+      render(<App />);
+
+      fireEvent.click(screen.getByTestId("new-issue-button"));
+      fireEvent.change(await screen.findByTestId("create-issue-title"), {
+        target: { value: "Manual first task" },
+      });
+      fireEvent.click(screen.getByTestId("create-issue-submit"));
+
+      await waitFor(() => {
+        expect(mockCreateIssue).toHaveBeenCalledWith(
+          "test-ws-id",
+          expect.objectContaining({
+            title: "Manual first task",
+          }),
+        );
+      });
+
+      expect(mockUpdateIssue).not.toHaveBeenCalledWith(
+        "test-ws-id",
+        "manual-task",
+        { assignee: "planner" },
+      );
+      expect(mockStartAgent).not.toHaveBeenCalled();
+      expect(mockOpenPanel).toHaveBeenCalledWith({
+        type: "issue",
+        id: "manual-task",
+      });
+      expect(fetchIssue).toHaveBeenCalledWith("manual-task");
     });
   });
 

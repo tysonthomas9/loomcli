@@ -1038,6 +1038,7 @@ describe("IssueDetailPanel", () => {
         status: "open",
         issue_type: "task",
         assignee: "",
+        design: "Implementation plan is ready.",
       });
       const updatedIssue = { ...issue, assignee: "desktopqa" };
       mockUpdateIssue.mockResolvedValueOnce(updatedIssue);
@@ -1069,6 +1070,78 @@ describe("IssueDetailPanel", () => {
       });
       expect(onIssueUpdate).toHaveBeenCalledWith(updatedIssue);
       expect(refetchAgents).toHaveBeenCalled();
+    });
+
+    it("rolls back the assignee when daemon start fails", async () => {
+      const mockUpdateIssue = updateIssue as ReturnType<typeof vi.fn>;
+      const mockStartAgent = startAgent as ReturnType<typeof vi.fn>;
+      mockUpdateIssue.mockReset();
+      mockStartAgent.mockReset();
+      mockStartAgent.mockRejectedValueOnce(new Error("daemon unavailable"));
+      const agentStore = createAgentStore();
+      agentStore.setState({
+        agents: [
+          {
+            name: "desktopqa",
+            branch: "main",
+            status: "idle",
+            ahead: 0,
+            behind: 0,
+            role: "task",
+            workspace: "Desktop QA",
+          },
+        ],
+        isConnected: true,
+        wasEverConnected: true,
+        connectionState: "connected",
+      });
+      mockUseAgentStoreInstance.mockReturnValue(agentStore);
+      mockUseWorkspaceContext.mockImplementation(() =>
+        createWorkspaceContext({ workspaceId: "DESKTOP-QA" }),
+      );
+
+      const issue = createTestIssueDetails({
+        id: "DESKTOP-QA-3",
+        status: "open",
+        issue_type: "task",
+        assignee: "",
+        design: "Implementation plan is ready.",
+      });
+      const assignedIssue = { ...issue, assignee: "desktopqa" };
+      const rolledBackIssue = { ...issue, assignee: "" };
+      mockUpdateIssue
+        .mockResolvedValueOnce(assignedIssue)
+        .mockResolvedValueOnce(rolledBackIssue);
+      const onIssueUpdate = vi.fn();
+
+      render(
+        <IssueDetailPanel
+          isOpen={true}
+          issue={issue}
+          onClose={() => {}}
+          onIssueUpdate={onIssueUpdate}
+        />,
+      );
+
+      fireEvent.click(screen.getByTestId("start-work-button"));
+      fireEvent.click(screen.getByTestId("agent-option-desktopqa"));
+
+      await waitFor(() => {
+        expect(mockStartAgent).toHaveBeenCalledWith("DESKTOP-QA", "desktopqa", {
+          taskId: "DESKTOP-QA-3",
+        });
+      });
+      await waitFor(() => {
+        expect(mockUpdateIssue).toHaveBeenLastCalledWith(
+          "DESKTOP-QA",
+          "DESKTOP-QA-3",
+          { assignee: "" },
+        );
+      });
+      expect(onIssueUpdate).toHaveBeenCalledWith(rolledBackIssue);
+      expect(await screen.findByTestId("start-work-error")).toHaveTextContent(
+        "daemon unavailable",
+      );
     });
   });
 
