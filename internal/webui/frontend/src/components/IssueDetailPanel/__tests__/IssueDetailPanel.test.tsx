@@ -1003,6 +1003,58 @@ describe("IssueDetailPanel", () => {
   });
 
   describe("Start Work", () => {
+    it("shows plan agents for issues that need planning", () => {
+      const agentStore = createAgentStore();
+      agentStore.setState({
+        agents: [
+          {
+            name: "planner",
+            branch: "main",
+            status: "idle",
+            ahead: 0,
+            behind: 0,
+            role: "plan",
+            workspace: "Desktop QA",
+          },
+          {
+            name: "desktopqa",
+            branch: "main",
+            status: "idle",
+            ahead: 0,
+            behind: 0,
+            role: "task",
+            workspace: "Desktop QA",
+          },
+        ],
+        isConnected: true,
+        wasEverConnected: true,
+        connectionState: "connected",
+      });
+      mockUseAgentStoreInstance.mockReturnValue(agentStore);
+      mockUseWorkspaceContext.mockImplementation(() =>
+        createWorkspaceContext({ workspaceId: "DESKTOP-QA" }),
+      );
+
+      const issue = createTestIssueDetails({
+        id: "DESKTOP-QA-3",
+        status: "open",
+        issue_type: "task",
+        assignee: "",
+        design: "",
+      });
+
+      render(
+        <IssueDetailPanel isOpen={true} issue={issue} onClose={() => {}} />,
+      );
+
+      fireEvent.click(screen.getByTestId("start-work-button"));
+
+      expect(screen.getByTestId("agent-option-planner")).toBeInTheDocument();
+      expect(
+        screen.queryByTestId("agent-option-desktopqa"),
+      ).not.toBeInTheDocument();
+    });
+
     it("assigns the issue and asks the daemon to claim the requested task", async () => {
       const mockUpdateIssue = updateIssue as ReturnType<typeof vi.fn>;
       const mockStartAgent = startAgent as ReturnType<typeof vi.fn>;
