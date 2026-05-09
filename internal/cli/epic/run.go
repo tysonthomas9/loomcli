@@ -47,7 +47,7 @@ var (
 	runLead            string
 )
 
-var errStalledWorker = errors.New("spawned worker stopped before completing its task")
+var errStalledWorker = errors.New("task worker stopped before completing its task")
 
 var epicCmd = &cobra.Command{
 	Use:     "epic",
@@ -159,7 +159,6 @@ func runEpicRun(cmd *cobra.Command, _ []string) error {
 		orchestratorSessionID: orchestratorID,
 		targetNodeID:          nodeID,
 		dryRun:                runDryRun,
-		spawned:               make(map[string]string),
 	}
 	r.printHeader()
 	return r.reconcileLoop(ctx)
@@ -179,11 +178,6 @@ type runner struct {
 	orchestratorSessionID string
 	targetNodeID          string
 	dryRun                bool
-
-	// spawned tracks task_id -> worker_name for tasks this runner has already
-	// dispatched. Survives only this process; restarting the command rebuilds
-	// state from fleet-db's unique-name constraint (idempotent agentdef add).
-	spawned map[string]string
 }
 
 func (r *runner) printHeader() {
@@ -351,7 +345,7 @@ func (r *runner) reconcileLoop(ctx context.Context) error {
 
 		select {
 		case <-ctx.Done():
-			fmt.Printf("[epic-run] interrupted; %d workers spawned during this run continue independently\n", len(r.spawned))
+			fmt.Printf("[epic-run] interrupted; worker state remains in fleet-db and workers continue independently\n")
 			return nil
 		case <-ticker.C:
 			// loop
@@ -376,25 +370,25 @@ func (r *runner) reconcileOnce(ctx context.Context) (done bool, err error) {
 		return false, err
 	}
 
-	// Drain only after no child work remains and every worker spawned by this
-	// runner has stopped, so downstream orchestration can trust the lifecycle.
+	// Drain only after no child work remains and every epic worker has stopped,
+	// so downstream orchestration can trust the lifecycle.
 	if len(openChildren) == 0 {
-		activeSpawned := r.countActiveSpawned(ctx)
-		if activeSpawned > 0 {
-			fmt.Printf("[epic-run] child work closed; waiting for %d spawned worker(s) to stop\n", activeSpawned)
+		activeWorkers := r.countActiveWorkers(ctx, openChildren)
+		if activeWorkers > 0 {
+			fmt.Printf("[epic-run] child work closed; waiting for %d active worker(s) to stop\n", activeWorkers)
 			return false, nil
 		}
 		return true, nil
 	}
 
 	// Spawn for new ready tasks, respecting concurrency.
-	activeSpawned := r.countActiveSpawned(ctx)
-	if stalled := r.stalledSpawnedTasks(ctx, openChildren); len(stalled) > 0 {
+	activeWorkers := r.countActiveWorkers(ctx, openChildren)
+	if stalled := r.stalledTasks(ctx, openChildren); len(stalled) > 0 {
 		return false, fmt.Errorf("%w: %s", errStalledWorker, strings.Join(stalled, "; "))
 	}
-	slots := r.maxConcurrency - activeSpawned
+	slots := r.maxConcurrency - activeWorkers
 	if slots <= 0 {
-		fmt.Printf("[epic-run] %d ready, %d blocked, %d active workers (at cap)\n", len(ready), len(blocked), activeSpawned)
+		fmt.Printf("[epic-run] %d ready, %d blocked, %d active workers (at cap)\n", len(ready), len(blocked), activeWorkers)
 		return false, nil
 	}
 
@@ -411,16 +405,14 @@ func (r *runner) reconcileOnce(ctx context.Context) (done bool, err error) {
 		if task.Status == "closed" || task.Status == "deferred" {
 			continue
 		}
-		if name, alreadySpawned := r.spawned[task.ID]; alreadySpawned {
-			if task.Status == "open" && !r.workerStillActive(ctx, name) {
-				delete(r.spawned, task.ID)
-			} else {
-				// This runner invocation already assigned a worker to the task. Do
-				// not enqueue duplicate starts while the daemon is converging; if
-				// the worker fails, restarting the runner will retry the
-				// deterministic worker name.
-				continue
-			}
+		name := workerName(r.prefix, task.ID)
+		active, err := r.workerActiveForTask(ctx, name, task.ID)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "[epic-run] active worker check for %s failed: %v\n", task.ID, err)
+			continue
+		}
+		if active {
+			continue
 		}
 		if err := r.spawnWorker(ctx, task); err != nil {
 			fmt.Fprintf(os.Stderr, "[epic-run] spawn for %s failed: %v\n", task.ID, err)
@@ -430,7 +422,7 @@ func (r *runner) reconcileOnce(ctx context.Context) (done bool, err error) {
 	}
 
 	fmt.Printf("[epic-run] %d ready, %d blocked, dispatched %d (active %d/%d)\n",
-		len(ready), len(blocked), dispatched, activeSpawned+dispatched, r.maxConcurrency)
+		len(ready), len(blocked), dispatched, activeWorkers+dispatched, r.maxConcurrency)
 	return false, nil
 }
 
@@ -448,44 +440,143 @@ func (r *runner) openChildren(ctx context.Context) ([]backend.IssueData, error) 
 	return open, nil
 }
 
-// countActiveSpawned returns how many of the workers this runner has spawned
-// are still actively running (not stopped). Best-effort — on store error,
-// assume all spawned are still active to err on the side of not over-spawning.
-func (r *runner) countActiveSpawned(ctx context.Context) int {
-	count := 0
-	for _, name := range r.spawned {
-		if r.workerStillActive(ctx, name) {
-			count++
+// countActiveWorkers derives active epic worker count from fleet-db state, not
+// from this process. On store errors it fails closed and reports the cap as
+// active to avoid over-dispatching.
+func (r *runner) countActiveWorkers(ctx context.Context, openChildren []backend.IssueData) int {
+	active := make(map[string]struct{})
+	for _, task := range openChildren {
+		name := workerName(r.prefix, task.ID)
+		ok, err := r.workerActiveForTask(ctx, name, task.ID)
+		if err != nil {
+			return r.maxConcurrency
+		}
+		if ok {
+			active[name] = struct{}{}
 		}
 	}
-	return count
+
+	agents, err := r.store.Agents().List(ctx, r.workspace)
+	if err != nil {
+		return r.maxConcurrency
+	}
+	for _, agent := range agents {
+		if agent == nil || agent.Parent != r.parent || agent.Mode != domain.AgentModeEphemeral {
+			continue
+		}
+		if _, counted := active[agent.Name]; counted {
+			continue
+		}
+		ok, err := r.workerActiveForTask(ctx, agent.Name, "")
+		if err != nil {
+			return r.maxConcurrency
+		}
+		if ok {
+			active[agent.Name] = struct{}{}
+		}
+	}
+	return len(active)
 }
 
-func (r *runner) workerStillActive(ctx context.Context, name string) bool {
+func (r *runner) workerActiveForTask(ctx context.Context, name, taskID string) (bool, error) {
 	if name == "" {
-		return false
+		return false, nil
+	}
+	liveCommand, err := r.hasLiveStartCommand(ctx, name, taskID)
+	if err != nil || liveCommand {
+		return liveCommand, err
+	}
+	liveSession, err := r.hasLiveTaskSession(ctx, name, taskID)
+	if err != nil || liveSession {
+		return liveSession, err
 	}
 	a, err := r.store.Agents().Get(ctx, r.workspace, name)
 	if errors.Is(err, domain.ErrNotFound) || a == nil {
-		return false
+		return false, nil
 	}
 	if err != nil {
-		return true // assume active if we can't tell
+		return false, err
 	}
-	return a.State != domain.AgentStateStopped
+	return a.Mode == domain.AgentModeEphemeral && a.Parent == r.parent && a.State == domain.AgentStateActive, nil
 }
 
-func (r *runner) stalledSpawnedTasks(ctx context.Context, openChildren []backend.IssueData) []string {
+func (r *runner) hasLiveStartCommand(ctx context.Context, name, taskID string) (bool, error) {
+	if r.store.AgentCommands() == nil {
+		return false, nil
+	}
+	cmds, err := r.store.AgentCommands().List(ctx, r.workspace, store.AgentCommandFilter{
+		TargetAgentID: name,
+		Limit:         100,
+	})
+	if err != nil {
+		return false, err
+	}
+	for _, cmd := range cmds {
+		if cmd == nil || cmd.Type != "start" || !liveAgentCommandStatus(cmd.Status) {
+			continue
+		}
+		if taskID != "" && cmd.Payload["task_id"] != taskID {
+			continue
+		}
+		return true, nil
+	}
+	return false, nil
+}
+
+func (r *runner) hasLiveTaskSession(ctx context.Context, name, taskID string) (bool, error) {
+	if r.store.AgentSessions() == nil {
+		return false, nil
+	}
+	filter := store.AgentSessionFilter{AgentID: name, Limit: 100}
+	if taskID != "" {
+		filter.TaskID = taskID
+	}
+	sessions, err := r.store.AgentSessions().List(ctx, r.workspace, filter)
+	if err != nil {
+		return false, err
+	}
+	for _, session := range sessions {
+		if session == nil || session.Kind != domain.AgentSessionKindTask || !liveAgentSessionStatus(session.Status) {
+			continue
+		}
+		if taskID != "" && session.TaskID != taskID {
+			continue
+		}
+		return true, nil
+	}
+	return false, nil
+}
+
+func liveAgentCommandStatus(status domain.AgentCommandStatus) bool {
+	switch status {
+	case domain.AgentCommandQueued, domain.AgentCommandAcked, domain.AgentCommandRunning:
+		return true
+	default:
+		return false
+	}
+}
+
+func liveAgentSessionStatus(status domain.AgentSessionStatus) bool {
+	switch status {
+	case domain.AgentSessionQueued, domain.AgentSessionLeased, domain.AgentSessionStarting, domain.AgentSessionRunning:
+		return true
+	default:
+		return false
+	}
+}
+
+func (r *runner) stalledTasks(ctx context.Context, openChildren []backend.IssueData) []string {
 	var stalled []string
 	for _, task := range openChildren {
 		if task.Status != "in_progress" {
 			continue
 		}
-		name := r.spawned[task.ID]
-		if name == "" && task.Assignee == workerName(r.prefix, task.ID) {
-			name = task.Assignee
+		name := workerName(r.prefix, task.ID)
+		if task.Assignee != name {
+			continue
 		}
-		if name == "" || r.workerStillActive(ctx, name) {
+		active, err := r.workerActiveForTask(ctx, name, task.ID)
+		if err != nil || active {
 			continue
 		}
 		stalled = append(stalled, fmt.Sprintf("%s (%s) assigned to stopped worker %s", task.ID, task.Title, name))
@@ -494,14 +585,13 @@ func (r *runner) stalledSpawnedTasks(ctx context.Context, openChildren []backend
 }
 
 // spawnWorker creates an ephemeral worker agent pinned to the given task and
-// enqueues a start command. Idempotent: if an agent with the derived name
-// already exists, we record the mapping and skip creation.
+// enqueues a start command. Agent creation is idempotent because the worker name
+// is deterministic for the task.
 func (r *runner) spawnWorker(ctx context.Context, task backend.IssueData) error {
 	name := workerName(r.prefix, task.ID)
 
 	if r.dryRun {
 		fmt.Printf("[epic-run] DRY-RUN would spawn: %s for task %s (%s)\n", name, task.ID, task.Title)
-		r.spawned[task.ID] = name
 		return nil
 	}
 
@@ -539,7 +629,6 @@ func (r *runner) spawnWorker(ctx context.Context, task backend.IssueData) error 
 	if r.store.AgentCommands() == nil {
 		// No command channel available (e.g. memstore in tests) — agent will
 		// auto-claim from Ready() on its own polling cycle.
-		r.spawned[task.ID] = name
 		fmt.Printf("[epic-run] spawned %s for %s (%s) — no command channel, agent will pick task via Ready())\n", name, task.ID, task.Title)
 		return nil
 	}
@@ -554,7 +643,6 @@ func (r *runner) spawnWorker(ctx context.Context, task backend.IssueData) error 
 		return fmt.Errorf("enqueue start command for %s: %w", name, err)
 	}
 
-	r.spawned[task.ID] = name
 	fmt.Printf("[epic-run] spawned %s -> %s (%s)\n", name, task.ID, task.Title)
 	return nil
 }

@@ -1,10 +1,13 @@
 package daemon
 
 import (
+	"context"
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/cli/daemon/supervisor"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 func TestDiffAgents_NoChanges(t *testing.T) {
@@ -363,14 +366,32 @@ func TestComputeConfigHash_AgentChanges(t *testing.T) {
 }
 
 func TestModifiedAgentsToDrain_DefersActiveEphemeralTask(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Agents().Create(ctx, store.AgentCreate{
+		WorkspaceKey: "ws",
+		Name:         "worker",
+		RoleName:     "task",
+		Mode:         domain.AgentModeEphemeral,
+	}); err != nil {
+		t.Fatalf("create worker: %v", err)
+	}
+	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey: "ws",
+		SessionID:    "sess-1",
+		AgentID:      "worker",
+		Kind:         domain.AgentSessionKindTask,
+		TaskID:       "TASK-1",
+		Status:       domain.AgentSessionRunning,
+	}); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
 	d := &Daemon{
 		sup: &supervisor.Supervisor{
-			Agents: []*supervisor.AgentProcess{{
-				Entry:           AgentEntry{Worktree: "worker", Role: "task", Mode: domain.AgentModeEphemeral},
-				RequestedTaskID: "TASK-1",
-				Done:            make(chan struct{}),
-			}},
+			WorkspaceID: "ws",
 		},
+		store: st,
 	}
 
 	got := d.modifiedAgentsToDrain([]AgentEntry{{
@@ -385,16 +406,36 @@ func TestModifiedAgentsToDrain_DefersActiveEphemeralTask(t *testing.T) {
 }
 
 func TestModifiedAgentsToDrain_DrainsCompletedEphemeralTask(t *testing.T) {
-	done := make(chan struct{})
-	close(done)
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Agents().Create(ctx, store.AgentCreate{
+		WorkspaceKey: "ws",
+		Name:         "worker",
+		RoleName:     "task",
+		Mode:         domain.AgentModeEphemeral,
+	}); err != nil {
+		t.Fatalf("create worker: %v", err)
+	}
+	stopped := domain.AgentStateStopped
+	if _, err := st.Agents().Update(ctx, "ws", "worker", store.AgentUpdate{State: &stopped}); err != nil {
+		t.Fatalf("stop worker: %v", err)
+	}
+	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey: "ws",
+		SessionID:    "sess-1",
+		AgentID:      "worker",
+		Kind:         domain.AgentSessionKindTask,
+		TaskID:       "TASK-1",
+		Status:       domain.AgentSessionCompleted,
+	}); err != nil {
+		t.Fatalf("create completed session: %v", err)
+	}
+
 	d := &Daemon{
 		sup: &supervisor.Supervisor{
-			Agents: []*supervisor.AgentProcess{{
-				Entry:          AgentEntry{Worktree: "worker", Role: "task", Mode: domain.AgentModeEphemeral},
-				AssignedTaskID: "TASK-1",
-				Done:           done,
-			}},
+			WorkspaceID: "ws",
 		},
+		store: st,
 	}
 
 	entries := []AgentEntry{{

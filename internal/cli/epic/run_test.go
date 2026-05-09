@@ -226,7 +226,6 @@ func TestReconcileOnceFailsWhenSpawnedWorkerStoppedWithInProgressTask(t *testing
 		parent:         "EPIC-1",
 		prefix:         "epic-1",
 		maxConcurrency: 1,
-		spawned:        map[string]string{taskID: worker},
 	}
 
 	done, err := r.reconcileOnce(ctx)
@@ -260,7 +259,6 @@ func TestReconcileOnceDetectsStoppedDeterministicWorkerAfterRestart(t *testing.T
 		parent:         "EPIC-1",
 		prefix:         "epic-1",
 		maxConcurrency: 1,
-		spawned:        map[string]string{},
 	}
 
 	_, err := r.reconcileOnce(ctx)
@@ -273,7 +271,6 @@ func TestReconcileOnceRetriesOpenTaskWhenSpawnedWorkerMissing(t *testing.T) {
 	ctx := context.Background()
 	st := newTestStore(t)
 	taskID := "EPIC-2"
-	oldWorker := workerName("epic-1", taskID)
 	task := backend.IssueData{ID: taskID, Title: "retry task", Status: "open"}
 
 	ib := clitest.NewMockIssueBackend()
@@ -288,7 +285,6 @@ func TestReconcileOnceRetriesOpenTaskWhenSpawnedWorkerMissing(t *testing.T) {
 		prefix:         "epic-1",
 		role:           "task",
 		maxConcurrency: 1,
-		spawned:        map[string]string{taskID: oldWorker},
 	}
 
 	done, err := r.reconcileOnce(ctx)
@@ -309,6 +305,101 @@ func TestReconcileOnceRetriesOpenTaskWhenSpawnedWorkerMissing(t *testing.T) {
 	}
 	if len(cmds) != 1 || cmds[0].Payload["task_id"] != taskID {
 		t.Fatalf("commands = %#v, want one start command for %s", cmds, taskID)
+	}
+}
+
+func TestReconcileOnceSkipsReadyTaskWithLiveStartCommand(t *testing.T) {
+	ctx := context.Background()
+	st := newTestStore(t)
+	taskID := "EPIC-2"
+	worker := workerName("epic-1", taskID)
+	task := backend.IssueData{ID: taskID, Title: "queued task", Status: "open"}
+	if _, err := st.AgentCommands().Create(ctx, store.AgentCommandCreate{
+		WorkspaceKey:  "ws",
+		TargetAgentID: worker,
+		Type:          "start",
+		Payload:       map[string]string{"task_id": taskID},
+	}); err != nil {
+		t.Fatalf("create command: %v", err)
+	}
+
+	ib := clitest.NewMockIssueBackend()
+	ib.ReadyResult = []backend.IssueData{task}
+	ib.ListResult = []backend.IssueData{task}
+
+	r := &runner{
+		store:          st,
+		ib:             ib,
+		workspace:      "ws",
+		parent:         "EPIC-1",
+		prefix:         "epic-1",
+		role:           "task",
+		maxConcurrency: 1,
+	}
+
+	done, err := r.reconcileOnce(ctx)
+	if err != nil {
+		t.Fatalf("reconcileOnce error = %v", err)
+	}
+	if done {
+		t.Fatal("reconcileOnce done = true, want false")
+	}
+	cmds, err := st.AgentCommands().List(ctx, "ws", store.AgentCommandFilter{TargetAgentID: worker})
+	if err != nil {
+		t.Fatalf("list agent commands: %v", err)
+	}
+	if len(cmds) != 1 {
+		t.Fatalf("commands = %d, want existing command only", len(cmds))
+	}
+}
+
+func TestReconcileOnceLiveSessionConsumesConcurrency(t *testing.T) {
+	ctx := context.Background()
+	st := newTestStore(t)
+	activeTaskID := "EPIC-2"
+	readyTaskID := "EPIC-3"
+	activeWorker := workerName("epic-1", activeTaskID)
+	readyWorker := workerName("epic-1", readyTaskID)
+	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey: "ws",
+		SessionID:    "sess-1",
+		AgentID:      activeWorker,
+		Kind:         domain.AgentSessionKindTask,
+		TaskID:       activeTaskID,
+		Status:       domain.AgentSessionRunning,
+	}); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
+	activeTask := backend.IssueData{ID: activeTaskID, Title: "active task", Status: "in_progress", Assignee: activeWorker}
+	readyTask := backend.IssueData{ID: readyTaskID, Title: "ready task", Status: "open"}
+	ib := clitest.NewMockIssueBackend()
+	ib.ReadyResult = []backend.IssueData{readyTask}
+	ib.ListResult = []backend.IssueData{activeTask, readyTask}
+
+	r := &runner{
+		store:          st,
+		ib:             ib,
+		workspace:      "ws",
+		parent:         "EPIC-1",
+		prefix:         "epic-1",
+		role:           "task",
+		maxConcurrency: 1,
+	}
+
+	done, err := r.reconcileOnce(ctx)
+	if err != nil {
+		t.Fatalf("reconcileOnce error = %v", err)
+	}
+	if done {
+		t.Fatal("reconcileOnce done = true, want false")
+	}
+	cmds, err := st.AgentCommands().List(ctx, "ws", store.AgentCommandFilter{TargetAgentID: readyWorker})
+	if err != nil {
+		t.Fatalf("list agent commands: %v", err)
+	}
+	if len(cmds) != 0 {
+		t.Fatalf("commands = %d, want no dispatch while active session consumes cap", len(cmds))
 	}
 }
 

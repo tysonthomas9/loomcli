@@ -997,38 +997,6 @@ func (s *Supervisor) AgentCount() int {
 	return n
 }
 
-// HasActiveEphemeralTask reports whether a command-started ephemeral worker is
-// still responsible for a specific task. Config reconciliation uses this to
-// avoid draining one-shot epic workers while their assigned task is in flight.
-func (s *Supervisor) HasActiveEphemeralTask(name string) bool {
-	s.AgentsMu.RLock()
-	var target *AgentProcess
-	for _, ap := range s.Agents {
-		if ap.Entry.Worktree == name {
-			target = ap
-			break
-		}
-	}
-	s.AgentsMu.RUnlock()
-	if target == nil || target.Entry.Mode != domain.AgentModeEphemeral {
-		return false
-	}
-	if target.Done != nil {
-		select {
-		case <-target.Done:
-			return false
-		default:
-		}
-	}
-
-	target.Mu.Lock()
-	hasTask := target.AssignedTaskID != "" || target.RequestedTaskID != ""
-	stopReason := target.StopReason
-	target.Mu.Unlock()
-
-	return hasTask && stopReason == ""
-}
-
 // GetAgents returns a snapshot of all agent statuses for inspection.
 // The returned SupervisedAgentStatus structs are safe to use without synchronization.
 func (s *Supervisor) GetAgents() []SupervisedAgentStatus {
