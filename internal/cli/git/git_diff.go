@@ -76,11 +76,19 @@ func resolveGoGitCommit(repo *gogit.Repository, ref string) (*object.Commit, boo
 		return nil, false
 	}
 	commit, err := repo.CommitObject(*hash)
+	if err == nil {
+		return commit, true
+	}
+	tag, err := repo.TagObject(*hash)
+	if err == nil {
+		commit, err := tag.Commit()
+		return commit, err == nil
+	}
 	return commit, err == nil
 }
 
 func diffBaseCandidates(repo *gogit.Repository, branch string) []string {
-	candidates := make([]string, 0, 12)
+	candidates := make([]string, 0, 16)
 	seen := make(map[string]struct{})
 	add := func(ref string) {
 		if ref == "" {
@@ -96,11 +104,10 @@ func diffBaseCandidates(repo *gogit.Repository, branch string) []string {
 		candidates = append(candidates, ref)
 	}
 
-	remotes, branchUpstream := repoRemoteHints(repo)
+	remotes := repoRemotes(repo)
 	add(branch)
-	for _, upstream := range branchUpstream {
-		add(upstream)
-	}
+	// The current branch's upstream is often origin/<agent-branch>, which would
+	// hide already-pushed agent work from review diffs. Prefer integration refs.
 	for _, remote := range remotes {
 		if branch != "" {
 			add(remote + "/" + branch)
@@ -108,17 +115,19 @@ func diffBaseCandidates(repo *gogit.Repository, branch string) []string {
 		add(remote + "/HEAD")
 		add(remote + "/main")
 		add(remote + "/master")
+		add(remote + "/trunk")
 	}
 	add("main")
 	add("master")
+	add("trunk")
 
 	return candidates
 }
 
-func repoRemoteHints(repo *gogit.Repository) ([]string, []string) {
+func repoRemotes(repo *gogit.Repository) []string {
 	cfg, err := repo.Config()
 	if err != nil || cfg == nil {
-		return []string{"origin"}, nil
+		return []string{"origin"}
 	}
 
 	remotes := make([]string, 0, len(cfg.Remotes))
@@ -132,15 +141,7 @@ func repoRemoteHints(repo *gogit.Repository) ([]string, []string) {
 		remotes = []string{"origin"}
 	}
 
-	upstreams := []string{}
-	if head, err := repo.Head(); err == nil && head.Name().IsBranch() {
-		if branchCfg := cfg.Branches[head.Name().Short()]; branchCfg != nil && branchCfg.Remote != "" && branchCfg.Merge != "" {
-			if err := validateGitRef(branchCfg.Remote); err == nil {
-				upstreams = append(upstreams, branchCfg.Remote+"/"+branchCfg.Merge.Short())
-			}
-		}
-	}
-	return remotes, upstreams
+	return remotes
 }
 
 // DiffCommits returns the list of commits between mergeBase and HEAD.
@@ -337,6 +338,9 @@ func DiffFilePatch(worktreePath, from, to, path string) (*ops.DiffFilePatchResul
 }
 
 func changeIsBinary(change *object.Change) bool {
+	if changeHasNonFileTreeEntry(change) {
+		return true
+	}
 	from, to, err := change.Files()
 	if err != nil {
 		return false
@@ -347,6 +351,15 @@ func changeIsBinary(change *object.Change) bool {
 		}
 		isBinary, err := file.IsBinary()
 		if err == nil && isBinary {
+			return true
+		}
+	}
+	return false
+}
+
+func changeHasNonFileTreeEntry(change *object.Change) bool {
+	for _, entry := range []object.ChangeEntry{change.From, change.To} {
+		if entry.Name != "" && !entry.TreeEntry.Mode.IsFile() {
 			return true
 		}
 	}
