@@ -1,13 +1,9 @@
 import type { BackendInfo } from "@/utils/workspace";
+import type { AIBackendSetupAction } from "@/utils/cliSetup";
 
 import styles from "./AIBackendSetupList.module.css";
 
-export type AIBackendSetupAction =
-  | "install"
-  | "login"
-  | "configure"
-  | "set-default"
-  | "test";
+export type { AIBackendSetupAction } from "@/utils/cliSetup";
 
 export interface AIBackendSetupListProps {
   backends: BackendInfo[];

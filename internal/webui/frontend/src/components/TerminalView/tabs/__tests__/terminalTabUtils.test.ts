@@ -191,6 +191,16 @@ describe("getBackendFromSessionName (shell backend)", () => {
     expect(getBackendFromSessionName("lead-shell-5")).toBe("shell");
   });
 
+  it('returns "shell" for setup shell sessions', () => {
+    expect(getBackendFromSessionName("lead-shell-setup-codex")).toBe("shell");
+  });
+
+  it('returns "shell" for workspace-prefixed setup shell sessions', () => {
+    expect(
+      getBackendFromSessionName("HELLO-WORLD--lead-shell-setup-codex"),
+    ).toBe("shell");
+  });
+
   it('returns "claude" for "lead-claude-1" (non-shell)', () => {
     expect(getBackendFromSessionName("lead-claude-1")).toBe("claude");
   });

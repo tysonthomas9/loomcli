@@ -39,6 +39,7 @@ import {
   type OnboardingRestartDetail,
 } from "@/utils/onboardingState";
 import { buildWorkspaceSwitchUrl } from "@/utils/workspaceUrl";
+import { requestCliSetup } from "@/utils/cliSetup";
 import { AppLayout } from "@/components/AppLayout/AppLayout";
 import { WorkspaceBreadcrumb } from "@/components/WorkspaceBreadcrumb/WorkspaceBreadcrumb";
 import { LoadingSkeleton } from "@/components/LoadingSkeleton/LoadingSkeleton";
@@ -218,8 +219,7 @@ function App() {
     () => workspaceRepos.some((repo) => isOnboardingRepo(repo)),
     [workspaceRepos],
   );
-  const shouldPrefillOnboardingIssue =
-    hasOnboardingRepo && issues.length === 0;
+  const shouldPrefillOnboardingIssue = hasOnboardingRepo && issues.length === 0;
   const shouldPrefillOnboardingAgent =
     hasOnboardingRepo && (workspace?.agents?.length ?? 0) === 0;
   const onboardingWorkspaceInitialValues = useMemo(
@@ -880,6 +880,7 @@ function App() {
         }
         return;
       }
+      requestCliSetup(backend, action);
       navigateToView("terminal");
     },
     [navigateToView, refetchAiBackends, showToast, updateOnboardingBackend],

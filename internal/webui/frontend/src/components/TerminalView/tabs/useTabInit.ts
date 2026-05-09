@@ -23,6 +23,8 @@ interface TabInitArgs {
   workspace?: string;
   /** Whether the Terminal view is currently visible — defer init until user navigates to Terminal */
   isViewActive: boolean;
+  /** When true, do not auto-create the default lead tab for an empty workspace. */
+  skipDefaultTabInit?: boolean;
 }
 
 export function useTabInit(args: TabInitArgs) {
@@ -37,6 +39,7 @@ export function useTabInit(args: TabInitArgs) {
     initializedRef,
     workspace,
     isViewActive,
+    skipDefaultTabInit = false,
   } = args;
 
   useEffect(() => {
@@ -74,6 +77,12 @@ export function useTabInit(args: TabInitArgs) {
         restoredTab ? restoredTab.id : (restoredTabs[0]?.id ?? ""),
       );
     } else {
+      if (skipDefaultTabInit) {
+        setTabs([]);
+        setActiveTabId("");
+        return;
+      }
+
       const backends = (config?.available ?? []).filter((b) => b !== "shell");
       if (backends.length === 0) {
         // No backends configured — render empty state (NoBackendsEmptyState)
@@ -123,7 +132,11 @@ export function useTabInit(args: TabInitArgs) {
     config,
     configLoading,
     createTab,
+    initializedRef,
+    setActiveTabId,
+    setTabs,
     workspace,
     isViewActive,
+    skipDefaultTabInit,
   ]);
 }
