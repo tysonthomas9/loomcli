@@ -1,4 +1,4 @@
-import { useEffect, type MutableRefObject } from "react";
+import { useEffect, useRef, type MutableRefObject } from "react";
 
 import type { TabMetadata } from "@/hooks/api";
 import type { BackendConfigData } from "@/api/common";
@@ -27,6 +27,36 @@ interface TabInitArgs {
   skipDefaultTabInit?: boolean;
 }
 
+function tabStateFromMetadata(
+  metadata: TabMetadata,
+  defaultBackend?: string,
+): TabState & { _sortOrder: number; _pinned: boolean } {
+  return {
+    id: metadata.session_name,
+    label: metadata.label,
+    sessionName: metadata.session_name,
+    connectionState: "disconnected" as ConnectionState,
+    backendName: getBackendFromSessionName(
+      metadata.session_name,
+      defaultBackend,
+    ),
+    pinned: metadata.pinned,
+    _sortOrder: metadata.sort_order,
+    _pinned: metadata.pinned,
+  };
+}
+
+function sortMetadataTabs(
+  tabs: Array<TabState & { _sortOrder?: number; _pinned?: boolean }>,
+): TabState[] {
+  return tabs
+    .sort((a, b) => {
+      if (a._pinned !== b._pinned) return a._pinned ? -1 : 1;
+      return (a._sortOrder ?? 999) - (b._sortOrder ?? 999);
+    })
+    .map(({ _sortOrder: _, _pinned: _p, ...tab }) => tab);
+}
+
 export function useTabInit(args: TabInitArgs) {
   const {
     tabMetadata,
@@ -41,6 +71,7 @@ export function useTabInit(args: TabInitArgs) {
     isViewActive,
     skipDefaultTabInit = false,
   } = args;
+  const initializedMetadataRef = useRef<TabMetadata[] | null>(null);
 
   useEffect(() => {
     if (initializedRef.current || metaLoading || configLoading || !isViewActive)
@@ -48,21 +79,10 @@ export function useTabInit(args: TabInitArgs) {
     initializedRef.current = true;
 
     if (tabMetadata.length > 0) {
+      initializedMetadataRef.current = tabMetadata;
       const defaultBackend = config?.backend;
       const restoredTabs: TabState[] = tabMetadata
-        .map((m) => ({
-          id: m.session_name,
-          label: m.label,
-          sessionName: m.session_name,
-          connectionState: "disconnected" as ConnectionState,
-          backendName: getBackendFromSessionName(
-            m.session_name,
-            defaultBackend,
-          ),
-          pinned: m.pinned,
-          _sortOrder: m.sort_order,
-          _pinned: m.pinned,
-        }))
+        .map((m) => tabStateFromMetadata(m, defaultBackend))
         .sort((a, b) => {
           if (a._pinned !== b._pinned) return a._pinned ? -1 : 1;
           return (a._sortOrder ?? 999) - (b._sortOrder ?? 999);
@@ -138,5 +158,82 @@ export function useTabInit(args: TabInitArgs) {
     workspace,
     isViewActive,
     skipDefaultTabInit,
+  ]);
+
+  useEffect(() => {
+    if (
+      !initializedRef.current ||
+      metaLoading ||
+      configLoading ||
+      !isViewActive
+    )
+      return;
+    if (tabMetadata.length === 0) return;
+    if (initializedMetadataRef.current === tabMetadata) return;
+
+    const defaultBackend = config?.backend;
+    const metadataTabs = sortMetadataTabs(
+      tabMetadata.map((m) => tabStateFromMetadata(m, defaultBackend)),
+    );
+
+    setTabs((current) => {
+      const currentBySession = new Map(current.map((t) => [t.sessionName, t]));
+      const metadataSessionNames = new Set(
+        metadataTabs.map((t) => t.sessionName),
+      );
+      const nextTabs = metadataTabs.map((metadataTab) => {
+        const existing = currentBySession.get(metadataTab.sessionName);
+        if (!existing) return metadataTab;
+        return {
+          ...existing,
+          label: metadataTab.label,
+          backendName: metadataTab.backendName,
+          ...(metadataTab.pinned !== undefined && {
+            pinned: metadataTab.pinned,
+          }),
+        };
+      });
+
+      for (const tab of current) {
+        if (!metadataSessionNames.has(tab.sessionName)) {
+          nextTabs.push(tab);
+        }
+      }
+
+      const unchanged =
+        nextTabs.length === current.length &&
+        nextTabs.every((tab, index) => {
+          const currentTab = current[index];
+          return (
+            currentTab != null &&
+            tab.id === currentTab.id &&
+            tab.label === currentTab.label &&
+            tab.sessionName === currentTab.sessionName &&
+            tab.connectionState === currentTab.connectionState &&
+            tab.backendName === currentTab.backendName &&
+            tab.pinned === currentTab.pinned
+          );
+        });
+      return unchanged ? current : nextTabs;
+    });
+
+    setActiveTabId((current) => {
+      if (current && metadataTabs.some((tab) => tab.id === current)) {
+        return current;
+      }
+      const savedActiveId = sessionStorage.getItem("terminal-active-tab");
+      const restoredTab =
+        savedActiveId && metadataTabs.find((t) => t.id === savedActiveId);
+      return restoredTab ? restoredTab.id : (metadataTabs[0]?.id ?? "");
+    });
+  }, [
+    tabMetadata,
+    metaLoading,
+    config,
+    configLoading,
+    initializedRef,
+    setActiveTabId,
+    setTabs,
+    isViewActive,
   ]);
 }
