@@ -21,6 +21,8 @@ import { useRouteView } from "@/hooks/common/useRouteView";
 import { useFilterState } from "@/hooks/issues/useFilterState";
 import { useIssueDetail } from "@/hooks/issues/useIssueDetail";
 import { useWorkspaceContext } from "@/hooks/workspace/useWorkspaceContext";
+import { useBackends } from "@/hooks/workspace/useBackends";
+import { useBackendConfig } from "@/hooks/workspace/useBackendConfig";
 import type { Issue, Status } from "@/types";
 
 import App from "../App";
@@ -767,6 +769,100 @@ function createMockUseIssueDetailReturn(
   };
 }
 
+function backendInfo(name: string, available: boolean) {
+  return {
+    name,
+    displayName:
+      name === "opencode" ? "OpenCode" : name[0].toUpperCase() + name.slice(1),
+    provider: name === "codex" ? "OpenAI" : "Test",
+    brandColor: "#6366f1",
+    available,
+    installed: available,
+    apiKeySet: available,
+  };
+}
+
+function mockBackendState({
+  defaultBackend = "opencode",
+  backends = [backendInfo("opencode", true)],
+}: {
+  defaultBackend?: string | null;
+  backends?: ReturnType<typeof backendInfo>[];
+} = {}) {
+  vi.mocked(useBackends).mockReturnValue({
+    backends,
+    isLoading: false,
+    error: null,
+    refetch: vi.fn(),
+  });
+  vi.mocked(useBackendConfig).mockReturnValue({
+    config:
+      defaultBackend === null
+        ? null
+        : {
+            backend: defaultBackend,
+            source: "test",
+            available: backends
+              .filter((backend) => backend.available)
+              .map((backend) => backend.name),
+            agents: [],
+          },
+    isLoading: false,
+    error: null,
+    isSaving: false,
+    isCached: false,
+    updateBackend: vi.fn().mockResolvedValue(true),
+    refetch: vi.fn(),
+  });
+}
+
+function mockHelloWorldWorkspaceContext({
+  agents = [{ name: "planner", role_name: "plan" }],
+  workspaces = [],
+}: {
+  agents?: Array<{ name: string; role_name?: string; backend?: string }>;
+  workspaces?: Array<{ id: string; name: string; backend?: string }>;
+} = {}) {
+  vi.mocked(useWorkspaceContext).mockReturnValue({
+    workspaceId: "test-ws-id",
+    workspace: {
+      name: "Hello-World",
+      agents,
+      workspaces,
+    },
+    repos: [
+      {
+        name: "Hello-World",
+        remote: "https://github.com/octocat/Hello-World",
+      },
+    ],
+    groups: [],
+    agents,
+    isLoading: false,
+    error: null,
+    refetch: vi.fn(),
+    getRepoByName: vi.fn(),
+    getReposByGroup: vi.fn(() => []),
+    getAgentByName: vi.fn(),
+    activeWorkspaceName: "Hello-World",
+    setActiveWorkspace: vi.fn(),
+    selectedRepoNames: new Set<string>(["Hello-World"]),
+    activeRepos: [
+      {
+        name: "Hello-World",
+        remote: "https://github.com/octocat/Hello-World",
+      },
+    ],
+    activeRepoNames: ["Hello-World"],
+    isAllSelected: true,
+    selectRepos: vi.fn(),
+    selectAll: vi.fn(),
+    toggleRepo: vi.fn(),
+    sourceReposFilter: undefined,
+    isMultiRepo: false,
+  } as ReturnType<typeof useWorkspaceContext>);
+}
+
 describe("App", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -819,6 +915,7 @@ describe("App", () => {
       sourceReposFilter: undefined,
       isMultiRepo: false,
     } as ReturnType<typeof useWorkspaceContext>);
+    mockBackendState();
     // Set up default usePanelManager mock
     mockUsePanelManager.mockReturnValue({
       activePanel: null,
@@ -2490,6 +2587,169 @@ describe("App", () => {
       expect(fetchIssue).not.toHaveBeenCalled();
     });
 
+    it("uses freshly fetched workspace agents before starting the onboarding task", async () => {
+      localStorage.clear();
+      const createdIssue = createMockIssue({
+        id: "onboarding-task",
+        title: "Explore Hello-World onboarding",
+        issue_type: "task",
+      });
+      mockCreateIssue.mockResolvedValue(createdIssue);
+      mockFetchWorkspaceApi.mockResolvedValue({
+        id: "test-ws-id",
+        name: "Hello-World",
+        path: "/tmp/hello-world",
+        repos: [],
+        groups: [],
+        agents: [{ name: "fresh-planner", role_name: "plan" }],
+        workspaces: [],
+        default_workspace: "Hello-World",
+      });
+      mockStoreState = createMockUseIssuesReturn({
+        issues: [],
+        refetch: vi.fn().mockResolvedValue(undefined),
+      });
+      mockUseRouteView.mockReturnValue(createViewStateReturn("terminal"));
+      mockHelloWorldWorkspaceContext({
+        agents: [{ name: "planner" }],
+      });
+
+      render(<App />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Create Issue" }));
+      fireEvent.click(await screen.findByTestId("create-issue-submit"));
+
+      await waitFor(() => {
+        expect(mockStartAgent).toHaveBeenCalledWith(
+          "test-ws-id",
+          "fresh-planner",
+          { taskId: "onboarding-task" },
+        );
+      });
+      expect(mockUpdateIssue).toHaveBeenCalledWith(
+        "test-ws-id",
+        "onboarding-task",
+        { assignee: "fresh-planner" },
+      );
+    });
+
+    it("does not start a task agent when the refreshed onboarding workspace has no planner", async () => {
+      localStorage.clear();
+      const showToast = vi.fn();
+      mockUseToast.mockReturnValue({
+        toasts: [],
+        showToast,
+        dismissToast: vi.fn(),
+        dismissAll: vi.fn(),
+      });
+      mockCreateIssue.mockResolvedValue(
+        createMockIssue({
+          id: "onboarding-task",
+          title: "Explore Hello-World onboarding",
+          issue_type: "task",
+        }),
+      );
+      mockFetchWorkspaceApi.mockResolvedValue({
+        id: "test-ws-id",
+        name: "Hello-World",
+        path: "/tmp/hello-world",
+        repos: [],
+        groups: [],
+        agents: [{ name: "builder", role_name: "task" }],
+        workspaces: [],
+        default_workspace: "Hello-World",
+      });
+      mockStoreState = createMockUseIssuesReturn({
+        issues: [],
+        refetch: vi.fn().mockResolvedValue(undefined),
+      });
+      mockUseRouteView.mockReturnValue(createViewStateReturn("terminal"));
+      mockHelloWorldWorkspaceContext({
+        agents: [{ name: "planner" }],
+      });
+
+      render(<App />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Create Issue" }));
+      fireEvent.click(await screen.findByTestId("create-issue-submit"));
+
+      await waitFor(() => {
+        expect(mockCreateIssue).toHaveBeenCalled();
+      });
+      expect(mockStartAgent).not.toHaveBeenCalled();
+      expect(mockUpdateIssue).not.toHaveBeenCalledWith(
+        "test-ws-id",
+        "onboarding-task",
+        expect.objectContaining({ assignee: "builder" }),
+      );
+      expect(showToast).toHaveBeenCalledWith(
+        "Task created, but no planner agent is available. Create a plan agent to start it.",
+        { type: "warning" },
+      );
+    });
+
+    it("rolls back the onboarding task assignee when starting the planner fails", async () => {
+      localStorage.clear();
+      const showToast = vi.fn();
+      mockUseToast.mockReturnValue({
+        toasts: [],
+        showToast,
+        dismissToast: vi.fn(),
+        dismissAll: vi.fn(),
+      });
+      mockCreateIssue.mockResolvedValue(
+        createMockIssue({
+          id: "onboarding-task",
+          title: "Explore Hello-World onboarding",
+          issue_type: "task",
+        }),
+      );
+      mockFetchWorkspaceApi.mockResolvedValue({
+        id: "test-ws-id",
+        name: "Hello-World",
+        path: "/tmp/hello-world",
+        repos: [],
+        groups: [],
+        agents: [{ name: "planner", role_name: "plan" }],
+        workspaces: [],
+        default_workspace: "Hello-World",
+      });
+      mockStartAgent.mockRejectedValueOnce(new Error("daemon unavailable"));
+      mockStoreState = createMockUseIssuesReturn({
+        issues: [],
+        refetch: vi.fn().mockResolvedValue(undefined),
+      });
+      mockUseRouteView.mockReturnValue(createViewStateReturn("terminal"));
+      mockHelloWorldWorkspaceContext();
+
+      render(<App />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Create Issue" }));
+      fireEvent.click(await screen.findByTestId("create-issue-submit"));
+
+      await waitFor(() => {
+        expect(mockStartAgent).toHaveBeenCalledWith("test-ws-id", "planner", {
+          taskId: "onboarding-task",
+        });
+      });
+      expect(mockUpdateIssue).toHaveBeenNthCalledWith(
+        1,
+        "test-ws-id",
+        "onboarding-task",
+        { assignee: "planner" },
+      );
+      expect(mockUpdateIssue).toHaveBeenNthCalledWith(
+        2,
+        "test-ws-id",
+        "onboarding-task",
+        { assignee: "" },
+      );
+      expect(showToast).toHaveBeenCalledWith(
+        "Task created, but agent did not start: daemon unavailable",
+        { type: "error" },
+      );
+    });
+
     it("does not auto-start agents for manually-created first issues in the onboarding workspace", async () => {
       localStorage.clear();
       const refetch = vi.fn().mockResolvedValue(undefined);
@@ -2574,6 +2834,91 @@ describe("App", () => {
         id: "manual-task",
       });
       expect(fetchIssue).toHaveBeenCalledWith("manual-task");
+    });
+  });
+
+  describe("onboarding setup gating and defaults", () => {
+    it("does not treat a task agent as the onboarding planner", () => {
+      localStorage.clear();
+      mockStoreState = createMockUseIssuesReturn({ issues: [] });
+      mockBackendState({
+        defaultBackend: "opencode",
+        backends: [backendInfo("opencode", true)],
+      });
+      mockHelloWorldWorkspaceContext({
+        agents: [{ name: "builder", role_name: "task" }],
+      });
+
+      render(<App />);
+
+      expect(
+        screen.getByRole("button", { name: "Create Agent" }),
+      ).toBeEnabled();
+      expect(
+        screen.getByRole("button", { name: "Create Issue" }),
+      ).toBeDisabled();
+    });
+
+    it("blocks agent creation until the default backend is ready", () => {
+      localStorage.clear();
+      mockStoreState = createMockUseIssuesReturn({ issues: [] });
+      mockBackendState({
+        defaultBackend: "codex",
+        backends: [backendInfo("codex", false), backendInfo("opencode", true)],
+      });
+      mockHelloWorldWorkspaceContext({ agents: [] });
+
+      render(<App />);
+
+      expect(
+        screen.getByRole("button", { name: "Create Agent" }),
+      ).toBeDisabled();
+    });
+
+    it("blocks onboarding issue creation until the planner backend is ready", () => {
+      localStorage.clear();
+      mockStoreState = createMockUseIssuesReturn({ issues: [] });
+      mockBackendState({
+        defaultBackend: "codex",
+        backends: [backendInfo("codex", false), backendInfo("opencode", true)],
+      });
+      mockHelloWorldWorkspaceContext();
+
+      render(<App />);
+
+      expect(
+        screen.getByRole("button", { name: "Create Issue" }),
+      ).toBeDisabled();
+    });
+
+    it("prefills new agents with the configured workspace backend", async () => {
+      localStorage.clear();
+      mockBackendState({
+        defaultBackend: "opencode",
+        backends: [backendInfo("opencode", true)],
+      });
+      mockHelloWorldWorkspaceContext({ agents: [] });
+
+      render(<App />);
+
+      fireEvent.click(screen.getByRole("button", { name: "+ Add agent" }));
+
+      expect(await screen.findByLabelText("Backend")).toHaveValue("opencode");
+    });
+
+    it("prefills new agents with the first ready backend when no backend is configured", async () => {
+      localStorage.clear();
+      mockBackendState({
+        defaultBackend: null,
+        backends: [backendInfo("codex", false), backendInfo("opencode", true)],
+      });
+      mockHelloWorldWorkspaceContext({ agents: [] });
+
+      render(<App />);
+
+      fireEvent.click(screen.getByRole("button", { name: "+ Add agent" }));
+
+      expect(await screen.findByLabelText("Backend")).toHaveValue("opencode");
     });
   });
 
