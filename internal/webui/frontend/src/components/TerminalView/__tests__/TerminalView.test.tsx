@@ -63,6 +63,7 @@ const mockTerminalApi = vi.hoisted(() => ({
     title: "Install Codex",
     message:
       "The backend started this command in the setup terminal. You can take control there if it prompts or fails.",
+    manual: false,
     created: true,
   }),
 }));
@@ -245,6 +246,7 @@ describe("TerminalView", () => {
       title: "Install Codex",
       message:
         "The backend started this command in the setup terminal. You can take control there if it prompts or fails.",
+      manual: false,
       created: true,
     });
     mockBackendConfigHook.isLoading = false;
@@ -435,6 +437,42 @@ describe("TerminalView", () => {
       );
       expect(mockMetadataHook.createTab).not.toHaveBeenCalled();
       expect(sessionStorage.getItem(CLI_SETUP_REQUEST_KEY)).toBeNull();
+    });
+
+    it("renders manual setup results as guidance rather than a running install", async () => {
+      setMetadata(DEFAULT_METADATA);
+      mockTerminalApi.startTerminalSetup.mockResolvedValue({
+        session_name: "lead-shell-setup-cursor",
+        label: "Cursor setup",
+        backend: "cursor",
+        action: "install",
+        command: "printf '%s\\n' 'Cursor CLI setup is not fully automated here.'",
+        title: "Set up Cursor manually",
+        message: "The setup terminal shows manual Cursor CLI setup steps.",
+        manual: true,
+        created: true,
+      });
+      sessionStorage.setItem(
+        CLI_SETUP_REQUEST_KEY,
+        JSON.stringify({
+          id: "setup-manual",
+          backendName: "cursor",
+          displayName: "Cursor",
+          provider: "Anysphere",
+          brandColor: "#00e5ff",
+          action: "install",
+        }),
+      );
+
+      render(<TerminalView />);
+
+      await waitFor(() => {
+        expect(
+          screen.getByText("Manual steps shown in terminal"),
+        ).toBeInTheDocument();
+      });
+      expect(screen.getByText("Set up Cursor manually")).toBeInTheDocument();
+      expect(screen.getByText("Show steps again")).toBeInTheDocument();
     });
 
     it("does not auto-create a lead tab when opening terminal for CLI setup", async () => {

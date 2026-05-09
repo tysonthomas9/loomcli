@@ -60,7 +60,7 @@ interface CliSetupGuide extends CliSetupRequest {
   tabId: string;
   instructions: CliSetupInstructions;
   hasRun: boolean;
-  status: "starting" | "running" | "failed";
+  status: "starting" | "running" | "manual" | "failed";
   error?: string | undefined;
 }
 
@@ -94,7 +94,7 @@ function setupInstructionsFromResult(
   const instructions: CliSetupInstructions = {
     title: result.title || fallback.title,
     description: result.message || fallback.description,
-    buttonLabel: fallback.buttonLabel,
+    buttonLabel: result.manual ? "Show steps again" : fallback.buttonLabel,
   };
   if (command) {
     instructions.command = command;
@@ -372,13 +372,17 @@ export function TerminalView({
               tabId: result.session_name || current.tabId,
               instructions,
               hasRun: true,
-              status: "running",
+              status: result.manual ? "manual" : "running",
               error: undefined,
             }
           : current,
       );
       startBackendStatusPolling();
-      announce(`${request.displayName} setup command started`);
+      announce(
+        result.manual
+          ? `${request.displayName} setup steps shown`
+          : `${request.displayName} setup command started`,
+      );
     },
     [announce, startBackendStatusPolling],
   );
@@ -770,7 +774,9 @@ export function TerminalView({
                     ? "Starting in terminal..."
                     : cliSetupGuide.status === "failed"
                       ? `Failed: ${cliSetupGuide.error ?? "setup did not start"}`
-                      : "Running in terminal"}
+                      : cliSetupGuide.status === "manual"
+                        ? "Manual steps shown in terminal"
+                        : "Running in terminal"}
                 </span>
               </div>
               <div className={styles.cliSetupActions}>
@@ -780,9 +786,11 @@ export function TerminalView({
                   onClick={() => runCliSetupCommand(cliSetupGuide)}
                   disabled={cliSetupGuide.status === "starting"}
                 >
-                  {cliSetupGuide.hasRun
-                    ? "Run again"
-                    : cliSetupGuide.instructions.buttonLabel}
+                  {cliSetupGuide.status === "manual"
+                    ? cliSetupGuide.instructions.buttonLabel
+                    : cliSetupGuide.hasRun
+                      ? "Run again"
+                      : cliSetupGuide.instructions.buttonLabel}
                 </button>
                 <button
                   type="button"

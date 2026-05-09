@@ -144,6 +144,10 @@
   color: #34d399;
 }
 
+.manual {
+  color: var(--color-text-muted);
+}
+
 .failed {
   color: #fb7185;
 }

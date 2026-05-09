@@ -18,6 +18,8 @@ type setupCommandSpec struct {
 	displayName string
 	commands    map[string]string
 	messages    map[string]string
+	titles      map[string]string
+	manual      map[string]bool
 }
 
 var setupCommandSpecs = map[string]setupCommandSpec{
@@ -81,9 +83,19 @@ var setupCommandSpecs = map[string]setupCommandSpec{
 			"test": "cursor --version",
 		},
 		messages: map[string]string{
-			"install":   "The setup terminal shows the supported Cursor CLI install step. You can take control there if you need to run extra commands.",
+			"install":   "The setup terminal shows manual Cursor CLI setup steps. You can take control there if you need to run extra commands.",
 			"login":     "The setup terminal shows how Loom detects Cursor credentials. You can take control there to configure this shell.",
 			"configure": "The setup terminal shows how Loom detects Cursor credentials. You can take control there to configure this shell.",
+		},
+		titles: map[string]string{
+			"install":   "Set up Cursor manually",
+			"login":     "Configure Cursor credentials",
+			"configure": "Configure Cursor credentials",
+		},
+		manual: map[string]bool{
+			"install":   true,
+			"login":     true,
+			"configure": true,
 		},
 	},
 }
@@ -137,18 +149,23 @@ func setupShellArgv(command string) []string {
 	return []string{"-lc", script}
 }
 
-func setupTitle(action, displayName string) string {
+func setupTitle(action string, spec setupCommandSpec) string {
+	if spec.titles != nil {
+		if title := spec.titles[action]; title != "" {
+			return title
+		}
+	}
 	switch action {
 	case "install":
-		return "Install " + displayName
+		return "Install " + spec.displayName
 	case "login":
-		return "Log in to " + displayName
+		return "Log in to " + spec.displayName
 	case "configure":
-		return "Configure " + displayName
+		return "Configure " + spec.displayName
 	case "test":
-		return "Test " + displayName
+		return "Test " + spec.displayName
 	default:
-		return displayName + " setup"
+		return spec.displayName + " setup"
 	}
 }
 
@@ -159,6 +176,10 @@ func setupMessage(action string, spec setupCommandSpec) string {
 		}
 	}
 	return "The backend started this command in the setup terminal. You can take control there if it prompts or fails."
+}
+
+func setupIsManual(action string, spec setupCommandSpec) bool {
+	return spec.manual != nil && spec.manual[action]
 }
 
 func (s *terminalServiceImpl) StartSetup(ctx context.Context, wsID string, req service.TerminalSetupRequest) (*service.TerminalSetupResult, error) {
@@ -204,8 +225,9 @@ func (s *terminalServiceImpl) StartSetup(ctx context.Context, wsID string, req s
 		Backend:     backend,
 		Action:      action,
 		Command:     command,
-		Title:       setupTitle(action, spec.displayName),
+		Title:       setupTitle(action, spec),
 		Message:     setupMessage(action, spec),
+		Manual:      setupIsManual(action, spec),
 		Created:     created,
 	}, nil
 }
