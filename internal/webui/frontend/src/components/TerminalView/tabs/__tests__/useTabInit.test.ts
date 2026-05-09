@@ -362,6 +362,42 @@ describe("useTabInit", () => {
     expect(tabs[0].connectionState).toBe("disconnected");
   });
 
+  it("restores persisted agent tabs with agent routing metadata", () => {
+    const metadata: TabMetadata[] = [
+      {
+        session_name: "agent-lead-ui-e2e",
+        label: "agent-lead-ui-e2e",
+        notes: "",
+        sort_order: 1,
+        created_at: "2024-01-01T00:00:00Z",
+        updated_at: "2024-01-01T00:00:00Z",
+      },
+    ];
+
+    const setTabs = vi.fn();
+    const args = createArgs({
+      tabMetadata: metadata,
+      config: {
+        backend: "codex",
+        source: "config",
+        available: ["codex"],
+        agents: [],
+      },
+      setTabs: setTabs as unknown as React.Dispatch<
+        React.SetStateAction<TabState[]>
+      >,
+    });
+
+    renderHook(() => useTabInit(args));
+
+    const tabs = setTabs.mock.calls[0][0] as TabState[];
+    expect(tabs[0]).toMatchObject({
+      sessionName: "agent-lead-ui-e2e",
+      backendName: "agent",
+      agentName: "lead-ui-e2e",
+    });
+  });
+
   it("filters shell from auto-created backends", () => {
     const setTabs = vi.fn();
     const setActiveTabId = vi.fn();

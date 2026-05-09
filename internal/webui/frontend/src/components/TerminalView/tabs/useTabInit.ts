@@ -5,6 +5,7 @@ import type { BackendConfigData } from "@/api/common";
 
 import type { ConnectionState } from "@/components/TerminalView/instances";
 import {
+  getAgentNameFromSessionName,
   getBackendFromSessionName,
   sanitizeSessionName,
   type TabState,
@@ -47,19 +48,22 @@ export function useTabInit(args: TabInitArgs) {
     if (tabMetadata.length > 0) {
       const defaultBackend = config?.backend;
       const restoredTabs: TabState[] = tabMetadata
-        .map((m) => ({
-          id: m.session_name,
-          label: m.label,
-          sessionName: m.session_name,
-          connectionState: "disconnected" as ConnectionState,
-          backendName: getBackendFromSessionName(
-            m.session_name,
-            defaultBackend,
-          ),
-          pinned: m.pinned,
-          _sortOrder: m.sort_order,
-          _pinned: m.pinned,
-        }))
+        .map((m) => {
+          const agentName = getAgentNameFromSessionName(m.session_name);
+          return {
+            id: m.session_name,
+            label: m.label,
+            sessionName: m.session_name,
+            connectionState: "disconnected" as ConnectionState,
+            backendName: agentName
+              ? "agent"
+              : getBackendFromSessionName(m.session_name, defaultBackend),
+            ...(agentName ? { agentName } : {}),
+            pinned: m.pinned,
+            _sortOrder: m.sort_order,
+            _pinned: m.pinned,
+          };
+        })
         .sort((a, b) => {
           if (a._pinned !== b._pinned) return a._pinned ? -1 : 1;
           return (a._sortOrder ?? 999) - (b._sortOrder ?? 999);

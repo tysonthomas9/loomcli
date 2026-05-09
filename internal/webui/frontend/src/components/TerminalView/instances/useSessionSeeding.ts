@@ -100,6 +100,17 @@ export function useSessionSeeding({
 
     const existingTab = tabs.find((t) => t.sessionName === sessionName);
     if (existingTab) {
+      setTabs((prev) =>
+        prev.map((tab) =>
+          tab.id === existingTab.id
+            ? {
+                ...tab,
+                backendName: "agent",
+                agentName: pendingAgentName,
+              }
+            : tab,
+        ),
+      );
       setActiveTabId(existingTab.id);
       onAgentNameConsumed?.();
       return;

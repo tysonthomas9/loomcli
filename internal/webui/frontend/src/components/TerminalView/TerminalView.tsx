@@ -421,16 +421,21 @@ export function TerminalView({
       const paneIsActive =
         pane === "right" ? tab.id === rightPaneTabId : tab.id === activeTabId;
       const meta = metaBySession.get(tab.sessionName);
+      const isAgentTab = Boolean(tab.agentName);
       // Undefined while metadata is still loading — preserves connect-on-
       // mount. Only concrete `false` gates auto-attach.
-      const ptyAlive = meta?.pty_alive;
+      // Agent tabs attach through the agent-terminal tmux endpoint; regular
+      // PTY liveness metadata is unrelated and must not block connection.
+      const ptyAlive = isAgentTab ? undefined : meta?.pty_alive;
       return (
         <TerminalPane
           tab={tab}
           isActive={paneIsActive}
           instanceRef={setInstanceRef(tab.id)}
           ptyAlive={ptyAlive}
-          autoStartStaleSession={isLeadSessionName(tab.sessionName)}
+          autoStartStaleSession={
+            isAgentTab || isLeadSessionName(tab.sessionName)
+          }
           onConnectionStateChange={(state, hasConnected) =>
             handleConnectionStateChange(tab.id, state, hasConnected)
           }

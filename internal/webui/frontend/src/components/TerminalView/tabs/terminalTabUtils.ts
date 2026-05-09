@@ -52,6 +52,19 @@ export function getBackendFromSessionName(
 }
 
 /**
+ * Agent terminal tabs are persisted in the same tab metadata store as normal
+ * terminal tabs. Rehydrate their agent identity from the stable session name
+ * so reloads keep using the agent-terminal WebSocket route.
+ */
+export function getAgentNameFromSessionName(
+  sessionName: string,
+): string | undefined {
+  if (!sessionName.startsWith("agent-")) return undefined;
+  const agentName = sessionName.slice("agent-".length);
+  return agentName.length > 0 ? agentName : undefined;
+}
+
+/**
  * Generate an auto-incremented tab name for a given backend.
  * Returns `{wsPrefix}lead-{backend}-{n}` where n is max existing number + 1.
  * The wsPrefix namespaces tmux sessions per workspace to prevent leakage.
