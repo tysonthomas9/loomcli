@@ -51,6 +51,10 @@ const { mockCloseIssue, mockUpdateIssue, mockAddComment } = vi.hoisted(() => ({
   mockAddComment: vi.fn(),
 }));
 
+const { mockStartAgent } = vi.hoisted(() => ({
+  mockStartAgent: vi.fn(),
+}));
+
 // Create hoisted mocks for modal API functions.
 const { mockCreateIssue } = vi.hoisted(() => ({
   mockCreateIssue: vi.fn(),
@@ -100,6 +104,7 @@ vi.mock("@/api", async (importOriginal) => {
     updateIssue: mockUpdateIssue,
     addComment: mockAddComment,
     closeIssue: mockCloseIssue,
+    startAgent: mockStartAgent,
     getIssueEvents: vi.fn().mockImplementation(() => new Promise(() => {})),
     getTaskLogPhases: vi.fn().mockResolvedValue([]),
   };
@@ -814,6 +819,7 @@ describe("App", () => {
     mockUpdateIssue.mockResolvedValue({});
     mockAddComment.mockResolvedValue({});
     mockCreateIssue.mockResolvedValue(createMockIssue({ id: "created-issue" }));
+    mockStartAgent.mockResolvedValue(undefined);
   });
 
   describe("loading state", () => {
@@ -2364,7 +2370,7 @@ describe("App", () => {
   });
 
   describe("onboarding issue creation", () => {
-    it("switches to kanban instead of opening the issue panel after the first onboarding task is created", async () => {
+    it("starts the planner and switches to kanban after the first onboarding task is created", async () => {
       localStorage.clear();
       const refetch = vi.fn().mockResolvedValue(undefined);
       const fetchIssue = vi.fn();
@@ -2440,6 +2446,14 @@ describe("App", () => {
       });
 
       expect(refetch).toHaveBeenCalledTimes(1);
+      expect(mockUpdateIssue).toHaveBeenCalledWith(
+        "test-ws-id",
+        "onboarding-task",
+        { assignee: "planner" },
+      );
+      expect(mockStartAgent).toHaveBeenCalledWith("test-ws-id", "planner", {
+        taskId: "onboarding-task",
+      });
       expect(mockOpenPanel).not.toHaveBeenCalled();
       expect(fetchIssue).not.toHaveBeenCalled();
     });

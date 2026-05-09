@@ -40,7 +40,7 @@ import type {
   Event,
 } from "@/types";
 import type { Status } from "@/types/issue";
-import { getReviewType, isPRUrl } from "@/utils/issue";
+import { getOpenStatus, getReviewType, isPRUrl } from "@/utils/issue";
 
 import {
   getBackendFromSessionName,
@@ -1268,6 +1268,9 @@ function DefaultContent({
                     agents={agents}
                     agentTasks={agentTasks}
                     isConnected={isLoomConnected}
+                    preferredRole={
+                      getOpenStatus(issue) === "needs_plan" ? "plan" : "task"
+                    }
                     onAssign={handleStartWork}
                   />
                 </div>

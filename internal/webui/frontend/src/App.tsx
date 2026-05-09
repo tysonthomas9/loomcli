@@ -19,7 +19,7 @@ import { useStore } from "zustand";
 
 import { useParams, useNavigate, Outlet } from "react-router-dom";
 
-import { updateIssue, addComment, closeIssue } from "@/api";
+import { updateIssue, addComment, closeIssue, startAgent } from "@/api";
 import type { IssueContext } from "@/api/terminal";
 import { buildShareUrl } from "@/utils/buildShareUrl";
 import { getReviewType } from "@/utils/issue";
@@ -174,11 +174,26 @@ function App() {
   );
 
   const agentDefaultBackend = useMemo(() => {
+    const configuredBackend = onboardingBackendConfig?.backend?.trim();
+    if (configuredBackend) return configuredBackend;
+
     const activeWorkspace = workspace?.workspaces?.find(
       (ws) => ws.id === workspaceId || ws.name === activeWorkspaceName,
     );
-    return activeWorkspace?.backend?.trim() || "codex";
-  }, [workspace?.workspaces, workspaceId, activeWorkspaceName]);
+    const workspaceBackend = activeWorkspace?.backend?.trim();
+    if (workspaceBackend) return workspaceBackend;
+
+    const firstReadyBackend = aiBackends.find(
+      (backend) => backend.available,
+    )?.name;
+    return firstReadyBackend?.trim() || "codex";
+  }, [
+    onboardingBackendConfig?.backend,
+    workspace?.workspaces,
+    workspaceId,
+    activeWorkspaceName,
+    aiBackends,
+  ]);
   const hasMultipleWorkspaces = (workspace?.workspaces?.length ?? 0) > 1;
 
   // Convert Set<string> to string[] for components that expect arrays
@@ -892,6 +907,30 @@ function App() {
       if (shouldShowWorkspaceOnboarding && shouldPrefillOnboardingIssue) {
         closeAllPanels();
         navigateToView("kanban");
+        const onboardingAgent =
+          workspace?.agents?.find(
+            (agent) => agent.name === ONBOARDING_AGENT_NAME,
+          )?.name ?? workspace?.agents?.[0]?.name;
+
+        if (onboardingAgent) {
+          try {
+            await updateIssue(workspaceId, issue.id, {
+              assignee: onboardingAgent,
+            });
+            await startAgent(workspaceId, onboardingAgent, {
+              taskId: issue.id,
+            });
+            showToast(`Started ${onboardingAgent} on ${issue.id}`, {
+              type: "success",
+            });
+          } catch (err) {
+            const message =
+              err instanceof Error ? err.message : "failed to start agent";
+            showToast(`Task created, but agent did not start: ${message}`, {
+              type: "error",
+            });
+          }
+        }
         return;
       }
 
@@ -906,6 +945,9 @@ function App() {
       refetch,
       shouldPrefillOnboardingIssue,
       shouldShowWorkspaceOnboarding,
+      showToast,
+      workspace?.agents,
+      workspaceId,
     ],
   );
   const workspaceOnboardingSteps: OnboardingStep[] = useMemo(

@@ -30,6 +30,8 @@ export interface StartWorkButtonProps {
   isConnected: boolean;
   /** Callback to assign agent */
   onAssign: (agentName: string) => Promise<void>;
+  /** Agent role that should handle this issue stage. Defaults to implementation agents. */
+  preferredRole?: "task" | "plan";
   /** External disable flag */
   disabled?: boolean;
 }
@@ -51,6 +53,7 @@ export function StartWorkButton({
   agentTasks,
   isConnected,
   onAssign,
+  preferredRole = "task",
   disabled,
 }: StartWorkButtonProps): JSX.Element | null {
   const [isOpen, setIsOpen] = useState(false);
@@ -120,8 +123,7 @@ export function StartWorkButton({
   const warningAgents: LoomAgentStatus[] = [];
 
   for (const agent of agents) {
-    // Only consider "task" role agents (skip "plan" role)
-    if (agent.role && agent.role !== "task") continue;
+    if (agent.role && agent.role !== preferredRole) continue;
 
     const parsed = parseLoomStatus(agent.status);
     if (AVAILABLE_TYPES.has(parsed.type)) {
