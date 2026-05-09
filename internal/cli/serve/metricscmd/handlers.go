@@ -328,20 +328,62 @@ func storeAgentsForMonitor(ctx context.Context, st store.Store, workspaceHint st
 		log.Printf("Failed to load workspace data for monitor response: %v", err)
 	}
 
+	// Read supervisor liveness (heartbeat timestamps) from the daemon state
+	// file so the UI can render per-agent heartbeat freshness next to the
+	// store-derived working/idle status.
+	daemonInfo := loadDaemonInfoForMonitor(workspaceData)
+
 	for _, assignment := range assignments {
 		if assignment == nil {
 			continue
 		}
-		agents = append(agents, monitor.AgentStatus{
+		agent := monitor.AgentStatus{
 			Name:      assignment.Name,
 			Branch:    monitorBranchFromAgent(workspaceData, assignment),
 			Status:    monitorStatusFromAgentState(assignment.State),
 			Role:      assignment.RoleName,
 			Repo:      monitorRepoFromAgent(assignment),
 			Workspace: wsName,
-		})
+		}
+		if info, ok := daemonInfo[assignment.Name]; ok {
+			agent.AgentLeaseLastHeartbeat = info.AgentLeaseLastHeartbeat
+		}
+		agents = append(agents, agent)
 	}
 	return agents
+}
+
+// loadDaemonInfoForMonitor returns daemon-managed agent metadata (including
+// supervisor heartbeats) keyed by worktree name. Returns an empty map when
+// the daemon is not running, the state file is missing, or the workspace
+// path cannot be resolved.
+func loadDaemonInfoForMonitor(ws *ops.WorkspaceData) map[string]monitor.DaemonAgentInfo {
+	wsPath := ""
+	if ws != nil {
+		wsPath = ws.Path
+	}
+	statePath := ""
+	if wsPath != "" {
+		candidate := filepath.Join(wsPath, ".loom", "daemon-agents.json")
+		if _, err := os.Stat(candidate); err == nil {
+			statePath = candidate
+		}
+	}
+	if statePath == "" {
+		// Fall back to the active project dir's state file (matches the
+		// daemon process's actual write path when launched via `loom daemon`
+		// from the loomcli source tree).
+		if cwd, cwdErr := os.Getwd(); cwdErr == nil {
+			candidate := filepath.Join(cwd, ".loom", "daemon-agents.json")
+			if _, err := os.Stat(candidate); err == nil {
+				statePath = candidate
+			}
+		}
+	}
+	if statePath == "" {
+		return nil
+	}
+	return monitor.LoadDaemonManagedAgents(statePath)
 }
 
 func monitorStatusFromAgentState(state domain.AgentState) string {
