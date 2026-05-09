@@ -1,5 +1,11 @@
 package ops
 
+import "errors"
+
+// ErrDiffBaseNotFound indicates that no usable base ref could be found for a
+// diff against an agent worktree.
+var ErrDiffBaseNotFound = errors.New("diff base not found")
+
 // GitOps defines the interface for git operations on agent worktrees.
 // This interface breaks the import cycle between webui and cli packages.
 // The cli package provides the concrete implementation.

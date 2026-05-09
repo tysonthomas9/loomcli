@@ -3,6 +3,7 @@ package svcimpl
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -45,6 +46,13 @@ func (s *diffServiceImpl) validateRef(ref string) error {
 	return nil
 }
 
+func diffBaseError(err error) error {
+	if errors.Is(err, ops.ErrDiffBaseNotFound) {
+		return service.ErrValidation("failed to resolve diff base: " + err.Error())
+	}
+	return service.ErrInternal("failed to resolve merge-base", err)
+}
+
 func (s *diffServiceImpl) DiffCommits(_ context.Context, wsID, agentName, from string, limit int) ([]ops.DiffCommitResult, error) {
 	wt, err := s.resolveAgent(wsID, agentName)
 	if err != nil {
@@ -54,7 +62,7 @@ func (s *diffServiceImpl) DiffCommits(_ context.Context, wsID, agentName, from s
 	if from == "" {
 		mergeBase, mbErr := s.gitOps.ResolveMergeBase(wt.Path, wt.DefaultBranch)
 		if mbErr != nil {
-			return nil, service.ErrInternal("failed to resolve merge-base", mbErr)
+			return nil, diffBaseError(mbErr)
 		}
 		from = mergeBase
 	} else {
@@ -89,7 +97,7 @@ func (s *diffServiceImpl) DiffFiles(_ context.Context, wsID, agentName, from, to
 	if from == "" {
 		mergeBase, mbErr := s.gitOps.ResolveMergeBase(wt.Path, wt.DefaultBranch)
 		if mbErr != nil {
-			return nil, service.ErrInternal("failed to resolve merge-base", mbErr)
+			return nil, diffBaseError(mbErr)
 		}
 		from = mergeBase
 	} else {
@@ -131,7 +139,7 @@ func (s *diffServiceImpl) DiffFilePatch(_ context.Context, wsID, agentName, from
 	if from == "" {
 		mergeBase, mbErr := s.gitOps.ResolveMergeBase(wt.Path, wt.DefaultBranch)
 		if mbErr != nil {
-			return nil, service.ErrInternal("failed to resolve merge-base", mbErr)
+			return nil, diffBaseError(mbErr)
 		}
 		from = mergeBase
 	} else {
