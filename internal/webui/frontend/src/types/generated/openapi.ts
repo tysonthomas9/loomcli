@@ -2558,6 +2558,10 @@ export interface components {
       parent?: string;
       /** @description Lead/orchestrator session that spawned or owns the agent. */
       orchestrator_session_id?: string;
+      /** @description Latest task session associated with this agent. */
+      task_id?: string;
+      /** @description Latest control-plane session associated with this agent. */
+      session_id?: string;
       /** @description Assignment mode, such as persistent or ephemeral. */
       mode?: string;
       /** @description Requested daemon state for the agent. */

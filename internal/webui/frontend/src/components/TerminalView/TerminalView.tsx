@@ -25,6 +25,7 @@ import {
   BACKEND_BRAND_COLORS,
   type TabState,
   generateTabName,
+  sanitizeSessionName,
   useTabOrdering,
   useTabActions,
   useTabInit,
@@ -33,10 +34,18 @@ import {
 } from "./tabs";
 import styles from "./TerminalView.module.css";
 
+export interface TerminalInputRequest {
+  id: string;
+  text: string;
+  targetAgentName?: string | undefined;
+}
+
 interface TerminalViewProps {
   isActive?: boolean;
   pendingIssueContext?: IssueContext | undefined;
   onIssueContextConsumed?: (() => void) | undefined;
+  pendingTerminalInput?: TerminalInputRequest | undefined;
+  onTerminalInputConsumed?: (() => void) | undefined;
   onActiveSessionCountChange?: (count: number) => void;
   onUnreadChange?: (hasAnyUnread: boolean) => void;
   onTabLimitReached?: (message: string) => void;
@@ -61,6 +70,8 @@ export function TerminalView({
   isActive = true,
   pendingIssueContext,
   onIssueContextConsumed,
+  pendingTerminalInput,
+  onTerminalInputConsumed,
   onActiveSessionCountChange,
   onUnreadChange,
   onTabLimitReached,
@@ -218,7 +229,7 @@ export function TerminalView({
     return () => {
       if (patchDebounceRef.current) clearTimeout(patchDebounceRef.current);
     };
-  }, [activeTabId]);
+  }, [activeTabId, workspaceId]);
 
   // Report active (connected) session count to parent
   useEffect(() => {
@@ -335,12 +346,7 @@ export function TerminalView({
     ) {
       handleDismissWelcome();
     }
-  }, [
-    dismissedWelcome,
-    metaLoading,
-    tabMetadata?.length,
-    handleDismissWelcome,
-  ]);
+  }, [dismissedWelcome, metaLoading, tabMetadata, handleDismissWelcome]);
 
   const handleToggleHelp = useCallback(() => {
     setIsHelpOpen((prev) => !prev);
@@ -360,6 +366,42 @@ export function TerminalView({
     },
     [],
   );
+
+  useEffect(() => {
+    if (!pendingTerminalInput) return;
+    if (tabs.length === 0) return;
+
+    const targetSessionName = pendingTerminalInput.targetAgentName
+      ? `agent-${sanitizeSessionName(pendingTerminalInput.targetAgentName)}`
+      : undefined;
+    const targetTab = targetSessionName
+      ? tabs.find(
+          (tab) =>
+            tab.sessionName === targetSessionName ||
+            tab.agentName === pendingTerminalInput.targetAgentName,
+        )
+      : tabs.find((tab) => tab.id === activeTabId);
+
+    if (!targetTab) return;
+    if (targetTab.id !== activeTabId) {
+      setActiveTabId(targetTab.id);
+      return;
+    }
+    if (targetTab.connectionState !== "connected") return;
+
+    const handle = instanceRefs.current.get(targetTab.id);
+    if (!handle) return;
+
+    handle.pasteText(pendingTerminalInput.text);
+    handle.focus();
+    onTerminalInputConsumed?.();
+  }, [
+    pendingTerminalInput,
+    tabs,
+    activeTabId,
+    setActiveTabId,
+    onTerminalInputConsumed,
+  ]);
 
   const setFocusedLeft = useCallback(
     () => setFocusedPane("left"),

@@ -327,10 +327,16 @@ func storeAgentsForMonitor(ctx context.Context, st store.Store, workspaceHint st
 	if err != nil {
 		log.Printf("Failed to load workspace data for monitor response: %v", err)
 	}
+	latestSessions := latestAgentSessionsForMonitor(ctx, st, wsKey)
 
 	for _, assignment := range assignments {
 		if assignment == nil {
 			continue
+		}
+		var taskID, sessionID string
+		if session := latestSessions[assignment.Name]; session != nil {
+			taskID = session.TaskID
+			sessionID = session.SessionID
 		}
 		agents = append(agents, monitor.AgentStatus{
 			Name:                  assignment.Name,
@@ -342,11 +348,70 @@ func storeAgentsForMonitor(ctx context.Context, st store.Store, workspaceHint st
 			DaemonManaged:         assignment.Auto,
 			Parent:                assignment.Parent,
 			OrchestratorSessionID: assignment.OrchestratorSessionID,
+			TaskID:                taskID,
+			SessionID:             sessionID,
 			Mode:                  string(assignment.Mode),
 			DesiredState:          string(assignment.DesiredState),
 		})
 	}
 	return agents
+}
+
+func latestAgentSessionsForMonitor(ctx context.Context, st store.Store, wsKey string) map[string]*domain.AgentSession {
+	out := make(map[string]*domain.AgentSession)
+	if st == nil || st.AgentSessions() == nil || wsKey == "" {
+		return out
+	}
+	sessions, err := st.AgentSessions().List(ctx, wsKey, store.AgentSessionFilter{Limit: 10000})
+	if err != nil {
+		log.Printf("Failed to list agent sessions for monitor response: %v", err)
+		return out
+	}
+	for _, session := range sessions {
+		if session == nil || session.AgentID == "" {
+			continue
+		}
+		current := out[session.AgentID]
+		if current == nil || monitorSessionMoreRecent(session, current) {
+			out[session.AgentID] = session
+		}
+	}
+	return out
+}
+
+func monitorSessionMoreRecent(candidate, current *domain.AgentSession) bool {
+	if candidate == nil {
+		return false
+	}
+	if current == nil {
+		return true
+	}
+	candidateActive := monitorSessionActive(candidate.Status)
+	currentActive := monitorSessionActive(current.Status)
+	if candidateActive != currentActive {
+		return candidateActive
+	}
+	candidateTime := candidate.UpdatedAt
+	if candidateTime.IsZero() {
+		candidateTime = candidate.CreatedAt
+	}
+	currentTime := current.UpdatedAt
+	if currentTime.IsZero() {
+		currentTime = current.CreatedAt
+	}
+	if !candidateTime.Equal(currentTime) {
+		return candidateTime.After(currentTime)
+	}
+	return candidate.SessionID > current.SessionID
+}
+
+func monitorSessionActive(status domain.AgentSessionStatus) bool {
+	switch status {
+	case domain.AgentSessionCompleted, domain.AgentSessionFailed, domain.AgentSessionCancelled, domain.AgentSessionExpired:
+		return false
+	default:
+		return true
+	}
 }
 
 func monitorStatusFromAgentState(state domain.AgentState) string {

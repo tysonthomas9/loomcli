@@ -12,12 +12,12 @@
  * workspace).
  */
 
-import { useMemo } from "react";
+import { useMemo, type KeyboardEvent } from "react";
 import { useStore } from "zustand";
 
 import { useWorkspaceViewActions } from "@/contexts/WorkspaceViewContext";
 import { useAgentStoreInstance, useIssueStoreInstance } from "@/hooks";
-import { type Issue, parseLoomStatus } from "@/types";
+import { type Issue, type LoomAgentStatus, parseLoomStatus } from "@/types";
 
 import styles from "./AgentWorkPanel.module.css";
 
@@ -29,6 +29,10 @@ interface AgentWorkPanelProps {
    * /agents to surface the IssueDetailPanel inline rather than as a slide-out.
    */
   onTaskClick?: (task: Issue) => void;
+  /** Run the selected epic in the currently selected lead terminal. */
+  onRunEpic?: (epicId: string) => void;
+  /** Open the terminal for the worker currently attached to a task. */
+  onAgentClick?: (agentName: string) => void;
 }
 
 interface EpicGroup {
@@ -78,6 +82,8 @@ const PRIORITY_CLASS: Record<number, string | undefined> = {
 export function AgentWorkPanel({
   agentName,
   onTaskClick,
+  onRunEpic,
+  onAgentClick,
 }: AgentWorkPanelProps): JSX.Element {
   const { handleIssueClick } = useWorkspaceViewActions();
   const dispatchClick = onTaskClick ?? handleIssueClick;
@@ -90,6 +96,7 @@ export function AgentWorkPanel({
     [agentName, agents],
   );
   const selectedAgentIsLead = isLeadRole(selectedAgent?.role);
+  const workerByTaskId = useMemo(() => buildWorkerByTaskId(agents), [agents]);
 
   // Detect the agent's "active epic": parse its current-task ID from status,
   // look the task up, walk to its parent. When set, the panel focuses on that
@@ -194,6 +201,15 @@ export function AgentWorkPanel({
             <EpicGroupCard
               key={group.epicId}
               group={group}
+              canRunEpic={
+                mode === "lead-open" &&
+                selectedAgentIsLead &&
+                group.epicId !== ORPHAN_EPIC_KEY &&
+                onRunEpic != null
+              }
+              onRunEpic={onRunEpic}
+              workerByTaskId={workerByTaskId}
+              onAgentClick={onAgentClick}
               onTaskClick={(task) => dispatchClick(task)}
             />
           ))
@@ -205,9 +221,17 @@ export function AgentWorkPanel({
 
 function EpicGroupCard({
   group,
+  canRunEpic,
+  onRunEpic,
+  workerByTaskId,
+  onAgentClick,
   onTaskClick,
 }: {
   group: EpicGroup;
+  canRunEpic: boolean;
+  onRunEpic?: ((epicId: string) => void) | undefined;
+  workerByTaskId: Map<string, LoomAgentStatus>;
+  onAgentClick?: ((agentName: string) => void) | undefined;
   onTaskClick: (task: Issue) => void;
 }): JSX.Element {
   const pct =
@@ -220,6 +244,16 @@ function EpicGroupCard({
         <span className={styles.epicCount}>
           {group.doneCount}/{group.totalCount}
         </span>
+        {canRunEpic ? (
+          <button
+            type="button"
+            className={styles.runEpicButton}
+            onClick={() => onRunEpic?.(group.epicId)}
+            aria-label={`Run epic ${group.epicId}`}
+          >
+            Run
+          </button>
+        ) : null}
       </div>
       <div className={styles.epicProgress}>
         <div
@@ -228,7 +262,13 @@ function EpicGroupCard({
         />
       </div>
       {group.tasks.map((task) => (
-        <TaskCard key={task.id} task={task} onClick={() => onTaskClick(task)} />
+        <TaskCard
+          key={task.id}
+          task={task}
+          workerAgent={workerByTaskId.get(task.id)}
+          onWorkerClick={onAgentClick}
+          onClick={() => onTaskClick(task)}
+        />
       ))}
     </div>
   );
@@ -236,9 +276,13 @@ function EpicGroupCard({
 
 function TaskCard({
   task,
+  workerAgent,
+  onWorkerClick,
   onClick,
 }: {
   task: Issue;
+  workerAgent?: LoomAgentStatus | undefined;
+  onWorkerClick?: ((agentName: string) => void) | undefined;
   onClick: () => void;
 }): JSX.Element {
   const status = (task.status ?? "open").toLowerCase();
@@ -246,25 +290,54 @@ function TaskCard({
   const priority = task.priority ?? 2;
   const priorityClass = PRIORITY_CLASS[priority] ?? PRIORITY_CLASS[2];
   const priorityLabel = PRIORITY_LABEL[priority] ?? "P2";
+  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    onClick();
+  };
   return (
-    <button
-      type="button"
-      onClick={onClick}
+    <div
       data-status={status}
       data-priority={priority}
       className={styles.taskCard}
     >
-      <div className={styles.taskMeta}>
-        <span className={styles.statusGlyph} aria-hidden="true">
-          {glyph}
-        </span>
-        <span className={styles.taskId}>{task.id}</span>
-        <span className={`${styles.priorityChip} ${priorityClass ?? ""}`}>
-          {priorityLabel}
-        </span>
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={onClick}
+        onKeyDown={handleKeyDown}
+        className={styles.taskContent}
+      >
+        <div className={styles.taskMeta}>
+          <span className={styles.statusGlyph} aria-hidden="true">
+            {glyph}
+          </span>
+          <span className={styles.taskId}>{task.id}</span>
+          <span className={`${styles.priorityChip} ${priorityClass ?? ""}`}>
+            {priorityLabel}
+          </span>
+          {workerAgent ? (
+            <span className={styles.workerCluster}>
+              <span className={styles.workerChip} title={workerAgent.name}>
+                {workerAgent.name}
+              </span>
+            </span>
+          ) : null}
+        </div>
+        <div className={styles.taskTitle}>{task.title}</div>
       </div>
-      <div className={styles.taskTitle}>{task.title}</div>
-    </button>
+      {workerAgent && onWorkerClick ? (
+        <button
+          type="button"
+          className={styles.workerTerminalButton}
+          title="Open worker terminal"
+          aria-label={`Open ${workerAgent.name} terminal for ${task.id}`}
+          onClick={() => onWorkerClick(workerAgent.name)}
+        >
+          &gt;_
+        </button>
+      ) : null}
+    </div>
   );
 }
 
@@ -275,6 +348,51 @@ function CountChip({ label }: { label: string }): JSX.Element {
 function isLeadRole(role: string | undefined): boolean {
   const normalized = (role ?? "").trim().toLowerCase();
   return normalized === "lead" || normalized === "orchestrator";
+}
+
+export function buildWorkerByTaskId(
+  agents: LoomAgentStatus[],
+): Map<string, LoomAgentStatus> {
+  const byTaskId = new Map<string, LoomAgentStatus>();
+
+  for (const agent of agents) {
+    const taskId =
+      agent.task_id || parseLoomStatus(agent.status ?? "").taskId || "";
+    if (!taskId) continue;
+
+    const current = byTaskId.get(taskId);
+    if (!current || compareWorkerAgent(agent, current) < 0) {
+      byTaskId.set(taskId, agent);
+    }
+  }
+
+  return byTaskId;
+}
+
+function compareWorkerAgent(
+  candidate: LoomAgentStatus,
+  current: LoomAgentStatus,
+): number {
+  const scoreDelta = workerAgentScore(current) - workerAgentScore(candidate);
+  if (scoreDelta !== 0) return scoreDelta;
+  return candidate.name.localeCompare(current.name);
+}
+
+function workerAgentScore(agent: LoomAgentStatus): number {
+  const parsed = parseLoomStatus(agent.status ?? "");
+  let score = 0;
+  if (
+    parsed.type === "working" ||
+    parsed.type === "planning" ||
+    parsed.type === "review"
+  ) {
+    score += 100;
+  }
+  if (agent.desired_state === "running") score += 20;
+  if (agent.desired_state === "stopped") score -= 20;
+  if (agent.mode === "ephemeral") score += 5;
+  if (agent.session_id) score += 1;
+  return score;
 }
 
 /**

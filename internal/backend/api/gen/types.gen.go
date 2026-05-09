@@ -1333,10 +1333,16 @@ type MonitorAgentStatus struct {
 	OrchestratorSessionId *string `json:"orchestrator_session_id,omitempty"`
 
 	// Parent Active epic assignment for lead/workers.
-	Parent    *string `json:"parent,omitempty"`
-	Repo      *string `json:"repo,omitempty"`
-	Role      *string `json:"role,omitempty"`
+	Parent *string `json:"parent,omitempty"`
+	Repo   *string `json:"repo,omitempty"`
+	Role   *string `json:"role,omitempty"`
+
+	// SessionId Latest control-plane session associated with this agent.
+	SessionId *string `json:"session_id,omitempty"`
 	Status    string  `json:"status"`
+
+	// TaskId Latest task session associated with this agent.
+	TaskId    *string `json:"task_id,omitempty"`
 	Workspace string  `json:"workspace"`
 }
 

@@ -16,7 +16,7 @@
  *   selection so the page never shows stale details.
  */
 
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useStore } from "zustand";
 
@@ -26,6 +26,7 @@ import { AgentWorkPanel } from "@/components/AgentWorkPanel/AgentWorkPanel";
 import { IssueDetailPanel } from "@/components/IssueDetailPanel/IssueDetailPanel";
 import { useAgentStoreInstance } from "@/hooks";
 import type { Issue } from "@/types";
+import type { TerminalInputRequest } from "@/components/TerminalView/TerminalView";
 
 export function AgentsPage(): JSX.Element {
   return (
@@ -45,6 +46,10 @@ function AgentsPageInner(): JSX.Element {
   const navigate = useNavigate();
   const agentStore = useAgentStoreInstance();
   const agents = useStore(agentStore, (s) => s.agents);
+  const selectedAgent = useMemo(
+    () => (agentName ? agents.find((a) => a.name === agentName) : undefined),
+    [agentName, agents],
+  );
 
   // Auto-select first agent when URL is bare /agents.
   const firstAgentName = useMemo(
@@ -63,9 +68,36 @@ function AgentsPageInner(): JSX.Element {
   // Inline task-detail selection. Cleared when the user switches agents so
   // the right column starts fresh on every agent change.
   const [selectedTask, setSelectedTask] = useState<Issue | null>(null);
+  const [pendingTerminalInput, setPendingTerminalInput] = useState<
+    TerminalInputRequest | undefined
+  >(undefined);
   useEffect(() => {
     setSelectedTask(null);
   }, [agentName]);
+
+  const handleRunEpic = useCallback(
+    (epicId: string) => {
+      if (!agentName) return;
+      const orchestratorSessionId =
+        selectedAgent?.orchestrator_session_id ||
+        `agent-${sanitizeTerminalSessionPart(agentName)}`;
+      const envPrefix = `LOOM_ORCHESTRATOR_SESSION_ID=${shellQuote(orchestratorSessionId)}`;
+      const command = `${envPrefix} loom epic run --parent ${shellQuote(epicId)} --lead ${shellQuote(agentName)}\n`;
+      setPendingTerminalInput({
+        id: `${Date.now()}-${agentName}-${epicId}`,
+        text: command,
+        targetAgentName: agentName,
+      });
+    },
+    [agentName, selectedAgent?.orchestrator_session_id],
+  );
+
+  const handleAgentClick = useCallback(
+    (name: string) => {
+      navigate(`/ws/${workspaceId}/agents/${encodeURIComponent(name)}`);
+    },
+    [navigate, workspaceId],
+  );
 
   return (
     <div
@@ -78,7 +110,11 @@ function AgentsPageInner(): JSX.Element {
         background: "var(--color-bg, #fdfcf8)",
       }}
     >
-      <AgentDetailMain agentName={agentName} />
+      <AgentDetailMain
+        agentName={agentName}
+        pendingTerminalInput={pendingTerminalInput}
+        onTerminalInputConsumed={() => setPendingTerminalInput(undefined)}
+      />
       {selectedTask ? (
         <div
           style={{
@@ -101,8 +137,19 @@ function AgentsPageInner(): JSX.Element {
         <AgentWorkPanel
           agentName={agentName}
           onTaskClick={(task) => setSelectedTask(task)}
+          onRunEpic={handleRunEpic}
+          onAgentClick={handleAgentClick}
         />
       )}
     </div>
   );
+}
+
+function sanitizeTerminalSessionPart(value: string): string {
+  return value.replace(/\./g, "-").replace(/[^a-zA-Z0-9_-]/g, "");
+}
+
+function shellQuote(value: string): string {
+  if (/^[A-Za-z0-9_./:-]+$/.test(value)) return value;
+  return `'${value.replace(/'/g, "'\\''")}'`;
 }

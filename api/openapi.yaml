@@ -4470,6 +4470,12 @@ components:
         orchestrator_session_id:
           type: string
           description: Lead/orchestrator session that spawned or owns the agent.
+        task_id:
+          type: string
+          description: Latest task session associated with this agent.
+        session_id:
+          type: string
+          description: Latest control-plane session associated with this agent.
         mode:
           type: string
           description: Assignment mode, such as persistent or ephemeral.

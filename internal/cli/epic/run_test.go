@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -28,7 +29,7 @@ func TestWorkerNameAddsHashToAvoidSanitizedCollisions(t *testing.T) {
 
 func TestBindLeadAgentAssignsEmptyParent(t *testing.T) {
 	ctx := context.Background()
-	st := memstore.New()
+	st := newTestStore(t)
 	createTestLead(t, st, "ws", "nova", "", "")
 
 	leadName, orch, err := bindLeadAgent(ctx, st, "ws", "nova", "EPIC-1", "session-1", true)
@@ -52,7 +53,7 @@ func TestBindLeadAgentAssignsEmptyParent(t *testing.T) {
 
 func TestBindLeadAgentAllowsSameParent(t *testing.T) {
 	ctx := context.Background()
-	st := memstore.New()
+	st := newTestStore(t)
 	createTestLead(t, st, "ws", "nova", "EPIC-1", "session-1")
 
 	_, orch, err := bindLeadAgent(ctx, st, "ws", "nova", "EPIC-1", "", true)
@@ -66,7 +67,7 @@ func TestBindLeadAgentAllowsSameParent(t *testing.T) {
 
 func TestBindLeadAgentRejectsDifferentParent(t *testing.T) {
 	ctx := context.Background()
-	st := memstore.New()
+	st := newTestStore(t)
 	createTestLead(t, st, "ws", "nova", "EPIC-1", "")
 
 	_, _, err := bindLeadAgent(ctx, st, "ws", "nova", "EPIC-2", "", true)
@@ -80,7 +81,7 @@ func TestBindLeadAgentRejectsDifferentParent(t *testing.T) {
 
 func TestBindLeadAgentRejectsNonLeadRole(t *testing.T) {
 	ctx := context.Background()
-	st := memstore.New()
+	st := newTestStore(t)
 	if _, err := st.Agents().Create(ctx, store.AgentCreate{
 		WorkspaceKey: "ws",
 		Name:         "worker",
@@ -100,7 +101,7 @@ func TestBindLeadAgentRejectsNonLeadRole(t *testing.T) {
 
 func TestBindLeadAgentDryRunDoesNotAssignParent(t *testing.T) {
 	ctx := context.Background()
-	st := memstore.New()
+	st := newTestStore(t)
 	createTestLead(t, st, "ws", "nova", "", "")
 
 	if _, _, err := bindLeadAgent(ctx, st, "ws", "nova", "EPIC-1", "", false); err != nil {
@@ -117,7 +118,7 @@ func TestBindLeadAgentDryRunDoesNotAssignParent(t *testing.T) {
 
 func TestBindLeadAgentMissingLead(t *testing.T) {
 	ctx := context.Background()
-	st := memstore.New()
+	st := newTestStore(t)
 
 	_, _, err := bindLeadAgent(ctx, st, "ws", "missing", "EPIC-1", "", true)
 	if !errors.Is(err, domain.ErrNotFound) {
@@ -128,9 +129,46 @@ func TestBindLeadAgentMissingLead(t *testing.T) {
 	}
 }
 
+func TestBindLeadAgentSerializesConcurrentParentClaims(t *testing.T) {
+	ctx := context.Background()
+	st := newTestStore(t)
+	createTestLead(t, st, "ws", "nova", "", "")
+
+	var wg sync.WaitGroup
+	errs := make(chan error, 2)
+	parents := []string{"EPIC-1", "EPIC-2"}
+	for _, parent := range parents {
+		parent := parent
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, _, err := bindLeadAgent(ctx, st, "ws", "nova", parent, "", true)
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+
+	successes := 0
+	conflicts := 0
+	for err := range errs {
+		switch {
+		case err == nil:
+			successes++
+		case strings.Contains(err.Error(), "already running epic"):
+			conflicts++
+		default:
+			t.Fatalf("unexpected bind error: %v", err)
+		}
+	}
+	if successes != 1 || conflicts != 1 {
+		t.Fatalf("successes/conflicts = %d/%d, want 1/1", successes, conflicts)
+	}
+}
+
 func TestSelectTargetNodeIDRequiresSingleActiveNode(t *testing.T) {
 	ctx := context.Background()
-	st := memstore.New()
+	st := newTestStore(t)
 	_, err := st.Nodes().Create(ctx, store.NodeCreate{
 		WorkspaceKey:    "ws",
 		NodeID:          "node-1",
@@ -162,6 +200,12 @@ func TestSelectTargetNodeIDRequiresSingleActiveNode(t *testing.T) {
 	if _, err := selectTargetNodeID(ctx, st, "ws"); err == nil {
 		t.Fatal("selectTargetNodeID() error = nil, want multiple-node error")
 	}
+}
+
+func newTestStore(t *testing.T) store.Store {
+	t.Helper()
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	return memstore.New()
 }
 
 func createTestLead(t *testing.T, st store.Store, workspace, name, parent, orchestrator string) {

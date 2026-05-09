@@ -13,13 +13,21 @@
  * selection changes (only pendingAgentName updates).
  */
 
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import { useStore } from "zustand";
 
 import { LoadingSkeleton } from "@/components";
 import { useAgentStoreInstance } from "@/hooks";
 import { type LoomAgentStatus, parseLoomStatus } from "@/types";
 import { getAvatarColor, shouldUseWhiteText } from "@/utils/colorUtils";
+import type { TerminalInputRequest } from "@/components/TerminalView/TerminalView";
 
 const TerminalView = lazy(() =>
   import("@/components/TerminalView/TerminalView").then((m) => ({
@@ -29,6 +37,8 @@ const TerminalView = lazy(() =>
 
 interface AgentDetailMainProps {
   agentName: string | undefined;
+  pendingTerminalInput?: TerminalInputRequest | undefined;
+  onTerminalInputConsumed?: (() => void) | undefined;
 }
 
 const STATUS_DOT_COLOR: Record<string, string> = {
@@ -43,7 +53,11 @@ const STATUS_DOT_COLOR: Record<string, string> = {
   changes: "var(--color-status-warn, #c96442)",
 };
 
-export function AgentDetailMain({ agentName }: AgentDetailMainProps): JSX.Element {
+export function AgentDetailMain({
+  agentName,
+  pendingTerminalInput,
+  onTerminalInputConsumed,
+}: AgentDetailMainProps): JSX.Element {
   const agentStore = useAgentStoreInstance();
   const agents = useStore(agentStore, (s) => s.agents);
 
@@ -103,6 +117,8 @@ export function AgentDetailMain({ agentName }: AgentDetailMainProps): JSX.Elemen
             isActive={true}
             pendingAgentName={pendingAgentName}
             onAgentNameConsumed={handleAgentNameConsumed}
+            pendingTerminalInput={pendingTerminalInput}
+            onTerminalInputConsumed={onTerminalInputConsumed}
             hideTabs
           />
         </Suspense>
@@ -122,7 +138,8 @@ function Header({
     () => parseLoomStatus(agent?.status ?? ""),
     [agent?.status],
   );
-  const dotColor = STATUS_DOT_COLOR[parsed.type] ?? "var(--color-status-idle, #888)";
+  const dotColor =
+    STATUS_DOT_COLOR[parsed.type] ?? "var(--color-status-idle, #888)";
   const initial = (agentName[0] ?? "?").toUpperCase();
   const avatarBg = getAvatarColor(agentName);
   const avatarFg = shouldUseWhiteText(avatarBg) ? "#fff" : "#1a1a1a";
@@ -157,7 +174,14 @@ function Header({
       >
         {initial}
       </span>
-      <div style={{ display: "flex", flexDirection: "column", flex: 1, minWidth: 0 }}>
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          flex: 1,
+          minWidth: 0,
+        }}
+      >
         <div style={{ fontSize: 14, fontWeight: 700 }}>{agentName}</div>
         <div
           style={{
@@ -182,7 +206,11 @@ function Header({
           {agent?.branch ? (
             <>
               <span>·</span>
-              <code style={{ fontFamily: "var(--font-mono, ui-monospace, monospace)" }}>
+              <code
+                style={{
+                  fontFamily: "var(--font-mono, ui-monospace, monospace)",
+                }}
+              >
                 {agent.branch}
               </code>
             </>
@@ -196,7 +224,11 @@ function Header({
           {parsed.taskId ? (
             <>
               <span>·</span>
-              <code style={{ fontFamily: "var(--font-mono, ui-monospace, monospace)" }}>
+              <code
+                style={{
+                  fontFamily: "var(--font-mono, ui-monospace, monospace)",
+                }}
+              >
                 {parsed.taskId}
               </code>
             </>
@@ -230,7 +262,14 @@ function EmptyState({
       }}
     >
       <div style={{ fontSize: 14, fontWeight: 600 }}>{message}</div>
-      <div style={{ fontSize: 12, marginTop: 6, textAlign: "center", maxWidth: 360 }}>
+      <div
+        style={{
+          fontSize: 12,
+          marginTop: 6,
+          textAlign: "center",
+          maxWidth: 360,
+        }}
+      >
         {detail}
       </div>
     </div>

@@ -107,6 +107,15 @@ func TestHandleAgents_UsesStoreAgentsAsSourceOfTruth(t *testing.T) {
 	if _, err := st.Agents().Update(ctx, "WS1", "falcon", store.AgentUpdate{State: &active}); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey: "WS1",
+		SessionID:    "session-falcon",
+		AgentID:      "falcon",
+		TaskID:       "TASK-1",
+		Status:       domain.AgentSessionRunning,
+	}); err != nil {
+		t.Fatal(err)
+	}
 	falconWorktree := filepath.Join(wsRoot, "worktrees", "repo-a", "falcon")
 	if err := runGitForMetricsTest(t, falconWorktree, "init", "-b", "feature/falcon"); err != nil {
 		t.Fatalf("init falcon worktree: %v", err)
@@ -158,6 +167,9 @@ func TestHandleAgents_UsesStoreAgentsAsSourceOfTruth(t *testing.T) {
 	}
 	if got := byName["falcon"]; got.Parent != "EPIC-1" || got.OrchestratorSessionID != "lead-session" || got.Mode != "ephemeral" || got.DesiredState != "stopped" {
 		t.Fatalf("falcon orchestration fields not sourced from store: %+v", got)
+	}
+	if got := byName["falcon"]; got.TaskID != "TASK-1" || got.SessionID != "session-falcon" {
+		t.Fatalf("falcon session fields not sourced from agent sessions: %+v", got)
 	}
 	if got := byName["nova"]; got.Role != "plan" || got.Status != "idle" || got.Workspace != "Test" {
 		t.Fatalf("nova not sourced from store: %+v", got)

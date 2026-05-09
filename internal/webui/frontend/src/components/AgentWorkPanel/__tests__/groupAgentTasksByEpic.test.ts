@@ -1,7 +1,11 @@
 import { describe, it, expect } from "vitest";
 
-import type { Issue } from "@/types";
-import { groupAgentTasksByEpic, groupOpenByEpic } from "../AgentWorkPanel";
+import type { Issue, LoomAgentStatus } from "@/types";
+import {
+  buildWorkerByTaskId,
+  groupAgentTasksByEpic,
+  groupOpenByEpic,
+} from "../AgentWorkPanel";
 
 // Minimal Issue factory — fills in just the fields the grouping function reads.
 function issue(overrides: Partial<Issue> & Pick<Issue, "id">): Issue {
@@ -17,6 +21,20 @@ function issue(overrides: Partial<Issue> & Pick<Issue, "id">): Issue {
 
 function buildMap(...issues: Issue[]): Map<string, Issue> {
   return new Map(issues.map((i) => [i.id, i]));
+}
+
+function agent(
+  overrides: Partial<LoomAgentStatus> & { name: string },
+): LoomAgentStatus {
+  return {
+    name: overrides.name,
+    branch: overrides.branch ?? "main",
+    status: overrides.status ?? "idle",
+    ahead: overrides.ahead ?? 0,
+    behind: overrides.behind ?? 0,
+    workspace: overrides.workspace ?? "default",
+    ...overrides,
+  } as LoomAgentStatus;
 }
 
 describe("groupAgentTasksByEpic", () => {
@@ -180,5 +198,49 @@ describe("groupOpenByEpic", () => {
       "T-OPEN",
       "T-BLOCKED",
     ]);
+  });
+});
+
+describe("buildWorkerByTaskId", () => {
+  it("maps worker agents by their task_id field", () => {
+    const workers = buildWorkerByTaskId([
+      agent({ name: "lead", role: "lead" }),
+      agent({
+        name: "worker-a",
+        status: "working",
+        task_id: "T-1",
+        session_id: "session-a",
+      }),
+    ]);
+
+    expect(workers.get("T-1")?.name).toBe("worker-a");
+    expect(workers.has("T-2")).toBe(false);
+  });
+
+  it("falls back to parsing task ID from status", () => {
+    const workers = buildWorkerByTaskId([
+      agent({ name: "worker-b", status: "working: T-2 (1m)" }),
+    ]);
+
+    expect(workers.get("T-2")?.name).toBe("worker-b");
+  });
+
+  it("prefers an active running worker over a stopped one for the same task", () => {
+    const workers = buildWorkerByTaskId([
+      agent({
+        name: "worker-stopped",
+        task_id: "T-3",
+        status: "idle",
+        desired_state: "stopped",
+      }),
+      agent({
+        name: "worker-active",
+        task_id: "T-3",
+        status: "working",
+        desired_state: "running",
+      }),
+    ]);
+
+    expect(workers.get("T-3")?.name).toBe("worker-active");
   });
 });

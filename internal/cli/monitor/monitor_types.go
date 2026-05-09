@@ -45,6 +45,8 @@ type AgentStatus struct {
 	DaemonManaged         bool           `json:"daemon_managed,omitempty"`          // true if under daemon supervision
 	Parent                string         `json:"parent,omitempty"`                  // active epic for leads/workers
 	OrchestratorSessionID string         `json:"orchestrator_session_id,omitempty"` // lead/orchestrator session attribution
+	TaskID                string         `json:"task_id,omitempty"`                 // latest task session associated with this agent
+	SessionID             string         `json:"session_id,omitempty"`              // latest control-plane session for this agent
 	Mode                  string         `json:"mode,omitempty"`                    // persistent/ephemeral assignment mode
 	DesiredState          string         `json:"desired_state,omitempty"`           // requested daemon state
 	Commits               []CommitDetail `json:"commits,omitempty"`                 // recent commits ahead of integration branch

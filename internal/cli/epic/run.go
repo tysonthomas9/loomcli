@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -26,6 +27,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
+	"github.com/tysonthomas9/loomcli/internal/lockfile"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -220,6 +222,14 @@ func bindLeadAgent(ctx context.Context, st store.Store, workspace, leadName, par
 		return "", orchestratorID, nil
 	}
 
+	if mutate {
+		unlock, err := acquireLeadBindLock(workspace, leadName)
+		if err != nil {
+			return "", "", err
+		}
+		defer unlock()
+	}
+
 	lead, err := st.Agents().Get(ctx, workspace, leadName)
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
@@ -277,6 +287,34 @@ func bindLeadAgent(ctx context.Context, st store.Store, workspace, leadName, par
 		effectiveOrchestratorID = strings.TrimSpace(updated.OrchestratorSessionID)
 	}
 	return leadName, effectiveOrchestratorID, nil
+}
+
+func acquireLeadBindLock(workspace, leadName string) (func(), error) {
+	dir := bootstrap.LoomDir()
+	if dir == "" {
+		return func() {}, errors.New("cannot resolve loom data directory for lead assignment lock")
+	}
+	lockDir := filepath.Join(dir, "epic-runner-locks")
+	if err := os.MkdirAll(lockDir, 0755); err != nil {
+		return func() {}, fmt.Errorf("create lead assignment lock directory: %w", err)
+	}
+	lockName := sanitizePrefix(workspace + "-" + leadName)
+	if lockName == "" {
+		lockName = "lead"
+	}
+	lockPath := filepath.Join(lockDir, lockName+".lock")
+	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0600) //nolint:gosec // path is under loom data dir with sanitized filename
+	if err != nil {
+		return func() {}, fmt.Errorf("open lead assignment lock %s: %w", lockPath, err)
+	}
+	if err := lockfile.FlockExclusiveBlocking(f); err != nil {
+		_ = f.Close()
+		return func() {}, fmt.Errorf("acquire lead assignment lock %s: %w", lockPath, err)
+	}
+	return func() {
+		_ = lockfile.FlockUnlock(f)
+		_ = f.Close()
+	}, nil
 }
 
 func isLeadRole(role string) bool {
