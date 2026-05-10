@@ -216,9 +216,10 @@ func TestGetLockStatus_WorkingAgentNoTaskID(t *testing.T) {
 	defer ReleaseLock(tmpDir)
 
 	status := GetLockStatus(tmpDir)
-	// Implementation agent without TaskID should show "working: ..."
-	if !strings.HasPrefix(status, "working: ...") {
-		t.Errorf("Expected 'working: ...' prefix, got '%s'", status)
+	// Implementation agent without TaskID is not actually working on anything,
+	// so the status surfaces as idle rather than "working: ...".
+	if !strings.HasPrefix(status, "idle (") {
+		t.Errorf("Expected 'idle (' prefix, got '%s'", status)
 	}
 }
 

@@ -432,11 +432,14 @@ func GetLockStatus(worktreePath string) string {
 			return fmt.Sprintf("working: %s (%s)", info.TaskID, duration)
 		}
 	}
-	// No TaskID yet - show state with ellipsis
+	// No TaskID yet. A planner without a task is still legitimately planning
+	// (it bootstraps tasks rather than claiming one), so keep the ellipsis form.
+	// A worker without a task is not actually working — surface it as idle so
+	// the UI doesn't show "Working" while the detail panel reports no task.
 	if info.Command == "plan" {
 		return fmt.Sprintf("planning: ... (%s)", duration)
 	}
-	return fmt.Sprintf("working: ... (%s)", duration)
+	return fmt.Sprintf("idle (%s)", duration)
 }
 
 // getTaskStatus returns the status of a task.
