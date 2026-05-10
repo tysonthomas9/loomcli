@@ -816,6 +816,7 @@ function DefaultContent({
 
       const updatedIssue = await updateIssue(workspaceId, issue.id, {
         assignee: agentName,
+        status: "in_progress",
       });
       try {
         await startAgent(workspaceId, agentName, { taskId: issue.id });
@@ -825,6 +826,7 @@ function DefaultContent({
         try {
           const rolledBackIssue = await updateIssue(workspaceId, issue.id, {
             assignee: "",
+            status: "open",
           });
           onIssueUpdate?.(rolledBackIssue);
         } catch {

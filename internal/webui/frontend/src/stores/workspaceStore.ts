@@ -24,6 +24,7 @@ export interface WorkspaceStoreActions {
   startPolling: (options: WorkspacePollingOptions) => void;
   stopPolling: () => void;
   refetch: () => void;
+  upsertAgent: (agent: WorkspaceData["agents"][number]) => void;
   reset: () => void;
 }
 
@@ -169,6 +170,29 @@ export function createWorkspaceStore(): StoreApi<WorkspaceStore> {
       void fetchWorkspace(activeWorkspaceId);
     };
 
+    const upsertAgent = (agent: WorkspaceData["agents"][number]): void => {
+      const current = get().workspace;
+      if (!current || !agent.name) return;
+
+      const agents = current.agents ?? [];
+      const existingIndex = agents.findIndex(
+        (item) => item.name === agent.name,
+      );
+      const nextAgents =
+        existingIndex === -1
+          ? [...agents, agent]
+          : agents.map((item, index) =>
+              index === existingIndex ? { ...item, ...agent } : item,
+            );
+
+      set({
+        workspace: {
+          ...current,
+          agents: nextAgents,
+        },
+      });
+    };
+
     const reset = (): void => {
       stopPolling();
       generation++;
@@ -183,6 +207,7 @@ export function createWorkspaceStore(): StoreApi<WorkspaceStore> {
       startPolling,
       stopPolling,
       refetch,
+      upsertAgent,
       reset,
     };
   });

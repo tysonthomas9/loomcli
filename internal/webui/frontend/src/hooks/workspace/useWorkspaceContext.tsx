@@ -71,6 +71,7 @@ const EMPTY_AGENTS: WorkspaceAgentInfo[] = [];
  * consumers don't care about the split.
  */
 export interface WorkspaceContextValue extends UseWorkspaceReturn {
+  upsertAgent?: (agent: WorkspaceAgentInfo) => void;
   getRepoByName: (name: string) => RepoInfo | undefined;
   getReposByGroup: (group: string) => RepoInfo[];
   getAgentByName: (name: string) => WorkspaceAgentInfo | undefined;
@@ -109,6 +110,7 @@ interface OuterContextValue {
   isLoading: boolean;
   error: string | null;
   refetch: () => void;
+  upsertAgent: (agent: WorkspaceAgentInfo) => void;
   getRepoByName: (name: string) => RepoInfo | undefined;
   getReposByGroup: (group: string) => RepoInfo[];
   getAgentByName: (name: string) => WorkspaceAgentInfo | undefined;
@@ -165,6 +167,10 @@ export function WorkspaceProvider({
   const wsIsLoading = useStore(store, (s) => s.isLoading);
   const wsError = useStore(store, (s) => s.error);
   const refetch = useCallback(() => store.getState().refetch(), [store]);
+  const upsertAgent = useCallback(
+    (agent: WorkspaceAgentInfo) => store.getState().upsertAgent(agent),
+    [store],
+  );
 
   // Latest-workspace ref for stable callbacks. Callbacks read from this so
   // their identities can stay empty-deps stable across renders. Without it,
@@ -176,12 +182,9 @@ export function WorkspaceProvider({
 
   const defaultWorkspaceName = null;
 
-  const setDefaultWorkspace = useCallback(
-    async (_name: string | null) => {
-      throw new Error("Default workspace selection has been removed");
-    },
-    [],
-  );
+  const setDefaultWorkspace = useCallback(async (_name: string | null) => {
+    throw new Error("Default workspace selection has been removed");
+  }, []);
 
   // Workspace switch: build the destination URL via buildWorkspaceSwitchUrl
   // (preserves `view=`, drops everything else) and navigate with
@@ -242,6 +245,7 @@ export function WorkspaceProvider({
       isLoading: wsIsLoading,
       error: wsError,
       refetch,
+      upsertAgent,
       getRepoByName,
       getReposByGroup,
       getAgentByName,
@@ -260,6 +264,7 @@ export function WorkspaceProvider({
       wsIsLoading,
       wsError,
       refetch,
+      upsertAgent,
       getRepoByName,
       getReposByGroup,
       getAgentByName,
@@ -302,6 +307,7 @@ export const NO_WORKSPACE_CONTEXT: WorkspaceContextValue = {
   isLoading: false,
   error: null,
   refetch: () => {},
+  upsertAgent: () => {},
   getRepoByName: () => undefined,
   getReposByGroup: () => [],
   getAgentByName: () => undefined,
@@ -344,6 +350,7 @@ export function useWorkspaceContext(): WorkspaceContextValue {
     isLoading: outer.isLoading,
     error: outer.error,
     refetch: outer.refetch,
+    upsertAgent: outer.upsertAgent,
     getRepoByName: outer.getRepoByName,
     getReposByGroup: outer.getReposByGroup,
     getAgentByName: outer.getAgentByName,
