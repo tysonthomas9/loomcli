@@ -142,7 +142,6 @@ export function RedirectToWorkspace() {
           <OnboardingFlow
             title="No workspaces found"
             subtitle="Start with the guided onboarding flow. Step 1 creates a workspace and clones the sample repo; the remaining steps stay visible so setup can continue after creation."
-            repoUrl={ONBOARDING_REPO_URL}
             steps={onboardingSteps}
           />
         </div>

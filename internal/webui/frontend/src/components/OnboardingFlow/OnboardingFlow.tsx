@@ -21,7 +21,6 @@ export interface OnboardingStep {
 export interface OnboardingFlowProps {
   title?: string;
   subtitle?: string;
-  repoUrl: string;
   steps: OnboardingStep[];
   className?: string;
   variant?: "page" | "panel";
@@ -43,7 +42,6 @@ function stepClassName(status: OnboardingStepStatus): string {
 export function OnboardingFlow({
   title = "Set up Loom",
   subtitle = "Follow the fixed first-run flow to create a workspace, attach a repo, configure the CLI, and start useful agent work.",
-  repoUrl,
   steps,
   className,
   variant = "page",
@@ -91,11 +89,6 @@ export function OnboardingFlow({
             </button>
           )}
         </div>
-      </div>
-
-      <div className={styles.repoStrip}>
-        <span className={styles.repoLabel}>Prefilled sample repo</span>
-        <code className={styles.repoUrl}>{repoUrl}</code>
       </div>
 
       <ol className={styles.steps}>
