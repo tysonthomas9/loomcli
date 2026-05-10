@@ -75,6 +75,9 @@ func (m *Module) Register(mux *http.ServeMux) {
 			mux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/terminal/token", HandleGetAgentTerminalToken(m.agentSvc))
 		}
 	}
+	if m.termSvc != nil && m.store != nil {
+		mux.HandleFunc("POST /api/workspaces/{ws}/agents/{name}/terminal/session", HandleEnsureAgentTerminalSession(m.termSvc, m.store, m.loomServerURL))
+	}
 	if m.agentTmuxMgr != nil {
 		mux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/terminal/ws", HandleAgentTerminalWS(m.agentTmuxMgr, m.termAuth, m.allowedOrigins))
 	}

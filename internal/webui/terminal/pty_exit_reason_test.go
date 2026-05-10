@@ -12,7 +12,7 @@ func TestExitReason_KillPropagatesToAttachment(t *testing.T) {
 	m := newTestManager(t)
 	key := SessionKey{Workspace: "ws1", Name: "sess"}
 
-	att, _, err := m.AttachSession(key, 80, 24, []string{"-c", "cat"})
+	att, _, err := m.AttachSession(key, 80, 24, &LaunchSpec{Argv: []string{"-c", "cat"}})
 	if err != nil {
 		t.Fatalf("AttachSession: %v", err)
 	}
@@ -47,7 +47,7 @@ func TestExitReason_ChildExitIsExited(t *testing.T) {
 	m := newTestManager(t)
 	key := SessionKey{Workspace: "ws1", Name: "sess"}
 
-	att, _, err := m.AttachSession(key, 80, 24, []string{"-c", "true"})
+	att, _, err := m.AttachSession(key, 80, 24, &LaunchSpec{Argv: []string{"-c", "true"}})
 	if err != nil {
 		t.Fatalf("AttachSession: %v", err)
 	}
@@ -74,7 +74,7 @@ func TestExitReason_ReplacementIsEmpty(t *testing.T) {
 	m.SetGracePeriod(5 * time.Second)
 	key := SessionKey{Workspace: "ws1", Name: "sess"}
 
-	att1, _, err := m.AttachSession(key, 80, 24, []string{"-c", "cat"})
+	att1, _, err := m.AttachSession(key, 80, 24, &LaunchSpec{Argv: []string{"-c", "cat"}})
 	if err != nil {
 		t.Fatalf("first attach: %v", err)
 	}
@@ -98,7 +98,7 @@ func TestAttachSession_RetriesAcrossConcurrentClose(t *testing.T) {
 	m := newTestManager(t)
 	key := SessionKey{Workspace: "ws1", Name: "sess"}
 
-	att1, _, err := m.AttachSession(key, 80, 24, []string{"-c", "cat"})
+	att1, _, err := m.AttachSession(key, 80, 24, &LaunchSpec{Argv: []string{"-c", "cat"}})
 	if err != nil {
 		t.Fatalf("initial attach: %v", err)
 	}
@@ -108,7 +108,7 @@ func TestAttachSession_RetriesAcrossConcurrentClose(t *testing.T) {
 		t.Fatalf("Kill: %v", err)
 	}
 
-	att2, reattach, err := m.AttachSession(key, 80, 24, []string{"-c", "cat"})
+	att2, reattach, err := m.AttachSession(key, 80, 24, &LaunchSpec{Argv: []string{"-c", "cat"}})
 	if err != nil {
 		t.Fatalf("re-attach after Kill: %v", err)
 	}
@@ -128,7 +128,7 @@ func TestAttachNew_ReturnsNilAfterClose(t *testing.T) {
 	m := newTestManager(t)
 	key := SessionKey{Workspace: "ws1", Name: "sess"}
 
-	_, _, err := m.AttachSession(key, 80, 24, []string{"-c", "cat"})
+	_, _, err := m.AttachSession(key, 80, 24, &LaunchSpec{Argv: []string{"-c", "cat"}})
 	if err != nil {
 		t.Fatalf("AttachSession: %v", err)
 	}

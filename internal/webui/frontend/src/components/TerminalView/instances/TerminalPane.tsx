@@ -83,7 +83,7 @@ export function TerminalPane({
         onOutput={onOutput}
         onBackendCrash={onBackendCrash}
         onTerminalFocus={onTerminalFocus}
-        agentName={tab.agentName}
+        writable={tab.writable}
         ptyAlive={ptyAlive}
         autoStartStaleSession={autoStartStaleSession}
       />

@@ -29,8 +29,11 @@ export interface TabState {
   backendName: string;
   pinned?: boolean;
   crashReason?: string | null;
-  /** When set, this tab observes an agent's terminal via the agent WebSocket endpoint. */
+  kind?: string;
+  role?: string;
+  /** When set, this tab represents an agent's PTY-backed terminal session. */
   agentName?: string;
+  writable?: boolean;
 }
 
 /**
@@ -49,19 +52,6 @@ export function getBackendFromSessionName(
   const match = sessionName.match(/^lead-(.+)-\d+$/);
   if (match?.[1]) return match[1];
   return defaultBackend ?? "unknown";
-}
-
-/**
- * Agent terminal tabs are persisted in the same tab metadata store as normal
- * terminal tabs. Rehydrate their agent identity from the stable session name
- * so reloads keep using the agent-terminal WebSocket route.
- */
-export function getAgentNameFromSessionName(
-  sessionName: string,
-): string | undefined {
-  if (!sessionName.startsWith("agent-")) return undefined;
-  const agentName = sessionName.slice("agent-".length);
-  return agentName.length > 0 ? agentName : undefined;
 }
 
 /**

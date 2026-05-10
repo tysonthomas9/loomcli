@@ -365,12 +365,20 @@ describe("useTabInit", () => {
   it("restores persisted agent tabs with agent routing metadata", () => {
     const metadata: TabMetadata[] = [
       {
-        session_name: "agent-lead-ui-e2e",
+        session_name: "term_550e8400-e29b-41d4-a716-446655440000",
         label: "agent-lead-ui-e2e",
         notes: "",
         sort_order: 1,
+        pinned: false,
+        kind: "agent",
+        agent_id: "lead-ui-e2e",
+        role: "lead",
+        backend: "codex",
+        writable: true,
         created_at: "2024-01-01T00:00:00Z",
         updated_at: "2024-01-01T00:00:00Z",
+        pty_alive: true,
+        attached_clients: 0,
       },
     ];
 
@@ -392,9 +400,10 @@ describe("useTabInit", () => {
 
     const tabs = setTabs.mock.calls[0][0] as TabState[];
     expect(tabs[0]).toMatchObject({
-      sessionName: "agent-lead-ui-e2e",
-      backendName: "agent",
+      sessionName: "term_550e8400-e29b-41d4-a716-446655440000",
+      backendName: "codex",
       agentName: "lead-ui-e2e",
+      writable: true,
     });
   });
 

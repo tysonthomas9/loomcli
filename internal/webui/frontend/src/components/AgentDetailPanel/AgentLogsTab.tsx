@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 
-import { getAgentLogArchive, getAgentTerminalInfo } from "@/hooks/api";
+import {
+  ensureAgentTerminalSession,
+  getAgentLogArchive,
+  getAgentTerminalInfo,
+} from "@/hooks/api";
 import { EmbeddedTerminal } from "@/components/EmbeddedTerminal";
 import type { ConnectionState } from "@/components/TerminalView";
 import { useWorkspaceContext } from "@/hooks/workspace";
@@ -18,18 +22,31 @@ export function AgentLogsTab({
 }: AgentLogsTabProps): JSX.Element {
   const { workspaceId } = useWorkspaceContext();
   const [mode, setMode] = useState<"tmux" | "archive" | null>(null);
+  const [terminalSession, setTerminalSession] = useState<{
+    sessionName: string;
+    backend: string;
+    agentName: string;
+  } | null>(null);
   const [lines, setLines] = useState<string[]>([]);
   const [state, setState] = useState<ConnectionState>("connecting");
 
   const load = useCallback(async () => {
     setState("connecting");
+    setTerminalSession(null);
     try {
       const nextMode = await getAgentTerminalInfo(workspaceId, agentName);
-      setMode(nextMode);
       if (nextMode === "tmux") {
+        const meta = await ensureAgentTerminalSession(workspaceId, agentName);
+        setTerminalSession({
+          sessionName: meta.session_name,
+          backend: meta.backend ?? "agent",
+          agentName: meta.agent_id ?? agentName,
+        });
+        setMode("tmux");
         setLines([]);
       } else {
         const archive = await getAgentLogArchive(workspaceId, agentName);
+        setMode("archive");
         setLines(archive.lines);
       }
       if (nextMode === "archive") setState("connected");
@@ -47,18 +64,18 @@ export function AgentLogsTab({
     <div className={styles.scrollableContent}>
       <div className={styles.section}>
         <h3 className={styles.sectionTitle}>
-          {mode === "tmux" ? "Live (tmux)" : "Archive snapshot"}
+          {mode === "tmux" ? "Live terminal" : "Archive snapshot"}
         </h3>
         <button type="button" onClick={load}>
           Refresh
         </button>
         <div data-testid="log-viewer">
           <span data-state={state}>{state}</span>
-          {mode === "tmux" ? (
+          {mode === "tmux" && terminalSession ? (
             <EmbeddedTerminal
-              sessionName={`agent-${agentName}`}
-              backend="agent"
-              agentName={agentName}
+              sessionName={terminalSession.sessionName}
+              backend={terminalSession.backend}
+              agentName={terminalSession.agentName}
               isActive={isActive}
               onConnectionStateChange={setState}
             />

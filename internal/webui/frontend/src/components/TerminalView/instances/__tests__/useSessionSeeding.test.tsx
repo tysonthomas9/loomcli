@@ -8,6 +8,19 @@ import type React from "react";
 import { useSessionSeeding } from "../useSessionSeeding";
 import type { TabState } from "@/components/TerminalView/tabs";
 
+const mockHooksApi = vi.hoisted(() => ({
+  ensureAgentTerminalSession: vi.fn(),
+}));
+
+vi.mock("@/hooks/api", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/hooks/api")>("@/hooks/api");
+  return {
+    ...actual,
+    ensureAgentTerminalSession: mockHooksApi.ensureAgentTerminalSession,
+  };
+});
+
 function makeArgs(overrides: Partial<Parameters<typeof useSessionSeeding>[0]>) {
   return {
     pendingIssueContext: undefined,
@@ -25,13 +38,15 @@ function makeArgs(overrides: Partial<Parameters<typeof useSessionSeeding>[0]>) {
 }
 
 describe("useSessionSeeding", () => {
-  it("repairs a restored agent tab before focusing it", () => {
+  it("focuses a restored agent tab without resolving a new session", () => {
     const existingTab: TabState = {
-      id: "agent-lead-ui-e2e",
+      id: "term_123",
       label: "agent-lead-ui-e2e",
-      sessionName: "agent-lead-ui-e2e",
+      sessionName: "term_123",
       connectionState: "disconnected",
       backendName: "codex",
+      kind: "agent",
+      agentName: "lead-ui-e2e",
     };
     const setTabs = vi.fn();
     const setActiveTabId = vi.fn();
@@ -51,15 +66,9 @@ describe("useSessionSeeding", () => {
 
     renderHook(() => useSessionSeeding(args));
 
-    expect(setTabs).toHaveBeenCalledTimes(1);
-    const updater = setTabs.mock.calls[0][0] as (
-      tabs: TabState[],
-    ) => TabState[];
-    expect(updater([existingTab])[0]).toMatchObject({
-      backendName: "agent",
-      agentName: "lead-ui-e2e",
-    });
-    expect(setActiveTabId).toHaveBeenCalledWith("agent-lead-ui-e2e");
+    expect(setTabs).not.toHaveBeenCalled();
+    expect(setActiveTabId).toHaveBeenCalledWith("term_123");
     expect(onAgentNameConsumed).toHaveBeenCalledTimes(1);
+    expect(mockHooksApi.ensureAgentTerminalSession).not.toHaveBeenCalled();
   });
 });

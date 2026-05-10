@@ -7,7 +7,6 @@ import { describe, it, expect } from "vitest";
 import {
   extractBaseName,
   generateTabName,
-  getAgentNameFromSessionName,
   getBackendFromSessionName,
   getNextDuplicateName,
   sanitizeSessionName,
@@ -251,22 +250,6 @@ describe("TabState agentName field", () => {
   it("agentName is undefined by default", () => {
     const tab: TabState = makeTab({ label: "Normal Tab" });
     expect(tab.agentName).toBeUndefined();
-  });
-});
-
-describe("getAgentNameFromSessionName", () => {
-  it("rehydrates agent identity from persisted agent tab session names", () => {
-    expect(getAgentNameFromSessionName("agent-lead-ui-e2e")).toBe(
-      "lead-ui-e2e",
-    );
-  });
-
-  it("ignores ordinary terminal session names", () => {
-    expect(getAgentNameFromSessionName("E2E--lead-codex-1")).toBeUndefined();
-  });
-
-  it("ignores an empty agent prefix", () => {
-    expect(getAgentNameFromSessionName("agent-")).toBeUndefined();
   });
 });
 

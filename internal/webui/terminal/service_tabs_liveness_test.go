@@ -27,7 +27,7 @@ func newFakePTYSource() *fakePTYSource {
 	return &fakePTYSource{alive: map[SessionKey]bool{}}
 }
 
-func (f *fakePTYSource) AttachSession(_ SessionKey, _, _ uint16, _ []string) (Attachment, bool, error) {
+func (f *fakePTYSource) AttachSession(_ SessionKey, _, _ uint16, _ *LaunchSpec) (Attachment, bool, error) {
 	panic("AttachSession not used in service-level tests")
 }
 func (f *fakePTYSource) Detach(_ SessionKey, _ string) {}

@@ -6,13 +6,7 @@
  * wires input directly (e.g. wterm's `onData` → ws.send).
  */
 
-import {
-  get,
-  wsUrl,
-  getWsBaseUrl,
-  getAgentTerminalToken,
-  getAgentTerminalWsUrl,
-} from "@/hooks/api";
+import { get, wsUrl, getWsBaseUrl } from "@/hooks/api";
 
 import type { ConnectionState } from "./TerminalInstance";
 
@@ -97,7 +91,6 @@ export function connectWebSocket(
   onDisconnected?: () => void,
   onOutput?: () => void,
   onBackendCrash?: (reason: string) => void,
-  agentName?: string,
   onSessionKilled?: () => void,
   initialSize?: { cols: number; rows: number },
 ): () => void {
@@ -172,18 +165,13 @@ export function connectWebSocket(
     flushTimer = setTimeout(flushPendingWrites, 16);
   };
 
-  const tokenPromise = agentName
-    ? getAgentTerminalToken(workspaceId, agentName).catch(() => null)
-    : fetchTerminalToken(workspaceId, sessionName);
+  const tokenPromise = fetchTerminalToken(workspaceId, sessionName);
 
   tokenPromise
     .then((token) => {
       if (cancelled) return;
 
-      const url =
-        agentName && token
-          ? getAgentTerminalWsUrl(workspaceId, agentName, token)
-          : buildWsUrl(workspaceId, sessionName, token, initialSize);
+      const url = buildWsUrl(workspaceId, sessionName, token, initialSize);
       const ws = new WebSocket(url);
       wsRef.current = ws;
       ws.binaryType = "arraybuffer";

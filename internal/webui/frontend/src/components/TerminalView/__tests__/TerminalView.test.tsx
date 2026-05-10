@@ -39,6 +39,11 @@ const mockMetadataHook = vi.hoisted(() => ({
     attached_clients: number;
     created_at: string;
     updated_at: string;
+    kind?: string;
+    agent_id?: string;
+    role?: string;
+    backend?: string;
+    writable?: boolean;
   }>,
   isLoading: false,
   error: null as Error | null,
@@ -91,6 +96,21 @@ const mockSessionRestoreHook = vi.hoisted(() => ({
 }));
 
 // useSessionRestore is mocked above via @/hooks/terminal
+
+const mockHooksApi = vi.hoisted(() => ({
+  patchTerminalState: vi.fn().mockResolvedValue(undefined),
+  ensureAgentTerminalSession: vi.fn(),
+}));
+
+vi.mock("@/hooks/api", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/hooks/api")>("@/hooks/api");
+  return {
+    ...actual,
+    patchTerminalState: mockHooksApi.patchTerminalState,
+    ensureAgentTerminalSession: mockHooksApi.ensureAgentTerminalSession,
+  };
+});
 
 // ── Mock sibling components ──────────────────────────────────────────────────
 
@@ -165,6 +185,11 @@ function setMetadata(
     pinned?: boolean;
     pty_alive?: boolean;
     attached_clients?: number;
+    kind?: string;
+    agent_id?: string;
+    role?: string;
+    backend?: string;
+    writable?: boolean;
   }>,
   isLoading = false,
 ) {
@@ -177,6 +202,11 @@ function setMetadata(
     pinned: t.pinned ?? false,
     pty_alive: t.pty_alive ?? true,
     attached_clients: t.attached_clients ?? 0,
+    kind: t.kind,
+    agent_id: t.agent_id,
+    role: t.role,
+    backend: t.backend,
+    writable: t.writable,
     created_at: now,
     updated_at: now,
   }));
@@ -199,6 +229,25 @@ describe("TerminalView", () => {
     mockMetadataHook.isLoading = true;
     mockMetadataHook.error = null;
     mockMetadataHook.createTab = vi.fn().mockResolvedValue(undefined);
+    mockHooksApi.patchTerminalState.mockResolvedValue(undefined);
+    mockHooksApi.ensureAgentTerminalSession.mockImplementation(
+      async (_workspaceId: string, agentName: string) => ({
+        session_name: `term_${agentName.replace(/[^a-zA-Z0-9_-]/g, "_")}`,
+        label: `agent-${agentName}`,
+        notes: "",
+        sort_order: DEFAULT_METADATA.length,
+        pinned: false,
+        kind: "agent",
+        agent_id: agentName,
+        role: "lead",
+        backend: "codex",
+        writable: true,
+        pty_alive: true,
+        attached_clients: 0,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }),
+    );
     mockBackendConfigHook.isLoading = false;
     mockBackendConfigHook.config = {
       backend: "claude",
@@ -863,29 +912,37 @@ describe("TerminalView", () => {
   // ── pendingAgentName (V7 Terminal View) ───────────────────────────────────
 
   describe("pendingAgentName", () => {
-    it("creates agent tab with correct session name pattern", () => {
+    it("creates agent tab from resolved UUID terminal metadata", async () => {
       setMetadata(DEFAULT_METADATA);
       render(
         <TerminalView pendingAgentName="fox" onAgentNameConsumed={vi.fn()} />,
       );
 
-      // sanitizeSessionName("fox") => "fox"
-      // tab sessionName => "agent-fox"
-      expect(
-        screen.getByTestId("terminal-instance-agent-fox"),
-      ).toBeInTheDocument();
+      await waitFor(() =>
+        expect(
+          screen.getByTestId("terminal-instance-term_fox"),
+        ).toBeInTheDocument(),
+      );
+      expect(mockHooksApi.ensureAgentTerminalSession).toHaveBeenCalledWith(
+        expect.any(String),
+        "fox",
+      );
     });
 
-    it("new agent tab becomes active", () => {
+    it("new agent tab becomes active", async () => {
       setMetadata(DEFAULT_METADATA);
       render(
         <TerminalView pendingAgentName="fox" onAgentNameConsumed={vi.fn()} />,
       );
 
-      expect(screen.getByTestId("active-tab-id").textContent).toBe("agent-fox");
+      await waitFor(() =>
+        expect(screen.getByTestId("active-tab-id").textContent).toBe(
+          "term_fox",
+        ),
+      );
     });
 
-    it("calls onAgentNameConsumed after creating agent tab", () => {
+    it("calls onAgentNameConsumed after resolving agent tab", async () => {
       setMetadata(DEFAULT_METADATA);
       const onConsumed = vi.fn();
       render(
@@ -895,13 +952,20 @@ describe("TerminalView", () => {
         />,
       );
 
-      expect(onConsumed).toHaveBeenCalled();
+      await waitFor(() => expect(onConsumed).toHaveBeenCalled());
     });
 
     it("switches to existing tab if agent tab already exists", () => {
       setMetadata([
         ...DEFAULT_METADATA,
-        { session_name: "agent-fox", label: "agent-fox" },
+        {
+          session_name: "term_existing",
+          label: "agent-fox",
+          kind: "agent",
+          agent_id: "fox",
+          backend: "codex",
+          writable: true,
+        },
       ]);
       const onConsumed = vi.fn();
       render(
@@ -912,24 +976,30 @@ describe("TerminalView", () => {
       );
 
       // Should switch to existing tab, not create a new one
-      expect(screen.getByTestId("active-tab-id").textContent).toBe("agent-fox");
+      expect(screen.getByTestId("active-tab-id").textContent).toBe(
+        "term_existing",
+      );
       expect(onConsumed).toHaveBeenCalled();
+      expect(mockHooksApi.ensureAgentTerminalSession).not.toHaveBeenCalled();
     });
 
-    it("persists tab metadata for new agent tab", () => {
+    it("does not persist agent tabs through generic tab creation", async () => {
       setMetadata(DEFAULT_METADATA);
       render(
         <TerminalView pendingAgentName="fox" onAgentNameConsumed={vi.fn()} />,
       );
 
-      expect(mockMetadataHook.createTab).toHaveBeenCalledWith(
-        "agent-fox",
+      await waitFor(() =>
+        expect(mockHooksApi.ensureAgentTerminalSession).toHaveBeenCalled(),
+      );
+      expect(mockMetadataHook.createTab).not.toHaveBeenCalledWith(
+        "term_fox",
         "agent-fox",
         expect.any(Number),
       );
     });
 
-    it("sanitizes agent name with dots in session name", () => {
+    it("uses backend-resolved session for agent names with dots", async () => {
       setMetadata(DEFAULT_METADATA);
       render(
         <TerminalView
@@ -938,10 +1008,11 @@ describe("TerminalView", () => {
         />,
       );
 
-      // sanitizeSessionName("agent.alpha") => "agent-alpha"
-      expect(
-        screen.getByTestId("terminal-instance-agent-agent-alpha"),
-      ).toBeInTheDocument();
+      await waitFor(() =>
+        expect(
+          screen.getByTestId("terminal-instance-term_agent_alpha"),
+        ).toBeInTheDocument(),
+      );
     });
 
     it("does not create agent tab when no pendingAgentName is provided", () => {

@@ -57,8 +57,7 @@ const SCROLL_BOTTOM_THRESHOLD_PX = 24;
 
 function isSocketOpenOrConnecting(ws: WebSocket | null): boolean {
   return (
-    ws?.readyState === WebSocket.OPEN ||
-    ws?.readyState === WebSocket.CONNECTING
+    ws?.readyState === WebSocket.OPEN || ws?.readyState === WebSocket.CONNECTING
   );
 }
 
@@ -88,8 +87,8 @@ export interface TerminalInstanceProps {
   onOutput?: () => void;
   onBackendCrash?: (reason: string) => void;
   onTerminalFocus?: (() => void) | undefined;
-  /** When set, connects to the agent terminal WebSocket instead of the regular terminal. */
-  agentName?: string | undefined;
+  /** Whether user input should be forwarded to the backing PTY. */
+  writable?: boolean | undefined;
   /**
    * Liveness hint from the backend's tab metadata. When explicitly
    * `false`, the auto-connect on mount is skipped and the overlay goes
@@ -125,7 +124,7 @@ export const TerminalInstance = forwardRef<
     onOutput,
     onBackendCrash,
     onTerminalFocus,
-    agentName,
+    writable = true,
     ptyAlive,
     autoStartStaleSession,
   },
@@ -176,15 +175,18 @@ export const TerminalInstance = forwardRef<
     });
   }, [getViewportElement]);
 
-  const write = useCallback((data: string | Uint8Array) => {
-    const wt = wtermInstanceRef.current;
-    if (wt) {
-      wt.write(data);
-      forceRendererPaint(wt);
-      return;
-    }
-    pendingRendererWritesRef.current.push(data);
-  }, [forceRendererPaint]);
+  const write = useCallback(
+    (data: string | Uint8Array) => {
+      const wt = wtermInstanceRef.current;
+      if (wt) {
+        wt.write(data);
+        forceRendererPaint(wt);
+        return;
+      }
+      pendingRendererWritesRef.current.push(data);
+    },
+    [forceRendererPaint],
+  );
   const focus = useCallback(() => {
     wtermInstanceRef.current?.focus();
   }, []);
@@ -258,7 +260,7 @@ export const TerminalInstance = forwardRef<
   // doConnect is defined below but `startReconnectLoop` needs a stable
   // reference to it. A ref avoids the circular-dep dance and keeps the
   // reconnect loop calling the latest doConnect even if its closure over
-  // workspaceId / sessionName / agentName re-memoises.
+  // workspaceId / sessionName re-memoises.
   const doConnectRef = useRef<
     ((opts?: { onOutcome?: (ok: boolean) => void }) => void) | null
   >(null);
@@ -337,7 +339,6 @@ export const TerminalInstance = forwardRef<
         },
         () => onOutputRef.current?.(),
         (reason) => onBackendCrashRef.current?.(reason),
-        agentName,
         // onSessionKilled — server told us the session is gone; do not reconnect.
         () => {
           beingKilledRef.current = true;
@@ -351,7 +352,6 @@ export const TerminalInstance = forwardRef<
     [
       workspaceId,
       sessionName,
-      agentName,
       write,
       clearReconnectTimers,
       syncViewportToBottom,
@@ -520,12 +520,16 @@ export const TerminalInstance = forwardRef<
     };
   }, [isActive, ptyAlive, connectionState, readyVersion]);
 
-  const handleData = useCallback((data: string) => {
-    const ws = wsRef.current;
-    if (ws?.readyState === WebSocket.OPEN) {
-      ws.send(data);
-    }
-  }, []);
+  const handleData = useCallback(
+    (data: string) => {
+      if (!writable) return;
+      const ws = wsRef.current;
+      if (ws?.readyState === WebSocket.OPEN) {
+        ws.send(data);
+      }
+    },
+    [writable],
+  );
 
   const handleResize = useCallback((cols: number, rows: number) => {
     terminalSizeRef.current = { cols, rows };
@@ -622,13 +626,14 @@ export const TerminalInstance = forwardRef<
         onTerminalFocusRef.current?.();
       },
       pasteText: (text: string) => {
+        if (!writable) return;
         const ws = wsRef.current;
         if (ws?.readyState === WebSocket.OPEN) {
           ws.send(text);
         }
       },
     }),
-    [focus, clearReconnectTimers],
+    [focus, clearReconnectTimers, writable],
   );
 
   return (

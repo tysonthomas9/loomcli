@@ -1,6 +1,6 @@
 import { useEffect, useCallback } from "react";
 
-import type { IssueContext } from "@/hooks/api";
+import { ensureAgentTerminalSession, type IssueContext } from "@/hooks/api";
 
 import type { ConnectionState } from "./TerminalInstance";
 import {
@@ -52,6 +52,7 @@ export function useSessionSeeding({
   createTab,
   config,
   initializedRef,
+  workspaceIdRef,
 }: UseSessionSeedingOptions): UseSessionSeedingReturn {
   // Handle pending issue context: create or switch to issue tab.
   useEffect(() => {
@@ -92,25 +93,25 @@ export function useSessionSeeding({
     config,
   ]);
 
-  // Handle pending agent name: create or switch to agent terminal tab.
+  // Handle pending agent name: resolve or switch to the agent's PTY terminal.
   useEffect(() => {
     if (!pendingAgentName || !initializedRef.current) return;
 
-    const sessionName = `agent-${sanitizeSessionName(pendingAgentName)}`;
-
-    const existingTab = tabs.find((t) => t.sessionName === sessionName);
+    const existingTab = tabs.find((t) => t.agentName === pendingAgentName);
     if (existingTab) {
-      setTabs((prev) =>
-        prev.map((tab) =>
-          tab.id === existingTab.id
-            ? {
-                ...tab,
-                backendName: "agent",
-                agentName: pendingAgentName,
-              }
-            : tab,
-        ),
-      );
+      if (existingTab.kind !== "agent") {
+        setTabs((prev) =>
+          prev.map((tab) =>
+            tab.id === existingTab.id
+              ? {
+                  ...tab,
+                  kind: "agent",
+                  agentName: pendingAgentName,
+                }
+              : tab,
+          ),
+        );
+      }
       setActiveTabId(existingTab.id);
       onAgentNameConsumed?.();
       return;
@@ -121,30 +122,54 @@ export function useSessionSeeding({
       return;
     }
 
-    const newTab: TabState = {
-      id: sessionName,
-      label: `agent-${pendingAgentName}`,
-      sessionName,
-      connectionState: "disconnected" as ConnectionState,
-      backendName: "agent",
-      agentName: pendingAgentName,
+    let cancelled = false;
+    ensureAgentTerminalSession(workspaceIdRef.current, pendingAgentName)
+      .then((meta) => {
+        if (cancelled) return;
+        const agentName = meta.agent_id ?? pendingAgentName;
+        const newTab: TabState = {
+          id: meta.session_name,
+          label: meta.label,
+          sessionName: meta.session_name,
+          connectionState: "disconnected" as ConnectionState,
+          backendName: meta.backend ?? "agent",
+          kind: meta.kind ?? "agent",
+          agentName,
+          writable: meta.writable ?? true,
+          pinned: meta.pinned,
+          ...(meta.role ? { role: meta.role } : {}),
+        };
+        setTabs((prev) => {
+          if (prev.some((tab) => tab.id === newTab.id)) {
+            return prev.map((tab) =>
+              tab.id === newTab.id ? { ...tab, ...newTab } : tab,
+            );
+          }
+          return [...prev, newTab];
+        });
+        setActiveTabId(newTab.id);
+        onAgentNameConsumed?.();
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        console.error(
+          `Failed to resolve agent terminal ${pendingAgentName}:`,
+          err,
+        );
+        onAgentNameConsumed?.();
+      });
+
+    return () => {
+      cancelled = true;
     };
-    setTabs((prev) => [...prev, newTab]);
-    setActiveTabId(sessionName);
-
-    createTab(sessionName, newTab.label, tabs.length).catch((err) =>
-      console.error(`Failed to persist agent tab ${sessionName}:`, err),
-    );
-
-    onAgentNameConsumed?.();
   }, [
     pendingAgentName,
     tabs,
-    createTab,
     onAgentNameConsumed,
     initializedRef,
     setTabs,
     setActiveTabId,
+    workspaceIdRef,
   ]);
 
   const trySeedOnConnect = useCallback((_tabId: string) => {

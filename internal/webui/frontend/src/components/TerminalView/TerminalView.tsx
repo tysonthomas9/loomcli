@@ -25,7 +25,6 @@ import {
   BACKEND_BRAND_COLORS,
   type TabState,
   generateTabName,
-  sanitizeSessionName,
   useTabOrdering,
   useTabActions,
   useTabInit,
@@ -371,14 +370,9 @@ export function TerminalView({
     if (!pendingTerminalInput) return;
     if (tabs.length === 0) return;
 
-    const targetSessionName = pendingTerminalInput.targetAgentName
-      ? `agent-${sanitizeSessionName(pendingTerminalInput.targetAgentName)}`
-      : undefined;
-    const targetTab = targetSessionName
+    const targetTab = pendingTerminalInput.targetAgentName
       ? tabs.find(
-          (tab) =>
-            tab.sessionName === targetSessionName ||
-            tab.agentName === pendingTerminalInput.targetAgentName,
+          (tab) => tab.agentName === pendingTerminalInput.targetAgentName,
         )
       : tabs.find((tab) => tab.id === activeTabId);
 
@@ -388,6 +382,7 @@ export function TerminalView({
       return;
     }
     if (targetTab.connectionState !== "connected") return;
+    if (targetTab.writable === false) return;
 
     const handle = instanceRefs.current.get(targetTab.id);
     if (!handle) return;
@@ -421,12 +416,10 @@ export function TerminalView({
       const paneIsActive =
         pane === "right" ? tab.id === rightPaneTabId : tab.id === activeTabId;
       const meta = metaBySession.get(tab.sessionName);
-      const isAgentTab = Boolean(tab.agentName);
+      const isAgentTab = tab.kind === "agent" || Boolean(tab.agentName);
       // Undefined while metadata is still loading — preserves connect-on-
       // mount. Only concrete `false` gates auto-attach.
-      // Agent tabs attach through the agent-terminal tmux endpoint; regular
-      // PTY liveness metadata is unrelated and must not block connection.
-      const ptyAlive = isAgentTab ? undefined : meta?.pty_alive;
+      const ptyAlive = meta?.pty_alive;
       return (
         <TerminalPane
           tab={tab}
