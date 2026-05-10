@@ -143,7 +143,7 @@ func TestStartSetupWritesCommandIntoExistingSetupSession(t *testing.T) {
 	}
 }
 
-func TestStartSetupSupportsCursorGuidance(t *testing.T) {
+func TestStartSetupSupportsCursorInstaller(t *testing.T) {
 	fake := newFakeSetupPTYSource(true)
 	svc, _ := newSetupTestSvc(t, fake)
 
@@ -158,16 +158,42 @@ func TestStartSetupSupportsCursorGuidance(t *testing.T) {
 	if result.SessionName != "HELLO-WORLD--lead-shell-setup-cursor" {
 		t.Fatalf("SessionName = %q", result.SessionName)
 	}
-	if !strings.Contains(result.Command, "Cursor CLI setup is not fully automated") {
+	if result.Command != "curl https://cursor.com/install -fsS | bash" {
+		t.Fatalf("Command = %q", result.Command)
+	}
+	if result.Manual {
+		t.Fatal("Manual = true, want false for Cursor installer")
+	}
+	if result.Title != "Install Cursor" {
+		t.Fatalf("Title = %q", result.Title)
+	}
+	if !strings.Contains(result.Message, "backend started this command") {
+		t.Fatalf("Message = %q", result.Message)
+	}
+}
+
+func TestStartSetupSupportsCursorCredentialGuidance(t *testing.T) {
+	fake := newFakeSetupPTYSource(true)
+	svc, _ := newSetupTestSvc(t, fake)
+
+	result, err := svc.StartSetup(context.Background(), "HELLO-WORLD", service.TerminalSetupRequest{
+		Backend: "cursor",
+		Action:  "login",
+	})
+	if err != nil {
+		t.Fatalf("StartSetup: %v", err)
+	}
+
+	if !strings.Contains(result.Command, "CURSOR_API_KEY") {
 		t.Fatalf("Command = %q", result.Command)
 	}
 	if !result.Manual {
-		t.Fatal("Manual = false, want true for Cursor install guidance")
+		t.Fatal("Manual = false, want true for Cursor credential guidance")
 	}
-	if result.Title != "Set up Cursor manually" {
+	if result.Title != "Configure Cursor credentials" {
 		t.Fatalf("Title = %q", result.Title)
 	}
-	if !strings.Contains(result.Message, "manual Cursor CLI setup steps") {
+	if !strings.Contains(result.Message, "detects Cursor credentials") {
 		t.Fatalf("Message = %q", result.Message)
 	}
 }

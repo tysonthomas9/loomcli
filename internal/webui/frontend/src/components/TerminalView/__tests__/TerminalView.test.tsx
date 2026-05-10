@@ -445,10 +445,11 @@ describe("TerminalView", () => {
         session_name: "lead-shell-setup-cursor",
         label: "Cursor setup",
         backend: "cursor",
-        action: "install",
-        command: "printf '%s\\n' 'Cursor CLI setup is not fully automated here.'",
-        title: "Set up Cursor manually",
-        message: "The setup terminal shows manual Cursor CLI setup steps.",
+        action: "login",
+        command: "printf '%s\\n' 'Cursor setup uses CURSOR_API_KEY for Loom.'",
+        title: "Configure Cursor credentials",
+        message:
+          "The setup terminal shows how Loom detects Cursor credentials.",
         manual: true,
         created: true,
       });
@@ -460,7 +461,7 @@ describe("TerminalView", () => {
           displayName: "Cursor",
           provider: "Anysphere",
           brandColor: "#00e5ff",
-          action: "install",
+          action: "login",
         }),
       );
 
@@ -471,7 +472,9 @@ describe("TerminalView", () => {
           screen.getByText("Manual steps shown in terminal"),
         ).toBeInTheDocument();
       });
-      expect(screen.getByText("Set up Cursor manually")).toBeInTheDocument();
+      expect(
+        screen.getByText("Configure Cursor credentials"),
+      ).toBeInTheDocument();
       expect(screen.getByText("Show steps again")).toBeInTheDocument();
     });
 
