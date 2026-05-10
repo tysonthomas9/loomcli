@@ -1500,7 +1500,6 @@ function App() {
                   variant="panel"
                   title="Finish onboarding"
                   subtitle="Keep this checklist open while you move through Loom. Setup actions switch the main view without losing progress."
-                  repoUrl={ONBOARDING_REPO_URL}
                   steps={workspaceOnboardingSteps}
                   onDismiss={handleOnboardingDismiss}
                 />

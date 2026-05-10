@@ -73,34 +73,6 @@
   cursor: pointer;
 }
 
-.repoStrip {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  width: 100%;
-  margin-bottom: var(--space-5);
-  padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-bg);
-}
-
-.repoLabel {
-  flex: 0 0 auto;
-  font-size: var(--font-size-xs);
-  font-weight: var(--font-weight-medium);
-  color: var(--color-text-muted);
-}
-
-.repoUrl {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--color-text-primary);
-  font-size: var(--font-size-sm);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .steps {
   display: flex;
   flex-direction: column;
@@ -260,10 +232,6 @@
   align-items: flex-start;
 }
 
-.panel .repoStrip {
-  display: none;
-}
-
 .panel .steps {
   gap: var(--space-2);
 }
@@ -328,12 +296,6 @@
 
   .headerAside {
     align-items: flex-start;
-  }
-
-  .repoStrip {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: var(--space-1);
   }
 
   .step {

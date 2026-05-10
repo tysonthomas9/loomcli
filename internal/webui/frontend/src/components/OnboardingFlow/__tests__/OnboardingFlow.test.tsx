@@ -48,19 +48,14 @@ const steps: OnboardingStep[] = [
 ];
 
 describe("OnboardingFlow", () => {
-  it("renders the five setup steps with progress and the sample repo", () => {
-    render(
-      <OnboardingFlow
-        repoUrl="https://github.com/octocat/Hello-World"
-        steps={steps}
-      />,
-    );
+  it("renders the five setup steps with progress", () => {
+    render(<OnboardingFlow steps={steps} />);
 
     expect(screen.getByTestId("onboarding-flow")).toBeInTheDocument();
     expect(screen.getByText("1/5")).toBeInTheDocument();
     expect(
-      screen.getByText("https://github.com/octocat/Hello-World"),
-    ).toBeInTheDocument();
+      screen.queryByText("https://github.com/octocat/Hello-World"),
+    ).not.toBeInTheDocument();
     expect(
       screen.getByRole("heading", { name: "Create workspace with repo" }),
     ).toBeInTheDocument();
@@ -84,7 +79,6 @@ describe("OnboardingFlow", () => {
     const onComplete = vi.fn();
     render(
       <OnboardingFlow
-        repoUrl="https://github.com/octocat/Hello-World"
         steps={[
           {
             id: "complete",
