@@ -29,6 +29,7 @@ export const CLI_SETUP_REQUEST_EVENT = "loom-cli-setup-requested";
 const INSTALL_COMMANDS: Record<string, string> = {
   claude: "npm install -g @anthropic-ai/claude-code",
   codex: "npm install -g @openai/codex",
+  cursor: "curl https://cursor.com/install -fsS | bash",
   gemini: "npm install -g @google/gemini-cli",
   opencode: "npm install -g opencode-ai",
 };

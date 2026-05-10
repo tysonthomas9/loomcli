@@ -62,12 +62,7 @@ var setupCommandSpecs = map[string]setupCommandSpec{
 	"cursor": {
 		displayName: "Cursor",
 		commands: map[string]string{
-			"install": strings.Join([]string{
-				"printf '%s\\n'",
-				"'Cursor CLI setup is not fully automated here.'",
-				"'Install the cursor command from Cursor, then click Recheck.'",
-				"'Open Cursor > Command Palette > Install cursor command, or follow Cursor CLI docs.'",
-			}, " "),
+			"install": "curl https://cursor.com/install -fsS | bash",
 			"login": strings.Join([]string{
 				"printf '%s\\n'",
 				"'Cursor setup uses CURSOR_API_KEY for Loom.'",
@@ -83,17 +78,14 @@ var setupCommandSpecs = map[string]setupCommandSpec{
 			"test": "cursor --version",
 		},
 		messages: map[string]string{
-			"install":   "The setup terminal shows manual Cursor CLI setup steps. You can take control there if you need to run extra commands.",
 			"login":     "The setup terminal shows how Loom detects Cursor credentials. You can take control there to configure this shell.",
 			"configure": "The setup terminal shows how Loom detects Cursor credentials. You can take control there to configure this shell.",
 		},
 		titles: map[string]string{
-			"install":   "Set up Cursor manually",
 			"login":     "Configure Cursor credentials",
 			"configure": "Configure Cursor credentials",
 		},
 		manual: map[string]bool{
-			"install":   true,
 			"login":     true,
 			"configure": true,
 		},
