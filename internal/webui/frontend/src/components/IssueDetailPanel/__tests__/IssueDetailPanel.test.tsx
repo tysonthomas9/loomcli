@@ -1112,7 +1112,7 @@ describe("IssueDetailPanel", () => {
         expect(mockUpdateIssue).toHaveBeenCalledWith(
           "DESKTOP-QA",
           "DESKTOP-QA-3",
-          { assignee: "desktopqa" },
+          { assignee: "desktopqa", status: "in_progress" },
         );
       });
       await waitFor(() => {
@@ -1159,8 +1159,16 @@ describe("IssueDetailPanel", () => {
         assignee: "",
         design: "Implementation plan is ready.",
       });
-      const assignedIssue = { ...issue, assignee: "desktopqa" };
-      const rolledBackIssue = { ...issue, assignee: "" };
+      const assignedIssue = {
+        ...issue,
+        assignee: "desktopqa",
+        status: "in_progress" as const,
+      };
+      const rolledBackIssue = {
+        ...issue,
+        assignee: "",
+        status: "open" as const,
+      };
       mockUpdateIssue
         .mockResolvedValueOnce(assignedIssue)
         .mockResolvedValueOnce(rolledBackIssue);
@@ -1187,7 +1195,7 @@ describe("IssueDetailPanel", () => {
         expect(mockUpdateIssue).toHaveBeenLastCalledWith(
           "DESKTOP-QA",
           "DESKTOP-QA-3",
-          { assignee: "" },
+          { assignee: "", status: "open" },
         );
       });
       expect(onIssueUpdate).toHaveBeenCalledWith(rolledBackIssue);

@@ -12,6 +12,7 @@ import {
   fireEvent,
   waitFor,
   act,
+  within,
 } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import "@testing-library/jest-dom";
@@ -23,6 +24,10 @@ import { useIssueDetail } from "@/hooks/issues/useIssueDetail";
 import { useWorkspaceContext } from "@/hooks/workspace/useWorkspaceContext";
 import { useBackends } from "@/hooks/workspace/useBackends";
 import { useBackendConfig } from "@/hooks/workspace/useBackendConfig";
+import {
+  ONBOARDING_ISSUE_DESCRIPTION,
+  ONBOARDING_ISSUE_TITLE,
+} from "@/utils/onboardingDefaults";
 import type { Issue, Status } from "@/types";
 
 import App from "../App";
@@ -57,8 +62,9 @@ const { mockStartAgent } = vi.hoisted(() => ({
   mockStartAgent: vi.fn(),
 }));
 
-const { mockFetchWorkspaceApi } = vi.hoisted(() => ({
+const { mockFetchWorkspaceApi, mockCreateWorkspaceAgent } = vi.hoisted(() => ({
   mockFetchWorkspaceApi: vi.fn(),
+  mockCreateWorkspaceAgent: vi.fn(),
 }));
 
 // Create hoisted mocks for modal API functions.
@@ -121,6 +127,7 @@ vi.mock("@/api/workspace", async (importOriginal) => {
   return {
     ...actual,
     fetchWorkspaceApi: mockFetchWorkspaceApi,
+    createWorkspaceAgent: mockCreateWorkspaceAgent,
   };
 });
 
@@ -819,9 +826,13 @@ function mockBackendState({
 function mockHelloWorldWorkspaceContext({
   agents = [{ name: "planner", role_name: "plan" }],
   workspaces = [],
+  refetch = vi.fn(),
+  upsertAgent = vi.fn(),
 }: {
   agents?: Array<{ name: string; role_name?: string; backend?: string }>;
   workspaces?: Array<{ id: string; name: string; backend?: string }>;
+  refetch?: () => void;
+  upsertAgent?: ReturnType<typeof vi.fn>;
 } = {}) {
   vi.mocked(useWorkspaceContext).mockReturnValue({
     workspaceId: "test-ws-id",
@@ -840,7 +851,8 @@ function mockHelloWorldWorkspaceContext({
     agents,
     isLoading: false,
     error: null,
-    refetch: vi.fn(),
+    refetch,
+    upsertAgent,
     getRepoByName: vi.fn(),
     getReposByGroup: vi.fn(() => []),
     getAgentByName: vi.fn(),
@@ -866,6 +878,13 @@ function mockHelloWorldWorkspaceContext({
 describe("App", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockCreateWorkspaceAgent.mockResolvedValue({
+      name: "planner",
+      role_name: "plan",
+      repos: ["Hello-World"],
+      repo_groups: [],
+      cross_repo: false,
+    });
     // Set up default store state for issue store selectors
     mockStoreState = createMockUseIssuesReturn({});
     // Set up default useRouteView mock (kanban is the default view)
@@ -2489,6 +2508,54 @@ describe("App", () => {
   });
 
   describe("onboarding issue creation", () => {
+    it("opens the prefilled issue modal immediately after onboarding agent creation", async () => {
+      localStorage.clear();
+      const refetchWorkspace = vi.fn();
+      const upsertAgent = vi.fn();
+      mockStoreState = createMockUseIssuesReturn({ issues: [] });
+      mockHelloWorldWorkspaceContext({
+        agents: [],
+        refetch: refetchWorkspace,
+        upsertAgent,
+      });
+
+      render(<App />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Create Agent" }));
+      const agentDialog = await screen.findByRole("dialog", {
+        name: "New Agent",
+      });
+      fireEvent.click(
+        within(agentDialog).getByRole("button", { name: "Create Agent" }),
+      );
+
+      await waitFor(() => {
+        expect(mockCreateWorkspaceAgent).toHaveBeenCalledWith(
+          "test-ws-id",
+          expect.objectContaining({
+            name: "planner",
+            role_name: "plan",
+            backend: "opencode",
+          }),
+        );
+      });
+
+      expect(upsertAgent).toHaveBeenCalledWith(
+        expect.objectContaining({ name: "planner", role_name: "plan" }),
+      );
+      expect(refetchWorkspace).toHaveBeenCalled();
+
+      const issueDialog = await screen.findByRole("dialog", {
+        name: "Create Issue",
+      });
+      expect(within(issueDialog).getByTestId("create-issue-title")).toHaveValue(
+        ONBOARDING_ISSUE_TITLE,
+      );
+      expect(
+        within(issueDialog).getByTestId("create-issue-description"),
+      ).toHaveValue(ONBOARDING_ISSUE_DESCRIPTION);
+    });
+
     it("starts the planner and switches to kanban after the first onboarding task is created", async () => {
       localStorage.clear();
       const refetch = vi.fn().mockResolvedValue(undefined);
@@ -2574,11 +2641,11 @@ describe("App", () => {
         expect(mockNavigateToView).toHaveBeenCalledWith("kanban");
       });
 
-      expect(refetch).toHaveBeenCalledTimes(1);
+      expect(refetch).toHaveBeenCalledTimes(2);
       expect(mockUpdateIssue).toHaveBeenCalledWith(
         "test-ws-id",
         "onboarding-task",
-        { assignee: "planner" },
+        { assignee: "planner", status: "in_progress" },
       );
       expect(mockStartAgent).toHaveBeenCalledWith("test-ws-id", "planner", {
         taskId: "onboarding-task",
@@ -2629,7 +2696,7 @@ describe("App", () => {
       expect(mockUpdateIssue).toHaveBeenCalledWith(
         "test-ws-id",
         "onboarding-task",
-        { assignee: "fresh-planner" },
+        { assignee: "fresh-planner", status: "in_progress" },
       );
     });
 
@@ -2736,13 +2803,13 @@ describe("App", () => {
         1,
         "test-ws-id",
         "onboarding-task",
-        { assignee: "planner" },
+        { assignee: "planner", status: "in_progress" },
       );
       expect(mockUpdateIssue).toHaveBeenNthCalledWith(
         2,
         "test-ws-id",
         "onboarding-task",
-        { assignee: "" },
+        { assignee: "", status: "open" },
       );
       expect(showToast).toHaveBeenCalledWith(
         "Task created, but agent did not start: daemon unavailable",
@@ -2826,7 +2893,7 @@ describe("App", () => {
       expect(mockUpdateIssue).not.toHaveBeenCalledWith(
         "test-ws-id",
         "manual-task",
-        { assignee: "planner" },
+        expect.objectContaining({ assignee: "planner" }),
       );
       expect(mockStartAgent).not.toHaveBeenCalled();
       expect(mockOpenPanel).toHaveBeenCalledWith({

@@ -148,13 +148,19 @@ async function assignAndStartAgent(
 ): Promise<void> {
   let assigned = false;
   try {
-    await updateIssue(workspaceId, issueId, { assignee: agentName });
+    await updateIssue(workspaceId, issueId, {
+      assignee: agentName,
+      status: "in_progress",
+    });
     assigned = true;
     await startAgent(workspaceId, agentName, { taskId: issueId });
   } catch (err) {
     if (assigned) {
       try {
-        await updateIssue(workspaceId, issueId, { assignee: "" });
+        await updateIssue(workspaceId, issueId, {
+          assignee: "",
+          status: "open",
+        });
       } catch {
         // Preserve the original start error; the user can still unassign manually.
       }
@@ -196,6 +202,7 @@ function App() {
     selectRepos,
     sourceReposFilter,
     refetch: refetchWorkspace,
+    upsertAgent: upsertWorkspaceAgent,
   } = useWorkspaceContext();
   const {
     backends: aiBackends,
@@ -975,6 +982,7 @@ function App() {
         if (onboardingAgent) {
           try {
             await assignAndStartAgent(workspaceId, issue.id, onboardingAgent);
+            await refetch();
             showToast(`Started ${onboardingAgent} on ${issue.id}`, {
               type: "success",
             });
@@ -1142,6 +1150,7 @@ function App() {
   const refetchWorkspaceAfterAgentCreate = useCallback(() => {
     refetchWorkspace();
     window.setTimeout(refetchWorkspace, 750);
+    window.setTimeout(refetchWorkspace, 2000);
   }, [refetchWorkspace]);
 
   // Focus search input (for Cmd/Ctrl+K shortcut in single-repo mode)
@@ -1589,8 +1598,13 @@ function App() {
         onClose={() => setShowCreateAgent(false)}
         onSuccess={(agent) => {
           setShowCreateAgent(false);
+          upsertWorkspaceAgent?.(agent);
           refetchWorkspaceAfterAgentCreate();
           showToast(`Agent "${agent.name}" created`, { type: "success" });
+          if (shouldPrefillOnboardingIssue) {
+            setCreateIssueMode("onboarding");
+            setShowCreateIssue(true);
+          }
         }}
       />
     </KeyboardShortcutProvider>

@@ -257,6 +257,67 @@ describe("workspaceStore", () => {
     });
   });
 
+  describe("upsertAgent", () => {
+    it("adds a newly-created agent to current workspace state immediately", async () => {
+      const ws = makeWorkspace({ agents: [] });
+      mockFetchWorkspaceApi.mockResolvedValueOnce(ws);
+      await store.getState().fetchWorkspace("ws-1");
+
+      store.getState().upsertAgent({
+        name: "planner",
+        role_name: "plan",
+        repos: ["hello-world"],
+        repo_groups: [],
+        cross_repo: false,
+      });
+
+      expect(store.getState().workspace?.agents).toEqual([
+        {
+          name: "planner",
+          role_name: "plan",
+          repos: ["hello-world"],
+          repo_groups: [],
+          cross_repo: false,
+        },
+      ]);
+    });
+
+    it("updates an existing optimistic agent instead of duplicating it", async () => {
+      const ws = makeWorkspace({
+        agents: [
+          {
+            name: "planner",
+            role_name: "task",
+            repos: ["hello-world"],
+            repo_groups: [],
+            cross_repo: false,
+          },
+        ],
+      });
+      mockFetchWorkspaceApi.mockResolvedValueOnce(ws);
+      await store.getState().fetchWorkspace("ws-1");
+
+      store.getState().upsertAgent({
+        name: "planner",
+        role_name: "plan",
+        backend: "opencode",
+        repos: ["hello-world"],
+        repo_groups: [],
+        cross_repo: false,
+      });
+
+      expect(store.getState().workspace?.agents).toHaveLength(1);
+      expect(store.getState().workspace?.agents[0]).toEqual({
+        name: "planner",
+        role_name: "plan",
+        backend: "opencode",
+        repos: ["hello-world"],
+        repo_groups: [],
+        cross_repo: false,
+      });
+    });
+  });
+
   describe("reset", () => {
     it("clears all state and stops polling", async () => {
       const ws = makeWorkspace();
