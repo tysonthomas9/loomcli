@@ -1,7 +1,7 @@
 # Agent Execution Product Docs
 
 **Status:** Draft
-**Date:** 2026-05-04
+**Date:** 2026-05-11
 
 This folder captures the product plan for making agent execution visible,
 controllable, and debuggable across local and cloud/containerized runs.
@@ -21,13 +21,15 @@ Read these in order:
    during development and early release packaging.
 5. `agent-run-ux-spec.md`
    What the UI should show for agents, sessions, task timelines, logs,
-   diffs, failures, empty states, and stale/offline states.
+   diffs, failures, empty states, stale/offline states, and ephemeral worker
+   history/cleanup.
 6. `lead-agent-epic-runner-spec.md`
    How first-class lead agents run one epic at a time through the existing
-   terminal UI, with scoped workers and epic/task panels.
+   terminal UI, with scoped workers, single-task ephemeral worker attempts,
+   epic/task panels, and worker history.
 7. `session-artifact-contract.md`
    The evidence every run must leave behind: transcript, logs, token usage,
-   diff, commit, test result, and error class.
+   diff, commit, test result, cleanup metadata, and error class.
 8. `daemon-agent-runtime-architecture.md`
    How the daemon, agent runner, local mode, cloud mode, ownership leases,
    and decentralized task claiming fit together.

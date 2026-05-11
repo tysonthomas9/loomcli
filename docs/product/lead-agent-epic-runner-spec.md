@@ -1,10 +1,11 @@
 # Lead Agent Epic Runner Product Spec
 
 **Status:** Draft
-**Date:** 2026-05-08
+**Date:** 2026-05-11
 **Related:** `docs/product/agent-run-ux-spec.md`,
 `docs/product/daemon-agent-runtime-architecture.md`,
-`docs/product/agent-lifecycle-state-machine.md`
+`docs/product/agent-lifecycle-state-machine.md`,
+`docs/product/session-artifact-contract.md`
 
 ## Purpose
 
@@ -36,6 +37,9 @@ the right.
 | Start from UI or terminal | Users can click "Run Epic" or type `loom epic run --parent <epic_id>` manually. Both paths use the same backend command path. |
 | No DAG visual in MVP | The right panel shows epic-grouped task cards, statuses, blockers, and current work. It does not need an arrow DAG first. |
 | Worker terminals are clickable | Clicking a spawned worker switches the center terminal to that worker. The right panel remains scoped to the lead's epic. |
+| Ephemeral worker is single-use | One ephemeral worker represents one task attempt. It may retry the same attempt after process failure, but it must not complete one task and then claim another. |
+| Completed workers become history | Completed ephemeral workers leave the live agent rail and appear as task attempts / worker history with logs, diffs, artifacts, and cleanup actions. |
+| Cleanup is first-class | Users can reclaim disk from completed ephemeral worktrees without losing the run's persisted evidence. |
 
 ## Existing UI Fit
 
@@ -86,7 +90,15 @@ select lead with parent="E2E-1"
 select worker spawned by selected lead
   center: worker terminal
   right: still E2E-1 and descendant tasks
+
+select completed ephemeral worker history
+  center: read-only run detail, not a live terminal
+  right: still E2E-1 and descendant tasks
 ```
+
+Completed ephemeral workers must not appear as idle live agents in the left
+rail. The left rail is for leads and currently live/reconnectable workers. Past
+ephemeral work belongs in worker history and task attempt history.
 
 ## Data Model Mapping
 
@@ -151,7 +163,10 @@ worker.mode                     ephemeral
 worker.parent                   same epic id as lead.parent
 worker.orchestrator_session_id  same lead session id
 worker.state                    idle | active | stopped
-worker.current_task             assigned task, derived from command/session/task claim
+worker.current_task             assigned task while live, derived from
+                                command/session/task claim
+worker.completed_task           completed task after stop, derived from the
+                                terminal task session
 ```
 
 Workers should appear nested under the lead when possible:
@@ -163,6 +178,93 @@ Nova
   + worker-e2e-6 idle     current: none
 ```
 
+Ephemeral worker invariant:
+
+```text
+worker.mode == ephemeral
+  worker must be started with exactly one task_id
+  worker may claim only that task_id
+  worker stops after one successful task completion
+  worker remains queryable as run history after it stops
+```
+
+Service workers are different:
+
+```text
+worker.mode == service
+  worker may keep polling
+  worker may claim multiple tasks over time
+  worker remains a live/restartable agent
+```
+
+Do not introduce a separate `TaskRun` entity for the MVP. Use existing
+control-plane primitives:
+
+```text
+Agent              lead/worker identity and lifecycle
+AgentCommand       start/stop/yield dispatch, including task_id
+AgentSession       task attempt lifecycle and artifact handle
+Issue              epic/task status, blocker graph, assignee
+TerminalSession    live PTY or archived terminal/log handle
+```
+
+If reporting later needs an aggregate read model, it should be derived from
+these records first.
+
+### Worker History Surfaces
+
+Ephemeral worker history must be visible in three places.
+
+Primary surface: selected lead page.
+
+```text
+/ws/:workspace/agents/:lead-agent-name
+```
+
+When the selected lead has an active epic, the right panel shows the epic,
+children, live workers, and completed worker history:
+
+```text
+Epic E2E-1
+  Tasks
+    E2E-2 closed       attempt #1 completed
+    E2E-3 in_progress  attempt #1 running
+    E2E-4 open         no attempt yet
+
+  Worker History
+    worker-e2e-2-a1  E2E-2  completed  logs diff cleanup
+    worker-e2e-3-a1  E2E-3  running    terminal
+    worker-e2e-5-a2  E2E-5  failed     logs rerun cleanup
+```
+
+Per-task surface: task attempt history.
+
+```text
+Task E2E-2 Reset password flow
+  status: closed
+  attempts:
+    #1 worker-e2e-2-a1 completed  8m  codex  logs | diff | cleanup
+```
+
+This is the best surface for understanding what happened to one task.
+
+Workspace cleanup surface:
+
+```text
+/ws/:workspace/agents/history
+```
+
+This global history/cleanup view lists completed ephemeral worker attempts
+across leads and epics with filters:
+
+```text
+filters: lead, epic, task, status, age, disk usage
+actions: delete worktree, archive logs, delete artifacts, rerun
+```
+
+The cleanup surface exists because completed ephemeral workers may no longer be
+visible in the live agent rail, but users still need to reclaim disk safely.
+
 ### Agent Command
 
 The existing command channel dispatches task workers.
@@ -171,7 +273,8 @@ The existing command channel dispatches task workers.
 agent_command.target_agent_id   worker name
 agent_command.target_node_id    daemon node id
 agent_command.type              start
-agent_command.payload.task_id   assigned task id
+agent_command.payload.task_id   assigned task id; required for ephemeral
+                                workers
 agent_command.status            queued | acked | running | succeeded | failed
 ```
 
@@ -228,6 +331,51 @@ leave ownership visible in the UI
 The user clears or changes epic ownership by talking to the lead. This keeps the
 lead's memory, terminal context, and handoff explicit.
 
+### Ephemeral Worker Start
+
+For `worker.mode=ephemeral`, backend start rules are stricter than service
+agent start rules:
+
+```text
+if start command has no task_id:
+  reject
+
+if worker already has a completed task session:
+  reject restart and require a new attempt worker
+
+if requested task_id is not ready/workable:
+  do not claim a fallback task
+
+if requested task_id is ready:
+  claim only that task_id
+```
+
+This prevents a completed ephemeral worker from becoming a generic queue
+consumer after a manual restart or UI reconnect.
+
+### Ephemeral Worker Completion
+
+On clean completion after a task claim:
+
+```text
+set worker.state = stopped
+set worker.desired_state = stopped
+complete AgentSession with task_id and artifacts
+keep logs/transcript/diff/test metadata queryable
+do not show the worker as an idle live agent
+```
+
+On failure:
+
+```text
+retry the same attempt according to daemon retry policy
+if retries are exhausted, mark session failed
+leave worker in history with rerun action
+```
+
+Rerun creates a new ephemeral worker attempt. It does not reuse a completed
+ephemeral worker.
+
 ### UI Run Epic Button
 
 The UI button should run the same command a user could type:
@@ -265,6 +413,11 @@ select lead
 select spawned worker
   switch center pane to worker terminal
   keep right pane scoped to lead epic
+
+select completed ephemeral worker
+  show read-only run detail
+  show logs, transcript, diff, artifacts, task, and cleanup actions
+  do not spawn or reconnect a PTY
 ```
 
 The right panel should not lose epic scope when switching from lead terminal to
@@ -318,6 +471,28 @@ worker terminal.
 6. Current task E2E-5 is highlighted.
 ```
 
+### Completed Worker History And Cleanup
+
+```text
+1. User selects lead nova.
+2. nova.parent = E2E-1.
+3. Right panel shows E2E-1 and Worker History.
+4. User clicks worker-e2e-2-a1, which is completed.
+5. Center switches to read-only run detail.
+6. User can view logs, transcript, diff, artifacts, and worktree path.
+7. User clicks Delete worktree to reclaim disk.
+8. Persisted run evidence remains visible after worktree deletion.
+```
+
+### Workspace Cleanup
+
+```text
+1. User opens /ws/E2E/agents/history.
+2. User filters completed ephemeral workers older than 7 days.
+3. UI shows disk usage, lead, epic, task, status, and artifact presence.
+4. User bulk-deletes worktrees while preserving logs and session metadata.
+```
+
 ## Current Task Display
 
 The UI should make "what is this agent doing right now" visible without opening
@@ -354,6 +529,10 @@ Ship these first:
 5. "Run Epic" button that sends the same command to the lead terminal.
 6. Auto-connect/resume lead terminal where session metadata exists.
 7. Show current task/epic for selected lead or worker.
+8. Enforce single-task ephemeral worker lifecycle in backend start/claim/restart
+   paths.
+9. Show completed ephemeral workers as history on the lead page and task detail.
+10. Provide workspace-level cleanup for completed ephemeral worker worktrees.
 
 Do not include in MVP:
 
@@ -362,6 +541,7 @@ Do not include in MVP:
 - multi-epic lead scheduling
 - automatic clearing of lead epic ownership
 - separate epic runner page
+- separate `TaskRun` write model
 
 ## Risks and Mitigations
 
@@ -373,6 +553,10 @@ Do not include in MVP:
 | Worker click loses epic context | Store selected lead scope separately from selected terminal. |
 | Existing task workers are not attributable to a lead | Set `orchestrator_session_id` and `parent` on spawned workers. |
 | `agent.parent` is overloaded | Treat `parent` as active epic for lead/task orchestration and document the invariant clearly. |
+| Completed ephemeral workers look restartable | Remove them from the live agent rail and render them as read-only task attempts. |
+| Manual restart makes ephemeral worker claim another task | Require `task_id` for ephemeral start and reject restart after completed task session. |
+| Users cannot reclaim disk | Provide lead-scoped and workspace-level cleanup actions that delete worktrees while preserving session artifacts. |
+| History disappears after cleanup | Store logs, transcript, diff, test, commit, and summary artifacts before deleting worktree/container state. |
 
 ## Open Implementation Notes
 
@@ -384,3 +568,5 @@ Do not include in MVP:
   workers in the sidebar.
 - Add API support for "lead scope" if current endpoints cannot efficiently
   return lead, child workers, active epic, and scoped issues in one request.
+- Add a compact derived read model only if the UI cannot efficiently join
+  agents, commands, sessions, terminal tabs, and issues for worker history.
