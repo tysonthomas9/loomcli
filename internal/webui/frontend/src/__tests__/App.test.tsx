@@ -969,7 +969,8 @@ describe("App", () => {
       success: true,
       issue: createMockIssue({ id: "onboarding-task" }),
       agent_name: "planner",
-      started: true,
+      started: false,
+      queued: true,
     });
     mockFetchWorkspaceApi.mockResolvedValue({
       id: "test-ws-id",
@@ -2591,6 +2592,13 @@ describe("App", () => {
       localStorage.clear();
       const refetch = vi.fn().mockResolvedValue(undefined);
       const fetchIssue = vi.fn();
+      const showToast = vi.fn();
+      mockUseToast.mockReturnValue({
+        toasts: [],
+        showToast,
+        dismissToast: vi.fn(),
+        dismissAll: vi.fn(),
+      });
       mockRunOnboardingFirstTask.mockResolvedValue({
         success: true,
         issue: createMockIssue({
@@ -2599,7 +2607,8 @@ describe("App", () => {
           issue_type: "task",
         }),
         agent_name: "fresh-planner",
-        started: true,
+        started: false,
+        queued: true,
       });
       mockFetchWorkspaceApi.mockResolvedValue({
         id: "test-ws-id",
@@ -2643,6 +2652,10 @@ describe("App", () => {
       await waitFor(() => {
         expect(mockNavigateToView).toHaveBeenCalledWith("kanban");
       });
+      expect(showToast).toHaveBeenCalledWith(
+        "Queued fresh-planner on onboarding-task",
+        { type: "success" },
+      );
 
       expect(refetch).toHaveBeenCalledTimes(1);
       expect(mockUpdateIssue).not.toHaveBeenCalledWith(

@@ -14,7 +14,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
-func TestHandleRunFirstTaskCreatesClaimableTaskAndStartsAgent(t *testing.T) {
+func TestHandleRunFirstTaskCreatesClaimableTaskAndQueuesAgentStart(t *testing.T) {
 	issueSvc := &stubIssueService{
 		createFunc: func(_ context.Context, params service.CreateIssueParams) (json.RawMessage, error) {
 			if params.Title != "Explore Hello-World onboarding" {
@@ -66,7 +66,7 @@ func TestHandleRunFirstTaskCreatesClaimableTaskAndStartsAgent(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if !body.Success || !body.Started || body.AgentName != "planner" {
+	if !body.Success || body.Started || !body.Queued || body.AgentName != "planner" {
 		t.Fatalf("response = %#v", body)
 	}
 }

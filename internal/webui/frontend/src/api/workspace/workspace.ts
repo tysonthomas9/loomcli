@@ -62,6 +62,7 @@ export interface RunOnboardingFirstTaskResponse {
   issue: Issue;
   agent_name: string;
   started: boolean;
+  queued?: boolean;
 }
 
 export type WorkspaceLifecycleState =

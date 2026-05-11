@@ -30,11 +30,13 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 # ── Stage 2: runtime ──
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        ca-certificates git nodejs npm tmux wget \
+        ca-certificates git jq nodejs npm tmux wget \
     && npm install -g @openai/codex@${CODEX_CLI_VERSION} \
     && npm cache clean --force \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /out/loom /usr/local/bin/loom
+COPY test/fleetdb/empty-daemon-manager.sh /usr/local/bin/loom-empty-daemon-manager
+RUN chmod +x /usr/local/bin/loom-empty-daemon-manager
 WORKDIR /workspace
 # Webui listens on 8080 inside the container; compose maps to host :8082.
 EXPOSE 8080

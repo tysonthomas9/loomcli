@@ -26,6 +26,7 @@ type runFirstTaskResponse struct {
 	Issue     json.RawMessage `json:"issue"`
 	AgentName string          `json:"agent_name"`
 	Started   bool            `json:"started"`
+	Queued    bool            `json:"queued"`
 }
 
 type createdIssueRef struct {
@@ -102,7 +103,8 @@ func HandleRunFirstTask(issueSvc service.IssueService, agentSvc service.AgentSer
 			Success:   true,
 			Issue:     created,
 			AgentName: agentName,
-			Started:   true,
+			Started:   false,
+			Queued:    true,
 		})
 	}
 }
