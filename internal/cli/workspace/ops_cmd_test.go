@@ -60,6 +60,43 @@ func TestWaitForWorkspaceOpsDaemonDoesNotReturnStaleStatusOnLoaderError(t *testi
 	}
 }
 
+func TestWaitForWorkspaceOpsDaemonAcceptsWorkspaceLocalDaemon(t *testing.T) {
+	initial := &WorkspaceOpsStatus{
+		Workspace: WorkspaceOpsWorkspace{Key: "TEST"},
+		Daemon: WorkspaceOpsDaemon{
+			AppData: DaemonInfo{Running: false},
+		},
+		Agents: []WorkspaceOpsAgent{
+			{Name: "planner", Runnable: true},
+		},
+	}
+	ready := &WorkspaceOpsStatus{
+		Workspace: WorkspaceOpsWorkspace{Key: "TEST"},
+		Daemon: WorkspaceOpsDaemon{
+			AppData:        DaemonInfo{Running: false},
+			WorkspaceLocal: DaemonInfo{Running: true, PID: 42},
+		},
+		Agents: []WorkspaceOpsAgent{
+			{Name: "planner", Runnable: true},
+		},
+	}
+
+	calls := 0
+	status, err := waitForWorkspaceOpsDaemon(context.Background(), "TEST", initial, func(context.Context, string) (*WorkspaceOpsStatus, error) {
+		calls++
+		return ready, nil
+	})
+	if err != nil {
+		t.Fatalf("waitForWorkspaceOpsDaemon returned error: %v", err)
+	}
+	if status != ready {
+		t.Fatalf("status = %#v, want ready status", status)
+	}
+	if calls != 1 {
+		t.Fatalf("loader calls = %d, want 1", calls)
+	}
+}
+
 func TestAgentDesiredRunnable(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -104,6 +141,26 @@ func TestAgentDesiredRunnable(t *testing.T) {
 				t.Fatalf("agentDesiredRunnable() = %t, want %t", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestWorkspaceOpsGlobalProblemsAcceptsWorkspaceLocalDaemon(t *testing.T) {
+	status := &WorkspaceOpsStatus{
+		Daemon: WorkspaceOpsDaemon{
+			AppData:        DaemonInfo{Running: false},
+			WorkspaceLocal: DaemonInfo{Running: true, PID: 202},
+		},
+		Repos: []WorkspaceOpsRepo{{Name: "app"}},
+		Agents: []WorkspaceOpsAgent{
+			{Name: "planner", Runnable: true},
+		},
+	}
+
+	problems := workspaceOpsGlobalProblems(status)
+	for _, problem := range problems {
+		if problem.Code == "daemon_not_running" {
+			t.Fatalf("problems = %#v, did not expect daemon_not_running", problems)
+		}
 	}
 }
 

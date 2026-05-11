@@ -984,7 +984,8 @@ function App() {
       navigateToView("kanban");
       await refetch();
       refetchWorkspace();
-      showToast(`Started ${onboardingAgent} on ${result.issue.id}`, {
+      const actionVerb = result.started ? "Started" : "Queued";
+      showToast(`${actionVerb} ${onboardingAgent} on ${result.issue.id}`, {
         type: "success",
       });
     } catch (err) {

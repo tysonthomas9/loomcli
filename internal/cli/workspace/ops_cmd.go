@@ -220,7 +220,7 @@ func waitForWorkspaceOpsDaemon(
 			return nil, err
 		}
 		status = refreshed
-		if !statusNeedsDaemonWait(status) || status.Daemon.AppData.Running {
+		if !statusNeedsDaemonWait(status) || workspaceDaemonRunning(status) {
 			return status, nil
 		}
 		select {
@@ -427,7 +427,7 @@ func workspaceOpsGlobalProblems(status *WorkspaceOpsStatus) []WorkspaceOpsProble
 			Fix:      "create planner/worker agents for background work",
 		})
 	}
-	if statusNeedsDaemonWait(status) && !status.Daemon.AppData.Running {
+	if statusNeedsDaemonWait(status) && !workspaceDaemonRunning(status) {
 		problems = append(problems, WorkspaceOpsProblem{
 			Severity: "error",
 			Code:     "daemon_not_running",
@@ -446,6 +446,10 @@ func workspaceOpsGlobalProblems(status *WorkspaceOpsStatus) []WorkspaceOpsProble
 		})
 	}
 	return problems
+}
+
+func workspaceDaemonRunning(status *WorkspaceOpsStatus) bool {
+	return status.Daemon.AppData.Running || status.Daemon.WorkspaceLocal.Running
 }
 
 func statusNeedsDaemonWait(status *WorkspaceOpsStatus) bool {
