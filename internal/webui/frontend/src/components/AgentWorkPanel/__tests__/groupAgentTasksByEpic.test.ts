@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 
 import type { Issue, LoomAgentStatus } from "@/types";
 import {
+  buildWorkerHistoryByEpic,
   buildWorkerByTaskId,
   groupAgentTasksByEpic,
   groupOpenByEpic,
@@ -273,5 +274,60 @@ describe("buildWorkerByTaskId", () => {
     ]);
 
     expect(workers.get("T-3")?.name).toBe("worker-active");
+  });
+});
+
+describe("buildWorkerHistoryByEpic", () => {
+  it("groups ephemeral worker attempts under their epic", () => {
+    const m = buildMap(
+      issue({ id: "EPIC-1", issue_type: "epic", title: "Epic" }),
+      issue({ id: "T-1", parent: "EPIC-1", status: "closed" }),
+      issue({ id: "T-2", parent: "EPIC-1", status: "in_progress" }),
+    );
+
+    const history = buildWorkerHistoryByEpic(
+      [
+        agent({
+          name: "worker-done",
+          mode: "ephemeral",
+          task_id: "T-1",
+          desired_state: "stopped",
+        }),
+        agent({
+          name: "worker-live",
+          mode: "ephemeral",
+          task_id: "T-2",
+          desired_state: "running",
+        }),
+        agent({ name: "service-worker", mode: "service", task_id: "T-3" }),
+      ],
+      m,
+    );
+
+    expect(history.get("EPIC-1")?.map((x) => x.agent.name)).toEqual([
+      "worker-live",
+      "worker-done",
+    ]);
+    expect(history.get("EPIC-1")?.map((x) => x.status)).toEqual([
+      "running",
+      "completed",
+    ]);
+  });
+
+  it("uses agent parent when task is no longer in the issue map", () => {
+    const history = buildWorkerHistoryByEpic(
+      [
+        agent({
+          name: "worker-retained",
+          mode: "ephemeral",
+          parent: "EPIC-2",
+          task_id: "T-MISSING",
+          desired_state: "stopped",
+        }),
+      ],
+      buildMap(),
+    );
+
+    expect(history.get("EPIC-2")?.[0]?.taskId).toBe("T-MISSING");
   });
 });

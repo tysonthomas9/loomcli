@@ -40,7 +40,7 @@ export function AgentIconRail(): JSX.Element {
   const agentStore = useAgentStoreInstance();
   const agents = useStore(agentStore, (s) => s.agents);
   const orderedAgents = useMemo(
-    () => orderAgentsForEpicRunner(agents),
+    () => orderAgentsForEpicRunner(agents).filter(isLiveAgentRailVisible),
     [agents],
   );
 
@@ -80,7 +80,7 @@ export function AgentIconRail(): JSX.Element {
       >
         Agents
       </div>
-      {agents.length === 0 ? (
+      {orderedAgents.length === 0 ? (
         <div
           style={{
             fontSize: 9,
@@ -89,7 +89,7 @@ export function AgentIconRail(): JSX.Element {
             padding: "12px 4px",
           }}
         >
-          None yet
+          No live agents
         </div>
       ) : (
         orderedAgents.map((agent) => (
@@ -103,6 +103,13 @@ export function AgentIconRail(): JSX.Element {
       )}
     </nav>
   );
+}
+
+export function isLiveAgentRailVisible(agent: LoomAgentStatus): boolean {
+  if (agent.mode !== "ephemeral") return true;
+  const state = String(agent.state ?? "").trim().toLowerCase();
+  const desiredState = String(agent.desired_state ?? "").trim().toLowerCase();
+  return state !== "stopped" && state !== "dead" && desiredState !== "stopped";
 }
 
 export function orderAgentsForEpicRunner(

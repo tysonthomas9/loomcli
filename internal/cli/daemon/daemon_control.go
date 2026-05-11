@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/daemon/supervisor"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -198,6 +199,9 @@ func (d *Daemon) handleAgentControlStart(name string, taskIDs ...string) DaemonC
 	if !ok {
 		return DaemonControlResponse{Error: fmt.Sprintf("agent %q not found in daemon config", name)}
 	}
+	if err := d.validateEphemeralStart(entry, taskID); err != nil {
+		return DaemonControlResponse{Error: err.Error()}
+	}
 
 	if d.isAgentRunning(name) {
 		return DaemonControlResponse{Error: fmt.Sprintf("agent %q is already running (use restart to reset a running agent)", name)}
@@ -245,6 +249,45 @@ func (d *Daemon) markAgentStartAccepted(name string) {
 	d.setConfigAgentDesiredStateLocked(name, desired)
 }
 
+func (d *Daemon) validateEphemeralStart(entry config.AgentEntry, taskID string) error {
+	if entry.Mode != domain.AgentModeEphemeral {
+		return nil
+	}
+	if taskID == "" {
+		return fmt.Errorf("ephemeral agent %q requires a task_id; rerun the task to create a new worker attempt", entry.Worktree)
+	}
+	if d.hasTerminalEphemeralTaskSession(entry.Worktree) {
+		return fmt.Errorf("ephemeral agent %q already has a terminal task attempt; rerun the task to create a new worker attempt", entry.Worktree)
+	}
+	return nil
+}
+
+func (d *Daemon) hasTerminalEphemeralTaskSession(agentName string) bool {
+	if d.store == nil || d.sup == nil || d.sup.WorkspaceID == "" || d.store.AgentSessions() == nil {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	sessions, err := d.store.AgentSessions().List(ctx, d.sup.WorkspaceID, store.AgentSessionFilter{
+		AgentID: agentName,
+		Limit:   100,
+	})
+	if err != nil {
+		slog.Warn("failed to inspect ephemeral task sessions", "agent", agentName, "err", err)
+		return true
+	}
+	for _, session := range sessions {
+		if session == nil || session.Kind != domain.AgentSessionKindTask || session.TaskID == "" {
+			continue
+		}
+		switch session.Status {
+		case domain.AgentSessionCompleted, domain.AgentSessionFailed, domain.AgentSessionCancelled, domain.AgentSessionExpired:
+			return true
+		}
+	}
+	return false
+}
+
 func (d *Daemon) setConfigAgentDesiredState(name string, desired domain.AgentDesiredState) {
 	d.reconcileMu.Lock()
 	defer d.reconcileMu.Unlock()
@@ -274,6 +317,13 @@ func (d *Daemon) handleAgentControlRestart(name string) DaemonControlResponse {
 	if !d.agentExistsInConfig(name) {
 		return DaemonControlResponse{Error: fmt.Sprintf("agent %q not found in daemon config", name)}
 	}
+	entry, ok := d.findAgentEntry(name)
+	if !ok {
+		return DaemonControlResponse{Error: fmt.Sprintf("agent %q not found in current config", name)}
+	}
+	if entry.Mode == domain.AgentModeEphemeral {
+		return DaemonControlResponse{Error: fmt.Sprintf("ephemeral agent %q cannot be restarted; rerun the task to create a new worker attempt", name)}
+	}
 
 	isStopped := d.isAgentStopped(name)
 
@@ -291,12 +341,6 @@ func (d *Daemon) handleAgentControlRestart(name string) DaemonControlResponse {
 	d.sup.AgentsMu.Lock()
 	delete(d.sup.StoppedAgents, name)
 	d.sup.AgentsMu.Unlock()
-
-	// Look up the config.AgentEntry from current config
-	entry, ok := d.findAgentEntry(name)
-	if !ok {
-		return DaemonControlResponse{Error: fmt.Sprintf("agent %q not found in current config", name)}
-	}
 
 	// Add the agent back with fresh state
 	if err := d.sup.AddAgent(entry); err != nil {

@@ -50,6 +50,14 @@ interface Counts {
   blocked: number;
 }
 
+interface WorkerHistoryItem {
+  agent: LoomAgentStatus;
+  taskId: string;
+  epicId: string;
+  status: "running" | "completed" | "failed";
+  openable: boolean;
+}
+
 const ORPHAN_EPIC_KEY = "__orphan__";
 
 const STATUS_GLYPH: Record<string, string> = {
@@ -97,6 +105,10 @@ export function AgentWorkPanel({
   );
   const selectedAgentIsLead = isLeadRole(selectedAgent?.role);
   const workerByTaskId = useMemo(() => buildWorkerByTaskId(agents), [agents]);
+  const workerHistoryByEpic = useMemo(
+    () => buildWorkerHistoryByEpic(agents, issuesMap),
+    [agents, issuesMap],
+  );
 
   // Detect the agent's "active epic": parse its current-task ID from status,
   // look the task up, walk to its parent. When set, the panel focuses on that
@@ -209,6 +221,7 @@ export function AgentWorkPanel({
               }
               onRunEpic={onRunEpic}
               workerByTaskId={workerByTaskId}
+              workerHistory={workerHistoryByEpic.get(group.epicId) ?? []}
               onAgentClick={onAgentClick}
               onTaskClick={(task) => dispatchClick(task)}
             />
@@ -224,6 +237,7 @@ function EpicGroupCard({
   canRunEpic,
   onRunEpic,
   workerByTaskId,
+  workerHistory,
   onAgentClick,
   onTaskClick,
 }: {
@@ -231,6 +245,7 @@ function EpicGroupCard({
   canRunEpic: boolean;
   onRunEpic?: ((epicId: string) => void) | undefined;
   workerByTaskId: Map<string, LoomAgentStatus>;
+  workerHistory: WorkerHistoryItem[];
   onAgentClick?: ((agentName: string) => void) | undefined;
   onTaskClick: (task: Issue) => void;
 }): JSX.Element {
@@ -270,7 +285,80 @@ function EpicGroupCard({
           onClick={() => onTaskClick(task)}
         />
       ))}
+      <WorkerHistory
+        items={workerHistory}
+        tasks={group.tasks}
+        onWorkerClick={onAgentClick}
+        onTaskClick={onTaskClick}
+      />
     </div>
+  );
+}
+
+function WorkerHistory({
+  items,
+  tasks,
+  onWorkerClick,
+  onTaskClick,
+}: {
+  items: WorkerHistoryItem[];
+  tasks: Issue[];
+  onWorkerClick?: ((agentName: string) => void) | undefined;
+  onTaskClick: (task: Issue) => void;
+}): JSX.Element | null {
+  if (items.length === 0) return null;
+  const taskById = new Map(tasks.map((task) => [task.id, task]));
+
+  return (
+    <section className={styles.workerHistory} aria-label="Worker history">
+      <div className={styles.workerHistoryHeader}>
+        <span>Worker History</span>
+        <span className={styles.workerHistoryCount}>{items.length}</span>
+      </div>
+      <div className={styles.workerHistoryList}>
+        {items.map((item) => {
+          const task = taskById.get(item.taskId);
+          return (
+            <div key={item.agent.name} className={styles.workerHistoryRow}>
+              <div className={styles.workerHistoryMain}>
+                <span
+                  className={styles.workerHistoryName}
+                  title={item.agent.name}
+                >
+                  {item.agent.name}
+                </span>
+                <span className={styles.workerHistoryMeta}>
+                  {item.taskId} · {item.status}
+                  {item.agent.session_id ? ` · ${item.agent.session_id}` : ""}
+                </span>
+              </div>
+              <div className={styles.workerHistoryActions}>
+                {task ? (
+                  <button
+                    type="button"
+                    className={styles.workerHistoryButton}
+                    onClick={() => onTaskClick(task)}
+                  >
+                    Task
+                  </button>
+                ) : null}
+                {item.openable && onWorkerClick ? (
+                  <button
+                    type="button"
+                    className={styles.workerHistoryButton}
+                    onClick={() => onWorkerClick(item.agent.name)}
+                  >
+                    Terminal
+                  </button>
+                ) : (
+                  <span className={styles.workerHistoryChip}>retained</span>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 
@@ -367,6 +455,59 @@ export function buildWorkerByTaskId(
   }
 
   return byTaskId;
+}
+
+export function buildWorkerHistoryByEpic(
+  agents: LoomAgentStatus[],
+  issuesMap: Map<string, Issue>,
+): Map<string, WorkerHistoryItem[]> {
+  const byEpic = new Map<string, WorkerHistoryItem[]>();
+
+  for (const agent of agents) {
+    if (agent.mode !== "ephemeral") continue;
+    const taskId =
+      agent.task_id || parseLoomStatus(agent.status ?? "").taskId || "";
+    if (!taskId) continue;
+    const epicId = agent.parent || issuesMap.get(taskId)?.parent || ORPHAN_EPIC_KEY;
+    const openable = isWorkerTerminalOpenable(agent);
+    const status = workerHistoryStatus(agent, openable);
+    const list = byEpic.get(epicId) ?? [];
+    list.push({ agent, taskId, epicId, status, openable });
+    byEpic.set(epicId, list);
+  }
+
+  for (const list of byEpic.values()) {
+    list.sort((a, b) => {
+      const rank = workerHistoryRank(a) - workerHistoryRank(b);
+      if (rank !== 0) return rank;
+      if (a.taskId !== b.taskId) return a.taskId.localeCompare(b.taskId);
+      return a.agent.name.localeCompare(b.agent.name);
+    });
+  }
+
+  return byEpic;
+}
+
+function workerHistoryStatus(
+  agent: LoomAgentStatus,
+  openable: boolean,
+): WorkerHistoryItem["status"] {
+  const parsed = parseLoomStatus(agent.status ?? "");
+  const state = String(agent.state ?? "").trim().toLowerCase();
+  if (parsed.type === "error" || state === "dead") return "failed";
+  if (openable) return "running";
+  return "completed";
+}
+
+function workerHistoryRank(item: WorkerHistoryItem): number {
+  switch (item.status) {
+    case "running":
+      return 0;
+    case "failed":
+      return 1;
+    case "completed":
+      return 2;
+  }
 }
 
 export function isWorkerTerminalOpenable(agent: LoomAgentStatus): boolean {

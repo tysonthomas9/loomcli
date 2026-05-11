@@ -36,6 +36,7 @@ import { SearchInput } from "@/components/search/SearchInput";
 import { SearchScopeIndicator } from "@/components/search/SearchScopeIndicator";
 import { IssueDetailPanel } from "@/components/IssueDetailPanel/IssueDetailPanel";
 import { AgentDetailPanel } from "@/components/AgentDetailPanel/AgentDetailPanel";
+import { AgentIconRail } from "@/components/AgentIconRail/AgentIconRail";
 import { WorkspaceTree } from "@/components/WorkspaceTree/WorkspaceTree";
 import { TalkToLeadButton } from "@/components/TalkToLeadButton/TalkToLeadButton";
 import { NavRail } from "@/components/NavRail/NavRail";
@@ -1046,22 +1047,26 @@ function App() {
     </div>
   );
 
-  // Sidebar: always show WorkspaceTree with agents nested inside.
-  // The tree includes agent list per workspace plus "+ New Workspace" button.
+  // Sidebar: the agents view swaps the workspace tree for the live-agent rail.
+  // Completed ephemeral workers remain available in AgentWorkPanel history.
   const sidebarContent = (
-    <WorkspaceTree
-      onWorkspaceSwitch={handleWorkspaceSwitch}
-      onAgentClick={handleAgentClick}
-      agentTasks={agentTasks}
-      onAddClick={() => setShowCreateAgent(true)}
-      onAddWorkspaceClick={() => setShowCreateWorkspace(true)}
-      connectionState={connectionState}
-      connectionLost={isConnectionLost}
-      disconnectedSince={staleBannerDisconnectedSince}
-      onRetryConnection={staleBannerRetry}
-      workQueueCounts={workQueueCounts}
-      onTreeSelect={handleTreeIssueSelect}
-    />
+    activeView === "agents" ? (
+      <AgentIconRail />
+    ) : (
+      <WorkspaceTree
+        onWorkspaceSwitch={handleWorkspaceSwitch}
+        onAgentClick={handleAgentClick}
+        agentTasks={agentTasks}
+        onAddClick={() => setShowCreateAgent(true)}
+        onAddWorkspaceClick={() => setShowCreateWorkspace(true)}
+        connectionState={connectionState}
+        connectionLost={isConnectionLost}
+        disconnectedSince={staleBannerDisconnectedSince}
+        onRetryConnection={staleBannerRetry}
+        workQueueCounts={workQueueCounts}
+        onTreeSelect={handleTreeIssueSelect}
+      />
+    )
   );
 
   return (

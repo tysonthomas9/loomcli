@@ -24,13 +24,13 @@ import {
 import { useStore } from "zustand";
 
 import { LoadingSkeleton } from "@/components";
+import type { TerminalInputRequest } from "@/components/TerminalView";
 import { useAgentStoreInstance } from "@/hooks";
 import { type LoomAgentStatus, parseLoomStatus } from "@/types";
 import { getAvatarColor, shouldUseWhiteText } from "@/utils/colorUtils";
-import type { TerminalInputRequest } from "@/components/TerminalView/TerminalView";
 
 const TerminalView = lazy(() =>
-  import("@/components/TerminalView/TerminalView").then((m) => ({
+  import("@/components/TerminalView").then((m) => ({
     default: m.TerminalView,
   })),
 );
@@ -80,6 +80,8 @@ export function AgentDetailMain({
     [],
   );
   const terminalUnavailable = agent != null && isTerminalUnavailable(agent);
+  const completedEphemeralWorker =
+    agent != null && isCompletedEphemeralWorker(agent);
 
   if (!agentName) {
     return (
@@ -113,7 +115,9 @@ export function AgentDetailMain({
           position: "relative",
         }}
       >
-        {terminalUnavailable ? (
+        {completedEphemeralWorker ? (
+          <CompletedWorkerSummary agent={agent} />
+        ) : terminalUnavailable ? (
           <EmptyState
             message="Agent is stopped"
             detail="This agent does not have a live terminal session. Start the agent before attaching to its PTY."
@@ -139,6 +143,86 @@ function isTerminalUnavailable(agent: LoomAgentStatus): boolean {
   const state = (agent.state ?? "").toLowerCase();
   const desiredState = (agent.desired_state ?? "").toLowerCase();
   return state === "stopped" || state === "dead" || desiredState === "stopped";
+}
+
+function isCompletedEphemeralWorker(agent: LoomAgentStatus): boolean {
+  return agent.mode === "ephemeral" && isTerminalUnavailable(agent);
+}
+
+function CompletedWorkerSummary({
+  agent,
+}: {
+  agent: LoomAgentStatus;
+}): JSX.Element {
+  const taskId =
+    agent.task_id || parseLoomStatus(agent.status ?? "").taskId || "unknown";
+  return (
+    <div
+      style={{
+        flex: 1,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 24,
+        color: "var(--color-text-primary, #333)",
+      }}
+    >
+      <div
+        style={{
+          width: "min(520px, 100%)",
+          border: "1px solid var(--color-border, #ddd)",
+          borderRadius: 6,
+          background: "var(--color-bg-card, #fff)",
+          padding: 18,
+          display: "flex",
+          flexDirection: "column",
+          gap: 10,
+        }}
+      >
+        <div
+          style={{
+            fontSize: 11,
+            fontWeight: 700,
+            letterSpacing: 0.4,
+            textTransform: "uppercase",
+            color: "var(--color-text-muted, #666)",
+          }}
+        >
+          Ephemeral worker attempt
+        </div>
+        <div style={{ fontSize: 18, fontWeight: 700 }}>{agent.name}</div>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "auto minmax(0, 1fr)",
+            gap: "6px 12px",
+            fontSize: 12,
+          }}
+        >
+          <span style={{ color: "var(--color-text-muted, #666)" }}>Task</span>
+          <code>{taskId}</code>
+          <span style={{ color: "var(--color-text-muted, #666)" }}>Epic</span>
+          <code>{agent.parent || "unknown"}</code>
+          <span style={{ color: "var(--color-text-muted, #666)" }}>
+            Session
+          </span>
+          <code>{agent.session_id || "not recorded"}</code>
+          <span style={{ color: "var(--color-text-muted, #666)" }}>State</span>
+          <span>{agent.desired_state || agent.status || "stopped"}</span>
+        </div>
+        <div
+          style={{
+            fontSize: 12,
+            lineHeight: 1.5,
+            color: "var(--color-text-secondary, #555)",
+          }}
+        >
+          This worker is retained as task attempt history. Live terminal attach
+          is disabled after the ephemeral run stops.
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function Header({

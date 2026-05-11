@@ -23,6 +23,10 @@ import { useStore } from "zustand";
 import { ErrorBoundary, LoadingSkeleton } from "@/components";
 import { AgentDetailMain } from "@/components/AgentDetailMain/AgentDetailMain";
 import { AgentWorkPanel } from "@/components/AgentWorkPanel/AgentWorkPanel";
+import {
+  isLiveAgentRailVisible,
+  orderAgentsForEpicRunner,
+} from "@/components/AgentIconRail/AgentIconRail";
 import { IssueDetailPanel } from "@/components/IssueDetailPanel/IssueDetailPanel";
 import { useAgentStoreInstance } from "@/hooks";
 import type { Issue } from "@/types";
@@ -53,7 +57,8 @@ function AgentsPageInner(): JSX.Element {
 
   // Auto-select first agent when URL is bare /agents.
   const firstAgentName = useMemo(
-    () => (agents.length > 0 ? agents[0]?.name : undefined),
+    () =>
+      orderAgentsForEpicRunner(agents).find(isLiveAgentRailVisible)?.name,
     [agents],
   );
   useEffect(() => {

@@ -148,6 +148,12 @@ vi.mock("@/components/TerminalView/TerminalView", () => ({
   ),
 }));
 
+vi.mock("@/components/AgentIconRail/AgentIconRail", () => ({
+  AgentIconRail: () => (
+    <nav aria-label="Live agents" data-testid="agent-icon-rail" />
+  ),
+}));
+
 // Mock FileExplorer to avoid CodeMirror dependencies in jsdom
 vi.mock("@/components/FileExplorer", () => ({
   FileExplorer: () => <div data-testid="file-explorer">File Explorer</div>,
@@ -2926,7 +2932,7 @@ describe("App", () => {
   });
 
   describe("sidebar isMultiRepo guard", () => {
-    it("always renders WorkspaceTree sidebar regardless of isMultiRepo", () => {
+    it("renders WorkspaceTree sidebar for workspace view regardless of isMultiRepo", () => {
       vi.mocked(useWorkspaceContext).mockReturnValue({
         workspace: null,
         repos: [],
@@ -2958,7 +2964,6 @@ describe("App", () => {
 
       render(<App />);
 
-      // WorkspaceTree is always rendered now (sidebar always shows WorkspaceTree)
       expect(screen.getByLabelText(/workspace tree/i)).toBeInTheDocument();
     });
 
@@ -3030,8 +3035,43 @@ describe("App", () => {
 
       render(<App />);
 
-      // WorkspaceTree is always shown now, regardless of activeView
       expect(screen.getByLabelText(/workspace tree/i)).toBeInTheDocument();
+    });
+
+    it("renders the live-agent rail instead of WorkspaceTree on agents view", () => {
+      vi.mocked(useWorkspaceContext).mockReturnValue({
+        workspace: { name: "my-workspace" },
+        repos: [],
+        groups: [],
+        agents: [],
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+        getRepoByName: vi.fn(),
+        getReposByGroup: vi.fn(() => []),
+        getAgentByName: vi.fn(),
+        activeWorkspaceName: "my-workspace",
+        setActiveWorkspace: vi.fn(),
+        defaultWorkspaceName: null,
+        setDefaultWorkspace: vi.fn().mockResolvedValue(undefined),
+        selectedRepoNames: new Set<string>(),
+        activeRepos: [],
+        activeRepoNames: [],
+        isAllSelected: true,
+        selectRepos: vi.fn(),
+        selectAll: vi.fn(),
+        toggleRepo: vi.fn(),
+        sourceReposFilter: undefined,
+        isMultiRepo: true,
+      });
+      mockUseRouteView.mockReturnValue(createViewStateReturn("agents"));
+      const mockReturn = createMockUseIssuesReturn({});
+      mockStoreState = mockReturn;
+
+      render(<App />);
+
+      expect(screen.getByTestId("agent-icon-rail")).toBeInTheDocument();
+      expect(screen.queryByLabelText(/workspace tree/i)).not.toBeInTheDocument();
     });
 
     it("renders WorkspaceTree sidebar during loading when isMultiRepo is false", () => {

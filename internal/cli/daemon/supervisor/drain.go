@@ -8,6 +8,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/workspace"
+	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/lockfile"
 )
 
@@ -278,6 +279,10 @@ func (s *Supervisor) AddAgent(entry config.AgentEntry) error {
 // AddAgentForTask creates and starts a new agent with an optional first task
 // requested by the control plane.
 func (s *Supervisor) AddAgentForTask(entry config.AgentEntry, taskID string) error {
+	if entry.Mode == domain.AgentModeEphemeral && taskID == "" {
+		return fmt.Errorf("ephemeral agent %q requires a task_id", entry.Worktree)
+	}
+
 	// Early duplicate check (avoids unnecessary I/O; authoritative check is below under Lock)
 	s.AgentsMu.RLock()
 	for _, ap := range s.Agents {

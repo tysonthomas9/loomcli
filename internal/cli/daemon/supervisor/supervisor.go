@@ -443,6 +443,10 @@ func (s *Supervisor) claimTask(ap *AgentProcess, epicID string) bool {
 	ap.Mu.Lock()
 	requestedTaskID := ap.RequestedTaskID
 	ap.Mu.Unlock()
+	if ap.Entry.Mode == domain.AgentModeEphemeral && requestedTaskID == "" {
+		s.setPreflightError(ap, agenterr.NoWork, "ephemeral worker requires a requested task")
+		return false
+	}
 	if requestedTaskID != "" {
 		return s.claimRequestedTask(ap, opts, requestedTaskID)
 	}
@@ -739,6 +743,10 @@ func (s *Supervisor) agentSessionMetadataLocked(ap *AgentProcess, backend string
 	}
 	if ap.AssignedTaskID != "" {
 		metadata["task_id"] = ap.AssignedTaskID
+	}
+	if ap.Entry.Mode == domain.AgentModeEphemeral {
+		metadata["attempt_kind"] = "ephemeral_task_attempt"
+		metadata["cleanup_state"] = "retained"
 	}
 	if ap.Entry.Repo != "" {
 		metadata["repo"] = ap.Entry.Repo

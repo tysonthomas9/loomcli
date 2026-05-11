@@ -1,6 +1,7 @@
 package supervisor
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
@@ -42,6 +43,22 @@ func TestShouldRestart_Ephemeral_CleanExitWithClaim_DoesNotRestart(t *testing.T)
 	}
 	if ap.StopReason != StopReasonEphemeralDone {
 		t.Errorf("StopReason = %q, want %q", ap.StopReason, StopReasonEphemeralDone)
+	}
+}
+
+func TestAddAgentForTask_EphemeralRequiresTaskID(t *testing.T) {
+	s := newEphemeralSupervisor(t)
+
+	err := s.AddAgentForTask(cfgpkg.AgentEntry{
+		Worktree: "test",
+		Role:     "task",
+		Mode:     domain.AgentModeEphemeral,
+	}, "")
+	if err == nil {
+		t.Fatal("AddAgentForTask returned nil, want task_id validation error")
+	}
+	if !strings.Contains(err.Error(), "requires a task_id") {
+		t.Fatalf("error = %q, want requires a task_id", err)
 	}
 }
 

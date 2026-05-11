@@ -12,7 +12,10 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/cli/daemon/supervisor"
+	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/events"
+	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 // shortSocketDir creates a short temp directory suitable for Unix socket paths,
@@ -272,6 +275,67 @@ func TestControlServer_StartNotStopped(t *testing.T) {
 	}
 	if !strings.Contains(resp.Error, "already running") {
 		t.Errorf("error = %q, want contains 'already running'", resp.Error)
+	}
+}
+
+func TestControlServer_EphemeralStartRequiresTaskID(t *testing.T) {
+	d := newTestDaemonWithAgents(nil)
+	d.config = makeDaemonConfig([]AgentEntry{
+		{Worktree: "worker", Role: "task", Mode: domain.AgentModeEphemeral},
+	}, nil)
+	defer d.sup.ShutdownOnce.Do(func() { close(d.sup.Shutdown) })
+
+	resp := d.handleAgentControlStart("worker")
+	if resp.Success {
+		t.Fatal("expected ephemeral start without task_id to fail")
+	}
+	if !strings.Contains(resp.Error, "requires a task_id") {
+		t.Fatalf("error = %q, want requires a task_id", resp.Error)
+	}
+}
+
+func TestControlServer_EphemeralStartRejectsTerminalAttempt(t *testing.T) {
+	d := newTestDaemonWithAgents(nil)
+	d.config = makeDaemonConfig([]AgentEntry{
+		{Worktree: "worker", Role: "task", Mode: domain.AgentModeEphemeral},
+	}, nil)
+	d.store = memstore.New()
+	d.sup.WorkspaceID = "WS"
+	defer d.sup.ShutdownOnce.Do(func() { close(d.sup.Shutdown) })
+
+	if _, err := d.store.AgentSessions().Create(t.Context(), store.AgentSessionCreate{
+		WorkspaceKey: "WS",
+		SessionID:    "sess-worker-1",
+		AgentID:      "worker",
+		Kind:         domain.AgentSessionKindTask,
+		TaskID:       "TASK-1",
+		Status:       domain.AgentSessionCompleted,
+	}); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
+	resp := d.handleAgentControlStart("worker", "TASK-1")
+	if resp.Success {
+		t.Fatal("expected ephemeral start with terminal attempt to fail")
+	}
+	if !strings.Contains(resp.Error, "already has a terminal task attempt") {
+		t.Fatalf("error = %q, want terminal task attempt rejection", resp.Error)
+	}
+}
+
+func TestControlServer_EphemeralRestartRejected(t *testing.T) {
+	d := newTestDaemonWithAgents(nil)
+	d.config = makeDaemonConfig([]AgentEntry{
+		{Worktree: "worker", Role: "task", Mode: domain.AgentModeEphemeral},
+	}, nil)
+	defer d.sup.ShutdownOnce.Do(func() { close(d.sup.Shutdown) })
+
+	resp := d.handleAgentControlRestart("worker")
+	if resp.Success {
+		t.Fatal("expected ephemeral restart to fail")
+	}
+	if !strings.Contains(resp.Error, "cannot be restarted") {
+		t.Fatalf("error = %q, want cannot be restarted", resp.Error)
 	}
 }
 
