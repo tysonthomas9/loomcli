@@ -326,7 +326,7 @@ function TaskCard({
         </div>
         <div className={styles.taskTitle}>{task.title}</div>
       </div>
-      {workerAgent && onWorkerClick ? (
+      {workerAgent && onWorkerClick && isWorkerTerminalOpenable(workerAgent) ? (
         <button
           type="button"
           className={styles.workerTerminalButton}
@@ -367,6 +367,12 @@ export function buildWorkerByTaskId(
   }
 
   return byTaskId;
+}
+
+export function isWorkerTerminalOpenable(agent: LoomAgentStatus): boolean {
+  const state = String(agent.state ?? "").trim().toLowerCase();
+  const desiredState = String(agent.desired_state ?? "").trim().toLowerCase();
+  return state !== "stopped" && state !== "dead" && desiredState !== "stopped";
 }
 
 function compareWorkerAgent(

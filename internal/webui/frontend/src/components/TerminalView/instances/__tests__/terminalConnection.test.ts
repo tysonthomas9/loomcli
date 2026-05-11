@@ -98,6 +98,8 @@ function makeMocks() {
   const onConnected = vi.fn();
   const onDisconnected = vi.fn();
   const onOutput = vi.fn();
+  const onBackendCrash = vi.fn();
+  const onSessionKilled = vi.fn();
 
   return {
     write,
@@ -106,6 +108,8 @@ function makeMocks() {
     onConnected,
     onDisconnected,
     onOutput,
+    onBackendCrash,
+    onSessionKilled,
   };
 }
 
@@ -375,6 +379,125 @@ describe("connectWebSocket", () => {
     ws.simulateClose(1008, "unauthorized");
     expect(m.setConnectionState).toHaveBeenCalledWith("disconnected");
     expect(m.onDisconnected).toHaveBeenCalled();
+  });
+
+  it("does not auto-retry when the workspace runtime is unavailable", async () => {
+    const m = makeMocks();
+    connectWebSocket(
+      "ws1",
+      "session1",
+      m.write,
+      m.wsRef,
+      m.setConnectionState,
+      undefined,
+      m.onDisconnected,
+      undefined,
+      undefined,
+      m.onSessionKilled,
+    );
+
+    shared.resolveToken!({ token: "tok" });
+    await vi.waitFor(() => {
+      expect(MockWebSocket.instances).toHaveLength(1);
+    });
+
+    const ws = MockWebSocket.instances[0];
+    ws.simulateOpen();
+    ws.simulateClose(1001, "workspace unavailable");
+
+    expect(m.setConnectionState).toHaveBeenCalledWith("error");
+    expect(m.onSessionKilled).toHaveBeenCalledTimes(1);
+    expect(m.onDisconnected).not.toHaveBeenCalled();
+  });
+
+  it("does not auto-retry when the backend process exits", async () => {
+    const m = makeMocks();
+    connectWebSocket(
+      "ws1",
+      "session1",
+      m.write,
+      m.wsRef,
+      m.setConnectionState,
+      undefined,
+      m.onDisconnected,
+      undefined,
+      m.onBackendCrash,
+      m.onSessionKilled,
+    );
+
+    shared.resolveToken!({ token: "tok" });
+    await vi.waitFor(() => {
+      expect(MockWebSocket.instances).toHaveLength(1);
+    });
+
+    const ws = MockWebSocket.instances[0];
+    ws.simulateOpen();
+    ws.simulateClose(4001, "backend process exited");
+
+    expect(m.setConnectionState).toHaveBeenCalledWith("crashed");
+    expect(m.onBackendCrash).toHaveBeenCalledWith("backend process exited");
+    expect(m.onDisconnected).not.toHaveBeenCalled();
+    expect(m.onSessionKilled).not.toHaveBeenCalled();
+  });
+
+  it("does not auto-retry when the terminal session exits cleanly", async () => {
+    const m = makeMocks();
+    connectWebSocket(
+      "ws1",
+      "session1",
+      m.write,
+      m.wsRef,
+      m.setConnectionState,
+      undefined,
+      m.onDisconnected,
+      undefined,
+      m.onBackendCrash,
+      m.onSessionKilled,
+    );
+
+    shared.resolveToken!({ token: "tok" });
+    await vi.waitFor(() => {
+      expect(MockWebSocket.instances).toHaveLength(1);
+    });
+
+    const ws = MockWebSocket.instances[0];
+    ws.simulateOpen();
+    ws.simulateClose(1000, "");
+
+    expect(m.setConnectionState).toHaveBeenCalledWith("session_ended");
+    expect(m.onSessionKilled).toHaveBeenCalledTimes(1);
+    expect(m.onDisconnected).not.toHaveBeenCalled();
+    expect(m.onBackendCrash).not.toHaveBeenCalled();
+  });
+
+  it("does not auto-retry when the terminal session is killed", async () => {
+    const m = makeMocks();
+    connectWebSocket(
+      "ws1",
+      "session1",
+      m.write,
+      m.wsRef,
+      m.setConnectionState,
+      undefined,
+      m.onDisconnected,
+      undefined,
+      m.onBackendCrash,
+      m.onSessionKilled,
+    );
+
+    shared.resolveToken!({ token: "tok" });
+    await vi.waitFor(() => {
+      expect(MockWebSocket.instances).toHaveLength(1);
+    });
+
+    const ws = MockWebSocket.instances[0];
+    ws.simulateOpen();
+    ws.simulateClose(4002, "session killed");
+
+    expect(m.setConnectionState).toHaveBeenCalledWith("session_ended");
+    expect(m.onSessionKilled).toHaveBeenCalledTimes(1);
+    expect(m.onDisconnected).not.toHaveBeenCalled();
+    expect(m.onBackendCrash).not.toHaveBeenCalled();
   });
 
   it("double cleanup is idempotent", async () => {

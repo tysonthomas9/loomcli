@@ -655,7 +655,7 @@ type agentCommandStore struct{ client *Client }
 var _ store.AgentCommandStore = (*agentCommandStore)(nil)
 
 func (s *agentCommandStore) Create(ctx context.Context, in store.AgentCommandCreate) (*domain.AgentCommand, error) {
-	body := map[string]any{"command_id": in.CommandID, "target_agent_id": in.TargetAgentID, "target_node_id": in.TargetNodeID, "session_id": in.SessionID, "type": in.Type, "payload": in.Payload, "status": domain.AgentCommandQueued}
+	body := map[string]any{"command_id": in.CommandID, "target_agent_id": in.TargetAgentID, "target_node_id": in.TargetNodeID, "session_id": in.SessionID, "type": in.Type, "payload": in.Payload}
 	var out domain.AgentCommand
 	if err := s.client.do(ctx, "POST", "/api/v1/"+pathEscape(in.WorkspaceKey)+"/agent-commands", body, &out); err != nil {
 		return nil, err

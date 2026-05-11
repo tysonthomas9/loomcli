@@ -19,12 +19,13 @@ import (
 // touched unexpectedly by the test subject.
 type fakePTYSource struct {
 	alive   map[SessionKey]bool
+	closed  map[SessionKey]bool
 	killed  []SessionKey
 	killErr error
 }
 
 func newFakePTYSource() *fakePTYSource {
-	return &fakePTYSource{alive: map[SessionKey]bool{}}
+	return &fakePTYSource{alive: map[SessionKey]bool{}, closed: map[SessionKey]bool{}}
 }
 
 func (f *fakePTYSource) AttachSession(_ SessionKey, _, _ uint16, _ *LaunchSpec) (Attachment, bool, error) {
@@ -34,9 +35,13 @@ func (f *fakePTYSource) Detach(_ SessionKey, _ string) {}
 func (f *fakePTYSource) Kill(key SessionKey) error {
 	f.killed = append(f.killed, key)
 	delete(f.alive, key)
+	f.closed[key] = true
 	return f.killErr
 }
 func (f *fakePTYSource) HasSession(key SessionKey) bool { return f.alive[key] }
+func (f *fakePTYSource) SessionClosed(key SessionKey) bool {
+	return f.closed[key]
+}
 func (f *fakePTYSource) AttachmentCount(key SessionKey) int {
 	if f.alive[key] {
 		return 1
@@ -133,6 +138,59 @@ func TestListTabs_TreatsCurrentProcessMetadataAsAttachable(t *testing.T) {
 	}
 	if got["stale-tab"] {
 		t.Errorf("stale-tab: expected pty_alive=false after server restart, got true")
+	}
+}
+
+func TestListTabs_DoesNotTreatAgentMetadataWithoutLaunchAsAttachable(t *testing.T) {
+	svc, _, _ := newLivenessTestSvc(t)
+	ctx := context.Background()
+	const ws = "w"
+	startedAt := time.Date(2026, 5, 5, 1, 0, 0, 0, time.UTC)
+	svc.startedAt = startedAt
+
+	if err := svc.tabStore.Set(ctx, &tabmeta.TabMetadata{
+		SessionName: "term_stopped_agent",
+		Workspace:   ws,
+		Label:       "agent-worker-done",
+		Kind:        "agent",
+		AgentID:     "worker-done",
+		CreatedAt:   startedAt.Add(time.Second),
+		UpdatedAt:   startedAt.Add(time.Second),
+	}); err != nil {
+		t.Fatalf("seed stopped agent tab: %v", err)
+	}
+
+	tabs, err := svc.ListTabs(ctx, ws)
+	if err != nil {
+		t.Fatalf("ListTabs: %v", err)
+	}
+	for _, tb := range tabs {
+		if tb.SessionName == "term_stopped_agent" && tb.PTYAlive {
+			t.Fatal("term_stopped_agent: expected pty_alive=false without launch spec")
+		}
+	}
+}
+
+func TestListTabs_DoesNotTreatClosedCurrentProcessMetadataAsAttachable(t *testing.T) {
+	svc, fake, _ := newLivenessTestSvc(t)
+	ctx := context.Background()
+	const ws = "w"
+	startedAt := time.Date(2026, 5, 5, 1, 0, 0, 0, time.UTC)
+	svc.startedAt = startedAt
+
+	putTestTabAt(t, svc, ws, "closed-tab", startedAt.Add(time.Second))
+	fake.closed[SessionKey{Workspace: ws, Name: "closed-tab"}] = true
+
+	tabs, err := svc.ListTabs(ctx, ws)
+	if err != nil {
+		t.Fatalf("ListTabs: %v", err)
+	}
+	got := map[string]bool{}
+	for _, tb := range tabs {
+		got[tb.SessionName] = tb.PTYAlive
+	}
+	if got["closed-tab"] {
+		t.Errorf("closed-tab: expected pty_alive=false after PTY exit, got true")
 	}
 }
 

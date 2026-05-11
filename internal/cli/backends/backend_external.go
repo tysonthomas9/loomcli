@@ -64,7 +64,6 @@ func (e *ExternalBackend) InvokeNonInteractive(workDir, prompt, agentName string
 		return wrapInvocationError(fmt.Errorf("failed to create stdout pipe: %w", err), "")
 	}
 	cmd.Stderr = os.Stderr
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	if err := cmd.Start(); err != nil {
 		r.Close()

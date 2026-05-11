@@ -61,10 +61,6 @@ interface TerminalViewProps {
   hideTabs?: boolean;
 }
 
-function isLeadSessionName(sessionName: string): boolean {
-  return /(?:^|--)lead-[^-]+-\d+$/.test(sessionName);
-}
-
 export function TerminalView({
   isActive = true,
   pendingIssueContext,
@@ -416,7 +412,6 @@ export function TerminalView({
       const paneIsActive =
         pane === "right" ? tab.id === rightPaneTabId : tab.id === activeTabId;
       const meta = metaBySession.get(tab.sessionName);
-      const isAgentTab = tab.kind === "agent" || Boolean(tab.agentName);
       // Undefined while metadata is still loading — preserves connect-on-
       // mount. Only concrete `false` gates auto-attach.
       const ptyAlive = meta?.pty_alive;
@@ -426,9 +421,7 @@ export function TerminalView({
           isActive={paneIsActive}
           instanceRef={setInstanceRef(tab.id)}
           ptyAlive={ptyAlive}
-          autoStartStaleSession={
-            isAgentTab || isLeadSessionName(tab.sessionName)
-          }
+          autoStartStaleSession={false}
           onConnectionStateChange={(state, hasConnected) =>
             handleConnectionStateChange(tab.id, state, hasConnected)
           }

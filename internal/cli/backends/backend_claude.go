@@ -119,8 +119,6 @@ func (c *ClaudeBackend) InvokeStreaming(ctx context.Context, workDir, prompt, ag
 		return nil, fmt.Errorf("failed to create stdout pipe: %w", err)
 	}
 
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-
 	if err := cmd.Start(); err != nil {
 		r.Close()
 		return nil, fmt.Errorf("failed to start claude: %w", err)
@@ -286,7 +284,6 @@ func setupNonInteractivePipes(cmd *exec.Cmd, prompt, resumeID string) (io.ReadCl
 		return nil, nil, fmt.Errorf("failed to create stdout pipe: %w", err)
 	}
 	cmd.Stderr = os.Stderr
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	if resumeID != "" {
 		fmt.Printf("[auto] Resuming Claude session %s...\n\n", resumeID)

@@ -601,7 +601,38 @@ func TestPushWorkspaceWorktrees_EmptyList(t *testing.T) {
 	}}
 
 	// Should not panic or call any commands
-	pushWorkspaceWorktrees(deps, worktrees, "", "main")
+	if err := pushWorkspaceWorktrees(deps, worktrees, "", "main"); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+}
+
+func TestPushWorkspaceWorktrees_ReturnsErrorWhenAnyRepoFails(t *testing.T) {
+	t.Parallel()
+	deps, _, _, _, _ := NewTestDeps(t)
+
+	worktrees := []WorktreeInfo{
+		{
+			Name:   "repo-a",
+			Path:   "/ws/repo-a",
+			Branch: "feat-a",
+			Repo:   &RepoConfig{Name: "repo-a", DefaultBranch: "main", Remote: ""},
+		},
+	}
+
+	cmdMock := NewCommandMock(t, []CommandStub{})
+	cmdMock.InstallOn(deps)
+	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
+		{Args: []string{"fetch", "origin"}, Err: errors.New("fetch failed")},
+	})
+	outputMock.InstallOn(deps)
+
+	err := pushWorkspaceWorktrees(deps, worktrees, "", "main")
+	if err == nil {
+		t.Fatal("expected pushWorkspaceWorktrees to return an error")
+	}
+	if !strings.Contains(err.Error(), "1 repo(s) failed") {
+		t.Fatalf("unexpected error: %v", err)
+	}
 }
 
 func TestPushBranchInRepo_WorktreeConflict_UsesDetached(t *testing.T) {

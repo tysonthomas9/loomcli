@@ -85,7 +85,6 @@ func defaultCodexNonInteractiveInvoker(workDir, prompt, agentName string, shutdo
 		return wrapInvocationError(fmt.Errorf("failed to create stdout pipe: %w", err), "")
 	}
 	cmd.Stderr = os.Stderr
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	fmt.Println("Launching Codex agent (non-interactive)...")
 	fmt.Println("")
@@ -119,12 +118,52 @@ func defaultCodexNonInteractiveInvoker(workDir, prompt, agentName string, shutdo
 
 // buildBackendEnv constructs the standard environment for backend subprocess invocations.
 func buildBackendEnv(workDir, agentName string) []string {
-	env := append(cli.FilteredEnv(), "LOOM_WORKTREE_PATH="+workDir)
+	env := appendLoomExecutableDirToPath(cli.FilteredEnv())
+	env = append(env, "LOOM_WORKTREE_PATH="+workDir)
 	if agentName != "" {
 		env = append(env, "LOOM_AGENT_NAME="+agentName)
 	}
 	env = append(env, activeSessionEnvVars()...)
 	return env
+}
+
+func appendLoomExecutableDirToPath(env []string) []string {
+	exe, err := os.Executable()
+	if err != nil || exe == "" {
+		return env
+	}
+	dir := filepath.Dir(exe)
+	if dir == "." || dir == "" {
+		return env
+	}
+
+	pathPrefix := "PATH="
+	for i, entry := range env {
+		if !strings.HasPrefix(entry, pathPrefix) {
+			continue
+		}
+		current := strings.TrimPrefix(entry, pathPrefix)
+		if pathContainsDir(current, dir) {
+			return env
+		}
+		if current == "" {
+			env[i] = pathPrefix + dir
+		} else {
+			env[i] = pathPrefix + dir + string(os.PathListSeparator) + current
+		}
+		return env
+	}
+
+	return append([]string{pathPrefix + dir}, env...)
+}
+
+func pathContainsDir(pathValue, dir string) bool {
+	for _, entry := range filepath.SplitList(pathValue) {
+		if entry == dir {
+			return true
+		}
+	}
+	return false
 }
 
 // pipePromptToCmd attaches the prompt to cmd.Stdin without exposing it in CLI args.

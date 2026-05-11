@@ -41,8 +41,8 @@ func TestExitReason_KillPropagatesToAttachment(t *testing.T) {
 }
 
 // TestExitReason_ChildExitIsExited verifies that a self-terminating child
-// process surfaces ExitReasonExited, so the WS handler can emit 4001
-// (backend exited) rather than 4002 (user-initiated kill).
+// process surfaces ExitReasonExited, so the WS handler can emit a normal
+// session-ended close rather than 4002 (user-initiated kill).
 func TestExitReason_ChildExitIsExited(t *testing.T) {
 	m := newTestManager(t)
 	key := SessionKey{Workspace: "ws1", Name: "sess"}
@@ -64,6 +64,45 @@ func TestExitReason_ChildExitIsExited(t *testing.T) {
 	if got := att.ExitReason(); got != ExitReasonExited {
 		t.Errorf("ExitReason after child exit = %q; want %q", got, ExitReasonExited)
 	}
+	if !m.SessionClosed(key) {
+		t.Errorf("SessionClosed after child exit = false; want true")
+	}
+	if m.HasSession(key) {
+		t.Errorf("HasSession after child exit = true; want false")
+	}
+}
+
+func TestSessionClosedClearsAfterFreshAttach(t *testing.T) {
+	m := newTestManager(t)
+	key := SessionKey{Workspace: "ws1", Name: "sess"}
+
+	att, _, err := m.AttachSession(key, 80, 24, &LaunchSpec{Argv: []string{"-c", "true"}})
+	if err != nil {
+		t.Fatalf("AttachSession: %v", err)
+	}
+	waitUntil(t, func() bool {
+		select {
+		case _, ok := <-att.Output():
+			return !ok
+		default:
+			return false
+		}
+	}, 2*time.Second, "output channel to close after child exit")
+	if !m.SessionClosed(key) {
+		t.Fatalf("SessionClosed after child exit = false; want true")
+	}
+
+	next, reattach, err := m.AttachSession(key, 80, 24, &LaunchSpec{Argv: []string{"-c", "cat"}})
+	if err != nil {
+		t.Fatalf("AttachSession after closed session: %v", err)
+	}
+	if reattach {
+		t.Errorf("reattach after closed session = true; want false")
+	}
+	if m.SessionClosed(key) {
+		t.Errorf("SessionClosed after fresh attach = true; want false")
+	}
+	m.Detach(key, next.ConnID())
 }
 
 // TestExitReason_ReplacementIsEmpty verifies that an attachment replaced by a

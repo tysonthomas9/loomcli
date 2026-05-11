@@ -35,6 +35,12 @@ type PTYSource interface {
 	// client is reconnecting".
 	HasSession(key SessionKey) bool
 
+	// SessionClosed reports whether a session with this key existed in the
+	// current process and has since exited or been killed. This lets callers
+	// distinguish "fresh metadata that may spawn on first attach" from
+	// "metadata for a completed command tab that must not auto-respawn".
+	SessionClosed(key SessionKey) bool
+
 	// AttachmentCount reports the number of concurrent clients currently
 	// attached to the session identified by key. Returns 0 for unknown
 	// sessions and for sessions that exist but have no live WebSockets

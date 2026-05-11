@@ -67,7 +67,6 @@ func defaultOpenCodeNonInteractiveInvoker(workDir, prompt, agentName string, shu
 		return wrapInvocationError(fmt.Errorf("failed to create stdout pipe: %w", err), "")
 	}
 	cmd.Stderr = os.Stderr
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	fmt.Println("Launching OpenCode agent (non-interactive)...")
 	fmt.Println("")

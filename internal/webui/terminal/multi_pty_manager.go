@@ -318,6 +318,16 @@ func (mm *MultiPTYManager) HasSession(key SessionKey) bool {
 	return m.HasSession(key)
 }
 
+// SessionClosed reports whether a session existed in the current per-workspace
+// manager and has since exited or been killed.
+func (mm *MultiPTYManager) SessionClosed(key SessionKey) bool {
+	m := mm.existingManagerForWS(key.Workspace)
+	if m == nil {
+		return false
+	}
+	return m.SessionClosed(key)
+}
+
 // AttachmentCount returns the number of concurrent attachments for key.
 // Returns 0 for unknown workspaces.
 func (mm *MultiPTYManager) AttachmentCount(key SessionKey) int {

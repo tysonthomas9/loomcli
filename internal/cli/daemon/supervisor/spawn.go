@@ -25,7 +25,10 @@ func (s *Supervisor) buildCommand(ap *AgentProcess) (*exec.Cmd, error) {
 	ap.Mu.Unlock()
 
 	agentBackend := s.GetEffectiveBackend(ap)
-	cmd := buildAgentExecCmd(ap, agentBackend, epicID)
+	cmd, err := buildAgentExecCmd(ap, agentBackend, epicID)
+	if err != nil {
+		return nil, err
+	}
 
 	cmd.Dir = ap.WorktreePath
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
@@ -62,7 +65,11 @@ func (s *Supervisor) buildCommand(ap *AgentProcess) (*exec.Cmd, error) {
 }
 
 // buildAgentExecCmd creates the exec.Cmd with the correct arguments for the agent role.
-func buildAgentExecCmd(ap *AgentProcess, backend, epicID string) *exec.Cmd {
+func buildAgentExecCmd(ap *AgentProcess, backend, epicID string) (*exec.Cmd, error) {
+	loomPath, err := os.Executable()
+	if err != nil {
+		return nil, fmt.Errorf("resolve loom executable: %w", err)
+	}
 	if BuiltInRoles[ap.Entry.Role] {
 		args := []string{ap.Entry.Role, ap.WorktreePath, "--auto", "--daemon-mode"}
 		if backend != "" {
@@ -71,7 +78,7 @@ func buildAgentExecCmd(ap *AgentProcess, backend, epicID string) *exec.Cmd {
 		if epicID != "" {
 			args = append(args, "--parent", epicID)
 		}
-		return exec.Command("loom", args...) //nolint:gosec // G204: intentional loom subprocess launch
+		return exec.Command(loomPath, args...), nil //nolint:gosec // G204: intentional loom subprocess launch
 	}
 
 	args := []string{"agent", ap.WorktreePath, "--prompt", ap.RoleConfig.PromptFile, "--auto", "--daemon-mode"}
@@ -84,7 +91,7 @@ func buildAgentExecCmd(ap *AgentProcess, backend, epicID string) *exec.Cmd {
 	if epicID != "" {
 		args = append(args, "--parent", epicID)
 	}
-	return exec.Command("loom", args...) //nolint:gosec // G204: intentional loom subprocess launch
+	return exec.Command(loomPath, args...), nil //nolint:gosec // G204: intentional loom subprocess launch
 }
 
 // appendRoleEnv adds role constraint env vars (allowed/denied tools, read-only, repo).

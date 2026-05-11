@@ -308,6 +308,35 @@ func TestReconcileOnceRetriesOpenTaskWhenSpawnedWorkerMissing(t *testing.T) {
 	}
 }
 
+func TestSpawnWorkerPinsConfiguredBackend(t *testing.T) {
+	ctx := context.Background()
+	st := newTestStore(t)
+
+	r := &runner{
+		store:          st,
+		workspace:      "ws",
+		parent:         "EPIC-1",
+		prefix:         "epic-1",
+		role:           "task",
+		backend:        "codex",
+		maxConcurrency: 1,
+	}
+	task := backend.IssueData{ID: "EPIC-2", Title: "worker backend", Status: "open"}
+
+	if err := r.spawnWorker(ctx, task); err != nil {
+		t.Fatalf("spawnWorker() error = %v", err)
+	}
+
+	worker := workerName("epic-1", task.ID)
+	agent, err := st.Agents().Get(ctx, "ws", worker)
+	if err != nil {
+		t.Fatalf("get worker: %v", err)
+	}
+	if agent.Backend != "codex" {
+		t.Fatalf("worker backend = %q, want codex", agent.Backend)
+	}
+}
+
 func TestReconcileOnceSkipsReadyTaskWithLiveStartCommand(t *testing.T) {
 	ctx := context.Background()
 	st := newTestStore(t)

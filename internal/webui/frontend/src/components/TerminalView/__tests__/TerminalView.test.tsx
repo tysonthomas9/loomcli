@@ -298,7 +298,7 @@ describe("TerminalView", () => {
       expect(screen.getByTestId("tab-session-2")).toBeInTheDocument();
     });
 
-    it("auto-starts stale lead tabs but not stale issue tabs", () => {
+    it("does not auto-start stale command tabs without an explicit user action", () => {
       setMetadata([
         {
           session_name: "DESKTOP-QA--lead-codex-1",
@@ -322,7 +322,7 @@ describe("TerminalView", () => {
       expect(
         calls.find((props) => props.sessionName === "DESKTOP-QA--lead-codex-1")
           ?.autoStartStaleSession,
-      ).toBe(true);
+      ).toBe(false);
       expect(
         calls.find((props) => props.sessionName === "issue-PROJ-42")
           ?.autoStartStaleSession,

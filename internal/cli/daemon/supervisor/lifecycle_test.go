@@ -1574,8 +1574,12 @@ func TestBuildCommand_CustomRoleAllFlags(t *testing.T) {
 	}
 
 	// Verify args: loom agent <path> --prompt <file> --auto --daemon-mode --task-filter <filter> --backend <backend> --parent <epic>
+	loomPath, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable(): %v", err)
+	}
 	expectedArgs := []string{
-		"loom", "agent", tmpDir, "--prompt", promptFile, "--auto", "--daemon-mode",
+		loomPath, "agent", tmpDir, "--prompt", promptFile, "--auto", "--daemon-mode",
 		"--task-filter", "review-tasks",
 		"--backend", "openai", // per-agent backend overrides project backend
 		"--parent", "epic-42",
@@ -1640,8 +1644,12 @@ func TestBuildCommand_CustomRoleMinimal(t *testing.T) {
 		t.Fatalf("buildCommand error: %v", err)
 	}
 
+	loomPath, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable(): %v", err)
+	}
 	expectedArgs := []string{
-		"loom", "agent", tmpDir, "--prompt", promptFile, "--auto", "--daemon-mode",
+		loomPath, "agent", tmpDir, "--prompt", promptFile, "--auto", "--daemon-mode",
 	}
 	if len(cmd.Args) != len(expectedArgs) {
 		t.Fatalf("cmd.Args = %v, want %v", cmd.Args, expectedArgs)
@@ -1805,8 +1813,12 @@ func TestBuildCommand_BuiltInRoleWithBackendAndEpic(t *testing.T) {
 		t.Fatalf("buildCommand error: %v", err)
 	}
 
+	loomPath, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable(): %v", err)
+	}
 	expectedArgs := []string{
-		"loom", "plan", tmpDir, "--auto", "--daemon-mode",
+		loomPath, "plan", tmpDir, "--auto", "--daemon-mode",
 		"--backend", "openai",
 		"--parent", "epic-99",
 	}

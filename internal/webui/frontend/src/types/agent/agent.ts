@@ -94,7 +94,7 @@ export type LoomFileChange = components["schemas"]["MonitorFileChange"];
 /**
  * Agent status from the loom server.
  * Based on generated MonitorAgentStatus, with workspace made optional for
- * unassigned agents and extended with cross_repo, path, worktree_path fields not in spec.
+ * unassigned agents and extended with state, cross_repo, path, worktree_path fields not in spec.
  */
 export type LoomAgentStatus = Omit<
   components["schemas"]["MonitorAgentStatus"],
@@ -108,6 +108,8 @@ export type LoomAgentStatus = Omit<
   path?: string;
   /** Absolute path to the agent's worktree */
   worktree_path?: string;
+  /** Control-plane assignment state returned by the fleet-backed agents API */
+  state?: string;
 };
 
 /**

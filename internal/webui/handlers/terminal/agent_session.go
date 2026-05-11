@@ -91,6 +91,13 @@ func ensureAgentTerminalSession(ctx context.Context, svc service.TerminalService
 		return existing, nil
 	}
 
+	if !agentTerminalLaunchAllowed(agent) {
+		if existing != nil {
+			return disableStoredAgentLaunch(ctx, svc, workspace, existing)
+		}
+		return nil, service.ErrValidation("agent is not running and has no terminal session")
+	}
+
 	sessionName := "term_" + uuid.NewString()
 	sortOrder := len(tabs)
 	label := "agent-" + agentName
@@ -146,6 +153,29 @@ func ensureAgentTerminalSession(ctx context.Context, svc service.TerminalService
 		return nil, err
 	}
 	return svc.GetTab(ctx, workspace, sessionName)
+}
+
+func agentTerminalLaunchAllowed(agent *domain.Agent) bool {
+	if agent == nil {
+		return false
+	}
+	return agent.State != domain.AgentStateStopped && agent.DesiredState != domain.AgentDesiredStopped
+}
+
+func disableStoredAgentLaunch(ctx context.Context, svc service.TerminalService, workspace string, existing *tabmeta.TabMetadata) (*tabmeta.TabMetadata, error) {
+	if existing.Launch == nil && !existing.Writable {
+		return existing, nil
+	}
+
+	now := time.Now().UTC()
+	meta := *existing
+	meta.Launch = nil
+	meta.Writable = false
+	meta.UpdatedAt = now
+	if err := svc.PutTab(ctx, workspace, &meta); err != nil {
+		return nil, err
+	}
+	return svc.GetTab(ctx, workspace, existing.SessionName)
 }
 
 func selectAgentTerminalTab(tabs []tabmeta.TabMetadata, agentName string) *tabmeta.TabMetadata {

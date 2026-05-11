@@ -69,8 +69,15 @@ func (s *terminalServiceImpl) ptyAttachable(wsID string, meta *tabmeta.TabMetada
 	if meta == nil {
 		return false
 	}
-	if s.ptyAlive(wsID, meta.SessionName) {
+	key := SessionKey{Workspace: wsID, Name: meta.SessionName}
+	if s.ptyMgr != nil && s.ptyMgr.HasSession(key) {
 		return true
+	}
+	if s.ptyMgr != nil && s.ptyMgr.SessionClosed(key) {
+		return false
+	}
+	if meta.Kind == "agent" && (meta.Launch == nil || len(meta.Launch.Argv) == 0) {
+		return false
 	}
 	if s.startedAt.IsZero() || meta.CreatedAt.IsZero() {
 		return false

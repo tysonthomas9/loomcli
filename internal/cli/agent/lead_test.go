@@ -109,3 +109,27 @@ func TestGenerateLeadPrompt_NotEmpty(t *testing.T) {
 		t.Errorf("lead prompt should contain relevant keywords, got %q", prompt)
 	}
 }
+
+func TestResolveLeadOrchestratorSessionIDPrefersExistingEnv(t *testing.T) {
+	t.Setenv(envOrchestratorSessionID, " lead-session-1 ")
+
+	if got := resolveLeadOrchestratorSessionID(); got != "lead-session-1" {
+		t.Fatalf("resolveLeadOrchestratorSessionID() = %q, want lead-session-1", got)
+	}
+}
+
+func TestResolveLeadAgentIDUsesTerminalAgentName(t *testing.T) {
+	t.Setenv(envAgentName, " lead-ui-e2e ")
+
+	if got := resolveLeadAgentID(); got != "lead-ui-e2e" {
+		t.Fatalf("resolveLeadAgentID() = %q, want lead-ui-e2e", got)
+	}
+}
+
+func TestResolveLeadAgentIDDefaultsToLead(t *testing.T) {
+	t.Setenv(envAgentName, " ")
+
+	if got := resolveLeadAgentID(); got != "lead" {
+		t.Fatalf("resolveLeadAgentID() = %q, want lead", got)
+	}
+}

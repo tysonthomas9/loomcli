@@ -135,6 +135,9 @@ func resolveFreshBaseRef(repoPath, remoteName, defaultBranch string) (string, er
 
 	if _, err := runGit(repoPath, "remote", "get-url", remoteName); err == nil {
 		if _, err := runGit(repoPath, "fetch", remoteName, defaultBranch); err != nil {
+			if _, localErr := runGit(repoPath, "rev-parse", "--verify", defaultBranch); localErr == nil {
+				return defaultBranch, nil
+			}
 			return "", fmt.Errorf("fetch base branch %q from %q: %w", defaultBranch, remoteName, err)
 		}
 		return remoteName + "/" + defaultBranch, nil

@@ -90,8 +90,6 @@ func defaultCursorNonInteractiveInvoker(workDir, prompt, agentName string, shutd
 	}
 	cmd.Stderr = os.Stderr
 
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-
 	fmt.Println("Launching Cursor agent (non-interactive)...")
 	fmt.Println("")
 

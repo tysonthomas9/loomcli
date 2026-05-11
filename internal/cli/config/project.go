@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
@@ -119,6 +120,10 @@ func (a AgentEntry) Equal(b AgentEntry) bool {
 // ShouldSupervise reports whether the local daemon should run this agent.
 // Empty desired_state preserves legacy behavior for existing agent definitions.
 func (a AgentEntry) ShouldSupervise() bool {
+	switch strings.ToLower(strings.TrimSpace(a.Role)) {
+	case "lead", "orchestrator":
+		return false
+	}
 	switch a.DesiredState {
 	case domain.AgentDesiredStopped, domain.AgentDesiredDraining:
 		return false

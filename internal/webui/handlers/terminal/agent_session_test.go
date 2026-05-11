@@ -2,6 +2,7 @@ package terminal
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/webui/service"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 	webuiterminal "github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
@@ -91,6 +93,104 @@ func TestEnsureAgentTerminalSessionCreatesLeadEpicLaunchSpec(t *testing.T) {
 	}
 	if session.Kind != domain.AgentSessionKindOrchestration || session.TerminalID != meta.SessionName {
 		t.Fatalf("agent session = kind:%q terminal:%q", session.Kind, session.TerminalID)
+	}
+}
+
+func TestEnsureAgentTerminalSessionRejectsStoppedAgentWithoutSession(t *testing.T) {
+	ctx := context.Background()
+	st, tabStore, rdb := newAgentSessionTestDeps(t)
+	svc := webuiterminal.NewTerminalService(
+		nil,
+		tabStore,
+		nil,
+		rdb,
+		nil,
+		time.Now(),
+	)
+
+	if _, err := st.Agents().Create(ctx, store.AgentCreate{
+		WorkspaceKey: "E2E",
+		Name:         "worker-done",
+		RoleName:     "task",
+		DesiredState: domain.AgentDesiredStopped,
+	}); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	stopped := domain.AgentStateStopped
+	if _, err := st.Agents().Update(ctx, "E2E", "worker-done", store.AgentUpdate{
+		State: &stopped,
+	}); err != nil {
+		t.Fatalf("stop agent: %v", err)
+	}
+
+	_, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "worker-done", "http://loom.test")
+	var svcErr *service.ServiceError
+	if !errors.As(err, &svcErr) || svcErr.Kind != service.KindValidation {
+		t.Fatalf("ensureAgentTerminalSession error = %v, want validation", err)
+	}
+}
+
+func TestEnsureAgentTerminalSessionDoesNotRelaunchStoppedExistingAgentTab(t *testing.T) {
+	ctx := context.Background()
+	st, tabStore, rdb := newAgentSessionTestDeps(t)
+	svc := webuiterminal.NewTerminalService(
+		nil,
+		tabStore,
+		nil,
+		rdb,
+		nil,
+		time.Now(),
+	)
+
+	if _, err := st.Agents().Create(ctx, store.AgentCreate{
+		WorkspaceKey: "E2E",
+		Name:         "worker-done",
+		RoleName:     "task",
+		DesiredState: domain.AgentDesiredStopped,
+	}); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	stopped := domain.AgentStateStopped
+	if _, err := st.Agents().Update(ctx, "E2E", "worker-done", store.AgentUpdate{
+		State: &stopped,
+	}); err != nil {
+		t.Fatalf("stop agent: %v", err)
+	}
+
+	now := time.Now().UTC()
+	if err := tabStore.Set(ctx, &tabmeta.TabMetadata{
+		SessionName: "term_worker_done",
+		Workspace:   "E2E",
+		Label:       "agent-worker-done",
+		Kind:        "agent",
+		AgentID:     "worker-done",
+		Role:        "task",
+		Backend:     "codex",
+		Writable:    true,
+		Launch: &tabmeta.LaunchSpec{
+			Argv: []string{"sh", "-c", "loom task worker-done --auto"},
+		},
+		CreatedAt: now,
+		UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("seed tab: %v", err)
+	}
+
+	meta, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "worker-done", "http://loom.test")
+	if err != nil {
+		t.Fatalf("ensureAgentTerminalSession: %v", err)
+	}
+	if meta.SessionName != "term_worker_done" {
+		t.Fatalf("session = %q, want existing stopped tab", meta.SessionName)
+	}
+	if meta.Launch != nil {
+		t.Fatalf("launch spec = %#v, want nil for stopped agent", meta.Launch)
+	}
+	if meta.Writable {
+		t.Fatal("writable = true, want false for stopped agent tab")
+	}
+	if meta.PTYAlive {
+		t.Fatal("PTYAlive = true, want false for stopped agent tab")
 	}
 }
 

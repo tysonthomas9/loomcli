@@ -5,6 +5,7 @@ import {
   buildWorkerByTaskId,
   groupAgentTasksByEpic,
   groupOpenByEpic,
+  isWorkerTerminalOpenable,
 } from "../AgentWorkPanel";
 
 // Minimal Issue factory — fills in just the fields the grouping function reads.
@@ -160,6 +161,36 @@ describe("groupAgentTasksByEpic", () => {
     );
     const res = groupAgentTasksByEpic(m, "nova");
     expect(res.groups[0]?.epicTitle).toBe("EPIC-MISSING");
+  });
+});
+
+describe("isWorkerTerminalOpenable", () => {
+  it("allows active or idle workers that are not explicitly stopped", () => {
+    expect(
+      isWorkerTerminalOpenable(
+        agent({ name: "worker-active", state: "active" }),
+      ),
+    ).toBe(true);
+    expect(
+      isWorkerTerminalOpenable(agent({ name: "worker-idle", state: "idle" })),
+    ).toBe(true);
+  });
+
+  it("blocks completed ephemeral workers so opening the UI cannot rerun them", () => {
+    expect(
+      isWorkerTerminalOpenable(
+        agent({
+          name: "worker-stopped",
+          state: "stopped",
+          desired_state: "stopped",
+        }),
+      ),
+    ).toBe(false);
+    expect(
+      isWorkerTerminalOpenable(
+        agent({ name: "worker-dead", state: "dead" }),
+      ),
+    ).toBe(false);
   });
 });
 

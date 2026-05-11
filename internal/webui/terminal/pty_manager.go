@@ -135,6 +135,7 @@ func (k SessionKey) String() string {
 type PTYManager struct {
 	mu       sync.Mutex
 	sessions map[SessionKey]*ptySession
+	ended    map[SessionKey]string
 
 	shell string   // absolute path to the login shell (e.g. /bin/bash)
 	argv  []string // default args when a session's argv is nil
@@ -189,6 +190,7 @@ func NewPTYManager(command string, maxSessions int, cwd string) *PTYManager {
 
 	m := &PTYManager{
 		sessions:    make(map[SessionKey]*ptySession),
+		ended:       make(map[SessionKey]string),
 		shell:       shell,
 		argv:        argv,
 		env:         env,
@@ -262,6 +264,7 @@ func (m *PTYManager) AttachSession(key SessionKey, cols, rows uint16, launch *ta
 				return nil, false, spawnErr
 			}
 			m.sessions[key] = newSess
+			delete(m.ended, key)
 			sess = newSess
 		}
 		m.mu.Unlock()
@@ -334,6 +337,9 @@ func (m *PTYManager) killSession(key SessionKey, reason string) error {
 	sess, ok := m.sessions[key]
 	if ok {
 		delete(m.sessions, key)
+		if reason != "" {
+			m.ended[key] = reason
+		}
 	}
 	m.mu.Unlock()
 	if !ok {
@@ -365,6 +371,16 @@ func (m *PTYManager) HasSession(key SessionKey) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	_, ok := m.sessions[key]
+	return ok
+}
+
+// SessionClosed reports whether key had a PTY in this process and that PTY
+// has since exited or been killed. A later explicit AttachSession clears the
+// tombstone after spawning a fresh PTY.
+func (m *PTYManager) SessionClosed(key SessionKey) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	_, ok := m.ended[key]
 	return ok
 }
 
@@ -417,6 +433,9 @@ func (m *PTYManager) Shutdown() error {
 	m.mu.Lock()
 	sessions := m.sessions
 	m.sessions = make(map[SessionKey]*ptySession)
+	for key := range sessions {
+		m.ended[key] = ExitReasonShutdown
+	}
 	m.mu.Unlock()
 
 	var firstErr error

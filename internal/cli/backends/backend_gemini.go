@@ -90,8 +90,6 @@ func defaultGeminiNonInteractiveInvoker(workDir, prompt, agentName string, shutd
 	}
 	cmd.Stderr = os.Stderr
 
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-
 	fmt.Println("Launching Gemini agent (non-interactive)...")
 	fmt.Println("")
 

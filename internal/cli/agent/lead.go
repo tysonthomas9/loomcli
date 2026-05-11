@@ -2,10 +2,12 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -25,6 +27,8 @@ import (
 // (e.g. agents created by `loom agentdef add` from within this lead's tmux
 // session) auto-attribute back to this lead session via OrchestratorSessionID.
 const envOrchestratorSessionID = "LOOM_ORCHESTRATOR_SESSION_ID"
+const envAgentName = "LOOM_AGENT_NAME"
+const envAgentTerminalID = "LOOM_AGENT_TERMINAL_ID"
 
 const leadHeartbeatInterval = 30 * time.Second
 const leadStoreOpTimeout = 10 * time.Second
@@ -126,7 +130,8 @@ func registerLeadOrchestratorSession(ctx context.Context, workDir string) func()
 		return noop
 	}
 
-	sid := "lead-" + uuid.New().String()
+	sid := resolveLeadOrchestratorSessionID()
+	agentID := resolveLeadAgentID()
 	actor := os.Getenv("USER")
 	if actor == "" {
 		actor = "unknown"
@@ -136,7 +141,9 @@ func registerLeadOrchestratorSession(ctx context.Context, workDir string) func()
 	_, err = handle.Store.AgentSessions().Create(createCtx, store.AgentSessionCreate{
 		WorkspaceKey: ws,
 		SessionID:    sid,
+		AgentID:      agentID,
 		Kind:         domain.AgentSessionKindOrchestration,
+		TerminalID:   strings.TrimSpace(os.Getenv(envAgentTerminalID)),
 		Status:       domain.AgentSessionRunning,
 		Metadata: map[string]string{
 			"actor":        actor,
@@ -144,7 +151,7 @@ func registerLeadOrchestratorSession(ctx context.Context, workDir string) func()
 		},
 	})
 	createCancel()
-	if err != nil {
+	if err != nil && !errors.Is(err, domain.ErrAlreadyExists) {
 		_ = handle.Close()
 		slog.Warn("lead orchestrator session: create failed, continuing without registration", "err", err)
 		return noop
@@ -179,6 +186,20 @@ func registerLeadOrchestratorSession(ctx context.Context, workDir string) func()
 		}
 		_ = handle.Close()
 	}
+}
+
+func resolveLeadOrchestratorSessionID() string {
+	if sid := strings.TrimSpace(os.Getenv(envOrchestratorSessionID)); sid != "" {
+		return sid
+	}
+	return "lead-" + uuid.New().String()
+}
+
+func resolveLeadAgentID() string {
+	if agentID := strings.TrimSpace(os.Getenv(envAgentName)); agentID != "" {
+		return agentID
+	}
+	return "lead"
 }
 
 // heartbeatLeadSession periodically refreshes the lead session's last_heartbeat

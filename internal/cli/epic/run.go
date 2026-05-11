@@ -153,6 +153,7 @@ func runEpicRun(cmd *cobra.Command, _ []string) error {
 		parent:                runParent,
 		leadName:              leadName,
 		role:                  runRole,
+		backend:               strings.TrimSpace(cli.GetBackendName()),
 		prefix:                prefix,
 		maxConcurrency:        runMaxConcurrency,
 		interval:              time.Duration(runIntervalSeconds) * time.Second,
@@ -172,6 +173,7 @@ type runner struct {
 	parent                string
 	leadName              string
 	role                  string
+	backend               string
 	prefix                string
 	maxConcurrency        int
 	interval              time.Duration
@@ -188,6 +190,9 @@ func (r *runner) printHeader() {
 		fmt.Printf("  lead agent:       %s\n", r.leadName)
 	}
 	fmt.Printf("  role:             %s\n", r.role)
+	if r.backend != "" {
+		fmt.Printf("  backend:          %s\n", r.backend)
+	}
 	fmt.Printf("  worker prefix:    %s\n", r.prefix)
 	fmt.Printf("  max concurrency:  %d\n", r.maxConcurrency)
 	fmt.Printf("  interval:         %s\n", r.interval)
@@ -605,6 +610,7 @@ func (r *runner) spawnWorker(ctx context.Context, task backend.IssueData) error 
 		Name:                  name,
 		RoleName:              r.role,
 		Auto:                  true,
+		Backend:               r.backend,
 		Parent:                r.parent,
 		OrchestratorSessionID: r.orchestratorSessionID,
 		Mode:                  mode,
