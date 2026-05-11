@@ -405,7 +405,7 @@ describe("RedirectToWorkspace", () => {
       renderComponent();
 
       const createButton = await screen.findByRole("button", {
-        name: "Create Sample Workspace",
+        name: "Create Workspace",
       });
       fireEvent.click(createButton);
       expect(mockCreateWorkspaceModalProps).toHaveBeenLastCalledWith(

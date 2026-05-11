@@ -91,7 +91,7 @@ export function RedirectToWorkspace() {
         description:
           "Create the first workspace and clone the sample repo in one fixed setup step.",
         status: "current",
-        actionLabel: "Create Sample Workspace",
+        actionLabel: "Create Workspace",
         onAction: () => setShowCreate(true),
       },
       {
