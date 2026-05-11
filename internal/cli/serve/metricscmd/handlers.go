@@ -3,6 +3,7 @@ package metricscmd
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -137,10 +138,11 @@ func HandleStatusWithSources(dataSource *MonitorDataSource, storeDataSource *Mon
 			return
 		}
 		storeData := storeDataSource.Resolve(ctx, workspaceHint)
-		span.SetAttributes(attribute.Int("result.count", len(storeData.Agents)))
+		agents := mergeStoreAgentsWithRuntime(storeData.Agents, data.Agents, data.AgentTasks)
+		span.SetAttributes(attribute.Int("result.count", len(agents)))
 		writeJSON(w, StatusResponse{
 			Workspace:        storeData.Workspace,
-			Agents:           storeData.Agents,
+			Agents:           agents,
 			Tasks:            data.Tasks,
 			NeedsPlanning:    taskInfoList(data.NeedsPlanningTasks),
 			ReadyToImplement: taskInfoList(data.ReadyToImplement),
@@ -186,16 +188,17 @@ func HandleAgentsWithSources(dataSource *MonitorDataSource, storeDataSource *Mon
 			return
 		}
 		storeData := storeDataSource.Resolve(ctx, workspaceHint)
+		agents := mergeStoreAgentsWithRuntime(storeData.Agents, data.Agents, data.AgentTasks)
 
 		response := AgentsResponse{
 			Workspace: storeData.Workspace,
-			Agents:    storeData.Agents,
+			Agents:    agents,
 			Timestamp: data.Timestamp,
 		}
 
-		response.ByWorkspace = groupAgentsByWorkspace(storeData.Agents)
+		response.ByWorkspace = groupAgentsByWorkspace(agents)
 
-		span.SetAttributes(attribute.Int("result.count", len(storeData.Agents)))
+		span.SetAttributes(attribute.Int("result.count", len(agents)))
 		writeJSON(w, response)
 	}
 }
@@ -382,10 +385,56 @@ func storeAgentsForMonitor(ctx context.Context, st store.Store, workspaceHint st
 func monitorStatusFromAgentState(state domain.AgentState) string {
 	switch state {
 	case domain.AgentStateActive:
-		return "working"
+		return "ready"
 	default:
 		return "idle"
 	}
+}
+
+func mergeStoreAgentsWithRuntime(storeAgents []monitor.AgentStatus, runtimeAgents []monitor.AgentStatus, agentTasks map[string]monitor.TaskInfo) []monitor.AgentStatus {
+	if len(storeAgents) == 0 {
+		return []monitor.AgentStatus{}
+	}
+
+	runtimeByName := make(map[string]monitor.AgentStatus, len(runtimeAgents))
+	for _, agent := range runtimeAgents {
+		if agent.Name == "" {
+			continue
+		}
+		runtimeByName[agent.Name] = agent
+	}
+
+	merged := make([]monitor.AgentStatus, 0, len(storeAgents))
+	for _, storeAgent := range storeAgents {
+		agent := storeAgent
+		if runtimeAgent, ok := runtimeByName[agent.Name]; ok {
+			agent = mergeRuntimeAgentStatus(agent, runtimeAgent)
+		} else if task, ok := agentTasks[agent.Name]; ok && task.Status == "in_progress" {
+			prefix := "working"
+			if agent.Role == "plan" {
+				prefix = "planning"
+			}
+			agent.Status = fmt.Sprintf("%s: %s", prefix, task.ID)
+		}
+		merged = append(merged, agent)
+	}
+	return merged
+}
+
+func mergeRuntimeAgentStatus(storeAgent monitor.AgentStatus, runtimeAgent monitor.AgentStatus) monitor.AgentStatus {
+	merged := storeAgent
+	if runtimeAgent.Status != "" {
+		merged.Status = runtimeAgent.Status
+	}
+	if merged.Branch == "" || merged.Branch == "unknown" {
+		merged.Branch = runtimeAgent.Branch
+	}
+	merged.Ahead = runtimeAgent.Ahead
+	merged.Behind = runtimeAgent.Behind
+	merged.DaemonManaged = runtimeAgent.DaemonManaged
+	merged.Commits = runtimeAgent.Commits
+	merged.Changes = runtimeAgent.Changes
+	return merged
 }
 
 func monitorBranchFromAgent(ws *ops.WorkspaceData, agent *domain.Agent) string {
