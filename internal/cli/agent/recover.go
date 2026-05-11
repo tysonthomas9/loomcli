@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"time"
@@ -131,7 +130,10 @@ func releaseFleetIssueLock(deps *cli.Deps, agentName, taskID string) {
 		if backend.IsKind(err, backend.KindNotFound) || backend.IsKind(err, backend.KindNotImplemented) {
 			return
 		}
-		if errors.Is(err, context.DeadlineExceeded) {
+		// The fleet client wraps context.DeadlineExceeded into KindTimeout
+		// via classifyTransportError, so check the wrapped kind rather than
+		// the raw sentinel.
+		if backend.IsKind(err, backend.KindTimeout) {
 			fmt.Printf("[recover] WARN: timed out releasing fleet-db lock for %s (actor=%s)\n",
 				taskID, agentName)
 			return

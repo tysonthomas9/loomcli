@@ -137,6 +137,17 @@ func checkOrphanedFleetLocks(deps *cli.Deps) CheckResult {
 
 	stateFilePath := cfgpkg.ResolveDaemonStatePath(cli.GetWorkspaceRuntimeDir())
 	managed := monitor.LoadDaemonManagedAgents(stateFilePath)
+	if managed == nil {
+		// The state file is missing or the recorded daemon PID isn't alive.
+		// Every assignee would look orphaned and we'd flood the report with
+		// false positives for legitimately-running agents launched outside
+		// the daemon. Skip rather than warn.
+		return CheckResult{
+			Name:    "orphaned_fleet_locks",
+			Status:  StatusPass,
+			Summary: "skipped: daemon state unavailable (start `loom daemon` for orphaned-lock checks)",
+		}
+	}
 
 	var orphans []string
 	for _, issue := range issues {

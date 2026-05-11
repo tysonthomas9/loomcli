@@ -1377,7 +1377,7 @@ func TestCheckOrphanedFleetLocks_NoneInProgressIsSkipped(t *testing.T) {
 	}
 }
 
-func TestCheckOrphanedFleetLocks_AllHoldersRunningPasses(t *testing.T) {
+func TestCheckOrphanedFleetLocks_DaemonStateUnavailableSkips(t *testing.T) {
 	t.Parallel()
 	deps, _, _, _, mock := NewTestDeps(t)
 	mock.ListResult = []backend.IssueData{
@@ -1386,15 +1386,17 @@ func TestCheckOrphanedFleetLocks_AllHoldersRunningPasses(t *testing.T) {
 	deps.IssueBackend = mock
 
 	result := checkOrphanedFleetLocks(deps)
-	// daemon-agents.json is unreadable in this test, so all holders count
-	// as missing. We still expect a non-empty result name with WARN status.
+	// daemon-agents.json is unreadable in this test (daemon not running),
+	// so every assignee would look orphaned. The check must skip rather
+	// than WARN — flooding the report with false positives would teach
+	// operators to ignore it.
 	if result.Name != "orphaned_fleet_locks" {
-		t.Errorf("Name = %q, want orphaned_fleet_locks", result.Name)
+		t.Fatalf("Name = %q, want orphaned_fleet_locks", result.Name)
 	}
-	if result.Status != StatusWarn {
-		t.Errorf("Status = %v, want StatusWarn (no running daemon, so holder is orphaned)", result.Status)
+	if result.Status != StatusPass {
+		t.Errorf("Status = %v, want StatusPass (daemon state unavailable → skip)", result.Status)
 	}
-	if !strings.Contains(result.Detail, "agent-alpha") {
-		t.Errorf("Detail = %q, want it to mention holder", result.Detail)
+	if !strings.Contains(result.Summary, "daemon state unavailable") {
+		t.Errorf("Summary = %q, want substring 'daemon state unavailable'", result.Summary)
 	}
 }

@@ -36,10 +36,9 @@ type ipcResponse struct {
 
 // Operation name constants matching the IPC server.
 const (
-	opClaim       = "claim"
-	opUpdate      = "update"
-	opComplete    = "complete"
-	opReleaseLock = "release_lock"
+	opClaim    = "claim"
+	opUpdate   = "update"
+	opComplete = "complete"
 )
 
 // Timeout constants matching task .1 server-side deadlines and task .2 client.
@@ -116,23 +115,21 @@ func (b *Backend) Update(_ context.Context, id string, params backend.UpdatePara
 	return responseToError(resp, op)
 }
 
-// ReleaseIssueLock releases the operational lock on an issue via the daemon
-// IPC socket. The IPC request uses opReleaseLock so the daemon-side dispatcher
-// routes it to fleet's release-lock endpoint with the agent's worktree
-// identity. The actor argument is ignored: the daemon authoritatively uses the
-// connected agent name.
-func (b *Backend) ReleaseIssueLock(_ context.Context, id, _ string) error {
-	const op = "AgentIPC.ReleaseIssueLock"
-	req := ipcRequest{
-		Operation: opReleaseLock,
-		AgentName: b.agentName,
-		IssueID:   id,
-	}
-	resp, err := sendIPC(b.socketPath, req, dialTimeout, readTimeout)
-	if err != nil {
-		return err
-	}
-	return responseToError(resp, op)
+// ReleaseIssueLock is not supported by this backend.
+//
+// The daemon IPC server fences mutations with session/lease tokens
+// (see daemon_ipc.go:validateIPCLease), but this package's ipcRequest does
+// not carry SessionID/LeaseID/LeaseToken — so any forwarded mutation here
+// fails with KindValidation against a real daemon. The fenced release path
+// lives at the CLI layer in *cli.ipcIssueBackend, which uses
+// *cli.AgentIPCClient and threads the lease fields via env vars.
+//
+// We return KindNotImplemented (mirroring api.APIBackend.ReleaseIssueLock)
+// so callers fall back to TTL expiry rather than logging a confusing
+// validation error.
+func (b *Backend) ReleaseIssueLock(_ context.Context, _, _ string) error {
+	return backend.ErrNotImplemented("AgentIPC.ReleaseIssueLock",
+		"not supported by agent IPC backend; use cli.ipcIssueBackend for fenced lock release")
 }
 
 // Close marks an issue as closed via the daemon IPC socket and returns the result.
