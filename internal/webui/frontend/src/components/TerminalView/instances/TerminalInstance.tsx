@@ -228,6 +228,8 @@ export const TerminalInstance = forwardRef<
   const [connectionState, setConnectionState] =
     useState<ConnectionState>("disconnected");
   const [readyVersion, setReadyVersion] = useState(0);
+  const isActiveRef = useRef(isActive);
+  isActiveRef.current = isActive;
 
   // Stable refs for parent callbacks so the lifecycle effect's dep array
   // stays minimal.
@@ -421,12 +423,14 @@ export const TerminalInstance = forwardRef<
     // otherwise the tab would stay stuck at "connecting" because the
     // prior cleanup cancelled its in-flight WebSocket.
     if (
+      isActiveRef.current &&
       wtermReadyRef.current &&
       (ptyAlive !== false || autoStartStaleSession)
     ) {
       doConnectRef.current?.();
     }
     return () => {
+      beingKilledRef.current = true;
       wtermInstanceRef.current = null;
       pendingRendererWritesRef.current = [];
       clearReconnectTimers();
@@ -496,11 +500,15 @@ export const TerminalInstance = forwardRef<
           wt.resize(measured.cols, measured.rows);
         }
       }
-      if (!wsCleanupRef.current && !isSocketOpenOrConnecting(wsRef.current)) {
+      if (
+        isActiveRef.current &&
+        !wsCleanupRef.current &&
+        !isSocketOpenOrConnecting(wsRef.current)
+      ) {
         doConnectRef.current?.();
       }
     },
-    [measureTerminalSize, ptyAlive, autoStartStaleSession],
+    [forceRendererPaint, measureTerminalSize, ptyAlive, autoStartStaleSession],
   );
 
   // In the desktop shell, a terminal can be mounted before the renderer's
@@ -528,7 +536,13 @@ export const TerminalInstance = forwardRef<
     return () => {
       clearTimeout(timeout);
     };
-  }, [isActive, ptyAlive, connectionState, readyVersion]);
+  }, [
+    isActive,
+    ptyAlive,
+    autoStartStaleSession,
+    connectionState,
+    readyVersion,
+  ]);
 
   const handleData = useCallback(
     (data: string) => {

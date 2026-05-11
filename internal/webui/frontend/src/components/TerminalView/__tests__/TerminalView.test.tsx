@@ -14,6 +14,7 @@ import {
   act,
 } from "@testing-library/react";
 import type { RenderOptions } from "@testing-library/react";
+import { useState } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import "@testing-library/jest-dom";
 import { KeyboardShortcutProvider } from "@/hooks/ui";
@@ -346,20 +347,23 @@ describe("TerminalView", () => {
       ]);
       render(<TerminalView />);
 
-      const calls = vi.mocked(TerminalInstance).mock.calls.flatMap(([props]) => {
-        if (!props) return [];
-        return [props as {
-          sessionName: string;
-          autoReconnect?: boolean;
-        }];
-      });
+      const calls = vi
+        .mocked(TerminalInstance)
+        .mock.calls.flatMap(([props]) => {
+          if (!props) return [];
+          return [
+            props as {
+              sessionName: string;
+              autoReconnect?: boolean;
+            },
+          ];
+        });
       expect(
         calls.find((props) => props.sessionName === "term_agent")
           ?.autoReconnect,
       ).toBe(true);
       expect(
-        calls.find((props) => props.sessionName === "session-1")
-          ?.autoReconnect,
+        calls.find((props) => props.sessionName === "session-1")?.autoReconnect,
       ).toBe(true);
     });
 
@@ -1051,6 +1055,94 @@ describe("TerminalView", () => {
           screen.getByTestId("terminal-instance-term_agent_alpha"),
         ).toBeInTheDocument(),
       );
+    });
+
+    it("hidden-tab agent view does not mount restored generic panes while resolving", async () => {
+      let resolveAgent!: (value: {
+        session_name: string;
+        label: string;
+        notes: string;
+        sort_order: number;
+        pinned: boolean;
+        kind: string;
+        agent_id: string;
+        role: string;
+        backend: string;
+        writable: boolean;
+        pty_alive: boolean;
+        attached_clients: number;
+        created_at: string;
+        updated_at: string;
+      }) => void;
+      mockHooksApi.ensureAgentTerminalSession.mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveAgent = resolve;
+        }),
+      );
+      sessionStorage.setItem("terminal-active-tab", "session-1");
+      setMetadata(DEFAULT_METADATA);
+      const onConsumed = vi.fn();
+      const HiddenAgentHarness = () => {
+        const [pending, setPending] = useState<string | undefined>("fox");
+        return (
+          <TerminalView
+            pendingAgentName={pending}
+            onAgentNameConsumed={() => {
+              onConsumed();
+              setPending(undefined);
+            }}
+            hideTabs
+          />
+        );
+      };
+
+      render(<HiddenAgentHarness />);
+
+      await waitFor(() =>
+        expect(mockHooksApi.ensureAgentTerminalSession).toHaveBeenCalledWith(
+          expect.any(String),
+          "fox",
+        ),
+      );
+      expect(
+        screen.queryByTestId("terminal-instance-session-1"),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByTestId("terminal-instance-session-2"),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.getByTestId("loading-skeleton-terminal"),
+      ).toBeInTheDocument();
+
+      await act(async () => {
+        resolveAgent({
+          session_name: "term_fox",
+          label: "agent-fox",
+          notes: "",
+          sort_order: DEFAULT_METADATA.length,
+          pinned: false,
+          kind: "agent",
+          agent_id: "fox",
+          role: "lead",
+          backend: "codex",
+          writable: true,
+          pty_alive: true,
+          attached_clients: 0,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        });
+      });
+
+      await waitFor(() =>
+        expect(
+          screen.getByTestId("terminal-instance-term_fox"),
+        ).toBeInTheDocument(),
+      );
+      expect(
+        screen.queryByTestId("terminal-instance-session-1"),
+      ).not.toBeInTheDocument();
+      expect(screen.queryByTestId("terminal-tab-bar")).not.toBeInTheDocument();
+      expect(onConsumed).toHaveBeenCalled();
     });
 
     it("does not create agent tab when no pendingAgentName is provided", () => {

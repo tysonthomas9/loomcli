@@ -407,10 +407,28 @@ export function TerminalView({
     () => new Map(tabMetadata.map((m) => [m.session_name, m])),
     [tabMetadata],
   );
+  const paneTabs = useMemo(() => {
+    if (!hideTabs) return tabs;
+
+    const activeTab = tabs.find((tab) => tab.id === activeTabId);
+    const targetAgentName = pendingAgentName ?? activeTab?.agentName;
+    if (targetAgentName) {
+      const agentTab = tabs.find((tab) => tab.agentName === targetAgentName);
+      return agentTab ? [agentTab] : [];
+    }
+
+    return activeTab ? [activeTab] : [];
+  }, [activeTabId, hideTabs, pendingAgentName, tabs]);
+
+  const paneActiveTabId = paneTabs.some((tab) => tab.id === activeTabId)
+    ? activeTabId
+    : (paneTabs[0]?.id ?? activeTabId);
   const renderTerminalPane = useCallback(
     (tab: TabState, pane: "left" | "right" | null) => {
       const paneIsActive =
-        pane === "right" ? tab.id === rightPaneTabId : tab.id === activeTabId;
+        pane === "right"
+          ? tab.id === rightPaneTabId
+          : tab.id === paneActiveTabId;
       const meta = metaBySession.get(tab.sessionName);
       // Undefined while metadata is still loading — preserves connect-on-
       // mount. Only concrete `false` gates auto-attach.
@@ -456,7 +474,6 @@ export function TerminalView({
       );
     },
     [
-      activeTabId,
       rightPaneTabId,
       setInstanceRef,
       handleConnectionStateChange,
@@ -475,6 +492,7 @@ export function TerminalView({
       setFocusedRight,
       dismissedWelcome,
       handleDismissWelcome,
+      paneActiveTabId,
     ],
   );
 
@@ -495,6 +513,8 @@ export function TerminalView({
             onGoToSettings: onNavigateToSettings,
           })}
         />
+      ) : hideTabs && paneTabs.length === 0 ? (
+        <LoadingSkeleton.Terminal />
       ) : (
         <>
           {!hideTabs && (
@@ -533,10 +553,10 @@ export function TerminalView({
             onClose={() => setIsHelpOpen(false)}
           />
           <TerminalPaneArea
-            tabs={tabs}
-            activeTabId={activeTabId}
-            isSplitView={isSplitView}
-            rightPaneTabId={rightPaneTabId}
+            tabs={paneTabs}
+            activeTabId={paneActiveTabId}
+            isSplitView={!hideTabs && isSplitView}
+            rightPaneTabId={hideTabs ? "" : rightPaneTabId}
             splitRatio={splitRatio}
             splitContainerRef={splitContainerRef}
             onSplitRatioChange={handleSplitRatioChange}
