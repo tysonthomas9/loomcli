@@ -64,6 +64,17 @@ function makeWorkspace(overrides?: Partial<WorkspaceData>): WorkspaceData {
   };
 }
 
+function deferred<T>(): {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+} {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
+
 describe("workspaceStore", () => {
   let store: StoreApi<WorkspaceStore>;
 
@@ -258,6 +269,140 @@ describe("workspaceStore", () => {
   });
 
   describe("upsertAgent", () => {
+    it("keeps a newly-created agent when upsert runs before workspace data loads", async () => {
+      store.getState().upsertAgent({
+        name: "planner",
+        role_name: "plan",
+        repos: ["hello-world"],
+        repo_groups: [],
+        cross_repo: false,
+      });
+
+      mockFetchWorkspaceApi.mockResolvedValueOnce(makeWorkspace({ agents: [] }));
+      await store.getState().fetchWorkspace("ws-1");
+
+      expect(store.getState().workspace?.agents).toEqual([
+        {
+          name: "planner",
+          role_name: "plan",
+          repos: ["hello-world"],
+          repo_groups: [],
+          cross_repo: false,
+        },
+      ]);
+    });
+
+    it("does not let a stale workspace fetch drop an optimistic agent", async () => {
+      mockFetchWorkspaceApi.mockResolvedValueOnce(makeWorkspace({ agents: [] }));
+      await store.getState().fetchWorkspace("ws-1");
+
+      store.getState().upsertAgent({
+        name: "planner",
+        role_name: "plan",
+        repos: ["hello-world"],
+        repo_groups: [],
+        cross_repo: false,
+      });
+
+      mockFetchWorkspaceApi.mockResolvedValueOnce(makeWorkspace({ agents: [] }));
+      await store.getState().fetchWorkspace("ws-1");
+
+      expect(store.getState().workspace?.agents).toEqual([
+        {
+          name: "planner",
+          role_name: "plan",
+          repos: ["hello-world"],
+          repo_groups: [],
+          cross_repo: false,
+        },
+      ]);
+    });
+
+    it("does not let an obsolete fetch clear pending optimistic agents", async () => {
+      const obsoleteFetch = deferred<WorkspaceData>();
+      const currentFetch = deferred<WorkspaceData>();
+      mockFetchWorkspaceApi
+        .mockReturnValueOnce(obsoleteFetch.promise)
+        .mockReturnValueOnce(currentFetch.promise);
+
+      const obsoleteRequest = store.getState().fetchWorkspace("ws-1");
+      store.getState().upsertAgent({
+        name: "planner",
+        role_name: "plan",
+        repos: ["hello-world"],
+        repo_groups: [],
+        cross_repo: false,
+      });
+      store.getState().refetch();
+
+      obsoleteFetch.resolve(
+        makeWorkspace({
+          agents: [
+            {
+              name: "planner",
+              role_name: "plan",
+              backend: "codex",
+              repos: ["hello-world"],
+              repo_groups: [],
+              cross_repo: false,
+            },
+          ],
+        }),
+      );
+      await obsoleteRequest;
+
+      currentFetch.resolve(makeWorkspace({ agents: [] }));
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(store.getState().workspace?.agents).toEqual([
+        {
+          name: "planner",
+          role_name: "plan",
+          repos: ["hello-world"],
+          repo_groups: [],
+          cross_repo: false,
+        },
+      ]);
+    });
+
+    it("uses the server copy once a pending optimistic agent appears in workspace data", async () => {
+      store.getState().upsertAgent({
+        name: "planner",
+        role_name: "plan",
+        backend: "opencode",
+        repos: ["hello-world"],
+        repo_groups: [],
+        cross_repo: false,
+      });
+
+      mockFetchWorkspaceApi.mockResolvedValueOnce(
+        makeWorkspace({
+          agents: [
+            {
+              name: "planner",
+              role_name: "plan",
+              backend: "codex",
+              repos: ["hello-world"],
+              repo_groups: [],
+              cross_repo: false,
+            },
+          ],
+        }),
+      );
+      await store.getState().fetchWorkspace("ws-1");
+
+      expect(store.getState().workspace?.agents).toEqual([
+        {
+          name: "planner",
+          role_name: "plan",
+          backend: "codex",
+          repos: ["hello-world"],
+          repo_groups: [],
+          cross_repo: false,
+        },
+      ]);
+    });
+
     it("adds a newly-created agent to current workspace state immediately", async () => {
       const ws = makeWorkspace({ agents: [] });
       mockFetchWorkspaceApi.mockResolvedValueOnce(ws);
