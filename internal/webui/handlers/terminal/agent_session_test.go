@@ -26,7 +26,7 @@ func newAgentSessionTestDeps(t *testing.T) (*memstore.Store, *tabmeta.Store, *re
 	return memstore.New(), tabmeta.NewStore(rdb, nil), rdb
 }
 
-func TestEnsureAgentTerminalSessionCreatesLeadEpicLaunchSpec(t *testing.T) {
+func TestEnsureAgentTerminalSessionCreatesLeadLaunchSpec(t *testing.T) {
 	ctx := context.Background()
 	st, tabStore, rdb := newAgentSessionTestDeps(t)
 	svc := webuiterminal.NewTerminalService(
@@ -68,9 +68,14 @@ func TestEnsureAgentTerminalSessionCreatesLeadEpicLaunchSpec(t *testing.T) {
 		t.Fatalf("launch spec = %#v, want shell argv", meta.Launch)
 	}
 	cmd := meta.Launch.Argv[1]
-	for _, want := range []string{"'--server' 'http://loom.test'", "'--workspace' 'E2E'", "'--backend' 'codex'", "'epic' 'run'", "'--parent' 'E2E-8'", "'--lead' 'lead-ui-e2e'"} {
+	for _, want := range []string{"'--server' 'http://loom.test'", "'--workspace' 'E2E'", "'--backend' 'codex'", "'lead'"} {
 		if !strings.Contains(cmd, want) {
 			t.Fatalf("launch command %q missing %q", cmd, want)
+		}
+	}
+	for _, forbidden := range []string{"'epic' 'run'", "'--parent' 'E2E-8'", "'--lead' 'lead-ui-e2e'"} {
+		if strings.Contains(cmd, forbidden) {
+			t.Fatalf("launch command %q contains %q, want interactive lead launch", cmd, forbidden)
 		}
 	}
 	if got := meta.Launch.Env["LOOM_AGENT_TERMINAL_ID"]; got != meta.SessionName {

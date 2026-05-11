@@ -37,7 +37,7 @@ var codexNonInteractiveInvoker func(workDir, prompt, agentName string, shutdown 
 // buildCodexInteractiveCmd constructs the exec.Cmd for interactive Codex invocation.
 // Extracted for testability — callers can inspect the returned cmd without execution.
 func buildCodexInteractiveCmd(workDir, prompt, agentName string) *exec.Cmd {
-	cmd := exec.Command("codex", "--dangerously-bypass-approvals-and-sandbox", prompt)
+	cmd := exec.Command("codex", "--no-alt-screen", "--dangerously-bypass-approvals-and-sandbox", prompt)
 	cmd.Dir = workDir
 	cmd.Env = buildBackendEnv(workDir, agentName)
 	cmd.Stdin = os.Stdin

@@ -48,7 +48,7 @@ func TestBuildInteractiveCmd_PromptInArgs(t *testing.T) {
 			name:     "codex",
 			buildFn:  buildCodexInteractiveCmd,
 			prompt:   "do something",
-			wantArgs: []string{"codex", "--dangerously-bypass-approvals-and-sandbox", "do something"},
+			wantArgs: []string{"codex", "--no-alt-screen", "--dangerously-bypass-approvals-and-sandbox", "do something"},
 		},
 		{
 			name:     "opencode",
@@ -110,7 +110,7 @@ func TestBuildInteractiveCmd_BinaryAndFlags(t *testing.T) {
 			name:       "codex",
 			buildFn:    buildCodexInteractiveCmd,
 			wantBinary: "codex",
-			wantFlags:  []string{"--dangerously-bypass-approvals-and-sandbox"},
+			wantFlags:  []string{"--no-alt-screen", "--dangerously-bypass-approvals-and-sandbox"},
 		},
 		{
 			name:       "opencode",

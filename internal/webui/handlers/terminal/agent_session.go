@@ -242,11 +242,7 @@ func buildAgentLaunchSpec(ctx context.Context, st store.Store, workspace, sessio
 
 	switch {
 	case roleName == roleLead || roleName == roleOrchestrator:
-		if strings.TrimSpace(agent.Parent) != "" {
-			args = append(args, "epic", "run", "--parent", agent.Parent, "--lead", agent.Name)
-		} else {
-			args = append(args, "lead")
-		}
+		args = append(args, "lead")
 	case roleName == rolePlan || roleName == roleTask:
 		args = append(args, roleName, agent.Name, "--auto", "--daemon-mode")
 		if strings.TrimSpace(agent.Parent) != "" {
