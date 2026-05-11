@@ -99,6 +99,8 @@ export interface TerminalInstanceProps {
   ptyAlive?: boolean | undefined;
   /** When true, stale PTYs are automatically replaced with a fresh shell. */
   autoStartStaleSession?: boolean | undefined;
+  /** When false, unexpected disconnects stop at the reconnect affordance. */
+  autoReconnect?: boolean | undefined;
 }
 
 export interface TerminalInstanceHandle {
@@ -127,6 +129,7 @@ export const TerminalInstance = forwardRef<
     writable = true,
     ptyAlive,
     autoStartStaleSession,
+    autoReconnect = true,
   },
   ref,
 ) {
@@ -330,11 +333,17 @@ export const TerminalInstance = forwardRef<
           // Only start a fresh reconnect loop if none is running. If one is
           // already running, startAutoReconnect's own backoff handles the
           // retry — we just wait for the next attempt.
-          if (!reconnectCancelRef.current) {
+          if (autoReconnect && !reconnectCancelRef.current) {
             const config = hasConnectedRef.current
               ? undefined
               : INITIAL_CONNECT_CONFIG;
             startReconnectLoop(config);
+          } else if (!autoReconnect) {
+            clearReconnectTimers();
+            onReconnectStateChangeRef.current?.(null);
+            if (hasConnectedRef.current) {
+              setConnectionState("session_ended");
+            }
           }
         },
         () => onOutputRef.current?.(),
@@ -356,6 +365,7 @@ export const TerminalInstance = forwardRef<
       clearReconnectTimers,
       syncViewportToBottom,
       startReconnectLoop,
+      autoReconnect,
     ],
   );
 

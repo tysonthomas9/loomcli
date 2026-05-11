@@ -47,6 +47,8 @@ export interface TerminalPaneProps {
   ptyAlive?: boolean | undefined;
   /** Automatically replace stale PTYs for tabs where losing old scrollback is acceptable. */
   autoStartStaleSession?: boolean | undefined;
+  /** Automatically reconnect after an unexpected WebSocket close. */
+  autoReconnect?: boolean | undefined;
 }
 
 export function TerminalPane({
@@ -71,6 +73,7 @@ export function TerminalPane({
   isMetaLoading,
   ptyAlive,
   autoStartStaleSession,
+  autoReconnect,
 }: TerminalPaneProps) {
   return (
     <>
@@ -86,6 +89,7 @@ export function TerminalPane({
         writable={tab.writable}
         ptyAlive={ptyAlive}
         autoStartStaleSession={autoStartStaleSession}
+        autoReconnect={autoReconnect}
       />
       {tab.crashReason != null ? (
         <CrashOverlay
@@ -99,6 +103,7 @@ export function TerminalPane({
             connectionState={tab.connectionState}
             hasConnected={hasConnected}
             onReconnect={onReconnect}
+            autoReconnect={autoReconnect}
           />
           <ReconnectingOverlay
             state={reconnectState}

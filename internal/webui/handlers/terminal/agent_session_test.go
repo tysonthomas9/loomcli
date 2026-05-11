@@ -194,6 +194,79 @@ func TestEnsureAgentTerminalSessionDoesNotRelaunchStoppedExistingAgentTab(t *tes
 	}
 }
 
+func TestEnsureAgentTerminalSessionCreatesFreshTabForStaleRunningAgentTab(t *testing.T) {
+	ctx := context.Background()
+	st, tabStore, rdb := newAgentSessionTestDeps(t)
+	svc := webuiterminal.NewTerminalService(
+		nil,
+		tabStore,
+		nil,
+		rdb,
+		nil,
+		time.Now(),
+	)
+
+	if _, err := st.Agents().Create(ctx, store.AgentCreate{
+		WorkspaceKey: "E2E",
+		Name:         "worker-live",
+		RoleName:     "task",
+		Backend:      "codex",
+	}); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	oldTime := time.Now().UTC().Add(-time.Hour)
+	if err := tabStore.Set(ctx, &tabmeta.TabMetadata{
+		SessionName: "term_worker_old",
+		Workspace:   "E2E",
+		Label:       "agent-worker-live",
+		Notes:       "old scrollback tab",
+		SortOrder:   3,
+		Pinned:      true,
+		Kind:        "agent",
+		AgentID:     "worker-live",
+		Role:        "task",
+		Backend:     "codex",
+		Writable:    true,
+		Launch: &tabmeta.LaunchSpec{
+			Argv: []string{"sh", "-c", "loom task worker-live --auto"},
+		},
+		CreatedAt: oldTime,
+		UpdatedAt: oldTime,
+	}); err != nil {
+		t.Fatalf("seed tab: %v", err)
+	}
+
+	meta, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "worker-live", "http://loom.test")
+	if err != nil {
+		t.Fatalf("ensureAgentTerminalSession: %v", err)
+	}
+	if meta.SessionName == "term_worker_old" {
+		t.Fatalf("session = %q, want fresh session for stale running agent tab", meta.SessionName)
+	}
+	if !strings.HasPrefix(meta.SessionName, "term_") {
+		t.Fatalf("session name = %q, want UUID term_ prefix", meta.SessionName)
+	}
+	if meta.SortOrder != 3 || !meta.Pinned || meta.Label != "agent-worker-live" || meta.Notes != "old scrollback tab" {
+		t.Fatalf("metadata not preserved: sort=%d pinned=%v label=%q notes=%q", meta.SortOrder, meta.Pinned, meta.Label, meta.Notes)
+	}
+	if meta.Launch == nil {
+		t.Fatal("launch spec = nil, want relaunchable terminal")
+	}
+	if got := meta.Launch.Env["LOOM_AGENT_TERMINAL_ID"]; got != meta.SessionName {
+		t.Fatalf("LOOM_AGENT_TERMINAL_ID = %q, want %q", got, meta.SessionName)
+	}
+	tabs, err := svc.ListTabs(ctx, "E2E")
+	if err != nil {
+		t.Fatalf("list tabs: %v", err)
+	}
+	for _, tab := range tabs {
+		if tab.SessionName == "term_worker_old" {
+			t.Fatalf("stale tab %q was not pruned", tab.SessionName)
+		}
+	}
+}
+
 func TestBuildAgentLaunchSpecRejectsUnknownRoleWithoutPrompt(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()

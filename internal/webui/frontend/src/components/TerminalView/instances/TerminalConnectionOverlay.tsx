@@ -13,6 +13,7 @@ export interface TerminalConnectionOverlayProps {
   connectionState: ConnectionState;
   hasConnected: boolean;
   onReconnect: () => void;
+  autoReconnect?: boolean | undefined;
 }
 
 // ActionableState variants share the same "message + button + optional
@@ -63,6 +64,7 @@ export function TerminalConnectionOverlay({
   connectionState,
   hasConnected,
   onReconnect,
+  autoReconnect = true,
 }: TerminalConnectionOverlayProps): JSX.Element | null {
   const reconnectButtonRef = useRef<HTMLButtonElement>(null);
 
@@ -102,6 +104,10 @@ export function TerminalConnectionOverlay({
   }
 
   const cfg = actionableStates[connectionState];
+  const subtext =
+    connectionState === "disconnected" && !autoReconnect
+      ? undefined
+      : cfg.subtext;
   return (
     <div
       className={`${styles.overlay} ${cfg.backdrop}`}
@@ -120,7 +126,7 @@ export function TerminalConnectionOverlay({
         >
           {cfg.buttonLabel}
         </button>
-        {cfg.subtext && <div className={styles.subtext}>{cfg.subtext}</div>}
+        {subtext && <div className={styles.subtext}>{subtext}</div>}
       </div>
     </div>
   );

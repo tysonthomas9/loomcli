@@ -329,6 +329,40 @@ describe("TerminalView", () => {
       ).toBe(false);
     });
 
+    it("does not auto-reconnect agent-backed terminal sessions", () => {
+      setMetadata([
+        {
+          session_name: "term_agent",
+          label: "agent-lead-ui-e2e",
+          kind: "agent",
+          agent_id: "lead-ui-e2e",
+          pty_alive: true,
+        },
+        {
+          session_name: "session-1",
+          label: "Session 1",
+          pty_alive: true,
+        },
+      ]);
+      render(<TerminalView />);
+
+      const calls = vi.mocked(TerminalInstance).mock.calls.flatMap(([props]) => {
+        if (!props) return [];
+        return [props as {
+          sessionName: string;
+          autoReconnect?: boolean;
+        }];
+      });
+      expect(
+        calls.find((props) => props.sessionName === "term_agent")
+          ?.autoReconnect,
+      ).toBe(false);
+      expect(
+        calls.find((props) => props.sessionName === "session-1")
+          ?.autoReconnect,
+      ).toBe(true);
+    });
+
     it("auto-creates only default backend tab on first open (empty metadata)", () => {
       setMetadata([]);
       render(<TerminalView />);
@@ -955,7 +989,7 @@ describe("TerminalView", () => {
       await waitFor(() => expect(onConsumed).toHaveBeenCalled());
     });
 
-    it("switches to existing tab if agent tab already exists", () => {
+    it("resolves backend terminal even if restored agent tab already exists", async () => {
       setMetadata([
         ...DEFAULT_METADATA,
         {
@@ -975,12 +1009,16 @@ describe("TerminalView", () => {
         />,
       );
 
-      // Should switch to existing tab, not create a new one
-      expect(screen.getByTestId("active-tab-id").textContent).toBe(
-        "term_existing",
+      await waitFor(() =>
+        expect(screen.getByTestId("active-tab-id").textContent).toBe(
+          "term_fox",
+        ),
       );
       expect(onConsumed).toHaveBeenCalled();
-      expect(mockHooksApi.ensureAgentTerminalSession).not.toHaveBeenCalled();
+      expect(mockHooksApi.ensureAgentTerminalSession).toHaveBeenCalledWith(
+        expect.any(String),
+        "fox",
+      );
     });
 
     it("does not persist agent tabs through generic tab creation", async () => {

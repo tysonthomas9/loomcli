@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -102,7 +103,6 @@ func ensureAgentTerminalSession(ctx context.Context, svc service.TerminalService
 	sortOrder := len(tabs)
 	label := "agent-" + agentName
 	if existing != nil {
-		sessionName = existing.SessionName
 		sortOrder = existing.SortOrder
 		label = existing.Label
 	}
@@ -152,6 +152,7 @@ func ensureAgentTerminalSession(ctx context.Context, svc service.TerminalService
 	if err := svc.PutTab(ctx, workspace, meta); err != nil {
 		return nil, err
 	}
+	pruneStaleAgentTerminalTabs(ctx, svc, workspace, agentName, sessionName, tabs)
 	return svc.GetTab(ctx, workspace, sessionName)
 }
 
@@ -193,6 +194,22 @@ func selectAgentTerminalTab(tabs []tabmeta.TabMetadata, agentName string) *tabme
 		}
 	}
 	return newest
+}
+
+func pruneStaleAgentTerminalTabs(ctx context.Context, svc service.TerminalService, workspace, agentName, keepSession string, tabs []tabmeta.TabMetadata) {
+	for i := range tabs {
+		tab := tabs[i]
+		if tab.SessionName == keepSession || tab.Kind != terminalKindAgent || tab.AgentID != agentName || tab.PTYAlive {
+			continue
+		}
+		if err := svc.DeleteTab(ctx, workspace, tab.SessionName); err != nil {
+			slog.Warn("failed to prune stale agent terminal tab",
+				"workspace", workspace,
+				"agent", agentName,
+				"session", tab.SessionName,
+				"err", err)
+		}
+	}
 }
 
 func buildAgentLaunchSpec(ctx context.Context, st store.Store, workspace, sessionName string, agent *domain.Agent, loomServerURL string) (*tabmeta.LaunchSpec, string, error) {

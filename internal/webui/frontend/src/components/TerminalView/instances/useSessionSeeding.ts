@@ -1,4 +1,4 @@
-import { useEffect, useCallback } from "react";
+import { useEffect, useCallback, useRef } from "react";
 
 import { ensureAgentTerminalSession, type IssueContext } from "@/hooks/api";
 
@@ -54,6 +54,11 @@ export function useSessionSeeding({
   initializedRef,
   workspaceIdRef,
 }: UseSessionSeedingOptions): UseSessionSeedingReturn {
+  const agentResolutionRef = useRef<{
+    key: string;
+    promise: ReturnType<typeof ensureAgentTerminalSession>;
+  } | null>(null);
+
   // Handle pending issue context: create or switch to issue tab.
   useEffect(() => {
     if (!pendingIssueContext || !initializedRef.current) return;
@@ -98,32 +103,26 @@ export function useSessionSeeding({
     if (!pendingAgentName || !initializedRef.current) return;
 
     const existingTab = tabs.find((t) => t.agentName === pendingAgentName);
-    if (existingTab) {
-      if (existingTab.kind !== "agent") {
-        setTabs((prev) =>
-          prev.map((tab) =>
-            tab.id === existingTab.id
-              ? {
-                  ...tab,
-                  kind: "agent",
-                  agentName: pendingAgentName,
-                }
-              : tab,
-          ),
-        );
-      }
-      setActiveTabId(existingTab.id);
-      onAgentNameConsumed?.();
-      return;
-    }
-
-    if (tabs.length >= MAX_TABS) {
+    if (!existingTab && tabs.length >= MAX_TABS) {
       onAgentNameConsumed?.();
       return;
     }
 
     let cancelled = false;
-    ensureAgentTerminalSession(workspaceIdRef.current, pendingAgentName)
+    const requestKey = `${workspaceIdRef.current}:${pendingAgentName}`;
+    let request = agentResolutionRef.current;
+    if (!request || request.key !== requestKey) {
+      request = {
+        key: requestKey,
+        promise: ensureAgentTerminalSession(
+          workspaceIdRef.current,
+          pendingAgentName,
+        ),
+      };
+      agentResolutionRef.current = request;
+    }
+
+    request.promise
       .then((meta) => {
         if (cancelled) return;
         const agentName = meta.agent_id ?? pendingAgentName;
@@ -145,6 +144,16 @@ export function useSessionSeeding({
               tab.id === newTab.id ? { ...tab, ...newTab } : tab,
             );
           }
+          if (existingTab) {
+            let replaced = false;
+            return prev.flatMap((tab) => {
+              if (tab.agentName !== agentName) return [tab];
+              if (replaced) return [];
+              replaced = true;
+              return [{ ...tab, ...newTab }];
+            });
+          }
+          if (prev.length >= MAX_TABS) return prev;
           return [...prev, newTab];
         });
         setActiveTabId(newTab.id);
@@ -157,6 +166,11 @@ export function useSessionSeeding({
           err,
         );
         onAgentNameConsumed?.();
+      })
+      .finally(() => {
+        if (agentResolutionRef.current?.key === requestKey) {
+          agentResolutionRef.current = null;
+        }
       });
 
     return () => {
