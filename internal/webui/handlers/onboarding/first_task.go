@@ -86,17 +86,6 @@ func HandleRunFirstTask(issueSvc service.IssueService, agentSvc service.AgentSer
 			return
 		}
 
-		inProgressStatus := "in_progress"
-		if err := issueSvc.PatchIssue(r.Context(), service.PatchIssueParams{
-			IssueID:  issueID,
-			Status:   &inProgressStatus,
-			Assignee: &agentName,
-		}); err != nil {
-			rollbackFirstTaskAssignment(r, issueSvc, issueID)
-			handler.HandleServiceError(w, err)
-			return
-		}
-
 		_, err = agentSvc.RequestAgentLifecycle(r.Context(), ws, agentName, service.AgentLifecycleInput{
 			State:        domain.AgentStateActive,
 			DesiredState: domain.AgentDesiredRunning,
@@ -104,7 +93,7 @@ func HandleRunFirstTask(issueSvc service.IssueService, agentSvc service.AgentSer
 			Payload:      map[string]string{"task_id": issueID},
 		})
 		if err != nil {
-			rollbackFirstTaskAssignment(r, issueSvc, issueID)
+			deleteCreatedFirstTask(r, issueSvc, issueID)
 			handler.HandleServiceError(w, err)
 			return
 		}
@@ -142,14 +131,8 @@ func decodeIssueID(raw json.RawMessage) (string, error) {
 	return created.ID, nil
 }
 
-func rollbackFirstTaskAssignment(r *http.Request, issueSvc service.IssueService, issueID string) {
-	openStatus := "open"
-	emptyAssignee := ""
-	if err := issueSvc.PatchIssue(r.Context(), service.PatchIssueParams{
-		IssueID:  issueID,
-		Status:   &openStatus,
-		Assignee: &emptyAssignee,
-	}); err != nil {
-		slog.Warn("onboarding first task rollback failed", "issue_id", issueID, "err", err)
+func deleteCreatedFirstTask(r *http.Request, issueSvc service.IssueService, issueID string) {
+	if _, err := issueSvc.DeleteIssue(r.Context(), issueID); err != nil {
+		slog.Warn("onboarding first task cleanup failed", "issue_id", issueID, "err", err)
 	}
 }
