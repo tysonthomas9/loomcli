@@ -422,7 +422,7 @@ export function TerminalView({
           instanceRef={setInstanceRef(tab.id)}
           ptyAlive={ptyAlive}
           autoStartStaleSession={false}
-          autoReconnect={tab.kind !== "agent"}
+          autoReconnect
           onConnectionStateChange={(state, hasConnected) =>
             handleConnectionStateChange(tab.id, state, hasConnected)
           }

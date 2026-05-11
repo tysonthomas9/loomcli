@@ -329,7 +329,7 @@ describe("TerminalView", () => {
       ).toBe(false);
     });
 
-    it("does not auto-reconnect agent-backed terminal sessions", () => {
+    it("auto-reconnects agent-backed terminal sessions after transient disconnects", () => {
       setMetadata([
         {
           session_name: "term_agent",
@@ -356,7 +356,7 @@ describe("TerminalView", () => {
       expect(
         calls.find((props) => props.sessionName === "term_agent")
           ?.autoReconnect,
-      ).toBe(false);
+      ).toBe(true);
       expect(
         calls.find((props) => props.sessionName === "session-1")
           ?.autoReconnect,

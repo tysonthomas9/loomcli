@@ -79,6 +79,7 @@ export function AgentDetailMain({
     () => setPendingAgentName(undefined),
     [],
   );
+  const terminalUnavailable = agent != null && isTerminalUnavailable(agent);
 
   if (!agentName) {
     return (
@@ -112,19 +113,32 @@ export function AgentDetailMain({
           position: "relative",
         }}
       >
-        <Suspense fallback={<LoadingSkeleton.Terminal />}>
-          <TerminalView
-            isActive={true}
-            pendingAgentName={pendingAgentName}
-            onAgentNameConsumed={handleAgentNameConsumed}
-            pendingTerminalInput={pendingTerminalInput}
-            onTerminalInputConsumed={onTerminalInputConsumed}
-            hideTabs
+        {terminalUnavailable ? (
+          <EmptyState
+            message="Agent is stopped"
+            detail="This agent does not have a live terminal session. Start the agent before attaching to its PTY."
           />
-        </Suspense>
+        ) : (
+          <Suspense fallback={<LoadingSkeleton.Terminal />}>
+            <TerminalView
+              isActive={true}
+              pendingAgentName={pendingAgentName}
+              onAgentNameConsumed={handleAgentNameConsumed}
+              pendingTerminalInput={pendingTerminalInput}
+              onTerminalInputConsumed={onTerminalInputConsumed}
+              hideTabs
+            />
+          </Suspense>
+        )}
       </div>
     </div>
   );
+}
+
+function isTerminalUnavailable(agent: LoomAgentStatus): boolean {
+  const state = (agent.state ?? "").toLowerCase();
+  const desiredState = (agent.desired_state ?? "").toLowerCase();
+  return state === "stopped" || state === "dead" || desiredState === "stopped";
 }
 
 function Header({
