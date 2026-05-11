@@ -72,8 +72,7 @@ func HandleRunFirstTask(issueSvc service.IssueService, agentSvc service.AgentSer
 			IssueType:   issueType,
 			Priority:    priority,
 			Description: strings.TrimSpace(req.Description),
-			Assignee:    agentName,
-			Status:      "in_progress",
+			Status:      "open",
 			SourceRepo:  strings.TrimSpace(req.SourceRepo),
 		})
 		if err != nil {
@@ -83,6 +82,17 @@ func HandleRunFirstTask(issueSvc service.IssueService, agentSvc service.AgentSer
 
 		issueID, err := decodeIssueID(created)
 		if err != nil {
+			handler.HandleServiceError(w, err)
+			return
+		}
+
+		inProgressStatus := "in_progress"
+		if err := issueSvc.PatchIssue(r.Context(), service.PatchIssueParams{
+			IssueID:  issueID,
+			Status:   &inProgressStatus,
+			Assignee: &agentName,
+		}); err != nil {
+			rollbackFirstTaskAssignment(r, issueSvc, issueID)
 			handler.HandleServiceError(w, err)
 			return
 		}

@@ -310,11 +310,16 @@ function App() {
   );
 
   // Drive issue fetching based on active view mode, workspace, and source repos
-  const issueModeByView: Record<string, "graph" | "kanban"> = {
+  const issueModeByView: Partial<Record<ViewMode, "graph" | "kanban">> = {
     graph: "graph",
     kanban: "kanban",
     table: "kanban",
     "issue-detail": "kanban",
+    terminal: "kanban",
+    settings: "kanban",
+    workspace: "kanban",
+    files: "kanban",
+    observability: "kanban",
   };
   const issueMode = issueModeByView[activeView] ?? ("ready" as const);
 
@@ -537,6 +542,7 @@ function App() {
   const agentStore = useAgentStoreInstance();
   const agents = useStore(agentStore, (s) => s.agents);
   const agentTasks = useStore(agentStore, (s) => s.agentTasks);
+  const agentStats = useStore(agentStore, (s) => s.stats);
   const agentShowStaleBanner = useStore(agentStore, (s) => s.showStaleBanner);
   const agentConnectionLost = useStore(agentStore, (s) => s.connectionLost);
   const agentDisconnectedSince = useStore(
@@ -904,7 +910,7 @@ function App() {
   const hasWorkspaceAgent = Boolean(
     getOnboardingPlannerName(workspace?.agents),
   );
-  const hasWorkspaceIssue = issues.length > 0;
+  const hasWorkspaceIssue = issues.length > 0 || (agentStats?.total ?? 0) > 0;
   const defaultBackend = onboardingBackendConfig?.backend;
   const defaultBackendStatus = aiBackends.find(
     (backend) => backend.name === defaultBackend,
