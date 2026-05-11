@@ -754,6 +754,17 @@ function createMockUseIssuesReturn(
     agents: [],
     agentTasks: {},
     retryNow: vi.fn(),
+    stats: {
+      open: 0,
+      closed: 0,
+      total: issues.length,
+      completion: 0,
+      remaining: issues.length,
+      in_progress: issues.filter((issue) => issue.status === "in_progress")
+        .length,
+      review: issues.filter((issue) => issue.status === "review").length,
+      blocked: issues.filter((issue) => issue.status === "blocked").length,
+    },
     ...overrides,
   };
 }
@@ -2319,6 +2330,17 @@ describe("App", () => {
       );
     });
 
+    it('calls fetchIssues with mode: "kanban" when activeView is "terminal"', () => {
+      mockStoreState = createMockUseIssuesReturn({});
+      vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("terminal"));
+
+      render(<App />);
+
+      expect(mockStoreState.fetchIssues).toHaveBeenCalledWith(
+        expect.objectContaining({ mode: "kanban" }),
+      );
+    });
+
     it("refetches issues when view changes from kanban to graph", () => {
       mockStoreState = createMockUseIssuesReturn({});
       vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("kanban"));
@@ -2805,6 +2827,38 @@ describe("App", () => {
         id: "manual-task",
       });
       expect(fetchIssue).toHaveBeenCalledWith("manual-task");
+    });
+
+    it("does not show completed onboarding on terminal routes when monitor stats report an issue", async () => {
+      localStorage.clear();
+      mockStoreState = createMockUseIssuesReturn({
+        issues: [],
+        stats: {
+          open: 0,
+          closed: 0,
+          total: 1,
+          completion: 0,
+          remaining: 1,
+          in_progress: 1,
+          review: 0,
+          blocked: 0,
+        },
+      });
+      mockUseRouteView.mockReturnValue(createViewStateReturn("terminal"));
+      mockBackendState({
+        defaultBackend: "opencode",
+        backends: [backendInfo("opencode", true)],
+      });
+      mockHelloWorldWorkspaceContext({
+        agents: [{ name: "planner", role_name: "plan" }],
+      });
+
+      render(<App />);
+
+      expect(screen.queryByTestId("onboarding-flow")).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: "Create & Run" }),
+      ).not.toBeInTheDocument();
     });
   });
 

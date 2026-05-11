@@ -15,18 +15,23 @@ import (
 )
 
 func TestHandleRunFirstTaskCreatesAssignsAndStarts(t *testing.T) {
+	var patch service.PatchIssueParams
 	issueSvc := &stubIssueService{
 		createFunc: func(_ context.Context, params service.CreateIssueParams) (json.RawMessage, error) {
 			if params.Title != "Explore Hello-World onboarding" {
 				t.Fatalf("Title = %q", params.Title)
 			}
-			if params.Assignee != "planner" || params.Status != "in_progress" {
-				t.Fatalf("assignment = %q/%q", params.Assignee, params.Status)
+			if params.Assignee != "" || params.Status != "open" {
+				t.Fatalf("create assignment = %q/%q", params.Assignee, params.Status)
 			}
 			if params.SourceRepo != "Hello-World" {
 				t.Fatalf("SourceRepo = %q", params.SourceRepo)
 			}
 			return json.RawMessage(`{"id":"task-1","title":"Explore Hello-World onboarding"}`), nil
+		},
+		patchFunc: func(_ context.Context, params service.PatchIssueParams) error {
+			patch = params
+			return nil
 		},
 	}
 	agentSvc := &stubAgentService{
@@ -64,6 +69,57 @@ func TestHandleRunFirstTaskCreatesAssignsAndStarts(t *testing.T) {
 	}
 	if !body.Success || !body.Started || body.AgentName != "planner" {
 		t.Fatalf("response = %#v", body)
+	}
+	if patch.IssueID != "task-1" || patch.Status == nil || *patch.Status != "in_progress" {
+		t.Fatalf("patch status = %#v", patch)
+	}
+	if patch.Assignee == nil || *patch.Assignee != "planner" {
+		t.Fatalf("patch assignee = %#v", patch)
+	}
+}
+
+func TestHandleRunFirstTaskDoesNotStartAgentWhenAssignmentFails(t *testing.T) {
+	var patchCalls int
+	issueSvc := &stubIssueService{
+		createFunc: func(context.Context, service.CreateIssueParams) (json.RawMessage, error) {
+			return json.RawMessage(`{"id":"task-1"}`), nil
+		},
+		patchFunc: func(_ context.Context, params service.PatchIssueParams) error {
+			patchCalls++
+			if patchCalls == 1 {
+				if params.Status == nil || *params.Status != "in_progress" {
+					t.Fatalf("assignment status = %#v", params)
+				}
+				return service.ErrValidation("claim failed")
+			}
+			if params.Status == nil || *params.Status != "open" {
+				t.Fatalf("rollback status = %#v", params)
+			}
+			return nil
+		},
+	}
+	agentSvc := &stubAgentService{
+		agents: []*domain.Agent{{Name: "planner", RoleName: "plan"}},
+		lifecycleFunc: func(context.Context, string, string, service.AgentLifecycleInput) (*domain.Agent, error) {
+			t.Fatal("agent lifecycle should not start when assignment fails")
+			return nil, nil
+		},
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/HELLO-WORLD/onboarding/first-task", strings.NewReader(`{
+		"agent_name":"planner",
+		"title":"Explore Hello-World onboarding"
+	}`))
+	req.SetPathValue("ws", "HELLO-WORLD")
+
+	HandleRunFirstTask(issueSvc, agentSvc).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if patchCalls != 2 {
+		t.Fatalf("patch calls = %d, want assignment and rollback", patchCalls)
 	}
 }
 
