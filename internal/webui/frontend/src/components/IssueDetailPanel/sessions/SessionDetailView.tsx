@@ -68,6 +68,14 @@ function formatDuration(s: number | undefined): string {
   return `${m}m ${rem.toFixed(0)}s`;
 }
 
+function runErrorSummary(session: SessionRecord): string | null {
+  if (session.last_error) return session.last_error;
+  if (session.error_class) return session.error_class;
+  if (session.status === "failed") return "Agent run failed.";
+  if (session.status === "aborted") return "Agent run was aborted.";
+  return null;
+}
+
 // ─── Event grouping ────────────────────────────────────────────────────
 
 type ToolItem = {
@@ -324,6 +332,7 @@ export function SessionDetailView({
     (session.output_tokens ?? 0) +
     (session.cache_read_tokens ?? 0) +
     (session.cache_write_tokens ?? 0);
+  const runError = runErrorSummary(session);
 
   return (
     <div className={styles.detail} data-testid="session-detail-view">
@@ -351,6 +360,17 @@ export function SessionDetailView({
           <div className={styles.promptBlock}>
             <div className={styles.promptLabel}>Prompt</div>
             <div className={styles.promptBody}>{grouped.prompt.text}</div>
+          </div>
+        )}
+
+        {runError && (
+          <div
+            className={styles.runErrorBanner}
+            role="alert"
+            data-testid="run-error-banner"
+          >
+            <div className={styles.runErrorTitle}>Run failed</div>
+            <div className={styles.runErrorBody}>{runError}</div>
           </div>
         )}
 
