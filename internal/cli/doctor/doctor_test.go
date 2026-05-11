@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 )
 
@@ -1361,5 +1362,39 @@ func TestCheckStaleSessionRecords_LeftoverTmpFixMode(t *testing.T) {
 	metaPath := filepath.Join(sessDir, "metadata.json")
 	if _, err := os.Stat(metaPath); err != nil {
 		t.Errorf("expected metadata.json to be preserved, but got error: %v", err)
+	}
+}
+
+func TestCheckOrphanedFleetLocks_NoneInProgressIsSkipped(t *testing.T) {
+	t.Parallel()
+	deps, _, _, _, mock := NewTestDeps(t)
+	mock.ListResult = []backend.IssueData{}
+	deps.IssueBackend = mock
+
+	result := checkOrphanedFleetLocks(deps)
+	if result.Name != "" {
+		t.Errorf("expected empty (skipped) result when no in_progress issues, got %+v", result)
+	}
+}
+
+func TestCheckOrphanedFleetLocks_AllHoldersRunningPasses(t *testing.T) {
+	t.Parallel()
+	deps, _, _, _, mock := NewTestDeps(t)
+	mock.ListResult = []backend.IssueData{
+		{ID: "FOO-1", Status: "in_progress", Assignee: "agent-alpha"},
+	}
+	deps.IssueBackend = mock
+
+	result := checkOrphanedFleetLocks(deps)
+	// daemon-agents.json is unreadable in this test, so all holders count
+	// as missing. We still expect a non-empty result name with WARN status.
+	if result.Name != "orphaned_fleet_locks" {
+		t.Errorf("Name = %q, want orphaned_fleet_locks", result.Name)
+	}
+	if result.Status != StatusWarn {
+		t.Errorf("Status = %v, want StatusWarn (no running daemon, so holder is orphaned)", result.Status)
+	}
+	if !strings.Contains(result.Detail, "agent-alpha") {
+		t.Errorf("Detail = %q, want it to mention holder", result.Detail)
 	}
 }

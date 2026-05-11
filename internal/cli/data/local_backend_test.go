@@ -85,6 +85,11 @@ func (b *localBackendStub) ClaimIssue(_ context.Context, id string, lockTTL time
 	return nil
 }
 
+func (b *localBackendStub) ReleaseIssueLock(_ context.Context, id, actor string) error {
+	b.record("ReleaseIssueLock", id, actor)
+	return nil
+}
+
 func (b *localBackendStub) DeferIssue(context.Context, string, time.Time) error { return nil }
 func (b *localBackendStub) UndeferIssue(context.Context, string) error          { return nil }
 

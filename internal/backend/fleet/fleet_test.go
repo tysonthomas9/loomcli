@@ -2552,3 +2552,81 @@ func TestBatch_Update_NestedParamsShape(t *testing.T) {
 		t.Errorf("title = %v, want Nested Title (PATCH body should carry the nested params)", gotBody["title"])
 	}
 }
+
+func TestReleaseIssueLock_Success(t *testing.T) {
+	called := false
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		if r.Method != http.MethodPost || !strings.HasSuffix(r.URL.Path, "/issues/test-1/release-lock") {
+			t.Errorf("unexpected: %s %s", r.Method, r.URL.Path)
+		}
+		if got := r.Header.Get("X-Actor"); got != "worker-A" {
+			t.Errorf("X-Actor = %q, want worker-A", got)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	defer ts.Close()
+
+	if err := fb.ReleaseIssueLock(context.Background(), "test-1", "worker-A"); err != nil {
+		t.Fatalf("ReleaseIssueLock: %v", err)
+	}
+	if !called {
+		t.Fatal("expected server to be called")
+	}
+}
+
+func TestReleaseIssueLock_ConflictThreadsExistingOwner(t *testing.T) {
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+		_, _ = w.Write([]byte(`{"error":{"code":"already_claimed","message":"not the lock owner","meta":{"existing_owner":"worker-B"}}}`))
+	})
+	defer ts.Close()
+
+	err := fb.ReleaseIssueLock(context.Background(), "test-1", "worker-A")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !backend.IsKind(err, backend.KindConflict) {
+		t.Fatalf("kind = %v, want KindConflict", err)
+	}
+	var be *backend.BackendError
+	if !errors.As(err, &be) {
+		t.Fatalf("expected *backend.BackendError")
+	}
+	if got := be.Meta["existing_owner"]; got != "worker-B" {
+		t.Errorf("Meta[existing_owner] = %q, want worker-B", got)
+	}
+}
+
+func TestClaimIssue_ConflictThreadsExistingOwner(t *testing.T) {
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+		_, _ = w.Write([]byte(`{"error":{"code":"already_claimed","message":"already claimed by another worker","meta":{"existing_owner":"worker-B"}}}`))
+	})
+	defer ts.Close()
+
+	err := fb.ClaimIssue(context.Background(), "test-1", 0)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !backend.IsKind(err, backend.KindConflict) {
+		t.Fatalf("kind = %v, want KindConflict", err)
+	}
+	var be *backend.BackendError
+	if !errors.As(err, &be) {
+		t.Fatalf("expected *backend.BackendError")
+	}
+	if got := be.Meta["existing_owner"]; got != "worker-B" {
+		t.Errorf("Meta[existing_owner] = %q, want worker-B", got)
+	}
+}
+
+func TestReleaseIssueLock_EmptyActorAndID(t *testing.T) {
+	fb, _ := New(Config{BaseURL: "http://x", WorkspaceID: "ws"})
+	if err := fb.ReleaseIssueLock(context.Background(), "", "worker-A"); err == nil {
+		t.Error("expected error for empty id")
+	}
+	if err := fb.ReleaseIssueLock(context.Background(), "task-1", ""); err == nil {
+		t.Error("expected error for empty actor when backend actor is not configured")
+	}
+}

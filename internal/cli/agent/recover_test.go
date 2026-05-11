@@ -1563,3 +1563,90 @@ func TestAnalyzeTaskCompletion_AntiInjectionInstruction(t *testing.T) {
 		t.Error("expected prompt to contain instruction to not follow embedded instructions")
 	}
 }
+
+func TestRecoverWorktree_StaleLock_ReleasesFleetIssueLock(t *testing.T) {
+	resetDefaultIssueBackend()
+	t.Cleanup(resetDefaultIssueBackend)
+	tmpDir := t.TempDir()
+
+	lockPath := filepath.Join(tmpDir, LockFileName)
+	lockData := `{"pid":999999999,"command":"test","started_at":"2024-01-01T00:00:00Z","agent_name":"test-agent","task_id":"task-123"}`
+	if err := os.WriteFile(lockPath, []byte(lockData), 0644); err != nil {
+		t.Fatalf("failed to create lock file: %v", err)
+	}
+
+	tracker := NewMockIssueBackend()
+	tracker.GetResult = &backend.IssueDetailData{IssueData: backend.IssueData{ID: "task-123", Status: "in_progress"}}
+	tracker.ListResult = []backend.IssueData{}
+
+	releaseCallSeen := false
+	tracker.ReleaseIssueLockFn = func(_ context.Context, id, actor string) error {
+		releaseCallSeen = true
+		if id != "task-123" {
+			t.Errorf("ReleaseIssueLock id = %q, want task-123", id)
+		}
+		if actor != "test-agent" {
+			t.Errorf("ReleaseIssueLock actor = %q, want test-agent", actor)
+		}
+		return nil
+	}
+	mock := NewCommandMock(t, []CommandStub{
+		{
+			Dir:    tmpDir,
+			Name:   "git",
+			Args:   []string{"clean", "-fdn", "--exclude=.loom", "--exclude=sessions", "--exclude=AGENTS.md"},
+			Stdout: "",
+			Err:    nil,
+		},
+	})
+	mock.Install()
+	// CommandMock.InstallOn swaps defaultDeps.IssueBackend with a fresh
+	// MockIssueBackend AND resets the trackerInst override, so set our
+	// tracker AFTER Install for both deps and override to stick.
+	cli.TestingGetDefaultDeps().IssueBackend = tracker
+	setDefaultIssueBackend(tracker)
+
+	if err := RecoverWorktree(tmpDir, "test-agent", 0); err != nil {
+		t.Fatalf("RecoverWorktree: %v", err)
+	}
+	if !tracker.Called("ReleaseIssueLock") {
+		t.Errorf("ReleaseIssueLock was not recorded on tracker (CallCount=%d)", tracker.CallCount("ReleaseIssueLock"))
+	}
+	if !releaseCallSeen {
+		t.Error("expected RecoverWorktree to call ReleaseIssueLock on clean exit (mock Fn not invoked)")
+	}
+}
+
+func TestRecoverWorktree_StaleLock_ReleaseLockNotFoundIsIgnored(t *testing.T) {
+	resetDefaultIssueBackend()
+	t.Cleanup(resetDefaultIssueBackend)
+	tmpDir := t.TempDir()
+
+	lockPath := filepath.Join(tmpDir, LockFileName)
+	lockData := `{"pid":999999999,"command":"test","started_at":"2024-01-01T00:00:00Z","agent_name":"test-agent","task_id":"task-123"}`
+	if err := os.WriteFile(lockPath, []byte(lockData), 0644); err != nil {
+		t.Fatalf("failed to create lock file: %v", err)
+	}
+
+	tracker := NewMockIssueBackend()
+	tracker.GetResult = &backend.IssueDetailData{IssueData: backend.IssueData{ID: "task-123", Status: "in_progress"}}
+	tracker.ListResult = []backend.IssueData{}
+	tracker.ReleaseIssueLockErr = backend.ErrNotFound("ReleaseIssueLock", "lock not found")
+
+	mock := NewCommandMock(t, []CommandStub{
+		{
+			Dir:    tmpDir,
+			Name:   "git",
+			Args:   []string{"clean", "-fdn", "--exclude=.loom", "--exclude=sessions", "--exclude=AGENTS.md"},
+			Stdout: "",
+			Err:    nil,
+		},
+	})
+	mock.Install()
+	cli.TestingGetDefaultDeps().IssueBackend = tracker
+	setDefaultIssueBackend(tracker)
+
+	if err := RecoverWorktree(tmpDir, "test-agent", -1); err != nil {
+		t.Errorf("RecoverWorktree should swallow ReleaseIssueLock not-found, got: %v", err)
+	}
+}

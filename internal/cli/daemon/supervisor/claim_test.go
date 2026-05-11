@@ -2,6 +2,7 @@ package supervisor
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -180,7 +181,12 @@ func TestClaimTask_CapsConflictRetries(t *testing.T) {
 	claimCalls := 0
 	mock.ClaimIssueFn = func(_ context.Context, _ string, _ time.Duration) error {
 		claimCalls++
-		return backend.ErrConflict("ClaimIssue", "claimed")
+		// Attach the existing-owner meta the fleet error classifier would
+		// populate from the server's 409 body. Supervisor should surface
+		// the holder identity in its LastError message.
+		be := backend.ErrConflict("ClaimIssue", "claimed")
+		be.Meta = map[string]string{"existing_owner": "nova"}
+		return be
 	}
 	s := &Supervisor{IssueBackend: mock}
 	ap := &AgentProcess{
@@ -194,8 +200,11 @@ func TestClaimTask_CapsConflictRetries(t *testing.T) {
 	if claimCalls != claimConflictRetryLimit {
 		t.Fatalf("claim calls = %d, want capped at %d", claimCalls, claimConflictRetryLimit)
 	}
-	if ap.LastError == nil || ap.LastError.Class != agenterr.NoWork {
-		t.Fatalf("LastError = %#v, want NoWork after conflict retry cap", ap.LastError)
+	if ap.LastError == nil || ap.LastError.Class != agenterr.LockConflict {
+		t.Fatalf("LastError = %#v, want LockConflict after conflict retry cap", ap.LastError)
+	}
+	if msg := ap.LastError.Message; !strings.Contains(msg, "locked by nova") {
+		t.Errorf("LastError.Message = %q, want substring 'locked by nova'", msg)
 	}
 }
 

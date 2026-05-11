@@ -12,6 +12,7 @@ const (
 	Timeout                           // Connection timeout / ETIMEDOUT / SIGKILL
 	Transient                         // Server error / 5xx / SIGTERM
 	NoWork                            // No claimable tasks available
+	LockConflict                      // Candidate task locked by another agent
 	Unknown                           // Unclassifiable error
 )
 
@@ -33,6 +34,8 @@ func (c ErrorClass) String() string {
 		return "Transient"
 	case NoWork:
 		return "NoWork"
+	case LockConflict:
+		return "LockConflict"
 	case Unknown:
 		return "Unknown"
 	default:

@@ -24,20 +24,27 @@ import (
 // It records calls and returns configurable results/errors.
 type mockIPCBackend struct {
 	// Recorded calls
-	claimCalls  []mockClaimCall
-	updateCalls []mockUpdateCall
-	closeCalls  []mockCloseCall
+	claimCalls       []mockClaimCall
+	updateCalls      []mockUpdateCall
+	closeCalls       []mockCloseCall
+	releaseLockCalls []mockReleaseLockCall
 
 	// Configurable returns
-	claimErr    error
-	updateErr   error
-	closeErr    error
-	closeResult *backend.CloseResult
+	claimErr       error
+	updateErr      error
+	closeErr       error
+	closeResult    *backend.CloseResult
+	releaseLockErr error
 }
 
 type mockClaimCall struct {
 	ID      string
 	LockTTL time.Duration
+}
+
+type mockReleaseLockCall struct {
+	ID    string
+	Actor string
 }
 
 type mockUpdateCall struct {
@@ -53,6 +60,11 @@ type mockCloseCall struct {
 func (m *mockIPCBackend) ClaimIssue(_ context.Context, id string, lockTTL time.Duration) error {
 	m.claimCalls = append(m.claimCalls, mockClaimCall{ID: id, LockTTL: lockTTL})
 	return m.claimErr
+}
+
+func (m *mockIPCBackend) ReleaseIssueLock(_ context.Context, id, actor string) error {
+	m.releaseLockCalls = append(m.releaseLockCalls, mockReleaseLockCall{ID: id, Actor: actor})
+	return m.releaseLockErr
 }
 
 func (m *mockIPCBackend) Update(_ context.Context, id string, params backend.UpdateParams) error {

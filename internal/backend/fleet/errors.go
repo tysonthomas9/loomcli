@@ -11,7 +11,10 @@ import (
 
 // classifyHTTPError maps an HTTP status code and response body to a
 // *backend.BackendError. For 2xx responses with success=false, the error
-// string in the body is matched against known patterns.
+// string in the body is matched against known patterns. The response's Meta
+// field (e.g. {"existing_owner": "..."} on a claim conflict) is threaded
+// onto the resulting BackendError.Meta so callers can surface structured
+// details without parsing message strings.
 func classifyHTTPError(op string, statusCode int, body apiResponse) error {
 	// 2xx with success=true: no error.
 	if statusCode >= 200 && statusCode < 300 && body.Success {
@@ -25,7 +28,7 @@ func classifyHTTPError(op string, statusCode int, body apiResponse) error {
 
 	// 2xx with success=false: classify from error string.
 	if statusCode >= 200 && statusCode < 300 {
-		return classifyErrorString(op, msg)
+		return attachMeta(classifyErrorString(op, msg), body.Meta)
 	}
 
 	// Non-2xx: fleet-db uses a mix of status codes for semantic errors
@@ -36,30 +39,50 @@ func classifyHTTPError(op string, statusCode int, body apiResponse) error {
 	// its verdict when it's non-default. Genuine internal errors fall
 	// through to the status-based switch below.
 	if classified := classifyErrorString(op, msg); !isInternalBucket(classified) {
-		return classified
+		return attachMeta(classified, body.Meta)
 	}
 
 	switch statusCode {
 	case 400:
-		return backend.ErrValidation(op, msg)
+		return attachMeta(backend.ErrValidation(op, msg), body.Meta)
 	case 401, 403:
-		return backend.ErrUnavailable(op, "authentication failed: "+msg, nil)
+		return attachMeta(backend.ErrUnavailable(op, "authentication failed: "+msg, nil), body.Meta)
 	case 404:
-		return backend.ErrNotFound(op, msg)
+		return attachMeta(backend.ErrNotFound(op, msg), body.Meta)
 	case 409:
-		return backend.ErrConflict(op, msg)
+		return attachMeta(backend.ErrConflict(op, msg), body.Meta)
 	case 429:
-		return backend.ErrUnavailable(op, "rate limited: "+msg, nil)
+		return attachMeta(backend.ErrUnavailable(op, "rate limited: "+msg, nil), body.Meta)
 	case 503:
-		return backend.ErrUnavailable(op, msg, nil)
+		return attachMeta(backend.ErrUnavailable(op, msg, nil), body.Meta)
 	case 504:
-		return backend.ErrTimeout(op, msg, nil)
+		return attachMeta(backend.ErrTimeout(op, msg, nil), body.Meta)
 	default:
 		if statusCode >= 400 {
-			return backend.ErrInternal(op, msg, nil)
+			return attachMeta(backend.ErrInternal(op, msg, nil), body.Meta)
 		}
 		return nil
 	}
+}
+
+// attachMeta copies the response meta map onto the BackendError so callers
+// can read structured fields like "existing_owner" without parsing message
+// strings. No-op when meta is empty or err is not a *backend.BackendError.
+func attachMeta(err error, meta map[string]string) error {
+	if err == nil || len(meta) == 0 {
+		return err
+	}
+	var be *backend.BackendError
+	if !errors.As(err, &be) {
+		return err
+	}
+	if be.Meta == nil {
+		be.Meta = make(map[string]string, len(meta))
+	}
+	for k, v := range meta {
+		be.Meta[k] = v
+	}
+	return err
 }
 
 // isInternalBucket reports whether err is the string matcher's default
