@@ -418,6 +418,11 @@ func seedBuiltInRoles(ctx context.Context, s storepkg.Store, key string) error {
 			Description:  "Task implementation agent",
 			TaskFilter:   "has_design",
 		},
+		{
+			WorkspaceKey: key,
+			Name:         "lead",
+			Description:  "Lead/orchestrator terminal",
+		},
 	}
 	for _, role := range roles {
 		if _, err := s.Roles().Create(ctx, role); err != nil {

@@ -1,7 +1,34 @@
-import { describe, expect, it } from "vitest";
+/**
+ * @vitest-environment jsdom
+ */
+
+import { fireEvent, render, screen } from "@testing-library/react";
+import { createElement } from "react";
+import { describe, expect, it, vi } from "vitest";
+import "@testing-library/jest-dom";
 
 import type { LoomAgentStatus } from "@/types";
-import { isLiveAgentRailVisible, orderAgentsForEpicRunner } from "./AgentIconRail";
+import {
+  AgentIconRail,
+  isLiveAgentRailVisible,
+  orderAgentsForEpicRunner,
+} from "./AgentIconRail";
+
+vi.mock("react-router-dom", () => ({
+  useNavigate: () => vi.fn(),
+  useParams: () => ({ workspaceId: "E2E", agentName: "lead" }),
+}));
+
+vi.mock("zustand", () => ({
+  useStore: (
+    _store: unknown,
+    selector: (state: { agents: LoomAgentStatus[] }) => unknown,
+  ) => selector({ agents: [] }),
+}));
+
+vi.mock("@/hooks", () => ({
+  useAgentStoreInstance: () => ({}),
+}));
 
 function agent(
   overrides: Partial<LoomAgentStatus> & { name: string },
@@ -65,5 +92,16 @@ describe("orderAgentsForEpicRunner", () => {
     ]);
 
     expect(ordered.map((x) => x.name)).toEqual(["lead", "worker", "unscoped"]);
+  });
+});
+
+describe("AgentIconRail", () => {
+  it("surfaces the add-agent action", () => {
+    const onAddClick = vi.fn();
+
+    render(createElement(AgentIconRail, { onAddClick }));
+    fireEvent.click(screen.getByRole("button", { name: "Add agent" }));
+
+    expect(onAddClick).toHaveBeenCalledTimes(1);
   });
 });

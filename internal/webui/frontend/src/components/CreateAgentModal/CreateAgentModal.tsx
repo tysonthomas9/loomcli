@@ -35,6 +35,7 @@ export function CreateAgentModal({
 
   const repoOptions = useMemo(() => repos.map((repo) => repo.name), [repos]);
   const selectedRepo = repoName || repoOptions[0] || "";
+  const isLeadAgent = isLeadRole(roleName);
 
   useEffect(() => {
     if (isOpen) {
@@ -58,7 +59,7 @@ export function CreateAgentModal({
       setError("Role is required");
       return;
     }
-    if (!crossRepo && !selectedRepo) {
+    if (!isLeadAgent && !crossRepo && !selectedRepo) {
       setError("Select a repo or enable workspace scope");
       return;
     }
@@ -69,8 +70,12 @@ export function CreateAgentModal({
         name: trimmedName,
         role_name: trimmedRole,
         auto: false,
-        cross_repo: crossRepo,
-        repos: crossRepo ? [] : [selectedRepo],
+        ...(isLeadAgent
+          ? {}
+          : {
+              cross_repo: crossRepo,
+              repos: crossRepo ? [] : [selectedRepo],
+            }),
       };
       const agent = await createAgent({
         ...request,
@@ -149,6 +154,7 @@ export function CreateAgentModal({
               >
                 <option value="task">task</option>
                 <option value="plan">plan</option>
+                <option value="lead">lead</option>
               </select>
             </div>
             <div className={styles.fieldGroup}>
@@ -166,35 +172,39 @@ export function CreateAgentModal({
             </div>
           </div>
 
-          <label className={styles.checkboxRow}>
-            <input
-              type="checkbox"
-              checked={crossRepo}
-              onChange={(event) => setCrossRepo(event.target.checked)}
-              disabled={isSubmitting}
-            />
-            <span>Workspace scope</span>
-          </label>
-
-          {!crossRepo && (
-            <div className={styles.fieldGroup}>
-              <label className={styles.label} htmlFor="agent-repo">
-                Repo
+          {!isLeadAgent && (
+            <>
+              <label className={styles.checkboxRow}>
+                <input
+                  type="checkbox"
+                  checked={crossRepo}
+                  onChange={(event) => setCrossRepo(event.target.checked)}
+                  disabled={isSubmitting}
+                />
+                <span>Workspace scope</span>
               </label>
-              <select
-                id="agent-repo"
-                className={styles.select}
-                value={selectedRepo}
-                onChange={(event) => setRepoName(event.target.value)}
-                disabled={isSubmitting || repoOptions.length === 0}
-              >
-                {repoOptions.map((repo) => (
-                  <option key={repo} value={repo}>
-                    {repo}
-                  </option>
-                ))}
-              </select>
-            </div>
+
+              {!crossRepo && (
+                <div className={styles.fieldGroup}>
+                  <label className={styles.label} htmlFor="agent-repo">
+                    Repo
+                  </label>
+                  <select
+                    id="agent-repo"
+                    className={styles.select}
+                    value={selectedRepo}
+                    onChange={(event) => setRepoName(event.target.value)}
+                    disabled={isSubmitting || repoOptions.length === 0}
+                  >
+                    {repoOptions.map((repo) => (
+                      <option key={repo} value={repo}>
+                        {repo}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </>
           )}
 
           {error && (
@@ -224,4 +234,9 @@ export function CreateAgentModal({
       </div>
     </div>
   );
+}
+
+function isLeadRole(roleName: string): boolean {
+  const normalized = roleName.trim().toLowerCase();
+  return normalized === "lead" || normalized === "orchestrator";
 }

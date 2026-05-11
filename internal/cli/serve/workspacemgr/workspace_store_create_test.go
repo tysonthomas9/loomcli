@@ -63,8 +63,8 @@ func TestStoreBackedCreateEmptyWorkspaceCreatesStoreAndLocalState(t *testing.T) 
 	if err != nil {
 		t.Fatalf("list roles: %v", err)
 	}
-	if len(roles) != 2 || !hasRole(roles, "plan") || !hasRole(roles, "task") {
-		t.Fatalf("roles = %#v, want plan and task", roles)
+	if len(roles) != 3 || !hasRole(roles, "plan") || !hasRole(roles, "task") || !hasRole(roles, "lead") {
+		t.Fatalf("roles = %#v, want plan, task, and lead", roles)
 	}
 	roleByName := rolesByName(roles)
 	if roleByName["plan"].TaskFilter != "needs_plan" {
@@ -384,8 +384,8 @@ func TestStoreBackedCreateCloneWorkspacePersistsLifecycleAndRepos(t *testing.T) 
 	if err != nil {
 		t.Fatalf("list roles: %v", err)
 	}
-	if len(roles) != 2 || !hasRole(roles, "plan") || !hasRole(roles, "task") {
-		t.Fatalf("roles = %#v, want plan and task", roles)
+	if len(roles) != 3 || !hasRole(roles, "plan") || !hasRole(roles, "task") || !hasRole(roles, "lead") {
+		t.Fatalf("roles = %#v, want plan, task, and lead", roles)
 	}
 	if _, err := os.Stat(filepath.Join(wsPath, "app", ".git")); err != nil {
 		t.Fatalf("clone checkout not created: %v", err)

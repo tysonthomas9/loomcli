@@ -31,7 +31,13 @@ const STATUS_DOT_COLOR: Record<string, string> = {
   changes: "var(--color-status-warn, #c96442)",
 };
 
-export function AgentIconRail(): JSX.Element {
+export interface AgentIconRailProps {
+  onAddClick?: (() => void) | undefined;
+}
+
+export function AgentIconRail({
+  onAddClick,
+}: AgentIconRailProps): JSX.Element {
   const { workspaceId = "", agentName: selectedName } = useParams<{
     workspaceId: string;
     agentName?: string;
@@ -101,6 +107,33 @@ export function AgentIconRail(): JSX.Element {
           />
         ))
       )}
+      {onAddClick ? (
+        <button
+          type="button"
+          onClick={onAddClick}
+          title="Add agent"
+          aria-label="Add agent"
+          style={{
+            width: 38,
+            height: 38,
+            padding: 0,
+            borderRadius: "50%",
+            background: "var(--color-bg, #fff)",
+            color: "var(--color-text-primary, #333)",
+            border: "1px dashed var(--color-border-strong, #aaa)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontSize: 20,
+            lineHeight: 1,
+            fontWeight: 600,
+            cursor: "pointer",
+            flexShrink: 0,
+          }}
+        >
+          +
+        </button>
+      ) : null}
     </nav>
   );
 }

@@ -1051,7 +1051,7 @@ function App() {
   // Completed ephemeral workers remain available in AgentWorkPanel history.
   const sidebarContent = (
     activeView === "agents" ? (
-      <AgentIconRail />
+      <AgentIconRail onAddClick={() => setShowCreateAgent(true)} />
     ) : (
       <WorkspaceTree
         onWorkspaceSwitch={handleWorkspaceSwitch}

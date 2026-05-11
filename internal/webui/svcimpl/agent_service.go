@@ -2,7 +2,9 @@ package svcimpl
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
@@ -333,7 +335,11 @@ func (s *agentServiceImpl) CreateAgent(ctx context.Context, in service.AgentCrea
 	if s.store == nil {
 		return nil, service.ErrUnavailable("fleet-db store not configured")
 	}
+	in.RoleName = normalizeFirstClassAgentRole(in.RoleName)
 	if err := validateAgentCreateInput(in); err != nil {
+		return nil, err
+	}
+	if err := s.ensureFirstClassAgentRole(ctx, in.WorkspaceKey, in.RoleName); err != nil {
 		return nil, err
 	}
 	created, err := s.store.Agents().Create(ctx, store.AgentCreate{
@@ -360,6 +366,9 @@ func (s *agentServiceImpl) CreateAgent(ctx context.Context, in service.AgentCrea
 }
 
 func (s *agentServiceImpl) ensureLocalAgentWorktrees(ctx context.Context, agent domain.Agent) error {
+	if isLeadAgentRole(agent.RoleName) {
+		return nil
+	}
 	ws, err := storeadapter.BuildWorkspaceDataForKey(ctx, s.store, agent.WorkspaceKey)
 	if err != nil {
 		return service.ErrInternal("load workspace for agent worktree", err)
@@ -401,6 +410,44 @@ func (s *agentServiceImpl) ensureLocalAgentWorktrees(ctx context.Context, agent 
 		return service.ErrInternal("update local agent state", err)
 	}
 	return nil
+}
+
+func (s *agentServiceImpl) ensureFirstClassAgentRole(ctx context.Context, workspaceKey, roleName string) error {
+	if !isLeadAgentRole(roleName) {
+		return nil
+	}
+	if _, err := s.store.Roles().Get(ctx, workspaceKey, roleName); err == nil {
+		return nil
+	} else if !errors.Is(err, domain.ErrNotFound) {
+		return service.ErrInternal("load lead role", err)
+	}
+	if _, err := s.store.Roles().Create(ctx, store.RoleCreate{
+		WorkspaceKey: workspaceKey,
+		Name:         roleName,
+		Description:  "Lead/orchestrator terminal",
+	}); err != nil && !errors.Is(err, domain.ErrAlreadyExists) {
+		return classifyStoreError("create lead role", err)
+	}
+	return nil
+}
+
+func normalizeFirstClassAgentRole(roleName string) string {
+	normalized := strings.ToLower(strings.TrimSpace(roleName))
+	switch normalized {
+	case "lead", "orchestrator":
+		return normalized
+	default:
+		return roleName
+	}
+}
+
+func isLeadAgentRole(roleName string) bool {
+	switch strings.ToLower(strings.TrimSpace(roleName)) {
+	case "lead", "orchestrator":
+		return true
+	default:
+		return false
+	}
 }
 
 // UpdateAgent applies a partial update to an existing agent.
