@@ -48,6 +48,22 @@ export interface CreateAgentRequest {
   cross_repo?: boolean;
 }
 
+export interface RunOnboardingFirstTaskRequest {
+  agent_name: string;
+  title: string;
+  description?: string;
+  issue_type?: "task" | "bug" | "feature" | "epic" | "chore";
+  priority?: number;
+  source_repo?: string;
+}
+
+export interface RunOnboardingFirstTaskResponse {
+  success: boolean;
+  issue: Issue;
+  agent_name: string;
+  started: boolean;
+}
+
 export type WorkspaceLifecycleState =
   | "creating"
   | "cloning"
@@ -294,6 +310,17 @@ export async function createWorkspaceAgent(
 ): Promise<WorkspaceAgentInfo> {
   return post<WorkspaceAgentInfo>(
     `/api/workspaces/${encodeURIComponent(workspaceId)}/agents`,
+    req,
+    { timeout: 120_000 },
+  );
+}
+
+export async function runOnboardingFirstTask(
+  workspaceId: string,
+  req: RunOnboardingFirstTaskRequest,
+): Promise<RunOnboardingFirstTaskResponse> {
+  return post<RunOnboardingFirstTaskResponse>(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/onboarding/first-task`,
     req,
     { timeout: 120_000 },
   );

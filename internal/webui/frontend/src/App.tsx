@@ -19,8 +19,12 @@ import { useStore } from "zustand";
 
 import { useParams, useNavigate, Outlet } from "react-router-dom";
 
-import { updateIssue, addComment, closeIssue, startAgent } from "@/api";
-import { fetchWorkspaceApi, type WorkspaceAgentInfo } from "@/api/workspace";
+import { updateIssue, addComment, closeIssue } from "@/api";
+import {
+  fetchWorkspaceApi,
+  runOnboardingFirstTask,
+  type WorkspaceAgentInfo,
+} from "@/api/workspace";
 import type { IssueContext } from "@/api/terminal";
 import { buildShareUrl } from "@/utils/buildShareUrl";
 import { getReviewType } from "@/utils/issue";
@@ -118,7 +122,7 @@ const TerminalView = lazy(() =>
   })),
 );
 
-type CreateIssueMode = "manual" | "onboarding";
+type OnboardingAction = "confirming-agent" | "running-first-task";
 
 function isOnboardingPlannerAgent(agent: WorkspaceAgentInfo): boolean {
   const roleName = agent.role_name?.trim();
@@ -141,32 +145,12 @@ function getOnboardingPlannerName(
   );
 }
 
-async function assignAndStartAgent(
-  workspaceId: string,
-  issueId: string,
-  agentName: string,
-): Promise<void> {
-  let assigned = false;
-  try {
-    await updateIssue(workspaceId, issueId, {
-      assignee: agentName,
-      status: "in_progress",
-    });
-    assigned = true;
-    await startAgent(workspaceId, agentName, { taskId: issueId });
-  } catch (err) {
-    if (assigned) {
-      try {
-        await updateIssue(workspaceId, issueId, {
-          assignee: "",
-          status: "open",
-        });
-      } catch {
-        // Preserve the original start error; the user can still unassign manually.
-      }
-    }
-    throw err;
-  }
+function getSingleRepoSourceRepo(
+  repos: readonly { name?: string; source_repo_id?: string }[],
+): string | undefined {
+  if (repos.length !== 1) return undefined;
+  const repo = repos[0];
+  return repo?.source_repo_id || repo?.name || undefined;
 }
 
 function App() {
@@ -297,18 +281,6 @@ function App() {
       urlInput: ONBOARDING_REPO_URL,
     }),
     [],
-  );
-  const onboardingIssueInitialValues = useMemo(
-    () =>
-      shouldPrefillOnboardingIssue
-        ? {
-            title: ONBOARDING_ISSUE_TITLE,
-            description: ONBOARDING_ISSUE_DESCRIPTION,
-            issueType: "task" as const,
-            priority: 2 as const,
-          }
-        : undefined,
-    [shouldPrefillOnboardingIssue],
   );
   const isLoading = useStore(issueStore, (s) => s.isLoading);
   const error = useStore(issueStore, (s) => s.error);
@@ -589,11 +561,14 @@ function App() {
 
   // Create workspace modal state
   const [showCreateIssue, setShowCreateIssue] = useState(false);
-  const [createIssueMode, setCreateIssueMode] =
-    useState<CreateIssueMode>("manual");
   const [showCreateWorkspace, setShowCreateWorkspace] = useState(false);
   const [showCreateAgent, setShowCreateAgent] = useState(false);
   const [onboardingDismissed, setOnboardingDismissed] = useState(false);
+  const [onboardingAction, setOnboardingAction] =
+    useState<OnboardingAction | null>(null);
+  const [onboardingActionError, setOnboardingActionError] = useState<
+    string | null
+  >(null);
 
   // Track mount state for async operations.
   useEffect(() => {
@@ -970,64 +945,69 @@ function App() {
     },
     [navigateToView, refetchAiBackends, showToast, updateOnboardingBackend],
   );
+
+  const handleRunFirstOnboardingTask = useCallback(async () => {
+    if (onboardingAction !== null) return;
+
+    setOnboardingAction("running-first-task");
+    setOnboardingActionError(null);
+    try {
+      let onboardingAgent = getOnboardingPlannerName(workspace?.agents);
+      try {
+        const latestWorkspace = await fetchWorkspaceApi(workspaceId);
+        onboardingAgent = getOnboardingPlannerName(latestWorkspace.agents);
+      } catch {
+        // Fall back to the already-rendered workspace snapshot.
+      }
+
+      if (!onboardingAgent) {
+        throw new Error("Planner agent is not available yet.");
+      }
+
+      const sourceRepo = getSingleRepoSourceRepo(workspaceRepos);
+      const result = await runOnboardingFirstTask(workspaceId, {
+        agent_name: onboardingAgent,
+        title: ONBOARDING_ISSUE_TITLE,
+        description: ONBOARDING_ISSUE_DESCRIPTION,
+        issue_type: "task",
+        priority: 2,
+        ...(sourceRepo ? { source_repo: sourceRepo } : {}),
+      });
+
+      closeAllPanels();
+      navigateToView("kanban");
+      await refetch();
+      refetchWorkspace();
+      showToast(`Started ${onboardingAgent} on ${result.issue.id}`, {
+        type: "success",
+      });
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "failed to start first task";
+      setOnboardingActionError(message);
+      showToast(`First task did not start: ${message}`, { type: "error" });
+    } finally {
+      setOnboardingAction(null);
+    }
+  }, [
+    closeAllPanels,
+    navigateToView,
+    onboardingAction,
+    refetch,
+    refetchWorkspace,
+    showToast,
+    workspace?.agents,
+    workspaceId,
+    workspaceRepos,
+  ]);
+
   const handleCreateIssueSuccess = useCallback(
     async (issue: Issue) => {
       await refetch();
-
-      if (
-        createIssueMode === "onboarding" &&
-        shouldShowWorkspaceOnboarding &&
-        shouldPrefillOnboardingIssue
-      ) {
-        closeAllPanels();
-        navigateToView("kanban");
-        let latestAgents = workspace?.agents ?? [];
-        try {
-          latestAgents = (await fetchWorkspaceApi(workspaceId)).agents ?? [];
-        } catch {
-          // Fall back to the context snapshot; the toast below covers missing agents.
-        }
-        const onboardingAgent = getOnboardingPlannerName(latestAgents);
-
-        if (onboardingAgent) {
-          try {
-            await assignAndStartAgent(workspaceId, issue.id, onboardingAgent);
-            await refetch();
-            showToast(`Started ${onboardingAgent} on ${issue.id}`, {
-              type: "success",
-            });
-          } catch (err) {
-            const message =
-              err instanceof Error ? err.message : "failed to start agent";
-            showToast(`Task created, but agent did not start: ${message}`, {
-              type: "error",
-            });
-          }
-        } else {
-          showToast(
-            "Task created, but no planner agent is available. Create a plan agent to start it.",
-            { type: "warning" },
-          );
-        }
-        return;
-      }
-
       openPanel({ type: "issue", id: issue.id });
       fetchIssue(issue.id);
     },
-    [
-      closeAllPanels,
-      createIssueMode,
-      fetchIssue,
-      navigateToView,
-      openPanel,
-      refetch,
-      shouldPrefillOnboardingIssue,
-      shouldShowWorkspaceOnboarding,
-      showToast,
-      workspace?.agents,
-      workspaceId,
-    ],
+    [fetchIssue, openPanel, refetch],
   );
   const workspaceOnboardingSteps: OnboardingStep[] = useMemo(
     () => [
@@ -1072,33 +1052,56 @@ function App() {
       {
         id: "create-agent",
         title: "Create agent",
-        description: hasWorkspaceAgent
-          ? "The first agent definition exists for this workspace."
-          : "Create a prefilled planner agent for the sample repo.",
-        status: hasWorkspaceAgent
-          ? "complete"
-          : hasWorkspaceRepo && isDefaultBackendReady
-            ? "current"
-            : "blocked",
-        actionLabel: "Create Agent",
-        onAction: () => setShowCreateAgent(true),
+        description:
+          onboardingAction === "confirming-agent"
+            ? "Confirming the planner agent is visible to the workspace."
+            : hasWorkspaceAgent
+              ? "The first agent definition exists for this workspace."
+              : "Create a prefilled planner agent for the sample repo.",
+        status:
+          onboardingAction === "confirming-agent"
+            ? "pending"
+            : hasWorkspaceAgent
+              ? "complete"
+              : hasWorkspaceRepo && isDefaultBackendReady
+                ? "current"
+                : "blocked",
+        actionLabel:
+          onboardingAction === "confirming-agent"
+            ? "Confirming..."
+            : "Create Agent",
+        actionDisabled: onboardingAction !== null,
+        onAction: () => {
+          setOnboardingActionError(null);
+          setShowCreateAgent(true);
+        },
       },
       {
         id: "create-issue",
         title: "Create first issue",
-        description: hasWorkspaceIssue
-          ? "The first issue is ready for agent work."
-          : "Create the prefilled sample task for the first agent run.",
-        status: hasWorkspaceIssue
-          ? "complete"
-          : hasWorkspaceAgent && isDefaultBackendReady
-            ? "current"
-            : "blocked",
-        actionLabel: "Create Issue",
-        onAction: () => {
-          setCreateIssueMode("onboarding");
-          setShowCreateIssue(true);
-        },
+        description:
+          onboardingAction === "running-first-task"
+            ? "Creating the task, assigning the planner, and starting work."
+            : hasWorkspaceIssue
+              ? "The first issue is ready for agent work."
+              : "Create and run the prefilled sample task.",
+        status:
+          onboardingAction === "running-first-task"
+            ? "pending"
+            : hasWorkspaceIssue
+              ? "complete"
+              : hasWorkspaceAgent && isDefaultBackendReady
+                ? "current"
+                : "blocked",
+        actionLabel:
+          onboardingAction === "running-first-task"
+            ? "Starting..."
+            : "Create & Run",
+        actionDisabled: onboardingAction !== null,
+        onAction: handleRunFirstOnboardingTask,
+        detail: onboardingActionError ? (
+          <p role="alert">{onboardingActionError}</p>
+        ) : undefined,
       },
     ],
     [
@@ -1114,6 +1117,9 @@ function App() {
       aiBackendsError,
       isSavingOnboardingBackend,
       handleBackendSetupAction,
+      handleRunFirstOnboardingTask,
+      onboardingAction,
+      onboardingActionError,
     ],
   );
 
@@ -1362,10 +1368,7 @@ function App() {
       </div>
       <button
         className={styles.newIssueButton}
-        onClick={() => {
-          setCreateIssueMode("manual");
-          setShowCreateIssue(true);
-        }}
+        onClick={() => setShowCreateIssue(true)}
         aria-label="New Issue"
         data-testid="new-issue-button"
       >
@@ -1548,15 +1551,8 @@ function App() {
           />
           <CreateIssueModal
             isOpen={showCreateIssue}
-            onClose={() => {
-              setShowCreateIssue(false);
-              setCreateIssueMode("manual");
-            }}
+            onClose={() => setShowCreateIssue(false)}
             onSuccess={handleCreateIssueSuccess}
-            {...(createIssueMode === "onboarding" &&
-            onboardingIssueInitialValues
-              ? { initialValues: onboardingIssueInitialValues }
-              : {})}
           />
           <TalkToLeadButton
             onClick={handleTalkToLeadClick}
@@ -1609,11 +1605,25 @@ function App() {
         onSuccess={(agent) => {
           setShowCreateAgent(false);
           upsertWorkspaceAgent?.(agent);
-          refetchWorkspaceAfterAgentCreate();
           showToast(`Agent "${agent.name}" created`, { type: "success" });
           if (shouldPrefillOnboardingIssue) {
-            setCreateIssueMode("onboarding");
-            setShowCreateIssue(true);
+            setOnboardingAction("confirming-agent");
+            setOnboardingActionError(null);
+            void (async () => {
+              try {
+                await fetchWorkspaceApi(workspaceId);
+              } catch {
+                // The optimistic upsert keeps the checklist moving; scheduled
+                // refetches below will repair the snapshot if this read fails.
+              } finally {
+                refetchWorkspaceAfterAgentCreate();
+                if (mountedRef.current) {
+                  setOnboardingAction(null);
+                }
+              }
+            })();
+          } else {
+            refetchWorkspaceAfterAgentCreate();
           }
         }}
       />

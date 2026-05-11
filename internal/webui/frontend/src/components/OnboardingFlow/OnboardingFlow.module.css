@@ -166,7 +166,11 @@
 }
 
 .complete {
-  border-color: color-mix(in srgb, var(--color-success) 32%, var(--color-border));
+  border-color: color-mix(
+    in srgb,
+    var(--color-success) 32%,
+    var(--color-border)
+  );
 }
 
 .complete .stepIndex {
@@ -180,21 +184,35 @@
 }
 
 .current {
-  border-color: color-mix(in srgb, var(--color-primary) 44%, var(--color-border));
+  border-color: color-mix(
+    in srgb,
+    var(--color-primary) 44%,
+    var(--color-border)
+  );
   box-shadow: 0 0 0 1px
     color-mix(in srgb, var(--color-primary) 18%, transparent);
 }
 
 .current .stepIndex,
-.actionable .stepIndex {
+.actionable .stepIndex,
+.pending .stepIndex {
   background: color-mix(in srgb, var(--color-primary) 12%, transparent);
   color: var(--color-primary);
 }
 
 .current .statusBadge,
-.actionable .statusBadge {
+.actionable .statusBadge,
+.pending .statusBadge {
   background: color-mix(in srgb, var(--color-primary) 12%, transparent);
   color: var(--color-primary);
+}
+
+.pending {
+  border-color: color-mix(
+    in srgb,
+    var(--color-primary) 36%,
+    var(--color-border)
+  );
 }
 
 .blocked {

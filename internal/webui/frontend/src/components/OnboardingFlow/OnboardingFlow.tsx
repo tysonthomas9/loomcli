@@ -6,6 +6,7 @@ export type OnboardingStepStatus =
   | "complete"
   | "current"
   | "actionable"
+  | "pending"
   | "blocked";
 
 export interface OnboardingStep {
@@ -15,6 +16,7 @@ export interface OnboardingStep {
   status: OnboardingStepStatus;
   actionLabel?: string;
   onAction?: () => void;
+  actionDisabled?: boolean;
   detail?: ReactNode;
 }
 
@@ -32,6 +34,7 @@ const STATUS_LABELS: Record<OnboardingStepStatus, string> = {
   complete: "Done",
   current: "Next",
   actionable: "Setup",
+  pending: "Working",
   blocked: "Locked",
 };
 
@@ -48,8 +51,9 @@ export function OnboardingFlow({
   onDismiss,
   dismissLabel = "Dismiss",
 }: OnboardingFlowProps): JSX.Element {
-  const completedCount = steps.filter((step) => step.status === "complete")
-    .length;
+  const completedCount = steps.filter(
+    (step) => step.status === "complete",
+  ).length;
   const rootClassName = [
     styles.onboardingFlow,
     variant === "panel" ? styles.panel : "",
@@ -94,6 +98,7 @@ export function OnboardingFlow({
       <ol className={styles.steps}>
         {steps.map((step, index) => {
           const isBlocked = step.status === "blocked";
+          const isDisabled = isBlocked || step.actionDisabled === true;
           const hasAction =
             step.status !== "complete" && step.actionLabel && step.onAction;
 
@@ -119,7 +124,8 @@ export function OnboardingFlow({
                   type="button"
                   className={styles.stepAction}
                   onClick={step.onAction}
-                  disabled={isBlocked}
+                  disabled={isDisabled}
+                  aria-busy={step.status === "pending" ? true : undefined}
                 >
                   {step.actionLabel}
                 </button>
