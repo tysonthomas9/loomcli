@@ -59,6 +59,31 @@ export function createWorkspaceStore(): StoreApi<WorkspaceStore> {
   let visibilityHandler: (() => void) | null = null;
   let activeWorkspaceId: string | undefined;
   let activePollInterval = DEFAULT_POLL_INTERVAL;
+  const pendingAgents = new Map<string, WorkspaceData["agents"][number]>();
+
+  const mergePendingAgents = (data: WorkspaceData): WorkspaceData => {
+    if (pendingAgents.size === 0) return data;
+
+    const agents = data.agents ?? [];
+    let changed = false;
+    const nextAgents = agents.map((agent) => {
+      const pending = pendingAgents.get(agent.name);
+      if (!pending) return agent;
+      pendingAgents.delete(agent.name);
+      return agent;
+    });
+
+    for (const pending of pendingAgents.values()) {
+      nextAgents.push(pending);
+      changed = true;
+    }
+
+    if (!changed && nextAgents.length === agents.length) return data;
+    return {
+      ...data,
+      agents: nextAgents,
+    };
+  };
 
   return createStore<WorkspaceStore>((set, get) => {
     const fetchWorkspace = async (workspaceId?: string): Promise<void> => {
@@ -82,8 +107,9 @@ export function createWorkspaceStore(): StoreApi<WorkspaceStore> {
       inflightPromise = promise;
 
       try {
-        const data = await promise;
+        const rawData = await promise;
         if (gen === generation) {
+          const data = mergePendingAgents(rawData);
           // Preserve workspace reference when payload is unchanged so downstream
           // useMemo chains (sourceReposFilter, activeRepos, etc.) don't churn on
           // every poll tick. The cherry-pick of v2's polling-bug fix removed the
@@ -136,6 +162,9 @@ export function createWorkspaceStore(): StoreApi<WorkspaceStore> {
       // Clean up any existing polling
       stopPolling();
 
+      if (options.workspaceId !== activeWorkspaceId) {
+        pendingAgents.clear();
+      }
       activeWorkspaceId = options.workspaceId;
       activePollInterval = options.pollInterval ?? DEFAULT_POLL_INTERVAL;
 
@@ -171,6 +200,10 @@ export function createWorkspaceStore(): StoreApi<WorkspaceStore> {
     };
 
     const upsertAgent = (agent: WorkspaceData["agents"][number]): void => {
+      if (agent.name) {
+        pendingAgents.set(agent.name, agent);
+      }
+
       const current = get().workspace;
       if (!current || !agent.name) return;
 
@@ -198,6 +231,7 @@ export function createWorkspaceStore(): StoreApi<WorkspaceStore> {
       generation++;
       inflightPromise = null;
       activeWorkspaceId = undefined;
+      pendingAgents.clear();
       set(INITIAL_WORKSPACE_STATE);
     };
 
