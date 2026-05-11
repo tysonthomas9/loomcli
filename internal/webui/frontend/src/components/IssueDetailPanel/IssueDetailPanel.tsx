@@ -46,7 +46,8 @@ import {
   getBackendFromSessionName,
   type ConnectionState,
 } from "@/components/TerminalView";
-import { useTaskLogPolling } from "@/hooks/terminal";
+import { useTaskLogPolling, useTaskSessions } from "@/hooks/terminal";
+import type { SessionRecord } from "@/types/agent";
 
 import {
   ActivityLog,
@@ -258,9 +259,58 @@ const DETAILS_TAB: DetailTab = {
 const SESSIONS_TAB: DetailTab = {
   id: "sessions",
   type: "sessions",
-  label: "Sessions",
+  label: "Runs",
   closable: false,
 };
+
+function latestFailedRun(sessions: SessionRecord[]): SessionRecord | null {
+  const sorted = [...sessions].sort(
+    (a, b) =>
+      new Date(b.started_at).getTime() - new Date(a.started_at).getTime(),
+  );
+  const latest = sorted[0];
+  if (!latest || !["failed", "aborted"].includes(latest.status)) return null;
+  return latest;
+}
+
+function runFailureMessage(run: SessionRecord): string {
+  return run.last_error || run.error_class || "Agent run failed.";
+}
+
+function LatestRunFailureBanner({
+  run,
+  onViewRuns,
+}: {
+  run: SessionRecord | null;
+  onViewRuns: () => void;
+}): JSX.Element | null {
+  if (!run) return null;
+
+  return (
+    <div
+      className={styles.runFailureBanner}
+      role="alert"
+      data-testid="latest-run-failure-banner"
+    >
+      <div className={styles.runFailureMain}>
+        <span className={styles.runFailureTitle}>Latest run failed</span>
+        <span className={styles.runFailureMeta}>
+          {run.agent_name} - {run.backend}
+        </span>
+        <span className={styles.runFailureMessage}>
+          {runFailureMessage(run)}
+        </span>
+      </div>
+      <button
+        type="button"
+        className={styles.runFailureAction}
+        onClick={onViewRuns}
+      >
+        View run
+      </button>
+    </div>
+  );
+}
 
 function formatPhaseLabel(phase: string): string {
   return phase.charAt(0).toUpperCase() + phase.slice(1);
@@ -357,6 +407,9 @@ function DefaultContent({
   const workspaces = workspace?.workspaces ?? [];
   const currentWorkspace = workspace?.name ?? "";
   const canMove = workspaces.length > 1 && issue?.status !== "closed";
+  const taskRunId = issue?.issue_type === "task" ? issue.id : null;
+  const { sessions: taskRuns } = useTaskSessions(taskRunId);
+  const failedRun = useMemo(() => latestFailedRun(taskRuns), [taskRuns]);
 
   const currentRepo = useMemo(() => {
     if (issue?.repo) return issue.repo;
@@ -505,7 +558,7 @@ function DefaultContent({
       .map((t) => ({
         id: t.id,
         type: t.type as DetailTab["type"],
-        label: t.label,
+        label: t.id === "sessions" ? SESSIONS_TAB.label : t.label,
         closable: t.type !== "details" && t.type !== "sessions",
         metadata:
           t.type === "terminal" && t.session_name
@@ -1108,6 +1161,11 @@ function DefaultContent({
         status={issue.status}
       />
 
+      <LatestRunFailureBanner
+        run={failedRun}
+        onViewRuns={() => setActiveTabId("sessions")}
+      />
+
       {/* Tab Bar */}
       <div className={styles.tabBarWrapper}>
         <div
@@ -1359,9 +1417,9 @@ function DefaultContent({
               </section>
             )}
 
-            {/* Session History */}
+            {/* Terminal history */}
             <CollapsibleSection
-              title="Session History"
+              title="Terminal History"
               defaultExpanded={false}
               testId="session-history-section"
             >

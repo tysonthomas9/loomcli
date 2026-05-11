@@ -97,6 +97,20 @@ describe("SessionTimeline", () => {
       render(<SessionTimeline {...defaultProps} sessions={sessions} />);
       expect(screen.getByTestId("session-timeline")).toBeInTheDocument();
     });
+
+    it("surfaces failed run error class in the row", () => {
+      const sessions = [
+        createSession({
+          status: "failed",
+          error_class: "AuthFailure",
+          backend: "codex",
+        }),
+      ];
+      render(<SessionTimeline {...defaultProps} sessions={sessions} />);
+      expect(screen.getByText("Failed")).toBeInTheDocument();
+      expect(screen.getByText("AuthFailure")).toBeInTheDocument();
+      expect(screen.getByText("codex")).toBeInTheDocument();
+    });
   });
 
   describe("sorting", () => {
