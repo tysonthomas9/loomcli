@@ -295,7 +295,7 @@ func (s *Supervisor) superviseAgent(ap *AgentProcess) {
 		if !s.Concurrency.Acquire(ap.Entry.Role) {
 			releaseOwnership()
 			slog.Info("concurrency tracker closed, exiting", "worktree", ap.Entry.Worktree)
-			s.setStopReason(ap, StopReasonShutdown)
+			s.setShutdownStopReason(ap)
 			return
 		}
 
@@ -345,7 +345,7 @@ func (s *Supervisor) checkAgentStopSignals(ap *AgentProcess) bool {
 	select {
 	case <-s.Shutdown:
 		slog.Info("shutdown signal received", "worktree", ap.Entry.Worktree)
-		s.setStopReason(ap, StopReasonShutdown)
+		s.setShutdownStopReason(ap)
 		return true
 	case <-ap.StopCh:
 		slog.Info("stop signal received", "worktree", ap.Entry.Worktree)
@@ -356,10 +356,13 @@ func (s *Supervisor) checkAgentStopSignals(ap *AgentProcess) bool {
 	}
 }
 
-// setStopReason unconditionally sets the agent's stop reason.
-func (s *Supervisor) setStopReason(ap *AgentProcess, reason StopReason) {
+// setShutdownStopReason unconditionally records that this agent stopped
+// because of supervisor shutdown. Every caller (drain, signal handler,
+// ownership transfer) uses the same reason; if a new code path ever needs
+// a different reason, reintroduce the explicit parameter.
+func (s *Supervisor) setShutdownStopReason(ap *AgentProcess) {
 	ap.Mu.Lock()
-	ap.StopReason = reason
+	ap.StopReason = StopReasonShutdown
 	ap.Mu.Unlock()
 }
 
@@ -426,6 +429,34 @@ func (s *Supervisor) claimTask(ap *AgentProcess, epicID string) bool {
 	if s.IssueBackend == nil || !shouldClaimTaskForRole(ap) {
 		return true
 	}
+	opts, constraints := s.buildClaimOpts(ap, epicID)
+
+	ap.Mu.Lock()
+	requestedTaskID := ap.RequestedTaskID
+	ap.Mu.Unlock()
+	if requestedTaskID != "" {
+		return s.claimRequestedTask(ap, opts, requestedTaskID)
+	}
+
+	// First try issues already assigned to this agent's worktree before
+	// falling back to the global ready queue.
+	if ap.Entry.Worktree != "" {
+		assignedOpts := opts
+		assignedOpts.Assignee = ap.Entry.Worktree
+		if claimed, decided := s.tryClaimFromReady(ap, assignedOpts, constraints); decided {
+			return claimed
+		}
+	}
+	if claimed, decided := s.tryClaimFromReady(ap, opts, constraints); decided {
+		return claimed
+	}
+	s.setPreflightError(ap, agenterr.NoWork, "no claimable tasks")
+	return false
+}
+
+// buildClaimOpts assembles the ReadyOpts for an agent's task claim,
+// resolving the agent's source repos and merging role constraints.
+func (s *Supervisor) buildClaimOpts(ap *AgentProcess, epicID string) (backend.ReadyOpts, cli.RoleConstraints) {
 	ae := ap.Entry
 	if sourceRepos, err := config.ResolveAgentRepos(ap.Entry, s.Repos); err == nil {
 		ae.SourceRepos = sourceRepos
@@ -440,45 +471,27 @@ func (s *Supervisor) claimTask(ap *AgentProcess, epicID string) bool {
 	if len(ae.SourceRepos) > 0 {
 		opts.SourceRepos = ae.SourceRepos
 	}
+	return opts, constraints
+}
 
-	ap.Mu.Lock()
-	requestedTaskID := ap.RequestedTaskID
-	ap.Mu.Unlock()
-	if requestedTaskID != "" {
-		return s.claimRequestedTask(ap, opts, requestedTaskID)
-	}
-
-	if ap.Entry.Worktree != "" {
-		assignedOpts := opts
-		assignedOpts.Assignee = ap.Entry.Worktree
-		assignedIssues, err := s.readyIssues(assignedOpts)
-		if err != nil {
-			s.setPreflightError(ap, agenterr.Unknown, fmt.Sprintf("ready query failed: %v", err))
-			return false
-		}
-		claimed, failed := s.tryClaimBestTask(ap, assignedIssues, constraints)
-		if claimed {
-			return true
-		}
-		if failed {
-			return false
-		}
-	}
-
+// tryClaimFromReady runs Ready+claim against the given opts. Returns
+// (claimed, decided): decided=false means "no decision, caller may try
+// another opts variant"; decided=true means we either succeeded or hit a
+// failure we've already recorded.
+func (s *Supervisor) tryClaimFromReady(ap *AgentProcess, opts backend.ReadyOpts, constraints cli.RoleConstraints) (claimed, decided bool) {
 	issues, err := s.readyIssues(opts)
 	if err != nil {
 		s.setPreflightError(ap, agenterr.Unknown, fmt.Sprintf("ready query failed: %v", err))
-		return false
+		return false, true
 	}
 	claimed, failed := s.tryClaimBestTask(ap, issues, constraints)
 	if claimed {
-		return true
+		return true, true
 	}
 	if failed {
-		return false
+		return false, true
 	}
-	s.setPreflightError(ap, agenterr.NoWork, "no claimable tasks")
-	return false
+	return false, false
 }
 
 func (s *Supervisor) readyIssues(opts backend.ReadyOpts) ([]backend.IssueData, error) {
@@ -998,7 +1011,7 @@ func (s *Supervisor) sleepBeforeRestart(ap *AgentProcess) bool {
 
 	if backoffAction == "shutdown" {
 		slog.Info("shutdown during backoff", "worktree", ap.Entry.Worktree)
-		s.setStopReason(ap, StopReasonShutdown)
+		s.setShutdownStopReason(ap)
 		return false
 	}
 	if backoffAction == "stop" {

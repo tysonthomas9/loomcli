@@ -100,7 +100,7 @@ func localDaemonWorkspaceKey() (string, error) {
 }
 
 func runLocalDaemonOnce(ctx context.Context, dataDir, exe string, port int, workspaceKey string) error {
-	logFile, err := os.OpenFile(daemonLogPath(dataDir), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	logFile, err := os.OpenFile(daemonLogPath(dataDir), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 	if err != nil {
 		return fmt.Errorf("open daemon log: %w", err)
 	}
@@ -141,7 +141,7 @@ func runLocalDaemonOnce(ctx context.Context, dataDir, exe string, port int, work
 }
 
 func appendLocalDaemonLog(dataDir, message string) {
-	logFile, err := os.OpenFile(daemonLogPath(dataDir), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	logFile, err := os.OpenFile(daemonLogPath(dataDir), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 	if err != nil {
 		return
 	}

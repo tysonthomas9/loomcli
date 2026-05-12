@@ -113,16 +113,20 @@ EXAMPLES
 }
 
 func init() {
-	// Get defaults from environment
+	registerServeFlags()
+	registerServeAuthFlags()
+	cli.RegisterCommand(serveCmd)
+}
+
+// registerServeFlags binds the non-auth serve flags. Split out so init()
+// stays under the funlen threshold; pure flag plumbing, no behavior.
+func registerServeFlags() {
 	defaultPort := 8080
 	if envPort := os.Getenv("LOOM_SERVER_PORT"); envPort != "" {
 		if p, err := strconv.Atoi(envPort); err == nil {
 			defaultPort = p
 		}
 	}
-
-	defaultCors := os.Getenv("LOOM_CORS_ORIGIN")
-
 	defaultBind := os.Getenv("LOOM_BIND_ADDR")
 	if defaultBind == "" {
 		defaultBind = "127.0.0.1"
@@ -130,41 +134,25 @@ func init() {
 
 	serveCmd.Flags().IntVarP(&servePort, "port", "p", defaultPort, "Server port")
 	serveCmd.Flags().StringVar(&serveBindAddr, "bind", defaultBind, "Bind address (use 0.0.0.0 for all interfaces)")
-	serveCmd.Flags().StringVar(&serveCorsOrigin, "cors", defaultCors, "CORS allowed origin")
+	serveCmd.Flags().StringVar(&serveCorsOrigin, "cors", os.Getenv("LOOM_CORS_ORIGIN"), "CORS allowed origin")
 	serveCmd.Flags().StringSliceVar(&serveFrontendURLs, "frontend-url", parseFrontendURLsEnv(), "Allowed frontend origin(s) for CORS. Repeatable or comma-separated. Env: LOOM_FRONTEND_URL")
 	serveCmd.Flags().StringVar(&serveFrontendDir, "frontend-dir", os.Getenv("LOOM_FRONTEND_DIR"), "Built web UI directory to serve for non-API routes. Env: LOOM_FRONTEND_DIR")
 	serveCmd.Flags().StringVar(&serveWebUISocket, "webui-socket", "", "Daemon socket path for webui (auto-detect if empty)")
 	serveCmd.Flags().BoolVar(&serveNoDaemon, "no-daemon", false, "Skip issue backend startup")
-
-	defaultRedisAddr := os.Getenv("LOOM_REDIS_ADDR")
-	serveCmd.Flags().StringVar(&serveRedisAddr, "redis-addr", defaultRedisAddr, "Redis address for fleet coordination (enables stale detector)")
-
-	defaultRedisPassword := os.Getenv("LOOM_REDIS_PASSWORD")
-	serveCmd.Flags().StringVar(&serveRedisPassword, "redis-password", defaultRedisPassword, "Redis password (prefer LOOM_REDIS_PASSWORD env var to avoid leaking in process list)")
-
-	defaultFleetMode := os.Getenv(envLoomFleetMode) == "true"
-	serveCmd.Flags().BoolVar(&serveFleetMode, "fleet-mode", defaultFleetMode, "Enable fleet coordination features (stale detector, task claims, fleet routes). Default off for local dev. Env: "+envLoomFleetMode)
-
-	defaultFleetAPIKey := os.Getenv("LOOM_FLEET_API_KEY")
-	serveCmd.Flags().StringVar(&serveFleetAPIKey, "fleet-api-key", defaultFleetAPIKey, "API key for fleet worker registration (required for fleet register endpoint)")
-
+	serveCmd.Flags().StringVar(&serveRedisAddr, "redis-addr", os.Getenv("LOOM_REDIS_ADDR"), "Redis address for fleet coordination (enables stale detector)")
+	serveCmd.Flags().StringVar(&serveRedisPassword, "redis-password", os.Getenv("LOOM_REDIS_PASSWORD"), "Redis password (prefer LOOM_REDIS_PASSWORD env var to avoid leaking in process list)")
+	serveCmd.Flags().BoolVar(&serveFleetMode, "fleet-mode", os.Getenv(envLoomFleetMode) == "true", "Enable fleet coordination features (stale detector, task claims, fleet routes). Default off for local dev. Env: "+envLoomFleetMode)
+	serveCmd.Flags().StringVar(&serveFleetAPIKey, "fleet-api-key", os.Getenv("LOOM_FLEET_API_KEY"), "API key for fleet worker registration (required for fleet register endpoint)")
 	serveCmd.Flags().BoolVar(&serveHSTS, "hsts", false, "Enable HSTS header (use when behind TLS-terminating proxy)")
+	serveCmd.Flags().StringVar(&serveSentryDSN, "sentry-dsn", os.Getenv("LOOM_SENTRY_DSN"), "Sentry/GlitchTip DSN for error tracking (or LOOM_SENTRY_DSN)")
+}
 
-	defaultAuthURL := os.Getenv("LOOM_AUTH_URL")
-	serveCmd.Flags().StringVar(&serveAuthURL, "auth-url", defaultAuthURL, "External auth service base URL (enables JWT auth)")
-
-	defaultAuthIssuer := os.Getenv("LOOM_AUTH_ISSUER")
-	serveCmd.Flags().StringVar(&serveAuthIssuer, "auth-issuer", defaultAuthIssuer, "Expected JWT issuer (defaults to --auth-url)")
-
-	defaultAuthAudience := os.Getenv("LOOM_AUTH_AUDIENCE")
-	serveCmd.Flags().StringVar(&serveAuthAudience, "auth-audience", defaultAuthAudience, "Expected JWT audience (defaults to \"loom\")")
-
+// registerServeAuthFlags binds the JWT-auth-related serve flags.
+func registerServeAuthFlags() {
+	serveCmd.Flags().StringVar(&serveAuthURL, "auth-url", os.Getenv("LOOM_AUTH_URL"), "External auth service base URL (enables JWT auth)")
+	serveCmd.Flags().StringVar(&serveAuthIssuer, "auth-issuer", os.Getenv("LOOM_AUTH_ISSUER"), "Expected JWT issuer (defaults to --auth-url)")
+	serveCmd.Flags().StringVar(&serveAuthAudience, "auth-audience", os.Getenv("LOOM_AUTH_AUDIENCE"), "Expected JWT audience (defaults to \"loom\")")
 	serveCmd.Flags().BoolVar(&serveAuthAllowInsecure, "auth-allow-insecure", false, "Allow HTTP for non-loopback --auth-url (INSECURE, for Docker internal networks only)")
-
-	defaultSentryDSN := os.Getenv("LOOM_SENTRY_DSN")
-	serveCmd.Flags().StringVar(&serveSentryDSN, "sentry-dsn", defaultSentryDSN, "Sentry/GlitchTip DSN for error tracking (or LOOM_SENTRY_DSN)")
-
-	cli.RegisterCommand(serveCmd)
 }
 
 //nolint:funlen // Serve startup wires process-wide dependencies in a fixed order.
