@@ -1094,6 +1094,10 @@ func TestCheckStaleSignalFiles_SkipsSubdirectories(t *testing.T) {
 // Must not be used with t.Parallel() since it mutates global state.
 func setupRuntimeDirForTest(t *testing.T, dir string) {
 	t.Helper()
+	// setupWorkspaceConfig stores under the uppercased key; the production
+	// resolveActiveWorkspaceName requires LOOM_WORKSPACE (or --workspace)
+	// to pick the active workspace.
+	t.Setenv("LOOM_WORKSPACE", "TEST")
 	ResetWorkspaceRuntimeDirCache()
 	setupWorkspaceConfig(t, &LoomConfig{
 		DefaultWorkspace: "test",
