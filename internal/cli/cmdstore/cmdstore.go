@@ -17,6 +17,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/runtimectx"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -54,28 +55,19 @@ func ensureFleetDBEnvFromFleetEnv() {
 	}
 }
 
-// rootCtx is the process-wide parent context for CLI commands. Set once by
-// SetRootContext before rootCmd.Execute runs; read by SignalContext so any
-// trace span (or other context-attached value) installed at the CLI entry
-// point is inherited by every subcommand without each subcommand having to
-// thread cmd.Context() down through every helper.
-var rootCtx context.Context = context.Background()
-
-// SetRootContext installs the parent context that SignalContext-derived
-// contexts inherit from. Call from cli.Execute before dispatching to Cobra.
+// SetRootContext is a thin alias for runtimectx.SetRootContext kept so
+// existing cli-layer callers don't need to migrate. The backing store
+// lives in runtimectx so infra packages can read RootContext without
+// importing cli/cmdstore.
 func SetRootContext(ctx context.Context) {
-	if ctx != nil {
-		rootCtx = ctx
-	}
+	runtimectx.SetRootContext(ctx)
 }
 
-// RootContext returns the process-wide root context. Use this from helper
-// functions that don't have access to a cobra cmd or a parent ctx but want
-// to inherit the active trace span / cancellation chain set up at CLI
-// entry. Prefer threading ctx through call sites where possible; this is
-// for the long tail of utility helpers where that's not practical.
+// RootContext is a thin alias for runtimectx.RootContext kept so
+// existing cli-layer callers don't need to migrate. New code should
+// prefer runtimectx.RootContext directly (or, better, thread ctx through).
 func RootContext() context.Context {
-	return rootCtx
+	return runtimectx.RootContext()
 }
 
 // SignalContext returns a context cancelled on SIGINT/SIGTERM. CLI
@@ -84,7 +76,7 @@ func RootContext() context.Context {
 // by SetRootContext, which lets a trace span installed at CLI startup
 // parent every command's context-attached spans.
 func SignalContext() (context.Context, context.CancelFunc) {
-	return signal.NotifyContext(rootCtx, os.Interrupt, syscall.SIGTERM)
+	return signal.NotifyContext(runtimectx.RootContext(), os.Interrupt, syscall.SIGTERM)
 }
 
 // ActiveWorkspace resolves the explicit active workspace key

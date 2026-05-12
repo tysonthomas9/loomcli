@@ -9,11 +9,7 @@ import { createPortal } from "react-dom";
 
 import { createWorkspace } from "@/hooks/api";
 import type { CreateWorkspaceRequest, WorkspaceData } from "@/api/workspace";
-import {
-  useRegisterEscapeLayer,
-  LAYER_MODAL,
-  useJobPolling,
-} from "@/hooks";
+import { useRegisterEscapeLayer, LAYER_MODAL, useJobPolling } from "@/hooks";
 import { useFolderPicker } from "@/hooks/common";
 import { useFocusTrap, useFocusReturn } from "@/hooks/ui";
 import styles from "./CreateWorkspaceModal.module.css";

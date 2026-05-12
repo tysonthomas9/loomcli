@@ -7,14 +7,14 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/lockfile"
+	"github.com/tysonthomas9/loomcli/internal/runtimectx"
 )
 
 // Finalize completes a session by setting final metadata, writing it to disk,
 // and appending the finalized SessionRecord to index.jsonl.
 func (s *Session) Finalize(opts FinalizeOptions) error {
-	_, span := startSpan(cmdstore.RootContext(), "service.Sessions.Finalize",
+	_, span := startSpan(runtimectx.RootContext(), "service.Sessions.Finalize",
 		attrLoomSessionID(s.Meta.SessionID),
 		attrLoomAgent(s.Meta.AgentName),
 		attrLoomTaskID(opts.TaskID),
@@ -126,7 +126,7 @@ func (s *Store) appendIndex(rec SessionRecord) error {
 // to re-index orphaned session directories that exist on disk but are
 // missing from the index.
 func (s *Store) ReIndex(rec SessionRecord) error {
-	_, span := startSpan(cmdstore.RootContext(), "service.Sessions.ReIndex",
+	_, span := startSpan(runtimectx.RootContext(), "service.Sessions.ReIndex",
 		attrLoomSessionID(rec.SessionID),
 	)
 	defer span.End()

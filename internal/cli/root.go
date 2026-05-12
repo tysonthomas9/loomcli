@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/events"
 	"github.com/tysonthomas9/loomcli/internal/observability/tracing"
@@ -144,45 +145,7 @@ func init() {
 func Execute() error {
 	registerPendingCommands()
 
-	// OpenTelemetry tracing. Off unless OTEL_EXPORTER_OTLP_ENDPOINT is set or
-	// LOOM_TRACE=1. CLI runs are short-lived; we init + shutdown per
-	// invocation. See docs/observability/tracing-contract.md §8.
-	traceEnabled := os.Getenv("LOOM_TRACE") == "1" || os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT") != ""
-	endpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
-	if traceEnabled && endpoint == "" {
-		endpoint = "localhost:4318"
-	}
-	// Service name follows the trace contract §1: long-running daemons get
-	// dedicated names so dashboards can filter cleanly. Agent-shaped commands
-	// (plan, task, agent, lead) emit as "loom-agent" so their per-task
-	// traces don't pollute the loom-cli short-lived-command dashboard.
-	serviceName := "loom-cli"
-	if len(os.Args) > 1 {
-		switch os.Args[1] {
-		case "serve":
-			serviceName = "loom-serve"
-		case "daemon":
-			serviceName = "loom-daemon"
-		case "plan", "task", "agent", "lead":
-			serviceName = "loom-agent"
-		}
-	}
-	// Sync mode for short-lived CLI/agent runs: every span.End() blocks until
-	// export completes, so spans land in Jaeger even when the process exits
-	// via os.Exit (which skips deferred shutdowns). Long-running serve/daemon
-	// processes use the batcher (Sync=false) to amortize export overhead.
-	syncExport := serviceName == "loom-cli" || serviceName == "loom-agent"
-	traceShutdown, _, err := tracing.Init(context.Background(), tracing.Config{
-		ServiceName:    serviceName,
-		ServiceVersion: Build,
-		Environment:    os.Getenv("LOOM_ENV"),
-		Endpoint:       endpoint,
-		AlwaysOn:       true,
-		Sync:           syncExport,
-	})
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "warning: tracing init failed: %v\n", err)
-	}
+	traceShutdown := initCLITracing()
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -240,6 +203,53 @@ func Execute() error {
 	defer signal.Stop(sigCh)
 
 	return rootCmd.Execute()
+}
+
+// initCLITracing installs the OTel tracer for the current CLI invocation
+// and returns the shutdown closure. Off unless OTEL_EXPORTER_OTLP_ENDPOINT
+// is set or LOOM_TRACE=1. CLI runs are short-lived; we init + shutdown per
+// invocation. See docs/observability/tracing-contract.md §8.
+func initCLITracing() tracing.Shutdown {
+	traceEnabled := os.Getenv("LOOM_TRACE") == "1" || os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT") != ""
+	endpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+	if traceEnabled && endpoint == "" {
+		endpoint = "localhost:4318"
+	}
+	serviceName := resolveCLIServiceName()
+	// Sync mode for short-lived CLI/agent runs: every span.End() blocks until
+	// export completes, so spans land in Jaeger even when the process exits
+	// via os.Exit. Long-running serve/daemon use the batcher.
+	syncExport := serviceName == "loom-cli" || serviceName == "loom-agent"
+	shutdown, _, err := tracing.Init(context.Background(), tracing.Config{
+		ServiceName:    serviceName,
+		ServiceVersion: Build,
+		Environment:    os.Getenv("LOOM_ENV"),
+		Endpoint:       endpoint,
+		AlwaysOn:       true,
+		Sync:           syncExport,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: tracing init failed: %v\n", err)
+	}
+	return shutdown
+}
+
+// resolveCLIServiceName maps the top-level subcommand to a service name so
+// dashboards can filter long-running daemons separately from agent runs and
+// short-lived CLI invocations. Trace contract §1.
+func resolveCLIServiceName() string {
+	if len(os.Args) <= 1 {
+		return "loom-cli"
+	}
+	switch os.Args[1] {
+	case "serve":
+		return "loom-serve"
+	case "daemon":
+		return "loom-daemon"
+	case "plan", "task", "agent", "lead":
+		return "loom-agent"
+	}
+	return "loom-cli"
 }
 
 // --- Command registration (merged from register.go) ---
