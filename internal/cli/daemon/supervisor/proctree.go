@@ -25,6 +25,21 @@ type processInspector struct {
 
 var procInspector processInspector
 
+// sweepOrphanedBackends kills any backend processes (codex/claude/cursor/etc)
+// reparented to init by a previous daemon SIGKILL or crash, scoped to the
+// daemon's managed worktrees. Logs a count when anything is killed.
+// Without this, a hung-process kill that left codex reparented to init keeps
+// holding its API connection and context window across restarts.
+func (s *Supervisor) sweepOrphanedBackends() {
+	paths := s.managedWorktreePaths()
+	if len(paths) == 0 {
+		return
+	}
+	if killed := s.killOrphanedWorktreeProcesses(paths); killed > 0 {
+		slog.Info("killed orphaned backend processes on startup", "count", killed)
+	}
+}
+
 // managedWorktreePaths returns the absolute filesystem paths the daemon is
 // currently supervising (one per agent). Used to scope the startup orphan
 // sweep so the daemon never signals processes that aren't ours.
@@ -200,10 +215,12 @@ func (s *Supervisor) killOrphanedWorktreeProcesses(worktreePaths []string) int {
 			"pgid", pgid, "pid", first.PID, "cwd", first.CWD, "worktree", first.Worktree, "members", len(members))
 		_ = syscall.Kill(-pgid, syscall.SIGTERM)
 	}
-	// Brief grace period before SIGKILL escalation. We can't easily wait on
-	// processes we don't own, so just poll a short window and SIGKILL anything
-	// still alive.
-	const gracePolls = 20 // 20 * 100ms = 2s
+	// Brief grace period before SIGKILL escalation. Long-orphaned backends
+	// almost never respond to SIGTERM (they've been parentless for some time
+	// and aren't handling signals cleanly), so we keep the window short and
+	// poll early-exit when the orphans clear. This keeps Start() from
+	// stalling agent spawn for more than ~half a second per cold boot.
+	const gracePolls = 5 // 5 * 100ms = 500ms
 	for range gracePolls {
 		anyAlive := false
 		for _, o := range orphans {

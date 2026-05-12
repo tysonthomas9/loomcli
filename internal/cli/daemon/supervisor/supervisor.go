@@ -116,15 +116,7 @@ func (s *Supervisor) Start() error {
 		}
 	}
 
-	// Sweep backend subprocesses (codex/claude/cursor/etc) orphaned by a
-	// previous daemon SIGKILL or crash. Without this, a hung-process kill that
-	// left codex reparented to init keeps holding its API connection and
-	// context window across restarts.
-	if paths := s.managedWorktreePaths(); len(paths) > 0 {
-		if killed := s.killOrphanedWorktreeProcesses(paths); killed > 0 {
-			slog.Info("killed orphaned backend processes on startup", "count", killed)
-		}
-	}
+	s.sweepOrphanedBackends()
 
 	// Start healthChecker goroutine
 	s.Wg.Add(1)

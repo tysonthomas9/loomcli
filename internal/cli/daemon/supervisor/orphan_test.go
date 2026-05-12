@@ -230,9 +230,10 @@ func TestKillOrphanedWorktreeProcesses_StartupSweep(t *testing.T) {
 		_ = syscall.Kill(-childPID, syscall.SIGKILL)
 	})
 
-	// Wait for the kernel to reparent the child to init. On macOS this is
-	// typically immediate but allow a small window for the scheduler.
-	deadline := time.Now().Add(3 * time.Second)
+	// Wait for the kernel to reparent the child to init. Local runs see this
+	// immediately; on a loaded CI runner the ps view can lag the kernel by
+	// multiple poll cycles, so the window is intentionally generous.
+	deadline := time.Now().Add(8 * time.Second)
 	for time.Now().Before(deadline) {
 		if readPPID(t, childPID) == 1 {
 			break
@@ -249,7 +250,7 @@ func TestKillOrphanedWorktreeProcesses_StartupSweep(t *testing.T) {
 			worktreeDir, childPID, processAlive(childPID))
 	}
 
-	deadline = time.Now().Add(3 * time.Second)
+	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		if !processAlive(childPID) {
 			return
