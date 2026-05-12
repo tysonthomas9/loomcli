@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
 	"go.opentelemetry.io/otel/propagation"
 	sdkresource "go.opentelemetry.io/otel/sdk/resource"
@@ -123,11 +124,30 @@ func Init(ctx context.Context, cfg Config) (Shutdown, Provider, error) {
 			func() *sdktrace.TracerProvider { return nil },
 			nil
 	}
-
 	if cfg.ServiceName == "" {
 		return nil, nil, fmt.Errorf("tracing: ServiceName required when Endpoint is set")
 	}
 
+	res, err := buildResource(ctx, cfg)
+	if err != nil {
+		return nil, nil, err
+	}
+	exp, err := buildExporter(ctx, cfg)
+	if err != nil {
+		return nil, nil, err
+	}
+	tp := sdktrace.NewTracerProvider(buildProviderOptions(exp, res, cfg)...)
+	otel.SetTracerProvider(tp)
+
+	return func(ctx context.Context) error {
+			_ = tp.ForceFlush(ctx)
+			return tp.Shutdown(ctx)
+		}, func() *sdktrace.TracerProvider {
+			return tp
+		}, nil
+}
+
+func buildResource(ctx context.Context, cfg Config) (*sdkresource.Resource, error) {
 	res, err := sdkresource.New(ctx,
 		sdkresource.WithAttributes(
 			semconv.ServiceName(cfg.ServiceName),
@@ -141,9 +161,12 @@ func Init(ctx context.Context, cfg Config) (Shutdown, Provider, error) {
 		sdkresource.WithProcessRuntimeVersion(),
 	)
 	if err != nil {
-		return nil, nil, fmt.Errorf("tracing: build resource: %w", err)
+		return nil, fmt.Errorf("tracing: build resource: %w", err)
 	}
+	return res, nil
+}
 
+func buildExporter(ctx context.Context, cfg Config) (*otlptrace.Exporter, error) {
 	expOpts := []otlptracehttp.Option{
 		otlptracehttp.WithEndpoint(stripScheme(cfg.Endpoint)),
 		otlptracehttp.WithTimeout(10 * time.Second),
@@ -153,9 +176,12 @@ func Init(ctx context.Context, cfg Config) (Shutdown, Provider, error) {
 	}
 	exp, err := otlptracehttp.New(ctx, expOpts...)
 	if err != nil {
-		return nil, nil, fmt.Errorf("tracing: create OTLP exporter: %w", err)
+		return nil, fmt.Errorf("tracing: create OTLP exporter: %w", err)
 	}
+	return exp, nil
+}
 
+func buildProviderOptions(exp *otlptrace.Exporter, res *sdkresource.Resource, cfg Config) []sdktrace.TracerProviderOption {
 	var tpOpts []sdktrace.TracerProviderOption
 	if cfg.Sync {
 		// Synchronous: each span.End() blocks until export completes. Use for
@@ -171,15 +197,7 @@ func Init(ctx context.Context, cfg Config) (Shutdown, Provider, error) {
 		sdktrace.WithResource(res),
 		sdktrace.WithSampler(buildSampler(cfg)),
 	)
-	tp := sdktrace.NewTracerProvider(tpOpts...)
-	otel.SetTracerProvider(tp)
-
-	return func(ctx context.Context) error {
-			_ = tp.ForceFlush(ctx)
-			return tp.Shutdown(ctx)
-		}, func() *sdktrace.TracerProvider {
-			return tp
-		}, nil
+	return tpOpts
 }
 
 // Tracer returns a tracer named for the calling package. Pass a stable

@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/atomicfile"
-	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
+	"github.com/tysonthomas9/loomcli/internal/runtimectx"
 	"github.com/tysonthomas9/loomcli/internal/sessions/redact"
 )
 
@@ -38,32 +38,16 @@ func (s *Store) SyncNativeTranscript(sessionID, srcPath string) error {
 	if srcPath == "" {
 		return nil
 	}
-	_, span := startSpan(cmdstore.RootContext(), "service.Sessions.SyncNativeTranscript",
+	_, span := startSpan(runtimectx.RootContext(), "service.Sessions.SyncNativeTranscript",
 		attrLoomSessionID(sessionID),
 	)
 	defer span.End()
 
-	if strings.ContainsAny(sessionID, "/\\") {
-		err := fmt.Errorf("invalid session ID %q: contains path separator", sessionID)
+	sessDir, err := s.resolveSessionDir(sessionID)
+	if err != nil {
 		recordErr(span, err)
 		return err
 	}
-
-	sessDir := filepath.Join(s.dir, sessionID)
-	cleanDir := filepath.Clean(sessDir)
-	if !strings.HasPrefix(cleanDir+string(os.PathSeparator), filepath.Clean(s.dir)+string(os.PathSeparator)) {
-		err := fmt.Errorf("invalid session ID %q", sessionID)
-		recordErr(span, err)
-		return err
-	}
-	if _, err := os.Stat(sessDir); err != nil {
-		if os.IsNotExist(err) {
-			return fmt.Errorf("session %q does not exist", sessionID)
-		}
-		recordErr(span, err)
-		return fmt.Errorf("stat session dir: %w", err)
-	}
-
 	if _, err := os.Stat(srcPath); err != nil {
 		if os.IsNotExist(err) {
 			return nil
@@ -72,15 +56,12 @@ func (s *Store) SyncNativeTranscript(sessionID, srcPath string) error {
 		return fmt.Errorf("stat source transcript: %w", err)
 	}
 
-	dstPath := filepath.Join(sessDir, NativeTranscriptFile)
-
 	// #nosec G304 — srcPath comes from the agent hook payload (trusted)
 	data, err := os.ReadFile(srcPath)
 	if err != nil {
 		recordErr(span, err)
 		return fmt.Errorf("read source transcript: %w", err)
 	}
-
 	if redactionEnabled() {
 		redacted, rerr := redact.JSONLBytes(data)
 		if rerr != nil {
@@ -90,6 +71,7 @@ func (s *Store) SyncNativeTranscript(sessionID, srcPath string) error {
 		data = redacted
 	}
 
+	dstPath := filepath.Join(sessDir, NativeTranscriptFile)
 	if err := atomicfile.WriteFile(dstPath, data, sessFilePerm); err != nil {
 		recordErr(span, err)
 		return fmt.Errorf("write native transcript: %w", err)

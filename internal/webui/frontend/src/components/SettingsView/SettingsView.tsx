@@ -70,8 +70,7 @@ export function SettingsView({
     updateRedis,
   } = useLocalSettings();
   const redisSettings = localSettings?.fleetdb_redis;
-  const [redisForm, setRedisForm] =
-    useState<RedisFormState>(EMPTY_REDIS_FORM);
+  const [redisForm, setRedisForm] = useState<RedisFormState>(EMPTY_REDIS_FORM);
 
   const { fontFamily, fontSize, setFontFamily, setFontSize } =
     useTerminalFont();

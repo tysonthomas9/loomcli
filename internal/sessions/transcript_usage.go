@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
+	"github.com/tysonthomas9/loomcli/internal/runtimectx"
 )
 
 // TokenUsage holds aggregated token counts from a Claude transcript.
@@ -42,7 +42,7 @@ type claudeTranscriptEntry struct {
 // On I/O errors mid-scan, returns partial results alongside the error.
 // Callers that need exact totals should check the error before using the result.
 func SumTranscriptUsage(transcriptPath string) (TokenUsage, error) {
-	_, span := startSpan(cmdstore.RootContext(), "service.Sessions.SumTranscriptUsage")
+	_, span := startSpan(runtimectx.RootContext(), "service.Sessions.SumTranscriptUsage")
 	defer span.End()
 
 	// #nosec G304 — transcriptPath comes from Claude's hook payload (trusted)

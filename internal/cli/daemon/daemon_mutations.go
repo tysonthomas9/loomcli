@@ -6,10 +6,11 @@ import (
 	"sync"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/notify"
-	"go.opentelemetry.io/otel/attribute"
 )
 
 // Control socket operation names for mutation queries.

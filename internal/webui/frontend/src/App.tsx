@@ -188,8 +188,7 @@ function App() {
     () => workspaceRepos.some((repo) => isOnboardingRepo(repo)),
     [workspaceRepos],
   );
-  const shouldPrefillOnboardingIssue =
-    hasOnboardingRepo && issues.length === 0;
+  const shouldPrefillOnboardingIssue = hasOnboardingRepo && issues.length === 0;
   const shouldPrefillOnboardingAgent =
     hasOnboardingRepo && (workspace?.agents?.length ?? 0) === 0;
   const onboardingWorkspaceInitialValues = useMemo(

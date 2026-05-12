@@ -39,7 +39,7 @@ const (
 )
 
 // wsCloseReason maps a websocket close status to one of the bounded
-// disconnectReason* enum values. Anything we don't explicitly recognise
+// disconnectReason* enum values. Anything we don't explicitly recognize
 // collapses to "error" so the cardinality of `disconnect.reason` stays
 // tied to the enum, not the (effectively unbounded) close-code space.
 func wsCloseReason(status websocket.StatusCode) string { //nolint:staticcheck // SA1019
@@ -103,50 +103,16 @@ func HandleTerminalWS(manager webuterminal.PTYSource, auth *realtime.TerminalAut
 		}
 		initialCols, initialRows := initialTerminalSizeFromRequest(r)
 
-		// Short-lived child span covering ONLY the WS upgrade handshake.
-		// We end this before entering the bidirectional relay so we don't
-		// hold a multi-minute (or multi-hour) span open in Jaeger. The
-		// long-lived relay is unspanned by design — per-message spans
-		// would flood the collector. See
-		// docs/observability/tracing-contract.md §3.
-		upgradeCtx, upgradeSpan := otel.Tracer(terminalTracerName).Start(r.Context(), "ws.upgrade",
-			trace.WithAttributes(
-				attribute.String("loom.workspace", workspace),
-				attribute.String("loom.session_id", session),
-				attribute.String("network.peer.address", r.RemoteAddr),
-			),
-		)
-
-		conn, ok := upgradeTerminalWS(w, r, p.patterns)
+		conn, upgradeCtx, ok := upgradeTerminalWithSpan(w, r, p.patterns, session, workspace)
 		if !ok {
-			upgradeSpan.SetStatus(codes.Error, "network")
-			upgradeSpan.End()
 			return
 		}
-		upgradeSpan.End()
-		_ = upgradeCtx
 
 		closeStatus := websocket.StatusInternalError
 		closeReason := "connection closed"
 		defer func() {
 			_ = conn.Close(closeStatus, closeReason) //nolint:staticcheck // SA1019: websocket migration tracked separately
-
-			// Sibling disconnect span: short-lived. Records the close
-			// reason as a bounded enum so dashboards can group
-			// disconnects without keeping a span open for the lifetime
-			// of the relay.
-			_, discSpan := otel.Tracer(terminalTracerName).Start(context.Background(), "ws.disconnect",
-				trace.WithLinks(trace.LinkFromContext(upgradeCtx)),
-				trace.WithAttributes(
-					attribute.String("loom.workspace", workspace),
-					attribute.String("loom.session_id", session),
-					attribute.String("disconnect.reason", wsCloseReason(closeStatus)),
-				),
-			)
-			if closeStatus == websocket.StatusInternalError { //nolint:staticcheck // SA1019
-				discSpan.SetStatus(codes.Error, "crash")
-			}
-			discSpan.End()
+			emitDisconnectSpan(upgradeCtx, workspace, session, closeStatus)
 		}()
 
 		closeStatus, closeReason = runTerminalRelay(
@@ -159,6 +125,47 @@ func HandleTerminalWS(manager webuterminal.PTYSource, auth *realtime.TerminalAut
 			initialRows,
 		)
 	}
+}
+
+// upgradeTerminalWithSpan opens a short-lived ws.upgrade span around the
+// websocket handshake. We end the span before entering the bidirectional
+// relay so we don't hold a multi-minute span open in Jaeger; the long-lived
+// relay is unspanned by design (per-message spans would flood the
+// collector). See docs/observability/tracing-contract.md §3.
+func upgradeTerminalWithSpan(w http.ResponseWriter, r *http.Request, patterns []string, session, workspace string) (*websocket.Conn, context.Context, bool) { //nolint:staticcheck // SA1019: websocket migration tracked separately
+	upgradeCtx, upgradeSpan := otel.Tracer(terminalTracerName).Start(r.Context(), "ws.upgrade",
+		trace.WithAttributes(
+			attribute.String("loom.workspace", workspace),
+			attribute.String("loom.session_id", session),
+			attribute.String("network.peer.address", r.RemoteAddr),
+		),
+	)
+	conn, ok := upgradeTerminalWS(w, r, patterns)
+	if !ok {
+		upgradeSpan.SetStatus(codes.Error, "network")
+		upgradeSpan.End()
+		return nil, upgradeCtx, false
+	}
+	upgradeSpan.End()
+	return conn, upgradeCtx, true
+}
+
+// emitDisconnectSpan records a sibling span on terminal-WS close. The
+// close-reason enum is bounded so dashboards can group disconnects without
+// keeping a span open for the lifetime of the relay.
+func emitDisconnectSpan(upgradeCtx context.Context, workspace, session string, closeStatus websocket.StatusCode) { //nolint:staticcheck // SA1019: websocket migration tracked separately
+	_, discSpan := otel.Tracer(terminalTracerName).Start(context.Background(), "ws.disconnect",
+		trace.WithLinks(trace.LinkFromContext(upgradeCtx)),
+		trace.WithAttributes(
+			attribute.String("loom.workspace", workspace),
+			attribute.String("loom.session_id", session),
+			attribute.String("disconnect.reason", wsCloseReason(closeStatus)),
+		),
+	)
+	if closeStatus == websocket.StatusInternalError { //nolint:staticcheck // SA1019
+		discSpan.SetStatus(codes.Error, "crash")
+	}
+	discSpan.End()
 }
 
 // validateTerminalWSRequest validates the session parameter, auth token, and

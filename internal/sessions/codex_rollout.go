@@ -10,14 +10,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
+	"github.com/tysonthomas9/loomcli/internal/runtimectx"
 )
 
 // SyncLatestCodexRollout mirrors the newest Codex rollout for workDir into the
 // Loom session as agent_transcript.jsonl. It is best-effort and returns an
 // empty path when no matching rollout is available.
 func (s *Store) SyncLatestCodexRollout(sessionID, workDir string, since time.Time) (string, error) {
-	_, span := startSpan(cmdstore.RootContext(), "service.Sessions.SyncLatestCodexRollout",
+	_, span := startSpan(runtimectx.RootContext(), "service.Sessions.SyncLatestCodexRollout",
 		attrLoomSessionID(sessionID),
 		attrLoomBackend("codex"),
 	)
@@ -27,16 +27,28 @@ func (s *Store) SyncLatestCodexRollout(sessionID, workDir string, since time.Tim
 	if root == "" {
 		return "", nil
 	}
+	bestPath, err := findLatestCodexRollout(root, workDir, since)
+	if err != nil {
+		recordErr(span, err)
+		return "", err
+	}
+	if bestPath == "" {
+		return "", nil
+	}
+	if err := s.SyncNativeTranscript(sessionID, bestPath); err != nil {
+		recordErr(span, err)
+		return "", err
+	}
+	return bestPath, nil
+}
+
+func findLatestCodexRollout(root, workDir string, since time.Time) (string, error) {
 	cutoff := since.Add(-1 * time.Minute)
 	var bestPath string
 	var bestMod time.Time
-
 	for _, walkRoot := range codexSessionWalkRoots(root, since, time.Now()) {
 		err := filepath.WalkDir(walkRoot, func(path string, d fs.DirEntry, err error) error {
-			if err != nil {
-				return nil
-			}
-			if d.IsDir() {
+			if err != nil || d.IsDir() {
 				return nil
 			}
 			name := d.Name()
@@ -57,16 +69,8 @@ func (s *Store) SyncLatestCodexRollout(sessionID, workDir string, since time.Tim
 			return nil
 		})
 		if err != nil {
-			recordErr(span, err)
 			return "", err
 		}
-	}
-	if bestPath == "" {
-		return "", nil
-	}
-	if err := s.SyncNativeTranscript(sessionID, bestPath); err != nil {
-		recordErr(span, err)
-		return "", err
 	}
 	return bestPath, nil
 }
