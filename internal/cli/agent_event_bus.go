@@ -2,7 +2,7 @@ package cli
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
@@ -49,7 +49,7 @@ func initAgentEventBus() {
 		dir = filepath.Join(base, "events")
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		log.Printf("[agent-events] mkdir %s failed: %v (events disabled)", dir, err)
+		slog.Warn("agent-events: mkdir failed (events disabled)", "dir", dir, "err", err)
 		agentBusErr = err
 		return
 	}
@@ -72,7 +72,7 @@ func initAgentEventBus() {
 		if err == nil {
 			bus.Subscribe(exp.HandleEvent)
 		} else {
-			log.Printf("[agent-events] otelexport init failed: %v (events still flow to JSONL)", err)
+			slog.Warn("agent-events: otelexport init failed (events still flow to JSONL)", "err", err)
 		}
 	}
 
