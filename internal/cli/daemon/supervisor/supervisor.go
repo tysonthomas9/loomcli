@@ -55,6 +55,24 @@ type Supervisor struct {
 	ShutdownOnce sync.Once      // protects shutdown channel from double-close
 	Wg           sync.WaitGroup // tracks superviseAgent goroutines
 
+	// FatalCh receives the first fatal supervisor error (panic in a critical
+	// goroutine, or a critical goroutine returning before shutdown). Buffered
+	// size 1; FatalOnce ensures only the first fatal is delivered. The daemon
+	// main loop selects on this alongside the shutdown channel so the process
+	// can exit non-zero when supervision dies.
+	FatalCh   chan error
+	FatalOnce sync.Once
+
+	// Ticks holds *atomic.Int64 UnixNano timestamps keyed by goroutine name.
+	// Watched goroutines call recordTick at each loop iteration; the liveness
+	// watchdog flags any tick older than the per-name threshold. sync.Map is
+	// chosen so the watchdog can scan without contending with hot loops.
+	Ticks sync.Map
+
+	// LivenessTimeout overrides the default per-goroutine staleness threshold
+	// for the liveness watchdog. Zero means use built-in defaults.
+	LivenessTimeout time.Duration
+
 	Concurrency *ConcurrencyTracker
 	EventBus    EventEmitter
 	EmitEvent   func(events.Event)
@@ -108,6 +126,7 @@ func (s *Supervisor) NewAgent(entry config.AgentEntry, idx int) (*AgentProcess, 
 // Start launches supervisor goroutines for all configured agents.
 func (s *Supervisor) Start() error {
 	s.Shutdown = make(chan struct{})
+	s.FatalCh = make(chan error, 1)
 
 	if err := s.startControlPlaneNode(); err != nil {
 		return err
@@ -124,12 +143,16 @@ func (s *Supervisor) Start() error {
 		}
 	}
 
-	// Start healthChecker goroutine
-	s.Wg.Add(1)
-	go func() {
-		defer s.Wg.Done()
-		s.healthChecker()
-	}()
+	// Start healthChecker goroutine under the crash-loud harness.
+	s.RegisterTick(GoroutineHealthChecker)
+	s.RunCritical(GoroutineHealthChecker, s.healthChecker)
+
+	// Start the liveness watchdog — itself wrapped in runCritical so a panic
+	// in the watchdog also exits the daemon. The watchdog reads atomic tick
+	// stamps without taking any supervisor mutex, so it stays responsive even
+	// if AgentsMu is deadlocked elsewhere.
+	s.RegisterTick(GoroutineLivenessWatchdog)
+	s.RunCritical(GoroutineLivenessWatchdog, s.livenessWatchdog)
 
 	// In fleet mode, skip agent supervision — agents are managed by the fleet server.
 	cfg := s.ConfigSnapshot()
@@ -147,15 +170,25 @@ func (s *Supervisor) Start() error {
 	for _, ap := range snapshot {
 		ap.StopCh = make(chan struct{})
 		ap.Done = make(chan struct{})
-		s.Wg.Add(1)
-		go func(agent *AgentProcess) {
-			defer s.Wg.Done()
-			defer close(agent.Done)
-			s.superviseAgent(agent)
-		}(ap)
+		s.startAgentSupervisor(ap)
 	}
 
 	return nil
+}
+
+// startAgentSupervisor launches the supervise loop for a single agent under
+// the crash-loud harness. Panics inside superviseAgent become fatal so the
+// daemon process exits non-zero; normal returns (max retries, config removed)
+// are expected and not treated as failures.
+//
+// This is called from Start() (no mutex held). The AddAgent path in drain.go
+// does its own coordinated Wg.Add(1) under AgentsMu and inlines the spawn —
+// see drain.go for that variant.
+func (s *Supervisor) startAgentSupervisor(ap *AgentProcess) {
+	name := GoroutineAgentPrefix + ap.Entry.Worktree
+	s.RegisterTick(name)
+	s.Wg.Add(1)
+	go s.supervisedAgentBody(name, ap)
 }
 
 const (
@@ -196,11 +229,10 @@ func (s *Supervisor) startControlPlaneNode() error {
 	}
 	s.NodeID = nodeID
 
-	s.Wg.Add(1)
-	go func() {
-		defer s.Wg.Done()
+	s.RegisterTick(GoroutineNodeHeartbeat)
+	s.RunCritical(GoroutineNodeHeartbeat, func() {
 		s.runNodeHeartbeat(nodeID, ttl, interval)
-	}()
+	})
 	return nil
 }
 
@@ -218,6 +250,7 @@ func (s *Supervisor) runNodeHeartbeat(nodeID string, ttl, interval time.Duration
 			if err != nil {
 				slog.Warn("supervisor node heartbeat failed", "workspace", s.WorkspaceID, "node_id", nodeID, "err", err)
 			}
+			s.RecordTick(GoroutineNodeHeartbeat)
 		}
 	}
 }
@@ -269,8 +302,10 @@ func (s *Supervisor) Stop() {
 //nolint:funlen // The restart loop keeps lifecycle ordering visible.
 func (s *Supervisor) superviseAgent(ap *AgentProcess) {
 	slog.Info("starting agent supervisor", "worktree", ap.Entry.Worktree, "role", ap.Entry.Role)
+	tickName := GoroutineAgentPrefix + ap.Entry.Worktree
 
 	for {
+		s.RecordTick(tickName)
 		if s.checkAgentStopSignals(ap) {
 			return
 		}

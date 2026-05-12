@@ -315,7 +315,9 @@ func (s *Supervisor) AddAgentForTask(entry config.AgentEntry, taskID string) err
 	}
 
 	// Check for duplicate, add to slice, and increment WaitGroup atomically
-	// under a single write lock to prevent a race between Wg.Add(1) and Stop()'s Wg.Wait().
+	// under a single write lock to prevent a race between Wg.Add(1) and
+	// Stop()'s Wg.Wait(). registerTick can happen outside the lock —
+	// rangeTicks tolerates concurrent registration.
 	s.AgentsMu.Lock()
 	for _, existing := range s.Agents {
 		if existing.Entry.Worktree == entry.Worktree {
@@ -326,11 +328,10 @@ func (s *Supervisor) AddAgentForTask(entry config.AgentEntry, taskID string) err
 	s.Agents = append(s.Agents, ap)
 	s.Wg.Add(1)
 	s.AgentsMu.Unlock()
-	go func() {
-		defer s.Wg.Done()
-		defer close(ap.Done)
-		s.superviseAgent(ap)
-	}()
+
+	name := GoroutineAgentPrefix + ap.Entry.Worktree
+	s.RegisterTick(name)
+	go s.supervisedAgentBody(name, ap)
 
 	slog.Info("agent added and started", "worktree", entry.Worktree, "role", entry.Role)
 	return nil
