@@ -443,9 +443,9 @@ func TestSpanNames_InMemoryExporterSmoke(t *testing.T) {
 	// "every name passes" assertion is vacuous (you can pass with zero
 	// spans of a kind).
 	wantPresent := map[string]bool{
-		"loom.cli.plan":                            false,
+		"loom.cli.plan": false,
 		"loom.backend.claude.invoke_non_interactive": false,
-		"loom.task":                                false,
+		"loom.task": false,
 	}
 	for _, s := range got {
 		if _, ok := wantPresent[s.Name]; ok {
