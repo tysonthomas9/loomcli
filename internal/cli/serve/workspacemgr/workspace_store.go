@@ -151,123 +151,196 @@ func createStoreBackedEmptyWorkspace(ctx context.Context, s storepkg.Store, req 
 
 //nolint:cyclop,funlen // Coordinates local git worktrees, fleet-db repo records, and local state rollback.
 func addReposToStoreBackedWorkspace(ctx context.Context, s storepkg.Store, req service.WorkspaceAddReposRequest) (service.WorkspaceCreateResult, error) {
-	key := strings.TrimSpace(req.WorkspaceID)
+	key, ws, err := resolveWorkspaceForAddRepos(ctx, s, req.WorkspaceID)
+	if err != nil {
+		return service.WorkspaceCreateResult{}, err
+	}
+	wsDir, err := prepareWorkspaceDir(key)
+	if err != nil {
+		return service.WorkspaceCreateResult{}, err
+	}
+
+	resolved, err := resolveRequestRepos(req.Repos)
+	if err != nil {
+		return service.WorkspaceCreateResult{}, err
+	}
+	seen, err := dedupAddReposAgainstExisting(ctx, s, key, resolved)
+	if err != nil {
+		return service.WorkspaceCreateResult{}, err
+	}
+
+	branch := pickAddReposBranch(req.Branch, ws, key)
+
+	created, repos, err := materializeAddReposWorktrees(ctx, resolved, wsDir, branch)
+	if err != nil {
+		return service.WorkspaceCreateResult{}, err
+	}
+	clonedRepos, err := materializeAddReposClones(ctx, req.CloneURLs, wsDir, seen, created)
+	if err != nil {
+		return service.WorkspaceCreateResult{}, err
+	}
+	repos = append(repos, clonedRepos...)
+
+	if err := persistAddReposRecords(ctx, s, key, wsDir, branch, repos, created, clonedRepos); err != nil {
+		return service.WorkspaceCreateResult{}, err
+	}
+	return service.WorkspaceCreateResult{WorkspaceID: key, WorkspacePath: wsDir}, nil
+}
+
+// resolveWorkspaceForAddRepos looks up the workspace by ID, then falls back
+// to lookup-by-name so callers can pass either. Returns the canonical key
+// (which may differ from the input when matched by name).
+func resolveWorkspaceForAddRepos(ctx context.Context, s storepkg.Store, workspaceID string) (string, *domain.Workspace, error) {
+	key := strings.TrimSpace(workspaceID)
 	if key == "" {
-		return service.WorkspaceCreateResult{}, workspaceerrors.New(workspaceerrors.PathNotFound, "workspace ID is required", nil)
+		return "", nil, workspaceerrors.New(workspaceerrors.PathNotFound, "workspace ID is required", nil)
 	}
 	ws, err := s.Workspaces().Get(ctx, key)
-	if err != nil {
-		if byName, byNameErr := s.Workspaces().GetByName(ctx, key); byNameErr == nil {
-			ws = byName
-			key = byName.Key
-		} else {
-			return service.WorkspaceCreateResult{}, fmt.Errorf("load workspace %q: %w", req.WorkspaceID, err)
-		}
+	if err == nil {
+		return key, ws, nil
 	}
+	byName, byNameErr := s.Workspaces().GetByName(ctx, key)
+	if byNameErr != nil {
+		return "", nil, fmt.Errorf("load workspace %q: %w", workspaceID, err)
+	}
+	return byName.Key, byName, nil
+}
 
+// prepareWorkspaceDir resolves the workspace's on-disk path, validates it,
+// and ensures the directory exists.
+func prepareWorkspaceDir(key string) (string, error) {
 	wsDir, err := localWorkspacePath(key)
 	if err != nil {
-		return service.WorkspaceCreateResult{}, err
+		return "", err
 	}
 	if err := validateWorkspacePath(wsDir); err != nil {
-		return service.WorkspaceCreateResult{}, err
+		return "", err
 	}
 	if err := os.MkdirAll(wsDir, 0755); err != nil {
-		return service.WorkspaceCreateResult{}, fmt.Errorf("cannot create workspace directory: %w", err)
+		return "", fmt.Errorf("cannot create workspace directory: %w", err)
 	}
+	return wsDir, nil
+}
 
-	var resolved []resolvedRepo
-	if len(req.Repos) > 0 {
-		resolved, err = resolveRepoPaths(req.Repos)
-		if err != nil {
-			return service.WorkspaceCreateResult{}, err
-		}
+func resolveRequestRepos(reqRepos []string) ([]resolvedRepo, error) {
+	if len(reqRepos) == 0 {
+		return nil, nil
 	}
+	return resolveRepoPaths(reqRepos)
+}
 
+// dedupAddReposAgainstExisting builds the set of repo names already present
+// in the workspace, then verifies the requested repos don't collide. Returns
+// the merged seen-set so downstream clone steps can extend it.
+func dedupAddReposAgainstExisting(ctx context.Context, s storepkg.Store, key string, resolved []resolvedRepo) (map[string]bool, error) {
 	existing, err := s.Repos().List(ctx, key)
 	if err != nil {
-		return service.WorkspaceCreateResult{}, fmt.Errorf("list workspace repos: %w", err)
+		return nil, fmt.Errorf("list workspace repos: %w", err)
 	}
-	seen := make(map[string]bool, len(existing))
+	seen := make(map[string]bool, len(existing)+len(resolved))
 	for _, r := range existing {
 		seen[r.Name] = true
 	}
 	for _, r := range resolved {
 		if seen[r.name] {
-			return service.WorkspaceCreateResult{}, workspaceerrors.New(workspaceerrors.AlreadyExists, fmt.Sprintf("repo %q already exists in workspace %q", r.name, key), nil)
+			return nil, workspaceerrors.New(workspaceerrors.AlreadyExists, fmt.Sprintf("repo %q already exists in workspace %q", r.name, key), nil)
 		}
 		seen[r.name] = true
 	}
+	return seen, nil
+}
 
-	branch := req.Branch
-	if branch == "" {
-		branch = ws.DefaultBranch
+// pickAddReposBranch resolves the target branch using the precedence
+// request → workspace default → workspace name → workspace key. Same fallbacks
+// the inline code used; lifted out so the outer function isn't paying the
+// cognitive cost of three sequential ifs.
+func pickAddReposBranch(reqBranch string, ws *domain.Workspace, key string) string {
+	if reqBranch != "" {
+		return reqBranch
 	}
-	if branch == "" {
-		branch = ws.Name
+	if ws.DefaultBranch != "" {
+		return ws.DefaultBranch
 	}
-	if branch == "" {
-		branch = key
+	if ws.Name != "" {
+		return ws.Name
 	}
+	return key
+}
 
-	var created []createdWorktree
-	var repos []config.RepoConfig
-	if len(resolved) > 0 {
-		created, repos, err = addWorktrees(ctx, resolved, wsDir, branch)
-		if err != nil {
-			cleanupAttachedWorktrees(created)
-			return service.WorkspaceCreateResult{}, err
-		}
+// materializeAddReposWorktrees attaches a worktree for each resolved repo,
+// rolling back partially-attached worktrees on failure.
+func materializeAddReposWorktrees(ctx context.Context, resolved []resolvedRepo, wsDir, branch string) ([]createdWorktree, []config.RepoConfig, error) {
+	if len(resolved) == 0 {
+		return nil, nil, nil
 	}
-
-	var clonedRepos []config.RepoConfig
-	if len(req.CloneURLs) > 0 {
-		clonedRepos, err = cloneReposWithSeen(ctx, req.CloneURLs, wsDir, seen)
-		if err != nil {
-			cleanupAttachedWorktrees(created)
-			return service.WorkspaceCreateResult{}, err
-		}
-		repos = append(repos, clonedRepos...)
+	created, repos, err := addWorktrees(ctx, resolved, wsDir, branch)
+	if err != nil {
+		cleanupAttachedWorktrees(created)
+		return nil, nil, err
 	}
+	return created, repos, nil
+}
 
+// materializeAddReposClones clones any --clone-url repos under the workspace
+// directory, rolling back previously-attached worktrees on failure.
+func materializeAddReposClones(ctx context.Context, cloneURLs []string, wsDir string, seen map[string]bool, created []createdWorktree) ([]config.RepoConfig, error) {
+	if len(cloneURLs) == 0 {
+		return nil, nil
+	}
+	cloned, err := cloneReposWithSeen(ctx, cloneURLs, wsDir, seen)
+	if err != nil {
+		cleanupAttachedWorktrees(created)
+		return nil, err
+	}
+	return cloned, nil
+}
+
+// persistAddReposRecords writes the fleet-db repo records for each new
+// repo and saves the local-state file. On any failure it rolls back the
+// store records, attached worktrees, and clone directories so the caller
+// is left with the pre-call state.
+func persistAddReposRecords(ctx context.Context, s storepkg.Store, key, wsDir, branch string, repos []config.RepoConfig, created []createdWorktree, clonedRepos []config.RepoConfig) error {
 	var storeRepos []string
-	rollbackStoreRepos := func() {
+	rollback := func() {
 		for _, name := range storeRepos {
 			if err := s.Repos().Delete(context.Background(), key, name); err != nil && !errors.Is(err, domain.ErrNotFound) {
 				slog.Warn("failed to rollback store repo create", "workspace", key, "repo", name, "err", err)
 			}
 		}
+		cleanupAttachedWorktrees(created)
+		cleanupClonedRepos(clonedRepos)
 	}
 
 	for _, r := range repos {
-		remoteName := r.Remote
-		if remoteName == "" {
-			remoteName = "origin"
-		}
-		if _, err := s.Repos().Create(ctx, storepkg.RepoCreate{
-			WorkspaceKey:  key,
-			Name:          r.Name,
-			RemoteURL:     gitRemoteURL(r.Path, remoteName),
-			Remote:        remoteName,
-			DefaultBranch: branch,
-			SourceRepoID:  r.SourceRepoID,
-		}); err != nil {
-			rollbackStoreRepos()
-			cleanupAttachedWorktrees(created)
-			cleanupClonedRepos(clonedRepos)
-			return service.WorkspaceCreateResult{}, fmt.Errorf("create repo %q in store: %w", r.Name, err)
+		if err := createStoreRepo(ctx, s, key, branch, r); err != nil {
+			rollback()
+			return err
 		}
 		storeRepos = append(storeRepos, r.Name)
 	}
-
 	if err := saveLocalWorkspaceState(key, wsDir, repos, true); err != nil {
-		rollbackStoreRepos()
-		cleanupAttachedWorktrees(created)
-		cleanupClonedRepos(clonedRepos)
-		return service.WorkspaceCreateResult{}, err
+		rollback()
+		return err
 	}
+	return nil
+}
 
-	return service.WorkspaceCreateResult{WorkspaceID: key, WorkspacePath: wsDir}, nil
+func createStoreRepo(ctx context.Context, s storepkg.Store, key, branch string, r config.RepoConfig) error {
+	remoteName := r.Remote
+	if remoteName == "" {
+		remoteName = "origin"
+	}
+	if _, err := s.Repos().Create(ctx, storepkg.RepoCreate{
+		WorkspaceKey:  key,
+		Name:          r.Name,
+		RemoteURL:     gitRemoteURL(r.Path, remoteName),
+		Remote:        remoteName,
+		DefaultBranch: branch,
+		SourceRepoID:  r.SourceRepoID,
+	}); err != nil {
+		return fmt.Errorf("create repo %q in store: %w", r.Name, err)
+	}
+	return nil
 }
 
 func localWorkspacePath(key string) (string, error) {

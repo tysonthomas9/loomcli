@@ -35,31 +35,28 @@ func printAgentStatus(agent DaemonAgentStatus) {
 		fmt.Printf("      Ownership: fence %d\n", agent.OwnershipFencingToken)
 	}
 
-	// Branch line with git sync info (read-time git ops)
 	printAgentBranchInfo(agent)
+	printAgentDiagnostics(agent)
+}
 
-	// Last run line (stopped/failed agents only)
+// printAgentDiagnostics prints the post-run signals (last exit code, error
+// class, retry counters, stop reason) for an agent. Split out of
+// printAgentStatus to keep that function under the funlen threshold.
+func printAgentDiagnostics(agent DaemonAgentStatus) {
 	if agent.PID == 0 && !agent.LastStart.IsZero() && !agent.LastExit.IsZero() {
 		runtime := agent.LastExit.Sub(agent.LastStart)
 		fmt.Printf("      Last run: %s (exit %d)\n", formatDaemonDuration(runtime), agent.LastExitCode)
 	}
-
-	// Last error class
 	if agent.LastErrorClass != "" {
 		fmt.Printf("      Last error: %s\n", agent.LastErrorClass)
 	}
-
-	// NoWork count
 	if agent.NoWorkCount > 0 {
 		fmt.Printf("      NoWork: %d\n", agent.NoWorkCount)
 	}
-
-	// Backoff remaining
 	if !agent.BackoffUntil.IsZero() && agent.BackoffUntil.After(time.Now()) {
 		remaining := time.Until(agent.BackoffUntil)
 		fmt.Printf("      Backoff: %s remaining\n", formatDaemonDuration(remaining))
 	}
-
 	if agent.RestartCount > 0 {
 		fmt.Printf("      Restarts: %d\n", agent.RestartCount)
 	}
