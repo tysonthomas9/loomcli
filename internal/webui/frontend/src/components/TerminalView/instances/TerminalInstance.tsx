@@ -57,8 +57,7 @@ const SCROLL_BOTTOM_THRESHOLD_PX = 24;
 
 function isSocketOpenOrConnecting(ws: WebSocket | null): boolean {
   return (
-    ws?.readyState === WebSocket.OPEN ||
-    ws?.readyState === WebSocket.CONNECTING
+    ws?.readyState === WebSocket.OPEN || ws?.readyState === WebSocket.CONNECTING
   );
 }
 
@@ -176,15 +175,18 @@ export const TerminalInstance = forwardRef<
     });
   }, [getViewportElement]);
 
-  const write = useCallback((data: string | Uint8Array) => {
-    const wt = wtermInstanceRef.current;
-    if (wt) {
-      wt.write(data);
-      forceRendererPaint(wt);
-      return;
-    }
-    pendingRendererWritesRef.current.push(data);
-  }, [forceRendererPaint]);
+  const write = useCallback(
+    (data: string | Uint8Array) => {
+      const wt = wtermInstanceRef.current;
+      if (wt) {
+        wt.write(data);
+        forceRendererPaint(wt);
+        return;
+      }
+      pendingRendererWritesRef.current.push(data);
+    },
+    [forceRendererPaint],
+  );
   const focus = useCallback(() => {
     wtermInstanceRef.current?.focus();
   }, []);

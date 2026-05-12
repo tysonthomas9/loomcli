@@ -3,6 +3,7 @@ package supervisor
 import (
 	"log/slog"
 	"os"
+	"os/exec"
 	"syscall"
 	"time"
 
@@ -53,49 +54,57 @@ func (s *Supervisor) StopAgent(ap *AgentProcess, sigtermTimeout time.Duration) {
 	}()
 
 	slog.Info("sending signal to process group", "worktree", ap.Entry.Worktree, "signal", "SIGTERM", "pid", pid)
-
-	// Send SIGTERM to the entire process group (negative PID)
-	if err := syscall.Kill(-pid, syscall.SIGTERM); err != nil {
-		// Process group may have already exited; try the process directly
-		slog.Warn("SIGTERM to process group failed, trying process directly", "worktree", ap.Entry.Worktree, "err", err)
-		if err := proc.Process.Signal(syscall.SIGTERM); err != nil {
-			slog.Warn("SIGTERM failed, process may have exited", "worktree", ap.Entry.Worktree, "err", err)
-			return
-		}
+	if !sendSigterm(ap, proc, pid) {
+		return
 	}
 
-	// Poll for process exit instead of calling Wait()
-	// (Wait() is called by waitForAgent in the supervise loop)
-	deadline := time.Now().Add(sigtermTimeout)
-	for time.Now().Before(deadline) {
-		ap.Mu.Lock()
-		currentPID := ap.Pid
-		ap.Mu.Unlock()
-
-		if currentPID == 0 {
-			// Process has exited (waitForAgent cleared the pid)
-			slog.Info("process exited gracefully", "worktree", ap.Entry.Worktree)
-			return
-		}
-
-		// Also check if process is still running via OS
-		if !lockfile.IsProcessRunning(pid) {
-			slog.Info("process exited gracefully", "worktree", ap.Entry.Worktree)
-			return
-		}
-
-		time.Sleep(100 * time.Millisecond)
+	if waitForProcessExit(ap, pid, sigtermTimeout) {
+		slog.Info("process exited gracefully", "worktree", ap.Entry.Worktree)
+		return
 	}
 
-	// Force kill the entire process group if still running
+	// Force kill the entire process group if still running.
 	ap.Mu.Lock()
 	stillRunning := ap.Pid != 0
 	ap.Mu.Unlock()
-
 	if stillRunning {
 		slog.Warn("sending SIGKILL to process group", "worktree", ap.Entry.Worktree, "pid", pid)
 		_ = syscall.Kill(-pid, syscall.SIGKILL)
 	}
+}
+
+// sendSigterm signals the process group, falling back to the leader process.
+// Returns false if the process appears to have already exited.
+func sendSigterm(ap *AgentProcess, proc *exec.Cmd, pid int) bool {
+	if err := syscall.Kill(-pid, syscall.SIGTERM); err != nil {
+		slog.Warn("SIGTERM to process group failed, trying process directly", "worktree", ap.Entry.Worktree, "err", err)
+		if err := proc.Process.Signal(syscall.SIGTERM); err != nil {
+			slog.Warn("SIGTERM failed, process may have exited", "worktree", ap.Entry.Worktree, "err", err)
+			return false
+		}
+	}
+	return true
+}
+
+// waitForProcessExit polls until the agent process exits or the timeout
+// elapses. Wait() itself is called by waitForAgent on the supervise loop,
+// so we observe exit via ap.Pid being cleared or the OS reporting the
+// process gone. Returns true when the process exited within the budget.
+func waitForProcessExit(ap *AgentProcess, pid int, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		ap.Mu.Lock()
+		currentPID := ap.Pid
+		ap.Mu.Unlock()
+		if currentPID == 0 {
+			return true
+		}
+		if !lockfile.IsProcessRunning(pid) {
+			return true
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return false
 }
 
 // checkWatchdog checks both transcript mtime (updated by hooks on every turn)

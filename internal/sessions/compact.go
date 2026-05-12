@@ -7,8 +7,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/lockfile"
+	"github.com/tysonthomas9/loomcli/internal/runtimectx"
 )
 
 // CompactIndex rewrites index.jsonl to remove duplicate entries and entries
@@ -16,7 +16,7 @@ import (
 // Must be called AFTER PurgeOlderThan so that purged directories are already gone.
 // Returns the count of removed entries (original line count minus surviving records).
 func (s *Store) CompactIndex() (int, error) {
-	_, span := startSpan(cmdstore.RootContext(), "service.Sessions.CompactIndex")
+	_, span := startSpan(runtimectx.RootContext(), "service.Sessions.CompactIndex")
 	defer span.End()
 
 	indexPath := filepath.Join(s.dir, "index.jsonl")
@@ -115,7 +115,7 @@ func writeRecordsAtomic(path string, records []SessionRecord) error {
 // CountIndexEntries returns the total line count and unique session count
 // in index.jsonl. Used by dry-run to show compaction potential.
 func (s *Store) CountIndexEntries() (total int, unique int, err error) {
-	_, span := startSpan(cmdstore.RootContext(), "service.Sessions.CountIndexEntries")
+	_, span := startSpan(runtimectx.RootContext(), "service.Sessions.CountIndexEntries")
 	defer span.End()
 
 	indexPath := filepath.Join(s.dir, "index.jsonl")

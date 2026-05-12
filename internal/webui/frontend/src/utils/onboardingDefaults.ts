@@ -19,7 +19,8 @@ export function isOnboardingRepo(repo: OnboardingRepoCandidate): boolean {
   const name = repo.name?.toLowerCase() ?? "";
   const remote = repo.remote?.toLowerCase() ?? "";
   const path = repo.path?.toLowerCase() ?? "";
-  const repoSlug = `${ONBOARDING_REPO_OWNER}/${ONBOARDING_REPO_NAME}`.toLowerCase();
+  const repoSlug =
+    `${ONBOARDING_REPO_OWNER}/${ONBOARDING_REPO_NAME}`.toLowerCase();
   const repoName = ONBOARDING_REPO_NAME.toLowerCase();
 
   return (
