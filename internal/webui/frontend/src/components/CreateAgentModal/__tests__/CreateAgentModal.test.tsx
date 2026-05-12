@@ -1,0 +1,350 @@
+/**
+ * @vitest-environment jsdom
+ */
+
+/**
+ * Unit tests for CreateAgentModal.
+ *
+ * Covers the v5-era validation surface plus the newer defaults behavior
+ * introduced with onboarding (defaultName / defaultRoleName props +
+ * wasOpenRef gating so the form doesn't reset state on every parent
+ * re-render while the modal is open).
+ */
+
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import "@testing-library/jest-dom";
+
+import { CreateAgentModal } from "../CreateAgentModal";
+import { ApiError } from "@/types/common";
+import type { RepoInfo, WorkspaceAgentInfo } from "@/api/workspace";
+
+// ---------- Mocks ----------
+
+// useCreateWorkspaceAgent returns a function (request) => Promise<agent>.
+// Tests swap the function per case via mockCreateAgent.mockImplementation.
+const mockCreateAgent = vi.fn();
+vi.mock("@/hooks/agents", () => ({
+  useCreateWorkspaceAgent: () => mockCreateAgent,
+}));
+
+// ---------- Helpers ----------
+
+const repos: RepoInfo[] = [
+  { name: "alpha", default_branch: "main", local_path: "/a" },
+  { name: "beta", default_branch: "main", local_path: "/b" },
+];
+
+const sampleAgent: WorkspaceAgentInfo = {
+  name: "planner",
+  repos: ["alpha"],
+  repo_groups: [],
+  cross_repo: false,
+};
+
+function renderModal(
+  overrides: Partial<React.ComponentProps<typeof CreateAgentModal>> = {},
+) {
+  const onClose = vi.fn();
+  const onSuccess = vi.fn();
+  const utils = render(
+    <CreateAgentModal
+      isOpen
+      workspaceId="ws-1"
+      repos={repos}
+      onClose={onClose}
+      onSuccess={onSuccess}
+      {...overrides}
+    />,
+  );
+  return { ...utils, onClose, onSuccess };
+}
+
+beforeEach(() => {
+  mockCreateAgent.mockReset();
+});
+
+// ---------- isOpen gate ----------
+
+describe("CreateAgentModal: open/close gate", () => {
+  it("renders nothing when isOpen is false", () => {
+    const { container } = render(
+      <CreateAgentModal
+        isOpen={false}
+        workspaceId="ws-1"
+        repos={repos}
+        onClose={vi.fn()}
+        onSuccess={vi.fn()}
+      />,
+    );
+    expect(container.firstChild).toBeNull();
+  });
+
+  it("renders the dialog when isOpen is true", () => {
+    renderModal();
+    expect(
+      screen.getByRole("dialog", { name: /new agent/i }),
+    ).toBeInTheDocument();
+  });
+});
+
+// ---------- defaults props ----------
+
+describe("CreateAgentModal: default prop seeding", () => {
+  it("seeds name input from defaultName", () => {
+    renderModal({ defaultName: "starter-agent" });
+    expect(screen.getByLabelText(/^name$/i)).toHaveValue("starter-agent");
+  });
+
+  it("trims whitespace in defaultName", () => {
+    renderModal({ defaultName: "  pad  " });
+    expect(screen.getByLabelText(/^name$/i)).toHaveValue("pad");
+  });
+
+  it("seeds role select from defaultRoleName", () => {
+    renderModal({ defaultRoleName: "plan" });
+    expect(screen.getByLabelText(/^role$/i)).toHaveValue("plan");
+  });
+
+  it("defaults role to 'task' when defaultRoleName is omitted", () => {
+    renderModal();
+    expect(screen.getByLabelText(/^role$/i)).toHaveValue("task");
+  });
+
+  it("seeds backend from defaultBackend (falling back to 'codex')", () => {
+    renderModal({ defaultBackend: "claude" });
+    expect(screen.getByLabelText(/^backend$/i)).toHaveValue("claude");
+  });
+
+  it("falls back to 'codex' backend when defaultBackend is empty", () => {
+    renderModal({ defaultBackend: "   " });
+    expect(screen.getByLabelText(/^backend$/i)).toHaveValue("codex");
+  });
+});
+
+// ---------- wasOpenRef: don't reset on re-render ----------
+
+describe("CreateAgentModal: state preservation across re-renders", () => {
+  it("does not clobber typed name when parent re-renders with same isOpen", () => {
+    const { rerender } = render(
+      <CreateAgentModal
+        isOpen
+        workspaceId="ws-1"
+        repos={repos}
+        defaultName="seeded"
+        onClose={vi.fn()}
+        onSuccess={vi.fn()}
+      />,
+    );
+    const nameInput = screen.getByLabelText(/^name$/i);
+    expect(nameInput).toHaveValue("seeded");
+
+    // User edits the name.
+    fireEvent.change(nameInput, { target: { value: "my-custom-name" } });
+    expect(nameInput).toHaveValue("my-custom-name");
+
+    // Parent re-renders (e.g., a sibling state changed) with same props.
+    rerender(
+      <CreateAgentModal
+        isOpen
+        workspaceId="ws-1"
+        repos={repos}
+        defaultName="seeded"
+        onClose={vi.fn()}
+        onSuccess={vi.fn()}
+      />,
+    );
+
+    // The wasOpenRef gate must prevent the effect from re-seeding.
+    expect(screen.getByLabelText(/^name$/i)).toHaveValue("my-custom-name");
+  });
+
+  it("re-seeds defaults on close → open transition", () => {
+    const { rerender } = render(
+      <CreateAgentModal
+        isOpen
+        workspaceId="ws-1"
+        repos={repos}
+        defaultName="first-default"
+        onClose={vi.fn()}
+        onSuccess={vi.fn()}
+      />,
+    );
+    // User edits.
+    fireEvent.change(screen.getByLabelText(/^name$/i), {
+      target: { value: "user-typed" },
+    });
+    // Close.
+    rerender(
+      <CreateAgentModal
+        isOpen={false}
+        workspaceId="ws-1"
+        repos={repos}
+        defaultName="first-default"
+        onClose={vi.fn()}
+        onSuccess={vi.fn()}
+      />,
+    );
+    // Re-open with a NEW default — should seed the new value.
+    rerender(
+      <CreateAgentModal
+        isOpen
+        workspaceId="ws-1"
+        repos={repos}
+        defaultName="second-default"
+        onClose={vi.fn()}
+        onSuccess={vi.fn()}
+      />,
+    );
+    expect(screen.getByLabelText(/^name$/i)).toHaveValue("second-default");
+  });
+});
+
+// ---------- validation ----------
+
+describe("CreateAgentModal: client-side validation", () => {
+  it("rejects empty name with inline error and does not call API", async () => {
+    const { onSuccess } = renderModal();
+    fireEvent.click(screen.getByRole("button", { name: /create agent/i }));
+    expect(
+      await screen.findByRole("alert", { name: undefined }),
+    ).toHaveTextContent(/name is required/i);
+    expect(mockCreateAgent).not.toHaveBeenCalled();
+    expect(onSuccess).not.toHaveBeenCalled();
+  });
+
+  it("rejects whitespace-only name", async () => {
+    renderModal();
+    fireEvent.change(screen.getByLabelText(/^name$/i), {
+      target: { value: "   " },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /create agent/i }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      /name is required/i,
+    );
+    expect(mockCreateAgent).not.toHaveBeenCalled();
+  });
+
+  it("rejects missing repo when workspace scope is off", async () => {
+    renderModal({ defaultName: "agent-x", repos: [] });
+    fireEvent.click(screen.getByRole("button", { name: /create agent/i }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      /repo|workspace scope/i,
+    );
+    expect(mockCreateAgent).not.toHaveBeenCalled();
+  });
+});
+
+// ---------- happy-path submission ----------
+
+describe("CreateAgentModal: submission", () => {
+  it("submits repo-scoped agent with trimmed values + invokes onSuccess", async () => {
+    mockCreateAgent.mockResolvedValueOnce(sampleAgent);
+    const { onSuccess } = renderModal({
+      defaultName: "  planner  ",
+      defaultBackend: " claude ",
+    });
+    fireEvent.click(screen.getByRole("button", { name: /create agent/i }));
+
+    await waitFor(() => expect(mockCreateAgent).toHaveBeenCalledTimes(1));
+    expect(mockCreateAgent).toHaveBeenCalledWith({
+      name: "planner",
+      role_name: "task",
+      auto: false,
+      cross_repo: false,
+      repos: ["alpha"], // first repo is the default
+      backend: "claude",
+    });
+    await waitFor(() => expect(onSuccess).toHaveBeenCalledWith(sampleAgent));
+  });
+
+  it("omits backend field when empty", async () => {
+    mockCreateAgent.mockResolvedValueOnce(sampleAgent);
+    renderModal({ defaultName: "agent" });
+    fireEvent.change(screen.getByLabelText(/^backend$/i), {
+      target: { value: "" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /create agent/i }));
+    await waitFor(() => expect(mockCreateAgent).toHaveBeenCalled());
+    const req = mockCreateAgent.mock.calls[0][0];
+    expect(req).not.toHaveProperty("backend");
+  });
+
+  it("sends cross_repo with empty repos array when workspace scope is on", async () => {
+    mockCreateAgent.mockResolvedValueOnce(sampleAgent);
+    renderModal({ defaultName: "global" });
+    fireEvent.click(screen.getByRole("checkbox", { name: /workspace scope/i }));
+    fireEvent.click(screen.getByRole("button", { name: /create agent/i }));
+    await waitFor(() => expect(mockCreateAgent).toHaveBeenCalled());
+    expect(mockCreateAgent.mock.calls[0][0]).toMatchObject({
+      cross_repo: true,
+      repos: [],
+    });
+  });
+
+  it("resets the form to the configured defaults after a successful submit", async () => {
+    mockCreateAgent.mockResolvedValueOnce(sampleAgent);
+    renderModal({ defaultName: "seed-name", defaultRoleName: "plan" });
+
+    // User overrides the name.
+    fireEvent.change(screen.getByLabelText(/^name$/i), {
+      target: { value: "one-off" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /create agent/i }));
+
+    await waitFor(() => expect(mockCreateAgent).toHaveBeenCalled());
+    // After success the form returns to the defaults the parent supplied,
+    // not the prior v5-era hard-coded blank/"task".
+    await waitFor(() => {
+      expect(screen.getByLabelText(/^name$/i)).toHaveValue("seed-name");
+    });
+    expect(screen.getByLabelText(/^role$/i)).toHaveValue("plan");
+  });
+});
+
+// ---------- error surfacing ----------
+
+describe("CreateAgentModal: error handling", () => {
+  it("surfaces ApiError messages from the backend", async () => {
+    mockCreateAgent.mockRejectedValueOnce(
+      new ApiError("conflict: agent already exists", 409),
+    );
+    renderModal({ defaultName: "dup" });
+    fireEvent.click(screen.getByRole("button", { name: /create agent/i }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      /conflict: agent already exists/i,
+    );
+  });
+
+  it("surfaces generic Error messages", async () => {
+    mockCreateAgent.mockRejectedValueOnce(new Error("network down"));
+    renderModal({ defaultName: "x" });
+    fireEvent.click(screen.getByRole("button", { name: /create agent/i }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/network down/i);
+  });
+
+  it("falls back to a generic message for non-Error throws", async () => {
+    mockCreateAgent.mockRejectedValueOnce("oops");
+    renderModal({ defaultName: "x" });
+    fireEvent.click(screen.getByRole("button", { name: /create agent/i }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      /failed to create agent/i,
+    );
+  });
+});
+
+// ---------- close affordances ----------
+
+describe("CreateAgentModal: close affordances", () => {
+  it("invokes onClose when the cancel button is clicked", () => {
+    const { onClose } = renderModal();
+    fireEvent.click(screen.getByRole("button", { name: /cancel/i }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("invokes onClose when the close (x) button is clicked", () => {
+    const { onClose } = renderModal();
+    fireEvent.click(screen.getByRole("button", { name: /^close$/i }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+});
