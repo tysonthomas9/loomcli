@@ -159,10 +159,10 @@ func TestGitSpanName_FallsBackToUnknown(t *testing.T) {
 		{[]string{""}, "git.unknown"},
 		{[]string{"-c"}, "git.unknown"},
 		{[]string{"--no-pager"}, "git.unknown"},
-		{[]string{"PUSH"}, "git.push"},           // uppercase canonicalized to lowercase
-		{[]string{"push"}, "git.push"},           // canonical
+		{[]string{"PUSH"}, "git.push"},             // uppercase canonicalized to lowercase
+		{[]string{"push"}, "git.push"},             // canonical
 		{[]string{"push;rm -rf /"}, "git.unknown"}, // semicolon outside [a-z_-] set
-		{[]string{"rev-parse"}, "git.rev-parse"}, // dash allowed
+		{[]string{"rev-parse"}, "git.rev-parse"},   // dash allowed
 		{[]string{"checkout", "feature/x"}, "git.checkout"},
 	}
 	for _, tc := range cases {

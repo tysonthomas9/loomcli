@@ -53,10 +53,10 @@ func recordErr(span trace.Span, err error) {
 // package-level helpers so the strings are colocated with the helper that
 // uses them — no other producer should be inventing parallel keys.
 //
-//   loom.agent       — agent name (e.g. "falcon")
-//   loom.session_id  — session UUID/short id
-//   loom.task_id     — task issue ID, when known
-//   loom.backend     — AI backend (claude / codex / opencode)
+//	loom.agent       — agent name (e.g. "falcon")
+//	loom.session_id  — session UUID/short id
+//	loom.task_id     — task issue ID, when known
+//	loom.backend     — AI backend (claude / codex / opencode)
 func attrLoomAgent(v string) attribute.KeyValue     { return attribute.String("loom.agent", v) }
 func attrLoomSessionID(v string) attribute.KeyValue { return attribute.String("loom.session_id", v) }
 func attrLoomTaskID(v string) attribute.KeyValue    { return attribute.String("loom.task_id", v) }
