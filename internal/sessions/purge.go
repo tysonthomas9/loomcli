@@ -6,14 +6,14 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
+	"github.com/tysonthomas9/loomcli/internal/runtimectx"
 )
 
 // PurgeOlderThan removes session directories for sessions that are
 // not running and whose EndedAt is older than the given age.
 // Returns the count of purged sessions.
 func (s *Store) PurgeOlderThan(age time.Duration) (int, error) {
-	_, span := startSpan(cmdstore.RootContext(), "service.Sessions.PurgeOlderThan")
+	_, span := startSpan(runtimectx.RootContext(), "service.Sessions.PurgeOlderThan")
 	defer span.End()
 
 	cutoff := time.Now().UTC().Add(-age)

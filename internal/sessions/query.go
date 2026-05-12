@@ -12,7 +12,7 @@ import (
 
 	"go.opentelemetry.io/otel/attribute"
 
-	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
+	"github.com/tysonthomas9/loomcli/internal/runtimectx"
 )
 
 // readDedupedIndex reads index.jsonl, applies the filter, and deduplicates
@@ -86,7 +86,7 @@ func (s *Store) Query(f Filter) ([]SessionRecord, error) {
 	if f.Backend != "" {
 		attrs = append(attrs, attrLoomBackend(f.Backend))
 	}
-	_, span := startSpan(cmdstore.RootContext(), "service.Sessions.Query", attrs...)
+	_, span := startSpan(runtimectx.RootContext(), "service.Sessions.Query", attrs...)
 	defer span.End()
 
 	deduped, err := s.readDedupedIndex(f)
@@ -137,7 +137,7 @@ func (s *Store) SessionsByTask(taskID string) ([]SessionRecord, error) {
 // LoadMetadata reads and returns the SessionMetadata from
 // sessions/<sessionID>/metadata.json.
 func (s *Store) LoadMetadata(sessionID string) (*SessionMetadata, error) {
-	_, span := startSpan(cmdstore.RootContext(), "service.Sessions.LoadMetadata",
+	_, span := startSpan(runtimectx.RootContext(), "service.Sessions.LoadMetadata",
 		attrLoomSessionID(sessionID),
 	)
 	defer span.End()
@@ -168,7 +168,7 @@ func (s *Store) LoadMetadata(sessionID string) (*SessionMetadata, error) {
 // LoadTranscript reads and returns all TranscriptEntries from
 // sessions/<sessionID>/transcript.jsonl, sorted by Seq ascending.
 func (s *Store) LoadTranscript(sessionID string) ([]TranscriptEntry, error) {
-	_, span := startSpan(cmdstore.RootContext(), "service.Sessions.LoadTranscript",
+	_, span := startSpan(runtimectx.RootContext(), "service.Sessions.LoadTranscript",
 		attrLoomSessionID(sessionID),
 	)
 	defer span.End()
@@ -223,7 +223,7 @@ func (s *Store) LoadTranscript(sessionID string) ([]TranscriptEntry, error) {
 // ReadPrompt reads and returns the prompt text from
 // sessions/<sessionID>/prompt.txt.
 func (s *Store) ReadPrompt(sessionID string) (string, error) {
-	_, span := startSpan(cmdstore.RootContext(), "service.Sessions.ReadPrompt",
+	_, span := startSpan(runtimectx.RootContext(), "service.Sessions.ReadPrompt",
 		attrLoomSessionID(sessionID),
 	)
 	defer span.End()
@@ -250,7 +250,7 @@ func (s *Store) ReadPrompt(sessionID string) (string, error) {
 // sessions/<sessionID>/diff.patch.
 // Returns os.ErrNotExist (wrapped) when no diff.patch exists for the session.
 func (s *Store) ReadDiff(sessionID string) (string, error) {
-	_, span := startSpan(cmdstore.RootContext(), "service.Sessions.ReadDiff",
+	_, span := startSpan(runtimectx.RootContext(), "service.Sessions.ReadDiff",
 		attrLoomSessionID(sessionID),
 	)
 	defer span.End()

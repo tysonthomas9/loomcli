@@ -211,10 +211,7 @@ const apiMiddleware: Middleware = {
         controller as unknown as { _timeoutId: ReturnType<typeof setTimeout> }
       )._timeoutId = timeoutId;
 
-      const signal = AbortSignal.any([
-        request.signal,
-        controller.signal,
-      ]);
+      const signal = AbortSignal.any([request.signal, controller.signal]);
       const newReq = new Request(request, { signal });
       (
         newReq as unknown as { _timeoutController: AbortController }
@@ -296,11 +293,14 @@ export function apiErrorFromResponse(
  * Throws ApiError if success is false.
  */
 export function unwrapResponse<T>(
-  envelope: {
-    success: boolean;
-    data?: T;
-    error?: string;
-  } | null | undefined,
+  envelope:
+    | {
+        success: boolean;
+        data?: T;
+        error?: string;
+      }
+    | null
+    | undefined,
   response?: Response,
 ): T {
   if (envelope == null) {

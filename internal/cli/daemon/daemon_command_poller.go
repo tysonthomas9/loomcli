@@ -6,10 +6,11 @@ import (
 	"log/slog"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
-	"go.opentelemetry.io/otel/attribute"
 )
 
 var agentCommandPollTimeout = 5 * time.Second
