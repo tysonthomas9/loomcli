@@ -70,11 +70,11 @@ type tracedStore struct {
 	daemon               *tracedDaemonStore
 }
 
-func (t *tracedStore) Workspaces() store.WorkspaceStore         { return t.workspaces }
-func (t *tracedStore) Repos() store.RepoStore                   { return t.repos }
-func (t *tracedStore) Agents() store.AgentStore                 { return t.agents }
-func (t *tracedStore) Nodes() store.NodeStore                   { return t.nodes }
-func (t *tracedStore) AgentSessions() store.AgentSessionStore   { return t.agentSessions }
+func (t *tracedStore) Workspaces() store.WorkspaceStore       { return t.workspaces }
+func (t *tracedStore) Repos() store.RepoStore                 { return t.repos }
+func (t *tracedStore) Agents() store.AgentStore               { return t.agents }
+func (t *tracedStore) Nodes() store.NodeStore                 { return t.nodes }
+func (t *tracedStore) AgentSessions() store.AgentSessionStore { return t.agentSessions }
 func (t *tracedStore) TerminalSessions() store.TerminalSessionStore {
 	return t.terminalSessions
 }
@@ -602,7 +602,9 @@ func (t *tracedAgentLeaseStore) Release(ctx context.Context, ws, leaseID, token 
 
 // --- AgentOwnershipLeaseStore ---
 
-type tracedAgentOwnershipLeaseStore struct{ inner store.AgentOwnershipLeaseStore }
+type tracedAgentOwnershipLeaseStore struct {
+	inner store.AgentOwnershipLeaseStore
+}
 
 func (t *tracedAgentOwnershipLeaseStore) Acquire(ctx context.Context, in store.AgentOwnershipLeaseAcquire) (*domain.AgentOwnershipLease, error) {
 	ctx, span := startStoreSpan(ctx, "AgentOwnershipLeases", "Acquire",
