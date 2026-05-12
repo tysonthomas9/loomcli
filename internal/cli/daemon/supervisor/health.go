@@ -53,10 +53,21 @@ func (s *Supervisor) StopAgent(ap *AgentProcess, sigtermTimeout time.Duration) {
 		span.End()
 	}()
 
-	slog.Info("sending signal to process group", "worktree", ap.Entry.Worktree, "signal", "SIGTERM", "pid", pid)
+	// Snapshot descendant pgroups BEFORE the worker dies. Once we send SIGTERM,
+	// the worker may exit within microseconds and its children get reparented
+	// to init — at which point we can no longer correlate them as our
+	// descendants. We re-use this snapshot for the SIGKILL pass below.
+	descendantPGIDs := findDescendantPGIDs(pid, syscall.Getpgrp())
+
+	slog.Info("sending signal to process group", "worktree", ap.Entry.Worktree, "signal", "SIGTERM", "pid", pid, "extra_pgroups", len(descendantPGIDs))
 	if !sendSigterm(ap, proc, pid) {
 		return
 	}
+
+	// Children that called Setpgid (e.g. codex/claude/cursor backends) sit in
+	// their own pgroup, so the kill(-pid) above misses them. Signal each
+	// pgroup we discovered in the descendant snapshot.
+	signalDescendantPGroups(descendantPGIDs, syscall.SIGTERM, ap.Entry.Worktree)
 
 	if waitForProcessExit(ap, pid, sigtermTimeout) {
 		slog.Info("process exited gracefully", "worktree", ap.Entry.Worktree)
@@ -71,6 +82,12 @@ func (s *Supervisor) StopAgent(ap *AgentProcess, sigtermTimeout time.Duration) {
 		slog.Warn("sending SIGKILL to process group", "worktree", ap.Entry.Worktree, "pid", pid)
 		_ = syscall.Kill(-pid, syscall.SIGKILL)
 	}
+
+	// Always SIGKILL the descendant pgroups we snapshotted earlier, even if
+	// the worker exited cleanly. A backend that ignored SIGTERM (or was
+	// already reparented to init when we got here) won't show up in a fresh
+	// scan, but we still hold its pgid from before the worker died.
+	signalDescendantPGroups(descendantPGIDs, syscall.SIGKILL, ap.Entry.Worktree)
 }
 
 // sendSigterm signals the process group, falling back to the leader process.
