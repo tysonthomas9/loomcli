@@ -112,7 +112,7 @@ type WorkspaceOpsProblem struct {
 }
 
 func runWorkspaceOpsStatus(cmd *cobra.Command, args []string) error {
-	return withWorkspaceOpsStatus(cmd, args, func(status *WorkspaceOpsStatus) error {
+	return withWorkspaceOpsStatus(args, func(status *WorkspaceOpsStatus) error {
 		return renderWorkspaceOpsStatus(cmd, status)
 	})
 }
@@ -147,7 +147,7 @@ func runWorkspaceOpsEnsureRuntime(cmd *cobra.Command, args []string) error {
 	return renderWorkspaceOpsStatus(cmd, status)
 }
 
-func withWorkspaceOpsStatus(cmd *cobra.Command, args []string, fn func(*WorkspaceOpsStatus) error) error {
+func withWorkspaceOpsStatus(args []string, fn func(*WorkspaceOpsStatus) error) error {
 	status, err := workspaceOpsStatusForArgs(args)
 	if err != nil {
 		return err
@@ -249,6 +249,20 @@ func buildWorkspaceOpsStatus(
 	}
 	runtime, runtimeErr := local.ReadRuntimeStatus(ctx, dataDir)
 
+	status := newWorkspaceOpsStatus(ws, localState, dataDir, runtime, runtimeErr, len(repos), len(agents))
+	repoByName := collectOpsRepos(status, repos, localState)
+	roleNames := collectRoleNames(roles)
+	collectOpsAgents(status, agents, localState, repoByName, roleNames)
+
+	status.Problems = append(status.Problems, workspaceOpsGlobalProblems(status)...)
+	status.OK = !hasErrorProblem(status.Problems)
+	return status, nil
+}
+
+// newWorkspaceOpsStatus seeds the response struct and records the
+// local-runtime-unhealthy warning when the runtime read failed or returned
+// not-healthy.
+func newWorkspaceOpsStatus(ws *domain.Workspace, localState bootstrap.WorkspaceLocalState, dataDir string, runtime *local.RuntimeStatusSnapshot, runtimeErr error, repoCap, agentCap int) *WorkspaceOpsStatus {
 	status := &WorkspaceOpsStatus{
 		Workspace: WorkspaceOpsWorkspace{
 			Key:       ws.Key,
@@ -261,8 +275,8 @@ func buildWorkspaceOpsStatus(
 			AppData: collectDaemonStatusForDir(dataDir),
 			DataDir: dataDir,
 		},
-		Repos:  make([]WorkspaceOpsRepo, 0, len(repos)),
-		Agents: make([]WorkspaceOpsAgent, 0, len(agents)),
+		Repos:  make([]WorkspaceOpsRepo, 0, repoCap),
+		Agents: make([]WorkspaceOpsAgent, 0, agentCap),
 	}
 	if localState.Path != "" {
 		status.Daemon.WorkspaceLocal = collectDaemonStatusForDir(localState.Path)
@@ -275,7 +289,12 @@ func buildWorkspaceOpsStatus(
 			Fix:      "run `loom workspace ops ensure-runtime --json`",
 		})
 	}
+	return status
+}
 
+// collectOpsRepos appends a WorkspaceOpsRepo for each non-nil repo and
+// returns a name-keyed lookup used during agent validation.
+func collectOpsRepos(status *WorkspaceOpsStatus, repos []*domain.Repo, localState bootstrap.WorkspaceLocalState) map[string]*domain.Repo {
 	repoByName := map[string]*domain.Repo{}
 	for _, repo := range repos {
 		if repo == nil {
@@ -290,13 +309,20 @@ func buildWorkspaceOpsStatus(
 			SourceRepo: repo.SourceRepoID,
 		})
 	}
+	return repoByName
+}
+
+func collectRoleNames(roles []*domain.Role) map[string]struct{} {
 	roleNames := map[string]struct{}{}
 	for _, role := range roles {
 		if role != nil {
 			roleNames[role.Name] = struct{}{}
 		}
 	}
+	return roleNames
+}
 
+func collectOpsAgents(status *WorkspaceOpsStatus, agents []*domain.Agent, localState bootstrap.WorkspaceLocalState, repoByName map[string]*domain.Repo, roleNames map[string]struct{}) {
 	for _, agent := range agents {
 		if agent == nil {
 			continue
@@ -305,9 +331,6 @@ func buildWorkspaceOpsStatus(
 		status.Agents = append(status.Agents, item)
 		status.Problems = append(status.Problems, problems...)
 	}
-	status.Problems = append(status.Problems, workspaceOpsGlobalProblems(status)...)
-	status.OK = !hasErrorProblem(status.Problems)
-	return status, nil
 }
 
 func workspaceStateString(state domain.WorkspaceState) string {
@@ -476,26 +499,27 @@ func renderWorkspaceOpsStatus(cmd *cobra.Command, status *WorkspaceOpsStatus) er
 		enc.SetIndent("", "  ")
 		return enc.Encode(status)
 	}
-	fmt.Fprintf(cmd.OutOrStdout(), "Workspace: %s (%s)\n", status.Workspace.Key, status.Workspace.State)
+	out := cmd.OutOrStdout()
+	_, _ = fmt.Fprintf(out, "Workspace: %s (%s)\n", status.Workspace.Key, status.Workspace.State)
 	if status.LocalRuntime != nil && status.LocalRuntime.Runtime != nil {
-		fmt.Fprintf(cmd.OutOrStdout(), "Runtime:   healthy=%t url=%s pid=%d\n",
+		_, _ = fmt.Fprintf(out, "Runtime:   healthy=%t url=%s pid=%d\n",
 			status.LocalRuntime.Healthy, status.LocalRuntime.Runtime.URL, status.LocalRuntime.Runtime.PID)
 	} else {
-		fmt.Fprintln(cmd.OutOrStdout(), "Runtime:   unavailable")
+		_, _ = fmt.Fprintln(out, "Runtime:   unavailable")
 	}
-	fmt.Fprintf(cmd.OutOrStdout(), "Daemon:    desktop=%s workspace=%s\n",
+	_, _ = fmt.Fprintf(out, "Daemon:    desktop=%s workspace=%s\n",
 		daemonHuman(status.Daemon.AppData), daemonHuman(status.Daemon.WorkspaceLocal))
-	fmt.Fprintf(cmd.OutOrStdout(), "Repos:     %d\nAgents:    %d\n", len(status.Repos), len(status.Agents))
+	_, _ = fmt.Fprintf(out, "Repos:     %d\nAgents:    %d\n", len(status.Repos), len(status.Agents))
 	if len(status.Problems) > 0 {
-		fmt.Fprintf(cmd.OutOrStdout(), "Problems:  %d\n", len(status.Problems))
+		_, _ = fmt.Fprintf(out, "Problems:  %d\n", len(status.Problems))
 		for _, problem := range status.Problems {
 			parts := []string{problem.Severity, problem.Code}
 			if problem.Agent != "" {
 				parts = append(parts, "agent="+problem.Agent)
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "  - %s: %s\n", strings.Join(parts, " "), problem.Message)
+			_, _ = fmt.Fprintf(out, "  - %s: %s\n", strings.Join(parts, " "), problem.Message)
 			if problem.Fix != "" {
-				fmt.Fprintf(cmd.OutOrStdout(), "    fix: %s\n", problem.Fix)
+				_, _ = fmt.Fprintf(out, "    fix: %s\n", problem.Fix)
 			}
 		}
 	}
