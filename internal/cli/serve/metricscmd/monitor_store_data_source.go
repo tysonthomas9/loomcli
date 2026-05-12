@@ -2,7 +2,7 @@ package metricscmd
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"os"
 	"sync"
 	"time"
@@ -124,7 +124,7 @@ func collectMonitorStoreData(ctx context.Context, st store.Store, workspaceHint 
 
 	assignments, err := st.Agents().List(ctx, wsKey)
 	if err != nil {
-		log.Printf("Failed to list store agents for monitor response: %v", err)
+		slog.Warn("monitor: list store agents failed", "workspace", wsKey, "err", err)
 		return data
 	}
 
@@ -191,7 +191,7 @@ func monitorWorkspaceDataForAgents(ctx context.Context, st store.Store, wsKey st
 	}
 	repos, err := st.Repos().List(ctx, wsKey)
 	if err != nil {
-		log.Printf("Failed to list store repos for monitor response: %v", err)
+		slog.Warn("monitor: list store repos failed", "workspace", wsKey, "err", err)
 		return nil
 	}
 
