@@ -231,6 +231,15 @@ func initCLITracing() tracing.Shutdown {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "warning: tracing init failed: %v\n", err)
 	}
+	// On the error path tracing.Init returns a nil shutdown; the caller
+	// in Execute then defers `_ = traceShutdown(ctx)` which would panic
+	// (nil function call) for any misconfigured OTLP setting. Always
+	// return a callable closure so the contract is "you can defer this
+	// unconditionally". The same closure is fed to RegisterActiveTraceState
+	// so ExitWithFlush stays nil-safe.
+	if shutdown == nil {
+		shutdown = func(context.Context) error { return nil }
+	}
 	return shutdown
 }
 

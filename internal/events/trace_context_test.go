@@ -27,6 +27,37 @@ func TestSetContextProvider_NilClearsProvider(t *testing.T) {
 	t.Cleanup(func() { SetContextProvider(nil) })
 }
 
+// TestAmbientCtx_DoesNotPanic pins the safety guarantee questioned in
+// the OTel PR review (P1 finding on trace_context.go:32): the bot
+// claimed atomic.Value.Load before any Store panics. Per Go's
+// documented contract, Load returns nil cleanly when nothing has been
+// stored — and ambientCtx() explicitly handles that nil branch with a
+// context.Background fallback. This test exercises the public surface
+// (ambientCtx via the same code path Bus.Emit hits) and asserts it
+// never panics, regardless of whether SetContextProvider has been
+// invoked before.
+//
+// The bot's underlying concern — "Bus.Emit before SetContextProvider
+// crashes the process" — is therefore not reproducible; if the test
+// ever does fire, it would mean ambientCtx's nil-guard branch was
+// dropped.
+func TestAmbientCtx_DoesNotPanic(t *testing.T) {
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("ambientCtx panicked: %v", r)
+		}
+	}()
+	// Call multiple times in mixed states.
+	if got := ambientCtx(); got == nil {
+		t.Error("ambientCtx returned nil context")
+	}
+	SetContextProvider(nil)
+	t.Cleanup(func() { SetContextProvider(nil) })
+	if got := ambientCtx(); got == nil {
+		t.Error("ambientCtx returned nil context after SetContextProvider(nil)")
+	}
+}
+
 func TestEvent_InjectExtractTraceContext_RoundTrip(t *testing.T) {
 	// Install propagator + tracer so injection produces a real traceparent.
 	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
