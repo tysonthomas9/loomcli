@@ -97,18 +97,18 @@ func installLaunchAgent(w io.Writer, dataDir string, port int) error {
 	}
 	uid := fmt.Sprintf("%d", os.Getuid())
 	if _, err := os.Stat(plistPath); err == nil {
-		fmt.Fprintln(w, "Replacing existing local runtime service definition")
-		_ = execCommand("launchctl", "bootout", "gui/"+uid, plistPath)
+		_, _ = fmt.Fprintln(w, "Replacing existing local runtime service definition")
+		_ = launchctl("bootout", "gui/"+uid, plistPath)
 	}
 	if err := writeLaunchAgentFile(plistPath, content); err != nil {
 		return err
 	}
-	if err := execCommand("launchctl", "bootstrap", "gui/"+uid, plistPath); err != nil {
-		if err2 := execCommand("launchctl", "load", plistPath); err2 != nil {
+	if err := launchctl("bootstrap", "gui/"+uid, plistPath); err != nil {
+		if err2 := launchctl("load", plistPath); err2 != nil {
 			return fmt.Errorf("loading local runtime service: %v (also tried launchctl load: %v)", err, err2)
 		}
 	}
-	fmt.Fprintf(w, "Loom local runtime service installed: %s\n", plistPath)
+	_, _ = fmt.Fprintf(w, "Loom local runtime service installed: %s\n", plistPath)
 	return nil
 }
 
@@ -121,20 +121,20 @@ func uninstallLaunchAgent(w io.Writer) error {
 		return err
 	}
 	if _, err := os.Stat(plistPath); os.IsNotExist(err) {
-		fmt.Fprintf(w, "Loom local runtime service is not installed: %s\n", plistPath)
+		_, _ = fmt.Fprintf(w, "Loom local runtime service is not installed: %s\n", plistPath)
 		return nil
 	}
 	if _, err := exec.LookPath("launchctl"); err != nil {
 		return fmt.Errorf("launchctl not found in PATH")
 	}
 	uid := fmt.Sprintf("%d", os.Getuid())
-	if err := execCommand("launchctl", "bootout", "gui/"+uid, plistPath); err != nil {
-		_ = execCommand("launchctl", "unload", plistPath)
+	if err := launchctl("bootout", "gui/"+uid, plistPath); err != nil {
+		_ = launchctl("unload", plistPath)
 	}
 	if err := os.Remove(plistPath); err != nil {
 		return fmt.Errorf("remove %s: %w", plistPath, err)
 	}
-	fmt.Fprintf(w, "Loom local runtime service uninstalled: %s\n", plistPath)
+	_, _ = fmt.Fprintf(w, "Loom local runtime service uninstalled: %s\n", plistPath)
 	return nil
 }
 
@@ -190,8 +190,11 @@ func launchAgentPathEnv() string {
 	return "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 }
 
-func execCommand(name string, args ...string) error {
-	cmd := exec.Command(name, args...) //nolint:gosec // service lifecycle command with fixed executable names
+// launchctl runs an /bin/launchctl subcommand. All call sites in this
+// package target launchctl specifically (bootout/bootstrap/load/unload);
+// generalizing the receiver to an arbitrary binary tripped unparam.
+func launchctl(args ...string) error {
+	cmd := exec.Command("launchctl", args...) //nolint:gosec // fixed executable; args are the subcommand + plist path
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()

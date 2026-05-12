@@ -98,7 +98,7 @@ func Save(dataDir string, settings Settings) error {
 	if err := os.MkdirAll(dataDir, 0700); err != nil {
 		return fmt.Errorf("mkdir local settings dir: %w", err)
 	}
-	_ = os.Chmod(dataDir, 0700)
+	_ = os.Chmod(dataDir, 0700) //nolint:gosec // directory needs execute bit; rwx for owner only
 	data, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal local settings: %w", err)
