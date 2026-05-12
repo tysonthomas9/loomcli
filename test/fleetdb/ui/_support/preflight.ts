@@ -559,9 +559,9 @@ function preflightError(r: PreflightResult): Error {
     )
     .join("\n");
   const setup = isFleetOnlyMode()
-    ? `  docker compose -f test/fleetdb/docker-compose.regression.yml up -d --build redis fleet-db loom-fleet ui-fleet fleetdb-regression-seed-fleet`
-    : `  docker compose -f test/fleetdb/docker-compose.regression.yml up -d\n` +
-      `  docker compose -f test/fleetdb/docker-compose.regression.yml run --rm fleetdb-regression-seed`;
+    ? `  ${composeRun("up -d --build redis fleet-db loom-fleet ui-fleet fleetdb-regression-seed-fleet")}`
+    : `  ${composeRun("up -d")}\n` +
+      `  ${composeRun("run --rm fleetdb-regression-seed")}`;
   return new Error(
     `FleetDB Regression preflight failed — cannot run suite.\n\n` +
       `Failing checks (${failed.length}/${r.checks.length}):\n${summary}\n\n` +
