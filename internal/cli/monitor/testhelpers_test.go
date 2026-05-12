@@ -45,6 +45,9 @@ func setupMonitorWorkspaceConfig(t *testing.T, workspaceDir string, agentNames .
 	configDir := t.TempDir()
 	t.Setenv("LOOM_CONFIG_DIR", configDir)
 	t.Setenv("LOOM_FLEET_DB_ACTOR", "test")
+	// Production resolveActiveWorkspaceName requires LOOM_WORKSPACE (or
+	// --workspace) to pick the active workspace.
+	t.Setenv("LOOM_WORKSPACE", "TEST")
 	config.InvalidateConfigCache()
 	cli.ResetWorkspaceRuntimeDirCache()
 	oldResolver := cli.TestingResetDefaultResolver()
