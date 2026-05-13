@@ -126,12 +126,54 @@ func runService(cmd *cobra.Command, _ []string) error {
 	serviceCtx, stopSignals := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 	defer stopSignals()
 
-	dataDir, err := resolveDataDir(dataDirFlag)
+	cfg, err := prepareLocalServiceConfig()
 	if err != nil {
 		return err
 	}
-	if err := ensureRuntimeDirs(dataDir); err != nil {
+	logFile, err := os.OpenFile(serveLogPath(cfg.dataDir), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		return fmt.Errorf("open serve log: %w", err)
+	}
+	defer func() { _ = logFile.Close() }()
+
+	info := newRuntimeInfo(cfg)
+	if err := writeRuntime(cfg.dataDir, info); err != nil {
 		return err
+	}
+
+	serveCmd, err := startServeProcess(serviceCtx, cfg, logFile, info)
+	if err != nil {
+		return err
+	}
+	if err := awaitServeHealthy(serviceCtx, cfg, info, serveCmd); err != nil {
+		return err
+	}
+
+	startLocalDaemonSupervisor(serviceCtx, cfg.dataDir, cfg.exe, cfg.port)
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Loom local runtime: %s\n", info.URL)
+	return waitServeExit(serviceCtx, serveCmd, cfg.dataDir, info)
+}
+
+// localServiceConfig is the resolved environment for a single runService
+// invocation: data dir, bind address + port, this process's executable, and
+// the fleet-db identity stamps written to runtime.json.
+type localServiceConfig struct {
+	dataDir   string
+	bindAddr  string
+	port      int
+	exe       string
+	identity  executableIdentity
+	redisHash string
+	url       string
+}
+
+func prepareLocalServiceConfig() (*localServiceConfig, error) {
+	dataDir, err := resolveDataDir(dataDirFlag)
+	if err != nil {
+		return nil, err
+	}
+	if err := ensureRuntimeDirs(dataDir); err != nil {
+		return nil, err
 	}
 	_ = os.Setenv("LOOM_CONFIG_DIR", dataDir)
 	_ = os.Setenv("LOOM_DESKTOP_DATA_DIR", dataDir)
@@ -141,100 +183,115 @@ func runService(cmd *cobra.Command, _ []string) error {
 			_ = os.Setenv("FLEET_DB_BIN", fleetDBBin)
 		}
 	}
-	if bindFlag == "" {
-		bindFlag = "127.0.0.1"
+	bind := bindFlag
+	if bind == "" {
+		bind = "127.0.0.1"
+		bindFlag = bind
 	}
 	port := portFlag
 	if port == 0 {
-		_, p, err := netutil.PickFreeLoopbackPort()
-		if err != nil {
-			return fmt.Errorf("pick local runtime port: %w", err)
+		_, p, perr := netutil.PickFreeLoopbackPort()
+		if perr != nil {
+			return nil, fmt.Errorf("pick local runtime port: %w", perr)
 		}
 		port = p
 	}
-
 	exe, err := os.Executable()
 	if err != nil {
-		return fmt.Errorf("resolve loom executable: %w", err)
+		return nil, fmt.Errorf("resolve loom executable: %w", err)
 	}
-	identity := currentExecutableIdentity()
 	redisHash, err := currentFleetDBRedisHash(dataDir)
 	if err != nil {
-		return fmt.Errorf("load FleetDB Redis settings: %w", err)
+		return nil, fmt.Errorf("load FleetDB Redis settings: %w", err)
 	}
-	logFile, err := os.OpenFile(serveLogPath(dataDir), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
-	if err != nil {
-		return fmt.Errorf("open serve log: %w", err)
-	}
-	defer func() { _ = logFile.Close() }()
+	return &localServiceConfig{
+		dataDir:   dataDir,
+		bindAddr:  bind,
+		port:      port,
+		exe:       exe,
+		identity:  currentExecutableIdentity(),
+		redisHash: redisHash,
+		url:       "http://" + net.JoinHostPort(bind, strconv.Itoa(port)),
+	}, nil
+}
 
-	url := "http://" + net.JoinHostPort(bindFlag, strconv.Itoa(port))
+func newRuntimeInfo(cfg *localServiceConfig) *runtimeInfo {
 	info := &runtimeInfo{
 		Status:    "starting",
 		PID:       os.Getpid(),
-		DataDir:   dataDir,
-		URL:       url,
-		Port:      port,
+		DataDir:   cfg.dataDir,
+		URL:       cfg.url,
+		Port:      cfg.port,
 		StartedAt: time.Now().UTC(),
 	}
-	applyExecutableIdentity(info, identity)
-	info.FleetDBRedisHash = redisHash
-	if err := writeRuntime(dataDir, info); err != nil {
-		return err
-	}
+	applyExecutableIdentity(info, cfg.identity)
+	info.FleetDBRedisHash = cfg.redisHash
+	return info
+}
 
-	serveCmd := exec.CommandContext(serviceCtx, exe, "serve",
-		"--bind", bindFlag,
-		"--port", strconv.Itoa(port),
+// startServeProcess spawns `loom serve` as a child, records its PID in
+// runtime.json, and returns the running *exec.Cmd. Caller owns Wait().
+func startServeProcess(ctx context.Context, cfg *localServiceConfig, logFile *os.File, info *runtimeInfo) (*exec.Cmd, error) {
+	// #nosec G204 — exe is this process's resolved binary path; args are fixed
+	// subcommand + CLI-validated bindFlag / port. No user-controlled strings.
+	serveCmd := exec.CommandContext(ctx, cfg.exe, "serve",
+		"--bind", cfg.bindAddr,
+		"--port", strconv.Itoa(cfg.port),
 		"--fleet-mode",
 	)
-	serveCmd.Env = localEnv(dataDir, port)
+	serveCmd.Env = localEnv(cfg.dataDir, cfg.port)
 	serveCmd.Stdout = logFile
 	serveCmd.Stderr = logFile
 	serveCmd.SysProcAttr = newDetachedSysProcAttr()
 	if err := serveCmd.Start(); err != nil {
 		info.Status = "failed"
 		info.Error = err.Error()
-		_ = writeRuntime(dataDir, info)
-		return fmt.Errorf("start loom serve: %w", err)
+		_ = writeRuntime(cfg.dataDir, info)
+		return nil, fmt.Errorf("start loom serve: %w", err)
 	}
-
-	info.Status = "starting"
 	info.ServePID = serveCmd.Process.Pid
-	if err := writeRuntime(dataDir, info); err != nil {
+	if err := writeRuntime(cfg.dataDir, info); err != nil {
 		_ = serveCmd.Process.Kill()
-		return err
+		return nil, err
 	}
+	return serveCmd, nil
+}
 
-	waitCtx, cancel := context.WithTimeout(serviceCtx, 30*time.Second)
-	waitErr := waitForRuntime(waitCtx, url)
-	cancel()
-	if waitErr != nil {
+// awaitServeHealthy polls the serve URL until it becomes ready or the
+// 30s budget expires. Marks the runtime info accordingly; on timeout the
+// child serve process is killed.
+func awaitServeHealthy(ctx context.Context, cfg *localServiceConfig, info *runtimeInfo, serveCmd *exec.Cmd) error {
+	waitCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	if err := waitForRuntime(waitCtx, cfg.url); err != nil {
 		info.Status = "failed"
-		info.Error = waitErr.Error()
-		_ = writeRuntime(dataDir, info)
+		info.Error = err.Error()
+		_ = writeRuntime(cfg.dataDir, info)
 		_ = serveCmd.Process.Kill()
-		return fmt.Errorf("local runtime did not become healthy: %w", waitErr)
+		return fmt.Errorf("local runtime did not become healthy: %w", err)
 	}
-
 	info.Status = "running"
 	info.Error = ""
-	if err := writeRuntime(dataDir, info); err != nil {
+	if err := writeRuntime(cfg.dataDir, info); err != nil {
 		_ = serveCmd.Process.Kill()
 		return err
 	}
-	startLocalDaemonSupervisor(serviceCtx, dataDir, exe, port)
-	fmt.Fprintf(cmd.OutOrStdout(), "Loom local runtime: %s\n", url)
+	return nil
+}
 
-	err = serveCmd.Wait()
+// waitServeExit blocks until the child serve process exits, then updates
+// runtime.json with the final status. Returns nil when shutdown was caused
+// by a signal (serviceCtx cancellation).
+func waitServeExit(ctx context.Context, serveCmd *exec.Cmd, dataDir string, info *runtimeInfo) error {
+	err := serveCmd.Wait()
 	info.Status = "stopped"
 	info.Error = ""
-	if err != nil && serviceCtx.Err() == nil {
+	if err != nil && ctx.Err() == nil {
 		info.Status = "failed"
 		info.Error = err.Error()
 	}
 	_ = writeRuntime(dataDir, info)
-	if serviceCtx.Err() != nil {
+	if ctx.Err() != nil {
 		return nil
 	}
 	return err
@@ -250,10 +307,10 @@ func runStart(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	if result.AlreadyRunning {
-		fmt.Fprintf(cmd.OutOrStdout(), "Loom local runtime already running: %s\n", result.URL)
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Loom local runtime already running: %s\n", result.URL)
 		return nil
 	}
-	fmt.Fprintf(cmd.OutOrStdout(), "Started Loom local service (pid %d)\n", result.PID)
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Started Loom local service (pid %d)\n", result.PID)
 	return nil
 }
 
@@ -274,7 +331,7 @@ func runStatus(cmd *cobra.Command, _ []string) error {
 		return writeJSON(cmd.OutOrStdout(), status)
 	}
 	info := status.Runtime
-	fmt.Fprintf(cmd.OutOrStdout(), "status: %s\nurl: %s\npid: %d\nserve_pid: %d\nhealthy: %t\ndata_dir: %s\n",
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "status: %s\nurl: %s\npid: %d\nserve_pid: %d\nhealthy: %t\ndata_dir: %s\n",
 		info.Status, info.URL, info.PID, info.ServePID, status.Healthy, info.DataDir)
 	return nil
 }
@@ -329,20 +386,8 @@ func startRuntime(dataDir string, port int, force bool) (*RuntimeStartResult, er
 			return nil, err
 		}
 	}
-	if info, err := readRuntime(dataDir); err == nil && processRunning(info.PID) {
-		if !force {
-			identity := currentExecutableIdentity()
-			redisHash, err := currentFleetDBRedisHash(dataDir)
-			if err != nil {
-				return nil, fmt.Errorf("load FleetDB Redis settings: %w", err)
-			}
-			if runtimeMatchesExecutable(info, identity) && runtimeMatchesFleetDBRedisSettings(info, redisHash) {
-				return &RuntimeStartResult{PID: info.PID, URL: info.URL, AlreadyRunning: true}, nil
-			}
-		}
-		if err := stopRuntimeProcess(info.PID, 15*time.Second); err != nil {
-			return nil, fmt.Errorf("stop stale local runtime: %w", err)
-		}
+	if result, err := reuseRunningRuntime(dataDir, force); err != nil || result != nil {
+		return result, err
 	}
 	if _, err := currentFleetDBRedisHash(dataDir); err != nil {
 		return nil, fmt.Errorf("load FleetDB Redis settings: %w", err)
@@ -354,7 +399,38 @@ func startRuntime(dataDir string, port int, force bool) (*RuntimeStartResult, er
 	if err != nil {
 		return nil, fmt.Errorf("resolve loom executable: %w", err)
 	}
-	logFile, err := os.OpenFile(serviceLogPath(dataDir), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	return spawnDetachedService(exe, dataDir, port)
+}
+
+// reuseRunningRuntime returns an AlreadyRunning result when the previous
+// service is still alive and matches our executable+config identity. When
+// force is true or identity drifts, it stops the stale process and returns
+// (nil, nil) so the caller can spawn a fresh one. Errors propagate.
+func reuseRunningRuntime(dataDir string, force bool) (*RuntimeStartResult, error) {
+	info, err := readRuntime(dataDir)
+	if err != nil || !processRunning(info.PID) {
+		return nil, nil
+	}
+	if !force {
+		identity := currentExecutableIdentity()
+		redisHash, err := currentFleetDBRedisHash(dataDir)
+		if err != nil {
+			return nil, fmt.Errorf("load FleetDB Redis settings: %w", err)
+		}
+		if runtimeMatchesExecutable(info, identity) && runtimeMatchesFleetDBRedisSettings(info, redisHash) {
+			return &RuntimeStartResult{PID: info.PID, URL: info.URL, AlreadyRunning: true}, nil
+		}
+	}
+	if err := stopRuntimeProcess(info.PID, 15*time.Second); err != nil {
+		return nil, fmt.Errorf("stop stale local runtime: %w", err)
+	}
+	return nil, nil
+}
+
+// spawnDetachedService launches `loom local service` as a detached child
+// process whose lifetime is independent of this CLI invocation.
+func spawnDetachedService(exe, dataDir string, port int) (*RuntimeStartResult, error) {
+	logFile, err := os.OpenFile(serviceLogPath(dataDir), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 	if err != nil {
 		return nil, fmt.Errorf("open service log: %w", err)
 	}
@@ -364,6 +440,8 @@ func startRuntime(dataDir string, port int, force bool) (*RuntimeStartResult, er
 	if port > 0 {
 		args = append(args, "--port", strconv.Itoa(port))
 	}
+	// #nosec G204 — exe is this process's resolved binary path; args are fixed
+	// subcommand strings + CLI-validated dataDir / port.
 	service := exec.Command(exe, args...)
 	service.Env = append(os.Environ(), "LOOM_CONFIG_DIR="+dataDir)
 	service.Stdout = logFile
@@ -430,13 +508,13 @@ func runStop(cmd *cobra.Command, _ []string) error {
 	if !processRunning(info.PID) {
 		info.Status = "stopped"
 		_ = writeRuntime(dataDir, info)
-		fmt.Fprintln(cmd.OutOrStdout(), "Loom local runtime is not running.")
+		_, _ = fmt.Fprintln(cmd.OutOrStdout(), "Loom local runtime is not running.")
 		return nil
 	}
 	if err := stopRuntimeProcess(info.PID, 15*time.Second); err != nil {
 		return err
 	}
-	fmt.Fprintln(cmd.OutOrStdout(), "Loom local runtime stopped.")
+	_, _ = fmt.Fprintln(cmd.OutOrStdout(), "Loom local runtime stopped.")
 	return nil
 }
 
@@ -499,7 +577,7 @@ func runLogs(cmd *cobra.Command, _ []string) error {
 	if err := ensureRuntimeDirs(dataDir); err != nil {
 		return err
 	}
-	fmt.Fprintf(cmd.OutOrStdout(), "service: %s\nserve:   %s\n", serviceLogPath(dataDir), serveLogPath(dataDir))
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "service: %s\nserve:   %s\n", serviceLogPath(dataDir), serveLogPath(dataDir))
 	return nil
 }
 

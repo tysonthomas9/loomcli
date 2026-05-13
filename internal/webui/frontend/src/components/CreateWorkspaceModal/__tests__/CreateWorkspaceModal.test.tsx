@@ -210,6 +210,29 @@ describe("CreateWorkspaceModal", () => {
       expect(templateCard).toHaveAttribute("aria-checked", "false");
     });
 
+    it("prefills provided clone workspace values", () => {
+      render(
+        <CreateWorkspaceModal
+          isOpen={true}
+          onClose={onClose}
+          onSuccess={onSuccess}
+          initialValues={{
+            name: "Hello-World",
+            type: "clone",
+            urlInput: "https://github.com/octocat/Hello-World",
+          }}
+        />,
+      );
+
+      expect(screen.getByTestId("create-workspace-name")).toHaveValue(
+        "Hello-World",
+      );
+      expect(screen.getByTestId("create-workspace-clone-url")).toHaveValue(
+        "https://github.com/octocat/Hello-World",
+      );
+      expect(screen.getByTestId("create-workspace-submit")).toBeEnabled();
+    });
+
     it("browse button is disabled outside the desktop app", () => {
       render(
         <CreateWorkspaceModal

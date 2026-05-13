@@ -3,6 +3,7 @@ package agent
 import (
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -78,7 +79,7 @@ func runTask(cmd *cobra.Command, args []string) {
 	target, err := workspace.ResolveAgentTarget(argName, "")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		cli.ExitWithFlush(1)
 	}
 
 	worktreePath := target.WorkDir
@@ -103,7 +104,7 @@ func runTask(cmd *cobra.Command, args []string) {
 
 	if err := cli.AcquireLock(worktreePath, "task", agentName); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		cli.ExitWithFlush(1)
 	}
 	defer func() { _ = cli.ReleaseLock(worktreePath) }()
 
@@ -119,7 +120,7 @@ func runTask(cmd *cobra.Command, args []string) {
 func runTaskDaemon(deps *cli.Deps, worktreePath, agentName string) {
 	if err := cli.AcquireLock(worktreePath, "task", agentName); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		cli.ExitWithFlush(1)
 	}
 	if err := cli.UpdateLockState(worktreePath, cli.StateActive); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: could not update lock state: %v\n", err)
@@ -127,18 +128,23 @@ func runTaskDaemon(deps *cli.Deps, worktreePath, agentName string) {
 
 	ws, _ := config.ResolveActiveWorkspace()
 	prompt := GenerateTaskPrompt(agentName, ws, taskParentID, cli.GetBackendName())
-	if assignedTaskID := os.Getenv("LOOM_ASSIGNED_TASK_ID"); assignedTaskID != "" {
+	assignedTaskID := os.Getenv("LOOM_ASSIGNED_TASK_ID")
+	if assignedTaskID != "" {
 		prompt = GenerateFleetTaskPrompt(agentName, assignedTaskID, ws, cli.GetBackendName())
 	}
 	sess := adoptOrCreateSession(agentName, taskParentID, prompt, "implementation")
 
+	emitTaskClaimedFromEnv(agentName, assignedTaskID)
+
 	beforeRef := automode.CaptureHEADRef(worktreePath)
+	startedAt := time.Now()
 	invokeErr := deps.Agent.InvokeInteractive(worktreePath, prompt, agentName)
+	emitTaskLifecycleResult(agentName, worktreePath, startedAt, invokeErr)
 	finalizeAgentSession(sess, worktreePath, beforeRef, invokeErr)
 
 	if invokeErr != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", invokeErr)
-		os.Exit(1)
+		cli.ExitWithFlush(1)
 	}
 }
 
@@ -146,10 +152,15 @@ func runTaskDaemon(deps *cli.Deps, worktreePath, agentName string) {
 func runTaskAutoFallback(deps *cli.Deps, worktreePath, agentName string, routerCheck func() (bool, error)) {
 	fmt.Println("[auto] tmux not found, using JSON streaming mode")
 	shutdown := automode.SetupSignalHandler()
+	backendName := cli.GetBackendName()
+	promptGen := func(name string, ws *config.WorkspaceConfig) string {
+		return GenerateTaskPrompt(name, ws, taskParentID, backendName)
+	}
 	automode.RunAutoModeLoop(automode.AutoModeOptions{
 		Interval: taskInterval, MaxTasks: taskMaxTasks, IdleTimeout: taskIdleTimeout,
 		AgentType: "task", AgentName: agentName, WorktreePath: worktreePath,
-		ParentID: taskParentID, CustomTaskCheck: routerCheck, Deps: deps,
+		ParentID: taskParentID, CustomTaskCheck: routerCheck,
+		CustomPromptGen: promptGen, Deps: deps,
 	}, shutdown)
 }
 
@@ -160,7 +171,7 @@ func runTaskSingleTask(deps *cli.Deps, worktreePath, agentName string, routerChe
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error checking tasks: %v\n", err)
-		os.Exit(1)
+		cli.ExitWithFlush(1)
 	}
 	if !available {
 		fmt.Println("No tasks available for implementation.")
@@ -182,12 +193,20 @@ func runTaskSingleTask(deps *cli.Deps, worktreePath, agentName string, routerChe
 	prompt := GenerateTaskPrompt(agentName, ws, taskParentID, cli.GetBackendName())
 	sess := createAgentSession(agentName, taskParentID, prompt, "implementation")
 
+	// Single-task mode: the task is self-claimed by the agent during the
+	// run, so the ID is unknown here. Emit with TaskID="" to start the
+	// loom.task span; emitTaskLifecycleResult reads the lock file after
+	// invoke to recover the resolved ID for the close-out event.
+	emitTaskClaimedFromEnv(agentName, "")
+
 	beforeRef := automode.CaptureHEADRef(worktreePath)
+	startedAt := time.Now()
 	invokeErr := deps.Agent.InvokeInteractive(worktreePath, prompt, agentName)
+	emitTaskLifecycleResult(agentName, worktreePath, startedAt, invokeErr)
 	finalizeAgentSession(sess, worktreePath, beforeRef, invokeErr)
 
 	if invokeErr != nil {
 		fmt.Fprintf(os.Stderr, "Error running agent: %v\n", invokeErr)
-		os.Exit(1)
+		cli.ExitWithFlush(1)
 	}
 }

@@ -14,9 +14,17 @@ type CollectDataFn = func() *monitor.MonitorData
 // NewCollector creates a cached monitor data collector with the given TTL.
 // It uses singleflight-style coalescing: concurrent callers share one collection.
 func NewCollector(ttl time.Duration) CollectDataFn {
+	return NewCollectorFunc(ttl, func() *monitor.MonitorData { return monitor.CollectMonitorData(10000, "") })
+}
+
+// NewCollectorFunc creates a cached monitor data collector around collectFn.
+func NewCollectorFunc(ttl time.Duration, collectFn CollectDataFn) CollectDataFn {
+	if collectFn == nil {
+		collectFn = func() *monitor.MonitorData { return monitor.CollectMonitorData(10000, "") }
+	}
 	cv := &cachedCollector{
 		ttl:       ttl,
-		collectFn: func() *monitor.MonitorData { return monitor.CollectMonitorData(10000, "") },
+		collectFn: collectFn,
 	}
 	return cv.get
 }
@@ -26,9 +34,18 @@ func NewCollector(ttl time.Duration) CollectDataFn {
 // HTTP handlers always read pre-warmed data, eliminating cache-miss latency.
 // The background goroutine exits when ctx is canceled.
 func NewCollectorWithBackground(ctx context.Context, ttl, interval time.Duration) CollectDataFn {
+	return NewCollectorWithBackgroundFunc(ctx, ttl, interval, func() *monitor.MonitorData { return monitor.CollectMonitorData(10000, "") })
+}
+
+// NewCollectorWithBackgroundFunc creates a cached monitor data collector around
+// collectFn and refreshes it every interval in the background.
+func NewCollectorWithBackgroundFunc(ctx context.Context, ttl, interval time.Duration, collectFn CollectDataFn) CollectDataFn {
+	if collectFn == nil {
+		collectFn = func() *monitor.MonitorData { return monitor.CollectMonitorData(10000, "") }
+	}
 	cv := &cachedCollector{
 		ttl:       ttl,
-		collectFn: func() *monitor.MonitorData { return monitor.CollectMonitorData(10000, "") },
+		collectFn: collectFn,
 	}
 	cv.startBackground(ctx, interval)
 	return cv.get

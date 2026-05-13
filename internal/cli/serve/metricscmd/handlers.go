@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
@@ -16,7 +18,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/store"
-	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/storeadapter"
 )
 
@@ -93,19 +94,33 @@ func HandleStatus(collectDataFn func() *monitor.MonitorData, st store.Store) htt
 }
 
 func HandleStatusWithBackend(collectDataFn func() *monitor.MonitorData, st store.Store, backendFn IssueBackendFn) http.HandlerFunc {
+	return HandleStatusWithDataSource(NewMonitorDataSource(collectDataFn, backendFn), st)
+}
+
+func HandleStatusWithDataSource(dataSource *MonitorDataSource, st store.Store) http.HandlerFunc {
+	return HandleStatusWithSources(dataSource, NewMonitorStoreDataSource(st))
+}
+
+func HandleStatusWithSources(dataSource *MonitorDataSource, storeDataSource *MonitorStoreDataSource) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		data := monitorDataForRequest(r, collectDataFn, backendFn)
+		workspaceHint := r.URL.Query().Get("workspace")
+		ctx, span := startSpan(r.Context(), "service.Monitor.Status",
+			attribute.String("loom.workspace", workspaceHint))
+		defer span.End()
+		r = r.WithContext(ctx)
+
+		data := dataSource.Resolve(r)
 		if data == nil {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusServiceUnavailable)
 			_, _ = w.Write([]byte(`{"error":"data collection unavailable"}`))
 			return
 		}
-		workspaceHint := r.URL.Query().Get("workspace")
-		agents := storeAgentsForMonitor(r.Context(), st, workspaceHint)
+		storeData := storeDataSource.Resolve(ctx, workspaceHint)
+		span.SetAttributes(attribute.Int("result.count", len(storeData.Agents)))
 		writeJSON(w, StatusResponse{
-			Workspace:      getWorkspaceInfo(r.Context(), st, workspaceHint),
-			Agents:         agents,
+			Workspace:      storeData.Workspace,
+			Agents:         storeData.Agents,
 			Tasks:          data.Tasks,
 			InProgressList: data.InProgressTasks,
 			AgentTasks:     data.AgentTasks,
@@ -122,26 +137,39 @@ func HandleAgents(collectDataFn func() *monitor.MonitorData, st store.Store) htt
 }
 
 func HandleAgentsWithBackend(collectDataFn func() *monitor.MonitorData, st store.Store, backendFn IssueBackendFn) http.HandlerFunc {
+	return HandleAgentsWithDataSource(NewMonitorDataSource(collectDataFn, backendFn), st)
+}
+
+func HandleAgentsWithDataSource(dataSource *MonitorDataSource, st store.Store) http.HandlerFunc {
+	return HandleAgentsWithSources(dataSource, NewMonitorStoreDataSource(st))
+}
+
+func HandleAgentsWithSources(dataSource *MonitorDataSource, storeDataSource *MonitorStoreDataSource) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		data := monitorDataForRequest(r, collectDataFn, backendFn)
+		workspaceHint := r.URL.Query().Get("workspace")
+		ctx, span := startSpan(r.Context(), "service.Monitor.Agents",
+			attribute.String("loom.workspace", workspaceHint))
+		defer span.End()
+		r = r.WithContext(ctx)
+
+		data := dataSource.Resolve(r)
 		if data == nil {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusServiceUnavailable)
 			_, _ = w.Write([]byte(`{"error":"data collection unavailable"}`))
 			return
 		}
-		workspaceHint := r.URL.Query().Get("workspace")
-		wsInfo := getWorkspaceInfo(r.Context(), st, workspaceHint)
-		agents := storeAgentsForMonitor(r.Context(), st, workspaceHint)
+		storeData := storeDataSource.Resolve(ctx, workspaceHint)
 
 		response := AgentsResponse{
-			Workspace: wsInfo,
-			Agents:    agents,
+			Workspace: storeData.Workspace,
+			Agents:    storeData.Agents,
 			Timestamp: data.Timestamp,
 		}
 
-		response.ByWorkspace = groupAgentsByWorkspace(agents)
+		response.ByWorkspace = groupAgentsByWorkspace(storeData.Agents)
 
+		span.SetAttributes(attribute.Int("result.count", len(storeData.Agents)))
 		writeJSON(w, response)
 	}
 }
@@ -152,14 +180,30 @@ func HandleTasks(collectDataFn func() *monitor.MonitorData) http.HandlerFunc {
 }
 
 func HandleTasksWithBackend(collectDataFn func() *monitor.MonitorData, backendFn IssueBackendFn) http.HandlerFunc {
+	return HandleTasksWithDataSource(NewMonitorDataSource(collectDataFn, backendFn))
+}
+
+func HandleTasksWithDataSource(dataSource *MonitorDataSource) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		data := monitorDataForRequest(r, collectDataFn, backendFn)
+		workspaceHint := r.URL.Query().Get("workspace")
+		ctx, span := startSpan(r.Context(), "service.Monitor.Tasks",
+			attribute.String("loom.workspace", workspaceHint))
+		defer span.End()
+		r = r.WithContext(ctx)
+
+		data := dataSource.Resolve(r)
 		if data == nil {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusServiceUnavailable)
 			_, _ = w.Write([]byte(`{"error":"data collection unavailable"}`))
 			return
 		}
+		// result.count = total task entries surfaced across the buckets so
+		// dashboards can see how chatty this endpoint is per workspace.
+		span.SetAttributes(attribute.Int("result.count",
+			len(data.NeedsPlanningTasks)+len(data.ReadyToImplement)+
+				len(data.ReviewTasks)+len(data.InProgressTasks)+
+				len(data.BacklogTasks)+len(data.ClosedTasks)))
 		writeJSON(w, TasksResponse{
 			Summary:          data.Tasks,
 			NeedsPlanning:    data.NeedsPlanningTasks,
@@ -179,8 +223,12 @@ func HandleStats(collectDataFn func() *monitor.MonitorData) http.HandlerFunc {
 }
 
 func HandleStatsWithBackend(collectDataFn func() *monitor.MonitorData, backendFn IssueBackendFn) http.HandlerFunc {
+	return HandleStatsWithDataSource(NewMonitorDataSource(collectDataFn, backendFn))
+}
+
+func HandleStatsWithDataSource(dataSource *MonitorDataSource) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		data := monitorDataForRequest(r, collectDataFn, backendFn)
+		data := dataSource.Resolve(r)
 		if data == nil {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusServiceUnavailable)
@@ -195,15 +243,7 @@ func HandleStatsWithBackend(collectDataFn func() *monitor.MonitorData, backendFn
 }
 
 func monitorDataForRequest(r *http.Request, collectDataFn func() *monitor.MonitorData, backendFn IssueBackendFn) *monitor.MonitorData {
-	workspaceHint := r.URL.Query().Get("workspace")
-	if workspaceHint == "" || backendFn == nil {
-		return collectDataFn()
-	}
-	ctx := middleware.WithWorkspace(r.Context(), workspaceHint)
-	if be := backendFn(ctx); be != nil {
-		return monitor.CollectMonitorDataWithIssueBackend(be, 10000, "")
-	}
-	return collectDataFn()
+	return NewMonitorDataSource(collectDataFn, backendFn).Resolve(r)
 }
 
 // HandleSync returns an HTTP handler for the sync endpoint.
@@ -310,38 +350,7 @@ func groupAgentsByWorkspace(agents []monitor.AgentStatus) map[string][]monitor.A
 }
 
 func storeAgentsForMonitor(ctx context.Context, st store.Store, workspaceHint string) []monitor.AgentStatus {
-	agents := make([]monitor.AgentStatus, 0)
-	if st == nil {
-		return agents
-	}
-	wsKey, wsName, ok := resolveMonitorWorkspace(ctx, st, workspaceHint)
-	if !ok {
-		return agents
-	}
-	assignments, err := st.Agents().List(ctx, wsKey)
-	if err != nil {
-		log.Printf("Failed to list store agents for monitor response: %v", err)
-		return agents
-	}
-	workspaceData, err := storeadapter.BuildWorkspaceDataForKey(ctx, st, wsKey)
-	if err != nil {
-		log.Printf("Failed to load workspace data for monitor response: %v", err)
-	}
-
-	for _, assignment := range assignments {
-		if assignment == nil {
-			continue
-		}
-		agents = append(agents, monitor.AgentStatus{
-			Name:      assignment.Name,
-			Branch:    monitorBranchFromAgent(workspaceData, assignment),
-			Status:    monitorStatusFromAgentState(assignment.State),
-			Role:      assignment.RoleName,
-			Repo:      monitorRepoFromAgent(assignment),
-			Workspace: wsName,
-		})
-	}
-	return agents
+	return collectMonitorStoreData(ctx, st, workspaceHint).Agents
 }
 
 func monitorStatusFromAgentState(state domain.AgentState) string {

@@ -98,39 +98,8 @@ func writeStateFile(path string, startedAt time.Time, agents []supervisor.Superv
 		StartedAt: startedAt,
 		Agents:    make([]DaemonAgentStatus, len(agents)),
 	}
-
 	for i, ap := range agents {
-		das := DaemonAgentStatus{
-			Worktree:               ap.Worktree,
-			Role:                   ap.Role,
-			Repo:                   ap.Repo,
-			PID:                    ap.PID,
-			Status:                 computeAgentStatus(ap, maxRetries),
-			EpicID:                 ap.AssignedEpicID,
-			CurrentBackend:         ap.CurrentBackend,
-			RestartCount:           ap.RestartCount,
-			LastStart:              ap.LastStart,
-			LastExit:               ap.LastExit,
-			LastExitCode:           ap.LastExitCode,
-			StopReason:             string(ap.StopReason),
-			WorktreePath:           ap.WorktreePath,
-			LastErrorClass:         ap.LastErrorClass,
-			NoWorkCount:            ap.NoWorkCount,
-			BackoffUntil:           ap.BackoffUntil,
-			RemoteBranch:           ap.RemoteBranch,
-			OwnershipLeaseID:       ap.OwnershipLeaseID,
-			OwnershipFencingToken:  ap.OwnershipFencingToken,
-			OwnershipLastHeartbeat: ap.OwnershipLastHeartbeat,
-		}
-		// Set StoppedAt from LastExit when agent is stopped with a reason
-		if ap.StopReason != "" && ap.PID == 0 {
-			if !ap.LastExit.IsZero() {
-				das.StoppedAt = ap.LastExit
-			} else {
-				das.StoppedAt = time.Now()
-			}
-		}
-		state.Agents[i] = das
+		state.Agents[i] = toDaemonAgentStatus(ap, maxRetries)
 	}
 
 	data, err := json.MarshalIndent(state, "", "  ")
@@ -138,16 +107,51 @@ func writeStateFile(path string, startedAt time.Time, agents []supervisor.Superv
 		return err
 	}
 
-	// Atomic write via temp file (include PID to avoid race conditions)
+	// Atomic write via temp file (PID-tagged to avoid concurrent-writer races).
 	tempFile := fmt.Sprintf("%s.%d.tmp", path, os.Getpid())
 	if err := os.WriteFile(tempFile, data, 0600); err != nil {
 		return err
 	}
 	if err := os.Rename(tempFile, path); err != nil {
-		os.Remove(tempFile) // Clean up temp file on rename failure
+		os.Remove(tempFile)
 		return err
 	}
 	return nil
+}
+
+// toDaemonAgentStatus projects the supervisor's per-agent status into the
+// JSON-serializable shape written to daemon-agents.json.
+func toDaemonAgentStatus(ap supervisor.SupervisedAgentStatus, maxRetries int) DaemonAgentStatus {
+	das := DaemonAgentStatus{
+		Worktree:               ap.Worktree,
+		Role:                   ap.Role,
+		Repo:                   ap.Repo,
+		PID:                    ap.PID,
+		Status:                 computeAgentStatus(ap, maxRetries),
+		EpicID:                 ap.AssignedEpicID,
+		CurrentBackend:         ap.CurrentBackend,
+		RestartCount:           ap.RestartCount,
+		LastStart:              ap.LastStart,
+		LastExit:               ap.LastExit,
+		LastExitCode:           ap.LastExitCode,
+		StopReason:             string(ap.StopReason),
+		WorktreePath:           ap.WorktreePath,
+		LastErrorClass:         ap.LastErrorClass,
+		NoWorkCount:            ap.NoWorkCount,
+		BackoffUntil:           ap.BackoffUntil,
+		RemoteBranch:           ap.RemoteBranch,
+		OwnershipLeaseID:       ap.OwnershipLeaseID,
+		OwnershipFencingToken:  ap.OwnershipFencingToken,
+		OwnershipLastHeartbeat: ap.OwnershipLastHeartbeat,
+	}
+	if ap.StopReason != "" && ap.PID == 0 {
+		if !ap.LastExit.IsZero() {
+			das.StoppedAt = ap.LastExit
+		} else {
+			das.StoppedAt = time.Now()
+		}
+	}
+	return das
 }
 
 // computeAgentStatus determines the status string based on agent state.

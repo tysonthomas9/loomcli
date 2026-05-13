@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
+	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
@@ -137,7 +138,7 @@ type DaemonConfig struct {
 // FleetDB. If no workspace is set, it returns built-in defaults so first-run
 // commands can still render help and diagnostics.
 func LoadDaemonConfig(projectDir string) (*DaemonConfig, error) {
-	ctx := context.Background()
+	ctx := cmdstore.RootContext()
 	dc := newDefaultDaemonConfig()
 	key, err := bootstrap.ResolveActiveWorkspaceKey(ctx, nil)
 	if err != nil {
@@ -154,6 +155,8 @@ func LoadDaemonConfig(projectDir string) (*DaemonConfig, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open fleet-db store: %w", err)
 	}
+	// Apply store-level tracing (this path bypasses cmdstore.OpenStore).
+	handle.Store = cmdstore.WrapStoreWithTracing(handle.Store)
 	defer func() { _ = handle.Close() }()
 
 	return loadDaemonConfigFromStore(ctx, handle.Store, key, dc, projectDir)

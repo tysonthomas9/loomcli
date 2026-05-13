@@ -9,6 +9,10 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"go.opentelemetry.io/otel/attribute"
+
+	"github.com/tysonthomas9/loomcli/internal/runtimectx"
 )
 
 // readDedupedIndex reads index.jsonl, applies the filter, and deduplicates
@@ -69,8 +73,25 @@ func (s *Store) readDedupedIndex(f Filter) ([]SessionRecord, error) {
 // If the index file does not exist, it returns an empty slice (not an error).
 // Corrupt lines are skipped with a log warning.
 func (s *Store) Query(f Filter) ([]SessionRecord, error) {
+	// Filter values (TaskID, AgentName, Backend) are caller-supplied but
+	// drawn from the same allowlist as direct attrs — agent name, task ID,
+	// backend enum. Status is an enum. Time bounds are not attrs.
+	attrs := []attribute.KeyValue{}
+	if f.AgentName != "" {
+		attrs = append(attrs, attrLoomAgent(f.AgentName))
+	}
+	if f.TaskID != "" {
+		attrs = append(attrs, attrLoomTaskID(f.TaskID))
+	}
+	if f.Backend != "" {
+		attrs = append(attrs, attrLoomBackend(f.Backend))
+	}
+	_, span := startSpan(runtimectx.RootContext(), "service.Sessions.Query", attrs...)
+	defer span.End()
+
 	deduped, err := s.readDedupedIndex(f)
 	if err != nil {
+		recordErr(span, err)
 		return deduped, err
 	}
 
@@ -89,6 +110,7 @@ func (s *Store) Query(f Filter) ([]SessionRecord, error) {
 		deduped = filtered
 	}
 
+	span.SetAttributes(attrResultCount(len(deduped)))
 	return deduped, nil
 }
 
@@ -115,7 +137,13 @@ func (s *Store) SessionsByTask(taskID string) ([]SessionRecord, error) {
 // LoadMetadata reads and returns the SessionMetadata from
 // sessions/<sessionID>/metadata.json.
 func (s *Store) LoadMetadata(sessionID string) (*SessionMetadata, error) {
+	_, span := startSpan(runtimectx.RootContext(), "service.Sessions.LoadMetadata",
+		attrLoomSessionID(sessionID),
+	)
+	defer span.End()
+
 	if err := validateSessionID(sessionID); err != nil {
+		recordErr(span, err)
 		return nil, err
 	}
 
@@ -124,11 +152,13 @@ func (s *Store) LoadMetadata(sessionID string) (*SessionMetadata, error) {
 	// #nosec G304 — sessionID validated above
 	data, err := os.ReadFile(metaPath)
 	if err != nil {
+		recordErr(span, err)
 		return nil, fmt.Errorf("read metadata.json: %w", err)
 	}
 
 	var meta SessionMetadata
 	if err := json.Unmarshal(data, &meta); err != nil {
+		recordErr(span, err)
 		return nil, fmt.Errorf("unmarshal metadata: %w", err)
 	}
 	meta.NormalizeAfterLoad()
@@ -138,7 +168,13 @@ func (s *Store) LoadMetadata(sessionID string) (*SessionMetadata, error) {
 // LoadTranscript reads and returns all TranscriptEntries from
 // sessions/<sessionID>/transcript.jsonl, sorted by Seq ascending.
 func (s *Store) LoadTranscript(sessionID string) ([]TranscriptEntry, error) {
+	_, span := startSpan(runtimectx.RootContext(), "service.Sessions.LoadTranscript",
+		attrLoomSessionID(sessionID),
+	)
+	defer span.End()
+
 	if err := validateSessionID(sessionID); err != nil {
+		recordErr(span, err)
 		return nil, err
 	}
 
@@ -150,6 +186,7 @@ func (s *Store) LoadTranscript(sessionID string) ([]TranscriptEntry, error) {
 		if os.IsNotExist(err) {
 			return nil, nil
 		}
+		recordErr(span, err)
 		return nil, fmt.Errorf("open transcript: %w", err)
 	}
 	defer func() { _ = file.Close() }()
@@ -170,6 +207,7 @@ func (s *Store) LoadTranscript(sessionID string) ([]TranscriptEntry, error) {
 		entries = append(entries, e)
 	}
 	if err := scanner.Err(); err != nil {
+		recordErr(span, err)
 		return entries, fmt.Errorf("read transcript: %w", err)
 	}
 
@@ -178,13 +216,20 @@ func (s *Store) LoadTranscript(sessionID string) ([]TranscriptEntry, error) {
 		return entries[i].Seq < entries[j].Seq
 	})
 
+	span.SetAttributes(attrResultCount(len(entries)))
 	return entries, nil
 }
 
 // ReadPrompt reads and returns the prompt text from
 // sessions/<sessionID>/prompt.txt.
 func (s *Store) ReadPrompt(sessionID string) (string, error) {
+	_, span := startSpan(runtimectx.RootContext(), "service.Sessions.ReadPrompt",
+		attrLoomSessionID(sessionID),
+	)
+	defer span.End()
+
 	if err := validateSessionID(sessionID); err != nil {
+		recordErr(span, err)
 		return "", err
 	}
 
@@ -193,8 +238,11 @@ func (s *Store) ReadPrompt(sessionID string) (string, error) {
 	// #nosec G304 — sessionID validated above
 	data, err := os.ReadFile(promptPath)
 	if err != nil {
+		recordErr(span, err)
 		return "", fmt.Errorf("read prompt.txt: %w", err)
 	}
+	// Note: prompt content is NOT recorded as a span attribute — see
+	// trace contract §6 (forbidden: prompt, prompt_template).
 	return string(data), nil
 }
 
@@ -202,7 +250,13 @@ func (s *Store) ReadPrompt(sessionID string) (string, error) {
 // sessions/<sessionID>/diff.patch.
 // Returns os.ErrNotExist (wrapped) when no diff.patch exists for the session.
 func (s *Store) ReadDiff(sessionID string) (string, error) {
+	_, span := startSpan(runtimectx.RootContext(), "service.Sessions.ReadDiff",
+		attrLoomSessionID(sessionID),
+	)
+	defer span.End()
+
 	if err := validateSessionID(sessionID); err != nil {
+		recordErr(span, err)
 		return "", err
 	}
 
@@ -211,8 +265,10 @@ func (s *Store) ReadDiff(sessionID string) (string, error) {
 	// #nosec G304 — sessionID validated above
 	data, err := os.ReadFile(diffPath)
 	if err != nil {
+		recordErr(span, err)
 		return "", fmt.Errorf("read diff.patch: %w", err)
 	}
+	// Note: diff body is forbidden as a span attribute (§6: git.diff).
 	return string(data), nil
 }
 

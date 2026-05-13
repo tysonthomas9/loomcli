@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
+	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
@@ -109,7 +110,7 @@ func GetConfigDir() string {
 // LoadConfig reads the workspace topology from FleetDB and overlays
 // machine-local checkout paths from bootstrap state.json.
 func LoadConfig() (*LoomConfig, error) {
-	ctx := context.Background()
+	ctx := cmdstore.RootContext()
 	dataDir := bootstrap.LoomDir()
 	if dataDir == "" {
 		return nil, errors.New("cannot determine loom data directory")
@@ -118,6 +119,8 @@ func LoadConfig() (*LoomConfig, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open fleet-db store: %w", err)
 	}
+	// Apply store-level tracing (this path bypasses cmdstore.OpenStore).
+	handle.Store = cmdstore.WrapStoreWithTracing(handle.Store)
 	defer func() { _ = handle.Close() }()
 	return loadConfigFromStore(ctx, handle.Store)
 }
@@ -130,7 +133,7 @@ func GetWorkspaceDir(name string) string {
 // ResolveActiveWorkspace returns the active FleetDB workspace projected into the
 // historical WorkspaceConfig DTO used by prompt and daemon code.
 func ResolveActiveWorkspace() (*WorkspaceConfig, error) {
-	ctx := context.Background()
+	ctx := cmdstore.RootContext()
 	key, err := bootstrap.ResolveActiveWorkspaceKey(ctx, nil)
 	if err != nil {
 		if errors.Is(err, bootstrap.ErrNoActiveWorkspace) {
@@ -146,6 +149,8 @@ func ResolveActiveWorkspace() (*WorkspaceConfig, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open fleet-db store: %w", err)
 	}
+	// Apply store-level tracing (this path bypasses cmdstore.OpenStore).
+	handle.Store = cmdstore.WrapStoreWithTracing(handle.Store)
 	defer func() { _ = handle.Close() }()
 
 	cfg, err := loadConfigFromStore(ctx, handle.Store)

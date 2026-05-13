@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -13,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/lockfile"
 )
@@ -448,7 +448,7 @@ func getTaskStatus(taskID string) string {
 }
 
 func GetTaskStatusDeps(deps *Deps, taskID string) string {
-	detail, err := deps.IssueBackend.Get(context.Background(), taskID)
+	detail, err := deps.IssueBackend.Get(cmdstore.RootContext(), taskID)
 	if err != nil || detail == nil {
 		return ""
 	}

@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/authmode"
+
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 // Config holds the parameters needed to create an authenticated client.
@@ -43,8 +45,11 @@ func New(cfg Config) (*Client, error) {
 	serverURL := strings.TrimRight(cfg.ServerURL, "/")
 
 	c := &Client{
-		serverURL:  serverURL,
-		httpClient: &http.Client{Timeout: 30 * time.Second},
+		serverURL: serverURL,
+		httpClient: &http.Client{
+			Transport: otelhttp.NewTransport(http.DefaultTransport),
+			Timeout:   30 * time.Second,
+		},
 	}
 
 	authMode, err := c.discoverAuthMode()

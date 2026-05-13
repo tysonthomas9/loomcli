@@ -278,15 +278,9 @@ func (s *Supervisor) AddAgent(entry config.AgentEntry) error {
 // AddAgentForTask creates and starts a new agent with an optional first task
 // requested by the control plane.
 func (s *Supervisor) AddAgentForTask(entry config.AgentEntry, taskID string) error {
-	// Early duplicate check (avoids unnecessary I/O; authoritative check is below under Lock)
-	s.AgentsMu.RLock()
-	for _, ap := range s.Agents {
-		if ap.Entry.Worktree == entry.Worktree {
-			s.AgentsMu.RUnlock()
-			return fmt.Errorf("agent %q already exists", entry.Worktree)
-		}
+	if err := s.checkDuplicateAgent(entry.Worktree); err != nil {
+		return err
 	}
-	s.AgentsMu.RUnlock()
 
 	// Resolve worktree path (outside lock — may do I/O)
 	target, err := workspace.ResolveAgentTarget(entry.Worktree, entry.Repo)
@@ -294,11 +288,9 @@ func (s *Supervisor) AddAgentForTask(entry config.AgentEntry, taskID string) err
 		return fmt.Errorf("agent %q worktree: %w", entry.Worktree, err)
 	}
 
-	// Resolve role config (outside lock — may do I/O)
 	s.AgentsMu.RLock()
 	agentCount := len(s.Agents)
 	s.AgentsMu.RUnlock()
-
 	roleConfig, err := s.resolveRoleConfig(entry.Role, agentCount)
 	if err != nil {
 		return err
@@ -314,8 +306,8 @@ func (s *Supervisor) AddAgentForTask(entry config.AgentEntry, taskID string) err
 		Done:            make(chan struct{}),
 	}
 
-	// Check for duplicate, add to slice, and increment WaitGroup atomically
-	// under a single write lock to prevent a race between Wg.Add(1) and Stop()'s Wg.Wait().
+	// Authoritative duplicate check + slice append + WaitGroup increment under
+	// a single write lock so Wg.Add can't race with Stop()'s Wg.Wait.
 	s.AgentsMu.Lock()
 	for _, existing := range s.Agents {
 		if existing.Entry.Worktree == entry.Worktree {
@@ -333,5 +325,19 @@ func (s *Supervisor) AddAgentForTask(entry config.AgentEntry, taskID string) err
 	}()
 
 	slog.Info("agent added and started", "worktree", entry.Worktree, "role", entry.Role)
+	return nil
+}
+
+// checkDuplicateAgent does a lock-free probe for an existing agent with the
+// same worktree. Cheap fast-fail before the I/O in AddAgentForTask; the
+// authoritative check happens under AgentsMu.Lock after the I/O.
+func (s *Supervisor) checkDuplicateAgent(worktree string) error {
+	s.AgentsMu.RLock()
+	defer s.AgentsMu.RUnlock()
+	for _, ap := range s.Agents {
+		if ap.Entry.Worktree == worktree {
+			return fmt.Errorf("agent %q already exists", worktree)
+		}
+	}
 	return nil
 }

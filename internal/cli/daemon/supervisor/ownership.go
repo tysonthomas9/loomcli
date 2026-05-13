@@ -161,7 +161,7 @@ func (s *Supervisor) sleepBeforeOwnershipRetry(ap *AgentProcess) bool {
 	case <-time.After(defaultOwnershipRetryInterval):
 		return true
 	case <-s.Shutdown:
-		s.setStopReason(ap, StopReasonShutdown)
+		s.setShutdownStopReason(ap)
 		return false
 	case <-ap.StopCh:
 		s.setStopReasonDefault(ap, StopReasonConfigRemoved)

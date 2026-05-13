@@ -295,6 +295,204 @@ func TestHandleStatusWithBackend_UsesWorkspaceScopedIssueBackend(t *testing.T) {
 	}
 }
 
+func TestMonitorDataSource_CachesWorkspaceCollectionAcrossEndpoints(t *testing.T) {
+	t.Setenv("LOOM_WORKSPACE", "WS1")
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS1", Name: "First"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS2", Name: "Second"}); err != nil {
+		t.Fatal(err)
+	}
+
+	scopedBackend := clitest.NewMockIssueBackend()
+	scopedBackend.ReadyResult = []backend.IssueData{
+		{ID: "T-1", Title: "Scoped task", Status: "open", Design: ""},
+	}
+	scopedBackend.StatsResult = &backend.StatsData{TotalIssues: 7, OpenIssues: 6, ClosedIssues: 1}
+
+	backendFnCalls := 0
+	backendFn := func(ctx context.Context) backend.IssueBackend {
+		backendFnCalls++
+		if got := middleware.WorkspaceFromContext(ctx); got != "WS2" {
+			t.Fatalf("workspace context = %q, want WS2", got)
+		}
+		return scopedBackend
+	}
+	dataSource := NewMonitorDataSourceWithTTL(func() *monitor.MonitorData {
+		t.Fatal("fallback collector should not be used for workspace request")
+		return nil
+	}, backendFn, time.Minute)
+
+	for _, handler := range []http.HandlerFunc{
+		HandleStatusWithDataSource(dataSource, st),
+		HandleTasksWithDataSource(dataSource),
+		HandleStatsWithDataSource(dataSource),
+	} {
+		req := httptest.NewRequest(http.MethodGet, "/api/monitor/test?workspace=WS2", nil)
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200, body = %s", rr.Code, rr.Body.String())
+		}
+	}
+
+	if backendFnCalls != 1 {
+		t.Fatalf("backendFn calls = %d, want 1 shared workspace collection", backendFnCalls)
+	}
+	if got := scopedBackend.CallCount("Ready"); got != 1 {
+		t.Fatalf("Ready calls = %d, want 1 shared workspace collection", got)
+	}
+	if got := scopedBackend.CallCount("Stats"); got != 1 {
+		t.Fatalf("Stats calls = %d, want 1 shared workspace collection", got)
+	}
+}
+
+func TestMonitorStoreDataSource_CachesWorkspaceMetadataAcrossEndpoints(t *testing.T) {
+	t.Setenv("LOOM_WORKSPACE", "WS1")
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	ctx := context.Background()
+	base := memstore.New()
+	if _, err := base.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS1", Name: "First"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := base.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS2", Name: "Second"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := base.Repos().Create(ctx, store.RepoCreate{WorkspaceKey: "WS1", Name: "repo-a"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := base.Repos().Create(ctx, store.RepoCreate{WorkspaceKey: "WS2", Name: "repo-b", Groups: []string{"backend"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := base.Agents().Create(ctx, store.AgentCreate{
+		WorkspaceKey: "WS2",
+		Name:         "nova",
+		RoleName:     "task",
+		RepoGroups:   []string{"backend"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	counted := newCountingStore(base)
+	dataSource := NewMonitorDataSourceWithTTL(func() *monitor.MonitorData {
+		return &monitor.MonitorData{Timestamp: time.Unix(1, 0).UTC()}
+	}, nil, time.Minute)
+	storeDataSource := NewMonitorStoreDataSourceWithTTL(counted, time.Minute)
+
+	for _, handler := range []http.HandlerFunc{
+		HandleStatusWithSources(dataSource, storeDataSource),
+		HandleAgentsWithSources(dataSource, storeDataSource),
+	} {
+		req := httptest.NewRequest(http.MethodGet, "/api/monitor/test?workspace=WS2", nil)
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200, body = %s", rr.Code, rr.Body.String())
+		}
+	}
+
+	if got := counted.workspaces.listCalls; got != 1 {
+		t.Fatalf("workspace List calls = %d, want 1 shared store metadata read", got)
+	}
+	if got := counted.workspaces.getCalls; got != 0 {
+		t.Fatalf("workspace Get calls = %d, want 0 when request workspace is resolved from List", got)
+	}
+	if got := counted.agents.listCalls; got != 1 {
+		t.Fatalf("agent List calls = %d, want 1 shared store metadata read", got)
+	}
+	if got := counted.repos.listCalls; got != 1 {
+		t.Fatalf("repo List calls = %d, want only selected workspace repos once", got)
+	}
+	if got := counted.repos.listByWorkspace["WS1"]; got != 0 {
+		t.Fatalf("WS1 repo List calls = %d, want no cross-workspace repo reads", got)
+	}
+	if got := counted.repos.listByWorkspace["WS2"]; got != 1 {
+		t.Fatalf("WS2 repo List calls = %d, want 1", got)
+	}
+	if got := counted.daemon.getCalls; got != 0 {
+		t.Fatalf("daemon Get calls = %d, want no workspace summary daemon reads", got)
+	}
+}
+
+type countingStore struct {
+	store.Store
+	workspaces *countingWorkspaceStore
+	repos      *countingRepoStore
+	agents     *countingAgentStore
+	daemon     *countingDaemonStore
+}
+
+func newCountingStore(base store.Store) *countingStore {
+	return &countingStore{
+		Store:      base,
+		workspaces: &countingWorkspaceStore{WorkspaceStore: base.Workspaces()},
+		repos:      &countingRepoStore{RepoStore: base.Repos(), listByWorkspace: make(map[string]int)},
+		agents:     &countingAgentStore{AgentStore: base.Agents()},
+		daemon:     &countingDaemonStore{DaemonProfileStore: base.Daemon()},
+	}
+}
+
+func (s *countingStore) Workspaces() store.WorkspaceStore { return s.workspaces }
+func (s *countingStore) Repos() store.RepoStore           { return s.repos }
+func (s *countingStore) Agents() store.AgentStore         { return s.agents }
+func (s *countingStore) Daemon() store.DaemonProfileStore { return s.daemon }
+
+type countingWorkspaceStore struct {
+	store.WorkspaceStore
+	getCalls       int
+	getByNameCalls int
+	listCalls      int
+}
+
+func (s *countingWorkspaceStore) Get(ctx context.Context, key string) (*domain.Workspace, error) {
+	s.getCalls++
+	return s.WorkspaceStore.Get(ctx, key)
+}
+
+func (s *countingWorkspaceStore) GetByName(ctx context.Context, name string) (*domain.Workspace, error) {
+	s.getByNameCalls++
+	return s.WorkspaceStore.GetByName(ctx, name)
+}
+
+func (s *countingWorkspaceStore) List(ctx context.Context) ([]*domain.Workspace, error) {
+	s.listCalls++
+	return s.WorkspaceStore.List(ctx)
+}
+
+type countingRepoStore struct {
+	store.RepoStore
+	listCalls       int
+	listByWorkspace map[string]int
+}
+
+func (s *countingRepoStore) List(ctx context.Context, workspaceKey string) ([]*domain.Repo, error) {
+	s.listCalls++
+	s.listByWorkspace[workspaceKey]++
+	return s.RepoStore.List(ctx, workspaceKey)
+}
+
+type countingAgentStore struct {
+	store.AgentStore
+	listCalls int
+}
+
+func (s *countingAgentStore) List(ctx context.Context, workspaceKey string) ([]*domain.Agent, error) {
+	s.listCalls++
+	return s.AgentStore.List(ctx, workspaceKey)
+}
+
+type countingDaemonStore struct {
+	store.DaemonProfileStore
+	getCalls int
+}
+
+func (s *countingDaemonStore) Get(ctx context.Context, workspaceKey string) (*domain.DaemonProfile, error) {
+	s.getCalls++
+	return s.DaemonProfileStore.Get(ctx, workspaceKey)
+}
+
 func TestWriteJSON_Coverage(t *testing.T) {
 	rr := httptest.NewRecorder()
 

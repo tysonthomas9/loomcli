@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/atomicfile"
+	"github.com/tysonthomas9/loomcli/internal/runtimectx"
 	"github.com/tysonthomas9/loomcli/internal/sessions/redact"
 )
 
@@ -32,22 +33,34 @@ func (s *Store) SyncSubagentTranscript(sessionID, subagentID, srcPath string) er
 	if srcPath == "" || subagentID == "" {
 		return nil
 	}
+	_, span := startSpan(runtimectx.RootContext(), "service.Sessions.SyncSubagentTranscript",
+		attrLoomSessionID(sessionID),
+	)
+	defer span.End()
+
 	if strings.ContainsAny(sessionID, "/\\") {
-		return fmt.Errorf("invalid session ID %q: contains path separator", sessionID)
+		err := fmt.Errorf("invalid session ID %q: contains path separator", sessionID)
+		recordErr(span, err)
+		return err
 	}
 	if !SubagentIDPattern.MatchString(subagentID) {
-		return fmt.Errorf("invalid subagent ID %q", subagentID)
+		err := fmt.Errorf("invalid subagent ID %q", subagentID)
+		recordErr(span, err)
+		return err
 	}
 
 	sessDir := filepath.Join(s.dir, sessionID)
 	cleanDir := filepath.Clean(sessDir)
 	if !strings.HasPrefix(cleanDir+string(os.PathSeparator), filepath.Clean(s.dir)+string(os.PathSeparator)) {
-		return fmt.Errorf("invalid session ID %q", sessionID)
+		err := fmt.Errorf("invalid session ID %q", sessionID)
+		recordErr(span, err)
+		return err
 	}
 	if _, err := os.Stat(sessDir); err != nil {
 		if os.IsNotExist(err) {
 			return fmt.Errorf("session %q does not exist", sessionID)
 		}
+		recordErr(span, err)
 		return fmt.Errorf("stat session dir: %w", err)
 	}
 
@@ -55,11 +68,13 @@ func (s *Store) SyncSubagentTranscript(sessionID, subagentID, srcPath string) er
 		if os.IsNotExist(err) {
 			return nil
 		}
+		recordErr(span, err)
 		return fmt.Errorf("stat source transcript: %w", err)
 	}
 
 	dstDir := filepath.Join(sessDir, subagentsSubdir)
 	if err := os.MkdirAll(dstDir, sessDirPerm); err != nil {
+		recordErr(span, err)
 		return fmt.Errorf("create subagents dir: %w", err)
 	}
 
@@ -68,18 +83,21 @@ func (s *Store) SyncSubagentTranscript(sessionID, subagentID, srcPath string) er
 	// #nosec G304 — srcPath comes from the agent hook payload (trusted)
 	data, err := os.ReadFile(srcPath)
 	if err != nil {
+		recordErr(span, err)
 		return fmt.Errorf("read source subagent transcript: %w", err)
 	}
 
 	if redactionEnabled() {
 		redacted, rerr := redact.JSONLBytes(data)
 		if rerr != nil {
+			recordErr(span, rerr)
 			return fmt.Errorf("redact subagent transcript: %w", rerr)
 		}
 		data = redacted
 	}
 
 	if err := atomicfile.WriteFile(dstPath, data, sessFilePerm); err != nil {
+		recordErr(span, err)
 		return fmt.Errorf("write subagent transcript: %w", err)
 	}
 	return nil
@@ -89,8 +107,15 @@ func (s *Store) SyncSubagentTranscript(sessionID, subagentID, srcPath string) er
 // subagent transcripts captured for a session. Returns an empty slice if the
 // subagents directory does not exist.
 func (s *Store) ListSubagentTranscripts(sessionID string) ([]string, error) {
+	_, span := startSpan(runtimectx.RootContext(), "service.Sessions.ListSubagentTranscripts",
+		attrLoomSessionID(sessionID),
+	)
+	defer span.End()
+
 	if strings.ContainsAny(sessionID, "/\\") {
-		return nil, fmt.Errorf("invalid session ID %q", sessionID)
+		err := fmt.Errorf("invalid session ID %q", sessionID)
+		recordErr(span, err)
+		return nil, err
 	}
 	dir := filepath.Join(s.dir, sessionID, subagentsSubdir)
 	entries, err := os.ReadDir(dir)
@@ -98,6 +123,7 @@ func (s *Store) ListSubagentTranscripts(sessionID string) ([]string, error) {
 		if os.IsNotExist(err) {
 			return nil, nil
 		}
+		recordErr(span, err)
 		return nil, fmt.Errorf("read subagents dir: %w", err)
 	}
 	var out []string
@@ -110,6 +136,7 @@ func (s *Store) ListSubagentTranscripts(sessionID string) ([]string, error) {
 			out = append(out, name)
 		}
 	}
+	span.SetAttributes(attrResultCount(len(out)))
 	return out, nil
 }
 

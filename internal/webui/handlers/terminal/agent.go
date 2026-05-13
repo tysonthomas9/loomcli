@@ -8,6 +8,10 @@ import (
 	"regexp"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 	"nhooyr.io/websocket" //nolint:staticcheck // SA1019: websocket migration tracked separately
 
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
@@ -152,7 +156,7 @@ func HandleAgentTerminalWS(manager *webuterminal.AgentTmuxManager, auth *realtim
 			return
 		}
 
-		conn, ok := upgradeAgentWS(w, r, patterns)
+		conn, upgradeCtx, ok := upgradeAgentTerminalWithSpan(w, r, patterns, wsID, agentName, sessionName)
 		if !ok {
 			return
 		}
@@ -161,10 +165,51 @@ func HandleAgentTerminalWS(manager *webuterminal.AgentTmuxManager, auth *realtim
 		closeReason := "connection closed"
 		defer func() {
 			_ = conn.Close(closeStatus, closeReason) //nolint:staticcheck // SA1019: websocket migration tracked separately
+			emitAgentDisconnectSpan(upgradeCtx, wsID, agentName, sessionName, closeStatus)
 		}()
 
 		closeStatus, closeReason = runAgentTerminalRelay(r.Context(), conn, manager, sessionName, agentName)
 	}
+}
+
+// upgradeAgentTerminalWithSpan opens a short-lived ws.upgrade span around
+// the agent-terminal handshake. Mirrors upgradeTerminalWithSpan (main
+// terminal) but tags with loom.agent. See trace contract §3.
+func upgradeAgentTerminalWithSpan(w http.ResponseWriter, r *http.Request, patterns []string, wsID, agentName, sessionName string) (*websocket.Conn, context.Context, bool) { //nolint:staticcheck // SA1019: websocket migration tracked separately
+	upgradeCtx, upgradeSpan := otel.Tracer(terminalTracerName).Start(r.Context(), "ws.upgrade",
+		trace.WithAttributes(
+			attribute.String("loom.workspace", wsID),
+			attribute.String("loom.agent", agentName),
+			attribute.String("loom.session_id", sessionName),
+			attribute.String("network.peer.address", r.RemoteAddr),
+		),
+	)
+	conn, ok := upgradeAgentWS(w, r, patterns)
+	if !ok {
+		upgradeSpan.SetStatus(codes.Error, "network")
+		upgradeSpan.End()
+		return nil, upgradeCtx, false
+	}
+	upgradeSpan.End()
+	return conn, upgradeCtx, true
+}
+
+// emitAgentDisconnectSpan records a sibling span on agent-terminal close,
+// tagged with loom.agent in addition to the workspace and session.
+func emitAgentDisconnectSpan(upgradeCtx context.Context, wsID, agentName, sessionName string, closeStatus websocket.StatusCode) { //nolint:staticcheck // SA1019: websocket migration tracked separately
+	_, discSpan := otel.Tracer(terminalTracerName).Start(context.Background(), "ws.disconnect",
+		trace.WithLinks(trace.LinkFromContext(upgradeCtx)),
+		trace.WithAttributes(
+			attribute.String("loom.workspace", wsID),
+			attribute.String("loom.agent", agentName),
+			attribute.String("loom.session_id", sessionName),
+			attribute.String("disconnect.reason", wsCloseReason(closeStatus)),
+		),
+	)
+	if closeStatus == websocket.StatusInternalError { //nolint:staticcheck // SA1019
+		discSpan.SetStatus(codes.Error, "crash")
+	}
+	discSpan.End()
 }
 
 // validateAgentWSRequest validates the agent name, manager, auth, and token.

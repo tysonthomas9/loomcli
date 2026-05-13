@@ -8,8 +8,33 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"time"
+
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
+
+// deviceFlowClient is the traced HTTP client used by RFC 8628 device flow
+// requests. Lazily initialized so tests that override transport via the
+// global default still work.
+var (
+	deviceFlowClientOnce sync.Once
+	deviceFlowClient     *http.Client
+)
+
+func getDeviceFlowClient() *http.Client {
+	deviceFlowClientOnce.Do(func() {
+		deviceFlowClient = &http.Client{
+			Transport: otelhttp.NewTransport(http.DefaultTransport),
+		}
+	})
+	return deviceFlowClient
+}
+
+// postForm is a traced equivalent of http.PostForm.
+func postForm(endpoint string, form url.Values) (*http.Response, error) {
+	return getDeviceFlowClient().PostForm(endpoint, form)
+}
 
 // cliClientID is the well-known OAuth client ID for the loom CLI.
 const cliClientID = "loom-cli"
@@ -100,7 +125,7 @@ func requestDeviceCode(authURL, clientID string) (*DeviceCodeResponse, error) {
 	endpoint := strings.TrimRight(authURL, "/") + "/api/auth/device/code"
 	form := url.Values{"client_id": {clientID}}
 
-	resp, err := http.PostForm(endpoint, form) //nolint:gosec // G107: URL is constructed from user-provided auth service base URL
+	resp, err := postForm(endpoint, form) //nolint:gosec // G107: URL is constructed from user-provided auth service base URL
 	if err != nil {
 		return nil, fmt.Errorf("cannot reach auth service at %s: %w", authURL, err)
 	}
@@ -130,7 +155,7 @@ func pollDeviceToken(authURL, clientID, deviceCode string) (*deviceTokenResponse
 		"grant_type":  {"urn:ietf:params:oauth:grant-type:device_code"},
 	}
 
-	resp, err := http.PostForm(endpoint, form) //nolint:gosec // G107: URL is constructed from user-provided auth service base URL
+	resp, err := postForm(endpoint, form) //nolint:gosec // G107: URL is constructed from user-provided auth service base URL
 	if err != nil {
 		return nil, fmt.Errorf("polling device token: %w", err)
 	}

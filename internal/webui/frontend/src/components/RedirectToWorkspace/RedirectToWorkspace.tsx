@@ -20,6 +20,10 @@ import { useAuth } from "@/contexts/AuthContext";
 import { CreateWorkspaceModal } from "@/components/CreateWorkspaceModal";
 import { KeyboardShortcutProvider } from "@/hooks";
 import { AUTH_MODE_OPEN } from "@/types/common";
+import {
+  ONBOARDING_REPO_URL,
+  ONBOARDING_WORKSPACE_NAME,
+} from "@/utils/onboardingDefaults";
 
 export function RedirectToWorkspace() {
   const navigate = useNavigate();
@@ -93,7 +97,7 @@ export function RedirectToWorkspace() {
           }}
         >
           <p style={{ margin: 0, fontSize: "15px" }}>
-            No workspaces found. Create one to get started.
+            No workspaces found. Start with a prefilled sample repo.
           </p>
           <button
             onClick={() => setShowCreate(true)}
@@ -108,12 +112,17 @@ export function RedirectToWorkspace() {
               cursor: "pointer",
             }}
           >
-            Create Workspace
+            Create Sample Workspace
           </button>
         </div>
         <CreateWorkspaceModal
           isOpen={showCreate}
           onClose={() => setShowCreate(false)}
+          initialValues={{
+            name: ONBOARDING_WORKSPACE_NAME,
+            type: "clone",
+            urlInput: ONBOARDING_REPO_URL,
+          }}
           onSuccess={(data, createdName) => {
             setShowCreate(false);
             const ws = data.workspaces.find(

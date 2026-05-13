@@ -9,10 +9,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/agenterr"
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/automode"
+	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/sessionfinalize"
 	"github.com/tysonthomas9/loomcli/internal/cli/workspace"
@@ -20,20 +20,12 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/events"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/store"
+
+	"go.opentelemetry.io/otel/attribute"
 )
 
 // EventEmitter is the interface for emitting observability events.
 type EventEmitter = events.Emitter
-
-type actorClaimBackend interface {
-	ClaimIssueAsActor(ctx context.Context, id string, lockTTL time.Duration, actor string) error
-}
-
-const (
-	claimReadyLimit         = 256
-	claimConflictRetryLimit = 16
-	claimOperationTimeout   = 10 * time.Second
-)
 
 // Supervisor manages agent subprocess lifecycle: spawning, health-checking,
 // restart logic, and graceful drain. It is created by the daemon and owns
@@ -292,7 +284,7 @@ func (s *Supervisor) superviseAgent(ap *AgentProcess) {
 		if !s.Concurrency.Acquire(ap.Entry.Role) {
 			releaseOwnership()
 			slog.Info("concurrency tracker closed, exiting", "worktree", ap.Entry.Worktree)
-			s.setStopReason(ap, StopReasonShutdown)
+			s.setShutdownStopReason(ap)
 			return
 		}
 
@@ -342,7 +334,7 @@ func (s *Supervisor) checkAgentStopSignals(ap *AgentProcess) bool {
 	select {
 	case <-s.Shutdown:
 		slog.Info("shutdown signal received", "worktree", ap.Entry.Worktree)
-		s.setStopReason(ap, StopReasonShutdown)
+		s.setShutdownStopReason(ap)
 		return true
 	case <-ap.StopCh:
 		slog.Info("stop signal received", "worktree", ap.Entry.Worktree)
@@ -353,10 +345,13 @@ func (s *Supervisor) checkAgentStopSignals(ap *AgentProcess) bool {
 	}
 }
 
-// setStopReason unconditionally sets the agent's stop reason.
-func (s *Supervisor) setStopReason(ap *AgentProcess, reason StopReason) {
+// setShutdownStopReason unconditionally records that this agent stopped
+// because of supervisor shutdown. Every caller (drain, signal handler,
+// ownership transfer) uses the same reason; if a new code path ever needs
+// a different reason, reintroduce the explicit parameter.
+func (s *Supervisor) setShutdownStopReason(ap *AgentProcess) {
 	ap.Mu.Lock()
-	ap.StopReason = reason
+	ap.StopReason = StopReasonShutdown
 	ap.Mu.Unlock()
 }
 
@@ -417,197 +412,6 @@ func (s *Supervisor) assignEpic(ap *AgentProcess) string {
 		}
 	}
 	return epicID
-}
-
-func (s *Supervisor) claimTask(ap *AgentProcess, epicID string) bool {
-	if s.IssueBackend == nil || !shouldClaimTaskForRole(ap) {
-		return true
-	}
-	ae := ap.Entry
-	if sourceRepos, err := config.ResolveAgentRepos(ap.Entry, s.Repos); err == nil {
-		ae.SourceRepos = sourceRepos
-	} else {
-		slog.Warn("failed to resolve agent repos for task claim", "worktree", ap.Entry.Worktree, "err", err)
-	}
-	constraints := cli.MergeRoleConstraints(ap.RoleConfig, ae)
-	opts := backend.ReadyOpts{Limit: claimReadyLimit, ParentID: epicID}
-	if ap.Entry.Repo != "" {
-		opts.Labels = []string{"repo:" + ap.Entry.Repo}
-	}
-	if len(ae.SourceRepos) > 0 {
-		opts.SourceRepos = ae.SourceRepos
-	}
-
-	ap.Mu.Lock()
-	requestedTaskID := ap.RequestedTaskID
-	ap.Mu.Unlock()
-	if requestedTaskID != "" {
-		return s.claimRequestedTask(ap, opts, requestedTaskID)
-	}
-
-	if ap.Entry.Worktree != "" {
-		assignedOpts := opts
-		assignedOpts.Assignee = ap.Entry.Worktree
-		assignedIssues, err := s.readyIssues(assignedOpts)
-		if err != nil {
-			s.setPreflightError(ap, agenterr.Unknown, fmt.Sprintf("ready query failed: %v", err))
-			return false
-		}
-		claimed, failed := s.tryClaimBestTask(ap, assignedIssues, constraints)
-		if claimed {
-			return true
-		}
-		if failed {
-			return false
-		}
-	}
-
-	issues, err := s.readyIssues(opts)
-	if err != nil {
-		s.setPreflightError(ap, agenterr.Unknown, fmt.Sprintf("ready query failed: %v", err))
-		return false
-	}
-	claimed, failed := s.tryClaimBestTask(ap, issues, constraints)
-	if claimed {
-		return true
-	}
-	if failed {
-		return false
-	}
-	s.setPreflightError(ap, agenterr.NoWork, "no claimable tasks")
-	return false
-}
-
-func (s *Supervisor) readyIssues(opts backend.ReadyOpts) ([]backend.IssueData, error) {
-	readyCtx, readyCancel := s.operationContext(claimOperationTimeout)
-	issues, err := s.IssueBackend.Ready(readyCtx, opts)
-	readyCancel()
-	return issues, err
-}
-
-func (s *Supervisor) claimRequestedTask(ap *AgentProcess, opts backend.ReadyOpts, taskID string) bool {
-	if ap.Entry.Worktree != "" {
-		opts.Assignee = ap.Entry.Worktree
-	}
-	issues, err := s.readyIssues(opts)
-	if err != nil {
-		s.setPreflightError(ap, agenterr.Unknown, fmt.Sprintf("ready query failed: %v", err))
-		return false
-	}
-	for _, issue := range issues {
-		if issue.ID != taskID {
-			continue
-		}
-		if !cli.IsWorkableTask(issue) {
-			s.setPreflightError(ap, agenterr.NoWork, fmt.Sprintf("requested task %s is not claimable", taskID))
-			return false
-		}
-		if err := s.claimIssueForAgent(ap, taskID, "requested task"); err != nil {
-			if backend.IsKind(err, backend.KindConflict) {
-				s.setPreflightError(ap, agenterr.NoWork, fmt.Sprintf("requested task %s was already claimed", taskID))
-				return false
-			}
-			s.setPreflightError(ap, agenterr.Unknown, fmt.Sprintf("claim failed for %s: %v", taskID, err))
-			return false
-		}
-		return true
-	}
-	s.setPreflightError(ap, agenterr.NoWork, fmt.Sprintf("requested task %s is not ready", taskID))
-	return false
-}
-
-func (s *Supervisor) tryClaimBestTask(ap *AgentProcess, issues []backend.IssueData, constraints cli.RoleConstraints) (bool, bool) {
-	conflicts := 0
-	for {
-		match := cli.SelectBestTask(issues, constraints)
-		if match == nil {
-			return false, false
-		}
-		if err := s.claimIssueForAgent(ap, match.Issue.ID, match.Reason); err != nil {
-			if backend.IsKind(err, backend.KindConflict) {
-				conflicts++
-				if conflicts >= claimConflictRetryLimit {
-					s.setPreflightError(ap, agenterr.NoWork, "no claimable tasks after claim conflicts")
-					return false, true
-				}
-				issues = removeIssueByID(issues, match.Issue.ID)
-				continue
-			}
-			s.setPreflightError(ap, agenterr.Unknown, fmt.Sprintf("claim failed for %s: %v", match.Issue.ID, err))
-			return false, true
-		}
-		return true, false
-	}
-}
-
-func (s *Supervisor) claimIssueForAgent(ap *AgentProcess, taskID, reason string) error {
-	claimCtx, claimCancel := s.operationContext(claimOperationTimeout)
-	var err error
-	if ap.Entry.Worktree != "" {
-		if actorBackend, ok := s.IssueBackend.(actorClaimBackend); ok {
-			err = actorBackend.ClaimIssueAsActor(claimCtx, taskID, 0, ap.Entry.Worktree)
-		} else {
-			err = s.IssueBackend.ClaimIssue(claimCtx, taskID, 0)
-		}
-	} else {
-		err = s.IssueBackend.ClaimIssue(claimCtx, taskID, 0)
-	}
-	claimCancel()
-	if err != nil {
-		return err
-	}
-	ap.Mu.Lock()
-	ap.AssignedTaskID = taskID
-	ap.RequestedTaskID = ""
-	ap.Mu.Unlock()
-	slog.Info("claimed task for agent", "worktree", ap.Entry.Worktree, "task_id", taskID, "reason", reason)
-	return nil
-}
-
-func (s *Supervisor) operationContext(timeout time.Duration) (context.Context, context.CancelFunc) {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	if s.Shutdown == nil {
-		return ctx, cancel
-	}
-	done := make(chan struct{})
-	var once sync.Once
-	go func() {
-		select {
-		case <-s.Shutdown:
-			cancel()
-		case <-done:
-		case <-ctx.Done():
-		}
-	}()
-	return ctx, func() {
-		once.Do(func() {
-			close(done)
-			cancel()
-		})
-	}
-}
-
-func shouldClaimTaskForRole(ap *AgentProcess) bool {
-	return BuiltInRoles[ap.Entry.Role] || ap.RoleConfig.TaskFilter != ""
-}
-
-func (s *Supervisor) setPreflightError(ap *AgentProcess, class agenterr.ErrorClass, message string) {
-	ap.Mu.Lock()
-	ap.LastExitCode = 0
-	ap.LastExit = time.Now()
-	ap.LastError = &agenterr.AgentError{Class: class, Message: message}
-	ap.LastNoWork = class == agenterr.NoWork
-	ap.Mu.Unlock()
-}
-
-func removeIssueByID(issues []backend.IssueData, id string) []backend.IssueData {
-	out := issues[:0]
-	for _, issue := range issues {
-		if issue.ID != id {
-			out = append(out, issue)
-		}
-	}
-	return out
 }
 
 // createAgentSession creates a session for liveness tracking.
@@ -951,13 +755,29 @@ func (s *Supervisor) postExitCleanup(ap *AgentProcess) {
 }
 
 // sleepBeforeRestart performs interruptible backoff sleep. Returns false if interrupted.
+//
+// One daemon.supervisor.restart span is opened per restart attempt. The span
+// covers the backoff window plus the AgentRestarted event emit; the actual
+// re-spawn that follows is its own daemon.supervisor.spawn child span (via
+// the next iteration of the supervise loop).
 func (s *Supervisor) sleepBeforeRestart(ap *AgentProcess) bool {
 	backoff := s.computeBackoff(ap)
 	ap.Mu.Lock()
 	count := ap.RestartCount
+	errType := errorTypeFromAgentErr(ap.LastError)
 	ap.BackoffUntil = time.Now().Add(backoff)
 	ap.Mu.Unlock()
 	slog.Info("waiting before restart", "worktree", ap.Entry.Worktree, "backoff", backoff, "attempt", count)
+
+	_, span := startSpan(cmdstore.RootContext(),
+		"daemon.supervisor.restart",
+		attribute.String("loom.agent", ap.Entry.Worktree),
+		attribute.String("loom.role", ap.Entry.Role),
+		attribute.String("loom.workspace", s.WorkspaceID),
+		attribute.Int("loom.restart_count", count),
+		attribute.String("loom.error_type", errType),
+	)
+	defer span.End()
 
 	if evt, err := events.NewEvent(events.AgentRestarted, ap.Entry.Worktree, ap.Entry.Role, "", events.AgentRestartedData{PID: 0, RestartCount: count}); err == nil {
 		s.EmitEvent(evt)
@@ -979,7 +799,7 @@ func (s *Supervisor) sleepBeforeRestart(ap *AgentProcess) bool {
 
 	if backoffAction == "shutdown" {
 		slog.Info("shutdown during backoff", "worktree", ap.Entry.Worktree)
-		s.setStopReason(ap, StopReasonShutdown)
+		s.setShutdownStopReason(ap)
 		return false
 	}
 	if backoffAction == "stop" {

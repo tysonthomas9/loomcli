@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/daemon/supervisor"
 	"github.com/tysonthomas9/loomcli/internal/events"
@@ -276,7 +277,7 @@ func wireSupervisorCallbacks(sup *supervisor.Supervisor, issueBackend backend.Is
 		return nil
 	}
 	sup.IssueBackendReady = func(epicID string) (bool, error) {
-		issues, err := issueBackend.Ready(context.Background(), backend.ReadyOpts{
+		issues, err := issueBackend.Ready(cmdstore.RootContext(), backend.ReadyOpts{
 			ParentID: epicID,
 			Limit:    1,
 		})

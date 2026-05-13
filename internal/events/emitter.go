@@ -35,12 +35,20 @@ func (b *Bus) Subscribe(l Listener) {
 }
 
 // Emit writes an event to the JSONL writer and notifies all listeners.
-// Auto-sets Timestamp if zero.
+// Auto-sets Timestamp if zero. Captures the active trace context from the
+// ambient provider (set via SetContextProvider) into e.TraceParent so
+// downstream consumers (otelexport) can re-root their spans under the
+// originating request. Pre-populated TraceParent on the input event is
+// preserved.
+//
 // Note: under concurrent emits, listener notification order may differ from
 // file write order. Listeners should not depend on ordering.
 func (b *Bus) Emit(e Event) error {
 	if e.Timestamp.IsZero() {
 		e.Timestamp = Now()
+	}
+	if e.TraceParent == "" {
+		e.InjectTraceContext(ambientCtx())
 	}
 
 	if err := b.writer.Write(e); err != nil {

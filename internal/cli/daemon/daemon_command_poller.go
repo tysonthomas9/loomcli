@@ -6,6 +6,9 @@ import (
 	"log/slog"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+
+	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
@@ -33,16 +36,31 @@ func (d *Daemon) startAgentCommandPoller() {
 }
 
 func (d *Daemon) pollAgentCommands() {
-	ctx, cancel := context.WithTimeout(context.Background(), agentCommandPollTimeout)
+	cycleStart := time.Now()
+	// Inherit the daemon's process-wide root span via cmdstore.RootContext()
+	// so the cycle attaches to the daemon trace tree (not a detached root).
+	ctx, span := startCommandPollSpan(cmdstore.RootContext())
+	defer span.End()
+
+	ctx, cancel := context.WithTimeout(ctx, agentCommandPollTimeout)
 	defer cancel()
 	cmds, err := d.store.AgentCommands().List(ctx, d.sup.WorkspaceID, store.AgentCommandFilter{
 		Status: domain.AgentCommandQueued,
 		Limit:  50,
 	})
 	if err != nil {
+		recordCommandPollErr(span, err)
+		span.SetAttributes(
+			attribute.Int("result.count", 0),
+			attribute.Int64("cycle.duration_ms", time.Since(cycleStart).Milliseconds()),
+		)
 		slog.Warn("agent command poll failed", "err", err)
 		return
 	}
+	span.SetAttributes(
+		attribute.Int("result.count", len(cmds)),
+		attribute.Int64("cycle.duration_ms", time.Since(cycleStart).Milliseconds()),
+	)
 	for _, cmd := range cmds {
 		if cmd.TargetNodeID != "" && cmd.TargetNodeID != d.sup.NodeID {
 			continue

@@ -17,6 +17,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/runtimectx"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -32,6 +33,12 @@ func OpenStore(ctx context.Context) (*bootstrap.StoreHandle, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open store: %w", err)
 	}
+	// Wrap the store so every method call emits a
+	// `service.Store.<SubStore>.<Method>` span. nil-safe; no-op when
+	// tracing is disabled. Lives on the cmdstore side because
+	// internal/cli (where the spec asked for it) cannot be imported by
+	// cmdstore without a cycle. See store_tracing.go.
+	handle.Store = WrapStoreWithTracing(handle.Store)
 	return handle, nil
 }
 
@@ -48,11 +55,28 @@ func ensureFleetDBEnvFromFleetEnv() {
 	}
 }
 
+// SetRootContext is a thin alias for runtimectx.SetRootContext kept so
+// existing cli-layer callers don't need to migrate. The backing store
+// lives in runtimectx so infra packages can read RootContext without
+// importing cli/cmdstore.
+func SetRootContext(ctx context.Context) {
+	runtimectx.SetRootContext(ctx)
+}
+
+// RootContext is a thin alias for runtimectx.RootContext kept so
+// existing cli-layer callers don't need to migrate. New code should
+// prefer runtimectx.RootContext directly (or, better, thread ctx through).
+func RootContext() context.Context {
+	return runtimectx.RootContext()
+}
+
 // SignalContext returns a context cancelled on SIGINT/SIGTERM. CLI
 // commands use this so Ctrl+C propagates cleanly to fleet-db RPCs and
-// the embedded subprocess shutdown.
+// the embedded subprocess shutdown. Inherits from the root context set
+// by SetRootContext, which lets a trace span installed at CLI startup
+// parent every command's context-attached spans.
 func SignalContext() (context.Context, context.CancelFunc) {
-	return signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	return signal.NotifyContext(runtimectx.RootContext(), os.Interrupt, syscall.SIGTERM)
 }
 
 // ActiveWorkspace resolves the explicit active workspace key

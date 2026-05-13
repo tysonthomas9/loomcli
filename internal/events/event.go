@@ -50,13 +50,26 @@ const (
 
 // Event is the envelope written to JSONL files. Data is stored as json.RawMessage
 // so that JSON round-trips preserve typed data without losing type information.
+//
+// Trace fields:
+//   - TraceParent / TraceState: W3C trace-context captured at emit time. Empty
+//     when the emitter had no active span (or tracing was disabled). The
+//     otelexport consumer rebuilds the parent span context from these so
+//     event-driven spans (loom.task, loom.agent.lifecycle) connect to the
+//     originating request rather than fragmenting into their own traces.
+//
+// Older JSONL records without these fields decode normally — the otelexport
+// consumer treats absent fields as "no parent, use the existing
+// context.Background() path" so backward compatibility is preserved.
 type Event struct {
-	Type      EventType       `json:"type"`
-	Timestamp time.Time       `json:"timestamp"`
-	Agent     string          `json:"agent,omitempty"`
-	Role      string          `json:"role,omitempty"`
-	EpicID    string          `json:"epic_id,omitempty"`
-	Data      json.RawMessage `json:"data,omitempty"`
+	Type        EventType       `json:"type"`
+	Timestamp   time.Time       `json:"timestamp"`
+	Agent       string          `json:"agent,omitempty"`
+	Role        string          `json:"role,omitempty"`
+	EpicID      string          `json:"epic_id,omitempty"`
+	Data        json.RawMessage `json:"data,omitempty"`
+	TraceParent string          `json:"traceparent,omitempty"`
+	TraceState  string          `json:"tracestate,omitempty"`
 }
 
 // NewEvent creates an Event, marshaling v into the Data field.
