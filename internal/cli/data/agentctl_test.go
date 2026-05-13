@@ -201,3 +201,105 @@ func TestAgent503(t *testing.T) {
 		}
 	})
 }
+
+func TestFetchAgentsErrors(t *testing.T) {
+	tests := []struct {
+		name       string
+		status     int
+		body       string
+		wantErrSub string
+	}{
+		{name: "unavailable", status: http.StatusServiceUnavailable, wantErrSub: "daemon unavailable"},
+		{name: "no content", status: http.StatusNoContent, wantErrSub: "no body"},
+		{name: "server error", status: http.StatusInternalServerError, body: "boom", wantErrSub: "HTTP 500"},
+		{name: "bad json", status: http.StatusOK, body: "{", wantErrSub: "decode agents response"},
+		{name: "envelope error", status: http.StatusOK, body: `{"success":false,"error":"bad workspace"}`, wantErrSub: "bad workspace"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if tt.status != 0 {
+					w.WriteHeader(tt.status)
+				}
+				_, _ = w.Write([]byte(tt.body))
+			}))
+			defer srv.Close()
+
+			_, err := fetchAgents(context.Background(), srv.Client(), srv.URL, "default")
+			if err == nil {
+				t.Fatal("expected fetchAgents error")
+			}
+			if !strings.Contains(err.Error(), tt.wantErrSub) {
+				t.Fatalf("error = %q, want %q", err.Error(), tt.wantErrSub)
+			}
+		})
+	}
+}
+
+func TestDecodeAgentMessageFallbackAndError(t *testing.T) {
+	msg, err := decodeAgentMessage([]byte(`{"success":true}`), "yield")
+	if err != nil {
+		t.Fatalf("decode empty success message: %v", err)
+	}
+	if msg != "" {
+		t.Fatalf("message = %q, want empty fallback trigger", msg)
+	}
+
+	_, err = decodeAgentMessage([]byte(`{"success":false,"error":"agent busy"}`), "restart")
+	if err == nil {
+		t.Fatal("expected error response to fail")
+	}
+	if !strings.Contains(err.Error(), "agent busy") {
+		t.Fatalf("error = %q, want agent busy", err.Error())
+	}
+
+	_, err = decodeAgentMessage([]byte(`{`), "stop")
+	if err == nil {
+		t.Fatal("expected malformed JSON to fail")
+	}
+	if !strings.Contains(err.Error(), "decode agent stop response") {
+		t.Fatalf("error = %q, want decode context", err.Error())
+	}
+}
+
+func TestPostAgentActionHTTPErrorIncludesBody(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+		_, _ = w.Write([]byte("already running"))
+	}))
+	defer srv.Close()
+
+	_, err := postAgentAction(context.Background(), srv.Client(), srv.URL, "start", false)
+	if err == nil {
+		t.Fatal("expected HTTP error")
+	}
+	if !strings.Contains(err.Error(), "HTTP 409") || !strings.Contains(err.Error(), "already running") {
+		t.Fatalf("error = %q, want status and body", err.Error())
+	}
+}
+
+func TestRunAgentControlUsesFallbackMessage(t *testing.T) {
+	mux := http.NewServeMux()
+	registerAuthConfig(mux)
+	mux.HandleFunc("/api/workspaces/default/agents/falcon/yield", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = w.Write([]byte(`{"success":true}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	withDataClientState(t, func() {
+		setupAgentTest(t, srv.URL)
+		out, err := captureDataStdout(t, func() error {
+			return runAgentControl(context.Background(), "falcon", "yield", false, true)
+		})
+		if err != nil {
+			t.Fatalf("runAgentControl: %v", err)
+		}
+		if !strings.Contains(out, `agent "falcon" yield requested`) {
+			t.Fatalf("output = %q, want fallback message", out)
+		}
+	})
+}

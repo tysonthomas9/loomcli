@@ -111,8 +111,9 @@ func (b *localBackendStub) RemoveLabel(context.Context, string, string) error { 
 func (b *localBackendStub) ListComments(context.Context, string) ([]backend.CommentData, error) {
 	return nil, nil
 }
-func (b *localBackendStub) AddComment(context.Context, backend.CommentAddParams) (*backend.CommentData, error) {
-	return nil, nil
+func (b *localBackendStub) AddComment(_ context.Context, params backend.CommentAddParams) (*backend.CommentData, error) {
+	b.record("AddComment", params.IssueID, params)
+	return &backend.CommentData{IssueID: params.IssueID, Author: params.Author, Text: params.Text}, nil
 }
 func (b *localBackendStub) ListEvents(context.Context, string, int) ([]backend.EventData, error) {
 	return nil, nil
@@ -267,6 +268,31 @@ func TestDataShowClaimClose_NoServerUsesLocalBackend(t *testing.T) {
 		}
 		if updateParams.Notes == nil || *updateParams.Notes != notes {
 			t.Fatalf("Update notes = %#v", updateParams.Notes)
+		}
+	})
+}
+
+func TestDataComment_NoServerUsesLocalBackend(t *testing.T) {
+	stub := &localBackendStub{}
+	withLocalBackend(t, stub, func() {
+		outputFormat = "text"
+		commentAuthor = "planner"
+
+		out, err := captureDataStdout(t, func() error {
+			return commentCmd.RunE(commentCmd, []string{"loom-2", "ship it"})
+		})
+		if err != nil {
+			t.Fatalf("comment: %v", err)
+		}
+		if !strings.Contains(out, "comment added to loom-2") {
+			t.Fatalf("comment output = %q, want success message", out)
+		}
+		if len(stub.calls) != 1 || stub.calls[0].method != "AddComment" || stub.calls[0].id != "loom-2" {
+			t.Fatalf("calls = %#v, want one AddComment call", stub.calls)
+		}
+		params := stub.calls[0].args.(backend.CommentAddParams)
+		if params.IssueID != "loom-2" || params.Author != "planner" || params.Text != "ship it" {
+			t.Fatalf("Comment params = %#v", params)
 		}
 	})
 }
