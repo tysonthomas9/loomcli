@@ -1,6 +1,9 @@
 package ops
 
-import "errors"
+import (
+	"context"
+	"errors"
+)
 
 // ErrDiffBaseNotFound indicates that no usable base ref could be found for a
 // diff against an agent worktree.
@@ -51,13 +54,13 @@ type GitOps interface {
 	ResolveMergeBase(worktreePath, branch string) (string, error)
 
 	// DiffCommits returns the list of commits between mergeBase and HEAD.
-	DiffCommits(worktreePath, mergeBase string, limit int) ([]DiffCommitResult, error)
+	DiffCommits(ctx context.Context, worktreePath, mergeBase string, limit int) ([]DiffCommitResult, error)
 
 	// DiffFiles returns the list of changed files between two refs.
-	DiffFiles(worktreePath, from, to string) ([]DiffFileResult, error)
+	DiffFiles(ctx context.Context, worktreePath, from, to string) ([]DiffFileResult, error)
 
 	// DiffFilePatch returns the unified diff patch for a single file between two refs.
-	DiffFilePatch(worktreePath, from, to, path string) (*DiffFilePatchResult, error)
+	DiffFilePatch(ctx context.Context, worktreePath, from, to, path string) (*DiffFilePatchResult, error)
 }
 
 // AgentWorktree contains resolved worktree info for an agent.

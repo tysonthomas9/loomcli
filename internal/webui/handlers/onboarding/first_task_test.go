@@ -144,28 +144,22 @@ func TestHandleRunFirstTaskDeletesCreatedIssueWhenStartFails(t *testing.T) {
 	}
 }
 
-// P2.5 — deleteCreatedFirstTask uses r.Context(), so if the caller's context
-// is already canceled when lifecycle fails, the compensating delete inherits
-// that canceled context and the underlying service may no-op, orphaning the
-// issue.
-//
-// We construct an httptest request, cancel its context BEFORE serving, force
-// the lifecycle to fail, and observe whether the delete call propagates a
-// canceled-context to the issue service.
-func TestHandleRunFirstTaskCleanupUsesCanceledContextWhenClientDisconnects(t *testing.T) {
+// Regression: client disconnect must not orphan a just-created first task.
+// deleteCreatedFirstTask uses a detached cleanup context with a bounded
+// timeout, so a canceled request context still lets the compensating delete
+// run to completion.
+func TestHandleRunFirstTaskCleanupRunsWithLiveContextWhenClientDisconnects(t *testing.T) {
 	var deleteCtxErr error
 	var deleteCalled bool
+	var deletedID string
 	issueSvc := &stubIssueService{
 		createFunc: func(context.Context, service.CreateIssueParams) (json.RawMessage, error) {
 			return json.RawMessage(`{"id":"task-1"}`), nil
 		},
-		deleteFunc: func(ctx context.Context, _ string) (json.RawMessage, error) {
+		deleteFunc: func(ctx context.Context, id string) (json.RawMessage, error) {
 			deleteCalled = true
 			deleteCtxErr = ctx.Err()
-			// Honest stub: return what a service backed by this ctx would.
-			if ctx.Err() != nil {
-				return nil, ctx.Err()
-			}
+			deletedID = id
 			return json.RawMessage(`{"deleted_count":1}`), nil
 		},
 	}
@@ -192,11 +186,12 @@ func TestHandleRunFirstTaskCleanupUsesCanceledContextWhenClientDisconnects(t *te
 	if !deleteCalled {
 		t.Fatal("cleanup delete was not called")
 	}
-	if deleteCtxErr == nil {
-		t.Fatal("cleanup ran with a live context — bug appears fixed; consider removing this test or asserting context.Background()")
+	if deletedID != "task-1" {
+		t.Fatalf("deleted issue = %q, want task-1", deletedID)
 	}
-	// Bug confirmed: cleanup observed a canceled context.
-	t.Logf("BUG CONFIRMED: cleanup ctx.Err() = %v (orphans task on client disconnect)", deleteCtxErr)
+	if deleteCtxErr != nil {
+		t.Fatalf("cleanup observed a canceled context: %v — orphans task on client disconnect", deleteCtxErr)
+	}
 }
 
 func TestHandleRunFirstTaskRejectsUnknownAgent(t *testing.T) {

@@ -149,7 +149,7 @@ func TestDiffFilesParityWithNativeGit(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			dir, from, to := tt.setup(t)
-			gotFiles, err := DiffFiles(dir, from, to)
+			gotFiles, err := DiffFiles(t.Context(), dir, from, to)
 			if err != nil {
 				t.Fatalf("DiffFiles failed: %v", err)
 			}
@@ -169,7 +169,7 @@ func TestDiffFilesKnownNativeGitDivergences(t *testing.T) {
 		repo.commitAll("base")
 		repo.write("base.txt", "dirty\n")
 
-		gotFiles, err := DiffFiles(repo.dir, "HEAD", "HEAD")
+		gotFiles, err := DiffFiles(t.Context(), repo.dir, "HEAD", "HEAD")
 		if err != nil {
 			t.Fatalf("DiffFiles failed: %v", err)
 		}
@@ -191,7 +191,7 @@ func TestDiffFilesKnownNativeGitDivergences(t *testing.T) {
 		repo.write("copy.txt", "same\n")
 		repo.commitAll("copy file")
 
-		gotFiles, err := DiffFiles(repo.dir, base, "HEAD")
+		gotFiles, err := DiffFiles(t.Context(), repo.dir, base, "HEAD")
 		if err != nil {
 			t.Fatalf("DiffFiles failed: %v", err)
 		}
@@ -218,7 +218,7 @@ func TestDiffFilesKnownNativeGitDivergences(t *testing.T) {
 		}
 		repo.commitAll("many files")
 
-		gotFiles, err := DiffFiles(repo.dir, base, "HEAD")
+		gotFiles, err := DiffFiles(t.Context(), repo.dir, base, "HEAD")
 		if err != nil {
 			t.Fatalf("DiffFiles failed: %v", err)
 		}
@@ -238,7 +238,7 @@ func TestDiffFilePatchKnownNativeGitDivergences(t *testing.T) {
 		repo.write("large.txt", strings.Repeat("line with enough bytes to exceed the patch cap\n", 12000))
 		repo.commitAll("large patch")
 
-		result, err := DiffFilePatch(repo.dir, base, "HEAD", "large.txt")
+		result, err := DiffFilePatch(t.Context(), repo.dir, base, "HEAD", "large.txt")
 		if err != nil {
 			t.Fatalf("DiffFilePatch failed: %v", err)
 		}
@@ -267,7 +267,7 @@ func TestDiffFilesParityMissingBaseObject(t *testing.T) {
 		t.Skip("git retained the base commit despite depth=1")
 	}
 
-	_, goGitErr := DiffFiles(shallow, base, "HEAD")
+	_, goGitErr := DiffFiles(t.Context(), shallow, base, "HEAD")
 	_, nativeErr := runNativeGitBytesAllowError(t, shallow, "diff", "--name-status", base, "HEAD")
 	if goGitErr == nil || nativeErr == nil {
 		t.Fatalf("missing base object errors: go-git=%v native=%v", goGitErr, nativeErr)

@@ -56,7 +56,7 @@ func diffBaseError(err error) error {
 	return service.ErrInternal("failed to resolve merge-base", err)
 }
 
-func (s *diffServiceImpl) DiffCommits(_ context.Context, wsID, agentName, from string, limit int) ([]ops.DiffCommitResult, error) {
+func (s *diffServiceImpl) DiffCommits(ctx context.Context, wsID, agentName, from string, limit int) ([]ops.DiffCommitResult, error) {
 	wt, err := s.resolveAgent(wsID, agentName)
 	if err != nil {
 		return nil, err
@@ -74,7 +74,7 @@ func (s *diffServiceImpl) DiffCommits(_ context.Context, wsID, agentName, from s
 		}
 	}
 
-	commits, err := s.gitOps.DiffCommits(wt.Path, from, limit)
+	commits, err := s.gitOps.DiffCommits(ctx, wt.Path, from, limit)
 	if err != nil {
 		return nil, service.ErrInternal("failed to get diff commits", err)
 	}
@@ -84,7 +84,7 @@ func (s *diffServiceImpl) DiffCommits(_ context.Context, wsID, agentName, from s
 	return commits, nil
 }
 
-func (s *diffServiceImpl) DiffFiles(_ context.Context, wsID, agentName, from, to string) ([]ops.DiffFileResult, error) {
+func (s *diffServiceImpl) DiffFiles(ctx context.Context, wsID, agentName, from, to string) ([]ops.DiffFileResult, error) {
 	wt, err := s.resolveAgent(wsID, agentName)
 	if err != nil {
 		return nil, err
@@ -109,7 +109,7 @@ func (s *diffServiceImpl) DiffFiles(_ context.Context, wsID, agentName, from, to
 		}
 	}
 
-	files, err := s.gitOps.DiffFiles(wt.Path, from, to)
+	files, err := s.gitOps.DiffFiles(ctx, wt.Path, from, to)
 	if err != nil {
 		return nil, service.ErrInternal("failed to get diff files", err)
 	}
@@ -119,7 +119,7 @@ func (s *diffServiceImpl) DiffFiles(_ context.Context, wsID, agentName, from, to
 	return files, nil
 }
 
-func (s *diffServiceImpl) DiffFilePatch(_ context.Context, wsID, agentName, from, to, filePath string) (*ops.DiffFilePatchResult, error) {
+func (s *diffServiceImpl) DiffFilePatch(ctx context.Context, wsID, agentName, from, to, filePath string) (*ops.DiffFilePatchResult, error) {
 	wt, err := s.resolveAgent(wsID, agentName)
 	if err != nil {
 		return nil, err
@@ -151,7 +151,7 @@ func (s *diffServiceImpl) DiffFilePatch(_ context.Context, wsID, agentName, from
 		}
 	}
 
-	result, err := s.gitOps.DiffFilePatch(wt.Path, from, to, filePath)
+	result, err := s.gitOps.DiffFilePatch(ctx, wt.Path, from, to, filePath)
 	if err != nil {
 		return nil, service.ErrInternal("failed to get diff patch", err)
 	}

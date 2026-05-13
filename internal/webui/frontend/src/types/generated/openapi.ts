@@ -1049,6 +1049,53 @@ export interface paths {
     patch: operations["patchTerminalState"];
     trace?: never;
   };
+  "/api/workspaces/{ws}/terminal/setup": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Start a backend-owned setup command in a setup terminal
+     * @description Opens or reuses the workspace's per-backend setup terminal and runs the
+     *     requested action (install / login / configure / test). For supported
+     *     backends (claude, codex, gemini, opencode, cursor) the resolved command
+     *     is run inside the PTY; for backends flagged as manual (cursor login)
+     *     the terminal shows credential guidance instead.
+     */
+    post: operations["startTerminalSetup"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/onboarding/first-task": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Create the onboarding first task and queue an agent start
+     * @description Creates an open, unassigned issue and requests the named agent start
+     *     working on it via the lifecycle backend. If the lifecycle request
+     *     fails the just-created issue is deleted in a bounded cleanup so the
+     *     kanban does not accumulate orphans on disconnect.
+     */
+    post: operations["runOnboardingFirstTask"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/workspaces/{ws}/agents/{name}/terminal/info": {
     parameters: {
       query?: never;
@@ -4934,6 +4981,124 @@ export interface operations {
             active_tab?: string;
           };
         };
+      };
+    };
+  };
+  startTerminalSetup: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": {
+          /** @description AI backend name (claude, codex, gemini, opencode, cursor) */
+          backend: string;
+          /** @enum {string} */
+          action: "install" | "login" | "configure" | "test";
+        };
+      };
+    };
+    responses: {
+      /** @description Setup terminal created or reused */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            session_name?: string;
+            label?: string;
+            backend?: string;
+            action?: string;
+            command?: string;
+            title?: string;
+            message?: string;
+            manual?: boolean;
+            created?: boolean;
+          };
+        };
+      };
+      /** @description Invalid backend or action */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Terminal manager not available */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  runOnboardingFirstTask: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": {
+          agent_name: string;
+          title: string;
+          description?: string;
+          /** @default task */
+          issue_type?: string;
+          priority?: number;
+          source_repo?: string;
+        };
+      };
+    };
+    responses: {
+      /** @description Issue created and agent start queued */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            success?: boolean;
+            issue?: Record<string, never>;
+            agent_name?: string;
+            started?: boolean;
+            queued?: boolean;
+          };
+        };
+      };
+      /** @description Validation error (missing agent_name or title) */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Agent not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Agent lifecycle backend unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
     };
   };

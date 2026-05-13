@@ -282,7 +282,7 @@ func TestResolveMergeBase_UsesRemoteDefaultBeforeCurrentBranchUpstream(t *testin
 		t.Fatalf("merge-base = %q, want remote default base %q", got, expectedBase)
 	}
 
-	files, err := DiffFiles(clone, got, "HEAD")
+	files, err := DiffFiles(t.Context(), clone, got, "HEAD")
 	if err != nil {
 		t.Fatalf("DiffFiles failed: %v", err)
 	}
@@ -381,7 +381,7 @@ func TestGoGitDiffSupportsLinkedWorktree(t *testing.T) {
 		t.Fatalf("merge-base = %q, want %q", got, expectedBase)
 	}
 
-	files, err := DiffFiles(worktree, got, "HEAD")
+	files, err := DiffFiles(t.Context(), worktree, got, "HEAD")
 	if err != nil {
 		t.Fatalf("DiffFiles on linked worktree failed: %v", err)
 	}
@@ -393,7 +393,7 @@ func TestGoGitDiffSupportsLinkedWorktree(t *testing.T) {
 func TestDiffCommits_Success(t *testing.T) {
 	dir, mergeBase := setupDiffTestRepo(t)
 
-	commits, err := DiffCommits(dir, mergeBase, 0)
+	commits, err := DiffCommits(t.Context(), dir, mergeBase, 0)
 	if err != nil {
 		t.Fatalf("DiffCommits failed: %v", err)
 	}
@@ -424,7 +424,7 @@ func TestDiffCommits_Success(t *testing.T) {
 func TestDiffCommits_WithLimit(t *testing.T) {
 	dir, mergeBase := setupDiffTestRepo(t)
 
-	commits, err := DiffCommits(dir, mergeBase, 1)
+	commits, err := DiffCommits(t.Context(), dir, mergeBase, 1)
 	if err != nil {
 		t.Fatalf("DiffCommits failed: %v", err)
 	}
@@ -461,7 +461,7 @@ func TestDiffCommits_NoCommits(t *testing.T) {
 	run("commit", "-m", "init")
 	head := run("rev-parse", "HEAD")
 
-	commits, err := DiffCommits(dir, head, 0)
+	commits, err := DiffCommits(t.Context(), dir, head, 0)
 	if err != nil {
 		t.Fatalf("DiffCommits failed: %v", err)
 	}
@@ -473,7 +473,7 @@ func TestDiffCommits_NoCommits(t *testing.T) {
 func TestDiffFiles_Success(t *testing.T) {
 	dir, mergeBase := setupDiffTestRepo(t)
 
-	files, err := DiffFiles(dir, mergeBase, "HEAD")
+	files, err := DiffFiles(t.Context(), dir, mergeBase, "HEAD")
 	if err != nil {
 		t.Fatalf("DiffFiles failed: %v", err)
 	}
@@ -525,7 +525,7 @@ func TestDiffFiles_Success(t *testing.T) {
 func TestDiffFiles_WithRename(t *testing.T) {
 	dir, mergeBase := setupDiffTestRepo(t)
 
-	files, err := DiffFiles(dir, mergeBase, "HEAD")
+	files, err := DiffFiles(t.Context(), dir, mergeBase, "HEAD")
 	if err != nil {
 		t.Fatalf("DiffFiles failed: %v", err)
 	}
@@ -588,7 +588,7 @@ func TestDiffFiles_WithSpecialCharacterFilenames(t *testing.T) {
 	run("add", ".")
 	run("commit", "-m", "special filenames")
 
-	files, err := DiffFiles(dir, base, "HEAD")
+	files, err := DiffFiles(t.Context(), dir, base, "HEAD")
 	if err != nil {
 		t.Fatalf("DiffFiles failed: %v", err)
 	}
@@ -614,7 +614,7 @@ func TestDiffFiles_WithAnnotatedTagRef(t *testing.T) {
 	repo.write("feature.txt", "feature\n")
 	repo.commitAll("feature")
 
-	files, err := DiffFiles(repo.dir, "v-base", "HEAD")
+	files, err := DiffFiles(t.Context(), repo.dir, "v-base", "HEAD")
 	if err != nil {
 		t.Fatalf("DiffFiles failed: %v", err)
 	}
@@ -638,7 +638,7 @@ func TestDiffFiles_ModeOnlyChange(t *testing.T) {
 	}
 	repo.run("commit", "-m", "make executable")
 
-	files, err := DiffFiles(repo.dir, base, "HEAD")
+	files, err := DiffFiles(t.Context(), repo.dir, base, "HEAD")
 	if err != nil {
 		t.Fatalf("DiffFiles failed: %v", err)
 	}
@@ -666,7 +666,7 @@ func TestDiffFiles_SymlinkTargetChange(t *testing.T) {
 	}
 	repo.commitAll("retarget symlink")
 
-	files, err := DiffFiles(repo.dir, base, "HEAD")
+	files, err := DiffFiles(t.Context(), repo.dir, base, "HEAD")
 	if err != nil {
 		t.Fatalf("DiffFiles failed: %v", err)
 	}
@@ -683,7 +683,7 @@ func TestDiffFiles_SubmoduleGitlinkChange(t *testing.T) {
 	repo.run("update-index", "--cacheinfo", "160000,2222222222222222222222222222222222222222,deps/mod")
 	repo.commitIndex("update gitlink")
 
-	files, err := DiffFiles(repo.dir, base, "HEAD")
+	files, err := DiffFiles(t.Context(), repo.dir, base, "HEAD")
 	if err != nil {
 		t.Fatalf("DiffFiles failed: %v", err)
 	}
@@ -694,7 +694,7 @@ func TestDiffFiles_SubmoduleGitlinkChange(t *testing.T) {
 		t.Fatalf("gitlink stats = %d/%d, want 1/1", files[0].Additions, files[0].Deletions)
 	}
 
-	result, err := DiffFilePatch(repo.dir, base, "HEAD", "deps/mod")
+	result, err := DiffFilePatch(t.Context(), repo.dir, base, "HEAD", "deps/mod")
 	if err != nil {
 		t.Fatalf("DiffFilePatch failed: %v", err)
 	}
@@ -734,7 +734,7 @@ func TestDiffFiles_NoChanges(t *testing.T) {
 	run("commit", "-m", "init")
 	head := run("rev-parse", "HEAD")
 
-	files, err := DiffFiles(dir, head, "HEAD")
+	files, err := DiffFiles(t.Context(), dir, head, "HEAD")
 	if err != nil {
 		t.Fatalf("DiffFiles failed: %v", err)
 	}
@@ -746,7 +746,7 @@ func TestDiffFiles_NoChanges(t *testing.T) {
 func TestDiffFilePatch_Success(t *testing.T) {
 	dir, mergeBase := setupDiffTestRepo(t)
 
-	result, err := DiffFilePatch(dir, mergeBase, "HEAD", "existing.txt")
+	result, err := DiffFilePatch(t.Context(), dir, mergeBase, "HEAD", "existing.txt")
 	if err != nil {
 		t.Fatalf("DiffFilePatch failed: %v", err)
 	}
@@ -770,7 +770,7 @@ func TestDiffFilePatch_Success(t *testing.T) {
 func TestDiffFilePatch_BinaryFile(t *testing.T) {
 	dir, mergeBase := setupDiffTestRepo(t)
 
-	result, err := DiffFilePatch(dir, mergeBase, "HEAD", "image.bin")
+	result, err := DiffFilePatch(t.Context(), dir, mergeBase, "HEAD", "image.bin")
 	if err != nil {
 		t.Fatalf("DiffFilePatch failed: %v", err)
 	}
@@ -790,7 +790,7 @@ func TestDiffFilePatch_BinaryModification(t *testing.T) {
 	repo.writeBytes("image.bin", []byte{0, 1, 2, 99, 4})
 	repo.commitAll("modify binary")
 
-	result, err := DiffFilePatch(repo.dir, base, "HEAD", "image.bin")
+	result, err := DiffFilePatch(t.Context(), repo.dir, base, "HEAD", "image.bin")
 	if err != nil {
 		t.Fatalf("DiffFilePatch failed: %v", err)
 	}
@@ -808,7 +808,7 @@ func TestDiffFilePatch_BinaryModification(t *testing.T) {
 func TestDiffFilePatch_DeletedFile(t *testing.T) {
 	dir, mergeBase := setupDiffTestRepo(t)
 
-	result, err := DiffFilePatch(dir, mergeBase, "HEAD", "to-delete.txt")
+	result, err := DiffFilePatch(t.Context(), dir, mergeBase, "HEAD", "to-delete.txt")
 	if err != nil {
 		t.Fatalf("DiffFilePatch failed: %v", err)
 	}
@@ -826,11 +826,11 @@ func TestDiffFilePatch_DeletedFile(t *testing.T) {
 func TestDiffFilePatch_RenameMatchesOldAndNewPath(t *testing.T) {
 	dir, mergeBase := setupDiffTestRepo(t)
 
-	oldPathResult, err := DiffFilePatch(dir, mergeBase, "HEAD", "to-rename.txt")
+	oldPathResult, err := DiffFilePatch(t.Context(), dir, mergeBase, "HEAD", "to-rename.txt")
 	if err != nil {
 		t.Fatalf("DiffFilePatch old path failed: %v", err)
 	}
-	newPathResult, err := DiffFilePatch(dir, mergeBase, "HEAD", "renamed.txt")
+	newPathResult, err := DiffFilePatch(t.Context(), dir, mergeBase, "HEAD", "renamed.txt")
 	if err != nil {
 		t.Fatalf("DiffFilePatch new path failed: %v", err)
 	}
@@ -883,7 +883,7 @@ func TestDiffFilePatch_TooLarge(t *testing.T) {
 	run("add", ".")
 	run("commit", "-m", "big change")
 
-	result, err := DiffFilePatch(dir, base, "HEAD", "f.txt")
+	result, err := DiffFilePatch(t.Context(), dir, base, "HEAD", "f.txt")
 	if err != nil {
 		t.Fatalf("DiffFilePatch failed: %v", err)
 	}
@@ -923,7 +923,7 @@ func TestDiffFilePatch_NoChange(t *testing.T) {
 	run("commit", "-m", "init")
 	head := run("rev-parse", "HEAD")
 
-	result, err := DiffFilePatch(dir, head, "HEAD", "f.txt")
+	result, err := DiffFilePatch(t.Context(), dir, head, "HEAD", "f.txt")
 	if err != nil {
 		t.Fatalf("DiffFilePatch failed: %v", err)
 	}

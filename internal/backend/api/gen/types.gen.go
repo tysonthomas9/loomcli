@@ -929,6 +929,30 @@ func (e ListReadyParamsSort) Valid() bool {
 	}
 }
 
+// Defines values for StartTerminalSetupJSONBodyAction.
+const (
+	Configure StartTerminalSetupJSONBodyAction = "configure"
+	Install   StartTerminalSetupJSONBodyAction = "install"
+	Login     StartTerminalSetupJSONBodyAction = "login"
+	Test      StartTerminalSetupJSONBodyAction = "test"
+)
+
+// Valid indicates whether the value is a known member of the StartTerminalSetupJSONBodyAction enum.
+func (e StartTerminalSetupJSONBodyAction) Valid() bool {
+	switch e {
+	case Configure:
+		return true
+	case Install:
+		return true
+	case Login:
+		return true
+	case Test:
+		return true
+	default:
+		return false
+	}
+}
+
 // AddDependencyRequest defines model for AddDependencyRequest.
 type AddDependencyRequest struct {
 	DepType     *string `json:"dep_type,omitempty"`
@@ -2133,6 +2157,16 @@ type SaveIssueTabsJSONBody struct {
 	Tabs        []IssueTab `json:"tabs"`
 }
 
+// RunOnboardingFirstTaskJSONBody defines parameters for RunOnboardingFirstTask.
+type RunOnboardingFirstTaskJSONBody struct {
+	AgentName   string  `json:"agent_name"`
+	Description *string `json:"description,omitempty"`
+	IssueType   *string `json:"issue_type,omitempty"`
+	Priority    *int    `json:"priority,omitempty"`
+	SourceRepo  *string `json:"source_repo,omitempty"`
+	Title       string  `json:"title"`
+}
+
 // ListReadyParams defines parameters for ListReady.
 type ListReadyParams struct {
 	Assignee        *string                 `form:"assignee,omitempty" json:"assignee,omitempty"`
@@ -2182,6 +2216,17 @@ type GetTerminalSessionStatusParams struct {
 type ListSessionsByIssueParams struct {
 	IssueId *string `form:"issue_id,omitempty" json:"issue_id,omitempty"`
 }
+
+// StartTerminalSetupJSONBody defines parameters for StartTerminalSetup.
+type StartTerminalSetupJSONBody struct {
+	Action StartTerminalSetupJSONBodyAction `json:"action"`
+
+	// Backend AI backend name (claude, codex, gemini, opencode, cursor)
+	Backend string `json:"backend"`
+}
+
+// StartTerminalSetupJSONBodyAction defines parameters for StartTerminalSetup.
+type StartTerminalSetupJSONBodyAction string
 
 // PatchTerminalStateJSONBody defines parameters for PatchTerminalState.
 type PatchTerminalStateJSONBody struct {
@@ -2271,8 +2316,14 @@ type SaveIssueTabsJSONRequestBody SaveIssueTabsJSONBody
 // RenameWorkspaceJSONRequestBody defines body for RenameWorkspace for application/json ContentType.
 type RenameWorkspaceJSONRequestBody = WorkspaceRenameRequest
 
+// RunOnboardingFirstTaskJSONRequestBody defines body for RunOnboardingFirstTask for application/json ContentType.
+type RunOnboardingFirstTaskJSONRequestBody RunOnboardingFirstTaskJSONBody
+
 // SeedTerminalSessionJSONRequestBody defines body for SeedTerminalSession for application/json ContentType.
 type SeedTerminalSessionJSONRequestBody = SeedRequest
+
+// StartTerminalSetupJSONRequestBody defines body for StartTerminalSetup for application/json ContentType.
+type StartTerminalSetupJSONRequestBody StartTerminalSetupJSONBody
 
 // SpawnTerminalSessionJSONRequestBody defines body for SpawnTerminalSession for application/json ContentType.
 type SpawnTerminalSessionJSONRequestBody = TerminalSpawnRequest

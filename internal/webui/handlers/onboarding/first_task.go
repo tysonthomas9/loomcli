@@ -6,11 +6,17 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
+
+// cleanupTimeout bounds the compensating delete after a failed lifecycle
+// start. Detached from the request context so a disconnected client does
+// not cause the cleanup to no-op and orphan the just-created issue.
+const cleanupTimeout = 5 * time.Second
 
 type runFirstTaskRequest struct {
 	AgentName   string `json:"agent_name"`
@@ -94,7 +100,7 @@ func HandleRunFirstTask(issueSvc service.IssueService, agentSvc service.AgentSer
 			Payload:      map[string]string{"task_id": issueID},
 		})
 		if err != nil {
-			deleteCreatedFirstTask(r, issueSvc, issueID)
+			deleteCreatedFirstTask(issueSvc, issueID)
 			handler.HandleServiceError(w, err)
 			return
 		}
@@ -133,8 +139,10 @@ func decodeIssueID(raw json.RawMessage) (string, error) {
 	return created.ID, nil
 }
 
-func deleteCreatedFirstTask(r *http.Request, issueSvc service.IssueService, issueID string) {
-	if _, err := issueSvc.DeleteIssue(r.Context(), issueID); err != nil {
+func deleteCreatedFirstTask(issueSvc service.IssueService, issueID string) {
+	ctx, cancel := context.WithTimeout(context.Background(), cleanupTimeout)
+	defer cancel()
+	if _, err := issueSvc.DeleteIssue(ctx, issueID); err != nil {
 		slog.Warn("onboarding first task cleanup failed", "issue_id", issueID, "err", err)
 	}
 }

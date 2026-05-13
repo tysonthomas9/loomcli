@@ -146,7 +146,10 @@ func repoRemotes(repo *gogit.Repository) []string {
 
 // DiffCommits returns the list of commits between mergeBase and HEAD.
 // Format: %H|%h|%an|%ae|%aI|%s — subject is last so pipes in it are preserved.
-func DiffCommits(worktreePath, mergeBase string, limit int) ([]ops.DiffCommitResult, error) {
+// ctx is currently unused at this layer (RunGitCommand has no ctx surface yet)
+// but is accepted so the public API mirrors DiffFiles/DiffFilePatch.
+func DiffCommits(ctx context.Context, worktreePath, mergeBase string, limit int) ([]ops.DiffCommitResult, error) {
+	_ = ctx
 	if err := validateGitRef(mergeBase); err != nil {
 		return nil, err
 	}
@@ -182,8 +185,10 @@ func DiffCommits(worktreePath, mergeBase string, limit int) ([]ops.DiffCommitRes
 }
 
 // DiffFiles returns the list of changed files between two refs with status and stats.
-func DiffFiles(worktreePath, from, to string) ([]ops.DiffFileResult, error) {
-	changes, err := diffChanges(worktreePath, from, to)
+// ctx is plumbed into go-git's DiffContext so a canceled request stops the
+// in-process tree walk instead of running to natural completion.
+func DiffFiles(ctx context.Context, worktreePath, from, to string) ([]ops.DiffFileResult, error) {
+	changes, err := diffChanges(ctx, worktreePath, from, to)
 	if err != nil {
 		return nil, err
 	}
@@ -202,7 +207,7 @@ func DiffFiles(worktreePath, from, to string) ([]ops.DiffFileResult, error) {
 	return results, nil
 }
 
-func diffChanges(worktreePath, from, to string) (object.Changes, error) {
+func diffChanges(ctx context.Context, worktreePath, from, to string) (object.Changes, error) {
 	if err := validateGitRef(from); err != nil {
 		return nil, err
 	}
@@ -229,7 +234,7 @@ func diffChanges(worktreePath, from, to string) (object.Changes, error) {
 	if err != nil {
 		return nil, fmt.Errorf("load to tree: %w", err)
 	}
-	changes, err := fromTree.DiffContext(context.Background(), toTree)
+	changes, err := fromTree.DiffContext(ctx, toTree)
 	if err != nil {
 		return nil, fmt.Errorf("diff trees: %w", err)
 	}
@@ -315,11 +320,13 @@ func parseNumstatRenamePath(s string) string {
 }
 
 // DiffFilePatch returns the unified diff patch for a single file between two refs.
-func DiffFilePatch(worktreePath, from, to, path string) (*ops.DiffFilePatchResult, error) {
+// ctx is plumbed into the underlying go-git tree walk so a canceled request
+// stops the walk.
+func DiffFilePatch(ctx context.Context, worktreePath, from, to, path string) (*ops.DiffFilePatchResult, error) {
 	if path == "" {
 		return nil, fmt.Errorf("path must not be empty")
 	}
-	changes, err := diffChanges(worktreePath, from, to)
+	changes, err := diffChanges(ctx, worktreePath, from, to)
 	if err != nil {
 		return nil, err
 	}

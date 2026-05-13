@@ -299,8 +299,11 @@ describe("WorkspaceLayout", () => {
     });
   });
 
-  describe("terminal session map scope", () => {
-    it("does not fetch issue sessions outside the terminal route", async () => {
+  describe("issue session map scope", () => {
+    // Regression: previously gated to view === "terminal", which left
+    // kanban/table IssueCards with an always-empty map and hidden badges
+    // until the user visited Terminal. Hook is now enabled on every route.
+    it("fetches issue sessions on the kanban route so cards can show the active-session badge", async () => {
       mockUseRouteView.mockReturnValue({
         view: "kanban",
         setView: vi.fn(),
@@ -314,10 +317,13 @@ describe("WorkspaceLayout", () => {
         expect(screen.getByTestId("outlet-content")).toBeInTheDocument();
       });
 
-      expect(mockUseIssueSessionMap).toHaveBeenCalledWith({ enabled: false });
+      expect(mockUseIssueSessionMap).toHaveBeenCalled();
+      const firstArg = mockUseIssueSessionMap.mock.calls[0]?.[0];
+      // No args, or args without { enabled: false } — fetch must not be gated off.
+      expect(firstArg?.enabled).not.toBe(false);
     });
 
-    it("enables issue session fetches on the terminal route", async () => {
+    it("fetches issue sessions on the terminal route", async () => {
       mockUseRouteView.mockReturnValue({
         view: "terminal",
         setView: vi.fn(),
@@ -331,7 +337,9 @@ describe("WorkspaceLayout", () => {
         expect(screen.getByTestId("outlet-content")).toBeInTheDocument();
       });
 
-      expect(mockUseIssueSessionMap).toHaveBeenCalledWith({ enabled: true });
+      expect(mockUseIssueSessionMap).toHaveBeenCalled();
+      const firstArg = mockUseIssueSessionMap.mock.calls[0]?.[0];
+      expect(firstArg?.enabled).not.toBe(false);
     });
   });
 

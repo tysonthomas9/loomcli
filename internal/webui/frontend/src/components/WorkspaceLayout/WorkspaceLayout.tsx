@@ -11,15 +11,16 @@ import {
   WorkspaceProvider,
   StoreProvider,
   useIssueSessionMap,
-  useRouteView,
 } from "@/hooks";
 import { IssueSessionProvider } from "@/contexts/IssueSessionContext";
 import { fetchWorkspaceApi } from "@/hooks/api";
 import { clearLastWorkspaceId } from "@/utils/scopedStorage";
 
+// IssueCard reads active-session state from this context to render the
+// session badge on kanban/table/graph views. Keep the hook enabled across
+// all routes so cards have the data before the user opens Terminal.
 function IssueSessionWrapper({ children }: { children: React.ReactNode }) {
-  const { view } = useRouteView();
-  const issueSessionMap = useIssueSessionMap({ enabled: view === "terminal" });
+  const issueSessionMap = useIssueSessionMap();
   return (
     <IssueSessionProvider value={issueSessionMap}>
       {children}

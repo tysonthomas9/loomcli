@@ -267,19 +267,19 @@ func (m *mockGitOps) ResolveMergeBase(worktreePath, branch string) (string, erro
 	}
 	return "abc123", nil
 }
-func (m *mockGitOps) DiffCommits(worktreePath, mergeBase string, limit int) ([]ops.DiffCommitResult, error) {
+func (m *mockGitOps) DiffCommits(_ context.Context, worktreePath, mergeBase string, limit int) ([]ops.DiffCommitResult, error) {
 	if m.diffCommitsFunc != nil {
 		return m.diffCommitsFunc(worktreePath, mergeBase, limit)
 	}
 	return []ops.DiffCommitResult{}, nil
 }
-func (m *mockGitOps) DiffFiles(worktreePath, from, to string) ([]ops.DiffFileResult, error) {
+func (m *mockGitOps) DiffFiles(_ context.Context, worktreePath, from, to string) ([]ops.DiffFileResult, error) {
 	if m.diffFilesFunc != nil {
 		return m.diffFilesFunc(worktreePath, from, to)
 	}
 	return []ops.DiffFileResult{}, nil
 }
-func (m *mockGitOps) DiffFilePatch(worktreePath, from, to, path string) (*ops.DiffFilePatchResult, error) {
+func (m *mockGitOps) DiffFilePatch(_ context.Context, worktreePath, from, to, path string) (*ops.DiffFilePatchResult, error) {
 	if m.diffFilePatchFunc != nil {
 		return m.diffFilePatchFunc(worktreePath, from, to, path)
 	}
