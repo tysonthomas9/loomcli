@@ -40,11 +40,18 @@ After ~30 seconds you should see the 3 seeded tasks move `open → closed`,
 with one `Playground implementation (PLAYGROUND-N)` commit per task in
 the coder worktree under `~/.loom/workspaces/playground/worktrees/repo/playground-coder/`.
 
-`setup.sh` is **not** idempotent across orphan fleet-db state — if a previous
-run left stale role records (e.g. you `kill -9`'d the daemon mid-create),
-re-running may fail with `create role "plan": HTTP 409 already exists`. Fix
-by stopping `loom serve`, removing `~/.loom`, and starting fresh. Normal
-`./teardown.sh && ./setup.sh` works when the previous run completed.
+`./teardown.sh` is idempotent and reliably purges the workspace from
+fleet-db — including the operational data keys (`fleet-db:PLAYGROUND:*`)
+that `loom workspace remove` leaves behind. `./setup.sh` also self-heals:
+if it hits an HTTP 409 "already exists" on workspace create (orphan keys
+from an earlier interrupted run), it transparently runs teardown and
+retries once. Net effect: you can `./setup.sh` repeatedly without
+manually nuking `~/.loom` between runs.
+
+Under the hood, `teardown.sh` connects to fleet-db's embedded Redis
+(address from `~/.loom/fleet-db/runtime.json`) and SCAN-then-DEL's every
+`fleet-db:PLAYGROUND:*` key. Only PLAYGROUND keys are touched; other
+workspaces in the same fleet-db are unaffected.
 
 ## What gets created
 

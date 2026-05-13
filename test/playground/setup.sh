@@ -24,7 +24,35 @@ export PATH="$BIN:$PATH"
   printf 'export LOOM_WORKSPACE=PLAYGROUND\n'
 } > "$RUNTIME/env"
 
-loom workspace create playground --repos "$REPO"
+# Try to create the workspace. If a previous run left orphan fleet-db keys
+# (e.g. interrupted setup, `kill -9`'d daemon), `loom workspace create`
+# fails with HTTP 409 on role seeding. Recover by running teardown.sh
+# (which surgically purges fleet-db:PLAYGROUND:*) and retrying once.
+if ! loom workspace create playground --repos "$REPO" 2>"$RUNTIME/create.err"; then
+  if grep -q "already exists" "$RUNTIME/create.err"; then
+    echo "[setup] orphan fleet-db state detected; running teardown then retrying..." >&2
+    "$HERE/teardown.sh" >/dev/null 2>&1 || true
+    # teardown nukes .runtime/, so re-materialize before the retry.
+    mkdir -p "$BIN"
+    ln -sf "$HERE/loom-backend-playground" "$BIN/loom-backend-playground"
+    rm -rf "$REPO"
+    mkdir -p "$REPO"
+    cp -R "$HERE/repo-template/." "$REPO/"
+    git -C "$REPO" init -q -b main
+    git -C "$REPO" add .
+    git -C "$REPO" -c user.email=playground@loom.local -c user.name=Playground \
+      commit -q -m "Initial playground commit"
+    {
+      printf 'export PATH="%s:$PATH"\n' "$BIN"
+      printf 'export LOOM_WORKSPACE=PLAYGROUND\n'
+    } > "$RUNTIME/env"
+    loom workspace create playground --repos "$REPO"
+  else
+    cat "$RUNTIME/create.err" >&2
+    exit 1
+  fi
+fi
+rm -f "$RUNTIME/create.err"
 export LOOM_WORKSPACE=PLAYGROUND
 loom workspace use PLAYGROUND
 
