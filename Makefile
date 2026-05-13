@@ -25,6 +25,22 @@ test-all:
 	@echo "Running all tests..."
 	@TEST_TAGS=integration,e2e TEST_COVER=1 ./scripts/test.sh
 
+# Run playground smoke + scenario + UI tests. Requires `loom serve`
+# running on http://localhost:8080 and a clean ~/.loom (or no orphan
+# PLAYGROUND state). The shell + Go tests drive setup.sh → daemon →
+# assertions → teardown.sh. The Playwright stage re-creates the workspace
+# and asserts the kanban renders the seed tasks.
+test-playground:
+	@echo "=== Playground: shell smoke test ==="
+	@bash test/playground/smoke_test.sh
+	@echo "=== Playground: Go scenario test ==="
+	@go test -tags=playground -timeout=3m ./test/playground/...
+	@echo "=== Playground: Playwright UI test ==="
+	@bash test/playground/setup.sh >/dev/null
+	@cd internal/webui/frontend && RUN_INTEGRATION_TESTS=1 LOOM_LOCAL_SERVER=1 \
+		npx playwright test --project=integration playground.integration.spec.ts; \
+		rc=$$?; bash ../../test/playground/teardown.sh >/dev/null 2>&1 || true; exit $$rc
+
 # Run clean-checkout embedded local mode smoke. Requires a loom binary and
 # fleet-db binary; override with LOOM_BIN=/path/to/loom FLEET_DB_BIN=/path/to/fleet-db.
 test-fleetdb-embedded: build
