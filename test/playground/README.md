@@ -123,6 +123,7 @@ without LLM calls.
 | Backend                                | Failure mode                                                                                                          | Tests                                                                                              |
 | -------------------------------------- | --------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
 | `loom-backend-playground-hang`         | Parent goes silent. No descendants.                                                                                   | Basic watchdog (single-pgroup case). Simplest template for "copy this when adding a new bug."      |
+| `loom-backend-playground-grandchild`   | Spawns setsid grandchild in its own pgroup; mode flag (`hang`/`orphan`) selects whether the parent hangs or exits 0.  | PR #63: descendant-pgroup signal during watchdog kill, and startup orphan sweep.                   |
 | `loom-backend-playground-crash`        | Exits non-zero a few seconds after invoke.                                                                            | Failure classification + retry/backoff.                                                            |
 | `loom-backend-playground-slow`         | Writes one stdout line every `interval` seconds (less than the watchdog timeout).                                     | Regression guard: legitimate slow work must NOT trigger the watchdog.                              |
 
@@ -211,12 +212,13 @@ reason. To defend:
 2. Before trusting a green scenario, check out that hash and re-run. If
    it still passes, the assertion is too weak — fix it before merging.
 
-Example (replace `<pre-fix-commit>` with the hash from your scenario header):
+Example (using the #63 grandchild scenarios, where `5c3385b2` is the
+commit immediately before `2d451815`, the #63 fix):
 
 ```sh
-git checkout <pre-fix-commit>
-bash test/playground/scenarios/<your_scenario>.sh
-# must FAIL; if it passes, the scenario is not actually testing the bug
+git checkout 5c3385b2                                          # pre-#63
+bash test/playground/scenarios/watchdog_kills_grandchild.sh
+# must FAIL; if it passes, the scenario is not actually testing #63
 git checkout -                                                 # back to HEAD
 ```
 

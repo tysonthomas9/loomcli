@@ -1,0 +1,111 @@
+#!/bin/sh
+# Spawns a setsid descendant for PR #63 verification (kill backend descendants
+# in separate pgroups + startup orphan sweep).
+#
+# Failure modes (selected by a mode file written before invoke):
+#
+#   mode=hang
+#     Spawn setsid grandchild in its OWN pgroup, then parent stays silent
+#     past the daemon's watchdog. Without #63: watchdog SIGTERMs parent;
+#     grandchild survives in a separate pgroup. With #63: StopAgent
+#     snapshots descendant pgroups BEFORE SIGTERM and signals each one —
+#     grandchild dies too.
+#
+#   mode=orphan
+#     Spawn setsid grandchild, then close the task and exit cleanly. The
+#     scenario harness SIGKILLs the daemon, leaving the grandchild with
+#     PPID==1 inside a managed worktree. On next daemon start, the startup
+#     sweep should find and kill the orphan.
+#
+# Mode is read from a file rather than env because the daemon controls
+# backend env via buildBackendEnv and won't propagate test-only vars from
+# the harness. Scenarios write this file before dispatching a task.
+#
+# Env knobs:
+#   LOOM_PLAYGROUND_GRANDCHILD_SECONDS     — parent silent duration in hang mode (default 120)
+#   LOOM_PLAYGROUND_GRANDCHILD_SLEEP       — grandchild sleep duration (default 600)
+#   LOOM_PLAYGROUND_GRANDCHILD_MARKER_DIR  — override marker dir (testing only)
+
+set -eu
+
+cmd="${1:-}"
+hang_seconds="${LOOM_PLAYGROUND_GRANDCHILD_SECONDS:-120}"
+grandchild_sleep="${LOOM_PLAYGROUND_GRANDCHILD_SLEEP:-600}"
+marker_root="${LOOM_PLAYGROUND_GRANDCHILD_MARKER_DIR:-${LOOM_WORKSPACE_RUNTIME_DIR:-/tmp/playground-grandchild}/grandchild}"
+pid_file="${marker_root}/grandchild.pid"
+alive_file="${marker_root}/grandchild.alive"
+started_file="${marker_root}/started.flag"
+mode_file="${marker_root}/mode"
+
+mode="hang"
+if [ -s "$mode_file" ]; then
+  mode="$(tr -d '[:space:]' < "$mode_file")"
+fi
+
+run_invoke() {
+  task_id="${LOOM_ASSIGNED_TASK_ID:-PLAYGROUND-GRANDCHILD-1}"
+  agent="${LOOM_AGENT_NAME:-playground-grandchild}"
+
+  mkdir -p "$marker_root"
+  rm -f "$pid_file" "$alive_file" "$started_file"
+
+  echo "[playground-grandchild] ${agent} claiming ${task_id} (mode=${mode})"
+  loom claim "$task_id" || true
+
+  # Spawn grandchild in its OWN process group. macOS lacks setsid(1), so
+  # use python3 which has os.setsid() in stdlib. The grandchild:
+  #   - puts itself in a new session/pgroup via os.setsid()
+  #   - writes its PID to $pid_file
+  #   - holds an open fd on $alive_file for liveness inspection
+  #   - sleeps long enough to outlive any reasonable test
+  # All fds redirected so grandchild output doesn't reach the daemon log —
+  # parent silence is what trips the watchdog in hang mode.
+  python3 -c '
+import os, sys, time
+os.setsid()
+pid_file, alive_file, sleep_s = sys.argv[1], sys.argv[2], int(sys.argv[3])
+with open(pid_file, "w") as f:
+    f.write(str(os.getpid()))
+fd = os.open(alive_file, os.O_CREAT | os.O_WRONLY, 0o644)
+time.sleep(sleep_s)
+' "$pid_file" "$alive_file" "$grandchild_sleep" </dev/null >/dev/null 2>&1 &
+  : > "$started_file"
+
+  # Brief settle so the grandchild has time to write its pidfile before
+  # the parent goes silent / exits.
+  sleep 1
+
+  case "$mode" in
+    hang)
+      exec sleep "$hang_seconds"
+      ;;
+    orphan)
+      # Close the task so the daemon doesn't re-schedule and spawn more
+      # grandchildren. Then exit cleanly. The grandchild keeps running;
+      # the harness SIGKILLs the daemon shortly, leaving it orphaned.
+      loom data close "$task_id" --reason "playground-grandchild orphan-mode artificial close" || true
+      loom complete || true
+      exit 0
+      ;;
+    *)
+      echo "[playground-grandchild] unknown mode '${mode}' (expected hang or orphan)" >&2
+      exit 2
+      ;;
+  esac
+}
+
+case "$cmd" in
+  meta)
+    printf '{"display_name":"Playground Grandchild","version":"1","description":"Spawns setsid descendant for #63 watchdog and orphan-sweep verification","binary_name":"loom-backend-playground-grandchild"}\n'
+    ;;
+  health)
+    printf '{"installed":true,"healthy":true,"message":"ready"}\n'
+    ;;
+  invoke)
+    run_invoke
+    ;;
+  *)
+    echo "usage: loom-backend-playground-grandchild {meta|health|invoke}" >&2
+    exit 2
+    ;;
+esac
