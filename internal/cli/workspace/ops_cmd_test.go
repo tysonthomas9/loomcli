@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli/local"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 )
@@ -215,6 +217,131 @@ func TestShouldWarnLocalRuntimeUnhealthy(t *testing.T) {
 			}
 			if got := shouldWarnLocalRuntimeUnhealthy(tc.runtime, tc.err); got != tc.wantWarning {
 				t.Errorf("shouldWarnLocalRuntimeUnhealthy = %v, want %v", got, tc.wantWarning)
+			}
+		})
+	}
+}
+
+func TestWorkspaceOpsAgentStatusFlagsUnknownRole(t *testing.T) {
+	roleNames := map[string]struct{}{"plan": {}, "task": {}}
+	agent := &domain.Agent{
+		Name:         "rogue",
+		RoleName:     "missing",
+		State:        domain.AgentStateActive,
+		DesiredState: domain.AgentDesiredRunning,
+	}
+
+	item, problems := workspaceOpsAgentStatus(bootstrap.WorkspaceLocalState{}, nil, roleNames, agent)
+
+	if item.Runnable {
+		t.Error("Runnable = true, want false (unknown role forces non-runnable)")
+	}
+	if item.Reason != "unknown_role" {
+		t.Errorf("Reason = %q, want unknown_role", item.Reason)
+	}
+	if len(problems) == 0 {
+		t.Fatal("expected agent_unknown_role problem")
+	}
+	if problems[0].Code != "agent_unknown_role" || problems[0].Severity != "error" {
+		t.Errorf("problem = %+v, want code=agent_unknown_role severity=error", problems[0])
+	}
+	if problems[0].Agent != "rogue" {
+		t.Errorf("problem.Agent = %q, want rogue", problems[0].Agent)
+	}
+}
+
+func TestWorkspaceOpsAgentStatusFlagsMissingWorktree(t *testing.T) {
+	roleNames := map[string]struct{}{"plan": {}}
+	localState := bootstrap.WorkspaceLocalState{
+		Path: "/some/workspace",
+		Agents: map[string]bootstrap.AgentLocalState{
+			"planner": {Worktree: "/nonexistent/path/that/has/no/dot-git"},
+		},
+	}
+	agent := &domain.Agent{
+		Name:         "planner",
+		RoleName:     "plan",
+		State:        domain.AgentStateActive,
+		DesiredState: domain.AgentDesiredRunning,
+	}
+
+	item, problems := workspaceOpsAgentStatus(localState, nil, roleNames, agent)
+
+	if !item.Runnable {
+		t.Error("Runnable = false; want true (role exists, desired running)")
+	}
+	if item.WorktreeReady {
+		t.Error("WorktreeReady = true; want false (no .git on disk)")
+	}
+	if item.Reason != "missing_local_worktree" {
+		t.Errorf("Reason = %q, want missing_local_worktree", item.Reason)
+	}
+	if len(problems) == 0 {
+		t.Fatal("expected agent_missing_worktree problem")
+	}
+	if problems[0].Code != "agent_missing_worktree" || problems[0].Severity != "error" {
+		t.Errorf("problem = %+v, want code=agent_missing_worktree severity=error", problems[0])
+	}
+}
+
+func TestWorkspaceOpsGlobalProblemsDetectsDaemonNotRunningWithRunnableAgent(t *testing.T) {
+	status := &WorkspaceOpsStatus{
+		Daemon: WorkspaceOpsDaemon{
+			AppData:        DaemonInfo{Running: false},
+			WorkspaceLocal: DaemonInfo{Running: false},
+		},
+		Repos:  []WorkspaceOpsRepo{{Name: "app"}},
+		Agents: []WorkspaceOpsAgent{{Name: "planner", Runnable: true}},
+	}
+
+	problems := workspaceOpsGlobalProblems(status)
+
+	var got *WorkspaceOpsProblem
+	for i, p := range problems {
+		if p.Code == "daemon_not_running" {
+			got = &problems[i]
+			break
+		}
+	}
+	if got == nil {
+		t.Fatalf("expected daemon_not_running problem, got %+v", problems)
+	}
+	if got.Severity != "error" {
+		t.Errorf("severity = %q, want error", got.Severity)
+	}
+	if !strings.Contains(got.Fix, "ensure-runtime") {
+		t.Errorf("fix = %q, want it to suggest ensure-runtime", got.Fix)
+	}
+}
+
+func TestWorkspaceOpsGlobalProblemsSilentWhenDaemonRunningOrNoRunnableAgents(t *testing.T) {
+	cases := []struct {
+		name   string
+		status *WorkspaceOpsStatus
+	}{
+		{
+			name: "daemon running, agent runnable",
+			status: &WorkspaceOpsStatus{
+				Daemon: WorkspaceOpsDaemon{AppData: DaemonInfo{Running: true, PID: 42}},
+				Repos:  []WorkspaceOpsRepo{{Name: "app"}},
+				Agents: []WorkspaceOpsAgent{{Name: "planner", Runnable: true}},
+			},
+		},
+		{
+			name: "daemon down, no runnable agents",
+			status: &WorkspaceOpsStatus{
+				Daemon: WorkspaceOpsDaemon{AppData: DaemonInfo{Running: false}},
+				Repos:  []WorkspaceOpsRepo{{Name: "app"}},
+				Agents: []WorkspaceOpsAgent{{Name: "stopped", Runnable: false}},
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, p := range workspaceOpsGlobalProblems(tc.status) {
+				if p.Code == "daemon_not_running" {
+					t.Errorf("unexpected daemon_not_running problem: %+v", p)
+				}
 			}
 		})
 	}
