@@ -95,10 +95,11 @@ func (m *CommandMock) Run(dir, name string, args ...string) CommandResult {
 // WARNING: This modifies global state (defaultDeps.Exec). Tests using this mock
 // MUST NOT use t.Parallel() as it would cause race conditions.
 func (m *CommandMock) Install() {
-	orig := defaultDeps.Exec
-	defaultDeps.Exec = m
+	deps := ensureDefaultDeps()
+	orig := deps.Exec
+	deps.Exec = m
 	m.t.Cleanup(func() {
-		defaultDeps.Exec = orig
+		deps.Exec = orig
 		m.Verify()
 	})
 }

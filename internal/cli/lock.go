@@ -442,7 +442,7 @@ func GetLockStatus(worktreePath string) string {
 // getTaskStatus returns the status of a task.
 // Returns "needs_review", "closed", "in_progress", "open", or ""
 func getTaskStatus(taskID string) string {
-	d := *defaultDeps
+	d := *ensureDefaultDeps()
 	d.IssueBackend = DefaultIssueBackend()
 	return GetTaskStatusDeps(&d, taskID)
 }

@@ -361,7 +361,7 @@ func getGitBranchesDeps(deps *Deps) ([]string, error) {
 
 // GetGitBranches returns all local and remote branch names
 func GetGitBranches() ([]string, error) {
-	return getGitBranchesDeps(defaultDeps)
+	return getGitBranchesDeps(ensureDefaultDeps())
 }
 
 // parseGitBranches parses the output of git branch -a into unique branch names.
