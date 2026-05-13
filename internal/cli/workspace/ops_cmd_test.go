@@ -189,36 +189,107 @@ func TestWorkspaceOpsGlobalProblemsDetectsDuplicateDaemonOwnership(t *testing.T)
 	}
 }
 
-func TestShouldWarnLocalRuntimeUnhealthy(t *testing.T) {
+func TestBuildLocalRuntimeFleetModeNotApplicable(t *testing.T) {
+	t.Setenv("LOOM_ISSUE_BACKEND", "fleet")
+
 	enoent := &os.PathError{Op: "open", Path: "runtime.json", Err: os.ErrNotExist}
-	healthy := &local.RuntimeStatusSnapshot{Healthy: true}
-	unhealthy := &local.RuntimeStatusSnapshot{Healthy: false}
+	out := buildLocalRuntime(nil, enoent)
 
-	tests := []struct {
-		name        string
-		fleetMode   bool
-		runtime     *local.RuntimeStatusSnapshot
-		err         error
-		wantWarning bool
-	}{
-		{name: "healthy never warns", runtime: healthy, wantWarning: false},
-		{name: "missing in fleet mode is silent", fleetMode: true, runtime: nil, err: enoent, wantWarning: false},
-		{name: "missing in non-fleet mode warns", fleetMode: false, runtime: nil, err: enoent, wantWarning: true},
-		{name: "unhealthy file exists always warns", fleetMode: true, runtime: unhealthy, err: nil, wantWarning: true},
-		{name: "non-ENOENT error warns even in fleet mode", fleetMode: true, runtime: nil, err: errors.New("permission denied"), wantWarning: true},
+	if out.Applicable {
+		t.Error("Applicable = true, want false in fleet mode")
 	}
+	if out.Reason == "" {
+		t.Error("Reason should explain why runtime is not applicable")
+	}
+	if out.Healthy {
+		t.Error("Healthy = true, want false (zero value) when not applicable")
+	}
+	if out.Error != "" {
+		t.Errorf("Error = %q, want empty in not-applicable case", out.Error)
+	}
+	if out.Runtime != nil {
+		t.Errorf("Runtime = %+v, want nil in not-applicable case", out.Runtime)
+	}
+}
 
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			if tc.fleetMode {
-				t.Setenv("LOOM_ISSUE_BACKEND", "fleet")
-			} else {
-				t.Setenv("LOOM_ISSUE_BACKEND", "")
-			}
-			if got := shouldWarnLocalRuntimeUnhealthy(tc.runtime, tc.err); got != tc.wantWarning {
-				t.Errorf("shouldWarnLocalRuntimeUnhealthy = %v, want %v", got, tc.wantWarning)
-			}
-		})
+func TestBuildLocalRuntimeFleetModeIgnoresEvenAStartedRuntime(t *testing.T) {
+	// Even if runtime.json happens to exist (someone manually ran
+	// `loom local start`), in fleet mode the desktop runtime is still
+	// "not applicable" — agents talk to fleet-db directly.
+	t.Setenv("LOOM_ISSUE_BACKEND", "fleet")
+
+	snap := &local.RuntimeStatusSnapshot{
+		Healthy: true,
+		Runtime: &local.RuntimeSnapshot{PID: 123, URL: "http://127.0.0.1:8081"},
+	}
+	out := buildLocalRuntime(snap, nil)
+
+	if out.Applicable {
+		t.Error("Applicable = true, want false in fleet mode regardless of runtime state")
+	}
+	if out.Runtime != nil {
+		t.Error("Runtime metadata should be hidden in fleet mode")
+	}
+}
+
+func TestBuildLocalRuntimeDesktopModeHealthy(t *testing.T) {
+	t.Setenv("LOOM_ISSUE_BACKEND", "")
+
+	snap := &local.RuntimeStatusSnapshot{
+		Healthy: true,
+		Runtime: &local.RuntimeSnapshot{PID: 123, URL: "http://127.0.0.1:8081"},
+	}
+	out := buildLocalRuntime(snap, nil)
+
+	if !out.Applicable {
+		t.Error("Applicable = false, want true in desktop mode")
+	}
+	if out.Reason != "" {
+		t.Errorf("Reason = %q, want empty when applicable", out.Reason)
+	}
+	if !out.Healthy {
+		t.Error("Healthy = false, want true (mirrored from snapshot)")
+	}
+	if out.Runtime == nil || out.Runtime.PID != 123 {
+		t.Errorf("Runtime not mirrored from snapshot: %+v", out.Runtime)
+	}
+}
+
+func TestBuildLocalRuntimeDesktopModeUnhealthyMirrorsError(t *testing.T) {
+	t.Setenv("LOOM_ISSUE_BACKEND", "")
+
+	snap := &local.RuntimeStatusSnapshot{
+		Healthy: false,
+		Error:   "health check timed out",
+		Runtime: &local.RuntimeSnapshot{PID: 999},
+	}
+	out := buildLocalRuntime(snap, nil)
+
+	if !out.Applicable {
+		t.Error("Applicable should be true in desktop mode regardless of health")
+	}
+	if out.Healthy {
+		t.Error("Healthy = true, want false (mirrored)")
+	}
+	if out.Error != "health check timed out" {
+		t.Errorf("Error = %q, want mirrored from snapshot", out.Error)
+	}
+}
+
+func TestBuildLocalRuntimeDesktopModeReadErrorSurfacesAsError(t *testing.T) {
+	t.Setenv("LOOM_ISSUE_BACKEND", "")
+
+	readErr := &os.PathError{Op: "open", Path: "runtime.json", Err: os.ErrNotExist}
+	out := buildLocalRuntime(nil, readErr)
+
+	if !out.Applicable {
+		t.Error("Applicable should be true in desktop mode")
+	}
+	if out.Error == "" {
+		t.Error("Error should surface the read failure")
+	}
+	if !strings.Contains(out.Error, "runtime.json") {
+		t.Errorf("Error = %q, want it to reference runtime.json", out.Error)
 	}
 }
 

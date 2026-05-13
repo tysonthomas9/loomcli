@@ -218,6 +218,31 @@ expect_contains "diagnose text output names workspace" "Workspace: HELLO-WORLD" 
 expect_contains "diagnose text output reports daemon" "Daemon:"                 "$text_out"
 expect_contains "diagnose text output lists repos"    "Repos:"                  "$text_out"
 expect_contains "diagnose text output lists agents"   "Agents:"                 "$text_out"
+expect_contains "diagnose text marks runtime not applicable in fleet mode" \
+    "Runtime:   not applicable" "$text_out"
+
+# Scenario 12b: JSON local_runtime is shaped for fleet mode (applicable=false,
+# no misleading runtime / error fields). Confirms the response is
+# self-explanatory rather than reporting a false-negative "unhealthy" for a
+# concept that does not apply to this deployment.
+diag_json=$($CTL exec "$LOOM_NAME" \
+    loom workspace ops diagnose HELLO-WORLD --json 2>/dev/null \
+    | sed -n '/^{/,$p' | jq -c '.local_runtime' 2>/dev/null || true)
+expect_contains "diagnose JSON local_runtime applicable=false in fleet" \
+    '"applicable":false' "$diag_json"
+expect_contains "diagnose JSON local_runtime has explanatory reason" \
+    '"reason":"fleet mode' "$diag_json"
+# No "error" field with the runtime.json ENOENT — that was the misleading
+# string the lead agent was rendering.
+if printf '%s' "$diag_json" | grep -qF '"error":"open '; then
+    red "  FAIL  diagnose JSON local_runtime should not surface ENOENT error in fleet"
+    red "        got: $diag_json"
+    FAIL=$((FAIL+1))
+    fail_names+=("diagnose JSON local_runtime should not surface ENOENT error in fleet")
+else
+    green "  PASS  diagnose JSON local_runtime does not surface ENOENT error in fleet"
+    PASS=$((PASS+1))
+fi
 
 # Scenario 13: stale lock detection. Plant a lock file at the repo root with
 # a definitely-dead PID; doctor.checkStaleLocks should flip to warn. Clean
