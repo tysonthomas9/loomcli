@@ -109,3 +109,122 @@ JSON-stream output / `loom data ...` calls.
 
 To edit the seed repo's starting state, change files under `repo-template/`
 and `./teardown.sh && ./setup.sh`.
+
+## Failure-mode harness
+
+`test/playground/` doubles as a daemon-lifecycle test harness. While
+`loom-backend-playground` exercises the happy path, the sibling backends
+below misbehave in named, reproducible ways so scenarios can verify the
+daemon's watchdog, orphan sweep, retry/backoff, and classification paths
+without LLM calls.
+
+### Failure-mode backend zoo
+
+| Backend                                | Failure mode                                                                                                          | Tests                                                                                              |
+| -------------------------------------- | --------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `loom-backend-playground-hang`         | Parent goes silent. No descendants.                                                                                   | Basic watchdog (single-pgroup case). Simplest template for "copy this when adding a new bug."      |
+| `loom-backend-playground-crash`        | Exits non-zero a few seconds after invoke.                                                                            | Failure classification + retry/backoff.                                                            |
+| `loom-backend-playground-slow`         | Writes one stdout line every `interval` seconds (less than the watchdog timeout).                                     | Regression guard: legitimate slow work must NOT trigger the watchdog.                              |
+
+Each backend implements the same `meta`/`health`/`invoke` contract as
+`loom-backend-playground` and self-documents its failure mode in a header
+comment.
+
+### Running a scenario
+
+```sh
+# List available scenarios
+./run_scenario.sh
+
+# Run one
+./run_scenario.sh slow_backend_not_killed
+```
+
+`run_scenario.sh` is a thin wrapper. Scenarios in `scenarios/*.sh` are
+self-contained — they handle their own setup, daemon lifecycle, assertions,
+and teardown via the same `setup.sh`/`teardown.sh` that drive the happy
+path, just with a scenario argument:
+
+```sh
+bash test/playground/scenarios/slow_backend_not_killed.sh
+# or directly:
+./setup.sh slow && ... && ./teardown.sh slow
+```
+
+Exit codes: 0 pass, 1 assertion failure, 2 prereq missing, 3 timeout.
+
+### Writing a new scenario
+
+Copy a sibling in `scenarios/` and edit it. The shape is:
+
+```sh
+#!/usr/bin/env bash
+set -euo pipefail
+HERE="$(cd "$(dirname "$0")/.." && pwd)"
+SCENARIO_NAME="<backend suffix>"     # picks loom-backend-playground-<this>
+PLAYGROUND_LOG_SCOPE="<short label>" # appears in [scope HH:MM:SS] log lines
+export PLAYGROUND_LOG_SCOPE
+
+. "$HERE/lib/common.sh"
+. "$HERE/lib/proctree.sh"
+. "$HERE/lib/daemon.sh"
+
+cleanup() {
+  local rc=$?
+  stop_daemon_graceful || true
+  "$HERE/teardown.sh" "$SCENARIO_NAME" >/dev/null 2>&1 || true
+  exit $rc
+}
+trap cleanup EXIT
+
+"$HERE/setup.sh" "$SCENARIO_NAME"
+# shellcheck disable=SC1091
+. "$HERE/.runtime-$SCENARIO_NAME/env"
+
+# create task, start daemon, assert, exit 0 / EXIT_FAIL / EXIT_TIMEOUT
+```
+
+The script header **must** document:
+
+1. The bug or regression the scenario guards against (link to PR/issue).
+2. Expected outcome on HEAD (pass).
+3. Expected outcome on a named pre-fix commit (fail) — the negative
+   control.
+
+### Adding a new failure-mode backend
+
+1. Copy `loom-backend-playground-hang` to `loom-backend-playground-<mode>`.
+2. Edit the header to describe the failure mode and link the bug/PR it
+   guards against.
+3. Edit `run_invoke()` to misbehave in your named way.
+4. `chmod +x` the new file.
+5. Write a scenario in `scenarios/` that uses it. `setup.sh <mode>` picks
+   up the new backend by filename — no edits to `setup.sh`/`teardown.sh`
+   are needed.
+
+### Negative-control protocol
+
+The most common way integration tests lie is by passing for the wrong
+reason. To defend:
+
+1. Every scenario cites a specific pre-fix commit hash in its header.
+2. Before trusting a green scenario, check out that hash and re-run. If
+   it still passes, the assertion is too weak — fix it before merging.
+
+Example (replace `<pre-fix-commit>` with the hash from your scenario header):
+
+```sh
+git checkout <pre-fix-commit>
+bash test/playground/scenarios/<your_scenario>.sh
+# must FAIL; if it passes, the scenario is not actually testing the bug
+git checkout -                                                 # back to HEAD
+```
+
+### `LOOM_DAEMON_OUTPUT_TIMEOUT_SECONDS`
+
+Scenarios that need to trip the daemon's output-timeout watchdog quickly
+export this env var before launching `loom daemon`. Read by
+`Supervisor.GetOutputTimeout` (`internal/cli/daemon/supervisor/restart.go`);
+the env var wins over fleet-db config because the wire schema does not
+currently persist this field. Pure testability — no production behavior
+change. The harness sets it to 15 seconds (vs. the 900s default).
