@@ -22,10 +22,7 @@ import { generateTestId } from "./helpers";
 
 // Skip if integration tests not enabled
 const skipIntegration = !process.env.RUN_INTEGRATION_TESTS;
-test.skip(
-  skipIntegration,
-  "Integration tests require RUN_INTEGRATION_TESTS=1",
-);
+test.skip(skipIntegration, "Integration tests require RUN_INTEGRATION_TESTS=1");
 
 // Run tests serially to avoid interfering with each other's route interceptions
 test.describe.configure({ mode: "serial" });
@@ -106,12 +103,10 @@ async function navigateAndWaitForConnected(
  * Register an addInitScript that wraps EventSource to track instances.
  * Must be called BEFORE any page.goto(). Allows injectSSEError() to
  * dispatch an error event on the live EventSource, triggering the
- * onerror → reconnect → overlay cascade. route.abort() alone cannot
+ * onerror → reconnect → unavailable-state cascade. route.abort() alone cannot
  * break an existing SSE streaming connection.
  */
-async function setupEventSourceTracking(
-  page: import("@playwright/test").Page,
-) {
+async function setupEventSourceTracking(page: import("@playwright/test").Page) {
   await page.addInitScript(() => {
     (window as any).__eventSources = [];
     const Orig = window.EventSource;
@@ -138,7 +133,7 @@ async function injectSSEError(page: import("@playwright/test").Page) {
 
 /**
  * Block the health, SSE token, and SSE events endpoints so that the
- * reconnection cascade triggers notifyDaemonUnavailable → overlay.
+ * reconnection cascade marks the workspace service unavailable.
  * The token endpoint must be blocked — otherwise the SSE client
  * silently reconnects without triggering the health check cascade.
  */
@@ -146,6 +141,18 @@ async function blockDaemonEndpoints(page: import("@playwright/test").Page) {
   await page.route("**/api/health", (route) => route.abort());
   await page.route("**/events/token", (route) => route.abort());
   await page.route("**/events", (route) => route.abort());
+}
+
+function workspaceOfflineBadge(page: import("@playwright/test").Page) {
+  return page.getByRole("button", {
+    name: /Workspace service offline|Connecting/,
+  });
+}
+
+function staleDataAlert(page: import("@playwright/test").Page) {
+  return page
+    .getByRole("alert")
+    .filter({ hasText: /Reconnecting|Connection lost/ });
 }
 
 test.describe("Daemon error recovery", () => {
@@ -171,7 +178,7 @@ test.describe("Daemon error recovery", () => {
     testIssueIds.length = 0;
   });
 
-  test("health check failure shows daemon unavailable overlay", async ({
+  test("health check failure shows workspace unavailable state", async ({
     page,
   }) => {
     await setupEventSourceTracking(page);
@@ -179,27 +186,19 @@ test.describe("Daemon error recovery", () => {
     await blockDaemonEndpoints(page);
     await injectSSEError(page);
 
-    // Wait for DaemonUnavailableOverlay to appear
+    // Wait for the non-blocking unavailable state to appear.
     // Must exceed the 2000ms debounce + 1s initial reconnect delay + token fetch
-    const overlay = page.locator('[aria-labelledby="daemon-overlay-title"]');
-    await expect(overlay).toBeVisible({ timeout: 15_000 });
-
-    // Assert overlay title says "Connection to daemon lost" (not "Connecting to daemon")
-    // because we established a connected state first (mode is not never_connected)
-    await expect(page.locator("#daemon-overlay-title")).toContainText("lost");
-
-    // Assert retry UI is visible within the overlay (countdown or retry button)
-    await expect(
-      overlay.locator("text=/Retrying in|Retry Now/").first(),
-    ).toBeVisible();
+    const offlineBadge = workspaceOfflineBadge(page);
+    await expect(offlineBadge).toBeVisible({ timeout: 15_000 });
+    await expect(staleDataAlert(page)).toBeVisible({ timeout: 15_000 });
 
     // Unroute all blocked endpoints — simulate daemon recovery
     await page.unroute("**/api/health");
     await page.unroute("**/events/token");
     await page.unroute("**/events");
 
-    // Wait for overlay to disappear (daemon recovers on next health poll)
-    await expect(overlay).not.toBeVisible({ timeout: 20_000 });
+    // Wait for unavailable state to disappear (daemon recovers on next health poll)
+    await expect(offlineBadge).not.toBeVisible({ timeout: 20_000 });
 
     // Reload page to reset SSE client backoff and establish fresh connection
     // (without reload, the SSE exponential backoff can delay reconnection 30s+)
@@ -240,7 +239,7 @@ test.describe("Daemon error recovery", () => {
     ).toBeVisible({ timeout: 15_000 });
   });
 
-  test("retry now button triggers immediate reconnection", async ({
+  test("workspace status badge triggers immediate reconnection", async ({
     page,
   }) => {
     await setupEventSourceTracking(page);
@@ -248,24 +247,19 @@ test.describe("Daemon error recovery", () => {
     await blockDaemonEndpoints(page);
     await injectSSEError(page);
 
-    // Wait for overlay to appear (must wait >2000ms debounce)
-    const overlay = page.locator('[aria-labelledby="daemon-overlay-title"]');
-    await expect(overlay).toBeVisible({ timeout: 15_000 });
-
-    // Assert "Retry Now" button IS visible
-    // Only renders when mode !== 'never_connected' (DaemonUnavailableOverlay.tsx line 74)
-    const retryButton = overlay.locator("button", { hasText: "Retry Now" });
-    await expect(retryButton).toBeVisible();
+    // Wait for the retry badge to appear (must wait >2000ms debounce)
+    const retryButton = workspaceOfflineBadge(page);
+    await expect(retryButton).toBeVisible({ timeout: 15_000 });
 
     // Unroute health + token (simulate daemon recovery), keep SSE blocked for now
     await page.unroute("**/api/health");
     await page.unroute("**/events/token");
 
-    // Click "Retry Now" — triggers immediate health check bypassing backoff timer
+    // Click badge — triggers immediate health check bypassing backoff timer
     await retryButton.click();
 
-    // Assert overlay disappears quickly
-    await expect(overlay).not.toBeVisible({ timeout: 10_000 });
+    // Assert unavailable state disappears quickly
+    await expect(retryButton).not.toBeVisible({ timeout: 10_000 });
 
     // Unroute SSE endpoint
     await page.unroute("**/events");
@@ -293,26 +287,26 @@ test.describe("Daemon error recovery", () => {
     testIssueIds.push(issueId);
 
     // Wait for issue to appear in ready column via SSE
-    const readyColumn = page.locator('section[data-status="ready"]');
+    const readyColumn = page.getByRole("region", { name: "Open issues" });
     await expect(async () => {
       await expect(readyColumn.getByText(uniqueTitle)).toBeVisible();
     }).toPass({ timeout: 10_000, intervals: [500, 1000, 2000] });
 
-    // Block daemon endpoints and inject SSE error to trigger overlay
+    // Block daemon endpoints and inject SSE error to trigger unavailable state
     await blockDaemonEndpoints(page);
     await injectSSEError(page);
 
-    // Wait for overlay to appear (>2000ms debounce)
-    const overlay = page.locator('[aria-labelledby="daemon-overlay-title"]');
-    await expect(overlay).toBeVisible({ timeout: 15_000 });
+    // Wait for unavailable state to appear (>2000ms debounce)
+    const offlineBadge = workspaceOfflineBadge(page);
+    await expect(offlineBadge).toBeVisible({ timeout: 15_000 });
 
     // Unblock all endpoints (simulate recovery)
     await page.unroute("**/api/health");
     await page.unroute("**/events/token");
     await page.unroute("**/events");
 
-    // Wait for overlay to disappear
-    await expect(overlay).not.toBeVisible({ timeout: 20_000 });
+    // Wait for unavailable state to disappear
+    await expect(offlineBadge).not.toBeVisible({ timeout: 20_000 });
 
     // Reload to reset SSE backoff and re-establish connection
     await page.reload();
@@ -322,7 +316,7 @@ test.describe("Daemon error recovery", () => {
     ).toBeVisible({ timeout: 15_000 });
 
     // Assert the previously created issue is STILL visible (page didn't lose data)
-    const readyAfterReload = page.locator('section[data-status="ready"]');
+    const readyAfterReload = page.getByRole("region", { name: "Open issues" });
     await expect(readyAfterReload.getByText(uniqueTitle)).toBeVisible();
 
     // Create another issue while the UI is reconnected — proves SSE pipeline is functional
@@ -350,14 +344,12 @@ test.describe("Daemon error recovery", () => {
     await page.goto("/");
     await page.waitForURL("**/ws/*/**", { timeout: 10_000 });
 
-    // Assert reconnecting state is visible but overlay is NOT
+    // Assert reconnecting state is visible but workspace service is NOT marked unavailable
     // (daemon is healthy, only SSE is interrupted)
     await expect(
       page.locator('[role="status"][data-state="reconnecting"]'),
     ).toBeVisible({ timeout: 15_000 });
-    await expect(
-      page.locator('[aria-labelledby="daemon-overlay-title"]'),
-    ).not.toBeVisible();
+    await expect(workspaceOfflineBadge(page)).not.toBeVisible();
 
     // Unblock SSE endpoint
     await page.unroute("**/events");
@@ -383,12 +375,12 @@ test.describe("Daemon error recovery", () => {
     const response = await request.get("/api/health");
     expect(response.ok()).toBe(true);
 
-    // Inject SSE error to trigger the overlay cascade
+    // Inject SSE error to trigger the unavailable-state cascade
     await injectSSEError(page);
 
-    // Wait for overlay to appear on the page (>2000ms debounce)
-    const overlay = page.locator('[aria-labelledby="daemon-overlay-title"]');
-    await expect(overlay).toBeVisible({ timeout: 15_000 });
+    // Wait for unavailable state to appear on the page (>2000ms debounce)
+    const offlineBadge = workspaceOfflineBadge(page);
+    await expect(offlineBadge).toBeVisible({ timeout: 15_000 });
 
     // Unroute all endpoints
     await page.unroute("**/api/health");
@@ -396,7 +388,7 @@ test.describe("Daemon error recovery", () => {
     await page.unroute("**/events");
 
     // Verify recovery
-    await expect(overlay).not.toBeVisible({ timeout: 20_000 });
+    await expect(offlineBadge).not.toBeVisible({ timeout: 20_000 });
 
     // Reload to reset SSE backoff and re-establish connection
     await page.reload();

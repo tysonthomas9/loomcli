@@ -1041,13 +1041,30 @@ func TestUpdate_AssigneeOnlyUsesAssignEndpoint(t *testing.T) {
 }
 
 func TestUpdate_LabelOnlyUsesLabelEndpoint(t *testing.T) {
-	var gotPath string
+	var sawLabelPost bool
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-		gotPath = r.URL.Path
-		if r.Method != "POST" || !strings.HasSuffix(r.URL.Path, "/issues/test-1/labels") {
+		switch {
+		case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/issues/test-1/labels"):
+			sawLabelPost = true
+			respondOK(w, json.RawMessage(`{}`))
+		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/issues/test-1"):
+			respondOK(w, fleetIssueWithCountsWire{
+				fleetIssueWire: fleetIssueWire{
+					ID:     "test-1",
+					Labels: []string{"frontend"},
+				},
+			})
+		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/issues/test-1/deps"):
+			respondOK(w, struct {
+				Dependencies []struct{} `json:"dependencies"`
+			}{})
+		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/issues/test-1/comments"):
+			respondOK(w, struct {
+				Comments []fleetCommentWire `json:"comments"`
+			}{})
+		default:
 			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
 		}
-		respondOK(w, json.RawMessage(`{}`))
 	})
 	defer ts.Close()
 
@@ -1055,8 +1072,8 @@ func TestUpdate_LabelOnlyUsesLabelEndpoint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Update: %v", err)
 	}
-	if !strings.HasSuffix(gotPath, "/issues/test-1/labels") {
-		t.Errorf("path = %q", gotPath)
+	if !sawLabelPost {
+		t.Fatal("label POST was not called")
 	}
 }
 
@@ -1403,13 +1420,41 @@ func TestDelete_ForceSkipsNotFound(t *testing.T) {
 
 func TestAddDependency(t *testing.T) {
 	var gotBody map[string]string
+	var sawPost bool
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != "POST" {
-			t.Errorf("Method = %q, want POST", r.Method)
+		switch {
+		case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/issues/a/deps"):
+			sawPost = true
+			json.NewDecoder(r.Body).Decode(&gotBody) //nolint:errcheck
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(apiResponse{Success: true}) //nolint:errcheck
+		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/issues/a"):
+			respondOK(w, fleetIssueWithCountsWire{fleetIssueWire: fleetIssueWire{ID: "a"}})
+		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/issues/a/deps"):
+			respondOK(w, struct {
+				Dependencies []struct {
+					IssueID     string `json:"issue_id"`
+					DependsOnID string `json:"depends_on_id"`
+					Type        string `json:"type"`
+				} `json:"dependencies"`
+			}{
+				Dependencies: []struct {
+					IssueID     string `json:"issue_id"`
+					DependsOnID string `json:"depends_on_id"`
+					Type        string `json:"type"`
+				}{
+					{IssueID: "a", DependsOnID: "b", Type: "blocks"},
+				},
+			})
+		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/issues/b"):
+			respondOK(w, fleetIssueWithCountsWire{fleetIssueWire: fleetIssueWire{ID: "b", Title: "Blocker"}})
+		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/issues/a/comments"):
+			respondOK(w, struct {
+				Comments []fleetCommentWire `json:"comments"`
+			}{})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
 		}
-		json.NewDecoder(r.Body).Decode(&gotBody) //nolint:errcheck
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(apiResponse{Success: true}) //nolint:errcheck
 	})
 	defer ts.Close()
 
@@ -1421,27 +1466,47 @@ func TestAddDependency(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AddDependency: %v", err)
 	}
+	if !sawPost {
+		t.Fatal("dependency POST was not called")
+	}
 	if gotBody["depends_on_id"] != "b" {
 		t.Errorf("depends_on_id = %q, want %q", gotBody["depends_on_id"], "b")
 	}
 }
 
 func TestRemoveDependency(t *testing.T) {
+	var sawDelete bool
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != "DELETE" {
-			t.Errorf("Method = %q, want DELETE", r.Method)
+		switch {
+		case r.Method == "DELETE" && strings.Contains(r.URL.Path, "/issues/a/deps/b"):
+			sawDelete = true
+			if got := r.URL.Query().Get("type"); got != "blocks" {
+				t.Fatalf("dependency type query = %q, want %q", got, "blocks")
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(apiResponse{Success: true}) //nolint:errcheck
+		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/issues/a"):
+			respondOK(w, fleetIssueWithCountsWire{fleetIssueWire: fleetIssueWire{ID: "a"}})
+		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/issues/a/deps"):
+			respondOK(w, struct {
+				Dependencies []struct{} `json:"dependencies"`
+			}{})
+		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/issues/a/comments"):
+			respondOK(w, struct {
+				Comments []fleetCommentWire `json:"comments"`
+			}{})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
 		}
-		if !strings.Contains(r.URL.Path, "/deps/") {
-			t.Errorf("path missing /deps/: %s", r.URL.Path)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(apiResponse{Success: true}) //nolint:errcheck
 	})
 	defer ts.Close()
 
 	err := fb.RemoveDependency(context.Background(), backend.DepRemoveParams{FromID: "a", ToID: "b"})
 	if err != nil {
 		t.Fatalf("RemoveDependency: %v", err)
+	}
+	if !sawDelete {
+		t.Fatal("dependency DELETE was not called")
 	}
 }
 

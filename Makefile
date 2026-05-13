@@ -350,7 +350,13 @@ clean:
 
 # Frontend directory
 FRONTEND_DIR := internal/webui/frontend
-FLEET_DB_REPO ?= ../../fleet-db
+LOCAL_FLEET_DB_REPO := $(firstword $(wildcard $(CURDIR)/../fleet-db $(CURDIR)/../../fleet-db))
+LOCAL_FLEET_DB_BIN := $(firstword $(wildcard $(CURDIR)/../fleet-db/fleet-db $(CURDIR)/../../fleet-db/fleet-db))
+FLEET_DB_REPO ?= $(if $(LOCAL_FLEET_DB_REPO),$(LOCAL_FLEET_DB_REPO),../../fleet-db)
+ifneq ($(LOCAL_FLEET_DB_BIN),)
+FLEET_DB_BIN ?= $(LOCAL_FLEET_DB_BIN)
+export FLEET_DB_BIN
+endif
 DISTRIBUTED_SMOKE_BIN := $(CURDIR)/tmp/distributed-smoke/bin
 
 # Git hooks directory (resolves correctly in both regular repos and worktrees)

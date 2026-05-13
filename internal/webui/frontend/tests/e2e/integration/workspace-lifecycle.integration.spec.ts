@@ -32,12 +32,10 @@ test.skip(skipIntegration, "Integration tests require RUN_INTEGRATION_TESTS=1");
 // Run tests serially because workspace mutations share local FleetDB-backed state.
 test.describe.configure({ mode: "serial" });
 
-
 test.describe("Workspace Lifecycle Integration", () => {
   const testId = generateTestId();
   let workspaceName = `ws-${testId}`;
   let workspaceId = "";
-  let originalDefault = "";
   let repoPath = "";
 
   // Discover a valid repo path from the running server's active workspace
@@ -46,12 +44,9 @@ test.describe("Workspace Lifecycle Integration", () => {
     if (active.data?.repos?.length) {
       repoPath = active.data.repos[0].path;
     }
-    if (active.data?.default_workspace) {
-      originalDefault = active.data.default_workspace;
-    }
   });
 
-  // Cleanup: delete test workspace and restore original default.
+  // Cleanup: delete test workspace.
   // Workspace deletion may stop a daemon (30+ seconds), so extend the hook timeout.
   // Use a 45s internal timeout so the afterAll hook doesn't hang indefinitely.
   test.afterAll(async ({}, testInfo) => {
@@ -59,14 +54,8 @@ test.describe("Workspace Lifecycle Integration", () => {
     if (workspaceId) {
       await Promise.race([
         deleteTestWorkspace(workspaceId),
-        new Promise(r => setTimeout(r, 45_000)),
+        new Promise((r) => setTimeout(r, 45_000)),
       ]).catch(() => {});
-    }
-    // Restore original default if we changed it
-    if (originalDefault) {
-      await setDefaultWorkspace(originalDefault).catch(() => {});
-    } else {
-      await clearDefaultWorkspace().catch(() => {});
     }
   });
 
@@ -112,18 +101,17 @@ test.describe("Workspace Lifecycle Integration", () => {
     expect(repo.path).toBeTruthy();
   });
 
-  test("set created workspace as default", async () => {
+  test("set default workspace endpoint returns unavailable", async () => {
     test.skip(!workspaceId, "Workspace was not created");
 
     const response = await setDefaultWorkspace(workspaceName);
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(503);
 
-    const body: WorkspaceResponse = await response.json();
-    expect(body.success).toBe(true);
-
-    // Verify default is set
-    const active = await getActiveWorkspace();
-    expect(active.data?.default_workspace).toBe(workspaceName);
+    const body = await response.json();
+    expect(body.kind).toBe("unavailable");
+    expect(body.error).toContain(
+      "default workspace selection has been removed",
+    );
   });
 
   test("rename workspace and verify new name persists", async () => {
@@ -141,14 +129,10 @@ test.describe("Workspace Lifecycle Integration", () => {
     const wsData = await getWorkspaceById(workspaceId);
     expect(wsData.data?.name).toBe(newName);
 
-    // Verify default_workspace was updated since we set it as default
-    const active = await getActiveWorkspace();
-    expect(active.data?.default_workspace).toBe(newName);
-
     workspaceName = newName;
   });
 
-  test("reorder workspaces and verify order persists", async () => {
+  test("reorder workspace endpoint returns not implemented", async () => {
     test.skip(!workspaceId, "Workspace was not created");
 
     // Get current workspaces to build an order list
@@ -162,16 +146,11 @@ test.describe("Workspace Lifecycle Integration", () => {
       ...allNames.filter((n) => n !== workspaceName),
     ];
     const response = await reorderWorkspaces(reordered);
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(501);
 
-    const body: WorkspaceResponse = await response.json();
-    expect(body.success).toBe(true);
-
-    // Verify order persisted
-    const refreshed = await getActiveWorkspace();
-    const order = refreshed.data?.workspace_order ?? [];
-    expect(order.length).toBeGreaterThan(0);
-    expect(order[0]).toBe(workspaceName);
+    const body = await response.json();
+    expect(body.kind).toBe("not_implemented");
+    expect(body.error).toContain("workspace ordering is not implemented");
   });
 
   test("update workspace backend config", async () => {
@@ -188,19 +167,17 @@ test.describe("Workspace Lifecycle Integration", () => {
     expect(wsData.success).toBe(true);
   });
 
-  test("clear default workspace", async () => {
+  test("clear default workspace endpoint returns unavailable", async () => {
     test.skip(!workspaceId, "Workspace was not created");
 
     const response = await clearDefaultWorkspace();
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(503);
 
-    const body: WorkspaceResponse = await response.json();
-    expect(body.success).toBe(true);
-
-    // After clearing, the default should no longer be our test workspace.
-    // The server may fall back to the first workspace or return empty.
-    const active = await getActiveWorkspace();
-    expect(active.data?.default_workspace).not.toBe(workspaceName);
+    const body = await response.json();
+    expect(body.kind).toBe("unavailable");
+    expect(body.error).toContain(
+      "default workspace selection has been removed",
+    );
   });
 
   test("delete workspace removes from config", async () => {
@@ -281,10 +258,13 @@ test.describe("Workspace Validation", () => {
   });
 
   test("create workspace with missing type returns 400", async () => {
-    const response = await createTestWorkspace(`ws-notype-${generateTestId()}`, {
-      type: "",
-      repos: ["/tmp"],
-    });
+    const response = await createTestWorkspace(
+      `ws-notype-${generateTestId()}`,
+      {
+        type: "",
+        repos: ["/tmp"],
+      },
+    );
     expect(response.status).toBe(400);
 
     const body = await response.json();

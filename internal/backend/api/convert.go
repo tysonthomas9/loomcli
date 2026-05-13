@@ -211,16 +211,16 @@ func statisticsToData(s gen.Statistics) backend.StatsData {
 	}
 }
 
-// blockedIssueToData converts gen.BlockedIssue to backend.IssueData. The
-// blocker metadata (blocked_by, blocked_by_count) is dropped since
-// backend.IssueData has no field for it (matches the fleet backend).
+// blockedIssueToData converts gen.BlockedIssue to backend.IssueData.
 func blockedIssueToData(b gen.BlockedIssue) backend.IssueData {
 	d := backend.IssueData{
-		ID:        b.Id,
-		Title:     b.Title,
-		Priority:  b.Priority,
-		CreatedAt: b.CreatedAt,
-		UpdatedAt: b.UpdatedAt,
+		ID:             b.Id,
+		Title:          b.Title,
+		Priority:       b.Priority,
+		BlockedByCount: b.BlockedByCount,
+		BlockedBy:      append([]string(nil), b.BlockedBy...),
+		CreatedAt:      b.CreatedAt,
+		UpdatedAt:      b.UpdatedAt,
 	}
 	if b.Status != nil {
 		d.Status = string(*b.Status)

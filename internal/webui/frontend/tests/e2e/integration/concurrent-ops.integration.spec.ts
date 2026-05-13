@@ -23,10 +23,7 @@ import {
 
 // Skip if integration tests not enabled
 const skipIntegration = !process.env.RUN_INTEGRATION_TESTS;
-test.skip(
-  skipIntegration,
-  "Integration tests require RUN_INTEGRATION_TESTS=1",
-);
+test.skip(skipIntegration, "Integration tests require RUN_INTEGRATION_TESTS=1");
 
 // Run tests serially to avoid data conflicts with shared backend
 test.describe.configure({ mode: "serial" });
@@ -61,8 +58,9 @@ test.describe("Concurrent issue creation", () => {
   });
 
   test("concurrent creates all succeed and return distinct IDs", async () => {
-    const titles = Array.from({ length: 5 }, () =>
-      `Concurrent Create ${generateTestId()}`,
+    const titles = Array.from(
+      { length: 5 },
+      () => `Concurrent Create ${generateTestId()}`,
     );
 
     const ids = await Promise.all(
@@ -103,18 +101,24 @@ test.describe("Concurrent issue creation", () => {
     await navigateAndWaitForConnected(page);
 
     // Wait for Kanban columns to render and SSE to stabilize
-    const readyColumn = page.locator('section[data-status="ready"]');
+    const readyColumn = page.getByRole("region", { name: "Open issues" });
     await expect(readyColumn).toBeVisible({ timeout: 15_000 });
     await page.waitForTimeout(2000);
 
-    const titles = Array.from({ length: 5 }, () =>
-      `SSE Concurrent ${generateTestId()}`,
+    const titles = Array.from(
+      { length: 5 },
+      () => `SSE Concurrent ${generateTestId()}`,
     );
 
     const ids = await Promise.all(
       titles.map((t) => createTestIssueInWorkspace(workspaceId, t)),
     );
     testIssueIds.push(...ids);
+
+    await page
+      .getByTestId("toggle-column-ready")
+      .click({ timeout: 5_000 })
+      .catch(() => {});
 
     // Wait for all 5 to appear in the ready column
     await expect(async () => {
@@ -187,16 +191,16 @@ test.describe("Concurrent issue mutations", () => {
     const labels = ["concur-a", "concur-b", "concur-c", "concur-d", "concur-e"];
 
     await Promise.all(
-      labels.map((l) =>
-        patchWsIssue(workspaceId, id, { add_labels: [l] }),
-      ),
+      labels.map((l) => patchWsIssue(workspaceId, id, { add_labels: [l] })),
     );
 
-    const readBack = await getWsIssue(workspaceId, id);
-    const issueLabels = readBack.labels as string[];
-    for (const label of labels) {
-      expect(issueLabels).toContain(label);
-    }
+    await expect(async () => {
+      const readBack = await getWsIssue(workspaceId, id);
+      const issueLabels = readBack.labels as string[];
+      for (const label of labels) {
+        expect(issueLabels).toContain(label);
+      }
+    }).toPass({ timeout: 10_000, intervals: [250, 500, 1000, 2000] });
   });
 
   test("concurrent status transitions end in valid state", async () => {
@@ -292,15 +296,16 @@ test.describe("SSE delivery under concurrent load", () => {
     const mainId = await createTestIssueInWorkspace(workspaceId, mainTitle);
     testIssueIds.push(mainId);
 
-    const readyColumn = page.locator('section[data-status="ready"]');
+    const readyColumn = page.getByRole("region", { name: "Open issues" });
     await expect(async () => {
       await expect(readyColumn.getByText(mainTitle)).toBeVisible();
     }).toPass({ timeout: 10_000, intervals: [500, 1000, 2000] });
 
     // Create 3 issues sequentially with small gaps to avoid rate-limit
     // token exhaustion (20 req/s mutate, burst 40).
-    const burstTitles = Array.from({ length: 3 }, () =>
-      `SSE Burst ${generateTestId()}`,
+    const burstTitles = Array.from(
+      { length: 3 },
+      () => `SSE Burst ${generateTestId()}`,
     );
     const burstIds: string[] = [];
     for (const t of burstTitles) {
@@ -322,9 +327,9 @@ test.describe("SSE delivery under concurrent load", () => {
 
     // Verify the main issue ended up in in_progress column.
     // Under burst load, SSE delivery may lag — reload to pick up final state.
-    const inProgressColumn = page.locator(
-      'section[data-status="in_progress"]',
-    );
+    const inProgressColumn = page.getByRole("region", {
+      name: "In Progress issues",
+    });
     try {
       await expect(async () => {
         await expect(inProgressColumn.getByText(mainTitle)).toBeVisible();

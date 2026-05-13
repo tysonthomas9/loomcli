@@ -143,21 +143,16 @@ func kanbanRPCToKanbanIssue(ki *rpc.KanbanIssueRPC, unclosedIDs map[string]bool,
 // most importantly, in fleet mode where the local issue daemon is intentionally
 // absent and every list query has to hit the fleet HTTP API instead.
 //
-// This is the simplest viable port: it covers the standard (non-kanban)
-// list shape and a basic kanban view by deriving blocked status from the
-// limited info available on backend.IssueData. Parent-title enrichment
-// requires extra Get calls per issue and is skipped — the FE shows the
-// parent ID without a title, which the kanban handles as a graceful
-// fallback (see kanbanIssue.go in the FE).
+// This port covers the standard (non-kanban) list shape and enriches kanban
+// blocked state from IssueBackend.Blocked. Parent-title enrichment requires
+// extra Get calls per issue and is skipped — the FE shows the parent ID
+// without a title, which the kanban handles as a graceful fallback (see
+// kanbanIssue.go in the FE).
 //
-// The composite ListKanban RPC's per-issue parent-title and
-// blocked-by-details lookups are intentionally not reproduced: matching
-// them would mean N extra Gets, which fleet-db can absorb but which
-// inflates p95 enough to fail the SSE realtime parity spec. When fleet-db
-// adds a batch list-with-relations endpoint, swap this implementation for
-// it and drop the per-issue degraded mode.
-//
-//nolint:funlen // Backend list adapter preserves the existing issue list response contract.
+// The composite ListKanban RPC's per-issue parent-title and full
+// blocked-by-details lookups are intentionally not reproduced: matching them
+// would mean N extra Gets. The blocked summary uses one backend Blocked call
+// instead, which preserves kanban correctness without the p95 hit.
 func (s *issueServiceImpl) listIssuesViaBackend(
 	ctx context.Context, be backend.IssueBackend, params ListIssuesParams,
 ) (*ListIssuesResult, error) {
@@ -166,59 +161,153 @@ func (s *issueServiceImpl) listIssuesViaBackend(
 	if err != nil {
 		return nil, translateBackendError(err)
 	}
-
-	// Apply ExcludeStatus client-side. fleet-db's ListOpts has a single
-	// Status filter, not an exclude set; doing it here keeps the contract
-	// uniform with the pool-based path.
-	if len(params.ExcludeStatus) > 0 {
-		excluded := make(map[string]bool, len(params.ExcludeStatus))
-		for _, s := range params.ExcludeStatus {
-			excluded[s] = true
-		}
-		filtered := issues[:0]
-		for _, i := range issues {
-			if !excluded[i.Status] {
-				filtered = append(filtered, i)
-			}
-		}
-		issues = filtered
-	}
+	issues = excludeBackendIssuesByStatus(issues, params.ExcludeStatus)
 
 	if !params.IncludeBlocked {
-		out := make([]IssueWithParent, len(issues))
-		for i, d := range issues {
-			d := d // local copy for &d.Parent below
-			iwc := backendIssueDataToWithCounts(&d)
-			iwp := IssueWithParent{IssueWithCounts: iwc}
-			if d.Parent != "" {
-				p := d.Parent
-				iwp.Parent = &p
-			}
-			if d.SourceRepo != "" {
-				r := d.SourceRepo
-				iwp.Repo = &r
-			}
-			out[i] = iwp
-		}
-		return &ListIssuesResult{Issues: out}, nil
+		return &ListIssuesResult{Issues: backendIssuesWithParent(issues)}, nil
 	}
 
+	blockedByID, err := s.blockedIssueMap(ctx, be, params.Args)
+	if err != nil {
+		return nil, err
+	}
+	issues = appendMissingBlockedIssues(issues, blockedByID)
+
+	return &ListIssuesResult{KanbanIssues: backendKanbanIssues(issues, blockedByID)}, nil
+}
+
+// Apply ExcludeStatus client-side. fleet-db's ListOpts has a single Status
+// filter, not an exclude set; doing it here keeps the contract uniform with the
+// pool-based path.
+func excludeBackendIssuesByStatus(issues []backend.IssueData, excludeStatus []string) []backend.IssueData {
+	if len(excludeStatus) == 0 {
+		return issues
+	}
+	excluded := make(map[string]bool, len(excludeStatus))
+	for _, status := range excludeStatus {
+		excluded[status] = true
+	}
+	filtered := issues[:0]
+	for _, issue := range issues {
+		if !excluded[issue.Status] {
+			filtered = append(filtered, issue)
+		}
+	}
+	return filtered
+}
+
+func backendIssuesWithParent(issues []backend.IssueData) []IssueWithParent {
+	out := make([]IssueWithParent, len(issues))
+	for i, d := range issues {
+		out[i] = backendIssueWithParent(d)
+	}
+	return out
+}
+
+func backendIssueWithParent(d backend.IssueData) IssueWithParent {
+	iwc := backendIssueDataToWithCounts(&d)
+	iwp := IssueWithParent{IssueWithCounts: iwc}
+	if d.Parent != "" {
+		p := d.Parent
+		iwp.Parent = &p
+	}
+	if d.SourceRepo != "" {
+		r := d.SourceRepo
+		iwp.Repo = &r
+	}
+	return iwp
+}
+
+func appendMissingBlockedIssues(
+	issues []backend.IssueData,
+	blockedByID map[string]backend.IssueData,
+) []backend.IssueData {
+	if len(blockedByID) == 0 {
+		return issues
+	}
+	seen := make(map[string]bool, len(issues))
+	for _, d := range issues {
+		seen[d.ID] = true
+	}
+	for _, d := range blockedByID {
+		if !seen[d.ID] {
+			issues = append(issues, d)
+		}
+	}
+	return issues
+}
+
+func backendKanbanIssues(
+	issues []backend.IssueData,
+	blockedByID map[string]backend.IssueData,
+) []KanbanIssue {
 	out := make([]KanbanIssue, len(issues))
 	for i, d := range issues {
-		d := d
-		iwc := backendIssueDataToWithCounts(&d)
-		ki := KanbanIssue{IssueWithCounts: iwc}
-		if d.Parent != "" {
-			p := d.Parent
-			ki.Parent = &p
-		}
-		if d.SourceRepo != "" {
-			r := d.SourceRepo
-			ki.Repo = &r
-		}
-		out[i] = ki
+		out[i] = backendKanbanIssue(d, blockedByID[d.ID])
 	}
-	return &ListIssuesResult{KanbanIssues: out}, nil
+	return out
+}
+
+func backendKanbanIssue(d backend.IssueData, blocked backend.IssueData) KanbanIssue {
+	if blocked.ID != "" && (d.Status == "" || d.Status == string(types.StatusOpen)) {
+		d.Status = string(types.StatusBlocked)
+	}
+
+	iwc := backendIssueDataToWithCounts(&d)
+	ki := KanbanIssue{IssueWithCounts: iwc}
+	if d.Parent != "" {
+		p := d.Parent
+		ki.Parent = &p
+	}
+	if d.SourceRepo != "" {
+		r := d.SourceRepo
+		ki.Repo = &r
+	}
+	if blocked.ID != "" {
+		applyBlockedSummary(&ki, blocked)
+	}
+	return ki
+}
+
+func applyBlockedSummary(ki *KanbanIssue, blocked backend.IssueData) {
+	ki.IsBlocked = true
+	ki.BlockedByCount = blocked.BlockedByCount
+	ki.BlockedBy = append([]string(nil), blocked.BlockedBy...)
+	if ki.BlockedByCount == 0 {
+		ki.BlockedByCount = len(ki.BlockedBy)
+	}
+	if ki.BlockedByCount == 0 {
+		ki.BlockedByCount = 1
+	}
+}
+
+func (s *issueServiceImpl) blockedIssueMap(
+	ctx context.Context,
+	be backend.IssueBackend,
+	args *rpc.ListArgs,
+) (map[string]backend.IssueData, error) {
+	blocked, err := be.Blocked(ctx, blockedOptsFromListArgs(args))
+	if err != nil {
+		slog.Error("backend error in ListIssues.Blocked", "err", err)
+		return nil, translateBackendError(err)
+	}
+	out := make(map[string]backend.IssueData, len(blocked))
+	for _, d := range blocked {
+		out[d.ID] = d
+	}
+	return out, nil
+}
+
+func blockedOptsFromListArgs(args *rpc.ListArgs) backend.BlockedOpts {
+	if args == nil {
+		return backend.BlockedOpts{}
+	}
+	return backend.BlockedOpts{
+		ParentID: args.ParentID,
+		Assignee: args.Assignee,
+		Priority: args.Priority,
+		Type:     args.IssueType,
+	}
 }
 
 // backendIssueDataToWithCounts adapts the slim list projection
