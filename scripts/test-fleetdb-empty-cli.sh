@@ -201,6 +201,92 @@ fleet_check=$(printf '%s' "$out" | jq -c '.checks[] | select(.name == "fleet")' 
 expect_contains "doctor fleet FAIL when unreachable" '"status":"fail"' "$fleet_check"
 expect_contains "doctor fleet detail mentions probe failure" 'probe failed' "$fleet_check"
 
+# Scenario 11: human-readable doctor text output sanity.
+# Asserts the headed format renders (banner + check rows + summary line),
+# not just the JSON path.
+text_out=$($CTL exec "$LOOM_NAME" sh -c \
+    'cd /loom-config/workspaces/Hello-World && LOOM_WORKSPACE=HELLO-WORLD loom doctor 2>/dev/null' \
+    2>&1 || true)
+expect_contains "doctor text output has banner"      "Loom Doctor"            "$text_out"
+expect_contains "doctor text output shows fleet check" "fleet configured"     "$text_out"
+expect_contains "doctor text output ends with summary" "checks passed"        "$text_out"
+
+# Scenario 12: human-readable diagnose text output sanity.
+text_out=$($CTL exec "$LOOM_NAME" \
+    loom workspace ops diagnose HELLO-WORLD 2>/dev/null || true)
+expect_contains "diagnose text output names workspace" "Workspace: HELLO-WORLD" "$text_out"
+expect_contains "diagnose text output reports daemon" "Daemon:"                 "$text_out"
+expect_contains "diagnose text output lists repos"    "Repos:"                  "$text_out"
+expect_contains "diagnose text output lists agents"   "Agents:"                 "$text_out"
+
+# Scenario 13: stale lock detection. Plant a lock file at the repo root with
+# a definitely-dead PID; doctor.checkStaleLocks should flip to warn. Clean
+# up regardless of pass/fail so subsequent test runs aren't poisoned.
+lock_path="/loom-config/workspaces/Hello-World/hello-world/.agent.lock"
+lock_json='{"pid":99999,"command":"plan","started_at":"2026-01-01T00:00:00Z","agent_name":"planner"}'
+$CTL exec "$LOOM_NAME" sh -c "printf '%s' '$lock_json' > $lock_path" 2>/dev/null || true
+out=$(doctor_json "cd /loom-config/workspaces/Hello-World && LOOM_WORKSPACE=HELLO-WORLD loom doctor --json")
+stale_check=$(printf '%s' "$out" | jq -c '.checks[] | select(.name == "stale_locks")' 2>/dev/null || true)
+$CTL exec "$LOOM_NAME" rm -f "$lock_path" >/dev/null 2>&1 || true
+expect_contains "doctor stale_locks flags planted lock" '"status":"warn"' "$stale_check"
+expect_contains "doctor stale_locks identifies the dead PID" 'PID 99999 dead' "$stale_check"
+
+# Scenario 14: doctor stale_signal_files detection + --fix autoremediation.
+# Plant a >1h-old file under /tmp/loom-signals-<uid>; doctor without --fix
+# should report warn; doctor --fix should remove the file and flip to pass.
+signal_dir="/tmp/loom-signals-0"
+signal_file="$signal_dir/empty-cli-stale-signal"
+$CTL exec "$LOOM_NAME" sh -c "
+    mkdir -p $signal_dir
+    touch $signal_file
+    # busybox touch -d accepts ISO format; date -u -d works on alpine.
+    touch -d \"\$(date -u -d '-2 hours' +%Y-%m-%dT%H:%M:%S)\" $signal_file
+" 2>/dev/null || true
+
+out=$(doctor_json "cd /loom-config/workspaces/Hello-World && LOOM_WORKSPACE=HELLO-WORLD loom doctor --json")
+signal_check=$(printf '%s' "$out" | jq -c '.checks[] | select(.name == "stale_signal_files")' 2>/dev/null || true)
+expect_contains "doctor detects stale signal file" '"status":"warn"' "$signal_check"
+expect_contains "doctor stale signal detail mentions --fix" 'loom doctor --fix' "$signal_check"
+
+out=$(doctor_json "cd /loom-config/workspaces/Hello-World && LOOM_WORKSPACE=HELLO-WORLD loom doctor --fix --json")
+signal_check=$(printf '%s' "$out" | jq -c '.checks[] | select(.name == "stale_signal_files")' 2>/dev/null || true)
+expect_contains "doctor --fix clears stale signal" '"status":"pass"' "$signal_check"
+expect_contains "doctor --fix reports fixed count" 'fixed 1 stale' "$signal_check"
+
+# Confirm the file was actually removed (the JSON Pass is computed from
+# whatever the code chose to print, but disk truth is the real assertion).
+remaining=$($CTL exec "$LOOM_NAME" ls "$signal_dir" 2>/dev/null | wc -l | tr -d ' ')
+if [[ "$remaining" -eq 0 ]]; then
+    green "  PASS  doctor --fix removed the signal file from disk"
+    PASS=$((PASS+1))
+else
+    red "  FAIL  doctor --fix removed the signal file from disk (still $remaining file(s))"
+    FAIL=$((FAIL+1))
+    fail_names+=("doctor --fix removed the signal file from disk")
+fi
+
+# Scenario 15: doctor backend_cli FAIL when the active backend's CLI is
+# missing from PATH. Symlink only `loom` itself into a clean tmp PATH so
+# codex disappears, then assert the check reports FAIL with a remediation
+# detail. Doesn't actually uninstall codex from the container.
+out=$($CTL exec "$LOOM_NAME" sh -c '
+    tmpbin=$(mktemp -d)
+    ln -s /usr/local/bin/loom "$tmpbin/loom"
+    PATH="$tmpbin:/usr/bin:/bin" LOOM_BACKEND=codex LOOM_WORKSPACE=HELLO-WORLD \
+        "$tmpbin/loom" doctor --json 2>/dev/null
+    rm -rf "$tmpbin"
+' 2>&1 | sed -n '/^{/,$p' | jq -c . 2>/dev/null || true)
+backend_check=$(printf '%s' "$out" | jq -c '.checks[] | select(.name == "backend_cli")' 2>/dev/null || true)
+expect_contains "doctor backend_cli FAIL when codex missing" '"status":"fail"' "$backend_check"
+expect_contains "doctor backend_cli detail mentions install" 'Install the codex CLI' "$backend_check"
+
+# ensure-runtime convergence is intentionally NOT exercised here. It's a
+# Loom.app desktop-mode helper that spawns `loom serve --fleet-mode` as a
+# child on a fresh port and writes runtime.json. In this headless container
+# the parent serve already owns the only loom port, so the runtime spawn
+# health-check never converges. Coverage for the path lives in unit tests
+# under internal/cli/local/ and the dedicated test/local-runtime/ harness.
+
 echo
 echo "==> Summary: $PASS passed, $FAIL failed"
 if [[ "$FAIL" -gt 0 ]]; then
