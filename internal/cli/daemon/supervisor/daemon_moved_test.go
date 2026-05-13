@@ -994,6 +994,64 @@ func TestGetOutputTimeout(t *testing.T) {
 			t.Errorf("getOutputTimeout() = %d, want 0", got)
 		}
 	})
+
+	t.Run("env var override beats unset config", func(t *testing.T) {
+		t.Setenv("LOOM_DAEMON_OUTPUT_TIMEOUT_SECONDS", "42")
+		config := makeSupervisorConfig(
+			[]cfgpkg.AgentEntry{{Worktree: "test", Role: "plan"}},
+			nil,
+		)
+		cfg := config
+		s := &Supervisor{ConfigSnapshot: func() *cfgpkg.DaemonConfig { return cfg }, Shutdown: make(chan struct{}), StoppedAgents: make(map[string]struct{}), Agents: make([]*AgentProcess, 0), EmitEvent: func(events.Event) {}}
+		got := s.GetOutputTimeout()
+		if got != 42 {
+			t.Errorf("getOutputTimeout() = %d, want 42 (env override)", got)
+		}
+	})
+
+	t.Run("env var beats configured value", func(t *testing.T) {
+		t.Setenv("LOOM_DAEMON_OUTPUT_TIMEOUT_SECONDS", "42")
+		config := makeSupervisorConfig(
+			[]cfgpkg.AgentEntry{{Worktree: "test", Role: "plan"}},
+			nil,
+		)
+		config.Daemon.RestartPolicy.OutputTimeout = cfgpkg.IntPtr(600)
+		cfg := config
+		s := &Supervisor{ConfigSnapshot: func() *cfgpkg.DaemonConfig { return cfg }, Shutdown: make(chan struct{}), StoppedAgents: make(map[string]struct{}), Agents: make([]*AgentProcess, 0), EmitEvent: func(events.Event) {}}
+		got := s.GetOutputTimeout()
+		if got != 42 {
+			t.Errorf("getOutputTimeout() = %d, want 42 (env beats config)", got)
+		}
+	})
+
+	t.Run("invalid env var falls through to config", func(t *testing.T) {
+		t.Setenv("LOOM_DAEMON_OUTPUT_TIMEOUT_SECONDS", "not-a-number")
+		config := makeSupervisorConfig(
+			[]cfgpkg.AgentEntry{{Worktree: "test", Role: "plan"}},
+			nil,
+		)
+		config.Daemon.RestartPolicy.OutputTimeout = cfgpkg.IntPtr(600)
+		cfg := config
+		s := &Supervisor{ConfigSnapshot: func() *cfgpkg.DaemonConfig { return cfg }, Shutdown: make(chan struct{}), StoppedAgents: make(map[string]struct{}), Agents: make([]*AgentProcess, 0), EmitEvent: func(events.Event) {}}
+		got := s.GetOutputTimeout()
+		if got != 600 {
+			t.Errorf("getOutputTimeout() = %d, want 600 (invalid env should fall through)", got)
+		}
+	})
+
+	t.Run("empty env var falls through to default", func(t *testing.T) {
+		t.Setenv("LOOM_DAEMON_OUTPUT_TIMEOUT_SECONDS", "")
+		config := makeSupervisorConfig(
+			[]cfgpkg.AgentEntry{{Worktree: "test", Role: "plan"}},
+			nil,
+		)
+		cfg := config
+		s := &Supervisor{ConfigSnapshot: func() *cfgpkg.DaemonConfig { return cfg }, Shutdown: make(chan struct{}), StoppedAgents: make(map[string]struct{}), Agents: make([]*AgentProcess, 0), EmitEvent: func(events.Event) {}}
+		got := s.GetOutputTimeout()
+		if got != 900 {
+			t.Errorf("getOutputTimeout() = %d, want 900 (empty env should fall through)", got)
+		}
+	})
 }
 
 func TestCheckAgentHealth_Watchdog(t *testing.T) {
