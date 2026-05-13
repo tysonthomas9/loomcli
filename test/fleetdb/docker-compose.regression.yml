@@ -68,6 +68,11 @@ services:
       - ":8080"
       - "--auth-dev-mode"
       - "--authz-enabled=false"
+      # The browser regression suite drives two tabs against the same
+      # fleet-db instance and intentionally fans out route probes. Rate
+      # limiting is covered in fleet-db's own tests; keep this stack focused
+      # on UI routing/rendering parity.
+      - "--rate-limit-enabled=false"
     networks: [fleetdb-regression]
     ports:
       - "8080:8080"

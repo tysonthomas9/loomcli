@@ -446,12 +446,12 @@ describe("useStoreContext", () => {
   // -----------------------------------------------------------------------
 
   describe("Initial polling", () => {
-    it("calls startPolling with initial fetch only", () => {
+    it("calls startPolling with monitor refresh interval", () => {
       renderHook(() => useAgentStoreInstance(), { wrapper });
 
       expect(agentMethodsRef.current.startPolling).toHaveBeenCalledWith({
         workspaceId: "test-ws-id",
-        pollInterval: 0,
+        pollInterval: 5000,
       });
     });
   });
@@ -483,7 +483,7 @@ describe("useStoreContext", () => {
       expect(issueMethodsRef.current.fetchIssues).not.toHaveBeenCalled();
       expect(agentMethodsRef.current.startPolling).toHaveBeenCalledWith({
         workspaceId: "new-ws-id",
-        pollInterval: 0,
+        pollInterval: 5000,
       });
     });
   });

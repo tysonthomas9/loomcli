@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
@@ -16,6 +17,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 	"github.com/tysonthomas9/loomcli/internal/webui/svcimpl"
 )
 
@@ -145,6 +147,88 @@ func TestFleetDBAgentRoutesUseStoreInsteadOfDaemonControl(t *testing.T) {
 	app.mux.ServeHTTP(rr, req)
 	if rr.Code != http.StatusNotImplemented {
 		t.Fatalf("agent queue status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestFleetDBAgentRoutesBroadcastMonitorRefresh(t *testing.T) {
+	ctx := t.Context()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "PARITY", Name: "Parity"}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+
+	hub := realtime.NewHub()
+	go hub.Run()
+	t.Cleanup(hub.Stop)
+
+	gitOps := &mockGitOps{}
+	app := &Server{
+		multiPool: daemon.NewMultiPool(middleware.WorkspaceFromContext, 1),
+		config:    webui.ServerConfig{Store: st, GitOps: gitOps},
+		agentSvc:  svcimpl.NewAgentService(gitOps, nil, nil, st),
+		hub:       hub,
+		wsExistsFn: func(id string) bool {
+			return id == "PARITY"
+		},
+	}
+	setupTestRoutes(t, app)
+
+	client := realtime.NewClient(1, realtime.ClientSendBuf, "", nil, "PARITY")
+	hub.RegisterClient(client)
+	waitForHubClient(t, hub)
+
+	serveAgentRequest(t, app, http.MethodPost, "/api/workspaces/PARITY/agents", `{"name":"worker-one","role_name":"builder","auto":true,"backend":"claude"}`, http.StatusCreated)
+	expectAgentRefresh(t, client.Send(), "PARITY", "worker-one")
+
+	serveAgentRequest(t, app, http.MethodPatch, "/api/workspaces/PARITY/agents/worker-one", `{"state":"active"}`, http.StatusOK)
+	expectAgentRefresh(t, client.Send(), "PARITY", "worker-one")
+
+	serveAgentRequest(t, app, http.MethodPost, "/api/workspaces/PARITY/agents/worker-one/stop", "", http.StatusOK)
+	expectAgentRefresh(t, client.Send(), "PARITY", "worker-one")
+
+	serveAgentRequest(t, app, http.MethodDelete, "/api/workspaces/PARITY/agents/worker-one", "", http.StatusOK)
+	expectAgentRefresh(t, client.Send(), "PARITY", "worker-one")
+}
+
+func serveAgentRequest(t *testing.T, app *Server, method, target, body string, wantStatus int) {
+	t.Helper()
+	req := httptest.NewRequest(method, target, bytes.NewBufferString(body))
+	rr := httptest.NewRecorder()
+	app.mux.ServeHTTP(rr, req)
+	if rr.Code != wantStatus {
+		t.Fatalf("%s %s status = %d, want %d, body = %s", method, target, rr.Code, wantStatus, rr.Body.String())
+	}
+}
+
+func waitForHubClient(t *testing.T, hub *realtime.Hub) {
+	t.Helper()
+	deadline := time.After(time.Second)
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if hub.ClientCount() == 1 {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatal("SSE client was not registered")
+		case <-ticker.C:
+		}
+	}
+}
+
+func expectAgentRefresh(t *testing.T, events <-chan *realtime.MutationPayload, workspace, agentName string) {
+	t.Helper()
+	select {
+	case event := <-events:
+		if event == nil {
+			t.Fatal("SSE event channel closed")
+		}
+		if event.Type != "refresh" || event.WorkspaceID != workspace || event.Title != agentName {
+			t.Fatalf("unexpected refresh event: %+v", event)
+		}
+	case <-time.After(time.Second):
+		t.Fatalf("timed out waiting for agent refresh event for %s", agentName)
 	}
 }
 

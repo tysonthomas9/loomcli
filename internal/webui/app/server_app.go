@@ -180,6 +180,7 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 
 	// Bridge per-workspace backend mutations to SSE clients.
 	app.multiSub = appstores.NewMultiSub(app.hub, config.Logger)
+	app.getMutationsSince = appstores.GetMutationsSinceFn(app.multiSub)
 	cleanups = append(cleanups, func() { app.multiSub.Stop() })
 
 	// Main web terminal manager: one *PTYManager per workspace, dispatched by
@@ -298,7 +299,6 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 			// Daemon was confirmed running above, activate subscriber immediately.
 			_ = app.registry.ActivateSubscriber(app.initialWorkspaceID)
 		}
-		app.getMutationsSince = appstores.GetMutationsSinceFn(app.multiSub)
 	}
 
 	// Reconcile all store workspaces. Subscribers for secondary workspaces
@@ -386,6 +386,7 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 		}
 		if wsStore != nil {
 			if ws, err := wsStore.Workspaces().Get(ctx, id); err == nil && ws != nil {
+				app.ensureStoreBackedSubscriber(ws.Key)
 				return true
 			}
 		}
@@ -443,6 +444,23 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	app.registerWorkerAPIRoutes()
 
 	return app, nil
+}
+
+func (app *Server) ensureStoreBackedSubscriber(wsID string) {
+	if app == nil || wsID == "" || app.multiSub == nil || app.config.IssueBackendFn == nil {
+		return
+	}
+	if app.multiSub.HasSubscriber(wsID) {
+		return
+	}
+	be := app.config.IssueBackendFn(middleware.WithWorkspace(context.Background(), wsID))
+	if be == nil {
+		return
+	}
+	if err := app.multiSub.AddWorkspaceWithBackend(wsID, be); err != nil {
+		logger.Warn("failed to start store-backed workspace subscriber",
+			"workspace", wsID, "err", err)
+	}
 }
 
 func storeWorkspacePathsFn(ctx context.Context, config webui.ServerConfig) func() (map[string]string, error) {

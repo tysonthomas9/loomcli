@@ -65,6 +65,7 @@ const MONITOR_REFRESH_TYPES = new Set<MutationPayload["type"]>([
 ]);
 
 const MONITOR_REFRESH_DEBOUNCE_MS = 250;
+const AGENT_REFRESH_INTERVAL_MS = 5_000;
 
 // ---------------------------------------------------------------------------
 // Context
@@ -109,8 +110,8 @@ function StoreWiring({
   }, [issueStore, subscribe]);
 
   // 3. Refresh monitor status from the existing workspace SSE stream.
-  // The agent store still performs one initial fetch; subsequent monitor updates
-  // are event-driven instead of a fixed 5s polling loop.
+  // SSE gives low-latency updates; periodic polling covers agent-only changes
+  // and reconnect races that are not represented in the issue mutation stream.
   useEffect(() => {
     let refreshTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -163,7 +164,10 @@ function StoreWiring({
     }
     prevWorkspaceIdRef.current = workspaceId;
 
-    agentStore.getState().startPolling({ workspaceId, pollInterval: 0 });
+    agentStore.getState().startPolling({
+      workspaceId,
+      pollInterval: AGENT_REFRESH_INTERVAL_MS,
+    });
 
     return () => {
       agentStore.getState().stopPolling();

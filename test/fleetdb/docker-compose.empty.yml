@@ -66,6 +66,10 @@ services:
       - ":8080"
       - "--auth-dev-mode"
       - "--authz-enabled=false"
+      # Empty-stack tests exercise workspace/bootstrap behavior. fleet-db
+      # has dedicated rate-limit coverage, so keep this compose path stable
+      # under CLI/browser probe bursts.
+      - "--rate-limit-enabled=false"
     networks: [fleetdb-empty]
     ports:
       - "${FLEET_DB_PORT:-8090}:8080"

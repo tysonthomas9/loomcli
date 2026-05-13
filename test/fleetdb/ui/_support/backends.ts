@@ -364,14 +364,42 @@ async function runSeedScript(): Promise<void> {
 
 async function repairFleetWorkspaceMapping(): Promise<void> {
   const workspace = FLEETDB_URLS.workspace;
+  const workspaceRoot = `/root/.loom/workspaces/${workspace}`;
+  const repoPath = `${workspaceRoot}/workspace`;
+  const workspaceAgentWorktree = `${workspaceRoot}/worktrees/workspace/workspace`;
+  const stateCache = JSON.stringify({
+    version: 1,
+    last_workspace: workspace,
+    workspaces: {
+      [workspace]: {
+        path: workspaceRoot,
+        repos: { workspace: repoPath },
+        agents: { workspace: { worktree: workspaceAgentWorktree } },
+      },
+    },
+  });
 
   // The seed resets shared FleetDB workspace rows. Reattach this loom
   // process' local checkout metadata so file/diff and agent creation routes
   // can prove real store-backed behavior instead of falling back to shims.
+  //
+  // Do not call `loom workspace create` here: after the seed recreates the
+  // FleetDB workspace row, create correctly reports AlreadyExists and will not
+  // rewrite this machine's local state cache. This fixture owns the container,
+  // so rebuilding the local checkout/cache directly is deterministic.
   execSync(
     composeRun(
       `exec -T loom-fleet sh -lc ${shellQuote(
-        `cd /workspace && loom workspace create ${workspace} --repos /workspace >/tmp/loom-workspace-repair.log 2>&1 || true`,
+        [
+          "set -e",
+          "cd /workspace",
+          `workspaceRoot=${shellQuote(workspaceRoot)}`,
+          `repoPath=${shellQuote(repoPath)}`,
+          'if [ ! -d "$repoPath/.git" ]; then rm -rf "$workspaceRoot"; mkdir -p "$workspaceRoot"; git -C /workspace worktree prune || true; if git -C /workspace show-ref --verify --quiet refs/heads/FLEETDB; then git -C /workspace worktree add "$repoPath" FLEETDB; else git -C /workspace worktree add "$repoPath" -b FLEETDB; fi; fi',
+          "mkdir -p /root/.loom",
+          `printf '%s\\n' ${shellQuote(stateCache)} > /root/.loom/state.json`,
+          'git -C "$repoPath" status --short --branch >/dev/null',
+        ].join("; "),
       )}`,
     ),
     {

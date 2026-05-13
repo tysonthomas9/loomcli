@@ -181,10 +181,10 @@ test-local-mode-harness: local-mode-verify
 test-distributed-smoke:
 	@echo "Running fleet-db distributed smoke..."
 	@mkdir -p "$(DISTRIBUTED_SMOKE_BIN)"
-	@echo "[distributed-smoke] building loom binary..."
-	@CGO_ENABLED=0 go build -o "$(DISTRIBUTED_SMOKE_BIN)/loom" ./cmd/loom
-	@echo "[distributed-smoke] building fleet-db binary from $(FLEET_DB_REPO)..."
-	@cd "$(FLEET_DB_REPO)" && CGO_ENABLED=0 go build -o "$(DISTRIBUTED_SMOKE_BIN)/fleet-db" ./cmd/fleet-db
+	@echo "[distributed-smoke] building loom binary for $(DISTRIBUTED_SMOKE_GOOS)/$(DISTRIBUTED_SMOKE_GOARCH)..."
+	@CGO_ENABLED=0 GOOS="$(DISTRIBUTED_SMOKE_GOOS)" GOARCH="$(DISTRIBUTED_SMOKE_GOARCH)" go build -o "$(DISTRIBUTED_SMOKE_BIN)/loom" ./cmd/loom
+	@echo "[distributed-smoke] building fleet-db binary from $(FLEET_DB_REPO) for $(DISTRIBUTED_SMOKE_GOOS)/$(DISTRIBUTED_SMOKE_GOARCH)..."
+	@cd "$(FLEET_DB_REPO)" && CGO_ENABLED=0 GOOS="$(DISTRIBUTED_SMOKE_GOOS)" GOARCH="$(DISTRIBUTED_SMOKE_GOARCH)" go build -o "$(DISTRIBUTED_SMOKE_BIN)/fleet-db" ./cmd/fleet-db
 	@set +e; \
 	if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then \
 	  compose="docker compose"; \
@@ -358,6 +358,8 @@ FLEET_DB_BIN ?= $(LOCAL_FLEET_DB_BIN)
 export FLEET_DB_BIN
 endif
 DISTRIBUTED_SMOKE_BIN := $(CURDIR)/tmp/distributed-smoke/bin
+DISTRIBUTED_SMOKE_GOOS ?= linux
+DISTRIBUTED_SMOKE_GOARCH ?= $(shell go env GOARCH)
 
 # Git hooks directory (resolves correctly in both regular repos and worktrees)
 GIT_HOOKS_DIR := $(shell git rev-parse --git-path hooks)
