@@ -12,10 +12,12 @@ func RunGitCommandWithOutput(dir string, args ...string) error {
 	return runGitOutput(ensureDefaultDeps(), dir, args...)
 }
 
-func GitFetch(dir string) error                  { return gitFetch(ensureDefaultDeps(), dir) }
-func GitCheckout(dir, branch string) error       { return gitCheckout(ensureDefaultDeps(), dir, branch) }
-func GitPull(dir, branch string) error           { return gitPull(ensureDefaultDeps(), dir, branch) }
-func GitMerge(dir, branch, message string) error { return gitMerge(ensureDefaultDeps(), dir, branch, message) }
+func GitFetch(dir string) error            { return gitFetch(ensureDefaultDeps(), dir) }
+func GitCheckout(dir, branch string) error { return gitCheckout(ensureDefaultDeps(), dir, branch) }
+func GitPull(dir, branch string) error     { return gitPull(ensureDefaultDeps(), dir, branch) }
+func GitMerge(dir, branch, message string) error {
+	return gitMerge(ensureDefaultDeps(), dir, branch, message)
+}
 func GitMergeOrigin(dir, branch, message string) error {
 	return gitMergeOrigin(ensureDefaultDeps(), dir, branch, message)
 }

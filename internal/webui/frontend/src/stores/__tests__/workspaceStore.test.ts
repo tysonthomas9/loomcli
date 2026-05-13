@@ -278,7 +278,9 @@ describe("workspaceStore", () => {
         cross_repo: false,
       });
 
-      mockFetchWorkspaceApi.mockResolvedValueOnce(makeWorkspace({ agents: [] }));
+      mockFetchWorkspaceApi.mockResolvedValueOnce(
+        makeWorkspace({ agents: [] }),
+      );
       await store.getState().fetchWorkspace("ws-1");
 
       expect(store.getState().workspace?.agents).toEqual([
@@ -293,7 +295,9 @@ describe("workspaceStore", () => {
     });
 
     it("does not let a stale workspace fetch drop an optimistic agent", async () => {
-      mockFetchWorkspaceApi.mockResolvedValueOnce(makeWorkspace({ agents: [] }));
+      mockFetchWorkspaceApi.mockResolvedValueOnce(
+        makeWorkspace({ agents: [] }),
+      );
       await store.getState().fetchWorkspace("ws-1");
 
       store.getState().upsertAgent({
@@ -304,7 +308,9 @@ describe("workspaceStore", () => {
         cross_repo: false,
       });
 
-      mockFetchWorkspaceApi.mockResolvedValueOnce(makeWorkspace({ agents: [] }));
+      mockFetchWorkspaceApi.mockResolvedValueOnce(
+        makeWorkspace({ agents: [] }),
+      );
       await store.getState().fetchWorkspace("ws-1");
 
       expect(store.getState().workspace?.agents).toEqual([

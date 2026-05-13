@@ -59,7 +59,11 @@ vi.mock("@/hooks/ui", async () => {
   };
 });
 
-import { useBackendConfig, useBackends, useLocalSettings } from "@/hooks/workspace";
+import {
+  useBackendConfig,
+  useBackends,
+  useLocalSettings,
+} from "@/hooks/workspace";
 import { useTerminalFont } from "@/hooks/terminal";
 import { useToast } from "@/hooks/ui";
 

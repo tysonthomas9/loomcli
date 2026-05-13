@@ -32,104 +32,130 @@ func RunIssueBackendConformance(t *testing.T, cfg IssueBackendSuiteConfig) {
 	}
 
 	t.Run("CreateListGetUpdateCloseReopen", func(t *testing.T) {
-		ib := cfg.NewBackend(t)
-		ctx := suiteContext(t)
-
-		created := createIssue(t, ctx, ib, "lifecycle")
-		assertIssue(t, created, "lifecycle", "open")
-
-		listed, err := ib.List(ctx, backend.ListOpts{Status: "open", Limit: 100})
-		if err != nil {
-			t.Fatalf("List(open): %v", err)
-		}
-		if !containsIssueID(listed, created.ID) {
-			t.Fatalf("List(open) did not include created issue %q; got ids %v", created.ID, issueIDs(listed))
-		}
-
-		detail, err := ib.Get(ctx, created.ID)
-		if err != nil {
-			t.Fatalf("Get(%s): %v", created.ID, err)
-		}
-		if detail.ID != created.ID || detail.Title != created.Title {
-			t.Fatalf("Get(%s) = {ID:%q Title:%q}, want {ID:%q Title:%q}",
-				created.ID, detail.ID, detail.Title, created.ID, created.Title)
-		}
-
-		updatedTitle := created.Title + " updated"
-		if err := ib.Update(ctx, created.ID, backend.UpdateParams{Title: &updatedTitle}); err != nil {
-			t.Fatalf("Update title: %v", err)
-		}
-		detail, err = ib.Get(ctx, created.ID)
-		if err != nil {
-			t.Fatalf("Get after Update: %v", err)
-		}
-		if detail.Title != updatedTitle {
-			t.Fatalf("updated title = %q, want %q", detail.Title, updatedTitle)
-		}
-
-		closed, err := ib.Close(ctx, created.ID, backend.CloseParams{Reason: "backend conformance"})
-		if err != nil {
-			t.Fatalf("Close(%s): %v", created.ID, err)
-		}
-		if closed == nil || closed.Closed == nil || closed.Closed.ID != created.ID {
-			t.Fatalf("Close result = %#v, want closed issue %q", closed, created.ID)
-		}
-
-		if err := ib.Reopen(ctx, created.ID, backend.ReopenParams{Reason: "backend conformance"}); err != nil {
-			t.Fatalf("Reopen(%s): %v", created.ID, err)
-		}
-		detail, err = ib.Get(ctx, created.ID)
-		if err != nil {
-			t.Fatalf("Get after Reopen: %v", err)
-		}
-		if detail.Status != "open" {
-			t.Fatalf("status after Reopen = %q, want open", detail.Status)
-		}
+		runCreateListGetUpdateCloseReopen(t, cfg.NewBackend(t))
 	})
-
 	t.Run("ReadyAndBlockedAgreeOnUnblockedIssue", func(t *testing.T) {
-		ib := cfg.NewBackend(t)
-		ctx := suiteContext(t)
-
-		created := createIssue(t, ctx, ib, "ready")
-		ready, err := ib.Ready(ctx, backend.ReadyOpts{Limit: 100})
-		if err != nil {
-			t.Fatalf("Ready: %v", err)
-		}
-		if !containsIssueID(ready, created.ID) {
-			t.Fatalf("Ready did not include unblocked issue %q; got ids %v", created.ID, issueIDs(ready))
-		}
-
-		blocked, err := ib.Blocked(ctx, backend.BlockedOpts{Limit: 100})
-		if err != nil {
-			t.Fatalf("Blocked: %v", err)
-		}
-		if containsIssueID(blocked, created.ID) {
-			t.Fatalf("Blocked unexpectedly included unblocked issue %q", created.ID)
-		}
+		runReadyAndBlockedAgreeOnUnblockedIssue(t, cfg.NewBackend(t))
 	})
-
 	t.Run("ExplicitCreateID", func(t *testing.T) {
-		if !cfg.SupportsExplicitCreateID {
-			t.Skip("backend does not currently honor CreateParams.ID")
-		}
-		ib := cfg.NewBackend(t)
-		ctx := suiteContext(t)
-		wantID := "CONTRACT-" + strings.ToUpper(safeName(t.Name()))
-		issue, err := ib.Create(ctx, backend.CreateParams{
-			ID:        wantID,
-			Title:     uniqueTitle(t, "explicit-id"),
-			Status:    "open",
-			IssueType: "task",
-			Priority:  2,
-		})
-		if err != nil {
-			t.Fatalf("Create explicit ID: %v", err)
-		}
-		if issue.ID != wantID {
-			t.Fatalf("CreateParams.ID was not honored: got %q, want %q", issue.ID, wantID)
-		}
+		runExplicitCreateID(t, cfg)
 	})
+}
+
+func runCreateListGetUpdateCloseReopen(t *testing.T, ib backend.IssueBackend) {
+	t.Helper()
+	ctx := suiteContext(t)
+	created := createIssue(t, ctx, ib, "lifecycle")
+	assertIssue(t, created, "lifecycle", "open")
+
+	assertListIncludes(t, ctx, ib, created.ID)
+	assertGetMatches(t, ctx, ib, created)
+	assertUpdateTitle(t, ctx, ib, created)
+	assertCloseReopen(t, ctx, ib, created.ID)
+}
+
+func runReadyAndBlockedAgreeOnUnblockedIssue(t *testing.T, ib backend.IssueBackend) {
+	t.Helper()
+	ctx := suiteContext(t)
+	created := createIssue(t, ctx, ib, "ready")
+
+	ready, err := ib.Ready(ctx, backend.ReadyOpts{Limit: 100})
+	if err != nil {
+		t.Fatalf("Ready: %v", err)
+	}
+	if !containsIssueID(ready, created.ID) {
+		t.Fatalf("Ready did not include unblocked issue %q; got ids %v", created.ID, issueIDs(ready))
+	}
+
+	blocked, err := ib.Blocked(ctx, backend.BlockedOpts{Limit: 100})
+	if err != nil {
+		t.Fatalf("Blocked: %v", err)
+	}
+	if containsIssueID(blocked, created.ID) {
+		t.Fatalf("Blocked unexpectedly included unblocked issue %q", created.ID)
+	}
+}
+
+func runExplicitCreateID(t *testing.T, cfg IssueBackendSuiteConfig) {
+	t.Helper()
+	if !cfg.SupportsExplicitCreateID {
+		t.Skip("backend does not currently honor CreateParams.ID")
+	}
+	ib := cfg.NewBackend(t)
+	ctx := suiteContext(t)
+	wantID := "CONTRACT-" + strings.ToUpper(safeName(t.Name()))
+	issue, err := ib.Create(ctx, backend.CreateParams{
+		ID:        wantID,
+		Title:     uniqueTitle(t, "explicit-id"),
+		Status:    "open",
+		IssueType: "task",
+		Priority:  2,
+	})
+	if err != nil {
+		t.Fatalf("Create explicit ID: %v", err)
+	}
+	if issue.ID != wantID {
+		t.Fatalf("CreateParams.ID was not honored: got %q, want %q", issue.ID, wantID)
+	}
+}
+
+func assertListIncludes(t *testing.T, ctx context.Context, ib backend.IssueBackend, id string) {
+	t.Helper()
+	listed, err := ib.List(ctx, backend.ListOpts{Status: "open", Limit: 100})
+	if err != nil {
+		t.Fatalf("List(open): %v", err)
+	}
+	if !containsIssueID(listed, id) {
+		t.Fatalf("List(open) did not include created issue %q; got ids %v", id, issueIDs(listed))
+	}
+}
+
+func assertGetMatches(t *testing.T, ctx context.Context, ib backend.IssueBackend, issue *backend.IssueData) {
+	t.Helper()
+	detail, err := ib.Get(ctx, issue.ID)
+	if err != nil {
+		t.Fatalf("Get(%s): %v", issue.ID, err)
+	}
+	if detail.ID != issue.ID || detail.Title != issue.Title {
+		t.Fatalf("Get(%s) = {ID:%q Title:%q}, want {ID:%q Title:%q}",
+			issue.ID, detail.ID, detail.Title, issue.ID, issue.Title)
+	}
+}
+
+func assertUpdateTitle(t *testing.T, ctx context.Context, ib backend.IssueBackend, issue *backend.IssueData) {
+	t.Helper()
+	updatedTitle := issue.Title + " updated"
+	if err := ib.Update(ctx, issue.ID, backend.UpdateParams{Title: &updatedTitle}); err != nil {
+		t.Fatalf("Update title: %v", err)
+	}
+	detail, err := ib.Get(ctx, issue.ID)
+	if err != nil {
+		t.Fatalf("Get after Update: %v", err)
+	}
+	if detail.Title != updatedTitle {
+		t.Fatalf("updated title = %q, want %q", detail.Title, updatedTitle)
+	}
+}
+
+func assertCloseReopen(t *testing.T, ctx context.Context, ib backend.IssueBackend, id string) {
+	t.Helper()
+	closed, err := ib.Close(ctx, id, backend.CloseParams{Reason: "backend conformance"})
+	if err != nil {
+		t.Fatalf("Close(%s): %v", id, err)
+	}
+	if closed == nil || closed.Closed == nil || closed.Closed.ID != id {
+		t.Fatalf("Close result = %#v, want closed issue %q", closed, id)
+	}
+	if err := ib.Reopen(ctx, id, backend.ReopenParams{Reason: "backend conformance"}); err != nil {
+		t.Fatalf("Reopen(%s): %v", id, err)
+	}
+	detail, err := ib.Get(ctx, id)
+	if err != nil {
+		t.Fatalf("Get after Reopen: %v", err)
+	}
+	if detail.Status != "open" {
+		t.Fatalf("status after Reopen = %q, want open", detail.Status)
+	}
 }
 
 func suiteContext(t *testing.T) context.Context {

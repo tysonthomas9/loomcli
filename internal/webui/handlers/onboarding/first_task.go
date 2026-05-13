@@ -39,68 +39,34 @@ type createdIssueRef struct {
 	ID string `json:"id"`
 }
 
+type normalizedRunFirstTaskRequest struct {
+	AgentName   string
+	Title       string
+	Description string
+	IssueType   string
+	Priority    int
+	SourceRepo  string
+}
+
 // HandleRunFirstTask creates the first onboarding task, assigns it to the
 // selected planner, and requests the agent start in one backend operation.
 func HandleRunFirstTask(issueSvc service.IssueService, agentSvc service.AgentService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ws := r.PathValue("ws")
-		var req runFirstTaskRequest
-		if err := handler.ReadJSON(w, r, &req); err != nil {
-			handler.HandleServiceError(w, err)
-			return
-		}
-
-		agentName := strings.TrimSpace(req.AgentName)
-		title := strings.TrimSpace(req.Title)
-		if agentName == "" {
-			handler.HandleServiceError(w, service.ErrValidation("agent_name is required"))
-			return
-		}
-		if title == "" {
-			handler.HandleServiceError(w, service.ErrValidation("title is required"))
-			return
-		}
-		if err := ensureAgentExists(r.Context(), agentSvc, ws, agentName); err != nil {
-			handler.HandleServiceError(w, err)
-			return
-		}
-
-		issueType := strings.TrimSpace(req.IssueType)
-		if issueType == "" {
-			issueType = "task"
-		}
-		priority := 2
-		if req.Priority != nil {
-			priority = *req.Priority
-		}
-
-		created, err := issueSvc.CreateIssue(r.Context(), service.CreateIssueParams{
-			Title:       title,
-			IssueType:   issueType,
-			Priority:    priority,
-			Description: strings.TrimSpace(req.Description),
-			Status:      "open",
-			SourceRepo:  strings.TrimSpace(req.SourceRepo),
-		})
+		req, err := readRunFirstTaskRequest(w, r)
 		if err != nil {
 			handler.HandleServiceError(w, err)
 			return
 		}
 
-		issueID, err := decodeIssueID(created)
+		normalized, err := normalizeRunFirstTaskRequest(req)
 		if err != nil {
 			handler.HandleServiceError(w, err)
 			return
 		}
 
-		_, err = agentSvc.RequestAgentLifecycle(r.Context(), ws, agentName, service.AgentLifecycleInput{
-			State:        domain.AgentStateActive,
-			DesiredState: domain.AgentDesiredRunning,
-			CommandType:  "start",
-			Payload:      map[string]string{"task_id": issueID},
-		})
+		created, err := createAndQueueFirstTask(r.Context(), issueSvc, agentSvc, ws, normalized)
 		if err != nil {
-			deleteCreatedFirstTask(issueSvc, issueID)
 			handler.HandleServiceError(w, err)
 			return
 		}
@@ -108,11 +74,88 @@ func HandleRunFirstTask(issueSvc service.IssueService, agentSvc service.AgentSer
 		handler.WriteJSON(w, http.StatusCreated, runFirstTaskResponse{
 			Success:   true,
 			Issue:     created,
-			AgentName: agentName,
+			AgentName: normalized.AgentName,
 			Started:   false,
 			Queued:    true,
 		})
 	}
+}
+
+func readRunFirstTaskRequest(w http.ResponseWriter, r *http.Request) (runFirstTaskRequest, error) {
+	var req runFirstTaskRequest
+	if err := handler.ReadJSON(w, r, &req); err != nil {
+		return runFirstTaskRequest{}, err
+	}
+	return req, nil
+}
+
+func normalizeRunFirstTaskRequest(req runFirstTaskRequest) (normalizedRunFirstTaskRequest, error) {
+	out := normalizedRunFirstTaskRequest{
+		AgentName:   strings.TrimSpace(req.AgentName),
+		Title:       strings.TrimSpace(req.Title),
+		Description: strings.TrimSpace(req.Description),
+		IssueType:   strings.TrimSpace(req.IssueType),
+		Priority:    2,
+		SourceRepo:  strings.TrimSpace(req.SourceRepo),
+	}
+	if out.AgentName == "" {
+		return normalizedRunFirstTaskRequest{}, service.ErrValidation("agent_name is required")
+	}
+	if out.Title == "" {
+		return normalizedRunFirstTaskRequest{}, service.ErrValidation("title is required")
+	}
+	if out.IssueType == "" {
+		out.IssueType = "task"
+	}
+	if req.Priority != nil {
+		out.Priority = *req.Priority
+	}
+	return out, nil
+}
+
+func createAndQueueFirstTask(
+	ctx context.Context,
+	issueSvc service.IssueService,
+	agentSvc service.AgentService,
+	ws string,
+	req normalizedRunFirstTaskRequest,
+) (json.RawMessage, error) {
+	if err := ensureAgentExists(ctx, agentSvc, ws, req.AgentName); err != nil {
+		return nil, err
+	}
+	created, err := issueSvc.CreateIssue(ctx, service.CreateIssueParams{
+		Title:       req.Title,
+		IssueType:   req.IssueType,
+		Priority:    req.Priority,
+		Description: req.Description,
+		Status:      "open",
+		SourceRepo:  req.SourceRepo,
+	})
+	if err != nil {
+		return nil, err
+	}
+	issueID, err := decodeIssueID(created)
+	if err != nil {
+		return nil, err
+	}
+	if err := queueFirstTask(ctx, agentSvc, ws, req.AgentName, issueID); err != nil {
+		deleteCreatedFirstTask(issueSvc, issueID)
+		return nil, err
+	}
+	return created, nil
+}
+
+func queueFirstTask(ctx context.Context, agentSvc service.AgentService, ws, agentName, issueID string) error {
+	_, err := agentSvc.RequestAgentLifecycle(ctx, ws, agentName, service.AgentLifecycleInput{
+		State:        domain.AgentStateActive,
+		DesiredState: domain.AgentDesiredRunning,
+		CommandType:  "start",
+		Payload:      map[string]string{"task_id": issueID},
+	})
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func ensureAgentExists(ctx context.Context, agentSvc service.AgentService, ws, agentName string) error {

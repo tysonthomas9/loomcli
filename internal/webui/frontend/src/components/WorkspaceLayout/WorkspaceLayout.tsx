@@ -7,11 +7,7 @@
 import { useParams, useNavigate, Outlet } from "react-router-dom";
 import { useEffect, useState } from "react";
 
-import {
-  WorkspaceProvider,
-  StoreProvider,
-  useIssueSessionMap,
-} from "@/hooks";
+import { WorkspaceProvider, StoreProvider, useIssueSessionMap } from "@/hooks";
 import { IssueSessionProvider } from "@/contexts/IssueSessionContext";
 import { fetchWorkspaceApi } from "@/hooks/api";
 import { clearLastWorkspaceId } from "@/utils/scopedStorage";

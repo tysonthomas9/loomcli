@@ -2333,7 +2333,9 @@ describe("App", () => {
 
     it('calls fetchIssues with mode: "kanban" when activeView is "terminal"', () => {
       mockStoreState = createMockUseIssuesReturn({});
-      vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("terminal"));
+      vi.mocked(useRouteView).mockReturnValue(
+        createViewStateReturn("terminal"),
+      );
 
       render(<App />);
 
