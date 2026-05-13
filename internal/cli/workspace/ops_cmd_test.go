@@ -3,8 +3,10 @@ package workspace
 import (
 	"context"
 	"errors"
+	"os"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/cli/local"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 )
 
@@ -182,5 +184,38 @@ func TestWorkspaceOpsGlobalProblemsDetectsDuplicateDaemonOwnership(t *testing.T)
 	}
 	if problems[0].Code != "duplicate_daemon_ownership" || problems[0].Severity != "warning" {
 		t.Fatalf("problem = %#v, want duplicate_daemon_ownership warning", problems[0])
+	}
+}
+
+func TestShouldWarnLocalRuntimeUnhealthy(t *testing.T) {
+	enoent := &os.PathError{Op: "open", Path: "runtime.json", Err: os.ErrNotExist}
+	healthy := &local.RuntimeStatusSnapshot{Healthy: true}
+	unhealthy := &local.RuntimeStatusSnapshot{Healthy: false}
+
+	tests := []struct {
+		name        string
+		fleetMode   bool
+		runtime     *local.RuntimeStatusSnapshot
+		err         error
+		wantWarning bool
+	}{
+		{name: "healthy never warns", runtime: healthy, wantWarning: false},
+		{name: "missing in fleet mode is silent", fleetMode: true, runtime: nil, err: enoent, wantWarning: false},
+		{name: "missing in non-fleet mode warns", fleetMode: false, runtime: nil, err: enoent, wantWarning: true},
+		{name: "unhealthy file exists always warns", fleetMode: true, runtime: unhealthy, err: nil, wantWarning: true},
+		{name: "non-ENOENT error warns even in fleet mode", fleetMode: true, runtime: nil, err: errors.New("permission denied"), wantWarning: true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.fleetMode {
+				t.Setenv("LOOM_ISSUE_BACKEND", "fleet")
+			} else {
+				t.Setenv("LOOM_ISSUE_BACKEND", "")
+			}
+			if got := shouldWarnLocalRuntimeUnhealthy(tc.runtime, tc.err); got != tc.wantWarning {
+				t.Errorf("shouldWarnLocalRuntimeUnhealthy = %v, want %v", got, tc.wantWarning)
+			}
+		})
 	}
 }

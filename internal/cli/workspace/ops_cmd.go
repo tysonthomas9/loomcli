@@ -3,6 +3,7 @@ package workspace
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
+	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/cli/local"
 	"github.com/tysonthomas9/loomcli/internal/domain"
@@ -281,7 +283,7 @@ func newWorkspaceOpsStatus(ws *domain.Workspace, localState bootstrap.WorkspaceL
 	if localState.Path != "" {
 		status.Daemon.WorkspaceLocal = collectDaemonStatusForDir(localState.Path)
 	}
-	if runtimeErr != nil || runtime == nil || !runtime.Healthy {
+	if shouldWarnLocalRuntimeUnhealthy(runtime, runtimeErr) {
 		status.Problems = append(status.Problems, WorkspaceOpsProblem{
 			Severity: "warning",
 			Code:     "local_runtime_unhealthy",
@@ -290,6 +292,28 @@ func newWorkspaceOpsStatus(ws *domain.Workspace, localState bootstrap.WorkspaceL
 		})
 	}
 	return status
+}
+
+// shouldWarnLocalRuntimeUnhealthy returns true only when the user appears to
+// care about the local desktop runtime. The runtime is a Loom.app concept:
+// in headless fleet-mode deployments (LOOM_ISSUE_BACKEND=fleet, e.g. the
+// fleet-db docker-compose stacks) the runtime is never started and ENOENT
+// on runtime.json is the expected state, not a problem to surface.
+//
+// Cases:
+//   - runtime healthy → no warning
+//   - runtime started but unhealthy (file exists, health check fails) → warn
+//   - runtime missing (ENOENT) AND fleet mode → silent (headless deployment)
+//   - runtime missing (ENOENT) AND not fleet mode → warn (desktop user
+//     forgot to start it, or it crashed and never recovered)
+func shouldWarnLocalRuntimeUnhealthy(runtime *local.RuntimeStatusSnapshot, runtimeErr error) bool {
+	if runtime != nil && runtime.Healthy {
+		return false
+	}
+	if runtimeErr != nil && errors.Is(runtimeErr, os.ErrNotExist) && cli.IsFleetActive() {
+		return false
+	}
+	return runtime == nil || !runtime.Healthy || runtimeErr != nil
 }
 
 // collectOpsRepos appends a WorkspaceOpsRepo for each non-nil repo and
