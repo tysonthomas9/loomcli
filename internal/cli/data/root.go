@@ -38,9 +38,10 @@ Examples:
   loom data monitor --server http://localhost:8080
   loom data agent stop falcon --server http://localhost:8080
 
-Note: if you pass --server as a root-level flag (e.g.
-'loom --server URL data show ID'), cli/data cannot read it — use
-'loom data show ID --server URL' or set LOOM_SERVER_URL.`,
+Root-level --server / --workspace are mirrored into LOOM_SERVER_URL /
+LOOM_WORKSPACE in PersistentPreRunE, so 'loom --server URL data show ID'
+and 'loom data show ID --server URL' resolve identically. The data
+subcommand reads from env, not from its own flag.`,
 }
 
 // Commands returns the data sub-tree for registration by cmd/loom/main.go.
