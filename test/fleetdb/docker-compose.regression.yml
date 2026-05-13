@@ -88,10 +88,6 @@ services:
     environment:
       LOOM_ISSUE_BACKEND: fleet-db
       LOOM_FLEET_URL: http://fleet-db:8080
-      # The fleet backend's URL builder uses LOOM_FLEET_WORKSPACE (not
-      # LOOM_WORKSPACE) — without this, requests go to .../workspaces/default/
-      # and 404 because fleet-db has no "default" workspace seeded.
-      LOOM_FLEET_WORKSPACE: FLEETDB
       LOOM_WORKSPACE: FLEETDB
       LOOM_BACKEND: codex
       CODEX_HOME: /root/.codex

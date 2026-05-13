@@ -8,7 +8,7 @@ import (
 func TestCreateFleetIssueBackend_MissingURL(t *testing.T) {
 	// Ensure no env vars provide a fleet URL.
 	t.Setenv("LOOM_FLEET_URL", "")
-	t.Setenv("LOOM_FLEET_WORKSPACE", "")
+	t.Setenv("LOOM_WORKSPACE", "")
 	t.Setenv("LOOM_FLEET_API_KEY", "")
 	t.Setenv("LOOM_ISSUE_BACKEND", "fleet")
 
@@ -23,7 +23,7 @@ func TestCreateFleetIssueBackend_MissingURL(t *testing.T) {
 
 func TestCreateFleetIssueBackend_Success(t *testing.T) {
 	t.Setenv("LOOM_FLEET_URL", "http://localhost:0")
-	t.Setenv("LOOM_FLEET_WORKSPACE", "test-ws")
+	t.Setenv("LOOM_WORKSPACE", "test-ws")
 	t.Setenv("LOOM_FLEET_API_KEY", "")
 	t.Setenv("LOOM_ISSUE_BACKEND", "fleet")
 

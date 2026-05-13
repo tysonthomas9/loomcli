@@ -5,7 +5,7 @@ import "testing"
 func clearFleetEnv(t *testing.T) {
 	t.Helper()
 	t.Setenv("LOOM_FLEET_URL", "")
-	t.Setenv("LOOM_FLEET_WORKSPACE", "")
+	t.Setenv("LOOM_WORKSPACE", "")
 	t.Setenv("LOOM_FLEET_API_KEY", "")
 	t.Setenv("LOOM_FLEET_ACTOR", "")
 	t.Setenv("LOOM_AGENT_NAME", "")
@@ -26,7 +26,7 @@ func TestResolveFleetConfig_Defaults(t *testing.T) {
 
 func TestResolveFleetConfig_NormalizesDefaultWorkspace(t *testing.T) {
 	clearFleetEnv(t)
-	t.Setenv("LOOM_FLEET_WORKSPACE", " default ")
+	t.Setenv("LOOM_WORKSPACE", " default ")
 
 	cfg := ResolveFleetConfig(nil)
 
@@ -38,7 +38,7 @@ func TestResolveFleetConfig_NormalizesDefaultWorkspace(t *testing.T) {
 func TestResolveFleetConfig_Env(t *testing.T) {
 	clearFleetEnv(t)
 	t.Setenv("LOOM_FLEET_URL", "https://fleet.example.com///")
-	t.Setenv("LOOM_FLEET_WORKSPACE", "prod")
+	t.Setenv("LOOM_WORKSPACE", "prod")
 	t.Setenv("LOOM_FLEET_API_KEY", "secret")
 	t.Setenv("LOOM_FLEET_ACTOR", "operator")
 

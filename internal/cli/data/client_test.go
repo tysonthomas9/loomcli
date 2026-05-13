@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 )
@@ -27,13 +28,17 @@ func fakeAuthConfigServer(t *testing.T) *httptest.Server {
 func withDataClientState(t *testing.T, fn func()) {
 	t.Helper()
 	prevServer := serverURL
-	prevWorkspace := workspaceID
 	prevOutput := outputFormat
+	prevWorkspace, hadWorkspace := os.LookupEnv("LOOM_WORKSPACE")
 	resetClient()
 	t.Cleanup(func() {
 		serverURL = prevServer
-		workspaceID = prevWorkspace
 		outputFormat = prevOutput
+		if hadWorkspace {
+			_ = os.Setenv("LOOM_WORKSPACE", prevWorkspace)
+		} else {
+			_ = os.Unsetenv("LOOM_WORKSPACE")
+		}
 		resetClient()
 	})
 	fn()

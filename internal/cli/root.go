@@ -105,7 +105,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&logFormat, "log-format", "text", "Log format (text|json)")
 	rootCmd.PersistentFlags().StringVar(&logOutput, "log-output", "stderr", "Log output destination (stderr|<filepath>)")
 	rootCmd.PersistentFlags().StringVar(&serverFlag, "server", "", "Remote loom server base URL. When set, CLI uses HTTP API backend instead of local FleetDB. Env: LOOM_SERVER_URL")
-	rootCmd.PersistentFlags().StringVar(&workspaceFlag, "workspace", "", "Workspace ID (for --server mode). Env: LOOM_WORKSPACE")
+	rootCmd.PersistentFlags().StringVar(&workspaceFlag, "workspace", "", "Workspace ID. Env: LOOM_WORKSPACE")
 
 	// Resolve and set active backend before any subcommand runs,
 	// then inject the Deps container into the command context.
@@ -129,7 +129,16 @@ func init() {
 		if err := ResolveAndSetBackend(); err != nil {
 			return err
 		}
+		// Rebuild the package-level defaultDeps now that --workspace /
+		// --server have been mirrored into the env. The eager
+		// `var defaultDeps = DefaultDeps()` in deps.go runs at process
+		// load time, before Cobra has parsed any flags, so its cached
+		// IssueBackend would otherwise be locked to whatever env was
+		// inherited from the shell. resolveDirectIssueBackend() reads
+		// defaultDeps.IssueBackend, so refresh it here before any
+		// subcommand runs.
 		deps := DefaultDeps()
+		defaultDeps = deps
 		cmd.SetContext(WithDeps(cmd.Context(), deps))
 		return nil
 	}

@@ -82,7 +82,6 @@ services:
       LOOM_ISSUE_BACKEND: fleet
       LOOM_FLEET_URL: http://fleet-db:8080
       LOOM_FLEET_DB_URL: http://fleet-db:8080
-      LOOM_FLEET_WORKSPACE: DEFAULT
       LOOM_WORKSPACE: DEFAULT
       LOOM_FLEET_ACTOR: local-user
       LOOM_FLEET_DB_ACTOR: local-user

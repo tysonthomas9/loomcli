@@ -32,7 +32,7 @@ func runList(t *testing.T, srvURL string, opts backend.ListOpts, format string) 
 	t.Helper()
 	resetClient()
 	serverURL = srvURL
-	workspaceID = "default"
+	t.Setenv("LOOM_WORKSPACE", "default")
 	outputFormat = format
 
 	ctx := context.Background()

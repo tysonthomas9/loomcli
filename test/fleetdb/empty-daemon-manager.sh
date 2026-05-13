@@ -31,7 +31,6 @@ workspace_has_runnable_agents() {
   status="$(
     LOOM_WORKSPACE="$ws_key" \
     LOOM_WORKSPACE_ID="$ws_key" \
-    LOOM_FLEET_WORKSPACE="$ws_key" \
       loom workspace ops status "$ws_key" --json 2>/tmp/loom-empty-daemon-status.err || true
   )"
   if [ "$status" = "" ]; then
@@ -52,7 +51,6 @@ start_workspace_daemon() {
     export LOOM_CONFIG_DIR="${LOOM_CONFIG_DIR:-/loom-config}"
     export LOOM_WORKSPACE="$ws_key"
     export LOOM_WORKSPACE_ID="$ws_key"
-    export LOOM_FLEET_WORKSPACE="$ws_key"
     export LOOM_BACKEND="${LOOM_BACKEND:-codex}"
     export LOOM_ISSUE_BACKEND=fleetdb
     export LOOM_FLEET_DB_URL="${LOOM_FLEET_DB_URL:-${LOOM_FLEET_URL:-http://fleet-db:8080}}"

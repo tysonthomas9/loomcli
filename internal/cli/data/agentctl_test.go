@@ -106,7 +106,7 @@ func setupAgentTest(t *testing.T, srvURL string) {
 	t.Helper()
 	resetClient()
 	serverURL = srvURL
-	workspaceID = "default"
+	t.Setenv("LOOM_WORKSPACE", "default")
 	outputFormat = "text"
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
 }
