@@ -198,6 +198,84 @@ func TestStartSetupSupportsCursorCredentialGuidance(t *testing.T) {
 	}
 }
 
+// P2.3 — setupShellArgv shellQuotes the printf argument but pastes the body
+// line raw. Safe today (only internal map values flow in), but creates an
+// asymmetry: a future entry with a single-quote will print fine via printf
+// but the unquoted body line will break shell parsing or behave differently.
+//
+// This test exercises a hypothetical command containing a single quote and
+// inspects the generated script to confirm the asymmetry exists.
+func TestSetupShellArgvHasAsymmetricQuotingBetweenPrintfAndBody(t *testing.T) {
+	cmd := `echo "it's set"`
+
+	argv := setupShellArgv(cmd)
+	if len(argv) != 2 || argv[0] != "-lc" {
+		t.Fatalf("argv = %v", argv)
+	}
+	script := argv[1]
+
+	// Printf arg is `shellQuote`'d, so the quote becomes '\''.
+	wantQuotedSegment := shellQuote(cmd)
+	if !strings.Contains(script, wantQuotedSegment) {
+		t.Fatalf("printf line missing quoted command:\n%s\nexpected substring: %s", script, wantQuotedSegment)
+	}
+
+	// Body line: command pasted raw. Look for the raw line (no surrounding
+	// single-quote escaping) somewhere in the script.
+	rawLine := "\n" + cmd + "\n"
+	if !strings.Contains(script, rawLine) {
+		t.Fatalf("expected raw command line in body:\n%s\nlooking for: %q", script, rawLine)
+	}
+
+	// The asymmetry itself: the printf-quoted form and the body-raw form
+	// are not the same. Confirms that if the input contained shell-special
+	// characters, the two locations would diverge.
+	if strings.Contains(rawLine, "'\\''") {
+		t.Fatal("raw body line is shell-escaped — asymmetry already removed")
+	}
+	if !strings.Contains(wantQuotedSegment, "'\\''") {
+		t.Fatal("printf quoted form lost escaping — test setup is wrong")
+	}
+	t.Logf("ASYMMETRY CONFIRMED: printf quoted=%q vs body raw=%q", wantQuotedSegment, rawLine)
+}
+
+// Also verify the WriteToSession path: when the session exists, the service
+// writes `command+"\n"` directly. Same asymmetry — no shell quoting.
+func TestStartSetupWritesRawCommandToExistingSessionWithoutQuoting(t *testing.T) {
+	// Swap in a temporary setupCommandSpecs entry that contains a single
+	// quote. Restore on cleanup so other tests aren't affected.
+	original := setupCommandSpecs
+	t.Cleanup(func() { setupCommandSpecs = original })
+	setupCommandSpecs = map[string]setupCommandSpec{
+		"unsafe": {
+			displayName: "Unsafe",
+			commands:    map[string]string{"login": `echo "it's set"`},
+		},
+	}
+
+	fake := newFakeSetupPTYSource(false) // not created => triggers WriteToSession
+	svc, _ := newSetupTestSvc(t, fake)
+
+	_, err := svc.StartSetup(context.Background(), "HELLO-WORLD", service.TerminalSetupRequest{
+		Backend: "unsafe",
+		Action:  "login",
+	})
+	if err != nil {
+		t.Fatalf("StartSetup: %v", err)
+	}
+
+	if len(fake.writeCalls) != 1 {
+		t.Fatalf("WriteToSession calls = %d, want 1", len(fake.writeCalls))
+	}
+	got := fake.writeCalls[0].data
+	want := `echo "it's set"` + "\n"
+	if got != want {
+		t.Fatalf("WriteToSession data = %q, want raw %q", got, want)
+	}
+	// Bug-shape confirmed: the WriteToSession path does NOT shell-quote
+	// the command, in contrast to setupShellArgv's printf argument.
+}
+
 func TestStartSetupRejectsUnsupportedBackend(t *testing.T) {
 	fake := newFakeSetupPTYSource(true)
 	svc, _ := newSetupTestSvc(t, fake)

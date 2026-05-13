@@ -144,6 +144,61 @@ func TestHandleRunFirstTaskDeletesCreatedIssueWhenStartFails(t *testing.T) {
 	}
 }
 
+// P2.5 — deleteCreatedFirstTask uses r.Context(), so if the caller's context
+// is already canceled when lifecycle fails, the compensating delete inherits
+// that canceled context and the underlying service may no-op, orphaning the
+// issue.
+//
+// We construct an httptest request, cancel its context BEFORE serving, force
+// the lifecycle to fail, and observe whether the delete call propagates a
+// canceled-context to the issue service.
+func TestHandleRunFirstTaskCleanupUsesCanceledContextWhenClientDisconnects(t *testing.T) {
+	var deleteCtxErr error
+	var deleteCalled bool
+	issueSvc := &stubIssueService{
+		createFunc: func(context.Context, service.CreateIssueParams) (json.RawMessage, error) {
+			return json.RawMessage(`{"id":"task-1"}`), nil
+		},
+		deleteFunc: func(ctx context.Context, _ string) (json.RawMessage, error) {
+			deleteCalled = true
+			deleteCtxErr = ctx.Err()
+			// Honest stub: return what a service backed by this ctx would.
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			return json.RawMessage(`{"deleted_count":1}`), nil
+		},
+	}
+	agentSvc := &stubAgentService{
+		agents: []*domain.Agent{{Name: "planner", RoleName: "plan"}},
+		lifecycleFunc: func(context.Context, string, string, service.AgentLifecycleInput) (*domain.Agent, error) {
+			return nil, service.ErrUnavailable("daemon unavailable")
+		},
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/HELLO-WORLD/onboarding/first-task", strings.NewReader(`{
+		"agent_name":"planner",
+		"title":"Explore Hello-World onboarding"
+	}`))
+	req.SetPathValue("ws", "HELLO-WORLD")
+	// Simulate client disconnect: pre-cancel the request context.
+	ctx, cancel := context.WithCancel(req.Context())
+	cancel()
+	req = req.WithContext(ctx)
+
+	HandleRunFirstTask(issueSvc, agentSvc).ServeHTTP(rec, req)
+
+	if !deleteCalled {
+		t.Fatal("cleanup delete was not called")
+	}
+	if deleteCtxErr == nil {
+		t.Fatal("cleanup ran with a live context — bug appears fixed; consider removing this test or asserting context.Background()")
+	}
+	// Bug confirmed: cleanup observed a canceled context.
+	t.Logf("BUG CONFIRMED: cleanup ctx.Err() = %v (orphans task on client disconnect)", deleteCtxErr)
+}
+
 func TestHandleRunFirstTaskRejectsUnknownAgent(t *testing.T) {
 	issueSvc := &stubIssueService{
 		createFunc: func(context.Context, service.CreateIssueParams) (json.RawMessage, error) {

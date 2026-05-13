@@ -430,6 +430,47 @@ describe("RedirectToWorkspace", () => {
     });
   });
 
+  describe("review finding P2.6 — resolveWorkspace deps", () => {
+    // resolveWorkspace is wrapped in useCallback with `location.state` in the
+    // dependency array. location.state is an object reference, so any router
+    // navigation that produces a new state reference (even with the same
+    // logical value) recreates resolveWorkspace, retriggering the useEffect
+    // and firing fetchWorkspaceApi again.
+    it("refetches workspaces when location.state reference changes", async () => {
+      mockFetchWorkspace.mockResolvedValue(
+        makeWorkspaceData([{ id: "ws-a", is_default: false }]),
+      );
+
+      const initialState = { failedWorkspaceId: "x" };
+      mockLocation.state = initialState;
+
+      const { rerender } = render(
+        <MemoryRouter>
+          <RedirectToWorkspace />
+        </MemoryRouter>,
+      );
+
+      await waitFor(() => {
+        expect(mockFetchWorkspace).toHaveBeenCalledTimes(1);
+      });
+
+      // New object reference with same logical content.
+      mockLocation.state = { failedWorkspaceId: "x" };
+      rerender(
+        <MemoryRouter>
+          <RedirectToWorkspace />
+        </MemoryRouter>,
+      );
+
+      await waitFor(() => {
+        // Bug shape: 2 fetches for what should be 1 logical resolution.
+        // If memoized on `failedId` string instead of `location.state`
+        // object, this would stay at 1.
+        expect(mockFetchWorkspace.mock.calls.length).toBeGreaterThan(1);
+      });
+    });
+  });
+
   describe("loading state", () => {
     it("renders nothing while resolving", () => {
       // fetchWorkspace never resolves during this test
