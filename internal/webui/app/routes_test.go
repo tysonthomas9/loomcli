@@ -1448,6 +1448,49 @@ func TestSetupRoutes_SSEEndpointRegisteredOnWorkspaceScope(t *testing.T) {
 	}
 }
 
+func TestSetupRoutes_SSEEndpointUsesCanonicalWorkspace(t *testing.T) {
+	hub := realtime.NewHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	multiPool := daemon.NewMultiPool(middleware.WorkspaceFromContext, 1)
+	app := &Server{
+		multiPool: multiPool,
+		hub:       hub,
+		wsResolveFn: func(_ context.Context, requestedID string) (middleware.WorkspaceRef, bool) {
+			if requestedID != "alias-ws" {
+				t.Fatalf("requested workspace = %q, want alias-ws", requestedID)
+			}
+			return middleware.WorkspaceRef{RequestedID: requestedID, CanonicalID: "canonical-ws"}, true
+		},
+	}
+	app.sessSvc = svcimpl.NewSessionService(nil, nil)
+	setupTestRoutes(t, app)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/alias-ws/events", nil).WithContext(ctx)
+	rr := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() {
+		app.mux.ServeHTTP(rr, req)
+		close(done)
+	}()
+
+	waitForWorkspaceClientCount(t, hub, "canonical-ws", 1)
+	if got := hub.ClientCountForWorkspace("alias-ws"); got != 0 {
+		t.Fatalf("alias workspace client count = %d, want 0", got)
+	}
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("SSE handler did not exit after request context cancellation")
+	}
+}
+
 func TestSetupRoutes_WorkspaceMonitorStatusInjectsWorkspace(t *testing.T) {
 	multiPool := daemon.NewMultiPool(middleware.WorkspaceFromContext, 1)
 	_ = multiPool.Register("test-ws", &stubPool{})
@@ -1484,6 +1527,52 @@ func TestSetupRoutes_WorkspaceMonitorStatusInjectsWorkspace(t *testing.T) {
 	if ct := rr.Header().Get("Content-Type"); ct != "application/json" {
 		t.Errorf("Content-Type = %q, want application/json", ct)
 	}
+}
+
+func TestSetupRoutes_WorkspaceGetUsesCanonicalWorkspace(t *testing.T) {
+	wsSvc := &mockWorkspaceService{
+		getWorkspaceFn: func(ctx context.Context, wsID string) (*ops.WorkspaceData, error) {
+			if wsID != "canonical-ws" {
+				t.Errorf("workspace id = %q, want canonical-ws", wsID)
+			}
+			if got := middleware.WorkspaceFromContext(ctx); got != "canonical-ws" {
+				t.Errorf("workspace context = %q, want canonical-ws", got)
+			}
+			return &ops.WorkspaceData{ID: "canonical-ws"}, nil
+		},
+	}
+	app := &Server{
+		multiPool:    daemon.NewMultiPool(middleware.WorkspaceFromContext, 1),
+		workspaceSvc: wsSvc,
+		wsResolveFn: func(_ context.Context, requestedID string) (middleware.WorkspaceRef, bool) {
+			if requestedID != "alias-ws" {
+				t.Fatalf("requested workspace = %q, want alias-ws", requestedID)
+			}
+			return middleware.WorkspaceRef{RequestedID: requestedID, CanonicalID: "canonical-ws"}, true
+		},
+	}
+	app.sessSvc = svcimpl.NewSessionService(nil, nil)
+	setupTestRoutes(t, app)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/alias-ws", nil)
+	rr := httptest.NewRecorder()
+	app.mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func waitForWorkspaceClientCount(t *testing.T, hub *realtime.Hub, wsID string, expected int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if hub.ClientCountForWorkspace(wsID) == expected {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("workspace %q client count = %d, want %d", wsID, hub.ClientCountForWorkspace(wsID), expected)
 }
 
 func TestSetupRoutes_WorkspaceBackendGetEndpoint(t *testing.T) {

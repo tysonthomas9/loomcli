@@ -179,8 +179,7 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	cleanups = append(cleanups, func() { app.hub.Stop() })
 
 	// Bridge per-workspace backend mutations to SSE clients.
-	app.multiSub = appstores.NewMultiSub(app.hub, config.Logger)
-	app.multiSub.Start(ctx)
+	app.multiSub = appstores.NewMultiSub(ctx, app.hub, config.Logger)
 	app.getMutationsSince = appstores.GetMutationsSinceFn(app.multiSub)
 	cleanups = append(cleanups, func() { app.multiSub.Stop() })
 
@@ -374,24 +373,34 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	// state from fleet-db.
 	wsResolver := config.WorkspaceIDResolverFn
 	wsStore := config.Store
-	app.wsExistsFn = func(id string) bool {
+	app.wsResolveFn = func(reqCtx context.Context, id string) (middleware.WorkspaceRef, bool) {
+		ref := middleware.WorkspaceRef{RequestedID: id, CanonicalID: id}
 		if app.registry.Registered(id) {
 			_ = app.registry.ActivateSubscriber(id)
-			return true
+			return ref, true
 		}
 		if wsResolver != nil {
 			if uuid, err := wsResolver(id); err == nil && uuid != "" && app.registry.Registered(uuid) {
 				_ = app.registry.ActivateSubscriber(uuid)
-				return true
+				ref.CanonicalID = uuid
+				return ref, true
 			}
 		}
 		if wsStore != nil {
-			if ws, err := wsStore.Workspaces().Get(ctx, id); err == nil && ws != nil {
-				app.ensureStoreBackedSubscriber(ws.Key)
-				return true
+			if reqCtx == nil {
+				reqCtx = ctx
+			}
+			if key, err := storeadapter.ResolveWorkspaceKeyByName(reqCtx, wsStore, id); err == nil && key != "" {
+				ref.CanonicalID = key
+				app.ensureStoreBackedSubscriber(reqCtx, key)
+				return ref, true
 			}
 		}
-		return false
+		return middleware.WorkspaceRef{}, false
+	}
+	app.wsExistsFn = func(id string) bool {
+		_, ok := app.wsResolveFn(context.Background(), id)
+		return ok
 	}
 
 	// Initialize workspace service layer. FleetDB Store is the authoritative
@@ -447,18 +456,21 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	return app, nil
 }
 
-func (app *Server) ensureStoreBackedSubscriber(wsID string) {
+func (app *Server) ensureStoreBackedSubscriber(ctx context.Context, wsID string) {
 	if app == nil || wsID == "" || app.multiSub == nil || app.config.IssueBackendFn == nil {
 		return
 	}
 	if app.multiSub.HasSubscriber(wsID) {
 		return
 	}
-	be := app.config.IssueBackendFn(middleware.WithWorkspace(context.Background(), wsID))
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	be := app.config.IssueBackendFn(middleware.WithWorkspace(ctx, wsID))
 	if be == nil {
 		return
 	}
-	if err := app.multiSub.AddWorkspaceWithBackend(wsID, be); err != nil {
+	if err := app.multiSub.EnsureActive(ctx, wsID, be, appstores.ActivationReasonHTTP); err != nil {
 		logger.Warn("failed to start store-backed workspace subscriber",
 			"workspace", wsID, "err", err)
 	}

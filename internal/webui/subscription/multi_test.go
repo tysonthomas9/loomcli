@@ -171,9 +171,10 @@ func TestAddWorkspaceWithBackend_TOCTOUSafe(t *testing.T) {
 	}
 }
 
-// TestStart_IdempotentAndRunsIdleDeactivation verifies that the manager
-// lifecycle can be started once at server boot and then owns idle cleanup.
-func TestStart_IdempotentAndRunsIdleDeactivation(t *testing.T) {
+// TestStart_ManagerLifecycleOnlyAndRunsIdleDeactivation verifies that the
+// manager lifecycle can be started once at server boot and owns idle cleanup
+// without also owning per-workspace subscriber start.
+func TestStart_ManagerLifecycleOnlyAndRunsIdleDeactivation(t *testing.T) {
 	hub := realtime.NewHub()
 	go hub.Run()
 	defer hub.Stop()
@@ -195,8 +196,8 @@ func TestStart_IdempotentAndRunsIdleDeactivation(t *testing.T) {
 	multi.Start(ctx)
 	multi.Start(ctx)
 
-	if got := sub.startCalls.Load(); got != 1 {
-		t.Fatalf("Start should start registered subscribers once, got %d starts", got)
+	if got := sub.startCalls.Load(); got != 0 {
+		t.Fatalf("manager Start should not start per-workspace subscribers, got %d starts", got)
 	}
 
 	waitForMultiCondition(t, func() bool {
@@ -204,6 +205,75 @@ func TestStart_IdempotentAndRunsIdleDeactivation(t *testing.T) {
 	})
 	if got := sub.stopCalls.Load(); got != 1 {
 		t.Fatalf("idle deactivation should stop subscriber once, got %d stops", got)
+	}
+}
+
+func TestEnsureActive_AfterStopErrors(t *testing.T) {
+	hub := realtime.NewHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	multi := NewStartedMultiWorkspaceSubscriber(context.Background(), hub, nil)
+	multi.Stop()
+
+	err := multi.EnsureActive(context.Background(), "ws-stopped", &fakeBackend{}, ActivationReasonHTTP)
+	if err == nil {
+		t.Fatal("expected EnsureActive after Stop to error")
+	}
+	if multi.HasSubscriber("ws-stopped") {
+		t.Fatal("EnsureActive after Stop should not register subscriber")
+	}
+}
+
+func TestGetMutationsSinceForWorkspace_ConcurrentStop(t *testing.T) {
+	ts := time.Date(2026, 3, 25, 12, 0, 0, 0, time.UTC)
+	hub := realtime.NewHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	getStarted := make(chan struct{})
+	releaseGet := make(chan struct{})
+	var signalStarted sync.Once
+	fb := &fakeBackend{getFn: func(ctx context.Context, _ int64) ([]backend.MutationData, error) {
+		signalStarted.Do(func() { close(getStarted) })
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-releaseGet:
+			return []backend.MutationData{{Type: "create", IssueID: "fleet-stop-race", Timestamp: ts}}, nil
+		}
+	}}
+
+	multi := NewStartedMultiWorkspaceSubscriber(context.Background(), hub, nil)
+	if err := multi.EnsureActive(context.Background(), "ws-stop-race", fb, ActivationReasonHTTP); err != nil {
+		t.Fatalf("EnsureActive: %v", err)
+	}
+
+	gotLen := make(chan int, 1)
+	go func() {
+		gotLen <- len(multi.GetMutationsSinceForWorkspace("ws-stop-race", "0"))
+	}()
+	<-getStarted
+
+	stopped := make(chan struct{})
+	go func() {
+		multi.Stop()
+		close(stopped)
+	}()
+	select {
+	case <-stopped:
+	case <-time.After(time.Second):
+		t.Fatal("Stop blocked while catch-up GetMutationDataSince was in flight")
+	}
+
+	close(releaseGet)
+	select {
+	case got := <-gotLen:
+		if got != 1 {
+			t.Fatalf("expected catch-up result after concurrent Stop, got %d", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("GetMutationsSinceForWorkspace did not return after release")
 	}
 }
 

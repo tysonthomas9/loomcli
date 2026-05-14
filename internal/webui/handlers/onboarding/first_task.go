@@ -10,6 +10,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
@@ -52,7 +53,10 @@ type normalizedRunFirstTaskRequest struct {
 // selected planner, and requests the agent start in one backend operation.
 func HandleRunFirstTask(issueSvc service.IssueService, agentSvc service.AgentService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		ws := r.PathValue("ws")
+		ws := middleware.WorkspaceFromContext(r.Context())
+		if ws == "" {
+			ws = r.PathValue("ws")
+		}
 		req, err := readRunFirstTaskRequest(w, r)
 		if err != nil {
 			handler.HandleServiceError(w, err)

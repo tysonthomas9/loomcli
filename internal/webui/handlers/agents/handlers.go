@@ -11,13 +11,14 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/dto"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 func HandleList(agentSvc service.AgentService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		agents, err := agentSvc.ListAgents(r.Context(), r.PathValue("ws"))
+		agents, err := agentSvc.ListAgents(r.Context(), requestWorkspaceID(r))
 		if err != nil {
 			handler.HandleServiceError(w, err)
 			return
@@ -28,7 +29,7 @@ func HandleList(agentSvc service.AgentService) http.HandlerFunc {
 
 func HandleCreate(agentSvc service.AgentService, hub *realtime.Hub) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		ws := r.PathValue("ws")
+		ws := requestWorkspaceID(r)
 		ctx, span := startSpan(r.Context(), "service.Agent.Create",
 			attribute.String("loom.workspace", ws))
 		defer span.End()
@@ -77,19 +78,20 @@ func HandleUpdate(agentSvc service.AgentService, hub *realtime.Hub) http.Handler
 			handler.HandleServiceError(w, service.ErrValidation("invalid desired_state"))
 			return
 		}
-		updated, err := agentSvc.UpdateAgent(r.Context(), r.PathValue("ws"), r.PathValue("name"), patch)
+		ws := requestWorkspaceID(r)
+		updated, err := agentSvc.UpdateAgent(r.Context(), ws, r.PathValue("name"), patch)
 		if err != nil {
 			handler.HandleServiceError(w, err)
 			return
 		}
-		broadcastAgentRefresh(hub, r.PathValue("ws"), updated.Name, r.Header.Get("X-Actor"))
+		broadcastAgentRefresh(hub, ws, updated.Name, r.Header.Get("X-Actor"))
 		handler.WriteJSON(w, http.StatusOK, updated)
 	}
 }
 
 func HandleDelete(agentSvc service.AgentService, hub *realtime.Hub) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		ws := r.PathValue("ws")
+		ws := requestWorkspaceID(r)
 		name := r.PathValue("name")
 		if err := agentSvc.DeleteAgent(r.Context(), ws, name); err != nil {
 			handler.HandleServiceError(w, err)
@@ -160,7 +162,7 @@ type lifecycleRequest struct {
 
 func handleLifecycle(agentSvc service.AgentService, hub *realtime.Hub, patch lifecyclePatch) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		ws := r.PathValue("ws")
+		ws := requestWorkspaceID(r)
 		name := r.PathValue("name")
 		payload := patch.payload
 		if r.Body != nil && r.ContentLength != 0 {
@@ -198,6 +200,13 @@ func handleLifecycle(agentSvc service.AgentService, hub *realtime.Hub, patch lif
 		broadcastAgentRefresh(hub, ws, updated.Name, r.Header.Get("X-Actor"))
 		handler.WriteJSON(w, patch.status, dto.NewMessageResponse(fmt.Sprintf("agent %q %s", updated.Name, patch.message)))
 	}
+}
+
+func requestWorkspaceID(r *http.Request) string {
+	if ws := middleware.WorkspaceFromContext(r.Context()); ws != "" {
+		return ws
+	}
+	return r.PathValue("ws")
 }
 
 func broadcastAgentRefresh(hub *realtime.Hub, workspace, agentName, actor string) {

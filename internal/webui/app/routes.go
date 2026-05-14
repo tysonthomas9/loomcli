@@ -137,23 +137,24 @@ func (app *Server) registerMonitorHandlers() {
 
 // registerWorkspaceRoutes sets up workspace listing, CRUD, and workspace-scoped API routes.
 func (app *Server) registerWorkspaceRoutes() {
+	workspaceMW := app.workspaceMiddleware()
 	app.mux.HandleFunc("GET /api/workspaces/active", handlermux.HandleActiveWorkspace(app.workspaceSvc))
 	app.mux.HandleFunc("GET /api/workspaces", handlermux.HandleListWorkspaces(app.workspaceSvc))
 	app.mux.HandleFunc("PUT /api/workspaces/default", handlermux.HandleSetDefaultWorkspace(app.workspaceSvc))
 	app.mux.HandleFunc("DELETE /api/workspaces/default", handlermux.HandleClearDefaultWorkspace(app.workspaceSvc))
-	app.mux.HandleFunc("GET /api/workspaces/{ws}", handlermux.HandleGetWorkspace(app.workspaceSvc))
+	app.mux.Handle("GET /api/workspaces/{ws}", workspaceMW(handlermux.HandleGetWorkspace(app.workspaceSvc)))
 	app.mux.HandleFunc("POST /api/workspaces", handlermux.HandleWorkspaceCreate(app.workspaceSvc))
 	app.mux.HandleFunc("GET /api/workspaces/jobs/{id}", handlermux.HandleGetWorkspaceJob(app.workspaceSvc))
 	app.mux.HandleFunc("PUT /api/workspaces/order", handlermux.HandleWorkspaceReorder(app.workspaceSvc))
-	app.mux.Handle("DELETE /api/workspaces/{ws}", middleware.Workspace(app.wsExistsFn)(handlermux.HandleWorkspaceDelete(app.workspaceSvc)))
+	app.mux.Handle("DELETE /api/workspaces/{ws}", workspaceMW(handlermux.HandleWorkspaceDelete(app.workspaceSvc)))
 	// PATCH handlers are registered on the outer mux (not the nested wsMux)
 	// because Go 1.22+ http.ServeMux has a bug where r.Body.Read() hangs for
 	// PATCH requests routed through a nested mux via wildcard subtree pattern.
-	app.mux.Handle("PATCH /api/workspaces/{ws}/name", middleware.Workspace(app.wsExistsFn)(handlermux.HandleWorkspaceRename(app.workspaceSvc)))
-	app.mux.Handle("GET /api/workspaces/{ws}/config/backend", middleware.Workspace(app.wsExistsFn)(handlermux.HandleWorkspaceBackendGet(app.workspaceSvc)))
-	app.mux.Handle("PATCH /api/workspaces/{ws}/config/backend", middleware.Workspace(app.wsExistsFn)(handlermux.HandleWorkspaceBackendPatch(app.workspaceSvc)))
+	app.mux.Handle("PATCH /api/workspaces/{ws}/name", workspaceMW(handlermux.HandleWorkspaceRename(app.workspaceSvc)))
+	app.mux.Handle("GET /api/workspaces/{ws}/config/backend", workspaceMW(handlermux.HandleWorkspaceBackendGet(app.workspaceSvc)))
+	app.mux.Handle("PATCH /api/workspaces/{ws}/config/backend", workspaceMW(handlermux.HandleWorkspaceBackendPatch(app.workspaceSvc)))
 	if statusHandler := app.config.MonitorHandlers.Status; statusHandler != nil {
-		app.mux.Handle("GET /api/workspaces/{ws}/monitor/status", middleware.Workspace(app.wsExistsFn)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		app.mux.Handle("GET /api/workspaces/{ws}/monitor/status", workspaceMW(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			q := r.URL.Query()
 			if q.Get("workspace") == "" {
 				q.Set("workspace", middleware.WorkspaceFromContext(r.Context()))
@@ -181,5 +182,14 @@ func (app *Server) registerWorkspaceRoutes() {
 		webui.SetPromRoutePattern(r.Context(), pattern)
 		wsMux.ServeHTTP(w, r)
 	})
-	app.mux.Handle("/api/workspaces/{ws}/", middleware.Workspace(app.wsExistsFn)(wsHandler))
+	app.mux.Handle("/api/workspaces/{ws}/", workspaceMW(wsHandler))
+}
+
+func (app *Server) workspaceMiddleware() middleware.Middleware {
+	if app.wsResolveFn != nil {
+		return middleware.WorkspaceResolved(app.wsResolveFn)
+	}
+	return middleware.Workspace(func(id string) bool {
+		return app.wsExistsFn != nil && app.wsExistsFn(id)
+	})
 }

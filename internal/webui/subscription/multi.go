@@ -19,6 +19,15 @@ const (
 	defaultIdleDeactivationTimeout  = 60 * time.Second
 )
 
+// ActivationReason records why a workspace subscriber was activated.
+type ActivationReason string
+
+const (
+	ActivationReasonHTTP     ActivationReason = "http"
+	ActivationReasonRegistry ActivationReason = "registry"
+	ActivationReasonLegacy   ActivationReason = "legacy"
+)
+
 // workspaceSubscriber abstracts a per-workspace backend mutation source.
 type workspaceSubscriber interface {
 	Start()
@@ -43,10 +52,19 @@ type MultiWorkspaceSubscriber struct {
 	idleDeactivationTimeout  time.Duration
 
 	mu        sync.RWMutex
+	closed    bool
 	startOnce sync.Once
 	idleWG    sync.WaitGroup
 	ctx       context.Context
 	cancel    context.CancelFunc
+}
+
+// NewStartedMultiWorkspaceSubscriber creates a MultiWorkspaceSubscriber and
+// starts its process-lifetime manager loop.
+func NewStartedMultiWorkspaceSubscriber(ctx context.Context, hub *realtime.Hub, logger *slog.Logger) *MultiWorkspaceSubscriber {
+	m := NewMultiWorkspaceSubscriber(hub, logger)
+	m.Start(ctx)
+	return m
 }
 
 // NewMultiWorkspaceSubscriber creates a new MultiWorkspaceSubscriber.
@@ -70,13 +88,27 @@ func NewMultiWorkspaceSubscriber(hub *realtime.Hub, logger *slog.Logger) *MultiW
 // lock to close the TOCTOU window between HasSubscriber and insertion.
 // Returns an error if b is nil.
 func (m *MultiWorkspaceSubscriber) AddWorkspaceWithBackend(wsID string, b backend.IssueBackend) error {
+	return m.EnsureActive(context.Background(), wsID, b, ActivationReasonLegacy)
+}
+
+// EnsureActive creates and starts the per-workspace backend subscriber if one
+// is not already active. HTTP traffic warms subscribers; connected SSE clients
+// retain them, and the manager idle loop removes subscribers with no SSE
+// clients after the idle grace period.
+func (m *MultiWorkspaceSubscriber) EnsureActive(ctx context.Context, wsID string, b backend.IssueBackend, reason ActivationReason) error {
 	if b == nil {
-		return fmt.Errorf("AddWorkspaceWithBackend: backend must not be nil for workspace %q", wsID)
+		return fmt.Errorf("EnsureActive: backend must not be nil for workspace %q", wsID)
+	}
+	if ctx != nil && ctx.Err() != nil {
+		return ctx.Err()
 	}
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	if m.closed {
+		return fmt.Errorf("EnsureActive: subscriber manager is stopped")
+	}
 	if _, ok := m.subscribers[wsID]; ok {
 		return nil
 	}
@@ -85,7 +117,7 @@ func (m *MultiWorkspaceSubscriber) AddWorkspaceWithBackend(wsID string, b backen
 	sub.Start()
 	m.subscribers[wsID] = &subscriberEntry{sub: sub}
 
-	m.logger.Info("workspace backend subscriber started", "workspace", wsID)
+	m.logger.Info("workspace backend subscriber started", "workspace", wsID, "reason", reason)
 	return nil
 }
 
@@ -109,7 +141,8 @@ func (m *MultiWorkspaceSubscriber) RemoveWorkspace(wsID string) {
 	}
 }
 
-// Start starts all registered workspace subscribers and the idle deactivation loop.
+// Start starts the process-lifetime manager loop. Stop does not make the
+// manager restartable.
 func (m *MultiWorkspaceSubscriber) Start(ctx context.Context) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -118,13 +151,11 @@ func (m *MultiWorkspaceSubscriber) Start(ctx context.Context) {
 	m.startOnce.Do(func() {
 		m.mu.Lock()
 		defer m.mu.Unlock()
+		if m.closed {
+			return
+		}
 
 		m.ctx, m.cancel = context.WithCancel(ctx)
-
-		for wsID, entry := range m.subscribers {
-			entry.sub.Start()
-			m.logger.Info("workspace subscriber started", "workspace", wsID)
-		}
 
 		m.idleWG.Add(1)
 		go func() {
@@ -136,9 +167,15 @@ func (m *MultiWorkspaceSubscriber) Start(ctx context.Context) {
 
 // Stop gracefully stops all workspace subscribers.
 func (m *MultiWorkspaceSubscriber) Stop() {
-	m.mu.RLock()
+	m.mu.Lock()
+	if m.closed {
+		m.mu.Unlock()
+		return
+	}
+	m.closed = true
 	cancel := m.cancel
-	m.mu.RUnlock()
+	m.mu.Unlock()
+
 	if cancel != nil {
 		cancel()
 	}

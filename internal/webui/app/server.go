@@ -101,8 +101,9 @@ type Server struct {
 	// Async workspace creation jobs
 	jobStore *svcimpl.WorkspaceJobStore
 
-	// Workspace existence checker
-	wsExistsFn func(string) bool
+	// Workspace resolver
+	wsExistsFn  func(string) bool // legacy identity resolver used by tests
+	wsResolveFn middleware.WorkspaceResolveFn
 
 	// Notify token for session change endpoint auth
 	notifyToken     string
