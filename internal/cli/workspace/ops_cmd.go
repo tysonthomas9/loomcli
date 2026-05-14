@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
+	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/cli/local"
 	"github.com/tysonthomas9/loomcli/internal/domain"
@@ -59,13 +60,51 @@ func init() {
 }
 
 type WorkspaceOpsStatus struct {
-	OK           bool                         `json:"ok"`
-	Workspace    WorkspaceOpsWorkspace        `json:"workspace"`
-	LocalRuntime *local.RuntimeStatusSnapshot `json:"local_runtime,omitempty"`
-	Daemon       WorkspaceOpsDaemon           `json:"daemon"`
-	Repos        []WorkspaceOpsRepo           `json:"repos"`
-	Agents       []WorkspaceOpsAgent          `json:"agents"`
-	Problems     []WorkspaceOpsProblem        `json:"problems,omitempty"`
+	OK           bool                      `json:"ok"`
+	Workspace    WorkspaceOpsWorkspace     `json:"workspace"`
+	LocalRuntime *WorkspaceOpsLocalRuntime `json:"local_runtime,omitempty"`
+	Daemon       WorkspaceOpsDaemon        `json:"daemon"`
+	Repos        []WorkspaceOpsRepo        `json:"repos"`
+	Agents       []WorkspaceOpsAgent       `json:"agents"`
+	Problems     []WorkspaceOpsProblem     `json:"problems,omitempty"`
+}
+
+// WorkspaceOpsLocalRuntime reports whether the local desktop runtime is
+// relevant to this deployment, and (when applicable) its health.
+//
+// The local desktop runtime is a Loom.app concept: a per-machine HTTP
+// service that backs the Mac/desktop UI. It is started by `loom local
+// start` and tracked via /loom-config/runtime.json.
+//
+// On fleet/headless deployments (LOOM_ISSUE_BACKEND=fleet, e.g. the
+// docker-compose stacks) there is no Loom.app and no local runtime — the
+// agent CLI talks to fleet-db directly. In that case Applicable=false
+// and the runtime / error fields are intentionally empty so callers do
+// not mistake "not used here" for "unhealthy".
+//
+// Field compatibility for desktop consumers (Loom.app reads runtime.json
+// directly, not this response, so it is unaffected): the prior Healthy
+// / Error / Runtime fields keep their JSON names and meaning when
+// Applicable=true. Old consumers that only inspected Healthy continue to
+// see the same value they saw before in desktop mode.
+type WorkspaceOpsLocalRuntime struct {
+	// Applicable is true when this deployment uses the desktop runtime
+	// (Loom.app). False on fleet/headless deployments where the concept
+	// does not apply.
+	Applicable bool `json:"applicable"`
+	// Reason is a short human-readable explanation, populated only when
+	// Applicable=false.
+	Reason string `json:"reason,omitempty"`
+	// Healthy mirrors the underlying RuntimeStatusSnapshot.Healthy when
+	// Applicable=true. When Applicable=false it is false (zero value)
+	// and should be ignored — check Applicable first.
+	Healthy bool `json:"healthy"`
+	// Error mirrors the underlying RuntimeStatusSnapshot.Error when
+	// Applicable=true. Empty when Applicable=false.
+	Error string `json:"error,omitempty"`
+	// Runtime is the desktop runtime metadata (PID, URL, build, ...)
+	// when Applicable=true and runtime.json was readable.
+	Runtime *local.RuntimeSnapshot `json:"runtime,omitempty"`
 }
 
 type WorkspaceOpsWorkspace struct {
@@ -220,7 +259,7 @@ func waitForWorkspaceOpsDaemon(
 			return nil, err
 		}
 		status = refreshed
-		if !statusNeedsDaemonWait(status) || status.Daemon.AppData.Running {
+		if !statusNeedsDaemonWait(status) || workspaceDaemonRunning(status) {
 			return status, nil
 		}
 		select {
@@ -259,9 +298,9 @@ func buildWorkspaceOpsStatus(
 	return status, nil
 }
 
-// newWorkspaceOpsStatus seeds the response struct and records the
-// local-runtime-unhealthy warning when the runtime read failed or returned
-// not-healthy.
+// newWorkspaceOpsStatus seeds the response struct, populates the
+// local-runtime block, and records the local-runtime-unhealthy warning
+// when applicable.
 func newWorkspaceOpsStatus(ws *domain.Workspace, localState bootstrap.WorkspaceLocalState, dataDir string, runtime *local.RuntimeStatusSnapshot, runtimeErr error, repoCap, agentCap int) *WorkspaceOpsStatus {
 	status := &WorkspaceOpsStatus{
 		Workspace: WorkspaceOpsWorkspace{
@@ -270,7 +309,7 @@ func newWorkspaceOpsStatus(ws *domain.Workspace, localState bootstrap.WorkspaceL
 			State:     workspaceStateString(ws.State),
 			LocalPath: localState.Path,
 		},
-		LocalRuntime: runtime,
+		LocalRuntime: buildLocalRuntime(runtime, runtimeErr),
 		Daemon: WorkspaceOpsDaemon{
 			AppData: collectDaemonStatusForDir(dataDir),
 			DataDir: dataDir,
@@ -281,7 +320,7 @@ func newWorkspaceOpsStatus(ws *domain.Workspace, localState bootstrap.WorkspaceL
 	if localState.Path != "" {
 		status.Daemon.WorkspaceLocal = collectDaemonStatusForDir(localState.Path)
 	}
-	if runtimeErr != nil || runtime == nil || !runtime.Healthy {
+	if status.LocalRuntime.Applicable && !status.LocalRuntime.Healthy {
 		status.Problems = append(status.Problems, WorkspaceOpsProblem{
 			Severity: "warning",
 			Code:     "local_runtime_unhealthy",
@@ -290,6 +329,36 @@ func newWorkspaceOpsStatus(ws *domain.Workspace, localState bootstrap.WorkspaceL
 		})
 	}
 	return status
+}
+
+// buildLocalRuntime composes the WorkspaceOpsLocalRuntime block.
+//
+// Fleet/headless deployments do not use the desktop runtime, so the block
+// reports Applicable=false with a brief Reason and leaves Healthy / Error /
+// Runtime empty (zero values). On desktop deployments the existing
+// RuntimeStatusSnapshot is mirrored field-for-field so consumers that
+// inspect Healthy / Runtime see exactly what they saw before.
+func buildLocalRuntime(runtime *local.RuntimeStatusSnapshot, runtimeErr error) *WorkspaceOpsLocalRuntime {
+	if cli.IsFleetActive() {
+		return &WorkspaceOpsLocalRuntime{
+			Applicable: false,
+			Reason:     "fleet mode — local desktop runtime not required (agents talk to fleet-db directly)",
+		}
+	}
+	out := &WorkspaceOpsLocalRuntime{Applicable: true}
+	if runtime != nil {
+		out.Healthy = runtime.Healthy
+		out.Error = runtime.Error
+		out.Runtime = runtime.Runtime
+	}
+	if runtimeErr != nil {
+		// Surface ENOENT and other read errors in the Error field but
+		// keep Healthy=false (the zero value already covers that).
+		if out.Error == "" {
+			out.Error = runtimeErr.Error()
+		}
+	}
+	return out
 }
 
 // collectOpsRepos appends a WorkspaceOpsRepo for each non-nil repo and
@@ -450,7 +519,7 @@ func workspaceOpsGlobalProblems(status *WorkspaceOpsStatus) []WorkspaceOpsProble
 			Fix:      "create planner/worker agents for background work",
 		})
 	}
-	if statusNeedsDaemonWait(status) && !status.Daemon.AppData.Running {
+	if statusNeedsDaemonWait(status) && !workspaceDaemonRunning(status) {
 		problems = append(problems, WorkspaceOpsProblem{
 			Severity: "error",
 			Code:     "daemon_not_running",
@@ -469,6 +538,10 @@ func workspaceOpsGlobalProblems(status *WorkspaceOpsStatus) []WorkspaceOpsProble
 		})
 	}
 	return problems
+}
+
+func workspaceDaemonRunning(status *WorkspaceOpsStatus) bool {
+	return status.Daemon.AppData.Running || status.Daemon.WorkspaceLocal.Running
 }
 
 func statusNeedsDaemonWait(status *WorkspaceOpsStatus) bool {
@@ -497,7 +570,9 @@ func renderWorkspaceOpsStatus(cmd *cobra.Command, status *WorkspaceOpsStatus) er
 	}
 	out := cmd.OutOrStdout()
 	_, _ = fmt.Fprintf(out, "Workspace: %s (%s)\n", status.Workspace.Key, status.Workspace.State)
-	if status.LocalRuntime != nil && status.LocalRuntime.Runtime != nil {
+	if status.LocalRuntime != nil && !status.LocalRuntime.Applicable {
+		_, _ = fmt.Fprintf(out, "Runtime:   not applicable (%s)\n", status.LocalRuntime.Reason)
+	} else if status.LocalRuntime != nil && status.LocalRuntime.Runtime != nil {
 		_, _ = fmt.Fprintf(out, "Runtime:   healthy=%t url=%s pid=%d\n",
 			status.LocalRuntime.Healthy, status.LocalRuntime.Runtime.URL, status.LocalRuntime.Runtime.PID)
 	} else {

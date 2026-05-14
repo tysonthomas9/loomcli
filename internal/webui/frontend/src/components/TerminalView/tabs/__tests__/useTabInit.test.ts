@@ -68,6 +68,79 @@ describe("useTabInit", () => {
     expect(args.setTabs).not.toHaveBeenCalled();
   });
 
+  it("merges server metadata into already initialized tabs", () => {
+    let tabs: TabState[] = [
+      {
+        id: "lead-codex-1",
+        label: "Old label",
+        sessionName: "lead-codex-1",
+        connectionState: "connected",
+        backendName: "codex",
+      },
+    ];
+    let activeTabId = "lead-codex-1";
+    const setTabs = vi.fn((update: React.SetStateAction<TabState[]>) => {
+      tabs = typeof update === "function" ? update(tabs) : update;
+    });
+    const setActiveTabId = vi.fn((update: React.SetStateAction<string>) => {
+      activeTabId = typeof update === "function" ? update(activeTabId) : update;
+    });
+    const metadata: TabMetadata[] = [
+      {
+        session_name: "lead-codex-1",
+        label: "lead-codex-1",
+        notes: "",
+        sort_order: 0,
+        pinned: false,
+        created_at: "2024-01-01T00:00:00Z",
+        updated_at: "2024-01-01T00:00:00Z",
+      },
+      {
+        session_name: "lead-codex-2",
+        label: "lead-codex-2",
+        notes: "",
+        sort_order: 1,
+        pinned: false,
+        created_at: "2024-01-01T00:00:00Z",
+        updated_at: "2024-01-01T00:00:00Z",
+      },
+    ];
+    const args = createArgs({
+      initializedRef: { current: true } as React.MutableRefObject<boolean>,
+      tabMetadata: metadata,
+      config: {
+        backend: "codex",
+        source: "config",
+        available: ["codex"],
+        agents: [],
+      },
+      setTabs: setTabs as unknown as React.Dispatch<
+        React.SetStateAction<TabState[]>
+      >,
+      setActiveTabId: setActiveTabId as unknown as React.Dispatch<
+        React.SetStateAction<string>
+      >,
+    });
+
+    renderHook(() => useTabInit(args));
+
+    expect(setTabs).toHaveBeenCalledTimes(1);
+    expect(tabs).toHaveLength(2);
+    expect(tabs[0]).toMatchObject({
+      sessionName: "lead-codex-1",
+      label: "lead-codex-1",
+      connectionState: "connected",
+      backendName: "codex",
+    });
+    expect(tabs[1]).toMatchObject({
+      sessionName: "lead-codex-2",
+      label: "lead-codex-2",
+      connectionState: "disconnected",
+      backendName: "codex",
+    });
+    expect(activeTabId).toBe("lead-codex-1");
+  });
+
   it("restores tabs from tabMetadata sorted by sort_order", () => {
     const metadata: TabMetadata[] = [
       {

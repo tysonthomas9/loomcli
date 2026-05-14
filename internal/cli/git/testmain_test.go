@@ -15,5 +15,9 @@ func TestMain(m *testing.M) {
 		os.Setenv("LOOM_CONFIG_DIR", tmpCfg)
 		defer os.RemoveAll(tmpCfg)
 	}
+	// Populate defaultDeps so tests that mutate defaultDeps.Agent/Exec
+	// don't nil-deref. Production code triggers the same init via the
+	// first wrapper call after root.PersistentPreRunE has run.
+	_ = ensureDefaultDeps()
 	os.Exit(m.Run())
 }

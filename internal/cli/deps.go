@@ -69,7 +69,7 @@ type Deps struct {
 type defaultGitRunner struct{}
 
 func (defaultGitRunner) Run(dir string, args ...string) CommandResult {
-	return defaultDeps.Exec.Run(dir, "git", args...)
+	return ensureDefaultDeps().Exec.Run(dir, "git", args...)
 }
 
 func (defaultGitRunner) RunWithOutput(dir string, args ...string) error {
@@ -176,8 +176,24 @@ func DefaultDeps() *Deps {
 }
 
 // defaultDeps is the package-level Deps instance used by package helpers.
-// Initialized to DefaultDeps() so production code works without explicit wiring.
-var defaultDeps = DefaultDeps()
+// Built lazily on first access (see ensureDefaultDeps) and refreshed in
+// root.PersistentPreRunE after the --workspace / --server flag-to-env
+// mirror runs, so the cached fleet client reflects the actual workspace
+// instead of whatever the shell exported at process start.
+//
+// Tests assign directly into this var; production code must go through
+// ensureDefaultDeps() to avoid a nil deref before the first command runs.
+var defaultDeps *Deps
+
+// ensureDefaultDeps lazily builds the package-level Deps. Returns the
+// current value unchanged if already set (by PersistentPreRunE or by a
+// test override).
+func ensureDefaultDeps() *Deps {
+	if defaultDeps == nil {
+		defaultDeps = DefaultDeps()
+	}
+	return defaultDeps
+}
 
 // --- cobra context helpers ---
 
@@ -191,26 +207,26 @@ func WithDeps(ctx context.Context, d *Deps) context.Context {
 }
 
 // GetDeps extracts the *Deps from a cobra command's context.
-// If none is set, it returns defaultDeps (the package singleton) so that
+// If none is set, it returns the lazily-built default singleton so that
 // test-time swaps via installExecMock/etc. are visible to all callers.
 func GetDeps(cmd *cobra.Command) *Deps {
 	if cmd == nil {
-		return defaultDeps
+		return ensureDefaultDeps()
 	}
 	ctx := cmd.Context()
 	if ctx == nil {
-		return defaultDeps
+		return ensureDefaultDeps()
 	}
 	if d, ok := ctx.Value(depsKey).(*Deps); ok && d != nil {
 		return d
 	}
-	return defaultDeps
+	return ensureDefaultDeps()
 }
 
 // TestingGetDefaultDeps returns the package-level defaultDeps for use by test
 // packages that need to swap global state. Production code should use GetDeps.
 func TestingGetDefaultDeps() *Deps {
-	return defaultDeps
+	return ensureDefaultDeps()
 }
 
 // fleetDBIssueBackend lazily opens fleet-db for IssueBackend calls. It avoids

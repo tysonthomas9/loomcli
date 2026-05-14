@@ -19,14 +19,23 @@ const (
 // requests use a per-workspace cached collector so adjacent monitor endpoints
 // share one expensive issue-backend collection.
 type MonitorDataSource struct {
-	collectDataFn CollectDataFn
-	backendFn     IssueBackendFn
-	workspace     *workspaceMonitorDataCache
+	collectDataFn    CollectDataFn
+	backendFn        IssueBackendFn
+	defaultWorkspace string
+	workspace        *workspaceMonitorDataCache
 }
 
 // NewMonitorDataSource returns a request-aware monitor data source.
 func NewMonitorDataSource(collectDataFn CollectDataFn, backendFn IssueBackendFn) *MonitorDataSource {
 	return NewMonitorDataSourceWithTTL(collectDataFn, backendFn, defaultWorkspaceMonitorCacheTTL)
+}
+
+// NewMonitorDataSourceWithDefaultWorkspace returns a data source that reuses
+// the pre-warmed collector for requests targeting the same default workspace.
+func NewMonitorDataSourceWithDefaultWorkspace(collectDataFn CollectDataFn, backendFn IssueBackendFn, defaultWorkspace string) *MonitorDataSource {
+	ds := NewMonitorDataSourceWithTTL(collectDataFn, backendFn, defaultWorkspaceMonitorCacheTTL)
+	ds.defaultWorkspace = defaultWorkspace
+	return ds
 }
 
 // NewMonitorDataSourceWithTTL returns a request-aware monitor data source with
@@ -49,6 +58,9 @@ func (s *MonitorDataSource) Resolve(r *http.Request) *monitor.MonitorData {
 	}
 	workspaceHint := r.URL.Query().Get("workspace")
 	if workspaceHint == "" || s.backendFn == nil {
+		return s.collectDataFn()
+	}
+	if s.defaultWorkspace != "" && workspaceHint == s.defaultWorkspace {
 		return s.collectDataFn()
 	}
 	return s.workspace.get(workspaceHint)

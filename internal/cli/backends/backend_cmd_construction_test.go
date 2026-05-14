@@ -31,6 +31,8 @@ func envHasKey(env []string, key string) bool {
 type buildFunc func(workDir, prompt, agentName string) *exec.Cmd
 
 func TestBuildInteractiveCmd_PromptInArgs(t *testing.T) {
+	t.Setenv("LOOM_OPENCODE_MODEL", "")
+
 	tests := []struct {
 		name    string
 		buildFn buildFunc
@@ -54,7 +56,7 @@ func TestBuildInteractiveCmd_PromptInArgs(t *testing.T) {
 			name:     "opencode",
 			buildFn:  buildOpenCodeInteractiveCmd,
 			prompt:   "do something",
-			wantArgs: []string{"opencode", "run", "do something"},
+			wantArgs: []string{"opencode", "run", "--dir", "/tmp/work", "--dangerously-skip-permissions", "do something"},
 		},
 	}
 
@@ -116,7 +118,7 @@ func TestBuildInteractiveCmd_BinaryAndFlags(t *testing.T) {
 			name:       "opencode",
 			buildFn:    buildOpenCodeInteractiveCmd,
 			wantBinary: "opencode",
-			wantFlags:  []string{"run"},
+			wantFlags:  []string{"run", "--dir", "--dangerously-skip-permissions"},
 		},
 	}
 
@@ -350,4 +352,44 @@ func TestBuildInteractiveCmd_WorkDir(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestBuildOpenCodeInteractiveCmd_PassesDirFlag(t *testing.T) {
+	t.Setenv("LOOM_OPENCODE_MODEL", "")
+
+	workDir := "/projects/myapp"
+	cmd := buildOpenCodeInteractiveCmd(workDir, "test prompt", "agent")
+
+	for i, arg := range cmd.Args {
+		if arg == "--dir" {
+			if i+1 >= len(cmd.Args) {
+				t.Fatal("--dir flag present but no value follows")
+			}
+			if cmd.Args[i+1] != workDir {
+				t.Fatalf("--dir value = %q, want %q", cmd.Args[i+1], workDir)
+			}
+			return
+		}
+	}
+	t.Fatalf("expected --dir flag in args %v", cmd.Args)
+}
+
+func TestBuildOpenCodeInteractiveCmd_PassesModelFlagFromEnv(t *testing.T) {
+	workDir := "/projects/myapp"
+	model := "openai/gpt-5.4-mini"
+	t.Setenv("LOOM_OPENCODE_MODEL", model)
+
+	cmd := buildOpenCodeInteractiveCmd(workDir, "test prompt", "agent")
+	for i, arg := range cmd.Args {
+		if arg == "--model" {
+			if i+1 >= len(cmd.Args) {
+				t.Fatal("--model flag present but no value follows")
+			}
+			if cmd.Args[i+1] != model {
+				t.Fatalf("--model value = %q, want %q", cmd.Args[i+1], model)
+			}
+			return
+		}
+	}
+	t.Fatalf("expected --model flag in args %v", cmd.Args)
 }

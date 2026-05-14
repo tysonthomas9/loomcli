@@ -8,9 +8,11 @@ import (
 	"os"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
@@ -66,6 +68,21 @@ func mockMonitorData() *MonitorData {
 			Total:      20,
 			Completion: 60.0,
 		},
+	}
+}
+
+func TestBuildMonitorCollectDataFnIsLazy(t *testing.T) {
+	var backendCalls atomic.Int32
+
+	_ = buildMonitorCollectDataFn("WS", func(context.Context) backend.IssueBackend {
+		backendCalls.Add(1)
+		return nil
+	})
+
+	time.Sleep(50 * time.Millisecond)
+
+	if got := backendCalls.Load(); got != 0 {
+		t.Fatalf("buildMonitorCollectDataFn called issue backend before first request: got %d calls", got)
 	}
 }
 

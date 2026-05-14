@@ -45,6 +45,9 @@ type IssueData struct {
 	// Counts for list display (populated by backends that support them).
 	DependencyCount int `json:"dependency_count,omitempty"`
 	DependentCount  int `json:"dependent_count,omitempty"`
+	// Blocker metadata for blocked-list projections.
+	BlockedByCount int      `json:"blocked_by_count,omitempty"`
+	BlockedBy      []string `json:"blocked_by,omitempty"`
 }
 
 // IssueDetailData is the full issue projection returned by Get.

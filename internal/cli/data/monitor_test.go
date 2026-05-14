@@ -121,3 +121,41 @@ func TestMonitor503(t *testing.T) {
 		}
 	})
 }
+
+func TestMonitorHTTPErrorAndDecodeError(t *testing.T) {
+	t.Run("http error", func(t *testing.T) {
+		srv := monitorStatusServer(t, nil, http.StatusInternalServerError)
+		defer srv.Close()
+		withDataClientState(t, func() {
+			t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+			_, err := fetchAndRender(t, srv.URL, "text")
+			if err == nil {
+				t.Fatal("expected HTTP error")
+			}
+			if !strings.Contains(err.Error(), "HTTP 500") {
+				t.Fatalf("error = %q, want HTTP 500", err.Error())
+			}
+		})
+	})
+
+	t.Run("decode error", func(t *testing.T) {
+		mux := http.NewServeMux()
+		registerAuthConfig(mux)
+		mux.HandleFunc("/api/monitor/status", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte("{"))
+		})
+		srv := httptest.NewServer(mux)
+		defer srv.Close()
+		withDataClientState(t, func() {
+			t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+			_, err := fetchAndRender(t, srv.URL, "text")
+			if err == nil {
+				t.Fatal("expected decode error")
+			}
+			if !strings.Contains(err.Error(), "decode monitor response") {
+				t.Fatalf("error = %q, want decode context", err.Error())
+			}
+		})
+	})
+}

@@ -47,6 +47,15 @@ vi.mock("@/utils/scopedStorage", () => ({
   clearLastWorkspaceId: mockClearLastWorkspaceId,
 }));
 
+const { mockUseIssueSessionMap, mockUseRouteView } = vi.hoisted(() => ({
+  mockUseIssueSessionMap: vi.fn(() => ({})),
+  mockUseRouteView: vi.fn(() => ({
+    view: "kanban",
+    setView: vi.fn(),
+    navigateToView: vi.fn(),
+  })),
+}));
+
 // Mock @/hooks to avoid rendering WorkspaceProvider / StoreProvider internals
 vi.mock("@/hooks", () => ({
   WorkspaceProvider: ({ children }: { children: React.ReactNode }) => (
@@ -55,7 +64,8 @@ vi.mock("@/hooks", () => ({
   StoreProvider: ({ children }: { children: React.ReactNode }) => (
     <div data-testid="store-provider">{children}</div>
   ),
-  useIssueSessionMap: vi.fn(() => ({})),
+  useIssueSessionMap: mockUseIssueSessionMap,
+  useRouteView: mockUseRouteView,
   useWorkspaceContext: vi.fn(() => ({ workspace: { id: "ws-1" } })),
 }));
 
@@ -114,6 +124,12 @@ function renderWithWorkspaceId(workspaceId: string) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockUseRouteView.mockReturnValue({
+    view: "kanban",
+    setView: vi.fn(),
+    navigateToView: vi.fn(),
+  });
+  mockUseIssueSessionMap.mockReturnValue({});
 });
 
 // ── Tests ────────────────────────────────────────────────────────────────────
@@ -280,6 +296,50 @@ describe("WorkspaceLayout", () => {
       expect(storeProvider).toContainElement(
         screen.getByTestId("issue-session-provider"),
       );
+    });
+  });
+
+  describe("issue session map scope", () => {
+    // Regression: previously gated to view === "terminal", which left
+    // kanban/table IssueCards with an always-empty map and hidden badges
+    // until the user visited Terminal. Hook is now enabled on every route.
+    it("fetches issue sessions on the kanban route so cards can show the active-session badge", async () => {
+      mockUseRouteView.mockReturnValue({
+        view: "kanban",
+        setView: vi.fn(),
+        navigateToView: vi.fn(),
+      });
+      mockFetchWorkspace.mockResolvedValueOnce(makeWorkspaceData("ws-1"));
+
+      renderWithWorkspaceId("ws-1");
+
+      await waitFor(() => {
+        expect(screen.getByTestId("outlet-content")).toBeInTheDocument();
+      });
+
+      expect(mockUseIssueSessionMap).toHaveBeenCalled();
+      const firstArg = mockUseIssueSessionMap.mock.calls[0]?.[0];
+      // No args, or args without { enabled: false } — fetch must not be gated off.
+      expect(firstArg?.enabled).not.toBe(false);
+    });
+
+    it("fetches issue sessions on the terminal route", async () => {
+      mockUseRouteView.mockReturnValue({
+        view: "terminal",
+        setView: vi.fn(),
+        navigateToView: vi.fn(),
+      });
+      mockFetchWorkspace.mockResolvedValueOnce(makeWorkspaceData("ws-1"));
+
+      renderWithWorkspaceId("ws-1");
+
+      await waitFor(() => {
+        expect(screen.getByTestId("outlet-content")).toBeInTheDocument();
+      });
+
+      expect(mockUseIssueSessionMap).toHaveBeenCalled();
+      const firstArg = mockUseIssueSessionMap.mock.calls[0]?.[0];
+      expect(firstArg?.enabled).not.toBe(false);
     });
   });
 

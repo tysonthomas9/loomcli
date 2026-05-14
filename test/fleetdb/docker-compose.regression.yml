@@ -68,6 +68,11 @@ services:
       - ":8080"
       - "--auth-dev-mode"
       - "--authz-enabled=false"
+      # The browser regression suite drives two tabs against the same
+      # fleet-db instance and intentionally fans out route probes. Rate
+      # limiting is covered in fleet-db's own tests; keep this stack focused
+      # on UI routing/rendering parity.
+      - "--rate-limit-enabled=false"
     networks: [fleetdb-regression]
     ports:
       - "8080:8080"
@@ -88,10 +93,6 @@ services:
     environment:
       LOOM_ISSUE_BACKEND: fleet-db
       LOOM_FLEET_URL: http://fleet-db:8080
-      # The fleet backend's URL builder uses LOOM_FLEET_WORKSPACE (not
-      # LOOM_WORKSPACE) — without this, requests go to .../workspaces/default/
-      # and 404 because fleet-db has no "default" workspace seeded.
-      LOOM_FLEET_WORKSPACE: FLEETDB
       LOOM_WORKSPACE: FLEETDB
       LOOM_BACKEND: codex
       CODEX_HOME: /root/.codex

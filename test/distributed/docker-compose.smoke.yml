@@ -62,7 +62,6 @@ services:
     environment:
       LOOM_ISSUE_BACKEND: fleet
       LOOM_FLEET_URL: http://fleet-db:8080
-      LOOM_FLEET_WORKSPACE: DIST
       LOOM_WORKSPACE: DIST
       LOOM_AGENT_NAME: distributed-loom-a
       LOOM_FLEET_ACTOR: distributed-loom-a
@@ -106,7 +105,6 @@ services:
     environment:
       LOOM_ISSUE_BACKEND: fleet
       LOOM_FLEET_URL: http://fleet-db:8080
-      LOOM_FLEET_WORKSPACE: DIST
       LOOM_WORKSPACE: DIST
       LOOM_AGENT_NAME: distributed-loom-b
       LOOM_FLEET_ACTOR: distributed-loom-b

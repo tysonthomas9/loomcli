@@ -71,6 +71,119 @@
   font-size: var(--font-sm);
 }
 
+.cliSetupBanner {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) auto;
+  gap: var(--space-3);
+  align-items: center;
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--terminal-border, #333);
+  background: color-mix(in srgb, var(--terminal-bg) 88%, white 12%);
+  color: var(--terminal-text, #e5e7eb);
+}
+
+.cliSetupDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+}
+
+.cliSetupBody {
+  min-width: 0;
+  display: grid;
+  gap: var(--space-1);
+}
+
+.cliSetupHeader {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.cliSetupHeader strong {
+  font-size: var(--font-sm);
+  font-weight: 650;
+}
+
+.cliSetupHeader span,
+.cliSetupBody p {
+  color: var(--color-text-muted);
+  font-size: var(--font-xs);
+}
+
+.cliSetupBody p {
+  margin: 0;
+}
+
+.cliSetupBody code {
+  width: fit-content;
+  max-width: 100%;
+  overflow-x: auto;
+  padding: 2px var(--space-2);
+  border: 1px solid var(--terminal-border, #333);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--terminal-bg) 70%, black 30%);
+  color: var(--terminal-text, #e5e7eb);
+  font-size: var(--font-xs);
+  white-space: nowrap;
+}
+
+.cliSetupStatus {
+  width: fit-content;
+  max-width: 100%;
+  font-size: var(--font-xs);
+  font-weight: 650;
+}
+
+.starting {
+  color: #facc15;
+}
+
+.running {
+  color: #34d399;
+}
+
+.manual {
+  color: var(--color-text-muted);
+}
+
+.failed {
+  color: #fb7185;
+}
+
+.cliSetupActions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.cliSetupButton,
+.cliSetupDismiss {
+  border: 1px solid var(--terminal-border, #333);
+  border-radius: 6px;
+  padding: 5px var(--space-3);
+  font-size: var(--font-xs);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.cliSetupButton {
+  background: var(--color-primary, #2563eb);
+  color: var(--color-primary-foreground, #fff);
+  border-color: transparent;
+}
+
+.cliSetupDismiss {
+  background: transparent;
+  color: var(--terminal-text, #e5e7eb);
+}
+
+.cliSetupButton:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 /* Screen-reader-only live region for keyboard shortcut announcements */
 .visuallyHidden {
   position: absolute;

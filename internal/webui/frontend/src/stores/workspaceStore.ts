@@ -24,6 +24,7 @@ export interface WorkspaceStoreActions {
   startPolling: (options: WorkspacePollingOptions) => void;
   stopPolling: () => void;
   refetch: () => void;
+  upsertAgent: (agent: WorkspaceData["agents"][number]) => void;
   reset: () => void;
 }
 
@@ -58,6 +59,31 @@ export function createWorkspaceStore(): StoreApi<WorkspaceStore> {
   let visibilityHandler: (() => void) | null = null;
   let activeWorkspaceId: string | undefined;
   let activePollInterval = DEFAULT_POLL_INTERVAL;
+  const pendingAgents = new Map<string, WorkspaceData["agents"][number]>();
+
+  const mergePendingAgents = (data: WorkspaceData): WorkspaceData => {
+    if (pendingAgents.size === 0) return data;
+
+    const agents = data.agents ?? [];
+    let changed = false;
+    const nextAgents = agents.map((agent) => {
+      const pending = pendingAgents.get(agent.name);
+      if (!pending) return agent;
+      pendingAgents.delete(agent.name);
+      return agent;
+    });
+
+    for (const pending of pendingAgents.values()) {
+      nextAgents.push(pending);
+      changed = true;
+    }
+
+    if (!changed && nextAgents.length === agents.length) return data;
+    return {
+      ...data,
+      agents: nextAgents,
+    };
+  };
 
   return createStore<WorkspaceStore>((set, get) => {
     const fetchWorkspace = async (workspaceId?: string): Promise<void> => {
@@ -81,8 +107,9 @@ export function createWorkspaceStore(): StoreApi<WorkspaceStore> {
       inflightPromise = promise;
 
       try {
-        const data = await promise;
+        const rawData = await promise;
         if (gen === generation) {
+          const data = mergePendingAgents(rawData);
           // Preserve workspace reference when payload is unchanged so downstream
           // useMemo chains (sourceReposFilter, activeRepos, etc.) don't churn on
           // every poll tick. The cherry-pick of v2's polling-bug fix removed the
@@ -135,6 +162,9 @@ export function createWorkspaceStore(): StoreApi<WorkspaceStore> {
       // Clean up any existing polling
       stopPolling();
 
+      if (options.workspaceId !== activeWorkspaceId) {
+        pendingAgents.clear();
+      }
       activeWorkspaceId = options.workspaceId;
       activePollInterval = options.pollInterval ?? DEFAULT_POLL_INTERVAL;
 
@@ -169,11 +199,39 @@ export function createWorkspaceStore(): StoreApi<WorkspaceStore> {
       void fetchWorkspace(activeWorkspaceId);
     };
 
+    const upsertAgent = (agent: WorkspaceData["agents"][number]): void => {
+      if (agent.name) {
+        pendingAgents.set(agent.name, agent);
+      }
+
+      const current = get().workspace;
+      if (!current || !agent.name) return;
+
+      const agents = current.agents ?? [];
+      const existingIndex = agents.findIndex(
+        (item) => item.name === agent.name,
+      );
+      const nextAgents =
+        existingIndex === -1
+          ? [...agents, agent]
+          : agents.map((item, index) =>
+              index === existingIndex ? { ...item, ...agent } : item,
+            );
+
+      set({
+        workspace: {
+          ...current,
+          agents: nextAgents,
+        },
+      });
+    };
+
     const reset = (): void => {
       stopPolling();
       generation++;
       inflightPromise = null;
       activeWorkspaceId = undefined;
+      pendingAgents.clear();
       set(INITIAL_WORKSPACE_STATE);
     };
 
@@ -183,6 +241,7 @@ export function createWorkspaceStore(): StoreApi<WorkspaceStore> {
       startPolling,
       stopPolling,
       refetch,
+      upsertAgent,
       reset,
     };
   });

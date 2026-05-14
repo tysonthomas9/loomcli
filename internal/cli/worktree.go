@@ -106,7 +106,7 @@ func getCurrentBranchDeps(deps *Deps, path string) (string, error) {
 
 // GetCurrentBranch returns the current branch for a git directory
 func GetCurrentBranch(path string) (string, error) {
-	return getCurrentBranchDeps(defaultDeps, path)
+	return getCurrentBranchDeps(ensureDefaultDeps(), path)
 }
 
 // --- Branch detection (merged from worktree_branch.go) ---
@@ -168,7 +168,7 @@ func GetDefaultBranchForWorktrees(worktrees []WorktreeInfo) string {
 	integrationBranchMu.Unlock()
 
 	result := "main"
-	if detected := detectIntegrationBranchDeps(defaultDeps, worktrees); detected != "" {
+	if detected := detectIntegrationBranchDeps(ensureDefaultDeps(), worktrees); detected != "" {
 		result = detected
 	}
 
@@ -303,5 +303,5 @@ func detectIntegrationBranchDeps(deps *Deps, worktrees []WorktreeInfo) string {
 // DetectIntegrationBranch analyzes worktree branches to find a common integration
 // branch that is closer than main. Returns empty string if no such branch is found.
 func DetectIntegrationBranch(worktrees []WorktreeInfo) string {
-	return detectIntegrationBranchDeps(defaultDeps, worktrees)
+	return detectIntegrationBranchDeps(ensureDefaultDeps(), worktrees)
 }

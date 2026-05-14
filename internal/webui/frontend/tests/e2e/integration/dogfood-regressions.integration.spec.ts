@@ -39,7 +39,7 @@ async function waitForKanbanReady(page: Page) {
   await expect(page.locator('[data-state="connected"]')).toBeVisible({
     timeout: 10_000,
   });
-  await expect(page.locator('section[data-status="ready"]')).toBeVisible({
+  await expect(page.getByRole("region", { name: "Open issues" })).toBeVisible({
     timeout: 15_000,
   });
 }
@@ -157,7 +157,7 @@ test.describe("Dogfood promoted regressions", () => {
     await gotoKanban(page, workspaceId, "?groupBy=none");
     await waitForKanbanReady(page);
 
-    const readyColumn = page.locator('section[data-status="ready"]');
+    const readyColumn = page.getByRole("region", { name: "Open issues" });
     await expect(
       readyColumn.locator("article", { hasText: firstTitle }),
     ).toBeVisible({

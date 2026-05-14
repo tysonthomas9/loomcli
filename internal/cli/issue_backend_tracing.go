@@ -212,6 +212,23 @@ func (t *tracedIssueBackend) ClaimIssue(ctx context.Context, id string, lockTTL 
 	return err
 }
 
+func (t *tracedIssueBackend) ClaimIssueAsActor(ctx context.Context, id string, lockTTL time.Duration, actor string) error {
+	ctx, span := t.startSpan(ctx, "ClaimIssueAsActor",
+		attribute.String("loom.task_id", id),
+		attribute.Int64("lock_ttl_ms", lockTTL.Milliseconds()),
+	)
+	if actorBackend, ok := t.inner.(interface {
+		ClaimIssueAsActor(context.Context, string, time.Duration, string) error
+	}); ok {
+		err := actorBackend.ClaimIssueAsActor(ctx, id, lockTTL, actor)
+		endSpan(span, err)
+		return err
+	}
+	err := t.inner.ClaimIssue(ctx, id, lockTTL)
+	endSpan(span, err)
+	return err
+}
+
 func (t *tracedIssueBackend) DeferIssue(ctx context.Context, id string, until time.Time) error {
 	ctx, span := t.startSpan(ctx, "DeferIssue",
 		attribute.String("loom.task_id", id),

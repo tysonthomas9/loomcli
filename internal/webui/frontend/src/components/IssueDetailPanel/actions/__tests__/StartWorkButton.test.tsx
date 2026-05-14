@@ -423,6 +423,26 @@ describe("StartWorkButton", () => {
       expect(screen.queryByTestId("agent-option-beta")).not.toBeInTheDocument();
     });
 
+    it("shows plan agents when preferredRole is plan", () => {
+      const agents = [
+        makeAgent("alpha", "ready", "task"),
+        makeAgent("beta", "ready", "plan"),
+      ];
+      render(
+        <StartWorkButton
+          {...defaultProps}
+          agents={agents}
+          preferredRole="plan"
+        />,
+      );
+      fireEvent.click(screen.getByTestId("start-work-button"));
+
+      expect(
+        screen.queryByTestId("agent-option-alpha"),
+      ).not.toBeInTheDocument();
+      expect(screen.getByTestId("agent-option-beta")).toBeInTheDocument();
+    });
+
     it("shows agents with no role", () => {
       const agents = [
         makeAgent("alpha", "ready"), // no role

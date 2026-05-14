@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
@@ -55,6 +56,8 @@ type issueServiceImpl struct {
 	// remain to back ListIssues/ListKanban and the cross-workspace MoveIssue
 	// path which have not yet been migrated.
 	backendFn IssueBackendProvider
+
+	labelMutationMu sync.Mutex
 }
 
 // NewIssueService creates a new IssueService implementation backed by the
@@ -261,6 +264,11 @@ func (s *issueServiceImpl) PatchIssue(ctx context.Context, params PatchIssuePara
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 
+	if patchHasLabelMutation(params) {
+		s.labelMutationMu.Lock()
+		defer s.labelMutationMu.Unlock()
+	}
+
 	if err := be.Update(ctx, params.IssueID, patchParamsToBackendUpdate(&params)); err != nil {
 		// Special-case "cannot update template" — backend classifies as
 		// internal but the prior service contract maps to ErrConflict.
@@ -271,6 +279,10 @@ func (s *issueServiceImpl) PatchIssue(ctx context.Context, params PatchIssuePara
 		return translateBackendError(err)
 	}
 	return nil
+}
+
+func patchHasLabelMutation(params PatchIssueParams) bool {
+	return len(params.AddLabels) > 0 || len(params.RemoveLabels) > 0 || len(params.SetLabels) > 0
 }
 
 // isTemplateUpdateError preserves the existing handler contract that surfaces

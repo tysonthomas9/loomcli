@@ -54,6 +54,28 @@ args=(-d --init --name "$NAME" -p "$HOST_PORT:3000"
 [[ -d "$HOME/.codex"           ]] && args+=(-v "$HOME/.codex:/root/.codex:ro")
 [[ -d "$HOME/.config/opencode" ]] && args+=(-v "$HOME/.config/opencode:/root/.config/opencode:ro")
 
+# fleet-db is required by `loom serve --issue-backend=fleetdb` but isn't built
+# from this repo (separate project). The dev image doesn't bake it in, so look
+# for a prebuilt binary in well-known places and bind-mount it onto PATH. Set
+# FLEET_DB_BIN=/path/to/fleet-db to override.
+if [[ -z "${FLEET_DB_BIN:-}" ]]; then
+    for candidate in \
+        "$REPO_ROOT/tmp/distributed-smoke/bin/fleet-db" \
+        "$REPO_ROOT/tmp/e2e-workspace/.loom-config/fleet-db" \
+        "$REPO_ROOT/.loom-config/bin/fleet-db" \
+        "$HOME/.loom/bin/fleet-db"
+    do
+        [[ -x "$candidate" ]] && FLEET_DB_BIN=$candidate && break
+    done
+fi
+if [[ -n "${FLEET_DB_BIN:-}" && -x "$FLEET_DB_BIN" ]]; then
+    echo "==> mounting fleet-db from $FLEET_DB_BIN"
+    args+=(-v "$FLEET_DB_BIN:/usr/local/bin/fleet-db:ro")
+else
+    echo "Warning: no fleet-db binary found; loom serve will fail to start." >&2
+    echo "         Set FLEET_DB_BIN=/path/to/fleet-db before re-running." >&2
+fi
+
 echo "==> starting $NAME on http://localhost:$HOST_PORT"
 podman run "${args[@]}" "$IMAGE"
 

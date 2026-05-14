@@ -19,6 +19,11 @@ func TestMain(m *testing.M) {
 	}
 
 	killTestTmuxSessions()
+	// Populate defaultDeps so tests that read/mutate defaultDeps.Exec /
+	// .LookPath / .ExecCtx directly do not nil-deref. Production code
+	// triggers the same init via the first wrapper call after
+	// root.PersistentPreRunE has run.
+	_ = ensureDefaultDeps()
 	code := m.Run()
 	killTestTmuxSessions()
 	os.Exit(code)

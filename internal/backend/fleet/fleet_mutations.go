@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/url"
+	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 )
@@ -22,15 +23,28 @@ func (b *FleetBackend) AddDependency(ctx context.Context, params backend.DepAddP
 		DependsOnID: params.ToID,
 		Type:        params.DepType,
 	}
-	_, err := b.exec(ctx, "AddDependency", "POST", "/issues/"+url.PathEscape(params.FromID)+"/deps", req)
-	return err
+	if _, err := b.exec(ctx, "AddDependency", "POST", "/issues/"+url.PathEscape(params.FromID)+"/deps", req); err != nil {
+		return err
+	}
+	return b.waitForDependencyState(ctx, "AddDependency", params.FromID, params.ToID, true)
 }
 
 func (b *FleetBackend) RemoveDependency(ctx context.Context, params backend.DepRemoveParams) error {
 	// fleet-db delete route is /issues/{id}/deps/{depends_on_id}; abbreviated
-	// to match the add route.
-	_, err := b.exec(ctx, "RemoveDependency", "DELETE", "/issues/"+url.PathEscape(params.FromID)+"/deps/"+url.PathEscape(params.ToID), nil)
-	return err
+	// to match the add route. The server also requires the dependency type so
+	// it can distinguish multiple edge kinds between the same issues.
+	depType := strings.TrimSpace(params.DepType)
+	if depType == "" {
+		depType = "blocks"
+	}
+	path := "/issues/" + url.PathEscape(params.FromID) + "/deps/" + url.PathEscape(params.ToID) + "?type=" + url.QueryEscape(depType)
+	if _, err := b.exec(ctx, "RemoveDependency", "DELETE", path, nil); err != nil {
+		return err
+	}
+	if err := b.waitForDependencyState(ctx, "RemoveDependency", params.FromID, params.ToID, false); err != nil {
+		return err
+	}
+	return b.clearBlockedStatusAfterDependencyRemoval(ctx, params.FromID)
 }
 
 // --- Label operations ---

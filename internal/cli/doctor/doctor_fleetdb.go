@@ -3,6 +3,7 @@ package doctor
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 	"time"
@@ -12,6 +13,27 @@ import (
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/kv"
 )
+
+// fleetHealthProbe is overridden in tests to avoid real network calls.
+// Default probes <url>/healthz with a short timeout.
+var fleetHealthProbe = defaultFleetHealthProbe
+
+func defaultFleetHealthProbe(ctx context.Context, baseURL string) error {
+	url := strings.TrimRight(baseURL, "/") + "/healthz"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("HTTP %d from %s", resp.StatusCode, url)
+	}
+	return nil
+}
 
 func checkIssueBackend() CheckResult {
 	if cli.IsFleetActive() {
@@ -124,9 +146,22 @@ func checkFleet() CheckResult {
 		}
 	}
 
+	// Probe /healthz so the agent CLI's expected backend is actually
+	// reachable. Configured-but-down was reporting PASS before this.
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := fleetHealthProbe(ctx, fleetCfg.URL); err != nil {
+		return CheckResult{
+			Name:    "fleet",
+			Status:  StatusFail,
+			Summary: fmt.Sprintf("fleet URL configured but not reachable at %s", fleetCfg.URL),
+			Detail:  fmt.Sprintf("probe failed: %v. Check fleet-db is running and the URL is correct.", err),
+		}
+	}
+
 	return CheckResult{
 		Name:    "fleet",
 		Status:  StatusPass,
-		Summary: fmt.Sprintf("fleet configured (workspace: %s, URL: %s)", fleetCfg.Workspace, fleetCfg.URL),
+		Summary: fmt.Sprintf("fleet configured and reachable (workspace: %s, URL: %s)", fleetCfg.Workspace, fleetCfg.URL),
 	}
 }

@@ -157,7 +157,7 @@ func (b *ipcIssueBackend) BackendName() string {
 
 // resolveDirectIssueBackend returns the active default issue backend.
 func resolveDirectIssueBackend() backend.IssueBackend {
-	if t := defaultDeps.IssueBackend; t != nil {
+	if t := ensureDefaultDeps().IssueBackend; t != nil {
 		return t
 	}
 	return newFleetDBIssueBackend()

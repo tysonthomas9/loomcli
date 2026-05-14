@@ -12,6 +12,7 @@ import {
   apiErrorFromResponse,
   unwrapResponse,
   get,
+  post,
   wsUrl,
   getWsBaseUrl,
 } from "@/api/common";
@@ -83,6 +84,46 @@ export interface TabMetadata {
    * destructive tab-close actions.
    */
   attached_clients: number;
+}
+
+export interface TerminalSetupResult {
+  session_name: string;
+  label: string;
+  backend: string;
+  action: string;
+  command: string;
+  title: string;
+  message: string;
+  manual: boolean;
+  created: boolean;
+}
+
+type TerminalSetupApiResponse =
+  | { success: true; data: TerminalSetupResult }
+  | { success: false; error: string };
+
+function unwrapTerminalSetupResponse(
+  response: TerminalSetupApiResponse,
+): TerminalSetupResult {
+  if (!response.success) {
+    throw new ApiError(0, response.error);
+  }
+  return response.data;
+}
+
+/**
+ * Start a typed backend-owned setup command in a workspace terminal.
+ */
+export async function startTerminalSetup(
+  workspaceId: string,
+  backend: string,
+  action: string,
+): Promise<TerminalSetupResult> {
+  const response = await post<TerminalSetupApiResponse>(
+    wsUrl(workspaceId, "/terminal/setup"),
+    { backend, action },
+  );
+  return unwrapTerminalSetupResponse(response);
 }
 
 /**

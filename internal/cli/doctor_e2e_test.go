@@ -413,3 +413,54 @@ func TestE2E_DoctorHelp(t *testing.T) {
 		t.Errorf("expected --help to mention '--json' flag, got:\n%s", stdout)
 	}
 }
+
+// TestE2E_DoctorFleetProbeUnreachable verifies that checkFleet's real-network
+// /healthz probe surfaces an unreachable fleet URL as a doctor FAIL rather
+// than a green "configured" PASS. Without the probe, doctor would say the
+// fleet is fine even when the agent CLI cannot reach it — the latent bug the
+// reviewer called out.
+func TestE2E_DoctorFleetProbeUnreachable(t *testing.T) {
+	dir := initTempGitRepoWithRuntime(t)
+
+	loom := loomBinaryPath(t)
+	cmd := exec.Command(loom, "doctor", "--json")
+	cmd.Dir = dir
+	env := os.Environ()
+	filtered := env[:0]
+	for _, e := range env {
+		if strings.HasPrefix(e, "LOOM_REDIS_ADDR=") {
+			continue
+		}
+		filtered = append(filtered, e)
+	}
+	filtered = append(filtered,
+		"HOME="+dir,
+		"LOOM_CONFIG_DIR="+filepath.Join(dir, ".loom-config"),
+		"GIT_CONFIG_NOSYSTEM=1",
+		"LOOM_ISSUE_BACKEND=fleet",
+		// Use a host that will never resolve. Probe should fail fast.
+		"LOOM_FLEET_URL=http://fleet-probe-must-not-resolve.invalid:65535",
+		"LOOM_WORKSPACE=TEST",
+	)
+	cmd.Env = filtered
+
+	var stdoutBuf, stderrBuf strings.Builder
+	cmd.Stdout = &stdoutBuf
+	cmd.Stderr = &stderrBuf
+	_ = cmd.Run() // expected non-zero (probe fails)
+
+	out := parseDoctorJSON(t, stdoutBuf.String())
+	fleet := findCheck(out, "fleet")
+	if fleet == nil {
+		t.Fatalf("no 'fleet' check in output; checks: %+v", out.Checks)
+	}
+	if fleet.Status != "fail" {
+		t.Errorf("Status = %q, want \"fail\" (probe should detect unreachable host)", fleet.Status)
+	}
+	if !strings.Contains(fleet.Summary, "not reachable") {
+		t.Errorf("Summary = %q, want substring 'not reachable'", fleet.Summary)
+	}
+	if !strings.Contains(fleet.Detail, "probe failed") {
+		t.Errorf("Detail = %q, want substring 'probe failed'", fleet.Detail)
+	}
+}

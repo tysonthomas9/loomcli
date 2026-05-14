@@ -123,7 +123,7 @@ func TestHandleAgents_UsesStoreAgentsAsSourceOfTruth(t *testing.T) {
 	data := &monitor.MonitorData{
 		Timestamp: time.Unix(1, 0).UTC(),
 		Agents: []monitor.AgentStatus{
-			{Name: "falcon", Branch: "runtime/stale", Status: "ready", Ahead: 1},
+			{Name: "falcon", Branch: "runtime/stale", Status: "planning: HELLO-WORLD-1", Ahead: 1},
 			{Name: "stray", Branch: "feature/stray", Status: "ready", Workspace: "Test"},
 		},
 	}
@@ -149,7 +149,7 @@ func TestHandleAgents_UsesStoreAgentsAsSourceOfTruth(t *testing.T) {
 	if _, exists := byName["stray"]; exists {
 		t.Fatalf("unregistered runtime agent leaked into response: %+v", resp.Agents)
 	}
-	if got := byName["falcon"]; got.Role != "task" || got.Repo != "repo-a" || got.Workspace != "Test" || got.Status != "working" || got.Branch != "feature/falcon" {
+	if got := byName["falcon"]; got.Role != "task" || got.Repo != "repo-a" || got.Workspace != "Test" || got.Status != "planning: HELLO-WORLD-1" || got.Branch != "feature/falcon" {
 		t.Fatalf("falcon not sourced from store: %+v", got)
 	}
 	if got := byName["nova"]; got.Role != "plan" || got.Status != "idle" || got.Workspace != "Test" {
@@ -157,6 +157,91 @@ func TestHandleAgents_UsesStoreAgentsAsSourceOfTruth(t *testing.T) {
 	}
 	if len(resp.ByWorkspace["Test"]) != 2 {
 		t.Fatalf("by_workspace[Test] = %+v, want both agents", resp.ByWorkspace["Test"])
+	}
+}
+
+func TestHandleStatus_ActiveStoreAgentWithoutWorkIsReady(t *testing.T) {
+	t.Setenv("LOOM_WORKSPACE", "WS1")
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS1", Name: "Test"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Agents().Create(ctx, store.AgentCreate{
+		WorkspaceKey: "WS1",
+		Name:         "planner",
+		RoleName:     "plan",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	active := domain.AgentStateActive
+	if _, err := st.Agents().Update(ctx, "WS1", "planner", store.AgentUpdate{State: &active}); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/monitor/status", nil)
+	rr := httptest.NewRecorder()
+	HandleStatus(func() *monitor.MonitorData {
+		return &monitor.MonitorData{Timestamp: time.Unix(1, 0).UTC()}
+	}, st).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+	var resp StatusResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("json unmarshal: %v", err)
+	}
+	if len(resp.Agents) != 1 {
+		t.Fatalf("agents = %+v, want one planner", resp.Agents)
+	}
+	if got := resp.Agents[0].Status; got != "ready" {
+		t.Fatalf("planner status = %q, want ready", got)
+	}
+}
+
+func TestHandleStatus_DerivesPlanningFromInProgressTaskWithoutRuntimeAgent(t *testing.T) {
+	t.Setenv("LOOM_WORKSPACE", "WS1")
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS1", Name: "Test"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Agents().Create(ctx, store.AgentCreate{
+		WorkspaceKey: "WS1",
+		Name:         "planner",
+		RoleName:     "plan",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	active := domain.AgentStateActive
+	if _, err := st.Agents().Update(ctx, "WS1", "planner", store.AgentUpdate{State: &active}); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/monitor/status", nil)
+	rr := httptest.NewRecorder()
+	HandleStatus(func() *monitor.MonitorData {
+		return &monitor.MonitorData{
+			Timestamp: time.Unix(1, 0).UTC(),
+			AgentTasks: map[string]monitor.TaskInfo{
+				"planner": {ID: "HELLO-WORLD-1", Title: "Explore", Status: "in_progress"},
+			},
+		}
+	}, st).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+	var resp StatusResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("json unmarshal: %v", err)
+	}
+	if len(resp.Agents) != 1 {
+		t.Fatalf("agents = %+v, want one planner", resp.Agents)
+	}
+	if got := resp.Agents[0].Status; got != "planning: HELLO-WORLD-1" {
+		t.Fatalf("planner status = %q, want planning task", got)
 	}
 }
 
@@ -293,6 +378,12 @@ func TestHandleStatusWithBackend_UsesWorkspaceScopedIssueBackend(t *testing.T) {
 	if resp.Tasks.NeedsPlanning != 1 {
 		t.Fatalf("needs_planning = %d, want scoped ready task", resp.Tasks.NeedsPlanning)
 	}
+	if len(resp.NeedsPlanning) != 1 || resp.NeedsPlanning[0].ID != "T-1" {
+		t.Fatalf("needs_planning list = %+v, want scoped ready task", resp.NeedsPlanning)
+	}
+	if resp.ReadyToImplement == nil || resp.Backlog == nil || resp.Closed == nil {
+		t.Fatalf("empty task buckets must serialize as arrays, got ready=%v backlog=%v closed=%v", resp.ReadyToImplement, resp.Backlog, resp.Closed)
+	}
 }
 
 func TestMonitorDataSource_CachesWorkspaceCollectionAcrossEndpoints(t *testing.T) {
@@ -346,6 +437,30 @@ func TestMonitorDataSource_CachesWorkspaceCollectionAcrossEndpoints(t *testing.T
 	}
 	if got := scopedBackend.CallCount("Stats"); got != 1 {
 		t.Fatalf("Stats calls = %d, want 1 shared workspace collection", got)
+	}
+}
+
+func TestMonitorDataSource_DefaultWorkspaceUsesWarmCollector(t *testing.T) {
+	collectCalls := 0
+	backendFnCalls := 0
+	dataSource := NewMonitorDataSourceWithDefaultWorkspace(func() *monitor.MonitorData {
+		collectCalls++
+		return &monitor.MonitorData{Timestamp: time.Unix(1, 0).UTC()}
+	}, func(ctx context.Context) backend.IssueBackend {
+		backendFnCalls++
+		return nil
+	}, "WS2")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/monitor/status?workspace=WS2", nil)
+	if data := dataSource.Resolve(req); data == nil {
+		t.Fatal("Resolve returned nil")
+	}
+
+	if collectCalls != 1 {
+		t.Fatalf("collect calls = %d, want 1 warm collector read", collectCalls)
+	}
+	if backendFnCalls != 0 {
+		t.Fatalf("backendFn calls = %d, want 0 duplicate workspace collection", backendFnCalls)
 	}
 }
 

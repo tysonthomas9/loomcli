@@ -28,6 +28,10 @@
     # client-side router fallback.
     handle {
         root * /srv
+        # The fleetdb test stack is rebuilt frequently during product dogfood.
+        # Do not let the browser keep an old index.html pointing at deleted
+        # hashed assets or stale onboarding logic.
+        header Cache-Control "no-store"
         try_files {path} /index.html
         file_server
     }

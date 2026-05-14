@@ -22,6 +22,7 @@ import { createIssueStore, type IssueStore } from "@/stores/issueStore";
 import { createAgentStore, type AgentStore } from "@/stores/agentStore";
 import { useWorkspaceContext } from "@/hooks/workspace";
 import { useToast } from "@/hooks/ui";
+import type { MutationPayload } from "@/types/workspace";
 import { EventProvider, useEventContext } from "./useEventProvider";
 
 // ---------------------------------------------------------------------------
@@ -51,6 +52,21 @@ const NO_STORE_CONTEXT: StoreContextValue = {
 
 export { NO_STORE_CONTEXT };
 
+const MONITOR_REFRESH_TYPES = new Set<MutationPayload["type"]>([
+  "create",
+  "update",
+  "delete",
+  "comment",
+  "status",
+  "bonded",
+  "squashed",
+  "burned",
+  "refresh",
+]);
+
+const MONITOR_REFRESH_DEBOUNCE_MS = 250;
+const AGENT_REFRESH_INTERVAL_MS = 5_000;
+
 // ---------------------------------------------------------------------------
 // Context
 // ---------------------------------------------------------------------------
@@ -77,29 +93,59 @@ function StoreWiring({
   children,
 }: StoreWiringProps): JSX.Element {
   const { workspaceId } = useWorkspaceContext();
-  const eventContext = useEventContext();
+  const {
+    retryNow,
+    subscribe,
+    state: connectionState,
+    reconnectAttempts,
+  } = useEventContext();
 
   // 1. Wire retryNow ref
-  retryNowRef.current = eventContext.retryNow;
+  retryNowRef.current = retryNow;
 
   // 2. Connect issueStore to EventProvider SSE events
   useEffect(() => {
-    const unsubscribe = issueStore
-      .getState()
-      .connectToEvents(eventContext.subscribe);
+    const unsubscribe = issueStore.getState().connectToEvents(subscribe);
     return unsubscribe;
-  }, [issueStore, eventContext.subscribe]);
+  }, [issueStore, subscribe]);
 
-  // 3. Mirror EventProvider connection state → issueStore
+  // 3. Refresh monitor status from the existing workspace SSE stream.
+  // SSE gives low-latency updates; periodic polling covers agent-only changes
+  // and reconnect races that are not represented in the issue mutation stream.
   useEffect(() => {
-    issueStore.getState().setConnectionState(eventContext.state);
-  }, [issueStore, eventContext.state]);
+    let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const scheduleRefresh = (): void => {
+      if (refreshTimer) clearTimeout(refreshTimer);
+      refreshTimer = setTimeout(() => {
+        refreshTimer = null;
+        void agentStore.getState().fetchData();
+      }, MONITOR_REFRESH_DEBOUNCE_MS);
+    };
+
+    const unsubscribe = subscribe((mutation) => {
+      if (mutation.workspace_id && mutation.workspace_id !== workspaceId)
+        return;
+      if (!MONITOR_REFRESH_TYPES.has(mutation.type)) return;
+      scheduleRefresh();
+    });
+
+    return () => {
+      if (refreshTimer) clearTimeout(refreshTimer);
+      unsubscribe();
+    };
+  }, [agentStore, subscribe, workspaceId]);
+
+  // 4. Mirror EventProvider connection state → issueStore
+  useEffect(() => {
+    issueStore.getState().setConnectionState(connectionState);
+  }, [issueStore, connectionState]);
 
   useEffect(() => {
-    issueStore.getState().setReconnectAttempts(eventContext.reconnectAttempts);
-  }, [issueStore, eventContext.reconnectAttempts]);
+    issueStore.getState().setReconnectAttempts(reconnectAttempts);
+  }, [issueStore, reconnectAttempts]);
 
-  // 4. Reset stores on workspace *change* + start agent polling.
+  // 5. Reset stores on workspace *change* + fetch initial agent status.
   // Issue fetching is driven by App.tsx (mode-aware), not here.
   // Skip reset on the initial mount: App.tsx's sibling useEffect fires its
   // fetchIssues(...) call before this parent effect runs (children-first
@@ -118,14 +164,17 @@ function StoreWiring({
     }
     prevWorkspaceIdRef.current = workspaceId;
 
-    agentStore.getState().startPolling({ workspaceId, pollInterval: 5000 });
+    agentStore.getState().startPolling({
+      workspaceId,
+      pollInterval: AGENT_REFRESH_INTERVAL_MS,
+    });
 
     return () => {
       agentStore.getState().stopPolling();
     };
   }, [workspaceId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // 5. Cleanup on unmount
+  // 6. Cleanup on unmount
   useEffect(() => {
     return () => {
       issueStore.getState().reset();

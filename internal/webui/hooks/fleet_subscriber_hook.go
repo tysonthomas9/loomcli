@@ -1,6 +1,7 @@
 package hooks
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 
@@ -51,17 +52,17 @@ func (h *FleetSubscriberHook) Name() string { return "fleet-subscriber" }
 func (h *FleetSubscriberHook) Critical() bool { return false }
 
 // OnRegister is a no-op. Subscriber start is deferred to Activate so that
-// it only runs when the SSE endpoint is hit (lazy activation matches the
-// notification-subscriber hook and avoids one open long-poll per workspace
-// at startup, which would multiply by N for fleet deployments).
+// workspace-scoped traffic can warm it lazily instead of opening one long-poll
+// per workspace at startup. Connected SSE clients retain the subscriber; the
+// MultiWorkspaceSubscriber idle loop tears it down after the grace period.
 func (h *FleetSubscriberHook) OnRegister(ctx *coordinator.RegistrationContext) error {
 	h.logger.Debug("fleet subscriber hook registered for workspace (deferred)", "workspace", ctx.WorkspaceID)
 	return nil
 }
 
 // Activate is the subscriberActivator interface method called by
-// WorkspaceRegistry.ActivateSubscriber when the SSE endpoint opens for
-// the given workspace. It looks up the FleetBackend that FleetBackendHook
+// WorkspaceRegistry.ActivateSubscriber when workspace-scoped HTTP traffic
+// warms the workspace. It looks up the FleetBackend that FleetBackendHook
 // previously stored on the workspace handle and hands it to the
 // MultiWorkspaceSubscriber to spin up a long-poll loop.
 //
@@ -103,7 +104,7 @@ func (h *FleetSubscriberHook) Activate(wsID string) error {
 		return fmt.Errorf("activate fleet subscriber: workspace %q resource is not backend.IssueBackend (got %T)", wsID, res)
 	}
 
-	if err := h.multiSub.AddWorkspaceWithBackend(wsID, be); err != nil {
+	if err := h.multiSub.EnsureActive(context.Background(), wsID, be, subscription.ActivationReasonRegistry); err != nil {
 		h.logger.Warn("failed to activate fleet subscriber for workspace",
 			"workspace", wsID, "err", err)
 		return fmt.Errorf("add workspace fleet subscriber %q: %w", wsID, err)

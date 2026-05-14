@@ -1,11 +1,15 @@
 package data
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
+
+	"github.com/tysonthomas9/loomcli/internal/backend"
 )
 
 // fakeAuthConfigServer returns an httptest.Server whose /api/config endpoint
@@ -27,13 +31,17 @@ func fakeAuthConfigServer(t *testing.T) *httptest.Server {
 func withDataClientState(t *testing.T, fn func()) {
 	t.Helper()
 	prevServer := serverURL
-	prevWorkspace := workspaceID
 	prevOutput := outputFormat
+	prevWorkspace, hadWorkspace := os.LookupEnv("LOOM_WORKSPACE")
 	resetClient()
 	t.Cleanup(func() {
 		serverURL = prevServer
-		workspaceID = prevWorkspace
 		outputFormat = prevOutput
+		if hadWorkspace {
+			_ = os.Setenv("LOOM_WORKSPACE", prevWorkspace)
+		} else {
+			_ = os.Unsetenv("LOOM_WORKSPACE")
+		}
 		resetClient()
 	})
 	fn()
@@ -120,6 +128,63 @@ func TestResetClient(t *testing.T) {
 		}
 		if url2 != srv2.URL {
 			t.Errorf("after reset URL = %q, want %q", url2, srv2.URL)
+		}
+	})
+}
+
+func TestGetIssueBackend_NoServerNoProvider(t *testing.T) {
+	withDataClientState(t, func() {
+		t.Setenv("LOOM_SERVER_URL", "")
+		serverURL = ""
+		SetLocalIssueBackendProvider(nil)
+
+		_, err := getIssueBackend(context.Background())
+		if err == nil {
+			t.Fatal("expected missing backend provider error")
+		}
+		if !strings.Contains(err.Error(), "local backend provider") {
+			t.Fatalf("error = %q, want local backend provider hint", err.Error())
+		}
+	})
+}
+
+func TestGetIssueBackend_NilProviderResult(t *testing.T) {
+	withDataClientState(t, func() {
+		t.Setenv("LOOM_SERVER_URL", "")
+		serverURL = ""
+		SetLocalIssueBackendProvider(func(context.Context) backend.IssueBackend {
+			return nil
+		})
+		t.Cleanup(func() { SetLocalIssueBackendProvider(nil) })
+
+		_, err := getIssueBackend(context.Background())
+		if err == nil {
+			t.Fatal("expected nil provider result error")
+		}
+		if !strings.Contains(err.Error(), "returned nil") {
+			t.Fatalf("error = %q, want returned nil hint", err.Error())
+		}
+	})
+}
+
+func TestGetIssueBackend_FromServerURL(t *testing.T) {
+	srv := fakeAuthConfigServer(t)
+	defer srv.Close()
+
+	withDataClientState(t, func() {
+		t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+		t.Setenv("LOOM_WORKSPACE", "default")
+		serverURL = srv.URL
+
+		ib, err := getIssueBackend(context.Background())
+		if err != nil {
+			t.Fatalf("getIssueBackend: %v", err)
+		}
+		if ib == nil {
+			t.Fatal("expected issue backend")
+		}
+		if got := ib.BackendName(); got != "api" {
+			t.Fatalf("BackendName = %q, want api", got)
 		}
 	})
 }

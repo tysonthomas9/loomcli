@@ -19,6 +19,12 @@ vi.mock("@/hooks", () => ({
   useWorkspaceContext: () => ({
     getAgentByName: () => undefined,
   }),
+  useAgentDiffStat: vi.fn(() => ({
+    data: null,
+    isLoading: false,
+    error: null,
+    refetch: vi.fn(),
+  })),
   useFocusReturn: vi.fn(),
   useFocusTrap: vi.fn(),
   useRegisterEscapeLayer: vi.fn(),

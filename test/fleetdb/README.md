@@ -1,8 +1,9 @@
 # Empty FleetDB UI Stack
 
 This stack models a new user setup: fleet-db starts with an empty Redis store,
-Loom runs in fleet mode, and the UI is served through Caddy. No workspace,
-repo, issue, or regression fixture is seeded.
+Loom runs in fleet mode, the UI is served through Caddy, and a small daemon
+manager starts a workspace-scoped `loom daemon` whenever a UI-created workspace
+has runnable agents. No workspace, repo, issue, or regression fixture is seeded.
 
 ## Start
 

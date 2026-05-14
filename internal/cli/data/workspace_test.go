@@ -7,23 +7,8 @@ import (
 	"testing"
 )
 
-func TestResolveWorkspaceID_FlagWins(t *testing.T) {
+func TestResolveWorkspaceID_FromEnv(t *testing.T) {
 	withDataClientState(t, func() {
-		workspaceID = "ws-flag"
-		t.Setenv("LOOM_WORKSPACE", "ws-env")
-		got, err := resolveWorkspaceID(context.Background(), http.DefaultClient, "http://unused.invalid")
-		if err != nil {
-			t.Fatalf("resolveWorkspaceID: %v", err)
-		}
-		if got != "ws-flag" {
-			t.Errorf("got %q, want %q", got, "ws-flag")
-		}
-	})
-}
-
-func TestResolveWorkspaceID_EnvWins(t *testing.T) {
-	withDataClientState(t, func() {
-		workspaceID = ""
 		t.Setenv("LOOM_WORKSPACE", "ws-env")
 		got, err := resolveWorkspaceID(context.Background(), http.DefaultClient, "http://unused.invalid")
 		if err != nil {
@@ -37,7 +22,6 @@ func TestResolveWorkspaceID_EnvWins(t *testing.T) {
 
 func TestResolveWorkspaceID_RequiresExplicitWorkspace(t *testing.T) {
 	withDataClientState(t, func() {
-		workspaceID = ""
 		t.Setenv("LOOM_WORKSPACE", "")
 		_, err := resolveWorkspaceID(context.Background(), http.DefaultClient, "http://unused.invalid")
 		if err == nil {
