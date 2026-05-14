@@ -3,6 +3,7 @@ package subscription
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -168,4 +169,71 @@ func TestAddWorkspaceWithBackend_TOCTOUSafe(t *testing.T) {
 	if ids := multi.WorkspaceIDs(); len(ids) != 1 {
 		t.Errorf("expected exactly 1 subscriber under concurrent activation, got %v", ids)
 	}
+}
+
+// TestStart_IdempotentAndRunsIdleDeactivation verifies that the manager
+// lifecycle can be started once at server boot and then owns idle cleanup.
+func TestStart_IdempotentAndRunsIdleDeactivation(t *testing.T) {
+	hub := realtime.NewHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	multi := NewMultiWorkspaceSubscriber(hub, nil)
+	multi.idleDeactivationInterval = 5 * time.Millisecond
+	multi.idleDeactivationTimeout = 10 * time.Millisecond
+	defer multi.Stop()
+
+	sub := &trackingWorkspaceSubscriber{}
+	multi.mu.Lock()
+	multi.subscribers["ws-idle"] = &subscriberEntry{sub: sub}
+	multi.mu.Unlock()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	multi.Start(ctx)
+	multi.Start(ctx)
+	multi.Start(ctx)
+
+	if got := sub.startCalls.Load(); got != 1 {
+		t.Fatalf("Start should start registered subscribers once, got %d starts", got)
+	}
+
+	waitForMultiCondition(t, func() bool {
+		return !multi.HasSubscriber("ws-idle")
+	})
+	if got := sub.stopCalls.Load(); got != 1 {
+		t.Fatalf("idle deactivation should stop subscriber once, got %d stops", got)
+	}
+}
+
+type trackingWorkspaceSubscriber struct {
+	startCalls atomic.Int64
+	stopCalls  atomic.Int64
+	getCalls   atomic.Int64
+}
+
+func (s *trackingWorkspaceSubscriber) Start() {
+	s.startCalls.Add(1)
+}
+
+func (s *trackingWorkspaceSubscriber) Stop() {
+	s.stopCalls.Add(1)
+}
+
+func (s *trackingWorkspaceSubscriber) GetMutationDataSince(string) []backend.MutationData {
+	s.getCalls.Add(1)
+	return nil
+}
+
+func waitForMultiCondition(t *testing.T, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("condition not met before timeout")
 }

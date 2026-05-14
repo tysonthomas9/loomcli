@@ -180,6 +180,7 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 
 	// Bridge per-workspace backend mutations to SSE clients.
 	app.multiSub = appstores.NewMultiSub(app.hub, config.Logger)
+	app.multiSub.Start(ctx)
 	app.getMutationsSince = appstores.GetMutationsSinceFn(app.multiSub)
 	cleanups = append(cleanups, func() { app.multiSub.Stop() })
 
