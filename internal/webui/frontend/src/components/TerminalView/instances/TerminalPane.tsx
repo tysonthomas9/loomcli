@@ -10,7 +10,6 @@ import {
   type ReconnectOverlayState,
 } from "./ReconnectingOverlay";
 import { TerminalConnectionOverlay } from "./TerminalConnectionOverlay";
-import { WelcomeBanner } from "@/components/TerminalView/layout";
 import type { TabState } from "@/components/TerminalView/tabs";
 
 export interface TerminalPaneProps {
@@ -30,9 +29,6 @@ export interface TerminalPaneProps {
   onTerminalFocus: (() => void) | undefined;
   hasConnected: boolean;
   reconnectState: ReconnectOverlayState;
-  dismissedWelcome: boolean;
-  onDismissWelcome: () => void;
-  onExampleClick: (text: string) => void;
   notes: string;
   onSaveNotes: (text: string) => Promise<void>;
   isMetaLoading: boolean;
@@ -63,9 +59,6 @@ export function TerminalPane({
   onTerminalFocus,
   hasConnected,
   reconnectState,
-  dismissedWelcome,
-  onDismissWelcome,
-  onExampleClick,
   notes,
   onSaveNotes,
   isMetaLoading,
@@ -105,14 +98,6 @@ export function TerminalPane({
             onReconnect={onReconnect}
           />
         </>
-      )}
-      {hasConnected && !dismissedWelcome && (
-        <WelcomeBanner
-          backendName={tab.backendName}
-          isActive={isActive}
-          onDismiss={onDismissWelcome}
-          onExampleClick={onExampleClick}
-        />
       )}
       <NotesBar notes={notes} onSave={onSaveNotes} isLoading={isMetaLoading} />
     </>

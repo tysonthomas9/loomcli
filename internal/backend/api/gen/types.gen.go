@@ -929,6 +929,30 @@ func (e ListReadyParamsSort) Valid() bool {
 	}
 }
 
+// Defines values for StartTerminalSetupJSONBodyAction.
+const (
+	Configure StartTerminalSetupJSONBodyAction = "configure"
+	Install   StartTerminalSetupJSONBodyAction = "install"
+	Login     StartTerminalSetupJSONBodyAction = "login"
+	Test      StartTerminalSetupJSONBodyAction = "test"
+)
+
+// Valid indicates whether the value is a known member of the StartTerminalSetupJSONBodyAction enum.
+func (e StartTerminalSetupJSONBodyAction) Valid() bool {
+	switch e {
+	case Configure:
+		return true
+	case Install:
+		return true
+	case Login:
+		return true
+	case Test:
+		return true
+	default:
+		return false
+	}
+}
+
 // AddDependencyRequest defines model for AddDependencyRequest.
 type AddDependencyRequest struct {
 	DepType     *string `json:"dep_type,omitempty"`
@@ -1371,14 +1395,20 @@ type MonitorStatsResponse struct {
 
 // MonitorStatusResponse defines model for MonitorStatusResponse.
 type MonitorStatusResponse struct {
-	AgentTasks     map[string]MonitorTaskInfo `json:"agent_tasks"`
-	Agents         []MonitorAgentStatus       `json:"agents"`
-	InProgressList []MonitorTaskInfo          `json:"in_progress_list"`
-	Stats          MonitorStats               `json:"stats"`
-	Sync           MonitorSyncInfo            `json:"sync"`
-	Tasks          MonitorTaskSummary         `json:"tasks"`
-	Timestamp      time.Time                  `json:"timestamp"`
-	Workspace      MonitorWorkspaceInfo       `json:"workspace"`
+	AgentTasks       map[string]MonitorTaskInfo `json:"agent_tasks"`
+	Agents           []MonitorAgentStatus       `json:"agents"`
+	Backlog          []MonitorTaskInfo          `json:"backlog"`
+	Closed           []MonitorTaskInfo          `json:"closed"`
+	InProgress       []MonitorTaskInfo          `json:"in_progress"`
+	InProgressList   []MonitorTaskInfo          `json:"in_progress_list"`
+	NeedsPlanning    []MonitorTaskInfo          `json:"needs_planning"`
+	NeedsReview      []MonitorTaskInfo          `json:"needs_review"`
+	ReadyToImplement []MonitorTaskInfo          `json:"ready_to_implement"`
+	Stats            MonitorStats               `json:"stats"`
+	Sync             MonitorSyncInfo            `json:"sync"`
+	Tasks            MonitorTaskSummary         `json:"tasks"`
+	Timestamp        time.Time                  `json:"timestamp"`
+	Workspace        MonitorWorkspaceInfo       `json:"workspace"`
 }
 
 // MonitorSyncInfo defines model for MonitorSyncInfo.
@@ -1925,9 +1955,6 @@ type WorkspaceId = string
 // ReportClientErrorJSONBody defines parameters for ReportClientError.
 type ReportClientErrorJSONBody = map[string]interface{}
 
-// ReportCSPViolationJSONBody defines parameters for ReportCSPViolation.
-type ReportCSPViolationJSONBody = map[string]interface{}
-
 // PushWorkerEventsJSONBody defines parameters for PushWorkerEvents.
 type PushWorkerEventsJSONBody = map[string]interface{}
 
@@ -2130,6 +2157,16 @@ type SaveIssueTabsJSONBody struct {
 	Tabs        []IssueTab `json:"tabs"`
 }
 
+// RunOnboardingFirstTaskJSONBody defines parameters for RunOnboardingFirstTask.
+type RunOnboardingFirstTaskJSONBody struct {
+	AgentName   string  `json:"agent_name"`
+	Description *string `json:"description,omitempty"`
+	IssueType   *string `json:"issue_type,omitempty"`
+	Priority    *int    `json:"priority,omitempty"`
+	SourceRepo  *string `json:"source_repo,omitempty"`
+	Title       string  `json:"title"`
+}
+
 // ListReadyParams defines parameters for ListReady.
 type ListReadyParams struct {
 	Assignee        *string                 `form:"assignee,omitempty" json:"assignee,omitempty"`
@@ -2180,6 +2217,17 @@ type ListSessionsByIssueParams struct {
 	IssueId *string `form:"issue_id,omitempty" json:"issue_id,omitempty"`
 }
 
+// StartTerminalSetupJSONBody defines parameters for StartTerminalSetup.
+type StartTerminalSetupJSONBody struct {
+	Action StartTerminalSetupJSONBodyAction `json:"action"`
+
+	// Backend AI backend name (claude, codex, gemini, opencode, cursor)
+	Backend string `json:"backend"`
+}
+
+// StartTerminalSetupJSONBodyAction defines parameters for StartTerminalSetup.
+type StartTerminalSetupJSONBodyAction string
+
 // PatchTerminalStateJSONBody defines parameters for PatchTerminalState.
 type PatchTerminalStateJSONBody struct {
 	ActiveTab *string `json:"active_tab,omitempty"`
@@ -2195,9 +2243,6 @@ type ConnectTerminalWSParams struct {
 
 // ReportClientErrorJSONRequestBody defines body for ReportClientError for application/json ContentType.
 type ReportClientErrorJSONRequestBody = ReportClientErrorJSONBody
-
-// ReportCSPViolationJSONRequestBody defines body for ReportCSPViolation for application/json ContentType.
-type ReportCSPViolationJSONRequestBody = ReportCSPViolationJSONBody
 
 // OpenEditorJSONRequestBody defines body for OpenEditor for application/json ContentType.
 type OpenEditorJSONRequestBody = EditorOpenRequest
@@ -2271,8 +2316,14 @@ type SaveIssueTabsJSONRequestBody SaveIssueTabsJSONBody
 // RenameWorkspaceJSONRequestBody defines body for RenameWorkspace for application/json ContentType.
 type RenameWorkspaceJSONRequestBody = WorkspaceRenameRequest
 
+// RunOnboardingFirstTaskJSONRequestBody defines body for RunOnboardingFirstTask for application/json ContentType.
+type RunOnboardingFirstTaskJSONRequestBody RunOnboardingFirstTaskJSONBody
+
 // SeedTerminalSessionJSONRequestBody defines body for SeedTerminalSession for application/json ContentType.
 type SeedTerminalSessionJSONRequestBody = SeedRequest
+
+// StartTerminalSetupJSONRequestBody defines body for StartTerminalSetup for application/json ContentType.
+type StartTerminalSetupJSONRequestBody StartTerminalSetupJSONBody
 
 // SpawnTerminalSessionJSONRequestBody defines body for SpawnTerminalSession for application/json ContentType.
 type SpawnTerminalSessionJSONRequestBody = TerminalSpawnRequest

@@ -52,4 +52,12 @@ describe("TalkToLeadButton", () => {
       "true",
     );
   });
+
+  it("marks the button when it should avoid a side panel", () => {
+    render(<TalkToLeadButton avoidSidePanel={true} />);
+    expect(screen.getByTestId("talk-to-lead-button")).toHaveAttribute(
+      "data-avoid-side-panel",
+      "true",
+    );
+  });
 });

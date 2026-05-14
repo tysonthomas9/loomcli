@@ -345,16 +345,16 @@ func (g *GitOpsImpl) ResolveMergeBase(worktreePath, branch string) (string, erro
 	return git.ResolveMergeBase(worktreePath, branch)
 }
 
-func (g *GitOpsImpl) DiffCommits(worktreePath, mergeBase string, limit int) ([]ops.DiffCommitResult, error) {
-	return git.DiffCommits(worktreePath, mergeBase, limit)
+func (g *GitOpsImpl) DiffCommits(ctx context.Context, worktreePath, mergeBase string, limit int) ([]ops.DiffCommitResult, error) {
+	return git.DiffCommits(ctx, worktreePath, mergeBase, limit)
 }
 
-func (g *GitOpsImpl) DiffFiles(worktreePath, from, to string) ([]ops.DiffFileResult, error) {
-	return git.DiffFiles(worktreePath, from, to)
+func (g *GitOpsImpl) DiffFiles(ctx context.Context, worktreePath, from, to string) ([]ops.DiffFileResult, error) {
+	return git.DiffFiles(ctx, worktreePath, from, to)
 }
 
-func (g *GitOpsImpl) DiffFilePatch(worktreePath, from, to, path string) (*ops.DiffFilePatchResult, error) {
-	return git.DiffFilePatch(worktreePath, from, to, path)
+func (g *GitOpsImpl) DiffFilePatch(ctx context.Context, worktreePath, from, to, path string) (*ops.DiffFilePatchResult, error) {
+	return git.DiffFilePatch(ctx, worktreePath, from, to, path)
 }
 
 // isLockedError checks if err is a git.LockedError and extracts it.

@@ -171,6 +171,27 @@ describe("fetchAgents", () => {
       signal: expect.any(AbortSignal),
     });
   });
+
+  it("uses workspace-scoped monitor status when workspace is provided", async () => {
+    mockGet.mockResolvedValueOnce({
+      agents: null,
+      tasks: {},
+      agent_tasks: null,
+      sync: {},
+      stats: {},
+      timestamp: "",
+    } as never);
+
+    await fetchStatus("test-ws");
+
+    expect(mockGet).toHaveBeenCalledWith(
+      "/api/workspaces/test-ws/monitor/status",
+      {
+        signal: expect.any(AbortSignal),
+      },
+    );
+    expect(mockApiGet).not.toHaveBeenCalled();
+  });
 });
 
 describe("checkLoomHealth", () => {
@@ -409,6 +430,37 @@ describe("fetchStatus", () => {
           need_review: 4,
           backlog: 5,
         },
+        needs_planning: [
+          { id: "loom-001", title: "Plan", priority: 2, status: "open" },
+        ],
+        ready_to_implement: [
+          { id: "loom-002", title: "Implement", priority: 1, status: "open" },
+        ],
+        needs_review: [
+          { id: "loom-004", title: "Review", priority: 1, status: "review" },
+        ],
+        in_progress: [
+          {
+            id: "loom-003",
+            title: "In progress",
+            priority: 0,
+            status: "in_progress",
+          },
+        ],
+        in_progress_list: [
+          {
+            id: "loom-003",
+            title: "In progress",
+            priority: 0,
+            status: "in_progress",
+          },
+        ],
+        backlog: [
+          { id: "loom-005", title: "Blocked", priority: 3, status: "blocked" },
+        ],
+        closed: [
+          { id: "loom-006", title: "Done", priority: 3, status: "closed" },
+        ],
         agent_tasks: {
           nova: {
             id: "loom-123",
@@ -437,6 +489,7 @@ describe("fetchStatus", () => {
 
     expect(result).toHaveProperty("agents");
     expect(result).toHaveProperty("tasks");
+    expect(result).toHaveProperty("taskLists");
     expect(result).toHaveProperty("agentTasks");
     expect(result).toHaveProperty("sync");
     expect(result).toHaveProperty("stats");
@@ -444,6 +497,8 @@ describe("fetchStatus", () => {
 
     expect(result.agents).toEqual(agents);
     expect(result.tasks.backlog).toBe(5);
+    expect(result.taskLists.readyToImplement[0].id).toBe("loom-002");
+    expect(result.taskLists.done[0].id).toBe("loom-006");
     expect(result.timestamp).toBe("2024-01-15T12:30:00Z");
   });
 
@@ -785,6 +840,15 @@ describe("API field consistency", () => {
           backlog: 7,
         },
         agent_tasks: null,
+        needs_planning: null,
+        ready_to_implement: null,
+        needs_review: null,
+        in_progress: null,
+        in_progress_list: null,
+        backlog: [
+          { id: "loom-100", title: "Blocked", priority: 0, status: "blocked" },
+        ],
+        closed: null,
         sync: { db_synced: true, db_last_sync: "2024-01-15T12:00:00Z" },
         stats: {
           open: 7,
@@ -805,6 +869,7 @@ describe("API field consistency", () => {
     const statusResult = await fetchStatus();
 
     expect(statusResult.tasks.backlog).toBe(7);
+    expect(statusResult.taskLists.backlog).toHaveLength(1);
 
     mockApiGet.mockResolvedValueOnce({
       data: {

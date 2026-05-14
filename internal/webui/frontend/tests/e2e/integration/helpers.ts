@@ -10,6 +10,13 @@ import * as os from "os";
 /** Base URL for API calls (configurable via env var). */
 export const BASE_URL = process.env.LOOM_BASE_URL || "http://localhost:8080";
 
+/** Base URL for browser navigation in manually created contexts. */
+export const FRONTEND_BASE_URL =
+  process.env.LOOM_FRONTEND_BASE_URL ||
+  (process.env.RUN_INTEGRATION_TESTS && !process.env.LOOM_LOCAL_SERVER
+    ? "http://localhost:3100"
+    : process.env.LOOM_BASE_URL || "http://localhost:3000");
+
 /**
  * Resolve API key from environment or key file.
  * Priority: LOOM_API_KEY env var > ~/.loom/webui-api-key file > empty string.

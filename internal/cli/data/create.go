@@ -11,7 +11,6 @@ import (
 )
 
 type createIssueFlags struct {
-	id                 string
 	parent             string
 	title              string
 	description        string
@@ -59,7 +58,6 @@ func newCreateCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&flags.id, "id", "", "Optional issue ID")
 	cmd.Flags().StringVar(&flags.parent, "parent", "", "Parent issue ID")
 	cmd.Flags().StringVar(&flags.title, "title", "", "Issue title")
 	cmd.Flags().StringVar(&flags.description, "description", "", "Issue description")
@@ -88,7 +86,6 @@ func createParamsFromFlags(cmd *cobra.Command, flags createIssueFlags) (backend.
 		return backend.CreateParams{}, fmt.Errorf("--title is required")
 	}
 	params := backend.CreateParams{
-		ID:                 flags.id,
 		Parent:             flags.parent,
 		Title:              flags.title,
 		Description:        flags.description,

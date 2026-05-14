@@ -31,6 +31,14 @@ type SessionHistoryStore = sessionhistory.Store
 // MultiWorkspaceSubscriber is a type alias for subscription.MultiWorkspaceSubscriber.
 type MultiWorkspaceSubscriber = subscription.MultiWorkspaceSubscriber
 
+// ActivationReason records why a workspace subscriber was activated.
+type ActivationReason = subscription.ActivationReason
+
+const (
+	ActivationReasonHTTP     = subscription.ActivationReasonHTTP
+	ActivationReasonRegistry = subscription.ActivationReasonRegistry
+)
+
 // SessionRecord is a type alias for sessionhistory.SessionRecord.
 type SessionRecord = sessionhistory.SessionRecord
 
@@ -55,9 +63,10 @@ func NewTerminalAuth() (*TerminalAuth, error) { return realtime.NewTerminalAuth(
 // NewTokenStore creates a new SSE token store.
 func NewTokenStore() (*TokenStore, error) { return realtime.NewTokenStore() }
 
-// NewMultiSub creates a multi-workspace subscriber bridging backend mutations to SSE.
-func NewMultiSub(hub *realtime.Hub, logger *slog.Logger) *MultiWorkspaceSubscriber {
-	return subscription.NewMultiWorkspaceSubscriber(hub, logger)
+// NewMultiSub creates and starts a multi-workspace subscriber bridging backend
+// mutations to SSE.
+func NewMultiSub(ctx context.Context, hub *realtime.Hub, logger *slog.Logger) *MultiWorkspaceSubscriber {
+	return subscription.NewStartedMultiWorkspaceSubscriber(ctx, hub, logger)
 }
 
 // GetMutationsSinceFn returns the mutations-since callback from the subscriber.

@@ -106,3 +106,22 @@ func TestCreateCommand_RequiresTitle(t *testing.T) {
 		}
 	})
 }
+
+func TestCreateCommand_RejectsIDFlag(t *testing.T) {
+	stub := &localBackendStub{}
+	withLocalBackend(t, stub, func() {
+		cmd := newCreateCmd()
+		cmd.SetArgs([]string{"--title", "Local mode", "--id", "E2E-99"})
+
+		_, err := captureDataStdout(t, cmd.Execute)
+		if err == nil {
+			t.Fatal("expected unknown --id flag error")
+		}
+		if !strings.Contains(err.Error(), "unknown flag: --id") {
+			t.Fatalf("error = %q, want unknown --id flag", err.Error())
+		}
+		if len(stub.calls) != 0 {
+			t.Fatalf("calls = %#v, want no backend calls", stub.calls)
+		}
+	})
+}

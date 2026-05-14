@@ -86,7 +86,7 @@ describe("SessionTimelineRow", () => {
     it("renders aria-label with agent name and status", () => {
       render(<SessionTimelineRow {...defaultProps} />);
       expect(
-        screen.getByLabelText("Session by nova, completed"),
+        screen.getByLabelText("Run by nova, Completed"),
       ).toBeInTheDocument();
     });
   });

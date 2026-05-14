@@ -12,27 +12,6 @@ import "@testing-library/jest-dom";
 
 import type { LoomAgentStatus } from "@/types";
 
-// Mock useAgentDiffStat and useWorkspaceContext
-const mockDiffStat = vi.fn().mockReturnValue({
-  data: null,
-  isLoading: false,
-  error: null,
-  refetch: vi.fn(),
-});
-vi.mock("@/hooks", () => ({
-  useAgentDiffStat: (...args: unknown[]) => mockDiffStat(...args),
-}));
-vi.mock("@/hooks/workspace", async () => {
-  const actual =
-    await vi.importActual<typeof import("@/hooks/workspace")>(
-      "@/hooks/workspace",
-    );
-  return {
-    ...actual,
-    useWorkspaceContext: () => ({ workspaceId: "ws-test-123" }),
-  };
-});
-
 import { AgentCard } from "./AgentCard";
 
 /** Helper to build a minimal agent object. */
@@ -259,117 +238,6 @@ describe("AgentCard", () => {
     });
   });
 
-  describe("diff stats", () => {
-    it("shows +N when diffStat.added > 0", () => {
-      mockDiffStat.mockReturnValue({
-        data: { branch: "main", added: 366, removed: 0 },
-        isLoading: false,
-        error: null,
-        refetch: vi.fn(),
-      });
-      const { container } = render(<AgentCard agent={makeAgent()} />);
-
-      const linesAdded = container.querySelector('[class*="linesAdded"]');
-      expect(linesAdded).toBeInTheDocument();
-      expect(linesAdded).toHaveTextContent("+366");
-    });
-
-    it("shows -N when diffStat.removed > 0", () => {
-      mockDiffStat.mockReturnValue({
-        data: { branch: "main", added: 0, removed: 42 },
-        isLoading: false,
-        error: null,
-        refetch: vi.fn(),
-      });
-      const { container } = render(<AgentCard agent={makeAgent()} />);
-
-      const linesRemoved = container.querySelector('[class*="linesRemoved"]');
-      expect(linesRemoved).toBeInTheDocument();
-      expect(linesRemoved).toHaveTextContent("-42");
-    });
-
-    it("shows both added and removed when both > 0", () => {
-      mockDiffStat.mockReturnValue({
-        data: { branch: "main", added: 200, removed: 50 },
-        isLoading: false,
-        error: null,
-        refetch: vi.fn(),
-      });
-      const { container } = render(<AgentCard agent={makeAgent()} />);
-
-      const linesAdded = container.querySelector('[class*="linesAdded"]');
-      const linesRemoved = container.querySelector('[class*="linesRemoved"]');
-      expect(linesAdded).toHaveTextContent("+200");
-      expect(linesRemoved).toHaveTextContent("-50");
-    });
-
-    it("hidden when diffStat is null (loading)", () => {
-      mockDiffStat.mockReturnValue({
-        data: null,
-        isLoading: true,
-        error: null,
-        refetch: vi.fn(),
-      });
-      const { container } = render(<AgentCard agent={makeAgent()} />);
-
-      expect(
-        container.querySelector('[class*="diffStats"]'),
-      ).not.toBeInTheDocument();
-    });
-
-    it("hidden when both added and removed are 0", () => {
-      mockDiffStat.mockReturnValue({
-        data: { branch: "main", added: 0, removed: 0 },
-        isLoading: false,
-        error: null,
-        refetch: vi.fn(),
-      });
-      const { container } = render(<AgentCard agent={makeAgent()} />);
-
-      expect(
-        container.querySelector('[class*="diffStats"]'),
-      ).not.toBeInTheDocument();
-    });
-
-    it("shows correct tooltip text", () => {
-      mockDiffStat.mockReturnValue({
-        data: { branch: "main", added: 366, removed: 12 },
-        isLoading: false,
-        error: null,
-        refetch: vi.fn(),
-      });
-      render(<AgentCard agent={makeAgent()} />);
-
-      expect(
-        screen.getByTitle("366 lines added, 12 lines removed"),
-      ).toBeInTheDocument();
-    });
-
-    it("passes correct options to useAgentDiffStat", () => {
-      mockDiffStat.mockReturnValue({
-        data: null,
-        isLoading: false,
-        error: null,
-        refetch: vi.fn(),
-      });
-      render(<AgentCard agent={makeAgent({ name: "nova" })} />);
-
-      expect(mockDiffStat).toHaveBeenCalledWith({
-        agentName: "nova",
-        pollInterval: 60000,
-      });
-    });
-
-    afterEach(() => {
-      mockDiffStat.mockReturnValue({
-        data: null,
-        isLoading: false,
-        error: null,
-        refetch: vi.fn(),
-      });
-    });
-  });
-
   describe("data-status attribute", () => {
     it("sets data-status to the parsed status type", () => {
       const { container } = render(
@@ -561,26 +429,6 @@ describe("AgentCard", () => {
 
       expect(container.firstChild).toHaveAttribute("data-status", "ready");
       expect(screen.getByText("Ready")).toBeInTheDocument();
-    });
-
-    it("handles large diff stat values", () => {
-      mockDiffStat.mockReturnValue({
-        data: { branch: "main", added: 100000, removed: 50000 },
-        isLoading: false,
-        error: null,
-        refetch: vi.fn(),
-      });
-      render(<AgentCard agent={makeAgent()} />);
-
-      expect(screen.getByText("+100000")).toBeInTheDocument();
-      expect(screen.getByText("-50000")).toBeInTheDocument();
-
-      mockDiffStat.mockReturnValue({
-        data: null,
-        isLoading: false,
-        error: null,
-        refetch: vi.fn(),
-      });
     });
   });
 });

@@ -17,6 +17,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import "@testing-library/jest-dom";
 
 import type { Issue, IssueDetails, IssueWithDependencyMetadata } from "@/types";
+import type { SessionRecord } from "@/types/agent";
 import { updateIssue, startAgent } from "@/api";
 import { createAgentStore } from "@/stores/agentStore";
 
@@ -30,6 +31,7 @@ const {
   mockUseIssueTabPersistence,
   mockUseWorkspaceContext,
   mockUseAgentStoreInstance,
+  mockGetTaskSessions,
 } = vi.hoisted(() => ({
   mockUseRegisterEscapeLayer: vi.fn(),
   mockDeleteTabMetadata: vi.fn(() => Promise.resolve()),
@@ -58,6 +60,7 @@ const {
     setDefaultWorkspace: () => Promise.resolve(),
   })),
   mockUseAgentStoreInstance: vi.fn(),
+  mockGetTaskSessions: vi.fn(() => Promise.resolve([])),
 }));
 
 // Mock the API module
@@ -74,6 +77,7 @@ vi.mock("@/api", () => ({
 vi.mock("@/api/terminal", () => ({
   deleteTabMetadata: mockDeleteTabMetadata,
   scheduleSessionKill: mockScheduleSessionKill,
+  getTaskSessions: mockGetTaskSessions,
   listIssueSessions: vi.fn().mockImplementation(() => new Promise(() => {})),
 }));
 
@@ -172,6 +176,36 @@ function createTestDependency(
   };
 }
 
+function createTestSession(
+  overrides: Partial<SessionRecord> = {},
+): SessionRecord {
+  return {
+    session_id: "sess-1",
+    task_id: "test-123",
+    agent_name: "planner",
+    backend: "codex",
+    status: "failed",
+    started_at: "2026-01-23T00:00:00Z",
+    ended_at: "2026-01-23T00:00:15Z",
+    duration_s: 15,
+    input_tokens: 0,
+    output_tokens: 0,
+    cache_read_tokens: 0,
+    cache_write_tokens: 0,
+    estimated_cost_usd: 0,
+    exit_code: 1,
+    files_changed: 0,
+    lines_added: 0,
+    lines_removed: 0,
+    attempt_num: 1,
+    has_transcript: true,
+    has_diff: false,
+    is_active: false,
+    error_class: "AuthFailure",
+    ...overrides,
+  };
+}
+
 function createWorkspaceContext(overrides: Record<string, unknown> = {}) {
   return {
     workspace: null,
@@ -200,6 +234,8 @@ describe("IssueDetailPanel", () => {
     mockUseAgentStoreInstance.mockReturnValue(agentStore);
     mockUseWorkspaceContext.mockReset();
     mockUseWorkspaceContext.mockImplementation(() => createWorkspaceContext());
+    mockGetTaskSessions.mockReset();
+    mockGetTaskSessions.mockResolvedValue([]);
   });
 
   // Reset body overflow after each test
@@ -224,6 +260,63 @@ describe("IssueDetailPanel", () => {
         </IssueDetailPanel>,
       );
       expect(screen.getByTestId("child-content")).toBeInTheDocument();
+    });
+
+    it("shows latest failed task run and links to Runs tab", async () => {
+      mockGetTaskSessions.mockResolvedValue([
+        createTestSession({ error_class: "AuthFailure" }),
+      ]);
+      const mockIssue = createTestIssue({
+        issue_type: "task",
+        id: "test-123",
+      });
+      render(
+        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
+      );
+
+      await waitFor(() => {
+        expect(
+          screen.getByTestId("latest-run-failure-banner"),
+        ).toHaveTextContent("AuthFailure");
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: "View run" }));
+      expect(screen.getByRole("tab", { name: "Runs" })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
+    });
+
+    it("does not show failed-run banner when a newer run succeeded", async () => {
+      mockGetTaskSessions.mockResolvedValue([
+        createTestSession({
+          session_id: "old-failure",
+          status: "failed",
+          error_class: "AuthFailure",
+          started_at: "2026-01-23T00:00:00Z",
+        }),
+        createTestSession({
+          session_id: "new-success",
+          status: "completed",
+          error_class: undefined,
+          exit_code: 0,
+          started_at: "2026-01-23T01:00:00Z",
+        }),
+      ]);
+      const mockIssue = createTestIssue({
+        issue_type: "task",
+        id: "test-123",
+      });
+      render(
+        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
+      );
+
+      await waitFor(() => {
+        expect(mockGetTaskSessions).toHaveBeenCalledWith("", "test-123");
+      });
+      expect(
+        screen.queryByTestId("latest-run-failure-banner"),
+      ).not.toBeInTheDocument();
     });
 
     it("applies open class when isOpen is true", () => {
@@ -1003,6 +1096,58 @@ describe("IssueDetailPanel", () => {
   });
 
   describe("Start Work", () => {
+    it("shows plan agents for issues that need planning", () => {
+      const agentStore = createAgentStore();
+      agentStore.setState({
+        agents: [
+          {
+            name: "planner",
+            branch: "main",
+            status: "idle",
+            ahead: 0,
+            behind: 0,
+            role: "plan",
+            workspace: "Desktop QA",
+          },
+          {
+            name: "desktopqa",
+            branch: "main",
+            status: "idle",
+            ahead: 0,
+            behind: 0,
+            role: "task",
+            workspace: "Desktop QA",
+          },
+        ],
+        isConnected: true,
+        wasEverConnected: true,
+        connectionState: "connected",
+      });
+      mockUseAgentStoreInstance.mockReturnValue(agentStore);
+      mockUseWorkspaceContext.mockImplementation(() =>
+        createWorkspaceContext({ workspaceId: "DESKTOP-QA" }),
+      );
+
+      const issue = createTestIssueDetails({
+        id: "DESKTOP-QA-3",
+        status: "open",
+        issue_type: "task",
+        assignee: "",
+        design: "",
+      });
+
+      render(
+        <IssueDetailPanel isOpen={true} issue={issue} onClose={() => {}} />,
+      );
+
+      fireEvent.click(screen.getByTestId("start-work-button"));
+
+      expect(screen.getByTestId("agent-option-planner")).toBeInTheDocument();
+      expect(
+        screen.queryByTestId("agent-option-desktopqa"),
+      ).not.toBeInTheDocument();
+    });
+
     it("assigns the issue and asks the daemon to claim the requested task", async () => {
       const mockUpdateIssue = updateIssue as ReturnType<typeof vi.fn>;
       const mockStartAgent = startAgent as ReturnType<typeof vi.fn>;
@@ -1038,6 +1183,7 @@ describe("IssueDetailPanel", () => {
         status: "open",
         issue_type: "task",
         assignee: "",
+        design: "Implementation plan is ready.",
       });
       const updatedIssue = { ...issue, assignee: "desktopqa" };
       mockUpdateIssue.mockResolvedValueOnce(updatedIssue);
@@ -1059,7 +1205,7 @@ describe("IssueDetailPanel", () => {
         expect(mockUpdateIssue).toHaveBeenCalledWith(
           "DESKTOP-QA",
           "DESKTOP-QA-3",
-          { assignee: "desktopqa" },
+          { assignee: "desktopqa", status: "in_progress" },
         );
       });
       await waitFor(() => {
@@ -1069,6 +1215,86 @@ describe("IssueDetailPanel", () => {
       });
       expect(onIssueUpdate).toHaveBeenCalledWith(updatedIssue);
       expect(refetchAgents).toHaveBeenCalled();
+    });
+
+    it("rolls back the assignee when daemon start fails", async () => {
+      const mockUpdateIssue = updateIssue as ReturnType<typeof vi.fn>;
+      const mockStartAgent = startAgent as ReturnType<typeof vi.fn>;
+      mockUpdateIssue.mockReset();
+      mockStartAgent.mockReset();
+      mockStartAgent.mockRejectedValueOnce(new Error("daemon unavailable"));
+      const agentStore = createAgentStore();
+      agentStore.setState({
+        agents: [
+          {
+            name: "desktopqa",
+            branch: "main",
+            status: "idle",
+            ahead: 0,
+            behind: 0,
+            role: "task",
+            workspace: "Desktop QA",
+          },
+        ],
+        isConnected: true,
+        wasEverConnected: true,
+        connectionState: "connected",
+      });
+      mockUseAgentStoreInstance.mockReturnValue(agentStore);
+      mockUseWorkspaceContext.mockImplementation(() =>
+        createWorkspaceContext({ workspaceId: "DESKTOP-QA" }),
+      );
+
+      const issue = createTestIssueDetails({
+        id: "DESKTOP-QA-3",
+        status: "open",
+        issue_type: "task",
+        assignee: "",
+        design: "Implementation plan is ready.",
+      });
+      const assignedIssue = {
+        ...issue,
+        assignee: "desktopqa",
+        status: "in_progress" as const,
+      };
+      const rolledBackIssue = {
+        ...issue,
+        assignee: "",
+        status: "open" as const,
+      };
+      mockUpdateIssue
+        .mockResolvedValueOnce(assignedIssue)
+        .mockResolvedValueOnce(rolledBackIssue);
+      const onIssueUpdate = vi.fn();
+
+      render(
+        <IssueDetailPanel
+          isOpen={true}
+          issue={issue}
+          onClose={() => {}}
+          onIssueUpdate={onIssueUpdate}
+        />,
+      );
+
+      fireEvent.click(screen.getByTestId("start-work-button"));
+      fireEvent.click(screen.getByTestId("agent-option-desktopqa"));
+
+      await waitFor(() => {
+        expect(mockStartAgent).toHaveBeenCalledWith("DESKTOP-QA", "desktopqa", {
+          taskId: "DESKTOP-QA-3",
+        });
+      });
+      await waitFor(() => {
+        expect(mockUpdateIssue).toHaveBeenLastCalledWith(
+          "DESKTOP-QA",
+          "DESKTOP-QA-3",
+          { assignee: "", status: "open" },
+        );
+      });
+      expect(onIssueUpdate).toHaveBeenCalledWith(rolledBackIssue);
+      expect(await screen.findByTestId("start-work-error")).toHaveTextContent(
+        "daemon unavailable",
+      );
     });
   });
 
@@ -1276,7 +1502,7 @@ describe("IssueDetailPanel", () => {
           {
             id: "sessions",
             type: "sessions" as const,
-            label: "Sessions",
+            label: "Runs",
             sort_order: 1,
           },
           {
@@ -1439,7 +1665,7 @@ describe("IssueDetailPanel", () => {
             {
               id: "sessions",
               type: "sessions" as const,
-              label: "Sessions",
+              label: "Runs",
               sort_order: 1,
             },
             {
@@ -1490,15 +1716,15 @@ describe("IssueDetailPanel", () => {
   });
 
   describe("tab reset on issue change", () => {
-    it("includes Sessions tab on initial render", () => {
+    it("includes Runs tab on initial render", () => {
       const mockIssue = createTestIssue();
       render(
         <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
       );
-      expect(screen.getByRole("tab", { name: "Sessions" })).toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: "Runs" })).toBeInTheDocument();
     });
 
-    it("includes Sessions tab after issue ID changes", () => {
+    it("includes Runs tab after issue ID changes", () => {
       const issueA = createTestIssue({ id: "issue-a" });
       const issueB = createTestIssue({ id: "issue-b" });
       const { rerender } = render(
@@ -1507,7 +1733,7 @@ describe("IssueDetailPanel", () => {
       rerender(
         <IssueDetailPanel isOpen={true} issue={issueB} onClose={() => {}} />,
       );
-      expect(screen.getByRole("tab", { name: "Sessions" })).toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: "Runs" })).toBeInTheDocument();
     });
 
     it("resets active tab to Details when issue changes", () => {
@@ -1517,18 +1743,18 @@ describe("IssueDetailPanel", () => {
         <IssueDetailPanel isOpen={true} issue={issueA} onClose={() => {}} />,
       );
 
-      // Click Sessions tab
-      const sessionsTab = screen.getByRole("tab", { name: "Sessions" });
-      fireEvent.click(sessionsTab);
-      expect(sessionsTab).toHaveAttribute("aria-selected", "true");
+      // Click Runs tab
+      const runsTab = screen.getByRole("tab", { name: "Runs" });
+      fireEvent.click(runsTab);
+      expect(runsTab).toHaveAttribute("aria-selected", "true");
 
       // Rerender with different issue
       rerender(
         <IssueDetailPanel isOpen={true} issue={issueB} onClose={() => {}} />,
       );
 
-      // Details tab should be active again, Sessions tab still present
-      expect(screen.getByRole("tab", { name: "Sessions" })).toBeInTheDocument();
+      // Details tab should be active again, Runs tab still present
+      expect(screen.getByRole("tab", { name: "Runs" })).toBeInTheDocument();
       expect(screen.getByRole("tab", { name: "Details" })).toHaveAttribute(
         "aria-selected",
         "true",
@@ -1549,7 +1775,7 @@ describe("IssueDetailPanel", () => {
             {
               id: "sessions",
               type: "sessions" as const,
-              label: "Sessions",
+              label: "Runs",
               sort_order: 1,
             },
             {
@@ -1598,7 +1824,7 @@ describe("IssueDetailPanel", () => {
         <IssueDetailPanel isOpen={true} issue={issueC} onClose={() => {}} />,
       );
       expect(screen.getByRole("tab", { name: "Details" })).toBeInTheDocument();
-      expect(screen.getByRole("tab", { name: "Sessions" })).toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: "Runs" })).toBeInTheDocument();
     });
   });
 });
