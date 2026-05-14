@@ -361,6 +361,26 @@ func TestMakefileNoHardcodedGitHooks(t *testing.T) {
 	}
 }
 
+func TestPrePushHookClearsGitLocalEnv(t *testing.T) {
+	t.Parallel()
+
+	data, err := os.ReadFile(repoRoot(t) + "/scripts/hooks/pre-push")
+	if err != nil {
+		t.Fatalf("reading pre-push hook: %v", err)
+	}
+	content := string(data)
+
+	if !strings.Contains(content, "git rev-parse --local-env-vars") {
+		t.Fatalf("pre-push hook should discover all local Git env vars before running the gate")
+	}
+	if !strings.Contains(content, "unset \"$git_env\"") {
+		t.Fatalf("pre-push hook should unset each local Git env var before running the gate")
+	}
+	if strings.Index(content, "git rev-parse --local-env-vars") > strings.Index(content, "make check") {
+		t.Fatalf("pre-push hook should clear Git env vars before running make check")
+	}
+}
+
 // ---------------------------------------------------------------------------
 // .gitignore tests
 // ---------------------------------------------------------------------------
