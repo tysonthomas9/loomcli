@@ -35,9 +35,7 @@ export interface AgentIconRailProps {
   onAddClick?: (() => void) | undefined;
 }
 
-export function AgentIconRail({
-  onAddClick,
-}: AgentIconRailProps): JSX.Element {
+export function AgentIconRail({ onAddClick }: AgentIconRailProps): JSX.Element {
   const { workspaceId = "", agentName: selectedName } = useParams<{
     workspaceId: string;
     agentName?: string;
@@ -140,8 +138,12 @@ export function AgentIconRail({
 
 export function isLiveAgentRailVisible(agent: LoomAgentStatus): boolean {
   if (agent.mode !== "ephemeral") return true;
-  const state = String(agent.state ?? "").trim().toLowerCase();
-  const desiredState = String(agent.desired_state ?? "").trim().toLowerCase();
+  const state = String(agent.state ?? "")
+    .trim()
+    .toLowerCase();
+  const desiredState = String(agent.desired_state ?? "")
+    .trim()
+    .toLowerCase();
   return state !== "stopped" && state !== "dead" && desiredState !== "stopped";
 }
 

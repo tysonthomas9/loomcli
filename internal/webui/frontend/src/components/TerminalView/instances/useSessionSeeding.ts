@@ -58,6 +58,13 @@ export function useSessionSeeding({
     key: string;
     promise: ReturnType<typeof ensureAgentTerminalSession>;
   } | null>(null);
+  const consumedAgentKeyRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!pendingAgentName) {
+      consumedAgentKeyRef.current = null;
+    }
+  }, [pendingAgentName]);
 
   // Handle pending issue context: create or switch to issue tab.
   useEffect(() => {
@@ -110,6 +117,8 @@ export function useSessionSeeding({
 
     let cancelled = false;
     const requestKey = `${workspaceIdRef.current}:${pendingAgentName}`;
+    if (consumedAgentKeyRef.current === requestKey) return;
+
     let request = agentResolutionRef.current;
     if (!request || request.key !== requestKey) {
       request = {
@@ -157,6 +166,7 @@ export function useSessionSeeding({
           return [...prev, newTab];
         });
         setActiveTabId(newTab.id);
+        consumedAgentKeyRef.current = requestKey;
         onAgentNameConsumed?.();
       })
       .catch((err) => {
@@ -165,6 +175,7 @@ export function useSessionSeeding({
           `Failed to resolve agent terminal ${pendingAgentName}:`,
           err,
         );
+        consumedAgentKeyRef.current = requestKey;
         onAgentNameConsumed?.();
       })
       .finally(() => {

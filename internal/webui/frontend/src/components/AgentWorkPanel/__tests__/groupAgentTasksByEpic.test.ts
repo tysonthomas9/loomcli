@@ -188,9 +188,7 @@ describe("isWorkerTerminalOpenable", () => {
       ),
     ).toBe(false);
     expect(
-      isWorkerTerminalOpenable(
-        agent({ name: "worker-dead", state: "dead" }),
-      ),
+      isWorkerTerminalOpenable(agent({ name: "worker-dead", state: "dead" })),
     ).toBe(false);
   });
 });

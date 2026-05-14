@@ -103,19 +103,8 @@ func init() {
 }
 
 func runEpicRun(cmd *cobra.Command, _ []string) error {
-	if strings.TrimSpace(runParent) == "" {
-		return errors.New("--parent is required")
-	}
-	if runMaxConcurrency < 1 {
-		return fmt.Errorf("--max-concurrency must be >= 1, got %d", runMaxConcurrency)
-	}
-	if runIntervalSeconds < 1 {
-		return fmt.Errorf("--interval-seconds must be >= 1, got %d", runIntervalSeconds)
-	}
-
-	prefix := runWorkerPrefix
-	if prefix == "" {
-		prefix = sanitizePrefix(runParent)
+	if err := validateEpicRunFlags(); err != nil {
+		return err
 	}
 
 	ctx, cancel := signalContext(cmd.Context())
@@ -137,38 +126,65 @@ func runEpicRun(cmd *cobra.Command, _ []string) error {
 		return errors.New("no issue backend available")
 	}
 
-	orchestratorID := strings.TrimSpace(os.Getenv(envOrchestratorSessionID))
-	leadName, orchestratorID, err := bindLeadAgent(ctx, handle.Store, ws, resolveLeadName(runLead), runParent, orchestratorID, !runDryRun)
+	r, err := newRunnerFromFlags(ctx, handle.Store, ib, ws)
 	if err != nil {
 		return err
 	}
+	r.printHeader()
+	return r.reconcileLoop(ctx)
+}
+
+func validateEpicRunFlags() error {
+	if strings.TrimSpace(runParent) == "" {
+		return errors.New("--parent is required")
+	}
+	if runMaxConcurrency < 1 {
+		return fmt.Errorf("--max-concurrency must be >= 1, got %d", runMaxConcurrency)
+	}
+	if runIntervalSeconds < 1 {
+		return fmt.Errorf("--interval-seconds must be >= 1, got %d", runIntervalSeconds)
+	}
+	return nil
+}
+
+func epicRunWorkerPrefix() string {
+	if runWorkerPrefix != "" {
+		return runWorkerPrefix
+	}
+	return sanitizePrefix(runParent)
+}
+
+func newRunnerFromFlags(ctx context.Context, st store.Store, ib backend.IssueBackend, ws string) (*runner, error) {
+	orchestratorID := strings.TrimSpace(os.Getenv(envOrchestratorSessionID))
+	leadName, orchestratorID, err := bindLeadAgent(ctx, st, ws, resolveLeadName(runLead), runParent, orchestratorID, !runDryRun)
+	if err != nil {
+		return nil, err
+	}
 
 	nodeID := runNodeID
-	if nodeID == "" && handle.Store.AgentCommands() != nil && !runDryRun {
-		nodeID, err = selectTargetNodeID(ctx, handle.Store, ws)
+	if nodeID == "" && st.AgentCommands() != nil && !runDryRun {
+		nodeID, err = selectTargetNodeID(ctx, st, ws)
 		if err != nil {
-			return err
+			return nil, err
 		}
 	}
 
-	r := &runner{
-		store:                 handle.Store,
+	return &runner{
+		store:                 st,
 		ib:                    ib,
 		workspace:             ws,
 		parent:                runParent,
 		leadName:              leadName,
 		role:                  runRole,
 		backend:               strings.TrimSpace(cli.GetBackendName()),
-		prefix:                prefix,
+		prefix:                epicRunWorkerPrefix(),
 		maxConcurrency:        runMaxConcurrency,
 		interval:              time.Duration(runIntervalSeconds) * time.Second,
 		orchestratorSessionID: orchestratorID,
 		targetNodeID:          nodeID,
 		dryRun:                runDryRun,
 		stalledTaskTicks:      make(map[string]int),
-	}
-	r.printHeader()
-	return r.reconcileLoop(ctx)
+	}, nil
 }
 
 // runner is one foreground epic-run instance.
@@ -187,6 +203,12 @@ type runner struct {
 	targetNodeID          string
 	dryRun                bool
 	stalledTaskTicks      map[string]int
+}
+
+type reconcileSnapshot struct {
+	ready        []backend.IssueData
+	blocked      []backend.IssueData
+	openChildren []backend.IssueData
 }
 
 func (r *runner) printHeader() {
@@ -238,35 +260,54 @@ func bindLeadAgent(ctx context.Context, st store.Store, workspace, leadName, par
 		defer unlock()
 	}
 
+	lead, err := loadLeadAgentForEpic(ctx, st, workspace, leadName, parent)
+	if err != nil {
+		return "", "", err
+	}
+	effectiveOrchestratorID := effectiveLeadOrchestratorID(orchestratorID, lead)
+
+	if !mutate {
+		logLeadDryRunAssignment(leadName, parent, lead)
+		return leadName, effectiveOrchestratorID, nil
+	}
+	return updateLeadBinding(ctx, st, workspace, leadName, parent, effectiveOrchestratorID, lead)
+}
+
+func loadLeadAgentForEpic(ctx context.Context, st store.Store, workspace, leadName, parent string) (*domain.Agent, error) {
 	lead, err := st.Agents().Get(ctx, workspace, leadName)
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
-			return "", "", fmt.Errorf("lead agent %q was not found in workspace %s; create it with `loom agentdef add %s --role lead` or rerun without --lead: %w", leadName, workspace, leadName, domain.ErrNotFound)
+			return nil, fmt.Errorf("lead agent %q was not found in workspace %s; create it with `loom agentdef add %s --role lead` or rerun without --lead: %w", leadName, workspace, leadName, domain.ErrNotFound)
 		}
-		return "", "", fmt.Errorf("load lead agent %q: %w", leadName, err)
+		return nil, fmt.Errorf("load lead agent %q: %w", leadName, err)
 	}
 	if lead == nil {
-		return "", "", fmt.Errorf("lead agent %q lookup returned nil", leadName)
+		return nil, fmt.Errorf("lead agent %q lookup returned nil", leadName)
 	}
 	if !isLeadRole(lead.RoleName) {
-		return "", "", fmt.Errorf("agent %q has role %q; `loom epic run` requires a lead agent when --lead or %s is set", leadName, lead.RoleName, envAgentName)
+		return nil, fmt.Errorf("agent %q has role %q; `loom epic run` requires a lead agent when --lead or %s is set", leadName, lead.RoleName, envAgentName)
 	}
 	if lead.Parent != "" && lead.Parent != parent {
-		return "", "", fmt.Errorf("lead agent %q is already running epic %s; ask the lead to clear or finish that epic before running %s", leadName, lead.Parent, parent)
+		return nil, fmt.Errorf("lead agent %q is already running epic %s; ask the lead to clear or finish that epic before running %s", leadName, lead.Parent, parent)
 	}
+	return lead, nil
+}
 
+func effectiveLeadOrchestratorID(orchestratorID string, lead *domain.Agent) string {
 	effectiveOrchestratorID := strings.TrimSpace(orchestratorID)
 	if effectiveOrchestratorID == "" {
 		effectiveOrchestratorID = strings.TrimSpace(lead.OrchestratorSessionID)
 	}
+	return effectiveOrchestratorID
+}
 
-	if !mutate {
-		if lead.Parent == "" {
-			fmt.Printf("[epic-run] DRY-RUN would assign lead %s to epic %s\n", leadName, parent)
-		}
-		return leadName, effectiveOrchestratorID, nil
+func logLeadDryRunAssignment(leadName, parent string, lead *domain.Agent) {
+	if lead.Parent == "" {
+		fmt.Printf("[epic-run] DRY-RUN would assign lead %s to epic %s\n", leadName, parent)
 	}
+}
 
+func updateLeadBinding(ctx context.Context, st store.Store, workspace, leadName, parent, effectiveOrchestratorID string, lead *domain.Agent) (string, string, error) {
 	patch := store.AgentUpdate{}
 	needsUpdate := false
 	if lead.Parent == "" {
@@ -392,42 +433,59 @@ func (r *runner) reconcileLoop(ctx context.Context) error {
 // reconcileOnce performs one pass: fetch ready, fetch blocked, spawn for new
 // ready tasks up to the concurrency cap, and report whether the epic is done.
 func (r *runner) reconcileOnce(ctx context.Context) (done bool, err error) {
-	ready, err := r.ib.Ready(ctx, backend.ReadyOpts{ParentID: r.parent, Limit: 256})
-	if err != nil {
-		return false, fmt.Errorf("ready query: %w", err)
-	}
-	blocked, err := r.ib.Blocked(ctx, backend.BlockedOpts{ParentID: r.parent, Limit: 256})
-	if err != nil {
-		return false, fmt.Errorf("blocked query: %w", err)
-	}
-
-	openChildren, err := r.openChildren(ctx)
+	snapshot, err := r.loadReconcileSnapshot(ctx)
 	if err != nil {
 		return false, err
 	}
-
-	// Drain only after no child work remains and every epic worker has stopped,
-	// so downstream orchestration can trust the lifecycle.
-	if len(openChildren) == 0 {
-		activeWorkers := r.countActiveWorkers(ctx, openChildren)
-		if activeWorkers > 0 {
-			fmt.Printf("[epic-run] child work closed; waiting for %d active worker(s) to stop\n", activeWorkers)
-			return false, nil
-		}
+	if drained, activeWorkers := r.drainState(ctx, snapshot.openChildren); drained {
 		return true, nil
+	} else if len(snapshot.openChildren) == 0 {
+		fmt.Printf("[epic-run] child work closed; waiting for %d active worker(s) to stop\n", activeWorkers)
+		return false, nil
 	}
 
-	// Spawn for new ready tasks, respecting concurrency.
-	activeWorkers := r.countActiveWorkers(ctx, openChildren)
-	if stalled := r.stalledTasks(ctx, openChildren); len(stalled) > 0 {
+	activeWorkers := r.countActiveWorkers(ctx, snapshot.openChildren)
+	if stalled := r.stalledTasks(ctx, snapshot.openChildren); len(stalled) > 0 {
 		return false, fmt.Errorf("%w: %s", errStalledWorker, strings.Join(stalled, "; "))
 	}
 	slots := r.maxConcurrency - activeWorkers
 	if slots <= 0 {
-		fmt.Printf("[epic-run] %d ready, %d blocked, %d active workers (at cap)\n", len(ready), len(blocked), activeWorkers)
+		fmt.Printf("[epic-run] %d ready, %d blocked, %d active workers (at cap)\n", len(snapshot.ready), len(snapshot.blocked), activeWorkers)
 		return false, nil
 	}
 
+	dispatched := r.dispatchReadyTasks(ctx, snapshot.ready, slots)
+	fmt.Printf("[epic-run] %d ready, %d blocked, dispatched %d (active %d/%d)\n",
+		len(snapshot.ready), len(snapshot.blocked), dispatched, activeWorkers+dispatched, r.maxConcurrency)
+	return false, nil
+}
+
+func (r *runner) loadReconcileSnapshot(ctx context.Context) (*reconcileSnapshot, error) {
+	ready, err := r.ib.Ready(ctx, backend.ReadyOpts{ParentID: r.parent, Limit: 256})
+	if err != nil {
+		return nil, fmt.Errorf("ready query: %w", err)
+	}
+	blocked, err := r.ib.Blocked(ctx, backend.BlockedOpts{ParentID: r.parent, Limit: 256})
+	if err != nil {
+		return nil, fmt.Errorf("blocked query: %w", err)
+	}
+
+	openChildren, err := r.openChildren(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &reconcileSnapshot{ready: ready, blocked: blocked, openChildren: openChildren}, nil
+}
+
+func (r *runner) drainState(ctx context.Context, openChildren []backend.IssueData) (drained bool, activeWorkers int) {
+	if len(openChildren) > 0 {
+		return false, 0
+	}
+	activeWorkers = r.countActiveWorkers(ctx, openChildren)
+	return activeWorkers == 0, activeWorkers
+}
+
+func (r *runner) dispatchReadyTasks(ctx context.Context, ready []backend.IssueData, slots int) int {
 	dispatched := 0
 	for _, task := range ready {
 		if dispatched >= slots {
@@ -456,10 +514,7 @@ func (r *runner) reconcileOnce(ctx context.Context) (done bool, err error) {
 		}
 		dispatched++
 	}
-
-	fmt.Printf("[epic-run] %d ready, %d blocked, dispatched %d (active %d/%d)\n",
-		len(ready), len(blocked), dispatched, activeWorkers+dispatched, r.maxConcurrency)
-	return false, nil
+	return dispatched
 }
 
 func (r *runner) openChildren(ctx context.Context) ([]backend.IssueData, error) {
@@ -638,12 +693,26 @@ func (r *runner) stalledTasks(ctx context.Context, openChildren []backend.IssueD
 // is deterministic for the task.
 func (r *runner) spawnWorker(ctx context.Context, task backend.IssueData) error {
 	name := workerName(r.prefix, task.ID)
-
 	if r.dryRun {
 		fmt.Printf("[epic-run] DRY-RUN would spawn: %s for task %s (%s)\n", name, task.ID, task.Title)
 		return nil
 	}
 
+	agent, err := r.createOrLoadWorkerAgent(ctx, name)
+	if err != nil {
+		return err
+	}
+	if err := r.ensureLocalWorkerWorktrees(ctx, *agent); err != nil {
+		return err
+	}
+	if err := r.enqueueWorkerStart(ctx, name, task); err != nil {
+		return err
+	}
+	fmt.Printf("[epic-run] spawned %s -> %s (%s)\n", name, task.ID, task.Title)
+	return nil
+}
+
+func (r *runner) createOrLoadWorkerAgent(ctx context.Context, name string) (*domain.Agent, error) {
 	mode := domain.AgentModeEphemeral
 	desired := domain.AgentDesiredStopped
 	if r.store.AgentCommands() == nil {
@@ -661,21 +730,21 @@ func (r *runner) spawnWorker(ctx context.Context, task backend.IssueData) error 
 		DesiredState:          desired,
 	})
 	if err != nil && !errors.Is(err, domain.ErrAlreadyExists) {
-		return fmt.Errorf("create agent %s: %w", name, err)
+		return nil, fmt.Errorf("create agent %s: %w", name, err)
 	}
 	if errors.Is(err, domain.ErrAlreadyExists) {
 		agent, err = r.store.Agents().Get(ctx, r.workspace, name)
 		if err != nil {
-			return fmt.Errorf("get existing agent %s: %w", name, err)
+			return nil, fmt.Errorf("get existing agent %s: %w", name, err)
 		}
 	}
 	if agent == nil {
-		return fmt.Errorf("create agent %s returned nil", name)
+		return nil, fmt.Errorf("create agent %s returned nil", name)
 	}
-	if err := r.ensureLocalWorkerWorktrees(ctx, *agent); err != nil {
-		return err
-	}
+	return agent, nil
+}
 
+func (r *runner) enqueueWorkerStart(ctx context.Context, name string, task backend.IssueData) error {
 	if r.store.AgentCommands() == nil {
 		// No command channel available (e.g. memstore in tests) — agent will
 		// auto-claim from Ready() on its own polling cycle.
@@ -692,8 +761,6 @@ func (r *runner) spawnWorker(ctx context.Context, task backend.IssueData) error 
 	}); err != nil {
 		return fmt.Errorf("enqueue start command for %s: %w", name, err)
 	}
-
-	fmt.Printf("[epic-run] spawned %s -> %s (%s)\n", name, task.ID, task.Title)
 	return nil
 }
 

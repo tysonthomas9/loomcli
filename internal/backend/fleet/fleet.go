@@ -519,7 +519,7 @@ func (b *FleetBackend) Create(ctx context.Context, params backend.CreateParams) 
 		if strings.TrimSpace(depID) == "" {
 			continue
 		}
-		if err := b.AddDependency(ctx, backend.DepAddParams{
+		if err := b.postDependency(ctx, backend.DepAddParams{
 			FromID:  result.ID,
 			ToID:    depID,
 			DepType: "blocks",

@@ -79,62 +79,79 @@ func (s *Supervisor) shouldRestart(ap *AgentProcess) bool {
 	ap.Mu.Lock()
 	defer ap.Mu.Unlock()
 
-	// Ephemeral mode: exit cleanly after one successful task cycle.
-	// Worker stays in fleet-db (state=stopped) for audit; no restart, no GC.
-	// Triggered only when the agent actually claimed and ran a task — a NoWork
-	// exit on an ephemeral agent still falls through to the NoWork branch below
-	// so it can re-poll until a task arrives.
-	if ap.Entry.Mode == domain.AgentModeEphemeral &&
-		ap.LastExitCode == 0 && ap.LastError == nil &&
-		ap.AssignedTaskID != "" {
-		ap.RestartCount = 0
-		ap.RateRetryCount = 0
-		ap.NoWorkCount = 0
-		ap.StopReason = StopReasonEphemeralDone
-		log.Printf("[daemon] Agent %s: ephemeral task complete, exiting supervisor", ap.Entry.Worktree)
+	if stopAfterEphemeralTask(ap) {
 		return false
 	}
-
-	// Clean success (exit 0, no error): always restart, reset counters.
-	// Long runs (>1 minute) also reset primary backend.
-	if ap.LastExitCode == 0 && ap.LastError == nil {
-		ap.RestartCount = 0
-		ap.RateRetryCount = 0
-		ap.NoWorkCount = 0
-		ap.StopReason = ""
-		if time.Since(ap.LastStart) > time.Minute {
-			ap.CurrentBackendIdx = 0 // reset to primary backend
-		}
+	if restartAfterCleanExit(ap) {
 		return true
 	}
-
 	if ap.LastError != nil && ap.LastError.Class == agenterr.NoWork {
 		s.applyNoWorkRestart(ap)
 		return true
 	}
-
-	// Fatal errors: stop immediately, no retries
-	if ap.LastError != nil && ap.LastError.IsFatal() {
-		log.Printf("[daemon] Agent %s: fatal error (%s), stopping supervisor",
-			ap.Entry.Worktree, ap.LastError.Class)
-		ap.NoWorkCount = 0
-		ap.StopReason = StopReasonFatalError
+	if stopAfterFatalError(ap) {
 		return false
 	}
-
-	// Rate-limited: unlimited retries (don't count toward max_retries)
-	if ap.LastError != nil && ap.LastError.Class == agenterr.RateLimited && s.getRateLimitNoCount() {
-		ap.RateRetryCount++
-		ap.NoWorkCount = 0
-		ap.StopReason = ""
-		log.Printf("[daemon] Agent %s: rate limited (retry %d, not counted toward max_retries)",
-			ap.Entry.Worktree, ap.RateRetryCount)
+	if s.restartAfterRateLimit(ap) {
 		return true
 	}
+	return applyCountedRestart(ap, maxRetries)
+}
 
-	// All other errors: count toward max_retries
+func stopAfterEphemeralTask(ap *AgentProcess) bool {
+	// Ephemeral mode exits cleanly after one successful task cycle. A NoWork
+	// exit still falls through so it can re-poll until a task arrives.
+	if ap.Entry.Mode != domain.AgentModeEphemeral || ap.LastExitCode != 0 || ap.LastError != nil || ap.AssignedTaskID == "" {
+		return false
+	}
+	ap.RestartCount = 0
+	ap.RateRetryCount = 0
+	ap.NoWorkCount = 0
+	ap.StopReason = StopReasonEphemeralDone
+	log.Printf("[daemon] Agent %s: ephemeral task complete, exiting supervisor", ap.Entry.Worktree)
+	return true
+}
+
+func restartAfterCleanExit(ap *AgentProcess) bool {
+	if ap.LastExitCode != 0 || ap.LastError != nil {
+		return false
+	}
+	ap.RestartCount = 0
+	ap.RateRetryCount = 0
+	ap.NoWorkCount = 0
+	ap.StopReason = ""
+	if time.Since(ap.LastStart) > time.Minute {
+		ap.CurrentBackendIdx = 0
+	}
+	return true
+}
+
+func stopAfterFatalError(ap *AgentProcess) bool {
+	if ap.LastError == nil || !ap.LastError.IsFatal() {
+		return false
+	}
+	log.Printf("[daemon] Agent %s: fatal error (%s), stopping supervisor",
+		ap.Entry.Worktree, ap.LastError.Class)
+	ap.NoWorkCount = 0
+	ap.StopReason = StopReasonFatalError
+	return true
+}
+
+func (s *Supervisor) restartAfterRateLimit(ap *AgentProcess) bool {
+	if ap.LastError == nil || ap.LastError.Class != agenterr.RateLimited || !s.getRateLimitNoCount() {
+		return false
+	}
+	ap.RateRetryCount++
+	ap.NoWorkCount = 0
+	ap.StopReason = ""
+	log.Printf("[daemon] Agent %s: rate limited (retry %d, not counted toward max_retries)",
+		ap.Entry.Worktree, ap.RateRetryCount)
+	return true
+}
+
+func applyCountedRestart(ap *AgentProcess, maxRetries int) bool {
 	ap.RestartCount++
-	ap.RateRetryCount = 0 // reset rate counter on non-rate error
+	ap.RateRetryCount = 0
 	ap.NoWorkCount = 0
 	if ap.RestartCount <= maxRetries {
 		ap.StopReason = ""

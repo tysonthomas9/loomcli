@@ -27,6 +27,7 @@ import { useStore } from "zustand";
 import { LoadingSkeleton } from "@/components";
 import type { TerminalInputRequest } from "@/components/TerminalView";
 import { useAgentStoreInstance } from "@/hooks";
+import { wsUrl } from "@/hooks/api";
 import { type LoomAgentStatus, parseLoomStatus } from "@/types";
 import { getAvatarColor, shouldUseWhiteText } from "@/utils/colorUtils";
 
@@ -162,15 +163,21 @@ function CompletedWorkerSummary({
   const hasTaskSession = taskId !== "unknown" && sessionId !== "";
   const logsHref =
     workspace !== ""
-      ? `/api/workspaces/${encodeURIComponent(workspace)}/agents/${encodeURIComponent(agent.name)}/logs`
+      ? wsUrl(workspace, `/agents/${encodeURIComponent(agent.name)}/logs`)
       : "";
   const transcriptHref =
     workspace !== "" && hasTaskSession
-      ? `/api/workspaces/${encodeURIComponent(workspace)}/tasks/${encodeURIComponent(taskId)}/sessions/${encodeURIComponent(sessionId)}/transcript`
+      ? wsUrl(
+          workspace,
+          `/tasks/${encodeURIComponent(taskId)}/sessions/${encodeURIComponent(sessionId)}/transcript`,
+        )
       : "";
   const diffHref =
     workspace !== "" && hasTaskSession
-      ? `/api/workspaces/${encodeURIComponent(workspace)}/tasks/${encodeURIComponent(taskId)}/sessions/${encodeURIComponent(sessionId)}/diff`
+      ? wsUrl(
+          workspace,
+          `/tasks/${encodeURIComponent(taskId)}/sessions/${encodeURIComponent(sessionId)}/diff`,
+        )
       : "";
   const openHref = (href: string) => {
     if (!href) return;

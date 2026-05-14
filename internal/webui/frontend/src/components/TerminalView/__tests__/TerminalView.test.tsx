@@ -12,10 +12,11 @@ import {
   fireEvent,
   waitFor,
   act,
+  cleanup,
 } from "@testing-library/react";
 import type { RenderOptions } from "@testing-library/react";
 import { useState } from "react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import "@testing-library/jest-dom";
 import { KeyboardShortcutProvider } from "@/hooks/ui";
 
@@ -295,6 +296,10 @@ describe("TerminalView", () => {
     };
     mockSessionRestoreHook.activeTabId = null;
     mockSessionRestoreHook.isRestoring = true;
+  });
+
+  afterEach(() => {
+    cleanup();
   });
 
   // ── Session initialization ───────────────────────────────────────────────
@@ -1137,6 +1142,28 @@ describe("TerminalView", () => {
       );
 
       await waitFor(() => expect(onConsumed).toHaveBeenCalled());
+    });
+
+    it("does not re-resolve an unchanged pending agent after consumption", async () => {
+      setMetadata(DEFAULT_METADATA);
+      const onConsumed = vi.fn();
+      render(
+        <TerminalView
+          pendingAgentName="fox"
+          onAgentNameConsumed={onConsumed}
+        />,
+      );
+
+      await waitFor(() => expect(onConsumed).toHaveBeenCalledTimes(1));
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(mockTerminalApi.ensureAgentTerminalSession).toHaveBeenCalledTimes(
+        1,
+      );
+      expect(onConsumed).toHaveBeenCalledTimes(1);
     });
 
     it("resolves backend terminal even if restored agent tab already exists", async () => {

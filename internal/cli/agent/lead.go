@@ -116,29 +116,44 @@ func runLead(cmd *cobra.Command, args []string) {
 // heartbeat. Best-effort: any error returns a no-op finalize so lead always runs.
 func registerLeadOrchestratorSession(ctx context.Context, workDir string) func() {
 	noop := func() {}
-
-	handle, err := cmdstore.OpenStore(ctx)
-	if err != nil {
-		slog.Debug("lead orchestrator session: store unavailable, continuing without registration", "err", err)
-		return noop
-	}
-
-	ws, err := bootstrap.ResolveActiveWorkspaceKey(ctx, handle.Store.Workspaces())
-	if err != nil {
-		_ = handle.Close()
-		slog.Debug("lead orchestrator session: no active workspace, continuing without registration", "err", err)
+	handle, ws, ok := openLeadSessionStore(ctx)
+	if !ok {
 		return noop
 	}
 
 	sid := resolveLeadOrchestratorSessionID()
 	agentID := resolveLeadAgentID()
-	actor := os.Getenv("USER")
-	if actor == "" {
-		actor = "unknown"
+	if err := createLeadSession(ctx, handle, ws, sid, agentID, workDir); err != nil {
+		_ = handle.Close()
+		slog.Warn("lead orchestrator session: create failed, continuing without registration", "err", err)
+		return noop
 	}
 
+	activateLeadSessionEnv(sid)
+	fmt.Printf("Lead session: %s (orchestrator linkage active)\n\n", sid)
+	stopHB, wg := startLeadSessionHeartbeat(handle, ws, sid)
+	return leadSessionFinalizer(handle, ws, sid, stopHB, wg)
+}
+
+func openLeadSessionStore(ctx context.Context) (*bootstrap.StoreHandle, string, bool) {
+	handle, err := cmdstore.OpenStore(ctx)
+	if err != nil {
+		slog.Debug("lead orchestrator session: store unavailable, continuing without registration", "err", err)
+		return nil, "", false
+	}
+	ws, err := bootstrap.ResolveActiveWorkspaceKey(ctx, handle.Store.Workspaces())
+	if err != nil {
+		_ = handle.Close()
+		slog.Debug("lead orchestrator session: no active workspace, continuing without registration", "err", err)
+		return nil, "", false
+	}
+	return handle, ws, true
+}
+
+func createLeadSession(ctx context.Context, handle *bootstrap.StoreHandle, ws, sid, agentID, workDir string) error {
 	createCtx, createCancel := context.WithTimeout(ctx, leadStoreOpTimeout)
-	_, err = handle.Store.AgentSessions().Create(createCtx, store.AgentSessionCreate{
+	defer createCancel()
+	_, err := handle.Store.AgentSessions().Create(createCtx, store.AgentSessionCreate{
 		WorkspaceKey: ws,
 		SessionID:    sid,
 		AgentID:      agentID,
@@ -146,30 +161,39 @@ func registerLeadOrchestratorSession(ctx context.Context, workDir string) func()
 		TerminalID:   strings.TrimSpace(os.Getenv(envAgentTerminalID)),
 		Status:       domain.AgentSessionRunning,
 		Metadata: map[string]string{
-			"actor":        actor,
+			"actor":        leadSessionActor(),
 			"lead_workdir": workDir,
 		},
 	})
-	createCancel()
-	if err != nil && !errors.Is(err, domain.ErrAlreadyExists) {
-		_ = handle.Close()
-		slog.Warn("lead orchestrator session: create failed, continuing without registration", "err", err)
-		return noop
+	if errors.Is(err, domain.ErrAlreadyExists) {
+		return nil
 	}
+	return err
+}
 
-	// Inject env so child agents (`loom agentdef add` from within this tmux
-	// session) auto-stamp OrchestratorSessionID = this session's ID.
+func leadSessionActor() string {
+	if actor := os.Getenv("USER"); actor != "" {
+		return actor
+	}
+	return "unknown"
+}
+
+func activateLeadSessionEnv(sid string) {
+	// Child agents spawned from this session inherit the orchestrator ID.
 	if err := os.Setenv(envOrchestratorSessionID, sid); err != nil {
 		slog.Warn("lead orchestrator session: setenv failed", "err", err)
 	}
+}
 
-	fmt.Printf("Lead session: %s (orchestrator linkage active)\n\n", sid)
-
+func startLeadSessionHeartbeat(handle *bootstrap.StoreHandle, ws, sid string) (chan struct{}, *sync.WaitGroup) {
 	stopHB := make(chan struct{})
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go heartbeatLeadSession(handle, ws, sid, stopHB, &wg)
+	return stopHB, &wg
+}
 
+func leadSessionFinalizer(handle *bootstrap.StoreHandle, ws, sid string, stopHB chan struct{}, wg *sync.WaitGroup) func() {
 	return func() {
 		close(stopHB)
 		wg.Wait()

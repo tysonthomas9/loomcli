@@ -78,15 +78,9 @@ func ensureAgentTerminalSession(ctx context.Context, svc service.TerminalService
 	unlock := lockAgentTerminalSession(workspace, agentName)
 	defer unlock()
 
-	agent, err := st.Agents().Get(ctx, workspace, agentName)
+	agent, err := loadTerminalAgent(ctx, st, workspace, agentName)
 	if err != nil {
-		if errors.Is(err, domain.ErrNotFound) {
-			return nil, service.ErrNotFound("agent not found")
-		}
-		return nil, service.ErrInternal("failed to load agent", err)
-	}
-	if agent == nil {
-		return nil, service.ErrNotFound("agent not found")
+		return nil, err
 	}
 
 	tabs, err := svc.ListTabs(ctx, workspace)
@@ -97,53 +91,90 @@ func ensureAgentTerminalSession(ctx context.Context, svc service.TerminalService
 	if existing != nil && existing.PTYAlive {
 		return existing, nil
 	}
-
 	if !agentTerminalLaunchAllowed(agent) {
-		if existing != nil {
-			return disableStoredAgentLaunch(ctx, svc, workspace, existing)
-		}
-		return nil, service.ErrValidation("agent is not running and has no terminal session")
+		return inactiveAgentTerminalSession(ctx, svc, workspace, existing)
 	}
 
-	sessionName := "term_" + uuid.NewString()
-	sortOrder := len(tabs)
-	label := "agent-" + agentName
-	if existing != nil {
-		sortOrder = existing.SortOrder
-		label = existing.Label
+	sessionName, label, sortOrder := newAgentTerminalTabPlacement(tabs, existing, agentName)
+	agentForLaunch, err := ensureLeadOrchestratorLink(ctx, st, workspace, sessionName, agent)
+	if err != nil {
+		return nil, err
 	}
-
-	agentForLaunch := *agent
-	orchestratorID := strings.TrimSpace(agentForLaunch.OrchestratorSessionID)
-	if isLeadRole(agentForLaunch.RoleName) && orchestratorID == "" {
-		orchestratorID = "lead-" + uuid.NewString()
-		if err := createLeadOrchestratorSession(ctx, st, workspace, sessionName, agentName, orchestratorID); err != nil {
-			return nil, err
-		}
-		if _, err := st.Agents().Update(ctx, workspace, agentName, store.AgentUpdate{
-			OrchestratorSessionID: &orchestratorID,
-		}); err != nil {
-			return nil, service.ErrInternal("failed to link lead agent to terminal session", err)
-		}
-		agentForLaunch.OrchestratorSessionID = orchestratorID
-	}
-
 	launch, backend, err := buildAgentLaunchSpec(ctx, st, workspace, sessionName, &agentForLaunch, loomServerURL)
 	if err != nil {
 		return nil, err
 	}
 
+	meta := newAgentTerminalTabMetadata(workspace, sessionName, label, sortOrder, &agentForLaunch, backend, launch, existing)
+	if err := svc.PutTab(ctx, workspace, meta); err != nil {
+		return nil, err
+	}
+	pruneStaleAgentTerminalTabs(ctx, svc, workspace, agentName, sessionName, tabs)
+	return svc.GetTab(ctx, workspace, sessionName)
+}
+
+func loadTerminalAgent(ctx context.Context, st store.Store, workspace, agentName string) (*domain.Agent, error) {
+	agent, err := st.Agents().Get(ctx, workspace, agentName)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return nil, service.ErrNotFound("agent not found")
+		}
+		return nil, service.ErrInternal("failed to load agent", err)
+	}
+	if agent == nil {
+		return nil, service.ErrNotFound("agent not found")
+	}
+	return agent, nil
+}
+
+func inactiveAgentTerminalSession(ctx context.Context, svc service.TerminalService, workspace string, existing *tabmeta.TabMetadata) (*tabmeta.TabMetadata, error) {
+	if existing != nil {
+		return disableStoredAgentLaunch(ctx, svc, workspace, existing)
+	}
+	return nil, service.ErrValidation("agent is not running and has no terminal session")
+}
+
+func newAgentTerminalTabPlacement(tabs []tabmeta.TabMetadata, existing *tabmeta.TabMetadata, agentName string) (string, string, int) {
+	sessionName := "term_" + uuid.NewString()
+	label := "agent-" + agentName
+	sortOrder := len(tabs)
+	if existing != nil {
+		label = existing.Label
+		sortOrder = existing.SortOrder
+	}
+	return sessionName, label, sortOrder
+}
+
+func ensureLeadOrchestratorLink(ctx context.Context, st store.Store, workspace, sessionName string, agent *domain.Agent) (domain.Agent, error) {
+	agentForLaunch := *agent
+	if !isLeadRole(agentForLaunch.RoleName) || strings.TrimSpace(agentForLaunch.OrchestratorSessionID) != "" {
+		return agentForLaunch, nil
+	}
+
+	orchestratorID := "lead-" + uuid.NewString()
+	if err := createLeadOrchestratorSession(ctx, st, workspace, sessionName, agentForLaunch.Name, orchestratorID); err != nil {
+		return agentForLaunch, err
+	}
+	if _, err := st.Agents().Update(ctx, workspace, agentForLaunch.Name, store.AgentUpdate{
+		OrchestratorSessionID: &orchestratorID,
+	}); err != nil {
+		return agentForLaunch, service.ErrInternal("failed to link lead agent to terminal session", err)
+	}
+	agentForLaunch.OrchestratorSessionID = orchestratorID
+	return agentForLaunch, nil
+}
+
+func newAgentTerminalTabMetadata(workspace, sessionName, label string, sortOrder int, agent *domain.Agent, backend string, launch *tabmeta.LaunchSpec, existing *tabmeta.TabMetadata) *tabmeta.TabMetadata {
 	now := time.Now().UTC()
 	meta := &tabmeta.TabMetadata{
 		SessionName: sessionName,
 		Workspace:   workspace,
 		Label:       label,
-		Notes:       "",
 		SortOrder:   sortOrder,
 		Pinned:      existing != nil && existing.Pinned,
 		Kind:        terminalKindAgent,
-		AgentID:     agentName,
-		Role:        agentForLaunch.RoleName,
+		AgentID:     agent.Name,
+		Role:        agent.RoleName,
 		Backend:     backend,
 		Writable:    true,
 		Launch:      launch,
@@ -154,12 +185,7 @@ func ensureAgentTerminalSession(ctx context.Context, svc service.TerminalService
 		meta.Notes = existing.Notes
 		meta.IssueID = existing.IssueID
 	}
-
-	if err := svc.PutTab(ctx, workspace, meta); err != nil {
-		return nil, err
-	}
-	pruneStaleAgentTerminalTabs(ctx, svc, workspace, agentName, sessionName, tabs)
-	return svc.GetTab(ctx, workspace, sessionName)
+	return meta
 }
 
 func lockAgentTerminalSession(workspace, agentName string) func() {
@@ -228,21 +254,43 @@ func pruneStaleAgentTerminalTabs(ctx context.Context, svc service.TerminalServic
 
 func buildAgentLaunchSpec(ctx context.Context, st store.Store, workspace, sessionName string, agent *domain.Agent, loomServerURL string) (*tabmeta.LaunchSpec, string, error) {
 	roleName := strings.ToLower(strings.TrimSpace(agent.RoleName))
+	role, err := loadAgentLaunchRole(ctx, st, workspace, agent.RoleName)
+	if err != nil {
+		return nil, "", err
+	}
+	backend := agentLaunchBackend(agent, role)
+	commandArgs, err := agentLaunchCommandArgs(roleName, agent, role)
+	if err != nil {
+		return nil, "", err
+	}
+	args := append(agentLaunchBaseArgs(workspace, loomServerURL, backend), commandArgs...)
+
+	return &tabmeta.LaunchSpec{
+		Argv: webuterminal.ShellArgvForCommand(args),
+		Env:  agentLaunchEnv(workspace, sessionName, backend, agent),
+	}, backend, nil
+}
+
+func loadAgentLaunchRole(ctx context.Context, st store.Store, workspace, roleName string) (*domain.Role, error) {
+	role, err := st.Roles().Get(ctx, workspace, roleName)
+	if errors.Is(err, domain.ErrNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, service.ErrInternal("failed to load agent role", err)
+	}
+	return role, nil
+}
+
+func agentLaunchBackend(agent *domain.Agent, role *domain.Role) string {
 	backend := strings.TrimSpace(agent.Backend)
-	var role *domain.Role
-	if loaded, err := st.Roles().Get(ctx, workspace, agent.RoleName); err == nil {
-		role = loaded
-		if backend == "" && role != nil {
-			backend = strings.TrimSpace(role.Backend)
-		}
-	} else if !errors.Is(err, domain.ErrNotFound) {
-		return nil, "", service.ErrInternal("failed to load agent role", err)
+	if backend == "" && role != nil {
+		backend = strings.TrimSpace(role.Backend)
 	}
+	return backend
+}
 
-	if roleName != roleLead && roleName != roleOrchestrator && roleName != rolePlan && roleName != roleTask && role == nil {
-		return nil, "", service.ErrValidation(fmt.Sprintf("agent role %q has no launch spec", agent.RoleName))
-	}
-
+func agentLaunchBaseArgs(workspace, loomServerURL, backend string) []string {
 	args := []string{webuterminal.LoomExecutableForTerminal()}
 	if loomServerURL != "" {
 		args = append(args, "--server", loomServerURL)
@@ -253,27 +301,44 @@ func buildAgentLaunchSpec(ctx context.Context, st store.Store, workspace, sessio
 	if backend != "" {
 		args = append(args, "--backend", backend)
 	}
+	return args
+}
 
-	switch {
-	case roleName == roleLead || roleName == roleOrchestrator:
-		args = append(args, "lead")
-	case roleName == rolePlan || roleName == roleTask:
-		args = append(args, roleName, agent.Name, "--auto", "--daemon-mode")
-		if strings.TrimSpace(agent.Parent) != "" {
-			args = append(args, "--parent", agent.Parent)
-		}
-	case role != nil && strings.TrimSpace(role.PromptFile) != "":
-		args = append(args, "agent", agent.Name, "--prompt", role.PromptFile, "--auto", "--daemon-mode")
-		if strings.TrimSpace(role.TaskFilter) != "" {
-			args = append(args, "--task-filter", role.TaskFilter)
-		}
-		if strings.TrimSpace(agent.Parent) != "" {
-			args = append(args, "--parent", agent.Parent)
-		}
+func agentLaunchCommandArgs(roleName string, agent *domain.Agent, role *domain.Role) ([]string, error) {
+	switch roleName {
+	case roleLead, roleOrchestrator:
+		return []string{"lead"}, nil
+	case rolePlan, roleTask:
+		return builtInAgentLaunchArgs(roleName, agent), nil
 	default:
-		return nil, "", service.ErrValidation(fmt.Sprintf("agent role %q has no launch spec", agent.RoleName))
+		return customAgentLaunchArgs(agent, role)
 	}
+}
 
+func builtInAgentLaunchArgs(roleName string, agent *domain.Agent) []string {
+	args := []string{roleName, agent.Name, "--auto", "--daemon-mode"}
+	return appendParentArg(args, agent.Parent)
+}
+
+func customAgentLaunchArgs(agent *domain.Agent, role *domain.Role) ([]string, error) {
+	if role == nil || strings.TrimSpace(role.PromptFile) == "" {
+		return nil, service.ErrValidation(fmt.Sprintf("agent role %q has no launch spec", agent.RoleName))
+	}
+	args := []string{"agent", agent.Name, "--prompt", role.PromptFile, "--auto", "--daemon-mode"}
+	if strings.TrimSpace(role.TaskFilter) != "" {
+		args = append(args, "--task-filter", role.TaskFilter)
+	}
+	return appendParentArg(args, agent.Parent), nil
+}
+
+func appendParentArg(args []string, parent string) []string {
+	if strings.TrimSpace(parent) != "" {
+		args = append(args, "--parent", parent)
+	}
+	return args
+}
+
+func agentLaunchEnv(workspace, sessionName, backend string, agent *domain.Agent) map[string]string {
 	env := map[string]string{
 		"LOOM_AGENT_NAME":        agent.Name,
 		"LOOM_AGENT_ROLE":        agent.RoleName,
@@ -283,14 +348,10 @@ func buildAgentLaunchSpec(ctx context.Context, st store.Store, workspace, sessio
 	if backend != "" {
 		env["LOOM_BACKEND"] = backend
 	}
-	if strings.TrimSpace(agent.OrchestratorSessionID) != "" {
-		env["LOOM_ORCHESTRATOR_SESSION_ID"] = strings.TrimSpace(agent.OrchestratorSessionID)
+	if orchestratorID := strings.TrimSpace(agent.OrchestratorSessionID); orchestratorID != "" {
+		env["LOOM_ORCHESTRATOR_SESSION_ID"] = orchestratorID
 	}
-
-	return &tabmeta.LaunchSpec{
-		Argv: webuterminal.ShellArgvForCommand(args),
-		Env:  env,
-	}, backend, nil
+	return env
 }
 
 func createLeadOrchestratorSession(ctx context.Context, st store.Store, workspace, terminalID, agentName, sessionID string) error {

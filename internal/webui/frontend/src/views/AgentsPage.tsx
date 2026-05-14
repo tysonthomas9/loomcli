@@ -57,8 +57,7 @@ function AgentsPageInner(): JSX.Element {
 
   // Auto-select first agent when URL is bare /agents.
   const firstAgentName = useMemo(
-    () =>
-      orderAgentsForEpicRunner(agents).find(isLiveAgentRailVisible)?.name,
+    () => orderAgentsForEpicRunner(agents).find(isLiveAgentRailVisible)?.name,
     [agents],
   );
   useEffect(() => {

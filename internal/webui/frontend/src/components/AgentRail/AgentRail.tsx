@@ -96,7 +96,8 @@ export function AgentRail({
           >
             No agents in this workspace.
             <div style={{ marginTop: 8, fontSize: 11 }}>
-              Run <code>loom agentdef add</code> from a Terminal to register one.
+              Run <code>loom agentdef add</code> from a Terminal to register
+              one.
             </div>
           </div>
         ) : (
@@ -134,17 +135,19 @@ interface AgentRowProps {
 }
 
 function AgentRow({ agent, selected, onClick }: AgentRowProps): JSX.Element {
-  const parsed = useMemo(() => parseLoomStatus(agent.status ?? ""), [agent.status]);
+  const parsed = useMemo(
+    () => parseLoomStatus(agent.status ?? ""),
+    [agent.status],
+  );
   const dotColor =
     STATUS_DOT_COLOR[parsed.type] ?? "var(--color-status-idle, #888)";
   const initial = (agent.name?.[0] ?? "?").toUpperCase();
   const avatarBg = getAvatarColor(agent.name ?? "");
   const avatarFg = shouldUseWhiteText(avatarBg) ? "#fff" : "#1a1a1a";
 
-  const subtitle =
-    parsed.taskId
-      ? `${parsed.type} · ${parsed.taskId}`
-      : parsed.type;
+  const subtitle = parsed.taskId
+    ? `${parsed.type} · ${parsed.taskId}`
+    : parsed.type;
 
   return (
     <button
@@ -172,7 +175,8 @@ function AgentRow({ agent, selected, onClick }: AgentRowProps): JSX.Element {
       }}
       onMouseEnter={(e) => {
         if (!selected)
-          e.currentTarget.style.background = "var(--color-hover-bg, rgba(0,0,0,0.04))";
+          e.currentTarget.style.background =
+            "var(--color-hover-bg, rgba(0,0,0,0.04))";
       }}
       onMouseLeave={(e) => {
         if (!selected) e.currentTarget.style.background = "transparent";

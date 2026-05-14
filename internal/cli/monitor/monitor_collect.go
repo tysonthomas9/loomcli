@@ -177,9 +177,13 @@ func buildAgentStatus(deps *cli.Deps, wt cli.WorktreeInfo, daemonManaged map[str
 // the file changes derived from the same git status invocation, with idle=true,
 // so the caller can avoid a redundant git subprocess.
 func resolveAgentStatus(deps *cli.Deps, wt cli.WorktreeInfo, agentTasks map[string]TaskInfo) (status string, changes []FileChange, idle bool) {
+	lockInfo, running, _ := cli.CheckLock(wt.Path)
 	lockStatus := cli.GetLockStatus(wt.Path)
 	if lockStatus != "" {
-		return refineLockStatus(deps, lockStatus, wt.Name, agentTasks), nil, false
+		if !running {
+			lockInfo = nil
+		}
+		return refineLockStatus(deps, lockStatus, lockInfo, wt.Name, agentTasks), nil, false
 	}
 	if task, ok := agentTasks[wt.Name]; ok && task.Status == "in_progress" {
 		return fmt.Sprintf("error: %s", task.ID), nil, false
@@ -189,19 +193,26 @@ func resolveAgentStatus(deps *cli.Deps, wt cli.WorktreeInfo, agentTasks map[stri
 }
 
 // refineLockStatus enriches a lock status with task details when needed.
-func refineLockStatus(deps *cli.Deps, lockStatus, agentName string, agentTasks map[string]TaskInfo) string {
-	if !strings.Contains(lockStatus, "...") {
-		return lockStatus
-	}
+func refineLockStatus(deps *cli.Deps, lockStatus string, lockInfo *cli.LockInfo, agentName string, agentTasks map[string]TaskInfo) string {
 	task, ok := agentTasks[agentName]
 	if !ok {
 		return lockStatus
 	}
-	taskStatus := cli.GetTaskStatusDeps(deps, task.ID)
 	durationPart := ""
 	if idx := strings.Index(lockStatus, " ("); idx != -1 {
 		durationPart = lockStatus[idx:]
 	}
+	if strings.Contains(lockStatus, "...") {
+		return refineLockTaskStatus(deps, lockStatus, task, durationPart)
+	}
+	if lockInfo == nil || lockInfo.TaskID != "" || lockInfo.State == cli.StateIdle || !strings.HasPrefix(lockStatus, "idle (") {
+		return lockStatus
+	}
+	return refineLockTaskStatus(deps, lockStatusForCommand(lockInfo.Command), task, durationPart)
+}
+
+func refineLockTaskStatus(deps *cli.Deps, lockStatus string, task TaskInfo, durationPart string) string {
+	taskStatus := cli.GetTaskStatusDeps(deps, task.ID)
 	switch taskStatus {
 	case "needs_review":
 		if strings.HasPrefix(lockStatus, "planning:") {
@@ -213,6 +224,13 @@ func refineLockStatus(deps *cli.Deps, lockStatus, agentName string, agentTasks m
 	default:
 		return strings.Replace(lockStatus, "...", task.ID, 1)
 	}
+}
+
+func lockStatusForCommand(command string) string {
+	if command == "plan" {
+		return "planning: ..."
+	}
+	return "working: ..."
 }
 
 // resolveIdleStatus determines the status for an agent with no lock and no in-progress task.

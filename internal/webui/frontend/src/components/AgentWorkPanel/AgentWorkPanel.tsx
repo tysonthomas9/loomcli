@@ -468,7 +468,8 @@ export function buildWorkerHistoryByEpic(
     const taskId =
       agent.task_id || parseLoomStatus(agent.status ?? "").taskId || "";
     if (!taskId) continue;
-    const epicId = agent.parent || issuesMap.get(taskId)?.parent || ORPHAN_EPIC_KEY;
+    const epicId =
+      agent.parent || issuesMap.get(taskId)?.parent || ORPHAN_EPIC_KEY;
     const openable = isWorkerTerminalOpenable(agent);
     const status = workerHistoryStatus(agent, openable);
     const list = byEpic.get(epicId) ?? [];
@@ -493,7 +494,9 @@ function workerHistoryStatus(
   openable: boolean,
 ): WorkerHistoryItem["status"] {
   const parsed = parseLoomStatus(agent.status ?? "");
-  const state = String(agent.state ?? "").trim().toLowerCase();
+  const state = String(agent.state ?? "")
+    .trim()
+    .toLowerCase();
   if (parsed.type === "error" || state === "dead") return "failed";
   if (openable) return "running";
   return "completed";
@@ -511,8 +514,12 @@ function workerHistoryRank(item: WorkerHistoryItem): number {
 }
 
 export function isWorkerTerminalOpenable(agent: LoomAgentStatus): boolean {
-  const state = String(agent.state ?? "").trim().toLowerCase();
-  const desiredState = String(agent.desired_state ?? "").trim().toLowerCase();
+  const state = String(agent.state ?? "")
+    .trim()
+    .toLowerCase();
+  const desiredState = String(agent.desired_state ?? "")
+    .trim()
+    .toLowerCase();
   return state !== "stopped" && state !== "dead" && desiredState !== "stopped";
 }
 

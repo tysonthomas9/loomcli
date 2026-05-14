@@ -94,7 +94,7 @@ func TestEnsureGitWorktreeFromBranchFallsBackToLocalDefaultBranch(t *testing.T) 
 
 func git(t *testing.T, dir string, args ...string) {
 	t.Helper()
-	cmd := exec.Command("git", args...) //nolint:gosec,norawexec // fixed test helper commands.
+	cmd := exec.Command("git", args...) //nolint:norawexec,gosec // fixed test helper commands.
 	if dir != "" {
 		cmd.Dir = dir
 	}

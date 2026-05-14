@@ -3694,7 +3694,9 @@ describe("App", () => {
       render(<App />);
 
       expect(screen.getByTestId("agent-icon-rail")).toBeInTheDocument();
-      expect(screen.queryByLabelText(/workspace tree/i)).not.toBeInTheDocument();
+      expect(
+        screen.queryByLabelText(/workspace tree/i),
+      ).not.toBeInTheDocument();
     });
 
     it("renders WorkspaceTree sidebar during loading when isMultiRepo is false", () => {

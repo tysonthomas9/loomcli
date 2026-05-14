@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"github.com/creack/pty"
+
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 )
 
