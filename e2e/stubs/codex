@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env bash
 # Stub for the Codex CLI used in E2E tests.
 # Mimics both interactive and non-interactive invocation patterns.
 #
@@ -8,7 +8,7 @@
 #   STUB_CODEX_DELAY      - seconds to sleep before responding (default: 0)
 #   STUB_CODEX_EPIC_RUNNER - when 1, perform the deterministic epic-runner task flow
 
-set -e
+set -euo pipefail
 
 EXIT_CODE="${STUB_CODEX_EXIT_CODE:-0}"
 RESPONSE="${STUB_CODEX_RESPONSE:-I completed the requested task successfully.}"

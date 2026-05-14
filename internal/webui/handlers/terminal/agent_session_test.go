@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -26,6 +27,20 @@ func newAgentSessionTestDeps(t *testing.T) (*memstore.Store, *tabmeta.Store, *re
 	return memstore.New(), tabmeta.NewStore(rdb, nil), rdb
 }
 
+type slowListTerminalService struct {
+	service.TerminalService
+	delay time.Duration
+}
+
+func (s slowListTerminalService) ListTabs(ctx context.Context, wsID string) ([]tabmeta.TabMetadata, error) {
+	tabs, err := s.TerminalService.ListTabs(ctx, wsID)
+	if err != nil {
+		return nil, err
+	}
+	time.Sleep(s.delay)
+	return tabs, nil
+}
+
 func TestEnsureAgentTerminalSessionCreatesLeadLaunchSpec(t *testing.T) {
 	ctx := context.Background()
 	st, tabStore, rdb := newAgentSessionTestDeps(t)
@@ -35,7 +50,7 @@ func TestEnsureAgentTerminalSessionCreatesLeadLaunchSpec(t *testing.T) {
 		nil,
 		rdb,
 		nil,
-		time.Now(),
+		time.Now().Add(-time.Second),
 	)
 
 	if _, err := st.Roles().Create(ctx, store.RoleCreate{
@@ -98,6 +113,99 @@ func TestEnsureAgentTerminalSessionCreatesLeadLaunchSpec(t *testing.T) {
 	}
 	if session.Kind != domain.AgentSessionKindOrchestration || session.TerminalID != meta.SessionName {
 		t.Fatalf("agent session = kind:%q terminal:%q", session.Kind, session.TerminalID)
+	}
+}
+
+func TestEnsureAgentTerminalSessionSerializesConcurrentCreates(t *testing.T) {
+	ctx := context.Background()
+	st, tabStore, rdb := newAgentSessionTestDeps(t)
+	baseSvc := webuiterminal.NewTerminalService(
+		nil,
+		tabStore,
+		nil,
+		rdb,
+		nil,
+		time.Now().Add(-time.Second),
+	)
+	svc := slowListTerminalService{TerminalService: baseSvc, delay: 25 * time.Millisecond}
+
+	if _, err := st.Roles().Create(ctx, store.RoleCreate{
+		WorkspaceKey: "E2E",
+		Name:         "lead",
+		Backend:      "codex",
+	}); err != nil {
+		t.Fatalf("create role: %v", err)
+	}
+	if _, err := st.Agents().Create(ctx, store.AgentCreate{
+		WorkspaceKey: "E2E",
+		Name:         "nova",
+		RoleName:     "lead",
+		Parent:       "E2E-8",
+	}); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	const workers = 24
+	start := make(chan struct{})
+	metas := make(chan *tabmeta.TabMetadata, workers)
+	errs := make(chan error, workers)
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			meta, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "nova", "http://loom.test")
+			if err != nil {
+				errs <- err
+				return
+			}
+			metas <- meta
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	close(metas)
+
+	for err := range errs {
+		t.Errorf("ensureAgentTerminalSession: %v", err)
+	}
+
+	seenSessions := map[string]bool{}
+	for meta := range metas {
+		seenSessions[meta.SessionName] = true
+	}
+	if len(seenSessions) != 1 {
+		t.Fatalf("concurrent ensure returned %d sessions: %#v", len(seenSessions), seenSessions)
+	}
+
+	tabs, err := baseSvc.ListTabs(ctx, "E2E")
+	if err != nil {
+		t.Fatalf("list tabs: %v", err)
+	}
+	var agentTabs int
+	for _, tab := range tabs {
+		if tab.Kind == "agent" && tab.AgentID == "nova" {
+			agentTabs++
+		}
+	}
+	if agentTabs != 1 {
+		t.Fatalf("agent tab count = %d, want 1", agentTabs)
+	}
+
+	sessions, err := st.AgentSessions().List(ctx, "E2E", store.AgentSessionFilter{AgentID: "nova"})
+	if err != nil {
+		t.Fatalf("list agent sessions: %v", err)
+	}
+	var orchestrationSessions int
+	for _, session := range sessions {
+		if session.Kind == domain.AgentSessionKindOrchestration {
+			orchestrationSessions++
+		}
+	}
+	if orchestrationSessions != 1 {
+		t.Fatalf("orchestration session count = %d, want 1", orchestrationSessions)
 	}
 }
 

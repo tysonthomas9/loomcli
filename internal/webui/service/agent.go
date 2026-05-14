@@ -16,7 +16,7 @@ type AgentService interface {
 	GetTerminalInfo(ctx context.Context, wsID, agentName string) (*AgentTerminalInfoResult, error)
 
 	// GenerateTerminalToken generates a one-time token scoped to an agent logs stream.
-	GenerateTerminalToken(ctx context.Context, agentName, userID string) (string, error)
+	GenerateTerminalToken(ctx context.Context, wsID, agentName, userID string) (string, error)
 
 	// GetLog returns log file content for an agent.
 	GetLog(ctx context.Context, wsID, agentName string, lines int, beforeLine int64) (*AgentLogResult, error)

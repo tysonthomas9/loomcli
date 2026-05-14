@@ -199,7 +199,7 @@ func validateTerminalWSRequest(w http.ResponseWriter, r *http.Request, manager w
 		return "", "", false
 	}
 
-	if !authenticateTerminalSession(w, r, auth, session) {
+	if !authenticateTerminalSession(w, r, auth, session, workspace) {
 		return "", "", false
 	}
 
@@ -218,21 +218,21 @@ func validateTerminalWSRequest(w http.ResponseWriter, r *http.Request, manager w
 }
 
 // authenticateTerminalSession validates the one-time terminal token if auth is configured.
-func authenticateTerminalSession(w http.ResponseWriter, r *http.Request, auth *realtime.TerminalAuth, session string) bool {
+func authenticateTerminalSession(w http.ResponseWriter, r *http.Request, auth *realtime.TerminalAuth, session, workspace string) bool {
 	if auth == nil {
 		return true
 	}
 	token := r.URL.Query().Get("token")
-	userID, err := auth.ValidateToken(token, session)
+	userID, err := auth.ValidateToken(token, session, workspace)
 	if err != nil {
 		handler.WriteJSON(w, http.StatusUnauthorized, map[string]interface{}{
 			"success": false, "error": "terminal authentication failed",
 		})
-		slog.Warn("terminal auth failed", "session", session, "err", err)
+		slog.Warn("terminal auth failed", "session", session, "workspace", workspace, "err", err)
 		return false
 	}
 	if userID != "" {
-		slog.Info("terminal session authenticated", "session", session, "user_id", userID)
+		slog.Info("terminal session authenticated", "session", session, "workspace", workspace, "user_id", userID)
 	}
 	return true
 }

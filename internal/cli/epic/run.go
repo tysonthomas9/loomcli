@@ -34,6 +34,11 @@ import (
 const (
 	envAgentName             = "LOOM_AGENT_NAME"
 	envOrchestratorSessionID = "LOOM_ORCHESTRATOR_SESSION_ID"
+
+	leadBindLockTimeout      = 30 * time.Second
+	leadBindLockPollInterval = 100 * time.Millisecond
+
+	stalledWorkerFatalConsecutiveTicks = 2
 )
 
 var (
@@ -160,6 +165,7 @@ func runEpicRun(cmd *cobra.Command, _ []string) error {
 		orchestratorSessionID: orchestratorID,
 		targetNodeID:          nodeID,
 		dryRun:                runDryRun,
+		stalledTaskTicks:      make(map[string]int),
 	}
 	r.printHeader()
 	return r.reconcileLoop(ctx)
@@ -180,6 +186,7 @@ type runner struct {
 	orchestratorSessionID string
 	targetNodeID          string
 	dryRun                bool
+	stalledTaskTicks      map[string]int
 }
 
 func (r *runner) printHeader() {
@@ -291,6 +298,10 @@ func bindLeadAgent(ctx context.Context, st store.Store, workspace, leadName, par
 }
 
 func acquireLeadBindLock(workspace, leadName string) (func(), error) {
+	return acquireLeadBindLockWithTimeout(workspace, leadName, leadBindLockTimeout, leadBindLockPollInterval)
+}
+
+func acquireLeadBindLockWithTimeout(workspace, leadName string, timeout, pollInterval time.Duration) (func(), error) {
 	dir := bootstrap.LoomDir()
 	if dir == "" {
 		return func() {}, errors.New("cannot resolve loom data directory for lead assignment lock")
@@ -299,7 +310,7 @@ func acquireLeadBindLock(workspace, leadName string) (func(), error) {
 	if err := os.MkdirAll(lockDir, 0755); err != nil {
 		return func() {}, fmt.Errorf("create lead assignment lock directory: %w", err)
 	}
-	lockName := sanitizePrefix(workspace + "-" + leadName)
+	lockName := sanitizePrefix(workspace)
 	if lockName == "" {
 		lockName = "lead"
 	}
@@ -308,9 +319,29 @@ func acquireLeadBindLock(workspace, leadName string) (func(), error) {
 	if err != nil {
 		return func() {}, fmt.Errorf("open lead assignment lock %s: %w", lockPath, err)
 	}
-	if err := lockfile.FlockExclusiveBlocking(f); err != nil {
-		_ = f.Close()
-		return func() {}, fmt.Errorf("acquire lead assignment lock %s: %w", lockPath, err)
+
+	if pollInterval <= 0 {
+		pollInterval = leadBindLockPollInterval
+	}
+	deadline := time.Now().Add(timeout)
+	for {
+		if err := lockfile.TryLockExclusive(f); err != nil {
+			if !errors.Is(err, lockfile.ErrLocked) {
+				_ = f.Close()
+				return func() {}, fmt.Errorf("acquire lead assignment lock %s: %w", lockPath, err)
+			}
+			if timeout <= 0 || !time.Now().Before(deadline) {
+				_ = f.Close()
+				return func() {}, fmt.Errorf("timed out acquiring lead assignment lock %s for lead %q after %s", lockPath, leadName, timeout)
+			}
+			sleepFor := pollInterval
+			if remaining := time.Until(deadline); remaining < sleepFor {
+				sleepFor = remaining
+			}
+			time.Sleep(sleepFor)
+			continue
+		}
+		break
 	}
 	return func() {
 		_ = lockfile.FlockUnlock(f)
@@ -572,6 +603,10 @@ func liveAgentSessionStatus(status domain.AgentSessionStatus) bool {
 
 func (r *runner) stalledTasks(ctx context.Context, openChildren []backend.IssueData) []string {
 	var stalled []string
+	if r.stalledTaskTicks == nil {
+		r.stalledTaskTicks = make(map[string]int)
+	}
+	observed := make(map[string]struct{})
 	for _, task := range openChildren {
 		if task.Status != "in_progress" {
 			continue
@@ -584,7 +619,16 @@ func (r *runner) stalledTasks(ctx context.Context, openChildren []backend.IssueD
 		if err != nil || active {
 			continue
 		}
-		stalled = append(stalled, fmt.Sprintf("%s (%s) assigned to stopped worker %s", task.ID, task.Title, name))
+		observed[task.ID] = struct{}{}
+		r.stalledTaskTicks[task.ID]++
+		if r.stalledTaskTicks[task.ID] >= stalledWorkerFatalConsecutiveTicks {
+			stalled = append(stalled, fmt.Sprintf("%s (%s) assigned to stopped worker %s", task.ID, task.Title, name))
+		}
+	}
+	for taskID := range r.stalledTaskTicks {
+		if _, ok := observed[taskID]; !ok {
+			delete(r.stalledTaskTicks, taskID)
+		}
 	}
 	return stalled
 }

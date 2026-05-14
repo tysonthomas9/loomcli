@@ -33,7 +33,7 @@ func newFakeSetupPTYSource(created bool) *fakeSetupPTYSource {
 	return &fakeSetupPTYSource{alive: map[SessionKey]bool{}, created: created}
 }
 
-func (f *fakeSetupPTYSource) AttachSession(_ SessionKey, _, _ uint16, _ []string) (Attachment, bool, error) {
+func (f *fakeSetupPTYSource) AttachSession(_ SessionKey, _, _ uint16, _ *LaunchSpec) (Attachment, bool, error) {
 	panic("AttachSession not used in setup service tests")
 }
 func (f *fakeSetupPTYSource) Detach(_ SessionKey, _ string) {}
@@ -41,7 +41,8 @@ func (f *fakeSetupPTYSource) Kill(key SessionKey) error {
 	delete(f.alive, key)
 	return nil
 }
-func (f *fakeSetupPTYSource) HasSession(key SessionKey) bool { return f.alive[key] }
+func (f *fakeSetupPTYSource) HasSession(key SessionKey) bool  { return f.alive[key] }
+func (f *fakeSetupPTYSource) SessionClosed(_ SessionKey) bool { return false }
 func (f *fakeSetupPTYSource) AttachmentCount(key SessionKey) int {
 	if f.alive[key] {
 		return 1

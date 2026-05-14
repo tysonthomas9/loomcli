@@ -20,6 +20,7 @@ import {
   useEffect,
   useMemo,
   useState,
+  type CSSProperties,
 } from "react";
 import { useStore } from "zustand";
 
@@ -156,6 +157,41 @@ function CompletedWorkerSummary({
 }): JSX.Element {
   const taskId =
     agent.task_id || parseLoomStatus(agent.status ?? "").taskId || "unknown";
+  const workspace = agent.workspace || "";
+  const sessionId = agent.session_id || "";
+  const hasTaskSession = taskId !== "unknown" && sessionId !== "";
+  const logsHref =
+    workspace !== ""
+      ? `/api/workspaces/${encodeURIComponent(workspace)}/agents/${encodeURIComponent(agent.name)}/logs`
+      : "";
+  const transcriptHref =
+    workspace !== "" && hasTaskSession
+      ? `/api/workspaces/${encodeURIComponent(workspace)}/tasks/${encodeURIComponent(taskId)}/sessions/${encodeURIComponent(sessionId)}/transcript`
+      : "";
+  const diffHref =
+    workspace !== "" && hasTaskSession
+      ? `/api/workspaces/${encodeURIComponent(workspace)}/tasks/${encodeURIComponent(taskId)}/sessions/${encodeURIComponent(sessionId)}/diff`
+      : "";
+  const openHref = (href: string) => {
+    if (!href) return;
+    window.open(href, "_blank", "noopener,noreferrer");
+  };
+  const actionButtonStyle: CSSProperties = {
+    minHeight: 30,
+    padding: "0 10px",
+    border: "1px solid var(--color-border, #ddd)",
+    borderRadius: 4,
+    background: "var(--color-bg, #fdfcf8)",
+    color: "var(--color-text-primary, #333)",
+    fontSize: 12,
+    fontWeight: 600,
+    cursor: "pointer",
+  };
+  const disabledActionButtonStyle: CSSProperties = {
+    ...actionButtonStyle,
+    opacity: 0.55,
+    cursor: "not-allowed",
+  };
   return (
     <div
       style={{
@@ -219,6 +255,74 @@ function CompletedWorkerSummary({
         >
           This worker is retained as task attempt history. Live terminal attach
           is disabled after the ephemeral run stops.
+        </div>
+        <div
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            gap: 8,
+            paddingTop: 2,
+          }}
+        >
+          <button
+            type="button"
+            style={logsHref ? actionButtonStyle : disabledActionButtonStyle}
+            disabled={!logsHref}
+            title={logsHref ? "Open worker logs" : "Workspace is not recorded"}
+            onClick={() => openHref(logsHref)}
+          >
+            Open logs
+          </button>
+          <button
+            type="button"
+            style={
+              transcriptHref ? actionButtonStyle : disabledActionButtonStyle
+            }
+            disabled={!transcriptHref}
+            title={
+              transcriptHref
+                ? "Open session transcript"
+                : "Task session is not recorded"
+            }
+            onClick={() => openHref(transcriptHref)}
+          >
+            Open transcript
+          </button>
+          <button
+            type="button"
+            style={diffHref ? actionButtonStyle : disabledActionButtonStyle}
+            disabled={!diffHref}
+            title={
+              diffHref ? "Open session diff" : "Task session is not recorded"
+            }
+            onClick={() => openHref(diffHref)}
+          >
+            Open diff
+          </button>
+          <button
+            type="button"
+            style={disabledActionButtonStyle}
+            disabled
+            title="Worktree cleanup is unavailable until retention metadata is published"
+          >
+            Delete worktree
+          </button>
+          <button
+            type="button"
+            style={disabledActionButtonStyle}
+            disabled
+            title="Artifact archive is unavailable until artifact storage is published"
+          >
+            Archive artifacts
+          </button>
+          <button
+            type="button"
+            style={disabledActionButtonStyle}
+            disabled
+            title="Rerun creates a new attempt once retry controls are available"
+          >
+            Rerun task
+          </button>
         </div>
       </div>
     </div>

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -27,6 +28,8 @@ const (
 	rolePlan          = "plan"
 	roleTask          = "task"
 )
+
+var agentTerminalSessionLocks sync.Map
 
 // HandleEnsureAgentTerminalSession resolves an agent name to a persisted UUID
 // terminal session. The session's launch command lives in tab metadata; the
@@ -72,6 +75,9 @@ func HandleEnsureAgentTerminalSession(svc service.TerminalService, st store.Stor
 }
 
 func ensureAgentTerminalSession(ctx context.Context, svc service.TerminalService, st store.Store, workspace, agentName, loomServerURL string) (*tabmeta.TabMetadata, error) {
+	unlock := lockAgentTerminalSession(workspace, agentName)
+	defer unlock()
+
 	agent, err := st.Agents().Get(ctx, workspace, agentName)
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
@@ -154,6 +160,14 @@ func ensureAgentTerminalSession(ctx context.Context, svc service.TerminalService
 	}
 	pruneStaleAgentTerminalTabs(ctx, svc, workspace, agentName, sessionName, tabs)
 	return svc.GetTab(ctx, workspace, sessionName)
+}
+
+func lockAgentTerminalSession(workspace, agentName string) func() {
+	key := workspace + "\x00" + agentName
+	actual, _ := agentTerminalSessionLocks.LoadOrStore(key, &sync.Mutex{})
+	mu := actual.(*sync.Mutex)
+	mu.Lock()
+	return mu.Unlock
 }
 
 func agentTerminalLaunchAllowed(agent *domain.Agent) bool {

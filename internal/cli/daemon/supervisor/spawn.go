@@ -92,7 +92,11 @@ func buildAgentExecCmd(ap *AgentProcess, backend, epicID string) (*exec.Cmd, err
 		return exec.Command(loomPath, args...), nil //nolint:gosec // G204: intentional loom subprocess launch
 	}
 
-	args := []string{"agent", ap.WorktreePath, "--prompt", ap.RoleConfig.PromptFile, "--auto", "--daemon-mode"}
+	promptFile := strings.TrimSpace(ap.RoleConfig.PromptFile)
+	if promptFile == "" {
+		return nil, fmt.Errorf("custom role %q missing prompt_file", ap.Entry.Role)
+	}
+	args := []string{"agent", ap.WorktreePath, "--prompt", promptFile, "--auto", "--daemon-mode"}
 	if ap.RoleConfig.TaskFilter != "" {
 		args = append(args, "--task-filter", ap.RoleConfig.TaskFilter)
 	}

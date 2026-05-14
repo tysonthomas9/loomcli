@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"testing"
@@ -1837,6 +1838,32 @@ func TestBuildCommand_BuiltInRoleWithBackendAndEpic(t *testing.T) {
 		case "agent", "--prompt":
 			t.Errorf("unexpected arg %q in built-in role command", arg)
 		}
+	}
+}
+
+func TestBuildCommand_CustomRoleMissingPromptFileFails(t *testing.T) {
+	tmpDir := t.TempDir()
+	s := &Supervisor{
+		ConfigSnapshot: func() *cfgpkg.DaemonConfig { return &cfgpkg.DaemonConfig{Daemon: cfgpkg.DaemonSettings{}} },
+		ProjectDir:     tmpDir,
+		Shutdown:       make(chan struct{}),
+		StoppedAgents:  make(map[string]struct{}),
+		Agents:         make([]*AgentProcess, 0),
+		EmitEvent:      func(events.Event) {},
+	}
+
+	ap := &AgentProcess{
+		Entry:        cfgpkg.AgentEntry{Worktree: "hawk", Role: "coder"},
+		RoleConfig:   cfgpkg.RoleConfig{},
+		WorktreePath: tmpDir,
+	}
+
+	_, err := s.buildCommand(ap)
+	if err == nil {
+		t.Fatal("buildCommand error = nil, want missing prompt_file error")
+	}
+	if !strings.Contains(err.Error(), "missing prompt_file") {
+		t.Fatalf("error = %v, want missing prompt_file message", err)
 	}
 }
 

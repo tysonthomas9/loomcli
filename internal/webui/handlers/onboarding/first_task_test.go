@@ -291,7 +291,7 @@ type stubAgentService struct {
 func (s *stubAgentService) GetTerminalInfo(context.Context, string, string) (*service.AgentTerminalInfoResult, error) {
 	return nil, service.ErrNotImplemented("not implemented")
 }
-func (s *stubAgentService) GenerateTerminalToken(context.Context, string, string) (string, error) {
+func (s *stubAgentService) GenerateTerminalToken(context.Context, string, string, string) (string, error) {
 	return "", service.ErrNotImplemented("not implemented")
 }
 func (s *stubAgentService) GetLog(context.Context, string, string, int, int64) (*service.AgentLogResult, error) {

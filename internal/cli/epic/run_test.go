@@ -204,7 +204,7 @@ func TestSelectTargetNodeIDRequiresSingleActiveNode(t *testing.T) {
 	}
 }
 
-func TestReconcileOnceFailsWhenSpawnedWorkerStoppedWithInProgressTask(t *testing.T) {
+func TestReconcileOnceDefersStalledWorkerFatalOnFirstObservation(t *testing.T) {
 	ctx := context.Background()
 	st := newTestStore(t)
 	taskID := "EPIC-2"
@@ -232,8 +232,8 @@ func TestReconcileOnceFailsWhenSpawnedWorkerStoppedWithInProgressTask(t *testing
 	if done {
 		t.Fatal("reconcileOnce done = true, want false")
 	}
-	if !errors.Is(err, errStalledWorker) {
-		t.Fatalf("reconcileOnce error = %v, want errStalledWorker", err)
+	if err != nil {
+		t.Fatalf("reconcileOnce error = %v, want nil during first stopped-worker observation", err)
 	}
 }
 
@@ -261,9 +261,30 @@ func TestReconcileOnceDetectsStoppedDeterministicWorkerAfterRestart(t *testing.T
 		maxConcurrency: 1,
 	}
 
+	if _, err := r.reconcileOnce(ctx); err != nil {
+		t.Fatalf("first reconcileOnce error = %v, want grace pass before fatal stall", err)
+	}
 	_, err := r.reconcileOnce(ctx)
 	if !errors.Is(err, errStalledWorker) {
 		t.Fatalf("reconcileOnce error = %v, want errStalledWorker", err)
+	}
+}
+
+func TestAcquireLeadBindLockTimesOutWhenHeld(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+
+	unlock, err := acquireLeadBindLockWithTimeout("ws", "nova", time.Second, time.Millisecond)
+	if err != nil {
+		t.Fatalf("initial acquireLeadBindLockWithTimeout() error = %v", err)
+	}
+	defer unlock()
+
+	_, err = acquireLeadBindLockWithTimeout("ws", "nova", 10*time.Millisecond, time.Millisecond)
+	if err == nil {
+		t.Fatal("second acquireLeadBindLockWithTimeout() error = nil, want timeout")
+	}
+	if !strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("error = %v, want timeout message", err)
 	}
 }
 
