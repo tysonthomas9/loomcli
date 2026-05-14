@@ -153,6 +153,30 @@ describe("CreateIssueModal", () => {
       expect(screen.getByTestId("create-issue-type")).toHaveValue("task");
       expect(screen.getByTestId("create-issue-priority")).toHaveValue("2");
     });
+
+    it("prefills provided issue values", () => {
+      render(
+        <CreateIssueModal
+          isOpen={true}
+          onClose={onClose}
+          onSuccess={onSuccess}
+          initialValues={{
+            title: "Explore Hello-World onboarding",
+            description: "Inspect the sample repo and write a plan.",
+            issueType: "task",
+            priority: 2,
+          }}
+        />,
+      );
+
+      expect(screen.getByTestId("create-issue-title")).toHaveValue(
+        "Explore Hello-World onboarding",
+      );
+      expect(screen.getByTestId("create-issue-description")).toHaveValue(
+        "Inspect the sample repo and write a plan.",
+      );
+      expect(screen.getByTestId("create-issue-submit")).toBeEnabled();
+    });
   });
 
   describe("submit button state", () => {

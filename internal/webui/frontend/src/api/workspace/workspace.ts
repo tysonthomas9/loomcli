@@ -34,6 +34,8 @@ export interface WorkspaceAgentInfo {
   repos: string[];
   repo_groups: string[];
   cross_repo: boolean;
+  role_name?: string;
+  backend?: string;
 }
 
 export interface CreateAgentRequest {
@@ -44,6 +46,23 @@ export interface CreateAgentRequest {
   repos?: string[];
   repo_groups?: string[];
   cross_repo?: boolean;
+}
+
+export interface RunOnboardingFirstTaskRequest {
+  agent_name: string;
+  title: string;
+  description?: string;
+  issue_type?: "task" | "bug" | "feature" | "epic" | "chore";
+  priority?: number;
+  source_repo?: string;
+}
+
+export interface RunOnboardingFirstTaskResponse {
+  success: boolean;
+  issue: Issue;
+  agent_name: string;
+  started: boolean;
+  queued?: boolean;
 }
 
 export type WorkspaceLifecycleState =
@@ -292,6 +311,17 @@ export async function createWorkspaceAgent(
 ): Promise<WorkspaceAgentInfo> {
   return post<WorkspaceAgentInfo>(
     `/api/workspaces/${encodeURIComponent(workspaceId)}/agents`,
+    req,
+    { timeout: 120_000 },
+  );
+}
+
+export async function runOnboardingFirstTask(
+  workspaceId: string,
+  req: RunOnboardingFirstTaskRequest,
+): Promise<RunOnboardingFirstTaskResponse> {
+  return post<RunOnboardingFirstTaskResponse>(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/onboarding/first-task`,
     req,
     { timeout: 120_000 },
   );

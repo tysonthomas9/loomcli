@@ -5,12 +5,14 @@ export interface TalkToLeadButtonProps {
   onClick?: () => void;
   isActive?: boolean;
   sessionCount?: number;
+  avoidSidePanel?: boolean;
 }
 
 export function TalkToLeadButton({
   onClick,
   isActive,
   sessionCount,
+  avoidSidePanel,
 }: TalkToLeadButtonProps) {
   const count = sessionCount ?? 0;
   return (
@@ -23,6 +25,7 @@ export function TalkToLeadButton({
       }
       onClick={onClick}
       data-active={isActive ? "true" : undefined}
+      data-avoid-side-panel={avoidSidePanel ? "true" : undefined}
       aria-pressed={isActive}
     >
       <svg

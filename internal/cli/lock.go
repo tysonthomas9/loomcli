@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -13,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/lockfile"
 )
@@ -432,23 +432,26 @@ func GetLockStatus(worktreePath string) string {
 			return fmt.Sprintf("working: %s (%s)", info.TaskID, duration)
 		}
 	}
-	// No TaskID yet - show state with ellipsis
+	// No TaskID yet. A planner without a task is still legitimately planning
+	// (it bootstraps tasks rather than claiming one), so keep the ellipsis form.
+	// A worker without a task is not actually working — surface it as idle so
+	// the UI doesn't show "Working" while the detail panel reports no task.
 	if info.Command == "plan" {
 		return fmt.Sprintf("planning: ... (%s)", duration)
 	}
-	return fmt.Sprintf("working: ... (%s)", duration)
+	return fmt.Sprintf("idle (%s)", duration)
 }
 
 // getTaskStatus returns the status of a task.
 // Returns "needs_review", "closed", "in_progress", "open", or ""
 func getTaskStatus(taskID string) string {
-	d := *defaultDeps
+	d := *ensureDefaultDeps()
 	d.IssueBackend = DefaultIssueBackend()
 	return GetTaskStatusDeps(&d, taskID)
 }
 
 func GetTaskStatusDeps(deps *Deps, taskID string) string {
-	detail, err := deps.IssueBackend.Get(context.Background(), taskID)
+	detail, err := deps.IssueBackend.Get(cmdstore.RootContext(), taskID)
 	if err != nil || detail == nil {
 		return ""
 	}

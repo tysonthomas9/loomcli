@@ -82,7 +82,7 @@ func runAgent(cmd *cobra.Command, args []string) {
 	taskCheckFn, err := mapTaskFilter(agentTaskFilter, agentParentID)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		cli.ExitWithFlush(1)
 	}
 
 	// Override with router-based check if daemon env vars provide routing constraints
@@ -93,7 +93,7 @@ func runAgent(cmd *cobra.Command, args []string) {
 	target, err := workspace.ResolveAgentTarget(argName, "")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		cli.ExitWithFlush(1)
 	}
 
 	worktreePath := target.WorkDir
@@ -118,11 +118,11 @@ func validatePromptFile(path string) {
 	info, err := os.Stat(path)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: cannot access prompt file %s: %v\n", path, err)
-		os.Exit(1)
+		cli.ExitWithFlush(1)
 	}
 	if info.IsDir() {
 		fmt.Fprintf(os.Stderr, "Error: prompt path is a directory, not a file: %s\n", path)
-		os.Exit(1)
+		cli.ExitWithFlush(1)
 	}
 }
 
@@ -131,7 +131,7 @@ func validatePromptFile(path string) {
 func runAgentDaemon(worktreePath, agentName string, promptGen func(string, *config.WorkspaceConfig) string) {
 	if err := cli.AcquireLock(worktreePath, "agent", agentName); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		cli.ExitWithFlush(1)
 	}
 	// Lock intentionally NOT released here. Parent (RunAutoModeTmux)
 	// reads the lock after daemon exit to detect task claims, then
@@ -155,7 +155,7 @@ func runAgentDaemon(worktreePath, agentName string, promptGen func(string, *conf
 	prompt := promptGen(agentName, ws)
 	if err := cli.InvokeAgent(worktreePath, prompt, agentName); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		cli.ExitWithFlush(1)
 	}
 }
 
@@ -187,7 +187,7 @@ func runAgentAutoMode(worktreePath, agentName string, promptGen func(string, *co
 	// Fallback to JSON streaming mode (no tmux)
 	if err := cli.AcquireLock(worktreePath, "agent", agentName); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		cli.ExitWithFlush(1)
 	}
 	defer func() { _ = cli.ReleaseLock(worktreePath) }()
 
@@ -200,14 +200,14 @@ func runAgentAutoMode(worktreePath, agentName string, promptGen func(string, *co
 func runAgentSingleTask(worktreePath, agentName string, promptGen func(string, *config.WorkspaceConfig) string, taskCheckFn func() (bool, error)) {
 	if err := cli.AcquireLock(worktreePath, "agent", agentName); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		cli.ExitWithFlush(1)
 	}
 	defer func() { _ = cli.ReleaseLock(worktreePath) }()
 
 	available, err := taskCheckFn()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error checking tasks: %v\n", err)
-		os.Exit(1)
+		cli.ExitWithFlush(1)
 	}
 	if !available {
 		fmt.Println("No tasks available matching the specified filter.")
@@ -231,7 +231,7 @@ func runAgentSingleTask(worktreePath, agentName string, promptGen func(string, *
 	prompt := promptGen(agentName, ws)
 	if err := cli.InvokeAgent(worktreePath, prompt, agentName); err != nil {
 		fmt.Fprintf(os.Stderr, "Error running agent: %v\n", err)
-		os.Exit(1)
+		cli.ExitWithFlush(1)
 	}
 }
 

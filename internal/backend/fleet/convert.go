@@ -104,16 +104,29 @@ type readyIssueWithParent struct {
 // types.Issue (json tag `issue_type`) and would silently drop the type
 // field on every fleet response.
 //
-// The BlockedBy* fields are captured for unmarshal completeness only —
-// blockedIssuesToData currently projects to backend.IssueData, which has
-// no blocker columns, so these get dropped. Widening IssueData (or adding
-// a dedicated BlockedIssueData) is the path if the kanban or detail view
-// ever needs blocker chips on fleet.
+// The BlockedByDetails field is captured for unmarshal completeness only;
+// IssueData carries the summary blocker fields used by kanban/list views.
 type blockedIssueWire struct {
 	fleetIssueWire
 	BlockedByCount   int                `json:"blocked_by_count,omitempty"`
 	BlockedBy        []string           `json:"blocked_by,omitempty"`
 	BlockedByDetails []types.BlockerRef `json:"blocked_by_details,omitempty"`
+}
+
+// blockedIssueResponseWire mirrors fleet-db's native blocked response shape:
+// {"issue": {...}, "blockers": [{...}]}.
+type blockedIssueResponseWire struct {
+	Issue    fleetIssueWire       `json:"issue"`
+	Blockers []blockedBlockerWire `json:"blockers,omitempty"`
+}
+
+type blockedBlockerWire struct {
+	ID       string `json:"id"`
+	Title    string `json:"title,omitempty"`
+	Priority int    `json:"priority,omitempty"`
+	Status   string `json:"status,omitempty"`
+	DepType  string `json:"dep_type,omitempty"`
+	Reason   string `json:"reason,omitempty"`
 }
 
 // countIssuesResponse is the JSON structure returned by the fleet server's
@@ -327,6 +340,79 @@ func blockedIssuesToData(issues []*blockedIssueWire) []backend.IssueData {
 		if parent := bi.fleetIssueWire.parent(); parent != "" {
 			d.Parent = parent
 		}
+		if d.Status == "" || d.Status == string(types.StatusOpen) {
+			d.Status = string(types.StatusBlocked)
+		}
+		d.BlockedByCount = bi.BlockedByCount
+		d.BlockedBy = append([]string(nil), bi.BlockedBy...)
+		result = append(result, d)
+	}
+	return result
+}
+
+// unmarshalBlockedIssueList accepts both blocked response dialects:
+// fleet-db native {"issues":[{"issue":...,"blockers":[...]}]} and the older
+// flat BlockedIssue shape used by loom's legacy API bridge.
+func unmarshalBlockedIssueList(data []byte, op string) ([]backend.IssueData, error) {
+	if nested, ok := unmarshalNativeBlockedIssues(data); ok {
+		return blockedIssueResponsesToData(nested), nil
+	}
+	issues, err := unmarshalListOrWrapper[*blockedIssueWire](data, op)
+	if err != nil {
+		return nil, err
+	}
+	return blockedIssuesToData(issues), nil
+}
+
+func unmarshalNativeBlockedIssues(data []byte) ([]blockedIssueResponseWire, bool) {
+	var bare []blockedIssueResponseWire
+	if err := json.Unmarshal(data, &bare); err == nil {
+		if len(bare) == 0 || blockedResponsesHaveIssue(bare) {
+			return bare, true
+		}
+		return nil, false
+	}
+
+	var wrapper struct {
+		Issues []blockedIssueResponseWire `json:"issues"`
+	}
+	if err := json.Unmarshal(data, &wrapper); err == nil && wrapper.Issues != nil {
+		if len(wrapper.Issues) == 0 || blockedResponsesHaveIssue(wrapper.Issues) {
+			return wrapper.Issues, true
+		}
+	}
+	return nil, false
+}
+
+func blockedResponsesHaveIssue(issues []blockedIssueResponseWire) bool {
+	for _, issue := range issues {
+		if issue.Issue.ID != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func blockedIssueResponsesToData(issues []blockedIssueResponseWire) []backend.IssueData {
+	result := make([]backend.IssueData, 0, len(issues))
+	for _, entry := range issues {
+		if entry.Issue.ID == "" {
+			continue
+		}
+		issue := entry.Issue.toIssue()
+		d := issueToData(&issue)
+		if parent := entry.Issue.parent(); parent != "" {
+			d.Parent = parent
+		}
+		if d.Status == "" || d.Status == string(types.StatusOpen) {
+			d.Status = string(types.StatusBlocked)
+		}
+		for _, blocker := range entry.Blockers {
+			if blocker.ID != "" {
+				d.BlockedBy = append(d.BlockedBy, blocker.ID)
+			}
+		}
+		d.BlockedByCount = len(d.BlockedBy)
 		result = append(result, d)
 	}
 	return result

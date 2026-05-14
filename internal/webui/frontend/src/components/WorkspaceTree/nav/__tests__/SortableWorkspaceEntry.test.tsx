@@ -128,7 +128,6 @@ describe("SortableWorkspaceEntry", () => {
 
       expect(screen.queryByText("active")).not.toBeInTheDocument();
     });
-
   });
 
   describe("click handling", () => {

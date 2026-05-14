@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/spf13/pflag"
+
 	"github.com/tysonthomas9/loomcli/internal/backend"
 )
 
@@ -111,8 +113,9 @@ func (b *localBackendStub) RemoveLabel(context.Context, string, string) error { 
 func (b *localBackendStub) ListComments(context.Context, string) ([]backend.CommentData, error) {
 	return nil, nil
 }
-func (b *localBackendStub) AddComment(context.Context, backend.CommentAddParams) (*backend.CommentData, error) {
-	return nil, nil
+func (b *localBackendStub) AddComment(_ context.Context, params backend.CommentAddParams) (*backend.CommentData, error) {
+	b.record("AddComment", params.IssueID, params)
+	return &backend.CommentData{IssueID: params.IssueID, Author: params.Author, Text: params.Text}, nil
 }
 func (b *localBackendStub) ListEvents(context.Context, string, int) ([]backend.EventData, error) {
 	return nil, nil
@@ -198,6 +201,82 @@ func TestDataReady_NoServerUsesLocalBackend(t *testing.T) {
 	})
 }
 
+func TestDataList_NoServerUsesLocalBackend(t *testing.T) {
+	stub := &localBackendStub{
+		readyItems: []backend.IssueData{{
+			ID:        "loom-10",
+			Title:     "filtered task",
+			Status:    "review",
+			IssueType: "task",
+			Priority:  1,
+		}},
+	}
+	withLocalBackend(t, stub, func() {
+		outputFormat = "text"
+		listStatus = "review"
+		listType = "task"
+		listParent = "epic-1"
+		listLimit = 5
+		listPriority = 1
+		setTestFlagChanged(t, listCmd.Flags(), "priority", true)
+
+		out, err := captureDataStdout(t, func() error {
+			return listCmd.RunE(listCmd, nil)
+		})
+		if err != nil {
+			t.Fatalf("list: %v", err)
+		}
+		if !strings.Contains(out, "loom-10") || !strings.Contains(out, "filtered task") {
+			t.Fatalf("list output = %q, want issue", out)
+		}
+		if len(stub.calls) != 1 || stub.calls[0].method != "List" {
+			t.Fatalf("calls = %#v, want one List call", stub.calls)
+		}
+		opts := stub.calls[0].args.(backend.ListOpts)
+		if opts.Status != "review" || opts.IssueType != "task" || opts.ParentID != "epic-1" || opts.Limit != 5 {
+			t.Fatalf("List opts = %#v", opts)
+		}
+		if opts.Priority == nil || *opts.Priority != 1 {
+			t.Fatalf("List priority = %#v, want 1", opts.Priority)
+		}
+	})
+}
+
+func TestDataBlocked_NoServerUsesLocalBackend(t *testing.T) {
+	stub := &localBackendStub{
+		readyItems: []backend.IssueData{{
+			ID:        "loom-20",
+			Title:     "blocked bug",
+			Status:    "blocked",
+			IssueType: "bug",
+			Priority:  0,
+		}},
+	}
+	withLocalBackend(t, stub, func() {
+		outputFormat = "text"
+		blockedLimit = 7
+		blockedType = "bug"
+		blockedParent = "epic-2"
+
+		out, err := captureDataStdout(t, func() error {
+			return blockedCmd.RunE(blockedCmd, nil)
+		})
+		if err != nil {
+			t.Fatalf("blocked: %v", err)
+		}
+		if !strings.Contains(out, "loom-20") || !strings.Contains(out, "blocked bug") {
+			t.Fatalf("blocked output = %q, want issue", out)
+		}
+		if len(stub.calls) != 1 || stub.calls[0].method != "Blocked" {
+			t.Fatalf("calls = %#v, want one Blocked call", stub.calls)
+		}
+		opts := stub.calls[0].args.(backend.BlockedOpts)
+		if opts.Limit != 7 || opts.Type != "bug" || opts.ParentID != "epic-2" {
+			t.Fatalf("Blocked opts = %#v", opts)
+		}
+	})
+}
+
 func TestDataShowClaimClose_NoServerUsesLocalBackend(t *testing.T) {
 	stub := &localBackendStub{
 		detail: &backend.IssueDetailData{
@@ -268,5 +347,87 @@ func TestDataShowClaimClose_NoServerUsesLocalBackend(t *testing.T) {
 		if updateParams.Notes == nil || *updateParams.Notes != notes {
 			t.Fatalf("Update notes = %#v", updateParams.Notes)
 		}
+	})
+}
+
+func TestDataUpdate_AllChangedFields(t *testing.T) {
+	stub := &localBackendStub{}
+	withLocalBackend(t, stub, func() {
+		outputFormat = "json"
+		updateStatus = "review"
+		updateAssignee = "agent-7"
+		updateNotes = "ready for review"
+		updateDesign = "new approach"
+		updatePriority = 0
+		for _, name := range []string{"status", "assignee", "notes", "design", "priority"} {
+			setTestFlagChanged(t, updateCmd.Flags(), name, true)
+		}
+
+		out, err := captureDataStdout(t, func() error {
+			return updateCmd.RunE(updateCmd, []string{"loom-30"})
+		})
+		if err != nil {
+			t.Fatalf("update: %v", err)
+		}
+		if !strings.Contains(out, `"message": "updated loom-30"`) {
+			t.Fatalf("update output = %q, want JSON message", out)
+		}
+		if len(stub.calls) != 1 || stub.calls[0].method != "Update" || stub.calls[0].id != "loom-30" {
+			t.Fatalf("calls = %#v, want one Update call", stub.calls)
+		}
+		params := stub.calls[0].args.(backend.UpdateParams)
+		if params.Status == nil || *params.Status != "review" {
+			t.Fatalf("Update status = %#v", params.Status)
+		}
+		if params.Assignee == nil || *params.Assignee != "agent-7" {
+			t.Fatalf("Update assignee = %#v", params.Assignee)
+		}
+		if params.Notes == nil || *params.Notes != "ready for review" {
+			t.Fatalf("Update notes = %#v", params.Notes)
+		}
+		if params.Design == nil || *params.Design != "new approach" {
+			t.Fatalf("Update design = %#v", params.Design)
+		}
+		if params.Priority == nil || *params.Priority != 0 {
+			t.Fatalf("Update priority = %#v", params.Priority)
+		}
+	})
+}
+
+func TestDataComment_NoServerUsesLocalBackend(t *testing.T) {
+	stub := &localBackendStub{}
+	withLocalBackend(t, stub, func() {
+		outputFormat = "text"
+		commentAuthor = "planner"
+
+		out, err := captureDataStdout(t, func() error {
+			return commentCmd.RunE(commentCmd, []string{"loom-2", "ship it"})
+		})
+		if err != nil {
+			t.Fatalf("comment: %v", err)
+		}
+		if !strings.Contains(out, "comment added to loom-2") {
+			t.Fatalf("comment output = %q, want success message", out)
+		}
+		if len(stub.calls) != 1 || stub.calls[0].method != "AddComment" || stub.calls[0].id != "loom-2" {
+			t.Fatalf("calls = %#v, want one AddComment call", stub.calls)
+		}
+		params := stub.calls[0].args.(backend.CommentAddParams)
+		if params.IssueID != "loom-2" || params.Author != "planner" || params.Text != "ship it" {
+			t.Fatalf("Comment params = %#v", params)
+		}
+	})
+}
+
+func setTestFlagChanged(t *testing.T, flags *pflag.FlagSet, name string, changed bool) {
+	t.Helper()
+	flag := flags.Lookup(name)
+	if flag == nil {
+		t.Fatalf("flag %q not found", name)
+	}
+	previous := flag.Changed
+	flag.Changed = changed
+	t.Cleanup(func() {
+		flag.Changed = previous
 	})
 }

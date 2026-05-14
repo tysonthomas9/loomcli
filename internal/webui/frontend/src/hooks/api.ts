@@ -32,8 +32,17 @@ export type { SessionRecord } from "@/api/terminal";
 // Terminal sub-module functions not in the @/api barrel.
 // Most tmux-era terminal APIs (spawn, restart, kill, seed, lead-session,
 // close-all, export, scrollback) were removed with the wterm migration.
-export { patchTerminalState, deleteTabMetadata } from "@/api/terminal";
-export type { IssueContext, TabMetadata } from "@/api/terminal";
+export {
+  patchTerminalState,
+  deleteTabMetadata,
+  ensureAgentTerminalSession,
+  startTerminalSetup,
+} from "@/api/terminal";
+export type {
+  IssueContext,
+  TabMetadata,
+  TerminalSetupResult,
+} from "@/api/terminal";
 
 // Workspace mutation helpers not in the @/api barrel.
 export {

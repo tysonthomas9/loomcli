@@ -20,7 +20,30 @@ EXTRA_WORKSPACES=${EXTRA_WORKSPACES:-bravo:/root/.loom/workspaces/bravo}
 export LOOM_CONFIG_DIR=${LOOM_CONFIG_DIR:-/root/.loom-config}
 mkdir -p "$LOOM_CONFIG_DIR"
 
+# fleet-db --auth-dev-mode reads the X-Actor header; the loom CLI sends it
+# from LOOM_FLEET_DB_ACTOR. Without this every CLI call hits HTTP 401.
+export LOOM_FLEET_DB_ACTOR="${LOOM_FLEET_DB_ACTOR:-loom-dev}"
+
 log() { printf '[dev] %s\n' "$*"; }
+
+# ── 0. Mirror read-only auth dirs to writable copies ──
+# The host mounts ~/.codex, ~/.claude, ~/.config/opencode read-only, but the
+# CLIs (codex especially) write session state under those dirs at runtime and
+# crash with "Read-only file system (os error 30)" otherwise. Copy each into
+# a writable sibling and point the CLI env vars at the copy.
+mirror_rw() {
+    local src=$1 dst=$2
+    [ -d "$src" ] || return 0
+    [ -d "$dst" ] && return 0
+    log "mirroring $src → $dst (writable copy for CLI state)"
+    mkdir -p "$(dirname "$dst")"
+    cp -r "$src" "$dst"
+}
+mirror_rw /root/.codex          /root/.codex-rw
+mirror_rw /root/.claude         /root/.claude-rw
+mirror_rw /root/.config/opencode /root/.config/opencode-rw
+export CODEX_HOME=/root/.codex-rw
+export CLAUDE_CONFIG_DIR=/root/.claude-rw
 
 # ── 1. Seed primary workspace: git only ──
 if [ ! -d "$PRIMARY_PATH/.git" ]; then
@@ -54,6 +77,12 @@ for spec in $EXTRA_WORKSPACES; do
     loom workspace create "$ws_name" --repos "$ws_path" --path "$ws_path" \
         2>/dev/null || log "  (already registered or create failed — continuing)"
 done
+
+# Pre-seeded workspaces are registered but inactive. The loom daemon resolves
+# its agent list from the *active* workspace, so set one now; the daemon
+# watcher below promotes any newly-created workspace as it appears.
+loom workspace use "$PRIMARY_NAME" >/dev/null 2>&1 \
+    || log "  (primary workspace '$PRIMARY_NAME' not yet registered)"
 
 # ── 4. Cleanup hook ──
 cleanup() {
@@ -96,7 +125,45 @@ log "loom serve ready"
     log "default backend '$DEFAULT_BACKEND' applied where possible"
 ) &
 
-# ── 8. Vite preview (foreground, keeps container alive) ──
+# ── 8. Agent daemon watcher ──
+# loom serve only handles HTTP + terminal. The agent supervisor that actually
+# runs codex/claude/opencode lives in a separate `loom daemon` process and
+# expects to be pointed at one workspace via LOOM_WORKSPACE. The dev container
+# can't know the user's workspace upfront (the onboarding flow creates it via
+# the UI), so this watcher polls /api/workspaces and brings up one daemon per
+# workspace that has at least one configured agent. It respawns if a daemon
+# exits.
+(
+    declare -A DAEMON_PIDS=()
+    start_daemon_for() {
+        local ws=$1 ws_path=$2
+        log "starting loom daemon for workspace $ws (cwd $ws_path)"
+        loom workspace use "$ws" >/dev/null 2>&1 || true
+        (
+            cd "$ws_path"
+            LOOM_WORKSPACE="$ws" loom daemon >> "/tmp/loom-daemon-$ws.log" 2>&1
+        ) &
+        DAEMON_PIDS[$ws]=$!
+    }
+    while sleep 5; do
+        ws_listing=$(curl -fs --max-time 3 \
+            "http://127.0.0.1:${API_PORT}/api/workspaces" 2>/dev/null) || continue
+        while IFS=$'\t' read -r ws ws_path; do
+            [ -z "$ws" ] && continue
+            agent_count=$(curl -fs --max-time 3 \
+                "http://127.0.0.1:${API_PORT}/api/workspaces/$ws/agents" 2>/dev/null \
+                | jq '.data | length // 0' 2>/dev/null || echo 0)
+            [ "$agent_count" -eq 0 ] && continue
+            pid=${DAEMON_PIDS[$ws]:-}
+            if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+                continue
+            fi
+            start_daemon_for "$ws" "$ws_path"
+        done < <(printf '%s' "$ws_listing" | jq -r '.workspaces[]? | "\(.id)\t\(.path)"')
+    done
+) &
+
+# ── 9. Vite preview (foreground, keeps container alive) ──
 log "starting vite preview on :${UI_PORT}"
 cd /src/internal/webui/frontend
 exec npx vite preview --host 0.0.0.0 --port "$UI_PORT" --strictPort

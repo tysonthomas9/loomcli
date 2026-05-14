@@ -316,6 +316,11 @@ func TestResolveNotifyToken_FileOnDisk(t *testing.T) {
 	// Ensure LOOM_NOTIFY_TOKEN env var is not set.
 	t.Setenv("LOOM_NOTIFY_TOKEN", "")
 
+	// setupWorkspaceConfig stores workspaces under the uppercased key; the
+	// production resolveActiveWorkspaceName contract requires LOOM_WORKSPACE
+	// (or --workspace) to pick the active workspace, so set it explicitly.
+	t.Setenv("LOOM_WORKSPACE", "TEST")
+
 	// Set up a workspace config so GetWorkspaceRuntimeDir() returns a known temp dir.
 	ResetWorkspaceRuntimeDirCache()
 	runtimeDir := t.TempDir()
@@ -342,6 +347,7 @@ func TestResolveNotifyToken_FileOnDisk(t *testing.T) {
 func TestResolveNotifyToken_BothFail(t *testing.T) {
 	// No env var.
 	t.Setenv("LOOM_NOTIFY_TOKEN", "")
+	t.Setenv("LOOM_WORKSPACE", "TEST")
 
 	// Set up workspace config pointing to a temp dir without notify.token.
 	ResetWorkspaceRuntimeDirCache()

@@ -32,16 +32,24 @@ export interface UseBackendConfigReturn {
   refetch: () => void;
 }
 
+export interface UseBackendConfigOptions {
+  enabled?: boolean;
+}
+
 /**
  * React hook for managing backend configuration state.
  *
  * Fetches from the workspace-scoped /api/workspaces/{ws}/config/backend.
  * Runtime backend config is store-backed; callers must provide a workspace ID.
  */
-export function useBackendConfig(workspaceId?: string): UseBackendConfigReturn {
+export function useBackendConfig(
+  workspaceId?: string,
+  options: UseBackendConfigOptions = {},
+): UseBackendConfigReturn {
+  const enabled = options.enabled ?? true;
   const [initialCache] = useState(() => getCachedBackendConfig());
   const [config, setConfig] = useState<BackendConfigData | null>(initialCache);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(enabled);
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isCached, setIsCached] = useState(initialCache !== null);
@@ -58,6 +66,10 @@ export function useBackendConfig(workspaceId?: string): UseBackendConfigReturn {
   }, []);
 
   const fetchConfig = useCallback(async () => {
+    if (!enabled) {
+      setIsLoading(false);
+      return;
+    }
     setIsLoading(true);
     setError(null);
 
@@ -85,12 +97,16 @@ export function useBackendConfig(workspaceId?: string): UseBackendConfigReturn {
         setIsLoading(false);
       }
     }
-  }, [workspaceId]);
+  }, [enabled, workspaceId]);
 
   // Fetch on mount + whenever workspaceId changes.
   useEffect(() => {
+    if (!enabled) {
+      setIsLoading(false);
+      return;
+    }
     fetchConfig();
-  }, [fetchConfig]);
+  }, [enabled, fetchConfig]);
 
   const updateBackend = useCallback(
     async (backend: string): Promise<boolean> => {

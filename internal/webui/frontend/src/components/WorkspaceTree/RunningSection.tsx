@@ -10,11 +10,11 @@ import { useStore } from "zustand";
 
 import {
   useAgentStoreInstance,
-  useWorkspaceRepos,
+  useWorkspaceContext,
   useWorkspaceTree,
 } from "@/hooks";
 import { parseLoomStatus } from "@/types/agent";
-import type { Issue } from "@/types";
+import type { Issue, LoomTaskInfo } from "@/types";
 
 import styles from "./RunningSection.module.css";
 
@@ -35,25 +35,18 @@ interface EpicGroup {
   runningTasks: RunningTask[];
 }
 
+type ActiveTaskMap = Map<string, { agentName: string; duration: string }>;
+
 export function RunningSection({
   onSelect,
 }: RunningSectionProps): JSX.Element | null {
-  const { workspace } = useWorkspaceRepos();
   const agentStore = useAgentStoreInstance();
   const agents = useStore(agentStore, (s) => s.agents);
   const agentTasks = useStore(agentStore, (s) => s.agentTasks);
 
-  // Fetch all workspace issues to resolve parent epics.
-  const { epics: allEpics, orphanTasks: allOrphans } = useWorkspaceTree(
-    workspace?.name ?? "",
-    "all",
-    undefined,
-    true,
-  );
-
   // Build map of taskId → { agentName, duration } from working agents.
   const activeTaskMap = useMemo(() => {
-    const map = new Map<string, { agentName: string; duration: string }>();
+    const map: ActiveTaskMap = new Map();
     for (const agent of agents) {
       const parsed = parseLoomStatus(agent.status);
       if (
@@ -68,6 +61,37 @@ export function RunningSection({
     }
     return map;
   }, [agents]);
+
+  if (activeTaskMap.size === 0) return null;
+
+  return (
+    <RunningSectionContent
+      activeTaskMap={activeTaskMap}
+      agentTasks={agentTasks}
+      onSelect={onSelect}
+    />
+  );
+}
+
+interface RunningSectionContentProps extends RunningSectionProps {
+  activeTaskMap: ActiveTaskMap;
+  agentTasks: Record<string, LoomTaskInfo>;
+}
+
+function RunningSectionContent({
+  activeTaskMap,
+  agentTasks,
+  onSelect,
+}: RunningSectionContentProps): JSX.Element | null {
+  const { workspace } = useWorkspaceContext();
+
+  // Fetch all workspace issues only when there is an active task to place.
+  const { epics: allEpics, orphanTasks: allOrphans } = useWorkspaceTree(
+    workspace?.name ?? "",
+    "all",
+    undefined,
+    true,
+  );
 
   // Build a flat lookup: taskId → Issue for all tasks across epics + orphans.
   const taskById = useMemo(() => {

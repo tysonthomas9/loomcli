@@ -39,7 +39,7 @@ func runList(cmd *cobra.Command, args []string) {
 	worktrees, err := cli.DiscoverWorktrees()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		cli.ExitWithFlush(1)
 	}
 
 	if len(worktrees) == 0 {

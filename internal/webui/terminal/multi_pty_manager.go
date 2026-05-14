@@ -289,6 +289,25 @@ func (mm *MultiPTYManager) AttachSession(key SessionKey, cols, rows uint16, laun
 	return m.AttachSession(key, cols, rows, launch)
 }
 
+// EnsureSession routes backend-owned session startup to the per-workspace
+// manager, creating it lazily if necessary.
+func (mm *MultiPTYManager) EnsureSession(key SessionKey, cols, rows uint16, argv []string) (bool, error) {
+	m, err := mm.managerForWS(key.Workspace)
+	if err != nil {
+		return false, err
+	}
+	return m.EnsureSession(key, cols, rows, argv)
+}
+
+// WriteToSession writes backend-owned input to an existing per-workspace PTY.
+func (mm *MultiPTYManager) WriteToSession(key SessionKey, p []byte) error {
+	m := mm.existingManagerForWS(key.Workspace)
+	if m == nil {
+		return fmt.Errorf("%w: %q", ErrWorkspaceNotRegistered, key.Workspace)
+	}
+	return m.WriteToSession(key, p)
+}
+
 // Detach releases the attachment. No-op for unknown workspaces or
 // workspaces whose per-workspace manager has not been created yet.
 func (mm *MultiPTYManager) Detach(key SessionKey, connID string) {

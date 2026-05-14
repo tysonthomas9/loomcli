@@ -33,7 +33,7 @@ type authConfigResponse struct {
 }
 
 // AuthConfigLimiter is a per-IP token bucket rate limiter for GET /api/config.
-// Follows the same pattern as ClientErrorLimiter and CSPReportLimiter.
+// Follows the same pattern as ClientErrorLimiter.
 type AuthConfigLimiter struct {
 	clients         sync.Map // map[string]*authConfigLimiterEntry
 	ratePerSec      rate.Limit

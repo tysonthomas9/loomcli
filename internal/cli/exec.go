@@ -66,7 +66,7 @@ func RunGitOutput(deps *Deps, dir string, args ...string) error {
 
 // RunGitCommand executes a git command in the specified directory using defaultDeps.
 func RunGitCommand(dir string, args ...string) (string, error) {
-	return RunGit(defaultDeps, dir, args...)
+	return RunGit(ensureDefaultDeps(), dir, args...)
 }
 
 func defaultRunGitWithOutput(dir string, args ...string) error {
@@ -79,7 +79,7 @@ func defaultRunGitWithOutput(dir string, args ...string) error {
 
 // RunGitCommandWithOutput executes a git command and streams output to stdout/stderr.
 func RunGitCommandWithOutput(dir string, args ...string) error {
-	return RunGitOutput(defaultDeps, dir, args...)
+	return RunGitOutput(ensureDefaultDeps(), dir, args...)
 }
 
 // FilteredEnv returns os.Environ() filtered through the subprocess allowlist.

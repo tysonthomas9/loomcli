@@ -36,7 +36,9 @@ var openCodeNonInteractiveInvoker func(workDir, prompt, agentName string, shutdo
 // buildOpenCodeInteractiveCmd constructs the exec.Cmd for interactive OpenCode invocation.
 // Extracted for testability — callers can inspect the returned cmd without execution.
 func buildOpenCodeInteractiveCmd(workDir, prompt, agentName string) *exec.Cmd {
-	cmd := exec.Command("opencode", "run", prompt)
+	args := append([]string{"run", "--dir", workDir, "--dangerously-skip-permissions"}, openCodeModelArgs()...)
+	args = append(args, prompt)
+	cmd := exec.Command("opencode", args...)
 	cmd.Dir = workDir
 	cmd.Env = buildBackendEnv(workDir, agentName)
 	cmd.Stdin = os.Stdin
@@ -55,7 +57,8 @@ func defaultOpenCodeInvoker(workDir, prompt, agentName string) error {
 }
 
 func defaultOpenCodeNonInteractiveInvoker(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error {
-	cmd := exec.Command("opencode", "run", "--format", "json")
+	args := append([]string{"run", "--format", "json", "--dir", workDir, "--dangerously-skip-permissions"}, openCodeModelArgs()...)
+	cmd := exec.Command("opencode", args...)
 	cmd.Dir = workDir
 	cmd.Env = buildBackendEnv(workDir, agentName)
 
@@ -127,6 +130,14 @@ func (o *OpenCodeBackend) HealthCheck() HealthStatus {
 
 func init() {
 	cli.RegisterBackend(&OpenCodeBackend{})
+}
+
+func openCodeModelArgs() []string {
+	model := strings.TrimSpace(os.Getenv("LOOM_OPENCODE_MODEL"))
+	if model == "" {
+		return nil
+	}
+	return []string{"--model", model}
 }
 
 // openCodeUsageEvent is the minimal structure for OpenCode --format json output.

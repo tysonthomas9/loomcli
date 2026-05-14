@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
+	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -542,7 +542,7 @@ func (r *Resolver) SetRepoDefaultBranch(repoName, branch string) error {
 	if r.Mode != ModeWorkspace || r.Config == nil {
 		return fmt.Errorf("target branch update only supported in workspace mode")
 	}
-	ctx := context.Background()
+	ctx := cmdstore.RootContext()
 	dataDir := bootstrap.LoomDir()
 	if dataDir == "" {
 		return fmt.Errorf("cannot determine loom data directory")
@@ -551,6 +551,8 @@ func (r *Resolver) SetRepoDefaultBranch(repoName, branch string) error {
 	if err != nil {
 		return fmt.Errorf("open fleet-db store: %w", err)
 	}
+	// Apply store-level tracing (this path bypasses cmdstore.OpenStore).
+	handle.Store = cmdstore.WrapStoreWithTracing(handle.Store)
 	defer func() { _ = handle.Close() }()
 	if _, err := handle.Store.Repos().Update(ctx, r.Workspace, repoName, store.RepoUpdate{DefaultBranch: &branch}); err != nil {
 		return fmt.Errorf("update repo %q default branch in workspace %q: %w", repoName, r.Workspace, err)

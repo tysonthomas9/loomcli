@@ -41,7 +41,12 @@ test.describe("18 agents fleet-db acceptance", () => {
       `${FLEETDB_URLS.fleet}/api/monitor/status`,
       recordRouteHit,
     );
-    expect(status.workspace?.name, "monitor workspace").toBe(fleetWs);
+    const monitorWorkspaceName = status.workspace?.name;
+    expect(monitorWorkspaceName, "monitor workspace name").toBeTruthy();
+    expect(
+      status.workspace?.workspaces ?? [],
+      "monitor workspace list",
+    ).toContain(monitorWorkspaceName);
     expect(
       status.agents?.some((agent: any) => agent.name === "workspace"),
     ).toBeTruthy();
@@ -53,10 +58,12 @@ test.describe("18 agents fleet-db acceptance", () => {
       `${FLEETDB_URLS.fleet}/api/monitor/agents`,
       recordRouteHit,
     );
+    const workspaceAgents =
+      agents.by_workspace?.[monitorWorkspaceName] ??
+      agents.by_workspace?.[fleetWs] ??
+      [];
     expect(
-      agents.by_workspace?.[fleetWs]?.some(
-        (agent: any) => agent.name === "workspace",
-      ),
+      workspaceAgents.some((agent: any) => agent.name === "workspace"),
     ).toBeTruthy();
 
     const tasks = await apiJson(

@@ -9,10 +9,16 @@ import { ErrorDisplay } from "@/components/ErrorDisplay";
 import { LoadingSkeleton } from "@/components/LoadingSkeleton";
 import type { ViewMode } from "@/types";
 import {
+  AIBackendSetupList,
+  type AIBackendSetupAction,
+} from "@/components/AIBackendSetupList";
+import {
   useBackendConfig,
+  useBackends,
   useLocalSettings,
   useWorkspaceContext,
 } from "@/hooks/workspace";
+import type { BackendInfo } from "@/utils/workspace";
 import {
   useTerminalFont,
   FONT_FAMILY_OPTIONS,
@@ -21,6 +27,8 @@ import {
   DEFAULT_FONT_FAMILY,
 } from "@/hooks/terminal";
 import { useToast } from "@/hooks/ui";
+import { restartOnboarding } from "@/utils/onboardingState";
+import { requestCliSetup } from "@/utils/cliSetup";
 
 import styles from "./SettingsView.module.css";
 
@@ -61,6 +69,12 @@ export function SettingsView({
     updateBackend,
     refetch,
   } = useBackendConfig(workspaceId);
+  const {
+    backends,
+    isLoading: isLoadingBackends,
+    error: backendsError,
+    refetch: refetchBackends,
+  } = useBackends();
   const { showToast } = useToast();
   const [selectedBackend, setSelectedBackend] = useState<string | null>(null);
   const {
@@ -70,8 +84,7 @@ export function SettingsView({
     updateRedis,
   } = useLocalSettings();
   const redisSettings = localSettings?.fleetdb_redis;
-  const [redisForm, setRedisForm] =
-    useState<RedisFormState>(EMPTY_REDIS_FORM);
+  const [redisForm, setRedisForm] = useState<RedisFormState>(EMPTY_REDIS_FORM);
 
   const { fontFamily, fontSize, setFontFamily, setFontSize } =
     useTerminalFont();
@@ -162,6 +175,34 @@ export function SettingsView({
     }
   };
 
+  const handleRestartOnboarding = () => {
+    restartOnboarding(workspaceId);
+    showToast("Onboarding checklist restored", { type: "success" });
+  };
+
+  const handleBackendSetupAction = async (
+    backend: BackendInfo,
+    action: AIBackendSetupAction,
+  ) => {
+    if (action === "set-default") {
+      const ok = await updateBackend(backend.name);
+      if (ok) {
+        setSelectedBackend(null);
+        refetchBackends();
+        showToast(`${backend.displayName} set as default`, {
+          type: "success",
+        });
+      } else {
+        showToast(`Failed to set ${backend.displayName} as default`, {
+          type: "error",
+        });
+      }
+      return;
+    }
+    requestCliSetup(backend, action);
+    onNavigate?.("terminal");
+  };
+
   const handleRedisUrlChange = (value: string) => {
     const trimmed = value.trim();
     setRedisForm((current) => ({
@@ -205,6 +246,45 @@ export function SettingsView({
   return (
     <div className={rootClassName} data-testid="settings-view">
       <h2 className={styles.pageTitle}>Settings</h2>
+
+      {/* Onboarding */}
+      <div className={styles.panel}>
+        <div className={styles.panelHeader}>
+          <h3 className={styles.panelTitle}>Onboarding</h3>
+        </div>
+        <div className={styles.panelContent}>
+          <p className={styles.description}>
+            Restore the setup checklist if it was dismissed before onboarding
+            was complete.
+          </p>
+          <button
+            type="button"
+            className={styles.navButton}
+            onClick={handleRestartOnboarding}
+            data-testid="restart-onboarding-button"
+          >
+            Show Onboarding Checklist
+          </button>
+        </div>
+      </div>
+
+      {/* AI CLI status */}
+      <div className={styles.panel}>
+        <div className={styles.panelHeader}>
+          <h3 className={styles.panelTitle}>AI CLIs</h3>
+        </div>
+        <div className={styles.panelContent}>
+          <AIBackendSetupList
+            backends={backends}
+            defaultBackend={config.backend}
+            variant="matrix"
+            isLoading={isLoadingBackends}
+            error={backendsError}
+            isSavingDefault={isSaving}
+            onAction={handleBackendSetupAction}
+          />
+        </div>
+      </div>
 
       {/* Project Default Backend */}
       <div className={styles.panel}>

@@ -31,7 +31,19 @@ func runGitOutput(deps *cli.Deps, dir string, args ...string) error {
 	return cli.RunGitOutput(deps, dir, args...)
 }
 
-var defaultDeps = cli.GetDeps(nil)
+// defaultDeps is the package-level Deps the wrappers fall back to when no
+// explicit *cli.Deps is provided. Populated lazily by ensureDefaultDeps so
+// the fleet backend is not constructed at this package's load time (before
+// Cobra parses --workspace / --server flags). Tests in this package read
+// and mutate this directly; TestMain calls ensureDefaultDeps to seed it.
+var defaultDeps *cli.Deps
+
+func ensureDefaultDeps() *cli.Deps {
+	if defaultDeps == nil {
+		defaultDeps = cli.GetDeps(nil)
+	}
+	return defaultDeps
+}
 
 func resolveRemote(remote string) string {
 	if remote == "" {

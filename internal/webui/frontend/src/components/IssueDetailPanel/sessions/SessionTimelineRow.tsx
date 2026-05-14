@@ -1,5 +1,5 @@
 /**
- * SessionTimelineRow - A single row in the session timeline.
+ * SessionTimelineRow - A single row in the run timeline.
  * Shows agent name, phase badge, status dot, duration, token count, and cost.
  */
 
@@ -36,12 +36,36 @@ function formatCost(usd: number): string {
   return `$${usd.toFixed(2)}`;
 }
 
+function formatRunStatus(status: string): string {
+  switch (status) {
+    case "completed":
+      return "Completed";
+    case "failed":
+      return "Failed";
+    case "running":
+      return "Running";
+    case "aborted":
+      return "Aborted";
+    default:
+      return status;
+  }
+}
+
+function runErrorSummary(session: SessionRecord): string | null {
+  if (session.last_error) return session.last_error;
+  if (session.error_class) return session.error_class;
+  if (session.status === "failed") return "Failed";
+  return null;
+}
+
 export function SessionTimelineRow({
   session,
   isSelected,
   onClick,
 }: SessionTimelineRowProps): JSX.Element {
   const totalTokens = session.input_tokens + session.output_tokens;
+  const errorSummary = runErrorSummary(session);
+  const statusLabel = formatRunStatus(session.status);
 
   return (
     <div
@@ -55,7 +79,7 @@ export function SessionTimelineRow({
           onClick();
         }
       }}
-      aria-label={`Session by ${session.agent_name}, ${session.status}`}
+      aria-label={`Run by ${session.agent_name}, ${statusLabel}${errorSummary ? `, ${errorSummary}` : ""}`}
       data-testid={`session-row-${session.session_id}`}
     >
       <span
@@ -66,12 +90,19 @@ export function SessionTimelineRow({
       <div className={styles.rowMain}>
         <div className={styles.rowTop}>
           <span className={styles.agentName}>{session.agent_name}</span>
+          <span className={styles.backendBadge}>{session.backend}</span>
           {session.phase && (
             <span className={styles.phaseBadge} data-phase={session.phase}>
               {session.phase}
             </span>
           )}
+          <span className={styles.statusLabel} data-status={session.status}>
+            {statusLabel}
+          </span>
         </div>
+        {errorSummary && (
+          <div className={styles.errorSummary}>{errorSummary}</div>
+        )}
         <div className={styles.rowBottom}>
           <span className={styles.duration}>
             {formatDuration(session.duration_s)}

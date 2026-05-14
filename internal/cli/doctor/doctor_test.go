@@ -1,7 +1,9 @@
 package doctor
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -1094,6 +1096,10 @@ func TestCheckStaleSignalFiles_SkipsSubdirectories(t *testing.T) {
 // Must not be used with t.Parallel() since it mutates global state.
 func setupRuntimeDirForTest(t *testing.T, dir string) {
 	t.Helper()
+	// setupWorkspaceConfig stores under the uppercased key; the production
+	// resolveActiveWorkspaceName requires LOOM_WORKSPACE (or --workspace)
+	// to pick the active workspace.
+	t.Setenv("LOOM_WORKSPACE", "TEST")
 	ResetWorkspaceRuntimeDirCache()
 	setupWorkspaceConfig(t, &LoomConfig{
 		DefaultWorkspace: "test",
@@ -1361,5 +1367,79 @@ func TestCheckStaleSessionRecords_LeftoverTmpFixMode(t *testing.T) {
 	metaPath := filepath.Join(sessDir, "metadata.json")
 	if _, err := os.Stat(metaPath); err != nil {
 		t.Errorf("expected metadata.json to be preserved, but got error: %v", err)
+	}
+}
+
+func TestCheckFleetProbeUnreachable(t *testing.T) {
+	t.Setenv("LOOM_ISSUE_BACKEND", "fleet")
+	t.Setenv("LOOM_FLEET_URL", "http://fleet-not-running.invalid:8080")
+	t.Setenv("LOOM_WORKSPACE", "TEST")
+
+	origProbe := fleetHealthProbe
+	fleetHealthProbe = func(ctx context.Context, baseURL string) error {
+		return errors.New("dial tcp: connection refused")
+	}
+	t.Cleanup(func() { fleetHealthProbe = origProbe })
+
+	result := checkFleet()
+
+	if result.Status != StatusFail {
+		t.Errorf("Status = %q, want %q", result.Status, StatusFail)
+	}
+	if !strings.Contains(result.Summary, "not reachable") {
+		t.Errorf("Summary = %q, want substring 'not reachable'", result.Summary)
+	}
+	if !strings.Contains(result.Detail, "connection refused") {
+		t.Errorf("Detail = %q, want it to include probe error", result.Detail)
+	}
+}
+
+func TestCheckFleetProbeReachable(t *testing.T) {
+	t.Setenv("LOOM_ISSUE_BACKEND", "fleet")
+	t.Setenv("LOOM_FLEET_URL", "http://fleet-db.local:8080")
+	t.Setenv("LOOM_WORKSPACE", "TEST")
+
+	origProbe := fleetHealthProbe
+	probedURL := ""
+	fleetHealthProbe = func(ctx context.Context, baseURL string) error {
+		probedURL = baseURL
+		return nil
+	}
+	t.Cleanup(func() { fleetHealthProbe = origProbe })
+
+	result := checkFleet()
+
+	if result.Status != StatusPass {
+		t.Errorf("Status = %q, want %q", result.Status, StatusPass)
+	}
+	if !strings.Contains(result.Summary, "reachable") {
+		t.Errorf("Summary = %q, want 'reachable' substring", result.Summary)
+	}
+	if probedURL != "http://fleet-db.local:8080" {
+		t.Errorf("probed = %q, want fleet URL", probedURL)
+	}
+}
+
+func TestCheckFleetNoURL(t *testing.T) {
+	t.Setenv("LOOM_ISSUE_BACKEND", "fleet")
+	t.Setenv("LOOM_FLEET_URL", "")
+	t.Setenv("LOOM_WORKSPACE", "TEST")
+
+	// Probe should not be called when URL is empty.
+	origProbe := fleetHealthProbe
+	probeCalled := false
+	fleetHealthProbe = func(ctx context.Context, baseURL string) error {
+		probeCalled = true
+		return nil
+	}
+	t.Cleanup(func() { fleetHealthProbe = origProbe })
+
+	result := checkFleet()
+
+	if result.Status != StatusFail {
+		t.Errorf("Status = %q, want %q", result.Status, StatusFail)
+	}
+	if probeCalled {
+		t.Error("probe was called despite empty URL")
 	}
 }

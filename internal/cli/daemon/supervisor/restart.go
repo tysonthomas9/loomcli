@@ -5,18 +5,36 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
+	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+
+	"go.opentelemetry.io/otel/attribute"
 )
 
 const primaryBackendRetryCooldown = time.Minute
 
 // handleRestartAfterError handles restart logic after spawn failure.
 // Returns true if the supervisor should continue, false if it should exit.
+//
+// Emits a daemon.supervisor.restart span covering the post-spawn-error
+// backoff window. Mirrors the sleepBeforeRestart span shape so dashboards
+// don't need to distinguish the two callers.
 func (s *Supervisor) handleRestartAfterError(ap *AgentProcess) bool {
 	ap.Mu.Lock()
 	ap.RestartCount++
 	count := ap.RestartCount
+	errType := errorTypeFromAgentErr(ap.LastError)
 	ap.Mu.Unlock()
+
+	_, span := startSpan(cmdstore.RootContext(),
+		"daemon.supervisor.restart",
+		attribute.String("loom.agent", ap.Entry.Worktree),
+		attribute.String("loom.role", ap.Entry.Role),
+		attribute.String("loom.workspace", s.WorkspaceID),
+		attribute.Int("loom.restart_count", count),
+		attribute.String("loom.error_type", errType),
+	)
+	defer span.End()
 
 	maxRetries := s.getMaxRetries()
 	if count > maxRetries {
@@ -90,17 +108,8 @@ func (s *Supervisor) shouldRestart(ap *AgentProcess) bool {
 		return true
 	}
 
-	// NoWork: no claimable tasks — always restart, never count toward max_retries.
-	// Preserve CurrentBackendIdx: NoWork is about task availability, not backend health.
-	// If the agent failed over to a fallback backend, it should stay on that backend.
 	if ap.LastError != nil && ap.LastError.Class == agenterr.NoWork {
-		ap.RestartCount = 0
-		ap.RateRetryCount = 0
-		ap.NoWorkCount++
-		if ap.CurrentBackendIdx > 0 && shouldRetryPrimaryAfterNoWork(ap.NoWorkCount, s.getNoWorkBackoff()) {
-			ap.CurrentBackendIdx = 0
-		}
-		ap.StopReason = ""
+		s.applyNoWorkRestart(ap)
 		return true
 	}
 
@@ -133,6 +142,20 @@ func (s *Supervisor) shouldRestart(ap *AgentProcess) bool {
 	}
 	ap.StopReason = StopReasonMaxRetries
 	return false
+}
+
+// applyNoWorkRestart resets retry counters for a NoWork exit and, if the
+// agent has failed over to a fallback backend, periodically returns to the
+// primary to test recovery. Caller holds ap.Mu. NoWork never counts toward
+// max_retries — task availability is not a backend-health signal.
+func (s *Supervisor) applyNoWorkRestart(ap *AgentProcess) {
+	ap.RestartCount = 0
+	ap.RateRetryCount = 0
+	ap.NoWorkCount++
+	if ap.CurrentBackendIdx > 0 && shouldRetryPrimaryAfterNoWork(ap.NoWorkCount, s.getNoWorkBackoff()) {
+		ap.CurrentBackendIdx = 0
+	}
+	ap.StopReason = ""
 }
 
 // computeBackoff returns the sleep duration before next restart.

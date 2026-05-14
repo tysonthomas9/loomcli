@@ -13,6 +13,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/backend/fleet"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
+	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
@@ -68,7 +69,7 @@ type Deps struct {
 type defaultGitRunner struct{}
 
 func (defaultGitRunner) Run(dir string, args ...string) CommandResult {
-	return defaultDeps.Exec.Run(dir, "git", args...)
+	return ensureDefaultDeps().Exec.Run(dir, "git", args...)
 }
 
 func (defaultGitRunner) RunWithOutput(dir string, args ...string) error {
@@ -148,8 +149,18 @@ func DefaultDeps() *Deps {
 		issueBackend = newFleetDBIssueBackend()
 	}
 
+	// Wrap the resolved IssueBackend with tracing so every method call
+	// emits a `service.IssueBackend.<Method>` sub-span under the active
+	// CLI / HTTP-server / agent span. Applied after backend selection so
+	// fleet-db, fleet, and api backends all get the same instrumentation.
+	// See issue_backend_tracing.go.
+	issueBackend = wrapIssueBackendWithTracing(issueBackend)
+
 	return &Deps{
-		Git:          defaultGitRunner{},
+		// Wrap the default git runner with tracing so every git subprocess
+		// (push/pull/fetch/merge/status/etc.) emits a sub-span under the
+		// active loom.cli span. See git_runner_tracing.go.
+		Git:          wrapGitRunnerWithTracing(defaultGitRunner{}),
 		Exec:         defaultExecRunner{},
 		FS:           defaultFileSystem{},
 		Logger:       slog.Default(),
@@ -157,13 +168,32 @@ func DefaultDeps() *Deps {
 		IssueBackend: issueBackend,
 		LookPath:     exec.LookPath,
 		ExecCtx:      defaultExecContextRunner{},
-		Agent:        registryAgentInvoker{},
+		// Wrap the registry-backed invoker with tracing so every backend call
+		// from agent flows (plan/task/automode/etc.) emits a sub-span under
+		// the active loom.cli span. See agent_invoker_tracing.go.
+		Agent: wrapAgentInvokerWithTracing(registryAgentInvoker{}),
 	}
 }
 
 // defaultDeps is the package-level Deps instance used by package helpers.
-// Initialized to DefaultDeps() so production code works without explicit wiring.
-var defaultDeps = DefaultDeps()
+// Built lazily on first access (see ensureDefaultDeps) and refreshed in
+// root.PersistentPreRunE after the --workspace / --server flag-to-env
+// mirror runs, so the cached fleet client reflects the actual workspace
+// instead of whatever the shell exported at process start.
+//
+// Tests assign directly into this var; production code must go through
+// ensureDefaultDeps() to avoid a nil deref before the first command runs.
+var defaultDeps *Deps
+
+// ensureDefaultDeps lazily builds the package-level Deps. Returns the
+// current value unchanged if already set (by PersistentPreRunE or by a
+// test override).
+func ensureDefaultDeps() *Deps {
+	if defaultDeps == nil {
+		defaultDeps = DefaultDeps()
+	}
+	return defaultDeps
+}
 
 // --- cobra context helpers ---
 
@@ -177,26 +207,26 @@ func WithDeps(ctx context.Context, d *Deps) context.Context {
 }
 
 // GetDeps extracts the *Deps from a cobra command's context.
-// If none is set, it returns defaultDeps (the package singleton) so that
+// If none is set, it returns the lazily-built default singleton so that
 // test-time swaps via installExecMock/etc. are visible to all callers.
 func GetDeps(cmd *cobra.Command) *Deps {
 	if cmd == nil {
-		return defaultDeps
+		return ensureDefaultDeps()
 	}
 	ctx := cmd.Context()
 	if ctx == nil {
-		return defaultDeps
+		return ensureDefaultDeps()
 	}
 	if d, ok := ctx.Value(depsKey).(*Deps); ok && d != nil {
 		return d
 	}
-	return defaultDeps
+	return ensureDefaultDeps()
 }
 
 // TestingGetDefaultDeps returns the package-level defaultDeps for use by test
 // packages that need to swap global state. Production code should use GetDeps.
 func TestingGetDefaultDeps() *Deps {
-	return defaultDeps
+	return ensureDefaultDeps()
 }
 
 // fleetDBIssueBackend lazily opens fleet-db for IssueBackend calls. It avoids
@@ -219,6 +249,8 @@ func (b *fleetDBIssueBackend) withBackend(ctx context.Context, op string, fn fun
 	if err != nil {
 		return backend.ErrUnavailable(op, "open fleet-db store", err)
 	}
+	// Apply store-level tracing here (this path bypasses cmdstore.OpenStore).
+	handle.Store = cmdstore.WrapStoreWithTracing(handle.Store)
 	defer func() { _ = handle.Close() }()
 
 	ws, err := bootstrap.ResolveActiveWorkspaceKey(ctx, handle.Store.Workspaces())

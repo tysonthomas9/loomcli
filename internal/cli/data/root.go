@@ -6,9 +6,14 @@ import (
 
 // Persistent flag/env state for the `loom data` subtree. These are set by
 // Cobra flag binding on dataRootCmd and read by every leaf command.
+//
+// --workspace lives only on the root command (see internal/cli/root.go) so
+// `loom --workspace X data ...` and `LOOM_WORKSPACE=X loom data ...` are the
+// supported forms. Adding a duplicate flag here would shadow the root one
+// and leave `LOOM_WORKSPACE` unset on the post-subcommand form, which the
+// fleet backend needs at construction time.
 var (
 	serverURL    string
-	workspaceID  string
 	outputFormat string // "text" | "json"
 )
 
@@ -33,9 +38,10 @@ Examples:
   loom data monitor --server http://localhost:8080
   loom data agent stop falcon --server http://localhost:8080
 
-Note: if you pass --server as a root-level flag (e.g.
-'loom --server URL data show ID'), cli/data cannot read it — use
-'loom data show ID --server URL' or set LOOM_SERVER_URL.`,
+Root-level --server / --workspace are mirrored into LOOM_SERVER_URL /
+LOOM_WORKSPACE in PersistentPreRunE, so 'loom --server URL data show ID'
+and 'loom data show ID --server URL' resolve identically. The data
+subcommand reads from env, not from its own flag.`,
 }
 
 // Commands returns the data sub-tree for registration by cmd/loom/main.go.
@@ -47,7 +53,6 @@ func Commands() []*cobra.Command {
 
 func init() {
 	dataRootCmd.PersistentFlags().StringVar(&serverURL, "server", "", "Loom server base URL (or LOOM_SERVER_URL env var)")
-	dataRootCmd.PersistentFlags().StringVar(&workspaceID, "workspace", "", "Workspace ID (or LOOM_WORKSPACE env var)")
 	dataRootCmd.PersistentFlags().StringVarP(&outputFormat, "output", "o", "text", "Output format: text|json")
 
 	dataRootCmd.AddCommand(

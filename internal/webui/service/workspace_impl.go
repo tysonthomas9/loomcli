@@ -48,6 +48,7 @@ type workspaceServiceImpl struct {
 	jobStore       JobStore
 	setDefaultFn   func(string) error
 	clearDefaultFn func() error
+	workspaceCache *workspaceDataCache
 }
 
 // NewWorkspaceService creates a new WorkspaceService from the given config.
@@ -61,6 +62,7 @@ func NewWorkspaceService(cfg WorkspaceServiceConfig) WorkspaceService {
 		jobStore:       cfg.JobStore,
 		setDefaultFn:   cfg.SetDefaultFn,
 		clearDefaultFn: cfg.ClearDefaultFn,
+		workspaceCache: newWorkspaceDataCache(defaultWorkspaceDataCacheTTL),
 	}
 }
 
@@ -89,7 +91,8 @@ func (s *workspaceServiceImpl) AddWorkspaceRepos(ctx context.Context, req Worksp
 		return nil, classifyWorkspaceCreateError(err)
 	}
 	if s.store != nil && result.WorkspaceID != "" {
-		data, buildErr := storeadapter.BuildWorkspaceDataForKey(ctx, s.store, result.WorkspaceID)
+		s.invalidateWorkspaceCache()
+		data, buildErr := s.loadWorkspaceByID(ctx, result.WorkspaceID)
 		if buildErr != nil {
 			return nil, ErrInternal("failed to load workspace data", buildErr)
 		}
@@ -110,7 +113,9 @@ func (s *workspaceServiceImpl) loadActiveWorkspace(ctx context.Context) (*ops.Wo
 // loadWorkspaceByID returns a specific workspace's topology from FleetDB.
 func (s *workspaceServiceImpl) loadWorkspaceByID(ctx context.Context, wsID string) (*ops.WorkspaceData, error) {
 	if s.store != nil {
-		return storeadapter.BuildWorkspaceDataForKey(ctx, s.store, wsID)
+		return s.workspaceCache.get(ctx, wsID, func(ctx context.Context, key string) (*ops.WorkspaceData, error) {
+			return storeadapter.BuildWorkspaceDataForKey(ctx, s.store, key)
+		})
 	}
 	return nil, nil
 }
@@ -242,7 +247,7 @@ func (s *workspaceServiceImpl) GetWorkspace(ctx context.Context, wsID string) (*
 // unknown, or (nil, false, err) on a load error.
 func (s *workspaceServiceImpl) lookupWorkspace(ctx context.Context, wsID string) (*ops.WorkspaceData, bool, error) {
 	if s.store != nil {
-		data, err := storeadapter.BuildWorkspaceDataForKey(ctx, s.store, wsID)
+		data, err := s.loadWorkspaceByID(ctx, wsID)
 		if err == nil && data != nil {
 			normalizeWorkspaceData(data)
 			for i := range data.Repos {
@@ -291,7 +296,8 @@ func (s *workspaceServiceImpl) CreateWorkspace(ctx context.Context, req Workspac
 
 	var data *ops.WorkspaceData
 	if s.store != nil && result.WorkspaceID != "" {
-		d, buildErr := storeadapter.BuildWorkspaceDataForKey(ctx, s.store, result.WorkspaceID)
+		s.invalidateWorkspaceCache()
+		d, buildErr := s.loadWorkspaceByID(ctx, result.WorkspaceID)
 		if buildErr != nil {
 			return nil, nil, ErrInternal("failed to load created workspace data", buildErr)
 		}
@@ -386,6 +392,7 @@ func (s *workspaceServiceImpl) DeleteWorkspace(ctx context.Context, wsID string)
 		}
 		return nil, ErrInternal(errMsg, err)
 	}
+	s.invalidateWorkspaceCache()
 
 	data, err := storeadapter.BuildActiveWorkspaceData(ctx, s.store)
 	if err != nil {
@@ -410,7 +417,7 @@ func (s *workspaceServiceImpl) RenameWorkspace(ctx context.Context, wsID string,
 		return nil, serr
 	}
 	if ws.Name == newName {
-		data, err := storeadapter.BuildWorkspaceDataForKey(ctx, s.store, ws.Key)
+		data, err := s.loadWorkspaceByID(ctx, ws.Key)
 		if err != nil {
 			return nil, ErrInternal("failed to load workspace data", err)
 		}
@@ -424,7 +431,8 @@ func (s *workspaceServiceImpl) RenameWorkspace(ctx context.Context, wsID string,
 	if err != nil {
 		return nil, ErrInternal("failed to rename workspace", err)
 	}
-	data, err := storeadapter.BuildWorkspaceDataForKey(ctx, s.store, updated.Key)
+	s.invalidateWorkspaceCache()
+	data, err := s.loadWorkspaceByID(ctx, updated.Key)
 	if err != nil {
 		return nil, ErrInternal("failed to load workspace data", err)
 	}
@@ -535,12 +543,19 @@ func (s *workspaceServiceImpl) PatchWorkspaceBackend(ctx context.Context, wsID s
 	if _, err := s.store.Daemon().Upsert(ctx, profile); err != nil {
 		return nil, ErrInternal("failed to save workspace backend config", err)
 	}
-	data, err := storeadapter.BuildWorkspaceDataForKey(ctx, s.store, ws.Key)
+	s.invalidateWorkspaceCache()
+	data, err := s.loadWorkspaceByID(ctx, ws.Key)
 	if err != nil {
 		return nil, ErrInternal("failed to load workspace data", err)
 	}
 	normalizeWorkspaceData(data)
 	return data, nil
+}
+
+func (s *workspaceServiceImpl) invalidateWorkspaceCache() {
+	if s.workspaceCache != nil {
+		s.workspaceCache.invalidateAll()
+	}
 }
 
 func poolStatsFromDaemon(d daemon.PoolStats) PoolStats {

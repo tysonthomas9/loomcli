@@ -72,7 +72,7 @@ func runShow(t *testing.T, srvURL, id, format string) (string, error) {
 	t.Helper()
 	resetClient()
 	serverURL = srvURL
-	workspaceID = "default"
+	t.Setenv("LOOM_WORKSPACE", "default")
 	outputFormat = format
 
 	// Run showCmd's RunE directly to capture stdout via a pipe. We swap

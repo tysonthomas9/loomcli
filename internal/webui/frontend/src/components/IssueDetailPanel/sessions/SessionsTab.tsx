@@ -1,5 +1,5 @@
 /**
- * SessionsTab - Container component for the Sessions tab in IssueDetailPanel.
+ * SessionsTab - Container component for the Runs tab in IssueDetailPanel.
  * Uses useTaskSessions to fetch session data, manages selected session state,
  * and renders SessionTimeline + SessionDetailView in a two-column layout.
  */
@@ -44,7 +44,7 @@ export function SessionsTab({ taskId }: SessionsTabProps): JSX.Element {
   if (error && sessions.length === 0) {
     return (
       <div className={styles.emptyState}>
-        Failed to load sessions: {error.message}
+        Failed to load runs: {error.message}
       </div>
     );
   }
@@ -53,7 +53,7 @@ export function SessionsTab({ taskId }: SessionsTabProps): JSX.Element {
   if (!isLoading && sessions.length === 0) {
     return (
       <div className={styles.emptyState} data-testid="sessions-empty">
-        No sessions recorded yet
+        No agent runs recorded yet
       </div>
     );
   }
@@ -62,7 +62,7 @@ export function SessionsTab({ taskId }: SessionsTabProps): JSX.Element {
     <div className={styles.outerContainer} data-testid="sessions-tab">
       <div className={styles.costSummary}>
         <span className={styles.summaryItem}>
-          <span className={styles.summaryLabel}>Sessions</span>
+          <span className={styles.summaryLabel}>Runs</span>
           <span className={styles.summaryValue}>{summary.count}</span>
         </span>
         <span className={styles.summaryItem}>
@@ -84,6 +84,13 @@ export function SessionsTab({ taskId }: SessionsTabProps): JSX.Element {
             </span>
           </span>
         )}
+        {summary.failedSessions > 0 && (
+          <span className={styles.summaryItem}>
+            <span className={styles.failedBadge}>
+              {summary.failedSessions} failed
+            </span>
+          </span>
+        )}
       </div>
       <div className={styles.container}>
         <SessionTimeline
@@ -95,9 +102,7 @@ export function SessionsTab({ taskId }: SessionsTabProps): JSX.Element {
         {selectedSession ? (
           <SessionDetailView taskId={taskId} session={selectedSession} />
         ) : (
-          <div className={styles.detailEmpty}>
-            Select a session to view details
-          </div>
+          <div className={styles.detailEmpty}>Select a run to view details</div>
         )}
       </div>
     </div>
@@ -109,18 +114,27 @@ interface CostSummary {
   totalTokens: number;
   totalCost: number;
   activeSessions: number;
+  failedSessions: number;
 }
 
 function computeCostSummary(sessions: SessionRecord[]): CostSummary {
   let totalTokens = 0;
   let totalCost = 0;
   let activeSessions = 0;
+  let failedSessions = 0;
   for (const s of sessions) {
     totalTokens += s.input_tokens + s.output_tokens;
     totalCost += s.estimated_cost_usd;
     if (s.is_active) activeSessions++;
+    if (s.status === "failed") failedSessions++;
   }
-  return { count: sessions.length, totalTokens, totalCost, activeSessions };
+  return {
+    count: sessions.length,
+    totalTokens,
+    totalCost,
+    activeSessions,
+    failedSessions,
+  };
 }
 
 function formatTokensShort(count: number): string {

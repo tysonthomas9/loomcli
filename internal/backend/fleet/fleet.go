@@ -336,6 +336,7 @@ func (b *FleetBackend) Get(ctx context.Context, id string) (*backend.IssueDetail
 	issue := wire.toIssue()
 	details := types.IssueDetails{Issue: issue}
 	result := detailsToDetailData(&details)
+	result.IssueData.Labels = append([]string(nil), wire.Labels...)
 	result.IssueData.DependencyCount = wire.DependencyCount
 	result.IssueData.DependentCount = wire.DependentCount
 
@@ -352,39 +353,6 @@ func (b *FleetBackend) Get(ctx context.Context, id string) (*backend.IssueDetail
 	}
 
 	return &result, nil
-}
-
-// fetchDependencies calls fleet-db's GET /issues/{id}/deps and projects
-// the native payload ({"dependencies":[{issue_id, depends_on_id, type,
-// created_at, ...}]}) into the backend.DependencyData shape.
-func (b *FleetBackend) fetchDependencies(ctx context.Context, id string) ([]backend.DependencyData, error) {
-	resp, err := b.exec(ctx, "Get", "GET", "/issues/"+url.PathEscape(id)+"/deps", nil)
-	if err != nil {
-		return nil, err
-	}
-	if !hasData(resp) {
-		return nil, nil
-	}
-	type depWire struct {
-		IssueID     string `json:"issue_id"`
-		DependsOnID string `json:"depends_on_id"`
-		Type        string `json:"type"`
-	}
-	var wrap struct {
-		Dependencies []depWire `json:"dependencies"`
-	}
-	if json.Unmarshal(resp.Data, &wrap) != nil {
-		return nil, nil
-	}
-	out := make([]backend.DependencyData, 0, len(wrap.Dependencies))
-	for _, d := range wrap.Dependencies {
-		out = append(out, backend.DependencyData{
-			IssueID:     d.IssueID,
-			DependsOnID: d.DependsOnID,
-			Type:        d.Type,
-		})
-	}
-	return out, nil
 }
 
 func (b *FleetBackend) List(ctx context.Context, opts backend.ListOpts) ([]backend.IssueData, error) {
@@ -424,11 +392,7 @@ func (b *FleetBackend) Blocked(ctx context.Context, opts backend.BlockedOpts) ([
 	if !hasData(resp) {
 		return []backend.IssueData{}, nil
 	}
-	issues, err := unmarshalListOrWrapper[*blockedIssueWire](resp.Data, "Blocked")
-	if err != nil {
-		return nil, err
-	}
-	return blockedIssuesToData(issues), nil
+	return unmarshalBlockedIssueList(resp.Data, "Blocked")
 }
 
 // Stats builds StatsData from the fleet server's count endpoint with
@@ -759,9 +723,15 @@ func (b *FleetBackend) applyLabelUpdates(ctx context.Context, id string, params 
 		if err := b.AddLabel(ctx, id, label); err != nil {
 			return err
 		}
+		if err := b.waitForLabelState(ctx, id, label, true); err != nil {
+			return err
+		}
 	}
 	for _, label := range params.RemoveLabels {
 		if err := b.RemoveLabel(ctx, id, label); err != nil {
+			return err
+		}
+		if err := b.waitForLabelState(ctx, id, label, false); err != nil {
 			return err
 		}
 	}
@@ -777,6 +747,9 @@ func (b *FleetBackend) applyLabelUpdates(ctx context.Context, id string, params 
 			if err := b.RemoveLabel(ctx, id, label); err != nil {
 				return err
 			}
+			if err := b.waitForLabelState(ctx, id, label, false); err != nil {
+				return err
+			}
 		}
 	}
 	for _, label := range params.SetLabels {
@@ -784,9 +757,38 @@ func (b *FleetBackend) applyLabelUpdates(ctx context.Context, id string, params 
 			if err := b.AddLabel(ctx, id, label); err != nil {
 				return err
 			}
+			if err := b.waitForLabelState(ctx, id, label, true); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
+}
+
+func (b *FleetBackend) waitForLabelState(ctx context.Context, id, label string, wantPresent bool) error {
+	ticker := time.NewTicker(25 * time.Millisecond)
+	defer ticker.Stop()
+	timeout := time.NewTimer(2 * time.Second)
+	defer timeout.Stop()
+
+	var lastErr error
+	for {
+		detail, err := b.Get(ctx, id)
+		if err == nil && detail != nil && containsString(detail.Labels, label) == wantPresent {
+			return nil
+		}
+		if err != nil {
+			lastErr = err
+		}
+
+		select {
+		case <-ctx.Done():
+			return backend.ErrTimeout("Update", "label projection did not settle", ctx.Err())
+		case <-timeout.C:
+			return backend.ErrTimeout("Update", "label projection did not settle", lastErr)
+		case <-ticker.C:
+		}
+	}
 }
 
 func hasLabelUpdate(params backend.UpdateParams) bool {
@@ -940,111 +942,3 @@ func (b *FleetBackend) Delete(ctx context.Context, params backend.DeleteParams) 
 	}
 	return nil
 }
-
-// --- Dependency operations ---
-
-func (b *FleetBackend) AddDependency(ctx context.Context, params backend.DepAddParams) error {
-	// fleet-db mounts dependency routes at /issues/{id}/deps (abbreviated)
-	// and its AddDependencyRequest names the dep kind "type" (not
-	// "dep_type"). Path + body tweaked to match.
-	type depReq struct {
-		DependsOnID string `json:"depends_on_id"`
-		Type        string `json:"type,omitempty"`
-	}
-	req := depReq{
-		DependsOnID: params.ToID,
-		Type:        params.DepType,
-	}
-	_, err := b.exec(ctx, "AddDependency", "POST", "/issues/"+url.PathEscape(params.FromID)+"/deps", req)
-	return err
-}
-
-func (b *FleetBackend) RemoveDependency(ctx context.Context, params backend.DepRemoveParams) error {
-	// fleet-db delete route is /issues/{id}/deps/{depends_on_id}; abbreviated
-	// to match the add route.
-	_, err := b.exec(ctx, "RemoveDependency", "DELETE", "/issues/"+url.PathEscape(params.FromID)+"/deps/"+url.PathEscape(params.ToID), nil)
-	return err
-}
-
-// --- Label operations ---
-
-func (b *FleetBackend) AddLabel(ctx context.Context, id string, label string) error {
-	req := struct {
-		Label string `json:"label"`
-	}{Label: label}
-	_, err := b.exec(ctx, "AddLabel", "POST", "/issues/"+url.PathEscape(id)+"/labels", req)
-	return err
-}
-
-func (b *FleetBackend) RemoveLabel(ctx context.Context, id string, label string) error {
-	_, err := b.exec(ctx, "RemoveLabel", "DELETE", "/issues/"+url.PathEscape(id)+"/labels/"+url.PathEscape(label), nil)
-	return err
-}
-
-// --- Comment operations ---
-
-func (b *FleetBackend) ListComments(ctx context.Context, id string) ([]backend.CommentData, error) {
-	// fleet-db exposes GET /issues/{id}/comments as a first-class endpoint.
-	resp, err := b.exec(ctx, "ListComments", "GET", "/issues/"+url.PathEscape(id)+"/comments", nil)
-	if err != nil {
-		return nil, err
-	}
-	if !hasData(resp) {
-		return []backend.CommentData{}, nil
-	}
-	// Try native wrapper {"comments":[...]} first, then bare array.
-	var wrap struct {
-		Comments []fleetCommentWire `json:"comments"`
-	}
-	if json.Unmarshal(resp.Data, &wrap) == nil && wrap.Comments != nil {
-		out := make([]backend.CommentData, 0, len(wrap.Comments))
-		for _, w := range wrap.Comments {
-			c := w.toTypesComment()
-			out = append(out, commentToData(&c))
-		}
-		backend.SortCommentsByCreation(out)
-		return out, nil
-	}
-	var bare []fleetCommentWire
-	if err := json.Unmarshal(resp.Data, &bare); err != nil {
-		return nil, backend.ErrInternal("ListComments", "unmarshal response", err)
-	}
-	out := make([]backend.CommentData, 0, len(bare))
-	for _, w := range bare {
-		c := w.toTypesComment()
-		out = append(out, commentToData(&c))
-	}
-	backend.SortCommentsByCreation(out)
-	return out, nil
-}
-
-func (b *FleetBackend) AddComment(ctx context.Context, params backend.CommentAddParams) (*backend.CommentData, error) {
-	// Response body: fleet-db returns a "body" field + string ID; loom's
-	// canonical types.Comment has "text" + int64 ID. Unmarshal into a
-	// local struct that mirrors fleet-db's wire shape, then project to
-	// types.Comment.
-	type commentReq struct {
-		Body string `json:"body"`
-	}
-	resp, err := b.exec(ctx, "AddComment", "POST", "/issues/"+url.PathEscape(params.IssueID)+"/comments", commentReq{Body: params.Text})
-	if err != nil {
-		return nil, err
-	}
-	if !hasData(resp) {
-		return nil, backend.ErrInternal("AddComment", "empty response from server", nil)
-	}
-	var wire fleetCommentWire
-	if err := json.Unmarshal(resp.Data, &wire); err != nil {
-		return nil, backend.ErrInternal("AddComment", "unmarshal response", err)
-	}
-	comment := wire.toTypesComment()
-	result := commentToData(&comment)
-	return &result, nil
-}
-
-// fleetCommentWire mirrors fleet-db's comment response shape so the
-// unmarshal path doesn't collide with types.Comment field tags. Fleet-db
-// can emit ID as either string (per-issue sequence like "2") or number;
-// json.RawMessage tolerates both and the toTypesComment projection
-// normalizes to int64.
-// Field rename: body → Text.

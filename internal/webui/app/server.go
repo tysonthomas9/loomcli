@@ -101,8 +101,9 @@ type Server struct {
 	// Async workspace creation jobs
 	jobStore *svcimpl.WorkspaceJobStore
 
-	// Workspace existence checker
-	wsExistsFn func(string) bool
+	// Workspace resolver
+	wsExistsFn  func(string) bool // legacy identity resolver used by tests
+	wsResolveFn middleware.WorkspaceResolveFn
 
 	// Notify token for session change endpoint auth
 	notifyToken     string
@@ -196,9 +197,6 @@ func (app *Server) Close() {
 		if app.handlers.ClientErrLimiter != nil {
 			app.handlers.ClientErrLimiter.Stop()
 		}
-		if app.handlers.CSPLimiter != nil {
-			app.handlers.CSPLimiter.Stop()
-		}
 		if app.handlers.AuthCfgLimiter != nil {
 			app.handlers.AuthCfgLimiter.Stop()
 		}
@@ -243,7 +241,13 @@ func (app *Server) run(ctx context.Context) error { //nolint:funlen // server li
 	// Prometheus HTTP metrics: outer wraps the chain to record duration+status;
 	// routeCapture must run innermost (after mux routes) to read r.Pattern.
 	metricsOuter, routeCapture := webui.PromMetricsMiddleware()
+	// Tracing pair mirrors the same outer/inner pattern. The outer (otelhttp)
+	// extracts traceparent and starts a span before any other middleware
+	// runs; the inner promotes the captured route template onto the span
+	// name + http.route attribute.
+	tracingOuter, tracingInner := webui.TracingWithRouteName()
 	chain := middleware.Chain(
+		middleware.Middleware(tracingOuter),
 		middleware.Recover(app.config.Logger),
 		middleware.RequestLog(app.config.Logger),
 		middleware.Middleware(metricsOuter),
@@ -255,6 +259,7 @@ func (app *Server) run(ctx context.Context) error { //nolint:funlen // server li
 		authMW,
 		middleware.CORS(app.corsConfig),
 		middleware.Middleware(routeCapture),
+		middleware.Middleware(tracingInner),
 	)
 	var handler http.Handler
 	if os.Getenv("LOOM_DISABLE_H2C") == "1" {

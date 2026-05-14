@@ -139,6 +139,18 @@ describe("SessionDetailView", () => {
       expect(screen.getByText("1")).toBeInTheDocument();
     });
 
+    it("shows failed run error class in an alert banner", () => {
+      const session = createSession({
+        status: "failed",
+        exit_code: 1,
+        error_class: "AuthFailure",
+      });
+      render(<SessionDetailView taskId="task-1" session={session} />);
+      expect(screen.getByTestId("run-error-banner")).toHaveTextContent(
+        "AuthFailure",
+      );
+    });
+
     it("renders a Files stat when files_changed > 0 with added/removed detail", () => {
       render(<SessionDetailView taskId="task-1" session={defaultSession} />);
       expect(screen.getByText("Files")).toBeInTheDocument();

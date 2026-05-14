@@ -18,8 +18,16 @@ import {
 import { fetchWorkspaceApi } from "@/hooks/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { CreateWorkspaceModal } from "@/components/CreateWorkspaceModal";
+import {
+  OnboardingFlow,
+  type OnboardingStep,
+} from "@/components/OnboardingFlow";
 import { KeyboardShortcutProvider } from "@/hooks";
 import { AUTH_MODE_OPEN } from "@/types/common";
+import {
+  ONBOARDING_REPO_URL,
+  ONBOARDING_WORKSPACE_NAME,
+} from "@/utils/onboardingDefaults";
 
 export function RedirectToWorkspace() {
   const navigate = useNavigate();
@@ -76,6 +84,46 @@ export function RedirectToWorkspace() {
   }, [mode, isAuthenticated, isLoading, resolveWorkspace]);
 
   if (!resolving) {
+    const onboardingSteps: OnboardingStep[] = [
+      {
+        id: "workspace-repo",
+        title: "Create workspace with repo",
+        description:
+          "Create the first workspace and clone the sample repo in one fixed setup step.",
+        status: "current",
+        actionLabel: "Create Workspace",
+        onAction: () => setShowCreate(true),
+      },
+      {
+        id: "verify-repo",
+        title: "Verify repository",
+        description:
+          "Confirm the repo is cloned, readable, and ready for agent work.",
+        status: "blocked",
+      },
+      {
+        id: "setup-backend",
+        title: "Set up AI CLI",
+        description:
+          "Install, login, or configure the local CLI from an inline terminal when needed.",
+        status: "blocked",
+      },
+      {
+        id: "create-agent",
+        title: "Create agent",
+        description:
+          "Add the first agent definition with the sample repo and backend preselected.",
+        status: "blocked",
+      },
+      {
+        id: "create-issue",
+        title: "Create first issue",
+        description:
+          "Create the initial task so the agent has concrete work to run.",
+        status: "blocked",
+      },
+    ];
+
     // CreateWorkspaceModal uses useRegisterEscapeLayer which requires a
     // KeyboardShortcutProvider ancestor. The root "/" route renders
     // outside App's provider, so wrap locally.
@@ -83,37 +131,28 @@ export function RedirectToWorkspace() {
       <KeyboardShortcutProvider>
         <div
           style={{
-            display: "flex",
-            flexDirection: "column",
+            display: "grid",
             alignItems: "center",
             justifyContent: "center",
-            height: "100vh",
-            gap: "16px",
-            color: "var(--text-secondary, #666)",
+            minHeight: "100vh",
+            padding: "32px 0",
+            background: "var(--color-bg-secondary)",
           }}
         >
-          <p style={{ margin: 0, fontSize: "15px" }}>
-            No workspaces found. Create one to get started.
-          </p>
-          <button
-            onClick={() => setShowCreate(true)}
-            style={{
-              padding: "10px 24px",
-              border: "none",
-              borderRadius: "8px",
-              background: "var(--bg-accent, #1976d2)",
-              color: "#fff",
-              fontSize: "14px",
-              fontWeight: 500,
-              cursor: "pointer",
-            }}
-          >
-            Create Workspace
-          </button>
+          <OnboardingFlow
+            title="No workspaces found"
+            subtitle="Start with the guided onboarding flow. Step 1 creates a workspace and clones the sample repo; the remaining steps stay visible so setup can continue after creation."
+            steps={onboardingSteps}
+          />
         </div>
         <CreateWorkspaceModal
           isOpen={showCreate}
           onClose={() => setShowCreate(false)}
+          initialValues={{
+            name: ONBOARDING_WORKSPACE_NAME,
+            type: "clone",
+            urlInput: ONBOARDING_REPO_URL,
+          }}
           onSuccess={(data, createdName) => {
             setShowCreate(false);
             const ws = data.workspaces.find(

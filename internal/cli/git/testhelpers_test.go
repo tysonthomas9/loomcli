@@ -279,6 +279,13 @@ func setupWorkspaceConfigInDir(t *testing.T, configDir string, cfg *config.LoomC
 	t.Helper()
 	t.Setenv("LOOM_CONFIG_DIR", configDir)
 	t.Setenv("LOOM_FLEET_DB_ACTOR", "test")
+	// Production resolveActiveWorkspaceName requires LOOM_WORKSPACE
+	// (or --workspace) to select the active workspace; set it from
+	// the test config's DefaultWorkspace (uppercased to match the
+	// fleet-db store key convention).
+	if cfg != nil && cfg.DefaultWorkspace != "" {
+		t.Setenv("LOOM_WORKSPACE", strings.ToUpper(cfg.DefaultWorkspace))
+	}
 	config.InvalidateConfigCache()
 	oldResolver := cli.TestingResetDefaultResolver()
 

@@ -183,24 +183,6 @@ paths:
         "429":
           description: Rate limited
 
-  /api/csp-report:
-    post:
-      operationId: reportCSPViolation
-      tags: [health]
-      summary: CSP violation reporting (rate-limited, 60 req/min/IP)
-      security: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-      responses:
-        "200":
-          description: Report recorded
-        "429":
-          description: Rate limited
-
   # ── Stats ───────────────────────────────────────────────────────────────
   /api/workspaces/{ws}/stats:
     get:
@@ -319,6 +301,25 @@ paths:
                 $ref: "#/components/schemas/MessageResponse"
         "404":
           description: Workspace not found
+
+  /api/workspaces/{ws}/monitor/status:
+    get:
+      operationId: getWorkspaceMonitorStatus
+      tags: [monitor]
+      summary: Full monitor dashboard data for a workspace
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: Dashboard status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MonitorStatusResponse"
+        "404":
+          description: Workspace not found
+        "503":
+          description: Data collection unavailable
 
   /api/workspaces/jobs/{id}:
     get:
@@ -2008,6 +2009,124 @@ paths:
                 properties:
                   active_tab:
                     type: string
+
+  # ── Terminal Setup ──────────────────────────────────────────────────────
+  /api/workspaces/{ws}/terminal/setup:
+    post:
+      operationId: startTerminalSetup
+      tags: [terminal-tabs]
+      summary: Start a backend-owned setup command in a setup terminal
+      description: |
+        Opens or reuses the workspace's per-backend setup terminal and runs the
+        requested action (install / login / configure / test). For supported
+        backends (claude, codex, gemini, opencode, cursor) the resolved command
+        is run inside the PTY; for backends flagged as manual (cursor login)
+        the terminal shows credential guidance instead.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [backend, action]
+              properties:
+                backend:
+                  type: string
+                  description: AI backend name (claude, codex, gemini, opencode, cursor)
+                action:
+                  type: string
+                  enum: [install, login, configure, test]
+      responses:
+        "201":
+          description: Setup terminal created or reused
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  session_name:
+                    type: string
+                  label:
+                    type: string
+                  backend:
+                    type: string
+                  action:
+                    type: string
+                  command:
+                    type: string
+                  title:
+                    type: string
+                  message:
+                    type: string
+                  manual:
+                    type: boolean
+                  created:
+                    type: boolean
+        "400":
+          description: Invalid backend or action
+        "503":
+          description: Terminal manager not available
+
+  # ── Onboarding ──────────────────────────────────────────────────────────
+  /api/workspaces/{ws}/onboarding/first-task:
+    post:
+      operationId: runOnboardingFirstTask
+      tags: [onboarding]
+      summary: Create the onboarding first task and queue an agent start
+      description: |
+        Creates an open, unassigned issue and requests the named agent start
+        working on it via the lifecycle backend. If the lifecycle request
+        fails the just-created issue is deleted in a bounded cleanup so the
+        kanban does not accumulate orphans on disconnect.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [agent_name, title]
+              properties:
+                agent_name:
+                  type: string
+                title:
+                  type: string
+                description:
+                  type: string
+                issue_type:
+                  type: string
+                  default: task
+                priority:
+                  type: integer
+                source_repo:
+                  type: string
+      responses:
+        "201":
+          description: Issue created and agent start queued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  issue:
+                    type: object
+                  agent_name:
+                    type: string
+                  started:
+                    type: boolean
+                  queued:
+                    type: boolean
+        "400":
+          description: Validation error (missing agent_name or title)
+        "404":
+          description: Agent not found
+        "503":
+          description: Agent lifecycle backend unavailable
 
   # ── Agent Terminal ──────────────────────────────────────────────────────
   /api/workspaces/{ws}/agents/{name}/terminal/info:
@@ -4300,7 +4419,7 @@ components:
     # ── Monitor Schemas ─────────────────────────────────────────────────
     MonitorStatusResponse:
       type: object
-      required: [workspace, agents, tasks, in_progress_list, agent_tasks, stats, sync, timestamp]
+      required: [workspace, agents, tasks, needs_planning, ready_to_implement, needs_review, in_progress, in_progress_list, backlog, closed, agent_tasks, stats, sync, timestamp]
       properties:
         workspace:
           $ref: "#/components/schemas/MonitorWorkspaceInfo"
@@ -4310,7 +4429,31 @@ components:
             $ref: "#/components/schemas/MonitorAgentStatus"
         tasks:
           $ref: "#/components/schemas/MonitorTaskSummary"
+        needs_planning:
+          type: array
+          items:
+            $ref: "#/components/schemas/MonitorTaskInfo"
+        ready_to_implement:
+          type: array
+          items:
+            $ref: "#/components/schemas/MonitorTaskInfo"
+        needs_review:
+          type: array
+          items:
+            $ref: "#/components/schemas/MonitorTaskInfo"
+        in_progress:
+          type: array
+          items:
+            $ref: "#/components/schemas/MonitorTaskInfo"
         in_progress_list:
+          type: array
+          items:
+            $ref: "#/components/schemas/MonitorTaskInfo"
+        backlog:
+          type: array
+          items:
+            $ref: "#/components/schemas/MonitorTaskInfo"
+        closed:
           type: array
           items:
             $ref: "#/components/schemas/MonitorTaskInfo"

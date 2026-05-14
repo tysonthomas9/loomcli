@@ -24,6 +24,12 @@ type fakeIssueBackend struct {
 	getResult           *backend.IssueDetailData
 	getErr              error
 	getCalls            []string
+	listResult          []backend.IssueData
+	listErr             error
+	listCalls           []backend.ListOpts
+	blockedResult       []backend.IssueData
+	blockedErr          error
+	blockedCalls        []backend.BlockedOpts
 	createResult        *backend.IssueData
 	createErr           error
 	createParams        []backend.CreateParams
@@ -90,14 +96,20 @@ func (f *fakeIssueBackend) Get(_ context.Context, id string) (*backend.IssueDeta
 	return f.getResult, f.getErr
 }
 
-func (f *fakeIssueBackend) List(_ context.Context, _ backend.ListOpts) ([]backend.IssueData, error) {
-	return nil, nil
+func (f *fakeIssueBackend) List(_ context.Context, opts backend.ListOpts) ([]backend.IssueData, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.listCalls = append(f.listCalls, opts)
+	return f.listResult, f.listErr
 }
 func (f *fakeIssueBackend) Ready(_ context.Context, _ backend.ReadyOpts) ([]backend.IssueData, error) {
 	return nil, nil
 }
-func (f *fakeIssueBackend) Blocked(_ context.Context, _ backend.BlockedOpts) ([]backend.IssueData, error) {
-	return nil, nil
+func (f *fakeIssueBackend) Blocked(_ context.Context, opts backend.BlockedOpts) ([]backend.IssueData, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.blockedCalls = append(f.blockedCalls, opts)
+	return f.blockedResult, f.blockedErr
 }
 func (f *fakeIssueBackend) Stats(_ context.Context) (*backend.StatsData, error) { return nil, nil }
 func (f *fakeIssueBackend) Count(_ context.Context, _ backend.CountOpts) (int, error) {

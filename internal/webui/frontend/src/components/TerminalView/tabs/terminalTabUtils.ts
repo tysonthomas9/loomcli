@@ -45,6 +45,10 @@ export function getBackendFromSessionName(
   sessionName: string,
   defaultBackend?: string,
 ): string {
+  const leadIndex = sessionName.lastIndexOf("--lead-");
+  const localName =
+    leadIndex >= 0 ? sessionName.slice(leadIndex + 2) : sessionName;
+  if (localName.startsWith("lead-shell-")) return "shell";
   // Match workspace-prefixed: {workspace}--lead-{backend}-{n}
   const prefixedMatch = sessionName.match(/^.+--lead-(.+)-\d+$/);
   if (prefixedMatch?.[1]) return prefixedMatch[1];

@@ -15,6 +15,7 @@ import "@testing-library/jest-dom";
 
 import type {
   UseBackendConfigReturn,
+  UseBackendsReturn,
   UseLocalSettingsReturn,
 } from "@/hooks/workspace";
 import type { UseTerminalFontReturn } from "@/hooks/terminal";
@@ -28,7 +29,12 @@ vi.mock("@/hooks/workspace", async () => {
     await vi.importActual<typeof import("@/hooks/workspace")>(
       "@/hooks/workspace",
     );
-  return { ...actual, useBackendConfig: vi.fn(), useLocalSettings: vi.fn() };
+  return {
+    ...actual,
+    useBackendConfig: vi.fn(),
+    useBackends: vi.fn(),
+    useLocalSettings: vi.fn(),
+  };
 });
 
 vi.mock("@/hooks/terminal", async () => {
@@ -53,11 +59,16 @@ vi.mock("@/hooks/ui", async () => {
   };
 });
 
-import { useBackendConfig, useLocalSettings } from "@/hooks/workspace";
+import {
+  useBackendConfig,
+  useBackends,
+  useLocalSettings,
+} from "@/hooks/workspace";
 import { useTerminalFont } from "@/hooks/terminal";
 import { useToast } from "@/hooks/ui";
 
 const mockUseBackendConfig = vi.mocked(useBackendConfig);
+const mockUseBackends = vi.mocked(useBackends);
 const mockUseLocalSettings = vi.mocked(useLocalSettings);
 const mockUseTerminalFont = vi.mocked(useTerminalFont);
 const mockUseToast = vi.mocked(useToast);
@@ -90,6 +101,37 @@ function createMockHookReturn(
     isSaving: false,
     isCached: false,
     updateBackend: vi.fn().mockResolvedValue(undefined),
+    refetch: vi.fn(),
+    ...overrides,
+  };
+}
+
+function createMockBackendsReturn(
+  overrides?: Partial<UseBackendsReturn>,
+): UseBackendsReturn {
+  return {
+    backends: [
+      {
+        name: "anthropic",
+        displayName: "Anthropic",
+        provider: "Anthropic",
+        brandColor: "#d4a574",
+        available: true,
+        installed: true,
+        apiKeySet: true,
+      },
+      {
+        name: "openai",
+        displayName: "OpenAI",
+        provider: "OpenAI",
+        brandColor: "#10a37f",
+        available: false,
+        installed: false,
+        apiKeySet: false,
+      },
+    ],
+    isLoading: false,
+    error: null,
     refetch: vi.fn(),
     ...overrides,
   };
@@ -143,6 +185,7 @@ describe("SettingsView", () => {
       dismissToast: vi.fn(),
       dismissAll: vi.fn(),
     });
+    mockUseBackends.mockReturnValue(createMockBackendsReturn());
     mockUseTerminalFont.mockReturnValue(createMockFontReturn());
     mockUseLocalSettings.mockReturnValue(createMockLocalSettingsReturn());
   });

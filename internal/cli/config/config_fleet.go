@@ -23,7 +23,7 @@ func ResolveFleetConfig(daemon *DaemonSettings) FleetClientConfig {
 	if v, ok := os.LookupEnv("LOOM_FLEET_URL"); ok {
 		url = v
 	}
-	if v, ok := os.LookupEnv("LOOM_FLEET_WORKSPACE"); ok {
+	if v, ok := os.LookupEnv("LOOM_WORKSPACE"); ok {
 		workspace = v
 	}
 	if v, ok := os.LookupEnv("LOOM_FLEET_API_KEY"); ok {

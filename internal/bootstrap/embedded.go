@@ -20,6 +20,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/localsettings"
 	"github.com/tysonthomas9/loomcli/internal/lockfile"
 	"github.com/tysonthomas9/loomcli/internal/netutil"
+	"github.com/tysonthomas9/loomcli/internal/observability/tracing"
 	"github.com/tysonthomas9/loomcli/internal/webui/localredis"
 )
 
@@ -366,6 +367,14 @@ func StartEmbedded(ctx context.Context, dataDir string, logger *slog.Logger) (*E
 		"FLEET_SERVER_ADDR="+httpAddr,
 		"FLEET_REDIS_ADDR="+redisAddr,
 	)
+	// Propagate the active trace context to the spawned fleet-db so its
+	// bootstrap work shows up as a child of the loom span that triggered
+	// the spawn. Per-request tracing flows through the inbound HTTP header
+	// independently; this only matters for startup work. See
+	// docs/observability/tracing-contract.md §5.
+	if tp := tracing.TraceparentFromContext(ctx); tp != "" {
+		cmd.Env = append(cmd.Env, "LOOM_TRACE_PARENT="+tp)
+	}
 	if redisCfg.Enabled {
 		cmd.Env = append(cmd.Env,
 			"FLEET_REDIS_DB="+fmt.Sprintf("%d", redisCfg.DB),

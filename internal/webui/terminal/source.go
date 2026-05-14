@@ -65,6 +65,15 @@ type PTYSource interface {
 	MaxSessions() int
 }
 
+// PTYCommandRunner is implemented by PTY sources that can start a session
+// without a browser attachment and write backend-owned input into it. Setup
+// flows use this to run a typed command inside the same TTY the user later
+// controls from the web terminal.
+type PTYCommandRunner interface {
+	EnsureSession(key SessionKey, cols, rows uint16, argv []string) (created bool, err error)
+	WriteToSession(key SessionKey, p []byte) error
+}
+
 // Attachment is the handle returned by PTYSource.AttachSession. The WS
 // handler reads output frames from Output() and writes user input via
 // WriteInput(). Callers release the attachment by invoking
@@ -102,6 +111,8 @@ type Attachment interface {
 var (
 	_ PTYSource        = (*PTYManager)(nil)
 	_ PTYSource        = (*MultiPTYManager)(nil)
+	_ PTYCommandRunner = (*PTYManager)(nil)
+	_ PTYCommandRunner = (*MultiPTYManager)(nil)
 	_ Attachment       = (*localAttachment)(nil)
 	_ realtime.Resizer = (*localAttachment)(nil)
 )

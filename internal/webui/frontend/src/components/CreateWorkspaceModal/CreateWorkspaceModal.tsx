@@ -9,16 +9,12 @@ import { createPortal } from "react-dom";
 
 import { createWorkspace } from "@/hooks/api";
 import type { CreateWorkspaceRequest, WorkspaceData } from "@/api/workspace";
-import {
-  useRegisterEscapeLayer,
-  LAYER_MODAL,
-  useJobPolling,
-} from "@/hooks";
+import { useRegisterEscapeLayer, LAYER_MODAL, useJobPolling } from "@/hooks";
 import { useFolderPicker } from "@/hooks/common";
 import { useFocusTrap, useFocusReturn } from "@/hooks/ui";
 import styles from "./CreateWorkspaceModal.module.css";
 
-type WorkspaceType = "empty" | "clone" | "template";
+export type WorkspaceType = "empty" | "clone" | "template";
 
 const TYPE_CARDS: {
   type: WorkspaceType;
@@ -126,6 +122,15 @@ export interface CreateWorkspaceModalProps {
     createdName: string,
     warnings?: string[],
   ) => void;
+  initialValues?: {
+    name?: string;
+    type?: WorkspaceType;
+    path?: string;
+    cloneUrls?: string[];
+    urlInput?: string;
+    repos?: string[];
+    repoInput?: string;
+  };
 }
 
 const WORKSPACE_NAME_RE = /^[A-Za-z0-9_-]+$/;
@@ -152,6 +157,7 @@ export function CreateWorkspaceModal({
   isOpen,
   onClose,
   onSuccess,
+  initialValues,
 }: CreateWorkspaceModalProps): JSX.Element | null {
   const [name, setName] = useState("");
   const [type, setType] = useState<WorkspaceType>("clone");
@@ -168,7 +174,14 @@ export function CreateWorkspaceModal({
   const [repoInput, setRepoInput] = useState("");
 
   // Async clone job polling
-  const job = useJobPolling(name, {
+  const {
+    isPolling,
+    progress: jobProgress,
+    elapsed: jobElapsed,
+    error: jobError,
+    startJob,
+    reset: resetJob,
+  } = useJobPolling(name, {
     onSuccess,
     onClose,
     onFinish: () => setIsSubmitting(false),
@@ -176,22 +189,38 @@ export function CreateWorkspaceModal({
 
   const dialogRef = useRef<HTMLDivElement>(null);
   const nameRef = useRef<HTMLInputElement>(null);
+  const wasOpenRef = useRef(false);
 
   // Reset form state when modal opens
   useEffect(() => {
-    if (isOpen) {
-      setName("");
-      setType("clone");
-      setPath("");
-      setIsSubmitting(false);
-      setError("");
-      setCloneUrls([]);
-      setUrlInput("");
-      setRepos([]);
-      setRepoInput("");
-      job.reset();
+    if (!isOpen) {
+      wasOpenRef.current = false;
+      return;
     }
-  }, [isOpen]); // eslint-disable-line react-hooks/exhaustive-deps -- job.reset is stable
+
+    if (wasOpenRef.current) return;
+    wasOpenRef.current = true;
+    setName(initialValues?.name ?? "");
+    setType(initialValues?.type ?? "clone");
+    setPath(initialValues?.path ?? "");
+    setIsSubmitting(false);
+    setError("");
+    setCloneUrls(initialValues?.cloneUrls ?? []);
+    setUrlInput(initialValues?.urlInput ?? "");
+    setRepos(initialValues?.repos ?? []);
+    setRepoInput(initialValues?.repoInput ?? "");
+    resetJob();
+  }, [
+    isOpen,
+    initialValues?.name,
+    initialValues?.type,
+    initialValues?.path,
+    initialValues?.cloneUrls,
+    initialValues?.urlInput,
+    initialValues?.repos,
+    initialValues?.repoInput,
+    resetJob,
+  ]);
 
   // Auto-focus name input on open
   useEffect(() => {
@@ -200,7 +229,7 @@ export function CreateWorkspaceModal({
     }
   }, [isOpen]);
 
-  useRegisterEscapeLayer(LAYER_MODAL, onClose, isOpen && !job.isPolling);
+  useRegisterEscapeLayer(LAYER_MODAL, onClose, isOpen && !isPolling);
   useFocusTrap(dialogRef, isOpen, { initialFocus: nameRef });
   useFocusReturn(isOpen);
 
@@ -305,7 +334,7 @@ export function CreateWorkspaceModal({
         if (result.kind === "async") {
           // Clone job started: switch to progress state and begin polling.
           // Keep isSubmitting true so the form stays disabled during polling.
-          job.startJob(result.jobId);
+          startJob(result.jobId);
           return;
         }
         // Sync path: workspace created immediately
@@ -345,7 +374,7 @@ export function CreateWorkspaceModal({
       path,
       onSuccess,
       onClose,
-      job.startJob,
+      startJob,
     ],
   );
 
@@ -384,7 +413,7 @@ export function CreateWorkspaceModal({
   return createPortal(
     <div
       className={styles.overlay}
-      onClick={job.isPolling ? undefined : onClose}
+      onClick={isPolling ? undefined : onClose}
       data-testid="create-workspace-overlay"
     >
       <div
@@ -397,9 +426,9 @@ export function CreateWorkspaceModal({
       >
         <div className={styles.headerRow}>
           <h2 className={styles.title}>
-            {job.isPolling ? "Creating Workspace" : "New Workspace"}
+            {isPolling ? "Creating Workspace" : "New Workspace"}
           </h2>
-          {!job.isPolling && (
+          {!isPolling && (
             <button
               type="button"
               className={styles.closeButton}
@@ -412,14 +441,14 @@ export function CreateWorkspaceModal({
           )}
         </div>
 
-        {job.isPolling ? (
+        {isPolling ? (
           <div
             className={styles.progressContainer}
             data-testid="create-workspace-progress"
           >
             <div className={styles.progressSpinner} aria-hidden="true" />
-            <p className={styles.progressMessage}>{job.progress}</p>
-            <p className={styles.progressElapsed}>{job.elapsed}</p>
+            <p className={styles.progressMessage}>{jobProgress}</p>
+            <p className={styles.progressElapsed}>{jobElapsed}</p>
           </div>
         ) : (
           <form onSubmit={handleSubmit}>
@@ -642,9 +671,9 @@ export function CreateWorkspaceModal({
               </div>
             )}
 
-            {(error || job.error) && (
+            {(error || jobError) && (
               <p className={styles.error} data-testid="create-workspace-error">
-                {error || job.error}
+                {error || jobError}
               </p>
             )}
 

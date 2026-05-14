@@ -12,8 +12,12 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/agent"
+	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/events"
+	"github.com/tysonthomas9/loomcli/internal/observability/tracing"
+
+	"go.opentelemetry.io/otel/attribute"
 )
 
 // buildCommand constructs the exec.Cmd for spawning an agent subprocess (does not start it).
@@ -60,6 +64,13 @@ func (s *Supervisor) buildCommand(ap *AgentProcess) (*exec.Cmd, error) {
 	cmd.Env = s.appendDaemonEnv(cmd.Env)
 	cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_YIELD_FILE=%s", filepath.Join(ap.WorktreePath, YieldFileName)))
 	cmd.Env = appendSessionEnv(cmd.Env, ap)
+
+	// Propagate the active trace context so the agent subprocess's bootstrap
+	// span and per-request spans inherit the daemon's trace tree.
+	// See docs/observability/tracing-contract.md §5.
+	if tp := tracing.TraceparentFromContext(cmdstore.RootContext()); tp != "" {
+		cmd.Env = append(cmd.Env, "LOOM_TRACE_PARENT="+tp)
+	}
 
 	return cmd, nil
 }
@@ -168,10 +179,22 @@ func appendSessionEnv(env []string, ap *AgentProcess) []string {
 	return env
 }
 
-// spawnAgent starts the subprocess for an agent.
+// spawnAgent starts the subprocess for an agent. The whole sequence
+// (buildCommand → cmd.Start → first control-plane heartbeat) is wrapped in a
+// daemon.supervisor.spawn span so failures classify cleanly as either a
+// build/start failure or a heartbeat failure.
 func (s *Supervisor) spawnAgent(ap *AgentProcess) error {
+	_, span := startSpan(cmdstore.RootContext(),
+		"daemon.supervisor.spawn",
+		attribute.String("loom.agent", ap.Entry.Worktree),
+		attribute.String("loom.role", ap.Entry.Role),
+		attribute.String("loom.workspace", s.WorkspaceID),
+	)
+	defer span.End()
+
 	cmd, err := s.buildCommand(ap)
 	if err != nil {
+		recordErr(span, err, "spawn.build_command")
 		return fmt.Errorf("build command: %w", err)
 	}
 
@@ -185,6 +208,7 @@ func (s *Supervisor) spawnAgent(ap *AgentProcess) error {
 			ap.LogFile = nil
 		}
 		ap.Mu.Unlock()
+		recordErr(span, err, "spawn.start")
 		return fmt.Errorf("failed to start subprocess: %w", err)
 	}
 
@@ -199,6 +223,8 @@ func (s *Supervisor) spawnAgent(ap *AgentProcess) error {
 	role := ap.Entry.Role
 	epicID := ap.AssignedEpicID
 	ap.Mu.Unlock()
+
+	span.SetAttributes(attribute.Int("loom.pid", pid))
 
 	log.Printf("[daemon] Agent %s: spawned subprocess PID %d", worktree, pid)
 

@@ -9,7 +9,6 @@ export { useSplitView } from "./useSplitView";
 export { BackendPickerPrompt } from "./BackendPickerPrompt";
 export type { BackendPickerPromptProps } from "./BackendPickerPrompt";
 export { NoBackendsEmptyState } from "./NoBackendsEmptyState";
-export { WelcomeBanner } from "./WelcomeBanner";
 
 export { SessionNamePrompt } from "./SessionNamePrompt";
 export type { SessionNamePromptProps } from "./SessionNamePrompt";

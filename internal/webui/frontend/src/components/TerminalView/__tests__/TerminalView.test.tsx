@@ -22,6 +22,7 @@ import { KeyboardShortcutProvider } from "@/hooks/ui";
 import { TerminalView } from "../TerminalView";
 import { TerminalInstance } from "../instances/TerminalInstance";
 import { MAX_TABS } from "@/components/TerminalView/tabs/terminalTabUtils";
+import { CLI_SETUP_REQUEST_KEY } from "@/utils/cliSetup";
 import {
   BackendPickerPrompt,
   SessionNamePrompt,
@@ -57,6 +58,34 @@ const mockMetadataHook = vi.hoisted(() => ({
   handleMutation: vi.fn(),
 }));
 
+const mockTerminalApi = vi.hoisted(() => ({
+  patchTerminalState: vi.fn().mockResolvedValue(undefined),
+  ensureAgentTerminalSession: vi.fn(),
+  startTerminalSetup: vi.fn().mockResolvedValue({
+    session_name: "lead-shell-setup-codex",
+    label: "Codex setup",
+    backend: "codex",
+    action: "install",
+    command: "npm install -g @openai/codex",
+    title: "Install Codex",
+    message:
+      "The backend started this command in the setup terminal. You can take control there if it prompts or fails.",
+    manual: false,
+    created: true,
+  }),
+}));
+
+vi.mock("@/hooks/api", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/hooks/api")>("@/hooks/api");
+  return {
+    ...actual,
+    patchTerminalState: mockTerminalApi.patchTerminalState,
+    ensureAgentTerminalSession: mockTerminalApi.ensureAgentTerminalSession,
+    startTerminalSetup: mockTerminalApi.startTerminalSetup,
+  };
+});
+
 vi.mock("@/hooks/terminal", async () => {
   const actual =
     await vi.importActual<typeof import("@/hooks/terminal")>(
@@ -83,12 +112,23 @@ const mockBackendConfigHook = vi.hoisted(() => ({
   refetch: vi.fn(),
 }));
 
+const mockBackendsHook = vi.hoisted(() => ({
+  backends: [],
+  isLoading: false,
+  error: null as string | null,
+  refetch: vi.fn(),
+}));
+
 vi.mock("@/hooks/workspace", async () => {
   const actual =
     await vi.importActual<typeof import("@/hooks/workspace")>(
       "@/hooks/workspace",
     );
-  return { ...actual, useBackendConfig: () => mockBackendConfigHook };
+  return {
+    ...actual,
+    useBackendConfig: () => mockBackendConfigHook,
+    useBackends: () => mockBackendsHook,
+  };
 });
 
 const mockSessionRestoreHook = vi.hoisted(() => ({
@@ -97,21 +137,6 @@ const mockSessionRestoreHook = vi.hoisted(() => ({
 }));
 
 // useSessionRestore is mocked above via @/hooks/terminal
-
-const mockHooksApi = vi.hoisted(() => ({
-  patchTerminalState: vi.fn().mockResolvedValue(undefined),
-  ensureAgentTerminalSession: vi.fn(),
-}));
-
-vi.mock("@/hooks/api", async () => {
-  const actual =
-    await vi.importActual<typeof import("@/hooks/api")>("@/hooks/api");
-  return {
-    ...actual,
-    patchTerminalState: mockHooksApi.patchTerminalState,
-    ensureAgentTerminalSession: mockHooksApi.ensureAgentTerminalSession,
-  };
-});
 
 // ── Mock sibling components ──────────────────────────────────────────────────
 
@@ -230,8 +255,8 @@ describe("TerminalView", () => {
     mockMetadataHook.isLoading = true;
     mockMetadataHook.error = null;
     mockMetadataHook.createTab = vi.fn().mockResolvedValue(undefined);
-    mockHooksApi.patchTerminalState.mockResolvedValue(undefined);
-    mockHooksApi.ensureAgentTerminalSession.mockImplementation(
+    mockTerminalApi.patchTerminalState.mockResolvedValue(undefined);
+    mockTerminalApi.ensureAgentTerminalSession.mockImplementation(
       async (_workspaceId: string, agentName: string) => ({
         session_name: `term_${agentName.replace(/[^a-zA-Z0-9_-]/g, "_")}`,
         label: `agent-${agentName}`,
@@ -249,6 +274,18 @@ describe("TerminalView", () => {
         updated_at: new Date().toISOString(),
       }),
     );
+    mockTerminalApi.startTerminalSetup.mockResolvedValue({
+      session_name: "lead-shell-setup-codex",
+      label: "Codex setup",
+      backend: "codex",
+      action: "install",
+      command: "npm install -g @openai/codex",
+      title: "Install Codex",
+      message:
+        "The backend started this command in the setup terminal. You can take control there if it prompts or fails.",
+      manual: false,
+      created: true,
+    });
     mockBackendConfigHook.isLoading = false;
     mockBackendConfigHook.config = {
       backend: "claude",
@@ -314,12 +351,15 @@ describe("TerminalView", () => {
       ]);
       render(<TerminalView />);
 
-      const calls = vi.mocked(TerminalInstance).mock.calls.map(([props]) => {
-        return props as {
-          sessionName: string;
-          autoStartStaleSession?: boolean;
-        };
-      });
+      const calls = vi
+        .mocked(TerminalInstance)
+        .mock.calls.map(([props]) => {
+          return props as {
+            sessionName: string;
+            autoStartStaleSession?: boolean;
+          };
+        })
+        .filter((props) => props?.sessionName != null);
       expect(
         calls.find((props) => props.sessionName === "DESKTOP-QA--lead-codex-1")
           ?.autoStartStaleSession,
@@ -432,6 +472,112 @@ describe("TerminalView", () => {
       setMetadata(DEFAULT_METADATA);
       render(<TerminalView />);
 
+      expect(mockMetadataHook.createTab).not.toHaveBeenCalled();
+    });
+
+    it("opens a shell setup tab from a pending CLI setup request", async () => {
+      setMetadata(DEFAULT_METADATA);
+      sessionStorage.setItem(
+        CLI_SETUP_REQUEST_KEY,
+        JSON.stringify({
+          id: "setup-1",
+          backendName: "codex",
+          displayName: "Codex",
+          provider: "OpenAI",
+          brandColor: "#10a37f",
+          action: "install",
+        }),
+      );
+
+      render(<TerminalView />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId("cli-setup-banner")).toBeInTheDocument();
+      });
+      expect(screen.getByText("Install Codex")).toBeInTheDocument();
+      expect(
+        screen.getByText("npm install -g @openai/codex"),
+      ).toBeInTheDocument();
+      await waitFor(() => {
+        expect(mockTerminalApi.startTerminalSetup).toHaveBeenCalledWith(
+          expect.any(String),
+          "codex",
+          "install",
+        );
+      });
+      expect(screen.getByText("Running in terminal")).toBeInTheDocument();
+      expect(
+        screen.getByTestId("tab-lead-shell-setup-codex"),
+      ).toBeInTheDocument();
+      expect(screen.getByTestId("active-tab-id").textContent).toBe(
+        "lead-shell-setup-codex",
+      );
+      expect(mockMetadataHook.createTab).not.toHaveBeenCalled();
+      expect(sessionStorage.getItem(CLI_SETUP_REQUEST_KEY)).toBeNull();
+    });
+
+    it("renders manual setup results as guidance rather than a running install", async () => {
+      setMetadata(DEFAULT_METADATA);
+      mockTerminalApi.startTerminalSetup.mockResolvedValue({
+        session_name: "lead-shell-setup-cursor",
+        label: "Cursor setup",
+        backend: "cursor",
+        action: "login",
+        command: "printf '%s\\n' 'Cursor setup uses CURSOR_API_KEY for Loom.'",
+        title: "Configure Cursor credentials",
+        message:
+          "The setup terminal shows how Loom detects Cursor credentials.",
+        manual: true,
+        created: true,
+      });
+      sessionStorage.setItem(
+        CLI_SETUP_REQUEST_KEY,
+        JSON.stringify({
+          id: "setup-manual",
+          backendName: "cursor",
+          displayName: "Cursor",
+          provider: "Anysphere",
+          brandColor: "#00e5ff",
+          action: "login",
+        }),
+      );
+
+      render(<TerminalView />);
+
+      await waitFor(() => {
+        expect(
+          screen.getByText("Manual steps shown in terminal"),
+        ).toBeInTheDocument();
+      });
+      expect(
+        screen.getByText("Configure Cursor credentials"),
+      ).toBeInTheDocument();
+      expect(screen.getByText("Show steps again")).toBeInTheDocument();
+    });
+
+    it("does not auto-create a lead tab when opening terminal for CLI setup", async () => {
+      setMetadata([]);
+      sessionStorage.setItem(
+        CLI_SETUP_REQUEST_KEY,
+        JSON.stringify({
+          id: "setup-2",
+          backendName: "codex",
+          displayName: "Codex",
+          provider: "OpenAI",
+          brandColor: "#10a37f",
+          action: "install",
+        }),
+      );
+
+      render(<TerminalView />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId("cli-setup-banner")).toBeInTheDocument();
+      });
+      expect(
+        screen.getByTestId("tab-lead-shell-setup-codex"),
+      ).toBeInTheDocument();
+      expect(screen.queryByTestId("tab-lead-claude-1")).not.toBeInTheDocument();
       expect(mockMetadataHook.createTab).not.toHaveBeenCalled();
     });
 
@@ -961,7 +1107,7 @@ describe("TerminalView", () => {
           screen.getByTestId("terminal-instance-term_fox"),
         ).toBeInTheDocument(),
       );
-      expect(mockHooksApi.ensureAgentTerminalSession).toHaveBeenCalledWith(
+      expect(mockTerminalApi.ensureAgentTerminalSession).toHaveBeenCalledWith(
         expect.any(String),
         "fox",
       );
@@ -1019,7 +1165,7 @@ describe("TerminalView", () => {
         ),
       );
       expect(onConsumed).toHaveBeenCalled();
-      expect(mockHooksApi.ensureAgentTerminalSession).toHaveBeenCalledWith(
+      expect(mockTerminalApi.ensureAgentTerminalSession).toHaveBeenCalledWith(
         expect.any(String),
         "fox",
       );
@@ -1032,7 +1178,7 @@ describe("TerminalView", () => {
       );
 
       await waitFor(() =>
-        expect(mockHooksApi.ensureAgentTerminalSession).toHaveBeenCalled(),
+        expect(mockTerminalApi.ensureAgentTerminalSession).toHaveBeenCalled(),
       );
       expect(mockMetadataHook.createTab).not.toHaveBeenCalledWith(
         "term_fox",
@@ -1074,7 +1220,7 @@ describe("TerminalView", () => {
         created_at: string;
         updated_at: string;
       }) => void;
-      mockHooksApi.ensureAgentTerminalSession.mockReturnValueOnce(
+      mockTerminalApi.ensureAgentTerminalSession.mockReturnValueOnce(
         new Promise((resolve) => {
           resolveAgent = resolve;
         }),
@@ -1099,7 +1245,7 @@ describe("TerminalView", () => {
       render(<HiddenAgentHarness />);
 
       await waitFor(() =>
-        expect(mockHooksApi.ensureAgentTerminalSession).toHaveBeenCalledWith(
+        expect(mockTerminalApi.ensureAgentTerminalSession).toHaveBeenCalledWith(
           expect.any(String),
           "fox",
         ),

@@ -161,8 +161,8 @@ func TestControlPlaneClientAgentCommandCreateQueuesCommand(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatalf("decode create: %v", err)
 		}
-		if _, ok := body["status"]; ok {
-			t.Fatalf("command create should let fleet-db assign status; body=%#v", body)
+		if body["status"] != string(domain.AgentCommandQueued) {
+			t.Fatalf("command create status = %q, want queued; body=%#v", body["status"], body)
 		}
 		if body["target_agent_id"] != "agent-1" || body["target_node_id"] != "node-1" || body["type"] != "start" {
 			t.Fatalf("body = %#v", body)

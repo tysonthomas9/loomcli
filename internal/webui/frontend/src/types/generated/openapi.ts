@@ -106,23 +106,6 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/csp-report": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /** CSP violation reporting (rate-limited, 60 req/min/IP) */
-    post: operations["reportCSPViolation"];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
   "/api/workspaces/{ws}/stats": {
     parameters: {
       query?: never;
@@ -188,6 +171,23 @@ export interface paths {
     post?: never;
     /** Delete a workspace */
     delete: operations["deleteWorkspace"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/monitor/status": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Full monitor dashboard data for a workspace */
+    get: operations["getWorkspaceMonitorStatus"];
+    put?: never;
+    post?: never;
+    delete?: never;
     options?: never;
     head?: never;
     patch?: never;
@@ -1047,6 +1047,53 @@ export interface paths {
     head?: never;
     /** Update terminal UI state */
     patch: operations["patchTerminalState"];
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/terminal/setup": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Start a backend-owned setup command in a setup terminal
+     * @description Opens or reuses the workspace's per-backend setup terminal and runs the
+     *     requested action (install / login / configure / test). For supported
+     *     backends (claude, codex, gemini, opencode, cursor) the resolved command
+     *     is run inside the PTY; for backends flagged as manual (cursor login)
+     *     the terminal shows credential guidance instead.
+     */
+    post: operations["startTerminalSetup"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/onboarding/first-task": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Create the onboarding first task and queue an agent start
+     * @description Creates an open, unassigned issue and requests the named agent start
+     *     working on it via the lifecycle backend. If the lifecycle request
+     *     fails the just-created issue is deleted in a bounded cleanup so the
+     *     kanban does not accumulate orphans on disconnect.
+     */
+    post: operations["runOnboardingFirstTask"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
     trace?: never;
   };
   "/api/workspaces/{ws}/agents/{name}/terminal/info": {
@@ -2485,7 +2532,13 @@ export interface components {
       workspace: components["schemas"]["MonitorWorkspaceInfo"];
       agents: components["schemas"]["MonitorAgentStatus"][];
       tasks: components["schemas"]["MonitorTaskSummary"];
+      needs_planning: components["schemas"]["MonitorTaskInfo"][];
+      ready_to_implement: components["schemas"]["MonitorTaskInfo"][];
+      needs_review: components["schemas"]["MonitorTaskInfo"][];
+      in_progress: components["schemas"]["MonitorTaskInfo"][];
       in_progress_list: components["schemas"]["MonitorTaskInfo"][];
+      backlog: components["schemas"]["MonitorTaskInfo"][];
+      closed: components["schemas"]["MonitorTaskInfo"][];
       agent_tasks: {
         [key: string]: components["schemas"]["MonitorTaskInfo"];
       };
@@ -2929,35 +2982,6 @@ export interface operations {
       };
     };
   };
-  reportCSPViolation: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        "application/json": Record<string, never>;
-      };
-    };
-    responses: {
-      /** @description Report recorded */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-      /** @description Rate limited */
-      429: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-    };
-  };
   getWorkspaceStats: {
     parameters: {
       query?: never;
@@ -3123,6 +3147,43 @@ export interface operations {
       };
       /** @description Workspace not found */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  getWorkspaceMonitorStatus: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Dashboard status */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MonitorStatusResponse"];
+        };
+      };
+      /** @description Workspace not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Data collection unavailable */
+      503: {
         headers: {
           [name: string]: unknown;
         };
@@ -4932,6 +4993,124 @@ export interface operations {
             active_tab?: string;
           };
         };
+      };
+    };
+  };
+  startTerminalSetup: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": {
+          /** @description AI backend name (claude, codex, gemini, opencode, cursor) */
+          backend: string;
+          /** @enum {string} */
+          action: "install" | "login" | "configure" | "test";
+        };
+      };
+    };
+    responses: {
+      /** @description Setup terminal created or reused */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            session_name?: string;
+            label?: string;
+            backend?: string;
+            action?: string;
+            command?: string;
+            title?: string;
+            message?: string;
+            manual?: boolean;
+            created?: boolean;
+          };
+        };
+      };
+      /** @description Invalid backend or action */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Terminal manager not available */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  runOnboardingFirstTask: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": {
+          agent_name: string;
+          title: string;
+          description?: string;
+          /** @default task */
+          issue_type?: string;
+          priority?: number;
+          source_repo?: string;
+        };
+      };
+    };
+    responses: {
+      /** @description Issue created and agent start queued */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            success?: boolean;
+            issue?: Record<string, never>;
+            agent_name?: string;
+            started?: boolean;
+            queued?: boolean;
+          };
+        };
+      };
+      /** @description Validation error (missing agent_name or title) */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Agent not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Agent lifecycle backend unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
     };
   };

@@ -75,6 +75,7 @@ export async function startAgent(
 export interface FetchStatusResult {
   agents: LoomAgentStatus[];
   tasks: LoomTaskSummary;
+  taskLists: LoomTaskLists;
   agentTasks: Record<string, LoomTaskInfo>;
   sync: LoomSyncInfo;
   stats: LoomStats;
@@ -90,8 +91,10 @@ export async function fetchStatus(
 ): Promise<FetchStatusResult> {
   if (workspaceId) {
     const d = await get<LoomStatusResponse>(
-      monitorPath("/api/monitor/status", workspaceId),
-      { signal: AbortSignal.timeout(15000) },
+      wsUrl(workspaceId, "/monitor/status"),
+      {
+        signal: AbortSignal.timeout(15000),
+      },
     );
     return statusResponseToResult(d);
   }
@@ -107,6 +110,7 @@ function statusResponseToResult(d: LoomStatusResponse): FetchStatusResult {
   return {
     agents: (d.agents ?? []) as unknown as LoomAgentStatus[],
     tasks: d.tasks as unknown as LoomTaskSummary,
+    taskLists: tasksResponseToLists(d),
     agentTasks: (d.agent_tasks ?? {}) as unknown as Record<
       string,
       LoomTaskInfo
@@ -137,12 +141,26 @@ export async function fetchTasks(workspaceId?: string): Promise<LoomTaskLists> {
   return tasksResponseToLists(data! as unknown as LoomTasksResponse);
 }
 
-function tasksResponseToLists(d: LoomTasksResponse): LoomTaskLists {
+type MonitorTaskListFields = Partial<
+  Pick<
+    LoomTasksResponse,
+    | "needs_planning"
+    | "ready_to_implement"
+    | "needs_review"
+    | "in_progress"
+    | "closed"
+    | "backlog"
+  > & {
+    in_progress_list: LoomTaskInfo[];
+  }
+>;
+
+function tasksResponseToLists(d: MonitorTaskListFields): LoomTaskLists {
   return {
     needsPlanning: d.needs_planning ?? [],
     readyToImplement: d.ready_to_implement ?? [],
     needsReview: d.needs_review ?? [],
-    inProgress: d.in_progress ?? [],
+    inProgress: d.in_progress ?? d.in_progress_list ?? [],
     backlog: d.backlog ?? [],
     done: d.closed ?? [],
   } as unknown as LoomTaskLists;

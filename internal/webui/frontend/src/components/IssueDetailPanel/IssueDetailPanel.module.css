@@ -265,6 +265,71 @@
   flex-shrink: 0;
 }
 
+/* ============= Latest Run Failure Banner ============= */
+
+.runFailureBanner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px var(--panel-padding-md);
+  border-bottom: 1px solid var(--color-border-light);
+  background: rgba(239, 68, 68, 0.08);
+  color: var(--color-text-primary);
+}
+
+[data-theme="light"] .runFailureBanner {
+  background: #fef2f2;
+}
+
+.runFailureMain {
+  min-width: 0;
+  flex: 1;
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  align-items: center;
+  gap: 8px;
+}
+
+.runFailureTitle {
+  color: #dc2626;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.runFailureMeta {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+
+.runFailureMessage {
+  min-width: 0;
+  color: var(--color-text-primary);
+  font-size: 12px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.runFailureAction {
+  flex-shrink: 0;
+  border: 1px solid rgba(220, 38, 38, 0.35);
+  background: transparent;
+  color: #dc2626;
+  border-radius: var(--radius-sm);
+  padding: 5px 9px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.runFailureAction:hover {
+  background: rgba(239, 68, 68, 0.12);
+}
+
 /* ============= Detail Content ============= */
 
 .detailContent {

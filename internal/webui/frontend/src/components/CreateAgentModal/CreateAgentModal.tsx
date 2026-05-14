@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 
 import type { RepoInfo, WorkspaceAgentInfo } from "@/api/workspace";
 import { useCreateWorkspaceAgent } from "@/hooks/agents";
@@ -11,6 +11,8 @@ export interface CreateAgentModalProps {
   workspaceId: string;
   repos: RepoInfo[];
   defaultBackend?: string;
+  defaultName?: string;
+  defaultRoleName?: "task" | "plan";
   onClose: () => void;
   onSuccess: (agent: WorkspaceAgentInfo) => void;
 }
@@ -20,17 +22,22 @@ export function CreateAgentModal({
   workspaceId,
   repos,
   defaultBackend,
+  defaultName,
+  defaultRoleName,
   onClose,
   onSuccess,
 }: CreateAgentModalProps): JSX.Element | null {
   const resolvedDefaultBackend = defaultBackend?.trim() || "codex";
-  const [name, setName] = useState("");
-  const [roleName, setRoleName] = useState("task");
+  const resolvedDefaultName = defaultName?.trim() ?? "";
+  const resolvedDefaultRoleName = defaultRoleName ?? "task";
+  const [name, setName] = useState(resolvedDefaultName);
+  const [roleName, setRoleName] = useState<string>(resolvedDefaultRoleName);
   const [backend, setBackend] = useState(resolvedDefaultBackend);
   const [repoName, setRepoName] = useState("");
   const [crossRepo, setCrossRepo] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const wasOpenRef = useRef(false);
   const createAgent = useCreateWorkspaceAgent(workspaceId);
 
   const repoOptions = useMemo(() => repos.map((repo) => repo.name), [repos]);
@@ -38,10 +45,26 @@ export function CreateAgentModal({
   const isLeadAgent = isLeadRole(roleName);
 
   useEffect(() => {
-    if (isOpen) {
-      setBackend(resolvedDefaultBackend);
+    if (!isOpen) {
+      wasOpenRef.current = false;
+      return;
     }
-  }, [isOpen, resolvedDefaultBackend]);
+
+    if (wasOpenRef.current) return;
+    wasOpenRef.current = true;
+    setName(resolvedDefaultName);
+    setRoleName(resolvedDefaultRoleName);
+    setBackend(resolvedDefaultBackend);
+    setRepoName("");
+    setCrossRepo(false);
+    setIsSubmitting(false);
+    setError(null);
+  }, [
+    isOpen,
+    resolvedDefaultName,
+    resolvedDefaultRoleName,
+    resolvedDefaultBackend,
+  ]);
 
   if (!isOpen) return null;
 
@@ -82,8 +105,8 @@ export function CreateAgentModal({
         ...(trimmedBackend ? { backend: trimmedBackend } : {}),
       });
       onSuccess(agent);
-      setName("");
-      setRoleName("task");
+      setName(resolvedDefaultName);
+      setRoleName(resolvedDefaultRoleName);
       setBackend(resolvedDefaultBackend);
       setRepoName("");
       setCrossRepo(false);
@@ -134,7 +157,7 @@ export function CreateAgentModal({
               className={styles.input}
               value={name}
               onChange={(event) => setName(event.target.value)}
-              placeholder="worker-one"
+              placeholder="planner"
               disabled={isSubmitting}
               autoFocus
             />

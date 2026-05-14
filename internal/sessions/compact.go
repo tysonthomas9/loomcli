@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"github.com/tysonthomas9/loomcli/internal/lockfile"
+	"github.com/tysonthomas9/loomcli/internal/runtimectx"
 )
 
 // CompactIndex rewrites index.jsonl to remove duplicate entries and entries
@@ -15,23 +16,29 @@ import (
 // Must be called AFTER PurgeOlderThan so that purged directories are already gone.
 // Returns the count of removed entries (original line count minus surviving records).
 func (s *Store) CompactIndex() (int, error) {
+	_, span := startSpan(runtimectx.RootContext(), "service.Sessions.CompactIndex")
+	defer span.End()
+
 	indexPath := filepath.Join(s.dir, "index.jsonl")
 
 	// Open for read-write to acquire flock.
 	// #nosec G304 — controlled path from Store
 	f, err := os.OpenFile(indexPath, os.O_RDWR|os.O_CREATE, sessFilePerm)
 	if err != nil {
+		recordErr(span, err)
 		return 0, fmt.Errorf("open index for compaction: %w", err)
 	}
 	defer func() { _ = f.Close() }()
 
 	if err := lockfile.FlockExclusiveBlocking(f); err != nil {
+		recordErr(span, err)
 		return 0, fmt.Errorf("flock index for compaction: %w", err)
 	}
 	defer func() { _ = lockfile.FlockUnlock(f) }()
 
 	origTotal, _, err := countIndexLines(indexPath)
 	if err != nil {
+		recordErr(span, err)
 		return 0, err
 	}
 	if origTotal == 0 {
@@ -40,6 +47,7 @@ func (s *Store) CompactIndex() (int, error) {
 
 	surviving, err := s.survivingRecords()
 	if err != nil {
+		recordErr(span, err)
 		return 0, err
 	}
 
@@ -48,7 +56,12 @@ func (s *Store) CompactIndex() (int, error) {
 		return 0, nil
 	}
 
-	return removed, writeRecordsAtomic(indexPath, surviving)
+	if werr := writeRecordsAtomic(indexPath, surviving); werr != nil {
+		recordErr(span, werr)
+		return removed, werr
+	}
+	span.SetAttributes(attrResultCount(removed))
+	return removed, nil
 }
 
 // survivingRecords reads the index, deduplicates, and filters to records
@@ -102,8 +115,15 @@ func writeRecordsAtomic(path string, records []SessionRecord) error {
 // CountIndexEntries returns the total line count and unique session count
 // in index.jsonl. Used by dry-run to show compaction potential.
 func (s *Store) CountIndexEntries() (total int, unique int, err error) {
+	_, span := startSpan(runtimectx.RootContext(), "service.Sessions.CountIndexEntries")
+	defer span.End()
+
 	indexPath := filepath.Join(s.dir, "index.jsonl")
 	total, unique, err = countIndexLines(indexPath)
+	if err != nil {
+		recordErr(span, err)
+	}
+	span.SetAttributes(attrResultCount(unique))
 	return
 }
 

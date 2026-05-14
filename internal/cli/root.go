@@ -1,11 +1,19 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
+
+	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
+	"github.com/tysonthomas9/loomcli/internal/events"
+	"github.com/tysonthomas9/loomcli/internal/observability/tracing"
 )
 
 // Version information (set at build time via ldflags)
@@ -97,7 +105,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&logFormat, "log-format", "text", "Log format (text|json)")
 	rootCmd.PersistentFlags().StringVar(&logOutput, "log-output", "stderr", "Log output destination (stderr|<filepath>)")
 	rootCmd.PersistentFlags().StringVar(&serverFlag, "server", "", "Remote loom server base URL. When set, CLI uses HTTP API backend instead of local FleetDB. Env: LOOM_SERVER_URL")
-	rootCmd.PersistentFlags().StringVar(&workspaceFlag, "workspace", "", "Workspace ID (for --server mode). Env: LOOM_WORKSPACE")
+	rootCmd.PersistentFlags().StringVar(&workspaceFlag, "workspace", "", "Workspace ID. Env: LOOM_WORKSPACE")
 
 	// Resolve and set active backend before any subcommand runs,
 	// then inject the Deps container into the command context.
@@ -121,7 +129,16 @@ func init() {
 		if err := ResolveAndSetBackend(); err != nil {
 			return err
 		}
+		// Rebuild the package-level defaultDeps now that --workspace /
+		// --server have been mirrored into the env. The eager
+		// `var defaultDeps = DefaultDeps()` in deps.go runs at process
+		// load time, before Cobra has parsed any flags, so its cached
+		// IssueBackend would otherwise be locked to whatever env was
+		// inherited from the shell. resolveDirectIssueBackend() reads
+		// defaultDeps.IssueBackend, so refresh it here before any
+		// subcommand runs.
 		deps := DefaultDeps()
+		defaultDeps = deps
 		cmd.SetContext(WithDeps(cmd.Context(), deps))
 		return nil
 	}
@@ -136,7 +153,121 @@ func init() {
 // Execute runs the root command
 func Execute() error {
 	registerPendingCommands()
+
+	traceShutdown := initCLITracing()
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = traceShutdown(ctx)
+	}()
+
+	// Wrap the entire CLI invocation in a root span so HTTP calls to fleet-db
+	// hang off it as children rather than fragmenting into per-call traces.
+	// Cobra subcommands ignore cmd.Context() in many helpers (cmdstore.WithStore
+	// builds its own SignalContext), so we publish the trace-bearing context
+	// as a process-wide root via cmdstore.SetRootContext for any helper that
+	// derives its context from there.
+	tracer := tracing.Tracer("github.com/tysonthomas9/loomcli/internal/cli")
+	// BootstrapContext consumes LOOM_TRACE_PARENT (set by a parent loom
+	// process — daemon spawning agent, or loom spawning embedded fleet-db)
+	// so this process's root span inherits the spawner's trace ID. Returns
+	// context.Background unchanged when no env var is set.
+	bootstrapCtx := tracing.BootstrapContext(context.Background())
+	ctx, span := tracer.Start(bootstrapCtx, "loom.cli")
+	defer span.End()
+	rootCmd.SetContext(ctx)
+	cmdstore.SetRootContext(ctx)
+	// Publish the active span + shutdown so any handler that calls os.Exit
+	// can route through ExitWithFlush() and still flush traces.
+	RegisterActiveTraceState(span, traceShutdown)
+	// Bus.Emit uses this provider to capture the active trace context into
+	// every emitted event (Event.TraceParent). Without it, loom.task /
+	// loom.agent.lifecycle spans would land in a separate trace.
+	events.SetContextProvider(cmdstore.RootContext)
+	if len(os.Args) > 1 {
+		span.SetName("loom.cli." + os.Args[1])
+	}
+
+	// Trace-flush on signal: SIGINT/SIGTERM (sent by `timeout`, Ctrl-C,
+	// supervisor kill) bypass deferred span.End. End the root span here
+	// so it exports under sync mode. Do NOT shut down the TracerProvider
+	// in the signal handler — that would prevent in-flight spans (e.g.,
+	// a backend.invoke span deeper in the call stack) from flushing as
+	// they unwind. Sync mode means each ended span exports immediately,
+	// so leaving the provider alive until the process actually exits is
+	// the right call.
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		s, ok := <-sigCh
+		if !ok {
+			return
+		}
+		span.End()
+		// Reset to default handler so the second signal terminates immediately,
+		// and re-raise so unwinding code paths run before exit.
+		signal.Reset(s.(syscall.Signal))
+		_ = syscall.Kill(syscall.Getpid(), s.(syscall.Signal))
+	}()
+	defer signal.Stop(sigCh)
+
 	return rootCmd.Execute()
+}
+
+// initCLITracing installs the OTel tracer for the current CLI invocation
+// and returns the shutdown closure. Off unless OTEL_EXPORTER_OTLP_ENDPOINT
+// is set or LOOM_TRACE=1. CLI runs are short-lived; we init + shutdown per
+// invocation. See docs/observability/tracing-contract.md §8.
+func initCLITracing() tracing.Shutdown {
+	traceEnabled := os.Getenv("LOOM_TRACE") == "1" || os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT") != ""
+	endpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+	if traceEnabled && endpoint == "" {
+		endpoint = "localhost:4318"
+	}
+	serviceName := resolveCLIServiceName()
+	// Sync mode for short-lived CLI/agent runs: every span.End() blocks until
+	// export completes, so spans land in Jaeger even when the process exits
+	// via os.Exit. Long-running serve/daemon use the batcher.
+	syncExport := serviceName == "loom-cli" || serviceName == "loom-agent"
+	shutdown, _, err := tracing.Init(context.Background(), tracing.Config{
+		ServiceName:    serviceName,
+		ServiceVersion: Build,
+		Environment:    os.Getenv("LOOM_ENV"),
+		Endpoint:       endpoint,
+		AlwaysOn:       true,
+		Sync:           syncExport,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: tracing init failed: %v\n", err)
+	}
+	// On the error path tracing.Init returns a nil shutdown; the caller
+	// in Execute then defers `_ = traceShutdown(ctx)` which would panic
+	// (nil function call) for any misconfigured OTLP setting. Always
+	// return a callable closure so the contract is "you can defer this
+	// unconditionally". The same closure is fed to RegisterActiveTraceState
+	// so ExitWithFlush stays nil-safe.
+	if shutdown == nil {
+		shutdown = func(context.Context) error { return nil }
+	}
+	return shutdown
+}
+
+// resolveCLIServiceName maps the top-level subcommand to a service name so
+// dashboards can filter long-running daemons separately from agent runs and
+// short-lived CLI invocations. Trace contract §1.
+func resolveCLIServiceName() string {
+	if len(os.Args) <= 1 {
+		return "loom-cli"
+	}
+	switch os.Args[1] {
+	case "serve":
+		return "loom-serve"
+	case "daemon":
+		return "loom-daemon"
+	case "plan", "task", "agent", "lead":
+		return "loom-agent"
+	}
+	return "loom-cli"
 }
 
 // --- Command registration (merged from register.go) ---
@@ -230,7 +361,7 @@ func getGitBranchesDeps(deps *Deps) ([]string, error) {
 
 // GetGitBranches returns all local and remote branch names
 func GetGitBranches() ([]string, error) {
-	return getGitBranchesDeps(defaultDeps)
+	return getGitBranchesDeps(ensureDefaultDeps())
 }
 
 // parseGitBranches parses the output of git branch -a into unique branch names.

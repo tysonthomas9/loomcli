@@ -11,6 +11,7 @@ import {
   useMemo,
   lazy,
   Suspense,
+  type CSSProperties,
   type RefObject,
 } from "react";
 
@@ -19,10 +20,31 @@ import { useStore } from "zustand";
 import { useParams, useNavigate, Outlet } from "react-router-dom";
 
 import { updateIssue, addComment, closeIssue } from "@/api";
+import {
+  fetchWorkspaceApi,
+  runOnboardingFirstTask,
+  type WorkspaceAgentInfo,
+} from "@/api/workspace";
 import type { IssueContext } from "@/api/terminal";
 import { buildShareUrl } from "@/utils/buildShareUrl";
 import { getReviewType } from "@/utils/issue";
+import {
+  isOnboardingRepo,
+  ONBOARDING_AGENT_NAME,
+  ONBOARDING_AGENT_ROLE,
+  ONBOARDING_ISSUE_DESCRIPTION,
+  ONBOARDING_ISSUE_TITLE,
+  ONBOARDING_REPO_URL,
+  ONBOARDING_WORKSPACE_NAME,
+} from "@/utils/onboardingDefaults";
+import {
+  dismissOnboarding,
+  isOnboardingDismissed,
+  ONBOARDING_RESTART_EVENT,
+  type OnboardingRestartDetail,
+} from "@/utils/onboardingState";
 import { buildWorkspaceSwitchUrl } from "@/utils/workspaceUrl";
+import { requestCliSetup } from "@/utils/cliSetup";
 import { AppLayout } from "@/components/AppLayout/AppLayout";
 import { WorkspaceBreadcrumb } from "@/components/WorkspaceBreadcrumb/WorkspaceBreadcrumb";
 import { LoadingSkeleton } from "@/components/LoadingSkeleton/LoadingSkeleton";
@@ -47,6 +69,14 @@ import { WorkspaceSwitcher } from "@/components/WorkspaceSwitcher/WorkspaceSwitc
 import { CreateIssueModal } from "@/components/CreateIssueModal/CreateIssueModal";
 import { CreateWorkspaceModal } from "@/components/CreateWorkspaceModal/CreateWorkspaceModal";
 import { CreateAgentModal } from "@/components/CreateAgentModal/CreateAgentModal";
+import {
+  OnboardingFlow,
+  type OnboardingStep,
+} from "@/components/OnboardingFlow";
+import {
+  AIBackendSetupList,
+  type AIBackendSetupAction,
+} from "@/components/AIBackendSetupList";
 import { UserMenu } from "@/components/UserMenu/UserMenu";
 import { SearchTermProvider } from "@/contexts/SearchTermContext";
 import {
@@ -78,6 +108,9 @@ import { useWorkspaceContext } from "@/hooks/workspace/useWorkspaceContext";
 import { useWorkspaceState } from "@/hooks/workspace/useWorkspaceState";
 import { useRepoFilterParam } from "@/hooks/workspace/useRepoFilterParam";
 import { useWorkspaceHealth } from "@/hooks/workspace/useWorkspaceHealth";
+import { useBackends } from "@/hooks/workspace/useBackends";
+import { useBackendConfig } from "@/hooks/workspace/useBackendConfig";
+import type { BackendInfo } from "@/utils/workspace";
 import type { Issue, Status } from "@/types";
 
 import styles from "./App.module.css";
@@ -89,6 +122,37 @@ const TerminalView = lazy(() =>
     default: m.TerminalView,
   })),
 );
+
+type OnboardingAction = "confirming-agent" | "running-first-task";
+
+function isOnboardingPlannerAgent(agent: WorkspaceAgentInfo): boolean {
+  const roleName = agent.role_name?.trim();
+  if (roleName) {
+    return roleName === ONBOARDING_AGENT_ROLE;
+  }
+  return agent.name === ONBOARDING_AGENT_NAME;
+}
+
+function getOnboardingPlannerName(
+  agents: readonly WorkspaceAgentInfo[] | undefined,
+): string | undefined {
+  const agentList = agents ?? [];
+  return (
+    agentList.find(
+      (agent) =>
+        agent.name === ONBOARDING_AGENT_NAME &&
+        (!agent.role_name || agent.role_name === ONBOARDING_AGENT_ROLE),
+    )?.name ?? agentList.find(isOnboardingPlannerAgent)?.name
+  );
+}
+
+function getSingleRepoSourceRepo(
+  repos: readonly { name?: string; source_repo_id?: string }[],
+): string | undefined {
+  if (repos.length !== 1) return undefined;
+  const repo = repos[0];
+  return repo?.source_repo_id || repo?.name || undefined;
+}
 
 function App() {
   // Route params: issueId present on /ws/:id/issues/:issueId
@@ -123,7 +187,20 @@ function App() {
     selectRepos,
     sourceReposFilter,
     refetch: refetchWorkspace,
+    upsertAgent: upsertWorkspaceAgent,
   } = useWorkspaceContext();
+  const {
+    backends: aiBackends,
+    isLoading: aiBackendsLoading,
+    error: aiBackendsError,
+    refetch: refetchAiBackends,
+  } = useBackends();
+  const {
+    config: onboardingBackendConfig,
+    isLoading: onboardingBackendConfigLoading,
+    isSaving: isSavingOnboardingBackend,
+    updateBackend: updateOnboardingBackend,
+  } = useBackendConfig(workspaceId, { enabled: Boolean(workspaceId) });
 
   // Repo filter URL param sync (deep linking for repo selection)
   const [repoFilterParam] = useRepoFilterParam();
@@ -135,11 +212,26 @@ function App() {
   );
 
   const agentDefaultBackend = useMemo(() => {
+    const configuredBackend = onboardingBackendConfig?.backend?.trim();
+    if (configuredBackend) return configuredBackend;
+
     const activeWorkspace = workspace?.workspaces?.find(
       (ws) => ws.id === workspaceId || ws.name === activeWorkspaceName,
     );
-    return activeWorkspace?.backend?.trim() || "codex";
-  }, [workspace?.workspaces, workspaceId, activeWorkspaceName]);
+    const workspaceBackend = activeWorkspace?.backend?.trim();
+    if (workspaceBackend) return workspaceBackend;
+
+    const firstReadyBackend = aiBackends.find(
+      (backend) => backend.available,
+    )?.name;
+    return firstReadyBackend?.trim() || "codex";
+  }, [
+    onboardingBackendConfig?.backend,
+    workspace?.workspaces,
+    workspaceId,
+    activeWorkspaceName,
+    aiBackends,
+  ]);
   const hasMultipleWorkspaces = (workspace?.workspaces?.length ?? 0) > 1;
 
   // Convert Set<string> to string[] for components that expect arrays
@@ -176,6 +268,21 @@ function App() {
 
   const issuesMap = useStore(issueStore, (s) => s.issuesMap);
   const issues = useMemo(() => [...issuesMap.values()], [issuesMap]);
+  const hasOnboardingRepo = useMemo(
+    () => workspaceRepos.some((repo) => isOnboardingRepo(repo)),
+    [workspaceRepos],
+  );
+  const shouldPrefillOnboardingIssue = hasOnboardingRepo && issues.length === 0;
+  const shouldPrefillOnboardingAgent =
+    hasOnboardingRepo && !getOnboardingPlannerName(workspace?.agents);
+  const onboardingWorkspaceInitialValues = useMemo(
+    () => ({
+      name: ONBOARDING_WORKSPACE_NAME,
+      type: "clone" as const,
+      urlInput: ONBOARDING_REPO_URL,
+    }),
+    [],
+  );
   const isLoading = useStore(issueStore, (s) => s.isLoading);
   const error = useStore(issueStore, (s) => s.error);
   const retryCount = useStore(issueStore, (s) => s.retryCount);
@@ -204,7 +311,7 @@ function App() {
   );
 
   // Drive issue fetching based on active view mode, workspace, and source repos
-  const issueModeByView: Record<string, "graph" | "kanban"> = {
+  const issueModeByView: Partial<Record<ViewMode, "graph" | "kanban">> = {
     graph: "graph",
     kanban: "kanban",
     table: "kanban",
@@ -212,6 +319,11 @@ function App() {
     // Agents view filters issues by assignee + groups by parent epic, so it
     // needs the same broad fetch the kanban view uses.
     agents: "kanban",
+    terminal: "kanban",
+    settings: "kanban",
+    workspace: "kanban",
+    files: "kanban",
+    observability: "kanban",
   };
   const issueMode = issueModeByView[activeView] ?? ("ready" as const);
 
@@ -434,6 +546,7 @@ function App() {
   const agentStore = useAgentStoreInstance();
   const agents = useStore(agentStore, (s) => s.agents);
   const agentTasks = useStore(agentStore, (s) => s.agentTasks);
+  const agentStats = useStore(agentStore, (s) => s.stats);
   const agentShowStaleBanner = useStore(agentStore, (s) => s.showStaleBanner);
   const agentConnectionLost = useStore(agentStore, (s) => s.connectionLost);
   const agentDisconnectedSince = useStore(
@@ -460,6 +573,12 @@ function App() {
   const [showCreateIssue, setShowCreateIssue] = useState(false);
   const [showCreateWorkspace, setShowCreateWorkspace] = useState(false);
   const [showCreateAgent, setShowCreateAgent] = useState(false);
+  const [onboardingDismissed, setOnboardingDismissed] = useState(false);
+  const [onboardingAction, setOnboardingAction] =
+    useState<OnboardingAction | null>(null);
+  const [onboardingActionError, setOnboardingActionError] = useState<
+    string | null
+  >(null);
 
   // Track mount state for async operations.
   useEffect(() => {
@@ -574,14 +693,24 @@ function App() {
   activeViewRef.current = activeView;
   const selectedIssueIdRef = useRef(selectedIssueId);
   selectedIssueIdRef.current = selectedIssueId;
+  // When the issue detail panel is open as an overlay (kanban/table/graph),
+  // the route does not carry the issue id — fall back to the panel's issue id.
+  const activePanelRef = useRef(activePanel);
+  activePanelRef.current = activePanel;
 
-  // Copy link handler: copies a clean shareable URL to clipboard
+  // Copy link handler: copies a clean shareable URL to clipboard.
+  // For an open issue (route or overlay panel), the link always points at the
+  // dedicated issue-detail route so the recipient lands on that task.
   const handleCopyLink = useCallback(async () => {
     try {
+      const panel = activePanelRef.current;
+      const panelIssueId = panel?.type === "issue" ? panel.id : null;
+      const issueId = selectedIssueIdRef.current ?? panelIssueId;
+      const view = issueId ? "issue-detail" : activeViewRef.current;
       await navigator.clipboard.writeText(
         buildShareUrl({
-          view: activeViewRef.current,
-          issue: selectedIssueIdRef.current,
+          view,
+          issue: issueId,
         }),
       );
       showToast("Link copied to clipboard", { type: "success" });
@@ -691,7 +820,7 @@ function App() {
         }
       }
     },
-    [updateIssueStatus, refetch, handlePanelClose, showToast],
+    [workspaceId, updateIssueStatus, refetch, handlePanelClose, showToast],
   );
 
   // Handle reject button submission on review cards
@@ -719,7 +848,7 @@ function App() {
         showToast(message, { type: "error" });
       }
     },
-    [refetch, handlePanelClose, showToast],
+    [workspaceId, refetch, handlePanelClose, showToast],
   );
 
   // Handle agent click from MonitorDashboard / WorkspaceTree.
@@ -792,6 +921,253 @@ function App() {
     navigateToView("terminal");
   }, [closeAllPanels, navigateToView]);
 
+  const hasWorkspaceRepo = workspaceRepos.length > 0;
+  const hasWorkspaceAgent = Boolean(
+    getOnboardingPlannerName(workspace?.agents),
+  );
+  const hasWorkspaceIssue = issues.length > 0 || (agentStats?.total ?? 0) > 0;
+  const defaultBackend = onboardingBackendConfig?.backend;
+  const defaultBackendStatus = aiBackends.find(
+    (backend) => backend.name === defaultBackend,
+  );
+  const isDefaultBackendReady = defaultBackendStatus?.available === true;
+  const isWorkspaceOnboardingComplete =
+    hasWorkspaceRepo &&
+    hasWorkspaceAgent &&
+    hasWorkspaceIssue &&
+    isDefaultBackendReady;
+  const shouldShowWorkspaceOnboarding =
+    !onboardingDismissed &&
+    !isWorkspaceOnboardingComplete &&
+    (workspaceRepos.length === 0 || hasOnboardingRepo) &&
+    (!hasWorkspaceRepo || !hasWorkspaceAgent || !hasWorkspaceIssue);
+  const handleOnboardingDismiss = useCallback(() => {
+    dismissOnboarding(workspaceId);
+    setOnboardingDismissed(true);
+  }, [workspaceId]);
+  const handleBackendSetupAction = useCallback(
+    async (backend: BackendInfo, action: AIBackendSetupAction) => {
+      if (action === "set-default") {
+        const ok = await updateOnboardingBackend(backend.name);
+        if (ok) {
+          showToast(`${backend.displayName} set as default`, {
+            type: "success",
+          });
+          refetchAiBackends();
+        } else {
+          showToast(`Failed to set ${backend.displayName} as default`, {
+            type: "error",
+          });
+        }
+        return;
+      }
+      requestCliSetup(backend, action);
+      navigateToView("terminal");
+    },
+    [navigateToView, refetchAiBackends, showToast, updateOnboardingBackend],
+  );
+
+  const handleRunFirstOnboardingTask = useCallback(async () => {
+    if (onboardingAction !== null) return;
+
+    setOnboardingAction("running-first-task");
+    setOnboardingActionError(null);
+    try {
+      let onboardingAgent = getOnboardingPlannerName(workspace?.agents);
+      try {
+        const latestWorkspace = await fetchWorkspaceApi(workspaceId);
+        onboardingAgent = getOnboardingPlannerName(latestWorkspace.agents);
+      } catch {
+        // Fall back to the already-rendered workspace snapshot.
+      }
+
+      if (!onboardingAgent) {
+        throw new Error("Planner agent is not available yet.");
+      }
+
+      const sourceRepo = getSingleRepoSourceRepo(workspaceRepos);
+      const result = await runOnboardingFirstTask(workspaceId, {
+        agent_name: onboardingAgent,
+        title: ONBOARDING_ISSUE_TITLE,
+        description: ONBOARDING_ISSUE_DESCRIPTION,
+        issue_type: "task",
+        priority: 2,
+        ...(sourceRepo ? { source_repo: sourceRepo } : {}),
+      });
+
+      closeAllPanels();
+      navigateToView("kanban");
+      await refetch();
+      refetchWorkspace();
+      const actionVerb = result.started ? "Started" : "Queued";
+      showToast(`${actionVerb} ${onboardingAgent} on ${result.issue.id}`, {
+        type: "success",
+      });
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "failed to start first task";
+      setOnboardingActionError(message);
+      showToast(`First task did not start: ${message}`, { type: "error" });
+    } finally {
+      setOnboardingAction(null);
+    }
+  }, [
+    closeAllPanels,
+    navigateToView,
+    onboardingAction,
+    refetch,
+    refetchWorkspace,
+    showToast,
+    workspace?.agents,
+    workspaceId,
+    workspaceRepos,
+  ]);
+
+  const handleCreateIssueSuccess = useCallback(
+    async (issue: Issue) => {
+      await refetch();
+      openPanel({ type: "issue", id: issue.id });
+      fetchIssue(issue.id);
+    },
+    [fetchIssue, openPanel, refetch],
+  );
+  const workspaceOnboardingSteps: OnboardingStep[] = useMemo(
+    () => [
+      {
+        id: "workspace-repo",
+        title: "Create workspace with repo",
+        description: hasWorkspaceRepo
+          ? "The sample repo is attached to this workspace."
+          : "Add the sample repo from the workspace tree; the URL is prefilled for first-run setup.",
+        status: hasWorkspaceRepo ? "complete" : "current",
+      },
+      {
+        id: "verify-repo",
+        title: "Verify repository",
+        description: hasWorkspaceRepo
+          ? "The repo is visible to Loom and ready for the next setup step."
+          : "Repository checks run after a repo has been attached.",
+        status: hasWorkspaceRepo ? "complete" : "blocked",
+      },
+      {
+        id: "setup-backend",
+        title: "Set up AI CLIs",
+        description: isDefaultBackendReady
+          ? `${defaultBackendStatus?.displayName ?? "The default CLI"} is ready.`
+          : "Install, login, or choose a ready CLI.",
+        status: !hasWorkspaceRepo
+          ? "blocked"
+          : isDefaultBackendReady
+            ? "complete"
+            : "actionable",
+        detail: hasWorkspaceRepo ? (
+          <AIBackendSetupList
+            backends={aiBackends}
+            defaultBackend={defaultBackend}
+            isLoading={aiBackendsLoading || onboardingBackendConfigLoading}
+            error={aiBackendsError}
+            isSavingDefault={isSavingOnboardingBackend}
+            onAction={handleBackendSetupAction}
+          />
+        ) : undefined,
+      },
+      {
+        id: "create-agent",
+        title: "Create agent",
+        description:
+          onboardingAction === "confirming-agent"
+            ? "Confirming the planner agent is visible to the workspace."
+            : hasWorkspaceAgent
+              ? "The first agent definition exists for this workspace."
+              : "Create a prefilled planner agent for the sample repo.",
+        status:
+          onboardingAction === "confirming-agent"
+            ? "pending"
+            : hasWorkspaceAgent
+              ? "complete"
+              : hasWorkspaceRepo && isDefaultBackendReady
+                ? "current"
+                : "blocked",
+        actionLabel:
+          onboardingAction === "confirming-agent"
+            ? "Confirming..."
+            : "Create Agent",
+        actionDisabled: onboardingAction !== null,
+        onAction: () => {
+          setOnboardingActionError(null);
+          setShowCreateAgent(true);
+        },
+      },
+      {
+        id: "create-issue",
+        title: "Create first issue",
+        description:
+          onboardingAction === "running-first-task"
+            ? "Creating the task, assigning the planner, and starting work."
+            : hasWorkspaceIssue
+              ? "The first issue is ready for agent work."
+              : "Create and run the prefilled sample task.",
+        status:
+          onboardingAction === "running-first-task"
+            ? "pending"
+            : hasWorkspaceIssue
+              ? "complete"
+              : hasWorkspaceAgent && isDefaultBackendReady
+                ? "current"
+                : "blocked",
+        actionLabel:
+          onboardingAction === "running-first-task"
+            ? "Starting..."
+            : "Create & Run",
+        actionDisabled: onboardingAction !== null,
+        onAction: handleRunFirstOnboardingTask,
+        detail: onboardingActionError ? (
+          <p role="alert">{onboardingActionError}</p>
+        ) : undefined,
+      },
+    ],
+    [
+      hasWorkspaceAgent,
+      hasWorkspaceIssue,
+      hasWorkspaceRepo,
+      isDefaultBackendReady,
+      defaultBackendStatus,
+      aiBackends,
+      defaultBackend,
+      aiBackendsLoading,
+      onboardingBackendConfigLoading,
+      aiBackendsError,
+      isSavingOnboardingBackend,
+      handleBackendSetupAction,
+      handleRunFirstOnboardingTask,
+      onboardingAction,
+      onboardingActionError,
+    ],
+  );
+
+  useEffect(() => {
+    setOnboardingDismissed(isOnboardingDismissed(workspaceId));
+  }, [workspaceId]);
+
+  useEffect(() => {
+    const handleRestart = (event: Event) => {
+      const detail = (event as CustomEvent<OnboardingRestartDetail>).detail;
+      if (!detail?.workspaceId || detail.workspaceId === workspaceId) {
+        setOnboardingDismissed(false);
+      }
+    };
+    window.addEventListener(ONBOARDING_RESTART_EVENT, handleRestart);
+    return () => {
+      window.removeEventListener(ONBOARDING_RESTART_EVENT, handleRestart);
+    };
+  }, [workspaceId]);
+
+  useEffect(() => {
+    if (isWorkspaceOnboardingComplete) {
+      setOnboardingDismissed(false);
+    }
+  }, [isWorkspaceOnboardingComplete]);
+
   const handleIssueContextConsumed = useCallback(() => {
     setPendingIssueContext(undefined);
   }, []);
@@ -808,6 +1184,12 @@ function App() {
   const handleAgentNameConsumed = useCallback(() => {
     setPendingAgentName(undefined);
   }, []);
+
+  const refetchWorkspaceAfterAgentCreate = useCallback(() => {
+    refetchWorkspace();
+    window.setTimeout(refetchWorkspace, 750);
+    window.setTimeout(refetchWorkspace, 2000);
+  }, [refetchWorkspace]);
 
   // Focus search input (for Cmd/Ctrl+K shortcut in single-repo mode)
   const handleSearchFocus = useCallback(() => {
@@ -1049,7 +1431,7 @@ function App() {
 
   // Sidebar: the agents view swaps the workspace tree for the live-agent rail.
   // Completed ephemeral workers remain available in AgentWorkPanel history.
-  const sidebarContent = (
+  const sidebarContent =
     activeView === "agents" ? (
       <AgentIconRail onAddClick={() => setShowCreateAgent(true)} />
     ) : (
@@ -1066,8 +1448,15 @@ function App() {
         workQueueCounts={workQueueCounts}
         onTreeSelect={handleTreeIssueSelect}
       />
-    )
-  );
+    );
+
+  const terminalContainerClassName =
+    activeView === "terminal"
+      ? styles.terminalRouteContainer
+      : styles.terminalHidden;
+  const terminalContainerStyle: CSSProperties =
+    activeView === "terminal" ? { display: "contents" } : { display: "none" };
+  const isTerminalActive = activeView === "terminal";
 
   return (
     <KeyboardShortcutProvider
@@ -1093,29 +1482,79 @@ function App() {
           }
           sidebar={sidebarContent}
         >
-          <ViewSubSwitcher activeView={activeView} onChange={navigateToView} />
-          {(showStaleBanner || isConnectionLost) &&
-            staleBannerDisconnectedSince !== null &&
-            !(
-              issues.length === 0 &&
-              !isLoading &&
-              !error &&
-              isIssueBasedView
-            ) && (
-              <StaleDataBanner
-                disconnectedSince={staleBannerDisconnectedSince}
-                onRetry={staleBannerRetry}
-                connectionLost={isConnectionLost}
-              />
-            )}
-          <WorkspaceViewProvider
-            data={workspaceViewData}
-            actions={workspaceViewActions}
+          <div
+            className={
+              shouldShowWorkspaceOnboarding
+                ? styles.workspaceContentWithOnboarding
+                : styles.workspaceContent
+            }
           >
-            <Suspense fallback={<LoadingSkeleton.Column />}>
-              <Outlet />
-            </Suspense>
-          </WorkspaceViewProvider>
+            <div className={styles.workspaceMainContent}>
+              <ViewSubSwitcher
+                activeView={activeView}
+                onChange={navigateToView}
+              />
+              {(showStaleBanner || isConnectionLost) &&
+                staleBannerDisconnectedSince !== null &&
+                !(
+                  issues.length === 0 &&
+                  !isLoading &&
+                  !error &&
+                  isIssueBasedView
+                ) && (
+                  <StaleDataBanner
+                    disconnectedSince={staleBannerDisconnectedSince}
+                    onRetry={staleBannerRetry}
+                    connectionLost={isConnectionLost}
+                  />
+                )}
+              <WorkspaceViewProvider
+                data={workspaceViewData}
+                actions={workspaceViewActions}
+              >
+                <Suspense fallback={<LoadingSkeleton.Column />}>
+                  <Outlet />
+                </Suspense>
+              </WorkspaceViewProvider>
+              {activeView !== "agents" && (
+                <div
+                  className={terminalContainerClassName}
+                  style={terminalContainerStyle}
+                >
+                  <Suspense fallback={<LoadingSkeleton.Terminal />}>
+                    <TerminalView
+                      isActive={isTerminalActive}
+                      pendingIssueContext={pendingIssueContext}
+                      onIssueContextConsumed={handleIssueContextConsumed}
+                      pendingAgentName={pendingAgentName}
+                      onAgentNameConsumed={handleAgentNameConsumed}
+                      onActiveSessionCountChange={setActiveSessionCount}
+                      onUnreadChange={setHasTerminalUnread}
+                      onTabLimitReached={(message) =>
+                        showToast(message, { type: "error" })
+                      }
+                      onNavigateToSettings={() => navigateToView("settings")}
+                    />
+                  </Suspense>
+                </div>
+              )}
+            </div>
+            {shouldShowWorkspaceOnboarding && (
+              <aside
+                className={styles.onboardingSidePanel}
+                aria-label="Onboarding checklist"
+              >
+                <OnboardingFlow
+                  className={styles.workspaceOnboarding ?? ""}
+                  variant="panel"
+                  title="Finish onboarding"
+                  subtitle="Keep this checklist open while you move through Loom. Setup actions switch the main view without losing progress."
+                  steps={workspaceOnboardingSteps}
+                  onDismiss={handleOnboardingDismiss}
+                />
+              </aside>
+            )}
+          </div>
           <ToastContainer toasts={toasts} onDismiss={dismissToast} />
           <IssueDetailPanel
             isOpen={isPanelOpen}
@@ -1140,37 +1579,13 @@ function App() {
           <CreateIssueModal
             isOpen={showCreateIssue}
             onClose={() => setShowCreateIssue(false)}
-            onSuccess={async (issue) => {
-              await refetch();
-              openPanel({ type: "issue", id: issue.id });
-              fetchIssue(issue.id);
-            }}
+            onSuccess={handleCreateIssueSuccess}
           />
-          {activeView !== "agents" && (
-            <div
-              style={{ display: activeView === "terminal" ? "contents" : "none" }}
-            >
-              <Suspense fallback={<LoadingSkeleton.Terminal />}>
-                <TerminalView
-                  isActive={activeView === "terminal"}
-                  pendingIssueContext={pendingIssueContext}
-                  onIssueContextConsumed={handleIssueContextConsumed}
-                  pendingAgentName={pendingAgentName}
-                  onAgentNameConsumed={handleAgentNameConsumed}
-                  onActiveSessionCountChange={setActiveSessionCount}
-                  onUnreadChange={setHasTerminalUnread}
-                  onTabLimitReached={(message) =>
-                    showToast(message, { type: "error" })
-                  }
-                  onNavigateToSettings={() => navigateToView("settings")}
-                />
-              </Suspense>
-            </div>
-          )}
           <TalkToLeadButton
             onClick={handleTalkToLeadClick}
             isActive={activeView === "terminal"}
             sessionCount={activeSessionCount}
+            avoidSidePanel={shouldShowWorkspaceOnboarding}
           />
         </AppLayout>
       </SearchTermProvider>
@@ -1187,6 +1602,7 @@ function App() {
       <CreateWorkspaceModal
         isOpen={showCreateWorkspace}
         onClose={() => setShowCreateWorkspace(false)}
+        initialValues={onboardingWorkspaceInitialValues}
         onSuccess={(data, createdName, warnings) => {
           setShowCreateWorkspace(false);
           const newWs = data.workspaces?.find((ws) => ws.name === createdName);
@@ -1206,11 +1622,36 @@ function App() {
         workspaceId={workspaceId}
         repos={workspaceRepos}
         defaultBackend={agentDefaultBackend}
+        {...(shouldPrefillOnboardingAgent
+          ? {
+              defaultName: ONBOARDING_AGENT_NAME,
+              defaultRoleName: ONBOARDING_AGENT_ROLE,
+            }
+          : {})}
         onClose={() => setShowCreateAgent(false)}
         onSuccess={(agent) => {
           setShowCreateAgent(false);
-          refetchWorkspace();
+          upsertWorkspaceAgent?.(agent);
           showToast(`Agent "${agent.name}" created`, { type: "success" });
+          if (shouldPrefillOnboardingIssue) {
+            setOnboardingAction("confirming-agent");
+            setOnboardingActionError(null);
+            void (async () => {
+              try {
+                await fetchWorkspaceApi(workspaceId);
+              } catch {
+                // The optimistic upsert keeps the checklist moving; scheduled
+                // refetches below will repair the snapshot if this read fails.
+              } finally {
+                refetchWorkspaceAfterAgentCreate();
+                if (mountedRef.current) {
+                  setOnboardingAction(null);
+                }
+              }
+            })();
+          } else {
+            refetchWorkspaceAfterAgentCreate();
+          }
         }}
       />
     </KeyboardShortcutProvider>

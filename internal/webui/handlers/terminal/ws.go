@@ -10,6 +10,10 @@ import (
 	"strings"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 	"nhooyr.io/websocket" //nolint:staticcheck // SA1019: websocket migration tracked separately
 
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -24,6 +28,40 @@ var (
 	errAgentLaunchSpecMissing    = errors.New("agent terminal launch spec missing")
 	errTerminalLaunchMetaMissing = errors.New("terminal launch metadata missing")
 )
+
+// terminalTracerName is the instrumentation library name for terminal WS
+// spans. Stable so dashboards filtering on it don't break.
+const terminalTracerName = "github.com/tysonthomas9/loomcli/internal/webui/handlers/terminal"
+
+// Disconnect reasons reported on `ws.disconnect` spans. Bounded enum so
+// the `disconnect.reason` attribute stays low-cardinality. See
+// docs/observability/tracing-contract.md §3.
+const (
+	wsDisconnectReasonClientClose   = "client_close"
+	wsDisconnectReasonServerClose   = "server_close"
+	wsDisconnectReasonBackendExited = "backend_exited"
+	wsDisconnectReasonSessionKilled = "session_killed"
+	wsDisconnectReasonError         = "error"
+)
+
+// wsCloseReason maps a websocket close status to one of the bounded
+// disconnectReason* enum values. Anything we don't explicitly recognize
+// collapses to "error" so the cardinality of `disconnect.reason` stays
+// tied to the enum, not the (effectively unbounded) close-code space.
+func wsCloseReason(status websocket.StatusCode) string { //nolint:staticcheck // SA1019
+	switch status {
+	case websocket.StatusNormalClosure: //nolint:staticcheck // SA1019
+		return wsDisconnectReasonClientClose
+	case websocket.StatusGoingAway: //nolint:staticcheck // SA1019
+		return wsDisconnectReasonServerClose
+	case websocket.StatusCode(realtime.WSCloseBackendExited): //nolint:staticcheck // SA1019
+		return wsDisconnectReasonBackendExited
+	case websocket.StatusCode(realtime.WSCloseSessionKilled): //nolint:staticcheck // SA1019
+		return wsDisconnectReasonSessionKilled
+	default:
+		return wsDisconnectReasonError
+	}
+}
 
 // terminalWSParams holds the dependencies for a terminal WebSocket handler.
 type terminalWSParams struct {
@@ -71,7 +109,7 @@ func HandleTerminalWS(manager webuterminal.PTYSource, auth *realtime.TerminalAut
 		}
 		initialCols, initialRows := initialTerminalSizeFromRequest(r)
 
-		conn, ok := upgradeTerminalWS(w, r, p.patterns)
+		conn, upgradeCtx, ok := upgradeTerminalWithSpan(w, r, p.patterns, session, workspace)
 		if !ok {
 			return
 		}
@@ -80,6 +118,7 @@ func HandleTerminalWS(manager webuterminal.PTYSource, auth *realtime.TerminalAut
 		closeReason := "connection closed"
 		defer func() {
 			_ = conn.Close(closeStatus, closeReason) //nolint:staticcheck // SA1019: websocket migration tracked separately
+			emitDisconnectSpan(upgradeCtx, workspace, session, closeStatus)
 		}()
 
 		closeStatus, closeReason = runTerminalRelay(
@@ -92,6 +131,47 @@ func HandleTerminalWS(manager webuterminal.PTYSource, auth *realtime.TerminalAut
 			initialRows,
 		)
 	}
+}
+
+// upgradeTerminalWithSpan opens a short-lived ws.upgrade span around the
+// websocket handshake. We end the span before entering the bidirectional
+// relay so we don't hold a multi-minute span open in Jaeger; the long-lived
+// relay is unspanned by design (per-message spans would flood the
+// collector). See docs/observability/tracing-contract.md §3.
+func upgradeTerminalWithSpan(w http.ResponseWriter, r *http.Request, patterns []string, session, workspace string) (*websocket.Conn, context.Context, bool) { //nolint:staticcheck // SA1019: websocket migration tracked separately
+	upgradeCtx, upgradeSpan := otel.Tracer(terminalTracerName).Start(r.Context(), "ws.upgrade",
+		trace.WithAttributes(
+			attribute.String("loom.workspace", workspace),
+			attribute.String("loom.session_id", session),
+			attribute.String("network.peer.address", r.RemoteAddr),
+		),
+	)
+	conn, ok := upgradeTerminalWS(w, r, patterns)
+	if !ok {
+		upgradeSpan.SetStatus(codes.Error, "network")
+		upgradeSpan.End()
+		return nil, upgradeCtx, false
+	}
+	upgradeSpan.End()
+	return conn, upgradeCtx, true
+}
+
+// emitDisconnectSpan records a sibling span on terminal-WS close. The
+// close-reason enum is bounded so dashboards can group disconnects without
+// keeping a span open for the lifetime of the relay.
+func emitDisconnectSpan(upgradeCtx context.Context, workspace, session string, closeStatus websocket.StatusCode) { //nolint:staticcheck // SA1019: websocket migration tracked separately
+	_, discSpan := otel.Tracer(terminalTracerName).Start(context.Background(), "ws.disconnect",
+		trace.WithLinks(trace.LinkFromContext(upgradeCtx)),
+		trace.WithAttributes(
+			attribute.String("loom.workspace", workspace),
+			attribute.String("loom.session_id", session),
+			attribute.String("disconnect.reason", wsCloseReason(closeStatus)),
+		),
+	)
+	if closeStatus == websocket.StatusInternalError { //nolint:staticcheck // SA1019
+		discSpan.SetStatus(codes.Error, "crash")
+	}
+	discSpan.End()
 }
 
 // validateTerminalWSRequest validates the session parameter, auth token, and

@@ -571,6 +571,7 @@ export const TerminalInstance = forwardRef<
     let cancelled = false;
     let firstFrame = 0;
     let secondFrame = 0;
+    const focusTimers: Array<ReturnType<typeof setTimeout>> = [];
 
     const syncActiveLayout = () => {
       if (cancelled) return;
@@ -593,11 +594,17 @@ export const TerminalInstance = forwardRef<
       syncActiveLayout();
       secondFrame = requestAnimationFrame(syncActiveLayout);
     });
+    for (const delay of [50, 150, 300, 600]) {
+      focusTimers.push(setTimeout(syncActiveLayout, delay));
+    }
 
     return () => {
       cancelled = true;
       cancelAnimationFrame(firstFrame);
       cancelAnimationFrame(secondFrame);
+      for (const timer of focusTimers) {
+        clearTimeout(timer);
+      }
     };
   }, [
     isActive,
