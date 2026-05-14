@@ -2,9 +2,11 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, v5]
   pull_request:
-    branches: [main]
+    # Empty branches filter = runs on PRs targeting any branch. The Go and
+    # Frontend quality-gate jobs below are equivalent to `make gate`.
+    types: [opened, synchronize, reopened, ready_for_review]
 
 concurrency:
   group: ci-${{ github.ref }}
