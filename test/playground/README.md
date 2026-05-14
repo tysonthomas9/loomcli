@@ -1,13 +1,23 @@
 # Playground
 
-Self-contained workspace + mock agent harness for exercising loom end-to-end
-without LLM calls or touching real source code.
+Daemon-lifecycle **failure-mode harness** for the loom supervisor: deterministic
+mock backends that crash, hang, or run slow on demand, plus scenario scripts
+that assert the supervisor classifies, kills, sweeps, and times them out
+correctly. Covers code paths the Go unit tests in
+`internal/cli/daemon/supervisor/**` structurally cannot — real pgroups, real
+orphan PIDs, real watchdog timing, real fleet-db lock cleanup.
+
+A happy-path mock backend (`loom-backend-playground`) and a workspace
+scaffold come along for the ride; see [§ Happy-path scaffold](#happy-path-scaffold)
+below. For general full-stack dogfooding (Docker, distributed mode, web UI)
+use [`test/local-mode/`](../local-mode/) instead — this directory is not the
+right tool for that.
 
 `setup.sh` creates a throwaway git repo, registers it as a loom workspace,
-defines `plan` + `task` agents that dispatch to `loom-backend-playground`
-(a deterministic shell script), and seeds a few sample tasks. From there you
-can drive the daemon with `loom monitor`, run `loom lead` interactively, hit
-the web UI, etc.
+defines `plan` + `task` agents that dispatch to one of the
+`loom-backend-playground[-mode]` scripts, and seeds a few sample tasks. From
+there scenarios drive the daemon and assert against its behavior; humans can
+also drive it manually with `loom monitor` / `loom lead` / the web UI.
 
 ## Prereqs
 
@@ -15,6 +25,16 @@ the web UI, etc.
 - `loom serve` already running on `http://localhost:8080` (or the Loom Desktop
   app), so the daemon spawned by `loom workspace ops ensure-runtime` has a
   backend to talk to.
+
+## Happy-path scaffold
+
+The happy-path mock (`loom-backend-playground`) and its 3 seed tasks exist
+as scaffolding for the failure-mode scenarios — every scenario reuses the
+same `setup.sh`/`teardown.sh` plumbing. It is *not* a substitute for the
+real `loom lead` approval flow; the planner role skips that step on purpose
+so scenarios can get to `open → closed` deterministically without human
+input. If you want to exercise the real lead/plan/task UX, run
+`test/local-mode/` or a real workspace.
 
 ## Up / down
 
@@ -80,8 +100,10 @@ The harness reads `LOOM_ROLE` from its environment (set by `loom daemon`
 based on the agent assignment's role):
 
 - `LOOM_ROLE=plan` → claim task, write a canned design, set status `open`
-  (with the design attached — a playground shortcut that skips the human
-  `loom lead` approval step the real flow uses), call `loom complete`.
+  (with the design attached — skipping the human `loom lead` approval step
+  on purpose so failure-mode scenarios can reach `open → closed` without
+  human input; see [§ Happy-path scaffold](#happy-path-scaffold)),
+  call `loom complete`.
 - `LOOM_ROLE=task` → claim task, append to `playground.txt`, git commit,
   close task, call `loom complete`.
 
@@ -92,11 +114,15 @@ monitor UI to keep up visually.
 
 ## Comparison to `test/local-mode/`
 
-`test/local-mode/` brings up a full Docker/Podman stack (fleet-db, daemon,
-web UI) for distributed-mode dogfooding. The playground here is single-host
-and assumes you already have `loom serve` running locally — useful for
-manual exploration, demoing, and quick sanity checks rather than full
-stack regression testing.
+Different jobs — pick by purpose, not by overlap:
+
+- **`test/local-mode/`** — full Docker/Podman stack (fleet-db, daemon, web UI)
+  for distributed-mode dogfooding and full-stack regression. Heavy; slow to
+  start; correct choice for "does the whole product still work".
+- **`test/playground/` (here)** — single-host failure-mode harness for the
+  daemon supervisor. Assumes `loom serve` is already running. Cheap; fast;
+  deterministic. Correct choice for "does the supervisor still classify a
+  crashed/hung/slow backend correctly".
 
 ## Customizing the mock
 
@@ -112,11 +138,11 @@ and `./teardown.sh && ./setup.sh`.
 
 ## Failure-mode harness
 
-`test/playground/` doubles as a daemon-lifecycle test harness. While
-`loom-backend-playground` exercises the happy path, the sibling backends
-below misbehave in named, reproducible ways so scenarios can verify the
-daemon's watchdog, orphan sweep, retry/backoff, and classification paths
-without LLM calls.
+The core of the playground. While `loom-backend-playground` exercises the
+happy-path scaffold, the sibling backends below misbehave in named,
+reproducible ways so scenarios can verify the daemon's watchdog, orphan
+sweep, retry/backoff, and classification paths — without LLM calls and
+without the cost of bringing up Docker.
 
 ### Failure-mode backend zoo
 

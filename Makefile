@@ -25,11 +25,13 @@ test-all:
 	@echo "Running all tests..."
 	@TEST_TAGS=integration,e2e TEST_COVER=1 ./scripts/test.sh
 
-# Run playground smoke + scenario + UI tests. Requires `loom serve`
-# running on http://localhost:8080 and a clean ~/.loom (or no orphan
-# PLAYGROUND state). The shell + Go tests drive setup.sh → daemon →
-# assertions → teardown.sh. The Playwright stage re-creates the workspace
-# and asserts the kanban renders the seed tasks.
+# Daemon-lifecycle failure-mode harness (crash/hang/slow backends + a
+# happy-path scaffold). Requires `loom serve` running on
+# http://localhost:8080 and a clean ~/.loom (or no orphan PLAYGROUND
+# state). The shell + Go tests drive setup.sh → daemon → assertions →
+# teardown.sh. The Playwright stage re-creates the workspace and asserts
+# the kanban renders the seed tasks. For full-stack dogfooding use
+# `make local-mode-up` instead — see test/playground/README.md.
 test-playground:
 	@echo "=== Playground: shell smoke test ==="
 	@bash test/playground/smoke_test.sh
