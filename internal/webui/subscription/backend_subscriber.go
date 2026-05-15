@@ -26,6 +26,13 @@ const (
 	// error from WaitForMutations (e.g., transient HTTP failure).
 	backendRetryDelay = 2 * time.Second
 
+	// backendEmptyPollDelay is a client-side backoff after an empty mutation
+	// poll. Healthy fleet-db long-polls usually return after the server-side
+	// wait timeout, so this is invisible in the steady state. When the
+	// downstream Redis pool is under pressure and empty polls return early,
+	// this prevents the subscriber from immediately re-entering the pool.
+	backendEmptyPollDelay = time.Second
+
 	// backendCatchUpTimeout caps the GetMutations call used by the
 	// SSE reconnect catch-up path. Catch-up runs synchronously inside the
 	// SSE handler; bound it tightly so a slow backend cannot stall the
@@ -166,11 +173,11 @@ func (s *BackendMutationSubscriber) loop() {
 			// Long-poll returned no mutations. Apply a small client-side
 			// back-off before re-entering: under fleet-db pool pressure
 			// the server returns early empty 200s (well before its 30s
-			// timeout), and a tight loop pegs both subscriber CPU and the
-			// downstream Redis pool. 250ms caps re-entry at 4/s in that
+			// timeout), and a tight loop competes with normal workspace API
+			// traffic for the downstream Redis pool. This caps re-entry in that
 			// degraded mode while still being invisible in the steady
 			// state where the server honors the full long-poll window.
-			s.waitWithCancel(250 * time.Millisecond)
+			s.waitWithCancel(backendEmptyPollDelay)
 			continue
 		}
 

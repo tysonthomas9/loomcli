@@ -65,6 +65,54 @@ func TestDiagnoseFleetDBBinaryEnvRunnable(t *testing.T) {
 	}
 }
 
+func TestAppendEmbeddedFleetDBEnvDefaultsAddsWhenMissing(t *testing.T) {
+	env := appendEmbeddedFleetDBEnvDefaults([]string{"EXISTING=value"})
+
+	if !envHas(env, EnvFleetRedisPoolSize+"="+defaultEmbeddedFleetRedisPoolSize) {
+		t.Fatalf("missing default %s in env %v", EnvFleetRedisPoolSize, env)
+	}
+	if !envHas(env, EnvFleetRedisMinIdleConns+"="+defaultEmbeddedFleetRedisMinIdleConns) {
+		t.Fatalf("missing default %s in env %v", EnvFleetRedisMinIdleConns, env)
+	}
+}
+
+func TestAppendEmbeddedFleetDBEnvDefaultsPreservesConfiguredValues(t *testing.T) {
+	env := appendEmbeddedFleetDBEnvDefaults([]string{
+		EnvFleetRedisPoolSize + "=7",
+		EnvFleetRedisMinIdleConns + "=2",
+	})
+
+	if !envHas(env, EnvFleetRedisPoolSize+"=7") {
+		t.Fatalf("expected configured pool size to be preserved in env %v", env)
+	}
+	if !envHas(env, EnvFleetRedisMinIdleConns+"=2") {
+		t.Fatalf("expected configured min idle conns to be preserved in env %v", env)
+	}
+}
+
+func TestAppendEmbeddedFleetDBEnvDefaultsReplacesEmptyValues(t *testing.T) {
+	env := appendEmbeddedFleetDBEnvDefaults([]string{
+		EnvFleetRedisPoolSize + "=",
+		EnvFleetRedisMinIdleConns + "=   ",
+	})
+
+	if !envHas(env, EnvFleetRedisPoolSize+"="+defaultEmbeddedFleetRedisPoolSize) {
+		t.Fatalf("expected empty pool size to receive default in env %v", env)
+	}
+	if !envHas(env, EnvFleetRedisMinIdleConns+"="+defaultEmbeddedFleetRedisMinIdleConns) {
+		t.Fatalf("expected empty min idle conns to receive default in env %v", env)
+	}
+}
+
+func envHas(env []string, want string) bool {
+	for _, got := range env {
+		if got == want {
+			return true
+		}
+	}
+	return false
+}
+
 func TestEmbeddedRuntimeLockFailsFastWhenHeld(t *testing.T) {
 	fleetDir := t.TempDir()
 	first, err := acquireEmbeddedRuntimeLock(fleetDir)
