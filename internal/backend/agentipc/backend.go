@@ -36,9 +36,10 @@ type ipcResponse struct {
 
 // Operation name constants matching the IPC server.
 const (
-	opClaim    = "claim"
-	opUpdate   = "update"
-	opComplete = "complete"
+	opClaim       = "claim"
+	opUpdate      = "update"
+	opComplete    = "complete"
+	opReleaseLock = "release_lock"
 )
 
 // Timeout constants matching task .1 server-side deadlines and task .2 client.
@@ -87,6 +88,23 @@ func (b *Backend) ClaimIssue(_ context.Context, id string, lockTTL time.Duration
 			return backend.ErrInternal(op, "marshal args", err)
 		}
 		req.Args = args
+	}
+	resp, err := sendIPC(b.socketPath, req, dialTimeout, readTimeout)
+	if err != nil {
+		return err
+	}
+	return responseToError(resp, op)
+}
+
+// ReleaseIssueLock releases the operational lock on an issue via the daemon
+// IPC socket. The actor argument is ignored: the daemon authoritatively uses
+// the connected agent name.
+func (b *Backend) ReleaseIssueLock(_ context.Context, id, _ string) error {
+	const op = "AgentIPC.ReleaseIssueLock"
+	req := ipcRequest{
+		Operation: opReleaseLock,
+		AgentName: b.agentName,
+		IssueID:   id,
 	}
 	resp, err := sendIPC(b.socketPath, req, dialTimeout, readTimeout)
 	if err != nil {

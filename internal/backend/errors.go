@@ -35,6 +35,11 @@ type BackendError struct {
 	Op      string // The backend operation that failed (e.g., "Get", "List").
 	Message string
 	Cause   error
+	// Meta carries optional structured details from the underlying transport.
+	// fleet-db responses populate it from the JSON error envelope's "meta"
+	// field (e.g., {"existing_owner": "..."} on a claim conflict). Empty when
+	// no structured details are available.
+	Meta map[string]string
 }
 
 // Error returns a formatted error string. It is safe to call on a nil receiver.

@@ -2,6 +2,7 @@ package supervisor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -18,6 +19,16 @@ import (
 // rather than the generic process actor.
 type actorClaimBackend interface {
 	ClaimIssueAsActor(ctx context.Context, id string, lockTTL time.Duration, actor string) error
+}
+
+// actorReleaseBackend is the optional symmetric counterpart of
+// actorClaimBackend. Backends that support this method allow the supervisor
+// to release the claim lock on a task when the agent that holds it exits,
+// rather than waiting for the lock's TTL to expire. Without this, an exited
+// agent's lock blocks every subsequent claim attempt for that issue (whether
+// from the same worktree or a different one) until the TTL elapses.
+type actorReleaseBackend interface {
+	ReleaseIssueAsActor(ctx context.Context, id string, actor string) error
 }
 
 const (
@@ -121,7 +132,7 @@ func (s *Supervisor) claimRequestedTask(ap *AgentProcess, opts backend.ReadyOpts
 		}
 		if err := s.claimIssueForAgent(ap, taskID, "requested task"); err != nil {
 			if backend.IsKind(err, backend.KindConflict) {
-				s.setPreflightError(ap, agenterr.NoWork, fmt.Sprintf("requested task %s was already claimed", taskID))
+				s.setPreflightError(ap, agenterr.LockConflict, fmt.Sprintf("requested task %s locked by %s", taskID, conflictHolder(err)))
 				return false
 			}
 			s.setPreflightError(ap, agenterr.Unknown, fmt.Sprintf("claim failed for %s: %v", taskID, err))
@@ -135,6 +146,7 @@ func (s *Supervisor) claimRequestedTask(ap *AgentProcess, opts backend.ReadyOpts
 
 func (s *Supervisor) tryClaimBestTask(ap *AgentProcess, issues []backend.IssueData, constraints cli.RoleConstraints) (bool, bool) {
 	conflicts := 0
+	var lastConflictID, lastConflictHolder string
 	for {
 		match := cli.SelectBestTask(issues, constraints)
 		if match == nil {
@@ -143,8 +155,12 @@ func (s *Supervisor) tryClaimBestTask(ap *AgentProcess, issues []backend.IssueDa
 		if err := s.claimIssueForAgent(ap, match.Issue.ID, match.Reason); err != nil {
 			if backend.IsKind(err, backend.KindConflict) {
 				conflicts++
+				lastConflictID = match.Issue.ID
+				lastConflictHolder = conflictHolder(err)
 				if conflicts >= claimConflictRetryLimit {
-					s.setPreflightError(ap, agenterr.NoWork, "no claimable tasks after claim conflicts")
+					msg := fmt.Sprintf("no claimable tasks after %d conflicts (last: %s locked by %s)",
+						conflicts, lastConflictID, lastConflictHolder)
+					s.setPreflightError(ap, agenterr.LockConflict, msg)
 					return false, true
 				}
 				issues = removeIssueByID(issues, match.Issue.ID)
@@ -155,6 +171,21 @@ func (s *Supervisor) tryClaimBestTask(ap *AgentProcess, issues []backend.IssueDa
 		}
 		return true, false
 	}
+}
+
+// conflictHolder extracts the holder identity from a KindConflict error's
+// structured meta (populated by the fleet error classifier from the server's
+// {existing_owner: "..."} response). Returns "unknown" when the holder cannot
+// be determined — older fleet-db servers and non-fleet backends won't carry
+// the metadata.
+func conflictHolder(err error) string {
+	var be *backend.BackendError
+	if errors.As(err, &be) && be != nil {
+		if holder, ok := be.Meta["existing_owner"]; ok && holder != "" {
+			return holder
+		}
+	}
+	return "unknown"
 }
 
 func (s *Supervisor) claimIssueForAgent(ap *AgentProcess, taskID, reason string) error {

@@ -21,6 +21,7 @@ type ipcMutator interface {
 	Claim(issueID string, lockTTL time.Duration) error
 	Update(issueID string, params backend.UpdateParams) error
 	Complete(issueID string, params backend.CloseParams) (*backend.CloseResult, error)
+	ReleaseLock(issueID string) error
 }
 
 // ipcIssueBackend decorates an IssueBackend with IPC routing for mutations.
@@ -49,6 +50,12 @@ func (b *ipcIssueBackend) Update(ctx context.Context, id string, params backend.
 // ClaimIssue routes through IPC.
 func (b *ipcIssueBackend) ClaimIssue(ctx context.Context, id string, lockTTL time.Duration) error {
 	return b.ipc.Claim(id, lockTTL)
+}
+
+// ReleaseIssueLock routes through IPC. The IPC server uses the connected
+// agent's name as the lock-release actor regardless of what we pass in actor.
+func (b *ipcIssueBackend) ReleaseIssueLock(ctx context.Context, id, actor string) error {
+	return b.ipc.ReleaseLock(id)
 }
 
 // Close routes through IPC.
@@ -187,10 +194,11 @@ type AgentIPCResponse struct {
 
 // IPC operation name constants.
 const (
-	IPCOpClaim     = "claim"
-	IPCOpUpdate    = "update"
-	IPCOpComplete  = "complete"
-	IPCOpHeartbeat = "heartbeat" // liveness ping carrying LastActivityAt; no mutation
+	IPCOpClaim       = "claim"
+	IPCOpUpdate      = "update"
+	IPCOpComplete    = "complete"
+	IPCOpHeartbeat   = "heartbeat" // liveness ping carrying LastActivityAt; no mutation
+	IPCOpReleaseLock = "release_lock"
 )
 
 // IPCClaimArgs are the optional arguments for the claim operation.

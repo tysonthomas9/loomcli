@@ -697,6 +697,31 @@ func (s *Supervisor) completeControlPlaneAgentSession(ap *AgentProcess, input ag
 			slog.Warn("control-plane agent lease release failed", "worktree", ap.Entry.Worktree, "session_id", input.sessionID, "lease_id", input.leaseID, "err", err)
 		}
 	}
+	s.releaseAssignedTaskClaim(ap, input.taskID)
+}
+
+// releaseAssignedTaskClaim releases the issue-claim lock held by this agent on
+// the given task. Called from completeControlPlaneAgentSession when the agent
+// process exits. Without this, fleet-db's per-issue claim lock leaks until its
+// TTL expires (~5 min), so the next agent — even with a fresh assignee — gets
+// HTTP 409 KindConflict on every ClaimIssue attempt and silently NoWorks in
+// the supervisor's restart backoff. The release is best-effort: if the backend
+// does not support actor-scoped release, or if the lock is already gone (e.g.
+// the agent already moved status to closed which auto-releases), this logs at
+// debug level and returns without affecting the cleanup path.
+func (s *Supervisor) releaseAssignedTaskClaim(ap *AgentProcess, taskID string) {
+	if taskID == "" || ap.Entry.Worktree == "" || s.IssueBackend == nil {
+		return
+	}
+	releaser, ok := s.IssueBackend.(actorReleaseBackend)
+	if !ok {
+		return
+	}
+	ctx, cancel := s.operationContext(claimOperationTimeout)
+	defer cancel()
+	if err := releaser.ReleaseIssueAsActor(ctx, taskID, ap.Entry.Worktree); err != nil {
+		slog.Debug("agent task claim release skipped", "worktree", ap.Entry.Worktree, "task_id", taskID, "err", err)
+	}
 }
 
 // spawnAndWait spawns the agent and waits for it to exit. A spawn failure is

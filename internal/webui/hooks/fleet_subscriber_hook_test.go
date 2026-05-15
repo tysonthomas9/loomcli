@@ -58,6 +58,9 @@ func (stubFleetBackend) Update(_ context.Context, _ string, _ backend.UpdatePara
 func (stubFleetBackend) ClaimIssue(_ context.Context, _ string, _ time.Duration) error {
 	return errors.New("stub")
 }
+func (stubFleetBackend) ReleaseIssueLock(_ context.Context, _, _ string) error {
+	return errors.New("stub")
+}
 func (stubFleetBackend) DeferIssue(_ context.Context, _ string, _ time.Time) error {
 	return errors.New("stub")
 }
