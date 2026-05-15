@@ -37,9 +37,10 @@ type AgentIPCResponse struct {
 
 // Operation name constants for agent IPC.
 const (
-	ipcOpClaim    = "claim"
-	ipcOpUpdate   = "update"
-	ipcOpComplete = "complete"
+	ipcOpClaim       = "claim"
+	ipcOpUpdate      = "update"
+	ipcOpComplete    = "complete"
+	ipcOpReleaseLock = "release_lock"
 )
 
 // ipcClaimArgs are the optional arguments for the claim operation.
@@ -155,7 +156,7 @@ func validateIPCRequest(req AgentIPCRequest) (AgentIPCResponse, bool) {
 // can thread it through to inherit the span as parent.
 func (d *Daemon) dispatchIPCOperation(req AgentIPCRequest) AgentIPCResponse {
 	switch req.Operation {
-	case ipcOpClaim, ipcOpUpdate, ipcOpComplete:
+	case ipcOpClaim, ipcOpUpdate, ipcOpComplete, ipcOpReleaseLock:
 		// known method — fall through to traced dispatch below
 	default:
 		return AgentIPCResponse{Error: fmt.Sprintf("unknown operation: %q", req.Operation)}
@@ -173,6 +174,8 @@ func (d *Daemon) dispatchIPCOperation(req AgentIPCRequest) AgentIPCResponse {
 		resp = d.handleIPCUpdate(req)
 	case ipcOpComplete:
 		resp = d.handleIPCComplete(req)
+	case ipcOpReleaseLock:
+		resp = d.handleIPCReleaseLock(req)
 	}
 	recordIPCErr(span, resp)
 	return resp
@@ -290,6 +293,22 @@ func (d *Daemon) handleIPCComplete(req AgentIPCRequest) AgentIPCResponse {
 	d.publishMutation(mut)
 
 	return AgentIPCResponse{Success: true, Data: data}
+}
+
+// handleIPCReleaseLock handles the "release_lock" operation: drop only the
+// fleet-db claim lock for the agent's issue without changing its status.
+// Idempotent: a missing or already-released lock returns success.
+func (d *Daemon) handleIPCReleaseLock(req AgentIPCRequest) AgentIPCResponse {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if resp, ok := d.validateIPCLease(ctx, req); !ok {
+		return resp
+	}
+	if err := d.issueBackend.ReleaseIssueLock(ctx, req.IssueID, req.AgentName); err != nil {
+		return ipcErrorResponse(err)
+	}
+	return AgentIPCResponse{Success: true}
 }
 
 func (d *Daemon) validateIPCLease(ctx context.Context, req AgentIPCRequest) (AgentIPCResponse, bool) {

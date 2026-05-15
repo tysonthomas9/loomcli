@@ -55,6 +55,10 @@ func (m *mockIPCBackend) ClaimIssue(_ context.Context, id string, lockTTL time.D
 	return m.claimErr
 }
 
+func (m *mockIPCBackend) ReleaseIssueLock(_ context.Context, _, _ string) error {
+	return nil
+}
+
 func (m *mockIPCBackend) Update(_ context.Context, id string, params backend.UpdateParams) error {
 	m.updateCalls = append(m.updateCalls, mockUpdateCall{ID: id, Params: params})
 	return m.updateErr

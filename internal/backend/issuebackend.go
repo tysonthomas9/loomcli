@@ -76,6 +76,18 @@ type IssueBackend interface {
 	// already claimed by another agent.
 	ClaimIssue(ctx context.Context, id string, lockTTL time.Duration) error
 
+	// ReleaseIssueLock releases only the distributed claim lock on the
+	// issue without changing its status or assignee. Idempotent: returns
+	// nil if no lock exists. Returns KindConflict if the lock is held by
+	// a different actor. Backends without a lock concept return
+	// KindNotImplemented.
+	//
+	// This is the supervisor-driven counterpart to claim release used on
+	// agent exit when the agent has already transitioned the task status
+	// to review/closed/etc. via Update/Close (which leave the operational
+	// lock untouched).
+	ReleaseIssueLock(ctx context.Context, id string, actor string) error
+
 	// DeferIssue defers an issue by setting status to "deferred" and
 	// optionally setting defer_until. A zero `until` (time.Time{}) means
 	// status-only defer with no end date. Returns KindValidation if id is

@@ -212,6 +212,33 @@ func (t *tracedIssueBackend) ClaimIssue(ctx context.Context, id string, lockTTL 
 	return err
 }
 
+func (t *tracedIssueBackend) ReleaseIssueLock(ctx context.Context, id, actor string) error {
+	ctx, span := t.startSpan(ctx, "ReleaseIssueLock",
+		attribute.String("loom.task_id", id),
+	)
+	err := t.inner.ReleaseIssueLock(ctx, id, actor)
+	endSpan(span, err)
+	return err
+}
+
+// ReleaseIssueAsActor preserves actor-scoped release through the traced
+// decorator when the underlying backend supports it.
+func (t *tracedIssueBackend) ReleaseIssueAsActor(ctx context.Context, id, actor string) error {
+	ctx, span := t.startSpan(ctx, "ReleaseIssueAsActor",
+		attribute.String("loom.task_id", id),
+	)
+	if actorBackend, ok := t.inner.(interface {
+		ReleaseIssueAsActor(context.Context, string, string) error
+	}); ok {
+		err := actorBackend.ReleaseIssueAsActor(ctx, id, actor)
+		endSpan(span, err)
+		return err
+	}
+	err := t.inner.ReleaseIssueLock(ctx, id, actor)
+	endSpan(span, err)
+	return err
+}
+
 func (t *tracedIssueBackend) ClaimIssueAsActor(ctx context.Context, id string, lockTTL time.Duration, actor string) error {
 	ctx, span := t.startSpan(ctx, "ClaimIssueAsActor",
 		attribute.String("loom.task_id", id),
