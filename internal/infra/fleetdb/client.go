@@ -1,11 +1,10 @@
 // Package fleetdb implements store.Store as an HTTP client against the
 // fleet-db service's REST API.
 //
-// This is the production wiring used by loom serve + loom CLI commands.
-// Tests typically use internal/infra/memstore instead. Both packages
-// implement the same store.Store contract, so any caller can be tested
-// against memstore and run in production against fleetdb without code
-// changes.
+// This is the only runtime wiring used by loom serve + loom CLI commands.
+// Unit tests may use the test-only internal/infra/memstore package as a store
+// double. Local mode still uses this client, pointed at an embedded fleet-db
+// subprocess; cloud mode points it at a remote fleet-db service.
 //
 // Authentication: the client sends X-Fleet-API-Key (when APIKey is
 // configured) and X-Actor (always — defaults to the loom agent name or

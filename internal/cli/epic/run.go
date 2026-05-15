@@ -746,7 +746,7 @@ func (r *runner) createOrLoadWorkerAgent(ctx context.Context, name string) (*dom
 
 func (r *runner) enqueueWorkerStart(ctx context.Context, name string, task backend.IssueData) error {
 	if r.store.AgentCommands() == nil {
-		// No command channel available (e.g. memstore in tests) — agent will
+		// No command channel available (for example, test-only memstore): agent will
 		// auto-claim from Ready() on its own polling cycle.
 		fmt.Printf("[epic-run] spawned %s for %s (%s) — no command channel, agent will pick task via Ready())\n", name, task.ID, task.Title)
 		return nil

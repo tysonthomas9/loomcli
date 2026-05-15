@@ -20,6 +20,19 @@ Local mode must still use FleetDB as the shared control plane. It is a
 single-machine deployment of the distributed architecture, not a separate
 storage mode.
 
+The only valid runtime control-plane topologies are:
+
+```text
+local mode:
+loomcli -> HTTP client -> fleet-db subprocess -> RedisStorage -> miniredis or external Redis
+
+cloud mode:
+loomcli -> HTTP client -> fleet-db service -> Redis/Postgres
+```
+
+`internal/infra/memstore` is a test-only store double. It is not a local-mode
+runtime, fallback, cache, or embedded Redis implementation.
+
 ## Product Promise
 
 When a user starts a local agent, the UI shows it immediately, attaches it
