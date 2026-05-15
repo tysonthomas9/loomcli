@@ -53,13 +53,34 @@ func (s *Supervisor) StopAgent(ap *AgentProcess, sigtermTimeout time.Duration) {
 		span.End()
 	}()
 
-	slog.Info("sending signal to process group", "worktree", ap.Entry.Worktree, "signal", "SIGTERM", "pid", pid)
+	// Snapshot descendant pgroups BEFORE the worker dies. Once we send SIGTERM,
+	// the worker may exit within microseconds and its children get reparented
+	// to init — at which point we can no longer correlate them as our
+	// descendants. We re-use this snapshot for the SIGKILL pass below so a
+	// backend that ignored SIGTERM (or was already reparented to init) is
+	// still reachable by pgid.
+	descendantPGIDs := findDescendantPGIDs(pid, syscall.Getpgrp())
+
+	slog.Info("sending signal to process group", "worktree", ap.Entry.Worktree, "signal", "SIGTERM", "pid", pid, "extra_pgroups", len(descendantPGIDs))
 	if !sendSigterm(ap, proc, pid) {
+		// Still signal descendants — the worker may already be gone but its
+		// reparented backends won't be.
+		signalDescendantPGroups(descendantPGIDs, syscall.SIGTERM, ap.Entry.Worktree)
+		signalDescendantPGroups(descendantPGIDs, syscall.SIGKILL, ap.Entry.Worktree)
 		return
 	}
 
+	// Children that called Setpgid (e.g. codex/claude/cursor backends) sit in
+	// their own pgroup, so the kill(-pid) above misses them. Signal each
+	// pgroup we discovered in the descendant snapshot.
+	signalDescendantPGroups(descendantPGIDs, syscall.SIGTERM, ap.Entry.Worktree)
+
 	if waitForProcessExit(ap, pid, sigtermTimeout) {
 		slog.Info("process exited gracefully", "worktree", ap.Entry.Worktree)
+		// Even on clean worker exit, hit the descendant pgroups with SIGKILL —
+		// a backend that ignored SIGTERM won't be reachable any other way once
+		// it's reparented to init.
+		signalDescendantPGroups(descendantPGIDs, syscall.SIGKILL, ap.Entry.Worktree)
 		return
 	}
 
@@ -71,6 +92,7 @@ func (s *Supervisor) StopAgent(ap *AgentProcess, sigtermTimeout time.Duration) {
 		slog.Warn("sending SIGKILL to process group", "worktree", ap.Entry.Worktree, "pid", pid)
 		_ = syscall.Kill(-pid, syscall.SIGKILL)
 	}
+	signalDescendantPGroups(descendantPGIDs, syscall.SIGKILL, ap.Entry.Worktree)
 }
 
 // sendSigterm signals the process group, falling back to the leader process.

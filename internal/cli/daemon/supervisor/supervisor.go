@@ -105,6 +105,11 @@ func (s *Supervisor) Start() error {
 		return err
 	}
 
+	// Sweep backend processes orphaned by a previous SIGKILL or crash (PPID==1
+	// with cwd under a managed worktree). Must happen before we spawn new
+	// workers so a brand-new agent doesn't get confused with a leftover one.
+	s.sweepOrphanedBackends()
+
 	// Sweep orphaned sessions from prior daemon runs before launching agents.
 	if sessStore, err := sessions.NewStore(cli.GetWorkspaceRuntimeDir()); err != nil {
 		slog.Warn("session store unavailable, skipping orphan sweep", "err", err)
