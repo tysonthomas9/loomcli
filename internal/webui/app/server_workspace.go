@@ -51,8 +51,8 @@ func wrapWorkspaceCreateFn(
 				"workspace", req.Name, "workspace_id", wsID, "err", err)
 			service.AddCreateWarning(ctx, "Workspace created but runtime registration failed — some features may be unavailable until restart")
 		}
-		// Subscriber activation is deferred — the workspace middleware's
-		// wsExistsFn lazily activates it on the first API request.
+		// Subscriber activation is deferred to the workspace SSE token/stream
+		// routes so ordinary REST traffic does not start FleetDB long-polls.
 
 		return result, nil
 	}

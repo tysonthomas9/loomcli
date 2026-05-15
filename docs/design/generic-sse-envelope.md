@@ -41,6 +41,12 @@ The legacy `type` and `issue_id` fields remain for backward compatibility.
   long-poll open to FleetDB (`/api/v2/{ws}/events/mutations`) so it can feed
   that browser stream. These are two different hops in one pipeline, not two
   browser SSE subscriptions.
+- Backend mutation long-polls are activated only after an authorized SSE token
+  or stream request (`/events/token` or `/events`). Ordinary workspace REST
+  requests must validate workspace existence without starting a FleetDB mutation
+  subscriber. This keeps REST polling, page bootstrap calls, and background
+  monitor refresh from opening idle backend long-polls for workspaces with no
+  browser event stream.
 - Keep old events working: events without `entity_type` still fall back to
   legacy `type` and `issue_id` behavior.
 - Keep backend and RPC projection in sync. `BackendMutationToPayload` and
@@ -81,3 +87,13 @@ The legacy `type` and `issue_id` fields remain for backward compatibility.
     `action: "session.change"`, and legacy `issue_id: "E2E-WS-1"`.
   - Confirmed the issue stayed in Open and did not appear as Blocked after that
     session event.
+- Long-term activation check:
+  - Started an isolated E2E stack on API `:19196` and frontend `:3196`.
+  - Called `GET /api/workspaces/E2E-WS/issues` before opening the browser and
+    confirmed it did not start `backend mutation subscription started` or
+    `/api/v2/E2E-WS/events/mutations`.
+  - Opened `agent-browser --session sse-longterm` to the frontend and confirmed
+    `/api/workspaces/E2E-WS/events/token` activated the backend subscriber and
+    started the FleetDB mutation long-poll.
+  - Created issue `E2E-WS-1` through the UI. The Kanban and work queue showed
+    `Open 1`, `Blocked 0`, and no stale/reconnect banner.

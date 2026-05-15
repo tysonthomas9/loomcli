@@ -51,7 +51,7 @@ func (app *Server) buildModules() {
 	if app.hub != nil {
 		app.wsModules = append(app.wsModules,
 			appstores.NewSubscriptionModule(app.hub, app.getMutationsSince,
-				middleware.WorkspaceFromContext, app.sseTokens))
+				middleware.WorkspaceFromContext, app.activateSSESubscriber, app.sseTokens))
 	}
 
 	app.buildTerminalModules()
