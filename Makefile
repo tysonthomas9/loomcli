@@ -33,10 +33,8 @@ test-all:
 # the kanban renders the seed tasks. For full-stack dogfooding use
 # `make local-mode-up` instead — see test/playground/README.md.
 test-playground:
-	@echo "=== Playground: shell smoke test ==="
-	@bash test/playground/smoke_test.sh
-	@echo "=== Playground: Go scenario test ==="
-	@go test -tags=playground -timeout=3m ./test/playground/...
+	@echo "=== Playground: Go scenarios (happy path + failure modes) ==="
+	@go test -tags=playground -timeout=5m ./test/playground/...
 	@echo "=== Playground: Playwright UI test ==="
 	@bash test/playground/setup.sh >/dev/null
 	@cd internal/webui/frontend && RUN_INTEGRATION_TESTS=1 LOOM_LOCAL_SERVER=1 \

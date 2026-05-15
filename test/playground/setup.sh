@@ -3,14 +3,14 @@
 #
 # Usage: setup.sh [<scenario>]
 #
-# No arg                — original happy-path workspace: planner+coder agents
-#                         plus 3 seed tasks. Used by smoke_test.sh and
-#                         playground_test.go.
+# No arg                — happy-path scaffold workspace: planner+coder agents
+#                         plus 3 seed tasks. Used by TestPlaygroundHappyPath
+#                         in playground_test.go.
 # <scenario>            — isolated workspace `playground-<scenario>` wired to
 #                         loom-backend-playground-<scenario>, single agent
 #                         filtering on has_design, no seed tasks. Used by
-#                         run_scenario.sh + scenarios/ for daemon-lifecycle
-#                         regression tests.
+#                         the failure-mode tests in scenarios_test.go
+#                         (-tags=playground).
 #
 # Optional env knobs (scenarios use these; the no-arg path ignores them):
 #   LOOM_DAEMON_OUTPUT_TIMEOUT_SECONDS — written into .runtime-<scenario>/env
@@ -130,7 +130,7 @@ Drive a scenario by hand:
     --status open --design "Scenario probe"
   loom daemon               # foreground; Ctrl+C to stop
 
-Or use the wrapper: $HERE/run_scenario.sh <scenario-name>
+Or run the Go scenario tests: go test -tags=playground -v ./test/playground/...
 Teardown: $HERE/teardown.sh $SCENARIO
 EOF
 fi

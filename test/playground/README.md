@@ -156,61 +156,52 @@ Each backend implements the same `meta`/`health`/`invoke` contract as
 `loom-backend-playground` and self-documents its failure mode in a header
 comment.
 
-### Running a scenario
+### Running scenarios
+
+Scenarios live in `scenarios_test.go` as Go tests under the `playground`
+build tag. They share helpers (`startScenarioDaemon`, `waitForFile`,
+`waitForLogLine`, `runLoom`, `scenarioCleanup`) and call `setup.sh` /
+`teardown.sh` for workspace orchestration.
 
 ```sh
-# List available scenarios
-./run_scenario.sh
+# Run all scenarios (happy path + failure modes)
+go test -tags=playground -v ./test/playground/...
 
 # Run one
-./run_scenario.sh slow_backend_not_killed
+go test -tags=playground -v -run TestPlaygroundSlowBackendNotKilled ./test/playground/...
 ```
 
-`run_scenario.sh` is a thin wrapper. Scenarios in `scenarios/*.sh` are
-self-contained — they handle their own setup, daemon lifecycle, assertions,
-and teardown via the same `setup.sh`/`teardown.sh` that drive the happy
-path, just with a scenario argument:
-
-```sh
-bash test/playground/scenarios/slow_backend_not_killed.sh
-# or directly:
-./setup.sh slow && ... && ./teardown.sh slow
-```
-
-Exit codes: 0 pass, 1 assertion failure, 2 prereq missing, 3 timeout.
+`requireServe` skips the test if `loom serve` isn't reachable, so the
+suite is safe to run on machines that aren't set up.
 
 ### Writing a new scenario
 
-Copy a sibling in `scenarios/` and edit it. The shape is:
+Add a new `TestPlayground<Mode>` function to `scenarios_test.go`. The shape
+is:
 
-```sh
-#!/usr/bin/env bash
-set -euo pipefail
-HERE="$(cd "$(dirname "$0")/.." && pwd)"
-SCENARIO_NAME="<backend suffix>"     # picks loom-backend-playground-<this>
-PLAYGROUND_LOG_SCOPE="<short label>" # appears in [scope HH:MM:SS] log lines
-export PLAYGROUND_LOG_SCOPE
+```go
+func TestPlaygroundMyMode(t *testing.T) {
+    requireServe(t)
+    const scenario = "mymode" // picks loom-backend-playground-mymode
 
-. "$HERE/lib/common.sh"
-. "$HERE/lib/proctree.sh"
-. "$HERE/lib/daemon.sh"
+    _ = exec.Command("bash",
+        filepath.Join(hereDir(t), "teardown.sh"), scenario).Run()
 
-cleanup() {
-  local rc=$?
-  stop_daemon_graceful || true
-  "$HERE/teardown.sh" "$SCENARIO_NAME" >/dev/null 2>&1 || true
-  exit $rc
+    runScenarioScript(t, "setup.sh", []string{scenario}, nil)
+
+    daemonLog := filepath.Join(scenarioRuntimeDir(t, scenario), scenario+".daemon.log")
+    daemon := startScenarioDaemon(t, scenario, daemonLog)
+    t.Cleanup(func() { scenarioCleanup(t, scenario, daemon) })
+
+    runLoom(t, scenario, "data", "create", "--title", "Probe",
+        "--type", "task", "--priority", "2",
+        "--status", "open", "--design", "...")
+
+    // assert: waitForFile, waitForLogLine, logHasLine, t.Errorf on miss
 }
-trap cleanup EXIT
-
-"$HERE/setup.sh" "$SCENARIO_NAME"
-# shellcheck disable=SC1091
-. "$HERE/.runtime-$SCENARIO_NAME/env"
-
-# create task, start daemon, assert, exit 0 / EXIT_FAIL / EXIT_TIMEOUT
 ```
 
-The script header **must** document:
+The test docstring **must** document:
 
 1. The bug or regression the scenario guards against (link to PR/issue).
 2. Expected outcome on HEAD (pass).
@@ -224,24 +215,25 @@ The script header **must** document:
    guards against.
 3. Edit `run_invoke()` to misbehave in your named way.
 4. `chmod +x` the new file.
-5. Write a scenario in `scenarios/` that uses it. `setup.sh <mode>` picks
-   up the new backend by filename — no edits to `setup.sh`/`teardown.sh`
-   are needed.
+5. Write a `TestPlayground<Mode>` test in `scenarios_test.go` that uses
+   it. `setup.sh <mode>` picks up the new backend by filename — no edits
+   to `setup.sh`/`teardown.sh` are needed.
 
 ### Negative-control protocol
 
 The most common way integration tests lie is by passing for the wrong
 reason. To defend:
 
-1. Every scenario cites a specific pre-fix commit hash in its header.
+1. Every scenario docstring cites a specific pre-fix commit hash.
 2. Before trusting a green scenario, check out that hash and re-run. If
    it still passes, the assertion is too weak — fix it before merging.
 
-Example (replace `<pre-fix-commit>` with the hash from your scenario header):
+Example (replace `<pre-fix-commit>` with the hash from your scenario
+docstring):
 
 ```sh
 git checkout <pre-fix-commit>
-bash test/playground/scenarios/<your_scenario>.sh
+go test -tags=playground -v -run TestPlaygroundMyMode ./test/playground/...
 # must FAIL; if it passes, the scenario is not actually testing the bug
 git checkout -                                                 # back to HEAD
 ```
