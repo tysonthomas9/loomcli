@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -158,6 +159,50 @@ func TestModule_ActivatesWorkspaceOnTokenRoute(t *testing.T) {
 	}
 }
 
+func TestModule_ActivatesResolvedWorkspacePerTokenRoute(t *testing.T) {
+	hub := realtime.NewHub()
+	defer hub.Stop()
+
+	tokens, err := realtime.NewTokenStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tokens.Stop()
+
+	getMutations := func(_ string, _ string) []rpc.MutationEvent { return nil }
+	var activated []string
+	activate := func(_ context.Context, wsID string) {
+		activated = append(activated, wsID)
+	}
+
+	mod := NewModule(hub, getMutations, middleware.WorkspaceFromContext, activate, tokens)
+
+	wsMux := http.NewServeMux()
+	mod.Register(wsMux)
+	mux := http.NewServeMux()
+	mux.Handle("/api/workspaces/{ws}/", middleware.Workspace(func(id string) bool {
+		return id == "ws-alpha" || id == "ws-beta"
+	})(wsMux))
+
+	for _, wsID := range []string{"ws-alpha", "ws-beta", "ws-alpha"} {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest("GET", "/api/workspaces/"+wsID+"/events/token", nil)
+		req = req.WithContext(middleware.WithUserIdentity(
+			req.Context(),
+			middleware.UserIdentity{UserID: "user-123", Email: "test@example.com"},
+		))
+		mux.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("token route for %s: expected 200, got %d", wsID, rec.Code)
+		}
+	}
+
+	want := []string{"ws-alpha", "ws-beta", "ws-alpha"}
+	if strings.Join(activated, ",") != strings.Join(want, ",") {
+		t.Fatalf("activated = %v, want %v", activated, want)
+	}
+}
+
 func TestModule_DoesNotActivateEventsRouteBeforeTokenAuth(t *testing.T) {
 	hub := realtime.NewHub()
 	defer hub.Stop()
@@ -189,6 +234,72 @@ func TestModule_DoesNotActivateEventsRouteBeforeTokenAuth(t *testing.T) {
 	}
 	if len(activated) != 0 {
 		t.Fatalf("activated = %v, want no activation before token auth", activated)
+	}
+}
+
+func TestModule_ActivatesEachAuthorizedEventsClient(t *testing.T) {
+	hub := realtime.NewHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	tokens, err := realtime.NewTokenStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tokens.Stop()
+
+	getMutations := func(_ string, _ string) []rpc.MutationEvent { return nil }
+	activated := make(chan string, 3)
+	activate := func(_ context.Context, wsID string) {
+		activated <- wsID
+	}
+
+	mod := NewModule(hub, getMutations, middleware.WorkspaceFromContext, activate, tokens)
+
+	wsMux := http.NewServeMux()
+	mod.Register(wsMux)
+	mux := http.NewServeMux()
+	mux.Handle("/api/workspaces/{ws}/", middleware.Workspace(func(id string) bool {
+		return id == "ws-alpha" || id == "ws-beta"
+	})(wsMux))
+
+	for _, wsID := range []string{"ws-alpha", "ws-alpha", "ws-beta"} {
+		token, err := tokens.Generate("user-123", wsID)
+		if err != nil {
+			t.Fatalf("Generate token for %s: %v", wsID, err)
+		}
+
+		ctx, cancel := context.WithCancel(context.Background())
+		req := httptest.NewRequest(
+			"GET",
+			"/api/workspaces/"+wsID+"/events?token="+url.QueryEscape(token),
+			nil,
+		).WithContext(ctx)
+		rec := httptest.NewRecorder()
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			mux.ServeHTTP(rec, req)
+		}()
+
+		select {
+		case got := <-activated:
+			if got != wsID {
+				t.Fatalf("activated workspace = %q, want %q", got, wsID)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("events route for %s did not activate", wsID)
+		}
+
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+			t.Fatalf("events route for %s did not exit after request cancellation", wsID)
+		}
+		if rec.Code != http.StatusOK {
+			t.Fatalf("events route for %s: expected 200, got %d", wsID, rec.Code)
+		}
 	}
 }
 

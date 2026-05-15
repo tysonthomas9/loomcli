@@ -97,3 +97,11 @@ The legacy `type` and `issue_id` fields remain for backward compatibility.
     started the FleetDB mutation long-poll.
   - Created issue `E2E-WS-1` through the UI. The Kanban and work queue showed
     `Open 1`, `Blocked 0`, and no stale/reconnect banner.
+- Multi-workspace and multi-client follow-up:
+  - Added route-level tests that run the subscription module behind the real
+    workspace middleware and verify token activation resolves separate
+    workspaces (`ws-alpha`, `ws-beta`).
+  - Added stream-route coverage for multiple authorized clients across two
+    workspaces.
+  - Re-ran app-level hub tests for duplicate issue IDs across workspaces and
+    two-tab SSE independence.
