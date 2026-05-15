@@ -16,6 +16,9 @@ package playground_test
 
 import (
 	"bytes"
+	"encoding/json"
+	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -324,6 +327,291 @@ func TestPlaygroundSlowBackendNotKilled(t *testing.T) {
 	if ticks < 2 {
 		t.Errorf("slow backend completed only %d heartbeat ticks, expected ≥ 2", ticks)
 	}
+}
+
+// TestWorkspaceRemoveCascade asserts that `loom workspace remove --force`
+// fully purges the workspace's operational data from fleet-db, leaving zero
+// keys under `fleet-db:<KEY>:*`. fleet-db implements a two-pass cascade in
+// internal/storage/workspace.go (DeleteWorkspace, force=true path).
+//
+// Currently SKIPPED — the cascade code is present in the fleet-db binary
+// but operational keys still survive force-remove in practice (verified
+// 2026-05-14: 11 orphan keys remained after a clean create+remove cycle:
+// projector:cursor, events:*, role:*, repo:*, repos-meta, roles-meta).
+// Most likely cause is an async event projector recreating keys after the
+// cascade's straggler sweep completes.
+//
+// The teardown.sh SCAN/DEL workaround and the setup.sh HTTP-409 retry
+// are load-bearing because of this bug. Remove the t.Skip below — and
+// then the workarounds — once fleet-db's cascade is reliable end-to-end
+// (track upstream).
+//
+// Direct Redis probe rather than a behavioral "create-twice" probe because
+// `workspace remove` has separate unrelated cleanup gaps (e.g. it doesn't
+// delete the git branch it created in the source repo) that confound
+// behavioral assertions.
+func TestWorkspaceRemoveCascade(t *testing.T) {
+	t.Skip("fleet-db cascade-delete races with the event projector; workaround in teardown.sh is still load-bearing. Re-enable once upstream fix lands and verify with `go test -tags=playground -run TestWorkspaceRemoveCascade`.")
+	requireServe(t)
+
+	const probeName = "purgeprobe"
+	probeKey := strings.ToUpper(probeName)
+
+	tmpRepo := t.TempDir()
+	if out, err := exec.Command("git",
+		"-c", "init.defaultBranch=main",
+		"init", "-q", tmpRepo).CombinedOutput(); err != nil {
+		t.Fatalf("git init %s: %v\n%s", tmpRepo, err, out)
+	}
+	if out, err := exec.Command("git",
+		"-c", "user.email=probe@loom.local", "-c", "user.name=Probe",
+		"-C", tmpRepo, "commit", "--allow-empty", "-q", "-m", "init").CombinedOutput(); err != nil {
+		t.Fatalf("git commit: %v\n%s", err, out)
+	}
+
+	loomRun := func(args ...string) (string, error) {
+		cmd := exec.Command("loom", args...)
+		cmd.Env = os.Environ()
+		var out bytes.Buffer
+		cmd.Stdout = &out
+		cmd.Stderr = &out
+		err := cmd.Run()
+		return out.String(), err
+	}
+
+	_, _ = loomRun("workspace", "remove", probeKey, "--force")
+	t.Cleanup(func() {
+		_, _ = loomRun("workspace", "remove", probeKey, "--force")
+	})
+
+	if out, err := loomRun("workspace", "create", probeName, "--repos", tmpRepo); err != nil {
+		t.Fatalf("workspace create: %v\n%s", err, out)
+	}
+
+	// Verify operational keys exist before remove — otherwise this test
+	// would pass trivially against any fleet-db (or no fleet-db at all).
+	preKeys, err := scanFleetDBKeys(t, probeKey)
+	if err != nil {
+		t.Fatalf("scan before remove: %v", err)
+	}
+	if len(preKeys) == 0 {
+		t.Fatalf("no fleet-db:%s:* keys after create — probe is meaningless", probeKey)
+	}
+
+	if out, err := loomRun("workspace", "remove", probeKey, "--force"); err != nil {
+		t.Fatalf("workspace remove: %v\n%s", err, out)
+	}
+
+	postKeys, err := scanFleetDBKeys(t, probeKey)
+	if err != nil {
+		t.Fatalf("scan after remove: %v", err)
+	}
+	if len(postKeys) > 0 {
+		sample := postKeys
+		if len(sample) > 10 {
+			sample = sample[:10]
+		}
+		t.Errorf("expected zero fleet-db:%s:* keys after force-remove, found %d\nfirst few: %v",
+			probeKey, len(postKeys), sample)
+	}
+}
+
+// scanFleetDBKeys connects to fleet-db's embedded Redis (address from
+// ~/.loom/fleet-db/runtime.json) and returns every key matching
+// `fleet-db:<workspace>:*`. Mirrors the SCAN logic from teardown.sh's
+// embedded Python so the two see the same surface.
+func scanFleetDBKeys(t *testing.T, workspace string) ([]string, error) {
+	t.Helper()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, err
+	}
+	rtPath := filepath.Join(home, ".loom", "fleet-db", "runtime.json")
+	b, err := os.ReadFile(rtPath)
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", rtPath, err)
+	}
+	var rt struct {
+		RedisAddr string `json:"redis_addr"`
+	}
+	if err := json.Unmarshal(b, &rt); err != nil {
+		return nil, fmt.Errorf("parse %s: %w", rtPath, err)
+	}
+	if rt.RedisAddr == "" {
+		return nil, fmt.Errorf("%s: redis_addr is empty", rtPath)
+	}
+
+	conn, err := net.DialTimeout("tcp", rt.RedisAddr, 2*time.Second)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
+
+	pattern := fmt.Sprintf("fleet-db:%s:*", workspace)
+	cursor := "0"
+	var keys []string
+	for {
+		nextCursor, batch, err := redisScan(conn, cursor, pattern)
+		if err != nil {
+			return nil, err
+		}
+		keys = append(keys, batch...)
+		if nextCursor == "0" {
+			break
+		}
+		cursor = nextCursor
+	}
+	return keys, nil
+}
+
+// redisScan issues one `SCAN cursor MATCH pattern COUNT 1000` and returns
+// the next cursor + matched keys. Just enough RESP to avoid pulling in a
+// Redis client dep for a test probe.
+func redisScan(conn net.Conn, cursor, pattern string) (string, []string, error) {
+	req := buildRESP("SCAN", cursor, "MATCH", pattern, "COUNT", "1000")
+	if _, err := conn.Write(req); err != nil {
+		return "", nil, err
+	}
+	r := newRESPReader(conn)
+	arr, err := r.readArray()
+	if err != nil {
+		return "", nil, err
+	}
+	if len(arr) != 2 {
+		return "", nil, fmt.Errorf("SCAN: expected 2-element array, got %d", len(arr))
+	}
+	nextCursor, ok := arr[0].(string)
+	if !ok {
+		return "", nil, fmt.Errorf("SCAN: cursor not a string: %T", arr[0])
+	}
+	rawKeys, ok := arr[1].([]any)
+	if !ok {
+		return "", nil, fmt.Errorf("SCAN: keys not an array: %T", arr[1])
+	}
+	keys := make([]string, 0, len(rawKeys))
+	for _, k := range rawKeys {
+		if s, ok := k.(string); ok {
+			keys = append(keys, s)
+		}
+	}
+	return nextCursor, keys, nil
+}
+
+// buildRESP serializes a Redis command as a RESP array of bulk strings.
+func buildRESP(parts ...string) []byte {
+	var b bytes.Buffer
+	fmt.Fprintf(&b, "*%d\r\n", len(parts))
+	for _, p := range parts {
+		fmt.Fprintf(&b, "$%d\r\n%s\r\n", len(p), p)
+	}
+	return b.Bytes()
+}
+
+// respReader is a minimal RESP2 reader that handles bulk strings and
+// arrays of bulk strings — enough for the SCAN reply shape.
+type respReader struct {
+	conn net.Conn
+	buf  []byte
+}
+
+func newRESPReader(conn net.Conn) *respReader {
+	return &respReader{conn: conn}
+}
+
+func (r *respReader) readLine() (string, error) {
+	for {
+		if i := bytes.Index(r.buf, []byte("\r\n")); i >= 0 {
+			line := string(r.buf[:i])
+			r.buf = r.buf[i+2:]
+			return line, nil
+		}
+		tmp := make([]byte, 4096)
+		n, err := r.conn.Read(tmp)
+		if n > 0 {
+			r.buf = append(r.buf, tmp[:n]...)
+		}
+		if err != nil {
+			return "", err
+		}
+	}
+}
+
+func (r *respReader) readN(n int) ([]byte, error) {
+	for len(r.buf) < n {
+		tmp := make([]byte, 4096)
+		nn, err := r.conn.Read(tmp)
+		if nn > 0 {
+			r.buf = append(r.buf, tmp[:nn]...)
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
+	out := r.buf[:n]
+	r.buf = r.buf[n:]
+	return out, nil
+}
+
+func (r *respReader) readReply() (any, error) {
+	line, err := r.readLine()
+	if err != nil {
+		return nil, err
+	}
+	if line == "" {
+		return nil, fmt.Errorf("empty RESP line")
+	}
+	switch line[0] {
+	case '$':
+		n, err := strconv.Atoi(line[1:])
+		if err != nil {
+			return nil, err
+		}
+		if n < 0 {
+			return nil, nil
+		}
+		data, err := r.readN(n)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := r.readLine(); err != nil {
+			return nil, err
+		}
+		return string(data), nil
+	case '*':
+		n, err := strconv.Atoi(line[1:])
+		if err != nil {
+			return nil, err
+		}
+		out := make([]any, n)
+		for i := 0; i < n; i++ {
+			out[i], err = r.readReply()
+			if err != nil {
+				return nil, err
+			}
+		}
+		return out, nil
+	case '+':
+		return line[1:], nil
+	case '-':
+		return nil, fmt.Errorf("RESP error: %s", line[1:])
+	case ':':
+		return strconv.Atoi(line[1:])
+	default:
+		return nil, fmt.Errorf("unsupported RESP type %q", line[0])
+	}
+}
+
+func (r *respReader) readArray() ([]any, error) {
+	v, err := r.readReply()
+	if err != nil {
+		return nil, err
+	}
+	arr, ok := v.([]any)
+	if !ok {
+		return nil, fmt.Errorf("expected array, got %T", v)
+	}
+	return arr, nil
 }
 
 // durationFromEnv reads a number-of-seconds env var, returning fallback

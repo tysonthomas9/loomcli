@@ -68,6 +68,23 @@ from an earlier interrupted run), it transparently runs teardown and
 retries once. Net effect: you can `./setup.sh` repeatedly without
 manually nuking `~/.loom` between runs.
 
+### Why these workarounds exist
+
+fleet-db's `DELETE /api/v1/admin/workspaces/<key>?force=true` *does*
+contain a two-pass cascade-delete (see `internal/storage/workspace.go`
+in the fleet-db repo). The CLI passes `force=true`. But in practice
+keys still survive: verified 2026-05-14, 11 orphan keys remained after
+a clean create + force-remove cycle (`projector:cursor`, `events:*`,
+`role:*`, `repo:*`, `repos-meta`, `roles-meta`). The cascade runs,
+sweeps, completes successfully — and then fleet-db's event projector
+re-materializes some keys on its own schedule. The CLI returns
+"Workspace removed." while the orphans are quietly recreated.
+
+`TestWorkspaceRemoveCascade` in `scenarios_test.go` is the regression
+tripwire for this. It's currently `t.Skip`ped because fleet-db is
+external; remove the skip — and the workarounds below — once the
+upstream cascade-vs-projector race is fixed.
+
 Under the hood, `teardown.sh` connects to fleet-db's embedded Redis
 (address from `~/.loom/fleet-db/runtime.json`) and SCAN-then-DEL's every
 `fleet-db:PLAYGROUND:*` key. Only PLAYGROUND keys are touched; other
