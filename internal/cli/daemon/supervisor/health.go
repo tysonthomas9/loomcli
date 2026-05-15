@@ -165,6 +165,7 @@ func (s *Supervisor) healthChecker() {
 			return
 		case <-ticker.C:
 			s.checkAgentHealth()
+			s.RecordTick(GoroutineHealthChecker)
 		}
 	}
 }
