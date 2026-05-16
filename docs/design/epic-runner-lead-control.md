@@ -1,7 +1,7 @@
 # Epic Runner Lead Control Direction
 
 Date: 2026-05-16
-Status: Design direction, needs implementation tests
+Status: Design direction, Claude hooks and Codex app-server topology smoke-tested
 
 ## Goal
 
@@ -9,14 +9,15 @@ The epic runner should let users keep interacting with a visible lead AI session
 while the backend remains the source of truth for which epic the lead should
 work on.
 
-The direction is:
+The current direction is:
 
 - The backend owns lead assignment, run locking, and run state.
-- Claude hooks inject that backend state into the lead session at lifecycle
-  boundaries.
-- The visible Claude TUI remains the human-facing lead conversation.
-- PTY injection is only a wake-up mechanism for idle sessions, not the
-  authoritative transport for run details.
+- Provider adapters inject or expose backend state at lifecycle boundaries.
+  Claude does this with hooks. Codex can do this through app-server status
+  events and backend-originated `turn/start` messages on the same thread.
+- The visible AI TUI remains the human-facing lead conversation.
+- Raw PTY injection is only a fallback wake-up mechanism for idle sessions, not
+  the authoritative transport for run details.
 - Busy sessions are updated at safe hook boundaries instead of blindly typing
   into the composer.
 
@@ -193,6 +194,47 @@ remote control if available, or a stream-json controlled process. Hard
 interrupts should be reserved for cancellation or urgent user action, not the
 normal run-epic path.
 
+### Codex App-Server Adapter
+
+Codex has a better topology than raw PTY control when using `app-server`:
+
+- Run one Codex app-server for the lead session.
+- Attach the human's real Codex TUI with `codex --remote <server>`.
+- Attach the Loom backend as a second websocket client.
+- Subscribe the backend to the lead thread with `thread/read`.
+- Track idle/busy from `thread/status/changed`.
+- Start backend-assigned work with `turn/start` on the same thread only when the
+  backend state says the lead is idle, or queue the assignment when active.
+
+This keeps the Codex TUI as the human UI. Loom does not need to build a full
+replacement chat UI before it can observe and control a lead session.
+
+Provider-neutral mapping:
+
+```text
+Codex thread/status/changed idle
+  -> lead session is idle and can accept backend turn/start
+
+Codex thread/status/changed active
+  -> lead session is busy; queue assignment or wait for safe transition
+
+Codex activeFlags.waitingOnApproval
+  -> lead is blocked on approval, not truly available for new epic work
+
+Codex activeFlags.waitingOnUserInput
+  -> lead is blocked on user input, not truly available for new epic work
+```
+
+Backend-originated prompts should be small and explicit:
+
+```text
+Loom assigned you epic EPIC-1 via run RUN-1. Read backend assignment state and
+begin only if this thread is idle.
+```
+
+The assignment details still come from backend state, not from a long prompt
+typed into the user's composer.
+
 ### User Chats With Lead After Assignment
 
 1. User types normally in the TUI.
@@ -218,6 +260,46 @@ Manual probes on 2026-05-16:
   Claude answered `ACK_HOOK_CONTEXT_1` from hook-only context.
 - The same hook method worked in interactive TUI; Claude answered
   `ACK_HOOK_TUI_1` from hook-only context and accepted `sessionTitle`.
+- Claude idle/busy is observable through hooks: `UserPromptSubmit` fired when
+  work began and `Stop` fired when the TUI returned `ACK_IDLE_DETECT_CLAUDE`.
+- Codex exposes hook and thread lifecycle events through the generated
+  app-server protocol. The generated schema includes `userPromptSubmit`,
+  `stop`, `thread/status/changed`, and `activeFlags`.
+- Codex app-server can host a real Codex TUI and a second backend observer on
+  the same lead session without breaking the session model.
+- Test topology:
+  - app-server:
+    `codex app-server --listen ws://127.0.0.1:17777 -c sqlite_home="/tmp/codex-idle-sqlite"`
+  - human TUI:
+    `codex --remote ws://127.0.0.1:17777 --no-alt-screen -C <repo>`
+  - backend observer/controller: minimal websocket JSON-RPC client using
+    `initialize`, `thread/list`, `hooks/list`, `thread/read`, and `turn/start`.
+- Important Codex gotcha: connecting to app-server and calling `thread/list` is
+  not enough to receive live status transitions. The observer must call
+  `thread/read` for the target thread to subscribe.
+- TUI-driven Codex prompt test:
+  - user typed:
+    `IDLE_TOPOLOGY_TEST_2: Reply exactly ACK_TOPOLOGY_CODEX_2 and nothing else.`
+  - TUI answered `ACK_TOPOLOGY_CODEX_2`.
+  - backend observer received `thread/status/changed` from `active` to `idle`.
+- Backend controller Codex prompt test:
+  - controller sent `turn/start` on the same thread with:
+    `IDLE_TOPOLOGY_CONTROLLER: Reply exactly ACK_TOPOLOGY_CONTROLLER and nothing else.`
+  - TUI displayed the backend-started prompt and answer
+    `ACK_TOPOLOGY_CONTROLLER`.
+  - observer/controller saw the same thread return to `idle`.
+- Did not observe a live `turn/started` or `turn/completed` notification on the
+  observer during this smoke test. For idle detection,
+  `thread/status/changed` was sufficient. Richer timeline rendering still needs
+  follow-up testing.
+- Node v24's built-in `WebSocket` failed the local app-server handshake with an
+  empty error in this environment. A raw RFC6455 Python client worked. The
+  production backend should use a websocket client with explicit handshake and
+  header control.
+- Local `~/.codex` sqlite corruption caused an earlier app-server startup
+  failure (`file is not a database`). Starting app-server with a dedicated
+  `sqlite_home` avoided the issue while still using the existing authenticated
+  Codex installation.
 
 ## Required Tests
 
@@ -282,6 +364,20 @@ These should be automated before treating the architecture as complete.
   - Assignments are workspace scoped.
   - Hooks for workspace A cannot read assignment state for workspace B.
 
+- Codex app-server hybrid:
+  - Start Codex app-server with isolated `sqlite_home`.
+  - Attach a real Codex TUI using `codex --remote`.
+  - Attach a backend websocket client to the same app-server.
+  - Backend calls `thread/read` for the selected lead thread.
+  - User-submitted TUI prompt produces `active` then `idle` status events.
+  - Backend `turn/start` on an idle thread appears in the TUI and returns to
+    `idle`.
+  - Backend `turn/start` while the thread is `active` is rejected or queued by
+    Loom, not blindly sent.
+  - Multiple backend/browser clients subscribed to the same thread observe the
+    same status transitions.
+  - Separate workspaces map to separate lead thread subscriptions.
+
 ### Agent-Browser UI Tests
 
 Use named `agent-browser --session` values to avoid collisions.
@@ -301,5 +397,7 @@ Use named `agent-browser --session` values to avoid collisions.
 - Should assignment acknowledgement be explicit, for example
   `assignment_ack_version`, or inferred from hook/run events?
 - Which states should allow a hard interrupt rather than a soft hook boundary?
-- Should Codex get a parallel adapter with app-server/remote-control hooks, or
-  should the first implementation be Claude-only?
+- For Codex, do we need item-level timeline events in addition to
+  `thread/status/changed`, and which subscription method exposes them reliably?
+- Should Loom own the Codex app-server process lifecycle per workspace, per
+  lead, or per local daemon node?
