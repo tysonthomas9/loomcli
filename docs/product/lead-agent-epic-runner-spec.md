@@ -379,15 +379,20 @@ ephemeral worker.
 
 ### UI Run Epic Button
 
-The UI button should run the same command a user could type:
+The UI button and terminal command should use the same backend run semantics.
+A user may still type:
 
 ```bash
 loom epic run --parent <epic_id>
 ```
 
-It should execute inside the selected lead terminal, not through a separate
-hidden service path. This guarantees the UI button and manual terminal command
-share:
+For provider-backed interactive leads, the UI button should first write durable
+backend assignment/run state, then deliver that assignment through the selected
+lead session's provider adapter. For Codex app-server-backed leads, that means a
+visible `turn/start` on the same Codex thread the user is already viewing. It
+does not mean blind PTY typing into the composer.
+
+This guarantees the UI button and manual terminal command share:
 
 - the same lead identity
 - the same session/resume behavior

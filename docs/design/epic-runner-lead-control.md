@@ -34,7 +34,10 @@ LeadAssignment
   epic_id
   epic_run_id
   state: unassigned | assigned | active | paused | completed | cancelled | failed
+  delivery_state: none | pending | delivered | acknowledged
   version
+  delivered_version
+  acknowledged_version
   updated_at
 ```
 
@@ -61,6 +64,177 @@ durable execution record. The backend enforces:
 
 The older `agent.parent` can remain as a compatibility/read-model field, but it
 should not be the only lock or liveness source.
+
+## Implementation Decisions
+
+These are the decisions for the first implementation. Treat them as settled
+unless a test proves they are wrong.
+
+### Source Of Truth
+
+Use a dedicated `LeadAssignment` store plus durable `EpicRun` records.
+
+`agent.parent` remains a compatibility/read-model field for existing UI and CLI
+surfaces, but it is not the authoritative lock. The authoritative invariants
+live in `LeadAssignment` and `EpicRun`:
+
+- one non-terminal assignment per lead
+- one non-terminal run per epic
+- idempotent resume for the same epic/lead
+- explicit version increments for every backend assignment transition
+
+Do not derive current assignment only from terminal contents, Codex thread
+contents, Claude hook events, or `AgentSession` history.
+
+### Assignment Delivery
+
+Track assignment delivery explicitly.
+
+```text
+version                 backend desired-state version
+delivered_version       highest version submitted to the lead session
+acknowledged_version    highest version the lead has visibly acknowledged
+delivery_state          none | pending | delivered | acknowledged
+```
+
+For MVP behavior, `delivered_version` is enough to avoid duplicate wake-ups.
+`acknowledged_version` should still exist because hook-driven providers can
+record real acknowledgment and future UI can distinguish "sent to lead" from
+"lead understood it".
+
+### Lead Runtime Record
+
+Persist a provider-neutral runtime record for each lead session.
+
+```text
+LeadSessionRuntime
+  workspace_id
+  lead_id
+  provider: codex | claude
+  provider_session_id
+  provider_thread_id
+  runtime_home
+  app_server_endpoint
+  app_server_pid
+  status: disconnected | idle | active | waiting_on_approval | waiting_on_user_input | failed
+  status_version
+  controller_lease_id
+  updated_at
+```
+
+`app_server_endpoint` and `app_server_pid` are runtime metadata. Assignment
+state must survive their loss. Auth secrets do not belong in this record.
+
+### Codex Process Ownership
+
+Run one Codex app-server per lead session for the first implementation.
+
+The Loom daemon node that owns the lead terminal owns that app-server process.
+Use a lead-scoped runtime directory and a lead-scoped Codex `sqlite_home`, for
+example:
+
+```text
+<loom-runtime>/<workspace>/<lead>/codex/
+```
+
+This isolates lead conversations, makes cleanup clear, and avoids accidental
+cross-workspace subscriptions. A shared app-server can be reconsidered later
+only after the per-lead adapter is stable.
+
+### Backend Controller Lease
+
+Only one Loom backend controller may call provider mutation APIs for a lead at a
+time.
+
+Browsers and secondary services observe Loom state through the backend. They do
+not connect directly to Codex app-server as controllers. For Codex, multiple
+websocket observers are acceptable, but only the lease holder may call
+`turn/start`, `interrupt`, or future mutation APIs.
+
+### Busy Behavior
+
+If a lead has no active epic but the provider session is busy, create the
+assignment and leave it pending. Do not submit a turn while Codex reports
+`active`, `waitingOnApproval`, or `waitingOnUserInput`.
+
+When the lead returns to `idle`, the controller sends one visible provider turn
+for the current assignment version and records `delivered_version`.
+
+### Conflict Behavior
+
+Use strict conflict rules for the first implementation:
+
+- same lead, same epic: idempotent resume
+- same lead, different non-terminal epic: reject
+- same epic, different non-terminal lead: reject
+- no active epic, busy lead session: queue delivery until idle
+
+Do not implement automatic epic switching in the MVP. Switching should be a
+separate explicit user action because it changes the lead's working context.
+
+### Interrupt Policy
+
+Normal "Run Epic" does not interrupt active provider work.
+
+Interrupts are reserved for:
+
+- user clicks a clear stop/cancel/interrupt action
+- backend must stop unsafe work after a cancelled or paused run
+- provider is stuck and the user chooses recovery
+
+Assignment delivery uses queue-on-busy, not hard interrupt.
+
+### Provider Adapter Boundary
+
+Hide provider-specific control behind a lead-session adapter.
+
+```text
+LeadSessionAdapter
+  EnsureRuntime(ctx, lead) -> LeadSessionRuntime
+  Subscribe(ctx, runtime) -> status/event stream
+  StartTurn(ctx, runtime, message, assignment_version) -> delivery result
+  Interrupt(ctx, runtime, reason) -> result
+  Resume(ctx, runtime) -> LeadSessionRuntime
+  Close(ctx, runtime) -> result
+```
+
+Codex implements this with app-server websocket calls. Claude can implement the
+same shape with hooks, stream-json, or PTY fallback, but epic runner code should
+not know those details.
+
+### UI State Language
+
+Expose these states in the UI:
+
+- unassigned
+- assigned, waiting for lead
+- active
+- busy, assignment pending
+- waiting on approval
+- waiting on user input
+- disconnected
+- failed
+- paused
+- cancelled
+- completed
+
+Use "waiting for lead" when the assignment is written but not delivered. Use
+"busy, assignment pending" when a provider status says the lead cannot accept a
+new turn yet.
+
+### Failure Recovery
+
+Assignment state remains durable when provider runtime fails.
+
+- app-server exits: mark runtime `disconnected`, keep assignment unchanged, and
+  offer reconnect/retry
+- TUI disconnects: keep app-server and backend observer alive when possible
+- backend observer disconnects: reconnect, call provider read/subscribe again,
+  and reconcile status
+- stale thread id: start app-server, list/resume threads, and require explicit
+  user recovery if the thread cannot be found
+- corrupted provider sqlite: create a new lead-scoped runtime home and keep the
+  old path for inspection
 
 ## Hook Strategy
 
@@ -198,7 +372,7 @@ normal run-epic path.
 
 Codex has a better topology than raw PTY control when using `app-server`:
 
-- Run one Codex app-server for the lead session.
+- Run one Codex app-server per lead session.
 - Attach the human's real Codex TUI with `codex --remote <server>`.
 - Attach the Loom backend as a second websocket client.
 - Subscribe the backend to the lead thread with `thread/read`.
@@ -385,19 +559,19 @@ Use named `agent-browser --session` values to avoid collisions.
 - Run Epic button on an idle lead shows `assigned` then `active`.
 - Running an already assigned epic shows resume/retry state rather than starting
   a duplicate run.
-- Running a different epic on a busy lead shows queued/pending assignment state.
+- Running an epic while the provider session is busy but the lead is unassigned
+  shows queued/pending assignment state.
+- Running a different epic while the lead owns a non-terminal epic shows a clear
+  conflict and does not queue an implicit switch.
 - The lead panel explains that the update will be picked up at the next safe
   point.
 - The terminal composer is not polluted by backend state while the lead is busy.
 
-## Open Questions
+## Follow-Up Work
 
-- Do we use a new `LeadAssignment` table/store, or derive it from `EpicRun` plus
-  `AgentSession` for the first implementation?
-- Should assignment acknowledgement be explicit, for example
-  `assignment_ack_version`, or inferred from hook/run events?
-- Which states should allow a hard interrupt rather than a soft hook boundary?
 - For Codex, do we need item-level timeline events in addition to
   `thread/status/changed`, and which subscription method exposes them reliably?
-- Should Loom own the Codex app-server process lifecycle per workspace, per
-  lead, or per local daemon node?
+- Add a deliberate "switch epic" UX after the strict MVP conflict behavior is
+  working.
+- Reconsider shared app-server processes only after the per-lead implementation
+  has multi-workspace and reconnect coverage.
