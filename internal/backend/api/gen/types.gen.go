@@ -429,8 +429,8 @@ const (
 	MutationPayloadTypeComment               MutationPayloadType = "comment"
 	MutationPayloadTypeCreate                MutationPayloadType = "create"
 	MutationPayloadTypeDelete                MutationPayloadType = "delete"
-	MutationPayloadTypeRefresh               MutationPayloadType = "refresh"
 	MutationPayloadTypeIssueTabs             MutationPayloadType = "issue_tabs"
+	MutationPayloadTypeRefresh               MutationPayloadType = "refresh"
 	MutationPayloadTypeSessionChange         MutationPayloadType = "session_change"
 	MutationPayloadTypeSquashed              MutationPayloadType = "squashed"
 	MutationPayloadTypeStatus                MutationPayloadType = "status"
@@ -452,9 +452,9 @@ func (e MutationPayloadType) Valid() bool {
 		return true
 	case MutationPayloadTypeDelete:
 		return true
-	case MutationPayloadTypeRefresh:
-		return true
 	case MutationPayloadTypeIssueTabs:
+		return true
+	case MutationPayloadTypeRefresh:
 		return true
 	case MutationPayloadTypeSessionChange:
 		return true

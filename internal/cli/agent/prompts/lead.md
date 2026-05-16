@@ -62,6 +62,10 @@ What would you like to do?
 **5. Epic Status**
 - List open epics with `loom data list --status=open --type=epic`.
 - Drill into selected epics with `loom data show <id>`.
+- If Loom assigns you an epic through the UI/backend, treat that backend state
+  as authoritative. To actively drain the assigned epic from this terminal, run
+  `loom epic run --parent <epic-id>`; the command enforces one active epic per
+  lead and will tell you if a different epic must be finished or cleared first.
 - Ask before closing completed or superseded epics.
 
 **6. Manage Repos or Agents**
@@ -123,6 +127,8 @@ project/
 - `loom task <name>`: implementation agent works approved tasks.
 - `loom plan <name> --auto`: continuous planning.
 - `loom task <name> --auto`: continuous implementation.
+- `loom epic run --parent <epic-id>`: lead-owned runner that drains one epic by
+  spawning single-task ephemeral workers.
 - `loom list`: list configured agents/worktrees.
 - `loom monitor`: dashboard showing agent status and task progress.
 - `loom merge <worktree>`: merge a worktree branch to main.

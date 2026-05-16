@@ -130,6 +130,19 @@ func collectMonitorStoreData(ctx context.Context, st store.Store, workspaceHint 
 
 	workspaceData := monitorWorkspaceDataForAgents(ctx, st, wsKey, wsName)
 	latestSessions := latestAgentSessionsForMonitor(ctx, st, wsKey)
+	orchestrationByAgent := latestOrchestrationSessionsForMonitor(ctx, st, wsKey)
+	data.Agents = monitorAgentStatuses(assignments, workspaceData, latestSessions, orchestrationByAgent, wsName)
+	return data
+}
+
+func monitorAgentStatuses(
+	assignments []*domain.Agent,
+	workspaceData *ops.WorkspaceData,
+	latestSessions map[string]*domain.AgentSession,
+	orchestrationByAgent map[string]*domain.AgentSession,
+	wsName string,
+) []monitor.AgentStatus {
+	agents := []monitor.AgentStatus{}
 	for _, assignment := range assignments {
 		if assignment == nil {
 			continue
@@ -139,7 +152,11 @@ func collectMonitorStoreData(ctx context.Context, st store.Store, workspaceHint 
 			taskID = session.TaskID
 			sessionID = session.SessionID
 		}
-		data.Agents = append(data.Agents, monitor.AgentStatus{
+		var orchID string
+		if sess := orchestrationByAgent[assignment.Name]; sess != nil {
+			orchID = sess.SessionID
+		}
+		agents = append(agents, monitor.AgentStatus{
 			Name:                  assignment.Name,
 			Branch:                monitorBranchFromAgent(workspaceData, assignment),
 			Status:                monitorStatusFromAgentState(assignment.State),
@@ -148,14 +165,14 @@ func collectMonitorStoreData(ctx context.Context, st store.Store, workspaceHint 
 			Workspace:             wsName,
 			DaemonManaged:         assignment.Auto,
 			Parent:                assignment.Parent,
-			OrchestratorSessionID: assignment.OrchestratorSessionID,
+			OrchestratorSessionID: orchID,
 			TaskID:                taskID,
 			SessionID:             sessionID,
 			Mode:                  string(assignment.Mode),
 			DesiredState:          string(assignment.DesiredState),
 		})
 	}
-	return data
+	return agents
 }
 
 func workspaceNames(workspaces []*domain.Workspace) []string {

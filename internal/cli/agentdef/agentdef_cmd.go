@@ -111,7 +111,7 @@ func init() {
 	agentAddCmd.Flags().IntVar(&agentAddMaxConc, "max-concurrency", 0, "Maximum concurrent runs for orchestrator/service agents")
 	agentAddCmd.Flags().StringVar(&agentAddBudget, "budget-policy", "", "Budget/retry policy name")
 	agentAddCmd.Flags().StringVar(&agentAddTask, "task", "", "Pin this agent's first cycle to a specific task ID (claims that task instead of polling Ready)")
-	agentAddCmd.Flags().StringVar(&agentAddOrchestrator, "orchestrator", "", "Attribute this agent to a parent lead/orchestrator session ID (overrides $LOOM_ORCHESTRATOR_SESSION_ID)")
+	agentAddCmd.Flags().StringVar(&agentAddOrchestrator, "orchestrator", "", "Parent lead/orchestrator session ID for the queued --task start command (overrides $LOOM_ORCHESTRATOR_SESSION_ID)")
 
 	agentListCmd.Flags().BoolVar(&agentListJSON, "json", false, "JSON output")
 	agentShowCmd.Flags().BoolVar(&agentShowJSON, "json", false, "JSON output")
@@ -130,27 +130,7 @@ func runAgentAdd(_ *cobra.Command, args []string) error {
 		if orchestratorID == "" {
 			orchestratorID = os.Getenv(envOrchestratorSessionID)
 		}
-		desiredState := domain.AgentDesiredState("")
-		if agentAddTask != "" {
-			desiredState = domain.AgentDesiredStopped
-		}
-		a, err := h.Store.Agents().Create(ctx, store.AgentCreate{
-			WorkspaceKey:          ws,
-			Name:                  args[0],
-			RoleName:              agentAddRole,
-			Auto:                  agentAddAuto,
-			Backend:               agentAddBackend,
-			Repos:                 agentAddRepos,
-			RepoGroups:            agentAddRepoGroups,
-			CrossRepo:             agentAddCrossRepo,
-			Parent:                agentAddParent,
-			OrchestratorSessionID: orchestratorID,
-			Mode:                  mode,
-			TaskFilter:            agentAddTaskFilter,
-			MaxConcurrency:        agentAddMaxConc,
-			BudgetPolicy:          agentAddBudget,
-			DesiredState:          desiredState,
-		})
+		a, err := h.Store.Agents().Create(ctx, agentCreateFromFlags(ws, args[0], mode))
 		if err != nil {
 			return fmt.Errorf("create agent: %w", err)
 		}
@@ -160,22 +140,54 @@ func runAgentAdd(_ *cobra.Command, args []string) error {
 		}
 		fmt.Printf("Created agent %s/%s (role=%s)\n", a.WorkspaceKey, a.Name, a.RoleName)
 
-		// If --task was provided, enqueue a start command with task_id payload so
-		// the daemon's command poller dispatches the agent pre-pinned to that task.
-		// This is the seam used by `loom epic run` to spawn task-specific workers.
-		if agentAddTask != "" && h.Store.AgentCommands() != nil {
-			if _, err := h.Store.AgentCommands().Create(ctx, store.AgentCommandCreate{
-				WorkspaceKey:  ws,
-				TargetAgentID: a.Name,
-				Type:          "start",
-				Payload:       map[string]string{"task_id": agentAddTask},
-			}); err != nil {
-				return fmt.Errorf("enqueue start command for task %q: %w", agentAddTask, err)
-			}
-			fmt.Printf("  pinned to task: %s\n", agentAddTask)
+		if err := enqueueAgentAddTaskStart(ctx, h.Store, ws, a.Name, orchestratorID); err != nil {
+			return err
 		}
 		return nil
 	})
+}
+
+func agentCreateFromFlags(workspace, name string, mode domain.AgentMode) store.AgentCreate {
+	desiredState := domain.AgentDesiredState("")
+	if agentAddTask != "" {
+		desiredState = domain.AgentDesiredStopped
+	}
+	return store.AgentCreate{
+		WorkspaceKey:   workspace,
+		Name:           name,
+		RoleName:       agentAddRole,
+		Auto:           agentAddAuto,
+		Backend:        agentAddBackend,
+		Repos:          agentAddRepos,
+		RepoGroups:     agentAddRepoGroups,
+		CrossRepo:      agentAddCrossRepo,
+		Parent:         agentAddParent,
+		Mode:           mode,
+		TaskFilter:     agentAddTaskFilter,
+		MaxConcurrency: agentAddMaxConc,
+		BudgetPolicy:   agentAddBudget,
+		DesiredState:   desiredState,
+	}
+}
+
+func enqueueAgentAddTaskStart(ctx context.Context, st store.Store, workspace, agentName, orchestratorID string) error {
+	if agentAddTask == "" || st.AgentCommands() == nil {
+		return nil
+	}
+	payload := map[string]string{"task_id": agentAddTask}
+	if orchestratorID != "" {
+		payload["parent_session_id"] = orchestratorID
+	}
+	if _, err := st.AgentCommands().Create(ctx, store.AgentCommandCreate{
+		WorkspaceKey:  workspace,
+		TargetAgentID: agentName,
+		Type:          "start",
+		Payload:       payload,
+	}); err != nil {
+		return fmt.Errorf("enqueue start command for task %q: %w", agentAddTask, err)
+	}
+	fmt.Printf("  pinned to task: %s\n", agentAddTask)
+	return nil
 }
 
 func ensureAgentDefinitionLocalWorktrees(ctx context.Context, st store.Store, agent domain.Agent) error {
@@ -278,8 +290,11 @@ func runAgentShow(_ *cobra.Command, args []string) error {
 		if a.Parent != "" {
 			fmt.Printf("Parent epic:  %s\n", a.Parent)
 		}
-		if a.OrchestratorSessionID != "" {
-			fmt.Printf("Orchestrator: %s\n", a.OrchestratorSessionID)
+		// AgentSession is the single source of truth for orchestrator
+		// attribution; the denormalized Agent.OrchestratorSessionID
+		// cache was dropped on FleetDB writes in 9aef2ae5.
+		if orchID, err := store.OrchestrationSessionIDFor(ctx, h.Store, ws, a.Name); err == nil && orchID != "" {
+			fmt.Printf("Orchestrator: %s\n", orchID)
 		}
 		if a.Mode != "" {
 			fmt.Printf("Mode:         %s\n", a.Mode)

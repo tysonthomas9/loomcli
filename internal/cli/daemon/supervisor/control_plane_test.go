@@ -99,10 +99,11 @@ func TestSupervisorMirrorsAgentSessionToControlPlane(t *testing.T) {
 	cli.ResetWorkspaceRuntimeDirCache()
 
 	ap := &AgentProcess{
-		Entry:          cfgpkg.AgentEntry{Worktree: "worker-1", Role: "task", Repo: "repo-a"},
-		RoleConfig:     cfgpkg.RoleConfig{Backend: "claude"},
-		WorktreePath:   worktree,
-		AssignedTaskID: "task-1",
+		Entry:           cfgpkg.AgentEntry{Worktree: "worker-1", Role: "task", Repo: "repo-a"},
+		RoleConfig:      cfgpkg.RoleConfig{Backend: "claude"},
+		WorktreePath:    worktree,
+		AssignedTaskID:  "task-1",
+		ParentSessionID: "lead-session-1",
 	}
 
 	s.createAgentSession(ap, "epic-1")
@@ -124,6 +125,9 @@ func TestSupervisorMirrorsAgentSessionToControlPlane(t *testing.T) {
 	}
 	if session.TaskID != "task-1" {
 		t.Fatalf("task id = %q, want task-1", session.TaskID)
+	}
+	if session.ParentSessionID != "lead-session-1" {
+		t.Fatalf("parent session id = %q, want lead-session-1", session.ParentSessionID)
 	}
 	if session.Metadata["epic_id"] != "epic-1" || session.Metadata["task_id"] != "task-1" || session.Metadata["repo"] != "repo-a" {
 		t.Fatalf("metadata = %#v, want epic/task/repo", session.Metadata)

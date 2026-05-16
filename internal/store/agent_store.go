@@ -10,41 +10,43 @@ import (
 // and RoleName are required; RoleName must reference an existing Role
 // in the same workspace.
 type AgentCreate struct {
-	WorkspaceKey          string
-	Name                  string
-	RoleName              string
-	Auto                  bool
-	Backend               string
-	FallbackBackends      []string
-	Repos                 []string
-	RepoGroups            []string
-	CrossRepo             bool
-	Parent                string
-	OrchestratorSessionID string
-	Mode                  domain.AgentMode
-	TaskFilter            string
-	MaxConcurrency        int
-	BudgetPolicy          string
-	DesiredState          domain.AgentDesiredState
+	WorkspaceKey     string
+	Name             string
+	RoleName         string
+	Auto             bool
+	Backend          string
+	FallbackBackends []string
+	Repos            []string
+	RepoGroups       []string
+	CrossRepo        bool
+	Parent           string
+	// OrchestratorSessionID was here historically as a denormalized cache
+	// of the lead-to-orchestration AgentSession join. AgentSession is the
+	// single source of truth; use store.OrchestrationSessionIDFor.
+	Mode           domain.AgentMode
+	TaskFilter     string
+	MaxConcurrency int
+	BudgetPolicy   string
+	DesiredState   domain.AgentDesiredState
 }
 
 // AgentUpdate is the partial-update payload for agents.
 type AgentUpdate struct {
-	RoleName              *string
-	Auto                  *bool
-	Backend               *string
-	FallbackBackends      *[]string
-	Repos                 *[]string
-	RepoGroups            *[]string
-	CrossRepo             *bool
-	Parent                *string
-	OrchestratorSessionID *string
-	State                 *domain.AgentState
-	Mode                  *domain.AgentMode
-	TaskFilter            *string
-	MaxConcurrency        *int
-	BudgetPolicy          *string
-	DesiredState          *domain.AgentDesiredState
+	RoleName         *string
+	Auto             *bool
+	Backend          *string
+	FallbackBackends *[]string
+	Repos            *[]string
+	RepoGroups       *[]string
+	CrossRepo        *bool
+	Parent           *string
+	// OrchestratorSessionID removed; see comment on AgentCreate.
+	State          *domain.AgentState
+	Mode           *domain.AgentMode
+	TaskFilter     *string
+	MaxConcurrency *int
+	BudgetPolicy   *string
+	DesiredState   *domain.AgentDesiredState
 }
 
 // AgentStore is the persistence interface for Agent assignments.

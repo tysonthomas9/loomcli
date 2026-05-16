@@ -48,9 +48,10 @@ func TestBindLeadAgentAssignsEmptyParent(t *testing.T) {
 	if got.Parent != "EPIC-1" {
 		t.Fatalf("lead parent = %q, want EPIC-1", got.Parent)
 	}
-	if got.OrchestratorSessionID != "session-1" {
-		t.Fatalf("lead orchestrator = %q, want session-1", got.OrchestratorSessionID)
-	}
+	// Orchestrator session attribution lives on AgentSession now, not on
+	// Agent.OrchestratorSessionID (which was dropped from FleetDB writes
+	// in commit 9aef2ae5). bindLeadAgent returns the resolved orchestrator
+	// id via the function's second return value, asserted above.
 }
 
 func TestBindLeadAgentAllowsSameParent(t *testing.T) {
@@ -299,13 +300,14 @@ func TestReconcileOnceRetriesOpenTaskWhenSpawnedWorkerMissing(t *testing.T) {
 	ib.ListResult = []backend.IssueData{task}
 
 	r := &runner{
-		store:          st,
-		ib:             ib,
-		workspace:      "ws",
-		parent:         "EPIC-1",
-		prefix:         "epic-1",
-		role:           "task",
-		maxConcurrency: 1,
+		store:                 st,
+		ib:                    ib,
+		workspace:             "ws",
+		parent:                "EPIC-1",
+		prefix:                "epic-1",
+		role:                  "task",
+		maxConcurrency:        1,
+		orchestratorSessionID: "lead-session-1",
 	}
 
 	done, err := r.reconcileOnce(ctx)
@@ -324,8 +326,8 @@ func TestReconcileOnceRetriesOpenTaskWhenSpawnedWorkerMissing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list agent commands: %v", err)
 	}
-	if len(cmds) != 1 || cmds[0].Payload["task_id"] != taskID {
-		t.Fatalf("commands = %#v, want one start command for %s", cmds, taskID)
+	if len(cmds) != 1 || cmds[0].Payload["task_id"] != taskID || cmds[0].Payload["parent_session_id"] != "lead-session-1" {
+		t.Fatalf("commands = %#v, want one start command for %s with lead session", cmds, taskID)
 	}
 }
 
@@ -479,14 +481,26 @@ func createStoppedWorker(t *testing.T, st store.Store, workspace, name string) {
 
 func createTestLead(t *testing.T, st store.Store, workspace, name, parent, orchestrator string) {
 	t.Helper()
-	_, err := st.Agents().Create(context.Background(), store.AgentCreate{
-		WorkspaceKey:          workspace,
-		Name:                  name,
-		RoleName:              "lead",
-		Parent:                parent,
-		OrchestratorSessionID: orchestrator,
+	ctx := context.Background()
+	_, err := st.Agents().Create(ctx, store.AgentCreate{
+		WorkspaceKey: workspace,
+		Name:         name,
+		RoleName:     "lead",
+		Parent:       parent,
 	})
 	if err != nil {
 		t.Fatalf("create lead: %v", err)
+	}
+	// Seed the AgentSession row so the orchestration join finds it.
+	if orchestrator != "" {
+		if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+			WorkspaceKey: workspace,
+			SessionID:    orchestrator,
+			AgentID:      name,
+			Kind:         domain.AgentSessionKindOrchestration,
+			Status:       domain.AgentSessionRunning,
+		}); err != nil {
+			t.Fatalf("create orchestrator session: %v", err)
+		}
 	}
 }

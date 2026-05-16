@@ -159,6 +159,7 @@ func appendSessionEnv(env []string, ap *AgentProcess) []string {
 	}
 	leaseID := ap.AgentLeaseID
 	leaseToken := ap.AgentLeaseToken
+	parentSessionID := ap.ParentSessionID
 	ownershipLeaseID := ap.OwnershipLeaseID
 	ownershipFencingToken := ap.OwnershipFencingToken
 	ap.Mu.Unlock()
@@ -173,6 +174,9 @@ func appendSessionEnv(env []string, ap *AgentProcess) []string {
 			fmt.Sprintf("LOOM_AGENT_LEASE_ID=%s", leaseID),
 			fmt.Sprintf("LOOM_AGENT_LEASE_TOKEN=%s", leaseToken),
 		)
+	}
+	if parentSessionID != "" {
+		env = append(env, fmt.Sprintf("LOOM_ORCHESTRATOR_SESSION_ID=%s", parentSessionID))
 	}
 	if ownershipLeaseID != "" {
 		env = append(env,

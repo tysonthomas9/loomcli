@@ -88,6 +88,58 @@ func TestControlPlaneClientAgentSessionListQuery(t *testing.T) {
 	}
 }
 
+// TestAgentSessionList_FiltersKindAndParentClientSide guards the client-side
+// filter applied for Kind + ParentSessionID. fleet-db's listAgentSessions
+// doesn't accept those as query params yet, so the loomcli client must NOT
+// send them on the wire and must filter the response locally. Without this
+// the filter would silently no-op and callers would get the full session
+// list back.
+func TestAgentSessionList_FiltersKindAndParentClientSide(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/WS/agent-sessions" {
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.String())
+		}
+		q := r.URL.Query()
+		for _, forbidden := range []string{"kind", "parent_session_id"} {
+			if q.Has(forbidden) {
+				t.Fatalf("query contains unsupported filter %q=%q; client must filter locally",
+					forbidden, q.Get(forbidden))
+			}
+		}
+		if q.Has("limit") {
+			t.Fatalf("limit must not be set when client-side kind/parent filter is active; got %q", q.Get("limit"))
+		}
+		writeJSON(t, w, map[string]any{"agent_sessions": []domain.AgentSession{
+			{WorkspaceKey: "WS", SessionID: "orch-1", Kind: domain.AgentSessionKindOrchestration},
+			{WorkspaceKey: "WS", SessionID: "task-a", Kind: domain.AgentSessionKindTask, ParentSessionID: "orch-1"},
+			{WorkspaceKey: "WS", SessionID: "task-b", Kind: domain.AgentSessionKindTask, ParentSessionID: "orch-1"},
+			{WorkspaceKey: "WS", SessionID: "task-c", Kind: domain.AgentSessionKindTask, ParentSessionID: "orch-other"},
+		}})
+	}))
+	defer ts.Close()
+
+	client, err := New(Config{BaseURL: ts.URL, Actor: "tester"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := client.AgentSessions().List(t.Context(), "WS", store.AgentSessionFilter{
+		Kind:            domain.AgentSessionKindTask,
+		ParentSessionID: "orch-1",
+		Limit:           5,
+	})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("filtered len = %d, want 2; got %+v", len(got), got)
+	}
+	for _, s := range got {
+		if s.Kind != domain.AgentSessionKindTask || s.ParentSessionID != "orch-1" {
+			t.Fatalf("unexpected session passed filter: %+v", s)
+		}
+	}
+}
+
 func TestControlPlaneClientAgentSessionUpdateBodyUsesWireNames(t *testing.T) {
 	finishedAt := time.Now().UTC()
 	exitCode := 7
@@ -151,7 +203,7 @@ func TestControlPlaneClientAgentSessionUpdateBodyUsesWireNames(t *testing.T) {
 	}
 }
 
-func TestControlPlaneClientAgentCommandCreateQueuesCommand(t *testing.T) {
+func TestControlPlaneClientAgentCommandCreateOmitsUnsupportedStatus(t *testing.T) {
 	now := time.Now().UTC()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/WS/agent-commands" {
@@ -161,8 +213,8 @@ func TestControlPlaneClientAgentCommandCreateQueuesCommand(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatalf("decode create: %v", err)
 		}
-		if body["status"] != string(domain.AgentCommandQueued) {
-			t.Fatalf("command create status = %q, want queued; body=%#v", body["status"], body)
+		if _, ok := body["status"]; ok {
+			t.Fatalf("create body contains unsupported status field: %#v", body)
 		}
 		if body["target_agent_id"] != "agent-1" || body["target_node_id"] != "node-1" || body["type"] != "start" {
 			t.Fatalf("body = %#v", body)

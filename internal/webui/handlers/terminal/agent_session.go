@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -89,18 +90,28 @@ func ensureAgentTerminalSession(ctx context.Context, svc service.TerminalService
 	}
 	existing := selectAgentTerminalTab(tabs, agentName)
 	if existing != nil && existing.PTYAlive {
-		return existing, nil
+		// Cache-validity check: if the agent's effective backend/role has
+		// changed since the existing tab was built, the cached launch spec
+		// is stale (e.g. agent was created with no backend, workspace
+		// default was codex, then user set agent.backend = claude). The
+		// running PTY is still on the old backend. Rebuild a candidate
+		// spec and compare argv; if they differ, fall through to the
+		// rebuild path which will issue a fresh tab metadata. The stale
+		// PTY is killed by svc.PutTab → reattach when the user reloads.
+		if !agentTerminalLaunchSpecStale(ctx, st, workspace, existing, agent, loomServerURL) {
+			return existing, nil
+		}
 	}
 	if !agentTerminalLaunchAllowed(agent) {
 		return inactiveAgentTerminalSession(ctx, svc, workspace, existing)
 	}
 
 	sessionName, label, sortOrder := newAgentTerminalTabPlacement(tabs, existing, agentName)
-	agentForLaunch, err := ensureLeadOrchestratorLink(ctx, st, workspace, sessionName, agent)
+	agentForLaunch, orchestratorID, err := ensureLeadOrchestratorLink(ctx, st, workspace, sessionName, agent)
 	if err != nil {
 		return nil, err
 	}
-	launch, backend, err := buildAgentLaunchSpec(ctx, st, workspace, sessionName, &agentForLaunch, loomServerURL)
+	launch, backend, err := buildAgentLaunchSpec(ctx, st, workspace, sessionName, &agentForLaunch, orchestratorID, loomServerURL)
 	if err != nil {
 		return nil, err
 	}
@@ -111,6 +122,35 @@ func ensureAgentTerminalSession(ctx context.Context, svc service.TerminalService
 	}
 	pruneStaleAgentTerminalTabs(ctx, svc, workspace, agentName, sessionName, tabs)
 	return svc.GetTab(ctx, workspace, sessionName)
+}
+
+// agentTerminalLaunchSpecStale returns true when the existing tab's cached
+// launch spec no longer matches what would be built for the current agent
+// state. Common trigger: agent.backend was patched after the terminal
+// session was created, so the cached argv has no --backend flag but the
+// next render would include it. Without this check, the stale spec is
+// returned indefinitely and the running PTY never picks up the change.
+func agentTerminalLaunchSpecStale(
+	ctx context.Context,
+	st store.Store,
+	workspace string,
+	existing *tabmeta.TabMetadata,
+	agent *domain.Agent,
+	loomServerURL string,
+) bool {
+	if existing == nil || existing.Launch == nil {
+		return true
+	}
+	// Build a candidate spec under the same name so any volatile parts
+	// (sessionName) match. We only compare the launch argv — env vars carry
+	// per-session ids that legitimately differ and shouldn't trigger churn.
+	// Pass empty orchestratorID — the argv doesn't include it (it's an env
+	// var only), so the stale-check is unaffected by the orchestrator.
+	candidate, _, err := buildAgentLaunchSpec(ctx, st, workspace, existing.SessionName, agent, "", loomServerURL)
+	if err != nil || candidate == nil {
+		return false
+	}
+	return !slices.Equal(candidate.Argv, existing.Launch.Argv)
 }
 
 func loadTerminalAgent(ctx context.Context, st store.Store, workspace, agentName string) (*domain.Agent, error) {
@@ -145,23 +185,26 @@ func newAgentTerminalTabPlacement(tabs []tabmeta.TabMetadata, existing *tabmeta.
 	return sessionName, label, sortOrder
 }
 
-func ensureLeadOrchestratorLink(ctx context.Context, st store.Store, workspace, sessionName string, agent *domain.Agent) (domain.Agent, error) {
+// ensureLeadOrchestratorLink resolves (or creates) the lead's orchestration
+// session and returns its session id alongside the agent copy. The id is
+// carried as a separate return value rather than on the domain.Agent struct
+// — AgentSession is the single source of truth, accessed via this function
+// and store.OrchestrationSessionIDFor.
+func ensureLeadOrchestratorLink(ctx context.Context, st store.Store, workspace, sessionName string, agent *domain.Agent) (domain.Agent, string, error) {
 	agentForLaunch := *agent
-	if !isLeadRole(agentForLaunch.RoleName) || strings.TrimSpace(agentForLaunch.OrchestratorSessionID) != "" {
-		return agentForLaunch, nil
+	if !isLeadRole(agentForLaunch.RoleName) {
+		return agentForLaunch, "", nil
+	}
+	// Skip when this lead already has an active orchestration session.
+	if existingID, err := store.OrchestrationSessionIDFor(ctx, st, workspace, agentForLaunch.Name); err == nil && existingID != "" {
+		return agentForLaunch, existingID, nil
 	}
 
 	orchestratorID := "lead-" + uuid.NewString()
 	if err := createLeadOrchestratorSession(ctx, st, workspace, sessionName, agentForLaunch.Name, orchestratorID); err != nil {
-		return agentForLaunch, err
+		return agentForLaunch, "", err
 	}
-	if _, err := st.Agents().Update(ctx, workspace, agentForLaunch.Name, store.AgentUpdate{
-		OrchestratorSessionID: &orchestratorID,
-	}); err != nil {
-		return agentForLaunch, service.ErrInternal("failed to link lead agent to terminal session", err)
-	}
-	agentForLaunch.OrchestratorSessionID = orchestratorID
-	return agentForLaunch, nil
+	return agentForLaunch, orchestratorID, nil
 }
 
 func newAgentTerminalTabMetadata(workspace, sessionName, label string, sortOrder int, agent *domain.Agent, backend string, launch *tabmeta.LaunchSpec, existing *tabmeta.TabMetadata) *tabmeta.TabMetadata {
@@ -252,13 +295,17 @@ func pruneStaleAgentTerminalTabs(ctx context.Context, svc service.TerminalServic
 	}
 }
 
-func buildAgentLaunchSpec(ctx context.Context, st store.Store, workspace, sessionName string, agent *domain.Agent, loomServerURL string) (*tabmeta.LaunchSpec, string, error) {
+// buildAgentLaunchSpec constructs the PTY launch spec for an agent terminal.
+// orchestratorID is the lead → orchestration session id resolved by
+// ensureLeadOrchestratorLink. It is passed in rather than read off the
+// agent struct because AgentSession is the single source of truth.
+func buildAgentLaunchSpec(ctx context.Context, st store.Store, workspace, sessionName string, agent *domain.Agent, orchestratorID, loomServerURL string) (*tabmeta.LaunchSpec, string, error) {
 	roleName := strings.ToLower(strings.TrimSpace(agent.RoleName))
 	role, err := loadAgentLaunchRole(ctx, st, workspace, agent.RoleName)
 	if err != nil {
 		return nil, "", err
 	}
-	backend := agentLaunchBackend(agent, role)
+	backend := agentLaunchBackend(ctx, st, workspace, agent, role)
 	commandArgs, err := agentLaunchCommandArgs(roleName, agent, role)
 	if err != nil {
 		return nil, "", err
@@ -267,7 +314,7 @@ func buildAgentLaunchSpec(ctx context.Context, st store.Store, workspace, sessio
 
 	return &tabmeta.LaunchSpec{
 		Argv: webuterminal.ShellArgvForCommand(args),
-		Env:  agentLaunchEnv(workspace, sessionName, backend, agent),
+		Env:  agentLaunchEnv(workspace, sessionName, backend, orchestratorID, agent),
 	}, backend, nil
 }
 
@@ -282,10 +329,20 @@ func loadAgentLaunchRole(ctx context.Context, st store.Store, workspace, roleNam
 	return role, nil
 }
 
-func agentLaunchBackend(agent *domain.Agent, role *domain.Role) string {
+func agentLaunchBackend(ctx context.Context, st store.Store, workspace string, agent *domain.Agent, role *domain.Role) string {
 	backend := strings.TrimSpace(agent.Backend)
 	if backend == "" && role != nil {
 		backend = strings.TrimSpace(role.Backend)
+	}
+	// Workspace-level default backend (set via PATCH /config/backend or the
+	// daemon profile) is the last fallback before the launch spec ships with
+	// no --backend flag at all. Without this, an agent created via
+	// `loom agentdef add … --role lead` (no --backend) produced a terminal
+	// command of `loom lead` with no backend wired, so codex never started.
+	if backend == "" && st != nil {
+		if profile, err := st.Daemon().Get(ctx, workspace); err == nil && profile != nil {
+			backend = strings.TrimSpace(profile.AgentBackend)
+		}
 	}
 	return backend
 }
@@ -338,7 +395,7 @@ func appendParentArg(args []string, parent string) []string {
 	return args
 }
 
-func agentLaunchEnv(workspace, sessionName, backend string, agent *domain.Agent) map[string]string {
+func agentLaunchEnv(workspace, sessionName, backend, orchestratorID string, agent *domain.Agent) map[string]string {
 	env := map[string]string{
 		"LOOM_AGENT_NAME":        agent.Name,
 		"LOOM_AGENT_ROLE":        agent.RoleName,
@@ -348,8 +405,8 @@ func agentLaunchEnv(workspace, sessionName, backend string, agent *domain.Agent)
 	if backend != "" {
 		env["LOOM_BACKEND"] = backend
 	}
-	if orchestratorID := strings.TrimSpace(agent.OrchestratorSessionID); orchestratorID != "" {
-		env["LOOM_ORCHESTRATOR_SESSION_ID"] = orchestratorID
+	if orchID := strings.TrimSpace(orchestratorID); orchID != "" {
+		env["LOOM_ORCHESTRATOR_SESSION_ID"] = orchID
 	}
 	return env
 }

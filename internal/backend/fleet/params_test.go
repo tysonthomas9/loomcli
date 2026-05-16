@@ -1,6 +1,7 @@
 package fleet
 
 import (
+	"net/url"
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
@@ -138,4 +139,31 @@ func TestCreateParamsToBody_OmitsZeroValues(t *testing.T) {
 			t.Errorf("zero-value field %q should not appear in body", k)
 		}
 	}
+}
+
+// --- listOptsToQuery tests ---
+//
+// fleet-db's listIssues endpoint expects ?type=<kind>, not ?issue_type=<kind>
+// (see fleet-db/api/openapi.yaml). loomcli sending "issue_type" caused the
+// filter to be silently ignored, so a query for --type=epic also returned
+// tasks.
+
+func TestListOptsToQuery_UsesTypeNotIssueType(t *testing.T) {
+	q := listOptsToQuery(backend.ListOpts{IssueType: "epic"})
+	v := parseQueryValues(t, q)
+	if _, has := v["issue_type"]; has {
+		t.Errorf("query contains issue_type=%q; fleet-db's listIssues silently ignores it", v.Get("issue_type"))
+	}
+	if got := v.Get("type"); got != "epic" {
+		t.Errorf("type = %q, want %q", got, "epic")
+	}
+}
+
+func parseQueryValues(t *testing.T, raw string) url.Values {
+	t.Helper()
+	v, err := url.ParseQuery(raw)
+	if err != nil {
+		t.Fatalf("parse query %q: %v", raw, err)
+	}
+	return v
 }

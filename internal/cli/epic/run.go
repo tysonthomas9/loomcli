@@ -14,7 +14,6 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -26,17 +25,14 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/epicrunner"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
-	"github.com/tysonthomas9/loomcli/internal/lockfile"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 const (
 	envAgentName             = "LOOM_AGENT_NAME"
 	envOrchestratorSessionID = "LOOM_ORCHESTRATOR_SESSION_ID"
-
-	leadBindLockTimeout      = 30 * time.Second
-	leadBindLockPollInterval = 100 * time.Millisecond
 
 	stalledWorkerFatalConsecutiveTicks = 2
 )
@@ -252,151 +248,35 @@ func bindLeadAgent(ctx context.Context, st store.Store, workspace, leadName, par
 		return "", orchestratorID, nil
 	}
 
-	if mutate {
-		unlock, err := acquireLeadBindLock(workspace, leadName)
-		if err != nil {
-			return "", "", err
-		}
-		defer unlock()
-	}
-
-	lead, err := loadLeadAgentForEpic(ctx, st, workspace, leadName, parent)
+	result, err := epicrunner.Start(ctx, st, epicrunner.StartInput{
+		WorkspaceKey:          workspace,
+		EpicID:                parent,
+		LeadName:              leadName,
+		OrchestratorSessionID: orchestratorID,
+		Mutate:                mutate,
+	})
 	if err != nil {
 		return "", "", err
 	}
-	effectiveOrchestratorID := effectiveLeadOrchestratorID(orchestratorID, lead)
-
-	if !mutate {
-		logLeadDryRunAssignment(leadName, parent, lead)
-		return leadName, effectiveOrchestratorID, nil
-	}
-	return updateLeadBinding(ctx, st, workspace, leadName, parent, effectiveOrchestratorID, lead)
-}
-
-func loadLeadAgentForEpic(ctx context.Context, st store.Store, workspace, leadName, parent string) (*domain.Agent, error) {
-	lead, err := st.Agents().Get(ctx, workspace, leadName)
-	if err != nil {
-		if errors.Is(err, domain.ErrNotFound) {
-			return nil, fmt.Errorf("lead agent %q was not found in workspace %s; create it with `loom agentdef add %s --role lead` or rerun without --lead: %w", leadName, workspace, leadName, domain.ErrNotFound)
-		}
-		return nil, fmt.Errorf("load lead agent %q: %w", leadName, err)
-	}
-	if lead == nil {
-		return nil, fmt.Errorf("lead agent %q lookup returned nil", leadName)
-	}
-	if !isLeadRole(lead.RoleName) {
-		return nil, fmt.Errorf("agent %q has role %q; `loom epic run` requires a lead agent when --lead or %s is set", leadName, lead.RoleName, envAgentName)
-	}
-	if lead.Parent != "" && lead.Parent != parent {
-		return nil, fmt.Errorf("lead agent %q is already running epic %s; ask the lead to clear or finish that epic before running %s", leadName, lead.Parent, parent)
-	}
-	return lead, nil
-}
-
-func effectiveLeadOrchestratorID(orchestratorID string, lead *domain.Agent) string {
-	effectiveOrchestratorID := strings.TrimSpace(orchestratorID)
-	if effectiveOrchestratorID == "" {
-		effectiveOrchestratorID = strings.TrimSpace(lead.OrchestratorSessionID)
-	}
-	return effectiveOrchestratorID
-}
-
-func logLeadDryRunAssignment(leadName, parent string, lead *domain.Agent) {
-	if lead.Parent == "" {
+	if !mutate && result != nil && result.Lead != nil && result.Lead.Parent == "" {
 		fmt.Printf("[epic-run] DRY-RUN would assign lead %s to epic %s\n", leadName, parent)
 	}
-}
-
-func updateLeadBinding(ctx context.Context, st store.Store, workspace, leadName, parent, effectiveOrchestratorID string, lead *domain.Agent) (string, string, error) {
-	patch := store.AgentUpdate{}
-	needsUpdate := false
-	if lead.Parent == "" {
-		patch.Parent = &parent
-		needsUpdate = true
+	if result == nil {
+		return leadName, "", nil
 	}
-	if effectiveOrchestratorID != "" && lead.OrchestratorSessionID != effectiveOrchestratorID {
-		patch.OrchestratorSessionID = &effectiveOrchestratorID
-		needsUpdate = true
-	}
-	if !needsUpdate {
-		return leadName, effectiveOrchestratorID, nil
-	}
-
-	updated, err := st.Agents().Update(ctx, workspace, leadName, patch)
-	if err != nil {
-		return "", "", fmt.Errorf("bind lead agent %q to epic %s: %w", leadName, parent, err)
-	}
-	if updated == nil {
-		return "", "", fmt.Errorf("bind lead agent %q returned nil", leadName)
-	}
-	if updated.Parent != parent {
-		return "", "", fmt.Errorf("lead agent %q is already running epic %s; ask the lead to clear or finish that epic before running %s", leadName, updated.Parent, parent)
-	}
-	if effectiveOrchestratorID == "" {
-		effectiveOrchestratorID = strings.TrimSpace(updated.OrchestratorSessionID)
-	}
-	return leadName, effectiveOrchestratorID, nil
+	return result.LeadName, result.OrchestratorSessionID, nil
 }
 
 func acquireLeadBindLock(workspace, leadName string) (func(), error) {
-	return acquireLeadBindLockWithTimeout(workspace, leadName, leadBindLockTimeout, leadBindLockPollInterval)
+	return epicrunner.AcquireBindLock(workspace, leadName)
 }
 
 func acquireLeadBindLockWithTimeout(workspace, leadName string, timeout, pollInterval time.Duration) (func(), error) {
-	dir := bootstrap.LoomDir()
-	if dir == "" {
-		return func() {}, errors.New("cannot resolve loom data directory for lead assignment lock")
-	}
-	lockDir := filepath.Join(dir, "epic-runner-locks")
-	if err := os.MkdirAll(lockDir, 0755); err != nil {
-		return func() {}, fmt.Errorf("create lead assignment lock directory: %w", err)
-	}
-	lockName := sanitizePrefix(workspace)
-	if lockName == "" {
-		lockName = "lead"
-	}
-	lockPath := filepath.Join(lockDir, lockName+".lock")
-	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0600) //nolint:gosec // path is under loom data dir with sanitized filename
-	if err != nil {
-		return func() {}, fmt.Errorf("open lead assignment lock %s: %w", lockPath, err)
-	}
-
-	if pollInterval <= 0 {
-		pollInterval = leadBindLockPollInterval
-	}
-	deadline := time.Now().Add(timeout)
-	for {
-		if err := lockfile.TryLockExclusive(f); err != nil {
-			if !errors.Is(err, lockfile.ErrLocked) {
-				_ = f.Close()
-				return func() {}, fmt.Errorf("acquire lead assignment lock %s: %w", lockPath, err)
-			}
-			if timeout <= 0 || !time.Now().Before(deadline) {
-				_ = f.Close()
-				return func() {}, fmt.Errorf("timed out acquiring lead assignment lock %s for lead %q after %s", lockPath, leadName, timeout)
-			}
-			sleepFor := pollInterval
-			if remaining := time.Until(deadline); remaining < sleepFor {
-				sleepFor = remaining
-			}
-			time.Sleep(sleepFor)
-			continue
-		}
-		break
-	}
-	return func() {
-		_ = lockfile.FlockUnlock(f)
-		_ = f.Close()
-	}, nil
+	return epicrunner.AcquireBindLockWithTimeout(workspace, leadName, timeout, pollInterval)
 }
 
 func isLeadRole(role string) bool {
-	switch strings.ToLower(strings.TrimSpace(role)) {
-	case "lead", "orchestrator":
-		return true
-	default:
-		return false
-	}
+	return epicrunner.IsLeadRole(role)
 }
 
 // reconcileLoop is the core loop: query Ready, dispatch any ungraduated tasks,
@@ -719,16 +599,17 @@ func (r *runner) createOrLoadWorkerAgent(ctx context.Context, name string) (*dom
 		desired = domain.AgentDesiredRunning
 	}
 	agent, err := r.store.Agents().Create(ctx, store.AgentCreate{
-		WorkspaceKey:          r.workspace,
-		Name:                  name,
-		RoleName:              r.role,
-		Auto:                  true,
-		Backend:               r.backend,
-		Parent:                r.parent,
-		OrchestratorSessionID: r.orchestratorSessionID,
-		Mode:                  mode,
-		DesiredState:          desired,
+		WorkspaceKey: r.workspace,
+		Name:         name,
+		RoleName:     r.role,
+		Auto:         true,
+		Backend:      r.backend,
+		Parent:       r.parent,
+		Mode:         mode,
+		DesiredState: desired,
 	})
+	// Worker orchestrator attribution is carried through the start command and
+	// recorded on AgentSession.ParentSessionID when the daemon starts the worker.
 	if err != nil && !errors.Is(err, domain.ErrAlreadyExists) {
 		return nil, fmt.Errorf("create agent %s: %w", name, err)
 	}
@@ -752,12 +633,16 @@ func (r *runner) enqueueWorkerStart(ctx context.Context, name string, task backe
 		return nil
 	}
 
+	payload := map[string]string{"task_id": task.ID}
+	if r.orchestratorSessionID != "" {
+		payload["parent_session_id"] = r.orchestratorSessionID
+	}
 	if _, err := r.store.AgentCommands().Create(ctx, store.AgentCommandCreate{
 		WorkspaceKey:  r.workspace,
 		TargetAgentID: name,
 		TargetNodeID:  r.targetNodeID,
 		Type:          "start",
-		Payload:       map[string]string{"task_id": task.ID},
+		Payload:       payload,
 	}); err != nil {
 		return fmt.Errorf("enqueue start command for %s: %w", name, err)
 	}

@@ -184,6 +184,10 @@ func (d *Daemon) handleAgentControlStart(name string, taskIDs ...string) DaemonC
 	if len(taskIDs) > 0 {
 		taskID = taskIDs[0]
 	}
+	parentSessionID := ""
+	if len(taskIDs) > 1 {
+		parentSessionID = taskIDs[1]
+	}
 	if name == "" {
 		return DaemonControlResponse{Error: "agent name is required"}
 	}
@@ -213,7 +217,7 @@ func (d *Daemon) handleAgentControlStart(name string, taskIDs ...string) DaemonC
 	d.sup.AgentsMu.Unlock()
 
 	d.drainAddMu.Lock()
-	err := d.sup.AddAgentForTask(entry, taskID)
+	err := d.sup.AddAgentForTask(entry, taskID, parentSessionID)
 	d.drainAddMu.Unlock()
 	if err != nil {
 		// Re-add to StoppedAgents on failure

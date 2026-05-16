@@ -145,7 +145,17 @@ func (s *agentSessionStore) List(ctx context.Context, ws string, filter store.Ag
 	if filter.Status != "" {
 		q.Set("status", string(filter.Status))
 	}
-	if filter.Limit > 0 {
+	// fleet-db's listAgentSessions doesn't yet accept kind / parent_session_id
+	// as query params (see fleet-db/api/openapi.yaml :: listAgentSessions),
+	// so we ask for the broader set and filter client-side below. When fleet-db
+	// adds those params, append them here and drop the post-filter pass.
+	clientSideKind := filter.Kind
+	clientSideParent := filter.ParentSessionID
+	// Limit must be applied *after* the client-side filter, otherwise we
+	// could return fewer than the requested count when the server-side
+	// page contains many non-matching kinds/parents.
+	clientSideLimit := filter.Limit
+	if clientSideKind == "" && clientSideParent == "" && filter.Limit > 0 {
 		q.Set("limit", strconv.Itoa(filter.Limit))
 	}
 	path := "/api/v1/" + pathEscape(ws) + "/agent-sessions"
@@ -161,7 +171,31 @@ func (s *agentSessionStore) List(ctx context.Context, ws string, filter store.Ag
 	if resp.AgentSessions == nil {
 		resp.AgentSessions = []*domain.AgentSession{}
 	}
+	if clientSideKind != "" || clientSideParent != "" {
+		resp.AgentSessions = filterAgentSessionsClientSide(resp.AgentSessions, clientSideKind, clientSideParent, clientSideLimit)
+	}
 	return resp.AgentSessions, nil
+}
+
+// Client-side filter for Kind / ParentSessionID; see List comment above.
+func filterAgentSessionsClientSide(sessions []*domain.AgentSession, kind domain.AgentSessionKind, parent string, limit int) []*domain.AgentSession {
+	filtered := make([]*domain.AgentSession, 0, len(sessions))
+	for _, sess := range sessions {
+		if sess == nil {
+			continue
+		}
+		if kind != "" && sess.Kind != kind {
+			continue
+		}
+		if parent != "" && sess.ParentSessionID != parent {
+			continue
+		}
+		filtered = append(filtered, sess)
+		if limit > 0 && len(filtered) >= limit {
+			break
+		}
+	}
+	return filtered
 }
 
 func (s *agentSessionStore) Heartbeat(ctx context.Context, ws, sessionID string) (*domain.AgentSession, error) {
@@ -655,7 +689,9 @@ type agentCommandStore struct{ client *Client }
 var _ store.AgentCommandStore = (*agentCommandStore)(nil)
 
 func (s *agentCommandStore) Create(ctx context.Context, in store.AgentCommandCreate) (*domain.AgentCommand, error) {
-	body := map[string]any{"command_id": in.CommandID, "target_agent_id": in.TargetAgentID, "target_node_id": in.TargetNodeID, "session_id": in.SessionID, "type": in.Type, "payload": in.Payload, "status": domain.AgentCommandQueued}
+	// fleet-db hardcodes Status=queued server-side and rejects unknown fields
+	// via DisallowUnknownFields, so the client must not send "status".
+	body := map[string]any{"command_id": in.CommandID, "target_agent_id": in.TargetAgentID, "target_node_id": in.TargetNodeID, "session_id": in.SessionID, "type": in.Type, "payload": in.Payload}
 	var out domain.AgentCommand
 	if err := s.client.do(ctx, "POST", "/api/v1/"+pathEscape(in.WorkspaceKey)+"/agent-commands", body, &out); err != nil {
 		return nil, err

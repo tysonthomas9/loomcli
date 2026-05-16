@@ -100,12 +100,11 @@ func TestEnsureAgentTerminalSessionCreatesLeadLaunchSpec(t *testing.T) {
 	if !strings.HasPrefix(orchestratorID, "lead-") {
 		t.Fatalf("LOOM_ORCHESTRATOR_SESSION_ID = %q, want lead- prefix", orchestratorID)
 	}
-	lead, err := st.Agents().Get(ctx, "E2E", "lead-ui-e2e")
-	if err != nil {
-		t.Fatalf("reload lead: %v", err)
-	}
-	if lead.OrchestratorSessionID != orchestratorID {
-		t.Fatalf("lead orchestrator = %q, want %q", lead.OrchestratorSessionID, orchestratorID)
+	// Resolve orchestrator attribution via the join helper.
+	if got, err := store.OrchestrationSessionIDFor(ctx, st, "E2E", "lead-ui-e2e"); err != nil {
+		t.Fatalf("lookup orchestrator: %v", err)
+	} else if got != orchestratorID {
+		t.Fatalf("lead orchestrator = %q, want %q", got, orchestratorID)
 	}
 	session, err := st.AgentSessions().Get(ctx, "E2E", orchestratorID)
 	if err != nil {
@@ -113,6 +112,61 @@ func TestEnsureAgentTerminalSessionCreatesLeadLaunchSpec(t *testing.T) {
 	}
 	if session.Kind != domain.AgentSessionKindOrchestration || session.TerminalID != meta.SessionName {
 		t.Fatalf("agent session = kind:%q terminal:%q", session.Kind, session.TerminalID)
+	}
+}
+
+// TestAgentTerminalLaunchSpecStale_DetectsBackendChange exercises the
+// cache-validity helper. An existing tab whose launch argv lacks
+// --backend is stale once the workspace default is set, because the next
+// build would include the flag. ensure() relies on this check to know
+// when to emit a fresh tab instead of returning the cached one.
+func TestAgentTerminalLaunchSpecStale_DetectsBackendChange(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "E2E", Name: "E2E"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if _, err := st.Roles().Create(ctx, store.RoleCreate{WorkspaceKey: "E2E", Name: "lead"}); err != nil {
+		t.Fatalf("create role: %v", err)
+	}
+	agent := &domain.Agent{WorkspaceKey: "E2E", Name: "nova", RoleName: "lead"}
+
+	// Build the "previous" cached spec via the same builder so the only
+	// thing that changes between the two states is the workspace's daemon
+	// profile (which contributes the --backend fallback).
+	cachedLaunch, _, err := buildAgentLaunchSpec(ctx, st, "E2E", "term_old", agent, "", "http://loom.test")
+	if err != nil {
+		t.Fatalf("build cached launch: %v", err)
+	}
+	existing := &tabmeta.TabMetadata{SessionName: "term_old", Launch: cachedLaunch}
+
+	if agentTerminalLaunchSpecStale(ctx, st, "E2E", existing, agent, "http://loom.test") {
+		t.Fatal("with no workspace default backend, the cached spec matches what would be built — spec is fresh")
+	}
+
+	if _, err := st.Daemon().Upsert(ctx, &domain.DaemonProfile{
+		WorkspaceKey: "E2E",
+		AgentBackend: "codex",
+	}); err != nil {
+		t.Fatalf("upsert daemon profile: %v", err)
+	}
+
+	if !agentTerminalLaunchSpecStale(ctx, st, "E2E", existing, agent, "http://loom.test") {
+		t.Fatal("expected staleness after workspace default backend was set; ensure() would return the cached spec")
+	}
+}
+
+// TestAgentTerminalLaunchSpecStale_NilLaunchTreatedStale guards against the
+// case where an existing tab has no Launch (Bug from earlier passes —
+// "terminal metadata missing launch spec"). Treating it as stale lets
+// ensure() rebuild instead of failing to attach forever.
+func TestAgentTerminalLaunchSpecStale_NilLaunchTreatedStale(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	agent := &domain.Agent{WorkspaceKey: "E2E", Name: "nova", RoleName: "lead"}
+	existing := &tabmeta.TabMetadata{SessionName: "term_old", Launch: nil}
+	if !agentTerminalLaunchSpecStale(ctx, st, "E2E", existing, agent, "http://loom.test") {
+		t.Fatal("existing tab with nil Launch should be treated as stale")
 	}
 }
 
@@ -389,7 +443,47 @@ func TestBuildAgentLaunchSpecRejectsUnknownRoleWithoutPrompt(t *testing.T) {
 		RoleName:     "reviewer",
 	}
 
-	if _, _, err := buildAgentLaunchSpec(ctx, st, "E2E", "term_1", agent, ""); err == nil {
+	if _, _, err := buildAgentLaunchSpec(ctx, st, "E2E", "term_1", agent, "", ""); err == nil {
 		t.Fatal("buildAgentLaunchSpec error = nil, want missing launch spec error")
+	}
+}
+
+// TestBuildAgentLaunchSpecFallsBackToWorkspaceBackend asserts that when the
+// agent and role both have no backend, the launch spec picks up the
+// workspace's daemon-profile backend. Without this fallback, `loom agentdef
+// add nova --role lead` (no --backend) produced a launch command of
+// `loom lead` with no --backend flag, so the terminal never started codex.
+func TestBuildAgentLaunchSpecFallsBackToWorkspaceBackend(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "E2E", Name: "E2E"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if _, err := st.Daemon().Upsert(ctx, &domain.DaemonProfile{
+		WorkspaceKey: "E2E",
+		AgentBackend: "codex",
+	}); err != nil {
+		t.Fatalf("upsert daemon profile: %v", err)
+	}
+	agent := &domain.Agent{
+		WorkspaceKey: "E2E",
+		Name:         "nova",
+		RoleName:     "lead",
+		// No Backend set on the agent itself
+	}
+
+	launch, backend, err := buildAgentLaunchSpec(ctx, st, "E2E", "term_1", agent, "", "http://localhost:8080")
+	if err != nil {
+		t.Fatalf("buildAgentLaunchSpec: %v", err)
+	}
+	if backend != "codex" {
+		t.Fatalf("backend = %q, want %q (workspace daemon profile default)", backend, "codex")
+	}
+	if launch == nil {
+		t.Fatal("launch spec is nil")
+	}
+	joined := strings.Join(launch.Argv, " ")
+	if !strings.Contains(joined, "--backend") || !strings.Contains(joined, "codex") {
+		t.Fatalf("launch argv missing --backend codex: %v", launch.Argv)
 	}
 }

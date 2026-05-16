@@ -191,6 +191,21 @@
   outline-offset: 2px;
 }
 
+/* Replaces the Run button when another lead already owns this epic.
+   Surfacing the claim avoids the silent "two leads on one epic"
+   ambiguity the multi-lead UI walk uncovered. */
+.epicClaim {
+  flex-shrink: 0;
+  font-family: inherit;
+  font-size: 0.6875rem;
+  font-weight: var(--font-weight-medium);
+  font-style: italic;
+  color: var(--color-text-secondary);
+  padding: 3px var(--space-2);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
 .epicProgress {
   margin: 2px 0 var(--space-1);
   height: 3px;

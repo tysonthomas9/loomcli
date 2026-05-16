@@ -334,7 +334,10 @@ describe("WorkspaceSSEClient", () => {
         timestamp: "2025-01-23T12:00:00Z",
       };
 
-      MockEventSource.lastInstance?.simulateMutation(mutation, "agent-cursor-1");
+      MockEventSource.lastInstance?.simulateMutation(
+        mutation,
+        "agent-cursor-1",
+      );
 
       expect(onMutation).toHaveBeenCalledWith(mutation);
       expect(client.getLastEventId()).toBe("agent-cursor-1");

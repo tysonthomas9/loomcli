@@ -30,7 +30,7 @@ interface AgentWorkPanelProps {
    */
   onTaskClick?: (task: Issue) => void;
   /** Run the selected epic in the currently selected lead terminal. */
-  onRunEpic?: (epicId: string) => void;
+  onRunEpic?: (epicId: string) => void | Promise<void>;
   /** Open the terminal for the worker currently attached to a task. */
   onAgentClick?: (agentName: string) => void;
 }
@@ -104,6 +104,20 @@ export function AgentWorkPanel({
     [agentName, agents],
   );
   const selectedAgentIsLead = isLeadRole(selectedAgent?.role);
+  // epicClaims maps epic id to lead name when SOME OTHER lead already owns
+  // that epic (i.e. lead.parent === epicId and lead.name !== agentName).
+  // Used to disable the Run button and surface a "claimed by ..." badge so
+  // two leads can't silently bind to the same epic.
+  const epicClaims = useMemo<Map<string, string>>(() => {
+    const m = new Map<string, string>();
+    for (const a of agents) {
+      if (!a || !isLeadRole(a.role)) continue;
+      if (!a.parent) continue;
+      if (a.name === agentName) continue;
+      m.set(a.parent, a.name);
+    }
+    return m;
+  }, [agents, agentName]);
   const workerByTaskId = useMemo(() => buildWorkerByTaskId(agents), [agents]);
   const workerHistoryByEpic = useMemo(
     () => buildWorkerHistoryByEpic(agents, issuesMap),
@@ -209,23 +223,34 @@ export function AgentWorkPanel({
                   : `No tasks assigned to ${agentName} yet.`}
           </div>
         ) : (
-          groups.map((group) => (
-            <EpicGroupCard
-              key={group.epicId}
-              group={group}
-              canRunEpic={
-                mode === "lead-open" &&
-                selectedAgentIsLead &&
-                group.epicId !== ORPHAN_EPIC_KEY &&
-                onRunEpic != null
-              }
-              onRunEpic={onRunEpic}
-              workerByTaskId={workerByTaskId}
-              workerHistory={workerHistoryByEpic.get(group.epicId) ?? []}
-              onAgentClick={onAgentClick}
-              onTaskClick={(task) => dispatchClick(task)}
-            />
-          ))
+          groups.map((group) => {
+            const claimedBy = epicClaims.get(group.epicId);
+            // Don't offer Run for drained epics (no open work left) or
+            // ones already claimed by another lead. Both prevent the
+            // dead-end / silent-conflict cases the multi-lead UI walk
+            // surfaced.
+            const remainingOpen = group.totalCount - group.doneCount;
+            const canRunEpic =
+              mode === "lead-open" &&
+              selectedAgentIsLead &&
+              group.epicId !== ORPHAN_EPIC_KEY &&
+              onRunEpic != null &&
+              remainingOpen > 0 &&
+              !claimedBy;
+            return (
+              <EpicGroupCard
+                key={group.epicId}
+                group={group}
+                canRunEpic={canRunEpic}
+                claimedBy={claimedBy}
+                onRunEpic={onRunEpic}
+                workerByTaskId={workerByTaskId}
+                workerHistory={workerHistoryByEpic.get(group.epicId) ?? []}
+                onAgentClick={onAgentClick}
+                onTaskClick={(task) => dispatchClick(task)}
+              />
+            );
+          })
         )}
       </div>
     </aside>
@@ -235,6 +260,7 @@ export function AgentWorkPanel({
 function EpicGroupCard({
   group,
   canRunEpic,
+  claimedBy,
   onRunEpic,
   workerByTaskId,
   workerHistory,
@@ -243,7 +269,9 @@ function EpicGroupCard({
 }: {
   group: EpicGroup;
   canRunEpic: boolean;
-  onRunEpic?: ((epicId: string) => void) | undefined;
+  /** Lead name when another lead already owns this epic; renders a badge. */
+  claimedBy?: string | undefined;
+  onRunEpic?: ((epicId: string) => void | Promise<void>) | undefined;
   workerByTaskId: Map<string, LoomAgentStatus>;
   workerHistory: WorkerHistoryItem[];
   onAgentClick?: ((agentName: string) => void) | undefined;
@@ -263,11 +291,21 @@ function EpicGroupCard({
           <button
             type="button"
             className={styles.runEpicButton}
-            onClick={() => onRunEpic?.(group.epicId)}
+            onClick={() => {
+              void onRunEpic?.(group.epicId);
+            }}
             aria-label={`Run epic ${group.epicId}`}
           >
             Run
           </button>
+        ) : claimedBy ? (
+          <span
+            className={styles.epicClaim}
+            title={`Claimed by lead ${claimedBy}`}
+            aria-label={`Epic ${group.epicId} claimed by lead ${claimedBy}`}
+          >
+            claimed by {claimedBy}
+          </span>
         ) : null}
       </div>
       <div className={styles.epicProgress}>

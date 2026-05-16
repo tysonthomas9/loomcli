@@ -2521,19 +2521,13 @@ export interface components {
         | "terminal_session_change"
         | "issue_tabs"
         | "session_change";
-      /**
-       * @description Generic changed entity type, for example issue, dependency, comment, label, agent, terminal, session, or workspace.
-       */
+      /** @description Generic changed entity type, for example issue, dependency, comment, label, agent, terminal, session, or workspace. */
       entity_type?: string;
       /** @description Generic changed entity identifier. */
       entity_id?: string;
-      /**
-       * @description Source action for the mutation, usually the fleet-db action such as issue.update or dep.add.
-       */
+      /** @description Source action for the mutation, usually the fleet-db action such as issue.update or dep.add. */
       action?: string;
-      /**
-       * @description Legacy issue identifier for issue-scoped consumers; omitted for non-issue entities.
-       */
+      /** @description Legacy issue identifier for issue-scoped consumers; omitted for non-issue entities. */
       issue_id?: string;
       title?: string;
       assignee?: string;

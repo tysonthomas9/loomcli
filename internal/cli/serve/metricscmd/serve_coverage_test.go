@@ -84,14 +84,24 @@ func TestHandleAgents_UsesStoreAgentsAsSourceOfTruth(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := st.Agents().Create(ctx, store.AgentCreate{
-		WorkspaceKey:          "WS1",
-		Name:                  "falcon",
-		RoleName:              "task",
-		Repos:                 []string{"repo-a"},
-		Parent:                "EPIC-1",
-		OrchestratorSessionID: "lead-session",
-		Mode:                  domain.AgentModeEphemeral,
-		DesiredState:          domain.AgentDesiredStopped,
+		WorkspaceKey: "WS1",
+		Name:         "falcon",
+		RoleName:     "task",
+		Repos:        []string{"repo-a"},
+		Parent:       "EPIC-1",
+		Mode:         domain.AgentModeEphemeral,
+		DesiredState: domain.AgentDesiredStopped,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// Seed the orchestration AgentSession row — the monitor data source
+	// reads attribution via OrchestrationSessionIDFor.
+	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey: "WS1",
+		SessionID:    "lead-session",
+		AgentID:      "falcon",
+		Kind:         domain.AgentSessionKindOrchestration,
+		Status:       domain.AgentSessionRunning,
 	}); err != nil {
 		t.Fatal(err)
 	}

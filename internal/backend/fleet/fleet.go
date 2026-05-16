@@ -335,6 +335,13 @@ func (b *FleetBackend) Get(ctx context.Context, id string) (*backend.IssueDetail
 	}
 	issue := wire.toIssue()
 	details := types.IssueDetails{Issue: issue}
+	// wire.parent() reads either the "parent_id" or "parent" JSON field;
+	// detailsToDetailData expects *types.IssueDetails.Parent to be set, so
+	// project it across explicitly. Without this, loom data show --output json
+	// returns parent:null even when fleet-db has the relationship recorded.
+	if parent := wire.parent(); parent != "" {
+		details.Parent = &parent
+	}
 	result := detailsToDetailData(&details)
 	result.IssueData.Labels = append([]string(nil), wire.Labels...)
 	result.IssueData.DependencyCount = wire.DependencyCount

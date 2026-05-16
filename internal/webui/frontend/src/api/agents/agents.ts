@@ -69,6 +69,25 @@ export async function startAgent(
   );
 }
 
+export interface RunEpicResponse {
+  epic_id: string;
+  lead_name?: string;
+  orchestrator_session_id?: string;
+  state: string;
+  delivery_state?: string;
+}
+
+export async function runEpic(
+  workspaceId: string,
+  epicId: string,
+  leadName: string,
+): Promise<RunEpicResponse> {
+  return post<RunEpicResponse>(
+    wsUrl(workspaceId, `/epics/${encodeURIComponent(epicId)}/run`),
+    { lead: leadName },
+  );
+}
+
 /**
  * Fetched status result type.
  */

@@ -302,6 +302,13 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	// activate lazily via the workspace SSE token/stream routes.
 	appinfra.ReconcileStoreWorkspaces(workspacePathsFn, app.initialWorkspaceID, app.pool != nil, app.registry, config.Logger)
 
+	// Periodic re-reconcile: workspaces created out-of-band (CLI
+	// `loom workspace create` while serve is running, or another
+	// loom-serve instance against shared fleet-db) need to be picked up
+	// without a serve restart. Without this, terminal attach for those
+	// workspaces fails with "workspace not registered" until restart.
+	appinfra.StartPeriodicWorkspaceReconcile(ctx, workspacePathsFn, app.registry, 15*time.Second, config.Logger)
+
 	if config.DaemonStartupFn != nil {
 		onReady := func(string) {}
 		go config.DaemonStartupFn(ctx, onReady)

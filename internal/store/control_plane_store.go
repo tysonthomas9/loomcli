@@ -61,7 +61,21 @@ type AgentSessionFilter struct {
 	NodeID  string
 	TaskID  string
 	Status  domain.AgentSessionStatus
-	Limit   int
+	// Kind narrows the query to one session kind (orchestration, task,
+	// terminal, maintenance, ad_hoc). The data model has always carried
+	// AgentSession.Kind, but the filter interface didn't expose it, so
+	// callers couldn't ask "which orchestration session spawned this
+	// worker?" without listing every session and filtering client-side.
+	// Required by the migration off Agent.OrchestratorSessionID - readers
+	// look up the parent lead via {Kind=orchestration, TerminalID=<id>} or
+	// {Kind=task, ParentSessionID=<id>} joins.
+	Kind domain.AgentSessionKind
+	// ParentSessionID restricts results to sessions whose ParentSessionID
+	// field equals this value (typically the lead's orchestration session).
+	// Companion to Kind for the same migration: "list task sessions that
+	// were spawned by orchestration session X".
+	ParentSessionID string
+	Limit           int
 }
 
 type AgentSessionUpdate struct {

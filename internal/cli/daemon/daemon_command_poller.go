@@ -80,7 +80,7 @@ func (d *Daemon) handleAgentCommand(cmd *domain.AgentCommand) {
 	var resp DaemonControlResponse
 	switch cmd.Type {
 	case "start":
-		resp = d.handleAgentControlStart(cmd.TargetAgentID, cmd.Payload["task_id"])
+		resp = d.handleAgentControlStart(cmd.TargetAgentID, cmd.Payload["task_id"], cmd.Payload["parent_session_id"])
 	case "stop":
 		resp = d.handleAgentControlStop(cmd.TargetAgentID, cmd.Payload["force"] == "true")
 	case "restart":

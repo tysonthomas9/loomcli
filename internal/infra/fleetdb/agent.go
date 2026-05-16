@@ -13,49 +13,51 @@ type agentStore struct{ client *Client }
 var _ store.AgentStore = (*agentStore)(nil)
 
 // agentWire mirrors fleet-db's models.Agent JSON shape.
+//
+// orchestrator_session_id was on this struct historically as a cache of
+// the lead-to-orchestration AgentSession join. AgentSession is the
+// single source of truth; readers use store.OrchestrationSessionIDFor.
 type agentWire struct {
-	WorkspaceKey          string    `json:"workspace_key"`
-	Name                  string    `json:"name"`
-	RoleName              string    `json:"role_name"`
-	Auto                  bool      `json:"auto,omitempty"`
-	Backend               string    `json:"backend,omitempty"`
-	FallbackBackends      []string  `json:"fallback_backends,omitempty"`
-	Repos                 []string  `json:"repos,omitempty"`
-	RepoGroups            []string  `json:"repo_groups,omitempty"`
-	CrossRepo             bool      `json:"cross_repo,omitempty"`
-	Parent                string    `json:"parent,omitempty"`
-	OrchestratorSessionID string    `json:"orchestrator_session_id,omitempty"`
-	State                 string    `json:"state"`
-	Mode                  string    `json:"mode,omitempty"`
-	TaskFilter            string    `json:"task_filter,omitempty"`
-	MaxConcurrency        int       `json:"max_concurrency,omitempty"`
-	BudgetPolicy          string    `json:"budget_policy,omitempty"`
-	DesiredState          string    `json:"desired_state,omitempty"`
-	CreatedAt             time.Time `json:"created_at"`
-	UpdatedAt             time.Time `json:"updated_at"`
+	WorkspaceKey     string    `json:"workspace_key"`
+	Name             string    `json:"name"`
+	RoleName         string    `json:"role_name"`
+	Auto             bool      `json:"auto,omitempty"`
+	Backend          string    `json:"backend,omitempty"`
+	FallbackBackends []string  `json:"fallback_backends,omitempty"`
+	Repos            []string  `json:"repos,omitempty"`
+	RepoGroups       []string  `json:"repo_groups,omitempty"`
+	CrossRepo        bool      `json:"cross_repo,omitempty"`
+	Parent           string    `json:"parent,omitempty"`
+	State            string    `json:"state"`
+	Mode             string    `json:"mode,omitempty"`
+	TaskFilter       string    `json:"task_filter,omitempty"`
+	MaxConcurrency   int       `json:"max_concurrency,omitempty"`
+	BudgetPolicy     string    `json:"budget_policy,omitempty"`
+	DesiredState     string    `json:"desired_state,omitempty"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
 }
 
 func (a agentWire) toDomain() *domain.Agent {
 	return &domain.Agent{
-		WorkspaceKey:          a.WorkspaceKey,
-		Name:                  a.Name,
-		RoleName:              a.RoleName,
-		Auto:                  a.Auto,
-		Backend:               a.Backend,
-		FallbackBackends:      a.FallbackBackends,
-		Repos:                 a.Repos,
-		RepoGroups:            a.RepoGroups,
-		CrossRepo:             a.CrossRepo,
-		Parent:                a.Parent,
-		OrchestratorSessionID: a.OrchestratorSessionID,
-		State:                 domain.AgentState(a.State),
-		Mode:                  domain.AgentMode(a.Mode),
-		TaskFilter:            a.TaskFilter,
-		MaxConcurrency:        a.MaxConcurrency,
-		BudgetPolicy:          a.BudgetPolicy,
-		DesiredState:          domain.AgentDesiredState(a.DesiredState),
-		CreatedAt:             a.CreatedAt,
-		UpdatedAt:             a.UpdatedAt,
+		WorkspaceKey:     a.WorkspaceKey,
+		Name:             a.Name,
+		RoleName:         a.RoleName,
+		Auto:             a.Auto,
+		Backend:          a.Backend,
+		FallbackBackends: a.FallbackBackends,
+		Repos:            a.Repos,
+		RepoGroups:       a.RepoGroups,
+		CrossRepo:        a.CrossRepo,
+		Parent:           a.Parent,
+		State:            domain.AgentState(a.State),
+		Mode:             domain.AgentMode(a.Mode),
+		TaskFilter:       a.TaskFilter,
+		MaxConcurrency:   a.MaxConcurrency,
+		BudgetPolicy:     a.BudgetPolicy,
+		DesiredState:     domain.AgentDesiredState(a.DesiredState),
+		CreatedAt:        a.CreatedAt,
+		UpdatedAt:        a.UpdatedAt,
 	}
 }
 
@@ -172,9 +174,10 @@ func (s *agentStore) Update(ctx context.Context, ws, name string, patch store.Ag
 }
 
 // agentUpdateHasFleetDBFields filters store.AgentUpdate down to the fields
-// accepted by FleetDB's strict agent PATCH contract. OrchestratorSessionID is
-// a loomcli-local store field; FleetDB tracks session attribution in
-// AgentSession rows instead.
+// accepted by FleetDB's strict agent PATCH contract. Used to short-circuit
+// PATCH requests that would carry only loomcli-local fields (none today; the
+// last such field, OrchestratorSessionID, was removed when AgentSession
+// became the single source of truth).
 func agentUpdateHasFleetDBFields(patch store.AgentUpdate) bool {
 	return patch.RoleName != nil ||
 		patch.Auto != nil ||

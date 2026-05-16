@@ -532,7 +532,9 @@ Ship these first:
    - lead selected: show lead terminal
    - worker selected: show worker terminal
    - right panel follows lead epic scope
-5. "Run Epic" button that sends the same command to the lead terminal.
+5. "Run Epic" button that uses the same backend run semantics as the lead
+   terminal command and delivers the assignment through the lead session
+   adapter rather than blind terminal typing.
 6. Auto-connect/resume lead terminal where session metadata exists.
 7. Show current task/epic for selected lead or worker.
 8. Enforce single-task ephemeral worker lifecycle in backend start/claim/restart

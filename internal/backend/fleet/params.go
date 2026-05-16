@@ -145,7 +145,10 @@ func listOptsToQuery(opts backend.ListOpts) string {
 func addListCoreFilters(q url.Values, opts backend.ListOpts) {
 	setNonEmpty(q, "status", opts.Status)
 	setOptInt(q, "priority", opts.Priority)
-	setNonEmpty(q, "issue_type", opts.IssueType)
+	// fleet-db's listIssues endpoint expects "type", not "issue_type"
+	// (see fleet-db/api/openapi.yaml listIssues). The count endpoint already
+	// uses "type" in addCountCoreFilters; this matches it.
+	setNonEmpty(q, "type", opts.IssueType)
 	setNonEmpty(q, "assignee", opts.Assignee)
 	addAll(q, "labels", opts.Labels)
 	addAll(q, "labels_any", opts.LabelsAny)

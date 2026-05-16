@@ -28,7 +28,9 @@ import {
   orderAgentsForEpicRunner,
 } from "@/components/AgentIconRail/AgentIconRail";
 import { IssueDetailPanel } from "@/components/IssueDetailPanel/IssueDetailPanel";
+import { runEpic } from "@/api";
 import { useAgentStoreInstance } from "@/hooks";
+import { useToast } from "@/hooks/ui/useToast";
 import type { Issue } from "@/types";
 import type { TerminalInputRequest } from "@/components/TerminalView/TerminalView";
 
@@ -41,7 +43,6 @@ export function AgentsPage(): JSX.Element {
     </ErrorBoundary>
   );
 }
-
 function AgentsPageInner(): JSX.Element {
   const { workspaceId = "", agentName } = useParams<{
     workspaceId: string;
@@ -50,10 +51,7 @@ function AgentsPageInner(): JSX.Element {
   const navigate = useNavigate();
   const agentStore = useAgentStoreInstance();
   const agents = useStore(agentStore, (s) => s.agents);
-  const selectedAgent = useMemo(
-    () => (agentName ? agents.find((a) => a.name === agentName) : undefined),
-    [agentName, agents],
-  );
+  const { showToast } = useToast();
 
   // Auto-select first agent when URL is bare /agents.
   const firstAgentName = useMemo(
@@ -79,21 +77,31 @@ function AgentsPageInner(): JSX.Element {
     setSelectedTask(null);
   }, [agentName]);
 
+  // handleRunEpic calls the shared backend command path
+  // (POST /api/workspaces/:ws/epics/:id/run). The backend validates that
+  // the selected agent is a lead, enforces "one epic per lead" + "one lead
+  // per epic", and binds agent.parent atomically. The lead's terminal
+  // picks up the new binding on next render. This replaces the prior
+  // "paste a shell command into the terminal" path, which silently no-op'd
+  // when the terminal was running an AI CLI like codex instead of a
+  // shell; see lead-agent-epic-runner-spec.md:37.
   const handleRunEpic = useCallback(
-    (epicId: string) => {
+    async (epicId: string) => {
       if (!agentName) return;
-      const orchestratorSessionId =
-        selectedAgent?.orchestrator_session_id ||
-        `agent-${sanitizeTerminalSessionPart(agentName)}`;
-      const envPrefix = `LOOM_ORCHESTRATOR_SESSION_ID=${shellQuote(orchestratorSessionId)}`;
-      const command = `${envPrefix} loom epic run --parent ${shellQuote(epicId)} --lead ${shellQuote(agentName)}\n`;
-      setPendingTerminalInput({
-        id: `${Date.now()}-${agentName}-${epicId}`,
-        text: command,
-        targetAgentName: agentName,
-      });
+      try {
+        const result = await runEpic(workspaceId, epicId, agentName);
+        await agentStore.getState().fetchData();
+        const state = result.state === "resumed" ? "resumed" : "assigned";
+        showToast(`Epic ${epicId} ${state} for ${agentName}`, {
+          type: "success",
+        });
+      } catch (err) {
+        showToast(`run-epic failed: ${(err as Error).message}`, {
+          type: "error",
+        });
+      }
     },
-    [agentName, selectedAgent?.orchestrator_session_id],
+    [agentName, workspaceId, showToast, agentStore],
   );
 
   const handleAgentClick = useCallback(
@@ -147,13 +155,4 @@ function AgentsPageInner(): JSX.Element {
       )}
     </div>
   );
-}
-
-function sanitizeTerminalSessionPart(value: string): string {
-  return value.replace(/\./g, "-").replace(/[^a-zA-Z0-9_-]/g, "");
-}
-
-function shellQuote(value: string): string {
-  if (/^[A-Za-z0-9_./:-]+$/.test(value)) return value;
-  return `'${value.replace(/'/g, "'\\''")}'`;
 }
