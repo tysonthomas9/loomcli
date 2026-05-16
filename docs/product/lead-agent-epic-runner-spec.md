@@ -5,7 +5,8 @@
 **Related:** `docs/product/agent-run-ux-spec.md`,
 `docs/product/daemon-agent-runtime-architecture.md`,
 `docs/product/agent-lifecycle-state-machine.md`,
-`docs/product/session-artifact-contract.md`
+`docs/product/session-artifact-contract.md`,
+`docs/design/epic-runner-lead-control.md`
 
 ## Purpose
 
