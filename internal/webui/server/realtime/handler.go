@@ -296,6 +296,9 @@ func RPCMutationToPayload(m rpc.MutationEvent) *MutationPayload {
 	return &MutationPayload{
 		Cursor:     m.Cursor,
 		Type:       m.Type,
+		EntityType: m.EntityType,
+		EntityID:   m.EntityID,
+		Action:     m.Action,
 		IssueID:    m.IssueID,
 		Title:      m.Title,
 		Assignee:   m.Assignee,

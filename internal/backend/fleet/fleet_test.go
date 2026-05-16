@@ -2203,6 +2203,9 @@ func TestGetMutations_HappyPath(t *testing.T) {
 	if got[0].Type != backend.MutationCreate {
 		t.Errorf("got[0].Type = %q, want %q", got[0].Type, backend.MutationCreate)
 	}
+	if got[0].EntityType != "issue" || got[0].EntityID != "loom-1" || got[0].Action != "issue.create" {
+		t.Errorf("got[0] generic envelope = %q/%q/%q, want issue/loom-1/issue.create", got[0].EntityType, got[0].EntityID, got[0].Action)
+	}
 	if got[0].IssueID != "loom-1" || got[0].Title != "New issue" || got[0].ParentID != "ep-1" || got[0].SourceRepo != "org/repo" {
 		t.Errorf("got[0] = %+v, after-snapshot fields not extracted", got[0])
 	}
@@ -2279,6 +2282,15 @@ func TestGetMutations_ActionFolding(t *testing.T) {
 		if got[i].Type != wantT {
 			t.Errorf("got[%d].Type = %q, want %q", i, got[i].Type, wantT)
 		}
+		if got[i].EntityType == "" || got[i].EntityID == "" || got[i].Action == "" {
+			t.Errorf("got[%d] missing generic envelope fields: %+v", i, got[i])
+		}
+	}
+	if got[2].IssueID != "" || got[3].IssueID != "" || got[4].IssueID != "" {
+		t.Errorf("non-issue fleet mutations should not populate legacy issue_id: comment=%q label=%q workspace=%q", got[2].IssueID, got[3].IssueID, got[4].IssueID)
+	}
+	if got[0].IssueID != "a" || got[5].IssueID != "e" {
+		t.Errorf("issue fleet mutations should preserve legacy issue_id: update=%q unknown=%q", got[0].IssueID, got[5].IssueID)
 	}
 }
 

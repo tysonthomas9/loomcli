@@ -430,8 +430,11 @@ const (
 	MutationPayloadTypeCreate                MutationPayloadType = "create"
 	MutationPayloadTypeDelete                MutationPayloadType = "delete"
 	MutationPayloadTypeRefresh               MutationPayloadType = "refresh"
+	MutationPayloadTypeIssueTabs             MutationPayloadType = "issue_tabs"
+	MutationPayloadTypeSessionChange         MutationPayloadType = "session_change"
 	MutationPayloadTypeSquashed              MutationPayloadType = "squashed"
 	MutationPayloadTypeStatus                MutationPayloadType = "status"
+	MutationPayloadTypeTerminalMetadata      MutationPayloadType = "terminal_metadata"
 	MutationPayloadTypeTerminalSessionChange MutationPayloadType = "terminal_session_change"
 	MutationPayloadTypeUpdate                MutationPayloadType = "update"
 )
@@ -451,9 +454,15 @@ func (e MutationPayloadType) Valid() bool {
 		return true
 	case MutationPayloadTypeRefresh:
 		return true
+	case MutationPayloadTypeIssueTabs:
+		return true
+	case MutationPayloadTypeSessionChange:
+		return true
 	case MutationPayloadTypeSquashed:
 		return true
 	case MutationPayloadTypeStatus:
+		return true
+	case MutationPayloadTypeTerminalMetadata:
 		return true
 	case MutationPayloadTypeTerminalSessionChange:
 		return true
@@ -1521,15 +1530,28 @@ type MoveResult struct {
 	Warnings *[]string `json:"warnings,omitempty"`
 }
 
-// MutationPayload SSE mutation event payload. All fields except type, issue_id, and
-// timestamp are context-dependent. For status events: old_status and
-// new_status are present. For bonded events: parent_id and step_count
+// MutationPayload SSE mutation event payload. `type` is the legacy coarse mutation kind.
+// New consumers should prefer the generic `entity_type`, `entity_id`, and
+// `action` envelope fields when deciding which local state to invalidate.
+// `issue_id` is retained for backward-compatible issue-scoped consumers
+// and may be omitted for non-issue entities. For status events: old_status
+// and new_status are present. For bonded events: parent_id and step_count
 // are present. This is documented as a flat schema (no discriminator)
 // because the SSE stream is not validated by generated clients.
 type MutationPayload struct {
+	// Action Source action for the mutation, usually the fleet-db action such as issue.update or dep.add.
+	Action   *string `json:"action,omitempty"`
 	Actor    *string `json:"actor,omitempty"`
 	Assignee *string `json:"assignee,omitempty"`
-	IssueId  string  `json:"issue_id"`
+
+	// EntityId Generic changed entity identifier.
+	EntityId *string `json:"entity_id,omitempty"`
+
+	// EntityType Generic changed entity type, for example issue, dependency, comment, label, agent, terminal, session, or workspace.
+	EntityType *string `json:"entity_type,omitempty"`
+
+	// IssueId Legacy issue identifier for issue-scoped consumers; omitted for non-issue entities.
+	IssueId *string `json:"issue_id,omitempty"`
 
 	// NewStatus Present for status mutation events
 	NewStatus *string `json:"new_status,omitempty"`

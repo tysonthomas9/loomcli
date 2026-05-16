@@ -70,13 +70,27 @@ The legacy `type` and `issue_id` fields remain for backward compatibility.
 ## Validation
 
 - Frontend focused SSE/store tests:
-  `npm run test:unit -- src/stores/__tests__/issueStore.test.ts src/hooks/common/__tests__/useEventProvider.test.tsx`
+  `npm run test:unit -- src/api/common/__tests__/sse.test.ts src/hooks/common/__tests__/useEventProvider.test.tsx src/stores/__tests__/issueStore.test.ts`
+  - `WorkspaceSSEClient` accepts generic non-issue agent payloads and tracks
+    opaque cursors for them.
+  - `EventProvider` entity/action filters deliver `agent.status` events and
+    skip malformed mutation JSON without poisoning later generic events.
+  - The issue store ignores `agent.status` and `agent.refresh` for issue-list
+    mutation/refetch purposes, even if a legacy `issue_id` is present.
 - Frontend contract checks:
   `npm run typecheck`
 - Frontend lint on touched files:
   `npx eslint ...`
 - Backend focused packages:
   `GOCACHE=/tmp/go-build-cache go test ./internal/rpc ./internal/backend ./internal/backend/fleet ./internal/webui/server/realtime`
+  - Generic agent payload projection is covered in
+    `internal/webui/server/realtime`.
+  - Agent refresh broadcasting is covered in `internal/webui/handlers/agents`
+    and asserts the event has `entity_type: "agent"` with no `issue_id`.
+  - In sandboxed Codex runs, the full `./internal/rpc` package can fail on
+    Unix socket bind permissions; use
+    `GOCACHE=/tmp/go-build-cache go test ./internal/rpc -run 'TestMutationEvent'`
+    for the mutation envelope checks when that happens.
 - Agent-browser smoke:
   - Started an isolated E2E stack on API `:19191` and frontend `:3191`.
   - Opened `agent-browser --session sse-envelope` to the isolated frontend.

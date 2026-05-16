@@ -545,6 +545,9 @@ export interface paths {
      *     ```json
      *     {
      *       "type": "update",
+     *       "entity_type": "issue",
+     *       "entity_id": "proj-abc.5",
+     *       "action": "issue.update",
      *       "issue_id": "proj-abc.5",
      *       "title": "Fix login bug",
      *       "assignee": "agent-1",
@@ -561,7 +564,8 @@ export interface paths {
      *     ```
      *
      *     **Mutation types**: `create`, `update`, `delete`, `comment`, `status`,
-     *     `bonded`, `squashed`, `burned`, `refresh`, `terminal_session_change`
+     *     `bonded`, `squashed`, `burned`, `refresh`, `terminal_metadata`,
+     *     `terminal_session_change`, `issue_tabs`, `session_change`
      *
      *     **Authentication**: Accepts Bearer token via `Authorization` header or
      *     one-time token via `token` query parameter (for EventSource which
@@ -2492,9 +2496,12 @@ export interface components {
       task_title?: string;
     };
     /**
-     * @description SSE mutation event payload. All fields except type, issue_id, and
-     *     timestamp are context-dependent. For status events: old_status and
-     *     new_status are present. For bonded events: parent_id and step_count
+     * @description SSE mutation event payload. `type` is the legacy coarse mutation kind.
+     *     New consumers should prefer the generic `entity_type`, `entity_id`, and
+     *     `action` envelope fields when deciding which local state to invalidate.
+     *     `issue_id` is retained for backward-compatible issue-scoped consumers
+     *     and may be omitted for non-issue entities. For status events: old_status
+     *     and new_status are present. For bonded events: parent_id and step_count
      *     are present. This is documented as a flat schema (no discriminator)
      *     because the SSE stream is not validated by generated clients.
      */
@@ -2510,8 +2517,24 @@ export interface components {
         | "squashed"
         | "burned"
         | "refresh"
-        | "terminal_session_change";
-      issue_id: string;
+        | "terminal_metadata"
+        | "terminal_session_change"
+        | "issue_tabs"
+        | "session_change";
+      /**
+       * @description Generic changed entity type, for example issue, dependency, comment, label, agent, terminal, session, or workspace.
+       */
+      entity_type?: string;
+      /** @description Generic changed entity identifier. */
+      entity_id?: string;
+      /**
+       * @description Source action for the mutation, usually the fleet-db action such as issue.update or dep.add.
+       */
+      action?: string;
+      /**
+       * @description Legacy issue identifier for issue-scoped consumers; omitted for non-issue entities.
+       */
+      issue_id?: string;
       title?: string;
       assignee?: string;
       actor?: string;

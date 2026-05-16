@@ -145,7 +145,10 @@ type CloseResult struct {
 type MutationData struct {
 	Cursor     string    `json:"cursor,omitempty"`
 	Type       string    `json:"type"`
-	IssueID    string    `json:"issue_id"`
+	EntityType string    `json:"entity_type,omitempty"`
+	EntityID   string    `json:"entity_id,omitempty"`
+	Action     string    `json:"action,omitempty"`
+	IssueID    string    `json:"issue_id,omitempty"`
 	Title      string    `json:"title,omitempty"`
 	Assignee   string    `json:"assignee,omitempty"`
 	Actor      string    `json:"actor,omitempty"`

@@ -33,6 +33,8 @@ import {
   INITIAL_STATE,
   issuesAreEqual,
   extractErrorMessage,
+  issueMutationAppliesToLocalIssue,
+  issueMutationInvalidatesProjection,
   processMutation as applyMutationPure,
 } from "./issueStoreHelpers";
 import type {
@@ -85,24 +87,34 @@ export function createIssueStore(
   let onToast = initialConfig?.onToast ?? null;
   let retryConnectionFn = initialConfig?.retryConnectionFn ?? null;
 
+  function scheduleProjectionRefresh(get: () => IssueStore): void {
+    if (refreshTimeout) clearTimeout(refreshTimeout);
+    refreshTimeout = setTimeout(() => {
+      refreshTimeout = null;
+      void get().refetch();
+    }, REFRESH_DEBOUNCE_MS);
+  }
+
   /** Apply a mutation to the store, handling side effects from the pure result */
   function applyMutationToStore(
     mutation: MutationPayload,
     set: (partial: Partial<IssueStore>) => void,
     get: () => IssueStore,
   ): void {
-    const result = applyMutationPure(
-      get().issuesMap,
-      mutation,
-      activeController !== null,
-    );
+    const result = issueMutationAppliesToLocalIssue(mutation)
+      ? applyMutationPure(get().issuesMap, mutation, activeController !== null)
+      : {
+          newMap: null,
+          incrementCount: false,
+          trackDeletion: null,
+          scheduleRefresh: false,
+        };
 
-    if (result.scheduleRefresh) {
-      if (refreshTimeout) clearTimeout(refreshTimeout);
-      refreshTimeout = setTimeout(() => {
-        refreshTimeout = null;
-        void get().refetch();
-      }, REFRESH_DEBOUNCE_MS);
+    if (
+      result.scheduleRefresh ||
+      issueMutationInvalidatesProjection(mutation)
+    ) {
+      scheduleProjectionRefresh(get);
     }
 
     if (result.trackDeletion) {
@@ -473,6 +485,7 @@ export function createIssueStore(
           }
         }
         removeOptimisticEntry(issueId, get, set);
+        scheduleProjectionRefresh(get);
       } catch (err) {
         const currentEntry = optimisticEntries.get(issueId);
         if (currentEntry) {
