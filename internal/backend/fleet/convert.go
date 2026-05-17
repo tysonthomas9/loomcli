@@ -341,9 +341,6 @@ func blockedIssuesToData(issues []*blockedIssueWire) []backend.IssueData {
 		if parent := bi.fleetIssueWire.parent(); parent != "" {
 			d.Parent = parent
 		}
-		if d.Status == "" || d.Status == string(types.StatusOpen) {
-			d.Status = string(types.StatusBlocked)
-		}
 		d.BlockedByCount = bi.BlockedByCount
 		d.BlockedBy = append([]string(nil), bi.BlockedBy...)
 		result = append(result, d)
@@ -404,9 +401,6 @@ func blockedIssueResponsesToData(issues []blockedIssueResponseWire) []backend.Is
 		d := issueToData(&issue)
 		if parent := entry.Issue.parent(); parent != "" {
 			d.Parent = parent
-		}
-		if d.Status == "" || d.Status == string(types.StatusOpen) {
-			d.Status = string(types.StatusBlocked)
 		}
 		for _, blocker := range entry.Blockers {
 			if blocker.ID != "" {

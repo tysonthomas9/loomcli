@@ -165,30 +165,30 @@ function shouldIncludeDependency(
  * ```
  */
 /**
- * Non-ready statuses - issues with these statuses are never "ready".
- */
-const NON_READY_STATUSES = new Set(["closed", "deferred"]);
-
-/**
- * Check if an issue is ready based on status and blocked state.
- * An issue is ready if:
- * - It's not closed or deferred
- * - It's not in the blockedIssueIds set
+ * Check if an issue is ready. When the API provides the canonical ready flag,
+ * use it. Older graph payloads fall back to the strict open-and-unblocked rule.
  */
 function computeIsReady(
-  issueId: string,
-  status: string | undefined,
+  issue: Issue,
   blockedIssueIds: Set<string> | undefined,
 ): boolean {
-  // Closed and deferred issues are never ready
-  if (status && NON_READY_STATUSES.has(status)) {
+  if (issue.is_ready !== undefined) {
+    return (
+      issue.is_ready === true &&
+      issue.is_deferred !== true &&
+      issue.is_blocked !== true &&
+      !blockedIssueIds?.has(issue.id)
+    );
+  }
+  if (issue.status !== "open" && issue.status !== undefined) {
     return false;
   }
-  // If we have blocked info, check if this issue is blocked
-  if (blockedIssueIds && blockedIssueIds.has(issueId)) {
+  if (issue.is_deferred === true || issue.status === "deferred") {
     return false;
   }
-  // Default to ready if not blocked and not closed/deferred
+  if (issue.is_blocked === true || blockedIssueIds?.has(issue.id)) {
+    return false;
+  }
   return true;
 }
 
@@ -349,7 +349,7 @@ export function useGraphData(
           issueType: issue.issue_type,
           dependencyCount: outgoingCounts.get(issue.id) ?? 0,
           dependentCount: incomingCounts.get(issue.id) ?? 0,
-          isReady: computeIsReady(issue.id, issue.status, blockedIssueIds),
+          isReady: computeIsReady(issue, blockedIssueIds),
           blockedCount,
           isRootBlocker,
           isClosed: issue.status === "closed",

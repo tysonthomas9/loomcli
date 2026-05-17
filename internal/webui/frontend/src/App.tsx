@@ -448,32 +448,26 @@ function App() {
     let needsReview = 0;
     let done = 0;
     for (const issue of issues) {
-      switch (issue.status) {
-        case "deferred":
-          backlog++;
-          break;
-        case "open":
-        case undefined:
-          if (issue.is_blocked) {
-            blocked++;
-          } else {
-            open++;
-          }
-          break;
-        case "blocked":
-          blocked++;
-          break;
-        case "in_progress":
-          inProgress++;
-          break;
-        case "review":
-          needsReview++;
-          break;
-        case "closed":
-          done++;
-          break;
-        default:
-          break;
+      const isDeferred =
+        issue.is_deferred === true || issue.status === "deferred";
+      const isBlocked = issue.is_blocked === true || issue.status === "blocked";
+      if (issue.status === "closed") {
+        done++;
+      } else if (isDeferred) {
+        backlog++;
+      } else if (isBlocked) {
+        blocked++;
+      } else if (issue.is_ready === true) {
+        open++;
+      } else if (
+        issue.is_ready === undefined &&
+        (issue.status === "open" || issue.status === undefined)
+      ) {
+        open++;
+      } else if (issue.status === "in_progress") {
+        inProgress++;
+      } else if (issue.status === "review") {
+        needsReview++;
       }
     }
     return { backlog, open, blocked, inProgress, needsReview, done };

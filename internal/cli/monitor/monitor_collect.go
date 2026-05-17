@@ -561,11 +561,16 @@ func collectStatisticsDeps(deps *cli.Deps) MonitorStats {
 			stats.Remaining = 0
 		}
 
-		// Review = total - open - inProgress - closed - blocked - deferred - pinned
-		stats.Review = stats.Total - stats.Open - stats.InProgress - stats.Closed -
-			stats.Blocked - statsData.DeferredIssues - statsData.PinnedIssues
-		if stats.Review < 0 {
-			stats.Review = 0
+		reviewCount, countErr := deps.IssueBackend.Count(cmdstore.RootContext(), backend.CountOpts{Status: "review"})
+		if countErr == nil {
+			stats.Review = reviewCount
+		} else {
+			// Fallback for older backends without Count support.
+			stats.Review = stats.Total - stats.Open - stats.InProgress - stats.Closed -
+				stats.Blocked - statsData.DeferredIssues - statsData.PinnedIssues
+			if stats.Review < 0 {
+				stats.Review = 0
+			}
 		}
 	}
 

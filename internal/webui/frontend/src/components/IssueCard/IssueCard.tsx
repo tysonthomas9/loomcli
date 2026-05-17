@@ -129,6 +129,7 @@ export const IssueCard = memo(function IssueCard({
   const displayId = formatIssueId(issue.id);
   const displayTitle = issue.title || "Untitled";
   const isBlocked = (blockedByCount ?? 0) > 0;
+  const isDeferred = issue.is_deferred === true || issue.status === "deferred";
   const reviewType = getReviewType(issue);
   const openStatus = columnId === "ready" ? getOpenStatus(issue) : null;
 
@@ -252,7 +253,7 @@ export const IssueCard = memo(function IssueCard({
             })}
           />
         )}
-        {issue.status === "deferred" && (
+        {isDeferred && (
           <span className={styles.deferredBadge} aria-label="Deferred">
             <span aria-hidden="true">⏸</span> Deferred
           </span>

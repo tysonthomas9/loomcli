@@ -168,3 +168,9 @@ type IssueBackend interface {
 	// (e.g., "fleet-db"). The value is immutable after construction.
 	BackendName() string
 }
+
+// DeferredIssueBackend is an optional extension for backends that expose the
+// canonical deferred view: explicit deferred status or a future defer_until.
+type DeferredIssueBackend interface {
+	Deferred(ctx context.Context, opts DeferredOpts) ([]IssueData, error)
+}

@@ -250,6 +250,18 @@ type ReadyOpts struct {
 	SourceRepos []string `json:"source_repos,omitempty"`
 }
 
+// DeferredOpts configures the canonical Deferred query. Backends may apply
+// narrowing filters client-side when the upstream deferred view is unfiltered.
+type DeferredOpts struct {
+	Assignee    string   `json:"assignee,omitempty"`
+	Priority    *int     `json:"priority,omitempty"`
+	Type        string   `json:"type,omitempty"`
+	ParentID    string   `json:"parent_id,omitempty"`
+	Labels      []string `json:"labels,omitempty"`
+	SourceRepos []string `json:"source_repos,omitempty"`
+	Limit       int      `json:"limit,omitempty"`
+}
+
 // BlockedOpts configures the canonical Blocked query.
 type BlockedOpts struct {
 	ParentID string `json:"parent_id,omitempty"`

@@ -106,6 +106,8 @@ interface IssueExtensions {
 
   // Kanban-enriched fields (present when fetched with include_blocked=true)
   is_blocked?: boolean;
+  is_ready?: boolean;
+  is_deferred?: boolean;
   blocked_by_count?: number;
   blocked_by?: string[];
   blocked_by_details?: BlockerRef[];

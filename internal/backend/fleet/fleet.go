@@ -394,9 +394,9 @@ func (b *FleetBackend) Blocked(ctx context.Context, opts backend.BlockedOpts) ([
 	return b.canonicalBlocked(ctx, opts)
 }
 
-// Stats builds StatsData from the fleet server's count endpoint with
-// group_by=status. ReadyIssues, EpicsEligibleForClosure, and AverageLeadTime
-// are unavailable until fleet-db adds server-side stats aggregation (fleet-08yg).
+// Stats builds lifecycle counts from fleet-db's status count endpoint and
+// canonical operational counts from FleetDB's computed ready/blocked/deferred
+// views.
 func (b *FleetBackend) Stats(ctx context.Context) (*backend.StatsData, error) {
 	resp, err := b.exec(ctx, "Stats", "GET", "/issues/count?group_by=status", nil)
 	if err != nil {
@@ -410,16 +410,29 @@ func (b *FleetBackend) Stats(ctx context.Context) (*backend.StatsData, error) {
 		return nil, backend.ErrInternal("Stats", "unmarshal response", err)
 	}
 	groups := countResp.Groups
+	blocked, err := b.Blocked(ctx, backend.BlockedOpts{})
+	if err != nil {
+		return nil, err
+	}
+	deferred, err := b.Deferred(ctx, backend.DeferredOpts{})
+	if err != nil {
+		return nil, err
+	}
+	ready, err := b.Ready(ctx, backend.ReadyOpts{})
+	if err != nil {
+		return nil, err
+	}
 	return &backend.StatsData{
 		TotalIssues:      int(countResp.Total),
 		OpenIssues:       int(groups[string(types.StatusOpen)]),
 		InProgressIssues: int(groups[string(types.StatusInProgress)]),
 		ClosedIssues:     int(groups[string(types.StatusClosed)]),
-		BlockedIssues:    int(groups[string(types.StatusBlocked)]),
-		DeferredIssues:   int(groups[string(types.StatusDeferred)]),
+		BlockedIssues:    len(blocked),
+		DeferredIssues:   len(deferred),
+		ReadyIssues:      len(ready),
 		TombstoneIssues:  int(groups[string(types.StatusTombstone)]),
 		PinnedIssues:     int(groups[string(types.StatusPinned)]),
-		// ReadyIssues, EpicsEligibleForClosure, AverageLeadTime: 0 (fleet-08yg).
+		// EpicsEligibleForClosure, AverageLeadTime: 0 (fleet-08yg).
 		// StatusReview and StatusHooked counts are included in TotalIssues but have
 		// no dedicated StatsData field; they are silently omitted from per-status counts.
 	}, nil

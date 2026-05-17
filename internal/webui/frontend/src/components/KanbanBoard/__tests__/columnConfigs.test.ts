@@ -3,9 +3,9 @@
  */
 
 /**
- * Unit tests for columnConfigs – verifies the Backlog/Blocked/Review column
- * filter logic. Backlog only contains deferred issues, Blocked contains
- * dependency-blocked and status=blocked issues.
+ * Unit tests for columnConfigs – verifies Backlog/Open/Blocked/Review column
+ * filter logic. Computed kanban flags from FleetDB win when present, with raw
+ * status fallback for older payloads.
  */
 
 import { describe, it, expect } from "vitest";
@@ -58,13 +58,18 @@ describe("columnConfigs", () => {
   });
 
   // ---------------------------------------------------------------
-  // 2-5. Backlog filter (only deferred status)
+  // 2-5. Backlog filter (canonical deferred)
   // ---------------------------------------------------------------
   describe("Backlog filter", () => {
     const backlog = getColumn("backlog");
 
     it("matches issues with status=deferred", () => {
       const issue = createMockIssue({ status: "deferred" });
+      expect(backlog.filter(issue, notBlocked)).toBe(true);
+    });
+
+    it("matches open issues flagged as currently deferred", () => {
+      const issue = createMockIssue({ status: "open", is_deferred: true });
       expect(backlog.filter(issue, notBlocked)).toBe(true);
     });
 
@@ -85,7 +90,7 @@ describe("columnConfigs", () => {
   });
 
   // ---------------------------------------------------------------
-  // Blocked filter (dependency-blocked + status=blocked)
+  // Blocked filter (canonical blocked + fallback status)
   // ---------------------------------------------------------------
   describe("Blocked filter", () => {
     const blockedCol = getColumn("blocked");
@@ -102,6 +107,11 @@ describe("columnConfigs", () => {
 
     it("matches issues with status=blocked", () => {
       const issue = createMockIssue({ status: "blocked" });
+      expect(blockedCol.filter(issue, notBlocked)).toBe(true);
+    });
+
+    it("matches issues flagged blocked even without blocker details", () => {
+      const issue = createMockIssue({ status: "open", is_blocked: true });
       expect(blockedCol.filter(issue, notBlocked)).toBe(true);
     });
 
@@ -182,6 +192,17 @@ describe("columnConfigs", () => {
       expect(open.filter(issue, notBlocked)).toBe(true);
     });
 
+    it("matches open issues flagged canonically ready", () => {
+      const issue = createMockIssue({ status: "open", is_ready: true });
+      expect(open.filter(issue, blocked)).toBe(false);
+      expect(open.filter(issue, notBlocked)).toBe(true);
+    });
+
+    it("rejects open issues flagged not ready", () => {
+      const issue = createMockIssue({ status: "open", is_ready: false });
+      expect(open.filter(issue, notBlocked)).toBe(false);
+    });
+
     it("matches issues with undefined status (treated as open)", () => {
       const issue = createMockIssue({ status: undefined });
       expect(open.filter(issue, notBlocked)).toBe(true);
@@ -190,6 +211,11 @@ describe("columnConfigs", () => {
     it("rejects open issues that have blockers", () => {
       const issue = createMockIssue({ status: "open" });
       expect(open.filter(issue, blocked)).toBe(false);
+    });
+
+    it("rejects review issues even if a stale ready flag is present", () => {
+      const issue = createMockIssue({ status: "review", is_ready: true });
+      expect(open.filter(issue, notBlocked)).toBe(false);
     });
 
     it("matches open issues even with [Need Review] in title", () => {
