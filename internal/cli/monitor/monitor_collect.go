@@ -190,7 +190,7 @@ func resolveAgentStatus(deps *cli.Deps, wt cli.WorktreeInfo, agentTasks map[stri
 
 // refineLockStatus enriches a lock status with task details when needed.
 func refineLockStatus(deps *cli.Deps, lockStatus, agentName string, agentTasks map[string]TaskInfo) string {
-	if !strings.Contains(lockStatus, "...") {
+	if !strings.Contains(lockStatus, "...") && !strings.HasPrefix(lockStatus, "idle ") {
 		return lockStatus
 	}
 	task, ok := agentTasks[agentName]
@@ -211,6 +211,9 @@ func refineLockStatus(deps *cli.Deps, lockStatus, agentName string, agentTasks m
 	case "closed":
 		return fmt.Sprintf("done: %s%s", task.ID, durationPart)
 	default:
+		if strings.HasPrefix(lockStatus, "idle ") {
+			return fmt.Sprintf("working: %s%s", task.ID, durationPart)
+		}
 		return strings.Replace(lockStatus, "...", task.ID, 1)
 	}
 }

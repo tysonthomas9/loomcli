@@ -219,6 +219,7 @@ func TestCheckGlobalConfig(t *testing.T) {
 		dir := t.TempDir()
 		t.Setenv("LOOM_CONFIG_DIR", dir)
 		defer ResetWorkspaceRuntimeDirCache()
+		setupWorkspaceConfigInDir(t, dir, &LoomConfig{Workspaces: map[string]WorkspaceConfig{}})
 
 		result := checkGlobalConfig()
 		if result.Status != StatusWarn {
@@ -235,6 +236,7 @@ func TestCheckGlobalConfig(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(invalidYAML), 0644); err != nil {
 			t.Fatal(err)
 		}
+		setupWorkspaceConfigInDir(t, dir, &LoomConfig{Workspaces: map[string]WorkspaceConfig{}})
 
 		result := checkGlobalConfig()
 		if result.Status != StatusWarn {
@@ -257,6 +259,7 @@ func TestCheckGlobalConfig(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yamlContent), 0644); err != nil {
 			t.Fatal(err)
 		}
+		setupWorkspaceConfigInDir(t, dir, &LoomConfig{Workspaces: map[string]WorkspaceConfig{}})
 
 		result := checkGlobalConfig()
 		// May be pass or warn (path might not exist)
