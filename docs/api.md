@@ -691,7 +691,10 @@ Add a comment to an issue.
 
 ### `GET /api/ready`
 
-Issues ready to work on (open/in_progress with no blockers).
+Canonical ready availability view from the issue backend. Ready work is open,
+non-epic, not canonically blocked, and not currently deferred. Status-like
+filters may narrow this view, but must not make `review`, `blocked`,
+`deferred`, or `in_progress` issues ready.
 
 - **Auth:** Required
 - **Query Parameters:**
@@ -703,7 +706,7 @@ Issues ready to work on (open/in_progress with no blockers).
   | `mol_type` | string | swarm, patrol, or work |
   | `sort` | string | hybrid, priority, or oldest |
   | `unassigned` | bool | Only unassigned issues |
-  | `include_deferred` | bool | Include deferred issues |
+  | `include_deferred` | bool | Deprecated/ignored for FleetDB-backed workspaces; ready never includes currently deferred issues |
   | `priority` | int (0-4) | Filter by priority |
   | `limit` | int | Max results |
   | `labels` | string | Comma-separated labels (all must match) |
@@ -728,7 +731,11 @@ Issues ready to work on (open/in_progress with no blockers).
 
 ### `GET /api/blocked`
 
-Issues that are blocked by other issues.
+Canonical blocked work from the issue backend. For FleetDB-backed workspaces,
+this includes explicit `status=blocked` issues, issues blocked by non-terminal
+dependencies, and descendants of blocked parents. Dependency blocker IDs are
+returned when known; explicit status-only and parent-only blocked issues may
+have an empty `blocked_by` list.
 
 - **Auth:** Required
 - **Query Parameters:**
@@ -3930,7 +3937,8 @@ Get workspace issue statistics.
 
 #### `GET /api/workspaces/{ws}/ready`
 
-Get issues ready to work on (unblocked, open).
+Get the canonical ready availability view for a workspace: open, non-epic,
+unblocked, and not currently deferred.
 
 - **Auth:** Required
 - **Timeout:** 5 seconds
@@ -3944,7 +3952,7 @@ Get issues ready to work on (unblocked, open).
   | `labels` | string | Comma-separated labels (all must match) |
   | `limit` | int | Max results |
   | `unassigned` | bool | Only unassigned issues |
-  | `include_deferred` | bool | Include deferred issues |
+  | `include_deferred` | bool | Deprecated/ignored for FleetDB-backed workspaces; ready never includes currently deferred issues |
   | `source_repos` | string | Comma-separated repo names to filter by |
 
 - Same response shape as `GET /api/ready` documented in [Issues](#issues)
@@ -3952,7 +3960,8 @@ Get issues ready to work on (unblocked, open).
 
 #### `GET /api/workspaces/{ws}/blocked`
 
-Get blocked issues.
+Get canonical blocked work for a workspace: explicit `status=blocked`,
+dependency-blocked, and parent-blocked issues.
 
 - **Auth:** Required
 - **Timeout:** 5 seconds

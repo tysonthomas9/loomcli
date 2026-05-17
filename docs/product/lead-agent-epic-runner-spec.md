@@ -222,6 +222,29 @@ do not:
   add SSE event-specific state rules that duplicate FleetDB query semantics
 ```
 
+Loom-side adapters must preserve the FleetDB view contract:
+
+```text
+FleetBackend.Ready:
+  forwards ready filters to FleetDB /issues/ready
+  treats ready as an availability view, not as a status-filtered list
+  does not re-add deferred, blocked, review, in_progress, or epic issues
+
+FleetBackend.Blocked:
+  consumes FleetDB /issues/blocked as authoritative once the FleetDB contract is canonical
+  does not permanently union /issues/blocked with status=blocked list results
+  keeps any compatibility union behind a clearly marked temporary shim
+  preserves blocker/source metadata when FleetDB exposes it
+
+FleetBackend deferred handling:
+  uses FleetDB /issues/deferred for operational "currently deferred" views
+  uses status=deferred counts only when the UI explicitly asks for raw lifecycle status
+
+FleetBackend.Close:
+  preserves canonical newly-unblocked results from FleetDB when returned
+  does not synthesize newly-unblocked work from partial local ready predicates
+```
+
 SSE and realtime updates are invalidation/delivery mechanisms, not alternate
 state authorities. On an SSE event, Loom clients should refresh or reconcile
 against the same FleetDB computed views used by the runner and CLI. Adding a new

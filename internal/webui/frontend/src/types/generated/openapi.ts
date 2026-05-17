@@ -484,7 +484,13 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List ready (unblocked) issues */
+    /**
+     * List ready (unblocked) issues
+     * @description Returns the canonical ready availability view from the issue backend:
+     *     open, non-epic work that is not canonically blocked and not currently
+     *     deferred. Filters may narrow this view, but they must not make
+     *     non-open statuses or epics ready.
+     */
     get: operations["listReady"];
     put?: never;
     post?: never;
@@ -501,7 +507,15 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List blocked issues with blocker details */
+    /**
+     * List blocked issues with blocker details
+     * @description Returns canonical blocked work from the issue backend. For FleetDB-backed
+     *     workspaces this includes explicit status=blocked issues, issues blocked
+     *     by non-terminal dependencies, and descendants of blocked parents.
+     *     Dependency blocker IDs/details are returned when known; explicit
+     *     status-only and parent-only blocked issues may have no dependency
+     *     blocker IDs.
+     */
     get: operations["listBlocked"];
     put?: never;
     post?: never;
@@ -2088,9 +2102,10 @@ export interface components {
       /** Format: date-time */
       edited_at?: string | null;
     };
-    /** @description Issue with blocking information */
+    /** @description Canonically blocked issue with blocking information when available. */
     BlockedIssue: components["schemas"]["Issue"] & {
       blocked_by_count: number;
+      /** @description Dependency blocker IDs when known. May be empty for explicit status-only or parent-propagated blocking. */
       blocked_by: string[];
       blocked_by_details?: components["schemas"]["BlockerRef"][];
     };
@@ -3980,11 +3995,16 @@ export interface operations {
     parameters: {
       query?: {
         assignee?: string;
+        /** @description Filter by issue type. Epics are always excluded from the ready view. */
         type?: "bug" | "feature" | "task" | "epic" | "chore";
         parent_id?: string;
         mol_type?: "swarm" | "patrol" | "work";
         sort?: "hybrid" | "priority" | "oldest";
         unassigned?: boolean;
+        /**
+         * @deprecated
+         * @description Deprecated and ignored for FleetDB-backed workspaces; ready never includes currently deferred issues.
+         */
         include_deferred?: boolean;
         priority?: number;
         limit?: number;

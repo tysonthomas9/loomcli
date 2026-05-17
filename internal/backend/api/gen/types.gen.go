@@ -1017,35 +1017,37 @@ type BlockedIssue struct {
 	AcceptanceCriteria *string                 `json:"acceptance_criteria,omitempty"`
 	AgentState         *BlockedIssueAgentState `json:"agent_state,omitempty"`
 	Assignee           *string                 `json:"assignee,omitempty"`
-	BlockedBy          []string                `json:"blocked_by"`
-	BlockedByCount     int                     `json:"blocked_by_count"`
-	BlockedByDetails   *[]BlockerRef           `json:"blocked_by_details,omitempty"`
-	CloseReason        *string                 `json:"close_reason,omitempty"`
-	ClosedAt           *time.Time              `json:"closed_at,omitempty"`
-	Comments           *[]Comment              `json:"comments,omitempty"`
-	CreatedAt          time.Time               `json:"created_at"`
-	CreatedBy          *string                 `json:"created_by,omitempty"`
-	DeferUntil         *time.Time              `json:"defer_until,omitempty"`
-	Dependencies       *[]Dependency           `json:"dependencies,omitempty"`
-	Description        *string                 `json:"description,omitempty"`
-	Design             *string                 `json:"design,omitempty"`
-	DueAt              *time.Time              `json:"due_at,omitempty"`
-	EstimatedMinutes   *int                    `json:"estimated_minutes,omitempty"`
-	ExternalRef        *string                 `json:"external_ref,omitempty"`
-	Id                 string                  `json:"id"`
-	IssueType          *BlockedIssueIssueType  `json:"issue_type,omitempty"`
-	Labels             *[]string               `json:"labels,omitempty"`
-	LastActivity       *time.Time              `json:"last_activity,omitempty"`
-	MolType            *string                 `json:"mol_type,omitempty"`
-	Notes              *string                 `json:"notes,omitempty"`
-	Owner              *string                 `json:"owner,omitempty"`
-	Parent             *string                 `json:"parent,omitempty"`
-	Pinned             *bool                   `json:"pinned,omitempty"`
-	Priority           int                     `json:"priority"`
-	Rig                *string                 `json:"rig,omitempty"`
-	RoleType           *string                 `json:"role_type,omitempty"`
-	SourceRepo         *string                 `json:"source_repo,omitempty"`
-	SourceSystem       *string                 `json:"source_system,omitempty"`
+
+	// BlockedBy Dependency blocker IDs when known. May be empty for explicit status-only or parent-propagated blocking.
+	BlockedBy        []string               `json:"blocked_by"`
+	BlockedByCount   int                    `json:"blocked_by_count"`
+	BlockedByDetails *[]BlockerRef          `json:"blocked_by_details,omitempty"`
+	CloseReason      *string                `json:"close_reason,omitempty"`
+	ClosedAt         *time.Time             `json:"closed_at,omitempty"`
+	Comments         *[]Comment             `json:"comments,omitempty"`
+	CreatedAt        time.Time              `json:"created_at"`
+	CreatedBy        *string                `json:"created_by,omitempty"`
+	DeferUntil       *time.Time             `json:"defer_until,omitempty"`
+	Dependencies     *[]Dependency          `json:"dependencies,omitempty"`
+	Description      *string                `json:"description,omitempty"`
+	Design           *string                `json:"design,omitempty"`
+	DueAt            *time.Time             `json:"due_at,omitempty"`
+	EstimatedMinutes *int                   `json:"estimated_minutes,omitempty"`
+	ExternalRef      *string                `json:"external_ref,omitempty"`
+	Id               string                 `json:"id"`
+	IssueType        *BlockedIssueIssueType `json:"issue_type,omitempty"`
+	Labels           *[]string              `json:"labels,omitempty"`
+	LastActivity     *time.Time             `json:"last_activity,omitempty"`
+	MolType          *string                `json:"mol_type,omitempty"`
+	Notes            *string                `json:"notes,omitempty"`
+	Owner            *string                `json:"owner,omitempty"`
+	Parent           *string                `json:"parent,omitempty"`
+	Pinned           *bool                  `json:"pinned,omitempty"`
+	Priority         int                    `json:"priority"`
+	Rig              *string                `json:"rig,omitempty"`
+	RoleType         *string                `json:"role_type,omitempty"`
+	SourceRepo       *string                `json:"source_repo,omitempty"`
+	SourceSystem     *string                `json:"source_system,omitempty"`
 
 	// Status User-facing statuses. Internal statuses (tombstone, pinned, hooked)
 	// are not settable via the API and excluded from this enum.
@@ -2209,15 +2211,19 @@ type RunOnboardingFirstTaskJSONBody struct {
 
 // ListReadyParams defines parameters for ListReady.
 type ListReadyParams struct {
-	Assignee        *string                 `form:"assignee,omitempty" json:"assignee,omitempty"`
-	Type            *ListReadyParamsType    `form:"type,omitempty" json:"type,omitempty"`
-	ParentId        *string                 `form:"parent_id,omitempty" json:"parent_id,omitempty"`
-	MolType         *ListReadyParamsMolType `form:"mol_type,omitempty" json:"mol_type,omitempty"`
-	Sort            *ListReadyParamsSort    `form:"sort,omitempty" json:"sort,omitempty"`
-	Unassigned      *bool                   `form:"unassigned,omitempty" json:"unassigned,omitempty"`
-	IncludeDeferred *bool                   `form:"include_deferred,omitempty" json:"include_deferred,omitempty"`
-	Priority        *int                    `form:"priority,omitempty" json:"priority,omitempty"`
-	Limit           *int                    `form:"limit,omitempty" json:"limit,omitempty"`
+	Assignee *string `form:"assignee,omitempty" json:"assignee,omitempty"`
+
+	// Type Filter by issue type. Epics are always excluded from the ready view.
+	Type       *ListReadyParamsType    `form:"type,omitempty" json:"type,omitempty"`
+	ParentId   *string                 `form:"parent_id,omitempty" json:"parent_id,omitempty"`
+	MolType    *ListReadyParamsMolType `form:"mol_type,omitempty" json:"mol_type,omitempty"`
+	Sort       *ListReadyParamsSort    `form:"sort,omitempty" json:"sort,omitempty"`
+	Unassigned *bool                   `form:"unassigned,omitempty" json:"unassigned,omitempty"`
+
+	// IncludeDeferred Deprecated and ignored for FleetDB-backed workspaces; ready never includes currently deferred issues.
+	IncludeDeferred *bool `form:"include_deferred,omitempty" json:"include_deferred,omitempty"`
+	Priority        *int  `form:"priority,omitempty" json:"priority,omitempty"`
+	Limit           *int  `form:"limit,omitempty" json:"limit,omitempty"`
 
 	// Labels Comma-separated labels (all must match)
 	Labels *string `form:"labels,omitempty" json:"labels,omitempty"`
