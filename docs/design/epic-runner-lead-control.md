@@ -1049,6 +1049,32 @@ Gotchas:
   falling back to the bundled sandbox. This did not block the controlled runtime
   or delivery path.
 
+### 2026-05-17 UTC: TDD Fixes For Valid Runner Issues
+
+Scope: fix only the issues verified as valid from the Slack run transcript.
+
+Implemented:
+
+- `Blocked` now includes both dependency-blocked issues and issues explicitly
+  marked `status=blocked` in the FleetDB and API backends.
+- API list queries now pass `parent_id`, so child issue queries stay scoped to
+  the assigned epic.
+- The epic runner now treats "no ready work, blocked children remain, no active
+  workers" as a terminal blocked state instead of polling forever with
+  `0 ready, 0 blocked, active 0/2`.
+- The HTTP Run Epic path reports `run_state: "blocked"` for that terminal
+  blocked state and stops its background run lock.
+- Lead terminal launch metadata now carries a configured local agent worktree
+  as `Launch.Cwd`; PTY startup uses it when present and valid.
+
+Tests added:
+
+- explicit `status=blocked` issues are returned by API and FleetDB blocked
+  backends
+- runner exits the foreground loop when only blocked child work remains
+- configured lead worktrees are used for terminal launch cwd, while missing
+  worktrees fall back safely
+
 ## Follow-Up Work
 
 - For Codex, do we need item-level timeline events in addition to

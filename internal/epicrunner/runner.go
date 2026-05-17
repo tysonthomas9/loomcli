@@ -287,6 +287,9 @@ func (r *Runner) RunLoop(ctx context.Context) error {
 			r.writef("[epic-run] epic %s drained, exiting\n", r.parent)
 			return nil
 		}
+		if result.Blocked {
+			return nil
+		}
 
 		select {
 		case <-ctx.Done():
@@ -313,6 +316,7 @@ type DispatchedTask struct {
 // ReconcileResult summarizes a single reconcile pass.
 type ReconcileResult struct {
 	Done              bool             `json:"done"`
+	Blocked           bool             `json:"blocked,omitempty"`
 	ReadyCount        int              `json:"ready_count"`
 	BlockedCount      int              `json:"blocked_count"`
 	OpenChildrenCount int              `json:"open_children_count"`
@@ -352,6 +356,12 @@ func (r *Runner) ReconcileOnce(ctx context.Context) (ReconcileResult, error) {
 	if stalled := r.stalledTasks(ctx, snapshot.openChildren); len(stalled) > 0 {
 		return result, fmt.Errorf("%w: %s", ErrStalledWorker, strings.Join(stalled, "; "))
 	}
+	if len(snapshot.ready) == 0 && len(snapshot.blocked) > 0 && activeWorkers == 0 {
+		result.Blocked = true
+		r.writef("[epic-run] epic %s blocked with %d child task(s): %s\n",
+			r.parent, len(snapshot.blocked), blockedTaskSummary(snapshot.blocked))
+		return result, nil
+	}
 	slots := r.maxConcurrency - activeWorkers
 	if slots <= 0 {
 		r.writef("[epic-run] %d ready, %d blocked, %d active workers (at cap)\n", len(snapshot.ready), len(snapshot.blocked), activeWorkers)
@@ -367,6 +377,28 @@ func (r *Runner) ReconcileOnce(ctx context.Context) (ReconcileResult, error) {
 		return result, runError(ErrorKindInternal, fmt.Sprintf("dispatch failed: %s", strings.Join(failures, "; ")), nil)
 	}
 	return result, nil
+}
+
+func blockedTaskSummary(tasks []backend.IssueData) string {
+	const maxTasks = 5
+	parts := make([]string, 0, len(tasks))
+	for _, task := range tasks {
+		if task.ID == "" {
+			continue
+		}
+		label := task.ID
+		if strings.TrimSpace(task.Title) != "" {
+			label += " (" + task.Title + ")"
+		}
+		parts = append(parts, label)
+		if len(parts) == maxTasks {
+			break
+		}
+	}
+	if len(tasks) > maxTasks {
+		parts = append(parts, fmt.Sprintf("+%d more", len(tasks)-maxTasks))
+	}
+	return strings.Join(parts, ", ")
 }
 
 func (r *Runner) loadReconcileSnapshot(ctx context.Context) (*reconcileSnapshot, error) {

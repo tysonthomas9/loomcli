@@ -3,6 +3,8 @@ package terminal
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -11,8 +13,10 @@ import (
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
 
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
@@ -112,6 +116,90 @@ func TestEnsureAgentTerminalSessionCreatesLeadLaunchSpec(t *testing.T) {
 	}
 	if session.Kind != domain.AgentSessionKindOrchestration || session.TerminalID != meta.SessionName {
 		t.Fatalf("agent session = kind:%q terminal:%q", session.Kind, session.TerminalID)
+	}
+}
+
+func TestEnsureAgentTerminalSessionLaunchesLeadInConfiguredWorktree(t *testing.T) {
+	ctx := context.Background()
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	st, tabStore, rdb := newAgentSessionTestDeps(t)
+	svc := webuiterminal.NewTerminalService(
+		nil,
+		tabStore,
+		nil,
+		rdb,
+		nil,
+		time.Now().Add(-time.Second),
+	)
+	worktree := filepath.Join(t.TempDir(), "worktrees", "slack-src", "nova")
+	if err := os.MkdirAll(filepath.Join(worktree, ".git"), 0755); err != nil {
+		t.Fatalf("create worktree marker: %v", err)
+	}
+	if err := bootstrap.SaveStateCache(&bootstrap.StateCache{
+		Version: 1,
+		Workspaces: map[string]bootstrap.WorkspaceLocalState{
+			"E2E": {
+				Path: t.TempDir(),
+				Agents: map[string]bootstrap.AgentLocalState{
+					"nova": {Worktree: worktree},
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("save state cache: %v", err)
+	}
+
+	if _, err := st.Roles().Create(ctx, store.RoleCreate{
+		WorkspaceKey: "E2E",
+		Name:         "lead",
+		Backend:      "codex",
+	}); err != nil {
+		t.Fatalf("create role: %v", err)
+	}
+	if _, err := st.Agents().Create(ctx, store.AgentCreate{
+		WorkspaceKey: "E2E",
+		Name:         "nova",
+		RoleName:     "lead",
+		Parent:       "E2E-8",
+	}); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	meta, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "nova", "http://loom.test")
+	if err != nil {
+		t.Fatalf("ensureAgentTerminalSession: %v", err)
+	}
+	if meta.Launch == nil {
+		t.Fatal("launch spec is nil")
+	}
+	if meta.Launch.Cwd != worktree {
+		t.Fatalf("Launch.Cwd = %q, want configured lead worktree %q", meta.Launch.Cwd, worktree)
+	}
+}
+
+func TestBuildAgentLaunchSpecFallsBackWhenConfiguredWorktreeMissing(t *testing.T) {
+	ctx := context.Background()
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	st := memstore.New()
+	missing := filepath.Join(t.TempDir(), "missing", "nova")
+	if err := localworkspace.RememberAgentWorktree("E2E", "nova", missing); err != nil {
+		t.Fatalf("remember worktree: %v", err)
+	}
+	if _, err := st.Roles().Create(ctx, store.RoleCreate{
+		WorkspaceKey: "E2E",
+		Name:         "lead",
+		Backend:      "codex",
+	}); err != nil {
+		t.Fatalf("create role: %v", err)
+	}
+	agent := &domain.Agent{WorkspaceKey: "E2E", Name: "nova", RoleName: "lead"}
+
+	launch, _, err := buildAgentLaunchSpec(ctx, st, "E2E", "term_nova", agent, "lead-1", "http://loom.test")
+	if err != nil {
+		t.Fatalf("buildAgentLaunchSpec: %v", err)
+	}
+	if launch.Cwd != "" {
+		t.Fatalf("Launch.Cwd = %q, want empty fallback for missing worktree", launch.Cwd)
 	}
 }
 

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -13,6 +15,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
@@ -150,7 +153,7 @@ func agentTerminalLaunchSpecStale(
 	if err != nil || candidate == nil {
 		return false
 	}
-	return !slices.Equal(candidate.Argv, existing.Launch.Argv)
+	return !slices.Equal(candidate.Argv, existing.Launch.Argv) || candidate.Cwd != existing.Launch.Cwd
 }
 
 func loadTerminalAgent(ctx context.Context, st store.Store, workspace, agentName string) (*domain.Agent, error) {
@@ -315,7 +318,30 @@ func buildAgentLaunchSpec(ctx context.Context, st store.Store, workspace, sessio
 	return &tabmeta.LaunchSpec{
 		Argv: webuterminal.ShellArgvForCommand(args),
 		Env:  agentLaunchEnv(workspace, sessionName, backend, orchestratorID, agent),
+		Cwd:  agentLaunchCwd(workspace, agent),
 	}, backend, nil
+}
+
+func agentLaunchCwd(workspace string, agent *domain.Agent) string {
+	if agent == nil {
+		return ""
+	}
+	cache, err := bootstrap.LoadStateCache()
+	if err != nil || cache == nil {
+		return ""
+	}
+	local := cache.Workspaces[workspace]
+	worktree := strings.TrimSpace(local.Agents[agent.Name].Worktree)
+	if worktree == "" {
+		return ""
+	}
+	if info, err := os.Stat(worktree); err != nil || !info.IsDir() {
+		return ""
+	}
+	if _, err := os.Stat(filepath.Join(worktree, ".git")); err != nil {
+		return ""
+	}
+	return worktree
 }
 
 func loadAgentLaunchRole(ctx context.Context, st store.Store, workspace, roleName string) (*domain.Role, error) {

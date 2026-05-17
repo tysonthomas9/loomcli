@@ -361,6 +361,9 @@ func (m *PTYManager) spawnSession(key SessionKey, cols, rows uint16, launch *tab
 	}
 	cmd.Env = env
 	cmd.Dir = m.cwd
+	if launch != nil && strings.TrimSpace(launch.Cwd) != "" {
+		cmd.Dir = launch.Cwd
+	}
 
 	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Cols: cols, Rows: rows})
 	if err != nil {

@@ -59,6 +59,7 @@ type TabMetadata struct {
 type LaunchSpec struct {
 	Argv []string          `json:"argv,omitempty"`
 	Env  map[string]string `json:"env,omitempty"`
+	Cwd  string            `json:"cwd,omitempty"`
 }
 
 // Store provides Redis-backed persistence for terminal tab metadata.

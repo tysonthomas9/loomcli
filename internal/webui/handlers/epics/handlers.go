@@ -122,6 +122,10 @@ func reconcileHTTPRun(ctx context.Context, m *Module, wsKey, epicID string, runn
 		finishRun()
 		return reconcile, "drained", nil
 	}
+	if reconcile.Blocked {
+		finishRun()
+		return reconcile, "blocked", nil
+	}
 	if m.backgroundRuns {
 		startBackgroundRun(runner, m.runInterval, finishRun)
 		return reconcile, "running", nil

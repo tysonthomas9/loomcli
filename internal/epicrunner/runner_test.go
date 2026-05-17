@@ -1,6 +1,7 @@
 package epicrunner
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"strings"
@@ -325,6 +326,70 @@ func TestReconcileOnceLiveSessionConsumesConcurrency(t *testing.T) {
 	}
 	if len(cmds) != 0 {
 		t.Fatalf("commands = %d, want no dispatch while active session consumes cap", len(cmds))
+	}
+}
+
+func TestReconcileOnceReportsOnlyBlockedChildrenAsTerminal(t *testing.T) {
+	ctx := context.Background()
+	st := newTestStore(t)
+	blockedTask := backend.IssueData{ID: "EPIC-2", Title: "blocked task", Status: "blocked"}
+
+	ib := clitest.NewMockIssueBackend()
+	ib.BlockedResult = []backend.IssueData{blockedTask}
+	ib.ListResult = []backend.IssueData{blockedTask}
+
+	r := &Runner{
+		store:          st,
+		ib:             ib,
+		workspace:      "ws",
+		parent:         "EPIC-1",
+		prefix:         "epic-1",
+		role:           "task",
+		maxConcurrency: 1,
+	}
+
+	result, err := r.ReconcileOnce(ctx)
+	if err != nil {
+		t.Fatalf("ReconcileOnce error = %v", err)
+	}
+	if result.Done {
+		t.Fatal("Done = true, want false because blocked child work still needs user action")
+	}
+	if !result.Blocked {
+		t.Fatal("Blocked = false, want true when only blocked children remain")
+	}
+	if result.BlockedCount != 1 || result.ActiveWorkers != 0 || result.ReadyCount != 0 {
+		t.Fatalf("result = %+v, want blocked=1 active=0 ready=0", result)
+	}
+}
+
+func TestRunLoopExitsWhenOnlyBlockedChildrenRemain(t *testing.T) {
+	ctx := context.Background()
+	st := newTestStore(t)
+	blockedTask := backend.IssueData{ID: "EPIC-2", Title: "blocked task", Status: "blocked"}
+
+	ib := clitest.NewMockIssueBackend()
+	ib.BlockedResult = []backend.IssueData{blockedTask}
+	ib.ListResult = []backend.IssueData{blockedTask}
+
+	var out bytes.Buffer
+	r := &Runner{
+		store:          st,
+		ib:             ib,
+		workspace:      "ws",
+		parent:         "EPIC-1",
+		prefix:         "epic-1",
+		role:           "task",
+		maxConcurrency: 1,
+		interval:       time.Hour,
+		out:            &out,
+	}
+
+	if err := r.RunLoop(ctx); err != nil {
+		t.Fatalf("RunLoop error = %v", err)
+	}
+	if !strings.Contains(out.String(), "blocked") || !strings.Contains(out.String(), "EPIC-2") {
+		t.Fatalf("RunLoop output = %q, want blocked terminal summary with task id", out.String())
 	}
 }
 
