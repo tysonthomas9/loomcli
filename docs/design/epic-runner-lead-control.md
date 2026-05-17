@@ -782,6 +782,76 @@ Gotchas:
 - `agent-browser wait --load networkidle` is still unsuitable because the app
   holds SSE connections open; use bounded waits.
 
+### 2026-05-17 UTC: Confusing Runner UX Fix And Clean Reset
+
+Scope: re-check whether the epic runner works and whether the UI path makes
+sense to a user, starting from the current UI state and then resetting the
+Slack test container from scratch. This was a UI/runner dispatch validation,
+not a full Slack app implementation run.
+
+Problems found in the current UI state:
+
+- A lead assigned to an epic could still show `unknown` in the agent header.
+- The active-epic panel said `0 active` even when a live worker was openable
+  for a child task.
+- The active-epic heading did not make the assigned epic ID obvious.
+- The dev container copied host Codex runtime/plugin state into
+  `/root/.codex-rw`, causing user-facing terminal noise:
+  `file is not a database` and desktop MCP/plugin startup failures.
+- Queue count wording used `active`, which became misleading once a worker
+  completed but FleetDB still had the task in `in_progress`.
+
+Fixes made:
+
+- Lead/orchestrator headers now hide placeholder branch values like `unknown`.
+- Lead headers now show `assigned epic <id>` or `no epic assigned`.
+- The active-epic heading says `Assigned epic` for the selected lead's
+  assigned epic and shows the epic ID next to the title.
+- Task counts now account for live/openable worker terminals, and the count
+  label is `in progress` instead of `active`.
+- The dev container now mirrors Codex auth/config into `/root/.codex-rw` without
+  host runtime SQLite/log files, host MCP server blocks, plugin blocks, or
+  desktop notify hooks.
+
+Fresh reset validation:
+
+- Rebuilt `loomcli-dev-slack-epic`, removed `loom-slack-epic`, and started a
+  fresh container on port 8092.
+- Confirmed `GET /api/workspaces` returned an empty list.
+- Created `/tmp/slack-src` as a git repo inside the container and created
+  workspace `Slack_UI` (`SLACK-UI`) with that repo attached.
+- Seeded lead agents `atlas` and `nova`, two epics, and three child tasks per
+  epic.
+- Drove the final browser validation with isolated session
+  `agent-browser --session epic-ux-label`.
+- Initial UI showed `atlas idle · lead · no epic assigned`,
+  `Open queue · 2 epics · 6 tasks`, `0 in progress`, and no Codex SQLite or
+  MCP/plugin startup warnings.
+- Clicking `Run` for `SLACK-UI-1` assigned `atlas` and the UI showed
+  `Assigned epic Slack collaboration shell SLACK-UI-1`.
+- Switching to `nova` showed `SLACK-UI-1` as claimed by `atlas` and left
+  `SLACK-UI-2` runnable.
+- Clicking `Run` for `SLACK-UI-2` assigned `nova`; backend state confirmed
+  `atlas.parent=SLACK-UI-1` and `nova.parent=SLACK-UI-2`.
+
+Evidence:
+
+- Clean initial screenshot: `/tmp/epic-ux-clean-initial.png`
+- Updated count-label screenshot after atlas run: `/tmp/epic-ux-label-atlas.png`
+- Final two-lead screenshot after nova run: `/tmp/epic-ux-label-nova.png`
+
+Gotchas:
+
+- FleetDB issue projection can lag just long enough that immediate post-create
+  list calls may not include the newest issues. Use returned create payloads or
+  bounded waits when seeding automated UI scenarios.
+- `localhost` through Podman/gvproxy was briefly flaky from shell scripts; direct
+  one-shot `curl` calls to `127.0.0.1:8092` were reliable once the server was
+  ready.
+- The terminal still shows the normal Codex trust prompt for a new workspace.
+  That is expected setup UI; the previous SQLite and MCP/plugin warnings are
+  gone.
+
 ## Follow-Up Work
 
 - For Codex, do we need item-level timeline events in addition to

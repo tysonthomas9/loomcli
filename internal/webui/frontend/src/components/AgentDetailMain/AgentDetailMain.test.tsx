@@ -48,6 +48,53 @@ function renderWithAgents(agents: LoomAgentStatus[], agentName: string) {
 }
 
 describe("AgentDetailMain", () => {
+  it("shows assigned lead epic and hides placeholder branch values", () => {
+    renderWithAgents(
+      [
+        {
+          name: "nova",
+          branch: "unknown",
+          status: "idle",
+          ahead: 0,
+          behind: 0,
+          workspace: "E2E",
+          role: "lead",
+          parent: "E2E-1",
+          state: "idle",
+        } as LoomAgentStatus,
+      ],
+      "nova",
+    );
+
+    expect(screen.getByText("nova")).toBeInTheDocument();
+    expect(screen.getByText("idle")).toBeInTheDocument();
+    expect(screen.getByText("lead")).toBeInTheDocument();
+    expect(screen.getByText("assigned epic")).toBeInTheDocument();
+    expect(screen.getByText("E2E-1")).toBeInTheDocument();
+    expect(screen.queryByText("unknown")).not.toBeInTheDocument();
+  });
+
+  it("makes an unassigned lead explicit instead of showing unknown", () => {
+    renderWithAgents(
+      [
+        {
+          name: "atlas",
+          branch: "unknown",
+          status: "idle",
+          ahead: 0,
+          behind: 0,
+          workspace: "E2E",
+          role: "lead",
+          state: "idle",
+        } as LoomAgentStatus,
+      ],
+      "atlas",
+    );
+
+    expect(screen.getByText("no epic assigned")).toBeInTheDocument();
+    expect(screen.queryByText("unknown")).not.toBeInTheDocument();
+  });
+
   it("keeps completed ephemeral worker artifacts and cleanup actions visible", () => {
     const agent = completedWorkerAgent();
 

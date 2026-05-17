@@ -4,6 +4,8 @@ import type { Issue, LoomAgentStatus } from "@/types";
 import {
   buildWorkerHistoryByEpic,
   buildWorkerByTaskId,
+  countTaskStatusesWithWorkers,
+  effectiveTaskStatus,
   groupAgentTasksByEpic,
   groupOpenByEpic,
   isWorkerTerminalOpenable,
@@ -272,6 +274,67 @@ describe("buildWorkerByTaskId", () => {
     ]);
 
     expect(workers.get("T-3")?.name).toBe("worker-active");
+  });
+});
+
+describe("effectiveTaskStatus", () => {
+  it("treats a live worker as active even before issue status catches up", () => {
+    const task = issue({ id: "T-1", status: "open" });
+    const liveWorker = agent({
+      name: "worker-live",
+      task_id: "T-1",
+      state: "active",
+      desired_state: "running",
+    });
+    const stoppedWorker = agent({
+      name: "worker-stopped",
+      task_id: "T-1",
+      state: "stopped",
+      desired_state: "stopped",
+    });
+
+    expect(effectiveTaskStatus(task, liveWorker)).toBe("active");
+    expect(effectiveTaskStatus(task, stoppedWorker)).toBe("open");
+  });
+
+  it("preserves completed task status even when retained worker metadata exists", () => {
+    expect(
+      effectiveTaskStatus(
+        issue({ id: "T-2", status: "closed" }),
+        agent({
+          name: "worker-retained",
+          task_id: "T-2",
+          state: "stopped",
+          desired_state: "stopped",
+        }),
+      ),
+    ).toBe("closed");
+  });
+});
+
+describe("countTaskStatusesWithWorkers", () => {
+  it("counts live-worker tasks as active for the panel summary", () => {
+    const tasks = [
+      issue({ id: "T-ACTIVE", status: "open" }),
+      issue({ id: "T-OPEN", status: "open" }),
+      issue({ id: "T-BLOCKED", status: "blocked" }),
+      issue({ id: "T-DONE", status: "closed" }),
+    ];
+    const workers = buildWorkerByTaskId([
+      agent({
+        name: "worker-active",
+        task_id: "T-ACTIVE",
+        state: "active",
+        desired_state: "running",
+      }),
+    ]);
+
+    expect(countTaskStatusesWithWorkers(tasks, workers)).toEqual({
+      active: 1,
+      open: 1,
+      blocked: 1,
+      done: 1,
+    });
   });
 });
 

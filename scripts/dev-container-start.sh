@@ -31,6 +31,12 @@ log() { printf '[dev] %s\n' "$*"; }
 # CLIs (codex especially) write session state under those dirs at runtime and
 # crash with "Read-only file system (os error 30)" otherwise. Copy each into
 # a writable sibling and point the CLI env vars at the copy.
+#
+# Codex runtime state is intentionally not copied wholesale. Host SQLite/log
+# files can be version- or platform-specific, and a stale/corrupt state DB makes
+# the containerized TUI print "file is not a database" before every lead prompt.
+# Host MCP/plugin config is also omitted because desktop plugin binaries are
+# often not executable inside the Linux dev container.
 mirror_rw() {
     local src=$1 dst=$2
     [ -d "$src" ] || return 0
@@ -39,7 +45,47 @@ mirror_rw() {
     mkdir -p "$(dirname "$dst")"
     cp -r "$src" "$dst"
 }
-mirror_rw /root/.codex          /root/.codex-rw
+
+sanitize_codex_config() {
+    local src_file=$1 dst_file=$2
+    awk '
+        /^notify[[:space:]]*=/ { next }
+        /^\[mcp_servers(\.|])/ { skip = 1; next }
+        /^\[plugins\./ { skip = 1; next }
+        /^\[/ { skip = 0 }
+        !skip { print }
+    ' "$src_file" > "$dst_file"
+    chmod 600 "$dst_file" 2>/dev/null || true
+}
+
+mirror_codex_rw() {
+    local src=$1 dst=$2
+    [ -d "$src" ] || return 0
+    [ -d "$dst" ] && return 0
+    log "mirroring $src → $dst (sanitized writable copy for Codex auth/config)"
+    mkdir -p "$dst"
+
+    local file
+    for file in \
+        auth.json \
+        AGENTS.md \
+        installation_id \
+        internal_storage.json \
+        version.json \
+        .codex-global-state.json \
+        .personality_migration
+    do
+        [ -e "$src/$file" ] && cp -p "$src/$file" "$dst/$file"
+    done
+    [ -e "$src/config.toml" ] && sanitize_codex_config "$src/config.toml" "$dst/config.toml"
+
+    local dir
+    for dir in rules skills plugins memories vendor_imports; do
+        [ -d "$src/$dir" ] && cp -R "$src/$dir" "$dst/$dir"
+    done
+}
+
+mirror_codex_rw /root/.codex    /root/.codex-rw
 mirror_rw /root/.claude         /root/.claude-rw
 mirror_rw /root/.config/opencode /root/.config/opencode-rw
 export CODEX_HOME=/root/.codex-rw

@@ -352,6 +352,10 @@ function Header({
   const initial = (agentName[0] ?? "?").toUpperCase();
   const avatarBg = getAvatarColor(agentName);
   const avatarFg = shouldUseWhiteText(avatarBg) ? "#fff" : "#1a1a1a";
+  const branch = displayBranch(agent?.branch);
+  const role = (agent?.role ?? "").trim();
+  const assignedEpic = (agent?.parent ?? "").trim();
+  const isLead = isLeadRole(role);
 
   return (
     <div
@@ -412,7 +416,7 @@ function Header({
             }}
           />
           <span>{parsed.type || "unknown"}</span>
-          {agent?.branch ? (
+          {branch ? (
             <>
               <span>·</span>
               <code
@@ -420,14 +424,32 @@ function Header({
                   fontFamily: "var(--font-mono, ui-monospace, monospace)",
                 }}
               >
-                {agent.branch}
+                {branch}
               </code>
             </>
           ) : null}
-          {agent?.role ? (
+          {role ? (
             <>
               <span>·</span>
-              <span>{agent.role}</span>
+              <span>{role}</span>
+            </>
+          ) : null}
+          {assignedEpic ? (
+            <>
+              <span>·</span>
+              <span>assigned epic</span>
+              <code
+                style={{
+                  fontFamily: "var(--font-mono, ui-monospace, monospace)",
+                }}
+              >
+                {assignedEpic}
+              </code>
+            </>
+          ) : isLead ? (
+            <>
+              <span>·</span>
+              <span>no epic assigned</span>
             </>
           ) : null}
           {parsed.taskId ? (
@@ -446,6 +468,19 @@ function Header({
       </div>
     </div>
   );
+}
+
+function displayBranch(branch: string | undefined): string {
+  const value = (branch ?? "").trim();
+  if (value === "" || value.toLowerCase() === "unknown") {
+    return "";
+  }
+  return value;
+}
+
+function isLeadRole(role: string | undefined): boolean {
+  const normalized = (role ?? "").trim().toLowerCase();
+  return normalized === "lead" || normalized === "orchestrator";
 }
 
 function EmptyState({

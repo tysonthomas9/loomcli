@@ -43,7 +43,7 @@ interface EpicGroup {
   totalCount: number;
 }
 
-interface Counts {
+export interface Counts {
   active: number;
   done: number;
   open: number;
@@ -147,7 +147,7 @@ export function AgentWorkPanel({
   //   3. workspace-wide — agent is idle and has nothing assigned; show all
   //      workspace issues grouped by epic so the panel still has useful
   //      context. Triggered when groupAgentTasksByEpic returns 0 tasks.
-  const { groups, counts, totalTasks, mode } = useMemo(() => {
+  const { groups, totalTasks, mode } = useMemo(() => {
     if (activeEpicId) {
       const v = scopeToEpic(issuesMap, activeEpicId);
       return { ...v, mode: "epic" as const };
@@ -164,6 +164,18 @@ export function AgentWorkPanel({
     return { ...wide, mode: "workspace" as const };
   }, [issuesMap, agentName, activeEpicId, selectedAgentIsLead]);
   const focused = mode === "epic";
+  const displayCounts = useMemo(
+    () =>
+      countTaskStatusesWithWorkers(
+        groups.flatMap((group) => group.tasks),
+        workerByTaskId,
+      ),
+    [groups, workerByTaskId],
+  );
+  const activeEpicLabel =
+    focused && selectedAgentIsLead && selectedAgent?.parent === activeEpicId
+      ? "Assigned epic"
+      : "Active epic";
 
   if (!agentName) {
     return (
@@ -173,7 +185,8 @@ export function AgentWorkPanel({
     );
   }
 
-  const overallPct = totalTasks > 0 ? (counts.done / totalTasks) * 100 : 0;
+  const overallPct =
+    totalTasks > 0 ? (displayCounts.done / totalTasks) * 100 : 0;
 
   return (
     <aside className={styles.panel} aria-label="Agent work">
@@ -182,9 +195,14 @@ export function AgentWorkPanel({
           <>
             <div className={styles.activeEpicTag}>
               <span aria-hidden="true" className={styles.activeEpicTagDot} />
-              Active epic
+              {activeEpicLabel}
             </div>
-            <div className={styles.activeEpicTitle}>{groups[0].epicTitle}</div>
+            <div className={styles.activeEpicTitle}>
+              <span className={styles.activeEpicTitleText}>
+                {groups[0].epicTitle}
+              </span>
+              <code className={styles.activeEpicId}>{groups[0].epicId}</code>
+            </div>
           </>
         ) : (
           <div className={styles.label}>
@@ -197,10 +215,10 @@ export function AgentWorkPanel({
         )}
 
         <div className={styles.countRow}>
-          <CountChip label={`${counts.done} done`} />
-          <CountChip label={`${counts.active} active`} />
-          <CountChip label={`${counts.open} queued`} />
-          <CountChip label={`${counts.blocked} blocked`} />
+          <CountChip label={`${displayCounts.done} done`} />
+          <CountChip label={`${displayCounts.active} in progress`} />
+          <CountChip label={`${displayCounts.open} queued`} />
+          <CountChip label={`${displayCounts.blocked} blocked`} />
         </div>
 
         <div className={styles.progressBar}>
@@ -411,7 +429,7 @@ function TaskCard({
   onWorkerClick?: ((agentName: string) => void) | undefined;
   onClick: () => void;
 }): JSX.Element {
-  const status = (task.status ?? "open").toLowerCase();
+  const status = effectiveTaskStatus(task, workerAgent);
   const glyph = STATUS_GLYPH[status] ?? STATUS_GLYPH["open"];
   const priority = task.priority ?? 2;
   const priorityClass = PRIORITY_CLASS[priority] ?? PRIORITY_CLASS[2];
@@ -469,6 +487,31 @@ function TaskCard({
 
 function CountChip({ label }: { label: string }): JSX.Element {
   return <span className={styles.countChip}>{label}</span>;
+}
+
+export function countTaskStatusesWithWorkers(
+  tasks: Issue[],
+  workerByTaskId: Map<string, LoomAgentStatus>,
+): Counts {
+  const counts: Counts = { active: 0, done: 0, open: 0, blocked: 0 };
+  for (const task of tasks) {
+    const status = effectiveTaskStatus(task, workerByTaskId.get(task.id));
+    if (status === "in_progress" || status === "active") counts.active++;
+    else if (status === "closed" || status === "done") counts.done++;
+    else if (status === "blocked") counts.blocked++;
+    else counts.open++;
+  }
+  return counts;
+}
+
+export function effectiveTaskStatus(
+  task: Issue,
+  workerAgent?: LoomAgentStatus | undefined,
+): string {
+  const status = (task.status ?? "open").toLowerCase();
+  if (status === "closed" || status === "done") return status;
+  if (workerAgent && isWorkerTerminalOpenable(workerAgent)) return "active";
+  return status;
 }
 
 function isLeadRole(role: string | undefined): boolean {
