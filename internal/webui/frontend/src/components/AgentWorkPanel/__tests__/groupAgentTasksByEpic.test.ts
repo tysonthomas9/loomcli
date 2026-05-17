@@ -9,6 +9,7 @@ import {
   groupAgentTasksByEpic,
   groupOpenByEpic,
   isWorkerTerminalOpenable,
+  leadDeliveryStateLabel,
 } from "../AgentWorkPanel";
 
 // Minimal Issue factory — fills in just the fields the grouping function reads.
@@ -164,6 +165,16 @@ describe("groupAgentTasksByEpic", () => {
     );
     const res = groupAgentTasksByEpic(m, "nova");
     expect(res.groups[0]?.epicTitle).toBe("EPIC-MISSING");
+  });
+});
+
+describe("leadDeliveryStateLabel", () => {
+  it("maps backend delivery states to user-visible labels", () => {
+    expect(leadDeliveryStateLabel("pending")).toBe("waiting for lead");
+    expect(leadDeliveryStateLabel("delivered")).toBe("sent to lead");
+    expect(leadDeliveryStateLabel("acknowledged")).toBe("acknowledged");
+    expect(leadDeliveryStateLabel("")).toBe("");
+    expect(leadDeliveryStateLabel(undefined)).toBe("");
   });
 });
 

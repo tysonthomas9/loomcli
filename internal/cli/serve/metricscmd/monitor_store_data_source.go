@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -165,6 +166,7 @@ func monitorAgentStatuses(
 			Workspace:             wsName,
 			DaemonManaged:         assignment.Auto,
 			Parent:                assignment.Parent,
+			DeliveryState:         monitorLeadDeliveryState(assignment, orchestrationByAgent[assignment.Name]),
 			OrchestratorSessionID: orchID,
 			TaskID:                taskID,
 			SessionID:             sessionID,
@@ -173,6 +175,49 @@ func monitorAgentStatuses(
 		})
 	}
 	return agents
+}
+
+func monitorLeadDeliveryState(agent *domain.Agent, session *domain.AgentSession) string {
+	if agent == nil || !monitorIsLeadRole(agent.RoleName) || strings.TrimSpace(agent.Parent) == "" {
+		return ""
+	}
+	version := monitorLeadAssignmentVersion(agent)
+	if version == "" {
+		return "pending"
+	}
+	if monitorSessionMetadataVersionMatches(session, "lead_assignment_acknowledged_version", version) {
+		return "acknowledged"
+	}
+	if monitorSessionMetadataVersionMatches(session, "lead_assignment_delivered_version", version) {
+		return "delivered"
+	}
+	return "pending"
+}
+
+func monitorIsLeadRole(role string) bool {
+	switch strings.ToLower(strings.TrimSpace(role)) {
+	case "lead", "orchestrator":
+		return true
+	default:
+		return false
+	}
+}
+
+func monitorLeadAssignmentVersion(agent *domain.Agent) string {
+	if agent == nil {
+		return ""
+	}
+	if !agent.UpdatedAt.IsZero() {
+		return agent.UpdatedAt.UTC().Format(time.RFC3339Nano)
+	}
+	return strings.TrimSpace(agent.Parent)
+}
+
+func monitorSessionMetadataVersionMatches(session *domain.AgentSession, key, version string) bool {
+	if session == nil || session.Metadata == nil || version == "" {
+		return false
+	}
+	return strings.TrimSpace(session.Metadata[key]) == version
 }
 
 func workspaceNames(workspaces []*domain.Workspace) []string {

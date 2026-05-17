@@ -110,6 +110,8 @@ export type LoomAgentStatus = Omit<
   worktree_path?: string;
   /** Control-plane assignment state returned by the fleet-backed agents API */
   state?: string;
+  /** Lead assignment delivery state returned by the fleet-backed agents API */
+  delivery_state?: "pending" | "delivered" | "acknowledged" | string;
 };
 
 /**

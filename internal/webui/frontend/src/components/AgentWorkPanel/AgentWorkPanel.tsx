@@ -176,6 +176,10 @@ export function AgentWorkPanel({
     focused && selectedAgentIsLead && selectedAgent?.parent === activeEpicId
       ? "Assigned epic"
       : "Active epic";
+  const deliveryLabel =
+    focused && selectedAgentIsLead && selectedAgent?.parent === activeEpicId
+      ? leadDeliveryStateLabel(selectedAgent?.delivery_state)
+      : "";
 
   if (!agentName) {
     return (
@@ -196,6 +200,11 @@ export function AgentWorkPanel({
             <div className={styles.activeEpicTag}>
               <span aria-hidden="true" className={styles.activeEpicTagDot} />
               {activeEpicLabel}
+              {deliveryLabel ? (
+                <span className={styles.deliveryStatePill}>
+                  {deliveryLabel}
+                </span>
+              ) : null}
             </div>
             <div className={styles.activeEpicTitle}>
               <span className={styles.activeEpicTitleText}>
@@ -487,6 +496,21 @@ function TaskCard({
 
 function CountChip({ label }: { label: string }): JSX.Element {
   return <span className={styles.countChip}>{label}</span>;
+}
+
+export function leadDeliveryStateLabel(
+  deliveryState: string | undefined,
+): string {
+  switch ((deliveryState ?? "").trim().toLowerCase()) {
+    case "pending":
+      return "waiting for lead";
+    case "delivered":
+      return "sent to lead";
+    case "acknowledged":
+      return "acknowledged";
+    default:
+      return "";
+  }
 }
 
 export function countTaskStatusesWithWorkers(

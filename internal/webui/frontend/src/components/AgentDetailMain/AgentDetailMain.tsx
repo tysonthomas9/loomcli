@@ -356,6 +356,9 @@ function Header({
   const role = (agent?.role ?? "").trim();
   const assignedEpic = (agent?.parent ?? "").trim();
   const isLead = isLeadRole(role);
+  const deliveryLabel = isLead
+    ? leadDeliveryStateLabel(agent?.delivery_state)
+    : "";
 
   return (
     <div
@@ -445,6 +448,12 @@ function Header({
               >
                 {assignedEpic}
               </code>
+              {deliveryLabel ? (
+                <>
+                  <span>·</span>
+                  <span>{deliveryLabel}</span>
+                </>
+              ) : null}
             </>
           ) : isLead ? (
             <>
@@ -468,6 +477,21 @@ function Header({
       </div>
     </div>
   );
+}
+
+export function leadDeliveryStateLabel(
+  deliveryState: string | undefined,
+): string {
+  switch ((deliveryState ?? "").trim().toLowerCase()) {
+    case "pending":
+      return "waiting for lead";
+    case "delivered":
+      return "sent to lead";
+    case "acknowledged":
+      return "acknowledged";
+    default:
+      return "";
+  }
 }
 
 function displayBranch(branch: string | undefined): string {

@@ -852,6 +852,35 @@ Gotchas:
   That is expected setup UI; the previous SQLite and MCP/plugin warnings are
   gone.
 
+Post-validation terminal scroll finding:
+
+- Scrolling the selected lead terminal to the bottom after running
+  `SLACK-UI-2` showed the normal `loom lead` startup menu and runtime summary,
+  not an acknowledgement of the assigned epic. The UI/backend had assigned the
+  epic and dispatched workers, but the already-running Codex TUI had not been
+  notified.
+- This means the runner dispatch path works, but visible lead-session delivery
+  is still incomplete for Codex until the app-server adapter records
+  delivered/acknowledged assignment versions.
+- The monitor agent payload now exposes `delivery_state` for assigned leads.
+  The UI shows pending assignments as `waiting for lead` instead of implying
+  that the terminal conversation has already picked up the epic.
+- Fresh `loom lead` startup now records
+  `lead_assignment_delivered_version` on the orchestration session when the
+  startup prompt actually includes backend assignment context. Already-running
+  Codex TUIs still remain `pending` until Codex app-server delivery lands.
+- Rebuilt-container browser validation:
+  - `atlas`: clicked Run from an already-starting Codex terminal; UI showed
+    `assigned epic SLACK-UI-1 · waiting for lead`, worker dispatch started, and
+    the terminal did not contain the specific assignment.
+  - `nova`: assigned `SLACK-UI-2` before opening the lead terminal; startup
+    prompt contained `## Loom Backend Assignment`, monitor returned
+    `delivery_state: delivered`, and the UI refreshed to `sent to lead`.
+  - Screenshots captured:
+    `/tmp/epic-delivery-v2-before.png`,
+    `/tmp/epic-delivery-v2-atlas-pending.png`,
+    `/tmp/epic-delivery-v2-nova-delivered.png`.
+
 ## Follow-Up Work
 
 - For Codex, do we need item-level timeline events in addition to

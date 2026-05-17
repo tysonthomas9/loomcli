@@ -127,7 +127,37 @@ func currentLeadAssignmentPrompt(ctx context.Context) string {
 	if err != nil || assignment == nil {
 		return ""
 	}
+	if err := markLeadAssignmentDelivered(loadCtx, handle.Store, ws, assignment); err != nil {
+		slog.Debug("lead assignment delivery marker failed", "err", err)
+	}
 	return epicrunner.FormatLeadAssignmentContext(assignment)
+}
+
+func markLeadAssignmentDelivered(ctx context.Context, st store.Store, ws string, assignment *epicrunner.LeadAssignmentContext) error {
+	if st == nil || st.AgentSessions() == nil || assignment == nil {
+		return nil
+	}
+	sessionID := strings.TrimSpace(assignment.OrchestratorSessionID)
+	version := strings.TrimSpace(assignment.AssignmentVersion)
+	if sessionID == "" || version == "" {
+		return nil
+	}
+
+	session, err := st.AgentSessions().Get(ctx, ws, sessionID)
+	if errors.Is(err, domain.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	metadata := make(map[string]string, len(session.Metadata)+2)
+	for k, v := range session.Metadata {
+		metadata[k] = v
+	}
+	metadata["lead_assignment_delivered_version"] = version
+	metadata["lead_assignment_delivered_epic"] = strings.TrimSpace(assignment.EpicID)
+	_, err = st.AgentSessions().Update(ctx, ws, sessionID, store.AgentSessionUpdate{Metadata: &metadata})
+	return err
 }
 
 // registerLeadOrchestratorSession opens fleet-db, creates an

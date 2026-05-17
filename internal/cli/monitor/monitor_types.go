@@ -44,6 +44,7 @@ type AgentStatus struct {
 	Workspace             string         `json:"workspace"`                         // workspace name
 	DaemonManaged         bool           `json:"daemon_managed,omitempty"`          // true if under daemon supervision
 	Parent                string         `json:"parent,omitempty"`                  // active epic for leads/workers
+	DeliveryState         string         `json:"delivery_state,omitempty"`          // lead assignment delivery state
 	OrchestratorSessionID string         `json:"orchestrator_session_id,omitempty"` // lead/orchestrator session attribution
 	TaskID                string         `json:"task_id,omitempty"`                 // latest task session associated with this agent
 	SessionID             string         `json:"session_id,omitempty"`              // latest control-plane session for this agent

@@ -74,6 +74,30 @@ describe("AgentDetailMain", () => {
     expect(screen.queryByText("unknown")).not.toBeInTheDocument();
   });
 
+  it("shows pending lead delivery as waiting for lead", () => {
+    renderWithAgents(
+      [
+        {
+          name: "nova",
+          branch: "unknown",
+          status: "idle",
+          ahead: 0,
+          behind: 0,
+          workspace: "E2E",
+          role: "lead",
+          parent: "E2E-1",
+          delivery_state: "pending",
+          state: "idle",
+        } as LoomAgentStatus,
+      ],
+      "nova",
+    );
+
+    expect(screen.getByText("assigned epic")).toBeInTheDocument();
+    expect(screen.getByText("E2E-1")).toBeInTheDocument();
+    expect(screen.getByText("waiting for lead")).toBeInTheDocument();
+  });
+
   it("makes an unassigned lead explicit instead of showing unknown", () => {
     renderWithAgents(
       [

@@ -2,11 +2,17 @@ package agent
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/epicrunner"
+	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 func TestRunLead_InvokesClaude(t *testing.T) {
@@ -131,5 +137,43 @@ func TestResolveLeadAgentIDDefaultsToLead(t *testing.T) {
 
 	if got := resolveLeadAgentID(); got != "lead" {
 		t.Fatalf("resolveLeadAgentID() = %q, want lead", got)
+	}
+}
+
+func TestMarkLeadAssignmentDelivered(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey: "WS",
+		SessionID:    "lead-session",
+		AgentID:      "nova",
+		Kind:         domain.AgentSessionKindOrchestration,
+		Status:       domain.AgentSessionRunning,
+		Metadata:     map[string]string{"actor": "test"},
+	}); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
+	err := markLeadAssignmentDelivered(ctx, st, "WS", &epicrunner.LeadAssignmentContext{
+		EpicID:                "EPIC-1",
+		AssignmentVersion:     "2026-05-17T05:00:00Z",
+		OrchestratorSessionID: "lead-session",
+	})
+	if err != nil {
+		t.Fatalf("markLeadAssignmentDelivered() error = %v", err)
+	}
+
+	session, err := st.AgentSessions().Get(ctx, "WS", "lead-session")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	if session.Metadata["actor"] != "test" {
+		t.Fatalf("existing metadata was not preserved: %#v", session.Metadata)
+	}
+	if got := session.Metadata["lead_assignment_delivered_version"]; got != "2026-05-17T05:00:00Z" {
+		t.Fatalf("delivered version = %q", got)
+	}
+	if got := session.Metadata["lead_assignment_delivered_epic"]; got != "EPIC-1" {
+		t.Fatalf("delivered epic = %q", got)
 	}
 }
