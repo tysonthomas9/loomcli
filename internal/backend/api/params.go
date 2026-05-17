@@ -70,7 +70,6 @@ func readyOptsToQuery(opts backend.ReadyOpts) string {
 	joinCSV(q, "labels", opts.Labels)
 	joinCSV(q, "labels_any", opts.LabelsAny)
 	setNonEmpty(q, "mol_type", opts.MolType)
-	setBoolIfTrue(q, "include_deferred", opts.IncludeDeferred)
 	joinCSV(q, "source_repos", opts.SourceRepos)
 	return q.Encode()
 }

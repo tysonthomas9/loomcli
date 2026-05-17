@@ -4001,11 +4001,6 @@ export interface operations {
         mol_type?: "swarm" | "patrol" | "work";
         sort?: "hybrid" | "priority" | "oldest";
         unassigned?: boolean;
-        /**
-         * @deprecated
-         * @description Deprecated and ignored for FleetDB-backed workspaces; ready never includes currently deferred issues.
-         */
-        include_deferred?: boolean;
         priority?: number;
         limit?: number;
         /** @description Comma-separated labels (all must match) */

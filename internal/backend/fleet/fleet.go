@@ -391,7 +391,7 @@ func (b *FleetBackend) Ready(ctx context.Context, opts backend.ReadyOpts) ([]bac
 }
 
 func (b *FleetBackend) Blocked(ctx context.Context, opts backend.BlockedOpts) ([]backend.IssueData, error) {
-	return b.blockedIncludingExplicitStatus(ctx, opts)
+	return b.canonicalBlocked(ctx, opts)
 }
 
 // Stats builds StatsData from the fleet server's count endpoint with

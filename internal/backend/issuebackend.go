@@ -28,10 +28,13 @@ type IssueBackend interface {
 	// An empty ListOpts returns all issues up to the backend's default limit.
 	List(ctx context.Context, opts ListOpts) ([]IssueData, error)
 
-	// Ready returns issues with no open blockers, matching the given filters.
+	// Ready returns the canonical ready availability view, matching the given
+	// narrowing filters.
 	Ready(ctx context.Context, opts ReadyOpts) ([]IssueData, error)
 
-	// Blocked returns issues that have at least one open blocker.
+	// Blocked returns the canonical blocked view, including explicit blocked
+	// status, dependency-blocked work, and parent-blocked descendants when
+	// supported by the backend.
 	Blocked(ctx context.Context, opts BlockedOpts) ([]IssueData, error)
 
 	// Stats returns aggregate issue statistics for the project.

@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
-	"github.com/tysonthomas9/loomcli/internal/types"
 )
 
 func TestBlockedIncludesExplicitBlockedStatusIssues(t *testing.T) {
@@ -18,31 +17,13 @@ func TestBlockedIncludesExplicitBlockedStatusIssues(t *testing.T) {
 		seen[r.URL.Path+"?"+r.URL.RawQuery] = true
 		switch r.URL.Path {
 		case "/api/v1/test-ws/issues/blocked":
-			respondOK(w, []*types.BlockedIssue{
+			respondOK(w, []blockedIssueResponseWire{
 				{
-					Issue:          types.Issue{ID: "dep-blocked", Title: "Dependency blocked", Status: types.StatusOpen, CreatedAt: now, UpdatedAt: now},
-					BlockedBy:      []string{"dep-1"},
-					BlockedByCount: 1,
+					Issue:    fleetIssueWire{ID: "dep-blocked", Title: "Dependency blocked", Status: "open", CreatedAt: now, UpdatedAt: now},
+					Blockers: []blockedBlockerWire{{ID: "dep-1"}},
 				},
-			})
-		case "/api/v1/test-ws/issues":
-			if got := r.URL.Query().Get("status"); got != "blocked" {
-				t.Fatalf("status query = %q, want blocked", got)
-			}
-			if got := r.URL.Query().Get("parent_id"); got != parent {
-				t.Fatalf("parent_id query = %q, want %q", got, parent)
-			}
-			respondOK(w, []fleetIssueWithCountsWire{
 				{
-					fleetIssueWire: fleetIssueWire{
-						ID:        "explicit-blocked",
-						Title:     "Explicitly blocked",
-						Status:    "blocked",
-						Priority:  2,
-						ParentID:  parent,
-						CreatedAt: now,
-						UpdatedAt: now,
-					},
+					Issue: fleetIssueWire{ID: "explicit-blocked", Title: "Explicitly blocked", Status: "blocked", Priority: 2, ParentID: parent, CreatedAt: now, UpdatedAt: now},
 				},
 			})
 		default:
@@ -67,32 +48,16 @@ func TestBlockedIncludesExplicitBlockedStatusIssues(t *testing.T) {
 			t.Fatalf("Blocked result missing %q: %+v", want, result)
 		}
 	}
-	if len(seen) != 2 {
-		t.Fatalf("requests = %#v, want /issues/blocked and /issues status=blocked", seen)
+	if len(seen) != 1 {
+		t.Fatalf("requests = %#v, want only canonical /issues/blocked", seen)
 	}
 }
 
-func TestBlockedFallsBackToExplicitStatusWhenDependencyEndpointEmpty(t *testing.T) {
-	now := time.Now().UTC().Truncate(time.Second)
+func TestBlockedEmptyCanonicalEndpointReturnsEmpty(t *testing.T) {
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/test-ws/issues/blocked":
-			respondOK(w, []*types.BlockedIssue{})
-		case "/api/v1/test-ws/issues":
-			if got := r.URL.Query().Get("status"); got != "blocked" {
-				t.Fatalf("status query = %q, want blocked", got)
-			}
-			respondOK(w, []fleetIssueWithCountsWire{
-				{
-					fleetIssueWire: fleetIssueWire{
-						ID:        "explicit-blocked",
-						Title:     "Explicitly blocked",
-						Status:    "blocked",
-						CreatedAt: now,
-						UpdatedAt: now,
-					},
-				},
-			})
+			respondOK(w, []blockedIssueResponseWire{})
 		default:
 			t.Fatalf("unexpected request: %s", r.URL.String())
 		}
@@ -103,7 +68,7 @@ func TestBlockedFallsBackToExplicitStatusWhenDependencyEndpointEmpty(t *testing.
 	if err != nil {
 		t.Fatalf("Blocked: %v", err)
 	}
-	if len(result) != 1 || result[0].ID != "explicit-blocked" {
-		t.Fatalf("result = %+v, want explicit blocked issue", result)
+	if len(result) != 0 {
+		t.Fatalf("result = %+v, want empty canonical blocked result", result)
 	}
 }

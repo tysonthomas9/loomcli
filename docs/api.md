@@ -706,7 +706,6 @@ filters may narrow this view, but must not make `review`, `blocked`,
   | `mol_type` | string | swarm, patrol, or work |
   | `sort` | string | hybrid, priority, or oldest |
   | `unassigned` | bool | Only unassigned issues |
-  | `include_deferred` | bool | Deprecated/ignored for FleetDB-backed workspaces; ready never includes currently deferred issues |
   | `priority` | int (0-4) | Filter by priority |
   | `limit` | int | Max results |
   | `labels` | string | Comma-separated labels (all must match) |
@@ -3952,7 +3951,6 @@ unblocked, and not currently deferred.
   | `labels` | string | Comma-separated labels (all must match) |
   | `limit` | int | Max results |
   | `unassigned` | bool | Only unassigned issues |
-  | `include_deferred` | bool | Deprecated/ignored for FleetDB-backed workspaces; ready never includes currently deferred issues |
   | `source_repos` | string | Comma-separated repo names to filter by |
 
 - Same response shape as `GET /api/ready` documented in [Issues](#issues)

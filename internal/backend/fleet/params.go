@@ -211,7 +211,6 @@ func readyOptsToQuery(opts backend.ReadyOpts) string {
 	addAll(q, "labels", opts.Labels)
 	addAll(q, "labels_any", opts.LabelsAny)
 	setNonEmpty(q, "mol_type", opts.MolType)
-	setBoolIfTrue(q, "include_deferred", opts.IncludeDeferred)
 	addAll(q, "source_repos", opts.SourceRepos)
 	return q.Encode()
 }

@@ -343,8 +343,6 @@ func TestBlocked_HappyPath(t *testing.T) {
 			respondOK(w, []gen.BlockedIssue{
 				{Id: "b-1", Title: "Blocked", Priority: 2, CreatedAt: now, UpdatedAt: now, BlockedBy: []string{"b-0"}},
 			})
-		case strings.HasSuffix(r.URL.Path, "/issues"):
-			respondOK(w, []gen.Issue{})
 		default:
 			t.Fatalf("unexpected request: %s", r.URL.String())
 		}
@@ -358,8 +356,8 @@ func TestBlocked_HappyPath(t *testing.T) {
 	if !seen["/api/workspaces/test-ws/blocked"] {
 		t.Errorf("missing /blocked request; seen=%v", seen)
 	}
-	if !seen["/api/workspaces/test-ws/issues"] {
-		t.Errorf("missing explicit status /issues request; seen=%v", seen)
+	if len(seen) != 1 {
+		t.Errorf("requests = %v, want only canonical /blocked request", seen)
 	}
 	if len(result) != 1 || result[0].ID != "b-1" {
 		t.Errorf("result: %+v", result)
@@ -368,7 +366,6 @@ func TestBlocked_HappyPath(t *testing.T) {
 
 func TestBlockedIncludesExplicitBlockedStatusIssues(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
-	status := gen.IssueStatus("blocked")
 	parent := "epic-1"
 	seen := map[string]bool{}
 	ab, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
@@ -377,16 +374,7 @@ func TestBlockedIncludesExplicitBlockedStatusIssues(t *testing.T) {
 		case strings.HasSuffix(r.URL.Path, "/blocked"):
 			respondOK(w, []gen.BlockedIssue{
 				{Id: "dep-blocked", Title: "Dependency blocked", Priority: 2, CreatedAt: now, UpdatedAt: now, BlockedBy: []string{"dep-1"}},
-			})
-		case strings.HasSuffix(r.URL.Path, "/issues"):
-			if got := r.URL.Query().Get("status"); got != "blocked" {
-				t.Fatalf("status query = %q, want blocked", got)
-			}
-			if got := r.URL.Query().Get("parent_id"); got != parent {
-				t.Fatalf("parent_id query = %q, want %q", got, parent)
-			}
-			respondOK(w, []gen.Issue{
-				{Id: "explicit-blocked", Title: "Explicitly blocked", Priority: 2, CreatedAt: now, UpdatedAt: now, Status: &status},
+				{Id: "explicit-blocked", Title: "Explicitly blocked", Priority: 2, CreatedAt: now, UpdatedAt: now},
 			})
 		default:
 			t.Fatalf("unexpected request: %s", r.URL.String())
@@ -410,8 +398,8 @@ func TestBlockedIncludesExplicitBlockedStatusIssues(t *testing.T) {
 			t.Fatalf("Blocked result missing %q: %+v", want, result)
 		}
 	}
-	if len(seen) != 2 {
-		t.Fatalf("requests = %#v, want /blocked and /issues status=blocked", seen)
+	if len(seen) != 1 {
+		t.Fatalf("requests = %#v, want only canonical /blocked", seen)
 	}
 }
 

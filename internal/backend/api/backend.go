@@ -213,18 +213,6 @@ func (b *APIBackend) Ready(ctx context.Context, opts backend.ReadyOpts) ([]backe
 }
 
 func (b *APIBackend) Blocked(ctx context.Context, opts backend.BlockedOpts) ([]backend.IssueData, error) {
-	dependencyBlocked, err := b.dependencyBlocked(ctx, opts)
-	if err != nil {
-		return nil, err
-	}
-	explicitBlocked, err := b.List(ctx, explicitBlockedListOpts(opts))
-	if err != nil {
-		return nil, err
-	}
-	return mergeBlockedIssues(dependencyBlocked, explicitBlocked, opts.Limit), nil
-}
-
-func (b *APIBackend) dependencyBlocked(ctx context.Context, opts backend.BlockedOpts) ([]backend.IssueData, error) {
 	path := "/blocked"
 	if q := blockedOptsToQuery(opts); q != "" {
 		path += "?" + q
@@ -245,46 +233,6 @@ func (b *APIBackend) dependencyBlocked(ctx context.Context, opts backend.Blocked
 		result = append(result, blockedIssueToData(i))
 	}
 	return result, nil
-}
-
-func explicitBlockedListOpts(opts backend.BlockedOpts) backend.ListOpts {
-	return backend.ListOpts{
-		Status:    "blocked",
-		ParentID:  opts.ParentID,
-		Assignee:  opts.Assignee,
-		Priority:  opts.Priority,
-		IssueType: opts.Type,
-		Limit:     opts.Limit,
-	}
-}
-
-func mergeBlockedIssues(dependencyBlocked, explicitBlocked []backend.IssueData, limit int) []backend.IssueData {
-	merged := make([]backend.IssueData, 0, len(dependencyBlocked)+len(explicitBlocked))
-	seen := make(map[string]struct{}, len(dependencyBlocked)+len(explicitBlocked))
-	for _, issue := range dependencyBlocked {
-		if issue.ID == "" {
-			continue
-		}
-		seen[issue.ID] = struct{}{}
-		merged = append(merged, issue)
-	}
-	for _, issue := range explicitBlocked {
-		if issue.ID == "" {
-			continue
-		}
-		if _, ok := seen[issue.ID]; ok {
-			continue
-		}
-		seen[issue.ID] = struct{}{}
-		if issue.Status == "" {
-			issue.Status = "blocked"
-		}
-		merged = append(merged, issue)
-	}
-	if limit > 0 && len(merged) > limit {
-		return merged[:limit]
-	}
-	return merged
 }
 
 // Stats fetches per-workspace statistics. The server returns a raw

@@ -2219,11 +2219,8 @@ type ListReadyParams struct {
 	MolType    *ListReadyParamsMolType `form:"mol_type,omitempty" json:"mol_type,omitempty"`
 	Sort       *ListReadyParamsSort    `form:"sort,omitempty" json:"sort,omitempty"`
 	Unassigned *bool                   `form:"unassigned,omitempty" json:"unassigned,omitempty"`
-
-	// IncludeDeferred Deprecated and ignored for FleetDB-backed workspaces; ready never includes currently deferred issues.
-	IncludeDeferred *bool `form:"include_deferred,omitempty" json:"include_deferred,omitempty"`
-	Priority        *int  `form:"priority,omitempty" json:"priority,omitempty"`
-	Limit           *int  `form:"limit,omitempty" json:"limit,omitempty"`
+	Priority   *int                    `form:"priority,omitempty" json:"priority,omitempty"`
+	Limit      *int                    `form:"limit,omitempty" json:"limit,omitempty"`
 
 	// Labels Comma-separated labels (all must match)
 	Labels *string `form:"labels,omitempty" json:"labels,omitempty"`
