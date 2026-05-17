@@ -228,9 +228,6 @@ func TestPlaygroundCrashClassifiedAsFailure(t *testing.T) {
 	runScenarioScript(t, "setup.sh", []string{scenario}, nil)
 
 	daemonLog := filepath.Join(scenarioRuntimeDir(t, scenario), "crash.daemon.log")
-	daemon := startScenarioDaemon(t, scenario, daemonLog)
-	t.Cleanup(func() { scenarioCleanup(t, scenario, daemon) })
-
 	runLoom(t, scenario,
 		"data", "create",
 		"--title", "Crash scenario",
@@ -239,6 +236,9 @@ func TestPlaygroundCrashClassifiedAsFailure(t *testing.T) {
 		"--status", "open",
 		"--design", "Crash classification verification",
 	)
+
+	daemon := startScenarioDaemon(t, scenario, daemonLog)
+	t.Cleanup(func() { scenarioCleanup(t, scenario, daemon) })
 
 	startedFlag := filepath.Join(scenarioMarkerDir(t, scenario), "started.flag")
 	if !waitForFile(startedFlag, startedTimeout) {
@@ -253,6 +253,54 @@ func TestPlaygroundCrashClassifiedAsFailure(t *testing.T) {
 	if !waitForLogLine(daemonLog, failurePattern, backoffTimeout) {
 		t.Fatalf("daemon never logged a failure/retry signal within %s\n--- daemon.log tail ---\n%s",
 			backoffTimeout, tailFile(daemonLog, 50))
+	}
+}
+
+// TestPlaygroundHangKilledByWatchdog asserts that a silent backend is killed
+// by the supervisor's output-timeout watchdog.
+//
+// Regression guard for the single-pgroup hung-process path: the backend claims
+// work, emits its initial line, then stays silent. With a shortened watchdog,
+// the daemon must log the hung-process kill instead of leaving the agent stuck
+// forever.
+func TestPlaygroundHangKilledByWatchdog(t *testing.T) {
+	requireServe(t)
+
+	const scenario = "hang"
+	watchdog := durationFromEnv("PLAYGROUND_WATCHDOG_TIMEOUT", 15*time.Second)
+	startedTimeout := durationFromEnv("PLAYGROUND_HANG_STARTED_WAIT", 25*time.Second)
+	killTimeout := durationFromEnv("PLAYGROUND_HANG_WATCHDOG_WAIT", 60*time.Second)
+
+	_ = exec.Command("bash",
+		filepath.Join(hereDir(t), "teardown.sh"), scenario).Run()
+
+	runScenarioScript(t, "setup.sh", []string{scenario}, map[string]string{
+		"LOOM_DAEMON_OUTPUT_TIMEOUT_SECONDS": strconv.Itoa(int(watchdog.Seconds())),
+	})
+
+	daemonLog := filepath.Join(scenarioRuntimeDir(t, scenario), "hang.daemon.log")
+	runLoom(t, scenario,
+		"data", "create",
+		"--title", "Hang scenario",
+		"--type", "task",
+		"--priority", "2",
+		"--status", "open",
+		"--design", "Hung-backend watchdog verification",
+	)
+
+	daemon := startScenarioDaemon(t, scenario, daemonLog)
+	t.Cleanup(func() { scenarioCleanup(t, scenario, daemon) })
+
+	startedFlag := filepath.Join(scenarioMarkerDir(t, scenario), "started.flag")
+	if !waitForFile(startedFlag, startedTimeout) {
+		t.Fatalf("hang backend never wrote started.flag at %s within %s\n--- daemon.log tail ---\n%s",
+			startedFlag, startedTimeout, tailFile(daemonLog, 50))
+	}
+
+	hungPattern := regexp.MustCompile(`killing hung process, no activity detected`)
+	if !waitForLogLine(daemonLog, hungPattern, killTimeout) {
+		t.Fatalf("daemon never logged watchdog kill within %s\n--- daemon.log tail ---\n%s",
+			killTimeout, tailFile(daemonLog, 80))
 	}
 }
 
@@ -283,9 +331,6 @@ func TestPlaygroundSlowBackendNotKilled(t *testing.T) {
 	})
 
 	daemonLog := filepath.Join(scenarioRuntimeDir(t, scenario), "slow.daemon.log")
-	daemon := startScenarioDaemon(t, scenario, daemonLog)
-	t.Cleanup(func() { scenarioCleanup(t, scenario, daemon) })
-
 	runLoom(t, scenario,
 		"data", "create",
 		"--title", "Slow scenario",
@@ -294,6 +339,9 @@ func TestPlaygroundSlowBackendNotKilled(t *testing.T) {
 		"--status", "open",
 		"--design", "Slow-work watchdog tolerance verification",
 	)
+
+	daemon := startScenarioDaemon(t, scenario, daemonLog)
+	t.Cleanup(func() { scenarioCleanup(t, scenario, daemon) })
 
 	startedFlag := filepath.Join(scenarioMarkerDir(t, scenario), "started.flag")
 	if !waitForFile(startedFlag, startedTimeout) {

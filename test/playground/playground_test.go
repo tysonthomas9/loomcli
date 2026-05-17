@@ -31,10 +31,16 @@ import (
 )
 
 const (
-	serveURL          = "http://localhost:8080"
 	workspaceKey      = "PLAYGROUND"
 	expectedTaskCount = 3
 )
+
+func serveBaseURL() string {
+	if v := strings.TrimRight(os.Getenv("LOOM_BASE_URL"), "/"); v != "" {
+		return v
+	}
+	return "http://localhost:8080"
+}
 
 // hereDir returns this directory (test/playground/) at test runtime.
 func hereDir(t *testing.T) string {
@@ -50,13 +56,20 @@ func hereDir(t *testing.T) string {
 func requireServe(t *testing.T) {
 	t.Helper()
 	client := &http.Client{Timeout: 2 * time.Second}
-	resp, err := client.Get(serveURL + "/health")
+	baseURL := serveBaseURL()
+	resp, err := client.Get(baseURL + "/health")
 	if err != nil {
-		t.Skipf("loom serve not reachable at %s (%v) — start it before running -tags=playground tests", serveURL, err)
+		if os.Getenv("LOOM_PLAYGROUND_REQUIRE_SERVE") != "" {
+			t.Fatalf("loom serve not reachable at %s (%v)", baseURL, err)
+		}
+		t.Skipf("loom serve not reachable at %s (%v) — start it before running -tags=playground tests", baseURL, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		t.Skipf("loom serve /health = %d at %s — start a fresh server first", resp.StatusCode, serveURL)
+		if os.Getenv("LOOM_PLAYGROUND_REQUIRE_SERVE") != "" {
+			t.Fatalf("loom serve /health = %d at %s", resp.StatusCode, baseURL)
+		}
+		t.Skipf("loom serve /health = %d at %s — start a fresh server first", resp.StatusCode, baseURL)
 	}
 }
 
@@ -155,7 +168,7 @@ type issueEnvelope struct {
 func listTasks(t *testing.T) []issue {
 	t.Helper()
 	client := &http.Client{Timeout: 5 * time.Second}
-	url := fmt.Sprintf("%s/api/workspaces/%s/issues", serveURL, workspaceKey)
+	url := fmt.Sprintf("%s/api/workspaces/%s/issues", serveBaseURL(), workspaceKey)
 	resp, err := client.Get(url)
 	if err != nil {
 		t.Fatalf("GET %s: %v", url, err)
@@ -233,11 +246,15 @@ func TestPlaygroundHappyPath(t *testing.T) {
 	}
 
 	// Assertions on side effects.
-	home, err := os.UserHomeDir()
-	if err != nil {
-		t.Fatalf("UserHomeDir: %v", err)
+	loomDir := os.Getenv("LOOM_CONFIG_DIR")
+	if loomDir == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			t.Fatalf("UserHomeDir: %v", err)
+		}
+		loomDir = filepath.Join(home, ".loom")
 	}
-	coderRepo := filepath.Join(home, ".loom", "workspaces", "playground", "worktrees", "repo", "playground-coder")
+	coderRepo := filepath.Join(loomDir, "workspaces", "playground", "worktrees", "repo", "playground-coder")
 
 	logOut, err := exec.Command("git", "-C", coderRepo, "log", "--oneline").Output()
 	if err != nil {

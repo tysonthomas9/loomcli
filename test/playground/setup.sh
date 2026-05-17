@@ -69,7 +69,7 @@ export PATH="$BIN:$PATH"
 # with HTTP 409 on role seeding. Recover by running teardown.sh (same
 # scenario arg) and retrying once.
 if ! loom workspace create "$WORKSPACE_NAME" --repos "$REPO" 2>"$RUNTIME/create.err"; then
-  if grep -q "already exists" "$RUNTIME/create.err"; then
+  if grep -Eq "already exists|workspace path must be empty or not exist" "$RUNTIME/create.err"; then
     echo "[setup$SUFFIX] orphan fleet-db state detected; running teardown then retrying..." >&2
     "$HERE/teardown.sh" "$SCENARIO" >/dev/null 2>&1 || true
     # teardown nukes .runtime$SUFFIX/, so re-materialize before the retry.

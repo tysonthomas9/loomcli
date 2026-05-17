@@ -70,13 +70,17 @@ fi
 # 3. CLI-level remove (clean path; idempotent).
 loom workspace remove "$WORKSPACE_KEY" --force >/dev/null 2>&1 || true
 
+# Remove the materialized workspace directory even when fleet-db no longer has
+# a registry entry for it. `workspace create` refuses to reuse a non-empty path.
+rm -rf "$loom_dir/workspaces/$WORKSPACE_NAME"
+
 # 4. Surgical fleet-db purge — required because `loom workspace remove`
 #    only deletes the workspace registry entry, not the operational data
 #    keys under fleet-db:<WORKSPACE>:* (issues, agents, roles, events,
 #    indexes, full-text search). Those orphans block a subsequent
 #    `loom workspace create` with HTTP 409 on role re-seeding.
-if [ -f "$HOME/.loom/fleet-db/runtime.json" ]; then
-  python3 - "$HOME/.loom/fleet-db/runtime.json" "$WORKSPACE_KEY" "$SUFFIX" <<'PY' || true
+if [ -f "$loom_dir/fleet-db/runtime.json" ]; then
+  python3 - "$loom_dir/fleet-db/runtime.json" "$WORKSPACE_KEY" "$SUFFIX" <<'PY' || true
 import json, socket, sys
 
 runtime_path, workspace, suffix = sys.argv[1], sys.argv[2], sys.argv[3]
