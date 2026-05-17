@@ -142,6 +142,92 @@ issue.dependencies[].depends_on_id
 issue.dependencies[].type       blocks | parent-child | waits-for | conditional-blocks
 ```
 
+### FleetDB State Contract Guardrail
+
+FleetDB is the source of truth for issue lifecycle state, dependency state, and
+computed work views. Loom must not locally redefine what `ready`, `blocked`,
+`deferred`, or `newly unblocked` mean.
+
+This matters because FleetDB has both raw lifecycle statuses and computed views:
+
+```text
+raw status examples:
+  issue.status == open
+  issue.status == blocked
+  issue.status == deferred
+  issue.status == review
+
+computed view examples:
+  ready      = work currently available to run
+  blocked    = work currently blocked by explicit status, dependency, or parent
+  deferred   = work currently held by explicit status or future defer_until
+  unblocked  = work that became ready after a blocker was resolved
+```
+
+Product rule:
+
+```text
+Loom consumes FleetDB computed views as authoritative.
+Loom may filter or render those views, but it must not patch their semantics by
+unioning status lists, dependency lists, or local UI state.
+```
+
+If Loom discovers that a FleetDB computed view is incomplete, the long-term fix
+is a FleetDB contract change with Redis/Postgres parity tests. A Loom-side
+workaround is allowed only as a temporary compatibility shim, and it must be
+clearly marked with the FleetDB version/contract it can be removed after.
+
+Required FleetDB contracts for epic runner correctness:
+
+```text
+blocked:
+  includes issue.status == blocked
+  includes issues with non-terminal dependency blockers
+  includes descendants of blocked parents
+  excludes closed/tombstoned issues
+  reports a stable reason/source such as status-blocked, direct, parent-blocked
+
+deferred:
+  includes issue.status == deferred
+  includes open issues with defer_until in the future
+  excludes open issues with defer_until in the past
+  treats status=deferred with no defer_until as an indefinite defer
+
+ready:
+  includes only status=open work
+  excludes epics
+  excludes canonical blocked work
+  excludes canonical deferred work
+  applies assignee filters as query filters, not as alternate state semantics
+
+newly unblocked:
+  returns only issues that now satisfy canonical ready semantics
+```
+
+Loom implementation rules:
+
+```text
+do:
+  use FleetDB /issues/ready for runnable work
+  use FleetDB /issues/blocked for blocked work
+  use FleetDB /issues/deferred for deferred work
+  use issue list/status endpoints only for display, counts, and fallback detail
+  add failing FleetDB contract tests before changing computed-state behavior
+
+do not:
+  treat status=blocked alone as the blocked view in one Loom layer
+  treat dependency-blocked alone as the blocked view in another Loom layer
+  compute ready by subtracting local blocked/deferred sets in the UI
+  make Redis and Postgres semantics diverge silently
+  add SSE event-specific state rules that duplicate FleetDB query semantics
+```
+
+SSE and realtime updates are invalidation/delivery mechanisms, not alternate
+state authorities. On an SSE event, Loom clients should refresh or reconcile
+against the same FleetDB computed views used by the runner and CLI. Adding a new
+FleetDB state field or event type must not require each UI/client layer to learn
+a new version of the `ready`/`blocked`/`deferred` rules.
+
 The right panel filter follows the selected lead:
 
 ```text
