@@ -567,6 +567,63 @@ Use named `agent-browser --session` values to avoid collisions.
   point.
 - The terminal composer is not polluted by backend state while the lead is busy.
 
+## Validation Log
+
+### 2026-05-17 UTC: Fresh Slack Two-Epic UI Run
+
+Scope: validate the UI-driven lead-to-epic binding path after a fresh container
+reset. This was not a full Codex worker-completion run of the Slack app.
+
+Steps:
+
+- Removed the stale `loom-slack-epic` container, which already contained a
+  `SLACK-UI` workspace from an earlier run.
+- Confirmed the Slack test container had no named Podman volume. Its only mounts
+  were read-only bind mounts for `/root/.codex` and `/usr/local/bin/fleet-db`, so
+  recreating the container reset the writable filesystem state.
+- Rebuilt the image from the current branch:
+  `podman build -f Dockerfile.dev -t loomcli-dev-slack-epic .`
+- Started the replacement container on port 8092 with `DEFAULT_BACKEND=codex`
+  and the host Codex auth mounted read-only.
+- Confirmed the reset baseline with `GET /api/workspaces`, which returned an
+  empty workspace list.
+- Seeded workspace `Slack_UI` (`SLACK-UI`), two lead agents (`atlas`, `nova`),
+  two Slack epics, and three child tasks per epic.
+- Drove the UI with a dedicated browser session:
+  `agent-browser --session slack-two-epic-reset`.
+- Initial UI state on `atlas`: `Open queue · 2 epics · 6 tasks`, with both
+  epics showing a `Run` button and each epic showing its three child tasks.
+- Clicked `Run` for `SLACK-UI-1` on `atlas`. The UI changed to active-epic mode
+  for `atlas`, and the rail showed `atlas - idle - SLACK-UI-1`.
+- Switched to `nova`. The UI showed `SLACK-UI-1` as `claimed by atlas` with no
+  Run button, and still showed `Run` for `SLACK-UI-2`.
+- Clicked `Run` for `SLACK-UI-2` on `nova`. Backend state updated to
+  `atlas.parent=SLACK-UI-1` and `nova.parent=SLACK-UI-2`; after a short SSE
+  refresh delay the UI showed `nova - idle - SLACK-UI-2`.
+- Switched back to `atlas`; the panel still showed only its active
+  collaboration epic.
+
+Evidence:
+
+- Initial screenshot: `/tmp/slack-two-epic-before-run.png`
+- Final screenshot: `/tmp/slack-two-epic-after-run.png`
+- Final backend check:
+  `atlas` parent `SLACK-UI-1`, `nova` parent `SLACK-UI-2`.
+
+Gotchas:
+
+- FleetDB ignored the explicit issue IDs supplied in the create payload and
+  auto-assigned IDs. The test had to use the returned IDs:
+  `SLACK-UI-1` for collaboration and `SLACK-UI-2` for foundation.
+- `agent-browser wait --load networkidle` is not usable on this page because
+  the app keeps an SSE connection open. Use bounded waits such as
+  `agent-browser --session <name> wait 1000`.
+- The second Run click updated backend state immediately, but the visible UI
+  took a couple seconds to reconcile through SSE. It did not require a reload,
+  but the delay is worth watching in automated assertions.
+- The onboarding checklist still appears over the agent page and adds noise to
+  screenshots. It did not block the Run buttons.
+
 ## Follow-Up Work
 
 - For Codex, do we need item-level timeline events in addition to
