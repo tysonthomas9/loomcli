@@ -136,8 +136,8 @@ jobs:
       - name: Verify build output
         run: test -f internal/webui/frontend/dist/index.html
 
-      - name: Verify VITE_API_BASE_URL was baked into the bundle
-        run: grep -r "api.ci-test.example.com" internal/webui/frontend/dist/ > /dev/null
+      - name: Verify VITE_API_BASE_URL is not baked into the bundle
+        run: "! grep -r \"api.ci-test.example.com\" internal/webui/frontend/dist/ > /dev/null"
 
       - name: Unit tests
         run: cd internal/webui/frontend && npm run test:unit
