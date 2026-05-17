@@ -412,9 +412,14 @@ Implementation status, 2026-05-17:
   setup error, repo-backed runs dispatch one worker per lead/epic, duplicate
   active runs return `already_running`, and assigning a busy lead to a second
   epic returns 409.
-- Provider-specific lead-session delivery is still pending. Until that lands,
-  the UI route starts the worker runner and records lead attribution, but it
-  does not inject a visible message into a busy Codex or Claude TUI.
+- Lead startup and Claude hook delivery now share a compact backend assignment
+  context. `loom lead` starts with the assigned epic when `agent.parent` is set,
+  and Claude receives assignment `additionalContext` on session start, user
+  prompt, task-tool boundary, and stop. The UI now reports
+  `delivery_state: pending` separately from runner `run_state`.
+- Codex app-server delivery is still pending. Until that lands, an
+  already-running Codex TUI is not safely awakened with a backend-originated
+  `turn/start`; fresh lead startup still sees the backend assignment context.
 
 ## Terminal and Resume Requirements
 

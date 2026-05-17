@@ -20,6 +20,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/backends"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/epicrunner"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -97,6 +98,9 @@ func runLead(cmd *cobra.Command, args []string) {
 
 	// Generate the lead prompt and append the user's initial request if provided.
 	prompt := GenerateLeadPrompt()
+	if assignment := currentLeadAssignmentPrompt(context.Background()); assignment != "" {
+		prompt += "\n\n## Loom Backend Assignment\n\n" + assignment
+	}
 	if leadMessage != "" {
 		prompt += "\n\n## User's Initial Request\n\n" + leadMessage +
 			"\n\nAddress this request using the lead mode conventions above."
@@ -108,6 +112,22 @@ func runLead(cmd *cobra.Command, args []string) {
 		fmt.Fprintf(os.Stderr, "\nDropping into a shell. Fix the issue and run 'loom lead' to retry.\n\n")
 		execShell(workDir)
 	}
+}
+
+func currentLeadAssignmentPrompt(ctx context.Context) string {
+	handle, ws, ok := openLeadSessionStore(ctx)
+	if !ok {
+		return ""
+	}
+	defer func() { _ = handle.Close() }()
+
+	loadCtx, cancel := context.WithTimeout(ctx, leadStoreOpTimeout)
+	defer cancel()
+	assignment, err := epicrunner.LoadLeadAssignmentContext(loadCtx, handle.Store, ws, resolveLeadAgentID())
+	if err != nil || assignment == nil {
+		return ""
+	}
+	return epicrunner.FormatLeadAssignmentContext(assignment)
 }
 
 // registerLeadOrchestratorSession opens fleet-db, creates an

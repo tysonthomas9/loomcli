@@ -607,11 +607,62 @@ Edge cases covered by tests:
 
 Remaining gotcha:
 
-- The UI route now starts a real backend runner loop, but it still does not
-  inject assignment context into a busy provider TUI. The lead binding is visible
-  in the UI and workers are attributed to the lead session; provider-specific
-  hook/app-server injection remains the next step for fully conversational lead
-  awareness.
+- The UI route now starts a real backend runner loop, but at this point it did
+  not inject assignment context into a busy provider TUI. The lead binding was
+  visible in the UI and workers were attributed to the lead session; provider
+  delivery remained the next step.
+
+### 2026-05-17 UTC: Lead Assignment Context Delivery Pass
+
+Scope: make backend epic assignment visible to lead runtimes at safe provider
+boundaries without returning to blind PTY typing.
+
+Implemented:
+
+- Added a shared `LeadAssignmentContext` helper in `internal/epicrunner` that
+  loads the current lead assignment from the backend agent record and formats a
+  compact provider context block.
+- `loom lead` now appends the current backend assignment to the lead prompt at
+  startup when `LOOM_AGENT_NAME`/active workspace resolve to a lead with
+  `agent.parent` set.
+- Claude hook handling now emits assignment `additionalContext` for
+  `SessionStart`, `UserPromptSubmit`, `PreToolUse`, and `Stop` when the lead is
+  assigned an epic. This covers user prompts and safe busy-session boundaries
+  without typing into the composer.
+- The Web UI run response now reports `delivery_state: "pending"` separately
+  from `run_state`. `run_state` still describes runner lifecycle
+  (`running`, `drained`, `already_running`); delivery state now describes
+  whether the lead session has picked up the assignment.
+- The Run Epic toast now tells the user when lead context delivery is pending.
+
+Edge cases covered by tests:
+
+- Missing lead, non-lead agents, and unassigned leads do not produce assignment
+  context.
+- Assigned leads include workspace, lead, epic, assignment version, and
+  orchestration session when available.
+- Unsupported Claude hooks and empty assignments produce no hook stdout.
+- `delivery_state` no longer aliases runner lifecycle state in the HTTP
+  response.
+
+Verification notes:
+
+- Focused gates passed:
+  `GOCACHE=/tmp/go-build-cache go test ./internal/epicrunner ./internal/cli/hooks ./internal/cli/agent ./internal/webui/handlers/epics`,
+  `GOCACHE=/tmp/go-build-cache go build ./cmd/loom`, and frontend
+  `npm run typecheck`.
+- A broad `GOCACHE=/tmp/go-build-cache go test ./...` run was attempted in the
+  sandbox but failed on environment prerequisites unrelated to this slice:
+  localhost/Unix socket binds are denied, writes under `/Users/tyson/.loom` are
+  denied, tmux-backed tests cannot start, and workspace tests need `fleet-db` on
+  `PATH`.
+
+Remaining gotcha:
+
+- Codex app-server delivery is still pending. Codex leads see assignment context
+  on a fresh `loom lead` startup, but an already-running Codex TUI still needs
+  the per-lead app-server adapter before Loom can safely `turn/start` on the
+  same visible thread when the provider reports idle.
 
 ### 2026-05-17 UTC: Fresh Slack Two-Epic UI Run
 

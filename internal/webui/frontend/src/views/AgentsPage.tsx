@@ -101,9 +101,14 @@ function AgentsPageInner(): JSX.Element {
               : dispatched > 0
                 ? `dispatched ${dispatched} task${dispatched === 1 ? "" : "s"}`
                 : "waiting for ready work";
-        showToast(`Epic ${epicId} ${state} for ${agentName}; ${suffix}`, {
-          type: "success",
-        });
+        const delivery =
+          result.delivery_state === "pending" ? "; lead context pending" : "";
+        showToast(
+          `Epic ${epicId} ${state} for ${agentName}; ${suffix}${delivery}`,
+          {
+            type: "success",
+          },
+        );
       } catch (err) {
         showToast(`run-epic failed: ${(err as Error).message}`, {
           type: "error",

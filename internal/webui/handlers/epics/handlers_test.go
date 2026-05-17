@@ -51,8 +51,8 @@ func TestRunEpicBindsLead(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%v", rr.Code, body)
 	}
-	if body["state"] != "assigned" || body["delivery_state"] != "drained" || body["orchestrator_session_id"] != "session-1" {
-		t.Fatalf("body = %#v, want assigned drained session-1", body)
+	if body["state"] != "assigned" || body["delivery_state"] != "pending" || body["run_state"] != "drained" || body["orchestrator_session_id"] != "session-1" {
+		t.Fatalf("body = %#v, want assigned pending/drained session-1", body)
 	}
 	got, err := st.Agents().Get(ctx, "WS", "nova")
 	if err != nil {
@@ -122,8 +122,8 @@ func TestRunEpicIdempotentWhenAlreadyBound(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%v", rr.Code, body)
 	}
-	if body["state"] != "resumed" || body["delivery_state"] != "drained" {
-		t.Fatalf("body = %#v, want resumed/drained", body)
+	if body["state"] != "resumed" || body["delivery_state"] != "pending" || body["run_state"] != "drained" {
+		t.Fatalf("body = %#v, want resumed pending/drained", body)
 	}
 }
 
