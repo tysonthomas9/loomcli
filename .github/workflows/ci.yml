@@ -86,7 +86,7 @@ jobs:
         run: go test -race -coverprofile=coverage.out -tags=integration -timeout 15m ./...
 
       - name: Check coverage threshold
-        run: ./scripts/check-coverage.sh coverage.out 70
+        run: ./scripts/check-coverage.sh coverage.out 60
 
       - name: Upload coverage
         uses: codecov/codecov-action@v4

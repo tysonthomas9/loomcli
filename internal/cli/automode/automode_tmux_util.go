@@ -116,7 +116,13 @@ func cleanupTmuxSession(name string) {
 
 	// Send Ctrl+C for graceful shutdown (allows Claude to save state)
 	_ = exec.Command("tmux", "send-keys", "-t", name, "C-c").Run() //nolint:gosec // constant tmux subcommands
-	time.Sleep(100 * time.Millisecond)
+	deadline := time.Now().Add(1 * time.Second)
+	for time.Now().Before(deadline) {
+		if !tmuxSessionExists(name) || tmuxPaneDead(name) {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 
 	// Kill session
 	_ = exec.Command("tmux", "kill-session", "-t", name).Run() //nolint:gosec // constant tmux subcommands
