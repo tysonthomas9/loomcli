@@ -417,9 +417,14 @@ Implementation status, 2026-05-17:
   and Claude receives assignment `additionalContext` on session start, user
   prompt, task-tool boundary, and stop. The UI now reports
   `delivery_state: pending` separately from runner `run_state`.
-- Codex app-server delivery is still pending. Until that lands, an
-  already-running Codex TUI is not safely awakened with a backend-originated
-  `turn/start`; fresh lead startup still sees the backend assignment context.
+- Codex app-server delivery now launches Codex leads as controlled app-server
+  runtimes from startup. The visible TUI attaches through `codex --remote`, and
+  backend delivery uses provider `turn/start` on the recorded thread when the
+  thread is idle. If the runtime is still starting or busy, delivery remains
+  pending and retries instead of typing into the terminal.
+- Already-running raw Codex TUIs remain legacy/uncontrolled sessions. They are
+  not retrofitted with app-server control; users should reconnect/restart those
+  leads to get visible backend-originated Run Epic delivery.
 
 ## Terminal and Resume Requirements
 

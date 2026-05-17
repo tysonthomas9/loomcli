@@ -99,6 +99,45 @@ func TestOrchestrationSessionFor_PicksMostRecentlyUpdated(t *testing.T) {
 	}
 }
 
+func TestOrchestrationSessionFor_IgnoresCompletedSessions(t *testing.T) {
+	st := memstore.New()
+	ctx := context.Background()
+
+	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey: "WS",
+		SessionID:    "lead-nova-running",
+		AgentID:      "nova",
+		Kind:         domain.AgentSessionKindOrchestration,
+		Status:       domain.AgentSessionRunning,
+	}); err != nil {
+		t.Fatalf("create running: %v", err)
+	}
+	time.Sleep(2 * time.Millisecond)
+	completed, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey: "WS",
+		SessionID:    "lead-nova-completed",
+		AgentID:      "nova",
+		Kind:         domain.AgentSessionKindOrchestration,
+		Status:       domain.AgentSessionCompleted,
+	})
+	if err != nil {
+		t.Fatalf("create completed: %v", err)
+	}
+	finishedAt := time.Now().UTC()
+	finishedAtPtr := &finishedAt
+	if _, err := st.AgentSessions().Update(ctx, "WS", completed.SessionID, store.AgentSessionUpdate{FinishedAt: &finishedAtPtr}); err != nil {
+		t.Fatalf("finish completed: %v", err)
+	}
+
+	got, err := store.OrchestrationSessionFor(ctx, st, "WS", "nova")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if got == nil || got.SessionID != "lead-nova-running" {
+		t.Fatalf("got = %+v, want running session", got)
+	}
+}
+
 func TestOrchestrationSessionIDFor_EmptyAgentID(t *testing.T) {
 	st := memstore.New()
 	id, err := store.OrchestrationSessionIDFor(context.Background(), st, "WS", "")

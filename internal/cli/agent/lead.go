@@ -93,8 +93,8 @@ func runLead(cmd *cobra.Command, args []string) {
 	// Best-effort: register this lead as an orchestrator session so workers
 	// the AI spawns via `loom agentdef add` are attributed back to it. Skips
 	// silently if there is no active workspace or fleet-db is unreachable.
-	finalize := registerLeadOrchestratorSession(context.Background(), workDir)
-	defer finalize()
+	registration := registerLeadOrchestratorSession(context.Background(), workDir)
+	defer registration.Finalize()
 
 	// Generate the lead prompt and append the user's initial request if provided.
 	prompt := GenerateLeadPrompt()
@@ -106,9 +106,23 @@ func runLead(cmd *cobra.Command, args []string) {
 			"\n\nAddress this request using the lead mode conventions above."
 	}
 
-	// Invoke agent interactively (no agent name needed - lead mode doesn't claim tasks)
-	if err := cli.InvokeAgent(workDir, prompt, ""); err != nil {
-		fmt.Fprintf(os.Stderr, "Error running agent: %v\n", err)
+	// Invoke agent interactively (no agent name needed - lead mode doesn't claim tasks).
+	var invokeErr error
+	if strings.EqualFold(backendName, backends.NameCodex) {
+		invokeErr = backends.RunCodexLeadRuntime(
+			context.Background(),
+			registration.Store(),
+			registration.Workspace,
+			registration.AgentID,
+			registration.SessionID,
+			workDir,
+			prompt,
+		)
+	} else {
+		invokeErr = cli.InvokeAgent(workDir, prompt, "")
+	}
+	if invokeErr != nil {
+		fmt.Fprintf(os.Stderr, "Error running agent: %v\n", invokeErr)
 		fmt.Fprintf(os.Stderr, "\nDropping into a shell. Fix the issue and run 'loom lead' to retry.\n\n")
 		execShell(workDir)
 	}
@@ -160,15 +174,38 @@ func markLeadAssignmentDelivered(ctx context.Context, st store.Store, ws string,
 	return err
 }
 
+type leadSessionRegistration struct {
+	handle    *bootstrap.StoreHandle
+	Workspace string
+	SessionID string
+	AgentID   string
+	finalize  func()
+}
+
+func (r leadSessionRegistration) Finalize() {
+	if r.finalize != nil {
+		r.finalize()
+	}
+}
+
+func (r leadSessionRegistration) Store() store.Store {
+	if r.handle == nil {
+		return nil
+	}
+	return r.handle.Store
+}
+
 // registerLeadOrchestratorSession opens fleet-db, creates an
 // AgentSession{Kind:orchestration}, and starts a heartbeat goroutine. Returns a
-// finalize fn the caller defers to mark the session completed and stop the
-// heartbeat. Best-effort: any error returns a no-op finalize so lead always runs.
-func registerLeadOrchestratorSession(ctx context.Context, workDir string) func() {
+// registration whose Finalize method marks the session completed and stops the
+// heartbeat. Best-effort: any error returns a no-op registration so lead always
+// runs.
+func registerLeadOrchestratorSession(ctx context.Context, workDir string) leadSessionRegistration {
 	noop := func() {}
+	empty := leadSessionRegistration{finalize: noop}
 	handle, ws, ok := openLeadSessionStore(ctx)
 	if !ok {
-		return noop
+		return empty
 	}
 
 	sid := resolveLeadOrchestratorSessionID()
@@ -176,13 +213,19 @@ func registerLeadOrchestratorSession(ctx context.Context, workDir string) func()
 	if err := createLeadSession(ctx, handle, ws, sid, agentID, workDir); err != nil {
 		_ = handle.Close()
 		slog.Warn("lead orchestrator session: create failed, continuing without registration", "err", err)
-		return noop
+		return empty
 	}
 
 	activateLeadSessionEnv(sid)
 	fmt.Printf("Lead session: %s (orchestrator linkage active)\n\n", sid)
 	stopHB, wg := startLeadSessionHeartbeat(handle, ws, sid)
-	return leadSessionFinalizer(handle, ws, sid, stopHB, wg)
+	return leadSessionRegistration{
+		handle:    handle,
+		Workspace: ws,
+		SessionID: sid,
+		AgentID:   agentID,
+		finalize:  leadSessionFinalizer(handle, ws, sid, stopHB, wg),
+	}
 }
 
 func openLeadSessionStore(ctx context.Context) (*bootstrap.StoreHandle, string, bool) {

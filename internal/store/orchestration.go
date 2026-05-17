@@ -38,12 +38,12 @@ func OrchestrationSessionFor(ctx context.Context, s Store, workspaceKey, agentID
 	if len(sessions) == 0 {
 		return nil, nil
 	}
-	best := sessions[0]
-	for _, sess := range sessions[1:] {
-		if sess == nil {
+	var best *domain.AgentSession
+	for _, sess := range sessions {
+		if !activeOrchestrationSession(sess) {
 			continue
 		}
-		if sess.UpdatedAt.After(best.UpdatedAt) {
+		if best == nil || sess.UpdatedAt.After(best.UpdatedAt) {
 			best = sess
 		}
 	}
@@ -60,4 +60,16 @@ func OrchestrationSessionIDFor(ctx context.Context, s Store, workspaceKey, agent
 		return "", err
 	}
 	return sess.SessionID, nil
+}
+
+func activeOrchestrationSession(sess *domain.AgentSession) bool {
+	if sess == nil || sess.FinishedAt != nil {
+		return false
+	}
+	switch sess.Status {
+	case "", domain.AgentSessionLeased, domain.AgentSessionStarting, domain.AgentSessionRunning, domain.AgentSessionIdle, domain.AgentSessionYielded:
+		return true
+	default:
+		return false
+	}
 }

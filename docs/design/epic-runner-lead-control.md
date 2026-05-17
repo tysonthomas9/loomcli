@@ -70,6 +70,40 @@ should not be the only lock or liveness source.
 These are the decisions for the first implementation. Treat them as settled
 unless a test proves they are wrong.
 
+### Controlled Codex Runtime Is Required
+
+Codex lead sessions must be born as controllable app-server sessions. The Run
+Epic path cannot safely retrofit control onto an already-running raw Codex TUI,
+because the backend has no durable provider thread id and no reliable mutation
+channel for `turn/start`.
+
+The required Codex topology is:
+
+```text
+loom lead --backend codex
+  starts one lead-scoped Codex app-server
+  starts the visible user TUI with codex --remote <app-server>
+  records endpoint, pid, runtime home, and provider thread id on the lead session
+
+Run Epic
+  writes durable Loom assignment/run state
+  asks the Codex lead-session adapter to deliver that assignment
+  sends turn/start only when the provider thread is idle
+  otherwise leaves delivery pending until the provider reports idle
+```
+
+This is intentionally not blind PTY input, and it is not a stdio-only Codex
+process. Stdio mode is useful for a single parent process, but it does not give
+Loom both a real human-facing Codex TUI and a second backend
+observer/controller. The first implementation should use Codex app-server over
+`ws://127.0.0.1:<port>` or a Unix socket, with the visible TUI attached by
+`codex --remote`.
+
+Legacy sessions that were started as raw Codex TUIs are not controllable. For
+those sessions, Loom should keep the backend assignment pending and surface a
+clear reconnect/restart-required state instead of marking the assignment
+delivered.
+
 ### Source Of Truth
 
 Use a dedicated `LeadAssignment` store plus durable `EpicRun` records.
@@ -373,6 +407,8 @@ normal run-epic path.
 Codex has a better topology than raw PTY control when using `app-server`:
 
 - Run one Codex app-server per lead session.
+- Treat the app-server runtime as part of lead startup, not as a Run-button
+  side effect.
 - Attach the human's real Codex TUI with `codex --remote <server>`.
 - Attach the Loom backend as a second websocket client.
 - Subscribe the backend to the lead thread with `thread/read`.
@@ -382,6 +418,11 @@ Codex has a better topology than raw PTY control when using `app-server`:
 
 This keeps the Codex TUI as the human UI. Loom does not need to build a full
 replacement chat UI before it can observe and control a lead session.
+
+The backend should not attempt to paste assignment text into the xterm or write
+to the Codex process stdin for normal delivery. That path loses the provider
+thread identity, races with user input, and cannot tell the difference between a
+delivered turn and text buffered in the composer.
 
 Provider-neutral mapping:
 
@@ -664,6 +705,52 @@ Remaining gotcha:
   the per-lead app-server adapter before Loom can safely `turn/start` on the
   same visible thread when the provider reports idle.
 
+### 2026-05-17 UTC: Controlled Codex Runtime Rethink
+
+Scope: record the architecture correction before implementing Codex delivery.
+
+Decision:
+
+- Codex delivery is not a frontend terminal-input feature. It belongs behind a
+  lead-session provider adapter.
+- `loom lead --backend codex` must create the controllable runtime at startup:
+  one lead-scoped Codex app-server plus a visible `codex --remote` TUI.
+- The backend/controller connects to that app-server and records provider
+  runtime metadata on the lead orchestration session.
+- The Run Epic button remains a backend state transition first. After the
+  assignment is durable, provider delivery uses `turn/start` on the recorded
+  Codex thread.
+- Busy Codex threads queue delivery. Normal Run Epic does not interrupt active
+  provider work.
+- Existing raw Codex TUIs are legacy/uncontrolled sessions. They can receive
+  assignment context only at fresh startup; already-running raw TUIs should stay
+  `pending` or `reconnect required`.
+
+Implementation order:
+
+1. Add a small Codex app-server JSON-RPC client and lead runtime adapter.
+2. Change Codex lead terminal startup so the visible terminal attaches through
+   `codex --remote`.
+3. Persist endpoint, pid, runtime home, provider thread id, and status metadata
+   on the lead orchestration session.
+4. Wire Run Epic delivery through the adapter and mark
+   `lead_assignment_delivered_version` only after `turn/start` succeeds.
+5. Keep multi-browser clients on Loom SSE/API state; browsers do not become
+   direct Codex controllers.
+
+Gotchas:
+
+- A provider thread id is only reliable if Loom owns the lead runtime from
+  startup.
+- `thread/list` alone does not subscribe to live status. The observer must call
+  `thread/read` for the selected thread.
+- Node's built-in WebSocket failed the local app-server handshake during the POC;
+  the Go implementation should use the existing `nhooyr.io/websocket`
+  dependency.
+- Stdio-only app-server mode is not the right default for this UX because the
+  backend and TUI both need to attach without collapsing into one controlling
+  parent.
+
 ### 2026-05-17 UTC: Fresh Slack Two-Epic UI Run
 
 Scope: validate the UI-driven lead-to-epic binding path after a fresh container
@@ -880,6 +967,87 @@ Post-validation terminal scroll finding:
     `/tmp/epic-delivery-v2-before.png`,
     `/tmp/epic-delivery-v2-atlas-pending.png`,
     `/tmp/epic-delivery-v2-nova-delivered.png`.
+
+### 2026-05-17 UTC: Controlled Codex App-Server Delivery Pass
+
+Scope: implement the long-term Codex delivery path and validate it from a clean
+Slack two-epic run through the browser UI.
+
+Implemented:
+
+- `loom lead --backend codex` now starts a lead-scoped Codex app-server and
+  launches the visible lead TUI with `codex --remote <endpoint>`.
+- The lead orchestration session records Codex runtime metadata:
+  endpoint, app-server pid, runtime home, isolated `sqlite_home`, provider
+  thread id, controlled-runtime flag, and runtime status.
+- Run Epic still writes durable Loom assignment/run state first. After that,
+  the HTTP path asks the Codex delivery adapter to deliver the assignment with
+  `turn/start` on the recorded Codex thread.
+- Delivery records `lead_assignment_delivered_version` only after `turn/start`
+  succeeds. The UI then shows `sent to lead`; otherwise it remains
+  `waiting for lead`.
+- Delivery retries for up to two minutes when the controlled runtime is still
+  starting or the Codex thread is busy. It does not type into the terminal or
+  interrupt active provider work.
+- Codex thread discovery now ignores historical threads and waits for a thread
+  created after this lead runtime starts. This prevents a second lead in the
+  same workspace/cwd from latching onto an older disconnected thread.
+- Orchestration-session lookup now ignores completed sessions so reconnects do
+  not reuse stale completed lead sessions.
+
+Validation:
+
+- Rebuilt `loomcli-dev-slack-epic`, removed and recreated
+  `loom-slack-epic`, then seeded workspace `Slack_UI` (`SLACK-UI`) with repo
+  `slack-src`, leads `atlas` and `nova`, two Slack epics, and three tasks per
+  epic.
+- Drove the UI with isolated browser session
+  `agent-browser --session codex-runtime-final2`.
+- Opening `atlas` created one `loom lead`, one Codex app-server, and one
+  `codex --remote` TUI under
+  `/root/.cache/loom/codex-leads/slack-ui/atlas/<session>/`.
+- Clicking Run for `SLACK-UI-1` assigned `atlas`, delivered the backend
+  assignment into the visible Codex conversation, marked the UI `sent to lead`,
+  and dispatched two child workers.
+- Opening `nova` created a separate app-server and `codex --remote` TUI under
+  `/root/.cache/loom/codex-leads/slack-ui/nova/<session>/`.
+- Clicking Run for `SLACK-UI-2` assigned `nova`, delivered the backend
+  assignment into the visible Codex conversation, marked the UI `sent to lead`,
+  and dispatched two child workers.
+- A second observer browser session
+  `agent-browser --session codex-runtime-observer` saw the same delivered state
+  for `nova` without creating extra lead runtimes.
+- Process inspection after the observer check showed exactly one app-server and
+  one `codex --remote` process per lead.
+
+Evidence:
+
+- Final `nova` assigned-state screenshot:
+  `/tmp/codex-runtime-final2-nova-run.png`
+- Final `nova` terminal-bottom screenshot showing the backend assignment and
+  Codex acknowledgement:
+  `/tmp/codex-runtime-final2-nova-terminal-bottom.png`
+- Second-browser observer screenshot:
+  `/tmp/codex-runtime-final2-observer-nova.png`
+- Metadata snapshot showed different provider thread ids for the two leads:
+  `atlas` used `019e3492-525f-7e03-9ab4-9acabe0bbe51`; `nova` used
+  `019e3493-8b58-7f32-9509-d0d2ba34b59c`.
+
+Gotchas:
+
+- A first implementation accepted the first historical thread returned by
+  `thread/list`. In a same-workspace/two-lead run, `nova` initially latched
+  onto `atlas`'s older thread and stayed `waiting for lead` with
+  `codex thread is disconnected`. Filtering discovery by lead runtime start
+  time fixed this.
+- Host-to-Podman localhost access intermittently failed under sandboxed shell
+  commands with `Operation not permitted`; running seed/setup API calls through
+  `podman exec` against `127.0.0.1:3000` inside the container was reliable.
+- `agent-browser wait <milliseconds>` hung once during the run and had to be
+  killed. Short bounded waits of 3-20 seconds were reliable.
+- Codex app-server still emits a bubblewrap warning in the dev container before
+  falling back to the bundled sandbox. This did not block the controlled runtime
+  or delivery path.
 
 ## Follow-Up Work
 

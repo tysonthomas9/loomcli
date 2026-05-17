@@ -5,13 +5,18 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/backendnames"
 	"github.com/tysonthomas9/loomcli/internal/epicrunner"
+	"github.com/tysonthomas9/loomcli/internal/leadcontrol"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/dto"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
+
+var codexDeliveryRetryLocks sync.Map
 
 // runEpicRequest is the JSON payload for POST /epics/{id}/run.
 type runEpicRequest struct {
@@ -54,13 +59,14 @@ func handleRunEpic(m *Module) http.HandlerFunc {
 			return
 		}
 
+		deliveryState := deliverHTTPLeadAssignment(r.Context(), m, wsKey, result, r.Header.Get("X-Actor"))
 		reconcile, runState, err := reconcileHTTPRun(r.Context(), m, wsKey, epicID, runner)
 		if err != nil {
 			writeEpicRunnerError(w, err)
 			return
 		}
 		broadcastRunRefresh(m.hub, wsKey, result.LeadName, reconcile, r.Header.Get("X-Actor"))
-		writeRunEpicResponse(w, result, reconcile, runState)
+		writeRunEpicResponse(w, result, reconcile, runState, deliveryState)
 	}
 }
 
@@ -124,6 +130,78 @@ func reconcileHTTPRun(ctx context.Context, m *Module, wsKey, epicID string, runn
 	return reconcile, "reconciled", nil
 }
 
+func deliverHTTPLeadAssignment(ctx context.Context, m *Module, wsKey string, result *epicrunner.StartResult, actor string) string {
+	if result == nil {
+		return "pending"
+	}
+	deliveryState := "pending"
+	if strings.TrimSpace(result.LeadName) == "" {
+		return deliveryState
+	}
+	if result.Lead != nil {
+		backend := strings.ToLower(strings.TrimSpace(result.Lead.Backend))
+		if backend != "" && backend != backendnames.Codex {
+			return deliveryState
+		}
+	}
+	delivery, err := leadcontrol.DeliverCurrentAssignmentToCodex(ctx, m.store, wsKey, result.LeadName)
+	if err != nil {
+		slog.Warn("codex lead assignment delivery failed", "workspace", wsKey, "lead", result.LeadName, "err", err)
+		return deliveryState
+	}
+	if delivery == nil {
+		return deliveryState
+	}
+	switch delivery.State {
+	case leadcontrol.DeliveryStateDelivered:
+		return "delivered"
+	case leadcontrol.DeliveryStatePending:
+		startCodexDeliveryRetry(m, wsKey, result.LeadName, actor)
+		return "pending"
+	default:
+		return deliveryState
+	}
+}
+
+func startCodexDeliveryRetry(m *Module, wsKey, leadName, actor string) {
+	if m == nil || m.store == nil || strings.TrimSpace(wsKey) == "" || strings.TrimSpace(leadName) == "" {
+		return
+	}
+	key := wsKey + "\x00" + leadName
+	if _, loaded := codexDeliveryRetryLocks.LoadOrStore(key, struct{}{}); loaded {
+		return
+	}
+	go func() {
+		defer codexDeliveryRetryLocks.Delete(key)
+		deadline := time.NewTimer(2 * time.Minute)
+		defer deadline.Stop()
+		ticker := time.NewTicker(2 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-deadline.C:
+				return
+			case <-ticker.C:
+				delivery, err := leadcontrol.DeliverCurrentAssignmentToCodex(context.Background(), m.store, wsKey, leadName)
+				if err != nil {
+					slog.Warn("codex lead assignment retry failed", "workspace", wsKey, "lead", leadName, "err", err)
+					continue
+				}
+				if delivery == nil {
+					return
+				}
+				switch delivery.State {
+				case leadcontrol.DeliveryStateDelivered:
+					broadcastAgentRefresh(m.hub, wsKey, leadName, actor)
+					return
+				case leadcontrol.DeliveryStateNone, leadcontrol.DeliveryStateUnsupported:
+					return
+				}
+			}
+		}
+	}()
+}
+
 func broadcastRunRefresh(hub *realtime.Hub, wsKey, leadName string, reconcile epicrunner.ReconcileResult, actor string) {
 	broadcastAgentRefresh(hub, wsKey, leadName, actor)
 	for _, dispatched := range reconcile.Dispatched {
@@ -131,13 +209,16 @@ func broadcastRunRefresh(hub *realtime.Hub, wsKey, leadName string, reconcile ep
 	}
 }
 
-func writeRunEpicResponse(w http.ResponseWriter, result *epicrunner.StartResult, reconcile epicrunner.ReconcileResult, runState string) {
+func writeRunEpicResponse(w http.ResponseWriter, result *epicrunner.StartResult, reconcile epicrunner.ReconcileResult, runState, deliveryState string) {
+	if strings.TrimSpace(deliveryState) == "" {
+		deliveryState = "pending"
+	}
 	handler.WriteJSON(w, http.StatusOK, runEpicResponse{
 		EpicID:                result.EpicID,
 		LeadName:              result.LeadName,
 		OrchestratorSessionID: result.OrchestratorSessionID,
 		State:                 string(result.State),
-		DeliveryState:         "pending",
+		DeliveryState:         deliveryState,
 		RunState:              runState,
 		Reconcile:             reconcile,
 		Dispatched:            reconcile.Dispatched,
