@@ -75,6 +75,16 @@ export interface RunEpicResponse {
   orchestrator_session_id?: string;
   state: string;
   delivery_state?: string;
+  run_state?: string;
+  reconcile?: {
+    done?: boolean;
+    ready_count?: number;
+    blocked_count?: number;
+    open_children_count?: number;
+    active_workers?: number;
+    dispatched_count?: number;
+    max_concurrency?: number;
+  };
 }
 
 export async function runEpic(

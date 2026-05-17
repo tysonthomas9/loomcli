@@ -92,7 +92,16 @@ function AgentsPageInner(): JSX.Element {
         const result = await runEpic(workspaceId, epicId, agentName);
         await agentStore.getState().fetchData();
         const state = result.state === "resumed" ? "resumed" : "assigned";
-        showToast(`Epic ${epicId} ${state} for ${agentName}`, {
+        const dispatched = result.reconcile?.dispatched_count ?? 0;
+        const suffix =
+          result.run_state === "already_running"
+            ? "runner already active"
+            : result.run_state === "drained"
+              ? "no open work"
+              : dispatched > 0
+                ? `dispatched ${dispatched} task${dispatched === 1 ? "" : "s"}`
+                : "waiting for ready work";
+        showToast(`Epic ${epicId} ${state} for ${agentName}; ${suffix}`, {
           type: "success",
         });
       } catch (err) {

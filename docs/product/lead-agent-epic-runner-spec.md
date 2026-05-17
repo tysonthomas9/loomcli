@@ -399,6 +399,23 @@ This guarantees the UI button and manual terminal command share:
 - the same backend conflict enforcement
 - the same observable terminal output
 
+Implementation status, 2026-05-17:
+
+- The CLI and UI now share the `internal/epicrunner` reconcile/dispatch path.
+- The UI run route validates backend, repo, epic, command channel, daemon node,
+  and lead ownership before mutating lead assignment.
+- The UI run route performs the first reconcile pass and queues real daemon
+  worker `start` commands for ready child tasks, then continues a backend loop
+  so newly unblocked child work can be scheduled.
+- Browser validation covered a fresh two-epic Slack mock workspace with
+  `atlas` and `nova` as separate leads. The no-repo case fails with a clear
+  setup error, repo-backed runs dispatch one worker per lead/epic, duplicate
+  active runs return `already_running`, and assigning a busy lead to a second
+  epic returns 409.
+- Provider-specific lead-session delivery is still pending. Until that lands,
+  the UI route starts the worker runner and records lead attribution, but it
+  does not inject a visible message into a busy Codex or Claude TUI.
+
 ## Terminal and Resume Requirements
 
 Each lead agent must have a stable terminal/session identity.

@@ -569,6 +569,50 @@ Use named `agent-browser --session` values to avoid collisions.
 
 ## Validation Log
 
+### 2026-05-17 UTC: Correct Runner Implementation Pass
+
+Scope: replace the bind-only UI route with a real runner start path that reuses
+the `loom epic run` worker dispatch semantics.
+
+Implemented:
+
+- Moved the reusable reconcile/dispatch logic into `internal/epicrunner`.
+- Kept `loom epic run` as the foreground loop, now backed by the shared runner.
+- Changed `POST /api/workspaces/{ws}/epics/{id}/run` to:
+  - validate issue backend availability
+  - validate the target issue exists and is an epic
+  - require at least one workspace repo before mutating the lead assignment
+  - require the agent command channel
+  - require exactly one active daemon node
+  - bind/resume the lead with the same one-lead-per-epic rules
+  - run the first reconcile pass synchronously
+  - enqueue real worker `start` commands for ready child tasks
+  - continue the runner loop in-process after the response so downstream
+    unblocked work can be scheduled
+- Added UI toast detail for `already_running`, `drained`, dispatched tasks, and
+  waiting-for-ready-work outcomes.
+
+Edge cases covered by tests:
+
+- Workspace has no repos: request fails before lead parent is mutated.
+- Missing issue backend: route returns unavailable.
+- Missing lead, non-lead agent, lead already on another epic, and epic already
+  claimed by another lead.
+- No active daemon node and multiple active daemon nodes are classified.
+- Existing live worker command prevents duplicate dispatch.
+- Existing live task session consumes concurrency.
+- Stopped deterministic worker is observed once before being treated as fatal.
+- Ready task dispatch creates a deterministic ephemeral worker and queues a
+  daemon `start` command with the lead orchestration session.
+
+Remaining gotcha:
+
+- The UI route now starts a real backend runner loop, but it still does not
+  inject assignment context into a busy provider TUI. The lead binding is visible
+  in the UI and workers are attributed to the lead session; provider-specific
+  hook/app-server injection remains the next step for fully conversational lead
+  awareness.
+
 ### 2026-05-17 UTC: Fresh Slack Two-Epic UI Run
 
 Scope: validate the UI-driven lead-to-epic binding path after a fresh container
@@ -623,6 +667,69 @@ Gotchas:
   but the delay is worth watching in automated assertions.
 - The onboarding checklist still appears over the agent page and adds noise to
   screenshots. It did not block the Run buttons.
+
+### 2026-05-17 UTC: Correct Runner UI Validation
+
+Scope: validate the implemented shared `internal/epicrunner` path from the UI
+after rebuilding the Slack test container from this branch. This run used real
+FleetDB-backed workspaces, agents, issues, daemon commands, and daemon-owned
+worker sessions. It was not a full Codex completion run of the Slack app.
+
+Steps:
+
+- Removed `loom-slack-epic`, rebuilt `loomcli-dev-slack-epic`, and started the
+  replacement container on port 8092.
+- Confirmed `/api/workspaces` was empty after reset.
+- Seeded workspace `Slack_UI` (`SLACK-UI`) with two lead agents (`atlas`,
+  `nova`), two Slack epics, and three child tasks per epic.
+- Drove the browser with isolated session
+  `agent-browser --session epic-runner-edge`.
+- Clicked `Run` for `SLACK-UI-1` before any repo was attached. The UI showed a
+  red error toast:
+  `workspace SLACK-UI has no repos attached; add or clone a repo before running an epic`.
+  This confirmed the route fails before silently binding a lead or pretending
+  work has started.
+- Created a git repo inside the container at `/tmp/slack-src` and attached it
+  to `SLACK-UI` through `POST /api/workspaces/SLACK-UI/repos`.
+- Waited for the dev-container daemon watcher to start a daemon for `SLACK-UI`.
+- Clicked `Run` for `SLACK-UI-1` on `atlas`. The UI entered active-epic mode,
+  showed `atlas - idle - SLACK-UI-1`, and showed worker
+  `slack-ui-1-slack-ui-3-6254cd2d` running task `SLACK-UI-3`.
+- Switched to `nova` and clicked `Run` for `SLACK-UI-2`. The UI entered
+  active-epic mode for the second lead and showed worker
+  `slack-ui-2-slack-ui-7-7ae3ddd3` running task `SLACK-UI-7`.
+- Checked the issue API: `SLACK-UI-3` and `SLACK-UI-7` were `in_progress` with
+  their deterministic worker assignees, while the other four child tasks stayed
+  open.
+- Re-posted `Run` for active `atlas`/`SLACK-UI-1`; API returned
+  `run_state: "already_running"` instead of dispatching duplicate workers.
+- Tried assigning `atlas` to `SLACK-UI-2`; API returned 409 with
+  `lead atlas is already running epic SLACK-UI-1`.
+
+Evidence:
+
+- No-repo validation screenshot:
+  `/tmp/epic-runner-no-repo-error.png`
+- First lead/epic dispatch screenshot:
+  `/tmp/epic-runner-dispatch-atlas.png`
+- Two-lead/two-epic dispatch screenshot:
+  `/tmp/epic-runner-two-leads-two-epics.png`
+
+Gotchas:
+
+- The onboarding sidebar still appears on the agent page. In the no-repo case
+  it is useful because it points at the same "Create workspace with repo" setup
+  requirement, but it still adds visual noise after the workspace has agents and
+  epics.
+- The lead terminal autostarts Codex and hit a local auth/state issue:
+  `failed to initialize state runtime at /root/.codex-rw: ... file is not a database`.
+  This did not block backend runner dispatch, but it is separate evidence that
+  provider TUI context injection remains unfinished.
+- The terminal trust prompt remains visible for each lead. The backend runner
+  does not depend on the prompt, but a real conversational lead experience still
+  needs provider/app-server integration.
+- `agent-browser wait --load networkidle` is still unsuitable because the app
+  holds SSE connections open; use bounded waits.
 
 ## Follow-Up Work
 

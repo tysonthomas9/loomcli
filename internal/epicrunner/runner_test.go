@@ -1,171 +1,59 @@
-package epic
+package epicrunner
 
 import (
 	"context"
 	"errors"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli/clitest"
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 func TestWorkerNameAddsHashToAvoidSanitizedCollisions(t *testing.T) {
-	a := workerName("epic", "TASK/1")
-	b := workerName("epic", "TASK:1")
+	a := WorkerName("epic", "TASK/1")
+	b := WorkerName("epic", "TASK:1")
 	if a == b {
-		t.Fatalf("workerName collision: %q", a)
+		t.Fatalf("WorkerName collision: %q", a)
 	}
 	if len(a) > 63 || len(b) > 63 {
-		t.Fatalf("workerName length = %d/%d, want <= 63", len(a), len(b))
+		t.Fatalf("WorkerName length = %d/%d, want <= 63", len(a), len(b))
 	}
 	if strings.ContainsAny(a, "/:") || strings.ContainsAny(b, "/:") {
-		t.Fatalf("workerName contains unsanitized chars: %q %q", a, b)
+		t.Fatalf("WorkerName contains unsanitized chars: %q %q", a, b)
 	}
 }
 
-func TestBindLeadAgentAssignsEmptyParent(t *testing.T) {
+func TestNewRunnerRequiresReposBeforeBindingLead(t *testing.T) {
 	ctx := context.Background()
 	st := newTestStore(t)
-	createTestLead(t, st, "ws", "nova", "", "")
+	createLead(t, st, "ws", "nova", "", "")
+	ib := clitest.NewMockIssueBackend()
+	ib.GetResult = &backend.IssueDetailData{IssueData: backend.IssueData{ID: "EPIC-1", IssueType: "epic"}}
 
-	leadName, orch, err := bindLeadAgent(ctx, st, "ws", "nova", "EPIC-1", "session-1", true)
-	if err != nil {
-		t.Fatalf("bindLeadAgent() error = %v", err)
-	}
-	if leadName != "nova" || orch != "session-1" {
-		t.Fatalf("bindLeadAgent() = (%q, %q), want nova/session-1", leadName, orch)
-	}
-	got, err := st.Agents().Get(ctx, "ws", "nova")
-	if err != nil {
-		t.Fatalf("get lead: %v", err)
-	}
-	if got.Parent != "EPIC-1" {
-		t.Fatalf("lead parent = %q, want EPIC-1", got.Parent)
-	}
-	// Orchestrator session attribution lives on AgentSession now, not on
-	// Agent.OrchestratorSessionID (which was dropped from FleetDB writes
-	// in commit 9aef2ae5). bindLeadAgent returns the resolved orchestrator
-	// id via the function's second return value, asserted above.
-}
-
-func TestBindLeadAgentAllowsSameParent(t *testing.T) {
-	ctx := context.Background()
-	st := newTestStore(t)
-	createTestLead(t, st, "ws", "nova", "EPIC-1", "session-1")
-
-	_, orch, err := bindLeadAgent(ctx, st, "ws", "nova", "EPIC-1", "", true)
-	if err != nil {
-		t.Fatalf("bindLeadAgent() error = %v", err)
-	}
-	if orch != "session-1" {
-		t.Fatalf("orchestrator = %q, want existing session-1", orch)
-	}
-}
-
-func TestBindLeadAgentRejectsDifferentParent(t *testing.T) {
-	ctx := context.Background()
-	st := newTestStore(t)
-	createTestLead(t, st, "ws", "nova", "EPIC-1", "")
-
-	_, _, err := bindLeadAgent(ctx, st, "ws", "nova", "EPIC-2", "", true)
-	if err == nil {
-		t.Fatal("bindLeadAgent() error = nil, want conflict")
-	}
-	if !strings.Contains(err.Error(), "already running epic EPIC-1") {
-		t.Fatalf("error = %v, want active epic message", err)
-	}
-}
-
-func TestBindLeadAgentRejectsNonLeadRole(t *testing.T) {
-	ctx := context.Background()
-	st := newTestStore(t)
-	if _, err := st.Agents().Create(ctx, store.AgentCreate{
-		WorkspaceKey: "ws",
-		Name:         "worker",
-		RoleName:     "task",
-	}); err != nil {
-		t.Fatalf("create task agent: %v", err)
-	}
-
-	_, _, err := bindLeadAgent(ctx, st, "ws", "worker", "EPIC-1", "", true)
-	if err == nil {
-		t.Fatal("bindLeadAgent() error = nil, want non-lead role error")
-	}
-	if !strings.Contains(err.Error(), "requires a lead agent") {
-		t.Fatalf("error = %v, want lead role message", err)
-	}
-}
-
-func TestBindLeadAgentDryRunDoesNotAssignParent(t *testing.T) {
-	ctx := context.Background()
-	st := newTestStore(t)
-	createTestLead(t, st, "ws", "nova", "", "")
-
-	if _, _, err := bindLeadAgent(ctx, st, "ws", "nova", "EPIC-1", "", false); err != nil {
-		t.Fatalf("bindLeadAgent() error = %v", err)
+	_, _, err := NewRunner(ctx, RunnerConfig{
+		Store:            st,
+		IssueBackend:     ib,
+		WorkspaceKey:     "ws",
+		EpicID:           "EPIC-1",
+		LeadName:         "nova",
+		MutateLead:       true,
+		RequireRepos:     true,
+		ValidateEpic:     true,
+		PrepareWorktrees: false,
+	})
+	if ErrorKindOf(err) != ErrorKindValidation || !strings.Contains(err.Error(), "has no repos attached") {
+		t.Fatalf("NewRunner() error = %v, want no-repos validation", err)
 	}
 	got, err := st.Agents().Get(ctx, "ws", "nova")
 	if err != nil {
 		t.Fatalf("get lead: %v", err)
 	}
 	if got.Parent != "" {
-		t.Fatalf("lead parent = %q, want empty in dry-run", got.Parent)
-	}
-}
-
-func TestBindLeadAgentMissingLead(t *testing.T) {
-	ctx := context.Background()
-	st := newTestStore(t)
-
-	_, _, err := bindLeadAgent(ctx, st, "ws", "missing", "EPIC-1", "", true)
-	if !errors.Is(err, domain.ErrNotFound) {
-		t.Fatalf("bindLeadAgent() error = %v, want ErrNotFound", err)
-	}
-	if !strings.Contains(err.Error(), "was not found") {
-		t.Fatalf("error = %v, want not found message", err)
-	}
-}
-
-func TestBindLeadAgentSerializesConcurrentParentClaims(t *testing.T) {
-	ctx := context.Background()
-	st := newTestStore(t)
-	createTestLead(t, st, "ws", "nova", "", "")
-
-	var wg sync.WaitGroup
-	errs := make(chan error, 2)
-	parents := []string{"EPIC-1", "EPIC-2"}
-	for _, parent := range parents {
-		parent := parent
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			_, _, err := bindLeadAgent(ctx, st, "ws", "nova", parent, "", true)
-			errs <- err
-		}()
-	}
-	wg.Wait()
-	close(errs)
-
-	successes := 0
-	conflicts := 0
-	for err := range errs {
-		switch {
-		case err == nil:
-			successes++
-		case strings.Contains(err.Error(), "already running epic"):
-			conflicts++
-		default:
-			t.Fatalf("unexpected bind error: %v", err)
-		}
-	}
-	if successes != 1 || conflicts != 1 {
-		t.Fatalf("successes/conflicts = %d/%d, want 1/1", successes, conflicts)
+		t.Fatalf("lead parent = %q, want no bind after preflight failure", got.Parent)
 	}
 }
 
@@ -182,12 +70,12 @@ func TestSelectTargetNodeIDRequiresSingleActiveNode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create node: %v", err)
 	}
-	got, err := selectTargetNodeID(ctx, st, "ws")
+	got, err := SelectTargetNodeID(ctx, st, "ws")
 	if err != nil {
-		t.Fatalf("selectTargetNodeID() error = %v", err)
+		t.Fatalf("SelectTargetNodeID() error = %v", err)
 	}
 	if got != "node-1" {
-		t.Fatalf("selectTargetNodeID() = %q, want node-1", got)
+		t.Fatalf("SelectTargetNodeID() = %q, want node-1", got)
 	}
 
 	_, err = st.Nodes().Create(ctx, store.NodeCreate{
@@ -200,8 +88,8 @@ func TestSelectTargetNodeIDRequiresSingleActiveNode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create second node: %v", err)
 	}
-	if _, err := selectTargetNodeID(ctx, st, "ws"); err == nil {
-		t.Fatal("selectTargetNodeID() error = nil, want multiple-node error")
+	if _, err := SelectTargetNodeID(ctx, st, "ws"); ErrorKindOf(err) != ErrorKindConflict {
+		t.Fatalf("SelectTargetNodeID() error = %v, want conflict", err)
 	}
 }
 
@@ -209,7 +97,7 @@ func TestReconcileOnceDefersStalledWorkerFatalOnFirstObservation(t *testing.T) {
 	ctx := context.Background()
 	st := newTestStore(t)
 	taskID := "EPIC-2"
-	worker := workerName("epic-1", taskID)
+	worker := WorkerName("epic-1", taskID)
 	createStoppedWorker(t, st, "ws", worker)
 
 	ib := clitest.NewMockIssueBackend()
@@ -220,7 +108,7 @@ func TestReconcileOnceDefersStalledWorkerFatalOnFirstObservation(t *testing.T) {
 		Assignee: worker,
 	}}
 
-	r := &runner{
+	r := &Runner{
 		store:          st,
 		ib:             ib,
 		workspace:      "ws",
@@ -229,12 +117,12 @@ func TestReconcileOnceDefersStalledWorkerFatalOnFirstObservation(t *testing.T) {
 		maxConcurrency: 1,
 	}
 
-	done, err := r.reconcileOnce(ctx)
-	if done {
-		t.Fatal("reconcileOnce done = true, want false")
+	result, err := r.ReconcileOnce(ctx)
+	if result.Done {
+		t.Fatal("ReconcileOnce done = true, want false")
 	}
 	if err != nil {
-		t.Fatalf("reconcileOnce error = %v, want nil during first stopped-worker observation", err)
+		t.Fatalf("ReconcileOnce error = %v, want nil during first stopped-worker observation", err)
 	}
 }
 
@@ -242,7 +130,7 @@ func TestReconcileOnceDetectsStoppedDeterministicWorkerAfterRestart(t *testing.T
 	ctx := context.Background()
 	st := newTestStore(t)
 	taskID := "EPIC-2"
-	worker := workerName("epic-1", taskID)
+	worker := WorkerName("epic-1", taskID)
 	createStoppedWorker(t, st, "ws", worker)
 
 	ib := clitest.NewMockIssueBackend()
@@ -253,7 +141,7 @@ func TestReconcileOnceDetectsStoppedDeterministicWorkerAfterRestart(t *testing.T
 		Assignee: worker,
 	}}
 
-	r := &runner{
+	r := &Runner{
 		store:          st,
 		ib:             ib,
 		workspace:      "ws",
@@ -262,30 +150,12 @@ func TestReconcileOnceDetectsStoppedDeterministicWorkerAfterRestart(t *testing.T
 		maxConcurrency: 1,
 	}
 
-	if _, err := r.reconcileOnce(ctx); err != nil {
-		t.Fatalf("first reconcileOnce error = %v, want grace pass before fatal stall", err)
+	if _, err := r.ReconcileOnce(ctx); err != nil {
+		t.Fatalf("first ReconcileOnce error = %v, want grace pass before fatal stall", err)
 	}
-	_, err := r.reconcileOnce(ctx)
-	if !errors.Is(err, errStalledWorker) {
-		t.Fatalf("reconcileOnce error = %v, want errStalledWorker", err)
-	}
-}
-
-func TestAcquireLeadBindLockTimesOutWhenHeld(t *testing.T) {
-	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
-
-	unlock, err := acquireLeadBindLockWithTimeout("ws", "nova", time.Second, time.Millisecond)
-	if err != nil {
-		t.Fatalf("initial acquireLeadBindLockWithTimeout() error = %v", err)
-	}
-	defer unlock()
-
-	_, err = acquireLeadBindLockWithTimeout("ws", "nova", 10*time.Millisecond, time.Millisecond)
-	if err == nil {
-		t.Fatal("second acquireLeadBindLockWithTimeout() error = nil, want timeout")
-	}
-	if !strings.Contains(err.Error(), "timed out") {
-		t.Fatalf("error = %v, want timeout message", err)
+	_, err := r.ReconcileOnce(ctx)
+	if !errors.Is(err, ErrStalledWorker) {
+		t.Fatalf("ReconcileOnce error = %v, want ErrStalledWorker", err)
 	}
 }
 
@@ -299,7 +169,7 @@ func TestReconcileOnceRetriesOpenTaskWhenSpawnedWorkerMissing(t *testing.T) {
 	ib.ReadyResult = []backend.IssueData{task}
 	ib.ListResult = []backend.IssueData{task}
 
-	r := &runner{
+	r := &Runner{
 		store:                 st,
 		ib:                    ib,
 		workspace:             "ws",
@@ -310,15 +180,18 @@ func TestReconcileOnceRetriesOpenTaskWhenSpawnedWorkerMissing(t *testing.T) {
 		orchestratorSessionID: "lead-session-1",
 	}
 
-	done, err := r.reconcileOnce(ctx)
+	result, err := r.ReconcileOnce(ctx)
 	if err != nil {
-		t.Fatalf("reconcileOnce error = %v", err)
+		t.Fatalf("ReconcileOnce error = %v", err)
 	}
-	if done {
-		t.Fatal("reconcileOnce done = true, want false")
+	if result.Done {
+		t.Fatal("ReconcileOnce done = true, want false")
+	}
+	if result.DispatchedCount != 1 {
+		t.Fatalf("DispatchedCount = %d, want 1", result.DispatchedCount)
 	}
 
-	newWorker := workerName("epic-1", taskID)
+	newWorker := WorkerName("epic-1", taskID)
 	if _, err := st.Agents().Get(ctx, "ws", newWorker); err != nil {
 		t.Fatalf("expected retry to create worker %q: %v", newWorker, err)
 	}
@@ -335,7 +208,7 @@ func TestSpawnWorkerPinsConfiguredBackend(t *testing.T) {
 	ctx := context.Background()
 	st := newTestStore(t)
 
-	r := &runner{
+	r := &Runner{
 		store:          st,
 		workspace:      "ws",
 		parent:         "EPIC-1",
@@ -350,7 +223,7 @@ func TestSpawnWorkerPinsConfiguredBackend(t *testing.T) {
 		t.Fatalf("spawnWorker() error = %v", err)
 	}
 
-	worker := workerName("epic-1", task.ID)
+	worker := WorkerName("epic-1", task.ID)
 	agent, err := st.Agents().Get(ctx, "ws", worker)
 	if err != nil {
 		t.Fatalf("get worker: %v", err)
@@ -364,7 +237,7 @@ func TestReconcileOnceSkipsReadyTaskWithLiveStartCommand(t *testing.T) {
 	ctx := context.Background()
 	st := newTestStore(t)
 	taskID := "EPIC-2"
-	worker := workerName("epic-1", taskID)
+	worker := WorkerName("epic-1", taskID)
 	task := backend.IssueData{ID: taskID, Title: "queued task", Status: "open"}
 	if _, err := st.AgentCommands().Create(ctx, store.AgentCommandCreate{
 		WorkspaceKey:  "ws",
@@ -379,7 +252,7 @@ func TestReconcileOnceSkipsReadyTaskWithLiveStartCommand(t *testing.T) {
 	ib.ReadyResult = []backend.IssueData{task}
 	ib.ListResult = []backend.IssueData{task}
 
-	r := &runner{
+	r := &Runner{
 		store:          st,
 		ib:             ib,
 		workspace:      "ws",
@@ -389,12 +262,12 @@ func TestReconcileOnceSkipsReadyTaskWithLiveStartCommand(t *testing.T) {
 		maxConcurrency: 1,
 	}
 
-	done, err := r.reconcileOnce(ctx)
+	result, err := r.ReconcileOnce(ctx)
 	if err != nil {
-		t.Fatalf("reconcileOnce error = %v", err)
+		t.Fatalf("ReconcileOnce error = %v", err)
 	}
-	if done {
-		t.Fatal("reconcileOnce done = true, want false")
+	if result.Done {
+		t.Fatal("ReconcileOnce done = true, want false")
 	}
 	cmds, err := st.AgentCommands().List(ctx, "ws", store.AgentCommandFilter{TargetAgentID: worker})
 	if err != nil {
@@ -410,8 +283,8 @@ func TestReconcileOnceLiveSessionConsumesConcurrency(t *testing.T) {
 	st := newTestStore(t)
 	activeTaskID := "EPIC-2"
 	readyTaskID := "EPIC-3"
-	activeWorker := workerName("epic-1", activeTaskID)
-	readyWorker := workerName("epic-1", readyTaskID)
+	activeWorker := WorkerName("epic-1", activeTaskID)
+	readyWorker := WorkerName("epic-1", readyTaskID)
 	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
 		WorkspaceKey: "ws",
 		SessionID:    "sess-1",
@@ -429,7 +302,7 @@ func TestReconcileOnceLiveSessionConsumesConcurrency(t *testing.T) {
 	ib.ReadyResult = []backend.IssueData{readyTask}
 	ib.ListResult = []backend.IssueData{activeTask, readyTask}
 
-	r := &runner{
+	r := &Runner{
 		store:          st,
 		ib:             ib,
 		workspace:      "ws",
@@ -439,12 +312,12 @@ func TestReconcileOnceLiveSessionConsumesConcurrency(t *testing.T) {
 		maxConcurrency: 1,
 	}
 
-	done, err := r.reconcileOnce(ctx)
+	result, err := r.ReconcileOnce(ctx)
 	if err != nil {
-		t.Fatalf("reconcileOnce error = %v", err)
+		t.Fatalf("ReconcileOnce error = %v", err)
 	}
-	if done {
-		t.Fatal("reconcileOnce done = true, want false")
+	if result.Done {
+		t.Fatal("ReconcileOnce done = true, want false")
 	}
 	cmds, err := st.AgentCommands().List(ctx, "ws", store.AgentCommandFilter{TargetAgentID: readyWorker})
 	if err != nil {
@@ -455,12 +328,6 @@ func TestReconcileOnceLiveSessionConsumesConcurrency(t *testing.T) {
 	}
 }
 
-func newTestStore(t *testing.T) store.Store {
-	t.Helper()
-	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
-	return memstore.New()
-}
-
 func createStoppedWorker(t *testing.T, st store.Store, workspace, name string) {
 	t.Helper()
 	ctx := context.Background()
@@ -469,6 +336,7 @@ func createStoppedWorker(t *testing.T, st store.Store, workspace, name string) {
 		Name:         name,
 		RoleName:     "task",
 		Mode:         domain.AgentModeEphemeral,
+		Parent:       "EPIC-1",
 		DesiredState: domain.AgentDesiredStopped,
 	}); err != nil {
 		t.Fatalf("create stopped worker: %v", err)
@@ -476,31 +344,5 @@ func createStoppedWorker(t *testing.T, st store.Store, workspace, name string) {
 	stopped := domain.AgentStateStopped
 	if _, err := st.Agents().Update(ctx, workspace, name, store.AgentUpdate{State: &stopped}); err != nil {
 		t.Fatalf("mark worker stopped: %v", err)
-	}
-}
-
-func createTestLead(t *testing.T, st store.Store, workspace, name, parent, orchestrator string) {
-	t.Helper()
-	ctx := context.Background()
-	_, err := st.Agents().Create(ctx, store.AgentCreate{
-		WorkspaceKey: workspace,
-		Name:         name,
-		RoleName:     "lead",
-		Parent:       parent,
-	})
-	if err != nil {
-		t.Fatalf("create lead: %v", err)
-	}
-	// Seed the AgentSession row so the orchestration join finds it.
-	if orchestrator != "" {
-		if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
-			WorkspaceKey: workspace,
-			SessionID:    orchestrator,
-			AgentID:      name,
-			Kind:         domain.AgentSessionKindOrchestration,
-			Status:       domain.AgentSessionRunning,
-		}); err != nil {
-			t.Fatalf("create orchestrator session: %v", err)
-		}
 	}
 }

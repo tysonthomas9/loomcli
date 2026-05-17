@@ -107,7 +107,7 @@ func (app *Server) buildInfraModules() {
 	if storeBacked {
 		app.wsModules = append(app.wsModules, agents.NewModule(app.agentSvc, app.hub))
 		app.wsModules = append(app.wsModules, onboarding.NewModule(app.issueSvc, app.agentSvc))
-		app.wsModules = append(app.wsModules, epics.NewModule(app.config.Store, app.hub))
+		app.wsModules = append(app.wsModules, epics.NewModule(app.config.Store, app.hub).WithIssueBackendFn(app.config.IssueBackendFn))
 	} else if app.config.AgentControlFn != nil {
 		app.wsModules = append(app.wsModules, webui.NewAgentControlModule(app.config.AgentControlFn))
 	}
