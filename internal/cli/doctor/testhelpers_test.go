@@ -39,7 +39,11 @@ func installExecMock(t *testing.T, m *clitest.MockExecRunner) {
 
 func setupWorkspaceConfig(t *testing.T, cfg *config.LoomConfig) {
 	t.Helper()
-	configDir := t.TempDir()
+	setupWorkspaceConfigInDir(t, t.TempDir(), cfg)
+}
+
+func setupWorkspaceConfigInDir(t *testing.T, configDir string, cfg *config.LoomConfig) {
+	t.Helper()
 	t.Setenv("LOOM_CONFIG_DIR", configDir)
 	t.Setenv("LOOM_FLEET_DB_ACTOR", "test")
 	config.InvalidateConfigCache()
@@ -106,7 +110,9 @@ func setupWorkspaceConfig(t *testing.T, cfg *config.LoomConfig) {
 	if cfg.DefaultWorkspace != "" {
 		t.Setenv("LOOM_WORKSPACE", strings.ToUpper(cfg.DefaultWorkspace))
 	}
-	config.InvalidateConfigCache()
+	if _, err := config.TestingPrimeConfigCacheFromStore(ctx, handle.Store); err != nil {
+		t.Fatalf("prime config cache: %v", err)
+	}
 	cli.ResetWorkspaceRuntimeDirCache()
 	cli.TestingResetDefaultResolver()
 }

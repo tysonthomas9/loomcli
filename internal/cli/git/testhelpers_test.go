@@ -347,7 +347,9 @@ func setupWorkspaceConfigInDir(t *testing.T, configDir string, cfg *config.LoomC
 	if cfg.DefaultWorkspace != "" {
 		t.Setenv("LOOM_WORKSPACE", strings.ToUpper(cfg.DefaultWorkspace))
 	}
-	config.InvalidateConfigCache()
+	if _, err := config.TestingPrimeConfigCacheFromStore(ctx, handle.Store); err != nil {
+		t.Fatalf("prime config cache: %v", err)
+	}
 	cli.ResetWorkspaceRuntimeDirCache()
 }
 

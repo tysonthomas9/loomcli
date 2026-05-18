@@ -1,0 +1,64 @@
+#!/bin/sh
+# Drip-feeds stdout to verify the daemon's watchdog doesn't false-positive
+# on legitimate slow work. Pairs with -hang as a regression guard: if
+# someone tightens the output-timeout threshold without updating the test
+# matrix, -slow's scenario starts failing.
+#
+# Failure mode: claim the task, then loop writing one log line every
+# LOOM_PLAYGROUND_SLOW_INTERVAL seconds (must be less than the active
+# output_timeout for the watchdog to see continuous activity). After
+# LOOM_PLAYGROUND_SLOW_DURATION seconds, close the task and exit cleanly.
+#
+# Env knobs:
+#   LOOM_PLAYGROUND_SLOW_INTERVAL    — seconds between stdout lines (default 10)
+#   LOOM_PLAYGROUND_SLOW_DURATION    — total run duration before clean exit (default 45)
+#   LOOM_PLAYGROUND_SLOW_MARKER_DIR  — override marker dir (testing only)
+
+set -eu
+
+cmd="${1:-}"
+interval="${LOOM_PLAYGROUND_SLOW_INTERVAL:-10}"
+duration="${LOOM_PLAYGROUND_SLOW_DURATION:-45}"
+marker_root="${LOOM_PLAYGROUND_SLOW_MARKER_DIR:-${LOOM_WORKSPACE_RUNTIME_DIR:-/tmp/playground-slow}/slow}"
+
+run_invoke() {
+  task_id="${LOOM_ASSIGNED_TASK_ID:-PLAYGROUND-SLOW-1}"
+  agent="${LOOM_AGENT_NAME:-playground-slow}"
+
+  mkdir -p "$marker_root"
+  : > "$marker_root/started.flag"
+  printf '0' > "$marker_root/heartbeat.count"
+
+  echo "[playground-slow] ${agent} claiming ${task_id} (interval=${interval}s, duration=${duration}s)"
+  loom claim "$task_id" || true
+
+  elapsed=0
+  ticks=0
+  while [ "$elapsed" -lt "$duration" ]; do
+    sleep "$interval"
+    elapsed=$((elapsed + interval))
+    ticks=$((ticks + 1))
+    echo "[playground-slow] heartbeat tick ${ticks} (elapsed=${elapsed}s)"
+    printf '%d' "$ticks" > "$marker_root/heartbeat.count"
+  done
+
+  echo "[playground-slow] duration complete, exiting cleanly"
+  loom data close "$task_id" --reason "playground-slow drip-feed completed" || true
+  loom complete || true
+}
+
+case "$cmd" in
+  meta)
+    printf '{"display_name":"Playground Slow","version":"1","description":"Drip-feeds stdout to verify the watchdog allows legitimate slow work","binary_name":"loom-backend-playground-slow"}\n'
+    ;;
+  health)
+    printf '{"installed":true,"healthy":true,"message":"ready"}\n'
+    ;;
+  invoke)
+    run_invoke
+    ;;
+  *)
+    echo "usage: loom-backend-playground-slow {meta|health|invoke}" >&2
+    exit 2
+    ;;
+esac

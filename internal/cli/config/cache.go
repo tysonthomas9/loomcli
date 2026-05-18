@@ -1,8 +1,11 @@
 package config
 
 import (
+	"context"
 	"sync"
 	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 // configCache caches the FleetDB workspace projection briefly to avoid repeated
@@ -48,4 +51,21 @@ func InvalidateConfigCache() {
 	configCache.expires = time.Time{}
 	configCache.dir = ""
 	configCache.Unlock()
+}
+
+// TestingPrimeConfigCacheFromStore projects st into the LoadConfigCached cache.
+// It lets tests seed workspace config with memstore without starting fleet-db.
+func TestingPrimeConfigCacheFromStore(ctx context.Context, st store.Store) (*LoomConfig, error) {
+	cfg, err := loadConfigFromStore(ctx, st)
+	if err != nil {
+		return nil, err
+	}
+
+	configCache.Lock()
+	configCache.cfg = cfg
+	configCache.err = nil
+	configCache.expires = time.Now().Add(time.Hour)
+	configCache.dir = GetConfigDir()
+	configCache.Unlock()
+	return cfg, nil
 }

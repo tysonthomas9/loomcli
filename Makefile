@@ -1,6 +1,6 @@
 # Makefile for loomcli project
 
-.PHONY: all build build-frontend build-all test test-integration test-all test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui test-fleetdb-empty-cli fleetdb-empty-up fleetdb-empty-down local-mode-up local-mode-codex-up local-mode-down local-mode-logs local-mode-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-control-plane-paths check-no-raw-exec check-no-beads-prod test-coverage test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness
+.PHONY: all build build-frontend build-all test test-integration test-all test-playground test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui test-fleetdb-empty-cli fleetdb-empty-up fleetdb-empty-down local-mode-up local-mode-codex-up local-mode-down local-mode-logs local-mode-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-control-plane-paths check-no-raw-exec check-no-beads-prod test-coverage test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness
 
 # Default target
 all: build
@@ -24,6 +24,28 @@ test-integration:
 test-all:
 	@echo "Running all tests..."
 	@TEST_TAGS=integration,e2e TEST_COVER=1 ./scripts/test.sh
+
+# Daemon-lifecycle failure-mode harness (crash/hang/slow backends + a
+# happy-path scaffold). Requires `loom serve` running on
+# http://localhost:8080 and a clean ~/.loom (or no orphan PLAYGROUND
+# state). The shell + Go tests drive setup.sh → daemon → assertions →
+# teardown.sh. The Playwright stage re-creates the workspace and asserts
+# the kanban renders the seed tasks. For full-stack dogfooding use
+# `make local-mode-up` instead — see test/playground/README.md.
+test-playground:
+	@echo "=== Playground: Go scenarios (happy path + failure modes) ==="
+	@LOOM_BASE_URL="$${LOOM_BASE_URL:-http://localhost:8080}" LOOM_PLAYGROUND_REQUIRE_SERVE=1 go test -tags=playground -count=1 -timeout=5m ./test/playground/...
+	@echo "=== Playground: Playwright UI test ==="
+	@set -e; \
+		root="$$(pwd)"; \
+		base_url="$${LOOM_BASE_URL:-http://localhost:8080}"; \
+		frontend_url="$${LOOM_FRONTEND_BASE_URL:-$$base_url}"; \
+		bash "$$root/test/playground/teardown.sh" >/dev/null 2>&1 || true; \
+		trap 'bash "$$root/test/playground/teardown.sh" >/dev/null 2>&1 || true' EXIT; \
+		bash "$$root/test/playground/setup.sh" >/dev/null; \
+		cd "$$root/internal/webui/frontend"; \
+		RUN_INTEGRATION_TESTS=1 LOOM_LOCAL_SERVER=1 LOOM_BASE_URL="$$base_url" LOOM_FRONTEND_BASE_URL="$$frontend_url" \
+			npx playwright test --project=integration playground.integration.spec.ts
 
 # Run clean-checkout embedded local mode smoke. Requires a loom binary and
 # fleet-db binary; override with LOOM_BIN=/path/to/loom FLEET_DB_BIN=/path/to/fleet-db.

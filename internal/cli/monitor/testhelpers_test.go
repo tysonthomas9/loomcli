@@ -102,7 +102,9 @@ func setupMonitorWorkspaceConfig(t *testing.T, workspaceDir string, agentNames .
 	}); err != nil {
 		t.Fatalf("save state cache: %v", err)
 	}
-	config.InvalidateConfigCache()
+	if _, err := config.TestingPrimeConfigCacheFromStore(ctx, handle.Store); err != nil {
+		t.Fatalf("prime config cache: %v", err)
+	}
 	cli.ResetWorkspaceRuntimeDirCache()
 	cli.TestingResetDefaultResolver()
 }

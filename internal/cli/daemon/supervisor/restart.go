@@ -2,6 +2,8 @@ package supervisor
 
 import (
 	"log"
+	"os"
+	"strconv"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
@@ -264,7 +266,17 @@ func (s *Supervisor) getBackoffMax() int {
 }
 
 // GetOutputTimeout returns the configured output timeout in seconds.
+// LOOM_DAEMON_OUTPUT_TIMEOUT_SECONDS env var is honored when set — useful
+// for integration tests that need to trip the watchdog quickly (e.g.
+// test/playground/scenarios/). The env var wins over fleet-db config
+// because fleet-db's wire schema does not currently persist this field
+// (see internal/infra/fleetdb/daemon.go).
 func (s *Supervisor) GetOutputTimeout() int {
+	if v := os.Getenv("LOOM_DAEMON_OUTPUT_TIMEOUT_SECONDS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
+	}
 	cfg := s.ConfigSnapshot()
 	if cfg.Daemon.RestartPolicy.OutputTimeout != nil {
 		return *cfg.Daemon.RestartPolicy.OutputTimeout
