@@ -84,6 +84,8 @@ export function AgentDetailMain({
   const terminalUnavailable = agent != null && isTerminalUnavailable(agent);
   const completedEphemeralWorker =
     agent != null && isCompletedEphemeralWorker(agent);
+  const shouldResolveLeadTerminal =
+    agent != null && isAssignedLead(agent) && terminalUnavailable;
   const terminalEmptyState =
     agent != null && terminalUnavailable
       ? terminalUnavailableEmptyState(agent)
@@ -123,7 +125,7 @@ export function AgentDetailMain({
       >
         {completedEphemeralWorker ? (
           <CompletedWorkerSummary agent={agent} />
-        ) : terminalUnavailable ? (
+        ) : terminalUnavailable && !shouldResolveLeadTerminal ? (
           <EmptyState
             message={terminalEmptyState?.message ?? "Agent is stopped"}
             detail={
@@ -152,6 +154,10 @@ function isTerminalUnavailable(agent: LoomAgentStatus): boolean {
   const state = (agent.state ?? "").toLowerCase();
   const desiredState = (agent.desired_state ?? "").toLowerCase();
   return state === "stopped" || state === "dead" || desiredState === "stopped";
+}
+
+function isAssignedLead(agent: LoomAgentStatus): boolean {
+  return isLeadRole(agent.role) && (agent.parent ?? "").trim() !== "";
 }
 
 function terminalUnavailableEmptyState(agent: LoomAgentStatus): {

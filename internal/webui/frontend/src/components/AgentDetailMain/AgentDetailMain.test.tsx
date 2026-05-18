@@ -98,7 +98,7 @@ describe("AgentDetailMain", () => {
     expect(screen.getByText("context pending")).toBeInTheDocument();
   });
 
-  it("explains that a stopped assigned lead is waiting for interactive context", () => {
+  it("resolves the terminal for a stopped assigned lead", () => {
     renderWithAgents(
       [
         {
@@ -118,12 +118,7 @@ describe("AgentDetailMain", () => {
       "nova",
     );
 
-    expect(screen.getByText("Lead session not open")).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        "The epic assignment is saved in backend state and will be injected when the lead session opens.",
-      ),
-    ).toBeInTheDocument();
+    expect(screen.getByTestId("terminal-view")).toBeInTheDocument();
     expect(screen.queryByText("Agent is stopped")).not.toBeInTheDocument();
   });
 

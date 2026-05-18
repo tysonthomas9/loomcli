@@ -385,6 +385,59 @@ func TestEnsureAgentTerminalSessionRejectsStoppedAgentWithoutSession(t *testing.
 	}
 }
 
+func TestEnsureAgentTerminalSessionCreatesLaunchForStoppedAssignedLead(t *testing.T) {
+	ctx := context.Background()
+	st, tabStore, rdb := newAgentSessionTestDeps(t)
+	svc := webuiterminal.NewTerminalService(
+		nil,
+		tabStore,
+		nil,
+		rdb,
+		nil,
+		time.Now(),
+	)
+
+	if _, err := st.Roles().Create(ctx, store.RoleCreate{
+		WorkspaceKey: "E2E",
+		Name:         "lead",
+		Backend:      "codex",
+	}); err != nil {
+		t.Fatalf("create role: %v", err)
+	}
+	if _, err := st.Agents().Create(ctx, store.AgentCreate{
+		WorkspaceKey: "E2E",
+		Name:         "nova",
+		RoleName:     "lead",
+		Parent:       "E2E-8",
+		DesiredState: domain.AgentDesiredStopped,
+	}); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	stopped := domain.AgentStateStopped
+	if _, err := st.Agents().Update(ctx, "E2E", "nova", store.AgentUpdate{
+		State: &stopped,
+	}); err != nil {
+		t.Fatalf("stop agent: %v", err)
+	}
+
+	meta, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "nova", "http://loom.test")
+	if err != nil {
+		t.Fatalf("ensureAgentTerminalSession: %v", err)
+	}
+	if meta.Launch == nil {
+		t.Fatal("launch spec = nil, want assigned lead to be resumable")
+	}
+	if !meta.Writable {
+		t.Fatal("writable = false, want assigned lead terminal to be writable")
+	}
+	cmd := strings.Join(meta.Launch.Argv, " ")
+	for _, want := range []string{"--backend", "codex", "lead"} {
+		if !strings.Contains(cmd, want) {
+			t.Fatalf("launch argv %q missing %q", cmd, want)
+		}
+	}
+}
+
 func TestEnsureAgentTerminalSessionDoesNotRelaunchStoppedExistingAgentTab(t *testing.T) {
 	ctx := context.Background()
 	st, tabStore, rdb := newAgentSessionTestDeps(t)
