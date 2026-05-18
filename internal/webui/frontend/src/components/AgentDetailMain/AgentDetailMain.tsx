@@ -85,7 +85,7 @@ export function AgentDetailMain({
   const completedEphemeralWorker =
     agent != null && isCompletedEphemeralWorker(agent);
   const shouldResolveLeadTerminal =
-    agent != null && isAssignedLead(agent) && terminalUnavailable;
+    agent != null && isLeadRole(agent.role) && terminalUnavailable;
   const terminalEmptyState =
     agent != null && terminalUnavailable
       ? terminalUnavailableEmptyState(agent)
@@ -156,22 +156,10 @@ function isTerminalUnavailable(agent: LoomAgentStatus): boolean {
   return state === "stopped" || state === "dead" || desiredState === "stopped";
 }
 
-function isAssignedLead(agent: LoomAgentStatus): boolean {
-  return isLeadRole(agent.role) && (agent.parent ?? "").trim() !== "";
-}
-
-function terminalUnavailableEmptyState(agent: LoomAgentStatus): {
+function terminalUnavailableEmptyState(_agent: LoomAgentStatus): {
   message: string;
   detail: string;
 } {
-  const assignedEpic = (agent.parent ?? "").trim();
-  if (isLeadRole(agent.role) && assignedEpic !== "") {
-    return {
-      message: "Lead session not open",
-      detail:
-        "The epic assignment is saved in backend state and will be injected when the lead session opens.",
-    };
-  }
   return {
     message: "Agent is stopped",
     detail:

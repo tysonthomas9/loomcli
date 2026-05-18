@@ -246,7 +246,7 @@ func agentTerminalLaunchAllowed(agent *domain.Agent) bool {
 	if agent == nil {
 		return false
 	}
-	if isLeadRole(agent.RoleName) && strings.TrimSpace(agent.Parent) != "" {
+	if isLeadRole(agent.RoleName) {
 		return true
 	}
 	return agent.State != domain.AgentStateStopped && agent.DesiredState != domain.AgentDesiredStopped

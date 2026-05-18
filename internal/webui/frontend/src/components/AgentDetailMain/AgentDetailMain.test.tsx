@@ -122,6 +122,28 @@ describe("AgentDetailMain", () => {
     expect(screen.queryByText("Agent is stopped")).not.toBeInTheDocument();
   });
 
+  it("resolves the terminal for a stopped unassigned lead", () => {
+    renderWithAgents(
+      [
+        {
+          name: "atlas",
+          branch: "unknown",
+          status: "idle",
+          ahead: 0,
+          behind: 0,
+          workspace: "E2E",
+          role: "lead",
+          state: "idle",
+          desired_state: "stopped",
+        } as LoomAgentStatus,
+      ],
+      "atlas",
+    );
+
+    expect(screen.getByTestId("terminal-view")).toBeInTheDocument();
+    expect(screen.queryByText("Agent is stopped")).not.toBeInTheDocument();
+  });
+
   it("makes an unassigned lead explicit instead of showing unknown", () => {
     renderWithAgents(
       [
