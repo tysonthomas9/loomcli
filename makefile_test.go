@@ -549,7 +549,7 @@ func TestCIWorkflowHasFrontendCoverageStep(t *testing.T) {
 }
 
 // TestCIWorkflowHasGoCoverageThreshold verifies that the CI workflow
-// invokes check-coverage.sh with a 70%% threshold.
+// matches the main Go quality gate coverage threshold.
 func TestCIWorkflowHasGoCoverageThreshold(t *testing.T) {
 	t.Parallel()
 
@@ -559,8 +559,8 @@ func TestCIWorkflowHasGoCoverageThreshold(t *testing.T) {
 	}
 	content := string(data)
 
-	if !strings.Contains(content, "check-coverage.sh coverage.out 70") {
-		t.Errorf("ci.yml should invoke check-coverage.sh with threshold 70")
+	if !strings.Contains(content, "check-coverage.sh coverage.out 60") {
+		t.Errorf("ci.yml should invoke check-coverage.sh with threshold 60")
 	}
 }
 

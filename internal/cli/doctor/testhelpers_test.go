@@ -10,6 +10,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/clitest"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
+	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -39,7 +40,11 @@ func installExecMock(t *testing.T, m *clitest.MockExecRunner) {
 
 func setupWorkspaceConfig(t *testing.T, cfg *config.LoomConfig) {
 	t.Helper()
-	configDir := t.TempDir()
+	setupWorkspaceConfigInDir(t, t.TempDir(), cfg)
+}
+
+func setupWorkspaceConfigInDir(t *testing.T, configDir string, cfg *config.LoomConfig) {
+	t.Helper()
 	t.Setenv("LOOM_CONFIG_DIR", configDir)
 	t.Setenv("LOOM_FLEET_DB_ACTOR", "test")
 	config.InvalidateConfigCache()
@@ -47,12 +52,9 @@ func setupWorkspaceConfig(t *testing.T, cfg *config.LoomConfig) {
 	oldResolver := cli.TestingResetDefaultResolver()
 
 	ctx := context.Background()
-	handle, err := bootstrap.OpenStore(ctx, configDir, nil)
-	if err != nil {
-		t.Fatalf("open fleet-db store: %v", err)
-	}
+	st := memstore.New()
 	t.Cleanup(func() {
-		_ = handle.Close()
+		_ = st.Close()
 		cli.TestingSetDefaultResolver(oldResolver)
 		config.InvalidateConfigCache()
 		cli.ResetWorkspaceRuntimeDirCache()
@@ -71,7 +73,7 @@ func setupWorkspaceConfig(t *testing.T, cfg *config.LoomConfig) {
 	for _, name := range names {
 		ws := cfg.Workspaces[name]
 		key := strings.ToUpper(name)
-		if _, err := handle.Store.Workspaces().Create(ctx, store.WorkspaceCreate{
+		if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{
 			Key:           key,
 			Name:          name,
 			DefaultBranch: firstRepoDefaultBranch(ws.Repos),
@@ -85,7 +87,7 @@ func setupWorkspaceConfig(t *testing.T, cfg *config.LoomConfig) {
 			if sourceRepoID == "" {
 				sourceRepoID = repo.Name
 			}
-			if _, err := handle.Store.Repos().Create(ctx, store.RepoCreate{
+			if _, err := st.Repos().Create(ctx, store.RepoCreate{
 				WorkspaceKey:  key,
 				Name:          repo.Name,
 				Remote:        repo.Remote,
@@ -103,7 +105,9 @@ func setupWorkspaceConfig(t *testing.T, cfg *config.LoomConfig) {
 	if err := bootstrap.SaveStateCache(state); err != nil {
 		t.Fatalf("save state cache: %v", err)
 	}
-	config.InvalidateConfigCache()
+	if _, err := config.TestingPrimeConfigCacheFromStore(ctx, st); err != nil {
+		t.Fatalf("prime config cache: %v", err)
+	}
 	cli.ResetWorkspaceRuntimeDirCache()
 	cli.TestingResetDefaultResolver()
 }

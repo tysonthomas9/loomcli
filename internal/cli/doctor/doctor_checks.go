@@ -162,7 +162,7 @@ func checkProjectConfig() CheckResult {
 }
 
 func checkGlobalConfig() CheckResult {
-	cfg, err := cfgpkg.LoadConfig()
+	cfg, err := cfgpkg.LoadConfigCached()
 	if err != nil {
 		return CheckResult{
 			Name:    "global_config",

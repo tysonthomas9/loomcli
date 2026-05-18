@@ -59,3 +59,121 @@ jobs:
 
       - name: E2E Container Tests
         run: go test -tags container -v -timeout 20m ./e2e/
+
+  playground:
+    # Daemon-lifecycle failure-mode harness against a real loom serve +
+    # fleet-db. The supervisor unit tests in internal/cli/daemon/supervisor
+    # mock exec.Command and so cannot exercise real pgroup / orphan-PID /
+    # watchdog-timing / fleet-db-lock-cleanup code paths — this job covers
+    # them. See test/playground/README.md for the harness design and the
+    # current failure modes (crash, slow, happy-path scaffold).
+    #
+    # ---------------------------------------------------------------------
+    # Operator setup (do this once before the first scheduled run):
+    #
+    #   1. Add repo secret FLEET_DB_REPO_TOKEN under
+    #      Settings → Secrets and variables → Actions. Use a PAT with
+    #      `repo` read scope on BrowserOperator/fleet-db. (Alternative:
+    #      replace the `token:` line below with `ssh-key: ${{ secrets.X }}`
+    #      and register a deploy key on the fleet-db repo.)
+    #
+    #   2. Validate manually before relying on the schedule:
+    #        gh workflow run nightly.yml
+    #      Watch the Playground job; on first run expect to iterate on
+    #      token auth and the artifact path globs.
+    #
+    #   3. After ~10 consecutive green runs, flip
+    #      `continue-on-error: true` → `false` below so flakes page.
+    # ---------------------------------------------------------------------
+    #
+    # Initially continue-on-error: true while we collect signal on
+    # stability.
+    name: Playground (daemon-lifecycle)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    continue-on-error: true
+    steps:
+      - name: Checkout loomcli
+        uses: actions/checkout@v4
+
+      - name: Checkout fleet-db (sibling repo)
+        uses: actions/checkout@v4
+        with:
+          repository: BrowserOperator/fleet-db
+          path: fleet-db
+          # Needs read access to a private repo. Provide either a
+          # FLEET_DB_REPO_TOKEN secret (PAT with repo scope) or swap to
+          # ssh-key + deploy key. Job fails fast on checkout if missing.
+          token: ${{ secrets.FLEET_DB_REPO_TOKEN }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Configure Git
+        run: |
+          git config --global user.name "CI Bot"
+          git config --global user.email "ci@loomcli.test"
+
+      - name: Build loom + fleet-db
+        run: |
+          set -euxo pipefail
+          mkdir -p "$HOME/bin"
+          go build -o "$HOME/bin/loom" ./cmd/loom
+          (cd fleet-db && go build -o "$HOME/bin/fleet-db" ./cmd/fleet-db)
+          echo "$HOME/bin" >> "$GITHUB_PATH"
+
+      - name: Build frontend and install Playwright browsers
+        working-directory: internal/webui/frontend
+        run: |
+          npm ci
+          npm run build
+          npx playwright install --with-deps chromium
+
+      - name: Start loom serve
+        run: |
+          set -euxo pipefail
+          loom serve --frontend-dir internal/webui/frontend/dist > /tmp/loom-serve.log 2>&1 &
+          echo $! > /tmp/loom-serve.pid
+          # Poll readiness up to 30s — fleet-db spawn + projector init can
+          # take a few seconds on a cold CI runner.
+          for _ in $(seq 1 30); do
+            if curl -sfm 2 http://localhost:8080/health >/dev/null; then
+              echo "loom serve ready"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "loom serve never reported healthy; tail of log:" >&2
+          tail -100 /tmp/loom-serve.log >&2
+          exit 1
+
+      - name: Run playground
+        run: make test-playground
+
+      - name: Stop loom serve
+        if: always()
+        run: |
+          if [ -f /tmp/loom-serve.pid ]; then
+            kill "$(cat /tmp/loom-serve.pid)" 2>/dev/null || true
+          fi
+
+      - name: Upload playground artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playground-logs
+          path: |
+            /tmp/loom-serve.log
+            ~/.loom/workspaces/playground/sessions/**
+            ~/.loom/workspaces/playground-*/sessions/**
+            test/playground/.runtime/daemon.log
+            test/playground/.runtime-*/daemon.log
+            test/playground/.runtime-*/setup.log
+          if-no-files-found: ignore

@@ -15,8 +15,8 @@ output=""
 
 # Find all *_test.go files, excluding dirs and e2e/integration filenames.
 while IFS= read -r -d '' file; do
-    # Skip files with integration/e2e/container build tags in first 5 lines.
-    if head -5 "$file" | grep -qE '//go:build.*(integration|e2e|container)'; then
+    # Skip files with non-unit-test build tags in first 5 lines.
+    if head -5 "$file" | grep -qE '//go:build.*(integration|e2e|container|playground)'; then
         continue
     fi
 

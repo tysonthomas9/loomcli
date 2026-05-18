@@ -104,7 +104,7 @@ func EnsureGitWorktree(repoPath, targetPath, branchName string) error {
 }
 
 func runGit(dir string, args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
+	cmd := exec.Command("git", args...) //nolint:gosec // G204: fixed git executable; args are controlled by internal worktree callers.
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
 	if err != nil {
