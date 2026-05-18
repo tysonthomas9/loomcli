@@ -145,6 +145,105 @@
   background-color: var(--color-bg-active);
 }
 
+/* Epic grouping */
+.issue-table__group-row {
+  border-top: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border-light);
+  background: var(--color-bg-secondary);
+}
+
+.issue-table__group-row--clickable {
+  cursor: pointer;
+}
+
+.issue-table__group-row--clickable:hover {
+  background: var(--color-bg-hover);
+}
+
+.issue-table__group-row--clickable:focus {
+  outline: none;
+}
+
+.issue-table__group-row--clickable:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+
+.issue-table__group-cell {
+  padding: var(--space-3) var(--space-4);
+}
+
+.issue-table__group-content {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.issue-table__group-label,
+.issue-table__group-priority,
+.issue-table__group-status {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  white-space: nowrap;
+}
+
+.issue-table__group-label {
+  color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 12%, transparent);
+  text-transform: uppercase;
+}
+
+.issue-table__group-id {
+  color: var(--color-text-muted);
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-xs);
+  white-space: nowrap;
+}
+
+.issue-table__group-title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text);
+  font-weight: var(--font-weight-semibold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.issue-table__group-priority {
+  color: var(--color-text);
+  background: var(--color-priority-2);
+}
+
+.issue-table__group-status {
+  color: var(--color-text-secondary);
+  background: var(--color-bg-tertiary);
+}
+
+.issue-table__group-summary {
+  margin-left: auto;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  white-space: nowrap;
+}
+
+.issue-table__row--group-child .issue-table__cell[data-column="title"] {
+  padding-left: calc(var(--space-4) + var(--space-6));
+}
+
+.issue-table__group-empty-cell {
+  padding: var(--space-3) var(--space-4) var(--space-3)
+    calc(var(--space-4) + var(--space-6));
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  font-style: italic;
+}
+
 /* Table cells */
 .issue-table__cell {
   padding: var(--space-3) var(--space-4);

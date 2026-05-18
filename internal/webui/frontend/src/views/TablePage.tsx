@@ -45,6 +45,7 @@ export function TablePage() {
         <IssueTable
           issues={filteredIssues}
           sortable
+          groupByEpic
           showCheckbox
           selectedIds={selectedIds}
           onSelectionChange={toggleSelection}
