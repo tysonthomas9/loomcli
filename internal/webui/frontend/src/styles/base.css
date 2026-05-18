@@ -5,7 +5,8 @@
 
 /* Root element */
 html {
-  font-size: 100%;
+  /* 14px root: keeps rem-based UI text 2px smaller than the browser default. */
+  font-size: 87.5%;
   scroll-behavior: smooth;
 }
 
