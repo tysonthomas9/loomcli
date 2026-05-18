@@ -232,6 +232,51 @@ func TestBuildLocalRuntimeFleetModeIgnoresEvenAStartedRuntime(t *testing.T) {
 	}
 }
 
+func TestBuildLocalRuntimeDisabledModeNotApplicableForFleetDB(t *testing.T) {
+	t.Setenv("LOOM_ISSUE_BACKEND", "fleetdb")
+	t.Setenv(envLocalRuntimeMode, "disabled")
+
+	enoent := &os.PathError{Op: "open", Path: "runtime.json", Err: os.ErrNotExist}
+	out := buildLocalRuntime(nil, enoent)
+
+	if out.Applicable {
+		t.Error("Applicable = true, want false when local runtime is disabled")
+	}
+	if !strings.Contains(out.Reason, envLocalRuntimeMode) {
+		t.Errorf("Reason = %q, want it to mention %s", out.Reason, envLocalRuntimeMode)
+	}
+	if out.Error != "" {
+		t.Errorf("Error = %q, want empty in not-applicable case", out.Error)
+	}
+	if out.Runtime != nil {
+		t.Errorf("Runtime = %+v, want nil in not-applicable case", out.Runtime)
+	}
+}
+
+func TestShouldEnsureLocalRuntimeSkipsDisabledDeployment(t *testing.T) {
+	status := &WorkspaceOpsStatus{
+		LocalRuntime: &WorkspaceOpsLocalRuntime{
+			Applicable: false,
+			Reason:     "headless/server deployment",
+		},
+	}
+
+	if shouldEnsureLocalRuntime(status) {
+		t.Fatal("shouldEnsureLocalRuntime = true, want false when local runtime is not applicable")
+	}
+}
+
+func TestDaemonNotRunningFixRespectsNotApplicableRuntime(t *testing.T) {
+	status := &WorkspaceOpsStatus{
+		LocalRuntime: &WorkspaceOpsLocalRuntime{Applicable: false},
+	}
+
+	got := daemonNotRunningFix(status)
+	if strings.Contains(got, "ensure-runtime") {
+		t.Fatalf("daemonNotRunningFix = %q, should not suggest ensure-runtime when local runtime is not applicable", got)
+	}
+}
+
 func TestBuildLocalRuntimeDesktopModeHealthy(t *testing.T) {
 	t.Setenv("LOOM_ISSUE_BACKEND", "")
 

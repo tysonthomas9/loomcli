@@ -167,11 +167,12 @@ func (s *issueServiceImpl) listIssuesViaBackend(
 	if err != nil {
 		return nil, err
 	}
-	deferredByID, err := s.deferredIssueIDMap(ctx, be, params.Args)
+	deferredByID, err := s.deferredIssueMap(ctx, be, params.Args)
 	if err != nil {
 		return nil, err
 	}
 	issues = appendMissingBlockedIssues(issues, blockedByID)
+	issues = appendMissingDeferredIssues(issues, deferredByID)
 
 	return &ListIssuesResult{KanbanIssues: backendKanbanIssues(issues, blockedByID, readyByID, deferredByID)}, nil
 }
@@ -222,14 +223,28 @@ func appendMissingBlockedIssues(
 	issues []backend.IssueData,
 	blockedByID map[string]backend.IssueData,
 ) []backend.IssueData {
-	if len(blockedByID) == 0 {
+	return appendMissingIssueData(issues, blockedByID)
+}
+
+func appendMissingDeferredIssues(
+	issues []backend.IssueData,
+	deferredByID map[string]backend.IssueData,
+) []backend.IssueData {
+	return appendMissingIssueData(issues, deferredByID)
+}
+
+func appendMissingIssueData(
+	issues []backend.IssueData,
+	byID map[string]backend.IssueData,
+) []backend.IssueData {
+	if len(byID) == 0 {
 		return issues
 	}
 	seen := make(map[string]bool, len(issues))
 	for _, d := range issues {
 		seen[d.ID] = true
 	}
-	for _, d := range blockedByID {
+	for _, d := range byID {
 		if !seen[d.ID] {
 			issues = append(issues, d)
 		}
@@ -241,11 +256,12 @@ func backendKanbanIssues(
 	issues []backend.IssueData,
 	blockedByID map[string]backend.IssueData,
 	readyByID map[string]bool,
-	deferredByID map[string]bool,
+	deferredByID map[string]backend.IssueData,
 ) []KanbanIssue {
 	out := make([]KanbanIssue, len(issues))
 	for i, d := range issues {
-		out[i] = backendKanbanIssue(d, blockedByID[d.ID], readyByID[d.ID], deferredByID[d.ID])
+		_, deferred := deferredByID[d.ID]
+		out[i] = backendKanbanIssue(d, blockedByID[d.ID], readyByID[d.ID], deferred)
 	}
 	return out
 }
@@ -308,27 +324,35 @@ func (s *issueServiceImpl) readyIssueIDMap(
 	return issueIDSet(ready), nil
 }
 
-func (s *issueServiceImpl) deferredIssueIDMap(
+func (s *issueServiceImpl) deferredIssueMap(
 	ctx context.Context,
 	be backend.IssueBackend,
 	args *rpc.ListArgs,
-) (map[string]bool, error) {
+) (map[string]backend.IssueData, error) {
 	deferredBackend, ok := be.(backend.DeferredIssueBackend)
 	if !ok {
-		return map[string]bool{}, nil
+		return map[string]backend.IssueData{}, nil
 	}
 	deferred, err := deferredBackend.Deferred(ctx, deferredOptsFromListArgs(args))
 	if err != nil {
 		slog.Error("backend error in ListIssues.Deferred", "err", err)
 		return nil, translateBackendError(err)
 	}
-	return issueIDSet(deferred), nil
+	return issueDataMap(deferred), nil
 }
 
 func issueIDSet(issues []backend.IssueData) map[string]bool {
 	out := make(map[string]bool, len(issues))
 	for _, d := range issues {
 		out[d.ID] = true
+	}
+	return out
+}
+
+func issueDataMap(issues []backend.IssueData) map[string]backend.IssueData {
+	out := make(map[string]backend.IssueData, len(issues))
+	for _, d := range issues {
+		out[d.ID] = d
 	}
 	return out
 }
@@ -366,10 +390,12 @@ func blockedOptsFromListArgs(args *rpc.ListArgs) backend.BlockedOpts {
 		return backend.BlockedOpts{}
 	}
 	return backend.BlockedOpts{
-		ParentID: args.ParentID,
-		Assignee: args.Assignee,
-		Priority: args.Priority,
-		Type:     args.IssueType,
+		ParentID:    args.ParentID,
+		Assignee:    args.Assignee,
+		Priority:    args.Priority,
+		Type:        args.IssueType,
+		Labels:      args.Labels,
+		SourceRepos: args.SourceRepos,
 	}
 }
 

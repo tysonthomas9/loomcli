@@ -264,11 +264,13 @@ type DeferredOpts struct {
 
 // BlockedOpts configures the canonical Blocked query.
 type BlockedOpts struct {
-	ParentID string `json:"parent_id,omitempty"`
-	Assignee string `json:"assignee,omitempty"`
-	Priority *int   `json:"priority,omitempty"`
-	Type     string `json:"type,omitempty"`
-	Limit    int    `json:"limit,omitempty"`
+	ParentID    string   `json:"parent_id,omitempty"`
+	Assignee    string   `json:"assignee,omitempty"`
+	Priority    *int     `json:"priority,omitempty"`
+	Type        string   `json:"type,omitempty"`
+	Labels      []string `json:"labels,omitempty"`
+	SourceRepos []string `json:"source_repos,omitempty"`
+	Limit       int      `json:"limit,omitempty"`
 }
 
 // CountOpts configures the Count query.

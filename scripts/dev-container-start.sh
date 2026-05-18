@@ -20,6 +20,11 @@ EXTRA_WORKSPACES=${EXTRA_WORKSPACES:-bravo:/root/.loom/workspaces/bravo}
 export LOOM_CONFIG_DIR=${LOOM_CONFIG_DIR:-/root/.loom-config}
 mkdir -p "$LOOM_CONFIG_DIR"
 
+# The dev container already runs a headless HTTP server plus a workspace daemon
+# watcher. Lead agents may run `loom workspace ops ensure-runtime`; keep that
+# from starting the Loom.app desktop local runtime and creating a second daemon.
+export LOOM_LOCAL_RUNTIME="${LOOM_LOCAL_RUNTIME:-disabled}"
+
 # fleet-db --auth-dev-mode reads the X-Actor header; the loom CLI sends it
 # from LOOM_FLEET_DB_ACTOR. Without this every CLI call hits HTTP 401.
 export LOOM_FLEET_DB_ACTOR="${LOOM_FLEET_DB_ACTOR:-loom-dev}"

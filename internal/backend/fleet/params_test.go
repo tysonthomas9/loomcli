@@ -159,6 +159,43 @@ func TestListOptsToQuery_UsesTypeNotIssueType(t *testing.T) {
 	}
 }
 
+func TestListOptsToQuery_UsesFleetLabelAndRepoParams(t *testing.T) {
+	q := listOptsToQuery(backend.ListOpts{
+		Labels:      []string{"urgent"},
+		SourceRepos: []string{"repo-a"},
+	})
+	v := parseQueryValues(t, q)
+	if got := v.Get("label"); got != "urgent" {
+		t.Errorf("label = %q, want urgent", got)
+	}
+	if got := v.Get("repo"); got != "repo-a" {
+		t.Errorf("repo = %q, want repo-a", got)
+	}
+	if v.Get("labels") != "" {
+		t.Errorf("labels = %q, want absent", v.Get("labels"))
+	}
+	if v.Get("source_repos") != "" {
+		t.Errorf("source_repos = %q, want absent", v.Get("source_repos"))
+	}
+}
+
+func TestReadyOptsToQuery_UsesFleetLabelParams(t *testing.T) {
+	q := readyOptsToQuery(backend.ReadyOpts{
+		Labels:    []string{"urgent", "frontend"},
+		LabelsAny: []string{"bug", "design"},
+	})
+	v := parseQueryValues(t, q)
+	if got := v.Get("label"); got != "urgent,frontend" {
+		t.Errorf("label = %q, want comma-separated labels", got)
+	}
+	if got := v.Get("label_any"); got != "bug,design" {
+		t.Errorf("label_any = %q, want comma-separated labels_any", got)
+	}
+	if v.Get("labels") != "" || v.Get("labels_any") != "" {
+		t.Errorf("legacy labels params leaked: %q", q)
+	}
+}
+
 func parseQueryValues(t *testing.T, raw string) url.Values {
 	t.Helper()
 	v, err := url.ParseQuery(raw)

@@ -84,6 +84,10 @@ export function AgentDetailMain({
   const terminalUnavailable = agent != null && isTerminalUnavailable(agent);
   const completedEphemeralWorker =
     agent != null && isCompletedEphemeralWorker(agent);
+  const terminalEmptyState =
+    agent != null && terminalUnavailable
+      ? terminalUnavailableEmptyState(agent)
+      : null;
 
   if (!agentName) {
     return (
@@ -121,8 +125,11 @@ export function AgentDetailMain({
           <CompletedWorkerSummary agent={agent} />
         ) : terminalUnavailable ? (
           <EmptyState
-            message="Agent is stopped"
-            detail="This agent does not have a live terminal session. Start the agent before attaching to its PTY."
+            message={terminalEmptyState?.message ?? "Agent is stopped"}
+            detail={
+              terminalEmptyState?.detail ??
+              "This agent does not have a live terminal session. Start the agent before attaching to its PTY."
+            }
           />
         ) : (
           <Suspense fallback={<LoadingSkeleton.Terminal />}>
@@ -145,6 +152,25 @@ function isTerminalUnavailable(agent: LoomAgentStatus): boolean {
   const state = (agent.state ?? "").toLowerCase();
   const desiredState = (agent.desired_state ?? "").toLowerCase();
   return state === "stopped" || state === "dead" || desiredState === "stopped";
+}
+
+function terminalUnavailableEmptyState(agent: LoomAgentStatus): {
+  message: string;
+  detail: string;
+} {
+  const assignedEpic = (agent.parent ?? "").trim();
+  if (isLeadRole(agent.role) && assignedEpic !== "") {
+    return {
+      message: "Lead session not open",
+      detail:
+        "The epic assignment is saved in backend state and will be injected when the lead session opens.",
+    };
+  }
+  return {
+    message: "Agent is stopped",
+    detail:
+      "This agent does not have a live terminal session. Start the agent before attaching to its PTY.",
+  };
 }
 
 function isCompletedEphemeralWorker(agent: LoomAgentStatus): boolean {
@@ -484,11 +510,11 @@ export function leadDeliveryStateLabel(
 ): string {
   switch ((deliveryState ?? "").trim().toLowerCase()) {
     case "pending":
-      return "waiting for lead";
+      return "context pending";
     case "delivered":
-      return "sent to lead";
+      return "context sent";
     case "acknowledged":
-      return "acknowledged";
+      return "lead acknowledged";
     default:
       return "";
   }

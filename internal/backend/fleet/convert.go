@@ -23,6 +23,7 @@ type fleetIssueWire struct {
 	Owner       string     `json:"owner,omitempty"`
 	Labels      []string   `json:"labels,omitempty"`
 	Repo        string     `json:"repo,omitempty"`
+	SourceRepo  string     `json:"source_repo,omitempty"`
 	ParentID    string     `json:"parent_id,omitempty"`
 	Parent      string     `json:"parent,omitempty"`
 	Design      string     `json:"design,omitempty"`
@@ -48,7 +49,7 @@ func (w fleetIssueWire) toIssue() types.Issue {
 		Assignee:    w.Assignee,
 		Owner:       w.Owner,
 		Labels:      w.Labels,
-		SourceRepo:  w.Repo,
+		SourceRepo:  w.sourceRepo(),
 		Design:      w.Design,
 		CreatedAt:   w.CreatedAt,
 		CreatedBy:   w.CreatedBy,
@@ -65,6 +66,13 @@ func (w fleetIssueWire) parent() string {
 		return w.ParentID
 	}
 	return w.Parent
+}
+
+func (w fleetIssueWire) sourceRepo() string {
+	if w.Repo != "" {
+		return w.Repo
+	}
+	return w.SourceRepo
 }
 
 // fleetIssueWithCountsWire mirrors fleet-db's IssueWithCounts wrapper.
@@ -323,6 +331,9 @@ func readyIssuesToData(issues []*readyIssueWithParent) []backend.IssueData {
 		}
 		if riwp.Parent != nil {
 			d.Parent = *riwp.Parent
+		}
+		if riwp.Repo != nil {
+			d.SourceRepo = *riwp.Repo
 		}
 		result = append(result, d)
 	}

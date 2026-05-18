@@ -3,6 +3,7 @@ package fleet
 import (
 	"context"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -19,7 +20,7 @@ func TestBlockedIncludesExplicitBlockedStatusIssues(t *testing.T) {
 		case "/api/v1/test-ws/issues/blocked":
 			respondOK(w, []blockedIssueResponseWire{
 				{
-					Issue:    fleetIssueWire{ID: "dep-blocked", Title: "Dependency blocked", Status: "open", CreatedAt: now, UpdatedAt: now},
+					Issue:    fleetIssueWire{ID: "dep-blocked", Title: "Dependency blocked", Status: "open", ParentID: parent, CreatedAt: now, UpdatedAt: now},
 					Blockers: []blockedBlockerWire{{ID: "dep-1"}},
 				},
 				{
@@ -70,5 +71,60 @@ func TestBlockedEmptyCanonicalEndpointReturnsEmpty(t *testing.T) {
 	}
 	if len(result) != 0 {
 		t.Fatalf("result = %+v, want empty canonical blocked result", result)
+	}
+}
+
+func TestBlockedClientFiltersLabelsAndSourceReposWithoutServerLimit(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	var gotQuery string
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.RawQuery
+		switch r.URL.Path {
+		case "/api/v1/test-ws/issues/blocked":
+			respondOK(w, []blockedIssueResponseWire{
+				{
+					Issue: fleetIssueWire{
+						ID:        "repo-a",
+						Title:     "Wrong repo",
+						Status:    "open",
+						Labels:    []string{"frontend"},
+						Repo:      "repo-a",
+						CreatedAt: now,
+						UpdatedAt: now,
+					},
+					Blockers: []blockedBlockerWire{{ID: "dep-1"}},
+				},
+				{
+					Issue: fleetIssueWire{
+						ID:        "repo-b",
+						Title:     "Right repo",
+						Status:    "open",
+						Labels:    []string{"frontend"},
+						Repo:      "repo-b",
+						CreatedAt: now,
+						UpdatedAt: now,
+					},
+					Blockers: []blockedBlockerWire{{ID: "dep-2"}},
+				},
+			})
+		default:
+			t.Fatalf("unexpected request: %s", r.URL.String())
+		}
+	})
+	defer ts.Close()
+
+	result, err := fb.Blocked(context.Background(), backend.BlockedOpts{
+		Labels:      []string{"frontend"},
+		SourceRepos: []string{"repo-b"},
+		Limit:       1,
+	})
+	if err != nil {
+		t.Fatalf("Blocked: %v", err)
+	}
+	if strings.Contains(gotQuery, "label=") || strings.Contains(gotQuery, "source_repos=") || strings.Contains(gotQuery, "limit=") {
+		t.Fatalf("query = %q, want no unsupported label/repo filter or pre-filter limit", gotQuery)
+	}
+	if len(result) != 1 || result[0].ID != "repo-b" {
+		t.Fatalf("result = %+v, want repo-b", result)
 	}
 }

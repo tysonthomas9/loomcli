@@ -6,6 +6,7 @@ import {
   buildWorkerByTaskId,
   countTaskStatusesWithWorkers,
   effectiveTaskStatus,
+  formatQueueLabel,
   groupAgentTasksByEpic,
   groupOpenByEpic,
   isWorkerTerminalOpenable,
@@ -170,9 +171,9 @@ describe("groupAgentTasksByEpic", () => {
 
 describe("leadDeliveryStateLabel", () => {
   it("maps backend delivery states to user-visible labels", () => {
-    expect(leadDeliveryStateLabel("pending")).toBe("waiting for lead");
-    expect(leadDeliveryStateLabel("delivered")).toBe("sent to lead");
-    expect(leadDeliveryStateLabel("acknowledged")).toBe("acknowledged");
+    expect(leadDeliveryStateLabel("pending")).toBe("context pending");
+    expect(leadDeliveryStateLabel("delivered")).toBe("context sent");
+    expect(leadDeliveryStateLabel("acknowledged")).toBe("lead acknowledged");
     expect(leadDeliveryStateLabel("")).toBe("");
     expect(leadDeliveryStateLabel(undefined)).toBe("");
   });
@@ -241,6 +242,31 @@ describe("groupOpenByEpic", () => {
       "T-OPEN",
       "T-BLOCKED",
     ]);
+  });
+
+  it("does not count the unassigned bucket as an epic in the queue label", () => {
+    const m = buildMap(
+      issue({
+        id: "EPIC-1",
+        title: "Shell",
+        issue_type: "epic",
+        status: "open",
+      }),
+      issue({
+        id: "EPIC-2",
+        title: "Foundation",
+        issue_type: "epic",
+        status: "open",
+      }),
+      issue({ id: "T-1", parent: "EPIC-1", status: "open" }),
+      issue({ id: "T-2", parent: "EPIC-2", status: "open" }),
+      issue({ id: "T-ORPHAN", status: "open" }),
+    );
+    const res = groupOpenByEpic(m);
+
+    expect(
+      formatQueueLabel("lead-open", res.groups, res.totalTasks, "nova"),
+    ).toBe("Open queue · 2 epics · 1 unassigned · 3 tasks");
   });
 });
 

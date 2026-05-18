@@ -366,16 +366,22 @@ func (b *FleetBackend) List(ctx context.Context, opts backend.ListOpts) ([]backe
 	if err := checkFleetUnsupportedFilters(opts); err != nil {
 		return nil, err
 	}
-	path := "/issues?" + listOptsToQuery(opts)
+	serverOpts := listServerOpts(opts)
+	path := "/issues?" + listOptsToQuery(serverOpts)
 	resp, err := b.exec(ctx, "List", "GET", path, nil)
 	if err != nil {
 		return nil, err
 	}
-	return unmarshalIssueList(resp, "List")
+	issues, err := unmarshalIssueList(resp, "List")
+	if err != nil {
+		return nil, err
+	}
+	return filterListIssues(issues, opts), nil
 }
 
 func (b *FleetBackend) Ready(ctx context.Context, opts backend.ReadyOpts) ([]backend.IssueData, error) {
-	path := "/issues/ready?" + readyOptsToQuery(opts)
+	serverOpts := readyServerOpts(opts)
+	path := "/issues/ready?" + readyOptsToQuery(serverOpts)
 	resp, err := b.exec(ctx, "Ready", "GET", path, nil)
 	if err != nil {
 		return nil, err
@@ -387,7 +393,7 @@ func (b *FleetBackend) Ready(ctx context.Context, opts backend.ReadyOpts) ([]bac
 	if err != nil {
 		return nil, err
 	}
-	return readyIssuesToData(issues), nil
+	return filterReadyIssues(readyIssuesToData(issues), opts), nil
 }
 
 func (b *FleetBackend) Blocked(ctx context.Context, opts backend.BlockedOpts) ([]backend.IssueData, error) {

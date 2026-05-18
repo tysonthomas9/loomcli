@@ -22,13 +22,71 @@ func (b *FleetBackend) Deferred(ctx context.Context, opts backend.DeferredOpts) 
 }
 
 func filterDeferredIssues(issues []backend.IssueData, opts backend.DeferredOpts) []backend.IssueData {
-	if opts.Assignee == "" && opts.Priority == nil && opts.Type == "" && opts.ParentID == "" &&
-		len(opts.Labels) == 0 && len(opts.SourceRepos) == 0 && opts.Limit <= 0 {
+	return filterIssueData(issues, issueDataFilter{
+		Assignee:    opts.Assignee,
+		Priority:    opts.Priority,
+		Type:        opts.Type,
+		ParentID:    opts.ParentID,
+		Labels:      opts.Labels,
+		SourceRepos: opts.SourceRepos,
+		Limit:       opts.Limit,
+	})
+}
+
+func filterReadyIssues(issues []backend.IssueData, opts backend.ReadyOpts) []backend.IssueData {
+	return filterIssueData(issues, issueDataFilter{
+		Assignee:    opts.Assignee,
+		Priority:    opts.Priority,
+		Type:        opts.Type,
+		ParentID:    opts.ParentID,
+		Labels:      opts.Labels,
+		LabelsAny:   opts.LabelsAny,
+		SourceRepos: opts.SourceRepos,
+		Limit:       opts.Limit,
+	})
+}
+
+func filterBlockedIssues(issues []backend.IssueData, opts backend.BlockedOpts) []backend.IssueData {
+	return filterIssueData(issues, issueDataFilter{
+		Assignee:    opts.Assignee,
+		Priority:    opts.Priority,
+		Type:        opts.Type,
+		ParentID:    opts.ParentID,
+		Labels:      opts.Labels,
+		SourceRepos: opts.SourceRepos,
+		Limit:       opts.Limit,
+	})
+}
+
+func filterListIssues(issues []backend.IssueData, opts backend.ListOpts) []backend.IssueData {
+	return filterIssueData(issues, issueDataFilter{
+		Assignee:    opts.Assignee,
+		Type:        opts.IssueType,
+		ParentID:    opts.ParentID,
+		Labels:      opts.Labels,
+		SourceRepos: opts.SourceRepos,
+		Limit:       opts.Limit,
+	})
+}
+
+type issueDataFilter struct {
+	Assignee    string
+	Priority    *int
+	Type        string
+	ParentID    string
+	Labels      []string
+	LabelsAny   []string
+	SourceRepos []string
+	Limit       int
+}
+
+func filterIssueData(issues []backend.IssueData, opts issueDataFilter) []backend.IssueData {
+	if !opts.needsFilter() {
 		return issues
 	}
 	out := make([]backend.IssueData, 0, len(issues))
 	for _, issue := range issues {
-		if !deferredIssueMatches(issue, opts) {
+		if !issueDataMatches(issue, opts) {
 			continue
 		}
 		out = append(out, issue)
@@ -39,7 +97,12 @@ func filterDeferredIssues(issues []backend.IssueData, opts backend.DeferredOpts)
 	return out
 }
 
-func deferredIssueMatches(issue backend.IssueData, opts backend.DeferredOpts) bool {
+func (opts issueDataFilter) needsFilter() bool {
+	return opts.Assignee != "" || opts.Priority != nil || opts.Type != "" || opts.ParentID != "" ||
+		len(opts.Labels) > 0 || len(opts.LabelsAny) > 0 || len(opts.SourceRepos) > 0 || opts.Limit > 0
+}
+
+func issueDataMatches(issue backend.IssueData, opts issueDataFilter) bool {
 	if opts.Assignee != "" && issue.Assignee != opts.Assignee {
 		return false
 	}
@@ -55,6 +118,9 @@ func deferredIssueMatches(issue backend.IssueData, opts backend.DeferredOpts) bo
 	if len(opts.Labels) > 0 && !hasAllStrings(issue.Labels, opts.Labels) {
 		return false
 	}
+	if len(opts.LabelsAny) > 0 && !hasAnyOfStrings(issue.Labels, opts.LabelsAny) {
+		return false
+	}
 	if len(opts.SourceRepos) > 0 && !hasAnyString(opts.SourceRepos, issue.SourceRepo) {
 		return false
 	}
@@ -68,6 +134,15 @@ func hasAllStrings(values, required []string) bool {
 		}
 	}
 	return true
+}
+
+func hasAnyOfStrings(values, candidates []string) bool {
+	for _, value := range values {
+		if hasAnyString(candidates, value) {
+			return true
+		}
+	}
+	return false
 }
 
 func hasAnyString(values []string, needle string) bool {

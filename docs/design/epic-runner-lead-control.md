@@ -1075,6 +1075,33 @@ Tests added:
 - configured lead worktrees are used for terminal launch cwd, while missing
   worktrees fall back safely
 
+### 2026-05-18 UTC: Headless Dev Container Runtime Guard
+
+During Podman UI verification, a lead followed the desktop repair guidance and
+ran `loom workspace ops ensure-runtime --json` inside the dev container. That
+started a Loom.app-style local runtime on a second port, which then started a
+second daemon for the same workspace. The UI Run Epic endpoint correctly
+rejected the ambiguous control plane with `multiple active daemon nodes found`.
+
+Decision:
+
+- The dev container is a headless/server deployment: it already owns `loom serve`
+  and a workspace-daemon watcher.
+- In that topology, `workspace ops ensure-runtime` must not start the desktop
+  local runtime.
+- `LOOM_LOCAL_RUNTIME=disabled` is the explicit deployment switch. When set,
+  workspace ops reports `local_runtime.applicable=false`, `ensure-runtime`
+  returns the current status without spawning a runtime, and daemon repair
+  guidance no longer points agents back at `ensure-runtime`.
+
+Tested at unit level:
+
+- FleetDB plus `LOOM_LOCAL_RUNTIME=disabled` hides missing `runtime.json` as
+  not applicable.
+- `ensure-runtime` skips local runtime startup when the status says the local
+  runtime is not applicable.
+- The no-daemon fix text does not suggest `ensure-runtime` in that topology.
+
 ## Follow-Up Work
 
 - For Codex, do we need item-level timeline events in addition to

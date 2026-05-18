@@ -74,7 +74,7 @@ describe("AgentDetailMain", () => {
     expect(screen.queryByText("unknown")).not.toBeInTheDocument();
   });
 
-  it("shows pending lead delivery as waiting for lead", () => {
+  it("shows pending lead delivery as pending context", () => {
     renderWithAgents(
       [
         {
@@ -95,7 +95,36 @@ describe("AgentDetailMain", () => {
 
     expect(screen.getByText("assigned epic")).toBeInTheDocument();
     expect(screen.getByText("E2E-1")).toBeInTheDocument();
-    expect(screen.getByText("waiting for lead")).toBeInTheDocument();
+    expect(screen.getByText("context pending")).toBeInTheDocument();
+  });
+
+  it("explains that a stopped assigned lead is waiting for interactive context", () => {
+    renderWithAgents(
+      [
+        {
+          name: "nova",
+          branch: "unknown",
+          status: "idle",
+          ahead: 0,
+          behind: 0,
+          workspace: "E2E",
+          role: "lead",
+          parent: "E2E-1",
+          delivery_state: "pending",
+          state: "idle",
+          desired_state: "stopped",
+        } as LoomAgentStatus,
+      ],
+      "nova",
+    );
+
+    expect(screen.getByText("Lead session not open")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "The epic assignment is saved in backend state and will be injected when the lead session opens.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Agent is stopped")).not.toBeInTheDocument();
   });
 
   it("makes an unassigned lead explicit instead of showing unknown", () => {

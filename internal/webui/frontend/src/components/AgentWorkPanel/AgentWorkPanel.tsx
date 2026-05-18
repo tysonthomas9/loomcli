@@ -35,7 +35,7 @@ interface AgentWorkPanelProps {
   onAgentClick?: (agentName: string) => void;
 }
 
-interface EpicGroup {
+export interface EpicGroup {
   epicId: string;
   epicTitle: string;
   tasks: Issue[];
@@ -59,6 +59,8 @@ interface WorkerHistoryItem {
 }
 
 const ORPHAN_EPIC_KEY = "__orphan__";
+
+type PanelMode = "epic" | "agent" | "lead-open" | "workspace";
 
 const STATUS_GLYPH: Record<string, string> = {
   active: "▸",
@@ -215,11 +217,7 @@ export function AgentWorkPanel({
           </>
         ) : (
           <div className={styles.label}>
-            {mode === "lead-open"
-              ? `Open queue · ${groups.length} epic${groups.length === 1 ? "" : "s"} · ${totalTasks} task${totalTasks === 1 ? "" : "s"}`
-              : mode === "workspace"
-                ? `Workspace queue · ${groups.length} epic${groups.length === 1 ? "" : "s"} · ${totalTasks} task${totalTasks === 1 ? "" : "s"}`
-                : `${agentName}'s work · ${groups.length} epic${groups.length === 1 ? "" : "s"} · ${totalTasks} task${totalTasks === 1 ? "" : "s"}`}
+            {formatQueueLabel(mode, groups, totalTasks, agentName)}
           </div>
         )}
 
@@ -306,10 +304,13 @@ function EpicGroupCard({
 }): JSX.Element {
   const pct =
     group.totalCount > 0 ? (group.doneCount / group.totalCount) * 100 : 0;
+  const isOrphan = isOrphanGroup(group);
   return (
     <div className={styles.group}>
       <div className={styles.groupHeader}>
-        <span className={styles.epicChip}>EPIC</span>
+        <span className={isOrphan ? styles.orphanChip : styles.epicChip}>
+          {isOrphan ? "UNASSIGNED" : "EPIC"}
+        </span>
         <span className={styles.epicTitle}>{group.epicTitle}</span>
         <span className={styles.epicCount}>
           {group.doneCount}/{group.totalCount}
@@ -427,6 +428,36 @@ function WorkerHistory({
   );
 }
 
+export function formatQueueLabel(
+  mode: PanelMode,
+  groups: EpicGroup[],
+  totalTasks: number,
+  agentName: string | undefined,
+): string {
+  const epicCount = groups.filter((group) => !isOrphanGroup(group)).length;
+  const orphanCount = groups.length - epicCount;
+  const groupParts = [`${epicCount} ${pluralize("epic", epicCount)}`];
+  if (orphanCount > 0) {
+    groupParts.push(`${orphanCount} unassigned`);
+  }
+  const taskPart = `${totalTasks} ${pluralize("task", totalTasks)}`;
+  if (mode === "lead-open") {
+    return `Open queue · ${groupParts.join(" · ")} · ${taskPart}`;
+  }
+  if (mode === "workspace") {
+    return `Workspace queue · ${groupParts.join(" · ")} · ${taskPart}`;
+  }
+  return `${agentName ?? "Agent"}'s work · ${groupParts.join(" · ")} · ${taskPart}`;
+}
+
+function pluralize(word: string, count: number): string {
+  return count === 1 ? word : `${word}s`;
+}
+
+function isOrphanGroup(group: EpicGroup): boolean {
+  return group.epicId === ORPHAN_EPIC_KEY;
+}
+
 function TaskCard({
   task,
   workerAgent,
@@ -503,11 +534,11 @@ export function leadDeliveryStateLabel(
 ): string {
   switch ((deliveryState ?? "").trim().toLowerCase()) {
     case "pending":
-      return "waiting for lead";
+      return "context pending";
     case "delivered":
-      return "sent to lead";
+      return "context sent";
     case "acknowledged":
-      return "acknowledged";
+      return "lead acknowledged";
     default:
       return "";
   }

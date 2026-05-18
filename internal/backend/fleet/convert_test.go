@@ -34,7 +34,7 @@ func TestFleetIssueWire_FieldDriftGuard(t *testing.T) {
 			wireKeys["kind"] = true
 			continue
 		}
-		if key == "repo" {
+		if key == "repo" || key == "source_repo" {
 			wireKeys["repo_canonical"] = true
 			continue
 		}

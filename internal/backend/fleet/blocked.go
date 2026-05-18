@@ -8,7 +8,8 @@ import (
 
 func (b *FleetBackend) canonicalBlocked(ctx context.Context, opts backend.BlockedOpts) ([]backend.IssueData, error) {
 	path := "/issues/blocked"
-	if q := blockedOptsToQuery(opts); q != "" {
+	serverOpts := blockedServerOpts(opts)
+	if q := blockedOptsToQuery(serverOpts); q != "" {
 		path += "?" + q
 	}
 	resp, err := b.exec(ctx, "Blocked", "GET", path, nil)
@@ -18,5 +19,9 @@ func (b *FleetBackend) canonicalBlocked(ctx context.Context, opts backend.Blocke
 	if !hasData(resp) {
 		return []backend.IssueData{}, nil
 	}
-	return unmarshalBlockedIssueList(resp.Data, "Blocked")
+	issues, err := unmarshalBlockedIssueList(resp.Data, "Blocked")
+	if err != nil {
+		return nil, err
+	}
+	return filterBlockedIssues(issues, opts), nil
 }

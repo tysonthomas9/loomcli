@@ -206,6 +206,47 @@ func TestListIssues_Backend_KanbanUsesCanonicalReadyAndDeferred(t *testing.T) {
 	}
 }
 
+func TestListIssues_Backend_KanbanAppendsDeferredOnlyItems(t *testing.T) {
+	future := time.Now().UTC().Add(24 * time.Hour)
+	fb := &fakeIssueBackend{
+		listResult: []backend.IssueData{
+			{
+				ID:        "ready-1",
+				Title:     "Ready",
+				Status:    string(types.StatusOpen),
+				IssueType: string(types.TypeTask),
+				Priority:  1,
+			},
+		},
+		readyResult: []backend.IssueData{
+			{ID: "ready-1", Status: string(types.StatusOpen)},
+		},
+		deferredResult: []backend.IssueData{
+			{
+				ID:         "future-deferred",
+				Title:      "Future Deferred",
+				Status:     string(types.StatusOpen),
+				IssueType:  string(types.TypeTask),
+				Priority:   2,
+				DeferUntil: &future,
+			},
+		},
+	}
+	svc := newServiceWithFake(fb)
+
+	result, err := svc.ListIssues(context.Background(), ListIssuesParams{
+		Args:           &rpc.ListArgs{},
+		IncludeBlocked: true,
+	})
+	if err != nil {
+		t.Fatalf("ListIssues: %v", err)
+	}
+	deferred := findKanbanIssue(t, result.KanbanIssues, "future-deferred")
+	if deferred.IsReady || !deferred.IsDeferred || deferred.Issue.Status != types.StatusOpen {
+		t.Fatalf("deferred flags/status = ready:%v deferred:%v status:%q", deferred.IsReady, deferred.IsDeferred, deferred.Issue.Status)
+	}
+}
+
 func findKanbanIssue(t *testing.T, issues []KanbanIssue, id string) KanbanIssue {
 	t.Helper()
 	for _, issue := range issues {

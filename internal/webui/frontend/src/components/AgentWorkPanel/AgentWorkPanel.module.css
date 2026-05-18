@@ -169,17 +169,28 @@
   gap: var(--space-2);
 }
 
-.epicChip {
+.epicChip,
+.orphanChip {
   font-size: 0.625rem; /* 10px */
   font-weight: var(--font-weight-bold);
   letter-spacing: 0.04em;
-  background: color-mix(in srgb, var(--color-type-epic) 14%, transparent);
-  color: var(--color-type-epic);
-  border: 1px solid color-mix(in srgb, var(--color-type-epic) 36%, transparent);
+  border: 1px solid;
   border-radius: var(--radius-sm);
   padding: 2px var(--space-2);
   line-height: 1.4;
   flex-shrink: 0;
+}
+
+.epicChip {
+  background: color-mix(in srgb, var(--color-type-epic) 14%, transparent);
+  color: var(--color-type-epic);
+  border-color: color-mix(in srgb, var(--color-type-epic) 36%, transparent);
+}
+
+.orphanChip {
+  background: color-mix(in srgb, var(--color-text-muted) 12%, transparent);
+  color: var(--color-text-secondary);
+  border-color: color-mix(in srgb, var(--color-text-muted) 28%, transparent);
 }
 
 .epicTitle {

@@ -300,11 +300,39 @@ func TestList_QueryParams(t *testing.T) {
 
 	for _, want := range []string{
 		"status=open", "limit=5", "assignee=agent-1",
-		"labels=urgent", "updated_after=2026-01-01", "source_repos=repo-a",
+		"label=urgent", "updated_after=2026-01-01", "repo=repo-a",
 	} {
 		if !strings.Contains(gotQuery, want) {
 			t.Errorf("query %q missing %q", gotQuery, want)
 		}
+	}
+}
+
+func TestList_ClientFiltersMultipleReposWithoutServerLimit(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	var gotQuery string
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.RawQuery
+		respondOK(w, []*types.IssueWithCounts{
+			{Issue: &types.Issue{ID: "a", Title: "A", Status: types.StatusOpen, SourceRepo: "repo-a", CreatedAt: now, UpdatedAt: now}},
+			{Issue: &types.Issue{ID: "b", Title: "B", Status: types.StatusOpen, SourceRepo: "repo-b", CreatedAt: now, UpdatedAt: now}},
+			{Issue: &types.Issue{ID: "c", Title: "C", Status: types.StatusOpen, SourceRepo: "repo-c", CreatedAt: now, UpdatedAt: now}},
+		})
+	})
+	defer ts.Close()
+
+	result, err := fb.List(context.Background(), backend.ListOpts{
+		SourceRepos: []string{"repo-b", "repo-c"},
+		Limit:       1,
+	})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if strings.Contains(gotQuery, "source_repos=") || strings.Contains(gotQuery, "repo=") || strings.Contains(gotQuery, "limit=") {
+		t.Fatalf("query = %q, want no unsupported repo filter or pre-filter limit", gotQuery)
+	}
+	if len(result) != 1 || result[0].ID != "b" {
+		t.Fatalf("result = %+v, want first locally filtered repo item", result)
 	}
 }
 
@@ -1636,6 +1664,35 @@ func TestReady_HappyPath(t *testing.T) {
 	}
 	if result[0].Parent != "epic-1" {
 		t.Errorf("Parent = %q, want %q", result[0].Parent, "epic-1")
+	}
+}
+
+func TestReady_ClientFiltersSourceReposWithoutServerLimit(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	var gotQuery string
+	repoA := "repo-a"
+	repoB := "repo-b"
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.RawQuery
+		respondOK(w, []*readyIssueWithParent{
+			{fleetIssueWire: fleetIssueWire{ID: "repo-a", Title: "A", Status: string(types.StatusOpen), CreatedAt: now, UpdatedAt: now}, Repo: &repoA},
+			{fleetIssueWire: fleetIssueWire{ID: "repo-b", Title: "B", Status: string(types.StatusOpen), CreatedAt: now, UpdatedAt: now}, Repo: &repoB},
+		})
+	})
+	defer ts.Close()
+
+	result, err := fb.Ready(context.Background(), backend.ReadyOpts{
+		SourceRepos: []string{"repo-b"},
+		Limit:       1,
+	})
+	if err != nil {
+		t.Fatalf("Ready: %v", err)
+	}
+	if strings.Contains(gotQuery, "source_repos=") || strings.Contains(gotQuery, "limit=") {
+		t.Fatalf("query = %q, want no unsupported repo filter or pre-filter limit", gotQuery)
+	}
+	if len(result) != 1 || result[0].ID != "repo-b" {
+		t.Fatalf("result = %+v, want repo-b", result)
 	}
 }
 
