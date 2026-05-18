@@ -1,0 +1,93 @@
+#!/bin/sh
+set -eu
+
+cmd="${1:-}"
+
+json_escape() {
+  printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
+}
+
+write_transcript() {
+  text="$1"
+  if [ "${LOOM_WORKSPACE_RUNTIME_DIR:-}" = "" ] || [ "${LOOM_SESSION_ID:-}" = "" ]; then
+    return 0
+  fi
+  dir="${LOOM_WORKSPACE_RUNTIME_DIR}/sessions/${LOOM_SESSION_ID}"
+  mkdir -p "$dir"
+  escaped="$(json_escape "$text")"
+  ts="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+  printf '{"type":"assistant","timestamp":"%s","message":{"content":[{"type":"text","text":"%s"}]}}\n' "$ts" "$escaped" >> "${dir}/agent_transcript.jsonl"
+}
+
+step_delay="${LOOM_PLAYGROUND_STEP_DELAY:-1}"
+
+run_planner() {
+  task_id="${LOOM_ASSIGNED_TASK_ID:-PLAYGROUND-PLAN-1}"
+  agent="${LOOM_AGENT_NAME:-playground-planner}"
+  design="Approved design: playground planner verified the supervised run loop. The coder should append a line to playground.txt, commit it, and close the task."
+
+  echo "[playground] planner ${agent} handling ${task_id}"
+  write_transcript "Planner ${agent} claimed ${task_id}."
+  loom claim "$task_id" || true
+  sleep "$step_delay"
+  # Playground shortcut: skip the human-in-the-loop "review" step so the coder
+  # can pick the task up immediately. A real planner sets --status review and
+  # waits for `loom lead` to approve.
+  loom data update "$task_id" --design "$design" --status open
+  write_transcript "Planner ${agent} wrote design and pre-approved ${task_id}."
+  loom complete
+}
+
+run_coder() {
+  task_id="${LOOM_ASSIGNED_TASK_ID:-PLAYGROUND-CODE-1}"
+  agent="${LOOM_AGENT_NAME:-playground-coder}"
+  output_file="playground.txt"
+
+  echo "[playground] coder ${agent} handling ${task_id}"
+  write_transcript "Coder ${agent} claimed ${task_id}."
+  loom claim "$task_id" || true
+  sleep "$step_delay"
+
+  {
+    printf 'Task: %s\n' "$task_id"
+    printf 'Agent: %s\n' "$agent"
+    printf 'Result: playground deterministic backend produced a committed artifact.\n'
+    printf 'Updated: %s\n\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+  } >> "$output_file"
+
+  git add "$output_file"
+  git -c user.email=playground@loom.local -c user.name=Playground \
+    commit -m "Playground implementation (${task_id})" || true
+  loom data close "$task_id" --session "${LOOM_SESSION_ID:-}" --reason "Playground deterministic implementation completed."
+  write_transcript "Coder ${agent} committed ${output_file} and closed ${task_id}."
+  loom complete
+}
+
+case "$cmd" in
+  meta)
+    printf '{"display_name":"Playground","version":"1","description":"Deterministic mock harness for test/playground/","binary_name":"loom-backend-playground"}\n'
+    ;;
+  health)
+    printf '{"installed":true,"healthy":true,"message":"ready"}\n'
+    ;;
+  invoke)
+    case "${LOOM_ROLE:-}" in
+      plan)
+        run_planner
+        ;;
+      task)
+        run_coder
+        ;;
+      *)
+        case "${LOOM_AGENT_NAME:-}" in
+          *planner*) run_planner ;;
+          *) run_coder ;;
+        esac
+        ;;
+    esac
+    ;;
+  *)
+    echo "usage: loom-backend-playground {meta|health|invoke}" >&2
+    exit 2
+    ;;
+esac

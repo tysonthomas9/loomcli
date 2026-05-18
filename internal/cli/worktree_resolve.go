@@ -579,7 +579,7 @@ func GetWorkspaceRuntimeDir() string {
 			return
 		}
 
-		cfg, err := config.LoadConfig()
+		cfg, err := config.LoadConfigCached()
 		if err != nil || cfg == nil || len(cfg.Workspaces) == 0 {
 			workspaceRuntimeDirCache = "."
 			return
