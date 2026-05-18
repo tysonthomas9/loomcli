@@ -2433,50 +2433,15 @@ describe("App", () => {
   });
 
   describe("TerminalView integration", () => {
-    it("renders TalkToLeadButton in the app", () => {
+    it("does not render the floating TalkToLeadButton in the app", () => {
       const mockReturn = createMockUseIssuesReturn({});
       mockStoreState = mockReturn;
 
       render(<App />);
 
-      expect(screen.getByTestId("talk-to-lead-button")).toBeInTheDocument();
-    });
-
-    it("TalkToLeadButton has isActive=false when view is not terminal", () => {
-      const mockReturn = createMockUseIssuesReturn({});
-      mockStoreState = mockReturn;
-
-      render(<App />);
-
-      const button = screen.getByTestId("talk-to-lead-button");
-      expect(button).not.toHaveAttribute("data-active");
-      expect(button).toHaveAttribute("aria-pressed", "false");
-    });
-
-    it("TalkToLeadButton click calls navigateToView with terminal", () => {
-      const mockReturn = createMockUseIssuesReturn({});
-      mockStoreState = mockReturn;
-
-      render(<App />);
-
-      const button = screen.getByTestId("talk-to-lead-button");
-      fireEvent.click(button);
-
-      expect(mockNavigateToView).toHaveBeenCalledWith("terminal");
-    });
-
-    it("TalkToLeadButton shows active when view is terminal", () => {
-      const mockReturn = createMockUseIssuesReturn({});
-      mockStoreState = mockReturn;
-      vi.mocked(useRouteView).mockReturnValue(
-        createViewStateReturn("terminal"),
-      );
-
-      render(<App />);
-
-      const button = screen.getByTestId("talk-to-lead-button");
-      expect(button).toHaveAttribute("data-active", "true");
-      expect(button).toHaveAttribute("aria-pressed", "true");
+      expect(
+        screen.queryByTestId("talk-to-lead-button"),
+      ).not.toBeInTheDocument();
     });
 
     it("TerminalView is always mounted in the DOM", async () => {

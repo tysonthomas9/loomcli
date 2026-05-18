@@ -60,7 +60,6 @@ import { IssueDetailPanel } from "@/components/IssueDetailPanel/IssueDetailPanel
 import { AgentDetailPanel } from "@/components/AgentDetailPanel/AgentDetailPanel";
 import { AgentIconRail } from "@/components/AgentIconRail/AgentIconRail";
 import { WorkspaceTree } from "@/components/WorkspaceTree/WorkspaceTree";
-import { TalkToLeadButton } from "@/components/TalkToLeadButton/TalkToLeadButton";
 import { NavRail } from "@/components/NavRail/NavRail";
 import { ViewSubSwitcher } from "@/components/ViewSubSwitcher/ViewSubSwitcher";
 import { ThemeToggle } from "@/components/ThemeToggle/ThemeToggle";
@@ -909,12 +908,6 @@ function App() {
     [activeWorkspaceName, closeAllPanels, setActiveWorkspace],
   );
 
-  // Handle Talk to Lead button click
-  const handleTalkToLeadClick = useCallback(() => {
-    closeAllPanels();
-    navigateToView("terminal");
-  }, [closeAllPanels, navigateToView]);
-
   const hasWorkspaceRepo = workspaceRepos.length > 0;
   const hasWorkspaceAgent = Boolean(
     getOnboardingPlannerName(workspace?.agents),
@@ -1574,12 +1567,6 @@ function App() {
             isOpen={showCreateIssue}
             onClose={() => setShowCreateIssue(false)}
             onSuccess={handleCreateIssueSuccess}
-          />
-          <TalkToLeadButton
-            onClick={handleTalkToLeadClick}
-            isActive={activeView === "terminal"}
-            sessionCount={activeSessionCount}
-            avoidSidePanel={shouldShowWorkspaceOnboarding}
           />
         </AppLayout>
       </SearchTermProvider>
