@@ -27,7 +27,7 @@ import {
 } from "@/api/workspace";
 import type { IssueContext } from "@/api/terminal";
 import { buildShareUrl } from "@/utils/buildShareUrl";
-import { getReviewType } from "@/utils/issue";
+import { getReviewType, getWorkQueueCounts } from "@/utils/issue";
 import {
   isOnboardingRepo,
   ONBOARDING_AGENT_NAME,
@@ -438,39 +438,8 @@ function App() {
     return map;
   }, [activeView, issues, blockedIssuesData]);
 
-  // Compute Work Queue counts from workspace-scoped issues for sidebar display
-  const workQueueCounts = useMemo(() => {
-    let backlog = 0;
-    let open = 0;
-    let blocked = 0;
-    let inProgress = 0;
-    let needsReview = 0;
-    let done = 0;
-    for (const issue of issues) {
-      const isDeferred =
-        issue.is_deferred === true || issue.status === "deferred";
-      const isBlocked = issue.is_blocked === true || issue.status === "blocked";
-      if (issue.status === "closed") {
-        done++;
-      } else if (isDeferred) {
-        backlog++;
-      } else if (isBlocked) {
-        blocked++;
-      } else if (issue.is_ready === true) {
-        open++;
-      } else if (
-        issue.is_ready === undefined &&
-        (issue.status === "open" || issue.status === undefined)
-      ) {
-        open++;
-      } else if (issue.status === "in_progress") {
-        inProgress++;
-      } else if (issue.status === "review") {
-        needsReview++;
-      }
-    }
-    return { backlog, open, blocked, inProgress, needsReview, done };
-  }, [issues]);
+  // Compute Work Queue counts from workspace-scoped issues for sidebar display.
+  const workQueueCounts = useMemo(() => getWorkQueueCounts(issues), [issues]);
 
   const { toasts, showToast, dismissToast } = useToast();
   const mountedRef = useRef(true);

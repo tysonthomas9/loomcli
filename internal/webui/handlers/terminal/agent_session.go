@@ -87,6 +87,10 @@ func ensureAgentTerminalSession(ctx context.Context, svc service.TerminalService
 		return nil, err
 	}
 
+	if isDaemonOwnedEphemeralWorker(agent) {
+		return nil, service.ErrValidation("daemon-owned ephemeral worker terminals cannot be started from the agents page; use worker logs or task session history")
+	}
+
 	tabs, err := svc.ListTabs(ctx, workspace)
 	if err != nil {
 		return nil, err
@@ -250,6 +254,13 @@ func agentTerminalLaunchAllowed(agent *domain.Agent) bool {
 		return true
 	}
 	return agent.State != domain.AgentStateStopped && agent.DesiredState != domain.AgentDesiredStopped
+}
+
+func isDaemonOwnedEphemeralWorker(agent *domain.Agent) bool {
+	if agent == nil {
+		return false
+	}
+	return agent.Mode == domain.AgentModeEphemeral && !isLeadRole(agent.RoleName)
 }
 
 func disableStoredAgentLaunch(ctx context.Context, svc service.TerminalService, workspace string, existing *tabmeta.TabMetadata) (*tabmeta.TabMetadata, error) {

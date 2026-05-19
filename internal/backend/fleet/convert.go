@@ -28,6 +28,8 @@ type fleetIssueWire struct {
 	Parent      string     `json:"parent,omitempty"`
 	Design      string     `json:"design,omitempty"`
 	Description string     `json:"description,omitempty"`
+	Acceptance  string     `json:"acceptance_criteria,omitempty"`
+	Notes       string     `json:"notes,omitempty"`
 	CreatedAt   time.Time  `json:"created_at,omitempty"`
 	CreatedBy   string     `json:"created_by,omitempty"`
 	UpdatedAt   time.Time  `json:"updated_at,omitempty"`
@@ -40,24 +42,26 @@ type fleetIssueWire struct {
 // toIssue projects the wire shape to the canonical types.Issue.
 func (w fleetIssueWire) toIssue() types.Issue {
 	return types.Issue{
-		ID:          w.ID,
-		Title:       w.Title,
-		Description: w.Description,
-		Status:      types.Status(w.Status),
-		Priority:    w.Priority,
-		IssueType:   types.IssueType(w.Type),
-		Assignee:    w.Assignee,
-		Owner:       w.Owner,
-		Labels:      w.Labels,
-		SourceRepo:  w.sourceRepo(),
-		Design:      w.Design,
-		CreatedAt:   w.CreatedAt,
-		CreatedBy:   w.CreatedBy,
-		UpdatedAt:   w.UpdatedAt,
-		DueAt:       w.DueAt,
-		DeferUntil:  w.DeferUntil,
-		ClosedAt:    w.ClosedAt,
-		CloseReason: w.CloseReason,
+		ID:                 w.ID,
+		Title:              w.Title,
+		Description:        w.Description,
+		AcceptanceCriteria: w.Acceptance,
+		Notes:              w.Notes,
+		Status:             types.Status(w.Status),
+		Priority:           w.Priority,
+		IssueType:          types.IssueType(w.Type),
+		Assignee:           w.Assignee,
+		Owner:              w.Owner,
+		Labels:             w.Labels,
+		SourceRepo:         w.sourceRepo(),
+		Design:             w.Design,
+		CreatedAt:          w.CreatedAt,
+		CreatedBy:          w.CreatedBy,
+		UpdatedAt:          w.UpdatedAt,
+		DueAt:              w.DueAt,
+		DeferUntil:         w.DeferUntil,
+		ClosedAt:           w.ClosedAt,
+		CloseReason:        w.CloseReason,
 	}
 }
 

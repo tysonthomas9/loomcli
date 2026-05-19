@@ -169,13 +169,17 @@ func TestGet_HappyPath(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	details := types.IssueDetails{
 		Issue: types.Issue{
-			ID:        "issue-1",
-			Title:     "Test Issue",
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
-			CreatedAt: now,
-			UpdatedAt: now,
+			ID:                 "issue-1",
+			Title:              "Test Issue",
+			Description:        "description",
+			Design:             "design",
+			AcceptanceCriteria: "acceptance",
+			Notes:              "BLOCKED: missing origin remote",
+			Status:             types.StatusOpen,
+			Priority:           2,
+			IssueType:          types.TypeTask,
+			CreatedAt:          now,
+			UpdatedAt:          now,
 		},
 		Labels:       []string{"label-1"},
 		Dependencies: []*types.IssueWithDependencyMetadata{},
@@ -212,6 +216,18 @@ func TestGet_HappyPath(t *testing.T) {
 	}
 	if result.Title != "Test Issue" {
 		t.Errorf("Title = %q, want %q", result.Title, "Test Issue")
+	}
+	if result.Description != "description" {
+		t.Errorf("Description = %q, want description", result.Description)
+	}
+	if result.Design != "design" {
+		t.Errorf("Design = %q, want design", result.Design)
+	}
+	if result.AcceptanceCriteria != "acceptance" {
+		t.Errorf("AcceptanceCriteria = %q, want acceptance", result.AcceptanceCriteria)
+	}
+	if result.Notes != "BLOCKED: missing origin remote" {
+		t.Errorf("Notes = %q, want blocker note", result.Notes)
 	}
 }
 

@@ -140,14 +140,25 @@ func pushWorkspaceWorktrees(deps *cli.Deps, worktrees []cli.WorktreeInfo, source
 }
 
 func pushBranchInRepo(deps *cli.Deps, repoPath, sourceBranch, targetBranch, remote string) error {
+	return withRepoPushLock(repoPath, func() error {
+		return pushBranchInRepoLocked(deps, repoPath, sourceBranch, targetBranch, remote)
+	})
+}
+
+func pushBranchInRepoLocked(deps *cli.Deps, repoPath, sourceBranch, targetBranch, remote string) error {
 	r := resolveRemote(remote)
 
 	fmt.Println("=========================================")
 	fmt.Printf("Push: %s -> %s (repo: %s, remote: %s)\n", sourceBranch, targetBranch, repoPath, r)
 	fmt.Println("=========================================")
 
-	if err := gitFetchRemote(deps, repoPath, remote); err != nil {
-		return fmt.Errorf("fetching: %v", err)
+	hasRemote := remoteConfiguredDeps(deps, repoPath, remote)
+	if hasRemote {
+		if err := gitFetchRemote(deps, repoPath, remote); err != nil {
+			return fmt.Errorf("fetching: %v", err)
+		}
+	} else {
+		fmt.Printf("No %s remote configured; integrating into local %s only.\n", r, targetBranch)
 	}
 
 	stashCleanup, err := stashIfDirtyDeps(deps, repoPath)
@@ -162,6 +173,9 @@ func pushBranchInRepo(deps *cli.Deps, repoPath, sourceBranch, targetBranch, remo
 		return handlePushCheckoutErr(deps, err, repoPath, sourceBranch, targetBranch, remote)
 	}
 
+	if !hasRemote {
+		return pushAfterCheckoutLocalInRepo(deps, repoPath, sourceBranch, targetBranch)
+	}
 	return pushAfterCheckoutInRepo(deps, repoPath, sourceBranch, targetBranch, remote, r)
 }
 
@@ -203,6 +217,28 @@ func pushAfterCheckoutInRepo(deps *cli.Deps, repoPath, sourceBranch, targetBranc
 		return fmt.Errorf("pushing: %v", err)
 	}
 	fmt.Printf("✓ Pushed to %s/%s\n", r, targetBranch)
+	return nil
+}
+
+func pushAfterCheckoutLocalInRepo(deps *cli.Deps, repoPath, sourceBranch, targetBranch string) error {
+	hasCommits, err := hasCommitsBetweenDeps(deps, repoPath, targetBranch, sourceBranch)
+	if err == nil && !hasCommits {
+		fmt.Printf("✓ Already up to date (no new commits in %s)\n", sourceBranch)
+		return nil
+	}
+
+	conflicts, mergeErr := mergeSourceDeps(deps, repoPath, sourceBranch, targetBranch)
+	if mergeErr != nil {
+		if len(conflicts) > 0 {
+			if err := resolveLocalConflictsWithAgentDeps(deps, repoPath, sourceBranch, targetBranch, conflicts); err != nil {
+				return fmt.Errorf("resolving conflicts: %v", err)
+			}
+			return nil
+		}
+		return mergeErr
+	}
+
+	fmt.Printf("✓ Integrated %s into local %s (no remote configured)\n", sourceBranch, targetBranch)
 	return nil
 }
 

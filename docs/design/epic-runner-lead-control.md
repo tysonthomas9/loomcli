@@ -1102,6 +1102,78 @@ Tested at unit level:
   runtime is not applicable.
 - The no-daemon fix text does not suggest `ensure-runtime` in that topology.
 
+### 2026-05-19 UTC: Desktop App Full Slack Epic Runner Run
+
+Scope: validate the epic runner through the macOS desktop app, not the browser
+or Podman UI, using a fresh Slack clone workspace with two epics, three tasks
+per epic, and one lead per epic.
+
+Setup:
+
+- Built the desktop app and copied it to
+  `/private/tmp/Loom-E2E-20260519b.app`.
+- Started the desktop local runtime with data dir
+  `/private/tmp/loom-desktop-slack-e2e-20260519b` on
+  `http://127.0.0.1:65325`.
+- Seeded workspace `Slack_UI` (`SLACK-UI`) with repo `slack-src`, branch
+  `Slack_UI`, leads `atlas` and `nova`, two epics, and six child tasks:
+  `SLACK-UI-3` through `SLACK-UI-8`.
+
+Desktop UI validation:
+
+- Opened the desktop app Agents view and clicked Run for `SLACK-UI-1` on
+  `atlas`, then Run for `SLACK-UI-2` on `nova`.
+- The visible lead terminal received backend assignment context and acknowledged
+  the assignment before running `loom epic run --parent <epic>`.
+- The table/list view grouped tasks under their epic headers, which made the
+  six-task Slack run easier to scan than the flat list.
+- The removed Talk to Lead button stayed absent from the UI.
+- The reduced viewport scale and global 2px font reduction were readable on the
+  desktop app window without obvious text overlap.
+- Clicking an active ephemeral worker opened a read-only worker summary instead
+  of trying to attach a second live terminal to the daemon-owned worker.
+
+Runner result:
+
+- `SLACK-UI-3`, `SLACK-UI-4`, and `SLACK-UI-5` closed under `atlas`.
+- `SLACK-UI-6`, `SLACK-UI-7`, and `SLACK-UI-8` closed under `nova`.
+- All ephemeral worker agents ended in `state=stopped`,
+  `desired_state=stopped`.
+- `loom data blocked` returned no blocked work.
+- The target repo was clean at the end:
+  `git status --short --branch` returned only `## Slack_UI`.
+- The target branch contained the expected integration commits, including:
+  - `5963788 Resolve merge conflicts: slack-ui-1-slack-ui-5-92656f8a -> Slack_UI`
+  - `544998c Resolve merge conflicts: slack-ui-2-slack-ui-8-2ec91e74 -> Slack_UI`
+  - `066f700 Resolve merge conflicts: slack-ui-1-slack-ui-3-6254cd2d -> Slack_UI`
+  - `fb4d72d Resolve merge conflicts: slack-ui-1-slack-ui-4-f27ffc15 -> Slack_UI`
+  - `b230fa1 Resolve merge conflicts: slack-ui-2-slack-ui-6-117a2a96 -> Slack_UI`
+  - `ff631d2 Seed Slack workspace data (SLACK-UI-7)`
+
+Important observations:
+
+- Repo-backed workspaces must start the desktop app-data daemon even when there
+  are no runnable long-lived auto agents. The desktop run relied on that daemon
+  to launch lead and worker sessions.
+- Local-only repos with no `origin` must integrate locally instead of failing
+  fetch/pull/push. The Slack seed repo intentionally had no remote.
+- Parallel workers caused repeated same-file merge conflicts in `src/app.js`,
+  `src/styles.css`, and tests. The per-repo push lock serialized integration,
+  and the built-in conflict resolver eventually produced clean merge commits
+  with build/test checks passing.
+- While an integration resolver owns the target repo, the target branch is
+  transiently dirty or unmerged. That state is expected, but the UI should grow
+  a clearer "integrating" or "resolving merge" state so users do not read it as
+  stuck worker execution.
+- Parent epics remained `open` after all child tasks closed. That is consistent
+  with the current lead-mode rule to ask before closing epics, but the UI should
+  make "all child tasks done, epic still open" explicit.
+- After the run, reopening the copied test desktop app through Launch Services
+  produced a running `loom-desktop` process with no accessible macOS window.
+  The earlier desktop window was usable for the run itself. Treat this as a
+  desktop window lifecycle gotcha to investigate separately from runner
+  correctness.
+
 ## Follow-Up Work
 
 - For Codex, do we need item-level timeline events in addition to

@@ -580,6 +580,21 @@ func TestGenerateConflictResolutionPromptWithPush(t *testing.T) {
 				"git push origin loom-push-temp-123:release",
 			},
 		},
+		{
+			name:         "empty pushRef keeps local-only conflict resolution local",
+			sourceBranch: "feature/local",
+			targetBranch: "Slack_UI",
+			conflicts:    []string{"src/data.js"},
+			pushRef:      "",
+			wantParts: []string{
+				"No remote is configured for this repo",
+				"Do not run git push origin",
+				"git commit -m \"Resolve merge conflicts: feature/local -> Slack_UI",
+			},
+			notWantParts: []string{
+				"\ngit push origin",
+			},
+		},
 	}
 
 	for _, tc := range tests {

@@ -40,6 +40,23 @@ function completedWorkerAgent(): LoomAgentStatus {
   };
 }
 
+function activeWorkerAgent(): LoomAgentStatus {
+  return {
+    name: "worker-e2e-2-live",
+    branch: "worker/e2e-2-live",
+    status: "working: E2E-2",
+    ahead: 0,
+    behind: 0,
+    workspace: "E2E",
+    parent: "E2E-1",
+    task_id: "E2E-2",
+    session_id: "sess-live",
+    mode: "ephemeral",
+    desired_state: "running",
+    state: "active",
+  };
+}
+
 function renderWithAgents(agents: LoomAgentStatus[], agentName: string) {
   const store = createAgentStore();
   store.setState({ agents });
@@ -188,6 +205,21 @@ describe("AgentDetailMain", () => {
     ).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Rerun task" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId("terminal-view")).not.toBeInTheDocument();
+  });
+
+  it("does not attach a terminal for active daemon-owned ephemeral workers", () => {
+    const agent = activeWorkerAgent();
+
+    renderWithAgents([agent], agent.name);
+
+    expect(screen.getByText("Ephemeral worker attempt")).toBeInTheDocument();
+    expect(
+      screen.getByText(/daemon-owned ephemeral worker is already running/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Open logs" }),
     ).toBeInTheDocument();
     expect(screen.queryByTestId("terminal-view")).not.toBeInTheDocument();
   });

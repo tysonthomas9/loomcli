@@ -82,8 +82,7 @@ export function AgentDetailMain({
     [],
   );
   const terminalUnavailable = agent != null && isTerminalUnavailable(agent);
-  const completedEphemeralWorker =
-    agent != null && isCompletedEphemeralWorker(agent);
+  const ephemeralWorker = agent != null && isEphemeralWorker(agent);
   const shouldResolveLeadTerminal =
     agent != null && isLeadRole(agent.role) && terminalUnavailable;
   const terminalEmptyState =
@@ -123,8 +122,8 @@ export function AgentDetailMain({
           position: "relative",
         }}
       >
-        {completedEphemeralWorker ? (
-          <CompletedWorkerSummary agent={agent} />
+        {ephemeralWorker ? (
+          <EphemeralWorkerSummary agent={agent} />
         ) : terminalUnavailable && !shouldResolveLeadTerminal ? (
           <EmptyState
             message={terminalEmptyState?.message ?? "Agent is stopped"}
@@ -167,11 +166,11 @@ function terminalUnavailableEmptyState(_agent: LoomAgentStatus): {
   };
 }
 
-function isCompletedEphemeralWorker(agent: LoomAgentStatus): boolean {
-  return agent.mode === "ephemeral" && isTerminalUnavailable(agent);
+function isEphemeralWorker(agent: LoomAgentStatus): boolean {
+  return agent.mode === "ephemeral" && !isLeadRole(agent.role);
 }
 
-function CompletedWorkerSummary({
+function EphemeralWorkerSummary({
   agent,
 }: {
   agent: LoomAgentStatus;
@@ -180,6 +179,12 @@ function CompletedWorkerSummary({
     agent.task_id || parseLoomStatus(agent.status ?? "").taskId || "unknown";
   const workspace = agent.workspace || "";
   const sessionId = agent.session_id || "";
+  const running = !isTerminalUnavailable(agent);
+  const stateLabel =
+    agent.state ||
+    agent.desired_state ||
+    parseLoomStatus(agent.status ?? "").type ||
+    "unknown";
   const hasTaskSession = taskId !== "unknown" && sessionId !== "";
   const logsHref =
     workspace !== ""
@@ -271,7 +276,7 @@ function CompletedWorkerSummary({
           </span>
           <code>{agent.session_id || "not recorded"}</code>
           <span style={{ color: "var(--color-text-muted, #666)" }}>State</span>
-          <span>{agent.desired_state || agent.status || "stopped"}</span>
+          <span>{stateLabel}</span>
         </div>
         <div
           style={{
@@ -280,8 +285,9 @@ function CompletedWorkerSummary({
             color: "var(--color-text-secondary, #555)",
           }}
         >
-          This worker is retained as task attempt history. Live terminal attach
-          is disabled after the ephemeral run stops.
+          {running
+            ? "This daemon-owned ephemeral worker is already running under Loom. Live terminal attach is disabled so the UI does not launch a duplicate worker; use logs while it runs."
+            : "This daemon-owned ephemeral worker has stopped. Live terminal attach is disabled after the ephemeral run stops; use logs and task session artifacts for review."}
         </div>
         <div
           style={{

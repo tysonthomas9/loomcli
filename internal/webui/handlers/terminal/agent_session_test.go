@@ -385,6 +385,53 @@ func TestEnsureAgentTerminalSessionRejectsStoppedAgentWithoutSession(t *testing.
 	}
 }
 
+func TestEnsureAgentTerminalSessionRejectsActiveEphemeralWorkerWithoutRelaunch(t *testing.T) {
+	ctx := context.Background()
+	st, tabStore, rdb := newAgentSessionTestDeps(t)
+	svc := webuiterminal.NewTerminalService(
+		nil,
+		tabStore,
+		nil,
+		rdb,
+		nil,
+		time.Now(),
+	)
+
+	if _, err := st.Agents().Create(ctx, store.AgentCreate{
+		WorkspaceKey:   "E2E",
+		Name:           "worker-live",
+		RoleName:       "task",
+		Mode:           domain.AgentModeEphemeral,
+		DesiredState:   domain.AgentDesiredRunning,
+		MaxConcurrency: 1,
+	}); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	active := domain.AgentStateActive
+	if _, err := st.Agents().Update(ctx, "E2E", "worker-live", store.AgentUpdate{
+		State: &active,
+	}); err != nil {
+		t.Fatalf("activate agent: %v", err)
+	}
+
+	_, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "worker-live", "http://loom.test")
+	var svcErr *service.ServiceError
+	if !errors.As(err, &svcErr) || svcErr.Kind != service.KindValidation {
+		t.Fatalf("ensureAgentTerminalSession error = %v, want validation", err)
+	}
+	if !strings.Contains(svcErr.Message, "daemon-owned ephemeral worker") {
+		t.Fatalf("validation message = %q, want daemon-owned ephemeral worker guidance", svcErr.Message)
+	}
+
+	tabs, err := svc.ListTabs(ctx, "E2E")
+	if err != nil {
+		t.Fatalf("list tabs: %v", err)
+	}
+	if len(tabs) != 0 {
+		t.Fatalf("tab count = %d, want no terminal tab created for daemon-owned worker", len(tabs))
+	}
+}
+
 func TestEnsureAgentTerminalSessionCreatesLaunchForStoppedAssignedLead(t *testing.T) {
 	ctx := context.Background()
 	st, tabStore, rdb := newAgentSessionTestDeps(t)
