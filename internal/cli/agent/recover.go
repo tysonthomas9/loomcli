@@ -16,6 +16,14 @@ func strPtr(s string) *string { return &s }
 var (
 	recoverNoAnalyze bool
 	recoverForce     bool
+
+	resolveRecoverWorktreePathFn = cli.ResolveWorktreePath
+	checkRecoverLockFn           = cli.CheckLock
+	handleRunningAgentFn         = handleRunningAgent
+	clearRecoverStaleLockFn      = clearStaleLock
+	handleRecoverOrphanedTaskFn  = handleOrphanedTask
+	resetRecoverOrphanedTasksFn  = resetOrphanedAgentTasks
+	cleanRecoverUntrackedFilesFn = cleanUntrackedFiles
 )
 
 var recoverCmd = &cobra.Command{
@@ -64,7 +72,7 @@ func runRecover(cmd *cobra.Command, args []string) {
 	deps := cli.GetDeps(cmd)
 	worktreeName := args[0]
 
-	worktreePath, err := cli.ResolveWorktreePath(worktreeName)
+	worktreePath, err := resolveRecoverWorktreePathFn(worktreeName)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
@@ -75,7 +83,7 @@ func runRecover(cmd *cobra.Command, args []string) {
 	fmt.Println("=========================================")
 	fmt.Println("")
 
-	lockInfo, isRunning, err := cli.CheckLock(worktreePath)
+	lockInfo, isRunning, err := checkRecoverLockFn(worktreePath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error checking lock: %v\n", err)
 		os.Exit(1)
@@ -83,25 +91,25 @@ func runRecover(cmd *cobra.Command, args []string) {
 
 	if lockInfo == nil {
 		fmt.Println("No lock file found - checking for orphaned tasks...")
-		resetOrphanedAgentTasks(deps, worktreePath, worktreeName, "", !recoverNoAnalyze)
+		resetRecoverOrphanedTasksFn(deps, worktreePath, worktreeName, "", !recoverNoAnalyze)
 		fmt.Println("Agent is ready for new work.")
 		return
 	}
 
 	if isRunning {
-		if !handleRunningAgent(lockInfo.PID) {
+		if !handleRunningAgentFn(lockInfo.PID) {
 			return
 		}
 	}
 
-	clearStaleLock(worktreePath, lockInfo.PID)
+	clearRecoverStaleLockFn(worktreePath, lockInfo.PID)
 
 	if lockInfo.TaskID != "" {
-		handleOrphanedTask(deps, worktreePath, lockInfo.TaskID, !recoverNoAnalyze)
+		handleRecoverOrphanedTaskFn(deps, worktreePath, lockInfo.TaskID, !recoverNoAnalyze)
 	}
 
-	resetOrphanedAgentTasks(deps, worktreePath, lockInfo.AgentName, lockInfo.TaskID, !recoverNoAnalyze)
-	cleanUntrackedFiles(worktreePath, recoverForce)
+	resetRecoverOrphanedTasksFn(deps, worktreePath, lockInfo.AgentName, lockInfo.TaskID, !recoverNoAnalyze)
+	cleanRecoverUntrackedFilesFn(worktreePath, recoverForce)
 
 	fmt.Println("")
 	fmt.Println("=========================================")

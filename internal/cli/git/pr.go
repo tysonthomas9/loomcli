@@ -12,6 +12,7 @@ import (
 
 var prAll bool
 var prWorkspace string
+var createPRFn = createPR
 
 var prCmd = &cobra.Command{
 	Use:               "pr [worktree] [target]",
@@ -208,7 +209,7 @@ func prWorkspaceWorktrees(deps *cli.Deps, worktrees []cli.WorktreeInfo, sourceBr
 
 		remote := wt.Repo.Remote
 
-		url, err := createPR(deps, wt.Path, source, target, remote)
+		url, err := createPRFn(deps, wt.Path, source, target, remote)
 		if err != nil {
 			results = append(results, result{repo: wt.Name, success: false, err: err.Error()})
 		} else {

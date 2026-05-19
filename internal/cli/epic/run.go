@@ -40,6 +40,13 @@ var (
 	runDryRun          bool
 	runNodeID          string
 	runLead            string
+
+	epicSignalContextFn       = signalContext
+	epicOpenStoreFn           = cmdstore.OpenStore
+	epicResolveWorkspaceKeyFn = bootstrap.ResolveActiveWorkspaceKey
+	epicDefaultIssueBackendFn = cli.DefaultIssueBackend
+	epicNewRunnerFromFlagsFn  = newRunnerFromFlags
+	epicRunConfiguredRunnerFn = runConfiguredRunner
 )
 
 var epicCmd = &cobra.Command{
@@ -95,29 +102,33 @@ func runEpicRun(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	ctx, cancel := signalContext(cmd.Context())
+	ctx, cancel := epicSignalContextFn(cmd.Context())
 	defer cancel()
 
-	handle, err := cmdstore.OpenStore(ctx)
+	handle, err := epicOpenStoreFn(ctx)
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)
 	}
 	defer func() { _ = handle.Close() }()
 
-	ws, err := bootstrap.ResolveActiveWorkspaceKey(ctx, handle.Store.Workspaces())
+	ws, err := epicResolveWorkspaceKeyFn(ctx, handle.Store.Workspaces())
 	if err != nil {
 		return fmt.Errorf("resolve workspace: %w", err)
 	}
 
-	ib := cli.DefaultIssueBackend()
+	ib := epicDefaultIssueBackendFn()
 	if ib == nil {
 		return errors.New("no issue backend available")
 	}
 
-	r, err := newRunnerFromFlags(ctx, handle.Store, ib, ws)
+	r, err := epicNewRunnerFromFlagsFn(ctx, handle.Store, ib, ws)
 	if err != nil {
 		return err
 	}
+	return epicRunConfiguredRunnerFn(ctx, r)
+}
+
+func runConfiguredRunner(ctx context.Context, r *epicrunner.Runner) error {
 	r.PrintHeader()
 	return r.RunLoop(ctx)
 }

@@ -123,7 +123,7 @@ func syncSingleWorkspace(deps *cli.Deps, resolver *cli.Resolver, pushOnly, pullO
 	if !pullOnly {
 		fmt.Println("")
 		fmt.Println("--- Phase 1: Push ---")
-		if err := pushWorkspaceWorktrees(deps, worktrees, "", ""); err != nil {
+		if err := pushWorkspaceWorktreesFn(deps, worktrees, "", ""); err != nil {
 			fmt.Fprintf(os.Stderr, "Push phase completed with errors: %v\n", err)
 		}
 	}

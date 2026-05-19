@@ -246,3 +246,60 @@ func TestResolveQueueSourceReposWarnsWithoutWorkspace(t *testing.T) {
 		t.Fatalf("SourceRepos = %+v, want empty without workspace", agent.SourceRepos)
 	}
 }
+
+func TestRunDaemonQueueUsesHookedDependencies(t *testing.T) {
+	oldGetwd := daemonGetwdFn
+	oldLoad := loadDaemonConfigFn
+	oldResolveRole := resolveQueueRoleConfigFn
+	oldResolveRepos := resolveQueueSourceReposFn
+	oldFetch := fetchQueueReadyIssuesFn
+	t.Cleanup(func() {
+		daemonGetwdFn = oldGetwd
+		loadDaemonConfigFn = oldLoad
+		resolveQueueRoleConfigFn = oldResolveRole
+		resolveQueueSourceReposFn = oldResolveRepos
+		fetchQueueReadyIssuesFn = oldFetch
+	})
+
+	cfg := &DaemonConfig{
+		Agents: []AgentEntry{{Worktree: "spark", Role: "task", Parent: "EPIC-1", Repo: "api"}},
+	}
+	daemonGetwdFn = func() (string, error) { return "/repo", nil }
+	loadDaemonConfigFn = func(projectDir string) (*DaemonConfig, error) {
+		if projectDir != "/repo" {
+			t.Fatalf("projectDir = %q", projectDir)
+		}
+		return cfg, nil
+	}
+	resolveQueueRoleConfigFn = func(roleName string, got *DaemonConfig, projectDir string) (RoleConfig, error) {
+		if roleName != "task" || got != cfg || projectDir != "/repo" {
+			t.Fatalf("role hook args role=%q cfg=%p projectDir=%q", roleName, got, projectDir)
+		}
+		return RoleConfig{TaskFilter: "has_design", Skills: []string{"go"}}, nil
+	}
+	resolveQueueSourceReposFn = func(agent *AgentEntry) {
+		agent.SourceRepos = []string{"api"}
+	}
+	fetchQueueReadyIssuesFn = func(parentID, repoLabel string) ([]backend.IssueData, error) {
+		if parentID != "EPIC-1" || repoLabel != "api" {
+			t.Fatalf("fetch args parent=%q repo=%q", parentID, repoLabel)
+		}
+		return []backend.IssueData{
+			{ID: "TASK-1", Title: "ship it", Status: "open", IssueType: "task", Priority: 1, Labels: []string{"go"}, SourceRepo: "api", Design: "ready"},
+			{ID: "TASK-2", Title: "needs plan", Status: "open", IssueType: "task", Priority: 1, SourceRepo: "api"},
+		}, nil
+	}
+
+	out := captureDaemonStdout(t, func() { runDaemonQueue(nil, []string{"spark"}) })
+	for _, want := range []string{"Agent: spark", "Role:  task", "Skills: go", "Source repos: api", "TASK-1", "1 filtered"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("queue output missing %q:\n%s", want, out)
+		}
+	}
+
+	fetchQueueReadyIssuesFn = func(string, string) ([]backend.IssueData, error) { return nil, nil }
+	out = captureDaemonStdout(t, func() { runDaemonQueue(nil, []string{"spark"}) })
+	if !strings.Contains(out, "No tasks in the ready queue") {
+		t.Fatalf("empty queue output = %q", out)
+	}
+}

@@ -8,6 +8,8 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli"
 )
 
+var pushWorkspaceWorktreesFn = pushWorkspaceWorktrees
+
 func pushAllWorkspaces(deps *cli.Deps, targetBranch string) error {
 	resolver, err := cli.NewResolver()
 	if err != nil {
@@ -46,7 +48,7 @@ func pushAllWorkspaces(deps *cli.Deps, targetBranch string) error {
 			continue
 		}
 
-		if err := pushWorkspaceWorktrees(deps, worktrees, "", targetBranch); err != nil {
+		if err := pushWorkspaceWorktreesFn(deps, worktrees, "", targetBranch); err != nil {
 			failures++
 		}
 		fmt.Println("")
@@ -77,7 +79,7 @@ func pushWorkspaceRepos(deps *cli.Deps, resolver *cli.Resolver, sourceBranch, ta
 	fmt.Println("=========================================")
 	fmt.Println("")
 
-	pushErr := pushWorkspaceWorktrees(deps, worktrees, sourceBranch, targetBranch)
+	pushErr := pushWorkspaceWorktreesFn(deps, worktrees, sourceBranch, targetBranch)
 
 	fmt.Println("=========================================")
 	fmt.Printf("Workspace %q push complete!\n", resolver.WorkspaceName())

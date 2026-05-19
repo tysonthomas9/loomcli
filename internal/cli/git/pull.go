@@ -11,6 +11,7 @@ import (
 
 var pullAll bool
 var pullWorkspace string
+var pullRepoWorktreeFn = pullRepoWorktree
 
 var pullCmd = &cobra.Command{
 	Use:               "pull [worktree] [branch]",
@@ -190,7 +191,7 @@ func pullWorkspaceRepo(deps *cli.Deps, resolver *cli.Resolver, worktreeName, sou
 	fmt.Println("=========================================")
 	fmt.Println("")
 
-	err = pullRepoWorktree(deps, matched.Path, matched.Branch, source, remote)
+	err = pullRepoWorktreeFn(deps, matched.Path, matched.Branch, source, remote)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
@@ -220,7 +221,7 @@ func pullWorkspaceWorktrees(deps *cli.Deps, worktrees []cli.WorktreeInfo, source
 
 		remote := wt.Repo.Remote
 
-		err := pullRepoWorktree(deps, wt.Path, wt.Branch, source, remote)
+		err := pullRepoWorktreeFn(deps, wt.Path, wt.Branch, source, remote)
 		if err != nil {
 			results = append(results, result{repo: wt.Name, success: false, err: err.Error()})
 		} else {

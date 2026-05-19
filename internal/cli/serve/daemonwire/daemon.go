@@ -351,13 +351,13 @@ func cloneFloatPtr(v *float64) *float64 {
 // for a named agent using the task router. Returns nil if the working
 // directory cannot be resolved.
 func BuildAgentQueueFn() func(string) ([]webui.AgentQueueEntry, error) {
-	projectDir, err := os.Getwd()
+	projectDir, err := daemonwireGetwdFn()
 	if err != nil {
 		return nil
 	}
 
 	return func(agentName string) ([]webui.AgentQueueEntry, error) {
-		cfg, err := config.LoadDaemonConfig(projectDir)
+		cfg, err := daemonwireLoadDaemonConfigFn(projectDir)
 		if err != nil {
 			return nil, fmt.Errorf("load daemon config: %w", err)
 		}
@@ -381,7 +381,7 @@ func BuildAgentQueueFn() func(string) ([]webui.AgentQueueEntry, error) {
 		}
 		constraints := cli.MergeRoleConstraints(roleConfig, *agent)
 
-		issues, err := cli.FetchReadyIssues(agent.Parent, agent.Repo)
+		issues, err := daemonwireFetchReadyIssuesFn(agent.Parent, agent.Repo)
 		if err != nil {
 			return nil, fmt.Errorf("fetch ready issues: %w", err)
 		}
@@ -389,6 +389,12 @@ func BuildAgentQueueFn() func(string) ([]webui.AgentQueueEntry, error) {
 		return scoreAndSortQueue(issues, constraints), nil
 	}
 }
+
+var (
+	daemonwireGetwdFn            = os.Getwd
+	daemonwireLoadDaemonConfigFn = config.LoadDaemonConfig
+	daemonwireFetchReadyIssuesFn = cli.FetchReadyIssues
+)
 
 // scoreAndSortQueue scores issues against constraints and returns sorted entries.
 func scoreAndSortQueue(issues []backend.IssueData, constraints cli.RoleConstraints) []webui.AgentQueueEntry {

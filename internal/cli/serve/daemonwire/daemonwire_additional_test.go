@@ -6,12 +6,15 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/kv"
+	"github.com/tysonthomas9/loomcli/internal/webui"
 )
 
 func TestResolveFleetJWTKeyFromEnv(t *testing.T) {
@@ -69,4 +72,58 @@ func TestStartLocalRedisUsesConfigDirSnapshot(t *testing.T) {
 		t.Fatalf("config dir = %q, want %q", got, dir)
 	}
 	_ = filepath.Join(dir, "terminal-state", "snapshot.json")
+}
+
+func TestBuildAgentQueueFnUsesHookedDependencies(t *testing.T) {
+	oldGetwd := daemonwireGetwdFn
+	oldLoad := daemonwireLoadDaemonConfigFn
+	oldFetch := daemonwireFetchReadyIssuesFn
+	t.Cleanup(func() {
+		daemonwireGetwdFn = oldGetwd
+		daemonwireLoadDaemonConfigFn = oldLoad
+		daemonwireFetchReadyIssuesFn = oldFetch
+	})
+
+	cfg := &config.DaemonConfig{
+		Agents: []config.AgentEntry{{Worktree: "spark", Role: "task", Parent: "EPIC-1", Repo: "api"}},
+		Roles: map[string]config.RoleConfig{
+			"task": {TaskFilter: "has_design", Skills: []string{"go"}},
+		},
+	}
+	daemonwireGetwdFn = func() (string, error) { return "/repo", nil }
+	daemonwireLoadDaemonConfigFn = func(projectDir string) (*config.DaemonConfig, error) {
+		if projectDir != "/repo" {
+			t.Fatalf("projectDir = %q", projectDir)
+		}
+		return cfg, nil
+	}
+	daemonwireFetchReadyIssuesFn = func(parentID, repoLabel string) ([]backend.IssueData, error) {
+		if parentID != "EPIC-1" || repoLabel != "api" {
+			t.Fatalf("fetch args parent=%q repo=%q", parentID, repoLabel)
+		}
+		return []backend.IssueData{
+			{ID: "TASK-1", Title: "first", Status: "open", IssueType: "task", Priority: 2, Labels: []string{"go"}, Design: "ready"},
+			{ID: "TASK-2", Title: "filtered", Status: "open", IssueType: "task", Priority: 1},
+		}, nil
+	}
+
+	queueFn := BuildAgentQueueFn()
+	if queueFn == nil {
+		t.Fatal("BuildAgentQueueFn returned nil")
+	}
+	entries, err := queueFn("spark")
+	if err != nil {
+		t.Fatalf("queueFn: %v", err)
+	}
+	if len(entries) != 1 || entries[0].IssueID != "TASK-1" || entries[0].Score == 0 {
+		t.Fatalf("entries = %+v", entries)
+	}
+	if _, err := queueFn("missing"); err != webui.ErrAgentNotFound {
+		t.Fatalf("missing agent err = %v", err)
+	}
+
+	daemonwireGetwdFn = func() (string, error) { return "", os.ErrNotExist }
+	if got := BuildAgentQueueFn(); got != nil {
+		t.Fatal("BuildAgentQueueFn getwd failure returned non-nil callback")
+	}
 }

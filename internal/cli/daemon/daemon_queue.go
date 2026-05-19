@@ -32,6 +32,12 @@ Examples:
 	Run:  runDaemonQueue,
 }
 
+var (
+	resolveQueueRoleConfigFn  = ResolveRoleConfigStatic
+	resolveQueueSourceReposFn = resolveQueueSourceRepos
+	fetchQueueReadyIssuesFn   = cli.FetchReadyIssues
+)
+
 // ResolveRoleConfigStatic looks up a role by name without requiring a Daemon instance.
 // For built-in roles, merges any user-defined config on top of defaults.
 // For custom roles, requires a prompt_file that must exist.
@@ -58,13 +64,13 @@ func findAgentEntryStatic(config *cfgpkg.DaemonConfig, worktreeName string) (*cf
 func runDaemonQueue(cmd *cobra.Command, args []string) {
 	agentName := args[0]
 
-	projectDir, err := os.Getwd()
+	projectDir, err := daemonGetwdFn()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: cannot determine working directory: %v\n", err)
 		os.Exit(1)
 	}
 
-	config, err := cfgpkg.LoadDaemonConfig(projectDir)
+	config, err := loadDaemonConfigFn(projectDir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: loading config: %v\n", err)
 		os.Exit(1)
@@ -76,18 +82,18 @@ func runDaemonQueue(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	rc, err := ResolveRoleConfigStatic(agent.Role, config, projectDir)
+	rc, err := resolveQueueRoleConfigFn(agent.Role, config, projectDir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: resolving role %q: %v\n", agent.Role, err)
 		os.Exit(1)
 	}
 
-	resolveQueueSourceRepos(agent)
+	resolveQueueSourceReposFn(agent)
 	constraints := cli.MergeRoleConstraints(rc, *agent)
 
 	printQueueHeader(agentName, agent, constraints)
 
-	issues, err := cli.FetchReadyIssues(agent.Parent, agent.Repo)
+	issues, err := fetchQueueReadyIssuesFn(agent.Parent, agent.Repo)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: fetching ready issues: %v\n", err)
 		os.Exit(1)
