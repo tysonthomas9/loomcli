@@ -115,6 +115,55 @@ func TestPullAllWorkspacesUsesConfiguredRepos(t *testing.T) {
 	pullAllWorkspaces(deps, "")
 }
 
+func TestPushAllWorkspacesUsesConfiguredRepos(t *testing.T) {
+	tmp := t.TempDir()
+	ws1 := filepath.Join(tmp, "ws1")
+	ws2 := filepath.Join(tmp, "ws2")
+	repo := filepath.Join(ws1, "api")
+	if err := os.MkdirAll(filepath.Join(repo, ".git"), 0755); err != nil {
+		t.Fatalf("mkdir repo: %v", err)
+	}
+	if err := os.MkdirAll(ws2, 0755); err != nil {
+		t.Fatalf("mkdir ws2: %v", err)
+	}
+	setupWorkspaceConfig(t, &LoomConfig{
+		DefaultWorkspace: "ws1",
+		Workspaces: map[string]WorkspaceConfig{
+			"ws1": {Path: ws1, Repos: []RepoConfig{{Name: "api", Path: repo}}},
+			"ws2": {Path: ws2},
+		},
+	})
+
+	deps, _, _, _, _ := NewTestDeps(t)
+	cmdMock := NewCommandMock(t, []CommandStub{
+		{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "feature\n"},
+		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},
+		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},
+		{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "feature\n"},
+		{Name: "git", Args: []string{"log", "origin/main..feature", "--oneline"}, Stdout: "abc commit\n"},
+	})
+	cmdMock.Install()
+	deps.Exec = cmdMock
+	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
+		{Args: []string{"fetch", "origin"}},
+		{Args: []string{"stash"}},
+		{Args: []string{"checkout", "main"}},
+		{Args: []string{"pull", "origin", "main"}},
+		{Args: []string{"merge", "-m", "Merge feature into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>", "--", "feature"}},
+		{Args: []string{"push", "origin", "main"}},
+		{Args: []string{"checkout", "feature"}},
+	})
+	outputMock.InstallOn(deps)
+	deps.Agent = &MockAgentInvoker{InteractiveFunc: func(workDir, prompt, agentName string) error {
+		t.Fatalf("unexpected agent invocation in %s: %s", workDir, prompt)
+		return nil
+	}}
+
+	if err := pushAllWorkspaces(deps, ""); err != nil {
+		t.Fatalf("pushAllWorkspaces: %v", err)
+	}
+}
+
 func TestPullWorkspaceRepoUsesRepoDefaultBranch(t *testing.T) {
 	tmp := t.TempDir()
 	ws := filepath.Join(tmp, "ws")

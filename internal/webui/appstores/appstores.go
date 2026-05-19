@@ -80,6 +80,9 @@ func GetMutationsSinceFn(sub *MultiWorkspaceSubscriber) func(wsID string, since 
 
 // InitTabMeta creates the tab metadata store from Redis config.
 func InitTabMeta(_ context.Context, redisCfg *fleet.RedisConfig, logger *slog.Logger) (*TabMetaStore, func()) {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	tmClient := fleet.NewRedisClient(redisCfg.Address, redisCfg.Password, 0)
 	store := tabmeta.NewStore(tmClient, nil)
 	cleanup := func() { _ = store.Close() }
@@ -89,6 +92,9 @@ func InitTabMeta(_ context.Context, redisCfg *fleet.RedisConfig, logger *slog.Lo
 
 // InitIssueTabs creates the issue tab store from Redis config.
 func InitIssueTabs(ctx context.Context, redisCfg *fleet.RedisConfig, initialWSID string, logger *slog.Logger) (*IssueTabStore, func()) {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	itClient := fleet.NewRedisClient(redisCfg.Address, redisCfg.Password, 0)
 	store := issuetabs.NewStore(itClient, nil)
 	cleanup := func() { _ = store.Close() }
@@ -98,6 +104,9 @@ func InitIssueTabs(ctx context.Context, redisCfg *fleet.RedisConfig, initialWSID
 
 // InitSessionHistory creates the session history store from Redis config.
 func InitSessionHistory(ctx context.Context, redisCfg *fleet.RedisConfig, initialWSID string, logger *slog.Logger) (*SessionHistoryStore, func()) {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	shClient := fleet.NewRedisClient(redisCfg.Address, redisCfg.Password, 0)
 	store := sessionhistory.NewStore(shClient, nil)
 	cleanup := func() { _ = store.Close() }

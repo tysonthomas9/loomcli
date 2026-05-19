@@ -483,3 +483,42 @@ func TestResolveAndSetBackendDefault(t *testing.T) {
 		t.Fatalf("expected default 'codex', got %q", got)
 	}
 }
+
+func TestBackendTestingAccessorsAndReset(t *testing.T) {
+	origFlag := backendFlag
+	t.Cleanup(func() { backendFlag = origFlag })
+
+	TestingResetBackendState(t)
+	if IsRegistered("codex") {
+		t.Fatal("TestingResetBackendState should clear registered backends")
+	}
+
+	*TestingBackendFlag() = "manual"
+	if got := GetBackendFlag(); got != "manual" {
+		t.Fatalf("GetBackendFlag = %q, want manual", got)
+	}
+
+	TestingBackendMu().RLock()
+	registeredCount := len(TestingBackends())
+	TestingBackendMu().RUnlock()
+	if registeredCount != 0 {
+		t.Fatalf("TestingBackends count after reset = %d, want 0", registeredCount)
+	}
+
+	backend := &mockBackend{name: "codex"}
+	RegisterBackend(backend)
+	if !IsRegistered("codex") {
+		t.Fatal("codex backend should be registered")
+	}
+	if got, ok := GetBackendByName("codex"); !ok || got != backend {
+		t.Fatalf("GetBackendByName = (%v, %t), want registered backend", got, ok)
+	}
+	if TestingBackends()["codex"] != backend {
+		t.Fatal("TestingBackends did not expose registered backend")
+	}
+
+	*TestingActiveBackend() = "codex"
+	if got := GetBackendName(); got != "codex" {
+		t.Fatalf("GetBackendName = %q, want codex", got)
+	}
+}

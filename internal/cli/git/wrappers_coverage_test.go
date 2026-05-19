@@ -305,3 +305,194 @@ func TestResetWorktreeResultSuccessAndProtectedBranch(t *testing.T) {
 		t.Fatalf("protected reset error = %v, want protected branch refusal", err)
 	}
 }
+
+func TestCreatePRResultBranches(t *testing.T) {
+	t.Run("created", func(t *testing.T) {
+		_, gitRunner, execRunner := installWrapperCoverageDeps(t)
+		gitRunner.RunFunc = func(_ string, args ...string) cli.CommandResult {
+			switch strings.Join(args, " ") {
+			case "log origin/main..feature --oneline":
+				return cli.CommandResult{Stdout: "abc123 Add feature\n"}
+			case "log origin/main..origin/feature --format=%s --reverse":
+				return cli.CommandResult{Stdout: "Add feature\nRefine feature\n"}
+			default:
+				return cli.CommandResult{}
+			}
+		}
+		execRunner.RunFunc = func(_, name string, args ...string) cli.CommandResult {
+			if name != "gh" || strings.Join(args[:3], " ") != "pr create --base" {
+				t.Fatalf("unexpected exec call: %s %v", name, args)
+			}
+			return cli.CommandResult{Stdout: "https://github.example.test/pr/2\n"}
+		}
+
+		result, err := CreatePRResult("/repo", "feature", "main", "origin")
+		if err != nil {
+			t.Fatalf("CreatePRResult: %v", err)
+		}
+		if result == nil || !result.Created || result.URL != "https://github.example.test/pr/2" {
+			t.Fatalf("result = %+v, want created PR URL", result)
+		}
+	})
+
+	t.Run("already exists resolves URL", func(t *testing.T) {
+		_, gitRunner, execRunner := installWrapperCoverageDeps(t)
+		gitRunner.RunFunc = func(_ string, args ...string) cli.CommandResult {
+			switch strings.Join(args, " ") {
+			case "log upstream/main..feature --oneline":
+				return cli.CommandResult{Stdout: "abc123 Add feature\n"}
+			case "log upstream/main..upstream/feature --format=%s --reverse":
+				return cli.CommandResult{Stdout: "Add feature\n"}
+			default:
+				return cli.CommandResult{}
+			}
+		}
+		execRunner.RunFunc = func(_, name string, args ...string) cli.CommandResult {
+			if name != "gh" {
+				t.Fatalf("unexpected exec call: %s %v", name, args)
+			}
+			joined := strings.Join(args, " ")
+			if strings.HasPrefix(joined, "pr create ") {
+				return cli.CommandResult{Stderr: "a pull request for feature already exists", Err: errors.New("exists")}
+			}
+			if joined == "pr view feature --json url -q .url" {
+				return cli.CommandResult{Stdout: "https://github.example.test/pr/existing\n"}
+			}
+			t.Fatalf("unexpected gh args: %v", args)
+			return cli.CommandResult{}
+		}
+
+		result, err := CreatePRResult("/repo", "feature", "main", "upstream")
+		if err != nil {
+			t.Fatalf("CreatePRResult existing: %v", err)
+		}
+		if result == nil || !result.AlreadyExists || result.URL != "https://github.example.test/pr/existing" {
+			t.Fatalf("result = %+v, want existing PR URL", result)
+		}
+	})
+
+	t.Run("already exists URL lookup fails", func(t *testing.T) {
+		_, gitRunner, execRunner := installWrapperCoverageDeps(t)
+		gitRunner.RunFunc = func(_ string, args ...string) cli.CommandResult {
+			switch strings.Join(args, " ") {
+			case "log origin/main..feature --oneline":
+				return cli.CommandResult{Stdout: "abc123 Add feature\n"}
+			case "log origin/main..origin/feature --format=%s --reverse":
+				return cli.CommandResult{Stdout: "Add feature\n"}
+			default:
+				return cli.CommandResult{}
+			}
+		}
+		execRunner.RunFunc = func(_, _ string, args ...string) cli.CommandResult {
+			joined := strings.Join(args, " ")
+			if strings.HasPrefix(joined, "pr create ") {
+				return cli.CommandResult{Stderr: "already exists", Err: errors.New("exists")}
+			}
+			return cli.CommandResult{Stderr: "not found", Err: errors.New("not found")}
+		}
+
+		if _, err := CreatePRResult("/repo", "feature", "main", "origin"); err == nil || !strings.Contains(err.Error(), "getting existing PR URL") {
+			t.Fatalf("error = %v, want existing PR URL lookup failure", err)
+		}
+	})
+
+	t.Run("create fails", func(t *testing.T) {
+		_, gitRunner, execRunner := installWrapperCoverageDeps(t)
+		gitRunner.RunFunc = func(_ string, args ...string) cli.CommandResult {
+			switch strings.Join(args, " ") {
+			case "log origin/main..feature --oneline":
+				return cli.CommandResult{Stdout: "abc123 Add feature\n"}
+			case "log origin/main..origin/feature --format=%s --reverse":
+				return cli.CommandResult{Stdout: "Add feature\n"}
+			default:
+				return cli.CommandResult{}
+			}
+		}
+		execRunner.RunFunc = func(_, _ string, _ ...string) cli.CommandResult {
+			return cli.CommandResult{Stderr: "authentication required\n", Err: errors.New("auth")}
+		}
+
+		if _, err := CreatePRResult("/repo", "feature", "main", "origin"); err == nil || !strings.Contains(err.Error(), "authentication required") {
+			t.Fatalf("error = %v, want gh create failure", err)
+		}
+	})
+
+	t.Run("invalid ref", func(t *testing.T) {
+		installWrapperCoverageDeps(t)
+		if _, err := CreatePRResult("/repo", "feature;bad", "main", "origin"); err == nil {
+			t.Fatal("expected invalid ref error")
+		}
+	})
+}
+
+func TestPushBranchInRepoResultSuccessAndErrors(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		_, gitRunner, _ := installWrapperCoverageDeps(t)
+		stashListCalls := 0
+		gitRunner.RunFunc = func(_ string, args ...string) cli.CommandResult {
+			switch strings.Join(args, " ") {
+			case "stash list":
+				stashListCalls++
+				if stashListCalls == 1 {
+					return cli.CommandResult{}
+				}
+				return cli.CommandResult{Stdout: "stash@{0}: WIP\n"}
+			case "branch --show-current":
+				return cli.CommandResult{Stdout: "feature\n"}
+			case "log origin/main..feature --oneline":
+				return cli.CommandResult{Stdout: "abc123 Add feature\n"}
+			default:
+				return cli.CommandResult{}
+			}
+		}
+
+		result, err := PushBranchInRepoResult("/repo", "feature", "main", "origin")
+		if err != nil {
+			t.Fatalf("PushBranchInRepoResult: %v", err)
+		}
+		if result == nil || !result.Success || !strings.Contains(result.Message, "origin/main") {
+			t.Fatalf("result = %+v, want successful push", result)
+		}
+	})
+
+	t.Run("fetch error", func(t *testing.T) {
+		_, gitRunner, _ := installWrapperCoverageDeps(t)
+		gitRunner.WithOutput = errors.New("network down")
+		if _, err := PushBranchInRepoResult("/repo", "feature", "main", "origin"); err == nil || !strings.Contains(err.Error(), "fetching") {
+			t.Fatalf("error = %v, want fetch failure", err)
+		}
+	})
+
+	t.Run("stash error", func(t *testing.T) {
+		_, gitRunner, _ := installWrapperCoverageDeps(t)
+		gitRunner.RunFunc = func(_ string, args ...string) cli.CommandResult {
+			if strings.Join(args, " ") == "stash list" {
+				return cli.CommandResult{Err: errors.New("stash list failed")}
+			}
+			return cli.CommandResult{}
+		}
+		if _, err := PushBranchInRepoResult("/repo", "feature", "main", "origin"); err == nil || !strings.Contains(err.Error(), "stashing changes") {
+			t.Fatalf("error = %v, want stash failure", err)
+		}
+	})
+}
+
+func TestCheckGhInstalledWrapper(t *testing.T) {
+	_, _, execRunner := installWrapperCoverageDeps(t)
+	execRunner.RunFunc = func(_, name string, args ...string) cli.CommandResult {
+		if name != "gh" || strings.Join(args, " ") != "--version" {
+			t.Fatalf("unexpected exec call: %s %v", name, args)
+		}
+		return cli.CommandResult{}
+	}
+	if err := CheckGhInstalled(); err != nil {
+		t.Fatalf("CheckGhInstalled: %v", err)
+	}
+
+	execRunner.RunFunc = func(_, _ string, _ ...string) cli.CommandResult {
+		return cli.CommandResult{Err: errors.New("missing")}
+	}
+	if err := CheckGhInstalled(); err == nil || !strings.Contains(err.Error(), "gh' CLI not found") {
+		t.Fatalf("error = %v, want missing gh message", err)
+	}
+}

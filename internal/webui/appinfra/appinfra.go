@@ -280,6 +280,9 @@ func NewFleetTokenConfig(signingKey []byte, expiry time.Duration) *FleetTokenCon
 
 // NewFleetRegisterConfig creates a fleet register config.
 func NewFleetRegisterConfig(apiKey string, redisCfg *fleet.RedisConfig, logger *slog.Logger) (*FleetRegisterConfig, func()) {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	regCfg := &fleet.RegisterConfig{
 		APIKey: apiKey,
 	}

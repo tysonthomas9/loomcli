@@ -6,12 +6,16 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/alicebob/miniredis/v2"
 
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui"
+	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
@@ -111,6 +115,90 @@ func TestNewServer_FleetClientSkipsDaemonPoolAndHealthProbe(t *testing.T) {
 	}
 	if _, ok := body["pool"]; ok {
 		t.Fatal("/api/health should not report daemon pool stats in FleetDB-backed mode")
+	}
+}
+
+func TestNewServer_DaemonModeWithExplicitSocketInitializesPool(t *testing.T) {
+	app, err := NewServer(context.Background(), webui.ServerConfig{
+		Port:            freeTCPPort(t),
+		BindAddress:     "127.0.0.1",
+		MaxPortAttempts: 1,
+		SocketPath:      filepath.Join(t.TempDir(), "missing.sock"),
+		CORSEnabled:     true,
+		CORSOrigins:     []string{"https://ui.example.test"},
+		HSTSEnabled:     true,
+		FrontendDir:     t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	t.Cleanup(func() { app.Close() })
+
+	if app.pool == nil {
+		t.Fatal("daemon-backed server should initialize a protected daemon pool")
+	}
+	if !app.corsConfig.Enabled || len(app.corsConfig.AllowedOrigins) != 1 || app.corsConfig.AllowedOrigins[0] != "https://ui.example.test" {
+		t.Fatalf("cors config = %#v, want explicit origin", app.corsConfig)
+	}
+	if app.mux == nil || app.handlers == nil {
+		t.Fatal("server should build handlers and mux")
+	}
+}
+
+func TestNewServer_FleetRedisInitializesFleetStores(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	mr := miniredis.RunT(t)
+	st := memstore.New()
+	t.Cleanup(func() { _ = st.Close() })
+
+	app, err := NewServer(ctx, webui.ServerConfig{
+		Port:               freeTCPPort(t),
+		BindAddress:        "127.0.0.1",
+		MaxPortAttempts:    1,
+		FleetClient:        true,
+		FleetRedis:         &fleet.RedisConfig{Address: mr.Addr()},
+		FleetJWTKey:        []byte("0123456789abcdef0123456789abcdef"),
+		FleetAPIKey:        "fleet-api-key",
+		InitialWorkspaceID: "WS1",
+		Store:              st,
+	})
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	t.Cleanup(func() {
+		if app.listener != nil {
+			_ = app.listener.Close()
+		}
+		if app.hub != nil {
+			app.hub.Stop()
+		}
+		if app.multiSub != nil {
+			app.multiSub.Stop()
+		}
+		if app.ptyMgr != nil {
+			_ = app.ptyMgr.Close()
+		}
+		if app.multiPool != nil {
+			_ = app.multiPool.Close()
+		}
+		if app.registry != nil {
+			_ = app.registry.Close()
+		}
+		app.Close()
+	})
+
+	if app.fleetRegistry == nil || app.tokenCfg == nil || app.claimMetrics == nil || app.fleetRegCfg == nil {
+		t.Fatalf("fleet fields registry=%t token=%t metrics=%t regCfg=%t",
+			app.fleetRegistry != nil, app.tokenCfg != nil, app.claimMetrics != nil, app.fleetRegCfg != nil)
+	}
+	if app.tabMetaStore == nil || app.issueTabStore == nil || app.sessionHistoryStore == nil {
+		t.Fatalf("redis-backed stores tab=%t issue=%t sessions=%t",
+			app.tabMetaStore != nil, app.issueTabStore != nil, app.sessionHistoryStore != nil)
+	}
+	if app.termSvc == nil {
+		t.Fatal("terminal service should initialize with redis-backed tab metadata")
 	}
 }
 

@@ -2,6 +2,8 @@ package git
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -273,6 +275,43 @@ func TestPrWorkspaceWorktrees_UsesPerRepoDefaultBranch(t *testing.T) {
 	outputMock.InstallOn(deps)
 
 	prWorkspaceWorktrees(deps, worktrees, "", "")
+}
+
+func TestPrAllWorkspacesUsesConfiguredRepos(t *testing.T) {
+	tmp := t.TempDir()
+	ws1 := filepath.Join(tmp, "ws1")
+	ws2 := filepath.Join(tmp, "ws2")
+	repo := filepath.Join(ws1, "api")
+	if err := os.MkdirAll(filepath.Join(repo, ".git"), 0755); err != nil {
+		t.Fatalf("mkdir repo: %v", err)
+	}
+	if err := os.MkdirAll(ws2, 0755); err != nil {
+		t.Fatalf("mkdir ws2: %v", err)
+	}
+	setupWorkspaceConfig(t, &LoomConfig{
+		DefaultWorkspace: "ws1",
+		Workspaces: map[string]WorkspaceConfig{
+			"ws1": {Path: ws1, Repos: []RepoConfig{{Name: "api", Path: repo}}},
+			"ws2": {Path: ws2},
+		},
+	})
+
+	deps, _, _, _, _ := NewTestDeps(t)
+	cmdMock := NewCommandMock(t, []CommandStub{
+		{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "feature\n"},
+		{Name: "git", Args: []string{"log", "origin/develop..feature", "--oneline"}, Stdout: "abc commit\n"},
+		{Name: "git", Args: []string{"log", "origin/develop..origin/feature", "--format=%s", "--reverse"}, Stdout: "Add API\n"},
+		{Name: "gh", Args: []string{"pr", "create", "--base", "develop", "--head", "feature", "--title", "Add API", "--body", "---\nCreated with [loom](https://github.com/tysonthomas9/loomcli)"}, Stdout: "https://github.com/user/repo/pull/99\n"},
+	})
+	cmdMock.Install()
+	deps.Exec = cmdMock
+	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
+		{Args: []string{"fetch", "origin"}},
+		{Args: []string{"push", "origin", "feature"}},
+	})
+	outputMock.InstallOn(deps)
+
+	prAllWorkspaces(deps, "develop")
 }
 
 func TestGeneratePRInfo_SingleCommit(t *testing.T) {
