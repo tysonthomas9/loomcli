@@ -40,6 +40,14 @@ const envLoomFleetMode = "LOOM_FLEET_MODE"
 
 const monitorCollectionCacheTTL = 10 * time.Second
 
+const (
+	envLocalRuntimeMode = "LOOM_LOCAL_RUNTIME"
+	envDesktopDataDir   = "LOOM_DESKTOP_DATA_DIR"
+
+	localRuntimeModeDesktop  = "desktop"
+	localRuntimeModeHeadless = "headless"
+)
+
 var (
 	servePort              int
 	serveBindAddr          string
@@ -154,6 +162,8 @@ func registerServeAuthFlags() {
 
 //nolint:funlen // Serve startup wires process-wide dependencies in a fixed order.
 func runServe(cmd *cobra.Command, args []string) {
+	configureServeLocalRuntimeMode()
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -211,6 +221,17 @@ func runServe(cmd *cobra.Command, args []string) {
 
 	logServerStartup()
 	awaitShutdown(cmd, stop, webuiErr, cancel)
+}
+
+func configureServeLocalRuntimeMode() {
+	if strings.TrimSpace(os.Getenv(envLocalRuntimeMode)) != "" {
+		return
+	}
+	if strings.TrimSpace(os.Getenv(envDesktopDataDir)) != "" {
+		_ = os.Setenv(envLocalRuntimeMode, localRuntimeModeDesktop)
+		return
+	}
+	_ = os.Setenv(envLocalRuntimeMode, localRuntimeModeHeadless)
 }
 
 func buildMonitorCollectDataFn(workspaceHint string, issueBackendFn metricscmd.IssueBackendFn) metricscmd.CollectDataFn {

@@ -306,6 +306,7 @@ func localEnv(dataDir string, port int) []string {
 	url := "http://127.0.0.1:" + strconv.Itoa(port)
 	env := append(os.Environ(),
 		"LOOM_CONFIG_DIR="+dataDir,
+		"LOOM_LOCAL_RUNTIME=desktop",
 		"LOOM_ISSUE_BACKEND=fleetdb",
 		"LOOM_SERVER_URL=",
 		"LOOM_WORKSPACE_RUNTIME_DIR="+dataDir,

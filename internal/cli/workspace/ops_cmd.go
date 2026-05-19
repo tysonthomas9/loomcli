@@ -344,18 +344,31 @@ func newWorkspaceOpsStatus(ws *domain.Workspace, localState bootstrap.WorkspaceL
 // RuntimeStatusSnapshot is mirrored field-for-field so consumers that
 // inspect Healthy / Runtime see exactly what they saw before.
 func buildLocalRuntime(runtime *local.RuntimeStatusSnapshot, runtimeErr error) *WorkspaceOpsLocalRuntime {
-	if localRuntimeDisabledByEnv() {
+	if applicable, reason, ok := localRuntimeModeOverride(); ok {
+		if applicable {
+			return buildApplicableLocalRuntime(runtime, runtimeErr)
+		}
 		return &WorkspaceOpsLocalRuntime{
 			Applicable: false,
-			Reason:     "local runtime disabled by " + envLocalRuntimeMode + " (headless/server deployment)",
+			Reason:     reason,
 		}
 	}
-	if cli.IsFleetActive() {
+	if cli.IsFleetActive() || cli.IsAPIActive() {
 		return &WorkspaceOpsLocalRuntime{
 			Applicable: false,
-			Reason:     "fleet mode — local desktop runtime not required (agents talk to fleet-db directly)",
+			Reason:     "remote issue backend active — local desktop runtime not required",
 		}
 	}
+	if strings.TrimSpace(os.Getenv(bootstrap.EnvFleetDBURL)) != "" {
+		return &WorkspaceOpsLocalRuntime{
+			Applicable: false,
+			Reason:     "external FleetDB URL configured — local desktop runtime not required",
+		}
+	}
+	return buildApplicableLocalRuntime(runtime, runtimeErr)
+}
+
+func buildApplicableLocalRuntime(runtime *local.RuntimeStatusSnapshot, runtimeErr error) *WorkspaceOpsLocalRuntime {
 	out := &WorkspaceOpsLocalRuntime{Applicable: true}
 	if runtime != nil {
 		out.Healthy = runtime.Healthy
@@ -372,12 +385,14 @@ func buildLocalRuntime(runtime *local.RuntimeStatusSnapshot, runtimeErr error) *
 	return out
 }
 
-func localRuntimeDisabledByEnv() bool {
+func localRuntimeModeOverride() (bool, string, bool) {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv(envLocalRuntimeMode))) {
 	case "0", "false", "off", "disabled", "none", "headless":
-		return true
+		return false, "local runtime disabled by " + envLocalRuntimeMode + " (headless/server deployment)", true
+	case "1", "true", "on", "enabled", "desktop", "local":
+		return true, "", true
 	default:
-		return false
+		return false, "", false
 	}
 }
 

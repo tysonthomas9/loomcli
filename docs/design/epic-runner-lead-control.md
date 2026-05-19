@@ -1102,6 +1102,31 @@ Tested at unit level:
   runtime is not applicable.
 - The no-daemon fix text does not suggest `ensure-runtime` in that topology.
 
+### 2026-05-19 UTC: Runtime Mode Selection Guard
+
+Follow-up from hosted VM testing: relying only on deploy scripts to set
+`LOOM_LOCAL_RUNTIME=disabled` still allowed a lead terminal to start a second
+desktop runtime when the service was running in server/headless mode.
+
+Decision:
+
+- `loom serve` marks itself as `LOOM_LOCAL_RUNTIME=headless` when no runtime
+  mode is explicitly configured.
+- `loom local service` marks its child environment as
+  `LOOM_LOCAL_RUNTIME=desktop`, preserving the macOS app/runtime path.
+- Workspace ops treats API-backed mode and external `LOOM_FLEET_DB_URL` mode as
+  not desktop-runtime-managed, so missing `runtime.json` does not become a
+  repair prompt to start another runtime.
+- An explicit `LOOM_LOCAL_RUNTIME=desktop` still wins when a desktop runtime is
+  intentionally managing the server.
+
+Tested at unit level:
+
+- Standalone `loom serve` defaults to headless runtime mode.
+- Desktop local service child env exports desktop runtime mode.
+- Workspace ops suppresses desktop runtime repair in API and external FleetDB
+  modes, while explicit desktop mode keeps runtime health visible.
+
 ### 2026-05-19 UTC: Desktop App Full Slack Epic Runner Run
 
 Scope: validate the epic runner through the macOS desktop app, not the browser
