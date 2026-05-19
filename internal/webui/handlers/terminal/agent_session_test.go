@@ -87,12 +87,12 @@ func TestEnsureAgentTerminalSessionCreatesLeadLaunchSpec(t *testing.T) {
 		t.Fatalf("launch spec = %#v, want shell argv", meta.Launch)
 	}
 	cmd := meta.Launch.Argv[1]
-	for _, want := range []string{"'--server' 'http://loom.test'", "'--workspace' 'E2E'", "'--backend' 'codex'", "'lead'"} {
+	for _, want := range []string{"'--workspace' 'E2E'", "'--backend' 'codex'", "'lead'"} {
 		if !strings.Contains(cmd, want) {
 			t.Fatalf("launch command %q missing %q", cmd, want)
 		}
 	}
-	for _, forbidden := range []string{"'epic' 'run'", "'--parent' 'E2E-8'", "'--lead' 'lead-ui-e2e'"} {
+	for _, forbidden := range []string{"'--server'", "'epic' 'run'", "'--parent' 'E2E-8'", "'--lead' 'lead-ui-e2e'"} {
 		if strings.Contains(cmd, forbidden) {
 			t.Fatalf("launch command %q contains %q, want interactive lead launch", cmd, forbidden)
 		}
@@ -194,7 +194,7 @@ func TestBuildAgentLaunchSpecFallsBackWhenConfiguredWorktreeMissing(t *testing.T
 	}
 	agent := &domain.Agent{WorkspaceKey: "E2E", Name: "nova", RoleName: "lead"}
 
-	launch, _, err := buildAgentLaunchSpec(ctx, st, "E2E", "term_nova", agent, "lead-1", "http://loom.test")
+	launch, _, err := buildAgentLaunchSpec(ctx, st, "E2E", "term_nova", agent, "lead-1")
 	if err != nil {
 		t.Fatalf("buildAgentLaunchSpec: %v", err)
 	}
@@ -222,13 +222,13 @@ func TestAgentTerminalLaunchSpecStale_DetectsBackendChange(t *testing.T) {
 	// Build the "previous" cached spec via the same builder so the only
 	// thing that changes between the two states is the workspace's daemon
 	// profile (which contributes the --backend fallback).
-	cachedLaunch, _, err := buildAgentLaunchSpec(ctx, st, "E2E", "term_old", agent, "", "http://loom.test")
+	cachedLaunch, _, err := buildAgentLaunchSpec(ctx, st, "E2E", "term_old", agent, "")
 	if err != nil {
 		t.Fatalf("build cached launch: %v", err)
 	}
 	existing := &tabmeta.TabMetadata{SessionName: "term_old", Launch: cachedLaunch}
 
-	if agentTerminalLaunchSpecStale(ctx, st, "E2E", existing, agent, "http://loom.test") {
+	if agentTerminalLaunchSpecStale(ctx, st, "E2E", existing, agent) {
 		t.Fatal("with no workspace default backend, the cached spec matches what would be built — spec is fresh")
 	}
 
@@ -239,7 +239,7 @@ func TestAgentTerminalLaunchSpecStale_DetectsBackendChange(t *testing.T) {
 		t.Fatalf("upsert daemon profile: %v", err)
 	}
 
-	if !agentTerminalLaunchSpecStale(ctx, st, "E2E", existing, agent, "http://loom.test") {
+	if !agentTerminalLaunchSpecStale(ctx, st, "E2E", existing, agent) {
 		t.Fatal("expected staleness after workspace default backend was set; ensure() would return the cached spec")
 	}
 }
@@ -253,7 +253,7 @@ func TestAgentTerminalLaunchSpecStale_NilLaunchTreatedStale(t *testing.T) {
 	st := memstore.New()
 	agent := &domain.Agent{WorkspaceKey: "E2E", Name: "nova", RoleName: "lead"}
 	existing := &tabmeta.TabMetadata{SessionName: "term_old", Launch: nil}
-	if !agentTerminalLaunchSpecStale(ctx, st, "E2E", existing, agent, "http://loom.test") {
+	if !agentTerminalLaunchSpecStale(ctx, st, "E2E", existing, agent) {
 		t.Fatal("existing tab with nil Launch should be treated as stale")
 	}
 }
@@ -683,7 +683,7 @@ func TestBuildAgentLaunchSpecRejectsUnknownRoleWithoutPrompt(t *testing.T) {
 		RoleName:     "reviewer",
 	}
 
-	if _, _, err := buildAgentLaunchSpec(ctx, st, "E2E", "term_1", agent, "", ""); err == nil {
+	if _, _, err := buildAgentLaunchSpec(ctx, st, "E2E", "term_1", agent, ""); err == nil {
 		t.Fatal("buildAgentLaunchSpec error = nil, want missing launch spec error")
 	}
 }
@@ -712,7 +712,7 @@ func TestBuildAgentLaunchSpecFallsBackToWorkspaceBackend(t *testing.T) {
 		// No Backend set on the agent itself
 	}
 
-	launch, backend, err := buildAgentLaunchSpec(ctx, st, "E2E", "term_1", agent, "", "http://localhost:8080")
+	launch, backend, err := buildAgentLaunchSpec(ctx, st, "E2E", "term_1", agent, "")
 	if err != nil {
 		t.Fatalf("buildAgentLaunchSpec: %v", err)
 	}

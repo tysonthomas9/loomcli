@@ -105,7 +105,7 @@ func ensureAgentTerminalSession(ctx context.Context, svc service.TerminalService
 		// spec and compare argv; if they differ, fall through to the
 		// rebuild path which will issue a fresh tab metadata. The stale
 		// PTY is killed by svc.PutTab → reattach when the user reloads.
-		if !agentTerminalLaunchSpecStale(ctx, st, workspace, existing, agent, loomServerURL) {
+		if !agentTerminalLaunchSpecStale(ctx, st, workspace, existing, agent) {
 			return existing, nil
 		}
 	}
@@ -118,7 +118,7 @@ func ensureAgentTerminalSession(ctx context.Context, svc service.TerminalService
 	if err != nil {
 		return nil, err
 	}
-	launch, backend, err := buildAgentLaunchSpec(ctx, st, workspace, sessionName, &agentForLaunch, orchestratorID, loomServerURL)
+	launch, backend, err := buildAgentLaunchSpec(ctx, st, workspace, sessionName, &agentForLaunch, orchestratorID)
 	if err != nil {
 		return nil, err
 	}
@@ -143,7 +143,6 @@ func agentTerminalLaunchSpecStale(
 	workspace string,
 	existing *tabmeta.TabMetadata,
 	agent *domain.Agent,
-	loomServerURL string,
 ) bool {
 	if existing == nil || existing.Launch == nil {
 		return true
@@ -153,7 +152,7 @@ func agentTerminalLaunchSpecStale(
 	// per-session ids that legitimately differ and shouldn't trigger churn.
 	// Pass empty orchestratorID — the argv doesn't include it (it's an env
 	// var only), so the stale-check is unaffected by the orchestrator.
-	candidate, _, err := buildAgentLaunchSpec(ctx, st, workspace, existing.SessionName, agent, "", loomServerURL)
+	candidate, _, err := buildAgentLaunchSpec(ctx, st, workspace, existing.SessionName, agent, "")
 	if err != nil || candidate == nil {
 		return false
 	}
@@ -316,7 +315,7 @@ func pruneStaleAgentTerminalTabs(ctx context.Context, svc service.TerminalServic
 // orchestratorID is the lead → orchestration session id resolved by
 // ensureLeadOrchestratorLink. It is passed in rather than read off the
 // agent struct because AgentSession is the single source of truth.
-func buildAgentLaunchSpec(ctx context.Context, st store.Store, workspace, sessionName string, agent *domain.Agent, orchestratorID, loomServerURL string) (*tabmeta.LaunchSpec, string, error) {
+func buildAgentLaunchSpec(ctx context.Context, st store.Store, workspace, sessionName string, agent *domain.Agent, orchestratorID string) (*tabmeta.LaunchSpec, string, error) {
 	roleName := strings.ToLower(strings.TrimSpace(agent.RoleName))
 	role, err := loadAgentLaunchRole(ctx, st, workspace, agent.RoleName)
 	if err != nil {
@@ -327,7 +326,7 @@ func buildAgentLaunchSpec(ctx context.Context, st store.Store, workspace, sessio
 	if err != nil {
 		return nil, "", err
 	}
-	args := append(agentLaunchBaseArgs(workspace, loomServerURL, backend), commandArgs...)
+	args := append(agentLaunchBaseArgs(workspace, backend), commandArgs...)
 
 	return &tabmeta.LaunchSpec{
 		Argv: webuterminal.ShellArgvForCommand(args),
@@ -387,11 +386,8 @@ func agentLaunchBackend(ctx context.Context, st store.Store, workspace string, a
 	return backend
 }
 
-func agentLaunchBaseArgs(workspace, loomServerURL, backend string) []string {
+func agentLaunchBaseArgs(workspace, backend string) []string {
 	args := []string{webuterminal.LoomExecutableForTerminal()}
-	if loomServerURL != "" {
-		args = append(args, "--server", loomServerURL)
-	}
 	if workspace != "" {
 		args = append(args, "--workspace", workspace)
 	}
