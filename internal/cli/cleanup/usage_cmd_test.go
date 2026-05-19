@@ -9,6 +9,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/spf13/cobra"
+
+	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
@@ -313,6 +316,74 @@ func TestRenderUsageJSON(t *testing.T) {
 	}
 	if !strings.Contains(jsonOut, `"name": "nova"`) {
 		t.Fatalf("renderUsageJSON output missing agent summary:\n%s", jsonOut)
+	}
+}
+
+func TestRunUsageNoDataTableAndJSON(t *testing.T) {
+	oldFormat, oldVerbose := usageFormat, usageVerbose
+	oldAgent, oldBackend, oldEpic := usageAgent, usageBackend, usageEpic
+	oldSince, oldUntil := usageSince, usageUntil
+	oldToday, oldWeek := usageToday, usageWeek
+	t.Cleanup(func() {
+		usageFormat, usageVerbose = oldFormat, oldVerbose
+		usageAgent, usageBackend, usageEpic = oldAgent, oldBackend, oldEpic
+		usageSince, usageUntil = oldSince, oldUntil
+		usageToday, usageWeek = oldToday, oldWeek
+		cli.ResetWorkspaceRuntimeDirCache()
+	})
+
+	dir := t.TempDir()
+	t.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", dir)
+	cli.ResetWorkspaceRuntimeDirCache()
+	usageFormat, usageVerbose = "", false
+	usageAgent, usageBackend, usageEpic = "", "", ""
+	usageSince, usageUntil = "", ""
+	usageToday, usageWeek = false, false
+
+	out := captureCleanupStdout(t, func() {
+		runUsage(&cobra.Command{}, nil)
+	})
+	if !strings.Contains(out, "No usage data found") {
+		t.Fatalf("runUsage no-data output = %q", out)
+	}
+
+	store, err := usage.NewStore(dir)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	record := usage.SessionUsage{
+		SessionID:        "sess-1",
+		AgentName:        "nova",
+		Backend:          "codex",
+		TaskID:           "loom-123",
+		InputTokens:      100,
+		OutputTokens:     50,
+		EstimatedCostUSD: 0.42,
+		StartedAt:        time.Date(2026, 5, 19, 10, 0, 0, 0, time.UTC),
+		EndedAt:          time.Date(2026, 5, 19, 10, 3, 0, 0, time.UTC),
+		ExitCode:         0,
+	}
+	if err := store.Append(record); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+
+	out = captureCleanupStdout(t, func() {
+		runUsage(&cobra.Command{}, nil)
+	})
+	for _, want := range []string{"USAGE SUMMARY", "nova", "codex"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("runUsage table output missing %q:\n%s", want, out)
+		}
+	}
+
+	usageFormat = "json"
+	out = captureCleanupStdout(t, func() {
+		runUsage(&cobra.Command{}, nil)
+	})
+	for _, want := range []string{`"total_input_tokens": 100`, `"name": "nova"`} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("runUsage JSON output missing %q:\n%s", want, out)
+		}
 	}
 }
 

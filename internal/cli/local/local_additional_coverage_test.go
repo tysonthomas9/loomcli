@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -584,6 +585,101 @@ func TestPrepareLocalServiceConfigAndSpawnDetachedService(t *testing.T) {
 	}
 	if result == nil || result.PID <= 0 {
 		t.Fatalf("spawnDetachedService result = %+v", result)
+	}
+}
+
+func TestPrepareLocalServiceConfigPicksEphemeralPort(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Setenv("FLEET_DB_BIN", os.Getenv("FLEET_DB_BIN"))
+	oldDataDirFlag, oldBindFlag, oldPortFlag := dataDirFlag, bindFlag, portFlag
+	t.Cleanup(func() {
+		dataDirFlag, bindFlag, portFlag = oldDataDirFlag, oldBindFlag, oldPortFlag
+	})
+	dataDirFlag = dataDir
+	bindFlag = ""
+	portFlag = 0
+
+	cfg, err := prepareLocalServiceConfig()
+	if err != nil {
+		t.Fatalf("prepareLocalServiceConfig: %v", err)
+	}
+	if cfg.port == 0 {
+		t.Fatalf("expected picked port, got %+v", cfg)
+	}
+	if cfg.url != "http://127.0.0.1:"+strconv.Itoa(cfg.port) {
+		t.Fatalf("url = %q for port %d", cfg.url, cfg.port)
+	}
+}
+
+func TestServeProcessFailureBranches(t *testing.T) {
+	dataDir := t.TempDir()
+	if err := ensureRuntimeDirs(dataDir); err != nil {
+		t.Fatalf("ensureRuntimeDirs: %v", err)
+	}
+	logFile, err := os.OpenFile(serveLogPath(dataDir), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		t.Fatalf("open serve log: %v", err)
+	}
+	defer func() { _ = logFile.Close() }()
+
+	missingCfg := &localServiceConfig{
+		dataDir:  dataDir,
+		bindAddr: "127.0.0.1",
+		port:     19901,
+		exe:      filepath.Join(t.TempDir(), "missing-loom"),
+		url:      "http://127.0.0.1:19901",
+	}
+	info := newRuntimeInfo(missingCfg)
+	if cmd, err := startServeProcess(context.Background(), missingCfg, logFile, info); err == nil || cmd != nil {
+		t.Fatalf("startServeProcess missing exe cmd=%v err=%v", cmd, err)
+	}
+	written, err := readRuntime(dataDir)
+	if err != nil {
+		t.Fatalf("read missing-exe runtime: %v", err)
+	}
+	if written.Status != "failed" || written.Error == "" {
+		t.Fatalf("runtime after missing exe = %+v", written)
+	}
+
+	exitExe := writeLocalFakeExecutable(t, "loom-exit", "exit 7")
+	exitCfg := &localServiceConfig{dataDir: dataDir, bindAddr: "127.0.0.1", port: 19902, exe: exitExe, url: "http://127.0.0.1:19902"}
+	info = newRuntimeInfo(exitCfg)
+	cmd, err := startServeProcess(context.Background(), exitCfg, logFile, info)
+	if err != nil {
+		t.Fatalf("start exit process: %v", err)
+	}
+	if err := waitServeExit(context.Background(), cmd, dataDir, info); err == nil {
+		t.Fatal("waitServeExit exit 7 err = nil")
+	}
+	written, err = readRuntime(dataDir)
+	if err != nil {
+		t.Fatalf("read failed runtime: %v", err)
+	}
+	if written.Status != "failed" || written.Error == "" {
+		t.Fatalf("runtime after failed serve = %+v", written)
+	}
+
+	longExe := writeLocalFakeExecutable(t, "loom-long-unhealthy", "sleep 60")
+	unhealthyCfg := &localServiceConfig{dataDir: dataDir, bindAddr: "127.0.0.1", port: 19903, exe: longExe, url: "http://127.0.0.1:19903"}
+	info = newRuntimeInfo(unhealthyCfg)
+	cmd, err = startServeProcess(context.Background(), unhealthyCfg, logFile, info)
+	if err != nil {
+		t.Fatalf("start long process: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := awaitServeHealthy(ctx, unhealthyCfg, info, cmd); err == nil {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		t.Fatal("awaitServeHealthy canceled err = nil")
+	}
+	_ = cmd.Wait()
+	written, err = readRuntime(dataDir)
+	if err != nil {
+		t.Fatalf("read unhealthy runtime: %v", err)
+	}
+	if written.Status != "failed" || written.Error == "" {
+		t.Fatalf("runtime after unhealthy serve = %+v", written)
 	}
 }
 

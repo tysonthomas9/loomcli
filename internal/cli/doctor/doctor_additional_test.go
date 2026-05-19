@@ -1,11 +1,16 @@
 package doctor
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/spf13/cobra"
+
+	"github.com/tysonthomas9/loomcli/internal/cli"
 )
 
 func TestCheckStatusStringMarshalAndTally(t *testing.T) {
@@ -46,6 +51,32 @@ func TestRenderDoctorHumanCoversAllStatuses(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Fatalf("output missing %q:\n%s", want, out)
 		}
+	}
+}
+
+func TestCollectDoctorChecksFleetAndFleetDBBranches(t *testing.T) {
+	deps, _, _, _, _ := NewTestDeps(t)
+	cmd := &cobra.Command{}
+	cmd.SetContext(cli.WithDeps(context.Background(), deps))
+
+	t.Setenv("LOOM_ISSUE_BACKEND", "fleet")
+	fleetChecks := collectDoctorChecks(cmd)
+	if len(fleetChecks) == 0 {
+		t.Fatal("fleet checks empty")
+	}
+
+	t.Setenv("LOOM_ISSUE_BACKEND", "")
+	fleetDBChecks := collectDoctorChecks(cmd)
+	if len(fleetDBChecks) == 0 {
+		t.Fatal("fleetdb checks empty")
+	}
+	if len(fleetChecks) != len(fleetDBChecks) {
+		t.Fatalf("check counts differ fleet=%d fleetdb=%d", len(fleetChecks), len(fleetDBChecks))
+	}
+
+	first := fleetDBChecks[0]()
+	if first.Name == "" {
+		t.Fatalf("first doctor check did not run: %+v", first)
 	}
 }
 

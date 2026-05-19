@@ -337,3 +337,80 @@ func TestWorkspaceOpsSmallHelpers(t *testing.T) {
 		t.Fatalf("seed data dir should be populated")
 	}
 }
+
+func TestWorkspaceOpsCommandsAgainstFleetStore(t *testing.T) {
+	handle := setupWorkspaceCommandFleetStore(t)
+	defer func() { _ = handle.Close() }()
+	t.Setenv(envLocalRuntimeMode, "headless")
+
+	ctx := context.Background()
+	if _, err := handle.Store.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS", Name: "Workspace"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if _, err := handle.Store.Repos().Create(ctx, store.RepoCreate{
+		WorkspaceKey: "WS",
+		Name:         "api",
+		RemoteURL:    "git@example/api",
+		Remote:       "origin",
+	}); err != nil {
+		t.Fatalf("create repo: %v", err)
+	}
+	if _, err := handle.Store.Roles().Create(ctx, store.RoleCreate{WorkspaceKey: "WS", Name: "task"}); err != nil {
+		t.Fatalf("create role: %v", err)
+	}
+	if _, err := handle.Store.Agents().Create(ctx, store.AgentCreate{
+		WorkspaceKey: "WS",
+		Name:         "nova",
+		RoleName:     "task",
+		DesiredState: domain.AgentDesiredStopped,
+		Backend:      "codex",
+	}); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	oldJSON, oldTimeout := workspaceOpsJSON, workspaceOpsTimeoutSec
+	t.Cleanup(func() {
+		workspaceOpsJSON = oldJSON
+		workspaceOpsTimeoutSec = oldTimeout
+	})
+
+	status, err := workspaceOpsStatusForArgs([]string{"WS"})
+	if err != nil {
+		t.Fatalf("workspaceOpsStatusForArgs: %v", err)
+	}
+	if status.Workspace.Key != "WS" || len(status.Repos) != 1 || len(status.Agents) != 1 {
+		t.Fatalf("status = %+v", status)
+	}
+	if status.LocalRuntime == nil || status.LocalRuntime.Applicable {
+		t.Fatalf("headless local runtime = %+v", status.LocalRuntime)
+	}
+
+	var human bytes.Buffer
+	workspaceOpsJSON = false
+	cmd := &cobra.Command{}
+	cmd.SetContext(context.Background())
+	cmd.SetOut(&human)
+	if err := runWorkspaceOpsStatus(cmd, []string{"WS"}); err != nil {
+		t.Fatalf("runWorkspaceOpsStatus: %v", err)
+	}
+	if !strings.Contains(human.String(), "Runtime:   not applicable") {
+		t.Fatalf("status output = %q", human.String())
+	}
+
+	var jsonOut bytes.Buffer
+	workspaceOpsJSON = true
+	cmd = &cobra.Command{}
+	cmd.SetContext(context.Background())
+	cmd.SetOut(&jsonOut)
+	workspaceOpsTimeoutSec = 0
+	if err := runWorkspaceOpsEnsureRuntime(cmd, []string{"WS"}); err != nil {
+		t.Fatalf("runWorkspaceOpsEnsureRuntime: %v", err)
+	}
+	var decoded WorkspaceOpsStatus
+	if err := json.Unmarshal(jsonOut.Bytes(), &decoded); err != nil {
+		t.Fatalf("decode ensure-runtime JSON %q: %v", jsonOut.String(), err)
+	}
+	if decoded.Workspace.Key != "WS" || decoded.LocalRuntime == nil || decoded.LocalRuntime.Applicable {
+		t.Fatalf("ensure-runtime decoded = %+v", decoded)
+	}
+}

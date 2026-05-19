@@ -311,6 +311,41 @@ func TestRunDaemonConfigPrintsDefaultConfig(t *testing.T) {
 	}
 }
 
+func TestRunDaemonDryRunAndStopAgentWrapper(t *testing.T) {
+	projectDir := withShortDaemonTempCwd(t)
+	oldDryRun, oldStopForce, oldStopTimeout := daemonDryRun, daemonStopForce, daemonStopTimeout
+	t.Cleanup(func() {
+		daemonDryRun, daemonStopForce, daemonStopTimeout = oldDryRun, oldStopForce, oldStopTimeout
+	})
+
+	daemonDryRun = true
+	out := captureDaemonStdout(t, func() { runDaemon(&cobra.Command{}, nil) })
+	if !strings.Contains(out, "DRY RUN") {
+		t.Fatalf("dry-run output = %q", out)
+	}
+
+	socketPath := filepath.Join(projectDir, ".loom", "daemon.sock")
+	stopServer := startFakeDaemonControlServer(t, socketPath, func(req DaemonControlRequest) DaemonControlResponse {
+		if req.Operation == ctrlOpAgentList {
+			data, _ := json.Marshal([]AgentListEntry{{Name: "falcon", Status: "stopped"}})
+			return DaemonControlResponse{Success: true, Data: data}
+		}
+		return DaemonControlResponse{Success: true}
+	})
+	defer stopServer()
+
+	cmd := &cobra.Command{}
+	cmd.Flags().IntVarP(&daemonStopTimeout, "timeout", "t", 0, "")
+	if err := cmd.Flags().Set("timeout", "1"); err != nil {
+		t.Fatalf("set timeout: %v", err)
+	}
+	daemonStopForce = true
+	out = captureDaemonStdout(t, func() { runDaemonStop(cmd, []string{"falcon"}) })
+	if !strings.Contains(out, `Agent "falcon" stopped.`) {
+		t.Fatalf("agent stop wrapper output = %q", out)
+	}
+}
+
 func TestSetupSignalHandlerClosesOnSignal(t *testing.T) {
 	shutdown := setupSignalHandler()
 	if err := syscall.Kill(os.Getpid(), syscall.SIGHUP); err != nil {
@@ -679,6 +714,51 @@ func TestDaemonLogsPureHelpers(t *testing.T) {
 	emptyOut := captureDaemonStdout(t, func() { showAgentLog(emptyPath) })
 	if !strings.Contains(emptyOut, "(empty log file)") {
 		t.Fatalf("empty log output = %q", emptyOut)
+	}
+}
+
+func TestRunDaemonLogsWrapperAndFollowCancel(t *testing.T) {
+	projectDir := withDaemonTempCwd(t)
+	logDir := filepath.Join(projectDir, ".loom", "logs")
+	if err := os.MkdirAll(logDir, 0755); err != nil {
+		t.Fatalf("mkdir logs: %v", err)
+	}
+	logPath := filepath.Join(logDir, "task-falcon.log")
+	if err := os.WriteFile(logPath, []byte("alpha\nbeta\n"), 0600); err != nil {
+		t.Fatalf("write log: %v", err)
+	}
+	statePath := cfgpkg.ResolveDaemonStatePath(projectDir)
+	if err := os.MkdirAll(filepath.Dir(statePath), 0755); err != nil {
+		t.Fatalf("mkdir state dir: %v", err)
+	}
+	state := DaemonState{PID: os.Getpid(), StartedAt: time.Now(), Agents: []DaemonAgentStatus{{Worktree: "falcon", Role: "task"}}}
+	data, err := json.Marshal(state)
+	if err != nil {
+		t.Fatalf("marshal state: %v", err)
+	}
+	if err := os.WriteFile(statePath, data, 0600); err != nil {
+		t.Fatalf("write state: %v", err)
+	}
+
+	oldLines, oldFollow := daemonLogsLines, daemonLogsFollow
+	t.Cleanup(func() {
+		daemonLogsLines, daemonLogsFollow = oldLines, oldFollow
+	})
+	daemonLogsLines, daemonLogsFollow = 5, false
+
+	out := captureDaemonStdout(t, func() { runDaemonLogs(&cobra.Command{}, nil) })
+	if !strings.Contains(out, "Available agents") || !strings.Contains(out, "falcon") {
+		t.Fatalf("logs list output = %q", out)
+	}
+	out = captureDaemonStdout(t, func() { runDaemonLogs(&cobra.Command{}, []string{"falcon"}) })
+	if !strings.Contains(out, "alpha") || !strings.Contains(out, "beta") {
+		t.Fatalf("logs show output = %q", out)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := followLogFile(ctx, logPath); err != nil {
+		t.Fatalf("followLogFile canceled: %v", err)
 	}
 }
 

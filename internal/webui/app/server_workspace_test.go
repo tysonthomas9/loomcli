@@ -4,9 +4,13 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
+	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/coordinator"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
@@ -133,6 +137,61 @@ func TestWrapWorkspaceCreateFn_CollectsWarnings(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("expected daemon registration warning, got: %v", warnings)
+	}
+}
+
+func TestWorkerWorkspaceHelpers(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	ctx := context.Background()
+	wsDir := t.TempDir()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS1", Name: "Workspace One"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := bootstrap.SaveStateCache(&bootstrap.StateCache{
+		Workspaces: map[string]bootstrap.WorkspaceLocalState{
+			"WS1": {Path: wsDir},
+		},
+	}); err != nil {
+		t.Fatalf("save state: %v", err)
+	}
+
+	if got := safeLogPath(wsDir, "nova"); got != filepath.Join(wsDir, ".loom", "logs", "task-nova.log") {
+		t.Fatalf("safeLogPath = %q", got)
+	}
+
+	if workerValidateWorkspace(nil)("WS1") {
+		t.Fatal("nil store validated workspace")
+	}
+	if workerValidateWorkspace(st)("MISSING") {
+		t.Fatal("missing workspace validated")
+	}
+	if !workerValidateWorkspace(st)("WS1") {
+		t.Fatal("valid workspace was rejected")
+	}
+
+	resolveWorktree := workerResolveWorktree(st)
+	if got := resolveWorktree("WS1", "nova"); got != filepath.Join(wsDir, "worktrees", "nova") {
+		t.Fatalf("workerResolveWorktree = %q", got)
+	}
+	if got := resolveWorktree("WS1", "../../escape"); got != "" {
+		t.Fatalf("escaping worktree path = %q, want empty", got)
+	}
+	if got := workerResolveWorktree(nil)("WS1", "nova"); got != "" {
+		t.Fatalf("nil store worktree = %q, want empty", got)
+	}
+
+	if got := workerResolveEventsDir(st)("WS1"); got != filepath.Join(wsDir, ".loom", "events") {
+		t.Fatalf("workerResolveEventsDir = %q", got)
+	}
+	if got := workerResolveEventsDir(st)("MISSING"); got != "" {
+		t.Fatalf("missing events dir = %q, want empty", got)
+	}
+	if got := workerResolveLogPath(st)("WS1", "nova"); got != filepath.Join(wsDir, ".loom", "logs", "task-nova.log") {
+		t.Fatalf("workerResolveLogPath = %q", got)
+	}
+	if got := workerResolveLogPath(nil)("WS1", "nova"); got != "" {
+		t.Fatalf("nil store log path = %q, want empty", got)
 	}
 }
 

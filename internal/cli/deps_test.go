@@ -14,6 +14,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
+	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
@@ -764,4 +766,85 @@ func TestFleetDBIssueBackend_FailsClosedWhenStoreUnavailable(t *testing.T) {
 	assertUnavailable("GetMutations", err)
 	_, err = ib.WaitForMutations(ctx, 0, 1)
 	assertUnavailable("WaitForMutations", err)
+}
+
+func TestFleetDBIssueBackend_DelegatesAllMethodsWithLocalStore(t *testing.T) {
+	if os.Getenv("FLEET_DB_BIN") == "" {
+		t.Skip("FLEET_DB_BIN is required for local fleet-db wrapper coverage")
+	}
+
+	configDir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", configDir)
+	t.Setenv("LOOM_WORKSPACE", "WS")
+	t.Setenv("LOOM_FLEET_DB_ACTOR", "deps-test")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	handle, err := bootstrap.OpenStore(ctx, configDir, slog.Default())
+	if err != nil {
+		t.Fatalf("open local fleet-db store: %v", err)
+	}
+	if _, err := handle.Store.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS", Name: "Workspace"}); err != nil {
+		_ = handle.Close()
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := handle.Close(); err != nil {
+		t.Fatalf("close setup store: %v", err)
+	}
+
+	ib := newFleetDBIssueBackend()
+	actorBackend, ok := ib.(interface {
+		ClaimIssueAsActor(context.Context, string, time.Duration, string) error
+	})
+	if !ok {
+		t.Fatal("fleetDBIssueBackend does not implement ClaimIssueAsActor")
+	}
+
+	missingID := "MISSING-1"
+	calls := []struct {
+		name string
+		run  func() error
+	}{
+		{"Get", func() error { _, err := ib.Get(ctx, missingID); return err }},
+		{"List", func() error { _, err := ib.List(ctx, backend.ListOpts{}); return err }},
+		{"Ready", func() error { _, err := ib.Ready(ctx, backend.ReadyOpts{}); return err }},
+		{"Blocked", func() error { _, err := ib.Blocked(ctx, backend.BlockedOpts{}); return err }},
+		{"Stats", func() error { _, err := ib.Stats(ctx); return err }},
+		{"Count", func() error { _, err := ib.Count(ctx, backend.CountOpts{}); return err }},
+		{"GetChildren", func() error { _, err := ib.GetChildren(ctx, missingID); return err }},
+		{"SearchIssues", func() error { _, err := ib.SearchIssues(ctx, "missing", 1); return err }},
+		{"Create", func() error {
+			_, err := ib.Create(ctx, backend.CreateParams{Title: "wrapper coverage", IssueType: "task"})
+			return err
+		}},
+		{"Update", func() error { return ib.Update(ctx, missingID, backend.UpdateParams{}) }},
+		{"ClaimIssue", func() error { return ib.ClaimIssue(ctx, missingID, time.Second) }},
+		{"ClaimIssueAsActor", func() error { return actorBackend.ClaimIssueAsActor(ctx, missingID, time.Second, "other") }},
+		{"DeferIssue", func() error { return ib.DeferIssue(ctx, missingID, time.Now().Add(time.Hour)) }},
+		{"UndeferIssue", func() error { return ib.UndeferIssue(ctx, missingID) }},
+		{"Close", func() error { _, err := ib.Close(ctx, missingID, backend.CloseParams{}); return err }},
+		{"Reopen", func() error { return ib.Reopen(ctx, missingID, backend.ReopenParams{}) }},
+		{"Delete", func() error { return ib.Delete(ctx, backend.DeleteParams{IDs: []string{missingID}, Force: true}) }},
+		{"AddDependency", func() error { return ib.AddDependency(ctx, backend.DepAddParams{FromID: missingID, ToID: "MISSING-2"}) }},
+		{"RemoveDependency", func() error {
+			return ib.RemoveDependency(ctx, backend.DepRemoveParams{FromID: missingID, ToID: "MISSING-2"})
+		}},
+		{"AddLabel", func() error { return ib.AddLabel(ctx, missingID, "coverage") }},
+		{"RemoveLabel", func() error { return ib.RemoveLabel(ctx, missingID, "coverage") }},
+		{"ListComments", func() error { _, err := ib.ListComments(ctx, missingID); return err }},
+		{"AddComment", func() error {
+			_, err := ib.AddComment(ctx, backend.CommentAddParams{IssueID: missingID, Author: "deps-test", Text: "hello"})
+			return err
+		}},
+		{"ListEvents", func() error { _, err := ib.ListEvents(ctx, missingID, 1); return err }},
+		{"Batch", func() error { _, err := ib.Batch(ctx, []backend.BatchOp{}); return err }},
+		{"GetMutations", func() error { _, err := ib.GetMutations(ctx, 0); return err }},
+		{"WaitForMutations", func() error { _, err := ib.WaitForMutations(ctx, 0, 1); return err }},
+	}
+	for _, call := range calls {
+		if err := call.run(); backend.IsKind(err, backend.KindUnavailable) {
+			t.Fatalf("%s returned unavailable; wrapper did not reach fleet backend: %v", call.name, err)
+		}
+	}
 }

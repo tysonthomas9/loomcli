@@ -190,6 +190,9 @@ func TestSupervisorNewAgentResolvesAbsoluteWorktreeAndRole(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "path does not exist") {
 		t.Fatalf("NewAgent missing path err = %v", err)
 	}
+
+	s.finalizeAgentSession(&AgentProcess{}, 0)
+	s.postExitCleanup(&AgentProcess{})
 }
 
 func TestSupervisorAssignmentStopAndSessionStateHelpers(t *testing.T) {

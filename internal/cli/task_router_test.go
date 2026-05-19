@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
@@ -888,5 +889,66 @@ func TestBuildRouterTaskCheck_SourceReposOnlyConstraint(t *testing.T) {
 	check := BuildRouterTaskCheck(rc, ae, "")
 	if check == nil {
 		t.Error("BuildRouterTaskCheck() should return non-nil when AgentEntry.SourceRepos is set")
+	}
+}
+
+func TestRouterTaskCheckExecutesAndAvailabilityFallback(t *testing.T) {
+	ok, err := CheckTaskAvailability(
+		func() (bool, error) { return true, nil },
+		func() (bool, error) {
+			t.Fatal("default check should not run when router check is present")
+			return false, nil
+		},
+	)
+	if err != nil || !ok {
+		t.Fatalf("router availability = %t, %v", ok, err)
+	}
+	ok, err = CheckTaskAvailability(nil, func() (bool, error) { return false, nil })
+	if err != nil || ok {
+		t.Fatalf("default availability = %t, %v", ok, err)
+	}
+
+	resetDefaultIssueBackend()
+	t.Cleanup(resetDefaultIssueBackend)
+	t.Setenv("LOOM_SOURCE_REPOS", "src-api")
+	mock := NewMockIssueBackend()
+	var captured backend.ReadyOpts
+	mock.ReadyFn = func(_ context.Context, opts backend.ReadyOpts) ([]backend.IssueData, error) {
+		captured = opts
+		return []backend.IssueData{{
+			ID:         "task-1",
+			Status:     "open",
+			Labels:     []string{"go"},
+			SourceRepo: "src-api",
+		}}, nil
+	}
+	setDefaultIssueBackend(mock)
+
+	check := BuildRouterTaskCheck(
+		RoleConfig{TaskFilter: "any", Skills: []string{"go"}},
+		AgentEntry{Repo: "api", SourceRepos: []string{"src-api"}},
+		"epic-1",
+	)
+	if check == nil {
+		t.Fatal("BuildRouterTaskCheck returned nil")
+	}
+	hasTask, err := check()
+	if err != nil {
+		t.Fatalf("router check: %v", err)
+	}
+	if !hasTask {
+		t.Fatal("router check did not find matching task")
+	}
+	if captured.ParentID != "epic-1" || len(captured.Labels) != 1 || captured.Labels[0] != "repo:api" {
+		t.Fatalf("captured ready opts = %+v", captured)
+	}
+	if len(captured.SourceRepos) != 1 || captured.SourceRepos[0] != "src-api" {
+		t.Fatalf("source repos = %+v", captured.SourceRepos)
+	}
+
+	t.Setenv("LOOM_ROLE_SKILLS", "go,ui")
+	t.Setenv("LOOM_AGENT_REPO", "api")
+	if RouterTaskCheckFromEnv("epic-2") == nil {
+		t.Fatal("RouterTaskCheckFromEnv returned nil for routing env")
 	}
 }
