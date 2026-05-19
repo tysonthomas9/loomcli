@@ -2,11 +2,13 @@ package supervisor
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/cli/clitest"
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/events"
@@ -58,6 +60,50 @@ func TestConcurrencyTrackerTryReleaseCountsAndNil(t *testing.T) {
 	ct.Close()
 	if ct.TryAcquire("task") {
 		t.Fatal("TryAcquire should fail after close")
+	}
+}
+
+func TestCaptureMultiRepoDiffFormatsSkipsAndTruncates(t *testing.T) {
+	deps := cli.TestingGetDefaultDeps()
+	oldGit := deps.Git
+	t.Cleanup(func() { deps.Git = oldGit })
+
+	mockGit := &clitest.MockGitRunner{
+		RunFunc: func(dir string, args ...string) cli.CommandResult {
+			if strings.Join(args, " ") != "diff HEAD" {
+				t.Fatalf("git args = %v, want diff HEAD", args)
+			}
+			switch dir {
+			case "/repo/api":
+				return cli.CommandResult{Stdout: "\n diff --git a/api.go b/api.go\n+api\n"}
+			case "/repo/ui":
+				return cli.CommandResult{Stdout: "   \n"}
+			default:
+				return cli.CommandResult{Err: errors.New("git failed"), Stderr: "nope"}
+			}
+		},
+	}
+	deps.Git = mockGit
+
+	worktrees := []cli.WorktreeInfo{
+		{Name: "api", Path: "/repo/api"},
+		{Name: "ui", Path: "/repo/ui"},
+		{Name: "broken", Path: "/repo/broken"},
+	}
+	got := captureMultiRepoDiff(worktrees, 10_000)
+	if !strings.Contains(got, "--- repo: api ---\ndiff --git a/api.go b/api.go\n+api\n") {
+		t.Fatalf("formatted diff missing api repo:\n%s", got)
+	}
+	if strings.Contains(got, "ui") || strings.Contains(got, "broken") {
+		t.Fatalf("empty/error repos should be skipped:\n%s", got)
+	}
+
+	truncated := captureMultiRepoDiff(worktrees[:1], 45)
+	if !strings.Contains(truncated, "(truncated") {
+		t.Fatalf("truncated diff missing marker: %q", truncated)
+	}
+	if len(mockGit.RunCalls) != 4 {
+		t.Fatalf("git call count = %d, want 4", len(mockGit.RunCalls))
 	}
 }
 

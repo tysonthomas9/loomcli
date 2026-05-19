@@ -210,6 +210,69 @@ func TestAgentTmuxManagerKillWorkspaceSessionsAndShutdown(t *testing.T) {
 	}
 }
 
+func TestAgentTmuxManagerAttachResizeAndDetachBranches(t *testing.T) {
+	tmux := writeFakeTmux(t)
+	manager := &AgentTmuxManager{
+		tmuxPath: tmux,
+		env:      os.Environ(),
+		max:      1,
+		conns:    map[string]*AgentTmuxConn{},
+	}
+
+	if _, err := manager.AttachExistingRaw("../bad", 80, 24); err == nil {
+		t.Fatal("invalid session attach error = nil")
+	}
+	if _, err := manager.AttachExistingRaw("missing", 80, 24); err == nil {
+		t.Fatal("missing session attach error = nil")
+	}
+
+	conn, err := manager.AttachExistingRaw("exists", 0, 0)
+	if err != nil {
+		t.Fatalf("AttachExistingRaw() error = %v", err)
+	}
+	if conn.ConnID == "" || conn.SessionName != "exists" || conn.KillCh() == nil {
+		t.Fatalf("conn = %#v", conn)
+	}
+	if manager.SessionCount() != 1 {
+		t.Fatalf("SessionCount = %d, want 1", manager.SessionCount())
+	}
+
+	if _, err := manager.AttachExistingRaw("exists", 80, 24); err != ErrMaxSessionsReached {
+		t.Fatalf("max attach err = %v, want ErrMaxSessionsReached", err)
+	}
+	if err := manager.Resize("missing", 80, 24); err == nil {
+		t.Fatal("Resize missing error = nil")
+	}
+	if err := manager.Resize(conn.ConnID, 90, 30); err != nil {
+		t.Fatalf("Resize() error = %v", err)
+	}
+	if err := manager.Detach(conn.ConnID); err != nil {
+		t.Fatalf("Detach() error = %v", err)
+	}
+	if manager.SessionCount() != 0 {
+		t.Fatalf("SessionCount after detach = %d, want 0", manager.SessionCount())
+	}
+	if err := manager.Detach(conn.ConnID); err == nil {
+		t.Fatal("second Detach error = nil")
+	}
+	if err := manager.Resize(conn.ConnID, 80, 24); err == nil {
+		t.Fatal("Resize detached error = nil")
+	}
+
+	closedFile, err := os.CreateTemp(t.TempDir(), "pty")
+	if err != nil {
+		t.Fatalf("CreateTemp: %v", err)
+	}
+	closedConn := &AgentTmuxConn{ConnID: "closed", SessionName: "exists", PTY: closedFile, killCh: make(chan struct{})}
+	if err := closedConn.Close(); err != nil {
+		t.Fatalf("close test conn: %v", err)
+	}
+	manager.conns["closed"] = closedConn
+	if err := manager.Resize("closed", 80, 24); err == nil || !strings.Contains(err.Error(), "is closed") {
+		t.Fatalf("Resize closed err = %v", err)
+	}
+}
+
 func TestAgentTmuxConnCloseIsIdempotent(t *testing.T) {
 	file, err := os.CreateTemp(t.TempDir(), "pty")
 	if err != nil {

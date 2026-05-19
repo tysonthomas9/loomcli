@@ -13,6 +13,38 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 )
 
+func TestGraphInterceptorResponseWriterBehavior(t *testing.T) {
+	interceptor := &graphInterceptor{header: make(http.Header)}
+	interceptor.Header().Add("X-Test", "one")
+	n, err := interceptor.Write([]byte("body"))
+	if err != nil || n != len("body") {
+		t.Fatalf("Write n=%d err=%v", n, err)
+	}
+	interceptor.WriteHeader(http.StatusAccepted)
+
+	rec := httptest.NewRecorder()
+	interceptor.flushTo(rec)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("flush status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if rec.Header().Get("X-Test") != "one" || rec.Body.String() != "body" {
+		t.Fatalf("flush headers/body = %q/%q", rec.Header().Get("X-Test"), rec.Body.String())
+	}
+
+	interceptor = &graphInterceptor{header: make(http.Header)}
+	interceptor.Header().Add("X-Test", "two")
+	interceptor.WriteHeader(http.StatusCreated)
+	interceptor.WriteHeader(http.StatusBadGateway)
+	if _, err := interceptor.Write([]byte("created")); err != nil {
+		t.Fatalf("Write after header: %v", err)
+	}
+	rec = httptest.NewRecorder()
+	interceptor.flushTo(rec)
+	if rec.Code != http.StatusCreated || rec.Body.String() != "created" {
+		t.Fatalf("flush explicit status/body = %d/%q", rec.Code, rec.Body.String())
+	}
+}
+
 // ---------------------------------------------------------------------------
 // handleBlocked tests
 // ---------------------------------------------------------------------------

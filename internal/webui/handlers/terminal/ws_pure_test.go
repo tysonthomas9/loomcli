@@ -143,6 +143,25 @@ func TestValidateTerminalWSRequestFailures(t *testing.T) {
 	}
 }
 
+func TestTerminalWSUpgradeFailureBranches(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/ws?session=shell", nil)
+	rec := httptest.NewRecorder()
+	if conn, ok := upgradeTerminalWS(rec, req, nil); ok || conn != nil {
+		t.Fatalf("upgradeTerminalWS succeeded unexpectedly")
+	}
+	if rec.Code != http.StatusUpgradeRequired {
+		t.Fatalf("upgradeTerminalWS status = %d, want %d", rec.Code, http.StatusUpgradeRequired)
+	}
+
+	rec = httptest.NewRecorder()
+	if conn, _, ok := upgradeTerminalWithSpan(rec, req, nil, "shell", "WS"); ok || conn != nil {
+		t.Fatalf("upgradeTerminalWithSpan succeeded unexpectedly")
+	}
+	if rec.Code != http.StatusUpgradeRequired {
+		t.Fatalf("upgradeTerminalWithSpan status = %d, want %d", rec.Code, http.StatusUpgradeRequired)
+	}
+}
+
 type fakePTYSource struct {
 	has   bool
 	count int

@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -453,6 +454,75 @@ func TestDaemonAgentControlFallbackBranches(t *testing.T) {
 	if isAgentRunningViaSocket(filepath.Join(projectDir, ".loom", "missing.sock"), "falcon") {
 		t.Fatal("missing socket should be treated as not running")
 	}
+}
+
+func TestDaemonControlTimeoutAndProcessStopHelpers(t *testing.T) {
+	projectDir := withShortDaemonTempCwd(t)
+	socketPath := filepath.Join(projectDir, ".loom", "daemon.sock")
+	var mu sync.Mutex
+	var requests []DaemonControlRequest
+	stopServer := startFakeDaemonControlServer(t, socketPath, func(req DaemonControlRequest) DaemonControlResponse {
+		mu.Lock()
+		requests = append(requests, req)
+		mu.Unlock()
+		return DaemonControlResponse{Success: true}
+	})
+	defer stopServer()
+
+	out := captureDaemonStdout(t, func() { pollAndForceStop(socketPath, "falcon", -time.Nanosecond) })
+	if !strings.Contains(out, "Yield timeout") || !strings.Contains(out, `Agent "falcon" stopped.`) {
+		t.Fatalf("pollAndForceStop output = %q", out)
+	}
+
+	phase := "yield-error"
+	stopServer2 := startFakeDaemonControlServer(t, filepath.Join(projectDir, ".loom", "daemon2.sock"), func(req DaemonControlRequest) DaemonControlResponse {
+		if phase == "yield-error" && req.Operation == ctrlOpAgentYield {
+			return DaemonControlResponse{Success: false, Error: "temporary control failure"}
+		}
+		return DaemonControlResponse{Success: true}
+	})
+	defer stopServer2()
+	if requestYieldOrFallback(filepath.Join(projectDir, ".loom", "daemon2.sock"), "nova") {
+		t.Fatal("yield fallback should force-stop and stop polling")
+	}
+
+	for _, tc := range []struct {
+		name string
+		stop func(int)
+		want string
+	}{
+		{name: "force", stop: stopDaemonForce, want: "Force-stopping daemon"},
+		{name: "graceful", stop: stopDaemonGraceful, want: "Stopping daemon"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pid := startDetachedSleepProcess(t)
+			out := captureDaemonStdout(t, func() { tc.stop(pid) })
+			if !strings.Contains(out, tc.want) {
+				t.Fatalf("%s output = %q", tc.name, out)
+			}
+		})
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(requests) == 0 || requests[len(requests)-1].Operation != ctrlOpAgentStop {
+		t.Fatalf("pollAndForceStop requests = %+v", requests)
+	}
+}
+
+func startDetachedSleepProcess(t *testing.T) int {
+	t.Helper()
+	cmd := exec.Command("sh", "-c", "sleep 60 >/dev/null 2>&1 & echo $!") //nolint:gosec //nolint:norawexec // test helper starts a controlled sleep process
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("start detached sleep: %v", err)
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(out)))
+	if err != nil || pid <= 0 {
+		t.Fatalf("parse sleep pid from %q: %v", string(out), err)
+	}
+	t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL) })
+	return pid
 }
 
 func startFakeDaemonControlServer(t *testing.T, socketPath string, handler func(DaemonControlRequest) DaemonControlResponse) func() {

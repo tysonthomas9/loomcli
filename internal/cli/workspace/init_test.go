@@ -2,11 +2,17 @@ package workspace
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/spf13/cobra"
+
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
+	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 func TestParseNames(t *testing.T) {
@@ -225,6 +231,80 @@ func TestWorkspaceIssueStorageHelpersPrintFleetDBMessage(t *testing.T) {
 	})
 	if strings.Count(out, "Fleet-db issue storage is used") != 2 {
 		t.Fatalf("issue storage helper output = %q", out)
+	}
+}
+
+func TestRunInitSuccessWithExistingWorktree(t *testing.T) {
+	worktreesDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(worktreesDir, "falcon", ".git"), 0755); err != nil {
+		t.Fatalf("mkdir existing worktree: %v", err)
+	}
+
+	oldYes, oldWorktreesDir, oldNames, oldWorkspace := initYes, initWorktreesDir, initNames, initWorkspace
+	t.Cleanup(func() {
+		initYes, initWorktreesDir, initNames, initWorkspace = oldYes, oldWorktreesDir, oldNames, oldWorkspace
+	})
+	initYes = true
+	initWorktreesDir = worktreesDir
+	initNames = "falcon"
+	initWorkspace = ""
+
+	deps, _, _, _, _ := NewTestDeps(t)
+	mock := NewCommandMock(t, []CommandStub{
+		{Name: "git", Args: []string{"rev-parse", "--is-inside-work-tree"}, Stdout: "true"},
+		{Name: "git", Args: []string{"rev-parse", "--git-common-dir"}, Stdout: ".git"},
+		{Name: "git", Args: []string{"rev-parse", "--git-dir"}, Stdout: ".git"},
+	})
+	mock.InstallOn(deps)
+
+	cmd := &cobra.Command{}
+	cmd.SetContext(WithDeps(context.Background(), deps))
+	out := captureWorkspaceStdout(t, func() { runInit(cmd, nil) })
+	if !strings.Contains(out, "Loom Setup Wizard") || !strings.Contains(out, "No new worktrees") {
+		t.Fatalf("runInit output = %q", out)
+	}
+}
+
+func TestRunInitWorkspaceSuccess(t *testing.T) {
+	handle := setupWorkspaceCommandFleetStore(t)
+	defer func() { _ = handle.Close() }()
+
+	ctx := context.Background()
+	if _, err := handle.Store.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS", Name: "Workspace"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if _, err := handle.Store.Repos().Create(ctx, store.RepoCreate{WorkspaceKey: "WS", Name: "api"}); err != nil {
+		t.Fatalf("create repo: %v", err)
+	}
+	wsPath := t.TempDir()
+	if err := bootstrap.SaveStateCache(&bootstrap.StateCache{
+		LastWorkspace: "WS",
+		Workspaces: map[string]bootstrap.WorkspaceLocalState{
+			"WS": {Path: wsPath, Repos: map[string]string{"api": filepath.Join(wsPath, "api")}},
+		},
+	}); err != nil {
+		t.Fatalf("save state: %v", err)
+	}
+
+	oldYes, oldWorktreesDir, oldNames, oldWorkspace := initYes, initWorktreesDir, initNames, initWorkspace
+	t.Cleanup(func() {
+		initYes, initWorktreesDir, initNames, initWorkspace = oldYes, oldWorktreesDir, oldNames, oldWorkspace
+	})
+	initWorkspace = "WS"
+
+	deps, _, _, _, _ := NewTestDeps(t)
+	mock := NewCommandMock(t, []CommandStub{
+		{Name: "git", Args: []string{"rev-parse", "--is-inside-work-tree"}, Stdout: "true"},
+		{Name: "git", Args: []string{"rev-parse", "--git-common-dir"}, Stdout: ".git"},
+		{Name: "git", Args: []string{"rev-parse", "--git-dir"}, Stdout: ".git"},
+	})
+	mock.InstallOn(deps)
+
+	cmd := &cobra.Command{}
+	cmd.SetContext(WithDeps(context.Background(), deps))
+	out := captureWorkspaceStdout(t, func() { runInitWorkspace(cmd, nil) })
+	if !strings.Contains(out, `Workspace "WS" found`) || !strings.Contains(out, "Workspace ready") {
+		t.Fatalf("runInitWorkspace output = %q", out)
 	}
 }
 

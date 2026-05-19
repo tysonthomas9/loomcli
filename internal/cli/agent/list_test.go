@@ -3,6 +3,7 @@ package agent
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -82,6 +83,22 @@ func TestGetUncommittedChangesCount(t *testing.T) {
 				t.Errorf("GetUncommittedChangesCountDeps() = %d, want %d", got, tc.expected)
 			}
 		})
+	}
+}
+
+func TestGetUncommittedChangesCountPublicWrapper(t *testing.T) {
+	deps := defaultDeps
+	oldGit := deps.Git
+	t.Cleanup(func() { deps.Git = oldGit })
+
+	deps.Git = &MockGitRunner{RunResult: CommandResult{Stdout: " M api.go\n?? new.go\n"}}
+	if got := GetUncommittedChangesCount("/repo"); got != 2 {
+		t.Fatalf("GetUncommittedChangesCount = %d, want 2", got)
+	}
+
+	deps.Git = &MockGitRunner{RunResult: CommandResult{Err: errors.New("git failed"), Stderr: "fatal"}}
+	if got := GetUncommittedChangesCount("/repo"); got != 0 {
+		t.Fatalf("GetUncommittedChangesCount error = %d, want 0", got)
 	}
 }
 

@@ -179,6 +179,48 @@ func TestAgentTerminalPureHelpers(t *testing.T) {
 	emitAgentDisconnectSpan(context.Background(), "WS", "nova", "tmux-session", realtime.WSCloseSessionKilled)
 }
 
+func TestAgentWSUpgradeFailureBranches(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/agents/nova/ws", nil)
+	rec := httptest.NewRecorder()
+	if conn, ok := upgradeAgentWS(rec, req, nil); ok || conn != nil {
+		t.Fatalf("upgradeAgentWS succeeded unexpectedly")
+	}
+	if rec.Code != http.StatusUpgradeRequired {
+		t.Fatalf("upgradeAgentWS status = %d, want %d", rec.Code, http.StatusUpgradeRequired)
+	}
+
+	rec = httptest.NewRecorder()
+	if conn, _, ok := upgradeAgentTerminalWithSpan(rec, req, nil, "WS", "nova", "tmux-session"); ok || conn != nil {
+		t.Fatalf("upgradeAgentTerminalWithSpan succeeded unexpectedly")
+	}
+	if rec.Code != http.StatusUpgradeRequired {
+		t.Fatalf("upgradeAgentTerminalWithSpan status = %d, want %d", rec.Code, http.StatusUpgradeRequired)
+	}
+}
+
+func TestAgentTmuxMonitorDelegatesToManager(t *testing.T) {
+	dir := t.TempDir()
+	tmuxPath := writeHandlerFakeTmux(t, dir)
+	oldPath := os.Getenv("PATH")
+	t.Setenv("PATH", filepath.Dir(tmuxPath)+string(os.PathListSeparator)+oldPath)
+	t.Setenv("TMUX_DEAD_SESSION", "dead-pane")
+
+	manager, err := webuterminal.NewAgentTmuxManager(10)
+	if err != nil {
+		t.Fatalf("NewAgentTmuxManager: %v", err)
+	}
+	monitor := &agentTmuxMonitor{mgr: manager}
+	if !monitor.HasSession("exists") || monitor.HasSession("missing") {
+		t.Fatal("HasSession delegation mismatch")
+	}
+	if !monitor.PaneDead("dead-pane") || monitor.PaneDead("live-pane") {
+		t.Fatal("PaneDead delegation mismatch")
+	}
+	if got := monitor.CapturePaneRaw("live-pane", 2); got != "line one\nline two" {
+		t.Fatalf("CapturePaneRaw = %q", got)
+	}
+}
+
 type fakeAgentTerminalService struct {
 	info          *service.AgentTerminalInfoResult
 	infoErr       error
@@ -251,6 +293,19 @@ func writeHandlerFakeTmux(t *testing.T, dir string) string {
 	path := filepath.Join(dir, "tmux")
 	content := `#!/bin/sh
 case "$1" in
+  has-session)
+    [ "$3" = "missing" ] && exit 1
+    exit 0
+    ;;
+  list-panes)
+    [ "$3" = "$TMUX_DEAD_SESSION" ] && echo 1 || echo 0
+    exit 0
+    ;;
+  capture-pane)
+    echo "line one"
+    echo "line two"
+    exit 0
+    ;;
   list-sessions)
     case "$TMUX_LIST_MODE" in
       hard-error) echo "tmux failed" >&2; exit 2 ;;

@@ -262,3 +262,47 @@ func TestDiscoverWorktrees_PublicAPI_DelegatesWorkspace(t *testing.T) {
 		t.Error("expected non-nil Repo in workspace mode")
 	}
 }
+
+func TestWorktreePublicWrappersAndCacheReset(t *testing.T) {
+	tmpDir := t.TempDir()
+	repoPath := filepath.Join(tmpDir, "repo")
+	createGitRepo(t, repoPath)
+	agentPath := filepath.Join(tmpDir, "worktrees", "repo", "falcon")
+	createGitRepo(t, agentPath)
+	cfg := &LoomConfig{
+		DefaultWorkspace: "ws",
+		Workspaces: map[string]WorkspaceConfig{
+			"ws": {
+				Path: tmpDir,
+				Repos: []RepoConfig{{
+					Name:          "repo",
+					Path:          repoPath,
+					DefaultBranch: "develop",
+				}},
+			},
+		},
+	}
+	setupWorkspaceConfig(t, cfg)
+	old := defaultResolver
+	defaultResolver = nil
+	t.Cleanup(func() { defaultResolver = old })
+
+	if got := GetWorktreesDir(); got != tmpDir {
+		t.Fatalf("GetWorktreesDir = %q, want %q", got, tmpDir)
+	}
+	if got, err := ResolveWorktreesDir(); err != nil || got != tmpDir {
+		t.Fatalf("ResolveWorktreesDir = %q err=%v, want %q", got, err, tmpDir)
+	}
+	if got := GetDefaultBranch(); got != "develop" {
+		t.Fatalf("GetDefaultBranch = %q, want develop", got)
+	}
+	resolved, err := ResolveWorktreePath("repo")
+	if err != nil || resolved != repoPath {
+		t.Fatalf("ResolveWorktreePath = %q err=%v, want %q", resolved, err, repoPath)
+	}
+	agents, err := DiscoverAgentWorktrees()
+	if err != nil || len(agents) != 1 || agents[0].Name != "falcon" {
+		t.Fatalf("DiscoverAgentWorktrees = %+v err=%v", agents, err)
+	}
+	TestingResetIntegrationBranchCache()
+}
