@@ -1,0 +1,1093 @@
+meta:
+  app: loom
+  tagline: Agent management CLI for parallel AI coding workflows backed by fleet-db.
+  description: >
+    Run multiple AI agents in parallel across git worktrees. Each agent works
+    independently on its own branch, picks tasks from a shared issue tracker,
+    and integrates back through a structured push/pull/sync workflow.
+  repository: https://github.com/tysonthomas9/loomcli
+  license: MIT
+  generated: 2026-05-14
+  generated_by: feature-cataloger
+  refs_in:  [stories, epics]
+  refs_out: [glossary]
+
+categories:
+  - id: cli-agents
+    name: CLI — Agent Commands
+    summary: Run, supervise, and recover AI coding agents from the terminal.
+    features:
+      - name: loom plan
+        id: loom-plan
+        purpose: Run a planning agent that researches tasks and produces designs for review.
+        source: internal/cli/agent/plan.go
+        flags: ["--auto/-a", "--interval/-i", "--max-tasks/-m", "--idle-timeout/-t", "--parent"]
+        tags: [agent, planning, auto-mode]
+      - name: loom task
+        id: loom-task
+        purpose: Run an implementation agent that builds approved designs.
+        source: internal/cli/agent/task.go
+        flags: ["--auto/-a", "--interval/-i", "--max-tasks/-m", "--idle-timeout/-t", "--parent"]
+        tags: [agent, implementation, auto-mode]
+      - name: loom lead
+        id: loom-lead
+        epic: epics:lead-driven-orchestration
+        purpose: Interactive AI project management — review plans, triage the backlog.
+        source: internal/cli/agent/lead.go
+        flags: ["--message"]
+        tags: [agent, interactive, triage]
+      - name: loom agent
+        id: loom-agent
+        purpose: Run a custom agent with a user-defined prompt template.
+        source: internal/cli/agent/agent_cmd.go
+        flags: ["--prompt/-p", "--task-filter/-f", "--auto/-a", "--interval", "--max-tasks", "--idle-timeout", "--parent"]
+        tags: [agent, custom, prompts]
+      - name: loom monitor
+        id: loom-monitor
+        purpose: Live terminal dashboard for agent status and task progress.
+        source: internal/cli/monitor/monitor.go
+        flags: ["--branch/-b", "--no-watch/-n", "--interval/-i"]
+        aliases: [mon, status]
+        tags: [observability, dashboard, tui]
+      - name: loom list
+        id: loom-list
+        purpose: List all agents (worktrees) and their status grouped by workspace.
+        source: internal/cli/agent/list.go
+        aliases: [ls]
+        tags: [agents, inventory]
+      - name: loom recover
+        id: loom-recover
+        epic: epics:failure-modes-recovery
+        purpose: Recover an agent worktree from an error state — clears locks, analyzes orphans.
+        source: internal/cli/agent/recover.go
+        flags: ["--no-analyze", "--force"]
+        tags: [agent, recovery, locks]
+      - name: loom complete
+        id: loom-complete
+        purpose: Internal signal command — agents call it to mark task completion to auto mode.
+        source: internal/cli/agent/complete.go
+        tags: [agent, internal]
+      - name: loom daemon
+        id: loom-daemon
+        purpose: Supervise multiple agents with auto-restart, queue management, and lifecycle control.
+        source: internal/cli/daemon/daemon_cmd.go
+        subcommands: [status, stop, start, restart, queue, logs, profile]
+        flags: ["--dry-run"]
+        tags: [daemon, supervisor, multi-agent]
+      - name: loom daemon profile
+        id: loom-daemon-profile
+        purpose: View and configure the workspace's daemon profile (max agents, paths, backend, etc.).
+        source: internal/cli/daemon/profile_cmd.go
+        subcommands: [show, set, unset]
+        tags: [daemon, config]
+      - name: loom epic run
+        id: loom-epic-run
+        epic: epics:lead-driven-orchestration
+        purpose: Reconcile loop that drains an epic by spawning ephemeral workers for ready child tasks.
+        source: internal/cli/epic/run.go
+        flags: ["--parent", "--max-concurrency", "--worker-prefix", "--interval-seconds", "--role", "--node-id", "--lead", "--dry-run"]
+        tags: [epic, orchestration, fan-out]
+
+  - id: cli-git
+    name: CLI — Git Operations
+    summary: Branch management with AI-assisted conflict resolution across worktrees.
+    features:
+      - name: loom push
+        id: loom-push
+        purpose: Push worktree branch to a target with AI-driven merge conflict resolution.
+        source: internal/cli/git/push.go
+        aliases: [merge]
+        flags: ["--all/-a", "--workspace/-W"]
+        tags: [git, merge, ai-conflict]
+      - name: loom pull
+        id: loom-pull
+        purpose: Pull an integration branch into worktree(s) with AI conflict resolution.
+        source: internal/cli/git/pull.go
+        flags: ["--all/-a", "--workspace/-W"]
+        tags: [git, pull, ai-conflict]
+      - name: loom sync
+        id: loom-sync
+        purpose: Full sync — push all completed work, then pull latest into all worktrees.
+        source: internal/cli/git/sync.go
+        flags: ["--push-only", "--pull-only", "--workspace/-W"]
+        tags: [git, sync, batch]
+      - name: loom pr
+        id: loom-pr
+        purpose: Create a GitHub pull request from a worktree branch.
+        source: internal/cli/git/pr.go
+        flags: ["--all/-a", "--workspace/-W"]
+        tags: [git, github, pr]
+      - name: loom reset
+        id: loom-reset
+        purpose: Hard reset a worktree to a specific branch — discards local changes.
+        source: internal/cli/git/reset.go
+        flags: ["--all/-a", "--push/-p", "--force/-f"]
+        tags: [git, reset, destructive]
+      - name: AI conflict resolution
+        id: ai-conflict-resolution
+        purpose: Spawn a Claude agent during push/pull conflicts to resolve markers automatically.
+        source: internal/cli/git/conflict_resolution.go
+        tags: [git, ai, merge]
+
+  - id: cli-config
+    name: CLI — Configuration
+    summary: Workspaces, repos, roles, agent definitions, and onboarding.
+    features:
+      - name: loom workspace
+        id: loom-workspace
+        purpose: Create / list / remove workspaces — the unit of isolation for repos and agents.
+        source: internal/cli/workspace/workspace_cmd.go
+        subcommands: [create, list, remove]
+        flags: ["--repos", "--path", "--branch", "--force", "--keep-worktrees", "--json"]
+        tags: [config, workspace]
+      - name: loom repo
+        id: loom-repo
+        purpose: Register repos inside a workspace (URL, remote, default branch, groups).
+        source: internal/cli/repo/repo_cmd.go
+        subcommands: [add, list, show, remove]
+        flags: ["--remote", "--branch", "--groups", "--source-repo-id", "--json"]
+        tags: [config, git, repos]
+      - name: loom role
+        id: loom-role
+        purpose: Define agent roles — prompts, models, backends, skills, tool allowlists.
+        source: internal/cli/role/role_cmd.go
+        subcommands: [add, list, show, remove, set, unset]
+        flags: ["--description", "--prompt-file", "--model", "--backend", "--skills", "--max-concurrency", "--read-only"]
+        tags: [config, roles, prompts]
+      - name: loom agentdef
+        id: loom-agentdef
+        purpose: Bind a role + repo(s) to a named agent definition that the daemon can run.
+        source: internal/cli/agentdef/agentdef_cmd.go
+        subcommands: [add, list, show, remove, start, stop]
+        flags: ["--role", "--auto", "--backend", "--repos", "--repo-groups", "--cross-repo", "--parent", "--mode", "--task-filter", "--max-concurrency", "--budget", "--task", "--orchestrator"]
+        tags: [config, agents]
+      - name: loom init
+        id: loom-init
+        purpose: Guided setup wizard — creates a workspace and initial worktrees.
+        source: internal/cli/workspace/init.go
+        flags: ["--yes/-y", "--worktrees-dir", "--names", "--workspace"]
+        tags: [onboarding, wizard]
+      - name: loom workspace (fleet-db)
+        id: loom-workspace-fleet-db
+        purpose: Fleet-db-backed workspace management — add, switch, show, and inspect lifecycle state.
+        source: internal/cli/workspace/workspacev2_cmd.go
+        subcommands: [add, use, show, status]
+        tags: [config, workspace, fleet-db]
+      - name: loom workspace ops
+        id: loom-workspace-ops
+        purpose: Agent-safe runtime operations — status, diagnose, and ensure-runtime for the local workspace daemon.
+        source: internal/cli/workspace/ops_cmd.go
+        subcommands: [status, diagnose, ensure-runtime]
+        tags: [config, workspace, diagnostics]
+      - name: loom cleanup
+        id: loom-cleanup
+        purpose: Purge old session, usage, and event data with per-store retention windows.
+        source: internal/cli/cleanup/cleanup_cmd.go
+        flags: ["--sessions-older-than", "--usage-older-than", "--events-older-than", "--dry-run"]
+        tags: [cleanup, retention, maintenance]
+      - name: loom sessions clean
+        id: loom-sessions-clean
+        purpose: Remove agent session directories older than a configurable retention window.
+        source: internal/cli/cleanup/sessions_cmd.go
+        subcommands: [clean]
+        flags: ["--older-than"]
+        tags: [cleanup, sessions]
+
+  - id: cli-data
+    name: CLI — Issue Data (HTTP backend)
+    summary: Backend-aware CLI for working with issues via the server's API.
+    features:
+      - name: loom data create
+        id: loom-data-create
+        purpose: Create an issue from the CLI against a running server.
+        source: internal/cli/data/create.go
+        tags: [issues, api]
+      - name: loom data show
+        id: loom-data-show
+        purpose: Show a single issue's details.
+        source: internal/cli/data/doc.go
+        tags: [issues, api]
+      - name: loom data list
+        id: loom-data-list
+        purpose: List issues with optional filters.
+        source: internal/cli/data/list.go
+        tags: [issues, api]
+      - name: loom data ready
+        id: loom-data-ready
+        purpose: List ready (unblocked) tasks.
+        source: internal/cli/data/blocked.go
+        flags: ["--limit"]
+        tags: [issues, planning]
+      - name: loom data blocked
+        id: loom-data-blocked
+        purpose: List blocked tasks and their blockers.
+        source: internal/cli/data/blocked.go
+        tags: [issues, dependencies]
+      - name: loom data claim
+        id: loom-data-claim
+        purpose: Claim an issue (mark as in-progress with owner).
+        source: internal/cli/data/claim.go
+        tags: [issues, workflow]
+      - name: loom data update
+        id: loom-data-update
+        purpose: Patch issue fields.
+        source: internal/cli/data/close.go
+        tags: [issues, api]
+      - name: loom data close
+        id: loom-data-close
+        purpose: Close an issue with reason.
+        source: internal/cli/data/close.go
+        tags: [issues, workflow]
+      - name: loom data comment
+        id: loom-data-comment
+        purpose: Add a comment to an issue.
+        source: internal/cli/data/comment.go
+        tags: [issues, comments]
+      - name: loom data monitor
+        id: loom-data-monitor
+        purpose: Monitor an issue backend from the CLI (non-TUI).
+        source: internal/cli/data/monitor.go
+        tags: [issues, observability]
+      - name: loom data agents
+        id: loom-data-agents
+        purpose: List agents managed by the loom daemon over HTTP.
+        source: internal/cli/data/agents.go
+        tags: [agents, api]
+      - name: loom data agent
+        id: loom-data-agent
+        purpose: Send agent control commands (start, stop, restart, yield) over HTTP.
+        source: internal/cli/data/agentctl.go
+        subcommands: [start, stop, restart, yield]
+        tags: [agents, control]
+
+  - id: cli-server
+    name: CLI — Server & Service
+    summary: Start the web UI, HTTP API, and worker/log-router subprocesses.
+    features:
+      - name: loom serve
+        id: loom-serve
+        purpose: Start the HTTP API + SSE/WebSocket server and embedded web UI.
+        source: internal/cli/serve/serve.go
+        flags: ["--port", "--bind", "--cors-origin", "--frontend-url", "--redis-addr", "--redis-password", "--fleet-mode", "--auth-url", "--auth-issuer", "--auth-audience", "--auth-allow-insecure", "--no-daemon", "--hsts", "--sentry-dsn"]
+        tags: [server, web-ui, api]
+      - name: loom serve install-service
+        id: loom-serve-install-service
+        purpose: Generate or install a platform-native service (systemd/launchd).
+        source: internal/cli/serve/install/install_service_cmd.go
+        flags: ["--install", "--uninstall", "--name", "--port", "--bind", "--env"]
+        tags: [service, systemd, launchd]
+      - name: loom serve worker
+        id: loom-serve-worker
+        epic: epics:container-runners
+        purpose: Run a remote agent worker that connects back to a control plane.
+        source: internal/cli/serve/worker/worker_cmd.go
+        hidden: true
+        flags: ["--control-plane", "--workspace", "--agent", "--backend", "--interval", "--max-tasks", "--idle-timeout"]
+        tags: [worker, remote, fleet]
+      - name: loom serve log-router
+        id: loom-serve-log-router
+        purpose: Internal subprocess — routes stdin to agent/task log files with rotation.
+        source: internal/cli/serve/logroutercmd/logrouter_cmd.go
+        hidden: true
+        flags: ["--agent", "--base-dir", "--lock-path", "--max-log-size", "--workspace-id"]
+        tags: [internal, logs]
+      - name: loom local (service)
+        id: loom-local-service
+        epic: epics:local-first
+        purpose: Manage the local desktop runtime service (foreground, background, install, drain).
+        source: internal/cli/local/local_cmd.go
+        subcommands: [service, start, status, stop, restart, install-service, uninstall-service, drain]
+        tags: [desktop, daemon, lifecycle]
+      - name: loom doctor
+        id: loom-doctor
+        epic: epics:failure-modes-recovery
+        purpose: Health check — diagnoses installation, tmux, redis, fleetdb, and config issues.
+        source: internal/cli/doctor/doctor.go
+        flags: ["--json", "--fix"]
+        tags: [diagnostics, health]
+      - name: loom hooks
+        id: loom-hooks
+        purpose: Hidden lifecycle hooks for backend integrations and daemon-level task gating.
+        source: internal/cli/hooks/hooks_cmd.go
+        hidden: true
+        subcommands: [claude-code, session-start, user-prompt-submit, stop, pre-task, post-task, yield-guard, session-end, install, uninstall, status]
+        tags: [hooks, integration]
+
+  - id: webui-views
+    name: Web UI — Views
+    summary: Pages exposed by the React frontend served from `loom serve`.
+    features:
+      - name: Kanban board
+        id: kanban-board
+        purpose: Drag-and-drop swim-lane view grouped by status, priority, epic, assignee, repo, or label.
+        source: internal/webui/frontend/src/views/KanbanPage.tsx
+        tags: [view, kanban, drag-and-drop]
+      - name: Table view
+        id: table-view
+        purpose: Sortable issue list with bulk actions, virtualization, and inline editing.
+        source: internal/webui/frontend/src/views/TablePage.tsx
+        tags: [view, table, bulk]
+      - name: Graph view
+        id: graph-view
+        purpose: React Flow dependency graph with filters by status and edge type.
+        source: internal/webui/frontend/src/views/GraphPage.tsx
+        tags: [view, graph, dependencies]
+      - name: Monitor dashboard
+        id: monitor-dashboard
+        purpose: Multi-agent operator view with project health, agent activity, and usage panels.
+        source: internal/webui/frontend/src/views/MonitorPage.tsx
+        tags: [view, monitoring, agents]
+      - name: Observability dashboard
+        id: observability-dashboard
+        purpose: Trace analytics, error rates, and latency by endpoint and agent.
+        source: internal/webui/frontend/src/views/ObservabilityPage.tsx
+        tags: [view, observability, tracing]
+      - name: Settings
+        id: settings
+        purpose: Backend configuration, per-agent backend overrides, terminal fonts, Redis, onboarding restart.
+        source: internal/webui/frontend/src/views/SettingsPage.tsx
+        tags: [view, settings]
+      - name: Files
+        id: files
+        purpose: Tree-style file explorer for an agent's worktree with CodeMirror viewer.
+        source: internal/webui/frontend/src/views/FilesPage.tsx
+        tags: [view, files, editor]
+      - name: Workspace overview
+        id: workspace-overview
+        purpose: Multi-repo workspace topology — repos, groups, agents.
+        source: internal/webui/frontend/src/views/WorkspacePage.tsx
+        tags: [view, workspace, multi-repo]
+      - name: Issue detail page
+        id: issue-detail-page
+        purpose: Full-page issue view — markdown editor, design, dependencies, activity, sessions.
+        source: internal/webui/frontend/src/views/IssueDetailPage.tsx
+        tags: [view, issues]
+      - name: Agents page
+        id: agents-page
+        purpose: Agent rail + embedded terminal + work panel — switch agents via URL.
+        source: internal/webui/frontend/src/views/AgentsPage.tsx
+        tags: [view, agents, terminal]
+
+  - id: webui-features
+    name: Web UI — Capabilities
+    summary: Cross-cutting browser features layered on top of the views.
+    features:
+      - name: Talk to Lead terminal
+        id: talk-to-lead-terminal
+        epic: epics:lead-driven-orchestration
+        purpose: Built-in terminal running `loom lead` over wterm + tmux via WebSocket.
+        source: internal/webui/frontend/src/components/TalkToLeadButton
+        tags: [terminal, ai, lead]
+      - name: Per-agent embedded terminals
+        id: per-agent-embedded-terminals
+        epic: epics:real-time-ui
+        purpose: Multi-tab xterm.js terminals attached to live agent tmux sessions.
+        source: internal/webui/terminal/agent_tmux.go
+        tags: [terminal, multiplex, tmux]
+      - name: Real-time SSE mutations
+        id: real-time-sse-mutations
+        epic: epics:real-time-ui
+        purpose: Server-Sent Events push issue/agent/dependency/comment mutations to all clients.
+        source: internal/webui/server/realtime/hub.go
+        tags: [real-time, sse]
+      - name: Full-text issue search
+        id: full-text-issue-search
+        purpose: Cmd/Ctrl+K-driven workspace search with scope indicator and result highlighting.
+        source: internal/webui/frontend/src/components/search
+        tags: [search, keyboard]
+      - name: Bulk action toolbar
+        id: bulk-action-toolbar
+        purpose: Batch status updates and label edits on selected issues in the table view.
+        source: internal/webui/frontend/src/components/BulkActionToolbar
+        tags: [bulk, table]
+      - name: Dependency editor
+        id: dependency-editor
+        purpose: Add and remove dependency edges with type (blocks, parent-of, related, etc.).
+        source: internal/webui/frontend/src/components/IssueDetailPanel
+        tags: [dependencies, issues]
+      - name: Activity log & comments
+        id: activity-log-comments
+        purpose: Timeline of issue events plus a markdown comment form.
+        source: internal/webui/frontend/src/components/IssueDetailPanel
+        tags: [issues, comments, activity]
+      - name: Session history
+        id: session-history
+        purpose: Per-issue linked terminal sessions with phase, duration, and status.
+        source: internal/webui/sessionhistory
+        tags: [sessions, history]
+      - name: File editor panel
+        id: file-editor-panel
+        purpose: CodeMirror-based viewer/editor with syntax highlighting and open-in-editor links.
+        source: internal/webui/frontend/src/components/FileEditorPanel
+        tags: [files, editor]
+      - name: Onboarding flow
+        id: onboarding-flow
+        epic: epics:web-onboarding
+        purpose: Step-by-step wizard — create workspace, attach repo, configure backend, first task.
+        source: internal/webui/frontend/src/components/OnboardingFlow
+        tags: [onboarding, wizard]
+      - name: Theme system (light/dark)
+        id: theme-system-light-dark
+        purpose: System-aware light/dark theme with persistent toggle.
+        source: internal/webui/frontend/src/components/ThemeToggle
+        tags: [theme, ui]
+      - name: Keyboard cheatsheet
+        id: keyboard-cheatsheet
+        purpose: Help overlay (press `?`) listing all keyboard shortcuts.
+        source: internal/webui/frontend/src/components/KeyboardCheatsheet
+        tags: [keyboard, a11y]
+      - name: Auth gate & login
+        id: auth-gate-login
+        purpose: OIDC/OAuth gate with deep-link preservation and CLI auth proxy.
+        source: internal/webui/frontend/src/components/AuthGate
+        tags: [auth, oidc]
+      - name: Workspace switcher
+        id: workspace-switcher
+        purpose: Dropdown to switch between or create workspaces, scoped to the URL.
+        source: internal/webui/frontend/src/components/WorkspaceSwitcher
+        tags: [workspace, navigation]
+      - name: Stale data banner
+        id: stale-data-banner
+        epic: epics:real-time-ui
+        purpose: Warning shown when disconnected from SSE with manual retry.
+        source: internal/webui/frontend/src/components/StaleDataBanner
+        tags: [real-time, resilience]
+      - name: Approve / reject review flow
+        id: approve-reject-review-flow
+        purpose: Reviewer workflow with required reject comments for review-type issues.
+        source: internal/webui/frontend/src/components/IssueDetailPanel
+        tags: [review, workflow]
+      - name: Usage dashboard
+        id: usage-dashboard
+        purpose: Token, cost, and session breakdown by agent, backend, and day for the Observability tab.
+        source: internal/webui/frontend/src/components/UsageDashboard
+        tags: [observability, usage, dashboard]
+      - name: Monitor dashboard panels
+        id: monitor-dashboard-panels
+        purpose: Project-health, agent-activity, and blocking-dependencies canvases composed inside MonitorPage.
+        source: internal/webui/frontend/src/components/MonitorDashboard
+        tags: [monitor, dashboard, real-time]
+      - name: Task drawer
+        id: task-drawer
+        purpose: Side drawer surfaces task detail, logs, sessions, and quick actions over any view.
+        source: internal/webui/frontend/src/components/TaskDrawer
+        tags: [ui, tasks, drawer]
+      - name: Workspace tree navigator
+        id: workspace-tree-navigator
+        purpose: Collapsible workspace > repo > agent tree used in the agent rail.
+        source: internal/webui/frontend/src/components/WorkspaceTree
+        tags: [ui, navigation, workspace]
+      - name: Agent rail
+        id: agent-rail
+        purpose: Vertical agent navigation rail with icon-only and expanded variants used on AgentsPage.
+        source: internal/webui/frontend/src/components/AgentRail
+        tags: [ui, agents, navigation]
+      - name: Agent work panel
+        id: agent-work-panel
+        purpose: Live work view for a single agent — current task, status, and recent activity.
+        source: internal/webui/frontend/src/components/AgentWorkPanel
+        tags: [ui, agents]
+      - name: Workspace unavailable overlay
+        id: workspace-unavailable-overlay
+        purpose: Full-screen overlay shown when the active workspace's runtime is down or draining.
+        source: internal/webui/frontend/src/components/WorkspaceUnavailableOverlay
+        tags: [ui, resilience, workspace]
+      - name: Create-* modals
+        id: create-modals
+        epic: epics:web-onboarding
+        purpose: Modal dialogs for creating issues, workspaces, and agents with validation.
+        source: internal/webui/frontend/src/components/CreateIssueModal
+        tags: [ui, modals]
+
+  - id: server-api
+    name: Server — HTTP API
+    summary: REST endpoints exposed by `loom serve`. See api/openapi.yaml.
+    features:
+      - name: Issues API
+        id: issues-api
+        purpose: CRUD + close/reopen/claim/move/search over workspace issues.
+        source: internal/webui/handlers/issues
+        endpoints:
+          - GET /api/workspaces/{ws}/issues
+          - POST /api/workspaces/{ws}/issues
+          - PATCH /api/workspaces/{ws}/issues/:id
+          - DELETE /api/workspaces/{ws}/issues/:id
+          - POST /api/workspaces/{ws}/issues/:id/close
+          - POST /api/workspaces/{ws}/issues/:id/reopen
+          - POST /api/workspaces/{ws}/issues/:id/claim
+          - POST /api/workspaces/{ws}/issues/:id/move
+          - GET /api/workspaces/{ws}/issues/search
+        tags: [api, issues]
+      - name: Comments & events API
+        id: comments-events-api
+        purpose: List/add comments and read issue event history.
+        source: internal/webui/handlers/issues
+        endpoints:
+          - GET /api/workspaces/{ws}/issues/:id/comments
+          - POST /api/workspaces/{ws}/issues/:id/comments
+          - GET /api/workspaces/{ws}/issues/:id/events
+        tags: [api, comments, activity]
+      - name: Dependencies API
+        id: dependencies-api
+        purpose: List/add/remove issue dependency edges with type metadata.
+        source: internal/webui/handlers/issues
+        endpoints:
+          - GET /api/workspaces/{ws}/issues/:id/dependencies
+          - POST /api/workspaces/{ws}/issues/:id/dependencies
+          - DELETE /api/workspaces/{ws}/issues/:id/dependencies/:depId
+        tags: [api, dependencies]
+      - name: Agents API
+        id: agents-api
+        purpose: Create / list / update / delete agents within a workspace.
+        source: internal/webui/handlers/agents
+        endpoints:
+          - GET /api/workspaces/{ws}/agents
+          - POST /api/workspaces/{ws}/agents
+          - PATCH /api/workspaces/{ws}/agents/:name
+          - DELETE /api/workspaces/{ws}/agents/:name
+        tags: [api, agents]
+      - name: Agent control API
+        id: agent-control-api
+        purpose: Start / stop / pause agents and send terminal input.
+        source: internal/webui/handlers/agentcontrol
+        endpoints:
+          - POST /api/workspaces/{ws}/agents/:name/control/run
+          - POST /api/workspaces/{ws}/agents/:name/control/stop
+          - POST /api/workspaces/{ws}/agents/:name/control/pause
+          - POST /api/workspaces/{ws}/agents/:name/input
+        tags: [api, agents, control]
+      - name: Workspace API
+        id: workspace-api
+        purpose: Workspace CRUD, default lookup, repo reordering, background jobs.
+        source: internal/webui/handlers/workspace
+        endpoints:
+          - GET /api/workspaces
+          - POST /api/workspaces
+          - GET /api/workspaces/default
+          - GET /api/workspaces/{ws}
+          - PATCH /api/workspaces/{ws}
+          - DELETE /api/workspaces/{ws}
+          - POST /api/workspaces/{ws}/reorder
+          - GET /api/workspaces/{ws}/jobs
+        tags: [api, workspace]
+      - name: Git API
+        id: git-api
+        purpose: Diff, diff-stats, blocked list, and dependency graph for visualizations.
+        source: internal/webui/handlers/git
+        endpoints:
+          - GET /api/workspaces/{ws}/git/diff/:issueId
+          - GET /api/workspaces/{ws}/git/diff-stat/:issueId
+          - GET /api/workspaces/{ws}/git/blocked
+          - GET /api/workspaces/{ws}/git/graph
+        tags: [api, git]
+      - name: Terminal API
+        id: terminal-api
+        epic: epics:real-time-ui
+        purpose: One-time tokens + WebSocket attach for xterm.js plus session/tab persistence.
+        source: internal/webui/handlers/terminal
+        endpoints:
+          - GET /api/workspaces/{ws}/terminal/token
+          - WS  /ws/terminal
+          - GET /api/workspaces/{ws}/terminal/sessions
+          - POST /api/workspaces/{ws}/terminal/setup
+          - PATCH /api/workspaces/{ws}/terminal/state
+        tags: [api, terminal, websocket]
+      - name: Onboarding API
+        id: onboarding-api
+        epic: epics:web-onboarding
+        purpose: Server-side endpoints powering the onboarding wizard's first-task flow.
+        source: internal/webui/handlers/onboarding
+        endpoints:
+          - POST /api/workspaces/{ws}/onboarding/first-task
+        tags: [api, onboarding]
+      - name: Files & editors API
+        id: files-editors-api
+        purpose: Per-agent file tree, file read/write, and detection/launch of installed editors (VS Code, Cursor).
+        source: internal/webui/handlers/misc/files.go
+        endpoints:
+          - GET /api/workspaces/{ws}/agents/{name}/files/tree
+          - GET /api/workspaces/{ws}/agents/{name}/files
+          - PUT /api/workspaces/{ws}/agents/{name}/files
+          - GET /api/editors
+          - POST /api/editors/open
+        tags: [api, files]
+      - name: Backend config API
+        id: backend-config-api
+        epic: epics:multi-backend
+        purpose: List backends and read/patch the workspace's active backend selection.
+        source: internal/webui/handlermux/handlermux.go
+        endpoints:
+          - GET /api/backends
+          - GET /api/workspaces/{ws}/config/backend
+          - PATCH /api/workspaces/{ws}/config/backend
+        tags: [api, backends]
+      - name: Local settings API
+        id: local-settings-api
+        purpose: Per-user settings (Redis config, fonts, prefs) stored locally.
+        source: internal/webui/handlers/localsettings
+        endpoints:
+          - GET /api/workspaces/{ws}/local-settings
+          - PATCH /api/workspaces/{ws}/local-settings
+        tags: [api, settings]
+      - name: Health / doctor API
+        id: health-doctor-api
+        purpose: Liveness, auth-config readout, and CLI-style config endpoints.
+        source: internal/webui/handlers/health/health.go
+        endpoints:
+          - GET /health
+          - GET /api/health
+          - GET /api/config
+          - GET /api/config/terminal
+        tags: [api, health]
+      - name: Real-time event stream
+        id: real-time-event-stream
+        epic: epics:real-time-ui
+        purpose: SSE stream that replays missed mutations on reconnect via last-event-id.
+        source: internal/webui/server/realtime/hub.go
+        endpoints:
+          - GET /api/workspaces/{ws}/events/token
+          - GET /api/workspaces/{ws}/events
+        tags: [real-time, sse]
+      - name: Observability & usage API
+        id: observability-usage-api
+        purpose: Per-agent traces, error rates, token usage, and cost.
+        source: internal/webui/handlers
+        endpoints:
+          - GET /api/workspaces/{ws}/agents/:name/observability
+          - GET /api/workspaces/{ws}/agents/:name/usage
+        tags: [api, observability, usage]
+      - name: Monitor dashboard API
+        id: monitor-dashboard-api
+        purpose: Aggregated monitor data — agents, tasks, sync state, stats, and stale-task detection.
+        source: internal/cli/serve/metricscmd/handlers.go
+        endpoints:
+          - GET /api/monitor/agents
+          - GET /api/monitor/status
+          - GET /api/monitor/stats
+          - GET /api/monitor/sync
+          - GET /api/monitor/tasks
+          - GET /api/monitor/usage
+          - GET /api/monitor/workspaces
+          - GET /api/monitor/stale-detector
+          - GET /api/workspaces/{ws}/monitor/status
+        tags: [api, monitor, observability]
+      - name: Observability events & metrics API
+        id: observability-events-metrics-api
+        purpose: Workspace-wide observability event log and metric series for the dashboard.
+        source: internal/cli/serve/observability/observability.go
+        endpoints:
+          - GET /api/observability/events
+          - GET /api/observability/metrics
+        tags: [api, observability]
+      - name: Daemon status API
+        id: daemon-status-api
+        purpose: Exposes the supervisor pool, daemon config, and per-workspace daemon health.
+        source: internal/webui/handlers_daemon.go
+        endpoints:
+          - GET /api/daemon/config
+          - GET /api/daemon/supervisor
+          - GET /api/workspaces/{ws}/daemon/status
+        tags: [api, daemon, health]
+      - name: Agent control API (lifecycle)
+        id: agent-control-api-lifecycle
+        purpose: Start, stop, restart, and cooperatively yield agents over HTTP.
+        source: internal/webui/handlers/agentcontrol/handlers.go
+        endpoints:
+          - POST /api/workspaces/{ws}/agents/{name}/start
+          - POST /api/workspaces/{ws}/agents/{name}/stop
+          - POST /api/workspaces/{ws}/agents/{name}/restart
+          - POST /api/workspaces/{ws}/agents/{name}/yield
+        tags: [api, agents, control]
+      - name: Agent git operations API
+        id: agent-git-operations-api
+        purpose: Trigger push/pull/PR/reset/sync (and push-all) on an agent's worktree from the UI.
+        source: internal/webui/handlers/git/git.go
+        endpoints:
+          - POST /api/workspaces/{ws}/agents/{name}/git/push
+          - POST /api/workspaces/{ws}/agents/{name}/git/pull
+          - POST /api/workspaces/{ws}/agents/{name}/git/pr
+          - POST /api/workspaces/{ws}/agents/{name}/git/reset
+          - POST /api/workspaces/{ws}/agents/{name}/git/sync
+          - PATCH /api/workspaces/{ws}/agents/{name}/git/target
+          - GET /api/workspaces/{ws}/agents/{name}/git/status
+          - GET /api/workspaces/{ws}/agents/{name}/git/diff-stat
+          - POST /api/workspaces/{ws}/git/push-all
+        tags: [api, git, agents]
+      - name: Agent diff API
+        id: agent-diff-api
+        purpose: Per-agent diff inspection — commit list, changed files, and file-level diff text.
+        source: internal/webui/handlers/git/diff.go
+        endpoints:
+          - GET /api/workspaces/{ws}/agents/{name}/diff/commits
+          - GET /api/workspaces/{ws}/agents/{name}/diff/files
+          - GET /api/workspaces/{ws}/agents/{name}/diff/file
+        tags: [api, git, diff]
+      - name: Agent logs & queue API
+        id: agent-logs-queue-api
+        purpose: Stream archived agent logs and preview the agent's filtered work queue.
+        source: internal/webui/handlers/misc/logs.go
+        endpoints:
+          - GET /api/workspaces/{ws}/agents/{name}/logs
+          - GET /api/workspaces/{ws}/agents/{name}/queue
+        tags: [api, agents, logs]
+      - name: Task logs API
+        id: task-logs-api
+        purpose: Per-task log phases and phase-scoped log retrieval used by the task drawer.
+        source: internal/webui/handlers/misc/logs.go
+        endpoints:
+          - GET /api/workspaces/{ws}/tasks/{id}/logs
+          - GET /api/workspaces/{ws}/tasks/{id}/logs/{phase}
+        tags: [api, tasks, logs]
+      - name: Issue ready / blocked / stats API
+        id: issue-ready-blocked-stats-api
+        purpose: Workspace-scoped ready queue, blocked tasks with blockers, and aggregate issue stats.
+        source: internal/webui/handlers/issues
+        endpoints:
+          - GET /api/workspaces/{ws}/ready
+          - GET /api/workspaces/{ws}/blocked
+          - GET /api/workspaces/{ws}/stats
+          - GET /api/workspaces/{ws}/issues/graph
+        tags: [api, issues, planning]
+      - name: Issue tabs API
+        id: issue-tabs-api
+        purpose: Persist per-issue editor/terminal tab state for the IssueDetailPanel.
+        source: internal/webui/issuetabs/store.go
+        endpoints:
+          - GET /api/workspaces/{ws}/issues/{issueId}/tabs
+          - PUT /api/workspaces/{ws}/issues/{issueId}/tabs
+          - DELETE /api/workspaces/{ws}/issues/{issueId}/tabs
+        tags: [api, issues, ui-state]
+      - name: Session history & transcripts API
+        id: session-history-transcripts-api
+        purpose: List per-issue sessions, scrollback, diff, and transcript entries for the session history panel.
+        source: internal/webui/handlers/issues/session_history.go
+        endpoints:
+          - GET /api/workspaces/{ws}/issues/{issueId}/sessions
+          - GET /api/workspaces/{ws}/issues/{issueId}/sessions/{recordId}/scrollback
+          - GET /api/workspaces/{ws}/tasks/{taskId}/sessions
+          - GET /api/workspaces/{ws}/tasks/{taskId}/sessions/{sessionId}
+          - GET /api/workspaces/{ws}/tasks/{taskId}/sessions/{sessionId}/diff
+          - GET /api/workspaces/{ws}/tasks/{taskId}/sessions/{sessionId}/transcript
+        tags: [api, sessions, history]
+      - name: Sessions notify API
+        id: sessions-notify-api
+        purpose: Hook endpoint backends call to push session lifecycle/usage updates into loom.
+        source: internal/webui/handlers/misc/sessions.go
+        endpoints:
+          - POST /api/sessions/notify
+        tags: [api, sessions, hooks]
+      - name: Agent terminal session API
+        id: agent-terminal-session-api
+        purpose: One-shot setup, info, and WebSocket attach for an agent's tmux-backed terminal.
+        source: internal/webui/handlers/terminal/agent.go
+        endpoints:
+          - GET /api/workspaces/{ws}/agents/{name}/terminal/token
+          - GET /api/workspaces/{ws}/agents/{name}/terminal/info
+          - GET /api/workspaces/{ws}/agents/{name}/terminal/ws
+          - POST /api/workspaces/{ws}/agents/{name}/terminal/session
+        tags: [api, terminal, agents]
+      - name: Terminal tabs API
+        id: terminal-tabs-api
+        purpose: CRUD for browser terminal tab metadata — names, focus, ordering, layout.
+        source: internal/webui/handlers/terminal/tabs.go
+        endpoints:
+          - GET /api/workspaces/{ws}/terminal/tabs
+          - GET /api/workspaces/{ws}/terminal/tabs/{session}
+          - PUT /api/workspaces/{ws}/terminal/tabs/{session}
+          - PATCH /api/workspaces/{ws}/terminal/tabs/{session}
+          - DELETE /api/workspaces/{ws}/terminal/tabs/{session}
+          - GET /api/workspaces/{ws}/terminal/sessions/by-issue
+        tags: [api, terminal, tabs]
+      - name: Workspace repos & lifecycle API
+        id: workspace-repos-lifecycle-api
+        purpose: List/add repos in a workspace, rename it, set default, and look up active workspace + jobs.
+        source: internal/webui/handlermux/handlermux.go
+        endpoints:
+          - GET /api/workspaces/active
+          - GET /api/workspaces/{ws}/repos
+          - POST /api/workspaces/{ws}/repos
+          - PATCH /api/workspaces/{ws}/name
+          - PUT /api/workspaces/default
+          - DELETE /api/workspaces/default
+          - PUT /api/workspaces/order
+          - GET /api/workspaces/jobs/{id}
+        tags: [api, workspace, repos]
+      - name: Fleet claim/done/heartbeat API
+        id: fleet-claim-done-heartbeat-api
+        epic: epics:distributed-control-plane
+        purpose: Workspace-scoped fleet endpoints — workers claim tasks, report completion, and heartbeat.
+        source: internal/webui/fleet
+        endpoints:
+          - POST /api/fleet/claim
+          - POST /api/workspaces/{ws}/fleet/claim
+          - POST /api/workspaces/{ws}/fleet/done/{id}
+          - POST /api/workspaces/{ws}/fleet/heartbeat
+          - POST /api/workspaces/{ws}/fleet/register
+        tags: [api, fleet, workers]
+      - name: Internal workers API
+        id: internal-workers-api
+        purpose: Control-plane endpoints for remote `loom serve worker` registration and event reporting.
+        source: internal/webui/handlers/misc/worker_api.go
+        endpoints:
+          - POST /api/internal/workers/register
+          - POST /api/internal/workers/{id}/events
+        tags: [api, workers, control-plane]
+      - name: Client error reporting API
+        id: client-error-reporting-api
+        purpose: Browser-side error/crash sink that forwards into the Sentry pipeline.
+        source: internal/webui/handlers/misc/client_errors.go
+        endpoints:
+          - POST /api/client-errors
+        tags: [api, observability, sentry]
+
+  - id: backends
+    name: AI Backends
+    summary: CLI integrations for AI coding assistants. Selected by --backend or LOOM_BACKEND.
+    features:
+      - name: Claude
+        id: claude
+        epic: epics:multi-backend
+        purpose: Default backend — invokes the Anthropic Claude Code CLI with token tracking.
+        source: internal/cli/backends/backend_claude.go
+        tags: [backend, anthropic, default]
+      - name: Codex
+        id: codex
+        epic: epics:multi-backend
+        purpose: OpenAI Codex CLI integration with approval bypass and sandbox modes.
+        source: internal/cli/backends/backend_codex.go
+        tags: [backend, openai]
+      - name: OpenCode
+        id: opencode
+        epic: epics:multi-backend
+        purpose: OpenCode CLI integration with model selection.
+        source: internal/cli/backends/backend_opencode.go
+        tags: [backend, opencode]
+      - name: Cursor
+        id: cursor
+        epic: epics:multi-backend
+        purpose: Cursor (VS Code fork) AI backend invocation.
+        source: internal/cli/backends/backend_cursor.go
+        tags: [backend, cursor]
+      - name: Gemini
+        id: gemini
+        epic: epics:multi-backend
+        purpose: Google Gemini AI backend invocation.
+        source: internal/cli/backends/backend_gemini.go
+        tags: [backend, google]
+      - name: External
+        id: external
+        epic: epics:multi-backend
+        purpose: Generic wrapper for any third-party AI CLI via arbitrary shell command.
+        source: internal/cli/backends/backend_external.go
+        tags: [backend, custom]
+      - name: Echo (testing)
+        id: echo-testing
+        epic: epics:multi-backend
+        purpose: Test/stub backend that echoes prompts back — no external calls.
+        source: internal/cli/backends/backend_echo.go
+        tags: [backend, testing]
+      - name: Backend capabilities
+        id: backend-capabilities
+        epic: epics:multi-backend
+        purpose: Runtime introspection of supported tools, features, and models per backend.
+        source: internal/cli/backends/backend_capabilities.go
+        tags: [backend, capabilities]
+
+  - id: storage-auth
+    name: Storage, Fleet & Auth
+    summary: Data plane and authentication primitives.
+    features:
+      - name: Fleet-db HTTP backend
+        id: fleet-db-http-backend
+        epic: epics:distributed-control-plane
+        purpose: REST client for the shared fleet-db service — workspace-scoped issues and mutations.
+        source: internal/backend/fleet
+        tags: [storage, fleet, http]
+      - name: External Redis support
+        id: external-redis-support
+        epic: epics:distributed-control-plane
+        purpose: Connect to an external Redis (TLS optional) for terminal state and fleet coordination.
+        source: internal/cli/serve/serve.go
+        tags: [storage, redis, fleet]
+      - name: Auth proxy
+        id: auth-proxy
+        purpose: Reverse-proxy /api/auth/* to an external BetterAuth service from the loom origin.
+        source: internal/webui/auth_proxy.go
+        tags: [auth, proxy, betterauth]
+      - name: Fleet JWT (RS256)
+        id: fleet-jwt-rs256
+        epic: epics:distributed-control-plane
+        purpose: RS256 JWT signing/verification for fleet claim/done/heartbeat endpoints.
+        source: internal/webui/fleet/jwt.go
+        tags: [auth, jwt, fleet]
+      - name: Standalone BetterAuth service
+        id: standalone-betterauth-service
+        purpose: TypeScript/Hono microservice with Drizzle + SQLite/Postgres for tenant auth.
+        source: services/auth
+        tags: [auth, betterauth, service]
+  - id: observability
+    name: Observability
+    summary: Tracing, metrics, and log routing.
+    features:
+      - name: OpenTelemetry tracing
+        id: opentelemetry-tracing
+        epic: epics:observability
+        purpose: W3C traceparent propagation + OTLP/HTTP exporter wired across CLI and server.
+        source: internal/observability/tracing/tracing.go
+        tags: [observability, otel, tracing]
+      - name: HTTP route tracing middleware
+        id: http-route-tracing-middleware
+        epic: epics:observability
+        purpose: Low-cardinality span naming for server HTTP handlers.
+        source: internal/webui/otel_tracing.go
+        tags: [observability, otel, http]
+      - name: Prometheus metrics
+        id: prometheus-metrics
+        epic: epics:observability
+        purpose: HTTP request counters and latency histograms by method/route/status.
+        source: internal/webui/prom_metrics.go
+        tags: [observability, prometheus]
+      - name: Fleet metrics
+        id: fleet-metrics
+        epic: epics:observability
+        purpose: Workspace-scoped counters for fleet claim operations.
+        source: internal/webui/fleet/metrics.go
+        tags: [observability, fleet]
+      - name: Trace-aware daemon
+        id: trace-aware-daemon
+        epic: epics:observability
+        purpose: Propagates span context to child processes via LOOM_TRACE_PARENT env var.
+        source: internal/cli/daemon/supervisor/tracing.go
+        tags: [observability, daemon]
+      - name: Log router
+        id: log-router
+        epic: epics:observability
+        purpose: Routes stdin from agents to per-agent/per-task rotating log files.
+        source: internal/logrouter
+        tags: [logs, routing]
+      - name: Sentry client error reporting
+        id: sentry-client-error-reporting
+        epic: epics:observability
+        purpose: Optional Sentry DSN forwards client-side errors with auth context.
+        source: internal/webui/sentry.go
+        tags: [observability, sentry]
+      - name: Usage tracking
+        id: usage-tracking
+        purpose: Token and cost accounting per backend invocation.
+        source: internal/usage
+        tags: [observability, usage]
+
+  - id: daemon
+    name: Daemon & Supervisor
+    summary: Multi-agent process supervision and orchestration.
+    features:
+      - name: Ephemeral epic workers
+        id: ephemeral-epic-workers
+        epic: epics:lead-driven-orchestration
+        purpose: Supervisor support for short-lived workers spawned by `loom epic run` and torn down on task completion.
+        source: internal/cli/daemon/supervisor/epic.go
+        tags: [daemon, epic, ephemeral]
+      - name: Cooperative drain & yield
+        id: cooperative-drain-yield
+        epic: epics:lead-driven-orchestration
+        purpose: Asks running agents to finish current task and exit cleanly before SIGTERM.
+        source: internal/cli/daemon/supervisor/drain.go
+        tags: [daemon, lifecycle, drain]
+      - name: Daemon health probe
+        id: daemon-health-probe
+        purpose: Health surface for the supervisor pool exposed to /api/daemon endpoints.
+        source: internal/cli/daemon/supervisor/health.go
+        tags: [daemon, health]
+  - id: terminal-sessions
+    name: Terminal & Sessions
+    summary: PTY management, tmux integration, and session lifecycle.
+    features:
+      - name: Native session transcripts
+        id: native-session-transcripts
+        purpose: Parses backend-native event streams (Claude, Codex rollouts) into normalized transcript entries.
+        source: internal/sessions/native_transcript.go
+        tags: [sessions, transcripts, backends]
+      - name: Session redaction
+        id: session-redaction
+        purpose: Strips secrets and sensitive paths from transcripts before they leave the host.
+        source: internal/sessions/redact
+        tags: [sessions, security, redact]
+      - name: Stale session detector
+        id: stale-session-detector
+        epic: epics:failure-modes-recovery
+        purpose: Marks sessions whose owning processes have died so the UI can surface them.
+        source: internal/sessions/stale.go
+        tags: [sessions, health]
+      - name: Session purge
+        id: session-purge
+        purpose: Retention-aware purge of session directories and the session index.
+        source: internal/sessions/purge.go
+        tags: [sessions, retention]
+      - name: Issue-tab persistence
+        id: issue-tab-persistence
+        purpose: Stores per-issue UI tab state (which file/terminal/session tabs are open) for the detail panel.
+        source: internal/webui/issuetabs/store.go
+        tags: [tabs, ui-state]
+  - id: locks-hooks
+    name: Locks, Hooks & Resilience
+    summary: Concurrency primitives, lifecycle hooks, and fault tolerance.
+    features:
+      - name: Hook installer
+        id: hook-installer
+        purpose: Installs git pre/post-commit/merge/rebase hooks for agent integration.
+        source: internal/cli/hooks/hooks_install.go
+        tags: [hooks, git]
+  - id: desktop
+    name: Desktop App
+    summary: Tauri-based desktop shell wrapping the loom UI.
+    features:
+      - name: Tauri desktop shell
+        id: tauri-desktop-shell
+        epic: epics:desktop-app
+        purpose: Cross-platform desktop wrapper (macOS, Windows, Linux) for the loom UI.
+        source: desktop/src-tauri
+        tags: [desktop, tauri]
+      - name: Native AppKit bindings
+        id: native-appkit-bindings
+        epic: epics:desktop-app
+        purpose: macOS NSApplication integration for menu bar and window chrome.
+        source: desktop/src-tauri
+        tags: [desktop, macos]
+      - name: Desktop frontend
+        id: desktop-frontend
+        epic: epics:desktop-app
+        purpose: TypeScript entrypoint that bootstraps the React UI inside Tauri.
+        source: desktop/src
+        tags: [desktop, frontend]
+
+  - id: dist
+    name: Distribution & Dev Container
+    summary: How loom is packaged, installed, and run for development.
+    features:
+      - name: npm package
+        id: npm-package
+        purpose: Distributable loomcli npm package with binary postinstall.
+        source: npm/package.json
+        tags: [distribution, npm]
+      - name: Install script
+        id: install-script
+        purpose: Curl-based one-liner installer that fetches the binary into ~/.local/bin.
+        source: scripts/install.sh
+        tags: [distribution, install]
+      - name: Goreleaser config
+        id: goreleaser-config
+        purpose: Cross-platform release pipeline producing tarballs and checksums.
+        source: .goreleaser.yml
+        tags: [distribution, release]
+      - name: Dev container
+        id: dev-container
+        epic: epics:container-runners
+        purpose: Dockerfile.dev image with real AI CLIs and a seeded loom workspace.
+        source: Dockerfile.dev
+        tags: [dev, container]
+      - name: Dev compose stack
+        id: dev-compose-stack
+        epic: epics:container-runners
+        purpose: docker-compose.dev.yml — full local stack with optional Redis profile.
+        source: docker-compose.dev.yml
+        tags: [dev, compose]

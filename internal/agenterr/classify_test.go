@@ -138,6 +138,17 @@ func TestClassifyClaude(t *testing.T) {
 	}
 }
 
+func TestAgentErrorRetryableDelegatesToClass(t *testing.T) {
+	err := &AgentError{Class: RateLimited}
+	if !err.IsRetryable() {
+		t.Fatal("RateLimited AgentError should be retryable")
+	}
+	err.Class = AuthFailure
+	if err.IsRetryable() {
+		t.Fatal("AuthFailure AgentError should not be retryable")
+	}
+}
+
 func TestClassifyCodex(t *testing.T) {
 	t.Parallel()
 

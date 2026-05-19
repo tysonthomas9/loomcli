@@ -1,0 +1,24 @@
+# Catalog file ownership contract.
+#
+# Each catalog YAML file is owned by exactly one cataloger agent. The owner
+# is the only agent that may write to the file.
+#
+# The catalog-write-guard hook (.claude/hooks/catalog-write-guard.sh) reads
+# this file on every Edit/Write to catalog/*.yaml and surfaces an advisory
+# warning naming the owner. The catalog-curator can also read this file to
+# audit ownership post-hoc via `git diff`.
+#
+# To add a new catalog file:
+#   1. Add a row below.
+#   2. Create the owner agent at ~/.claude/agents/<name>-cataloger.md.
+#   3. Register the file in catalog/index.yaml.
+
+version: 1
+files:
+  personas.yaml: persona-cataloger
+  features.yaml: feature-cataloger
+  stories.yaml:  user-story-cataloger
+  epics.yaml:    epic-cataloger
+  glossary.yaml: glossary-cataloger
+  index.yaml:    catalog-curator
+  ".ownership.yaml": catalog-curator

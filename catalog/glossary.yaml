@@ -1,0 +1,147 @@
+meta:
+  app: loom
+  tagline: Domain vocabulary used across the catalog files.
+  description: >
+    Glossary of terms used in `personas.yaml`, `features.yaml`, `stories.yaml`,
+    and `epics.yaml`. If you find yourself defining a term inline more than
+    once, lift it here and reference `glossary:<term-id>` everywhere else.
+  generated: 2026-05-14
+  generated_by: glossary-cataloger
+  refs_in:  [personas, features, stories, epics]
+  refs_out: []
+
+terms:
+  - id: agent
+    term: Agent
+    definition: A running process — local or remote — that claims tasks and works on them. Bound to an agent definition, a role, and a backend.
+    aliases: [worker, runner]
+    related: [glossary:agent-def, glossary:role, glossary:backend]
+
+  - id: agent-def
+    term: Agent definition (agentdef)
+    definition: The configuration record that binds a role + repo(s) + optional overrides into a named agent the daemon can run.
+    related: [glossary:agent, glossary:role, glossary:daemon]
+
+  - id: auto-mode
+    term: Auto mode
+    definition: A flag (`--auto`) that turns an agent into a continuous polling loop — it picks the next ready task, works it, and repeats until an exit condition is met.
+
+  - id: backend
+    term: Backend
+    definition: The AI CLI an agent shells out to (claude, codex, opencode, cursor, gemini, echo, or external). Selected per workspace, role, or agent.
+    related: [features:claude, features:codex]
+
+  - id: coder
+    term: Coder (task agent)
+    definition: An agent that implements an approved design. Invoked as `loom task` or via the daemon. Contrasted with planner and lead.
+    related: [glossary:planner, glossary:lead]
+
+  - id: daemon
+    term: Daemon
+    definition: The supervisor process that spawns, health-checks, and restarts agents. Profiles describe its concurrency and runtime limits.
+    related: [glossary:agent-def]
+
+  - id: epic
+    term: Epic
+    definition: A body of work decomposed into stories and features, with a defined outcome and a shipping state. Lives across many sessions and ships when its child stories ship. Catalogued in `catalog/epics.yaml`; stories and features point to their epic via an `epic:` field.
+    related: [glossary:epic-issue, glossary:story, glossary:feature, glossary:lead]
+
+  - id: epic-issue
+    term: Epic issue (parent issue)
+    definition: The fleet-db data structure loom uses to track one epic. A parent issue with child tasks, claimed and drained by `loom epic run`, worked by a lead agent fanning out ephemeral workers. One implementation of the broader epic concept — not every catalog epic has a corresponding epic-issue.
+    aliases: [parent issue, parent epic]
+    related: [glossary:epic, features:loom-epic-run, features:loom-lead]
+
+  - id: feature
+    term: Feature
+    definition: A single user-or-operator-observable capability of loom, named the way a user would refer to it. Must be reachable from a documented surface (CLI flag, view, endpoint, runtime mode), describable in one sentence of purpose, and testable in isolation. Implementation choices and specification artifacts are not features — they're glossary terms or notes on a parent feature.
+    related: [glossary:epic, features:loom-plan]
+
+  - id: story
+    term: Story
+    definition: A persona-driven journey through one or more features with a concrete situation, outcome, and 2–5 step flow. Cataloged in `catalog/stories.yaml`. A story is one user goal, not one feature interaction — if it can be described in a single click, it's a feature note, not a story.
+    related: [glossary:epic, glossary:feature]
+
+  - id: fleet-db
+    term: Fleet-db
+    definition: The shared issue and config store. Embedded miniredis in local mode; an external HTTP service in cloud / multi-node mode.
+    aliases: [control plane]
+    related: [glossary:fleet-mode]
+
+  - id: fleet-mode
+    term: Fleet mode
+    definition: A `loom serve` flag (`--fleet-mode`) that enables cross-node task claims, shared JWT signing keys, and stale-server detection.
+    related: [glossary:fleet-db]
+
+  - id: heartbeat
+    term: Heartbeat
+    definition: A periodic ping from an agent or daemon to fleet-db. Used to detect stale runners and reassign claimed tasks.
+    related: [glossary:stale-runner]
+
+  - id: integration-branch
+    term: Integration branch
+    definition: The branch worktrees push to and pull from — typically `main`. Configured by `LOOM_DEFAULT_BRANCH`.
+    related: [glossary:worktree]
+
+  - id: lead
+    term: Lead (agent)
+    definition: An interactive AI agent that reviews plans, triages the backlog, and orchestrates an epic by spawning workers.
+    related: [glossary:coder, glossary:planner, glossary:epic]
+
+  - id: planner
+    term: Planner (plan agent)
+    definition: An agent that researches a task and writes a design document for review. Invoked as `loom plan`.
+    related: [glossary:coder, glossary:lead]
+
+  - id: preflight
+    term: Preflight
+    definition: Pre-run checks (auth, tool presence, repo readiness) that fail fast before the model is invoked. Errors get classified.
+
+  - id: role
+    term: Role
+    definition: A named bundle of prompt, model, backend, and tool allowlists. Multiple agents can share a role.
+    related: [glossary:agent-def, features:loom-role]
+
+  - id: session
+    term: Session
+    definition: One end-to-end execution of an agent on a task. Captures transcript, diff stats, token usage, and result.
+    related: [glossary:stale-runner]
+
+  - id: stale-runner
+    term: Stale runner
+    definition: An agent that has stopped sending heartbeats but still holds a task claim. Recovery releases the claim and resets the lock.
+    related: [glossary:heartbeat, glossary:lock-file, features:loom-recover]
+
+  - id: lock-file
+    term: Lock file
+    definition: Per-worktree `.agent.lock` file containing PID, current task, and state. Prevents concurrent agents in the same worktree.
+
+  - id: workspace
+    term: Workspace
+    definition: The top-level unit of isolation. Owns repos, agents, daemon profile, and issues. A user can have many workspaces.
+    related: [glossary:worktree]
+
+  - id: worktree
+    term: Worktree
+    definition: A git worktree allocated to one agent. Each agent works on its own branch in its own directory, isolated from siblings.
+    related: [glossary:workspace, glossary:integration-branch]
+
+  - id: miniredis
+    term: Miniredis
+    definition: In-process Redis-compatible server used by loom's local mode for terminal state, tabs, and session history. Snapshotted to ~/.loom/fleet-db/redis-snapshot.json. Removes the need for an external Redis in single-machine setups.
+    aliases: [embedded miniredis]
+    related: [glossary:fleet-db]
+
+  - id: circuit-breaker
+    term: Circuit breaker
+    definition: Resilience pattern (open / closed / half-open states) used inside loom to pause polling, downstream calls, or backend retries when repeated errors signal a downstream failure. Avoids retry storms during outages.
+    related: [glossary:auto-mode]
+
+  - id: atomic-write
+    term: Atomic write
+    definition: Write-then-rename pattern with .bak backup used for crash-safe persistence of config, snapshots, and ownership-sensitive files. Either the previous content or the new content survives a crash — never a half-written file.
+
+  - id: openapi-spec
+    term: OpenAPI spec
+    definition: api/openapi.yaml — the canonical REST contract for the loom server, generated into Go code via oapi-codegen. Not a feature itself; the contract that the server-api features implement.
+    related: [features:issues-api, features:agents-api, features:workspace-api]

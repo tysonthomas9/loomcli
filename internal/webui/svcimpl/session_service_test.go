@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/webui/sessionhistory"
 )
 
 func TestSessionServiceListTaskSessionsUsesControlPlane(t *testing.T) {
@@ -210,5 +212,116 @@ func TestReadScrollbackFileReturnsInternalWhenHomeDirUnavailable(t *testing.T) {
 	}
 	if svcErr.Kind != service.KindInternal {
 		t.Fatalf("error kind = %q, want %q", svcErr.Kind, service.KindInternal)
+	}
+}
+
+func TestSessionServiceDetailTranscriptDiffAndSubagents(t *testing.T) {
+	runtimeDir := t.TempDir()
+	sessStore, err := sessions.NewStore(runtimeDir)
+	if err != nil {
+		t.Fatalf("new session store: %v", err)
+	}
+	sess, err := sessStore.CreateSession(sessions.CreateOptions{
+		AgentName: "worker",
+		Backend:   "codex",
+		Phase:     "implementation",
+	})
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	if err := sess.Finalize(sessions.FinalizeOptions{
+		TaskID:    "TASK-4",
+		ExitCode:  0,
+		DiffPatch: "diff --git a/a.txt b/a.txt\n",
+	}); err != nil {
+		t.Fatalf("finalize session: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(sessStore.SubagentTranscriptPath(sess.SessionID(), "abc123")), 0o755); err != nil {
+		t.Fatalf("mkdir subagents: %v", err)
+	}
+	if err := os.WriteFile(sessStore.SubagentTranscriptPath(sess.SessionID(), "abc123"), []byte("{}\n"), 0o600); err != nil {
+		t.Fatalf("write subagent: %v", err)
+	}
+
+	svc := NewSessionServiceWithRuntimeDir(nil, nil, runtimeDir)
+	detail, err := svc.GetSession(t.Context(), "WS", "TASK-4", sess.SessionID())
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	if detail.SessionID != sess.SessionID() || detail.IsActive {
+		t.Fatalf("detail = %+v", detail)
+	}
+	events, err := svc.GetSessionTranscript(t.Context(), "WS", "TASK-4", sess.SessionID())
+	if err != nil {
+		t.Fatalf("GetSessionTranscript: %v", err)
+	}
+	if events == nil {
+		t.Fatal("transcript events should be an empty slice, not nil")
+	}
+	diff, err := svc.GetSessionDiff(t.Context(), "WS", "TASK-4", sess.SessionID())
+	if err != nil || !strings.Contains(diff, "diff --git") {
+		t.Fatalf("diff = %q err=%v", diff, err)
+	}
+	subagents, err := svc.ListSessionSubagents(t.Context(), "WS", "TASK-4", sess.SessionID())
+	if err != nil {
+		t.Fatalf("ListSessionSubagents: %v", err)
+	}
+	if len(subagents) != 1 || subagents[0] != "abc123" {
+		t.Fatalf("subagents = %+v", subagents)
+	}
+	if _, err := svc.GetSessionSubagentTranscript(t.Context(), "WS", "TASK-4", sess.SessionID(), "bad/id"); err == nil {
+		t.Fatal("invalid subagent id returned nil error")
+	}
+	if _, err := svc.GetSessionSubagentTranscript(t.Context(), "WS", "TASK-4", sess.SessionID(), "missing"); err == nil {
+		t.Fatal("missing subagent transcript returned nil error")
+	}
+}
+
+func TestSessionServiceValidationAndScrollbackHelpers(t *testing.T) {
+	svc := NewSessionServiceWithRuntimeDir(nil, nil, t.TempDir())
+	if _, err := svc.ListTaskSessions(t.Context(), "WS", "../bad"); err == nil {
+		t.Fatal("invalid task id returned nil error")
+	}
+	if _, err := svc.GetSession(t.Context(), "WS", "TASK", "../bad"); err == nil {
+		t.Fatal("invalid session id returned nil error")
+	}
+	if _, err := svc.GetSessionDiff(t.Context(), "WS", "../bad", "sess"); err == nil {
+		t.Fatal("invalid diff task id returned nil error")
+	}
+	if _, err := svc.GetSessionScrollback(t.Context(), "WS", "bad/id", "record"); err == nil {
+		t.Fatal("nil history should return unavailable before validation")
+	}
+	records := []sessionhistory.SessionRecord{{ID: "one"}, {ID: "two"}}
+	if got := findSessionRecord(records, "two"); got == nil || got.ID != "two" {
+		t.Fatalf("findSessionRecord = %+v", got)
+	}
+	if got := findSessionRecord(records, "missing"); got != nil {
+		t.Fatalf("find missing = %+v", got)
+	}
+
+	home := t.TempDir()
+	oldUserHomeDir := userHomeDir
+	userHomeDir = func() (string, error) { return home, nil }
+	t.Cleanup(func() { userHomeDir = oldUserHomeDir })
+	scrollDir := filepath.Join(home, ".loom", "session-scrollback")
+	if err := os.MkdirAll(scrollDir, 0o755); err != nil {
+		t.Fatalf("mkdir scrollback: %v", err)
+	}
+	path := filepath.Join(scrollDir, "session.log")
+	if err := os.WriteFile(path, []byte("one\ntwo"), 0o600); err != nil {
+		t.Fatalf("write scrollback: %v", err)
+	}
+	got, err := readScrollbackFile(path)
+	if err != nil {
+		t.Fatalf("read scrollback: %v", err)
+	}
+	if got.Content != "one\ntwo" || got.Lines != 2 {
+		t.Fatalf("scrollback = %+v", got)
+	}
+	if _, err := readScrollbackFile(filepath.Join(home, "outside.log")); err == nil {
+		t.Fatal("outside scrollback path returned nil error")
+	}
+	if _, err := readScrollbackFile(filepath.Join(scrollDir, "missing.log")); err == nil {
+		t.Fatal("missing scrollback path returned nil error")
 	}
 }

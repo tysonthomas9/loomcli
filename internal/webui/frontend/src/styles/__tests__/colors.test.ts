@@ -20,15 +20,15 @@ import {
 
 describe("StateColors", () => {
   it("has correct color for blocked state", () => {
-    expect(StateColors.blocked).toBe("#ef4444"); // red-500
+    expect(StateColors.blocked).toBe("#f87171"); // red-400
   });
 
   it("has correct color for ready state", () => {
-    expect(StateColors.ready).toBe("#22c55e"); // green-500
+    expect(StateColors.ready).toBe("#34d399"); // emerald-400
   });
 
   it("has correct color for closed state", () => {
-    expect(StateColors.closed).toBe("#10b981"); // green-500 (same as status-closed)
+    expect(StateColors.closed).toBe("#34d399"); // emerald-400 (same as status-closed)
   });
 
   it("contains exactly 3 state colors", () => {
@@ -38,19 +38,19 @@ describe("StateColors", () => {
 
 describe("StatusColors", () => {
   it("has correct color for open status", () => {
-    expect(StatusColors.open).toBe("#3b82f6"); // blue-500
+    expect(StatusColors.open).toBe("#60a5fa"); // blue-400
   });
 
   it("has correct color for in_progress status", () => {
-    expect(StatusColors.in_progress).toBe("#f59e0b"); // amber-500
+    expect(StatusColors.in_progress).toBe("#facc15"); // yellow-400 (lemon)
   });
 
   it("has correct color for closed status", () => {
-    expect(StatusColors.closed).toBe("#10b981"); // green-500
+    expect(StatusColors.closed).toBe("#34d399"); // emerald-400
   });
 
   it("has correct color for review status", () => {
-    expect(StatusColors.review).toBe("#8b5cf6"); // purple-500
+    expect(StatusColors.review).toBe("#a78bfa"); // violet-400
   });
 
   it("contains exactly 4 status colors", () => {
@@ -60,19 +60,19 @@ describe("StatusColors", () => {
 
 describe("PriorityColors", () => {
   it("has correct color for priority 0 (critical)", () => {
-    expect(PriorityColors[0]).toBe("#dc2626"); // red-600
+    expect(PriorityColors[0]).toBe("#f87171"); // red-400
   });
 
   it("has correct color for priority 1 (high)", () => {
-    expect(PriorityColors[1]).toBe("#ea580c"); // orange-600
+    expect(PriorityColors[1]).toBe("#fb923c"); // orange-400
   });
 
   it("has correct color for priority 2 (medium)", () => {
-    expect(PriorityColors[2]).toBe("#ca8a04"); // yellow-600
+    expect(PriorityColors[2]).toBe("#fbbf24"); // amber-400
   });
 
   it("has correct color for priority 3 (normal)", () => {
-    expect(PriorityColors[3]).toBe("#2563eb"); // blue-600
+    expect(PriorityColors[3]).toBe("#60a5fa"); // blue-400
   });
 
   it("has correct color for priority 4 (low/backlog)", () => {
@@ -86,19 +86,19 @@ describe("PriorityColors", () => {
 
 describe("SemanticColors", () => {
   it("has correct primary color", () => {
-    expect(SemanticColors.primary).toBe("#3b82f6"); // blue-500
+    expect(SemanticColors.primary).toBe("#e8a020"); // Cortex amber
   });
 
   it("has correct success color", () => {
-    expect(SemanticColors.success).toBe("#22c55e"); // green-500
+    expect(SemanticColors.success).toBe("#34d399"); // emerald-400
   });
 
   it("has correct warning color", () => {
-    expect(SemanticColors.warning).toBe("#f59e0b"); // amber-500
+    expect(SemanticColors.warning).toBe("#facc15"); // lemon (amber is reserved for brand)
   });
 
   it("has correct danger color", () => {
-    expect(SemanticColors.danger).toBe("#ef4444"); // red-500
+    expect(SemanticColors.danger).toBe("#f87171"); // red-400
   });
 
   it("has correct info color", () => {
@@ -112,7 +112,7 @@ describe("SemanticColors", () => {
 
 describe("TypeColors", () => {
   it("has correct color for epic type", () => {
-    expect(TypeColors.epic).toBe("#8b5cf6"); // purple-500
+    expect(TypeColors.epic).toBe("#a78bfa"); // violet-400
   });
 
   it("contains exactly 1 type color", () => {
@@ -122,15 +122,15 @@ describe("TypeColors", () => {
 
 describe("getStateColor", () => {
   it("returns correct color for blocked state", () => {
-    expect(getStateColor("blocked")).toBe("#ef4444");
+    expect(getStateColor("blocked")).toBe("#f87171");
   });
 
   it("returns correct color for ready state", () => {
-    expect(getStateColor("ready")).toBe("#22c55e");
+    expect(getStateColor("ready")).toBe("#34d399");
   });
 
   it("returns correct color for closed state", () => {
-    expect(getStateColor("closed")).toBe("#10b981");
+    expect(getStateColor("closed")).toBe("#34d399");
   });
 
   it("returns same value as StateColors object", () => {
@@ -142,19 +142,19 @@ describe("getStateColor", () => {
 
 describe("getPriorityColor", () => {
   it("returns correct color for priority 0", () => {
-    expect(getPriorityColor(0)).toBe("#dc2626");
+    expect(getPriorityColor(0)).toBe("#f87171");
   });
 
   it("returns correct color for priority 1", () => {
-    expect(getPriorityColor(1)).toBe("#ea580c");
+    expect(getPriorityColor(1)).toBe("#fb923c");
   });
 
   it("returns correct color for priority 2", () => {
-    expect(getPriorityColor(2)).toBe("#ca8a04");
+    expect(getPriorityColor(2)).toBe("#fbbf24");
   });
 
   it("returns correct color for priority 3", () => {
-    expect(getPriorityColor(3)).toBe("#2563eb");
+    expect(getPriorityColor(3)).toBe("#60a5fa");
   });
 
   it("returns correct color for priority 4", () => {
@@ -172,15 +172,15 @@ describe("getPriorityColor", () => {
 
 describe("getStatusColor", () => {
   it("returns correct color for open status", () => {
-    expect(getStatusColor("open")).toBe("#3b82f6");
+    expect(getStatusColor("open")).toBe("#60a5fa");
   });
 
   it("returns correct color for in_progress status", () => {
-    expect(getStatusColor("in_progress")).toBe("#f59e0b");
+    expect(getStatusColor("in_progress")).toBe("#facc15");
   });
 
   it("returns correct color for closed status", () => {
-    expect(getStatusColor("closed")).toBe("#10b981");
+    expect(getStatusColor("closed")).toBe("#34d399");
   });
 
   it("returns same value as StatusColors object", () => {
@@ -195,51 +195,51 @@ describe("Color consistency with variables.css", () => {
   // to ensure colors.ts stays in sync with variables.css
 
   it("state colors match CSS variables", () => {
-    // --color-blocked: #ef4444
-    expect(StateColors.blocked).toBe("#ef4444");
-    // --color-ready: #22c55e
-    expect(StateColors.ready).toBe("#22c55e");
-    // --color-status-closed: #10b981
-    expect(StateColors.closed).toBe("#10b981");
+    // --color-blocked: #f87171
+    expect(StateColors.blocked).toBe("#f87171");
+    // --color-ready: #34d399
+    expect(StateColors.ready).toBe("#34d399");
+    // --color-status-closed: #34d399
+    expect(StateColors.closed).toBe("#34d399");
   });
 
   it("status colors match CSS variables", () => {
-    // --color-status-open: #3b82f6
-    expect(StatusColors.open).toBe("#3b82f6");
-    // --color-status-in-progress: #f59e0b
-    expect(StatusColors.in_progress).toBe("#f59e0b");
-    // --color-status-closed: #10b981
-    expect(StatusColors.closed).toBe("#10b981");
+    // --color-status-open: #60a5fa
+    expect(StatusColors.open).toBe("#60a5fa");
+    // --color-status-in-progress: #facc15
+    expect(StatusColors.in_progress).toBe("#facc15");
+    // --color-status-closed: #34d399
+    expect(StatusColors.closed).toBe("#34d399");
   });
 
   it("priority colors match CSS variables", () => {
-    // --color-priority-0: #dc2626
-    expect(PriorityColors[0]).toBe("#dc2626");
-    // --color-priority-1: #ea580c
-    expect(PriorityColors[1]).toBe("#ea580c");
-    // --color-priority-2: #ca8a04
-    expect(PriorityColors[2]).toBe("#ca8a04");
-    // --color-priority-3: #2563eb
-    expect(PriorityColors[3]).toBe("#2563eb");
+    // --color-priority-0: #f87171
+    expect(PriorityColors[0]).toBe("#f87171");
+    // --color-priority-1: #fb923c
+    expect(PriorityColors[1]).toBe("#fb923c");
+    // --color-priority-2: #fbbf24
+    expect(PriorityColors[2]).toBe("#fbbf24");
+    // --color-priority-3: #60a5fa
+    expect(PriorityColors[3]).toBe("#60a5fa");
     // --color-priority-4: #6b7280
     expect(PriorityColors[4]).toBe("#6b7280");
   });
 
   it("semantic colors match CSS variables", () => {
-    // --color-primary: #3b82f6
-    expect(SemanticColors.primary).toBe("#3b82f6");
-    // --color-success: #22c55e
-    expect(SemanticColors.success).toBe("#22c55e");
-    // --color-warning: #f59e0b
-    expect(SemanticColors.warning).toBe("#f59e0b");
-    // --color-danger: #ef4444
-    expect(SemanticColors.danger).toBe("#ef4444");
+    // --color-primary: #e8a020
+    expect(SemanticColors.primary).toBe("#e8a020");
+    // --color-success: #34d399
+    expect(SemanticColors.success).toBe("#34d399");
+    // --color-warning: #facc15
+    expect(SemanticColors.warning).toBe("#facc15");
+    // --color-danger: #f87171
+    expect(SemanticColors.danger).toBe("#f87171");
     // --color-info: #06b6d4
     expect(SemanticColors.info).toBe("#06b6d4");
   });
 
   it("type colors match CSS variables", () => {
-    // --color-type-epic: #8b5cf6
-    expect(TypeColors.epic).toBe("#8b5cf6");
+    // --color-type-epic: #a78bfa
+    expect(TypeColors.epic).toBe("#a78bfa");
   });
 });

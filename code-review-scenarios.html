@@ -1,0 +1,475 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Loom — User Stories</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #161a22;
+    --panel-2: #1c2230;
+    --border: #2a3142;
+    --text: #e6e9ef;
+    --text-dim: #9aa3b2;
+    --accent: #6aa6ff;
+    --accent-2: #b08cff;
+    --good: #7ad388;
+    --warn: #ffb547;
+    --bad: #ff7a7a;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; line-height: 1.55; }
+  header {
+    padding: 32px 40px 24px;
+    border-bottom: 1px solid var(--border);
+    background: linear-gradient(180deg, #131722 0%, #0f1115 100%);
+  }
+  header h1 { margin: 0 0 8px; font-size: 26px; font-weight: 600; letter-spacing: -0.01em; }
+  header .tagline { color: var(--text-dim); font-size: 14px; max-width: 820px; }
+  header .meta { margin-top: 12px; font-family: var(--mono); font-size: 12px; color: var(--text-dim); }
+
+  .layout { display: grid; grid-template-columns: 260px 1fr; min-height: calc(100vh - 110px); }
+  nav { border-right: 1px solid var(--border); padding: 20px 0; background: var(--panel); position: sticky; top: 0; height: 100vh; overflow-y: auto; }
+  nav .group { padding: 10px 16px 6px; }
+  nav .group-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-dim); margin-bottom: 6px; }
+  nav a { display: block; padding: 5px 10px; color: var(--text); text-decoration: none; font-size: 13px; border-radius: 4px; border-left: 2px solid transparent; }
+  nav a:hover { background: var(--panel-2); border-left-color: var(--accent); }
+  nav a .num { color: var(--text-dim); font-family: var(--mono); font-size: 11px; margin-right: 6px; }
+
+  main { padding: 28px 48px 100px; max-width: 1080px; }
+
+  .overview { background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px; padding: 22px 26px; margin-bottom: 28px; }
+  .overview h2 { margin: 0 0 10px; font-size: 16px; }
+  .overview p { margin: 0 0 8px; color: var(--text-dim); font-size: 14px; }
+  .overview strong { color: var(--text); }
+
+  .personas { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-bottom: 32px; }
+  .persona { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; }
+  .persona .role { font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--accent); margin-bottom: 4px; font-weight: 600; }
+  .persona .desc { font-size: 13px; color: var(--text-dim); }
+
+  .section-heading { font-size: 13px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-dim); margin: 40px 0 14px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
+
+  .story {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 22px 26px;
+    margin-bottom: 16px;
+    scroll-margin-top: 20px;
+  }
+  .story .head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 8px; flex-wrap: wrap; }
+  .story .num-tag { font-family: var(--mono); font-size: 12px; color: var(--text-dim); }
+  .story h2 { margin: 0; font-size: 17px; font-weight: 600; }
+  .story .persona-tag { font-size: 10px; padding: 2px 8px; border-radius: 999px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; background: rgba(106,166,255,0.12); color: var(--accent); border: 1px solid rgba(106,166,255,0.25); }
+  .story .as-a { font-style: italic; color: var(--text-dim); margin-bottom: 14px; font-size: 14px; }
+  .story .as-a .so-that { color: var(--text); }
+
+  .row { display: grid; grid-template-columns: 130px 1fr; gap: 8px 18px; margin-bottom: 6px; font-size: 14px; }
+  .row .label { color: var(--text-dim); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; padding-top: 3px; font-weight: 600; }
+  .row .value { color: var(--text); }
+  .row .value code { font-family: var(--mono); font-size: 12.5px; background: var(--panel-2); padding: 1px 6px; border-radius: 3px; border: 1px solid var(--border); color: #cde0ff; }
+  .row .value ol, .row .value ul { margin: 2px 0 0; padding-left: 18px; }
+  .row .value li { margin-bottom: 3px; }
+
+  .surfaces { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+  .surface-chip { font-size: 11px; padding: 3px 9px; border-radius: 999px; background: rgba(176,140,255,0.10); color: var(--accent-2); border: 1px solid rgba(176,140,255,0.22); font-family: var(--mono); }
+
+  pre.cli {
+    background: #0a0c11;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 14px;
+    overflow-x: auto;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    color: #d4d8e0;
+    margin: 6px 0 0;
+  }
+  pre.cli .comment { color: #6c7280; }
+  pre.cli .cmd { color: #cde0ff; }
+  pre.cli .flag { color: #b08cff; }
+
+  .glossary { background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; padding: 18px 22px; margin-top: 16px; }
+  .glossary dl { margin: 0; display: grid; grid-template-columns: 160px 1fr; gap: 6px 16px; }
+  .glossary dt { color: var(--accent); font-family: var(--mono); font-size: 12.5px; }
+  .glossary dd { margin: 0; font-size: 13.5px; color: var(--text-dim); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Loom — User Stories</h1>
+  <div class="tagline">
+    Loom is an agent-management CLI and web UI for running multiple AI coding agents in parallel.
+    Each agent works in its own git worktree, picks tasks from a shared issue tracker (fleet-db),
+    and integrates back through a structured push/pull/sync workflow. Supports Claude Code, Codex,
+    Cursor, Gemini, OpenCode backends.
+  </div>
+  <div class="meta">CLI binary <code>loom</code> · web UI on :8080 · macOS desktop app (Tauri) · local mode (embedded fleet-db) or cloud mode (<code>LOOM_FLEET_DB_URL</code>)</div>
+</header>
+
+<div class="layout">
+  <nav>
+    <div class="group">
+      <div class="group-title">Setup</div>
+      <a href="#s1"><span class="num">1</span>First-run onboarding</a>
+      <a href="#s2"><span class="num">2</span>Configure AI backend</a>
+      <a href="#s3"><span class="num">3</span>Define an agent role</a>
+    </div>
+    <div class="group">
+      <div class="group-title">Issue tracking</div>
+      <a href="#s4"><span class="num">4</span>Create &amp; triage issues</a>
+      <a href="#s5"><span class="num">5</span>Plan tasks via Kanban</a>
+      <a href="#s6"><span class="num">6</span>Model dependencies (graph)</a>
+    </div>
+    <div class="group">
+      <div class="group-title">Solo agent work</div>
+      <a href="#s7"><span class="num">7</span>Run a planning agent</a>
+      <a href="#s8"><span class="num">8</span>Run a coding agent</a>
+      <a href="#s9"><span class="num">9</span>Approve a design</a>
+      <a href="#s10"><span class="num">10</span>Auto-mode for backlog</a>
+    </div>
+    <div class="group">
+      <div class="group-title">Epic orchestration</div>
+      <a href="#s11"><span class="num">11</span>Talk to a Lead agent</a>
+      <a href="#s12"><span class="num">12</span>Run an epic</a>
+      <a href="#s13"><span class="num">13</span>Inspect ephemeral workers</a>
+      <a href="#s14"><span class="num">14</span>Review finished worker</a>
+    </div>
+    <div class="group">
+      <div class="group-title">Fleet operation</div>
+      <a href="#s15"><span class="num">15</span>Supervise via daemon</a>
+      <a href="#s16"><span class="num">16</span>Multi-node fleet mode</a>
+    </div>
+    <div class="group">
+      <div class="group-title">Git workflow</div>
+      <a href="#s17"><span class="num">17</span>Sync worktrees</a>
+      <a href="#s18"><span class="num">18</span>Open a PR from a worktree</a>
+    </div>
+    <div class="group">
+      <div class="group-title">Operate &amp; debug</div>
+      <a href="#s19"><span class="num">19</span>Watch the Monitor view</a>
+      <a href="#s20"><span class="num">20</span>Recover a stuck agent</a>
+      <a href="#s21"><span class="num">21</span>Switch backend mid-flight</a>
+    </div>
+    <div class="group">
+      <div class="group-title">Reference</div>
+      <a href="#glossary">Glossary</a>
+    </div>
+  </nav>
+
+  <main>
+    <div class="overview">
+      <h2>What you can do with loom</h2>
+      <p>Loom turns "AI agent" from a chat bot into a long-running, supervised worker that picks tasks off a board, writes designs, implements code in its own git worktree, and pushes results — repeatedly, in parallel, across many agents and machines.</p>
+      <p>The product wraps a few hard things behind one CLI + web UI: <strong>worktree isolation</strong> so agents don't stomp each other, a <strong>shared task store</strong> (fleet-db) so they coordinate, <strong>terminal-attachable runtimes</strong> so you can watch any agent live, and <strong>structured artifacts</strong> (logs, diffs, transcripts) so you can audit what happened after the fact.</p>
+      <p>The newest direction is the <strong>Lead Agent / Epic Runner</strong>: a long-lived "manager" agent owns one epic at a time, spawns short-lived ephemeral workers for each child task, and gives you one terminal to chat with it about progress.</p>
+    </div>
+
+    <div class="section-heading">Who uses it</div>
+    <div class="personas">
+      <div class="persona">
+        <div class="role">Solo developer</div>
+        <div class="desc">Runs planner/coder agents on their own machine to chip through a backlog while they focus elsewhere.</div>
+      </div>
+      <div class="persona">
+        <div class="role">Dogfood operator</div>
+        <div class="desc">Validates that agents actually pick tasks, write designs, implement them, and leave usable evidence.</div>
+      </div>
+      <div class="persona">
+        <div class="role">Team lead</div>
+        <div class="desc">Sees which agents own what, why things are blocked, and approves designs before code lands.</div>
+      </div>
+      <div class="persona">
+        <div class="role">Platform engineer</div>
+        <div class="desc">Debugs local + distributed runner failures from logs, sessions, and artifacts.</div>
+      </div>
+    </div>
+
+    <!-- ============ SETUP ============ -->
+    <div class="section-heading">Setup</div>
+
+    <div class="story" id="s1">
+      <div class="head"><span class="num-tag">1</span><h2>First-run onboarding</h2><span class="persona-tag">Solo developer</span></div>
+      <div class="as-a">As a developer who just installed loom, I want a guided checklist <span class="so-that">so that I get from <code>loom serve</code> to a running agent without reading docs or jumping into the CLI.</span></div>
+      <div class="row"><div class="label">Trigger</div><div class="value">User opens <code>http://localhost:8080</code> for the first time.</div></div>
+      <div class="row"><div class="label">Flow</div><div class="value">
+        <ol>
+          <li>OnboardingFlow appears with a server-driven checklist.</li>
+          <li>"Create workspace + first repo" — one combined modal accepting local path or git clone URL (no dead-end empty workspaces).</li>
+          <li>"Verify repo" — RepoChecksPanel runs checks (default branch, gate command, push remote).</li>
+          <li>"Set up backend" — BackendSetupPanel can install a missing CLI, run interactive login, or show env-var instructions via an embedded terminal.</li>
+          <li>"Create agent" — CreateAgentModal binds a role to the repo.</li>
+          <li>"Create issue" — first task seeded.</li>
+          <li>"Run agent" — first visible run, with a live terminal you can watch.</li>
+        </ol>
+      </div></div>
+      <div class="row"><div class="label">Outcome</div><div class="value">One workspace, one repo, one ready backend, one agent, one issue, one visible run — all without leaving the browser.</div></div>
+      <div class="row"><div class="label">Surfaces</div><div class="value"><div class="surfaces">
+        <span class="surface-chip">OnboardingFlow</span>
+        <span class="surface-chip">BackendSetupPanel</span>
+        <span class="surface-chip">WorkspaceRepoWizard</span>
+        <span class="surface-chip">RepoChecksPanel</span>
+        <span class="surface-chip">EmbeddedTerminal</span>
+      </div></div></div>
+    </div>
+
+    <div class="story" id="s2">
+      <div class="head"><span class="num-tag">2</span><h2>Configure an AI backend</h2><span class="persona-tag">Solo developer</span></div>
+      <div class="as-a">As a developer I want to install and log into Claude, Codex, Cursor, or Gemini from the UI <span class="so-that">so that agents have a model to talk to.</span></div>
+      <div class="row"><div class="label">Backends</div><div class="value">claude · codex · cursor · gemini · opencode (each is a thin shim around the vendor's CLI).</div></div>
+      <div class="row"><div class="label">Flow</div><div class="value">
+        <ol>
+          <li>Settings → AI Backends shows readiness per backend (installed? logged in? auth-ready?).</li>
+          <li>Pick a backend → BackendSetupPanel previews the exact install command, requires an explicit click, then runs it in an embedded terminal.</li>
+          <li>For login: panel runs the vendor's interactive auth in the same terminal.</li>
+          <li>Server polls readiness; checklist ticks itself off.</li>
+        </ol>
+      </div></div>
+      <div class="row"><div class="label">Key rule</div><div class="value">Loom never stores API keys at rest. Auth lives in the vendor CLI's own store or the operator's shell.</div></div>
+      <div class="row"><div class="label">CLI</div><div class="value"><pre class="cli"><span class="comment"># Pick a backend per call, env, or workspace</span>
+<span class="cmd">loom plan falcon</span> <span class="flag">--backend codex</span>
+<span class="cmd">LOOM_BACKEND=codex loom plan falcon</span>
+<span class="cmd">loom daemon profile set</span> <span class="flag">--backend codex</span></pre></div></div>
+    </div>
+
+    <div class="story" id="s3">
+      <div class="head"><span class="num-tag">3</span><h2>Define an agent role</h2><span class="persona-tag">Solo developer</span></div>
+      <div class="as-a">As a developer I want named roles with specific prompts, tool allow-lists, and budget caps <span class="so-that">so that "reviewer" and "implementer" behave differently and stay in their lanes.</span></div>
+      <div class="row"><div class="label">Concepts</div><div class="value">
+        <strong>Role</strong> = prompt + tool allow/deny + read-only flag + budget. Reused across agents.<br/>
+        <strong>Agent definition</strong> = name + role + repo. The thing you actually run.
+      </div></div>
+      <div class="row"><div class="label">CLI</div><div class="value"><pre class="cli"><span class="cmd">loom role set</span> reviewer <span class="flag">--prompt-file</span> ./prompts/reviewer.txt
+<span class="cmd">loom role set</span> reviewer <span class="flag">--allowed-tools</span> Read,Grep <span class="flag">--read-only</span>
+<span class="cmd">loom agentdef add</span> falcon <span class="flag">--role</span> reviewer <span class="flag">--repo</span> my-app</pre></div></div>
+      <div class="row"><div class="label">Built-in roles</div><div class="value"><code>plan</code> (writes designs), <code>task</code> (implements approved designs), <code>lead</code> (orchestrates).</div></div>
+    </div>
+
+    <!-- ============ ISSUE TRACKING ============ -->
+    <div class="section-heading">Issue tracking</div>
+
+    <div class="story" id="s4">
+      <div class="head"><span class="num-tag">4</span><h2>Create &amp; triage issues</h2><span class="persona-tag">Team lead</span></div>
+      <div class="as-a">As a team lead I want a real issue tracker inside loom <span class="so-that">so that the same tasks agents pick up are also the tasks I plan against.</span></div>
+      <div class="row"><div class="label">Issue model</div><div class="value">type (task / epic / feature / bug), status (open → in_progress → review → done / blocked), priority, assignee, labels, parent, dependencies, design, notes, repo.</div></div>
+      <div class="row"><div class="label">Mutations</div><div class="value">From the UI (CreateIssueModal, IssueDetailPanel) or CLI (<code>loom data create/show/update/close</code>). Mutations broadcast over SSE — every connected tab updates live.</div></div>
+      <div class="row"><div class="label">Bulk ops</div><div class="value">BulkActionToolbar in the Table view: assign, label, close, change status across N issues at once.</div></div>
+    </div>
+
+    <div class="story" id="s5">
+      <div class="head"><span class="num-tag">5</span><h2>Plan tasks via Kanban</h2><span class="persona-tag">Team lead</span></div>
+      <div class="as-a">As a team lead I want a drag-and-drop board <span class="so-that">so that I can sort the backlog visually and watch agent progress.</span></div>
+      <div class="row"><div class="label">View</div><div class="value">KanbanPage shows swim-lanes grouped by status, priority, or type. Cards show task ownership, current run signal, blocked badge.</div></div>
+      <div class="row"><div class="label">Live updates</div><div class="value">When an agent claims a task, the card visibly moves; when it closes a task, the card lands in done.</div></div>
+      <div class="row"><div class="label">Alternates</div><div class="value">Table view for power users, Graph view (React Flow) for dependencies, Files view to browse repo, Observability view for traces.</div></div>
+    </div>
+
+    <div class="story" id="s6">
+      <div class="head"><span class="num-tag">6</span><h2>Model task dependencies</h2><span class="persona-tag">Team lead</span></div>
+      <div class="as-a">As a team lead I want to declare "task B blocks task C" <span class="so-that">so that an epic runner only starts ready work and skips blocked work.</span></div>
+      <div class="row"><div class="label">Flow</div><div class="value">
+        <ol>
+          <li>Open IssueDetailPanel → Dependencies → "Add depends-on".</li>
+          <li>Graph view re-renders with the new edge.</li>
+          <li>Backend now classifies B as "ready" (no open deps) and C as "blocked" until B closes.</li>
+        </ol>
+      </div></div>
+      <div class="row"><div class="label">Why it matters</div><div class="value">The epic runner (#12) only dispatches ready tasks. Dependency edges turn into orchestration logic for free.</div></div>
+    </div>
+
+    <!-- ============ SOLO AGENT WORK ============ -->
+    <div class="section-heading">Solo agent work</div>
+
+    <div class="story" id="s7">
+      <div class="head"><span class="num-tag">7</span><h2>Run a planning agent</h2><span class="persona-tag">Solo developer</span></div>
+      <div class="as-a">As a developer I want an agent to write a design for an unplanned task <span class="so-that">so that I can review the approach before any code is written.</span></div>
+      <div class="row"><div class="label">CLI</div><div class="value"><pre class="cli"><span class="cmd">loom plan</span> falcon                <span class="comment"># single task, then exit</span>
+<span class="cmd">loom plan</span> falcon <span class="flag">--auto</span>         <span class="comment"># keep claiming tasks-without-designs</span>
+<span class="cmd">loom plan</span> falcon <span class="flag">-a -m 5</span>         <span class="comment"># cap at 5 tasks</span>
+<span class="cmd">loom plan</span> falcon <span class="flag">-a -t 30</span>        <span class="comment"># exit after 30 min idle</span></pre></div></div>
+      <div class="row"><div class="label">What an agent does</div><div class="value">
+        <ol>
+          <li>Acquires worktree lock.</li>
+          <li>Queries fleet-db for tasks without an approved design.</li>
+          <li>Claims one; backend (claude/codex/…) writes a design into the issue's <code>design</code> field.</li>
+          <li>Marks task as needing review; loops or exits.</li>
+        </ol>
+      </div></div>
+      <div class="row"><div class="label">Visibility</div><div class="value">UI shows an agent card the moment the process starts — before the model talks. Task Sessions tab populates with transcript, logs, current state.</div></div>
+    </div>
+
+    <div class="story" id="s8">
+      <div class="head"><span class="num-tag">8</span><h2>Run a coding agent</h2><span class="persona-tag">Solo developer</span></div>
+      <div class="as-a">As a developer I want an agent to implement an approved design <span class="so-that">so that approved plans turn into committed code automatically.</span></div>
+      <div class="row"><div class="label">CLI</div><div class="value"><pre class="cli"><span class="cmd">loom task</span> falcon <span class="flag">--auto</span></pre></div></div>
+      <div class="row"><div class="label">Selection rule</div><div class="value">Picks tasks <em>with</em> approved design, skips tasks marked <code>[Need Review]</code> or already in-progress, skips epics.</div></div>
+      <div class="row"><div class="label">Each task</div><div class="value">Claim → implement (edits files in the worktree) → run gate command if configured → commit → close task → move on. Failures land as <code>failed</code> or <code>preflight_failed</code> with a readable reason.</div></div>
+    </div>
+
+    <div class="story" id="s9">
+      <div class="head"><span class="num-tag">9</span><h2>Approve a design before code is written</h2><span class="persona-tag">Team lead</span></div>
+      <div class="as-a">As a team lead I want to gate implementation on design approval <span class="so-that">so that the agent doesn't burn budget building the wrong thing.</span></div>
+      <div class="row"><div class="label">Flow</div><div class="value">
+        <ol>
+          <li>Planning agent fills in <code>design</code> and tags the issue <code>[Need Review]</code>.</li>
+          <li>Implementer agents skip <code>[Need Review]</code> tasks automatically.</li>
+          <li>Lead reviews via IssueDetailPanel; approves or edits the design.</li>
+          <li>Approval clears the review label; coding agents now pick it up.</li>
+        </ol>
+      </div></div>
+    </div>
+
+    <div class="story" id="s10">
+      <div class="head"><span class="num-tag">10</span><h2>Auto-mode for an unattended backlog burn</h2><span class="persona-tag">Solo developer</span></div>
+      <div class="as-a">As a developer I want to start an agent before lunch and come back to N closed tasks <span class="so-that">so that throughput isn't bound by my keystrokes.</span></div>
+      <div class="row"><div class="label">CLI</div><div class="value"><pre class="cli"><span class="cmd">loom task</span> falcon <span class="flag">-a -m 10 -t 60</span>
+<span class="comment"># up to 10 tasks; bail if idle 60 min; Ctrl+C anytime</span></pre></div></div>
+      <div class="row"><div class="label">Exit conditions</div><div class="value">Ctrl+C, <code>--max-tasks</code> reached, or <code>--idle-timeout</code> with no work.</div></div>
+      <div class="row"><div class="label">Summary on exit</div><div class="value">Tasks completed, reason for exit, total wall time.</div></div>
+    </div>
+
+    <!-- ============ EPIC ORCHESTRATION ============ -->
+    <div class="section-heading">Epic orchestration (newest feature)</div>
+
+    <div class="story" id="s11">
+      <div class="head"><span class="num-tag">11</span><h2>Talk to a Lead agent</h2><span class="persona-tag">Team lead</span></div>
+      <div class="as-a">As a team lead I want a long-lived "manager" agent I can chat with about the backlog <span class="so-that">so that I can hand off epic-level planning without losing context.</span></div>
+      <div class="row"><div class="label">What a Lead is</div><div class="value">A persistent agent with <code>role_name=lead</code> and a resumable terminal session. Reconnect after a refresh — scrollback replays.</div></div>
+      <div class="row"><div class="label">Surface</div><div class="value">Agents page → pick the lead in the left rail → center is the lead's terminal → right panel shows open epics/tasks (or the active epic if one is bound).</div></div>
+      <div class="row"><div class="label">Usage</div><div class="value">Chat about strategy, ask it to triage the backlog, or kick off an epic run by typing <code>loom epic run --parent E2E-1</code> right into its terminal.</div></div>
+    </div>
+
+    <div class="story" id="s12">
+      <div class="head"><span class="num-tag">12</span><h2>Run an epic</h2><span class="persona-tag">Team lead</span></div>
+      <div class="as-a">As a team lead I want the lead agent to drive a whole epic to completion <span class="so-that">so that I assign work at the epic level, not the task level.</span></div>
+      <div class="row"><div class="label">Trigger</div><div class="value">Click "Run Epic" in the right panel <em>or</em> type <code>loom epic run --parent E2E-1</code> in the lead terminal.</div></div>
+      <div class="row"><div class="label">What happens</div><div class="value">
+        <ol>
+          <li>Backend rejects if the lead is already running a different epic (one epic per lead).</li>
+          <li>Lead's <code>agent.parent</code> is set to the epic ID — that's the lock.</li>
+          <li>Reconcile loop starts: read ready tasks, spawn an ephemeral worker per ready task up to concurrency cap, sleep, repeat.</li>
+          <li>Each worker is a deterministically-named ephemeral agent pinned to one task — claim, work, commit, close, exit.</li>
+          <li>Lead terminal streams the reconcile output: <code>[epic-run] 3 ready, 1 blocked, 2 active workers</code>.</li>
+        </ol>
+      </div></div>
+      <div class="row"><div class="label">Drain</div><div class="value">Loop exits when no open children remain and all spawned workers have stopped. Lead remains bound to the epic until you tell it otherwise — completion does not auto-clear ownership.</div></div>
+    </div>
+
+    <div class="story" id="s13">
+      <div class="head"><span class="num-tag">13</span><h2>Inspect an ephemeral worker mid-run</h2><span class="persona-tag">Solo developer</span></div>
+      <div class="as-a">As a developer I want to peek at any worker the lead spawned <span class="so-that">so that I can debug a slow or stuck task without stopping the whole epic.</span></div>
+      <div class="row"><div class="label">Flow</div><div class="value">
+        <ol>
+          <li>Left rail shows the lead with its live workers nested underneath: <code>+ worker-auth-1 active</code>.</li>
+          <li>Click a worker → center terminal switches to that worker's PTY → scrollback replays.</li>
+          <li>Right panel stays scoped to the epic so context is preserved.</li>
+        </ol>
+      </div></div>
+      <div class="row"><div class="label">Single-use</div><div class="value">An ephemeral worker is pinned to one task. It may retry the same attempt after process failure but it will never claim a second task — that keeps task→worker mapping deterministic.</div></div>
+    </div>
+
+    <div class="story" id="s14">
+      <div class="head"><span class="num-tag">14</span><h2>Review a finished worker</h2><span class="persona-tag">Team lead</span></div>
+      <div class="as-a">As a team lead I want logs, diff, transcript, and cleanup actions for a worker that already finished <span class="so-that">so that I can audit attempts and reclaim disk after the fact.</span></div>
+      <div class="row"><div class="label">Where</div><div class="value">Finished workers leave the live rail and appear in "worker history" / task attempt history.</div></div>
+      <div class="row"><div class="label">What's preserved</div><div class="value">Per <code>session-artifact-contract.md</code>: transcript, logs, token usage, diff, commit, test result, cleanup state, error class. The PTY is gone but the evidence isn't.</div></div>
+      <div class="row"><div class="label">Cleanup</div><div class="value">First-class action: delete worktree, archive artifacts. Reclaims disk without losing persisted evidence.</div></div>
+    </div>
+
+    <!-- ============ FLEET ============ -->
+    <div class="section-heading">Fleet operation</div>
+
+    <div class="story" id="s15">
+      <div class="head"><span class="num-tag">15</span><h2>Supervise many agents with the daemon</h2><span class="persona-tag">Platform engineer</span></div>
+      <div class="as-a">As an operator I want one process that keeps N agents alive <span class="so-that">so that crashes auto-restart and I don't babysit terminals.</span></div>
+      <div class="row"><div class="label">CLI</div><div class="value"><pre class="cli"><span class="cmd">loom daemon profile set</span> <span class="flag">--max-agents</span>=10
+<span class="cmd">loom daemon</span>                       <span class="comment"># start supervising</span>
+<span class="cmd">loom daemon status</span>                <span class="comment"># health, active agents, queues</span></pre></div></div>
+      <div class="row"><div class="label">Behavior</div><div class="value">Reads daemon profile from fleet-db → reconciles desired vs actual agent state every tick → starts missing, restarts crashed (with backoff), drains gracefully on SIGTERM. Owns the agent <em>lifecycle</em>, not the model traffic.</div></div>
+    </div>
+
+    <div class="story" id="s16">
+      <div class="head"><span class="num-tag">16</span><h2>Multi-node fleet</h2><span class="persona-tag">Platform engineer</span></div>
+      <div class="as-a">As an operator I want agents on multiple machines coordinating via shared state <span class="so-that">so that throughput scales beyond one box.</span></div>
+      <div class="row"><div class="label">CLI</div><div class="value"><pre class="cli"><span class="cmd">loom serve</span> <span class="flag">--fleet-mode</span> <span class="flag">--redis-addr</span>=redis.prod:6379
+<span class="cmd">LOOM_FLEET_DB_URL</span>=https://fleet.example.com <span class="cmd">loom daemon</span></pre></div></div>
+      <div class="row"><div class="label">What fleet-mode unlocks</div><div class="value">Cross-node task claims, shared JWT signing, stale server detection, fleet worker API routes, decentralized claim leases.</div></div>
+      <div class="row"><div class="label">Off by default</div><div class="value">Most users stay local; the same code paths back both — local is "fleet mode with one node".</div></div>
+    </div>
+
+    <!-- ============ GIT ============ -->
+    <div class="section-heading">Git workflow</div>
+
+    <div class="story" id="s17">
+      <div class="head"><span class="num-tag">17</span><h2>Sync all worktrees</h2><span class="persona-tag">Solo developer</span></div>
+      <div class="as-a">As a developer I want one command to push completed work and pull integration changes across every worktree <span class="so-that">so that I don't merge-hop manually across 10 directories.</span></div>
+      <div class="row"><div class="label">CLI</div><div class="value"><pre class="cli"><span class="cmd">loom push</span> <span class="flag">--all</span>             <span class="comment"># push every worktree to its target</span>
+<span class="cmd">loom pull</span> <span class="flag">--all</span>             <span class="comment"># pull main into every worktree</span>
+<span class="cmd">loom sync</span>                   <span class="comment"># both, in order</span>
+<span class="cmd">loom reset</span> falcon main      <span class="comment"># hard reset worktree to main</span></pre></div></div>
+      <div class="row"><div class="label">AI conflict resolution</div><div class="value">When a merge conflict happens, an agent backend can resolve it interactively rather than aborting.</div></div>
+    </div>
+
+    <div class="story" id="s18">
+      <div class="head"><span class="num-tag">18</span><h2>Open a PR from a worktree</h2><span class="persona-tag">Solo developer</span></div>
+      <div class="as-a">As a developer I want a one-shot PR open from an agent's branch <span class="so-that">so that I review and merge through the usual GitHub flow.</span></div>
+      <div class="row"><div class="label">CLI</div><div class="value"><pre class="cli"><span class="cmd">loom pr</span> falcon                <span class="comment"># PR from falcon's branch to main</span></pre></div></div>
+      <div class="row"><div class="label">Output</div><div class="value">Wraps <code>gh pr create</code>; surfaces the PR URL on success.</div></div>
+    </div>
+
+    <!-- ============ OPERATE & DEBUG ============ -->
+    <div class="section-heading">Operate &amp; debug</div>
+
+    <div class="story" id="s19">
+      <div class="head"><span class="num-tag">19</span><h2>Watch the Monitor view</h2><span class="persona-tag">Team lead</span></div>
+      <div class="as-a">As a team lead I want one dashboard that tells me what every agent is doing right now <span class="so-that">so that I notice slow tasks and idle agents at a glance.</span></div>
+      <div class="row"><div class="label">Surface</div><div class="value">MonitorPage in the web UI, or <code>loom monitor</code> for a terminal dashboard.</div></div>
+      <div class="row"><div class="label">Shows</div><div class="value">Per-agent: name, role, backend/model, lifecycle state, current task, runtime provider, stale/offline indicator, latest error. Per-project: ready/blocked counts, queue depth, heartbeat health.</div></div>
+    </div>
+
+    <div class="story" id="s20">
+      <div class="head"><span class="num-tag">20</span><h2>Recover a stuck agent</h2><span class="persona-tag">Platform engineer</span></div>
+      <div class="as-a">As an operator I want clear "this is why your agent is stuck" states + a one-button recover action <span class="so-that">so that I don't dig through logs to clear a lock.</span></div>
+      <div class="row"><div class="label">Preflight failure</div><div class="value">Missing backend auth, missing tools, missing worktree, missing gate command, missing git remote — surfaced as a discrete state before the model starts.</div></div>
+      <div class="row"><div class="label">Recovery</div><div class="value"><pre class="cli"><span class="cmd">loom recover</span> falcon            <span class="comment"># clears locks, resets task claims</span></pre></div></div>
+      <div class="row"><div class="label">Failure modes covered</div><div class="value">Per <code>failure-modes-recovery-ux.md</code>: stalled worker, preflight failed, gate failed, push failed, ungraceful crash, orphan claim.</div></div>
+    </div>
+
+    <div class="story" id="s21">
+      <div class="head"><span class="num-tag">21</span><h2>Switch backend mid-flight</h2><span class="persona-tag">Solo developer</span></div>
+      <div class="as-a">As a developer I want to try Codex on the next task without redoing setup <span class="so-that">so that I can compare backends in-place.</span></div>
+      <div class="row"><div class="label">Resolution order</div><div class="value"><code>--backend</code> flag &gt; <code>LOOM_BACKEND</code> env &gt; daemon profile &gt; default <code>claude</code>.</div></div>
+      <div class="row"><div class="label">Per-agent override</div><div class="value">Agent definitions can pin a backend; daemon-spawned agents inherit it.</div></div>
+      <div class="row"><div class="label">CLI</div><div class="value"><pre class="cli"><span class="cmd">loom task</span> falcon <span class="flag">--backend</span> codex</pre></div></div>
+    </div>
+
+    <!-- ============ GLOSSARY ============ -->
+    <div class="section-heading" id="glossary">Glossary</div>
+    <div class="glossary">
+      <dl>
+        <dt>workspace</dt><dd>Top-level container — usually one team/project. Has its own repos, agents, issues.</dd>
+        <dt>repo</dt><dd>A git repository tracked inside a workspace. Agents work in its worktrees.</dd>
+        <dt>worktree</dt><dd>Per-agent git checkout on its own branch — agents never share working dirs.</dd>
+        <dt>role</dt><dd>Prompt + tool allow/deny + budget. Reusable across agents.</dd>
+        <dt>agent definition</dt><dd>Named binding of (role, repo). What you actually start.</dd>
+        <dt>agent (runtime)</dt><dd>A running process serving an agent definition. Has state: active, idle, stopped, dead.</dd>
+        <dt>ephemeral worker</dt><dd>Short-lived agent spawned by a lead to do one task, then exit.</dd>
+        <dt>lead</dt><dd>Long-lived agent that owns one epic at a time and spawns workers for it.</dd>
+        <dt>fleet-db</dt><dd>Shared state store (issues, agents, sessions, leases). Embedded locally or remote in cloud mode.</dd>
+        <dt>backend</dt><dd>The AI model CLI behind an agent — claude / codex / cursor / gemini / opencode.</dd>
+        <dt>session</dt><dd>One agent-task execution unit with a transcript, logs, and artifacts.</dd>
+        <dt>artifact</dt><dd>Persistent evidence from a run — transcript, logs, diff, test result, token usage.</dd>
+        <dt>gate command</dt><dd>Per-repo test/lint command an agent must pass before closing a task.</dd>
+        <dt>daemon</dt><dd>Local supervisor process that keeps the configured agents alive.</dd>
+        <dt>fleet mode</dt><dd>Multi-node operation — agents coordinate across machines via shared Redis + fleet-db.</dd>
+      </dl>
+    </div>
+
+  </main>
+</div>
+
+</body>
+</html>

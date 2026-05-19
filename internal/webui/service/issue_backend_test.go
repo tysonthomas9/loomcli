@@ -36,6 +36,9 @@ type fakeIssueBackend struct {
 	deferredResult      []backend.IssueData
 	deferredErr         error
 	deferredCalls       []backend.DeferredOpts
+	searchResult        []backend.IssueData
+	searchErr           error
+	searchCalls         []searchCall
 	createResult        *backend.IssueData
 	createErr           error
 	createParams        []backend.CreateParams
@@ -44,11 +47,16 @@ type fakeIssueBackend struct {
 	closeResult         *backend.CloseResult
 	closeErr            error
 	closeCalls          []closeCall
+	reopenErr           error
+	reopenCalls         []reopenCall
 	deleteErr           error
 	deleteCalls         []backend.DeleteParams
 	addCommentResult    *backend.CommentData
 	addCommentErr       error
 	addCommentParams    []backend.CommentAddParams
+	listCommentsResult  []backend.CommentData
+	listCommentsErr     error
+	listCommentsCalls   []string
 	addDepErr           error
 	addDepParams        []backend.DepAddParams
 	removeDepErr        error
@@ -75,6 +83,16 @@ type closeCall struct {
 type listEventsCall struct {
 	id    string
 	limit int
+}
+
+type searchCall struct {
+	query string
+	limit int
+}
+
+type reopenCall struct {
+	id     string
+	params backend.ReopenParams
 }
 
 type claimCall struct {
@@ -133,8 +151,11 @@ func (f *fakeIssueBackend) Count(_ context.Context, _ backend.CountOpts) (int, e
 func (f *fakeIssueBackend) GetChildren(_ context.Context, _ string) ([]backend.IssueData, error) {
 	return nil, nil
 }
-func (f *fakeIssueBackend) SearchIssues(_ context.Context, _ string, _ int) ([]backend.IssueData, error) {
-	return nil, nil
+func (f *fakeIssueBackend) SearchIssues(_ context.Context, query string, limit int) ([]backend.IssueData, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.searchCalls = append(f.searchCalls, searchCall{query: query, limit: limit})
+	return f.searchResult, f.searchErr
 }
 
 func (f *fakeIssueBackend) Create(_ context.Context, params backend.CreateParams) (*backend.IssueData, error) {
@@ -174,8 +195,11 @@ func (f *fakeIssueBackend) Close(_ context.Context, id string, params backend.Cl
 	return f.closeResult, f.closeErr
 }
 
-func (f *fakeIssueBackend) Reopen(_ context.Context, _ string, _ backend.ReopenParams) error {
-	return nil
+func (f *fakeIssueBackend) Reopen(_ context.Context, id string, params backend.ReopenParams) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.reopenCalls = append(f.reopenCalls, reopenCall{id: id, params: params})
+	return f.reopenErr
 }
 
 func (f *fakeIssueBackend) Delete(_ context.Context, params backend.DeleteParams) error {
@@ -201,8 +225,11 @@ func (f *fakeIssueBackend) RemoveDependency(_ context.Context, params backend.De
 
 func (f *fakeIssueBackend) AddLabel(_ context.Context, _, _ string) error    { return nil }
 func (f *fakeIssueBackend) RemoveLabel(_ context.Context, _, _ string) error { return nil }
-func (f *fakeIssueBackend) ListComments(_ context.Context, _ string) ([]backend.CommentData, error) {
-	return nil, nil
+func (f *fakeIssueBackend) ListComments(_ context.Context, id string) ([]backend.CommentData, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.listCommentsCalls = append(f.listCommentsCalls, id)
+	return f.listCommentsResult, f.listCommentsErr
 }
 
 func (f *fakeIssueBackend) AddComment(_ context.Context, params backend.CommentAddParams) (*backend.CommentData, error) {

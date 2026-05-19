@@ -1,0 +1,102 @@
+meta:
+  app: loom
+  tagline: Strategic themes — the big bets loom is making.
+  description: >
+    Epics are the multi-quarter themes that group related features, stories,
+    and design docs. Each epic names a sponsor persona, the outcome it's
+    chasing, the stories it advances, and the features it depends on.
+  generated: 2026-05-14
+  generated_by: epic-cataloger
+  refs_in:  []
+  refs_out: [personas, features, stories, glossary]
+
+epics:
+  - id: distributed-control-plane
+    name: Distributed Control Plane
+    summary: Run loom across many nodes with shared issue state, JWT-secured fleet APIs, and cross-node task claims.
+    sponsor_personas: [personas:platform-engineer, personas:team-lead]
+    outcome: A team of operators can run loom on multiple hosts; agents claim tasks across nodes without conflict; auth is consistent and tracing flows end-to-end.
+    status: in-progress
+    source: docs/design/distributed-control-plane.md
+    tags: [fleet, scale, multi-node]
+
+  - id: lead-driven-orchestration
+    name: Lead-Driven Orchestration
+    summary: A "lead" agent reviews plans and fans an epic out to short-lived workers.
+    sponsor_personas: [personas:team-lead]
+    outcome: A team lead can ask the lead agent to drain an epic; workers spawn, work in parallel, and exit cleanly when done.
+    status: in-progress
+    source: docs/product/lead-agent-epic-runner-spec.md
+    tags: [orchestration, lead, epics]
+
+  - id: web-onboarding
+    name: Web Onboarding
+    summary: A guided new-user flow that takes someone from blank slate to first agent run.
+    sponsor_personas: [personas:new-user]
+    outcome: A first-time user goes from zero to a workspace + repo + backend + agent + first issue in a single guided session, with clear status on each step.
+    status: shipped
+    source: docs/product/web-onboarding-spec.md
+    tags: [onboarding, web-ui, new-user]
+
+  - id: failure-modes-recovery
+    name: Failure Modes & Recovery
+    summary: Detect, classify, and recover from agent failures without losing work or surprising the user.
+    sponsor_personas: [personas:solo-dev, personas:dogfood-operator]
+    outcome: Every agent failure has a class and a clear next action; preflight blocks doomed runs before tokens are spent; stale runners can be released.
+    status: in-progress
+    source: docs/product/failure-modes-recovery-ux.md
+    tags: [recovery, resilience, errors]
+
+  - id: observability
+    name: Observability
+    summary: Distributed tracing, metrics, and structured logs from CLI through daemon to HTTP server.
+    sponsor_personas: [personas:platform-engineer]
+    outcome: An operator can trace a slow request across the whole stack and read counters/histograms for any HTTP route.
+    status: shipped
+    source: internal/observability/tracing
+    tags: [observability, otel]
+
+  - id: multi-backend
+    name: Multi-Backend AI
+    summary: Treat AI backends as pluggable — pick claude, codex, opencode, cursor, gemini, or roll your own.
+    sponsor_personas: [personas:solo-dev, personas:team-lead]
+    outcome: A user picks a backend per workspace, role, or agent — and can compare two side by side. New backends fit a stable interface.
+    status: shipped
+    source: internal/cli/backends
+    tags: [backend, ai, llm]
+
+  - id: real-time-ui
+    name: Real-Time UI
+    summary: Live, push-driven views — agent state, issue mutations, and terminal streams without polling.
+    sponsor_personas: [personas:solo-dev, personas:team-lead]
+    outcome: Every change shows up in the UI within ~250 ms across all connected clients; terminals stream like ssh; reconnects replay missed mutations.
+    status: shipped
+    source: internal/webui/appstores/hub.go
+    tags: [real-time, sse, websocket]
+
+  - id: desktop-app
+    name: Desktop App
+    summary: A Tauri wrapper around the loom UI for users who don't want to run `loom serve` in a terminal.
+    sponsor_personas: [personas:solo-dev, personas:new-user]
+    outcome: A double-clickable macOS/Linux/Windows app that boots loom in the background and shows the UI.
+    status: alpha
+    source: docs/product/desktop-app-runtime-spec.md
+    tags: [desktop, tauri, native]
+
+  - id: container-runners
+    name: Container Runners
+    summary: Run agents in isolated containers so untrusted code or experimental backends don't touch the host.
+    sponsor_personas: [personas:platform-engineer, personas:dogfood-operator]
+    outcome: A user can launch an agent in a container, watch its session live, and retain logs/diff/transcript after the container exits.
+    status: in-progress
+    source: docs/product/container-runner-mvp-spec.md
+    tags: [container, isolation, runner]
+
+  - id: local-first
+    name: Local-First Execution
+    summary: Run loom with zero external dependencies — embedded fleet-db, miniredis, snapshot persistence.
+    sponsor_personas: [personas:solo-dev, personas:new-user]
+    outcome: A user installs loom and runs the full stack with no Redis, no Postgres, no auth server.
+    status: shipped
+    source: docs/product/local-mode-product-spec.md
+    tags: [local, zero-config]

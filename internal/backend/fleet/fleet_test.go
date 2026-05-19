@@ -2392,3 +2392,38 @@ func TestBatch_Creates_Aggregated(t *testing.T) {
 		}
 	}
 }
+
+func TestParseOptionalFleetTime(t *testing.T) {
+	if got, err := parseOptionalFleetTime(nil); err != nil || !got.IsZero() {
+		t.Fatalf("nil time got=%s err=%v", got, err)
+	}
+	blank := "   "
+	if got, err := parseOptionalFleetTime(&blank); err != nil || !got.IsZero() {
+		t.Fatalf("blank time got=%s err=%v", got, err)
+	}
+	raw := "2026-05-19T01:02:03.123456789Z"
+	got, err := parseOptionalFleetTime(&raw)
+	if err != nil {
+		t.Fatalf("RFC3339Nano parse: %v", err)
+	}
+	if got.Nanosecond() != 123456789 {
+		t.Fatalf("nanoseconds = %d", got.Nanosecond())
+	}
+	raw = "2026-05-19T01:02:03Z"
+	if got, err = parseOptionalFleetTime(&raw); err != nil || got.IsZero() {
+		t.Fatalf("RFC3339 parse got=%s err=%v", got, err)
+	}
+	raw = "not-time"
+	if _, err = parseOptionalFleetTime(&raw); err == nil || !strings.Contains(err.Error(), "RFC3339") {
+		t.Fatalf("invalid time err = %v", err)
+	}
+}
+
+func TestHasAnyOfStrings(t *testing.T) {
+	if !hasAnyOfStrings([]string{"a", "b"}, []string{"c", "b"}) {
+		t.Fatal("expected intersection to match")
+	}
+	if hasAnyOfStrings([]string{"a"}, []string{"b", "c"}) {
+		t.Fatal("unexpected match")
+	}
+}

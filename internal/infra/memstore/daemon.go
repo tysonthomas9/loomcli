@@ -65,6 +65,8 @@ func cloneDaemonProfile(p *domain.DaemonProfile) *domain.DaemonProfile {
 	out := *p
 	if p.OTel != nil {
 		ot := *p.OTel
+		ot.Traces = clonePtr(p.OTel.Traces)
+		ot.Metrics = clonePtr(p.OTel.Metrics)
 		out.OTel = &ot
 	}
 	out.RestartPolicy = cloneRestartPolicy(p.RestartPolicy)

@@ -1,0 +1,1607 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>loom — Catalog</title>
+  <script src="https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f1115; --bg-2: #161922; --bg-3: #1d2230;
+      --border: #2a3142; --fg: #e4e7ef; --fg-dim: #9aa3b8; --fg-mute: #6b7488;
+      --accent: #8b9eff; --accent-2: #6cd8c4; --warn: #f0b86a; --bad: #ff8b9a;
+      --pill: #232a3a; --hover: #1f2535; --code-bg: #11141c;
+      --shadow: 0 1px 0 rgba(255,255,255,0.03), 0 8px 24px rgba(0,0,0,0.25);
+    }
+    @media (prefers-color-scheme: light) {
+      :root {
+        --bg: #fbfbfd; --bg-2: #ffffff; --bg-3: #f4f5f8;
+        --border: #e3e5ec; --fg: #1a1d24; --fg-dim: #4f5564; --fg-mute: #7e8593;
+        --accent: #3a52d6; --accent-2: #199a82; --warn: #a16608; --bad: #c4324a;
+        --pill: #eef0f6; --hover: #f0f2f7; --code-bg: #f4f5f8;
+        --shadow: 0 1px 0 rgba(0,0,0,0.02), 0 8px 24px rgba(15,17,21,0.06);
+      }
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      background: var(--bg); color: var(--fg); line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+    }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    .top {
+      position: sticky; top: 0; z-index: 10;
+      background: var(--bg-2); border-bottom: 1px solid var(--border);
+      padding: 14px 24px;
+    }
+    .top-row {
+      display: flex; align-items: center; gap: 16px;
+      max-width: 1200px; margin: 0 auto;
+    }
+    .brand { display: flex; align-items: baseline; gap: 10px; flex-shrink: 0; }
+    .brand-mark { font-weight: 700; font-size: 18px; letter-spacing: -0.02em; }
+    .brand-tag { color: var(--fg-mute); font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; }
+
+    .tabs {
+      display: flex; gap: 4px; margin-left: auto;
+      flex-wrap: wrap;
+    }
+    .tab {
+      padding: 6px 12px; border-radius: 6px;
+      background: transparent; border: 1px solid transparent;
+      color: var(--fg-dim); font-size: 13px; cursor: pointer;
+      display: flex; align-items: center; gap: 6px;
+      transition: all 0.1s;
+    }
+    .tab:hover { background: var(--hover); color: var(--fg); }
+    .tab.active { background: var(--bg-3); border-color: var(--border); color: var(--fg); }
+    .tab .count { font-size: 10px; color: var(--fg-mute); }
+
+    .kbar-trigger {
+      display: flex; align-items: center; gap: 8px;
+      padding: 7px 11px;
+      background: var(--bg-3); border: 1px solid var(--border); border-radius: 8px;
+      color: var(--fg-mute); font-size: 13px; cursor: pointer;
+      min-width: 260px; text-align: left;
+      transition: border-color 0.12s, color 0.12s;
+    }
+    .kbar-trigger:hover { border-color: var(--accent); color: var(--fg); }
+    .kbar-trigger .placeholder { flex-grow: 1; }
+    .kbar-trigger kbd {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 10px;
+      padding: 1px 5px;
+      background: var(--bg-2);
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      color: var(--fg-dim);
+    }
+
+    .main {
+      max-width: 1200px; margin: 0 auto;
+      padding: 28px 24px 80px;
+    }
+    h1 { font-size: 24px; letter-spacing: -0.02em; margin: 0 0 4px; }
+    .lead { color: var(--fg-dim); font-size: 14px; margin: 0 0 24px; max-width: 760px; }
+
+    .panel { display: none; }
+    .panel.active { display: block; }
+
+    /* ---- filter chip bar ---- */
+    .chips {
+      display: flex; flex-wrap: wrap; gap: 6px;
+      margin-bottom: 18px;
+    }
+    .chip {
+      padding: 4px 10px;
+      background: transparent;
+      border: 1px solid var(--border); border-radius: 999px;
+      color: var(--fg-dim); font-size: 12px;
+      cursor: pointer;
+      display: inline-flex; align-items: center; gap: 5px;
+      transition: all 0.12s;
+    }
+    .chip:hover { color: var(--fg); border-color: var(--accent); }
+    .chip.active {
+      background: var(--accent); border-color: var(--accent); color: var(--bg);
+    }
+    .chip .chip-n { font-size: 10px; opacity: 0.75; }
+
+    .filtered-banner {
+      padding: 8px 14px; background: var(--bg-3);
+      border: 1px solid var(--border); border-radius: 8px;
+      font-size: 12px; color: var(--fg-dim);
+      margin-bottom: 16px;
+      display: flex; justify-content: space-between; align-items: center;
+    }
+    .filtered-banner.hidden { display: none; }
+    .clear-btn {
+      background: transparent; border: 1px solid var(--border);
+      color: var(--fg-dim); padding: 4px 10px; border-radius: 6px;
+      font-size: 11px; cursor: pointer;
+    }
+    .clear-btn:hover { background: var(--hover); border-color: var(--accent); color: var(--fg); }
+
+    /* Card layouts */
+    .grid {
+      display: grid; gap: 12px;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    }
+    .stack { display: flex; flex-direction: column; gap: 12px; }
+
+    .card {
+      background: var(--bg-2); border: 1px solid var(--border);
+      border-radius: 10px; padding: 14px 16px;
+      transition: border-color 0.12s, box-shadow 0.12s, background 0.6s;
+      scroll-margin-top: 80px;
+    }
+    .card:hover { border-color: var(--accent); box-shadow: var(--shadow); }
+    .card.hidden { display: none; }
+    .card.flash { animation: flashCard 1.6s ease-out; }
+
+    /* Lifecycle states (Q7) */
+    .card[data-lifecycle="deprecated"] {
+      border-style: dashed;
+      border-color: var(--warn);
+      opacity: 0.85;
+    }
+    .card[data-lifecycle="deprecated"] h3::after {
+      content: " · deprecated";
+      font-size: 10px;
+      font-weight: 500;
+      letter-spacing: 0.06em;
+      color: var(--warn);
+      text-transform: uppercase;
+    }
+    .card[data-lifecycle="deleted"] {
+      border-style: dashed;
+      border-color: var(--bad);
+      opacity: 0.55;
+      text-decoration: line-through;
+      text-decoration-color: rgba(204,72,90,0.4);
+      display: none;     /* hidden unless body.show-deleted */
+    }
+    body.show-deleted .card[data-lifecycle="deleted"] { display: block; }
+    .card[data-lifecycle="deleted"] h3 { text-decoration: line-through; }
+    .card[data-lifecycle="deleted"] h3::after {
+      content: " · deleted";
+      font-size: 10px;
+      font-weight: 500;
+      letter-spacing: 0.06em;
+      color: var(--bad);
+      text-transform: uppercase;
+      text-decoration: none;
+    }
+    .pill.ref.target-deprecated { border-color: var(--warn); color: var(--warn); background: rgba(240,184,106,0.1); }
+    .pill.ref.target-deleted    { border-color: var(--bad);  color: var(--bad);  background: rgba(255,139,154,0.1); text-decoration: line-through; }
+
+    .lifecycle-toggle {
+      padding: 4px 10px;
+      background: transparent;
+      border: 1px solid var(--border); border-radius: 999px;
+      color: var(--fg-dim); font-size: 12px;
+      cursor: pointer;
+      transition: all 0.12s;
+      margin-left: auto;
+    }
+    .lifecycle-toggle:hover { color: var(--fg); border-color: var(--accent); }
+    .lifecycle-toggle.active { background: var(--bad); border-color: var(--bad); color: var(--bg); }
+    @keyframes flashCard {
+      0%   { background: color-mix(in srgb, var(--accent) 18%, var(--bg-2)); border-color: var(--accent); }
+      100% { background: var(--bg-2); border-color: var(--border); }
+    }
+    .card h3 {
+      margin: 0 0 4px; font-size: 14px; font-weight: 600; letter-spacing: -0.005em;
+      display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    }
+    .card .desc { color: var(--fg-dim); font-size: 13px; margin: 0 0 10px; }
+    .card .source {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 11px; color: var(--fg-mute);
+      background: var(--code-bg); padding: 2px 6px; border-radius: 4px;
+      display: inline-block; word-break: break-all;
+    }
+
+    .pill {
+      display: inline-block; padding: 2px 8px; border-radius: 999px;
+      background: var(--pill); color: var(--fg-dim);
+      font-size: 10px; letter-spacing: 0.04em; font-weight: 500;
+      position: relative;
+    }
+    .pill.tag { color: var(--accent-2); background: rgba(108,216,196,0.1); }
+    .pill.persona { background: rgba(139,158,255,0.12); color: var(--accent); cursor: pointer; }
+    .pill.persona:hover { background: rgba(139,158,255,0.22); }
+    .pill.feat {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 10px;
+    }
+    .pill.ref {
+      cursor: pointer; background: rgba(108,216,196,0.1); color: var(--accent-2);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 10px;
+      transition: background 0.1s;
+    }
+    .pill.ref:hover { background: rgba(108,216,196,0.22); }
+    .pill.ref.expanded {
+      background: var(--accent-2);
+      color: var(--bg);
+    }
+    .pill.ref.broken { background: rgba(255,139,154,0.12); color: var(--bad); cursor: help; }
+    .pill.priority { border: 1px solid currentColor; background: transparent; font-weight: 600; text-transform: uppercase; }
+    .pill.priority.must { color: var(--bad); }
+    .pill.priority.should { color: var(--warn); }
+    .pill.priority.could { color: var(--accent); }
+    .pill.status {
+      border: 1px solid currentColor; background: transparent; text-transform: uppercase; font-weight: 600;
+    }
+    .pill.status.shipped { color: var(--accent-2); }
+    .pill.status.in-progress { color: var(--warn); }
+    .pill.status.alpha { color: var(--accent); }
+    .pill.status.planned { color: var(--fg-mute); }
+    .pill.status.paused { color: var(--fg-mute); }
+
+    .meta-line { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+
+    /* Categories within a panel */
+    .category { margin-bottom: 28px; }
+    .category h2 {
+      font-size: 16px; letter-spacing: -0.01em; margin: 16px 0 6px;
+      padding-bottom: 6px; border-bottom: 1px solid var(--border);
+    }
+    .category .cat-summary { color: var(--fg-dim); font-size: 12px; margin: 0 0 12px; }
+
+    /* Story-specific */
+    .story-head {
+      display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+      user-select: none;
+    }
+
+    /* The whole card behaves like a button when collapsed */
+    .card.collapsed {
+      cursor: pointer;
+      position: relative;
+    }
+    .card.collapsed:hover {
+      border-color: var(--accent);
+      background: color-mix(in srgb, var(--accent) 6%, var(--bg-2));
+    }
+    .card.collapsed:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+    /* "Click to expand" hint appears on hover, only when collapsed */
+    .card.collapsed::after {
+      content: "Click to expand";
+      position: absolute;
+      bottom: 8px; right: 14px;
+      font-size: 10px;
+      letter-spacing: 0.06em;
+      color: var(--fg-mute);
+      opacity: 0;
+      transition: opacity 0.15s;
+      pointer-events: none;
+    }
+    .card.collapsed:hover::after { opacity: 0.85; }
+
+    /* Chevron is a real button, prominent */
+    .chev {
+      margin-left: auto;
+      width: 28px; height: 28px;
+      display: inline-flex; align-items: center; justify-content: center;
+      background: var(--bg-3);
+      border: 1px solid var(--border);
+      border-radius: 50%;
+      color: var(--fg-dim);
+      font-size: 11px;
+      cursor: pointer;
+      transition: transform 0.2s, background 0.12s, color 0.12s, border-color 0.12s;
+      padding: 0;
+    }
+    .chev:hover {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: var(--bg);
+    }
+    .chev:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+    .card.collapsed .chev { transform: rotate(-90deg); }
+    .card.collapsed .narrative .when-dt,
+    .card.collapsed .narrative .when-dd { display: none; }
+    .card.collapsed .narrative { margin: 6px 0 0; }
+    .card.collapsed .flow,
+    .card.collapsed .story-footer,
+    .card.collapsed .reverse-refs { display: none; }
+    .card.collapsed .narrative dd.then {
+      font-size: 13.5px;
+      color: var(--fg-dim);
+      font-weight: 400;
+    }
+    .card .compact-meta {
+      display: none;
+      font-size: 11px;
+      color: var(--fg-mute);
+      margin-top: 8px;
+      gap: 12px;
+    }
+    .card.collapsed .compact-meta { display: flex; }
+    .card .compact-meta .dot { color: var(--fg-faint, var(--border)); }
+
+    .collapse-controls {
+      display: flex; gap: 8px;
+      margin: 0 0 14px;
+    }
+    .collapse-btn {
+      padding: 4px 10px;
+      background: transparent;
+      border: 1px solid var(--border); border-radius: 6px;
+      color: var(--fg-dim); font-size: 11px;
+      cursor: pointer;
+      display: inline-flex; align-items: center; gap: 6px;
+      transition: all 0.12s;
+    }
+    .collapse-btn:hover { color: var(--fg); border-color: var(--accent); }
+    .collapse-btn .icon { font-size: 10px; opacity: 0.7; }
+    .narrative { margin: 8px 0; font-size: 13px; }
+    .narrative dt {
+      font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em;
+      color: var(--fg-mute); margin-top: 6px;
+    }
+    .narrative dd { margin: 2px 0 0; }
+    .narrative dd.dim { color: var(--fg-dim); }
+    .flow { margin: 8px 0 0; padding-left: 0; list-style: none; counter-reset: step; }
+    .flow li {
+      position: relative; padding: 3px 0 3px 26px;
+      font-size: 13px; color: var(--fg-dim);
+      counter-increment: step;
+    }
+    .flow li::before {
+      content: counter(step);
+      position: absolute; left: 0; top: 4px;
+      width: 18px; height: 18px;
+      background: var(--bg-3); border: 1px solid var(--border);
+      border-radius: 50%; font-size: 10px; font-weight: 600;
+      color: var(--fg-mute);
+      display: flex; align-items: center; justify-content: center;
+    }
+
+    /* Glossary */
+    .term { display: flex; flex-direction: column; gap: 4px; }
+    .term-name { font-weight: 600; font-size: 14px; }
+    .term-aliases { font-size: 11px; color: var(--fg-mute); }
+
+    /* Overview */
+    .overview-files {
+      display: grid; gap: 12px;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      margin-bottom: 28px;
+    }
+    .file-card {
+      background: var(--bg-2); border: 1px solid var(--border);
+      border-radius: 10px; padding: 14px 16px; cursor: pointer;
+      transition: border-color 0.12s, box-shadow 0.12s;
+    }
+    .file-card:hover { border-color: var(--accent); box-shadow: var(--shadow); }
+    .file-card .name { font-weight: 600; font-size: 14px; margin-bottom: 4px; }
+    .file-card .path {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 11px; color: var(--fg-mute);
+    }
+    .file-card .owner {
+      font-size: 11px; color: var(--accent); margin-top: 8px;
+    }
+    .file-card .desc { color: var(--fg-dim); font-size: 12px; margin: 6px 0 0; }
+
+    .health-panel {
+      padding: 14px 16px; background: var(--bg-2);
+      border: 1px solid var(--border); border-radius: 10px;
+      margin-bottom: 24px;
+    }
+    .health-panel h3 { margin: 0 0 8px; font-size: 13px; }
+    .health-line {
+      font-size: 12px; color: var(--fg-dim); margin: 4px 0;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    }
+    .health-line.warn { color: var(--warn); }
+    .health-line.bad { color: var(--bad); }
+    .health-line.ok { color: var(--accent-2); }
+
+    /* ---- inline ref peek (NEW) ---- */
+    .ref-peek {
+      margin-top: 10px;
+      padding: 10px 14px;
+      background: var(--bg-3);
+      border: 1px solid var(--border);
+      border-left: 3px solid var(--accent-2);
+      border-radius: 6px;
+      animation: peekIn 0.18s ease-out;
+    }
+    @keyframes peekIn {
+      from { opacity: 0; transform: translateY(-3px); max-height: 0; }
+      to   { opacity: 1; transform: translateY(0); max-height: 600px; }
+    }
+    .ref-peek .peek-head {
+      display: flex; align-items: baseline; gap: 10px;
+      margin-bottom: 4px;
+    }
+    .ref-peek .peek-kind {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 9px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--fg-mute);
+    }
+    .ref-peek .peek-title {
+      font-weight: 600;
+      font-size: 13px;
+      color: var(--fg);
+    }
+    .ref-peek .peek-jump {
+      margin-left: auto;
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--accent);
+      cursor: pointer;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+    }
+    .ref-peek .peek-jump:hover { background: var(--hover); border-color: var(--accent); }
+    .ref-peek .peek-body {
+      font-size: 12.5px;
+      line-height: 1.55;
+      color: var(--fg-dim);
+    }
+
+    /* ---- reverse refs (NEW) ---- */
+    .reverse-refs {
+      margin-top: 10px;
+      padding-top: 8px;
+      border-top: 1px dashed var(--border);
+    }
+    .reverse-refs .rev-label {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--fg-mute);
+      margin-bottom: 4px;
+    }
+    .reverse-refs .rev-row {
+      display: flex; flex-wrap: wrap; gap: 4px;
+    }
+
+    /* ---- command palette (NEW) ---- */
+    .kbar-veil {
+      position: fixed; inset: 0; z-index: 100;
+      background: color-mix(in srgb, var(--bg) 70%, transparent);
+      backdrop-filter: blur(4px);
+      -webkit-backdrop-filter: blur(4px);
+      display: none;
+      align-items: flex-start; justify-content: center;
+      padding-top: 14vh;
+      animation: fadeIn 0.12s ease-out;
+    }
+    .kbar-veil.open { display: flex; }
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+    .kbar {
+      width: min(640px, 92vw);
+      background: var(--bg-2);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      box-shadow: 0 24px 80px -16px rgba(0,0,0,0.5);
+      overflow: hidden;
+    }
+    .kbar-input {
+      width: 100%;
+      padding: 14px 18px;
+      background: transparent;
+      border: 0; outline: 0;
+      color: var(--fg);
+      font-size: 16px;
+      border-bottom: 1px solid var(--border);
+    }
+    .kbar-input::placeholder { color: var(--fg-mute); }
+    .kbar-results {
+      max-height: 60vh;
+      overflow-y: auto;
+      padding: 4px 0;
+    }
+    .kbar-group {
+      font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase;
+      color: var(--fg-mute); padding: 10px 18px 4px;
+    }
+    .kbar-item {
+      display: flex; align-items: center; gap: 12px;
+      padding: 6px 18px;
+      cursor: pointer;
+      font-size: 13px;
+      color: var(--fg);
+      border-left: 3px solid transparent;
+      transition: background 0.08s, border-color 0.08s;
+    }
+    .kbar-item:hover, .kbar-item[aria-selected="true"] {
+      background: var(--hover);
+      border-left-color: var(--accent);
+    }
+    .kbar-item .kbar-kind {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 10px;
+      letter-spacing: 0.06em;
+      color: var(--fg-mute);
+      text-transform: uppercase;
+      width: 70px;
+      flex-shrink: 0;
+    }
+    .kbar-item .kbar-name { font-weight: 500; }
+    .kbar-item .kbar-sub {
+      color: var(--fg-mute);
+      font-size: 12px;
+      margin-left: auto;
+      max-width: 55%;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .kbar-footer {
+      padding: 8px 18px;
+      border-top: 1px solid var(--border);
+      font-size: 10px;
+      color: var(--fg-mute);
+      display: flex; gap: 14px;
+    }
+    .kbar-footer kbd {
+      padding: 1px 5px;
+      background: var(--bg-3);
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 9px;
+      color: var(--fg-dim);
+    }
+
+    .loading, .error-box { padding: 30px 20px; text-align: center; color: var(--fg-mute); }
+    .error-box {
+      text-align: left; background: var(--bg-2);
+      border: 1px solid var(--warn); border-radius: 10px; color: var(--fg);
+    }
+  </style>
+</head>
+<body>
+  <header class="top">
+    <div class="top-row">
+      <div class="brand">
+        <span class="brand-mark">loom</span>
+        <span class="brand-tag">catalog</span>
+      </div>
+      <div class="tabs" id="tabs"></div>
+      <button class="kbar-trigger" id="kbarTrigger">
+        <span class="placeholder">Search everything…</span>
+        <kbd>⌘K</kbd>
+      </button>
+      <button class="lifecycle-toggle" id="showDeleted" title="Show items marked as deleted">
+        Show deleted
+      </button>
+    </div>
+  </header>
+
+  <main class="main">
+    <div id="content">
+      <div class="loading">Loading catalog…</div>
+    </div>
+  </main>
+
+  <!-- Command palette -->
+  <div class="kbar-veil" id="kbarVeil">
+    <div class="kbar" role="dialog" aria-modal="true">
+      <input class="kbar-input" id="kbarInput" placeholder="Search features, stories, personas, epics, glossary…" autocomplete="off" />
+      <div class="kbar-results" id="kbarResults"></div>
+      <div class="kbar-footer">
+        <span><kbd>↑↓</kbd> navigate</span>
+        <span><kbd>↵</kbd> jump</span>
+        <span><kbd>esc</kbd> close</span>
+        <span style="margin-left: auto;"><kbd>⌘K</kbd> toggle</span>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ---------- helpers ----------
+    function el(tag, opts) {
+      const node = document.createElement(tag);
+      if (!opts) return node;
+      if (opts.class) node.className = opts.class;
+      if (opts.id) node.id = opts.id;
+      if (opts.text != null) node.textContent = String(opts.text);
+      if (opts.href != null) node.setAttribute("href", String(opts.href));
+      if (opts.attrs) for (const [k, v] of Object.entries(opts.attrs)) node.setAttribute(k, String(v));
+      if (opts.onClick) node.addEventListener("click", opts.onClick);
+      if (opts.children) for (const c of opts.children) {
+        if (c == null) continue;
+        node.appendChild(typeof c === "string" ? document.createTextNode(c) : c);
+      }
+      return node;
+    }
+    function clear(n) { while (n.firstChild) n.removeChild(n.firstChild); }
+    function slug(s) {
+      return String(s).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+    }
+    function asArray(v) { return Array.isArray(v) ? v : (v != null ? [v] : []); }
+    const $ = (s) => document.querySelector(s);
+
+    // ---------- state ----------
+    const state = {
+      index: null,
+      catalogs: {},
+      itemIndex: {},        // file-id -> Map(slug -> item)
+      reverseRefs: {},      // file-id -> Map(itemId -> [{fileId, itemId, label, summary}])
+      activeTab: "overview",
+      kbar: { open: false, query: "", selected: 0, results: [] },
+    };
+
+    // ---------- load ----------
+    async function fetchYaml(path) {
+      const res = await fetch(path, { cache: "no-cache" });
+      if (!res.ok) throw new Error(path + ": HTTP " + res.status);
+      return jsyaml.load(await res.text());
+    }
+    async function bootstrap() {
+      try {
+        state.index = await fetchYaml("index.yaml");
+        await Promise.all((state.index.files || []).map(async (f) => {
+          state.catalogs[f.id] = await fetchYaml(f.path);
+        }));
+        buildItemIndex();
+        buildReverseRefs();
+        // hash routing on first load — set tab BEFORE rendering so the active state is right
+        const { tab, item } = parseHash();
+        state.activeTab = tab || "overview";
+        renderTabs();
+        renderPanel();
+        if (item) setTimeout(() => scrollToItem(state.activeTab, item, true), 160);
+      } catch (err) {
+        const c = $("#content"); clear(c);
+        const box = el("div", { class: "error-box" });
+        box.appendChild(el("strong", { text: "Couldn't load catalog." }));
+        box.appendChild(el("p", { text: err.message }));
+        box.appendChild(el("p", { text: "Serve this dir over HTTP (e.g., `python3 -m http.server`) then reload." }));
+        c.appendChild(box);
+      }
+    }
+
+    function buildItemIndex() {
+      // state.itemIndex: file-id -> Map(canonical-slug -> { item, group })
+      // state.previousIds: file-id -> Map(previous-slug -> canonical-slug)
+      state.previousIds = {};
+      for (const f of (state.index.files || [])) {
+        const data = state.catalogs[f.id];
+        const idx = new Map();
+        const prev = new Map();
+        const list = data[f.item_key];
+        if (!list) { state.itemIndex[f.id] = idx; state.previousIds[f.id] = prev; continue; }
+        const visit = (item, group) => {
+          const id = String(item[f.item_id_field] ?? "");
+          const key = slug(id);
+          if (!key) return;
+          idx.set(key, { item, group });
+          for (const prior of (item.previous_ids || [])) {
+            prev.set(slug(prior), key);
+          }
+        };
+        if (f.nested_items_key) {
+          for (const group of list) {
+            for (const item of (group[f.nested_items_key] || [])) visit(item, group);
+          }
+        } else {
+          for (const item of list) visit(item, null);
+        }
+        state.itemIndex[f.id] = idx;
+        state.previousIds[f.id] = prev;
+      }
+    }
+
+    function buildReverseRefs() {
+      // For every item in every file, find which other items reference it.
+      for (const f of state.index.files) state.reverseRefs[f.id] = new Map();
+      const refPattern = /^[a-z][a-z0-9-]*:[A-Za-z0-9_.\- \/]+$/;
+      const walkAndCollect = (sourceFile, sourceId, sourceItem) => {
+        const visit = (val) => {
+          if (val == null) return;
+          if (typeof val === "string") {
+            if (refPattern.test(val)) {
+              const [fid, ...rest] = val.split(":");
+              const tid = slug(rest.join(":"));
+              const targetMap = state.reverseRefs[fid];
+              if (!targetMap) return;
+              if (!targetMap.has(tid)) targetMap.set(tid, []);
+              const entry = state.itemIndex[sourceFile]?.get(sourceId);
+              if (!entry) return;
+              const label = entry.item.name || entry.item.term || entry.item.title || sourceId;
+              const summary = entry.item.purpose || entry.item.definition || entry.item.description || entry.item.summary || entry.item.outcome || "";
+              targetMap.get(tid).push({ fileId: sourceFile, itemId: sourceId, label, summary });
+            }
+            return;
+          }
+          if (Array.isArray(val)) val.forEach(visit);
+          else if (typeof val === "object") Object.values(val).forEach(visit);
+        };
+        visit(sourceItem);
+      };
+      for (const [fileId, idx] of Object.entries(state.itemIndex)) {
+        for (const [id, { item }] of idx) walkAndCollect(fileId, id, item);
+      }
+    }
+
+    function resolveRef(refStr) {
+      const [fileId, ...rest] = String(refStr).split(":");
+      const id = rest.join(":");
+      const idx = state.itemIndex[fileId];
+      if (!idx) return { fileId, id, found: false };
+      const key = slug(id);
+      // 1. canonical lookup
+      let entry = idx.get(key) || idx.get(id);
+      if (entry) return { fileId, id, found: true, entry, aliased: false };
+      // 2. previous_ids fallback
+      const prev = state.previousIds && state.previousIds[fileId];
+      if (prev) {
+        const canonical = prev.get(key) || prev.get(id);
+        if (canonical) {
+          entry = idx.get(canonical);
+          if (entry) return { fileId, id, found: true, entry, aliased: true, canonicalId: canonical };
+        }
+      }
+      return { fileId, id, found: false };
+    }
+
+    // ---------- URL routing ----------
+    function parseHash() {
+      const h = location.hash.replace(/^#/, "");
+      if (!h) return { tab: null, item: null };
+      const [tab, item] = h.split("/");
+      return { tab: tab || null, item: item || null };
+    }
+    function setHash(tab, item) {
+      const next = "#" + tab + (item ? "/" + item : "");
+      if (location.hash !== next) history.replaceState(null, "", next);
+    }
+
+    // ---------- tabs ----------
+    function renderTabs() {
+      const tabs = $("#tabs"); clear(tabs);
+      const order = ["overview", ...(state.index.files || []).map((f) => f.id)];
+      for (const t of order) {
+        const label = t === "overview" ? "Overview" : titleFor(t);
+        const count = t === "overview" ? null : (state.itemIndex[t] ? state.itemIndex[t].size : 0);
+        const btn = el("button", {
+          class: "tab" + (state.activeTab === t ? " active" : ""),
+          attrs: { "data-tab": t },
+          onClick: () => switchTab(t),
+        });
+        btn.appendChild(document.createTextNode(label));
+        if (count != null) btn.appendChild(el("span", { class: "count", text: String(count) }));
+        tabs.appendChild(btn);
+      }
+    }
+    function titleFor(fileId) {
+      return ({
+        personas: "Personas", features: "Features", stories: "Stories",
+        epics: "Epics", glossary: "Glossary",
+      })[fileId] || fileId;
+    }
+    function switchTab(t, item) {
+      state.activeTab = t;
+      document.querySelectorAll(".tab").forEach((b) => {
+        b.classList.toggle("active", b.getAttribute("data-tab") === t);
+      });
+      renderPanel();
+      setHash(t, item);
+      if (item) setTimeout(() => scrollToItem(t, item, true), 60);
+    }
+
+    function scrollToItem(fileId, itemId, flash) {
+      const sel = `.card[data-id="${slug(itemId)}"]`;
+      const target = document.querySelector(sel);
+      if (!target) return;
+      if (target.classList.contains("collapsed")) expandCard(target);
+      target.scrollIntoView({ behavior: "smooth", block: "center" });
+      if (flash) {
+        target.classList.remove("flash");
+        void target.offsetWidth;
+        target.classList.add("flash");
+      }
+    }
+
+    // ---------- panel rendering ----------
+    function renderPanel() {
+      const c = $("#content"); clear(c);
+      if (state.activeTab === "overview") return renderOverview(c);
+      const renderers = {
+        personas: renderPersonas, features: renderFeatures, stories: renderStories,
+        epics: renderEpics, glossary: renderGlossary,
+      };
+      const fn = renderers[state.activeTab];
+      if (fn) fn(c);
+      else c.appendChild(el("p", { text: "Unknown tab: " + state.activeTab }));
+    }
+
+    function renderOverview(c) {
+      const meta = state.index.meta || {};
+      c.appendChild(el("h1", { text: meta.app + " — Catalog" }));
+      c.appendChild(el("p", { class: "lead", text: meta.description || "" }));
+
+      const grid = el("div", { class: "overview-files" });
+      for (const f of (state.index.files || [])) {
+        const count = state.itemIndex[f.id] ? state.itemIndex[f.id].size : 0;
+        const card = el("div", {
+          class: "file-card",
+          onClick: () => switchTab(f.id),
+        });
+        const head = el("div");
+        head.appendChild(el("span", { class: "name", text: titleFor(f.id) + " (" + count + ")" }));
+        card.appendChild(head);
+        card.appendChild(el("div", { class: "path", text: f.path }));
+        card.appendChild(el("p", { class: "desc", text: f.description || "" }));
+        card.appendChild(el("div", { class: "owner", text: "Owner: " + (f.owner_agent || "—") }));
+        grid.appendChild(card);
+      }
+      c.appendChild(grid);
+
+      const health = el("div", { class: "health-panel" });
+      health.appendChild(el("h3", { text: "Cross-reference health" }));
+      const stats = computeRefHealth();
+      const line = (cls, text) => el("div", { class: "health-line " + cls, text });
+      health.appendChild(line(stats.broken === 0 ? "ok" : "bad", "broken refs: " + stats.broken));
+      health.appendChild(line(stats.orphans === 0 ? "ok" : "warn",
+        "items with no incoming refs: " + stats.orphans + " (informational)"));
+      health.appendChild(line("ok", "total refs scanned: " + stats.scanned));
+      c.appendChild(health);
+
+      if (stats.brokenList.length) {
+        const broken = el("div", { class: "health-panel" });
+        broken.appendChild(el("h3", { text: "Broken references" }));
+        for (const b of stats.brokenList.slice(0, 20))
+          broken.appendChild(el("div", { class: "health-line bad", text: b }));
+        if (stats.brokenList.length > 20)
+          broken.appendChild(el("div", { class: "health-line", text: "… and " + (stats.brokenList.length - 20) + " more" }));
+        c.appendChild(broken);
+      }
+
+      // Schema health panel — consumes the `fields:` block from index.yaml.
+      const schema = computeSchemaHealth();
+      const sh = el("div", { class: "health-panel" });
+      sh.appendChild(el("h3", { text: "Schema health" }));
+      sh.appendChild(line("ok", "items checked: " + schema.items));
+      sh.appendChild(line(schema.missing === 0 ? "ok" : "bad",
+        "missing required fields: " + schema.missing));
+      sh.appendChild(line(schema.unknown === 0 ? "ok" : "warn",
+        "unknown fields (not in schema): " + schema.unknown));
+      sh.appendChild(line(schema.lifecycleViolations === 0 ? "ok" : "warn",
+        "lifecycle violations (missing date / stale metadata): " + schema.lifecycleViolations));
+      sh.appendChild(line(schema.refTypeMismatches === 0 ? "ok" : "bad",
+        "ref-type mismatches: " + schema.refTypeMismatches));
+      c.appendChild(sh);
+
+      if (schema.violations.length) {
+        const v = el("div", { class: "health-panel" });
+        v.appendChild(el("h3", { text: "Schema violations" }));
+        for (const x of schema.violations.slice(0, 20))
+          v.appendChild(el("div", { class: "health-line bad", text: x }));
+        if (schema.violations.length > 20)
+          v.appendChild(el("div", { class: "health-line", text: "… and " + (schema.violations.length - 20) + " more" }));
+        c.appendChild(v);
+      }
+    }
+
+    function computeSchemaHealth() {
+      let items = 0, missing = 0, unknown = 0, lifecycleViolations = 0, refTypeMismatches = 0;
+      const violations = [];
+      for (const f of (state.index.files || [])) {
+        if (!f.fields) continue;
+        const knownFields = new Set(Object.keys(f.fields));
+        const requiredFields = Object.entries(f.fields).filter(([, v]) => v.required).map(([k]) => k);
+        const idx = state.itemIndex[f.id];
+        if (!idx) continue;
+        for (const [id, { item }] of idx) {
+          items++;
+          for (const rf of requiredFields) {
+            if (item[rf] === undefined) {
+              missing++;
+              violations.push(f.id + ":" + id + ' — missing required "' + rf + '"');
+            }
+          }
+          for (const k of Object.keys(item)) {
+            if (!knownFields.has(k)) {
+              unknown++;
+              violations.push(f.id + ":" + id + ' — unknown field "' + k + '"');
+            }
+          }
+          // Lifecycle integrity
+          const lc = item.lifecycle;
+          if (lc && lc !== "active") {
+            if (!item.lifecycle_at) {
+              lifecycleViolations++;
+              violations.push(f.id + ":" + id + ' — lifecycle="' + lc + '" missing lifecycle_at');
+            }
+          } else if (item.lifecycle_at || item.lifecycle_reason) {
+            lifecycleViolations++;
+            violations.push(f.id + ":" + id + ' — lifecycle is active but lifecycle_at/reason set (stale metadata)');
+          }
+          // Ref-type mismatches for typed list<ref<...>> fields
+          for (const [k, spec] of Object.entries(f.fields)) {
+            if (!item[k]) continue;
+            const m = String(spec.type).match(/^list<ref<([a-z][a-z0-9-]*|\*)>>$/);
+            if (m && Array.isArray(item[k])) {
+              const wantFile = m[1];
+              for (const ref of item[k]) {
+                if (typeof ref !== "string" || !ref.includes(":")) continue;
+                const [refFile] = ref.split(":");
+                if (wantFile !== "*" && refFile !== wantFile) {
+                  refTypeMismatches++;
+                  violations.push(f.id + ":" + id + " — " + k + ' expected ref<' + wantFile + '>, got "' + ref + '"');
+                }
+              }
+            }
+          }
+        }
+      }
+      return { items, missing, unknown, lifecycleViolations, refTypeMismatches, violations };
+    }
+    function computeRefHealth() {
+      let scanned = 0, broken = 0;
+      const brokenList = [];
+      const referenced = new Set();
+      const refPattern = /^[a-z][a-z0-9-]*:[A-Za-z0-9_.\- \/]+$/;
+      const walk = (obj, ownerFile, ownerId) => {
+        if (obj == null) return;
+        if (typeof obj === "string") {
+          if (refPattern.test(obj)) {
+            scanned++;
+            const r = resolveRef(obj);
+            if (r.found) referenced.add(r.fileId + ":" + slug(r.id));
+            else { broken++; brokenList.push(ownerFile + ":" + ownerId + " → " + obj); }
+          }
+          return;
+        }
+        if (Array.isArray(obj)) for (const x of obj) walk(x, ownerFile, ownerId);
+        else if (typeof obj === "object") for (const v of Object.values(obj)) walk(v, ownerFile, ownerId);
+      };
+      for (const [fileId, idx] of Object.entries(state.itemIndex))
+        for (const [id, { item }] of idx) walk(item, fileId, id);
+      let orphans = 0;
+      for (const [fileId, idx] of Object.entries(state.itemIndex)) {
+        if (fileId === "glossary" || fileId === "epics") continue;
+        for (const [id] of idx) if (!referenced.has(fileId + ":" + slug(id))) orphans++;
+      }
+      return { scanned, broken, orphans, brokenList };
+    }
+
+    // ---------- panel renderers ----------
+    function renderPersonas(c) {
+      c.appendChild(el("h1", { text: "Personas" }));
+      const data = state.catalogs.personas || {};
+      c.appendChild(el("p", { class: "lead", text: (data.meta || {}).description || "" }));
+      const grid = el("div", { class: "grid" });
+      for (const p of (data.personas || [])) grid.appendChild(renderPersonaCard(p));
+      c.appendChild(grid);
+    }
+    function renderPersonaCard(p) {
+      const card = el("article", {
+        class: "card",
+        attrs: {
+          "data-search": searchBlob(p),
+          "data-id": slug(p.id || ""),
+          "data-lifecycle": p.lifecycle || "active",
+        },
+      });
+      const h3 = el("h3");
+      h3.appendChild(document.createTextNode(p.name || ""));
+      h3.appendChild(el("span", { class: "pill", text: p.id }));
+      card.appendChild(h3);
+      if (p.description) card.appendChild(el("p", { class: "desc", text: p.description }));
+      if (Array.isArray(p.motivations) && p.motivations.length) {
+        const ul = el("ul", { attrs: { style: "margin: 4px 0 8px; padding-left: 16px; font-size: 12px; color: var(--fg-dim);" } });
+        for (const m of p.motivations) ul.appendChild(el("li", { text: m }));
+        card.appendChild(ul);
+      }
+      if (p.evidence) card.appendChild(el("span", { class: "source", text: p.evidence }));
+      const tags = el("div", { class: "meta-line" });
+      for (const t of (p.tags || [])) tags.appendChild(el("span", { class: "pill tag", text: t }));
+      if (tags.firstChild) card.appendChild(tags);
+      appendReverseRefs(card, "personas", slug(p.id));
+      return card;
+    }
+
+    function renderFeatures(c) {
+      const data = state.catalogs.features || {};
+      const meta = data.meta || {};
+      c.appendChild(el("h1", { text: meta.app + " — Features" }));
+      c.appendChild(el("p", { class: "lead", text: meta.description || "" }));
+
+      // category filter chips
+      const cats = (data.categories || []).map((cat) => ({ id: cat.id, name: cat.name, n: (cat.features || []).length }));
+      c.appendChild(renderChips("cat", cats, applyFilter));
+
+      for (const cat of (data.categories || [])) {
+        const section = el("section", { class: "category", attrs: { "data-cat": cat.id } });
+        section.appendChild(el("h2", { text: cat.name }));
+        if (cat.summary) section.appendChild(el("p", { class: "cat-summary", text: cat.summary }));
+        const grid = el("div", { class: "grid" });
+        for (const f of (cat.features || [])) grid.appendChild(renderFeatureCard(f, cat.id));
+        section.appendChild(grid);
+        c.appendChild(section);
+      }
+    }
+    function renderFeatureCard(f, catId) {
+      const id = slug(f.id || f.name || "");
+      const card = el("article", {
+        class: "card",
+        attrs: {
+          "data-search": searchBlob(f), "data-id": id, "data-cat": catId,
+          "data-lifecycle": f.lifecycle || "active",
+        },
+      });
+      const h3 = el("h3");
+      h3.appendChild(document.createTextNode(f.name || ""));
+      if (f.hidden) h3.appendChild(el("span", { class: "pill", text: "hidden" }));
+      h3.appendChild(el("span", { class: "pill", attrs: { style: "font-family: ui-monospace, monospace; opacity: 0.7;" }, text: id }));
+      card.appendChild(h3);
+      if (f.purpose) card.appendChild(el("p", { class: "desc", text: f.purpose }));
+      if (f.source) card.appendChild(el("span", { class: "source", text: f.source }));
+      if (Array.isArray(f.flags) && f.flags.length) {
+        const row = el("div", { class: "meta-line", attrs: { style: "margin-top: 8px;" } });
+        for (const fl of f.flags) row.appendChild(el("span", {
+          class: "pill", attrs: { style: "font-family: ui-monospace, monospace;" }, text: fl,
+        }));
+        card.appendChild(row);
+      }
+      const meta = el("div", { class: "meta-line" });
+      for (const a of (f.aliases || [])) meta.appendChild(el("span", { class: "pill", text: "alias: " + a }));
+      for (const t of (f.tags || [])) meta.appendChild(el("span", { class: "pill tag", text: t }));
+      if (meta.firstChild) card.appendChild(meta);
+      appendReverseRefs(card, "features", id);
+      return card;
+    }
+
+    function renderStories(c) {
+      const data = state.catalogs.stories || {};
+      const meta = data.meta || {};
+      c.appendChild(el("h1", { text: meta.app + " — User Stories" }));
+      c.appendChild(el("p", { class: "lead", text: meta.description || "" }));
+
+      // persona filter chips
+      const personaCount = new Map();
+      for (const cat of (data.categories || [])) for (const s of (cat.stories || [])) {
+        for (const pid of asArray(s.persona)) personaCount.set(pid, (personaCount.get(pid) || 0) + 1);
+      }
+      const personaChips = [...personaCount].map(([id, n]) => {
+        const pEntry = state.itemIndex.personas?.get(slug(id));
+        return { id, name: pEntry ? pEntry.item.name : id, n };
+      });
+      const priorityCount = new Map();
+      for (const cat of (data.categories || [])) for (const s of (cat.stories || [])) {
+        if (s.priority) priorityCount.set(s.priority, (priorityCount.get(s.priority) || 0) + 1);
+      }
+      const prioChips = [...priorityCount].map(([id, n]) => ({ id, name: id.toUpperCase(), n }));
+
+      if (personaChips.length) c.appendChild(renderChips("persona", personaChips, applyFilter));
+      if (prioChips.length) c.appendChild(renderChips("priority", prioChips, applyFilter));
+
+      // Expand/collapse-all controls
+      const controls = el("div", { class: "collapse-controls" });
+      controls.appendChild(el("button", {
+        class: "collapse-btn",
+        onClick: () => setAllStoriesCollapsed(false),
+        children: [el("span", { class: "icon", text: "▾" }), document.createTextNode("Expand all")],
+      }));
+      controls.appendChild(el("button", {
+        class: "collapse-btn",
+        onClick: () => setAllStoriesCollapsed(true),
+        children: [el("span", { class: "icon", text: "▸" }), document.createTextNode("Collapse all")],
+      }));
+      c.appendChild(controls);
+
+      for (const cat of (data.categories || [])) {
+        const section = el("section", { class: "category" });
+        section.appendChild(el("h2", { text: cat.name }));
+        if (cat.summary) section.appendChild(el("p", { class: "cat-summary", text: cat.summary }));
+        const stack = el("div", { class: "stack" });
+        for (const s of (cat.stories || [])) stack.appendChild(renderStoryCard(s));
+        section.appendChild(stack);
+        c.appendChild(section);
+      }
+    }
+    function renderStoryCard(s) {
+      const id = slug(s.id || "");
+      const personaIds = asArray(s.persona);
+      const card = el("article", {
+        class: "card collapsed",
+        attrs: {
+          "data-search": searchBlob(s),
+          "data-id": id,
+          "data-personas": personaIds.join("|"),
+          "data-priority": s.priority || "",
+          "data-lifecycle": s.lifecycle || "active",
+          "tabindex": "0",
+          "role": "button",
+          "aria-expanded": "false",
+          "aria-label": "Story: " + (s.title || id) + ". Click to expand.",
+        },
+      });
+
+      // Whole-card click: only when collapsed, only if user didn't hit a pill/button
+      card.addEventListener("click", (ev) => {
+        if (!card.classList.contains("collapsed")) return;
+        if (ev.target.closest(".pill") || ev.target.closest("button")) return;
+        expandCard(card);
+      });
+      card.addEventListener("keydown", (ev) => {
+        if ((ev.key === "Enter" || ev.key === " ") && card.classList.contains("collapsed")) {
+          ev.preventDefault();
+          expandCard(card);
+        } else if (ev.key === "Escape" && !card.classList.contains("collapsed")) {
+          collapseCard(card);
+        }
+      });
+
+      const head = el("div", { class: "story-head" });
+      head.appendChild(el("span", { attrs: { style: "font-weight: 600; font-size: 14px; flex-grow: 1;" }, text: s.title || "" }));
+      if (s.priority) head.appendChild(el("span", { class: "pill priority " + s.priority, text: s.priority }));
+      if (s.id) head.appendChild(el("span", { class: "pill", text: s.id }));
+
+      const chev = el("button", {
+        class: "chev",
+        text: "▾",
+        attrs: { type: "button", "aria-label": "Collapse this story" },
+        onClick: (ev) => {
+          ev.stopPropagation();
+          if (card.classList.contains("collapsed")) expandCard(card);
+          else collapseCard(card);
+        },
+      });
+      head.appendChild(chev);
+      card.appendChild(head);
+
+      const personas = el("div", { class: "meta-line" });
+      for (const pid of personaIds) {
+        const p = (state.itemIndex.personas && state.itemIndex.personas.get(slug(pid))) || null;
+        personas.appendChild(refPill("personas:" + pid, p ? p.item.name : pid, "persona"));
+      }
+      if (personas.firstChild) card.appendChild(personas);
+
+      const dl = el("dl", { class: "narrative" });
+      if (s.situation) {
+        dl.appendChild(el("dt", { class: "when-dt", text: "When" }));
+        dl.appendChild(el("dd", { class: "dim when-dd", text: s.situation }));
+      }
+      if (s.outcome) {
+        dl.appendChild(el("dt", { class: "then-dt", text: "Then" }));
+        dl.appendChild(el("dd", { class: "then", text: s.outcome }));
+      }
+      if (dl.firstChild) card.appendChild(dl);
+
+      // Compact meta line — only visible in collapsed state
+      const stepCount = Array.isArray(s.flow) ? s.flow.length : 0;
+      const featCount = (s.related_features || []).length;
+      const compact = el("div", { class: "compact-meta" });
+      if (stepCount) compact.appendChild(el("span", { text: stepCount + (stepCount === 1 ? " step" : " steps") }));
+      if (featCount) {
+        if (compact.firstChild) compact.appendChild(el("span", { class: "dot", text: "·" }));
+        compact.appendChild(el("span", { text: featCount + (featCount === 1 ? " feature" : " features") }));
+      }
+      if (compact.firstChild) card.appendChild(compact);
+
+      if (Array.isArray(s.flow) && s.flow.length) {
+        const ol = el("ol", { class: "flow" });
+        for (const step of s.flow) ol.appendChild(el("li", { text: step }));
+        card.appendChild(ol);
+      }
+
+      const footer = el("div", { class: "meta-line story-footer", attrs: { style: "margin-top: 10px;" } });
+      if (s.source) footer.appendChild(el("span", { class: "source", text: s.source }));
+      for (const r of (s.related_features || [])) {
+        if (typeof r === "string" && r.includes(":")) footer.appendChild(refPill(r, r.split(":")[1], "feat"));
+        else footer.appendChild(el("span", { class: "pill feat broken-stub", text: r, attrs: { title: "Not in features.yaml — feature-cataloger should add this" } }));
+      }
+      for (const t of (s.tags || [])) footer.appendChild(el("span", { class: "pill tag", text: t }));
+      if (footer.firstChild) card.appendChild(footer);
+      appendReverseRefs(card, "stories", id);
+      return card;
+    }
+
+    function expandCard(card) {
+      card.classList.remove("collapsed");
+      card.setAttribute("aria-expanded", "true");
+      const chev = card.querySelector(".chev");
+      if (chev) chev.setAttribute("aria-label", "Collapse this story");
+    }
+    function collapseCard(card) {
+      card.classList.add("collapsed");
+      card.setAttribute("aria-expanded", "false");
+      const chev = card.querySelector(".chev");
+      if (chev) chev.setAttribute("aria-label", "Expand this story");
+    }
+    function setAllStoriesCollapsed(collapsed) {
+      document.querySelectorAll("#content .card[data-personas]").forEach((c) => {
+        collapsed ? collapseCard(c) : expandCard(c);
+      });
+    }
+
+    function renderEpics(c) {
+      const data = state.catalogs.epics || {};
+      const meta = data.meta || {};
+      c.appendChild(el("h1", { text: meta.app + " — Epics" }));
+      c.appendChild(el("p", { class: "lead", text: meta.description || "" }));
+
+      // status filter chips
+      const statusCount = new Map();
+      for (const e of (data.epics || [])) if (e.status) statusCount.set(e.status, (statusCount.get(e.status) || 0) + 1);
+      const statusChips = [...statusCount].map(([id, n]) => ({ id, name: id, n }));
+      if (statusChips.length) c.appendChild(renderChips("status", statusChips, applyFilter));
+
+      const stack = el("div", { class: "stack" });
+      for (const e of (data.epics || [])) stack.appendChild(renderEpicCard(e));
+      c.appendChild(stack);
+    }
+    function renderEpicCard(e) {
+      const id = slug(e.id || "");
+      const card = el("article", {
+        class: "card",
+        attrs: {
+          "data-search": searchBlob(e), "data-id": id,
+          "data-status": e.status || "",
+          "data-lifecycle": e.lifecycle || "active",
+        },
+      });
+      const head = el("div", { class: "story-head" });
+      head.appendChild(el("span", { attrs: { style: "font-weight: 600; font-size: 14px; flex-grow: 1;" }, text: e.name || "" }));
+      if (e.status) head.appendChild(el("span", { class: "pill status " + e.status, text: e.status }));
+      if (e.id) head.appendChild(el("span", { class: "pill", text: e.id }));
+      card.appendChild(head);
+      if (e.summary) card.appendChild(el("p", { class: "desc", text: e.summary }));
+      if (e.outcome) {
+        const dl = el("dl", { class: "narrative" });
+        dl.appendChild(el("dt", { text: "Outcome" }));
+        dl.appendChild(el("dd", { text: e.outcome }));
+        card.appendChild(dl);
+      }
+      const refs = el("div", { class: "meta-line" });
+      for (const r of (e.sponsor_personas || [])) {
+        const ref = typeof r === "string" && r.includes(":") ? r : "personas:" + r;
+        const rr = resolveRef(ref);
+        refs.appendChild(refPill(ref, rr.found ? rr.entry.item.name : ref.split(":")[1], "persona"));
+      }
+      if (refs.firstChild) card.appendChild(refs);
+
+      const links = el("div", { class: "meta-line", attrs: { style: "margin-top: 8px;" } });
+      for (const r of (e.related_features || [])) links.appendChild(refPill(r, r.split(":")[1] || r, "feat"));
+      for (const r of (e.related_stories || [])) links.appendChild(refPill(r, r.split(":")[1] || r, "ref"));
+      if (links.firstChild) card.appendChild(links);
+
+      const meta = el("div", { class: "meta-line" });
+      if (e.source) meta.appendChild(el("span", { class: "source", text: e.source }));
+      for (const t of (e.tags || [])) meta.appendChild(el("span", { class: "pill tag", text: t }));
+      if (meta.firstChild) card.appendChild(meta);
+      appendReverseRefs(card, "epics", id);
+      return card;
+    }
+
+    function renderGlossary(c) {
+      const data = state.catalogs.glossary || {};
+      const meta = data.meta || {};
+      c.appendChild(el("h1", { text: meta.app + " — Glossary" }));
+      c.appendChild(el("p", { class: "lead", text: meta.description || "" }));
+      const grid = el("div", { class: "grid" });
+      for (const t of (data.terms || [])) grid.appendChild(renderTermCard(t));
+      c.appendChild(grid);
+    }
+    function renderTermCard(t) {
+      const id = slug(t.id || "");
+      const card = el("article", {
+        class: "card term",
+        attrs: {
+          "data-search": searchBlob(t), "data-id": id,
+          "data-lifecycle": t.lifecycle || "active",
+        },
+      });
+      const head = el("div", { attrs: { style: "display: flex; align-items: baseline; gap: 8px;" } });
+      head.appendChild(el("span", { class: "term-name", text: t.term || "" }));
+      head.appendChild(el("span", { class: "pill", text: t.id }));
+      card.appendChild(head);
+      if (Array.isArray(t.aliases) && t.aliases.length)
+        card.appendChild(el("span", { class: "term-aliases", text: "aka " + t.aliases.join(", ") }));
+      if (t.definition) card.appendChild(el("p", { class: "desc", attrs: { style: "margin-top: 6px;" }, text: t.definition }));
+      const refs = el("div", { class: "meta-line" });
+      for (const r of (t.related || [])) refs.appendChild(refPill(r, r.split(":")[1] || r, "ref"));
+      if (refs.firstChild) card.appendChild(refs);
+      appendReverseRefs(card, "glossary", id);
+      return card;
+    }
+
+    // ---------- filter chips ----------
+    function renderChips(group, items, onChange) {
+      const wrap = el("div", { class: "chips", attrs: { "data-chip-group": group } });
+      const all = el("button", {
+        class: "chip active",
+        attrs: { "data-chip-value": "" },
+        onClick: () => setChip(group, ""),
+      });
+      all.appendChild(document.createTextNode("All"));
+      all.appendChild(el("span", { class: "chip-n", text: String(items.reduce((n, x) => n + (x.n || 0), 0)) }));
+      wrap.appendChild(all);
+      for (const it of items) {
+        const c = el("button", {
+          class: "chip",
+          attrs: { "data-chip-value": it.id },
+          onClick: () => setChip(group, it.id),
+        });
+        c.appendChild(document.createTextNode(it.name));
+        if (it.n != null) c.appendChild(el("span", { class: "chip-n", text: String(it.n) }));
+        wrap.appendChild(c);
+      }
+      return wrap;
+    }
+    function setChip(group, value) {
+      const wrap = document.querySelector(`.chips[data-chip-group="${group}"]`);
+      if (!wrap) return;
+      wrap.querySelectorAll(".chip").forEach((c) => {
+        c.classList.toggle("active", c.getAttribute("data-chip-value") === value);
+      });
+      applyFilter();
+    }
+    function getActiveChip(group) {
+      const c = document.querySelector(`.chips[data-chip-group="${group}"] .chip.active`);
+      return c ? c.getAttribute("data-chip-value") : "";
+    }
+    function applyFilter() {
+      const cards = document.querySelectorAll(".card");
+      const persona = getActiveChip("persona");
+      const priority = getActiveChip("priority");
+      const status = getActiveChip("status");
+      const cat = getActiveChip("cat");
+      cards.forEach((node) => {
+        const pp = (node.getAttribute("data-personas") || "").split("|");
+        const pri = node.getAttribute("data-priority") || "";
+        const st = node.getAttribute("data-status") || "";
+        const cc = node.getAttribute("data-cat") || "";
+        let match = true;
+        if (persona && !pp.includes(persona)) match = false;
+        if (priority && pri !== priority) match = false;
+        if (status && st !== status) match = false;
+        if (cat && cc !== cat) match = false;
+        node.classList.toggle("hidden", !match);
+      });
+      document.querySelectorAll(".category").forEach((cat) => {
+        const v = cat.querySelectorAll(".card:not(.hidden)").length;
+        cat.style.display = v === 0 ? "none" : "";
+      });
+    }
+
+    // ---------- ref pills (with inline peek instead of tab jump) ----------
+    function refPill(refStr, label, klass) {
+      const r = resolveRef(refStr);
+      const lifecycle = r.found ? (r.entry.item.lifecycle || "active") : null;
+      let cls = "pill " + (klass || "ref") + (r.found ? "" : " broken");
+      if (lifecycle === "deprecated") cls += " target-deprecated";
+      if (lifecycle === "deleted")    cls += " target-deleted";
+      const titleParts = [refStr];
+      if (lifecycle === "deprecated") titleParts.push("target is deprecated");
+      if (lifecycle === "deleted")    titleParts.push("target is deleted — " + (r.entry.item.lifecycle_reason || "no reason given"));
+      if (!r.found) titleParts.push("not found");
+      else titleParts.push("click to peek");
+      const pill = el("span", {
+        class: cls,
+        text: label || refStr,
+        attrs: { title: titleParts.join(" — ") },
+      });
+      if (r.found) pill.addEventListener("click", (ev) => togglePeek(ev.currentTarget, refStr));
+      return pill;
+    }
+
+    function togglePeek(triggerEl, refStr) {
+      const card = triggerEl.closest(".card");
+      if (!card) return;
+      // remove any existing peek on this trigger
+      const existingForThis = card.querySelector(`:scope > .ref-peek[data-ref="${refStr}"]`);
+      if (existingForThis) {
+        existingForThis.remove();
+        triggerEl.classList.remove("expanded");
+        return;
+      }
+      // remove other peeks in the same card (one at a time)
+      card.querySelectorAll(":scope > .ref-peek").forEach((n) => n.remove());
+      card.querySelectorAll(".pill.expanded").forEach((p) => p.classList.remove("expanded"));
+      const r = resolveRef(refStr);
+      if (!r.found) return;
+      triggerEl.classList.add("expanded");
+
+      const peek = el("div", { class: "ref-peek", attrs: { "data-ref": refStr } });
+      const head = el("div", { class: "peek-head" });
+      head.appendChild(el("span", { class: "peek-kind", text: r.fileId }));
+      head.appendChild(el("span", { class: "peek-title", text: r.entry.item.name || r.entry.item.term || r.entry.item.title || r.id }));
+      const jump = el("button", {
+        class: "peek-jump",
+        text: "open in " + r.fileId + " →",
+        onClick: () => switchTab(r.fileId, slug(r.id)),
+      });
+      head.appendChild(jump);
+      peek.appendChild(head);
+
+      const item = r.entry.item;
+      const summary = item.purpose || item.definition || item.description || item.summary || item.outcome || "";
+      if (summary) peek.appendChild(el("div", { class: "peek-body", text: summary }));
+
+      // For stories, show the flow inline
+      if (r.fileId === "stories" && Array.isArray(item.flow) && item.flow.length) {
+        const ol = el("ol", { class: "flow", attrs: { style: "margin-top: 8px;" } });
+        for (const step of item.flow.slice(0, 5)) ol.appendChild(el("li", { text: step }));
+        if (item.flow.length > 5) ol.appendChild(el("li", { attrs: { style: "color: var(--fg-mute);" }, text: "… " + (item.flow.length - 5) + " more steps" }));
+        peek.appendChild(ol);
+      }
+      // For features, show flags + source
+      if (r.fileId === "features") {
+        if (item.source) {
+          const s = el("span", { class: "source", attrs: { style: "margin-top: 6px;" }, text: item.source });
+          peek.appendChild(s);
+        }
+      }
+      card.appendChild(peek);
+    }
+
+    // ---------- reverse refs ----------
+    function appendReverseRefs(card, fileId, itemId) {
+      const refs = state.reverseRefs[fileId]?.get(itemId) || [];
+      if (!refs.length) return;
+      // group by fileId
+      const byKind = new Map();
+      for (const r of refs) {
+        if (!byKind.has(r.fileId)) byKind.set(r.fileId, []);
+        byKind.get(r.fileId).push(r);
+      }
+      const block = el("div", { class: "reverse-refs" });
+      const label = el("div", { class: "rev-label", text: "Referenced by " + refs.length + " " + (refs.length === 1 ? "item" : "items") });
+      block.appendChild(label);
+      const row = el("div", { class: "rev-row" });
+      for (const [kind, items] of byKind) {
+        for (const r of items.slice(0, 8)) {
+          const pillRef = kind + ":" + r.itemId;
+          row.appendChild(refPill(pillRef, r.label, kind === "personas" ? "persona" : "ref"));
+        }
+        if (items.length > 8) {
+          row.appendChild(el("span", { class: "pill", attrs: { style: "color: var(--fg-mute);" }, text: "+" + (items.length - 8) + " more " + kind }));
+        }
+      }
+      block.appendChild(row);
+      card.appendChild(block);
+    }
+
+    // ---------- search blob ----------
+    function searchBlob(obj) {
+      const out = [];
+      const walk = (v) => {
+        if (v == null) return;
+        if (typeof v === "string" || typeof v === "number") out.push(String(v));
+        else if (Array.isArray(v)) v.forEach(walk);
+        else if (typeof v === "object") Object.values(v).forEach(walk);
+      };
+      walk(obj);
+      return out.join(" ").toLowerCase();
+    }
+
+    // ---------- command palette ----------
+    function openKbar() {
+      state.kbar.open = true;
+      $("#kbarVeil").classList.add("open");
+      $("#kbarInput").value = "";
+      state.kbar.query = "";
+      state.kbar.selected = 0;
+      kbarUpdate();
+      setTimeout(() => $("#kbarInput").focus(), 0);
+    }
+    function closeKbar() {
+      state.kbar.open = false;
+      $("#kbarVeil").classList.remove("open");
+    }
+    function kbarUpdate() {
+      const q = state.kbar.query.toLowerCase().trim();
+      const order = ["features", "stories", "personas", "epics", "glossary"];
+      const results = [];
+      for (const fileId of order) {
+        const idx = state.itemIndex[fileId];
+        if (!idx) continue;
+        for (const [id, { item }] of idx) {
+          const label = item.name || item.term || item.title || id;
+          const sub = item.purpose || item.definition || item.description || item.summary || "";
+          const blob = (label + " " + id + " " + sub).toLowerCase();
+          if (!q || blob.includes(q)) results.push({ fileId, id, label, sub });
+        }
+      }
+      results.sort((a, b) => {
+        if (!q) return 0;
+        const ra = a.label.toLowerCase().startsWith(q) ? 0 : a.label.toLowerCase().includes(q) ? 1 : 2;
+        const rb = b.label.toLowerCase().startsWith(q) ? 0 : b.label.toLowerCase().includes(q) ? 1 : 2;
+        return ra - rb;
+      });
+      state.kbar.results = results.slice(0, 80);
+      state.kbar.selected = 0;
+      renderKbarResults();
+    }
+    function renderKbarResults() {
+      const c = $("#kbarResults"); clear(c);
+      let lastKind = null;
+      state.kbar.results.forEach((r, i) => {
+        if (r.fileId !== lastKind) {
+          c.appendChild(el("div", { class: "kbar-group", text: titleFor(r.fileId) }));
+          lastKind = r.fileId;
+        }
+        const row = el("div", {
+          class: "kbar-item",
+          attrs: { "aria-selected": i === state.kbar.selected ? "true" : "false", "data-i": i },
+          onClick: () => kbarChoose(i),
+        });
+        row.appendChild(el("span", { class: "kbar-kind", text: r.fileId }));
+        row.appendChild(el("span", { class: "kbar-name", text: r.label }));
+        if (r.sub) row.appendChild(el("span", { class: "kbar-sub", text: r.sub.length > 70 ? r.sub.slice(0, 70) + "…" : r.sub }));
+        c.appendChild(row);
+      });
+      const sel = c.querySelector('[aria-selected="true"]');
+      if (sel) sel.scrollIntoView({ block: "nearest" });
+    }
+    function kbarMove(delta) {
+      const n = state.kbar.results.length;
+      if (!n) return;
+      state.kbar.selected = (state.kbar.selected + delta + n) % n;
+      document.querySelectorAll(".kbar-item").forEach((el, i) => {
+        el.setAttribute("aria-selected", i === state.kbar.selected ? "true" : "false");
+      });
+      const sel = document.querySelector('.kbar-item[aria-selected="true"]');
+      if (sel) sel.scrollIntoView({ block: "nearest" });
+    }
+    function kbarChoose(i) {
+      const r = state.kbar.results[i ?? state.kbar.selected];
+      if (!r) return;
+      closeKbar();
+      switchTab(r.fileId, r.id);
+    }
+
+    $("#kbarTrigger").addEventListener("click", openKbar);
+    $("#showDeleted").addEventListener("click", () => {
+      const on = document.body.classList.toggle("show-deleted");
+      $("#showDeleted").classList.toggle("active", on);
+      $("#showDeleted").textContent = on ? "Hide deleted" : "Show deleted";
+    });
+    $("#kbarInput").addEventListener("input", (e) => { state.kbar.query = e.target.value; kbarUpdate(); });
+    $("#kbarInput").addEventListener("keydown", (e) => {
+      if (e.key === "ArrowDown") { e.preventDefault(); kbarMove(1); }
+      else if (e.key === "ArrowUp") { e.preventDefault(); kbarMove(-1); }
+      else if (e.key === "Enter") { e.preventDefault(); kbarChoose(); }
+      else if (e.key === "Escape") { closeKbar(); }
+    });
+    $("#kbarVeil").addEventListener("click", (e) => { if (e.target === $("#kbarVeil")) closeKbar(); });
+
+    // global key handling
+    window.addEventListener("keydown", (e) => {
+      if ((e.metaKey || e.ctrlKey) && (e.key === "k" || e.key === "K")) {
+        e.preventDefault();
+        state.kbar.open ? closeKbar() : openKbar();
+      }
+      if (e.key === "Escape") {
+        if (state.kbar.open) closeKbar();
+        // also close any open inline peeks
+        document.querySelectorAll(".ref-peek").forEach((p) => p.remove());
+        document.querySelectorAll(".pill.expanded").forEach((p) => p.classList.remove("expanded"));
+      }
+    });
+
+    // hash listening
+    window.addEventListener("hashchange", () => {
+      const { tab, item } = parseHash();
+      if (!tab) return;
+      if (tab !== state.activeTab) switchTab(tab, item);
+      else if (item) scrollToItem(tab, item, true);
+    });
+
+    bootstrap();
+  </script>
+</body>
+</html>

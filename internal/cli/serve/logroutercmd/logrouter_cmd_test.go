@@ -1,6 +1,9 @@
 package logroutercmd
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -109,5 +112,61 @@ func TestLogRouterCmd_UseString(t *testing.T) {
 func TestLogRouterCmd_HasRunE(t *testing.T) {
 	if logRouterCmd.RunE == nil {
 		t.Error("log-router command should have RunE set, but it is nil")
+	}
+}
+
+func TestRunLogRouterRoutesStdinToAgentAndTaskLogs(t *testing.T) {
+	baseDir := t.TempDir()
+	lockPath := filepath.Join(t.TempDir(), ".agent.lock")
+	lockJSON := `{"pid":123,"command":"task","agent_name":"nova","task_id":"TASK-1","state":"active"}`
+	if err := os.WriteFile(lockPath, []byte(lockJSON), 0600); err != nil {
+		t.Fatalf("write lock: %v", err)
+	}
+
+	oldAgent, oldBase, oldLock := logRouterAgent, logRouterBaseDir, logRouterLockPath
+	oldMax, oldWorkspace := logRouterMaxLogSize, logRouterWorkspaceID
+	oldStdin := os.Stdin
+	t.Cleanup(func() {
+		logRouterAgent, logRouterBaseDir, logRouterLockPath = oldAgent, oldBase, oldLock
+		logRouterMaxLogSize, logRouterWorkspaceID = oldMax, oldWorkspace
+		os.Stdin = oldStdin
+	})
+
+	logRouterAgent = "nova"
+	logRouterBaseDir = baseDir
+	logRouterLockPath = lockPath
+	logRouterMaxLogSize = 0
+	logRouterWorkspaceID = "WS"
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	os.Stdin = r
+	if _, err := w.WriteString("line one\nline two\n"); err != nil {
+		t.Fatalf("write stdin pipe: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("close stdin writer: %v", err)
+	}
+
+	if err := runLogRouter(logRouterCmd, nil); err != nil {
+		t.Fatalf("runLogRouter: %v", err)
+	}
+	_ = r.Close()
+
+	agentData, err := os.ReadFile(filepath.Join(baseDir, "WS", "agents", "nova.log"))
+	if err != nil {
+		t.Fatalf("read agent log: %v", err)
+	}
+	if !strings.Contains(string(agentData), "line two") {
+		t.Fatalf("agent log = %q", string(agentData))
+	}
+	taskData, err := os.ReadFile(filepath.Join(baseDir, "WS", "tasks", "TASK-1", "implementation.log"))
+	if err != nil {
+		t.Fatalf("read task log: %v", err)
+	}
+	if !strings.Contains(string(taskData), "line one") {
+		t.Fatalf("task log = %q", string(taskData))
 	}
 }

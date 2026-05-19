@@ -2,15 +2,19 @@ package opsimpl
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
+	"github.com/tysonthomas9/loomcli/internal/cli/git"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -227,6 +231,131 @@ func TestResolveAgentWorktree_StoreBackedFleetDB(t *testing.T) {
 	}
 	if got.RepoName != "api" || got.DefaultBranch != "main" || got.Branch != "feature/nova" || !got.IsWorkspace {
 		t.Fatalf("unexpected worktree: %+v", got)
+	}
+}
+
+func TestGitOpsPureHelpers(t *testing.T) {
+	st := memstore.New()
+	if got := NewGitOps().WithStore(st); got.store != st {
+		t.Fatal("WithStore did not install store")
+	}
+
+	repos := []ops.WorkspaceRepo{
+		{Name: "api", Groups: []string{"backend"}, DefaultBranch: "trunk", Remote: "upstream"},
+		{Name: "ui", Groups: []string{"frontend"}},
+	}
+	repo, err := selectAgentRepo(repos, ops.WorkspaceAgentInfo{Name: "nova"})
+	if err != nil || repo.Name != "api" {
+		t.Fatalf("default repo = %+v err=%v", repo, err)
+	}
+	repo, err = selectAgentRepo(repos, ops.WorkspaceAgentInfo{Name: "nova", Repos: []string{"ui"}})
+	if err != nil || repo.Name != "ui" {
+		t.Fatalf("explicit repo = %+v err=%v", repo, err)
+	}
+	repo, err = selectAgentRepo(repos, ops.WorkspaceAgentInfo{Name: "nova", RepoGroups: []string{"backend"}})
+	if err != nil || repo.Name != "api" {
+		t.Fatalf("group repo = %+v err=%v", repo, err)
+	}
+	if _, err := selectAgentRepo(repos, ops.WorkspaceAgentInfo{Name: "nova", Repos: []string{"missing"}}); err == nil {
+		t.Fatal("missing repo affinity should fail")
+	}
+	if _, err := selectAgentRepo(nil, ops.WorkspaceAgentInfo{Name: "nova"}); err == nil {
+		t.Fatal("empty workspace repos should fail")
+	}
+
+	wt := toAgentWorktree(cli.WorktreeInfo{
+		Name: "nova", Path: "/tmp/nova", Branch: "feature",
+		Repo: &config.RepoConfig{Name: "api", DefaultBranch: "trunk", Remote: "upstream"},
+	})
+	if wt.DefaultBranch != "trunk" || wt.Remote != "upstream" || wt.RepoName != "api" || !wt.IsWorkspace {
+		t.Fatalf("agent worktree = %+v", wt)
+	}
+	plain := toAgentWorktree(cli.WorktreeInfo{Name: "plain", Path: "/tmp/plain", Branch: "main"})
+	if plain.DefaultBranch != "main" || plain.IsWorkspace {
+		t.Fatalf("plain worktree = %+v", plain)
+	}
+
+	var target *git.LockedError
+	if !isLockedError(&git.LockedError{AgentName: "nova", Duration: time.Second}, &target) || target.AgentName != "nova" {
+		t.Fatalf("locked error target = %+v", target)
+	}
+	if isLockedError(errors.New("other"), &target) {
+		t.Fatal("non locked error matched")
+	}
+}
+
+func TestGitOpsStatusAndDiffWrappersWithRealRepo(t *testing.T) {
+	repo := t.TempDir()
+	if err := runGit(t, repo, "init", "-b", "main"); err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+	if err := runGit(t, repo, "config", "user.email", "test@example.com"); err != nil {
+		t.Fatalf("git config email: %v", err)
+	}
+	if err := runGit(t, repo, "config", "user.name", "Test User"); err != nil {
+		t.Fatalf("git config name: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "a.txt"), []byte("one\n"), 0600); err != nil {
+		t.Fatalf("write a: %v", err)
+	}
+	if err := runGit(t, repo, "add", "a.txt"); err != nil {
+		t.Fatalf("git add: %v", err)
+	}
+	if err := runGit(t, repo, "commit", "-m", "initial"); err != nil {
+		t.Fatalf("git commit: %v", err)
+	}
+	beforeCmd := exec.Command("git", "rev-parse", "HEAD") //nolint:norawexec // test reads HEAD from an isolated git repo.
+	beforeCmd.Dir = repo
+	beforeOut, err := beforeCmd.Output()
+	if err != nil {
+		t.Fatalf("rev-parse: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "a.txt"), []byte("one\ntwo\n"), 0600); err != nil {
+		t.Fatalf("update a: %v", err)
+	}
+	if err := runGit(t, repo, "add", "a.txt"); err != nil {
+		t.Fatalf("git add update: %v", err)
+	}
+	if err := runGit(t, repo, "commit", "-m", "update"); err != nil {
+		t.Fatalf("git commit update: %v", err)
+	}
+
+	g := NewGitOps()
+	branch, err := g.GetCurrentBranch(repo)
+	if err != nil || branch != "main" {
+		t.Fatalf("GetCurrentBranch = %q err=%v", branch, err)
+	}
+	stat := g.DiffStat(repo, string(beforeOut[:len(beforeOut)-1]))
+	if stat.FilesChanged != 1 || stat.LinesAdded != 1 {
+		t.Fatalf("DiffStat = %+v", stat)
+	}
+	status, err := g.Status(repo, "main")
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if status.Branch != "main" || !status.IsClean || status.HasConflicts {
+		t.Fatalf("Status = %+v", status)
+	}
+	commits, err := g.DiffCommits(context.Background(), repo, string(beforeOut[:len(beforeOut)-1]), 10)
+	if err != nil {
+		t.Fatalf("DiffCommits: %v", err)
+	}
+	if len(commits) != 1 {
+		t.Fatalf("commits = %+v", commits)
+	}
+	files, err := g.DiffFiles(context.Background(), repo, string(beforeOut[:len(beforeOut)-1]), "HEAD")
+	if err != nil {
+		t.Fatalf("DiffFiles: %v", err)
+	}
+	if len(files) != 1 || files[0].Path != "a.txt" {
+		t.Fatalf("files = %+v", files)
+	}
+	patch, err := g.DiffFilePatch(context.Background(), repo, string(beforeOut[:len(beforeOut)-1]), "HEAD", "a.txt")
+	if err != nil {
+		t.Fatalf("DiffFilePatch: %v", err)
+	}
+	if patch == nil || patch.Patch == "" {
+		t.Fatalf("patch = %+v", patch)
 	}
 }
 

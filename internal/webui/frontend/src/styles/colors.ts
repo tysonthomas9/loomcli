@@ -14,11 +14,11 @@
  */
 export const StateColors = {
   /** Color for blocked issues (waiting on dependencies) */
-  blocked: "#ef4444", // red-500
+  blocked: "#f87171", // red-400
   /** Color for ready issues (no blockers, can be worked on) */
-  ready: "#22c55e", // green-500
+  ready: "#34d399", // emerald-400
   /** Color for closed/completed issues */
-  closed: "#10b981", // emerald-500 (same as status-closed)
+  closed: "#34d399", // emerald-400 (same as status-closed)
 } as const;
 
 /**
@@ -26,10 +26,10 @@ export const StateColors = {
  * Used for status badges and indicators.
  */
 export const StatusColors = {
-  open: "#3b82f6", // blue-500
-  in_progress: "#f59e0b", // amber-500
-  review: "#8b5cf6", // purple-500
-  closed: "#10b981", // emerald-500
+  open: "#60a5fa", // blue-400
+  in_progress: "#facc15", // yellow-400 (lemon — amber is reserved for brand)
+  review: "#a78bfa", // violet-400
+  closed: "#34d399", // emerald-400
 } as const;
 
 /**
@@ -37,10 +37,10 @@ export const StatusColors = {
  * Used for priority badges and indicators.
  */
 export const PriorityColors = {
-  0: "#dc2626", // red-600, critical
-  1: "#ea580c", // orange-600, high
-  2: "#ca8a04", // yellow-600, medium
-  3: "#2563eb", // blue-600, normal
+  0: "#f87171", // red-400, critical
+  1: "#fb923c", // orange-400, high
+  2: "#fbbf24", // amber-400, medium
+  3: "#60a5fa", // blue-400, normal
   4: "#6b7280", // gray-500, low/backlog
 } as const;
 
@@ -48,10 +48,10 @@ export const PriorityColors = {
  * Semantic colors for general UI elements.
  */
 export const SemanticColors = {
-  primary: "#3b82f6", // blue-500
-  success: "#22c55e", // green-500
-  warning: "#f59e0b", // amber-500
-  danger: "#ef4444", // red-500
+  primary: "#e8a020", // Cortex amber — brand accent
+  success: "#34d399", // emerald-400
+  warning: "#facc15", // lemon (amber is reserved for brand)
+  danger: "#f87171", // red-400
   info: "#06b6d4", // cyan-500
 } as const;
 
@@ -59,7 +59,7 @@ export const SemanticColors = {
  * Issue type colors.
  */
 export const TypeColors = {
-  epic: "#8b5cf6", // purple-500
+  epic: "#a78bfa", // violet-400
 } as const;
 
 /**

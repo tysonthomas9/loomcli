@@ -1,0 +1,63 @@
+meta:
+  app: loom
+  tagline: User archetypes — who uses loom and what they're trying to accomplish.
+  description: >
+    Personas are the abstract users referenced by `stories.yaml`. Each persona
+    has motivations grounded in real evidence from product docs. Stories,
+    epics, and feature decisions should trace back to one of these.
+  generated: 2026-05-14
+  generated_by: persona-cataloger
+  refs_in:  [stories, epics]      # files that reference into this one
+  refs_out: [glossary]            # files this one references out to
+
+personas:
+  - id: solo-dev
+    name: Solo Developer
+    description: Builds with AI agents on personal or small-team projects; runs everything locally.
+    motivations:
+      - Wants AI to handle routine coding without constant supervision.
+      - Needs quick visual feedback on agent progress without leaving the UI.
+      - Spins up workers for specific bugs without long-running process overhead.
+    evidence: docs/product/agent-execution-prd.md
+    tags: [local, single-user]
+
+  - id: team-lead
+    name: Team Lead
+    description: Oversees multiple agents and coordinates parallel work across a team.
+    motivations:
+      - Needs to see which agents are active and what they're working on.
+      - Must understand why work is blocked and how to unblock it.
+      - Wants to review and approve plans before implementation starts.
+      - Orchestrates multiple workers running in parallel toward an epic.
+    evidence: docs/product/lead-agent-epic-runner-spec.md
+    tags: [coordination, review, epics]
+
+  - id: new-user
+    name: New User
+    description: Encounters loom for the first time and needs a guided path from blank slate to first agent.
+    motivations:
+      - Wants a single guided path — not many empty screens.
+      - Needs clear status on which setup steps are done.
+      - Wants to understand which AI backend to pick.
+    evidence: docs/product/web-onboarding-spec.md
+    tags: [onboarding, web-ui]
+
+  - id: dogfood-operator
+    name: Dogfood Operator
+    description: Validates end-to-end that the agent system works correctly; internal or early-stage user.
+    motivations:
+      - Must verify the full plan → design → implement → push cycle.
+      - Needs evidence (sessions, logs, transcripts, diffs) captured correctly.
+      - Wants reproducible scenarios and clear failure modes.
+    evidence: docs/product/dogfood-agent-execution-test-plan.md
+    tags: [validation, qa, internal]
+
+  - id: platform-engineer
+    name: Platform Engineer
+    description: Operates loom at scale — diagnoses failures, monitors fleets, manages distributed control plane.
+    motivations:
+      - Diagnoses local and remote runner failures from logs and artifacts.
+      - Understands distributed control plane behavior across nodes.
+      - Wants reproducible failure modes to verify recovery paths.
+    evidence: docs/product/container-runner-mvp-spec.md
+    tags: [fleet, distributed, ops]

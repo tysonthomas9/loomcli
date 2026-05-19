@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
@@ -347,6 +349,112 @@ func TestPatchWorkspaceBackend_StoreBackedWritesDaemonProfile(t *testing.T) {
 	}
 	if profile.AgentBackend != "codex" {
 		t.Fatalf("AgentBackend = %q, want codex", profile.AgentBackend)
+	}
+}
+
+func TestReadGitHeadBranchAndWorkspaceRenameBranches(t *testing.T) {
+	repoDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(repoDir, ".git"), 0755); err != nil {
+		t.Fatalf("mkdir .git: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, ".git", "HEAD"), []byte("ref: refs/heads/feature\n"), 0600); err != nil {
+		t.Fatalf("write HEAD: %v", err)
+	}
+	if got := readGitHeadBranch(repoDir); got != "feature" {
+		t.Fatalf("readGitHeadBranch = %q, want feature", got)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, ".git", "HEAD"), []byte("abc123\n"), 0600); err != nil {
+		t.Fatalf("write detached HEAD: %v", err)
+	}
+	if got := readGitHeadBranch(repoDir); got != "" {
+		t.Fatalf("detached branch = %q, want empty", got)
+	}
+
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "ALPHA", Name: "Alpha_Project"}); err != nil {
+		t.Fatalf("create alpha: %v", err)
+	}
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "BETA", Name: "Beta_Project"}); err != nil {
+		t.Fatalf("create beta: %v", err)
+	}
+	svc := NewWorkspaceService(WorkspaceServiceConfig{Store: st})
+
+	same, err := svc.RenameWorkspace(ctx, "ALPHA", "Alpha_Project")
+	if err != nil {
+		t.Fatalf("RenameWorkspace same name: %v", err)
+	}
+	if same.ID != "ALPHA" || same.Name != "Alpha_Project" {
+		t.Fatalf("same-name data = %+v", same)
+	}
+	if _, err := svc.RenameWorkspace(ctx, "ALPHA", "Beta_Project"); err == nil {
+		t.Fatal("RenameWorkspace conflict succeeded")
+	}
+	renamed, err := svc.RenameWorkspace(ctx, "Alpha_Project", "Gamma_Project")
+	if err != nil {
+		t.Fatalf("RenameWorkspace by name: %v", err)
+	}
+	if renamed.ID != "ALPHA" || renamed.Name != "Gamma_Project" {
+		t.Fatalf("renamed data = %+v", renamed)
+	}
+	if _, err := svc.RenameWorkspace(ctx, "", "Delta"); err == nil {
+		t.Fatal("RenameWorkspace empty ID succeeded")
+	}
+	if _, err := svc.ReorderWorkspaces(ctx, []string{"ALPHA", "BETA"}); err == nil {
+		t.Fatal("ReorderWorkspaces succeeded despite being unimplemented")
+	}
+}
+
+func TestWorkspaceAsyncJobAndStoreStateBranches(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS", Name: "Workspace"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	svc := NewWorkspaceService(WorkspaceServiceConfig{Store: st})
+	if _, err := svc.StartAsyncCreate(ctx, WorkspaceCreateRequest{Name: "bad", Type: "zip"}); err == nil {
+		t.Fatal("StartAsyncCreate invalid request succeeded")
+	}
+	if _, err := svc.StartAsyncCreate(ctx, WorkspaceCreateRequest{Name: "valid", Type: "empty"}); err == nil {
+		t.Fatal("StartAsyncCreate without job store succeeded")
+	}
+
+	states := []struct {
+		state    domain.WorkspaceState
+		progress string
+		status   WorkspaceJobStatus
+	}{
+		{domain.WorkspaceStateCreating, "creating workspace...", JobStatusRunning},
+		{domain.WorkspaceStateInitializing, "initializing workspace...", JobStatusRunning},
+		{"", "", JobStatusDone},
+	}
+	for _, tc := range states {
+		if _, err := st.Workspaces().Update(ctx, "WS", store.WorkspaceUpdate{State: &tc.state}); err != nil {
+			t.Fatalf("update state %q: %v", tc.state, err)
+		}
+		job, err := svc.GetWorkspaceJob(ctx, "WS")
+		if err != nil {
+			t.Fatalf("GetWorkspaceJob state %q: %v", tc.state, err)
+		}
+		if job.Status != tc.status || job.Progress != tc.progress {
+			t.Fatalf("state %q job = %+v", tc.state, job)
+		}
+	}
+
+	failed := domain.WorkspaceStateError
+	emptyMsg := ""
+	if _, err := st.Workspaces().Update(ctx, "WS", store.WorkspaceUpdate{State: &failed, ErrorMessage: &emptyMsg}); err != nil {
+		t.Fatalf("update failed state: %v", err)
+	}
+	job, err := svc.GetWorkspaceJob(ctx, "WS")
+	if err != nil {
+		t.Fatalf("GetWorkspaceJob failed state: %v", err)
+	}
+	if job.Status != JobStatusFailed || job.Error != "workspace creation failed" {
+		t.Fatalf("failed job = %+v", job)
+	}
+	if _, err := svc.GetWorkspaceJob(ctx, "MISSING"); err == nil {
+		t.Fatal("GetWorkspaceJob missing succeeded")
 	}
 }
 

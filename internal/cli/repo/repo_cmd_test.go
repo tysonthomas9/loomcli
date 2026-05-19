@@ -2,6 +2,7 @@ package repo
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -49,6 +50,71 @@ func TestEnsureRepoLocalCheckoutNoopsWithoutLocalWorkspacePath(t *testing.T) {
 	}
 	if path != "" || cloned {
 		t.Fatalf("path=%q cloned=%t, want no-op", path, cloned)
+	}
+}
+
+func TestEnsureRepoLocalCheckoutNoopsForNonCloneURL(t *testing.T) {
+	path, cloned, err := ensureRepoLocalCheckout(context.Background(), "TEST", "hello-world", "/local/path")
+	if err != nil {
+		t.Fatalf("ensureRepoLocalCheckout returned error: %v", err)
+	}
+	if path != "" || cloned {
+		t.Fatalf("path=%q cloned=%t, want no-op", path, cloned)
+	}
+}
+
+func TestEnsureRepoLocalCheckoutRejectsInvalidCloneURL(t *testing.T) {
+	path, cloned, err := ensureRepoLocalCheckout(context.Background(), "TEST", "hello-world", "https://")
+	if err == nil {
+		t.Fatalf("ensureRepoLocalCheckout path=%q cloned=%t, want invalid clone URL error", path, cloned)
+	}
+}
+
+func TestEnsureRepoLocalCheckoutUsesCachedGitCheckout(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	cachedPath := t.TempDir()
+	if err := os.Mkdir(filepath.Join(cachedPath, ".git"), 0o755); err != nil {
+		t.Fatalf("mkdir .git: %v", err)
+	}
+	if err := bootstrap.MutateWorkspaceLocalState("TEST", func(local *bootstrap.WorkspaceLocalState) error {
+		local.Path = t.TempDir()
+		local.Repos = map[string]string{
+			"hello-world": cachedPath,
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("MutateWorkspaceLocalState returned error: %v", err)
+	}
+
+	path, cloned, err := ensureRepoLocalCheckout(context.Background(), "TEST", "hello-world", "https://github.com/octocat/Hello-World")
+	if err != nil {
+		t.Fatalf("ensureRepoLocalCheckout returned error: %v", err)
+	}
+	if path != cachedPath || cloned {
+		t.Fatalf("path=%q cloned=%t, want cached path %q without clone", path, cloned, cachedPath)
+	}
+}
+
+func TestEnsureRepoLocalCheckoutRejectsExistingNonGitTarget(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	root := t.TempDir()
+	target, err := localworkspace.RepoCheckoutPath(root, "hello-world")
+	if err != nil {
+		t.Fatalf("RepoCheckoutPath: %v", err)
+	}
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatalf("mkdir target: %v", err)
+	}
+	if err := bootstrap.MutateWorkspaceLocalState("TEST", func(local *bootstrap.WorkspaceLocalState) error {
+		local.Path = root
+		return nil
+	}); err != nil {
+		t.Fatalf("MutateWorkspaceLocalState returned error: %v", err)
+	}
+
+	path, cloned, err := ensureRepoLocalCheckout(context.Background(), "TEST", "hello-world", "https://github.com/octocat/Hello-World")
+	if err == nil || !strings.Contains(err.Error(), "already exists and is not a git repo") {
+		t.Fatalf("ensureRepoLocalCheckout path=%q cloned=%t err=%v, want existing non-git target error", path, cloned, err)
 	}
 }
 

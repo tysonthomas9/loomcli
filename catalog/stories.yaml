@@ -1,0 +1,1020 @@
+meta:
+  app: loom
+  tagline: User stories — what people want to do with loom and how the journey unfolds.
+  description: >
+    Persona-driven user stories and journeys. Each story names its persona
+    (referenced as `personas:<id>`), the trigger, the desired outcome, the
+    concrete steps, and the loom features it touches (referenced as
+    `features:<feature-id>`). Companion files: `personas.yaml`, `features.yaml`,
+    `epics.yaml`, `glossary.yaml`.
+  repository: https://github.com/tysonthomas9/loomcli
+  license: MIT
+  generated: 2026-05-14
+  generated_by: user-story-cataloger
+  refs_in:  [epics]
+  refs_out: [personas, features, glossary]
+
+categories:
+  - id: onboarding
+    name: Onboarding & First Run
+    summary: New-user journeys from install to first successful agent run.
+    stories:
+      - id: install-loom
+        epic: epics:local-first
+        title: Install loom on my machine
+        persona: [new-user, solo-dev]
+        situation: I want to try loom on macOS or Linux.
+        outcome: The `loom` binary is on my PATH and `loom --version` works.
+        flow:
+          - Run the curl one-liner from the README.
+          - Installer detects OS/arch and fetches the latest GitHub release.
+          - Binary is verified by SHA256 checksum.
+          - Binary lands in `~/.local/bin` (macOS) or `/usr/local/bin` (Linux).
+          - Add `~/.local/bin` to PATH if the installer prompts.
+        priority: must
+        related_features: [install-script, npm-package]
+        source: scripts/install.sh
+        tags: [install, cli]
+      - id: web-onboarding-flow
+        epic: epics:web-onboarding
+        title: Complete first-run onboarding in the web UI
+        persona: [new-user]
+        situation: I just ran `loom serve` and opened the UI for the first time.
+        outcome: I have a workspace, an attached repo, a configured backend, an agent, and a first issue.
+        flow:
+          - Step 1 — Create workspace by giving it a name and a repo path or clone URL.
+          - Step 2 — Verify repo (path, git, default branch, remote).
+          - Step 3 — Configure AI backend (install CLI, login/auth).
+          - Step 4 — Create an agent and assign a role.
+          - Step 5 — Create the first issue.
+          - Step 6 — Start the agent and watch its session in real-time.
+        priority: must
+        related_features: [features:onboarding-flow, features:onboarding-api, features:loom-serve, features:loom-workspace, features:loom-agentdef]
+        source: internal/webui/frontend/src/components/OnboardingFlow
+        tags: [onboarding, web-ui]
+      - id: pick-a-backend
+        epic: epics:multi-backend
+        title: Pick and configure an AI backend
+        persona: [new-user, solo-dev]
+        situation: I'm at the backend-setup step and the wizard says "Not installed".
+        outcome: Backend status flips to "Ready" and the agent can call the model.
+        flow:
+          - Open Settings → Backend setup or the onboarding backend step.
+          - See per-backend status — installed / authenticated / ready.
+          - Click "Install" or "Login" — a terminal opens with the command pre-filled.
+          - Complete the install / OAuth flow in the embedded terminal.
+          - Hit "Refresh" — status flips to "Ready".
+        priority: must
+        related_features: [features:backend-config-api, features:claude, features:codex, features:opencode, features:settings]
+        source: internal/webui/frontend/src/components/AIBackendSetupList
+        tags: [onboarding, backend, settings]
+      - id: handle-repo-without-remote
+        epic: epics:web-onboarding
+        title: Work with a local repo that has no git remote
+        persona: [new-user, solo-dev]
+        situation: I attached a local repo but it has no `origin` configured.
+        outcome: I understand local agent runs still work and I know that push/PR will fail until I add a remote.
+        flow:
+          - Onboarding flags "No git remote" on the repo verification step.
+          - Wizard explains: local runs OK, push/PR not available.
+          - Choose to add a remote now or skip for later.
+          - Run a planner — it works.
+          - Run a coder — it works locally; `loom push` errors with a clear hint.
+          - Add the remote when ready and re-run push.
+        priority: should
+        related_features: [features:loom-repo, features:loom-push, features:loom-doctor]
+        source: docs/product/web-onboarding-spec.md
+        tags: [onboarding, git, edge-case]
+      - id: understand-roles
+        epic: epics:web-onboarding
+        title: Understand the difference between planner, coder, and lead
+        persona: [new-user]
+        situation: I'm about to create an agent and unsure which role to pick.
+        outcome: I pick a role that matches the work — planner for design, coder for implementation, lead for orchestration.
+        flow:
+          - Open the Create Agent modal.
+          - See each role with a one-line description and its default backend / prompt.
+          - Pick "planner" for design tasks or "task" for implementation.
+          - Confirm — agent appears in the rail.
+        priority: should
+        related_features: [features:loom-role, features:loom-agentdef, features:create-modals]
+        source: internal/webui/frontend/src/components/CreateAgentModal
+        tags: [onboarding, roles, ui]
+      - id: install-backend-cli-detail
+        title: Install a backend CLI from the embedded terminal
+        persona: [new-user]
+        situation: The backend setup card shows "Not installed" for Claude Code (or another backend).
+        outcome: The CLI is installed and `which claude` succeeds; the backend card flips to "Installed".
+        flow:
+          - Click "Install" on the backend card — an embedded terminal opens with the install command pre-filled.
+          - Press Enter; npm / Homebrew / curl runs in the terminal.
+          - Wait for the install to complete and watch the success line.
+          - Click "Refresh" — the backend card recomputes status from `which` + version probe.
+        priority: must
+        related_features: [features:backend-config-api, features:per-agent-embedded-terminals, features:backend-capabilities, features:claude]
+        source: internal/webui/frontend/src/components/BackendSetupPanel
+        tags: [onboarding, backend, terminal]
+      - id: recover-aborted-onboarding
+        title: Resume onboarding after I closed the tab halfway through
+        persona: [new-user]
+        situation: I made it to step 3 (backend) and closed the browser; I come back tomorrow.
+        outcome: The wizard reopens at the next unfinished step rather than starting over.
+        flow:
+          - Reload `http://localhost:8080` — the wizard reads `/api/onboarding/status`.
+          - Steps already completed (workspace created, repo attached) are checked off.
+          - The wizard lands on the first unfinished step (backend setup).
+          - Finish the remaining steps without re-entering prior data.
+        priority: should
+        related_features: [features:onboarding-flow, features:onboarding-api, features:workspace-api]
+        source: internal/webui/frontend/src/components/OnboardingFlow
+        tags: [onboarding, resilience, ui]
+      - id: choose-local-vs-cloud-mode
+        title: Choose between local-only mode and fleet-coordinated mode
+        persona: [new-user]
+        situation: The wizard asks how I want to run loom — just my laptop, or coordinated with teammates.
+        outcome: I understand the trade-off and pick the mode that fits my use case.
+        flow:
+          - Read the inline explainer: local = single-machine, fleet = multi-node with shared task queue.
+          - Pick "Local" to skip Redis and JWT setup.
+          - Or pick "Fleet" and enter the Redis URL + auth issuer.
+          - Wizard validates connectivity before moving on.
+        priority: should
+        related_features: [features:loom-serve, features:external-redis-support, features:fleet-db-http-backend, features:auth-proxy]
+        source: docs/product/local-mode-product-spec.md
+        tags: [onboarding, mode, fleet]
+      - id: attach-repo-to-existing-workspace
+        title: Attach an additional repo to an existing workspace
+        persona: [new-user, solo-dev]
+        situation: I have a workspace with one repo and now want to add a second related repo.
+        outcome: The second repo is registered and visible alongside the first in the Workspace overview.
+        flow:
+          - Open the workspace and click "Add repo".
+          - Provide path or clone URL plus optional groups / default branch.
+          - Wizard runs the repo verification checks (path, git, remote, default branch).
+          - On success the new repo appears in the tree navigator and is selectable when creating agents.
+        priority: should
+        related_features: [features:loom-repo, features:workspace-repos-lifecycle-api, features:workspace-tree-navigator, features:workspace-overview]
+        source: internal/webui/frontend/src/components/WorkspaceRepoWizard
+        tags: [onboarding, repos, workspace]
+      - id: verify-repo-checks
+        title: Confirm a repo passes the onboarding health checks
+        persona: [new-user]
+        situation: I just added a repo and want to know whether loom can drive it.
+        outcome: Every check (path exists, is git, has default branch, has remote, branch is clean) shows green or actionable.
+        flow:
+          - Repo card shows each check with status icon and tooltip.
+          - Failing checks expose a "fix" button (e.g., "Add origin remote").
+          - I re-run the checks; status updates without leaving the page.
+        priority: should
+        related_features: [features:onboarding-api, features:loom-doctor, features:loom-repo]
+        source: internal/webui/frontend/src/components/RepoChecksPanel
+        tags: [onboarding, validation, repo]
+      - id: skip-onboarding-power-user
+        title: Skip the wizard when I already know what I'm doing
+        persona: [new-user, solo-dev]
+        situation: I have a workspace already configured via the CLI and just want the UI.
+        outcome: The wizard recognizes a complete setup and drops me directly on the Kanban board.
+        flow:
+          - Run `loom workspace add` and `loom repo add` from the CLI.
+          - Start `loom serve` and open the UI.
+          - Server detects a complete workspace + repo + backend and bypasses the wizard.
+          - Wizard remains accessible from Settings → "Re-run onboarding" if needed.
+        priority: could
+        related_features: [features:onboarding-flow, features:onboarding-api, features:loom-workspace, features:settings]
+        source: internal/webui/frontend/src/components/OnboardingFlow
+        tags: [onboarding, power-user, cli-first]
+
+  - id: daily-dev
+    name: Daily Development (Solo Dev)
+    summary: Day-to-day work — plan, implement, monitor, ship.
+    stories:
+      - id: run-first-agent
+        epic: epics:real-time-ui
+        title: Run my first agent end-to-end
+        persona: [solo-dev]
+        situation: I have an issue I want an agent to design and implement.
+        outcome: The agent creates a design, I approve it, the agent implements and pushes.
+        flow:
+          - Create issue on the Kanban board.
+          - Click "Start work" — choose planner.
+          - Watch the live transcript in the embedded terminal.
+          - Approve the design in the Issue detail panel.
+          - Start a coder agent on the same issue.
+          - Watch diff and test output stream in Sessions tab.
+          - Push branch via `loom push` (AI conflict resolution if needed).
+        priority: must
+        related_features: [features:loom-plan, features:loom-task, features:kanban-board, features:issue-detail-page, features:per-agent-embedded-terminals, features:session-history, features:loom-push]
+        source: docs/product/agent-execution-prd.md
+        tags: [happy-path, agents, planning, implementation]
+      - id: plan-a-task
+        title: Have an agent design a task before I implement it
+        persona: [solo-dev]
+        situation: I want an AI to scope a feature before I or another agent writes code.
+        outcome: The issue has a written design document marked for review.
+        flow:
+          - Mark an issue as "needs planning" (no design yet).
+          - Run `loom plan <agent>` or click "Plan" in the UI.
+          - Agent claims, writes design, updates the issue's design field.
+          - Design appears in the Issue detail panel as rendered markdown.
+        priority: must
+        related_features: [features:loom-plan,  "Auto mode", features:issue-detail-page, features:real-time-sse-mutations]
+        source: internal/cli/agent/plan.go
+        tags: [planning, agents]
+      - id: implement-approved-task
+        title: Have an agent implement an approved design
+        persona: [solo-dev]
+        situation: The design is approved and the issue is ready for code.
+        outcome: Code is committed, tests pass, the issue closes.
+        flow:
+          - Click "Start work" on an approved issue (status `has_design`).
+          - Coder agent claims it and writes code in the worktree.
+          - Live diff appears in the Sessions / Diff tab.
+          - Tests run and gate output is shown.
+          - Push succeeds; issue moves to closed.
+        priority: must
+        related_features: [features:loom-task,  "Auto mode", features:agent-work-panel, features:agent-diff-api, features:loom-push]
+        source: internal/cli/agent/task.go
+        tags: [implementation, agents]
+      - id: watch-live-activity
+        epic: epics:real-time-ui
+        title: Watch what every agent is doing right now
+        persona: [solo-dev, team-lead]
+        situation: I want a single pane of glass on parallel agent work.
+        outcome: I see every agent's status, current task, and progress without page reloads.
+        flow:
+          - Open Monitor dashboard.
+          - Project Health panel shows open / in-progress / blocked / done counts.
+          - Agent Activity grid shows each agent with state and current task.
+          - Click an agent card → embedded terminal opens with live stream.
+        priority: must
+        related_features: [features:monitor-dashboard, features:real-time-sse-mutations, features:per-agent-embedded-terminals, features:agent-rail]
+        source: internal/webui/frontend/src/views/MonitorPage.tsx
+        tags: [monitoring, real-time, dashboard]
+      - id: keyboard-driven-search
+        title: Find an issue with the keyboard
+        persona: [solo-dev, team-lead]
+        situation: I know an issue exists but I don't want to scroll.
+        outcome: I jump straight to the issue's detail page.
+        flow:
+          - Press Cmd/Ctrl-K.
+          - Type a fragment of the title or ID.
+          - Press Enter — issue detail opens.
+          - Use Tab / arrow keys to focus assignee / status.
+        priority: should
+        related_features: [features:full-text-issue-search, features:keyboard-cheatsheet]
+        source: internal/webui/frontend/src/components/search
+        tags: [power-user, keyboard]
+      - id: spawn-one-shot-worker
+        epic: epics:lead-driven-orchestration
+        title: Spin up a one-shot worker for a single bug
+        persona: [solo-dev]
+        situation: A critical bug needs a focused worker that exits when done.
+        outcome: A worker fixes the bug, pushes, and cleans itself up.
+        flow:
+          - Open "Talk to Lead" terminal.
+          - Ask the lead to spawn a worker for the bug.
+          - Lead runs `loom agentdef add` with the ephemeral mode.
+          - Monitor shows the worker under the orchestrator's panel.
+          - Worker claims the issue, commits, pushes, exits.
+        priority: could
+        related_features: [features:talk-to-lead-terminal, features:loom-epic-run, features:ephemeral-epic-workers, features:cooperative-drain-yield]
+        source: docs/product/orchestrator-worker-model.md
+        tags: [orchestration, ephemeral, agents]
+      - id: list-ready-and-blocked-from-cli
+        title: See what's ready to work and what's blocked from the terminal
+        persona: [solo-dev]
+        situation: I'm in a shell and want to pick the next task without opening the browser.
+        outcome: I get a ranked list of ready issues and a separate list of blockers, all from the CLI.
+        flow:
+          - Run `loom data ready --limit 10` — see the top ready tasks.
+          - Run `loom data blocked` — see what's blocked and on what.
+          - Copy an issue ID and run `loom data show <id>` for details.
+        priority: should
+        related_features: [features:loom-data-ready, features:loom-data-blocked, features:loom-data-show, features:issue-ready-blocked-stats-api]
+        source: internal/cli/data/blocked.go
+        tags: [cli, planning, issues]
+      - id: claim-and-close-from-cli
+        title: Claim an issue, work on it, and close it from the CLI
+        persona: [solo-dev]
+        situation: I want to track work I'm doing by hand using loom's queue.
+        outcome: The issue is owned by me while I work and closes cleanly when I'm done.
+        flow:
+          - Run `loom data claim <id>` to mark in-progress with my owner.
+          - Make the code change in my worktree.
+          - Optionally `loom data comment <id> "Pushed branch fix/foo"`.
+          - Run `loom data close <id> --reason "shipped"`.
+        priority: should
+        related_features: [features:loom-data-claim, features:loom-data-update, features:loom-data-close, features:loom-data-comment, features:issues-api]
+        source: internal/cli/data/claim.go
+        tags: [cli, workflow, issues]
+      - id: setup-git-hooks
+        title: Install loom's git hooks for an existing repo
+        persona: [solo-dev]
+        situation: I want loom to record sessions and post task gates automatically when I commit.
+        outcome: Pre/post-commit and merge hooks are installed; future commits trigger loom lifecycle events.
+        flow:
+          - Run `loom hooks install` from the repo root.
+          - Hook installer writes scripts into `.git/hooks/` (backing up any existing).
+          - Confirm with `loom hooks status` that hooks are present and current.
+          - Make a test commit — loom records the SessionEnd / post-commit event.
+        priority: could
+        related_features: [features:loom-hooks, features:hook-installer, features:loom-hooks, features:loom-hooks]
+        source: internal/cli/hooks/hooks_install.go
+        tags: [cli, hooks, git]
+      - id: recover-stuck-terminal
+        title: Recover a wedged agent terminal without losing scrollback
+        persona: [solo-dev]
+        situation: An agent's terminal stopped echoing input but the session is still alive.
+        outcome: I get back an interactive PTY attached to the same tmux session, with scrollback intact.
+        flow:
+          - In the UI, click the terminal tab's "Reattach" action — the WebSocket reconnects.
+          - If still wedged, run `loom workspace ops diagnose` from the CLI to inspect the tmux session.
+          - As a last resort, run `loom workspace ops ensure-runtime` to rebuild the PTY manager state.
+          - Open the agent terminal again; scrollback reloads from the session history store.
+        priority: should
+        related_features: [features:loom-workspace-ops, features:per-agent-embedded-terminals, features:per-agent-embedded-terminals, features:session-history, features:agent-terminal-session-api]
+        source: internal/webui/terminal/agent_tmux.go
+        tags: [recovery, terminal, tmux]
+      - id: run-custom-agent
+        title: Run a custom agent with my own prompt template
+        persona: [solo-dev]
+        situation: I have a specialized task (security review, doc updates) that doesn't fit the stock planner/coder roles.
+        outcome: A one-off agent runs with my prompt, filters tasks I care about, and reports back.
+        flow:
+          - Write a prompt template file (markdown with role + instructions).
+          - Run `loom agent --prompt ./prompts/security.md --task-filter "label:security"`.
+          - Agent claims matching tasks and applies my custom prompt.
+          - Watch the session, then close out tasks normally.
+        priority: could
+        related_features: [features:loom-agent, features:loom-role, features:loom-agentdef, features:loom-task]
+        source: internal/cli/agent/agent_cmd.go
+        tags: [cli, custom, prompts]
+
+  - id: leadership
+    name: Project Leadership (Team Lead)
+    summary: Plan review, triage, orchestration of an epic.
+    stories:
+      - id: review-design
+        epic: epics:lead-driven-orchestration
+        title: Review and approve (or reject) a planner's design
+        persona: [team-lead]
+        situation: A planner finished a design and the issue is in Review.
+        outcome: Design is approved (→ ready for code) or rejected with feedback.
+        flow:
+          - Open the Review column on Kanban.
+          - Click the issue → design appears as rendered markdown.
+          - Add a comment with feedback if needed.
+          - Click Approve (→ has_design) or Reject (→ open).
+          - Rejection opens a feedback form; Ctrl-Enter to submit.
+        priority: must
+        related_features: [features:approve-reject-review-flow, features:activity-log-comments, features:issue-detail-page, features:kanban-board]
+        source: internal/webui/frontend/src/components/IssueDetailPanel
+        tags: [review, workflow]
+      - id: triage-blocked
+        title: Triage and unblock stalled work
+        persona: [team-lead]
+        situation: Several issues are blocked and progress is slowing.
+        outcome: Blockers resolved or downgraded; tasks become ready again.
+        flow:
+          - Filter Kanban or Table by `blocked` status.
+          - Open the Graph view to see the dependency chain.
+          - Click each blocker — resolve, close, or change type.
+          - Watch blocked issues flip back to Ready in real time.
+        priority: should
+        related_features: [features:graph-view, features:dependencies-api, features:dependency-editor, features:issue-ready-blocked-stats-api]
+        source: internal/webui/frontend/src/views/GraphPage.tsx
+        tags: [triage, dependencies]
+      - id: orchestrate-an-epic
+        epic: epics:lead-driven-orchestration
+        title: Drain an epic with parallel workers
+        persona: [team-lead]
+        situation: An epic has 8 child tasks and I want them in parallel.
+        outcome: Workers spawn, each handles one task, all child tasks close.
+        flow:
+          - Open the epic.
+          - Click "Run epic" in the Lead terminal, or run `loom epic run --parent <epic-id>`.
+          - Reconcile loop spawns one worker per ready task up to max-concurrency.
+          - Monitor dashboard shows each worker's progress.
+          - Workers auto-exit when their task is done.
+        priority: must
+        related_features: [features:loom-epic-run, features:ephemeral-epic-workers, features:monitor-dashboard-panels, features:loom-daemon]
+        source: internal/cli/epic/run.go
+        tags: [epic, orchestration, fan-out]
+      - id: redirect-task
+        title: Move a task to a different agent or backend
+        persona: [team-lead]
+        situation: One agent is bottlenecked; another agent is idle.
+        outcome: The task is unassigned from the first agent and picked up by the second.
+        flow:
+          - Open the issue.
+          - Change the assignee or backend dropdown.
+          - First agent releases its claim.
+          - Second agent claims the task on its next poll.
+        priority: should
+        related_features: [features:agents-api, features:agent-control-api, features:per-agent-embedded-terminals]
+        source: internal/webui/handlers/agents
+        tags: [agents, workflow]
+      - id: push-completed-work
+        title: Ship the completed branches to main
+        persona: [team-lead]
+        situation: Several agents have pushed branches ready to merge.
+        outcome: All ready branches land on main with AI-resolved conflicts.
+        flow:
+          - Run `loom sync` (or `loom push --all`).
+          - For each conflict, Claude is invoked to resolve markers.
+          - Optionally open GitHub PRs via `loom pr --all`.
+          - Issues close as branches merge.
+        priority: must
+        related_features: [features:loom-push, features:loom-sync, features:loom-pr, features:ai-conflict-resolution]
+        source: internal/cli/git/sync.go
+        tags: [git, merge, batch]
+      - id: rotate-epic-workers
+        title: Replace a failing worker mid-epic without restarting the whole run
+        persona: [team-lead]
+        situation: One worker in a running epic is stuck on a task; the rest are healthy.
+        outcome: The bad worker is stopped, its task is released, and a fresh worker picks it up.
+        flow:
+          - Open Monitor — the epic panel shows one worker red and others green.
+          - Click the bad worker → "Stop" (cooperative drain) or "Kill" (force).
+          - Supervisor releases the task claim back to the epic queue.
+          - The reconcile loop in `loom epic run` spawns a replacement worker on the next tick.
+        priority: should
+        related_features: [features:loom-epic-run, features:cooperative-drain-yield, features:agent-control-api-lifecycle, features:ephemeral-epic-workers, features:loom-daemon]
+        source: internal/cli/daemon/supervisor/epic.go
+        tags: [epic, recovery, orchestration]
+      - id: enforce-epic-budget
+        title: Cap an epic's token / cost budget
+        persona: [team-lead]
+        situation: I'm running an expensive epic and need to bound its spend.
+        outcome: Workers stop spawning once the cumulative budget is exceeded; I get a notification.
+        flow:
+          - Set a budget on the epic via `loom agentdef add --budget` or the Issue panel.
+          - Start the epic with `loom epic run`.
+          - Usage dashboard tracks tokens and cost in real time.
+          - When the budget is hit, the orchestrator marks remaining tasks "budget_exceeded" and exits.
+        priority: should
+        related_features: [features:loom-agentdef, features:loom-epic-run, features:usage-tracking, features:usage-dashboard, features:observability-usage-api]
+        source: internal/cli/epic/run.go
+        tags: [epic, budget, governance]
+      - id: coordinate-across-repos
+        title: Run agents on a workspace that spans multiple repos
+        persona: [team-lead]
+        situation: My workspace has 3 repos and an epic that needs changes in 2 of them.
+        outcome: Agents can be scoped to specific repos or groups; cross-repo agents can change all of them.
+        flow:
+          - Tag repos with groups via `loom repo add --groups frontend,backend`.
+          - Define an agent with `loom agentdef add --repos backend --cross-repo` (or `--repo-groups frontend`).
+          - Start the epic — workers spawn per repo and don't step on each other's worktrees.
+          - Monitor groups agent activity by repo for clarity.
+        priority: should
+        related_features: [features:loom-repo, features:loom-agentdef, features:workspace-overview, features:agents-api, features:monitor-dashboard-panels]
+        source: internal/cli/agentdef/agentdef_cmd.go
+        tags: [multi-repo, workspace, agents]
+
+  - id: recovery
+    name: Recovery & Resilience
+    summary: When agents get stuck or fail — diagnose, recover, retry.
+    stories:
+      - id: debug-failed-run
+        epic: epics:failure-modes-recovery
+        title: Diagnose why an agent run failed
+        persona: [solo-dev, dogfood-operator]
+        situation: An agent run shows a red error badge.
+        outcome: I find the error class, the failing command, and a fix.
+        flow:
+          - Click the failed run's card in the Sessions tab.
+          - Read the error class (e.g., `auth_failed`, `tool_missing`).
+          - Open the full logs / transcript.
+          - Fix the underlying issue (set env var, install tool, etc.).
+          - Click "Retry preflight".
+        priority: must
+        related_features: [features:session-history, features:native-session-transcripts, features:agent-logs-queue-api,  "Failure modes & recovery UX"]
+        source: docs/product/failure-modes-recovery-ux.md
+        tags: [recovery, debugging, agents]
+      - id: recover-stuck-agent
+        epic: epics:failure-modes-recovery
+        title: Free a task from a stuck agent
+        persona: [solo-dev, team-lead]
+        situation: An agent claimed a task and stopped sending heartbeats.
+        outcome: The task is released back to the queue and the agent is reset.
+        flow:
+          - Monitor shows the agent as `stale`.
+          - Click the agent → stale runner panel appears.
+          - Choose "Release task claim" or "Mark run failed".
+          - Task returns to the ready column.
+          - Run `loom recover <worktree>` from CLI if needed.
+        priority: should
+        related_features: [features:loom-recover, features:stale-session-detector, features:monitor-dashboard, features:loom-recover]
+        source: internal/cli/agent/recover.go
+        tags: [recovery, locks]
+      - id: preflight-failure
+        epic: epics:failure-modes-recovery
+        title: See a preflight failure before the model is invoked
+        persona: [dogfood-operator, solo-dev]
+        situation: I started an agent but auth or a tool is missing.
+        outcome: Preflight blocks the run before any tokens are spent and shows a fix action.
+        flow:
+          - Click "Start work" on an issue.
+          - Preflight checks fail (e.g., `CLAUDE_API_KEY` unset).
+          - Run is marked failed with class `auth_failed`.
+          - UI offers "Retry preflight" and "Change backend" actions.
+          - Provide the missing credential and retry.
+        priority: must
+        related_features: [features:loom-doctor, features:backend-config-api, features:health-doctor-api]
+        source: docs/product/failure-modes-recovery-ux.md
+        tags: [recovery, preflight, agents]
+      - id: doctor-self-heal
+        epic: epics:failure-modes-recovery
+        title: Self-diagnose the workspace with `loom doctor`
+        persona: [solo-dev, platform-engineer]
+        situation: Something feels off — agents won't start or terminals won't attach.
+        outcome: I run one command and get a checklist of what's broken with optional auto-fix.
+        flow:
+          - Run `loom doctor` from the CLI.
+          - Health checks run (tmux, redis, fleetdb, workspace config, backend CLIs).
+          - For each failed check, a fix command is shown.
+          - Re-run with `--fix` to auto-apply safe fixes.
+        priority: should
+        related_features: [features:loom-doctor, features:loom-doctor]
+        source: internal/cli/doctor/doctor.go
+        tags: [diagnostics, recovery]
+
+  - id: power-use
+    name: Multi-Workspace & Power Use
+    summary: Cross-project workflows, file editing, terminals, theming.
+    stories:
+      - id: switch-workspaces
+        title: Switch between multiple workspaces
+        persona: [solo-dev, team-lead]
+        situation: I have several unrelated projects, each in its own workspace.
+        outcome: I switch contexts and each workspace preserves its own agents, issues, terminal tabs.
+        flow:
+          - Click the workspace switcher in the nav.
+          - Pick a different workspace.
+          - All views (Kanban, Monitor, Agents) refresh against that workspace.
+          - URL updates to `/ws/<id>`.
+          - Switch back — previous state is preserved.
+        priority: must
+        related_features: [features:workspace-switcher, features:workspace-api, features:workspace-tree-navigator]
+        source: internal/webui/frontend/src/components/WorkspaceSwitcher
+        tags: [multi-workspace, navigation]
+      - id: review-diff-and-files
+        title: Review an agent's diff and edit files
+        persona: [team-lead, solo-dev]
+        situation: An agent finished work and I want to read or tweak the diff.
+        outcome: I see the full diff with syntax highlighting and can open a file in my editor.
+        flow:
+          - Open the agent's detail panel.
+          - Click the Diff tab — see file list with +/- stats.
+          - Expand a file — diff renders.
+          - Click "Open in editor" → VS Code or Cursor launches the file.
+        priority: should
+        related_features: [features:files, features:file-editor-panel, features:agent-diff-api, features:files-editors-api]
+        source: internal/webui/frontend/src/views/FilesPage.tsx
+        tags: [diff, editor, files]
+      - id: split-terminals
+        title: Run multiple agent terminals side by side
+        persona: [solo-dev, team-lead]
+        situation: I want to watch two agents at once.
+        outcome: Two terminal tabs are open simultaneously in split view.
+        flow:
+          - Open the terminal area.
+          - Hit "+" to create a second tab.
+          - Drag the tab into a split pane.
+          - Both stream output simultaneously.
+          - Rename tabs for clarity.
+        priority: could
+        related_features: [features:per-agent-embedded-terminals, features:per-agent-embedded-terminals, features:issue-tab-persistence]
+        source: internal/webui/terminal
+        tags: [terminal, power-user]
+      - id: bulk-update-issues
+        title: Update many issues at once
+        persona: [team-lead]
+        situation: I need to re-prioritize a dozen issues quickly.
+        outcome: All selected issues get the new priority / status / label in one action.
+        flow:
+          - Switch to Table view.
+          - Filter or sort to find the set.
+          - Multi-select via checkboxes.
+          - Use the bulk action toolbar to set priority, status, or labels.
+        priority: should
+        related_features: [features:table-view, features:bulk-action-toolbar, features:issues-api]
+        source: internal/webui/frontend/src/views/TablePage.tsx
+        tags: [bulk, table]
+      - id: theme-and-shortcuts
+        title: Tune the UI to my preferences
+        persona: [solo-dev, team-lead]
+        situation: I want a dark theme and to know every keyboard shortcut.
+        outcome: UI matches my preference and I have a cheatsheet a keypress away.
+        flow:
+          - Click the theme toggle in the user menu.
+          - Press `?` to open the keyboard cheatsheet.
+          - Adjust terminal font in Settings.
+        priority: could
+        related_features: [features:theme-system-light-dark, features:keyboard-cheatsheet, features:settings]
+        source: internal/webui/frontend/src/components/ThemeToggle
+        tags: [ui, preferences]
+
+  - id: validation
+    name: Validation & Dogfooding
+    summary: End-to-end verification stories from the dogfood test plan.
+    stories:
+      - id: validate-planner-e2e
+        title: Validate a planner produces a visible session
+        persona: [dogfood-operator]
+        situation: I want to confirm a planner runs locally and the UI sees it.
+        outcome: Session appears within 2 seconds, design is written, timeline records each event.
+        flow:
+          - Seed an issue with priority P1 and no design.
+          - Start the planner from the CLI.
+          - Verify the agent card appears in the UI within 2 s.
+          - Wait for design update; verify rendered markdown.
+          - Confirm timeline records `started → design updated → completed`.
+        priority: must
+        related_features: [features:loom-plan, features:session-history, features:native-session-transcripts, features:real-time-sse-mutations]
+        source: docs/product/dogfood-agent-execution-test-plan.md
+        tags: [dogfood, validation, planning]
+      - id: validate-coder-e2e
+        title: Validate a coder produces diff, commit, and push
+        persona: [dogfood-operator]
+        situation: I want to verify the implementation cycle end to end.
+        outcome: Files change, commit lands, push succeeds, issue closes — all visible in the UI.
+        flow:
+          - Seed an issue with an approved design.
+          - Start the coder.
+          - Watch live diff in the Diff tab.
+          - Verify gate / test results.
+          - Verify commit appears and push status flips to success.
+        priority: must
+        related_features: [features:loom-task, features:agent-diff-api, features:loom-push, features:session-history]
+        source: docs/product/dogfood-agent-execution-test-plan.md
+        tags: [dogfood, validation, implementation]
+      - id: validate-direct-cli-visibility
+        title: Confirm a direct CLI run is visible in the UI
+        persona: [dogfood-operator]
+        situation: I run `loom plan` straight from a shell — not via the daemon.
+        outcome: The UI's Sessions tab shows the run without any "invisible CLI" warning.
+        flow:
+          - Open the web UI.
+          - Run `loom plan <agent>` from a separate shell.
+          - Watch the agent rail update with the new session.
+          - Open the issue — Sessions tab shows the running session.
+        priority: should
+        related_features: [features:session-history, features:real-time-sse-mutations, features:sessions-notify-api]
+        source: docs/product/dogfood-agent-execution-test-plan.md
+        tags: [dogfood, validation, cli]
+      - id: validate-container-runner
+        title: Validate the container runner produces the same artifacts as a local run
+        persona: [dogfood-operator]
+        situation: I want to confirm the dockerized runner behaves the same as a host-side agent.
+        outcome: Same diff, transcript, and session shape from a container run as from a local run.
+        flow:
+          - Run the local-only baseline against a seeded issue.
+          - Capture diff stats, transcript line count, and session metadata.
+          - Re-run the same issue inside `Dockerfile.dev` with the container runner.
+          - Diff the two artifact sets — should match byte-for-byte (modulo timestamps).
+        priority: should
+        related_features: [features:dev-container, features:dev-compose-stack, features:session-history, features:native-session-transcripts]
+        source: docs/product/container-runner-mvp-spec.md
+        tags: [dogfood, container, parity]
+      - id: validate-transcripts-persist
+        title: Validate session transcripts survive a server restart
+        persona: [dogfood-operator]
+        situation: I want to verify that closing and restarting `loom serve` doesn't lose history.
+        outcome: After restart, every prior session is still readable with its full transcript.
+        flow:
+          - Run a planner and a coder against the same issue.
+          - Stop `loom serve`, wait, then restart.
+          - Open the issue's Sessions tab.
+          - Both sessions appear with intact transcript and scrollback.
+        priority: must
+        related_features: [features:session-history, features:native-session-transcripts, features:native-session-transcripts, features:session-history-transcripts-api]
+        source: docs/product/session-artifact-contract.md
+        tags: [dogfood, sessions, persistence]
+      - id: validate-epic-runner-e2e
+        title: Validate the epic runner drains a multi-task epic
+        persona: [dogfood-operator]
+        situation: I need to confirm `loom epic run` spawns the right number of workers and closes all tasks.
+        outcome: All child tasks reach `closed`, workers exit cleanly, and the epic itself closes.
+        flow:
+          - Seed an epic with N approved child tasks.
+          - Run `loom epic run --parent <epic> --max-concurrency K`.
+          - Observe at most K workers running at once via Monitor.
+          - All N tasks close; orchestrator exits with code 0.
+        priority: must
+        related_features: [features:loom-epic-run, features:ephemeral-epic-workers, features:loom-daemon, features:loom-daemon, features:monitor-dashboard-api]
+        source: docs/product/lead-agent-epic-runner-spec.md
+        tags: [dogfood, epic, orchestration]
+      - id: validate-fleet-claim-contention
+        title: Validate two workers don't double-claim the same task
+        persona: [dogfood-operator]
+        situation: I'm running two `loom serve worker` processes against the same control plane.
+        outcome: Each ready task is claimed by exactly one worker; metrics confirm zero double-claims.
+        flow:
+          - Start two workers pointing at the same fleet endpoint.
+          - Seed K ready tasks on the control plane.
+          - Watch the fleet claim metric and worker logs.
+          - Verify each task ID appears in exactly one worker's session history.
+        priority: must
+        related_features: [features:fleet-claim-done-heartbeat-api, features:loom-serve-worker, features:loom-daemon, features:fleet-metrics, features:fleet-jwt-rs256]
+        source: internal/webui/fleet
+        tags: [dogfood, fleet, contention]
+      - id: validate-auth-token-rotation
+        title: Validate fleet JWT rotation without dropping in-flight tasks
+        persona: [dogfood-operator]
+        situation: I'm about to rotate the fleet signing key in production-like staging.
+        outcome: Workers refresh their tokens and existing claims complete; no run is orphaned.
+        flow:
+          - Start one worker and one in-flight task.
+          - Rotate the JWT signing key (issue a new kid).
+          - Watch the worker re-authenticate within the heartbeat interval.
+          - In-flight task completes; new tasks pick up the new signing kid.
+        priority: should
+        related_features: [features:fleet-jwt-rs256, features:auth-proxy, features:standalone-betterauth-service, features:loom-serve-worker]
+        source: internal/webui/fleet/jwt.go
+        tags: [dogfood, auth, rotation]
+
+  - id: platform-ops
+    name: Platform Operations
+    summary: Operating loom at scale — distributed control plane, observability, fleet.
+    stories:
+      - id: monitor-fleet-health
+        epic: epics:distributed-control-plane
+        title: Monitor fleet-wide agent health
+        persona: [platform-engineer]
+        situation: Loom is running across multiple nodes and I need an overall view.
+        outcome: I see every node, registered agents, heartbeats, and lease ownership.
+        flow:
+          - Start `loom serve --fleet-mode --redis-addr <addr>`.
+          - Open Monitor dashboard with fleet view enabled.
+          - See nodes, agents per node, and heartbeat freshness.
+          - Spot agents with high retry counts.
+        priority: should
+        related_features: [features:monitor-dashboard, features:fleet-db-http-backend, features:fleet-jwt-rs256, features:daemon-status-api]
+        source: docs/design/distributed-control-plane.md
+        tags: [fleet, monitoring]
+      - id: debug-remote-runner
+        epic: epics:container-runners
+        title: Debug a container or remote worker failure
+        persona: [platform-engineer]
+        situation: A remote worker failed and I need to understand why.
+        outcome: I find the error, read the transcript, and reproduce locally.
+        flow:
+          - Open the failed run in Monitor or the issue's Sessions tab.
+          - View error class and full log stream.
+          - Read transcript with model interactions.
+          - Reproduce locally with `loom serve worker --control-plane <url>`.
+        priority: should
+        related_features: [features:loom-serve-worker, features:agent-logs-queue-api, features:task-logs-api, features:native-session-transcripts]
+        source: internal/cli/serve/worker
+        tags: [fleet, debugging]
+      - id: tracing-and-metrics
+        epic: epics:observability
+        title: Trace a slow request across CLI and server
+        persona: [platform-engineer]
+        situation: A request feels slow and I want to see where the time went.
+        outcome: I get a distributed trace across the CLI, daemon, and HTTP server in my OTel backend.
+        flow:
+          - Set `OTEL_EXPORTER_OTLP_ENDPOINT` and `LOOM_TRACE=1`.
+          - Reproduce the slow operation.
+          - Open the OTel UI — trace spans the CLI, daemon, and HTTP server.
+          - Identify the slow span.
+        priority: could
+        related_features: [features:opentelemetry-tracing, features:http-route-tracing-middleware, features:trace-aware-daemon, features:prometheus-metrics]
+        source: internal/observability/tracing
+        tags: [observability, tracing]
+      - id: install-service
+        title: Run loom as a persistent service
+        persona: [platform-engineer, solo-dev]
+        situation: I want `loom serve` to start at boot and survive reboots.
+        outcome: A systemd unit (Linux) or launchd plist (macOS) supervises loom.
+        flow:
+          - Run `loom serve install-service --port 8080 --bind 127.0.0.1`.
+          - Service unit is generated and installed.
+          - Service starts; `loom doctor` confirms it.
+          - Uninstall with `loom serve install-service --uninstall`.
+        priority: could
+        related_features: [features:loom-serve-install-service, features:loom-local-service]
+        source: internal/cli/serve/install
+        tags: [service, lifecycle]
+      - id: operate-the-daemon
+        title: Operate the workspace daemon (status, restart, drain)
+        persona: [platform-engineer]
+        situation: The daemon is misbehaving and I want to inspect or restart it without killing in-flight work.
+        outcome: I can see daemon state, drain it cleanly, and bring it back.
+        flow:
+          - Run `loom daemon status` — see supervised agents, queue, restart counts.
+          - Run `loom daemon queue` to inspect pending tasks.
+          - Run `loom daemon stop --drain` for graceful shutdown.
+          - Run `loom daemon start` (or rely on the OS service) to bring it back.
+        priority: should
+        related_features: [features:loom-daemon, features:loom-daemon, features:cooperative-drain-yield, features:loom-daemon, features:daemon-status-api]
+        source: internal/cli/daemon/daemon_cmd.go
+        tags: [daemon, ops, lifecycle]
+      - id: rotate-fleet-jwt
+        title: Rotate the fleet JWT signing key safely
+        persona: [platform-engineer]
+        situation: It's time to rotate the RS256 signing key without taking workers offline.
+        outcome: New keys are issued, workers transparently re-auth, and old keys can be retired.
+        flow:
+          - Generate a new RS256 keypair and publish the new `kid` in JWKS.
+          - Update the BetterAuth service to sign with the new `kid`.
+          - Workers and CLIs refresh tokens on their next heartbeat.
+          - Once metrics show zero traffic on the old `kid`, retire it.
+        priority: should
+        related_features: [features:fleet-jwt-rs256, features:standalone-betterauth-service, features:auth-proxy, features:auth-proxy]
+        source: internal/webui/fleet/jwt.go
+        tags: [auth, rotation, fleet]
+      - id: upgrade-loom-across-nodes
+        title: Roll a loom upgrade across all nodes without dropping work
+        persona: [platform-engineer]
+        situation: A new loom release is out and I run loom on several hosts.
+        outcome: Every node upgrades, no in-flight task is lost, and post-upgrade health is green.
+        flow:
+          - Drain one node with `loom daemon stop --drain` while others keep serving.
+          - Upgrade the binary on that node (npm or curl install).
+          - Restart and confirm `loom doctor` is green.
+          - Move to the next node; repeat until the fleet is uniform.
+        priority: should
+        related_features: [features:install-script, features:npm-package, features:loom-local-service, features:loom-doctor, features:cooperative-drain-yield]
+        source: scripts/install.sh
+        tags: [upgrade, fleet, lifecycle]
+      - id: configure-external-redis
+        title: Switch loom from embedded miniredis to external Redis
+        persona: [platform-engineer]
+        situation: I need durable, shared state across nodes; the embedded miniredis isn't enough.
+        outcome: All workspaces use the external Redis; terminal state and fleet coordination survive restarts.
+        flow:
+          - Provision an external Redis (optionally with TLS).
+          - Start `loom serve --redis-addr rediss://...` on each node.
+          - Verify `loom doctor` reports the external backend.
+          - Migrate or accept warm-cache loss on the first deploy.
+        priority: should
+        related_features: [features:external-redis-support, features:fleet-db-http-backend, features:loom-serve, features:loom-doctor]
+        source: internal/cli/serve/serve.go
+        tags: [storage, redis, fleet]
+      - id: debug-jwt-failure
+        title: Debug a 401 from a fleet worker
+        persona: [platform-engineer]
+        situation: A `loom serve worker` keeps getting 401s when calling claim.
+        outcome: I identify the bad token, clock skew, or kid mismatch and the worker reconnects.
+        flow:
+          - Inspect the worker log — read the JWT validation error.
+          - Confirm system clocks are within tolerance across nodes.
+          - Check the JWKS endpoint exposes the current `kid`.
+          - Re-issue a token or restart the worker; metrics show claims succeeding.
+        priority: should
+        related_features: [features:fleet-jwt-rs256, features:standalone-betterauth-service, features:auth-proxy, features:health-doctor-api]
+        source: internal/webui/fleet/jwt.go
+        tags: [auth, debugging, fleet]
+
+  - id: administration
+    name: Administration & Configuration
+    summary: Workspace, role, and agent-def lifecycle plus per-workspace tuning.
+    stories:
+      - id: define-role-from-prompt-file
+        title: Define a custom agent role from a prompt file
+        persona: [solo-dev, team-lead]
+        situation: I want a "reviewer" role that uses a specific prompt and a smaller model.
+        outcome: A new role is registered and selectable when creating agents.
+        flow:
+          - Write the prompt as `roles/reviewer.md`.
+          - Run `loom role add reviewer --prompt-file roles/reviewer.md --model claude-haiku --backend claude --read-only`.
+          - Confirm with `loom role show reviewer`.
+          - Create an agent with `--role reviewer` and run it.
+        priority: should
+        related_features: [features:loom-role, features:loom-agentdef, features:backend-capabilities]
+        source: internal/cli/role/role_cmd.go
+        tags: [config, roles, admin]
+      - id: agentdef-lifecycle
+        title: Manage an agent definition through its lifecycle
+        persona: [team-lead, platform-engineer]
+        situation: I need to add, pause, and eventually remove a long-running auto-mode agent.
+        outcome: The agent def is created, started, paused for maintenance, then cleanly removed.
+        flow:
+          - Run `loom agentdef add bot1 --role task --backend claude --auto`.
+          - Start it — daemon supervises and the agent appears in the rail.
+          - Run `loom agentdef stop bot1` for a planned pause; supervisor drains it.
+          - Run `loom agentdef remove bot1` once obsolete; lock files and state are cleaned.
+        priority: should
+        related_features: [features:loom-agentdef, features:loom-daemon, features:cooperative-drain-yield, features:loom-recover]
+        source: internal/cli/agentdef/agentdef_cmd.go
+        tags: [admin, agents, lifecycle]
+      - id: tune-daemon-profile
+        title: Tune the daemon profile for a workspace
+        persona: [platform-engineer, team-lead]
+        situation: My workspace is hitting concurrency limits and I need to raise them.
+        outcome: New limits are persisted and the daemon picks them up on next reconcile.
+        flow:
+          - Run `loom daemon profile show` to see current settings.
+          - Run `loom daemon profile set max-agents 8 default-backend claude`.
+          - Daemon reconciler reads the new profile and adjusts.
+          - Verify with `loom daemon status` and Monitor.
+        priority: should
+        related_features: [features:loom-daemon-profile, features:loom-daemon, features:loom-daemon, features:daemon-status-api]
+        source: internal/cli/daemon/profile_cmd.go
+        tags: [admin, daemon, tuning]
+      - id: purge-old-sessions
+        title: Reclaim disk by purging old sessions and usage data
+        persona: [platform-engineer, solo-dev]
+        situation: Sessions and usage tables have grown large after months of running.
+        outcome: Old data is removed within configurable retention windows; disk shrinks.
+        flow:
+          - Run `loom cleanup --sessions-older-than 30d --usage-older-than 90d --dry-run`.
+          - Inspect the dry-run summary.
+          - Re-run without `--dry-run` to apply.
+          - Optionally automate via cron or systemd timer.
+        priority: could
+        related_features: [features:loom-cleanup, features:loom-sessions-clean, features:session-purge, features:usage-tracking]
+        source: internal/cli/cleanup/cleanup_cmd.go
+        tags: [admin, retention, cleanup]
+
+  - id: dev-stack
+    name: Dev Stack & Distribution
+    summary: Local development, containerized testing, and CI workflows.
+    stories:
+      - id: run-make-dev
+        epic: epics:local-first
+        title: Iterate on loom with hot reload
+        persona: [platform-engineer, solo-dev]
+        situation: I'm changing Go server code and React frontend code at the same time.
+        outcome: Go server live-reloads on save; Vite HMR updates the browser instantly.
+        flow:
+          - Run `make dev`.
+          - Air watches Go files and rebuilds on save.
+          - Vite serves the frontend at :3000 with HMR.
+          - Open `http://localhost:3000` and iterate.
+        priority: must
+        related_features: [features:dev-container, features:dev-compose-stack]
+        source: Makefile
+        tags: [dev, hot-reload]
+      - id: container-smoke-test
+        epic: epics:container-runners
+        title: Run a full-stack smoke test in containers
+        persona: [platform-engineer, dogfood-operator]
+        situation: I want to verify the whole stack — real AI CLIs, real loom, real frontend.
+        outcome: Containers come up, seeded workspaces appear, the UI is live at :8091.
+        flow:
+          - Run `docker compose -f docker-compose.dev.yml up --build`.
+          - Loom image is built with real AI CLIs included.
+          - Seed workspaces appear in the UI on first boot.
+          - Optional `--profile fleet` adds Redis for fleet coordination.
+        priority: should
+        related_features: [features:dev-container, features:dev-compose-stack]
+        source: Dockerfile.dev
+        tags: [dev, container]
+      - id: ci-gate
+        title: Run the CI quality gate locally
+        persona: [platform-engineer, dogfood-operator]
+        situation: I want to know my change passes before pushing.
+        outcome: Go gate + frontend gate + integration tests all pass with 60% coverage.
+        flow:
+          - Run `make check` (or `make gate`).
+          - Format, vet, build, lint, LOC, package size, import fanout.
+          - Frontend gate runs typecheck, eslint, and unit tests.
+          - Integration tests run with the e2e tag.
+        priority: must
+        source: Makefile
+        tags: [ci, testing]
+      - id: run-e2e-in-ci
+        title: Run the end-to-end suite in CI against a containerized stack
+        persona: [platform-engineer, dogfood-operator]
+        situation: I want CI to catch regressions across the real HTTP + daemon + frontend stack.
+        outcome: The e2e job spins up the dev compose stack, runs the suite, and reports results.
+        flow:
+          - CI brings up `docker-compose.dev.yml` with the fleet profile.
+          - Wait for `/api/health` to return ready.
+          - Run the e2e test suite against `http://localhost:8091`.
+          - Upload artifacts (screenshots, server logs, transcripts) on failure.
+        priority: should
+        related_features: [features:dev-compose-stack, features:dev-container, features:health-doctor-api]
+        source: Makefile
+        tags: [ci, e2e, container]
+      - id: distributed-smoke-test
+        title: Smoke-test a two-node fleet locally
+        persona: [platform-engineer]
+        situation: Before shipping a fleet change I want to validate two-node behavior on my laptop.
+        outcome: Two `loom serve` instances share an external Redis and one fleet DB; tasks claim correctly.
+        flow:
+          - Start Redis (via the compose `fleet` profile or a standalone container).
+          - Start node A with `loom serve --fleet-mode --redis-addr ...`.
+          - Start node B with the same Redis and a distinct `--node-id`.
+          - Seed tasks; watch claims split between nodes in Monitor.
+        priority: could
+        related_features: [features:external-redis-support, features:daemon-status-api, features:fleet-claim-done-heartbeat-api, features:dev-compose-stack]
+        source: docs/design/distributed-control-plane.md
+        tags: [fleet, smoke, dev]
+      - id: openapi-contract-test
+        title: Verify the server matches its OpenAPI contract
+        persona: [platform-engineer, dogfood-operator]
+        situation: I changed an HTTP handler and need to confirm the OpenAPI spec still matches.
+        outcome: The contract test fails loudly if any endpoint drifts from `api/openapi.yaml`.
+        flow:
+          - Regenerate server stubs from `api/openapi.yaml` via oapi-codegen.
+          - Run the contract test target — exercises every endpoint with the spec's schemas.
+          - Inspect any diff; either fix the handler or update the spec.
+          - Commit both together so the contract stays authoritative.
+        priority: should
+        related_features: [features:issues-api, features:issues-api, features:workspace-api, features:agents-api]
+        source: api/openapi.yaml
+        tags: [ci, contract, api]

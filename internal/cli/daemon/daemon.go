@@ -127,15 +127,17 @@ func (d *Daemon) Start() error {
 	d.configHash = computeConfigHash(d.config)
 	d.reconcileMu.Unlock()
 
-	// Start configReconciler goroutine (owned by daemon, not supervisor)
+	if err := d.sup.Start(); err != nil {
+		return err
+	}
+	// Start configReconciler goroutine after supervisor startup initializes
+	// Shutdown; otherwise the race detector can observe concurrent nil/channel
+	// access between this loop and Supervisor.Start.
 	d.sup.Wg.Add(1)
 	go func() {
 		defer d.sup.Wg.Done()
 		d.configReconciler()
 	}()
-	if err := d.sup.Start(); err != nil {
-		return err
-	}
 	d.startAgentCommandPoller()
 	return nil
 }

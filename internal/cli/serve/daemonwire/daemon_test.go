@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
+	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
+	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
@@ -90,5 +93,105 @@ func TestBuildStoreBackedDaemonConfigFnUsesFleetDBStore(t *testing.T) {
 	}
 	if len(agent.RepoGroups) != 1 || agent.RepoGroups[0] != "backend" {
 		t.Fatalf("agent repo_groups = %v, want [backend]", agent.RepoGroups)
+	}
+}
+
+func TestDaemonwireDomainConversionsClonePointersAndSlices(t *testing.T) {
+	maxRetries, maxAgents, startupTimeout := 3, 5, 12
+	trace, metrics, rateLimitNoCount := true, false, true
+	budget := 1.25
+	profile := &domain.DaemonProfile{
+		PIDFile:        ".loom/pid",
+		LogDir:         ".loom/logs",
+		EventsDir:      ".loom/events",
+		IssueBackend:   "fleetdb",
+		MaxAgents:      &maxAgents,
+		StartupTimeout: &startupTimeout,
+		RestartPolicy: domain.RestartPolicy{
+			MaxRetries:       &maxRetries,
+			RateLimitNoCount: &rateLimitNoCount,
+		},
+		OTel: &domain.OTelSettings{
+			Enabled: true, Endpoint: "http://otel", Protocol: "grpc",
+			ServiceName: "loom", SampleRate: 0.5, FlushIntervalMs: 100,
+			Traces: &trace, Metrics: &metrics,
+		},
+	}
+	settings := daemonSettingsFromProfile(profile)
+	if settings.PIDFile != ".loom/pid" || settings.MaxAgents == nil || *settings.MaxAgents != 5 ||
+		settings.StartupTimeout == nil || *settings.StartupTimeout != 12 ||
+		settings.RestartPolicy.MaxRetries == nil || *settings.RestartPolicy.MaxRetries != 3 ||
+		settings.RestartPolicy.RateLimitNoCount == nil || !*settings.RestartPolicy.RateLimitNoCount ||
+		settings.OTel == nil || settings.OTel.Traces == nil || !*settings.OTel.Traces || settings.OTel.Metrics == nil || *settings.OTel.Metrics {
+		t.Fatalf("daemon settings = %#v", settings)
+	}
+	*profile.MaxAgents = 99
+	if *settings.MaxAgents != 5 {
+		t.Fatal("daemonSettingsFromProfile did not clone pointer values")
+	}
+	if got := daemonSettingsFromProfile(nil); got.IssueBackend != "fleetdb" {
+		t.Fatalf("nil daemon settings = %#v", got)
+	}
+
+	maxPriority, maxConcurrency := 2, 4
+	role := roleConfigFromDomain(&domain.Role{
+		Name: "task", Description: "desc", PromptFile: "prompt.md", Model: "gpt",
+		TaskFilter: "ready", Backend: "codex", PathPatterns: []string{"*.go"},
+		Skills: []string{"go"}, MaxPriority: &maxPriority, MaxConcurrency: &maxConcurrency,
+		ReadOnly: true, AllowedTools: []string{"read"}, DeniedTools: []string{"write"},
+		MaxBudgetUSD: &budget,
+	})
+	if role.Description != "desc" || role.Backend != "codex" || role.MaxPriority == nil || *role.MaxPriority != 2 ||
+		len(role.PathPatterns) != 1 || role.PathPatterns[0] != "*.go" || role.MaxBudgetUSD == nil || *role.MaxBudgetUSD != 1.25 {
+		t.Fatalf("role config = %#v", role)
+	}
+	if empty := roleConfigFromDomain(nil); empty.Backend != "" {
+		t.Fatalf("nil role config = %#v", empty)
+	}
+
+	agent := agentEntryFromDomain(&domain.Agent{
+		Name: "nova", RoleName: "task", Auto: true, Backend: "codex",
+		FallbackBackends: []string{"claude"}, Repos: []string{"api"},
+		RepoGroups: []string{"backend"}, CrossRepo: true, Parent: "epic-1",
+		DesiredState: domain.AgentDesiredRunning,
+	})
+	if agent.Worktree != "nova" || agent.Role != "task" || !agent.Auto || agent.FallbackBackends[0] != "claude" ||
+		!agent.CrossRepo || agent.DesiredState != domain.AgentDesiredRunning {
+		t.Fatalf("agent entry = %#v", agent)
+	}
+	if empty := agentEntryFromDomain(nil); empty.Worktree != "" {
+		t.Fatalf("nil agent entry = %#v", empty)
+	}
+}
+
+func TestScoreAndSortQueue(t *testing.T) {
+	issues := []backend.IssueData{
+		{ID: "LOW", Title: "low", Status: "open", Priority: 4, IssueType: "task", Labels: []string{"go"}, Parent: "P"},
+		{ID: "HIGH", Title: "high", Status: "open", Priority: 1, IssueType: "task", Labels: []string{"go"}, Parent: "P"},
+		{ID: "SKIP", Title: "skip", Status: "closed", Priority: 1, IssueType: "task", Labels: []string{"go"}, Parent: "P"},
+	}
+	entries := scoreAndSortQueue(issues, cli.RoleConstraints{TaskFilter: "any", Skills: []string{"go"}})
+	if len(entries) != 2 {
+		t.Fatalf("entries = %#v", entries)
+	}
+	if entries[0].IssueID != "HIGH" || entries[1].IssueID != "LOW" {
+		t.Fatalf("sorted entries = %#v", entries)
+	}
+	if entries[0].Reason == "" || entries[0].Parent != "P" || entries[0].Labels[0] != "go" {
+		t.Fatalf("entry details = %#v", entries[0])
+	}
+}
+
+func TestBuildStoreBackedDaemonConfigFnNilAndMissingWorkspace(t *testing.T) {
+	if BuildStoreBackedDaemonConfigFn(nil) != nil {
+		t.Fatal("nil store returned non-nil config fn")
+	}
+	t.Setenv(bootstrap.EnvWorkspace, "")
+	fn := BuildStoreBackedDaemonConfigFn(memstore.New())
+	if fn == nil {
+		t.Fatal("memstore config fn is nil")
+	}
+	if _, err := fn(); err == nil {
+		t.Fatal("missing workspace config fn error = nil")
 	}
 }

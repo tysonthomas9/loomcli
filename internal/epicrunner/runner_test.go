@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli/clitest"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -55,6 +56,109 @@ func TestNewRunnerRequiresReposBeforeBindingLead(t *testing.T) {
 	}
 	if got.Parent != "" {
 		t.Fatalf("lead parent = %q, want no bind after preflight failure", got.Parent)
+	}
+}
+
+func TestNewRunnerDryRunSuccessAndHeaderOutput(t *testing.T) {
+	ctx := context.Background()
+	st := newTestStore(t)
+	createLead(t, st, "ws", "nova", "", "orch-1")
+	if _, err := st.Repos().Create(ctx, store.RepoCreate{WorkspaceKey: "ws", Name: "api"}); err != nil {
+		t.Fatalf("create repo: %v", err)
+	}
+	ib := clitest.NewMockIssueBackend()
+	ib.GetResult = &backend.IssueDetailData{IssueData: backend.IssueData{ID: "EPIC-1", IssueType: "epic"}}
+
+	var out bytes.Buffer
+	r, result, err := NewRunner(ctx, RunnerConfig{
+		Store:                 st,
+		IssueBackend:          ib,
+		WorkspaceKey:          " ws ",
+		EpicID:                " EPIC-1 ",
+		LeadName:              " nova ",
+		Role:                  "",
+		Backend:               " codex ",
+		MaxConcurrency:        0,
+		Interval:              0,
+		OrchestratorSessionID: " orch-1 ",
+		DryRun:                true,
+		RequireRepos:          true,
+		ValidateEpic:          true,
+		Out:                   &out,
+	})
+	if err != nil {
+		t.Fatalf("NewRunner: %v", err)
+	}
+	if result == nil || result.State != StartStateDryRun || result.LeadName != "nova" {
+		t.Fatalf("result = %+v, want dry-run lead result", result)
+	}
+	if r.role != "task" || r.maxConcurrency != 1 || r.interval != 5*time.Second || r.prefix != "epic-1" {
+		t.Fatalf("runner defaults = role=%q max=%d interval=%s prefix=%q", r.role, r.maxConcurrency, r.interval, r.prefix)
+	}
+	r.PrintHeader()
+	header := out.String()
+	for _, want := range []string{"Epic runner", "workspace:        ws", "lead agent:       nova", "backend:          codex", "orchestrator:     orch-1", "dry-run:          true"} {
+		if !strings.Contains(header, want) {
+			t.Fatalf("header missing %q:\n%s", want, header)
+		}
+	}
+}
+
+func TestValidateEpicIssueAndBackendRunErrorKinds(t *testing.T) {
+	ctx := context.Background()
+	ib := clitest.NewMockIssueBackend()
+	ib.GetResult = &backend.IssueDetailData{IssueData: backend.IssueData{ID: "EPIC-1", IssueType: "epic"}}
+	if err := validateEpicIssue(ctx, ib, "EPIC-1"); err != nil {
+		t.Fatalf("validateEpicIssue valid: %v", err)
+	}
+	ib.GetResult = &backend.IssueDetailData{IssueData: backend.IssueData{ID: "TASK-1", IssueType: "task"}}
+	if err := validateEpicIssue(ctx, ib, "TASK-1"); ErrorKindOf(err) != ErrorKindValidation {
+		t.Fatalf("validateEpicIssue task error = %v, want validation", err)
+	}
+	ib.GetResult = nil
+	if err := validateEpicIssue(ctx, ib, "MISSING"); ErrorKindOf(err) != ErrorKindNotFound {
+		t.Fatalf("validateEpicIssue nil detail error = %v, want not found", err)
+	}
+
+	for _, tt := range []struct {
+		kind backend.ErrorKind
+		want ErrorKind
+	}{
+		{backend.KindNotFound, ErrorKindNotFound},
+		{backend.KindValidation, ErrorKindValidation},
+		{backend.KindConflict, ErrorKindConflict},
+		{backend.KindUnavailable, ErrorKindUnavailable},
+		{backend.KindTimeout, ErrorKindUnavailable},
+		{backend.KindCanceled, ErrorKindUnavailable},
+		{backend.KindInternal, ErrorKindInternal},
+	} {
+		err := backendRunError(ErrorKindInternal, "backend failed", backend.NewBackendError(tt.kind, "Get", "boom", nil))
+		if ErrorKindOf(err) != tt.want {
+			t.Fatalf("backend kind %s mapped to %s, want %s (err=%v)", tt.kind, ErrorKindOf(err), tt.want, err)
+		}
+	}
+	if ErrorKindOf(backendRunError(ErrorKindValidation, "plain", errors.New("plain"))) != ErrorKindValidation {
+		t.Fatalf("plain backendRunError did not use default kind")
+	}
+}
+
+func TestEnsureLocalWorkerWorktreesGuardBranches(t *testing.T) {
+	ctx := context.Background()
+	st := newTestStore(t)
+	agent := domain.Agent{WorkspaceKey: "ws", Name: "worker", RoleName: "task"}
+	r := &Runner{store: st}
+
+	if err := r.ensureLocalWorkerWorktrees(ctx, agent); err != nil {
+		t.Fatalf("ensureLocalWorkerWorktrees without local path: %v", err)
+	}
+	if err := bootstrap.MutateWorkspaceLocalState("ws", func(local *bootstrap.WorkspaceLocalState) error {
+		local.Path = t.TempDir()
+		return nil
+	}); err != nil {
+		t.Fatalf("MutateWorkspaceLocalState: %v", err)
+	}
+	if err := r.ensureLocalWorkerWorktrees(ctx, agent); err == nil || !strings.Contains(err.Error(), "has no repos") {
+		t.Fatalf("ensureLocalWorkerWorktrees no repos err = %v, want no repos", err)
 	}
 }
 

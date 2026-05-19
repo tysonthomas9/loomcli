@@ -7,8 +7,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/epicrunner"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
@@ -175,5 +178,78 @@ func TestMarkLeadAssignmentDelivered(t *testing.T) {
 	}
 	if got := session.Metadata["lead_assignment_delivered_epic"]; got != "EPIC-1" {
 		t.Fatalf("delivered epic = %q", got)
+	}
+}
+
+func TestLeadSessionLifecycleHelpers(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	handle := &bootstrap.StoreHandle{Store: st}
+	t.Setenv(envAgentTerminalID, "terminal-1")
+	t.Setenv("USER", "lead-user")
+
+	if err := createLeadSession(ctx, handle, "WS", "lead-session", "lead-agent", "/tmp/work"); err != nil {
+		t.Fatalf("createLeadSession: %v", err)
+	}
+	if err := createLeadSession(ctx, handle, "WS", "lead-session", "lead-agent", "/tmp/work"); err != nil {
+		t.Fatalf("duplicate createLeadSession should be ignored: %v", err)
+	}
+	session, err := st.AgentSessions().Get(ctx, "WS", "lead-session")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	if session.TerminalID != "terminal-1" || session.Metadata["actor"] != "lead-user" || session.Metadata["lead_workdir"] != "/tmp/work" {
+		t.Fatalf("created session = %+v", session)
+	}
+
+	activateLeadSessionEnv("lead-session")
+	if got := os.Getenv(envOrchestratorSessionID); got != "lead-session" {
+		t.Fatalf("%s = %q", envOrchestratorSessionID, got)
+	}
+	reg := leadSessionRegistration{handle: handle}
+	if reg.Store() != st {
+		t.Fatalf("registration Store() did not return backing store")
+	}
+	if (leadSessionRegistration{}).Store() != nil {
+		t.Fatal("empty registration Store() should be nil")
+	}
+
+	stopHB, wg := startLeadSessionHeartbeat(handle, "WS", "lead-session")
+	finalize := leadSessionFinalizer(handle, "WS", "lead-session", stopHB, wg)
+	finalize()
+
+	session, err = st.AgentSessions().Get(ctx, "WS", "lead-session")
+	if err != nil {
+		t.Fatalf("get finalized session: %v", err)
+	}
+	if session.Status != domain.AgentSessionCompleted || session.FinishedAt == nil {
+		t.Fatalf("finalized session = %+v", session)
+	}
+}
+
+func TestLeadSessionRegistrationFinalizeNoopAndHeartbeatStop(t *testing.T) {
+	called := false
+	leadSessionRegistration{finalize: func() { called = true }}.Finalize()
+	if !called {
+		t.Fatal("Finalize did not call callback")
+	}
+	leadSessionRegistration{}.Finalize()
+
+	st := memstore.New()
+	handle := &bootstrap.StoreHandle{Store: st}
+	stopHB := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go heartbeatLeadSession(handle, "WS", "missing-session", stopHB, &wg)
+	close(stopHB)
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("heartbeat did not stop after stop channel close")
 	}
 }

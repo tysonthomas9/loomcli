@@ -1,0 +1,1174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>loom — wireframe map</title>
+  <script src="https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
+  <style>
+    :root {
+      --bg: #fafaf7;
+      --paper: #ffffff;
+      --paper-soft: #f6f6f3;
+      --ink: #1c1c1c;
+      --ink-soft: #4a4a4a;
+      --ink-mute: #8a8a8a;
+      --line: #b8b8b8;
+      --line-soft: #d8d8d8;
+      --accent: #2d5b9e;
+      --accent-tint: #e6efff;
+      --hot: #d8462a;
+      --hot-tint: #fde6df;
+      --shadow: 0 1px 2px rgba(0,0,0,0.04), 0 6px 18px rgba(0,0,0,0.06);
+      --mono: ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace;
+      --body: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; min-height: 100%; background: var(--bg); color: var(--ink); font-family: var(--body); }
+    body {
+      background-image:
+        linear-gradient(rgba(0,0,0,0.022) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0,0,0,0.022) 1px, transparent 1px);
+      background-size: 24px 24px;
+    }
+
+    .page-head {
+      padding: 20px 32px 14px;
+      display: flex; align-items: baseline; gap: 18px;
+      border-bottom: 1px dashed var(--line);
+    }
+    .page-head h1 { margin: 0; font-size: 18px; font-weight: 600; letter-spacing: -0.01em; }
+    .page-head .hint { font-family: var(--mono); font-size: 12px; color: var(--ink-mute); }
+    .page-head .back {
+      margin-left: auto;
+      font-family: var(--mono); font-size: 11px;
+      color: var(--accent); text-decoration: none;
+      padding: 4px 10px; border: 1px dashed var(--accent); border-radius: 4px;
+    }
+    .page-head .back:hover { background: var(--accent-tint); }
+
+    .view-switch {
+      display: flex; gap: 6px;
+      padding: 12px 32px;
+      border-bottom: 1px dashed var(--line);
+    }
+    .view-switch button {
+      font-family: var(--mono); font-size: 11px;
+      padding: 4px 10px;
+      background: transparent;
+      border: 1px dashed var(--line);
+      color: var(--ink-soft);
+      cursor: pointer;
+      border-radius: 4px;
+      transition: all 0.12s;
+    }
+    .view-switch button:hover { border-color: var(--ink); color: var(--ink); }
+    .view-switch button.active { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+    .view-switch .legend {
+      margin-left: auto;
+      font-family: var(--mono); font-size: 10px;
+      color: var(--ink-mute);
+      display: flex; align-items: center; gap: 6px;
+    }
+    .view-switch .legend .dot {
+      display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+      background: var(--hot); border: 1px dashed var(--hot);
+    }
+
+    .canvas { padding: 32px; max-width: 1280px; margin: 0 auto; }
+    .frame { display: none; }
+    .frame.active { display: block; }
+    .wf {
+      border: 2px solid var(--line);
+      background: var(--paper);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .region {
+      border: 1px dashed var(--line);
+      background: var(--paper);
+      padding: 8px 10px;
+      position: relative;
+      transition: background 0.12s, border-color 0.12s, transform 0.08s;
+    }
+    .region[data-clickable="true"] {
+      cursor: pointer;
+    }
+    .region[data-clickable="true"]:hover {
+      background: var(--hot-tint);
+      border-color: var(--hot);
+    }
+    .region[data-clickable="true"]:active { transform: scale(0.997); }
+    .region[data-clickable="true"]::after {
+      content: attr(data-count);
+      position: absolute;
+      top: -8px; right: 8px;
+      font-family: var(--mono);
+      font-size: 9px;
+      letter-spacing: 0.06em;
+      color: var(--hot);
+      background: var(--paper);
+      padding: 1px 6px;
+      border: 1px solid var(--hot);
+      border-radius: 999px;
+      opacity: 0.95;
+      line-height: 1.3;
+    }
+    .region .label {
+      font-family: var(--mono); font-size: 10px;
+      color: var(--ink-mute); letter-spacing: 0.06em;
+      text-transform: uppercase;
+      display: block; margin-bottom: 4px;
+    }
+    .region .placeholder {
+      font-family: var(--mono); font-size: 11.5px;
+      color: var(--ink-soft); line-height: 1.6;
+    }
+    .region .placeholder b { font-weight: 600; color: var(--ink); }
+
+    /* ==== Kanban app (matches AppLayout + SwimLaneBoard) ==== */
+    .kanban-app {
+      display: grid;
+      grid-template-rows: 64px 1fr;
+      min-height: 760px;
+    }
+
+    /* HEADER — full width, like AppLayout */
+    .topbar {
+      display: flex; align-items: center;
+      padding: 8px 20px;
+      border-bottom: 1px solid var(--line);
+      gap: 20px;
+      background: var(--paper);
+    }
+    .topbar .brand {
+      flex-shrink: 0;
+      display: flex; align-items: baseline; gap: 12px;
+      padding: 0;
+    }
+    .topbar .brand .logo {
+      font-family: var(--body);
+      font-size: 26px;
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      color: var(--ink);
+    }
+    .topbar .brand .ws-pill {
+      font-family: var(--mono);
+      font-size: 11px;
+      padding: 3px 9px;
+      border: 1px dashed var(--line);
+      border-radius: 4px;
+      color: var(--ink-soft);
+    }
+    .topbar .header-nav {
+      display: flex; gap: 6px; align-items: center;
+      flex: 1 1 auto;
+      min-width: 0;
+      padding-left: 20px;
+    }
+    .topbar .header-nav .region { padding: 6px 12px; }
+    .topbar .header-nav .region.tab-active {
+      border-style: solid;
+      background: var(--paper-soft);
+      color: var(--ink);
+    }
+    .topbar .actions {
+      display: flex; gap: 6px; flex-shrink: 0;
+    }
+    .topbar .actions .region {
+      padding: 6px 10px;
+      min-width: 36px;
+      text-align: center;
+    }
+
+    /* BODY — nav rail + main */
+    .app-body {
+      display: grid;
+      grid-template-columns: 64px 1fr;
+      min-height: 0;
+    }
+    .nav-rail {
+      display: flex; flex-direction: column; gap: 10px;
+      padding: 18px 12px;
+      border-right: 1px solid var(--line);
+      background: var(--paper);
+      align-items: center;
+    }
+    .nav-rail .nav-btn {
+      width: 40px; height: 40px;
+      border-radius: 11px;
+      border: 1px dashed var(--line);
+      background: var(--paper);
+      display: flex; align-items: center; justify-content: center;
+      font-family: var(--mono);
+      font-size: 14px;
+      color: var(--ink-soft);
+      cursor: pointer;
+      position: relative;
+      transition: background 0.12s, border-color 0.12s, color 0.12s;
+    }
+    .nav-rail .nav-btn:hover {
+      background: var(--hot-tint);
+      border-color: var(--hot);
+      color: var(--hot);
+    }
+    .nav-rail .nav-btn.active {
+      background: var(--accent);
+      color: var(--paper);
+      border-color: var(--accent);
+      border-style: solid;
+    }
+    .nav-rail .nav-btn[data-clickable="true"]::after {
+      content: attr(data-count);
+      position: absolute;
+      top: -6px; right: -6px;
+      font-family: var(--mono);
+      font-size: 9px;
+      color: var(--hot);
+      background: var(--paper);
+      padding: 1px 5px;
+      border: 1px solid var(--hot);
+      border-radius: 999px;
+      line-height: 1.2;
+    }
+
+    /* Main content */
+    .work-area {
+      padding: 20px 24px;
+      display: flex; flex-direction: column;
+      gap: 14px;
+      min-height: 0;
+    }
+    .filter-bar {
+      display: flex; gap: 8px; align-items: center;
+      flex-wrap: wrap;
+    }
+    .filter-bar .region { padding: 5px 11px; }
+
+    .lane-toolbar {
+      display: flex; gap: 8px;
+      padding-bottom: 2px;
+    }
+    .lane-toolbar .region { padding: 4px 10px; }
+
+    /* SWIM LANES — horizontal rows */
+    .swim-lanes {
+      display: flex; flex-direction: column;
+      gap: 14px;
+    }
+    .swim-lane {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      overflow: hidden;
+      background: var(--paper);
+    }
+    .lane-head {
+      display: flex; align-items: center; gap: 10px;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--line);
+      background: var(--paper-soft);
+    }
+    .lane-head .chev {
+      font-family: var(--mono); font-size: 10px; color: var(--ink-mute);
+    }
+    .lane-head .lane-title { font-weight: 600; font-size: 13px; }
+    .lane-head .lane-count {
+      font-family: var(--mono); font-size: 10px; color: var(--ink-mute);
+    }
+    .lane-body {
+      display: flex; gap: 10px;
+      padding: 14px;
+      overflow-x: auto;
+    }
+
+    /* Issue cards inside lanes */
+    .issue-card {
+      flex: 0 0 220px;
+      min-height: 90px;
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--paper);
+      box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+      cursor: pointer;
+      transition: background 0.12s, border-color 0.12s;
+      position: relative;
+    }
+    .issue-card:hover {
+      background: var(--hot-tint);
+      border-color: var(--hot);
+    }
+    .issue-card .ic-head {
+      display: flex; align-items: center; gap: 6px;
+      margin-bottom: 4px;
+    }
+    .issue-card .ic-pri {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: var(--hot);
+      flex-shrink: 0;
+    }
+    .issue-card .ic-pri.p2 { background: var(--accent); }
+    .issue-card .ic-pri.p3 { background: var(--line); }
+    .issue-card .ic-title {
+      font-size: 13px; font-weight: 500;
+      line-height: 1.3;
+      color: var(--ink);
+    }
+    .issue-card .ic-meta {
+      display: flex; gap: 6px;
+      margin-top: 6px;
+    }
+    .issue-card .mini-pill {
+      font-family: var(--mono);
+      font-size: 9px;
+      padding: 1px 6px;
+      border: 1px solid var(--line-soft); border-radius: 999px;
+      color: var(--ink-mute);
+    }
+    .issue-card[data-clickable="true"]::after {
+      content: attr(data-count);
+      position: absolute;
+      top: -8px; right: 8px;
+      font-family: var(--mono);
+      font-size: 9px;
+      color: var(--hot);
+      background: var(--paper);
+      padding: 1px 6px;
+      border: 1px solid var(--hot);
+      border-radius: 999px;
+      line-height: 1.3;
+    }
+
+    /* Talk-to-Lead floating button */
+    .talk-to-lead {
+      position: absolute;
+      bottom: 22px; right: 22px;
+      font-family: var(--body); font-size: 12px;
+      padding: 10px 14px;
+      background: var(--ink); color: var(--paper);
+      border: 1px solid var(--ink);
+      border-radius: 999px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+      cursor: pointer;
+      display: flex; align-items: center; gap: 6px;
+    }
+    .talk-to-lead[data-clickable="true"]:hover {
+      background: var(--hot); border-color: var(--hot);
+    }
+    .talk-to-lead[data-clickable="true"]::after {
+      content: attr(data-count);
+      position: absolute;
+      top: -8px; right: 8px;
+      font-family: var(--mono); font-size: 9px;
+      color: var(--hot);
+      background: var(--paper);
+      padding: 1px 6px;
+      border: 1px solid var(--hot);
+      border-radius: 999px;
+      line-height: 1.3;
+    }
+
+    /* ==== Agents view ==== */
+    .agents-app {
+      display: grid;
+      grid-template-rows: 64px 1fr;
+      min-height: 760px;
+    }
+    .agents-body {
+      display: grid;
+      grid-template-columns: 64px 80px 1fr 340px;
+      min-height: 0;
+    }
+    .agent-icon-rail {
+      display: flex; flex-direction: column; gap: 8px;
+      padding: 18px 12px;
+      border-right: 1px solid var(--line);
+      background: var(--paper);
+      align-items: center;
+    }
+    .agent-avatar {
+      width: 44px; height: 44px;
+      border-radius: 50%;
+      background: var(--paper-soft);
+      border: 1px dashed var(--line);
+      display: flex; align-items: center; justify-content: center;
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--ink-soft);
+      cursor: pointer;
+      position: relative;
+    }
+    .agent-avatar.active {
+      border-color: var(--accent); border-style: solid;
+      background: var(--accent-tint);
+      color: var(--accent);
+    }
+    .agent-avatar .status-dot {
+      position: absolute;
+      bottom: 2px; right: 2px;
+      width: 9px; height: 9px;
+      border-radius: 50%;
+      background: var(--hot);
+      border: 1.5px solid var(--paper);
+    }
+    .agent-avatar .status-dot.idle { background: var(--line); }
+    .agent-avatar .status-dot.working { background: #1d8a4e; }
+    .agent-avatar[data-clickable="true"]::after {
+      content: attr(data-count);
+      position: absolute;
+      top: -4px; left: -8px;
+      font-family: var(--mono); font-size: 9px;
+      color: var(--hot);
+      background: var(--paper);
+      padding: 1px 5px;
+      border: 1px solid var(--hot);
+      border-radius: 999px;
+    }
+
+    .agent-detail {
+      display: flex; flex-direction: column;
+      padding: 18px 22px;
+      gap: 12px;
+      min-height: 0;
+    }
+    .agent-detail .ad-head .placeholder {
+      font-size: 16px; line-height: 1.4; color: var(--ink);
+    }
+    .agent-detail .terminal {
+      flex-grow: 1;
+      background: #1a1a1a;
+      color: #d1d1c8;
+      border-radius: 8px;
+      padding: 14px 16px;
+      font-family: var(--mono);
+      font-size: 12px;
+      line-height: 1.7;
+      min-height: 280px;
+      overflow: hidden;
+      position: relative;
+    }
+    .agent-detail .terminal[data-clickable="true"] {
+      cursor: pointer;
+      transition: filter 0.12s;
+    }
+    .agent-detail .terminal[data-clickable="true"]:hover {
+      filter: brightness(1.15);
+    }
+    .agent-detail .terminal[data-clickable="true"]::after {
+      content: attr(data-count);
+      position: absolute;
+      top: 10px; right: 12px;
+      font-family: var(--mono); font-size: 9px;
+      color: var(--hot);
+      background: var(--paper);
+      padding: 1px 6px;
+      border: 1px solid var(--hot);
+      border-radius: 999px;
+    }
+    .agent-detail .terminal .prompt { color: #7ab87a; }
+    .agent-detail .terminal .cmd { color: #d1d1c8; }
+    .agent-detail .terminal .out { color: #8a8a8a; }
+
+    .agent-context {
+      border-left: 1px solid var(--line);
+      padding: 18px 20px;
+      background: var(--paper-soft);
+      display: flex; flex-direction: column; gap: 12px;
+    }
+    .agent-context .region { background: var(--paper); }
+
+    /* ==== Onboarding ==== */
+    .onb-app {
+      padding: 60px 40px;
+      min-height: 720px;
+      background: var(--paper-soft);
+    }
+    .onb-card {
+      width: min(720px, 100%);
+      margin: 0 auto;
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+    .onb-header {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      padding: 28px 32px 24px;
+      border-bottom: 1px solid var(--line);
+    }
+    .onb-kicker {
+      font-family: var(--mono);
+      font-size: 10px;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 6px;
+    }
+    .onb-title { font-size: 22px; font-weight: 600; margin: 0; }
+    .onb-subtitle { font-size: 13px; color: var(--ink-soft); margin-top: 6px; max-width: 480px; }
+    .onb-progress {
+      text-align: right;
+      font-family: var(--mono); font-size: 11px; color: var(--ink-mute);
+    }
+    .onb-progress strong { font-size: 22px; color: var(--ink); display: block; line-height: 1; }
+    .onb-steps { padding: 6px 32px 28px; display: flex; flex-direction: column; gap: 6px; }
+    .onb-step {
+      display: grid; grid-template-columns: 28px 1fr auto;
+      gap: 14px; align-items: center;
+      padding: 14px 16px;
+      border-radius: 8px;
+      transition: background 0.12s;
+    }
+    .onb-step[data-clickable="true"] { cursor: pointer; }
+    .onb-step[data-clickable="true"]:hover { background: var(--hot-tint); border-color: var(--hot); }
+    .onb-step .step-num {
+      font-family: var(--mono); font-size: 12px;
+      color: var(--ink-mute);
+      width: 22px; height: 22px;
+      border: 1px dashed var(--line); border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .onb-step.complete .step-num { background: #1d8a4e; color: #fff; border-color: #1d8a4e; border-style: solid; }
+    .onb-step.current .step-num { background: var(--accent); color: var(--paper); border-color: var(--accent); border-style: solid; }
+    .onb-step .step-body { font-size: 14px; }
+    .onb-step .step-body b { font-weight: 600; }
+    .onb-step .step-body .sub { color: var(--ink-soft); font-size: 12.5px; display: block; margin-top: 2px; }
+    .onb-step .step-state {
+      font-family: var(--mono); font-size: 10px;
+      color: var(--ink-mute);
+      text-transform: uppercase; letter-spacing: 0.06em;
+    }
+
+    /* Drawer (unchanged from before) */
+    .drawer {
+      position: fixed; top: 0; right: 0;
+      width: min(440px, 92vw); height: 100vh;
+      background: var(--paper);
+      border-left: 1px solid var(--line);
+      box-shadow: -8px 0 32px rgba(0,0,0,0.08);
+      transform: translateX(100%);
+      transition: transform 0.24s cubic-bezier(0.16, 1, 0.3, 1);
+      z-index: 50;
+      display: flex; flex-direction: column;
+      overflow: hidden;
+    }
+    .drawer.open { transform: translateX(0); }
+    .drawer-head { padding: 18px 22px 14px; border-bottom: 1px solid var(--line-soft); }
+    .drawer-kicker {
+      font-family: var(--mono); font-size: 10px;
+      letter-spacing: 0.14em; text-transform: uppercase;
+      color: var(--hot); margin-bottom: 4px;
+    }
+    .drawer-title { font-size: 20px; font-weight: 600; letter-spacing: -0.01em; margin: 0 0 6px; }
+    .drawer-desc { font-size: 13px; color: var(--ink-soft); line-height: 1.5; }
+    .drawer-close {
+      position: absolute; top: 14px; right: 16px;
+      width: 28px; height: 28px;
+      background: transparent; border: 1px solid var(--line);
+      border-radius: 50%; cursor: pointer;
+      font-size: 14px; color: var(--ink-soft);
+      display: flex; align-items: center; justify-content: center;
+    }
+    .drawer-close:hover { background: var(--bg); border-color: var(--ink); color: var(--ink); }
+    .drawer-body { overflow-y: auto; padding: 14px 22px 32px; display: flex; flex-direction: column; gap: 22px; }
+    .drawer-section h4 {
+      font-family: var(--mono); font-size: 10px;
+      letter-spacing: 0.12em; text-transform: uppercase;
+      color: var(--ink-mute);
+      margin: 0 0 8px;
+      display: flex; align-items: baseline; gap: 8px;
+    }
+    .drawer-section h4 .n { font-family: var(--mono); font-size: 10px; color: var(--ink-mute); }
+    .drawer-item {
+      display: block;
+      padding: 10px 12px;
+      border: 1px solid var(--line-soft);
+      border-radius: 6px;
+      text-decoration: none;
+      color: var(--ink);
+      margin-bottom: 6px;
+      transition: border-color 0.12s, background 0.12s;
+    }
+    .drawer-item:hover { border-color: var(--accent); background: var(--accent-tint); }
+    .drawer-item .di-head { display: flex; align-items: center; gap: 8px; margin-bottom: 2px; }
+    .drawer-item .di-name { font-size: 13.5px; font-weight: 500; }
+    .drawer-item .di-id { font-family: var(--mono); font-size: 10px; color: var(--ink-mute); margin-left: auto; }
+    .drawer-item .di-sub { font-size: 12.5px; color: var(--ink-soft); line-height: 1.45; }
+    .drawer-item.missing { border-style: dashed; opacity: 0.55; }
+    .drawer-item.missing .di-sub { font-style: italic; }
+    .drawer-item.deprecated {
+      border-style: dashed;
+      border-color: #d97c12;
+      background: #fff5e6;
+    }
+    .drawer-item.deprecated .di-name::after {
+      content: "  deprecated";
+      font-size: 9px;
+      font-weight: 500;
+      letter-spacing: 0.08em;
+      color: #d97c12;
+      text-transform: uppercase;
+    }
+    .drawer-item.deleted {
+      border-style: dashed;
+      border-color: var(--hot);
+      background: var(--hot-tint);
+      opacity: 0.55;
+      text-decoration: line-through;
+      text-decoration-color: rgba(216,70,42,0.45);
+    }
+    .drawer-item.deleted .di-name {
+      text-decoration: line-through;
+    }
+    .drawer-item.deleted .di-name::after {
+      content: "  deleted";
+      font-size: 9px;
+      font-weight: 500;
+      letter-spacing: 0.08em;
+      color: var(--hot);
+      text-transform: uppercase;
+      text-decoration: none;
+    }
+    .drawer-empty {
+      font-family: var(--mono); font-size: 11px;
+      color: var(--ink-mute);
+      padding: 8px 12px;
+      border: 1px dashed var(--line);
+      border-radius: 4px;
+    }
+    .veil {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.18);
+      backdrop-filter: blur(1px);
+      opacity: 0; pointer-events: none;
+      transition: opacity 0.2s;
+      z-index: 40;
+    }
+    .veil.open { opacity: 1; pointer-events: auto; }
+  </style>
+</head>
+<body>
+  <header class="page-head">
+    <h1>loom · wireframe map</h1>
+    <span class="hint">Click any dashed region to see the features &amp; stories that touch it.</span>
+    <a class="back" href="index.html">← Catalog</a>
+  </header>
+
+  <div class="view-switch">
+    <button data-frame="kanban" class="active">Kanban view</button>
+    <button data-frame="agents">Agents view</button>
+    <button data-frame="onboarding">Onboarding</button>
+    <span class="legend"><span class="dot"></span> hover regions to highlight; click for details</span>
+  </div>
+
+  <main class="canvas">
+    <!-- KANBAN frame -->
+    <div class="frame active" data-frame="kanban">
+      <div class="wf kanban-app" style="position: relative;">
+        <!-- Top bar: brand + view tabs + actions -->
+        <div class="topbar">
+          <div class="brand">
+            <span class="logo">Loom</span>
+            <div class="region" data-clickable="true" data-region="ws-switcher" style="padding: 4px 10px;">
+              <span class="placeholder">ACME workspace ▾</span>
+            </div>
+          </div>
+          <div class="header-nav">
+            <div class="region tab-active"><span class="placeholder">Kanban</span></div>
+            <div class="region"><span class="placeholder">Table</span></div>
+            <div class="region"><span class="placeholder">Graph</span></div>
+            <div class="region" data-clickable="true" data-region="filter-area" style="margin-left: auto; padding: 4px 10px;">
+              <span class="placeholder">Group by status ▾</span>
+            </div>
+          </div>
+          <div class="actions">
+            <div class="region" data-clickable="true" data-region="topbar-search">
+              <span class="placeholder">⌕ Search</span>
+            </div>
+            <div class="region" data-clickable="true" data-region="topbar-notifications">
+              <span class="placeholder">● SSE</span>
+            </div>
+            <div class="region" data-clickable="true" data-region="topbar-user">
+              <span class="placeholder">◐ ⊙</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="app-body">
+          <!-- Nav rail: 4 icons only, matching the real loom UI -->
+          <div class="nav-rail">
+            <div class="nav-btn active" data-clickable="true" data-region="nav-workspaces" title="Workspaces">▦</div>
+            <div class="nav-btn" data-clickable="true" data-region="nav-agents" title="Agents">⚇</div>
+            <div class="nav-btn" data-clickable="true" data-region="nav-monitor" title="Monitor">◉</div>
+            <div class="nav-btn" data-clickable="true" data-region="nav-settings" title="Settings">⚙</div>
+          </div>
+
+          <!-- Main work area -->
+          <div class="work-area">
+            <div class="filter-bar">
+              <div class="region" data-clickable="true" data-region="filter-priority"><span class="placeholder">Priority ▾</span></div>
+              <div class="region" data-clickable="true" data-region="filter-type"><span class="placeholder">Type ▾</span></div>
+              <div class="region" data-clickable="true" data-region="filter-repo"><span class="placeholder">Repo ▾</span></div>
+              <div class="region" data-clickable="true" data-region="filter-more"><span class="placeholder">+ More filters</span></div>
+              <div class="region" style="margin-left: auto;"><span class="placeholder">+ New issue</span></div>
+            </div>
+
+            <div class="lane-toolbar">
+              <div class="region" data-clickable="true" data-region="lane-controls"><span class="placeholder">▾ Expand all</span></div>
+              <div class="region" data-clickable="true" data-region="lane-controls"><span class="placeholder">▸ Collapse all</span></div>
+            </div>
+
+            <!-- Horizontal swim lanes — matches the real loom UI -->
+            <div class="swim-lanes">
+              <!-- Ready lane -->
+              <div class="swim-lane region" data-clickable="true" data-region="lane-ready">
+                <div class="lane-head">
+                  <span class="chev">▾</span>
+                  <span class="lane-title">Ready</span>
+                  <span class="lane-count">12</span>
+                </div>
+                <div class="lane-body">
+                  <div class="issue-card" data-clickable="true" data-region="issue-card">
+                    <div class="ic-head"><span class="ic-pri"></span><span class="ic-title">Add OAuth fallback</span></div>
+                    <div class="ic-meta"><span class="mini-pill">bug</span><span class="mini-pill">@falcon</span></div>
+                  </div>
+                  <div class="issue-card">
+                    <div class="ic-head"><span class="ic-pri p2"></span><span class="ic-title">Migrate session store</span></div>
+                    <div class="ic-meta"><span class="mini-pill">task</span><span class="mini-pill">P2</span></div>
+                  </div>
+                  <div class="issue-card">
+                    <div class="ic-head"><span class="ic-pri p3"></span><span class="ic-title">Write release notes</span></div>
+                    <div class="ic-meta"><span class="mini-pill">chore</span></div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- In Progress lane -->
+              <div class="swim-lane region" data-clickable="true" data-region="lane-in-progress">
+                <div class="lane-head">
+                  <span class="chev">▾</span>
+                  <span class="lane-title">In Progress</span>
+                  <span class="lane-count">3</span>
+                </div>
+                <div class="lane-body">
+                  <div class="issue-card">
+                    <div class="ic-head"><span class="ic-pri"></span><span class="ic-title">Refactor diff stats</span></div>
+                    <div class="ic-meta"><span class="mini-pill">task</span><span class="mini-pill">@ember</span></div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Review lane -->
+              <div class="swim-lane region" data-clickable="true" data-region="lane-review">
+                <div class="lane-head">
+                  <span class="chev">▾</span>
+                  <span class="lane-title">Review</span>
+                  <span class="lane-count">2</span>
+                </div>
+                <div class="lane-body">
+                  <div class="issue-card" data-clickable="true" data-region="issue-review-card">
+                    <div class="ic-head"><span class="ic-pri p2"></span><span class="ic-title">Design: container runner</span></div>
+                    <div class="ic-meta"><span class="mini-pill">design</span><span class="mini-pill">@gamma</span></div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Blocked lane -->
+              <div class="swim-lane region" data-clickable="true" data-region="lane-blocked">
+                <div class="lane-head">
+                  <span class="chev">▾</span>
+                  <span class="lane-title">Blocked</span>
+                  <span class="lane-count">1</span>
+                </div>
+                <div class="lane-body">
+                  <div class="issue-card">
+                    <div class="ic-head"><span class="ic-pri"></span><span class="ic-title">Add JWT rotation</span></div>
+                    <div class="ic-meta"><span class="mini-pill">blocked</span></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Talk to Lead floating button -->
+        <div class="talk-to-lead" data-clickable="true" data-region="talk-to-lead">
+          💬 Talk to Lead
+        </div>
+      </div>
+    </div>
+
+    <!-- AGENTS frame -->
+    <div class="frame" data-frame="agents">
+      <div class="wf agents-app">
+        <div class="topbar">
+          <div class="brand">
+            <span class="logo">Loom</span>
+            <div class="region" style="padding: 4px 10px;"><span class="placeholder">ACME workspace ▾</span></div>
+          </div>
+          <div class="header-nav">
+            <div class="region"><span class="placeholder">Kanban</span></div>
+            <div class="region tab-active"><span class="placeholder">Agents</span></div>
+            <div class="region"><span class="placeholder">Monitor</span></div>
+          </div>
+          <div class="actions">
+            <div class="region"><span class="placeholder">⌕</span></div>
+            <div class="region"><span class="placeholder">◐</span></div>
+            <div class="region"><span class="placeholder">⊙</span></div>
+          </div>
+        </div>
+
+        <div class="agents-body">
+          <!-- Outer nav rail -->
+          <div class="nav-rail">
+            <div class="nav-btn" data-clickable="true" data-region="nav-workspaces" title="Workspaces">▦</div>
+            <div class="nav-btn active" data-clickable="true" data-region="nav-agents" title="Agents">⚇</div>
+            <div class="nav-btn" data-clickable="true" data-region="nav-monitor" title="Monitor">◉</div>
+            <div class="nav-btn" data-clickable="true" data-region="nav-settings" title="Settings">⚙</div>
+          </div>
+
+          <!-- Agent icon rail (specific to /agents) -->
+          <div class="agent-icon-rail">
+            <div class="agent-avatar active" data-clickable="true" data-region="agent-icon-rail">
+              fal
+              <span class="status-dot working"></span>
+            </div>
+            <div class="agent-avatar">
+              emb
+              <span class="status-dot idle"></span>
+            </div>
+            <div class="agent-avatar">
+              gam
+              <span class="status-dot"></span>
+            </div>
+            <div class="agent-avatar">
+              del
+              <span class="status-dot idle"></span>
+            </div>
+          </div>
+
+          <!-- Agent detail main: header + terminal -->
+          <div class="agent-detail">
+            <div class="region ad-head" data-clickable="true" data-region="agent-detail-header" style="border-style: solid; border-color: var(--line); background: transparent;">
+              <span class="placeholder"><b>falcon</b> · working on <b>fix-auth-bug</b><br>3 commits ahead · 2 files changed</span>
+            </div>
+            <div class="terminal" data-clickable="true" data-region="agent-terminal">
+              <div><span class="prompt">$</span> <span class="cmd">loom task falcon --auto</span></div>
+              <div class="out">▸ Claimed issue: Add OAuth fallback</div>
+              <div class="out">▸ Generating plan…</div>
+              <div class="out">▸ Edit src/auth/oauth.go (+34 -8)</div>
+              <div class="out">▸ Run tests: 28 passed</div>
+              <div><span class="prompt">$</span> <span class="cmd">_</span></div>
+            </div>
+          </div>
+
+          <!-- Right context column -->
+          <div class="agent-context">
+            <div class="region" data-clickable="true" data-region="agent-work-panel" style="padding: 12px 14px;">
+              <span class="label">Work panel</span>
+              <span class="placeholder">
+                · mon-004 (in progress 2m)<br>
+                · auth-cleanup (queued)<br>
+                · 1 blocker
+              </span>
+            </div>
+            <div class="region" data-clickable="true" data-region="session-history" style="padding: 12px 14px;">
+              <span class="label">Session history</span>
+              <span class="placeholder">
+                · Session #3 (12m, ✓)<br>
+                · Session #2 (4m, ✗ auth)<br>
+                · Session #1 (8m, ✓)
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ONBOARDING frame -->
+    <div class="frame" data-frame="onboarding">
+      <div class="wf onb-app">
+        <div class="onb-card">
+          <div class="onb-header">
+            <div>
+              <div class="onb-kicker">Welcome to loom</div>
+              <h2 class="onb-title">Set up your first workspace</h2>
+              <p class="onb-subtitle">Six guided steps from blank slate to your first agent running on a real issue.</p>
+            </div>
+            <div class="onb-progress">
+              <strong>2/6</strong>
+              steps complete
+            </div>
+          </div>
+          <div class="onb-steps">
+            <div class="onb-step complete" data-clickable="true" data-region="onb-workspace">
+              <span class="step-num">✓</span>
+              <span class="step-body"><b>Create workspace</b><span class="sub">Name it and give it a repo path or clone URL.</span></span>
+              <span class="step-state">Complete</span>
+            </div>
+            <div class="onb-step complete" data-clickable="true" data-region="onb-repo">
+              <span class="step-num">✓</span>
+              <span class="step-body"><b>Verify repo</b><span class="sub">Path, git, default branch, remote.</span></span>
+              <span class="step-state">Complete</span>
+            </div>
+            <div class="onb-step current" data-clickable="true" data-region="onb-backend">
+              <span class="step-num">3</span>
+              <span class="step-body"><b>Configure backend</b><span class="sub">Install AI CLI and complete login from the embedded terminal.</span></span>
+              <span class="step-state">Current</span>
+            </div>
+            <div class="onb-step" data-clickable="true" data-region="onb-agent">
+              <span class="step-num">4</span>
+              <span class="step-body"><b>Create agent</b><span class="sub">Pick a role, backend, and repo.</span></span>
+              <span class="step-state">Pending</span>
+            </div>
+            <div class="onb-step" data-clickable="true" data-region="onb-issue">
+              <span class="step-num">5</span>
+              <span class="step-body"><b>Create first issue</b><span class="sub">Give your agent something to do.</span></span>
+              <span class="step-state">Pending</span>
+            </div>
+            <div class="onb-step" data-clickable="true" data-region="onb-run">
+              <span class="step-num">6</span>
+              <span class="step-body"><b>Run first agent</b><span class="sub">Watch its session stream live.</span></span>
+              <span class="step-state">Pending</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <div class="veil" id="veil"></div>
+  <aside class="drawer" id="drawer">
+    <button class="drawer-close" id="drawerClose" aria-label="Close">×</button>
+    <div class="drawer-head">
+      <div class="drawer-kicker" id="drawerKicker"></div>
+      <h2 class="drawer-title" id="drawerTitle"></h2>
+      <p class="drawer-desc" id="drawerDesc"></p>
+    </div>
+    <div class="drawer-body" id="drawerBody"></div>
+  </aside>
+
+  <script>
+    // ---------- region → catalog mapping ----------
+    const REGION_MAP = {
+      // ── Top bar ──
+      "ws-switcher":          { title: "Workspace switcher",  desc: "Pick the active workspace; multi-workspace navigation.",                       features: ["workspace-switcher", "workspace-tree-navigator", "workspace-api", "redirecttoworkspace"], stories: ["switch-workspaces", "attach-repo-to-existing-workspace"] },
+      "topbar-search":        { title: "Search",              desc: "⌘K opens a fuzzy search across all issues in the workspace.",                  features: ["full-text-issue-search", "issues-api"], stories: ["keyboard-driven-search"] },
+      "topbar-notifications": { title: "Live updates",        desc: "SSE indicator — green when connected; banner appears when stale.",            features: ["real-time-sse-mutations", "real-time-event-stream", "stale-data-banner", "sse-subscription-tokens"], stories: ["watch-live-activity"] },
+      "topbar-user":          { title: "Theme & user menu",   desc: "Auth gate, theme toggle, profile + logout.",                                  features: ["auth-gate-login", "theme-system-light-dark", "user-menu", "auth-mode-resolution"], stories: ["theme-and-shortcuts"] },
+      "filter-area":          { title: "View options",        desc: "Group by status / priority / epic / assignee / type / label / repo.",         features: ["kanban-board", "view-switcher"], stories: ["watch-live-activity"] },
+
+      // ── Nav rail (4 icons, matching the actual app) ──
+      "nav-workspaces": { title: "Workspaces (Kanban / Table / Graph)", desc: "Issue views over the active workspace.",                             features: ["kanban-board", "table-view", "graph-view", "bulk-action-toolbar", "dependencies-api"], stories: ["watch-live-activity", "triage-blocked", "bulk-update-issues"] },
+      "nav-agents":     { title: "Agents",                 desc: "Per-agent rail + embedded terminal + work panel.",                              features: ["agents-page", "agent-icon-rail", "agent-rail", "agent-detail-main", "agent-work-panel"], stories: ["watch-live-activity"] },
+      "nav-monitor":    { title: "Monitor",                desc: "Multi-agent operator dashboard — health, activity, usage.",                     features: ["monitor-dashboard", "monitor-dashboard-panels", "monitor-dashboard-api", "observability-dashboard"], stories: ["watch-live-activity", "monitor-fleet-health"] },
+      "nav-settings":   { title: "Settings",               desc: "Backend config, per-agent overrides, terminal fonts, onboarding restart.",      features: ["settings", "backend-config-api", "local-settings-api", "ai-backend-setup-list"], stories: ["pick-a-backend"] },
+
+      // ── Filter bar ──
+      "filter-priority": { title: "Priority filter",         desc: "Multi-select priority filter chip.",                                          features: ["filter-bar", "moremoref ilters-menu"], stories: ["bulk-update-issues"] },
+      "filter-type":     { title: "Type filter",             desc: "Multi-select issue-type filter (bug / feature / task / epic).",               features: ["filter-bar", "type-icon"], stories: ["bulk-update-issues"] },
+      "filter-repo":     { title: "Repo filter",             desc: "Single or multi-select repo / repo-group filter.",                            features: ["repo-selector", "repo-badge"], stories: ["coordinate-across-repos"] },
+      "filter-more":     { title: "More filters",            desc: "Status / assignee / owner / label / milestone / parent / custom.",            features: ["more-filters-menu"], stories: ["bulk-update-issues"] },
+
+      // ── Swim lanes ──
+      "lane-controls":   { title: "Expand / Collapse all",   desc: "Toolbar at the top of the swim-lane board.",                                  features: ["kanban-board"], stories: ["watch-live-activity"] },
+      "lane-ready":      { title: "Ready lane",              desc: "Issues with an approved design, waiting for implementation.",                 features: ["kanban-board", "issue-ready-blocked-stats-api"], stories: ["plan-a-task", "implement-approved-task"] },
+      "lane-in-progress":{ title: "In Progress lane",        desc: "Issues actively being worked by an agent. Drag from Ready triggers assignee prompt.", features: ["kanban-board", "draggable-issue-card", "assignee-prompt"], stories: ["implement-approved-task", "redirect-task"] },
+      "lane-review":     { title: "Review lane",             desc: "Plans waiting for human approval before implementation.",                     features: ["approve-reject-review-flow", "issue-detail-page"], stories: ["review-design"] },
+      "lane-blocked":    { title: "Blocked lane",            desc: "Issues with unresolved dependencies preventing progress.",                    features: ["blocked-badge", "blocked-summary", "issue-ready-blocked-stats-api"], stories: ["triage-blocked", "recover-stuck-agent"] },
+
+      // ── Cards ──
+      "issue-card":         { title: "Issue card",            desc: "Title, priority, type, assignee, labels — clicks open the detail panel.",    features: ["issue-card", "draggable-issue-card", "issues-api", "issue-detail-page"], stories: ["plan-a-task", "redirect-task"] },
+      "issue-review-card":  { title: "Review-state issue",    desc: "Issue in Review — clicking opens the design + approve/reject flow.",         features: ["approve-reject-review-flow", "issue-detail-page", "activity-log-comments"], stories: ["review-design"] },
+
+      // ── Floating Talk-to-Lead ──
+      "talk-to-lead":    { title: "Talk to Lead",            desc: "Built-in terminal running `loom lead` over wterm + tmux. Plan, review, or fan out an epic.", features: ["talk-to-lead-terminal", "loom-lead", "loom-epic-run"], stories: ["orchestrate-an-epic", "spawn-one-shot-worker", "review-design"] },
+
+      // ── Agents view ──
+      "agent-icon-rail":     { title: "Agent icon rail",     desc: "Vertical avatars; click to switch the selected agent (URL-driven).",          features: ["agent-icon-rail", "agent-rail", "agents-api"], stories: ["watch-live-activity"] },
+      "agent-detail-header": { title: "Agent detail header", desc: "Selected agent's name, current task, git state (commits ahead, files changed).", features: ["agent-detail-main", "agents-api", "agent-control-api-lifecycle"], stories: ["redirect-task"] },
+      "agent-terminal":      { title: "Embedded terminal",   desc: "Live xterm.js connection to the agent's tmux session over WebSocket.",        features: ["per-agent-embedded-terminals", "agent-tmux-attach", "terminal-api"], stories: ["debug-failed-run", "recover-stuck-terminal"] },
+      "agent-work-panel":    { title: "Work panel",          desc: "Tasks assigned to the agent + bottlenecks affecting it.",                     features: ["agent-work-panel", "agent-detail-panel"], stories: ["redirect-task", "recover-stuck-agent"] },
+      "session-history":     { title: "Session history",     desc: "Linked sessions where this agent worked, with phase, duration, and result.",  features: ["session-history", "native-session-transcripts", "agent-logs-queue-api"], stories: ["debug-failed-run", "validate-transcripts-persist"] },
+
+      // ── Onboarding steps ──
+      "onb-workspace": { title: "Step 1 — Create workspace", desc: "Name the workspace and attach a repo (path or clone URL).",                  features: ["onboarding-flow", "loom-workspace", "workspace-api", "createworkspacemodal"], stories: ["web-onboarding-flow"] },
+      "onb-repo":      { title: "Step 2 — Verify repo",      desc: "Check the repo exists, is a git repo, has a remote, and a default branch.",  features: ["loom-repo", "workspace-repos-lifecycle-api"], stories: ["handle-repo-without-remote", "attach-repo-to-existing-workspace", "verify-repo-checks"] },
+      "onb-backend":   { title: "Step 3 — Configure backend",desc: "Install AI CLI and complete login from the embedded terminal.",              features: ["ai-backend-setup-list", "backend-config-api", "claude", "codex", "opencode"], stories: ["pick-a-backend", "install-backend-cli-detail"] },
+      "onb-agent":     { title: "Step 4 — Create agent",     desc: "Pick role, backend, and repo for the first agent.",                          features: ["create-modals", "loom-agentdef", "loom-role", "agents-api"], stories: ["understand-roles", "agentdef-lifecycle"] },
+      "onb-issue":     { title: "Step 5 — First issue",      desc: "Create the first issue to give the agent something to do.",                  features: ["create-issue-modal", "issues-api"], stories: ["run-first-agent"] },
+      "onb-run":       { title: "Step 6 — Run first agent",  desc: "Start the agent and watch its session in real-time.",                         features: ["per-agent-embedded-terminals", "session-history", "real-time-sse-mutations"], stories: ["run-first-agent", "validate-planner-e2e"] },
+    };
+
+    // ---------- helpers ----------
+    function el(tag, opts) {
+      const n = document.createElement(tag);
+      if (!opts) return n;
+      if (opts.class) n.className = opts.class;
+      if (opts.id) n.id = opts.id;
+      if (opts.text != null) n.textContent = String(opts.text);
+      if (opts.href != null) n.setAttribute("href", String(opts.href));
+      if (opts.attrs) for (const [k, v] of Object.entries(opts.attrs)) n.setAttribute(k, String(v));
+      if (opts.children) for (const c of opts.children) {
+        if (c == null) continue;
+        n.appendChild(typeof c === "string" ? document.createTextNode(c) : c);
+      }
+      return n;
+    }
+    function clear(n) { while (n.firstChild) n.removeChild(n.firstChild); }
+    function slug(s) { return String(s).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""); }
+
+    // data: canonical slug -> item.  prev: previous-id-slug -> canonical-slug.
+    const data = { features: new Map(), stories: new Map() };
+    const prev = { features: new Map(), stories: new Map() };
+
+    function lookup(kind, ref) {
+      const key = slug(ref);
+      if (data[kind].has(key)) return data[kind].get(key);
+      const canon = prev[kind].get(key);
+      return canon ? data[kind].get(canon) : undefined;
+    }
+
+    async function loadCatalog() {
+      const [f, s] = await Promise.all([
+        fetch("features.yaml").then((r) => r.text()).then(jsyaml.load),
+        fetch("stories.yaml").then((r) => r.text()).then(jsyaml.load),
+      ]);
+      for (const cat of (f.categories || [])) {
+        for (const item of (cat.features || [])) {
+          const key = slug(item.id || item.name);
+          data.features.set(key, item);
+          for (const pid of (item.previous_ids || [])) prev.features.set(slug(pid), key);
+        }
+      }
+      for (const cat of (s.categories || [])) {
+        for (const item of (cat.stories || [])) {
+          const key = slug(item.id);
+          data.stories.set(key, item);
+          for (const pid of (item.previous_ids || [])) prev.stories.set(slug(pid), key);
+        }
+      }
+      paintCounts();
+    }
+
+    function paintCounts() {
+      document.querySelectorAll("[data-clickable='true']").forEach((r) => {
+        const key = r.getAttribute("data-region");
+        const m = REGION_MAP[key];
+        if (!m) { r.setAttribute("data-count", "?"); return; }
+        let resolved = 0;
+        for (const f of (m.features || [])) if (lookup("features", f)) resolved++;
+        for (const s of (m.stories  || [])) if (lookup("stories",  s)) resolved++;
+        r.setAttribute("data-count", String(resolved));
+      });
+    }
+
+    const drawer = document.getElementById("drawer");
+    const veil = document.getElementById("veil");
+
+    function openDrawer(key) {
+      const m = REGION_MAP[key];
+      if (!m) return;
+      document.getElementById("drawerKicker").textContent = key;
+      document.getElementById("drawerTitle").textContent = m.title;
+      document.getElementById("drawerDesc").textContent = m.desc || "";
+      const body = document.getElementById("drawerBody");
+      clear(body);
+
+      const fSection = el("div", { class: "drawer-section" });
+      fSection.appendChild(el("h4", {
+        children: [document.createTextNode("Features "), el("span", { class: "n", text: "· " + (m.features || []).length })],
+      }));
+      if ((m.features || []).length === 0) {
+        fSection.appendChild(el("div", { class: "drawer-empty", text: "no features mapped" }));
+      } else {
+        for (const fid of m.features) {
+          const item = lookup("features", fid);
+          if (item) {
+            const lc = item.lifecycle && item.lifecycle !== "active" ? " " + item.lifecycle : "";
+            const a = el("a", { class: "drawer-item" + lc, href: "index.html#features/" + slug(item.id || item.name) });
+            const head = el("div", { class: "di-head" });
+            head.appendChild(el("span", { class: "di-name", text: item.name || item.id }));
+            head.appendChild(el("span", { class: "di-id", text: slug(item.id || item.name) }));
+            a.appendChild(head);
+            if (item.purpose) a.appendChild(el("div", { class: "di-sub", text: item.purpose }));
+            fSection.appendChild(a);
+          } else {
+            const a = el("a", { class: "drawer-item missing", href: "index.html#features", attrs: { title: "Not yet in features.yaml" } });
+            const head = el("div", { class: "di-head" });
+            head.appendChild(el("span", { class: "di-name", text: fid }));
+            head.appendChild(el("span", { class: "di-id", text: "missing" }));
+            a.appendChild(head);
+            a.appendChild(el("div", { class: "di-sub", text: "Not in features.yaml — feature-cataloger should add this." }));
+            fSection.appendChild(a);
+          }
+        }
+      }
+      body.appendChild(fSection);
+
+      const sSection = el("div", { class: "drawer-section" });
+      sSection.appendChild(el("h4", {
+        children: [document.createTextNode("Stories "), el("span", { class: "n", text: "· " + (m.stories || []).length })],
+      }));
+      if ((m.stories || []).length === 0) {
+        sSection.appendChild(el("div", { class: "drawer-empty", text: "no stories mapped" }));
+      } else {
+        for (const sid of m.stories) {
+          const item = lookup("stories", sid);
+          if (item) {
+            const lc = item.lifecycle && item.lifecycle !== "active" ? " " + item.lifecycle : "";
+            const a = el("a", { class: "drawer-item" + lc, href: "index.html#stories/" + slug(item.id) });
+            const head = el("div", { class: "di-head" });
+            head.appendChild(el("span", { class: "di-name", text: item.title }));
+            head.appendChild(el("span", { class: "di-id", text: item.id }));
+            a.appendChild(head);
+            if (item.outcome) a.appendChild(el("div", { class: "di-sub", text: item.outcome }));
+            sSection.appendChild(a);
+          } else {
+            const a = el("a", { class: "drawer-item missing", href: "index.html#stories" });
+            a.appendChild(el("div", { class: "di-head", children: [el("span", { class: "di-name", text: sid }), el("span", { class: "di-id", text: "missing" })] }));
+            a.appendChild(el("div", { class: "di-sub", text: "Not in stories.yaml" }));
+            sSection.appendChild(a);
+          }
+        }
+      }
+      body.appendChild(sSection);
+
+      drawer.classList.add("open");
+      veil.classList.add("open");
+    }
+    function closeDrawer() {
+      drawer.classList.remove("open");
+      veil.classList.remove("open");
+    }
+    document.getElementById("drawerClose").addEventListener("click", closeDrawer);
+    veil.addEventListener("click", closeDrawer);
+    window.addEventListener("keydown", (e) => { if (e.key === "Escape") closeDrawer(); });
+
+    document.addEventListener("click", (ev) => {
+      const r = ev.target.closest("[data-clickable='true']");
+      if (!r) return;
+      const key = r.getAttribute("data-region");
+      openDrawer(key);
+    });
+
+    document.querySelectorAll(".view-switch button").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const t = btn.getAttribute("data-frame");
+        document.querySelectorAll(".view-switch button").forEach((b) => b.classList.toggle("active", b === btn));
+        document.querySelectorAll(".frame").forEach((f) => f.classList.toggle("active", f.getAttribute("data-frame") === t));
+      });
+    });
+
+    loadCatalog().catch((err) => {
+      console.error(err);
+      alert("Couldn't load catalog YAML files. Serve over HTTP (python3 -m http.server) and reload.");
+    });
+  </script>
+</body>
+</html>

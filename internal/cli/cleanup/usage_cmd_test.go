@@ -1,13 +1,38 @@
 package cleanup
 
 import (
+	"bytes"
 	"encoding/json"
+	"io"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
+
+func captureCleanupStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	old := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	os.Stdout = w
+	defer func() {
+		os.Stdout = old
+		_ = r.Close()
+	}()
+
+	fn()
+	_ = w.Close()
+	var buf bytes.Buffer
+	if _, err := io.Copy(&buf, r); err != nil {
+		t.Fatalf("copy stdout: %v", err)
+	}
+	return buf.String()
+}
 
 func TestFormatTokenCount(t *testing.T) {
 	tests := []struct {
@@ -217,6 +242,18 @@ func TestRenderUsageTable(t *testing.T) {
 	if !strings.Contains(dateRange, "2026-02-27") {
 		t.Errorf("Expected date range to contain 2026-02-27, got %q", dateRange)
 	}
+
+	oldVerbose := usageVerbose
+	usageVerbose = true
+	t.Cleanup(func() { usageVerbose = oldVerbose })
+	out := captureCleanupStdout(t, func() {
+		renderUsageTable(records, f)
+	})
+	for _, want := range []string{"USAGE SUMMARY", "TOTALS", "BY AGENT", "BY BACKEND", "SESSIONS", "nova"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("renderUsageTable output missing %q:\n%s", want, out)
+		}
+	}
 }
 
 func TestRenderUsageJSON(t *testing.T) {
@@ -266,6 +303,16 @@ func TestRenderUsageJSON(t *testing.T) {
 	}
 	if out.SessionCount != 1 {
 		t.Errorf("SessionCount = %d, want 1", out.SessionCount)
+	}
+
+	jsonOut := captureCleanupStdout(t, func() {
+		renderUsageJSON(records)
+	})
+	if !strings.Contains(jsonOut, `"total_input_tokens": 100000`) {
+		t.Fatalf("renderUsageJSON output missing totals:\n%s", jsonOut)
+	}
+	if !strings.Contains(jsonOut, `"name": "nova"`) {
+		t.Fatalf("renderUsageJSON output missing agent summary:\n%s", jsonOut)
 	}
 }
 
@@ -340,5 +387,64 @@ func TestRenderUsageTableBoxDrawing(t *testing.T) {
 	lineWidth := displayWidth(strings.TrimRight(line, "\n"))
 	if width != lineWidth {
 		t.Errorf("Box width mismatch: top=%d, line=%d", width, lineWidth)
+	}
+}
+
+func TestBuildUsageFilterBranches(t *testing.T) {
+	oldAgent, oldBackend, oldEpic := usageAgent, usageBackend, usageEpic
+	oldSince, oldUntil := usageSince, usageUntil
+	oldToday, oldWeek := usageToday, usageWeek
+	t.Cleanup(func() {
+		usageAgent, usageBackend, usageEpic = oldAgent, oldBackend, oldEpic
+		usageSince, usageUntil = oldSince, oldUntil
+		usageToday, usageWeek = oldToday, oldWeek
+	})
+
+	usageAgent, usageBackend, usageEpic = "nova", "codex", "epic-1"
+	usageSince, usageUntil = "2026-01-02", "2026-01-03"
+	usageToday, usageWeek = false, false
+	f, err := buildUsageFilter()
+	if err != nil {
+		t.Fatalf("buildUsageFilter valid dates: %v", err)
+	}
+	if f.AgentName != "nova" || f.Backend != "codex" || f.EpicID != "epic-1" {
+		t.Fatalf("filter identity fields = %+v", f)
+	}
+	if f.Since.Format("2006-01-02") != "2026-01-02" || f.Until.Format("2006-01-02") != "2026-01-03" {
+		t.Fatalf("filter dates = since %s until %s", f.Since, f.Until)
+	}
+
+	usageSince, usageUntil = "bad", ""
+	if _, err := buildUsageFilter(); err == nil || !strings.Contains(err.Error(), "invalid --since") {
+		t.Fatalf("invalid since err = %v", err)
+	}
+
+	usageSince, usageUntil = "2026-01-04", "2026-01-03"
+	if _, err := buildUsageFilter(); err == nil || !strings.Contains(err.Error(), "after --since") {
+		t.Fatalf("until-before-since err = %v", err)
+	}
+
+	usageSince, usageUntil = "", "bad"
+	if _, err := buildUsageFilter(); err == nil || !strings.Contains(err.Error(), "invalid --until") {
+		t.Fatalf("invalid until err = %v", err)
+	}
+
+	usageUntil = ""
+	usageToday = true
+	f, err = buildUsageFilter()
+	if err != nil {
+		t.Fatalf("today filter: %v", err)
+	}
+	if f.Since.IsZero() {
+		t.Fatal("today filter did not set Since")
+	}
+	usageToday = false
+	usageWeek = true
+	f, err = buildUsageFilter()
+	if err != nil {
+		t.Fatalf("week filter: %v", err)
+	}
+	if f.Since.IsZero() {
+		t.Fatal("week filter did not set Since")
 	}
 }

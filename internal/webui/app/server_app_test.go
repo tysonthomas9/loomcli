@@ -10,7 +10,9 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui"
+	"github.com/tysonthomas9/loomcli/internal/webui/service"
 	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
 
@@ -109,6 +111,112 @@ func TestNewServer_FleetClientSkipsDaemonPoolAndHealthProbe(t *testing.T) {
 	}
 	if _, ok := body["pool"]; ok {
 		t.Fatal("/api/health should not report daemon pool stats in FleetDB-backed mode")
+	}
+}
+
+func TestNewServer_APIOnlyOptionalServicesAndWorkspaceResolver(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	st := memstore.New()
+	t.Cleanup(func() { _ = st.Close() })
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS1", Name: "Workspace One"}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+
+	createCalled := false
+	deleteCalled := false
+	app, err := NewServer(ctx, webui.ServerConfig{
+		Port:                 freeTCPPort(t),
+		BindAddress:          "127.0.0.1",
+		MaxPortAttempts:      1,
+		FleetClient:          true,
+		CORSEnabled:          true,
+		ExtAuthURL:           "https://auth.example.test",
+		ExtAuthAllowInsecure: true,
+		FrontendDir:          t.TempDir(),
+		Store:                st,
+		GitOps:               &mockGitOps{},
+		FileOps:              &mockFileOps{},
+		NotifyTokenDir:       t.TempDir(),
+		TerminalCmd:          "sh",
+		MaxTerminalSessions:  2,
+		InitialWorkspaceID:   "WS1",
+		WorkspaceIDResolverFn: func(name string) (string, error) {
+			if name == "friendly" {
+				return "WS1", nil
+			}
+			return "", nil
+		},
+		WorkspaceCreateFn: func(ctx context.Context, req service.WorkspaceCreateRequest) (service.WorkspaceCreateResult, error) {
+			createCalled = true
+			return service.WorkspaceCreateResult{WorkspaceID: "WS1", WorkspacePath: t.TempDir()}, nil
+		},
+		WorkspaceDeleteFn: func(name string) error {
+			deleteCalled = true
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	t.Cleanup(func() {
+		if app.listener != nil {
+			_ = app.listener.Close()
+		}
+		if app.hub != nil {
+			app.hub.Stop()
+		}
+		if app.multiSub != nil {
+			app.multiSub.Stop()
+		}
+		if app.ptyMgr != nil {
+			_ = app.ptyMgr.Close()
+		}
+		if app.multiPool != nil {
+			_ = app.multiPool.Close()
+		}
+		if app.registry != nil {
+			_ = app.registry.Close()
+		}
+		app.Close()
+	})
+
+	if app.pool != nil {
+		t.Fatal("FleetClient mode should not create a daemon pool")
+	}
+	if !app.corsConfig.Enabled || len(app.corsConfig.AllowedOrigins) != 2 {
+		t.Fatalf("cors config = %#v, want dev origin plus auth origin", app.corsConfig)
+	}
+	if app.extAuthMiddleware == nil || app.jwksCleanup == nil || app.sseTokens == nil {
+		t.Fatalf("external auth fields were not initialized: middleware=%t cleanup=%t sseTokens=%t",
+			app.extAuthMiddleware != nil, app.jwksCleanup != nil, app.sseTokens != nil)
+	}
+	if app.issueSvc == nil || app.workspaceSvc == nil || app.termSvc == nil || app.diffSvc == nil || app.fileSvc == nil || app.sessSvc == nil {
+		t.Fatal("expected core services to be initialized")
+	}
+	if app.wrappedCreateFn == nil || app.wrappedDeleteFn == nil || app.jobStore == nil || app.notifyToken == "" || app.notifyTokenFile == "" {
+		t.Fatal("expected workspace wrappers, job store, and notify token to be initialized")
+	}
+
+	if ref, ok := app.wsResolveFn(ctx, "Workspace One"); !ok || ref.CanonicalID != "WS1" {
+		t.Fatalf("wsResolveFn(name) = (%+v, %v), want WS1", ref, ok)
+	}
+	if err := app.registry.Register("WS1", t.TempDir()); err != nil {
+		t.Fatalf("register workspace for resolver alias: %v", err)
+	}
+	if ref, ok := app.wsResolveFn(ctx, "friendly"); !ok || ref.CanonicalID != "WS1" {
+		t.Fatalf("wsResolveFn(resolver alias) = (%+v, %v), want WS1", ref, ok)
+	}
+
+	if _, err := app.wrappedCreateFn(service.WithCreateWarnings(ctx), service.WorkspaceCreateRequest{Name: "Workspace One", Type: "empty"}); err != nil {
+		t.Fatalf("wrappedCreateFn: %v", err)
+	}
+	if err := app.wrappedDeleteFn("Workspace One"); err != nil {
+		t.Fatalf("wrappedDeleteFn: %v", err)
+	}
+	if !createCalled || !deleteCalled {
+		t.Fatalf("createCalled=%v deleteCalled=%v", createCalled, deleteCalled)
 	}
 }
 

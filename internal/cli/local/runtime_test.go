@@ -1,13 +1,20 @@
 package local
 
 import (
+	"bytes"
 	"context"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/spf13/cobra"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 )
@@ -257,6 +264,191 @@ func TestEnsureRuntimeStartedRestartsUnhealthyRecordedRuntime(t *testing.T) {
 	}
 }
 
+func TestReadRuntimeStatusUsesRuntimeSnapshotAndHealth(t *testing.T) {
+	dataDir := t.TempDir()
+	info := &runtimeInfo{
+		Status:           "running",
+		PID:              os.Getpid(),
+		ServePID:         os.Getpid(),
+		URL:              "http://runtime.test",
+		Port:             18444,
+		ClaimsPaused:     true,
+		StartedAt:        time.Now().Add(-time.Hour),
+		Executable:       "/tmp/loom",
+		BinaryHash:       "hash",
+		Build:            "build",
+		FleetDBRedisHash: "redis",
+	}
+	if err := writeRuntime(dataDir, info); err != nil {
+		t.Fatalf("writeRuntime: %v", err)
+	}
+	withDefaultHTTPClient(t, fakeRoundTrip(func(r *http.Request) (*http.Response, error) {
+		if r.URL.String() != "http://runtime.test/api/health" {
+			t.Fatalf("health URL = %s", r.URL.String())
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader("{}")),
+			Header:     make(http.Header),
+		}, nil
+	}))
+
+	status, err := ReadRuntimeStatus(context.Background(), dataDir)
+	if err != nil {
+		t.Fatalf("ReadRuntimeStatus() error = %v", err)
+	}
+	if !status.Healthy || status.Runtime == nil || status.Runtime.URL != "http://runtime.test" || !status.Runtime.ClaimsPaused {
+		t.Fatalf("status = %#v", status)
+	}
+}
+
+func TestReadRuntimeStatusReportsReadAndHealthErrors(t *testing.T) {
+	if status, err := ReadRuntimeStatus(context.Background(), t.TempDir()); err == nil || status == nil || status.Error == "" {
+		t.Fatalf("missing runtime status=%#v err=%v, want error snapshot", status, err)
+	}
+
+	dataDir := t.TempDir()
+	if err := writeRuntime(dataDir, &runtimeInfo{Status: "running", PID: os.Getpid(), URL: "http://runtime.test"}); err != nil {
+		t.Fatalf("writeRuntime: %v", err)
+	}
+	withDefaultHTTPClient(t, fakeRoundTrip(func(*http.Request) (*http.Response, error) {
+		return nil, errors.New("offline")
+	}))
+	status, err := ReadRuntimeStatus(context.Background(), dataDir)
+	if err != nil {
+		t.Fatalf("ReadRuntimeStatus() read error = %v", err)
+	}
+	if status.Healthy || !strings.Contains(status.Error, "offline") {
+		t.Fatalf("status = %#v, want unhealthy offline", status)
+	}
+}
+
+func TestPrepareLocalServiceConfigResolvesEnvironment(t *testing.T) {
+	oldDataDir, oldBind, oldPort := dataDirFlag, bindFlag, portFlag
+	dataDir := t.TempDir()
+	dataDirFlag, bindFlag, portFlag = dataDir, "", 18444
+	t.Cleanup(func() {
+		dataDirFlag, bindFlag, portFlag = oldDataDir, oldBind, oldPort
+	})
+
+	cfg, err := prepareLocalServiceConfig()
+	if err != nil {
+		t.Fatalf("prepareLocalServiceConfig() error = %v", err)
+	}
+	if cfg.dataDir != dataDir || cfg.bindAddr != "127.0.0.1" || cfg.port != 18444 || cfg.url != "http://127.0.0.1:18444" {
+		t.Fatalf("config = %#v", cfg)
+	}
+	for _, env := range []string{"LOOM_CONFIG_DIR", "LOOM_DESKTOP_DATA_DIR", "LOOM_WORKSPACE_RUNTIME_DIR"} {
+		if got := os.Getenv(env); got != dataDir {
+			t.Fatalf("%s = %q, want %q", env, got, dataDir)
+		}
+	}
+	info := newRuntimeInfo(cfg)
+	if info.Status != "starting" || info.PID != os.Getpid() || info.URL != cfg.url || info.FleetDBRedisHash != cfg.redisHash {
+		t.Fatalf("newRuntimeInfo = %#v", info)
+	}
+}
+
+func TestLocalCommandsStatusLogsStopAndPauseState(t *testing.T) {
+	oldDataDir, oldJSON := dataDirFlag, jsonFlag
+	dataDir := t.TempDir()
+	dataDirFlag, jsonFlag = dataDir, false
+	t.Cleanup(func() {
+		dataDirFlag, jsonFlag = oldDataDir, oldJSON
+	})
+	if err := writeRuntime(dataDir, &runtimeInfo{Status: "running", PID: -1, URL: "http://runtime.test", Port: 18444}); err != nil {
+		t.Fatalf("writeRuntime: %v", err)
+	}
+	withDefaultHTTPClient(t, fakeRoundTrip(func(*http.Request) (*http.Response, error) {
+		return nil, errors.New("offline")
+	}))
+
+	var out bytes.Buffer
+	cmd := commandWithOutput(&out)
+	if err := runStatus(cmd, nil); err != nil {
+		t.Fatalf("runStatus() error = %v", err)
+	}
+	if !strings.Contains(out.String(), "status: running") || !strings.Contains(out.String(), "healthy: false") {
+		t.Fatalf("runStatus output = %q", out.String())
+	}
+
+	jsonFlag = true
+	out.Reset()
+	if err := runStatus(commandWithOutput(&out), nil); err != nil {
+		t.Fatalf("runStatus(json) error = %v", err)
+	}
+	if !strings.Contains(out.String(), `"healthy": false`) {
+		t.Fatalf("runStatus json output = %q", out.String())
+	}
+
+	jsonFlag = false
+	out.Reset()
+	if err := runLogs(commandWithOutput(&out), nil); err != nil {
+		t.Fatalf("runLogs() error = %v", err)
+	}
+	if !strings.Contains(out.String(), "loom-local-service.log") || !strings.Contains(out.String(), "loom-serve.log") {
+		t.Fatalf("runLogs output = %q", out.String())
+	}
+
+	out.Reset()
+	if err := runStop(commandWithOutput(&out), nil); err != nil {
+		t.Fatalf("runStop() error = %v", err)
+	}
+	if !strings.Contains(out.String(), "not running") {
+		t.Fatalf("runStop output = %q", out.String())
+	}
+
+	if err := writeRuntime(dataDir, &runtimeInfo{Status: "running", PID: os.Getpid()}); err != nil {
+		t.Fatalf("writeRuntime current pid: %v", err)
+	}
+	if err := updatePauseState(true); err != nil {
+		t.Fatalf("updatePauseState(true): %v", err)
+	}
+	paused, err := readRuntime(dataDir)
+	if err != nil {
+		t.Fatalf("read paused runtime: %v", err)
+	}
+	if !paused.ClaimsPaused || paused.Status != "draining" {
+		t.Fatalf("paused runtime = %#v", paused)
+	}
+	if err := updatePauseState(false); err != nil {
+		t.Fatalf("updatePauseState(false): %v", err)
+	}
+	resumed, err := readRuntime(dataDir)
+	if err != nil {
+		t.Fatalf("read resumed runtime: %v", err)
+	}
+	if resumed.ClaimsPaused || resumed.Status != "running" {
+		t.Fatalf("resumed runtime = %#v", resumed)
+	}
+}
+
+func TestWaitServeExitAndJSONHelpers(t *testing.T) {
+	cmd := exec.Command("true") //nolint:norawexec // test needs a completed process for waitServeExit.
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start true: %v", err)
+	}
+	dataDir := t.TempDir()
+	info := &runtimeInfo{Status: "running"}
+	if err := waitServeExit(context.Background(), cmd, dataDir, info); err != nil {
+		t.Fatalf("waitServeExit() error = %v", err)
+	}
+	written, err := readRuntime(dataDir)
+	if err != nil {
+		t.Fatalf("read runtime: %v", err)
+	}
+	if written.Status != "stopped" || written.Error != "" {
+		t.Fatalf("written runtime = %#v", written)
+	}
+	var out bytes.Buffer
+	if err := writeJSON(&out, map[string]string{"ok": "yes"}); err != nil {
+		t.Fatalf("writeJSON: %v", err)
+	}
+	if !strings.Contains(out.String(), "\n  \"ok\": \"yes\"\n") {
+		t.Fatalf("writeJSON output = %q", out.String())
+	}
+}
+
 func containsEnv(env []string, needle string) bool {
 	for _, entry := range env {
 		if entry == needle {
@@ -273,4 +465,25 @@ func containsEnvPrefix(env []string, prefix string) bool {
 		}
 	}
 	return false
+}
+
+type fakeRoundTrip func(*http.Request) (*http.Response, error)
+
+func (f fakeRoundTrip) RoundTrip(r *http.Request) (*http.Response, error) {
+	return f(r)
+}
+
+func withDefaultHTTPClient(t *testing.T, rt http.RoundTripper) {
+	t.Helper()
+	oldClient := http.DefaultClient
+	http.DefaultClient = &http.Client{Transport: rt}
+	t.Cleanup(func() { http.DefaultClient = oldClient })
+}
+
+func commandWithOutput(out *bytes.Buffer) *cobra.Command {
+	cmd := &cobra.Command{}
+	cmd.SetContext(context.Background())
+	cmd.SetOut(out)
+	cmd.SetErr(out)
+	return cmd
 }

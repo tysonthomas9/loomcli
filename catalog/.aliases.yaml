@@ -1,0 +1,27 @@
+# Catalog rename redirects for EXTERNAL consumers.
+#
+# When an item is renamed inside a catalog file, its old ID is recorded in
+# the item's `previous_ids:` field — the in-catalog resolver (index.html,
+# wireframe.html, catalog-curator) uses that for fallback resolution.
+#
+# This file is the SAME information mirrored for tools that don't read the
+# YAML directly (e.g. external scripts, the wireframe's REGION_MAP, future
+# API consumers, search indexers).
+#
+# The catalog-curator regenerates this file on every rename pass. Don't
+# edit by hand — your edits will be overwritten.
+#
+# Format:
+#   <file-id>:
+#     <old-id>: <new-canonical-id>
+
+version: 1
+generated_by: catalog-curator
+generated: 2026-05-14
+
+redirects:
+  personas:  {}
+  features:  {}
+  stories:   {}
+  epics:     {}
+  glossary:  {}

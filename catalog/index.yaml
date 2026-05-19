@@ -1,0 +1,154 @@
+meta:
+  app: loom
+  version: 2
+  generated: 2026-05-14
+  description: >
+    Manifest for the loom catalog — a web of YAML files describing the app
+    from multiple angles. Each file is owned by one specialized agent and
+    cross-references the others using a stable `<file>:<id>` reference form.
+    The `catalog-curator` agent is responsible for keeping references valid
+    and items conformant to the schema declared in each file entry below.
+
+ref_format: "<file-id>:<item-id>"
+ref_examples:
+  - personas:solo-dev
+  - features:loom-plan
+  - stories:run-first-agent
+  - epics:lead-driven-orchestration
+  - glossary:fleet-db
+
+# Type vocabulary used by the `fields:` blocks. Keep this list small.
+field_types:
+  string:         "Free text."
+  int:            "Whole number."
+  bool:           "true / false."
+  date:           "ISO-8601 date string."
+  enum:           "One of a fixed set of strings. Must include `values: [...]`."
+  list<T>:        "Ordered list. `T` is any other type."
+  ref<file-id>:   "Typed cross-reference to an item in another catalog file."
+
+files:
+  - id: personas
+    path: personas.yaml
+    description: User archetypes — who uses loom and what they're trying to accomplish.
+    owner_agent: persona-cataloger
+    item_key: personas
+    item_id_field: id
+    fields:
+      id:            { type: string,         required: true,  desc: "kebab-case slug; canonical identity. See RENAMES.md for the rename policy." }
+      name:          { type: string,         required: true,  desc: "human display label" }
+      description:   { type: string,         required: true,  desc: "one sentence" }
+      motivations:   { type: "list<string>", required: true,  desc: "pain points or goals, one sentence each" }
+      evidence:      { type: string,         required: false, desc: "single file path supporting this persona" }
+      tags:          { type: "list<string>", required: false }
+      previous_ids:     { type: "list<string>", required: false, desc: "prior IDs; resolver falls back to these. Curator clears entries once no refs remain. See RENAMES.md." }
+      lifecycle:        { type: enum,            required: false, values: [active, deprecated, deleted], desc: "default 'active' if omitted. See LIFECYCLE.md." }
+      lifecycle_at:     { type: date,            required: false, desc: "ISO date of the lifecycle transition. Required by the curator when lifecycle != active." }
+      lifecycle_reason: { type: string,          required: false, desc: "one sentence explaining the transition." }
+
+  - id: features
+    path: features.yaml
+    description: What the system does — every CLI command, view, API, integration, and runtime feature.
+    owner_agent: feature-cataloger
+    item_key: categories
+    nested_items_key: features
+    item_id_field: id
+    fields:
+      id:            { type: string,         required: true,  desc: "kebab-case slug; canonical identity. See RENAMES.md." }
+      name:          { type: string,         required: true,  desc: "the way a user would refer to it" }
+      purpose:       { type: string,         required: true,  desc: "one sentence; active voice; not 'this command…'" }
+      source:        { type: string,         required: false, desc: "primary file or dir, repo-relative" }
+      flags:         { type: "list<string>", required: false }
+      subcommands:   { type: "list<string>", required: false }
+      endpoints:     { type: "list<string>", required: false }
+      aliases:       { type: "list<string>", required: false, desc: "semantic synonyms — alt names a user might type (e.g. `mon` for `loom monitor`). NOT rename history; use previous_ids for that." }
+      tags:          { type: "list<string>", required: false }
+      hidden:        { type: bool,           required: false, desc: "internal / non-user-facing" }
+      epic:          { type: "ref<epics>",   required: false, desc: "the epic this feature advances (inbound aggregate)" }
+      refs:             { type: "list<ref<glossary>>", required: false, desc: "glossary terms this feature is associated with" }
+      previous_ids:     { type: "list<string>",        required: false, desc: "prior IDs; resolver falls back to these. See RENAMES.md." }
+      lifecycle:        { type: enum,                  required: false, values: [active, deprecated, deleted], desc: "default 'active' if omitted. See LIFECYCLE.md." }
+      lifecycle_at:     { type: date,                  required: false, desc: "ISO date of the lifecycle transition. Required by the curator when lifecycle != active." }
+      lifecycle_reason: { type: string,                required: false, desc: "one sentence explaining the transition." }
+
+  - id: stories
+    path: stories.yaml
+    description: User goals — what each persona wants to accomplish, step by step.
+    owner_agent: user-story-cataloger
+    item_key: categories
+    nested_items_key: stories
+    item_id_field: id
+    fields:
+      id:                { type: string,                  required: true,  desc: "kebab-case slug; canonical identity. See RENAMES.md." }
+      title:             { type: string,                  required: true,  desc: "user-readable goal; action-oriented" }
+      persona:           { type: "list<ref<personas>>",   required: true,  desc: "one or more personas; outbound junction ref" }
+      situation:         { type: string,                  required: true,  desc: "starts with 'When …'" }
+      outcome:           { type: string,                  required: true,  desc: "the result clause" }
+      flow:              { type: "list<string>",          required: true,  desc: "2–5 concrete steps" }
+      priority:          { type: enum,                    required: true,  values: [must, should, could], desc: "MoSCoW" }
+      related_features:  { type: "list<ref<features>>",   required: false, desc: "features this story touches; outbound junction ref" }
+      source:            { type: string,                  required: false, desc: "single file of strongest evidence" }
+      tags:              { type: "list<string>",          required: false }
+      epic:              { type: "ref<epics>",            required: false, desc: "the epic this story advances (inbound aggregate)" }
+      previous_ids:      { type: "list<string>",          required: false, desc: "prior IDs; resolver falls back to these. See RENAMES.md." }
+      lifecycle:         { type: enum,                    required: false, values: [active, deprecated, deleted], desc: "default 'active' if omitted. See LIFECYCLE.md." }
+      lifecycle_at:      { type: date,                    required: false, desc: "ISO date of the lifecycle transition. Required by the curator when lifecycle != active." }
+      lifecycle_reason:  { type: string,                  required: false, desc: "one sentence explaining the transition." }
+
+  - id: epics
+    path: epics.yaml
+    description: Strategic themes — the big bets that group related features and stories.
+    owner_agent: epic-cataloger
+    item_key: epics
+    item_id_field: id
+    fields:
+      id:                { type: string,                  required: true,  desc: "kebab-case slug; canonical identity. See RENAMES.md." }
+      name:              { type: string,                  required: true,  desc: "title case" }
+      summary:           { type: string,                  required: true,  desc: "one sentence" }
+      outcome:           { type: string,                  required: true,  desc: "what changes when this epic ships; active voice" }
+      status:            { type: enum,                    required: true,  values: [planned, in-progress, shipped, alpha, paused] }
+      sponsor_personas:  { type: "list<ref<personas>>",   required: true,  desc: "personas this epic exists for" }
+      source:            { type: string,                  required: false, desc: "strongest evidence file (usually a design doc)" }
+      tags:              { type: "list<string>",          required: false }
+      previous_ids:      { type: "list<string>",          required: false, desc: "prior IDs; resolver falls back to these. See RENAMES.md." }
+      lifecycle:         { type: enum,                    required: false, values: [active, deprecated, deleted], desc: "default 'active' if omitted. See LIFECYCLE.md. Note: an epic's `status` (shipped/in-progress/etc.) is independent of `lifecycle` (active/deleted)." }
+      lifecycle_at:      { type: date,                    required: false, desc: "ISO date of the lifecycle transition. Required by the curator when lifecycle != active." }
+      lifecycle_reason:  { type: string,                  required: false, desc: "one sentence explaining the transition." }
+      # NOTE: post-Q1 inversion, epics no longer carry `related_features` or
+      # `related_stories`. Membership is expressed by stories/features pointing
+      # back via their own `epic:` field. The renderer assembles the epic view
+      # from reverse refs.
+
+  - id: glossary
+    path: glossary.yaml
+    description: Domain vocabulary used across all other catalog files.
+    owner_agent: glossary-cataloger
+    item_key: terms
+    item_id_field: id
+    fields:
+      id:            { type: string,         required: true,  desc: "kebab-case slug; canonical identity. See RENAMES.md." }
+      term:          { type: string,         required: true,  desc: "the canonical word as a reader would say it" }
+      definition:    { type: string,         required: true,  desc: "1–2 sentences; concept-level, not implementation" }
+      aliases:       { type: "list<string>", required: false, desc: "semantic synonyms — alternate words a reader might search for (e.g. 'parent issue' for `epic-issue`). NOT rename history." }
+      related:          { type: "list<ref<*>>", required: false, desc: "links to other glossary terms or to anchoring features" }
+      previous_ids:     { type: "list<string>", required: false, desc: "prior IDs; resolver falls back to these. See RENAMES.md." }
+      lifecycle:        { type: enum,           required: false, values: [active, deprecated, deleted], desc: "default 'active' if omitted. See LIFECYCLE.md." }
+      lifecycle_at:     { type: date,           required: false, desc: "ISO date of the lifecycle transition. Required by the curator when lifecycle != active." }
+      lifecycle_reason: { type: string,         required: false, desc: "one sentence explaining the transition." }
+
+orchestrator:
+  agent: catalog-curator
+  responsibilities:
+    - Validate every `<file>:<id>` reference resolves to a real item.
+    - Validate each item against the `fields:` schema for its file.
+    - Detect orphans (items nobody references) and unreferenced items.
+    - Run the owner agents in dependency order on a full refresh.
+    - Report broken links, schema violations, duplicates, and out-of-date `generated:` dates.
+
+dependency_order:
+  # Updating in this order minimizes broken intermediate states.
+  - glossary       # foundational; no outgoing refs
+  - personas       # references glossary
+  - features       # references glossary, epics
+  - stories        # references personas, features, glossary, epics
+  - epics          # references personas, glossary (metadata only — no more outbound aggregates)

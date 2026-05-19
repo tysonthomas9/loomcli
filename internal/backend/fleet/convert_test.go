@@ -428,3 +428,22 @@ func TestFleetIssueWire_RepoProjection(t *testing.T) {
 		t.Errorf("SourceRepo = %q, want %q", got, "org/repo")
 	}
 }
+
+func TestIssuesWithCountsToDataSkipsNilWrappers(t *testing.T) {
+	issues := []*types.IssueWithCounts{
+		nil,
+		{Issue: &types.Issue{ID: "task-1", Title: "Task", Status: types.StatusOpen}, DependencyCount: 2, DependentCount: 3},
+		{Issue: nil, DependencyCount: 4, DependentCount: 5},
+	}
+
+	got := issuesWithCountsToData(issues)
+	if len(got) != 2 {
+		t.Fatalf("len = %d, want 2", len(got))
+	}
+	if got[0].ID != "task-1" || got[0].DependencyCount != 2 || got[0].DependentCount != 3 {
+		t.Fatalf("first converted issue = %+v", got[0])
+	}
+	if got[1].ID != "" || got[1].DependencyCount != 4 || got[1].DependentCount != 5 {
+		t.Fatalf("nil issue count projection = %+v", got[1])
+	}
+}

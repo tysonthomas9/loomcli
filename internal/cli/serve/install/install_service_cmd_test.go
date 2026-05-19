@@ -1,11 +1,35 @@
 package install
 
 import (
+	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func captureInstallStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	old := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	os.Stdout = w
+	defer func() {
+		os.Stdout = old
+		_ = r.Close()
+	}()
+
+	fn()
+	_ = w.Close()
+	var buf bytes.Buffer
+	if _, err := io.Copy(&buf, r); err != nil {
+		t.Fatalf("copy stdout: %v", err)
+	}
+	return buf.String()
+}
 
 // baseCfg returns a minimal serviceConfig for testing.
 func baseCfg() serviceConfig {
@@ -296,5 +320,95 @@ func TestLaunchdPlistPath(t *testing.T) {
 	want = filepath.Join(home, "Library", "LaunchAgents", "com.loom.serve.myproject.plist")
 	if got != want {
 		t.Errorf("launchdPlistPath(com.loom.serve.myproject) = %q, want %q", got, want)
+	}
+}
+
+func TestHandleSystemdAndLaunchdPrintDefinitions(t *testing.T) {
+	cfg := baseCfg()
+	systemdOut := captureInstallStdout(t, func() {
+		if err := handleSystemd(cfg, false, false); err != nil {
+			t.Fatalf("handleSystemd print: %v", err)
+		}
+	})
+	if !strings.Contains(systemdOut, "# systemd user unit file") || !strings.Contains(systemdOut, "ExecStart=/usr/local/bin/loom serve") {
+		t.Fatalf("systemd print output = %s", systemdOut)
+	}
+
+	cfg.Name = "com.loom.serve"
+	launchdOut := captureInstallStdout(t, func() {
+		if err := handleLaunchd(cfg, false, false); err != nil {
+			t.Fatalf("handleLaunchd print: %v", err)
+		}
+	})
+	if !strings.Contains(launchdOut, "launchd user agent plist") || !strings.Contains(launchdOut, "<key>ProgramArguments</key>") {
+		t.Fatalf("launchd print output = %s", launchdOut)
+	}
+}
+
+func TestUninstallMissingServicesAreNoops(t *testing.T) {
+	missingSystemd := filepath.Join(t.TempDir(), "missing.service")
+	out := captureInstallStdout(t, func() {
+		if err := uninstallSystemd("loom-serve", missingSystemd); err != nil {
+			t.Fatalf("uninstallSystemd missing: %v", err)
+		}
+	})
+	if !strings.Contains(out, "not installed") {
+		t.Fatalf("missing systemd output = %q", out)
+	}
+
+	missingPlist := filepath.Join(t.TempDir(), "missing.plist")
+	out = captureInstallStdout(t, func() {
+		if err := uninstallLaunchd("com.loom.serve", missingPlist); err != nil {
+			t.Fatalf("uninstallLaunchd missing: %v", err)
+		}
+	})
+	if !strings.Contains(out, "not installed") {
+		t.Fatalf("missing launchd output = %q", out)
+	}
+}
+
+func TestWriteServiceFileAndLogDirResolution(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "nested", "loom.service")
+	if err := writeServiceFile(path, "unit"); err != nil {
+		t.Fatalf("writeServiceFile: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read service file: %v", err)
+	}
+	if string(data) != "unit" {
+		t.Fatalf("service file content = %q", string(data))
+	}
+
+	cwd := t.TempDir()
+	if got := resolveServiceLogDir(cwd); got != filepath.Join(cwd, ".loom", "logs") {
+		t.Fatalf("default log dir = %q", got)
+	}
+}
+
+func TestBuildServiceNameFallbackAndInvalidNameValidation(t *testing.T) {
+	oldName := installServiceName
+	oldEnv := installServiceEnv
+	oldInstall := installServiceInstall
+	oldUninstall := installServiceUninstall
+	t.Cleanup(func() {
+		installServiceName = oldName
+		installServiceEnv = oldEnv
+		installServiceInstall = oldInstall
+		installServiceUninstall = oldUninstall
+	})
+
+	installServiceName = ""
+	if got := buildServiceName("plan9"); got != "loom-serve" {
+		t.Fatalf("fallback service name = %q", got)
+	}
+
+	installServiceName = "bad name"
+	installServiceEnv = nil
+	installServiceInstall = false
+	installServiceUninstall = false
+	if err := validateInstallServiceFlags(); err == nil || !strings.Contains(err.Error(), "invalid --name") {
+		t.Fatalf("invalid name err = %v", err)
 	}
 }
