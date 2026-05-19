@@ -73,7 +73,7 @@ func TestEnsureAgentTerminalSessionCreatesLeadLaunchSpec(t *testing.T) {
 		t.Fatalf("create agent: %v", err)
 	}
 
-	meta, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "lead-ui-e2e", "http://loom.test")
+	meta, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "lead-ui-e2e")
 	if err != nil {
 		t.Fatalf("ensureAgentTerminalSession: %v", err)
 	}
@@ -165,7 +165,7 @@ func TestEnsureAgentTerminalSessionLaunchesLeadInConfiguredWorktree(t *testing.T
 		t.Fatalf("create agent: %v", err)
 	}
 
-	meta, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "nova", "http://loom.test")
+	meta, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "nova")
 	if err != nil {
 		t.Fatalf("ensureAgentTerminalSession: %v", err)
 	}
@@ -297,7 +297,7 @@ func TestEnsureAgentTerminalSessionSerializesConcurrentCreates(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			meta, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "nova", "http://loom.test")
+			meta, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "nova")
 			if err != nil {
 				errs <- err
 				return
@@ -378,7 +378,7 @@ func TestEnsureAgentTerminalSessionRejectsStoppedAgentWithoutSession(t *testing.
 		t.Fatalf("stop agent: %v", err)
 	}
 
-	_, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "worker-done", "http://loom.test")
+	_, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "worker-done")
 	var svcErr *service.ServiceError
 	if !errors.As(err, &svcErr) || svcErr.Kind != service.KindValidation {
 		t.Fatalf("ensureAgentTerminalSession error = %v, want validation", err)
@@ -414,7 +414,7 @@ func TestEnsureAgentTerminalSessionRejectsActiveEphemeralWorkerWithoutRelaunch(t
 		t.Fatalf("activate agent: %v", err)
 	}
 
-	_, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "worker-live", "http://loom.test")
+	_, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "worker-live")
 	var svcErr *service.ServiceError
 	if !errors.As(err, &svcErr) || svcErr.Kind != service.KindValidation {
 		t.Fatalf("ensureAgentTerminalSession error = %v, want validation", err)
@@ -467,7 +467,7 @@ func TestEnsureAgentTerminalSessionCreatesLaunchForStoppedAssignedLead(t *testin
 		t.Fatalf("stop agent: %v", err)
 	}
 
-	meta, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "nova", "http://loom.test")
+	meta, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "nova")
 	if err != nil {
 		t.Fatalf("ensureAgentTerminalSession: %v", err)
 	}
@@ -519,7 +519,7 @@ func TestEnsureAgentTerminalSessionCreatesLaunchForStoppedUnassignedLead(t *test
 		t.Fatalf("stop agent: %v", err)
 	}
 
-	meta, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "atlas", "http://loom.test")
+	meta, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "atlas")
 	if err != nil {
 		t.Fatalf("ensureAgentTerminalSession: %v", err)
 	}
@@ -583,7 +583,7 @@ func TestEnsureAgentTerminalSessionDoesNotRelaunchStoppedExistingAgentTab(t *tes
 		t.Fatalf("seed tab: %v", err)
 	}
 
-	meta, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "worker-done", "http://loom.test")
+	meta, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "worker-done")
 	if err != nil {
 		t.Fatalf("ensureAgentTerminalSession: %v", err)
 	}
@@ -644,7 +644,7 @@ func TestEnsureAgentTerminalSessionCreatesFreshTabForStaleRunningAgentTab(t *tes
 		t.Fatalf("seed tab: %v", err)
 	}
 
-	meta, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "worker-live", "http://loom.test")
+	meta, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "worker-live")
 	if err != nil {
 		t.Fatalf("ensureAgentTerminalSession: %v", err)
 	}

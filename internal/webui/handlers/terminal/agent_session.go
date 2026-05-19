@@ -38,7 +38,7 @@ var agentTerminalSessionLocks sync.Map
 // HandleEnsureAgentTerminalSession resolves an agent name to a persisted UUID
 // terminal session. The session's launch command lives in tab metadata; the
 // WebSocket path never infers agent behavior from the session name.
-func HandleEnsureAgentTerminalSession(svc service.TerminalService, st store.Store, loomServerURL string) http.HandlerFunc {
+func HandleEnsureAgentTerminalSession(svc service.TerminalService, st store.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if svc == nil {
 			handler.WriteJSON(w, http.StatusServiceUnavailable, tabMetadataResponse{
@@ -65,7 +65,7 @@ func HandleEnsureAgentTerminalSession(svc service.TerminalService, st store.Stor
 			return
 		}
 
-		meta, err := ensureAgentTerminalSession(r.Context(), svc, st, workspace, agentName, loomServerURL)
+		meta, err := ensureAgentTerminalSession(r.Context(), svc, st, workspace, agentName)
 		if err != nil {
 			handler.HandleServiceError(w, err)
 			return
@@ -78,7 +78,7 @@ func HandleEnsureAgentTerminalSession(svc service.TerminalService, st store.Stor
 	}
 }
 
-func ensureAgentTerminalSession(ctx context.Context, svc service.TerminalService, st store.Store, workspace, agentName, loomServerURL string) (*tabmeta.TabMetadata, error) {
+func ensureAgentTerminalSession(ctx context.Context, svc service.TerminalService, st store.Store, workspace, agentName string) (*tabmeta.TabMetadata, error) {
 	unlock := lockAgentTerminalSession(workspace, agentName)
 	defer unlock()
 
