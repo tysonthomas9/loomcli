@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/sessions"
@@ -287,6 +288,63 @@ func TestGetSessionDiff_WithDiff(t *testing.T) {
 	body := rr.Body.String()
 	if body == "" {
 		t.Error("body is empty, expected diff content")
+	}
+}
+
+func TestSessionSubagentHandlers(t *testing.T) {
+	store := newTestSessionStore(t)
+	sess := createTestSession(t, store, "loom-subagents")
+	source := filepath.Join(t.TempDir(), "subagent.jsonl")
+	content := `{"type":"user","uuid":"u1","message":{"content":"subagent hello"}}` + "\n"
+	if err := os.WriteFile(source, []byte(content), 0600); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+	if err := store.SyncSubagentTranscript(sess.SessionID(), "abc123", source); err != nil {
+		t.Fatalf("SyncSubagentTranscript: %v", err)
+	}
+	svc := NewSessionService(store, nil)
+
+	listReq := httptest.NewRequest(http.MethodGet, "/api/tasks/loom-subagents/sessions/"+sess.SessionID()+"/subagents", nil)
+	listReq.SetPathValue("taskId", "loom-subagents")
+	listReq.SetPathValue("sessionId", sess.SessionID())
+	listRec := httptest.NewRecorder()
+	HandleListSessionSubagents(svc).ServeHTTP(listRec, listReq)
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("list status = %d body=%s", listRec.Code, listRec.Body.String())
+	}
+	var listResp SubagentListResponse
+	if err := json.NewDecoder(listRec.Body).Decode(&listResp); err != nil {
+		t.Fatalf("decode list: %v", err)
+	}
+	if !listResp.Success || listResp.Data == nil || len(listResp.Data.SubagentIDs) != 1 || listResp.Data.SubagentIDs[0] != "abc123" {
+		t.Fatalf("list response = %+v", listResp)
+	}
+
+	transcriptReq := httptest.NewRequest(http.MethodGet, "/api/tasks/loom-subagents/sessions/"+sess.SessionID()+"/subagents/abc123/transcript", nil)
+	transcriptReq.SetPathValue("taskId", "loom-subagents")
+	transcriptReq.SetPathValue("sessionId", sess.SessionID())
+	transcriptReq.SetPathValue("subagentId", "abc123")
+	transcriptRec := httptest.NewRecorder()
+	HandleGetSessionSubagentTranscript(svc).ServeHTTP(transcriptRec, transcriptReq)
+	if transcriptRec.Code != http.StatusOK {
+		t.Fatalf("transcript status = %d body=%s", transcriptRec.Code, transcriptRec.Body.String())
+	}
+	var transcriptResp TranscriptResponse
+	if err := json.NewDecoder(transcriptRec.Body).Decode(&transcriptResp); err != nil {
+		t.Fatalf("decode transcript: %v", err)
+	}
+	if !transcriptResp.Success || transcriptResp.Data == nil || transcriptResp.Data.SessionID != sess.SessionID()+"/abc123" || len(transcriptResp.Data.Entries) == 0 {
+		t.Fatalf("transcript response = %+v", transcriptResp)
+	}
+
+	missingReq := httptest.NewRequest(http.MethodGet, "/api/tasks/loom-subagents/sessions/"+sess.SessionID()+"/subagents/missing/transcript", nil)
+	missingReq.SetPathValue("taskId", "loom-subagents")
+	missingReq.SetPathValue("sessionId", sess.SessionID())
+	missingReq.SetPathValue("subagentId", "missing")
+	missingRec := httptest.NewRecorder()
+	HandleGetSessionSubagentTranscript(svc).ServeHTTP(missingRec, missingReq)
+	if missingRec.Code != http.StatusNotFound || !strings.Contains(missingRec.Body.String(), "not found") {
+		t.Fatalf("missing status/body = %d %s", missingRec.Code, missingRec.Body.String())
 	}
 }
 

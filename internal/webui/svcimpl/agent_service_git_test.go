@@ -101,28 +101,155 @@ func TestAgentServiceGitOperationErrors(t *testing.T) {
 	}
 }
 
+func TestAgentServiceGitOperationPropagatesGitErrors(t *testing.T) {
+	ctx := context.Background()
+	baseWT := &ops.AgentWorktree{Name: "agent", Path: "/repo", Branch: "b", DefaultBranch: "main", Remote: "origin", RepoName: "api", IsWorkspace: true}
+
+	tests := []struct {
+		name string
+		fake *fakeGitOps
+		call func(*testing.T, *fakeGitOps) error
+	}{
+		{
+			name: "push",
+			fake: &fakeGitOps{wt: baseWT, pushErr: errors.New("push failed")},
+			call: func(t *testing.T, f *fakeGitOps) error {
+				t.Helper()
+				_, err := NewAgentService(f, nil, nil, nil).GitPush(ctx, "WS", "agent", "develop")
+				return err
+			},
+		},
+		{
+			name: "pull",
+			fake: &fakeGitOps{wt: baseWT, current: "b", pullErr: errors.New("pull failed")},
+			call: func(t *testing.T, f *fakeGitOps) error {
+				t.Helper()
+				_, err := NewAgentService(f, nil, nil, nil).GitPull(ctx, "WS", "agent", "develop")
+				return err
+			},
+		},
+		{
+			name: "sync push",
+			fake: &fakeGitOps{wt: baseWT, pushErr: errors.New("push failed")},
+			call: func(t *testing.T, f *fakeGitOps) error {
+				t.Helper()
+				_, err := NewAgentService(f, nil, nil, nil).GitSync(ctx, "WS", "agent")
+				return err
+			},
+		},
+		{
+			name: "sync pull",
+			fake: &fakeGitOps{wt: baseWT, push: &ops.GitPushResult{Success: true}, current: "b", pullErr: errors.New("pull failed")},
+			call: func(t *testing.T, f *fakeGitOps) error {
+				t.Helper()
+				_, err := NewAgentService(f, nil, nil, nil).GitSync(ctx, "WS", "agent")
+				return err
+			},
+		},
+		{
+			name: "create pr",
+			fake: &fakeGitOps{wt: baseWT, prErr: errors.New("pr failed")},
+			call: func(t *testing.T, f *fakeGitOps) error {
+				t.Helper()
+				_, err := NewAgentService(f, nil, nil, nil).CreatePR(ctx, "WS", "agent", "develop")
+				return err
+			},
+		},
+		{
+			name: "reset",
+			fake: &fakeGitOps{wt: baseWT, resetErr: errors.New("reset failed")},
+			call: func(t *testing.T, f *fakeGitOps) error {
+				t.Helper()
+				_, err := NewAgentService(f, nil, nil, nil).GitReset(ctx, "WS", "agent", "develop", true, false)
+				return err
+			},
+		},
+		{
+			name: "status",
+			fake: &fakeGitOps{wt: baseWT, statusErr: errors.New("status failed")},
+			call: func(t *testing.T, f *fakeGitOps) error {
+				t.Helper()
+				_, err := NewAgentService(f, nil, nil, nil).GitStatus(ctx, "WS", "agent")
+				return err
+			},
+		},
+		{
+			name: "set branch",
+			fake: &fakeGitOps{wt: baseWT, setBranchErr: errors.New("branch failed")},
+			call: func(t *testing.T, f *fakeGitOps) error {
+				t.Helper()
+				return NewAgentService(f, nil, nil, nil).SetTargetBranch(ctx, "WS", "agent", "develop")
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := tc.call(t, tc.fake); err == nil {
+				t.Fatal("expected error, got nil")
+			}
+		})
+	}
+}
+
+func TestAgentServiceGitPushAllErrorBranches(t *testing.T) {
+	ctx := context.Background()
+	svc := NewAgentService(&fakeGitOps{worktreesErr: errors.New("list failed")}, nil, nil, nil)
+	if _, err := svc.GitPushAll(ctx, "WS"); err == nil {
+		t.Fatal("list error returned nil")
+	}
+
+	fake := &fakeGitOps{
+		worktrees: []ops.AgentWorktree{
+			{Name: "err", Path: "/err", Branch: "b", DefaultBranch: "main", Remote: "upstream"},
+			{Name: "empty-remote", Path: "/empty", Branch: "b", DefaultBranch: "main"},
+		},
+		pushErrByPath: map[string]error{"/err": errors.New("remote rejected")},
+		pushByPath:    map[string]*ops.GitPushResult{"/empty": {Success: true, Message: "ok"}},
+	}
+	svc = NewAgentService(fake, nil, nil, nil)
+	all, err := svc.GitPushAll(ctx, "WS")
+	if err != nil {
+		t.Fatalf("GitPushAll: %v", err)
+	}
+	if all.Pushed != 1 || all.Failed != 1 || len(all.Results) != 2 {
+		t.Fatalf("push all = %+v", all)
+	}
+	if all.Results[0].Error != "remote rejected" || all.Results[1].Message != "ok" {
+		t.Fatalf("results = %+v", all.Results)
+	}
+}
+
 type fakeGitOps struct {
-	wt         *ops.AgentWorktree
-	resolveErr error
-	push       *ops.GitPushResult
-	pull       *ops.GitPullResult
-	pr         *ops.GitPRResult
-	reset      *ops.GitResetResult
-	status     *ops.GitStatusResult
-	diff       ops.DiffStatResult
-	current    string
-	currentErr error
-	ghErr      error
-	mergeBase  string
-	mergeErr   error
-	commits    []ops.DiffCommitResult
-	commitErr  error
-	files      []ops.DiffFileResult
-	filesErr   error
-	patch      *ops.DiffFilePatchResult
-	patchErr   error
-	worktrees  []ops.AgentWorktree
-	pushByPath map[string]*ops.GitPushResult
+	wt            *ops.AgentWorktree
+	resolveErr    error
+	push          *ops.GitPushResult
+	pushErr       error
+	pull          *ops.GitPullResult
+	pullErr       error
+	pr            *ops.GitPRResult
+	prErr         error
+	reset         *ops.GitResetResult
+	resetErr      error
+	status        *ops.GitStatusResult
+	statusErr     error
+	diff          ops.DiffStatResult
+	current       string
+	currentErr    error
+	ghErr         error
+	mergeBase     string
+	mergeErr      error
+	commits       []ops.DiffCommitResult
+	commitErr     error
+	files         []ops.DiffFileResult
+	filesErr      error
+	patch         *ops.DiffFilePatchResult
+	patchErr      error
+	worktrees     []ops.AgentWorktree
+	worktreesErr  error
+	pushByPath    map[string]*ops.GitPushResult
+	pushErrByPath map[string]error
+	setBranchErr  error
 
 	lastPushTarget  string
 	lastPullCurrent string
@@ -140,6 +267,12 @@ func (f *fakeGitOps) ResolveAgentWorktree(_, _ string) (*ops.AgentWorktree, erro
 
 func (f *fakeGitOps) Push(path, _, target, _ string) (*ops.GitPushResult, error) {
 	f.lastPushTarget = target
+	if err := f.pushErrByPath[path]; err != nil {
+		return nil, err
+	}
+	if f.pushErr != nil {
+		return nil, f.pushErr
+	}
 	if r := f.pushByPath[path]; r != nil {
 		return r, nil
 	}
@@ -152,18 +285,34 @@ func (f *fakeGitOps) Push(path, _, target, _ string) (*ops.GitPushResult, error)
 func (f *fakeGitOps) Pull(_, current, source, _ string) (*ops.GitPullResult, error) {
 	f.lastPullCurrent = current
 	f.lastPullSource = source
+	if f.pullErr != nil {
+		return nil, f.pullErr
+	}
 	if f.pull != nil {
 		return f.pull, nil
 	}
 	return &ops.GitPullResult{Success: true}, nil
 }
 
-func (f *fakeGitOps) CreatePR(_, _, _, _ string) (*ops.GitPRResult, error) { return f.pr, nil }
+func (f *fakeGitOps) CreatePR(_, _, _, _ string) (*ops.GitPRResult, error) {
+	if f.prErr != nil {
+		return nil, f.prErr
+	}
+	return f.pr, nil
+}
 func (f *fakeGitOps) Reset(_, _, branch string, _, _ bool) (*ops.GitResetResult, error) {
 	f.lastResetBranch = branch
+	if f.resetErr != nil {
+		return nil, f.resetErr
+	}
 	return f.reset, nil
 }
-func (f *fakeGitOps) Status(_, _ string) (*ops.GitStatusResult, error) { return f.status, nil }
+func (f *fakeGitOps) Status(_, _ string) (*ops.GitStatusResult, error) {
+	if f.statusErr != nil {
+		return nil, f.statusErr
+	}
+	return f.status, nil
+}
 func (f *fakeGitOps) GetCurrentBranch(_ string) (string, error) {
 	if f.currentErr != nil {
 		return "", f.currentErr
@@ -173,9 +322,15 @@ func (f *fakeGitOps) GetCurrentBranch(_ string) (string, error) {
 func (f *fakeGitOps) CheckGhInstalled() error { return f.ghErr }
 func (f *fakeGitOps) SetRepoDefaultBranch(_, _, branch string) error {
 	f.lastSetBranch = branch
+	if f.setBranchErr != nil {
+		return f.setBranchErr
+	}
 	return nil
 }
 func (f *fakeGitOps) ListAgentWorktrees(_ string) ([]ops.AgentWorktree, error) {
+	if f.worktreesErr != nil {
+		return nil, f.worktreesErr
+	}
 	return f.worktrees, nil
 }
 func (f *fakeGitOps) DiffStat(_, _ string) ops.DiffStatResult { return f.diff }

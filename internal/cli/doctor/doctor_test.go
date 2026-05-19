@@ -640,6 +640,56 @@ func TestLoomSessionRegex(t *testing.T) {
 	}
 }
 
+func TestDefaultListLoomTmuxSessionsParsesTmuxOutput(t *testing.T) {
+	fakeBin := t.TempDir()
+	tmuxPath := filepath.Join(fakeBin, "tmux")
+	script := `#!/bin/sh
+if [ "$1" = "list-sessions" ]; then
+  printf 'loom-aaaabbbb-plan-falcon-12345\t1700000000\n'
+  printf 'not-loom\t1700000001\n'
+  printf 'loom-default-task-my-agent-67890\tbad-created\n'
+  exit 0
+fi
+exit 2
+`
+	if err := os.WriteFile(tmuxPath, []byte(script), 0755); err != nil {
+		t.Fatalf("write fake tmux: %v", err)
+	}
+	t.Setenv("PATH", fakeBin)
+
+	sessions, err := defaultListLoomTmuxSessions()
+	if err != nil {
+		t.Fatalf("defaultListLoomTmuxSessions: %v", err)
+	}
+	if len(sessions) != 2 {
+		t.Fatalf("sessions = %+v", sessions)
+	}
+	if sessions[0].Agent != "falcon" || sessions[0].Role != "plan" || sessions[0].PID != 12345 || sessions[0].Created.IsZero() {
+		t.Fatalf("first session = %+v", sessions[0])
+	}
+	if sessions[1].Agent != "my-agent" || sessions[1].Role != "task" || sessions[1].PID != 67890 || !sessions[1].Created.IsZero() {
+		t.Fatalf("second session = %+v", sessions[1])
+	}
+}
+
+func TestDefaultListLoomTmuxSessionsNoServerIsEmpty(t *testing.T) {
+	fakeBin := t.TempDir()
+	tmuxPath := filepath.Join(fakeBin, "tmux")
+	script := "#!/bin/sh\nprintf 'no server running on /tmp/tmux\\n' >&2\nexit 1\n"
+	if err := os.WriteFile(tmuxPath, []byte(script), 0755); err != nil {
+		t.Fatalf("write fake tmux: %v", err)
+	}
+	t.Setenv("PATH", fakeBin)
+
+	sessions, err := defaultListLoomTmuxSessions()
+	if err != nil {
+		t.Fatalf("defaultListLoomTmuxSessions: %v", err)
+	}
+	if len(sessions) != 0 {
+		t.Fatalf("sessions = %+v", sessions)
+	}
+}
+
 func TestCheckOrphanedTmuxSessions_NoSessions(t *testing.T) {
 	origList := listLoomTmuxSessions
 	origFix := doctorFix

@@ -296,3 +296,90 @@ func TestValidatePathWithinDir_DeniesSymlinkEscape(t *testing.T) {
 		t.Fatalf("error = %q, want outside allowed directory", err.Error())
 	}
 }
+
+func TestGetLogDirEnvPriorityAndTaskPathValidation(t *testing.T) {
+	runtimeDir := t.TempDir()
+	configDir := t.TempDir()
+	t.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", runtimeDir)
+	t.Setenv("LOOM_CONFIG_DIR", configDir)
+
+	dir, err := GetLogDir()
+	if err != nil {
+		t.Fatalf("GetLogDir: %v", err)
+	}
+	if dir != filepath.Join(runtimeDir, ".loom", "logs") {
+		t.Fatalf("GetLogDir = %q, want runtime dir", dir)
+	}
+
+	taskDir := filepath.Join(runtimeDir, ".loom", "logs", "_default", "tasks", "task-1")
+	if err := os.MkdirAll(taskDir, 0755); err != nil {
+		t.Fatalf("mkdir task dir: %v", err)
+	}
+	taskPath, err := GetTaskLogPath("", "task-1", "review")
+	if err != nil {
+		t.Fatalf("GetTaskLogPath: %v", err)
+	}
+	if taskPath != filepath.Join(taskDir, "review.log") {
+		t.Fatalf("task path = %q", taskPath)
+	}
+}
+
+func TestListTaskPhasesErrorBranches(t *testing.T) {
+	runtimeDir := t.TempDir()
+	t.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", runtimeDir)
+	t.Setenv("LOOM_CONFIG_DIR", "")
+
+	missing, err := ListTaskPhases("WS", "missing")
+	if err != nil {
+		t.Fatalf("missing ListTaskPhases: %v", err)
+	}
+	if len(missing) != 0 {
+		t.Fatalf("missing phases = %#v", missing)
+	}
+
+	taskBase := filepath.Join(runtimeDir, ".loom", "logs", "WS", "tasks")
+	if err := os.MkdirAll(taskBase, 0755); err != nil {
+		t.Fatalf("mkdir task base: %v", err)
+	}
+	fileTask := filepath.Join(taskBase, "file-task")
+	if err := os.WriteFile(fileTask, []byte("not a dir"), 0600); err != nil {
+		t.Fatalf("write task file: %v", err)
+	}
+	if _, err := ListTaskPhases("WS", "file-task"); err == nil || !strings.Contains(err.Error(), "not a directory") {
+		t.Fatalf("file task err = %v", err)
+	}
+
+	realTask := filepath.Join(taskBase, "real-task")
+	if err := os.MkdirAll(realTask, 0755); err != nil {
+		t.Fatalf("mkdir real task: %v", err)
+	}
+	linkTask := filepath.Join(taskBase, "link-task")
+	if err := os.Symlink(realTask, linkTask); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	if _, err := ListTaskPhases("WS", "link-task"); err == nil || !strings.Contains(err.Error(), "refusing to follow symlink") {
+		t.Fatalf("symlink task err = %v", err)
+	}
+}
+
+func TestPathWithinDirAndResolvePathHelpers(t *testing.T) {
+	root := t.TempDir()
+	if !pathWithinDir(root, root) {
+		t.Fatal("root should be within itself")
+	}
+	if pathWithinDir(filepath.Dir(root), root) {
+		t.Fatal("parent should not be within child")
+	}
+
+	missing := filepath.Join(root, "missing", "leaf")
+	resolved, err := resolvePathForComparison(missing)
+	if err != nil {
+		t.Fatalf("resolve missing path: %v", err)
+	}
+	if !strings.HasSuffix(resolved, filepath.Join("missing", "leaf")) {
+		t.Fatalf("resolved missing path = %q", resolved)
+	}
+	if FileExists(missing) {
+		t.Fatal("FileExists returned true for missing file")
+	}
+}

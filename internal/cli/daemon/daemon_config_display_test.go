@@ -137,3 +137,42 @@ func TestResolvedConfigForDisplay_DoesNotMutateOriginal(t *testing.T) {
 		t.Error("Original NoWorkBackoff should still be nil")
 	}
 }
+
+func TestDeepCopyRestartPolicyClonesEveryPointer(t *testing.T) {
+	rateNoCount := true
+	src := &RestartPolicy{
+		MaxRetries:       intPtr(1),
+		BackoffInitial:   intPtr(2),
+		BackoffMax:       intPtr(3),
+		OutputTimeout:    intPtr(4),
+		RateLimitBackoff: intPtr(5),
+		RateLimitMaxWait: intPtr(6),
+		RateLimitNoCount: &rateNoCount,
+		TimeoutBackoff:   intPtr(7),
+		NoWorkBackoff:    intPtr(8),
+		IdlePollInterval: intPtr(9),
+		YieldTimeout:     intPtr(10),
+		SigtermTimeout:   intPtr(11),
+	}
+	dst := deepCopyRestartPolicy(src)
+
+	*src.MaxRetries = 101
+	*src.BackoffInitial = 102
+	*src.BackoffMax = 103
+	*src.OutputTimeout = 104
+	*src.RateLimitBackoff = 105
+	*src.RateLimitMaxWait = 106
+	*src.RateLimitNoCount = false
+	*src.TimeoutBackoff = 107
+	*src.NoWorkBackoff = 108
+	*src.IdlePollInterval = 109
+	*src.YieldTimeout = 110
+	*src.SigtermTimeout = 111
+
+	if *dst.MaxRetries != 1 || *dst.BackoffInitial != 2 || *dst.BackoffMax != 3 ||
+		*dst.OutputTimeout != 4 || *dst.RateLimitBackoff != 5 || *dst.RateLimitMaxWait != 6 ||
+		!*dst.RateLimitNoCount || *dst.TimeoutBackoff != 7 || *dst.NoWorkBackoff != 8 ||
+		*dst.IdlePollInterval != 9 || *dst.YieldTimeout != 10 || *dst.SigtermTimeout != 11 {
+		t.Fatalf("deep copy changed after source mutation: %+v", dst)
+	}
+}

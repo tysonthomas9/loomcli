@@ -2,12 +2,15 @@ package service
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/types"
+	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 )
 
 func TestListIssues_Backend_StandardListFiltersExcludedStatus(t *testing.T) {
@@ -244,6 +247,94 @@ func TestListIssues_Backend_KanbanAppendsDeferredOnlyItems(t *testing.T) {
 	deferred := findKanbanIssue(t, result.KanbanIssues, "future-deferred")
 	if deferred.IsReady || !deferred.IsDeferred || deferred.Issue.Status != types.StatusOpen {
 		t.Fatalf("deferred flags/status = ready:%v deferred:%v status:%q", deferred.IsReady, deferred.IsDeferred, deferred.Issue.Status)
+	}
+}
+
+func TestListIssues_Pool_ListKanbanStandardAndBlockedResults(t *testing.T) {
+	now := time.Now().UTC()
+	var captured []rpc.ListKanbanArgs
+	socket := startMovePoolRPCServer(t, func(req rpc.Request) rpc.Response {
+		switch req.Operation {
+		case rpc.OpHealth:
+			return movePoolJSONResponse(t, rpc.HealthResponse{Status: "healthy", Compatible: true})
+		case rpc.OpListKanban:
+			var args rpc.ListKanbanArgs
+			if err := json.Unmarshal(req.Args, &args); err != nil {
+				return rpc.Response{Success: false, Error: "bad args"}
+			}
+			captured = append(captured, args)
+			return movePoolJSONResponse(t, rpc.ListKanbanResponse{Issues: []*rpc.KanbanIssueRPC{
+				{
+					IssueWithCounts: &types.IssueWithCounts{Issue: &types.Issue{
+						ID: "ISS-1", Title: "Ready", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask,
+						CreatedAt: now, UpdatedAt: now,
+					}},
+					ParentID: "EPIC-1", ParentTitle: "Epic", Repo: "api", IsReady: true,
+				},
+				{
+					IssueWithCounts: &types.IssueWithCounts{Issue: &types.Issue{
+						ID: "ISS-2", Title: "Blocked", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeBug,
+						CreatedAt: now, UpdatedAt: now,
+					}},
+					IsBlocked: true, BlockedBy: []string{"ISS-0"},
+				},
+			}})
+		default:
+			return rpc.Response{Success: false, Error: "unexpected op " + req.Operation}
+		}
+	})
+	pool, err := daemon.NewConnectionPool(socket, 1)
+	if err != nil {
+		t.Fatalf("pool: %v", err)
+	}
+	t.Cleanup(func() { _ = pool.Close() })
+	pool.SetDialTimeout(time.Second)
+	svc := NewIssueService(pool, nil, nil)
+
+	standard, err := svc.ListIssues(context.Background(), ListIssuesParams{
+		Args: &rpc.ListArgs{Status: string(types.StatusOpen), Limit: 2},
+	})
+	if err != nil {
+		t.Fatalf("ListIssues standard: %v", err)
+	}
+	if len(standard.Issues) != 2 || standard.Issues[0].Parent == nil || *standard.Issues[0].Parent != "EPIC-1" {
+		t.Fatalf("standard result = %+v", standard)
+	}
+
+	blocked, err := svc.ListIssues(context.Background(), ListIssuesParams{
+		Args:           &rpc.ListArgs{Assignee: "alice"},
+		IncludeBlocked: true,
+		ExcludeStatus:  []string{string(types.StatusClosed)},
+	})
+	if err != nil {
+		t.Fatalf("ListIssues blocked: %v", err)
+	}
+	if len(blocked.KanbanIssues) != 2 || !blocked.KanbanIssues[1].IsBlocked || blocked.KanbanIssues[1].BlockedByCount != 1 {
+		t.Fatalf("blocked result = %+v", blocked)
+	}
+	if len(captured) != 2 || captured[1].Assignee != "alice" || !captured[1].IncludeBlocked || len(captured[1].ExcludeStatus) != 1 {
+		t.Fatalf("captured args = %+v", captured)
+	}
+}
+
+func TestListIssues_PoolFallbackAndErrorBranches(t *testing.T) {
+	ctx := context.Background()
+	fb := &fakeIssueBackend{listResult: []backend.IssueData{{ID: "BACKEND-1", Status: string(types.StatusOpen)}}}
+	pool := &fakeIssuePool{getErr: context.DeadlineExceeded}
+	svc := &issueServiceImpl{pool: pool, backendFn: func(context.Context) backend.IssueBackend { return fb }}
+	result, err := svc.ListIssues(ctx, ListIssuesParams{Args: &rpc.ListArgs{}})
+	if err != nil || len(result.Issues) != 1 || result.Issues[0].Issue.ID != "BACKEND-1" {
+		t.Fatalf("backend fallback result = %+v err=%v", result, err)
+	}
+
+	svc = &issueServiceImpl{pool: &fakeIssuePool{getErr: context.DeadlineExceeded}}
+	if _, err := svc.ListIssues(ctx, ListIssuesParams{Args: &rpc.ListArgs{}}); !serviceErrorKind(err, KindTimeout) {
+		t.Fatalf("deadline without backend err = %v", err)
+	}
+
+	svc = &issueServiceImpl{pool: &fakeIssuePool{getErr: errors.New("dial failed")}}
+	if _, err := svc.ListIssues(ctx, ListIssuesParams{Args: &rpc.ListArgs{}}); !serviceErrorKind(err, KindUnavailable) {
+		t.Fatalf("dial failure err = %v", err)
 	}
 }
 

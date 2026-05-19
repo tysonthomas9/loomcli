@@ -506,6 +506,98 @@ func TestMoveIssue_Backend_ClosedSource_Validation(t *testing.T) {
 	}
 }
 
+func TestMoveIssue_Backend_ValidationAndSourceErrors(t *testing.T) {
+	svc := newServiceWithFake(&fakeIssueBackend{})
+	for _, tc := range []struct {
+		name   string
+		params MoveIssueParams
+	}{
+		{name: "empty issue", params: MoveIssueParams{TargetWorkspace: "Target", Validator: testWorkspaceValidator{targetID: "target-ws"}}},
+		{name: "missing validator", params: MoveIssueParams{IssueID: "SRC-1", TargetWorkspace: "Target"}},
+		{name: "validator error", params: MoveIssueParams{IssueID: "SRC-1", TargetWorkspace: "Target", Validator: testWorkspaceValidator{err: ErrValidation("bad target")}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := svc.MoveIssue(context.Background(), tc.params)
+			var sErr *ServiceError
+			if !errors.As(err, &sErr) || sErr.Kind != KindValidation {
+				t.Fatalf("expected validation error, got %v", err)
+			}
+		})
+	}
+
+	notFoundSvc := newServiceWithFake(&fakeIssueBackend{getResult: nil})
+	_, err := notFoundSvc.MoveIssue(context.Background(), MoveIssueParams{
+		IssueID: "SRC-1", TargetWorkspace: "Target", Validator: testWorkspaceValidator{targetID: "target-ws"},
+	})
+	var sErr *ServiceError
+	if !errors.As(err, &sErr) || sErr.Kind != KindNotFound {
+		t.Fatalf("expected not found, got %v", err)
+	}
+
+	backendErrSvc := newServiceWithFake(&fakeIssueBackend{getErr: backend.ErrUnavailable("Get", "down", nil)})
+	_, err = backendErrSvc.MoveIssue(context.Background(), MoveIssueParams{
+		IssueID: "SRC-1", TargetWorkspace: "Target", Validator: testWorkspaceValidator{targetID: "target-ws"},
+	})
+	if !errors.As(err, &sErr) || sErr.Kind != KindUnavailable {
+		t.Fatalf("expected unavailable, got %v", err)
+	}
+}
+
+func TestMoveIssue_Backend_CreateAndCleanupWarnings(t *testing.T) {
+	now := time.Now().UTC()
+	source := &fakeIssueBackend{
+		getResult: &backend.IssueDetailData{IssueData: backend.IssueData{
+			ID: "SRC-1", Title: "Move me", Status: "open", Priority: 2, IssueType: "task",
+			CreatedAt: now, UpdatedAt: now,
+		}},
+		addCommentErr: errors.New("comment failed"),
+		closeErr:      errors.New("close failed"),
+	}
+	target := &fakeIssueBackend{
+		createResult: &backend.IssueData{ID: "DST-9", Title: "Move me", Status: "open", CreatedAt: now, UpdatedAt: now},
+	}
+
+	type workspaceKey struct{}
+	withWorkspace := func(ctx context.Context, wsID string) context.Context {
+		return context.WithValue(ctx, workspaceKey{}, wsID)
+	}
+	provider := func(ctx context.Context) backend.IssueBackend {
+		if wsID, _ := ctx.Value(workspaceKey{}).(string); wsID == "target-ws" {
+			return target
+		}
+		return source
+	}
+	svc := NewIssueServiceWithBackend(nil, nil, withWorkspace, provider)
+
+	result, err := svc.MoveIssue(context.Background(), MoveIssueParams{
+		IssueID: "SRC-1", TargetWorkspace: "Target", Validator: testWorkspaceValidator{targetID: "target-ws"},
+	})
+	if err != nil {
+		t.Fatalf("MoveIssue: %v", err)
+	}
+	if result.TargetID != "DST-9" || len(result.Warnings) != 2 {
+		t.Fatalf("result = %+v", result)
+	}
+
+	target.createResult = nil
+	_, err = svc.MoveIssue(context.Background(), MoveIssueParams{
+		IssueID: "SRC-1", TargetWorkspace: "Target", Validator: testWorkspaceValidator{targetID: "target-ws"},
+	})
+	var sErr *ServiceError
+	if !errors.As(err, &sErr) || sErr.Kind != KindInternal {
+		t.Fatalf("nil created issue should be internal error, got %v", err)
+	}
+
+	target.createResult = &backend.IssueData{ID: "DST-9"}
+	target.createErr = backend.ErrValidation("Create", "bad create")
+	_, err = svc.MoveIssue(context.Background(), MoveIssueParams{
+		IssueID: "SRC-1", TargetWorkspace: "Target", Validator: testWorkspaceValidator{targetID: "target-ws"},
+	})
+	if !errors.As(err, &sErr) || sErr.Kind != KindValidation {
+		t.Fatalf("create validation should map to service validation, got %v", err)
+	}
+}
+
 // --- AddComment ---
 
 func TestAddComment_Backend_Success(t *testing.T) {

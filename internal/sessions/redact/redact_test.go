@@ -125,3 +125,65 @@ func TestJSONLContent_PreservesSessionID(t *testing.T) {
 		t.Errorf("session_id value was incorrectly modified: got %q", got)
 	}
 }
+
+func TestJSONLContent_NestedArraysInvalidJSONAndSkippedObjects(t *testing.T) {
+	input := strings.Join([]string{
+		`{"items":[{"text":"token ` + highEntropySecret + `"},{"type":"image","data":"` + highEntropySecret + `"}],"signature":"` + highEntropySecret + `"}`,
+		`not-json ` + highEntropySecret,
+		``,
+	}, "\n")
+
+	got, err := JSONLContent(input)
+	if err != nil {
+		t.Fatalf("JSONLContent: %v", err)
+	}
+	if strings.Contains(got, `"text":"token `+highEntropySecret+`"`) {
+		t.Fatalf("nested text secret leaked: %q", got)
+	}
+	if !strings.Contains(got, `"type":"image","data":"`+highEntropySecret+`"`) {
+		t.Fatalf("image payload should be preserved: %q", got)
+	}
+	if !strings.Contains(got, `"signature":"`+highEntropySecret+`"`) {
+		t.Fatalf("signature field should be preserved: %q", got)
+	}
+	if strings.Contains(got, `not-json `+highEntropySecret) {
+		t.Fatalf("invalid JSON line was not entropy-redacted: %q", got)
+	}
+}
+
+func TestStringMergesOverlappingSecretRegionsAndPreservesJSONEscapes(t *testing.T) {
+	githubToken := "ghp_0123456789abcdefghijklmnopqrstuvwxyz"
+	input := `{"msg":"first\n` + githubToken + ` and again ` + githubToken + `"}`
+	got := String(input)
+	if strings.Contains(got, githubToken) {
+		t.Fatalf("token leaked: %q", got)
+	}
+	if strings.Contains(got, `\R`) {
+		t.Fatalf("redaction broke JSON escape sequence: %q", got)
+	}
+	if strings.Count(got, RedactedPlaceholder) != 2 {
+		t.Fatalf("redaction count = %d in %q, want 2", strings.Count(got, RedactedPlaceholder), got)
+	}
+}
+
+func TestRedactSmallHelpers(t *testing.T) {
+	if shannonEntropy("") != 0 {
+		t.Fatal("empty entropy should be zero")
+	}
+	if shouldSkipJSONLField("thread_id") != true || shouldSkipJSONLField("hybrid") != false {
+		t.Fatal("field skip allowlist mismatch")
+	}
+	if !shouldSkipJSONLObject(map[string]any{"type": "base64"}) {
+		t.Fatal("base64 block should be skipped")
+	}
+	if shouldSkipJSONLObject(map[string]any{"type": "text"}) {
+		t.Fatal("text block should not be skipped")
+	}
+	encoded, err := jsonEncodeString(`<tag>&value`)
+	if err != nil {
+		t.Fatalf("jsonEncodeString: %v", err)
+	}
+	if encoded != `"<tag>&value"` {
+		t.Fatalf("jsonEncodeString = %q", encoded)
+	}
+}
