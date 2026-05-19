@@ -60,6 +60,23 @@ var daemonDryRun bool
 var daemonStopForce bool
 var daemonStopTimeout int // seconds; 0 = default (60)
 
+var (
+	isolateProcessGroupFn = isolateProcessGroup
+	daemonGetwdFn         = os.Getwd
+	loadDaemonConfigFn    = cfgpkg.LoadDaemonConfig
+	validateDaemonPathsFn = ValidateDaemonPaths
+	printDryRunInfoFn     = printDryRunInfo
+	prepareDaemonDirsFn   = prepareDaemonDirs
+	acquireDaemonLockFn   = acquireDaemonLock
+	initPIDFileFn         = initPIDFile
+	initDaemonServicesFn  = initDaemonServices
+	runDaemonMainLoopFn   = runDaemonMainLoop
+	setupSignalHandlerFn  = setupSignalHandler
+	initOTelExporterFn    = initOTelExporter
+	cmdstoreOpenStoreFn   = cmdstore.OpenStore
+	newDaemonFn           = NewDaemon
+)
+
 // daemonCmd is the parent command for daemon subcommands
 var daemonCmd = &cobra.Command{
 	Use:     "daemon",
@@ -167,42 +184,42 @@ func setupSignalHandler() chan struct{} {
 }
 
 func runDaemon(cmd *cobra.Command, args []string) {
-	isolateProcessGroup()
+	isolateProcessGroupFn()
 
-	projectDir, err := os.Getwd()
+	projectDir, err := daemonGetwdFn()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: cannot determine working directory: %v\n", err)
 		os.Exit(1)
 	}
 
-	config, err := cfgpkg.LoadDaemonConfig(projectDir)
+	config, err := loadDaemonConfigFn(projectDir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: loading config: %v\n", err)
 		os.Exit(1)
 	}
 
 	paths := resolveDaemonPaths(projectDir, config)
-	ValidateDaemonPaths(projectDir, paths.pidFile, paths.logDir)
+	validateDaemonPathsFn(projectDir, paths.pidFile, paths.logDir)
 
 	if daemonDryRun {
-		printDryRunInfo(config, paths.pidFile, paths.logDir, paths.stateFile)
+		printDryRunInfoFn(config, paths.pidFile, paths.logDir, paths.stateFile)
 		return
 	}
 
-	prepareDaemonDirs(paths.pidFile, paths.logDir)
-	lockFile := acquireDaemonLock(paths.lockFile)
+	prepareDaemonDirsFn(paths.pidFile, paths.logDir)
+	lockFile := acquireDaemonLockFn(paths.lockFile)
 	defer lockFile.Close()
 	defer os.Remove(paths.lockFile)
 
-	initPIDFile(paths.pidFile)
+	initPIDFileFn(paths.pidFile)
 	defer os.Remove(paths.pidFile)
 	// runDaemonMainLoop waits for the state updater to stop before returning;
 	// keep that invariant so this deferred cleanup cannot race a state write.
 	defer os.Remove(paths.stateFile)
 
-	shutdown, daemon := initDaemonServices(config, projectDir, paths)
+	shutdown, daemon := initDaemonServicesFn(config, projectDir, paths)
 
-	runDaemonMainLoop(config, projectDir, paths, shutdown, daemon, lockFile)
+	runDaemonMainLoopFn(config, projectDir, paths, shutdown, daemon, lockFile)
 }
 
 // daemonPaths holds resolved filesystem paths for the daemon.
@@ -237,16 +254,16 @@ func initPIDFile(pidFilePath string) {
 
 // initDaemonServices sets up shutdown handler, event bus, fleet-db store access, and creates the daemon.
 func initDaemonServices(config *cfgpkg.DaemonConfig, projectDir string, paths daemonPaths) (chan struct{}, *Daemon) {
-	shutdown := setupSignalHandler()
+	shutdown := setupSignalHandlerFn()
 
 	eventBus := events.NewBus(paths.eventsDir)
 
-	if otelExp := initOTelExporter(config, eventBus); otelExp != nil {
+	if otelExp := initOTelExporterFn(config, eventBus); otelExp != nil {
 		// Caller cannot defer this, but otel exporter registers its own shutdown hook
 		_ = otelExp
 	}
 
-	storeHandle, storeErr := cmdstore.OpenStore(cmdstore.RootContext())
+	storeHandle, storeErr := cmdstoreOpenStoreFn(cmdstore.RootContext())
 	if storeErr != nil {
 		fmt.Fprintf(os.Stderr, "Error: failed to open fleet-db store for daemon: %v\n", storeErr)
 		os.Exit(1)
@@ -256,7 +273,7 @@ func initDaemonServices(config *cfgpkg.DaemonConfig, projectDir string, paths da
 		st = storeHandle.Store
 	}
 
-	daemon, err := NewDaemon(config, projectDir, eventBus, cli.DefaultIssueBackend(), st)
+	daemon, err := newDaemonFn(config, projectDir, eventBus, cli.DefaultIssueBackend(), st)
 	if err != nil {
 		if storeHandle != nil {
 			_ = storeHandle.Close()
@@ -386,7 +403,7 @@ func runDaemonStop(cmd *cobra.Command, args []string) {
 		if cmd.Flags().Changed("timeout") {
 			timeout = time.Duration(daemonStopTimeout) * time.Second
 		}
-		runDaemonAgentStop(args[0], daemonStopForce, timeout)
+		runDaemonAgentStopFn(args[0], daemonStopForce, timeout)
 		return
 	}
 
@@ -412,9 +429,9 @@ func runDaemonStop(cmd *cobra.Command, args []string) {
 	}
 
 	if daemonStopForce {
-		stopDaemonForce(rt.PID)
+		stopDaemonForceFn(rt.PID)
 	} else {
-		stopDaemonGraceful(rt.PID)
+		stopDaemonGracefulFn(rt.PID)
 	}
 }
 

@@ -272,6 +272,16 @@ func TestSessionServiceDetailTranscriptDiffAndSubagents(t *testing.T) {
 	if len(subagents) != 1 || subagents[0] != "abc123" {
 		t.Fatalf("subagents = %+v", subagents)
 	}
+	subEvents, err := svc.GetSessionSubagentTranscript(t.Context(), "WS", "TASK-4", sess.SessionID(), "abc123")
+	if err != nil {
+		t.Fatalf("GetSessionSubagentTranscript: %v", err)
+	}
+	if subEvents == nil {
+		t.Fatal("subagent transcript events should be an empty slice, not nil")
+	}
+	if _, err := svc.GetSessionSubagentTranscript(t.Context(), "WS", "TASK-4", sess.SessionID(), ""); err == nil {
+		t.Fatal("empty subagent id returned nil error")
+	}
 	if _, err := svc.GetSessionSubagentTranscript(t.Context(), "WS", "TASK-4", sess.SessionID(), "bad/id"); err == nil {
 		t.Fatal("invalid subagent id returned nil error")
 	}

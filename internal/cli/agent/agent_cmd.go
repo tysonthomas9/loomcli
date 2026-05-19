@@ -22,6 +22,17 @@ var (
 	agentMaxTasks    int
 	agentIdleTimeout int
 	agentParentID    string
+
+	validatePromptFileFn = validatePromptFile
+	mapTaskFilterFn      = mapTaskFilter
+	resolveAgentTargetFn = workspace.ResolveAgentTarget
+	runAgentDaemonFn     = runAgentDaemon
+	runAgentAutoModeFn   = runAgentAutoMode
+	runAgentSingleTaskFn = runAgentSingleTask
+	automodeTmuxFn       = automode.IsTmuxAvailable
+	setupSignalHandlerFn = automode.SetupSignalHandler
+	runAutoModeTmuxFn    = automode.RunAutoModeTmux
+	runAutoModeLoopFn    = automode.RunAutoModeLoop
 )
 
 var agentCmd = &cobra.Command{
@@ -77,9 +88,9 @@ func init() {
 
 func runAgent(cmd *cobra.Command, args []string) {
 	argName := args[0]
-	validatePromptFile(agentPromptFile)
+	validatePromptFileFn(agentPromptFile)
 
-	taskCheckFn, err := mapTaskFilter(agentTaskFilter, agentParentID)
+	taskCheckFn, err := mapTaskFilterFn(agentTaskFilter, agentParentID)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		cli.ExitWithFlush(1)
@@ -90,7 +101,7 @@ func runAgent(cmd *cobra.Command, args []string) {
 		taskCheckFn = routerCheck
 	}
 
-	target, err := workspace.ResolveAgentTarget(argName, "")
+	target, err := resolveAgentTargetFn(argName, "")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		cli.ExitWithFlush(1)
@@ -101,16 +112,16 @@ func runAgent(cmd *cobra.Command, args []string) {
 	promptGen := makeCustomPromptGen(agentPromptFile)
 
 	if agentDaemonMode {
-		runAgentDaemon(worktreePath, agentName, promptGen)
+		runAgentDaemonFn(worktreePath, agentName, promptGen)
 		return
 	}
 
 	if agentAutoMode {
-		runAgentAutoMode(worktreePath, agentName, promptGen, taskCheckFn)
+		runAgentAutoModeFn(worktreePath, agentName, promptGen, taskCheckFn)
 		return
 	}
 
-	runAgentSingleTask(worktreePath, agentName, promptGen, taskCheckFn)
+	runAgentSingleTaskFn(worktreePath, agentName, promptGen, taskCheckFn)
 }
 
 // validatePromptFile ensures the prompt path exists and is a regular file.
@@ -178,9 +189,9 @@ func agentAutoOpts(worktreePath, agentName string, promptGen func(string, *confi
 func runAgentAutoMode(worktreePath, agentName string, promptGen func(string, *config.WorkspaceConfig) string, taskCheckFn func() (bool, error)) {
 	opts := agentAutoOpts(worktreePath, agentName, promptGen, taskCheckFn)
 
-	if automode.IsTmuxAvailable() {
-		shutdown := automode.SetupSignalHandler()
-		automode.RunAutoModeTmux(opts, shutdown)
+	if automodeTmuxFn() {
+		shutdown := setupSignalHandlerFn()
+		runAutoModeTmuxFn(opts, shutdown)
 		return
 	}
 
@@ -192,8 +203,8 @@ func runAgentAutoMode(worktreePath, agentName string, promptGen func(string, *co
 	defer func() { _ = cli.ReleaseLock(worktreePath) }()
 
 	fmt.Println("[auto] tmux not found, using JSON streaming mode")
-	shutdown := automode.SetupSignalHandler()
-	automode.RunAutoModeLoop(opts, shutdown)
+	shutdown := setupSignalHandlerFn()
+	runAutoModeLoopFn(opts, shutdown)
 }
 
 // runAgentSingleTask handles the single-task (non-auto, non-daemon) execution path.

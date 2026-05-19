@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -278,6 +279,90 @@ func TestRunCodexLeadRuntimeEarlyDirectoryError(t *testing.T) {
 		t.Fatal("RunCodexLeadRuntime with missing binary returned nil")
 	}
 	_ = os.RemoveAll(badWorkDir)
+}
+
+func TestRunCodexLeadRuntimeWithHookedProcessLifecycle(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	workDir := t.TempDir()
+
+	oldEndpoint := freeLoopbackWSEndpointFn
+	oldStart := startCodexAppServerFn
+	oldWait := waitForCodexAppServerFn
+	oldTUI := runCodexRemoteTUIFn
+	oldStop := stopCodexAppServerFn
+	oldDiscover := discoverCodexLeadThreadFn
+	t.Cleanup(func() {
+		freeLoopbackWSEndpointFn = oldEndpoint
+		startCodexAppServerFn = oldStart
+		waitForCodexAppServerFn = oldWait
+		runCodexRemoteTUIFn = oldTUI
+		stopCodexAppServerFn = oldStop
+		discoverCodexLeadThreadFn = oldDiscover
+	})
+
+	freeLoopbackWSEndpointFn = func() (string, error) { return "ws://127.0.0.1:65530", nil }
+	appErr := make(chan error, 1)
+	cancelCalled := false
+	stopCalled := false
+	discoverCalled := make(chan struct{}, 1)
+	startCodexAppServerFn = func(_ context.Context, cfg CodexLeadRuntimeConfig, runtimeHome, sqliteHome, endpoint string) (*exec.Cmd, chan error, context.CancelFunc, *os.File, error) {
+		if cfg.WorkDir != workDir || !strings.Contains(runtimeHome, filepath.Join("ws", "lead", "sess")) || !strings.HasSuffix(sqliteHome, "sqlite") || endpoint == "" {
+			t.Fatalf("start args cfg=%+v runtime=%q sqlite=%q endpoint=%q", cfg, runtimeHome, sqliteHome, endpoint)
+		}
+		logFile, err := os.CreateTemp(t.TempDir(), "codex-log-*")
+		if err != nil {
+			t.Fatalf("create temp log: %v", err)
+		}
+		return &exec.Cmd{Process: &os.Process{Pid: 12345}}, appErr, func() { cancelCalled = true }, logFile, nil
+	}
+	waitForCodexAppServerFn = func(context.Context, string, <-chan error) error { return nil }
+	discoverCodexLeadThreadFn = func(ctx context.Context, _ CodexLeadRuntimeConfig, runtime CodexRuntimeMetadata, _ time.Time) {
+		if runtime.Status != RuntimeStatusStarting || runtime.Endpoint == "" || runtime.PID != 12345 {
+			t.Errorf("discover runtime = %+v", runtime)
+		}
+		discoverCalled <- struct{}{}
+		<-ctx.Done()
+	}
+	runCodexRemoteTUIFn = func(_ context.Context, cfg CodexLeadRuntimeConfig, endpoint string) error {
+		if cfg.WorkDir != workDir || endpoint != "ws://127.0.0.1:65530" {
+			t.Fatalf("tui args cfg=%+v endpoint=%q", cfg, endpoint)
+		}
+		return nil
+	}
+	stopCodexAppServerFn = func(*exec.Cmd, <-chan error, context.CancelFunc) error {
+		stopCalled = true
+		return nil
+	}
+
+	err := RunCodexLeadRuntime(context.Background(), CodexLeadRuntimeConfig{
+		Workspace: "WS", LeadName: "lead", SessionID: "sess",
+		WorkDir: workDir, Prompt: "prompt", CodexPath: "codex",
+		Stdin: strings.NewReader(""), Stdout: io.Discard, Stderr: io.Discard,
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	if err != nil {
+		t.Fatalf("RunCodexLeadRuntime: %v", err)
+	}
+	if !stopCalled || !cancelCalled {
+		t.Fatalf("stopCalled=%t cancelCalled=%t", stopCalled, cancelCalled)
+	}
+	select {
+	case <-discoverCalled:
+	case <-time.After(time.Second):
+		t.Fatal("discover hook was not called")
+	}
+
+	waitForCodexAppServerFn = func(context.Context, string, <-chan error) error { return errors.New("not ready") }
+	stopCalled = false
+	err = RunCodexLeadRuntime(context.Background(), CodexLeadRuntimeConfig{
+		Workspace: "WS", LeadName: "lead", SessionID: "sess2",
+		WorkDir: workDir, CodexPath: "codex",
+		Stdin: strings.NewReader(""), Stdout: io.Discard, Stderr: io.Discard,
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	if err == nil || !strings.Contains(err.Error(), "not ready") || !stopCalled {
+		t.Fatalf("failure branch err=%v stopCalled=%t", err, stopCalled)
+	}
 }
 
 func writeCodexRuntimeScript(t *testing.T, contents string) string {

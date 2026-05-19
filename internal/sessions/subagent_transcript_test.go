@@ -3,6 +3,7 @@ package sessions
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -128,5 +129,53 @@ func TestListSubagentTranscripts_ReturnsCaptured(t *testing.T) {
 	}
 	if len(names) != 3 {
 		t.Errorf("want 3, got %d: %v", len(names), names)
+	}
+}
+
+func TestSyncSubagentTranscriptValidationAndMissingBranches(t *testing.T) {
+	const sid = "20260417-120000-nova-abcd-0123abcd"
+	store, sessDir := newStoreWithSession(t, sid)
+	src := filepath.Join(t.TempDir(), "x.jsonl")
+	if err := os.WriteFile(src, []byte(`{"message":"hello"}`+"\n"), 0o600); err != nil {
+		t.Fatalf("write src: %v", err)
+	}
+
+	if err := store.SyncSubagentTranscript(sid+"/bad", "abc123", src); err == nil || !strings.Contains(err.Error(), "path separator") {
+		t.Fatalf("invalid session ID err = %v", err)
+	}
+	if err := store.SyncSubagentTranscript("missing-session", "abc123", src); err == nil || !strings.Contains(err.Error(), "does not exist") {
+		t.Fatalf("missing session err = %v", err)
+	}
+	if err := store.SyncSubagentTranscript(sid, "abc123", filepath.Join(t.TempDir(), "missing.jsonl")); err != nil {
+		t.Fatalf("missing source should be no-op, got %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(sessDir, "subagents", "agent-abc123.jsonl")); !os.IsNotExist(err) {
+		t.Fatalf("missing source created destination, stat err = %v", err)
+	}
+}
+
+func TestListSubagentTranscriptsValidationAndFiltering(t *testing.T) {
+	const sid = "20260417-120000-nova-abcd-0123abcd"
+	store, sessDir := newStoreWithSession(t, sid)
+	if _, err := store.ListSubagentTranscripts(sid + "/bad"); err == nil || !strings.Contains(err.Error(), "invalid session ID") {
+		t.Fatalf("invalid session ID err = %v", err)
+	}
+
+	dir := filepath.Join(sessDir, "subagents")
+	if err := os.MkdirAll(filepath.Join(dir, "agent-dir.jsonl"), 0o700); err != nil {
+		t.Fatalf("mkdir fake transcript dir: %v", err)
+	}
+	for _, name := range []string{"agent-good123.jsonl", "agent-no-suffix.txt", "prefix-agent-bad.jsonl"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("{}\n"), 0o600); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+
+	names, err := store.ListSubagentTranscripts(sid)
+	if err != nil {
+		t.Fatalf("ListSubagentTranscripts: %v", err)
+	}
+	if len(names) != 1 || names[0] != "agent-good123.jsonl" {
+		t.Fatalf("filtered names = %+v, want only agent-good123.jsonl", names)
 	}
 }

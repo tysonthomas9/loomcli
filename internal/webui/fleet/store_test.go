@@ -36,6 +36,74 @@ func TestNewStore_DefaultPoolSize(t *testing.T) {
 	defer store.Close()
 }
 
+func TestWorkspaceStoreConstructorsWorkerAndClaimHelpers(t *testing.T) {
+	mr := miniredis.RunT(t)
+	ctx := context.Background()
+
+	store, err := NewStoreForWorkspace(RedisConfig{Address: mr.Addr()}, "WS", nil)
+	if err != nil {
+		t.Fatalf("NewStoreForWorkspace: %v", err)
+	}
+	defer store.Close()
+	if store.workspaceID != "WS" {
+		t.Fatalf("workspaceID = %q, want WS", store.workspaceID)
+	}
+	if NewSigningKeyManagerFromStore(store) == nil {
+		t.Fatal("NewSigningKeyManagerFromStore returned nil")
+	}
+
+	worker := &Worker{WorkerID: "worker-1", Repos: []string{"api"}, RegisteredAt: 123}
+	if err := store.RegisterWorker(ctx, worker); err != nil {
+		t.Fatalf("RegisterWorker: %v", err)
+	}
+	gotWorker, err := store.GetWorker(ctx, "worker-1")
+	if err != nil {
+		t.Fatalf("GetWorker: %v", err)
+	}
+	if gotWorker == nil || gotWorker.WorkerID != "worker-1" || len(gotWorker.Repos) != 1 {
+		t.Fatalf("worker = %+v", gotWorker)
+	}
+	missingWorker, err := store.GetWorker(ctx, "missing")
+	if err != nil || missingWorker != nil {
+		t.Fatalf("missing worker = %+v err=%v", missingWorker, err)
+	}
+	if _, err := store.GetWorker(ctx, "bad worker"); err == nil {
+		t.Fatal("GetWorker invalid ID err = nil")
+	}
+
+	claim := &ClaimResponse{TaskID: "task-1", Success: true}
+	if err := store.RecordWorkerClaim(ctx, "worker-1", claim); err != nil {
+		t.Fatalf("RecordWorkerClaim: %v", err)
+	}
+	gotClaim, err := store.GetWorkerClaim(ctx, "worker-1")
+	if err != nil || gotClaim == nil || gotClaim.TaskID != "task-1" {
+		t.Fatalf("claim = %+v err=%v", gotClaim, err)
+	}
+	if err := store.ClearWorkerClaim(ctx, "worker-1"); err != nil {
+		t.Fatalf("ClearWorkerClaim: %v", err)
+	}
+	gotClaim, err = store.GetWorkerClaim(ctx, "worker-1")
+	if err != nil || gotClaim != nil {
+		t.Fatalf("claim after clear = %+v err=%v", gotClaim, err)
+	}
+	if err := store.ClearWorkerClaim(ctx, "bad worker"); err == nil {
+		t.Fatal("ClearWorkerClaim invalid ID err = nil")
+	}
+
+	client := NewRedisClient(mr.Addr(), "", 0)
+	defer client.Close()
+	if err := client.Ping(ctx).Err(); err != nil {
+		t.Fatalf("NewRedisClient ping: %v", err)
+	}
+	shared := NewStoreForClient(client, "WS2", nil)
+	if err := shared.Close(); err != nil {
+		t.Fatalf("shared Close: %v", err)
+	}
+	if err := client.Ping(ctx).Err(); err != nil {
+		t.Fatalf("shared store closed caller-owned client: %v", err)
+	}
+}
+
 func TestTryClaim_Success(t *testing.T) {
 	store, mr := setupTest(t)
 	ctx := context.Background()

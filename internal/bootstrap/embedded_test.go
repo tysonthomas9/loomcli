@@ -256,3 +256,27 @@ func TestOpenStoreLocalReusesHealthyEmbeddedRuntime(t *testing.T) {
 		t.Fatal("OpenStore started a new embedded process instead of reusing runtime")
 	}
 }
+
+func TestOpenStoreCloudUsesConfiguredURL(t *testing.T) {
+	t.Setenv(EnvFleetDBURL, "http://127.0.0.1:65530")
+	t.Setenv(EnvFleetDBAPIKey, "test-key")
+	t.Setenv(EnvFleetDBActor, "cloud-actor")
+
+	h, err := OpenStore(context.Background(), t.TempDir(), nil)
+	if err != nil {
+		t.Fatalf("OpenStore cloud: %v", err)
+	}
+	defer h.Close()
+	if h.Mode() != ModeCloud {
+		t.Fatalf("Mode = %s, want cloud", h.Mode())
+	}
+	if h.URL() != "http://127.0.0.1:65530" {
+		t.Fatalf("URL = %q, want configured cloud URL", h.URL())
+	}
+	if h.embedded != nil {
+		t.Fatal("cloud OpenStore should not attach an embedded runtime")
+	}
+	if got := resolveActor(); got != "cloud-actor" {
+		t.Fatalf("resolveActor = %q, want cloud-actor", got)
+	}
+}

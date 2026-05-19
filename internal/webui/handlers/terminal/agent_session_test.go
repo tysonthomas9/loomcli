@@ -2,7 +2,10 @@ package terminal
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,6 +21,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 	webuiterminal "github.com/tysonthomas9/loomcli/internal/webui/terminal"
@@ -116,6 +120,91 @@ func TestEnsureAgentTerminalSessionCreatesLeadLaunchSpec(t *testing.T) {
 	}
 	if session.Kind != domain.AgentSessionKindOrchestration || session.TerminalID != meta.SessionName {
 		t.Fatalf("agent session = kind:%q terminal:%q", session.Kind, session.TerminalID)
+	}
+}
+
+func TestHandleEnsureAgentTerminalSessionValidationAndSuccess(t *testing.T) {
+	ctx := context.Background()
+	st, tabStore, rdb := newAgentSessionTestDeps(t)
+	svc := webuiterminal.NewTerminalService(
+		nil,
+		tabStore,
+		nil,
+		rdb,
+		nil,
+		time.Now().Add(-time.Second),
+	)
+	if _, err := st.Roles().Create(ctx, store.RoleCreate{
+		WorkspaceKey: "E2E",
+		Name:         "lead",
+		Backend:      "codex",
+	}); err != nil {
+		t.Fatalf("create role: %v", err)
+	}
+	if _, err := st.Agents().Create(ctx, store.AgentCreate{
+		WorkspaceKey: "E2E",
+		Name:         "nova",
+		RoleName:     "lead",
+	}); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	cases := []struct {
+		name       string
+		handler    http.HandlerFunc
+		agent      string
+		wantStatus int
+		wantOK     bool
+	}{
+		{
+			name:       "nil terminal service",
+			handler:    HandleEnsureAgentTerminalSession(nil, st),
+			agent:      "nova",
+			wantStatus: http.StatusServiceUnavailable,
+		},
+		{
+			name:       "nil store",
+			handler:    HandleEnsureAgentTerminalSession(svc, nil),
+			agent:      "nova",
+			wantStatus: http.StatusServiceUnavailable,
+		},
+		{
+			name:       "invalid agent name",
+			handler:    HandleEnsureAgentTerminalSession(svc, st),
+			agent:      "../bad",
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "success",
+			handler:    HandleEnsureAgentTerminalSession(svc, st),
+			agent:      "nova",
+			wantStatus: http.StatusOK,
+			wantOK:     true,
+		},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/terminals/agents/"+tt.agent, nil)
+			req.SetPathValue("name", tt.agent)
+			req = req.WithContext(middleware.WithWorkspace(req.Context(), "E2E"))
+			rr := httptest.NewRecorder()
+
+			tt.handler.ServeHTTP(rr, req)
+
+			if rr.Code != tt.wantStatus {
+				t.Fatalf("status = %d body=%s, want %d", rr.Code, rr.Body.String(), tt.wantStatus)
+			}
+			var resp tabMetadataResponse
+			if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+				t.Fatalf("decode response: %v\n%s", err, rr.Body.String())
+			}
+			if resp.Success != tt.wantOK {
+				t.Fatalf("success = %v, want %v; response=%+v", resp.Success, tt.wantOK, resp)
+			}
+			if tt.wantOK && resp.Data == nil {
+				t.Fatalf("success response missing tab metadata: %+v", resp)
+			}
+		})
 	}
 }
 

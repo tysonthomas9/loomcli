@@ -30,6 +30,12 @@ var (
 	wsRemoveKeepWorktrees bool
 )
 
+var (
+	workspaceWithStoreFn              = cmdstore.WithStore
+	buildStoreBackedCreateWorkspaceFn = workspacemgr.BuildStoreBackedCreateWorkspace
+	writeWorkspaceJSONFn              = cmdstore.WriteJSON
+)
+
 var workspaceCmd = &cobra.Command{
 	Use:     "workspace",
 	Short:   "Manage multi-repo workspaces",
@@ -121,8 +127,8 @@ func runWorkspaceCreate(cmd *cobra.Command, args []string) {
 	branch := validateCreateInputs(wsName)
 	repoPaths := parseRepoPaths()
 
-	if err := cmdstore.WithStore(func(ctx context.Context, h *bootstrap.StoreHandle) error {
-		create := workspacemgr.BuildStoreBackedCreateWorkspace(h.Store)
+	if err := workspaceWithStoreFn(func(ctx context.Context, h *bootstrap.StoreHandle) error {
+		create := buildStoreBackedCreateWorkspaceFn(h.Store)
 		result, err := create(ctx, service.WorkspaceCreateRequest{
 			Name:   wsName,
 			Type:   "empty",
@@ -175,7 +181,7 @@ func runWorkspaceList(cmd *cobra.Command, args []string) {
 
 //nolint:gocognit,funlen // CLI table/JSON output branches share one store read path.
 func runFleetWorkspaceList() error {
-	return cmdstore.WithStore(func(ctx context.Context, h *bootstrap.StoreHandle) error {
+	return workspaceWithStoreFn(func(ctx context.Context, h *bootstrap.StoreHandle) error {
 		workspaces, err := h.Store.Workspaces().List(ctx)
 		if err != nil {
 			return fmt.Errorf("list workspaces: %w", err)
@@ -222,7 +228,7 @@ func runFleetWorkspaceList() error {
 					IsDefault: false,
 				})
 			}
-			return cmdstore.WriteJSON(items)
+			return writeWorkspaceJSONFn(items)
 		}
 
 		for _, ws := range workspaces {
@@ -247,7 +253,7 @@ func runFleetWorkspaceList() error {
 func runWorkspaceRemove(cmd *cobra.Command, args []string) {
 	deps := cli.GetDeps(cmd)
 	wsName := args[0]
-	if err := cmdstore.WithStore(func(ctx context.Context, h *bootstrap.StoreHandle) error {
+	if err := workspaceWithStoreFn(func(ctx context.Context, h *bootstrap.StoreHandle) error {
 		ws, err := h.Store.Workspaces().Get(ctx, wsName)
 		if err != nil {
 			if byName, byNameErr := h.Store.Workspaces().GetByName(ctx, wsName); byNameErr == nil {

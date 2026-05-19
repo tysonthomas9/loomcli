@@ -1,12 +1,18 @@
 package realtime
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"sort"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/alicebob/miniredis/v2"
+	"github.com/redis/go-redis/v9"
+
+	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 )
 
 func TestNewHub(t *testing.T) {
@@ -293,6 +299,69 @@ func TestHub_GetActiveSourceRepos_Empty(t *testing.T) {
 	h := NewHub()
 	if repos := h.GetActiveSourceRepos(); repos != nil {
 		t.Errorf("expected nil, got %v", repos)
+	}
+}
+
+func TestClientDoneReturnsDoneChannel(t *testing.T) {
+	c := NewClient(7, 1, "0", nil, "ws-1")
+	select {
+	case <-c.Done():
+		t.Fatal("new client done channel should be open")
+	default:
+	}
+	close(c.Done())
+	select {
+	case <-c.Done():
+	default:
+		t.Fatal("Done did not return the client's done channel")
+	}
+}
+
+func TestBroadcastSessionIssueEvent(t *testing.T) {
+	BroadcastSessionIssueEvent(nil, nil, "ws-1", "session-1")
+
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+
+	store := tabmeta.NewStore(rdb, nil)
+	h := NewHub()
+	BroadcastSessionIssueEvent(store, h, "ws-1", "missing")
+	select {
+	case mutation := <-h.broadcast:
+		t.Fatalf("unexpected broadcast for missing metadata: %+v", mutation)
+	default:
+	}
+
+	now := time.Now().UTC().Truncate(time.Second)
+	if err := store.Set(context.Background(), &tabmeta.TabMetadata{
+		SessionName: "session-1",
+		Workspace:   "ws-1",
+		Label:       "Terminal",
+		SortOrder:   1,
+		IssueID:     "TASK-1",
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}); err != nil {
+		t.Fatalf("set tab metadata: %v", err)
+	}
+
+	BroadcastSessionIssueEvent(store, h, "ws-1", "session-1")
+	select {
+	case mutation := <-h.broadcast:
+		if mutation.Type != "terminal_session_change" ||
+			mutation.EntityType != "terminal" ||
+			mutation.EntityID != "session-1" ||
+			mutation.Action != "terminal.session_change" ||
+			mutation.IssueID != "TASK-1" ||
+			mutation.WorkspaceID != "ws-1" {
+			t.Fatalf("mutation = %+v", mutation)
+		}
+		if mutation.Timestamp == "" {
+			t.Fatal("timestamp was not set")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for session issue broadcast")
 	}
 }
 

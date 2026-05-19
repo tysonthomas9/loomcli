@@ -205,6 +205,106 @@ func TestHandler_FleetDBOnlyReconnectCanMoveBetweenServeProcesses(t *testing.T) 
 	}
 }
 
+func TestHandlerValidateAuthBranches(t *testing.T) {
+	h := NewHandler(HandlerConfig{})
+	req := httptest.NewRequest(http.MethodGet, "/events", nil)
+	rr := httptest.NewRecorder()
+	if !h.validateAuth(rr, req) {
+		t.Fatal("open mode validateAuth returned false")
+	}
+
+	store, err := NewTokenStore()
+	if err != nil {
+		t.Fatalf("NewTokenStore: %v", err)
+	}
+	defer store.Stop()
+	h = NewHandler(HandlerConfig{
+		TokenStore:       store,
+		WorkspaceFromCtx: func(context.Context) string { return "ws-1" },
+	})
+
+	rr = httptest.NewRecorder()
+	if h.validateAuth(rr, req) {
+		t.Fatal("missing token validateAuth returned true")
+	}
+	if rr.Code != http.StatusUnauthorized || !strings.Contains(rr.Body.String(), "authentication required") {
+		t.Fatalf("missing token response = %d %q", rr.Code, rr.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/events?token=bad", nil)
+	rr = httptest.NewRecorder()
+	if h.validateAuth(rr, req) {
+		t.Fatal("bad token validateAuth returned true")
+	}
+	if rr.Code != http.StatusUnauthorized || !strings.Contains(rr.Body.String(), "invalid or expired token") {
+		t.Fatalf("bad token response = %d %q", rr.Code, rr.Body.String())
+	}
+
+	token, err := store.Generate("user-1", "ws-1")
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	req = httptest.NewRequest(http.MethodGet, "/events?token="+token, nil)
+	rr = httptest.NewRecorder()
+	if !h.validateAuth(rr, req) {
+		t.Fatalf("valid token validateAuth returned false: %d %q", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandlerServeHTTPAuthenticatedCallback(t *testing.T) {
+	store, err := NewTokenStore()
+	if err != nil {
+		t.Fatalf("NewTokenStore: %v", err)
+	}
+	defer store.Stop()
+	token, err := store.Generate("user-1", "ws-auth")
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	var gotWorkspace string
+	h := NewHandler(HandlerConfig{
+		Hub:              NewHub(),
+		TokenStore:       store,
+		WorkspaceFromCtx: func(context.Context) string { return "ws-auth" },
+		OnAuthenticated: func(_ context.Context, ws string) {
+			gotWorkspace = ws
+		},
+	})
+	h.heartbeatInterval = time.Hour
+
+	body := serveSSEOnce(t, h, func(req *http.Request) {
+		q := req.URL.Query()
+		q.Set("token", token)
+		req.URL.RawQuery = q.Encode()
+	})
+	if gotWorkspace != "ws-auth" {
+		t.Fatalf("OnAuthenticated workspace = %q, want ws-auth", gotWorkspace)
+	}
+	if !strings.Contains(body, "event: connected") {
+		t.Fatalf("authenticated SSE did not connect:\n%s", body)
+	}
+}
+
+func TestHandlerStreamLoopServerClose(t *testing.T) {
+	h := NewHandler(HandlerConfig{})
+	h.heartbeatInterval = time.Hour
+	rr := httptest.NewRecorder()
+	sw, err := NewWriter(rr)
+	if err != nil {
+		t.Fatalf("NewWriter: %v", err)
+	}
+	client := NewClient(1, 1, "", nil, "ws-1")
+	close(client.send)
+
+	reason, err := h.streamLoop(sw, client, context.Background())
+	if err != nil {
+		t.Fatalf("streamLoop err = %v", err)
+	}
+	if reason != disconnectReasonServerClose {
+		t.Fatalf("streamLoop reason = %q, want %q", reason, disconnectReasonServerClose)
+	}
+}
+
 func serveSSEOnce(t *testing.T, h *Handler, mutateReq func(*http.Request)) string {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())

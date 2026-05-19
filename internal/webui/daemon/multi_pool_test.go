@@ -11,11 +11,13 @@ import (
 
 // mockPool is a minimal Pool implementation for testing MultiPool routing.
 type mockPool struct {
-	mu       sync.Mutex
-	getCalls int
-	putCalls int
-	closed   bool
-	getErr   error
+	mu                 sync.Mutex
+	getCalls           int
+	putCalls           int
+	putAfterErrorCalls int
+	discardCalls       int
+	closed             bool
+	getErr             error
 }
 
 func (m *mockPool) Get(_ context.Context) (*rpc.Client, error) {
@@ -34,8 +36,17 @@ func (m *mockPool) Put(_ *rpc.Client) {
 	m.putCalls++
 }
 
-func (m *mockPool) PutAfterError(c *rpc.Client) { m.Put(c) }
-func (m *mockPool) Discard(_ *rpc.Client)       {}
+func (m *mockPool) PutAfterError(_ *rpc.Client) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.putAfterErrorCalls++
+}
+
+func (m *mockPool) Discard(_ *rpc.Client) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.discardCalls++
+}
 
 func (m *mockPool) Stats() PoolStats {
 	return PoolStats{Size: 10, Created: 1}
@@ -274,11 +285,11 @@ func TestMultiPool_PutAfterError(t *testing.T) {
 	mp.PutAfterError(client)
 
 	p.mu.Lock()
-	puts := p.putCalls
+	puts := p.putAfterErrorCalls
 	p.mu.Unlock()
 
 	if puts != 1 {
-		t.Errorf("expected putCalls=1 (routed via PutAfterError), got %d", puts)
+		t.Errorf("expected putAfterErrorCalls=1, got %d", puts)
 	}
 }
 
@@ -288,6 +299,46 @@ func TestMultiPool_PutAfterError_Nil(t *testing.T) {
 
 	// PutAfterError(nil) should be safe (no panic)
 	mp.PutAfterError(nil)
+}
+
+func TestMultiPool_ReturnsClientsToIssuingPool(t *testing.T) {
+	mp := NewMultiPool(extractWS, 10)
+	p := &mockPool{}
+	if err := mp.Register("ws", p); err != nil {
+		t.Fatal(err)
+	}
+
+	client, err := mp.Get(ctxWithWS("ws"))
+	if err != nil {
+		t.Fatalf("Get for Put: %v", err)
+	}
+	mp.Put(client)
+	mp.Put(client)
+	if p.putCalls != 1 {
+		t.Fatalf("putCalls = %d, want 1", p.putCalls)
+	}
+
+	client, err = mp.Get(ctxWithWS("ws"))
+	if err != nil {
+		t.Fatalf("Get for PutAfterError: %v", err)
+	}
+	mp.PutAfterError(client)
+	if p.putAfterErrorCalls != 1 {
+		t.Fatalf("putAfterErrorCalls = %d, want 1", p.putAfterErrorCalls)
+	}
+
+	client, err = mp.Get(ctxWithWS("ws"))
+	if err != nil {
+		t.Fatalf("Get for Discard: %v", err)
+	}
+	mp.Discard(client)
+	mp.Discard(client)
+	if p.discardCalls != 1 {
+		t.Fatalf("discardCalls = %d, want 1", p.discardCalls)
+	}
+
+	mp.Put(nil)
+	mp.Discard(nil)
 }
 
 func TestMultiPool_ConcurrentAccess(t *testing.T) {

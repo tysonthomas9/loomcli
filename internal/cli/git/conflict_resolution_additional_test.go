@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/clitest"
 )
 
@@ -57,5 +58,34 @@ func TestConflictResolutionPromptBranches(t *testing.T) {
 	agent.InteractiveErr = errors.New("agent failed")
 	if err := invokeAgentDeps(deps, "/repo", "prompt", "agent"); !errors.Is(err, agent.InteractiveErr) {
 		t.Fatalf("invokeAgentDeps err = %v", err)
+	}
+}
+
+func TestConflictResolutionDefaultWrappersUseDefaultDeps(t *testing.T) {
+	agent := &clitest.MockAgentInvoker{}
+
+	rootDeps := cli.TestingGetDefaultDeps()
+	oldAgent := rootDeps.Agent
+	oldGen, oldPushGen := ConflictPromptGen, ConflictPromptGenWithPush
+	rootDeps.Agent = agent
+	ConflictPromptGen = nil
+	ConflictPromptGenWithPush = nil
+	t.Cleanup(func() {
+		rootDeps.Agent = oldAgent
+		ConflictPromptGen = oldGen
+		ConflictPromptGenWithPush = oldPushGen
+	})
+
+	if err := resolveConflictsWithAgent("/repo", "feature", "main", []string{"a.go"}); err != nil {
+		t.Fatalf("resolveConflictsWithAgent: %v", err)
+	}
+	if err := resolveConflictsDetached("/repo", "feature", "main", []string{"b.go"}, "refs/heads/out"); err != nil {
+		t.Fatalf("resolveConflictsDetached: %v", err)
+	}
+	if len(agent.InteractiveCalls) != 2 {
+		t.Fatalf("interactive calls = %#v, want 2", agent.InteractiveCalls)
+	}
+	if !strings.Contains(agent.InteractiveCalls[0].Prompt, "a.go") || !strings.Contains(agent.InteractiveCalls[1].Prompt, "refs/heads/out") {
+		t.Fatalf("prompts = %#v", agent.InteractiveCalls)
 	}
 }

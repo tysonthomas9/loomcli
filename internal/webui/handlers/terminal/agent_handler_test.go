@@ -179,6 +179,27 @@ func TestAgentTerminalPureHelpers(t *testing.T) {
 	emitAgentDisconnectSpan(context.Background(), "WS", "nova", "tmux-session", realtime.WSCloseSessionKilled)
 }
 
+func TestHandleAgentTerminalWSValidationBranches(t *testing.T) {
+	handler := HandleAgentTerminalWS(nil, nil, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/agents//terminal/ws", nil)
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "WS"))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "missing agent name") {
+		t.Fatalf("missing agent status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/agents/nova/terminal/ws", nil)
+	req.SetPathValue("name", "nova")
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "WS"))
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusServiceUnavailable || !strings.Contains(rec.Body.String(), "agent terminal manager not initialized") {
+		t.Fatalf("nil manager status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestAgentWSUpgradeFailureBranches(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/agents/nova/ws", nil)
 	rec := httptest.NewRecorder()

@@ -3,8 +3,11 @@ package daemon
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/daemon/supervisor"
 )
 
@@ -183,5 +186,63 @@ func TestResolveRoleConfigStatic_MatchesDaemonMethod(t *testing.T) {
 		t.Errorf("MaxPriority: static=%v daemon=%v", staticRC.MaxPriority, daemonRC.MaxPriority)
 	} else if staticRC.MaxPriority != nil && *staticRC.MaxPriority != *daemonRC.MaxPriority {
 		t.Errorf("MaxPriority: static=%d daemon=%d", *staticRC.MaxPriority, *daemonRC.MaxPriority)
+	}
+}
+
+func TestDaemonQueueScoringAndOutputHelpers(t *testing.T) {
+	maxPriority := 3
+	issues := []backend.IssueData{
+		{ID: "TASK-2", Title: "best", Status: "open", IssueType: "task", Priority: 1, Labels: []string{"go"}, SourceRepo: "api", Design: "ready"},
+		{ID: "TASK-1", Title: "also good", Status: "open", IssueType: "task", Priority: 2, Labels: []string{"go"}, SourceRepo: "api", Design: "ready"},
+		{ID: "TASK-3", Title: "repo mismatch", Status: "open", IssueType: "task", Priority: 1, Labels: []string{"go"}, SourceRepo: "web", Design: "ready"},
+		{ID: "TASK-4", Title: "too much", Status: "open", IssueType: "task", Priority: 5, Labels: []string{"go"}, SourceRepo: "api", Design: "ready"},
+		{ID: "TASK-5", Title: "no design", Status: "open", IssueType: "task", Priority: 1, Labels: []string{"go"}, SourceRepo: "api"},
+	}
+
+	matched, rejected := scoreQueueCandidates(issues, cli.RoleConstraints{
+		TaskFilter:  "has_design",
+		Skills:      []string{"go"},
+		MaxPriority: &maxPriority,
+		SourceRepos: []string{"api"},
+	})
+	if len(matched) != 3 {
+		t.Fatalf("matched len = %d, want 3: %+v", len(matched), matched)
+	}
+	if matched[0].Issue.ID != "TASK-2" || matched[1].Issue.ID != "TASK-1" {
+		t.Fatalf("matched order = %+v, want TASK-2 then TASK-1", matched)
+	}
+	if matched[2].Issue.ID != "TASK-3" || matched[2].Reason != "repo mismatch" {
+		t.Fatalf("repo mismatch fallback match = %+v", matched[2])
+	}
+	if rejected["priority 5 exceeds max 3"] != 1 || rejected["filter: not ready to implement"] != 1 {
+		t.Fatalf("rejections = %+v", rejected)
+	}
+
+	out := captureDaemonStdout(t, func() {
+		printQueueResults(append(matched, matched...), map[string]int{"z reason": 2, "a reason": 1})
+	})
+	for _, want := range []string{"6 tasks match agent constraints (showing top 5)", "TASK-2", "3 filtered:", "1 a reason", "2 z reason"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("queue output missing %q:\n%s", want, out)
+		}
+	}
+
+	out = captureDaemonStdout(t, func() {
+		printQueueResults(nil, nil)
+	})
+	if !strings.Contains(out, "0 tasks match agent constraints") {
+		t.Fatalf("empty queue output = %q", out)
+	}
+}
+
+func TestResolveQueueSourceReposWarnsWithoutWorkspace(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	t.Setenv("LOOM_WORKSPACE", "")
+	agent := &AgentEntry{Worktree: "worker", Role: "task", Repos: []string{"api"}}
+
+	resolveQueueSourceRepos(agent)
+
+	if len(agent.SourceRepos) != 0 {
+		t.Fatalf("SourceRepos = %+v, want empty without workspace", agent.SourceRepos)
 	}
 }

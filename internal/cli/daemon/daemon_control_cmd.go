@@ -14,10 +14,23 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/lockfile"
 )
 
+var (
+	resolveControlSocketFromCwdFn  = resolveControlSocketFromCwd
+	sendDaemonControlRequestFn     = sendDaemonControlRequest
+	sendDaemonControlRequestFullFn = sendDaemonControlRequestFull
+	runDaemonAgentStopFn           = runDaemonAgentStop
+	forceStopAgentFn               = forceStopAgent
+	isAgentRunningViaSocketFn      = isAgentRunningViaSocket
+	stopDaemonForceFn              = stopDaemonForce
+	stopDaemonGracefulFn           = stopDaemonGraceful
+	daemonControlSleepFn           = time.Sleep
+	daemonControlNowFn             = time.Now
+)
+
 // runDaemonAgentStop stops a single agent via a two-phase sequence:
 // yield → poll → SIGTERM fallback. With --force or --timeout 0, skips yield.
 func runDaemonAgentStop(agentName string, force bool, yieldTimeout time.Duration) {
-	socketPath, err := resolveControlSocketFromCwd()
+	socketPath, err := resolveControlSocketFromCwdFn()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
@@ -26,7 +39,7 @@ func runDaemonAgentStop(agentName string, force bool, yieldTimeout time.Duration
 	// --force or --timeout 0: skip yield, SIGTERM directly
 	if force || yieldTimeout == 0 {
 		fmt.Printf("Force-stopping agent %q...\n", agentName)
-		forceStopAgent(socketPath, agentName)
+		forceStopAgentFn(socketPath, agentName)
 		return
 	}
 
@@ -44,7 +57,7 @@ func runDaemonAgentStop(agentName string, force bool, yieldTimeout time.Duration
 // requestYieldOrFallback sends agent_yield and handles error cases.
 // Returns true if yield succeeded and polling should begin.
 func requestYieldOrFallback(socketPath, agentName string) bool {
-	resp, err := sendDaemonControlRequestFull(socketPath, DaemonControlRequest{
+	resp, err := sendDaemonControlRequestFullFn(socketPath, DaemonControlRequest{
 		Operation: ctrlOpAgentYield,
 		AgentName: agentName,
 	})
@@ -69,38 +82,38 @@ func requestYieldOrFallback(socketPath, agentName string) bool {
 	// Other errors — fall through to force stop
 	fmt.Fprintf(os.Stderr, "Warning: yield request failed: %s\n", resp.Error)
 	fmt.Fprintf(os.Stderr, "Falling back to SIGTERM...\n")
-	forceStopAgent(socketPath, agentName)
+	forceStopAgentFn(socketPath, agentName)
 	return false
 }
 
 // pollAndForceStop polls agent_list until the agent stops or timeout expires,
 // then falls back to forceful SIGTERM.
 func pollAndForceStop(socketPath, agentName string, yieldTimeout time.Duration) {
-	start := time.Now()
+	start := daemonControlNowFn()
 	deadline := start.Add(yieldTimeout)
 	lastProgress := start
-	for time.Now().Before(deadline) {
-		if !isAgentRunningViaSocket(socketPath, agentName) {
+	for daemonControlNowFn().Before(deadline) {
+		if !isAgentRunningViaSocketFn(socketPath, agentName) {
 			fmt.Printf("Agent %q stopped gracefully.\n", agentName)
 			return
 		}
-		time.Sleep(2 * time.Second)
-		if time.Since(lastProgress) >= 10*time.Second {
-			elapsed := time.Since(start).Truncate(time.Second)
+		daemonControlSleepFn(2 * time.Second)
+		if daemonControlNowFn().Sub(lastProgress) >= 10*time.Second {
+			elapsed := daemonControlNowFn().Sub(start).Truncate(time.Second)
 			fmt.Printf("  Still waiting... (%s)\n", elapsed)
-			lastProgress = time.Now()
+			lastProgress = daemonControlNowFn()
 		}
 	}
 
 	fmt.Printf("Yield timeout (%s). Sending SIGTERM...\n", yieldTimeout.Truncate(time.Second))
-	forceStopAgent(socketPath, agentName)
+	forceStopAgentFn(socketPath, agentName)
 }
 
 // forceStopAgent sends a forceful agent_stop (SIGTERM, no yield).
 // Treats "not found" / "already stopped" as success — the agent may have
 // exited on its own during the yield polling window.
 func forceStopAgent(socketPath, agentName string) {
-	resp, err := sendDaemonControlRequestFull(socketPath, DaemonControlRequest{
+	resp, err := sendDaemonControlRequestFullFn(socketPath, DaemonControlRequest{
 		Operation: ctrlOpAgentStop,
 		AgentName: agentName,
 		Force:     true,
@@ -122,7 +135,7 @@ func forceStopAgent(socketPath, agentName string) {
 
 // isAgentRunningViaSocket checks if an agent is still running by querying agent_list.
 func isAgentRunningViaSocket(socketPath, agentName string) bool {
-	resp, err := sendDaemonControlRequest(socketPath, ctrlOpAgentList, "")
+	resp, err := sendDaemonControlRequestFn(socketPath, ctrlOpAgentList, "")
 	if err != nil {
 		return false // daemon unreachable, treat as not running
 	}
@@ -186,13 +199,13 @@ func stopDaemonGraceful(pid int) {
 }
 
 func runDaemonAgentStart(cmd *cobra.Command, args []string) {
-	socketPath, err := resolveControlSocketFromCwd()
+	socketPath, err := resolveControlSocketFromCwdFn()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
 
-	resp, err := sendDaemonControlRequest(socketPath, ctrlOpAgentStart, args[0])
+	resp, err := sendDaemonControlRequestFn(socketPath, ctrlOpAgentStart, args[0])
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
@@ -205,13 +218,13 @@ func runDaemonAgentStart(cmd *cobra.Command, args []string) {
 }
 
 func runDaemonAgentRestart(cmd *cobra.Command, args []string) {
-	socketPath, err := resolveControlSocketFromCwd()
+	socketPath, err := resolveControlSocketFromCwdFn()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
 
-	resp, err := sendDaemonControlRequest(socketPath, ctrlOpAgentRestart, args[0])
+	resp, err := sendDaemonControlRequestFn(socketPath, ctrlOpAgentRestart, args[0])
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)

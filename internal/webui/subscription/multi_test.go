@@ -225,6 +225,54 @@ func TestEnsureActive_AfterStopErrors(t *testing.T) {
 	}
 }
 
+func TestRemoveWorkspaceStopsAndDeletesSubscriber(t *testing.T) {
+	hub := realtime.NewHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	multi := NewMultiWorkspaceSubscriber(hub, nil)
+	sub := &trackingWorkspaceSubscriber{}
+	multi.mu.Lock()
+	multi.subscribers["ws-remove"] = &subscriberEntry{sub: sub}
+	multi.mu.Unlock()
+
+	multi.RemoveWorkspace("ws-remove")
+	multi.RemoveWorkspace("missing")
+
+	if multi.HasSubscriber("ws-remove") {
+		t.Fatal("subscriber still registered after RemoveWorkspace")
+	}
+	if got := sub.stopCalls.Load(); got != 1 {
+		t.Fatalf("stop calls = %d, want 1", got)
+	}
+}
+
+func TestGetMutationsSinceAggregatesSubscribers(t *testing.T) {
+	ts := time.Date(2026, 3, 25, 12, 0, 0, 0, time.UTC)
+	hub := realtime.NewHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	multi := NewMultiWorkspaceSubscriber(hub, nil)
+	multi.mu.Lock()
+	multi.subscribers["ws-a"] = &subscriberEntry{sub: &trackingWorkspaceSubscriber{
+		mutations: []backend.MutationData{{Type: "create", IssueID: "A-1", Timestamp: ts}},
+	}}
+	multi.subscribers["ws-b"] = &subscriberEntry{sub: &trackingWorkspaceSubscriber{
+		mutations: []backend.MutationData{{Type: "update", IssueID: "B-1", Timestamp: ts}},
+	}}
+	multi.mu.Unlock()
+
+	got := multi.GetMutationsSince("0")
+	if len(got) != 2 {
+		t.Fatalf("len = %d, want 2: %+v", len(got), got)
+	}
+	ids := map[string]bool{got[0].IssueID: true, got[1].IssueID: true}
+	if !ids["A-1"] || !ids["B-1"] {
+		t.Fatalf("mutations = %+v", got)
+	}
+}
+
 func TestGetMutationsSinceForWorkspace_ConcurrentStop(t *testing.T) {
 	ts := time.Date(2026, 3, 25, 12, 0, 0, 0, time.UTC)
 	hub := realtime.NewHub()
@@ -281,6 +329,7 @@ type trackingWorkspaceSubscriber struct {
 	startCalls atomic.Int64
 	stopCalls  atomic.Int64
 	getCalls   atomic.Int64
+	mutations  []backend.MutationData
 }
 
 func (s *trackingWorkspaceSubscriber) Start() {
@@ -293,7 +342,7 @@ func (s *trackingWorkspaceSubscriber) Stop() {
 
 func (s *trackingWorkspaceSubscriber) GetMutationDataSince(string) []backend.MutationData {
 	s.getCalls.Add(1)
-	return nil
+	return s.mutations
 }
 
 func waitForMultiCondition(t *testing.T, cond func() bool) {

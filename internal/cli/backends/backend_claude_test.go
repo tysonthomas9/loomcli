@@ -2,8 +2,10 @@ package backends
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -256,6 +258,35 @@ func TestClaudeBackendRegistered(t *testing.T) {
 	}
 	if _, isClaudeBackend := b.(*ClaudeBackend); !isClaudeBackend {
 		t.Fatalf("expected *ClaudeBackend, got %T", b)
+	}
+}
+
+func TestClaudeBackendStreamingAndContinueSession(t *testing.T) {
+	binDir := t.TempDir()
+	workDir := t.TempDir()
+	writeFakeBackendCLI(t, binDir, "claude", "claude 1.2.3", []string{
+		`{"type":"assistant","message":{"content":[{"type":"text","text":"stream ok"}]}}`,
+	}, 0)
+	t.Setenv("PATH", binDir)
+
+	b := &ClaudeBackend{}
+	rc, err := b.InvokeStreaming(context.Background(), workDir, "stream prompt", "nova")
+	if err != nil {
+		t.Fatalf("InvokeStreaming: %v", err)
+	}
+	data, err := io.ReadAll(rc)
+	if err != nil {
+		t.Fatalf("read stream: %v", err)
+	}
+	if err := rc.Close(); err != nil {
+		t.Fatalf("close stream: %v", err)
+	}
+	if !strings.Contains(string(data), "stream ok") {
+		t.Fatalf("stream data = %q", string(data))
+	}
+
+	if err := b.ContinueSession(workDir, "session-123", "nova"); err != nil {
+		t.Fatalf("ContinueSession: %v", err)
 	}
 }
 

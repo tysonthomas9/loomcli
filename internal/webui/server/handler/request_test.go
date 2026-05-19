@@ -161,6 +161,24 @@ func TestWriteJSON_NilValue(t *testing.T) {
 	}
 }
 
+func TestRespondError(t *testing.T) {
+	w := httptest.NewRecorder()
+	RespondError(w, http.StatusTeapot, "short and stout")
+
+	resp := w.Result()
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusTeapot {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusTeapot)
+	}
+	var body map[string]string
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if body["error"] != "short and stout" {
+		t.Fatalf("body = %#v", body)
+	}
+}
+
 // --- ParseListOpts tests ---
 
 func TestParseListOpts_Defaults(t *testing.T) {

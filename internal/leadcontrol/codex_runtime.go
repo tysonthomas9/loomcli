@@ -24,6 +24,15 @@ const (
 	codexThreadDiscoveryInterval = 500 * time.Millisecond
 )
 
+var (
+	freeLoopbackWSEndpointFn  = freeLoopbackWSEndpoint
+	startCodexAppServerFn     = startCodexAppServer
+	waitForCodexAppServerFn   = waitForCodexAppServer
+	runCodexRemoteTUIFn       = runCodexRemoteTUI
+	stopCodexAppServerFn      = stopCodexAppServer
+	discoverCodexLeadThreadFn = discoverCodexLeadThread
+)
+
 type CodexLeadRuntimeConfig struct {
 	Store     store.Store
 	Workspace string
@@ -46,11 +55,11 @@ func RunCodexLeadRuntime(ctx context.Context, cfg CodexLeadRuntimeConfig) error 
 	}
 
 	runtimeStartedAt := time.Now().UTC()
-	endpoint, err := freeLoopbackWSEndpoint()
+	endpoint, err := freeLoopbackWSEndpointFn()
 	if err != nil {
 		return err
 	}
-	appCmd, appErr, cancelApp, logFile, err := startCodexAppServer(ctx, cfg, runtimeHome, sqliteHome, endpoint)
+	appCmd, appErr, cancelApp, logFile, err := startCodexAppServerFn(ctx, cfg, runtimeHome, sqliteHome, endpoint)
 	if err != nil {
 		return err
 	}
@@ -69,8 +78,8 @@ func RunCodexLeadRuntime(ctx context.Context, cfg CodexLeadRuntimeConfig) error 
 		cfg.Logger.Warn("failed to persist codex runtime metadata", "err", err)
 	}
 
-	if err := waitForCodexAppServer(ctx, endpoint, appErr); err != nil {
-		_ = stopCodexAppServer(appCmd, appErr, cancelApp)
+	if err := waitForCodexAppServerFn(ctx, endpoint, appErr); err != nil {
+		_ = stopCodexAppServerFn(appCmd, appErr, cancelApp)
 		runtime.Status = RuntimeStatusFailed
 		_ = UpdateCodexRuntimeMetadata(context.Background(), cfg.Store, cfg.Workspace, cfg.SessionID, runtime)
 		return err
@@ -78,12 +87,12 @@ func RunCodexLeadRuntime(ctx context.Context, cfg CodexLeadRuntimeConfig) error 
 
 	discoverCtx, cancelDiscover := context.WithCancel(ctx)
 	defer cancelDiscover()
-	go discoverCodexLeadThread(discoverCtx, cfg, runtime, runtimeStartedAt)
+	go discoverCodexLeadThreadFn(discoverCtx, cfg, runtime, runtimeStartedAt)
 
-	tuiErr := runCodexRemoteTUI(ctx, cfg, endpoint)
+	tuiErr := runCodexRemoteTUIFn(ctx, cfg, endpoint)
 
 	cancelDiscover()
-	if err := stopCodexAppServer(appCmd, appErr, cancelApp); err != nil {
+	if err := stopCodexAppServerFn(appCmd, appErr, cancelApp); err != nil {
 		cfg.Logger.Debug("codex app-server shutdown failed", "err", err)
 	}
 	runtime.Status = RuntimeStatusDisconnected

@@ -19,6 +19,15 @@ func setupTest(t *testing.T) (*Store, *miniredis.Miniredis) {
 	return NewStore(rdb, nil), mr
 }
 
+func TestStoreClose(t *testing.T) {
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	store := NewStore(rdb, nil)
+	if err := store.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+}
+
 func TestAddAndList_RoundTrip(t *testing.T) {
 	store, _ := setupTest(t)
 	ctx := context.Background()

@@ -180,3 +180,30 @@ func TestJSONLWriter_WriteAfterClose(t *testing.T) {
 		t.Error("expected error writing after close")
 	}
 }
+
+func TestJSONLWriter_Flush(t *testing.T) {
+	dir := t.TempDir()
+	w := NewJSONLWriter(dir, defaultMaxSize, defaultMaxBackups)
+	if err := w.Flush(); err != nil {
+		t.Fatalf("Flush before write: %v", err)
+	}
+
+	e, _ := NewEvent(TaskStarted, "a1", "task", "", TaskStartedData{TaskID: "t1"})
+	e.Timestamp = time.Date(2026, 3, 4, 12, 0, 0, 0, time.UTC)
+	if err := w.Write(e); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	if err := w.Flush(); err != nil {
+		t.Fatalf("Flush after write: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "events-2026-03-04.jsonl"))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if len(data) == 0 {
+		t.Fatal("Flush did not write buffered data")
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+}

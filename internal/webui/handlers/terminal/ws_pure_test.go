@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"nhooyr.io/websocket" //nolint:staticcheck
 
@@ -140,6 +141,19 @@ func TestValidateTerminalWSRequestFailures(t *testing.T) {
 	session, workspace, ok := validateTerminalWSRequest(rec, req, manager, nil)
 	if !ok || session != "existing" || workspace != "WS" {
 		t.Fatalf("session=%q workspace=%q ok=%v status=%d", session, workspace, ok, rec.Code)
+	}
+}
+
+func TestHandleTerminalWSValidationBranch(t *testing.T) {
+	handler := HandleTerminalWS(nil, nil, nil, "", nil, nil, nil, time.Now())
+	req := httptest.NewRequest(http.MethodGet, "/ws?session=shell", nil)
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "WS"))
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("HandleTerminalWS status=%d body=%s", rec.Code, rec.Body.String())
 	}
 }
 

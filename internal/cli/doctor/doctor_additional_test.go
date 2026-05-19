@@ -80,6 +80,52 @@ func TestCollectDoctorChecksFleetAndFleetDBBranches(t *testing.T) {
 	}
 }
 
+func TestRunDoctorUsesCollectedChecksForJSONAndHumanOutput(t *testing.T) {
+	oldCollect := collectDoctorChecksFn
+	oldJSON := doctorJSON
+	t.Cleanup(func() {
+		collectDoctorChecksFn = oldCollect
+		doctorJSON = oldJSON
+	})
+
+	collectDoctorChecksFn = func(*cobra.Command) []checkFunc {
+		return []checkFunc{
+			func() CheckResult { return CheckResult{Name: "skipless", Status: StatusPass, Summary: "pass check"} },
+			func() CheckResult { return CheckResult{} },
+			func() CheckResult { return CheckResult{Name: "bad", Status: StatusFail, Summary: "fail check"} },
+		}
+	}
+	doctorJSON = true
+	cmd := &cobra.Command{}
+	out := captureDoctorStdout(t, func() {
+		err := runDoctor(cmd, nil)
+		if err == nil || !strings.Contains(err.Error(), "doctor found 1 failure") {
+			t.Fatalf("runDoctor err = %v", err)
+		}
+	})
+	if !strings.Contains(out, `"fail": 1`) || !strings.Contains(out, `"pass check"`) {
+		t.Fatalf("json output = %s", out)
+	}
+	if !cmd.SilenceErrors {
+		t.Fatal("runDoctor should silence cobra errors after failures")
+	}
+
+	collectDoctorChecksFn = func(*cobra.Command) []checkFunc {
+		return []checkFunc{func() CheckResult {
+			return CheckResult{Name: "warn", Status: StatusWarn, Summary: "warn check", Detail: "details"}
+		}}
+	}
+	doctorJSON = false
+	out = captureDoctorStdout(t, func() {
+		if err := runDoctor(&cobra.Command{}, nil); err != nil {
+			t.Fatalf("runDoctor human: %v", err)
+		}
+	})
+	if !strings.Contains(out, "warn check") || !strings.Contains(out, "details") || !strings.Contains(out, "0 checks passed, 1 warnings, 0 failures") {
+		t.Fatalf("human output = %s", out)
+	}
+}
+
 func captureDoctorStdout(t *testing.T, fn func()) string {
 	t.Helper()
 	orig := os.Stdout

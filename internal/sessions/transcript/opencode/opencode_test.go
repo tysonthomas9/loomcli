@@ -1,6 +1,8 @@
 package opencode
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
@@ -95,5 +97,29 @@ func TestParseExportSession_Empty(t *testing.T) {
 	}
 	if session != nil {
 		t.Errorf("want nil session for empty data")
+	}
+}
+
+func TestParseExportFromFile(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing.json")
+	session, err := ParseExportFromFile(missing)
+	if err != nil || session != nil {
+		t.Fatalf("missing export session=%+v err=%v, want nil nil", session, err)
+	}
+
+	path := filepath.Join(t.TempDir(), "opencode.json")
+	if err := os.WriteFile(path, []byte(sampleExport), 0o600); err != nil {
+		t.Fatalf("write export: %v", err)
+	}
+	session, err = ParseExportFromFile(path)
+	if err != nil {
+		t.Fatalf("ParseExportFromFile: %v", err)
+	}
+	if session == nil || session.Info.ID != "sess-1" {
+		t.Fatalf("session = %+v", session)
+	}
+
+	if _, err := ParseExportFromFile(t.TempDir()); err == nil {
+		t.Fatal("directory read returned nil error")
 	}
 }

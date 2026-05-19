@@ -20,6 +20,8 @@ const (
 var (
 	localDaemonLoadConfig        = loadLocalDaemonConfigForWorkspace
 	localDaemonWorkspaceHasRepos = workspaceHasReposForLocalDaemon
+	runLocalDaemonOnceFn         = runLocalDaemonOnce
+	sleepOrDoneFn                = sleepOrDone
 )
 
 func startLocalDaemonSupervisor(ctx context.Context, dataDir, exe string, port int) {
@@ -38,19 +40,19 @@ func superviseLocalDaemon(ctx context.Context, dataDir, exe string, port int) {
 		}
 		if !runnable {
 			backoff = time.Second
-			if !sleepOrDone(ctx, localDaemonPollInterval) {
+			if !sleepOrDoneFn(ctx, localDaemonPollInterval) {
 				return
 			}
 			continue
 		}
 
-		if err := runLocalDaemonOnce(ctx, dataDir, exe, port, workspaceKey); err != nil && ctx.Err() == nil {
+		if err := runLocalDaemonOnceFn(ctx, dataDir, exe, port, workspaceKey); err != nil && ctx.Err() == nil {
 			appendLocalDaemonLog(dataDir, "daemon exited: "+err.Error())
 		}
 		if ctx.Err() != nil {
 			return
 		}
-		if !sleepOrDone(ctx, backoff) {
+		if !sleepOrDoneFn(ctx, backoff) {
 			return
 		}
 		backoff *= 2

@@ -1,11 +1,16 @@
 package health
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -304,6 +309,48 @@ func TestHandleDaemonStatus_DaemonDead(t *testing.T) {
 	}
 }
 
+func TestHealthStatsAdapterAndDaemonStatusSuccess(t *testing.T) {
+	client := newHealthRPCClient(t)
+	pool := &liveRPCPool{client: client}
+
+	rec := httptest.NewRecorder()
+	HandleAPIHealth(pool).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/health", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("api health status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var healthBody HealthStatus
+	if err := json.Unmarshal(rec.Body.Bytes(), &healthBody); err != nil {
+		t.Fatalf("decode health: %v", err)
+	}
+	if !healthBody.Daemon.Connected || healthBody.Daemon.Version != "test-rpc" || pool.puts != 1 {
+		t.Fatalf("health body=%#v puts=%d discards=%d", healthBody, pool.puts, pool.discards)
+	}
+
+	rec = httptest.NewRecorder()
+	HandleDaemonStatusWithMode(pool, true).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/workspaces/ws/daemon/status", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("daemon status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var statusBody DaemonStatusResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &statusBody); err != nil {
+		t.Fatalf("decode status: %v", err)
+	}
+	if !statusBody.Success || statusBody.Data == nil || statusBody.Data.DaemonMode != rpc.DaemonModeEvents || pool.puts != 2 {
+		t.Fatalf("status body=%#v puts=%d", statusBody, pool.puts)
+	}
+
+	adapter := &statsPoolAdapter{pool: pool}
+	got, err := adapter.Get(context.Background())
+	if err != nil || got == nil {
+		t.Fatalf("adapter Get got=%#v err=%v", got, err)
+	}
+	adapter.Put(got)
+	adapter.Discard(got)
+	if pool.puts != 3 || pool.discards != 1 {
+		t.Fatalf("adapter put/discard counts puts=%d discards=%d", pool.puts, pool.discards)
+	}
+}
+
 type fakeStatsClient struct {
 	resp *rpc.Response
 	err  error
@@ -400,3 +447,81 @@ func (f fakeStatsBackend) WaitForMutations(context.Context, int64, int64) ([]bac
 	return nil, nil
 }
 func (f fakeStatsBackend) BackendName() string { return "fake" }
+
+type liveRPCPool struct {
+	client   *rpc.Client
+	puts     int
+	discards int
+}
+
+func (p *liveRPCPool) Get(context.Context) (*rpc.Client, error) { return p.client, nil }
+func (p *liveRPCPool) Put(*rpc.Client)                          { p.puts++ }
+func (p *liveRPCPool) PutAfterError(*rpc.Client)                { p.puts++ }
+func (p *liveRPCPool) Discard(*rpc.Client)                      { p.discards++ }
+func (p *liveRPCPool) Stats() daemon.PoolStats                  { return daemon.PoolStats{Size: 1, Active: 1} }
+func (p *liveRPCPool) Close() error                             { return nil }
+
+func newHealthRPCClient(t *testing.T) *rpc.Client {
+	t.Helper()
+	dir, err := os.MkdirTemp("/tmp", "loom-health-rpc-*")
+	if err != nil {
+		t.Fatalf("mktemp: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	socketPath := filepath.Join(dir, "daemon.sock")
+	listener, err := net.Listen("unix", socketPath)
+	if err != nil {
+		if strings.Contains(err.Error(), "operation not permitted") {
+			t.Skipf("unix sockets blocked by sandbox: %v", err)
+		}
+		t.Fatalf("listen unix: %v", err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			go serveHealthRPCConn(conn)
+		}
+	}()
+
+	client, err := rpc.TryConnectWithTimeout(socketPath, time.Second)
+	if err != nil {
+		t.Fatalf("TryConnectWithTimeout: %v", err)
+	}
+	if client == nil {
+		t.Fatal("TryConnectWithTimeout returned nil client")
+	}
+	t.Cleanup(func() { _ = client.Close() })
+	return client
+}
+
+func serveHealthRPCConn(conn net.Conn) {
+	defer conn.Close()
+	reader := bufio.NewReader(conn)
+	for {
+		line, err := reader.ReadBytes('\n')
+		if err != nil {
+			return
+		}
+		var req rpc.Request
+		if err := json.Unmarshal(line, &req); err != nil {
+			return
+		}
+		var data []byte
+		switch req.Operation {
+		case rpc.OpHealth:
+			data, _ = json.Marshal(rpc.HealthResponse{Status: "healthy", Version: "test-rpc", Compatible: true, Uptime: 12.5})
+		case rpc.OpStatus:
+			data, _ = json.Marshal(rpc.StatusResponse{Version: "test-rpc", DaemonMode: rpc.DaemonModeEvents})
+		default:
+			data, _ = json.Marshal(map[string]string{"ok": "true"})
+		}
+		resp, _ := json.Marshal(rpc.Response{Success: true, Data: data})
+		resp = append(resp, '\n')
+		_, _ = conn.Write(resp)
+	}
+}

@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/localsettings"
 )
 
@@ -329,5 +330,66 @@ func TestWaitForEmbeddedRuntimeTimesOutWithLastError(t *testing.T) {
 	defer cancel()
 	if _, err := waitForEmbeddedRuntime(ctx, fleetDir, 20*time.Millisecond, nil); err == nil || !strings.Contains(err.Error(), "not running") {
 		t.Fatalf("wait err = %v", err)
+	}
+}
+
+func TestStoreHandleActorAndDiagnosticHelperBranches(t *testing.T) {
+	t.Setenv(EnvFleetDBURL, "http://env-fleet-db")
+	if got := (*StoreHandle)(nil).URL(); got != "" {
+		t.Fatalf("nil StoreHandle URL = %q, want empty", got)
+	}
+	if got := (&StoreHandle{}).URL(); got != "http://env-fleet-db" {
+		t.Fatalf("env StoreHandle URL = %q", got)
+	}
+
+	embedded := &EmbeddedFleetDB{url: "http://embedded", done: make(chan struct{})}
+	h := &StoreHandle{Store: memstore.New(), mode: ModeLocal, url: "http://local", embedded: embedded}
+	if h.Mode() != ModeLocal || h.URL() != "http://embedded" {
+		t.Fatalf("handle mode/url = %s %q", h.Mode(), h.URL())
+	}
+	if err := h.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	select {
+	case <-embedded.Done():
+	default:
+		t.Fatal("embedded Done channel was not closed")
+	}
+	if err := h.Close(); err != nil {
+		t.Fatalf("second Close: %v", err)
+	}
+
+	t.Setenv(EnvFleetDBActor, "explicit-actor")
+	t.Setenv(EnvAgentName, "agent-actor")
+	t.Setenv("USER", "user-actor")
+	if got := resolveActor(); got != "explicit-actor" {
+		t.Fatalf("resolveActor explicit = %q", got)
+	}
+	t.Setenv(EnvFleetDBActor, "")
+	if got := resolveActor(); got != "agent-actor" {
+		t.Fatalf("resolveActor agent = %q", got)
+	}
+	t.Setenv(EnvAgentName, "")
+	if got := resolveActor(); got != "user-actor" {
+		t.Fatalf("resolveActor user = %q", got)
+	}
+
+	dir := t.TempDir()
+	t.Setenv(EnvFleetDBBin, dir)
+	diag := DiagnoseFleetDBBinary()
+	if diag.Err == nil || diag.Path != dir || !strings.Contains(diag.Err.Error(), "is a directory") {
+		t.Fatalf("directory diagnostic = %+v err=%v", diag, diag.Err)
+	}
+
+	if runtime.GOOS != "windows" {
+		file := filepath.Join(t.TempDir(), "fleet-db")
+		if err := os.WriteFile(file, []byte("not executable"), 0o600); err != nil {
+			t.Fatalf("write non-executable fleet-db: %v", err)
+		}
+		t.Setenv(EnvFleetDBBin, file)
+		diag = DiagnoseFleetDBBinary()
+		if diag.Err == nil || !strings.Contains(diag.Err.Error(), "not executable") {
+			t.Fatalf("non-executable diagnostic = %+v err=%v", diag, diag.Err)
+		}
 	}
 }

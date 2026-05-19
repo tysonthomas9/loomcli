@@ -704,3 +704,42 @@ func TestDispatch_LazyUncreated_NoOps(t *testing.T) {
 		t.Errorf("hasManager=true — Detach/Kill/etc should not create the manager")
 	}
 }
+
+func TestBackendSessionDispatch(t *testing.T) {
+	mm := newTestMultiManager(t, 0)
+	mm.SetGracePeriod(5 * time.Second)
+	if err := mm.Register("ws1", t.TempDir()); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	key := SessionKey{Workspace: "ws1", Name: "backend-owned"}
+
+	created, err := mm.EnsureSession(key, 0, 0, nil)
+	if err != nil {
+		t.Fatalf("EnsureSession create: %v", err)
+	}
+	if !created {
+		t.Fatal("EnsureSession created = false, want true")
+	}
+	created, err = mm.EnsureSession(key, 100, 30, nil)
+	if err != nil {
+		t.Fatalf("EnsureSession existing: %v", err)
+	}
+	if created {
+		t.Fatal("EnsureSession existing created = true, want false")
+	}
+	if err := mm.WriteToSession(key, []byte("hello\n")); err != nil {
+		t.Fatalf("WriteToSession existing: %v", err)
+	}
+	if err := mm.WriteToSession(SessionKey{Workspace: "missing", Name: "s"}, []byte("x")); !errors.Is(err, ErrWorkspaceNotRegistered) {
+		t.Fatalf("WriteToSession missing workspace err = %v, want ErrWorkspaceNotRegistered", err)
+	}
+	if mm.SessionClosed(key) {
+		t.Fatal("SessionClosed before kill = true")
+	}
+	if err := mm.Kill(key); err != nil {
+		t.Fatalf("Kill: %v", err)
+	}
+	if !mm.SessionClosed(key) {
+		t.Fatal("SessionClosed after kill = false")
+	}
+}

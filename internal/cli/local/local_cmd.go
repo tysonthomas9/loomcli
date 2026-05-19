@@ -25,8 +25,10 @@ var (
 	bindFlag    string
 	jsonFlag    bool
 
-	readRuntimeStatusFn = ReadRuntimeStatus
-	restartRuntimeFn    = RestartRuntime
+	osExecutableFn               = os.Executable
+	readRuntimeStatusFn          = ReadRuntimeStatus
+	restartRuntimeFn             = RestartRuntime
+	startLocalDaemonSupervisorFn = startLocalDaemonSupervisor
 )
 
 var localCmd = &cobra.Command{
@@ -149,7 +151,7 @@ func runService(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	startLocalDaemonSupervisor(serviceCtx, cfg.dataDir, cfg.exe, cfg.port)
+	startLocalDaemonSupervisorFn(serviceCtx, cfg.dataDir, cfg.exe, cfg.port)
 	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Loom local runtime: %s\n", info.URL)
 	return waitServeExit(serviceCtx, serveCmd, cfg.dataDir, info)
 }
@@ -196,7 +198,7 @@ func prepareLocalServiceConfig() (*localServiceConfig, error) {
 		}
 		port = p
 	}
-	exe, err := os.Executable()
+	exe, err := osExecutableFn()
 	if err != nil {
 		return nil, fmt.Errorf("resolve loom executable: %w", err)
 	}

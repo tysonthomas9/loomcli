@@ -456,3 +456,42 @@ Worktree: {{.WorktreeName}}`
 		t.Errorf("expected 'Worktree: ember', got: %s", result)
 	}
 }
+
+func TestLeadSessionEnvironmentHelpers(t *testing.T) {
+	t.Setenv(envOrchestratorSessionID, "  existing-session  ")
+	if got := resolveLeadOrchestratorSessionID(); got != "existing-session" {
+		t.Fatalf("resolveLeadOrchestratorSessionID env = %q", got)
+	}
+	t.Setenv(envOrchestratorSessionID, "")
+	if got := resolveLeadOrchestratorSessionID(); !strings.HasPrefix(got, "lead-") {
+		t.Fatalf("resolveLeadOrchestratorSessionID generated = %q, want lead-*", got)
+	}
+
+	t.Setenv(envAgentName, "  lead-agent  ")
+	if got := resolveLeadAgentID(); got != "lead-agent" {
+		t.Fatalf("resolveLeadAgentID env = %q", got)
+	}
+	t.Setenv(envAgentName, "")
+	if got := resolveLeadAgentID(); got != "lead" {
+		t.Fatalf("resolveLeadAgentID fallback = %q", got)
+	}
+
+	t.Setenv("USER", "alice")
+	if got := leadSessionActor(); got != "alice" {
+		t.Fatalf("leadSessionActor = %q", got)
+	}
+	activateLeadSessionEnv("session-123")
+	if got := os.Getenv(envOrchestratorSessionID); got != "session-123" {
+		t.Fatalf("activated orchestrator session env = %q", got)
+	}
+
+	var finalized bool
+	reg := leadSessionRegistration{finalize: func() { finalized = true }}
+	reg.Finalize()
+	if !finalized {
+		t.Fatal("Finalize did not call hook")
+	}
+	if got := (leadSessionRegistration{}).Store(); got != nil {
+		t.Fatalf("zero registration Store = %#v, want nil", got)
+	}
+}

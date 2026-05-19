@@ -53,3 +53,53 @@ func TestRunPullAndPRAllCommandsUseFlagValues(t *testing.T) {
 		}
 	})
 }
+
+func TestRunPushAndResetAllCommandsUseFlagValues(t *testing.T) {
+	tmp := t.TempDir()
+	ws := filepath.Join(tmp, "ws")
+	setupWorkspaceConfig(t, &LoomConfig{
+		DefaultWorkspace: "ws1",
+		Workspaces: map[string]WorkspaceConfig{
+			"ws1": {Path: ws},
+		},
+	})
+
+	t.Run("push all", func(t *testing.T) {
+		deps, _, _, _, _ := NewTestDeps(t)
+		cmd := &cobra.Command{}
+		cmd.Flags().Bool("all", false, "")
+		cmd.Flags().String("workspace", "", "")
+		cmd.SetContext(cli.WithDeps(context.Background(), deps))
+		if err := cmd.Flags().Set("all", "true"); err != nil {
+			t.Fatalf("set all: %v", err)
+		}
+		if err := runPush(cmd, []string{"main"}); err != nil {
+			t.Fatalf("runPush: %v", err)
+		}
+
+		resolver, err := NewResolver()
+		if err != nil {
+			t.Fatalf("NewResolver: %v", err)
+		}
+		if err := resolver.SetWorkspace("ws1"); err != nil {
+			t.Fatalf("SetWorkspace: %v", err)
+		}
+		if err := pushWorkspaceRepos(deps, resolver, "feature", "main"); err != nil {
+			t.Fatalf("pushWorkspaceRepos with empty workspace: %v", err)
+		}
+	})
+
+	t.Run("reset all", func(t *testing.T) {
+		oldResetAll, oldResetForce := resetAll, resetForce
+		t.Cleanup(func() {
+			resetAll, resetForce = oldResetAll, oldResetForce
+		})
+		resetAll = true
+		resetForce = true
+
+		deps, _, _, _, _ := NewTestDeps(t)
+		cmd := &cobra.Command{}
+		cmd.SetContext(cli.WithDeps(context.Background(), deps))
+		runReset(cmd, []string{"main"})
+	})
+}

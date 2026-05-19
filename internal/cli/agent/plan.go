@@ -16,7 +16,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/backends"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/sessionfinalize"
-	"github.com/tysonthomas9/loomcli/internal/cli/workspace"
 	"github.com/tysonthomas9/loomcli/internal/events"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 )
@@ -84,7 +83,7 @@ func runPlan(cmd *cobra.Command, args []string) {
 		argName = args[0]
 	}
 
-	target, err := workspace.ResolveAgentTarget(argName, "")
+	target, err := resolveAgentTargetFn(argName, "")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		cli.ExitWithFlush(1)
@@ -94,15 +93,15 @@ func runPlan(cmd *cobra.Command, args []string) {
 	agentName := target.AgentName
 
 	if planDaemonMode {
-		runPlanDaemon(deps, worktreePath, agentName)
+		runPlanDaemonFn(deps, worktreePath, agentName)
 		return
 	}
 
 	routerCheck := cli.RouterTaskCheckFromEnv(planParentID)
 
-	if planAutoMode && automode.IsTmuxAvailable() {
-		shutdown := automode.SetupSignalHandler()
-		automode.RunAutoModeTmux(automode.AutoModeOptions{
+	if planAutoMode && automodeTmuxFn() {
+		shutdown := setupSignalHandlerFn()
+		runAutoModeTmuxFn(automode.AutoModeOptions{
 			Interval: planInterval, MaxTasks: planMaxTasks, IdleTimeout: planIdleTimeout,
 			AgentType: "plan", AgentName: agentName, WorktreePath: worktreePath,
 			ParentID: planParentID, CustomTaskCheck: routerCheck,
@@ -117,12 +116,18 @@ func runPlan(cmd *cobra.Command, args []string) {
 	defer func() { _ = cli.ReleaseLock(worktreePath) }()
 
 	if planAutoMode {
-		runPlanAutoFallback(deps, worktreePath, agentName, routerCheck)
+		runPlanAutoFallbackFn(deps, worktreePath, agentName, routerCheck)
 		return
 	}
 
-	runPlanSingleTask(deps, worktreePath, agentName, routerCheck)
+	runPlanSingleTaskFn(deps, worktreePath, agentName, routerCheck)
 }
+
+var (
+	runPlanDaemonFn       = runPlanDaemon
+	runPlanAutoFallbackFn = runPlanAutoFallback
+	runPlanSingleTaskFn   = runPlanSingleTask
+)
 
 // runPlanDaemon handles daemon mode: acquire lock, invoke agent, finalize session.
 func runPlanDaemon(deps *cli.Deps, worktreePath, agentName string) {
@@ -159,11 +164,11 @@ func runPlanDaemon(deps *cli.Deps, worktreePath, agentName string) {
 // runPlanAutoFallback handles auto mode without tmux.
 func runPlanAutoFallback(deps *cli.Deps, worktreePath, agentName string, routerCheck func() (bool, error)) {
 	fmt.Println("[auto] tmux not found, using JSON streaming mode")
-	shutdown := automode.SetupSignalHandler()
+	shutdown := setupSignalHandlerFn()
 	promptGen := func(name string, ws *config.WorkspaceConfig) string {
 		return GeneratePlanningPrompt(name, ws, planParentID)
 	}
-	automode.RunAutoModeLoop(automode.AutoModeOptions{
+	runAutoModeLoopFn(automode.AutoModeOptions{
 		Interval: planInterval, MaxTasks: planMaxTasks, IdleTimeout: planIdleTimeout,
 		AgentType: "plan", AgentName: agentName, WorktreePath: worktreePath,
 		ParentID: planParentID, CustomTaskCheck: routerCheck,

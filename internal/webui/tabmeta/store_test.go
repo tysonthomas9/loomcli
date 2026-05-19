@@ -19,6 +19,18 @@ func setupTest(t *testing.T) (*Store, *miniredis.Miniredis) {
 	return NewStore(rdb, nil), mr
 }
 
+func TestStoreCloseAndRedisClient(t *testing.T) {
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	store := NewStore(rdb, nil)
+	if store.RedisClient() != rdb {
+		t.Fatal("RedisClient did not return underlying client")
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+}
+
 func TestGet_NotFound(t *testing.T) {
 	store, _ := setupTest(t)
 	meta, err := store.Get(context.Background(), testWorkspace, "nonexistent")

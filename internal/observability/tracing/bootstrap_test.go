@@ -2,6 +2,7 @@ package tracing_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"go.opentelemetry.io/otel"
@@ -91,5 +92,26 @@ func TestBootstrapContext_MalformedEnvVar(t *testing.T) {
 	sc := trace.SpanContextFromContext(out)
 	if sc.IsValid() {
 		t.Errorf("malformed traceparent unexpectedly produced a valid span context: %v", sc)
+	}
+}
+
+func TestTraceparentFromContextSerializesActiveSpan(t *testing.T) {
+	otel.SetTextMapPropagator(propagation.TraceContext{})
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSampler(sdktrace.AlwaysSample()))
+	otel.SetTracerProvider(tp)
+	t.Cleanup(func() { _ = tp.Shutdown(context.Background()) })
+
+	if got := tracing.TraceparentFromContext(context.Background()); got != "" {
+		t.Fatalf("empty context traceparent = %q", got)
+	}
+
+	ctx, span := tp.Tracer("test").Start(context.Background(), "active")
+	defer span.End()
+	got := tracing.TraceparentFromContext(ctx)
+	if got == "" {
+		t.Fatal("active span produced empty traceparent")
+	}
+	if !strings.Contains(got, span.SpanContext().TraceID().String()) {
+		t.Fatalf("traceparent %q does not include trace id %s", got, span.SpanContext().TraceID())
 	}
 }

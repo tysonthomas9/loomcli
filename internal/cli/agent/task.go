@@ -10,7 +10,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/automode"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
-	"github.com/tysonthomas9/loomcli/internal/cli/workspace"
 )
 
 var (
@@ -76,7 +75,7 @@ func runTask(cmd *cobra.Command, args []string) {
 		argName = args[0]
 	}
 
-	target, err := workspace.ResolveAgentTarget(argName, "")
+	target, err := resolveAgentTargetFn(argName, "")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		cli.ExitWithFlush(1)
@@ -86,15 +85,15 @@ func runTask(cmd *cobra.Command, args []string) {
 	agentName := target.AgentName
 
 	if taskDaemonMode {
-		runTaskDaemon(deps, worktreePath, agentName)
+		runTaskDaemonFn(deps, worktreePath, agentName)
 		return
 	}
 
 	routerCheck := cli.RouterTaskCheckFromEnv(taskParentID)
 
-	if taskAutoMode && automode.IsTmuxAvailable() {
-		shutdown := automode.SetupSignalHandler()
-		automode.RunAutoModeTmux(automode.AutoModeOptions{
+	if taskAutoMode && automodeTmuxFn() {
+		shutdown := setupSignalHandlerFn()
+		runAutoModeTmuxFn(automode.AutoModeOptions{
 			Interval: taskInterval, MaxTasks: taskMaxTasks, IdleTimeout: taskIdleTimeout,
 			AgentType: "task", AgentName: agentName, WorktreePath: worktreePath,
 			ParentID: taskParentID, CustomTaskCheck: routerCheck,
@@ -109,12 +108,18 @@ func runTask(cmd *cobra.Command, args []string) {
 	defer func() { _ = cli.ReleaseLock(worktreePath) }()
 
 	if taskAutoMode {
-		runTaskAutoFallback(deps, worktreePath, agentName, routerCheck)
+		runTaskAutoFallbackFn(deps, worktreePath, agentName, routerCheck)
 		return
 	}
 
-	runTaskSingleTask(deps, worktreePath, agentName, routerCheck)
+	runTaskSingleTaskFn(deps, worktreePath, agentName, routerCheck)
 }
+
+var (
+	runTaskDaemonFn       = runTaskDaemon
+	runTaskAutoFallbackFn = runTaskAutoFallback
+	runTaskSingleTaskFn   = runTaskSingleTask
+)
 
 // runTaskDaemon handles daemon mode for the task agent.
 func runTaskDaemon(deps *cli.Deps, worktreePath, agentName string) {
@@ -151,12 +156,12 @@ func runTaskDaemon(deps *cli.Deps, worktreePath, agentName string) {
 // runTaskAutoFallback handles auto mode without tmux for the task agent.
 func runTaskAutoFallback(deps *cli.Deps, worktreePath, agentName string, routerCheck func() (bool, error)) {
 	fmt.Println("[auto] tmux not found, using JSON streaming mode")
-	shutdown := automode.SetupSignalHandler()
+	shutdown := setupSignalHandlerFn()
 	backendName := cli.GetBackendName()
 	promptGen := func(name string, ws *config.WorkspaceConfig) string {
 		return GenerateTaskPrompt(name, ws, taskParentID, backendName)
 	}
-	automode.RunAutoModeLoop(automode.AutoModeOptions{
+	runAutoModeLoopFn(automode.AutoModeOptions{
 		Interval: taskInterval, MaxTasks: taskMaxTasks, IdleTimeout: taskIdleTimeout,
 		AgentType: "task", AgentName: agentName, WorktreePath: worktreePath,
 		ParentID: taskParentID, CustomTaskCheck: routerCheck,

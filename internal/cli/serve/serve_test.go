@@ -23,6 +23,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
+	"github.com/tysonthomas9/loomcli/internal/webui/localredis"
 )
 
 // mockMonitorData creates a sample MonitorData for testing
@@ -88,6 +89,95 @@ func TestBuildMonitorCollectDataFnIsLazy(t *testing.T) {
 
 	if got := backendCalls.Load(); got != 0 {
 		t.Fatalf("buildMonitorCollectDataFn called issue backend before first request: got %d calls", got)
+	}
+}
+
+func TestRunServeWithHookedStartup(t *testing.T) {
+	oldEnsure := ensureIssueBackendFn
+	oldResolveFleet := resolveFleetStateFn
+	oldStartRedis := startLocalRedisFn
+	oldInitUsage := initUsageStoreFn
+	oldOpenStore := openServeStoreFn
+	oldStartServer := startWebUIServerFn
+	oldAwait := awaitShutdownFn
+	oldUsage := usageHandler
+	oldServeNoDaemon, oldServeRedisAddr, oldServeFleetMode := serveNoDaemon, serveRedisAddr, serveFleetMode
+	oldServePort, oldServeBind := servePort, serveBindAddr
+	oldServeCors, oldFrontendURLs := serveCorsOrigin, serveFrontendURLs
+	t.Cleanup(func() {
+		ensureIssueBackendFn = oldEnsure
+		resolveFleetStateFn = oldResolveFleet
+		startLocalRedisFn = oldStartRedis
+		initUsageStoreFn = oldInitUsage
+		openServeStoreFn = oldOpenStore
+		startWebUIServerFn = oldStartServer
+		awaitShutdownFn = oldAwait
+		usageHandler = oldUsage
+		serveNoDaemon, serveRedisAddr, serveFleetMode = oldServeNoDaemon, oldServeRedisAddr, oldServeFleetMode
+		servePort, serveBindAddr = oldServePort, oldServeBind
+		serveCorsOrigin, serveFrontendURLs = oldServeCors, oldFrontendURLs
+	})
+
+	serveNoDaemon = false
+	serveRedisAddr = ""
+	serveFleetMode = true
+	servePort = 19088
+	serveBindAddr = "127.0.0.1"
+	serveCorsOrigin = "https://legacy.example"
+	serveFrontendURLs = []string{"https://app.example/"}
+
+	var ensureCalled, redisCalled, usageCalled, serverCalled bool
+	ensureIssueBackendFn = func() bool {
+		ensureCalled = true
+		return false
+	}
+	resolveFleetStateFn = func(context.Context) fleetState {
+		return fleetState{clientCfg: config.FleetClientConfig{Actor: "tester", Workspace: "WS"}}
+	}
+	startLocalRedisFn = func(context.Context, bool) *localredis.Manager {
+		redisCalled = true
+		return nil
+	}
+	initUsageStoreFn = func() {
+		usageCalled = true
+		usageHandler = func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusNoContent)
+		}
+	}
+	openServeStoreFn = func(context.Context, fleetState) (*bootstrap.StoreHandle, error) {
+		return &bootstrap.StoreHandle{}, nil
+	}
+	startWebUIServerFn = func(ctx context.Context, cfg webui.ServerConfig) error {
+		serverCalled = true
+		if cfg.Port != 19088 || cfg.BindAddress != "127.0.0.1" {
+			t.Fatalf("server cfg address = %s:%d", cfg.BindAddress, cfg.Port)
+		}
+		if !cfg.CORSEnabled || !reflect.DeepEqual(cfg.CORSOrigins, []string{"https://legacy.example", "https://app.example"}) {
+			t.Fatalf("CORS config = enabled:%t origins:%#v", cfg.CORSEnabled, cfg.CORSOrigins)
+		}
+		if cfg.MonitorHandlers.Status == nil || cfg.BackendOps == nil || cfg.AgentControlFn == nil {
+			t.Fatalf("server config not fully wired: %+v", cfg)
+		}
+		<-ctx.Done()
+		return nil
+	}
+	awaitShutdownFn = func(_ *cobra.Command, _ chan os.Signal, webuiErr chan error, cancel context.CancelFunc) {
+		cancel()
+		select {
+		case err := <-webuiErr:
+			if err != nil {
+				t.Fatalf("webui server returned error: %v", err)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("webui server was not started")
+		}
+	}
+
+	cmd := &cobra.Command{}
+	runServe(cmd, nil)
+
+	if !ensureCalled || !redisCalled || !usageCalled || !serverCalled {
+		t.Fatalf("hooks called ensure=%t redis=%t usage=%t server=%t", ensureCalled, redisCalled, usageCalled, serverCalled)
 	}
 }
 

@@ -110,6 +110,32 @@ func TestProtectedPool_BreakerState(t *testing.T) {
 	}
 }
 
+func TestProtectedPool_ResetBreaker(t *testing.T) {
+	pool, err := NewConnectionPool("/tmp/nonexistent.sock", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+
+	breaker := circuitbreaker.NewBreaker("daemon", circuitbreaker.Config{
+		FailureThreshold: 1,
+		OpenTimeout:      time.Hour,
+		ShouldTrip:       DaemonShouldTrip,
+	})
+	pp := NewProtectedPool(pool, breaker)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	_, _ = pp.Get(ctx)
+	if pp.BreakerState() != circuitbreaker.StateOpen {
+		t.Fatalf("breaker state = %v, want open", pp.BreakerState())
+	}
+	pp.ResetBreaker()
+	if pp.BreakerState() != circuitbreaker.StateClosed {
+		t.Fatalf("breaker state after reset = %v, want closed", pp.BreakerState())
+	}
+}
+
 func TestProtectedPool_DelegatesStats(t *testing.T) {
 	pool, err := NewConnectionPool("/tmp/nonexistent.sock", 3)
 	if err != nil {

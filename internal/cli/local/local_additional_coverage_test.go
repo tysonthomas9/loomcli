@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -227,6 +228,63 @@ func TestServeProcessLifecycleAndHealthHelpers(t *testing.T) {
 	}
 	_ = cmd.Process.Kill()
 	_ = cmd.Wait()
+}
+
+func TestRunServiceWithFakeServeProcess(t *testing.T) {
+	dataDir := t.TempDir()
+	listener, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		if strings.Contains(err.Error(), "operation not permitted") {
+			t.Skipf("local listen blocked by sandbox: %v", err)
+		}
+		t.Fatalf("listen for fake health server: %v", err)
+	}
+	healthServer := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/health" {
+			t.Fatalf("unexpected health path %q", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	healthServer.Listener = listener
+	healthServer.Start()
+	defer healthServer.Close()
+	host, portText, err := net.SplitHostPort(strings.TrimPrefix(healthServer.URL, "http://"))
+	if err != nil {
+		t.Fatalf("split test server host: %v", err)
+	}
+	port, err := strconv.Atoi(portText)
+	if err != nil {
+		t.Fatalf("parse test server port: %v", err)
+	}
+
+	oldDataDir, oldBind, oldPort := dataDirFlag, bindFlag, portFlag
+	oldExecutable := osExecutableFn
+	oldSupervisor := startLocalDaemonSupervisorFn
+	dataDirFlag, bindFlag, portFlag = dataDir, host, port
+	osExecutableFn = func() (string, error) {
+		return writeLocalFakeExecutable(t, "loom-serve-fake", "exit 0"), nil
+	}
+	startLocalDaemonSupervisorFn = func(context.Context, string, string, int) {}
+	t.Cleanup(func() {
+		dataDirFlag, bindFlag, portFlag = oldDataDir, oldBind, oldPort
+		osExecutableFn = oldExecutable
+		startLocalDaemonSupervisorFn = oldSupervisor
+	})
+
+	var out bytes.Buffer
+	if err := runService(commandWithOutput(&out), nil); err != nil {
+		t.Fatalf("runService: %v", err)
+	}
+	if !strings.Contains(out.String(), "Loom local runtime: "+healthServer.URL) {
+		t.Fatalf("runService output = %q, want runtime URL", out.String())
+	}
+	info, err := readRuntime(dataDir)
+	if err != nil {
+		t.Fatalf("read runtime: %v", err)
+	}
+	if info.Status != "stopped" || info.URL != healthServer.URL || info.Port != port {
+		t.Fatalf("runtime info after runService = %#v", info)
+	}
 }
 
 func writeLocalFakeExecutable(t *testing.T, name, body string) string {
@@ -724,4 +782,113 @@ func TestRunLocalDaemonOnceSuccessAndCancellation(t *testing.T) {
 			t.Fatalf("runLocalDaemonOnce err = %v, want context.Canceled", err)
 		}
 	})
+}
+
+func TestSuperviseLocalDaemonBranchesWithHooks(t *testing.T) {
+	oldLoad := localDaemonLoadConfig
+	oldHasRepos := localDaemonWorkspaceHasRepos
+	oldRunOnce := runLocalDaemonOnceFn
+	oldSleep := sleepOrDoneFn
+	t.Cleanup(func() {
+		localDaemonLoadConfig = oldLoad
+		localDaemonWorkspaceHasRepos = oldHasRepos
+		runLocalDaemonOnceFn = oldRunOnce
+		sleepOrDoneFn = oldSleep
+	})
+
+	t.Run("non runnable workspace polls without starting daemon", func(t *testing.T) {
+		dataDir := t.TempDir()
+		if err := ensureRuntimeDirs(dataDir); err != nil {
+			t.Fatalf("ensureRuntimeDirs: %v", err)
+		}
+		t.Setenv("LOOM_WORKSPACE", "WS-IDLE")
+		localDaemonWorkspaceHasRepos = func(string, string) (bool, error) { return false, nil }
+		localDaemonLoadConfig = func(string, string) (*cfgpkg.DaemonConfig, error) {
+			return &cfgpkg.DaemonConfig{}, nil
+		}
+		runLocalDaemonOnceFn = func(context.Context, string, string, int, string) error {
+			t.Fatal("runLocalDaemonOnce should not be called for a non-runnable workspace")
+			return nil
+		}
+		sleepOrDoneFn = func(ctx context.Context, d time.Duration) bool {
+			if d != localDaemonPollInterval {
+				t.Fatalf("sleep duration = %v, want poll interval", d)
+			}
+			return false
+		}
+		superviseLocalDaemon(context.Background(), dataDir, "/bin/loom", 19001)
+	})
+
+	t.Run("runnable workspace records daemon exit and backs off", func(t *testing.T) {
+		dataDir := t.TempDir()
+		if err := ensureRuntimeDirs(dataDir); err != nil {
+			t.Fatalf("ensureRuntimeDirs: %v", err)
+		}
+		t.Setenv("LOOM_WORKSPACE", "WS-RUN")
+		localDaemonWorkspaceHasRepos = func(string, string) (bool, error) { return true, nil }
+		runCalls := 0
+		runLocalDaemonOnceFn = func(ctx context.Context, dataDir, exe string, port int, workspaceKey string) error {
+			runCalls++
+			if ctx == nil || dataDir == "" || exe != "/bin/loom" || port != 19002 || workspaceKey != "WS-RUN" {
+				t.Fatalf("run args ctx=%v dataDir=%q exe=%q port=%d workspace=%q", ctx, dataDir, exe, port, workspaceKey)
+			}
+			return errors.New("daemon stopped")
+		}
+		sleepOrDoneFn = func(context.Context, time.Duration) bool { return false }
+
+		superviseLocalDaemon(context.Background(), dataDir, "/bin/loom", 19002)
+		if runCalls != 1 {
+			t.Fatalf("run calls = %d, want 1", runCalls)
+		}
+		data, err := os.ReadFile(daemonLogPath(dataDir))
+		if err != nil {
+			t.Fatalf("read daemon log: %v", err)
+		}
+		if !strings.Contains(string(data), "daemon exited: daemon stopped") {
+			t.Fatalf("daemon log = %q", string(data))
+		}
+	})
+}
+
+func TestStartLocalDaemonSupervisorLaunchesSupervisionGoroutine(t *testing.T) {
+	oldLoad := localDaemonLoadConfig
+	oldHasRepos := localDaemonWorkspaceHasRepos
+	oldRunOnce := runLocalDaemonOnceFn
+	oldSleep := sleepOrDoneFn
+	t.Cleanup(func() {
+		localDaemonLoadConfig = oldLoad
+		localDaemonWorkspaceHasRepos = oldHasRepos
+		runLocalDaemonOnceFn = oldRunOnce
+		sleepOrDoneFn = oldSleep
+	})
+
+	t.Setenv("LOOM_WORKSPACE", "WS-IDLE")
+	localDaemonWorkspaceHasRepos = func(string, string) (bool, error) { return false, nil }
+	localDaemonLoadConfig = func(string, string) (*cfgpkg.DaemonConfig, error) { return &cfgpkg.DaemonConfig{}, nil }
+	runLocalDaemonOnceFn = func(context.Context, string, string, int, string) error {
+		t.Fatal("daemon should not start for non-runnable workspace")
+		return nil
+	}
+
+	done := make(chan struct{})
+	sleepOrDoneFn = func(context.Context, time.Duration) bool {
+		close(done)
+		return false
+	}
+	startLocalDaemonSupervisor(context.Background(), t.TempDir(), "/bin/loom", 19003)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("supervisor goroutine did not reach poll sleep")
+	}
+}
+
+func TestLoadLocalDaemonConfigForWorkspaceRestoresEnvironmentOnError(t *testing.T) {
+	t.Setenv("LOOM_WORKSPACE", "previous")
+	if _, err := loadLocalDaemonConfigForWorkspace(filepath.Join(t.TempDir(), "missing"), "replacement"); err == nil {
+		t.Fatal("expected missing config error")
+	}
+	if got := os.Getenv("LOOM_WORKSPACE"); got != "previous" {
+		t.Fatalf("LOOM_WORKSPACE = %q, want previous", got)
+	}
 }

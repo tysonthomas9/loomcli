@@ -69,6 +69,14 @@ var (
 
 	// usageHandler holds the initialized usage HTTP handler.
 	usageHandler http.HandlerFunc
+
+	ensureIssueBackendFn = ensureIssueBackend
+	resolveFleetStateFn  = resolveFleetState
+	startLocalRedisFn    = daemonwire.StartLocalRedis
+	initUsageStoreFn     = initUsageStore
+	openServeStoreFn     = openServeStore
+	startWebUIServerFn   = webuiapp.StartServer
+	awaitShutdownFn      = awaitShutdown
 )
 
 // parseFrontendURLsEnv reads LOOM_FRONTEND_URL and returns a list of origins
@@ -170,19 +178,19 @@ func runServe(cmd *cobra.Command, args []string) {
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 
-	daemonWeStarted := ensureIssueBackend()
+	daemonWeStarted := ensureIssueBackendFn()
 	if daemonWeStarted {
 		defer stopIssueBackend()
 	}
 
-	fleetState := resolveFleetState(ctx)
+	fleetState := resolveFleetStateFn(ctx)
 
 	// When no external Redis address is configured, run an in-process
 	// miniredis so the terminal-state stores (tabmeta, issuetabs,
 	// sessionhistory, terminal:ui-state) keep working. State is snapshotted
 	// to ~/.loom/terminal-state/snapshot.json every 30s and on shutdown.
 	if serveRedisAddr == "" {
-		if mgr := daemonwire.StartLocalRedis(ctx, serveFleetMode); mgr != nil {
+		if mgr := startLocalRedisFn(ctx, serveFleetMode); mgr != nil {
 			fleetState.redisConfig = &daemonwire.FleetRedisConfig{Address: mgr.Addr()}
 		}
 	} else {
@@ -199,10 +207,10 @@ func runServe(cmd *cobra.Command, args []string) {
 	if serveFleetMode && serveRedisAddr != "" {
 		staleDetectorHandler = daemonwire.InitStaleDetectorHandler(ctx, serveRedisAddr, serveRedisPassword)
 	}
-	initUsageStore()
+	initUsageStoreFn()
 
 	// Open a fleet-db-backed store handle for the default fleet-db path.
-	storeHandle, storeErr := openServeStore(ctx, fleetState)
+	storeHandle, storeErr := openServeStoreFn(ctx, fleetState)
 	if storeErr != nil {
 		log.Fatalf("failed to open fleet-db store: %v", storeErr)
 	}
@@ -216,11 +224,11 @@ func runServe(cmd *cobra.Command, args []string) {
 	webuiErr := make(chan error, 1)
 	go func() {
 		cfg := buildServerConfig(monitorHandlers, fleetState, storeHandle)
-		webuiErr <- webuiapp.StartServer(ctx, cfg)
+		webuiErr <- startWebUIServerFn(ctx, cfg)
 	}()
 
 	logServerStartup()
-	awaitShutdown(cmd, stop, webuiErr, cancel)
+	awaitShutdownFn(cmd, stop, webuiErr, cancel)
 }
 
 func configureServeLocalRuntimeMode() {

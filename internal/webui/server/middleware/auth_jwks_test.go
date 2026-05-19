@@ -10,6 +10,7 @@ import (
 	"io"
 	"log/slog"
 	"math/big"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -39,6 +40,49 @@ func TestJWKSCacheFetchAndLookup(t *testing.T) {
 	}
 	if len(all) != 1 {
 		t.Fatalf("GetKey(empty) len = %d, want 1", len(all))
+	}
+}
+
+func TestJWKSCacheConstructorStopRefreshLoopAndHTTPClient(t *testing.T) {
+	key := mustRSAKey(t)
+	body := `{"keys":[` + jwkJSON("kid-ctor", &key.PublicKey) + `]}`
+	var calls int
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		_, _ = w.Write([]byte(body))
+	}))
+	defer ts.Close()
+
+	cache := NewJWKSCache(ts.URL, nil, nil)
+	defer cache.Stop()
+	if calls == 0 {
+		t.Fatal("NewJWKSCache did not perform initial fetch")
+	}
+	if keys, err := cache.GetKey("kid-ctor"); err != nil || len(keys) != 1 {
+		t.Fatalf("GetKey after constructor fetch = %v/%v", keys, err)
+	}
+	cache.Stop()
+	cache.Stop()
+
+	refreshCache := NewJWKSCacheNoFetch(ts.URL, fakeHTTPClient(body, http.StatusOK, nil), nil)
+	done := make(chan struct{})
+	go func() {
+		refreshCache.refreshLoop(time.Millisecond)
+		close(done)
+	}()
+	time.Sleep(3 * time.Millisecond)
+	refreshCache.Stop()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("refreshLoop did not stop after Stop")
+	}
+
+	client := NewJWKSHTTPClient(func(context.Context, string, string) (net.Conn, error) {
+		return nil, errors.New("dial blocked")
+	})
+	if _, err := client.Get("http://127.0.0.1:1/jwks"); err == nil || !strings.Contains(err.Error(), "dial blocked") {
+		t.Fatalf("custom JWKS HTTP client err = %v, want dial blocked", err)
 	}
 }
 

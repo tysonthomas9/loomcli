@@ -194,3 +194,18 @@ func TestProjectConfigSmallHelpersAndDaemonStatePath(t *testing.T) {
 		t.Fatalf("ResolveDaemonStatePath = %q, want %q", got, want)
 	}
 }
+
+func TestValidateAgentReposNoWorkspaceAndResolveRepoPathErrors(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	t.Setenv("LOOM_WORKSPACE", "")
+
+	if err := ValidateAgentRepos([]AgentEntry{{Worktree: "plain", Role: "task"}}); err != nil {
+		t.Fatalf("ValidateAgentRepos without repo = %v", err)
+	}
+	if err := ValidateAgentRepos([]AgentEntry{{Worktree: "repo-worker", Role: "task", Repo: "api"}}); err != nil {
+		t.Fatalf("ValidateAgentRepos without active workspace should warn only, got %v", err)
+	}
+	if _, err := resolveRepoPath("api"); err == nil || !strings.Contains(err.Error(), "no active workspace") {
+		t.Fatalf("resolveRepoPath without active workspace err = %v", err)
+	}
+}

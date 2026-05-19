@@ -51,6 +51,44 @@ func TestHandleWorkspaceBackendPatch_Success(t *testing.T) {
 	}
 }
 
+func TestHandleWorkspaceBackendGet_Success(t *testing.T) {
+	svc := &mockWorkspaceService{
+		getWorkspaceBackendFn: func(_ context.Context, wsID string) (*service.BackendConfigData, error) {
+			if wsID != "ws-uuid-1" {
+				t.Fatalf("wsID = %q", wsID)
+			}
+			return &service.BackendConfigData{Backend: "codex"}, nil
+		},
+	}
+	handler := HandleWorkspaceBackendGet(svc)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/ws-uuid-1/config/backend", nil)
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "ws-uuid-1"))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp BackendConfigResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !resp.Success || resp.Data == nil || resp.Data.Backend != "codex" {
+		t.Fatalf("response = %+v", resp)
+	}
+}
+
+func TestHandleWorkspaceBackendGet_MissingWorkspaceID(t *testing.T) {
+	handler := HandleWorkspaceBackendGet(&mockWorkspaceService{})
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/config/backend", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestHandleWorkspaceBackendPatch_InvalidBackend(t *testing.T) {
 	svc := &mockWorkspaceService{}
 	handler := handleWorkspaceBackendPatch(svc)

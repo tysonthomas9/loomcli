@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -202,5 +203,57 @@ func TestComputeDiffStats_InvalidRef(t *testing.T) {
 	}
 	if len(stats.FilesTouched) != 0 {
 		t.Errorf("FilesTouched = %v, want empty", stats.FilesTouched)
+	}
+}
+
+func TestComputeDiffPatchWithRealRepo(t *testing.T) {
+	clearGitEnvVars(t)
+	dir := t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...) //nolint:norawexec
+		cmd.Dir = dir
+		cmd.Env = gitSafeEnv(
+			"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@test.com",
+			"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@test.com",
+		)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v failed: %v\n%s", args, err, out)
+		}
+	}
+
+	run("init")
+	run("config", "user.email", "test@test.com")
+	run("config", "user.name", "test")
+	if err := os.WriteFile(filepath.Join(dir, "file.txt"), []byte("hello\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	run("add", ".")
+	run("commit", "-m", "initial")
+
+	cmd := exec.Command("git", "rev-parse", "HEAD") //nolint:norawexec
+	cmd.Dir = dir
+	cmd.Env = gitSafeEnv()
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeRef := strings.TrimSpace(string(out))
+
+	if got := ComputeDiffPatch(dir, ""); got != "" {
+		t.Fatalf("ComputeDiffPatch empty ref = %q, want empty", got)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "file.txt"), []byte("hello\nworld\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	run("add", ".")
+	run("commit", "-m", "changes")
+
+	patch := ComputeDiffPatch(dir, beforeRef)
+	if !strings.Contains(patch, "diff --git") || !strings.Contains(patch, "+world") {
+		t.Fatalf("patch = %q, want unified diff with added line", patch)
+	}
+	if got := ComputeDiffPatch(dir, "missing-ref"); got != "" {
+		t.Fatalf("ComputeDiffPatch invalid ref = %q, want empty", got)
 	}
 }

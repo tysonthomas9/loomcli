@@ -60,6 +60,7 @@ type DoctorSummary struct {
 
 var doctorJSON bool
 var doctorFix bool
+var collectDoctorChecksFn = collectDoctorChecks
 
 var doctorCmd = &cobra.Command{
 	Use:     "doctor",
@@ -95,7 +96,7 @@ func init() {
 type checkFunc func() CheckResult
 
 func runDoctor(cmd *cobra.Command, args []string) error {
-	checks := collectDoctorChecks(cmd)
+	checks := collectDoctorChecksFn(cmd)
 
 	var results []CheckResult
 	for _, check := range checks {

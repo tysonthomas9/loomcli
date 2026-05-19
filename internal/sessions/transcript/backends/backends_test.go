@@ -1,6 +1,10 @@
 package backends
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 func TestParseEvents_EmptyInput(t *testing.T) {
 	for _, backend := range []string{"claude", "codex", "opencode", "unknown"} {
@@ -55,5 +59,29 @@ func TestParseEvents_UnknownBackendFallsBackToClaude(t *testing.T) {
 	}
 	if len(events) != 1 || events[0].Text != "hi" {
 		t.Errorf("fallback did not route to claude: %+v", events)
+	}
+}
+
+func TestParseEventsFromFile(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing.jsonl")
+	events, err := ParseEventsFromFile("claude", missing)
+	if err != nil || events != nil {
+		t.Fatalf("missing file events=%+v err=%v, want nil nil", events, err)
+	}
+
+	path := filepath.Join(t.TempDir(), "claude.jsonl")
+	if err := os.WriteFile(path, []byte(`{"type":"user","uuid":"u1","message":{"content":"from file"}}`+"\n"), 0o600); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+	events, err = ParseEventsFromFile("claude", path)
+	if err != nil {
+		t.Fatalf("ParseEventsFromFile: %v", err)
+	}
+	if len(events) != 1 || events[0].Text != "from file" {
+		t.Fatalf("events = %+v", events)
+	}
+
+	if _, err := ParseEventsFromFile("claude", t.TempDir()); err == nil {
+		t.Fatal("directory read returned nil error")
 	}
 }

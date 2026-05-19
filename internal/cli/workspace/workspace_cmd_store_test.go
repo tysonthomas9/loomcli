@@ -15,6 +15,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 func TestFleetWorkspaceListAndRemoveAgainstLocalStore(t *testing.T) {
@@ -232,6 +233,46 @@ func resetWorkspaceCommandFlags(t *testing.T) {
 		wsListJSON = origListJSON
 		wsRemoveForce, wsRemoveKeepWorktrees = origRemoveForce, origRemoveKeep
 	})
+}
+
+func TestRunWorkspaceCreateUsesStoreBackedCreateHook(t *testing.T) {
+	oldWithStore := workspaceWithStoreFn
+	oldBuildCreate := buildStoreBackedCreateWorkspaceFn
+	oldRepos, oldPath, oldBranch := wsCreateRepos, wsCreatePath, wsCreateBranch
+	t.Cleanup(func() {
+		workspaceWithStoreFn = oldWithStore
+		buildStoreBackedCreateWorkspaceFn = oldBuildCreate
+		wsCreateRepos, wsCreatePath, wsCreateBranch = oldRepos, oldPath, oldBranch
+	})
+
+	workspaceWithStoreFn = func(fn func(context.Context, *bootstrap.StoreHandle) error) error {
+		return fn(context.Background(), &bootstrap.StoreHandle{})
+	}
+
+	var gotReq service.WorkspaceCreateRequest
+	buildStoreBackedCreateWorkspaceFn = func(store.Store) service.WorkspaceCreateFn {
+		return func(_ context.Context, req service.WorkspaceCreateRequest) (service.WorkspaceCreateResult, error) {
+			gotReq = req
+			return service.WorkspaceCreateResult{WorkspaceID: "WS-CREATED", WorkspacePath: "/tmp/ws-created"}, nil
+		}
+	}
+
+	wsCreateRepos = "/repo/one,/repo/two"
+	wsCreatePath = "/workspace/path"
+	wsCreateBranch = "feature_branch"
+
+	out := captureWorkspaceStdout(t, func() {
+		runWorkspaceCreate(&cobra.Command{}, []string{"New_WS"})
+	})
+	if !strings.Contains(out, `Workspace "WS-CREATED" created at /tmp/ws-created.`) {
+		t.Fatalf("create output = %q", out)
+	}
+	if gotReq.Name != "New_WS" || gotReq.Type != "empty" || gotReq.Path != "/workspace/path" || gotReq.Branch != "feature_branch" {
+		t.Fatalf("create request = %+v", gotReq)
+	}
+	if len(gotReq.Repos) != 2 || gotReq.Repos[0] != "/repo/one" || gotReq.Repos[1] != "/repo/two" {
+		t.Fatalf("create repos = %+v", gotReq.Repos)
+	}
 }
 
 func captureWorkspaceStdout(t *testing.T, fn func()) string {
