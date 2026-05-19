@@ -3,6 +3,7 @@ package terminal
 import (
 	"context"
 	"errors"
+	"os"
 	"testing"
 	"time"
 
@@ -377,4 +378,68 @@ func TestTerminalState_WorkspaceIsolation(t *testing.T) {
 	if gotB != "tab-b" {
 		t.Errorf("ws-b active_tab: got %q, want %q", gotB, "tab-b")
 	}
+}
+
+func TestPatchTabAndListSessionsByIssue(t *testing.T) {
+	svc, _, _ := newLivenessTestSvc(t)
+	ctx := context.Background()
+	const ws = "w"
+
+	putTestTab(t, svc, ws, "sess")
+	result, err := svc.PatchTab(ctx, ws, "sess", map[string]string{
+		"label":    "Renamed",
+		"issue_id": "TASK-1",
+	})
+	if err != nil {
+		t.Fatalf("PatchTab: %v", err)
+	}
+	if result == nil || result.Tab == nil || result.Tab.Label != "Renamed" || !result.IssueIDChanged {
+		t.Fatalf("PatchTab result = %+v", result)
+	}
+
+	sessionMap, err := svc.ListSessionsByIssue(ctx)
+	if err != nil {
+		t.Fatalf("ListSessionsByIssue: %v", err)
+	}
+	if got := sessionMap["TASK-1"]; len(got) != 1 || got[0] != "sess" {
+		t.Fatalf("session map = %#v, want TASK-1 -> sess", sessionMap)
+	}
+
+	if _, err := svc.PatchTab(ctx, ws, "missing", map[string]string{"label": "x"}); err == nil {
+		t.Fatal("PatchTab missing session returned nil error")
+	}
+}
+
+func TestTerminalUnavailableAndSessionCommandWrappers(t *testing.T) {
+	svc := &terminalServiceImpl{}
+	if _, err := svc.PatchTab(context.Background(), "w", "sess", map[string]string{"label": "x"}); err == nil {
+		t.Fatal("PatchTab without tab store returned nil error")
+	}
+	if _, err := svc.ListSessionsByIssue(context.Background()); err == nil {
+		t.Fatal("ListSessionsByIssue without tab store returned nil error")
+	}
+	if err := svc.PatchTerminalState(context.Background(), "w", "sess"); err == nil {
+		t.Fatal("PatchTerminalState without Redis returned nil error")
+	}
+
+	oldCurrentExecutable := currentExecutable
+	t.Cleanup(func() { currentExecutable = oldCurrentExecutable })
+	currentExecutable = func() (string, error) { return "", errors.New("no executable") }
+	if got := LoomExecutableForTerminal(); got != "loom" {
+		t.Fatalf("LoomExecutableForTerminal fallback = %q, want loom", got)
+	}
+	currentExecutable = func() (string, error) { return "/tmp/loom cli", nil }
+	if got := LoomExecutableForTerminal(); got != "/tmp/loom cli" {
+		t.Fatalf("LoomExecutableForTerminal = %q", got)
+	}
+
+	argv := ShellArgvForCommand([]string{"/tmp/loom cli", "lead", "--prompt", "it's ok", ""})
+	if len(argv) != 2 || argv[0] != "-c" || argv[1] != "'/tmp/loom cli' 'lead' '--prompt' 'it'\\''s ok' ''" {
+		t.Fatalf("ShellArgvForCommand = %#v", argv)
+	}
+	if got := ArgvForSession("lead-codex-1"); len(got) != 2 || got[0] != "-c" {
+		t.Fatalf("ArgvForSession codex = %#v", got)
+	}
+
+	currentExecutable = os.Executable
 }

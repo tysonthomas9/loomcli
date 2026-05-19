@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -451,6 +453,57 @@ func TestMockFileSystem_Remove(t *testing.T) {
 	_, err := fs.ReadFile("/tmp/x")
 	if err == nil {
 		t.Error("expected error after removal")
+	}
+}
+
+func TestDefaultFileSystemAndExecWrappers(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "nested", "file.txt")
+	fs := defaultFileSystem{}
+	if err := fs.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := fs.WriteFile(path, []byte("hello"), 0600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	data, err := fs.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if string(data) != "hello" {
+		t.Fatalf("ReadFile = %q, want hello", string(data))
+	}
+	info, err := fs.Stat(path)
+	if err != nil {
+		t.Fatalf("Stat: %v", err)
+	}
+	if info.IsDir() {
+		t.Fatal("Stat returned directory for file")
+	}
+	if err := fs.Remove(path); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+	if _, err := fs.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("Stat after Remove error = %v, want not exist", err)
+	}
+
+	sh, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skipf("sh not available: %v", err)
+	}
+	result := defaultExecContextRunner{}.Run(context.Background(), dir, sh, "-c", "printf wrapper")
+	if result.Err != nil || result.Stdout != "wrapper" {
+		t.Fatalf("ExecCtx result = %+v, want stdout wrapper without error", result)
+	}
+}
+
+func TestTestingGetDefaultDepsReturnsSingleton(t *testing.T) {
+	orig := defaultDeps
+	t.Cleanup(func() { defaultDeps = orig })
+	want := &Deps{Git: &MockGitRunner{}}
+	defaultDeps = want
+	if got := TestingGetDefaultDeps(); got != want {
+		t.Fatalf("TestingGetDefaultDeps() = %p, want %p", got, want)
 	}
 }
 

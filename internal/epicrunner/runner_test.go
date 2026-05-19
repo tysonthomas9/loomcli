@@ -497,6 +497,295 @@ func TestRunLoopExitsWhenOnlyBlockedChildrenRemain(t *testing.T) {
 	}
 }
 
+func TestRunLoopContinuesAfterReconcileErrorUntilContextCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	st := newTestStore(t)
+	ib := clitest.NewMockIssueBackend()
+	ib.ReadyErr = errors.New("ready failed")
+
+	var out, errOut bytes.Buffer
+	r := &Runner{
+		store:          st,
+		ib:             ib,
+		workspace:      "ws",
+		parent:         "EPIC-1",
+		prefix:         "epic-1",
+		maxConcurrency: 1,
+		interval:       time.Hour,
+		out:            &out,
+		errOut:         &errOut,
+	}
+
+	if err := r.RunLoop(ctx); err != nil {
+		t.Fatalf("RunLoop error = %v, want nil after context cancellation", err)
+	}
+	if !strings.Contains(errOut.String(), "reconcile error") {
+		t.Fatalf("stderr = %q, want reconcile error", errOut.String())
+	}
+	if !strings.Contains(out.String(), "interrupted") {
+		t.Fatalf("stdout = %q, want interrupted message", out.String())
+	}
+}
+
+func TestRunLoopReturnsStalledWorkerFatal(t *testing.T) {
+	ctx := context.Background()
+	st := newTestStore(t)
+	taskID := "EPIC-2"
+	worker := WorkerName("epic-1", taskID)
+	createStoppedWorker(t, st, "ws", worker)
+
+	ib := clitest.NewMockIssueBackend()
+	ib.ListResult = []backend.IssueData{{
+		ID:       taskID,
+		Title:    "stalled task",
+		Status:   "in_progress",
+		Assignee: worker,
+	}}
+
+	r := &Runner{
+		store:            st,
+		ib:               ib,
+		workspace:        "ws",
+		parent:           "EPIC-1",
+		prefix:           "epic-1",
+		maxConcurrency:   1,
+		interval:         time.Hour,
+		stalledTaskTicks: map[string]int{taskID: stalledWorkerFatalConsecutiveTicks - 1},
+	}
+
+	if err := r.RunLoop(ctx); !errors.Is(err, ErrStalledWorker) {
+		t.Fatalf("RunLoop error = %v, want ErrStalledWorker", err)
+	}
+}
+
+func TestReconcileOnceWaitsForActiveEphemeralWorkerAfterChildrenClose(t *testing.T) {
+	ctx := context.Background()
+	st := newTestStore(t)
+	if _, err := st.Agents().Create(ctx, store.AgentCreate{
+		WorkspaceKey: "ws",
+		Name:         "closing-worker",
+		RoleName:     "task",
+		Mode:         domain.AgentModeEphemeral,
+		Parent:       "EPIC-1",
+		DesiredState: domain.AgentDesiredRunning,
+	}); err != nil {
+		t.Fatalf("create worker: %v", err)
+	}
+	active := domain.AgentStateActive
+	if _, err := st.Agents().Update(ctx, "ws", "closing-worker", store.AgentUpdate{State: &active}); err != nil {
+		t.Fatalf("activate worker: %v", err)
+	}
+
+	ib := clitest.NewMockIssueBackend()
+	var out bytes.Buffer
+	r := &Runner{
+		store:          st,
+		ib:             ib,
+		workspace:      "ws",
+		parent:         "EPIC-1",
+		prefix:         "epic-1",
+		maxConcurrency: 3,
+		out:            &out,
+	}
+
+	result, err := r.ReconcileOnce(ctx)
+	if err != nil {
+		t.Fatalf("ReconcileOnce error = %v", err)
+	}
+	if result.Done || result.ActiveWorkers != 1 {
+		t.Fatalf("result = %+v, want not done with one active worker", result)
+	}
+	if !strings.Contains(out.String(), "child work closed") {
+		t.Fatalf("output = %q, want child-work closed wait message", out.String())
+	}
+}
+
+func TestReconcileOnceReturnsDispatchFailureWhenConfigured(t *testing.T) {
+	ctx := context.Background()
+	st := newTestStore(t)
+	task := backend.IssueData{ID: "EPIC-2", Title: "conflicting task", Status: "open"}
+	worker := WorkerName("epic-1", task.ID)
+	if _, err := st.Agents().Create(ctx, store.AgentCreate{
+		WorkspaceKey: "ws",
+		Name:         worker,
+		RoleName:     "lead",
+		Parent:       "OTHER",
+		Mode:         domain.AgentModeService,
+	}); err != nil {
+		t.Fatalf("create conflicting worker: %v", err)
+	}
+
+	ib := clitest.NewMockIssueBackend()
+	ib.ReadyResult = []backend.IssueData{task}
+	ib.ListResult = []backend.IssueData{task}
+
+	var errOut bytes.Buffer
+	r := &Runner{
+		store:               st,
+		ib:                  ib,
+		workspace:           "ws",
+		parent:              "EPIC-1",
+		prefix:              "epic-1",
+		role:                "task",
+		maxConcurrency:      1,
+		failOnDispatchError: true,
+		errOut:              &errOut,
+	}
+
+	result, err := r.ReconcileOnce(ctx)
+	if ErrorKindOf(err) != ErrorKindInternal {
+		t.Fatalf("ReconcileOnce error = %v, want internal dispatch failure", err)
+	}
+	if result.DispatchedCount != 0 {
+		t.Fatalf("DispatchedCount = %d, want 0", result.DispatchedCount)
+	}
+	if !strings.Contains(errOut.String(), "spawn for EPIC-2 failed") {
+		t.Fatalf("stderr = %q, want spawn failure", errOut.String())
+	}
+}
+
+func TestSpawnWorkerDryRunAndExistingAgentBranches(t *testing.T) {
+	ctx := context.Background()
+	st := newTestStore(t)
+	task := backend.IssueData{ID: "EPIC-2", Title: "dry run", Status: "open"}
+	var out bytes.Buffer
+	r := &Runner{
+		store:          st,
+		workspace:      "ws",
+		parent:         "EPIC-1",
+		prefix:         "epic-1",
+		role:           "task",
+		maxConcurrency: 1,
+		dryRun:         true,
+		out:            &out,
+	}
+	if err := r.spawnWorker(ctx, task); err != nil {
+		t.Fatalf("dry-run spawnWorker error = %v", err)
+	}
+	if !strings.Contains(out.String(), "DRY-RUN would spawn") {
+		t.Fatalf("output = %q, want dry-run message", out.String())
+	}
+
+	r.dryRun = false
+	worker := WorkerName("epic-1", task.ID)
+	if _, err := st.Agents().Create(ctx, store.AgentCreate{
+		WorkspaceKey: "ws",
+		Name:         worker,
+		RoleName:     "task",
+		Parent:       "EPIC-1",
+		Mode:         domain.AgentModeEphemeral,
+	}); err != nil {
+		t.Fatalf("create existing worker: %v", err)
+	}
+	if err := r.spawnWorker(ctx, task); err != nil {
+		t.Fatalf("spawn existing compatible worker error = %v", err)
+	}
+}
+
+func TestLiveCommandAndSessionHelpersFilterInactiveRows(t *testing.T) {
+	ctx := context.Background()
+	st := newTestStore(t)
+	r := &Runner{store: st, workspace: "ws"}
+
+	cmd, err := st.AgentCommands().Create(ctx, store.AgentCommandCreate{
+		WorkspaceKey:  "ws",
+		TargetAgentID: "worker",
+		Type:          "start",
+		Payload:       map[string]string{"task_id": "TASK-1"},
+	})
+	if err != nil {
+		t.Fatalf("create command: %v", err)
+	}
+	if _, err := st.AgentCommands().Complete(ctx, "ws", cmd.CommandID, store.AgentCommandComplete{Status: domain.AgentCommandSucceeded}); err != nil {
+		t.Fatalf("complete command: %v", err)
+	}
+	if live, err := r.hasLiveStartCommand(ctx, "worker", "TASK-1"); err != nil || live {
+		t.Fatalf("hasLiveStartCommand completed = %t, %v; want false, nil", live, err)
+	}
+	if _, err := st.AgentCommands().Create(ctx, store.AgentCommandCreate{
+		WorkspaceKey:  "ws",
+		TargetAgentID: "worker",
+		Type:          "start",
+		Payload:       map[string]string{"task_id": "TASK-2"},
+	}); err != nil {
+		t.Fatalf("create second command: %v", err)
+	}
+	if live, err := r.hasLiveStartCommand(ctx, "worker", "TASK-1"); err != nil || live {
+		t.Fatalf("hasLiveStartCommand wrong task = %t, %v; want false, nil", live, err)
+	}
+	if live, err := r.hasLiveStartCommand(ctx, "worker", "TASK-2"); err != nil || !live {
+		t.Fatalf("hasLiveStartCommand live task = %t, %v; want true, nil", live, err)
+	}
+
+	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey: "ws",
+		SessionID:    "idle-session",
+		AgentID:      "worker",
+		Kind:         domain.AgentSessionKindTask,
+		TaskID:       "TASK-1",
+		Status:       domain.AgentSessionIdle,
+	}); err != nil {
+		t.Fatalf("create idle session: %v", err)
+	}
+	if live, err := r.hasLiveTaskSession(ctx, "worker", "TASK-1"); err != nil || live {
+		t.Fatalf("hasLiveTaskSession idle = %t, %v; want false, nil", live, err)
+	}
+	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey: "ws",
+		SessionID:    "live-session",
+		AgentID:      "worker",
+		Kind:         domain.AgentSessionKindTask,
+		TaskID:       "TASK-2",
+		Status:       domain.AgentSessionLeased,
+	}); err != nil {
+		t.Fatalf("create live session: %v", err)
+	}
+	if live, err := r.hasLiveTaskSession(ctx, "worker", "TASK-2"); err != nil || !live {
+		t.Fatalf("hasLiveTaskSession live = %t, %v; want true, nil", live, err)
+	}
+
+	if !liveAgentCommandStatus(domain.AgentCommandAcked) || liveAgentCommandStatus(domain.AgentCommandSucceeded) {
+		t.Fatal("liveAgentCommandStatus did not classify acked/succeeded correctly")
+	}
+	if !liveAgentSessionStatus(domain.AgentSessionStarting) || liveAgentSessionStatus(domain.AgentSessionCompleted) {
+		t.Fatal("liveAgentSessionStatus did not classify starting/completed correctly")
+	}
+}
+
+func TestSelectTargetNodeIDRejectsNoActiveNodes(t *testing.T) {
+	ctx := context.Background()
+	st := newTestStore(t)
+	if _, err := st.Nodes().Create(ctx, store.NodeCreate{
+		WorkspaceKey:    "ws",
+		NodeID:          "draining",
+		RuntimeProvider: domain.RuntimeProviderLocal,
+		DrainState:      domain.NodeDrainDraining,
+		TTL:             time.Minute,
+	}); err != nil {
+		t.Fatalf("create draining node: %v", err)
+	}
+	expired, err := st.Nodes().Create(ctx, store.NodeCreate{
+		WorkspaceKey:    "ws",
+		NodeID:          "expired",
+		RuntimeProvider: domain.RuntimeProviderLocal,
+		DrainState:      domain.NodeDrainActive,
+		TTL:             time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("create expired node: %v", err)
+	}
+	expiredAt := time.Now().Add(-time.Minute)
+	if _, err := st.Nodes().Update(ctx, "ws", expired.NodeID, store.NodeUpdate{ExpiresAt: &expiredAt}); err != nil {
+		t.Fatalf("expire node: %v", err)
+	}
+
+	if _, err := SelectTargetNodeID(ctx, st, "ws"); ErrorKindOf(err) != ErrorKindUnavailable {
+		t.Fatalf("SelectTargetNodeID error = %v, want unavailable", err)
+	}
+}
+
 func createStoppedWorker(t *testing.T, st store.Store, workspace, name string) {
 	t.Helper()
 	ctx := context.Background()

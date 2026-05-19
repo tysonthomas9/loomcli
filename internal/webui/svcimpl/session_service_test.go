@@ -8,6 +8,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
+	"github.com/redis/go-redis/v9"
+
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
@@ -323,5 +326,88 @@ func TestSessionServiceValidationAndScrollbackHelpers(t *testing.T) {
 	}
 	if _, err := readScrollbackFile(filepath.Join(scrollDir, "missing.log")); err == nil {
 		t.Fatal("missing scrollback path returned nil error")
+	}
+}
+
+func TestSessionServiceHistoryAndScrollback(t *testing.T) {
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+	hist := sessionhistory.NewStore(rdb, nil)
+
+	home := t.TempDir()
+	oldUserHomeDir := userHomeDir
+	userHomeDir = func() (string, error) { return home, nil }
+	t.Cleanup(func() { userHomeDir = oldUserHomeDir })
+
+	scrollDir := filepath.Join(home, ".loom", "session-scrollback")
+	if err := os.MkdirAll(scrollDir, 0o755); err != nil {
+		t.Fatalf("mkdir scrollback: %v", err)
+	}
+	scrollback := filepath.Join(scrollDir, "record.log")
+	if err := os.WriteFile(scrollback, []byte("alpha\nbeta\n"), 0o600); err != nil {
+		t.Fatalf("write scrollback: %v", err)
+	}
+
+	now := time.Now().UTC()
+	records := []sessionhistory.SessionRecord{
+		{ID: "without-scrollback", SessionName: "sess-1", IssueID: "TASK-5", Status: "completed", StartedAt: now.Add(-time.Hour)},
+		{ID: "with-scrollback", SessionName: "sess-2", IssueID: "TASK-5", Status: "completed", StartedAt: now, ScrollbackPath: scrollback},
+	}
+	for _, rec := range records {
+		if err := hist.Add(t.Context(), "WS", rec); err != nil {
+			t.Fatalf("add history %s: %v", rec.ID, err)
+		}
+	}
+
+	svc := NewSessionService(nil, hist)
+	listed, err := svc.ListSessionHistory(t.Context(), "WS", "TASK-5")
+	if err != nil {
+		t.Fatalf("ListSessionHistory: %v", err)
+	}
+	if len(listed) != 2 || listed[0].ID != "with-scrollback" {
+		t.Fatalf("history = %+v, want most recent first", listed)
+	}
+
+	got, err := svc.GetSessionScrollback(t.Context(), "WS", "TASK-5", "with-scrollback")
+	if err != nil {
+		t.Fatalf("GetSessionScrollback: %v", err)
+	}
+	if got.Content != "alpha\nbeta\n" || got.Lines != 3 {
+		t.Fatalf("scrollback = %+v", got)
+	}
+	if _, err := svc.GetSessionScrollback(t.Context(), "WS", "bad/id", "with-scrollback"); err == nil {
+		t.Fatal("invalid issue ID returned nil error")
+	}
+	if _, err := svc.GetSessionScrollback(t.Context(), "WS", "TASK-5", ""); err == nil {
+		t.Fatal("empty record ID returned nil error")
+	}
+	if _, err := svc.GetSessionScrollback(t.Context(), "WS", "TASK-5", "missing"); err == nil {
+		t.Fatal("missing record returned nil error")
+	}
+	if _, err := svc.GetSessionScrollback(t.Context(), "WS", "TASK-5", "without-scrollback"); err == nil {
+		t.Fatal("record without scrollback returned nil error")
+	}
+}
+
+func TestAgentSessionStatusMappings(t *testing.T) {
+	cases := []struct {
+		status domain.AgentSessionStatus
+		want   sessions.SessionStatus
+		active bool
+	}{
+		{domain.AgentSessionCompleted, sessions.StatusCompleted, false},
+		{domain.AgentSessionFailed, sessions.StatusFailed, false},
+		{domain.AgentSessionCancelled, sessions.StatusAborted, false},
+		{domain.AgentSessionExpired, sessions.StatusAborted, false},
+		{domain.AgentSessionRunning, sessions.StatusRunning, true},
+	}
+	for _, tt := range cases {
+		if got := sessionStatusFromAgentSession(tt.status); got != tt.want {
+			t.Fatalf("sessionStatusFromAgentSession(%q) = %q, want %q", tt.status, got, tt.want)
+		}
+		if got := isActiveAgentSession(tt.status); got != tt.active {
+			t.Fatalf("isActiveAgentSession(%q) = %t, want %t", tt.status, got, tt.active)
+		}
 	}
 }

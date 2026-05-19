@@ -359,6 +359,72 @@ func TestStatusJSONOmitsEmptyIssues(t *testing.T) {
 	}
 }
 
+func TestRenderStatusHumanBranches(t *testing.T) {
+	data := StatusData{
+		Daemon:       DaemonInfo{Running: true, PID: 123, Uptime: "2h"},
+		Backend:      BackendInfo{Name: "codex", Source: "env"},
+		IssueBackend: "fleet-db",
+		Worktrees: WorktreesSummary{
+			Active: 1,
+			Idle:   1,
+			List: []WorktreeStatusItem{
+				{Name: "falcon", Status: "working: TASK-1 (1m)"},
+				{Name: "nova", Status: "ready"},
+			},
+		},
+		Tasks: TaskSummary{Open: 2, InProgress: 1, Review: 1, Closed: 3},
+		Git:   GitSummary{NeedsPush: 1, NeedsPull: 2},
+		Redis: RedisInfo{Configured: true, Error: "connection refused"},
+		Issues: []StatusIssue{
+			{Level: "warning", Message: "stale lock"},
+			{Level: "error", Message: "backend down"},
+		},
+	}
+
+	out := captureWorkspaceStdout(t, func() { renderStatusHuman(data) })
+	for _, want := range []string{
+		"Daemon:     running",
+		"Backend:    codex (via env)",
+		"Worktrees:  1 active, 1 idle",
+		"Git:        1 need push, 2 need pull",
+		"Redis:      error (connection refused)",
+		"Issues:     2 detected",
+		"backend down",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("render output missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestRenderStatusEmptyAndStaleBranches(t *testing.T) {
+	out := captureWorkspaceStdout(t, func() {
+		renderStatusDaemon(DaemonInfo{StalePID: true})
+		renderStatusWorktrees(WorktreesSummary{})
+		renderStatusGit(GitSummary{})
+		renderStatusRedis(RedisInfo{})
+		renderStatusIssues(nil)
+	})
+	for _, want := range []string{
+		"Daemon:     not running (stale pid file)",
+		"Worktrees:  none",
+		"Git:        all synced",
+		"Redis:      not configured",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("render output missing %q:\n%s", want, out)
+		}
+	}
+
+	out = captureWorkspaceStdout(t, func() {
+		renderStatusDaemon(DaemonInfo{})
+		renderStatusRedis(RedisInfo{Configured: true, Connected: true})
+	})
+	if !strings.Contains(out, "Daemon:     not running") || !strings.Contains(out, "Redis:      connected") {
+		t.Fatalf("render output = %q", out)
+	}
+}
+
 // ============================================================================
 // isActiveStatus Tests
 // ============================================================================

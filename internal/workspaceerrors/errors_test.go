@@ -59,6 +59,9 @@ func TestNewWithNilCause(t *testing.T) {
 	if err.Cause != nil {
 		t.Errorf("Cause = %v, want nil", err.Cause)
 	}
+	if got := err.CreateMessage(); got != "workspace foo exists" {
+		t.Errorf("CreateMessage() = %q, want %q", got, "workspace foo exists")
+	}
 }
 
 func TestNewWithCause(t *testing.T) {

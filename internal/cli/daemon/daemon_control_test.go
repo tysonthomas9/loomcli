@@ -661,6 +661,48 @@ func TestControlServer_EmptyAgentName(t *testing.T) {
 	})
 }
 
+func TestMarkAgentStartAcceptedUpdatesStoreAndConfig(t *testing.T) {
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(t.Context(), store.WorkspaceCreate{Key: "WS", Name: "Workspace"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if _, err := st.Roles().Create(t.Context(), store.RoleCreate{WorkspaceKey: "WS", Name: "task"}); err != nil {
+		t.Fatalf("create role: %v", err)
+	}
+	if _, err := st.Agents().Create(t.Context(), store.AgentCreate{
+		WorkspaceKey: "WS",
+		Name:         "falcon",
+		RoleName:     "task",
+		DesiredState: domain.AgentDesiredStopped,
+	}); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	d := &Daemon{
+		store:  st,
+		sup:    &supervisor.Supervisor{WorkspaceID: "WS"},
+		config: makeDaemonConfig([]AgentEntry{{Worktree: "falcon", Role: "task", DesiredState: domain.AgentDesiredStopped}}, nil),
+	}
+	d.markAgentStartAccepted("falcon")
+
+	agent, err := st.Agents().Get(t.Context(), "WS", "falcon")
+	if err != nil {
+		t.Fatalf("get agent: %v", err)
+	}
+	if agent.DesiredState != domain.AgentDesiredRunning || agent.State != domain.AgentStateActive {
+		t.Fatalf("agent state = desired %q state %q, want running/active", agent.DesiredState, agent.State)
+	}
+	if d.config.Agents[0].DesiredState != domain.AgentDesiredRunning || d.configHash == "" {
+		t.Fatalf("config desired/hash = %q/%q, want running and non-empty hash", d.config.Agents[0].DesiredState, d.configHash)
+	}
+
+	(&Daemon{}).markAgentStartAccepted("falcon")
+	d.setConfigAgentDesiredState("missing", domain.AgentDesiredStopped)
+	if d.config.Agents[0].DesiredState != domain.AgentDesiredRunning {
+		t.Fatalf("missing agent changed config desired state: %+v", d.config.Agents[0])
+	}
+}
+
 func TestControlServer_ConcurrentStops(t *testing.T) {
 	d := newTestDaemonWithAgents([]AgentEntry{
 		{Worktree: "alpha", Role: "plan"},

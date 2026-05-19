@@ -1,6 +1,7 @@
 package leadcontrol
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -88,10 +89,114 @@ func TestWaitForCodexAppServerBranches(t *testing.T) {
 	if err := waitForCodexAppServer(context.Background(), "ws://127.0.0.1:1", errCh); err == nil || !strings.Contains(err.Error(), "before ready") {
 		t.Fatalf("app exit err = %v", err)
 	}
+	nilErrCh := make(chan error, 1)
+	nilErrCh <- nil
+	close(nilErrCh)
+	if err := waitForCodexAppServer(context.Background(), "ws://127.0.0.1:1", nilErrCh); err == nil || !strings.Contains(err.Error(), "codex app-server exited") {
+		t.Fatalf("nil app exit err = %v", err)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	if err := waitForCodexAppServer(ctx, "ws://127.0.0.1:1", make(chan error)); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancel err = %v", err)
+	}
+}
+
+func TestRunCodexRemoteTUIWiresCommandAndStreams(t *testing.T) {
+	workDir := t.TempDir()
+	captureArgs := filepath.Join(t.TempDir(), "args.txt")
+	captureInput := filepath.Join(t.TempDir(), "stdin.txt")
+	codexPath := writeCodexRuntimeScript(t, `#!/bin/sh
+printf '%s\n' "$@" > "$CODEX_CAPTURE_ARGS"
+cat > "$CODEX_CAPTURE_STDIN"
+echo tui-stdout
+echo tui-stderr >&2
+exit 0
+`)
+	t.Setenv("CODEX_CAPTURE_ARGS", captureArgs)
+	t.Setenv("CODEX_CAPTURE_STDIN", captureInput)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	err := runCodexRemoteTUI(context.Background(), CodexLeadRuntimeConfig{
+		CodexPath: codexPath,
+		WorkDir:   workDir,
+		Prompt:    "build the thing",
+		Stdin:     strings.NewReader("typed input"),
+		Stdout:    &stdout,
+		Stderr:    &stderr,
+	}, "ws://127.0.0.1:12345")
+	if err != nil {
+		t.Fatalf("runCodexRemoteTUI: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "Launching controlled Codex lead session") || !strings.Contains(stdout.String(), "tui-stdout") {
+		t.Fatalf("stdout = %q", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "tui-stderr") {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+	argsData, err := os.ReadFile(captureArgs)
+	if err != nil {
+		t.Fatalf("read args: %v", err)
+	}
+	args := string(argsData)
+	for _, want := range []string{"--remote", "ws://127.0.0.1:12345", "--no-alt-screen", "--dangerously-bypass-approvals-and-sandbox", "-C", workDir, "build the thing"} {
+		if !strings.Contains(args, want) {
+			t.Fatalf("args missing %q:\n%s", want, args)
+		}
+	}
+	inputData, err := os.ReadFile(captureInput)
+	if err != nil {
+		t.Fatalf("read stdin: %v", err)
+	}
+	if string(inputData) != "typed input" {
+		t.Fatalf("stdin = %q", string(inputData))
+	}
+}
+
+func TestStartAndStopCodexAppServerWithFakeBinary(t *testing.T) {
+	workDir := t.TempDir()
+	runtimeHome := t.TempDir()
+	sqliteHome := filepath.Join(runtimeHome, "sqlite")
+	if err := os.MkdirAll(sqliteHome, 0700); err != nil {
+		t.Fatalf("mkdir sqlite: %v", err)
+	}
+	codexPath := writeCodexRuntimeScript(t, `#!/bin/sh
+echo "$@" > "$CODEX_APP_ARGS"
+sleep 30
+`)
+	argsPath := filepath.Join(t.TempDir(), "app-args.txt")
+	t.Setenv("CODEX_APP_ARGS", argsPath)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cmd, appErr, cancelApp, logFile, err := startCodexAppServer(ctx, CodexLeadRuntimeConfig{
+		CodexPath: codexPath,
+		WorkDir:   workDir,
+	}, runtimeHome, sqliteHome, "ws://127.0.0.1:45678")
+	if err != nil {
+		cancel()
+		t.Fatalf("startCodexAppServer: %v", err)
+	}
+	if cmd == nil || cmd.Process == nil || appErr == nil || cancelApp == nil || logFile == nil {
+		cancel()
+		t.Fatalf("start returned incomplete handles: cmd=%v appErr=%v cancel=%v log=%v", cmd, appErr, cancelApp, logFile)
+	}
+	data := waitReadCodexRuntimeFile(t, argsPath)
+	if err := stopCodexAppServer(cmd, appErr, cancelApp); err != nil && !errors.Is(err, context.Canceled) && !strings.Contains(err.Error(), "signal: killed") {
+		cancel()
+		t.Fatalf("stopCodexAppServer: %v", err)
+	}
+	cancel()
+	_ = logFile.Close()
+	if args := string(data); !strings.Contains(args, "app-server --listen ws://127.0.0.1:45678") || !strings.Contains(args, "sqlite_home=") {
+		t.Fatalf("app args = %q", args)
+	}
+	if _, err := os.Stat(filepath.Join(runtimeHome, "app-server.log")); err != nil {
+		t.Fatalf("app server log was not created: %v", err)
+	}
+
+	if err := stopCodexAppServer(nil, nil, func() {}); err != nil {
+		t.Fatalf("nil stop err = %v", err)
 	}
 }
 
@@ -108,4 +213,30 @@ func TestRunCodexLeadRuntimeEarlyDirectoryError(t *testing.T) {
 		t.Fatal("RunCodexLeadRuntime with missing binary returned nil")
 	}
 	_ = os.RemoveAll(badWorkDir)
+}
+
+func writeCodexRuntimeScript(t *testing.T, contents string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "codex")
+	if err := os.WriteFile(path, []byte(contents), 0700); err != nil {
+		t.Fatalf("write fake codex: %v", err)
+	}
+	return path
+}
+
+func waitReadCodexRuntimeFile(t *testing.T, path string) []byte {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		data, err := os.ReadFile(path)
+		if err == nil {
+			return data
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return data
 }
