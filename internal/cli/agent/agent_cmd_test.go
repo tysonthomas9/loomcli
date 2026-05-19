@@ -1,12 +1,15 @@
 package agent
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/cli/config"
 )
 
 func TestMapTaskFilter(t *testing.T) {
@@ -76,6 +79,90 @@ func TestMapTaskFilter(t *testing.T) {
 			// and that the right function type is returned
 		})
 	}
+}
+
+func TestAgentCommandHelpersAndRunPaths(t *testing.T) {
+	worktree := t.TempDir()
+	promptFile := filepath.Join(t.TempDir(), "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("hello {{.AgentName}}"), 0600); err != nil {
+		t.Fatalf("write prompt: %v", err)
+	}
+
+	oldPromptFile, oldTaskFilter, oldInterval := agentPromptFile, agentTaskFilter, agentInterval
+	oldMaxTasks, oldIdleTimeout, oldParentID := agentMaxTasks, agentIdleTimeout, agentParentID
+	t.Cleanup(func() {
+		agentPromptFile, agentTaskFilter, agentInterval = oldPromptFile, oldTaskFilter, oldInterval
+		agentMaxTasks, agentIdleTimeout, agentParentID = oldMaxTasks, oldIdleTimeout, oldParentID
+	})
+	agentPromptFile = promptFile
+	agentTaskFilter = "any"
+	agentInterval = 7
+	agentMaxTasks = 2
+	agentIdleTimeout = 11
+	agentParentID = "EPIC-1"
+
+	validatePromptFile(promptFile)
+	opts := agentAutoOpts(worktree, "falcon", makeCustomPromptGen(promptFile), func() (bool, error) { return true, nil })
+	if opts.Interval != 7 || opts.MaxTasks != 2 || opts.IdleTimeout != 11 || opts.AgentType != "agent" || opts.ParentID != "EPIC-1" {
+		t.Fatalf("agentAutoOpts = %+v", opts)
+	}
+	if opts.CustomPromptGen("nova", &config.WorkspaceConfig{}) != "hello nova" {
+		t.Fatalf("custom prompt did not render agent name")
+	}
+
+	out := captureAgentStdout(t, func() {
+		runAgentSingleTask(worktree, "falcon", makeCustomPromptGen(promptFile), func() (bool, error) { return false, nil })
+	})
+	if !strings.Contains(out, "No tasks available") || !strings.Contains(out, "Filter: any") {
+		t.Fatalf("no-task output = %q", out)
+	}
+
+	resetBackendState(t)
+	mock := &mockBackend{name: "claude"}
+	RegisterBackend(mock)
+	if err := SetBackend("claude"); err != nil {
+		t.Fatalf("SetBackend: %v", err)
+	}
+
+	out = captureAgentStdout(t, func() {
+		runAgentSingleTask(worktree, "falcon", makeCustomPromptGen(promptFile), func() (bool, error) { return true, nil })
+	})
+	if !strings.Contains(out, "Running CUSTOM agent") || len(mock.interactiveCalls) != 1 {
+		t.Fatalf("single-task output=%q calls=%d", out, len(mock.interactiveCalls))
+	}
+	if mock.interactiveCalls[0].workDir != worktree || mock.interactiveCalls[0].prompt != "hello falcon" {
+		t.Fatalf("single-task invocation = %+v", mock.interactiveCalls[0])
+	}
+
+	runAgentDaemon(worktree, "falcon", makeCustomPromptGen(promptFile))
+	if len(mock.interactiveCalls) != 2 {
+		t.Fatalf("daemon invocation count = %d", len(mock.interactiveCalls))
+	}
+	_ = cli.ReleaseLock(worktree)
+}
+
+func captureAgentStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	oldStdout := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	os.Stdout = w
+	defer func() {
+		os.Stdout = oldStdout
+		_ = r.Close()
+	}()
+
+	fn()
+	if err := w.Close(); err != nil {
+		t.Fatalf("close stdout: %v", err)
+	}
+	var buf bytes.Buffer
+	if _, err := buf.ReadFrom(r); err != nil {
+		t.Fatalf("read stdout: %v", err)
+	}
+	return buf.String()
 }
 
 // TestMapTaskFilter_WithParentID verifies that mapTaskFilter returns closures

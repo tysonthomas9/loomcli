@@ -1,6 +1,7 @@
 package terminal
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -8,6 +9,8 @@ import (
 
 	"nhooyr.io/websocket" //nolint:staticcheck
 
+	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 	webuterminal "github.com/tysonthomas9/loomcli/internal/webui/terminal"
@@ -56,6 +59,49 @@ func TestClassifyAttachErr(t *testing.T) {
 		if status != tt.status || reason != tt.reason {
 			t.Fatalf("classifyAttachErr(%v) = %v/%q, want %v/%q", tt.err, status, reason, tt.status, tt.reason)
 		}
+	}
+}
+
+func TestTerminalWSAuthAndSmallHelpers(t *testing.T) {
+	auth, err := realtime.NewTerminalAuth()
+	if err != nil {
+		t.Fatalf("NewTerminalAuth: %v", err)
+	}
+	t.Cleanup(auth.Stop)
+
+	token, err := auth.GenerateToken("main", "WS", "user-1")
+	if err != nil {
+		t.Fatalf("GenerateToken: %v", err)
+	}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/ws?token="+token, nil)
+	if !authenticateTerminalSession(rec, req, auth, "main", "WS") {
+		t.Fatalf("valid token rejected, status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/ws?token=bad", nil)
+	if authenticateTerminalSession(rec, req, auth, "main", "WS") || rec.Code != http.StatusUnauthorized {
+		t.Fatalf("invalid token accepted or wrong status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	var att fakeAttachment
+	n, err := (attachmentWriter{a: &att}).Write([]byte("hello"))
+	if err != nil || n != 5 || string(att.written) != "hello" {
+		t.Fatalf("attachmentWriter.Write n=%d err=%v written=%q", n, err, att.written)
+	}
+
+	emitDisconnectSpan(context.Background(), "WS", "main", websocket.StatusInternalError)
+
+	if got := workspaceNameFromStore(context.Background(), nil, "WS"); got != "" {
+		t.Fatalf("nil store workspace name = %q", got)
+	}
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(context.Background(), store.WorkspaceCreate{Key: "WS", Name: "Workspace One"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if got := workspaceNameFromStore(context.Background(), st, "WS"); got != "Workspace One" {
+		t.Fatalf("workspaceNameFromStore = %q", got)
 	}
 }
 
@@ -116,3 +162,25 @@ func (f fakePTYSource) AttachmentCount(webuterminal.SessionKey) int { return 0 }
 func (f fakePTYSource) SessionCount() int                           { return f.count }
 func (f fakePTYSource) SessionCountFor(string) int                  { return f.count }
 func (f fakePTYSource) MaxSessions() int                            { return f.max }
+
+type fakeAttachment struct {
+	written []byte
+	out     chan []byte
+}
+
+func (f *fakeAttachment) ConnID() string { return "conn-1" }
+func (f *fakeAttachment) Output() <-chan []byte {
+	if f.out == nil {
+		f.out = make(chan []byte)
+	}
+	return f.out
+}
+func (f *fakeAttachment) WriteInput(p []byte) (int, error) {
+	f.written = append(f.written, p...)
+	return len(p), nil
+}
+func (f *fakeAttachment) Scrollback() []byte { return nil }
+func (f *fakeAttachment) Resize(string, uint16, uint16) error {
+	return nil
+}
+func (f *fakeAttachment) ExitReason() string { return "" }

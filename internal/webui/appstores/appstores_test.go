@@ -2,12 +2,14 @@ package appstores
 
 import (
 	"context"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/rpc"
+	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
 
@@ -64,4 +66,28 @@ func TestNewSubscriptionModuleAndMultiSub(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("token route status = %d body=%s", rec.Code, rec.Body.String())
 	}
+}
+
+func TestRedisStoreInitializersReturnStoresAndCleanup(t *testing.T) {
+	ctx := context.Background()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	redisCfg := &fleet.RedisConfig{Address: "127.0.0.1:1"}
+
+	tabStore, tabCleanup := InitTabMeta(ctx, redisCfg, logger)
+	if tabStore == nil || tabCleanup == nil {
+		t.Fatalf("InitTabMeta store=%#v cleanup nil=%t", tabStore, tabCleanup == nil)
+	}
+	tabCleanup()
+
+	issueTabs, issueCleanup := InitIssueTabs(ctx, redisCfg, "WS", logger)
+	if issueTabs == nil || issueCleanup == nil {
+		t.Fatalf("InitIssueTabs store=%#v cleanup nil=%t", issueTabs, issueCleanup == nil)
+	}
+	issueCleanup()
+
+	history, historyCleanup := InitSessionHistory(ctx, redisCfg, "WS", logger)
+	if history == nil || historyCleanup == nil {
+		t.Fatalf("InitSessionHistory store=%#v cleanup nil=%t", history, historyCleanup == nil)
+	}
+	historyCleanup()
 }

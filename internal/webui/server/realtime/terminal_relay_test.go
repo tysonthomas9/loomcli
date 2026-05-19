@@ -1,7 +1,14 @@
 package realtime
 
 import (
+	"bytes"
+	"context"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"nhooyr.io/websocket"
 )
@@ -107,3 +114,208 @@ func TestCrashInfo_WSClose_KilledDefaultsReason(t *testing.T) {
 		t.Errorf("expected default reason 'session killed', got %q", reason)
 	}
 }
+
+func TestWSToPTYWritesInputAndHandlesResize(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var pty bytes.Buffer
+	resizer := &fakeResizer{}
+	done := make(chan struct{})
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			t.Errorf("accept websocket: %v", err)
+			return
+		}
+		defer conn.CloseNow()
+		WSToPTY(ctx, conn, &pty, resizer, "conn-1")
+		close(done)
+	}))
+	defer server.Close()
+
+	conn, _, err := websocket.Dial(ctx, wsURL(server.URL), nil)
+	if err != nil {
+		t.Fatalf("dial websocket: %v", err)
+	}
+	if err := conn.Write(ctx, websocket.MessageText, []byte("\x1b[RESIZE:120;40]")); err != nil {
+		t.Fatalf("write resize: %v", err)
+	}
+	if err := conn.Write(ctx, websocket.MessageText, []byte("echo hi\n")); err != nil {
+		t.Fatalf("write data: %v", err)
+	}
+	_ = conn.Close(websocket.StatusNormalClosure, "")
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("WSToPTY did not exit after client close")
+	}
+	if pty.String() != "echo hi\n" {
+		t.Fatalf("pty data = %q", pty.String())
+	}
+	if resizer.connID != "conn-1" || resizer.cols != 120 || resizer.rows != 40 {
+		t.Fatalf("resize = %+v", resizer)
+	}
+}
+
+func TestPtyToWSWritesOutputAndTreatsEOFAsCleanExit(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	clientCtx, clientCancel := context.WithTimeout(context.Background(), time.Second)
+	defer clientCancel()
+	done := make(chan CrashInfo, 1)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			t.Errorf("accept websocket: %v", err)
+			return
+		}
+		defer conn.CloseNow()
+		done <- PtyToWS(ctx, cancel, conn, strings.NewReader("hello"), "sess", nil, &fakeScrollback{})
+	}))
+	defer server.Close()
+
+	conn, _, err := websocket.Dial(clientCtx, wsURL(server.URL), nil)
+	if err != nil {
+		t.Fatalf("dial websocket: %v", err)
+	}
+	_, data, err := conn.Read(clientCtx)
+	if err != nil {
+		t.Fatalf("read pty frame: %v", err)
+	}
+	if string(data) != "hello" {
+		t.Fatalf("ws data = %q", data)
+	}
+
+	select {
+	case info := <-done:
+		if info.Crashed || info.Killed {
+			t.Fatalf("PtyToWS info = %+v", info)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("PtyToWS did not exit after EOF")
+	}
+	_ = conn.Close(websocket.StatusNormalClosure, "")
+}
+
+func TestPtyToWSDetectsCrashedTmuxSession(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	clientCtx, clientCancel := context.WithTimeout(context.Background(), time.Second)
+	defer clientCancel()
+	done := make(chan CrashInfo, 1)
+	monitor := &fakeSessionMonitor{hasSession: false, captured: strings.Repeat("x", 200)}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			t.Errorf("accept websocket: %v", err)
+			return
+		}
+		defer conn.CloseNow()
+		done <- PtyToWS(ctx, cancel, conn, errReader{}, "sess", monitor, nil)
+	}))
+	defer server.Close()
+
+	conn, _, err := websocket.Dial(clientCtx, wsURL(server.URL), nil)
+	if err != nil {
+		t.Fatalf("dial websocket: %v", err)
+	}
+	defer conn.CloseNow()
+
+	select {
+	case info := <-done:
+		if !info.Crashed || len(info.Reason) > 123 {
+			t.Fatalf("PtyToWS crash info = %+v", info)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("PtyToWS did not report crash")
+	}
+}
+
+func TestAttachmentToWSWritesFramesAndMapsKilledReason(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	clientCtx, clientCancel := context.WithTimeout(context.Background(), time.Second)
+	defer clientCancel()
+	output := make(chan []byte, 1)
+	att := &fakeAttachmentExit{output: output, reason: "killed"}
+	done := make(chan CrashInfo, 1)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			t.Errorf("accept websocket: %v", err)
+			return
+		}
+		defer conn.CloseNow()
+		done <- AttachmentToWS(ctx, cancel, conn, att)
+	}))
+	defer server.Close()
+
+	conn, _, err := websocket.Dial(clientCtx, wsURL(server.URL), nil)
+	if err != nil {
+		t.Fatalf("dial websocket: %v", err)
+	}
+	output <- []byte("frame")
+	_, data, err := conn.Read(clientCtx)
+	if err != nil {
+		t.Fatalf("read attachment frame: %v", err)
+	}
+	if string(data) != "frame" {
+		t.Fatalf("attachment frame = %q", data)
+	}
+	close(output)
+	_, _, _ = conn.Read(clientCtx)
+
+	select {
+	case info := <-done:
+		if !info.Killed || info.Reason != "session killed" {
+			t.Fatalf("AttachmentToWS info = %+v", info)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("AttachmentToWS did not exit after output close")
+	}
+	_ = conn.Close(websocket.StatusNormalClosure, "")
+}
+
+type fakeResizer struct {
+	connID     string
+	cols, rows uint16
+}
+
+func (f *fakeResizer) Resize(connID string, cols, rows uint16) error {
+	f.connID, f.cols, f.rows = connID, cols, rows
+	return nil
+}
+
+type fakeScrollback struct {
+	data []byte
+}
+
+func (f *fakeScrollback) Append(data []byte) {
+	f.data = append(f.data, data...)
+}
+
+type fakeSessionMonitor struct {
+	hasSession bool
+	paneDead   bool
+	captured   string
+}
+
+func (f *fakeSessionMonitor) HasSession(string) bool            { return f.hasSession }
+func (f *fakeSessionMonitor) PaneDead(string) bool              { return f.paneDead }
+func (f *fakeSessionMonitor) CapturePaneRaw(string, int) string { return f.captured }
+func (f *fakeAttachmentExit) Output() <-chan []byte             { return f.output }
+func (f *fakeAttachmentExit) ExitReason() string                { return f.reason }
+func (errReader) Read([]byte) (int, error)                      { return 0, io.ErrUnexpectedEOF }
+func wsURL(httpURL string) string                               { return "ws" + strings.TrimPrefix(httpURL, "http") }
+
+type fakeAttachmentExit struct {
+	output <-chan []byte
+	reason string
+}
+
+type errReader struct{}

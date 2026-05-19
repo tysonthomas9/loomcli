@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -18,6 +19,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/domain"
@@ -155,6 +157,42 @@ func TestDaemonCommandNoDaemonPaths(t *testing.T) {
 	}
 	if !strings.HasSuffix(socketPath, filepath.Join(".loom", "daemon.sock")) {
 		t.Fatalf("socket path = %q", socketPath)
+	}
+}
+
+func TestDaemonStatusDisplaysRunningStateFile(t *testing.T) {
+	projectDir := withDaemonTempCwd(t)
+	statePath := cfgpkg.ResolveDaemonStatePath(projectDir)
+	if err := os.MkdirAll(filepath.Dir(statePath), 0755); err != nil {
+		t.Fatalf("mkdir state dir: %v", err)
+	}
+	state := DaemonState{
+		PID:       os.Getpid(),
+		StartedAt: time.Date(2026, 5, 19, 12, 0, 0, 0, time.UTC),
+		Agents: []DaemonAgentStatus{{
+			Worktree:       "falcon",
+			Role:           "task",
+			PID:            os.Getpid(),
+			Status:         "running",
+			TaskID:         "loom-123",
+			RestartCount:   2,
+			LastStart:      time.Date(2026, 5, 19, 12, 1, 0, 0, time.UTC),
+			CurrentBackend: "codex",
+		}},
+	}
+	data, err := json.Marshal(state)
+	if err != nil {
+		t.Fatalf("marshal state: %v", err)
+	}
+	if err := os.WriteFile(statePath, data, 0600); err != nil {
+		t.Fatalf("write state: %v", err)
+	}
+
+	out := captureDaemonStdout(t, func() { runDaemonStatus(&cobra.Command{}, nil) })
+	for _, want := range []string{"Daemon: running", "Agents: 1", "falcon", "loom-123"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("status output missing %q:\n%s", want, out)
+		}
 	}
 }
 
@@ -469,6 +507,117 @@ func TestApplyProfileFieldAllKeysAndErrors(t *testing.T) {
 	}
 	if err := applyProfileField(p, "unknown", "x", false); err == nil {
 		t.Fatal("expected unknown key error")
+	}
+}
+
+func TestDaemonProfileCommandsAgainstLocalStore(t *testing.T) {
+	requireDaemonFleetDB(t)
+	configDir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", configDir)
+	t.Setenv(bootstrap.EnvWorkspace, "WS")
+	t.Setenv(bootstrap.EnvFleetDBActor, "daemon-profile-test")
+	t.Setenv(bootstrap.EnvFleetDBURL, "")
+
+	ctx := context.Background()
+	handle, err := bootstrap.OpenStore(ctx, configDir, nil)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	if _, err := handle.Store.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS", Name: "Workspace"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := handle.Close(); err != nil {
+		t.Fatalf("close setup store: %v", err)
+	}
+
+	oldWorkspace, oldJSON := daemonProfileWorkspace, daemonProfileShowJSON
+	t.Cleanup(func() {
+		daemonProfileWorkspace, daemonProfileShowJSON = oldWorkspace, oldJSON
+	})
+	daemonProfileWorkspace = "WS"
+	daemonProfileShowJSON = false
+
+	out := captureDaemonStdout(t, func() {
+		if err := runDaemonProfileShow(&cobra.Command{}, nil); err != nil {
+			t.Fatalf("profile show: %v", err)
+		}
+	})
+	if !strings.Contains(out, "Workspace:      WS") || !strings.Contains(out, "Issue backend:  fleetdb") {
+		t.Fatalf("profile show output = %q", out)
+	}
+
+	out = captureDaemonStdout(t, func() {
+		if err := runDaemonProfileSet(&cobra.Command{}, []string{"pid_file", ".loom/custom.pid"}); err != nil {
+			t.Fatalf("profile set pid_file: %v", err)
+		}
+		if err := runDaemonProfileSet(&cobra.Command{}, []string{"max_agents", "3"}); err != nil {
+			t.Fatalf("profile set max_agents: %v", err)
+		}
+	})
+	if !strings.Contains(out, "Set WS.pid_file") || !strings.Contains(out, "Set WS.max_agents") {
+		t.Fatalf("profile set output = %q", out)
+	}
+
+	out = captureDaemonStdout(t, func() {
+		if err := runDaemonProfileShow(&cobra.Command{}, nil); err != nil {
+			t.Fatalf("profile show after set: %v", err)
+		}
+	})
+	if !strings.Contains(out, "PID file:       .loom/custom.pid") || !strings.Contains(out, "Max agents:     3") {
+		t.Fatalf("profile show after set output = %q", out)
+	}
+
+	daemonProfileShowJSON = true
+	out = captureDaemonStdout(t, func() {
+		if err := runDaemonProfileShow(&cobra.Command{}, nil); err != nil {
+			t.Fatalf("profile show json: %v", err)
+		}
+	})
+	if !strings.Contains(out, `"workspace_key": "WS"`) || !strings.Contains(out, `"max_agents": 3`) {
+		t.Fatalf("profile show json output = %q", out)
+	}
+
+	out = captureDaemonStdout(t, func() {
+		if err := runDaemonProfileUnset(&cobra.Command{}, []string{"max_agents"}); err != nil {
+			t.Fatalf("profile unset max_agents: %v", err)
+		}
+	})
+	if !strings.Contains(out, "Cleared WS.max_agents") {
+		t.Fatalf("profile unset output = %q", out)
+	}
+	verifyHandle, err := bootstrap.OpenStore(ctx, configDir, nil)
+	if err != nil {
+		t.Fatalf("open verify store: %v", err)
+	}
+	defer verifyHandle.Close()
+	profile, err := verifyHandle.Store.Daemon().Get(ctx, "WS")
+	if err != nil {
+		t.Fatalf("get profile: %v", err)
+	}
+	if profile.MaxAgents != nil {
+		t.Fatalf("MaxAgents after unset = %#v", profile.MaxAgents)
+	}
+
+	daemonProfileWorkspace = ""
+	var resolved string
+	if err := withDaemonWorkspace(func(_ context.Context, _ *bootstrap.StoreHandle, ws string) error {
+		resolved = ws
+		return nil
+	}); err != nil {
+		t.Fatalf("withDaemonWorkspace active: %v", err)
+	}
+	if resolved != "WS" {
+		t.Fatalf("resolved workspace = %q, want WS", resolved)
+	}
+}
+
+func requireDaemonFleetDB(t *testing.T) {
+	t.Helper()
+	if os.Getenv("FLEET_DB_BIN") != "" {
+		return
+	}
+	if _, err := exec.LookPath("fleet-db"); err != nil {
+		t.Skip("fleet-db binary not available")
 	}
 }
 

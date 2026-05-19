@@ -375,3 +375,81 @@ func TestLocalStatusLogsPauseAndEnsureRuntimeBranches(t *testing.T) {
 		t.Fatalf("restart branch restarted=%t calls=%d status=%+v", restarted, calls, afterRestart)
 	}
 }
+
+func TestLocalStartRuntimeReusesMatchingLiveRuntime(t *testing.T) {
+	dataDir := t.TempDir()
+	if err := ensureRuntimeDirs(dataDir); err != nil {
+		t.Fatalf("ensureRuntimeDirs: %v", err)
+	}
+	redisHash, err := currentFleetDBRedisHash(dataDir)
+	if err != nil {
+		t.Fatalf("currentFleetDBRedisHash: %v", err)
+	}
+	info := &runtimeInfo{
+		Status:           "running",
+		PID:              os.Getpid(),
+		DataDir:          dataDir,
+		URL:              "http://127.0.0.1:19999",
+		FleetDBRedisHash: redisHash,
+	}
+	applyExecutableIdentity(info, currentExecutableIdentity())
+	if err := writeRuntime(dataDir, info); err != nil {
+		t.Fatalf("writeRuntime: %v", err)
+	}
+
+	result, err := StartRuntime(dataDir, 12345)
+	if err != nil {
+		t.Fatalf("StartRuntime: %v", err)
+	}
+	if result == nil || !result.AlreadyRunning || result.PID != os.Getpid() || result.URL != info.URL {
+		t.Fatalf("StartRuntime result = %+v", result)
+	}
+
+	oldDataDirFlag := dataDirFlag
+	t.Cleanup(func() { dataDirFlag = oldDataDirFlag })
+	dataDirFlag = dataDir
+	var out bytes.Buffer
+	cmd := &cobra.Command{}
+	cmd.SetOut(&out)
+	if err := runStart(cmd, nil); err != nil {
+		t.Fatalf("runStart: %v", err)
+	}
+	if !strings.Contains(out.String(), "already running") {
+		t.Fatalf("runStart output = %q", out.String())
+	}
+}
+
+func TestPrepareLocalServiceConfigAndSpawnDetachedService(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", os.Getenv("LOOM_CONFIG_DIR"))
+	t.Setenv("LOOM_DESKTOP_DATA_DIR", os.Getenv("LOOM_DESKTOP_DATA_DIR"))
+	t.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", os.Getenv("LOOM_WORKSPACE_RUNTIME_DIR"))
+	t.Setenv("FLEET_DB_BIN", os.Getenv("FLEET_DB_BIN"))
+	oldDataDirFlag, oldBindFlag, oldPortFlag := dataDirFlag, bindFlag, portFlag
+	t.Cleanup(func() {
+		dataDirFlag, bindFlag, portFlag = oldDataDirFlag, oldBindFlag, oldPortFlag
+	})
+	dataDirFlag = dataDir
+	bindFlag = ""
+	portFlag = 19876
+
+	cfg, err := prepareLocalServiceConfig()
+	if err != nil {
+		t.Fatalf("prepareLocalServiceConfig: %v", err)
+	}
+	if cfg.dataDir != dataDir || cfg.bindAddr != "127.0.0.1" || cfg.port != 19876 || cfg.url != "http://127.0.0.1:19876" {
+		t.Fatalf("config = %+v", cfg)
+	}
+	if os.Getenv("LOOM_CONFIG_DIR") != dataDir || os.Getenv("LOOM_DESKTOP_DATA_DIR") != dataDir || os.Getenv("LOOM_WORKSPACE_RUNTIME_DIR") != dataDir {
+		t.Fatalf("runtime env not set for dataDir %q", dataDir)
+	}
+
+	exe := writeLocalFakeExecutable(t, "loom-detached", "exit 0")
+	result, err := spawnDetachedService(exe, dataDir, 19877)
+	if err != nil {
+		t.Fatalf("spawnDetachedService: %v", err)
+	}
+	if result == nil || result.PID <= 0 {
+		t.Fatalf("spawnDetachedService result = %+v", result)
+	}
+}

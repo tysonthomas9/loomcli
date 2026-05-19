@@ -1,8 +1,10 @@
 package serve
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -12,9 +14,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/spf13/cobra"
+
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
+	"github.com/tysonthomas9/loomcli/internal/cli/serve/opsimpl"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
@@ -83,6 +88,118 @@ func TestBuildMonitorCollectDataFnIsLazy(t *testing.T) {
 
 	if got := backendCalls.Load(); got != 0 {
 		t.Fatalf("buildMonitorCollectDataFn called issue backend before first request: got %d calls", got)
+	}
+}
+
+func TestServeStartupHelpers(t *testing.T) {
+	t.Setenv("LOOM_FRONTEND_URL", " http://localhost:5173, https://ui.example.com/ , ")
+	if got := parseFrontendURLsEnv(); !reflect.DeepEqual(got, []string{"http://localhost:5173", "https://ui.example.com/"}) {
+		t.Fatalf("parseFrontendURLsEnv = %#v", got)
+	}
+	t.Setenv("LOOM_FRONTEND_URL", "")
+	if got := parseFrontendURLsEnv(); got != nil {
+		t.Fatalf("empty parseFrontendURLsEnv = %#v, want nil", got)
+	}
+
+	oldAuthURL, oldIssuer, oldAudience, oldAllowInsecure := serveAuthURL, serveAuthIssuer, serveAuthAudience, serveAuthAllowInsecure
+	oldBind, oldCors, oldFrontendURLs := serveBindAddr, serveCorsOrigin, serveFrontendURLs
+	oldPort, oldSocket, oldFrontendDir := servePort, serveWebUISocket, serveFrontendDir
+	oldHSTS, oldSentry, oldUsage := serveHSTS, serveSentryDSN, usageHandler
+	t.Cleanup(func() {
+		serveAuthURL, serveAuthIssuer, serveAuthAudience, serveAuthAllowInsecure = oldAuthURL, oldIssuer, oldAudience, oldAllowInsecure
+		serveBindAddr, serveCorsOrigin, serveFrontendURLs = oldBind, oldCors, oldFrontendURLs
+		servePort, serveWebUISocket, serveFrontendDir = oldPort, oldSocket, oldFrontendDir
+		serveHSTS, serveSentryDSN, usageHandler = oldHSTS, oldSentry, oldUsage
+	})
+
+	serveAuthURL = "https://auth.example.com"
+	serveAuthIssuer = ""
+	serveAuthAudience = ""
+	serveAuthAllowInsecure = false
+	applyAuthDefaults()
+	if serveAuthIssuer != serveAuthURL || serveAuthAudience != "loom" {
+		t.Fatalf("auth defaults issuer=%q audience=%q", serveAuthIssuer, serveAuthAudience)
+	}
+
+	serveBindAddr = "0.0.0.0"
+	var logs bytes.Buffer
+	oldLogWriter := log.Writer()
+	log.SetOutput(&logs)
+	warnNonLocalBind()
+	log.SetOutput(oldLogWriter)
+	if !strings.Contains(logs.String(), "WARNING: Server bound to 0.0.0.0") {
+		t.Fatalf("warnNonLocalBind log = %q", logs.String())
+	}
+
+	t.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", t.TempDir())
+	initUsageStore()
+	if usageHandler == nil {
+		t.Fatal("initUsageStore did not install usageHandler")
+	}
+
+	servePort = 19001
+	serveBindAddr = "127.0.0.1"
+	serveWebUISocket = "/tmp/loom-webui.sock"
+	serveFrontendDir = t.TempDir()
+	serveHSTS = true
+	serveSentryDSN = "https://sentry.example/1"
+	serveCorsOrigin = "https://legacy.example"
+	serveFrontendURLs = []string{" https://app.example/ ", ""}
+	handlers := buildMonitorHandlers(mockMonitorData, nil, nil, nil, "WS")
+	if handlers.Status == nil || handlers.Agents == nil || handlers.Tasks == nil || handlers.Stats == nil ||
+		handlers.Sync == nil || handlers.Workspaces == nil || handlers.Usage == nil ||
+		handlers.Metrics == nil || handlers.ObservabilityMetrics == nil || handlers.ObservabilityEvents == nil {
+		t.Fatalf("monitor handlers not fully wired: %+v", handlers)
+	}
+
+	gitOps := opsimpl.NewGitOps()
+	core := buildCoreServerConfig(handlers, gitOps, "codex")
+	if core.Port != 19001 || core.BindAddress != "127.0.0.1" || core.SocketPath != "/tmp/loom-webui.sock" {
+		t.Fatalf("core config addresses = %+v", core)
+	}
+	if core.TerminalCmd != "loom lead --backend codex" || !core.HSTSEnabled || core.SentryDSN != serveSentryDSN {
+		t.Fatalf("core config terminal/security = %+v", core)
+	}
+
+	cfg := buildServerConfig(handlers, fleetState{clientCfg: config.FleetClientConfig{Actor: "tester"}}, nil)
+	if !cfg.CORSEnabled || !reflect.DeepEqual(cfg.CORSOrigins, []string{"https://legacy.example", "https://app.example"}) {
+		t.Fatalf("CORS origins = %#v", cfg.CORSOrigins)
+	}
+}
+
+func TestResolveMonitorCollectorWorkspaceBranches(t *testing.T) {
+	t.Setenv(bootstrap.EnvWorkspace, "ENV-WS")
+	if got := resolveMonitorCollectorWorkspace(nil, "FALLBACK"); got != "ENV-WS" {
+		t.Fatalf("env workspace = %q", got)
+	}
+	t.Setenv(bootstrap.EnvWorkspace, "")
+	if got := resolveMonitorCollectorWorkspace(nil, "FALLBACK"); got != "FALLBACK" {
+		t.Fatalf("fallback workspace = %q", got)
+	}
+	if got := resolveMonitorCollectorWorkspace(nil, ""); got != "" {
+		t.Fatalf("nil-store workspace = %q", got)
+	}
+}
+
+func TestAwaitShutdownReturnsOnSignalAndNilServerExit(t *testing.T) {
+	var logs bytes.Buffer
+	oldLogWriter := log.Writer()
+	log.SetOutput(&logs)
+	t.Cleanup(func() { log.SetOutput(oldLogWriter) })
+
+	stop := make(chan os.Signal, 1)
+	webuiErr := make(chan error, 1)
+	cancelled := false
+	stop <- os.Interrupt
+	awaitShutdown(&cobra.Command{}, stop, webuiErr, func() {
+		cancelled = true
+		webuiErr <- nil
+	})
+	if !cancelled {
+		t.Fatal("awaitShutdown did not call cancel")
+	}
+	if !strings.Contains(logs.String(), "Shutting down server") {
+		t.Fatalf("awaitShutdown logs = %q", logs.String())
 	}
 }
 

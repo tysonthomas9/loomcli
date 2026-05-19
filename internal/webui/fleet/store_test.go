@@ -64,6 +64,45 @@ func TestTryClaim_Success(t *testing.T) {
 	}
 }
 
+func TestTaskResultRoundTripAndValidation(t *testing.T) {
+	store, mr := setupTest(t)
+	ctx := context.Background()
+	completedAt := time.Date(2026, 5, 19, 12, 0, 0, 0, time.UTC)
+	result := &TaskResult{
+		WorkerID:    "worker-1",
+		TaskID:      "task-1",
+		Success:     true,
+		CommitSHA:   "abc123",
+		CompletedAt: completedAt,
+	}
+	if err := store.RecordTaskResult(ctx, result); err != nil {
+		t.Fatalf("RecordTaskResult: %v", err)
+	}
+	if !mr.Exists(taskResultKey("task-1")) {
+		t.Fatal("task result key was not written")
+	}
+	got, err := store.GetTaskResult(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("GetTaskResult: %v", err)
+	}
+	if got == nil || got.WorkerID != "worker-1" || got.CommitSHA != "abc123" || !got.CompletedAt.Equal(completedAt) {
+		t.Fatalf("result = %+v", got)
+	}
+	missing, err := store.GetTaskResult(ctx, "task-missing")
+	if err != nil || missing != nil {
+		t.Fatalf("missing result = %+v err=%v", missing, err)
+	}
+	if err := store.RecordTaskResult(ctx, &TaskResult{TaskID: "", WorkerID: "worker-1"}); err == nil {
+		t.Fatal("RecordTaskResult accepted empty task ID")
+	}
+	if err := store.RecordTaskResult(ctx, &TaskResult{TaskID: "task-2", WorkerID: ""}); err == nil {
+		t.Fatal("RecordTaskResult accepted empty worker ID")
+	}
+	if _, err := store.GetTaskResult(ctx, ""); err == nil {
+		t.Fatal("GetTaskResult accepted empty task ID")
+	}
+}
+
 func TestTryClaim_AlreadyClaimed(t *testing.T) {
 	store, _ := setupTest(t)
 	ctx := context.Background()

@@ -2,6 +2,8 @@ package git
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -73,4 +75,78 @@ func TestPullWorkspaceWorktreesSkipsMissingRepoAndDefaultsBranch(t *testing.T) {
 			t.Fatalf("commands missing %q:\n%s", want, joined)
 		}
 	}
+}
+
+func TestPullAllWorkspacesUsesConfiguredRepos(t *testing.T) {
+	tmp := t.TempDir()
+	ws1 := filepath.Join(tmp, "ws1")
+	ws2 := filepath.Join(tmp, "ws2")
+	repo := filepath.Join(ws1, "api")
+	if err := os.MkdirAll(filepath.Join(repo, ".git"), 0755); err != nil {
+		t.Fatalf("mkdir repo: %v", err)
+	}
+	if err := os.MkdirAll(ws2, 0755); err != nil {
+		t.Fatalf("mkdir ws2: %v", err)
+	}
+	setupWorkspaceConfig(t, &LoomConfig{
+		DefaultWorkspace: "ws1",
+		Workspaces: map[string]WorkspaceConfig{
+			"ws1": {Path: ws1, Repos: []RepoConfig{{Name: "api", Path: repo, DefaultBranch: "develop"}}},
+			"ws2": {Path: ws2},
+		},
+	})
+
+	deps, _, _, _, _ := NewTestDeps(t)
+	cmdMock := NewCommandMock(t, []CommandStub{
+		{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "feature\n"},
+	})
+	cmdMock.Install()
+	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
+		{Args: []string{"fetch", "origin"}},
+		{Args: []string{"merge", "origin/develop", "-m", "Pull from develop\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}},
+		{Args: []string{"push", "origin", "feature"}},
+	})
+	outputMock.InstallOn(deps)
+	deps.Agent = &MockAgentInvoker{InteractiveFunc: func(workDir, prompt, agentName string) error {
+		t.Fatalf("unexpected agent invocation in %s: %s", workDir, prompt)
+		return nil
+	}}
+
+	pullAllWorkspaces(deps, "")
+}
+
+func TestPullWorkspaceRepoUsesRepoDefaultBranch(t *testing.T) {
+	tmp := t.TempDir()
+	ws := filepath.Join(tmp, "ws")
+	repo := filepath.Join(ws, "api")
+	if err := os.MkdirAll(filepath.Join(repo, ".git"), 0755); err != nil {
+		t.Fatalf("mkdir repo: %v", err)
+	}
+	setupWorkspaceConfig(t, &LoomConfig{
+		DefaultWorkspace: "ws1",
+		Workspaces: map[string]WorkspaceConfig{
+			"ws1": {Path: ws, Repos: []RepoConfig{{Name: "api", Path: repo, DefaultBranch: "develop", Remote: "upstream"}}},
+		},
+	})
+
+	resolver, err := NewResolver()
+	if err != nil {
+		t.Fatalf("NewResolver: %v", err)
+	}
+	if err := resolver.SetWorkspace("ws1"); err != nil {
+		t.Fatalf("SetWorkspace: %v", err)
+	}
+	cmdMock := NewCommandMock(t, []CommandStub{
+		{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "feature\n"},
+	})
+	cmdMock.Install()
+	deps, _, _, _, _ := NewTestDeps(t)
+	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
+		{Args: []string{"fetch", "upstream"}},
+		{Args: []string{"merge", "upstream/develop", "-m", "Pull from develop\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}},
+		{Args: []string{"push", "upstream", "feature"}},
+	})
+	outputMock.InstallOn(deps)
+
+	pullWorkspaceRepo(deps, resolver, "api", "")
 }

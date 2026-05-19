@@ -274,6 +274,157 @@ func TestHandleStatus_DerivesPlanningFromInProgressTaskWithoutRuntimeAgent(t *te
 	}
 }
 
+func TestTaskStatsSyncAndWorkspaceHandlers(t *testing.T) {
+	now := time.Unix(10, 0).UTC()
+	data := &monitor.MonitorData{
+		Timestamp: now,
+		Tasks: monitor.TaskSummary{
+			NeedsPlanning:    1,
+			ReadyToImplement: 2,
+			InProgress:       3,
+			NeedReview:       4,
+			Backlog:          5,
+		},
+		NeedsPlanningTasks: []monitor.TaskInfo{{ID: "P-1", Title: "plan"}},
+		ReadyToImplement:   []monitor.TaskInfo{{ID: "R-1", Title: "ready"}},
+		ReviewTasks:        []monitor.TaskInfo{{ID: "V-1", Title: "review"}},
+		InProgressTasks:    []monitor.TaskInfo{{ID: "I-1", Title: "doing"}},
+		BacklogTasks:       []monitor.TaskInfo{{ID: "B-1", Title: "later"}},
+		ClosedTasks:        []monitor.TaskInfo{{ID: "C-1", Title: "done"}},
+		Stats:              monitor.MonitorStats{Total: 9, Open: 5, Closed: 4},
+		SyncStatus:         monitor.SyncInfo{DBSynced: true, GitNeedsPush: 1, GitNeedsPull: 2},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/monitor/tasks?workspace=WS1", nil)
+	rr := httptest.NewRecorder()
+	HandleTasks(func() *monitor.MonitorData { return data }).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("tasks status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	var tasks TasksResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &tasks); err != nil {
+		t.Fatalf("decode tasks: %v", err)
+	}
+	if tasks.Summary.InProgress != 3 || len(tasks.ReadyToImplement) != 1 || len(tasks.Closed) != 1 {
+		t.Fatalf("tasks response = %+v", tasks)
+	}
+
+	rr = httptest.NewRecorder()
+	HandleStats(func() *monitor.MonitorData { return data }).ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/monitor/stats", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("stats status = %d", rr.Code)
+	}
+	var stats StatsResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &stats); err != nil {
+		t.Fatalf("decode stats: %v", err)
+	}
+	if stats.Stats.Total != 9 || stats.Stats.Closed != 4 {
+		t.Fatalf("stats response = %+v", stats)
+	}
+
+	rr = httptest.NewRecorder()
+	HandleSync(func() *monitor.MonitorData { return data }).ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/monitor/sync", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("sync status = %d", rr.Code)
+	}
+	var syncResp SyncResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &syncResp); err != nil {
+		t.Fatalf("decode sync: %v", err)
+	}
+	if !syncResp.Sync.DBSynced || syncResp.Sync.GitNeedsPush != 1 || syncResp.Sync.GitNeedsPull != 2 {
+		t.Fatalf("sync response = %+v", syncResp)
+	}
+
+	for name, handler := range map[string]http.HandlerFunc{
+		"tasks": HandleTasks(func() *monitor.MonitorData { return nil }),
+		"stats": HandleStats(func() *monitor.MonitorData { return nil }),
+		"sync":  HandleSync(func() *monitor.MonitorData { return nil }),
+	} {
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/monitor/"+name, nil))
+		if rr.Code != http.StatusServiceUnavailable {
+			t.Fatalf("%s nil-data status = %d, want 503", name, rr.Code)
+		}
+	}
+
+	if got := monitorDataForRequest(req, func() *monitor.MonitorData { return data }, nil); got != data {
+		t.Fatalf("monitorDataForRequest returned %+v, want original data", got)
+	}
+}
+
+func TestHandleWorkspacesAndWorkspaceInfo(t *testing.T) {
+	t.Setenv("LOOM_WORKSPACE", "WS1")
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	ctx := context.Background()
+	st := memstore.New()
+	root := t.TempDir()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS1", Name: "First"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS2", Name: "Second"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Repos().Create(ctx, store.RepoCreate{WorkspaceKey: "WS1", Name: "repo-a"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Repos().Create(ctx, store.RepoCreate{WorkspaceKey: "WS2", Name: "repo-b"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := bootstrap.SaveStateCache(&bootstrap.StateCache{
+		Workspaces: map[string]bootstrap.WorkspaceLocalState{
+			"WS1": {Path: filepath.Join(root, "first")},
+			"WS2": {Path: filepath.Join(root, "second")},
+		},
+	}); err != nil {
+		t.Fatalf("save state cache: %v", err)
+	}
+
+	rr := httptest.NewRecorder()
+	HandleWorkspaces(st).ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/workspaces", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("workspaces status = %d", rr.Code)
+	}
+	var resp WorkspacesResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode workspaces: %v", err)
+	}
+	if resp.Default != "First" || resp.Workspaces["First"].Path == "" || len(resp.Workspaces["Second"].Repos) != 1 {
+		t.Fatalf("workspaces response = %+v", resp)
+	}
+
+	rr = httptest.NewRecorder()
+	HandleWorkspaces(nil).ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/workspaces", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("nil store workspaces status = %d", rr.Code)
+	}
+	var empty WorkspacesResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &empty); err != nil {
+		t.Fatalf("decode nil store workspaces: %v", err)
+	}
+	if len(empty.Workspaces) != 0 {
+		t.Fatalf("nil store workspaces = %+v", empty.Workspaces)
+	}
+
+	info := getWorkspaceInfo(ctx, st, "Second")
+	if info.Mode != "workspace" || info.Name != "Second" || len(info.Workspaces) != 2 {
+		t.Fatalf("workspace info = %+v", info)
+	}
+	key, name, ok := resolveMonitorWorkspace(ctx, st, "WS1")
+	if !ok || key != "WS1" || name != "First" {
+		t.Fatalf("resolve by key = %q %q %v", key, name, ok)
+	}
+	key, name, ok = resolveMonitorWorkspace(ctx, st, "Second")
+	if !ok || key != "WS2" || name != "Second" {
+		t.Fatalf("resolve by name = %q %q %v", key, name, ok)
+	}
+	if _, _, ok := resolveMonitorWorkspace(ctx, st, "missing"); ok {
+		t.Fatal("missing workspace resolved")
+	}
+	if got := getWorkspaceInfo(ctx, nil, ""); got.Mode != "workspace" || got.Name != "" || got.Workspaces != nil {
+		t.Fatalf("nil store workspace info = %+v", got)
+	}
+}
+
 func runGitForMetricsTest(t *testing.T, dir string, args ...string) error {
 	t.Helper()
 	if len(args) > 0 && args[0] == "init" {

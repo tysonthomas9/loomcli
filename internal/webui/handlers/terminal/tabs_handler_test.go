@@ -91,25 +91,47 @@ func terminalReq(method, target string, body []byte, workspace, session string) 
 }
 
 type fakeTerminalService struct {
-	tab         *tabmeta.TabMetadata
-	getSession  string
-	patchFields map[string]string
-	putMeta     *tabmeta.TabMetadata
-	deleted     string
+	tab          *tabmeta.TabMetadata
+	getSession   string
+	patchFields  map[string]string
+	putMeta      *tabmeta.TabMetadata
+	deleted      string
+	tokenWS      string
+	tokenSession string
+	tokenUser    string
+	activeTab    string
+	patchWS      string
+	patchTab     string
+	setupWS      string
+	setupReq     service.TerminalSetupRequest
+	err          error
 }
 
-func (f *fakeTerminalService) GenerateToken(context.Context, string, string, string) (string, error) {
+func (f *fakeTerminalService) GenerateToken(_ context.Context, wsID, session, userID string) (string, error) {
+	f.tokenWS, f.tokenSession, f.tokenUser = wsID, session, userID
+	if f.err != nil {
+		return "", f.err
+	}
 	return "token", nil
 }
 func (f *fakeTerminalService) ListTabs(context.Context, string) ([]tabmeta.TabMetadata, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
 	return []tabmeta.TabMetadata{*f.tab}, nil
 }
 func (f *fakeTerminalService) GetTab(_ context.Context, _ string, session string) (*tabmeta.TabMetadata, error) {
 	f.getSession = session
+	if f.err != nil {
+		return nil, f.err
+	}
 	return f.tab, nil
 }
 func (f *fakeTerminalService) PatchTab(_ context.Context, _ string, _ string, fields map[string]string) (*service.PatchTabResult, error) {
 	f.patchFields = fields
+	if f.err != nil {
+		return nil, f.err
+	}
 	tab := *f.tab
 	if label := fields["label"]; label != "" {
 		tab.Label = label
@@ -118,23 +140,31 @@ func (f *fakeTerminalService) PatchTab(_ context.Context, _ string, _ string, fi
 }
 func (f *fakeTerminalService) PutTab(_ context.Context, _ string, meta *tabmeta.TabMetadata) error {
 	f.putMeta = meta
-	return nil
+	return f.err
 }
 func (f *fakeTerminalService) DeleteTab(_ context.Context, _ string, session string) error {
 	f.deleted = session
-	return nil
+	return f.err
 }
 func (f *fakeTerminalService) ListSessionsByIssue(context.Context) (map[string][]string, error) {
-	return nil, nil
+	if f.err != nil {
+		return nil, f.err
+	}
+	return map[string][]string{"ISSUE-1": {"main", "review"}}, nil
 }
 func (f *fakeTerminalService) GetTerminalState(context.Context, string) (string, error) {
-	return "", nil
+	return f.activeTab, f.err
 }
-func (f *fakeTerminalService) PatchTerminalState(context.Context, string, string) error {
-	return nil
+func (f *fakeTerminalService) PatchTerminalState(_ context.Context, wsID, activeTab string) error {
+	f.patchWS, f.patchTab = wsID, activeTab
+	return f.err
 }
-func (f *fakeTerminalService) StartSetup(context.Context, string, service.TerminalSetupRequest) (*service.TerminalSetupResult, error) {
-	return nil, nil
+func (f *fakeTerminalService) StartSetup(_ context.Context, wsID string, req service.TerminalSetupRequest) (*service.TerminalSetupResult, error) {
+	f.setupWS, f.setupReq = wsID, req
+	if f.err != nil {
+		return nil, f.err
+	}
+	return &service.TerminalSetupResult{SessionName: "setup-codex", Backend: req.Backend, Action: req.Action, Command: "codex login", Created: true}, nil
 }
 
 func TestTabMetadataResponseShape(t *testing.T) {

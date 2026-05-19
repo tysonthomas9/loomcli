@@ -10,6 +10,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 )
@@ -183,6 +184,89 @@ func TestCreateWorkspace_StoreBackedReturnsCreatedWorkspaceData(t *testing.T) {
 	}
 }
 
+func TestWorkspaceServiceUnavailableTimeoutAndErrorBranches(t *testing.T) {
+	ctx := context.Background()
+	emptySvc := NewWorkspaceService(WorkspaceServiceConfig{})
+
+	data, err := emptySvc.GetActiveWorkspace(ctx)
+	if err != nil || data == nil || len(data.Repos) != 0 || len(data.Workspaces) != 0 {
+		t.Fatalf("GetActiveWorkspace empty = data %+v err %v", data, err)
+	}
+	items, err := emptySvc.ListWorkspaces(ctx)
+	if err != nil || len(items) != 0 {
+		t.Fatalf("ListWorkspaces empty = %#v err %v", items, err)
+	}
+	if _, err := emptySvc.GetWorkspace(ctx, "missing"); !serviceErrorKind(err, KindNotFound) {
+		t.Fatalf("GetWorkspace missing err = %v", err)
+	}
+	if _, err := emptySvc.GetWorkspaceJob(ctx, "missing"); !serviceErrorKind(err, KindNotFound) {
+		t.Fatalf("GetWorkspaceJob missing err = %v", err)
+	}
+	if _, err := emptySvc.GetWorkspaceBackend(ctx, "ws"); !serviceErrorKind(err, KindUnavailable) {
+		t.Fatalf("GetWorkspaceBackend nil-store err = %v", err)
+	}
+	if _, err := emptySvc.PatchWorkspaceBackend(ctx, "ws", "codex"); !serviceErrorKind(err, KindUnavailable) {
+		t.Fatalf("PatchWorkspaceBackend nil-store err = %v", err)
+	}
+	if _, err := emptySvc.AddWorkspaceRepos(ctx, WorkspaceAddReposRequest{WorkspaceID: "WS", Repos: []string{"repo"}}); !serviceErrorKind(err, KindUnavailable) {
+		t.Fatalf("AddWorkspaceRepos nil-fn err = %v", err)
+	}
+	if _, _, err := emptySvc.CreateWorkspace(ctx, WorkspaceCreateRequest{Name: "WS", Type: "empty"}); !serviceErrorKind(err, KindUnavailable) {
+		t.Fatalf("CreateWorkspace nil-fn err = %v", err)
+	}
+	if _, err := emptySvc.DeleteWorkspace(ctx, "WS"); !serviceErrorKind(err, KindUnavailable) {
+		t.Fatalf("DeleteWorkspace nil-fn err = %v", err)
+	}
+
+	timeoutCreate := NewWorkspaceService(WorkspaceServiceConfig{
+		CreateFn: func(context.Context, WorkspaceCreateRequest) (WorkspaceCreateResult, error) {
+			return WorkspaceCreateResult{}, context.DeadlineExceeded
+		},
+	})
+	if _, _, err := timeoutCreate.CreateWorkspace(ctx, WorkspaceCreateRequest{Name: "WS", Type: "empty"}); !serviceErrorKind(err, KindTimeout) {
+		t.Fatalf("CreateWorkspace timeout err = %v", err)
+	}
+	failingCreate := NewWorkspaceService(WorkspaceServiceConfig{
+		CreateFn: func(context.Context, WorkspaceCreateRequest) (WorkspaceCreateResult, error) {
+			return WorkspaceCreateResult{}, errors.New("create failed")
+		},
+	})
+	if _, _, err := failingCreate.CreateWorkspace(ctx, WorkspaceCreateRequest{Name: "WS", Type: "empty"}); !serviceErrorKind(err, KindInternal) {
+		t.Fatalf("CreateWorkspace generic err = %v", err)
+	}
+
+	timeoutAdd := NewWorkspaceService(WorkspaceServiceConfig{
+		AddReposFn: func(context.Context, WorkspaceAddReposRequest) (WorkspaceCreateResult, error) {
+			return WorkspaceCreateResult{}, context.DeadlineExceeded
+		},
+	})
+	if _, err := timeoutAdd.AddWorkspaceRepos(ctx, WorkspaceAddReposRequest{WorkspaceID: "WS", Repos: []string{"repo"}}); !serviceErrorKind(err, KindTimeout) {
+		t.Fatalf("AddWorkspaceRepos timeout err = %v", err)
+	}
+	failingAdd := NewWorkspaceService(WorkspaceServiceConfig{
+		AddReposFn: func(context.Context, WorkspaceAddReposRequest) (WorkspaceCreateResult, error) {
+			return WorkspaceCreateResult{}, errors.New("add failed")
+		},
+	})
+	if _, err := failingAdd.AddWorkspaceRepos(ctx, WorkspaceAddReposRequest{WorkspaceID: "WS", Repos: []string{"repo"}}); !serviceErrorKind(err, KindInternal) {
+		t.Fatalf("AddWorkspaceRepos generic err = %v", err)
+	}
+
+	deleteNoStore := NewWorkspaceService(WorkspaceServiceConfig{DeleteFn: func(string) error { return nil }})
+	if _, err := deleteNoStore.DeleteWorkspace(ctx, "WS"); !serviceErrorKind(err, KindUnavailable) {
+		t.Fatalf("DeleteWorkspace nil-store err = %v", err)
+	}
+
+	workspaceData := &ops.WorkspaceData{
+		Repos:  []ops.WorkspaceRepo{{}},
+		Agents: []ops.WorkspaceAgentInfo{{}},
+	}
+	normalizeWorkspaceData(workspaceData)
+	if workspaceData.Repos[0].Groups == nil || workspaceData.Agents[0].Repos == nil || workspaceData.Agents[0].RepoGroups == nil {
+		t.Fatalf("normalizeWorkspaceData left nested nils: %+v", workspaceData)
+	}
+}
+
 func TestAddWorkspaceReposNormalizesCloneURLInput(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
@@ -210,6 +294,46 @@ func TestAddWorkspaceReposNormalizesCloneURLInput(t *testing.T) {
 	}
 	if len(got.CloneURLs) != 1 || got.CloneURLs[0] != "https://github.com/octocat/Hello-World" {
 		t.Fatalf("CloneURLs = %#v, want GitHub URL", got.CloneURLs)
+	}
+}
+
+func TestDeleteWorkspaceErrorClassification(t *testing.T) {
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name string
+		err  error
+		kind ErrorKind
+	}{
+		{name: "delete not found", err: errors.New("workspace not found"), kind: KindNotFound},
+		{name: "running agents", err: errors.New("workspace has running agents"), kind: KindConflict},
+		{name: "generic", err: errors.New("boom"), kind: KindInternal},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			st := memstore.New()
+			if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "ALPHA", Name: "Alpha Project"}); err != nil {
+				t.Fatalf("create alpha: %v", err)
+			}
+			var deletedKey string
+			svc := NewWorkspaceService(WorkspaceServiceConfig{
+				Store: st,
+				DeleteFn: func(key string) error {
+					deletedKey = key
+					return tc.err
+				},
+			})
+			if _, err := svc.DeleteWorkspace(ctx, "Alpha Project"); !serviceErrorKind(err, tc.kind) {
+				t.Fatalf("DeleteWorkspace err = %v, want %s", err, tc.kind)
+			}
+			if deletedKey != "ALPHA" {
+				t.Fatalf("deleted key = %q, want ALPHA", deletedKey)
+			}
+		})
+	}
+
+	st := memstore.New()
+	svc := NewWorkspaceService(WorkspaceServiceConfig{Store: st, DeleteFn: func(string) error { return nil }})
+	if _, err := svc.DeleteWorkspace(ctx, "MISSING"); !serviceErrorKind(err, KindNotFound) {
+		t.Fatalf("DeleteWorkspace missing err = %v", err)
 	}
 }
 
@@ -552,6 +676,11 @@ func TestGetWorkspaceJob_StoreFallbackReturnsFailedForErrorWorkspace(t *testing.
 	if job.Error != msg {
 		t.Fatalf("error = %q, want %q", job.Error, msg)
 	}
+}
+
+func serviceErrorKind(err error, kind ErrorKind) bool {
+	var serr *ServiceError
+	return errors.As(err, &serr) && serr.Kind == kind
 }
 
 type workspaceCountingStore struct {

@@ -1,9 +1,99 @@
 package role
 
 import (
+	"bytes"
+	"context"
+	"os"
+	"os/exec"
 	"strings"
 	"testing"
+
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
+	"github.com/tysonthomas9/loomcli/internal/store"
 )
+
+func TestRoleCommandsAgainstLocalStore(t *testing.T) {
+	handle := setupRoleFleetWorkspace(t)
+	defer handle.Close()
+
+	resetRoleFlagGlobals(t)
+	if out := captureRoleStdout(t, func() {
+		if err := runRoleList(nil, nil); err != nil {
+			t.Fatalf("runRoleList empty: %v", err)
+		}
+	}); !strings.Contains(out, "No roles in workspace WS") {
+		t.Fatalf("empty list output = %q", out)
+	}
+
+	roleAddDescription = strings.Repeat("d", 70)
+	roleAddPromptFile = "prompts/task.md"
+	roleAddModel = "gpt-5"
+	roleAddBackend = "codex"
+	roleAddSkills = []string{"go", "review"}
+	roleAddMaxConc = 2
+	roleAddReadOnly = true
+	if out := captureRoleStdout(t, func() {
+		if err := runRoleAdd(nil, []string{"task"}); err != nil {
+			t.Fatalf("runRoleAdd: %v", err)
+		}
+	}); !strings.Contains(out, "Created role WS/task") {
+		t.Fatalf("add output = %q", out)
+	}
+
+	roleListJSON = false
+	if out := captureRoleStdout(t, func() {
+		if err := runRoleList(nil, nil); err != nil {
+			t.Fatalf("runRoleList: %v", err)
+		}
+	}); !strings.Contains(out, "task") || !strings.Contains(out, "...") {
+		t.Fatalf("list output = %q", out)
+	}
+
+	roleShowJSON = false
+	if out := captureRoleStdout(t, func() {
+		if err := runRoleShow(nil, []string{"task"}); err != nil {
+			t.Fatalf("runRoleShow: %v", err)
+		}
+	}); !strings.Contains(out, "Model:        gpt-5") ||
+		!strings.Contains(out, "Prompt file:  prompts/task.md") ||
+		!strings.Contains(out, "Max concurrency: 2") ||
+		!strings.Contains(out, "Read-only:    true") {
+		t.Fatalf("show output = %q", out)
+	}
+
+	roleShowJSON = true
+	if out := captureRoleStdout(t, func() {
+		if err := runRoleShow(nil, []string{"task"}); err != nil {
+			t.Fatalf("runRoleShow json: %v", err)
+		}
+	}); !strings.Contains(out, `"name": "task"`) {
+		t.Fatalf("show json output = %q", out)
+	}
+
+	if out := captureRoleStdout(t, func() {
+		if err := runRoleSet(nil, []string{"task", "model", "gpt-5.1"}); err != nil {
+			t.Fatalf("runRoleSet: %v", err)
+		}
+	}); !strings.Contains(out, "Set WS/task.model = gpt-5.1") {
+		t.Fatalf("set output = %q", out)
+	}
+
+	if out := captureRoleStdout(t, func() {
+		if err := runRoleUnset(nil, []string{"task", "max_concurrency"}); err != nil {
+			t.Fatalf("runRoleUnset: %v", err)
+		}
+	}); !strings.Contains(out, "Cleared WS/task.max_concurrency") {
+		t.Fatalf("unset output = %q", out)
+	}
+
+	if out := captureRoleStdout(t, func() {
+		if err := runRoleRemove(nil, []string{"task"}); err != nil {
+			t.Fatalf("runRoleRemove: %v", err)
+		}
+	}); !strings.Contains(out, "Removed role WS/task") {
+		t.Fatalf("remove output = %q", out)
+	}
+}
 
 func TestBuildRolePatchSetAndUnset(t *testing.T) {
 	tests := []struct {
@@ -133,4 +223,73 @@ func TestSliceCSVPtrEmptyIsPresentEmptySlice(t *testing.T) {
 	if got == nil || len(*got) != 0 {
 		t.Fatalf("sliceCSVPtr empty = %#v", got)
 	}
+}
+
+func setupRoleFleetWorkspace(t *testing.T) *bootstrap.StoreHandle {
+	t.Helper()
+	requireRoleFleetDB(t)
+	configDir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", configDir)
+	t.Setenv(bootstrap.EnvWorkspace, "WS")
+	t.Setenv(bootstrap.EnvFleetDBActor, "role-test")
+	t.Setenv(bootstrap.EnvFleetDBURL, "")
+
+	ctx := context.Background()
+	handle, err := bootstrap.OpenStore(ctx, configDir, nil)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	if _, err := handle.Store.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS", Name: "Workspace"}); err != nil {
+		_ = handle.Close()
+		t.Fatalf("create workspace: %v", err)
+	}
+	return handle
+}
+
+func requireRoleFleetDB(t *testing.T) {
+	t.Helper()
+	if os.Getenv("FLEET_DB_BIN") != "" {
+		return
+	}
+	if _, err := exec.LookPath("fleet-db"); err != nil {
+		t.Skip("fleet-db binary not available")
+	}
+}
+
+func resetRoleFlagGlobals(t *testing.T) {
+	t.Helper()
+	origDesc, origPrompt, origModel, origBackend := roleAddDescription, roleAddPromptFile, roleAddModel, roleAddBackend
+	origSkills := roleAddSkills
+	origMaxConc := roleAddMaxConc
+	origReadOnly := roleAddReadOnly
+	origListJSON, origShowJSON := roleListJSON, roleShowJSON
+	t.Cleanup(func() {
+		roleAddDescription, roleAddPromptFile, roleAddModel, roleAddBackend = origDesc, origPrompt, origModel, origBackend
+		roleAddSkills = origSkills
+		roleAddMaxConc = origMaxConc
+		roleAddReadOnly = origReadOnly
+		roleListJSON, roleShowJSON = origListJSON, origShowJSON
+	})
+}
+
+func captureRoleStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	oldStdout := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	os.Stdout = w
+	defer func() { os.Stdout = oldStdout }()
+
+	fn()
+
+	if err := w.Close(); err != nil {
+		t.Fatalf("close stdout pipe: %v", err)
+	}
+	var b bytes.Buffer
+	if _, err := b.ReadFrom(r); err != nil {
+		t.Fatalf("read stdout pipe: %v", err)
+	}
+	return b.String()
 }
