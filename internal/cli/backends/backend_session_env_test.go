@@ -146,6 +146,17 @@ func TestBuildBackendEnvPrependsLoomExecutableDirToPath(t *testing.T) {
 	}
 }
 
+func TestResolveWebUIURLDefaultAndEnv(t *testing.T) {
+	t.Setenv("LOOM_WEBUI_URL", "")
+	if got := ResolveWebUIURL(); got != "http://127.0.0.1:8080" {
+		t.Fatalf("ResolveWebUIURL default = %q", got)
+	}
+	t.Setenv("LOOM_WEBUI_URL", "http://127.0.0.1:19090")
+	if got := ResolveWebUIURL(); got != "http://127.0.0.1:19090" {
+		t.Fatalf("ResolveWebUIURL env = %q", got)
+	}
+}
+
 func envHas(env []string, want string) bool {
 	for _, got := range env {
 		if got == want {

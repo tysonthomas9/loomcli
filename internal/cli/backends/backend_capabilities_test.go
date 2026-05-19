@@ -238,6 +238,24 @@ func TestBackendMeta_Fields(t *testing.T) {
 	}
 }
 
+func TestCheckBackendHealthRegisteredAndMissing(t *testing.T) {
+	resetBackendState(t)
+	if _, ok := CheckBackendHealth("missing"); ok {
+		t.Fatal("missing backend should not report health")
+	}
+
+	RegisterBackend(&mockBackend{name: "plain"})
+	if _, ok := CheckBackendHealth("plain"); ok {
+		t.Fatal("backend without health support should not report health")
+	}
+
+	RegisterBackend(&fullCapabilityBackend{mockBackend: mockBackend{name: "full"}})
+	status, ok := CheckBackendHealth("full")
+	if !ok || !status.Healthy || status.Version != "1.0" {
+		t.Fatalf("CheckBackendHealth = %+v, %t", status, ok)
+	}
+}
+
 func TestBackendOption_Fields(t *testing.T) {
 	var bo BackendOption
 	if bo.Key != "" || bo.Description != "" || bo.Default != "" || bo.CurrentValue != "" {

@@ -376,6 +376,86 @@ func TestLocalStatusLogsPauseAndEnsureRuntimeBranches(t *testing.T) {
 	}
 }
 
+func TestLocalStatusStopAndTimeoutBranches(t *testing.T) {
+	dataDir := t.TempDir()
+	if err := ensureRuntimeDirs(dataDir); err != nil {
+		t.Fatalf("ensureRuntimeDirs: %v", err)
+	}
+
+	if status, err := ReadRuntimeStatus(context.Background(), filepath.Join(dataDir, "missing")); err == nil || status == nil || status.Error == "" {
+		t.Fatalf("ReadRuntimeStatus missing status=%+v err=%v", status, err)
+	}
+
+	unhealthy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer unhealthy.Close()
+	if err := writeRuntime(dataDir, &runtimeInfo{
+		Status:  "running",
+		PID:     os.Getpid(),
+		DataDir: dataDir,
+		URL:     unhealthy.URL,
+	}); err != nil {
+		t.Fatalf("write runtime: %v", err)
+	}
+	status, err := ReadRuntimeStatus(context.Background(), dataDir)
+	if err != nil {
+		t.Fatalf("ReadRuntimeStatus unhealthy should not fail on readable runtime: %v", err)
+	}
+	if status.Healthy || !strings.Contains(status.Error, "/api/health returned 503") {
+		t.Fatalf("unhealthy status = %+v", status)
+	}
+
+	oldDataDirFlag := dataDirFlag
+	t.Cleanup(func() { dataDirFlag = oldDataDirFlag })
+	dataDirFlag = dataDir
+	if err := writeRuntime(dataDir, &runtimeInfo{Status: "running", PID: 0, DataDir: dataDir}); err != nil {
+		t.Fatalf("write stopped runtime: %v", err)
+	}
+	var out bytes.Buffer
+	cmd := &cobra.Command{}
+	cmd.SetOut(&out)
+	if err := runStop(cmd, nil); err != nil {
+		t.Fatalf("runStop not running: %v", err)
+	}
+	if !strings.Contains(out.String(), "not running") {
+		t.Fatalf("runStop output = %q", out.String())
+	}
+	stopped, err := readRuntime(dataDir)
+	if err != nil {
+		t.Fatalf("read stopped runtime: %v", err)
+	}
+	if stopped.Status != "stopped" {
+		t.Fatalf("stopped runtime status = %q", stopped.Status)
+	}
+
+	if err := stopRuntimeProcess(-1, time.Millisecond); err == nil {
+		t.Fatal("stopRuntimeProcess(-1) err = nil")
+	}
+
+	oldRead, oldRestart := readRuntimeStatusFn, restartRuntimeFn
+	t.Cleanup(func() {
+		readRuntimeStatusFn = oldRead
+		restartRuntimeFn = oldRestart
+	})
+	restartCalls := 0
+	readRuntimeStatusFn = func(context.Context, string) (*RuntimeStatusSnapshot, error) {
+		return &RuntimeStatusSnapshot{Runtime: &RuntimeSnapshot{PID: 123, URL: "http://127.0.0.1:1"}}, nil
+	}
+	restartRuntimeFn = func(string, int) (*RuntimeStartResult, error) {
+		restartCalls++
+		return &RuntimeStartResult{PID: 123}, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond)
+	defer cancel()
+	if _, err := EnsureRuntimeStarted(ctx, dataDir, 12345); err == nil {
+		t.Fatal("EnsureRuntimeStarted timeout err = nil")
+	}
+	if restartCalls != 1 {
+		t.Fatalf("restart calls = %d, want 1", restartCalls)
+	}
+}
+
 func TestLocalStartRuntimeReusesMatchingLiveRuntime(t *testing.T) {
 	dataDir := t.TempDir()
 	if err := ensureRuntimeDirs(dataDir); err != nil {
@@ -419,6 +499,59 @@ func TestLocalStartRuntimeReusesMatchingLiveRuntime(t *testing.T) {
 	}
 }
 
+func TestInstallUninstallLocalLaunchAgentWithFakeLaunchctl(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("launchagent install is macOS-only")
+	}
+	home := t.TempDir()
+	fakeBin := t.TempDir()
+	fakeLaunchctl := filepath.Join(fakeBin, "launchctl")
+	if err := os.WriteFile(fakeLaunchctl, []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
+		t.Fatalf("write fake launchctl: %v", err)
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", fakeBin)
+
+	dataDir := t.TempDir()
+	if err := ensureRuntimeDirs(dataDir); err != nil {
+		t.Fatalf("ensureRuntimeDirs: %v", err)
+	}
+	oldDataDirFlag, oldPortFlag := dataDirFlag, portFlag
+	t.Cleanup(func() {
+		dataDirFlag, portFlag = oldDataDirFlag, oldPortFlag
+	})
+	dataDirFlag = dataDir
+	portFlag = 19090
+
+	var out bytes.Buffer
+	cmd := &cobra.Command{}
+	cmd.SetOut(&out)
+	if err := runInstallService(cmd, nil); err != nil {
+		t.Fatalf("runInstallService: %v", err)
+	}
+	plist, err := launchAgentPlistPath()
+	if err != nil {
+		t.Fatalf("launchAgentPlistPath: %v", err)
+	}
+	if _, err := os.Stat(plist); err != nil {
+		t.Fatalf("installed plist stat: %v", err)
+	}
+	if !strings.Contains(out.String(), "installed") {
+		t.Fatalf("install output = %q", out.String())
+	}
+
+	out.Reset()
+	if err := runUninstallService(cmd, nil); err != nil {
+		t.Fatalf("runUninstallService: %v", err)
+	}
+	if _, err := os.Stat(plist); !os.IsNotExist(err) {
+		t.Fatalf("plist after uninstall stat err = %v", err)
+	}
+	if !strings.Contains(out.String(), "uninstalled") {
+		t.Fatalf("uninstall output = %q", out.String())
+	}
+}
+
 func TestPrepareLocalServiceConfigAndSpawnDetachedService(t *testing.T) {
 	dataDir := t.TempDir()
 	t.Setenv("LOOM_CONFIG_DIR", os.Getenv("LOOM_CONFIG_DIR"))
@@ -452,4 +585,47 @@ func TestPrepareLocalServiceConfigAndSpawnDetachedService(t *testing.T) {
 	if result == nil || result.PID <= 0 {
 		t.Fatalf("spawnDetachedService result = %+v", result)
 	}
+}
+
+func TestRunLocalDaemonOnceSuccessAndCancellation(t *testing.T) {
+	t.Run("success passes daemon env", func(t *testing.T) {
+		dataDir := t.TempDir()
+		if err := ensureRuntimeDirs(dataDir); err != nil {
+			t.Fatalf("ensureRuntimeDirs: %v", err)
+		}
+		outPath := filepath.Join(dataDir, "daemon-env.txt")
+		exe := writeLocalFakeExecutable(t, "loom-daemon-success",
+			`printf '%s|%s|%s|%s\n' "$1" "$LOOM_WORKSPACE" "$LOOM_WEBUI_URL" "$(pwd)" > "`+outPath+`"`)
+
+		if err := runLocalDaemonOnce(context.Background(), dataDir, exe, 19991, "WS-LOCAL"); err != nil {
+			t.Fatalf("runLocalDaemonOnce: %v", err)
+		}
+		data, err := os.ReadFile(outPath)
+		if err != nil {
+			t.Fatalf("read daemon env: %v", err)
+		}
+		got := strings.TrimSpace(string(data))
+		wantDir, err := filepath.EvalSymlinks(dataDir)
+		if err != nil {
+			t.Fatalf("eval symlinks: %v", err)
+		}
+		want := "daemon|WS-LOCAL|http://127.0.0.1:19991|" + wantDir
+		if got != want {
+			t.Fatalf("daemon env = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("context cancellation terminates child", func(t *testing.T) {
+		dataDir := t.TempDir()
+		if err := ensureRuntimeDirs(dataDir); err != nil {
+			t.Fatalf("ensureRuntimeDirs: %v", err)
+		}
+		exe := writeLocalFakeExecutable(t, "loom-daemon-sleep", "sleep 60")
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		err := runLocalDaemonOnce(ctx, dataDir, exe, 19992, "WS-LOCAL")
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("runLocalDaemonOnce err = %v, want context.Canceled", err)
+		}
+	})
 }

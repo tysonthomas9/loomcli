@@ -52,6 +52,38 @@ func TestResolveWorkspaceTarget_RepoName(t *testing.T) {
 	}
 }
 
+func TestResolveWorkspaceTarget_PerRepoWorktree(t *testing.T) {
+	tmpDir := t.TempDir()
+	repoPath := filepath.Join(tmpDir, "repo1")
+	createGitRepo(t, repoPath)
+	resolver := testResolver(&LoomConfig{
+		Workspaces: map[string]WorkspaceConfig{
+			"myws": {
+				Path:  tmpDir,
+				Repos: []RepoConfig{{Name: "repo1", Path: repoPath}},
+			},
+		},
+	}, "myws")
+
+	target, err := resolveWorkspaceTarget(resolver, "nova", "repo1")
+	if err != nil {
+		t.Fatalf("resolveWorkspaceTarget per repo: %v", err)
+	}
+	wantPath := filepath.Join(tmpDir, "worktrees", "repo1", "nova")
+	if target.WorkDir != wantPath || target.AgentName != "nova" || target.Repo != "repo1" {
+		t.Fatalf("target = %+v, want workdir %q repo1/nova", target, wantPath)
+	}
+	if _, err := os.Stat(filepath.Join(wantPath, ".git")); err != nil {
+		t.Fatalf("repo worktree .git missing: %v", err)
+	}
+	if got := GetWorktreeName(wantPath); got != "nova" {
+		t.Fatalf("GetWorktreeName = %q", got)
+	}
+	if err := EnsureRepoWorktree(repoPath, wantPath, "nova"); err != nil {
+		t.Fatalf("EnsureRepoWorktree existing: %v", err)
+	}
+}
+
 func TestResolveWorkspaceTarget_NoArgUsesWorkspaceRoot(t *testing.T) {
 	tmpDir := t.TempDir()
 	resolver := testResolver(&LoomConfig{

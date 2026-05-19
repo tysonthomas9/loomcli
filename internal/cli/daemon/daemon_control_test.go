@@ -98,6 +98,40 @@ func TestControlServer_StopAgent(t *testing.T) {
 	}
 }
 
+func TestControlServer_YieldAgent(t *testing.T) {
+	d := newTestDaemonWithAgents([]AgentEntry{{Worktree: "alpha", Role: "task"}})
+	defer d.sup.ShutdownOnce.Do(func() { close(d.sup.Shutdown) })
+	dir := t.TempDir()
+	d.sup.Agents[0].WorktreePath = dir
+	d.sup.Agents[0].Pid = os.Getpid()
+
+	resp := d.handleAgentControlYield("alpha")
+	if !resp.Success {
+		t.Fatalf("yield success = false: %s", resp.Error)
+	}
+	req, err := supervisor.ReadYieldFile(dir)
+	if err != nil {
+		t.Fatalf("ReadYieldFile: %v", err)
+	}
+	if req == nil || req.Reason != "manual_stop" || req.RequestedBy != "daemon" {
+		t.Fatalf("yield request = %+v", req)
+	}
+
+	d.sup.Agents[0].Pid = 0
+	resp = d.handleAgentControlYield("alpha")
+	if resp.Success || !strings.Contains(resp.Error, "not running") {
+		t.Fatalf("yield stopped response = %+v", resp)
+	}
+	resp = d.handleAgentControlYield("missing")
+	if resp.Success || !strings.Contains(resp.Error, "not found") {
+		t.Fatalf("yield missing response = %+v", resp)
+	}
+	resp = d.handleAgentControlYield("")
+	if resp.Success || !strings.Contains(resp.Error, "required") {
+		t.Fatalf("yield empty response = %+v", resp)
+	}
+}
+
 func TestControlServer_StartAgent(t *testing.T) {
 	t.Skip("requires full supervisor initialization after restructuring")
 	// Create temp worktree directory for addAgent to resolve

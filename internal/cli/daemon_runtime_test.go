@@ -2,8 +2,10 @@ package cli
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/lockfile"
@@ -58,6 +60,32 @@ func TestIsProtectedRuntimePath(t *testing.T) {
 				t.Errorf("IsProtectedRuntimePath(%q) = %v, want %v", tc.relPath, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestDaemonRuntimePathHelpers(t *testing.T) {
+	if got := resolvePath("/base", "rel/path"); got != filepath.Join("/base", "rel/path") {
+		t.Fatalf("resolvePath relative = %q", got)
+	}
+	if got := resolvePath("/base", "/already/abs"); got != "/already/abs" {
+		t.Fatalf("resolvePath absolute = %q", got)
+	}
+
+	hash := WorkspaceHash("/workspace/path")
+	if len(hash) != 16 {
+		t.Fatalf("WorkspaceHash length = %d, want 16", len(hash))
+	}
+	if WorkspaceHash("/workspace/path") != hash || WorkspaceHash("/other/path") == hash {
+		t.Fatal("WorkspaceHash should be deterministic and path-sensitive")
+	}
+
+	signalPath := GetSignalFilePath("/workspace/path")
+	wantDir := filepath.Join(os.TempDir(), fmt.Sprintf("loom-signals-%d", os.Getuid()))
+	if filepath.Dir(signalPath) != wantDir {
+		t.Fatalf("signal dir = %q, want %q", filepath.Dir(signalPath), wantDir)
+	}
+	if !strings.HasSuffix(signalPath, hash) {
+		t.Fatalf("signal path = %q, want suffix %q", signalPath, hash)
 	}
 }
 

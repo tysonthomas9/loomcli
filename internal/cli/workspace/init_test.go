@@ -217,6 +217,17 @@ func TestInitIssueStorage_Initialize(t *testing.T) {
 	}
 }
 
+func TestWorkspaceIssueStorageHelpersPrintFleetDBMessage(t *testing.T) {
+	deps, _, _, _, _ := NewTestDeps(t)
+	out := captureWorkspaceStdout(t, func() {
+		initWorkspaceIssueStorage(deps, WorkspaceConfig{Path: t.TempDir()})
+		initIssueStorageInWorkspace(deps, t.TempDir())
+	})
+	if strings.Count(out, "Fleet-db issue storage is used") != 2 {
+		t.Fatalf("issue storage helper output = %q", out)
+	}
+}
+
 func TestCreateWorktreesDir_AlreadyExists(t *testing.T) {
 	t.Parallel()
 	tmpDir := t.TempDir()

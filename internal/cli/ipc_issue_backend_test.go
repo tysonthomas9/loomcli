@@ -366,6 +366,81 @@ func TestIPCIssueBackend_Create_DelegatesToDirectBackend(t *testing.T) {
 	}
 }
 
+func TestIPCIssueBackend_RemainingMethodsDelegateToDirectBackend(t *testing.T) {
+	ipc := &mockIPCMutator{}
+	fb := NewMockIssueBackend()
+	fb.BlockedResult = []backend.IssueData{{ID: "blocked-1"}}
+	fb.StatsResult = &backend.StatsData{OpenIssues: 2}
+	fb.CountResult = 3
+	fb.ListCommentsResult = []backend.CommentData{{ID: 4}}
+	fb.AddCommentResult = &backend.CommentData{ID: 5}
+	fb.ListEventsResult = []backend.EventData{{ID: "event-6"}}
+	fb.BatchResult = []backend.BatchResult{{Success: true}}
+	fb.GetMutationsResult = []backend.MutationData{{Cursor: "7"}}
+	fb.WaitForMutationsResult = []backend.MutationData{{Cursor: "8"}}
+	b := newIPCIssueBackend(ipc, fb)
+	ctx := context.Background()
+
+	if got, err := b.Blocked(ctx, backend.BlockedOpts{}); err != nil || len(got) != 1 || got[0].ID != "blocked-1" {
+		t.Fatalf("Blocked = %+v, %v", got, err)
+	}
+	if got, err := b.Stats(ctx); err != nil || got == nil || got.OpenIssues != 2 {
+		t.Fatalf("Stats = %+v, %v", got, err)
+	}
+	if got, err := b.Count(ctx, backend.CountOpts{}); err != nil || got != 3 {
+		t.Fatalf("Count = %d, %v", got, err)
+	}
+	if err := b.Reopen(ctx, "task-1", backend.ReopenParams{}); err != nil {
+		t.Fatalf("Reopen: %v", err)
+	}
+	if err := b.Delete(ctx, backend.DeleteParams{IDs: []string{"task-1"}}); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	if err := b.AddDependency(ctx, backend.DepAddParams{FromID: "task-1", ToID: "task-0"}); err != nil {
+		t.Fatalf("AddDependency: %v", err)
+	}
+	if err := b.RemoveDependency(ctx, backend.DepRemoveParams{FromID: "task-1", ToID: "task-0"}); err != nil {
+		t.Fatalf("RemoveDependency: %v", err)
+	}
+	if err := b.AddLabel(ctx, "task-1", "bug"); err != nil {
+		t.Fatalf("AddLabel: %v", err)
+	}
+	if err := b.RemoveLabel(ctx, "task-1", "bug"); err != nil {
+		t.Fatalf("RemoveLabel: %v", err)
+	}
+	if got, err := b.ListComments(ctx, "task-1"); err != nil || len(got) != 1 || got[0].ID != 4 {
+		t.Fatalf("ListComments = %+v, %v", got, err)
+	}
+	if got, err := b.AddComment(ctx, backend.CommentAddParams{IssueID: "task-1", Text: "note"}); err != nil || got == nil || got.ID != 5 {
+		t.Fatalf("AddComment = %+v, %v", got, err)
+	}
+	if got, err := b.ListEvents(ctx, "task-1", 10); err != nil || len(got) != 1 || got[0].ID != "event-6" {
+		t.Fatalf("ListEvents = %+v, %v", got, err)
+	}
+	if got, err := b.Batch(ctx, []backend.BatchOp{{Operation: "create"}}); err != nil || len(got) != 1 || !got[0].Success {
+		t.Fatalf("Batch = %+v, %v", got, err)
+	}
+	if got, err := b.GetMutations(ctx, 6); err != nil || len(got) != 1 || got[0].Cursor != "7" {
+		t.Fatalf("GetMutations = %+v, %v", got, err)
+	}
+	if got, err := b.WaitForMutations(ctx, 7, 100); err != nil || len(got) != 1 || got[0].Cursor != "8" {
+		t.Fatalf("WaitForMutations = %+v, %v", got, err)
+	}
+
+	for _, method := range []string{
+		"Blocked", "Stats", "Count", "Reopen", "Delete", "AddDependency", "RemoveDependency",
+		"AddLabel", "RemoveLabel", "ListComments", "AddComment", "ListEvents", "Batch",
+		"GetMutations", "WaitForMutations",
+	} {
+		if !fb.Called(method) {
+			t.Fatalf("direct %s should have been called", method)
+		}
+	}
+	if fb.Called("Update") || fb.Called("ClaimIssue") || fb.Called("Close") {
+		t.Fatal("IPC-routed mutations should not have been delegated in direct delegation test")
+	}
+}
+
 // --- BackendName test ---
 
 func TestIPCIssueBackend_BackendName(t *testing.T) {

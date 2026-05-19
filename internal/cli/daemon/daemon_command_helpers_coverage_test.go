@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -307,6 +308,18 @@ func TestRunDaemonConfigPrintsDefaultConfig(t *testing.T) {
 	}
 	if !strings.Contains(out, "max_agents: 20") {
 		t.Fatalf("config output missing default max agents: %s", out)
+	}
+}
+
+func TestSetupSignalHandlerClosesOnSignal(t *testing.T) {
+	shutdown := setupSignalHandler()
+	if err := syscall.Kill(os.Getpid(), syscall.SIGHUP); err != nil {
+		t.Fatalf("send SIGHUP: %v", err)
+	}
+	select {
+	case <-shutdown:
+	case <-time.After(2 * time.Second):
+		t.Fatal("signal handler did not close shutdown channel")
 	}
 }
 

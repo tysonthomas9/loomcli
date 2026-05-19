@@ -168,3 +168,29 @@ func TestProjectConfigHelpersAndValidation(t *testing.T) {
 		t.Fatalf("absolute resolve = %q", got)
 	}
 }
+
+func TestProjectConfigSmallHelpersAndDaemonStatePath(t *testing.T) {
+	if p := BoolPtr(true); p == nil || !*p {
+		t.Fatalf("BoolPtr(true) = %#v", p)
+	}
+	cfg := &DaemonConfig{Roles: map[string]RoleConfig{
+		"review": {Backend: "codex", TaskFilter: "kind:task"},
+	}}
+	role, ok := cfg.ResolveRole("review")
+	if !ok || role.Backend != "codex" {
+		t.Fatalf("ResolveRole(review) role=%+v ok=%t", role, ok)
+	}
+	if _, ok := cfg.ResolveRole("missing"); ok {
+		t.Fatal("ResolveRole(missing) ok = true")
+	}
+
+	dataDir := t.TempDir()
+	projectDir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", dataDir)
+	t.Setenv("LOOM_WORKSPACE", "")
+	got := ResolveDaemonStatePath(projectDir)
+	want := filepath.Join(projectDir, ".loom", "daemon-agents.json")
+	if got != want {
+		t.Fatalf("ResolveDaemonStatePath = %q, want %q", got, want)
+	}
+}

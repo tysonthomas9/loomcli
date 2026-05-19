@@ -3,14 +3,21 @@ package leadcontrol
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"nhooyr.io/websocket" //nolint:staticcheck // package under test uses nhooyr/websocket
 )
 
 func TestCodexThreadStatusAndNewestThread(t *testing.T) {
@@ -99,6 +106,64 @@ func TestWaitForCodexAppServerBranches(t *testing.T) {
 	cancel()
 	if err := waitForCodexAppServer(ctx, "ws://127.0.0.1:1", make(chan error)); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancel err = %v", err)
+	}
+}
+
+func TestFindNewestCodexThreadUsesAppServerClient(t *testing.T) {
+	base := time.Date(2026, 5, 18, 12, 0, 0, 0, time.UTC)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			t.Errorf("accept websocket: %v", err)
+			return
+		}
+		defer conn.Close(websocket.StatusNormalClosure, "done")
+		for {
+			_, data, err := conn.Read(r.Context())
+			if err != nil {
+				return
+			}
+			var req rpcRequest
+			if err := json.Unmarshal(data, &req); err != nil {
+				t.Errorf("decode request: %v", err)
+				return
+			}
+			if req.ID == 0 {
+				continue
+			}
+			idJSON := strconv.FormatInt(req.ID, 10)
+			if req.Method == "thread/list" {
+				idJSON = strconv.Quote(idJSON)
+			}
+			result := `{}`
+			if req.Method == "thread/list" {
+				result = fmt.Sprintf(`{"data":[
+					{"id":"old","cwd":"/work","createdAt":%d,"updatedAt":%d,"status":{"type":"idle"}},
+					{"id":"best","cwd":"/work","createdAt":%d,"updatedAt":%d,"status":{"type":"active"}},
+					{"id":"other","cwd":"/other","createdAt":%d,"updatedAt":%d,"status":{"type":"idle"}}
+				]}`,
+					base.Add(-time.Minute).Unix(), base.Add(-time.Minute).Unix(),
+					base.Add(time.Second).Unix(), base.Add(2*time.Second).Unix(),
+					base.Add(time.Hour).Unix(), base.Add(time.Hour).Unix())
+			}
+			msg := fmt.Sprintf(`{"id":%s,"result":%s}`, idJSON, result)
+			if err := conn.Write(r.Context(), websocket.MessageText, []byte(msg)); err != nil {
+				return
+			}
+		}
+	}))
+	defer ts.Close()
+
+	endpoint := "ws" + strings.TrimPrefix(ts.URL, "http")
+	thread, err := findNewestCodexThread(context.Background(), endpoint, "/work", base)
+	if err != nil {
+		t.Fatalf("findNewestCodexThread: %v", err)
+	}
+	if thread == nil || thread.ID != "best" {
+		t.Fatalf("thread = %+v", thread)
+	}
+	if _, err := findNewestCodexThread(context.Background(), "ws://127.0.0.1:1", "/work", base); err == nil {
+		t.Fatal("findNewestCodexThread with bad endpoint err = nil")
 	}
 }
 

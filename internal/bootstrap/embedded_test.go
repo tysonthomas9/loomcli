@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -62,6 +63,20 @@ func TestDiagnoseFleetDBBinaryEnvRunnable(t *testing.T) {
 	}
 	if diag.Path != path {
 		t.Fatalf("Path = %q, want %q", diag.Path, path)
+	}
+}
+
+func TestIsSignalledExit(t *testing.T) {
+	if isSignalledExit(errors.New("plain error")) {
+		t.Fatal("plain error reported as signaled exit")
+	}
+	cmd := exec.Command("sh", "-c", "kill -TERM $$") //nolint:gosec //nolint:norawexec // fixed shell snippet for signal-exit behavior
+	err := cmd.Run()
+	if err == nil {
+		t.Fatal("self-terminating command returned nil error")
+	}
+	if !isSignalledExit(err) {
+		t.Fatalf("isSignalledExit(%T %[1]v) = false, want true", err)
 	}
 }
 

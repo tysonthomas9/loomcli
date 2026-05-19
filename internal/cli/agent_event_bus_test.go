@@ -121,6 +121,7 @@ func TestAgentEventBus_EmitsLoomTaskSpanUnderActiveContext(t *testing.T) {
 	// Close the bus so the JSONL writer's bufio.Writer flushes to disk
 	// before we read it. TestingResetAgentEventBus is idempotent; the
 	// cleanup registered at the top still runs at end-of-test.
+	cli.CloseAgentEventBus(context.Background())
 	cli.TestingResetAgentEventBus()
 
 	// Verify the JSONL writer also got the events with the right shape.

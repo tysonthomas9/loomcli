@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"log"
 	"log/slog"
@@ -9,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestInitLogger_TextFormat(t *testing.T) {
@@ -113,5 +115,22 @@ func TestInitLogger_BridgesLogPrintf(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "bridged message here") {
 		t.Errorf("log.Printf output should appear in slog output, got %q", string(data))
+	}
+}
+
+func TestTraceContextHandlerWithAttrsAndGroup(t *testing.T) {
+	var buf bytes.Buffer
+	handler := &traceContextHandler{inner: slog.NewTextHandler(&buf, nil)}
+	grouped := handler.WithAttrs([]slog.Attr{slog.String("component", "test")}).WithGroup("scope")
+	if !grouped.Enabled(context.Background(), slog.LevelInfo) {
+		t.Fatal("handler should be enabled for info records")
+	}
+	rec := slog.NewRecord(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC), slog.LevelInfo, "grouped", 0)
+	if err := grouped.Handle(context.Background(), rec); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "msg=grouped") || !strings.Contains(out, "component=test") {
+		t.Fatalf("handler output = %q", out)
 	}
 }

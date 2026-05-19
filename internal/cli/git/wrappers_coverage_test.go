@@ -477,6 +477,26 @@ func TestPushBranchInRepoResultSuccessAndErrors(t *testing.T) {
 	})
 }
 
+func TestPushBranchInRepoDetachedResultSuccess(t *testing.T) {
+	_, gitRunner, _ := installWrapperCoverageDeps(t)
+	gitRunner.RunFunc = func(_ string, args ...string) cli.CommandResult {
+		switch strings.Join(args, " ") {
+		case "log upstream/main..feature --oneline":
+			return cli.CommandResult{Stdout: "abc123 Add feature\n"}
+		default:
+			return cli.CommandResult{}
+		}
+	}
+
+	result, err := pushBranchInRepoDetachedResult("/repo", "feature", "main", "upstream")
+	if err != nil {
+		t.Fatalf("pushBranchInRepoDetachedResult: %v", err)
+	}
+	if result == nil || !result.Success || !strings.Contains(result.Message, "upstream/main") {
+		t.Fatalf("result = %+v, want successful detached push", result)
+	}
+}
+
 func TestCheckGhInstalledWrapper(t *testing.T) {
 	_, _, execRunner := installWrapperCoverageDeps(t)
 	execRunner.RunFunc = func(_, name string, args ...string) cli.CommandResult {

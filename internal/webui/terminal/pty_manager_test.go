@@ -95,6 +95,52 @@ func TestTerminalSessionEnv_UnscopedStripsWorkspace(t *testing.T) {
 	}
 }
 
+func TestOverlayEnvSessionKeyAndBackendSessionWrites(t *testing.T) {
+	env := overlayTerminalEnv([]string{"PATH=/bin", "B=old", "NO_EQUALS"}, map[string]string{
+		"C": "three",
+		"B": "new",
+	})
+	joined := strings.Join(env, "\n")
+	if strings.Contains(joined, "B=old") || !strings.Contains(joined, "B=new") || !strings.Contains(joined, "C=three") {
+		t.Fatalf("overlayTerminalEnv = %q", joined)
+	}
+	if env[len(env)-2] != "B=new" || env[len(env)-1] != "C=three" {
+		t.Fatalf("overlayTerminalEnv did not append sorted extras: %#v", env)
+	}
+	if got := (SessionKey{Name: "shell"}).String(); got != "shell" {
+		t.Fatalf("unscoped SessionKey.String = %q", got)
+	}
+	if got := (SessionKey{Workspace: "ws", Name: "shell"}).String(); got != "ws/shell" {
+		t.Fatalf("scoped SessionKey.String = %q", got)
+	}
+
+	m := newTestManager(t)
+	key := SessionKey{Workspace: "ws", Name: "backend"}
+	created, err := m.EnsureSession(key, 0, 0, []string{"-c", "cat"})
+	if err != nil {
+		t.Fatalf("EnsureSession create: %v", err)
+	}
+	if !created {
+		t.Fatal("EnsureSession created = false, want true")
+	}
+	created, err = m.EnsureSession(key, 100, 30, nil)
+	if err != nil {
+		t.Fatalf("EnsureSession existing: %v", err)
+	}
+	if created {
+		t.Fatal("EnsureSession existing created = true")
+	}
+	if got := m.SessionCountFor("ws"); got != 1 {
+		t.Fatalf("SessionCountFor(ws) = %d, want 1", got)
+	}
+	if err := m.WriteToSession(key, []byte("hello from backend\n")); err != nil {
+		t.Fatalf("WriteToSession existing: %v", err)
+	}
+	if err := m.WriteToSession(SessionKey{Workspace: "ws", Name: "missing"}, []byte("x")); !errors.Is(err, ErrPTYSessionNotFound) {
+		t.Fatalf("WriteToSession missing err = %v", err)
+	}
+}
+
 // newTestManager returns a manager configured to spawn `/bin/bash -c "cat"`.
 // cat echoes stdin to stdout so tests can deterministically drive the PTY.
 func newTestManager(t *testing.T) *PTYManager {

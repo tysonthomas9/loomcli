@@ -94,6 +94,55 @@ func TestSendControlRequestEmptyAndInvalidResponses(t *testing.T) {
 	})
 }
 
+func TestBuildAgentControlFnResolvesDefaultSocketAndSendsRequest(t *testing.T) {
+	dir, err := os.MkdirTemp("/tmp", "loom-dw-root-")
+	if err != nil {
+		t.Fatalf("mkdir temp root: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	t.Chdir(dir)
+	t.Setenv("LOOM_WORKSPACE", "")
+	if err := os.MkdirAll(filepath.Join(dir, ".loom"), 0o755); err != nil {
+		t.Fatalf("mkdir .loom: %v", err)
+	}
+	socketPath := filepath.Join(dir, ".loom", "daemon.sock")
+	ln, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatalf("listen unix: %v", err)
+	}
+	defer ln.Close()
+
+	reqCh := make(chan map[string]any, 1)
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		line, _ := bufio.NewReader(conn).ReadBytes('\n')
+		var req map[string]any
+		_ = json.Unmarshal(line, &req)
+		reqCh <- req
+		_ = json.NewEncoder(conn).Encode(agentcontrol.AgentControlResult{Success: true})
+	}()
+
+	controlFn := BuildAgentControlFn()
+	if controlFn == nil {
+		t.Fatal("BuildAgentControlFn returned nil")
+	}
+	result, err := controlFn("custom_op", "nova", true)
+	if err != nil {
+		t.Fatalf("controlFn: %v", err)
+	}
+	if result == nil || !result.Success {
+		t.Fatalf("result = %+v, want success", result)
+	}
+	req := <-reqCh
+	if req["operation"] != "custom_op" || req["agent_name"] != "nova" || req["force"] != true {
+		t.Fatalf("request = %#v", req)
+	}
+}
+
 func shortDaemonwireSocketPath(t *testing.T, name string) string {
 	t.Helper()
 	dir, err := os.MkdirTemp("/tmp", "loom-dw-")

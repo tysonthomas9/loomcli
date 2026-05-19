@@ -1,6 +1,10 @@
 package cli
 
 import (
+	"bytes"
+	"io"
+	"os"
+	"strings"
 	"testing"
 )
 
@@ -90,4 +94,47 @@ func TestIsFleetModeFromEnv_EnvVar(t *testing.T) {
 	if !isFleetModeFromEnv() {
 		t.Error("isFleetModeFromEnv() = false, want true (LOOM_ISSUE_BACKEND=fleet)")
 	}
+}
+
+func TestPrintDaemonBannerNormalAndFleetModes(t *testing.T) {
+	t.Setenv(fleetModeEnvVar, "")
+	normal := captureCLIStdout(t, func() {
+		PrintDaemonBanner(&DaemonConfig{
+			Agents: []AgentEntry{{Worktree: "nova", Role: "task"}},
+		}, "/workspace")
+	})
+	if !strings.Contains(normal, "Loom Agent Supervisor") ||
+		!strings.Contains(normal, "Agents: 1") ||
+		!strings.Contains(normal, "nova (task)") {
+		t.Fatalf("normal banner = %q", normal)
+	}
+
+	fleet := captureCLIStdout(t, func() {
+		PrintDaemonBanner(&DaemonConfig{Backend: BackendFleet}, "/workspace")
+	})
+	if !strings.Contains(fleet, "Fleet Mode") ||
+		!strings.Contains(fleet, "Agent supervision disabled") {
+		t.Fatalf("fleet banner = %q", fleet)
+	}
+}
+
+func captureCLIStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	old := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	os.Stdout = w
+	defer func() {
+		os.Stdout = old
+		_ = r.Close()
+	}()
+	fn()
+	_ = w.Close()
+	var buf bytes.Buffer
+	if _, err := io.Copy(&buf, r); err != nil {
+		t.Fatalf("copy stdout: %v", err)
+	}
+	return buf.String()
 }

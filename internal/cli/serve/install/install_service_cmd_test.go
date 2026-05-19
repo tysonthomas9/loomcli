@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -367,6 +368,78 @@ func TestUninstallMissingServicesAreNoops(t *testing.T) {
 	}
 }
 
+func TestInstallAndUninstallServiceCommandMissingManagers(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+
+	if err := installSystemd("loom-serve", filepath.Join(t.TempDir(), "loom.service"), "unit"); err == nil || !strings.Contains(err.Error(), "systemctl not found") {
+		t.Fatalf("installSystemd missing systemctl err = %v", err)
+	}
+	systemdUnit := filepath.Join(t.TempDir(), "installed.service")
+	if err := os.WriteFile(systemdUnit, []byte("unit"), 0o644); err != nil {
+		t.Fatalf("write unit: %v", err)
+	}
+	if err := uninstallSystemd("loom-serve", systemdUnit); err == nil || !strings.Contains(err.Error(), "systemctl not found") {
+		t.Fatalf("uninstallSystemd missing systemctl err = %v", err)
+	}
+
+	if err := installLaunchd(baseCfg(), filepath.Join(t.TempDir(), "loom.plist"), "plist"); err == nil || !strings.Contains(err.Error(), "launchctl not found") {
+		t.Fatalf("installLaunchd missing launchctl err = %v", err)
+	}
+	plist := filepath.Join(t.TempDir(), "installed.plist")
+	if err := os.WriteFile(plist, []byte("plist"), 0o644); err != nil {
+		t.Fatalf("write plist: %v", err)
+	}
+	if err := uninstallLaunchd("com.loom.serve", plist); err == nil || !strings.Contains(err.Error(), "launchctl not found") {
+		t.Fatalf("uninstallLaunchd missing launchctl err = %v", err)
+	}
+}
+
+func TestInstallAndUninstallServiceWithFakeManagers(t *testing.T) {
+	fakeBin := t.TempDir()
+	fakeManager := "systemctl"
+	cfg := baseCfg()
+	cfg.LogDir = filepath.Join(t.TempDir(), "logs")
+	unitPath := filepath.Join(t.TempDir(), "loom.service")
+	installFn := func() error { return installSystemd("loom-serve", unitPath, "unit") }
+	uninstallFn := func() error { return uninstallSystemd("loom-serve", unitPath) }
+	if runtime.GOOS == "darwin" {
+		fakeManager = "launchctl"
+		cfg.Name = "com.loom.serve"
+		unitPath = filepath.Join(t.TempDir(), "loom.plist")
+		installFn = func() error { return installLaunchd(cfg, unitPath, "plist") }
+		uninstallFn = func() error { return uninstallLaunchd(cfg.Name, unitPath) }
+	}
+	fakePath := filepath.Join(fakeBin, fakeManager)
+	if err := os.WriteFile(fakePath, []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
+		t.Fatalf("write fake manager: %v", err)
+	}
+	t.Setenv("PATH", fakeBin)
+
+	installOut := captureInstallStdout(t, func() {
+		if err := installFn(); err != nil {
+			t.Fatalf("install with fake %s: %v", fakeManager, err)
+		}
+	})
+	if _, err := os.Stat(unitPath); err != nil {
+		t.Fatalf("installed service file stat: %v", err)
+	}
+	if !strings.Contains(installOut, "installed") {
+		t.Fatalf("install output = %q", installOut)
+	}
+
+	uninstallOut := captureInstallStdout(t, func() {
+		if err := uninstallFn(); err != nil {
+			t.Fatalf("uninstall with fake %s: %v", fakeManager, err)
+		}
+	})
+	if _, err := os.Stat(unitPath); !os.IsNotExist(err) {
+		t.Fatalf("service file after uninstall stat err = %v", err)
+	}
+	if !strings.Contains(uninstallOut, "uninstalled") {
+		t.Fatalf("uninstall output = %q", uninstallOut)
+	}
+}
+
 func TestWriteServiceFileAndLogDirResolution(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "nested", "loom.service")
@@ -410,5 +483,35 @@ func TestBuildServiceNameFallbackAndInvalidNameValidation(t *testing.T) {
 	installServiceUninstall = false
 	if err := validateInstallServiceFlags(); err == nil || !strings.Contains(err.Error(), "invalid --name") {
 		t.Fatalf("invalid name err = %v", err)
+	}
+}
+
+func TestBuildServiceConfigUsesFlagsAndCWD(t *testing.T) {
+	oldName := installServiceName
+	oldPort := installServicePort
+	oldBind := installServiceBind
+	oldEnv := installServiceEnv
+	t.Cleanup(func() {
+		installServiceName = oldName
+		installServicePort = oldPort
+		installServiceBind = oldBind
+		installServiceEnv = oldEnv
+	})
+	dir := t.TempDir()
+	t.Chdir(dir)
+	installServiceName = "project"
+	installServicePort = 19001
+	installServiceBind = "0.0.0.0"
+	installServiceEnv = []string{"A=B"}
+
+	cfg, err := buildServiceConfig()
+	if err != nil {
+		t.Fatalf("buildServiceConfig: %v", err)
+	}
+	if cfg.WorkingDirectory != dir || cfg.Port != 19001 || cfg.BindAddr != "0.0.0.0" || len(cfg.ExtraEnv) != 1 {
+		t.Fatalf("service config = %+v", cfg)
+	}
+	if cfg.Name == "" || cfg.BinaryPath == "" || cfg.LogDir == "" {
+		t.Fatalf("service config missing resolved fields: %+v", cfg)
 	}
 }

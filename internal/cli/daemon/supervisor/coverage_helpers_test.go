@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/cli"
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/events"
@@ -366,4 +367,69 @@ func TestSupervisorDrainAllCapsTimeoutsAndAddAgentGuards(t *testing.T) {
 		ap.RequestedTaskID != "TASK-1" || ap.ParentSessionID != "parent-session" {
 		t.Fatalf("newRuntimeAgentProcess = %+v", ap)
 	}
+}
+
+func TestSupervisorPreFlightSpawnFailureAndFinalizeFallbacks(t *testing.T) {
+	runtimeDir := t.TempDir()
+	t.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", runtimeDir)
+	cli.ResetWorkspaceRuntimeDirCache()
+	t.Cleanup(cli.ResetWorkspaceRuntimeDirCache)
+
+	var emitted []events.Event
+	cfg := &cfgpkg.DaemonConfig{
+		Backend: "codex",
+		Daemon: cfgpkg.DaemonSettings{
+			EventsDir: ".loom/events",
+			RestartPolicy: cfgpkg.RestartPolicy{
+				MaxRetries: cfgpkg.IntPtr(0),
+			},
+		},
+	}
+	s := &Supervisor{
+		ConfigSnapshot: func() *cfgpkg.DaemonConfig { return cfg },
+		ProjectDir:     t.TempDir(),
+		Shutdown:       make(chan struct{}),
+		Concurrency:    NewConcurrencyTracker(nil),
+		EmitEvent: func(evt events.Event) {
+			emitted = append(emitted, evt)
+		},
+	}
+
+	ap := &AgentProcess{
+		Entry:        cfgpkg.AgentEntry{Worktree: "worker", Role: "custom", Parent: "EPIC-1"},
+		RoleConfig:   cfgpkg.RoleConfig{PromptFile: "prompt.md"},
+		WorktreePath: t.TempDir(),
+	}
+	if !s.preFlightSetup(ap) {
+		t.Fatal("preFlightSetup returned false without an issue backend")
+	}
+	if ap.AssignedEpicID != "EPIC-1" || ap.AgentSessionID == "" {
+		t.Fatalf("preflight state epic=%q session=%q", ap.AssignedEpicID, ap.AgentSessionID)
+	}
+	if len(emitted) != 1 || emitted[0].Type != events.EpicAssigned {
+		t.Fatalf("emitted events = %+v", emitted)
+	}
+
+	bad := &AgentProcess{
+		Entry:        cfgpkg.AgentEntry{Worktree: "bad", Role: "custom"},
+		RoleConfig:   cfgpkg.RoleConfig{},
+		WorktreePath: t.TempDir(),
+	}
+	s.Concurrency.Acquire("custom")
+	if s.spawnAndWait(bad) {
+		t.Fatal("spawnAndWait returned true for missing custom prompt")
+	}
+	if bad.StopReason != StopReasonMaxRetries {
+		t.Fatalf("spawn failure stop reason = %q", bad.StopReason)
+	}
+
+	finalizeAP := &AgentProcess{WorktreePath: t.TempDir(), AssignedTaskID: "TASK-1"}
+	if got := s.taskIDForFinalize(finalizeAP); got != "TASK-1" {
+		t.Fatalf("taskIDForFinalize fallback = %q", got)
+	}
+	yieldAP := &AgentProcess{Entry: cfgpkg.AgentEntry{Worktree: "yield"}, WorktreePath: t.TempDir()}
+	if err := WriteYieldFile(yieldAP.WorktreePath, &YieldRequest{Reason: "manual"}); err != nil {
+		t.Fatalf("WriteYieldFile: %v", err)
+	}
+	s.postMortemRecovery(yieldAP, 0)
 }

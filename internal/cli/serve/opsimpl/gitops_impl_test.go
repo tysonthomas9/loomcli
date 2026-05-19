@@ -232,6 +232,13 @@ func TestResolveAgentWorktree_StoreBackedFleetDB(t *testing.T) {
 	if got.RepoName != "api" || got.DefaultBranch != "main" || got.Branch != "feature/nova" || !got.IsWorkspace {
 		t.Fatalf("unexpected worktree: %+v", got)
 	}
+	list, err := NewGitOps().WithStore(st).ListAgentWorktrees("WS1")
+	if err != nil {
+		t.Fatalf("ListAgentWorktrees: %v", err)
+	}
+	if len(list) != 1 || list[0].Name != "nova" || list[0].Path != wtPath {
+		t.Fatalf("ListAgentWorktrees = %+v", list)
+	}
 }
 
 func TestGitOpsPureHelpers(t *testing.T) {
@@ -357,6 +364,98 @@ func TestGitOpsStatusAndDiffWrappersWithRealRepo(t *testing.T) {
 	if patch == nil || patch.Patch == "" {
 		t.Fatalf("patch = %+v", patch)
 	}
+}
+
+func TestGitOpsMutationWrappersWithRealRemote(t *testing.T) {
+	remote := filepath.Join(t.TempDir(), "origin.git")
+	if err := runGit(t, remote, "init", "--bare", "-b", "main"); err != nil {
+		t.Fatalf("git init bare: %v", err)
+	}
+	repo := filepath.Join(t.TempDir(), "repo")
+	clone := exec.Command("git", "clone", remote, repo) //nolint:norawexec // isolated test repository
+	if out, err := clone.CombinedOutput(); err != nil {
+		t.Fatalf("git clone: %v output=%s", err, out)
+	}
+	if err := runGit(t, repo, "config", "user.email", "test@example.com"); err != nil {
+		t.Fatalf("git config email: %v", err)
+	}
+	if err := runGit(t, repo, "config", "user.name", "Test User"); err != nil {
+		t.Fatalf("git config name: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "a.txt"), []byte("one\n"), 0600); err != nil {
+		t.Fatalf("write a: %v", err)
+	}
+	if err := runGit(t, repo, "add", "a.txt"); err != nil {
+		t.Fatalf("git add: %v", err)
+	}
+	if err := runGit(t, repo, "commit", "-m", "initial"); err != nil {
+		t.Fatalf("git commit: %v", err)
+	}
+	if err := runGit(t, repo, "push", "-u", "origin", "main"); err != nil {
+		t.Fatalf("git push main: %v", err)
+	}
+	if err := runGit(t, repo, "checkout", "-b", "feature"); err != nil {
+		t.Fatalf("git checkout feature: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "a.txt"), []byte("one\nfeature\n"), 0600); err != nil {
+		t.Fatalf("write feature: %v", err)
+	}
+	if err := runGit(t, repo, "commit", "-am", "feature"); err != nil {
+		t.Fatalf("git commit feature: %v", err)
+	}
+
+	g := NewGitOps()
+	push, err := g.Push(repo, "feature", "main", "origin")
+	if err != nil {
+		t.Fatalf("Push: %v", err)
+	}
+	if !push.Success {
+		t.Fatalf("Push result = %+v", push)
+	}
+	pr, err := g.CreatePR(repo, "main", "main", "origin")
+	if err != nil {
+		t.Fatalf("CreatePR no-commits path: %v", err)
+	}
+	if !pr.NoCommits {
+		t.Fatalf("CreatePR no-commits result = %+v", pr)
+	}
+
+	if err := runGit(t, repo, "checkout", "-b", "other", "origin/main"); err != nil {
+		t.Fatalf("git checkout other: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "b.txt"), []byte("other\n"), 0600); err != nil {
+		t.Fatalf("write b: %v", err)
+	}
+	if err := runGit(t, repo, "add", "b.txt"); err != nil {
+		t.Fatalf("git add b: %v", err)
+	}
+	if err := runGit(t, repo, "commit", "-m", "other"); err != nil {
+		t.Fatalf("git commit other: %v", err)
+	}
+	if err := runGit(t, repo, "push", "-u", "origin", "other"); err != nil {
+		t.Fatalf("git push other: %v", err)
+	}
+	if err := runGit(t, repo, "checkout", "feature"); err != nil {
+		t.Fatalf("git checkout feature again: %v", err)
+	}
+	pull, err := g.Pull(repo, "feature", "other", "origin")
+	if err != nil {
+		t.Fatalf("Pull: %v", err)
+	}
+	if !pull.Success {
+		t.Fatalf("Pull result = %+v", pull)
+	}
+	reset, err := g.Reset(repo, "feature", "main", true, false)
+	if err != nil {
+		t.Fatalf("Reset: %v", err)
+	}
+	if !reset.Success || reset.PreviousBranch != "feature" {
+		t.Fatalf("Reset result = %+v", reset)
+	}
+	if mergeBase, err := g.ResolveMergeBase(repo, "main"); err != nil || mergeBase == "" {
+		t.Fatalf("ResolveMergeBase = %q err=%v", mergeBase, err)
+	}
+	_ = g.CheckGhInstalled()
 }
 
 func runGit(t *testing.T, dir string, args ...string) error {

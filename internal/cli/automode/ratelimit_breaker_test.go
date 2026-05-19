@@ -284,6 +284,23 @@ func TestRateLimitBreaker_ShouldBlockInHalfOpen(t *testing.T) {
 	}
 }
 
+func TestBreakerStateString(t *testing.T) {
+	tests := []struct {
+		state breakerState
+		want  string
+	}{
+		{breakerClosed, "closed"},
+		{breakerOpen, "open"},
+		{breakerHalfOpen, "half-open"},
+		{breakerState(99), "unknown"},
+	}
+	for _, tt := range tests {
+		if got := tt.state.String(); got != tt.want {
+			t.Fatalf("breakerState(%d).String() = %q, want %q", tt.state, got, tt.want)
+		}
+	}
+}
+
 func TestRateLimitBreaker_WindowCountPrunesOldEvents(t *testing.T) {
 	t.Parallel()
 

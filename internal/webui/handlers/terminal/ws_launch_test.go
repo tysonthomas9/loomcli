@@ -153,3 +153,25 @@ func TestMaybeEmitStaleRestartBanner(t *testing.T) {
 		t.Fatalf("banner type=%v data=%q", msgType, data)
 	}
 }
+
+func TestInjectTerminalContextBannerWritesFetchedContext(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/monitor/status" {
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"stats":{"open":2,"blocked":1,"review":1,"in_progress":1},
+			"agents":[{"name":"nova","status":"running"}],
+			"tasks":{"needs_planning":3,"ready_to_implement":4}
+		}`))
+	}))
+	defer ts.Close()
+
+	att := &fakeAttachment{}
+	injectTerminalContextBanner(att, ts.URL, "Workspace One")
+	got := string(att.written)
+	if !strings.Contains(got, "Workspace One") || !strings.Contains(got, "nova (running)") {
+		t.Fatalf("context banner = %q", got)
+	}
+}

@@ -26,6 +26,27 @@ func TestNewManager_StartsEmpty(t *testing.T) {
 	}
 }
 
+func TestManagerStartAddrAndCloseIdempotent(t *testing.T) {
+	snapPath := filepath.Join(t.TempDir(), "snapshot.json")
+	m, err := NewManager(snapPath, false, nil)
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	if m.Addr() == "" {
+		t.Fatal("Addr returned empty string")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	m.Start(ctx)
+	m.Start(ctx)
+	cancel()
+	if err := m.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if err := m.Close(); err != nil {
+		t.Fatalf("second Close: %v", err)
+	}
+}
+
 func TestDumpLoad_RoundTrip(t *testing.T) {
 	snapPath := filepath.Join(t.TempDir(), "snapshot.json")
 	ctx := context.Background()
