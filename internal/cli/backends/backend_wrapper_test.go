@@ -18,6 +18,7 @@ import (
 
 	"github.com/olesho/harness-wrapper/pkg/wrapper"
 
+	"github.com/tysonthomas9/loomcli/internal/agenterr"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/harness"
 	"github.com/tysonthomas9/loomcli/internal/usage"
@@ -150,8 +151,8 @@ func TestRunHarness_PipesPromptAndCallsWrapper(t *testing.T) {
 		t.Fatalf("wrapperRun calls: got %d, want 1", len(calls))
 	}
 	cfg := calls[0]
-	if !strings.HasSuffix(cfg.BinaryPath, "/fake-tool") {
-		t.Errorf("BinaryPath: got %q, want suffix /fake-tool", cfg.BinaryPath)
+	if cfg.BinaryPath != "fake-tool" {
+		t.Errorf("BinaryPath: got %q, want %q (wrapper owns resolution now)", cfg.BinaryPath, "fake-tool")
 	}
 	if got, want := strings.Join(cfg.Args, " "), "--flag value"; got != want {
 		t.Errorf("Args: got %q, want %q", got, want)
@@ -171,10 +172,20 @@ func TestRunHarness_PipesPromptAndCallsWrapper(t *testing.T) {
 }
 
 func TestRunHarness_BinaryNotFound(t *testing.T) {
-	// Empty PATH so exec.LookPath fails predictably.
-	t.Setenv("PATH", "")
-
-	fake := &fakeWrapperRun{result: wrapper.Result{Status: wrapper.StatusIdle}}
+	// The wrapper now owns binary resolution: runHarness no longer
+	// preflights with exec.LookPath. Simulate the wrapper's
+	// ErrBinaryNotFound return and assert it surfaces as an
+	// InvocationError carrying the agenterr.BackendUnavailableMarker so
+	// the outer supervisor's classifier picks it up as
+	// BackendUnavailable instead of Unknown (fixes LOOM-4).
+	fake := &fakeWrapperRun{
+		result: wrapper.Result{
+			Status:   wrapper.StatusBinaryNotFound,
+			ExitCode: -1,
+			Reason:   `wrapper: binary not found: exec: "definitely-not-on-path-xyz": executable file not found in $PATH`,
+		},
+		err: wrapper.ErrBinaryNotFound,
+	}
 	installWrapperRunMock(t, fake.Run)
 
 	err := runHarness(context.Background(), nil, harnessInvocation{
@@ -184,15 +195,15 @@ func TestRunHarness_BinaryNotFound(t *testing.T) {
 	if err == nil {
 		t.Fatal("got nil, want non-nil error")
 	}
-	if len(fake.Calls()) != 0 {
-		t.Errorf("wrapperRun should not be called on lookup failure; got %d calls", len(fake.Calls()))
+	if len(fake.Calls()) != 1 {
+		t.Errorf("wrapperRun should be called once (wrapper owns the lookup); got %d calls", len(fake.Calls()))
 	}
 	var invErr *InvocationError
 	if !errors.As(err, &invErr) {
 		t.Fatalf("err: got %T (%v), want *InvocationError", err, err)
 	}
-	if !strings.Contains(invErr.Error(), "not found on PATH") {
-		t.Errorf("err message %q missing 'not found on PATH'", invErr.Error())
+	if !strings.Contains(invErr.Error(), agenterr.BackendUnavailableMarker) {
+		t.Errorf("err message %q missing marker %q", invErr.Error(), agenterr.BackendUnavailableMarker)
 	}
 }
 

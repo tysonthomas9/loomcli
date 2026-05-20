@@ -29,6 +29,19 @@ type errorPattern struct {
 // Shared across all backends — the format is provider-independent.
 var retryAfterRe = regexp.MustCompile(`(?i)retry.?after[:\s]+(\d+)`)
 
+// BackendUnavailableMarker is the stable log marker the inner backend
+// subprocess emits when the configured CLI is not on PATH. classifyFromText
+// recognizes it before any per-backend pattern table so the supervisor
+// gets a categorical BackendUnavailable instead of falling through to
+// Unknown on the exec-not-found exit (fixes LOOM-4).
+//
+// Stable string contract: changing it requires updating any emitter
+// (today: internal/cli/backends.binaryNotFoundInvocationError).
+const BackendUnavailableMarker = "loom: backend binary not on PATH"
+
+// backendUnavailableRe is the precompiled matcher used by classifyFromText.
+var backendUnavailableRe = regexp.MustCompile(regexp.QuoteMeta(BackendUnavailableMarker))
+
 // classifyWithPatterns runs the shared classification logic against a pattern
 // table. Every per-backend classifier delegates to this function.
 func classifyWithPatterns(text string, patterns []errorPattern) *classifyResult {
@@ -73,18 +86,32 @@ func ClassifyFromOutput(output string, exitCode int, backend string) *AgentError
 func classifyFromText(text string, exitCode int, backend string) *AgentError {
 	now := time.Now()
 
+	// Cross-cutting wrapper signals are checked before per-backend
+	// patterns: the marker is emitted by the loom-side wrapper
+	// translator regardless of which backend was configured, and it
+	// must outrank backend-specific patterns that might match the
+	// reason text by accident.
 	var result *classifyResult
-	switch backend {
-	case "claude":
-		result = classifyClaude(text)
-	case "codex":
-		result = classifyCodex(text)
-	case "cursor":
-		result = classifyCursor(text)
-	case "gemini":
-		result = classifyGemini(text)
-	case "opencode":
-		result = classifyOpenCode(text)
+	if backendUnavailableRe.MatchString(text) {
+		result = &classifyResult{
+			Class:   BackendUnavailable,
+			Message: "backend binary not on PATH",
+		}
+	}
+
+	if result == nil {
+		switch backend {
+		case "claude":
+			result = classifyClaude(text)
+		case "codex":
+			result = classifyCodex(text)
+		case "cursor":
+			result = classifyCursor(text)
+		case "gemini":
+			result = classifyGemini(text)
+		case "opencode":
+			result = classifyOpenCode(text)
+		}
 	}
 
 	if result == nil {

@@ -2,9 +2,7 @@ package backends
 
 import (
 	"context"
-	"fmt"
 	"io"
-	"os/exec"
 	"strings"
 
 	"github.com/olesho/harness-wrapper/pkg/wrapper"
@@ -42,10 +40,17 @@ type harnessInvocation struct {
 }
 
 // runHarness is the common driver for non-interactive backend
-// invocations. It resolves the binary on PATH, spawns it under
+// invocations. It spawns the configured binary under
 // harness.RunWithRetry, pipes the wrapper's Stdout into the line
 // handler scanner, and translates the terminal Result back into the
 // InvocationError taxonomy via wrapWrapperResult.
+//
+// The wrapper owns binary resolution: BinaryPath is passed through as
+// inv.BinaryName and the wrapper surfaces missing-binary cases as
+// wrapper.StatusBinaryNotFound / wrapper.ErrBinaryNotFound, which
+// wrapWrapperResult / wrapInvocationError translate into a
+// "backend binary not on PATH" InvocationError that agenterr
+// classifies as BackendUnavailable (fixes LOOM-4).
 //
 // Returns nil on StatusIdle. Other statuses (including post-retry
 // StatusRetryLater and StatusAPIError) map to *InvocationError;
@@ -55,11 +60,6 @@ type harnessInvocation struct {
 // the context the wrapper observes; the wrapper sends SIGTERM and
 // escalates to SIGKILL after its WaitDelay (default 5s).
 func runHarness(parent context.Context, shutdown <-chan struct{}, inv harnessInvocation) error {
-	binaryPath, err := exec.LookPath(inv.BinaryName)
-	if err != nil {
-		return wrapInvocationError(fmt.Errorf("%s not found on PATH: %w", inv.BinaryName, err), "")
-	}
-
 	ctx, cancel := contextFromShutdown(parent, shutdown)
 	defer cancel()
 
@@ -79,7 +79,7 @@ func runHarness(parent context.Context, shutdown <-chan struct{}, inv harnessInv
 	}
 
 	res, runErr := wrapperRun(ctx, wrapper.Config{
-		BinaryPath: binaryPath,
+		BinaryPath: inv.BinaryName,
 		Args:       inv.Args,
 		WorkingDir: inv.WorkDir,
 		Env:        inv.Env,
