@@ -55,6 +55,13 @@ func runComplete(cmd *cobra.Command, args []string) {
 		}
 	}
 
+	// Drop the fleet-db claim lock on the agent's current task, if any. Closes
+	// the planner-leak-lock path in LOOM-1: a planner that writes only
+	// --design and exits cleanly previously left the claim held even though
+	// the worktree lock and process were gone. Best-effort — failures are
+	// logged but do not block the completion signal below.
+	releaseClaimOnComplete(worktreePath)
+
 	// Write signal file to a safe location outside git's reach
 	signalFile := getSignalFilePath(worktreePath)
 	signalDir := filepath.Dir(signalFile)
