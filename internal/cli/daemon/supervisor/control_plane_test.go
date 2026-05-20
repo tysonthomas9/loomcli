@@ -3,6 +3,7 @@ package supervisor
 import (
 	"context"
 	"os"
+	"strconv"
 	"testing"
 	"time"
 
@@ -19,6 +20,8 @@ import (
 func TestSupervisorRegistersControlPlaneNodeOnStart(t *testing.T) {
 	st := memstore.New()
 	s := newControlPlaneTestSupervisor(st)
+	s.ProjectDir = "/tmp/loom-supervisor-test"
+	s.IpcSocketPath = "/tmp/loom-supervisor-test/.loom/agent-ipc.sock"
 
 	if err := s.Start(); err != nil {
 		t.Fatalf("Start: %v", err)
@@ -38,6 +41,28 @@ func TestSupervisorRegistersControlPlaneNodeOnStart(t *testing.T) {
 	if node.Capacity != 0 {
 		t.Fatalf("Capacity = %d, want 0", node.Capacity)
 	}
+
+	// LOOM-3: PID/Cwd/Socket labels make the node row a cwd-independent
+	// liveness signal for `loom workspace ops diagnose`.
+	wantPID := "loom.daemon.pid=" + strconv.Itoa(os.Getpid())
+	if !containsLabel(node.Labels, wantPID) {
+		t.Errorf("labels = %v, want %q", node.Labels, wantPID)
+	}
+	if !containsLabel(node.Labels, "loom.daemon.cwd=/tmp/loom-supervisor-test") {
+		t.Errorf("labels = %v, want loom.daemon.cwd=/tmp/loom-supervisor-test", node.Labels)
+	}
+	if !containsLabel(node.Labels, "loom.daemon.socket=/tmp/loom-supervisor-test/.loom/agent-ipc.sock") {
+		t.Errorf("labels = %v, want loom.daemon.socket=...", node.Labels)
+	}
+}
+
+func containsLabel(labels []string, want string) bool {
+	for _, l := range labels {
+		if l == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestSupervisorHeartbeatsControlPlaneNodeUntilStop(t *testing.T) {

@@ -64,6 +64,7 @@ type StatusData struct {
 type DaemonInfo struct {
 	Running  bool   `json:"running"`
 	PID      int    `json:"pid,omitempty"`
+	Cwd      string `json:"cwd,omitempty"`
 	Uptime   string `json:"uptime,omitempty"`
 	StalePID bool   `json:"stale_pid,omitempty"`
 }

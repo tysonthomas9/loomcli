@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"time"
 
@@ -179,6 +180,7 @@ func (s *Supervisor) startControlPlaneNode() error {
 		NodeID:          nodeID,
 		OwnerActor:      resolveNodeOwnerActor(),
 		RuntimeProvider: domain.RuntimeProviderLocal,
+		Labels:          s.daemonRuntimeLabels(),
 		Capabilities:    []string{"local-supervisor", "agent-process"},
 		Capacity:        len(s.Agents),
 		DrainState:      domain.NodeDrainActive,
@@ -212,6 +214,26 @@ func (s *Supervisor) runNodeHeartbeat(nodeID string, ttl, interval time.Duration
 			}
 		}
 	}
+}
+
+// daemonRuntimeLabels returns the prefixed labels diagnose uses to detect
+// a live supervisor daemon regardless of cwd. The pid, cwd, and (when
+// known) socket path travel on the Node row so consumers can correlate
+// the registered daemon back to a local process.
+//
+// Keep label keys in sync with the parsers in
+// internal/cli/daemon_registered.go.
+func (s *Supervisor) daemonRuntimeLabels() []string {
+	labels := []string{
+		"loom.daemon.pid=" + strconv.Itoa(os.Getpid()),
+	}
+	if s.ProjectDir != "" {
+		labels = append(labels, "loom.daemon.cwd="+s.ProjectDir)
+	}
+	if s.IpcSocketPath != "" {
+		labels = append(labels, "loom.daemon.socket="+s.IpcSocketPath)
+	}
+	return labels
 }
 
 func (s *Supervisor) resolveNodeID() string {

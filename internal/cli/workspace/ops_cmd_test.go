@@ -4,12 +4,16 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli/local"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 func TestWaitForWorkspaceOpsDaemonUsesCallerContext(t *testing.T) {
@@ -415,5 +419,142 @@ func TestWorkspaceOpsGlobalProblemsSilentWhenDaemonRunningOrNoRunnableAgents(t *
 				}
 			}
 		})
+	}
+}
+
+// TestWorkspaceOpsGlobalProblemsAcceptsRegisteredDaemon is the LOOM-3
+// regression: a daemon discoverable only via the fleet-db Node registry
+// (e.g. started from a non-standard cwd) must satisfy the
+// daemon-running check and suppress the daemon_not_running problem.
+func TestWorkspaceOpsGlobalProblemsAcceptsRegisteredDaemon(t *testing.T) {
+	status := &WorkspaceOpsStatus{
+		Daemon: WorkspaceOpsDaemon{
+			AppData:        DaemonInfo{Running: false},
+			WorkspaceLocal: DaemonInfo{Running: false},
+			Registered:     DaemonInfo{Running: true, PID: 31337, Cwd: "/tmp/anywhere"},
+		},
+		Repos: []WorkspaceOpsRepo{{Name: "app"}},
+		Agents: []WorkspaceOpsAgent{
+			{Name: "planner", Runnable: true},
+		},
+	}
+
+	problems := workspaceOpsGlobalProblems(status)
+	for _, problem := range problems {
+		if problem.Code == "daemon_not_running" {
+			t.Fatalf("problems = %#v, did not expect daemon_not_running with registered daemon", problems)
+		}
+	}
+}
+
+func TestWaitForWorkspaceOpsDaemonAcceptsRegisteredDaemon(t *testing.T) {
+	initial := &WorkspaceOpsStatus{
+		Workspace: WorkspaceOpsWorkspace{Key: "TEST"},
+		Daemon: WorkspaceOpsDaemon{
+			AppData: DaemonInfo{Running: false},
+		},
+		Agents: []WorkspaceOpsAgent{
+			{Name: "planner", Runnable: true},
+		},
+	}
+	ready := &WorkspaceOpsStatus{
+		Workspace: WorkspaceOpsWorkspace{Key: "TEST"},
+		Daemon: WorkspaceOpsDaemon{
+			AppData:    DaemonInfo{Running: false},
+			Registered: DaemonInfo{Running: true, PID: 31337, Cwd: "/var/runs/anywhere"},
+		},
+		Agents: []WorkspaceOpsAgent{
+			{Name: "planner", Runnable: true},
+		},
+	}
+
+	calls := 0
+	status, err := waitForWorkspaceOpsDaemon(context.Background(), "TEST", initial, func(context.Context, string) (*WorkspaceOpsStatus, error) {
+		calls++
+		return ready, nil
+	})
+	if err != nil {
+		t.Fatalf("waitForWorkspaceOpsDaemon returned error: %v", err)
+	}
+	if status != ready {
+		t.Fatalf("status = %#v, want ready status", status)
+	}
+	if calls != 1 {
+		t.Fatalf("loader calls = %d, want 1", calls)
+	}
+}
+
+// TestBuildWorkspaceOpsStatusUsesNodeRegistry is the deeper integration
+// test for LOOM-3: build the ops status against an in-memory store
+// pre-seeded with a fresh, live supervisor Node, then assert that
+// status.Daemon.Registered is populated and that no daemon_not_running
+// problem is reported even though the workspace has runnable agents
+// and no on-disk daemon lock anywhere.
+func TestBuildWorkspaceOpsStatusUsesNodeRegistry(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("LOOM_ISSUE_BACKEND", "fleet") // avoid desktop runtime probe
+
+	st := memstore.New()
+	ctx := context.Background()
+	workspaceKey := "DEMO"
+
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{
+		Key:  workspaceKey,
+		Name: "Demo",
+	}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+
+	host, err := os.Hostname()
+	if err != nil {
+		t.Fatalf("hostname: %v", err)
+	}
+	myPID := os.Getpid()
+	if _, err := st.Nodes().Create(ctx, store.NodeCreate{
+		WorkspaceKey:    workspaceKey,
+		NodeID:          "loom-supervisor-" + host + "-" + strconv.Itoa(myPID),
+		OwnerActor:      "test",
+		RuntimeProvider: domain.RuntimeProviderLocal,
+		Labels: []string{
+			"loom.daemon.pid=" + strconv.Itoa(myPID),
+			"loom.daemon.cwd=/tmp/x",
+		},
+		Capabilities: []string{"local-supervisor"},
+		DrainState:   domain.NodeDrainActive,
+		TTL:          2 * time.Minute,
+	}); err != nil {
+		t.Fatalf("create node: %v", err)
+	}
+
+	ws, err := st.Workspaces().Get(ctx, workspaceKey)
+	if err != nil {
+		t.Fatalf("get workspace: %v", err)
+	}
+	agents := []*domain.Agent{
+		{
+			WorkspaceKey: workspaceKey,
+			Name:         "planner",
+			RoleName:     "plan",
+			State:        domain.AgentStateActive,
+			DesiredState: domain.AgentDesiredRunning,
+		},
+	}
+	roles := []*domain.Role{{WorkspaceKey: workspaceKey, Name: "plan"}}
+	repos := []*domain.Repo{{WorkspaceKey: workspaceKey, Name: "app"}}
+
+	status, err := buildWorkspaceOpsStatus(ctx, st, ws, repos, agents, roles)
+	if err != nil {
+		t.Fatalf("buildWorkspaceOpsStatus: %v", err)
+	}
+	if !status.Daemon.Registered.Running {
+		t.Fatalf("Daemon.Registered = %+v, want Running=true", status.Daemon.Registered)
+	}
+	if status.Daemon.Registered.PID != myPID || status.Daemon.Registered.Cwd != "/tmp/x" {
+		t.Fatalf("Daemon.Registered = %+v, want PID=%d cwd=/tmp/x", status.Daemon.Registered, myPID)
+	}
+	for _, p := range status.Problems {
+		if p.Code == "daemon_not_running" {
+			t.Fatalf("problems = %+v, did not expect daemon_not_running", status.Problems)
+		}
 	}
 }
