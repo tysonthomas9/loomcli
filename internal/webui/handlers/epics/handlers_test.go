@@ -12,6 +12,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/epicrunner"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
@@ -163,6 +164,52 @@ func TestRunEpicRejectsBlankBody(t *testing.T) {
 	}
 }
 
+func TestRunEpicRequestAndBackendErrorBranches(t *testing.T) {
+	st := newTestStore(t)
+
+	t.Run("missing epic id", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/run", strings.NewReader(`{"lead":"nova"}`))
+		req.Header.Set("Content-Type", "application/json")
+		rr := httptest.NewRecorder()
+		handleRunEpic(NewModule(st, nil))(rr, req)
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want 400; body=%s", rr.Code, rr.Body.String())
+		}
+	})
+
+	t.Run("invalid json", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/api/workspaces/WS/epics/EPIC-1/run", strings.NewReader(`{bad json`))
+		req.SetPathValue("ws", "WS")
+		req.SetPathValue("id", "EPIC-1")
+		req.Header.Set("Content-Type", "application/json")
+		rr := httptest.NewRecorder()
+		handleRunEpic(NewModule(st, nil))(rr, req)
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want 400; body=%s", rr.Code, rr.Body.String())
+		}
+	})
+
+	t.Run("backend fn missing", func(t *testing.T) {
+		mux := http.NewServeMux()
+		NewModule(st, nil).Register(mux)
+		rr, body := postRun(t, mux, "WS", "EPIC-1", map[string]string{"lead": "nova"})
+		if rr.Code != http.StatusServiceUnavailable {
+			t.Fatalf("status = %d, want 503; body=%v", rr.Code, body)
+		}
+	})
+
+	t.Run("backend fn nil result", func(t *testing.T) {
+		mux := http.NewServeMux()
+		NewModule(st, nil).
+			WithIssueBackendFn(func(context.Context) backend.IssueBackend { return nil }).
+			Register(mux)
+		rr, body := postRun(t, mux, "WS", "EPIC-1", map[string]string{"lead": "nova"})
+		if rr.Code != http.StatusServiceUnavailable {
+			t.Fatalf("status = %d, want 503; body=%v", rr.Code, body)
+		}
+	})
+}
+
 func TestRunEpicRejectsWorkspaceWithoutRepoBeforeBinding(t *testing.T) {
 	ctx := context.Background()
 	st := newTestStore(t)
@@ -220,6 +267,70 @@ func TestRunEpicDispatchesReadyTask(t *testing.T) {
 	}
 	if len(cmds) != 1 || cmds[0].Payload["task_id"] != "EPIC-2" || cmds[0].Payload["parent_session_id"] != "lead-session" || cmds[0].TargetNodeID != "node-1" {
 		t.Fatalf("commands = %#v, want start command for EPIC-2 on node-1 with lead session", cmds)
+	}
+}
+
+func TestStartBackgroundRunFinishes(t *testing.T) {
+	st := newTestStore(t)
+	runner, _, err := epicrunner.NewRunner(context.Background(), epicrunner.RunnerConfig{
+		Store:          st,
+		IssueBackend:   newRunBackend("EPIC-1", nil),
+		WorkspaceKey:   "WS",
+		EpicID:         "EPIC-1",
+		Role:           "task",
+		MaxConcurrency: 1,
+		Interval:       time.Nanosecond,
+		DryRun:         true,
+	})
+	if err != nil {
+		t.Fatalf("NewRunner: %v", err)
+	}
+	done := make(chan struct{})
+	startBackgroundRun(runner, time.Nanosecond, func() { close(done) })
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("background run did not finish")
+	}
+}
+
+func TestRunEpicResponseAndDeliveryHelperBranches(t *testing.T) {
+	st := newTestStore(t)
+	m := NewModule(st, nil)
+
+	if got := deliverHTTPLeadAssignment(context.Background(), m, "WS", nil, "actor"); got != "pending" {
+		t.Fatalf("nil result delivery = %q, want pending", got)
+	}
+	if got := deliverHTTPLeadAssignment(context.Background(), m, "WS", &epicrunner.StartResult{}, "actor"); got != "pending" {
+		t.Fatalf("blank lead delivery = %q, want pending", got)
+	}
+	if got := deliverHTTPLeadAssignment(context.Background(), m, "WS", &epicrunner.StartResult{
+		LeadName: "nova",
+		Lead:     &domain.Agent{Backend: "claude"},
+	}, "actor"); got != "pending" {
+		t.Fatalf("non-codex lead delivery = %q, want pending", got)
+	}
+
+	startCodexDeliveryRetry(nil, "WS", "nova", "actor")
+	startCodexDeliveryRetry(NewModule(nil, nil), "", "nova", "actor")
+	startCodexDeliveryRetry(NewModule(nil, nil), "WS", "", "actor")
+
+	rr := httptest.NewRecorder()
+	writeRunEpicResponse(rr, &epicrunner.StartResult{
+		EpicID:                "EPIC-1",
+		LeadName:              "nova",
+		OrchestratorSessionID: "session-1",
+		State:                 epicrunner.StartStateAssigned,
+	}, epicrunner.ReconcileResult{}, "reconciled", "")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("writeRunEpicResponse status = %d; body=%s", rr.Code, rr.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body["delivery_state"] != "pending" {
+		t.Fatalf("delivery_state = %v, want pending", body["delivery_state"])
 	}
 }
 

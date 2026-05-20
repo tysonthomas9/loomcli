@@ -229,6 +229,139 @@ func TestGitAPIResultHelpers(t *testing.T) {
 	}
 }
 
+func TestGoGitDiffErrorAndParsingBranches(t *testing.T) {
+	_, gitRunner, _ := installWrapperCoverageDeps(t)
+	gitRunner.RunFunc = func(_ string, args ...string) cli.CommandResult {
+		switch strings.Join(args, " ") {
+		case "log main..HEAD --format=%H|%h|%an|%ae|%aI|%s":
+			return cli.CommandResult{Stdout: "malformed\nabc|a|ann|ann@example.test|2026-01-02T03:04:05Z|subject\n"}
+		case "log bad..HEAD --format=%H|%h|%an|%ae|%aI|%s":
+			return cli.CommandResult{Err: errors.New("git log failed")}
+		default:
+			return cli.CommandResult{Stdout: ""}
+		}
+	}
+
+	commits, err := DiffCommits(t.Context(), "/repo", "main", 0)
+	if err != nil {
+		t.Fatalf("DiffCommits parse branch: %v", err)
+	}
+	if len(commits) != 1 || commits[0].Hash != "abc" {
+		t.Fatalf("commits = %+v", commits)
+	}
+	if _, err := DiffCommits(t.Context(), "/repo", "../bad", 0); err == nil {
+		t.Fatal("DiffCommits invalid ref err = nil")
+	}
+	if _, err := DiffCommits(t.Context(), "/repo", "bad", 0); err == nil || !strings.Contains(err.Error(), "listing commits") {
+		t.Fatalf("DiffCommits git error = %v", err)
+	}
+	if _, err := DiffFilePatch(t.Context(), "/repo", "HEAD", "HEAD", ""); err == nil {
+		t.Fatal("DiffFilePatch empty path err = nil")
+	}
+	if _, err := DiffFiles(t.Context(), "/repo", "../bad", "HEAD"); err == nil {
+		t.Fatal("DiffFiles invalid from ref err = nil")
+	}
+	if _, err := DiffFiles(t.Context(), "/repo", "HEAD", "../bad"); err == nil {
+		t.Fatal("DiffFiles invalid to ref err = nil")
+	}
+	if _, err := DiffFiles(t.Context(), t.TempDir(), "HEAD", "HEAD"); err == nil || !strings.Contains(err.Error(), "open repository") {
+		t.Fatalf("DiffFiles non-repo err = %v", err)
+	}
+	if got := parseNumstatRenamePath("plain.txt"); got != "plain.txt" {
+		t.Fatalf("parseNumstatRenamePath plain = %q", got)
+	}
+}
+
+func TestPullRepoWorktreeResultErrorBranches(t *testing.T) {
+	t.Run("conflicts returned after abort", func(t *testing.T) {
+		deps, _, _ := installWrapperCoverageDeps(t)
+		cmdMock := NewCommandMock(t, []CommandStub{
+			{
+				Name:   "git",
+				Args:   []string{"diff", "--name-only", "--diff-filter=U"},
+				Stdout: "a.txt\nb.txt\n",
+			},
+			{
+				Name: "git",
+				Args: []string{"merge", "--abort"},
+			},
+		})
+		cmdMock.InstallOn(deps)
+		outputMock := NewOutputCommandMock(t, []OutputCommandStub{
+			{Args: []string{"fetch", "origin"}},
+			{
+				Args: []string{
+					"merge", "origin/main", "-m",
+					"Pull from main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
+				},
+				Err: errors.New("merge conflict"),
+			},
+		})
+		outputMock.InstallOn(deps)
+
+		result, err := PullRepoWorktreeResult("/repo", "feature", "main", "origin")
+		if err != nil {
+			t.Fatalf("PullRepoWorktreeResult conflicts: %v", err)
+		}
+		if result == nil || result.Success || len(result.ConflictedFiles) != 2 {
+			t.Fatalf("result = %+v, want conflict result with files", result)
+		}
+	})
+
+	t.Run("merge failure without conflict markers", func(t *testing.T) {
+		deps, _, _ := installWrapperCoverageDeps(t)
+		cmdMock := NewCommandMock(t, []CommandStub{
+			{
+				Name: "git",
+				Args: []string{"diff", "--name-only", "--diff-filter=U"},
+			},
+			{
+				Name: "git",
+				Args: []string{"merge", "--abort"},
+			},
+		})
+		cmdMock.InstallOn(deps)
+		outputMock := NewOutputCommandMock(t, []OutputCommandStub{
+			{Args: []string{"fetch", "origin"}},
+			{
+				Args: []string{
+					"merge", "origin/main", "-m",
+					"Pull from main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
+				},
+				Err: errors.New("merge refused"),
+			},
+		})
+		outputMock.InstallOn(deps)
+
+		result, err := PullRepoWorktreeResult("/repo", "feature", "main", "origin")
+		if err == nil || !strings.Contains(err.Error(), "merge failed") {
+			t.Fatalf("result=%+v err=%v, want merge failure", result, err)
+		}
+	})
+
+	t.Run("push failure", func(t *testing.T) {
+		deps, _, _ := installWrapperCoverageDeps(t)
+		cmdMock := NewCommandMock(t, []CommandStub{})
+		cmdMock.InstallOn(deps)
+		outputMock := NewOutputCommandMock(t, []OutputCommandStub{
+			{Args: []string{"fetch", "upstream"}},
+			{
+				Args: []string{
+					"merge", "upstream/trunk", "-m",
+					"Pull from trunk\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
+				},
+			},
+			{Args: []string{"push", "upstream", "feature"}, Err: errors.New("rejected")},
+		})
+		outputMock.InstallOn(deps)
+
+		result, err := PullRepoWorktreeResult("/repo", "feature", "trunk", "upstream")
+		if err == nil || !strings.Contains(err.Error(), "pushing") {
+			t.Fatalf("result=%+v err=%v, want push failure", result, err)
+		}
+	})
+}
+
 func TestGitStatusSummaryAndResetResultHelpers(t *testing.T) {
 	_, gitRunner, _ := installWrapperCoverageDeps(t)
 	gitRunner.RunFunc = func(_ string, args ...string) cli.CommandResult {
@@ -303,6 +436,27 @@ func TestResetWorktreeResultSuccessAndProtectedBranch(t *testing.T) {
 	}
 	if _, err := ResetWorktreeResult(t.TempDir(), "nova", "main", false, true); err == nil || !strings.Contains(err.Error(), "protected branch") {
 		t.Fatalf("protected reset error = %v, want protected branch refusal", err)
+	}
+}
+
+func TestResetWorktreeResultLocked(t *testing.T) {
+	installWrapperCoverageDeps(t)
+	worktreePath := t.TempDir()
+	if err := cli.AcquireLock(worktreePath, "loom task", "worker"); err != nil {
+		t.Fatalf("AcquireLock: %v", err)
+	}
+	t.Cleanup(func() { _ = cli.ReleaseLock(worktreePath) })
+
+	_, err := ResetWorktreeResult(worktreePath, "nova", "main", false, false)
+	if err == nil {
+		t.Fatal("ResetWorktreeResult returned nil error for locked worktree")
+	}
+	var locked *LockedError
+	if !errors.As(err, &locked) {
+		t.Fatalf("error = %T %v, want LockedError", err, err)
+	}
+	if locked.AgentName != "worker" {
+		t.Fatalf("locked agent = %q, want worker", locked.AgentName)
 	}
 }
 

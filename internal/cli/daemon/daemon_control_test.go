@@ -67,6 +67,70 @@ func newTestDaemonWithAgents(entries []AgentEntry) *Daemon {
 	return d
 }
 
+func TestControlConnectionInvalidUnknownAndListRequests(t *testing.T) {
+	d := newTestDaemonWithAgents([]AgentEntry{
+		{Worktree: "alpha", Role: "task"},
+		{Worktree: "beta", Role: "review"},
+	})
+	d.sup.StoppedAgents["beta"] = struct{}{}
+	defer d.sup.ShutdownOnce.Do(func() { close(d.sup.Shutdown) })
+
+	invalid := sendControlRequestOverPipe(t, d, []byte("{bad json}\n"))
+	if invalid.Success || !strings.Contains(invalid.Error, "invalid request") {
+		t.Fatalf("invalid response = %+v", invalid)
+	}
+
+	unknownReq, err := json.Marshal(DaemonControlRequest{Operation: "does_not_exist"})
+	if err != nil {
+		t.Fatalf("marshal unknown request: %v", err)
+	}
+	unknown := sendControlRequestOverPipe(t, d, append(unknownReq, '\n'))
+	if unknown.Success || !strings.Contains(unknown.Error, "unknown operation") {
+		t.Fatalf("unknown response = %+v", unknown)
+	}
+
+	listReq, err := json.Marshal(DaemonControlRequest{Operation: ctrlOpAgentList})
+	if err != nil {
+		t.Fatalf("marshal list request: %v", err)
+	}
+	list := sendControlRequestOverPipe(t, d, append(listReq, '\n'))
+	if !list.Success || len(list.Data) == 0 {
+		t.Fatalf("list response = %+v", list)
+	}
+	var entries []AgentListEntry
+	if err := json.Unmarshal(list.Data, &entries); err != nil {
+		t.Fatalf("unmarshal list data: %v", err)
+	}
+	if len(entries) != 2 || entries[0].Name != "alpha" || entries[1].Status != "stopped" {
+		t.Fatalf("entries = %+v", entries)
+	}
+}
+
+func sendControlRequestOverPipe(t *testing.T, d *Daemon, payload []byte) DaemonControlResponse {
+	t.Helper()
+	client, server := net.Pipe()
+	defer func() { _ = client.Close() }()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		d.handleControlConnection(server)
+	}()
+	if _, err := client.Write(payload); err != nil {
+		t.Fatalf("write request: %v", err)
+	}
+	scanner := bufio.NewScanner(client)
+	if !scanner.Scan() {
+		t.Fatalf("read response failed: %v", scanner.Err())
+	}
+	var resp DaemonControlResponse
+	if err := json.Unmarshal(scanner.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	<-done
+	return resp
+}
+
 func TestControlServer_StopAgent(t *testing.T) {
 	d := newTestDaemonWithAgents([]AgentEntry{
 		{Worktree: "alpha", Role: "plan"},
@@ -370,6 +434,32 @@ func TestControlServer_EphemeralRestartRejected(t *testing.T) {
 	}
 	if !strings.Contains(resp.Error, "cannot be restarted") {
 		t.Fatalf("error = %q, want cannot be restarted", resp.Error)
+	}
+}
+
+func TestControlServer_StartAndRestartReaddStoppedOnAddFailure(t *testing.T) {
+	t.Setenv("LOOM_WORKTREES_DIR", filepath.Join(t.TempDir(), "worktrees"))
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+
+	d := newTestDaemonWithAgents(nil)
+	d.config = makeDaemonConfig([]AgentEntry{{Worktree: "alpha", Role: "task"}}, nil)
+	d.sup.StoppedAgents["alpha"] = struct{}{}
+	defer d.sup.ShutdownOnce.Do(func() { close(d.sup.Shutdown) })
+
+	start := d.handleAgentControlStart("alpha")
+	if start.Success || !strings.Contains(start.Error, "failed to start agent") {
+		t.Fatalf("start response = %+v, want add failure", start)
+	}
+	if !d.isAgentStopped("alpha") {
+		t.Fatal("start failure should re-add alpha to StoppedAgents")
+	}
+
+	restart := d.handleAgentControlRestart("alpha")
+	if restart.Success || !strings.Contains(restart.Error, "failed to restart agent") {
+		t.Fatalf("restart response = %+v, want add failure", restart)
+	}
+	if d.isAgentStopped("alpha") {
+		t.Fatal("restart removes StoppedAgents before add attempt")
 	}
 }
 

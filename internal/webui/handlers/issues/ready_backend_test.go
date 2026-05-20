@@ -15,6 +15,13 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 )
 
+func TestReadyPoolAdapterPutDiscardIgnoreNonRPCClient(t *testing.T) {
+	adapter := &readyPoolAdapter{}
+	var client readyClient
+	adapter.Put(client)
+	adapter.Discard(client)
+}
+
 // stubReadyBackend implements backend.IssueBackend with only Ready
 // populated. Every other method returns a sentinel error so accidental use
 // surfaces as a test failure rather than silent empty payloads.
@@ -156,6 +163,36 @@ func TestHandleReady_BackendWhenNoPool(t *testing.T) {
 	}
 	if found.Repo == nil || *found.Repo != "repoA" {
 		t.Errorf("Repo = %v, want &repoA", found.Repo)
+	}
+}
+
+func TestServeReadyViaBackendAdditionalBranches(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/ready", nil)
+	if serveReadyViaBackend(httptest.NewRecorder(), req, nil) {
+		t.Fatal("nil backend function should fall through")
+	}
+	if serveReadyViaBackend(httptest.NewRecorder(), req, func(context.Context) backend.IssueBackend { return nil }) {
+		t.Fatal("nil backend should fall through")
+	}
+
+	rr := httptest.NewRecorder()
+	served := serveReadyViaBackend(rr, httptest.NewRequest(http.MethodGet, "/api/ready?priority=bad", nil), func(context.Context) backend.IssueBackend {
+		return &stubReadyBackend{}
+	})
+	if !served || rr.Code != http.StatusBadRequest {
+		t.Fatalf("parse error served=%v code=%d body=%s", served, rr.Code, rr.Body.String())
+	}
+
+	rr = httptest.NewRecorder()
+	served = serveReadyViaBackend(rr, req, func(context.Context) backend.IssueBackend {
+		return &stubReadyBackend{err: errors.New("ready failed")}
+	})
+	if !served || rr.Code != http.StatusInternalServerError {
+		t.Fatalf("backend error served=%v code=%d body=%s", served, rr.Code, rr.Body.String())
+	}
+
+	if issueDataToTypesIssue(nil) != nil {
+		t.Fatal("issueDataToTypesIssue(nil) returned non-nil")
 	}
 }
 

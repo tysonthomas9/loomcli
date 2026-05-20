@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -198,6 +199,75 @@ func TestEnsureAgentDefinitionLocalWorktreesRequiresSelectedRepos(t *testing.T) 
 	})
 	if err == nil || !strings.Contains(err.Error(), "has no repos") {
 		t.Fatalf("ensure with no repos = %v, want no repos error", err)
+	}
+}
+
+func TestEnsureAgentDefinitionLocalWorktreesCreatesAndRemembersWorktree(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	ctx := context.Background()
+	st := memstore.New()
+	t.Cleanup(func() { _ = st.Close() })
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS", Name: "Workspace"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	workspaceDir := t.TempDir()
+	repoDir := filepath.Join(workspaceDir, "api")
+	initAgentdefGitRepo(t, repoDir)
+	if _, err := st.Repos().Create(ctx, store.RepoCreate{WorkspaceKey: "WS", Name: "api", Groups: []string{"backend"}}); err != nil {
+		t.Fatalf("create repo: %v", err)
+	}
+	if err := bootstrap.SaveStateCache(&bootstrap.StateCache{
+		Workspaces: map[string]bootstrap.WorkspaceLocalState{
+			"WS": {Path: workspaceDir, Repos: map[string]string{"api": repoDir}},
+		},
+	}); err != nil {
+		t.Fatalf("SaveStateCache: %v", err)
+	}
+
+	err := ensureAgentDefinitionLocalWorktrees(ctx, st, domain.Agent{
+		WorkspaceKey: "WS",
+		Name:         "worker",
+		RoleName:     "task",
+		Repos:        []string{"api"},
+	})
+	if err != nil {
+		t.Fatalf("ensure worktree: %v", err)
+	}
+	want := filepath.Join(workspaceDir, "worktrees", "api", "worker")
+	if _, err := os.Stat(filepath.Join(want, ".git")); err != nil {
+		t.Fatalf("worktree .git missing: %v", err)
+	}
+	sc, err := bootstrap.LoadStateCache()
+	if err != nil {
+		t.Fatalf("LoadStateCache: %v", err)
+	}
+	if got := sc.Workspaces["WS"].Agents["worker"].Worktree; got != want {
+		t.Fatalf("remembered worktree = %q, want %q", got, want)
+	}
+}
+
+func initAgentdefGitRepo(t *testing.T, dir string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatalf("mkdir repo: %v", err)
+	}
+	agentdefGit(t, dir, "init")
+	agentdefGit(t, dir, "config", "user.name", "Agentdef Test")
+	agentdefGit(t, dir, "config", "user.email", "agentdef@example.test")
+	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("hello\n"), 0644); err != nil {
+		t.Fatalf("write readme: %v", err)
+	}
+	agentdefGit(t, dir, "add", "README.md")
+	agentdefGit(t, dir, "commit", "-m", "init")
+}
+
+func agentdefGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...) //nolint:norawexec,gosec // fixed test command.
+	cmd.Dir = dir
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s failed: %v\n%s", strings.Join(args, " "), err, strings.TrimSpace(string(output)))
 	}
 }
 

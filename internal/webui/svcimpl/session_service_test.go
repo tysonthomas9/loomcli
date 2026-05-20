@@ -1,6 +1,7 @@
 package svcimpl
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -153,6 +154,9 @@ func TestSessionServiceListTaskSessionsFallsBackToFileStores(t *testing.T) {
 }
 
 func TestSessionServiceListTaskSessionsSearchesRuntimeDir(t *testing.T) {
+	loomConfigDir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", loomConfigDir)
+
 	ctx := t.Context()
 	workspacePath := t.TempDir()
 	runtimeDir := t.TempDir()
@@ -198,6 +202,207 @@ func TestSessionServiceListTaskSessionsSearchesRuntimeDir(t *testing.T) {
 	}
 }
 
+func TestSessionServiceStoresForWorkspaceAvailabilityBranches(t *testing.T) {
+	ctx := t.Context()
+
+	unavailableSvc := NewSessionServiceWithRuntimeDir(nil, nil, "").(*sessionServiceImpl)
+	if _, err := unavailableSvc.storesForWorkspace(ctx, "WS"); err == nil {
+		t.Fatal("storesForWorkspace without store or runtime dir returned nil error")
+	}
+
+	runtimeDir := t.TempDir()
+	runtimeSvc := NewSessionServiceWithRuntimeDir(nil, nil, runtimeDir).(*sessionServiceImpl)
+	stores, err := runtimeSvc.storesForWorkspace(ctx, "WS")
+	if err != nil {
+		t.Fatalf("storesForWorkspace runtime-only: %v", err)
+	}
+	if len(stores) != 1 {
+		t.Fatalf("stores = %d, want 1", len(stores))
+	}
+
+	withMissingWorkspace := NewSessionServiceWithRuntimeDir(memstore.New(), nil, runtimeDir).(*sessionServiceImpl)
+	stores, err = withMissingWorkspace.storesForWorkspace(ctx, "MISSING")
+	if err != nil {
+		t.Fatalf("storesForWorkspace with runtime fallback: %v", err)
+	}
+	if len(stores) != 1 {
+		t.Fatalf("stores with missing workspace = %d, want runtime fallback only", len(stores))
+	}
+}
+
+func TestSessionServiceAdditionalErrorAndMetadataBranches(t *testing.T) {
+	ctx := t.Context()
+
+	missingWorkspaceSvc := NewSessionServiceWithRuntimeDir(memstore.New(), nil, "").(*sessionServiceImpl)
+	if _, err := missingWorkspaceSvc.storesForWorkspace(ctx, "MISSING"); err == nil {
+		t.Fatal("storesForWorkspace missing workspace without runtime returned nil error")
+	}
+	if _, err := missingWorkspaceSvc.findStoreForSession(ctx, "MISSING", "missing-session"); err == nil {
+		t.Fatal("findStoreForSession missing workspace returned nil error")
+	}
+	if items, err := (&sessionServiceImpl{}).controlPlaneTaskSessions(ctx, "WS", "TASK-1"); err != nil || items != nil {
+		t.Fatalf("controlPlaneTaskSessions without store = %+v, %v", items, err)
+	}
+
+	runtimeDir := t.TempDir()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS", Name: "Workspace"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := bootstrap.SaveStateCache(&bootstrap.StateCache{
+		Workspaces: map[string]bootstrap.WorkspaceLocalState{
+			"WS": {Path: runtimeDir},
+		},
+	}); err != nil {
+		t.Fatalf("save state cache: %v", err)
+	}
+	duplicateSvc := NewSessionServiceWithRuntimeDir(st, nil, runtimeDir).(*sessionServiceImpl)
+	stores, err := duplicateSvc.storesForWorkspace(ctx, "WS")
+	if err != nil {
+		t.Fatalf("storesForWorkspace duplicate runtime: %v", err)
+	}
+	if len(stores) != 1 {
+		t.Fatalf("stores = %d, want duplicate runtime/workspace path to be skipped", len(stores))
+	}
+
+	finishedAt := time.Now().UTC()
+	exitCode := 7
+	rec := sessionRecordFromAgentSession(&domain.AgentSession{
+		SessionID:  "sess-meta",
+		AgentID:    "agent",
+		CreatedAt:  finishedAt.Add(-time.Minute),
+		FinishedAt: &finishedAt,
+		ExitCode:   &exitCode,
+		Status:     domain.AgentSessionExpired,
+		Metadata: map[string]string{
+			"task_id":       "TASK-META",
+			"backend":       "codex",
+			"files_changed": "2",
+		},
+	})
+	if rec.TaskID != "TASK-META" || rec.Backend != "codex" || rec.Status != sessions.StatusAborted || rec.ExitCode != exitCode || rec.DurationS <= 0 {
+		t.Fatalf("sessionRecordFromAgentSession metadata fallback = %+v", rec)
+	}
+
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+	hist := sessionhistory.NewStore(rdb, nil)
+	historySvc := NewSessionService(nil, hist)
+	if _, err := historySvc.ListSessionHistory(ctx, "WS", "bad/id"); err == nil {
+		t.Fatal("ListSessionHistory invalid issue ID returned nil error")
+	}
+
+	sessStore, err := sessions.NewStore(runtimeDir)
+	if err != nil {
+		t.Fatalf("new session store: %v", err)
+	}
+	sess, err := sessStore.CreateSession(sessions.CreateOptions{AgentName: "worker", Backend: "claude", Phase: "implementation"})
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	if err := sess.Finalize(sessions.FinalizeOptions{TaskID: "TASK-CORRUPT", ExitCode: 0}); err != nil {
+		t.Fatalf("finalize session: %v", err)
+	}
+	subPath := sessStore.SubagentTranscriptPath(sess.SessionID(), "badjson")
+	if err := os.MkdirAll(filepath.Dir(subPath), 0o755); err != nil {
+		t.Fatalf("mkdir subagent path: %v", err)
+	}
+	if err := os.Mkdir(subPath, 0o755); err != nil {
+		t.Fatalf("create unreadable subagent transcript path: %v", err)
+	}
+	if _, err := NewSessionServiceWithRuntimeDir(nil, nil, runtimeDir).GetSessionSubagentTranscript(ctx, "WS", "TASK-CORRUPT", sess.SessionID(), "badjson"); err == nil {
+		t.Fatal("corrupt subagent transcript returned nil error")
+	}
+}
+
+func TestSessionServiceAdditionalControlPlaneAndHistoryErrorBranches(t *testing.T) {
+	ctx := t.Context()
+
+	listErr := errors.New("list sessions failed")
+	controlErrSvc := NewSessionService(&sessionServiceStoreOverride{
+		Store:    memstore.New(),
+		sessions: agentSessionListStore{err: listErr},
+	}, nil).(*sessionServiceImpl)
+	if _, err := controlErrSvc.controlPlaneTaskSessions(ctx, "WS", "TASK-1"); !errors.Is(err, listErr) {
+		t.Fatalf("controlPlaneTaskSessions err = %v, want %v", err, listErr)
+	}
+
+	later := time.Now().UTC()
+	earlier := later.Add(-time.Minute)
+	controlSvc := NewSessionService(&sessionServiceStoreOverride{
+		Store: memstore.New(),
+		sessions: agentSessionListStore{records: []*domain.AgentSession{
+			nil,
+			{
+				WorkspaceKey: "WS",
+				SessionID:    "older",
+				AgentID:      "a",
+				TaskID:       "TASK-1",
+				Status:       domain.AgentSessionRunning,
+				CreatedAt:    earlier,
+				Metadata:     map[string]string{"diff_path": "/tmp/diff.patch"},
+			},
+			{
+				WorkspaceKey: "WS",
+				SessionID:    "newer",
+				AgentID:      "b",
+				TaskID:       "TASK-1",
+				Status:       domain.AgentSessionCompleted,
+				StartedAt:    later,
+				CreatedAt:    later,
+				Metadata:     map[string]string{"transcript_path": "/tmp/transcript.jsonl"},
+			},
+		}},
+	}, nil).(*sessionServiceImpl)
+	items, err := controlSvc.controlPlaneTaskSessions(ctx, "WS", "TASK-1")
+	if err != nil {
+		t.Fatalf("controlPlaneTaskSessions sorted: %v", err)
+	}
+	if len(items) != 2 || items[0].SessionID != "newer" || !items[0].HasTranscript || !items[1].HasDiff {
+		t.Fatalf("control-plane items = %+v", items)
+	}
+
+	missingWorkspaceSvc := NewSessionServiceWithRuntimeDir(memstore.New(), nil, "").(*sessionServiceImpl)
+	if _, err := missingWorkspaceSvc.ListTaskSessions(ctx, "MISSING", "TASK-1"); err == nil {
+		t.Fatal("ListTaskSessions missing workspace returned nil error")
+	}
+
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	hist := sessionhistory.NewStore(rdb, nil)
+	historySvc := NewSessionService(nil, hist)
+	_ = rdb.Close()
+	if _, err := historySvc.ListSessionHistory(ctx, "WS", "TASK-1"); err == nil {
+		t.Fatal("ListSessionHistory with closed redis returned nil error")
+	}
+	if _, err := historySvc.GetSessionScrollback(ctx, "WS", "TASK-1", "record"); err == nil {
+		t.Fatal("GetSessionScrollback with closed redis returned nil error")
+	}
+}
+
+type sessionServiceStoreOverride struct {
+	store.Store
+	sessions store.AgentSessionStore
+}
+
+func (s *sessionServiceStoreOverride) AgentSessions() store.AgentSessionStore {
+	if s.sessions != nil {
+		return s.sessions
+	}
+	return s.Store.AgentSessions()
+}
+
+type agentSessionListStore struct {
+	store.AgentSessionStore
+	records []*domain.AgentSession
+	err     error
+}
+
+func (s agentSessionListStore) List(context.Context, string, store.AgentSessionFilter) ([]*domain.AgentSession, error) {
+	return s.records, s.err
+}
+
 func TestReadScrollbackFileReturnsInternalWhenHomeDirUnavailable(t *testing.T) {
 	oldUserHomeDir := userHomeDir
 	userHomeDir = func() (string, error) {
@@ -215,6 +420,21 @@ func TestReadScrollbackFileReturnsInternalWhenHomeDirUnavailable(t *testing.T) {
 	}
 	if svcErr.Kind != service.KindInternal {
 		t.Fatalf("error kind = %q, want %q", svcErr.Kind, service.KindInternal)
+	}
+}
+
+func TestReadScrollbackFileReturnsInternalForEmptyHomeDir(t *testing.T) {
+	oldUserHomeDir := userHomeDir
+	userHomeDir = func() (string, error) { return " ", nil }
+	t.Cleanup(func() { userHomeDir = oldUserHomeDir })
+
+	_, err := readScrollbackFile("/tmp/scrollback.log")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	var svcErr *service.ServiceError
+	if !errors.As(err, &svcErr) || svcErr.Kind != service.KindInternal {
+		t.Fatalf("error = %T %v, want internal ServiceError", err, err)
 	}
 }
 
@@ -290,6 +510,51 @@ func TestSessionServiceDetailTranscriptDiffAndSubagents(t *testing.T) {
 	}
 }
 
+func TestSessionServiceDetailOwnershipAndMissingArtifacts(t *testing.T) {
+	runtimeDir := t.TempDir()
+	sessStore, err := sessions.NewStore(runtimeDir)
+	if err != nil {
+		t.Fatalf("new session store: %v", err)
+	}
+	sess, err := sessStore.CreateSession(sessions.CreateOptions{
+		AgentName: "worker",
+		Backend:   "codex",
+		Phase:     "implementation",
+	})
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	if err := sess.Finalize(sessions.FinalizeOptions{TaskID: "TASK-6", ExitCode: 0}); err != nil {
+		t.Fatalf("finalize session: %v", err)
+	}
+
+	svc := NewSessionServiceWithRuntimeDir(nil, nil, runtimeDir)
+	if _, err := svc.GetSession(t.Context(), "WS", "TASK-OTHER", sess.SessionID()); err == nil {
+		t.Fatal("GetSession for wrong task returned nil error")
+	}
+	if _, err := svc.GetSession(t.Context(), "WS", "TASK-6", "missing-session"); err == nil {
+		t.Fatal("GetSession for missing session returned nil error")
+	}
+	if _, err := svc.GetSessionTranscript(t.Context(), "WS", "TASK-OTHER", sess.SessionID()); err == nil {
+		t.Fatal("GetSessionTranscript for wrong task returned nil error")
+	}
+	if _, err := svc.GetSessionTranscript(t.Context(), "WS", "TASK-6", "bad/session"); err == nil {
+		t.Fatal("GetSessionTranscript for invalid session returned nil error")
+	}
+	if _, err := svc.ListSessionSubagents(t.Context(), "WS", "TASK-OTHER", sess.SessionID()); err == nil {
+		t.Fatal("ListSessionSubagents for wrong task returned nil error")
+	}
+	if _, err := svc.GetSessionDiff(t.Context(), "WS", "TASK-OTHER", sess.SessionID()); err == nil {
+		t.Fatal("GetSessionDiff for wrong task returned nil error")
+	}
+	if _, err := svc.GetSessionDiff(t.Context(), "WS", "TASK-6", sess.SessionID()); err == nil {
+		t.Fatal("GetSessionDiff without diff returned nil error")
+	}
+	if _, err := svc.GetSessionDiff(t.Context(), "WS", "TASK-6", "bad/session"); err == nil {
+		t.Fatal("GetSessionDiff for invalid session returned nil error")
+	}
+}
+
 func TestSessionServiceValidationAndScrollbackHelpers(t *testing.T) {
 	svc := NewSessionServiceWithRuntimeDir(nil, nil, t.TempDir())
 	if _, err := svc.ListTaskSessions(t.Context(), "WS", "../bad"); err == nil {
@@ -298,11 +563,26 @@ func TestSessionServiceValidationAndScrollbackHelpers(t *testing.T) {
 	if _, err := svc.GetSession(t.Context(), "WS", "TASK", "../bad"); err == nil {
 		t.Fatal("invalid session id returned nil error")
 	}
+	if _, err := svc.GetSession(t.Context(), "WS", "../bad", "sess"); err == nil {
+		t.Fatal("invalid get task id returned nil error")
+	}
+	if _, err := svc.GetSessionTranscript(t.Context(), "WS", "../bad", "sess"); err == nil {
+		t.Fatal("invalid transcript task id returned nil error")
+	}
+	if _, err := svc.ListSessionSubagents(t.Context(), "WS", "../bad", "sess"); err == nil {
+		t.Fatal("invalid subagent list task id returned nil error")
+	}
 	if _, err := svc.GetSessionDiff(t.Context(), "WS", "../bad", "sess"); err == nil {
 		t.Fatal("invalid diff task id returned nil error")
 	}
+	if _, err := svc.GetSessionDiff(t.Context(), "WS", "TASK", ""); err == nil {
+		t.Fatal("empty diff session id returned nil error")
+	}
 	if _, err := svc.GetSessionScrollback(t.Context(), "WS", "bad/id", "record"); err == nil {
 		t.Fatal("nil history should return unavailable before validation")
+	}
+	if _, err := svc.ListSessionHistory(t.Context(), "WS", "TASK-5"); err == nil {
+		t.Fatal("nil history store should return unavailable")
 	}
 	records := []sessionhistory.SessionRecord{{ID: "one"}, {ID: "two"}}
 	if got := findSessionRecord(records, "two"); got == nil || got.ID != "two" {

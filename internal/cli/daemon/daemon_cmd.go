@@ -189,13 +189,13 @@ func runDaemon(cmd *cobra.Command, args []string) {
 	projectDir, err := daemonGetwdFn()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: cannot determine working directory: %v\n", err)
-		os.Exit(1)
+		exitProcess(1)
 	}
 
 	config, err := loadDaemonConfigFn(projectDir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: loading config: %v\n", err)
-		os.Exit(1)
+		exitProcess(1)
 	}
 
 	paths := resolveDaemonPaths(projectDir, config)
@@ -248,7 +248,7 @@ func initPIDFile(pidFilePath string) {
 	os.Remove(pidFilePath)
 	if err := writePIDFile(pidFilePath, os.Getpid()); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: writing PID file: %v\n", err)
-		os.Exit(1)
+		exitProcess(1)
 	}
 }
 
@@ -266,7 +266,7 @@ func initDaemonServices(config *cfgpkg.DaemonConfig, projectDir string, paths da
 	storeHandle, storeErr := cmdstoreOpenStoreFn(cmdstore.RootContext())
 	if storeErr != nil {
 		fmt.Fprintf(os.Stderr, "Error: failed to open fleet-db store for daemon: %v\n", storeErr)
-		os.Exit(1)
+		exitProcess(1)
 	}
 	var st store.Store
 	if storeHandle != nil {
@@ -279,7 +279,7 @@ func initDaemonServices(config *cfgpkg.DaemonConfig, projectDir string, paths da
 			_ = storeHandle.Close()
 		}
 		fmt.Fprintf(os.Stderr, "Error: creating daemon: %v\n", err)
-		os.Exit(1)
+		exitProcess(1)
 	}
 	daemon.storeHandle = storeHandle
 
@@ -303,7 +303,7 @@ func runDaemonMainLoop(config *cfgpkg.DaemonConfig, projectDir string, paths dae
 	if err := daemon.Start(); err != nil {
 		cleanupOnStartFailure(paths.pidFile, paths.stateFile, lockFile, paths.lockFile)
 		fmt.Fprintf(os.Stderr, "Error: starting daemon: %v\n", err)
-		os.Exit(1)
+		exitProcess(1)
 	}
 
 	startDaemonSockets(daemon, projectDir, config)
@@ -321,16 +321,16 @@ func acquireDaemonLock(lockFilePath string) *os.File {
 	lf, err := os.OpenFile(lockFilePath, os.O_CREATE|os.O_RDWR, 0644)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: opening lock file: %v\n", err)
-		os.Exit(1)
+		exitProcess(1)
 	}
 	if err := lockfile.TryLockExclusive(lf); err != nil {
 		lf.Close()
 		if err == lockfile.ErrLocked {
 			fmt.Fprintf(os.Stderr, "Error: daemon already running (lock held on %s)\n", lockFilePath)
-			os.Exit(1)
+			exitProcess(1)
 		}
 		fmt.Fprintf(os.Stderr, "Error: acquiring daemon lock: %v\n", err)
-		os.Exit(1)
+		exitProcess(1)
 	}
 
 	lockInfo, _ := json.Marshal(lockfile.LockInfo{
@@ -365,7 +365,7 @@ func runDaemonStatus(cmd *cobra.Command, args []string) {
 	projectDir, err := os.Getwd()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: cannot determine working directory: %v\n", err)
-		os.Exit(1)
+		exitProcess(1)
 	}
 
 	// Use shared runtime detection (lockfile -> state -> PID fallback)
@@ -410,7 +410,7 @@ func runDaemonStop(cmd *cobra.Command, args []string) {
 	projectDir, err := os.Getwd()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: cannot determine working directory: %v\n", err)
-		os.Exit(1)
+		exitProcess(1)
 	}
 
 	// Use shared runtime detection (lockfile -> state -> PID fallback)
@@ -425,7 +425,7 @@ func runDaemonStop(cmd *cobra.Command, args []string) {
 		fmt.Fprintf(os.Stderr, "To recover, inspect or remove .loom/daemon.lock and retry:\n")
 		fmt.Fprintf(os.Stderr, "  cat .loom/daemon.lock        # check daemon metadata\n")
 		fmt.Fprintf(os.Stderr, "  rm .loom/daemon.lock          # force-clear stale lock\n")
-		os.Exit(1)
+		exitProcess(1)
 	}
 
 	if daemonStopForce {
@@ -439,13 +439,13 @@ func runDaemonConfig(cmd *cobra.Command, args []string) {
 	projectDir, err := os.Getwd()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: cannot determine working directory: %v\n", err)
-		os.Exit(1)
+		exitProcess(1)
 	}
 
 	config, err := cfgpkg.LoadDaemonConfig(projectDir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: loading config: %v\n", err)
-		os.Exit(1)
+		exitProcess(1)
 	}
 
 	display := resolvedConfigForDisplay(config)
@@ -453,7 +453,7 @@ func runDaemonConfig(cmd *cobra.Command, args []string) {
 	data, err := yaml.Marshal(display)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: marshaling config: %v\n", err)
-		os.Exit(1)
+		exitProcess(1)
 	}
 
 	fmt.Print(string(data))

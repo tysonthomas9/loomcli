@@ -440,6 +440,155 @@ func TestInstallAndUninstallServiceWithFakeManagers(t *testing.T) {
 	}
 }
 
+func TestInstallSystemdSuccessAndExistingDefinitionWithFakeManager(t *testing.T) {
+	fakeBin := t.TempDir()
+	fakeSystemctl := filepath.Join(fakeBin, "systemctl")
+	if err := os.WriteFile(fakeSystemctl, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		t.Fatalf("write fake systemctl: %v", err)
+	}
+	t.Setenv("PATH", fakeBin)
+
+	unitPath := filepath.Join(t.TempDir(), "loom.service")
+	if err := os.WriteFile(unitPath, []byte("old unit"), 0o644); err != nil {
+		t.Fatalf("write existing unit: %v", err)
+	}
+
+	out := captureInstallStdout(t, func() {
+		if err := installSystemd("loom-serve", unitPath, "new unit"); err != nil {
+			t.Fatalf("installSystemd with fake manager: %v", err)
+		}
+	})
+	if !strings.Contains(out, "Replacing existing service definition") || !strings.Contains(out, "installed and started") {
+		t.Fatalf("installSystemd output = %q", out)
+	}
+	data, err := os.ReadFile(unitPath)
+	if err != nil {
+		t.Fatalf("read installed unit: %v", err)
+	}
+	if string(data) != "new unit" {
+		t.Fatalf("unit content = %q, want new unit", string(data))
+	}
+}
+
+func TestUninstallSystemdSuccessWithFakeManager(t *testing.T) {
+	fakeBin := t.TempDir()
+	fakeSystemctl := filepath.Join(fakeBin, "systemctl")
+	if err := os.WriteFile(fakeSystemctl, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		t.Fatalf("write fake systemctl: %v", err)
+	}
+	t.Setenv("PATH", fakeBin)
+
+	unitPath := filepath.Join(t.TempDir(), "loom.service")
+	if err := os.WriteFile(unitPath, []byte("unit"), 0o644); err != nil {
+		t.Fatalf("write unit: %v", err)
+	}
+	out := captureInstallStdout(t, func() {
+		if err := uninstallSystemd("loom-serve", unitPath); err != nil {
+			t.Fatalf("uninstallSystemd: %v", err)
+		}
+	})
+	if !strings.Contains(out, "uninstalled") {
+		t.Fatalf("uninstall output = %q", out)
+	}
+	if _, err := os.Stat(unitPath); !os.IsNotExist(err) {
+		t.Fatalf("unit still exists: %v", err)
+	}
+}
+
+func TestInstallSystemdCommandFailureBranches(t *testing.T) {
+	tests := []struct {
+		name        string
+		script      string
+		wantErrPart string
+	}{
+		{
+			name:        "daemon reload",
+			script:      "#!/bin/sh\nif [ \"$2\" = \"daemon-reload\" ]; then exit 42; fi\nexit 0\n",
+			wantErrPart: "systemd user session not available",
+		},
+		{
+			name:        "enable",
+			script:      "#!/bin/sh\nif [ \"$2\" = \"enable\" ]; then exit 43; fi\nexit 0\n",
+			wantErrPart: "enabling service",
+		},
+		{
+			name:        "start",
+			script:      "#!/bin/sh\nif [ \"$2\" = \"start\" ]; then exit 44; fi\nexit 0\n",
+			wantErrPart: "starting service",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fakeBin := t.TempDir()
+			fakeSystemctl := filepath.Join(fakeBin, "systemctl")
+			if err := os.WriteFile(fakeSystemctl, []byte(tt.script), 0o700); err != nil {
+				t.Fatalf("write fake systemctl: %v", err)
+			}
+			t.Setenv("PATH", fakeBin)
+
+			err := installSystemd("loom-serve", filepath.Join(t.TempDir(), "loom.service"), "unit")
+			if err == nil || !strings.Contains(err.Error(), tt.wantErrPart) {
+				t.Fatalf("installSystemd err = %v, want %q", err, tt.wantErrPart)
+			}
+		})
+	}
+}
+
+func TestInstallLaunchdFallbackAndFailureBranches(t *testing.T) {
+	cfg := baseCfg()
+	cfg.Name = "com.loom.serve"
+
+	t.Run("bootstrap fallback to load succeeds", func(t *testing.T) {
+		fakeBin := t.TempDir()
+		fakeLaunchctl := filepath.Join(fakeBin, "launchctl")
+		script := "#!/bin/sh\nif [ \"$1\" = \"bootstrap\" ]; then exit 42; fi\nexit 0\n"
+		if err := os.WriteFile(fakeLaunchctl, []byte(script), 0o700); err != nil {
+			t.Fatalf("write fake launchctl: %v", err)
+		}
+		t.Setenv("PATH", fakeBin)
+
+		plistPath := filepath.Join(t.TempDir(), "loom.plist")
+		out := captureInstallStdout(t, func() {
+			if err := installLaunchd(cfg, plistPath, "plist"); err != nil {
+				t.Fatalf("installLaunchd: %v", err)
+			}
+		})
+		if !strings.Contains(out, "installed and started") {
+			t.Fatalf("launchd output = %q", out)
+		}
+	})
+
+	t.Run("bootstrap and load fail", func(t *testing.T) {
+		fakeBin := t.TempDir()
+		fakeLaunchctl := filepath.Join(fakeBin, "launchctl")
+		if err := os.WriteFile(fakeLaunchctl, []byte("#!/bin/sh\nexit 42\n"), 0o700); err != nil {
+			t.Fatalf("write fake launchctl: %v", err)
+		}
+		t.Setenv("PATH", fakeBin)
+		if err := installLaunchd(cfg, filepath.Join(t.TempDir(), "loom.plist"), "plist"); err == nil || !strings.Contains(err.Error(), "loading service") {
+			t.Fatalf("installLaunchd err = %v", err)
+		}
+	})
+
+	t.Run("uninstall bootout fallback", func(t *testing.T) {
+		fakeBin := t.TempDir()
+		fakeLaunchctl := filepath.Join(fakeBin, "launchctl")
+		script := "#!/bin/sh\nif [ \"$1\" = \"bootout\" ]; then exit 42; fi\nexit 0\n"
+		if err := os.WriteFile(fakeLaunchctl, []byte(script), 0o700); err != nil {
+			t.Fatalf("write fake launchctl: %v", err)
+		}
+		t.Setenv("PATH", fakeBin)
+		plistPath := filepath.Join(t.TempDir(), "loom.plist")
+		if err := os.WriteFile(plistPath, []byte("plist"), 0o644); err != nil {
+			t.Fatalf("write plist: %v", err)
+		}
+		if err := uninstallLaunchd(cfg.Name, plistPath); err != nil {
+			t.Fatalf("uninstallLaunchd: %v", err)
+		}
+	})
+}
+
 func TestWriteServiceFileAndLogDirResolution(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "nested", "loom.service")

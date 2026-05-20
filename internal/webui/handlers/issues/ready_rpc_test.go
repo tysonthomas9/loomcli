@@ -145,6 +145,13 @@ func TestReadyInterceptorResponseWriterBehavior(t *testing.T) {
 	if rec.Code != http.StatusCreated || rec.Body.String() != "created" {
 		t.Fatalf("flush explicit status/body = %d/%q", rec.Code, rec.Body.String())
 	}
+
+	interceptor = &readyInterceptor{header: make(http.Header)}
+	rec = httptest.NewRecorder()
+	interceptor.flushTo(rec)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("empty flush status = %d, want 200", rec.Code)
+	}
 }
 
 func TestExecuteReadyRPCErrorsReturnOrDiscard(t *testing.T) {
@@ -227,6 +234,49 @@ func TestBuildReadyResponseParentFallbacks(t *testing.T) {
 	got = buildReadyResponse(errClient, issues[:1])
 	if got[0].Parent != nil || got[0].ParentTitle != nil {
 		t.Fatalf("parent error response = %+v", got[0])
+	}
+}
+
+func TestFilterUnclosedBlockersListErrorBranches(t *testing.T) {
+	issues := []*types.Issue{{
+		ID:     "READY",
+		Status: types.StatusOpen,
+		Dependencies: []*types.Dependency{{
+			IssueID:     "READY",
+			DependsOnID: "BLOCKER",
+			Type:        types.DepBlocks,
+		}},
+	}}
+
+	for _, tt := range []struct {
+		name string
+		list func(*rpc.ListArgs) (*rpc.Response, error)
+	}{
+		{
+			name: "list error",
+			list: func(*rpc.ListArgs) (*rpc.Response, error) {
+				return nil, errors.New("list failed")
+			},
+		},
+		{
+			name: "list unsuccessful",
+			list: func(*rpc.ListArgs) (*rpc.Response, error) {
+				return &rpc.Response{Success: false, Error: "nope"}, nil
+			},
+		},
+		{
+			name: "list bad json",
+			list: func(*rpc.ListArgs) (*rpc.Response, error) {
+				return &rpc.Response{Success: true, Data: json.RawMessage("{bad")}, nil
+			},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got := filterUnclosedBlockers(&readyRPCClient{list: tt.list}, issues)
+			if len(got) != 1 || got[0].ID != "READY" {
+				t.Fatalf("filterUnclosedBlockers = %+v, want original issue", got)
+			}
+		})
 	}
 }
 

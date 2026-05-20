@@ -224,6 +224,20 @@ func TestHandleStatsWithBackend(t *testing.T) {
 	}
 }
 
+func TestHandleStatsAndDaemonStatusWrappers(t *testing.T) {
+	rec := httptest.NewRecorder()
+	HandleStats(nil).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/stats", nil))
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("HandleStats(nil) status=%d body=%s, want 503", rec.Code, rec.Body.String())
+	}
+
+	rec = httptest.NewRecorder()
+	HandleDaemonStatus(nil).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/daemon/status", nil))
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("HandleDaemonStatus(nil) status=%d body=%s, want 503", rec.Code, rec.Body.String())
+	}
+}
+
 func TestHandleStatsWithPool(t *testing.T) {
 	statsData, err := json.Marshal(types.Statistics{TotalIssues: 4, OpenIssues: 2})
 	if err != nil {

@@ -83,18 +83,16 @@ func TestCollectorBackgroundRefreshAndNilCollectorFallback(t *testing.T) {
 	})
 
 	deadline := time.Now().Add(250 * time.Millisecond)
+	var data *monitor.MonitorData
 	for time.Now().Before(deadline) {
-		if calls.Load() > 0 {
-			data := collector()
-			if data == nil || data.Tasks.InProgress == 0 {
-				t.Fatalf("background collector returned %+v", data)
-			}
+		data = collector()
+		if data != nil && data.Tasks.InProgress >= 2 {
 			break
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	if calls.Load() == 0 {
-		t.Fatalf("background collector did not run")
+	if data == nil || data.Tasks.InProgress < 2 {
+		t.Fatalf("background collector returned %+v after %d calls", data, calls.Load())
 	}
 	cancel()
 
@@ -102,9 +100,42 @@ func TestCollectorBackgroundRefreshAndNilCollectorFallback(t *testing.T) {
 	if fallback == nil {
 		t.Fatalf("NewCollectorFunc nil collectFn returned nil")
 	}
-	bgFallback := NewCollectorWithBackground(context.Background(), time.Nanosecond, time.Hour)
+	bgCtx, bgCancel := context.WithCancel(context.Background())
+	bgCancel()
+	bgFallback := NewCollectorWithBackground(bgCtx, time.Nanosecond, time.Hour)
 	if bgFallback == nil {
 		t.Fatalf("NewCollectorWithBackground returned nil")
+	}
+}
+
+func TestCachedCollectorBackgroundTickerRefreshes(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var calls atomic.Int32
+	collector := &cachedCollector{
+		ttl: time.Hour,
+		collectFn: func() *monitor.MonitorData {
+			value := int(calls.Add(1))
+			return &monitor.MonitorData{Tasks: monitor.TaskSummary{InProgress: value}}
+		},
+	}
+	collector.startBackground(ctx, time.Millisecond)
+
+	deadline := time.Now().Add(250 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if calls.Load() >= 2 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if calls.Load() < 2 {
+		t.Fatalf("background ticker did not refresh")
+	}
+	collector.mu.Lock()
+	data := collector.cached
+	collector.mu.Unlock()
+	if data == nil || data.Tasks.InProgress < 2 {
+		t.Fatalf("cached background data = %+v", data)
 	}
 }
 

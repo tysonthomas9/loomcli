@@ -89,6 +89,56 @@ func TestTranslateBackendErrorAllBackendKinds(t *testing.T) {
 func TestIssueServiceAdditionalBackendErrorBranches(t *testing.T) {
 	ctx := context.Background()
 
+	t.Run("backend unavailable across migrated methods", func(t *testing.T) {
+		svc := NewIssueServiceWithBackend(nil, nil, nil, nil)
+		if _, err := svc.GetIssue(ctx, "i-1"); !serviceErrorKind(err, KindUnavailable) {
+			t.Fatalf("GetIssue err = %v, want unavailable", err)
+		}
+		if _, err := svc.CreateIssue(ctx, CreateIssueParams{Title: "T", IssueType: "task", Priority: 1}); !serviceErrorKind(err, KindUnavailable) {
+			t.Fatalf("CreateIssue err = %v, want unavailable", err)
+		}
+		if err := svc.PatchIssue(ctx, PatchIssueParams{IssueID: "i-1"}); !serviceErrorKind(err, KindUnavailable) {
+			t.Fatalf("PatchIssue err = %v, want unavailable", err)
+		}
+		if _, err := svc.CloseIssue(ctx, CloseIssueParams{IssueID: "i-1"}); !serviceErrorKind(err, KindUnavailable) {
+			t.Fatalf("CloseIssue err = %v, want unavailable", err)
+		}
+		if _, err := svc.ClaimIssue(ctx, ClaimIssueParams{IssueID: "i-1"}); !serviceErrorKind(err, KindUnavailable) {
+			t.Fatalf("ClaimIssue err = %v, want unavailable", err)
+		}
+		if _, err := svc.DeleteIssue(ctx, "i-1"); !serviceErrorKind(err, KindUnavailable) {
+			t.Fatalf("DeleteIssue err = %v, want unavailable", err)
+		}
+		if err := svc.AddDependency(ctx, AddDependencyParams{IssueID: "i-1", DependsOnID: "i-2"}); !serviceErrorKind(err, KindUnavailable) {
+			t.Fatalf("AddDependency err = %v, want unavailable", err)
+		}
+		if err := svc.RemoveDependency(ctx, RemoveDependencyParams{IssueID: "i-1", DepID: "i-2"}); !serviceErrorKind(err, KindUnavailable) {
+			t.Fatalf("RemoveDependency err = %v, want unavailable", err)
+		}
+		if _, err := svc.SearchIssues(ctx, SearchIssuesParams{Query: "needle"}); !serviceErrorKind(err, KindUnavailable) {
+			t.Fatalf("SearchIssues err = %v, want unavailable", err)
+		}
+		if err := svc.ReopenIssue(ctx, ReopenIssueParams{IssueID: "i-1"}); !serviceErrorKind(err, KindUnavailable) {
+			t.Fatalf("ReopenIssue err = %v, want unavailable", err)
+		}
+		if _, err := svc.ListEvents(ctx, EventListParams{IssueID: "i-1"}); !serviceErrorKind(err, KindUnavailable) {
+			t.Fatalf("ListEvents err = %v, want unavailable", err)
+		}
+		if _, err := svc.ListDependencies(ctx, "i-1"); !serviceErrorKind(err, KindUnavailable) {
+			t.Fatalf("ListDependencies err = %v, want unavailable", err)
+		}
+		if isTemplateUpdateError(nil) {
+			t.Fatal("isTemplateUpdateError(nil) = true")
+		}
+	})
+
+	t.Run("add dependency missing target validation", func(t *testing.T) {
+		svc := newServiceWithFake(&fakeIssueBackend{})
+		if err := svc.AddDependency(ctx, AddDependencyParams{IssueID: "i-1"}); !serviceErrorKind(err, KindValidation) {
+			t.Fatalf("AddDependency missing target err = %v, want validation", err)
+		}
+	})
+
 	t.Run("create nil result", func(t *testing.T) {
 		svc := newServiceWithFake(&fakeIssueBackend{})
 		_, err := svc.CreateIssue(ctx, CreateIssueParams{Title: "T", IssueType: "task", Priority: 1})

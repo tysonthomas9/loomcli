@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/events"
 )
 
@@ -38,6 +39,20 @@ func newTestMetricsCache(dir string) *CachedValue[*events.MetricsSnapshot] {
 		snap := store.Snapshot()
 		return &snap
 	})
+}
+
+func TestResolveEventsDirUsesWorkspaceRuntimeDefault(t *testing.T) {
+	runtimeDir := t.TempDir()
+	t.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", runtimeDir)
+	t.Setenv("LOOM_WORKSPACE", "")
+	cli.ResetWorkspaceRuntimeDirCache()
+	t.Cleanup(cli.ResetWorkspaceRuntimeDirCache)
+
+	got := ResolveEventsDir()
+	want := filepath.Join(runtimeDir, ".loom", "events")
+	if got != want {
+		t.Fatalf("ResolveEventsDir = %q, want %q", got, want)
+	}
 }
 
 func TestHandleObservabilityMetrics_Success(t *testing.T) {
@@ -79,6 +94,29 @@ func TestHandleObservabilityMetrics_Success(t *testing.T) {
 	}
 	if resp.Data.TasksByAgent["agent1"] != 1 {
 		t.Errorf("expected 1 task for agent1, got %d", resp.Data.TasksByAgent["agent1"])
+	}
+}
+
+func TestNewMetricsCacheReplaysDirectory(t *testing.T) {
+	dir := t.TempDir()
+	e, _ := events.NewEvent(events.TaskCompleted, "agent1", "coder", "", events.TaskCompletedData{TaskID: "task-1"})
+	e.Timestamp = time.Now()
+	writeTestEvent(t, dir, e)
+
+	cache := NewMetricsCache(dir)
+	snap := cache.Get()
+	if snap == nil {
+		t.Fatal("NewMetricsCache returned nil snapshot")
+	}
+	if snap.TasksCompleted24h != 1 {
+		t.Fatalf("TasksCompleted24h = %d, want 1", snap.TasksCompleted24h)
+	}
+}
+
+func TestNewMetricsCacheHandlesReplayError(t *testing.T) {
+	cache := NewMetricsCache(filepath.Join(t.TempDir(), "missing"))
+	if snap := cache.Get(); snap == nil {
+		t.Fatal("NewMetricsCache missing dir returned nil snapshot")
 	}
 }
 
@@ -513,6 +551,64 @@ func TestHandleObservabilityMetrics_CacheExpiry(t *testing.T) {
 	count := atomic.LoadInt64(&callCount)
 	if count != 2 {
 		t.Errorf("expected 2 collection calls after TTL expiry, got %d", count)
+	}
+}
+
+func TestCachedValueSharesInflightCollection(t *testing.T) {
+	started := make(chan struct{}, 2)
+	release := make(chan struct{})
+	var callCount int64
+	cache := NewCachedValue[int](time.Hour, func() int {
+		atomic.AddInt64(&callCount, 1)
+		started <- struct{}{}
+		<-release
+		return 42
+	})
+
+	first := make(chan int, 1)
+	go func() { first <- cache.Get() }()
+	<-started
+
+	second := make(chan int, 1)
+	go func() { second <- cache.Get() }()
+	time.Sleep(10 * time.Millisecond)
+	close(release)
+
+	if got := <-first; got != 42 {
+		t.Fatalf("first Get = %d, want 42", got)
+	}
+	if got := <-second; got != 42 {
+		t.Fatalf("second Get = %d, want 42", got)
+	}
+	if got := atomic.LoadInt64(&callCount); got != 1 {
+		t.Fatalf("collect calls = %d, want 1", got)
+	}
+}
+
+func TestHandleObservabilityEventsReadError(t *testing.T) {
+	handler := HandleEvents("[")
+	req := httptest.NewRequest("GET", "/api/observability/events", nil)
+	rec := httptest.NewRecorder()
+
+	handler(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", rec.Code)
+	}
+}
+
+func TestReadJSONLFileScannerError(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "events-2025-03-01.jsonl")
+	line := make([]byte, 1024*1024+1)
+	for i := range line {
+		line[i] = 'x'
+	}
+	if err := os.WriteFile(path, append(line, '\n'), 0600); err != nil {
+		t.Fatalf("write long line: %v", err)
+	}
+
+	if _, err := ReadJSONLFile(path); err == nil {
+		t.Fatal("ReadJSONLFile long line error = nil")
 	}
 }
 

@@ -3,9 +3,12 @@ package daemon
 import (
 	"context"
 	"errors"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli/daemon/supervisor"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/events"
@@ -542,6 +545,75 @@ func TestReconcilerEmitErrorAndAddNewAgentSkips(t *testing.T) {
 	}, "test")
 	if got := d.sup.AgentCount(); got != 0 {
 		t.Fatalf("agent count = %d, want 0 after skipped/failed additions", got)
+	}
+}
+
+func TestReloadAndReconcileFleetModeRefreshesStoreConfig(t *testing.T) {
+	requireReconcilerFleetDB(t)
+
+	ctx := context.Background()
+	dataDir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", dataDir)
+	t.Setenv(bootstrap.EnvWorkspace, "WS")
+	t.Setenv(bootstrap.EnvFleetDBActor, "daemon-reconciler-test")
+	t.Setenv(bootstrap.EnvFleetDBURL, "")
+
+	handle, err := bootstrap.OpenStore(ctx, dataDir, nil)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = handle.Close() })
+
+	if _, err := handle.Store.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS", Name: "Workspace"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if _, err := handle.Store.Daemon().Upsert(ctx, &domain.DaemonProfile{
+		WorkspaceKey: "WS",
+		AgentBackend: "fleet",
+	}); err != nil {
+		t.Fatalf("upsert daemon profile: %v", err)
+	}
+	if _, err := handle.Store.Agents().Create(ctx, store.AgentCreate{
+		WorkspaceKey:   "WS",
+		Name:           "store-worker",
+		RoleName:       "task",
+		DesiredState:   domain.AgentDesiredRunning,
+		MaxConcurrency: 1,
+	}); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	oldCfg := makeDaemonConfig([]AgentEntry{{Worktree: "old-worker", Role: "task"}}, nil)
+	d := &Daemon{
+		config:     oldCfg,
+		configHash: computeConfigHash(oldCfg),
+		projectDir: t.TempDir(),
+	}
+
+	d.reloadAndReconcile()
+	if d.config == oldCfg {
+		t.Fatal("config pointer was not refreshed")
+	}
+	if d.config.Backend != "fleet" {
+		t.Fatalf("backend = %q, want fleet", d.config.Backend)
+	}
+	if len(d.config.Agents) != 1 || d.config.Agents[0].Worktree != "store-worker" {
+		t.Fatalf("agents = %+v, want store-worker", d.config.Agents)
+	}
+	refreshedHash := d.configHash
+	d.reloadAndReconcile()
+	if d.configHash != refreshedHash {
+		t.Fatalf("config hash changed on no-op reload: %q -> %q", refreshedHash, d.configHash)
+	}
+}
+
+func requireReconcilerFleetDB(t *testing.T) {
+	t.Helper()
+	if os.Getenv(bootstrap.EnvFleetDBBin) != "" {
+		return
+	}
+	if _, err := exec.LookPath("fleet-db"); err != nil {
+		t.Skip("fleet-db binary not available")
 	}
 }
 

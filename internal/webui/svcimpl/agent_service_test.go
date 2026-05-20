@@ -3,6 +3,7 @@ package svcimpl
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -171,4 +172,212 @@ func TestRequestAgentLifecycleUpdatesStateAndQueuesCommand(t *testing.T) {
 	if cmds[0].Payload["task_id"] != "TEST2-1" {
 		t.Fatalf("command payload task_id = %q, want TEST2-1", cmds[0].Payload["task_id"])
 	}
+}
+
+func TestAgentServiceAdditionalStoreErrorBranches(t *testing.T) {
+	ctx := context.Background()
+
+	listErr := errors.New("list agents failed")
+	svc := NewAgentService(nil, nil, nil, &agentServiceStoreOverride{
+		Store:  memstore.New(),
+		agents: fakeAgentStore{listErr: listErr},
+	})
+	if _, err := svc.ListAgents(ctx, "WS"); err == nil || !strings.Contains(err.Error(), "list agents") {
+		t.Fatalf("ListAgents err = %v, want list agents error", err)
+	}
+
+	if _, err := NewAgentService(nil, nil, nil, memstore.New()).CreateAgent(ctx, service.AgentCreateInput{
+		Name:     "missing-workspace",
+		RoleName: "task",
+	}); err == nil || !strings.Contains(err.Error(), "workspace_key required") {
+		t.Fatalf("CreateAgent validation err = %v", err)
+	}
+
+	roleLoadErr := errors.New("role load failed")
+	svc = NewAgentService(nil, nil, nil, &agentServiceStoreOverride{
+		Store: memstore.New(),
+		roles: fakeRoleStore{getErr: roleLoadErr},
+	})
+	if _, err := svc.CreateAgent(ctx, service.AgentCreateInput{
+		WorkspaceKey: "WS",
+		Name:         "lead-one",
+		RoleName:     "lead",
+	}); err == nil || !strings.Contains(err.Error(), "load lead role") {
+		t.Fatalf("CreateAgent role load err = %v", err)
+	}
+
+	roleCreateErr := errors.New("role create failed")
+	svc = NewAgentService(nil, nil, nil, &agentServiceStoreOverride{
+		Store: memstore.New(),
+		roles: fakeRoleStore{
+			getErr:    fmt.Errorf("missing role: %w", domain.ErrNotFound),
+			createErr: roleCreateErr,
+		},
+	})
+	if _, err := svc.CreateAgent(ctx, service.AgentCreateInput{
+		WorkspaceKey: "WS",
+		Name:         "lead-two",
+		RoleName:     "lead",
+	}); err == nil || !strings.Contains(err.Error(), "create lead role") {
+		t.Fatalf("CreateAgent role create err = %v", err)
+	}
+
+	createErr := errors.New("create agent failed")
+	svc = NewAgentService(nil, nil, nil, &agentServiceStoreOverride{
+		Store:  memstore.New(),
+		agents: fakeAgentStore{createErr: createErr},
+	})
+	if _, err := svc.CreateAgent(ctx, service.AgentCreateInput{
+		WorkspaceKey: "WS",
+		Name:         "worker",
+		RoleName:     "task",
+	}); err == nil || !strings.Contains(err.Error(), "create agent") {
+		t.Fatalf("CreateAgent create err = %v", err)
+	}
+
+	impl := NewAgentService(nil, nil, nil, memstore.New()).(*agentServiceImpl)
+	if err := impl.ensureLocalAgentWorktrees(ctx, domain.Agent{
+		WorkspaceKey: "MISSING",
+		Name:         "worker",
+		RoleName:     "task",
+	}); err == nil || !strings.Contains(err.Error(), "load workspace") {
+		t.Fatalf("ensureLocalAgentWorktrees err = %v", err)
+	}
+
+	updateErr := errors.New("update failed")
+	svc = NewAgentService(nil, nil, nil, &agentServiceStoreOverride{
+		Store:  memstore.New(),
+		agents: fakeAgentStore{updateErr: updateErr},
+	})
+	if _, err := svc.RequestAgentLifecycle(ctx, "WS", "worker", service.AgentLifecycleInput{
+		State:        domain.AgentStateActive,
+		DesiredState: domain.AgentDesiredRunning,
+		CommandType:  "start",
+	}); err == nil || !strings.Contains(err.Error(), "update agent") {
+		t.Fatalf("RequestAgentLifecycle update err = %v", err)
+	}
+
+	svc = NewAgentService(nil, nil, nil, &agentServiceStoreOverride{
+		Store:    memstore.New(),
+		agents:   fakeAgentStore{updated: &domain.Agent{WorkspaceKey: "WS", Name: "worker"}},
+		commands: nil,
+	})
+	if updated, err := svc.RequestAgentLifecycle(ctx, "WS", "worker", service.AgentLifecycleInput{
+		State:        domain.AgentStateActive,
+		DesiredState: domain.AgentDesiredRunning,
+		CommandType:  "stop",
+	}); err != nil || updated == nil || updated.Name != "worker" {
+		t.Fatalf("RequestAgentLifecycle nil commands updated=%+v err=%v", updated, err)
+	}
+
+	commandErr := errors.New("command failed")
+	svc = NewAgentService(nil, nil, nil, &agentServiceStoreOverride{
+		Store:    memstore.New(),
+		agents:   fakeAgentStore{updated: &domain.Agent{WorkspaceKey: "WS", Name: "worker"}},
+		commands: fakeAgentCommandStore{createErr: commandErr},
+	})
+	if _, err := svc.RequestAgentLifecycle(ctx, "WS", "worker", service.AgentLifecycleInput{
+		State:        domain.AgentStateActive,
+		DesiredState: domain.AgentDesiredRunning,
+		CommandType:  "restart",
+	}); err == nil || !strings.Contains(err.Error(), "create agent command") {
+		t.Fatalf("RequestAgentLifecycle command err = %v", err)
+	}
+
+	deleteErr := errors.New("delete failed")
+	svc = NewAgentService(nil, nil, nil, &agentServiceStoreOverride{
+		Store:  memstore.New(),
+		agents: fakeAgentStore{deleteErr: deleteErr},
+	})
+	if err := svc.DeleteAgent(ctx, "WS", "worker"); err == nil || !strings.Contains(err.Error(), "delete agent") {
+		t.Fatalf("DeleteAgent err = %v", err)
+	}
+}
+
+type agentServiceStoreOverride struct {
+	store.Store
+	agents   store.AgentStore
+	roles    store.RoleStore
+	commands store.AgentCommandStore
+}
+
+func (s *agentServiceStoreOverride) Agents() store.AgentStore {
+	if s.agents != nil {
+		return s.agents
+	}
+	return s.Store.Agents()
+}
+
+func (s *agentServiceStoreOverride) Roles() store.RoleStore {
+	if s.roles != nil {
+		return s.roles
+	}
+	return s.Store.Roles()
+}
+
+func (s *agentServiceStoreOverride) AgentCommands() store.AgentCommandStore {
+	return s.commands
+}
+
+type fakeAgentStore struct {
+	store.AgentStore
+	listErr   error
+	createErr error
+	updateErr error
+	deleteErr error
+	updated   *domain.Agent
+}
+
+func (s fakeAgentStore) List(context.Context, string) ([]*domain.Agent, error) {
+	return nil, s.listErr
+}
+
+func (s fakeAgentStore) Create(_ context.Context, in store.AgentCreate) (*domain.Agent, error) {
+	if s.createErr != nil {
+		return nil, s.createErr
+	}
+	return &domain.Agent{WorkspaceKey: in.WorkspaceKey, Name: in.Name, RoleName: in.RoleName}, nil
+}
+
+func (s fakeAgentStore) Update(context.Context, string, string, store.AgentUpdate) (*domain.Agent, error) {
+	if s.updateErr != nil {
+		return nil, s.updateErr
+	}
+	if s.updated != nil {
+		return s.updated, nil
+	}
+	return &domain.Agent{WorkspaceKey: "WS", Name: "worker"}, nil
+}
+
+func (s fakeAgentStore) Delete(context.Context, string, string) error {
+	return s.deleteErr
+}
+
+type fakeRoleStore struct {
+	store.RoleStore
+	getErr    error
+	createErr error
+}
+
+func (s fakeRoleStore) Get(context.Context, string, string) (*domain.Role, error) {
+	return nil, s.getErr
+}
+
+func (s fakeRoleStore) Create(context.Context, store.RoleCreate) (*domain.Role, error) {
+	if s.createErr != nil {
+		return nil, s.createErr
+	}
+	return &domain.Role{}, nil
+}
+
+type fakeAgentCommandStore struct {
+	store.AgentCommandStore
+	createErr error
+}
+
+func (s fakeAgentCommandStore) Create(context.Context, store.AgentCommandCreate) (*domain.AgentCommand, error) {
+	if s.createErr != nil {
+		return nil, s.createErr
+	}
+	return &domain.AgentCommand{}, nil
 }

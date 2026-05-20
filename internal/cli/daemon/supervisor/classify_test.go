@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/agenterr"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 )
@@ -42,6 +43,73 @@ func newTestSupervisor() *Supervisor {
 	cfg := &config.DaemonConfig{}
 	return &Supervisor{
 		ConfigSnapshot: func() *config.DaemonConfig { return cfg },
+	}
+}
+
+func TestClassifyAgentExitNoWorkAndSuccessBranches(t *testing.T) {
+	s := &Supervisor{ConfigSnapshot: func() *config.DaemonConfig {
+		return &config.DaemonConfig{Backend: "codex"}
+	}}
+
+	idle := &AgentProcess{
+		Entry:        config.AgentEntry{Worktree: "idle"},
+		WorktreePath: t.TempDir(),
+	}
+	s.classifyAgentExit(idle, 0)
+	if idle.LastError == nil || idle.LastError.Class != agenterr.NoWork || !idle.LastNoWork {
+		t.Fatalf("idle classification = err %#v noWork %v, want NoWork", idle.LastError, idle.LastNoWork)
+	}
+	if idle.LastError.Backend != "codex" {
+		t.Fatalf("backend = %q, want codex", idle.LastError.Backend)
+	}
+
+	watchdog := &AgentProcess{
+		Entry:        config.AgentEntry{Worktree: "watchdog", Backend: "claude"},
+		WorktreePath: t.TempDir(),
+		StopReason:   StopReasonWatchdog,
+	}
+	s.classifyAgentExit(watchdog, 137)
+	if watchdog.LastError == nil || watchdog.LastError.Class != agenterr.NoWork || !watchdog.LastNoWork {
+		t.Fatalf("watchdog classification = err %#v noWork %v, want NoWork", watchdog.LastError, watchdog.LastNoWork)
+	}
+	if watchdog.LastError.Backend != "claude" {
+		t.Fatalf("watchdog backend = %q, want claude", watchdog.LastError.Backend)
+	}
+
+	doneDir := t.TempDir()
+	writeLockFile(t, doneDir, &cli.LockInfo{TaskID: "TASK-1", TaskTitle: "done", AgentName: "done", StartedAt: time.Now()})
+	done := &AgentProcess{
+		Entry:        config.AgentEntry{Worktree: "done"},
+		WorktreePath: doneDir,
+		LastError:    &agenterr.AgentError{Class: agenterr.Timeout},
+		LastNoWork:   true,
+	}
+	s.classifyAgentExit(done, 0)
+	if done.LastError != nil || done.LastNoWork {
+		t.Fatalf("success classification = err %#v noWork %v, want cleared", done.LastError, done.LastNoWork)
+	}
+}
+
+func TestClassifyAgentExitNonZeroUsesLogClassifier(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "agent.log")
+	if err := os.WriteFile(logPath, []byte("rate limit exceeded\n"), 0600); err != nil {
+		t.Fatalf("write log: %v", err)
+	}
+	ap := &AgentProcess{
+		Entry:       config.AgentEntry{Worktree: "failed", Backend: "codex"},
+		LogFilePath: logPath,
+		LastNoWork:  true,
+	}
+	s := &Supervisor{ConfigSnapshot: func() *config.DaemonConfig { return &config.DaemonConfig{} }}
+	s.classifyAgentExit(ap, 1)
+	if ap.LastError == nil {
+		t.Fatal("non-zero exit should set LastError")
+	}
+	if ap.LastNoWork {
+		t.Fatal("non-zero exit should clear LastNoWork")
+	}
+	if ap.LastError.Backend != "codex" {
+		t.Fatalf("backend = %q, want codex", ap.LastError.Backend)
 	}
 }
 

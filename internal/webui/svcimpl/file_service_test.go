@@ -174,6 +174,37 @@ func TestFileServiceDirectValidationBranches(t *testing.T) {
 	}
 }
 
+func TestFileServiceAdditionalErrorBranches(t *testing.T) {
+	root := resolvedTempDir(t)
+	if err := os.Mkdir(filepath.Join(root, "empty"), 0o755); err != nil {
+		t.Fatalf("mkdir empty: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "file.txt"), []byte("ok"), 0o600); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	if err := os.Symlink(filepath.Join(root, "missing-target"), filepath.Join(root, "dangling")); err != nil {
+		t.Fatalf("symlink dangling: %v", err)
+	}
+
+	svc := NewFileService(fakeFileOps{wt: &ops.AgentWorktree{Name: "agent", Path: root}})
+	if _, err := svc.ListDirectory(context.Background(), "WS", "agent", "missing"); err == nil ||
+		!strings.Contains(strings.ToLower(err.Error()), "not found") {
+		t.Fatalf("missing directory err = %v", err)
+	}
+	if _, err := svc.ListDirectory(context.Background(), "WS", "agent", "../outside"); err == nil ||
+		!strings.Contains(strings.ToLower(err.Error()), "not found") {
+		t.Fatalf("cleaned missing directory err = %v", err)
+	}
+	if _, err := svc.ReadFile(context.Background(), "WS", "agent", "../outside"); err == nil ||
+		!strings.Contains(strings.ToLower(err.Error()), "not found") {
+		t.Fatalf("cleaned missing read err = %v", err)
+	}
+	if _, err := validateFilePath(filepath.Join(root, "dangling")); err == nil ||
+		!strings.Contains(strings.ToLower(err.Error()), "symlink") {
+		t.Fatalf("dangling symlink validate err = %v", err)
+	}
+}
+
 type fakeFileOps struct {
 	wt  *ops.AgentWorktree
 	err error

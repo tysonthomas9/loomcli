@@ -80,6 +80,7 @@ func TestWrapStoreWithTracing_Smoke(t *testing.T) {
 	_, _ = nodes.Get(ctx, "TEST", "node-1")
 	_, _ = nodes.List(ctx, "TEST")
 	_, _ = nodes.Heartbeat(ctx, "TEST", "node-1", time.Minute)
+	_, _ = nodes.Update(ctx, "TEST", "node-1", store.NodeUpdate{})
 
 	sessions := wrapped.AgentSessions()
 	_, _ = sessions.Create(ctx, store.AgentSessionCreate{WorkspaceKey: "TEST", SessionID: "sess-1", AgentID: "agent"})

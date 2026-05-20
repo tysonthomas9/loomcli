@@ -613,6 +613,209 @@ func TestControlPlaneClientLeasesOwnershipAndCommands(t *testing.T) {
 	}
 }
 
+func TestControlPlaneClientAgentSessionLifecycleAndNilLists(t *testing.T) {
+	now := time.Now().UTC()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/WS/agent-sessions":
+			body := decodeBody(t, r)
+			if body["session_id"] != "sess-1" || body["agent_id"] != "agent-1" ||
+				body["node_id"] != "node-1" || body["kind"] != "task" ||
+				body["terminal_id"] != "term-1" || body["parent_session_id"] != "orch-1" ||
+				body["status"] != "running" || body["phase"] != "implementation" ||
+				body["attempt"] != float64(3) || body["metadata"] == nil {
+				t.Fatalf("agent session create body = %#v", body)
+			}
+			writeJSON(t, w, domain.AgentSession{WorkspaceKey: "WS", SessionID: "sess-1", AgentID: "agent-1"})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/WS/agent-sessions/sess-1":
+			writeJSON(t, w, domain.AgentSession{WorkspaceKey: "WS", SessionID: "sess-1", AgentID: "agent-1"})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/WS/agent-sessions/sess-1/heartbeat":
+			writeJSON(t, w, domain.AgentSession{WorkspaceKey: "WS", SessionID: "sess-1", LastHeartbeat: now})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/WS/nodes":
+			writeJSON(t, w, map[string]any{})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/WS/agent-sessions":
+			if r.URL.RawQuery != "" {
+				t.Fatalf("agent sessions nil-list query = %q, want empty", r.URL.RawQuery)
+			}
+			writeJSON(t, w, map[string]any{})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/WS/terminal-sessions":
+			writeJSON(t, w, map[string]any{})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/WS/artifacts":
+			writeJSON(t, w, map[string]any{})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/WS/agent-leases":
+			writeJSON(t, w, map[string]any{})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/WS/agent-ownership-leases":
+			writeJSON(t, w, map[string]any{})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/WS/agent-commands":
+			writeJSON(t, w, map[string]any{})
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer ts.Close()
+
+	client, err := New(Config{BaseURL: ts.URL, Actor: "tester"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.AgentSessions().Create(t.Context(), store.AgentSessionCreate{
+		WorkspaceKey:    "WS",
+		SessionID:       "sess-1",
+		AgentID:         "agent-1",
+		NodeID:          "node-1",
+		Kind:            domain.AgentSessionKindTask,
+		TaskID:          "task-1",
+		TerminalID:      "term-1",
+		ParentSessionID: "orch-1",
+		Status:          domain.AgentSessionRunning,
+		Phase:           "implementation",
+		Attempt:         3,
+		Metadata:        map[string]string{"k": "v"},
+	}); err != nil {
+		t.Fatalf("create agent session: %v", err)
+	}
+	if _, err := client.AgentSessions().Get(t.Context(), "WS", "sess-1"); err != nil {
+		t.Fatalf("get agent session: %v", err)
+	}
+	if _, err := client.AgentSessions().Heartbeat(t.Context(), "WS", "sess-1"); err != nil {
+		t.Fatalf("heartbeat agent session: %v", err)
+	}
+
+	if nodes, err := client.Nodes().List(t.Context(), "WS"); err != nil || len(nodes) != 0 {
+		t.Fatalf("nil nodes list = %+v err=%v", nodes, err)
+	}
+	if sessions, err := client.AgentSessions().List(t.Context(), "WS", store.AgentSessionFilter{}); err != nil || len(sessions) != 0 {
+		t.Fatalf("nil agent sessions list = %+v err=%v", sessions, err)
+	}
+	if terminals, err := client.TerminalSessions().List(t.Context(), "WS", store.TerminalSessionFilter{}); err != nil || len(terminals) != 0 {
+		t.Fatalf("nil terminal sessions list = %+v err=%v", terminals, err)
+	}
+	if artifacts, err := client.Artifacts().List(t.Context(), "WS", store.ArtifactFilter{}); err != nil || len(artifacts) != 0 {
+		t.Fatalf("nil artifacts list = %+v err=%v", artifacts, err)
+	}
+	if leases, err := client.AgentLeases().List(t.Context(), "WS", store.AgentLeaseFilter{}); err != nil || len(leases) != 0 {
+		t.Fatalf("nil leases list = %+v err=%v", leases, err)
+	}
+	if ownership, err := client.AgentOwnershipLeases().List(t.Context(), "WS", store.AgentOwnershipLeaseFilter{}); err != nil || len(ownership) != 0 {
+		t.Fatalf("nil ownership list = %+v err=%v", ownership, err)
+	}
+	if commands, err := client.AgentCommands().List(t.Context(), "WS", store.AgentCommandFilter{}); err != nil || len(commands) != 0 {
+		t.Fatalf("nil commands list = %+v err=%v", commands, err)
+	}
+}
+
+func TestControlPlaneClientStoreMethodErrors(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"error":{"message":"boom"}}`, http.StatusInternalServerError)
+	}))
+	defer ts.Close()
+
+	client, err := New(Config{BaseURL: ts.URL, Actor: "tester"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	status := domain.AgentSessionRunning
+	terminalStatus := domain.TerminalSessionClosed
+	owner := "owner"
+
+	cases := []struct {
+		name string
+		run  func() error
+	}{
+		{"node create", func() error {
+			_, err := client.Nodes().Create(t.Context(), store.NodeCreate{WorkspaceKey: "WS", NodeID: "node-1"})
+			return err
+		}},
+		{"node get", func() error {
+			_, err := client.Nodes().Get(t.Context(), "WS", "node-1")
+			return err
+		}},
+		{"node heartbeat", func() error {
+			_, err := client.Nodes().Heartbeat(t.Context(), "WS", "node-1", 0)
+			return err
+		}},
+		{"node update", func() error {
+			_, err := client.Nodes().Update(t.Context(), "WS", "node-1", store.NodeUpdate{OwnerActor: &owner})
+			return err
+		}},
+		{"agent session create", func() error {
+			_, err := client.AgentSessions().Create(t.Context(), store.AgentSessionCreate{WorkspaceKey: "WS", SessionID: "sess-1", AgentID: "agent-1"})
+			return err
+		}},
+		{"agent session get", func() error {
+			_, err := client.AgentSessions().Get(t.Context(), "WS", "sess-1")
+			return err
+		}},
+		{"agent session list", func() error {
+			_, err := client.AgentSessions().List(t.Context(), "WS", store.AgentSessionFilter{})
+			return err
+		}},
+		{"agent session heartbeat", func() error {
+			_, err := client.AgentSessions().Heartbeat(t.Context(), "WS", "sess-1")
+			return err
+		}},
+		{"agent session update", func() error {
+			_, err := client.AgentSessions().Update(t.Context(), "WS", "sess-1", store.AgentSessionUpdate{Status: &status})
+			return err
+		}},
+		{"terminal create", func() error {
+			_, err := client.TerminalSessions().Create(t.Context(), store.TerminalSessionCreate{WorkspaceKey: "WS", TerminalID: "term-1"})
+			return err
+		}},
+		{"terminal get", func() error {
+			_, err := client.TerminalSessions().Get(t.Context(), "WS", "term-1")
+			return err
+		}},
+		{"terminal update", func() error {
+			_, err := client.TerminalSessions().Update(t.Context(), "WS", "term-1", store.TerminalSessionUpdate{Status: &terminalStatus})
+			return err
+		}},
+		{"artifact create", func() error {
+			_, err := client.Artifacts().Create(t.Context(), store.ArtifactCreate{WorkspaceKey: "WS", ArtifactID: "artifact-1"})
+			return err
+		}},
+		{"artifact get", func() error {
+			_, err := client.Artifacts().Get(t.Context(), "WS", "artifact-1")
+			return err
+		}},
+		{"artifact update", func() error {
+			_, err := client.Artifacts().Update(t.Context(), "WS", "artifact-1", store.ArtifactUpdate{AgentID: &owner})
+			return err
+		}},
+		{"lease create", func() error {
+			_, err := client.AgentLeases().Create(t.Context(), store.AgentLeaseCreate{WorkspaceKey: "WS", SessionID: "sess-1", LeaseID: "lease-1"})
+			return err
+		}},
+		{"lease release", func() error {
+			_, err := client.AgentLeases().Release(t.Context(), "WS", "lease-1", "token")
+			return err
+		}},
+		{"ownership acquire", func() error {
+			_, err := client.AgentOwnershipLeases().Acquire(t.Context(), store.AgentOwnershipLeaseAcquire{WorkspaceKey: "WS", AgentID: "agent-1"})
+			return err
+		}},
+		{"ownership release", func() error {
+			_, err := client.AgentOwnershipLeases().Release(t.Context(), "WS", "agent-1", "token")
+			return err
+		}},
+		{"command ack", func() error {
+			_, err := client.AgentCommands().Ack(t.Context(), "WS", "cmd-1")
+			return err
+		}},
+		{"command complete", func() error {
+			_, err := client.AgentCommands().Complete(t.Context(), "WS", "cmd-1", store.AgentCommandComplete{Status: domain.AgentCommandSucceeded})
+			return err
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := tc.run(); err == nil {
+				t.Fatal("expected error")
+			}
+		})
+	}
+}
+
 func decodeBody(t *testing.T, r *http.Request) map[string]any {
 	t.Helper()
 	var body map[string]any

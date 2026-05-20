@@ -1,10 +1,14 @@
 package epic
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"io"
+	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -155,6 +159,81 @@ func TestRunEpicRunErrorBranches(t *testing.T) {
 	}
 }
 
+func TestNewRunnerFromFlagsDryRunAndConfiguredRunner(t *testing.T) {
+	resetEpicRunFlags(t)
+	ctx := context.Background()
+	st := memstore.New()
+	t.Cleanup(func() { _ = st.Close() })
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS", Name: "Workspace"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if _, err := st.Agents().Create(ctx, store.AgentCreate{
+		WorkspaceKey: "WS",
+		Name:         "nova",
+		RoleName:     "lead",
+	}); err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+	ib := clitest.NewMockIssueBackend()
+
+	runParent = "EPIC-1"
+	runLead = " nova "
+	runRole = "task"
+	runMaxConcurrency = 3
+	runIntervalSeconds = 1
+	runWorkerPrefix = ""
+	runNodeID = "node-1"
+	runDryRun = true
+	t.Setenv(envOrchestratorSessionID, " lead-session ")
+
+	var stdout bytes.Buffer
+	var r *epicrunner.Runner
+	out := captureEpicStdout(t, func() {
+		var err error
+		r, err = newRunnerFromFlags(ctx, st, ib, "WS")
+		if err != nil {
+			t.Fatalf("newRunnerFromFlags: %v", err)
+		}
+	})
+	stdout.WriteString(out)
+	if r == nil {
+		t.Fatal("newRunnerFromFlags returned nil runner")
+	}
+	if got := stdout.String(); !strings.Contains(got, "DRY-RUN would assign lead nova to epic EPIC-1") {
+		t.Fatalf("dry-run output = %q", got)
+	}
+	lead, err := st.Agents().Get(ctx, "WS", "nova")
+	if err != nil {
+		t.Fatalf("get lead: %v", err)
+	}
+	if lead.Parent != "" {
+		t.Fatalf("dry-run lead parent = %q, want unchanged", lead.Parent)
+	}
+
+	// A runner with no child work should print its header and drain immediately.
+	drained, _, err := epicrunner.NewRunner(ctx, epicrunner.RunnerConfig{
+		Store:          st,
+		IssueBackend:   ib,
+		WorkspaceKey:   "WS",
+		EpicID:         "EPIC-1",
+		Role:           "task",
+		MaxConcurrency: 1,
+		Interval:       time.Millisecond,
+		DryRun:         true,
+		Out:            &stdout,
+		ErrOut:         &stdout,
+	})
+	if err != nil {
+		t.Fatalf("NewRunner drained: %v", err)
+	}
+	if err := runConfiguredRunner(ctx, drained); err != nil {
+		t.Fatalf("runConfiguredRunner: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "Epic runner") {
+		t.Fatalf("configured runner output missing header: %q", stdout.String())
+	}
+}
+
 func replaceEpicRunHooks(t *testing.T) func() {
 	t.Helper()
 	oldSignal := epicSignalContextFn
@@ -191,4 +270,28 @@ func resetEpicRunFlags(t *testing.T) {
 	runMaxConcurrency = 2
 	runIntervalSeconds = 5
 	runDryRun = false
+}
+
+func captureEpicStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	oldStdout := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	os.Stdout = w
+	defer func() { os.Stdout = oldStdout }()
+	fn()
+	if err := w.Close(); err != nil {
+		t.Fatalf("close stdout: %v", err)
+	}
+	t.Cleanup(func() {
+		os.Stdout = oldStdout
+		_ = r.Close()
+	})
+	var out bytes.Buffer
+	if _, err := io.Copy(&out, r); err != nil {
+		t.Fatalf("read stdout: %v", err)
+	}
+	return out.String()
 }

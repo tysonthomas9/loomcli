@@ -191,6 +191,110 @@ func TestCreateStoreBackedCloneWorkspaceAdditionalErrors(t *testing.T) {
 	}
 }
 
+func TestCreateStoreBackedEmptyWorkspaceAdditionalErrors(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("existing name", func(t *testing.T) {
+		t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+		st := memstore.New()
+		if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "EXISTING", Name: "Existing"}); err != nil {
+			t.Fatalf("create existing: %v", err)
+		}
+		_, err := BuildStoreBackedCreateWorkspace(st)(ctx, service.WorkspaceCreateRequest{
+			Name: "Existing",
+			Type: "empty",
+			Path: filepath.Join(t.TempDir(), "ws"),
+		})
+		if err == nil || !strings.Contains(err.Error(), "already exists") {
+			t.Fatalf("err = %v, want already exists", err)
+		}
+	})
+
+	t.Run("existing key", func(t *testing.T) {
+		t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+		st := memstore.New()
+		if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "KEYEDWS", Name: "Other Name"}); err != nil {
+			t.Fatalf("create keyed: %v", err)
+		}
+		_, err := BuildStoreBackedCreateWorkspace(st)(ctx, service.WorkspaceCreateRequest{
+			Name: "keyed ws",
+			Type: "empty",
+			Path: filepath.Join(t.TempDir(), "ws"),
+		})
+		if err == nil || !strings.Contains(err.Error(), "already exists") {
+			t.Fatalf("err = %v, want already exists", err)
+		}
+	})
+
+	t.Run("workspace mkdir error", func(t *testing.T) {
+		t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+		parentFile := filepath.Join(t.TempDir(), "parent-file")
+		if err := os.WriteFile(parentFile, []byte("x"), 0600); err != nil {
+			t.Fatalf("write parent file: %v", err)
+		}
+		_, err := BuildStoreBackedCreateWorkspace(memstore.New())(ctx, service.WorkspaceCreateRequest{
+			Name: "mkdir-ws",
+			Type: "empty",
+			Path: filepath.Join(parentFile, "child"),
+		})
+		if err == nil {
+			t.Fatal("expected workspace path error, got nil")
+		}
+	})
+
+	t.Run("store create error", func(t *testing.T) {
+		t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+		errBoom := errors.New("create failed")
+		st := &workspaceCreateErrorStore{Store: memstore.New(), err: errBoom}
+		_, err := BuildStoreBackedCreateWorkspace(st)(ctx, service.WorkspaceCreateRequest{
+			Name: "create-error",
+			Type: "empty",
+			Path: filepath.Join(t.TempDir(), "ws"),
+		})
+		if err == nil || !strings.Contains(err.Error(), "create workspace in store") || !errors.Is(err, errBoom) {
+			t.Fatalf("err = %v, want create failed", err)
+		}
+	})
+
+	t.Run("save local state error rolls back", func(t *testing.T) {
+		loomFile := filepath.Join(t.TempDir(), "loom-file")
+		if err := os.WriteFile(loomFile, []byte("x"), 0600); err != nil {
+			t.Fatalf("write loom file: %v", err)
+		}
+		t.Setenv("LOOM_CONFIG_DIR", loomFile)
+		st := memstore.New()
+		_, err := BuildStoreBackedCreateWorkspace(st)(ctx, service.WorkspaceCreateRequest{
+			Name: "state-error",
+			Type: "empty",
+			Path: filepath.Join(t.TempDir(), "ws"),
+		})
+		if err == nil || !strings.Contains(err.Error(), "save local workspace state") {
+			t.Fatalf("err = %v, want save local state error", err)
+		}
+		if _, getErr := st.Workspaces().Get(ctx, "STATE-ERROR"); !errors.Is(getErr, domain.ErrNotFound) {
+			t.Fatalf("workspace was not rolled back, get err=%v", getErr)
+		}
+	})
+}
+
+type workspaceCreateErrorStore struct {
+	*memstore.Store
+	err error
+}
+
+func (s *workspaceCreateErrorStore) Workspaces() store.WorkspaceStore {
+	return workspaceCreateErrorWorkspaceStore{WorkspaceStore: s.Store.Workspaces(), err: s.err}
+}
+
+type workspaceCreateErrorWorkspaceStore struct {
+	store.WorkspaceStore
+	err error
+}
+
+func (s workspaceCreateErrorWorkspaceStore) Create(context.Context, store.WorkspaceCreate) (*domain.Workspace, error) {
+	return nil, s.err
+}
+
 type workspaceStateUpdateFailStore struct {
 	*memstore.Store
 	failState domain.WorkspaceState

@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -15,6 +16,17 @@ import (
 
 // Compile-time interface assertion.
 var _ backend.IssueBackend = (*APIBackend)(nil)
+
+type apiRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f apiRoundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {
+	return f(r)
+}
+
+type apiErrBody struct{}
+
+func (apiErrBody) Read([]byte) (int, error) { return 0, errors.New("read failed") }
+func (apiErrBody) Close() error             { return nil }
 
 // newTestServer creates a mock API server and returns an APIBackend pointing at it.
 func newTestServer(t *testing.T, handler http.HandlerFunc) (*APIBackend, *httptest.Server) {
@@ -1378,4 +1390,283 @@ func TestTransportError_ConnectionRefused(t *testing.T) {
 	if !backend.IsKind(err, backend.KindUnavailable) {
 		t.Errorf("expected KindUnavailable, got %v", err)
 	}
+}
+
+func TestAPIBackendAdditionalErrorBranches(t *testing.T) {
+	t.Run("doRequest marshal and read errors", func(t *testing.T) {
+		ab, err := New(Config{BaseURL: "http://example.test", WorkspaceID: "ws", HTTPClient: &http.Client{
+			Transport: apiRoundTripFunc(func(*http.Request) (*http.Response, error) {
+				return &http.Response{StatusCode: http.StatusOK, Body: apiErrBody{}, Header: make(http.Header)}, nil
+			}),
+		}})
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		if _, _, err := ab.doRequest(context.Background(), http.MethodPost, "/issues", map[string]any{"bad": func() {}}); err == nil || !strings.Contains(err.Error(), "marshal request body") {
+			t.Fatalf("marshal error = %v", err)
+		}
+		if _, _, err := ab.doRequest(context.Background(), http.MethodGet, "/issues", nil); err == nil || !strings.Contains(err.Error(), "read response body") {
+			t.Fatalf("read error = %v", err)
+		}
+	})
+
+	t.Run("query response errors", func(t *testing.T) {
+		cases := []struct {
+			name string
+			call func(*APIBackend) error
+			body string
+		}{
+			{
+				name: "get bad data",
+				call: func(ab *APIBackend) error {
+					_, err := ab.Get(context.Background(), "loom-1")
+					return err
+				},
+				body: `{"success":true,"data":"not-an-issue"}`,
+			},
+			{
+				name: "ready server error",
+				call: func(ab *APIBackend) error {
+					_, err := ab.Ready(context.Background(), backend.ReadyOpts{})
+					return err
+				},
+				body: `{"success":false,"error":"ready failed"}`,
+			},
+			{
+				name: "blocked server error",
+				call: func(ab *APIBackend) error {
+					_, err := ab.Blocked(context.Background(), backend.BlockedOpts{})
+					return err
+				},
+				body: `{"success":false,"error":"blocked failed"}`,
+			},
+			{
+				name: "blocked bad data",
+				call: func(ab *APIBackend) error {
+					_, err := ab.Blocked(context.Background(), backend.BlockedOpts{})
+					return err
+				},
+				body: `{"success":true,"data":"not-blocked-list"}`,
+			},
+			{
+				name: "children server error",
+				call: func(ab *APIBackend) error {
+					_, err := ab.GetChildren(context.Background(), "parent")
+					return err
+				},
+				body: `{"success":false,"error":"children failed"}`,
+			},
+		}
+		for _, tt := range cases {
+			t.Run(tt.name, func(t *testing.T) {
+				ab, ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
+					w.Header().Set("Content-Type", "application/json")
+					if strings.Contains(tt.body, `"success":false`) {
+						w.WriteHeader(http.StatusInternalServerError)
+					}
+					_, _ = w.Write([]byte(tt.body))
+				})
+				defer ts.Close()
+				if err := tt.call(ab); err == nil {
+					t.Fatalf("%s error = nil", tt.name)
+				}
+			})
+		}
+	})
+
+	t.Run("blocked null data", func(t *testing.T) {
+		ab, ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
+			respondEnvelopeNullData(w)
+		})
+		defer ts.Close()
+		got, err := ab.Blocked(context.Background(), backend.BlockedOpts{})
+		if err != nil || len(got) != 0 {
+			t.Fatalf("Blocked null data = %+v, %v", got, err)
+		}
+	})
+
+	t.Run("stats transport read and parse errors", func(t *testing.T) {
+		ab, err := New(Config{BaseURL: "http://example.test", WorkspaceID: "ws", HTTPClient: &http.Client{
+			Transport: apiRoundTripFunc(func(*http.Request) (*http.Response, error) {
+				return nil, context.Canceled
+			}),
+		}})
+		if err != nil {
+			t.Fatalf("New transport backend: %v", err)
+		}
+		if _, err := ab.Stats(context.Background()); err == nil {
+			t.Fatal("Stats transport error = nil")
+		}
+
+		ab, err = New(Config{BaseURL: "http://example.test", WorkspaceID: "ws", HTTPClient: &http.Client{
+			Transport: apiRoundTripFunc(func(*http.Request) (*http.Response, error) {
+				return &http.Response{StatusCode: http.StatusOK, Body: apiErrBody{}, Header: make(http.Header)}, nil
+			}),
+		}})
+		if err != nil {
+			t.Fatalf("New read backend: %v", err)
+		}
+		if _, err := ab.Stats(context.Background()); err == nil || !strings.Contains(err.Error(), "read response body") {
+			t.Fatalf("Stats read error = %v", err)
+		}
+
+		ab, ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`not-stats`))
+		})
+		defer ts.Close()
+		if _, err := ab.Stats(context.Background()); err == nil || !strings.Contains(err.Error(), "unmarshal response") {
+			t.Fatalf("Stats parse error = %v", err)
+		}
+	})
+
+	t.Run("create close reopen comment and event errors", func(t *testing.T) {
+		cases := []struct {
+			name string
+			call func(*APIBackend) error
+			body string
+			code int
+		}{
+			{
+				name: "create null data",
+				call: func(ab *APIBackend) error {
+					_, err := ab.Create(context.Background(), backend.CreateParams{Title: "x"})
+					return err
+				},
+				body: `{"success":true,"data":null}`,
+			},
+			{
+				name: "create bad data",
+				call: func(ab *APIBackend) error {
+					_, err := ab.Create(context.Background(), backend.CreateParams{Title: "x"})
+					return err
+				},
+				body: `{"success":true,"data":"not-an-issue"}`,
+			},
+			{
+				name: "close server error",
+				call: func(ab *APIBackend) error {
+					_, err := ab.Close(context.Background(), "loom-1", backend.CloseParams{Session: "s", SuggestNext: true, Force: true})
+					return err
+				},
+				body: `{"success":false,"error":"close failed"}`,
+				code: http.StatusConflict,
+			},
+			{
+				name: "reopen server error",
+				call: func(ab *APIBackend) error {
+					return ab.Reopen(context.Background(), "loom-1", backend.ReopenParams{})
+				},
+				body: `{"success":false,"error":"reopen failed"}`,
+				code: http.StatusConflict,
+			},
+			{
+				name: "list comments get error",
+				call: func(ab *APIBackend) error {
+					_, err := ab.ListComments(context.Background(), "loom-1")
+					return err
+				},
+				body: `{"success":false,"error":"missing"}`,
+				code: http.StatusNotFound,
+			},
+			{
+				name: "add comment server error",
+				call: func(ab *APIBackend) error {
+					_, err := ab.AddComment(context.Background(), backend.CommentAddParams{IssueID: "loom-1", Text: "x"})
+					return err
+				},
+				body: `{"success":false,"error":"comment failed"}`,
+				code: http.StatusInternalServerError,
+			},
+			{
+				name: "add comment null data",
+				call: func(ab *APIBackend) error {
+					_, err := ab.AddComment(context.Background(), backend.CommentAddParams{IssueID: "loom-1", Text: "x"})
+					return err
+				},
+				body: `{"success":true,"data":null}`,
+			},
+			{
+				name: "add comment bad data",
+				call: func(ab *APIBackend) error {
+					_, err := ab.AddComment(context.Background(), backend.CommentAddParams{IssueID: "loom-1", Text: "x"})
+					return err
+				},
+				body: `{"success":true,"data":"not-a-comment"}`,
+			},
+			{
+				name: "list events server error",
+				call: func(ab *APIBackend) error {
+					_, err := ab.ListEvents(context.Background(), "loom-1", 0)
+					return err
+				},
+				body: `{"success":false,"error":"events failed"}`,
+				code: http.StatusInternalServerError,
+			},
+			{
+				name: "list events bad data",
+				call: func(ab *APIBackend) error {
+					_, err := ab.ListEvents(context.Background(), "loom-1", 0)
+					return err
+				},
+				body: `{"success":true,"data":"not-events"}`,
+			},
+		}
+		for _, tt := range cases {
+			t.Run(tt.name, func(t *testing.T) {
+				ab, ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
+					w.Header().Set("Content-Type", "application/json")
+					if tt.code != 0 {
+						w.WriteHeader(tt.code)
+					}
+					_, _ = w.Write([]byte(tt.body))
+				})
+				defer ts.Close()
+				if err := tt.call(ab); err == nil {
+					t.Fatalf("%s error = nil", tt.name)
+				}
+			})
+		}
+	})
+
+	t.Run("list comments nil comments and list events null data", func(t *testing.T) {
+		now := time.Now().UTC().Truncate(time.Second)
+		ab, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case strings.Contains(r.URL.Path, "/events"):
+				respondEnvelopeNullData(w)
+			default:
+				respondOK(w, gen.IssueResponse{
+					Id: "loom-1", Title: "t", Status: "open", IssueType: "task",
+					CreatedAt: now, UpdatedAt: now, Labels: []string{},
+				})
+			}
+		})
+		defer ts.Close()
+		comments, err := ab.ListComments(context.Background(), "loom-1")
+		if err != nil || len(comments) != 0 {
+			t.Fatalf("ListComments nil comments = %+v, %v", comments, err)
+		}
+		events, err := ab.ListEvents(context.Background(), "loom-1", 1)
+		if err != nil || len(events) != 0 {
+			t.Fatalf("ListEvents null data = %+v, %v", events, err)
+		}
+	})
+
+	t.Run("close sends optional fields", func(t *testing.T) {
+		var body gen.CloseRequest
+		ab, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode close body: %v", err)
+			}
+			respondOK(w, map[string]any{"ok": true})
+		})
+		defer ts.Close()
+		if _, err := ab.Close(context.Background(), "loom-1", backend.CloseParams{Reason: "done", Session: "s1", SuggestNext: true, Force: true}); err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+		if body.Session == nil || *body.Session != "s1" || body.SuggestNext == nil || !*body.SuggestNext || body.Force == nil || !*body.Force {
+			t.Fatalf("close body = %+v", body)
+		}
+	})
 }

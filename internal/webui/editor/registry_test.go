@@ -161,6 +161,22 @@ func TestDetectedEditorsForOS(t *testing.T) {
 	}
 }
 
+func TestDetectedEditorsUsesRuntimeGOOS(t *testing.T) {
+	origLookPath := lookPathFn
+	origStat := statFn
+	t.Cleanup(func() {
+		lookPathFn = origLookPath
+		statFn = origStat
+	})
+
+	lookPathFn = mockLookPath(nil)
+	statFn = mockStat(nil)
+
+	if got := DetectedEditors(); len(got) != 0 {
+		t.Fatalf("DetectedEditors = %+v, want none with mocked lookups", got)
+	}
+}
+
 func TestDetectedEditorsForOSEmpty(t *testing.T) {
 	origLookPath := lookPathFn
 	origStat := statFn

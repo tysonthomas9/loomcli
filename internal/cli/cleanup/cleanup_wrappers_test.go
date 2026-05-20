@@ -117,6 +117,17 @@ func TestCleanupSessionsDryRunCountsOldCompletedAndDuplicateIndex(t *testing.T) 
 	if purged != wouldPurge || compacted != wouldCompact {
 		t.Fatalf("cleanupSessions dry-run = purge %d compact %d", purged, compacted)
 	}
+
+	purged, compacted, err = cleanupSessions(runtimeDir, 24*time.Hour, false)
+	if err != nil {
+		t.Fatalf("cleanupSessions purge: %v", err)
+	}
+	if purged != 2 {
+		t.Fatalf("cleanupSessions purge count = %d, want 2", purged)
+	}
+	if compacted == 0 {
+		t.Fatalf("cleanupSessions compacted = %d, want non-zero", compacted)
+	}
 }
 
 func TestRunCleanupValidationAndEventOnlySuccess(t *testing.T) {

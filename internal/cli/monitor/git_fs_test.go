@@ -247,6 +247,51 @@ func TestReadRefSHA_TempRepo(t *testing.T) {
 	}
 }
 
+func TestReadRefSHALoosePackedAndErrorBranches(t *testing.T) {
+	dir := t.TempDir()
+	ref := "refs/heads/main"
+	loosePath := filepath.Join(dir, ref)
+	if err := os.MkdirAll(filepath.Dir(loosePath), 0755); err != nil {
+		t.Fatalf("mkdir loose ref dir: %v", err)
+	}
+	if err := os.WriteFile(loosePath, []byte("short\n"), 0644); err != nil {
+		t.Fatalf("write short loose ref: %v", err)
+	}
+
+	packedSHA := "0123456789abcdef0123456789abcdef01234567"
+	packed := strings.Join([]string{
+		"# pack-refs with: peeled fully-peeled sorted",
+		"^peeled",
+		packedSHA + " " + ref,
+	}, "\n")
+	if err := os.WriteFile(filepath.Join(dir, "packed-refs"), []byte(packed), 0644); err != nil {
+		t.Fatalf("write packed-refs: %v", err)
+	}
+	got, err := ReadRefSHA(dir, ref)
+	if err != nil {
+		t.Fatalf("ReadRefSHA packed fallback: %v", err)
+	}
+	if got != packedSHA {
+		t.Fatalf("ReadRefSHA = %q, want %q", got, packedSHA)
+	}
+
+	validLooseSHA := "abcdef0123456789abcdef0123456789abcdef01"
+	if err := os.WriteFile(loosePath, []byte(validLooseSHA+"\n"), 0644); err != nil {
+		t.Fatalf("write valid loose ref: %v", err)
+	}
+	got, err = ReadRefSHA(dir, ref)
+	if err != nil {
+		t.Fatalf("ReadRefSHA loose: %v", err)
+	}
+	if got != validLooseSHA {
+		t.Fatalf("loose SHA = %q, want %q", got, validLooseSHA)
+	}
+
+	if _, err := ReadRefSHA(t.TempDir(), "refs/heads/missing"); err == nil {
+		t.Fatal("missing ref returned nil error")
+	}
+}
+
 func TestWorktreeChangeDetector_StatusCacheHit(t *testing.T) {
 	tmpDir := makeTempRepo(t)
 	detector := &worktreeChangeDetector{entries: make(map[string]*worktreeCacheEntry)}

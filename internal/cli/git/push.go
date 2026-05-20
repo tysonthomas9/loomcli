@@ -65,7 +65,7 @@ func runPush(cmd *cobra.Command, args []string) error {
 
 	if all && ws != "" {
 		fmt.Fprintln(os.Stderr, "Error: --all and --workspace are mutually exclusive")
-		os.Exit(1)
+		exitProcess(1)
 	}
 
 	targetBranch := ""
@@ -86,14 +86,14 @@ func runPush(cmd *cobra.Command, args []string) error {
 	resolver, err := cli.NewResolver()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error creating resolver: %v\n", err)
-		os.Exit(1)
+		exitProcess(1)
 	}
 
 	if ws != "" {
 		if err := resolver.SetWorkspace(ws); err != nil {
 			available := resolver.WorkspaceNames()
 			fmt.Fprintf(os.Stderr, "Error: workspace %q not found. Available: %v\n", ws, available)
-			os.Exit(1)
+			exitProcess(1)
 		}
 	}
 

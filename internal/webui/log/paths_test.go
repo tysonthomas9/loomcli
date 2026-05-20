@@ -383,3 +383,64 @@ func TestPathWithinDirAndResolvePathHelpers(t *testing.T) {
 		t.Fatal("FileExists returned true for missing file")
 	}
 }
+
+func TestLogPathAdditionalErrorAndSkipBranches(t *testing.T) {
+	t.Run("home lookup errors propagate", func(t *testing.T) {
+		t.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", "")
+		t.Setenv("LOOM_CONFIG_DIR", "")
+		t.Setenv("HOME", "")
+		if _, err := GetLogDir(); err == nil {
+			t.Fatal("GetLogDir HOME error = nil")
+		}
+		if _, err := GetWorkspaceLogDir("WS"); err == nil {
+			t.Fatal("GetWorkspaceLogDir HOME error = nil")
+		}
+		if _, err := GetAgentLogPath("WS", "agent"); err == nil {
+			t.Fatal("GetAgentLogPath HOME error = nil")
+		}
+		if _, err := GetTaskLogPath("WS", "task", "phase"); err == nil {
+			t.Fatal("GetTaskLogPath HOME error = nil")
+		}
+		if _, err := GetTaskLogDir("WS", "task"); err == nil {
+			t.Fatal("GetTaskLogDir HOME error = nil")
+		}
+		if _, err := ListTaskPhases("WS", "task"); err == nil {
+			t.Fatal("ListTaskPhases HOME error = nil")
+		}
+	})
+
+	t.Run("missing parent outside allowed dir", func(t *testing.T) {
+		root := t.TempDir()
+		allowed := filepath.Join(root, "allowed")
+		outside := filepath.Join(root, "outside")
+		if err := os.MkdirAll(allowed, 0755); err != nil {
+			t.Fatalf("mkdir allowed: %v", err)
+		}
+		if err := os.MkdirAll(outside, 0755); err != nil {
+			t.Fatalf("mkdir outside: %v", err)
+		}
+		err := ValidatePathWithinDir(filepath.Join(outside, "missing.log"), allowed)
+		if err == nil || !strings.Contains(err.Error(), "outside allowed directory") {
+			t.Fatalf("outside missing err = %v", err)
+		}
+	})
+
+	t.Run("ListTaskPhases skips directories", func(t *testing.T) {
+		runtimeDir := t.TempDir()
+		t.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", runtimeDir)
+		taskDir := filepath.Join(runtimeDir, ".loom", "logs", "WS", "tasks", "task-with-dir")
+		if err := os.MkdirAll(filepath.Join(taskDir, "nested.log"), 0755); err != nil {
+			t.Fatalf("mkdir nested dir: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(taskDir, "run.log"), []byte("ok"), 0600); err != nil {
+			t.Fatalf("write run log: %v", err)
+		}
+		phases, err := ListTaskPhases("WS", "task-with-dir")
+		if err != nil {
+			t.Fatalf("ListTaskPhases: %v", err)
+		}
+		if len(phases) != 1 || phases[0] != "run" {
+			t.Fatalf("phases = %#v, want only run", phases)
+		}
+	})
+}

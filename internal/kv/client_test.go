@@ -24,6 +24,19 @@ func TestNewClient(t *testing.T) {
 	_ = client.Close()
 }
 
+func TestClientPingWithAndWithoutBreaker(t *testing.T) {
+	client, _ := setupTest(t)
+	ctx := context.Background()
+
+	if err := client.Ping(ctx); err != nil {
+		t.Fatalf("Ping without breaker: %v", err)
+	}
+	client.SetCircuitBreaker(newTestBreaker())
+	if err := client.Ping(ctx); err != nil {
+		t.Fatalf("Ping with breaker: %v", err)
+	}
+}
+
 func TestKeyBuilders(t *testing.T) {
 	tests := []struct {
 		name     string

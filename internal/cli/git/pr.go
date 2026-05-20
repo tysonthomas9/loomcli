@@ -66,7 +66,7 @@ func runPR(cmd *cobra.Command, args []string) error {
 
 	if err := checkGhInstalled(deps); err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		exitProcess(1)
 	}
 
 	return runPRWorkspaceMode(deps, args, all, ws)
@@ -75,7 +75,7 @@ func runPR(cmd *cobra.Command, args []string) error {
 func runPRWorkspaceMode(deps *cli.Deps, args []string, all bool, ws string) error {
 	if all && ws != "" {
 		fmt.Fprintln(os.Stderr, "Error: --all and --workspace are mutually exclusive")
-		os.Exit(1)
+		exitProcess(1)
 	}
 
 	if all {
@@ -96,14 +96,14 @@ func runPRWorkspaceMode(deps *cli.Deps, args []string, all bool, ws string) erro
 	resolver, err := cli.NewResolver()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error creating resolver: %v\n", err)
-		os.Exit(1)
+		exitProcess(1)
 	}
 
 	if ws != "" {
 		if err := resolver.SetWorkspace(ws); err != nil {
 			available := resolver.WorkspaceNames()
 			fmt.Fprintf(os.Stderr, "Error: workspace %q not found. Available: %v\n", ws, available)
-			os.Exit(1)
+			exitProcess(1)
 		}
 	}
 
@@ -115,7 +115,7 @@ func prAllWorkspaces(deps *cli.Deps, targetBranch string) {
 	resolver, err := cli.NewResolver()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error creating resolver: %v\n", err)
-		os.Exit(1)
+		exitProcess(1)
 	}
 
 	wsNames := resolver.WorkspaceNames()
@@ -160,7 +160,7 @@ func prWorkspaceRepos(deps *cli.Deps, resolver *cli.Resolver, sourceBranch, targ
 	worktrees, err := resolver.DiscoverWorktrees()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error discovering repos: %v\n", err)
-		os.Exit(1)
+		exitProcess(1)
 	}
 
 	if len(worktrees) == 0 {

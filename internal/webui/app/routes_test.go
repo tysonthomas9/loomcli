@@ -49,6 +49,52 @@ func setupTestRoutes(t *testing.T, app *Server) {
 	})
 }
 
+func TestRegisterMonitorHandlersAllRoutes(t *testing.T) {
+	marker := func(name string) http.HandlerFunc {
+		return func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(name))
+		}
+	}
+	app := &Server{
+		config: webui.ServerConfig{MonitorHandlers: webui.MonitorHandlers{
+			Status:               marker("status"),
+			Agents:               marker("agents"),
+			Tasks:                marker("tasks"),
+			Stats:                marker("stats"),
+			Sync:                 marker("sync"),
+			Workspaces:           marker("workspaces"),
+			StaleDetector:        marker("stale"),
+			Usage:                marker("usage"),
+			Metrics:              marker("metrics"),
+			ObservabilityMetrics: marker("observability-metrics"),
+			ObservabilityEvents:  marker("observability-events"),
+		}},
+		mux: http.NewServeMux(),
+	}
+	app.registerMonitorHandlers()
+
+	for _, path := range []string{
+		"/api/monitor/status",
+		"/api/monitor/agents",
+		"/api/monitor/tasks",
+		"/api/monitor/stats",
+		"/api/monitor/sync",
+		"/api/monitor/workspaces",
+		"/api/monitor/stale-detector",
+		"/api/monitor/usage",
+		"/metrics",
+		"/api/observability/metrics",
+		"/api/observability/events",
+	} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		rr := httptest.NewRecorder()
+		app.mux.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("%s status = %d body=%q", path, rr.Code, rr.Body.String())
+		}
+	}
+}
+
 // TestHandleStats_NilPool verifies that handleStats returns 503 when pool is nil.
 func TestHandleStats_NilPool(t *testing.T) {
 	handler := healthhandlers.HandleStats(nil)

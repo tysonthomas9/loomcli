@@ -91,6 +91,34 @@ func TestNew_Defaults(t *testing.T) {
 	}
 }
 
+func TestNew_DisabledSignalsUseNoopProviders(t *testing.T) {
+	disabled := false
+	exp, err := New(Config{
+		ServiceName:     "test-service",
+		Endpoint:        "http://127.0.0.1:4318",
+		SampleRate:      2,
+		FlushIntervalMs: -1,
+		Traces:          &disabled,
+		Metrics:         &disabled,
+	})
+	if err != nil {
+		t.Fatalf("New disabled exporter: %v", err)
+	}
+	defer exp.Stop(context.Background())
+	if exp.tracerProvider != nil || exp.meterProvider != nil {
+		t.Fatalf("disabled exporter providers trace=%T meter=%T, want nil backing providers", exp.tracerProvider, exp.meterProvider)
+	}
+	if exp.config.SampleRate != 1 || exp.config.FlushIntervalMs != 60000 {
+		t.Fatalf("resolved config = %+v", exp.config)
+	}
+	if !(Config{}).TracesEnabled() || !(Config{}).MetricsEnabled() {
+		t.Fatal("nil trace/metric flags should default to enabled")
+	}
+	if (Config{Traces: &disabled}).TracesEnabled() || (Config{Metrics: &disabled}).MetricsEnabled() {
+		t.Fatal("explicit disabled trace/metric flags should be false")
+	}
+}
+
 func TestHandleEvent_TaskCompleted(t *testing.T) {
 	exp, _, reader := newTestExporter(t)
 	defer exp.Stop(context.Background())
@@ -215,6 +243,21 @@ func TestHandleEvent_UnknownEvent(t *testing.T) {
 
 	// Should not panic
 	exp.HandleEvent(events.Event{Type: "unknown_type"})
+}
+
+func TestHandleEventMalformedDataBranches(t *testing.T) {
+	exp, _, _ := newTestExporter(t)
+	defer exp.Stop(context.Background())
+
+	for _, typ := range []events.EventType{
+		events.TaskClaimed,
+		events.TaskCompleted,
+		events.TaskFailed,
+		events.AgentStarted,
+		events.AgentStopped,
+	} {
+		exp.HandleEvent(events.Event{Type: typ, Data: json.RawMessage("{bad-json")})
+	}
 }
 
 func TestStop_FlushesPending(t *testing.T) {

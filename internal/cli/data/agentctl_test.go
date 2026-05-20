@@ -203,6 +203,10 @@ func TestAgent503(t *testing.T) {
 }
 
 func TestFetchAgentsErrors(t *testing.T) {
+	if _, err := fetchAgents(context.Background(), http.DefaultClient, "://bad-url", "default"); err == nil {
+		t.Fatal("expected invalid base URL to fail")
+	}
+
 	tests := []struct {
 		name       string
 		status     int

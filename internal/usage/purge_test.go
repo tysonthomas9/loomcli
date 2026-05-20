@@ -228,3 +228,27 @@ func TestPurgeOlderThan_PreservesFormat(t *testing.T) {
 		t.Errorf("surviving InputTokens = %d, want 42", rec.InputTokens)
 	}
 }
+
+func TestWriteUsageAtomicErrorBranches(t *testing.T) {
+	t.Run("missing parent", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "missing", "usage.jsonl")
+		if err := writeUsageAtomic(path, nil); err == nil || !strings.Contains(err.Error(), "create usage purge tmp") {
+			t.Fatalf("writeUsageAtomic missing parent err = %v", err)
+		}
+	})
+
+	t.Run("rename over directory", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "usage.jsonl")
+		if err := os.Mkdir(path, 0755); err != nil {
+			t.Fatalf("mkdir target dir: %v", err)
+		}
+		err := writeUsageAtomic(path, []SessionUsage{{AgentName: "nova", StartedAt: time.Now().UTC()}})
+		if err == nil || !strings.Contains(err.Error(), "rename usage purge tmp") {
+			t.Fatalf("writeUsageAtomic rename err = %v", err)
+		}
+		if _, statErr := os.Stat(path + ".tmp"); !os.IsNotExist(statErr) {
+			t.Fatalf("tmp file still exists after rename failure: %v", statErr)
+		}
+	})
+}

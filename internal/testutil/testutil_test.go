@@ -86,3 +86,32 @@ func TestLoadFixture(t *testing.T) {
 		t.Errorf("LoadFixture() = %q, want %q", got, "fixture content")
 	}
 }
+
+func TestLoadFixtureWalksParentDirectories(t *testing.T) {
+	tmpDir := t.TempDir()
+	testdataDir := filepath.Join(tmpDir, "testdata")
+	if err := os.MkdirAll(testdataDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "go.mod"), []byte("module example.test\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(testdataDir, "nested.txt"), []byte("parent fixture"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	nestedDir := filepath.Join(tmpDir, "a", "b", "c")
+	if err := os.MkdirAll(nestedDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	origDir, _ := os.Getwd()
+	t.Cleanup(func() { _ = os.Chdir(origDir) })
+	if err := os.Chdir(nestedDir); err != nil {
+		t.Fatal(err)
+	}
+
+	got := LoadFixture(t, "nested.txt")
+	if got != "parent fixture" {
+		t.Errorf("LoadFixture() = %q, want %q", got, "parent fixture")
+	}
+}

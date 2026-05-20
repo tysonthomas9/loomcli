@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/lockfile"
 )
 
 // startMockServer creates a Unix socket server that accepts one connection,
@@ -131,6 +133,50 @@ func TestTryConnectWithTimeout_NoSocket(t *testing.T) {
 	if client != nil {
 		t.Error("TryConnectWithTimeout() should return nil client for non-existent socket")
 		client.Close()
+	}
+}
+
+func TestTryConnectWithTimeout_DaemonStarting(t *testing.T) {
+	dir, err := os.MkdirTemp("/tmp", "rpc-lock-*")
+	if err != nil {
+		t.Fatalf("mkdir temp runtime: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+
+	lockPath := filepath.Join(dir, "daemon.lock")
+	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatalf("open daemon lock: %v", err)
+	}
+	defer f.Close()
+	if err := lockfile.FlockExclusiveBlocking(f); err != nil {
+		t.Fatalf("lock daemon file: %v", err)
+	}
+	defer lockfile.FlockUnlock(f)
+
+	client, err := TryConnectWithTimeout(filepath.Join(dir, "loom.sock"), time.Millisecond)
+	if err != ErrDaemonStarting {
+		t.Fatalf("TryConnectWithTimeout err = %v, want ErrDaemonStarting", err)
+	}
+	if client != nil {
+		t.Fatalf("client = %v, want nil", client)
+	}
+}
+
+func TestTryConnectWithTimeout_DefaultTimeoutAndHealthFailure(t *testing.T) {
+	socketPath := startMockServer(t, func(req Request) Response {
+		if req.Operation != OpHealth {
+			t.Fatalf("operation = %q, want health", req.Operation)
+		}
+		return Response{Success: false, Error: "health failed"}
+	})
+
+	client, err := TryConnectWithTimeout(socketPath, 0)
+	if err != nil {
+		t.Fatalf("TryConnectWithTimeout health failure err = %v", err)
+	}
+	if client != nil {
+		t.Fatal("health failure should return nil client")
 	}
 }
 
@@ -1457,6 +1503,26 @@ func TestClient_GetGraphData(t *testing.T) {
 	}
 	if result == nil {
 		t.Error("GetGraphData() returned nil result")
+	}
+}
+
+func TestClient_ListKanban(t *testing.T) {
+	t.Parallel()
+
+	client := newMockClient(t, func(req Request) Response {
+		if req.Operation != OpListKanban {
+			t.Fatalf("operation = %q, want %q", req.Operation, OpListKanban)
+		}
+		data, _ := json.Marshal(ListKanbanResponse{})
+		return Response{Success: true, Data: data}
+	})
+
+	result, err := client.ListKanban(&ListKanbanArgs{})
+	if err != nil {
+		t.Fatalf("ListKanban() error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("ListKanban() returned nil result")
 	}
 }
 

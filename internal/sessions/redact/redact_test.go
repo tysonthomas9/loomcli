@@ -166,15 +166,59 @@ func TestStringMergesOverlappingSecretRegionsAndPreservesJSONEscapes(t *testing.
 	}
 }
 
+func TestStringGitleaksAndEscapeBoundaryBranches(t *testing.T) {
+	escaped := String(`{"files":"controller.go\nmodel.go\tview.go"}`)
+	if strings.Contains(escaped, `\R`) {
+		t.Fatalf("redaction consumed JSON escape continuation: %q", escaped)
+	}
+	if !strings.Contains(escaped, `\nmodel.go\tview.go`) {
+		t.Fatalf("ordinary escaped file list changed unexpectedly: %q", escaped)
+	}
+
+	shortEscapedToken := String(`{"files":"controller.go\nABCDEF123"}`)
+	if strings.Contains(shortEscapedToken, `\REDACTED`) {
+		t.Fatalf("short escaped token was redacted across JSON escape: %q", shortEscapedToken)
+	}
+
+	awsAccessKey := `aws_access_key_id = "AKIALALEMEL33243OLIA"`
+	got := String(awsAccessKey + " and again " + awsAccessKey)
+	if strings.Contains(got, "AKIALALEMEL33243OLIA") || strings.Count(got, RedactedPlaceholder) < 2 {
+		t.Fatalf("gitleaks-style secret was not fully redacted: %q", got)
+	}
+}
+
+func TestJSONLContentDeduplicatesReplacementsAndSkipsStructuralFields(t *testing.T) {
+	structuralID := "MSG_0123456789abcdef0123456789abcdef"
+	input := `{"message_id":"` + structuralID + `","nested":["` + highEntropySecret + `","` + highEntropySecret + `"],"type":"text"}`
+	got, err := JSONLContent(input)
+	if err != nil {
+		t.Fatalf("JSONLContent: %v", err)
+	}
+	if !strings.Contains(got, `"message_id":"`+structuralID+`"`) {
+		t.Fatalf("structural message_id should be preserved: %q", got)
+	}
+	if strings.Count(got, RedactedPlaceholder) != 2 {
+		t.Fatalf("redaction count = %d in %q, want duplicate string occurrences replaced", strings.Count(got, RedactedPlaceholder), got)
+	}
+}
+
 func TestRedactSmallHelpers(t *testing.T) {
 	if shannonEntropy("") != 0 {
 		t.Fatal("empty entropy should be zero")
 	}
-	if shouldSkipJSONLField("thread_id") != true || shouldSkipJSONLField("hybrid") != false {
-		t.Fatal("field skip allowlist mismatch")
+	for _, key := range []string{"signature", "id", "uuid", "thread_id", "tool_use_id", "filepath", "cwd"} {
+		if !shouldSkipJSONLField(key) {
+			t.Fatalf("%s should be skipped", key)
+		}
+	}
+	if shouldSkipJSONLField("hybrid") {
+		t.Fatal("hybrid should not be treated as a structural id")
 	}
 	if !shouldSkipJSONLObject(map[string]any{"type": "base64"}) {
 		t.Fatal("base64 block should be skipped")
+	}
+	if !shouldSkipJSONLObject(map[string]any{"type": "image/png"}) {
+		t.Fatal("image block should be skipped")
 	}
 	if shouldSkipJSONLObject(map[string]any{"type": "text"}) {
 		t.Fatal("text block should not be skipped")

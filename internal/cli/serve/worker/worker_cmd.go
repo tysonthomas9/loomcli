@@ -30,6 +30,19 @@ var (
 	workerMaxTasks     int
 	workerIdleTimeout  int
 	workerParentID     string
+
+	validateWorkerFlagsFn    = validateWorkerFlags
+	resolveWorkerWorkspaceFn = resolveWorkerWorkspace
+	printWorkerBannerFn      = printWorkerBanner
+	registerAndGetTokenFn    = registerAndGetToken
+	setupWorkerInterfacesFn  = setupWorkerInterfaces
+	setupWorkerShutdownFn    = setupWorkerShutdown
+	acquireWorkerLockFn      = cli.AcquireLock
+	releaseWorkerLockFn      = cli.ReleaseLock
+	runAutoModeLoopFn        = automode.RunAutoModeLoop
+	cleanupWorkerResourcesFn = cleanupWorkerResources
+	deregisterWorkerFn       = deregisterWorker
+	workerExitFn             = os.Exit
 )
 
 var workerCmd = &cobra.Command{
@@ -95,26 +108,31 @@ type workerRegistration struct {
 func validateWorkerFlags() (string, string) {
 	if workerControlPlane == "" {
 		fmt.Fprintln(os.Stderr, "Error: --control-plane is required (or set LOOM_WORKER_CONTROL_PLANE)")
-		os.Exit(1)
+		workerExitFn(1)
+		return "", ""
 	}
 	if workerWorkspace == "" {
 		fmt.Fprintln(os.Stderr, "Error: --workspace is required (or set LOOM_WORKER_WORKSPACE)")
-		os.Exit(1)
+		workerExitFn(1)
+		return "", ""
 	}
 	if workerAgent == "" {
 		fmt.Fprintln(os.Stderr, "Error: --agent is required (or set LOOM_WORKER_AGENT)")
-		os.Exit(1)
+		workerExitFn(1)
+		return "", ""
 	}
 	if workerBackend != "" {
 		if err := cli.SetBackend(workerBackend); err != nil {
 			fmt.Fprintf(os.Stderr, "Error setting backend: %v\n", err)
-			os.Exit(1)
+			workerExitFn(1)
+			return "", ""
 		}
 	}
 	worktreePath, err := os.Getwd()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error getting working directory: %v\n", err)
-		os.Exit(1)
+		workerExitFn(1)
+		return "", ""
 	}
 	return os.Getenv("LOOM_WORKER_TOKEN"), worktreePath
 }
@@ -147,29 +165,29 @@ func resolveWorkerWorkspace(workspace string) string {
 }
 
 func runWorker(cmd *cobra.Command, args []string) {
-	workerToken, worktreePath := validateWorkerFlags()
-	workerWorkspace = resolveWorkerWorkspace(workerWorkspace)
-	printWorkerBanner(worktreePath)
+	workerToken, worktreePath := validateWorkerFlagsFn()
+	workerWorkspace = resolveWorkerWorkspaceFn(workerWorkspace)
+	printWorkerBannerFn(worktreePath)
 
-	reg, authToken := registerAndGetToken(workerToken)
-	lockBridge, eventEmitter, logForwarder := setupWorkerInterfaces(reg, authToken)
+	reg, authToken := registerAndGetTokenFn(workerToken)
+	lockBridge, eventEmitter, logForwarder := setupWorkerInterfacesFn(reg, authToken)
 
-	shutdown := setupWorkerShutdown()
+	shutdown := setupWorkerShutdownFn()
 
-	if err := cli.AcquireLock(worktreePath, "worker", workerAgent); err != nil {
+	if err := acquireWorkerLockFn(worktreePath, "worker", workerAgent); err != nil {
 		fmt.Fprintf(os.Stderr, "Error acquiring lock: %v\n", err)
-		deregisterWorker(workerControlPlane, authToken, reg.WorkerID)
-		os.Exit(1)
+		deregisterWorkerFn(workerControlPlane, authToken, reg.WorkerID)
+		workerExitFn(1)
 	}
-	defer func() { _ = cli.ReleaseLock(worktreePath) }()
+	defer func() { _ = releaseWorkerLockFn(worktreePath) }()
 
-	automode.RunAutoModeLoop(automode.AutoModeOptions{
+	runAutoModeLoopFn(automode.AutoModeOptions{
 		Interval: workerInterval, MaxTasks: workerMaxTasks, IdleTimeout: workerIdleTimeout,
 		AgentType: "task", AgentName: workerAgent, WorktreePath: worktreePath,
 		ParentID: workerParentID, LockBridge: lockBridge, EventEmitter: eventEmitter,
 	}, shutdown)
 
-	cleanupWorkerResources(logForwarder, eventEmitter, authToken, reg.WorkerID)
+	cleanupWorkerResourcesFn(logForwarder, eventEmitter, authToken, reg.WorkerID)
 }
 
 func printWorkerBanner(worktreePath string) {

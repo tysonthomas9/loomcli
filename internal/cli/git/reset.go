@@ -91,7 +91,7 @@ func runReset(cmd *cobra.Command, args []string) {
 			targetBranch = args[0]
 		}
 		if err := resetAllWorktrees(deps, targetBranch, explicitBranch); err != nil {
-			os.Exit(1)
+			exitProcess(1)
 		}
 	} else {
 		// Single worktree reset
@@ -101,7 +101,7 @@ func runReset(cmd *cobra.Command, args []string) {
 			targetBranch = args[1]
 		}
 		if !resetWorktree(deps, worktreeName, targetBranch, !resetForce) {
-			os.Exit(1)
+			exitProcess(1)
 		}
 	}
 }

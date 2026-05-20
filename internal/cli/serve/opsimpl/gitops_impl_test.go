@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/git"
+	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -238,6 +240,65 @@ func TestResolveAgentWorktree_StoreBackedFleetDB(t *testing.T) {
 	}
 	if len(list) != 1 || list[0].Name != "nova" || list[0].Path != wtPath {
 		t.Fatalf("ListAgentWorktrees = %+v", list)
+	}
+}
+
+func TestResolveAgentWorktreeStoreBackedErrorBranches(t *testing.T) {
+	ctx := context.Background()
+	if _, err := (*GitOpsImpl)(nil).resolveAgentWorktreeFromStore(ctx, "WS", "nova"); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("nil GitOps error = %v, want ErrNotFound", err)
+	}
+	if _, err := (&GitOpsImpl{}).resolveAgentWorktreeFromStore(ctx, "WS", "nova"); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("nil store error = %v, want ErrNotFound", err)
+	}
+	if _, err := NewGitOps().WithStore(memstore.New()).resolveAgentWorktreeFromStore(ctx, "", "nova"); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("empty workspace error = %v, want ErrNotFound", err)
+	}
+	if _, err := NewGitOps().WithStore(memstore.New()).resolveAgentWorktreeFromStore(ctx, "WS", ""); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("empty agent error = %v, want ErrNotFound", err)
+	}
+
+	loomDir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", loomDir)
+	wsRoot := t.TempDir()
+	if err := bootstrap.SaveStateCache(&bootstrap.StateCache{
+		Version: 1,
+		Workspaces: map[string]bootstrap.WorkspaceLocalState{
+			"WS": {Path: wsRoot},
+		},
+	}); err != nil {
+		t.Fatalf("save empty state cache: %v", err)
+	}
+
+	st := memstore.New()
+	t.Cleanup(func() { _ = st.Close() })
+	g := NewGitOps().WithStore(st)
+	if _, err := g.resolveAgentWorktreeFromStore(ctx, "MISSING", "nova"); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("missing workspace error = %v, want ErrNotFound", err)
+	}
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS", Name: "Workspace"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if _, err := st.Roles().Create(ctx, store.RoleCreate{WorkspaceKey: "WS", Name: "task"}); err != nil {
+		t.Fatalf("create role: %v", err)
+	}
+	if _, err := g.resolveAgentWorktreeFromStore(ctx, "WS", "nova"); err == nil || !strings.Contains(err.Error(), "agent") {
+		t.Fatalf("missing agent error = %v", err)
+	}
+	if _, err := st.Agents().Create(ctx, store.AgentCreate{WorkspaceKey: "WS", Name: "nova", RoleName: "task"}); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	if _, err := g.resolveAgentWorktreeFromStore(ctx, "WS", "nova"); err == nil || !strings.Contains(err.Error(), "no repos") {
+		t.Fatalf("no repos error = %v", err)
+	}
+	if _, err := st.Repos().Create(ctx, store.RepoCreate{WorkspaceKey: "WS", Name: "api", DefaultBranch: "", Remote: "origin"}); err != nil {
+		t.Fatalf("create repo: %v", err)
+	}
+	if _, err := g.resolveAgentWorktreeFromStore(ctx, "WS", "nova"); err == nil || !strings.Contains(err.Error(), "not checked out") {
+		t.Fatalf("missing checkout error = %v", err)
+	}
+	if _, err := g.ListAgentWorktrees("MISSING"); err == nil || !strings.Contains(err.Error(), "load fleet-db workspace") {
+		t.Fatalf("ListAgentWorktrees missing workspace error = %v", err)
 	}
 }
 

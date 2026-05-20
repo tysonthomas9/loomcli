@@ -67,25 +67,25 @@ func runDaemonQueue(cmd *cobra.Command, args []string) {
 	projectDir, err := daemonGetwdFn()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: cannot determine working directory: %v\n", err)
-		os.Exit(1)
+		exitProcess(1)
 	}
 
 	config, err := loadDaemonConfigFn(projectDir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: loading config: %v\n", err)
-		os.Exit(1)
+		exitProcess(1)
 	}
 
 	agent, err := findAgentEntryStatic(config, agentName)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		exitProcess(1)
 	}
 
 	rc, err := resolveQueueRoleConfigFn(agent.Role, config, projectDir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: resolving role %q: %v\n", agent.Role, err)
-		os.Exit(1)
+		exitProcess(1)
 	}
 
 	resolveQueueSourceReposFn(agent)
@@ -96,7 +96,7 @@ func runDaemonQueue(cmd *cobra.Command, args []string) {
 	issues, err := fetchQueueReadyIssuesFn(agent.Parent, agent.Repo)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: fetching ready issues: %v\n", err)
-		os.Exit(1)
+		exitProcess(1)
 	}
 
 	if len(issues) == 0 {

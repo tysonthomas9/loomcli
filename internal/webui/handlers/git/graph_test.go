@@ -7,11 +7,33 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 )
+
+type graphBackendWithErrors struct {
+	stubGraphBackend
+	listErr    error
+	blockedErr error
+	blocked    []backend.IssueData
+}
+
+func (b *graphBackendWithErrors) List(ctx context.Context, opts backend.ListOpts) ([]backend.IssueData, error) {
+	if b.listErr != nil {
+		return nil, b.listErr
+	}
+	return b.stubGraphBackend.List(ctx, opts)
+}
+
+func (b *graphBackendWithErrors) Blocked(_ context.Context, _ backend.BlockedOpts) ([]backend.IssueData, error) {
+	if b.blockedErr != nil {
+		return nil, b.blockedErr
+	}
+	return b.blocked, nil
+}
 
 func TestGraphInterceptorResponseWriterBehavior(t *testing.T) {
 	interceptor := &graphInterceptor{header: make(http.Header)}
@@ -42,6 +64,13 @@ func TestGraphInterceptorResponseWriterBehavior(t *testing.T) {
 	interceptor.flushTo(rec)
 	if rec.Code != http.StatusCreated || rec.Body.String() != "created" {
 		t.Fatalf("flush explicit status/body = %d/%q", rec.Code, rec.Body.String())
+	}
+
+	interceptor = &graphInterceptor{header: make(http.Header)}
+	rec = httptest.NewRecorder()
+	interceptor.flushTo(rec)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("empty flush status = %d, want 200", rec.Code)
 	}
 }
 
@@ -1004,6 +1033,108 @@ func TestHandleGraph_BackendStatusFilter(t *testing.T) {
 			ids = append(ids, gi.ID)
 		}
 		t.Errorf("status=open returned IDs %v; want [OPEN-1]", ids)
+	}
+}
+
+func TestBackendGraphAndBlockedAdditionalBranches(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/issues/graph", nil)
+	if serveGraphViaBackend(httptest.NewRecorder(), req, nil) {
+		t.Fatal("nil graph backend function should fall through")
+	}
+	if serveGraphViaBackend(httptest.NewRecorder(), req, func(context.Context) backend.IssueBackend { return nil }) {
+		t.Fatal("nil graph backend should fall through")
+	}
+	if serveBlockedViaBackend(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/api/blocked", nil), nil) {
+		t.Fatal("nil blocked backend function should fall through")
+	}
+	if serveBlockedViaBackend(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/api/blocked", nil), func(context.Context) backend.IssueBackend { return nil }) {
+		t.Fatal("nil blocked backend should fall through")
+	}
+
+	rr := httptest.NewRecorder()
+	served := serveGraphViaBackend(rr, httptest.NewRequest(http.MethodGet, "/api/issues/graph?status=bad", nil), func(context.Context) backend.IssueBackend {
+		return &stubGraphBackend{}
+	})
+	if !served || rr.Code != http.StatusBadRequest {
+		t.Fatalf("invalid graph status served=%v code=%d body=%s", served, rr.Code, rr.Body.String())
+	}
+
+	rr = httptest.NewRecorder()
+	served = serveGraphViaBackend(rr, req, func(context.Context) backend.IssueBackend {
+		return &graphBackendWithErrors{listErr: errors.New("list failed")}
+	})
+	if !served || rr.Code != http.StatusInternalServerError {
+		t.Fatalf("graph list error served=%v code=%d body=%s", served, rr.Code, rr.Body.String())
+	}
+
+	deferAt := time.Now().UTC().Add(time.Hour)
+	dueAt := deferAt.Add(time.Hour)
+	be := &stubGraphBackend{
+		list: []backend.IssueData{{
+			ID:         "CLOSED-1",
+			Title:      "Closed",
+			Status:     "closed",
+			Parent:     "EPIC-1",
+			DeferUntil: &deferAt,
+			DueAt:      &dueAt,
+		}},
+		details: map[string]*backend.IssueDetailData{
+			"CLOSED-1": {
+				IssueData: backend.IssueData{ID: "CLOSED-1"},
+				Dependencies: []backend.DependencyData{{
+					DependsOnID: "EPIC-1",
+					Type:        "parent-child",
+				}},
+			},
+		},
+	}
+	rr = httptest.NewRecorder()
+	served = serveGraphViaBackend(rr, httptest.NewRequest(http.MethodGet, "/api/issues/graph?status=closed", nil), func(context.Context) backend.IssueBackend {
+		return be
+	})
+	if !served || rr.Code != http.StatusOK {
+		t.Fatalf("closed graph served=%v code=%d body=%s", served, rr.Code, rr.Body.String())
+	}
+	var graphResp GraphResponse
+	if err := json.NewDecoder(rr.Body).Decode(&graphResp); err != nil {
+		t.Fatalf("decode graph response: %v", err)
+	}
+	if len(graphResp.Data) != 1 || graphResp.Data[0].DeferUntil == "" || graphResp.Data[0].DueAt == "" ||
+		len(graphResp.Data[0].Dependencies) != 1 {
+		t.Fatalf("graph response = %+v", graphResp.Data)
+	}
+	if includeGraphIssue("closed", "all", false) {
+		t.Fatal("includeGraphIssue included closed issue when includeClosed=false")
+	}
+	if !includeGraphIssue("closed", "closed", true) {
+		t.Fatal("includeGraphIssue rejected closed status filter")
+	}
+	if splitAndTrim("") != nil {
+		t.Fatal("splitAndTrim empty returned non-nil")
+	}
+
+	rr = httptest.NewRecorder()
+	served = serveBlockedViaBackend(rr, httptest.NewRequest(http.MethodGet, "/api/blocked?priority=bad", nil), func(context.Context) backend.IssueBackend {
+		return &graphBackendWithErrors{}
+	})
+	if !served || rr.Code != http.StatusBadRequest {
+		t.Fatalf("blocked parse error served=%v code=%d body=%s", served, rr.Code, rr.Body.String())
+	}
+
+	rr = httptest.NewRecorder()
+	served = serveBlockedViaBackend(rr, httptest.NewRequest(http.MethodGet, "/api/blocked", nil), func(context.Context) backend.IssueBackend {
+		return &graphBackendWithErrors{blockedErr: errors.New("blocked failed")}
+	})
+	if !served || rr.Code != http.StatusInternalServerError {
+		t.Fatalf("blocked backend error served=%v code=%d body=%s", served, rr.Code, rr.Body.String())
+	}
+
+	rr = httptest.NewRecorder()
+	served = serveBlockedViaBackend(rr, httptest.NewRequest(http.MethodGet, "/api/blocked", nil), func(context.Context) backend.IssueBackend {
+		return &graphBackendWithErrors{}
+	})
+	if !served || rr.Code != http.StatusOK {
+		t.Fatalf("blocked nil slice served=%v code=%d body=%s", served, rr.Code, rr.Body.String())
 	}
 }
 

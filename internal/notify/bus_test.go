@@ -58,6 +58,10 @@ func TestPublishSubscribeBasic(t *testing.T) {
 	}
 }
 
+func TestNopPublisherPublish(t *testing.T) {
+	NopPublisher{}.Publish(Event{Topic: "noop"})
+}
+
 func TestPublishAutoSetsTimestamp(t *testing.T) {
 	bus := New()
 	defer bus.Close()

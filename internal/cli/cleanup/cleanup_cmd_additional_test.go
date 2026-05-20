@@ -4,6 +4,9 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/cli"
 )
 
 func TestPrintCleanupResultBranches(t *testing.T) {
@@ -36,5 +39,61 @@ func TestPrintCleanupResultBranches(t *testing.T) {
 	})
 	if !strings.Contains(out, "Usage: error: boom") {
 		t.Fatalf("error output = %q", out)
+	}
+}
+
+func TestParseDayDurationBranches(t *testing.T) {
+	got, err := parseDayDuration("2d")
+	if err != nil || got != 48*time.Hour {
+		t.Fatalf("parseDayDuration(2d) = %v, %v", got, err)
+	}
+	got, err = parseDayDuration("90m")
+	if err != nil || got != 90*time.Minute {
+		t.Fatalf("parseDayDuration(90m) = %v, %v", got, err)
+	}
+	if _, err := parseDayDuration("xd"); err == nil {
+		t.Fatal("parseDayDuration(xd) error = nil")
+	}
+}
+
+func TestRunCleanupValidationBranchesAndDryRunSuccess(t *testing.T) {
+	oldSessionsAge, oldUsageAge, oldEventsAge, oldDryRun := cleanupSessionsAge, cleanupUsageAge, cleanupEventsAge, cleanupDryRun
+	t.Cleanup(func() {
+		cleanupSessionsAge, cleanupUsageAge, cleanupEventsAge, cleanupDryRun = oldSessionsAge, oldUsageAge, oldEventsAge, oldDryRun
+		cli.ResetWorkspaceRuntimeDirCache()
+	})
+
+	runtimeDir := t.TempDir()
+	t.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", runtimeDir)
+	cli.ResetWorkspaceRuntimeDirCache()
+
+	cleanupSessionsAge = "1d"
+	cleanupUsageAge = "bad"
+	cleanupEventsAge = "1d"
+	cleanupDryRun = true
+	if err := runCleanup(nil, nil); err == nil || !strings.Contains(err.Error(), "invalid --usage-older-than") {
+		t.Fatalf("runCleanup invalid usage age err = %v", err)
+	}
+
+	cleanupUsageAge = "1d"
+	cleanupEventsAge = "bad"
+	if err := runCleanup(nil, nil); err == nil || !strings.Contains(err.Error(), "invalid --events-older-than") {
+		t.Fatalf("runCleanup invalid events age err = %v", err)
+	}
+
+	cleanupEventsAge = "1d"
+	out := captureCleanupStdout(t, func() {
+		if err := runCleanup(nil, nil); err != nil {
+			t.Fatalf("runCleanup dry-run: %v", err)
+		}
+	})
+	for _, want := range []string{
+		"Sessions: would purge 0, would compact 0 index entries",
+		"Usage: would purge 0 records",
+		"Events: would purge 0 files",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("runCleanup output = %q, missing %q", out, want)
+		}
 	}
 }

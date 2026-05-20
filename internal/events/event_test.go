@@ -2,6 +2,7 @@ package events
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"testing"
 	"time"
@@ -161,11 +162,63 @@ func TestNewEvent_NilData(t *testing.T) {
 	}
 }
 
+func TestBusEmitCtx(t *testing.T) {
+	bus := NewBus(t.TempDir())
+	defer bus.Close()
+	var got Event
+	bus.Subscribe(func(e Event) { got = e })
+	event, err := NewEvent(TaskStarted, "agent", "task", "EPIC", TaskStartedData{TaskID: "T-1"})
+	if err != nil {
+		t.Fatalf("NewEvent: %v", err)
+	}
+	if err := bus.EmitCtx(context.Background(), event); err != nil {
+		t.Fatalf("EmitCtx: %v", err)
+	}
+	if got.Type != TaskStarted || got.Agent != "agent" {
+		t.Fatalf("emitted event = %+v", got)
+	}
+}
+
 func TestDecodeData_UnknownType(t *testing.T) {
 	e := Event{Type: "unknown", Data: json.RawMessage(`{}`)}
 	_, err := e.DecodeData()
 	if err == nil {
 		t.Error("expected error for unknown type")
+	}
+}
+
+func TestDecodeData_AllEventTypeBranchesAndErrors(t *testing.T) {
+	for _, et := range []EventType{
+		TaskStarted,
+		TaskFailed,
+		TaskStuck,
+		AgentRestarted,
+		AgentStopped,
+		EpicAssigned,
+		EpicExhausted,
+		PRCreated,
+		ConflictResolved,
+		ConfigReloaded,
+	} {
+		t.Run(string(et), func(t *testing.T) {
+			e := Event{Type: et, Data: json.RawMessage(`{}`)}
+			if got, err := e.DecodeData(); err != nil || got == nil {
+				t.Fatalf("DecodeData(%s) = %#v, %v; want typed zero value", et, got, err)
+			}
+		})
+	}
+
+	e := Event{Type: TaskStarted, Data: json.RawMessage(`{`)}
+	if _, err := e.DecodeData(); err == nil {
+		t.Fatal("DecodeData accepted malformed JSON")
+	}
+
+	var d Duration
+	if err := d.UnmarshalJSON([]byte(`123`)); err == nil {
+		t.Fatal("Duration accepted non-string JSON")
+	}
+	if err := d.UnmarshalJSON([]byte(`"not-a-duration"`)); err == nil {
+		t.Fatal("Duration accepted invalid duration")
 	}
 }
 

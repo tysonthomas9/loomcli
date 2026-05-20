@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -88,5 +90,37 @@ func TestDefaultExecCommand_ExitCode(t *testing.T) {
 	result := defaultExecCommand("", "false") // 'false' command exits with 1
 	if result.Err == nil {
 		t.Error("expected error from 'false' command, got nil")
+	}
+}
+
+func TestDefaultExecCommandContextAndGitOutput(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	result := defaultExecCommandContext(ctx, "", "sh", "-c", "sleep 1")
+	if result.Err == nil {
+		t.Fatal("defaultExecCommandContext with canceled context returned nil error")
+	}
+
+	binDir := t.TempDir()
+	gitPath := filepath.Join(binDir, "git")
+	if err := os.WriteFile(gitPath, []byte("#!/bin/sh\necho streamed-git\n"), 0755); err != nil {
+		t.Fatalf("write fake git: %v", err)
+	}
+	oldPath := os.Getenv("PATH")
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+oldPath)
+	if err := defaultRunGitWithOutput(t.TempDir(), "status"); err != nil {
+		t.Fatalf("defaultRunGitWithOutput: %v", err)
+	}
+	if err := (defaultGitRunner{}).RunWithOutput(t.TempDir(), "status"); err != nil {
+		t.Fatalf("defaultGitRunner.RunWithOutput: %v", err)
+	}
+
+	deps, gitR, _, _, _ := NewTestDeps(t)
+	gitR.WithOutput = errors.New("stream failed")
+	if err := RunGitOutput(deps, "/repo", "status", "--short"); err == nil || !strings.Contains(err.Error(), "stream failed") {
+		t.Fatalf("RunGitOutput err = %v, want stream failed", err)
+	}
+	if len(gitR.RunCalls) != 1 || gitR.RunCalls[0].Dir != "/repo" || strings.Join(gitR.RunCalls[0].Args, " ") != "status --short" {
+		t.Fatalf("RunWithOutput calls = %+v", gitR.RunCalls)
 	}
 }

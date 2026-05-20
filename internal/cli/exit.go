@@ -20,6 +20,7 @@ import (
 var (
 	activeRootSpan      atomic.Value // trace.Span
 	activeTraceShutdown atomic.Value // func(context.Context) error
+	exitProcess         = os.Exit
 )
 
 // RegisterActiveTraceState publishes the per-invocation tracing state so
@@ -48,5 +49,16 @@ func ExitWithFlush(code int) {
 			cancel()
 		}
 	}
-	os.Exit(code)
+	exitProcess(code)
+}
+
+// TestingSetExitProcess replaces the process exit function for tests.
+func TestingSetExitProcess(t interface {
+	Helper()
+	Cleanup(func())
+}, fn func(int)) {
+	t.Helper()
+	old := exitProcess
+	exitProcess = fn
+	t.Cleanup(func() { exitProcess = old })
 }

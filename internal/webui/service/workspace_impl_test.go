@@ -267,6 +267,58 @@ func TestWorkspaceServiceUnavailableTimeoutAndErrorBranches(t *testing.T) {
 	}
 }
 
+func TestWorkspaceServiceStoreErrorBranches(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	t.Setenv("LOOM_WORKSPACE", "")
+
+	ctx := context.Background()
+	base := memstore.New()
+	errBoom := errors.New("store boom")
+	listErrStore := &workspaceErrorStore{
+		Store:      base,
+		workspaces: &workspaceErrorWorkspaceStore{WorkspaceStore: base.Workspaces(), listErr: errBoom},
+	}
+	svc := NewWorkspaceService(WorkspaceServiceConfig{Store: listErrStore})
+	if _, err := svc.ListWorkspaces(ctx); !serviceErrorKind(err, KindInternal) {
+		t.Fatalf("ListWorkspaces store error = %v", err)
+	}
+	if _, err := svc.GetActiveWorkspace(ctx); !serviceErrorKind(err, KindInternal) {
+		t.Fatalf("GetActiveWorkspace store error = %v", err)
+	}
+
+	getErrStore := &workspaceErrorStore{
+		Store:      base,
+		workspaces: &workspaceErrorWorkspaceStore{WorkspaceStore: base.Workspaces(), getErr: errBoom},
+	}
+	svc = NewWorkspaceService(WorkspaceServiceConfig{Store: getErrStore})
+	if _, err := svc.GetWorkspace(ctx, "WS"); !serviceErrorKind(err, KindInternal) {
+		t.Fatalf("GetWorkspace store error = %v", err)
+	}
+}
+
+func TestReadGitHeadBranchBranches(t *testing.T) {
+	if got := readGitHeadBranch(filepath.Join(t.TempDir(), "missing")); got != "" {
+		t.Fatalf("missing git branch = %q, want empty", got)
+	}
+	repo := t.TempDir()
+	gitDir := filepath.Join(repo, ".git")
+	if err := os.MkdirAll(gitDir, 0755); err != nil {
+		t.Fatalf("mkdir .git: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(gitDir, "HEAD"), []byte("0123456789abcdef\n"), 0644); err != nil {
+		t.Fatalf("write detached HEAD: %v", err)
+	}
+	if got := readGitHeadBranch(repo); got != "" {
+		t.Fatalf("detached git branch = %q, want empty", got)
+	}
+	if err := os.WriteFile(filepath.Join(gitDir, "HEAD"), []byte("ref: refs/heads/feature/test\n"), 0644); err != nil {
+		t.Fatalf("write branch HEAD: %v", err)
+	}
+	if got := readGitHeadBranch(repo); got != "feature/test" {
+		t.Fatalf("branch = %q, want feature/test", got)
+	}
+}
+
 func TestAddWorkspaceReposNormalizesCloneURLInput(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
@@ -406,6 +458,59 @@ func TestGetWorkspace_StoreBackedCachesTopologyAcrossRepeatedCalls(t *testing.T)
 	}
 	if got := counted.daemon.getByWorkspace["BETA"]; got != 1 {
 		t.Fatalf("BETA daemon Get calls = %d, want one cross-workspace summary read", got)
+	}
+}
+
+func TestGetWorkspace_StoreBackedPoolKnownMarksActiveAndBranch(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	ctx := context.Background()
+	st := memstore.New()
+	repoDir := t.TempDir()
+	gitDir := filepath.Join(repoDir, ".git")
+	if err := os.MkdirAll(gitDir, 0755); err != nil {
+		t.Fatalf("mkdir .git: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(gitDir, "HEAD"), []byte("ref: refs/heads/feature/pool\n"), 0600); err != nil {
+		t.Fatalf("write HEAD: %v", err)
+	}
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "ALPHA", Name: "Alpha Project"}); err != nil {
+		t.Fatalf("create alpha: %v", err)
+	}
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "BETA", Name: "Beta Project"}); err != nil {
+		t.Fatalf("create beta: %v", err)
+	}
+	if _, err := st.Repos().Create(ctx, store.RepoCreate{WorkspaceKey: "ALPHA", Name: "api"}); err != nil {
+		t.Fatalf("create repo: %v", err)
+	}
+	if err := bootstrap.SaveStateCache(&bootstrap.StateCache{
+		Workspaces: map[string]bootstrap.WorkspaceLocalState{
+			"ALPHA": {Path: filepath.Dir(repoDir), Repos: map[string]string{"api": repoDir}},
+		},
+	}); err != nil {
+		t.Fatalf("save state cache: %v", err)
+	}
+
+	mp := daemon.NewMultiPool(func(context.Context) string { return "" }, 1)
+	t.Cleanup(func() { _ = mp.Close() })
+	if err := mp.Register("ALPHA", &workspaceServiceFakePool{stats: daemon.PoolStats{Size: 1}}); err != nil {
+		t.Fatalf("register pool: %v", err)
+	}
+
+	svc := NewWorkspaceService(WorkspaceServiceConfig{Store: st, MultiPool: mp})
+	data, err := svc.GetWorkspace(ctx, "ALPHA")
+	if err != nil {
+		t.Fatalf("GetWorkspace: %v", err)
+	}
+	if len(data.Repos) != 1 || data.Repos[0].CurrentBranch != "feature/pool" {
+		t.Fatalf("repos = %+v, want feature/pool branch", data.Repos)
+	}
+	for _, item := range data.Workspaces {
+		if item.ID == "ALPHA" && !item.Active {
+			t.Fatalf("ALPHA summary should be active: %+v", data.Workspaces)
+		}
+		if item.ID == "BETA" && item.Active {
+			t.Fatalf("BETA summary should not be active: %+v", data.Workspaces)
+		}
 	}
 }
 
@@ -787,4 +892,31 @@ type workspaceCountingDaemonStore struct {
 func (s *workspaceCountingDaemonStore) Get(ctx context.Context, workspaceKey string) (*domain.DaemonProfile, error) {
 	s.getByWorkspace[workspaceKey]++
 	return s.DaemonProfileStore.Get(ctx, workspaceKey)
+}
+
+type workspaceErrorStore struct {
+	store.Store
+	workspaces store.WorkspaceStore
+}
+
+func (s *workspaceErrorStore) Workspaces() store.WorkspaceStore { return s.workspaces }
+
+type workspaceErrorWorkspaceStore struct {
+	store.WorkspaceStore
+	getErr  error
+	listErr error
+}
+
+func (s *workspaceErrorWorkspaceStore) Get(ctx context.Context, key string) (*domain.Workspace, error) {
+	if s.getErr != nil {
+		return nil, s.getErr
+	}
+	return s.WorkspaceStore.Get(ctx, key)
+}
+
+func (s *workspaceErrorWorkspaceStore) List(ctx context.Context) ([]*domain.Workspace, error) {
+	if s.listErr != nil {
+		return nil, s.listErr
+	}
+	return s.WorkspaceStore.List(ctx)
 }

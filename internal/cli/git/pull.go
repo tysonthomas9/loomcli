@@ -66,7 +66,7 @@ func runPull(cmd *cobra.Command, args []string) error {
 
 	if all && ws != "" {
 		fmt.Fprintln(os.Stderr, "Error: --all and --workspace are mutually exclusive")
-		os.Exit(1)
+		exitProcess(1)
 	}
 
 	sourceBranch := ""
@@ -88,14 +88,14 @@ func runPull(cmd *cobra.Command, args []string) error {
 	resolver, err := cli.NewResolver()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error creating resolver: %v\n", err)
-		os.Exit(1)
+		exitProcess(1)
 	}
 
 	if ws != "" {
 		if err := resolver.SetWorkspace(ws); err != nil {
 			available := resolver.WorkspaceNames()
 			fmt.Fprintf(os.Stderr, "Error: workspace %q not found. Available: %v\n", ws, available)
-			os.Exit(1)
+			exitProcess(1)
 		}
 	}
 
@@ -107,7 +107,7 @@ func pullAllWorkspaces(deps *cli.Deps, sourceBranch string) {
 	resolver, err := cli.NewResolver()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error creating resolver: %v\n", err)
-		os.Exit(1)
+		exitProcess(1)
 	}
 
 	wsNames := resolver.WorkspaceNames()
@@ -153,14 +153,14 @@ func pullWorkspaceRepo(deps *cli.Deps, resolver *cli.Resolver, worktreeName, sou
 	worktreePath, err := resolver.ResolveWorktreePath(worktreeName)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error resolving worktree: %v\n", err)
-		os.Exit(1)
+		exitProcess(1)
 	}
 
 	// Find the matching cli.WorktreeInfo to get Repo config
 	worktrees, err := resolver.DiscoverWorktrees()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error discovering repos: %v\n", err)
-		os.Exit(1)
+		exitProcess(1)
 	}
 
 	var matched *cli.WorktreeInfo
@@ -173,7 +173,7 @@ func pullWorkspaceRepo(deps *cli.Deps, resolver *cli.Resolver, worktreeName, sou
 
 	if matched == nil || matched.Repo == nil {
 		fmt.Fprintf(os.Stderr, "Error: repo %q is missing FleetDB repo metadata in workspace %q\n", worktreeName, resolver.WorkspaceName())
-		os.Exit(1)
+		exitProcess(1)
 	}
 
 	source := sourceBranch
@@ -194,7 +194,7 @@ func pullWorkspaceRepo(deps *cli.Deps, resolver *cli.Resolver, worktreeName, sou
 	err = pullRepoWorktreeFn(deps, matched.Path, matched.Branch, source, remote)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		exitProcess(1)
 	}
 }
 

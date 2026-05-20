@@ -119,3 +119,28 @@ func TestListExistingAndCreateWorktreesBranches(t *testing.T) {
 		t.Fatal("expected git call for valid worktree")
 	}
 }
+
+func TestPromptForWorktreeNamesRetriesInvalidAndExistingNames(t *testing.T) {
+	MockStdin(t, "3\n")
+
+	got := promptForWorktreeNames([]string{"falcon"})
+	if !slicesEqual(got, []string{"nova", "spark", "ember"}) {
+		t.Fatalf("promptForWorktreeNames = %#v", got)
+	}
+
+	used := map[string]bool{"nova": true}
+	MockStdin(t, "custom\n")
+	if got := promptValidWorktreeName(1, "spark", used); got != "custom" {
+		t.Fatalf("promptValidWorktreeName = %q, want custom", got)
+	}
+
+	MockStdin(t, "\n")
+	if got := promptValidWorktreeName(1, "spark", used); got != "spark" {
+		t.Fatalf("promptValidWorktreeName default = %q, want spark", got)
+	}
+
+	MockStdin(t, "0\n")
+	if got := promptForWorktreeNames(nil); got != nil {
+		t.Fatalf("zero count prompt returned %#v, want nil", got)
+	}
+}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -178,6 +179,35 @@ func TestJSONLWriter_WriteAfterClose(t *testing.T) {
 	err := w.Write(e)
 	if err == nil {
 		t.Error("expected error writing after close")
+	}
+}
+
+func TestJSONLWriter_WriteErrorBranches(t *testing.T) {
+	w := NewJSONLWriter(t.TempDir(), defaultMaxSize, defaultMaxBackups)
+	err := w.Write(Event{Timestamp: time.Now(), Data: json.RawMessage("{bad")})
+	if err == nil || !strings.Contains(err.Error(), "marshaling event") {
+		t.Fatalf("invalid JSON data err = %v, want marshaling event", err)
+	}
+
+	dir := filepath.Join(t.TempDir(), "not-a-dir")
+	if err := os.WriteFile(dir, []byte("file"), 0600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	w = NewJSONLWriter(dir, defaultMaxSize, defaultMaxBackups)
+	err = w.Write(Event{Timestamp: time.Now()})
+	if err == nil || !strings.Contains(err.Error(), "creating events dir") {
+		t.Fatalf("file-as-dir err = %v, want creating events dir", err)
+	}
+
+	dir = t.TempDir()
+	blockedPath := filepath.Join(dir, "events-2026-03-04.jsonl")
+	if err := os.Mkdir(blockedPath, 0750); err != nil {
+		t.Fatalf("Mkdir blocked events path: %v", err)
+	}
+	w = NewJSONLWriter(dir, defaultMaxSize, defaultMaxBackups)
+	err = w.Write(Event{Timestamp: time.Date(2026, 3, 4, 12, 0, 0, 0, time.UTC)})
+	if err == nil || !strings.Contains(err.Error(), "opening events file") {
+		t.Fatalf("blocked events path err = %v, want opening events file", err)
 	}
 }
 

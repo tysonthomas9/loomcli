@@ -9,6 +9,7 @@ import (
 
 	webuilog "github.com/tysonthomas9/loomcli/internal/webui/log"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
+	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
 
 func TestAgentServiceTerminalTokenAndUnavailableBranches(t *testing.T) {
@@ -85,5 +86,38 @@ func TestAgentServiceGetLogReadsWorkspaceAgentLog(t *testing.T) {
 	}
 	if result.Lines[0] != " two" || result.Lines[1] != "three" {
 		t.Fatalf("log lines = %#v", result.Lines)
+	}
+
+	result, err = svc.GetLog(context.Background(), "WS", "nova", 0, 0)
+	if err != nil {
+		t.Fatalf("GetLog default lines: %v", err)
+	}
+	if result.StartLine != 1 || result.LineCount != 3 || len(result.Lines) != 3 {
+		t.Fatalf("default log result = %+v", result)
+	}
+
+	result, err = svc.GetLog(context.Background(), "WS", "nova", webuilog.LogReadMaxLines+10, 0)
+	if err != nil {
+		t.Fatalf("GetLog clamped lines: %v", err)
+	}
+	if result.LineCount != 3 || len(result.Lines) != 3 {
+		t.Fatalf("clamped log result = %+v", result)
+	}
+}
+
+func TestAgentServiceGetTerminalInfoArchiveMode(t *testing.T) {
+	mgr, err := terminal.NewAgentTmuxManager(2)
+	if err != nil {
+		t.Skipf("tmux unavailable: %v", err)
+	}
+	t.Cleanup(func() { _ = mgr.Shutdown() })
+
+	svc := NewAgentService(&fakeGitOps{}, mgr, nil, nil)
+	result, err := svc.GetTerminalInfo(context.Background(), "WS", "nova")
+	if err != nil {
+		t.Fatalf("GetTerminalInfo: %v", err)
+	}
+	if result.Agent != "nova" || result.Mode == "" {
+		t.Fatalf("terminal result = %+v", result)
 	}
 }

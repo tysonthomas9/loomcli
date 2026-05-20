@@ -11,6 +11,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/cli/clitest"
+	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 )
 
@@ -325,6 +328,64 @@ func TestCheckStaleLocks(t *testing.T) {
 			t.Errorf("expected warn for stale lock, got %v: %s", result.Status, result.Summary)
 		}
 	})
+}
+
+func TestCheckWorktreesAndStaleLocksConfiguredRepo(t *testing.T) {
+	root := t.TempDir()
+	repoPath := filepath.Join(root, "api")
+	if err := os.MkdirAll(filepath.Join(repoPath, ".git"), 0o755); err != nil {
+		t.Fatalf("mkdir repo git dir: %v", err)
+	}
+	setupWorkspaceConfig(t, &LoomConfig{
+		DefaultWorkspace: "ws",
+		Workspaces: map[string]WorkspaceConfig{
+			"ws": {
+				Path: root,
+				Repos: []cfgpkg.RepoConfig{{
+					Name:          "api",
+					Path:          "api",
+					DefaultBranch: "main",
+				}},
+			},
+		},
+	})
+
+	deps := cli.TestingGetDefaultDeps()
+	oldGit := deps.Git
+	deps.Git = &clitest.MockGitRunner{RunFunc: func(dir string, args ...string) cli.CommandResult {
+		if dir == repoPath && strings.Join(args, " ") == "branch --show-current" {
+			return cli.CommandResult{Stdout: "main\n"}
+		}
+		return cli.CommandResult{Stdout: ""}
+	}}
+	t.Cleanup(func() { deps.Git = oldGit })
+
+	result := checkWorktrees()
+	if result.Status != StatusPass || !strings.Contains(result.Summary, "api") {
+		t.Fatalf("checkWorktrees = %+v, want pass mentioning api", result)
+	}
+	result = checkStaleLocks()
+	if result.Status != StatusPass {
+		t.Fatalf("checkStaleLocks without lock = %+v, want pass", result)
+	}
+
+	lockInfo := LockInfo{
+		PID:       999999,
+		Command:   "task",
+		StartedAt: time.Now().Add(-10 * time.Minute),
+		AgentName: "nova",
+	}
+	data, err := json.Marshal(lockInfo)
+	if err != nil {
+		t.Fatalf("marshal lock: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoPath, LockFileName), data, 0o644); err != nil {
+		t.Fatalf("write lock: %v", err)
+	}
+	result = checkStaleLocks()
+	if result.Status != StatusWarn || !strings.Contains(result.Detail, "api") {
+		t.Fatalf("checkStaleLocks stale lock = %+v, want warn mentioning api", result)
+	}
 }
 
 func TestCheckRedis(t *testing.T) {

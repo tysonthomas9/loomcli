@@ -130,6 +130,21 @@ func TestEditorCache_RefreshesAfterTTL(t *testing.T) {
 	}
 }
 
+func TestDefaultEditorConstructors(t *testing.T) {
+	cache := NewDefaultEditorCache()
+	if cache == nil {
+		t.Fatal("NewDefaultEditorCache returned nil")
+	}
+	handler := HandleOpenEditorDefault(cache)
+	req := httptest.NewRequest(http.MethodPost, "/api/editors/open", strings.NewReader(`{bad json`))
+	req.RemoteAddr = "127.0.0.1:12345"
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("HandleOpenEditorDefault status = %d, want 400", rec.Code)
+	}
+}
+
 // --- POST /api/editors/open validation tests ---
 
 func TestHandleOpenEditor_OversizedBody(t *testing.T) {

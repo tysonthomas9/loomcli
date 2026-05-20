@@ -143,14 +143,14 @@ func runWorkspaceCreate(cmd *cobra.Command, args []string) {
 		return nil
 	}); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		exitProcess(1)
 	}
 }
 
 func validateCreateInputs(wsName string) string {
 	if !isValidWorkspaceName(wsName) {
 		fmt.Fprintf(os.Stderr, "Error: workspace name %q contains invalid characters. Use only alphanumeric, hyphens, and underscores.\n", wsName)
-		os.Exit(1)
+		exitProcess(1)
 	}
 	branch := wsCreateBranch
 	if branch == "" {
@@ -158,7 +158,7 @@ func validateCreateInputs(wsName string) string {
 	}
 	if !isValidWorkspaceName(branch) || strings.HasPrefix(branch, "-") {
 		fmt.Fprintf(os.Stderr, "Error: branch name %q is invalid. Must contain only alphanumeric, hyphens, and underscores, and must not start with a dash.\n", branch)
-		os.Exit(1)
+		exitProcess(1)
 	}
 	return branch
 }
@@ -167,7 +167,7 @@ func parseRepoPaths() []string {
 	repoPaths := strings.Split(wsCreateRepos, ",")
 	if len(repoPaths) == 0 || (len(repoPaths) == 1 && repoPaths[0] == "") {
 		fmt.Fprintf(os.Stderr, "Error: --repos is required and must not be empty\n")
-		os.Exit(1)
+		exitProcess(1)
 	}
 	return repoPaths
 }
@@ -175,7 +175,7 @@ func parseRepoPaths() []string {
 func runWorkspaceList(cmd *cobra.Command, args []string) {
 	if err := runFleetWorkspaceList(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		exitProcess(1)
 	}
 }
 
@@ -280,7 +280,7 @@ func runWorkspaceRemove(cmd *cobra.Command, args []string) {
 		return nil
 	}); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		exitProcess(1)
 	}
 }
 
@@ -340,7 +340,7 @@ func checkRunningAgentsOrExit(ws config.WorkspaceConfig) {
 		lockPath := filepath.Join(repo.Path, ".agent.lock")
 		if _, err := os.Stat(lockPath); err == nil {
 			fmt.Fprintf(os.Stderr, "Error: repo %q has a running agent (lock file exists). Use --force to override.\n", repo.Name)
-			os.Exit(1)
+			exitProcess(1)
 		}
 	}
 }
@@ -361,7 +361,7 @@ func removeWorktrees(deps *cli.Deps, ws config.WorkspaceConfig) {
 	}
 	if len(errs) > 0 && !wsRemoveForce {
 		fmt.Fprintf(os.Stderr, "Error removing worktrees:\n%s\nUse --force to override.\n", strings.Join(errs, "\n"))
-		os.Exit(1)
+		exitProcess(1)
 	}
 	if err := os.RemoveAll(ws.Path); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: could not remove workspace directory %s: %v\n", ws.Path, err)

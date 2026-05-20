@@ -419,6 +419,19 @@ func TestIssue_ValidateWithCustom(t *testing.T) {
 	})
 }
 
+func TestIssue_ValidateWithCustomStatusesWrapper(t *testing.T) {
+	i := &Issue{
+		Title:     "Test issue",
+		Status:    "waiting_qa",
+		IssueType: TypeTask,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+	if err := i.ValidateWithCustomStatuses([]string{"waiting_qa"}); err != nil {
+		t.Fatalf("ValidateWithCustomStatuses: %v", err)
+	}
+}
+
 func TestIssue_IsTombstone(t *testing.T) {
 	tests := []struct {
 		name   string

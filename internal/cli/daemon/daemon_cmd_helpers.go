@@ -21,11 +21,11 @@ func isolateProcessGroup() {
 func prepareDaemonDirs(pidFilePath, logDir string) {
 	if err := os.MkdirAll(filepath.Dir(pidFilePath), 0755); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: creating PID directory: %v\n", err)
-		os.Exit(1)
+		exitProcess(1)
 	}
 	if err := os.MkdirAll(logDir, 0700); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: creating log directory: %v\n", err)
-		os.Exit(1)
+		exitProcess(1)
 	}
 }
 

@@ -51,6 +51,22 @@ func TestCORSMiddlewareBranches(t *testing.T) {
 	}
 
 	req = httptest.NewRequest(http.MethodGet, "/api", nil)
+	req.Header.Set("Origin", "http://allowed.test/")
+	rr = httptest.NewRecorder()
+	mw(next).ServeHTTP(rr, req)
+	if rr.Code != http.StatusAccepted || rr.Header().Get("Access-Control-Allow-Origin") != "http://allowed.test/" {
+		t.Fatalf("allowed request code=%d headers=%v", rr.Code, rr.Header())
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api", nil)
+	req.Header.Set("Origin", "http://blocked.test")
+	rr = httptest.NewRecorder()
+	mw(next).ServeHTTP(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("blocked request code=%d, want forbidden", rr.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api", nil)
 	req.Header.Set("Origin", "null")
 	rr = httptest.NewRecorder()
 	mw(next).ServeHTTP(rr, req)

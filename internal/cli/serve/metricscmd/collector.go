@@ -73,6 +73,12 @@ func (c *cachedCollector) startBackground(ctx context.Context, interval time.Dur
 	// The first HTTP request hitting get() will trigger a singleflight collection
 	// if the background hasn't finished yet — this avoids blocking server startup.
 	go func() {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
 		// Immediate first collection to warm the cache
 		result := c.collectFn()
 		collectedAt := time.Now()

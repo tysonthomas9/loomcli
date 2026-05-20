@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 
+	"nhooyr.io/websocket"
+
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
@@ -74,6 +76,7 @@ func TestAgentTerminalHandlersMapServiceErrors(t *testing.T) {
 	}{
 		{name: "info service error", infoErr: service.ErrNotFound("missing"), handler: HandleGetAgentTerminalInfo, want: http.StatusNotFound},
 		{name: "token generic error", tokenErr: errors.New("boom"), handler: HandleGetAgentTerminalToken, want: http.StatusInternalServerError},
+		{name: "token service error", tokenErr: service.ErrValidation("bad token request"), handler: HandleGetAgentTerminalToken, want: http.StatusBadRequest},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			svc := &fakeAgentTerminalService{infoErr: tt.infoErr, tokenErr: tt.tokenErr}
@@ -170,6 +173,21 @@ func TestResolveAgentSessionWithFakeTmux(t *testing.T) {
 	if _, err := resolveAgentSession(rec, manager, "WORKSPACE-123", "nova"); err == nil || rec.Code != http.StatusInternalServerError {
 		t.Fatalf("error resolve err=%v status=%d body=%s", err, rec.Code, rec.Body.String())
 	}
+
+	t.Setenv("TMUX_LIST_MODE", "")
+	manager, err = webuterminal.NewAgentTmuxManager(1)
+	if err != nil {
+		t.Fatalf("NewAgentTmuxManager max sessions: %v", err)
+	}
+	conn, err := manager.AttachExistingRaw("exists", 80, 24)
+	if err != nil {
+		t.Fatalf("AttachExistingRaw: %v", err)
+	}
+	defer conn.Close()
+	rec = httptest.NewRecorder()
+	if _, err := resolveAgentSession(rec, manager, "WORKSPACE-123", "nova"); err == nil || rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("max session resolve err=%v status=%d body=%s", err, rec.Code, rec.Body.String())
+	}
 }
 
 func TestAgentTerminalPureHelpers(t *testing.T) {
@@ -177,6 +195,7 @@ func TestAgentTerminalPureHelpers(t *testing.T) {
 		t.Fatalf("agentLogTokenScope = %q", got)
 	}
 	emitAgentDisconnectSpan(context.Background(), "WS", "nova", "tmux-session", realtime.WSCloseSessionKilled)
+	emitAgentDisconnectSpan(context.Background(), "WS", "nova", "tmux-session", websocket.StatusInternalError)
 }
 
 func TestHandleAgentTerminalWSValidationBranches(t *testing.T) {
@@ -239,6 +258,34 @@ func TestAgentTmuxMonitorDelegatesToManager(t *testing.T) {
 	}
 	if got := monitor.CapturePaneRaw("live-pane", 2); got != "line one\nline two" {
 		t.Fatalf("CapturePaneRaw = %q", got)
+	}
+}
+
+func TestRunAgentTerminalRelayAttachFailures(t *testing.T) {
+	dir := t.TempDir()
+	tmuxPath := writeHandlerFakeTmux(t, dir)
+	oldPath := os.Getenv("PATH")
+	t.Setenv("PATH", filepath.Dir(tmuxPath)+string(os.PathListSeparator)+oldPath)
+
+	manager, err := webuterminal.NewAgentTmuxManager(1)
+	if err != nil {
+		t.Fatalf("NewAgentTmuxManager: %v", err)
+	}
+	defer manager.Shutdown()
+
+	status, reason := runAgentTerminalRelay(context.Background(), nil, manager, "missing", "nova")
+	if status != websocket.StatusInternalError || !strings.Contains(reason, "not found") {
+		t.Fatalf("missing session status=%v reason=%q", status, reason)
+	}
+
+	conn, err := manager.AttachExistingRaw("exists", 80, 24)
+	if err != nil {
+		t.Fatalf("prime AttachExistingRaw: %v", err)
+	}
+	defer conn.Close()
+	status, reason = runAgentTerminalRelay(context.Background(), nil, manager, "exists", "nova")
+	if status != websocket.StatusInternalError || !strings.Contains(reason, webuterminal.ErrMaxSessionsReached.Error()) {
+		t.Fatalf("max sessions status=%v reason=%q", status, reason)
 	}
 }
 

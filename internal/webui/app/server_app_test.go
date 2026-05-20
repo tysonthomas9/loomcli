@@ -7,11 +7,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
 
+	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui"
@@ -118,6 +120,38 @@ func TestNewServer_FleetClientSkipsDaemonPoolAndHealthProbe(t *testing.T) {
 	}
 }
 
+func TestNewServer_AppliesRuntimeDefaultsAndCORSFallback(t *testing.T) {
+	app, err := NewServer(context.Background(), webui.ServerConfig{
+		FleetClient: true,
+		CORSEnabled: true,
+		Store:       memstore.New(),
+	})
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	t.Cleanup(func() { app.Close() })
+
+	if app.config.Port != webui.DefaultPort {
+		t.Fatalf("default port = %d, want %d", app.config.Port, webui.DefaultPort)
+	}
+	if app.config.PoolSize != webui.DefaultPoolSize {
+		t.Fatalf("default pool size = %d, want %d", app.config.PoolSize, webui.DefaultPoolSize)
+	}
+	if app.config.BindAddress != "127.0.0.1" {
+		t.Fatalf("default bind = %q", app.config.BindAddress)
+	}
+	if app.config.ShutdownTimeout != webui.DefaultShutdownTimeout {
+		t.Fatalf("default shutdown timeout = %v", app.config.ShutdownTimeout)
+	}
+	if app.config.MaxPortAttempts != webui.DefaultMaxPortAttempts {
+		t.Fatalf("default max port attempts = %d", app.config.MaxPortAttempts)
+	}
+	if !app.corsConfig.Enabled || len(app.corsConfig.AllowedOrigins) != 1 ||
+		app.corsConfig.AllowedOrigins[0] != "http://localhost:3000" {
+		t.Fatalf("cors fallback = %#v", app.corsConfig)
+	}
+}
+
 func TestNewServer_DaemonModeWithExplicitSocketInitializesPool(t *testing.T) {
 	app, err := NewServer(context.Background(), webui.ServerConfig{
 		Port:            freeTCPPort(t),
@@ -200,6 +234,86 @@ func TestNewServer_FleetRedisInitializesFleetStores(t *testing.T) {
 	if app.termSvc == nil {
 		t.Fatal("terminal service should initialize with redis-backed tab metadata")
 	}
+}
+
+func TestNewServer_FleetRedisWithoutAPIKeyAndGeneratedJWT(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	mr := miniredis.RunT(t)
+	app, err := NewServer(ctx, webui.ServerConfig{
+		Port:            freeTCPPort(t),
+		BindAddress:     "127.0.0.1",
+		MaxPortAttempts: 1,
+		FleetClient:     true,
+		FleetRedis:      &fleet.RedisConfig{Address: mr.Addr()},
+		Store:           memstore.New(),
+	})
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	t.Cleanup(func() { app.Close() })
+
+	if app.fleetRegistry == nil || app.tokenCfg == nil || app.claimMetrics == nil {
+		t.Fatalf("fleet registry/token/metrics not initialized: registry=%t token=%t metrics=%t",
+			app.fleetRegistry != nil, app.tokenCfg != nil, app.claimMetrics != nil)
+	}
+	if app.fleetRegCfg != nil {
+		t.Fatal("fleet registration config should stay nil without API key")
+	}
+}
+
+func TestNewServerResolverAndStartupBranches(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	st := memstore.New()
+	t.Cleanup(func() { _ = st.Close() })
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS2", Name: "Workspace Two"}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+
+	started := make(chan struct{}, 1)
+	app, err := NewServer(ctx, webui.ServerConfig{
+		Port:            freeTCPPort(t),
+		BindAddress:     "0.0.0.0",
+		MaxPortAttempts: 1,
+		FleetClient:     true,
+		Store:           st,
+		DaemonStartupFn: func(context.Context, func(string)) {
+			started <- struct{}{}
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	t.Cleanup(func() { app.Close() })
+
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("DaemonStartupFn was not invoked")
+	}
+
+	if err := app.registry.Register("WS2", t.TempDir()); err != nil {
+		t.Fatalf("register WS2: %v", err)
+	}
+	if ref, ok := app.wsResolveFn(ctx, "WS2"); !ok || ref.CanonicalID != "WS2" {
+		t.Fatalf("direct wsResolveFn = %+v ok=%t", ref, ok)
+	}
+	if ref, ok := app.wsResolveFn(nil, "Workspace Two"); !ok || ref.CanonicalID != "WS2" {
+		t.Fatalf("store-backed wsResolveFn = %+v ok=%t", ref, ok)
+	}
+	if app.wsExistsFn("missing") {
+		t.Fatal("wsExistsFn returned true for missing workspace")
+	}
+	if ref, ok := app.wsResolveFn(ctx, "missing"); ok || ref.CanonicalID != "" {
+		t.Fatalf("missing wsResolveFn = %+v ok=%t", ref, ok)
+	}
+
+	app.activateSSESubscriber(context.Background(), "WS2")
+	app.config.IssueBackendFn = func(context.Context) backend.IssueBackend { return nil }
+	app.ensureStoreBackedSSESubscriber(context.TODO(), "WS2")
 }
 
 func TestNewServer_APIOnlyOptionalServicesAndWorkspaceResolver(t *testing.T) {
@@ -331,6 +445,102 @@ func freeTCPPort(t *testing.T) int {
 	}
 	defer l.Close()
 	return l.Addr().(*net.TCPAddr).Port
+}
+
+func TestNewServer_PortUnavailableReturnsError(t *testing.T) {
+	blocker, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen blocker: %v", err)
+	}
+	defer blocker.Close()
+
+	_, err = NewServer(context.Background(), webui.ServerConfig{
+		Port:            blocker.Addr().(*net.TCPAddr).Port,
+		BindAddress:     "127.0.0.1",
+		MaxPortAttempts: 1,
+		FleetClient:     true,
+		Store:           memstore.New(),
+	})
+	if err == nil || !strings.Contains(err.Error(), "could not find available port") {
+		t.Fatalf("NewServer err = %v, want unavailable port error", err)
+	}
+}
+
+func TestNewServer_FallbackPortAndOptionalBranches(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	blocker, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen blocker: %v", err)
+	}
+	defer blocker.Close()
+	occupiedPort := blocker.Addr().(*net.TCPAddr).Port
+
+	started := make(chan struct{}, 1)
+	app, err := NewServer(ctx, webui.ServerConfig{
+		Port:                occupiedPort,
+		BindAddress:         "127.0.0.1",
+		MaxPortAttempts:     2,
+		PoolSize:            1,
+		FleetClient:         true,
+		FleetEnabled:        true,
+		HSTSEnabled:         true,
+		FrontendDir:         t.TempDir(),
+		CORSEnabled:         true,
+		CORSOrigins:         []string{"http://client.example"},
+		ExtAuthURL:          "https://auth.example",
+		NotifyTokenDir:      t.TempDir(),
+		TerminalCmd:         "sh",
+		MaxTerminalSessions: 1,
+		GitOps:              &mockGitOps{},
+		FileOps:             &mockFileOps{},
+		IssueBackendFn: func(context.Context) backend.IssueBackend {
+			return appTestIssueBackend{}
+		},
+		DaemonStartupFn: func(context.Context, func(string)) {
+			started <- struct{}{}
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	t.Cleanup(func() {
+		if app.listener != nil {
+			_ = app.listener.Close()
+		}
+		if app.hub != nil {
+			app.hub.Stop()
+		}
+		if app.multiSub != nil {
+			app.multiSub.Stop()
+		}
+		if app.ptyMgr != nil {
+			_ = app.ptyMgr.Close()
+		}
+		if app.multiPool != nil {
+			_ = app.multiPool.Close()
+		}
+		if app.registry != nil {
+			_ = app.registry.Close()
+		}
+		app.Close()
+	})
+
+	if app.actualPort == occupiedPort {
+		t.Fatalf("actualPort = occupied port %d; want fallback", occupiedPort)
+	}
+	if !app.corsConfig.Enabled || len(app.corsConfig.AllowedOrigins) != 2 {
+		t.Fatalf("cors config = %#v, want explicit origin plus auth origin", app.corsConfig)
+	}
+	if app.issueSvc == nil || app.agentSvc == nil || app.diffSvc == nil || app.fileSvc == nil {
+		t.Fatalf("expected optional services to be initialized")
+	}
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("DaemonStartupFn was not invoked")
+	}
 }
 
 // TestServer_ConfigDefaults_PoolSize verifies that the default pool size is

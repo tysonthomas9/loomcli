@@ -2,6 +2,7 @@ package codex
 
 import (
 	"testing"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
 )
@@ -50,5 +51,38 @@ func TestParseRollout_SkipsMalformed(t *testing.T) {
 	}
 	if len(envelopes) != 1 {
 		t.Fatalf("want 1 envelope, got %d", len(envelopes))
+	}
+}
+
+func TestEvents_CodexBranchyPayloads(t *testing.T) {
+	input := `{"timestamp":"bad-time","type":"response_item","payload":}
+{"timestamp":"2026-04-06T17:29:41.320Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<ide_context>hidden</ide_context>"}]}}
+{"timestamp":"2026-04-06T17:29:42.320Z","type":"response_item","payload":{"type":"message","role":"developer","content":[{"type":"input_text","text":"dev note"}]}}
+{"timestamp":"2026-04-06T17:29:43.320Z","type":"response_item","payload":{"type":"message","role":"system","content":[{"type":"input_text","text":"system note"}]}}
+{"timestamp":"bad-time","type":"response_item","payload":{"type":"message","role":"unknown","content":[{"type":"input_text","text":""},{"type":"input_text","text":"fallback role"}]}}
+{"timestamp":"2026-04-06T17:29:44.320Z","type":"response_item","payload":{"type":"function_call_output","call_id":"call_obj","output":{"ok":true}}}
+`
+	events, err := Events([]byte(input))
+	if err != nil {
+		t.Fatalf("Events: %v", err)
+	}
+	if len(events) != 4 {
+		t.Fatalf("got %d events: %+v", len(events), events)
+	}
+	if events[0].Role != transcript.RoleSystem || events[0].Text != "dev note" {
+		t.Fatalf("developer event = %+v", events[0])
+	}
+	wantTS := time.Date(2026, 4, 6, 17, 29, 42, 320000000, time.UTC)
+	if !events[0].Timestamp.Equal(wantTS) {
+		t.Fatalf("timestamp = %s, want %s", events[0].Timestamp, wantTS)
+	}
+	if events[1].Role != transcript.RoleSystem || events[1].Text != "system note" {
+		t.Fatalf("system event = %+v", events[1])
+	}
+	if events[2].Role != transcript.RoleSystem || events[2].Text != "fallback role" || !events[2].Timestamp.IsZero() {
+		t.Fatalf("fallback role event = %+v", events[2])
+	}
+	if events[3].Role != transcript.RoleTool || events[3].Output != `{"ok":true}` {
+		t.Fatalf("object output event = %+v", events[3])
 	}
 }

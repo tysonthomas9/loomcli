@@ -41,7 +41,7 @@ func runDaemonLogs(cmd *cobra.Command, args []string) {
 	projectDir, err := os.Getwd()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: cannot determine working directory: %v\n", err)
-		os.Exit(1)
+		exitProcess(1)
 	}
 
 	config := loadDaemonLogsConfig(projectDir)
@@ -76,7 +76,7 @@ func loadDaemonLogsConfig(projectDir string) *cfgpkg.DaemonConfig {
 func listAgentLogs(projectDir string, config *cfgpkg.DaemonConfig, state *DaemonState, stateErr error) {
 	if stateErr != nil || state == nil || len(state.Agents) == 0 {
 		fmt.Fprintf(os.Stderr, "No agent state found. Is the daemon running or has it been run before?\n")
-		os.Exit(1)
+		exitProcess(1)
 	}
 	fmt.Println("Available agents:")
 	for _, agent := range state.Agents {
@@ -110,7 +110,7 @@ func findAgent(name string, state *DaemonState, stateErr error) *DaemonAgentStat
 	} else {
 		fmt.Fprintf(os.Stderr, "No agent state found. Is the daemon running or has it been run before?\n")
 	}
-	os.Exit(1)
+	exitProcess(1)
 	return nil // unreachable
 }
 
@@ -119,13 +119,13 @@ func showAgentLog(logPath string) {
 	if _, err := os.Stat(logPath); os.IsNotExist(err) {
 		fmt.Fprintf(os.Stderr, "Log file not found: %s\n", logPath)
 		fmt.Fprintf(os.Stderr, "The agent may not have been started yet.\n")
-		os.Exit(1)
+		exitProcess(1)
 	}
 
 	lines, _, err := webuilog.ReadLastNLines(logPath, daemonLogsLines)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error reading log: %v\n", err)
-		os.Exit(1)
+		exitProcess(1)
 	}
 
 	if len(lines) == 0 {
@@ -144,7 +144,7 @@ func showAgentLog(logPath string) {
 		defer stop()
 		if err := followLogFile(ctx, logPath); err != nil && ctx.Err() == nil {
 			fmt.Fprintf(os.Stderr, "Error following log: %v\n", err)
-			os.Exit(1)
+			exitProcess(1)
 		}
 	}
 }

@@ -2,6 +2,7 @@ package tabmeta
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -93,6 +94,53 @@ func TestSetAndGet(t *testing.T) {
 	}
 }
 
+func TestSetAndGetPinnedWritableLaunch(t *testing.T) {
+	store, _ := setupTest(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+
+	meta := &TabMetadata{
+		SessionName: "agent_session",
+		Workspace:   testWorkspace,
+		Label:       "Agent",
+		SortOrder:   7,
+		Pinned:      true,
+		Writable:    true,
+		Launch:      &LaunchSpec{Argv: []string{"loom", "agent"}, Env: map[string]string{"A": "B"}, Cwd: "/tmp/work"},
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	if err := store.Set(ctx, meta); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+
+	got, err := store.Get(ctx, testWorkspace, "agent_session")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got == nil || !got.Pinned || !got.Writable || got.Launch == nil || got.Launch.Argv[1] != "agent" || got.Launch.Env["A"] != "B" {
+		t.Fatalf("metadata = %+v, want pinned writable launch spec", got)
+	}
+}
+
+func TestGetRejectsInvalidWorkspaceAndLaunchJSON(t *testing.T) {
+	store, _ := setupTest(t)
+	ctx := context.Background()
+
+	if _, err := store.Get(ctx, "bad workspace", "session"); err == nil {
+		t.Fatal("Get invalid workspace err = nil")
+	}
+	if err := store.RedisClient().HSet(ctx, metaKey(testWorkspace, "bad-launch"), map[string]any{
+		"label":  "bad",
+		"launch": "{not-json",
+	}).Err(); err != nil {
+		t.Fatalf("HSet bad launch: %v", err)
+	}
+	if _, err := store.Get(ctx, testWorkspace, "bad-launch"); err == nil {
+		t.Fatal("Get bad launch JSON err = nil")
+	}
+}
+
 func TestList_Empty(t *testing.T) {
 	store, _ := setupTest(t)
 	tabs, err := store.List(context.Background(), testWorkspace)
@@ -141,6 +189,63 @@ func TestList_Multiple(t *testing.T) {
 	}
 }
 
+func TestListPinnedSortAndInvalidStoredRows(t *testing.T) {
+	store, _ := setupTest(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+
+	for _, meta := range []TabMetadata{
+		{SessionName: "normal", Workspace: testWorkspace, Label: "normal", SortOrder: 1, CreatedAt: now, UpdatedAt: now},
+		{SessionName: "pinned", Workspace: testWorkspace, Label: "pinned", SortOrder: 99, Pinned: true, CreatedAt: now, UpdatedAt: now},
+	} {
+		meta := meta
+		if err := store.Set(ctx, &meta); err != nil {
+			t.Fatalf("Set %s: %v", meta.SessionName, err)
+		}
+	}
+	if err := store.RedisClient().HSet(ctx, metaKey(testWorkspace, "bad-row"), map[string]any{
+		"label":  "bad",
+		"launch": "{not-json",
+	}).Err(); err != nil {
+		t.Fatalf("HSet bad row: %v", err)
+	}
+
+	tabs, err := store.List(ctx, testWorkspace)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(tabs) != 2 || tabs[0].SessionName != "pinned" || tabs[1].SessionName != "normal" {
+		t.Fatalf("tabs = %+v, want pinned first and invalid row skipped", tabs)
+	}
+}
+
+func TestListAllSkipsInvalidKeysAndRows(t *testing.T) {
+	store, _ := setupTest(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+	meta := &TabMetadata{SessionName: "valid", Workspace: testWorkspace, Label: "valid", SortOrder: 1, CreatedAt: now, UpdatedAt: now}
+	if err := store.Set(ctx, meta); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	if err := store.RedisClient().HSet(ctx, keyPrefix+"invalidformat", "label", "bad").Err(); err != nil {
+		t.Fatalf("HSet invalid key: %v", err)
+	}
+	if err := store.RedisClient().HSet(ctx, metaKey("other", "bad-row"), map[string]any{
+		"label":  "bad",
+		"launch": "{not-json",
+	}).Err(); err != nil {
+		t.Fatalf("HSet bad row: %v", err)
+	}
+
+	tabs, err := store.ListAll(ctx)
+	if err != nil {
+		t.Fatalf("ListAll: %v", err)
+	}
+	if len(tabs) != 1 || tabs[0].SessionName != "valid" {
+		t.Fatalf("tabs = %+v, want only valid tab", tabs)
+	}
+}
+
 func TestPatch_PartialUpdate(t *testing.T) {
 	store, _ := setupTest(t)
 	ctx := context.Background()
@@ -177,6 +282,58 @@ func TestPatch_NotFound(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for patching nonexistent session")
 	}
+}
+
+func TestPatchAndDeleteValidationBranches(t *testing.T) {
+	store, _ := setupTest(t)
+	ctx := context.Background()
+
+	if _, err := store.Patch(ctx, "bad workspace", "session", map[string]string{"label": "x"}); err == nil {
+		t.Fatal("Patch invalid workspace err = nil")
+	}
+	if _, err := store.Patch(ctx, testWorkspace, "bad session", map[string]string{"label": "x"}); err == nil {
+		t.Fatal("Patch invalid session err = nil")
+	}
+	if err := store.Delete(ctx, "bad workspace", "session"); err == nil {
+		t.Fatal("Delete invalid workspace err = nil")
+	}
+}
+
+func TestStoreRedisErrorBranches(t *testing.T) {
+	store, _ := setupTest(t)
+	ctx := context.Background()
+	if err := store.RedisClient().Close(); err != nil {
+		t.Fatalf("Close redis client: %v", err)
+	}
+
+	checkErr := func(name string, err error, want string) {
+		t.Helper()
+		if err == nil {
+			t.Fatalf("%s err = nil", name)
+		}
+		if want != "" && !strings.Contains(err.Error(), want) {
+			t.Fatalf("%s err = %v, want substring %q", name, err, want)
+		}
+	}
+
+	_, err := store.Get(ctx, testWorkspace, "session")
+	checkErr("Get", err, "hgetall")
+	_, err = store.List(ctx, testWorkspace)
+	checkErr("List", err, "scan")
+	_, err = store.ListAll(ctx)
+	checkErr("ListAll", err, "scan")
+	err = store.Set(ctx, &TabMetadata{SessionName: "session", Workspace: testWorkspace})
+	checkErr("Set", err, "hset")
+	_, err = store.Patch(ctx, testWorkspace, "session", map[string]string{"label": "x"})
+	checkErr("Patch", err, "exists")
+	err = store.Delete(ctx, testWorkspace, "session")
+	checkErr("Delete", err, "del")
+	_, err = store.EnsureDefaults(ctx, testWorkspace, []string{"session"})
+	checkErr("EnsureDefaults", err, "scan")
+	_, err = store.ListByIssue(ctx, "ISSUE")
+	checkErr("ListByIssue", err, "scan")
+	_, err = store.ListIssueSessionMap(ctx)
+	checkErr("ListIssueSessionMap", err, "scan")
 }
 
 func TestDelete(t *testing.T) {
@@ -324,6 +481,17 @@ func TestEnsureDefaults_EmptyActiveSessions(t *testing.T) {
 	}
 	if tabs[0].SessionName != "dead-session" {
 		t.Errorf("expected dead-session, got %s", tabs[0].SessionName)
+	}
+}
+
+func TestEnsureDefaultsSkipsInvalidDefaultSession(t *testing.T) {
+	store, _ := setupTest(t)
+	tabs, err := store.EnsureDefaults(context.Background(), testWorkspace, []string{"bad session", "good-session"})
+	if err != nil {
+		t.Fatalf("EnsureDefaults: %v", err)
+	}
+	if len(tabs) != 1 || tabs[0].SessionName != "good-session" {
+		t.Fatalf("tabs = %+v, want only good-session", tabs)
 	}
 }
 

@@ -154,6 +154,51 @@ func TestSyncSubagentTranscriptValidationAndMissingBranches(t *testing.T) {
 	}
 }
 
+func TestSyncSubagentTranscriptFilesystemErrorBranches(t *testing.T) {
+	const sid = "20260417-120000-nova-abcd-0123abcd"
+
+	t.Run("read source directory", func(t *testing.T) {
+		store, _ := newStoreWithSession(t, sid)
+		err := store.SyncSubagentTranscript(sid, "abc123", t.TempDir())
+		if err == nil || !strings.Contains(err.Error(), "read source subagent transcript") {
+			t.Fatalf("SyncSubagentTranscript source dir err = %v", err)
+		}
+	})
+
+	t.Run("subagents path is file", func(t *testing.T) {
+		store, sessDir := newStoreWithSession(t, sid)
+		src := filepath.Join(t.TempDir(), "x.jsonl")
+		if err := os.WriteFile(src, []byte("{}\n"), 0o600); err != nil {
+			t.Fatalf("write src: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(sessDir, "subagents"), []byte("not a dir"), 0o600); err != nil {
+			t.Fatalf("write subagents file: %v", err)
+		}
+
+		err := store.SyncSubagentTranscript(sid, "abc123", src)
+		if err == nil || !strings.Contains(err.Error(), "create subagents dir") {
+			t.Fatalf("SyncSubagentTranscript subagents file err = %v", err)
+		}
+	})
+
+	t.Run("destination path is directory", func(t *testing.T) {
+		store, sessDir := newStoreWithSession(t, sid)
+		src := filepath.Join(t.TempDir(), "x.jsonl")
+		if err := os.WriteFile(src, []byte("{}\n"), 0o600); err != nil {
+			t.Fatalf("write src: %v", err)
+		}
+		dstPath := filepath.Join(sessDir, "subagents", "agent-abc123.jsonl")
+		if err := os.MkdirAll(dstPath, 0o700); err != nil {
+			t.Fatalf("mkdir dst path: %v", err)
+		}
+
+		err := store.SyncSubagentTranscript(sid, "abc123", src)
+		if err == nil || !strings.Contains(err.Error(), "write subagent transcript") {
+			t.Fatalf("SyncSubagentTranscript destination dir err = %v", err)
+		}
+	})
+}
+
 func TestListSubagentTranscriptsValidationAndFiltering(t *testing.T) {
 	const sid = "20260417-120000-nova-abcd-0123abcd"
 	store, sessDir := newStoreWithSession(t, sid)

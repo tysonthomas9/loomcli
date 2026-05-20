@@ -29,6 +29,10 @@ var (
 	readRuntimeStatusFn          = ReadRuntimeStatus
 	startRuntimeFn               = StartRuntime
 	restartRuntimeFn             = RestartRuntime
+	currentFleetDBRedisHashFn    = currentFleetDBRedisHash
+	ensureRuntimeDirsFn          = ensureRuntimeDirs
+	spawnDetachedServiceFn       = spawnDetachedService
+	stopRuntimeProcessFn         = stopRuntimeProcess
 	startLocalDaemonSupervisorFn = startLocalDaemonSupervisor
 )
 
@@ -203,7 +207,7 @@ func prepareLocalServiceConfig() (*localServiceConfig, error) {
 	if err != nil {
 		return nil, fmt.Errorf("resolve loom executable: %w", err)
 	}
-	redisHash, err := currentFleetDBRedisHash(dataDir)
+	redisHash, err := currentFleetDBRedisHashFn(dataDir)
 	if err != nil {
 		return nil, fmt.Errorf("load FleetDB Redis settings: %w", err)
 	}
@@ -392,17 +396,17 @@ func startRuntime(dataDir string, port int, force bool) (*RuntimeStartResult, er
 	if result, err := reuseRunningRuntime(dataDir, force); err != nil || result != nil {
 		return result, err
 	}
-	if _, err := currentFleetDBRedisHash(dataDir); err != nil {
+	if _, err := currentFleetDBRedisHashFn(dataDir); err != nil {
 		return nil, fmt.Errorf("load FleetDB Redis settings: %w", err)
 	}
-	if err := ensureRuntimeDirs(dataDir); err != nil {
+	if err := ensureRuntimeDirsFn(dataDir); err != nil {
 		return nil, err
 	}
-	exe, err := os.Executable()
+	exe, err := osExecutableFn()
 	if err != nil {
 		return nil, fmt.Errorf("resolve loom executable: %w", err)
 	}
-	return spawnDetachedService(exe, dataDir, port)
+	return spawnDetachedServiceFn(exe, dataDir, port)
 }
 
 // reuseRunningRuntime returns an AlreadyRunning result when the previous
@@ -416,7 +420,7 @@ func reuseRunningRuntime(dataDir string, force bool) (*RuntimeStartResult, error
 	}
 	if !force {
 		identity := currentExecutableIdentity()
-		redisHash, err := currentFleetDBRedisHash(dataDir)
+		redisHash, err := currentFleetDBRedisHashFn(dataDir)
 		if err != nil {
 			return nil, fmt.Errorf("load FleetDB Redis settings: %w", err)
 		}
@@ -424,7 +428,7 @@ func reuseRunningRuntime(dataDir string, force bool) (*RuntimeStartResult, error
 			return &RuntimeStartResult{PID: info.PID, URL: info.URL, AlreadyRunning: true}, nil
 		}
 	}
-	if err := stopRuntimeProcess(info.PID, 15*time.Second); err != nil {
+	if err := stopRuntimeProcessFn(info.PID, 15*time.Second); err != nil {
 		return nil, fmt.Errorf("stop stale local runtime: %w", err)
 	}
 	return nil, nil
@@ -514,7 +518,7 @@ func runStop(cmd *cobra.Command, _ []string) error {
 		_, _ = fmt.Fprintln(cmd.OutOrStdout(), "Loom local runtime is not running.")
 		return nil
 	}
-	if err := stopRuntimeProcess(info.PID, 15*time.Second); err != nil {
+	if err := stopRuntimeProcessFn(info.PID, 15*time.Second); err != nil {
 		return err
 	}
 	_, _ = fmt.Fprintln(cmd.OutOrStdout(), "Loom local runtime stopped.")

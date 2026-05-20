@@ -2,7 +2,10 @@ package webui
 
 import (
 	"context"
+	"io"
+	"log/slog"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -107,6 +110,61 @@ func TestNewAuthProxy_InvalidURL(t *testing.T) {
 func TestNewAuthProxy_ValidURL(t *testing.T) {
 	if NewAuthProxy("https://auth.example.com", nil) == nil {
 		t.Error("expected non-nil for valid URL")
+	}
+}
+
+func TestNewAuthProxy_ProxyAndErrorBranches(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	if NewAuthProxy("http://[::1", logger) != nil {
+		t.Fatal("expected nil for invalid URL with logger")
+	}
+
+	type seenRequest struct {
+		host string
+		path string
+	}
+	seen := make(chan seenRequest, 1)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen <- seenRequest{host: r.Host, path: r.URL.Path}
+		w.Header().Add("Set-Cookie", "sid=1; Domain=.example.com; SameSite=None; Partitioned")
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer upstream.Close()
+
+	proxy := NewAuthProxy(upstream.URL, logger)
+	if proxy == nil {
+		t.Fatal("expected auth proxy")
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/session", nil)
+	req.Header.Set("X-Forwarded-Proto", "https")
+	rr := httptest.NewRecorder()
+	proxy.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	got := <-seen
+	if got.host != strings.TrimPrefix(upstream.URL, "http://") {
+		t.Fatalf("proxied host = %q, want %q", got.host, strings.TrimPrefix(upstream.URL, "http://"))
+	}
+	if got.path != "/api/auth/session" {
+		t.Fatalf("proxied path = %q", got.path)
+	}
+	cookie := rr.Header().Get("Set-Cookie")
+	if !strings.Contains(cookie, "SameSite=Lax") || !strings.Contains(cookie, "Secure") {
+		t.Fatalf("cookie = %q, want Lax and Secure", cookie)
+	}
+	if strings.Contains(cookie, "Domain=") || strings.Contains(cookie, "Partitioned") {
+		t.Fatalf("cookie = %q, want Domain and Partitioned stripped", cookie)
+	}
+
+	bad := NewAuthProxy("http://127.0.0.1:1", logger)
+	if bad == nil {
+		t.Fatal("expected proxy for syntactically valid URL")
+	}
+	rr = httptest.NewRecorder()
+	bad.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/auth/session", nil))
+	if rr.Code != http.StatusBadGateway {
+		t.Fatalf("error handler status = %d body=%s", rr.Code, rr.Body.String())
 	}
 }
 

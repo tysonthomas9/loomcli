@@ -205,6 +205,211 @@ func TestMoveIssueViaPoolValidationAndUnavailableBranches(t *testing.T) {
 	}
 }
 
+func TestMoveIssueViaPoolSourceAndTargetErrorBranches(t *testing.T) {
+	missingPool, err := daemon.NewConnectionPool(filepath.Join(t.TempDir(), "missing.sock"), 1)
+	if err != nil {
+		t.Fatalf("missing source pool: %v", err)
+	}
+	missingPool.SetDialTimeout(time.Millisecond)
+	t.Cleanup(func() { _ = missingPool.Close() })
+	multiPool := daemon.NewMultiPool(movePoolWorkspaceFromContext, 1)
+	t.Cleanup(func() { _ = multiPool.Close() })
+	svc := NewIssueService(missingPool, multiPool, movePoolWithWorkspace)
+	if _, err := svc.MoveIssue(context.Background(), MoveIssueParams{
+		IssueID:         "SRC-1",
+		TargetWorkspace: "Target",
+		Validator:       testWorkspaceValidator{targetID: "target-ws"},
+	}); err == nil {
+		t.Fatal("expected unavailable source pool error")
+	}
+
+	for _, tt := range []struct {
+		name       string
+		showResp   rpc.Response
+		wantSubstr string
+	}{
+		{name: "show rpc not found", showResp: rpc.Response{Success: false, Error: "not found: SRC-1"}, wantSubstr: "not found"},
+		{name: "show rpc internal", showResp: rpc.Response{Success: false, Error: "show failed"}, wantSubstr: "show failed"},
+		{name: "show bad json", showResp: rpc.Response{Success: true, Data: json.RawMessage(`"bad"`)}, wantSubstr: "failed to parse source issue"},
+		{name: "closed source", showResp: movePoolJSONResponse(t, types.Issue{ID: "SRC-1", Status: types.StatusClosed}), wantSubstr: "cannot move a closed issue"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			sourcePool := movePoolSourcePool(t, func(req rpc.Request) rpc.Response {
+				switch req.Operation {
+				case rpc.OpHealth:
+					return movePoolJSONResponse(t, rpc.HealthResponse{Status: "healthy", Compatible: true})
+				case rpc.OpShow:
+					return tt.showResp
+				default:
+					return rpc.Response{Success: false, Error: "unexpected op " + req.Operation}
+				}
+			})
+			svc := NewIssueService(sourcePool, multiPool, movePoolWithWorkspace)
+			_, err := svc.MoveIssue(context.Background(), MoveIssueParams{
+				IssueID:         "SRC-1",
+				TargetWorkspace: "Target",
+				Validator:       testWorkspaceValidator{targetID: "target-ws"},
+			})
+			if err == nil || !strings.Contains(err.Error(), tt.wantSubstr) {
+				t.Fatalf("MoveIssue err = %v, want %q", err, tt.wantSubstr)
+			}
+		})
+	}
+
+	sourcePool := movePoolSourcePool(t, func(req rpc.Request) rpc.Response {
+		switch req.Operation {
+		case rpc.OpHealth:
+			return movePoolJSONResponse(t, rpc.HealthResponse{Status: "healthy", Compatible: true})
+		case rpc.OpShow:
+			return movePoolJSONResponse(t, types.Issue{ID: "SRC-1", Title: "Move me", Status: types.StatusOpen})
+		default:
+			return rpc.Response{Success: true}
+		}
+	})
+	svc = NewIssueService(sourcePool, multiPool, movePoolWithWorkspace)
+	if _, err := svc.MoveIssue(context.Background(), MoveIssueParams{
+		IssueID:         "SRC-1",
+		TargetWorkspace: "Target",
+		Validator:       testWorkspaceValidator{targetID: "missing-ws"},
+	}); err == nil || !strings.Contains(err.Error(), "not registered") {
+		t.Fatalf("MoveIssue missing target err = %v", err)
+	}
+
+	targetTests := []struct {
+		name       string
+		create     rpc.Response
+		wantSubstr string
+	}{
+		{name: "create failed response", create: rpc.Response{Success: false, Error: "create rejected"}, wantSubstr: "create rejected"},
+		{name: "create invalid json", create: rpc.Response{Success: true, Data: json.RawMessage(`"not-json"`)}, wantSubstr: "failed to parse response"},
+	}
+	for _, tt := range targetTests {
+		t.Run(tt.name, func(t *testing.T) {
+			targetPool := movePoolTargetPool(t, func(req rpc.Request) rpc.Response {
+				switch req.Operation {
+				case rpc.OpHealth:
+					return movePoolJSONResponse(t, rpc.HealthResponse{Status: "healthy", Compatible: true})
+				case rpc.OpCreate:
+					return tt.create
+				default:
+					return rpc.Response{Success: false, Error: "unexpected target op " + req.Operation}
+				}
+			})
+			mp := daemon.NewMultiPool(movePoolWorkspaceFromContext, 1)
+			t.Cleanup(func() { _ = mp.Close() })
+			if err := mp.Register("target-ws", targetPool); err != nil {
+				t.Fatalf("register target pool: %v", err)
+			}
+			svc := NewIssueService(sourcePool, mp, movePoolWithWorkspace)
+			_, err := svc.MoveIssue(context.Background(), MoveIssueParams{
+				IssueID:         "SRC-1",
+				TargetWorkspace: "Target",
+				Validator:       testWorkspaceValidator{targetID: "target-ws"},
+			})
+			if err == nil || !strings.Contains(err.Error(), tt.wantSubstr) {
+				t.Fatalf("MoveIssue target err = %v, want %q", err, tt.wantSubstr)
+			}
+		})
+	}
+}
+
+func TestMoveIssueViaPoolNonFatalSourceCleanupWarnings(t *testing.T) {
+	sourceIssue := types.Issue{ID: "SRC-1", Title: "Move me", Status: types.StatusOpen}
+	for _, tt := range []struct {
+		name         string
+		commentErr   bool
+		closeErr     bool
+		closeSuccess bool
+		wantWarnings []string
+	}{
+		{name: "comment and close errors", commentErr: true, closeErr: true, closeSuccess: true, wantWarnings: []string{"Failed to add comment", "Source issue could not be closed"}},
+		{name: "close unsuccessful response", closeSuccess: false, wantWarnings: []string{"Source issue could not be closed"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			sourcePool := movePoolSourcePool(t, func(req rpc.Request) rpc.Response {
+				switch req.Operation {
+				case rpc.OpHealth:
+					return movePoolJSONResponse(t, rpc.HealthResponse{Status: "healthy", Compatible: true})
+				case rpc.OpShow:
+					return movePoolJSONResponse(t, sourceIssue)
+				case rpc.OpCommentAdd:
+					if tt.commentErr {
+						return rpc.Response{Success: false, Error: "comment failed"}
+					}
+					return rpc.Response{Success: true}
+				case rpc.OpClose:
+					if tt.closeErr {
+						return rpc.Response{Success: false, Error: "close failed"}
+					}
+					return rpc.Response{Success: tt.closeSuccess, Error: "close rejected"}
+				default:
+					return rpc.Response{Success: false, Error: "unexpected source op " + req.Operation}
+				}
+			})
+			targetPool := movePoolTargetPool(t, func(req rpc.Request) rpc.Response {
+				switch req.Operation {
+				case rpc.OpHealth:
+					return movePoolJSONResponse(t, rpc.HealthResponse{Status: "healthy", Compatible: true})
+				case rpc.OpCreate:
+					return movePoolJSONResponse(t, types.Issue{ID: "DST-1", Status: types.StatusOpen})
+				default:
+					return rpc.Response{Success: false, Error: "unexpected target op " + req.Operation}
+				}
+			})
+			mp := daemon.NewMultiPool(movePoolWorkspaceFromContext, 1)
+			t.Cleanup(func() { _ = mp.Close() })
+			if err := mp.Register("target-ws", targetPool); err != nil {
+				t.Fatalf("register target pool: %v", err)
+			}
+
+			result, err := NewIssueService(sourcePool, mp, movePoolWithWorkspace).MoveIssue(context.Background(), MoveIssueParams{
+				IssueID:         "SRC-1",
+				TargetWorkspace: "Target",
+				Validator:       testWorkspaceValidator{targetID: "target-ws"},
+			})
+			if err != nil {
+				t.Fatalf("MoveIssue: %v", err)
+			}
+			for _, want := range tt.wantWarnings {
+				if !movePoolWarningsContain(result.Warnings, want) {
+					t.Fatalf("warnings = %#v, want substring %q", result.Warnings, want)
+				}
+			}
+		})
+	}
+}
+
+func movePoolSourcePool(t *testing.T, handler func(rpc.Request) rpc.Response) *daemon.ConnectionPool {
+	t.Helper()
+	pool, err := daemon.NewConnectionPool(startMovePoolRPCServer(t, handler), 1)
+	if err != nil {
+		t.Fatalf("source pool: %v", err)
+	}
+	pool.SetDialTimeout(time.Second)
+	t.Cleanup(func() { _ = pool.Close() })
+	return pool
+}
+
+func movePoolTargetPool(t *testing.T, handler func(rpc.Request) rpc.Response) *daemon.ConnectionPool {
+	t.Helper()
+	pool, err := daemon.NewConnectionPool(startMovePoolRPCServer(t, handler), 1)
+	if err != nil {
+		t.Fatalf("target pool: %v", err)
+	}
+	pool.SetDialTimeout(time.Second)
+	t.Cleanup(func() { _ = pool.Close() })
+	return pool
+}
+
+func movePoolWarningsContain(warnings []string, substr string) bool {
+	for _, warning := range warnings {
+		if strings.Contains(warning, substr) {
+			return true
+		}
+	}
+	return false
+}
+
 func startMovePoolRPCServer(t *testing.T, handler func(req rpc.Request) rpc.Response) string {
 	t.Helper()
 	dir, err := os.MkdirTemp("/tmp", "loom-move-rpc-*")

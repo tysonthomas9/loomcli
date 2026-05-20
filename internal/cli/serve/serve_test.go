@@ -545,6 +545,41 @@ func TestEnsureFleetStoreEnv_UsesFleetClientConfig(t *testing.T) {
 	}
 }
 
+func TestServeIssueBackendHelpers(t *testing.T) {
+	oldNoDaemon := serveNoDaemon
+	t.Cleanup(func() { serveNoDaemon = oldNoDaemon })
+
+	serveNoDaemon = true
+	if ensureIssueBackend() {
+		t.Fatal("ensureIssueBackend should return false when --no-daemon is set")
+	}
+	stopIssueBackend()
+}
+
+func TestOpenServeStoreAppliesFleetEnv(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	t.Setenv(bootstrap.EnvWorkspace, "WS")
+	t.Setenv(bootstrap.EnvFleetDBURL, "")
+	t.Setenv(bootstrap.EnvFleetDBActor, "")
+	t.Setenv("LOOM_ISSUE_BACKEND", "fleetdb")
+	config.InvalidateConfigCache()
+	t.Cleanup(config.InvalidateConfigCache)
+
+	handle, err := openServeStore(context.Background(), fleetState{})
+	if err != nil {
+		t.Fatalf("openServeStore: %v", err)
+	}
+	t.Cleanup(func() { _ = handle.Close() })
+	if handle.Store == nil {
+		t.Fatal("openServeStore returned nil store")
+	}
+}
+
+func TestValidateAuthURLSuccessBranches(t *testing.T) {
+	validateAuthURL("http://localhost:3000", false)
+	validateAuthURL("http://auth.internal:3000", true)
+}
+
 func TestHandleStatus(t *testing.T) {
 	mockData := mockMonitorData()
 

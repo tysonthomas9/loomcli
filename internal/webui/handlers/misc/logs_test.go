@@ -1298,6 +1298,83 @@ func TestHandleListTaskPhases_Success(t *testing.T) {
 	}
 }
 
+func TestListTaskPhasesAdditionalBranches(t *testing.T) {
+	t.Run("home lookup errors propagate", func(t *testing.T) {
+		t.Setenv("HOME", "")
+		if _, err := getLogDir(); err == nil {
+			t.Fatal("getLogDir HOME error = nil")
+		}
+		if _, err := getWorkspaceLogDir("WS"); err == nil {
+			t.Fatal("getWorkspaceLogDir HOME error = nil")
+		}
+		if _, err := getTaskLogPath("WS", "task", "planning"); err == nil {
+			t.Fatal("getTaskLogPath HOME error = nil")
+		}
+		if _, err := getTaskLogDir("WS", "task"); err == nil {
+			t.Fatal("getTaskLogDir HOME error = nil")
+		}
+		if _, err := listTaskPhases("WS", "task"); err == nil {
+			t.Fatal("listTaskPhases HOME error = nil")
+		}
+	})
+
+	t.Run("missing file symlink and directory entries", func(t *testing.T) {
+		tmpHome, err := filepath.EvalSymlinks(t.TempDir())
+		if err != nil {
+			t.Fatalf("resolve temp home: %v", err)
+		}
+		t.Setenv("HOME", tmpHome)
+
+		missing, err := listTaskPhases("WS", "missing")
+		if err != nil {
+			t.Fatalf("missing listTaskPhases: %v", err)
+		}
+		if len(missing) != 0 {
+			t.Fatalf("missing phases = %#v", missing)
+		}
+
+		taskBase := filepath.Join(tmpHome, ".loom", "logs", "WS", "tasks")
+		if err := os.MkdirAll(taskBase, 0o755); err != nil {
+			t.Fatalf("mkdir task base: %v", err)
+		}
+
+		fileTask := filepath.Join(taskBase, "file-task")
+		if err := os.WriteFile(fileTask, []byte("not a dir"), 0o600); err != nil {
+			t.Fatalf("write file task: %v", err)
+		}
+		if _, err := listTaskPhases("WS", "file-task"); err == nil || !strings.Contains(err.Error(), "not a directory") {
+			t.Fatalf("file task err = %v", err)
+		}
+
+		realTask := filepath.Join(taskBase, "real-task")
+		if err := os.MkdirAll(realTask, 0o755); err != nil {
+			t.Fatalf("mkdir real task: %v", err)
+		}
+		linkTask := filepath.Join(taskBase, "link-task")
+		if err := os.Symlink(realTask, linkTask); err != nil {
+			t.Skipf("symlink unavailable: %v", err)
+		}
+		if _, err := listTaskPhases("WS", "link-task"); err == nil || !strings.Contains(err.Error(), "refusing to follow symlink") {
+			t.Fatalf("symlink task err = %v", err)
+		}
+
+		taskWithDir := filepath.Join(taskBase, "task-with-dir")
+		if err := os.MkdirAll(filepath.Join(taskWithDir, "nested.log"), 0o755); err != nil {
+			t.Fatalf("mkdir nested log dir: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(taskWithDir, "run.log"), []byte("ok"), 0o600); err != nil {
+			t.Fatalf("write run log: %v", err)
+		}
+		phases, err := listTaskPhases("WS", "task-with-dir")
+		if err != nil {
+			t.Fatalf("listTaskPhases with directory entry: %v", err)
+		}
+		if len(phases) != 1 || phases[0] != "run" {
+			t.Fatalf("phases = %#v, want only run", phases)
+		}
+	})
+}
+
 // TestHandleGetTaskLog_Success tests the full success path for reading a task log.
 func TestHandleGetTaskLog_Success(t *testing.T) {
 	tmpHome, err := filepath.EvalSymlinks(t.TempDir())

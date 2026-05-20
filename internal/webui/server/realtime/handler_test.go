@@ -2,6 +2,7 @@ package realtime
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -285,6 +286,87 @@ func TestHandlerServeHTTPAuthenticatedCallback(t *testing.T) {
 	}
 }
 
+func TestHandlerServeHTTPEdgeBranches(t *testing.T) {
+	t.Run("auth rejection stops before stream setup", func(t *testing.T) {
+		store, err := NewTokenStore()
+		if err != nil {
+			t.Fatalf("NewTokenStore: %v", err)
+		}
+		defer store.Stop()
+
+		h := NewHandler(HandlerConfig{Hub: NewHub(), TokenStore: store})
+		rr := httptest.NewRecorder()
+		h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/events", nil))
+		if rr.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want 401; body=%s", rr.Code, rr.Body.String())
+		}
+	})
+
+	t.Run("writer without flusher", func(t *testing.T) {
+		h := NewHandler(HandlerConfig{Hub: NewHub()})
+		w := &nonFlushingResponseWriter{header: http.Header{}}
+		h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/events", nil))
+		if w.status != http.StatusInternalServerError {
+			t.Fatalf("status = %d, want 500", w.status)
+		}
+	})
+
+	t.Run("request canceled before register", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		h := NewHandler(HandlerConfig{Hub: NewHub()})
+		rr := httptest.NewRecorder()
+		h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/events", nil).WithContext(ctx))
+		if rr.Body.String() != "" {
+			t.Fatalf("pre-canceled request wrote body %q", rr.Body.String())
+		}
+	})
+
+	t.Run("catchup write failure", func(t *testing.T) {
+		h := NewHandler(HandlerConfig{
+			Hub: NewHub(),
+			GetMutationsSince: func(string, string) []rpc.MutationEvent {
+				return []rpc.MutationEvent{{Cursor: "1-0", Type: "update", IssueID: "task-1", Timestamp: time.Now().UTC()}}
+			},
+			WorkspaceFromCtx: func(context.Context) string { return "WS" },
+		})
+		w := &failingFlushWriter{header: http.Header{}, failOnWrite: 1}
+		req := httptest.NewRequest(http.MethodGet, "/events?since=0-0", nil)
+		h.ServeHTTP(w, req)
+		if w.writes != 1 {
+			t.Fatalf("writes = %d, want catch-up failure on first write", w.writes)
+		}
+	})
+
+	t.Run("retry write failure", func(t *testing.T) {
+		h := NewHandler(HandlerConfig{Hub: NewHub(), WorkspaceFromCtx: func(context.Context) string { return "WS" }})
+		w := &failingFlushWriter{header: http.Header{}, failOnWrite: 1}
+		h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/events", nil))
+		if w.writes != 1 {
+			t.Fatalf("writes = %d, want retry failure on first write", w.writes)
+		}
+	})
+
+	t.Run("connected write failure", func(t *testing.T) {
+		h := NewHandler(HandlerConfig{Hub: NewHub(), WorkspaceFromCtx: func(context.Context) string { return "WS" }})
+		w := &failingFlushWriter{header: http.Header{}, failOnWrite: 2}
+		h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/events", nil))
+		if w.writes != 2 {
+			t.Fatalf("writes = %d, want connected failure on second write", w.writes)
+		}
+	})
+
+	t.Run("heartbeat write failure records disconnect error", func(t *testing.T) {
+		h := NewHandler(HandlerConfig{Hub: NewHub(), WorkspaceFromCtx: func(context.Context) string { return "WS" }})
+		h.heartbeatInterval = time.Millisecond
+		w := &failingFlushWriter{header: http.Header{}, failOnWrite: 3}
+		h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/events", nil))
+		if w.writes < 3 {
+			t.Fatalf("writes = %d, want heartbeat failure after handshake", w.writes)
+		}
+	})
+}
+
 func TestHandlerStreamLoopServerClose(t *testing.T) {
 	h := NewHandler(HandlerConfig{})
 	h.heartbeatInterval = time.Hour
@@ -304,6 +386,83 @@ func TestHandlerStreamLoopServerClose(t *testing.T) {
 		t.Fatalf("streamLoop reason = %q, want %q", reason, disconnectReasonServerClose)
 	}
 }
+
+func TestHandlerStreamLoopErrorBranches(t *testing.T) {
+	t.Run("mutation write error", func(t *testing.T) {
+		h := NewHandler(HandlerConfig{})
+		h.heartbeatInterval = time.Hour
+		w := &failingFlushWriter{header: http.Header{}, failOnWrite: 1}
+		sw, err := NewWriter(w)
+		if err != nil {
+			t.Fatalf("NewWriter: %v", err)
+		}
+		client := NewClient(1, 1, "", nil, "WS")
+		client.send <- &MutationPayload{Type: "update", IssueID: "task-1", Timestamp: time.Now().UTC().Format(time.RFC3339Nano)}
+		reason, err := h.streamLoop(sw, client, context.Background())
+		if err == nil || reason != disconnectReasonError {
+			t.Fatalf("streamLoop reason=%q err=%v, want write error", reason, err)
+		}
+	})
+
+	t.Run("deadline context is an error disconnect", func(t *testing.T) {
+		h := NewHandler(HandlerConfig{})
+		rr := httptest.NewRecorder()
+		sw, err := NewWriter(rr)
+		if err != nil {
+			t.Fatalf("NewWriter: %v", err)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 0)
+		defer cancel()
+		reason, err := h.streamLoop(sw, NewClient(1, 1, "", nil, "WS"), ctx)
+		if !errors.Is(err, context.DeadlineExceeded) || reason != disconnectReasonError {
+			t.Fatalf("streamLoop reason=%q err=%v, want deadline error", reason, err)
+		}
+	})
+
+	t.Run("event id falls back when timestamp is stale", func(t *testing.T) {
+		eventIDCounter.Store(1000)
+		id := eventIDForMutation(&MutationPayload{Timestamp: time.Unix(0, 0).UTC().Format(time.RFC3339Nano)})
+		if id != "1001" {
+			t.Fatalf("eventIDForMutation stale timestamp = %q, want 1001", id)
+		}
+	})
+}
+
+type nonFlushingResponseWriter struct {
+	header http.Header
+	status int
+	body   strings.Builder
+}
+
+func (w *nonFlushingResponseWriter) Header() http.Header { return w.header }
+
+func (w *nonFlushingResponseWriter) Write(data []byte) (int, error) {
+	return w.body.Write(data)
+}
+
+func (w *nonFlushingResponseWriter) WriteHeader(status int) { w.status = status }
+
+type failingFlushWriter struct {
+	header      http.Header
+	status      int
+	writes      int
+	failOnWrite int
+	body        strings.Builder
+}
+
+func (w *failingFlushWriter) Header() http.Header { return w.header }
+
+func (w *failingFlushWriter) Write(data []byte) (int, error) {
+	w.writes++
+	if w.failOnWrite == w.writes {
+		return 0, errors.New("forced write failure")
+	}
+	return w.body.Write(data)
+}
+
+func (w *failingFlushWriter) WriteHeader(status int) { w.status = status }
+
+func (w *failingFlushWriter) Flush() {}
 
 func serveSSEOnce(t *testing.T, h *Handler, mutateReq func(*http.Request)) string {
 	t.Helper()

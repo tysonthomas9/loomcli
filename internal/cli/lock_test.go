@@ -989,6 +989,72 @@ func TestGetTaskStatus_ReviewStatus(t *testing.T) {
 	}
 }
 
+func TestGetLockStatusTaskOutcomeBranches(t *testing.T) {
+	tests := []struct {
+		name       string
+		command    string
+		status     string
+		wantPrefix string
+	}{
+		{name: "closed", command: "task", status: "closed", wantPrefix: "done: loom-status"},
+		{name: "planner review", command: "plan", status: "review", wantPrefix: "review: loom-status"},
+		{name: "worker review stays working", command: "task", status: "review", wantPrefix: "working: loom-status"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := AcquireLock(dir, tt.command, "nova"); err != nil {
+				t.Fatalf("AcquireLock: %v", err)
+			}
+			t.Cleanup(func() { _ = ReleaseLock(dir) })
+			if err := UpdateLockTask(dir, "loom-status", "title"); err != nil {
+				t.Fatalf("UpdateLockTask: %v", err)
+			}
+			setDefaultIssueBackend(&MockIssueBackend{
+				GetFn: func(context.Context, string) (*backend.IssueDetailData, error) {
+					return &backend.IssueDetailData{IssueData: backend.IssueData{ID: "loom-status", Status: tt.status}}, nil
+				},
+			})
+			t.Cleanup(func() { setDefaultIssueBackend(nil) })
+
+			if got := GetLockStatus(dir); !strings.HasPrefix(got, tt.wantPrefix) {
+				t.Fatalf("GetLockStatus = %q, want prefix %q", got, tt.wantPrefix)
+			}
+		})
+	}
+}
+
+func TestAcquireLockRetryReplacesStaleLock(t *testing.T) {
+	dir := t.TempDir()
+	lockPath := filepath.Join(dir, LockFileName)
+	stale := LockInfo{
+		PID:       -1,
+		Command:   "task",
+		AgentName: "old",
+		StartedAt: time.Now().Add(-time.Hour),
+	}
+	data, err := json.Marshal(stale)
+	if err != nil {
+		t.Fatalf("marshal stale lock: %v", err)
+	}
+	if err := os.WriteFile(lockPath, data, 0600); err != nil {
+		t.Fatalf("write stale lock: %v", err)
+	}
+
+	if err := AcquireLock(dir, "task", "new"); err != nil {
+		t.Fatalf("AcquireLock over stale lock: %v", err)
+	}
+	t.Cleanup(func() { _ = ReleaseLock(dir) })
+	info, err := ReadLockFile(dir)
+	if err != nil {
+		t.Fatalf("ReadLockFile: %v", err)
+	}
+	if info.AgentName != "new" || info.PID != os.Getpid() {
+		t.Fatalf("lock after retry = %+v", info)
+	}
+}
+
 // ============================================================================
 // Single-Task Mode Lock State Pattern Tests
 // ============================================================================

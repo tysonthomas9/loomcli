@@ -2,11 +2,14 @@ package config
 
 import (
 	"context"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -173,6 +176,9 @@ func TestProjectConfigSmallHelpersAndDaemonStatePath(t *testing.T) {
 	if p := BoolPtr(true); p == nil || !*p {
 		t.Fatalf("BoolPtr(true) = %#v", p)
 	}
+	if cloneFloatPtr(nil) != nil {
+		t.Fatal("cloneFloatPtr(nil) returned non-nil")
+	}
 	cfg := &DaemonConfig{Roles: map[string]RoleConfig{
 		"review": {Backend: "codex", TaskFilter: "kind:task"},
 	}}
@@ -207,5 +213,88 @@ func TestValidateAgentReposNoWorkspaceAndResolveRepoPathErrors(t *testing.T) {
 	}
 	if _, err := resolveRepoPath("api"); err == nil || !strings.Contains(err.Error(), "no active workspace") {
 		t.Fatalf("resolveRepoPath without active workspace err = %v", err)
+	}
+}
+
+func TestValidateAgentReposAndResolveRepoPathActiveWorkspace(t *testing.T) {
+	requireConfigFleetDB(t)
+
+	ctx := context.Background()
+	dataDir := t.TempDir()
+	workspaceDir := t.TempDir()
+	apiDir := filepath.Join(workspaceDir, "api")
+	if err := os.Mkdir(apiDir, 0755); err != nil {
+		t.Fatalf("mkdir api repo: %v", err)
+	}
+	filePath := filepath.Join(workspaceDir, "not-dir")
+	if err := os.WriteFile(filePath, []byte("not a dir"), 0600); err != nil {
+		t.Fatalf("write not-dir file: %v", err)
+	}
+
+	t.Setenv("LOOM_CONFIG_DIR", dataDir)
+	t.Setenv(bootstrap.EnvWorkspace, "WS")
+	t.Setenv(bootstrap.EnvFleetDBActor, "config-coverage-test")
+	t.Setenv(bootstrap.EnvFleetDBURL, "")
+	InvalidateConfigCache()
+	t.Cleanup(InvalidateConfigCache)
+
+	handle, err := bootstrap.OpenStore(ctx, dataDir, nil)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = handle.Close() })
+
+	if _, err := handle.Store.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS", Name: "Workspace"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if _, err := handle.Store.Repos().Create(ctx, store.RepoCreate{WorkspaceKey: "WS", Name: "api"}); err != nil {
+		t.Fatalf("create api repo: %v", err)
+	}
+	if _, err := handle.Store.Repos().Create(ctx, store.RepoCreate{WorkspaceKey: "WS", Name: "file"}); err != nil {
+		t.Fatalf("create file repo: %v", err)
+	}
+	if err := bootstrap.SaveStateCache(&bootstrap.StateCache{
+		LastWorkspace: "WS",
+		Workspaces: map[string]bootstrap.WorkspaceLocalState{
+			"WS": {
+				Path: workspaceDir,
+				Repos: map[string]string{
+					"api":  apiDir,
+					"file": filePath,
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("save state cache: %v", err)
+	}
+
+	if err := ValidateAgentRepos([]AgentEntry{
+		{Worktree: "plain", Role: "task"},
+		{Worktree: "worker", Role: "task", Repo: "api"},
+	}); err != nil {
+		t.Fatalf("ValidateAgentRepos valid repo: %v", err)
+	}
+	if err := ValidateAgentRepos([]AgentEntry{{Worktree: "worker", Role: "task", Repo: "missing"}}); err == nil ||
+		!strings.Contains(err.Error(), "available repos") {
+		t.Fatalf("ValidateAgentRepos missing repo err = %v", err)
+	}
+	if got, err := resolveRepoPath("api"); err != nil || got != apiDir {
+		t.Fatalf("resolveRepoPath(api) = %q err=%v, want %q", got, err, apiDir)
+	}
+	if _, err := resolveRepoPath("file"); err == nil || !strings.Contains(err.Error(), "not a directory") {
+		t.Fatalf("resolveRepoPath(file) err = %v, want not a directory", err)
+	}
+	if _, err := resolveRepoPath("missing"); err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("resolveRepoPath(missing) err = %v, want not found", err)
+	}
+}
+
+func requireConfigFleetDB(t *testing.T) {
+	t.Helper()
+	if os.Getenv(bootstrap.EnvFleetDBBin) != "" {
+		return
+	}
+	if _, err := exec.LookPath("fleet-db"); err != nil {
+		t.Skip("fleet-db binary not available")
 	}
 }

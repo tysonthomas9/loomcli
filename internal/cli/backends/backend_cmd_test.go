@@ -427,3 +427,33 @@ func TestBoolSymbol(t *testing.T) {
 		t.Errorf("boolSymbol(false) = %q, want ✗", got)
 	}
 }
+
+func TestBackendInfoPrintHelpersAdditionalBranches(t *testing.T) {
+	out := captureOutput(t, func() {
+		printInfoConfig([]BackendOption{
+			{Key: "model", Description: "Model", Default: "gpt-5", CurrentValue: "gpt-5.1"},
+			{Key: "effort", Description: "Reasoning effort"},
+		})
+		printField("  Empty", "")
+		printField("  Filled", "value")
+		printListRow(backendListEntry{Name: "bare"})
+		printHealthTable([]backendHealthEntry{{Name: "bare"}})
+	})
+
+	for _, want := range []string{
+		"Configuration Options:",
+		"model: Model",
+		"(default=gpt-5, current=gpt-5.1)",
+		"effort: Reasoning effort",
+		"Filled:",
+		"bare",
+		"✗",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("output missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "Empty:") {
+		t.Fatalf("empty field should not print:\n%s", out)
+	}
+}

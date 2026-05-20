@@ -172,3 +172,27 @@ func TestReplayFromFile_NewDotNotationFormat(t *testing.T) {
 		t.Errorf("TotalTasksFailed = %d, want 1", snap.TotalTasksFailed)
 	}
 }
+
+func TestNormalizeEventTypeAllLegacyBranches(t *testing.T) {
+	tests := map[EventType]EventType{
+		"task_claimed":      TaskClaimed,
+		"task_started":      TaskStarted,
+		"task_completed":    TaskCompleted,
+		"task_failed":       TaskFailed,
+		"agent_started":     AgentStarted,
+		"agent_restarted":   AgentRestarted,
+		"agent_stopped":     AgentStopped,
+		"epic_assigned":     EpicAssigned,
+		"epic_exhausted":    EpicExhausted,
+		"pr_created":        PRCreated,
+		"conflict_resolved": ConflictResolved,
+		"health_check":      HealthCheck,
+		"config_reloaded":   ConfigReloaded,
+		"already.current":   "already.current",
+	}
+	for in, want := range tests {
+		if got := normalizeEventType(in); got != want {
+			t.Fatalf("normalizeEventType(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

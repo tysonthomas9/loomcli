@@ -123,6 +123,12 @@ func TestMonitor503(t *testing.T) {
 }
 
 func TestMonitorHTTPErrorAndDecodeError(t *testing.T) {
+	t.Run("invalid url", func(t *testing.T) {
+		if _, err := fetchMonitorStatus(context.Background(), http.DefaultClient, "://bad-url"); err == nil {
+			t.Fatal("expected invalid URL error")
+		}
+	})
+
 	t.Run("http error", func(t *testing.T) {
 		srv := monitorStatusServer(t, nil, http.StatusInternalServerError)
 		defer srv.Close()

@@ -122,6 +122,21 @@ func TestLoadDaemonConfigFromStoreErrorBranches(t *testing.T) {
 	})
 }
 
+func TestResolveActiveWorkspaceOpenStoreErrorBranches(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	t.Setenv(bootstrap.EnvWorkspace, "WS")
+	t.Setenv(bootstrap.EnvFleetDBURL, "")
+	t.Setenv(bootstrap.EnvFleetDBBin, "/definitely/missing/fleet-db")
+
+	if _, err := ResolveActiveWorkspace(); err == nil || !strings.Contains(err.Error(), "open fleet-db store") {
+		t.Fatalf("ResolveActiveWorkspace err = %v, want open store error", err)
+	}
+	if err := ValidateAgentRepos([]AgentEntry{{Worktree: "worker", Role: "task", Repo: "api"}}); err == nil ||
+		!strings.Contains(err.Error(), "validating agent repos") {
+		t.Fatalf("ValidateAgentRepos err = %v, want wrapped active workspace error", err)
+	}
+}
+
 type daemonGetErrorStore struct {
 	*memstore.Store
 	err error

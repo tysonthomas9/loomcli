@@ -1,6 +1,7 @@
 package misc
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/sessions"
+	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 // newTestSessionStore creates a sessions.Store rooted in a temporary directory.
@@ -49,6 +51,16 @@ func createTestSession(t *testing.T, store *sessions.Store, taskID string) *sess
 		t.Fatalf("Finalize: %v", err)
 	}
 	return sess
+}
+
+type listSubagentsService struct {
+	service.SessionService
+	ids []string
+	err error
+}
+
+func (s listSubagentsService) ListSessionSubagents(context.Context, string, string, string) ([]string, error) {
+	return s.ids, s.err
 }
 
 // --- Tests ---
@@ -345,6 +357,34 @@ func TestSessionSubagentHandlers(t *testing.T) {
 	HandleGetSessionSubagentTranscript(svc).ServeHTTP(missingRec, missingReq)
 	if missingRec.Code != http.StatusNotFound || !strings.Contains(missingRec.Body.String(), "not found") {
 		t.Fatalf("missing status/body = %d %s", missingRec.Code, missingRec.Body.String())
+	}
+}
+
+func TestListSessionSubagentsErrorAndNilBranches(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/tasks/loom-subagents/sessions/session-1/subagents", nil)
+	req.SetPathValue("taskId", "loom-subagents")
+	req.SetPathValue("sessionId", "session-1")
+
+	rr := httptest.NewRecorder()
+	HandleListSessionSubagents(listSubagentsService{err: service.ErrValidation("bad subagents")}).ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("validation status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "bad subagents") {
+		t.Fatalf("validation body = %s", rr.Body.String())
+	}
+
+	rr = httptest.NewRecorder()
+	HandleListSessionSubagents(listSubagentsService{}).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("nil ids status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	var resp SubagentListResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode nil ids response: %v", err)
+	}
+	if !resp.Success || resp.Data == nil || resp.Data.SessionID != "session-1" || resp.Data.SubagentIDs == nil || len(resp.Data.SubagentIDs) != 0 {
+		t.Fatalf("nil ids response = %+v", resp)
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
 
+	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 )
@@ -407,6 +408,48 @@ func TestPatchTabAndListSessionsByIssue(t *testing.T) {
 
 	if _, err := svc.PatchTab(ctx, ws, "missing", map[string]string{"label": "x"}); err == nil {
 		t.Fatal("PatchTab missing session returned nil error")
+	}
+}
+
+func TestTabServiceValidationUnavailableAndBroadcastBranches(t *testing.T) {
+	ctx := context.Background()
+	if _, err := (&terminalServiceImpl{}).ListTabs(ctx, "w"); err == nil {
+		t.Fatal("ListTabs without tab store returned nil error")
+	}
+	if _, err := (&terminalServiceImpl{}).GetTab(ctx, "w", "sess"); err == nil {
+		t.Fatal("GetTab without tab store returned nil error")
+	}
+	if err := (&terminalServiceImpl{}).PutTab(ctx, "w", &tabmeta.TabMetadata{SessionName: "sess"}); err == nil {
+		t.Fatal("PutTab without tab store returned nil error")
+	}
+	if err := (&terminalServiceImpl{}).DeleteTab(ctx, "w", "sess"); err == nil {
+		t.Fatal("DeleteTab without tab store returned nil error")
+	}
+
+	svc, _, _ := newLivenessTestSvc(t)
+	if _, err := svc.GetTab(ctx, "w", "bad/name"); err == nil {
+		t.Fatal("GetTab accepted invalid session name")
+	}
+	if _, err := svc.GetTab(ctx, "w", "missing"); err == nil {
+		t.Fatal("GetTab missing session returned nil error")
+	}
+	if err := svc.PutTab(ctx, "w", &tabmeta.TabMetadata{SessionName: "bad/name"}); err == nil {
+		t.Fatal("PutTab accepted invalid session name")
+	}
+	if err := svc.DeleteTab(ctx, "w", "bad/name"); err == nil {
+		t.Fatal("DeleteTab accepted invalid session name")
+	}
+
+	svc.hub = realtime.NewHub()
+	putTestTab(t, svc, "w", "sess")
+	if result, err := svc.PatchTab(ctx, "w", "sess", map[string]string{"issue_id": "TASK-2"}); err != nil || result == nil || !result.IssueIDChanged {
+		t.Fatalf("PatchTab broadcast result=%+v err=%v", result, err)
+	}
+	if err := svc.PutTab(ctx, "w", &tabmeta.TabMetadata{SessionName: "newtab", Workspace: "w", Label: "New"}); err != nil {
+		t.Fatalf("PutTab broadcast: %v", err)
+	}
+	if err := svc.DeleteTab(ctx, "w", "newtab"); err != nil {
+		t.Fatalf("DeleteTab broadcast: %v", err)
 	}
 }
 

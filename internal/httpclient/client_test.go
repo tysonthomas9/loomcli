@@ -2,6 +2,7 @@ package httpclient
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,12 @@ import (
 	"testing"
 	"time"
 )
+
+type httpRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f httpRoundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {
+	return f(r)
+}
 
 func TestDiscoverAuthMode_Open(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -147,6 +154,31 @@ func TestDiscoverAuthMode_OIDCEmptyAuthURLUsesServerProxy(t *testing.T) {
 	}
 }
 
+func TestNewOIDCUsesCachedToken(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", tmpDir)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/config" {
+			t.Fatalf("unexpected auth path with cached token: %s", r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(AuthMode{Mode: "oidc"})
+	}))
+	defer srv.Close()
+
+	if err := saveCachedToken(srv.URL, "cached-token", time.Now().Add(10*time.Minute)); err != nil {
+		t.Fatalf("save cached token: %v", err)
+	}
+	c, err := New(Config{ServerURL: srv.URL})
+	if err != nil {
+		t.Fatalf("New cached token client: %v", err)
+	}
+	defer c.Close()
+	if c.token != "cached-token" {
+		t.Fatalf("token = %q, want cached-token", c.token)
+	}
+}
+
 func TestDiscoverAuthMode_ServerDown(t *testing.T) {
 	stderr = io.Discard
 	defer func() { stderr = os.Stderr }()
@@ -268,6 +300,39 @@ func TestDoNoAuthWhenModeOpen(t *testing.T) {
 
 	if gotAuth != "" {
 		t.Errorf("expected no Authorization header, got %q", gotAuth)
+	}
+}
+
+func TestDoTransportErrorBranches(t *testing.T) {
+	c := &Client{
+		serverURL: "http://loom.example.test",
+		authMode:  &AuthMode{Mode: "open"},
+		httpClient: &http.Client{Transport: httpRoundTripFunc(func(*http.Request) (*http.Response, error) {
+			return nil, errors.New("transport down")
+		})},
+	}
+	req, _ := http.NewRequest(http.MethodGet, "http://loom.example.test/api/test", nil)
+	if _, err := c.Do(req); err == nil || !strings.Contains(err.Error(), "transport down") {
+		t.Fatalf("initial transport err = %v", err)
+	}
+
+	calls := 0
+	c = &Client{
+		serverURL:   "http://loom.example.test",
+		authMode:    &AuthMode{Mode: "oidc", AuthURL: "http://auth.invalid"},
+		token:       "fresh",
+		tokenExpiry: time.Now().Add(10 * time.Minute),
+		httpClient: &http.Client{Transport: httpRoundTripFunc(func(*http.Request) (*http.Response, error) {
+			calls++
+			if calls == 1 {
+				return &http.Response{StatusCode: http.StatusUnauthorized, Body: io.NopCloser(strings.NewReader(""))}, nil
+			}
+			return nil, errors.New("retry transport down")
+		})},
+	}
+	req, _ = http.NewRequest(http.MethodGet, "http://loom.example.test/api/test", nil)
+	if _, err := c.Do(req); err == nil || !strings.Contains(err.Error(), "re-authentication failed") {
+		t.Fatalf("retry auth err = %v", err)
 	}
 }
 
@@ -544,4 +609,67 @@ func TestDeviceFlowRequestAndPollErrorBranches(t *testing.T) {
 			t.Fatalf("pollDeviceToken error = %v, want parse failure", err)
 		}
 	})
+}
+
+func TestRunDeviceFlowImmediateTimeoutAndTokenErrors(t *testing.T) {
+	tests := []struct {
+		name      string
+		expiresIn int
+		tokenBody string
+		want      string
+	}{
+		{
+			name:      "timeout before first poll",
+			expiresIn: 0,
+			want:      "authorization timed out",
+		},
+		{
+			name:      "expired token",
+			expiresIn: 30,
+			tokenBody: `{"error":"expired_token"}`,
+			want:      "authorization timed out",
+		},
+		{
+			name:      "access denied",
+			expiresIn: 30,
+			tokenBody: `{"error":"access_denied"}`,
+			want:      "authorization denied",
+		},
+		{
+			name:      "custom error",
+			expiresIn: 30,
+			tokenBody: `{"error":"bad_device"}`,
+			want:      "device flow error: bad_device",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stderr = io.Discard
+			t.Cleanup(func() { stderr = os.Stderr })
+
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/api/auth/device/code":
+					_ = json.NewEncoder(w).Encode(DeviceCodeResponse{
+						DeviceCode:      "device",
+						UserCode:        "USER-CODE",
+						VerificationURI: "https://auth.example/device",
+						ExpiresIn:       tt.expiresIn,
+						Interval:        -1,
+					})
+				case "/api/auth/device/token":
+					_, _ = w.Write([]byte(tt.tokenBody))
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			defer srv.Close()
+
+			_, _, err := RunDeviceFlow(DeviceFlowConfig{AuthURL: srv.URL})
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("RunDeviceFlow error = %v, want %q", err, tt.want)
+			}
+		})
+	}
 }

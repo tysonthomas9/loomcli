@@ -55,7 +55,7 @@ func runFullSync(cmd *cobra.Command, args []string) error {
 
 	if pushOnly && pullOnly {
 		fmt.Fprintln(os.Stderr, "Error: --push-only and --pull-only are mutually exclusive")
-		os.Exit(1)
+		exitProcess(1)
 	}
 
 	runWorkspaceSync(deps, pushOnly, pullOnly, ws)
@@ -66,7 +66,7 @@ func runWorkspaceSync(deps *cli.Deps, pushOnly, pullOnly bool, ws string) {
 	resolver, err := cli.NewResolver()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error creating resolver: %v\n", err)
-		os.Exit(1)
+		exitProcess(1)
 	}
 
 	// If workspace flag specified, operate on just that workspace
@@ -74,7 +74,7 @@ func runWorkspaceSync(deps *cli.Deps, pushOnly, pullOnly bool, ws string) {
 		if err := resolver.SetWorkspace(ws); err != nil {
 			available := resolver.WorkspaceNames()
 			fmt.Fprintf(os.Stderr, "Error: workspace %q not found. Available: %v\n", ws, available)
-			os.Exit(1)
+			exitProcess(1)
 		}
 		syncSingleWorkspace(deps, resolver, pushOnly, pullOnly)
 		return

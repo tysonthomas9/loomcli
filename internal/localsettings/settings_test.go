@@ -100,8 +100,21 @@ func TestLoadValidateEnvHashAndRedisURLEdges(t *testing.T) {
 	if _, err := Load(""); err == nil || !strings.Contains(err.Error(), "data dir is required") {
 		t.Fatalf("Load empty err = %v", err)
 	}
+	if err := Save("", Default()); err == nil || !strings.Contains(err.Error(), "data dir is required") {
+		t.Fatalf("Save empty err = %v", err)
+	}
+	if err := Save(t.TempDir(), Settings{FleetDBRedis: RedisConfig{Enabled: true}}); err == nil {
+		t.Fatal("Save invalid redis settings err = nil")
+	}
 	if got, err := Load(t.TempDir()); err != nil || got.Version != 1 {
 		t.Fatalf("Load missing got=%+v err=%v", got, err)
+	}
+	versionZeroDir := t.TempDir()
+	if err := os.WriteFile(Path(versionZeroDir), []byte(`{"fleetdb_redis":{"enabled":false}}`), 0600); err != nil {
+		t.Fatalf("write version zero settings: %v", err)
+	}
+	if got, err := Load(versionZeroDir); err != nil || got.Version != 1 {
+		t.Fatalf("Load version-zero got=%+v err=%v", got, err)
 	}
 	badDir := t.TempDir()
 	if err := os.WriteFile(Path(badDir), []byte("{bad-json"), 0600); err != nil {
@@ -160,9 +173,12 @@ func TestLoadValidateEnvHashAndRedisURLEdges(t *testing.T) {
 	if err != nil || parsed.DB != 4 || parsed.Password != "pw" {
 		t.Fatalf("--uri parsed=%+v err=%v", parsed, err)
 	}
-	for _, raw := range []string{"", "http://example.com:6379", "redis://example.com/not-number", "redis://:6379"} {
+	for _, raw := range []string{"", "://bad", "http://example.com:6379", "redis://example.com/not-number", "redis://:6379", "redis://bad host"} {
 		if _, err := RedisFromURL(raw); err == nil {
 			t.Fatalf("RedisFromURL(%q) err = nil", raw)
 		}
+	}
+	if _, err := RedisFromURL("redis-cli redis://default:pw@example.com:6379"); err != nil {
+		t.Fatalf("RedisFromURL redis-cli positional URL: %v", err)
 	}
 }

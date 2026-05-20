@@ -74,14 +74,14 @@ func runInit(cmd *cobra.Command, args []string) {
 	// Step 1: Check prerequisites
 	fmt.Println("Step 1: Prerequisites")
 	if !checkPrerequisites(deps) {
-		os.Exit(1)
+		exitProcess(1)
 	}
 	fmt.Println("")
 
 	// Step 2: Confirm issue storage
 	fmt.Println("Step 2: Issue storage")
 	if !initIssueStorage(deps) {
-		os.Exit(1)
+		exitProcess(1)
 	}
 	fmt.Println("")
 
@@ -89,7 +89,7 @@ func runInit(cmd *cobra.Command, args []string) {
 	fmt.Println("Step 3: Create worktrees directory")
 	worktreesDir := getWorktreesDirForInit()
 	if !createWorktreesDir(worktreesDir) {
-		os.Exit(1)
+		exitProcess(1)
 	}
 	fmt.Println("")
 
@@ -112,7 +112,7 @@ func runInitWorkspace(cmd *cobra.Command, _ []string) {
 
 	fmt.Println("Step 1: Prerequisites")
 	if !checkPrerequisites(deps) {
-		os.Exit(1)
+		exitProcess(1)
 	}
 	fmt.Println("")
 
@@ -150,7 +150,7 @@ func validateWorkspaceExists() config.WorkspaceConfig {
 		fmt.Fprintf(os.Stderr, "✗ %v\n", err)
 		fmt.Fprintf(os.Stderr, "  Create a workspace first with:\n")
 		fmt.Fprintf(os.Stderr, "  loom workspace create %s --repos /path/to/repo\n", initWorkspace)
-		os.Exit(1)
+		exitProcess(1)
 	}
 	fmt.Printf("✓ Workspace %q found at %s\n", initWorkspace, out.Path)
 	fmt.Printf("  Repos: %d\n", len(out.Repos))

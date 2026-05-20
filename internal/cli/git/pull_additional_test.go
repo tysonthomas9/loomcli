@@ -51,6 +51,72 @@ func TestPullRepoWorktreeSuccessAndMergeFailure(t *testing.T) {
 	}
 }
 
+func TestPullRepoWorktreeConflictAndPushErrors(t *testing.T) {
+	t.Run("merge conflict invokes agent", func(t *testing.T) {
+		deps, _, execRunner, _, _ := NewTestDeps(t)
+		execRunner.RunFunc = func(_ string, name string, args ...string) cli.CommandResult {
+			if name == "git" && strings.Join(args, " ") == "diff --name-only --diff-filter=U" {
+				return cli.CommandResult{Stdout: "a.go\nb.go\n"}
+			}
+			return cli.CommandResult{}
+		}
+		outputMock := NewOutputCommandMock(t, []OutputCommandStub{
+			{Err: nil},
+			{Err: errors.New("merge conflict")},
+		})
+		outputMock.InstallOn(deps)
+
+		var prompt string
+		deps.Agent = &MockAgentInvoker{InteractiveFunc: func(workDir, gotPrompt, agentName string) error {
+			if workDir != "/repo" || agentName != "" {
+				t.Fatalf("agent invocation workDir=%q agent=%q", workDir, agentName)
+			}
+			prompt = gotPrompt
+			return nil
+		}}
+
+		if err := pullRepoWorktree(deps, "/repo", "feature", "main", "origin"); err != nil {
+			t.Fatalf("pullRepoWorktree conflict path: %v", err)
+		}
+		if !strings.Contains(prompt, "a.go") || !strings.Contains(prompt, "b.go") {
+			t.Fatalf("conflict prompt = %q", prompt)
+		}
+	})
+
+	t.Run("merge conflict without conflicted files returns merge error", func(t *testing.T) {
+		deps, _, execRunner, _, _ := NewTestDeps(t)
+		execRunner.RunFunc = func(_ string, name string, args ...string) cli.CommandResult {
+			if name == "git" && strings.Join(args, " ") == "diff --name-only --diff-filter=U" {
+				return cli.CommandResult{}
+			}
+			return cli.CommandResult{}
+		}
+		outputMock := NewOutputCommandMock(t, []OutputCommandStub{
+			{Err: nil},
+			{Err: errors.New("merge failed")},
+		})
+		outputMock.InstallOn(deps)
+
+		if err := pullRepoWorktree(deps, "/repo", "feature", "main", "origin"); err == nil || !strings.Contains(err.Error(), "merge failed") {
+			t.Fatalf("pullRepoWorktree no-conflict-files error = %v", err)
+		}
+	})
+
+	t.Run("push failure", func(t *testing.T) {
+		deps, _, _, _, _ := NewTestDeps(t)
+		outputMock := NewOutputCommandMock(t, []OutputCommandStub{
+			{Err: nil},
+			{Err: nil},
+			{Err: errors.New("push rejected")},
+		})
+		outputMock.InstallOn(deps)
+
+		if err := pullRepoWorktree(deps, "/repo", "feature", "main", "origin"); err == nil || !strings.Contains(err.Error(), "pushing") {
+			t.Fatalf("pullRepoWorktree push failure = %v", err)
+		}
+	})
+}
+
 func TestPullWorkspaceWorktreesSkipsMissingRepoAndDefaultsBranch(t *testing.T) {
 	deps, gitRunner, _, _, _ := NewTestDeps(t)
 	pullWorkspaceWorktrees(deps, []cli.WorktreeInfo{

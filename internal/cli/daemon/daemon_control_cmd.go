@@ -33,7 +33,7 @@ func runDaemonAgentStop(agentName string, force bool, yieldTimeout time.Duration
 	socketPath, err := resolveControlSocketFromCwdFn()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		exitProcess(1)
 	}
 
 	// --force or --timeout 0: skip yield, SIGTERM directly
@@ -63,7 +63,7 @@ func requestYieldOrFallback(socketPath, agentName string) bool {
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		exitProcess(1)
 	}
 	if resp.Success {
 		return true
@@ -77,7 +77,7 @@ func requestYieldOrFallback(socketPath, agentName string) bool {
 	// "not found" — agent doesn't exist at all
 	if strings.Contains(resp.Error, "not found") {
 		fmt.Fprintf(os.Stderr, "Error: %s\n", resp.Error)
-		os.Exit(1)
+		exitProcess(1)
 	}
 	// Other errors — fall through to force stop
 	fmt.Fprintf(os.Stderr, "Warning: yield request failed: %s\n", resp.Error)
@@ -120,7 +120,7 @@ func forceStopAgent(socketPath, agentName string) {
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		exitProcess(1)
 	}
 	if !resp.Success {
 		if strings.Contains(resp.Error, "not found") || strings.Contains(resp.Error, "already stopped") {
@@ -128,7 +128,7 @@ func forceStopAgent(socketPath, agentName string) {
 			return
 		}
 		fmt.Fprintf(os.Stderr, "Error: %s\n", resp.Error)
-		os.Exit(1)
+		exitProcess(1)
 	}
 	fmt.Printf("Agent %q stopped.\n", agentName)
 }
@@ -159,7 +159,7 @@ func stopDaemonForce(pid int) {
 	fmt.Printf("Force-stopping daemon (PID %d)...\n", pid)
 	if err := syscall.Kill(pid, syscall.SIGKILL); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: sending SIGKILL: %v\n", err)
-		os.Exit(1)
+		exitProcess(1)
 	}
 	time.Sleep(1 * time.Second)
 	if !lockfile.IsProcessRunning(pid) {
@@ -174,7 +174,7 @@ func stopDaemonGraceful(pid int) {
 	fmt.Printf("Stopping daemon (PID %d)...\n", pid)
 	if err := syscall.Kill(pid, syscall.SIGTERM); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: sending SIGTERM: %v\n", err)
-		os.Exit(1)
+		exitProcess(1)
 	}
 
 	deadline := time.Now().Add(90 * time.Second)
@@ -195,24 +195,24 @@ func stopDaemonGraceful(pid int) {
 
 	fmt.Fprintf(os.Stderr, "Warning: daemon did not stop within 90 seconds\n")
 	fmt.Fprintf(os.Stderr, "Try: loom daemon stop --force\n")
-	os.Exit(1)
+	exitProcess(1)
 }
 
 func runDaemonAgentStart(cmd *cobra.Command, args []string) {
 	socketPath, err := resolveControlSocketFromCwdFn()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		exitProcess(1)
 	}
 
 	resp, err := sendDaemonControlRequestFn(socketPath, ctrlOpAgentStart, args[0])
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		exitProcess(1)
 	}
 	if !resp.Success {
 		fmt.Fprintf(os.Stderr, "Error: %s\n", resp.Error)
-		os.Exit(1)
+		exitProcess(1)
 	}
 	fmt.Printf("Agent %q started.\n", args[0])
 }
@@ -221,17 +221,17 @@ func runDaemonAgentRestart(cmd *cobra.Command, args []string) {
 	socketPath, err := resolveControlSocketFromCwdFn()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		exitProcess(1)
 	}
 
 	resp, err := sendDaemonControlRequestFn(socketPath, ctrlOpAgentRestart, args[0])
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		exitProcess(1)
 	}
 	if !resp.Success {
 		fmt.Fprintf(os.Stderr, "Error: %s\n", resp.Error)
-		os.Exit(1)
+		exitProcess(1)
 	}
 	fmt.Printf("Agent %q restarted.\n", args[0])
 }

@@ -58,6 +58,16 @@ func (h *panicHook) OnDeregister(ctx DeregistrationContext) {
 	}
 }
 
+type activatingHook struct {
+	mockHook
+	err error
+}
+
+func (h *activatingHook) Activate(wsID string) error {
+	*h.calls = append(*h.calls, "activate:"+h.name+":"+wsID)
+	return h.err
+}
+
 func newRegistry(t *testing.T) *WorkspaceRegistry {
 	t.Helper()
 	return NewWorkspaceRegistry(slog.Default())
@@ -611,6 +621,37 @@ func TestRegistry_Registered_AfterClose(t *testing.T) {
 	}
 	if r.Registered("nonexistent") {
 		t.Error("expected Registered(\"nonexistent\") = false after Close")
+	}
+}
+
+func TestRegistry_ActivateSubscriberBranches(t *testing.T) {
+	var calls []string
+	firstErr := errors.New("activate failed")
+	r := newRegistry(t)
+	r.AddHook(&mockHook{name: "plain", calls: &calls})
+	r.AddHook(&activatingHook{mockHook: mockHook{name: "bad", calls: &calls}, err: firstErr})
+	r.AddHook(&activatingHook{mockHook: mockHook{name: "good", calls: &calls}})
+
+	if err := r.ActivateSubscriber(""); !errors.Is(err, ErrEmptyWorkspaceID) {
+		t.Fatalf("empty id err = %v, want ErrEmptyWorkspaceID", err)
+	}
+	if err := r.ActivateSubscriber("missing"); err != nil {
+		t.Fatalf("missing workspace activation should be ignored, got %v", err)
+	}
+	if err := r.Register("ws-1", "/tmp/ws-1"); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	calls = nil
+	if err := r.ActivateSubscriber("ws-1"); !errors.Is(err, firstErr) {
+		t.Fatalf("ActivateSubscriber err = %v, want first activator error", err)
+	}
+	assertCalls(t, calls, []string{"activate:bad:ws-1", "activate:good:ws-1"})
+
+	if err := r.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if err := r.ActivateSubscriber("ws-1"); !errors.Is(err, ErrRegistryClosed) {
+		t.Fatalf("closed registry err = %v, want ErrRegistryClosed", err)
 	}
 }
 
