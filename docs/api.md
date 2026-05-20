@@ -3998,6 +3998,16 @@ Get daemon runtime status for the workspace.
 - Same response shape as `GET /api/daemon/status` documented in [Health & Status](#health--status)
 - **Errors:** `503` (pool unavailable), `504` (timeout)
 
+#### `GET /api/workspaces/{ws}/runtime-ready`
+
+Check whether the runtime can serve agent work for the workspace.
+
+- **Auth:** Required
+- **Timeout:** 2 seconds
+- **No query params**
+- **Success:** `200` with `{"ready":true,"mode":"daemon"|"fleet","workspace":"..."}`
+- **Errors:** `503` with `ready:false` and a diagnostic `reason`; `400` if the workspace path parameter is missing
+
 ---
 
 ## Client Error & CSP Reporting

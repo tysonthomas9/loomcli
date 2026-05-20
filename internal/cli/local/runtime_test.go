@@ -2,12 +2,14 @@ package local
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 )
@@ -38,6 +40,48 @@ func TestCheckRuntimeHealthReportsStatusCode(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "/api/health returned 404") {
 		t.Fatalf("checkRuntimeHealth() error = %q, want /api/health 404", err)
+	}
+}
+
+func TestWaitForWorkspaceReadyReturnsOnSuccess(t *testing.T) {
+	var gotPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.EscapedPath()
+		if gotPath != "/api/workspaces/LOOM%2FQA/runtime-ready" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ready":true}`))
+	}))
+	t.Cleanup(server.Close)
+
+	if err := WaitForWorkspaceReady(context.Background(), server.URL, "LOOM/QA"); err != nil {
+		t.Fatalf("WaitForWorkspaceReady() error = %v", err)
+	}
+}
+
+func TestWaitForWorkspaceReadyIncludesReasonOnTimeout(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_ = json.NewEncoder(w).Encode(runtimeReadyResponse{
+			Ready:  false,
+			Reason: "workspace not registered",
+		})
+	}))
+	t.Cleanup(server.Close)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	defer cancel()
+
+	err := WaitForWorkspaceReady(ctx, server.URL, "LOOM")
+	if err == nil {
+		t.Fatal("WaitForWorkspaceReady() error = nil, want timeout")
+	}
+	for _, want := range []string{`workspace "LOOM" runtime not ready`, "workspace not registered"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("WaitForWorkspaceReady() error = %q, want %q", err.Error(), want)
+		}
 	}
 }
 

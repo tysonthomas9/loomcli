@@ -297,6 +297,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/workspaces/{ws}/runtime-ready": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Workspace-scoped runtime readiness */
+    get: operations["getWorkspaceRuntimeReady"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/workspaces/{ws}/issues": {
     parameters: {
       query?: never;
@@ -1924,6 +1941,13 @@ export interface components {
       success: true;
       message: string;
     };
+    RuntimeReadyResponse: {
+      ready: boolean;
+      /** @enum {string} */
+      mode: "daemon" | "fleet";
+      workspace: string;
+      reason?: string;
+    };
     /**
      * @description Core issue type used in list endpoints. Maps to `types.Issue` json
      *     serialization. Some list endpoints return this shape directly (not
@@ -3389,6 +3413,38 @@ export interface operations {
         };
         content: {
           "application/json": Record<string, never>;
+        };
+      };
+    };
+  };
+  getWorkspaceRuntimeReady: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Runtime is ready to serve agent work for the workspace */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["RuntimeReadyResponse"];
+        };
+      };
+      /** @description Runtime is not ready to serve agent work for the workspace */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["RuntimeReadyResponse"];
         };
       };
     };

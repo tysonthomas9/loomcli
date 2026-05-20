@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -77,6 +78,11 @@ type RuntimeStatusSnapshot struct {
 	Runtime *RuntimeSnapshot `json:"runtime,omitempty"`
 	Healthy bool             `json:"healthy"`
 	Error   string           `json:"error,omitempty"`
+}
+
+type runtimeReadyResponse struct {
+	Ready  bool   `json:"ready"`
+	Reason string `json:"reason,omitempty"`
 }
 
 func runtimeSnapshot(info *runtimeInfo) *RuntimeSnapshot {
@@ -354,6 +360,62 @@ func waitForRuntime(ctx context.Context, url string) error {
 		case <-ticker.C:
 		}
 	}
+}
+
+// WaitForWorkspaceReady polls the runtime's workspace-scoped readiness probe
+// until the runtime can serve agent work for workspaceKey.
+func WaitForWorkspaceReady(ctx context.Context, baseURL, workspaceKey string) error {
+	if baseURL == "" {
+		return errors.New("runtime URL is empty")
+	}
+	endpoint := strings.TrimRight(baseURL, "/") + "/api/workspaces/" + url.PathEscape(workspaceKey) + "/runtime-ready"
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
+
+	var lastReason string
+	for {
+		reason, err := checkWorkspaceReady(ctx, endpoint)
+		if err == nil {
+			return nil
+		}
+		if reason != "" {
+			lastReason = reason
+		} else if ctx.Err() == nil || lastReason == "" {
+			lastReason = err.Error()
+		}
+
+		select {
+		case <-ctx.Done():
+			if lastReason != "" {
+				return fmt.Errorf("workspace %q runtime not ready: %s", workspaceKey, lastReason)
+			}
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
+}
+
+func checkWorkspaceReady(ctx context.Context, endpoint string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return "", err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode == http.StatusOK {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		return "", nil
+	}
+
+	var body runtimeReadyResponse
+	if err := json.NewDecoder(resp.Body).Decode(&body); err == nil && body.Reason != "" {
+		return body.Reason, fmt.Errorf("/runtime-ready returned %d", resp.StatusCode)
+	}
+	return fmt.Sprintf("HTTP %d", resp.StatusCode), fmt.Errorf("/runtime-ready returned %d", resp.StatusCode)
 }
 
 func processRunning(pid int) bool {
