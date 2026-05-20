@@ -1,14 +1,15 @@
 package backends
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"strings"
-	"syscall"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/harness"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
@@ -75,50 +76,32 @@ func defaultGeminiInvoker(workDir, prompt, agentName string) error {
 }
 
 func defaultGeminiNonInteractiveInvoker(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error {
-	cmd := exec.Command("gemini", "--approval-mode=yolo", "-p", prompt, "-o", "stream-json") //nolint:gosec // G204: prompt is from the CLI operator, not untrusted input
-	cmd.Dir = workDir
 	env := append(cli.FilteredEnv(), "LOOM_WORKTREE_PATH="+workDir)
 	if agentName != "" {
 		env = append(env, "LOOM_AGENT_NAME="+agentName)
 	}
-	cmd.Env = env
-
-	// Pipe stdout for JSON stream parsing
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return wrapInvocationError(fmt.Errorf("failed to create stdout pipe: %w", err), "")
-	}
-	cmd.Stderr = os.Stderr
-
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	fmt.Println("Launching Gemini agent (non-interactive)...")
 	fmt.Println("")
 
-	if err := cmd.Start(); err != nil {
-		return wrapInvocationError(fmt.Errorf("failed to start gemini: %w", err), "")
-	}
-
-	// Monitor for shutdown signal
-	guard := newProcessGuard(cmd.Process)
-	go func() {
-		select {
-		case <-shutdown:
-			guard.Signal(syscall.SIGTERM)
-		case <-guard.Done():
-		}
-	}()
-
-	outputTail := scanStreamOutput(stdout, func(line string) {
-		fmt.Println(line)
-		if collector != nil {
-			collectGeminiStreamUsage(line, collector)
-		}
+	// Gemini takes the prompt as a -p argv flag, not stdin, so the
+	// harnessInvocation's Prompt is empty (the wrapper still attaches
+	// an empty stdin so the harness sees EOF immediately if it reads).
+	return runHarness(context.Background(), shutdown, harnessInvocation{
+		BinaryName:  "gemini",
+		Args:        []string{"--approval-mode=yolo", "-p", prompt, "-o", "stream-json"},
+		WorkDir:     workDir,
+		Env:         env,
+		Prompt:      "",
+		HarnessName: "gemini",
+		LineHandler: func(line string) {
+			fmt.Println(line)
+			if collector != nil {
+				collectGeminiStreamUsage(line, collector)
+			}
+		},
+		RetryPolicy: harness.DefaultRetryPolicy(),
 	})
-
-	runErr := cmd.Wait()
-	guard.WaitAndMark()
-	return wrapInvocationError(runErr, outputTail)
 }
 
 // Meta returns descriptive metadata about the Gemini backend.

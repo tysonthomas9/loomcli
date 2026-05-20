@@ -18,7 +18,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -375,6 +377,290 @@ func TestPlaygroundSlowBackendNotKilled(t *testing.T) {
 	if ticks < 2 {
 		t.Errorf("slow backend completed only %d heartbeat ticks, expected ≥ 2", ticks)
 	}
+}
+
+// TestPlaygroundPlannerLeaksClaimLock reproduces the planner-leaks-lock defect
+// observed against the real claude/codex backends in the TREE workspace.
+//
+// Reproduction shape (matches what we found on TREE-1):
+//
+//   - A previous planner agent claimed the task, wrote a design, and exited.
+//     The issue state was left as: status=open, design populated, the
+//     fleet-db distributed lock still held by the planner actor (the
+//     supervisor's resetTask path is skipped on clean exits — see
+//     agent/recover.go:172-183 — and `loom data update --design ...`
+//     without --status doesn't touch the lock).
+//   - By the time the coder/worker tried to pick the task up, the planner
+//     agent was no longer in the daemon (or never restarted), so the
+//     supervisor's restart-cycle orphan reset (recover_helpers.go
+//     resetOrphanedAgentTasks) never ran for the planner. Without that
+//     reset the lock sits at its TTL (5min default) indefinitely from the
+//     coder's perspective.
+//   - The coder's has_design filter sees the task as eligible (queue says
+//     "1 task matches") but every claim attempt returns conflict
+//     "already_claimed". The supervisor classifies this as NoWork — the
+//     agent looks idle when it is in fact blocked.
+//
+// The test pre-stages the leaked-lock state directly via raw fleet-db API
+// calls (POST /claim as the synthetic planner + PATCH to status=open),
+// then runs the daemon with ONLY the coder agent registered. With no
+// planner agent in the daemon, the orphan-reset path never fires for the
+// planner actor, and the leak persists for the entire observation window.
+//
+// Expected to FAIL today (the defect reproduces). Once the supervisor (or
+// `loom complete` semantics) is changed to drop the lock unconditionally
+// on clean agent exits — or `loom data update` is made to release on
+// design write — the coder will close the task and the second-to-last
+// "appears fixed" Fatalf path will trip, signalling that this test should
+// be updated to assert the new healthy behavior.
+func TestPlaygroundPlannerLeaksClaimLock(t *testing.T) {
+	requireServe(t)
+
+	const scenario = "leakclaim"
+	const stalePlanner = "leakclaim-planner"
+	leakObserveDelay := durationFromEnv("PLAYGROUND_LEAKCLAIM_OBSERVE", 45*time.Second)
+
+	_ = exec.Command("bash",
+		filepath.Join(hereDir(t), "teardown.sh"), scenario).Run()
+
+	runScenarioScript(t, "setup.sh", []string{scenario}, nil)
+
+	wsKey := workspaceKeyForScenario(scenario)
+	taskID, err := firstTaskID(t, scenario)
+	if err != nil {
+		t.Fatalf("locate seeded task: %v", err)
+	}
+
+	// Stage 1: synthesize the leaked-lock state. Claim as the synthetic
+	// planner actor to acquire the distributed lock and flip status to
+	// in_progress; then PATCH directly (bypassing FleetBackend's
+	// transitionToOpen, which would translate status=open into a /release
+	// call and clear the lock) so the issue's status returns to open with
+	// the lock and assignee still held by the planner. This is exactly
+	// the shape TREE-1 was in.
+	if _, ok, err := probeClaim(t, wsKey, taskID, stalePlanner); err != nil || !ok {
+		t.Fatalf("initial claim as %q failed: ok=%v err=%v", stalePlanner, ok, err)
+	}
+	if err := patchIssue(t, wsKey, taskID, stalePlanner, map[string]any{
+		"status": "open",
+		"design": "stale design from planner that leaked its lock",
+	}); err != nil {
+		t.Fatalf("patch issue back to open: %v", err)
+	}
+
+	// Confirm the staged state before starting the daemon: status=open,
+	// lock still held by stalePlanner. probeClaim as a fresh actor must
+	// see the leak.
+	preHolder, preClaimable, err := probeClaim(t, wsKey, taskID, "leakclaim-probe")
+	if err != nil {
+		t.Fatalf("staging probe: %v", err)
+	}
+	if preClaimable {
+		t.Fatalf("staging failed: lock was already released before daemon start")
+	}
+	if preHolder != stalePlanner {
+		t.Fatalf("staging produced wrong lock holder: want %q got %q", stalePlanner, preHolder)
+	}
+
+	// Stage 2: run the daemon with only the coder agent. The coder's
+	// has_design filter sees the task in its ready queue; every claim
+	// attempt will hit conflict and the supervisor will record NoWork.
+	daemonLog := filepath.Join(scenarioRuntimeDir(t, scenario), "leakclaim.daemon.log")
+	daemon := startScenarioDaemon(t, scenario, daemonLog)
+	t.Cleanup(func() { scenarioCleanup(t, scenario, daemon) })
+
+	// Stage 3: observe. With a healthy supervisor the coder would claim
+	// and close within ~30s. With the leaked lock it never can, so the
+	// task status stays open (and not closed) for the entire window.
+	deadline := time.Now().Add(leakObserveDelay)
+	for time.Now().Before(deadline) {
+		status, err := taskStatus(t, scenario, taskID)
+		if err != nil {
+			t.Fatalf("read task status: %v", err)
+		}
+		if status == "closed" {
+			t.Fatalf("coder closed %s despite leaked planner lock — bug appears fixed; update this test\n--- daemon.log tail ---\n%s",
+				taskID, tailFile(daemonLog, 80))
+		}
+		time.Sleep(3 * time.Second)
+	}
+
+	// Stage 4: confirm the lock is still leaked at the end of the window.
+	holder, claimable, err := probeClaim(t, wsKey, taskID, "leakclaim-probe-final")
+	if err != nil {
+		t.Fatalf("final probe: %v", err)
+	}
+	if claimable {
+		t.Fatalf("lock unexpectedly released during observe window — bug appears fixed; update this test\n--- daemon.log tail ---\n%s",
+			tailFile(daemonLog, 80))
+	}
+	if holder != stalePlanner {
+		t.Errorf("end-of-window lock holder changed: want %q got %q", stalePlanner, holder)
+	}
+
+	t.Logf("reproduced planner-leaks-claim-lock: %s held by %s for %s, coder blocked\n--- daemon.log tail ---\n%s",
+		taskID, holder, leakObserveDelay, tailFile(daemonLog, 60))
+}
+
+// patchIssue calls PATCH /api/v1/{ws}/issues/{id} on the embedded fleet-db
+// directly. Used by TestPlaygroundPlannerLeaksClaimLock to push the issue
+// back to status=open without the loomcli FleetBackend's transitionToOpen
+// helper (which would translate that into a /release call and clear the
+// distributed lock we're trying to leak on purpose).
+func patchIssue(t *testing.T, ws, taskID, actor string, fields map[string]any) error {
+	t.Helper()
+	base := fleetDBBaseURL(t)
+	url := fmt.Sprintf("%s/api/v1/%s/issues/%s", base, ws, taskID)
+	body, err := json.Marshal(fields)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequest(http.MethodPatch, url, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("X-Actor", actor)
+	req.Header.Set("Content-Type", "application/json")
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		b, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("PATCH %s: HTTP %d: %s", url, resp.StatusCode, string(b))
+	}
+	return nil
+}
+
+// fleetDBBaseURL reads fleet-db's HTTP URL from ~/.loom/fleet-db/runtime.json.
+// The same path scanFleetDBKeys uses, but for the HTTP-side probe.
+func fleetDBBaseURL(t *testing.T) string {
+	t.Helper()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatalf("UserHomeDir: %v", err)
+	}
+	rtPath := filepath.Join(home, ".loom", "fleet-db", "runtime.json")
+	b, err := os.ReadFile(rtPath)
+	if err != nil {
+		t.Fatalf("read %s: %v", rtPath, err)
+	}
+	var rt struct {
+		URL string `json:"url"`
+	}
+	if err := json.Unmarshal(b, &rt); err != nil {
+		t.Fatalf("parse %s: %v", rtPath, err)
+	}
+	if rt.URL == "" {
+		t.Fatalf("%s: url is empty", rtPath)
+	}
+	return strings.TrimRight(rt.URL, "/")
+}
+
+// probeClaim attempts to claim taskID in workspace ws as actor. Returns
+// (holder, claimable, err): claimable=true means the claim succeeded; on
+// conflict claimable=false and holder is the existing_owner reported in
+// the error meta. Any other failure is returned as err.
+func probeClaim(t *testing.T, ws, taskID, actor string) (string, bool, error) {
+	t.Helper()
+	base := fleetDBBaseURL(t)
+	url := fmt.Sprintf("%s/api/v1/%s/issues/%s/claim", base, ws, taskID)
+	req, err := http.NewRequest(http.MethodPost, url, strings.NewReader(`{}`))
+	if err != nil {
+		return "", false, err
+	}
+	req.Header.Set("X-Actor", actor)
+	req.Header.Set("Content-Type", "application/json")
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", false, err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode == http.StatusOK {
+		return actor, true, nil
+	}
+	var errEnv struct {
+		Error struct {
+			Code    string            `json:"code"`
+			Message string            `json:"message"`
+			Meta    map[string]string `json:"meta"`
+		} `json:"error"`
+	}
+	if jerr := json.Unmarshal(body, &errEnv); jerr != nil {
+		return "", false, fmt.Errorf("HTTP %d %s: %s", resp.StatusCode, resp.Status, string(body))
+	}
+	if errEnv.Error.Code != "already_claimed" {
+		return "", false, fmt.Errorf("unexpected error code %q: %s", errEnv.Error.Code, string(body))
+	}
+	return errEnv.Error.Meta["existing_owner"], false, nil
+}
+
+// firstTaskID returns the ID of the first task in the scenario's workspace.
+// Used by leakclaim where the test seeds exactly one task.
+func firstTaskID(t *testing.T, scenario string) (string, error) {
+	t.Helper()
+	env := readScenarioEnv(t, scenario)
+	cmd := exec.Command("loom", "data", "list", "--output", "json")
+	cmd.Env = append(os.Environ(),
+		"PATH="+env["PATH"],
+		"LOOM_WORKSPACE="+env["LOOM_WORKSPACE"],
+	)
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &out
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("loom data list: %v\n%s", err, out.String())
+	}
+	// Strip slog "time=…" lines that loom emits to stdout when opening the
+	// embedded fleet-db client. The actual JSON payload starts at the first '['.
+	raw := out.Bytes()
+	idx := bytes.IndexByte(raw, '[')
+	if idx < 0 {
+		return "", fmt.Errorf("data list returned no JSON array:\n%s", out.String())
+	}
+	var arr []struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(raw[idx:], &arr); err != nil {
+		return "", fmt.Errorf("parse data list: %v\n%s", err, out.String())
+	}
+	if len(arr) == 0 {
+		return "", fmt.Errorf("no tasks in workspace")
+	}
+	return arr[0].ID, nil
+}
+
+// taskStatus returns the current status field for taskID via loom data show.
+func taskStatus(t *testing.T, scenario, taskID string) (string, error) {
+	t.Helper()
+	env := readScenarioEnv(t, scenario)
+	cmd := exec.Command("loom", "data", "show", taskID, "--output", "json")
+	cmd.Env = append(os.Environ(),
+		"PATH="+env["PATH"],
+		"LOOM_WORKSPACE="+env["LOOM_WORKSPACE"],
+	)
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &out
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("loom data show %s: %v\n%s", taskID, err, out.String())
+	}
+	raw := out.Bytes()
+	idx := bytes.IndexByte(raw, '{')
+	if idx < 0 {
+		return "", fmt.Errorf("data show returned no JSON object:\n%s", out.String())
+	}
+	var obj struct {
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(raw[idx:], &obj); err != nil {
+		return "", fmt.Errorf("parse data show: %v\n%s", err, out.String())
+	}
+	return obj.Status, nil
 }
 
 // TestWorkspaceRemoveCascade asserts that `loom workspace remove --force`

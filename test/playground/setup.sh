@@ -90,6 +90,17 @@ if [ -z "$SCENARIO" ]; then
   loom data create --title "Seed task 1 (playground)" --type task --priority 2
   loom data create --title "Seed task 2 (playground)" --type task --priority 2
   loom data create --title "Seed task 3 (playground)" --type task --priority 3
+elif [ "$SCENARIO" = "leakclaim" ]; then
+  # leakclaim wires ONLY a coder agent; the "planner" is a synthetic actor
+  # (leakclaim-planner) whose claim lock the Go test pre-stages via raw
+  # fleet-db API calls. Without a planner agent in the daemon, no restart
+  # cycle triggers resetOrphanedAgentTasks for the planner's assigned
+  # tasks, so the leaked lock persists forever — matching the TREE
+  # workspace behavior where the planner had already finished and stopped
+  # by the time the user noticed the worker was stuck.
+  loom agentdef add leakclaim-coder --role task --backend playground \
+    --repos "$(basename "$REPO")" --auto --task-filter has_design
+  loom data create --title "Leakclaim scenario seed" --type task --priority 2
 else
   # Agent name must differ from the workspace name. loom seeds the primary
   # repo checkout on a branch named after the workspace, and each agent

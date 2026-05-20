@@ -117,6 +117,16 @@ func installOpenCodeNonInteractiveMock(t *testing.T, fn func(workDir, prompt, ag
 	t.Cleanup(func() { openCodeNonInteractiveInvoker = orig })
 }
 
+// installWrapperRunMock swaps the package-level wrapperRun seam for fn
+// so tests can drive non-interactive backend invocations without
+// spawning real subprocesses. The original is restored on cleanup.
+func installWrapperRunMock(t *testing.T, fn wrapperRunFn) {
+	t.Helper()
+	orig := wrapperRun
+	wrapperRun = fn
+	t.Cleanup(func() { wrapperRun = orig })
+}
+
 // SetupMockClaudeInvoker installs a mock claude invoker for tests.
 type MockClaudeInvokerRecorder struct {
 	mu          sync.Mutex

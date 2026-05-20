@@ -10,10 +10,10 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/harness"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
@@ -52,40 +52,16 @@ func (e *ExternalBackend) InvokeInteractive(workDir, prompt, agentName string) e
 }
 
 func (e *ExternalBackend) InvokeNonInteractive(workDir, prompt, agentName string, shutdown <-chan struct{}, _ *usage.Collector) error {
-	cmd := exec.Command(e.binPath, "invoke", "--non-interactive")
-	cmd.Dir = workDir
-	cmd.Env = buildBackendEnv(workDir, agentName)
-
-	r := pipePromptToCmd(cmd, prompt)
-
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		r.Close()
-		return wrapInvocationError(fmt.Errorf("failed to create stdout pipe: %w", err), "")
-	}
-	cmd.Stderr = os.Stderr
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-
-	if err := cmd.Start(); err != nil {
-		r.Close()
-		return wrapInvocationError(fmt.Errorf("failed to start %s: %w", e.binPath, err), "")
-	}
-
-	guard := newProcessGuard(cmd.Process)
-	go func() {
-		select {
-		case <-shutdown:
-			guard.Signal(syscall.SIGTERM)
-		case <-guard.Done():
-		}
-	}()
-
-	outputTail := scanStreamOutput(stdout, func(line string) { fmt.Println(line) })
-
-	runErr := cmd.Wait()
-	guard.WaitAndMark()
-	r.Close()
-	return wrapInvocationError(runErr, outputTail)
+	return runHarness(context.Background(), shutdown, harnessInvocation{
+		BinaryName:  e.binPath,
+		Args:        []string{"invoke", "--non-interactive"},
+		WorkDir:     workDir,
+		Env:         buildBackendEnv(workDir, agentName),
+		Prompt:      prompt,
+		HarnessName: "", // unknown upstream; generic classifier
+		LineHandler: func(line string) { fmt.Println(line) },
+		RetryPolicy: harness.DefaultRetryPolicy(),
+	})
 }
 
 // Meta returns descriptive metadata about the external backend by invoking
