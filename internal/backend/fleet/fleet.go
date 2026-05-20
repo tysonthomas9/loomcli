@@ -252,8 +252,8 @@ func (b *FleetBackend) execURL(ctx context.Context, op, method, rawURL string, b
 	return apiResp, nil
 }
 
-func (b *FleetBackend) execAsActor(ctx context.Context, op, method, path string, body interface{}, actor string) error {
-	apiResp, statusCode, err := b.doRequestAsActor(ctx, method, path, body, actor)
+func (b *FleetBackend) execAsActor(ctx context.Context, op, path string, body interface{}, actor string) error {
+	apiResp, statusCode, err := b.doRequestAsActor(ctx, "POST", path, body, actor)
 	if err != nil {
 		return classifyTransportError(op, err)
 	}
@@ -599,7 +599,7 @@ func (b *FleetBackend) applyStatusUpdate(ctx context.Context, id string, params 
 		if actor == "" {
 			return false, backend.ErrValidation("Update", "assignee or configured actor is required to claim an issue")
 		}
-		return true, b.execAsActor(ctx, "Update", "POST", "/issues/"+url.PathEscape(id)+"/claim", nil, actor)
+		return true, b.execAsActor(ctx, "Update", "/issues/"+url.PathEscape(id)+"/claim", nil, actor)
 	case "open":
 		return false, b.transitionToOpen(ctx, id, current, clearAssigneeOnOpen)
 	case "closed":
@@ -637,7 +637,7 @@ func (b *FleetBackend) transitionToOpen(ctx context.Context, id string, current 
 		_, err = b.exec(ctx, "Update", "POST", "/issues/"+url.PathEscape(id)+"/undefer", nil)
 	case "in_progress":
 		if current.Assignee != "" {
-			return b.execAsActor(ctx, "Update", "POST", "/issues/"+url.PathEscape(id)+"/release", nil, current.Assignee)
+			return b.execAsActor(ctx, "Update", "/issues/"+url.PathEscape(id)+"/release", nil, current.Assignee)
 		}
 		_, err = b.exec(ctx, "Update", "PATCH", "/issues/"+url.PathEscape(id), map[string]interface{}{"status": "open"})
 	default:
@@ -801,7 +801,7 @@ func (b *FleetBackend) ReleaseClaim(ctx context.Context, id string) error {
 	if current == nil || current.Assignee == "" {
 		return nil
 	}
-	return b.execAsActor(ctx, "ReleaseClaim", "POST",
+	return b.execAsActor(ctx, "ReleaseClaim",
 		"/issues/"+url.PathEscape(id)+"/release", nil, current.Assignee)
 }
 
@@ -836,7 +836,7 @@ func (b *FleetBackend) ClaimIssueAsActor(ctx context.Context, id string, lockTTL
 	if err != nil {
 		return err
 	}
-	return b.execAsActor(ctx, "ClaimIssue", "POST", "/issues/"+url.PathEscape(id)+"/claim", body, actor)
+	return b.execAsActor(ctx, "ClaimIssue", "/issues/"+url.PathEscape(id)+"/claim", body, actor)
 }
 
 func claimIssueBody(lockTTL time.Duration) (interface{}, error) {

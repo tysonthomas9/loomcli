@@ -17,36 +17,19 @@ fi
 
 cd "$REPO_ROOT"
 
-# Find all non-test .go files under internal/, excluding vendor-like dirs.
-files=$(find internal/ -name '*.go' ! -name '*_test.go' \
-    ! -path '*/third_party/*' \
-    ! -path '*/vendor/*' \
-    ! -path '*/worktrees/*' \
-    ! -path '*/node_modules/*' \
-    2>/dev/null || true)
-
-[[ -z "$files" ]] && exit 0
-
-# Filter out generated code (// Code generated in first 3 lines).
-# Write filtered file paths to a temp file for portability (no bash 4 arrays needed).
-FILTERED_LIST=$(mktemp)
-trap 'rm -f "$FILTERED_LIST"' EXIT
-
-while IFS= read -r f; do
-    [[ -z "$f" ]] && continue
-    if head -3 "$f" | grep -q '// Code generated'; then
-        continue
-    fi
-    echo "$f"
-done <<< "$files" > "$FILTERED_LIST"
-
-[[ ! -s "$FILTERED_LIST" ]] && exit 0
-
-# Count files per directory (package), then check against threshold.
-# dirname each file, sort, count unique dirs, filter by threshold.
-violations=$(while IFS= read -r f; do dirname "$f"; done < "$FILTERED_LIST" \
-    | sort | uniq -c | sort -rn \
-    | awk -v threshold="$THRESHOLD" '$1 > threshold {print $1 "\t" $2}')
+# Count build-applicable non-test files per package. `go list` respects GOOS,
+# GOARCH, and build tags, so platform-specific alternatives are not double
+# counted as if they compiled into one package together.
+violations=$(go list -f '{{.Dir}}\t{{len .GoFiles}}' ./internal/... \
+    | while IFS=$'\t' read -r dir count; do
+        rel="${dir#$REPO_ROOT/}"
+        if [[ "$rel" == */third_party/* || "$rel" == */vendor/* || "$rel" == */worktrees/* || "$rel" == */node_modules/* ]]; then
+            continue
+        fi
+        if (( count > THRESHOLD )); then
+            printf '%d\t%s\n' "$count" "$rel"
+        fi
+    done | sort -rn)
 
 if [[ -n "$violations" ]]; then
     echo "Package size violations (threshold: $THRESHOLD):" >&2

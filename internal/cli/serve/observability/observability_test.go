@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sync/atomic"
@@ -259,7 +260,7 @@ func TestHandleObservabilityEvents_FilterBySince(t *testing.T) {
 
 	since := now.Add(-time.Hour).Format(time.RFC3339)
 	handler := HandleEvents(dir)
-	req := httptest.NewRequest("GET", "/api/observability/events?since="+since, nil)
+	req := httptest.NewRequest("GET", "/api/observability/events?since="+url.QueryEscape(since), nil)
 	rec := httptest.NewRecorder()
 	handler(rec, req)
 

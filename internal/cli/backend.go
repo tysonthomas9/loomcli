@@ -7,7 +7,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/tysonthomas9/loomcli/internal/backendnames"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
@@ -25,10 +24,12 @@ type Backend interface {
 
 var (
 	backends      = make(map[string]Backend)
-	activeBackend = backendnames.Codex
+	activeBackend = defaultBackendName
 	backendFlag   string // set by --backend persistent flag in root.go
 	backendMu     sync.RWMutex
 )
+
+const defaultBackendName = "codex"
 
 // RegisterBackend adds a backend to the registry by its Name().
 // Panics if b is nil (programming error).
@@ -88,7 +89,7 @@ func ResolveBackendName() string {
 	if env := os.Getenv("LOOM_BACKEND"); env != "" {
 		return env
 	}
-	return backendnames.Codex
+	return defaultBackendName
 }
 
 // ResolveAndSetBackend resolves the backend name from the precedence chain

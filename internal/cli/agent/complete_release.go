@@ -2,7 +2,7 @@ package agent
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
@@ -36,6 +36,6 @@ func releaseClaimOnComplete(worktreePath string) {
 	ctx, cancel := context.WithTimeout(context.Background(), releaseClaimTimeout)
 	defer cancel()
 	if relErr := releaser.ReleaseClaim(ctx, info.TaskID); relErr != nil {
-		log.Printf("[complete] warning: release claim on %s failed (continuing): %v", info.TaskID, relErr)
+		slog.Warn("release claim on complete failed; continuing", "task_id", info.TaskID, "err", relErr)
 	}
 }

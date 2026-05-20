@@ -14,6 +14,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli/daemon/supervisor"
+	"github.com/tysonthomas9/loomcli/internal/domain"
 )
 
 // AgentIPCRequest is sent by an agent subprocess to the daemon IPC socket.
@@ -304,11 +305,51 @@ func (d *Daemon) validateIPCLease(ctx context.Context, req AgentIPCRequest) (Age
 	}
 	lease, err := d.store.AgentLeases().Heartbeat(ctx, d.sup.WorkspaceID, req.LeaseID, req.LeaseToken, 2*time.Minute)
 	if err != nil {
+		if errors.Is(err, domain.ErrAlreadyExists) {
+			slog.Warn("agent lease heartbeat returned already exists; verifying via get",
+				"workspace", d.sup.WorkspaceID,
+				"lease_id", req.LeaseID,
+				"err", err,
+			)
+			verified, getErr := d.store.AgentLeases().Get(ctx, d.sup.WorkspaceID, req.LeaseID)
+			if getErr != nil {
+				return ipcErrorResponse(getErr), false
+			}
+			return validateLeaseRecord(verified, req)
+		}
 		return ipcErrorResponse(err), false
+	}
+	return validateLeaseRecord(lease, req)
+}
+
+func validateLeaseRecord(lease *domain.AgentLease, req AgentIPCRequest) (AgentIPCResponse, bool) {
+	if lease == nil {
+		return AgentIPCResponse{
+			Error: "lease not found",
+			Kind:  string(backend.KindConflict),
+		}, false
 	}
 	if lease.SessionID != req.SessionID || lease.AgentID != req.AgentName {
 		return AgentIPCResponse{
 			Error: "lease does not match IPC session or agent",
+			Kind:  string(backend.KindConflict),
+		}, false
+	}
+	if lease.Token != req.LeaseToken {
+		return AgentIPCResponse{
+			Error: "lease token does not match IPC credentials",
+			Kind:  string(backend.KindConflict),
+		}, false
+	}
+	if lease.Status != domain.AgentLeaseActive {
+		return AgentIPCResponse{
+			Error: "lease is not active",
+			Kind:  string(backend.KindConflict),
+		}, false
+	}
+	if time.Now().After(lease.ExpiresAt) {
+		return AgentIPCResponse{
+			Error: "lease expired",
 			Kind:  string(backend.KindConflict),
 		}, false
 	}
