@@ -188,6 +188,17 @@ func runWorkspaceOpsEnsureRuntime(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("ensure local runtime: %w", err)
 	}
 
+	// Workspace-scoped readiness probe. Fast-fails with the actual reason
+	// (e.g. "workspace not registered") instead of letting
+	// waitForWorkspaceOpsDaemon spin until the context deadline elapses and
+	// surface only the unhelpful "context deadline exceeded".
+	if rt, rtErr := local.ReadRuntimeStatus(ctx, initial.Daemon.DataDir); rtErr == nil &&
+		rt != nil && rt.Runtime != nil && rt.Runtime.URL != "" {
+		if err := local.WaitForWorkspaceReady(ctx, rt.Runtime.URL, key); err != nil {
+			return fmt.Errorf("ensure local runtime: %w", err)
+		}
+	}
+
 	status, err := waitForWorkspaceOpsDaemon(ctx, key, initial, loadWorkspaceOpsStatus)
 	if err != nil {
 		return fmt.Errorf("wait for workspace daemon: %w", err)
