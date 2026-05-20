@@ -235,6 +235,7 @@ func TestingGetDefaultDeps() *Deps {
 type fleetDBIssueBackend struct{}
 
 var _ backend.IssueBackend = (*fleetDBIssueBackend)(nil)
+var _ backend.ClaimReleaser = (*fleetDBIssueBackend)(nil)
 
 func newFleetDBIssueBackend() backend.IssueBackend {
 	return &fleetDBIssueBackend{}
@@ -378,6 +379,19 @@ func (b *fleetDBIssueBackend) Update(ctx context.Context, id string, params back
 func (b *fleetDBIssueBackend) ClaimIssue(ctx context.Context, id string, lockTTL time.Duration) error {
 	return b.withBackend(ctx, "ClaimIssue", func(ib backend.IssueBackend) error {
 		return ib.ClaimIssue(ctx, id, lockTTL)
+	})
+}
+
+// ReleaseClaim delegates to the underlying fleet backend (which implements
+// backend.ClaimReleaser). Required so `loom complete` can release a planner's
+// leaked claim lock when running outside the daemon-supervised subprocess
+// path (LOOM-1).
+func (b *fleetDBIssueBackend) ReleaseClaim(ctx context.Context, id string) error {
+	return b.withBackend(ctx, "ReleaseClaim", func(ib backend.IssueBackend) error {
+		if r, ok := ib.(backend.ClaimReleaser); ok {
+			return r.ReleaseClaim(ctx, id)
+		}
+		return nil
 	})
 }
 

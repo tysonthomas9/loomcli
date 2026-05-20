@@ -42,6 +42,7 @@ type FleetBackend struct {
 // Compile-time interface check.
 var _ backend.IssueBackend = (*FleetBackend)(nil)
 var _ backend.CursorMutationBackend = (*FleetBackend)(nil)
+var _ backend.ClaimReleaser = (*FleetBackend)(nil)
 
 // apiResponse is the generic JSON envelope returned by fleet server endpoints.
 type apiResponse struct {
@@ -611,6 +612,11 @@ func (b *FleetBackend) applyStatusUpdate(ctx context.Context, id string, params 
 		}
 		return false, b.deferIssue(ctx, id, until)
 	case "blocked", "review":
+		// TODO(LOOM-1): this PATCH-only path leaks the claim lock when
+		// current.Status == "in_progress" (mirrors the planner Step 5
+		// `--status review --assignee=""` flow). A follow-up should call
+		// /release symmetrically with the "open" branch above. Out of
+		// scope for the LOOM-1 creation-side fix.
 		_, err := b.exec(ctx, "Update", "PATCH", "/issues/"+url.PathEscape(id), map[string]interface{}{"status": target})
 		return false, err
 	default:
@@ -774,6 +780,29 @@ func containsString(values []string, needle string) bool {
 		}
 	}
 	return false
+}
+
+// ReleaseClaim drops the claim lock on an issue without changing its status.
+// Used by `loom complete` so planners that finished writing a design but did
+// not transition status out of `in_progress` still release the lock (LOOM-1).
+//
+// Calls POST /issues/<id>/release as the issue's current assignee (mirrors
+// the in_progress→open transition path at applyStatusUpdate). Idempotent:
+// returns nil if the issue has no current assignee (no lock to release).
+// Transport/HTTP errors are surfaced so callers can log them.
+func (b *FleetBackend) ReleaseClaim(ctx context.Context, id string) error {
+	if id == "" {
+		return backend.ErrValidation("ReleaseClaim", "id must not be empty")
+	}
+	current, err := b.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	if current == nil || current.Assignee == "" {
+		return nil
+	}
+	return b.execAsActor(ctx, "ReleaseClaim", "POST",
+		"/issues/"+url.PathEscape(id)+"/release", nil, current.Assignee)
 }
 
 // ClaimIssue atomically claims an issue via the fleet claim endpoint.

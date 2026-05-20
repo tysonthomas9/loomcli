@@ -33,6 +33,7 @@ type ipcIssueBackend struct {
 
 // Compile-time interface check.
 var _ backend.IssueBackend = (*ipcIssueBackend)(nil)
+var _ backend.ClaimReleaser = (*ipcIssueBackend)(nil)
 
 // newIPCIssueBackend returns an IPC-aware decorator.
 func newIPCIssueBackend(ipc ipcMutator, direct backend.IssueBackend) *ipcIssueBackend {
@@ -54,6 +55,18 @@ func (b *ipcIssueBackend) ClaimIssue(ctx context.Context, id string, lockTTL tim
 // Close routes through IPC.
 func (b *ipcIssueBackend) Close(ctx context.Context, id string, params backend.CloseParams) (*backend.CloseResult, error) {
 	return b.ipc.Complete(id, params)
+}
+
+// ReleaseClaim bypasses IPC and goes directly to the underlying backend.
+// Release is idempotent and authenticates by actor at the fleet layer, so
+// daemon mediation is unnecessary. The daemon IPC protocol does not yet
+// carry a release op; if a future protocol bump adds IPCOpReleaseClaim
+// this can be re-routed through b.ipc.
+func (b *ipcIssueBackend) ReleaseClaim(ctx context.Context, id string) error {
+	if r, ok := b.direct.(backend.ClaimReleaser); ok {
+		return r.ReleaseClaim(ctx, id)
+	}
+	return nil
 }
 
 // --- Direct backend methods ---

@@ -464,6 +464,206 @@ func TestWorkspaceRemoveCascade(t *testing.T) {
 	}
 }
 
+// cleanParentEnv returns os.Environ() with daemon-supervisor- and
+// agent-session-specific vars stripped. When this test is itself running
+// inside a loom-managed worker, the parent process exposes
+// LOOM_DAEMON_SOCKET + a lease token; subprocesses would inherit them and
+// route mutations through IPC instead of straight to the playground's
+// fleet server. Strip them so each subprocess sees a clean fleet client.
+func cleanParentEnv() []string {
+	stripped := map[string]struct{}{
+		"LOOM_DAEMON_SOCKET":                {},
+		"LOOM_AGENT_LEASE_ID":               {},
+		"LOOM_AGENT_LEASE_TOKEN":            {},
+		"LOOM_AGENT_OWNERSHIP_LEASE_ID":     {},
+		"LOOM_AGENT_OWNERSHIP_FENCING_TOKEN": {},
+		"LOOM_SESSION_ID":                   {},
+		"LOOM_ASSIGNED_TASK_ID":             {},
+		"LOOM_ROLE":                         {},
+		"LOOM_ROLE_TASK_FILTER":             {},
+		"LOOM_WORKTREE_PATH":                {},
+		"LOOM_EVENTS_DIR":                   {},
+		"LOOM_YIELD_FILE":                   {},
+		"LOOM_AGENT_NAME":                   {},
+		"LOOM_WORKSPACE":                    {},
+		"LOOM_FLEET_ACTOR":                  {},
+	}
+	out := make([]string, 0, len(os.Environ()))
+	for _, kv := range os.Environ() {
+		eq := strings.IndexByte(kv, '=')
+		if eq < 0 {
+			out = append(out, kv)
+			continue
+		}
+		if _, drop := stripped[kv[:eq]]; drop {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return out
+}
+
+// runLoomAsActor runs `loom <args...>` with the playground env applied
+// plus a LOOM_FLEET_ACTOR override (so different fleet identities can drive
+// the same workspace from one test). Returns stdout/stderr + the exit error
+// so the caller can assert on either success or expected failure.
+func runLoomAsActor(t *testing.T, scenario, actor string, args ...string) (string, error) {
+	t.Helper()
+	env := readScenarioEnv(t, scenario)
+	cmd := exec.Command("loom", args...)
+	procEnv := append(cleanParentEnv(),
+		"PATH="+env["PATH"],
+		"LOOM_WORKSPACE="+env["LOOM_WORKSPACE"],
+		"LOOM_FLEET_ACTOR="+actor,
+		"LOOM_AGENT_NAME="+actor,
+	)
+	cmd.Env = procEnv
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &out
+	err := cmd.Run()
+	return out.String(), err
+}
+
+// TestPlaygroundPlannerLeaksClaimLock pre-stages the leaked-lock state from
+// LOOM-1: an issue claimed by `planner` actor that received `--design` but
+// no status transition out of `in_progress`. The lock is still held.
+//
+// Two-phase assertion:
+//
+//  1. Pre-fix shape: a downstream `worker` actor cannot claim the issue —
+//     fleet-db returns conflict already_claimed.
+//  2. Post-fix shape: after `loom complete` runs in a worktree whose
+//     `.agent.lock` references the leaked issue (and is invoked as the
+//     planner actor), the claim is released and `worker` can claim cleanly.
+//
+// Negative control: on the parent commit of the LOOM-1 fix, Phase 2 must
+// FAIL (worker still can't claim). The fix author should record the
+// pre-fix commit hash here when merging.
+//
+// Pre-fix parent commit: <fill in at merge time>
+func TestPlaygroundPlannerLeaksClaimLock(t *testing.T) {
+	requireServe(t)
+
+	const scenario = "lockleak"
+
+	// Pre-clean any stale state from earlier interrupted runs.
+	_ = exec.Command("bash",
+		filepath.Join(hereDir(t), "teardown.sh"), scenario).Run()
+
+	runScenarioScript(t, "setup.sh", []string{scenario}, nil)
+	t.Cleanup(func() {
+		_ = exec.Command("bash",
+			filepath.Join(hereDir(t), "teardown.sh"), scenario).Run()
+	})
+
+	// Step 1: create the task as the planner actor (open status).
+	createOut, err := runLoomAsActor(t, scenario, "planner",
+		"data", "create",
+		"--title", "Lock leak repro",
+		"--type", "task",
+		"--priority", "2",
+		"--status", "open",
+		"--output", "json",
+	)
+	if err != nil {
+		t.Fatalf("loom data create: %v\n%s", err, createOut)
+	}
+	var created struct {
+		ID string `json:"id"`
+		// fall back path when the wire shape is the issue itself
+		Issue struct {
+			ID string `json:"id"`
+		} `json:"issue"`
+	}
+	if err := json.Unmarshal([]byte(createOut), &created); err != nil {
+		// Some create outputs wrap in {"data": {...}}. Strip down to
+		// the first ID-looking field via a permissive re-parse.
+		idMatch := regexp.MustCompile(`"id"\s*:\s*"([^"]+)"`).FindStringSubmatch(createOut)
+		if len(idMatch) < 2 {
+			t.Fatalf("could not parse created task ID from output: %s", createOut)
+		}
+		created.ID = idMatch[1]
+	}
+	taskID := created.ID
+	if taskID == "" {
+		taskID = created.Issue.ID
+	}
+	if taskID == "" {
+		t.Fatalf("created task ID is empty; output: %s", createOut)
+	}
+
+	// Step 2: claim the task as planner — this puts the claim lock on
+	// fleet-db with planner holding it. Use `loom data claim` (which calls
+	// POST /issues/<id>/claim) so the lock state is exactly the one the
+	// real planner pre-claim would produce.
+	if out, err := runLoomAsActor(t, scenario, "planner",
+		"data", "claim", taskID,
+	); err != nil {
+		t.Fatalf("planner claim: %v\n%s", err, out)
+	}
+
+	// Step 3: planner writes the design but no status transition. This is
+	// the LOOM-1 bug shape: the lock leaks because --design alone doesn't
+	// trigger release.
+	if out, err := runLoomAsActor(t, scenario, "planner",
+		"data", "update", taskID, "--design", "Lock leak test design",
+	); err != nil {
+		t.Fatalf("planner --design write: %v\n%s", err, out)
+	}
+
+	// Phase A — pre-fix assertion: worker cannot claim.
+	out, claimErr := runLoomAsActor(t, scenario, "worker",
+		"data", "claim", taskID,
+	)
+	if claimErr == nil {
+		t.Skipf("worker claim succeeded before fix is applied — fleet-db side may have auto-released. Output:\n%s", out)
+	}
+	if !strings.Contains(strings.ToLower(out), "conflict") && !strings.Contains(strings.ToLower(out), "already_claimed") {
+		t.Fatalf("worker claim failed for an unexpected reason — wanted conflict/already_claimed:\n%s", out)
+	}
+
+	// Step 4: simulate the planner agent exiting. Write a synthetic
+	// `.agent.lock` to a temp worktree dir whose TaskID is the leaked
+	// task, then invoke `loom complete` as the planner actor.
+	tmp := t.TempDir()
+	lock := map[string]interface{}{
+		"pid":        os.Getpid(),
+		"command":    "plan",
+		"agent_name": "planner",
+		"task_id":    taskID,
+		"started_at": time.Now().Format(time.RFC3339),
+	}
+	lockBytes, _ := json.MarshalIndent(lock, "", "  ")
+	if err := os.WriteFile(filepath.Join(tmp, ".agent.lock"), lockBytes, 0o600); err != nil {
+		t.Fatalf("write synthetic .agent.lock: %v", err)
+	}
+	env := readScenarioEnv(t, scenario)
+	completeCmd := exec.Command("loom", "complete")
+	completeCmd.Env = append(cleanParentEnv(),
+		"PATH="+env["PATH"],
+		"LOOM_WORKSPACE="+env["LOOM_WORKSPACE"],
+		"LOOM_FLEET_ACTOR=planner",
+		"LOOM_AGENT_NAME=planner",
+		"LOOM_WORKTREE_PATH="+tmp,
+	)
+	var completeOut bytes.Buffer
+	completeCmd.Stdout = &completeOut
+	completeCmd.Stderr = &completeOut
+	if err := completeCmd.Run(); err != nil {
+		t.Fatalf("loom complete: %v\n%s", err, completeOut.String())
+	}
+
+	// Phase B — post-fix assertion: worker can now claim.
+	postOut, postErr := runLoomAsActor(t, scenario, "worker",
+		"data", "claim", taskID,
+	)
+	if postErr != nil {
+		t.Fatalf("worker still cannot claim after planner loom complete — LOOM-1 fix appears broken:\nloom complete output was:\n%s\nworker claim output:\n%s",
+			completeOut.String(), postOut)
+	}
+}
+
 // scanFleetDBKeys connects to fleet-db's embedded Redis (address from
 // ~/.loom/fleet-db/runtime.json) and returns every key matching
 // `fleet-db:<workspace>:*`. Mirrors the SCAN logic from teardown.sh's

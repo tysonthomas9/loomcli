@@ -212,6 +212,24 @@ func (t *tracedIssueBackend) ClaimIssue(ctx context.Context, id string, lockTTL 
 	return err
 }
 
+// ReleaseClaim forwards to the inner backend's ClaimReleaser implementation,
+// if any. Required so the trace-decorated default backend still surfaces
+// the LOOM-1 release path to `loom complete`. No-op when the inner backend
+// doesn't implement ClaimReleaser (e.g. API/agentipc/mocks).
+func (t *tracedIssueBackend) ReleaseClaim(ctx context.Context, id string) error {
+	ctx, span := t.startSpan(ctx, "ReleaseClaim",
+		attribute.String("loom.task_id", id),
+	)
+	r, ok := t.inner.(backend.ClaimReleaser)
+	if !ok {
+		endSpan(span, nil)
+		return nil
+	}
+	err := r.ReleaseClaim(ctx, id)
+	endSpan(span, err)
+	return err
+}
+
 func (t *tracedIssueBackend) ClaimIssueAsActor(ctx context.Context, id string, lockTTL time.Duration, actor string) error {
 	ctx, span := t.startSpan(ctx, "ClaimIssueAsActor",
 		attribute.String("loom.task_id", id),

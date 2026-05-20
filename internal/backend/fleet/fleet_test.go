@@ -1077,6 +1077,130 @@ func TestUpdate_LabelOnlyUsesLabelEndpoint(t *testing.T) {
 	}
 }
 
+// --- ReleaseClaim tests ---
+
+// TestFleetBackend_ReleaseClaim_HTTPShape verifies that ReleaseClaim:
+//   - issues POST /issues/<id>/release
+//   - uses the current assignee in the X-Actor header (not the configured actor)
+//   - returns nil on a 2xx response
+func TestFleetBackend_ReleaseClaim_HTTPShape(t *testing.T) {
+	var sawRelease bool
+	var releaseActor string
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/issues/test-1"):
+			respondOK(w, types.Issue{
+				ID:        "test-1",
+				Title:     "T",
+				Status:    types.StatusInProgress,
+				Assignee:  "planner",
+				CreatedAt: time.Now(),
+				UpdatedAt: time.Now(),
+			})
+		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/issues/test-1/deps"):
+			respondOK(w, map[string]interface{}{"dependencies": []interface{}{}})
+		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/issues/test-1/comments"):
+			respondOK(w, []interface{}{})
+		case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/issues/test-1/release"):
+			sawRelease = true
+			releaseActor = r.Header.Get("X-Actor")
+			respondOK(w, json.RawMessage(`{}`))
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			respondErr(w, http.StatusNotFound, "not found")
+		}
+	})
+	defer ts.Close()
+
+	if err := fb.ReleaseClaim(context.Background(), "test-1"); err != nil {
+		t.Fatalf("ReleaseClaim: %v", err)
+	}
+	if !sawRelease {
+		t.Fatal("expected /release endpoint to be called")
+	}
+	if releaseActor != "planner" {
+		t.Errorf("X-Actor = %q, want planner", releaseActor)
+	}
+}
+
+// TestFleetBackend_ReleaseClaim_EmptyAssigneeIsNoOp verifies the
+// idempotent fast-path: when the issue has no current assignee, we
+// skip the /release call entirely.
+func TestFleetBackend_ReleaseClaim_EmptyAssigneeIsNoOp(t *testing.T) {
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/issues/test-1"):
+			respondOK(w, types.Issue{
+				ID:        "test-1",
+				Title:     "T",
+				Status:    types.StatusOpen,
+				Assignee:  "",
+				CreatedAt: time.Now(),
+				UpdatedAt: time.Now(),
+			})
+		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/issues/test-1/deps"):
+			respondOK(w, map[string]interface{}{"dependencies": []interface{}{}})
+		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/issues/test-1/comments"):
+			respondOK(w, []interface{}{})
+		case strings.HasSuffix(r.URL.Path, "/issues/test-1/release"):
+			t.Fatalf("/release should not be called when assignee is empty")
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	})
+	defer ts.Close()
+
+	if err := fb.ReleaseClaim(context.Background(), "test-1"); err != nil {
+		t.Fatalf("ReleaseClaim: %v", err)
+	}
+}
+
+// TestFleetBackend_ReleaseClaim_PropagatesError verifies that a 409 from
+// /release surfaces as an error (caller will log it).
+func TestFleetBackend_ReleaseClaim_PropagatesError(t *testing.T) {
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/issues/test-1"):
+			respondOK(w, types.Issue{
+				ID:        "test-1",
+				Title:     "T",
+				Status:    types.StatusInProgress,
+				Assignee:  "planner",
+				CreatedAt: time.Now(),
+				UpdatedAt: time.Now(),
+			})
+		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/issues/test-1/deps"):
+			respondOK(w, map[string]interface{}{"dependencies": []interface{}{}})
+		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/issues/test-1/comments"):
+			respondOK(w, []interface{}{})
+		case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/issues/test-1/release"):
+			respondErr(w, http.StatusConflict, "lock held by another actor")
+		}
+	})
+	defer ts.Close()
+
+	err := fb.ReleaseClaim(context.Background(), "test-1")
+	if err == nil {
+		t.Fatal("expected error from 409 /release, got nil")
+	}
+}
+
+// TestFleetBackend_ReleaseClaim_EmptyIDRejected verifies input validation.
+func TestFleetBackend_ReleaseClaim_EmptyIDRejected(t *testing.T) {
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("no HTTP call should be made for empty id; saw %s %s", r.Method, r.URL.Path)
+	})
+	defer ts.Close()
+
+	err := fb.ReleaseClaim(context.Background(), "")
+	if err == nil {
+		t.Fatal("expected validation error for empty id, got nil")
+	}
+	if !backend.IsKind(err, backend.KindValidation) {
+		t.Errorf("expected KindValidation, got %v", err)
+	}
+}
+
 // --- ClaimIssue tests ---
 
 func TestClaimIssue_HappyPath(t *testing.T) {
