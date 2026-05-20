@@ -342,6 +342,10 @@ func startDaemonSockets(daemon *Daemon, projectDir string, config *cfgpkg.Daemon
 		fmt.Fprintf(os.Stderr, "Warning: agent IPC socket unavailable: %v\n", err)
 	} else {
 		daemon.sup.IpcSocketPath = ipcSocketPath
+		// Re-publish the supervisor Node labels so daemonregistry
+		// consumers see loom.daemon.socket. The initial Create in
+		// startControlPlaneNode runs before the IPC socket is bound.
+		daemon.sup.RefreshNodeLabels()
 	}
 }
 
