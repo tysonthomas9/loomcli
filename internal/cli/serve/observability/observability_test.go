@@ -247,7 +247,12 @@ func TestHandleObservabilityEvents_FilterByAgent(t *testing.T) {
 
 func TestHandleObservabilityEvents_FilterBySince(t *testing.T) {
 	dir := t.TempDir()
-	now := time.Now()
+	// UTC throughout: time.RFC3339 emits a '+' for non-UTC offsets, and
+	// inlining that string into a URL query lets net/url decode the '+'
+	// as a space — the handler then rejects the "since" parameter as
+	// non-RFC3339. Using UTC produces a trailing 'Z' that round-trips
+	// through URL encoding cleanly.
+	now := time.Now().UTC()
 
 	e1, _ := events.NewEvent(events.TaskCompleted, "agent1", "coder", "", events.TaskCompletedData{TaskID: "t1"})
 	e1.Timestamp = now
