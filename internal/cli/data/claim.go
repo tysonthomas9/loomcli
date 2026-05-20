@@ -1,14 +1,15 @@
 package data
 
 import (
+	"context"
+	"fmt"
 	"os"
+	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 )
 
-// claimActor is captured for command-line parity with the local-mode claim
-// command. Backend implementations derive the effective actor from their
-// configured environment/session.
 var claimActor string
 
 var claimCmd = &cobra.Command{
@@ -21,13 +22,27 @@ var claimCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		if err := ib.ClaimIssue(ctx, args[0], 0); err != nil {
-			return err
+		id := args[0]
+		actor := strings.TrimSpace(claimActor)
+		if actor != "" {
+			actorBackend, ok := ib.(interface {
+				ClaimIssueAsActor(context.Context, string, time.Duration, string) error
+			})
+			if !ok {
+				return fmt.Errorf("--actor is not supported by the active backend (%s); the claim lock would be acquired under the CLI's identity instead", ib.BackendName())
+			}
+			if err := actorBackend.ClaimIssueAsActor(ctx, id, 0, actor); err != nil {
+				return err
+			}
+		} else {
+			if err := ib.ClaimIssue(ctx, id, 0); err != nil {
+				return err
+			}
 		}
-		return printMessageResult(os.Stdout, "claimed "+args[0], outputFormat)
+		return printMessageResult(os.Stdout, "claimed "+id, outputFormat)
 	},
 }
 
 func init() {
-	claimCmd.Flags().StringVar(&claimActor, "actor", "", "Actor attempting the claim")
+	claimCmd.Flags().StringVar(&claimActor, "actor", "", "Override the actor identity used to acquire the claim lock (defaults to the CLI's configured actor)")
 }
