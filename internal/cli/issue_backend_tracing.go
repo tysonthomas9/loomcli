@@ -256,6 +256,26 @@ func (t *tracedIssueBackend) ClaimIssueAsActor(ctx context.Context, id string, l
 	return err
 }
 
+// ReleaseClaim forwards to the inner backend when it implements
+// backend.ClaimReleaser (capability-detected — only fleet-db has an explicit
+// claim lock distinct from issue status). Wrapped in a span like the other
+// mutation methods. See LOOM-1: this delegation must exist or `loom complete`'s
+// release-on-exit path is silently a no-op when tracing is enabled (the
+// default for the CLI).
+func (t *tracedIssueBackend) ReleaseClaim(ctx context.Context, id string) error {
+	ctx, span := t.startSpan(ctx, "ReleaseClaim",
+		attribute.String("loom.task_id", id),
+	)
+	r, ok := t.inner.(backend.ClaimReleaser)
+	if !ok {
+		endSpan(span, nil)
+		return nil
+	}
+	err := r.ReleaseClaim(ctx, id)
+	endSpan(span, err)
+	return err
+}
+
 func (t *tracedIssueBackend) DeferIssue(ctx context.Context, id string, until time.Time) error {
 	ctx, span := t.startSpan(ctx, "DeferIssue",
 		attribute.String("loom.task_id", id),

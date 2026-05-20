@@ -9,6 +9,28 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/backend"
 )
 
+// releaserMock embeds MockIssueBackend and adds ReleaseClaim so we can
+// exercise ipcIssueBackend's ClaimReleaser delegation. MockIssueBackend
+// (clitest) intentionally does not implement ClaimReleaser — LOOM-1 keeps
+// the interface optional, capability-detected via type assertion.
+type releaserMock struct {
+	*MockIssueBackend
+	calls    int
+	lastID   string
+	releaseE error
+}
+
+var _ backend.ClaimReleaser = (*releaserMock)(nil)
+
+func (r *releaserMock) ReleaseClaim(_ context.Context, id string) error {
+	if r.MockIssueBackend == nil {
+		r.MockIssueBackend = NewMockIssueBackend()
+	}
+	r.calls++
+	r.lastID = id
+	return r.releaseE
+}
+
 // mockIPCMutator implements ipcMutator for testing the decorator logic.
 type mockIPCMutator struct {
 	claimFn       func(issueID string, lockTTL time.Duration) error
@@ -329,6 +351,47 @@ func TestIPCIssueBackend_SearchIssues_DelegatesToDirectBackend(t *testing.T) {
 	}
 	if !fb.Called("SearchIssues") {
 		t.Error("direct SearchIssues should have been called")
+	}
+}
+
+// TestIPCIssueBackend_ReleaseClaim_DelegatesToDirectBackend asserts that
+// ReleaseClaim bypasses the IPC mutator and delegates to the underlying
+// backend when it implements ClaimReleaser. LOOM-1's IPC path intentionally
+// skips daemon mediation because /release is idempotent and authenticates
+// by actor at the fleet layer; mediating would require a daemon-protocol
+// bump that this bug fix avoids.
+func TestIPCIssueBackend_ReleaseClaim_DelegatesToDirectBackend(t *testing.T) {
+	ipc := &mockIPCMutator{
+		claimFn: func(string, time.Duration) error {
+			t.Fatal("IPC Claim should not be touched by ReleaseClaim")
+			return nil
+		},
+	}
+	direct := &releaserMock{}
+	b := newIPCIssueBackend(ipc, direct)
+
+	if err := b.ReleaseClaim(context.Background(), "issue-99"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if direct.calls != 1 {
+		t.Errorf("direct.ReleaseClaim calls = %d, want 1", direct.calls)
+	}
+	if direct.lastID != "issue-99" {
+		t.Errorf("direct.ReleaseClaim id = %q, want issue-99", direct.lastID)
+	}
+}
+
+// TestIPCIssueBackend_ReleaseClaim_NoopWhenDirectDoesNotImplement asserts the
+// graceful degradation: if the direct backend doesn't implement ClaimReleaser
+// (api / agentipc / plain mock), the call is a silent no-op rather than a
+// panic or wire error.
+func TestIPCIssueBackend_ReleaseClaim_NoopWhenDirectDoesNotImplement(t *testing.T) {
+	ipc := &mockIPCMutator{}
+	direct := NewMockIssueBackend() // does not implement ClaimReleaser
+	b := newIPCIssueBackend(ipc, direct)
+
+	if err := b.ReleaseClaim(context.Background(), "issue-99"); err != nil {
+		t.Errorf("unexpected error from no-op release: %v", err)
 	}
 }
 

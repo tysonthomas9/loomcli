@@ -42,6 +42,7 @@ type FleetBackend struct {
 // Compile-time interface check.
 var _ backend.IssueBackend = (*FleetBackend)(nil)
 var _ backend.CursorMutationBackend = (*FleetBackend)(nil)
+var _ backend.ClaimReleaser = (*FleetBackend)(nil)
 
 // apiResponse is the generic JSON envelope returned by fleet server endpoints.
 type apiResponse struct {
@@ -156,7 +157,9 @@ func (b *FleetBackend) doRequest(ctx context.Context, method, path string, body 
 	return apiResp, resp.StatusCode, nil
 }
 
-func (b *FleetBackend) doRequestAsActor(ctx context.Context, method, path string, body interface{}, actor string) (*apiResponse, int, error) {
+// doRequestAsActor performs a POST request with the X-Actor header overridden.
+// Only POST is needed in practice (claim / release endpoints); see execAsActor.
+func (b *FleetBackend) doRequestAsActor(ctx context.Context, path string, body interface{}, actor string) (*apiResponse, int, error) {
 	b.mu.RLock()
 	auth := fleethttp.Auth{BearerToken: b.authToken, APIKey: b.apiKey, Actor: b.actor}
 	b.mu.RUnlock()
@@ -164,7 +167,7 @@ func (b *FleetBackend) doRequestAsActor(ctx context.Context, method, path string
 		auth.Actor = actor
 	}
 
-	req, err := fleethttp.BuildJSONRequest(ctx, method, b.baseWorkspaceURL+path, auth, body)
+	req, err := fleethttp.BuildJSONRequest(ctx, "POST", b.baseWorkspaceURL+path, auth, body)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -253,8 +256,11 @@ func (b *FleetBackend) execURL(ctx context.Context, op, method, rawURL string, b
 	return apiResp, nil
 }
 
+// execAsActor wraps doRequestAsActor with standard error classification.
+// Only POST endpoints (claim / release) use this path; the method is therefore
+// hardcoded rather than parameterized.
 func (b *FleetBackend) execAsActor(ctx context.Context, op, path string, body interface{}, actor string) error {
-	apiResp, statusCode, err := b.doRequestAsActor(ctx, http.MethodPost, path, body, actor)
+	apiResp, statusCode, err := b.doRequestAsActor(ctx, path, body, actor)
 	if err != nil {
 		return classifyTransportError(op, err)
 	}
@@ -613,11 +619,39 @@ func (b *FleetBackend) applyStatusUpdate(ctx context.Context, id string, params 
 		}
 		return false, b.deferIssue(ctx, id, until)
 	case "blocked", "review":
+		// TODO(LOOM-1): this PATCH-only path leaks the claim lock when
+		// current.Status == "in_progress" (planner's Step 5
+		// "--status review --assignee=\"\"" flow). A symmetric /release call
+		// belongs here, but is deferred to keep this bug fix focused on the
+		// loom-complete path described in LOOM-1.
 		_, err := b.exec(ctx, "Update", "PATCH", "/issues/"+url.PathEscape(id), map[string]interface{}{"status": target})
 		return false, err
 	default:
 		return false, backend.ErrValidation("Update", "unsupported status for FleetDB workflow: "+target)
 	}
+}
+
+// ReleaseClaim drops the claim lock on an issue without changing its status.
+// Used by `loom complete` so planners that wrote a design but did not
+// transition status out of `in_progress` still release the lock — see LOOM-1.
+//
+// Calls POST /issues/<id>/release as the issue's current assignee (mirrors
+// the in_progress→open transition path in transitionToOpen). Idempotent:
+// returns nil when the issue has no current assignee (nothing to release).
+// Transport / HTTP errors propagate so the caller can log them.
+func (b *FleetBackend) ReleaseClaim(ctx context.Context, id string) error {
+	if id == "" {
+		return backend.ErrValidation("ReleaseClaim", "id must not be empty")
+	}
+	current, err := b.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	if current == nil || current.Assignee == "" {
+		return nil
+	}
+	return b.execAsActor(ctx, "ReleaseClaim",
+		"/issues/"+url.PathEscape(id)+"/release", nil, current.Assignee)
 }
 
 func (b *FleetBackend) transitionToOpen(ctx context.Context, id string, current *backend.IssueDetailData, clearAssignee bool) error {
