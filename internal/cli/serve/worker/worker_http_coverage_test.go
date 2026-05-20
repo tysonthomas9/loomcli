@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"log"
@@ -224,5 +225,101 @@ func TestWorkerRegistrationInterfacesAreAssignable(t *testing.T) {
 	case <-ch:
 		t.Fatalf("shutdown channel closed without a signal")
 	case <-time.After(10 * time.Millisecond):
+	}
+}
+
+func TestLogForwarderFlushPostsBufferedData(t *testing.T) {
+	var gotPath, gotAuth, gotType string
+	var gotBody []byte
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		gotPath = r.URL.Path
+		gotAuth = r.Header.Get("Authorization")
+		gotType = r.Header.Get("Content-Type")
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("ReadAll body: %v", err)
+		}
+		gotBody = body
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	lf := &LogForwarder{
+		controlPlaneURL: server.URL,
+		workerID:        "worker-logs",
+		token:           "worker-token",
+		httpClient:      server.Client(),
+		buffer:          make([]byte, 0, logForwarderBufferSize),
+	}
+
+	n, err := lf.Write([]byte("hello"))
+	if err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	if n != len("hello") {
+		t.Fatalf("Write returned %d, want %d", n, len("hello"))
+	}
+	lf.Flush()
+	lf.Flush()
+
+	if requests != 1 {
+		t.Fatalf("requests = %d, want one flush", requests)
+	}
+	if gotPath != "/api/internal/workers/worker-logs/logs" {
+		t.Fatalf("path = %q, want worker log endpoint", gotPath)
+	}
+	if gotAuth != "Bearer worker-token" {
+		t.Fatalf("Authorization = %q, want bearer token", gotAuth)
+	}
+	if gotType != "application/octet-stream" {
+		t.Fatalf("Content-Type = %q, want octet-stream", gotType)
+	}
+	if string(gotBody) != "hello" {
+		t.Fatalf("body = %q, want hello", gotBody)
+	}
+}
+
+func TestLogForwarderAutoFlushAndClose(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("ReadAll body: %v", err)
+		}
+		switch requests {
+		case 1:
+			if len(body) != logForwarderBufferSize {
+				t.Fatalf("auto-flush body len = %d, want %d", len(body), logForwarderBufferSize)
+			}
+		case 2:
+			if string(body) != "tail" {
+				t.Fatalf("close flush body = %q, want tail", body)
+			}
+		default:
+			t.Fatalf("unexpected log request %d", requests)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	lf := NewLogForwarder(server.URL, "worker-auto", "")
+	lf.httpClient = server.Client()
+	if _, err := lf.Write(bytes.Repeat([]byte("x"), logForwarderBufferSize)); err != nil {
+		t.Fatalf("Write auto-flush chunk: %v", err)
+	}
+	if _, err := lf.Write([]byte("tail")); err != nil {
+		t.Fatalf("Write tail: %v", err)
+	}
+	if err := lf.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if err := lf.Close(); err != nil {
+		t.Fatalf("second Close: %v", err)
+	}
+	if requests != 2 {
+		t.Fatalf("requests = %d, want auto flush and close flush", requests)
 	}
 }

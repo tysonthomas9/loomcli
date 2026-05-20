@@ -1017,6 +1017,51 @@ func TestHandleGraph_NoPoolNoBackendReturns503(t *testing.T) {
 	}
 }
 
+func TestPublicGraphWrappersAndDaemonPoolAdapters(t *testing.T) {
+	for name, handler := range map[string]http.HandlerFunc{
+		"blocked": HandleBlocked(nil),
+		"graph":   HandleGraph(nil),
+	} {
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/"+name, nil))
+		if rr.Code != http.StatusServiceUnavailable {
+			t.Fatalf("%s status = %d, want 503", name, rr.Code)
+		}
+	}
+
+	client := &rpc.Client{}
+	pool := &recordingGraphDaemonPool{client: client}
+	blockedAdapter := &blockedPoolAdapter{pool: pool}
+	blockedClient, err := blockedAdapter.Get(context.Background())
+	if err != nil {
+		t.Fatalf("blocked adapter Get: %v", err)
+	}
+	if blockedClient != client || pool.gets != 1 {
+		t.Fatalf("blocked adapter got=%v gets=%d", blockedClient, pool.gets)
+	}
+	blockedAdapter.Put(client)
+	blockedAdapter.Put(&mockBlockedClient{})
+	blockedAdapter.Discard(client)
+	blockedAdapter.Discard(&mockBlockedClient{})
+
+	graphAdapter := &graphPoolAdapter{pool: pool}
+	graphClient, err := graphAdapter.Get(context.Background())
+	if err != nil {
+		t.Fatalf("graph adapter Get: %v", err)
+	}
+	if graphClient != client || pool.gets != 2 {
+		t.Fatalf("graph adapter got=%v gets=%d", graphClient, pool.gets)
+	}
+	graphAdapter.Put(client)
+	graphAdapter.Put(&mockGraphClient{})
+	graphAdapter.Discard(client)
+	graphAdapter.Discard(&mockGraphClient{})
+
+	if pool.puts != 2 || pool.discards != 2 {
+		t.Fatalf("pool puts=%d discards=%d", pool.puts, pool.discards)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Backend tests — HandleBlockedWithBackend
 // ---------------------------------------------------------------------------
@@ -1047,6 +1092,32 @@ func (p *errorDaemonPool) PutAfterError(_ *rpc.Client)                {}
 func (p *errorDaemonPool) Discard(_ *rpc.Client)                      {}
 func (p *errorDaemonPool) Stats() daemon.PoolStats                    { return daemon.PoolStats{} }
 func (p *errorDaemonPool) Close() error                               { return nil }
+
+type recordingGraphDaemonPool struct {
+	client   *rpc.Client
+	gets     int
+	puts     int
+	discards int
+}
+
+func (p *recordingGraphDaemonPool) Get(context.Context) (*rpc.Client, error) {
+	p.gets++
+	return p.client, nil
+}
+
+func (p *recordingGraphDaemonPool) Put(*rpc.Client) {
+	p.puts++
+}
+
+func (p *recordingGraphDaemonPool) PutAfterError(*rpc.Client) {}
+
+func (p *recordingGraphDaemonPool) Discard(*rpc.Client) {
+	p.discards++
+}
+
+func (p *recordingGraphDaemonPool) Stats() daemon.PoolStats { return daemon.PoolStats{} }
+
+func (p *recordingGraphDaemonPool) Close() error { return nil }
 
 func TestHandleBlocked_PoolErrorDoesNotUseBackend(t *testing.T) {
 	dp := &errorDaemonPool{err: errors.New("pool unavailable")}

@@ -179,6 +179,44 @@ func TestDiscoverAuthMode_UnknownMode(t *testing.T) {
 	}
 }
 
+func TestDiscoverAuthMode_ErrorResponses(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		code int
+		want string
+	}{
+		{
+			name: "status",
+			body: "maintenance",
+			code: http.StatusServiceUnavailable,
+			want: "HTTP 503",
+		},
+		{
+			name: "invalid json",
+			body: "{",
+			code: http.StatusOK,
+			want: "parsing /api/config response",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tt.code)
+				_, _ = w.Write([]byte(tt.body))
+			}))
+			defer srv.Close()
+
+			c := &Client{serverURL: srv.URL, httpClient: srv.Client()}
+			_, err := c.discoverAuthMode()
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("discoverAuthMode error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
 func TestDoInjectsAuthHeader(t *testing.T) {
 	var gotAuth string
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -230,6 +268,48 @@ func TestDoNoAuthWhenModeOpen(t *testing.T) {
 
 	if gotAuth != "" {
 		t.Errorf("expected no Authorization header, got %q", gotAuth)
+	}
+}
+
+func TestDoUnauthorizedBodyReplayErrors(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer backend.Close()
+
+	c := &Client{
+		serverURL:   backend.URL,
+		authMode:    &AuthMode{Mode: "oidc", AuthURL: "http://auth.invalid"},
+		token:       "stale-token",
+		tokenExpiry: time.Now().Add(10 * time.Minute),
+		httpClient:  backend.Client(),
+	}
+
+	req, err := http.NewRequest(http.MethodPost, backend.URL+"/api/test", io.NopCloser(strings.NewReader("body")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := c.Do(req)
+	if resp != nil {
+		resp.Body.Close()
+	}
+	if err == nil || !strings.Contains(err.Error(), "request body cannot be replayed") {
+		t.Fatalf("Do replay error = %v, want body cannot be replayed", err)
+	}
+
+	req, err = http.NewRequest(http.MethodPost, backend.URL+"/api/test", strings.NewReader("body"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.GetBody = func() (io.ReadCloser, error) {
+		return nil, os.ErrPermission
+	}
+	resp, err = c.Do(req)
+	if resp != nil {
+		resp.Body.Close()
+	}
+	if err == nil || !strings.Contains(err.Error(), "resetting request body") {
+		t.Fatalf("Do GetBody error = %v, want reset failure", err)
 	}
 }
 
@@ -414,4 +494,54 @@ func TestDo401Retry(t *testing.T) {
 	if c.token != "new-jwt-token" {
 		t.Errorf("expected token to be updated to 'new-jwt-token', got %q", c.token)
 	}
+}
+
+func TestDeviceFlowRequestAndPollErrorBranches(t *testing.T) {
+	t.Run("device code status", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Error(w, "bad client", http.StatusBadRequest)
+		}))
+		defer srv.Close()
+
+		_, err := requestDeviceCode(srv.URL, "client")
+		if err == nil || !strings.Contains(err.Error(), "device code request failed (400)") {
+			t.Fatalf("requestDeviceCode error = %v, want status failure", err)
+		}
+	})
+
+	t.Run("device code json", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte("{"))
+		}))
+		defer srv.Close()
+
+		_, err := requestDeviceCode(srv.URL, "client")
+		if err == nil || !strings.Contains(err.Error(), "parsing device code response") {
+			t.Fatalf("requestDeviceCode error = %v, want parse failure", err)
+		}
+	})
+
+	t.Run("poll status", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Error(w, "try later", http.StatusTooManyRequests)
+		}))
+		defer srv.Close()
+
+		_, err := pollDeviceToken(srv.URL, "client", "device")
+		if err == nil || !strings.Contains(err.Error(), "device token poll failed (429)") {
+			t.Fatalf("pollDeviceToken error = %v, want status failure", err)
+		}
+	})
+
+	t.Run("poll json", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte("{"))
+		}))
+		defer srv.Close()
+
+		_, err := pollDeviceToken(srv.URL, "client", "device")
+		if err == nil || !strings.Contains(err.Error(), "parsing device token response") {
+			t.Fatalf("pollDeviceToken error = %v, want parse failure", err)
+		}
+	})
 }

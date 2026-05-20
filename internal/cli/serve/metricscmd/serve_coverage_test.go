@@ -711,6 +711,43 @@ func TestMonitorStoreDataSource_CachesWorkspaceMetadataAcrossEndpoints(t *testin
 	}
 }
 
+func TestMonitorUnavailableStatusAgentsAndStoreAgentsWrapper(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS1", Name: "First"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Agents().Create(ctx, store.AgentCreate{
+		WorkspaceKey: "WS1",
+		Name:         "nova",
+		RoleName:     "task",
+		CrossRepo:    true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	agents := storeAgentsForMonitor(ctx, st, "WS1")
+	if len(agents) != 1 || agents[0].Name != "nova" || agents[0].Workspace != "First" {
+		t.Fatalf("storeAgentsForMonitor = %+v", agents)
+	}
+	if agents := storeAgentsForMonitor(ctx, nil, "WS1"); len(agents) != 0 {
+		t.Fatalf("nil store agents = %+v", agents)
+	}
+
+	dataSource := NewMonitorDataSource(func() *monitor.MonitorData { return nil }, nil)
+	storeSource := NewMonitorStoreDataSource(nil)
+	for name, handler := range map[string]http.HandlerFunc{
+		"status": HandleStatusWithSources(dataSource, storeSource),
+		"agents": HandleAgentsWithSources(dataSource, storeSource),
+	} {
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/monitor/"+name, nil))
+		if rr.Code != http.StatusServiceUnavailable {
+			t.Fatalf("%s nil-data status = %d, want 503", name, rr.Code)
+		}
+	}
+}
+
 type countingStore struct {
 	store.Store
 	workspaces *countingWorkspaceStore

@@ -27,6 +27,7 @@ var (
 
 	osExecutableFn               = os.Executable
 	readRuntimeStatusFn          = ReadRuntimeStatus
+	startRuntimeFn               = StartRuntime
 	restartRuntimeFn             = RestartRuntime
 	startLocalDaemonSupervisorFn = startLocalDaemonSupervisor
 )
@@ -304,7 +305,7 @@ func runStart(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	result, err := StartRuntime(dataDir, portFlag)
+	result, err := startRuntimeFn(dataDir, portFlag)
 	if err != nil {
 		return err
 	}
@@ -477,7 +478,7 @@ func EnsureRuntimeStarted(ctx context.Context, dataDir string, port int) (*Runti
 		if _, err := restartRuntimeFn(dataDir, port); err != nil {
 			return status, err
 		}
-	} else if _, err := StartRuntime(dataDir, port); err != nil {
+	} else if _, err := startRuntimeFn(dataDir, port); err != nil {
 		return status, err
 	}
 	ticker := time.NewTicker(250 * time.Millisecond)

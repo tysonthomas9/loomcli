@@ -43,6 +43,9 @@ type workerRegistrar interface {
 
 // handleFleetRegister returns a handler that registers a fleet worker and issues a JWT.
 func handleFleetRegister(store *Store, tokenCfg *TokenConfig, regCfg *RegisterConfig) http.HandlerFunc {
+	if store == nil {
+		return handleFleetRegisterWithStore(nil, tokenCfg, regCfg)
+	}
 	return handleFleetRegisterWithStore(store, tokenCfg, regCfg)
 }
 

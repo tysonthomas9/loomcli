@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -558,6 +559,79 @@ func TestLocalStartRuntimeReusesMatchingLiveRuntime(t *testing.T) {
 	}
 }
 
+func TestRunStartAndEnsureRuntimeUseStartHook(t *testing.T) {
+	dataDir := t.TempDir()
+	oldDataDirFlag, oldPortFlag := dataDirFlag, portFlag
+	oldStart := startRuntimeFn
+	oldRead := readRuntimeStatusFn
+	t.Cleanup(func() {
+		dataDirFlag, portFlag = oldDataDirFlag, oldPortFlag
+		startRuntimeFn = oldStart
+		readRuntimeStatusFn = oldRead
+	})
+
+	dataDirFlag = dataDir
+	portFlag = 19191
+	startCalls := 0
+	startRuntimeFn = func(gotDir string, gotPort int) (*RuntimeStartResult, error) {
+		startCalls++
+		if gotDir != dataDir || gotPort != 19191 {
+			t.Fatalf("startRuntimeFn args dir=%q port=%d", gotDir, gotPort)
+		}
+		return &RuntimeStartResult{PID: 4321, URL: "http://127.0.0.1:19191"}, nil
+	}
+
+	var out bytes.Buffer
+	cmd := &cobra.Command{}
+	cmd.SetOut(&out)
+	if err := runStart(cmd, nil); err != nil {
+		t.Fatalf("runStart: %v", err)
+	}
+	if startCalls != 1 || !strings.Contains(out.String(), "Started Loom local service (pid 4321)") {
+		t.Fatalf("runStart calls=%d output=%q", startCalls, out.String())
+	}
+
+	statusCalls := 0
+	readRuntimeStatusFn = func(context.Context, string) (*RuntimeStatusSnapshot, error) {
+		statusCalls++
+		if statusCalls == 1 {
+			return &RuntimeStatusSnapshot{}, errors.New("runtime missing")
+		}
+		return &RuntimeStatusSnapshot{
+			Healthy: true,
+			Runtime: runtimeSnapshot(&runtimeInfo{
+				Status: "running",
+				PID:    4321,
+				URL:    "http://127.0.0.1:19191",
+			}),
+		}, nil
+	}
+	startRuntimeFn = func(gotDir string, gotPort int) (*RuntimeStartResult, error) {
+		if gotDir != dataDir || gotPort != 19191 {
+			t.Fatalf("EnsureRuntimeStarted start args dir=%q port=%d", gotDir, gotPort)
+		}
+		return &RuntimeStartResult{PID: 4321, URL: "http://127.0.0.1:19191"}, nil
+	}
+	started, err := EnsureRuntimeStarted(context.Background(), dataDir, 19191)
+	if err != nil {
+		t.Fatalf("EnsureRuntimeStarted start branch: %v", err)
+	}
+	if !started.Healthy || statusCalls != 2 {
+		t.Fatalf("EnsureRuntimeStarted status=%+v calls=%d", started, statusCalls)
+	}
+
+	startErr := errors.New("start failed")
+	readRuntimeStatusFn = func(context.Context, string) (*RuntimeStatusSnapshot, error) {
+		return &RuntimeStatusSnapshot{}, errors.New("runtime missing")
+	}
+	startRuntimeFn = func(string, int) (*RuntimeStartResult, error) {
+		return nil, startErr
+	}
+	if _, err := EnsureRuntimeStarted(context.Background(), dataDir, 19191); !errors.Is(err, startErr) {
+		t.Fatalf("EnsureRuntimeStarted start error = %v, want %v", err, startErr)
+	}
+}
+
 func TestInstallUninstallLocalLaunchAgentWithFakeLaunchctl(t *testing.T) {
 	if runtime.GOOS != "darwin" {
 		t.Skip("launchagent install is macOS-only")
@@ -891,4 +965,142 @@ func TestLoadLocalDaemonConfigForWorkspaceRestoresEnvironmentOnError(t *testing.
 	if got := os.Getenv("LOOM_WORKSPACE"); got != "previous" {
 		t.Fatalf("LOOM_WORKSPACE = %q, want previous", got)
 	}
+}
+
+func TestLocalStatusErrorAndRuntimeHelperBranches(t *testing.T) {
+	dataDir := t.TempDir()
+	oldDataDirFlag, oldJSONFlag := dataDirFlag, jsonFlag
+	t.Cleanup(func() {
+		dataDirFlag, jsonFlag = oldDataDirFlag, oldJSONFlag
+	})
+	dataDirFlag = dataDir
+
+	cmd := &cobra.Command{}
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	if err := runStatus(cmd, nil); err == nil || !strings.Contains(err.Error(), "status unavailable") {
+		t.Fatalf("runStatus missing runtime err = %v", err)
+	}
+
+	out.Reset()
+	jsonFlag = true
+	if err := runStatus(cmd, nil); err != nil {
+		t.Fatalf("runStatus json missing runtime: %v", err)
+	}
+	var snapshot RuntimeStatusSnapshot
+	if err := json.Unmarshal(out.Bytes(), &snapshot); err != nil {
+		t.Fatalf("decode status error json: %v", err)
+	}
+	if snapshot.Error == "" {
+		t.Fatalf("json error snapshot = %+v", snapshot)
+	}
+	jsonFlag = false
+
+	if result, err := reuseRunningRuntime(filepath.Join(dataDir, "missing"), false); err != nil || result != nil {
+		t.Fatalf("reuse missing runtime result=%+v err=%v", result, err)
+	}
+	if err := writeRuntime(dataDir, &runtimeInfo{Status: "stopped", PID: 0, URL: "http://127.0.0.1:1"}); err != nil {
+		t.Fatalf("write stopped runtime: %v", err)
+	}
+	if result, err := reuseRunningRuntime(dataDir, false); err != nil || result != nil {
+		t.Fatalf("reuse stopped runtime result=%+v err=%v", result, err)
+	}
+
+	if err := updatePauseState(false); err != nil {
+		t.Fatalf("resume stopped runtime: %v", err)
+	}
+	info, err := readRuntime(dataDir)
+	if err != nil {
+		t.Fatalf("read runtime: %v", err)
+	}
+	if info.Status != "stopped" || info.ClaimsPaused {
+		t.Fatalf("resume stopped runtime mutated status unexpectedly: %+v", info)
+	}
+
+	t.Setenv("FLEET_DB_BIN", "/custom/fleet-db")
+	t.Setenv("LOOM_FRONTEND_DIR", "/custom/webui")
+	env := localEnv(dataDir, 19999)
+	if !envContains(env, "FLEET_DB_BIN=/custom/fleet-db") {
+		t.Fatalf("localEnv missing explicit FLEET_DB_BIN: %v", env)
+	}
+	if !envContains(env, "LOOM_FRONTEND_DIR=/custom/webui") {
+		t.Fatalf("localEnv missing explicit LOOM_FRONTEND_DIR: %v", env)
+	}
+	path := desktopRuntimePath("/bin", string(os.PathListSeparator)+"/bin"+string(os.PathListSeparator)+"/usr/bin")
+	parts := filepath.SplitList(path)
+	if len(parts) < 2 || parts[0] != "/bin" {
+		t.Fatalf("desktopRuntimePath = %q", path)
+	}
+	seenBin := 0
+	for _, part := range parts {
+		if part == "/bin" {
+			seenBin++
+		}
+	}
+	if seenBin != 1 {
+		t.Fatalf("desktopRuntimePath did not deduplicate /bin: %q", path)
+	}
+}
+
+func TestRunStopTerminatesChildRuntime(t *testing.T) {
+	dataDir := t.TempDir()
+	if err := ensureRuntimeDirs(dataDir); err != nil {
+		t.Fatalf("ensureRuntimeDirs: %v", err)
+	}
+	cmdProc := exec.Command("sleep", "60") //nolint:norawexec,gosec // controlled test process
+	if err := cmdProc.Start(); err != nil {
+		t.Fatalf("start sleep: %v", err)
+	}
+	waitCh := make(chan error, 1)
+	go func() {
+		waitCh <- cmdProc.Wait()
+	}()
+	waitDone := false
+	t.Cleanup(func() {
+		if waitDone {
+			return
+		}
+		select {
+		case <-waitCh:
+		default:
+			_ = cmdProc.Process.Kill()
+			<-waitCh
+		}
+	})
+	if err := writeRuntime(dataDir, &runtimeInfo{
+		Status:  "running",
+		PID:     cmdProc.Process.Pid,
+		DataDir: dataDir,
+		URL:     "http://127.0.0.1:1",
+	}); err != nil {
+		t.Fatalf("write runtime: %v", err)
+	}
+
+	oldDataDirFlag := dataDirFlag
+	t.Cleanup(func() { dataDirFlag = oldDataDirFlag })
+	dataDirFlag = dataDir
+	var out bytes.Buffer
+	cobraCmd := &cobra.Command{}
+	cobraCmd.SetOut(&out)
+	if err := runStop(cobraCmd, nil); err != nil {
+		t.Fatalf("runStop running runtime: %v", err)
+	}
+	select {
+	case <-waitCh:
+		waitDone = true
+	case <-time.After(time.Second):
+		t.Fatal("sleep process was not reaped after runStop")
+	}
+	if !strings.Contains(out.String(), "stopped") {
+		t.Fatalf("runStop output = %q", out.String())
+	}
+}
+
+func envContains(env []string, want string) bool {
+	for _, got := range env {
+		if got == want {
+			return true
+		}
+	}
+	return false
 }

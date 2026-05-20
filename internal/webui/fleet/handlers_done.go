@@ -39,6 +39,9 @@ type fleetDoneStore interface {
 
 // handleFleetDone returns a handler that completes a task for a fleet worker.
 func handleFleetDone(store *Store) http.HandlerFunc {
+	if store == nil {
+		return handleFleetDoneWithStore(nil)
+	}
 	return handleFleetDoneWithStore(store)
 }
 

@@ -71,6 +71,12 @@ func TestFileServiceValidationErrors(t *testing.T) {
 	if err := os.Symlink(filepath.Join(root, "file.txt"), filepath.Join(root, "link.txt")); err != nil {
 		t.Fatalf("symlink: %v", err)
 	}
+	if err := os.Mkdir(filepath.Join(root, "real-parent"), 0o755); err != nil {
+		t.Fatalf("mkdir real parent: %v", err)
+	}
+	if err := os.Symlink(filepath.Join(root, "real-parent"), filepath.Join(root, "link-parent")); err != nil {
+		t.Fatalf("symlink parent: %v", err)
+	}
 	svc := NewFileService(fakeFileOps{wt: &ops.AgentWorktree{Name: "agent", Path: root}})
 
 	cases := []struct {
@@ -123,6 +129,9 @@ func TestFileServiceValidationErrors(t *testing.T) {
 		{"write missing parent", func() error {
 			return svc.WriteFile(context.Background(), "WS", "agent", "missing/new.txt", "x")
 		}, "parent directory"},
+		{"write symlink parent", func() error {
+			return svc.WriteFile(context.Background(), "WS", "agent", "link-parent/new.txt", "x")
+		}, "symlink"},
 	}
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
@@ -131,6 +140,37 @@ func TestFileServiceValidationErrors(t *testing.T) {
 				t.Fatalf("err = %v, want containing %q", err, tt.want)
 			}
 		})
+	}
+}
+
+func TestFileServiceDirectValidationBranches(t *testing.T) {
+	root := resolvedTempDir(t)
+	large := filepath.Join(root, "large.txt")
+	f, err := os.Create(large)
+	if err != nil {
+		t.Fatalf("create large: %v", err)
+	}
+	if err := f.Truncate(maxRequestBody + 1); err != nil {
+		_ = f.Close()
+		t.Fatalf("truncate large: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("close large: %v", err)
+	}
+	if _, err := validateFilePath(large); err == nil || !strings.Contains(strings.ToLower(err.Error()), "too large") {
+		t.Fatalf("large validate err = %v", err)
+	}
+
+	target := filepath.Join(root, "target.txt")
+	if err := os.WriteFile(target, []byte("ok"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "target-link.txt")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readFileContent(link, root); err == nil || !strings.Contains(strings.ToLower(err.Error()), "symlink") {
+		t.Fatalf("readFileContent symlink err = %v", err)
 	}
 }
 

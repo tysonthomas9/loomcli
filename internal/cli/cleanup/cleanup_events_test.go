@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/cli"
 )
 
 func TestEventFileRe_Matches(t *testing.T) {
@@ -227,6 +229,39 @@ func TestPurgeEventFiles_AllRecentKept(t *testing.T) {
 	entries, _ := os.ReadDir(dir)
 	if len(entries) != 5 {
 		t.Errorf("remaining files = %d, want 5", len(entries))
+	}
+}
+
+func TestCleanupEventsResolvesDefaultEventsDir(t *testing.T) {
+	runtimeDir := t.TempDir()
+	eventsDir := filepath.Join(runtimeDir, ".loom", "events")
+	if err := os.MkdirAll(eventsDir, 0o755); err != nil {
+		t.Fatalf("mkdir events: %v", err)
+	}
+	oldDate := time.Now().UTC().AddDate(0, 0, -60).Format("2006-01-02")
+	oldPath := filepath.Join(eventsDir, "events-"+oldDate+".jsonl")
+	if err := os.WriteFile(oldPath, []byte("{}\n"), 0o600); err != nil {
+		t.Fatalf("write event: %v", err)
+	}
+
+	t.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", runtimeDir)
+	t.Setenv("LOOM_CONFIG_DIR", filepath.Join(runtimeDir, "config"))
+	t.Setenv("LOOM_WORKSPACE", "")
+	cli.ResetWorkspaceRuntimeDirCache()
+	t.Cleanup(cli.ResetWorkspaceRuntimeDirCache)
+
+	if got := resolveEventsDir(); got != eventsDir {
+		t.Fatalf("resolveEventsDir = %q, want %q", got, eventsDir)
+	}
+	purged, err := cleanupEvents(30*24*time.Hour, false)
+	if err != nil {
+		t.Fatalf("cleanupEvents: %v", err)
+	}
+	if purged != 1 {
+		t.Fatalf("cleanupEvents purged = %d, want 1", purged)
+	}
+	if _, err := os.Stat(oldPath); !os.IsNotExist(err) {
+		t.Fatalf("old event still exists or unexpected stat err: %v", err)
 	}
 }
 

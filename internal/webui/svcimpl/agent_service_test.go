@@ -2,8 +2,11 @@ package svcimpl
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -80,6 +83,43 @@ func TestCreateAgentLeadEnsuresRoleAndDoesNotRequireRepo(t *testing.T) {
 	}
 	if _, err := st.Roles().Get(ctx, "TEST2", "lead"); err != nil {
 		t.Fatalf("lead role was not created: %v", err)
+	}
+}
+
+func TestCreateAgentRejectsLocalWorkspaceWithoutReposAndRollsBack(t *testing.T) {
+	configDir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", configDir)
+
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{
+		Key:           "LOCAL",
+		Name:          "Local",
+		DefaultBranch: "main",
+	}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := bootstrap.SaveStateCache(&bootstrap.StateCache{
+		LastWorkspace: "LOCAL",
+		Workspaces: map[string]bootstrap.WorkspaceLocalState{
+			"LOCAL": {Path: t.TempDir()},
+		},
+	}); err != nil {
+		t.Fatalf("save state cache: %v", err)
+	}
+
+	svc := NewAgentService(nil, nil, nil, st)
+	_, err := svc.CreateAgent(ctx, service.AgentCreateInput{
+		WorkspaceKey: "LOCAL",
+		Name:         "worker",
+		RoleName:     "task",
+		CrossRepo:    true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "no repos") {
+		t.Fatalf("CreateAgent err = %v, want no repos validation", err)
+	}
+	if _, getErr := st.Agents().Get(ctx, "LOCAL", "worker"); !errors.Is(getErr, domain.ErrNotFound) {
+		t.Fatalf("agent rollback error = %v, want not found", getErr)
 	}
 }
 

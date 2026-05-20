@@ -93,3 +93,34 @@ func TestGetUncommittedChangesCount(t *testing.T) {
 		t.Fatalf("error changes = %d, want 0", got)
 	}
 }
+
+func TestPrintAgentBranchInfoWithGitStatus(t *testing.T) {
+	deps := cli.TestingGetDefaultDeps()
+	oldGit := deps.Git
+	t.Cleanup(func() { deps.Git = oldGit })
+
+	deps.Git = &clitest.MockGitRunner{RunFunc: func(_ string, args ...string) cli.CommandResult {
+		switch strings.Join(args, " ") {
+		case "branch --show-current":
+			return cli.CommandResult{Stdout: "feature/thing\n"}
+		case "rev-list --left-right --count origin/develop...HEAD":
+			return cli.CommandResult{Stdout: "4\t2\n"}
+		case "status --porcelain":
+			return cli.CommandResult{Stdout: " M api.go\n?? new.go\n"}
+		default:
+			return cli.CommandResult{Err: errors.New("unexpected git command: " + strings.Join(args, " "))}
+		}
+	}}
+
+	out := captureDaemonStdout(t, func() {
+		printAgentBranchInfo(DaemonAgentStatus{
+			WorktreePath: "/repo",
+			RemoteBranch: "origin/develop",
+		})
+	})
+	for _, want := range []string{"Branch: feature/thing", "↑2 ↓4", "● 2 changes"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("branch output missing %q:\n%s", want, out)
+		}
+	}
+}

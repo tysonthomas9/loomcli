@@ -120,6 +120,43 @@ func TestCodexSessionsRootMissingAndFindLatestNoMatches(t *testing.T) {
 	}
 }
 
+func TestSessionSyncLatestCodexRolloutWrapper(t *testing.T) {
+	codeHome := t.TempDir()
+	sessionsRoot := filepath.Join(codeHome, "sessions")
+	dayDir := filepath.Join(sessionsRoot, "2026", "05", "05")
+	mustMkdir(t, dayDir)
+	workDir := t.TempDir()
+	since := time.Date(2026, 5, 5, 12, 0, 0, 0, time.UTC)
+	rollout := filepath.Join(dayDir, "rollout-wrapper.jsonl")
+	writeRollout(t, rollout, workDir)
+	setModTime(t, rollout, since.Add(5*time.Second))
+
+	t.Setenv("CODEX_HOME", codeHome)
+	const sid = "20260417-120000-codex-abcd-0123abcd"
+	store, sessDir := newStoreWithSession(t, sid)
+	sess := &Session{
+		store: store,
+		Meta:  SessionMetadata{SessionRecord: SessionRecord{SessionID: sid}},
+	}
+	synced, err := sess.SyncLatestCodexRollout(workDir, since)
+	if err != nil {
+		t.Fatalf("Session.SyncLatestCodexRollout: %v", err)
+	}
+	if synced != rollout {
+		t.Fatalf("synced = %q, want %q", synced, rollout)
+	}
+	if _, err := os.Stat(filepath.Join(sessDir, NativeTranscriptFile)); err != nil {
+		t.Fatalf("synced transcript missing: %v", err)
+	}
+
+	if got, err := ((*Session)(nil)).SyncLatestCodexRollout(workDir, since); err != nil || got != "" {
+		t.Fatalf("nil session sync = %q, %v; want no-op", got, err)
+	}
+	if got, err := (&Session{}).SyncLatestCodexRollout(workDir, since); err != nil || got != "" {
+		t.Fatalf("session without store sync = %q, %v; want no-op", got, err)
+	}
+}
+
 func mustMkdir(t *testing.T, path string) {
 	t.Helper()
 	if err := os.MkdirAll(path, 0o755); err != nil {

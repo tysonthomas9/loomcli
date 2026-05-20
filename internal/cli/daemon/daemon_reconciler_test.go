@@ -2,10 +2,13 @@ package daemon
 
 import (
 	"context"
+	"errors"
+	"path/filepath"
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/cli/daemon/supervisor"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/events"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
@@ -447,6 +450,98 @@ func TestModifiedAgentsToDrain_DrainsCompletedEphemeralTask(t *testing.T) {
 	got := d.modifiedAgentsToDrain(entries)
 	if len(got) != 1 || got[0].Worktree != "worker" {
 		t.Fatalf("modifiedAgentsToDrain = %#v, want completed worker to drain", got)
+	}
+}
+
+func TestReconcilerCommandStatusAndStartCommandBranches(t *testing.T) {
+	for _, status := range []domain.AgentCommandStatus{
+		domain.AgentCommandQueued,
+		domain.AgentCommandAcked,
+		domain.AgentCommandRunning,
+	} {
+		if !liveAgentCommandStatus(status) {
+			t.Fatalf("status %s should be live", status)
+		}
+	}
+	for _, status := range []domain.AgentCommandStatus{
+		domain.AgentCommandSucceeded,
+		domain.AgentCommandFailed,
+		domain.AgentCommandCancelled,
+	} {
+		if liveAgentCommandStatus(status) {
+			t.Fatalf("status %s should not be live", status)
+		}
+	}
+
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.AgentCommands().Create(ctx, store.AgentCommandCreate{
+		WorkspaceKey:  "ws",
+		TargetAgentID: "worker",
+		Type:          "noop",
+	}); err != nil {
+		t.Fatalf("create noop command: %v", err)
+	}
+	if _, err := st.AgentCommands().Create(ctx, store.AgentCommandCreate{
+		WorkspaceKey:  "ws",
+		TargetAgentID: "worker",
+		Type:          "start",
+		Payload:       map[string]string{"task_id": "TASK-1"},
+	}); err != nil {
+		t.Fatalf("create start command: %v", err)
+	}
+
+	d := &Daemon{
+		sup:   &supervisor.Supervisor{WorkspaceID: "ws"},
+		store: st,
+	}
+	active, err := d.hasLiveEphemeralStartCommand(ctx, "worker")
+	if err != nil {
+		t.Fatalf("hasLiveEphemeralStartCommand: %v", err)
+	}
+	if !active {
+		t.Fatal("expected live start command")
+	}
+	active, err = d.hasLiveEphemeralStartCommand(ctx, "other")
+	if err != nil {
+		t.Fatalf("hasLiveEphemeralStartCommand other: %v", err)
+	}
+	if active {
+		t.Fatal("unexpected live command for other agent")
+	}
+}
+
+func TestReconcilerEmitErrorAndAddNewAgentSkips(t *testing.T) {
+	spy := &SpyEmitter{}
+	projectDir := t.TempDir()
+	t.Setenv("LOOM_WORKTREES_DIR", filepath.Join(projectDir, "worktrees"))
+	t.Setenv("LOOM_CONFIG_DIR", filepath.Join(projectDir, "config"))
+
+	cfg := makeDaemonConfig(nil, nil)
+	d := &Daemon{
+		config:     cfg,
+		projectDir: projectDir,
+		sup: &supervisor.Supervisor{
+			ConfigSnapshot: func() *DaemonConfig { return cfg },
+			StoppedAgents:  map[string]struct{}{"manual": {}},
+			Concurrency:    supervisor.NewConcurrencyTracker(nil),
+			EventBus:       spy,
+			EmitEvent:      func(evt events.Event) { _ = spy.Emit(evt) },
+		},
+	}
+	d.emitConfigReloadError(errors.New("bad config"))
+	if got := spy.EventsByType(events.ConfigReloaded); len(got) != 1 {
+		t.Fatalf("ConfigReloaded events = %d, want 1", len(got))
+	}
+
+	d.addNewAgents([]AgentEntry{
+		{Worktree: "lead-agent", Role: "lead"},
+		{Worktree: "stopped-agent", Role: "task", DesiredState: domain.AgentDesiredStopped},
+		{Worktree: "manual", Role: "task"},
+		{Worktree: "missing-worktree", Role: "task"},
+	}, "test")
+	if got := d.sup.AgentCount(); got != 0 {
+		t.Fatalf("agent count = %d, want 0 after skipped/failed additions", got)
 	}
 }
 

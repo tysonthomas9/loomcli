@@ -221,6 +221,61 @@ func TestRunDaemonLogs_ReadsLastNLines(t *testing.T) {
 	}
 }
 
+func TestDaemonLogHelpersSuccessPaths(t *testing.T) {
+	projectDir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", filepath.Join(projectDir, "config"))
+	t.Setenv("LOOM_WORKSPACE", "")
+	config := &DaemonConfig{Daemon: DaemonSettings{LogDir: "logs"}}
+	logDir := filepath.Join(projectDir, "logs")
+	if err := os.MkdirAll(logDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	logPath := filepath.Join(logDir, "task-falcon.log")
+	if err := os.WriteFile(logPath, []byte("one\ntwo\nthree\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	oldLines := daemonLogsLines
+	oldFollow := daemonLogsFollow
+	t.Cleanup(func() {
+		daemonLogsLines = oldLines
+		daemonLogsFollow = oldFollow
+	})
+	daemonLogsLines = 2
+	daemonLogsFollow = false
+
+	state := &DaemonState{Agents: []DaemonAgentStatus{{Worktree: "falcon", Role: "task"}}}
+	agent := findAgent("falcon", state, nil)
+	if agent == nil || agent.Worktree != "falcon" {
+		t.Fatalf("findAgent returned %#v", agent)
+	}
+
+	out := captureDaemonStdout(t, func() {
+		showAgentLog(logPath)
+	})
+	if strings.Contains(out, "one") || !strings.Contains(out, "two") || !strings.Contains(out, "three") {
+		t.Fatalf("showAgentLog output = %q, want last two lines", out)
+	}
+
+	emptyPath := filepath.Join(logDir, "task-empty.log")
+	if err := os.WriteFile(emptyPath, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	out = captureDaemonStdout(t, func() {
+		showAgentLog(emptyPath)
+	})
+	if !strings.Contains(out, "(empty log file)") {
+		t.Fatalf("empty log output = %q", out)
+	}
+
+	out = captureDaemonStdout(t, func() {
+		listAgentLogs(projectDir, config, state, nil)
+	})
+	if !strings.Contains(out, "Available agents:") || !strings.Contains(out, "task-falcon.log") || !strings.Contains(out, "exists") {
+		t.Fatalf("listAgentLogs output = %q", out)
+	}
+}
+
 func TestRunDaemonLogs_NoDaemonNoState(t *testing.T) {
 	// Empty temp dir with no state file
 	tmpDir := t.TempDir()

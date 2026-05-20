@@ -31,6 +31,9 @@ type heartbeatStore interface {
 
 // handleFleetHeartbeat returns a handler that processes worker heartbeats.
 func handleFleetHeartbeat(store *Store) http.HandlerFunc {
+	if store == nil {
+		return handleFleetHeartbeatWithStore(nil)
+	}
 	return handleFleetHeartbeatWithStore(store)
 }
 

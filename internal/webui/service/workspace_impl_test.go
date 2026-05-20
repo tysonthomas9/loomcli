@@ -418,6 +418,14 @@ func TestGetWorkspaceBackend_StoreBackedReadsDaemonProfile(t *testing.T) {
 	if _, err := st.Daemon().Upsert(ctx, &domain.DaemonProfile{WorkspaceKey: "ALPHA", AgentBackend: "codex"}); err != nil {
 		t.Fatalf("upsert daemon profile: %v", err)
 	}
+	if _, err := st.Agents().Create(ctx, store.AgentCreate{
+		WorkspaceKey: "ALPHA",
+		Name:         "falcon",
+		RoleName:     "task",
+		Backend:      "opencode",
+	}); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
 
 	svc := NewWorkspaceService(WorkspaceServiceConfig{Store: st})
 	cfg, err := svc.GetWorkspaceBackend(ctx, "ALPHA")
@@ -429,6 +437,9 @@ func TestGetWorkspaceBackend_StoreBackedReadsDaemonProfile(t *testing.T) {
 	}
 	if cfg.Source != "fleetdb" {
 		t.Fatalf("Source = %q, want fleetdb", cfg.Source)
+	}
+	if len(cfg.Agents) != 1 || cfg.Agents[0].Worktree != "falcon" || cfg.Agents[0].Backend != "opencode" {
+		t.Fatalf("agent backend overrides = %+v", cfg.Agents)
 	}
 }
 
@@ -543,6 +554,31 @@ func TestWorkspaceAsyncJobAndStoreStateBranches(t *testing.T) {
 		t.Fatal("StartAsyncCreate without job store succeeded")
 	}
 
+	jobs := &fakeWorkspaceJobStore{jobs: map[string]*WorkspaceJob{
+		"job-1": {ID: "job-1", Status: JobStatusRunning, Progress: "queued"},
+	}}
+	svcWithJobs := NewWorkspaceService(WorkspaceServiceConfig{
+		Store:    st,
+		JobStore: jobs,
+		CreateFn: func(context.Context, WorkspaceCreateRequest) (WorkspaceCreateResult, error) {
+			return WorkspaceCreateResult{WorkspaceID: "WS"}, nil
+		},
+	})
+	jobID, err := svcWithJobs.StartAsyncCreate(ctx, WorkspaceCreateRequest{Name: "async", Type: "empty"})
+	if err != nil {
+		t.Fatalf("StartAsyncCreate with job store: %v", err)
+	}
+	if jobID != "job-1" || jobs.started == nil || jobs.started.Name != "async" {
+		t.Fatalf("jobID=%q started=%+v", jobID, jobs.started)
+	}
+	job, err := svcWithJobs.GetWorkspaceJob(ctx, "job-1")
+	if err != nil {
+		t.Fatalf("GetWorkspaceJob from job store: %v", err)
+	}
+	if job.Progress != "queued" {
+		t.Fatalf("job = %+v", job)
+	}
+
 	states := []struct {
 		state    domain.WorkspaceState
 		progress string
@@ -570,7 +606,7 @@ func TestWorkspaceAsyncJobAndStoreStateBranches(t *testing.T) {
 	if _, err := st.Workspaces().Update(ctx, "WS", store.WorkspaceUpdate{State: &failed, ErrorMessage: &emptyMsg}); err != nil {
 		t.Fatalf("update failed state: %v", err)
 	}
-	job, err := svc.GetWorkspaceJob(ctx, "WS")
+	job, err = svc.GetWorkspaceJob(ctx, "WS")
 	if err != nil {
 		t.Fatalf("GetWorkspaceJob failed state: %v", err)
 	}
@@ -688,6 +724,20 @@ type workspaceCountingStore struct {
 	workspaces *workspaceCountingWorkspaceStore
 	repos      *workspaceCountingRepoStore
 	daemon     *workspaceCountingDaemonStore
+}
+
+type fakeWorkspaceJobStore struct {
+	started *WorkspaceCreateRequest
+	jobs    map[string]*WorkspaceJob
+}
+
+func (s *fakeWorkspaceJobStore) Start(req WorkspaceCreateRequest, _ WorkspaceCreateFn) string {
+	s.started = &req
+	return "job-1"
+}
+
+func (s *fakeWorkspaceJobStore) Get(id string) *WorkspaceJob {
+	return s.jobs[id]
 }
 
 func newWorkspaceCountingStore(base store.Store) *workspaceCountingStore {

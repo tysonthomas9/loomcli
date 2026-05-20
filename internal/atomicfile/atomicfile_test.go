@@ -160,3 +160,29 @@ func TestWriteFile_NoOrphanTempFiles(t *testing.T) {
 		t.Errorf("found orphan temp files: %v", matches)
 	}
 }
+
+func TestWriteFile_RenameFailureCleansTempFile(t *testing.T) {
+	dir := t.TempDir()
+	targetDir := filepath.Join(dir, "target")
+	if err := os.Mkdir(targetDir, 0755); err != nil {
+		t.Fatalf("mkdir target: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(targetDir, "existing"), []byte("keep"), 0600); err != nil {
+		t.Fatalf("write existing child: %v", err)
+	}
+
+	err := WriteFile(targetDir, []byte("data"), 0644)
+	if err == nil {
+		t.Fatal("expected rename failure writing over non-empty directory")
+	}
+	if _, statErr := os.Stat(filepath.Join(targetDir, "existing")); statErr != nil {
+		t.Fatalf("target directory was modified: %v", statErr)
+	}
+	matches, globErr := filepath.Glob(filepath.Join(dir, ".loom-atomic-*"))
+	if globErr != nil {
+		t.Fatalf("Glob: %v", globErr)
+	}
+	if len(matches) != 0 {
+		t.Fatalf("found orphan temp files after failed rename: %v", matches)
+	}
+}

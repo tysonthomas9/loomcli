@@ -23,6 +23,30 @@ func TestInitDisabledAndValidationBranches(t *testing.T) {
 	}
 }
 
+func TestInitEnabledBuildsProviderWithoutCollectorConnection(t *testing.T) {
+	shutdown, provider, err := Init(context.Background(), Config{
+		ServiceName:    "loom-test",
+		ServiceVersion: "test",
+		Environment:    "test",
+		Endpoint:       "http://127.0.0.1:1",
+		Insecure:       true,
+		AlwaysOn:       true,
+		Sync:           true,
+	})
+	if err != nil {
+		t.Fatalf("Init enabled: %v", err)
+	}
+	if provider == nil || provider() == nil {
+		t.Fatal("enabled provider should be non-nil")
+	}
+	if shutdown == nil {
+		t.Fatal("enabled shutdown should be non-nil")
+	}
+	if err := shutdown(context.Background()); err != nil {
+		t.Fatalf("enabled shutdown without spans: %v", err)
+	}
+}
+
 func TestBuildResourceSamplerAndProviderOptions(t *testing.T) {
 	res, err := buildResource(context.Background(), Config{ServiceName: "loom-test"})
 	if err != nil {
