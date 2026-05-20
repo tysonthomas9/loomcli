@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -354,6 +355,76 @@ func waitForRuntime(ctx context.Context, url string) error {
 		case <-ticker.C:
 		}
 	}
+}
+
+// runtimeReadyResponse mirrors webui/handlers/health.RuntimeReadyResponse on
+// the wire. Kept local to avoid a CLI → webui import cycle.
+type runtimeReadyResponse struct {
+	Ready     bool   `json:"ready"`
+	Mode      string `json:"mode"`
+	Workspace string `json:"workspace"`
+	Reason    string `json:"reason,omitempty"`
+}
+
+// WaitForWorkspaceReady polls /api/workspaces/{workspaceKey}/runtime-ready
+// until it returns 200 or the context is canceled. On timeout, the returned
+// error includes the last decoded reason so operators see the actual cause
+// (e.g. "workspace not registered: LOOM") rather than a bare
+// "context deadline exceeded".
+func WaitForWorkspaceReady(ctx context.Context, baseURL, workspaceKey string) error {
+	if baseURL == "" {
+		return errors.New("runtime URL is empty")
+	}
+	if workspaceKey == "" {
+		return errors.New("workspace key is empty")
+	}
+	endpoint := baseURL + "/api/workspaces/" + url.PathEscape(workspaceKey) + "/runtime-ready"
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
+	var lastReason string
+	for {
+		reason, ok, err := probeWorkspaceReady(ctx, endpoint)
+		if ok {
+			return nil
+		}
+		if reason != "" {
+			lastReason = reason
+		} else if err != nil {
+			lastReason = err.Error()
+		}
+		select {
+		case <-ctx.Done():
+			if lastReason != "" {
+				return fmt.Errorf("workspace %q runtime not ready: %s", workspaceKey, lastReason)
+			}
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
+}
+
+// probeWorkspaceReady performs a single GET against the workspace readiness
+// endpoint. Returns (reason, ready, transportErr). reason is decoded from the
+// JSON body when available, or a synthesized "HTTP N" string otherwise.
+func probeWorkspaceReady(ctx context.Context, endpoint string) (string, bool, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return "", false, err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", false, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode == http.StatusOK {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		return "", true, nil
+	}
+	var decoded runtimeReadyResponse
+	if jsonErr := json.NewDecoder(resp.Body).Decode(&decoded); jsonErr == nil && decoded.Reason != "" {
+		return decoded.Reason, false, nil
+	}
+	return fmt.Sprintf("HTTP %d", resp.StatusCode), false, nil
 }
 
 func processRunning(pid int) bool {

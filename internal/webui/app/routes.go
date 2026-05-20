@@ -2,6 +2,7 @@ package app
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlermux"
@@ -182,7 +183,13 @@ func (app *Server) registerWorkspaceRoutes() {
 		webui.SetPromRoutePattern(r.Context(), pattern)
 		wsMux.ServeHTTP(w, r)
 	})
-	app.mux.Handle("/api/workspaces/{ws}/", workspaceMW(wsHandler))
+	app.mux.Handle("/api/workspaces/{ws}/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/runtime-ready") {
+			wsHandler.ServeHTTP(w, r)
+			return
+		}
+		workspaceMW(wsHandler).ServeHTTP(w, r)
+	}))
 }
 
 func (app *Server) workspaceMiddleware() middleware.Middleware {

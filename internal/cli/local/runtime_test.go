@@ -7,7 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 )
@@ -246,6 +248,60 @@ func TestEnsureRuntimeStartedRestartsUnhealthyRecordedRuntime(t *testing.T) {
 	}
 	if status == nil || !status.Healthy || status.Runtime == nil || status.Runtime.PID != 456 {
 		t.Fatalf("status = %#v, want healthy restarted runtime", status)
+	}
+}
+
+// TestWaitForWorkspaceReadyReturnsOnSuccess verifies the happy path: when the
+// workspace runtime-ready endpoint responds 200, WaitForWorkspaceReady returns
+// nil promptly. The request path is also asserted so a future refactor that
+// changes the URL pattern (e.g. drops the {workspace} segment) is caught here.
+func TestWaitForWorkspaceReadyReturnsOnSuccess(t *testing.T) {
+	var observedPath atomic.Value
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		observedPath.Store(r.URL.Path)
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(server.Close)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	t.Cleanup(cancel)
+
+	if err := WaitForWorkspaceReady(ctx, server.URL, "LOOM"); err != nil {
+		t.Fatalf("WaitForWorkspaceReady() error = %v", err)
+	}
+
+	got, _ := observedPath.Load().(string)
+	if got != "/api/workspaces/LOOM/runtime-ready" {
+		t.Fatalf("server saw path = %q, want %q", got, "/api/workspaces/LOOM/runtime-ready")
+	}
+}
+
+// TestWaitForWorkspaceReadyIncludesReasonOnTimeout verifies the timeout
+// failure mode preserves the JSON-decoded reason from the last 503. The
+// loop used to swallow the upstream reason and surface only
+// "context deadline exceeded", which made desktop ensure-runtime failures
+// undebuggable.
+func TestWaitForWorkspaceReadyIncludesReasonOnTimeout(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"ready":false,"mode":"fleet","workspace":"LOOM","reason":"workspace not registered: LOOM"}`))
+	}))
+	t.Cleanup(server.Close)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	t.Cleanup(cancel)
+
+	err := WaitForWorkspaceReady(ctx, server.URL, "LOOM")
+	if err == nil {
+		t.Fatal("WaitForWorkspaceReady() error = nil, want timeout error")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "LOOM") {
+		t.Errorf("error %q missing workspace key %q", msg, "LOOM")
+	}
+	if !strings.Contains(msg, "workspace not registered") {
+		t.Errorf("error %q missing decoded reason %q", msg, "workspace not registered")
 	}
 }
 
