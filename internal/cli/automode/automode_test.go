@@ -631,6 +631,20 @@ func waitForFile(path string, timeout time.Duration) bool {
 	return false
 }
 
+// waitForTmuxSession waits for a tmux session to be visible to the server.
+// Under CI load, the server's `has-session` query can return false right
+// after startTmuxSession returns successfully; this poll closes the race.
+func waitForTmuxSession(sessionName string, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if tmuxSessionExists(sessionName) {
+			return true
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	return false
+}
+
 func TestCleanupTmuxSession_SendsCtrlC(t *testing.T) {
 	// Skip if tmux is not available
 	if exec.Command("tmux", "-V").Run() != nil { //nolint:norawexec
@@ -2235,8 +2249,7 @@ func TestStartTmuxSession_Success(t *testing.T) {
 		t.Fatalf("startTmuxSession failed: %v", err)
 	}
 
-	// Verify session was created
-	if !tmuxSessionExists(sessionName) {
+	if !waitForTmuxSession(sessionName, 5*time.Second) {
 		t.Error("Session was not created")
 	}
 }
@@ -2283,8 +2296,7 @@ func TestStartTmuxSession_KillsExisting(t *testing.T) {
 		t.Fatalf("startTmuxSession failed: %v", err)
 	}
 
-	// Verify session still exists (the new one)
-	if !tmuxSessionExists(sessionName) {
+	if !waitForTmuxSession(sessionName, 5*time.Second) {
 		t.Error("New session should exist after replacing old one")
 	}
 }
@@ -2325,8 +2337,7 @@ func TestStartTmuxSession_QuotesShellMetachars(t *testing.T) {
 		t.Fatalf("startTmuxSession failed: %v", err)
 	}
 
-	// Verify session was created
-	if !tmuxSessionExists(sessionName) {
+	if !waitForTmuxSession(sessionName, 5*time.Second) {
 		t.Fatal("Session was not created")
 	}
 
