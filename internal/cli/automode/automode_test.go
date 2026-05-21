@@ -638,11 +638,17 @@ func TestCleanupTmuxSession_SendsCtrlC(t *testing.T) {
 	}
 
 	sessionName := fmt.Sprintf("loom-test-ctrlc-%d", os.Getpid())
-	signalFile := filepath.Join(t.TempDir(), "received-sigint")
+	tmpDir := t.TempDir()
+	signalFile := filepath.Join(tmpDir, "received-sigint")
+	readyFile := filepath.Join(tmpDir, "trap-installed")
 
-	// Create a script that writes to a file when it receives SIGINT
-	// The script traps SIGINT and writes before exiting
-	trapScript := fmt.Sprintf(`trap 'echo received > %s; exit 0' INT; sleep 30`, signalFile)
+	// Trap SIGINT to write a signal file, then announce that the trap is
+	// installed via readyFile before the long sleep starts. The test waits
+	// for readyFile below so it cannot race ahead and send Ctrl+C before
+	// the trap has been registered — under CI load, shell startup can take
+	// >100ms, and a too-early C-c hits the default SIGINT handler and
+	// kills the shell before the trap fires.
+	trapScript := fmt.Sprintf(`trap 'echo received > %s; exit 0' INT; touch %s; sleep 30`, signalFile, readyFile)
 
 	// Create tmux session running the trap script
 	err := exec.Command("tmux", "new-session", "-d", "-s", sessionName, "sh", "-c", trapScript).Run() //nolint:norawexec
@@ -650,8 +656,10 @@ func TestCleanupTmuxSession_SendsCtrlC(t *testing.T) {
 		t.Fatalf("Failed to create tmux session: %v", err)
 	}
 
-	// Give the script time to set up the trap
-	time.Sleep(100 * time.Millisecond)
+	// Wait until the shell has installed the trap and is in `sleep`.
+	if !waitForFile(readyFile, 10*time.Second) {
+		t.Fatal("Timeout waiting for trap-installed marker — shell never reached `sleep`")
+	}
 
 	// Call cleanupTmuxSession - should send Ctrl+C then kill
 	cleanupTmuxSession(sessionName)
