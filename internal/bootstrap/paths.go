@@ -7,20 +7,32 @@ package bootstrap
 import (
 	"os"
 	"path/filepath"
+	"testing"
 )
 
 // LoomDir returns loom's per-user data directory.
 //
-// Resolution order:
+// Resolution order (production):
 //  1. LOOM_CONFIG_DIR env var (the directory holds state.json + the
 //     embedded fleet-db data dir, not yaml config).
 //  2. $HOME/.loom
 //
-// Returns "" if the home directory cannot be resolved AND the env var
-// is unset; callers should treat that as a fatal bootstrap error.
+// In production, returns "" if the home directory cannot be resolved
+// AND the env var is unset; callers should treat that as a fatal
+// bootstrap error.
+//
+// Under `go test`, falling back to $HOME/.loom would let an unprotected
+// test atomically overwrite the user's real state.json (see LOOM-11).
+// To make that class of bug fail loud, this function panics when called
+// from a test binary with LOOM_CONFIG_DIR unset — tests must set
+// LOOM_CONFIG_DIR (typically `t.Setenv("LOOM_CONFIG_DIR", t.TempDir())`)
+// before invoking any bootstrap state API.
 func LoomDir() string {
 	if dir := os.Getenv("LOOM_CONFIG_DIR"); dir != "" {
 		return dir
+	}
+	if testing.Testing() {
+		panic("bootstrap.LoomDir: refusing to fall back to $HOME/.loom under go test — set LOOM_CONFIG_DIR (e.g. t.Setenv(\"LOOM_CONFIG_DIR\", t.TempDir())) before calling bootstrap state APIs in tests")
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {

@@ -148,6 +148,8 @@ func TestSessionServiceListTaskSessionsFallsBackToFileStores(t *testing.T) {
 }
 
 func TestSessionServiceListTaskSessionsSearchesRuntimeDir(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+
 	ctx := t.Context()
 	workspacePath := t.TempDir()
 	runtimeDir := t.TempDir()
