@@ -2,7 +2,6 @@ package app
 
 import (
 	"net/http"
-	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlermux"
@@ -184,7 +183,11 @@ func (app *Server) registerWorkspaceRoutes() {
 		wsMux.ServeHTTP(w, r)
 	})
 	app.mux.Handle("/api/workspaces/{ws}/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/runtime-ready") {
+		// /runtime-ready is an unauthenticated readiness probe consumed by
+		// ensure-runtime; bypass workspace middleware for it. Exact-path
+		// match (not HasSuffix) so a future nested route ending in
+		// `/runtime-ready` does not silently skip middleware.
+		if r.Method == http.MethodGet && r.URL.Path == "/api/workspaces/"+r.PathValue("ws")+"/runtime-ready" {
 			wsHandler.ServeHTTP(w, r)
 			return
 		}
