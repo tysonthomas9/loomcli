@@ -100,6 +100,19 @@ ENVIRONMENT VARIABLES
   LOOM_AUTH_URL         External auth service base URL (enables JWT auth)
   LOOM_AUTH_ISSUER      Expected JWT issuer (defaults to LOOM_AUTH_URL)
   LOOM_AUTH_AUDIENCE    Expected JWT audience (defaults to "loom")
+  LOOM_CONFIG_DIR             Per-user data directory (defaults to ~/.loom).
+                              Setting this without LOOM_FLEET_DB_REGISTRY
+                              implies LOOM_FLEET_DB_NO_DISCOVERY=1 to keep
+                              parallel stacks isolated from the host's
+                              fleet-db.
+  LOOM_FLEET_DB_NO_DISCOVERY  Set to 1 to skip the host-wide fleet-db
+                              registry and force an isolated embedded
+                              instance. Set to 0 to opt back into discovery
+                              when LOOM_CONFIG_DIR is set.
+  LOOM_FLEET_DB_REGISTRY      Override the registry file path (default
+                              ~/.loom/fleet-db/active.json). Set when
+                              running parallel stacks that should
+                              coordinate on a private registry.
 
 EXAMPLES
   loom serve                                              # Default port 8080

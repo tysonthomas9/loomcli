@@ -81,6 +81,18 @@ Commands:
   loom daemon restart <agent>      Restart a single agent with fresh state
   loom daemon queue <agent>        Preview an agent's filtered work queue
 
+Environment variables:
+  LOOM_CONFIG_DIR             Per-user data directory (defaults to ~/.loom).
+                              Setting this without LOOM_FLEET_DB_REGISTRY
+                              implies LOOM_FLEET_DB_NO_DISCOVERY=1 to keep
+                              parallel stacks isolated.
+  LOOM_FLEET_DB_NO_DISCOVERY  Set to 1 to skip the host-wide fleet-db
+                              registry and force an isolated embedded
+                              instance. Set to 0 to opt back into discovery
+                              when LOOM_CONFIG_DIR is set.
+  LOOM_FLEET_DB_REGISTRY      Override the registry file path (default
+                              ~/.loom/fleet-db/active.json).
+
 Configuration is managed with FleetDB-backed daemon, role, and agent commands.`,
 	Run: runDaemon,
 }

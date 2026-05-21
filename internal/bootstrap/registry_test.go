@@ -310,6 +310,83 @@ func TestTryReuseActiveRegistryRespectsNoDiscoveryEnv(t *testing.T) {
 	}
 }
 
+// TestDiscoveryDisabledSmartDefault locks the parallel-stack default:
+// when an operator sets LOOM_CONFIG_DIR without coordinating on
+// LOOM_FLEET_DB_REGISTRY, discovery is implicitly disabled so the
+// sandbox does not silently join the host's fleet-db.
+func TestDiscoveryDisabledSmartDefault(t *testing.T) {
+	cases := []struct {
+		name        string
+		noDiscovery *string // nil = unset
+		configDir   *string
+		registry    *string
+		want        bool
+	}{
+		{name: "all unset → enabled", want: false},
+		{
+			name:      "config-dir alone → smart-default disabled",
+			configDir: ptr("/tmp/sandbox"),
+			want:      true,
+		},
+		{
+			name:      "config-dir + explicit registry → enabled",
+			configDir: ptr("/tmp/sandbox"),
+			registry:  ptr("/tmp/sandbox/registry.json"),
+			want:      false,
+		},
+		{
+			name:      "config-dir empty string → enabled (treated as unset)",
+			configDir: ptr(""),
+			want:      false,
+		},
+		{
+			name:        "explicit NO_DISCOVERY=1 wins over smart default",
+			noDiscovery: ptr("1"),
+			configDir:   ptr("/tmp/sandbox"),
+			registry:    ptr("/tmp/sandbox/registry.json"),
+			want:        true,
+		},
+		{
+			name:        "explicit NO_DISCOVERY=0 wins over smart default",
+			noDiscovery: ptr("0"),
+			configDir:   ptr("/tmp/sandbox"),
+			want:        false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// t.Setenv only takes a value; use os.Unsetenv + Cleanup
+			// to express "truly unset" semantics that LookupEnv reports
+			// as ok=false.
+			resetEnv(t, EnvFleetDBNoDiscovery, tc.noDiscovery)
+			resetEnv(t, "LOOM_CONFIG_DIR", tc.configDir)
+			resetEnv(t, EnvFleetDBRegistry, tc.registry)
+			if got := discoveryDisabled(); got != tc.want {
+				t.Errorf("discoveryDisabled() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func ptr(s string) *string { return &s }
+
+func resetEnv(t *testing.T, key string, val *string) {
+	t.Helper()
+	prev, hadPrev := os.LookupEnv(key)
+	t.Cleanup(func() {
+		if hadPrev {
+			_ = os.Setenv(key, prev)
+		} else {
+			_ = os.Unsetenv(key)
+		}
+	})
+	if val == nil {
+		_ = os.Unsetenv(key)
+		return
+	}
+	_ = os.Setenv(key, *val)
+}
+
 // TestOpenStoreLocalJoinsActiveRegistryFromOtherDataDir is the LOOM-7
 // repro: a foreign fleet-db (registered under a different data dir) is
 // running; OpenStore for *this* data dir must join it instead of trying

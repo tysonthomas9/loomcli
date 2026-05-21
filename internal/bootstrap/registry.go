@@ -23,6 +23,14 @@ const EnvFleetDBRegistry = "LOOM_FLEET_DB_REGISTRY"
 // writes to the host-wide registry. The per-data-dir reuse path still
 // runs. Useful for tests and for users who intentionally want isolated
 // fleet-db instances per data dir.
+//
+// Smart default: when LOOM_CONFIG_DIR is set AND
+// LOOM_FLEET_DB_REGISTRY is NOT set, discovery is disabled
+// automatically. An operator pointing the data dir at a non-default
+// location and not opting into an explicit registry path is almost
+// certainly running a parallel stack and would be surprised to silently
+// join the host's existing fleet-db. Set
+// LOOM_FLEET_DB_NO_DISCOVERY=0 to override and re-enable.
 const EnvFleetDBNoDiscovery = "LOOM_FLEET_DB_NO_DISCOVERY"
 
 // activeRegistryFile is the basename written under the registry directory.
@@ -95,9 +103,20 @@ func registryLockPath(registryPath string) string {
 }
 
 // discoveryDisabled reports whether registry reads and writes are
-// short-circuited via LOOM_FLEET_DB_NO_DISCOVERY=1.
+// short-circuited.
+//
+// Explicit override (LOOM_FLEET_DB_NO_DISCOVERY=1 or =0) always wins.
+// In the absence of that, when LOOM_CONFIG_DIR is set (non-empty) but
+// LOOM_FLEET_DB_REGISTRY is NOT, discovery defaults to disabled. The
+// operator has chosen a non-default data dir without coordinating on
+// the registry path, which is the parallel-stack scenario; silently
+// joining the host fleet-db there has caused real confusion. Empty
+// values are treated as unset to match LoomDir()'s convention.
 func discoveryDisabled() bool {
-	return os.Getenv(EnvFleetDBNoDiscovery) == "1"
+	if v, ok := os.LookupEnv(EnvFleetDBNoDiscovery); ok {
+		return v == "1"
+	}
+	return os.Getenv("LOOM_CONFIG_DIR") != "" && os.Getenv(EnvFleetDBRegistry) == ""
 }
 
 // acquireActiveRegistryLock takes a non-blocking exclusive flock on the
