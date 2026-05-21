@@ -359,7 +359,9 @@ func TestDataUpdate_AllChangedFields(t *testing.T) {
 		updateNotes = "ready for review"
 		updateDesign = "new approach"
 		updatePriority = 0
-		for _, name := range []string{"status", "assignee", "notes", "design", "priority"} {
+		updateTitle = "renamed title"
+		updateDescription = "rewritten body"
+		for _, name := range []string{"status", "assignee", "notes", "design", "priority", "title", "description"} {
 			setTestFlagChanged(t, updateCmd.Flags(), name, true)
 		}
 
@@ -390,6 +392,12 @@ func TestDataUpdate_AllChangedFields(t *testing.T) {
 		}
 		if params.Priority == nil || *params.Priority != 0 {
 			t.Fatalf("Update priority = %#v", params.Priority)
+		}
+		if params.Title == nil || *params.Title != "renamed title" {
+			t.Fatalf("Update title = %#v", params.Title)
+		}
+		if params.Description == nil || *params.Description != "rewritten body" {
+			t.Fatalf("Update description = %#v", params.Description)
 		}
 	})
 }
