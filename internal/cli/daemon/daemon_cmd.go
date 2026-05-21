@@ -211,6 +211,17 @@ func runDaemon(cmd *cobra.Command, args []string) {
 	defer lockFile.Close()
 	defer os.Remove(paths.lockFile)
 
+	// When a workspace is configured, also take a workspace-scoped lock
+	// so two daemons started from different cwds against the same
+	// workspace (which the per-cwd daemon.lock above cannot catch)
+	// refuse to coexist. No-op in single-project mode.
+	wsLock, wsErr := acquireWorkspaceDaemonLock()
+	if wsErr != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", wsErr)
+		os.Exit(1)
+	}
+	defer wsLock.Release()
+
 	initPIDFile(paths.pidFile)
 	defer os.Remove(paths.pidFile)
 	// runDaemonMainLoop waits for the state updater to stop before returning;
