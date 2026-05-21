@@ -155,6 +155,8 @@ func runPlanDaemon(deps *cli.Deps, worktreePath, agentName string) {
 	// → log mtime advances per turn.
 	shutdown := automode.SetupSignalHandler()
 	collector := usage.NewCollector(cli.GetBackendName(), agentName)
+	stopHeartbeat := startBackgroundLeaseHeartbeat()
+	defer stopHeartbeat()
 	invokeErr := deps.Agent.InvokeNonInteractive(worktreePath, prompt, agentName, shutdown, collector)
 
 	emitTaskLifecycleResult(agentName, worktreePath, startedAt, invokeErr)

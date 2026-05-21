@@ -147,6 +147,8 @@ func runTaskDaemon(deps *cli.Deps, worktreePath, agentName string) {
 	// non-interactive path: PTY + stream-json → log mtime advances per turn.
 	shutdown := automode.SetupSignalHandler()
 	collector := usage.NewCollector(cli.GetBackendName(), agentName)
+	stopHeartbeat := startBackgroundLeaseHeartbeat()
+	defer stopHeartbeat()
 	invokeErr := deps.Agent.InvokeNonInteractive(worktreePath, prompt, agentName, shutdown, collector)
 
 	emitTaskLifecycleResult(agentName, worktreePath, startedAt, invokeErr)

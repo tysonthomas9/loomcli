@@ -160,6 +160,75 @@ func TestAgentIPCClient_Claim_WithLockTTL(t *testing.T) {
 	})
 }
 
+// TestAgentIPCClient_Heartbeat_SendsRightFields locks in the wire format
+// of heartbeat: the operation name, the lease credentials, and the absence
+// of an IssueID. Heartbeat doesn't target any issue, and including a stale
+// IssueID would surprise future readers.
+func TestAgentIPCClient_Heartbeat_SendsRightFields(t *testing.T) {
+	tmpDir := shortSocketDir(t)
+	socketPath := filepath.Join(tmpDir, "ipc.sock")
+
+	var captured AgentIPCRequest
+	startTestIPCServer(t, socketPath, func(req AgentIPCRequest) AgentIPCResponse {
+		captured = req
+		return AgentIPCResponse{Success: true}
+	})
+
+	client := NewAgentIPCClient(socketPath, "falcon")
+	client.SessionID = "sess-1"
+	client.LeaseID = "lease-1"
+	client.LeaseToken = "tok-1"
+	if err := client.Heartbeat(); err != nil {
+		t.Fatalf("Heartbeat() error = %v", err)
+	}
+
+	if captured.Operation != IPCOpHeartbeat {
+		t.Errorf("Operation = %q, want %q", captured.Operation, IPCOpHeartbeat)
+	}
+	if captured.AgentName != "falcon" {
+		t.Errorf("AgentName = %q, want %q", captured.AgentName, "falcon")
+	}
+	if captured.SessionID != "sess-1" || captured.LeaseID != "lease-1" || captured.LeaseToken != "tok-1" {
+		t.Errorf("lease creds not propagated: session=%q lease=%q token=%q",
+			captured.SessionID, captured.LeaseID, captured.LeaseToken)
+	}
+	if captured.IssueID != "" {
+		t.Errorf("IssueID = %q, want empty (heartbeat is not issue-scoped)", captured.IssueID)
+	}
+}
+
+// TestAgentIPCClient_Heartbeat_PropagatesConflict ensures the typed
+// conflict error (e.g. "lease expired") surfaces to the caller as a
+// BackendError of KindConflict, so callers can distinguish a stale-lease
+// failure from a transport error.
+func TestAgentIPCClient_Heartbeat_PropagatesConflict(t *testing.T) {
+	tmpDir := shortSocketDir(t)
+	socketPath := filepath.Join(tmpDir, "ipc.sock")
+
+	startTestIPCServer(t, socketPath, func(req AgentIPCRequest) AgentIPCResponse {
+		return AgentIPCResponse{
+			Error: "lease expired",
+			Kind:  string(backend.KindConflict),
+		}
+	})
+
+	client := NewAgentIPCClient(socketPath, "falcon")
+	client.SessionID = "sess-1"
+	client.LeaseID = "lease-1"
+	client.LeaseToken = "tok-1"
+	err := client.Heartbeat()
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	be, ok := err.(*backend.BackendError)
+	if !ok {
+		t.Fatalf("err = %T, want *backend.BackendError", err)
+	}
+	if be.Kind != backend.KindConflict {
+		t.Errorf("Kind = %s, want %s", be.Kind, backend.KindConflict)
+	}
+}
+
 func TestAgentIPCClient_Update_Success(t *testing.T) {
 	tmpDir := shortSocketDir(t)
 	socketPath := filepath.Join(tmpDir, "ipc.sock")

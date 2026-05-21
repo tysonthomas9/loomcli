@@ -866,6 +866,149 @@ func TestIPCServer_CompletePublishesMutation(t *testing.T) {
 	}
 }
 
+// TestIPCServer_Heartbeat_RefreshesLease confirms that a heartbeat request
+// with valid credentials extends the lease's ExpiresAt without performing
+// any business operation against the issue backend. This is the core
+// behavior the agent supervisor's background keep-alive relies on.
+func TestIPCServer_Heartbeat_RefreshesLease(t *testing.T) {
+	mb := &mockIPCBackend{}
+	d := newTestIPCDaemon(mb)
+	defer close(d.sup.Shutdown)
+	st := memstore.New()
+	d.store = st
+	d.sup.WorkspaceID = "WS"
+
+	session, err := st.AgentSessions().Create(t.Context(), store.AgentSessionCreate{
+		WorkspaceKey: "WS",
+		SessionID:    "sess-hb",
+		AgentID:      "falcon",
+		NodeID:       "node-1",
+		Kind:         domain.AgentSessionKindTask,
+		Status:       domain.AgentSessionRunning,
+	})
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	lease, err := st.AgentLeases().Create(t.Context(), store.AgentLeaseCreate{
+		WorkspaceKey: "WS",
+		SessionID:    session.SessionID,
+		LeaseID:      "lease-hb",
+		AgentID:      "falcon",
+		NodeID:       "node-1",
+		TTL:          100 * time.Millisecond, // intentionally tiny; heartbeat should bump it
+	})
+	if err != nil {
+		t.Fatalf("create lease: %v", err)
+	}
+	originalExpiry := lease.ExpiresAt
+
+	resp := d.handleIPCHeartbeat(AgentIPCRequest{
+		Operation:  ipcOpHeartbeat,
+		AgentName:  "falcon",
+		SessionID:  session.SessionID,
+		LeaseID:    lease.LeaseID,
+		LeaseToken: lease.Token,
+	})
+	if !resp.Success {
+		t.Fatalf("heartbeat with valid lease failed: %s (kind=%s)", resp.Error, resp.Kind)
+	}
+	if len(mb.claimCalls) != 0 || len(mb.updateCalls) != 0 || len(mb.closeCalls) != 0 {
+		t.Errorf("heartbeat must not call the issue backend, got claims=%d updates=%d closes=%d",
+			len(mb.claimCalls), len(mb.updateCalls), len(mb.closeCalls))
+	}
+
+	refreshed, err := st.AgentLeases().Get(t.Context(), "WS", lease.LeaseID)
+	if err != nil {
+		t.Fatalf("get lease after heartbeat: %v", err)
+	}
+	if !refreshed.ExpiresAt.After(originalExpiry) {
+		t.Errorf("expected ExpiresAt to advance past %v, got %v", originalExpiry, refreshed.ExpiresAt)
+	}
+}
+
+// TestIPCServer_Heartbeat_RejectsBadToken protects against an attacker (or
+// stale session) refreshing a lease they don't own.
+func TestIPCServer_Heartbeat_RejectsBadToken(t *testing.T) {
+	mb := &mockIPCBackend{}
+	d := newTestIPCDaemon(mb)
+	defer close(d.sup.Shutdown)
+	st := memstore.New()
+	d.store = st
+	d.sup.WorkspaceID = "WS"
+
+	session, err := st.AgentSessions().Create(t.Context(), store.AgentSessionCreate{
+		WorkspaceKey: "WS",
+		SessionID:    "sess-hb2",
+		AgentID:      "falcon",
+		NodeID:       "node-1",
+		Kind:         domain.AgentSessionKindTask,
+		Status:       domain.AgentSessionRunning,
+	})
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	lease, err := st.AgentLeases().Create(t.Context(), store.AgentLeaseCreate{
+		WorkspaceKey: "WS",
+		SessionID:    session.SessionID,
+		LeaseID:      "lease-hb2",
+		AgentID:      "falcon",
+		NodeID:       "node-1",
+		TTL:          time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("create lease: %v", err)
+	}
+
+	resp := d.handleIPCHeartbeat(AgentIPCRequest{
+		Operation:  ipcOpHeartbeat,
+		AgentName:  "falcon",
+		SessionID:  session.SessionID,
+		LeaseID:    lease.LeaseID,
+		LeaseToken: "wrong-token",
+	})
+	if resp.Success {
+		t.Fatal("heartbeat accepted a bad token")
+	}
+}
+
+// TestIPCServer_Heartbeat_NoStore covers the daemon-without-store case (used
+// when the IPC server runs purely for local notifications). The heartbeat
+// must succeed because there is no lease state to refresh.
+func TestIPCServer_Heartbeat_NoStore(t *testing.T) {
+	mb := &mockIPCBackend{}
+	d := newTestIPCDaemon(mb)
+	defer close(d.sup.Shutdown)
+	// d.store and d.sup.WorkspaceID are deliberately left empty.
+
+	resp := d.handleIPCHeartbeat(AgentIPCRequest{
+		Operation: ipcOpHeartbeat,
+		AgentName: "falcon",
+	})
+	if !resp.Success {
+		t.Fatalf("heartbeat against store-less daemon failed: %s", resp.Error)
+	}
+}
+
+// TestIPCServer_Heartbeat_RoutedByDispatcher verifies the dispatcher
+// recognizes "heartbeat" as a known op (it would otherwise return
+// "unknown operation: heartbeat").
+func TestIPCServer_Heartbeat_RoutedByDispatcher(t *testing.T) {
+	mb := &mockIPCBackend{}
+	d := newTestIPCDaemon(mb)
+	defer close(d.sup.Shutdown)
+
+	resp := d.dispatchIPCOperation(AgentIPCRequest{
+		Operation: ipcOpHeartbeat,
+		AgentName: "falcon",
+	})
+	if !resp.Success {
+		t.Fatalf("dispatch heartbeat failed: %s", resp.Error)
+	}
+	if resp.Error != "" && strings.Contains(resp.Error, "unknown operation") {
+		t.Errorf("dispatcher rejected heartbeat as unknown: %s", resp.Error)
+	}
+}
+
 func TestIPCServer_ClaimError_NoMutation(t *testing.T) {
 	mb := &mockIPCBackend{
 		claimErr: fmt.Errorf("database unavailable"),

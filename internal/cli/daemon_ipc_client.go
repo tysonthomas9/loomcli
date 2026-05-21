@@ -112,6 +112,25 @@ func (c *AgentIPCClient) Complete(issueID string, params backend.CloseParams) (*
 	return &result, nil
 }
 
+// Heartbeat refreshes the agent lease on the daemon side without performing
+// any business operation. The agent supervisor (loom task / loom plan) runs
+// this periodically while the backend is busy with long, IPC-silent work
+// (e.g. `make gate`) to prevent the lease from aging out.
+func (c *AgentIPCClient) Heartbeat() error {
+	req := AgentIPCRequest{
+		Operation:  IPCOpHeartbeat,
+		AgentName:  c.AgentName,
+		SessionID:  c.SessionID,
+		LeaseID:    c.LeaseID,
+		LeaseToken: c.LeaseToken,
+	}
+	resp, err := sendAgentIPCRequest(c.SocketPath, req)
+	if err != nil {
+		return err
+	}
+	return ipcResponseToError(resp, "ipc.heartbeat")
+}
+
 // sendAgentIPCRequest dials the Unix socket, sends one JSON-line request, reads
 // one JSON-line response, and disconnects. All transport errors are returned as
 // backend.ErrUnavailable.

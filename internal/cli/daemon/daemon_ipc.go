@@ -37,9 +37,10 @@ type AgentIPCResponse struct {
 
 // Operation name constants for agent IPC.
 const (
-	ipcOpClaim    = "claim"
-	ipcOpUpdate   = "update"
-	ipcOpComplete = "complete"
+	ipcOpClaim     = "claim"
+	ipcOpUpdate    = "update"
+	ipcOpComplete  = "complete"
+	ipcOpHeartbeat = "heartbeat"
 )
 
 // ipcClaimArgs are the optional arguments for the claim operation.
@@ -155,7 +156,7 @@ func validateIPCRequest(req AgentIPCRequest) (AgentIPCResponse, bool) {
 // can thread it through to inherit the span as parent.
 func (d *Daemon) dispatchIPCOperation(req AgentIPCRequest) AgentIPCResponse {
 	switch req.Operation {
-	case ipcOpClaim, ipcOpUpdate, ipcOpComplete:
+	case ipcOpClaim, ipcOpUpdate, ipcOpComplete, ipcOpHeartbeat:
 		// known method — fall through to traced dispatch below
 	default:
 		return AgentIPCResponse{Error: fmt.Sprintf("unknown operation: %q", req.Operation)}
@@ -173,6 +174,8 @@ func (d *Daemon) dispatchIPCOperation(req AgentIPCRequest) AgentIPCResponse {
 		resp = d.handleIPCUpdate(req)
 	case ipcOpComplete:
 		resp = d.handleIPCComplete(req)
+	case ipcOpHeartbeat:
+		resp = d.handleIPCHeartbeat(req)
 	}
 	recordIPCErr(span, resp)
 	return resp
@@ -290,6 +293,21 @@ func (d *Daemon) handleIPCComplete(req AgentIPCRequest) AgentIPCResponse {
 	d.publishMutation(mut)
 
 	return AgentIPCResponse{Success: true, Data: data}
+}
+
+// handleIPCHeartbeat refreshes the agent lease without performing any
+// business operation. It exists so the long-running agent supervisor
+// (loom task / loom plan) can keep its lease alive during steps that
+// otherwise emit no IPC traffic for minutes (notably `make gate`).
+// validateIPCLease already calls AgentLeases.Heartbeat under the hood,
+// so the side effect is the entire point.
+func (d *Daemon) handleIPCHeartbeat(req AgentIPCRequest) AgentIPCResponse {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if resp, ok := d.validateIPCLease(ctx, req); !ok {
+		return resp
+	}
+	return AgentIPCResponse{Success: true}
 }
 
 func (d *Daemon) validateIPCLease(ctx context.Context, req AgentIPCRequest) (AgentIPCResponse, bool) {

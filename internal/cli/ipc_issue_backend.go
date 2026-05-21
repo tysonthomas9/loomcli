@@ -186,9 +186,10 @@ type AgentIPCResponse struct {
 
 // IPC operation name constants.
 const (
-	IPCOpClaim    = "claim"
-	IPCOpUpdate   = "update"
-	IPCOpComplete = "complete"
+	IPCOpClaim     = "claim"
+	IPCOpUpdate    = "update"
+	IPCOpComplete  = "complete"
+	IPCOpHeartbeat = "heartbeat"
 )
 
 // IPCClaimArgs are the optional arguments for the claim operation.
