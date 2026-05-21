@@ -113,6 +113,10 @@ func localRuntimeE2EEnv(dataDir, fleetDB string) []string {
 		"LOOM_WORKSPACE_RUNTIME_DIR="+dataDir,
 		"LOOM_WORKSPACE=RUNTIMEFIX",
 		"FLEET_DB_BIN="+fleetDB,
+		// Keep the e2e isolated from the host's $HOME/.loom/fleet-db
+		// registry so a desktop loom serve on the developer's machine
+		// can't be joined accidentally and skew results.
+		"LOOM_FLEET_DB_NO_DISCOVERY=1",
 		"GIT_CONFIG_NOSYSTEM=1",
 	)
 }

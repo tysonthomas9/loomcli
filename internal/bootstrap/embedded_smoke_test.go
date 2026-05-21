@@ -21,6 +21,9 @@ func TestEmbeddedFleetDBPersistenceSmoke(t *testing.T) {
 	if diag := bootstrap.DiagnoseFleetDBBinary(); diag.Err != nil {
 		t.Skipf("fleet-db binary unavailable: %v", diag.Err)
 	}
+	// Keep the smoke self-contained — do not touch the host's
+	// $HOME/.loom/fleet-db/active.json registry.
+	t.Setenv(bootstrap.EnvFleetDBNoDiscovery, "1")
 
 	dataDir := t.TempDir()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
