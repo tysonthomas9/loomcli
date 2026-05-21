@@ -152,6 +152,7 @@ func startFleetDBForIssueBackendConformance(t *testing.T) string {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	t.Cleanup(cancel)
+	t.Setenv(bootstrap.EnvFleetDBNoDiscovery, "1")
 	emb, err := bootstrap.StartEmbedded(ctx, t.TempDir(), slog.Default())
 	if err != nil {
 		t.Fatalf("start fleet-db: %v", err)
@@ -168,6 +169,7 @@ func createLocalWorkspace(t *testing.T, configDir, workspace string) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
+	t.Setenv(bootstrap.EnvFleetDBNoDiscovery, "1")
 	handle, err := bootstrap.OpenStore(ctx, configDir, slog.Default())
 	if err != nil {
 		t.Fatalf("open local fleet-db store: %v", err)

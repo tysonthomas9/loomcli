@@ -125,8 +125,16 @@ func openLocalStore(ctx context.Context, dataDir string, cfg fleetdb.Config, log
 		return h, err
 	}
 
+	if h, ok, err := tryJoinActiveRegistry(ctx, cfg, logger); ok || err != nil {
+		return h, err
+	}
+
 	emb, err := StartEmbedded(ctx, dataDir, logger)
 	if err != nil {
+		if joinURL := ReuseURLFromError(err); joinURL != "" {
+			h, _, joinErr := joinLocalStoreByURL(cfg, logger, joinURL)
+			return h, joinErr
+		}
 		if errors.Is(err, ErrEmbeddedAlreadyRunning) {
 			return waitAndOpenLocalStore(ctx, fleetDir, cfg, logger, err)
 		}
@@ -140,6 +148,39 @@ func openLocalStore(ctx context.Context, dataDir string, cfg fleetdb.Config, log
 	}
 	logger.Info("opened embedded fleet-db client", "url", cfg.BaseURL)
 	return &StoreHandle{Store: client, mode: ModeLocal, url: cfg.BaseURL, embedded: emb}, nil
+}
+
+// tryJoinActiveRegistry probes the host-wide registry for a foreign
+// fleet-db this loom serve can share. Mirrors tryReuseLocalStore but
+// uses LOOM_FLEET_DB_REGISTRY (or $HOME/.loom/fleet-db/active.json)
+// instead of the per-data-dir runtime.json.
+func tryJoinActiveRegistry(ctx context.Context, cfg fleetdb.Config, logger *slog.Logger) (*StoreHandle, bool, error) {
+	registryPath := RegistryPath()
+	if registryPath == "" || discoveryDisabled() {
+		return nil, false, nil
+	}
+	url, ok, err := tryReuseActiveRegistry(ctx, registryPath, logger, healthCheckTimeout)
+	if err != nil {
+		// Live PID but unhealthy — surface so we don't silently start a second.
+		return nil, false, fmt.Errorf("openstore: local: %w", err)
+	}
+	if !ok {
+		return nil, false, nil
+	}
+	return joinLocalStoreByURL(cfg, logger, url)
+}
+
+// joinLocalStoreByURL builds a client-only StoreHandle pointed at an
+// already-running local fleet-db owned by another process. embedded is
+// nil — closing this handle does not affect the foreign subprocess.
+func joinLocalStoreByURL(cfg fleetdb.Config, logger *slog.Logger, url string) (*StoreHandle, bool, error) {
+	cfg.BaseURL = url
+	client, err := fleetdb.New(cfg)
+	if err != nil {
+		return nil, true, fmt.Errorf("openstore: local joined client: %w", err)
+	}
+	logger.Info("joined existing local fleet-db", "url", url)
+	return &StoreHandle{Store: client, mode: ModeLocal, url: url}, true, nil
 }
 
 func tryReuseLocalStore(ctx context.Context, fleetDir string, cfg fleetdb.Config, logger *slog.Logger) (*StoreHandle, bool, error) {

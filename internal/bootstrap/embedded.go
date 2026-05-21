@@ -272,11 +272,12 @@ const startupTimeout = 30 * time.Second
 // Stop is idempotent and safe to call from a deferred function plus a
 // signal handler.
 type EmbeddedFleetDB struct {
-	url      string
-	cmd      *exec.Cmd
-	redisMgr *localredis.Manager
-	runLock  *embeddedRuntimeLock
-	logger   *slog.Logger
+	url          string
+	cmd          *exec.Cmd
+	redisMgr     *localredis.Manager
+	runLock      *embeddedRuntimeLock
+	registryPath string
+	logger       *slog.Logger
 
 	stopOnce      sync.Once
 	stopRequested atomic.Bool   // true once Stop is invoked; suppresses "unexpected exit" log
@@ -293,7 +294,7 @@ type EmbeddedFleetDB struct {
 // In cloud mode (LOOM_FLEET_DB_URL set) callers should not call this
 // at all; this function unconditionally spawns a subprocess.
 //
-//nolint:funlen // Process bootstrap needs to keep setup and cleanup ordering explicit.
+//nolint:funlen,cyclop // Process bootstrap keeps setup, registry coordination, and cleanup ordering explicit.
 func StartEmbedded(ctx context.Context, dataDir string, logger *slog.Logger) (*EmbeddedFleetDB, error) {
 	if logger == nil {
 		logger = slog.Default()
@@ -322,6 +323,26 @@ func StartEmbedded(ctx context.Context, dataDir string, logger *slog.Logger) (*E
 			_ = runLock.Release()
 		}
 	}()
+
+	// Host-wide registry probe: if some other loom serve (running under
+	// a different LOOM_CONFIG_DIR) already owns the local fleet-db, join
+	// it instead of spawning a second subprocess. The registry lock makes
+	// this check race-free against a concurrent starter.
+	registryPath := RegistryPath()
+	regLock, regJoinURL, regErr := acquireRegistryLockOrWaitForPeer(ctx, registryPath, logger)
+	if regErr != nil {
+		return nil, regErr
+	}
+	if regJoinURL != "" {
+		return nil, &embeddedReuseError{URL: regJoinURL, err: fmt.Errorf("%w at %s", ErrEmbeddedAlreadyRunning, regJoinURL)}
+	}
+	if regLock != nil {
+		// Keep the lock held until after the subprocess is healthy and
+		// we've written our own registry entry. Worst case: the lock is
+		// held for startupTimeout (~30s); concurrent starters block in
+		// acquireRegistryLockOrWaitForPeer until our entry appears.
+		defer func() { _ = regLock.Release() }()
+	}
 
 	snapshotPath := filepath.Join(fleetDir, "redis-snapshot.json")
 	redisCfg, err := desiredEmbeddedRedisConfig(dataDir)
@@ -438,6 +459,19 @@ func StartEmbedded(ctx context.Context, dataDir string, logger *slog.Logger) (*E
 		return nil, fmt.Errorf("embedded: write runtime metadata: %w", err)
 	}
 
+	if regLock != nil {
+		if err := WriteActiveRegistry(registryPath, ActiveRegistryEntry{
+			PID:       cmd.Process.Pid,
+			URL:       emb.url,
+			DataDir:   dataDir,
+			StartedAt: time.Now().UTC(),
+		}); err != nil {
+			_ = emb.Stop()
+			return nil, fmt.Errorf("embedded: write registry entry: %w", err)
+		}
+		emb.registryPath = registryPath
+	}
+
 	releaseLockOnError = false
 	return emb, nil
 }
@@ -482,6 +516,9 @@ func (e *EmbeddedFleetDB) Stop() error {
 		}
 		if e.runLock != nil {
 			removeEmbeddedRuntimeIfOwner(filepath.Dir(e.runLock.path), pid, e.url)
+		}
+		if e.registryPath != "" {
+			RemoveActiveRegistryIfOwner(e.registryPath, pid, e.url)
 		}
 		close(e.done)
 	})
