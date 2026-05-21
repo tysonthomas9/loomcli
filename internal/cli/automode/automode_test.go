@@ -2179,13 +2179,19 @@ func TestGetPaneState_ParsesCorrectly(t *testing.T) {
 		exec.Command("tmux", "kill-session", "-t", sessionName).Run() //nolint:norawexec
 	})
 
-	// Give session time to start
-	time.Sleep(100 * time.Millisecond)
-
-	// Get pane state while session is running
-	state, err := getPaneState(sessionName)
+	// Poll for the session to be queryable rather than fixed-sleep — under
+	// CI load the tmux server may need >100ms to register the new session.
+	deadline := time.Now().Add(5 * time.Second)
+	var state *PaneState
+	for time.Now().Before(deadline) {
+		state, err = getPaneState(sessionName)
+		if err == nil {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 	if err != nil {
-		t.Fatalf("getPaneState failed: %v", err)
+		t.Fatalf("getPaneState failed after polling: %v", err)
 	}
 
 	// Command is still running, so pane should NOT be dead
