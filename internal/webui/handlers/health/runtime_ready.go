@@ -60,6 +60,21 @@ func (a *runtimeReadyPoolAdapter) Discard(client runtimeReadyClient) {
 	}
 }
 
+// maxEchoedWorkspaceLen caps the workspace key reflected back in the response
+// body. The endpoint is unauthenticated, so an attacker probing arbitrary
+// paths can otherwise make the runtime echo arbitrary attacker-controlled
+// strings (Go's ServeMux percent-decodes %2F, so the ws path value can hold
+// any UTF-8 sequence). Truncation caps the log-poisoning blast radius without
+// breaking legitimate workspace keys.
+const maxEchoedWorkspaceLen = 64
+
+func truncateForEcho(ws string) string {
+	if len(ws) > maxEchoedWorkspaceLen {
+		return ws[:maxEchoedWorkspaceLen]
+	}
+	return ws
+}
+
 // HandleWorkspaceRuntimeReady reports whether the runtime can actually serve
 // agent work for the workspace named by the {ws} path parameter.
 //
@@ -85,8 +100,13 @@ func handleWorkspaceRuntimeReady(pool runtimeReadyPool, daemonExpected bool, bac
 	return func(w http.ResponseWriter, r *http.Request) {
 		ws := r.PathValue("ws")
 		if ws == "" {
+			mode := "fleet"
+			if daemonExpected {
+				mode = "daemon"
+			}
 			handler.WriteJSON(w, http.StatusBadRequest, RuntimeReadyResponse{
 				Ready:  false,
+				Mode:   mode,
 				Reason: "missing workspace path parameter",
 			})
 			return
@@ -110,7 +130,7 @@ func handleWorkspaceRuntimeReady(pool runtimeReadyPool, daemonExpected bool, bac
 // probeDaemon checks daemon-mode workspace readiness: a registered workspace
 // pool exists and its Health RPC succeeds.
 func probeDaemon(ctx context.Context, pool runtimeReadyPool, ws string) RuntimeReadyResponse {
-	resp := RuntimeReadyResponse{Mode: "daemon", Workspace: ws}
+	resp := RuntimeReadyResponse{Mode: "daemon", Workspace: truncateForEcho(ws)}
 	if pool == nil {
 		resp.Reason = "connection pool not initialized"
 		return resp
@@ -123,7 +143,7 @@ func probeDaemon(ctx context.Context, pool runtimeReadyPool, ws string) RuntimeR
 	if err != nil {
 		switch {
 		case errors.Is(err, daemon.ErrWorkspaceNotRegistered):
-			resp.Reason = "workspace not registered: " + ws
+			resp.Reason = "workspace not registered: " + truncateForEcho(ws)
 		case errors.Is(err, daemon.ErrDaemonStarting):
 			resp.Reason = "daemon is starting up"
 		default:
@@ -164,7 +184,7 @@ func probeDaemon(ctx context.Context, pool runtimeReadyPool, ws string) RuntimeR
 // probeFleet checks fleet-client-mode workspace readiness: the IssueBackend
 // factory returns a non-nil backend and its Stats RPC succeeds.
 func probeFleet(ctx context.Context, backendFn IssueBackendFn, ws string) RuntimeReadyResponse {
-	resp := RuntimeReadyResponse{Mode: "fleet", Workspace: ws}
+	resp := RuntimeReadyResponse{Mode: "fleet", Workspace: truncateForEcho(ws)}
 	if backendFn == nil {
 		resp.Reason = "issue backend not configured"
 		return resp

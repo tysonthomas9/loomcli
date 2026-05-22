@@ -268,7 +268,9 @@ func TestHandleWorkspaceRuntimeReady_FleetMode_BackendStatsOK(t *testing.T) {
 
 // TestHandleWorkspaceRuntimeReady_MissingPathValue ensures the handler
 // surfaces a 400 (not 503) when the {ws} path parameter is absent — a
-// programming error, not a runtime outage.
+// programming error, not a runtime outage. Also asserts Mode is populated
+// so the 400 response still satisfies the OpenAPI schema's
+// `required: [ready, mode, workspace]` clause.
 func TestHandleWorkspaceRuntimeReady_MissingPathValue(t *testing.T) {
 	h := handleWorkspaceRuntimeReady(nil, true, nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces//runtime-ready", nil)
@@ -281,5 +283,49 @@ func TestHandleWorkspaceRuntimeReady_MissingPathValue(t *testing.T) {
 	body := decodeRuntimeReady(t, rec.Body.Bytes())
 	if body.Reason != "missing workspace path parameter" {
 		t.Errorf("Reason = %q, want %q", body.Reason, "missing workspace path parameter")
+	}
+	if body.Mode != "daemon" {
+		t.Errorf("Mode = %q, want %q for daemonExpected=true", body.Mode, "daemon")
+	}
+}
+
+// TestHandleWorkspaceRuntimeReady_MissingPathValue_FleetMode mirrors
+// _MissingPathValue but for fleet mode, asserting Mode is populated with
+// "fleet" so the schema-required field is never empty.
+func TestHandleWorkspaceRuntimeReady_MissingPathValue_FleetMode(t *testing.T) {
+	h := handleWorkspaceRuntimeReady(nil, false, nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces//runtime-ready", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+	body := decodeRuntimeReady(t, rec.Body.Bytes())
+	if body.Mode != "fleet" {
+		t.Errorf("Mode = %q, want %q for daemonExpected=false", body.Mode, "fleet")
+	}
+}
+
+// TestHandleWorkspaceRuntimeReady_ReflectedWsTruncated covers the unauthenticated
+// log-poisoning surface: the ws path value is echoed into Workspace and
+// "workspace not registered: ..." reason, but must be capped at
+// maxEchoedWorkspaceLen so an attacker probing a giant path can't make the
+// runtime echo an unbounded string back.
+func TestHandleWorkspaceRuntimeReady_ReflectedWsTruncated(t *testing.T) {
+	longWs := strings.Repeat("A", 200)
+	pool := &stubRuntimeReadyPool{
+		client: &stubRuntimeReadyClient{resp: &rpc.HealthResponse{Status: "ok"}},
+	}
+	h := handleWorkspaceRuntimeReady(pool, true, nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, newRuntimeReadyRequest(longWs))
+
+	body := decodeRuntimeReady(t, rec.Body.Bytes())
+	if len(body.Workspace) > maxEchoedWorkspaceLen {
+		t.Errorf("Workspace echo length = %d, want <= %d", len(body.Workspace), maxEchoedWorkspaceLen)
+	}
+	if body.Workspace != strings.Repeat("A", maxEchoedWorkspaceLen) {
+		t.Errorf("Workspace = %q, want %q", body.Workspace, strings.Repeat("A", maxEchoedWorkspaceLen))
 	}
 }
