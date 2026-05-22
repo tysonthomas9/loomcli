@@ -187,6 +187,16 @@ func (app *Server) registerWorkspaceRoutes() {
 		// ensure-runtime; bypass workspace middleware for it. Exact-path
 		// match (not HasSuffix) so a future nested route ending in
 		// `/runtime-ready` does not silently skip middleware.
+		//
+		// Note: Go's ServeMux percent-decodes %2F in r.URL.Path before this
+		// comparison runs, so requests like
+		// /api/workspaces/abc%2Fdef/runtime-ready DO trigger this bypass
+		// with ws="abc/def" — i.e. the bypass is more permissive than a
+		// strict workspace-key validator would be. Downstream is safe: the
+		// handler does a MultiPool map lookup or IssueBackend.Stats call,
+		// not a filesystem walk. If this path ever grows side effects
+		// beyond a hash-map miss, revisit the bypass condition (e.g. reject
+		// strings.Contains(ws, "/")).
 		if r.Method == http.MethodGet && r.URL.Path == "/api/workspaces/"+r.PathValue("ws")+"/runtime-ready" {
 			wsHandler.ServeHTTP(w, r)
 			return
