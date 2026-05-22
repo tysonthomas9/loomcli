@@ -24,24 +24,38 @@ import (
 func setTmuxRemainOnExit(t *testing.T) {
 	t.Helper()
 
-	// Ensure a tmux server is running. If no server exists, "tmux set -g" fails silently.
+	// Ensure a tmux server is running. If no server exists, "tmux setw -g" fails silently.
 	// Start a keepalive session that sleeps - this guarantees a server for our global setting.
 	keepalive := fmt.Sprintf("loom-test-keepalive-%d", os.Getpid())
 	if err := exec.Command("tmux", "has-session", "-t", keepalive).Run(); err != nil { //nolint:norawexec
-		exec.Command("tmux", "new-session", "-d", "-s", keepalive, "sleep", "300").Run() //nolint:norawexec
+		out, err := exec.Command("tmux", "new-session", "-d", "-s", keepalive, "sleep", "300").CombinedOutput() //nolint:norawexec
+		if err != nil {
+			t.Skipf("failed to start tmux keepalive session: %v (%s)", err, strings.TrimSpace(string(out)))
+		}
 		t.Cleanup(func() {
 			exec.Command("tmux", "kill-session", "-t", keepalive).Run() //nolint:norawexec
 		})
 	}
 
-	origRemain, _ := exec.Command("tmux", "show", "-gv", "remain-on-exit").Output() //nolint:norawexec
-	exec.Command("tmux", "set", "-g", "remain-on-exit", "on").Run()                 //nolint:norawexec
+	// remain-on-exit is a window option, so use `setw -g` to set the global
+	// default for new windows. Plain `set -g` is interpreted inconsistently
+	// across tmux versions and may silently no-op on the window-option
+	// namespace, leaving panes free to die the moment their command exits.
+	origRemain, _ := exec.Command("tmux", "show", "-gv", "remain-on-exit").Output()                          //nolint:norawexec
+	if out, err := exec.Command("tmux", "setw", "-g", "remain-on-exit", "on").CombinedOutput(); err != nil { //nolint:norawexec
+		t.Skipf("failed to set tmux remain-on-exit: %v (%s)", err, strings.TrimSpace(string(out)))
+	}
+	// Verify the setting actually applied. Without it the tests that assert
+	// a session is alive right after a quickly-failing command will flake.
+	if got, _ := exec.Command("tmux", "show", "-wgv", "remain-on-exit").Output(); strings.TrimSpace(string(got)) != "on" { //nolint:norawexec
+		t.Skipf("tmux remain-on-exit not honored by this server (got %q)", strings.TrimSpace(string(got)))
+	}
 	t.Cleanup(func() {
 		val := strings.TrimSpace(string(origRemain))
 		if val == "" || val == "off" {
-			exec.Command("tmux", "set", "-g", "remain-on-exit", "off").Run() //nolint:norawexec
+			exec.Command("tmux", "setw", "-g", "remain-on-exit", "off").Run() //nolint:norawexec
 		} else {
-			exec.Command("tmux", "set", "-g", "remain-on-exit", val).Run() //nolint:norawexec
+			exec.Command("tmux", "setw", "-g", "remain-on-exit", val).Run() //nolint:norawexec
 		}
 	})
 }
