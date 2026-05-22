@@ -13,6 +13,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/lockfile"
 
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // StopAgent sends SIGTERM then SIGKILL to a single agent and its entire process group.
@@ -41,17 +42,7 @@ func (s *Supervisor) StopAgent(ap *AgentProcess, sigtermTimeout time.Duration) {
 		attribute.String("loom.agent", ap.Entry.Worktree),
 		attribute.String("loom.workspace", s.WorkspaceID),
 	)
-	defer func() {
-		ap.Mu.Lock()
-		exitCode := ap.LastExitCode
-		stopReason := string(ap.StopReason)
-		ap.Mu.Unlock()
-		span.SetAttributes(
-			attribute.Int("loom.exit_code", exitCode),
-			attribute.String("loom.stop_reason", stopReason),
-		)
-		span.End()
-	}()
+	defer finalizeStopSpan(span, ap)
 
 	// Snapshot descendant pgroups BEFORE the worker dies. Once we send SIGTERM,
 	// the worker may exit within microseconds and its children get reparented
@@ -93,6 +84,21 @@ func (s *Supervisor) StopAgent(ap *AgentProcess, sigtermTimeout time.Duration) {
 		_ = syscall.Kill(-pid, syscall.SIGKILL)
 	}
 	signalDescendantPGroups(descendantPGIDs, syscall.SIGKILL, ap.Entry.Worktree)
+}
+
+// finalizeStopSpan records the agent's exit code and stop reason on the stop
+// span and ends it. Pulled out of StopAgent so that function stays under the
+// funlen lint budget; keeps the span lifecycle in one named place.
+func finalizeStopSpan(span trace.Span, ap *AgentProcess) {
+	ap.Mu.Lock()
+	exitCode := ap.LastExitCode
+	stopReason := string(ap.StopReason)
+	ap.Mu.Unlock()
+	span.SetAttributes(
+		attribute.Int("loom.exit_code", exitCode),
+		attribute.String("loom.stop_reason", stopReason),
+	)
+	span.End()
 }
 
 // sendSigterm signals the process group, falling back to the leader process.
