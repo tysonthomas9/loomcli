@@ -374,7 +374,35 @@ func (s *Supervisor) clearAgentSessionState(ap *AgentProcess) {
 	ap.TranscriptPath = ""
 	ap.BeforeRef = ""
 	ap.AssignedTaskID = ""
+	ap.LastActivity = time.Time{}
 	ap.Mu.Unlock()
+}
+
+// RecordAgentActivity advances ap.LastActivity for the named agent toward the
+// observed PTY-output timestamp. It is a no-op if the agent isn't currently
+// supervised. Out-of-order heartbeats never regress the stored value — callers
+// can safely retry without ever rewinding the timestamp.
+func (s *Supervisor) RecordAgentActivity(agentName string, at time.Time) {
+	if agentName == "" || at.IsZero() {
+		return
+	}
+	s.AgentsMu.RLock()
+	var target *AgentProcess
+	for _, ap := range s.Agents {
+		if ap.Entry.Worktree == agentName {
+			target = ap
+			break
+		}
+	}
+	s.AgentsMu.RUnlock()
+	if target == nil {
+		return
+	}
+	target.Mu.Lock()
+	if at.After(target.LastActivity) {
+		target.LastActivity = at
+	}
+	target.Mu.Unlock()
 }
 
 // preFlightSetup runs recovery, assigns epic, creates session, and clears yield file.
@@ -846,6 +874,8 @@ func (s *Supervisor) GetAgents() []SupervisedAgentStatus {
 			OwnershipLeaseID:       ap.OwnershipLeaseID,
 			OwnershipFencingToken:  ap.OwnershipFencingToken,
 			OwnershipLastHeartbeat: ap.OwnershipLastHeartbeat,
+			AssignedTaskID:         ap.AssignedTaskID,
+			LastActivity:           ap.LastActivity,
 		}
 		if ap.LastError != nil {
 			result[i].LastErrorClass = ap.LastError.Class.String()
