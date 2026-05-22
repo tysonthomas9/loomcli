@@ -92,10 +92,41 @@ func TestWorkspaceOpsModule_TypedNilPoolUsesBackend(t *testing.T) {
 	}
 }
 
+// TestWorkspaceOpsModule_TypedNilPoolRuntimeReady is the sibling-symmetric
+// check for /runtime-ready of TestWorkspaceOpsModule_TypedNilPoolUsesBackend.
+// Passing a typed-nil *daemon.MultiPool must not panic — normalizePool
+// flattens it to interface-nil before the handler's `pool != nil` check ever
+// sees it. If normalizePool ever moves or grows a bug, this test catches the
+// regression: without the flattening, the handler would invoke pool.Get on a
+// nil *MultiPool receiver and panic.
+func TestWorkspaceOpsModule_TypedNilPoolRuntimeReady(t *testing.T) {
+	var typedNilPool *daemon.MultiPool
+	mod := NewWorkspaceOpsModule(&mockWorkspaceService{}, typedNilPool, nil).
+		WithIssueBackendFn(func(context.Context) backend.IssueBackend {
+			return &stubIssueBackend{}
+		}).
+		WithDaemonExpected(false)
+
+	mux := http.NewServeMux()
+	mod.Register(mux)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/runtime-ready", nil)
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /runtime-ready status = %d, want %d; body: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+}
+
 type stubIssueBackend struct {
 	backend.IssueBackend
 }
 
 func (s *stubIssueBackend) Ready(_ context.Context, _ backend.ReadyOpts) ([]backend.IssueData, error) {
 	return []backend.IssueData{}, nil
+}
+
+func (s *stubIssueBackend) Stats(_ context.Context) (*backend.StatsData, error) {
+	return &backend.StatsData{}, nil
 }
