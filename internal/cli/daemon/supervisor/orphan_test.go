@@ -52,7 +52,7 @@ func runFakeWorkerWithIsolatedChild(_ *testing.T) {
 		fmt.Fprintln(os.Stderr, "executable:", err)
 		os.Exit(1)
 	}
-	cmd := exec.Command(selfPath, "-test.run=TestHelperProcess", "--") //nolint:gosec // G204: test helper self-exec
+	cmd := exec.Command(selfPath, "-test.run=TestHelperProcess", "--") //nolint:norawexec,gosec // G204/norawexec: test helper self-exec
 	cmd.Env = append(os.Environ(), "LOOM_TEST_HELPER_MODE=fake_backend_sleep")
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Stdin = nil
@@ -88,7 +88,7 @@ func spawnFakeWorker(t *testing.T, workerCwd string) (*exec.Cmd, int) {
 	}
 	childPIDFile := filepath.Join(t.TempDir(), "child.pid")
 
-	cmd := exec.Command(selfPath, "-test.run=TestHelperProcess", "--") //nolint:gosec // G204: test helper self-exec
+	cmd := exec.Command(selfPath, "-test.run=TestHelperProcess", "--") //nolint:norawexec,gosec // G204/norawexec: test helper self-exec
 	cmd.Env = append(os.Environ(),
 		"LOOM_TEST_HELPER_MODE=fake_worker_with_isolated_child",
 		"LOOM_TEST_CHILD_PID_FILE="+childPIDFile,
@@ -190,7 +190,7 @@ func processAlive(pid int) bool {
 // failed test can show whether the grandchild has been reparented to init).
 func readPPID(t *testing.T, pid int) int {
 	t.Helper()
-	out, err := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "ppid=").Output()
+	out, err := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "ppid=").Output() //nolint:norawexec // test-only readPPID via ps
 	if err != nil {
 		return -1
 	}
@@ -271,7 +271,7 @@ func TestFindWorktreeOrphans_PrefixesMatchOnResolvedPath(t *testing.T) {
 	}
 	worktreeDir := t.TempDir()
 
-	cmd := exec.Command("sleep", "120") //nolint:gosec // G204: fixed args
+	cmd := exec.Command("sleep", "120") //nolint:norawexec,gosec // G204/norawexec: fixed args
 	cmd.Dir = worktreeDir
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {
@@ -311,7 +311,7 @@ func TestKillOrphanedWorktreeProcesses_PgroupKillEndToEnd(t *testing.T) {
 	}
 	worktreeDir := t.TempDir()
 
-	cmd := exec.Command("sleep", "120") //nolint:gosec // G204: fixed args
+	cmd := exec.Command("sleep", "120") //nolint:norawexec,gosec // G204/norawexec: fixed args
 	cmd.Dir = worktreeDir
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {
