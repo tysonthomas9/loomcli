@@ -76,9 +76,11 @@ func LoadDaemonManagedAgents(stateFilePath string) map[string]DaemonAgentInfo {
 	for _, agent := range state.Agents {
 		if agent.Worktree != "" {
 			result[agent.Worktree] = DaemonAgentInfo{
-				Managed: true,
-				Role:    agent.Role,
-				Repo:    agent.Repo,
+				Managed:       true,
+				Role:          agent.Role,
+				Repo:          agent.Repo,
+				CurrentTaskID: agent.TaskID,
+				LastActivity:  agent.LastActivity,
 			}
 		}
 	}
