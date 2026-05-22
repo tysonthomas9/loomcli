@@ -77,6 +77,15 @@ if command -v jq >/dev/null 2>&1; then
 		printf '%s\n' "$body"
 		exit 1
 	fi
+	mode=$(printf '%s\n' "$body" | jq -r '.mode')
+	case "$mode" in
+		daemon | fleet) ;;
+		*)
+			echo "[repro] expected mode=daemon|fleet, got '$mode'"
+			printf '%s\n' "$body"
+			exit 1
+			;;
+	esac
 else
 	if ! printf '%s\n' "$body" | grep -q '"ready":false'; then
 		echo "[repro] expected ready=false"
