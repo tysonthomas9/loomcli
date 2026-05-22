@@ -378,7 +378,7 @@ func WaitForWorkspaceReady(ctx context.Context, baseURL, workspaceKey string) er
 	if workspaceKey == "" {
 		return errors.New("workspace key is empty")
 	}
-	endpoint := baseURL + "/api/workspaces/" + url.PathEscape(workspaceKey) + "/runtime-ready"
+	endpoint := strings.TrimSuffix(baseURL, "/") + "/api/workspaces/" + url.PathEscape(workspaceKey) + "/runtime-ready"
 	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
 	var lastReason string
@@ -416,12 +416,16 @@ func probeWorkspaceReady(ctx context.Context, endpoint string) (string, bool, er
 		return "", false, err
 	}
 	defer func() { _ = resp.Body.Close() }()
+	// Bound the body read so a misbehaving runtime returning a multi-MB
+	// 503 payload can't keep the poll loop allocating until ctx fires.
+	// The legitimate response is ~200 bytes; 64 KiB is generous headroom.
+	body := io.LimitReader(resp.Body, 64*1024)
 	if resp.StatusCode == http.StatusOK {
-		_, _ = io.Copy(io.Discard, resp.Body)
+		_, _ = io.Copy(io.Discard, body)
 		return "", true, nil
 	}
 	var decoded runtimeReadyResponse
-	if jsonErr := json.NewDecoder(resp.Body).Decode(&decoded); jsonErr == nil && decoded.Reason != "" {
+	if jsonErr := json.NewDecoder(body).Decode(&decoded); jsonErr == nil && decoded.Reason != "" {
 		return decoded.Reason, false, nil
 	}
 	return fmt.Sprintf("HTTP %d", resp.StatusCode), false, nil

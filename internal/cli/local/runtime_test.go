@@ -305,6 +305,55 @@ func TestWaitForWorkspaceReadyIncludesReasonOnTimeout(t *testing.T) {
 	}
 }
 
+// TestWaitForWorkspaceReadyTrimsBaseURLTrailingSlash guards against a caller
+// passing a baseURL with a trailing slash producing a `//api/...` double-slash
+// path that current ServeMux tolerates but a future redirect would break.
+func TestWaitForWorkspaceReadyTrimsBaseURLTrailingSlash(t *testing.T) {
+	var observedPath atomic.Value
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		observedPath.Store(r.URL.Path)
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(server.Close)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	t.Cleanup(cancel)
+
+	if err := WaitForWorkspaceReady(ctx, server.URL+"/", "LOOM"); err != nil {
+		t.Fatalf("WaitForWorkspaceReady() error = %v", err)
+	}
+
+	got, _ := observedPath.Load().(string)
+	if got != "/api/workspaces/LOOM/runtime-ready" {
+		t.Fatalf("path = %q, want single-slash %q", got, "/api/workspaces/LOOM/runtime-ready")
+	}
+}
+
+// TestWaitForWorkspaceReadyBoundsBodyRead verifies probeWorkspaceReady wraps
+// resp.Body in io.LimitReader before JSON-decoding, so a misbehaving server
+// returning an oversized 503 payload can't drag the surfaced reason past the
+// cap.
+func TestWaitForWorkspaceReadyBoundsBodyRead(t *testing.T) {
+	big := strings.Repeat("x", 256*1024)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"ready":false,"mode":"fleet","workspace":"LOOM","reason":"` + big + `"}`))
+	}))
+	t.Cleanup(server.Close)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	t.Cleanup(cancel)
+
+	err := WaitForWorkspaceReady(ctx, server.URL, "LOOM")
+	if err == nil {
+		t.Fatal("WaitForWorkspaceReady() error = nil, want timeout error")
+	}
+	if strings.Count(err.Error(), "x") > 64*1024 {
+		t.Errorf("error message contains > 64 KiB of x's — LimitReader did not bound the read")
+	}
+}
+
 func containsEnv(env []string, needle string) bool {
 	for _, entry := range env {
 		if entry == needle {
