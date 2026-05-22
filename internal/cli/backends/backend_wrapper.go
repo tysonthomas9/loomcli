@@ -9,6 +9,7 @@ import (
 
 	"github.com/olesho/harness-wrapper/pkg/wrapper"
 
+	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/harness"
 )
 
@@ -68,6 +69,14 @@ func runHarness(parent context.Context, shutdown <-chan struct{}, inv harnessInv
 		defer pr.Close()
 		scanDone <- scanStreamOutput(pr, inv.LineHandler)
 	}()
+
+	// Auto-attach the daemon activity observer when the caller hasn't set
+	// one explicitly. In standalone mode (no daemon socket) this is a
+	// no-op; under daemon supervision it ticks wrapper.Snapshot.LastOutputAt
+	// over IPC so the daemon can surface per-agent liveness in the UI.
+	if inv.RetryPolicy.OnActivity == nil {
+		inv.RetryPolicy.OnActivity = cli.DaemonActivityObserver()
+	}
 
 	res, runErr := wrapperRun(ctx, wrapper.Config{
 		BinaryPath: binaryPath,

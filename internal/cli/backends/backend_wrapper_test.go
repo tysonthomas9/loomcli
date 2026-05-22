@@ -371,7 +371,10 @@ func TestRunHarness_RetryablePolicyPassedThrough(t *testing.T) {
 		t.Fatalf("runHarness err: %v", err)
 	}
 	got, _ := sawPolicy.Load().(harness.RetryPolicy)
-	if got != want {
+	// Compare field-by-field: RetryPolicy now contains an OnActivity func
+	// that runHarness auto-attaches when no daemon socket is set. The
+	// retry/backoff fields are the actual contract under test here.
+	if got.Max != want.Max || got.BaseBackoff != want.BaseBackoff || got.MaxBackoff != want.MaxBackoff {
 		t.Errorf("RetryPolicy: got %+v, want %+v", got, want)
 	}
 }

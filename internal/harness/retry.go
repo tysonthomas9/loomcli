@@ -16,9 +16,10 @@ import (
 	"github.com/olesho/harness-wrapper/pkg/wrapper"
 )
 
-// RetryPolicy controls how RunWithRetry handles transient failures.
-// A zero-value RetryPolicy is replaced with DefaultRetryPolicy by
-// RunWithRetry.
+// RetryPolicy controls how RunWithRetry handles transient failures and how
+// liveness is observed during a session. A zero-value RetryPolicy is replaced
+// with DefaultRetryPolicy by RunWithRetry — except OnActivity, which has no
+// default because it requires an external sink.
 type RetryPolicy struct {
 	// Max is the maximum number of retries after the first attempt.
 	// Max=3 means up to 4 total attempts.
@@ -32,7 +33,24 @@ type RetryPolicy struct {
 	// MaxBackoff caps both the exponential backoff and any
 	// RetryAfter hint emitted by the harness.
 	MaxBackoff time.Duration
+
+	// OnActivity, when non-nil, is invoked from a background goroutine while
+	// the wrapper.Session is alive. Each call carries the latest
+	// wrapper.Snapshot (notably LastOutputAt) so the caller can forward
+	// liveness to an external observer — e.g. a loom daemon IPC heartbeat.
+	// The callback must be cheap and non-blocking; the wrapper drops calls
+	// on a busy observer rather than queuing them.
+	OnActivity func(wrapper.Snapshot)
+
+	// ActivityInterval is the tick period for OnActivity. Zero means use
+	// DefaultActivityInterval. Ignored when OnActivity is nil.
+	ActivityInterval time.Duration
 }
+
+// DefaultActivityInterval is the OnActivity tick cadence when none is set.
+// 10s is short enough to make a stuck agent obvious within the next page
+// refresh, long enough to keep IPC chatter inconsequential.
+const DefaultActivityInterval = 10 * time.Second
 
 // DefaultRetryPolicy is the policy applied when RunWithRetry receives
 // a zero-value RetryPolicy.
@@ -62,7 +80,7 @@ type attemptResult struct {
 
 // runOnceFn is the seam tests use to swap in a fake harness without
 // spawning a real subprocess. Production code uses runOnceDefault.
-type runOnceFn func(ctx context.Context, cfg wrapper.Config) (attemptResult, error)
+type runOnceFn func(ctx context.Context, cfg wrapper.Config, p RetryPolicy) (attemptResult, error)
 
 // sleepFn is the seam tests use to skip real sleeps. Production code
 // uses sleepDefault.
@@ -81,13 +99,19 @@ var (
 // only for wrapper-level failures (PTY allocation, bad config) or
 // ctx.Err() if ctx was cancelled during backoff.
 func RunWithRetry(ctx context.Context, cfg wrapper.Config, p RetryPolicy) (wrapper.Result, error) {
-	if p == (RetryPolicy{}) {
-		p = DefaultRetryPolicy()
+	if p.Max == 0 && p.BaseBackoff == 0 && p.MaxBackoff == 0 {
+		// Caller passed a zero-value RetryPolicy (modulo OnActivity, which
+		// stays nil-or-set independent of defaults). Apply DefaultRetryPolicy
+		// for the retry/backoff fields and preserve any activity callback.
+		dp := DefaultRetryPolicy()
+		dp.OnActivity = p.OnActivity
+		dp.ActivityInterval = p.ActivityInterval
+		p = dp
 	}
 
 	var lastResult wrapper.Result
 	for attempt := 0; ; attempt++ {
-		out, err := runOnce(ctx, cfg)
+		out, err := runOnce(ctx, cfg, p)
 		if err != nil {
 			return out.Result, err
 		}
@@ -143,8 +167,10 @@ func backoffFor(p RetryPolicy, attempt int, hint time.Duration) time.Duration {
 // runOnceDefault is the production implementation of runOnceFn. It
 // starts a wrapper session, drains its event stream to capture the
 // latest RetryAfter hint and to remember whether an API-error event
-// fired mid-run, then waits for the terminal result.
-func runOnceDefault(ctx context.Context, cfg wrapper.Config) (attemptResult, error) {
+// fired mid-run, then waits for the terminal result. When p.OnActivity
+// is set, runOnceDefault also runs an activity-observer goroutine that
+// periodically samples sess.Snapshot() and forwards it to the caller.
+func runOnceDefault(ctx context.Context, cfg wrapper.Config, p RetryPolicy) (attemptResult, error) {
 	sess, err := wrapper.Start(ctx, cfg)
 	if err != nil {
 		return attemptResult{Result: wrapper.Result{ExitCode: -1}}, err
@@ -165,9 +191,46 @@ func runOnceDefault(ctx context.Context, cfg wrapper.Config) (attemptResult, err
 		}
 	}()
 
+	observerStop := startActivityObserver(sess, p)
+
 	res, err := sess.Wait()
 	<-drained
+	if observerStop != nil {
+		observerStop()
+	}
 	return attemptResult{Result: res, RetryAfter: lastRetryAfter, SawAPIError: sawAPIError}, err
+}
+
+// startActivityObserver runs p.OnActivity on a ticker until the returned
+// stop function is called. Returns nil when no observer is configured.
+func startActivityObserver(sess *wrapper.Session, p RetryPolicy) func() {
+	if p.OnActivity == nil {
+		return nil
+	}
+	interval := p.ActivityInterval
+	if interval <= 0 {
+		interval = DefaultActivityInterval
+	}
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stop:
+				p.OnActivity(sess.Snapshot())
+				return
+			case <-ticker.C:
+				p.OnActivity(sess.Snapshot())
+			}
+		}
+	}()
+	return func() {
+		close(stop)
+		<-done
+	}
 }
 
 // sleepDefault is the production implementation of sleepFnT. It
