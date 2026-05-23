@@ -11,6 +11,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/clitest"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
+	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -53,12 +54,9 @@ func setupMonitorWorkspaceConfig(t *testing.T, workspaceDir string, agentNames .
 	oldResolver := cli.TestingResetDefaultResolver()
 
 	ctx := context.Background()
-	handle, err := bootstrap.OpenStore(ctx, configDir, nil)
-	if err != nil {
-		t.Fatalf("open fleet-db store: %v", err)
-	}
+	st := memstore.New()
 	t.Cleanup(func() {
-		_ = handle.Close()
+		_ = st.Close()
 		cli.TestingSetDefaultResolver(oldResolver)
 		config.InvalidateConfigCache()
 		cli.ResetWorkspaceRuntimeDirCache()
@@ -66,14 +64,14 @@ func setupMonitorWorkspaceConfig(t *testing.T, workspaceDir string, agentNames .
 
 	const workspaceKey = "TEST"
 	const repoName = "repo"
-	if _, err := handle.Store.Workspaces().Create(ctx, store.WorkspaceCreate{
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{
 		Key:           workspaceKey,
 		Name:          "test",
 		DefaultBranch: "main",
 	}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
-	if _, err := handle.Store.Repos().Create(ctx, store.RepoCreate{
+	if _, err := st.Repos().Create(ctx, store.RepoCreate{
 		WorkspaceKey:  workspaceKey,
 		Name:          repoName,
 		DefaultBranch: "main",
@@ -101,7 +99,9 @@ func setupMonitorWorkspaceConfig(t *testing.T, workspaceDir string, agentNames .
 	}); err != nil {
 		t.Fatalf("save state cache: %v", err)
 	}
-	config.InvalidateConfigCache()
+	if _, err := config.TestingPrimeConfigCacheFromStore(ctx, st); err != nil {
+		t.Fatalf("prime config cache: %v", err)
+	}
 	cli.ResetWorkspaceRuntimeDirCache()
 	cli.TestingResetDefaultResolver()
 }

@@ -1,0 +1,54 @@
+#!/bin/sh
+# Pure-silent mock backend for daemon watchdog tests.
+#
+# Failure mode: on invoke, claim the task, write a started marker, then
+# sleep silently past the daemon's output timeout. No stdout, no transcript,
+# no descendants. The daemon's watchdog should fire and kill our process
+# group. This is the simplest possible failure mode and serves as the
+# template scenario authors copy when adding a new bug.
+#
+# Variants (see siblings):
+#   -crash       exit non-zero a few seconds into invoke
+#   -slow        drip-feed stdout to verify the watchdog allows slow work
+#
+# Contract: meta / health / invoke (same as loom-backend-playground).
+# Env knobs:
+#   LOOM_PLAYGROUND_HANG_SECONDS    — silent sleep duration (default 120)
+#   LOOM_PLAYGROUND_HANG_MARKER_DIR — override marker dir (testing only)
+
+set -eu
+
+cmd="${1:-}"
+hang_seconds="${LOOM_PLAYGROUND_HANG_SECONDS:-120}"
+marker_root="${LOOM_PLAYGROUND_HANG_MARKER_DIR:-${LOOM_WORKSPACE_RUNTIME_DIR:-/tmp/playground-hang}/hang}"
+
+run_invoke() {
+  task_id="${LOOM_ASSIGNED_TASK_ID:-PLAYGROUND-HANG-1}"
+  agent="${LOOM_AGENT_NAME:-playground-hang}"
+
+  mkdir -p "$marker_root"
+  : > "$marker_root/started.flag"
+
+  echo "[playground-hang] ${agent} claiming ${task_id}"
+  loom claim "$task_id" || true
+
+  # Stay silent past the watchdog threshold. With no descendants, the
+  # daemon's hung-process kill only needs to signal our primary pgroup.
+  exec sleep "$hang_seconds"
+}
+
+case "$cmd" in
+  meta)
+    printf '{"display_name":"Playground Hang","version":"1","description":"Silent backend that trips the daemon output-timeout watchdog","binary_name":"loom-backend-playground-hang"}\n'
+    ;;
+  health)
+    printf '{"installed":true,"healthy":true,"message":"ready"}\n'
+    ;;
+  invoke)
+    run_invoke
+    ;;
+  *)
+    echo "usage: loom-backend-playground-hang {meta|health|invoke}" >&2
+    exit 2
+    ;;
+esac
