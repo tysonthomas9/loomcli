@@ -301,10 +301,7 @@ func (s *Supervisor) superviseAgent(ap *AgentProcess) {
 			continue
 		}
 
-		if !s.spawnAndWait(ap) {
-			releaseOwnership()
-			continue
-		}
+		s.spawnAndWait(ap)
 
 		releaseOwnership()
 		s.postExitCleanup(ap)
@@ -611,8 +608,11 @@ func (s *Supervisor) completeControlPlaneAgentSession(ap *AgentProcess, input ag
 	}
 }
 
-// spawnAndWait spawns the agent and waits for it to exit. Returns false if spawn fails (continue loop).
-func (s *Supervisor) spawnAndWait(ap *AgentProcess) bool {
+// spawnAndWait spawns the agent and waits for it to exit. A spawn failure is
+// recorded as a synthetic exit (see markSpawnFailure) so the caller's single
+// restart decision — shouldRestart + sleepBeforeRestart — owns counting and
+// backoff for both real exits and spawn failures.
+func (s *Supervisor) spawnAndWait(ap *AgentProcess) {
 	if err := s.spawnAgent(ap); err != nil {
 		slog.Warn("spawn failed", "worktree", ap.Entry.Worktree, "err", err)
 		ap.Mu.Lock()
@@ -637,7 +637,8 @@ func (s *Supervisor) spawnAndWait(ap *AgentProcess) bool {
 			taskID:     s.taskIDForLifecycle(ap, nil),
 		})
 		s.Concurrency.Release(ap.Entry.Role)
-		return s.handleRestartAfterError(ap)
+		s.markSpawnFailure(ap, err)
+		return
 	}
 
 	exitCode := s.waitForAgent(ap)
@@ -647,7 +648,6 @@ func (s *Supervisor) spawnAndWait(ap *AgentProcess) bool {
 	s.postMortemRecovery(ap, exitCode)
 	s.Concurrency.Release(ap.Entry.Role)
 	s.handleEpicTransition(ap)
-	return true
 }
 
 type agentSessionFinalizeState struct {
