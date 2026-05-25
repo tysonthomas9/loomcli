@@ -3,6 +3,7 @@ package supervisor
 import (
 	"log/slog"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -191,13 +192,25 @@ func findWorktreeOrphans(worktreePaths []string) []orphanCandidate {
 	return out
 }
 
+// signalableOrphans drops candidates whose pgroup must never receive a
+// syscall.Kill(-pgid): pgroup 0/1 (kernel/init) and the daemon's own process
+// group (ownPGID), which would take down the daemon itself. The hung-process
+// descendant killer applies the same own-pgroup guard via findDescendantPGIDs;
+// the startup sweep needs it too because a backend that stayed in the daemon's
+// pgroup, got reparented to init, and has a worktree cwd would otherwise match.
+func signalableOrphans(orphans []orphanCandidate, ownPGID int) []orphanCandidate {
+	return slices.DeleteFunc(orphans, func(o orphanCandidate) bool {
+		return o.PGID <= 1 || o.PGID == ownPGID
+	})
+}
+
 // killOrphanedWorktreeProcesses sweeps any processes orphaned by a previous
 // daemon run (PPID==1) whose CWD points into one of worktreePaths, and signals
 // each one's process group with SIGTERM followed by SIGKILL after grace.
 // Designed to run once on supervisor startup as the "didn't shut down cleanly
 // last time" safety net.
 func (s *Supervisor) killOrphanedWorktreeProcesses(worktreePaths []string) int {
-	orphans := findWorktreeOrphans(worktreePaths)
+	orphans := signalableOrphans(findWorktreeOrphans(worktreePaths), syscall.Getpgrp())
 	if len(orphans) == 0 {
 		return 0
 	}
@@ -207,9 +220,6 @@ func (s *Supervisor) killOrphanedWorktreeProcesses(worktreePaths []string) int {
 		byPGID[o.PGID] = append(byPGID[o.PGID], o)
 	}
 	for pgid, members := range byPGID {
-		if pgid <= 1 {
-			continue
-		}
 		first := members[0]
 		slog.Warn("killing orphaned backend from previous daemon run",
 			"pgid", pgid, "pid", first.PID, "cwd", first.CWD, "worktree", first.Worktree, "members", len(members))
@@ -235,9 +245,6 @@ func (s *Supervisor) killOrphanedWorktreeProcesses(worktreePaths []string) int {
 		time.Sleep(100 * time.Millisecond)
 	}
 	for pgid := range byPGID {
-		if pgid <= 1 {
-			continue
-		}
 		_ = syscall.Kill(-pgid, syscall.SIGKILL)
 	}
 	return len(orphans)

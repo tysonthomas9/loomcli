@@ -299,6 +299,32 @@ func TestFindWorktreeOrphans_PrefixesMatchOnResolvedPath(t *testing.T) {
 	}
 }
 
+// TestSignalableOrphans_ExcludesInitAndOwnPgroup is the regression test for the
+// startup-sweep own-pgroup gap: killOrphanedWorktreeProcesses sends
+// syscall.Kill(-pgid), so any candidate sharing the daemon's own process group
+// (or pgroup 0/1) must be filtered out before signaling — otherwise the sweep
+// can SIGKILL the daemon itself. The hung-process descendant path already
+// guards this via findDescendantPGIDs; this confirms the sweep path matches.
+func TestSignalableOrphans_ExcludesInitAndOwnPgroup(t *testing.T) {
+	const ownPGID = 4242
+	in := []orphanCandidate{
+		{PID: 100, PGID: 0},       // kernel pgroup
+		{PID: 101, PGID: 1},       // init pgroup
+		{PID: 102, PGID: ownPGID}, // daemon's own pgroup — Kill(-pgid) is suicide
+		{PID: 103, PGID: 5555},    // genuine orphan — must survive the filter
+		{PID: 104, PGID: ownPGID}, // second member of the daemon's pgroup
+	}
+
+	got := signalableOrphans(in, ownPGID)
+
+	if len(got) != 1 {
+		t.Fatalf("expected exactly 1 signalable orphan, got %d: %+v", len(got), got)
+	}
+	if got[0].PID != 103 || got[0].PGID != 5555 {
+		t.Fatalf("expected only the genuine orphan (PID 103, PGID 5555) to remain, got %+v", got[0])
+	}
+}
+
 // TestKillOrphanedWorktreeProcesses_PgroupKillEndToEnd exercises the pgroup
 // kill path used by the startup sweep: given a candidate list, sending
 // SIGTERM to its pgroup stops the process within the grace window. The
