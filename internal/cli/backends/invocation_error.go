@@ -7,7 +7,7 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/tysonthomas9/loomcli/internal/harness/wrapper"
+	"github.com/olesho/harness-wrapper/pkg/wrapper"
 )
 
 // InvocationError carries invocation-local output evidence for classifying

@@ -652,13 +652,29 @@ func TestAcquireLockStale_ConcurrentRetry(t *testing.T) {
 		t.Fatalf("failed to write stale lock: %v", err)
 	}
 
+	// Racer injects a SECOND stale lock the moment AcquireLock has removed
+	// stale1 but not yet succeeded its own O_EXCL create. Stops as soon as
+	// it sees a non-stale lock (i.e. AcquireLock has won), so it can't
+	// clobber the valid lock on slow CI where the racer's WriteFile would
+	// otherwise complete after AcquireLock's own write.
+	racerDone := make(chan struct{})
 	go func() {
+		defer close(racerDone)
+		secondStale := []byte(`{"pid":999999998,"command":"stale2","agent_name":"dead-agent-2","started_at":"2024-01-01T00:00:00Z"}`)
+		injected := false
 		for {
-			_, err := os.Stat(lockPath)
-			if os.IsNotExist(err) {
-				secondStale := `{"pid":999999998,"command":"stale2","agent_name":"dead-agent-2","started_at":"2024-01-01T00:00:00Z"}`
-				os.WriteFile(lockPath, []byte(secondStale), 0644)
-				return
+			data, err := os.ReadFile(lockPath)
+			switch {
+			case os.IsNotExist(err):
+				if !injected {
+					_ = os.WriteFile(lockPath, secondStale, 0644)
+					injected = true
+				}
+			case err == nil:
+				var inf LockInfo
+				if json.Unmarshal(data, &inf) == nil && inf.PID == os.Getpid() {
+					return
+				}
 			}
 			time.Sleep(time.Millisecond)
 		}
@@ -669,13 +685,19 @@ func TestAcquireLockStale_ConcurrentRetry(t *testing.T) {
 		t.Fatalf("AcquireLock should succeed after retrying stale lock race: %v", err)
 	}
 	defer ReleaseLock(tmpDir)
+	// Wait for the racer to observe our PID and stop, so the post-acquire
+	// CheckLock cannot see a clobbered file.
+	<-racerDone
 
 	info, running, err := CheckLock(tmpDir)
 	if err != nil {
 		t.Fatalf("CheckLock failed: %v", err)
 	}
 	if !running {
-		t.Error("expected running process after acquiring lock")
+		t.Fatal("expected running process after acquiring lock")
+	}
+	if info == nil {
+		t.Fatal("CheckLock returned nil info after AcquireLock succeeded")
 	}
 	if info.PID != os.Getpid() {
 		t.Errorf("expected PID %d, got %d", os.Getpid(), info.PID)
