@@ -13,7 +13,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/harness/wrapper"
+	"github.com/olesho/harness-wrapper/pkg/wrapper"
 )
 
 // RetryPolicy controls how RunWithRetry handles transient failures.

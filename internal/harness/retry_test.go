@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/harness/wrapper"
+	"github.com/olesho/harness-wrapper/pkg/wrapper"
 )
 
 // installFakes swaps runOnce and sleepFn with the provided fakes for
