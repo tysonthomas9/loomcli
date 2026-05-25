@@ -653,14 +653,17 @@ func (b *FleetBackend) applyStatusUpdate(ctx context.Context, id string, params 
 	}
 }
 
-// ReleaseClaim drops the claim lock on an issue without changing its status.
-// Used by `loom complete` so planners that wrote a design but did not
+// ReleaseClaim drops the claim lock on an issue without changing its status or
+// assignee. Used by `loom complete` so planners that wrote a design but did not
 // transition status out of `in_progress` still release the lock — see LOOM-1.
 //
-// Calls POST /issues/<id>/release as the issue's current assignee (mirrors
-// the in_progress→open transition path in transitionToOpen). Idempotent:
-// returns nil when the issue has no current assignee (nothing to release).
-// Transport / HTTP errors propagate so the caller can log them.
+// Calls POST /issues/<id>/release-lock as the issue's current assignee (the
+// lock holder). Unlike /release, this is lock-only: it never reverts status to
+// open or clears the assignee, so it is correct even when the agent has already
+// moved the issue to review/closed before completing (where /release would
+// fail with ErrNotClaimable). Idempotent: returns nil when the issue has no
+// current assignee (nothing to release). Transport / HTTP errors propagate so
+// the caller can log them.
 func (b *FleetBackend) ReleaseClaim(ctx context.Context, id string) error {
 	if id == "" {
 		return backend.ErrValidation("ReleaseClaim", "id must not be empty")
@@ -673,7 +676,7 @@ func (b *FleetBackend) ReleaseClaim(ctx context.Context, id string) error {
 		return nil
 	}
 	return b.execAsActor(ctx, "ReleaseClaim",
-		"/issues/"+url.PathEscape(id)+"/release", nil, current.Assignee)
+		"/issues/"+url.PathEscape(id)+"/release-lock", nil, current.Assignee)
 }
 
 func (b *FleetBackend) transitionToOpen(ctx context.Context, id string, current *backend.IssueDetailData, clearAssignee bool) error {

@@ -371,14 +371,10 @@ func (d *Daemon) handleIPCReleaseClaim(req AgentIPCRequest) AgentIPCResponse {
 		return ipcErrorResponse(err)
 	}
 
-	d.publishMutation(backend.MutationData{
-		Type:      backend.MutationStatus,
-		IssueID:   req.IssueID,
-		Actor:     req.AgentName,
-		OldStatus: "in_progress",
-		NewStatus: "open",
-	})
-
+	// No mutation is published: ReleaseClaim is lock-only (POST /release-lock),
+	// so the issue's status and assignee are unchanged. Publishing a synthetic
+	// in_progress→open transition here would be a lie — the agent's own status
+	// change (if any) already published the real mutation.
 	return AgentIPCResponse{Success: true}
 }
 
