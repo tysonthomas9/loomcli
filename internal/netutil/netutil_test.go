@@ -29,6 +29,21 @@ func TestPickFreeLoopbackPortReturnsBindableAddress(t *testing.T) {
 	_ = l.Close()
 }
 
+func TestDialReachable(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	if !DialReachable(srv.URL, time.Second) {
+		t.Fatalf("DialReachable(%q) = false, want true for a live server", srv.URL)
+	}
+	deadURL := srv.URL
+	srv.Close()
+	if DialReachable(deadURL, time.Second) {
+		t.Fatalf("DialReachable(%q) = true, want false after server closed", deadURL)
+	}
+	if DialReachable("://not a url", time.Second) {
+		t.Fatal("DialReachable on a malformed URL should be false")
+	}
+}
+
 func TestWaitForHealthzReturnsOnOK(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/healthz" {

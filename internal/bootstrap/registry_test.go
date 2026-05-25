@@ -160,6 +160,60 @@ func TestTryReuseActiveRegistryRejectsUnhealthy(t *testing.T) {
 	}
 }
 
+// TestTryReuseActiveRegistryEvictsLivePIDWithDeadURL covers the
+// recycled-PID case: the entry's PID is live (reused by an unrelated
+// process) but nothing is listening on its URL. The read-only probe must
+// report a miss WITHOUT error and WITHOUT mutating the file, so the
+// caller falls through to StartEmbedded (which evicts under the lock).
+func TestTryReuseActiveRegistryEvictsLivePIDWithDeadURL(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	deadURL := srv.URL
+	srv.Close() // free the port so it is refused — simulates the recycled PID's dead fleet-db
+
+	path := filepath.Join(t.TempDir(), "active.json")
+	if err := WriteActiveRegistry(path, ActiveRegistryEntry{PID: os.Getpid(), URL: deadURL}); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	url, ok, err := tryReuseActiveRegistry(context.Background(), path, nil, 200*time.Millisecond)
+	if ok || url != "" {
+		t.Fatalf("live-pid/dead-url entry should be a miss; got url=%q ok=%v", url, ok)
+	}
+	if err != nil {
+		t.Fatalf("recycled-pid entry should NOT error (caller must proceed to spawn); err = %v", err)
+	}
+	if _, statErr := os.Stat(path); statErr != nil {
+		t.Fatalf("read-only probe must not evict; stat err = %v", statErr)
+	}
+}
+
+// TestEvaluateLockedRegistryEvictsLivePIDWithDeadURL is the under-lock
+// counterpart: same recycled-PID state, but here the entry IS evicted and
+// the caller is told to spawn (empty joinURL, nil error).
+func TestEvaluateLockedRegistryEvictsLivePIDWithDeadURL(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	deadURL := srv.URL
+	srv.Close()
+
+	path := filepath.Join(t.TempDir(), "active.json")
+	if err := WriteActiveRegistry(path, ActiveRegistryEntry{PID: os.Getpid(), URL: deadURL}); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	joinURL, err := evaluateLockedRegistry(ctx, path, slog.Default())
+	if err != nil {
+		t.Fatalf("recycled-pid entry should be evicted, not errored; err = %v", err)
+	}
+	if joinURL != "" {
+		t.Fatalf("joinURL = %q, want empty (recycled-pid entry should be evicted, not joined)", joinURL)
+	}
+	if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
+		t.Fatalf("recycled-pid entry should have been evicted under the lock; stat err = %v", statErr)
+	}
+}
+
 func TestActiveRegistryLockIsExclusive(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "active.json")
 	first, err := acquireActiveRegistryLock(path)

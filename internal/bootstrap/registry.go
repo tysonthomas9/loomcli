@@ -251,7 +251,20 @@ func tryReuseActiveRegistry(ctx context.Context, registryPath string, logger *sl
 	healthCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	if err := netutil.WaitForHealthz(healthCtx, entry.URL, healthCheckTimeout); err != nil {
-		// Live PID but unhealthy: surface the conflict instead of starting a second one.
+		// Live PID but unhealthy. Distinguish a recycled PID (the dead
+		// fleet-db's PID was reused by an unrelated process, so nothing is
+		// listening on entry.URL) from a fleet-db that is genuinely present
+		// but sick. When the URL is unreachable the entry is effectively
+		// stale: report a miss without mutating so the caller proceeds to
+		// StartEmbedded, which evicts under the lock and spawns. When
+		// something IS listening, surface the conflict instead of starting
+		// a second one and orphaning a live peer.
+		if !netutil.DialReachable(entry.URL, healthCheckTimeout) {
+			if logger != nil {
+				logger.Warn("registry entry pid live but url unreachable; treating as stale (deferring eviction to StartEmbedded)", "pid", entry.PID, "url", entry.URL)
+			}
+			return "", false, nil
+		}
 		return "", false, fmt.Errorf("registry: fleet-db at %s (pid %d) is registered but not healthy: %w", entry.URL, entry.PID, err)
 	}
 	if logger != nil {
@@ -357,6 +370,16 @@ func evaluateLockedRegistry(ctx context.Context, registryPath string, logger *sl
 	cancel()
 	if hzErr == nil {
 		return entry.URL, nil
+	}
+	// Live PID but unhealthy. If nothing is listening on entry.URL the PID
+	// was recycled (or the fleet-db died without cleanup) — evict and let
+	// the caller spawn a fresh one. This is safe from split-brain because
+	// there is no live server to conflict with. Otherwise a real server is
+	// present but sick: surface the error rather than orphan it.
+	if !netutil.DialReachable(entry.URL, healthCheckTimeout) {
+		logger.Warn("evicting registry entry: pid live but fleet-db url unreachable (recycled pid / dead server)", "pid", entry.PID, "url", entry.URL)
+		_ = os.Remove(registryPath)
+		return "", nil
 	}
 	return "", fmt.Errorf("embedded: registry entry %s (pid %d) is registered but unhealthy: %w", entry.URL, entry.PID, hzErr)
 }
