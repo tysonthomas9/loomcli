@@ -37,6 +37,7 @@ type mockIPCMutator struct {
 	updateFn      func(issueID string, params backend.UpdateParams) error
 	completeFn    func(issueID string, params backend.CloseParams) (*backend.CloseResult, error)
 	releaseLockFn func(issueID string) error
+	releaseFn     func(issueID string) error
 }
 
 func (m *mockIPCMutator) Claim(issueID string, lockTTL time.Duration) error {
@@ -63,6 +64,13 @@ func (m *mockIPCMutator) Complete(issueID string, params backend.CloseParams) (*
 func (m *mockIPCMutator) ReleaseLock(issueID string) error {
 	if m.releaseLockFn != nil {
 		return m.releaseLockFn(issueID)
+	}
+	return nil
+}
+
+func (m *mockIPCMutator) Release(issueID string) error {
+	if m.releaseFn != nil {
+		return m.releaseFn(issueID)
 	}
 	return nil
 }
@@ -354,44 +362,51 @@ func TestIPCIssueBackend_SearchIssues_DelegatesToDirectBackend(t *testing.T) {
 	}
 }
 
-// TestIPCIssueBackend_ReleaseClaim_DelegatesToDirectBackend asserts that
-// ReleaseClaim bypasses the IPC mutator and delegates to the underlying
-// backend when it implements ClaimReleaser. LOOM-1's IPC path intentionally
-// skips daemon mediation because /release is idempotent and authenticates
-// by actor at the fleet layer; mediating would require a daemon-protocol
-// bump that this bug fix avoids.
-func TestIPCIssueBackend_ReleaseClaim_DelegatesToDirectBackend(t *testing.T) {
+// TestIPCIssueBackend_ReleaseClaim_RoutesThroughIPC asserts that ReleaseClaim
+// goes through the IPC mutator (IPCOpReleaseClaim) — so the daemon applies the
+// lease fence — and does NOT touch the direct backend, even when the direct
+// backend implements ClaimReleaser. This is the inverse of the pre-LOOM-1
+// bypass: release is now daemon-mediated like Claim/Update/Close.
+func TestIPCIssueBackend_ReleaseClaim_RoutesThroughIPC(t *testing.T) {
+	var gotID string
+	releaseCalls := 0
 	ipc := &mockIPCMutator{
-		claimFn: func(string, time.Duration) error {
-			t.Fatal("IPC Claim should not be touched by ReleaseClaim")
+		releaseFn: func(issueID string) error {
+			releaseCalls++
+			gotID = issueID
 			return nil
 		},
 	}
+	// A direct backend that WOULD service ReleaseClaim if (incorrectly) called.
 	direct := &releaserMock{}
 	b := newIPCIssueBackend(ipc, direct)
 
 	if err := b.ReleaseClaim(context.Background(), "issue-99"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if direct.calls != 1 {
-		t.Errorf("direct.ReleaseClaim calls = %d, want 1", direct.calls)
+	if releaseCalls != 1 || gotID != "issue-99" {
+		t.Errorf("ipc.Release calls=%d id=%q, want 1 / issue-99", releaseCalls, gotID)
 	}
-	if direct.lastID != "issue-99" {
-		t.Errorf("direct.ReleaseClaim id = %q, want issue-99", direct.lastID)
+	if direct.calls != 0 {
+		t.Errorf("direct.ReleaseClaim calls = %d, want 0 (release must not bypass IPC)", direct.calls)
 	}
 }
 
-// TestIPCIssueBackend_ReleaseClaim_NoopWhenDirectDoesNotImplement asserts the
-// graceful degradation: if the direct backend doesn't implement ClaimReleaser
-// (api / agentipc / plain mock), the call is a silent no-op rather than a
-// panic or wire error.
-func TestIPCIssueBackend_ReleaseClaim_NoopWhenDirectDoesNotImplement(t *testing.T) {
-	ipc := &mockIPCMutator{}
-	direct := NewMockIssueBackend() // does not implement ClaimReleaser
-	b := newIPCIssueBackend(ipc, direct)
+// TestIPCIssueBackend_ReleaseClaim_PropagatesIPCError asserts that an error from
+// the daemon IPC release surfaces back to the caller unchanged.
+func TestIPCIssueBackend_ReleaseClaim_PropagatesIPCError(t *testing.T) {
+	want := backend.NewBackendError(backend.KindConflict, "ipc.release", "lock held by someone else", nil)
+	ipc := &mockIPCMutator{
+		releaseFn: func(string) error { return want },
+	}
+	b := newIPCIssueBackend(ipc, NewMockIssueBackend())
 
-	if err := b.ReleaseClaim(context.Background(), "issue-99"); err != nil {
-		t.Errorf("unexpected error from no-op release: %v", err)
+	err := b.ReleaseClaim(context.Background(), "issue-99")
+	if err == nil {
+		t.Fatal("expected error from ipc.Release, got nil")
+	}
+	if !backend.IsKind(err, backend.KindConflict) {
+		t.Errorf("expected KindConflict, got %v", err)
 	}
 }
 

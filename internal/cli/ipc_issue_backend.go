@@ -1,14 +1,11 @@
 // IPC-aware IssueBackend decorator.
 //
 // When a daemon-spawned subprocess has LOOM_DAEMON_SOCKET set, defaultIssueBackend()
-// returns an ipcIssueBackend that routes the three daemon-supported mutation operations
-// (Update, ClaimIssue, Close) through the AgentIPCClient while reading through the
-// underlying direct backend.
-//
-// ReleaseClaim is also implemented (LOOM-1) but intentionally bypasses IPC and
-// delegates to the direct backend — release is idempotent and authenticates by
-// actor at the fleet layer, so daemon mediation isn't required for correctness.
-// See ReleaseClaim's doc comment for the trade-off and the future-bump note.
+// returns an ipcIssueBackend that routes the daemon-supported mutation operations
+// (Update, ClaimIssue, Close, ReleaseClaim) through the AgentIPCClient while reading
+// through the underlying direct backend. Routing every mutation through the daemon
+// keeps them behind the lease fence (see daemon.validateIPCLease) — LOOM-1 added
+// ReleaseClaim to this set via the IPCOpReleaseClaim operation.
 
 package cli
 
@@ -27,6 +24,7 @@ type ipcMutator interface {
 	Update(issueID string, params backend.UpdateParams) error
 	Complete(issueID string, params backend.CloseParams) (*backend.CloseResult, error)
 	ReleaseLock(issueID string) error
+	Release(issueID string) error
 }
 
 // ipcIssueBackend decorates an IssueBackend with IPC routing for mutations.
@@ -69,18 +67,12 @@ func (b *ipcIssueBackend) Close(ctx context.Context, id string, params backend.C
 	return b.ipc.Complete(id, params)
 }
 
-// ReleaseClaim bypasses IPC and delegates to the underlying direct backend.
-// Release is idempotent and authenticates by actor at the fleet layer, so
-// daemon mediation is unnecessary for correctness. Trade-off: this path does
-// not carry the daemon's lease_token; the fleet /release endpoint uses the
-// actor header (set from current.Assignee inside the direct backend), so
-// actor identity is still correct. A future daemon-protocol bump that adds
-// IPCOpReleaseClaim can re-route this. See LOOM-1.
+// ReleaseClaim routes through IPC (IPCOpReleaseClaim), so the daemon applies
+// the same lease fence it enforces for Claim/Update/Close before releasing the
+// claim on the agent's behalf. The daemon derives the release actor from the
+// issue's server-side assignee, so identity is not caller-supplied. See LOOM-1.
 func (b *ipcIssueBackend) ReleaseClaim(ctx context.Context, id string) error {
-	if r, ok := b.direct.(backend.ClaimReleaser); ok {
-		return r.ReleaseClaim(ctx, id)
-	}
-	return nil
+	return b.ipc.Release(id)
 }
 
 // --- Direct backend methods ---
@@ -214,11 +206,12 @@ type AgentIPCResponse struct {
 
 // IPC operation name constants.
 const (
-	IPCOpClaim       = "claim"
-	IPCOpUpdate      = "update"
-	IPCOpComplete    = "complete"
-	IPCOpHeartbeat   = "heartbeat" // liveness ping carrying LastActivityAt; no mutation
-	IPCOpReleaseLock = "release_lock"
+	IPCOpClaim        = "claim"
+	IPCOpUpdate       = "update"
+	IPCOpComplete     = "complete"
+	IPCOpHeartbeat    = "heartbeat" // liveness ping carrying LastActivityAt; no mutation
+	IPCOpReleaseLock  = "release_lock"
+	IPCOpReleaseClaim = "release_claim"
 )
 
 // IPCClaimArgs are the optional arguments for the claim operation.

@@ -550,7 +550,13 @@ func (b *FleetBackend) Update(ctx context.Context, id string, params backend.Upd
 		handled = true
 	}
 
-	assignBeforeStatus := params.Assignee != nil && params.Status != nil && *params.Status != "in_progress" && *params.Status != "open"
+	// review/blocked transitions out of in_progress release the claim lock inside
+	// applyStatusUpdate, which clears the assignee as a side effect. Assigning
+	// first would erase the release actor (current.Assignee), so defer the assign
+	// for those targets — see applyStatusUpdate's "blocked"/"review" case (LOOM-1).
+	assignBeforeStatus := params.Assignee != nil && params.Status != nil &&
+		*params.Status != "in_progress" && *params.Status != "open" &&
+		*params.Status != "review" && *params.Status != "blocked"
 	if assignBeforeStatus {
 		if err := b.assignIssue(ctx, id, *params.Assignee); err != nil {
 			return err
@@ -619,13 +625,29 @@ func (b *FleetBackend) applyStatusUpdate(ctx context.Context, id string, params 
 		}
 		return false, b.deferIssue(ctx, id, until)
 	case "blocked", "review":
-		// TODO(LOOM-1): this PATCH-only path leaks the claim lock when
-		// current.Status == "in_progress" (planner's Step 5
-		// "--status review --assignee=\"\"" flow). A symmetric /release call
-		// belongs here, but is deferred to keep this bug fix focused on the
-		// loom-complete path described in LOOM-1.
-		_, err := b.exec(ctx, "Update", "PATCH", "/issues/"+url.PathEscape(id), map[string]interface{}{"status": target})
-		return false, err
+		// Releasing the claim lock when leaving in_progress keeps the planner's
+		// `--status review --assignee=""` flow from leaking the lock (LOOM-1).
+		// Mirrors transitionToOpen's in_progress branch: /release drops the lock
+		// (and clears the assignee) server-side; we then set the target status.
+		// Update defers the pre-status assign for review/blocked so current.Assignee
+		// still names the lock holder here (see assignBeforeStatus).
+		released := false
+		if current != nil && current.Status == "in_progress" && current.Assignee != "" {
+			if err := b.execAsActor(ctx, "Update",
+				"/issues/"+url.PathEscape(id)+"/release", nil, current.Assignee); err != nil {
+				return false, err
+			}
+			released = true
+		}
+		if _, err := b.exec(ctx, "Update", "PATCH", "/issues/"+url.PathEscape(id), map[string]interface{}{"status": target}); err != nil {
+			return false, err
+		}
+		// The release already cleared the assignee; report it handled when the
+		// caller asked to clear it (or named none) so Update skips a redundant
+		// /assign "". A non-empty requested assignee still falls through to the
+		// assign step below.
+		assigneeCleared := released && (params.Assignee == nil || *params.Assignee == "")
+		return assigneeCleared, nil
 	default:
 		return false, backend.ErrValidation("Update", "unsupported status for FleetDB workflow: "+target)
 	}

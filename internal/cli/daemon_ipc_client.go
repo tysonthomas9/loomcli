@@ -180,6 +180,27 @@ func (c *AgentIPCClient) Complete(issueID string, params backend.CloseParams) (*
 	return &result, nil
 }
 
+// Release drops the claim lock on an issue. The daemon validates this agent's
+// lease (the same fence as Claim/Update/Complete) and derives the release actor
+// from the issue's server-side assignee, so no args are carried. Idempotent on
+// the server side: releasing an unheld lock is not an error.
+func (c *AgentIPCClient) Release(issueID string) error {
+	req := AgentIPCRequest{
+		Operation:  IPCOpReleaseClaim,
+		AgentName:  c.AgentName,
+		IssueID:    issueID,
+		SessionID:  c.SessionID,
+		LeaseID:    c.LeaseID,
+		LeaseToken: c.LeaseToken,
+	}
+
+	resp, err := sendAgentIPCRequest(c.SocketPath, req)
+	if err != nil {
+		return err
+	}
+	return ipcResponseToError(resp, "ipc.release")
+}
+
 // sendAgentIPCRequest dials the Unix socket, sends one JSON-line request, reads
 // one JSON-line response, and disconnects. All transport errors are returned as
 // backend.ErrUnavailable.

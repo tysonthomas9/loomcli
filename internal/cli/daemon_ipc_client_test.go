@@ -397,3 +397,52 @@ func TestAgentIPCClient_AgentNamePopulated(t *testing.T) {
 		t.Errorf("IssueID = %q, want %q", capturedReq.IssueID, "abc-123")
 	}
 }
+
+func TestAgentIPCClient_Release_Success(t *testing.T) {
+	tmpDir := shortSocketDir(t)
+	socketPath := filepath.Join(tmpDir, "ipc.sock")
+
+	var capturedReq AgentIPCRequest
+	startTestIPCServer(t, socketPath, func(req AgentIPCRequest) AgentIPCResponse {
+		capturedReq = req
+		return AgentIPCResponse{Success: true}
+	})
+
+	client := NewAgentIPCClient(socketPath, "falcon")
+	client.SessionID = "sess-1"
+	client.LeaseID = "lease-1"
+	client.LeaseToken = "token-1"
+	if err := client.Release("abc-123"); err != nil {
+		t.Fatalf("Release() error = %v", err)
+	}
+
+	if capturedReq.Operation != IPCOpReleaseClaim {
+		t.Errorf("Operation = %q, want %q", capturedReq.Operation, IPCOpReleaseClaim)
+	}
+	if capturedReq.IssueID != "abc-123" {
+		t.Errorf("IssueID = %q, want %q", capturedReq.IssueID, "abc-123")
+	}
+	// Release must carry the lease-fence fields so the daemon can validate it.
+	if capturedReq.SessionID != "sess-1" || capturedReq.LeaseID != "lease-1" || capturedReq.LeaseToken != "token-1" {
+		t.Errorf("lease fields = session %q lease %q token %q, want sess-1/lease-1/token-1",
+			capturedReq.SessionID, capturedReq.LeaseID, capturedReq.LeaseToken)
+	}
+}
+
+func TestAgentIPCClient_Release_Conflict(t *testing.T) {
+	tmpDir := shortSocketDir(t)
+	socketPath := filepath.Join(tmpDir, "ipc.sock")
+
+	startTestIPCServer(t, socketPath, func(req AgentIPCRequest) AgentIPCResponse {
+		return AgentIPCResponse{Error: "lock held by someone else", Kind: string(backend.KindConflict)}
+	})
+
+	client := NewAgentIPCClient(socketPath, "falcon")
+	err := client.Release("abc-123")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !backend.IsKind(err, backend.KindConflict) {
+		t.Errorf("expected KindConflict, got: %v", err)
+	}
+}

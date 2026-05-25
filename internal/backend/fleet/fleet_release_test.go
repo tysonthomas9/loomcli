@@ -135,3 +135,120 @@ func TestReleaseClaim_EmptyIDValidationError(t *testing.T) {
 		t.Fatalf("expected KindValidation, got %v", err)
 	}
 }
+
+// Update review/blocked transition lock-leak fix (LOOM-1).
+
+// TestUpdate_ReviewOrBlockedFromInProgress_ReleasesClaim asserts that moving a
+// claimed (in_progress) issue to review or blocked drops the claim lock first
+// (POST /release as the current assignee) and then PATCHes the target status —
+// the planner's `--status review --assignee=""` flow that previously leaked the
+// lock. The /assign "" step is skipped because /release already cleared the
+// assignee.
+func TestUpdate_ReviewOrBlockedFromInProgress_ReleasesClaim(t *testing.T) {
+	for _, target := range []string{"review", "blocked"} {
+		t.Run(target, func(t *testing.T) {
+			var sawRelease, sawPatch, sawAssign bool
+			var releaseActor, patchedStatus string
+			fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/issues/test-1"):
+					respondOK(w, types.Issue{
+						ID:        "test-1",
+						Title:     "T",
+						Status:    types.StatusInProgress,
+						Assignee:  "planner",
+						CreatedAt: time.Now(),
+						UpdatedAt: time.Now(),
+					})
+				case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/issues/test-1/deps"):
+					respondOK(w, map[string]interface{}{"dependencies": []interface{}{}})
+				case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/issues/test-1/comments"):
+					respondOK(w, []interface{}{})
+				case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/issues/test-1/release"):
+					sawRelease = true
+					releaseActor = r.Header.Get("X-Actor")
+					respondOK(w, json.RawMessage(`{}`))
+				case r.Method == "PATCH" && strings.HasSuffix(r.URL.Path, "/issues/test-1"):
+					sawPatch = true
+					var body struct {
+						Status string `json:"status"`
+					}
+					if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+						t.Fatalf("decode patch body: %v", err)
+					}
+					patchedStatus = body.Status
+					respondOK(w, json.RawMessage(`{}`))
+				case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/issues/test-1/assign"):
+					sawAssign = true
+					respondOK(w, json.RawMessage(`{}`))
+				default:
+					t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+				}
+			})
+			defer ts.Close()
+
+			status := target
+			empty := ""
+			if err := fb.Update(context.Background(), "test-1",
+				backend.UpdateParams{Status: &status, Assignee: &empty}); err != nil {
+				t.Fatalf("Update: %v", err)
+			}
+			if !sawRelease {
+				t.Error("expected /release to be called to drop the claim lock")
+			}
+			if releaseActor != "planner" {
+				t.Errorf("release X-Actor = %q, want %q (the lock holder)", releaseActor, "planner")
+			}
+			if !sawPatch || patchedStatus != target {
+				t.Errorf("expected PATCH status=%q; sawPatch=%v patchedStatus=%q", target, sawPatch, patchedStatus)
+			}
+			if sawAssign {
+				t.Error("did not expect /assign: /release already cleared the assignee")
+			}
+		})
+	}
+}
+
+// TestUpdate_ReviewFromOpen_NoRelease asserts the negative: moving an issue to
+// review when it is NOT in_progress (no claim held) only PATCHes the status —
+// there is nothing to release, so no /release call is issued.
+func TestUpdate_ReviewFromOpen_NoRelease(t *testing.T) {
+	var sawRelease, sawPatch bool
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/issues/test-1"):
+			respondOK(w, types.Issue{
+				ID:        "test-1",
+				Title:     "T",
+				Status:    types.StatusOpen,
+				Assignee:  "",
+				CreatedAt: time.Now(),
+				UpdatedAt: time.Now(),
+			})
+		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/issues/test-1/deps"):
+			respondOK(w, map[string]interface{}{"dependencies": []interface{}{}})
+		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/issues/test-1/comments"):
+			respondOK(w, []interface{}{})
+		case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/issues/test-1/release"):
+			sawRelease = true
+			respondOK(w, json.RawMessage(`{}`))
+		case r.Method == "PATCH" && strings.HasSuffix(r.URL.Path, "/issues/test-1"):
+			sawPatch = true
+			respondOK(w, json.RawMessage(`{}`))
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	})
+	defer ts.Close()
+
+	status := "review"
+	if err := fb.Update(context.Background(), "test-1", backend.UpdateParams{Status: &status}); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if sawRelease {
+		t.Error("did not expect /release when the issue is not in_progress")
+	}
+	if !sawPatch {
+		t.Error("expected PATCH to set status=review")
+	}
+}

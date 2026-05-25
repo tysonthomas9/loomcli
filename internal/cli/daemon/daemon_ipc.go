@@ -19,7 +19,7 @@ import (
 
 // AgentIPCRequest is sent by an agent subprocess to the daemon IPC socket.
 type AgentIPCRequest struct {
-	Operation      string          `json:"operation"`                  // "claim", "update", "complete", "heartbeat"
+	Operation      string          `json:"operation"`                  // "claim", "update", "complete", "heartbeat", "release_claim"
 	AgentName      string          `json:"agent_name"`                 // LOOM_AGENT_NAME identity (required)
 	IssueID        string          `json:"issue_id"`                   // target issue (required except for "heartbeat")
 	SessionID      string          `json:"session_id,omitempty"`       // fleet-db AgentSession id
@@ -38,12 +38,14 @@ type AgentIPCResponse struct {
 }
 
 // Operation name constants for agent IPC.
+// These string values must stay in sync with the cli package's IPCOp* constants.
 const (
-	ipcOpClaim       = "claim"
-	ipcOpUpdate      = "update"
-	ipcOpComplete    = "complete"
-	ipcOpHeartbeat   = "heartbeat"
-	ipcOpReleaseLock = "release_lock"
+	ipcOpClaim        = "claim"
+	ipcOpUpdate       = "update"
+	ipcOpComplete     = "complete"
+	ipcOpHeartbeat    = "heartbeat"
+	ipcOpReleaseLock  = "release_lock"
+	ipcOpReleaseClaim = "release_claim"
 )
 
 // ipcClaimArgs are the optional arguments for the claim operation.
@@ -161,7 +163,7 @@ func validateIPCRequest(req AgentIPCRequest) (AgentIPCResponse, bool) {
 // can thread it through to inherit the span as parent.
 func (d *Daemon) dispatchIPCOperation(req AgentIPCRequest) AgentIPCResponse {
 	switch req.Operation {
-	case ipcOpClaim, ipcOpUpdate, ipcOpComplete, ipcOpHeartbeat, ipcOpReleaseLock:
+	case ipcOpClaim, ipcOpUpdate, ipcOpComplete, ipcOpHeartbeat, ipcOpReleaseLock, ipcOpReleaseClaim:
 		// known method — fall through to traced dispatch below
 	default:
 		return AgentIPCResponse{Error: fmt.Sprintf("unknown operation: %q", req.Operation)}
@@ -183,6 +185,8 @@ func (d *Daemon) dispatchIPCOperation(req AgentIPCRequest) AgentIPCResponse {
 		resp = d.handleIPCHeartbeat(req)
 	case ipcOpReleaseLock:
 		resp = d.handleIPCReleaseLock(req)
+	case ipcOpReleaseClaim:
+		resp = d.handleIPCReleaseClaim(req)
 	}
 	if resp.Success {
 		// Every successful op also advances per-agent liveness when a
@@ -344,6 +348,37 @@ func (d *Daemon) handleIPCReleaseLock(req AgentIPCRequest) AgentIPCResponse {
 	if err := d.issueBackend.ReleaseIssueLock(ctx, req.IssueID, req.AgentName); err != nil {
 		return ipcErrorResponse(err)
 	}
+	return AgentIPCResponse{Success: true}
+}
+
+// handleIPCReleaseClaim handles the "release_claim" operation: drop the claim
+// lock on an issue behind the same lease fence as the other mutations. The
+// backend releases as the issue's server-side assignee, so identity is not
+// caller-supplied. Backends without an explicit claim lock (non-fleet) report
+// success without acting — release is a no-op there.
+func (d *Daemon) handleIPCReleaseClaim(req AgentIPCRequest) AgentIPCResponse {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if resp, ok := d.validateIPCLease(ctx, req); !ok {
+		return resp
+	}
+	releaser, ok := d.issueBackend.(backend.ClaimReleaser)
+	if !ok {
+		return AgentIPCResponse{Success: true}
+	}
+	if err := releaser.ReleaseClaim(ctx, req.IssueID); err != nil {
+		return ipcErrorResponse(err)
+	}
+
+	d.publishMutation(backend.MutationData{
+		Type:      backend.MutationStatus,
+		IssueID:   req.IssueID,
+		Actor:     req.AgentName,
+		OldStatus: "in_progress",
+		NewStatus: "open",
+	})
+
 	return AgentIPCResponse{Success: true}
 }
 
