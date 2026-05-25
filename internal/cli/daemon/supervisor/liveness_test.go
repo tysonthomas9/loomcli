@@ -119,6 +119,56 @@ func TestLivenessTimeoutHonoredAtFloor(t *testing.T) {
 	}
 }
 
+// TestAgentWaitHeartbeatKeepsTickFresh is the regression guard for the
+// false-positive daemon crash: a healthy agent that runs longer than the agent
+// threshold must not be flagged, because waitForAgent's heartbeat keeps the
+// supervise tick fresh while cmd.Wait() blocks.
+func TestAgentWaitHeartbeatKeepsTickFresh(t *testing.T) {
+	s := newHarnessSupervisor()
+	ap := &AgentProcess{Entry: cfgpkg.AgentEntry{Worktree: "hb_agent", Role: "task"}}
+	name := agentTickName(ap)
+	s.RegisterTick(name)
+
+	// Simulate a healthy long-running agent: the supervise loop recorded its
+	// tick once at the top, then blocked in cmd.Wait() for an hour. Without the
+	// heartbeat this stale tick would trip the watchdog and crash the daemon.
+	setTickForTest(s, name, time.Now().Add(-1*time.Hour))
+
+	stop := s.startAgentWaitHeartbeatEvery(ap, 2*time.Millisecond)
+
+	fresh := false
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if last, ok := s.LoadTick(name); ok && time.Since(last) < agentThreshold(s) {
+			fresh = true
+			break
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	if !fresh {
+		stop()
+		t.Fatal("heartbeat did not refresh the agent tick while waiting")
+	}
+
+	// A heartbeating agent must not be flagged as a wedged supervise goroutine.
+	s.scanTicks(time.Now())
+	select {
+	case err := <-s.FatalChannel():
+		stop()
+		t.Fatalf("scanTicks flagged a heartbeating agent: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	// stop() must terminate the heartbeat goroutine; no ticks may follow.
+	stop()
+	last, _ := s.LoadTick(name)
+	time.Sleep(20 * time.Millisecond)
+	again, _ := s.LoadTick(name)
+	if !again.Equal(last) {
+		t.Fatalf("heartbeat kept ticking after stop: %v -> %v", last, again)
+	}
+}
+
 func setTickForTest(s *Supervisor, name string, when time.Time) {
 	v, ok := s.Ticks.Load(name)
 	if !ok {

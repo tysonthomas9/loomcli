@@ -87,6 +87,13 @@ func (s *Supervisor) thresholdFor(name string) time.Duration {
 }
 
 // agentThreshold computes the per-agent superviseAgent staleness threshold.
+//
+// startAgentWaitHeartbeat keeps the tick fresh for the (unbounded) duration of
+// cmd.Wait(), so this threshold only has to cover the non-waiting parts of the
+// supervise loop — spawn, pre-flight setup, post-exit cleanup and the no-work /
+// restart backoff. The formula budgets two no-work backoffs plus a spawn budget
+// so a healthy but momentarily idle agent is never mistaken for a wedged
+// supervise goroutine.
 func agentThreshold(s *Supervisor) time.Duration {
 	noWork := 30 * time.Second
 	if s.ConfigSnapshot != nil {
@@ -101,4 +108,56 @@ func agentThreshold(s *Supervisor) time.Duration {
 		threshold = minLivenessThreshold
 	}
 	return threshold
+}
+
+// agentTickName returns the liveness tick name for an agent's supervise goroutine.
+func agentTickName(ap *AgentProcess) string {
+	return GoroutineAgentPrefix + ap.Entry.Worktree
+}
+
+// agentWaitHeartbeatInterval is how often waitForAgent refreshes an agent's
+// supervise tick while blocked in cmd.Wait(). It must stay comfortably below
+// both livenessScanInterval and the agent staleness threshold so a scan never
+// observes a stale tick for a healthy, running agent.
+const agentWaitHeartbeatInterval = 15 * time.Second
+
+// startAgentWaitHeartbeat refreshes the agent's supervise tick on an interval
+// for as long as the supervise goroutine is blocked in cmd.Wait(). It returns a
+// stop function that signals the heartbeat goroutine and blocks until it exits.
+//
+// The tick recorded at the top of superviseAgent would otherwise stay frozen
+// for the entire, unbounded lifetime of a running agent, so the liveness
+// watchdog would eventually mistake a healthy long-running agent for a wedged
+// supervise goroutine and crash the whole daemon. A genuinely silent or hung
+// agent is handled independently by the output-timeout watchdog (checkWatchdog),
+// which kills the process and unblocks cmd.Wait().
+func (s *Supervisor) startAgentWaitHeartbeat(ap *AgentProcess) func() {
+	return s.startAgentWaitHeartbeatEvery(ap, agentWaitHeartbeatInterval)
+}
+
+// startAgentWaitHeartbeatEvery is startAgentWaitHeartbeat with an explicit
+// interval, allowing tests to drive the heartbeat without real-time waits.
+func (s *Supervisor) startAgentWaitHeartbeatEvery(ap *AgentProcess, interval time.Duration) func() {
+	tickName := agentTickName(ap)
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-s.Shutdown:
+				return
+			case <-ticker.C:
+				s.RecordTick(tickName)
+			}
+		}
+	}()
+	return func() {
+		close(stop)
+		<-done
+	}
 }

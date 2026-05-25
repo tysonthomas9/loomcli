@@ -293,9 +293,11 @@ func (s *Supervisor) Stop() {
 //nolint:funlen // The restart loop keeps lifecycle ordering visible.
 func (s *Supervisor) superviseAgent(ap *AgentProcess) {
 	slog.Info("starting agent supervisor", "worktree", ap.Entry.Worktree, "role", ap.Entry.Role)
-	tickName := GoroutineAgentPrefix + ap.Entry.Worktree
+	tickName := agentTickName(ap)
 
 	for {
+		// Refreshed at the top of every iteration; while we block in
+		// waitForAgent → cmd.Wait(), startAgentWaitHeartbeat keeps it fresh.
 		s.RecordTick(tickName)
 		if s.checkAgentStopSignals(ap) {
 			return
