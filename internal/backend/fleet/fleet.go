@@ -551,9 +551,11 @@ func (b *FleetBackend) Update(ctx context.Context, id string, params backend.Upd
 	}
 
 	// review/blocked transitions out of in_progress release the claim lock inside
-	// applyStatusUpdate, which clears the assignee as a side effect. Assigning
-	// first would erase the release actor (current.Assignee), so defer the assign
-	// for those targets — see applyStatusUpdate's "blocked"/"review" case (LOOM-1).
+	// applyStatusUpdate, releasing as current.Assignee (the lock holder). Assigning
+	// first would erase that identity, skip the release, and leak the lock — so
+	// defer the assign for those targets (see applyStatusUpdate's "blocked"/"review"
+	// case, LOOM-1). Any requested assignee change is applied afterward by the
+	// normal assign step below.
 	assignBeforeStatus := params.Assignee != nil && params.Status != nil &&
 		*params.Status != "in_progress" && *params.Status != "open" &&
 		*params.Status != "review" && *params.Status != "blocked"
@@ -625,29 +627,24 @@ func (b *FleetBackend) applyStatusUpdate(ctx context.Context, id string, params 
 		}
 		return false, b.deferIssue(ctx, id, until)
 	case "blocked", "review":
-		// Releasing the claim lock when leaving in_progress keeps the planner's
-		// `--status review --assignee=""` flow from leaking the lock (LOOM-1).
-		// Mirrors transitionToOpen's in_progress branch: /release drops the lock
-		// (and clears the assignee) server-side; we then set the target status.
-		// Update defers the pre-status assign for review/blocked so current.Assignee
-		// still names the lock holder here (see assignBeforeStatus).
-		released := false
+		// Drop the claim lock (lock-only) before changing status so the planner's
+		// `--status review --assignee=""` flow doesn't leak the lock (LOOM-1).
+		// Unlike /release, /release-lock leaves status and assignee untouched, so
+		// we set the target status next and let Update's normal assign step apply
+		// any requested assignee change — hence we return false (assignee not
+		// handled here). We release as current.Assignee (the lock holder); the
+		// assign is deferred (see assignBeforeStatus) precisely so that identity
+		// is still intact at this point.
 		if current != nil && current.Status == "in_progress" && current.Assignee != "" {
 			if err := b.execAsActor(ctx, "Update",
-				"/issues/"+url.PathEscape(id)+"/release", nil, current.Assignee); err != nil {
+				"/issues/"+url.PathEscape(id)+"/release-lock", nil, current.Assignee); err != nil {
 				return false, err
 			}
-			released = true
 		}
 		if _, err := b.exec(ctx, "Update", "PATCH", "/issues/"+url.PathEscape(id), map[string]interface{}{"status": target}); err != nil {
 			return false, err
 		}
-		// The release already cleared the assignee; report it handled when the
-		// caller asked to clear it (or named none) so Update skips a redundant
-		// /assign "". A non-empty requested assignee still falls through to the
-		// assign step below.
-		assigneeCleared := released && (params.Assignee == nil || *params.Assignee == "")
-		return assigneeCleared, nil
+		return false, nil
 	default:
 		return false, backend.ErrValidation("Update", "unsupported status for FleetDB workflow: "+target)
 	}
