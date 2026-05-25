@@ -5,14 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"strings"
 
+	"github.com/olesho/harness-wrapper/pkg/wrapper"
+
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/harness"
-	"github.com/tysonthomas9/loomcli/internal/harness/wrapper"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
@@ -196,22 +196,6 @@ func finalizeOpenCodeRun(runErr error, outputTail, streamErrMsg string) error {
 		runErr = errors.New(streamErrMsg)
 	}
 	return wrapInvocationError(runErr, outputTail)
-}
-
-func scanOpenCodeStream(stdout io.Reader, collector *usage.Collector) (string, string) {
-	var streamErrMsg string
-	outputTail := scanStreamOutput(stdout, func(line string) {
-		fmt.Println(line)
-		if streamErrMsg == "" {
-			if msg, ok := extractOpenCodeStreamError(line); ok {
-				streamErrMsg = msg
-			}
-		}
-		if collector != nil {
-			collectOpenCodeStreamUsage(line, collector)
-		}
-	})
-	return outputTail, streamErrMsg
 }
 
 // collectOpenCodeStreamUsage is best-effort: parse JSON lines for a usage field.

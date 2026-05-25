@@ -12,8 +12,9 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/olesho/harness-wrapper/pkg/wrapper"
+
 	"github.com/tysonthomas9/loomcli/internal/harness"
-	"github.com/tysonthomas9/loomcli/internal/harness/wrapper"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 

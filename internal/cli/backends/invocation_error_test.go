@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/harness/wrapper"
+	"github.com/olesho/harness-wrapper/pkg/wrapper"
 )
 
 func TestWrapWrapperResult_StatusMapping(t *testing.T) {
