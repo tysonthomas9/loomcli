@@ -299,32 +299,6 @@ func defaultClaudeNonInteractiveInvoker(workDir, prompt, agentName string, shutd
 	return err
 }
 
-// setupNonInteractivePipes configures stdin/stdout pipes, starts the process,
-// and prints the launch message. Returns the stdin closer and stdout reader.
-func setupNonInteractivePipes(cmd *exec.Cmd, prompt, resumeID string) (io.ReadCloser, io.Reader, error) {
-	r := pipePromptToCmd(cmd, prompt)
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		r.Close()
-		return nil, nil, fmt.Errorf("failed to create stdout pipe: %w", err)
-	}
-	cmd.Stderr = os.Stderr
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-
-	if resumeID != "" {
-		fmt.Printf("[auto] Resuming Claude session %s...\n\n", resumeID)
-	} else {
-		fmt.Println("Launching Claude agent (non-interactive)...")
-		fmt.Println("")
-	}
-
-	if err := cmd.Start(); err != nil {
-		r.Close()
-		return nil, nil, fmt.Errorf("failed to start claude: %w", err)
-	}
-	return r, stdout, nil
-}
-
 // outputRingBuffer keeps the last N lines of stream output for error classification.
 // Uses an index-based circular buffer to avoid pinning evicted strings.
 type outputRingBuffer struct {

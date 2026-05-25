@@ -114,9 +114,14 @@ func cleanupTmuxSession(name string) {
 		return
 	}
 
-	// Send Ctrl+C for graceful shutdown (allows Claude to save state)
+	// Send Ctrl+C for graceful shutdown (allows Claude to save state).
+	// Grace period is generous (3s) to cover slow tmux event-loop processing
+	// under CPU contention — the full path (send-keys → SIGINT delivery →
+	// shell trap → pane exit) is bounded by tmux + shell scheduling, not by
+	// our polling, and a too-tight deadline races us to kill-session before
+	// the foreground process has a chance to handle the signal.
 	_ = exec.Command("tmux", "send-keys", "-t", name, "C-c").Run() //nolint:gosec // constant tmux subcommands
-	deadline := time.Now().Add(1 * time.Second)
+	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
 		if !tmuxSessionExists(name) || tmuxPaneDead(name) {
 			break
