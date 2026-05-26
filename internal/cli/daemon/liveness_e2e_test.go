@@ -127,10 +127,12 @@ func TestE2E_PR82_WrapperTickerFiresOnActivity(t *testing.T) {
 		len(snaps), final.LastOutputAt, time.Since(final.LastOutputAt))
 }
 
-// TestE2E_PR82_FullChainWrapperToSupervisor is the full end-to-end test
-// for PR #82: run a real fakeharness through runHarness via the real IPC
-// daemon, and verify the supervisor's AgentProcess.LastActivity advances.
-// This is what the kanban surface reads via daemon-agents.json.
+// TestE2E_PR82_FullChainWrapperToSupervisor is the full lower-stack test
+// for PR #82: run a real fakeharness through the real wrapper and harness
+// retry loop, forward activity through the real IPC daemon, and verify the
+// supervisor's AgentProcess.LastActivity advances. It also verifies that the
+// supervisor and daemon-state projections preserve the task/activity fields
+// the kanban surface eventually consumes.
 //
 // The daemon is constructed without a fleet-db store, so validateIPCLease
 // short-circuits (no lease validation) — the heartbeat path runs purely
@@ -164,9 +166,15 @@ func TestE2E_PR82_FullChainWrapperToSupervisor(t *testing.T) {
 
 	// 2) Pre-register the AgentProcess so handleIPCHeartbeat has a
 	// target to update.
-	const agentName = "e2e-agent"
+	const (
+		agentName = "e2e-agent"
+		taskID    = "LOOM-LIVE"
+	)
 	d.sup.Agents = []*supervisor.AgentProcess{
-		{Entry: config.AgentEntry{Worktree: agentName, Role: "task"}},
+		{
+			Entry:          config.AgentEntry{Worktree: agentName, Role: "task"},
+			AssignedTaskID: taskID,
+		},
 	}
 
 	// 3) Wire env so cli.DaemonActivityObserver picks up our IPC client.
@@ -227,6 +235,27 @@ func TestE2E_PR82_FullChainWrapperToSupervisor(t *testing.T) {
 	age := time.Since(got)
 	if age > 10*time.Second {
 		t.Errorf("supervisor LastActivity is stale: %v ago (run lasted ~1s, want recent)", age)
+	}
+
+	// The next projection boundary is supervisor.GetAgents, which feeds
+	// daemon-agents.json through toDaemonAgentStatus. Pin both fields together:
+	// the frontend joins cards by task id and labels liveness by activity time.
+	statuses := d.sup.GetAgents()
+	if len(statuses) != 1 {
+		t.Fatalf("GetAgents returned %d agents, want 1", len(statuses))
+	}
+	if statuses[0].AssignedTaskID != taskID {
+		t.Errorf("GetAgents AssignedTaskID = %q, want %q", statuses[0].AssignedTaskID, taskID)
+	}
+	if !statuses[0].LastActivity.Equal(got) {
+		t.Errorf("GetAgents LastActivity = %v, want supervisor value %v", statuses[0].LastActivity, got)
+	}
+	daemonStatus := toDaemonAgentStatus(statuses[0], 3)
+	if daemonStatus.TaskID != taskID {
+		t.Errorf("daemon state TaskID = %q, want %q", daemonStatus.TaskID, taskID)
+	}
+	if !daemonStatus.LastActivity.Equal(got) {
+		t.Errorf("daemon state LastActivity = %v, want supervisor value %v", daemonStatus.LastActivity, got)
 	}
 
 	t.Logf("end-to-end success: agent %q LastActivity = %v (age %v)",
