@@ -526,6 +526,17 @@ func (b *FleetBackend) Create(ctx context.Context, params backend.CreateParams) 
 	return &result, nil
 }
 
+// shouldAssignBeforeStatus reports whether a requested assignee change must be
+// applied before the status transition. For review/blocked targets the claim lock
+// is released as the current assignee inside applyStatusUpdate, so the assign is
+// deferred to keep that identity intact (LOOM-1); for every other status target
+// the assign is safe to apply first.
+func shouldAssignBeforeStatus(params backend.UpdateParams) bool {
+	return params.Assignee != nil && params.Status != nil &&
+		*params.Status != "in_progress" && *params.Status != "open" &&
+		*params.Status != "review" && *params.Status != "blocked"
+}
+
 func (b *FleetBackend) Update(ctx context.Context, id string, params backend.UpdateParams) error {
 	if params.Claim {
 		return backend.ErrValidation("Update", "Claim field is not supported in FleetBackend.Update; use ClaimIssue instead")
@@ -556,10 +567,8 @@ func (b *FleetBackend) Update(ctx context.Context, id string, params backend.Upd
 	// defer the assign for those targets (see applyStatusUpdate's "blocked"/"review"
 	// case, LOOM-1). Any requested assignee change is applied afterward by the
 	// normal assign step below.
-	assignBeforeStatus := params.Assignee != nil && params.Status != nil &&
-		*params.Status != "in_progress" && *params.Status != "open" &&
-		*params.Status != "review" && *params.Status != "blocked"
-	if assignBeforeStatus {
+	assignBefore := shouldAssignBeforeStatus(params)
+	if assignBefore {
 		if err := b.assignIssue(ctx, id, *params.Assignee); err != nil {
 			return err
 		}
@@ -574,7 +583,7 @@ func (b *FleetBackend) Update(ctx context.Context, id string, params backend.Upd
 		handled = true
 	}
 
-	if params.Assignee != nil && !assignBeforeStatus && !assigneeHandledByStatus {
+	if params.Assignee != nil && !assignBefore && !assigneeHandledByStatus {
 		if err := b.assignIssue(ctx, id, *params.Assignee); err != nil {
 			return err
 		}
@@ -627,24 +636,7 @@ func (b *FleetBackend) applyStatusUpdate(ctx context.Context, id string, params 
 		}
 		return false, b.deferIssue(ctx, id, until)
 	case "blocked", "review":
-		// Drop the claim lock (lock-only) before changing status so the planner's
-		// `--status review --assignee=""` flow doesn't leak the lock (LOOM-1).
-		// Unlike /release, /release-lock leaves status and assignee untouched, so
-		// we set the target status next and let Update's normal assign step apply
-		// any requested assignee change — hence we return false (assignee not
-		// handled here). We release as current.Assignee (the lock holder); the
-		// assign is deferred (see assignBeforeStatus) precisely so that identity
-		// is still intact at this point.
-		if current != nil && current.Status == "in_progress" && current.Assignee != "" {
-			if err := b.execAsActor(ctx, "Update",
-				"/issues/"+url.PathEscape(id)+"/release-lock", nil, current.Assignee); err != nil {
-				return false, err
-			}
-		}
-		if _, err := b.exec(ctx, "Update", "PATCH", "/issues/"+url.PathEscape(id), map[string]interface{}{"status": target}); err != nil {
-			return false, err
-		}
-		return false, nil
+		return false, b.transitionToBlockedOrReview(ctx, id, target, current)
 	default:
 		return false, backend.ErrValidation("Update", "unsupported status for FleetDB workflow: "+target)
 	}
@@ -674,6 +666,26 @@ func (b *FleetBackend) ReleaseClaim(ctx context.Context, id string) error {
 	}
 	return b.execAsActor(ctx, "ReleaseClaim",
 		"/issues/"+url.PathEscape(id)+"/release-lock", nil, current.Assignee)
+}
+
+// transitionToBlockedOrReview drops the claim lock (lock-only) before changing
+// status so the planner's `--status review --assignee=""` flow doesn't leak the
+// lock (LOOM-1). Unlike /release, /release-lock leaves status and assignee
+// untouched, so we set the target status next and let Update's normal assign step
+// apply any requested assignee change (the caller returns false: assignee not
+// handled here). We release as current.Assignee (the lock holder); the assign is
+// deferred (see shouldAssignBeforeStatus) so that identity is still intact here.
+func (b *FleetBackend) transitionToBlockedOrReview(ctx context.Context, id, target string, current *backend.IssueDetailData) error {
+	if current != nil && current.Status == "in_progress" && current.Assignee != "" {
+		if err := b.execAsActor(ctx, "Update",
+			"/issues/"+url.PathEscape(id)+"/release-lock", nil, current.Assignee); err != nil {
+			return err
+		}
+	}
+	if _, err := b.exec(ctx, "Update", "PATCH", "/issues/"+url.PathEscape(id), map[string]interface{}{"status": target}); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (b *FleetBackend) transitionToOpen(ctx context.Context, id string, current *backend.IssueDetailData, clearAssignee bool) error {
