@@ -43,17 +43,8 @@ func (s *Supervisor) shouldRestart(ap *AgentProcess) bool {
 		return true
 	}
 
-	// Backend unavailable (CLI binary not on PATH): recoverable once the binary
-	// is installed or PATH is fixed, so keep retrying on a fixed recheck interval
-	// without eroding the restart budget. Mirrors the pre-spawn backend gate for
-	// the case where the missing backend is only detected at runtime, after the
-	// process has already been spawned.
 	if ap.LastError != nil && ap.LastError.Class == agenterr.BackendUnavailable {
-		ap.RateRetryCount = 0
-		ap.NoWorkCount = 0
-		ap.StopReason = ""
-		log.Printf("[daemon] Agent %s: backend unavailable, will recheck in %s (not counted toward max_retries)",
-			ap.Entry.Worktree, backendUnavailableRecheckInterval)
+		s.applyBackendUnavailableRestart(ap)
 		return true
 	}
 
@@ -100,6 +91,20 @@ func (s *Supervisor) applyNoWorkRestart(ap *AgentProcess) {
 		ap.CurrentBackendIdx = 0
 	}
 	ap.StopReason = ""
+}
+
+// applyBackendUnavailableRestart keeps an agent retrying when the backend CLI
+// binary is missing (CLI binary not on PATH): recoverable once the binary is
+// installed or PATH is fixed, so we keep retrying on a fixed recheck interval
+// without eroding the restart budget. Caller holds ap.Mu. Mirrors the pre-spawn
+// backend gate for the case where the missing backend is only detected at
+// runtime, after the process has already been spawned.
+func (s *Supervisor) applyBackendUnavailableRestart(ap *AgentProcess) {
+	ap.RateRetryCount = 0
+	ap.NoWorkCount = 0
+	ap.StopReason = ""
+	log.Printf("[daemon] Agent %s: backend unavailable, will recheck in %s (not counted toward max_retries)",
+		ap.Entry.Worktree, backendUnavailableRecheckInterval)
 }
 
 // computeBackoff returns the sleep duration before next restart.
