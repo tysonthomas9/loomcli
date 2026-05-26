@@ -12,6 +12,7 @@ const (
 	Timeout                           // Connection timeout / ETIMEDOUT / SIGKILL
 	Transient                         // Server error / 5xx / SIGTERM
 	NoWork                            // No claimable tasks available
+	SpawnFailure                      // Supervisor could not start the agent subprocess
 	Unknown                           // Unclassifiable error
 )
 
@@ -33,6 +34,8 @@ func (c ErrorClass) String() string {
 		return "Transient"
 	case NoWork:
 		return "NoWork"
+	case SpawnFailure:
+		return "SpawnFailure"
 	case Unknown:
 		return "Unknown"
 	default:
@@ -43,7 +46,7 @@ func (c ErrorClass) String() string {
 // IsRetryable returns true if the error class is worth retrying.
 func (c ErrorClass) IsRetryable() bool {
 	switch c {
-	case RateLimited, Timeout, Transient:
+	case RateLimited, Timeout, Transient, SpawnFailure:
 		return true
 	default:
 		return false

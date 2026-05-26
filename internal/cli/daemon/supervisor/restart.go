@@ -7,70 +7,9 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
-	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
-
-	"go.opentelemetry.io/otel/attribute"
 )
 
 const primaryBackendRetryCooldown = time.Minute
-
-// handleRestartAfterError handles restart logic after spawn failure.
-// Returns true if the supervisor should continue, false if it should exit.
-//
-// Emits a daemon.supervisor.restart span covering the post-spawn-error
-// backoff window. Mirrors the sleepBeforeRestart span shape so dashboards
-// don't need to distinguish the two callers.
-func (s *Supervisor) handleRestartAfterError(ap *AgentProcess) bool {
-	ap.Mu.Lock()
-	ap.RestartCount++
-	count := ap.RestartCount
-	errType := errorTypeFromAgentErr(ap.LastError)
-	ap.Mu.Unlock()
-
-	_, span := startSpan(cmdstore.RootContext(),
-		"daemon.supervisor.restart",
-		attribute.String("loom.agent", ap.Entry.Worktree),
-		attribute.String("loom.role", ap.Entry.Role),
-		attribute.String("loom.workspace", s.WorkspaceID),
-		attribute.Int("loom.restart_count", count),
-		attribute.String("loom.error_type", errType),
-	)
-	defer span.End()
-
-	maxRetries := s.getMaxRetries()
-	if count > maxRetries {
-		log.Printf("[daemon] Agent %s: max retries exceeded after spawn error", ap.Entry.Worktree)
-		ap.Mu.Lock()
-		ap.StopReason = StopReasonMaxRetries
-		ap.Mu.Unlock()
-		return false
-	}
-
-	backoff := s.computeBackoff(ap)
-	log.Printf("[daemon] Agent %s: spawn failed, waiting %v before retry (attempt %d/%d)",
-		ap.Entry.Worktree, backoff, count, maxRetries)
-
-	ap.Mu.Lock()
-	ap.BackoffUntil = time.Now().Add(backoff)
-	ap.Mu.Unlock()
-
-	var shouldContinue bool
-	select {
-	case <-time.After(backoff):
-		shouldContinue = true
-	case <-s.Shutdown:
-		ap.Mu.Lock()
-		ap.StopReason = StopReasonShutdown
-		ap.Mu.Unlock()
-		shouldContinue = false
-	}
-
-	ap.Mu.Lock()
-	ap.BackoffUntil = time.Time{}
-	ap.Mu.Unlock()
-
-	return shouldContinue
-}
 
 // shouldRestart determines if agent should restart based on backoff policy
 // and the classified error from the most recent exit.
