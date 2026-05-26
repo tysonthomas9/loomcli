@@ -23,6 +23,11 @@ import (
 // `loom recover <worktree>` (which releases the fleet-db lock) or wait for
 // the TTL to expire.
 //
+// NOTE: this is a single-host check. It reads daemon-agents.json for this host
+// only, so multi-VM deployments can falsely flag work held by another host.
+// The cross-VM path is to use fleet-db node/agent-lease state instead of local
+// daemon state; see the multi-VM liveness aggregation ADR.
+//
 // Report-only. Returns an empty CheckResult (skipped) when no IssueBackend is
 // configured, when listing fails, or when no in_progress issues exist.
 func checkOrphanedFleetLocks(deps *cli.Deps) CheckResult {

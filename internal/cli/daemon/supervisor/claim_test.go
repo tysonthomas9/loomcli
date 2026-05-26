@@ -199,6 +199,26 @@ func TestClaimTask_CapsConflictRetries(t *testing.T) {
 	}
 }
 
+func TestClaimTask_AllCandidatesConflictedSetsLockConflict(t *testing.T) {
+	mock := clitest.NewMockIssueBackend()
+	mock.ReadyResult = []backend.IssueData{
+		{ID: "task-1", IssueType: "task", Status: "open", Priority: 1, Title: "Locked", Design: "plan"},
+	}
+	mock.ClaimIssueErr = backend.ErrConflict("ClaimIssue", "already claimed")
+	s := &Supervisor{IssueBackend: mock}
+	ap := &AgentProcess{
+		Entry:      cfgpkg.AgentEntry{Role: "task"},
+		RoleConfig: cfgpkg.RoleConfig{TaskFilter: "has_design"},
+	}
+
+	if s.claimTask(ap, "") {
+		t.Fatal("claimTask returned true after all candidates conflicted")
+	}
+	if ap.LastError == nil || ap.LastError.Class != agenterr.LockConflict {
+		t.Fatalf("LastError = %#v, want LockConflict after all candidates conflicted", ap.LastError)
+	}
+}
+
 func TestClaimTask_NoMatchSetsNoWork(t *testing.T) {
 	mock := clitest.NewMockIssueBackend()
 	mock.ReadyResult = []backend.IssueData{

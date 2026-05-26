@@ -54,7 +54,7 @@ func (b *ipcIssueBackend) ClaimIssue(ctx context.Context, id string, lockTTL tim
 
 // ReleaseIssueLock routes through IPC. The IPC server uses the connected
 // agent's name as the lock-release actor regardless of what we pass in actor.
-func (b *ipcIssueBackend) ReleaseIssueLock(ctx context.Context, id, actor string) error {
+func (b *ipcIssueBackend) ReleaseIssueLock(_ context.Context, id, _ string) error {
 	return b.ipc.ReleaseLock(id)
 }
 

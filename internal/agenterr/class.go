@@ -52,7 +52,7 @@ func (c ErrorClass) String() string {
 // IsRetryable returns true if the error class is worth retrying.
 func (c ErrorClass) IsRetryable() bool {
 	switch c {
-	case RateLimited, Timeout, Transient, SpawnFailure:
+	case RateLimited, Timeout, Transient, SpawnFailure, LockConflict:
 		return true
 	default:
 		return false
