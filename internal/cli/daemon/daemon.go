@@ -127,15 +127,16 @@ func (d *Daemon) Start() error {
 	d.configHash = computeConfigHash(d.config)
 	d.reconcileMu.Unlock()
 
-	// Start configReconciler goroutine (owned by daemon, not supervisor)
+	if err := d.sup.Start(); err != nil {
+		return err
+	}
+
+	// Start configReconciler after Supervisor.Start initializes shared runtime state.
 	d.sup.Wg.Add(1)
 	go func() {
 		defer d.sup.Wg.Done()
 		d.configReconciler()
 	}()
-	if err := d.sup.Start(); err != nil {
-		return err
-	}
 	d.startAgentCommandPoller()
 	return nil
 }
