@@ -50,17 +50,26 @@ func (s *Supervisor) claimTask(ap *AgentProcess, epicID string) bool {
 		return s.claimRequestedTask(ap, opts, requestedTaskID)
 	}
 
+	var conflicts claimConflictInfo
 	// First try issues already assigned to this agent's worktree before
 	// falling back to the global ready queue.
 	if ap.Entry.Worktree != "" {
 		assignedOpts := opts
 		assignedOpts.Assignee = ap.Entry.Worktree
-		if claimed, decided := s.tryClaimFromReady(ap, assignedOpts, constraints); decided {
+		claimed, decided, attemptConflicts := s.tryClaimFromReady(ap, assignedOpts, constraints)
+		conflicts = mergeClaimConflict(conflicts, attemptConflicts)
+		if decided {
 			return claimed
 		}
 	}
-	if claimed, decided := s.tryClaimFromReady(ap, opts, constraints); decided {
+	claimed, decided, attemptConflicts := s.tryClaimFromReady(ap, opts, constraints)
+	conflicts = mergeClaimConflict(conflicts, attemptConflicts)
+	if decided {
 		return claimed
+	}
+	if conflicts.seen() {
+		s.setPreflightError(ap, agenterr.LockConflict, conflicts.message())
+		return false
 	}
 	s.setPreflightError(ap, agenterr.NoWork, "no claimable tasks")
 	return false
@@ -89,21 +98,23 @@ func (s *Supervisor) buildClaimOpts(ap *AgentProcess, epicID string) (backend.Re
 // tryClaimFromReady runs Ready+claim against the given opts. Returns
 // (claimed, decided): decided=false means "no decision, caller may try
 // another opts variant"; decided=true means we either succeeded or hit a
-// failure we've already recorded.
-func (s *Supervisor) tryClaimFromReady(ap *AgentProcess, opts backend.ReadyOpts, constraints cli.RoleConstraints) (claimed, decided bool) {
+// failure we've already recorded. Claim conflicts that did not hit the local
+// cap are returned to the caller so it can try other queues before deciding
+// whether the final preflight result is NoWork or LockConflict.
+func (s *Supervisor) tryClaimFromReady(ap *AgentProcess, opts backend.ReadyOpts, constraints cli.RoleConstraints) (claimed, decided bool, conflicts claimConflictInfo) {
 	issues, err := s.readyIssues(opts)
 	if err != nil {
 		s.setPreflightError(ap, agenterr.Unknown, fmt.Sprintf("ready query failed: %v", err))
-		return false, true
+		return false, true, claimConflictInfo{}
 	}
-	claimed, failed := s.tryClaimBestTask(ap, issues, constraints)
+	claimed, failed, conflicts := s.tryClaimBestTask(ap, issues, constraints)
 	if claimed {
-		return true, true
+		return true, true, conflicts
 	}
 	if failed {
-		return false, true
+		return false, true, conflicts
 	}
-	return false, false
+	return false, false, conflicts
 }
 
 func (s *Supervisor) readyIssues(opts backend.ReadyOpts) ([]backend.IssueData, error) {
@@ -144,32 +155,54 @@ func (s *Supervisor) claimRequestedTask(ap *AgentProcess, opts backend.ReadyOpts
 	return false
 }
 
-func (s *Supervisor) tryClaimBestTask(ap *AgentProcess, issues []backend.IssueData, constraints cli.RoleConstraints) (bool, bool) {
-	conflicts := 0
-	var lastConflictID, lastConflictHolder string
+type claimConflictInfo struct {
+	count      int
+	lastID     string
+	lastHolder string
+}
+
+func (c claimConflictInfo) seen() bool { return c.count > 0 }
+
+func (c claimConflictInfo) message() string {
+	if c.count == 1 {
+		return fmt.Sprintf("no claimable tasks after claim conflict (last: %s locked by %s)", c.lastID, c.lastHolder)
+	}
+	return fmt.Sprintf("no claimable tasks after %d conflicts (last: %s locked by %s)", c.count, c.lastID, c.lastHolder)
+}
+
+func mergeClaimConflict(a, b claimConflictInfo) claimConflictInfo {
+	if !b.seen() {
+		return a
+	}
+	a.count += b.count
+	a.lastID = b.lastID
+	a.lastHolder = b.lastHolder
+	return a
+}
+
+func (s *Supervisor) tryClaimBestTask(ap *AgentProcess, issues []backend.IssueData, constraints cli.RoleConstraints) (bool, bool, claimConflictInfo) {
+	var conflicts claimConflictInfo
 	for {
 		match := cli.SelectBestTask(issues, constraints)
 		if match == nil {
-			return false, false
+			return false, false, conflicts
 		}
 		if err := s.claimIssueForAgent(ap, match.Issue.ID, match.Reason); err != nil {
 			if backend.IsKind(err, backend.KindConflict) {
-				conflicts++
-				lastConflictID = match.Issue.ID
-				lastConflictHolder = conflictHolder(err)
-				if conflicts >= claimConflictRetryLimit {
-					msg := fmt.Sprintf("no claimable tasks after %d conflicts (last: %s locked by %s)",
-						conflicts, lastConflictID, lastConflictHolder)
-					s.setPreflightError(ap, agenterr.LockConflict, msg)
-					return false, true
+				conflicts.count++
+				conflicts.lastID = match.Issue.ID
+				conflicts.lastHolder = conflictHolder(err)
+				if conflicts.count >= claimConflictRetryLimit {
+					s.setPreflightError(ap, agenterr.LockConflict, conflicts.message())
+					return false, true, conflicts
 				}
 				issues = removeIssueByID(issues, match.Issue.ID)
 				continue
 			}
 			s.setPreflightError(ap, agenterr.Unknown, fmt.Sprintf("claim failed for %s: %v", match.Issue.ID, err))
-			return false, true
+			return false, true, conflicts
 		}
-		return true, false
+		return true, false, conflicts
 	}
 }
 

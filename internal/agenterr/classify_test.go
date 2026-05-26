@@ -781,7 +781,7 @@ func TestClassifyFromLog(t *testing.T) {
 func TestIsRetryable(t *testing.T) {
 	t.Parallel()
 
-	retryable := []ErrorClass{RateLimited, Timeout, Transient}
+	retryable := []ErrorClass{RateLimited, Timeout, Transient, LockConflict}
 	notRetryable := []ErrorClass{AuthFailure, BillingError, ModelNotFound, ContextOverflow, NoWork, Unknown}
 
 	for _, c := range retryable {

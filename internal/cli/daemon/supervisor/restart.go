@@ -50,6 +50,14 @@ func (s *Supervisor) shouldRestart(ap *AgentProcess) bool {
 		return true
 	}
 
+	// Lock conflicts mean fleet-db still has a live or recently released claim
+	// lock. Keep retrying without eroding max_retries; the lock holder may release
+	// within milliseconds, or the server TTL may eventually expire it.
+	if ap.LastError != nil && ap.LastError.Class == agenterr.LockConflict {
+		s.applyLockConflictRestart(ap)
+		return true
+	}
+
 	// Fatal errors: stop immediately, no retries
 	if ap.LastError != nil && ap.LastError.IsFatal() {
 		log.Printf("[daemon] Agent %s: fatal error (%s), stopping supervisor",
@@ -109,6 +117,14 @@ func (s *Supervisor) applyBackendUnavailableRestart(ap *AgentProcess) {
 		ap.Entry.Worktree, s.backendRecheckBackoff())
 }
 
+func (s *Supervisor) applyLockConflictRestart(ap *AgentProcess) {
+	ap.RateRetryCount = 0
+	ap.NoWorkCount = 0
+	ap.StopReason = ""
+	log.Printf("[daemon] Agent %s: task lock conflict, will retry in %ds (not counted toward max_retries)",
+		ap.Entry.Worktree, s.getNoWorkBackoff())
+}
+
 // backendRecheckBackoff is the fixed delay between BackendUnavailable re-checks
 // (configurable via backendRecheckInterval; package default otherwise).
 func (s *Supervisor) backendRecheckBackoff() time.Duration {
@@ -138,6 +154,9 @@ func (s *Supervisor) computeBackoff(ap *AgentProcess) time.Duration {
 	// are waiting for the backend CLI to reappear, not backing off a flaky run.
 	if lastErr != nil && lastErr.Class == agenterr.BackendUnavailable {
 		return s.backendRecheckBackoff()
+	}
+	if lastErr != nil && lastErr.Class == agenterr.LockConflict {
+		return time.Duration(s.getNoWorkBackoff()) * time.Second
 	}
 
 	// Select initial backoff and retry count based on error class

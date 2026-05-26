@@ -826,6 +826,77 @@ func TestRecoverWorktree_StaleLock(t *testing.T) {
 	}
 }
 
+func TestRunRecover_StaleLockReleasesFleetIssueLock(t *testing.T) {
+	resetDefaultIssueBackend()
+	t.Cleanup(resetDefaultIssueBackend)
+	tmpDir := t.TempDir()
+
+	lockPath := filepath.Join(tmpDir, LockFileName)
+	lockData := `{"pid":999999999,"command":"test","started_at":"2024-01-01T00:00:00Z","agent_name":"test-agent","task_id":"task-123"}`
+	if err := os.WriteFile(lockPath, []byte(lockData), 0644); err != nil {
+		t.Fatalf("failed to create lock file: %v", err)
+	}
+
+	tracker := NewMockIssueBackend()
+	tracker.GetResult = &backend.IssueDetailData{IssueData: backend.IssueData{ID: "task-123", Status: "in_progress"}}
+	tracker.ListResult = []backend.IssueData{}
+	dd := cli.TestingGetDefaultDeps()
+	origIssueBackend := dd.IssueBackend
+	dd.IssueBackend = tracker
+	t.Cleanup(func() { dd.IssueBackend = origIssueBackend })
+
+	mock := NewCommandMock(t, []CommandStub{
+		{
+			Dir:    tmpDir,
+			Name:   "git",
+			Args:   []string{"clean", "-fdn", "--exclude=.loom", "--exclude=sessions", "--exclude=AGENTS.md"},
+			Stdout: "",
+			Err:    nil,
+		},
+	})
+	mock.Install()
+
+	oldNoAnalyze := recoverNoAnalyze
+	oldForce := recoverForce
+	recoverNoAnalyze = true
+	recoverForce = true
+	t.Cleanup(func() {
+		recoverNoAnalyze = oldNoAnalyze
+		recoverForce = oldForce
+	})
+
+	runRecover(nil, []string{tmpDir})
+
+	if !tracker.Called("ReleaseIssueLock") {
+		t.Fatalf("ReleaseIssueLock was not called; calls = %#v", tracker.Calls)
+	}
+	if got := tracker.CallCount("ReleaseIssueLock"); got != 1 {
+		t.Fatalf("ReleaseIssueLock calls = %d, want 1", got)
+	}
+}
+
+func TestReleaseFleetIssueLock_IgnoresExpectedNonFatalErrors(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+	}{
+		{name: "not found", err: backend.ErrNotFound("ReleaseIssueLock", "missing")},
+		{name: "not implemented", err: backend.ErrNotImplemented("ReleaseIssueLock", "unsupported")},
+		{name: "timeout", err: context.DeadlineExceeded},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tracker := NewMockIssueBackend()
+			tracker.ReleaseIssueLockErr = tt.err
+			releaseFleetIssueLock(&cli.Deps{IssueBackend: tracker}, "falcon", "task-1")
+			if got := tracker.CallCount("ReleaseIssueLock"); got != 1 {
+				t.Fatalf("ReleaseIssueLock calls = %d, want 1", got)
+			}
+		})
+	}
+}
+
 func TestRecoverWorktree_LockCheckError(t *testing.T) {
 	// RecoverWorktree uses defaultDeps internally; must use global mocks.
 	ResetWorkspaceRuntimeDirCache()

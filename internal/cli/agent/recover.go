@@ -101,6 +101,11 @@ func runRecover(cmd *cobra.Command, args []string) {
 	clearStaleLock(worktreePath, lockInfo.PID)
 
 	if lockInfo.TaskID != "" {
+		actor := lockInfo.AgentName
+		if actor == "" {
+			actor = worktreeName
+		}
+		releaseFleetIssueLock(deps, actor, lockInfo.TaskID)
 		handleOrphanedTask(deps, worktreePath, lockInfo.TaskID, !recoverNoAnalyze)
 	}
 
@@ -137,7 +142,7 @@ func releaseFleetIssueLock(deps *cli.Deps, agentName, taskID string) {
 			taskID, agentName, err)
 		return
 	}
-	fmt.Printf("[recover] released fleet-db lock issue=%s actor=%s\n", taskID, agentName)
+	fmt.Printf("[recover] fleet-db lock release call succeeded issue=%s actor=%s\n", taskID, agentName)
 }
 
 // handleRunningAgent prompts to kill a running agent process. Returns true if

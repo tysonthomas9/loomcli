@@ -249,6 +249,43 @@ func TestSupervisor_ShouldRestart_BackendUnavailable_PreservesBudget(t *testing.
 	}
 }
 
+func TestSupervisor_ShouldRestart_LockConflict_PreservesBudget(t *testing.T) {
+	maxRetries := 1
+	noWorkBackoff := 7
+	s := newTestSupervisorWithConfig(&config.DaemonConfig{
+		Daemon: config.DaemonSettings{
+			RestartPolicy: config.RestartPolicy{
+				MaxRetries:    &maxRetries,
+				NoWorkBackoff: &noWorkBackoff,
+			},
+		},
+	})
+
+	ap := &AgentProcess{
+		Entry:        config.AgentEntry{Worktree: "falcon"},
+		LastExitCode: 1,
+		LastStart:    time.Now(),
+		LastError:    &agenterr.AgentError{Class: agenterr.LockConflict},
+		RestartCount: maxRetries,
+	}
+
+	for i := 0; i < 3; i++ {
+		if !s.shouldRestart(ap) {
+			t.Fatalf("shouldRestart should keep restarting on LockConflict (iteration %d)", i)
+		}
+		if ap.RestartCount != maxRetries {
+			t.Fatalf("RestartCount = %d after LockConflict, want %d (budget must not erode)", ap.RestartCount, maxRetries)
+		}
+		if ap.StopReason == StopReasonMaxRetries {
+			t.Fatalf("StopReason set to max-retries on LockConflict (iteration %d)", i)
+		}
+	}
+
+	if got, want := s.computeBackoff(ap), time.Duration(noWorkBackoff)*time.Second; got != want {
+		t.Errorf("computeBackoff = %v, want %v (fixed lock-conflict retry)", got, want)
+	}
+}
+
 func TestSupervisor_AgentCount(t *testing.T) {
 	s := newTestSupervisorWithConfig(&config.DaemonConfig{})
 	s.Agents = []*AgentProcess{
