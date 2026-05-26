@@ -110,6 +110,33 @@ func TestClassifyClaude(t *testing.T) {
 			exitCode:  1,
 			wantClass: Unknown,
 		},
+		// User-evidence strings from the 2026-05-21 dead-agents incident.
+		// These previously fell through to Unknown and burned the entire
+		// retry budget; the shared rate-limit patterns now catch them.
+		{
+			name:      "session limit prose with reset time",
+			log:       "You've hit your session limit · resets 6:40pm (Europe/Warsaw)",
+			exitCode:  1,
+			wantClass: RateLimited,
+		},
+		{
+			name:      "usage limit prose with try again at",
+			log:       "You've hit your usage limit. Upgrade to Pro or try again at May 21st, 2026 1:32 AM.",
+			exitCode:  1,
+			wantClass: RateLimited,
+		},
+		{
+			name:      "usage limit JSON envelope",
+			log:       `{"type":"error","message":"You've hit your usage limit."}`,
+			exitCode:  1,
+			wantClass: RateLimited,
+		},
+		{
+			name:      "generic try-again-at with time",
+			log:       "Error: try again at 6:40pm",
+			exitCode:  1,
+			wantClass: RateLimited,
+		},
 	}
 
 	for _, tt := range tests {
@@ -228,6 +255,21 @@ func TestClassifyCodex(t *testing.T) {
 			log:       "something unexpected happened",
 			exitCode:  1,
 			wantClass: Unknown,
+		},
+		// User-evidence strings: codex emits the same prose envelopes
+		// when a usage limit is hit, so the shared rate-limit patterns
+		// must apply to codex too.
+		{
+			name:      "session limit prose with reset time",
+			log:       "You've hit your session limit · resets 6:40pm (Europe/Warsaw)",
+			exitCode:  1,
+			wantClass: RateLimited,
+		},
+		{
+			name:      "usage limit JSON envelope",
+			log:       `{"type":"error","message":"You've hit your usage limit."}`,
+			exitCode:  1,
+			wantClass: RateLimited,
 		},
 	}
 

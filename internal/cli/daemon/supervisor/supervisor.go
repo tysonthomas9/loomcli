@@ -2,6 +2,7 @@ package supervisor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -69,6 +70,12 @@ type Supervisor struct {
 	NodeID       string
 	NodeTTL      time.Duration
 	NodeInterval time.Duration
+
+	// backendRecheckInterval is the fixed delay computeBackoff returns for a
+	// BackendUnavailable park (agent's backend CLI missing from PATH). Zero
+	// means use the package default (backendRecheckInterval const). Tests set a
+	// small value to avoid the 30s wait.
+	backendRecheckInterval time.Duration
 }
 
 // NewAgent creates an AgentProcess from an agent entry, resolving the worktree path
@@ -495,6 +502,26 @@ func (s *Supervisor) createControlPlaneAgentSession(ap *AgentProcess, sessionID,
 	ap.Mu.Unlock()
 }
 
+// markControlPlaneAgentState persists the given agent state onto the
+// fleet-db Agent record so UIs and `workspace ops diagnose` reflect
+// supervisor lifecycle transitions (currently used by the
+// backend-availability gate to flip between AgentStateBackendUnavailable
+// and AgentStateActive). Best-effort: failures are logged but do not
+// block the supervisor.
+func (s *Supervisor) markControlPlaneAgentState(ap *AgentProcess, state domain.AgentState) {
+	if s.ControlStore == nil || s.WorkspaceID == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), controlPlaneOperationTimeout)
+	defer cancel()
+	if _, err := s.ControlStore.Agents().Update(ctx, s.WorkspaceID, ap.Entry.Worktree, store.AgentUpdate{
+		State: &state,
+	}); err != nil {
+		slog.Warn("control-plane agent state update failed",
+			"worktree", ap.Entry.Worktree, "state", state, "err", err)
+	}
+}
+
 func (s *Supervisor) markControlPlaneAgentSessionRunning(ap *AgentProcess) {
 	if s.ControlStore == nil || s.WorkspaceID == "" {
 		return
@@ -614,6 +641,18 @@ func (s *Supervisor) completeControlPlaneAgentSession(ap *AgentProcess, input ag
 // backoff for both real exits and spawn failures.
 func (s *Supervisor) spawnAndWait(ap *AgentProcess) {
 	if err := s.spawnAgent(ap); err != nil {
+		if errors.Is(err, ErrBackendUnavailable) {
+			// Gate fired before buildCommand: gateBackendAvailable already set
+			// the BackendUnavailable state/error, and no session or subprocess
+			// was created, so there's nothing to finalize. Release concurrency
+			// and return; the single restart decision parks the agent —
+			// shouldRestart treats BackendUnavailable as retry-without-budget-
+			// erosion and computeBackoff returns the fixed backend re-check
+			// interval. The loop re-runs the gate next iteration and
+			// auto-recovers once the binary reappears.
+			s.Concurrency.Release(ap.Entry.Role)
+			return
+		}
 		slog.Warn("spawn failed", "worktree", ap.Entry.Worktree, "err", err)
 		ap.Mu.Lock()
 		orphanSess := ap.Session

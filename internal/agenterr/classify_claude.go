@@ -2,8 +2,10 @@ package agenterr
 
 import "regexp"
 
-// Claude-specific error patterns, ordered most-specific first.
-var claudePatterns = []errorPattern{
+// Claude-specific error patterns, ordered most-specific first. The
+// shared prose-style rate-limit patterns are appended at the end so
+// Anthropic-specific signals (429, overloaded_error) win when present.
+var claudePatterns = append([]errorPattern{
 	{regexp.MustCompile(`(?i)rate.?limit|too many requests`), RateLimited, "rate limit exceeded"},
 	{regexp.MustCompile(`(?i)\b429\b`), RateLimited, "rate limit exceeded (429)"},
 	{regexp.MustCompile(`(?i)overloaded_error`), RateLimited, "API overloaded (529)"},
@@ -18,7 +20,7 @@ var claudePatterns = []errorPattern{
 	{regexp.MustCompile(`(?i)timeout|ETIMEDOUT|ECONNRESET|connection.?timed?.?out`), Timeout, "connection timeout"},
 	{regexp.MustCompile(`(?i)\b529\b|internal.?server.?error|service.?unavailable`), Transient, "server error"},
 	{regexp.MustCompile(`(?i)\b50[023]\b`), Transient, "server error"},
-}
+}, sharedRateLimitPatterns...)
 
 func classifyClaude(logTail string) *classifyResult {
 	return classifyWithPatterns(logTail, claudePatterns)

@@ -176,6 +176,8 @@ func appendSessionEnv(env []string, ap *AgentProcess) []string {
 // (buildCommand → cmd.Start → first control-plane heartbeat) is wrapped in a
 // daemon.supervisor.spawn span so failures classify cleanly as either a
 // build/start failure or a heartbeat failure.
+//
+//nolint:funlen // Linear orchestration: gate → build → start → record. Each step is short; extracting would fragment the lifecycle.
 func (s *Supervisor) spawnAgent(ap *AgentProcess) error {
 	_, span := startSpan(cmdstore.RootContext(),
 		"daemon.supervisor.spawn",
@@ -184,6 +186,11 @@ func (s *Supervisor) spawnAgent(ap *AgentProcess) error {
 		attribute.String("loom.workspace", s.WorkspaceID),
 	)
 	defer span.End()
+
+	if err := s.gateBackendAvailable(ap); err != nil {
+		recordErr(span, err, "spawn.backend_unavailable")
+		return err
+	}
 
 	cmd, err := s.buildCommand(ap)
 	if err != nil {

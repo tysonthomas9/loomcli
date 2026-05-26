@@ -1,10 +1,92 @@
 package supervisor
 
 import (
+	"errors"
 	"log"
+	"log/slog"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
+	"github.com/tysonthomas9/loomcli/internal/cli/backendcheck"
+	"github.com/tysonthomas9/loomcli/internal/domain"
 )
+
+// ErrBackendUnavailable is the sentinel returned by spawnAgent when the
+// agent's effective backend CLI is not on PATH. The supervisor's
+// lifecycle treats this as a clean park — restart budget is preserved
+// and no backoff is set — because the supervise loop re-checks PATH
+// each iteration and auto-recovers the agent once the binary appears.
+var ErrBackendUnavailable = errors.New("supervisor: backend binary not on PATH")
+
+// backendRecheckInterval is how long the supervise loop parks an agent
+// between gate checks when its backend CLI is not on PATH. Matches the
+// daemon reconciler's poll cadence so users get one consistent feedback
+// loop between "install the missing CLI" and "agent resumes".
+const backendRecheckInterval = 30 * time.Second
+
+// gateBackendAvailable is the pre-spawn availability check. If the
+// agent's effective backend CLI is not on PATH, the agent is
+// transitioned to AgentStateBackendUnavailable (restart budget
+// preserved, no backoff scheduled) and ErrBackendUnavailable is
+// returned. Caller is responsible for tracing the failure.
+//
+// A discovery-layer failure (e.g. unreadable embedded versions.json)
+// is logged but does not block spawn — the supervisor will surface
+// the exec error if the binary is genuinely missing.
+func (s *Supervisor) gateBackendAvailable(ap *AgentProcess) error {
+	backend := s.GetEffectiveBackend(ap)
+	if backend == "" {
+		// No backend resolved (test fixture or misconfiguration). The
+		// regular spawn path will surface whatever the symptom is; the
+		// gate's job is specifically "named backend missing on PATH".
+		return nil
+	}
+	info, lookupErr := backendcheck.CheckBackend(backend)
+	if lookupErr != nil {
+		slog.Warn("backend availability check failed; proceeding with spawn",
+			"worktree", ap.Entry.Worktree, "backend", backend, "err", lookupErr)
+		return nil
+	}
+
+	if info.Installed {
+		// Recovery branch: if the agent was previously parked for
+		// backend-unavailable and the binary is now back, clear the
+		// state so UIs reflect the recovery before the spawn proceeds.
+		ap.Mu.Lock()
+		wasUnavailable := ap.StopReason == StopReasonBackendUnavailable
+		if wasUnavailable {
+			ap.StopReason = ""
+			ap.LastError = nil
+		}
+		worktree := ap.Entry.Worktree
+		ap.Mu.Unlock()
+		if wasUnavailable {
+			s.markControlPlaneAgentState(ap, domain.AgentStateActive)
+			log.Printf("[daemon] Agent %s: backend %q now on PATH — resuming spawn",
+				worktree, backend)
+		}
+		return nil
+	}
+
+	ap.Mu.Lock()
+	wasUnavailable := ap.StopReason == StopReasonBackendUnavailable
+	ap.StopReason = StopReasonBackendUnavailable
+	ap.LastError = &agenterr.AgentError{
+		Class:     agenterr.BackendUnavailable,
+		Message:   info.InstallHint,
+		Backend:   backend,
+		Timestamp: time.Now(),
+	}
+	worktree := ap.Entry.Worktree
+	ap.Mu.Unlock()
+
+	s.markControlPlaneAgentState(ap, domain.AgentStateBackendUnavailable)
+	if !wasUnavailable {
+		log.Printf("[daemon] Agent %s: backend %q not on PATH — skipping spawn (%s)",
+			worktree, backend, info.InstallHint)
+	}
+	return ErrBackendUnavailable
+}
 
 // GetEffectiveBackend returns the backend name for the agent's current failover position.
 // Index 0 = primary (ap.Entry.Backend or config.Backend), index 1+ = FallbackBackends[idx-1].
