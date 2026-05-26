@@ -18,12 +18,6 @@ import (
 // each iteration and auto-recovers the agent once the binary appears.
 var ErrBackendUnavailable = errors.New("supervisor: backend binary not on PATH")
 
-// backendRecheckInterval is how long the supervise loop parks an agent
-// between gate checks when its backend CLI is not on PATH. Matches the
-// daemon reconciler's poll cadence so users get one consistent feedback
-// loop between "install the missing CLI" and "agent resumes".
-const backendRecheckInterval = 30 * time.Second
-
 // gateBackendAvailable is the pre-spawn availability check. If the
 // agent's effective backend CLI is not on PATH, the agent is
 // transitioned to AgentStateBackendUnavailable (restart budget

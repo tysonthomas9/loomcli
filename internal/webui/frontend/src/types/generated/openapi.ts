@@ -2609,6 +2609,13 @@ export interface components {
       daemon_managed?: boolean;
       commits?: components["schemas"]["MonitorCommitDetail"][];
       changes?: components["schemas"]["MonitorFileChange"][];
+      /** @description Task this daemon-managed agent has currently claimed. Empty between tasks (just spawned, polling, finished). UI joins this against issue.id to render which agent is working each card. */
+      current_task_id?: string;
+      /**
+       * Format: date-time
+       * @description Most recent PTY-output observation from the agent's supervised backend (claude/codex/gemini), forwarded over IPC. Compare to "now" to detect stuck agents. Zero/absent when no observation yet or agent isn't daemon-managed.
+       */
+      last_activity_at?: string;
     };
     MonitorCommitDetail: {
       hash: string;

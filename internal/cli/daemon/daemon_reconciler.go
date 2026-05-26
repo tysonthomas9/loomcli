@@ -9,6 +9,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
+	"github.com/tysonthomas9/loomcli/internal/cli/daemon/supervisor"
 	"github.com/tysonthomas9/loomcli/internal/events"
 )
 
@@ -29,6 +30,7 @@ func (d *Daemon) configPollingLoop() {
 			return
 		case <-ticker.C:
 			d.reloadAndReconcile()
+			d.sup.RecordTick(supervisor.GoroutineConfigReconciler)
 		}
 	}
 }

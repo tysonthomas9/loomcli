@@ -6,6 +6,8 @@ import (
 	"os"
 	"sync"
 
+	"github.com/olesho/harness-wrapper/pkg/wrapper"
+
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/backend/api"
 	"github.com/tysonthomas9/loomcli/internal/httpclient"
@@ -123,6 +125,42 @@ func ResetDefaultIssueBackend() {
 	trackerMu.Lock()
 	defer trackerMu.Unlock()
 	trackerInst = nil
+}
+
+// DaemonActivityObserver returns a harness.RetryPolicy-compatible OnActivity
+// callback that forwards wrapper PTY-output timestamps to the daemon via the
+// active AgentIPCClient. It returns nil when the agent is not running under a
+// daemon (no LOOM_DAEMON_SOCKET, fleet mode, etc.) — harness.RetryPolicy
+// treats a nil callback as "no observer", so callers can pass through
+// unconditionally.
+//
+// The returned function is safe to invoke concurrently; AgentIPCClient is
+// stateless modulo its mutex-protected lastActivityAt.
+func DaemonActivityObserver() func(wrapper.Snapshot) {
+	client := agentIPCClientFromDefaultBackend()
+	if client == nil {
+		return nil
+	}
+	return func(snap wrapper.Snapshot) {
+		if snap.LastOutputAt.IsZero() {
+			return
+		}
+		if err := client.Heartbeat(snap.LastOutputAt); err != nil {
+			slog.Debug("agent IPC heartbeat failed", "err", err)
+		}
+	}
+}
+
+// agentIPCClientFromDefaultBackend returns the active AgentIPCClient when the
+// global issue backend is an ipcIssueBackend wrapping one, else nil.
+func agentIPCClientFromDefaultBackend() *AgentIPCClient {
+	b := DefaultIssueBackend()
+	ipcb, ok := b.(*ipcIssueBackend)
+	if !ok {
+		return nil
+	}
+	client, _ := ipcb.ipc.(*AgentIPCClient)
+	return client
 }
 
 // --- API backend factory (remote --server mode) ---

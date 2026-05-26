@@ -286,7 +286,11 @@ func (s *Supervisor) waitForAgent(ap *AgentProcess) int {
 		return -1
 	}
 
+	// Keep this supervise goroutine's liveness tick fresh while we block in
+	// cmd.Wait() for the agent's unbounded lifetime; see startAgentWaitHeartbeat.
+	stopHeartbeat := s.startAgentWaitHeartbeat(ap)
 	err := cmd.Wait()
+	stopHeartbeat()
 
 	ap.Mu.Lock()
 	ap.LastExit = time.Now()

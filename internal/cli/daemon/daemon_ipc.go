@@ -14,17 +14,19 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli/daemon/supervisor"
+	"github.com/tysonthomas9/loomcli/internal/domain"
 )
 
 // AgentIPCRequest is sent by an agent subprocess to the daemon IPC socket.
 type AgentIPCRequest struct {
-	Operation  string          `json:"operation"`             // "claim", "update", "complete"
-	AgentName  string          `json:"agent_name"`            // LOOM_AGENT_NAME identity (required)
-	IssueID    string          `json:"issue_id"`              // target issue (required)
-	SessionID  string          `json:"session_id,omitempty"`  // fleet-db AgentSession id
-	LeaseID    string          `json:"lease_id,omitempty"`    // fleet-db AgentLease id
-	LeaseToken string          `json:"lease_token,omitempty"` // fleet-db AgentLease token
-	Args       json.RawMessage `json:"args,omitempty"`        // operation-specific params
+	Operation      string          `json:"operation"`                  // "claim", "update", "complete", "heartbeat"
+	AgentName      string          `json:"agent_name"`                 // LOOM_AGENT_NAME identity (required)
+	IssueID        string          `json:"issue_id"`                   // target issue (required except for "heartbeat")
+	SessionID      string          `json:"session_id,omitempty"`       // fleet-db AgentSession id
+	LeaseID        string          `json:"lease_id,omitempty"`         // fleet-db AgentLease id
+	LeaseToken     string          `json:"lease_token,omitempty"`      // fleet-db AgentLease token
+	Args           json.RawMessage `json:"args,omitempty"`             // operation-specific params
+	LastActivityAt time.Time       `json:"last_activity_at,omitempty"` // most recent wrapper PTY-output observation; piggybacked on every op
 }
 
 // AgentIPCResponse is sent by the daemon back to the agent subprocess.
@@ -37,9 +39,10 @@ type AgentIPCResponse struct {
 
 // Operation name constants for agent IPC.
 const (
-	ipcOpClaim    = "claim"
-	ipcOpUpdate   = "update"
-	ipcOpComplete = "complete"
+	ipcOpClaim     = "claim"
+	ipcOpUpdate    = "update"
+	ipcOpComplete  = "complete"
+	ipcOpHeartbeat = "heartbeat"
 )
 
 // ipcClaimArgs are the optional arguments for the claim operation.
@@ -128,6 +131,8 @@ func (d *Daemon) handleIPCConnection(conn net.Conn) {
 }
 
 // validateIPCRequest checks required fields. Returns (response, false) on failure.
+// Heartbeat requests are exempt from the IssueID requirement: the daemon
+// updates per-agent liveness by name, not by issue.
 func validateIPCRequest(req AgentIPCRequest) (AgentIPCResponse, bool) {
 	if req.AgentName == "" {
 		return AgentIPCResponse{
@@ -135,7 +140,7 @@ func validateIPCRequest(req AgentIPCRequest) (AgentIPCResponse, bool) {
 			Kind:  string(backend.KindValidation),
 		}, false
 	}
-	if req.IssueID == "" {
+	if req.Operation != ipcOpHeartbeat && req.IssueID == "" {
 		return AgentIPCResponse{
 			Error: "issue_id is required",
 			Kind:  string(backend.KindValidation),
@@ -155,7 +160,7 @@ func validateIPCRequest(req AgentIPCRequest) (AgentIPCResponse, bool) {
 // can thread it through to inherit the span as parent.
 func (d *Daemon) dispatchIPCOperation(req AgentIPCRequest) AgentIPCResponse {
 	switch req.Operation {
-	case ipcOpClaim, ipcOpUpdate, ipcOpComplete:
+	case ipcOpClaim, ipcOpUpdate, ipcOpComplete, ipcOpHeartbeat:
 		// known method — fall through to traced dispatch below
 	default:
 		return AgentIPCResponse{Error: fmt.Sprintf("unknown operation: %q", req.Operation)}
@@ -173,9 +178,40 @@ func (d *Daemon) dispatchIPCOperation(req AgentIPCRequest) AgentIPCResponse {
 		resp = d.handleIPCUpdate(req)
 	case ipcOpComplete:
 		resp = d.handleIPCComplete(req)
+	case ipcOpHeartbeat:
+		resp = d.handleIPCHeartbeat(req)
+	}
+	if resp.Success {
+		// Every successful op also advances per-agent liveness when a
+		// timestamp was attached. Done last so a half-applied mutation
+		// (claim succeeded but heartbeat write failed — impossible
+		// today, but defensive) cannot mask the mutation outcome.
+		d.recordIPCActivity(req)
 	}
 	recordIPCErr(span, resp)
 	return resp
+}
+
+// recordIPCActivity forwards req.LastActivityAt to the supervisor's per-agent
+// liveness sink. No-op when the timestamp is zero or the supervisor is unset.
+func (d *Daemon) recordIPCActivity(req AgentIPCRequest) {
+	if d.sup == nil || req.LastActivityAt.IsZero() {
+		return
+	}
+	d.sup.RecordAgentActivity(req.AgentName, req.LastActivityAt)
+}
+
+// handleIPCHeartbeat handles the "heartbeat" operation. Its only side
+// effect is updating per-agent liveness via recordIPCActivity (called
+// from dispatchIPCOperation on Success). It does still validate the
+// lease so unauthenticated callers can't poke at agent state.
+func (d *Daemon) handleIPCHeartbeat(req AgentIPCRequest) AgentIPCResponse {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if resp, ok := d.validateIPCLease(ctx, req); !ok {
+		return resp
+	}
+	return AgentIPCResponse{Success: true}
 }
 
 // handleIPCClaim handles the "claim" operation.
@@ -304,11 +340,51 @@ func (d *Daemon) validateIPCLease(ctx context.Context, req AgentIPCRequest) (Age
 	}
 	lease, err := d.store.AgentLeases().Heartbeat(ctx, d.sup.WorkspaceID, req.LeaseID, req.LeaseToken, 2*time.Minute)
 	if err != nil {
+		if errors.Is(err, domain.ErrAlreadyExists) {
+			slog.Warn("agent lease heartbeat returned already exists; verifying via get",
+				"workspace", d.sup.WorkspaceID,
+				"lease_id", req.LeaseID,
+				"err", err,
+			)
+			verified, getErr := d.store.AgentLeases().Get(ctx, d.sup.WorkspaceID, req.LeaseID)
+			if getErr != nil {
+				return ipcErrorResponse(getErr), false
+			}
+			return validateLeaseRecord(verified, req)
+		}
 		return ipcErrorResponse(err), false
+	}
+	return validateLeaseRecord(lease, req)
+}
+
+func validateLeaseRecord(lease *domain.AgentLease, req AgentIPCRequest) (AgentIPCResponse, bool) {
+	if lease == nil {
+		return AgentIPCResponse{
+			Error: "lease not found",
+			Kind:  string(backend.KindConflict),
+		}, false
 	}
 	if lease.SessionID != req.SessionID || lease.AgentID != req.AgentName {
 		return AgentIPCResponse{
 			Error: "lease does not match IPC session or agent",
+			Kind:  string(backend.KindConflict),
+		}, false
+	}
+	if lease.Token != req.LeaseToken {
+		return AgentIPCResponse{
+			Error: "lease token does not match IPC credentials",
+			Kind:  string(backend.KindConflict),
+		}, false
+	}
+	if lease.Status != domain.AgentLeaseActive {
+		return AgentIPCResponse{
+			Error: "lease is not active",
+			Kind:  string(backend.KindConflict),
+		}, false
+	}
+	if time.Now().After(lease.ExpiresAt) {
+		return AgentIPCResponse{
+			Error: "lease expired",
 			Kind:  string(backend.KindConflict),
 		}, false
 	}

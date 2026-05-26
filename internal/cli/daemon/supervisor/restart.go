@@ -11,6 +11,12 @@ import (
 
 const primaryBackendRetryCooldown = time.Minute
 
+// backendUnavailableRecheckInterval is the fixed delay between retries when the
+// backend CLI binary is missing. The agent recovers automatically once the
+// binary is installed or PATH is fixed, so we poll on a fixed interval rather
+// than an exponential backoff, and never count these retries toward max_retries.
+const backendUnavailableRecheckInterval = 30 * time.Second
+
 // shouldRestart determines if agent should restart based on backoff policy
 // and the classified error from the most recent exit.
 func (s *Supervisor) shouldRestart(ap *AgentProcess) bool {
@@ -89,15 +95,18 @@ func (s *Supervisor) applyNoWorkRestart(ap *AgentProcess) {
 	ap.StopReason = ""
 }
 
-// applyBackendUnavailableRestart parks an agent whose backend CLI is missing
-// from PATH. Like NoWork, it never counts toward max_retries — a missing binary
-// is a recoverable environment condition, not an agent fault. Caller holds ap.Mu.
+// applyBackendUnavailableRestart keeps an agent retrying when the backend CLI
+// binary is missing (CLI binary not on PATH): recoverable once the binary is
+// installed or PATH is fixed, so we keep retrying on a fixed recheck interval
+// without eroding the restart budget. Caller holds ap.Mu. Mirrors the pre-spawn
+// backend gate for the case where the missing backend is only detected at
+// runtime, after the process has already been spawned.
 func (s *Supervisor) applyBackendUnavailableRestart(ap *AgentProcess) {
 	ap.RateRetryCount = 0
 	ap.NoWorkCount = 0
 	ap.StopReason = StopReasonBackendUnavailable
-	log.Printf("[daemon] Agent %s: backend unavailable, will recheck (not counted toward max_retries)",
-		ap.Entry.Worktree)
+	log.Printf("[daemon] Agent %s: backend unavailable, will recheck in %s (not counted toward max_retries)",
+		ap.Entry.Worktree, s.backendRecheckBackoff())
 }
 
 // backendRecheckBackoff is the fixed delay between BackendUnavailable re-checks
@@ -106,7 +115,7 @@ func (s *Supervisor) backendRecheckBackoff() time.Duration {
 	if s.backendRecheckInterval > 0 {
 		return s.backendRecheckInterval
 	}
-	return backendRecheckInterval
+	return backendUnavailableRecheckInterval
 }
 
 // computeBackoff returns the sleep duration before next restart.
@@ -125,7 +134,8 @@ func (s *Supervisor) computeBackoff(ap *AgentProcess) time.Duration {
 		return time.Duration(s.getNoWorkBackoff()) * time.Second
 	}
 
-	// Backend unavailable: fixed recheck interval, like NoWork.
+	// Backend unavailable: fixed recheck interval (no exponential growth) — we
+	// are waiting for the backend CLI to reappear, not backing off a flaky run.
 	if lastErr != nil && lastErr.Class == agenterr.BackendUnavailable {
 		return s.backendRecheckBackoff()
 	}

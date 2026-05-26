@@ -665,6 +665,36 @@ func TestClassifyFromLog(t *testing.T) {
 		}
 	})
 
+	t.Run("backend binary not on PATH marker classifies as BackendUnavailable", func(t *testing.T) {
+		t.Parallel()
+		// The marker is emitted by the loom-side wrapper translator
+		// when the configured CLI is missing. It outranks per-backend
+		// patterns because it's a cross-cutting wrapper signal —
+		// without this branch, the supervisor would burn restart
+		// budget on a binary that won't appear on its own (LOOM-4).
+		dir := t.TempDir()
+		logPath := filepath.Join(dir, "agent.log")
+		body := "Starting agent...\n" + BackendUnavailableMarker + `: wrapper: binary not found: exec: "codex": executable file not found in $PATH` + "\n"
+		if err := os.WriteFile(logPath, []byte(body), 0600); err != nil {
+			t.Fatalf("write log: %v", err)
+		}
+
+		aerr := ClassifyFromLog(logPath, 1, "codex")
+		if aerr.Class != BackendUnavailable {
+			t.Errorf("class = %s, want BackendUnavailable", aerr.Class)
+		}
+		// Backend-specific rate-limit / billing patterns must NOT win
+		// against the wrapper-level marker.
+		body2 := BackendUnavailableMarker + ": rate limit and 429 sprinkled in for distraction"
+		if err := os.WriteFile(logPath, []byte(body2), 0600); err != nil {
+			t.Fatalf("write log: %v", err)
+		}
+		aerr = ClassifyFromLog(logPath, 1, "codex")
+		if aerr.Class != BackendUnavailable {
+			t.Errorf("class = %s, want BackendUnavailable (marker outranks backend patterns)", aerr.Class)
+		}
+	})
+
 	t.Run("empty log file", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()

@@ -66,6 +66,17 @@ func TestWrapWrapperResult_StatusMapping(t *testing.T) {
 			wantEvidenceIn: []string{"harness exited with status unknown"},
 		},
 		{
+			// LOOM-4 contract: a categorical StatusBinaryNotFound from
+			// the wrapper must surface the agenterr marker so the outer
+			// classifier sees it as BackendUnavailable instead of
+			// falling back to Unknown. Exit code 127 follows the Unix
+			// "command not found" convention.
+			name:           "binary_not_found_emits_marker_and_127",
+			res:            wrapper.Result{Status: wrapper.StatusBinaryNotFound, ExitCode: -1, Reason: `wrapper: binary not found: exec: "codex": executable file not found in $PATH`},
+			wantExitCode:   127,
+			wantEvidenceIn: []string{"loom: backend binary not on PATH", `exec: "codex": executable file not found`},
+		},
+		{
 			name:           "output_tail_merged_with_reason",
 			res:            wrapper.Result{Status: wrapper.StatusFailed, ExitCode: 1, Reason: "bad happened"},
 			outputTail:     "Step 1\nStep 2",
