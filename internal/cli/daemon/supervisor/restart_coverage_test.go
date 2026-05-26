@@ -208,6 +208,47 @@ func TestSupervisor_ShouldRestart_BelowMax(t *testing.T) {
 	}
 }
 
+// TestSupervisor_ShouldRestart_BackendUnavailable_PreservesBudget is the
+// regression guard for LOOM-4: a missing backend CLI detected at runtime must
+// keep the agent retrying (it recovers when the binary returns) without eroding
+// max_retries, so it never escalates to a permanent failure.
+func TestSupervisor_ShouldRestart_BackendUnavailable_PreservesBudget(t *testing.T) {
+	maxRetries := 3
+	s := newTestSupervisorWithConfig(&config.DaemonConfig{
+		Daemon: config.DaemonSettings{
+			RestartPolicy: config.RestartPolicy{
+				MaxRetries: &maxRetries,
+			},
+		},
+	})
+
+	ap := &AgentProcess{
+		LastExitCode: 1,
+		LastStart:    time.Now(),
+		LastError:    &agenterr.AgentError{Class: agenterr.BackendUnavailable},
+		RestartCount: maxRetries, // already at the limit; a generic error would now fail
+	}
+
+	// Repeated BackendUnavailable exits must keep restarting without eroding the
+	// budget or tripping the max-retries stop reason.
+	for i := 0; i < 5; i++ {
+		if !s.shouldRestart(ap) {
+			t.Fatalf("shouldRestart should keep restarting on BackendUnavailable (iteration %d)", i)
+		}
+		if ap.RestartCount != maxRetries {
+			t.Fatalf("RestartCount = %d after BackendUnavailable, want %d (budget must not erode)", ap.RestartCount, maxRetries)
+		}
+		if ap.StopReason == StopReasonMaxRetries {
+			t.Fatalf("StopReason set to max-retries on BackendUnavailable (iteration %d)", i)
+		}
+	}
+
+	// Backoff is the fixed recheck interval, not exponential off RestartCount.
+	if got := s.computeBackoff(ap); got != backendUnavailableRecheckInterval {
+		t.Errorf("computeBackoff = %v, want %v (fixed recheck)", got, backendUnavailableRecheckInterval)
+	}
+}
+
 func TestSupervisor_AgentCount(t *testing.T) {
 	s := newTestSupervisorWithConfig(&config.DaemonConfig{})
 	s.Agents = []*AgentProcess{

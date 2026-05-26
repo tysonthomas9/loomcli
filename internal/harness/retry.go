@@ -11,6 +11,7 @@ package harness
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/olesho/harness-wrapper/pkg/wrapper"
@@ -173,7 +174,16 @@ func backoffFor(p RetryPolicy, attempt int, hint time.Duration) time.Duration {
 func runOnceDefault(ctx context.Context, cfg wrapper.Config, p RetryPolicy) (attemptResult, error) {
 	sess, err := wrapper.Start(ctx, cfg)
 	if err != nil {
-		return attemptResult{Result: wrapper.Result{ExitCode: -1}}, err
+		// Mirror wrapper.Run: when Start fails for a categorical reason
+		// (binary not on PATH today; potentially more later), surface
+		// it on Result.Status so downstream consumers that switch on
+		// Status (rather than errors.Is) can dispatch directly.
+		res := wrapper.Result{ExitCode: -1}
+		if errors.Is(err, wrapper.ErrBinaryNotFound) {
+			res.Status = wrapper.StatusBinaryNotFound
+			res.Reason = err.Error()
+		}
+		return attemptResult{Result: res}, err
 	}
 
 	var lastRetryAfter time.Duration
