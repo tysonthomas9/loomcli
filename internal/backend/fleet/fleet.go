@@ -45,9 +45,10 @@ var _ backend.CursorMutationBackend = (*FleetBackend)(nil)
 
 // apiResponse is the generic JSON envelope returned by fleet server endpoints.
 type apiResponse struct {
-	Success bool            `json:"success"`
-	Data    json.RawMessage `json:"data,omitempty"`
-	Error   string          `json:"error,omitempty"`
+	Success bool              `json:"success"`
+	Data    json.RawMessage   `json:"data,omitempty"`
+	Error   string            `json:"error,omitempty"`
+	Meta    map[string]string `json:"-"` // populated from native dialect error.meta
 }
 
 // New creates a FleetBackend with the given configuration.
@@ -208,15 +209,16 @@ func parseFleetResponse(body []byte, statusCode int) (*apiResponse, error) {
 		return &apiResponse{Success: true, Data: body}, nil
 	}
 
-	// Native error shape: {"error":{"code":"...","message":"..."}}.
+	// Native error shape: {"error":{"code":"...","message":"...","meta":{...}}}.
 	var errEnv struct {
 		Error struct {
-			Code    string `json:"code"`
-			Message string `json:"message"`
+			Code    string            `json:"code"`
+			Message string            `json:"message"`
+			Meta    map[string]string `json:"meta"`
 		} `json:"error"`
 	}
 	if json.Unmarshal(body, &errEnv) == nil && errEnv.Error.Message != "" {
-		return &apiResponse{Success: false, Error: errEnv.Error.Message}, nil
+		return &apiResponse{Success: false, Error: errEnv.Error.Message, Meta: errEnv.Error.Meta}, nil
 	}
 
 	// Last resort: surface the raw body as the error string. If even THAT
@@ -251,8 +253,8 @@ func (b *FleetBackend) execURL(ctx context.Context, op, method, rawURL string, b
 	return apiResp, nil
 }
 
-func (b *FleetBackend) execAsActor(ctx context.Context, op, method, path string, body interface{}, actor string) error {
-	apiResp, statusCode, err := b.doRequestAsActor(ctx, method, path, body, actor)
+func (b *FleetBackend) execAsActor(ctx context.Context, op, path string, body interface{}, actor string) error {
+	apiResp, statusCode, err := b.doRequestAsActor(ctx, http.MethodPost, path, body, actor)
 	if err != nil {
 		return classifyTransportError(op, err)
 	}
@@ -598,7 +600,7 @@ func (b *FleetBackend) applyStatusUpdate(ctx context.Context, id string, params 
 		if actor == "" {
 			return false, backend.ErrValidation("Update", "assignee or configured actor is required to claim an issue")
 		}
-		return true, b.execAsActor(ctx, "Update", "POST", "/issues/"+url.PathEscape(id)+"/claim", nil, actor)
+		return true, b.execAsActor(ctx, "Update", "/issues/"+url.PathEscape(id)+"/claim", nil, actor)
 	case "open":
 		return false, b.transitionToOpen(ctx, id, current, clearAssigneeOnOpen)
 	case "closed":
@@ -631,7 +633,7 @@ func (b *FleetBackend) transitionToOpen(ctx context.Context, id string, current 
 		_, err = b.exec(ctx, "Update", "POST", "/issues/"+url.PathEscape(id)+"/undefer", nil)
 	case "in_progress":
 		if current.Assignee != "" {
-			return b.execAsActor(ctx, "Update", "POST", "/issues/"+url.PathEscape(id)+"/release", nil, current.Assignee)
+			return b.execAsActor(ctx, "Update", "/issues/"+url.PathEscape(id)+"/release", nil, current.Assignee)
 		}
 		_, err = b.exec(ctx, "Update", "PATCH", "/issues/"+url.PathEscape(id), map[string]interface{}{"status": "open"})
 	default:
@@ -807,7 +809,42 @@ func (b *FleetBackend) ClaimIssueAsActor(ctx context.Context, id string, lockTTL
 	if err != nil {
 		return err
 	}
-	return b.execAsActor(ctx, "ClaimIssue", "POST", "/issues/"+url.PathEscape(id)+"/claim", body, actor)
+	return b.execAsActor(ctx, "ClaimIssue", "/issues/"+url.PathEscape(id)+"/claim", body, actor)
+}
+
+// ReleaseIssueLock releases only the operational lock on the issue without
+// changing its status or assignee. Idempotent: a missing lock returns nil.
+// Returns KindConflict if the lock is held by a different actor.
+//
+// When actor is empty, uses the configured backend actor. fleet-db requires a
+// non-empty actor on the /release-lock endpoint to verify lock ownership.
+func (b *FleetBackend) ReleaseIssueLock(ctx context.Context, id, actor string) error {
+	if id == "" {
+		return backend.ErrValidation("ReleaseIssueLock", "id must not be empty")
+	}
+	if actor == "" {
+		b.mu.RLock()
+		actor = b.actor
+		b.mu.RUnlock()
+	}
+	if actor == "" {
+		return backend.ErrValidation("ReleaseIssueLock", "actor must not be empty")
+	}
+	return b.execAsActor(ctx, "ReleaseIssueLock", "/issues/"+url.PathEscape(id)+"/release-lock", nil, actor)
+}
+
+// ReleaseIssueAsActor releases the claim lock on an issue, overriding the
+// configured FleetDB actor for this request. Used by the daemon supervisor
+// to symmetrically free a claim it acquired in claimIssueForAgent when the
+// agent process exits, rather than waiting for the lock's TTL to expire.
+func (b *FleetBackend) ReleaseIssueAsActor(ctx context.Context, id string, actor string) error {
+	if id == "" {
+		return backend.ErrValidation("ReleaseIssue", "id must not be empty")
+	}
+	if actor == "" {
+		return backend.ErrValidation("ReleaseIssue", "actor must not be empty")
+	}
+	return b.execAsActor(ctx, "ReleaseIssue", "/issues/"+url.PathEscape(id)+"/release-lock", nil, actor)
 }
 
 func claimIssueBody(lockTTL time.Duration) (interface{}, error) {

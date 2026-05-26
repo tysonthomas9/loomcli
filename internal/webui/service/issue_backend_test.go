@@ -149,6 +149,8 @@ func (f *fakeIssueBackend) ClaimIssue(_ context.Context, id string, lockTTL time
 	return f.claimErr
 }
 
+func (f *fakeIssueBackend) ReleaseIssueLock(_ context.Context, _, _ string) error { return nil }
+
 func (f *fakeIssueBackend) DeferIssue(_ context.Context, _ string, _ time.Time) error { return nil }
 func (f *fakeIssueBackend) UndeferIssue(_ context.Context, _ string) error            { return nil }
 

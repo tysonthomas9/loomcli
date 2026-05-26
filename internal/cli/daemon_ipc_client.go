@@ -128,6 +128,25 @@ func (c *AgentIPCClient) Update(issueID string, params backend.UpdateParams) err
 	return ipcResponseToError(resp, "ipc.update")
 }
 
+// ReleaseLock drops only the operational claim lock for an issue without
+// changing its status or assignee. Idempotent: missing lock returns nil.
+func (c *AgentIPCClient) ReleaseLock(issueID string) error {
+	req := AgentIPCRequest{
+		Operation:  IPCOpReleaseLock,
+		AgentName:  c.AgentName,
+		IssueID:    issueID,
+		SessionID:  c.SessionID,
+		LeaseID:    c.LeaseID,
+		LeaseToken: c.LeaseToken,
+	}
+
+	resp, err := sendAgentIPCRequest(c.SocketPath, req)
+	if err != nil {
+		return err
+	}
+	return ipcResponseToError(resp, "ipc.release_lock")
+}
+
 // Complete closes an issue and returns the CloseResult (including unblocked issues).
 func (c *AgentIPCClient) Complete(issueID string, params backend.CloseParams) (*backend.CloseResult, error) {
 	args, err := json.Marshal(params)

@@ -697,6 +697,7 @@ func (s *Supervisor) completeControlPlaneAgentSession(ap *AgentProcess, input ag
 			slog.Warn("control-plane agent lease release failed", "worktree", ap.Entry.Worktree, "session_id", input.sessionID, "lease_id", input.leaseID, "err", err)
 		}
 	}
+	s.releaseAssignedTaskClaim(ap, input.taskID)
 }
 
 // spawnAndWait spawns the agent and waits for it to exit. A spawn failure is

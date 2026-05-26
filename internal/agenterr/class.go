@@ -14,6 +14,7 @@ const (
 	NoWork                               // No claimable tasks available
 	SpawnFailure                         // Supervisor could not start the agent subprocess
 	BackendUnavailable                   // Backend CLI binary not on PATH (recoverable on install)
+	LockConflict                         // Candidate task locked by another agent
 	Unknown                              // Unclassifiable error
 )
 
@@ -39,6 +40,8 @@ func (c ErrorClass) String() string {
 		return "SpawnFailure"
 	case BackendUnavailable:
 		return "BackendUnavailable"
+	case LockConflict:
+		return "LockConflict"
 	case Unknown:
 		return "Unknown"
 	default:
