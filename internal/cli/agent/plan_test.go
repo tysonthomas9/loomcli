@@ -137,8 +137,13 @@ func TestRunPlan_DaemonMode_AcquiresLock(t *testing.T) {
 	var buf bytes.Buffer
 	buf.ReadFrom(r)
 
-	if len(recorder.InteractiveCalls) != 1 {
-		t.Fatalf("expected 1 agent invocation in daemon mode, got %d", len(recorder.InteractiveCalls))
+	// Daemon mode routes through the wrapper-backed non-interactive path so
+	// the supervisor watchdog sees per-turn stream output (see runPlanDaemon).
+	if len(recorder.NonInteractiveCalls) != 1 {
+		t.Fatalf("expected 1 agent non-interactive invocation in daemon mode, got %d", len(recorder.NonInteractiveCalls))
+	}
+	if len(recorder.InteractiveCalls) != 0 {
+		t.Fatalf("daemon mode must not invoke the interactive path, got %d calls", len(recorder.InteractiveCalls))
 	}
 
 	lockPath := filepath.Join(tmpDir, LockFileName)

@@ -15,6 +15,7 @@ import (
 	"syscall"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/harness"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
@@ -222,10 +223,14 @@ func buildClaudeEnv(workDir, agentName string) []string {
 	return append(env, activeSessionEnvVars()...)
 }
 
-// buildClaudeNonInteractiveCmd constructs the exec.Cmd for non-interactive Claude invocation.
-// When resumeSessionID is non-empty, the command includes --resume --session-id flags.
-// Appends --max-budget-usd when resolveMaxBudgetUSD returns a non-empty value.
-func buildClaudeNonInteractiveCmd(workDir, agentName, resumeSessionID string) *exec.Cmd {
+// buildClaudeNonInteractiveArgs returns the argument list for a
+// non-interactive Claude run. resumeSessionID prepends --resume flags.
+// When prompt is non-empty, it is appended as the final positional argument:
+// under the harness wrapper's PTY, claude's stdin looks like a TTY and `-p`
+// then requires the prompt as an argument rather than over stdin. The legacy
+// exec path (buildClaudeNonInteractiveCmd) still passes "" and feeds the
+// prompt via a real pipe through cmd.StdinPipe.
+func buildClaudeNonInteractiveArgs(resumeSessionID, prompt string) []string {
 	var args []string
 	if resumeSessionID != "" {
 		args = []string{"--resume", "--session-id", resumeSessionID, "-p", "--verbose",
@@ -237,56 +242,32 @@ func buildClaudeNonInteractiveCmd(workDir, agentName, resumeSessionID string) *e
 	if budget := resolveMaxBudgetUSD(); budget != "" {
 		args = append(args, "--max-budget-usd", budget)
 	}
-	cmd := exec.Command("claude", args...) //nolint:gosec // G204: intentional subprocess launch for claude CLI
+	if prompt != "" {
+		args = append(args, prompt)
+	}
+	return args
+}
+
+// buildClaudeNonInteractiveCmd constructs the exec.Cmd for non-interactive Claude invocation.
+// When resumeSessionID is non-empty, the command includes --resume --session-id flags.
+// Appends --max-budget-usd when resolveMaxBudgetUSD returns a non-empty value.
+// The prompt is delivered via stdin by the caller (cmd.StdinPipe), not argv,
+// since this path does not go through the wrapper's PTY.
+func buildClaudeNonInteractiveCmd(workDir, agentName, resumeSessionID string) *exec.Cmd {
+	cmd := exec.Command("claude", buildClaudeNonInteractiveArgs(resumeSessionID, "")...) //nolint:gosec // G204: intentional subprocess launch for claude CLI
 	cmd.Dir = workDir
 	cmd.Env = buildClaudeEnv(workDir, agentName)
 	return cmd
 }
 
-// defaultClaudeNonInteractiveInvoker is the real non-interactive Claude invocation
+// defaultClaudeNonInteractiveInvoker is the real non-interactive Claude
+// invocation. It runs the Claude CLI under the in-tree harness-wrapper
+// supervisor (internal/harness): the wrapper classifies the harness's
+// terminal state, surfaces transient API errors with RetryAfter hints,
+// and harness.RunWithRetry transparently respawns on
+// StatusRetryLater / StatusAPIError before bubbling up.
 func defaultClaudeNonInteractiveInvoker(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error {
 	resumeID := consumeResumeSessionID()
-	cmd := buildClaudeNonInteractiveCmd(workDir, agentName, resumeID)
-
-	r, stdout, err := setupNonInteractivePipes(cmd, prompt, resumeID)
-	if err != nil {
-		return wrapInvocationError(err, "")
-	}
-
-	guard := newProcessGuard(cmd.Process)
-	go func() {
-		select {
-		case <-shutdown:
-			guard.Signal(syscall.SIGTERM)
-		case <-guard.Done():
-		}
-	}()
-
-	ClearLastCapturedSessionID()
-	outputTail := scanStreamOutput(stdout, newStreamLineHandler(workDir, collector))
-
-	runErr := cmd.Wait()
-	guard.WaitAndMark()
-	r.Close()
-
-	if err := cli.ClearLockClaudeSessionID(workDir); err != nil {
-		fmt.Fprintf(os.Stderr, "[loom] failed to clear claude session ID: %v\n", err)
-	}
-
-	return wrapInvocationError(runErr, outputTail)
-}
-
-// setupNonInteractivePipes configures stdin/stdout pipes, starts the process,
-// and prints the launch message. Returns the stdin closer and stdout reader.
-func setupNonInteractivePipes(cmd *exec.Cmd, prompt, resumeID string) (io.ReadCloser, io.Reader, error) {
-	r := pipePromptToCmd(cmd, prompt)
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		r.Close()
-		return nil, nil, fmt.Errorf("failed to create stdout pipe: %w", err)
-	}
-	cmd.Stderr = os.Stderr
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	if resumeID != "" {
 		fmt.Printf("[auto] Resuming Claude session %s...\n\n", resumeID)
@@ -295,11 +276,27 @@ func setupNonInteractivePipes(cmd *exec.Cmd, prompt, resumeID string) (io.ReadCl
 		fmt.Println("")
 	}
 
-	if err := cmd.Start(); err != nil {
-		r.Close()
-		return nil, nil, fmt.Errorf("failed to start claude: %w", err)
+	ClearLastCapturedSessionID()
+
+	err := runHarness(context.Background(), shutdown, harnessInvocation{
+		BinaryName: "claude",
+		// Prompt is delivered as the final positional arg, not via stdin: the
+		// wrapper's PTY makes stdin look like a TTY to claude, which then
+		// requires the prompt as an argument when `-p` is set.
+		Args:        buildClaudeNonInteractiveArgs(resumeID, prompt),
+		WorkDir:     workDir,
+		Env:         buildClaudeEnv(workDir, agentName),
+		Prompt:      "",
+		HarnessName: "claude",
+		LineHandler: newStreamLineHandler(workDir, collector),
+		RetryPolicy: harness.DefaultRetryPolicy(),
+	})
+
+	if cerr := cli.ClearLockClaudeSessionID(workDir); cerr != nil {
+		fmt.Fprintf(os.Stderr, "[loom] failed to clear claude session ID: %v\n", cerr)
 	}
-	return r, stdout, nil
+
+	return err
 }
 
 // outputRingBuffer keeps the last N lines of stream output for error classification.

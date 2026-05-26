@@ -47,7 +47,7 @@ Before writing any code, build context from three sources: the epic, related tas
 - Run `loom data show <id> --output json` and check the `depends_on` field for blockers
 - For each dependency: run `loom data show <dep-id>` and read its design and status
   - If a dependency is closed: note what it implemented — you will build on its code
-  - If a dependency is still open: go to Step 8 (Handle Blockers)
+  - If a dependency is still open: go to Step 8a (External Blocker)
 - Read 2-3 other closed sibling tasks in the same epic to understand the conventions they established:
   `loom data list --parent <epic-id> --status closed --limit 5 --output json | jq -r '.[] | "\(.id) \(.title)"'`
   For each, run `loom data show <sibling-id>` and skim the design for naming conventions, sentinel values, key formats, and patterns
@@ -63,7 +63,7 @@ Before writing any code, build context from three sources: the epic, related tas
   - Follow the **intent** of the design (the what and why), not the exact details
   - Adapt your implementation to match the conventions in the current code on disk
   - Example: if the design says to use `"default"` as a sentinel but a prior commit already established `"_default"`, use `"_default"`
-- **If a conflict is so fundamental the design approach won't work**: go to Step 8 (Handle Blockers)
+- **If a conflict is so fundamental the design approach won't work**: go to Step 8b (Design Unviable) — the planner will re-design
 
 #### 2d. Explore the Code
 Before implementing, read the actual source files you'll be modifying — not just the design's description of them:
@@ -128,17 +128,21 @@ Also check these universal edge cases where applicable:
 - If changes were significant, spawn another code review agent
 - Repeat until review passes with no major issues
 
-### Step 8: Handle Blockers
-If at ANY point you discover the task cannot be completed:
-- Missing dependency (code/feature not yet implemented)
-- External blocker (waiting on API, approval, merge, etc.)
-- Discovered bug that blocks this work
-- Design fundamentally conflicts with current code state
+### Step 8: Handle Inability to Complete
 
-Do NOT leave the task in_progress. Instead:
-1. Document what's blocking in the notes:
-   loom data update <id> --notes "BLOCKED: <detailed reason>"
-2. If the blocker is another task, mention the blocking task ID in the notes.
+If at ANY point you discover the task cannot be completed, FIRST choose the
+correct failure path. The two paths are not interchangeable:
+
+**Step 8a — External Blocker (needs a human to unblock)**
+Use this ONLY when nothing in this codebase can move the task forward:
+- Missing dependency on another in-flight task
+- Waiting on a third-party API / approval / merge
+- A bug in code outside the design's scope blocks this work
+
+Procedure:
+1. Document the blocker:
+   loom data update <id> --notes "BLOCKED: <detailed external reason>"
+2. If blocked by another task, mention its ID in the notes.
 3. Change status to blocked:
    loom data update <id> --status blocked
 4. Commit any partial work (if meaningful):
@@ -147,7 +151,39 @@ Do NOT leave the task in_progress. Instead:
 5. Signal completion: loom complete
 6. EXIT immediately
 
-This ensures the task is properly tracked as blocked, not orphaned in error state.
+Blocked tasks DO NOT get re-claimed by any agent; they sit until a human reviews.
+
+**Step 8b — Design Unviable (auto-route back to the planner)**
+Use this when the design itself is wrong and the work CAN move forward with a
+revised plan. Symptoms:
+- The design's approach violates an acceptance criterion you cannot
+  satisfy by faithful implementation (e.g. catastrophic regressions
+  against existing eval gates).
+- Implementing the design exactly would require touching files or
+  introducing semantics the design did not anticipate.
+- You can articulate a concrete corrective direction the planner should
+  take ("move dedup before LCS"; "drop normalised-equality predicate";
+  etc.).
+
+Procedure:
+1. Document the design flaw and your proposed revision direction:
+   loom data update <id> --notes "NEEDS-REVISION: <what's wrong with the
+   design + concrete next-iteration direction + evidence>"
+2. Commit any salvageable infrastructure (tests, helpers, params) with
+   feature flags OFF so a future implementation can re-enable them:
+   git add <files> && git commit -m "WIP: <task-id> - design revision pending"
+   git push origin HEAD
+3. Flip the task back to the planner:
+   loom data update <id> --status open --labels +needs-revision
+4. Signal completion: loom complete
+5. EXIT immediately
+
+The planner watches for `needs-revision` and will re-design against the
+existing design + your NEEDS-REVISION feedback without human intervention.
+
+**If you cannot tell which path applies**, prefer 8b (needs-revision):
+the planner is cheaper to re-engage than a human, and 8b is non-terminal
+— if the next iteration also fails, the worker can still escalate to 8a.
 
 ### Step 9: Complete and Signal
 - Run the quality gate (MANDATORY - DO NOT SKIP):
@@ -160,7 +196,7 @@ This ensures the task is properly tracked as blocked, not orphaned in error stat
 - Signal completion: loom complete
 
 ### CRITICAL: STOP
-After completing Step 8 (blocked) or Step 9 (completed), you are DONE.
+After completing Step 8 (blocked or needs-revision) or Step 9 (completed), you are DONE.
 - Do NOT run 'loom data ready' again
 - Do NOT pick up another task
 - Do NOT continue working

@@ -1,6 +1,7 @@
 package backends
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,6 +13,7 @@ import (
 	"unsafe"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/harness"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
@@ -73,48 +75,24 @@ func defaultCodexInvoker(workDir, prompt, agentName string) error {
 }
 
 func defaultCodexNonInteractiveInvoker(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error {
-	cmd := exec.Command("codex", "exec", "--json", "--dangerously-bypass-approvals-and-sandbox")
-	cmd.Dir = workDir
-	cmd.Env = buildBackendEnv(workDir, agentName)
-
-	r := pipePromptToCmd(cmd, prompt)
-
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		r.Close()
-		return wrapInvocationError(fmt.Errorf("failed to create stdout pipe: %w", err), "")
-	}
-	cmd.Stderr = os.Stderr
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-
 	fmt.Println("Launching Codex agent (non-interactive)...")
 	fmt.Println("")
 
-	if err := cmd.Start(); err != nil {
-		r.Close()
-		return wrapInvocationError(fmt.Errorf("failed to start codex: %w", err), "")
-	}
-
-	guard := newProcessGuard(cmd.Process)
-	go func() {
-		select {
-		case <-shutdown:
-			guard.Signal(syscall.SIGTERM)
-		case <-guard.Done():
-		}
-	}()
-
-	outputTail := scanStreamOutput(stdout, func(line string) {
-		fmt.Println(line)
-		if collector != nil {
-			collectCodexStreamUsage(line, collector)
-		}
+	return runHarness(context.Background(), shutdown, harnessInvocation{
+		BinaryName:  "codex",
+		Args:        []string{"exec", "--json", "--dangerously-bypass-approvals-and-sandbox"},
+		WorkDir:     workDir,
+		Env:         buildBackendEnv(workDir, agentName),
+		Prompt:      prompt,
+		HarnessName: "codex",
+		LineHandler: func(line string) {
+			fmt.Println(line)
+			if collector != nil {
+				collectCodexStreamUsage(line, collector)
+			}
+		},
+		RetryPolicy: harness.DefaultRetryPolicy(),
 	})
-
-	runErr := cmd.Wait()
-	guard.WaitAndMark()
-	r.Close()
-	return wrapInvocationError(runErr, outputTail)
 }
 
 // buildBackendEnv constructs the standard environment for backend subprocess invocations.
