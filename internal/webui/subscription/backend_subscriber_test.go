@@ -111,6 +111,9 @@ func (f *fakeBackend) Update(ctx context.Context, id string, params backend.Upda
 func (f *fakeBackend) ClaimIssue(ctx context.Context, id string, lockTTL time.Duration) error {
 	return errors.New("not implemented")
 }
+func (f *fakeBackend) ReleaseIssueLock(ctx context.Context, id, actor string) error {
+	return errors.New("not implemented")
+}
 func (f *fakeBackend) DeferIssue(ctx context.Context, id string, until time.Time) error {
 	return errors.New("not implemented")
 }

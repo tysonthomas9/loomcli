@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"sync"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
@@ -13,13 +14,18 @@ import (
 // AgentIPCClient is the IPC client for agent subprocesses to communicate with
 // the daemon's agent IPC socket. Each method dials the socket, sends one JSON
 // request, reads one JSON response, and disconnects (stateless, one-shot).
-// Safe for concurrent use — no mutable state.
+// Safe for concurrent use — the lastActivity field is only written through
+// SetLastActivity (sync.Mutex), and the other fields are set once at
+// construction.
 type AgentIPCClient struct {
 	SocketPath string
 	AgentName  string
 	SessionID  string
 	LeaseID    string
 	LeaseToken string
+
+	activityMu     sync.Mutex
+	lastActivityAt time.Time
 }
 
 // NewAgentIPCClient returns an IPC client that will connect to the given socket
@@ -28,17 +34,58 @@ func NewAgentIPCClient(socketPath, agentName string) *AgentIPCClient {
 	return &AgentIPCClient{SocketPath: socketPath, AgentName: agentName}
 }
 
+// SetLastActivity records the most recent wrapper PTY-output timestamp the
+// caller has observed. Subsequent IPC requests carry it so the daemon can
+// update per-agent liveness without a dedicated heartbeat round trip.
+// Zero timestamps are accepted and not propagated.
+func (c *AgentIPCClient) SetLastActivity(at time.Time) {
+	c.activityMu.Lock()
+	if at.After(c.lastActivityAt) {
+		c.lastActivityAt = at
+	}
+	c.activityMu.Unlock()
+}
+
+func (c *AgentIPCClient) snapshotActivity() time.Time {
+	c.activityMu.Lock()
+	defer c.activityMu.Unlock()
+	return c.lastActivityAt
+}
+
+// Heartbeat sends a "I am alive" ping carrying the latest LastActivityAt to
+// the daemon. It is safe to call between mutations; idle agents that aren't
+// mutating still need this to keep the daemon's per-agent liveness fresh.
+// Failure to send is returned but is not fatal — the caller typically logs
+// and continues.
+func (c *AgentIPCClient) Heartbeat(at time.Time) error {
+	c.SetLastActivity(at)
+	req := AgentIPCRequest{
+		Operation:      IPCOpHeartbeat,
+		AgentName:      c.AgentName,
+		SessionID:      c.SessionID,
+		LeaseID:        c.LeaseID,
+		LeaseToken:     c.LeaseToken,
+		LastActivityAt: c.snapshotActivity(),
+	}
+	resp, err := sendAgentIPCRequest(c.SocketPath, req)
+	if err != nil {
+		return err
+	}
+	return ipcResponseToError(resp, "ipc.heartbeat")
+}
+
 // Claim atomically claims an issue for this agent. Pass lockTTL=0 to use the
 // server's default TTL. Returns *backend.BackendError with KindConflict if
 // already claimed, KindNotFound if issue missing.
 func (c *AgentIPCClient) Claim(issueID string, lockTTL time.Duration) error {
 	req := AgentIPCRequest{
-		Operation:  IPCOpClaim,
-		AgentName:  c.AgentName,
-		IssueID:    issueID,
-		SessionID:  c.SessionID,
-		LeaseID:    c.LeaseID,
-		LeaseToken: c.LeaseToken,
+		Operation:      IPCOpClaim,
+		AgentName:      c.AgentName,
+		IssueID:        issueID,
+		SessionID:      c.SessionID,
+		LeaseID:        c.LeaseID,
+		LeaseToken:     c.LeaseToken,
+		LastActivityAt: c.snapshotActivity(),
 	}
 
 	if lockTTL > 0 {
@@ -64,13 +111,14 @@ func (c *AgentIPCClient) Update(issueID string, params backend.UpdateParams) err
 	}
 
 	req := AgentIPCRequest{
-		Operation:  IPCOpUpdate,
-		AgentName:  c.AgentName,
-		IssueID:    issueID,
-		SessionID:  c.SessionID,
-		LeaseID:    c.LeaseID,
-		LeaseToken: c.LeaseToken,
-		Args:       args,
+		Operation:      IPCOpUpdate,
+		AgentName:      c.AgentName,
+		IssueID:        issueID,
+		SessionID:      c.SessionID,
+		LeaseID:        c.LeaseID,
+		LeaseToken:     c.LeaseToken,
+		Args:           args,
+		LastActivityAt: c.snapshotActivity(),
 	}
 
 	resp, err := sendAgentIPCRequest(c.SocketPath, req)
@@ -78,6 +126,25 @@ func (c *AgentIPCClient) Update(issueID string, params backend.UpdateParams) err
 		return err
 	}
 	return ipcResponseToError(resp, "ipc.update")
+}
+
+// ReleaseLock drops only the operational claim lock for an issue without
+// changing its status or assignee. Idempotent: missing lock returns nil.
+func (c *AgentIPCClient) ReleaseLock(issueID string) error {
+	req := AgentIPCRequest{
+		Operation:  IPCOpReleaseLock,
+		AgentName:  c.AgentName,
+		IssueID:    issueID,
+		SessionID:  c.SessionID,
+		LeaseID:    c.LeaseID,
+		LeaseToken: c.LeaseToken,
+	}
+
+	resp, err := sendAgentIPCRequest(c.SocketPath, req)
+	if err != nil {
+		return err
+	}
+	return ipcResponseToError(resp, "ipc.release_lock")
 }
 
 // Complete closes an issue and returns the CloseResult (including unblocked issues).
@@ -88,13 +155,14 @@ func (c *AgentIPCClient) Complete(issueID string, params backend.CloseParams) (*
 	}
 
 	req := AgentIPCRequest{
-		Operation:  IPCOpComplete,
-		AgentName:  c.AgentName,
-		IssueID:    issueID,
-		SessionID:  c.SessionID,
-		LeaseID:    c.LeaseID,
-		LeaseToken: c.LeaseToken,
-		Args:       args,
+		Operation:      IPCOpComplete,
+		AgentName:      c.AgentName,
+		IssueID:        issueID,
+		SessionID:      c.SessionID,
+		LeaseID:        c.LeaseID,
+		LeaseToken:     c.LeaseToken,
+		Args:           args,
+		LastActivityAt: c.snapshotActivity(),
 	}
 
 	resp, err := sendAgentIPCRequest(c.SocketPath, req)

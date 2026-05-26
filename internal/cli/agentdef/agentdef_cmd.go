@@ -14,6 +14,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/cli/backendcheck"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
@@ -112,7 +113,7 @@ func init() {
 	cli.RegisterCommand(agentdefCmd)
 }
 
-func runAgentAdd(_ *cobra.Command, args []string) error {
+func runAgentAdd(cmd *cobra.Command, args []string) error {
 	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
 		mode := domain.AgentMode(agentAddMode)
 		a, err := h.Store.Agents().Create(ctx, store.AgentCreate{
@@ -138,8 +139,29 @@ func runAgentAdd(_ *cobra.Command, args []string) error {
 			return err
 		}
 		fmt.Printf("Created agent %s/%s (role=%s)\n", a.WorkspaceKey, a.Name, a.RoleName)
+		warnIfBackendMissing(cmd, a.Name, agentAddBackend)
 		return nil
 	})
+}
+
+// warnIfBackendMissing writes a stderr WARN if the resolved backend
+// for a freshly-created agent is not on PATH. The agent is still
+// created (the user may intentionally pre-create one before installing
+// the binary), but the daemon will refuse to spawn it until the binary
+// appears.
+func warnIfBackendMissing(cmd *cobra.Command, agentName, agentBackend string) {
+	effective := agentBackend
+	if effective == "" {
+		effective = cli.ResolveBackendName()
+	}
+	info, err := backendcheck.CheckBackend(effective)
+	if err != nil || info.Installed {
+		return
+	}
+	_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "WARN: %s\n", info.InstallHint)
+	_, _ = fmt.Fprintf(cmd.ErrOrStderr(),
+		"      Agent %q was recorded, but the daemon will not spawn it until %q is installed on PATH.\n",
+		agentName, effective)
 }
 
 func ensureAgentDefinitionLocalWorktrees(ctx context.Context, st store.Store, agent domain.Agent) error {

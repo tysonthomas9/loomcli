@@ -2,6 +2,7 @@ package supervisor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -49,6 +50,23 @@ type Supervisor struct {
 	ShutdownOnce sync.Once      // protects shutdown channel from double-close
 	Wg           sync.WaitGroup // tracks superviseAgent goroutines
 
+	// FatalCh receives the first fatal supervisor error (panic in a critical
+	// goroutine, or a critical goroutine returning before shutdown). Buffered
+	// size 1; FatalOnce ensures only the first fatal is delivered. The daemon
+	// main loop selects on this alongside the shutdown channel so the process
+	// can exit non-zero when supervision dies.
+	FatalCh   chan error
+	FatalOnce sync.Once
+
+	// Ticks holds *atomic.Int64 UnixNano timestamps keyed by goroutine name.
+	// Watched goroutines call RecordTick at each loop iteration; the liveness
+	// watchdog flags any tick older than the per-name threshold.
+	Ticks sync.Map
+
+	// LivenessTimeout overrides the default per-goroutine staleness threshold
+	// for the liveness watchdog. Zero means use built-in defaults.
+	LivenessTimeout time.Duration
+
 	Concurrency *ConcurrencyTracker
 	EventBus    EventEmitter
 	EmitEvent   func(events.Event)
@@ -71,6 +89,12 @@ type Supervisor struct {
 	NodeID       string
 	NodeTTL      time.Duration
 	NodeInterval time.Duration
+
+	// backendRecheckInterval is the fixed delay computeBackoff returns for a
+	// BackendUnavailable park (agent's backend CLI missing from PATH). Zero
+	// means use the package default (backendUnavailableRecheckInterval). Tests set a
+	// small value to avoid the 30s wait.
+	backendRecheckInterval time.Duration
 }
 
 // NewAgent creates an AgentProcess from an agent entry, resolving the worktree path
@@ -102,10 +126,16 @@ func (s *Supervisor) NewAgent(entry config.AgentEntry, idx int) (*AgentProcess, 
 // Start launches supervisor goroutines for all configured agents.
 func (s *Supervisor) Start() error {
 	s.Shutdown = make(chan struct{})
+	s.FatalCh = make(chan error, 1)
 
 	if err := s.startControlPlaneNode(); err != nil {
 		return err
 	}
+
+	// Sweep backend processes orphaned by a previous SIGKILL or crash (PPID==1
+	// with cwd under a managed worktree). Must happen before we spawn new
+	// workers so a brand-new agent doesn't get confused with a leftover one.
+	s.sweepOrphanedBackends()
 
 	// Sweep orphaned sessions from prior daemon runs before launching agents.
 	if sessStore, err := sessions.NewStore(cli.GetWorkspaceRuntimeDir()); err != nil {
@@ -118,12 +148,16 @@ func (s *Supervisor) Start() error {
 		}
 	}
 
-	// Start healthChecker goroutine
-	s.Wg.Add(1)
-	go func() {
-		defer s.Wg.Done()
-		s.healthChecker()
-	}()
+	// Start healthChecker goroutine under the crash-loud harness.
+	s.RegisterTick(GoroutineHealthChecker)
+	s.RunCritical(GoroutineHealthChecker, s.healthChecker)
+
+	// Start the liveness watchdog — itself wrapped in RunCritical so a panic
+	// in the watchdog also exits the daemon. The watchdog reads atomic tick
+	// stamps without taking any supervisor mutex, so it stays responsive even
+	// if AgentsMu is deadlocked elsewhere.
+	s.RegisterTick(GoroutineLivenessWatchdog)
+	s.RunCritical(GoroutineLivenessWatchdog, s.livenessWatchdog)
 
 	// In fleet mode, skip agent supervision — agents are managed by the fleet server.
 	cfg := s.ConfigSnapshot()
@@ -141,15 +175,25 @@ func (s *Supervisor) Start() error {
 	for _, ap := range snapshot {
 		ap.StopCh = make(chan struct{})
 		ap.Done = make(chan struct{})
-		s.Wg.Add(1)
-		go func(agent *AgentProcess) {
-			defer s.Wg.Done()
-			defer close(agent.Done)
-			s.superviseAgent(agent)
-		}(ap)
+		s.startAgentSupervisor(ap)
 	}
 
 	return nil
+}
+
+// startAgentSupervisor launches the supervise loop for a single agent under
+// the crash-loud harness. Panics inside superviseAgent become fatal so the
+// daemon process exits non-zero; normal returns (max retries, config removed)
+// are expected and not treated as failures.
+//
+// This is called from Start() (no mutex held). The AddAgent path in drain.go
+// does its own coordinated Wg.Add(1) under AgentsMu and inlines the spawn —
+// see drain.go for that variant.
+func (s *Supervisor) startAgentSupervisor(ap *AgentProcess) {
+	name := GoroutineAgentPrefix + ap.Entry.Worktree
+	s.RegisterTick(name)
+	s.Wg.Add(1)
+	go s.supervisedAgentBody(name, ap)
 }
 
 const (
@@ -191,11 +235,10 @@ func (s *Supervisor) startControlPlaneNode() error {
 	}
 	s.NodeID = nodeID
 
-	s.Wg.Add(1)
-	go func() {
-		defer s.Wg.Done()
+	s.RegisterTick(GoroutineNodeHeartbeat)
+	s.RunCritical(GoroutineNodeHeartbeat, func() {
 		s.runNodeHeartbeat(nodeID, ttl, interval)
-	}()
+	})
 	return nil
 }
 
@@ -213,6 +256,7 @@ func (s *Supervisor) runNodeHeartbeat(nodeID string, ttl, interval time.Duration
 			if err != nil {
 				slog.Warn("supervisor node heartbeat failed", "workspace", s.WorkspaceID, "node_id", nodeID, "err", err)
 			}
+			s.RecordTick(GoroutineNodeHeartbeat)
 		}
 	}
 }
@@ -305,8 +349,12 @@ func (s *Supervisor) Stop() {
 //nolint:funlen // The restart loop keeps lifecycle ordering visible.
 func (s *Supervisor) superviseAgent(ap *AgentProcess) {
 	slog.Info("starting agent supervisor", "worktree", ap.Entry.Worktree, "role", ap.Entry.Role)
+	tickName := agentTickName(ap)
 
 	for {
+		// Refreshed at the top of every iteration; while we block in
+		// waitForAgent → cmd.Wait(), startAgentWaitHeartbeat keeps it fresh.
+		s.RecordTick(tickName)
 		if s.checkAgentStopSignals(ap) {
 			return
 		}
@@ -345,10 +393,7 @@ func (s *Supervisor) superviseAgent(ap *AgentProcess) {
 			continue
 		}
 
-		if !s.spawnAndWait(ap) {
-			releaseOwnership()
-			continue
-		}
+		s.spawnAndWait(ap)
 
 		releaseOwnership()
 		s.postExitCleanup(ap)
@@ -418,7 +463,35 @@ func (s *Supervisor) clearAgentSessionState(ap *AgentProcess) {
 	ap.TranscriptPath = ""
 	ap.BeforeRef = ""
 	ap.AssignedTaskID = ""
+	ap.LastActivity = time.Time{}
 	ap.Mu.Unlock()
+}
+
+// RecordAgentActivity advances ap.LastActivity for the named agent toward the
+// observed PTY-output timestamp. It is a no-op if the agent isn't currently
+// supervised. Out-of-order heartbeats never regress the stored value — callers
+// can safely retry without ever rewinding the timestamp.
+func (s *Supervisor) RecordAgentActivity(agentName string, at time.Time) {
+	if agentName == "" || at.IsZero() {
+		return
+	}
+	s.AgentsMu.RLock()
+	var target *AgentProcess
+	for _, ap := range s.Agents {
+		if ap.Entry.Worktree == agentName {
+			target = ap
+			break
+		}
+	}
+	s.AgentsMu.RUnlock()
+	if target == nil {
+		return
+	}
+	target.Mu.Lock()
+	if at.After(target.LastActivity) {
+		target.LastActivity = at
+	}
+	target.Mu.Unlock()
 }
 
 // preFlightSetup runs recovery, assigns epic, creates session, and clears yield file.
@@ -542,6 +615,26 @@ func (s *Supervisor) createControlPlaneAgentSession(ap *AgentProcess, sessionID,
 	ap.Mu.Unlock()
 }
 
+// markControlPlaneAgentState persists the given agent state onto the
+// fleet-db Agent record so UIs and `workspace ops diagnose` reflect
+// supervisor lifecycle transitions (currently used by the
+// backend-availability gate to flip between AgentStateBackendUnavailable
+// and AgentStateActive). Best-effort: failures are logged but do not
+// block the supervisor.
+func (s *Supervisor) markControlPlaneAgentState(ap *AgentProcess, state domain.AgentState) {
+	if s.ControlStore == nil || s.WorkspaceID == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), controlPlaneOperationTimeout)
+	defer cancel()
+	if _, err := s.ControlStore.Agents().Update(ctx, s.WorkspaceID, ap.Entry.Worktree, store.AgentUpdate{
+		State: &state,
+	}); err != nil {
+		slog.Warn("control-plane agent state update failed",
+			"worktree", ap.Entry.Worktree, "state", state, "err", err)
+	}
+}
+
 func (s *Supervisor) markControlPlaneAgentSessionRunning(ap *AgentProcess) {
 	if s.ControlStore == nil || s.WorkspaceID == "" {
 		return
@@ -653,11 +746,27 @@ func (s *Supervisor) completeControlPlaneAgentSession(ap *AgentProcess, input ag
 			slog.Warn("control-plane agent lease release failed", "worktree", ap.Entry.Worktree, "session_id", input.sessionID, "lease_id", input.leaseID, "err", err)
 		}
 	}
+	s.releaseAssignedTaskClaim(ap, input.taskID)
 }
 
-// spawnAndWait spawns the agent and waits for it to exit. Returns false if spawn fails (continue loop).
-func (s *Supervisor) spawnAndWait(ap *AgentProcess) bool {
+// spawnAndWait spawns the agent and waits for it to exit. A spawn failure is
+// recorded as a synthetic exit (see markSpawnFailure) so the caller's single
+// restart decision — shouldRestart + sleepBeforeRestart — owns counting and
+// backoff for both real exits and spawn failures.
+func (s *Supervisor) spawnAndWait(ap *AgentProcess) {
 	if err := s.spawnAgent(ap); err != nil {
+		if errors.Is(err, ErrBackendUnavailable) {
+			// Gate fired before buildCommand: gateBackendAvailable already set
+			// the BackendUnavailable state/error, and no session or subprocess
+			// was created, so there's nothing to finalize. Release concurrency
+			// and return; the single restart decision parks the agent —
+			// shouldRestart treats BackendUnavailable as retry-without-budget-
+			// erosion and computeBackoff returns the fixed backend re-check
+			// interval. The loop re-runs the gate next iteration and
+			// auto-recovers once the binary reappears.
+			s.Concurrency.Release(ap.Entry.Role)
+			return
+		}
 		slog.Warn("spawn failed", "worktree", ap.Entry.Worktree, "err", err)
 		ap.Mu.Lock()
 		orphanSess := ap.Session
@@ -681,7 +790,8 @@ func (s *Supervisor) spawnAndWait(ap *AgentProcess) bool {
 			taskID:     s.taskIDForLifecycle(ap, nil),
 		})
 		s.Concurrency.Release(ap.Entry.Role)
-		return s.handleRestartAfterError(ap)
+		s.markSpawnFailure(ap, err)
+		return
 	}
 
 	exitCode := s.waitForAgent(ap)
@@ -691,7 +801,6 @@ func (s *Supervisor) spawnAndWait(ap *AgentProcess) bool {
 	s.postMortemRecovery(ap, exitCode)
 	s.Concurrency.Release(ap.Entry.Role)
 	s.handleEpicTransition(ap)
-	return true
 }
 
 type agentSessionFinalizeState struct {
@@ -890,6 +999,8 @@ func (s *Supervisor) GetAgents() []SupervisedAgentStatus {
 			OwnershipLeaseID:       ap.OwnershipLeaseID,
 			OwnershipFencingToken:  ap.OwnershipFencingToken,
 			OwnershipLastHeartbeat: ap.OwnershipLastHeartbeat,
+			AssignedTaskID:         ap.AssignedTaskID,
+			LastActivity:           ap.LastActivity,
 		}
 		if ap.LastError != nil {
 			result[i].LastErrorClass = ap.LastError.Class.String()

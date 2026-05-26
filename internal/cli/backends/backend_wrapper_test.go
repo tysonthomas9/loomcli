@@ -1,19 +1,25 @@
 package backends
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/olesho/harness-wrapper/pkg/wrapper"
 
+	"github.com/tysonthomas9/loomcli/internal/agenterr"
+	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/harness"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
@@ -70,6 +76,53 @@ func requireBinaryOnPath(t *testing.T, name string) {
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
+func shortBackendSocketDir(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("/tmp", "loom-sock-")
+	if err != nil {
+		t.Fatalf("creating short socket dir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	return dir
+}
+
+func startBackendIPCServer(t *testing.T, socketPath string, handler func(cli.AgentIPCRequest) cli.AgentIPCResponse) {
+	t.Helper()
+	ln, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatalf("listen on %s: %v", socketPath, err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func(c net.Conn) {
+				defer func() { _ = c.Close() }()
+
+				_ = c.SetReadDeadline(time.Now().Add(5 * time.Second))
+				scanner := bufio.NewScanner(c)
+				if !scanner.Scan() {
+					return
+				}
+
+				var req cli.AgentIPCRequest
+				if err := json.Unmarshal(scanner.Bytes(), &req); err != nil {
+					return
+				}
+
+				resp := handler(req)
+				data, _ := json.Marshal(resp)
+				data = append(data, '\n')
+				_, _ = c.Write(data)
+			}(conn)
+		}
+	}()
+}
+
 func TestRunHarness_PipesPromptAndCallsWrapper(t *testing.T) {
 	requireBinaryOnPath(t, "fake-tool")
 	fake := &fakeWrapperRun{
@@ -98,8 +151,8 @@ func TestRunHarness_PipesPromptAndCallsWrapper(t *testing.T) {
 		t.Fatalf("wrapperRun calls: got %d, want 1", len(calls))
 	}
 	cfg := calls[0]
-	if !strings.HasSuffix(cfg.BinaryPath, "/fake-tool") {
-		t.Errorf("BinaryPath: got %q, want suffix /fake-tool", cfg.BinaryPath)
+	if cfg.BinaryPath != "fake-tool" {
+		t.Errorf("BinaryPath: got %q, want %q (wrapper owns resolution now)", cfg.BinaryPath, "fake-tool")
 	}
 	if got, want := strings.Join(cfg.Args, " "), "--flag value"; got != want {
 		t.Errorf("Args: got %q, want %q", got, want)
@@ -119,10 +172,20 @@ func TestRunHarness_PipesPromptAndCallsWrapper(t *testing.T) {
 }
 
 func TestRunHarness_BinaryNotFound(t *testing.T) {
-	// Empty PATH so exec.LookPath fails predictably.
-	t.Setenv("PATH", "")
-
-	fake := &fakeWrapperRun{result: wrapper.Result{Status: wrapper.StatusIdle}}
+	// The wrapper now owns binary resolution: runHarness no longer
+	// preflights with exec.LookPath. Simulate the wrapper's
+	// ErrBinaryNotFound return and assert it surfaces as an
+	// InvocationError carrying the agenterr.BackendUnavailableMarker so
+	// the outer supervisor's classifier picks it up as
+	// BackendUnavailable instead of Unknown (fixes LOOM-4).
+	fake := &fakeWrapperRun{
+		result: wrapper.Result{
+			Status:   wrapper.StatusBinaryNotFound,
+			ExitCode: -1,
+			Reason:   `wrapper: binary not found: exec: "definitely-not-on-path-xyz": executable file not found in $PATH`,
+		},
+		err: wrapper.ErrBinaryNotFound,
+	}
 	installWrapperRunMock(t, fake.Run)
 
 	err := runHarness(context.Background(), nil, harnessInvocation{
@@ -132,15 +195,15 @@ func TestRunHarness_BinaryNotFound(t *testing.T) {
 	if err == nil {
 		t.Fatal("got nil, want non-nil error")
 	}
-	if len(fake.Calls()) != 0 {
-		t.Errorf("wrapperRun should not be called on lookup failure; got %d calls", len(fake.Calls()))
+	if len(fake.Calls()) != 1 {
+		t.Errorf("wrapperRun should be called once (wrapper owns the lookup); got %d calls", len(fake.Calls()))
 	}
 	var invErr *InvocationError
 	if !errors.As(err, &invErr) {
 		t.Fatalf("err: got %T (%v), want *InvocationError", err, err)
 	}
-	if !strings.Contains(invErr.Error(), "not found on PATH") {
-		t.Errorf("err message %q missing 'not found on PATH'", invErr.Error())
+	if !strings.Contains(invErr.Error(), agenterr.BackendUnavailableMarker) {
+		t.Errorf("err message %q missing marker %q", invErr.Error(), agenterr.BackendUnavailableMarker)
 	}
 }
 
@@ -371,8 +434,68 @@ func TestRunHarness_RetryablePolicyPassedThrough(t *testing.T) {
 		t.Fatalf("runHarness err: %v", err)
 	}
 	got, _ := sawPolicy.Load().(harness.RetryPolicy)
-	if got != want {
+	// Compare field-by-field: RetryPolicy now contains an OnActivity func
+	// that runHarness auto-attaches when no daemon socket is set. The
+	// retry/backoff fields are the actual contract under test here.
+	if got.Max != want.Max || got.BaseBackoff != want.BaseBackoff || got.MaxBackoff != want.MaxBackoff {
 		t.Errorf("RetryPolicy: got %+v, want %+v", got, want)
+	}
+}
+
+func TestRunHarness_AutoAttachesDaemonActivityObserver(t *testing.T) {
+	requireBinaryOnPath(t, "fake-tool")
+
+	socketPath := filepath.Join(shortBackendSocketDir(t), "ipc.sock")
+	captured := make(chan cli.AgentIPCRequest, 1)
+	startBackendIPCServer(t, socketPath, func(req cli.AgentIPCRequest) cli.AgentIPCResponse {
+		captured <- req
+		return cli.AgentIPCResponse{Success: true}
+	})
+
+	t.Setenv("LOOM_DAEMON_SOCKET", socketPath)
+	t.Setenv("LOOM_AGENT_NAME", "worker-1")
+	t.Setenv("LOOM_SESSION_ID", "session-1")
+	t.Setenv("LOOM_AGENT_LEASE_ID", "lease-1")
+	t.Setenv("LOOM_AGENT_LEASE_TOKEN", "token-1")
+	t.Setenv("LOOM_SERVER_URL", "")
+	t.Setenv("LOOM_ISSUE_BACKEND", "")
+
+	cli.ResetDefaultIssueBackend()
+	t.Cleanup(cli.ResetDefaultIssueBackend)
+
+	activityAt := time.Unix(1700000000, 123456000).UTC()
+	installWrapperRunMock(t, func(ctx context.Context, cfg wrapper.Config, p harness.RetryPolicy) (wrapper.Result, error) {
+		if p.OnActivity == nil {
+			t.Fatal("runHarness did not auto-attach a daemon activity observer")
+		}
+		p.OnActivity(wrapper.Snapshot{LastOutputAt: activityAt})
+		return wrapper.Result{Status: wrapper.StatusIdle}, nil
+	})
+
+	if err := runHarness(context.Background(), nil, harnessInvocation{
+		BinaryName:  "fake-tool",
+		LineHandler: func(string) {},
+		RetryPolicy: harness.RetryPolicy{Max: 0, BaseBackoff: 1, MaxBackoff: 1},
+	}); err != nil {
+		t.Fatalf("runHarness err: %v", err)
+	}
+
+	select {
+	case req := <-captured:
+		if req.Operation != cli.IPCOpHeartbeat {
+			t.Errorf("operation = %q, want %q", req.Operation, cli.IPCOpHeartbeat)
+		}
+		if req.AgentName != "worker-1" {
+			t.Errorf("agent_name = %q, want worker-1", req.AgentName)
+		}
+		if req.SessionID != "session-1" || req.LeaseID != "lease-1" || req.LeaseToken != "token-1" {
+			t.Errorf("lease/session metadata = session:%q lease:%q token:%q", req.SessionID, req.LeaseID, req.LeaseToken)
+		}
+		if !req.LastActivityAt.Equal(activityAt) {
+			t.Errorf("last_activity_at = %v, want %v", req.LastActivityAt, activityAt)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for auto-attached heartbeat")
 	}
 }
 

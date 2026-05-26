@@ -13,6 +13,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/cli/backendcheck"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/cli/daemonregistry"
 	"github.com/tysonthomas9/loomcli/internal/cli/local"
@@ -443,6 +444,7 @@ func repoLocalPath(localState bootstrap.WorkspaceLocalState, name string) string
 	return localworkspace.RepoPath(localState, name)
 }
 
+//nolint:funlen // Linear "build status struct then collect problems with their per-problem Reason side-effect"; extracting the unknown_role / missing_worktree blocks would require returning the Runnable side-effect alongside the problem, which obscures more than it clarifies.
 func workspaceOpsAgentStatus(
 	localState bootstrap.WorkspaceLocalState,
 	repoByName map[string]*domain.Repo,
@@ -490,10 +492,55 @@ func workspaceOpsAgentStatus(
 			Fix:      "remove and recreate the agent with `loom agentdef add ... --auto` so Loom creates the local worktree",
 		})
 	}
+	if item.Runnable {
+		if p, ok := agentBackendProblem(agent); ok {
+			if item.Reason == "" {
+				item.Reason = "backend_unavailable"
+			}
+			problems = append(problems, p)
+		}
+	}
 	if !item.Runnable && item.Reason == "" {
 		item.Reason = "desired_state_not_running"
 	}
 	return item, problems
+}
+
+// agentBackendProblem returns a WorkspaceOpsProblem describing a missing
+// backend CLI when the agent's resolved backend is not on PATH. Returns
+// (zero, false) when the backend is installed, when no backend resolves,
+// or when discovery itself errored (we'd rather under-report than show
+// a false positive driven by a discovery-internal failure).
+func agentBackendProblem(agent *domain.Agent) (WorkspaceOpsProblem, bool) {
+	eff := agentEffectiveBackend(agent)
+	if eff == "" {
+		return WorkspaceOpsProblem{}, false
+	}
+	info, err := backendcheck.CheckBackend(eff)
+	if err != nil || info.Installed {
+		return WorkspaceOpsProblem{}, false
+	}
+	return WorkspaceOpsProblem{
+		Severity: "error",
+		Code:     "agent_backend_unavailable",
+		Message:  fmt.Sprintf("agent %q backend %q is not on PATH", agent.Name, eff),
+		Agent:    agent.Name,
+		Fix:      info.InstallHint,
+	}, true
+}
+
+// agentEffectiveBackend resolves the backend name an agent would run
+// under, using the precedence chain visible from the workspace surface:
+// agent override → CLI/env default. The richer supervisor-side
+// resolution (role + daemon-config) is deliberately not duplicated here
+// to keep the diagnose code free of daemon-runtime coupling. The
+// fallback resolution still matches the supervisor for the common case
+// where the agent does not set its own backend.
+func agentEffectiveBackend(agent *domain.Agent) string {
+	if agent.Backend != "" {
+		return agent.Backend
+	}
+	return cli.ResolveBackendName()
 }
 
 func agentDesiredRunnable(agent *domain.Agent) bool {

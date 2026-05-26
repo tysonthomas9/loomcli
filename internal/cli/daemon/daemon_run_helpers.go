@@ -16,8 +16,10 @@ import (
 // Returns a channel that is closed when the updater exits.
 func startStateUpdater(shutdown <-chan struct{}, stateFilePath string, startedAt time.Time, daemon *Daemon, maxRetries int) <-chan struct{} {
 	done := make(chan struct{})
+	daemon.sup.RegisterTick(supervisor.GoroutineStateUpdater)
 	go func() {
 		defer close(done)
+		defer daemon.sup.RecoverAndSignal(supervisor.GoroutineStateUpdater)
 		ticker := time.NewTicker(5 * time.Second)
 		defer ticker.Stop()
 		for {
@@ -28,6 +30,7 @@ func startStateUpdater(shutdown <-chan struct{}, stateFilePath string, startedAt
 				if err := writeStateFile(stateFilePath, startedAt, daemon.Agents(), maxRetries); err != nil {
 					fmt.Printf("Warning: failed to update state file: %v\n", err)
 				}
+				daemon.sup.RecordTick(supervisor.GoroutineStateUpdater)
 			}
 		}
 	}()

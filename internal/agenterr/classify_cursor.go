@@ -2,8 +2,10 @@ package agenterr
 
 import "regexp"
 
-// Cursor-specific error patterns, ordered most-specific first.
-var cursorPatterns = []errorPattern{
+// Cursor-specific error patterns, ordered most-specific first. The
+// shared prose-style rate-limit patterns are appended at the end so
+// cursor-specific signals (429) win when present.
+var cursorPatterns = append([]errorPattern{
 	{regexp.MustCompile(`(?i)rate.?limit|too many requests`), RateLimited, "rate limit exceeded"},
 	{regexp.MustCompile(`(?i)\b429\b`), RateLimited, "rate limit exceeded (429)"},
 	{regexp.MustCompile(`(?i)invalid.?api.?key|authentication.?failed`), AuthFailure, "invalid API key"},
@@ -16,7 +18,7 @@ var cursorPatterns = []errorPattern{
 	{regexp.MustCompile(`(?i)timeout|ETIMEDOUT|ECONNRESET|timed?.?out`), Timeout, "connection timeout"},
 	{regexp.MustCompile(`(?i)internal.?error|service.?unavailable|server.?error|overloaded`), Transient, "server error"},
 	{regexp.MustCompile(`(?i)\b50[023]\b`), Transient, "server error"},
-}
+}, sharedRateLimitPatterns...)
 
 func classifyCursor(logTail string) *classifyResult {
 	return classifyWithPatterns(logTail, cursorPatterns)

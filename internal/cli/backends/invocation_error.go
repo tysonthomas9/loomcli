@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/olesho/harness-wrapper/pkg/wrapper"
+
+	"github.com/tysonthomas9/loomcli/internal/agenterr"
 )
 
 // InvocationError carries invocation-local output evidence for classifying
@@ -40,6 +42,14 @@ func wrapInvocationError(err error, outputTail string) error {
 		return nil
 	}
 
+	// Categorical wrapper signals: when the wrapper reports the binary
+	// is not on PATH, prepend the stable marker that agenterr classifies
+	// as BackendUnavailable. Without this, the outer supervisor sees a
+	// generic exec failure and falls back to Unknown (LOOM-4).
+	if errors.Is(err, wrapper.ErrBinaryNotFound) {
+		return binaryNotFoundInvocationError(err.Error(), outputTail)
+	}
+
 	exitCode := 1
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {
@@ -60,6 +70,33 @@ func wrapInvocationError(err error, outputTail string) error {
 		Err:        err,
 		OutputTail: evidence,
 		ExitCode:   exitCode,
+	}
+}
+
+// binaryNotFoundInvocationError returns the canonical InvocationError
+// for the wrapper-detected "binary missing" case. Used by both
+// wrapWrapperResult (Status path) and wrapInvocationError (error path)
+// so the marker text is consistent across entry points.
+func binaryNotFoundInvocationError(reason, outputTail string) *InvocationError {
+	msg := strings.TrimSpace(reason)
+	if msg == "" {
+		msg = "binary not found"
+	}
+	combined := agenterr.BackendUnavailableMarker + ": " + msg
+	evidence := strings.TrimSpace(outputTail)
+	if evidence == "" {
+		evidence = combined
+	} else if !strings.Contains(evidence, combined) {
+		evidence = combined + "\n" + evidence
+	}
+	return &InvocationError{
+		Err:        errors.New(combined),
+		OutputTail: evidence,
+		// 127 is the Unix convention for "command not found". Kept for
+		// consumers that switch on ExitCode (the inner loom subprocess
+		// itself exits with 1 via cobra; the marker text is the primary
+		// signal for the outer classifier).
+		ExitCode: 127,
 	}
 }
 
@@ -84,6 +121,8 @@ func wrapWrapperResult(res wrapper.Result, outputTail string) error {
 			return fmt.Errorf("%w: %s", context.Canceled, res.Reason)
 		}
 		return context.Canceled
+	case wrapper.StatusBinaryNotFound:
+		return binaryNotFoundInvocationError(res.Reason, outputTail)
 	}
 
 	reason := strings.TrimSpace(res.Reason)

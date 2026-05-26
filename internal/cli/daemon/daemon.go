@@ -127,16 +127,15 @@ func (d *Daemon) Start() error {
 	d.configHash = computeConfigHash(d.config)
 	d.reconcileMu.Unlock()
 
+	// Supervisor.Start() initializes Shutdown and FatalCh; we need both before
+	// launching the daemon-owned reconciler goroutine. Start the supervisor
+	// first, then attach the reconciler under the same crash-loud harness.
 	if err := d.sup.Start(); err != nil {
 		return err
 	}
+	d.sup.RegisterTick(supervisor.GoroutineConfigReconciler)
+	d.sup.RunCritical(supervisor.GoroutineConfigReconciler, d.configReconciler)
 
-	// Start configReconciler after Supervisor.Start initializes shared runtime state.
-	d.sup.Wg.Add(1)
-	go func() {
-		defer d.sup.Wg.Done()
-		d.configReconciler()
-	}()
 	d.startAgentCommandPoller()
 	return nil
 }

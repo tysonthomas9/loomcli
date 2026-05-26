@@ -11,9 +11,10 @@ import (
 
 // mockIPCMutator implements ipcMutator for testing the decorator logic.
 type mockIPCMutator struct {
-	claimFn    func(issueID string, lockTTL time.Duration) error
-	updateFn   func(issueID string, params backend.UpdateParams) error
-	completeFn func(issueID string, params backend.CloseParams) (*backend.CloseResult, error)
+	claimFn       func(issueID string, lockTTL time.Duration) error
+	updateFn      func(issueID string, params backend.UpdateParams) error
+	completeFn    func(issueID string, params backend.CloseParams) (*backend.CloseResult, error)
+	releaseLockFn func(issueID string) error
 }
 
 func (m *mockIPCMutator) Claim(issueID string, lockTTL time.Duration) error {
@@ -35,6 +36,13 @@ func (m *mockIPCMutator) Complete(issueID string, params backend.CloseParams) (*
 		return m.completeFn(issueID, params)
 	}
 	return &backend.CloseResult{}, nil
+}
+
+func (m *mockIPCMutator) ReleaseLock(issueID string) error {
+	if m.releaseLockFn != nil {
+		return m.releaseLockFn(issueID)
+	}
+	return nil
 }
 
 // --- IPC routing tests ---

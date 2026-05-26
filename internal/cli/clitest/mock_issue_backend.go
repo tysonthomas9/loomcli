@@ -52,6 +52,8 @@ type MockIssueBackend struct {
 	UpdateFn               func(ctx context.Context, id string, params backend.UpdateParams) error
 	ClaimIssueErr          error
 	ClaimIssueFn           func(ctx context.Context, id string, lockTTL time.Duration) error
+	ReleaseIssueLockErr    error
+	ReleaseIssueLockFn     func(ctx context.Context, id, actor string) error
 	DeferIssueErr          error
 	DeferIssueFn           func(ctx context.Context, id string, until time.Time) error
 	UndeferIssueErr        error
@@ -205,6 +207,16 @@ func (m *MockIssueBackend) ClaimIssue(ctx context.Context, id string, lockTTL ti
 	m.mu.Unlock()
 	if fn != nil {
 		return fn(ctx, id, lockTTL)
+	}
+	return e
+}
+func (m *MockIssueBackend) ReleaseIssueLock(ctx context.Context, id, actor string) error {
+	m.mu.Lock()
+	m.record("ReleaseIssueLock", id, actor)
+	fn, e := m.ReleaseIssueLockFn, m.ReleaseIssueLockErr
+	m.mu.Unlock()
+	if fn != nil {
+		return fn(ctx, id, actor)
 	}
 	return e
 }

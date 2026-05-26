@@ -4,15 +4,18 @@ package agenterr
 type ErrorClass int
 
 const (
-	RateLimited     ErrorClass = iota // API rate limit / 429 / overloaded
-	AuthFailure                       // Invalid API key / 401 / unauthorized
-	BillingError                      // Payment required / 402 / quota exceeded
-	ModelNotFound                     // Model does not exist / 404
-	ContextOverflow                   // Context length exceeded / token limit
-	Timeout                           // Connection timeout / ETIMEDOUT / SIGKILL
-	Transient                         // Server error / 5xx / SIGTERM
-	NoWork                            // No claimable tasks available
-	Unknown                           // Unclassifiable error
+	RateLimited        ErrorClass = iota // API rate limit / 429 / overloaded
+	AuthFailure                          // Invalid API key / 401 / unauthorized
+	BillingError                         // Payment required / 402 / quota exceeded
+	ModelNotFound                        // Model does not exist / 404
+	ContextOverflow                      // Context length exceeded / token limit
+	Timeout                              // Connection timeout / ETIMEDOUT / SIGKILL
+	Transient                            // Server error / 5xx / SIGTERM
+	NoWork                               // No claimable tasks available
+	SpawnFailure                         // Supervisor could not start the agent subprocess
+	BackendUnavailable                   // Backend CLI binary not on PATH (recoverable on install)
+	LockConflict                         // Candidate task locked by another agent
+	Unknown                              // Unclassifiable error
 )
 
 func (c ErrorClass) String() string {
@@ -33,6 +36,12 @@ func (c ErrorClass) String() string {
 		return "Transient"
 	case NoWork:
 		return "NoWork"
+	case SpawnFailure:
+		return "SpawnFailure"
+	case BackendUnavailable:
+		return "BackendUnavailable"
+	case LockConflict:
+		return "LockConflict"
 	case Unknown:
 		return "Unknown"
 	default:
@@ -43,7 +52,7 @@ func (c ErrorClass) String() string {
 // IsRetryable returns true if the error class is worth retrying.
 func (c ErrorClass) IsRetryable() bool {
 	switch c {
-	case RateLimited, Timeout, Transient:
+	case RateLimited, Timeout, Transient, SpawnFailure:
 		return true
 	default:
 		return false
