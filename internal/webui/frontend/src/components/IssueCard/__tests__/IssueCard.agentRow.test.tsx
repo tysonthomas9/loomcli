@@ -78,7 +78,10 @@ function createTestIssue(overrides: Partial<Issue> = {}): Issue {
 }
 
 /**
- * Create a mock LoomAgentStatus.
+ * Create a mock LoomAgentStatus. By default the agent claims the
+ * test-issue-abc123 issue (matches createTestIssue()'s default id).
+ * Tests that want the "orphaned task" path can pass current_task_id: ""
+ * or a different id.
  */
 function createMockAgent(
   overrides: Partial<LoomAgentStatus> = {},
@@ -89,6 +92,7 @@ function createMockAgent(
     status: "working: loom-123 (5m)",
     ahead: 2,
     behind: 0,
+    current_task_id: "test-issue-abc123",
     ...overrides,
   };
 }
@@ -124,15 +128,17 @@ describe("IssueCard AgentRow integration", () => {
       expect(dot).toBeInTheDocument();
     });
 
-    it("renders AgentRow with name only when agent not found in loom", () => {
-      // getAgentByName returns undefined for unknown agents
+    it('renders AgentRow with the saved assignee name and "agent missing" when no live agent has current_task_id === issue.id', () => {
+      // No agent claims this issue right now (orphaned in_progress).
       setupAgentContext(undefined);
 
       const issue = createTestIssue({ assignee: "unknown-agent" });
       render(<IssueCard issue={issue} columnId="in_progress" />);
 
-      // The assignee name should still appear (AgentRow renders without status)
+      // The saved assignee name still appears
       expect(screen.getByText("unknown-agent")).toBeInTheDocument();
+      // And the activity slot calls out the missing agent in red.
+      expect(screen.getByText("agent missing")).toBeInTheDocument();
     });
 
     it("strips [H] prefix from human assignee display name", () => {

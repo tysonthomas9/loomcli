@@ -6,8 +6,8 @@
  * Unit tests for AgentRow component.
  */
 
-import { render, screen } from "@testing-library/react";
-import { describe, it, expect } from "vitest";
+import { act, render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 import "@testing-library/jest-dom";
 
 import type { ParsedLoomStatus } from "@/types";
@@ -213,6 +213,161 @@ describe("AgentRow", () => {
       const nameSpan = container.querySelector('[class*="name"]');
       expect(nameSpan).toBeInTheDocument();
       expect(nameSpan?.textContent).toBe("");
+    });
+  });
+
+  describe("liveness (lastActivityAt / agentMissing)", () => {
+    const NOW_MS = Date.UTC(2026, 4, 21, 12, 0, 0); // 2026-05-21T12:00:00Z
+    const fixedNow = () => NOW_MS;
+
+    it('renders red "agent missing" text when agentMissing is true', () => {
+      const { container } = render(
+        <AgentRow
+          {...createProps({
+            agentName: "worker2",
+            agentMissing: true,
+          })}
+        />,
+      );
+      expect(screen.getByText("agent missing")).toBeInTheDocument();
+      const activity = container.querySelector('[class*="activity"]');
+      expect(activity).toHaveAttribute("data-state", "missing");
+    });
+
+    it("suppresses the status dot when agentMissing is true (live status is meaningless)", () => {
+      const { container } = render(
+        <AgentRow
+          {...createProps({
+            status: createParsedStatus(),
+            dotColor: "#22c55e",
+            agentMissing: true,
+          })}
+        />,
+      );
+      expect(container.querySelector('[class*="statusDot"]')).toBeNull();
+    });
+
+    it('renders "active Ns ago" when lastActivityAt is seconds ago', () => {
+      const at = new Date(NOW_MS - 3_000).toISOString();
+      render(
+        <AgentRow
+          {...createProps({
+            lastActivityAt: at,
+            now: fixedNow,
+          })}
+        />,
+      );
+      expect(screen.getByText("active 3s ago")).toBeInTheDocument();
+    });
+
+    it('renders "active Nm ago" when lastActivityAt is within 5 minutes', () => {
+      const at = new Date(NOW_MS - 3 * 60_000).toISOString();
+      render(
+        <AgentRow
+          {...createProps({
+            lastActivityAt: at,
+            now: fixedNow,
+          })}
+        />,
+      );
+      expect(screen.getByText("active 3m ago")).toBeInTheDocument();
+    });
+
+    it('renders "last seen Xm ago" past the 5-minute mark', () => {
+      const at = new Date(NOW_MS - 30 * 60_000).toISOString();
+      render(
+        <AgentRow
+          {...createProps({
+            lastActivityAt: at,
+            now: fixedNow,
+          })}
+        />,
+      );
+      expect(screen.getByText("last seen 30m ago")).toBeInTheDocument();
+    });
+
+    it('renders "last seen Xh ago" past the hour mark', () => {
+      const at = new Date(NOW_MS - 4 * 60 * 60_000).toISOString();
+      render(
+        <AgentRow
+          {...createProps({
+            lastActivityAt: at,
+            now: fixedNow,
+          })}
+        />,
+      );
+      expect(screen.getByText("last seen 4h ago")).toBeInTheDocument();
+    });
+
+    it("combines an existing activity prop with the relative-time label", () => {
+      const at = new Date(NOW_MS - 5_000).toISOString();
+      render(
+        <AgentRow
+          {...createProps({
+            status: createParsedStatus(),
+            activity: "Working",
+            lastActivityAt: at,
+            now: fixedNow,
+          })}
+        />,
+      );
+      expect(screen.getByText("Working · active 5s ago")).toBeInTheDocument();
+    });
+
+    it('renders "awaiting activity" when lastActivityAt is explicitly null (agent up, no PTY output yet)', () => {
+      render(
+        <AgentRow
+          {...createProps({
+            lastActivityAt: null,
+          })}
+        />,
+      );
+      expect(screen.getByText("awaiting activity")).toBeInTheDocument();
+    });
+
+    it("agentMissing wins over a stale lastActivityAt", () => {
+      const at = new Date(NOW_MS - 60_000).toISOString();
+      render(
+        <AgentRow
+          {...createProps({
+            agentMissing: true,
+            lastActivityAt: at,
+            now: fixedNow,
+          })}
+        />,
+      );
+      expect(screen.getByText("agent missing")).toBeInTheDocument();
+      expect(screen.queryByText(/active|last seen/)).toBeNull();
+    });
+
+    describe("self-refresh ticker (mirrors ConnectionBanner pattern)", () => {
+      beforeEach(() => {
+        vi.useFakeTimers();
+      });
+      afterEach(() => {
+        vi.useRealTimers();
+      });
+
+      it("recomputes the 'Xs ago' label without a parent re-render", () => {
+        let nowMs = NOW_MS;
+        const at = new Date(NOW_MS - 1_000).toISOString();
+        render(
+          <AgentRow
+            {...createProps({
+              lastActivityAt: at,
+              now: () => nowMs,
+            })}
+          />,
+        );
+        expect(screen.getByText("active 1s ago")).toBeInTheDocument();
+
+        nowMs += 15_000; // advance virtual clock 15s
+        act(() => {
+          vi.advanceTimersByTime(10_000); // fire one ticker
+        });
+
+        expect(screen.getByText(/active 16s ago/)).toBeInTheDocument();
+      });
     });
   });
 

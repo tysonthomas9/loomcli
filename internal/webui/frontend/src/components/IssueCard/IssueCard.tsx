@@ -136,12 +136,21 @@ export const IssueCard = memo(function IssueCard({
   const showAgentRow =
     (columnId === "in_progress" || columnId === "review") && !!issue.assignee;
   const isReviewColumn = columnId === "review";
-  const assignedAgent = issue.assignee
-    ? agents.find((a) => a.name === issue.assignee)
-    : undefined;
+  // Liveness join: the live agent claiming this task is the one whose
+  // current_task_id points at this issue, not the one whose name matches
+  // the saved assignee. The two can diverge (stale assignee after a
+  // worker crash, mid-handoff between siblings) — and that divergence is
+  // exactly what "agent missing" needs to surface.
+  const assignedAgent = agents.find((a) => a.current_task_id === issue.id);
   const agentParsedStatus = assignedAgent
     ? parseLoomStatus(assignedAgent.status)
     : null;
+  // On in_progress cards where the issue claims an assignee, but no live
+  // agent has current_task_id === issue.id, the task is orphaned. Review
+  // cards intentionally don't show "missing" — the agent legitimately
+  // releases the task at handoff.
+  const isAgentMissing =
+    columnId === "in_progress" && !!issue.assignee && !assignedAgent;
 
   const rootClassName = className
     ? `${styles.issueCard} ${className}`
@@ -306,6 +315,12 @@ export const IssueCard = memo(function IssueCard({
                 ? getStatusLabel(agentParsedStatus)
                 : undefined
           }
+          lastActivityAt={
+            isReviewColumn
+              ? undefined
+              : (assignedAgent?.last_activity_at ?? null)
+          }
+          agentMissing={isAgentMissing}
         />
       )}
     </article>
