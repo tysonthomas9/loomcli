@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/localsettings"
 	"github.com/tysonthomas9/loomcli/internal/lockfile"
@@ -360,12 +361,25 @@ func processRunning(pid int) bool {
 	return pid > 0 && lockfile.IsProcessRunning(pid)
 }
 
+func localFleetDBRuntimeDir(dataDir string) string {
+	return filepath.Join(dataDir, "fleet-db")
+}
+
+func localFleetDBRuntimeEnv(dataDir string) string {
+	return bootstrap.EnvFleetDBRuntimeDir + "=" + localFleetDBRuntimeDir(dataDir)
+}
+
+func setLocalFleetDBRuntimeEnv(dataDir string) {
+	_ = os.Setenv(bootstrap.EnvFleetDBRuntimeDir, localFleetDBRuntimeDir(dataDir))
+}
+
 func localEnv(dataDir string, port int) []string {
 	url := "http://127.0.0.1:" + strconv.Itoa(port)
 	env := append(os.Environ(),
 		"LOOM_CONFIG_DIR="+dataDir,
 		"LOOM_ISSUE_BACKEND=fleetdb",
 		"LOOM_SERVER_URL=",
+		localFleetDBRuntimeEnv(dataDir),
 		"LOOM_WORKSPACE_RUNTIME_DIR="+dataDir,
 		"LOOM_WEBUI_URL="+url,
 		"LOOM_WORKSPACE=",

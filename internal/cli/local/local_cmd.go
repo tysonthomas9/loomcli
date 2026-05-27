@@ -179,6 +179,7 @@ func prepareLocalServiceConfig() (*localServiceConfig, error) {
 	_ = os.Setenv("LOOM_CONFIG_DIR", dataDir)
 	_ = os.Setenv("LOOM_DESKTOP_DATA_DIR", dataDir)
 	_ = os.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", dataDir)
+	setLocalFleetDBRuntimeEnv(dataDir)
 	if os.Getenv("FLEET_DB_BIN") == "" {
 		if fleetDBBin := bundledExecutable("fleet-db"); fleetDBBin != "" {
 			_ = os.Setenv("FLEET_DB_BIN", fleetDBBin)
@@ -497,7 +498,12 @@ func spawnDetachedService(exe, dataDir string, port int) (*RuntimeStartResult, e
 	// #nosec G204 — exe is this process's resolved binary path; args are fixed
 	// subcommand strings + CLI-validated dataDir / port.
 	service := exec.Command(exe, args...)
-	service.Env = append(os.Environ(), "LOOM_CONFIG_DIR="+dataDir)
+	service.Env = append(os.Environ(),
+		"LOOM_CONFIG_DIR="+dataDir,
+		"LOOM_DESKTOP_DATA_DIR="+dataDir,
+		"LOOM_WORKSPACE_RUNTIME_DIR="+dataDir,
+		localFleetDBRuntimeEnv(dataDir),
+	)
 	service.Stdout = logFile
 	service.Stderr = logFile
 	service.SysProcAttr = newDetachedSysProcAttr()

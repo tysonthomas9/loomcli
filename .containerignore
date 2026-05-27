@@ -1,6 +1,11 @@
 .git/
 worktrees/
 .beads/
+bin/
+desktop/
+dogfood-output/
+tmp/
+loom
 internal/cli/sessions/
 node_modules/
 **/node_modules/
@@ -9,4 +14,5 @@ internal/webui/frontend/.vite/
 test/parity/ui/artifacts/
 *.log
 .loom/
+**/.loom/
 loom.yaml
