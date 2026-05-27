@@ -262,6 +262,25 @@ func embeddedSnapshotPath(cfg localsettings.RedisConfig, snapshotPath string) st
 	return snapshotPath
 }
 
+func startEmbeddedRedis(ctx context.Context, snapshotPath string, cfg localsettings.RedisConfig, logger *slog.Logger) (*localredis.Manager, string, error) {
+	redisAddr := strings.TrimSpace(cfg.Addr)
+	if !cfg.Enabled {
+		// fleetKeys=true so the snapshot persists fleet-db's keyspace
+		// across CLI invocations (each `loom <cmd>` re-boots a fleet-db
+		// subprocess against this same on-disk snapshot).
+		redisMgr, err := localredis.NewManager(snapshotPath, true /* fleetKeys */, logger)
+		if err != nil {
+			return nil, "", fmt.Errorf("embedded: start miniredis: %w", err)
+		}
+		redisMgr.Start(ctx)
+		return redisMgr, redisMgr.Addr(), nil
+	}
+	if err := localsettings.Validate(cfg); err != nil {
+		return nil, "", fmt.Errorf("embedded: invalid external Redis settings: %w", err)
+	}
+	return nil, redisAddr, nil
+}
+
 // healthCheckTimeout caps the per-attempt HTTP timeout while polling
 // /healthz. Long enough for slow startup, short enough to detect a
 // hung subprocess quickly.
@@ -349,20 +368,9 @@ func StartEmbedded(ctx context.Context, dataDir string, logger *slog.Logger) (*E
 	if err != nil {
 		return nil, fmt.Errorf("embedded: load local settings: %w", err)
 	}
-	var redisMgr *localredis.Manager
-	redisAddr := strings.TrimSpace(redisCfg.Addr)
-	if !redisCfg.Enabled {
-		// fleetKeys=true so the snapshot persists fleet-db's keyspace
-		// across CLI invocations (each `loom <cmd>` re-boots a fleet-db
-		// subprocess against this same on-disk snapshot).
-		redisMgr, err = localredis.NewManager(snapshotPath, true /* fleetKeys */, logger)
-		if err != nil {
-			return nil, fmt.Errorf("embedded: start miniredis: %w", err)
-		}
-		redisMgr.Start(ctx)
-		redisAddr = redisMgr.Addr()
-	} else if err := localsettings.Validate(redisCfg); err != nil {
-		return nil, fmt.Errorf("embedded: invalid external Redis settings: %w", err)
+	redisMgr, redisAddr, err := startEmbeddedRedis(ctx, snapshotPath, redisCfg, logger)
+	if err != nil {
+		return nil, err
 	}
 
 	httpAddr, _, err := netutil.PickFreeLoopbackPort()
