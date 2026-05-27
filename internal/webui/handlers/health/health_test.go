@@ -95,4 +95,3 @@ func TestHandleAPIHealth_DaemonDead(t *testing.T) {
 		t.Errorf("Daemon.Error empty, want pool-failure detail")
 	}
 }
-

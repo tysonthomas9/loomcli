@@ -371,4 +371,3 @@ func HandleMetrics(hub *realtime.Hub, getFleetTimeouts func() int64, claimMetric
 		})
 	}
 }
-
