@@ -51,6 +51,9 @@ func TestLocalEnvSetsWorkspaceRuntimeDir(t *testing.T) {
 	if !containsEnv(env, "LOOM_WORKSPACE_RUNTIME_DIR=/tmp/loom-data") {
 		t.Fatalf("localEnv() missing LOOM_WORKSPACE_RUNTIME_DIR")
 	}
+	if !containsEnv(env, "LOOM_FLEET_DB_RUNTIME_DIR=/tmp/loom-data/fleet-db") {
+		t.Fatalf("localEnv() missing LOOM_FLEET_DB_RUNTIME_DIR")
+	}
 }
 
 func TestLocalEnvMarksDesktopRuntimeMode(t *testing.T) {

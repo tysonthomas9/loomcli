@@ -13,6 +13,8 @@ DEFAULT_BACKEND=${DEFAULT_BACKEND:-claude}
 # Extra workspaces get registered via `loom workspace create` CLI.
 PRIMARY_NAME=${PRIMARY_NAME:-alpha}
 PRIMARY_PATH=${PRIMARY_PATH:-/root/.loom/workspaces/alpha}
+REPO_BASE=${REPO_BASE:-/root/.loom/repos}
+PRIMARY_REPO_PATH=${PRIMARY_REPO_PATH:-${REPO_BASE}/${PRIMARY_NAME}}
 EXTRA_WORKSPACES=${EXTRA_WORKSPACES:-bravo:/root/.loom/workspaces/bravo}
 
 # Scope loom's state to a container-local config dir so we don't need to care
@@ -28,8 +30,37 @@ export LOOM_LOCAL_RUNTIME="${LOOM_LOCAL_RUNTIME:-disabled}"
 # fleet-db --auth-dev-mode reads the X-Actor header; the loom CLI sends it
 # from LOOM_FLEET_DB_ACTOR. Without this every CLI call hits HTTP 401.
 export LOOM_FLEET_DB_ACTOR="${LOOM_FLEET_DB_ACTOR:-loom-dev}"
+export FLEET_RATE_LIMIT_ENABLED="${FLEET_RATE_LIMIT_ENABLED:-false}"
+export FLEET_REDIS_POOL_SIZE="${FLEET_REDIS_POOL_SIZE:-50}"
 
 log() { printf '[dev] %s\n' "$*"; }
+
+workspace_key() {
+    printf '%s' "$1" \
+        | tr '[:lower:]' '[:upper:]' \
+        | sed -E 's/[^A-Z0-9_.-]+//g; s/[_.-]+/-/g; s/^-+//; s/-+$//; s/^([^A-Z])/W-\1/' \
+        | cut -c1-32
+}
+
+seed_repo() {
+    local name=$1 repo_path=$2
+    if [ ! -d "$repo_path/.git" ]; then
+        log "seeding source repo '$name' at $repo_path"
+        mkdir -p "$repo_path"
+        git -C "$repo_path" init -q
+        git -C "$repo_path" config user.email dev@loom.local
+        git -C "$repo_path" config user.name loom-dev
+        git -C "$repo_path" commit --allow-empty -qm "init"
+    fi
+}
+
+register_workspace() {
+    local name=$1 workspace_path=$2 repo_path=$3
+    log "registering workspace '$name' via loom CLI"
+    mkdir -p "$(dirname "$workspace_path")"
+    loom workspace create "$name" --repos "$repo_path" --path "$workspace_path" \
+        2>/dev/null || log "  (already registered or create failed — continuing)"
+}
 
 # ── 0. Mirror read-only auth dirs to writable copies ──
 # The host mounts ~/.codex, ~/.claude, ~/.config/opencode read-only, but the
@@ -97,43 +128,35 @@ mirror_rw /root/.config/opencode /root/.config/opencode-rw
 export CODEX_HOME=/root/.codex-rw
 export CLAUDE_CONFIG_DIR=/root/.claude-rw
 
-# ── 1. Seed primary workspace: git only ──
-if [ ! -d "$PRIMARY_PATH/.git" ]; then
-    log "seeding primary workspace '$PRIMARY_NAME' at $PRIMARY_PATH"
-    mkdir -p "$PRIMARY_PATH"
-    git -C "$PRIMARY_PATH" init -q
-    git -C "$PRIMARY_PATH" config user.email dev@loom.local
-    git -C "$PRIMARY_PATH" config user.name loom-dev
-    git -C "$PRIMARY_PATH" commit --allow-empty -qm "init"
-fi
+# ── 1. Seed primary source repo ──
+seed_repo "$PRIMARY_NAME" "$PRIMARY_REPO_PATH"
 
-# ── 2. Seed extra workspaces: git only ──
+# ── 2. Seed extra source repos ──
 for spec in $EXTRA_WORKSPACES; do
     ws_name=${spec%%:*}
-    ws_path=${spec#*:}
-    if [ ! -d "$ws_path/.git" ]; then
-        log "seeding extra workspace '$ws_name' at $ws_path"
-        mkdir -p "$ws_path"
-        git -C "$ws_path" init -q
-        git -C "$ws_path" config user.email dev@loom.local
-        git -C "$ws_path" config user.name loom-dev
-        git -C "$ws_path" commit --allow-empty -qm "init"
-    fi
+    rest=${spec#*:}
+    ws_path=${rest%%:*}
+    repo_path=${rest#*:}
+    [ "$repo_path" != "$rest" ] || repo_path="${REPO_BASE}/${ws_name}"
+    seed_repo "$ws_name" "$repo_path"
 done
 
-# ── 3. Register extra workspaces via the loom CLI (writes to LOOM_CONFIG_DIR) ──
+# ── 3. Register workspaces via the loom CLI (writes to LOOM_CONFIG_DIR) ──
+register_workspace "$PRIMARY_NAME" "$PRIMARY_PATH" "$PRIMARY_REPO_PATH"
 for spec in $EXTRA_WORKSPACES; do
     ws_name=${spec%%:*}
-    ws_path=${spec#*:}
-    log "registering workspace '$ws_name' via loom CLI"
-    loom workspace create "$ws_name" --repos "$ws_path" --path "$ws_path" \
-        2>/dev/null || log "  (already registered or create failed — continuing)"
+    rest=${spec#*:}
+    ws_path=${rest%%:*}
+    repo_path=${rest#*:}
+    [ "$repo_path" != "$rest" ] || repo_path="${REPO_BASE}/${ws_name}"
+    register_workspace "$ws_name" "$ws_path" "$repo_path"
 done
 
 # Pre-seeded workspaces are registered but inactive. The loom daemon resolves
 # its agent list from the *active* workspace, so set one now; the daemon
 # watcher below promotes any newly-created workspace as it appears.
-loom workspace use "$PRIMARY_NAME" >/dev/null 2>&1 \
+PRIMARY_KEY=$(workspace_key "$PRIMARY_NAME")
+loom workspace use "$PRIMARY_KEY" >/dev/null 2>&1 \
     || log "  (primary workspace '$PRIMARY_NAME' not yet registered)"
 
 # ── 4. Cleanup hook ──

@@ -15,13 +15,14 @@ import (
 const localLaunchAgentLabel = "com.loom.local"
 
 type launchAgentConfig struct {
-	Label      string
-	BinaryPath string
-	DataDir    string
-	Port       int
-	Path       string
-	StdoutPath string
-	StderrPath string
+	Label             string
+	BinaryPath        string
+	DataDir           string
+	Port              int
+	Path              string
+	FleetDBRuntimeDir string
+	StdoutPath        string
+	StderrPath        string
 }
 
 var localLaunchAgentTemplate = template.Must(template.New("local-launchagent").Funcs(template.FuncMap{
@@ -69,6 +70,8 @@ var localLaunchAgentTemplate = template.Must(template.New("local-launchagent").F
         <string>{{.DataDir | xmlEscape}}</string>
         <key>LOOM_DESKTOP_DATA_DIR</key>
         <string>{{.DataDir | xmlEscape}}</string>
+        <key>LOOM_FLEET_DB_RUNTIME_DIR</key>
+        <string>{{.FleetDBRuntimeDir | xmlEscape}}</string>
         <key>PATH</key>
         <string>{{.Path | xmlEscape}}</string>
     </dict>
@@ -147,13 +150,14 @@ func buildLaunchAgentConfig(dataDir string, port int) (launchAgentConfig, error)
 		binaryPath = resolved
 	}
 	return launchAgentConfig{
-		Label:      localLaunchAgentLabel,
-		BinaryPath: binaryPath,
-		DataDir:    dataDir,
-		Port:       port,
-		Path:       launchAgentPathEnv(),
-		StdoutPath: serviceLogPath(dataDir),
-		StderrPath: serviceLogPath(dataDir),
+		Label:             localLaunchAgentLabel,
+		BinaryPath:        binaryPath,
+		DataDir:           dataDir,
+		Port:              port,
+		Path:              launchAgentPathEnv(),
+		FleetDBRuntimeDir: localFleetDBRuntimeDir(dataDir),
+		StdoutPath:        serviceLogPath(dataDir),
+		StderrPath:        serviceLogPath(dataDir),
 	}, nil
 }
 
