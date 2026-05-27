@@ -22,11 +22,18 @@ var testLoomDir = sync.OnceValue(func() string {
 	return dir
 })
 
+// EnvFleetDBRuntimeDir overrides the host-level embedded FleetDB runtime
+// directory. The directory contains embedded.lock, runtime.json, and the
+// miniredis snapshot. Tests set this to avoid touching the operator's
+// real host runtime.
+const EnvFleetDBRuntimeDir = "LOOM_FLEET_DB_RUNTIME_DIR"
+
 // LoomDir returns loom's per-user data directory.
 //
 // Resolution order:
 //  1. LOOM_CONFIG_DIR env var (the directory holds state.json + the
-//     embedded fleet-db data dir, not yaml config).
+//     per-client local state, not yaml config or the host-level embedded
+//     FleetDB runtime).
 //  2. Under `go test` (testing.Testing()): a per-process temp dir —
 //     tests must NEVER touch the real ~/.loom. Note this guard does not
 //     extend to subprocesses a test spawns; tests that exec the loom
@@ -48,6 +55,43 @@ func LoomDir() string {
 		return ""
 	}
 	return filepath.Join(home, ".loom")
+}
+
+// defaultLoomDir returns the host-level default Loom data directory
+// without consulting LOOM_CONFIG_DIR. Embedded FleetDB uses this stable
+// base so starting `loom serve` under a foreign LOOM_CONFIG_DIR does not
+// create a second local FleetDB instance.
+func defaultLoomDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".loom")
+}
+
+// FleetDBRuntimeDir returns the host-level embedded FleetDB runtime
+// directory. Unlike LoomDir, it intentionally ignores LOOM_CONFIG_DIR so
+// multiple local clients share the same embedded FleetDB owner.
+func FleetDBRuntimeDir() string {
+	if dir := os.Getenv(EnvFleetDBRuntimeDir); dir != "" {
+		return dir
+	}
+	if dir := defaultLoomDir(); dir != "" {
+		return filepath.Join(dir, "fleet-db")
+	}
+	return ""
+}
+
+// FleetDBSettingsDir returns the directory that owns FleetDB-local
+// settings such as embedded Redis configuration. It is the parent of the
+// runtime directory so an override can keep runtime metadata and settings
+// in the same isolated tree.
+func FleetDBSettingsDir() string {
+	runtimeDir := FleetDBRuntimeDir()
+	if runtimeDir == "" {
+		return ""
+	}
+	return filepath.Dir(runtimeDir)
 }
 
 // StateFilePath returns the absolute path to the per-user state cache.

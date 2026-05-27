@@ -301,8 +301,9 @@ type EmbeddedFleetDB struct {
 // once /healthz reports ready; if startup fails it tears down whatever
 // it managed to start.
 //
-// dataDir is the per-user loom directory (typically LoomDir()) — the
-// miniredis snapshot lives at <dataDir>/fleet-db/redis-snapshot.json.
+// dataDir is the per-user loom directory (typically LoomDir()). Embedded
+// FleetDB runtime files and the miniredis snapshot live under
+// FleetDBRuntimeDir(), which intentionally ignores LOOM_CONFIG_DIR.
 // In cloud mode (LOOM_FLEET_DB_URL set) callers should not call this
 // at all; this function unconditionally spawns a subprocess.
 //
@@ -321,7 +322,10 @@ func StartEmbedded(ctx context.Context, dataDir string, logger *slog.Logger) (*E
 		return nil, fmt.Errorf("embedded: fleet-db binary %s is not runnable. %s", binPath, diag.Remediation)
 	}
 
-	fleetDir := filepath.Join(dataDir, "fleet-db")
+	fleetDir := FleetDBRuntimeDir()
+	if fleetDir == "" {
+		return nil, errors.New("embedded: cannot resolve fleet-db runtime directory; set HOME or " + EnvFleetDBRuntimeDir)
+	}
 	if err := os.MkdirAll(fleetDir, 0755); err != nil {
 		return nil, fmt.Errorf("embedded: mkdir %s: %w", fleetDir, err)
 	}
@@ -337,7 +341,11 @@ func StartEmbedded(ctx context.Context, dataDir string, logger *slog.Logger) (*E
 	}()
 
 	snapshotPath := filepath.Join(fleetDir, "redis-snapshot.json")
-	redisCfg, err := desiredEmbeddedRedisConfig(dataDir)
+	settingsDir := FleetDBSettingsDir()
+	if settingsDir == "" {
+		return nil, errors.New("embedded: cannot resolve fleet-db settings directory; set HOME or " + EnvFleetDBRuntimeDir)
+	}
+	redisCfg, err := desiredEmbeddedRedisConfig(settingsDir)
 	if err != nil {
 		return nil, fmt.Errorf("embedded: load local settings: %w", err)
 	}
