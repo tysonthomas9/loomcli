@@ -1,7 +1,7 @@
 export type FleetDBMode = "dual" | "fleet-only";
 
 export function fleetdbMode(): FleetDBMode {
-  const raw = (process.env.FLEETDB_MODE ?? "").trim().toLowerCase();
+  const raw = (process.env.PLAYWRIGHT_FLEETDB_MODE ?? "").trim().toLowerCase();
   if (raw === "dual") {
     return "dual";
   }

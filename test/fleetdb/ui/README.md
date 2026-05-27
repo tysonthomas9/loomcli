@@ -66,7 +66,7 @@ docker compose -f test/fleetdb/docker-compose.regression.yml up -d --build redis
 make test-fleetdb-ui
 ```
 
-Fleet-only mode sets `FLEETDB_MODE=fleet-only`. The harness opens two isolated
+Fleet-only mode sets `PLAYWRIGHT_FLEETDB_MODE=fleet-only`. The harness opens two isolated
 browser contexts against the fleet UI so existing dual-tab assertions still
 exercise rendering, SSE, routing, and write flows without a reference backend.
 
@@ -74,12 +74,12 @@ exercise rendering, SSE, routing, and write flows without a reference backend.
 
 | var | default | purpose |
 |---|---|---|
-| `LOOM_REFERENCE_URL` | `http://localhost:8081` | reference-backed loom |
-| `LOOM_FLEET_UI_URL` | `http://localhost:8082` | fleet-backed loom |
-| `FLEET_DB_URL` | `http://localhost:8080` | fleet-db admin API |
-| `FLEETDB_WORKSPACE` | `FLEETDB` | fleet-db workspace key |
-| `FLEETDB_MODE` | `dual` | `dual` or `fleet-only` |
-| `FLEETDB_COVERAGE_WAIVE` | (none) | comma-separated list of routes to skip |
+| `PLAYWRIGHT_REFERENCE_UI_URL` | `http://localhost:8081` | reference-backed loom |
+| `PLAYWRIGHT_FLEET_UI_URL` | `http://localhost:8082` | fleet-backed loom |
+| `PLAYWRIGHT_FLEET_DB_URL` | `http://localhost:8080` | fleet-db admin API |
+| `PLAYWRIGHT_FLEETDB_WORKSPACE` | `FLEETDB` | fleet-db workspace key |
+| `PLAYWRIGHT_FLEETDB_MODE` | `dual` | `dual` or `fleet-only` |
+| `PLAYWRIGHT_FLEETDB_COVERAGE_WAIVE` | (none) | comma-separated list of routes to skip |
 | `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` | (system) | pin Docker chromium |
 
 ## Routing verification
@@ -155,5 +155,5 @@ test("...", async ({ tabs, fleetSpy }) => {
 `_support/global-teardown.ts` flushes a coverage report to
 `artifacts/reports/coverage.json` and throws if any of the
 `REQUIRED_ROUTES` weren't exercised. Operators can knowingly waive
-routes via `FLEETDB_COVERAGE_WAIVE=/api/issues/blocked,...`. Starting
+routes via `PLAYWRIGHT_FLEETDB_COVERAGE_WAIVE=/api/issues/blocked,...`. Starting
 fresh, most routes should be hit on a clean run.
