@@ -67,9 +67,7 @@ services:
       LOOM_WORKSPACE: LOCALMODE
       LOOM_ISSUE_BACKEND: fleetdb
       LOOM_FLEET_DB_URL: http://fleet-db:8080
-      LOOM_FLEET_URL: http://fleet-db:8080
       LOOM_FLEET_DB_ACTOR: local-mode-harness@fixture.local
-      LOOM_FLEET_ACTOR: local-mode-harness@fixture.local
       LOOM_BACKEND: localdogfood
       LOOM_SERVER_URL: http://127.0.0.1:8080
       LOOM_WEBUI_URL: http://127.0.0.1:8080

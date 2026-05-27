@@ -1,13 +1,20 @@
 package config
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
+)
 
 func clearFleetEnv(t *testing.T) {
 	t.Helper()
 	t.Setenv("LOOM_FLEET_URL", "")
+	t.Setenv(bootstrap.EnvFleetDBURL, "")
 	t.Setenv("LOOM_WORKSPACE", "")
 	t.Setenv("LOOM_FLEET_API_KEY", "")
+	t.Setenv(bootstrap.EnvFleetDBAPIKey, "")
 	t.Setenv("LOOM_FLEET_ACTOR", "")
+	t.Setenv(bootstrap.EnvFleetDBActor, "")
 	t.Setenv("LOOM_AGENT_NAME", "")
 }
 
@@ -37,10 +44,10 @@ func TestResolveFleetConfig_NormalizesDefaultWorkspace(t *testing.T) {
 
 func TestResolveFleetConfig_Env(t *testing.T) {
 	clearFleetEnv(t)
-	t.Setenv("LOOM_FLEET_URL", "https://fleet.example.com///")
+	t.Setenv(bootstrap.EnvFleetDBURL, "https://fleet.example.com///")
 	t.Setenv("LOOM_WORKSPACE", "prod")
-	t.Setenv("LOOM_FLEET_API_KEY", "secret")
-	t.Setenv("LOOM_FLEET_ACTOR", "operator")
+	t.Setenv(bootstrap.EnvFleetDBAPIKey, "secret")
+	t.Setenv(bootstrap.EnvFleetDBActor, "operator")
 
 	cfg := ResolveFleetConfig(nil)
 
@@ -49,6 +56,19 @@ func TestResolveFleetConfig_Env(t *testing.T) {
 	}
 	if cfg.Workspace != "prod" || cfg.APIKey != "secret" || cfg.Actor != "operator" {
 		t.Errorf("env fleet config = %+v", cfg)
+	}
+}
+
+func TestResolveFleetConfig_IgnoresLegacyFleetURL(t *testing.T) {
+	clearFleetEnv(t)
+	t.Setenv("LOOM_FLEET_URL", "https://legacy.example.com")
+	t.Setenv("LOOM_FLEET_API_KEY", "legacy-secret")
+	t.Setenv("LOOM_FLEET_ACTOR", "legacy-actor")
+
+	cfg := ResolveFleetConfig(nil)
+
+	if cfg.URL != "" || cfg.APIKey != "" || cfg.Actor != "" {
+		t.Fatalf("ResolveFleetConfig read legacy fleet env: %+v", cfg)
 	}
 }
 

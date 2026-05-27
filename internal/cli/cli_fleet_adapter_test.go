@@ -3,13 +3,15 @@ package cli
 import (
 	"strings"
 	"testing"
+
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 )
 
 func TestCreateFleetIssueBackend_MissingURL(t *testing.T) {
 	// Ensure no env vars provide a fleet URL.
-	t.Setenv("LOOM_FLEET_URL", "")
+	t.Setenv(bootstrap.EnvFleetDBURL, "")
 	t.Setenv("LOOM_WORKSPACE", "")
-	t.Setenv("LOOM_FLEET_API_KEY", "")
+	t.Setenv(bootstrap.EnvFleetDBAPIKey, "")
 	t.Setenv("LOOM_ISSUE_BACKEND", "fleet")
 
 	_, err := createFleetIssueBackend()
@@ -22,9 +24,9 @@ func TestCreateFleetIssueBackend_MissingURL(t *testing.T) {
 }
 
 func TestCreateFleetIssueBackend_Success(t *testing.T) {
-	t.Setenv("LOOM_FLEET_URL", "http://localhost:0")
+	t.Setenv(bootstrap.EnvFleetDBURL, "http://localhost:0")
 	t.Setenv("LOOM_WORKSPACE", "test-ws")
-	t.Setenv("LOOM_FLEET_API_KEY", "")
+	t.Setenv(bootstrap.EnvFleetDBAPIKey, "")
 	t.Setenv("LOOM_ISSUE_BACKEND", "fleet")
 
 	be, err := createFleetIssueBackend()

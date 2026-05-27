@@ -147,16 +147,10 @@ func LoadDaemonConfig(projectDir string) (*DaemonConfig, error) {
 		}
 		return nil, fmt.Errorf("resolve active workspace: %w", err)
 	}
-	dataDir := bootstrap.LoomDir()
-	if dataDir == "" {
-		return nil, errors.New("cannot determine loom data directory")
-	}
-	handle, err := bootstrap.OpenStore(ctx, dataDir, nil)
+	handle, err := cmdstore.OpenStore(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("open fleet-db store: %w", err)
 	}
-	// Apply store-level tracing (this path bypasses cmdstore.OpenStore).
-	handle.Store = cmdstore.WrapStoreWithTracing(handle.Store)
 	defer func() { _ = handle.Close() }()
 
 	return loadDaemonConfigFromStore(ctx, handle.Store, key, dc, projectDir)

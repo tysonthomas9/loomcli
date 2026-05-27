@@ -3,6 +3,8 @@ package config
 import (
 	"os"
 	"strings"
+
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 )
 
 // FleetClientConfig is the resolved runtime config for connecting to a fleet server.
@@ -20,16 +22,16 @@ func ResolveFleetConfig(daemon *DaemonSettings) FleetClientConfig {
 	_ = daemon
 	var url, workspace, apiKey, actor string
 
-	if v, ok := os.LookupEnv("LOOM_FLEET_URL"); ok {
+	if v, ok := os.LookupEnv(bootstrap.EnvFleetDBURL); ok {
 		url = v
 	}
 	if v, ok := os.LookupEnv("LOOM_WORKSPACE"); ok {
 		workspace = v
 	}
-	if v, ok := os.LookupEnv("LOOM_FLEET_API_KEY"); ok {
+	if v, ok := os.LookupEnv(bootstrap.EnvFleetDBAPIKey); ok {
 		apiKey = v
 	}
-	if v, ok := os.LookupEnv("LOOM_FLEET_ACTOR"); ok {
+	if v, ok := os.LookupEnv(bootstrap.EnvFleetDBActor); ok {
 		actor = v
 	}
 	// Reuse the current agent name if no explicit actor is configured.

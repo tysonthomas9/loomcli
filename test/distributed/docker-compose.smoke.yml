@@ -61,10 +61,10 @@ services:
       - fleet-db
     environment:
       LOOM_ISSUE_BACKEND: fleet
-      LOOM_FLEET_URL: http://fleet-db:8080
+      LOOM_FLEET_DB_URL: http://fleet-db:8080
       LOOM_WORKSPACE: DIST
       LOOM_AGENT_NAME: distributed-loom-a
-      LOOM_FLEET_ACTOR: distributed-loom-a
+      LOOM_FLEET_DB_ACTOR: distributed-loom-a
       LOOM_FLEET_REQUIRED: "1"
     volumes:
       - ../../tmp/distributed-smoke/bin/loom:/usr/local/bin/loom:ro
@@ -75,13 +75,13 @@ services:
         set -e
         cd /workspace
         for i in $$(seq 1 60); do
-          wget -qO- "$$LOOM_FLEET_URL/healthz" >/dev/null 2>&1 && break
+          wget -qO- "$$LOOM_FLEET_DB_URL/healthz" >/dev/null 2>&1 && break
           sleep 1
         done
-        wget -qO- "$$LOOM_FLEET_URL/healthz" >/dev/null
+        wget -qO- "$$LOOM_FLEET_DB_URL/healthz" >/dev/null
         curl -fsS -H "Content-Type: application/json" -H "X-Actor: distributed-loom-a" \
           -X POST --data '{"key":"DIST","name":"Distributed Smoke","repos":["smoke-org/smoke-repo"]}' \
-          "$$LOOM_FLEET_URL/api/v1/admin/workspaces" >/dev/null 2>&1 || true
+          "$$LOOM_FLEET_DB_URL/api/v1/admin/workspaces" >/dev/null 2>&1 || true
         if [ ! -d .git ]; then
           git init -q -b main
           git config user.email "distributed-a@fixture.local"
@@ -104,10 +104,10 @@ services:
       - fleet-db
     environment:
       LOOM_ISSUE_BACKEND: fleet
-      LOOM_FLEET_URL: http://fleet-db:8080
+      LOOM_FLEET_DB_URL: http://fleet-db:8080
       LOOM_WORKSPACE: DIST
       LOOM_AGENT_NAME: distributed-loom-b
-      LOOM_FLEET_ACTOR: distributed-loom-b
+      LOOM_FLEET_DB_ACTOR: distributed-loom-b
       LOOM_FLEET_REQUIRED: "1"
     volumes:
       - ../../tmp/distributed-smoke/bin/loom:/usr/local/bin/loom:ro
@@ -118,13 +118,13 @@ services:
         set -e
         cd /workspace
         for i in $$(seq 1 60); do
-          wget -qO- "$$LOOM_FLEET_URL/healthz" >/dev/null 2>&1 && break
+          wget -qO- "$$LOOM_FLEET_DB_URL/healthz" >/dev/null 2>&1 && break
           sleep 1
         done
-        wget -qO- "$$LOOM_FLEET_URL/healthz" >/dev/null
+        wget -qO- "$$LOOM_FLEET_DB_URL/healthz" >/dev/null
         curl -fsS -H "Content-Type: application/json" -H "X-Actor: distributed-loom-b" \
           -X POST --data '{"key":"DIST","name":"Distributed Smoke","repos":["smoke-org/smoke-repo"]}' \
-          "$$LOOM_FLEET_URL/api/v1/admin/workspaces" >/dev/null 2>&1 || true
+          "$$LOOM_FLEET_DB_URL/api/v1/admin/workspaces" >/dev/null 2>&1 || true
         if [ ! -d .git ]; then
           git init -q -b main
           git config user.email "distributed-b@fixture.local"

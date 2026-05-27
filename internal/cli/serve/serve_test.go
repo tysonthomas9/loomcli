@@ -246,8 +246,10 @@ func TestResolveFleetStateResolvesClientConfigOutsideFleetMode(t *testing.T) {
 	t.Setenv(bootstrap.EnvFleetDBURL, "")
 	t.Setenv(bootstrap.EnvFleetDBActor, "")
 	t.Setenv("LOOM_ISSUE_BACKEND", "fleetdb")
-	t.Setenv("LOOM_FLEET_URL", "http://fleet-db:8080")
-	t.Setenv("LOOM_FLEET_ACTOR", "local-mode-harness")
+	t.Setenv("LOOM_FLEET_URL", "")
+	t.Setenv("LOOM_FLEET_ACTOR", "")
+	t.Setenv(bootstrap.EnvFleetDBURL, "http://fleet-db:8080")
+	t.Setenv(bootstrap.EnvFleetDBActor, "local-mode-harness")
 	oldRedisAddr, oldRedisPassword := serveRedisAddr, serveRedisPassword
 	serveRedisAddr, serveRedisPassword = "", ""
 	t.Cleanup(func() {
@@ -264,6 +266,30 @@ func TestResolveFleetStateResolvesClientConfigOutsideFleetMode(t *testing.T) {
 	}
 	if fs.clientCfg.Actor != "local-mode-harness" {
 		t.Fatalf("clientCfg.Actor = %q, want local-mode-harness", fs.clientCfg.Actor)
+	}
+}
+
+func TestResolveFleetStateIgnoresLegacyFleetURL(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	t.Setenv(bootstrap.EnvWorkspace, "")
+	t.Setenv(bootstrap.EnvFleetDBURL, "")
+	t.Setenv(bootstrap.EnvFleetDBActor, "")
+	t.Setenv("LOOM_ISSUE_BACKEND", "fleetdb")
+	t.Setenv("LOOM_FLEET_URL", "http://legacy-fleet-db:8080")
+	t.Setenv("LOOM_FLEET_ACTOR", "legacy-actor")
+	oldRedisAddr, oldRedisPassword := serveRedisAddr, serveRedisPassword
+	serveRedisAddr, serveRedisPassword = "", ""
+	t.Cleanup(func() {
+		serveRedisAddr, serveRedisPassword = oldRedisAddr, oldRedisPassword
+	})
+
+	fs := resolveFleetState(context.Background())
+
+	if fs.clientCfg.URL != "" {
+		t.Fatalf("clientCfg.URL = %q, want empty when only legacy LOOM_FLEET_URL is set", fs.clientCfg.URL)
+	}
+	if fs.clientCfg.Actor == "legacy-actor" {
+		t.Fatalf("clientCfg.Actor = %q, want legacy LOOM_FLEET_ACTOR ignored", fs.clientCfg.Actor)
 	}
 }
 

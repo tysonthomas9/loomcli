@@ -195,8 +195,8 @@ expect_contains "doctor exposes fleet check" '"name":"fleet"' "$fleet_check"
 expect_contains "doctor fleet PASS when reachable" '"status":"pass"' "$fleet_check"
 expect_contains "doctor fleet summary mentions reachable" 'reachable' "$fleet_check"
 
-# Scenario 10: doctor FAIL when LOOM_FLEET_URL is unreachable.
-out=$(doctor_json 'LOOM_FLEET_URL=http://fleet-probe-unreachable.invalid:9999 LOOM_WORKSPACE=HELLO-WORLD loom doctor --json')
+# Scenario 10: doctor FAIL when LOOM_FLEET_DB_URL is unreachable.
+out=$(doctor_json 'LOOM_FLEET_DB_URL=http://fleet-probe-unreachable.invalid:9999 LOOM_WORKSPACE=HELLO-WORLD loom doctor --json')
 fleet_check=$(printf '%s' "$out" | jq -c '.checks[] | select(.name == "fleet")' 2>/dev/null || true)
 expect_contains "doctor fleet FAIL when unreachable" '"status":"fail"' "$fleet_check"
 expect_contains "doctor fleet detail mentions probe failure" 'probe failed' "$fleet_check"

@@ -84,10 +84,8 @@ services:
     environment:
       LOOM_CONFIG_DIR: /loom-config
       LOOM_ISSUE_BACKEND: fleet
-      LOOM_FLEET_URL: http://fleet-db:8080
       LOOM_FLEET_DB_URL: http://fleet-db:8080
       LOOM_WORKSPACE: DEFAULT
-      LOOM_FLEET_ACTOR: local-user
       LOOM_FLEET_DB_ACTOR: local-user
       LOOM_AGENT_NAME: local-user
       LOOM_FLEET_REQUIRED: "1"
@@ -98,16 +96,16 @@ services:
       - -c
       - |
         set -e
-        echo "[loom-empty] checking fleet-db reachability at $$LOOM_FLEET_URL ..."
+        echo "[loom-empty] checking fleet-db reachability at $$LOOM_FLEET_DB_URL ..."
         for i in $$(seq 1 30); do
-          if wget -qO- "$$LOOM_FLEET_URL/healthz" >/dev/null 2>&1; then
+          if wget -qO- "$$LOOM_FLEET_DB_URL/healthz" >/dev/null 2>&1; then
             echo "[loom-empty] fleet-db OK"
             break
           fi
           echo "[loom-empty] waiting for fleet-db ($$i/30)"
           sleep 1
         done
-        wget -qO- "$$LOOM_FLEET_URL/healthz" >/dev/null || { echo "[loom-empty] FATAL: fleet-db unreachable"; exit 1; }
+        wget -qO- "$$LOOM_FLEET_DB_URL/healthz" >/dev/null || { echo "[loom-empty] FATAL: fleet-db unreachable"; exit 1; }
         loom-empty-daemon-manager >/tmp/loom-empty-daemon-manager.log 2>&1 &
         manager_pid="$$!"
         trap 'kill "$$manager_pid" "$$serve_pid" 2>/dev/null || true' INT TERM EXIT

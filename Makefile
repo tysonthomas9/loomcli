@@ -69,7 +69,7 @@ test-fleetdb-supervisor:
 #   make test-fleetdb-ui
 #
 # Environment overrides accepted (see playwright.config.ts):
-#   LOOM_FLEET_URL   default http://localhost:8082
+#   LOOM_FLEET_UI_URL default http://localhost:8082
 #   FLEET_DB_URL     default http://localhost:8080
 #   FLEETDB_WORKSPACE default FLEETDB
 test-fleetdb-ui:

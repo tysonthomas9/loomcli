@@ -201,7 +201,7 @@ func checkFleet() CheckResult {
 			Name:    "fleet",
 			Status:  StatusFail,
 			Summary: "fleet mode active but no fleet URL configured",
-			Detail:  "Set LOOM_FLEET_URL or the daemon fleet URL in FleetDB",
+			Detail:  "Set LOOM_FLEET_DB_URL or the daemon fleet URL in FleetDB",
 		}
 	}
 

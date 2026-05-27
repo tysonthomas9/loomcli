@@ -81,8 +81,8 @@ func TestE2E_IssueBackendConformance_AllModes(t *testing.T) {
 			"LOOM_WORKSPACE":     workspace,
 			"LOOM_AGENT_NAME":    "contract-fleet",
 			"LOOM_ISSUE_BACKEND": "fleet",
-			"LOOM_FLEET_URL":     remoteURL,
-			"LOOM_FLEET_DB_URL":  "",
+			"LOOM_FLEET_URL":     "",
+			"LOOM_FLEET_DB_URL":  remoteURL,
 			"LOOM_SERVER_URL":    "",
 		})
 		backendtest.RunIssueBackendConformance(t, backendtest.IssueBackendSuiteConfig{
