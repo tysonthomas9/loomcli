@@ -9,7 +9,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/domain"
@@ -41,14 +40,9 @@ func (f *fakeIssueBackend) List(_ context.Context, _ backend.ListOpts) ([]backen
 	return f.children, nil
 }
 
-func (f *fakeIssueBackend) ClaimIssue(_ context.Context, id string, _ time.Duration) error {
-	f.claimed = append(f.claimed, id)
-	return nil
-}
-
-func (f *fakeIssueBackend) ClaimIssueAsActor(_ context.Context, id string, _ time.Duration, actor string) error {
-	f.claimed = append(f.claimed, id)
-	f.actor = actor
+func (f *fakeIssueBackend) ClaimIssue(_ context.Context, params backend.ClaimIssueParams) error {
+	f.claimed = append(f.claimed, params.ID)
+	f.actor = params.OwnerActor
 	return nil
 }
 

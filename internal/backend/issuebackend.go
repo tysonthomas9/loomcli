@@ -71,13 +71,13 @@ type IssueBackend interface {
 	// is already claimed.
 	Update(ctx context.Context, id string, params UpdateParams) error
 
-	// ClaimIssue atomically claims an issue for the current agent. The
-	// assignee identity comes from the configured agent name at the backend
-	// level, not from the caller. lockTTL configures TTL-based lock expiry
-	// for backends that support it. Pass 0 to use the backend's default TTL.
-	// Returns KindConflict if the issue is
-	// already claimed by another agent.
-	ClaimIssue(ctx context.Context, id string, lockTTL time.Duration) error
+	// ClaimIssue atomically claims an issue. params.OwnerActor is the actor
+	// that should own the claim lock; when empty, the backend uses its
+	// configured caller identity. params.LockTTL configures TTL-based lock
+	// expiry for backends that support it. Pass 0 to use the backend's
+	// default TTL. Returns KindConflict if the issue is already claimed by
+	// another agent.
+	ClaimIssue(ctx context.Context, params ClaimIssueParams) error
 
 	// ReleaseIssueLock releases only the distributed claim lock on the
 	// issue without changing its status or assignee. Idempotent: returns

@@ -295,7 +295,7 @@ func callDefaults(t *testing.T, ctx context.Context, m *MockIssueBackend) {
 		t.Fatalf("Create returned %+v, %v", created, err)
 	}
 	mustNoErr("Update", m.Update(ctx, "id", backend.UpdateParams{}))
-	mustNoErr("ClaimIssue", m.ClaimIssue(ctx, "id", time.Second))
+	mustNoErr("ClaimIssue", m.ClaimIssue(ctx, backend.ClaimIssueParams{ID: "id", LockTTL: time.Second}))
 	mustNoErr("DeferIssue", m.DeferIssue(ctx, "id", time.Now()))
 	mustNoErr("UndeferIssue", m.UndeferIssue(ctx, "id"))
 	if _, err := m.Close(ctx, "id", backend.CloseParams{}); err != nil {

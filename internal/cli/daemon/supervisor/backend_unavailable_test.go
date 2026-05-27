@@ -5,7 +5,6 @@ import (
 	"errors"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/olesho/harness-wrapper/pkg/discovery"
 
@@ -244,12 +243,12 @@ type backendUnavailableActorIssueBackend struct {
 	releases atomic.Int64
 }
 
-func (b *backendUnavailableActorIssueBackend) ClaimIssueAsActor(ctx context.Context, id string, ttl time.Duration, _ string) error {
-	return b.ClaimIssue(ctx, id, ttl)
+func (b *backendUnavailableActorIssueBackend) ReleaseIssueLock(ctx context.Context, id, actor string) error {
+	b.releases.Add(1)
+	return b.MockIssueBackend.ReleaseIssueLock(ctx, id, actor)
 }
 
 func (b *backendUnavailableActorIssueBackend) ReleaseIssueAsActor(ctx context.Context, id, actor string) error {
-	b.releases.Add(1)
 	return b.ReleaseIssueLock(ctx, id, actor)
 }
 

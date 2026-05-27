@@ -35,16 +35,16 @@ func (r *releaserMock) ReleaseClaim(_ context.Context, id, actor string) error {
 
 // mockIPCMutator implements ipcMutator for testing the decorator logic.
 type mockIPCMutator struct {
-	claimFn       func(issueID string, lockTTL time.Duration) error
+	claimFn       func(params backend.ClaimIssueParams) error
 	updateFn      func(issueID string, params backend.UpdateParams) error
 	completeFn    func(issueID string, params backend.CloseParams) (*backend.CloseResult, error)
 	releaseLockFn func(issueID string) error
 	releaseFn     func(issueID string) error
 }
 
-func (m *mockIPCMutator) Claim(issueID string, lockTTL time.Duration) error {
+func (m *mockIPCMutator) Claim(params backend.ClaimIssueParams) error {
 	if m.claimFn != nil {
-		return m.claimFn(issueID, lockTTL)
+		return m.claimFn(params)
 	}
 	return nil
 }
@@ -108,13 +108,13 @@ func TestIPCIssueBackend_Update_RoutesToIPC(t *testing.T) {
 func TestIPCIssueBackend_ClaimIssue_RoutesToIPC(t *testing.T) {
 	var ipcCalled bool
 	ipc := &mockIPCMutator{
-		claimFn: func(issueID string, lockTTL time.Duration) error {
+		claimFn: func(params backend.ClaimIssueParams) error {
 			ipcCalled = true
-			if issueID != "task-2" {
-				t.Errorf("got issueID %q, want task-2", issueID)
+			if params.ID != "task-2" {
+				t.Errorf("got issueID %q, want task-2", params.ID)
 			}
-			if lockTTL != 5*time.Minute {
-				t.Errorf("got lockTTL %v, want 5m", lockTTL)
+			if params.LockTTL != 5*time.Minute {
+				t.Errorf("got lockTTL %v, want 5m", params.LockTTL)
 			}
 			return nil
 		},
@@ -122,7 +122,7 @@ func TestIPCIssueBackend_ClaimIssue_RoutesToIPC(t *testing.T) {
 	direct := NewMockIssueBackend()
 	b := newIPCIssueBackend(ipc, direct)
 
-	err := b.ClaimIssue(context.Background(), "task-2", 5*time.Minute)
+	err := b.ClaimIssue(context.Background(), backend.ClaimIssueParams{ID: "task-2", LockTTL: 5 * time.Minute})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -179,14 +179,14 @@ func TestIPCIssueBackend_Update_PropagatesUnavailable(t *testing.T) {
 
 func TestIPCIssueBackend_ClaimIssue_PropagatesUnavailable(t *testing.T) {
 	ipc := &mockIPCMutator{
-		claimFn: func(string, time.Duration) error {
+		claimFn: func(backend.ClaimIssueParams) error {
 			return backend.ErrUnavailable("ipc.claim", "daemon not running", nil)
 		},
 	}
 	direct := NewMockIssueBackend()
 	b := newIPCIssueBackend(ipc, direct)
 
-	err := b.ClaimIssue(context.Background(), "task-1", 0)
+	err := b.ClaimIssue(context.Background(), backend.ClaimIssueParams{ID: "task-1"})
 	if !backend.IsKind(err, backend.KindUnavailable) {
 		t.Fatalf("expected KindUnavailable, got %v", err)
 	}
@@ -238,14 +238,14 @@ func TestIPCIssueBackend_Update_PropagatesNonUnavailableError(t *testing.T) {
 
 func TestIPCIssueBackend_ClaimIssue_PropagatesConflict(t *testing.T) {
 	ipc := &mockIPCMutator{
-		claimFn: func(string, time.Duration) error {
+		claimFn: func(backend.ClaimIssueParams) error {
 			return backend.NewBackendError(backend.KindConflict, "ipc.claim", "already claimed", nil)
 		},
 	}
 	direct := NewMockIssueBackend()
 	b := newIPCIssueBackend(ipc, direct)
 
-	err := b.ClaimIssue(context.Background(), "task-1", 0)
+	err := b.ClaimIssue(context.Background(), backend.ClaimIssueParams{ID: "task-1"})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -544,7 +544,7 @@ func TestIPCIssueBackend_ConcurrentAccess(t *testing.T) {
 		updateFn: func(string, backend.UpdateParams) error {
 			return nil
 		},
-		claimFn: func(string, time.Duration) error {
+		claimFn: func(backend.ClaimIssueParams) error {
 			return nil
 		},
 		completeFn: func(string, backend.CloseParams) (*backend.CloseResult, error) {
@@ -561,7 +561,7 @@ func TestIPCIssueBackend_ConcurrentAccess(t *testing.T) {
 		go func(n int) {
 			defer func() { done <- struct{}{} }()
 			_ = b.Update(ctx, fmt.Sprintf("task-%d", n), backend.UpdateParams{})
-			_ = b.ClaimIssue(ctx, fmt.Sprintf("task-%d", n), 0)
+			_ = b.ClaimIssue(ctx, backend.ClaimIssueParams{ID: fmt.Sprintf("task-%d", n)})
 			_, _ = b.Close(ctx, fmt.Sprintf("task-%d", n), backend.CloseParams{})
 			_, _ = b.Ready(ctx, backend.ReadyOpts{})
 			_ = b.BackendName()

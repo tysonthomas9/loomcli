@@ -55,7 +55,7 @@ func (stubFleetBackend) Create(_ context.Context, _ backend.CreateParams) (*back
 func (stubFleetBackend) Update(_ context.Context, _ string, _ backend.UpdateParams) error {
 	return errors.New("stub")
 }
-func (stubFleetBackend) ClaimIssue(_ context.Context, _ string, _ time.Duration) error {
+func (stubFleetBackend) ClaimIssue(_ context.Context, _ backend.ClaimIssueParams) error {
 	return errors.New("stub")
 }
 func (stubFleetBackend) ReleaseIssueLock(_ context.Context, _, _ string) error {

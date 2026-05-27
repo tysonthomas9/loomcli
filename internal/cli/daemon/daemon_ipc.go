@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
@@ -50,7 +51,8 @@ const (
 
 // ipcClaimArgs are the optional arguments for the claim operation.
 type ipcClaimArgs struct {
-	LockTTLSeconds int `json:"lock_ttl_seconds,omitempty"`
+	LockTTLSeconds int    `json:"lock_ttl_seconds,omitempty"`
+	OwnerActor     string `json:"owner_actor,omitempty"`
 }
 
 // startIPCServer creates a Unix domain socket listener for agent IPC.
@@ -223,17 +225,17 @@ func (d *Daemon) handleIPCHeartbeat(req AgentIPCRequest) AgentIPCResponse {
 
 // handleIPCClaim handles the "claim" operation.
 func (d *Daemon) handleIPCClaim(req AgentIPCRequest) AgentIPCResponse {
+	var claimArgs ipcClaimArgs
 	var lockTTL time.Duration
 	if len(req.Args) > 0 && string(req.Args) != "null" {
-		var args ipcClaimArgs
-		if err := json.Unmarshal(req.Args, &args); err != nil {
+		if err := json.Unmarshal(req.Args, &claimArgs); err != nil {
 			return AgentIPCResponse{
 				Error: "invalid claim args: " + err.Error(),
 				Kind:  string(backend.KindValidation),
 			}
 		}
-		if args.LockTTLSeconds > 0 {
-			lockTTL = time.Duration(args.LockTTLSeconds) * time.Second
+		if claimArgs.LockTTLSeconds > 0 {
+			lockTTL = time.Duration(claimArgs.LockTTLSeconds) * time.Second
 		}
 	}
 
@@ -243,7 +245,17 @@ func (d *Daemon) handleIPCClaim(req AgentIPCRequest) AgentIPCResponse {
 	if resp, ok := d.validateIPCLease(ctx, req); !ok {
 		return resp
 	}
-	if err := d.issueBackend.ClaimIssue(ctx, req.IssueID, lockTTL); err != nil {
+	ownerActor := strings.TrimSpace(claimArgs.OwnerActor)
+	if ownerActor != "" && ownerActor != req.AgentName {
+		return AgentIPCResponse{
+			Error: "claim owner_actor must match agent_name",
+			Kind:  string(backend.KindValidation),
+		}
+	}
+	if ownerActor == "" {
+		ownerActor = req.AgentName
+	}
+	if err := d.issueBackend.ClaimIssue(ctx, backend.ClaimIssueParams{ID: req.IssueID, LockTTL: lockTTL, OwnerActor: ownerActor}); err != nil {
 		return ipcErrorResponse(err)
 	}
 

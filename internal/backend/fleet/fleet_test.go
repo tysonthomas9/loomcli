@@ -949,13 +949,13 @@ func TestClaimIssue_HappyPath(t *testing.T) {
 	})
 	defer ts.Close()
 
-	err := fb.ClaimIssue(context.Background(), "test-1", 0)
+	err := fb.ClaimIssue(context.Background(), backend.ClaimIssueParams{ID: "test-1"})
 	if err != nil {
 		t.Fatalf("ClaimIssue: %v", err)
 	}
 }
 
-func TestClaimIssueAsActor_OverridesActorHeader(t *testing.T) {
+func TestClaimIssue_OwnerActorOverridesActorHeader(t *testing.T) {
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "POST" || !strings.HasSuffix(r.URL.Path, "/issues/test-1/claim") {
 			t.Errorf("unexpected: %s %s", r.Method, r.URL.Path)
@@ -967,8 +967,8 @@ func TestClaimIssueAsActor_OverridesActorHeader(t *testing.T) {
 	})
 	defer ts.Close()
 
-	if err := fb.ClaimIssueAsActor(context.Background(), "test-1", 0, "desktopqa"); err != nil {
-		t.Fatalf("ClaimIssueAsActor: %v", err)
+	if err := fb.ClaimIssue(context.Background(), backend.ClaimIssueParams{ID: "test-1", OwnerActor: "desktopqa"}); err != nil {
+		t.Fatalf("ClaimIssue: %v", err)
 	}
 }
 
@@ -990,7 +990,7 @@ func TestClaimIssue_ForwardsLockTTL(t *testing.T) {
 	})
 	defer ts.Close()
 
-	if err := fb.ClaimIssue(context.Background(), "test-1", 5*time.Minute); err != nil {
+	if err := fb.ClaimIssue(context.Background(), backend.ClaimIssueParams{ID: "test-1", LockTTL: 5 * time.Minute}); err != nil {
 		t.Fatalf("ClaimIssue: %v", err)
 	}
 }
@@ -1010,14 +1010,14 @@ func TestClaimIssue_RoundsPositiveSubsecondTTL(t *testing.T) {
 	})
 	defer ts.Close()
 
-	if err := fb.ClaimIssue(context.Background(), "test-1", time.Millisecond); err != nil {
+	if err := fb.ClaimIssue(context.Background(), backend.ClaimIssueParams{ID: "test-1", LockTTL: time.Millisecond}); err != nil {
 		t.Fatalf("ClaimIssue: %v", err)
 	}
 }
 
 func TestClaimIssue_EmptyID(t *testing.T) {
 	fb, _ := New(Config{BaseURL: "http://x", WorkspaceID: "ws"})
-	err := fb.ClaimIssue(context.Background(), "", 0)
+	err := fb.ClaimIssue(context.Background(), backend.ClaimIssueParams{})
 	if err == nil {
 		t.Fatal("expected error for empty ID")
 	}
@@ -1032,7 +1032,7 @@ func TestClaimIssue_NegativeTTL(t *testing.T) {
 	})
 	defer ts.Close()
 
-	err := fb.ClaimIssue(context.Background(), "test-1", -time.Second)
+	err := fb.ClaimIssue(context.Background(), backend.ClaimIssueParams{ID: "test-1", LockTTL: -time.Second})
 	if err == nil {
 		t.Fatal("expected error for negative TTL")
 	}
@@ -1047,7 +1047,7 @@ func TestClaimIssue_Conflict(t *testing.T) {
 	})
 	defer ts.Close()
 
-	err := fb.ClaimIssue(context.Background(), "test-1", 0)
+	err := fb.ClaimIssue(context.Background(), backend.ClaimIssueParams{ID: "test-1"})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}

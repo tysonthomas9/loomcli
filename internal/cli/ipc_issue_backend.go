@@ -20,7 +20,7 @@ import (
 // ipcMutator is the subset of AgentIPCClient methods used for IPC-routed mutations.
 // The decorator depends on this interface (not the concrete client) for testability.
 type ipcMutator interface {
-	Claim(issueID string, lockTTL time.Duration) error
+	Claim(params backend.ClaimIssueParams) error
 	Update(issueID string, params backend.UpdateParams) error
 	Complete(issueID string, params backend.CloseParams) (*backend.CloseResult, error)
 	ReleaseLock(issueID string) error
@@ -52,8 +52,8 @@ func (b *ipcIssueBackend) Update(ctx context.Context, id string, params backend.
 }
 
 // ClaimIssue routes through IPC.
-func (b *ipcIssueBackend) ClaimIssue(ctx context.Context, id string, lockTTL time.Duration) error {
-	return b.ipc.Claim(id, lockTTL)
+func (b *ipcIssueBackend) ClaimIssue(ctx context.Context, params backend.ClaimIssueParams) error {
+	return b.ipc.Claim(params)
 }
 
 // ReleaseIssueLock routes through IPC. The IPC server uses the connected
@@ -216,5 +216,6 @@ const (
 
 // IPCClaimArgs are the optional arguments for the claim operation.
 type IPCClaimArgs struct {
-	LockTTLSeconds int `json:"lock_ttl_seconds,omitempty"`
+	LockTTLSeconds int    `json:"lock_ttl_seconds,omitempty"`
+	OwnerActor     string `json:"owner_actor,omitempty"`
 }

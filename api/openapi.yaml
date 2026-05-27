@@ -759,16 +759,23 @@ paths:
     post:
       operationId: claimIssue
       tags: [issues]
-      summary: Atomically claim an issue for the server-side actor
+      summary: Atomically claim an issue
       description: |
-        Claims an issue for the LOOM_AGENT_NAME configured on the server. Returns 409
-        Conflict if the issue is already claimed by another agent. The claim
-        operation is atomic — only one of N concurrent callers will succeed.
-        Blocked issues with open ready-work dependencies cannot be claimed.
-        Sets assignee and transitions status to in_progress in a single step.
+        Claims an issue for the backend default actor, or for an optional
+        policy-gated owner_actor override. Returns 409 Conflict if the issue is already claimed
+        by another agent. The claim operation is atomic — only one of N concurrent
+        callers will succeed. Blocked issues with open ready-work dependencies
+        cannot be claimed. Sets assignee and transitions status to in_progress in a
+        single step.
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
         - $ref: "#/components/parameters/IssueId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ClaimIssueRequest"
       responses:
         "200":
           description: Issue claimed
@@ -3895,6 +3902,17 @@ components:
           type: boolean
         force:
           type: boolean
+
+    ClaimIssueRequest:
+      type: object
+      properties:
+        lock_ttl:
+          type: integer
+          minimum: 0
+          description: Optional claim lock TTL in seconds. Omitted or zero uses the backend default.
+        owner_actor:
+          type: string
+          description: Optional actor that should own the claim lock. Servers may reject unsupported delegation.
 
     MoveIssueRequest:
       type: object

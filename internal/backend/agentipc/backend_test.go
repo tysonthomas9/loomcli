@@ -72,7 +72,7 @@ func TestBackend_ClaimIssue_Success(t *testing.T) {
 		return ipcResponse{Success: true}
 	})
 	b := New(sock, "test-agent")
-	err := b.ClaimIssue(context.Background(), "abc-123", 0)
+	err := b.ClaimIssue(context.Background(), backend.ClaimIssueParams{ID: "abc-123"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -83,7 +83,7 @@ func TestBackend_ClaimIssue_Conflict(t *testing.T) {
 		return ipcResponse{Error: "already claimed", Kind: "conflict"}
 	})
 	b := New(sock, "test-agent")
-	err := b.ClaimIssue(context.Background(), "abc-123", 0)
+	err := b.ClaimIssue(context.Background(), backend.ClaimIssueParams{ID: "abc-123"})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -97,7 +97,7 @@ func TestBackend_ClaimIssue_NotFound(t *testing.T) {
 		return ipcResponse{Error: "issue not found", Kind: "not_found"}
 	})
 	b := New(sock, "test-agent")
-	err := b.ClaimIssue(context.Background(), "abc-123", 0)
+	err := b.ClaimIssue(context.Background(), backend.ClaimIssueParams{ID: "abc-123"})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -115,7 +115,7 @@ func TestBackend_ClaimIssue_LockTTL(t *testing.T) {
 	b := New(sock, "test-agent")
 
 	// With TTL > 0: should include lock_ttl_seconds
-	err := b.ClaimIssue(context.Background(), "abc-123", 5*time.Minute)
+	err := b.ClaimIssue(context.Background(), backend.ClaimIssueParams{ID: "abc-123", LockTTL: 5 * time.Minute})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -131,12 +131,45 @@ func TestBackend_ClaimIssue_LockTTL(t *testing.T) {
 
 	// With TTL == 0: Args should be nil
 	gotArgs = nil
-	err = b.ClaimIssue(context.Background(), "abc-123", 0)
+	err = b.ClaimIssue(context.Background(), backend.ClaimIssueParams{ID: "abc-123"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if gotArgs != nil {
 		t.Fatalf("expected nil Args for lockTTL=0, got %s", gotArgs)
+	}
+}
+
+func TestBackend_ClaimIssue_OwnerActor(t *testing.T) {
+	var gotArgs json.RawMessage
+	sock := startTestServer(t, func(req ipcRequest) ipcResponse {
+		gotArgs = req.Args
+		return ipcResponse{Success: true}
+	})
+	b := New(sock, "falcon")
+
+	if err := b.ClaimIssue(context.Background(), backend.ClaimIssueParams{ID: "abc-123", OwnerActor: " falcon "}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var parsed struct {
+		OwnerActor string `json:"owner_actor"`
+	}
+	if err := json.Unmarshal(gotArgs, &parsed); err != nil {
+		t.Fatalf("unmarshal args: %v", err)
+	}
+	if parsed.OwnerActor != "falcon" {
+		t.Fatalf("owner_actor = %q, want falcon", parsed.OwnerActor)
+	}
+}
+
+func TestBackend_ClaimIssue_RejectsMismatchedOwnerActor(t *testing.T) {
+	b := New("/tmp/unreachable.sock", "falcon")
+	err := b.ClaimIssue(context.Background(), backend.ClaimIssueParams{ID: "abc-123", OwnerActor: "nova"})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !backend.IsKind(err, backend.KindValidation) {
+		t.Fatalf("expected KindValidation, got %v", err)
 	}
 }
 
@@ -246,7 +279,7 @@ func TestBackend_Close_MalformedData(t *testing.T) {
 
 func TestBackend_TransportError_NoSocket(t *testing.T) {
 	b := New("/nonexistent/path/s.sock", "test-agent")
-	err := b.ClaimIssue(context.Background(), "abc-123", 0)
+	err := b.ClaimIssue(context.Background(), backend.ClaimIssueParams{ID: "abc-123"})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -316,7 +349,7 @@ func TestBackend_TransportError_GarbageResponse(t *testing.T) {
 	}()
 
 	b := New(sockPath, "test-agent")
-	err = b.ClaimIssue(context.Background(), "abc-123", 0)
+	err = b.ClaimIssue(context.Background(), backend.ClaimIssueParams{ID: "abc-123"})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -345,7 +378,7 @@ func TestBackend_TransportError_ConnectionReset(t *testing.T) {
 	}()
 
 	b := New(sockPath, "test-agent")
-	err = b.ClaimIssue(context.Background(), "abc-123", 0)
+	err = b.ClaimIssue(context.Background(), backend.ClaimIssueParams{ID: "abc-123"})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -471,7 +504,7 @@ func TestBackend_RequestFields(t *testing.T) {
 	b := New(sock, "my-agent")
 	ctx := context.Background()
 
-	_ = b.ClaimIssue(ctx, "issue-1", 0)
+	_ = b.ClaimIssue(ctx, backend.ClaimIssueParams{ID: "issue-1"})
 	_ = b.Update(ctx, "issue-2", backend.UpdateParams{})
 	_, _ = b.Close(ctx, "issue-3", backend.CloseParams{})
 
@@ -517,7 +550,7 @@ func TestBackend_ConcurrentCalls(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_ = b.ClaimIssue(context.Background(), "abc-123", 0)
+			_ = b.ClaimIssue(context.Background(), backend.ClaimIssueParams{ID: "abc-123"})
 		}()
 	}
 	wg.Wait()
@@ -542,7 +575,7 @@ func TestBackend_ServerErrorWithoutKind(t *testing.T) {
 		return ipcResponse{Error: "unknown operation: \"foo\""}
 	})
 	b := New(sock, "test-agent")
-	err := b.ClaimIssue(context.Background(), "abc-123", 0)
+	err := b.ClaimIssue(context.Background(), backend.ClaimIssueParams{ID: "abc-123"})
 	if err == nil {
 		t.Fatal("expected error")
 	}

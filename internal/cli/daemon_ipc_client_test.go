@@ -26,7 +26,8 @@ func shortSocketDir(t *testing.T) string {
 
 // ipcClaimArgs mirrors daemon.ipcClaimArgs for test assertions.
 type ipcClaimArgs struct {
-	LockTTLSeconds int `json:"lock_ttl_seconds,omitempty"`
+	LockTTLSeconds int    `json:"lock_ttl_seconds,omitempty"`
+	OwnerActor     string `json:"owner_actor,omitempty"`
 }
 
 // ipcOpClaim mirrors the daemon IPC operation constant.
@@ -83,7 +84,7 @@ func TestAgentIPCClient_Claim_Success(t *testing.T) {
 	})
 
 	client := NewAgentIPCClient(socketPath, "falcon")
-	if err := client.Claim("abc-123", 0); err != nil {
+	if err := client.Claim(backend.ClaimIssueParams{ID: "abc-123"}); err != nil {
 		t.Fatalf("Claim() error = %v", err)
 	}
 }
@@ -97,7 +98,7 @@ func TestAgentIPCClient_Claim_Conflict(t *testing.T) {
 	})
 
 	client := NewAgentIPCClient(socketPath, "falcon")
-	err := client.Claim("abc-123", 0)
+	err := client.Claim(backend.ClaimIssueParams{ID: "abc-123"})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -115,7 +116,7 @@ func TestAgentIPCClient_Claim_NotFound(t *testing.T) {
 	})
 
 	client := NewAgentIPCClient(socketPath, "falcon")
-	err := client.Claim("abc-123", 0)
+	err := client.Claim(backend.ClaimIssueParams{ID: "abc-123"})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -137,7 +138,7 @@ func TestAgentIPCClient_Claim_WithLockTTL(t *testing.T) {
 	client := NewAgentIPCClient(socketPath, "falcon")
 
 	t.Run("with TTL", func(t *testing.T) {
-		if err := client.Claim("abc-123", 5*time.Minute); err != nil {
+		if err := client.Claim(backend.ClaimIssueParams{ID: "abc-123", LockTTL: 5 * time.Minute}); err != nil {
 			t.Fatalf("Claim() error = %v", err)
 		}
 		var args ipcClaimArgs
@@ -151,13 +152,47 @@ func TestAgentIPCClient_Claim_WithLockTTL(t *testing.T) {
 
 	t.Run("without TTL", func(t *testing.T) {
 		capturedReq = AgentIPCRequest{} // reset
-		if err := client.Claim("abc-123", 0); err != nil {
+		if err := client.Claim(backend.ClaimIssueParams{ID: "abc-123"}); err != nil {
 			t.Fatalf("Claim() error = %v", err)
 		}
 		if len(capturedReq.Args) != 0 {
 			t.Errorf("Args = %q, want empty (omitted)", string(capturedReq.Args))
 		}
 	})
+}
+
+func TestAgentIPCClient_Claim_WithOwnerActor(t *testing.T) {
+	tmpDir := shortSocketDir(t)
+	socketPath := filepath.Join(tmpDir, "ipc.sock")
+
+	var capturedReq AgentIPCRequest
+	startTestIPCServer(t, socketPath, func(req AgentIPCRequest) AgentIPCResponse {
+		capturedReq = req
+		return AgentIPCResponse{Success: true}
+	})
+
+	client := NewAgentIPCClient(socketPath, "falcon")
+	if err := client.Claim(backend.ClaimIssueParams{ID: "abc-123", OwnerActor: " falcon "}); err != nil {
+		t.Fatalf("Claim() error = %v", err)
+	}
+	var args ipcClaimArgs
+	if err := json.Unmarshal(capturedReq.Args, &args); err != nil {
+		t.Fatalf("unmarshal args: %v", err)
+	}
+	if args.OwnerActor != "falcon" {
+		t.Errorf("OwnerActor = %q, want falcon", args.OwnerActor)
+	}
+}
+
+func TestAgentIPCClient_Claim_RejectsMismatchedOwnerActor(t *testing.T) {
+	client := NewAgentIPCClient("/tmp/unreachable.sock", "falcon")
+	err := client.Claim(backend.ClaimIssueParams{ID: "abc-123", OwnerActor: "nova"})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !backend.IsKind(err, backend.KindValidation) {
+		t.Fatalf("expected KindValidation, got %v", err)
+	}
 }
 
 func TestAgentIPCClient_Update_Success(t *testing.T) {
@@ -273,7 +308,7 @@ func TestAgentIPCClient_TransportError_NoSocket(t *testing.T) {
 	client := NewAgentIPCClient("/nonexistent/path/ipc.sock", "falcon")
 
 	t.Run("claim", func(t *testing.T) {
-		err := client.Claim("abc-123", 0)
+		err := client.Claim(backend.ClaimIssueParams{ID: "abc-123"})
 		if err == nil {
 			t.Fatal("expected error")
 		}
@@ -329,7 +364,7 @@ func TestAgentIPCClient_TransportError_ServerHangs(t *testing.T) {
 	}()
 
 	client := NewAgentIPCClient(socketPath, "falcon")
-	err = client.Claim("abc-123", 0)
+	err = client.Claim(backend.ClaimIssueParams{ID: "abc-123"})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -363,7 +398,7 @@ func TestAgentIPCClient_TransportError_GarbageResponse(t *testing.T) {
 	}()
 
 	client := NewAgentIPCClient(socketPath, "falcon")
-	err = client.Claim("abc-123", 0)
+	err = client.Claim(backend.ClaimIssueParams{ID: "abc-123"})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -383,7 +418,7 @@ func TestAgentIPCClient_AgentNamePopulated(t *testing.T) {
 	})
 
 	client := NewAgentIPCClient(socketPath, "my-custom-agent")
-	if err := client.Claim("abc-123", 0); err != nil {
+	if err := client.Claim(backend.ClaimIssueParams{ID: "abc-123"}); err != nil {
 		t.Fatalf("Claim() error = %v", err)
 	}
 

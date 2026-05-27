@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
@@ -1091,6 +1092,27 @@ func TestHandleClaimIssueW_Success(t *testing.T) {
 	}
 	if !strings.Contains(string(resp.Data), `"assignee":"server"`) {
 		t.Errorf("data should include assignee, got %s", string(resp.Data))
+	}
+}
+
+func TestHandleClaimIssueW_ForwardsClaimBody(t *testing.T) {
+	svc := &mockIssueService{
+		claimIssueFunc: func(_ context.Context, params service.ClaimIssueParams) (json.RawMessage, error) {
+			if params.IssueID != "claim-1" || params.LockTTL != 300*time.Second || params.OwnerActor != "falcon" {
+				t.Fatalf("ClaimIssue params = %#v, want issue claim-1 ttl 300s owner falcon", params)
+			}
+			return json.RawMessage(`{"id":"claim-1"}`), nil
+		},
+	}
+	h := handleClaimIssue(svc)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/ws/issues/claim-1/claim", strings.NewReader(`{"lock_ttl":300,"owner_actor":" falcon "}`))
+	req.SetPathValue("id", "claim-1")
+	w := httptest.NewRecorder()
+
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d body=%s", w.Code, http.StatusOK, w.Body.String())
 	}
 }
 

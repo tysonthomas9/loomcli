@@ -803,16 +803,21 @@ func parseOptionalFleetTime(raw *string) (time.Time, error) {
 // fleet-db's claim endpoint is per-issue: POST /issues/{id}/claim with an
 // optional {"lock_ttl": seconds} body. A zero TTL asks the server to use its
 // default; positive sub-second TTLs round up to one second because the wire
-// contract is second-granular.
-func (b *FleetBackend) ClaimIssue(ctx context.Context, id string, lockTTL time.Duration) error {
-	if id == "" {
+// contract is second-granular. params.OwnerActor overrides the configured
+// X-Actor header for this request when non-empty.
+func (b *FleetBackend) ClaimIssue(ctx context.Context, params backend.ClaimIssueParams) error {
+	if params.ID == "" {
 		return backend.ErrValidation("ClaimIssue", "id must not be empty")
 	}
-	body, err := claimIssueBody(lockTTL)
+	body, err := claimIssueBody(params.LockTTL)
 	if err != nil {
 		return err
 	}
-	_, err = b.exec(ctx, "ClaimIssue", "POST", "/issues/"+url.PathEscape(id)+"/claim", body)
+	path := "/issues/" + url.PathEscape(params.ID) + "/claim"
+	if actor := strings.TrimSpace(params.OwnerActor); actor != "" {
+		return b.execAsActor(ctx, "ClaimIssue", path, body, actor)
+	}
+	_, err = b.exec(ctx, "ClaimIssue", "POST", path, body)
 	return err
 }
 

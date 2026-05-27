@@ -17,23 +17,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 )
 
-// actorClaimBackend is the optional richer claim API: when the issue backend
-// implements it, claims are recorded against the agent's worktree identifier
-// rather than the generic process actor.
-type actorClaimBackend interface {
-	ClaimIssueAsActor(ctx context.Context, id string, lockTTL time.Duration, actor string) error
-}
-
-// actorReleaseBackend is the optional symmetric counterpart of
-// actorClaimBackend. Backends that support this method allow the supervisor
-// to release the claim lock on a task when the agent that holds it exits,
-// rather than waiting for the lock's TTL to expire. Without this, an exited
-// agent's lock blocks every subsequent claim attempt for that issue (whether
-// from the same worktree or a different one) until the TTL elapses.
-type actorReleaseBackend interface {
-	ReleaseIssueAsActor(ctx context.Context, id string, actor string) error
-}
-
 const (
 	claimReadyLimit         = 256
 	claimConflictRetryLimit = 16
@@ -236,16 +219,7 @@ func conflictHolder(err error) string {
 
 func (s *Supervisor) claimIssueForAgent(ap *AgentProcess, taskID, reason string) error {
 	claimCtx, claimCancel := s.operationContext(claimOperationTimeout)
-	var err error
-	if ap.Entry.Worktree != "" {
-		if actorBackend, ok := s.IssueBackend.(actorClaimBackend); ok {
-			err = actorBackend.ClaimIssueAsActor(claimCtx, taskID, 0, ap.Entry.Worktree)
-		} else {
-			err = s.IssueBackend.ClaimIssue(claimCtx, taskID, 0)
-		}
-	} else {
-		err = s.IssueBackend.ClaimIssue(claimCtx, taskID, 0)
-	}
+	err := s.IssueBackend.ClaimIssue(claimCtx, backend.ClaimIssueParams{ID: taskID, OwnerActor: ap.Entry.Worktree})
 	claimCancel()
 	if err != nil {
 		return err
@@ -313,20 +287,16 @@ func removeIssueByID(issues []backend.IssueData, id string) []backend.IssueData 
 // TTL expires (~5 min), so the next agent — even with a fresh assignee — gets
 // HTTP 409 KindConflict on every ClaimIssue attempt and silently NoWorks in
 // the supervisor's restart backoff. The release is best-effort: if the backend
-// does not support actor-scoped release, or if the lock is already gone (e.g.
-// the agent already moved status to closed which auto-releases), this logs at
+// does not support lock release, or if the lock is already gone (e.g. the
+// agent already moved status to closed which auto-releases), this logs at
 // debug level and returns without affecting the cleanup path.
 func (s *Supervisor) releaseAssignedTaskClaim(ap *AgentProcess, taskID string) {
 	if taskID == "" || ap.Entry.Worktree == "" || s.IssueBackend == nil {
 		return
 	}
-	releaser, ok := s.IssueBackend.(actorReleaseBackend)
-	if !ok {
-		return
-	}
 	ctx, cancel := s.operationContext(claimOperationTimeout)
 	defer cancel()
-	if err := releaser.ReleaseIssueAsActor(ctx, taskID, ap.Entry.Worktree); err != nil {
+	if err := s.IssueBackend.ReleaseIssueLock(ctx, taskID, ap.Entry.Worktree); err != nil {
 		slog.Debug("agent task claim release skipped", "worktree", ap.Entry.Worktree, "task_id", taskID, "err", err)
 	}
 }

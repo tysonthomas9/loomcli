@@ -35,11 +35,11 @@ func TestClaimReadyTaskClaimsFirstAvailableAsActor(t *testing.T) {
 	if len(fake.readyCalls) != 1 || fake.readyCalls[0].ParentID != "EPIC-1" || fake.readyCalls[0].Limit != 10 {
 		t.Fatalf("ready calls = %+v, want parent EPIC-1 limit 10", fake.readyCalls)
 	}
-	if len(fake.actorClaims) != 2 {
-		t.Fatalf("actor claims = %+v, want two attempts", fake.actorClaims)
+	if len(fake.claims) != 2 {
+		t.Fatalf("claims = %+v, want two attempts", fake.claims)
 	}
-	if fake.actorClaims[1].id != "TEST-2" || fake.actorClaims[1].actor != "driver-run:run-1" || fake.actorClaims[1].ttl != time.Minute {
-		t.Fatalf("second actor claim = %+v, want TEST-2 actor/ttl", fake.actorClaims[1])
+	if fake.claims[1].id != "TEST-2" || fake.claims[1].actor != "driver-run:run-1" || fake.claims[1].ttl != time.Minute {
+		t.Fatalf("second claim = %+v, want TEST-2 actor/ttl", fake.claims[1])
 	}
 }
 
@@ -83,8 +83,8 @@ func TestClaimReadyTaskSkipsBlockedIssues(t *testing.T) {
 			} else if claimed == nil || claimed.ID != tc.wantClaim {
 				t.Fatalf("claimed = %+v, want %q", claimed, tc.wantClaim)
 			}
-			if len(fake.actorClaims) != tc.wantClaims {
-				t.Fatalf("actor claims = %+v, want %d claim attempts (never on blocked issues)", fake.actorClaims, tc.wantClaims)
+			if len(fake.claims) != tc.wantClaims {
+				t.Fatalf("claims = %+v, want %d claim attempts (never on blocked issues)", fake.claims, tc.wantClaims)
 			}
 		})
 	}
@@ -154,7 +154,6 @@ type fakeReadyIssueBackend struct {
 	ready         []backend.IssueData
 	readyCalls    []backend.ReadyOpts
 	claims        []claimCall
-	actorClaims   []claimCall
 	closeCalls    []closeCall
 	releases      []releaseCall
 	actorReleases []releaseCall
@@ -182,14 +181,9 @@ func (f *fakeReadyIssueBackend) Ready(_ context.Context, opts backend.ReadyOpts)
 	return append([]backend.IssueData(nil), f.ready...), nil
 }
 
-func (f *fakeReadyIssueBackend) ClaimIssue(_ context.Context, id string, ttl time.Duration) error {
-	f.claims = append(f.claims, claimCall{id: id, ttl: ttl})
-	return f.claimErrs[id]
-}
-
-func (f *fakeReadyIssueBackend) ClaimIssueAsActor(_ context.Context, id string, ttl time.Duration, actor string) error {
-	f.actorClaims = append(f.actorClaims, claimCall{id: id, ttl: ttl, actor: actor})
-	return f.claimErrs[id]
+func (f *fakeReadyIssueBackend) ClaimIssue(_ context.Context, params backend.ClaimIssueParams) error {
+	f.claims = append(f.claims, claimCall{id: params.ID, ttl: params.LockTTL, actor: params.OwnerActor})
+	return f.claimErrs[params.ID]
 }
 
 func (f *fakeReadyIssueBackend) Close(_ context.Context, id string, params backend.CloseParams) (*backend.CloseResult, error) {

@@ -454,6 +454,17 @@ type UpdateParams struct {
 	Claim              bool     `json:"claim,omitempty"`
 }
 
+// ClaimIssueParams contains fields for atomically claiming an issue.
+// OwnerActor is the actor that should own the claim lock. When empty,
+// backends use their configured caller identity. Backends that cannot
+// represent a non-empty OwnerActor must return KindNotImplemented or
+// KindValidation before mutating.
+type ClaimIssueParams struct {
+	ID         string        `json:"id,omitempty"`
+	LockTTL    time.Duration `json:"-"`
+	OwnerActor string        `json:"owner_actor,omitempty"`
+}
+
 // CloseParams contains fields for closing an issue.
 type CloseParams struct {
 	Reason      string `json:"reason,omitempty"`

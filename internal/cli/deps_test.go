@@ -600,7 +600,7 @@ func TestUnavailableIssueBackend_AllMethodsFailClosed(t *testing.T) {
 	_, err = ib.Create(ctx, backend.CreateParams{})
 	assertUnavailable("Create", err)
 	assertUnavailable("Update", ib.Update(ctx, "T-1", backend.UpdateParams{}))
-	assertUnavailable("ClaimIssue", ib.ClaimIssue(ctx, "T-1", time.Minute))
+	assertUnavailable("ClaimIssue", ib.ClaimIssue(ctx, backend.ClaimIssueParams{ID: "T-1", LockTTL: time.Minute}))
 	assertUnavailable("DeferIssue", ib.DeferIssue(ctx, "T-1", time.Now()))
 	assertUnavailable("UndeferIssue", ib.UndeferIssue(ctx, "T-1"))
 	_, err = ib.Close(ctx, "T-1", backend.CloseParams{})
@@ -681,14 +681,7 @@ func TestFleetDBIssueBackend_FailsClosedWhenStoreUnavailable(t *testing.T) {
 	_, err = ib.Create(ctx, backend.CreateParams{})
 	assertUnavailable("Create", err)
 	assertUnavailable("Update", ib.Update(ctx, "T-1", backend.UpdateParams{}))
-	assertUnavailable("ClaimIssue", ib.ClaimIssue(ctx, "T-1", time.Minute))
-	actorBackend, ok := ib.(interface {
-		ClaimIssueAsActor(context.Context, string, time.Duration, string) error
-	})
-	if !ok {
-		t.Fatal("fleetDBIssueBackend does not implement ClaimIssueAsActor")
-	}
-	assertUnavailable("ClaimIssueAsActor", actorBackend.ClaimIssueAsActor(ctx, "T-1", time.Minute, "agent"))
+	assertUnavailable("ClaimIssue", ib.ClaimIssue(ctx, backend.ClaimIssueParams{ID: "T-1", LockTTL: time.Minute, OwnerActor: "agent"}))
 	assertUnavailable("DeferIssue", ib.DeferIssue(ctx, "T-1", time.Now()))
 	assertUnavailable("UndeferIssue", ib.UndeferIssue(ctx, "T-1"))
 	_, err = ib.Close(ctx, "T-1", backend.CloseParams{})

@@ -39,11 +39,12 @@ func TestClaimTask_SelectsEligibleTaskAndClaims(t *testing.T) {
 	if opts.ParentID != "parent-1" || opts.Limit != claimReadyLimit {
 		t.Fatalf("ReadyOpts = %#v", opts)
 	}
-	if mock.Calls[1].Method != "ClaimIssue" || mock.Calls[1].Args[0] != "task-1" {
+	if mock.Calls[1].Method != "ClaimIssue" {
 		t.Fatalf("claim call = %#v", mock.Calls[1])
 	}
-	if ttl := mock.Calls[1].Args[1].(time.Duration); ttl != 0 {
-		t.Fatalf("claim TTL = %v, want zero", ttl)
+	claimParams := mock.Calls[1].Args[0].(backend.ClaimIssueParams)
+	if claimParams.ID != "task-1" || claimParams.LockTTL != 0 || claimParams.OwnerActor != "falcon" {
+		t.Fatalf("claim params = %#v, want task-1 owned by falcon with zero TTL", claimParams)
 	}
 }
 
@@ -76,8 +77,12 @@ func TestClaimTask_ClaimsRequestedTaskIgnoringRoleFilter(t *testing.T) {
 	if opts.Assignee != "" {
 		t.Fatalf("ReadyOpts.Assignee = %q, want empty for requested task lookup", opts.Assignee)
 	}
-	if mock.Calls[1].Method != "ClaimIssue" || mock.Calls[1].Args[0] != "task-1" {
+	if mock.Calls[1].Method != "ClaimIssue" {
 		t.Fatalf("claim call = %#v", mock.Calls[1])
+	}
+	claimParams := mock.Calls[1].Args[0].(backend.ClaimIssueParams)
+	if claimParams.ID != "task-1" || claimParams.OwnerActor != "falcon" {
+		t.Fatalf("claim params = %#v, want task-1 owned by falcon", claimParams)
 	}
 }
 
@@ -171,8 +176,8 @@ func TestClaimTask_SkipsConflictedCandidate(t *testing.T) {
 		{ID: "task-1", IssueType: "task", Status: "open", Priority: 1, Title: "First", Design: "plan"},
 		{ID: "task-2", IssueType: "task", Status: "open", Priority: 2, Title: "Second", Design: "plan"},
 	}
-	mock.ClaimIssueFn = func(_ context.Context, id string, _ time.Duration) error {
-		if id == "task-1" {
+	mock.ClaimIssueFn = func(_ context.Context, params backend.ClaimIssueParams) error {
+		if params.ID == "task-1" {
 			return backend.ErrConflict("ClaimIssue", "claimed")
 		}
 		return nil
@@ -204,7 +209,7 @@ func TestClaimTask_CapsConflictRetries(t *testing.T) {
 		})
 	}
 	claimCalls := 0
-	mock.ClaimIssueFn = func(_ context.Context, _ string, _ time.Duration) error {
+	mock.ClaimIssueFn = func(_ context.Context, _ backend.ClaimIssueParams) error {
 		claimCalls++
 		return backend.ErrConflict("ClaimIssue", "claimed")
 	}

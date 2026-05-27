@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -77,19 +78,23 @@ func (c *AgentIPCClient) Heartbeat(at time.Time) error {
 // Claim atomically claims an issue for this agent. Pass lockTTL=0 to use the
 // server's default TTL. Returns *backend.BackendError with KindConflict if
 // already claimed, KindNotFound if issue missing.
-func (c *AgentIPCClient) Claim(issueID string, lockTTL time.Duration) error {
+func (c *AgentIPCClient) Claim(params backend.ClaimIssueParams) error {
+	ownerActor := strings.TrimSpace(params.OwnerActor)
+	if ownerActor != "" && ownerActor != c.AgentName {
+		return backend.ErrValidation("ipc.claim", "owner actor override must match agent identity")
+	}
 	req := AgentIPCRequest{
 		Operation:      IPCOpClaim,
 		AgentName:      c.AgentName,
-		IssueID:        issueID,
+		IssueID:        params.ID,
 		SessionID:      c.SessionID,
 		LeaseID:        c.LeaseID,
 		LeaseToken:     c.LeaseToken,
 		LastActivityAt: c.snapshotActivity(),
 	}
 
-	if lockTTL > 0 {
-		args, err := json.Marshal(IPCClaimArgs{LockTTLSeconds: int(lockTTL.Seconds())})
+	if params.LockTTL > 0 || ownerActor != "" {
+		args, err := json.Marshal(IPCClaimArgs{LockTTLSeconds: int(params.LockTTL.Seconds()), OwnerActor: ownerActor})
 		if err != nil {
 			return backend.ErrInternal("ipc.claim", "marshal args", err)
 		}

@@ -12,6 +12,7 @@ import (
 	"context"
 	"encoding/json"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
@@ -73,17 +74,22 @@ func (b *Backend) BackendName() string { return "agent-ipc" }
 // --- IPC-routed mutations (3) ---
 
 // ClaimIssue atomically claims an issue via the daemon IPC socket.
-func (b *Backend) ClaimIssue(_ context.Context, id string, lockTTL time.Duration) error {
+func (b *Backend) ClaimIssue(_ context.Context, params backend.ClaimIssueParams) error {
 	const op = "AgentIPC.ClaimIssue"
+	ownerActor := strings.TrimSpace(params.OwnerActor)
+	if ownerActor != "" && ownerActor != b.agentName {
+		return backend.ErrValidation(op, "owner actor override must match agent identity")
+	}
 	req := ipcRequest{
 		Operation: opClaim,
 		AgentName: b.agentName,
-		IssueID:   id,
+		IssueID:   params.ID,
 	}
-	if secs := int(lockTTL.Seconds()); secs > 0 {
+	if params.LockTTL > 0 || ownerActor != "" {
 		args, err := json.Marshal(struct {
-			LockTTLSeconds int `json:"lock_ttl_seconds,omitempty"`
-		}{LockTTLSeconds: secs})
+			LockTTLSeconds int    `json:"lock_ttl_seconds,omitempty"`
+			OwnerActor     string `json:"owner_actor,omitempty"`
+		}{LockTTLSeconds: int(params.LockTTL.Seconds()), OwnerActor: ownerActor})
 		if err != nil {
 			return backend.ErrInternal(op, "marshal args", err)
 		}

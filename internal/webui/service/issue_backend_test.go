@@ -78,8 +78,9 @@ type listEventsCall struct {
 }
 
 type claimCall struct {
-	id      string
-	lockTTL time.Duration
+	id         string
+	lockTTL    time.Duration
+	ownerActor string
 }
 
 type testWorkspaceValidator struct {
@@ -157,10 +158,10 @@ func (f *fakeIssueBackend) Update(_ context.Context, id string, params backend.U
 	return f.updateErr
 }
 
-func (f *fakeIssueBackend) ClaimIssue(_ context.Context, id string, lockTTL time.Duration) error {
+func (f *fakeIssueBackend) ClaimIssue(_ context.Context, params backend.ClaimIssueParams) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.claimCalls = append(f.claimCalls, claimCall{id: id, lockTTL: lockTTL})
+	f.claimCalls = append(f.claimCalls, claimCall{id: params.ID, lockTTL: params.LockTTL, ownerActor: params.OwnerActor})
 	return f.claimErr
 }
 
@@ -611,6 +612,24 @@ func TestClaimIssue_Backend_HappyPath_RoutesToBackendAndReturnsIssue(t *testing.
 	}
 	if got["id"] != "i-1" || got["status"] != "in_progress" {
 		t.Errorf("unexpected claim response shape: %+v", got)
+	}
+}
+
+func TestClaimIssue_Backend_ForwardsOwnerActor(t *testing.T) {
+	now := time.Now().UTC()
+	fb := &fakeIssueBackend{
+		getResult: &backend.IssueDetailData{IssueData: backend.IssueData{
+			ID: "i-1", Title: "T", Status: "in_progress", Priority: 1, CreatedAt: now, UpdatedAt: now,
+		}},
+	}
+	svc := newServiceWithFake(fb)
+
+	_, err := svc.ClaimIssue(context.Background(), ClaimIssueParams{IssueID: "i-1", LockTTL: time.Minute, OwnerActor: "falcon"})
+	if err != nil {
+		t.Fatalf("ClaimIssue: %v", err)
+	}
+	if len(fb.claimCalls) != 1 || fb.claimCalls[0].id != "i-1" || fb.claimCalls[0].lockTTL != time.Minute || fb.claimCalls[0].ownerActor != "falcon" {
+		t.Fatalf("claim calls = %#v, want owner actor forwarded", fb.claimCalls)
 	}
 }
 
