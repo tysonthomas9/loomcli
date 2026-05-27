@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 )
@@ -38,6 +39,44 @@ func TestCheckRuntimeHealthReportsStatusCode(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "/api/health returned 404") {
 		t.Fatalf("checkRuntimeHealth() error = %q, want /api/health 404", err)
+	}
+}
+
+func TestWaitForWorkspaceRouteUsesWorkspaceEndpoint(t *testing.T) {
+	var gotPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		if r.URL.Path != "/api/workspaces/LOOM" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"success":true,"data":{"key":"LOOM"}}`))
+	}))
+	t.Cleanup(server.Close)
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := WaitForWorkspaceRoute(ctx, server.URL+"/", "LOOM"); err != nil {
+		t.Fatalf("WaitForWorkspaceRoute() error = %v", err)
+	}
+	if gotPath != "/api/workspaces/LOOM" {
+		t.Fatalf("server saw path = %q, want /api/workspaces/LOOM", gotPath)
+	}
+}
+
+func TestWaitForWorkspaceRouteReportsLastStatusCode(t *testing.T) {
+	server := httptest.NewServer(http.NotFoundHandler())
+	t.Cleanup(server.Close)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	err := WaitForWorkspaceRoute(ctx, server.URL, "NOPE")
+	if err == nil {
+		t.Fatal("WaitForWorkspaceRoute() error = nil, want timeout error")
+	}
+	if !strings.Contains(err.Error(), `/api/workspaces/NOPE returned 404`) {
+		t.Fatalf("WaitForWorkspaceRoute() error = %q, want last workspace endpoint status", err)
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -354,6 +355,54 @@ func waitForRuntime(ctx context.Context, url string) error {
 		case <-ticker.C:
 		}
 	}
+}
+
+// WaitForWorkspaceRoute polls the existing workspace resource endpoint until
+// the runtime can serve the requested workspace.
+func WaitForWorkspaceRoute(ctx context.Context, baseURL, workspaceKey string) error {
+	if baseURL == "" {
+		return errors.New("runtime URL is empty")
+	}
+	if workspaceKey == "" {
+		return errors.New("workspace key is empty")
+	}
+	path := "/api/workspaces/" + url.PathEscape(workspaceKey)
+	endpoint := strings.TrimSuffix(baseURL, "/") + path
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
+	var lastErr error
+	for {
+		if err := checkWorkspaceRoute(ctx, endpoint, path); err == nil {
+			return nil
+		} else {
+			lastErr = err
+		}
+		select {
+		case <-ctx.Done():
+			if lastErr != nil {
+				return fmt.Errorf("workspace %q route not ready: %w", workspaceKey, lastErr)
+			}
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
+}
+
+func checkWorkspaceRoute(ctx context.Context, endpoint, path string) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64*1024))
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("%s returned %d", path, resp.StatusCode)
+	}
+	return nil
 }
 
 func processRunning(pid int) bool {
