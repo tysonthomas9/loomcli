@@ -10,6 +10,15 @@ if [ -z "${LOOM_BIN:-}" ]; then
 	LOOM_BIN=./bin/loom
 fi
 
+json_string_field() {
+	field=$1
+	if command -v jq >/dev/null 2>&1; then
+		jq -r ".$field // empty" 2>/dev/null || true
+		return
+	fi
+	sed -n 's/.*"'"$field"'"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | sed -n '1p'
+}
+
 tmp=$(mktemp -d)
 runtime_pid=
 cleanup() {
@@ -28,7 +37,7 @@ runtime_json="$tmp/runtime.json"
 i=0
 while [ "$i" -lt 100 ]; do
 	if [ -f "$runtime_json" ]; then
-		status=$(jq -r '.status // empty' <"$runtime_json" 2>/dev/null || true)
+		status=$(json_string_field status <"$runtime_json")
 		if [ "$status" = "running" ]; then
 			break
 		fi
@@ -42,7 +51,7 @@ if [ ! -f "$runtime_json" ]; then
 	exit 1
 fi
 
-url=$(jq -r '.url // empty' <"$runtime_json")
+url=$(json_string_field url <"$runtime_json")
 if [ -z "$url" ]; then
 	echo "[repro] runtime URL missing from runtime.json"
 	exit 1
@@ -92,6 +101,21 @@ else
 		printf '%s\n' "$body"
 		exit 1
 	fi
+	reason=$(printf '%s\n' "$body" | json_string_field reason)
+	if [ -z "$reason" ]; then
+		echo "[repro] expected diagnostic reason"
+		printf '%s\n' "$body"
+		exit 1
+	fi
+	mode=$(printf '%s\n' "$body" | json_string_field mode)
+	case "$mode" in
+		daemon | fleet) ;;
+		*)
+			echo "[repro] expected mode=daemon|fleet, got '$mode'"
+			printf '%s\n' "$body"
+			exit 1
+			;;
+	esac
 fi
 
 echo "[repro] OK - /runtime-ready route returns 503 with diagnostic reason"

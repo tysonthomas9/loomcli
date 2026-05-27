@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/rpc"
@@ -48,11 +49,21 @@ func (stubStartingDaemonPool) Close() error                { return nil }
 // tests can exercise the daemon-mode Health() success / failure branches
 // without standing up a real rpc.Client.
 type stubRuntimeReadyClient struct {
-	resp *rpc.HealthResponse
-	err  error
+	resp                   *rpc.HealthResponse
+	err                    error
+	healthCalls            int
+	healthWithTimeoutCalls int
+	healthTimeout          time.Duration
 }
 
 func (s *stubRuntimeReadyClient) Health() (*rpc.HealthResponse, error) {
+	s.healthCalls++
+	return s.resp, s.err
+}
+
+func (s *stubRuntimeReadyClient) HealthWithTimeout(timeout time.Duration) (*rpc.HealthResponse, error) {
+	s.healthWithTimeoutCalls++
+	s.healthTimeout = timeout
 	return s.resp, s.err
 }
 
@@ -200,6 +211,31 @@ func TestHandleWorkspaceRuntimeReady_DaemonMode_HealthRPCFails(t *testing.T) {
 	body := decodeRuntimeReady(t, rec.Body.Bytes())
 	if body.Reason != "rpc broken" {
 		t.Errorf("Reason = %q, want %q", body.Reason, "rpc broken")
+	}
+}
+
+// TestHandleWorkspaceRuntimeReady_DaemonMode_HealthRPCUsesProbeTimeout guards
+// the endpoint's 2s readiness contract. pool.Get already observes the request
+// context, but the Health RPC must also be bounded; otherwise a wedged daemon
+// connection can hang /runtime-ready until the rpc.Client default timeout.
+func TestHandleWorkspaceRuntimeReady_DaemonMode_HealthRPCUsesProbeTimeout(t *testing.T) {
+	client := &stubRuntimeReadyClient{resp: &rpc.HealthResponse{Status: "ok"}}
+	pool := &stubRuntimeReadyPool{client: client}
+	h := handleWorkspaceRuntimeReady(pool, true, nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, newRuntimeReadyRequest("LOOM"))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if client.healthWithTimeoutCalls != 1 {
+		t.Fatalf("HealthWithTimeout calls = %d, want 1", client.healthWithTimeoutCalls)
+	}
+	if client.healthCalls != 0 {
+		t.Fatalf("Health calls = %d, want 0 unbounded calls", client.healthCalls)
+	}
+	if client.healthTimeout <= 0 || client.healthTimeout > 2*time.Second {
+		t.Fatalf("HealthWithTimeout timeout = %v, want >0 and <= %v", client.healthTimeout, 2*time.Second)
 	}
 }
 

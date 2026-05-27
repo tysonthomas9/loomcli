@@ -28,7 +28,7 @@ type RuntimeReadyResponse struct {
 // daemon-mode readiness probe. Defined for test substitution; production
 // uses *rpc.Client via runtimeReadyPoolAdapter.
 type runtimeReadyClient interface {
-	Health() (*rpc.HealthResponse, error)
+	HealthWithTimeout(timeout time.Duration) (*rpc.HealthResponse, error)
 }
 
 // runtimeReadyPool is the pool surface used by the readiness probe. Mirrors
@@ -66,7 +66,10 @@ func (a *runtimeReadyPoolAdapter) Discard(client runtimeReadyClient) {
 // strings (Go's ServeMux percent-decodes %2F, so the ws path value can hold
 // any UTF-8 sequence). Truncation caps the log-poisoning blast radius without
 // breaking legitimate workspace keys.
-const maxEchoedWorkspaceLen = 64
+const (
+	maxEchoedWorkspaceLen  = 64
+	runtimeReadyProbeLimit = 2 * time.Second
+)
 
 func truncateForEcho(ws string) string {
 	if len(ws) > maxEchoedWorkspaceLen {
@@ -136,19 +139,12 @@ func probeDaemon(ctx context.Context, pool runtimeReadyPool, ws string) RuntimeR
 		return resp
 	}
 
-	ctx, cancel := context.WithTimeout(middleware.WithWorkspace(ctx, ws), 2*time.Second)
+	ctx, cancel := context.WithTimeout(middleware.WithWorkspace(ctx, ws), runtimeReadyProbeLimit)
 	defer cancel()
 
 	client, err := pool.Get(ctx)
 	if err != nil {
-		switch {
-		case errors.Is(err, daemon.ErrWorkspaceNotRegistered):
-			resp.Reason = "workspace not registered: " + truncateForEcho(ws)
-		case errors.Is(err, daemon.ErrDaemonStarting):
-			resp.Reason = "daemon is starting up"
-		default:
-			resp.Reason = err.Error()
-		}
+		resp.Reason = runtimeReadyDaemonGetReason(err, ws)
 		return resp
 	}
 
@@ -161,7 +157,12 @@ func probeDaemon(ctx context.Context, pool runtimeReadyPool, ws string) RuntimeR
 		}
 	}()
 
-	health, err := client.Health()
+	healthTimeout, timeoutReason := runtimeReadyHealthTimeout(ctx)
+	if timeoutReason != "" {
+		resp.Reason = timeoutReason
+		return resp
+	}
+	health, err := client.HealthWithTimeout(healthTimeout)
 	if err != nil {
 		resp.Reason = err.Error()
 		return resp
@@ -181,6 +182,32 @@ func probeDaemon(ctx context.Context, pool runtimeReadyPool, ws string) RuntimeR
 	return resp
 }
 
+func runtimeReadyDaemonGetReason(err error, ws string) string {
+	switch {
+	case errors.Is(err, daemon.ErrWorkspaceNotRegistered):
+		return "workspace not registered: " + truncateForEcho(ws)
+	case errors.Is(err, daemon.ErrDaemonStarting):
+		return "daemon is starting up"
+	default:
+		return err.Error()
+	}
+}
+
+func runtimeReadyHealthTimeout(ctx context.Context) (time.Duration, string) {
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return runtimeReadyProbeLimit, ""
+	}
+	timeout := time.Until(deadline)
+	if timeout > 0 {
+		return timeout, ""
+	}
+	if err := ctx.Err(); err != nil {
+		return 0, err.Error()
+	}
+	return 0, "runtime readiness probe timed out"
+}
+
 // probeFleet checks fleet-client-mode workspace readiness: the IssueBackend
 // factory returns a non-nil backend and its Stats RPC succeeds.
 func probeFleet(ctx context.Context, backendFn IssueBackendFn, ws string) RuntimeReadyResponse {
@@ -197,7 +224,7 @@ func probeFleet(ctx context.Context, backendFn IssueBackendFn, ws string) Runtim
 		return resp
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, runtimeReadyProbeLimit)
 	defer cancel()
 
 	if _, err := be.Stats(ctx); err != nil {

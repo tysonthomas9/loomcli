@@ -35,9 +35,15 @@ func (c *Client) Status() (*StatusResponse, error) {
 	return &status, nil
 }
 
-// Health sends a health check request to verify the daemon is healthy
+// Health sends a health check request to verify the daemon is healthy.
 func (c *Client) Health() (*HealthResponse, error) {
-	resp, err := c.Execute(OpHealth, nil)
+	return c.HealthWithTimeout(0)
+}
+
+// HealthWithTimeout sends a health check request with a per-call timeout
+// override. A zero timeout uses the client's configured timeout.
+func (c *Client) HealthWithTimeout(timeout time.Duration) (*HealthResponse, error) {
+	resp, err := c.executeWithTimeout(OpHealth, nil, "", timeout)
 	if err != nil {
 		return nil, err
 	}
