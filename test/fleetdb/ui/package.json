@@ -5,7 +5,7 @@
   "description": "FleetDB UI regression tests for loomcli.",
   "scripts": {
     "test": "playwright test",
-    "test:fleet-only": "FLEETDB_MODE=fleet-only playwright test",
+    "test:fleet-only": "PLAYWRIGHT_FLEETDB_MODE=fleet-only playwright test",
     "test:headed": "playwright test --headed",
     "test:debug": "playwright test --debug",
     "test:ui": "playwright test --ui",

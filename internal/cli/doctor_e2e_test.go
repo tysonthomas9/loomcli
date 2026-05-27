@@ -439,7 +439,7 @@ func TestE2E_DoctorFleetProbeUnreachable(t *testing.T) {
 		"GIT_CONFIG_NOSYSTEM=1",
 		"LOOM_ISSUE_BACKEND=fleet",
 		// Use a host that will never resolve. Probe should fail fast.
-		"LOOM_FLEET_URL=http://fleet-probe-must-not-resolve.invalid:65535",
+		"LOOM_FLEET_DB_URL=http://fleet-probe-must-not-resolve.invalid:65535",
 		"LOOM_WORKSPACE=TEST",
 	)
 	cmd.Env = filtered

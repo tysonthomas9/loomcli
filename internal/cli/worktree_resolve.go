@@ -543,16 +543,10 @@ func (r *Resolver) SetRepoDefaultBranch(repoName, branch string) error {
 		return fmt.Errorf("target branch update only supported in workspace mode")
 	}
 	ctx := cmdstore.RootContext()
-	dataDir := bootstrap.LoomDir()
-	if dataDir == "" {
-		return fmt.Errorf("cannot determine loom data directory")
-	}
-	handle, err := bootstrap.OpenStore(ctx, dataDir, nil)
+	handle, err := cmdstore.OpenStore(ctx)
 	if err != nil {
 		return fmt.Errorf("open fleet-db store: %w", err)
 	}
-	// Apply store-level tracing (this path bypasses cmdstore.OpenStore).
-	handle.Store = cmdstore.WrapStoreWithTracing(handle.Store)
 	defer func() { _ = handle.Close() }()
 	if _, err := handle.Store.Repos().Update(ctx, r.Workspace, repoName, store.RepoUpdate{DefaultBranch: &branch}); err != nil {
 		return fmt.Errorf("update repo %q default branch in workspace %q: %w", repoName, r.Workspace, err)

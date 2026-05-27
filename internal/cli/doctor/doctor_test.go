@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 )
 
@@ -345,7 +346,7 @@ func TestDoctorJSONOutput(t *testing.T) {
 		Checks: []CheckResult{
 			{Name: "git", Status: StatusPass, Summary: "git 2.44 found"},
 			{Name: "tmux", Status: StatusWarn, Summary: "tmux not installed", Detail: "Required for daemon mode"},
-			{Name: "fleet-db", Status: StatusFail, Summary: "fleet-db not configured", Detail: "Set LOOM_FLEET_URL"},
+			{Name: "fleet-db", Status: StatusFail, Summary: "fleet-db not configured", Detail: "Set LOOM_FLEET_DB_URL"},
 		},
 		Summary: DoctorSummary{Pass: 1, Warn: 1, Fail: 1},
 	}
@@ -1375,7 +1376,7 @@ func TestCheckStaleSessionRecords_LeftoverTmpFixMode(t *testing.T) {
 
 func TestCheckFleetProbeUnreachable(t *testing.T) {
 	t.Setenv("LOOM_ISSUE_BACKEND", "fleet")
-	t.Setenv("LOOM_FLEET_URL", "http://fleet-not-running.invalid:8080")
+	t.Setenv(bootstrap.EnvFleetDBURL, "http://fleet-not-running.invalid:8080")
 	t.Setenv("LOOM_WORKSPACE", "TEST")
 
 	origProbe := fleetHealthProbe
@@ -1399,7 +1400,7 @@ func TestCheckFleetProbeUnreachable(t *testing.T) {
 
 func TestCheckFleetProbeReachable(t *testing.T) {
 	t.Setenv("LOOM_ISSUE_BACKEND", "fleet")
-	t.Setenv("LOOM_FLEET_URL", "http://fleet-db.local:8080")
+	t.Setenv(bootstrap.EnvFleetDBURL, "http://fleet-db.local:8080")
 	t.Setenv("LOOM_WORKSPACE", "TEST")
 
 	origProbe := fleetHealthProbe
@@ -1425,7 +1426,7 @@ func TestCheckFleetProbeReachable(t *testing.T) {
 
 func TestCheckFleetNoURL(t *testing.T) {
 	t.Setenv("LOOM_ISSUE_BACKEND", "fleet")
-	t.Setenv("LOOM_FLEET_URL", "")
+	t.Setenv(bootstrap.EnvFleetDBURL, "")
 	t.Setenv("LOOM_WORKSPACE", "TEST")
 
 	// Probe should not be called when URL is empty.

@@ -255,16 +255,10 @@ func newFleetDBIssueBackend() backend.IssueBackend {
 }
 
 func (b *fleetDBIssueBackend) withBackend(ctx context.Context, op string, fn func(backend.IssueBackend) error) error {
-	dataDir := bootstrap.LoomDir()
-	if dataDir == "" {
-		return backend.ErrUnavailable(op, "cannot resolve loom data directory; set HOME or LOOM_CONFIG_DIR", nil)
-	}
-	handle, err := bootstrap.OpenStore(ctx, dataDir, nil)
+	handle, err := cmdstore.OpenStore(ctx)
 	if err != nil {
 		return backend.ErrUnavailable(op, "open fleet-db store", err)
 	}
-	// Apply store-level tracing here (this path bypasses cmdstore.OpenStore).
-	handle.Store = cmdstore.WrapStoreWithTracing(handle.Store)
 	defer func() { _ = handle.Close() }()
 
 	ws, err := bootstrap.ResolveActiveWorkspaceKey(ctx, handle.Store.Workspaces())
