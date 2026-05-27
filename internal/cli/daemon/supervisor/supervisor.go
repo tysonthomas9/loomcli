@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"os"
 	"path/filepath"
 	"sync"
 	"time"
@@ -201,82 +200,6 @@ const (
 )
 
 var controlPlaneOperationTimeout = 2 * time.Second
-
-func (s *Supervisor) startControlPlaneNode() error {
-	if s.ControlStore == nil || s.WorkspaceID == "" {
-		return nil
-	}
-	nodeID := s.resolveNodeID()
-	ttl := s.NodeTTL
-	if ttl <= 0 {
-		ttl = defaultNodeTTL
-	}
-	interval := s.NodeInterval
-	if interval <= 0 {
-		interval = defaultNodeInterval
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), controlPlaneOperationTimeout)
-	defer cancel()
-	if _, err := s.ControlStore.Nodes().Create(ctx, store.NodeCreate{
-		WorkspaceKey:    s.WorkspaceID,
-		NodeID:          nodeID,
-		OwnerActor:      resolveNodeOwnerActor(),
-		RuntimeProvider: domain.RuntimeProviderLocal,
-		Capabilities:    []string{"local-supervisor", "agent-process"},
-		Capacity:        len(s.Agents),
-		DrainState:      domain.NodeDrainActive,
-		TTL:             ttl,
-	}); err != nil {
-		return fmt.Errorf("register supervisor node %q: %w", nodeID, err)
-	}
-	s.NodeID = nodeID
-
-	s.RegisterTick(GoroutineNodeHeartbeat)
-	s.RunCritical(GoroutineNodeHeartbeat, func() {
-		s.runNodeHeartbeat(nodeID, ttl, interval)
-	})
-	return nil
-}
-
-func (s *Supervisor) runNodeHeartbeat(nodeID string, ttl, interval time.Duration) {
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-s.Shutdown:
-			return
-		case <-ticker.C:
-			ctx, cancel := context.WithTimeout(context.Background(), controlPlaneOperationTimeout)
-			_, err := s.ControlStore.Nodes().Heartbeat(ctx, s.WorkspaceID, nodeID, ttl)
-			cancel()
-			if err != nil {
-				slog.Warn("supervisor node heartbeat failed", "workspace", s.WorkspaceID, "node_id", nodeID, "err", err)
-			}
-			s.RecordTick(GoroutineNodeHeartbeat)
-		}
-	}
-}
-
-func (s *Supervisor) resolveNodeID() string {
-	if s.NodeID != "" {
-		return s.NodeID
-	}
-	host, err := os.Hostname()
-	if err != nil || host == "" {
-		host = "unknown-host"
-	}
-	return fmt.Sprintf("loom-supervisor-%s-%d", host, os.Getpid())
-}
-
-func resolveNodeOwnerActor() string {
-	for _, key := range []string{"LOOM_FLEET_DB_ACTOR", "LOOM_AGENT_NAME", "USER"} {
-		if value := os.Getenv(key); value != "" {
-			return value
-		}
-	}
-	return "local"
-}
 
 // Stop gracefully shuts down all agents. Safe to call multiple times.
 func (s *Supervisor) Stop() {

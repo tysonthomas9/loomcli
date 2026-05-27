@@ -106,7 +106,6 @@ func NewDaemon(config *cfgpkg.DaemonConfig, projectDir string, eventBus events.E
 		Agents:         make([]*supervisor.AgentProcess, 0, len(config.Agents)),
 		ControlStore:   st,
 		IssueBackend:   issueBackend,
-		IpcSocketPath:  resolveAgentIPCSocketPath(projectDir, config.Daemon.PIDFile),
 	}
 
 	wireSupervisorCallbacks(sup, issueBackend)

@@ -3,10 +3,13 @@ package daemon
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/cli/daemonregistry"
 	"github.com/tysonthomas9/loomcli/internal/events"
+	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 )
 
 // SpyEmitter records all emitted events for test assertions.
@@ -85,7 +88,7 @@ func TestDaemon_NewDaemon_NilBusDefaultsToNop(t *testing.T) {
 	}
 }
 
-func TestDaemon_NewDaemon_PrecomputesAgentIPCSocketPath(t *testing.T) {
+func TestDaemon_NewDaemon_DoesNotPublishAgentIPCSocketPathBeforeBind(t *testing.T) {
 	tmpDir, wtDir := setupTestWorktree(t, "falcon")
 	agents := []AgentEntry{{Worktree: wtDir, Role: "plan"}}
 	config := makeDaemonConfig(agents, nil)
@@ -95,8 +98,37 @@ func TestDaemon_NewDaemon_PrecomputesAgentIPCSocketPath(t *testing.T) {
 		t.Fatalf("NewDaemon() error = %v", err)
 	}
 
-	want := resolveAgentIPCSocketPath(tmpDir, config.Daemon.PIDFile)
-	if daemon.sup.IpcSocketPath != want {
-		t.Fatalf("IpcSocketPath = %q, want %q before daemon.Start", daemon.sup.IpcSocketPath, want)
+	if daemon.sup.IpcSocketPath != "" {
+		t.Fatalf("IpcSocketPath = %q, want empty before agent IPC bind succeeds", daemon.sup.IpcSocketPath)
+	}
+}
+
+func TestDaemon_StartDoesNotPublishSocketLabelBeforeAgentIPCBind(t *testing.T) {
+	st := memstore.New()
+	tmpDir, wtDir := setupTestWorktree(t, "falcon")
+	agents := []AgentEntry{{Worktree: wtDir, Role: "plan"}}
+	config := makeDaemonConfig(agents, nil)
+	config.Backend = "fleet"
+
+	daemon, err := NewDaemon(config, tmpDir, nil, nil, st)
+	if err != nil {
+		t.Fatalf("NewDaemon() error = %v", err)
+	}
+	daemon.sup.WorkspaceID = "WS"
+	daemon.sup.NodeID = "node-1"
+
+	if err := daemon.Start(); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	defer daemon.Stop()
+
+	node, err := st.Nodes().Get(t.Context(), "WS", "node-1")
+	if err != nil {
+		t.Fatalf("get node: %v", err)
+	}
+	for _, label := range node.Labels {
+		if strings.HasPrefix(label, daemonregistry.LabelSocket) {
+			t.Fatalf("unexpected socket label before agent IPC bind succeeds: labels=%v", node.Labels)
+		}
 	}
 }
