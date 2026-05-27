@@ -331,33 +331,6 @@ export interface GraphResponse {
   error?: string
 }
 
-/** Daemon status data - runtime configuration from the daemon */
-export interface DaemonStatusData {
-  version: string
-  workspace_path: string
-  database_path: string
-  socket_path: string
-  pid: number
-  uptime_seconds: number
-  last_activity_time: string
-  exclusive_lock_active: boolean
-  exclusive_lock_holder?: string
-  // Configuration fields - these are what we test
-  auto_commit: boolean
-  auto_push: boolean
-  auto_pull: boolean
-  local_mode: boolean
-  sync_interval: string
-  daemon_mode: string
-}
-
-/** Daemon status response */
-export interface DaemonStatusResponse {
-  success: boolean
-  data?: DaemonStatusData
-  error?: string
-}
-
 // =============================================================================
 // API Client Implementation
 // =============================================================================
@@ -368,8 +341,8 @@ export interface DaemonStatusResponse {
  * All methods throw on non-2xx responses with descriptive error messages
  * including HTTP status and response body.
  *
- * Issue CRUD, dependency, stats, ready, blocked, daemon status, and graph
- * methods route through workspace-scoped endpoints (/api/workspaces/{ws}/...).
+ * Issue CRUD, dependency, stats, ready, blocked, and graph methods route
+ * through workspace-scoped endpoints (/api/workspaces/{ws}/...).
  * The API E2E suite intentionally has no flat /api fallback for these
  * contracts.
  */
@@ -420,16 +393,6 @@ export class LoomApiClient {
     const result = await this.parseResponse<MetricsResponse>(response)
     if (!result.success || !result.data) {
       throw new Error(`Metrics request failed: ${result.error}`)
-    }
-    return result.data
-  }
-
-  /** GET /api/workspaces/{ws}/daemon/status - Daemon runtime configuration */
-  async daemonStatus(): Promise<DaemonStatusData> {
-    const response = await this.request.get(`${this.wsPrefix}/daemon/status`)
-    const result = await this.parseResponse<DaemonStatusResponse>(response)
-    if (!result.success || !result.data) {
-      throw new Error(`Daemon status request failed: ${result.error}`)
     }
     return result.data
   }

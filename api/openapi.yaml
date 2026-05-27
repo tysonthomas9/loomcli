@@ -468,21 +468,6 @@ paths:
               schema:
                 $ref: "#/components/schemas/MessageResponse"
 
-  /api/workspaces/{ws}/daemon/status:
-    get:
-      operationId: getWorkspaceDaemonStatus
-      tags: [health]
-      summary: Workspace-scoped daemon status
-      parameters:
-        - $ref: "#/components/parameters/WorkspaceId"
-      responses:
-        "200":
-          description: Daemon status
-          content:
-            application/json:
-              schema:
-                type: object
-
   # ── Issues ──────────────────────────────────────────────────────────────
   /api/workspaces/{ws}/issues:
     get:

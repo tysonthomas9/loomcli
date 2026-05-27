@@ -280,23 +280,6 @@ export interface paths {
     patch: operations["patchWorkspaceBackend"];
     trace?: never;
   };
-  "/api/workspaces/{ws}/daemon/status": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /** Workspace-scoped daemon status */
-    get: operations["getWorkspaceDaemonStatus"];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
   "/api/workspaces/{ws}/issues": {
     parameters: {
       query?: never;
@@ -3373,29 +3356,6 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["MessageResponse"];
-        };
-      };
-    };
-  };
-  getWorkspaceDaemonStatus: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description Workspace identifier */
-        ws: components["parameters"]["WorkspaceId"];
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Daemon status */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": Record<string, never>;
         };
       };
     };

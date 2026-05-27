@@ -116,13 +116,6 @@ func (p *statsPoolAdapter) Discard(client StatsClient) {
 	}
 }
 
-// DaemonStatusResponse wraps the daemon status for JSON response.
-type DaemonStatusResponse struct {
-	Success bool                `json:"success"`
-	Data    *rpc.StatusResponse `json:"data,omitempty"`
-	Error   string              `json:"error,omitempty"`
-}
-
 // HandleHealth returns a simple health check response.
 // This is for load balancers and basic monitoring - it doesn't check daemon connectivity.
 func HandleHealth(pool daemon.Pool) http.HandlerFunc {
@@ -376,74 +369,5 @@ func HandleMetrics(hub *realtime.Hub, getFleetTimeouts func() int64, claimMetric
 			Success: true,
 			Data:    metrics,
 		})
-	}
-}
-
-// HandleDaemonStatus returns the daemon's runtime configuration.
-// This includes auto-commit, auto-push, auto-pull, local-mode, sync-interval, and daemon-mode.
-func HandleDaemonStatus(pool daemon.Pool) http.HandlerFunc {
-	return HandleDaemonStatusWithMode(pool, true)
-}
-
-// HandleDaemonStatusWithMode is the daemon-aware variant of HandleDaemonStatus.
-//
-// In daemon mode (daemonExpected=true) this behaves identically to the
-// historical handler: 503 when the pool can't connect, 200 with full
-// runtime config when it can. In fleet client mode (daemonExpected=false)
-// there is no daemon to query, so the handler returns 200 with a stub
-// response (success=true, daemon_mode="fleet", everything else zero) so
-// the FE's daemon-status badge can render a meaningful "fleet, no daemon"
-// state instead of perpetually showing the workspace as degraded.
-func HandleDaemonStatusWithMode(pool daemon.Pool, daemonExpected bool) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if !daemonExpected {
-			handler.WriteJSON(w, http.StatusOK, DaemonStatusResponse{
-				Success: true,
-				Data:    &rpc.StatusResponse{DaemonMode: rpc.DaemonModeFleet},
-			})
-			return
-		}
-		if pool == nil {
-			handler.WriteJSON(w, http.StatusServiceUnavailable, DaemonStatusResponse{
-				Success: false,
-				Error:   "connection pool not initialized",
-			})
-			return
-		}
-
-		// Acquire connection with timeout
-		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
-		defer cancel()
-
-		client, err := pool.Get(ctx)
-		if err != nil {
-			status := http.StatusServiceUnavailable
-			if errors.Is(err, context.DeadlineExceeded) {
-				status = http.StatusGatewayTimeout
-			}
-			handler.WriteJSON(w, status, DaemonStatusResponse{Success: false, Error: err.Error()})
-			return
-		}
-		rpcOK := false
-		defer func() {
-			if rpcOK {
-				pool.Put(client)
-			} else {
-				pool.Discard(client)
-			}
-		}()
-
-		// Get daemon status
-		daemonStatus, err := client.Status()
-		if err != nil {
-			handler.WriteJSON(w, http.StatusInternalServerError, DaemonStatusResponse{
-				Success: false,
-				Error:   fmt.Sprintf("rpc error: %v", err),
-			})
-			return
-		}
-		rpcOK = true
-
-		handler.WriteJSON(w, http.StatusOK, DaemonStatusResponse{Success: true, Data: daemonStatus})
 	}
 }
