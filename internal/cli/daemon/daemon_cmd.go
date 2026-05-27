@@ -356,6 +356,32 @@ func startDaemonSockets(daemon *Daemon, projectDir string, config *cfgpkg.Daemon
 	}
 }
 
+func detectDaemonRuntimeForCommand(projectDir string) cli.DaemonRuntimeInfo {
+	rt := cli.DetectDaemonRuntime(projectDir)
+	if rt.Running {
+		return rt
+	}
+	if wsRT := detectWorkspaceDaemonRuntime(); wsRT.Running {
+		return wsRT
+	}
+	return rt
+}
+
+func printUnknownDaemonPIDRecovery(rt cli.DaemonRuntimeInfo) {
+	fmt.Fprintf(os.Stderr, "Error: daemon appears to be running (detected via %s) but PID could not be determined.\n", rt.Source)
+	if rt.Source == "workspace-lock" {
+		workspace := os.Getenv("LOOM_WORKSPACE")
+		wsDir := cfgpkg.GetWorkspaceDir(workspace)
+		fmt.Fprintf(os.Stderr, "To recover, inspect the workspace daemon lock files and retry:\n")
+		fmt.Fprintf(os.Stderr, "  cat %s\n", filepath.Join(wsDir, "daemon.pid"))
+		fmt.Fprintf(os.Stderr, "  ls -l %s\n", filepath.Join(wsDir, "daemon.lock"))
+		return
+	}
+	fmt.Fprintf(os.Stderr, "To recover, inspect or remove .loom/daemon.lock and retry:\n")
+	fmt.Fprintf(os.Stderr, "  cat .loom/daemon.lock        # check daemon metadata\n")
+	fmt.Fprintf(os.Stderr, "  rm .loom/daemon.lock          # force-clear stale lock\n")
+}
+
 func runDaemonStatus(cmd *cobra.Command, args []string) {
 	projectDir, err := os.Getwd()
 	if err != nil {
@@ -363,8 +389,8 @@ func runDaemonStatus(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	// Use shared runtime detection (lockfile -> state -> PID fallback)
-	rt := cli.DetectDaemonRuntime(projectDir)
+	// Use shared runtime detection, then fall back to the workspace lock
+	rt := detectDaemonRuntimeForCommand(projectDir)
 	if !rt.Running {
 		fmt.Println("Daemon: not running")
 		return
@@ -408,18 +434,15 @@ func runDaemonStop(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	// Use shared runtime detection (lockfile -> state -> PID fallback)
-	rt := cli.DetectDaemonRuntime(projectDir)
+	// Use shared runtime detection, then fall back to the workspace lock
+	rt := detectDaemonRuntimeForCommand(projectDir)
 	if !rt.Running {
 		fmt.Println("Daemon is not running.")
 		return
 	}
 
 	if rt.PID == 0 {
-		fmt.Fprintf(os.Stderr, "Error: daemon appears to be running (detected via %s) but PID could not be determined.\n", rt.Source)
-		fmt.Fprintf(os.Stderr, "To recover, inspect or remove .loom/daemon.lock and retry:\n")
-		fmt.Fprintf(os.Stderr, "  cat .loom/daemon.lock        # check daemon metadata\n")
-		fmt.Fprintf(os.Stderr, "  rm .loom/daemon.lock          # force-clear stale lock\n")
+		printUnknownDaemonPIDRecovery(rt)
 		os.Exit(1)
 	}
 

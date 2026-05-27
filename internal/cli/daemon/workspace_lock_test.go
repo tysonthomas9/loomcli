@@ -30,7 +30,7 @@ func TestAcquireWorkspaceDaemonLockSkipsWhenUnset(t *testing.T) {
 
 // TestAcquireWorkspaceDaemonLockWritesPID locks the post-acquire state:
 // lock file exists, sidecar daemon.pid contains the current PID, and
-// Release cleans both up.
+// Release cleans the PID sidecar while keeping the stable lock path.
 func TestAcquireWorkspaceDaemonLockWritesPID(t *testing.T) {
 	loomDir := t.TempDir()
 	t.Setenv("LOOM_CONFIG_DIR", loomDir)
@@ -54,8 +54,8 @@ func TestAcquireWorkspaceDaemonLockWritesPID(t *testing.T) {
 	}
 
 	lock.Release()
-	if _, statErr := os.Stat(wantLock); !os.IsNotExist(statErr) {
-		t.Errorf("Release should remove daemon.lock; stat err=%v", statErr)
+	if _, statErr := os.Stat(wantLock); statErr != nil {
+		t.Errorf("Release should keep daemon.lock as a stable flock path; stat err=%v", statErr)
 	}
 	if _, statErr := os.Stat(wantPID); !os.IsNotExist(statErr) {
 		t.Errorf("Release should remove daemon.pid; stat err=%v", statErr)
@@ -119,5 +119,31 @@ func TestAcquireWorkspaceDaemonLockReleasesOnRelease(t *testing.T) {
 	defer second.Release()
 	if second == nil {
 		t.Fatal("acquire after release returned nil")
+	}
+}
+
+// TestDetectDaemonRuntimeForCommandFallsBackToWorkspaceLock verifies that
+// daemon status/stop can find a workspace daemon from a different cwd after
+// cwd-local runtime detection comes up empty.
+func TestDetectDaemonRuntimeForCommandFallsBackToWorkspaceLock(t *testing.T) {
+	loomDir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", loomDir)
+	t.Setenv("LOOM_WORKSPACE", "playground")
+
+	lock, err := acquireWorkspaceDaemonLock()
+	if err != nil {
+		t.Fatalf("workspace lock: %v", err)
+	}
+	defer lock.Release()
+
+	rt := detectDaemonRuntimeForCommand(t.TempDir())
+	if !rt.Running {
+		t.Fatalf("workspace lock is held, but runtime detection reported not running")
+	}
+	if rt.Source != "workspace-lock" {
+		t.Fatalf("runtime source = %q, want workspace-lock", rt.Source)
+	}
+	if rt.PID != os.Getpid() {
+		t.Fatalf("runtime PID = %d, want %d", rt.PID, os.Getpid())
 	}
 }

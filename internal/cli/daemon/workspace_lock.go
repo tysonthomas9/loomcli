@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/cli"
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/lockfile"
 )
@@ -75,17 +76,21 @@ func acquireWorkspaceDaemonLock() (*workspaceDaemonLock, error) {
 	}, nil
 }
 
-// Release drops the lock and removes the sidecar files. Safe on nil.
+// Release drops the lock and removes the PID sidecar. Safe on nil.
+//
+// The lock file itself intentionally remains on disk. Removing a flocked file
+// after unlock can delete a successor daemon's newly-acquired lock path during
+// handoff, allowing a third daemon to create and lock a different inode.
 func (w *workspaceDaemonLock) Release() {
 	if w == nil {
 		return
 	}
 	if w.lockFile != nil {
+		_ = os.Remove(w.pidPath)
 		_ = lockfile.FlockUnlock(w.lockFile)
 		_ = w.lockFile.Close()
+		w.lockFile = nil
 	}
-	_ = os.Remove(w.pidPath)
-	_ = os.Remove(w.lockPath)
 }
 
 // workspaceLockBusyError carries the existing daemon's PID so callers
@@ -112,6 +117,40 @@ func (e *workspaceLockBusyError) Error() string {
 
 func (e *workspaceLockBusyError) Unwrap() error {
 	return e.wrappedError
+}
+
+// detectWorkspaceDaemonRuntime probes the workspace-scoped daemon lock.
+// It is used as a fallback for commands run from a different cwd than the
+// daemon that owns the active LOOM_WORKSPACE.
+func detectWorkspaceDaemonRuntime() cli.DaemonRuntimeInfo {
+	workspace := strings.TrimSpace(os.Getenv("LOOM_WORKSPACE"))
+	if workspace == "" {
+		return cli.DaemonRuntimeInfo{}
+	}
+	wsDir := cfgpkg.GetWorkspaceDir(workspace)
+	lockPath := filepath.Join(wsDir, "daemon.lock")
+	pidPath := filepath.Join(wsDir, "daemon.pid")
+
+	lf, err := os.OpenFile(lockPath, os.O_RDWR, 0) //nolint:gosec // user-private lock
+	if err != nil {
+		return cli.DaemonRuntimeInfo{}
+	}
+	defer func() { _ = lf.Close() }()
+
+	lockErr := lockfile.TryLockExclusive(lf)
+	if lockErr == nil {
+		_ = lockfile.FlockUnlock(lf)
+		return cli.DaemonRuntimeInfo{}
+	}
+	if !errors.Is(lockErr, lockfile.ErrLocked) {
+		return cli.DaemonRuntimeInfo{}
+	}
+
+	pid := readWorkspacePID(pidPath)
+	if pid > 0 && lockfile.IsProcessRunning(pid) {
+		return cli.DaemonRuntimeInfo{Running: true, PID: pid, Source: "workspace-lock"}
+	}
+	return cli.DaemonRuntimeInfo{Running: true, Source: "workspace-lock"}
 }
 
 // readWorkspacePID best-effort reads the existing daemon's PID from
