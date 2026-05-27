@@ -178,6 +178,12 @@ func runWorkspaceOpsEnsureRuntime(cmd *cobra.Command, args []string) error {
 	if _, err := local.EnsureRuntimeStarted(ctx, initial.Daemon.DataDir, 0); err != nil {
 		return fmt.Errorf("ensure local runtime: %w", err)
 	}
+	if rt, err := local.ReadRuntimeStatus(ctx, initial.Daemon.DataDir); err == nil &&
+		rt != nil && rt.Runtime != nil && rt.Runtime.URL != "" {
+		if err := local.WaitForWorkspaceReady(ctx, rt.Runtime.URL, key); err != nil {
+			return fmt.Errorf("ensure local runtime: %w", err)
+		}
+	}
 
 	status, err := waitForWorkspaceOpsDaemon(ctx, key, initial, loadWorkspaceOpsStatus)
 	if err != nil {
