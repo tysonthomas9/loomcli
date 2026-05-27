@@ -206,6 +206,14 @@ func RemoveActiveRegistryIfOwner(registryPath string, pid int, url string) {
 	if registryPath == "" {
 		return
 	}
+	lock, err := acquireActiveRegistryLock(registryPath)
+	if err != nil {
+		// Best-effort cleanup: if another starter owns the registry lock,
+		// it is already responsible for evaluating or replacing the entry.
+		return
+	}
+	defer func() { _ = lock.Release() }()
+
 	entry, err := ReadActiveRegistry(registryPath)
 	if err != nil || entry == nil {
 		return
