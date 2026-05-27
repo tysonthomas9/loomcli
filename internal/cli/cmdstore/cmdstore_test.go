@@ -55,3 +55,20 @@ func TestOpenStoreRejectsServerURLRemoteMode(t *testing.T) {
 		t.Fatalf("error = %v, want LOOM_SERVER_URL routing error", err)
 	}
 }
+
+func TestOpenStoreAllowsExplicitFleetDBBackendWithServerURL(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	t.Setenv("LOOM_SERVER_URL", "http://127.0.0.1:18080")
+	t.Setenv("LOOM_ISSUE_BACKEND", "fleetdb")
+	t.Setenv(bootstrap.EnvFleetDBURL, "http://fleet-db:8080")
+
+	handle, err := OpenStore(context.Background())
+	if err != nil {
+		t.Fatalf("OpenStore returned error with explicit fleetdb backend: %v", err)
+	}
+	defer func() { _ = handle.Close() }()
+
+	if got := handle.URL(); got != "http://fleet-db:8080" {
+		t.Fatalf("handle.URL() = %q, want fleet-db URL", got)
+	}
+}

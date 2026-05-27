@@ -25,7 +25,7 @@ import (
 // Mode. Returns the handle so callers can `defer h.Close()`.
 func OpenStore(ctx context.Context) (*bootstrap.StoreHandle, error) {
 	ensureFleetDBEnvFromFleetEnv()
-	if os.Getenv("LOOM_SERVER_URL") != "" {
+	if isAPIServerMode() {
 		return nil, errors.New("LOOM_SERVER_URL is set; direct FleetDB store commands are disabled in remote server mode")
 	}
 	dataDir := bootstrap.LoomDir()
@@ -49,6 +49,16 @@ func ensureFleetDBEnvFromFleetEnv() {
 	// Legacy LOOM_FLEET_* variables are intentionally ignored. Store routing
 	// must only use the canonical LOOM_FLEET_DB_* names; otherwise two call
 	// paths can resolve different backing stores in the same shell.
+}
+
+func isAPIServerMode() bool {
+	switch os.Getenv("LOOM_ISSUE_BACKEND") {
+	case "api":
+		return true
+	case "fleetdb", "fleet":
+		return false
+	}
+	return os.Getenv("LOOM_SERVER_URL") != ""
 }
 
 // SetRootContext is a thin alias for runtimectx.SetRootContext kept so
