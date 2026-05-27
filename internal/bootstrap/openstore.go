@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
 
 	"github.com/tysonthomas9/loomcli/internal/backend/fleet"
 	"github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
@@ -74,14 +73,14 @@ func (h *StoreHandle) Close() error {
 // In ModeCloud (LOOM_FLEET_DB_URL set), it builds an HTTP client against
 // the configured URL. The returned handle's embedded field is nil.
 //
-// In ModeLocal (default), it spawns an embedded fleet-db subprocess
-// (via StartEmbedded) and builds an HTTP client against its URL. The
-// caller MUST call handle.Close() during shutdown to terminate the
-// subprocess.
+// In ModeLocal (default), it reuses or spawns a host-level embedded
+// fleet-db subprocess (via StartEmbedded) and builds an HTTP client
+// against its URL. The caller MUST call handle.Close() during shutdown
+// to terminate a subprocess it owns.
 //
-// dataDir is the per-user loom directory (typically LoomDir()) and is
-// only used in ModeLocal — it's where the embedded fleet-db's
-// miniredis snapshot lives.
+// dataDir is the per-user loom directory (typically LoomDir()). Embedded
+// FleetDB runtime files live under FleetDBRuntimeDir(), not dataDir, so
+// foreign LOOM_CONFIG_DIR values do not create split-brain local FleetDBs.
 func OpenStore(ctx context.Context, dataDir string, logger *slog.Logger) (*StoreHandle, error) {
 	if logger == nil {
 		logger = slog.Default()
@@ -120,7 +119,10 @@ func openCloudStore(cfg fleetdb.Config, logger *slog.Logger) (*StoreHandle, erro
 }
 
 func openLocalStore(ctx context.Context, dataDir string, cfg fleetdb.Config, logger *slog.Logger) (*StoreHandle, error) {
-	fleetDir := filepath.Join(dataDir, "fleet-db")
+	fleetDir := FleetDBRuntimeDir()
+	if fleetDir == "" {
+		return nil, errors.New("openstore: local: cannot resolve fleet-db runtime directory; set HOME or " + EnvFleetDBRuntimeDir)
+	}
 	if h, ok, err := tryReuseLocalStore(ctx, fleetDir, cfg, logger); ok || err != nil {
 		return h, err
 	}

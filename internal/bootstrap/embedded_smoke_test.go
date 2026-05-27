@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -23,6 +24,7 @@ func TestEmbeddedFleetDBPersistenceSmoke(t *testing.T) {
 	}
 
 	dataDir := t.TempDir()
+	t.Setenv(bootstrap.EnvFleetDBRuntimeDir, filepath.Join(dataDir, "fleet-db"))
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
