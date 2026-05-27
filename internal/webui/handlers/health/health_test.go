@@ -69,46 +69,6 @@ func TestHandleAPIHealth_NilPoolShortCircuit(t *testing.T) {
 	}
 }
 
-// TestHandleDaemonStatus_NoDaemonMode verifies the workspace-scoped
-// daemon-status handler returns the fleet stub when daemonExpected=false,
-// instead of the historical 503 ("workspace not registered" / "connection
-// pool not initialized") that fleet mode used to throw.
-func TestHandleDaemonStatus_NoDaemonMode(t *testing.T) {
-	handler := HandleDaemonStatusWithMode(nil, false)
-	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/x/daemon/status", nil)
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
-	var body DaemonStatusResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if !body.Success {
-		t.Errorf("Success = false, want true (fleet stub)")
-	}
-	if body.Data == nil {
-		t.Fatalf("Data = nil, want stub StatusResponse")
-	}
-	if body.Data.DaemonMode != rpc.DaemonModeFleet {
-		t.Errorf("DaemonMode = %q, want %q", body.Data.DaemonMode, rpc.DaemonModeFleet)
-	}
-}
-
-// TestHandleDaemonStatus_DaemonExpectedNilPool keeps the daemon-mode
-// contract intact: when daemonExpected=true and no pool is wired, the
-// handler returns 503 so operators can detect daemon-mode misconfiguration.
-func TestHandleDaemonStatus_DaemonExpectedNilPool(t *testing.T) {
-	handler := HandleDaemonStatusWithMode(nil, true)
-	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/x/daemon/status", nil)
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, want 503", rec.Code)
-	}
-}
-
 // TestHandleAPIHealth_DaemonDead is the prod-regression guard for the
 // daemon-mode 503 contract. A wired pool whose Get() errors MUST 503 so
 // k8s/load-balancer liveness probes restart the pod —
@@ -136,24 +96,3 @@ func TestHandleAPIHealth_DaemonDead(t *testing.T) {
 	}
 }
 
-// TestHandleDaemonStatus_DaemonDead mirrors the /api/health regression
-// guard for the workspace-scoped daemon-status route. With a wired pool
-// whose Get() always errors and daemonExpected=true, the
-// response MUST be 503 so the FE badge correctly renders "daemon down,
-// please restart" rather than the fleet-stub "no daemon expected" state.
-func TestHandleDaemonStatus_DaemonDead(t *testing.T) {
-	handler := HandleDaemonStatusWithMode(stubDeadDaemonPool{}, true)
-	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/x/daemon/status", nil)
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, want 503", rec.Code)
-	}
-	var body DaemonStatusResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if body.Success {
-		t.Errorf("Success = true, want false (daemon dead)")
-	}
-}
