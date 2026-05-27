@@ -27,7 +27,7 @@ type mockIPCBackend struct {
 	claimCalls   []mockClaimCall
 	updateCalls  []mockUpdateCall
 	closeCalls   []mockCloseCall
-	releaseCalls []string
+	releaseCalls []mockReleaseCall
 
 	// Configurable returns
 	claimErr    error
@@ -40,8 +40,8 @@ type mockIPCBackend struct {
 // ReleaseClaim records the call so handleIPCReleaseClaim tests can assert the
 // backend was reached. Implementing it makes *mockIPCBackend satisfy
 // backend.ClaimReleaser (the capability the release handler type-asserts).
-func (m *mockIPCBackend) ReleaseClaim(_ context.Context, id string) error {
-	m.releaseCalls = append(m.releaseCalls, id)
+func (m *mockIPCBackend) ReleaseClaim(_ context.Context, id, actor string) error {
+	m.releaseCalls = append(m.releaseCalls, mockReleaseCall{ID: id, Actor: actor})
 	return m.releaseErr
 }
 
@@ -58,6 +58,11 @@ type mockUpdateCall struct {
 type mockCloseCall struct {
 	ID     string
 	Params backend.CloseParams
+}
+
+type mockReleaseCall struct {
+	ID    string
+	Actor string
 }
 
 func (m *mockIPCBackend) ClaimIssue(_ context.Context, id string, lockTTL time.Duration) error {
@@ -310,8 +315,8 @@ func TestIPCServer_ReleaseClaimSuccess(t *testing.T) {
 	if !resp.Success {
 		t.Fatalf("expected success, got error: %s", resp.Error)
 	}
-	if len(mb.releaseCalls) != 1 || mb.releaseCalls[0] != "abc-123" {
-		t.Fatalf("backend ReleaseClaim calls = %v, want [abc-123]", mb.releaseCalls)
+	if len(mb.releaseCalls) != 1 || mb.releaseCalls[0].ID != "abc-123" || mb.releaseCalls[0].Actor != "falcon" {
+		t.Fatalf("backend ReleaseClaim calls = %+v, want id abc-123 actor falcon", mb.releaseCalls)
 	}
 }
 

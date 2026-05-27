@@ -69,9 +69,9 @@ func (b *ipcIssueBackend) Close(ctx context.Context, id string, params backend.C
 
 // ReleaseClaim routes through IPC (IPCOpReleaseClaim), so the daemon applies
 // the same lease fence it enforces for Claim/Update/Close before releasing the
-// claim on the agent's behalf. The daemon derives the release actor from the
-// issue's server-side assignee, so identity is not caller-supplied. See LOOM-1.
-func (b *ipcIssueBackend) ReleaseClaim(ctx context.Context, id string) error {
+// claim on the agent's behalf. The daemon uses its authenticated AgentName as
+// the release actor. See LOOM-1.
+func (b *ipcIssueBackend) ReleaseClaim(ctx context.Context, id, actor string) error {
 	return b.ipc.Release(id)
 }
 

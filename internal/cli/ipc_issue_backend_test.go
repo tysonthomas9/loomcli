@@ -15,19 +15,21 @@ import (
 // the interface optional, capability-detected via type assertion.
 type releaserMock struct {
 	*MockIssueBackend
-	calls    int
-	lastID   string
-	releaseE error
+	calls     int
+	lastID    string
+	lastActor string
+	releaseE  error
 }
 
 var _ backend.ClaimReleaser = (*releaserMock)(nil)
 
-func (r *releaserMock) ReleaseClaim(_ context.Context, id string) error {
+func (r *releaserMock) ReleaseClaim(_ context.Context, id, actor string) error {
 	if r.MockIssueBackend == nil {
 		r.MockIssueBackend = NewMockIssueBackend()
 	}
 	r.calls++
 	r.lastID = id
+	r.lastActor = actor
 	return r.releaseE
 }
 
@@ -381,7 +383,7 @@ func TestIPCIssueBackend_ReleaseClaim_RoutesThroughIPC(t *testing.T) {
 	direct := &releaserMock{}
 	b := newIPCIssueBackend(ipc, direct)
 
-	if err := b.ReleaseClaim(context.Background(), "issue-99"); err != nil {
+	if err := b.ReleaseClaim(context.Background(), "issue-99", "planner"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if releaseCalls != 1 || gotID != "issue-99" {
@@ -401,7 +403,7 @@ func TestIPCIssueBackend_ReleaseClaim_PropagatesIPCError(t *testing.T) {
 	}
 	b := newIPCIssueBackend(ipc, NewMockIssueBackend())
 
-	err := b.ReleaseClaim(context.Background(), "issue-99")
+	err := b.ReleaseClaim(context.Background(), "issue-99", "planner")
 	if err == nil {
 		t.Fatal("expected error from ipc.Release, got nil")
 	}

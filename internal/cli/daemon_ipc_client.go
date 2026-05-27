@@ -180,10 +180,10 @@ func (c *AgentIPCClient) Complete(issueID string, params backend.CloseParams) (*
 	return &result, nil
 }
 
-// Release drops the claim lock on an issue. The daemon validates this agent's
-// lease (the same fence as Claim/Update/Complete) and derives the release actor
-// from the issue's server-side assignee, so no args are carried. Idempotent on
-// the server side: releasing an unheld lock is not an error.
+// Release completes this agent's claim on an issue. The daemon validates this
+// agent's lease (the same fence as Claim/Update/Complete) and uses AgentName as
+// the release actor, so no args are carried. Idempotent on the server side:
+// releasing an unheld lock is not an error.
 func (c *AgentIPCClient) Release(issueID string) error {
 	req := AgentIPCRequest{
 		Operation:  IPCOpReleaseClaim,

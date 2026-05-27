@@ -642,30 +642,34 @@ func (b *FleetBackend) applyStatusUpdate(ctx context.Context, id string, params 
 	}
 }
 
-// ReleaseClaim drops the claim lock on an issue without changing its status or
-// assignee. Used by `loom complete` so planners that wrote a design but did not
-// transition status out of `in_progress` still release the lock — see LOOM-1.
+// ReleaseClaim releases the claim held by actor. If the issue is still
+// in_progress and assigned to actor, it uses /release so the task becomes
+// open/unassigned and immediately claimable. If the issue already moved out of
+// in_progress, it drops only the operational lock via /release-lock.
 //
-// Calls POST /issues/<id>/release-lock as the issue's current assignee (the
-// lock holder). Unlike /release, this is lock-only: it never reverts status to
-// open or clears the assignee, so it is correct even when the agent has already
-// moved the issue to review/closed before completing (where /release would
-// fail with ErrNotClaimable). Idempotent: returns nil when the issue has no
-// current assignee (nothing to release). Transport / HTTP errors propagate so
-// the caller can log them.
-func (b *FleetBackend) ReleaseClaim(ctx context.Context, id string) error {
+// The actor is caller-supplied from the completing agent's identity. Do not
+// derive it from current.Assignee: a stale completion could otherwise release a
+// newer agent's active lock after the old lock expires and the task is reclaimed.
+func (b *FleetBackend) ReleaseClaim(ctx context.Context, id, actor string) error {
 	if id == "" {
 		return backend.ErrValidation("ReleaseClaim", "id must not be empty")
+	}
+	if actor == "" {
+		return backend.ErrValidation("ReleaseClaim", "actor must not be empty")
 	}
 	current, err := b.Get(ctx, id)
 	if err != nil {
 		return err
 	}
-	if current == nil || current.Assignee == "" {
+	if current == nil || current.Assignee != actor {
 		return nil
 	}
+	if current.Status == "in_progress" {
+		return b.execAsActor(ctx, "ReleaseClaim",
+			"/issues/"+url.PathEscape(id)+"/release", nil, actor)
+	}
 	return b.execAsActor(ctx, "ReleaseClaim",
-		"/issues/"+url.PathEscape(id)+"/release-lock", nil, current.Assignee)
+		"/issues/"+url.PathEscape(id)+"/release-lock", nil, actor)
 }
 
 // transitionToBlockedOrReview drops the claim lock (lock-only) before changing

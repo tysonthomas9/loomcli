@@ -834,7 +834,7 @@ func TestPlaygroundPlannerLeaksClaimLock(t *testing.T) {
 	// extract the TaskID it should release.
 	worktree := t.TempDir()
 	lockPath := filepath.Join(worktree, ".agent.lock")
-	lockBody := fmt.Sprintf(`{"pid":%d,"command":"plan","agent_name":"playground-planner","task_id":%q,"task_title":"Leaked-claim repro"}`,
+	lockBody := fmt.Sprintf(`{"pid":%d,"command":"plan","agent_name":"planner-actor","task_id":%q,"task_title":"Leaked-claim repro"}`,
 		os.Getpid(), issueID)
 	if err := os.WriteFile(lockPath, []byte(lockBody), 0600); err != nil {
 		t.Fatalf("write %s: %v", lockPath, err)

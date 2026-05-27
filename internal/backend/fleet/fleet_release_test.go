@@ -14,11 +14,12 @@ import (
 
 // ReleaseClaim tests (LOOM-1).
 
-// TestReleaseClaim_PostsToReleaseLockEndpoint asserts the wire shape: a GET to
-// fetch the current assignee, followed by a POST /issues/<id>/release-lock with
-// the actor header set from the issue's current assignee. ReleaseClaim is
-// lock-only, so it must hit /release-lock, not the status-reverting /release.
-func TestReleaseClaim_PostsToReleaseLockEndpoint(t *testing.T) {
+// TestReleaseClaim_InProgressPostsToReleaseEndpoint asserts the wire shape for
+// a planner that exits while the issue is still in_progress: a GET to confirm
+// the supplied actor still owns the issue, followed by POST /issues/<id>/release
+// as that actor. This both drops the lock and returns the issue to open so a
+// downstream worker can claim it immediately.
+func TestReleaseClaim_InProgressPostsToReleaseEndpoint(t *testing.T) {
 	var sawRelease bool
 	var releaseActor string
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
@@ -36,7 +37,7 @@ func TestReleaseClaim_PostsToReleaseLockEndpoint(t *testing.T) {
 			respondOK(w, map[string]interface{}{"dependencies": []interface{}{}})
 		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/issues/test-1/comments"):
 			respondOK(w, []interface{}{})
-		case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/issues/test-1/release-lock"):
+		case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/issues/test-1/release"):
 			sawRelease = true
 			releaseActor = r.Header.Get("X-Actor")
 			respondOK(w, json.RawMessage(`{}`))
@@ -46,19 +47,87 @@ func TestReleaseClaim_PostsToReleaseLockEndpoint(t *testing.T) {
 	})
 	defer ts.Close()
 
-	if err := fb.ReleaseClaim(context.Background(), "test-1"); err != nil {
+	if err := fb.ReleaseClaim(context.Background(), "test-1", "planner"); err != nil {
 		t.Fatalf("ReleaseClaim: %v", err)
 	}
 	if !sawRelease {
-		t.Fatal("expected /release-lock endpoint to be called")
+		t.Fatal("expected /release endpoint to be called")
 	}
 	if releaseActor != "planner" {
-		t.Errorf("X-Actor = %q, want %q (the issue's current assignee)", releaseActor, "planner")
+		t.Errorf("X-Actor = %q, want %q (the supplied completing actor)", releaseActor, "planner")
 	}
 }
 
-// TestReleaseClaim_EmptyAssigneeFastPath asserts no /release-lock is issued when
-// the issue has no current assignee — nothing to release, so it's a no-op.
+func TestReleaseClaim_ReviewPostsToReleaseLockEndpoint(t *testing.T) {
+	var sawReleaseLock bool
+	var releaseActor string
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/issues/test-1"):
+			respondOK(w, types.Issue{
+				ID:        "test-1",
+				Title:     "T",
+				Status:    types.StatusReview,
+				Assignee:  "planner",
+				CreatedAt: time.Now(),
+				UpdatedAt: time.Now(),
+			})
+		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/issues/test-1/deps"):
+			respondOK(w, map[string]interface{}{"dependencies": []interface{}{}})
+		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/issues/test-1/comments"):
+			respondOK(w, []interface{}{})
+		case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/issues/test-1/release-lock"):
+			sawReleaseLock = true
+			releaseActor = r.Header.Get("X-Actor")
+			respondOK(w, json.RawMessage(`{}`))
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	})
+	defer ts.Close()
+
+	if err := fb.ReleaseClaim(context.Background(), "test-1", "planner"); err != nil {
+		t.Fatalf("ReleaseClaim: %v", err)
+	}
+	if !sawReleaseLock {
+		t.Fatal("expected /release-lock endpoint to be called")
+	}
+	if releaseActor != "planner" {
+		t.Errorf("X-Actor = %q, want planner", releaseActor)
+	}
+}
+
+func TestReleaseClaim_DifferentAssigneeIsNoop(t *testing.T) {
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/issues/test-1"):
+			respondOK(w, types.Issue{
+				ID:        "test-1",
+				Title:     "T",
+				Status:    types.StatusInProgress,
+				Assignee:  "new-worker",
+				CreatedAt: time.Now(),
+				UpdatedAt: time.Now(),
+			})
+		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/issues/test-1/deps"):
+			respondOK(w, map[string]interface{}{"dependencies": []interface{}{}})
+		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/issues/test-1/comments"):
+			respondOK(w, []interface{}{})
+		case r.Method == "POST":
+			t.Fatalf("stale actor must not release or reset new owner: %s", r.URL.Path)
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	})
+	defer ts.Close()
+
+	if err := fb.ReleaseClaim(context.Background(), "test-1", "planner"); err != nil {
+		t.Fatalf("ReleaseClaim: %v", err)
+	}
+}
+
+// TestReleaseClaim_EmptyAssigneeFastPath asserts no release endpoint is issued
+// when the issue has no current assignee — nothing to release, so it's a no-op.
 func TestReleaseClaim_EmptyAssigneeFastPath(t *testing.T) {
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -83,7 +152,7 @@ func TestReleaseClaim_EmptyAssigneeFastPath(t *testing.T) {
 	})
 	defer ts.Close()
 
-	if err := fb.ReleaseClaim(context.Background(), "test-1"); err != nil {
+	if err := fb.ReleaseClaim(context.Background(), "test-1", "planner"); err != nil {
 		t.Fatalf("ReleaseClaim: %v", err)
 	}
 }
@@ -98,7 +167,7 @@ func TestReleaseClaim_PropagatesServerError(t *testing.T) {
 			respondOK(w, types.Issue{
 				ID:        "test-1",
 				Title:     "T",
-				Status:    types.StatusInProgress,
+				Status:    types.StatusReview,
 				Assignee:  "planner",
 				CreatedAt: time.Now(),
 				UpdatedAt: time.Now(),
@@ -115,7 +184,7 @@ func TestReleaseClaim_PropagatesServerError(t *testing.T) {
 	})
 	defer ts.Close()
 
-	err := fb.ReleaseClaim(context.Background(), "test-1")
+	err := fb.ReleaseClaim(context.Background(), "test-1", "planner")
 	if err == nil {
 		t.Fatal("expected error from /release-lock 409, got nil")
 	}
@@ -128,7 +197,7 @@ func TestReleaseClaim_PropagatesServerError(t *testing.T) {
 // ClaimIssue: empty id returns KindValidation without touching the wire.
 func TestReleaseClaim_EmptyIDValidationError(t *testing.T) {
 	fb, _ := New(Config{BaseURL: "http://x", WorkspaceID: "ws"})
-	err := fb.ReleaseClaim(context.Background(), "")
+	err := fb.ReleaseClaim(context.Background(), "", "planner")
 	if err == nil {
 		t.Fatal("expected error for empty ID")
 	}

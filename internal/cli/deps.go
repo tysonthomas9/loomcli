@@ -386,13 +386,13 @@ func (b *fleetDBIssueBackend) ClaimIssue(ctx context.Context, id string, lockTTL
 // underlying FleetBackend (which is the only IssueBackend implementation
 // that maintains an explicit claim lock distinct from issue status).
 // Used by `loom complete` to close the planner-leaked-lock path in LOOM-1.
-func (b *fleetDBIssueBackend) ReleaseClaim(ctx context.Context, id string) error {
+func (b *fleetDBIssueBackend) ReleaseClaim(ctx context.Context, id, actor string) error {
 	return b.withBackend(ctx, "ReleaseClaim", func(ib backend.IssueBackend) error {
 		r, ok := ib.(backend.ClaimReleaser)
 		if !ok {
 			return nil
 		}
-		return r.ReleaseClaim(ctx, id)
+		return r.ReleaseClaim(ctx, id, actor)
 	})
 }
 

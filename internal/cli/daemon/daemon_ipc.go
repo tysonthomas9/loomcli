@@ -351,11 +351,11 @@ func (d *Daemon) handleIPCReleaseLock(req AgentIPCRequest) AgentIPCResponse {
 	return AgentIPCResponse{Success: true}
 }
 
-// handleIPCReleaseClaim handles the "release_claim" operation: drop the claim
-// lock on an issue behind the same lease fence as the other mutations. The
-// backend releases as the issue's server-side assignee, so identity is not
-// caller-supplied. Backends without an explicit claim lock (non-fleet) report
-// success without acting — release is a no-op there.
+// handleIPCReleaseClaim handles the "release_claim" operation behind the same
+// lease fence as the other mutations. The daemon supplies the authenticated
+// agent name as the release actor; the backend must not derive the actor from
+// mutable issue state. Backends without an explicit claim lock (non-fleet)
+// report success without acting — release is a no-op there.
 func (d *Daemon) handleIPCReleaseClaim(req AgentIPCRequest) AgentIPCResponse {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -367,14 +367,13 @@ func (d *Daemon) handleIPCReleaseClaim(req AgentIPCRequest) AgentIPCResponse {
 	if !ok {
 		return AgentIPCResponse{Success: true}
 	}
-	if err := releaser.ReleaseClaim(ctx, req.IssueID); err != nil {
+	if err := releaser.ReleaseClaim(ctx, req.IssueID, req.AgentName); err != nil {
 		return ipcErrorResponse(err)
 	}
 
-	// No mutation is published: ReleaseClaim is lock-only (POST /release-lock),
-	// so the issue's status and assignee are unchanged. Publishing a synthetic
-	// in_progress→open transition here would be a lie — the agent's own status
-	// change (if any) already published the real mutation.
+	// Do not publish a synthetic daemon mutation here. The backend either wrote
+	// the real in_progress→open release mutation, or it only dropped an
+	// operational lock for an issue whose status was already changed.
 	return AgentIPCResponse{Success: true}
 }
 

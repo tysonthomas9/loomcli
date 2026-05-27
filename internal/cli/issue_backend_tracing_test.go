@@ -46,16 +46,18 @@ func TestTracedIssueBackendPreservesClaimIssueAsActor(t *testing.T) {
 // call when the inner backend supports it.
 type claimReleaserMockBackend struct {
 	*MockIssueBackend
-	calls    int
-	lastID   string
-	releaseE error
+	calls     int
+	lastID    string
+	lastActor string
+	releaseE  error
 }
 
 var _ backend.ClaimReleaser = (*claimReleaserMockBackend)(nil)
 
-func (m *claimReleaserMockBackend) ReleaseClaim(_ context.Context, id string) error {
+func (m *claimReleaserMockBackend) ReleaseClaim(_ context.Context, id, actor string) error {
 	m.calls++
 	m.lastID = id
+	m.lastActor = actor
 	return m.releaseE
 }
 
@@ -72,11 +74,14 @@ func TestTracedIssueBackendPreservesReleaseClaim(t *testing.T) {
 	if !ok {
 		t.Fatal("tracedIssueBackend should implement ClaimReleaser when inner does")
 	}
-	if err := r.ReleaseClaim(context.Background(), "TASK-1"); err != nil {
+	if err := r.ReleaseClaim(context.Background(), "TASK-1", "planner"); err != nil {
 		t.Fatalf("ReleaseClaim: %v", err)
 	}
 	if inner.calls != 1 || inner.lastID != "TASK-1" {
 		t.Fatalf("inner.ReleaseClaim = calls=%d id=%q, want 1 / TASK-1", inner.calls, inner.lastID)
+	}
+	if inner.lastActor != "planner" {
+		t.Fatalf("inner.ReleaseClaim actor = %q, want planner", inner.lastActor)
 	}
 }
 
@@ -93,7 +98,7 @@ func TestTracedIssueBackendReleaseClaim_NoopWhenInnerLacksCapability(t *testing.
 	if !ok {
 		t.Fatal("tracedIssueBackend should still expose ClaimReleaser; capability check happens inside")
 	}
-	if err := r.ReleaseClaim(context.Background(), "TASK-1"); err != nil {
+	if err := r.ReleaseClaim(context.Background(), "TASK-1", "planner"); err != nil {
 		t.Errorf("expected no-op nil when inner lacks capability, got %v", err)
 	}
 }
@@ -108,7 +113,7 @@ func TestTracedIssueBackendReleaseClaim_PropagatesError(t *testing.T) {
 	wrapped := wrapIssueBackendWithTracing(inner)
 
 	r := wrapped.(backend.ClaimReleaser)
-	got := r.ReleaseClaim(context.Background(), "TASK-1")
+	got := r.ReleaseClaim(context.Background(), "TASK-1", "planner")
 	if !errors.Is(got, want) {
 		t.Errorf("ReleaseClaim error = %v, want %v", got, want)
 	}

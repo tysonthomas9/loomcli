@@ -262,7 +262,7 @@ func (t *tracedIssueBackend) ClaimIssueAsActor(ctx context.Context, id string, l
 // mutation methods. See LOOM-1: this delegation must exist or `loom complete`'s
 // release-on-exit path is silently a no-op when tracing is enabled (the
 // default for the CLI).
-func (t *tracedIssueBackend) ReleaseClaim(ctx context.Context, id string) error {
+func (t *tracedIssueBackend) ReleaseClaim(ctx context.Context, id, actor string) error {
 	ctx, span := t.startSpan(ctx, "ReleaseClaim",
 		attribute.String("loom.task_id", id),
 	)
@@ -271,7 +271,7 @@ func (t *tracedIssueBackend) ReleaseClaim(ctx context.Context, id string) error 
 		endSpan(span, nil)
 		return nil
 	}
-	err := r.ReleaseClaim(ctx, id)
+	err := r.ReleaseClaim(ctx, id, actor)
 	endSpan(span, err)
 	return err
 }
