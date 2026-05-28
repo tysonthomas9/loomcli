@@ -159,6 +159,26 @@ func TestStopAgent_KillsIsolatedGrandchildProcessGroup(t *testing.T) {
 	if !processAlive(childPID) {
 		t.Fatalf("isolated grandchild PID %d should be alive before StopAgent", childPID)
 	}
+	workerPGID, err := syscall.Getpgid(workerPID)
+	if err != nil {
+		t.Fatalf("worker PGID: %v", err)
+	}
+	childPGID, err := syscall.Getpgid(childPID)
+	if err != nil {
+		t.Fatalf("child PGID: %v", err)
+	}
+	oldInspector := procInspector
+	procInspector = processInspector{
+		List: func() ([]procInfo, error) {
+			return []procInfo{
+				{PID: workerPID, PPID: os.Getpid(), PGID: workerPGID},
+				{PID: childPID, PPID: workerPID, PGID: childPGID},
+			}, nil
+		},
+		CWD:  oldInspector.CWD,
+		CWDs: oldInspector.CWDs,
+	}
+	t.Cleanup(func() { procInspector = oldInspector })
 
 	s.StopAgent(ap, 2*time.Second)
 
@@ -296,36 +316,30 @@ func TestKillOrphanedWorktreeProcesses_StartupSweep(t *testing.T) {
 // symlinked form (/var/folders/...). The sweep must resolve symlinks before
 // prefix matching or it will miss every orphan on Darwin.
 func TestFindWorktreeOrphans_PrefixesMatchOnResolvedPath(t *testing.T) {
-	if procInspector.List == nil {
-		t.Skip("no process inspector on this platform")
-	}
 	worktreeDir := t.TempDir()
-
-	cmd := exec.Command("sleep", "120") //nolint:norawexec,gosec // G204/norawexec: fixed args
-	cmd.Dir = worktreeDir
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("start sleep: %v", err)
-	}
-	pid := cmd.Process.Pid
-	t.Cleanup(func() {
-		_ = syscall.Kill(-pid, syscall.SIGKILL)
-		_ = cmd.Wait()
-	})
-
-	cwd, err := procInspector.CWD(pid)
-	if err != nil || cwd == "" {
-		t.Fatalf("CWD lookup failed: pid=%d err=%v cwd=%q", pid, err, cwd)
-	}
-
-	// Mimic the prefix-matching the sweep does. With symlink resolution this
-	// must succeed even when worktreeDir uses /var and lsof returns /private/var.
 	resolved, err := filepath.EvalSymlinks(worktreeDir)
 	if err != nil {
 		t.Fatalf("EvalSymlinks(%q): %v", worktreeDir, err)
 	}
-	if !strings.HasPrefix(cwd, resolved) {
-		t.Fatalf("cwd %q does not have prefix %q (worktreeDir=%q)", cwd, resolved, worktreeDir)
+	cwd := filepath.Join(resolved, "nested")
+
+	oldInspector := procInspector
+	procInspector = processInspector{
+		List: func() ([]procInfo, error) {
+			return []procInfo{{PID: 4242, PPID: 1, PGID: 4242}}, nil
+		},
+		CWDs: func(pids []int) (map[int]string, error) {
+			return map[int]string{4242: cwd}, nil
+		},
+	}
+	t.Cleanup(func() { procInspector = oldInspector })
+
+	got := findWorktreeOrphans([]string{worktreeDir})
+	if len(got) != 1 {
+		t.Fatalf("findWorktreeOrphans returned %d candidates, want 1: %+v", len(got), got)
+	}
+	if got[0].PID != 4242 || got[0].CWD != cwd || got[0].Worktree != resolved {
+		t.Fatalf("orphan = %+v, want pid=4242 cwd=%q worktree=%q", got[0], cwd, resolved)
 	}
 }
 
