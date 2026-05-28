@@ -585,7 +585,7 @@ func (r *Runner) hasLiveTaskSession(ctx context.Context, name, taskID string) (b
 
 func liveAgentCommandStatus(status domain.AgentCommandStatus) bool {
 	switch status {
-	case domain.AgentCommandQueued, domain.AgentCommandAcked, domain.AgentCommandRunning:
+	case "", domain.AgentCommandQueued, domain.AgentCommandAcked, domain.AgentCommandRunning:
 		return true
 	default:
 		return false

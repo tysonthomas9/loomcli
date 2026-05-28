@@ -45,8 +45,7 @@ func (d *Daemon) pollAgentCommands() {
 	ctx, cancel := context.WithTimeout(ctx, agentCommandPollTimeout)
 	defer cancel()
 	cmds, err := d.store.AgentCommands().List(ctx, d.sup.WorkspaceID, store.AgentCommandFilter{
-		Status: domain.AgentCommandQueued,
-		Limit:  50,
+		Limit: 50,
 	})
 	if err != nil {
 		recordCommandPollErr(span, err)
@@ -62,10 +61,22 @@ func (d *Daemon) pollAgentCommands() {
 		attribute.Int64("cycle.duration_ms", time.Since(cycleStart).Milliseconds()),
 	)
 	for _, cmd := range cmds {
+		if cmd == nil || !pollableAgentCommandStatus(cmd.Status) {
+			continue
+		}
 		if cmd.TargetNodeID != "" && cmd.TargetNodeID != d.sup.NodeID {
 			continue
 		}
 		d.handleAgentCommand(cmd)
+	}
+}
+
+func pollableAgentCommandStatus(status domain.AgentCommandStatus) bool {
+	switch status {
+	case "", domain.AgentCommandQueued:
+		return true
+	default:
+		return false
 	}
 }
 

@@ -458,6 +458,7 @@ func TestModifiedAgentsToDrain_DrainsCompletedEphemeralTask(t *testing.T) {
 
 func TestReconcilerCommandStatusAndStartCommandBranches(t *testing.T) {
 	for _, status := range []domain.AgentCommandStatus{
+		"",
 		domain.AgentCommandQueued,
 		domain.AgentCommandAcked,
 		domain.AgentCommandRunning,

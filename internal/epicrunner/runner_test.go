@@ -746,8 +746,8 @@ func TestLiveCommandAndSessionHelpersFilterInactiveRows(t *testing.T) {
 		t.Fatalf("hasLiveTaskSession live = %t, %v; want true, nil", live, err)
 	}
 
-	if !liveAgentCommandStatus(domain.AgentCommandAcked) || liveAgentCommandStatus(domain.AgentCommandSucceeded) {
-		t.Fatal("liveAgentCommandStatus did not classify acked/succeeded correctly")
+	if !liveAgentCommandStatus("") || !liveAgentCommandStatus(domain.AgentCommandAcked) || liveAgentCommandStatus(domain.AgentCommandSucceeded) {
+		t.Fatal("liveAgentCommandStatus did not classify empty/acked/succeeded correctly")
 	}
 	if !liveAgentSessionStatus(domain.AgentSessionStarting) || liveAgentSessionStatus(domain.AgentSessionCompleted) {
 		t.Fatal("liveAgentSessionStatus did not classify starting/completed correctly")
