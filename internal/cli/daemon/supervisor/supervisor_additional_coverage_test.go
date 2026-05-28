@@ -25,6 +25,17 @@ func isolateSupervisorWorkspaceRuntimeDir(t *testing.T) string {
 	return runtimeDir
 }
 
+func stubEmptyProcessInspector(t *testing.T) {
+	t.Helper()
+	old := procInspector
+	procInspector = processInspector{
+		List: func() ([]procInfo, error) { return nil, nil },
+		CWD:  func(int) (string, error) { return "", nil },
+		CWDs: func([]int) (map[int]string, error) { return nil, nil },
+	}
+	t.Cleanup(func() { procInspector = old })
+}
+
 func TestStartControlPlaneNodeDefaultsAndNoopBranches(t *testing.T) {
 	if err := (&Supervisor{}).startControlPlaneNode(); err != nil {
 		t.Fatalf("empty startControlPlaneNode: %v", err)
@@ -96,6 +107,7 @@ func TestSupervisorLifecycleHelpersAdditionalBranches(t *testing.T) {
 	})
 
 	t.Run("start non-fleet mode launches configured agent goroutine", func(t *testing.T) {
+		stubEmptyProcessInspector(t)
 		s := newTestSupervisorWithConfig(&cfgpkg.DaemonConfig{})
 		s.Concurrency = NewConcurrencyTracker(nil)
 		s.Concurrency.Close()
