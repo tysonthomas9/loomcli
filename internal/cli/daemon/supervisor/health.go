@@ -13,6 +13,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/lockfile"
 
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // StopAgent sends SIGTERM then SIGKILL to a single agent and its entire process group.
@@ -41,25 +42,36 @@ func (s *Supervisor) StopAgent(ap *AgentProcess, sigtermTimeout time.Duration) {
 		attribute.String("loom.agent", ap.Entry.Worktree),
 		attribute.String("loom.workspace", s.WorkspaceID),
 	)
-	defer func() {
-		ap.Mu.Lock()
-		exitCode := ap.LastExitCode
-		stopReason := string(ap.StopReason)
-		ap.Mu.Unlock()
-		span.SetAttributes(
-			attribute.Int("loom.exit_code", exitCode),
-			attribute.String("loom.stop_reason", stopReason),
-		)
-		span.End()
-	}()
+	defer finalizeStopSpan(span, ap)
 
-	slog.Info("sending signal to process group", "worktree", ap.Entry.Worktree, "signal", "SIGTERM", "pid", pid)
+	// Snapshot descendant pgroups BEFORE the worker dies. Once we send SIGTERM,
+	// the worker may exit within microseconds and its children get reparented
+	// to init — at which point we can no longer correlate them as our
+	// descendants. We re-use this snapshot for the SIGKILL pass below so a
+	// backend that ignored SIGTERM (or was already reparented to init) is
+	// still reachable by pgid.
+	descendantPGIDs := findDescendantPGIDs(pid, syscall.Getpgrp())
+
+	slog.Info("sending signal to process group", "worktree", ap.Entry.Worktree, "signal", "SIGTERM", "pid", pid, "extra_pgroups", len(descendantPGIDs))
 	if !sendSigterm(ap, proc, pid) {
+		// Still signal descendants — the worker may already be gone but its
+		// reparented backends won't be.
+		signalDescendantPGroups(descendantPGIDs, syscall.SIGTERM, ap.Entry.Worktree)
+		signalDescendantPGroups(descendantPGIDs, syscall.SIGKILL, ap.Entry.Worktree)
 		return
 	}
 
+	// Children that called Setpgid (e.g. codex/claude/cursor backends) sit in
+	// their own pgroup, so the kill(-pid) above misses them. Signal each
+	// pgroup we discovered in the descendant snapshot.
+	signalDescendantPGroups(descendantPGIDs, syscall.SIGTERM, ap.Entry.Worktree)
+
 	if waitForProcessExit(ap, pid, sigtermTimeout) {
 		slog.Info("process exited gracefully", "worktree", ap.Entry.Worktree)
+		// Even on clean worker exit, hit the descendant pgroups with SIGKILL —
+		// a backend that ignored SIGTERM won't be reachable any other way once
+		// it's reparented to init.
+		signalDescendantPGroups(descendantPGIDs, syscall.SIGKILL, ap.Entry.Worktree)
 		return
 	}
 
@@ -71,6 +83,22 @@ func (s *Supervisor) StopAgent(ap *AgentProcess, sigtermTimeout time.Duration) {
 		slog.Warn("sending SIGKILL to process group", "worktree", ap.Entry.Worktree, "pid", pid)
 		_ = syscall.Kill(-pid, syscall.SIGKILL)
 	}
+	signalDescendantPGroups(descendantPGIDs, syscall.SIGKILL, ap.Entry.Worktree)
+}
+
+// finalizeStopSpan records the agent's exit code and stop reason on the stop
+// span and ends it. Pulled out of StopAgent so that function stays under the
+// funlen lint budget; keeps the span lifecycle in one named place.
+func finalizeStopSpan(span trace.Span, ap *AgentProcess) {
+	ap.Mu.Lock()
+	exitCode := ap.LastExitCode
+	stopReason := string(ap.StopReason)
+	ap.Mu.Unlock()
+	span.SetAttributes(
+		attribute.Int("loom.exit_code", exitCode),
+		attribute.String("loom.stop_reason", stopReason),
+	)
+	span.End()
 }
 
 // sendSigterm signals the process group, falling back to the leader process.
@@ -165,6 +193,7 @@ func (s *Supervisor) healthChecker() {
 			return
 		case <-ticker.C:
 			s.checkAgentHealth()
+			s.RecordTick(GoroutineHealthChecker)
 		}
 	}
 }

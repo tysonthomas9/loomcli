@@ -280,23 +280,6 @@ export interface paths {
     patch: operations["patchWorkspaceBackend"];
     trace?: never;
   };
-  "/api/workspaces/{ws}/daemon/status": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /** Workspace-scoped daemon status */
-    get: operations["getWorkspaceDaemonStatus"];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
   "/api/workspaces/{ws}/readyz": {
     parameters: {
       query?: never;
@@ -2633,6 +2616,13 @@ export interface components {
       daemon_managed?: boolean;
       commits?: components["schemas"]["MonitorCommitDetail"][];
       changes?: components["schemas"]["MonitorFileChange"][];
+      /** @description Task this daemon-managed agent has currently claimed. Empty between tasks (just spawned, polling, finished). UI joins this against issue.id to render which agent is working each card. */
+      current_task_id?: string;
+      /**
+       * Format: date-time
+       * @description Most recent PTY-output observation from the agent's supervised backend (claude/codex/gemini), forwarded over IPC. Compare to "now" to detect stuck agents. Zero/absent when no observation yet or agent isn't daemon-managed.
+       */
+      last_activity_at?: string;
     };
     MonitorCommitDetail: {
       hash: string;
@@ -3390,29 +3380,6 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["MessageResponse"];
-        };
-      };
-    };
-  };
-  getWorkspaceDaemonStatus: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description Workspace identifier */
-        ws: components["parameters"]["WorkspaceId"];
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Daemon status */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": Record<string, never>;
         };
       };
     };

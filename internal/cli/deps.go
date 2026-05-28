@@ -392,6 +392,27 @@ func (b *fleetDBIssueBackend) ClaimIssueAsActor(ctx context.Context, id string, 
 	})
 }
 
+func (b *fleetDBIssueBackend) ReleaseIssueLock(ctx context.Context, id, actor string) error {
+	return b.withBackend(ctx, "ReleaseIssueLock", func(ib backend.IssueBackend) error {
+		return ib.ReleaseIssueLock(ctx, id, actor)
+	})
+}
+
+// ReleaseIssueAsActor is the actor-scoped release used by the supervisor to
+// free a lock acquired via ClaimIssueAsActor when the agent process exits.
+// Falls back to ReleaseIssueLock(id, actor) if the underlying backend does
+// not expose a dedicated actor variant.
+func (b *fleetDBIssueBackend) ReleaseIssueAsActor(ctx context.Context, id string, actor string) error {
+	return b.withBackend(ctx, "ReleaseIssue", func(ib backend.IssueBackend) error {
+		if actorBackend, ok := ib.(interface {
+			ReleaseIssueAsActor(context.Context, string, string) error
+		}); ok {
+			return actorBackend.ReleaseIssueAsActor(ctx, id, actor)
+		}
+		return ib.ReleaseIssueLock(ctx, id, actor)
+	})
+}
+
 func (b *fleetDBIssueBackend) DeferIssue(ctx context.Context, id string, until time.Time) error {
 	return b.withBackend(ctx, "DeferIssue", func(ib backend.IssueBackend) error {
 		return ib.DeferIssue(ctx, id, until)
@@ -559,6 +580,9 @@ func (b *unavailableIssueBackend) Update(context.Context, string, backend.Update
 }
 func (b *unavailableIssueBackend) ClaimIssue(context.Context, string, time.Duration) error {
 	return b.unavailable("ClaimIssue")
+}
+func (b *unavailableIssueBackend) ReleaseIssueLock(context.Context, string, string) error {
+	return b.unavailable("ReleaseIssueLock")
 }
 func (b *unavailableIssueBackend) DeferIssue(context.Context, string, time.Time) error {
 	return b.unavailable("DeferIssue")

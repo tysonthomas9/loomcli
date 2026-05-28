@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/harness/wrapper"
+	"github.com/olesho/harness-wrapper/pkg/wrapper"
 )
 
 // installFakes swaps runOnce and sleepFn with the provided fakes for
@@ -35,7 +35,7 @@ type scriptStep struct {
 func scriptedRun(t *testing.T, script ...scriptStep) (runOnceFn, *int) {
 	t.Helper()
 	var calls int
-	return func(ctx context.Context, cfg wrapper.Config) (attemptResult, error) {
+	return func(ctx context.Context, cfg wrapper.Config, _ RetryPolicy) (attemptResult, error) {
 		if calls >= len(script) {
 			t.Fatalf("runOnce called %d times, script only has %d entries", calls+1, len(script))
 		}
@@ -365,7 +365,7 @@ func TestRunOnceDefault_BinaryNotFoundReturnsWrapperError(t *testing.T) {
 	out, err := runOnceDefault(context.Background(), wrapper.Config{
 		BinaryPath: "/path/that/does/not/exist/xyz123",
 		Stdout:     io.Discard,
-	})
+	}, RetryPolicy{})
 	if err == nil {
 		t.Fatal("got nil, want wrapper-level error for missing binary")
 	}
@@ -400,7 +400,7 @@ func TestRunOnceDefault_HappyPathReachesIdle(t *testing.T) {
 		// exit quickly.
 		IdleQuiet:    100 * time.Millisecond,
 		IdleClassify: 300 * time.Millisecond,
-	})
+	}, RetryPolicy{})
 	if err != nil {
 		t.Fatalf("runOnceDefault err: %v", err)
 	}

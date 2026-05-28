@@ -1,0 +1,235 @@
+package supervisor
+
+import (
+	"errors"
+	"testing"
+
+	"github.com/olesho/harness-wrapper/pkg/discovery"
+
+	"github.com/tysonthomas9/loomcli/internal/agenterr"
+	"github.com/tysonthomas9/loomcli/internal/cli/backendcheck"
+	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
+	"github.com/tysonthomas9/loomcli/internal/events"
+)
+
+// stubCheckBackend swaps backendcheck.CheckBackend with the given fn
+// for the duration of the test, restoring the original on cleanup.
+// Used to drive the spawn gate deterministically without touching PATH.
+func stubCheckBackend(t *testing.T, fn func(string) (discovery.Info, error)) {
+	t.Helper()
+	prev := backendcheck.CheckBackend
+	backendcheck.CheckBackend = fn
+	t.Cleanup(func() { backendcheck.CheckBackend = prev })
+}
+
+func newBackendUnavailableSupervisor() *Supervisor {
+	return &Supervisor{
+		ConfigSnapshot: func() *cfgpkg.DaemonConfig {
+			return &cfgpkg.DaemonConfig{Daemon: cfgpkg.DaemonSettings{}, Backend: "codex"}
+		},
+		Shutdown:      make(chan struct{}),
+		StoppedAgents: make(map[string]struct{}),
+		Agents:        make([]*AgentProcess, 0),
+		EmitEvent:     func(events.Event) {},
+	}
+}
+
+func newBackendUnavailableAgentProcess() *AgentProcess {
+	return &AgentProcess{
+		Entry:      cfgpkg.AgentEntry{Worktree: "falcon", Role: "plan", Backend: "codex"},
+		RoleConfig: cfgpkg.RoleConfig{Description: "test"},
+	}
+}
+
+// TestSpawnAgent_BackendNotOnPATH_DoesNotCrashLoop is the LOOM-5
+// reproduction. Before the fix, spawnAgent returned nil (subprocess
+// started) and the actual exec("codex") failure surfaced ~30ms later,
+// burning restart budget every cycle. With the gate, the failure is
+// caught up-front, RestartCount stays at zero, and no backoff is
+// scheduled — the supervise loop's sleepBeforeBackendRecheck handles
+// the parking instead.
+func TestSpawnAgent_BackendNotOnPATH_DoesNotCrashLoop(t *testing.T) {
+	stubCheckBackend(t, func(name string) (discovery.Info, error) {
+		return discovery.Info{
+			Name:        name,
+			Binary:      name,
+			Installed:   false,
+			InstallHint: `"codex" not on PATH. Install codex (e.g. ` + "`npm i -g @openai/codex`" + `).`,
+		}, nil
+	})
+
+	s := newBackendUnavailableSupervisor()
+	ap := newBackendUnavailableAgentProcess()
+
+	if ap.RestartCount != 0 {
+		t.Fatalf("precondition: RestartCount must start at 0, got %d", ap.RestartCount)
+	}
+
+	err := s.spawnAgent(ap)
+
+	if !errors.Is(err, ErrBackendUnavailable) {
+		t.Fatalf("expected ErrBackendUnavailable, got %v", err)
+	}
+	if ap.StopReason != StopReasonBackendUnavailable {
+		t.Errorf("StopReason = %q, want %q", ap.StopReason, StopReasonBackendUnavailable)
+	}
+	if ap.LastError == nil {
+		t.Fatal("LastError must be populated")
+	}
+	if ap.LastError.Class != agenterr.BackendUnavailable {
+		t.Errorf("LastError.Class = %v, want BackendUnavailable", ap.LastError.Class)
+	}
+	if ap.LastError.Backend != "codex" {
+		t.Errorf("LastError.Backend = %q, want %q", ap.LastError.Backend, "codex")
+	}
+	if ap.RestartCount != 0 {
+		t.Errorf("RestartCount = %d, want 0 (gate must preserve restart budget)", ap.RestartCount)
+	}
+	if !ap.BackoffUntil.IsZero() {
+		t.Errorf("BackoffUntil = %v, want zero (no backoff for backend_unavailable)", ap.BackoffUntil)
+	}
+	if ap.Cmd != nil {
+		t.Errorf("Cmd = %v, want nil (gate fires before buildCommand)", ap.Cmd)
+	}
+}
+
+// TestSpawnAgent_BackendNotOnPATH_RepeatedDoesNotAccumulate verifies
+// that re-calling spawnAgent (as the supervise loop will after the
+// sleepBeforeBackendRecheck interval) does not silently increment
+// restart bookkeeping or duplicate log noise.
+func TestSpawnAgent_BackendNotOnPATH_RepeatedDoesNotAccumulate(t *testing.T) {
+	stubCheckBackend(t, func(name string) (discovery.Info, error) {
+		return discovery.Info{
+			Name: name, Binary: name, Installed: false,
+			InstallHint: "missing",
+		}, nil
+	})
+
+	s := newBackendUnavailableSupervisor()
+	ap := newBackendUnavailableAgentProcess()
+
+	for i := 0; i < 3; i++ {
+		err := s.spawnAgent(ap)
+		if !errors.Is(err, ErrBackendUnavailable) {
+			t.Fatalf("iteration %d: expected ErrBackendUnavailable, got %v", i, err)
+		}
+	}
+	if ap.RestartCount != 0 {
+		t.Errorf("RestartCount = %d after 3 gate fires, want 0", ap.RestartCount)
+	}
+	if !ap.BackoffUntil.IsZero() {
+		t.Errorf("BackoffUntil = %v after 3 gate fires, want zero", ap.BackoffUntil)
+	}
+}
+
+// TestSpawnAgent_BackendRecoveryClearsState verifies that once the
+// binary becomes available, the next gate run clears the parked state
+// (StopReason and LastError) so UIs reflect the recovery before the
+// spawn proceeds.
+func TestSpawnAgent_BackendRecoveryClearsState(t *testing.T) {
+	installed := false
+	stubCheckBackend(t, func(name string) (discovery.Info, error) {
+		if installed {
+			return discovery.Info{
+				Name: name, Binary: name, Installed: true, Path: "/fake/bin/" + name,
+				VersionMatchesPin: true,
+			}, nil
+		}
+		return discovery.Info{
+			Name: name, Binary: name, Installed: false, InstallHint: "missing",
+		}, nil
+	})
+
+	s := newBackendUnavailableSupervisor()
+	ap := newBackendUnavailableAgentProcess()
+
+	// First call: gate fires, state set.
+	if err := s.spawnAgent(ap); !errors.Is(err, ErrBackendUnavailable) {
+		t.Fatalf("first spawn: expected ErrBackendUnavailable, got %v", err)
+	}
+	if ap.StopReason != StopReasonBackendUnavailable {
+		t.Fatalf("first spawn: StopReason = %q, want backend_unavailable", ap.StopReason)
+	}
+
+	// Second call: binary is "installed"; gate should clear state.
+	// (Spawn itself will fail later because the buildCommand step has
+	// no real `loom` binary in the test env. We only assert the gate's
+	// recovery branch ran.)
+	installed = true
+	_ = s.spawnAgent(ap)
+
+	if ap.StopReason != "" {
+		t.Errorf("StopReason after recovery = %q, want empty", ap.StopReason)
+	}
+	if ap.LastError != nil && ap.LastError.Class == agenterr.BackendUnavailable {
+		t.Errorf("LastError still carries BackendUnavailable after recovery: %+v", ap.LastError)
+	}
+}
+
+// TestSpawnAndWait_BackendUnavailable_ParksWithoutSpawning verifies the
+// spawnAndWait gate path under #84's void signature: when the backend is
+// missing, no subprocess is started, concurrency is released, and the
+// BackendUnavailable state the gate set (StopReason + LastError) is left intact
+// for the single restart decision to park on. RestartCount stays at 0 — the
+// budget-preserving park itself is shouldRestart + sleepBeforeRestart, asserted
+// by TestShouldRestart_BackendUnavailable_ParksWithoutEroding below.
+func TestSpawnAndWait_BackendUnavailable_ParksWithoutSpawning(t *testing.T) {
+	stubCheckBackend(t, func(name string) (discovery.Info, error) {
+		return discovery.Info{
+			Name:        name,
+			Binary:      name,
+			Installed:   false,
+			InstallHint: `"codex" not on PATH`,
+		}, nil
+	})
+
+	s := newBackendUnavailableSupervisor()
+	ap := newBackendUnavailableAgentProcess()
+	ap.StopCh = make(chan struct{})
+
+	s.spawnAndWait(ap)
+
+	if ap.RestartCount != 0 {
+		t.Errorf("RestartCount = %d, want 0 (gate must preserve restart budget)", ap.RestartCount)
+	}
+	if ap.StopReason != StopReasonBackendUnavailable {
+		t.Errorf("StopReason = %q, want %q", ap.StopReason, StopReasonBackendUnavailable)
+	}
+	if ap.LastError == nil || ap.LastError.Class != agenterr.BackendUnavailable {
+		t.Errorf("LastError = %+v, want BackendUnavailable", ap.LastError)
+	}
+	if ap.Cmd != nil {
+		t.Errorf("Cmd = %v, want nil (gate fires before buildCommand; no subprocess)", ap.Cmd)
+	}
+}
+
+// TestShouldRestart_BackendUnavailable_ParksWithoutEroding pins the new
+// contract (replacing the old WouldErodeBudget guard): the single restart
+// decision now treats BackendUnavailable as a budget-preserving park — it keeps
+// retrying, never increments RestartCount, and never trips the max-retries stop
+// reason, so a missing backend recovers indefinitely once the binary returns.
+func TestShouldRestart_BackendUnavailable_ParksWithoutEroding(t *testing.T) {
+	s := newBackendUnavailableSupervisor()
+	ap := newBackendUnavailableAgentProcess()
+
+	// State the gate leaves behind (see gateBackendAvailable): a
+	// BackendUnavailable LastError. Start at the retry limit — a generic error
+	// here would already fail the agent.
+	ap.LastError = &agenterr.AgentError{Class: agenterr.BackendUnavailable, Backend: "codex"}
+	ap.RestartCount = s.getMaxRetries()
+
+	for i := 0; i < 5; i++ {
+		if !s.shouldRestart(ap) {
+			t.Fatalf("iteration %d: shouldRestart = false, want true (BackendUnavailable parks, never fatal)", i)
+		}
+		if ap.RestartCount != s.getMaxRetries() {
+			t.Fatalf("iteration %d: RestartCount = %d, want %d (budget must not erode)", i, ap.RestartCount, s.getMaxRetries())
+		}
+		if ap.StopReason == StopReasonMaxRetries {
+			t.Fatalf("iteration %d: StopReason set to max-retries (budget eroded)", i)
+		}
+	}
+	if ap.StopReason != StopReasonBackendUnavailable {
+		t.Errorf("StopReason = %q, want %q", ap.StopReason, StopReasonBackendUnavailable)
+	}
+}

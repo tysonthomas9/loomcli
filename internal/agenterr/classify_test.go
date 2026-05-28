@@ -110,6 +110,33 @@ func TestClassifyClaude(t *testing.T) {
 			exitCode:  1,
 			wantClass: Unknown,
 		},
+		// User-evidence strings from the 2026-05-21 dead-agents incident.
+		// These previously fell through to Unknown and burned the entire
+		// retry budget; the shared rate-limit patterns now catch them.
+		{
+			name:      "session limit prose with reset time",
+			log:       "You've hit your session limit · resets 6:40pm (Europe/Warsaw)",
+			exitCode:  1,
+			wantClass: RateLimited,
+		},
+		{
+			name:      "usage limit prose with try again at",
+			log:       "You've hit your usage limit. Upgrade to Pro or try again at May 21st, 2026 1:32 AM.",
+			exitCode:  1,
+			wantClass: RateLimited,
+		},
+		{
+			name:      "usage limit JSON envelope",
+			log:       `{"type":"error","message":"You've hit your usage limit."}`,
+			exitCode:  1,
+			wantClass: RateLimited,
+		},
+		{
+			name:      "generic try-again-at with time",
+			log:       "Error: try again at 6:40pm",
+			exitCode:  1,
+			wantClass: RateLimited,
+		},
 	}
 
 	for _, tt := range tests {
@@ -228,6 +255,21 @@ func TestClassifyCodex(t *testing.T) {
 			log:       "something unexpected happened",
 			exitCode:  1,
 			wantClass: Unknown,
+		},
+		// User-evidence strings: codex emits the same prose envelopes
+		// when a usage limit is hit, so the shared rate-limit patterns
+		// must apply to codex too.
+		{
+			name:      "session limit prose with reset time",
+			log:       "You've hit your session limit · resets 6:40pm (Europe/Warsaw)",
+			exitCode:  1,
+			wantClass: RateLimited,
+		},
+		{
+			name:      "usage limit JSON envelope",
+			log:       `{"type":"error","message":"You've hit your usage limit."}`,
+			exitCode:  1,
+			wantClass: RateLimited,
 		},
 	}
 
@@ -620,6 +662,36 @@ func TestClassifyFromLog(t *testing.T) {
 		aerr := ClassifyFromLog("/nonexistent/log.txt", 1, "claude")
 		if aerr.Class != Unknown {
 			t.Errorf("class = %s, want Unknown", aerr.Class)
+		}
+	})
+
+	t.Run("backend binary not on PATH marker classifies as BackendUnavailable", func(t *testing.T) {
+		t.Parallel()
+		// The marker is emitted by the loom-side wrapper translator
+		// when the configured CLI is missing. It outranks per-backend
+		// patterns because it's a cross-cutting wrapper signal —
+		// without this branch, the supervisor would burn restart
+		// budget on a binary that won't appear on its own (LOOM-4).
+		dir := t.TempDir()
+		logPath := filepath.Join(dir, "agent.log")
+		body := "Starting agent...\n" + BackendUnavailableMarker + `: wrapper: binary not found: exec: "codex": executable file not found in $PATH` + "\n"
+		if err := os.WriteFile(logPath, []byte(body), 0600); err != nil {
+			t.Fatalf("write log: %v", err)
+		}
+
+		aerr := ClassifyFromLog(logPath, 1, "codex")
+		if aerr.Class != BackendUnavailable {
+			t.Errorf("class = %s, want BackendUnavailable", aerr.Class)
+		}
+		// Backend-specific rate-limit / billing patterns must NOT win
+		// against the wrapper-level marker.
+		body2 := BackendUnavailableMarker + ": rate limit and 429 sprinkled in for distraction"
+		if err := os.WriteFile(logPath, []byte(body2), 0600); err != nil {
+			t.Fatalf("write log: %v", err)
+		}
+		aerr = ClassifyFromLog(logPath, 1, "codex")
+		if aerr.Class != BackendUnavailable {
+			t.Errorf("class = %s, want BackendUnavailable (marker outranks backend patterns)", aerr.Class)
 		}
 	})
 

@@ -1,6 +1,7 @@
 package local
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -143,6 +144,63 @@ func runtimePath(dataDir string) string {
 
 func serveLogPath(dataDir string) string {
 	return filepath.Join(dataDir, logsDirName, "loom-serve.log")
+}
+
+// serveStartupLogTail returns up to maxBytes from the end of loom-serve.log,
+// dropping any partial first line so the result begins at a clean line
+// boundary. Returns "" when the log is missing, empty, or unreadable.
+func serveStartupLogTail(dataDir string, maxBytes int) string {
+	if maxBytes <= 0 {
+		return ""
+	}
+	file, err := os.Open(serveLogPath(dataDir)) //nolint:gosec // log path derived from app data dir
+	if err != nil {
+		return ""
+	}
+	defer func() { _ = file.Close() }()
+	stat, err := file.Stat()
+	if err != nil {
+		return ""
+	}
+	size := stat.Size()
+	if size == 0 {
+		return ""
+	}
+	var data []byte
+	if size <= int64(maxBytes) {
+		data, err = io.ReadAll(file)
+		if err != nil {
+			return ""
+		}
+	} else {
+		start := size - int64(maxBytes)
+		// Peek the byte preceding our window so we can tell whether `start`
+		// already sits on a line boundary. If it does, we keep the whole
+		// window; otherwise the first line is a fragment and we drop it.
+		atBoundary := false
+		if start > 0 {
+			var prev [1]byte
+			if _, err := file.ReadAt(prev[:], start-1); err != nil {
+				return ""
+			}
+			atBoundary = prev[0] == '\n'
+		}
+		if _, err := file.Seek(start, io.SeekStart); err != nil {
+			return ""
+		}
+		data, err = io.ReadAll(file)
+		if err != nil {
+			return ""
+		}
+		if !atBoundary {
+			if idx := bytes.IndexByte(data, '\n'); idx >= 0 {
+				data = data[idx+1:]
+			} else {
+				return ""
+			}
+		}
+	}
+	return strings.TrimRight(string(data), " \t\r\n")
 }
 
 func serviceLogPath(dataDir string) string {

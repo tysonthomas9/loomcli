@@ -24,24 +24,38 @@ import (
 func setTmuxRemainOnExit(t *testing.T) {
 	t.Helper()
 
-	// Ensure a tmux server is running. If no server exists, "tmux set -g" fails silently.
+	// Ensure a tmux server is running. If no server exists, "tmux setw -g" fails silently.
 	// Start a keepalive session that sleeps - this guarantees a server for our global setting.
 	keepalive := fmt.Sprintf("loom-test-keepalive-%d", os.Getpid())
 	if err := exec.Command("tmux", "has-session", "-t", keepalive).Run(); err != nil { //nolint:norawexec
-		exec.Command("tmux", "new-session", "-d", "-s", keepalive, "sleep", "300").Run() //nolint:norawexec
+		out, err := exec.Command("tmux", "new-session", "-d", "-s", keepalive, "sleep", "300").CombinedOutput() //nolint:norawexec
+		if err != nil {
+			t.Skipf("failed to start tmux keepalive session: %v (%s)", err, strings.TrimSpace(string(out)))
+		}
 		t.Cleanup(func() {
 			exec.Command("tmux", "kill-session", "-t", keepalive).Run() //nolint:norawexec
 		})
 	}
 
-	origRemain, _ := exec.Command("tmux", "show", "-gv", "remain-on-exit").Output() //nolint:norawexec
-	exec.Command("tmux", "set", "-g", "remain-on-exit", "on").Run()                 //nolint:norawexec
+	// remain-on-exit is a window option, so use `setw -g` to set the global
+	// default for new windows. Plain `set -g` is interpreted inconsistently
+	// across tmux versions and may silently no-op on the window-option
+	// namespace, leaving panes free to die the moment their command exits.
+	origRemain, _ := exec.Command("tmux", "show", "-gv", "remain-on-exit").Output()                          //nolint:norawexec
+	if out, err := exec.Command("tmux", "setw", "-g", "remain-on-exit", "on").CombinedOutput(); err != nil { //nolint:norawexec
+		t.Skipf("failed to set tmux remain-on-exit: %v (%s)", err, strings.TrimSpace(string(out)))
+	}
+	// Verify the setting actually applied. Without it the tests that assert
+	// a session is alive right after a quickly-failing command will flake.
+	if got, _ := exec.Command("tmux", "show", "-wgv", "remain-on-exit").Output(); strings.TrimSpace(string(got)) != "on" { //nolint:norawexec
+		t.Skipf("tmux remain-on-exit not honored by this server (got %q)", strings.TrimSpace(string(got)))
+	}
 	t.Cleanup(func() {
 		val := strings.TrimSpace(string(origRemain))
 		if val == "" || val == "off" {
-			exec.Command("tmux", "set", "-g", "remain-on-exit", "off").Run() //nolint:norawexec
+			exec.Command("tmux", "setw", "-g", "remain-on-exit", "off").Run() //nolint:norawexec
 		} else {
-			exec.Command("tmux", "set", "-g", "remain-on-exit", val).Run() //nolint:norawexec
+			exec.Command("tmux", "setw", "-g", "remain-on-exit", val).Run() //nolint:norawexec
 		}
 	})
 }
@@ -624,6 +638,20 @@ func waitForFile(path string, timeout time.Duration) bool {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		if _, err := os.Stat(path); err == nil {
+			return true
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	return false
+}
+
+// waitForTmuxSession waits for a tmux session to be visible to the server.
+// Under CI load, the server's `has-session` query can return false right
+// after startTmuxSession returns successfully; this poll closes the race.
+func waitForTmuxSession(sessionName string, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if tmuxSessionExists(sessionName) {
 			return true
 		}
 		time.Sleep(50 * time.Millisecond)
@@ -2179,13 +2207,19 @@ func TestGetPaneState_ParsesCorrectly(t *testing.T) {
 		exec.Command("tmux", "kill-session", "-t", sessionName).Run() //nolint:norawexec
 	})
 
-	// Give session time to start
-	time.Sleep(100 * time.Millisecond)
-
-	// Get pane state while session is running
-	state, err := getPaneState(sessionName)
+	// Poll for the session to be queryable rather than fixed-sleep — under
+	// CI load the tmux server may need >100ms to register the new session.
+	deadline := time.Now().Add(5 * time.Second)
+	var state *PaneState
+	for time.Now().Before(deadline) {
+		state, err = getPaneState(sessionName)
+		if err == nil {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 	if err != nil {
-		t.Fatalf("getPaneState failed: %v", err)
+		t.Fatalf("getPaneState failed after polling: %v", err)
 	}
 
 	// Command is still running, so pane should NOT be dead
@@ -2229,8 +2263,7 @@ func TestStartTmuxSession_Success(t *testing.T) {
 		t.Fatalf("startTmuxSession failed: %v", err)
 	}
 
-	// Verify session was created
-	if !tmuxSessionExists(sessionName) {
+	if !waitForTmuxSession(sessionName, 5*time.Second) {
 		t.Error("Session was not created")
 	}
 }
@@ -2277,8 +2310,7 @@ func TestStartTmuxSession_KillsExisting(t *testing.T) {
 		t.Fatalf("startTmuxSession failed: %v", err)
 	}
 
-	// Verify session still exists (the new one)
-	if !tmuxSessionExists(sessionName) {
+	if !waitForTmuxSession(sessionName, 5*time.Second) {
 		t.Error("New session should exist after replacing old one")
 	}
 }
@@ -2319,8 +2351,7 @@ func TestStartTmuxSession_QuotesShellMetachars(t *testing.T) {
 		t.Fatalf("startTmuxSession failed: %v", err)
 	}
 
-	// Verify session was created
-	if !tmuxSessionExists(sessionName) {
+	if !waitForTmuxSession(sessionName, 5*time.Second) {
 		t.Fatal("Session was not created")
 	}
 

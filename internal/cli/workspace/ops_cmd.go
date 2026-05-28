@@ -13,10 +13,13 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/cli/backendcheck"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
+	"github.com/tysonthomas9/loomcli/internal/cli/daemonregistry"
 	"github.com/tysonthomas9/loomcli/internal/cli/local"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
+	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 var (
@@ -117,7 +120,14 @@ type WorkspaceOpsWorkspace struct {
 type WorkspaceOpsDaemon struct {
 	AppData        DaemonInfo `json:"app_data"`
 	WorkspaceLocal DaemonInfo `json:"workspace_local,omitempty"`
-	DataDir        string     `json:"data_dir,omitempty"`
+	// Registered reports daemon liveness as advertised via the
+	// fleet-db Node registry (see daemonregistry.Detect). It is
+	// cwd-independent and correct for daemons launched from arbitrary
+	// directories, unlike AppData / WorkspaceLocal which only see
+	// daemons whose runtime files sit under the desktop data dir or
+	// the workspace local path.
+	Registered DaemonInfo `json:"registered,omitempty"`
+	DataDir    string     `json:"data_dir,omitempty"`
 }
 
 type WorkspaceOpsRepo struct {
@@ -214,7 +224,7 @@ func workspaceOpsStatusForArgs(args []string) (*WorkspaceOpsStatus, error) {
 		if err != nil {
 			return err
 		}
-		status, err := buildWorkspaceOpsStatus(ctx, ws, repos, agents, roles)
+		status, err := buildWorkspaceOpsStatus(ctx, h.Store, ws, repos, agents, roles)
 		if err != nil {
 			return err
 		}
@@ -240,7 +250,7 @@ func loadWorkspaceOpsStatus(ctx context.Context, key string) (*WorkspaceOpsStatu
 	if err != nil {
 		return nil, err
 	}
-	return buildWorkspaceOpsStatus(ctx, ws, repos, agents, roles)
+	return buildWorkspaceOpsStatus(ctx, h.Store, ws, repos, agents, roles)
 }
 
 type workspaceOpsStatusLoader func(context.Context, string) (*WorkspaceOpsStatus, error)
@@ -278,6 +288,7 @@ func waitForWorkspaceOpsDaemon(
 
 func buildWorkspaceOpsStatus(
 	ctx context.Context,
+	st store.Store,
 	ws *domain.Workspace,
 	repos []*domain.Repo,
 	agents []*domain.Agent,
@@ -295,6 +306,10 @@ func buildWorkspaceOpsStatus(
 	runtime, runtimeErr := local.ReadRuntimeStatus(ctx, dataDir)
 
 	status := newWorkspaceOpsStatus(ws, localState, dataDir, runtime, runtimeErr, len(repos), len(agents))
+	// Source 3: fleet-db Node registry. Cwd-independent — see
+	// daemonregistry.Detect. This is the LOOM-3 fix: it correctly
+	// reports daemons launched from arbitrary cwds.
+	status.Daemon.Registered = collectRegisteredDaemonStatus(ctx, st, ws.Key)
 	repoByName := collectOpsRepos(status, repos, localState)
 	roleNames := collectRoleNames(roles)
 	collectOpsAgents(status, agents, localState, repoByName, roleNames)
@@ -302,6 +317,22 @@ func buildWorkspaceOpsStatus(
 	status.Problems = append(status.Problems, workspaceOpsGlobalProblems(status)...)
 	status.OK = !hasErrorProblem(status.Problems)
 	return status, nil
+}
+
+// collectRegisteredDaemonStatus translates the daemonregistry.Info
+// into a DaemonInfo for WorkspaceOpsDaemon. The translation
+// deliberately discards the Socket field — diagnose consumers don't
+// need it, and we keep the JSON surface narrow.
+func collectRegisteredDaemonStatus(ctx context.Context, st store.Store, workspaceKey string) DaemonInfo {
+	info := daemonregistry.Detect(ctx, st, workspaceKey)
+	if !info.Running {
+		return DaemonInfo{}
+	}
+	return DaemonInfo{
+		Running: true,
+		PID:     info.PID,
+		Cwd:     info.Cwd,
+	}
 }
 
 // newWorkspaceOpsStatus seeds the response struct, populates the
@@ -419,6 +450,7 @@ func repoLocalPath(localState bootstrap.WorkspaceLocalState, name string) string
 	return localworkspace.RepoPath(localState, name)
 }
 
+//nolint:funlen // Linear "build status struct then collect problems with their per-problem Reason side-effect"; extracting the unknown_role / missing_worktree blocks would require returning the Runnable side-effect alongside the problem, which obscures more than it clarifies.
 func workspaceOpsAgentStatus(
 	localState bootstrap.WorkspaceLocalState,
 	repoByName map[string]*domain.Repo,
@@ -466,10 +498,55 @@ func workspaceOpsAgentStatus(
 			Fix:      "remove and recreate the agent with `loom agentdef add ... --auto` so Loom creates the local worktree",
 		})
 	}
+	if item.Runnable {
+		if p, ok := agentBackendProblem(agent); ok {
+			if item.Reason == "" {
+				item.Reason = "backend_unavailable"
+			}
+			problems = append(problems, p)
+		}
+	}
 	if !item.Runnable && item.Reason == "" {
 		item.Reason = "desired_state_not_running"
 	}
 	return item, problems
+}
+
+// agentBackendProblem returns a WorkspaceOpsProblem describing a missing
+// backend CLI when the agent's resolved backend is not on PATH. Returns
+// (zero, false) when the backend is installed, when no backend resolves,
+// or when discovery itself errored (we'd rather under-report than show
+// a false positive driven by a discovery-internal failure).
+func agentBackendProblem(agent *domain.Agent) (WorkspaceOpsProblem, bool) {
+	eff := agentEffectiveBackend(agent)
+	if eff == "" {
+		return WorkspaceOpsProblem{}, false
+	}
+	info, err := backendcheck.CheckBackend(eff)
+	if err != nil || info.Installed {
+		return WorkspaceOpsProblem{}, false
+	}
+	return WorkspaceOpsProblem{
+		Severity: "error",
+		Code:     "agent_backend_unavailable",
+		Message:  fmt.Sprintf("agent %q backend %q is not on PATH", agent.Name, eff),
+		Agent:    agent.Name,
+		Fix:      info.InstallHint,
+	}, true
+}
+
+// agentEffectiveBackend resolves the backend name an agent would run
+// under, using the precedence chain visible from the workspace surface:
+// agent override → CLI/env default. The richer supervisor-side
+// resolution (role + daemon-config) is deliberately not duplicated here
+// to keep the diagnose code free of daemon-runtime coupling. The
+// fallback resolution still matches the supervisor for the common case
+// where the agent does not set its own backend.
+func agentEffectiveBackend(agent *domain.Agent) string {
+	if agent.Backend != "" {
+		return agent.Backend
+	}
+	return cli.ResolveBackendName()
 }
 
 func agentDesiredRunnable(agent *domain.Agent) bool {
@@ -507,6 +584,15 @@ func agentWorktreePath(localState bootstrap.WorkspaceLocalState, repoByName map[
 	return ""
 }
 
+// workspaceOpsGlobalProblems returns the workspace-level problems for
+// status (vs. per-agent problems already collected in collectOpsAgents).
+//
+// The daemon_not_running problem fires only when there is a runnable
+// agent AND none of the three daemon-liveness sources reports the
+// daemon running. The third source — Registered, via the fleet-db Node
+// registry — is the LOOM-3 fix: it makes the check cwd-independent so
+// daemons launched from arbitrary directories are no longer reported as
+// missing.
 func workspaceOpsGlobalProblems(status *WorkspaceOpsStatus) []WorkspaceOpsProblem {
 	var problems []WorkspaceOpsProblem
 	if len(status.Repos) == 0 {
@@ -529,7 +615,7 @@ func workspaceOpsGlobalProblems(status *WorkspaceOpsStatus) []WorkspaceOpsProble
 		problems = append(problems, WorkspaceOpsProblem{
 			Severity: "error",
 			Code:     "daemon_not_running",
-			Message:  "workspace has runnable agents but the desktop-owned daemon is not running",
+			Message:  "workspace has runnable agents but no supervisor daemon is running for this workspace",
 			Fix:      "run `loom workspace ops ensure-runtime --json`",
 		})
 	}
@@ -547,7 +633,9 @@ func workspaceOpsGlobalProblems(status *WorkspaceOpsStatus) []WorkspaceOpsProble
 }
 
 func workspaceDaemonRunning(status *WorkspaceOpsStatus) bool {
-	return status.Daemon.AppData.Running || status.Daemon.WorkspaceLocal.Running
+	return status.Daemon.AppData.Running ||
+		status.Daemon.WorkspaceLocal.Running ||
+		status.Daemon.Registered.Running
 }
 
 func statusNeedsDaemonWait(status *WorkspaceOpsStatus) bool {
@@ -584,8 +672,10 @@ func renderWorkspaceOpsStatus(cmd *cobra.Command, status *WorkspaceOpsStatus) er
 	} else {
 		_, _ = fmt.Fprintln(out, "Runtime:   unavailable")
 	}
-	_, _ = fmt.Fprintf(out, "Daemon:    desktop=%s workspace=%s\n",
-		daemonHuman(status.Daemon.AppData), daemonHuman(status.Daemon.WorkspaceLocal))
+	_, _ = fmt.Fprintf(out, "Daemon:    desktop=%s workspace=%s registered=%s\n",
+		daemonHuman(status.Daemon.AppData),
+		daemonHuman(status.Daemon.WorkspaceLocal),
+		daemonHuman(status.Daemon.Registered))
 	_, _ = fmt.Fprintf(out, "Repos:     %d\nAgents:    %d\n", len(status.Repos), len(status.Agents))
 	if len(status.Problems) > 0 {
 		_, _ = fmt.Fprintf(out, "Problems:  %d\n", len(status.Problems))
@@ -605,10 +695,14 @@ func renderWorkspaceOpsStatus(cmd *cobra.Command, status *WorkspaceOpsStatus) er
 
 func daemonHuman(info DaemonInfo) string {
 	if info.Running {
-		if info.PID != 0 {
+		switch {
+		case info.PID != 0 && info.Cwd != "":
+			return fmt.Sprintf("running(pid=%d, cwd=%s)", info.PID, info.Cwd)
+		case info.PID != 0:
 			return fmt.Sprintf("running(pid=%d)", info.PID)
+		default:
+			return "running"
 		}
-		return "running"
 	}
 	if info.StalePID {
 		return "stale"

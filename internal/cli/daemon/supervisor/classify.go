@@ -64,6 +64,41 @@ func (s *Supervisor) classifyAgentExit(ap *AgentProcess, exitCode int) {
 	}
 }
 
+// markSpawnFailure records a spawn failure as a synthetic agent exit so the
+// single post-spawn restart decision (shouldRestart + sleepBeforeRestart) owns
+// counting and backoff — there is no longer a separate decision-maker for the
+// spawn-failure path.
+//
+// LastExitCode = -1 (with a non-nil LastError) keeps shouldRestart's
+// clean-success branch from firing on stale state from a prior clean run, which
+// would otherwise reset RestartCount and retry spawn failures forever. The
+// SpawnFailure class is non-fatal and counts toward max_retries, and does not
+// trigger backend failover (see tryFallbackBackend).
+func (s *Supervisor) markSpawnFailure(ap *AgentProcess, spawnErr error) {
+	// Resolve backend before locking — GetEffectiveBackend acquires ap.Mu.
+	backend := s.GetEffectiveBackend(ap)
+
+	msg := "failed to spawn agent subprocess"
+	if spawnErr != nil {
+		msg = spawnErr.Error()
+	}
+
+	ap.Mu.Lock()
+	ap.LastExitCode = -1
+	ap.LastNoWork = false
+	ap.LastError = &agenterr.AgentError{
+		Class:     agenterr.SpawnFailure,
+		ExitCode:  -1,
+		Message:   msg,
+		Backend:   backend,
+		Timestamp: time.Now(),
+	}
+	ap.Mu.Unlock()
+
+	log.Printf("[daemon] Agent %s: spawn failed, treating as retryable error: %v",
+		ap.Entry.Worktree, spawnErr)
+}
+
 // handleAgentCheckpoint saves a checkpoint on non-zero exit (before recovery clears the
 // worktree) or clears the checkpoint on successful exit. For yield exits (exit 0 with
 // yield file present), a yield checkpoint is saved instead of clearing.

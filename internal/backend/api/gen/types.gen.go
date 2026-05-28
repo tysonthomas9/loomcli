@@ -1357,17 +1357,23 @@ type MetricsSnapshot struct {
 
 // MonitorAgentStatus defines model for MonitorAgentStatus.
 type MonitorAgentStatus struct {
-	Ahead         int                    `json:"ahead"`
-	Behind        int                    `json:"behind"`
-	Branch        string                 `json:"branch"`
-	Changes       *[]MonitorFileChange   `json:"changes,omitempty"`
-	Commits       *[]MonitorCommitDetail `json:"commits,omitempty"`
-	DaemonManaged *bool                  `json:"daemon_managed,omitempty"`
-	Name          string                 `json:"name"`
-	Repo          *string                `json:"repo,omitempty"`
-	Role          *string                `json:"role,omitempty"`
-	Status        string                 `json:"status"`
-	Workspace     string                 `json:"workspace"`
+	Ahead   int                    `json:"ahead"`
+	Behind  int                    `json:"behind"`
+	Branch  string                 `json:"branch"`
+	Changes *[]MonitorFileChange   `json:"changes,omitempty"`
+	Commits *[]MonitorCommitDetail `json:"commits,omitempty"`
+
+	// CurrentTaskId Task this daemon-managed agent has currently claimed. Empty between tasks (just spawned, polling, finished). UI joins this against issue.id to render which agent is working each card.
+	CurrentTaskId *string `json:"current_task_id,omitempty"`
+	DaemonManaged *bool   `json:"daemon_managed,omitempty"`
+
+	// LastActivityAt Most recent PTY-output observation from the agent's supervised backend (claude/codex/gemini), forwarded over IPC. Compare to "now" to detect stuck agents. Zero/absent when no observation yet or agent isn't daemon-managed.
+	LastActivityAt *time.Time `json:"last_activity_at,omitempty"`
+	Name           string     `json:"name"`
+	Repo           *string    `json:"repo,omitempty"`
+	Role           *string    `json:"role,omitempty"`
+	Status         string     `json:"status"`
+	Workspace      string     `json:"workspace"`
 }
 
 // MonitorAgentsResponse defines model for MonitorAgentsResponse.
