@@ -10,6 +10,12 @@ import (
 // isPublicRoute returns true if the given method+path combination should be
 // accessible without authentication.
 func isPublicRoute(method, path string) bool {
+	// BetterAuth proxy is only mounted at flat /api/auth/*, never workspace-scoped.
+	// Check the raw path so /api/workspaces/{ws}/auth/* is not treated as public.
+	if strings.HasPrefix(path, "/api/auth/") {
+		return true
+	}
+
 	// Normalize workspace-scoped paths: strip /api/workspaces/{ws}/ prefix
 	// so that workspace-scoped routes match the same patterns as global routes.
 	// e.g. /api/workspaces/my-ws/fleet/... → /api/fleet/...
@@ -73,8 +79,6 @@ func isPublicRoute(method, path string) bool {
 //     fenced heartbeat) plus an optional shared bearer token
 //   - /api/task-run/: per-task-run lease-token bearer auth verified through
 //     the store's fenced task-run checks (taskrunapi)
-//   - /api/auth/: proxied to the BetterAuth service, which handles its own
-//     auth; must bypass the GET-only gate because sign-in/sign-up use POST
 func hasOwnAuthPrefix(normalizedPath string) bool {
 	for _, prefix := range []string{
 		"/api/fleet/",
@@ -82,7 +86,6 @@ func hasOwnAuthPrefix(normalizedPath string) bool {
 		"/api/webhooks/",
 		"/api/driver/",
 		"/api/task-run/",
-		"/api/auth/",
 	} {
 		if strings.HasPrefix(normalizedPath, prefix) {
 			return true

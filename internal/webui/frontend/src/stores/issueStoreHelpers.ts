@@ -109,6 +109,12 @@ export interface IssueStoreState {
   disconnectedSince: number | null;
   pendingIds: Set<string>;
   mutationCount: number;
+  /**
+   * Incremented whenever reset() clears store state. Components that drive
+   * fetches from effects can include this in dependencies to re-run after
+   * a reset even when their route/workspace inputs did not change.
+   */
+  resetGeneration: number;
 }
 
 export interface IssueStoreActions {
@@ -156,6 +162,7 @@ export const INITIAL_STATE: IssueStoreState = {
   disconnectedSince: null,
   pendingIds: new Set(),
   mutationCount: 0,
+  resetGeneration: 0,
 };
 
 // ---------------------------------------------------------------------------

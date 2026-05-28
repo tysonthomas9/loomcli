@@ -56,6 +56,7 @@ interface DisplayCommit {
   dateLabel: string;
   url?: string;
   dotColor: string;
+  isUnpushed: boolean;
 }
 
 function toDisplayCommit(
@@ -73,11 +74,14 @@ function toDisplayCommit(
     ? (commit as DiffCommit).author || agentName
     : agentName;
   const date = isDiff ? (commit as DiffCommit).date : undefined;
-  const url = isDiff
-    ? githubBaseUrl && fullHash
-      ? `${githubBaseUrl}/commit/${fullHash}`
-      : undefined
-    : commit.url;
+  const isUnpushed = isDiff && (commit as DiffCommit).pushed === false;
+  const url = isUnpushed
+    ? undefined
+    : isDiff
+      ? githubBaseUrl && fullHash
+        ? `${githubBaseUrl}/commit/${fullHash}`
+        : undefined
+      : commit.url;
 
   const display: DisplayCommit = {
     key: fullHash,
@@ -86,6 +90,7 @@ function toDisplayCommit(
     author,
     dateLabel: date ? formatCommitDate(date) : "",
     dotColor: getAvatarColor(author || shortHash),
+    isUnpushed,
   };
   if (url) {
     display.url = url;
@@ -276,7 +281,14 @@ export function GitTab({ agent, isActive }: GitTabProps): JSX.Element {
                         </span>
                       )}
                     </div>
-                    <span className={styles.hashPill}>
+                    <span
+                      className={styles.hashPill}
+                      title={
+                        commit.isUnpushed
+                          ? "Not yet pushed to remote"
+                          : undefined
+                      }
+                    >
                       {commit.url ? (
                         <a
                           href={commit.url}

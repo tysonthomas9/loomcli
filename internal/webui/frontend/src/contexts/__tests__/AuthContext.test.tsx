@@ -276,6 +276,102 @@ describe("AuthContext", () => {
       });
       expect(mockSetAuthState).toHaveBeenCalledWith("failed");
     });
+
+    it("sets isLoading=false and authServiceDown=true when token() returns empty data", async () => {
+      mockToken.mockResolvedValue({
+        data: null,
+        error: { message: "no token" },
+      });
+
+      mockSessionData = {
+        data: {
+          user: { id: "u1", name: "Dan", email: "dan@test.com" },
+          session: { id: "s5" },
+        },
+        isPending: false,
+        error: null,
+      };
+
+      const wrapper = ({ children }: { children: React.ReactNode }) => (
+        <mod.ExternalAuthProvider>{children}</mod.ExternalAuthProvider>
+      );
+
+      const { result } = renderHook(() => mod.useAuth(), { wrapper });
+
+      await waitFor(() => {
+        expect(result.current.authServiceDown).toBe(true);
+      });
+      expect(result.current.isLoading).toBe(false);
+      expect(result.current.isAuthenticated).toBe(false);
+    });
+
+    it("sets isLoading=false and authServiceDown=true when token() rejects", async () => {
+      mockToken.mockRejectedValue(new Error("token endpoint down"));
+
+      mockSessionData = {
+        data: {
+          user: { id: "u1", name: "Eve", email: "eve@test.com" },
+          session: { id: "s6" },
+        },
+        isPending: false,
+        error: null,
+      };
+
+      const wrapper = ({ children }: { children: React.ReactNode }) => (
+        <mod.ExternalAuthProvider>{children}</mod.ExternalAuthProvider>
+      );
+
+      const { result } = renderHook(() => mod.useAuth(), { wrapper });
+
+      await waitFor(() => {
+        expect(result.current.authServiceDown).toBe(true);
+      });
+      expect(result.current.isLoading).toBe(false);
+      expect(result.current.isAuthenticated).toBe(false);
+    });
+
+    it("resets tokenFetchedForSession on empty token allowing retry", async () => {
+      mockToken
+        .mockResolvedValueOnce({ data: null, error: { message: "no token" } })
+        .mockResolvedValueOnce({ data: { token: "jwt-retry" }, error: null });
+
+      mockSessionData = {
+        data: {
+          user: { id: "u1", name: "Faye", email: "faye@test.com" },
+          session: { id: "s7" },
+        },
+        isPending: false,
+        error: null,
+      };
+
+      const wrapper = ({ children }: { children: React.ReactNode }) => (
+        <mod.ExternalAuthProvider>{children}</mod.ExternalAuthProvider>
+      );
+
+      const { rerender } = renderHook(() => mod.useAuth(), { wrapper });
+
+      await waitFor(() => {
+        expect(mockToken).toHaveBeenCalledTimes(1);
+      });
+      await waitFor(() => {
+        expect(mockSetAuthState).toHaveBeenCalledWith("failed");
+      });
+
+      mockSessionData = {
+        data: {
+          user: { id: "u1", name: "Faye", email: "faye@test.com" },
+          session: { id: "s7" },
+        },
+        isPending: false,
+        error: null,
+      };
+
+      rerender();
+
+      await waitFor(() => {
+        expect(mockToken).toHaveBeenCalledTimes(2);
+      });
+    });
   });
 
   // =========================================================================

@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	gogit "github.com/go-git/go-git/v6"
@@ -147,6 +148,8 @@ func repoRemotes(repo *gogit.Repository) []string {
 
 // DiffCommits returns the list of commits between mergeBase and HEAD.
 // Format: %H|%h|%an|%ae|%aI|%s — subject is last so pipes in it are preserved.
+// Uses --topo-order so descendants appear before ancestors, which lets callers
+// split the returned list into unpushed/pushed prefixes by ahead count.
 // ctx is currently unused at this layer (RunGitCommand has no ctx surface yet)
 // but is accepted so the public API mirrors DiffFiles/DiffFilePatch.
 func DiffCommits(ctx context.Context, worktreePath, mergeBase string, limit int) ([]ops.DiffCommitResult, error) {
@@ -154,7 +157,7 @@ func DiffCommits(ctx context.Context, worktreePath, mergeBase string, limit int)
 	if err := validateGitRef(mergeBase); err != nil {
 		return nil, err
 	}
-	args := []string{"log", mergeBase + "..HEAD", "--format=%H|%h|%an|%ae|%aI|%s"}
+	args := []string{"log", mergeBase + "..HEAD", "--topo-order", "--format=%H|%h|%an|%ae|%aI|%s"}
 	if limit > 0 {
 		args = append(args, fmt.Sprintf("--max-count=%d", limit))
 	}
@@ -183,6 +186,30 @@ func DiffCommits(ctx context.Context, worktreePath, mergeBase string, limit int)
 		})
 	}
 	return results, nil
+}
+
+// UnpushedCount returns the number of commits on HEAD not reachable from
+// remote/<targetBranch>. The remote parameter is the configured git remote
+// name, defaulting to origin when empty.
+func UnpushedCount(worktreePath, remote, targetBranch string) (int, error) {
+	if remote == "" {
+		remote = "origin"
+	}
+	if err := validateGitRef(remote); err != nil {
+		return -1, err
+	}
+	if err := validateGitRef(targetBranch); err != nil {
+		return -1, err
+	}
+	out, err := cli.RunGitCommand(worktreePath, "rev-list", "--count", remote+"/"+targetBranch+"..HEAD")
+	if err != nil {
+		return -1, fmt.Errorf("counting unpushed commits: %w", err)
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(out))
+	if err != nil {
+		return -1, fmt.Errorf("parsing unpushed count %q: %w", out, err)
+	}
+	return n, nil
 }
 
 // DiffFiles returns the list of changed files between two refs with status and stats.

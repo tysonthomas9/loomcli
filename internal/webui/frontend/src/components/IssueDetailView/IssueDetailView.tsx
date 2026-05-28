@@ -202,7 +202,9 @@ export function IssueDetailView({
     onBack();
   }, [onBack, showRejectForm]);
 
-  useRegisterEscapeLayer(LAYER_ISSUE_PANEL, handleEscapeBack, true);
+  useRegisterEscapeLayer(LAYER_ISSUE_PANEL, handleEscapeBack, true, {
+    suppressWhenInputFocused: true,
+  });
 
   const handleApprove = useCallback(async () => {
     if (!issue || isApproving) return;
@@ -565,6 +567,13 @@ export function IssueDetailView({
             <textarea
               value={rejectComment}
               onChange={(e) => setRejectComment(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setShowRejectForm(false);
+                }
+              }}
               placeholder="Reason for rejection..."
               rows={3}
               style={{ flex: 1, resize: "vertical" }}

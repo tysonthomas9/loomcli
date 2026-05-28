@@ -626,6 +626,10 @@ func (g *GitOpsImpl) DiffCommits(ctx context.Context, worktreePath, mergeBase st
 	return git.DiffCommits(ctx, worktreePath, mergeBase, limit)
 }
 
+func (g *GitOpsImpl) UnpushedCount(worktreePath, remote, targetBranch string) (int, error) {
+	return git.UnpushedCount(worktreePath, remote, targetBranch)
+}
+
 func (g *GitOpsImpl) DiffFiles(ctx context.Context, worktreePath, from, to string) ([]ops.DiffFileResult, error) {
 	return git.DiffFiles(ctx, worktreePath, from, to)
 }

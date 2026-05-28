@@ -113,12 +113,14 @@ export function ExternalAuthProvider({
   const [tokenReady, setTokenReady] = useState(
     () => getAuthState() === "authenticated",
   );
+  const [tokenFailed, setTokenFailed] = useState(false);
   const tokenFetchedForSession = useRef<string | null>(null);
 
   // Track authState changes so isAuthenticated waits for JWT
   useEffect(() => {
     return onAuthStateChange((state: AuthState) => {
       setTokenReady(state === "authenticated");
+      setTokenFailed(state === "failed");
     });
   }, []);
 
@@ -140,6 +142,7 @@ export function ExternalAuthProvider({
       const sessionId = session.session?.id ?? "active";
       if (tokenFetchedForSession.current === sessionId) return;
       tokenFetchedForSession.current = sessionId;
+      setTokenFailed(false);
 
       getAuthClient()
         .token()
@@ -147,6 +150,7 @@ export function ExternalAuthProvider({
           if (result.data?.token) {
             setAuthToken(result.data.token);
           } else {
+            tokenFetchedForSession.current = null;
             setAuthToken(null);
             setAuthState("failed");
           }
@@ -242,9 +246,9 @@ export function ExternalAuthProvider({
   const value: AuthContextValue = {
     mode: AUTH_MODE_OIDC,
     user,
-    isLoading: isPending || (hasSession && !tokenReady),
+    isLoading: isPending || (hasSession && !tokenReady && !tokenFailed),
     isAuthenticated,
-    authServiceDown,
+    authServiceDown: authServiceDown || tokenFailed,
     signIn,
     signUp,
     signOut,

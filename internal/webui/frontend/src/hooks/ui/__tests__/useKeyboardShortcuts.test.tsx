@@ -339,12 +339,16 @@ function EscapeLayerTestComponent({
   handler,
   priority,
   active = true,
+  suppressWhenInputFocused = false,
 }: {
   handler: () => void;
   priority: number;
   active?: boolean;
+  suppressWhenInputFocused?: boolean;
 }) {
-  useRegisterEscapeLayer(priority, handler, active);
+  useRegisterEscapeLayer(priority, handler, active, {
+    suppressWhenInputFocused,
+  });
   return null;
 }
 
@@ -460,6 +464,71 @@ describe("Escape layer registry isolation", () => {
     // Only the highest-priority layer fires
     expect(highHandler).toHaveBeenCalledTimes(1);
     expect(lowHandler).not.toHaveBeenCalled();
+  });
+
+  it("suppresses the top layer when Escape starts in a text input", () => {
+    const panelHandler = vi.fn();
+
+    render(
+      <KeyboardShortcutProvider>
+        <EscapeLayerTestComponent
+          handler={panelHandler}
+          priority={LAYER_ISSUE_PANEL}
+          suppressWhenInputFocused
+        />
+        <input data-testid="escape-input" />
+      </KeyboardShortcutProvider>,
+    );
+
+    fireEvent.keyDown(screen.getByTestId("escape-input"), { key: "Escape" });
+
+    expect(panelHandler).not.toHaveBeenCalled();
+  });
+
+  it("does not fall through to lower layers when the top layer suppresses input Escape", () => {
+    const topHandler = vi.fn();
+    const lowHandler = vi.fn();
+
+    render(
+      <KeyboardShortcutProvider>
+        <EscapeLayerTestComponent
+          handler={topHandler}
+          priority={LAYER_MODAL}
+          suppressWhenInputFocused
+        />
+        <EscapeLayerTestComponent
+          handler={lowHandler}
+          priority={LAYER_ISSUE_PANEL}
+        />
+        <textarea data-testid="escape-textarea" />
+      </KeyboardShortcutProvider>,
+    );
+
+    fireEvent.keyDown(screen.getByTestId("escape-textarea"), {
+      key: "Escape",
+    });
+
+    expect(topHandler).not.toHaveBeenCalled();
+    expect(lowHandler).not.toHaveBeenCalled();
+  });
+
+  it("still fires a suppressed layer when Escape starts outside editable input", () => {
+    const panelHandler = vi.fn();
+
+    render(
+      <KeyboardShortcutProvider>
+        <EscapeLayerTestComponent
+          handler={panelHandler}
+          priority={LAYER_ISSUE_PANEL}
+          suppressWhenInputFocused
+        />
+        <button data-testid="escape-button">Close</button>
+      </KeyboardShortcutProvider>,
+    );
+
+    fireEvent.keyDown(screen.getByTestId("escape-button"), { key: "Escape" });
+
+    expect(panelHandler).toHaveBeenCalledTimes(1);
   });
 
   it("deactivating a layer removes it from the registry", () => {

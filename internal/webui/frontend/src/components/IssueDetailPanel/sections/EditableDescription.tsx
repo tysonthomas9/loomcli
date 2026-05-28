@@ -119,9 +119,11 @@ export function EditableDescription({
       // Cmd/Ctrl+Enter to save
       if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
+        e.stopPropagation();
         saveDescription();
       } else if (e.key === "Escape") {
         e.preventDefault();
+        e.stopPropagation();
         cancelEdit();
       }
     },

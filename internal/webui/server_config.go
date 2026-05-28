@@ -68,6 +68,7 @@ type ServerConfig struct {
 	FleetAPIKey             string                      // Pre-shared API key for fleet worker registration (required for fleet register endpoint)
 	HSTSEnabled             bool                        // Whether to send Strict-Transport-Security header (use when behind TLS-terminating proxy)
 	ExtAuthURL              string                      // Auth service base URL (e.g., "https://auth.loomcli.com"); empty = open mode
+	ExtAuthJWKSURL          string                      // Optional JWKS endpoint override; defaults to ExtAuthURL + /api/auth/jwks
 	ExtAuthIssuer           string                      // Expected JWT issuer (validated against "iss" claim; defaults to ExtAuthURL)
 	ExtAuthAudience         string                      // Expected JWT audience (validated against "aud" claim; defaults to "loom")
 	ExtAuthAllowInsecure    bool                        // Allow HTTP for non-loopback --auth-url (escape hatch for Docker networks)

@@ -81,7 +81,36 @@ func (s *diffServiceImpl) DiffCommits(ctx context.Context, wsID, agentName, from
 	if commits == nil {
 		commits = []ops.DiffCommitResult{}
 	}
+	markPushedCommits(commits, s.gitOps, wt)
 	return commits, nil
+}
+
+func markPushedCommits(commits []ops.DiffCommitResult, gitOps ops.GitOps, wt *ops.AgentWorktree) {
+	if len(commits) == 0 || wt == nil {
+		return
+	}
+	remote := wt.Remote
+	if remote == "" {
+		remote = "origin"
+	}
+	unpushed, err := gitOps.UnpushedCount(wt.Path, remote, wt.DefaultBranch)
+	if err != nil || unpushed < 0 {
+		return
+	}
+	if unpushed > len(commits) {
+		unpushed = len(commits)
+	}
+	for i := unpushed; i < len(commits); i++ {
+		commits[i].Pushed = true
+	}
+}
+
+func releaseRPCClient(pool daemon.Pool, client *rpc.Client, ok *bool) {
+	if *ok {
+		pool.Put(client)
+		return
+	}
+	pool.Discard(client)
 }
 
 func (s *diffServiceImpl) DiffFiles(ctx context.Context, wsID, agentName, from, to string) ([]ops.DiffFileResult, error) {
@@ -173,7 +202,8 @@ func (s *diffServiceImpl) GetIssueDiffStat(ctx context.Context, wsID, issueID st
 	if err != nil {
 		return nil, service.ErrUnavailable("issue backend unavailable")
 	}
-	defer s.pool.Put(client)
+	rpcOK := false
+	defer releaseRPCClient(s.pool, client, &rpcOK)
 
 	resp, err := client.Show(&rpc.ShowArgs{ID: issueID})
 	if err != nil {
@@ -182,6 +212,7 @@ func (s *diffServiceImpl) GetIssueDiffStat(ctx context.Context, wsID, issueID st
 		}
 		return nil, service.ErrInternal("failed to get issue", err)
 	}
+	rpcOK = true
 
 	var issue struct {
 		Assignee string `json:"assignee"`

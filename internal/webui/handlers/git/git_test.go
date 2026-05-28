@@ -29,6 +29,7 @@ type mockGitOps struct {
 	diffStatFunc           func(worktreePath, fromRef string) ops.DiffStatResult
 	resolveMergeBaseFunc   func(worktreePath, branch string) (string, error)
 	diffCommitsFunc        func(worktreePath, mergeBase string, limit int) ([]ops.DiffCommitResult, error)
+	unpushedCountFunc      func(worktreePath, remote, targetBranch string) (int, error)
 	diffFilesFunc          func(worktreePath, from, to string) ([]ops.DiffFileResult, error)
 	diffFilePatchFunc      func(worktreePath, from, to, path string) (*ops.DiffFilePatchResult, error)
 }
@@ -126,6 +127,13 @@ func (m *mockGitOps) DiffCommits(_ context.Context, worktreePath, mergeBase stri
 		return m.diffCommitsFunc(worktreePath, mergeBase, limit)
 	}
 	return []ops.DiffCommitResult{}, nil
+}
+
+func (m *mockGitOps) UnpushedCount(worktreePath, remote, targetBranch string) (int, error) {
+	if m.unpushedCountFunc != nil {
+		return m.unpushedCountFunc(worktreePath, remote, targetBranch)
+	}
+	return 0, nil
 }
 
 func (m *mockGitOps) DiffFiles(_ context.Context, worktreePath, from, to string) ([]ops.DiffFileResult, error) {

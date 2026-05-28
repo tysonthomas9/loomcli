@@ -476,6 +476,19 @@
   flex-shrink: 0;
 }
 
+.commitHashUnpushed {
+  color: var(--color-text-muted);
+}
+
+.unpushedDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background-color: var(--color-warning);
+  flex-shrink: 0;
+  align-self: center;
+}
+
 .commitHashLink {
   font-family: var(--font-mono);
   font-size: 12px;

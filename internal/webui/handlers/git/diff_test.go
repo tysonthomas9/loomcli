@@ -1,6 +1,7 @@
 package git
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -53,6 +54,46 @@ func TestDiffCommits_Success(t *testing.T) {
 	}
 	if len(commits) != 2 {
 		t.Fatalf("expected 2 commits, got %d", len(commits))
+	}
+}
+
+func TestDiffCommits_MarksUnpushedPrefixUsingConfiguredRemote(t *testing.T) {
+	gitOps := resolveOK()
+	wt := testWorktree()
+	wt.Remote = "upstream"
+	wt.DefaultBranch = "trunk"
+	gitOps.resolveFunc = func(string) (*ops.AgentWorktree, error) {
+		return wt, nil
+	}
+	gitOps.resolveMergeBaseFunc = func(_, _ string) (string, error) {
+		return "abc123", nil
+	}
+	gitOps.diffCommitsFunc = func(_, _ string, _ int) ([]ops.DiffCommitResult, error) {
+		return []ops.DiffCommitResult{
+			{Hash: "aaa111", ShortHash: "aaa"},
+			{Hash: "bbb222", ShortHash: "bbb"},
+			{Hash: "ccc333", ShortHash: "ccc"},
+		}, nil
+	}
+	var gotRemote, gotTarget string
+	gitOps.unpushedCountFunc = func(_, remote, targetBranch string) (int, error) {
+		gotRemote = remote
+		gotTarget = targetBranch
+		return 1, nil
+	}
+
+	commits, err := NewDiffService(gitOps, nil).DiffCommits(context.Background(), "test-ws", "test-agent", "", 0)
+	if err != nil {
+		t.Fatalf("DiffCommits error: %v", err)
+	}
+	if gotRemote != "upstream" || gotTarget != "trunk" {
+		t.Fatalf("UnpushedCount remote/target = %q/%q, want upstream/trunk", gotRemote, gotTarget)
+	}
+	if commits[0].Pushed {
+		t.Fatalf("first commit Pushed = true, want false")
+	}
+	if !commits[1].Pushed || !commits[2].Pushed {
+		t.Fatalf("commits = %#v, want only first unpushed", commits)
 	}
 }
 

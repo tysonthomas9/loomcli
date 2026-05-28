@@ -100,7 +100,7 @@ export const auth = betterAuth({
   databaseHooks: {
     user: {
       create: {
-        before: async (user) => {
+        before: async (user, context) => {
           const email = user.email as string;
 
           // SECURITY: Email domain restriction.
@@ -120,9 +120,12 @@ export const auth = betterAuth({
 
           // SECURITY: Defense-in-depth — reject unverified emails from
           // OAuth providers. Email/password signups start unverified by
-          // design (no OAuth provider to vouch), so only block when an
-          // OAuth provider explicitly reports email_verified=false.
-          const isOAuthSignup = "providerId" in user || "accountId" in user;
+          // design (no OAuth provider to vouch), so only block when the
+          // call comes from an OAuth callback endpoint.
+          const path = context?.path;
+          const isOAuthSignup =
+            path?.startsWith("/callback/") === true ||
+            path?.startsWith("/oauth2/callback/") === true;
           if (isOAuthSignup && user.emailVerified !== true) {
             throw new APIError("FORBIDDEN", {
               message:

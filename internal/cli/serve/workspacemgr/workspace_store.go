@@ -67,6 +67,9 @@ func createStoreBackedEmptyWorkspace(ctx context.Context, s storepkg.Store, req 
 		if err != nil {
 			return service.WorkspaceCreateResult{}, err
 		}
+		if err := checkWorkspaceRepoPathCollisions(wsDir, resolved); err != nil {
+			return service.WorkspaceCreateResult{}, err
+		}
 	}
 
 	branch := req.Branch
@@ -162,6 +165,9 @@ func addReposToStoreBackedWorkspace(ctx context.Context, s storepkg.Store, req s
 
 	resolved, err := resolveRequestRepos(req.Repos)
 	if err != nil {
+		return service.WorkspaceCreateResult{}, err
+	}
+	if err := checkWorkspaceRepoPathCollisions(wsDir, resolved); err != nil {
 		return service.WorkspaceCreateResult{}, err
 	}
 	seen, err := dedupAddReposAgainstExisting(ctx, s, key, resolved)
