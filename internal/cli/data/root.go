@@ -27,9 +27,9 @@ commands use the local backend selected by the workspace configuration and
 daemon IPC environment.
 
 Use 'loom data' commands when:
-  • You want a backend-aware command surface for agents and scripts.
-  • You want to manage agents on a remote loom server.
-  • You are scripting against a hosted loom deployment.
+  • You need low-level backend plumbing for tests or recovery.
+  • You need an admin/debug operation that has no workflow verb.
+  • You are intentionally scripting against backend-shaped data APIs.
 
 Examples:
   loom data show <id> --server http://localhost:8080

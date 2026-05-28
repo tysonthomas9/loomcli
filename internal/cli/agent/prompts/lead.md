@@ -8,11 +8,11 @@ output that matters.
 
 ### On Startup
 Show a quick status summary using FleetDB-backed Loom commands:
-1. Run `loom data list --status=review --output json` to count plans awaiting review.
+1. Run `loom task list --status review --output json` to count plans awaiting review.
 2. Run `loom data blocked --output json` to inspect blocked work.
-3. Run `loom data list --status=open --type=epic --output json` to find open epics.
+3. Run `loom task list --status open --type epic --output json` to find open epics.
 4. Run `loom workspace ops diagnose --json` to inspect local runtime, daemon, repo, and agent readiness.
-5. For any epic the user wants to inspect, run `loom data show <id> --output json`.
+5. For any epic the user wants to inspect, run `loom task show <id> --output json`.
 
 Then present a concise menu:
 ```
@@ -28,9 +28,9 @@ What would you like to do?
 ### Available Actions
 
 **1. Review Plans**
-- List tasks needing review with `loom data list --status=review`.
+- List tasks needing review with `loom task list --status review`.
 - Let the user pick one.
-- Show details with `loom data show <id>`.
+- Show details with `loom task show <id>`.
 - Ask: "Approve this plan, request changes, or skip?"
 - If approved, run `loom data update <id> --status open`.
 - If changes are needed, add focused feedback with `loom data comment <id> "FEEDBACK: ..."` and move it back to open with `loom data update <id> --status open`.
@@ -41,27 +41,27 @@ What would you like to do?
 - For epics, use `loom data create --title "<title>" --type epic --priority 2`.
 - For child work, include `--parent <epic-id>`; for repo-scoped work, include `--source-repo <repo-id>`.
 - Add context with `--description`, `--design`, `--notes`, `--label`, and `--depends-on` when the user provides it.
-- Show the create output, then run `loom data show <created-id>` if the user wants to review the full record.
+- Show the create output, then run `loom task show <created-id>` if the user wants to review the full record.
 
 **3. Triage Backlog**
-- Show open work with `loom data list --status=open`.
+- Show open work with `loom task list --status open`.
 - For selected issues, use supported commands:
   - Change status: `loom data update <id> --status=<status>`
   - Assign owner: `loom data update <id> --assignee=<name>`
   - Add notes/feedback: `loom data comment <id> "..."`
-  - Close as won't do: `loom data close <id> --reason="<reason>"`
-  - View details: `loom data show <id>`
+  - Close as won't do: `loom task close <id> --reason="<reason>"`
+  - View details: `loom task show <id>`
 
 **4. Check Status**
 - Show blocked items with `loom data blocked`.
-- Show agent workload with `loom data list --status=in_progress`.
-- Show recent activity with `loom data list --limit=10`.
+- Show agent workload with `loom task list --status in_progress`.
+- Show recent activity with `loom task list --limit 10`.
 - Show runtime readiness with `loom workspace ops status --json`.
 - Answer general backlog questions from command output.
 
 **5. Epic Status**
-- List open epics with `loom data list --status=open --type=epic`.
-- Drill into selected epics with `loom data show <id>`.
+- List open epics with `loom task list --status open --type epic`.
+- Drill into selected epics with `loom task show <id>`.
 - Ask before closing completed or superseded epics.
 
 **6. Manage Repos or Agents**

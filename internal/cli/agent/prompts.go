@@ -127,7 +127,7 @@ func buildWorkspaceContextBlock(workspace *config.WorkspaceConfig) string {
 	}
 
 	sb.WriteString("\n**Important workspace rules:**\n")
-	sb.WriteString("- Run `loom data` commands from the workspace root (current directory)\n")
+	sb.WriteString("- Run `loom task` and `loom data` commands from the workspace root (current directory)\n")
 	sb.WriteString("- Run git commands (git status, git add, git commit, git push) from the specific repo subdirectory\n")
 	sb.WriteString("- Run build/test commands from the specific repo subdirectory\n")
 	sb.WriteString("- Changes may span multiple repos — coordinate commits across them\n\n")

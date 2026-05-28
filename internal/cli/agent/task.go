@@ -21,12 +21,33 @@ var (
 	taskMaxTasks    int
 	taskIdleTimeout int
 	taskParentID    string
+	taskOutput      string
 )
 
 var taskCmd = &cobra.Command{
-	Use:               "task [worktree|workspace]",
+	Use:     "task",
+	Short:   "Manage task workflow and run implementation agents",
+	GroupID: "agents",
+	Long: `Manage task workflow state and run implementation agents.
+
+Workflow commands express user intent:
+  loom task claim <id>
+  loom task submit <id>
+  loom task block <id> --reason <text>
+  loom task release <id>
+  loom task close <id>
+
+The implementation-agent runner is explicit:
+  loom task run [worktree|workspace]`,
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return cmd.Help()
+	},
+}
+
+var taskRunCmd = &cobra.Command{
+	Use:               "run [worktree|workspace]",
 	Short:             "Run an implementation agent",
-	GroupID:           "agents",
 	ValidArgsFunction: cli.WorktreeCompletion,
 	Long: `Run an implementation agent in the specified worktree or workspace.
 
@@ -49,23 +70,39 @@ Flags:
   -t, --idle-timeout  Exit after N minutes with no available tasks (0 = none)
 
 Examples:
-  loom task falcon              # Run in falcon worktree/workspace (single task)
-  loom task                     # Run in current directory
-  loom task falcon --auto       # Continuous mode until Ctrl+C
-  loom task falcon -a -m 5      # Process up to 5 tasks
-  loom task falcon -a -t 30     # Exit after 30 min idle`,
+  loom task run falcon              # Run in falcon worktree/workspace (single task)
+  loom task run                     # Run in current directory
+  loom task run falcon --auto       # Continuous mode until Ctrl+C
+  loom task run falcon -a -m 5      # Process up to 5 tasks
+  loom task run falcon -a -t 30     # Exit after 30 min idle`,
 	Args: cobra.MaximumNArgs(1),
 	Run:  runTask,
 }
 
 func init() {
-	taskCmd.Flags().BoolVarP(&taskAutoMode, "auto", "a", false, "Enable continuous mode (process multiple tasks)")
-	taskCmd.Flags().BoolVar(&taskDaemonMode, "daemon-mode", false, "Internal: single task mode for daemon")
-	_ = taskCmd.Flags().MarkHidden("daemon-mode")
-	taskCmd.Flags().IntVarP(&taskInterval, "interval", "i", 30, "Polling interval in seconds when no tasks available")
-	taskCmd.Flags().IntVarP(&taskMaxTasks, "max-tasks", "m", 0, "Maximum tasks to process (0 = unlimited)")
-	taskCmd.Flags().IntVarP(&taskIdleTimeout, "idle-timeout", "t", 0, "Exit after N minutes with no tasks (0 = none)")
-	taskCmd.Flags().StringVar(&taskParentID, "parent", "", "Filter tasks to descendants of this epic ID")
+	taskCmd.PersistentFlags().StringVarP(&taskOutput, "output", "o", "text", "Output format for workflow commands: text|json")
+
+	taskRunCmd.Flags().BoolVarP(&taskAutoMode, "auto", "a", false, "Enable continuous mode (process multiple tasks)")
+	taskRunCmd.Flags().BoolVar(&taskDaemonMode, "daemon-mode", false, "Internal: single task mode for daemon")
+	_ = taskRunCmd.Flags().MarkHidden("daemon-mode")
+	taskRunCmd.Flags().IntVarP(&taskInterval, "interval", "i", 30, "Polling interval in seconds when no tasks available")
+	taskRunCmd.Flags().IntVarP(&taskMaxTasks, "max-tasks", "m", 0, "Maximum tasks to process (0 = unlimited)")
+	taskRunCmd.Flags().IntVarP(&taskIdleTimeout, "idle-timeout", "t", 0, "Exit after N minutes with no tasks (0 = none)")
+	taskRunCmd.Flags().StringVar(&taskParentID, "parent", "", "Filter tasks to descendants of this epic ID")
+
+	taskCmd.AddCommand(
+		taskRunCmd,
+		taskClaimCmd,
+		taskSubmitCmd,
+		taskBlockCmd,
+		taskReleaseCmd,
+		taskCloseCmd,
+		taskReopenCmd,
+		taskDeferCmd,
+		taskUndeferCmd,
+		taskShowCmd,
+		taskListCmd,
+	)
 	cli.RegisterCommand(taskCmd)
 }
 

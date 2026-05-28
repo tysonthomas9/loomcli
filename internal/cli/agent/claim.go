@@ -13,27 +13,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/events"
 )
 
-var claimCmd = &cobra.Command{
-	Use:   "claim <task-id>",
-	Short: "Update the lock file with the task being worked on",
-	Long: `Update the agent lock file to record which task is being worked on.
-
-This command is called after an agent claims a task through Loom. It updates
-the lock file so that 'loom monitor' can show which task each agent is working on.
-
-Arguments:
-  task-id    The Loom task ID (e.g., loomcli-487 or loomcli-abc.1)
-
-Examples:
-  loom claim loomcli-487         # Record that we're working on loomcli-487`,
-	Args: cobra.ExactArgs(1),
-	Run:  runClaim,
-}
-
-func init() {
-	cli.RegisterCommand(claimCmd)
-}
-
 func runClaim(cmd *cobra.Command, args []string) {
 	taskID := args[0]
 

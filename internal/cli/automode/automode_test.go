@@ -1231,7 +1231,7 @@ func TestTmuxCycle_DaemonExitsWithoutClaimingTask(t *testing.T) {
 		t.Fatalf("AcquireLock failed: %v", err)
 	}
 
-	// Daemon exits WITHOUT calling loom claim — TaskID stays empty.
+	// Daemon exits WITHOUT binding a task — TaskID stays empty.
 	// In the fix, daemon does NOT call ReleaseLock (no defer).
 	// Lock file remains on disk.
 
@@ -1264,7 +1264,7 @@ func TestTmuxCycle_DaemonClaimsTask(t *testing.T) {
 		t.Fatalf("AcquireLock failed: %v", err)
 	}
 
-	// Daemon (Claude) claims a task via loom claim
+	// Daemon (Claude) binds a claimed task into the lock file.
 	if err := UpdateLockTask(tmpDir, "loom-abc", "Implement feature"); err != nil {
 		t.Fatalf("UpdateLockTask failed: %v", err)
 	}
@@ -1312,7 +1312,7 @@ func TestTmuxCycle_ConsecutiveNoProgress(t *testing.T) {
 			t.Fatalf("Cycle %d: AcquireLock failed: %v", cycle, err)
 		}
 
-		// Daemon exits without claiming (no loom claim called)
+		// Daemon exits without binding a task.
 		// Lock stays on disk (no defer ReleaseLock)
 
 		// Parent checks progress

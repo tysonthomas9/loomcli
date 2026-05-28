@@ -737,7 +737,7 @@ func durationFromEnv(key string, fallback time.Duration) time.Duration {
 //
 // The fix extends `loom complete` to drop the claim lock as part of its
 // documented contract. This test pre-stages the leaked-lock state via public
-// `loom data` commands (the buggy sequence a planner emits), then asserts the
+// task workflow commands (the buggy sequence a planner used to emit), then asserts the
 // post-fix shape: after `loom complete` runs in a worktree whose .agent.lock
 // references the leaked issue, a downstream worker can claim it.
 //
@@ -769,10 +769,8 @@ func TestPlaygroundPlannerLeaksClaimLock(t *testing.T) {
 
 	// Per-actor env shims. The fleet-db backend takes its X-Actor header from
 	// LOOM_FLEET_DB_ACTOR (with LOOM_AGENT_NAME/USER fallbacks); the CLI
-	// `--actor` flag on `loom data claim` is documented as parity-only and
-	// is not threaded through the backend (see internal/cli/data/claim.go).
-	// To drive distinct identities for the two claim attempts we set the
-	// env explicitly per invocation.
+	// To drive distinct identities for the two claim attempts we set the env
+	// explicitly per invocation.
 	plannerEnv := map[string]string{"LOOM_FLEET_DB_ACTOR": "planner-actor"}
 	workerEnv := map[string]string{"LOOM_FLEET_DB_ACTOR": "worker-actor"}
 
@@ -798,10 +796,10 @@ func TestPlaygroundPlannerLeaksClaimLock(t *testing.T) {
 
 	// Reproduce the buggy planner sequence: claim as `planner-actor`, write
 	// the design via update, then "exit" without a status-transitioning
-	// update. `loom data claim` is the public path the buggy planner takes;
-	// we don't call `loom complete` here, mimicking the leaked-exit shape.
+	// update. `loom task claim` is the user-facing claim path; we don't call
+	// `loom complete` here, mimicking the leaked-exit shape.
 	if out, err := runLoomCapture(t, scenario, plannerEnv,
-		"data", "claim", issueID); err != nil {
+		"task", "claim", issueID); err != nil {
 		t.Fatalf("planner claim: %v\n%s", err, out)
 	}
 	if out, err := runLoomCapture(t, scenario, plannerEnv,
@@ -815,7 +813,7 @@ func TestPlaygroundPlannerLeaksClaimLock(t *testing.T) {
 	// been masked elsewhere and the test is no longer a meaningful
 	// regression guard — skip rather than pass tautologically.
 	out, err := runLoomCapture(t, scenario, workerEnv,
-		"data", "claim", issueID)
+		"task", "claim", issueID)
 	if err == nil {
 		t.Skipf("preconditions no longer met: worker claim succeeded with planner still holding lock — "+
 			"either fleet-db auto-releases on --design now, or the planner sequence we model "+
@@ -855,19 +853,19 @@ func TestPlaygroundPlannerLeaksClaimLock(t *testing.T) {
 	// before must now succeed. A failure here means `loom complete` did
 	// NOT release the lock — i.e. LOOM-1 has regressed.
 	out, err = runLoomCapture(t, scenario, workerEnv,
-		"data", "claim", issueID)
+		"task", "claim", issueID)
 	if err != nil {
 		t.Fatalf("post-fix: worker claim should succeed after loom complete released the lock, got error=%v output:\n%s",
 			err, out)
 	}
 }
 
-// firstIssueIDForScenario calls `loom data list --output json` against the
+// firstIssueIDForScenario calls `loom task list --output json` against the
 // scenario workspace and returns the first issue's ID. Used by tests that
 // create exactly one issue and need its ID for follow-up calls.
 func firstIssueIDForScenario(t *testing.T, scenario string) string {
 	t.Helper()
-	out, err := runLoomCapture(t, scenario, nil, "data", "list", "--output", "json")
+	out, err := runLoomCapture(t, scenario, nil, "task", "list", "--output", "json")
 	if err != nil {
 		t.Fatalf("loom data list: %v\n%s", err, out)
 	}
