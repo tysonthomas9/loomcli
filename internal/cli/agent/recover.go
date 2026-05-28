@@ -1,11 +1,15 @@
 package agent
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 )
 
@@ -117,6 +121,33 @@ func runRecover(cmd *cobra.Command, args []string) {
 	fmt.Println("=========================================")
 }
 
+// releaseFleetIssueLock issues a best-effort release of the fleet-db lock for
+// the given task held by agentName. Logs success/failure but never returns an
+// error: the agent has already exited and recovery should not abort if the
+// fleet-db server is briefly unreachable. Idempotent on the server side: a
+// missing or already-released lock returns nil.
+func releaseFleetIssueLock(deps *cli.Deps, agentName, taskID string) {
+	if deps == nil || deps.IssueBackend == nil || agentName == "" || taskID == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := deps.IssueBackend.ReleaseIssueLock(ctx, taskID, agentName); err != nil {
+		if backend.IsKind(err, backend.KindNotFound) || backend.IsKind(err, backend.KindNotImplemented) {
+			return
+		}
+		if errors.Is(err, context.DeadlineExceeded) {
+			fmt.Printf("[recover] WARN: timed out releasing fleet-db lock for %s (actor=%s)\n",
+				taskID, agentName)
+			return
+		}
+		fmt.Printf("[recover] WARN: failed to release fleet-db lock for %s (actor=%s): %v\n",
+			taskID, agentName, err)
+		return
+	}
+	fmt.Printf("[recover] released fleet-db lock issue=%s actor=%s\n", taskID, agentName)
+}
+
 // handleRunningAgent prompts to kill a running agent process. Returns true if
 // the process was killed (or force mode is on), false if the user aborted.
 func handleRunningAgent(pid int) bool {
@@ -178,6 +209,13 @@ func RecoverWorktree(worktreePath, agentName string, exitCode int) error {
 
 		// 4. Handle orphaned task from lock
 		if lockInfo.TaskID != "" {
+			// Always release the fleet-db issue lock on every exit path.
+			// Status mutations the agent already performed (review/closed/
+			// open via Update or Close) do NOT release the lock server-side,
+			// so without this call the lock survives until its TTL expires
+			// and other agents get spurious claim conflicts.
+			releaseFleetIssueLock(deps, agentName, lockInfo.TaskID)
+
 			if exitCode == 0 {
 				// Clean exit: trust the agent updated task status correctly.
 				// Do NOT reset — the agent may have set status to review/closed.

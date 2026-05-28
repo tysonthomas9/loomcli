@@ -18,6 +18,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/sessionfinalize"
 	"github.com/tysonthomas9/loomcli/internal/events"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
+	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
 var (
@@ -151,7 +152,16 @@ func runPlanDaemon(deps *cli.Deps, worktreePath, agentName string) {
 
 	beforeRef := automode.CaptureHEADRef(worktreePath)
 	startedAt := time.Now()
-	invokeErr := deps.Agent.InvokeInteractive(worktreePath, prompt, agentName)
+
+	// Daemon-spawned subprocesses have no controlling TTY. InvokeInteractive
+	// inherits the daemon's stdin/stdout, which makes backend TUIs render
+	// nothing — the supervisor watchdog then times the silent run out at
+	// 15 min. Use the wrapper-backed non-interactive path: PTY + stream-json
+	// → log mtime advances per turn.
+	shutdown := automode.SetupSignalHandler()
+	collector := usage.NewCollector(cli.GetBackendName(), agentName)
+	invokeErr := deps.Agent.InvokeNonInteractive(worktreePath, prompt, agentName, shutdown, collector)
+
 	emitTaskLifecycleResult(agentName, worktreePath, startedAt, invokeErr)
 	finalizeAgentSession(sess, worktreePath, beforeRef, invokeErr)
 

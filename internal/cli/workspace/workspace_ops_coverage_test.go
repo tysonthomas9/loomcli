@@ -237,6 +237,7 @@ func TestBuildWorkspaceOpsStatusAndRendering(t *testing.T) {
 	}
 
 	status, err := buildWorkspaceOpsStatus(context.Background(),
+		nil,
 		&domain.Workspace{Key: "WS", Name: "Workspace"},
 		[]*domain.Repo{{WorkspaceKey: "WS", Name: "app"}},
 		[]*domain.Agent{{WorkspaceKey: "WS", Name: "planner", RoleName: "plan", State: domain.AgentStateActive, DesiredState: domain.AgentDesiredRunning, Repos: []string{"app"}}},

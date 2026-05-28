@@ -36,17 +36,6 @@ func (stubDeadDaemonPool) Discard(_ *rpc.Client)       {}
 func (stubDeadDaemonPool) Stats() daemon.PoolStats     { return daemon.PoolStats{Size: 100} }
 func (stubDeadDaemonPool) Close() error                { return nil }
 
-type stubStartingDaemonPool struct{}
-
-func (stubStartingDaemonPool) Get(_ context.Context) (*rpc.Client, error) {
-	return nil, daemon.ErrDaemonStarting
-}
-func (stubStartingDaemonPool) Put(_ *rpc.Client)           {}
-func (stubStartingDaemonPool) PutAfterError(_ *rpc.Client) {}
-func (stubStartingDaemonPool) Discard(_ *rpc.Client)       {}
-func (stubStartingDaemonPool) Stats() daemon.PoolStats     { return daemon.PoolStats{Size: 1} }
-func (stubStartingDaemonPool) Close() error                { return nil }
-
 // TestHandleAPIHealthNoDaemon verifies the fleet-mode health handler
 // returns 200 with status="ok" and daemon.connected=false even with no
 // pool wired. Liveness probes must NOT see a 503 here — the server is
@@ -90,46 +79,6 @@ func TestHandleAPIHealth_NilPoolShortCircuit(t *testing.T) {
 	}
 }
 
-// TestHandleDaemonStatus_NoDaemonMode verifies the workspace-scoped
-// daemon-status handler returns the fleet stub when daemonExpected=false,
-// instead of the historical 503 ("workspace not registered" / "connection
-// pool not initialized") that fleet mode used to throw.
-func TestHandleDaemonStatus_NoDaemonMode(t *testing.T) {
-	handler := HandleDaemonStatusWithMode(nil, false)
-	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/x/daemon/status", nil)
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
-	var body DaemonStatusResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if !body.Success {
-		t.Errorf("Success = false, want true (fleet stub)")
-	}
-	if body.Data == nil {
-		t.Fatalf("Data = nil, want stub StatusResponse")
-	}
-	if body.Data.DaemonMode != rpc.DaemonModeFleet {
-		t.Errorf("DaemonMode = %q, want %q", body.Data.DaemonMode, rpc.DaemonModeFleet)
-	}
-}
-
-// TestHandleDaemonStatus_DaemonExpectedNilPool keeps the daemon-mode
-// contract intact: when daemonExpected=true and no pool is wired, the
-// handler returns 503 so operators can detect daemon-mode misconfiguration.
-func TestHandleDaemonStatus_DaemonExpectedNilPool(t *testing.T) {
-	handler := HandleDaemonStatusWithMode(nil, true)
-	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/x/daemon/status", nil)
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, want 503", rec.Code)
-	}
-}
-
 // TestHandleAPIHealth_DaemonDead is the prod-regression guard for the
 // daemon-mode 503 contract. A wired pool whose Get() errors MUST 503 so
 // k8s/load-balancer liveness probes restart the pod —
@@ -156,7 +105,6 @@ func TestHandleAPIHealth_DaemonDead(t *testing.T) {
 		t.Errorf("Daemon.Error empty, want pool-failure detail")
 	}
 }
-
 func TestHandleHealthAndStartingDaemon(t *testing.T) {
 	rec := httptest.NewRecorder()
 	HandleHealth(nil).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/health", nil))
@@ -230,12 +178,6 @@ func TestHandleStatsAndDaemonStatusWrappers(t *testing.T) {
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("HandleStats(nil) status=%d body=%s, want 503", rec.Code, rec.Body.String())
 	}
-
-	rec = httptest.NewRecorder()
-	HandleDaemonStatus(nil).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/daemon/status", nil))
-	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("HandleDaemonStatus(nil) status=%d body=%s, want 503", rec.Code, rec.Body.String())
-	}
 }
 
 func TestHandleStatsWithPool(t *testing.T) {
@@ -301,28 +243,6 @@ func TestHandleMetrics(t *testing.T) {
 	}
 }
 
-// TestHandleDaemonStatus_DaemonDead mirrors the /api/health regression
-// guard for the workspace-scoped daemon-status route. With a wired pool
-// whose Get() always errors and daemonExpected=true, the
-// response MUST be 503 so the FE badge correctly renders "daemon down,
-// please restart" rather than the fleet-stub "no daemon expected" state.
-func TestHandleDaemonStatus_DaemonDead(t *testing.T) {
-	handler := HandleDaemonStatusWithMode(stubDeadDaemonPool{}, true)
-	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/x/daemon/status", nil)
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, want 503", rec.Code)
-	}
-	var body DaemonStatusResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if body.Success {
-		t.Errorf("Success = true, want false (daemon dead)")
-	}
-}
-
 func TestHealthStatsAdapterAndDaemonStatusSuccess(t *testing.T) {
 	client := newHealthRPCClient(t)
 	pool := &liveRPCPool{client: client}
@@ -340,19 +260,6 @@ func TestHealthStatsAdapterAndDaemonStatusSuccess(t *testing.T) {
 		t.Fatalf("health body=%#v puts=%d discards=%d", healthBody, pool.puts, pool.discards)
 	}
 
-	rec = httptest.NewRecorder()
-	HandleDaemonStatusWithMode(pool, true).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/workspaces/ws/daemon/status", nil))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("daemon status=%d body=%s", rec.Code, rec.Body.String())
-	}
-	var statusBody DaemonStatusResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &statusBody); err != nil {
-		t.Fatalf("decode status: %v", err)
-	}
-	if !statusBody.Success || statusBody.Data == nil || statusBody.Data.DaemonMode != rpc.DaemonModeEvents || pool.puts != 2 {
-		t.Fatalf("status body=%#v puts=%d", statusBody, pool.puts)
-	}
-
 	adapter := &statsPoolAdapter{pool: pool}
 	got, err := adapter.Get(context.Background())
 	if err != nil || got == nil {
@@ -360,7 +267,7 @@ func TestHealthStatsAdapterAndDaemonStatusSuccess(t *testing.T) {
 	}
 	adapter.Put(got)
 	adapter.Discard(got)
-	if pool.puts != 3 || pool.discards != 1 {
+	if pool.puts != 2 || pool.discards != 1 {
 		t.Fatalf("adapter put/discard counts puts=%d discards=%d", pool.puts, pool.discards)
 	}
 }
@@ -431,6 +338,7 @@ func (f fakeStatsBackend) Update(context.Context, string, backend.UpdateParams) 
 func (f fakeStatsBackend) ClaimIssue(context.Context, string, time.Duration) error    { return nil }
 func (f fakeStatsBackend) DeferIssue(context.Context, string, time.Time) error        { return nil }
 func (f fakeStatsBackend) UndeferIssue(context.Context, string) error                 { return nil }
+func (f fakeStatsBackend) ReleaseIssueLock(context.Context, string, string) error     { return nil }
 func (f fakeStatsBackend) Close(context.Context, string, backend.CloseParams) (*backend.CloseResult, error) {
 	return nil, nil
 }

@@ -129,11 +129,12 @@ func TestRunDaemonStartsMainLoopThroughHooks(t *testing.T) {
 		servicesInitialized = got == cfg && gotProject == projectDir && paths.eventsDir != ""
 		return make(chan struct{}), &Daemon{}
 	}
-	runDaemonMainLoopFn = func(got *DaemonConfig, gotProject string, paths daemonPaths, shutdown chan struct{}, d *Daemon, lock *os.File) {
+	runDaemonMainLoopFn = func(got *DaemonConfig, gotProject string, paths daemonPaths, shutdown chan struct{}, d *Daemon, lock *os.File) int {
 		mainLoopRan = got == cfg && gotProject == projectDir && shutdown != nil && d != nil && lock != nil
 		if err := os.WriteFile(paths.stateFile, []byte("{}"), 0o600); err != nil {
 			t.Fatalf("write state: %v", err)
 		}
+		return 0
 	}
 
 	runDaemon(&cobra.Command{}, nil)

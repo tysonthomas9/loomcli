@@ -590,6 +590,24 @@ func (e PatchIssueRequestStatus) Valid() bool {
 	}
 }
 
+// Defines values for RuntimeReadyResponseMode.
+const (
+	Daemon RuntimeReadyResponseMode = "daemon"
+	Fleet  RuntimeReadyResponseMode = "fleet"
+)
+
+// Valid indicates whether the value is a known member of the RuntimeReadyResponseMode enum.
+func (e RuntimeReadyResponseMode) Valid() bool {
+	switch e {
+	case Daemon:
+		return true
+	case Fleet:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for SessionHistoryRecordLauncher.
 const (
 	SessionHistoryRecordLauncherStartWork SessionHistoryRecordLauncher = "start-work"
@@ -1350,15 +1368,21 @@ type MetricsSnapshot struct {
 
 // MonitorAgentStatus defines model for MonitorAgentStatus.
 type MonitorAgentStatus struct {
-	Ahead         int                    `json:"ahead"`
-	Behind        int                    `json:"behind"`
-	Branch        string                 `json:"branch"`
-	Changes       *[]MonitorFileChange   `json:"changes,omitempty"`
-	Commits       *[]MonitorCommitDetail `json:"commits,omitempty"`
-	DaemonManaged *bool                  `json:"daemon_managed,omitempty"`
+	Ahead   int                    `json:"ahead"`
+	Behind  int                    `json:"behind"`
+	Branch  string                 `json:"branch"`
+	Changes *[]MonitorFileChange   `json:"changes,omitempty"`
+	Commits *[]MonitorCommitDetail `json:"commits,omitempty"`
+
+	// CurrentTaskId Task this daemon-managed agent has currently claimed. Empty between tasks (just spawned, polling, finished). UI joins this against issue.id to render which agent is working each card.
+	CurrentTaskId *string `json:"current_task_id,omitempty"`
+	DaemonManaged *bool   `json:"daemon_managed,omitempty"`
 
 	// DesiredState Requested daemon state for the agent.
 	DesiredState *string `json:"desired_state,omitempty"`
+
+	// LastActivityAt Most recent PTY-output observation from the agent's supervised backend (claude/codex/gemini), forwarded over IPC. Compare to "now" to detect stuck agents. Zero/absent when no observation yet or agent isn't daemon-managed.
+	LastActivityAt *time.Time `json:"last_activity_at,omitempty"`
 
 	// Mode Assignment mode, such as persistent or ephemeral.
 	Mode *string `json:"mode,omitempty"`
@@ -1638,6 +1662,17 @@ type PatchIssueRequestAgentState string
 
 // PatchIssueRequestStatus defines model for PatchIssueRequest.Status.
 type PatchIssueRequestStatus string
+
+// RuntimeReadyResponse defines model for RuntimeReadyResponse.
+type RuntimeReadyResponse struct {
+	Mode      RuntimeReadyResponseMode `json:"mode"`
+	Ready     bool                     `json:"ready"`
+	Reason    *string                  `json:"reason,omitempty"`
+	Workspace string                   `json:"workspace"`
+}
+
+// RuntimeReadyResponseMode defines model for RuntimeReadyResponse.Mode.
+type RuntimeReadyResponseMode string
 
 // SeedRequest defines model for SeedRequest.
 type SeedRequest struct {

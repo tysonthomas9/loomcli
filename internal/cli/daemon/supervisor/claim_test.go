@@ -220,8 +220,8 @@ func TestClaimTask_CapsConflictRetries(t *testing.T) {
 	if claimCalls != claimConflictRetryLimit {
 		t.Fatalf("claim calls = %d, want capped at %d", claimCalls, claimConflictRetryLimit)
 	}
-	if ap.LastError == nil || ap.LastError.Class != agenterr.NoWork {
-		t.Fatalf("LastError = %#v, want NoWork after conflict retry cap", ap.LastError)
+	if ap.LastError == nil || ap.LastError.Class != agenterr.LockConflict {
+		t.Fatalf("LastError = %#v, want LockConflict after conflict retry cap", ap.LastError)
 	}
 }
 

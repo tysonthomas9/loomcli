@@ -105,7 +105,6 @@ func NewDaemon(config *cfgpkg.DaemonConfig, projectDir string, eventBus events.E
 		Agents:         make([]*supervisor.AgentProcess, 0, len(config.Agents)),
 		ControlStore:   st,
 		IssueBackend:   issueBackend,
-		IpcSocketPath:  resolveAgentIPCSocketPath(projectDir, config.Daemon.PIDFile),
 	}
 
 	wireSupervisorCallbacks(sup, issueBackend)
@@ -127,17 +126,15 @@ func (d *Daemon) Start() error {
 	d.configHash = computeConfigHash(d.config)
 	d.reconcileMu.Unlock()
 
+	// Supervisor.Start() initializes Shutdown and FatalCh; we need both before
+	// launching the daemon-owned reconciler goroutine. Start the supervisor
+	// first, then attach the reconciler under the same crash-loud harness.
 	if err := d.sup.Start(); err != nil {
 		return err
 	}
-	// Start configReconciler goroutine after supervisor startup initializes
-	// Shutdown; otherwise the race detector can observe concurrent nil/channel
-	// access between this loop and Supervisor.Start.
-	d.sup.Wg.Add(1)
-	go func() {
-		defer d.sup.Wg.Done()
-		d.configReconciler()
-	}()
+	d.sup.RegisterTick(supervisor.GoroutineConfigReconciler)
+	d.sup.RunCritical(supervisor.GoroutineConfigReconciler, d.configReconciler)
+
 	d.startAgentCommandPoller()
 	return nil
 }

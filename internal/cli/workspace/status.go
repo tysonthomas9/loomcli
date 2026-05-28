@@ -66,6 +66,11 @@ type DaemonInfo struct {
 	PID      int    `json:"pid,omitempty"`
 	Uptime   string `json:"uptime,omitempty"`
 	StalePID bool   `json:"stale_pid,omitempty"`
+	// Cwd is the daemon's project directory — the workspace working
+	// tree it is supervising. Only populated when the daemon source can
+	// report it (currently the Registered source — see
+	// WorkspaceOpsDaemon.Registered).
+	Cwd string `json:"cwd,omitempty"`
 }
 
 // BackendInfo holds the resolved backend information.

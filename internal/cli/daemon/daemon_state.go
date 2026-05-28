@@ -128,6 +128,7 @@ func toDaemonAgentStatus(ap supervisor.SupervisedAgentStatus, maxRetries int) Da
 		Repo:                   ap.Repo,
 		PID:                    ap.PID,
 		Status:                 computeAgentStatus(ap, maxRetries),
+		TaskID:                 ap.AssignedTaskID,
 		EpicID:                 ap.AssignedEpicID,
 		CurrentBackend:         ap.CurrentBackend,
 		RestartCount:           ap.RestartCount,
@@ -143,6 +144,7 @@ func toDaemonAgentStatus(ap supervisor.SupervisedAgentStatus, maxRetries int) Da
 		OwnershipLeaseID:       ap.OwnershipLeaseID,
 		OwnershipFencingToken:  ap.OwnershipFencingToken,
 		OwnershipLastHeartbeat: ap.OwnershipLastHeartbeat,
+		LastActivity:           ap.LastActivity,
 	}
 	if ap.StopReason != "" && ap.PID == 0 {
 		if !ap.LastExit.IsZero() {

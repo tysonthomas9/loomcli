@@ -76,7 +76,7 @@ func TestFleetRequestBuildErrors(t *testing.T) {
 	if _, _, err := fb.doRequest(context.Background(), http.MethodGet, "/issues", nil); err == nil {
 		t.Fatal("doRequest accepted malformed URL")
 	}
-	if _, _, err := fb.doRequestAsActor(context.Background(), http.MethodPost, "/issues", nil, "actor"); err == nil {
+	if _, _, err := fb.doRequestAsActor(context.Background(), "/issues", nil, "actor"); err == nil {
 		t.Fatal("doRequestAsActor accepted malformed URL")
 	}
 	if _, _, err := fb.doRequestURL(context.Background(), http.MethodGet, "://bad-url", nil); err == nil {

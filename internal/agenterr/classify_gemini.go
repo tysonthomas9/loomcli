@@ -2,8 +2,10 @@ package agenterr
 
 import "regexp"
 
-// Gemini-specific error patterns, ordered most-specific first.
-var geminiPatterns = []errorPattern{
+// Gemini-specific error patterns, ordered most-specific first. The
+// shared prose-style rate-limit patterns are appended at the end so
+// gemini-specific signals (429, resource_exhausted) win when present.
+var geminiPatterns = append([]errorPattern{
 	{regexp.MustCompile(`(?i)rate.?limit|too many requests|resource_exhausted`), RateLimited, "rate limit exceeded"},
 	{regexp.MustCompile(`(?i)\b429\b`), RateLimited, "rate limit exceeded (429)"},
 	{regexp.MustCompile(`(?i)invalid.?api.?key|authentication.?failed`), AuthFailure, "invalid API key"},
@@ -16,7 +18,7 @@ var geminiPatterns = []errorPattern{
 	{regexp.MustCompile(`(?i)timeout|ETIMEDOUT|ECONNRESET|timed?.?out|deadline.?exceeded`), Timeout, "connection timeout"},
 	{regexp.MustCompile(`(?i)internal.?error|service.?unavailable|backend.?error`), Transient, "server error"},
 	{regexp.MustCompile(`(?i)\b50[023]\b`), Transient, "server error"},
-}
+}, sharedRateLimitPatterns...)
 
 func classifyGemini(logTail string) *classifyResult {
 	return classifyWithPatterns(logTail, geminiPatterns)

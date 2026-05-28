@@ -3,7 +3,9 @@ package agenterr
 import "regexp"
 
 // Codex (OpenAI) specific error patterns, ordered most-specific first.
-var codexPatterns = []errorPattern{
+// The shared prose-style rate-limit patterns are appended at the end
+// so codex-specific signals (429, `tokens per min`) win when present.
+var codexPatterns = append([]errorPattern{
 	{regexp.MustCompile(`(?i)rate.?limit|too many requests|tokens per min`), RateLimited, "rate limit exceeded"},
 	{regexp.MustCompile(`(?i)\b429\b`), RateLimited, "rate limit exceeded (429)"},
 	{regexp.MustCompile(`(?i)invalid.?api.?key|incorrect.?api.?key`), AuthFailure, "invalid API key"},
@@ -17,7 +19,7 @@ var codexPatterns = []errorPattern{
 	{regexp.MustCompile(`(?i)timeout|ETIMEDOUT|ECONNRESET|timed?.?out`), Timeout, "connection timeout"},
 	{regexp.MustCompile(`(?i)server_error|internal.?error|overloaded`), Transient, "server error"},
 	{regexp.MustCompile(`(?i)\b50[023]\b`), Transient, "server error"},
-}
+}, sharedRateLimitPatterns...)
 
 func classifyCodex(logTail string) *classifyResult {
 	return classifyWithPatterns(logTail, codexPatterns)

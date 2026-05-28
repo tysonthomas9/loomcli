@@ -3,13 +3,18 @@ package workspace
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli/local"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 func clearRuntimeRoutingEnv(t *testing.T) {
@@ -526,5 +531,134 @@ func TestWorkspaceOpsGlobalProblemsSilentWhenDaemonRunningOrNoRunnableAgents(t *
 				}
 			}
 		})
+	}
+}
+
+// TestWorkspaceOpsGlobalProblemsAcceptsRegisteredDaemon mirrors the
+// WorkspaceLocal variant: when the supervisor publishes itself via the
+// fleet-db Node registry, diagnose must NOT emit daemon_not_running even
+// if the path-based detection (AppData / WorkspaceLocal) found nothing.
+// This is the LOOM-3 false-positive case.
+func TestWorkspaceOpsGlobalProblemsAcceptsRegisteredDaemon(t *testing.T) {
+	status := &WorkspaceOpsStatus{
+		Daemon: WorkspaceOpsDaemon{
+			AppData:        DaemonInfo{Running: false},
+			WorkspaceLocal: DaemonInfo{Running: false},
+			Registered:     DaemonInfo{Running: true, PID: 31337, Cwd: "/some/cwd"},
+		},
+		Repos: []WorkspaceOpsRepo{{Name: "app"}},
+		Agents: []WorkspaceOpsAgent{
+			{Name: "planner", Runnable: true},
+		},
+	}
+
+	problems := workspaceOpsGlobalProblems(status)
+	for _, problem := range problems {
+		if problem.Code == "daemon_not_running" {
+			t.Fatalf("problems = %#v, did not expect daemon_not_running (Registered daemon is alive)", problems)
+		}
+	}
+}
+
+func TestWaitForWorkspaceOpsDaemonAcceptsRegisteredDaemon(t *testing.T) {
+	initial := &WorkspaceOpsStatus{
+		Workspace: WorkspaceOpsWorkspace{Key: "TEST"},
+		Daemon: WorkspaceOpsDaemon{
+			AppData: DaemonInfo{Running: false},
+		},
+		Agents: []WorkspaceOpsAgent{
+			{Name: "planner", Runnable: true},
+		},
+	}
+	ready := &WorkspaceOpsStatus{
+		Workspace: WorkspaceOpsWorkspace{Key: "TEST"},
+		Daemon: WorkspaceOpsDaemon{
+			AppData:    DaemonInfo{Running: false},
+			Registered: DaemonInfo{Running: true, PID: 42},
+		},
+		Agents: []WorkspaceOpsAgent{
+			{Name: "planner", Runnable: true},
+		},
+	}
+
+	calls := 0
+	status, err := waitForWorkspaceOpsDaemon(context.Background(), "TEST", initial, func(context.Context, string) (*WorkspaceOpsStatus, error) {
+		calls++
+		return ready, nil
+	})
+	if err != nil {
+		t.Fatalf("waitForWorkspaceOpsDaemon returned error: %v", err)
+	}
+	if status != ready {
+		t.Fatalf("status = %#v, want ready status", status)
+	}
+	if calls != 1 {
+		t.Fatalf("loader calls = %d, want 1", calls)
+	}
+}
+
+// TestBuildWorkspaceOpsStatusUsesNodeRegistry verifies the end-to-end
+// behavior: a workspace with a runnable agent and a live supervisor Node
+// in the fleet-db registry should NOT report daemon_not_running, even
+// when the agent's path-based AppData/WorkspaceLocal lookups come up
+// empty (the LOOM-3 cwd-mismatch scenario).
+func TestBuildWorkspaceOpsStatusUsesNodeRegistry(t *testing.T) {
+	t.Setenv("LOOM_ISSUE_BACKEND", "fleet") // skip local-runtime probe
+	st := memstore.New()
+	ctx := context.Background()
+
+	ws := &domain.Workspace{Key: "WS-NODE"}
+	repo := &domain.Repo{Name: "app", Groups: []string{}}
+	agent := &domain.Agent{
+		Name:         "planner",
+		RoleName:     "plan",
+		State:        domain.AgentStateActive,
+		DesiredState: domain.AgentDesiredRunning,
+	}
+	roles := []*domain.Role{{Name: "plan"}}
+
+	// Register a fresh local supervisor Node with PID/Cwd labels for
+	// the current process. lockfile.IsProcessRunning will report it
+	// alive since it's our own PID.
+	livePID := os.Getpid()
+	hostname, _ := os.Hostname()
+	if hostname == "" {
+		hostname = "unknown-host"
+	}
+	nodeID := fmt.Sprintf("loom-supervisor-%s-%d", hostname, livePID)
+	_, err := st.Nodes().Create(ctx, store.NodeCreate{
+		WorkspaceKey:    ws.Key,
+		NodeID:          nodeID,
+		OwnerActor:      "local",
+		RuntimeProvider: domain.RuntimeProviderLocal,
+		Labels: []string{
+			"loom.daemon.pid=" + strconv.Itoa(livePID),
+			"loom.daemon.cwd=/tmp/registered-cwd",
+		},
+		Capabilities: []string{"local-supervisor"},
+		DrainState:   domain.NodeDrainActive,
+		TTL:          2 * time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("create node: %v", err)
+	}
+
+	status, err := buildWorkspaceOpsStatus(ctx, st, ws, []*domain.Repo{repo}, []*domain.Agent{agent}, roles)
+	if err != nil {
+		t.Fatalf("buildWorkspaceOpsStatus: %v", err)
+	}
+	if !status.Daemon.Registered.Running {
+		t.Fatalf("status.Daemon.Registered.Running = false, want true (live local Node should mark daemon as registered)")
+	}
+	if status.Daemon.Registered.PID != livePID {
+		t.Fatalf("status.Daemon.Registered.PID = %d, want %d", status.Daemon.Registered.PID, livePID)
+	}
+	if status.Daemon.Registered.Cwd != "/tmp/registered-cwd" {
+		t.Fatalf("status.Daemon.Registered.Cwd = %q, want /tmp/registered-cwd", status.Daemon.Registered.Cwd)
+	}
+	for _, problem := range status.Problems {
+		if problem.Code == "daemon_not_running" {
+			t.Fatalf("expected no daemon_not_running, got problems %#v", status.Problems)
+		}
 	}
 }

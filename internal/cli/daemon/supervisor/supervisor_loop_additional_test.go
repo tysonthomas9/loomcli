@@ -64,9 +64,7 @@ func TestSpawnAndWaitBuildFailureStopsOnShutdown(t *testing.T) {
 		StopCh:       make(chan struct{}),
 	}
 
-	if s.spawnAndWait(ap) {
-		t.Fatal("spawnAndWait returned true after build failure and shutdown")
-	}
+	s.spawnAndWait(ap)
 	if ap.RestartCount != 1 {
 		t.Fatalf("RestartCount = %d, want 1", ap.RestartCount)
 	}

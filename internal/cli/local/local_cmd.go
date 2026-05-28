@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -264,6 +265,58 @@ func startServeProcess(ctx context.Context, cfg *localServiceConfig, logFile *os
 	return serveCmd, nil
 }
 
+// serveStartupLogTailBytes caps how much of loom-serve.log we splice into
+// the user-facing startup error and into runtime.json.error. 4 KB is enough
+// to capture the last few lines without bloating either surface.
+const serveStartupLogTailBytes = 4096
+
+// serveStartupError wraps the health-check error with a tail of
+// loom-serve.log so the caller learns the real spawn failure instead of a
+// generic "connection refused". Implements Unwrap() so errors.Is/As still
+// see the original health error.
+type serveStartupError struct {
+	healthErr error
+	logPath   string
+	logTail   string
+	maxBytes  int
+}
+
+func (e *serveStartupError) Error() string {
+	var b strings.Builder
+	b.WriteString("local runtime did not become healthy: ")
+	b.WriteString(e.healthErr.Error())
+	b.WriteString("\nrecent loom-serve.log (last ")
+	b.WriteString(strconv.Itoa(e.maxBytes))
+	b.WriteString(" bytes from ")
+	b.WriteString(e.logPath)
+	b.WriteString("):\n")
+	for _, line := range strings.Split(e.logTail, "\n") {
+		b.WriteString("  ")
+		b.WriteString(strings.TrimRight(line, "\r"))
+		b.WriteString("\n")
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+func (e *serveStartupError) Unwrap() error { return e.healthErr }
+
+// wrapServeStartupError augments healthErr with the tail of loom-serve.log
+// when the log has content. When the log is missing or empty it falls back
+// to today's exact error format so existing callers/tests that match the
+// prefix continue to work.
+func wrapServeStartupError(dataDir string, healthErr error) error {
+	tail := serveStartupLogTail(dataDir, serveStartupLogTailBytes)
+	if tail == "" {
+		return fmt.Errorf("local runtime did not become healthy: %w", healthErr)
+	}
+	return &serveStartupError{
+		healthErr: healthErr,
+		logPath:   serveLogPath(dataDir),
+		logTail:   tail,
+		maxBytes:  serveStartupLogTailBytes,
+	}
+}
+
 // awaitServeHealthy polls the serve URL until it becomes ready or the
 // 30s budget expires. Marks the runtime info accordingly; on timeout the
 // child serve process is killed.
@@ -271,11 +324,12 @@ func awaitServeHealthy(ctx context.Context, cfg *localServiceConfig, info *runti
 	waitCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	if err := waitForRuntime(waitCtx, cfg.url); err != nil {
+		wrapped := wrapServeStartupError(cfg.dataDir, err)
 		info.Status = "failed"
-		info.Error = err.Error()
+		info.Error = wrapped.Error()
 		_ = writeRuntime(cfg.dataDir, info)
 		_ = serveCmd.Process.Kill()
-		return fmt.Errorf("local runtime did not become healthy: %w", err)
+		return wrapped
 	}
 	info.Status = "running"
 	info.Error = ""

@@ -565,9 +565,7 @@ func TestSupervisorLifecycleHelpersAdditionalBranches(t *testing.T) {
 			StopCh:          make(chan struct{}),
 		}
 
-		if s.spawnAndWait(ap) {
-			t.Fatal("spawnAndWait succeeded despite missing custom prompt_file")
-		}
+		s.spawnAndWait(ap)
 		session, err := st.AgentSessions().Get(ctx, "WS", "spawn-session")
 		if err != nil {
 			t.Fatalf("get finalized session: %v", err)

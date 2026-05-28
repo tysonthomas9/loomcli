@@ -91,7 +91,7 @@ func TestDefaultBackendInvokersRunFakeCLIs(t *testing.T) {
 	}
 
 	cmd := buildOpenCodeInteractiveCmd(workDir, "prompt", "nova")
-	if !containsArg(cmd.Args, "--model") || !containsArg(cmd.Args, "test/model") {
+	if !containsDefaultInvokerArg(cmd.Args, "--model") || !containsDefaultInvokerArg(cmd.Args, "test/model") {
 		t.Fatalf("opencode model args missing from %v", cmd.Args)
 	}
 }
@@ -174,7 +174,7 @@ func captureBackendStdout(t *testing.T, fn func() error) error {
 	return runErr
 }
 
-func containsArg(args []string, want string) bool {
+func containsDefaultInvokerArg(args []string, want string) bool {
 	for _, arg := range args {
 		if arg == want {
 			return true

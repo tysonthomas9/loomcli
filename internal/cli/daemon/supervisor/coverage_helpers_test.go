@@ -465,9 +465,7 @@ func TestSupervisorPreFlightSpawnFailureAndFinalizeFallbacks(t *testing.T) {
 		WorktreePath: t.TempDir(),
 	}
 	s.Concurrency.Acquire("custom")
-	if s.spawnAndWait(bad) {
-		t.Fatal("spawnAndWait returned true for missing custom prompt")
-	}
+	s.spawnAndWait(bad)
 	if bad.StopReason != StopReasonMaxRetries {
 		t.Fatalf("spawn failure stop reason = %q", bad.StopReason)
 	}

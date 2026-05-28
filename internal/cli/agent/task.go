@@ -10,6 +10,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/automode"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
+	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
 var (
@@ -143,7 +144,16 @@ func runTaskDaemon(deps *cli.Deps, worktreePath, agentName string) {
 
 	beforeRef := automode.CaptureHEADRef(worktreePath)
 	startedAt := time.Now()
-	invokeErr := deps.Agent.InvokeInteractive(worktreePath, prompt, agentName)
+
+	// Daemon-spawned subprocesses have no controlling TTY. InvokeInteractive
+	// inherits the daemon's stdin/stdout, which makes backend TUIs render
+	// nothing — the supervisor watchdog then times the silent run out at
+	// 15 min (see runTaskDaemon/runPlanDaemon notes). Use the wrapper-backed
+	// non-interactive path: PTY + stream-json → log mtime advances per turn.
+	shutdown := automode.SetupSignalHandler()
+	collector := usage.NewCollector(cli.GetBackendName(), agentName)
+	invokeErr := deps.Agent.InvokeNonInteractive(worktreePath, prompt, agentName, shutdown, collector)
+
 	emitTaskLifecycleResult(agentName, worktreePath, startedAt, invokeErr)
 	finalizeAgentSession(sess, worktreePath, beforeRef, invokeErr)
 

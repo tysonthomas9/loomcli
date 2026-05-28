@@ -155,6 +155,7 @@ func (m *memoryIssueBackend) Update(_ context.Context, id string, params backend
 func (m *memoryIssueBackend) ClaimIssue(context.Context, string, time.Duration) error { return nil }
 func (m *memoryIssueBackend) DeferIssue(context.Context, string, time.Time) error     { return nil }
 func (m *memoryIssueBackend) UndeferIssue(context.Context, string) error              { return nil }
+func (m *memoryIssueBackend) ReleaseIssueLock(context.Context, string, string) error  { return nil }
 
 func (m *memoryIssueBackend) Close(_ context.Context, id string, _ backend.CloseParams) (*backend.CloseResult, error) {
 	status := "closed"

@@ -42,12 +42,14 @@ type FleetBackend struct {
 // Compile-time interface check.
 var _ backend.IssueBackend = (*FleetBackend)(nil)
 var _ backend.CursorMutationBackend = (*FleetBackend)(nil)
+var _ backend.ClaimReleaser = (*FleetBackend)(nil)
 
 // apiResponse is the generic JSON envelope returned by fleet server endpoints.
 type apiResponse struct {
-	Success bool            `json:"success"`
-	Data    json.RawMessage `json:"data,omitempty"`
-	Error   string          `json:"error,omitempty"`
+	Success bool              `json:"success"`
+	Data    json.RawMessage   `json:"data,omitempty"`
+	Error   string            `json:"error,omitempty"`
+	Meta    map[string]string `json:"-"` // populated from native dialect error.meta
 }
 
 // New creates a FleetBackend with the given configuration.
@@ -155,7 +157,9 @@ func (b *FleetBackend) doRequest(ctx context.Context, method, path string, body 
 	return apiResp, resp.StatusCode, nil
 }
 
-func (b *FleetBackend) doRequestAsActor(ctx context.Context, method, path string, body interface{}, actor string) (*apiResponse, int, error) {
+// doRequestAsActor performs a POST request with the X-Actor header overridden.
+// Only POST is needed in practice (claim / release endpoints); see execAsActor.
+func (b *FleetBackend) doRequestAsActor(ctx context.Context, path string, body interface{}, actor string) (*apiResponse, int, error) {
 	b.mu.RLock()
 	auth := fleethttp.Auth{BearerToken: b.authToken, APIKey: b.apiKey, Actor: b.actor}
 	b.mu.RUnlock()
@@ -163,7 +167,7 @@ func (b *FleetBackend) doRequestAsActor(ctx context.Context, method, path string
 		auth.Actor = actor
 	}
 
-	req, err := fleethttp.BuildJSONRequest(ctx, method, b.baseWorkspaceURL+path, auth, body)
+	req, err := fleethttp.BuildJSONRequest(ctx, "POST", b.baseWorkspaceURL+path, auth, body)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -208,15 +212,16 @@ func parseFleetResponse(body []byte, statusCode int) (*apiResponse, error) {
 		return &apiResponse{Success: true, Data: body}, nil
 	}
 
-	// Native error shape: {"error":{"code":"...","message":"..."}}.
+	// Native error shape: {"error":{"code":"...","message":"...","meta":{...}}}.
 	var errEnv struct {
 		Error struct {
-			Code    string `json:"code"`
-			Message string `json:"message"`
+			Code    string            `json:"code"`
+			Message string            `json:"message"`
+			Meta    map[string]string `json:"meta"`
 		} `json:"error"`
 	}
 	if json.Unmarshal(body, &errEnv) == nil && errEnv.Error.Message != "" {
-		return &apiResponse{Success: false, Error: errEnv.Error.Message}, nil
+		return &apiResponse{Success: false, Error: errEnv.Error.Message, Meta: errEnv.Error.Meta}, nil
 	}
 
 	// Last resort: surface the raw body as the error string. If even THAT
@@ -251,8 +256,11 @@ func (b *FleetBackend) execURL(ctx context.Context, op, method, rawURL string, b
 	return apiResp, nil
 }
 
+// execAsActor wraps doRequestAsActor with standard error classification.
+// Only POST endpoints (claim / release) use this path; the method is therefore
+// hardcoded rather than parameterized.
 func (b *FleetBackend) execAsActor(ctx context.Context, op, path string, body interface{}, actor string) error {
-	apiResp, statusCode, err := b.doRequestAsActor(ctx, http.MethodPost, path, body, actor)
+	apiResp, statusCode, err := b.doRequestAsActor(ctx, path, body, actor)
 	if err != nil {
 		return classifyTransportError(op, err)
 	}
@@ -564,6 +572,17 @@ func (b *FleetBackend) applyCreateStatus(ctx context.Context, id string, params 
 	return err
 }
 
+// shouldAssignBeforeStatus reports whether a requested assignee change must be
+// applied before the status transition. For review/blocked targets the claim lock
+// is released as the current assignee inside applyStatusUpdate, so the assign is
+// deferred to keep that identity intact (LOOM-1); for every other status target
+// the assign is safe to apply first.
+func shouldAssignBeforeStatus(params backend.UpdateParams) bool {
+	return params.Assignee != nil && params.Status != nil &&
+		*params.Status != "in_progress" && *params.Status != "open" &&
+		*params.Status != "review" && *params.Status != "blocked"
+}
+
 func (b *FleetBackend) Update(ctx context.Context, id string, params backend.UpdateParams) error {
 	if params.Claim {
 		return backend.ErrValidation("Update", "Claim field is not supported in FleetBackend.Update; use ClaimIssue instead")
@@ -588,8 +607,14 @@ func (b *FleetBackend) Update(ctx context.Context, id string, params backend.Upd
 		handled = true
 	}
 
-	assignBeforeStatus := params.Assignee != nil && params.Status != nil && *params.Status != "in_progress" && *params.Status != "open"
-	if assignBeforeStatus {
+	// review/blocked transitions out of in_progress release the claim lock inside
+	// applyStatusUpdate, releasing as current.Assignee (the lock holder). Assigning
+	// first would erase that identity, skip the release, and leak the lock — so
+	// defer the assign for those targets (see applyStatusUpdate's "blocked"/"review"
+	// case, LOOM-1). Any requested assignee change is applied afterward by the
+	// normal assign step below.
+	assignBefore := shouldAssignBeforeStatus(params)
+	if assignBefore {
 		if err := b.assignIssue(ctx, id, *params.Assignee); err != nil {
 			return err
 		}
@@ -604,7 +629,7 @@ func (b *FleetBackend) Update(ctx context.Context, id string, params backend.Upd
 		handled = true
 	}
 
-	if params.Assignee != nil && !assignBeforeStatus && !assigneeHandledByStatus {
+	if params.Assignee != nil && !assignBefore && !assigneeHandledByStatus {
 		if err := b.assignIssue(ctx, id, *params.Assignee); err != nil {
 			return err
 		}
@@ -657,11 +682,58 @@ func (b *FleetBackend) applyStatusUpdate(ctx context.Context, id string, params 
 		}
 		return false, b.deferIssue(ctx, id, until)
 	case "blocked", "review":
-		_, err := b.exec(ctx, "Update", "PATCH", "/issues/"+url.PathEscape(id), map[string]interface{}{"status": target})
-		return false, err
+		return false, b.transitionToBlockedOrReview(ctx, id, target, current)
 	default:
 		return false, backend.ErrValidation("Update", "unsupported status for FleetDB workflow: "+target)
 	}
+}
+
+// ReleaseClaim releases the claim held by actor. If the issue is still
+// in_progress and assigned to actor, it uses /release so the task becomes
+// open/unassigned and immediately claimable. If the issue already moved out of
+// in_progress, it drops only the operational lock via /release-lock.
+//
+// The actor is caller-supplied from the completing agent's identity. Do not
+// derive it from current.Assignee: a stale completion could otherwise release a
+// newer agent's active lock after the old lock expires and the task is reclaimed.
+func (b *FleetBackend) ReleaseClaim(ctx context.Context, id, actor string) error {
+	if id == "" {
+		return backend.ErrValidation("ReleaseClaim", "id must not be empty")
+	}
+	if actor == "" {
+		return backend.ErrValidation("ReleaseClaim", "actor must not be empty")
+	}
+	current, err := b.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	if current == nil || current.Assignee != actor {
+		return nil
+	}
+	if current.Status == "in_progress" {
+		return b.execAsActor(ctx, "ReleaseClaim",
+			"/issues/"+url.PathEscape(id)+"/release", nil, actor)
+	}
+	return b.releaseIssueLock(ctx, "ReleaseClaim", id, actor, false)
+}
+
+// transitionToBlockedOrReview drops the claim lock (lock-only) before changing
+// status so the planner's `--status review --assignee=""` flow doesn't leak the
+// lock (LOOM-1). Unlike /release, /release-lock leaves status and assignee
+// untouched, so we set the target status next and let Update's normal assign step
+// apply any requested assignee change (the caller returns false: assignee not
+// handled here). We release as current.Assignee (the lock holder); the assign is
+// deferred (see shouldAssignBeforeStatus) so that identity is still intact here.
+func (b *FleetBackend) transitionToBlockedOrReview(ctx context.Context, id, target string, current *backend.IssueDetailData) error {
+	if current != nil && current.Status == "in_progress" && current.Assignee != "" {
+		if err := b.releaseIssueLock(ctx, "Update", id, current.Assignee, false); err != nil {
+			return err
+		}
+	}
+	if _, err := b.exec(ctx, "Update", "PATCH", "/issues/"+url.PathEscape(id), map[string]interface{}{"status": target}); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (b *FleetBackend) transitionToOpen(ctx context.Context, id string, current *backend.IssueDetailData, clearAssignee bool) error {
@@ -838,35 +910,6 @@ func (b *FleetBackend) ClaimIssue(ctx context.Context, id string, lockTTL time.D
 	}
 	_, err = b.exec(ctx, "ClaimIssue", "POST", "/issues/"+url.PathEscape(id)+"/claim", body)
 	return err
-}
-
-// ClaimIssueAsActor atomically claims an issue while overriding the configured
-// FleetDB actor for this request.
-func (b *FleetBackend) ClaimIssueAsActor(ctx context.Context, id string, lockTTL time.Duration, actor string) error {
-	if id == "" {
-		return backend.ErrValidation("ClaimIssue", "id must not be empty")
-	}
-	if actor == "" {
-		return backend.ErrValidation("ClaimIssue", "actor must not be empty")
-	}
-	body, err := claimIssueBody(lockTTL)
-	if err != nil {
-		return err
-	}
-	return b.execAsActor(ctx, "ClaimIssue", "/issues/"+url.PathEscape(id)+"/claim", body, actor)
-}
-
-func claimIssueBody(lockTTL time.Duration) (interface{}, error) {
-	if lockTTL < 0 {
-		return nil, backend.ErrValidation("ClaimIssue", "lockTTL must not be negative")
-	}
-	if lockTTL == 0 {
-		return nil, nil
-	}
-	seconds := int((lockTTL + time.Second - time.Nanosecond) / time.Second)
-	return struct {
-		LockTTL int `json:"lock_ttl"`
-	}{LockTTL: seconds}, nil
 }
 
 // DeferIssue defers an issue via fleet-db's workflow endpoint. A zero until

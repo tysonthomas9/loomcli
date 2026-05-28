@@ -67,6 +67,9 @@ func (s *stubReadyBackend) Update(_ context.Context, _ string, _ backend.UpdateP
 func (s *stubReadyBackend) ClaimIssue(_ context.Context, _ string, _ time.Duration) error {
 	return fmt.Errorf("ClaimIssue not implemented in stubReadyBackend")
 }
+func (s *stubReadyBackend) ReleaseIssueLock(_ context.Context, _, _ string) error {
+	return fmt.Errorf("ReleaseIssueLock not implemented in stubReadyBackend")
+}
 func (s *stubReadyBackend) DeferIssue(_ context.Context, _ string, _ time.Time) error {
 	return fmt.Errorf("DeferIssue not implemented in stubReadyBackend")
 }

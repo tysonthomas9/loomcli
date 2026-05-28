@@ -1,14 +1,15 @@
 package backends
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"strings"
-	"syscall"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/harness"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
@@ -75,48 +76,31 @@ func defaultCursorInvoker(workDir, prompt, agentName string) error {
 }
 
 func defaultCursorNonInteractiveInvoker(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error {
-	cmd := exec.Command("cursor", "-p", "--output-format", "stream-json", "--force", prompt) //nolint:gosec // G204: prompt is from the CLI operator, not untrusted input
-	cmd.Dir = workDir
 	env := append(cli.FilteredEnv(), "LOOM_WORKTREE_PATH="+workDir)
 	if agentName != "" {
 		env = append(env, "LOOM_AGENT_NAME="+agentName)
 	}
-	cmd.Env = env
-
-	// Pipe stdout for stream-json parsing
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return wrapInvocationError(fmt.Errorf("failed to create stdout pipe: %w", err), "")
-	}
-	cmd.Stderr = os.Stderr
 
 	fmt.Println("Launching Cursor agent (non-interactive)...")
 	fmt.Println("")
 
-	if err := cmd.Start(); err != nil {
-		return wrapInvocationError(fmt.Errorf("failed to start cursor: %w", err), "")
-	}
-
-	// Monitor for shutdown signal
-	guard := newProcessGuard(cmd.Process)
-	go func() {
-		select {
-		case <-shutdown:
-			guard.Signal(syscall.SIGTERM)
-		case <-guard.Done():
-		}
-	}()
-
-	outputTail := scanStreamOutput(stdout, func(line string) {
-		fmt.Println(line)
-		if collector != nil {
-			collectCursorStreamUsage(line, collector)
-		}
+	// Cursor consumes the prompt as a CLI argument; pass empty stdin
+	// so the wrapper's PTY sees immediate EOF if the harness reads.
+	return runHarness(context.Background(), shutdown, harnessInvocation{
+		BinaryName:  "cursor",
+		Args:        []string{"-p", "--output-format", "stream-json", "--force", prompt},
+		WorkDir:     workDir,
+		Env:         env,
+		Prompt:      "",
+		HarnessName: "", // no built-in classifier; fall back to generic cost/quota patterns
+		LineHandler: func(line string) {
+			fmt.Println(line)
+			if collector != nil {
+				collectCursorStreamUsage(line, collector)
+			}
+		},
+		RetryPolicy: harness.DefaultRetryPolicy(),
 	})
-
-	runErr := cmd.Wait()
-	guard.WaitAndMark()
-	return wrapInvocationError(runErr, outputTail)
 }
 
 // Meta returns descriptive metadata about the Cursor backend.
