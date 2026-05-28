@@ -14,6 +14,32 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
+func TestBuildAutoModeLoomCommand_TaskUsesRunSubcommand(t *testing.T) {
+	opts := AutoModeOptions{
+		AgentType:    "task",
+		WorktreePath: "/tmp/loom-task-agent",
+	}
+
+	got := buildAutoModeLoomCommand(opts, "")
+	want := "loom 'task' 'run' '/tmp/loom-task-agent' --daemon-mode"
+	if got != want {
+		t.Fatalf("command = %q, want %q", got, want)
+	}
+}
+
+func TestBuildAutoModeLoomCommand_PlanKeepsDirectSubcommand(t *testing.T) {
+	opts := AutoModeOptions{
+		AgentType:    "plan",
+		WorktreePath: "/tmp/loom-plan-agent",
+	}
+
+	got := buildAutoModeLoomCommand(opts, "TERM=dumb ")
+	want := "TERM=dumb loom 'plan' '/tmp/loom-plan-agent' --daemon-mode"
+	if got != want {
+		t.Fatalf("command = %q, want %q", got, want)
+	}
+}
+
 func TestGetAnyAvailableTasks_WithParentID(t *testing.T) {
 	tests := []struct {
 		name         string
