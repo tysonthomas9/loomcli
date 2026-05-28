@@ -19,6 +19,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/storeadapter"
 	"github.com/tysonthomas9/loomcli/internal/webui/svcimpl"
 	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
+	"github.com/tysonthomas9/loomcli/internal/webui/terminal/agentd"
 )
 
 // NewServer initializes all server dependencies. On failure, it cleans up
@@ -190,6 +191,29 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	app.ptyMgr = terminal.NewMultiPTYManager(config.TerminalCmd, config.MaxTerminalSessions)
 	cleanups = append(cleanups, func() { _ = app.ptyMgr.Close() })
 	logger.Info("multi pty manager initialized", "component", "terminal", "default_command", config.TerminalCmd)
+
+	app.ptySource = app.ptyMgr
+	if config.EnablePersistentAgents {
+		if config.ControlPlaneEndpoint == "" {
+			return nil, fmt.Errorf("EnablePersistentAgents=true but ControlPlaneEndpoint is empty (set LOOM_CONTROL_PLANE_ENDPOINT)")
+		}
+		agentdClient, agentdErr := agentd.New(agentd.Options{
+			ControlPlaneEndpoint: config.ControlPlaneEndpoint,
+			AgentdRootCAPEM:      config.AgentdRootCAPEM,
+		})
+		if agentdErr != nil {
+			return nil, fmt.Errorf("init agentd client: %w", agentdErr)
+		}
+		app.agentdClient = agentdClient
+		cleanups = append(cleanups, func() { _ = app.agentdClient.Close() })
+
+		app.ptySource = terminal.NewDispatcher(app.ptyMgr, app.agentdClient, classifyFromStore(config.Store))
+		logger.Info("persistent-agent dispatcher enabled",
+			"component", "terminal",
+			"control_plane_endpoint", config.ControlPlaneEndpoint,
+			"agentd_ca_present", len(config.AgentdRootCAPEM) > 0,
+		)
+	}
 
 	// Agent-view tmux manager: kept only so the web UI can attach to tmux
 	// sessions that the CLI auto-mode creates for agents. Missing tmux is a
@@ -430,7 +454,7 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 			rc = app.tabMetaStore.RedisClient()
 		}
 		app.termSvc = terminal.NewTerminalService(
-			app.termAuth, app.tabMetaStore, app.hub, rc, app.ptyMgr, app.startedAt,
+			app.termAuth, app.tabMetaStore, app.hub, rc, app.ptySource, app.startedAt,
 		)
 	}
 

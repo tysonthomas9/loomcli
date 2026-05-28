@@ -616,6 +616,7 @@ func buildServerConfig(monitorHandlers webui.MonitorHandlers, fs fleetState, sto
 	applyFleetConfig(&cfg, fs)
 	applyWorkspaceConfig(&cfg)
 	applyCORSConfig(&cfg)
+	applyPersistentAgentsConfig(&cfg)
 	return cfg
 }
 
@@ -711,6 +712,26 @@ func applyFleetInitialWorkspaceFallback(cfg *webui.ServerConfig, force bool) {
 	}
 	if force || cfg.InitialWorkspaceID == "" || cfg.InitialWorkspaceID == "workspace" || cfg.InitialWorkspaceID == "default" {
 		cfg.InitialWorkspaceID = cfg.FleetClientWorkspace
+	}
+}
+
+// applyPersistentAgentsConfig wires persistent-agent terminal settings from
+// environment variables into the server config. Default off: the only opt-in
+// path is LOOM_ENABLE_PERSISTENT_AGENTS=true.
+func applyPersistentAgentsConfig(cfg *webui.ServerConfig) {
+	enabled, _ := strconv.ParseBool(os.Getenv("LOOM_ENABLE_PERSISTENT_AGENTS"))
+	if !enabled {
+		return
+	}
+	cfg.EnablePersistentAgents = true
+	cfg.ControlPlaneEndpoint = os.Getenv("LOOM_CONTROL_PLANE_ENDPOINT")
+	if caPath := os.Getenv("LOOM_AGENTD_CA_PATH"); caPath != "" {
+		caPEM, err := os.ReadFile(caPath) //nolint:gosec // operator-provided CA path for persistent-agent TLS.
+		if err != nil {
+			log.Printf("WARNING: LOOM_AGENTD_CA_PATH=%q unreadable: %v (persistent-agent TLS will use the system trust store)", caPath, err)
+		} else {
+			cfg.AgentdRootCAPEM = caPEM
+		}
 	}
 }
 
