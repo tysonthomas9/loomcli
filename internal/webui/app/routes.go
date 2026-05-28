@@ -183,10 +183,12 @@ func (app *Server) registerWorkspaceRoutes() {
 		wsMux.ServeHTTP(w, r)
 	})
 	app.mux.Handle("/api/workspaces/{ws}/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// /readyz is an unauthenticated readiness probe consumed by
-		// ensure-runtime; bypass workspace middleware for it. Exact-path
-		// match (not HasSuffix) so a future nested route ending in
-		// `/readyz` does not silently skip middleware.
+		// /readyz is a runtime readiness probe consumed by ensure-runtime.
+		// It still goes through global auth when auth is enabled, but bypasses
+		// workspace middleware so the handler can return readiness diagnostics
+		// for unregistered or starting workspaces. Exact-path match (not
+		// HasSuffix) so future nested routes ending in `/readyz` do not
+		// silently skip workspace middleware.
 		if r.Method == http.MethodGet && r.URL.Path == "/api/workspaces/"+r.PathValue("ws")+"/readyz" {
 			wsHandler.ServeHTTP(w, r)
 			return
