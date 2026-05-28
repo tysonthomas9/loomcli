@@ -24,15 +24,25 @@ import (
 // It records calls and returns configurable results/errors.
 type mockIPCBackend struct {
 	// Recorded calls
-	claimCalls  []mockClaimCall
-	updateCalls []mockUpdateCall
-	closeCalls  []mockCloseCall
+	claimCalls   []mockClaimCall
+	updateCalls  []mockUpdateCall
+	closeCalls   []mockCloseCall
+	releaseCalls []mockReleaseCall
 
 	// Configurable returns
 	claimErr    error
 	updateErr   error
 	closeErr    error
 	closeResult *backend.CloseResult
+	releaseErr  error
+}
+
+// ReleaseClaim records the call so handleIPCReleaseClaim tests can assert the
+// backend was reached. Implementing it makes *mockIPCBackend satisfy
+// backend.ClaimReleaser (the capability the release handler type-asserts).
+func (m *mockIPCBackend) ReleaseClaim(_ context.Context, id, actor string) error {
+	m.releaseCalls = append(m.releaseCalls, mockReleaseCall{ID: id, Actor: actor})
+	return m.releaseErr
 }
 
 type mockClaimCall struct {
@@ -48,6 +58,11 @@ type mockUpdateCall struct {
 type mockCloseCall struct {
 	ID     string
 	Params backend.CloseParams
+}
+
+type mockReleaseCall struct {
+	ID    string
+	Actor string
 }
 
 func (m *mockIPCBackend) ClaimIssue(_ context.Context, id string, lockTTL time.Duration) error {
@@ -283,6 +298,85 @@ func TestIPCServer_ClaimRequiresValidLeaseWhenStoreBacked(t *testing.T) {
 	}
 	if len(mb.claimCalls) != 1 {
 		t.Fatalf("backend claim calls = %d, want 1", len(mb.claimCalls))
+	}
+}
+
+func TestIPCServer_ReleaseClaimSuccess(t *testing.T) {
+	mb := &mockIPCBackend{}
+	d := newTestIPCDaemon(mb)
+	defer close(d.sup.Shutdown)
+
+	resp := d.handleIPCReleaseClaim(AgentIPCRequest{
+		Operation: ipcOpReleaseClaim,
+		AgentName: "falcon",
+		IssueID:   "abc-123",
+	})
+
+	if !resp.Success {
+		t.Fatalf("expected success, got error: %s", resp.Error)
+	}
+	if len(mb.releaseCalls) != 1 || mb.releaseCalls[0].ID != "abc-123" || mb.releaseCalls[0].Actor != "falcon" {
+		t.Fatalf("backend ReleaseClaim calls = %+v, want id abc-123 actor falcon", mb.releaseCalls)
+	}
+}
+
+func TestIPCServer_ReleaseClaimRequiresValidLeaseWhenStoreBacked(t *testing.T) {
+	mb := &mockIPCBackend{}
+	d := newTestIPCDaemon(mb)
+	st := memstore.New()
+	d.store = st
+	d.sup.WorkspaceID = "WS"
+	session, err := st.AgentSessions().Create(t.Context(), store.AgentSessionCreate{
+		WorkspaceKey: "WS",
+		SessionID:    "sess-1",
+		AgentID:      "falcon",
+		NodeID:       "node-1",
+		Kind:         domain.AgentSessionKindTask,
+		Status:       domain.AgentSessionRunning,
+	})
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	lease, err := st.AgentLeases().Create(t.Context(), store.AgentLeaseCreate{
+		WorkspaceKey: "WS",
+		SessionID:    session.SessionID,
+		LeaseID:      "lease-1",
+		AgentID:      "falcon",
+		NodeID:       "node-1",
+		TTL:          time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("create lease: %v", err)
+	}
+
+	bad := d.handleIPCReleaseClaim(AgentIPCRequest{
+		Operation:  ipcOpReleaseClaim,
+		AgentName:  "falcon",
+		IssueID:    "abc-123",
+		SessionID:  session.SessionID,
+		LeaseID:    lease.LeaseID,
+		LeaseToken: "wrong",
+	})
+	if bad.Success {
+		t.Fatal("release with bad lease token succeeded")
+	}
+	if len(mb.releaseCalls) != 0 {
+		t.Fatalf("backend released for bad token: %d", len(mb.releaseCalls))
+	}
+
+	good := d.handleIPCReleaseClaim(AgentIPCRequest{
+		Operation:  ipcOpReleaseClaim,
+		AgentName:  "falcon",
+		IssueID:    "abc-123",
+		SessionID:  session.SessionID,
+		LeaseID:    lease.LeaseID,
+		LeaseToken: lease.Token,
+	})
+	if !good.Success {
+		t.Fatalf("release with valid lease failed: %s", good.Error)
+	}
+	if len(mb.releaseCalls) != 1 {
+		t.Fatalf("backend release calls = %d, want 1", len(mb.releaseCalls))
 	}
 }
 

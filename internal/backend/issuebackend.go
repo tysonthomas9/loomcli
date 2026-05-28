@@ -177,3 +177,24 @@ type IssueBackend interface {
 	// (e.g., "fleet-db"). The value is immutable after construction.
 	BackendName() string
 }
+
+// ClaimReleaser is an optional interface implemented by backends that maintain
+// an explicit claim lock distinct from issue status (e.g., the fleet-db
+// backend). Callers type-assert to release a completed agent's claim using the
+// agent's stable actor identity.
+//
+// Implementations must be idempotent: return nil if the actor no longer owns
+// the issue, or if the lock is already released, expired, or never held. The
+// actor must be supplied by the caller's authenticated/session identity; it must
+// not be derived from mutable issue state, or a stale completion could release a
+// newer agent's lock.
+//
+// If the issue is still in_progress and assigned to actor, implementations
+// should transition it back to open/unassigned so the task is claimable again.
+// If the issue already moved to review/closed/etc., implementations should
+// release only the operational lock. Backends that don't model an explicit claim
+// lock should simply not implement this interface; callers detect support via
+// type assertion.
+type ClaimReleaser interface {
+	ReleaseClaim(ctx context.Context, id, actor string) error
+}
