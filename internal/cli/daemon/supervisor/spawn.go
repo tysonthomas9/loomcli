@@ -29,7 +29,7 @@ func (s *Supervisor) buildCommand(ap *AgentProcess) (*exec.Cmd, error) {
 	ap.Mu.Unlock()
 
 	agentBackend := s.GetEffectiveBackend(ap)
-	cmd, err := buildAgentExecCmd(ap, agentBackend, epicID)
+	cmd, err := buildAgentCommand(ap, agentBackend, epicID)
 	if err != nil {
 		return nil, err
 	}
@@ -74,6 +74,8 @@ func (s *Supervisor) buildCommand(ap *AgentProcess) (*exec.Cmd, error) {
 
 	return cmd, nil
 }
+
+var buildAgentCommand = buildAgentExecCmd
 
 // buildAgentExecCmd creates the exec.Cmd with the correct arguments for the agent role.
 func buildAgentExecCmd(ap *AgentProcess, backend, epicID string) (*exec.Cmd, error) {

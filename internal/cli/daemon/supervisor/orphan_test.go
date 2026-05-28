@@ -3,13 +3,9 @@
 package supervisor
 
 import (
-	"context"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
-	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -17,297 +13,138 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 )
 
-// TestHelperProcess is the subprocess entry point. When invoked via
-// `os.Args[0] -test.run=TestHelperProcess` with the env var set, it acts as a
-// fake worker or fake backend instead of running a normal test. This avoids
-// needing a separate compiled helper binary and works on macOS where setsid
-// isn't installed.
-func TestHelperProcess(t *testing.T) {
-	mode := os.Getenv("LOOM_TEST_HELPER_MODE")
-	if mode == "" {
-		return
-	}
-
-	switch mode {
-	case "fake_worker_with_isolated_child":
-		runFakeWorkerWithIsolatedChild(t)
-	case "fake_backend_sleep":
-		runFakeBackendSleep(t)
-	default:
-		t.Fatalf("unknown helper mode %q", mode)
-	}
+type signalCall struct {
+	PGID int
+	PID  int
+	Sig  syscall.Signal
 }
 
-// runFakeWorkerWithIsolatedChild mimics what the real worker (`loom agent ...`)
-// does to spawn a backend: it execs a child process with Setpgid:true so the
-// child becomes leader of its own pgroup. The PID of that child is written to
-// the file given by LOOM_TEST_CHILD_PID_FILE so the parent test can verify it
-// gets killed.
-//
-// This helper deliberately does NOT install a signal handler that forwards to
-// the child. That mirrors the bug condition: when the supervisor SIGKILLs the
-// worker, no one is left to clean up the backend.
-func runFakeWorkerWithIsolatedChild(_ *testing.T) {
-	selfPath, err := os.Executable()
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "executable:", err)
-		os.Exit(1)
-	}
-	cmd := exec.Command(selfPath, "-test.run=TestHelperProcess", "--") //nolint:norawexec,gosec // G204/norawexec: test helper self-exec
-	cmd.Env = append(os.Environ(), "LOOM_TEST_HELPER_MODE=fake_backend_sleep")
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Stdin = nil
-	cmd.Stdout = nil
-	cmd.Stderr = os.Stderr
-	if err := cmd.Start(); err != nil {
-		fmt.Fprintln(os.Stderr, "start child:", err)
-		os.Exit(1)
-	}
-	if path := os.Getenv("LOOM_TEST_CHILD_PID_FILE"); path != "" {
-		_ = os.WriteFile(path, []byte(strconv.Itoa(cmd.Process.Pid)), 0o600)
-	}
-	// Sleep long enough that the test's StopAgent will hit us with SIGTERM.
-	time.Sleep(120 * time.Second)
-	os.Exit(0)
-}
-
-// runFakeBackendSleep just sleeps in its own pgroup. It is the codex stand-in.
-func runFakeBackendSleep(_ *testing.T) {
-	time.Sleep(120 * time.Second)
-	os.Exit(0)
-}
-
-// spawnFakeWorker starts the helper "worker" with Setpgid:true and returns the
-// *exec.Cmd plus the PID of the helper's isolated child (the codex stand-in).
-// The caller is responsible for cleaning both up. The workerCwd argument
-// becomes the working directory for both the worker and (inherited) the child.
-func spawnFakeWorker(t *testing.T, workerCwd string) (*exec.Cmd, int) {
-	t.Helper()
-	selfPath, err := os.Executable()
-	if err != nil {
-		t.Fatalf("executable: %v", err)
-	}
-	childPIDFile := filepath.Join(t.TempDir(), "child.pid")
-
-	cmd := exec.Command(selfPath, "-test.run=TestHelperProcess", "--") //nolint:norawexec,gosec // G204/norawexec: test helper self-exec
-	cmd.Env = append(os.Environ(),
-		"LOOM_TEST_HELPER_MODE=fake_worker_with_isolated_child",
-		"LOOM_TEST_CHILD_PID_FILE="+childPIDFile,
-	)
-	cmd.Dir = workerCwd
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Stderr = os.Stderr
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("start fake worker: %v", err)
-	}
-
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		data, err := os.ReadFile(childPIDFile)
-		if err == nil && len(data) > 0 {
-			pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
-			if err == nil && pid > 0 {
-				return cmd, pid
-			}
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-	_ = cmd.Wait()
-	t.Fatal("timed out waiting for child PID file")
-	return nil, 0
-}
-
-// TestStopAgent_KillsIsolatedGrandchildProcessGroup is the regression test for
-// Problem 3: when a backend subprocess (e.g. codex) uses Setpgid:true it is
-// invisible to syscall.Kill(-workerPID, SIGTERM) because it lives in its own
-// pgroup. The fix walks the descendant tree and signals each distinct pgroup.
-//
-// Without the fix: the helper worker dies on SIGTERM, the isolated grandchild
-// is reparented to init and survives well past the 5-second window.
-// With the fix: StopAgent's descendant-pgroup sweep signals the grandchild's
-// own pgroup, so it dies within the grace window.
+// TestStopAgent_KillsIsolatedGrandchildProcessGroup covers the StopAgent
+// contract without creating a real orphaned child. The process inspector seam
+// presents a worker plus a backend child in a separate pgroup, and the signal
+// seam records the process groups StopAgent would signal.
 func TestStopAgent_KillsIsolatedGrandchildProcessGroup(t *testing.T) {
 	s := newDrainTestSupervisor(&config.DaemonConfig{})
-	worktreeDir := t.TempDir()
-
-	workerCmd, childPID := spawnFakeWorker(t, worktreeDir)
-	workerPID := workerCmd.Process.Pid
-
-	t.Cleanup(func() {
-		_ = syscall.Kill(-workerPID, syscall.SIGKILL)
-		_ = syscall.Kill(childPID, syscall.SIGKILL)
-		_ = workerCmd.Wait()
-	})
-
 	ap := &AgentProcess{
 		Entry:        config.AgentEntry{Worktree: "test-orphan"},
-		Cmd:          workerCmd,
-		Pid:          workerPID,
-		WorktreePath: worktreeDir,
+		Cmd:          &exec.Cmd{Process: &os.Process{}},
+		Pid:          200,
+		WorktreePath: t.TempDir(),
 	}
 
-	// Reap the worker in the background so polling in StopAgent sees Pid==0.
-	go func() {
-		_ = workerCmd.Wait()
-		ap.Mu.Lock()
-		ap.Pid = 0
-		ap.Mu.Unlock()
-	}()
-
-	// Sanity: child is alive before the kill.
-	if !processAlive(childPID) {
-		t.Fatalf("isolated grandchild PID %d should be alive before StopAgent", childPID)
-	}
-	workerPGID, err := syscall.Getpgid(workerPID)
-	if err != nil {
-		t.Fatalf("worker PGID: %v", err)
-	}
-	childPGID, err := syscall.Getpgid(childPID)
-	if err != nil {
-		t.Fatalf("child PGID: %v", err)
-	}
 	oldInspector := procInspector
+	oldCurrentProcessGroup := currentProcessGroup
+	oldSignalProcessGroup := signalProcessGroup
+	oldProcessIsRunning := processIsRunning
+	oldSleepProcessPoll := sleepProcessPoll
+	var calls []signalCall
 	procInspector = processInspector{
 		List: func() ([]procInfo, error) {
 			return []procInfo{
-				{PID: workerPID, PPID: os.Getpid(), PGID: workerPGID},
-				{PID: childPID, PPID: workerPID, PGID: childPGID},
+				{PID: 200, PPID: 100, PGID: 200},
+				{PID: 201, PPID: 200, PGID: 300},
 			}, nil
 		},
 		CWD:  oldInspector.CWD,
 		CWDs: oldInspector.CWDs,
 	}
-	t.Cleanup(func() { procInspector = oldInspector })
+	currentProcessGroup = func() int { return 999 }
+	signalProcessGroup = func(pgid int, sig syscall.Signal) error {
+		calls = append(calls, signalCall{PGID: pgid, Sig: sig})
+		return nil
+	}
+	processIsRunning = func(int) bool { return false }
+	sleepProcessPoll = func(time.Duration) {}
+	t.Cleanup(func() {
+		procInspector = oldInspector
+		currentProcessGroup = oldCurrentProcessGroup
+		signalProcessGroup = oldSignalProcessGroup
+		processIsRunning = oldProcessIsRunning
+		sleepProcessPoll = oldSleepProcessPoll
+	})
 
 	s.StopAgent(ap, 2*time.Second)
 
-	// Acceptance: no descendant of the spawned worker survives 5 seconds after
-	// the kill.
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if !processAlive(childPID) {
-			return
+	want := []signalCall{
+		{PGID: 200, Sig: syscall.SIGTERM},
+		{PGID: 300, Sig: syscall.SIGTERM},
+		{PGID: 300, Sig: syscall.SIGKILL},
+	}
+	if len(calls) != len(want) {
+		t.Fatalf("signal calls = %+v, want %+v", calls, want)
+	}
+	for i := range want {
+		if calls[i] != want[i] {
+			t.Fatalf("signal calls = %+v, want %+v", calls, want)
 		}
-		time.Sleep(50 * time.Millisecond)
 	}
-	// Surface diagnostic context before failing.
-	if ppid := readPPID(t, childPID); ppid > 0 {
-		t.Logf("grandchild PID %d still alive, current PPID=%d", childPID, ppid)
-	}
-	t.Fatalf("isolated grandchild PID %d survived StopAgent — descendant pgroup not signaled", childPID)
-}
-
-// processAlive reports whether pid is still a live process.
-func processAlive(pid int) bool {
-	if pid <= 0 {
-		return false
-	}
-	err := syscall.Kill(pid, 0)
-	return err == nil || err == syscall.EPERM
-}
-
-// readPPID best-effort parses ps to return the current parent PID of pid (so a
-// failed test can show whether the grandchild has been reparented to init).
-func readPPID(t *testing.T, pid int) int {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), psListTimeout)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "ps", "-p", strconv.Itoa(pid), "-o", "ppid=") //nolint:norawexec // test-only readPPID via ps
-	cmd.WaitDelay = 500 * time.Millisecond
-	out, err := cmd.Output()
-	if err != nil {
-		return -1
-	}
-	v, err := strconv.Atoi(strings.TrimSpace(string(out)))
-	if err != nil {
-		return -1
-	}
-	return v
 }
 
 // TestKillOrphanedWorktreeProcesses_StartupSweep is the acceptance test for
-// the "didn't shut down cleanly last time" safety net. It simulates a daemon
-// SIGKILL that left a backend reparented to init: spawn a fake worker that
-// spawns an isolated child, then SIGKILL just the worker so the child becomes
-// a true orphan with PPID==1. The startup sweep must find it by cwd and kill
-// its pgroup with a log line per kill.
+// the "didn't shut down cleanly last time" safety net. It feeds a reparented
+// backend candidate through the process inspector seam, then verifies the
+// startup sweep signals the owning process group.
 func TestKillOrphanedWorktreeProcesses_StartupSweep(t *testing.T) {
-	if procInspector.List == nil {
-		t.Skip("no process inspector on this platform")
-	}
 	s := newDrainTestSupervisor(&config.DaemonConfig{})
 	worktreeDir := t.TempDir()
-
-	workerCmd, childPID := spawnFakeWorker(t, worktreeDir)
-	workerPID := workerCmd.Process.Pid
-
-	// Force-orphan the child by SIGKILLing only the worker's pgroup. The
-	// fake_worker helper isn't in the child's pgroup (Setpgid makes them
-	// independent), so the child survives and gets reparented to init.
-	if err := syscall.Kill(-workerPID, syscall.SIGKILL); err != nil {
-		t.Fatalf("SIGKILL worker: %v", err)
-	}
-	_ = workerCmd.Wait()
-
-	// Reap the child if our cleanup fires before the sweep does.
-	t.Cleanup(func() {
-		_ = syscall.Kill(-childPID, syscall.SIGKILL)
-	})
-
-	// Wait for the kernel to reparent the child to init. Local runs see this
-	// immediately; on a loaded CI runner the ps view can lag the kernel by
-	// multiple poll cycles, so the window is intentionally generous.
-	deadline := time.Now().Add(8 * time.Second)
-	for time.Now().Before(deadline) {
-		if readPPID(t, childPID) == 1 {
-			break
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	if ppid := readPPID(t, childPID); ppid != 1 {
-		t.Fatalf("child PID %d not yet reparented to init: PPID=%d", childPID, ppid)
-	}
-	childPGID, err := syscall.Getpgid(childPID)
-	if err != nil {
-		t.Fatalf("child PGID: %v", err)
-	}
 	resolvedWorktree, err := filepath.EvalSymlinks(worktreeDir)
 	if err != nil {
 		t.Fatalf("EvalSymlinks(%q): %v", worktreeDir, err)
 	}
 
 	oldInspector := procInspector
+	oldCurrentProcessGroup := currentProcessGroup
+	oldSignalProcessGroup := signalProcessGroup
+	oldSignalProcessID := signalProcessID
+	var calls []signalCall
 	procInspector = processInspector{
 		List: func() ([]procInfo, error) {
-			return []procInfo{{PID: childPID, PPID: 1, PGID: childPGID}}, nil
+			return []procInfo{{PID: 201, PPID: 1, PGID: 300}}, nil
 		},
 		CWD: func(pid int) (string, error) {
-			if pid == childPID {
+			if pid == 201 {
 				return resolvedWorktree, nil
 			}
 			return "", nil
 		},
 		CWDs: func(pids []int) (map[int]string, error) {
-			return map[int]string{childPID: resolvedWorktree}, nil
+			return map[int]string{201: resolvedWorktree}, nil
 		},
 	}
-	t.Cleanup(func() { procInspector = oldInspector })
+	currentProcessGroup = func() int { return 999 }
+	signalProcessGroup = func(pgid int, sig syscall.Signal) error {
+		calls = append(calls, signalCall{PGID: pgid, Sig: sig})
+		return nil
+	}
+	signalProcessID = func(pid int, sig syscall.Signal) error {
+		calls = append(calls, signalCall{PID: pid, Sig: sig})
+		return syscall.ESRCH
+	}
+	t.Cleanup(func() {
+		procInspector = oldInspector
+		currentProcessGroup = oldCurrentProcessGroup
+		signalProcessGroup = oldSignalProcessGroup
+		signalProcessID = oldSignalProcessID
+	})
 
 	killed := s.killOrphanedWorktreeProcesses([]string{worktreeDir})
 	if killed == 0 {
-		t.Fatalf("startup sweep found no orphans for %q (child PID %d alive=%v)",
-			worktreeDir, childPID, processAlive(childPID))
+		t.Fatalf("startup sweep found no orphans for %q", worktreeDir)
 	}
 
-	deadline = time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if !processAlive(childPID) {
-			return
-		}
-		time.Sleep(50 * time.Millisecond)
+	want := []signalCall{
+		{PGID: 300, Sig: syscall.SIGTERM},
+		{PID: 201, Sig: 0},
+		{PGID: 300, Sig: syscall.SIGKILL},
 	}
-	t.Fatalf("orphaned child PID %d survived startup sweep", childPID)
+	if len(calls) != len(want) {
+		t.Fatalf("signal calls = %+v, want %+v", calls, want)
+	}
+	for i := range want {
+		if calls[i] != want[i] {
+			t.Fatalf("signal calls = %+v, want %+v", calls, want)
+		}
+	}
 }
 
 // TestFindWorktreeOrphans_PrefixesMatchOnResolvedPath covers the
@@ -369,43 +206,72 @@ func TestSignalableOrphans_ExcludesInitAndOwnPgroup(t *testing.T) {
 	}
 }
 
-// TestKillOrphanedWorktreeProcesses_PgroupKillEndToEnd exercises the pgroup
-// kill path used by the startup sweep: given a candidate list, sending
-// SIGTERM to its pgroup stops the process within the grace window. The
-// real "PPID==1 reparenting" condition is end-to-end covered by
-// TestStopAgent_KillsIsolatedGrandchildProcessGroup above; this test just
-// confirms the sweep's signal delivery works.
-func TestKillOrphanedWorktreeProcesses_PgroupKillEndToEnd(t *testing.T) {
-	if procInspector.List == nil {
-		t.Skip("no process inspector on this platform")
-	}
+func TestKillOrphanedWorktreeProcesses_GroupsSignalsByPgroup(t *testing.T) {
+	s := newDrainTestSupervisor(&config.DaemonConfig{})
 	worktreeDir := t.TempDir()
-
-	cmd := exec.Command("sleep", "120") //nolint:norawexec,gosec // G204/norawexec: fixed args
-	cmd.Dir = worktreeDir
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("start sleep: %v", err)
+	resolved, err := filepath.EvalSymlinks(worktreeDir)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(%q): %v", worktreeDir, err)
 	}
-	pid := cmd.Process.Pid
 
-	// Reap in the background so processAlive (kill -0) doesn't see a zombie.
-	exited := make(chan struct{})
-	go func() {
-		_ = cmd.Wait()
-		close(exited)
-	}()
+	oldInspector := procInspector
+	oldCurrentProcessGroup := currentProcessGroup
+	oldSignalProcessGroup := signalProcessGroup
+	oldSignalProcessID := signalProcessID
+	var calls []signalCall
+	procInspector = processInspector{
+		List: func() ([]procInfo, error) {
+			return []procInfo{
+				{PID: 201, PPID: 1, PGID: 300},
+				{PID: 202, PPID: 1, PGID: 300},
+				{PID: 203, PPID: 1, PGID: 400},
+			}, nil
+		},
+		CWDs: func(pids []int) (map[int]string, error) {
+			return map[int]string{
+				201: resolved,
+				202: filepath.Join(resolved, "nested"),
+				203: resolved,
+			}, nil
+		},
+	}
+	currentProcessGroup = func() int { return 999 }
+	signalProcessGroup = func(pgid int, sig syscall.Signal) error {
+		calls = append(calls, signalCall{PGID: pgid, Sig: sig})
+		return nil
+	}
+	signalProcessID = func(pid int, sig syscall.Signal) error {
+		calls = append(calls, signalCall{PID: pid, Sig: sig})
+		return syscall.ESRCH
+	}
 	t.Cleanup(func() {
-		_ = syscall.Kill(-pid, syscall.SIGKILL)
-		<-exited
+		procInspector = oldInspector
+		currentProcessGroup = oldCurrentProcessGroup
+		signalProcessGroup = oldSignalProcessGroup
+		signalProcessID = oldSignalProcessID
 	})
 
-	if err := syscall.Kill(-pid, syscall.SIGTERM); err != nil {
-		t.Fatalf("kill pgroup: %v", err)
+	if killed := s.killOrphanedWorktreeProcesses([]string{worktreeDir}); killed != 3 {
+		t.Fatalf("killed = %d, want 3", killed)
 	}
-	select {
-	case <-exited:
-	case <-time.After(3 * time.Second):
-		t.Fatalf("pgroup SIGTERM did not stop pid %d within 3s", pid)
+
+	termGroups := map[int]int{}
+	killGroups := map[int]int{}
+	for _, call := range calls {
+		if call.PGID == 0 {
+			continue
+		}
+		switch call.Sig {
+		case syscall.SIGTERM:
+			termGroups[call.PGID]++
+		case syscall.SIGKILL:
+			killGroups[call.PGID]++
+		}
+	}
+	if termGroups[300] != 1 || termGroups[400] != 1 || len(termGroups) != 2 {
+		t.Fatalf("SIGTERM groups = %+v, want one signal for pgids 300 and 400", termGroups)
+	}
+	if killGroups[300] != 1 || killGroups[400] != 1 || len(killGroups) != 2 {
+		t.Fatalf("SIGKILL groups = %+v, want one signal for pgids 300 and 400", killGroups)
 	}
 }

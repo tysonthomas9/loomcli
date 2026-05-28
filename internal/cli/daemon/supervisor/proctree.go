@@ -117,7 +117,7 @@ func findDescendantPGIDs(rootPID int, ownPGID int) map[int]struct{} {
 // race the descendant-tree walk.
 func signalDescendantPGroups(pgids map[int]struct{}, sig syscall.Signal, worktree string) {
 	for pgid := range pgids {
-		if err := syscall.Kill(-pgid, sig); err != nil {
+		if err := signalProcessGroup(pgid, sig); err != nil {
 			slog.Warn("failed to signal descendant process group",
 				"worktree", worktree, "pgid", pgid, "signal", sig.String(), "err", err)
 			continue
@@ -235,7 +235,7 @@ func signalableOrphans(orphans []orphanCandidate, ownPGID int) []orphanCandidate
 // Designed to run once on supervisor startup as the "didn't shut down cleanly
 // last time" safety net.
 func (s *Supervisor) killOrphanedWorktreeProcesses(worktreePaths []string) int {
-	orphans := signalableOrphans(findWorktreeOrphans(worktreePaths), syscall.Getpgrp())
+	orphans := signalableOrphans(findWorktreeOrphans(worktreePaths), currentProcessGroup())
 	if len(orphans) == 0 {
 		return 0
 	}
@@ -248,7 +248,7 @@ func (s *Supervisor) killOrphanedWorktreeProcesses(worktreePaths []string) int {
 		first := members[0]
 		slog.Warn("killing orphaned backend from previous daemon run",
 			"pgid", pgid, "pid", first.PID, "cwd", first.CWD, "worktree", first.Worktree, "members", len(members))
-		_ = syscall.Kill(-pgid, syscall.SIGTERM)
+		_ = signalProcessGroup(pgid, syscall.SIGTERM)
 	}
 	// Brief grace period before SIGKILL escalation. Long-orphaned backends
 	// almost never respond to SIGTERM (they've been parentless for some time
@@ -259,7 +259,7 @@ func (s *Supervisor) killOrphanedWorktreeProcesses(worktreePaths []string) int {
 	for range gracePolls {
 		anyAlive := false
 		for _, o := range orphans {
-			if syscall.Kill(o.PID, 0) == nil {
+			if signalProcessID(o.PID, 0) == nil {
 				anyAlive = true
 				break
 			}
@@ -270,7 +270,7 @@ func (s *Supervisor) killOrphanedWorktreeProcesses(worktreePaths []string) int {
 		time.Sleep(100 * time.Millisecond)
 	}
 	for pgid := range byPGID {
-		_ = syscall.Kill(-pgid, syscall.SIGKILL)
+		_ = signalProcessGroup(pgid, syscall.SIGKILL)
 	}
 	return len(orphans)
 }

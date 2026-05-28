@@ -3,7 +3,6 @@ package supervisor
 import (
 	"log/slog"
 	"os"
-	"os/exec"
 	"syscall"
 	"time"
 
@@ -14,6 +13,14 @@ import (
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
+)
+
+var (
+	currentProcessGroup = syscall.Getpgrp
+	signalProcessGroup  = func(pgid int, sig syscall.Signal) error { return syscall.Kill(-pgid, sig) }
+	signalProcessID     = func(pid int, sig syscall.Signal) error { return syscall.Kill(pid, sig) }
+	processIsRunning    = lockfile.IsProcessRunning
+	sleepProcessPoll    = time.Sleep
 )
 
 // StopAgent sends SIGTERM then SIGKILL to a single agent and its entire process group.
@@ -50,10 +57,10 @@ func (s *Supervisor) StopAgent(ap *AgentProcess, sigtermTimeout time.Duration) {
 	// descendants. We re-use this snapshot for the SIGKILL pass below so a
 	// backend that ignored SIGTERM (or was already reparented to init) is
 	// still reachable by pgid.
-	descendantPGIDs := findDescendantPGIDs(pid, syscall.Getpgrp())
+	descendantPGIDs := findDescendantPGIDs(pid, currentProcessGroup())
 
 	slog.Info("sending signal to process group", "worktree", ap.Entry.Worktree, "signal", "SIGTERM", "pid", pid, "extra_pgroups", len(descendantPGIDs))
-	if !sendSigterm(ap, proc, pid) {
+	if !sendSigterm(ap, pid) {
 		// Still signal descendants — the worker may already be gone but its
 		// reparented backends won't be.
 		signalDescendantPGroups(descendantPGIDs, syscall.SIGTERM, ap.Entry.Worktree)
@@ -81,7 +88,7 @@ func (s *Supervisor) StopAgent(ap *AgentProcess, sigtermTimeout time.Duration) {
 	ap.Mu.Unlock()
 	if stillRunning {
 		slog.Warn("sending SIGKILL to process group", "worktree", ap.Entry.Worktree, "pid", pid)
-		_ = syscall.Kill(-pid, syscall.SIGKILL)
+		_ = signalProcessGroup(pid, syscall.SIGKILL)
 	}
 	signalDescendantPGroups(descendantPGIDs, syscall.SIGKILL, ap.Entry.Worktree)
 }
@@ -103,10 +110,10 @@ func finalizeStopSpan(span trace.Span, ap *AgentProcess) {
 
 // sendSigterm signals the process group, falling back to the leader process.
 // Returns false if the process appears to have already exited.
-func sendSigterm(ap *AgentProcess, proc *exec.Cmd, pid int) bool {
-	if err := syscall.Kill(-pid, syscall.SIGTERM); err != nil {
+func sendSigterm(ap *AgentProcess, pid int) bool {
+	if err := signalProcessGroup(pid, syscall.SIGTERM); err != nil {
 		slog.Warn("SIGTERM to process group failed, trying process directly", "worktree", ap.Entry.Worktree, "err", err)
-		if err := proc.Process.Signal(syscall.SIGTERM); err != nil {
+		if err := signalProcessID(pid, syscall.SIGTERM); err != nil {
 			slog.Warn("SIGTERM failed, process may have exited", "worktree", ap.Entry.Worktree, "err", err)
 			return false
 		}
@@ -127,10 +134,10 @@ func waitForProcessExit(ap *AgentProcess, pid int, timeout time.Duration) bool {
 		if currentPID == 0 {
 			return true
 		}
-		if !lockfile.IsProcessRunning(pid) {
+		if !processIsRunning(pid) {
 			return true
 		}
-		time.Sleep(100 * time.Millisecond)
+		sleepProcessPoll(100 * time.Millisecond)
 	}
 	return false
 }

@@ -127,6 +127,7 @@ func TestSpawnAgent_BackendNotOnPATH_RepeatedDoesNotAccumulate(t *testing.T) {
 // (StopReason and LastError) so UIs reflect the recovery before the
 // spawn proceeds.
 func TestSpawnAgent_BackendRecoveryClearsState(t *testing.T) {
+	stubSuccessfulAgentCommand(t)
 	installed := false
 	stubCheckBackend(t, func(name string) (discovery.Info, error) {
 		if installed {
@@ -142,6 +143,7 @@ func TestSpawnAgent_BackendRecoveryClearsState(t *testing.T) {
 
 	s := newBackendUnavailableSupervisor()
 	ap := newBackendUnavailableAgentProcess()
+	cleanupAgentProcess(t, ap)
 
 	// First call: gate fires, state set.
 	if err := s.spawnAgent(ap); !errors.Is(err, ErrBackendUnavailable) {
@@ -151,10 +153,8 @@ func TestSpawnAgent_BackendRecoveryClearsState(t *testing.T) {
 		t.Fatalf("first spawn: StopReason = %q, want backend_unavailable", ap.StopReason)
 	}
 
-	// Second call: binary is "installed"; gate should clear state.
-	// (Spawn itself will fail later because the buildCommand step has
-	// no real `loom` binary in the test env. We only assert the gate's
-	// recovery branch ran.)
+	// Second call: binary is "installed"; gate should clear state before
+	// spawning the cheap stub command.
 	installed = true
 	_ = s.spawnAgent(ap)
 

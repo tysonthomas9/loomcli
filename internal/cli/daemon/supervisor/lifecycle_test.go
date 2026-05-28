@@ -578,6 +578,20 @@ func cleanupAgentProcess(t *testing.T, ap *AgentProcess) {
 	})
 }
 
+func stubAgentCommand(t *testing.T, fn func(*AgentProcess, string, string) (*exec.Cmd, error)) {
+	t.Helper()
+	old := buildAgentCommand
+	buildAgentCommand = fn
+	t.Cleanup(func() { buildAgentCommand = old })
+}
+
+func stubSuccessfulAgentCommand(t *testing.T) {
+	t.Helper()
+	stubAgentCommand(t, func(*AgentProcess, string, string) (*exec.Cmd, error) {
+		return exec.Command("true"), nil //nolint:norawexec // test seam avoids recursive self-exec
+	})
+}
+
 // TestSpawnAgent_BuiltInRoleCommandConstruction tests the command args
 // constructed for built-in roles by inspecting what spawnAgent would build.
 func TestSpawnAgent_BuiltInRoleCommandConstruction(t *testing.T) {
@@ -600,9 +614,13 @@ func TestSpawnAgent_BuiltInRoleCommandConstruction(t *testing.T) {
 		}
 		cleanupAgentProcess(t, ap)
 
-		err := s.spawnAgent(ap)
+		cmd, err := s.buildCommand(ap)
 		if err != nil {
-			t.Logf("spawnAgent error (expected in test): %v", err)
+			t.Fatalf("buildCommand error: %v", err)
+		}
+		args := strings.Join(cmd.Args, " ")
+		if !strings.Contains(args, "plan") || !strings.Contains(args, "--auto") || !strings.Contains(args, "--daemon-mode") {
+			t.Fatalf("cmd.Args = %v, want plan daemon command", cmd.Args)
 		}
 	})
 
@@ -629,9 +647,12 @@ func TestSpawnAgent_BuiltInRoleCommandConstruction(t *testing.T) {
 			t.Errorf("Backend = %q, want %q", s.ConfigSnapshot().Backend, "openai")
 		}
 
-		err := s.spawnAgent(ap)
+		cmd, err := s.buildCommand(ap)
 		if err != nil {
-			t.Logf("spawnAgent error (expected in test): %v", err)
+			t.Fatalf("buildCommand error: %v", err)
+		}
+		if !strings.Contains(strings.Join(cmd.Args, " "), "--backend openai") {
+			t.Fatalf("cmd.Args = %v, want --backend openai", cmd.Args)
 		}
 	})
 
@@ -658,9 +679,12 @@ func TestSpawnAgent_BuiltInRoleCommandConstruction(t *testing.T) {
 			t.Errorf("agent Backend = %q, want %q", ap.Entry.Backend, "anthropic")
 		}
 
-		err := s.spawnAgent(ap)
+		cmd, err := s.buildCommand(ap)
 		if err != nil {
-			t.Logf("spawnAgent error (expected in test): %v", err)
+			t.Fatalf("buildCommand error: %v", err)
+		}
+		if !strings.Contains(strings.Join(cmd.Args, " "), "--backend anthropic") {
+			t.Fatalf("cmd.Args = %v, want --backend anthropic", cmd.Args)
 		}
 	})
 }
@@ -689,15 +713,22 @@ func TestSpawnAgent_CustomRoleCommandConstruction(t *testing.T) {
 	}
 	cleanupAgentProcess(t, ap)
 
-	err := s.spawnAgent(ap)
+	cmd, err := s.buildCommand(ap)
 	if err != nil {
-		t.Logf("spawnAgent error (expected in test): %v", err)
+		t.Fatalf("buildCommand error: %v", err)
+	}
+	args := strings.Join(cmd.Args, " ")
+	for _, want := range []string{"agent", tmpDir, "--prompt " + promptFile, "--task-filter review"} {
+		if !strings.Contains(args, want) {
+			t.Fatalf("cmd.Args = %v, want to contain %q", cmd.Args, want)
+		}
 	}
 }
 
 // TestSpawnAgent_LogFileSetup tests that spawnAgent creates log directory and
 // log files with correct paths.
 func TestSpawnAgent_LogFileSetup(t *testing.T) {
+	stubSuccessfulAgentCommand(t)
 	tmpDir := t.TempDir()
 	logDir := filepath.Join(tmpDir, "logs")
 
@@ -741,6 +772,7 @@ func TestSpawnAgent_LogFileSetup(t *testing.T) {
 // TestSpawnAgent_Environment tests that spawnAgent sets LOOM_AGENT_NAME and
 // LOOM_WORKTREE_PATH in the subprocess environment.
 func TestSpawnAgent_Environment(t *testing.T) {
+	stubSuccessfulAgentCommand(t)
 	tmpDir := t.TempDir()
 
 	// Instead of spawning loom (which doesn't exist in test), spawn a command
@@ -941,6 +973,7 @@ func TestWaitForAgent_SignaledExit(t *testing.T) {
 // TestSpawnAgent_RelativeLogDir tests that a relative log dir is resolved
 // relative to projectDir.
 func TestSpawnAgent_RelativeLogDir(t *testing.T) {
+	stubSuccessfulAgentCommand(t)
 	tmpDir := t.TempDir()
 
 	s := &Supervisor{
@@ -1003,11 +1036,18 @@ func TestSpawnAgent_EpicIDAddsParentFlag(t *testing.T) {
 		t.Errorf("assignedEpicID = %q, want %q", ap.AssignedEpicID, "epic-123")
 	}
 
-	_ = s.spawnAgent(ap)
+	cmd, err := s.buildCommand(ap)
+	if err != nil {
+		t.Fatalf("buildCommand error: %v", err)
+	}
+	if !strings.Contains(strings.Join(cmd.Args, " "), "--parent epic-123") {
+		t.Fatalf("cmd.Args = %v, want --parent epic-123", cmd.Args)
+	}
 }
 
 // TestSpawnAgent_SetsWorkingDirectory verifies that cmd.Dir is set to worktreePath.
 func TestSpawnAgent_SetsWorkingDirectory(t *testing.T) {
+	stubSuccessfulAgentCommand(t)
 	tmpDir := t.TempDir()
 
 	s := &Supervisor{
@@ -1040,6 +1080,7 @@ func TestSpawnAgent_SetsWorkingDirectory(t *testing.T) {
 // TestSpawnAgent_SetsLastStartAndPID verifies that lastStart and pid are set
 // after a successful spawn.
 func TestSpawnAgent_SetsLastStartAndPID(t *testing.T) {
+	stubSuccessfulAgentCommand(t)
 	tmpDir := t.TempDir()
 
 	// Use a real command that exists so spawn succeeds
