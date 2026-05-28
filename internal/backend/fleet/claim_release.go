@@ -34,18 +34,22 @@ func (b *FleetBackend) ClaimIssueAsActor(ctx context.Context, id string, lockTTL
 // When actor is empty, uses the configured backend actor. fleet-db requires a
 // non-empty actor on the /release-lock endpoint to verify lock ownership.
 func (b *FleetBackend) ReleaseIssueLock(ctx context.Context, id, actor string) error {
+	return b.releaseIssueLock(ctx, "ReleaseIssueLock", id, actor, true)
+}
+
+func (b *FleetBackend) releaseIssueLock(ctx context.Context, op, id, actor string, useConfiguredActor bool) error {
 	if id == "" {
-		return backend.ErrValidation("ReleaseIssueLock", "id must not be empty")
+		return backend.ErrValidation(op, "id must not be empty")
 	}
-	if actor == "" {
+	if actor == "" && useConfiguredActor {
 		b.mu.RLock()
 		actor = b.actor
 		b.mu.RUnlock()
 	}
 	if actor == "" {
-		return backend.ErrValidation("ReleaseIssueLock", "actor must not be empty")
+		return backend.ErrValidation(op, "actor must not be empty")
 	}
-	return b.execAsActor(ctx, "ReleaseIssueLock", "/issues/"+url.PathEscape(id)+"/release-lock", nil, actor)
+	return b.execAsActor(ctx, op, "/issues/"+url.PathEscape(id)+"/release-lock", nil, actor)
 }
 
 // ReleaseIssueAsActor releases the claim lock on an issue, overriding the

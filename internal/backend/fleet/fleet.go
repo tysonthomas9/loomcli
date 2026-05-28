@@ -668,8 +668,7 @@ func (b *FleetBackend) ReleaseClaim(ctx context.Context, id, actor string) error
 		return b.execAsActor(ctx, "ReleaseClaim",
 			"/issues/"+url.PathEscape(id)+"/release", nil, actor)
 	}
-	return b.execAsActor(ctx, "ReleaseClaim",
-		"/issues/"+url.PathEscape(id)+"/release-lock", nil, actor)
+	return b.releaseIssueLock(ctx, "ReleaseClaim", id, actor, false)
 }
 
 // transitionToBlockedOrReview drops the claim lock (lock-only) before changing
@@ -681,8 +680,7 @@ func (b *FleetBackend) ReleaseClaim(ctx context.Context, id, actor string) error
 // deferred (see shouldAssignBeforeStatus) so that identity is still intact here.
 func (b *FleetBackend) transitionToBlockedOrReview(ctx context.Context, id, target string, current *backend.IssueDetailData) error {
 	if current != nil && current.Status == "in_progress" && current.Assignee != "" {
-		if err := b.execAsActor(ctx, "Update",
-			"/issues/"+url.PathEscape(id)+"/release-lock", nil, current.Assignee); err != nil {
+		if err := b.releaseIssueLock(ctx, "Update", id, current.Assignee, false); err != nil {
 			return err
 		}
 	}
