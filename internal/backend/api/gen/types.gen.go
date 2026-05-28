@@ -581,6 +581,24 @@ func (e PatchIssueRequestStatus) Valid() bool {
 	}
 }
 
+// Defines values for RuntimeReadyResponseMode.
+const (
+	Daemon RuntimeReadyResponseMode = "daemon"
+	Fleet  RuntimeReadyResponseMode = "fleet"
+)
+
+// Valid indicates whether the value is a known member of the RuntimeReadyResponseMode enum.
+func (e RuntimeReadyResponseMode) Valid() bool {
+	switch e {
+	case Daemon:
+		return true
+	case Fleet:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for SessionHistoryRecordLauncher.
 const (
 	SessionHistoryRecordLauncherStartWork SessionHistoryRecordLauncher = "start-work"
@@ -1602,6 +1620,17 @@ type PatchIssueRequestAgentState string
 
 // PatchIssueRequestStatus defines model for PatchIssueRequest.Status.
 type PatchIssueRequestStatus string
+
+// RuntimeReadyResponse defines model for RuntimeReadyResponse.
+type RuntimeReadyResponse struct {
+	Mode      RuntimeReadyResponseMode `json:"mode"`
+	Ready     bool                     `json:"ready"`
+	Reason    *string                  `json:"reason,omitempty"`
+	Workspace string                   `json:"workspace"`
+}
+
+// RuntimeReadyResponseMode defines model for RuntimeReadyResponse.Mode.
+type RuntimeReadyResponseMode string
 
 // SeedRequest defines model for SeedRequest.
 type SeedRequest struct {

@@ -468,6 +468,27 @@ paths:
               schema:
                 $ref: "#/components/schemas/MessageResponse"
 
+  /api/workspaces/{ws}/readyz:
+    get:
+      operationId: getWorkspaceRuntimeReady
+      tags: [health]
+      summary: Workspace-scoped runtime readiness
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: Runtime is ready to serve agent work for the workspace
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RuntimeReadyResponse"
+        "503":
+          description: Runtime is not ready to serve agent work for the workspace
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RuntimeReadyResponse"
+
   # ── Issues ──────────────────────────────────────────────────────────────
   /api/workspaces/{ws}/issues:
     get:
@@ -3255,6 +3276,20 @@ components:
           type: boolean
           const: true
         message:
+          type: string
+
+    RuntimeReadyResponse:
+      type: object
+      required: [ready, mode, workspace]
+      properties:
+        ready:
+          type: boolean
+        mode:
+          type: string
+          enum: [daemon, fleet]
+        workspace:
+          type: string
+        reason:
           type: string
 
     # ── Issue Schemas ───────────────────────────────────────────────────

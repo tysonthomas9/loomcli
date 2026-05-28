@@ -84,6 +84,8 @@ func (m *WorkspaceOpsModule) Register(mux *http.ServeMux) {
 		githandlers.HandleBlockedWithBackend(m.multiPool, githandlers.IssueBackendFn(m.issueBackendFn)))
 	mux.HandleFunc("GET /api/workspaces/{ws}/issues/graph",
 		githandlers.HandleGraphWithBackend(m.multiPool, githandlers.IssueBackendFn(m.issueBackendFn)))
+	mux.HandleFunc("GET /api/workspaces/{ws}/readyz",
+		healthhandlers.HandleWorkspaceRuntimeReady(m.multiPool, m.daemonExpected, healthhandlers.IssueBackendFn(m.issueBackendFn)))
 	mux.HandleFunc("GET /api/workspaces/{ws}/config/backend", workspace.HandleWorkspaceBackendGet(m.workspaceSvc))
 	if m.agentQueueH != nil {
 		mux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/queue", m.agentQueueH)

@@ -31,6 +31,7 @@ func TestWorkspaceOpsModule_RegisterRoutes(t *testing.T) {
 		{"GET", "/api/workspaces/test-ws/ready"},
 		{"GET", "/api/workspaces/test-ws/blocked"},
 		{"GET", "/api/workspaces/test-ws/issues/graph"},
+		{"GET", "/api/workspaces/test-ws/readyz"},
 		{"GET", "/api/workspaces/test-ws/config/backend"},
 	}
 
