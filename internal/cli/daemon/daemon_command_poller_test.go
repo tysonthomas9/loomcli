@@ -36,6 +36,21 @@ func TestPollAgentCommands_UsesFreshContextPerCommand(t *testing.T) {
 	}
 }
 
+func TestPollableAgentCommandStatus(t *testing.T) {
+	if !pollableAgentCommandStatus("") {
+		t.Fatal("empty agent command status should be pollable for legacy fleet-db rows")
+	}
+	if !pollableAgentCommandStatus(domain.AgentCommandQueued) {
+		t.Fatal("queued agent command status should be pollable")
+	}
+	if pollableAgentCommandStatus(domain.AgentCommandRunning) {
+		t.Fatal("running agent command status should not be re-polled")
+	}
+	if pollableAgentCommandStatus(domain.AgentCommandSucceeded) {
+		t.Fatal("succeeded agent command status should not be re-polled")
+	}
+}
+
 type blockingAgentCommandStore struct {
 	mu               sync.Mutex
 	ackCalls         int

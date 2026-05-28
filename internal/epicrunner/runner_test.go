@@ -393,6 +393,18 @@ func TestRunLoopExitsWhenOnlyBlockedChildrenRemain(t *testing.T) {
 	}
 }
 
+func TestLiveAgentCommandStatusTreatsEmptyAsLive(t *testing.T) {
+	if !liveAgentCommandStatus("") {
+		t.Fatal("empty agent command status should be live for legacy fleet-db rows")
+	}
+	if !liveAgentCommandStatus(domain.AgentCommandAcked) {
+		t.Fatal("acked agent command status should be live")
+	}
+	if liveAgentCommandStatus(domain.AgentCommandSucceeded) {
+		t.Fatal("succeeded agent command status should not be live")
+	}
+}
+
 func createStoppedWorker(t *testing.T, st store.Store, workspace, name string) {
 	t.Helper()
 	ctx := context.Background()

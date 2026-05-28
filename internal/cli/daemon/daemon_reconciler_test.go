@@ -450,6 +450,18 @@ func TestModifiedAgentsToDrain_DrainsCompletedEphemeralTask(t *testing.T) {
 	}
 }
 
+func TestReconcilerLiveAgentCommandStatusTreatsEmptyAsLive(t *testing.T) {
+	if !liveAgentCommandStatus("") {
+		t.Fatal("empty agent command status should be live for legacy fleet-db rows")
+	}
+	if !liveAgentCommandStatus(domain.AgentCommandAcked) {
+		t.Fatal("acked agent command status should be live")
+	}
+	if liveAgentCommandStatus(domain.AgentCommandSucceeded) {
+		t.Fatal("succeeded agent command status should not be live")
+	}
+}
+
 // TestConcurrentDrainAdd_Serialized verifies that the drainAddMu mutex
 // serializes concurrent drainAgent calls, preventing double SIGTERM/SIGKILL
 // races against the same agent process. Without serialization, two concurrent

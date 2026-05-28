@@ -80,10 +80,9 @@ func defaultCodexNonInteractiveInvoker(workDir, prompt, agentName string, shutdo
 
 	return runHarness(context.Background(), shutdown, harnessInvocation{
 		BinaryName:  "codex",
-		Args:        []string{"exec", "--json", "--dangerously-bypass-approvals-and-sandbox"},
+		Args:        buildCodexNonInteractiveArgs(prompt),
 		WorkDir:     workDir,
 		Env:         buildBackendEnv(workDir, agentName),
-		Prompt:      prompt,
 		HarnessName: "codex",
 		LineHandler: func(line string) {
 			fmt.Println(line)
@@ -93,6 +92,16 @@ func defaultCodexNonInteractiveInvoker(workDir, prompt, agentName string, shutdo
 		},
 		RetryPolicy: harness.DefaultRetryPolicy(),
 	})
+}
+
+func buildCodexNonInteractiveArgs(prompt string) []string {
+	args := []string{"exec", "--json", "--dangerously-bypass-approvals-and-sandbox"}
+	if prompt != "" {
+		// The wrapper runs subprocesses under a PTY. Codex treats PTY stdin as
+		// interactive input and requires the initial exec prompt as argv.
+		args = append(args, prompt)
+	}
+	return args
 }
 
 // buildBackendEnv constructs the standard environment for backend subprocess invocations.

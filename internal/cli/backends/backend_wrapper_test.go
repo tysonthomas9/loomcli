@@ -354,6 +354,9 @@ func TestDefaultCodexNonInteractiveInvoker_UsesWrapperWithCodexHarness(t *testin
 	if !containsArg(calls[0].Args, "exec") || !containsArg(calls[0].Args, "--json") {
 		t.Errorf("codex args: got %v, want to contain 'exec' and '--json'", calls[0].Args)
 	}
+	if !containsArg(calls[0].Args, "prompt body") {
+		t.Errorf("codex args: got %v, want prompt passed as argv for PTY-backed exec", calls[0].Args)
+	}
 }
 
 func TestDefaultGeminiNonInteractiveInvoker_UsesWrapperWithGeminiHarness(t *testing.T) {
