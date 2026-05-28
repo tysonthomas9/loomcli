@@ -14,14 +14,18 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 )
 
-func TestCheckRuntimeHealthUsesAPIHealth(t *testing.T) {
+func TestCheckRuntimeHealthRequiresAPIAndStoreReadiness(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/health" {
+		switch r.URL.Path {
+		case "/api/health":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"status":"ok"}`))
+		case "/api/workspaces":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"workspaces":[]}`))
+		default:
 			http.NotFound(w, r)
-			return
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	}))
 	t.Cleanup(server.Close)
 
@@ -40,6 +44,33 @@ func TestCheckRuntimeHealthReportsStatusCode(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "/api/health returned 404") {
 		t.Fatalf("checkRuntimeHealth() error = %q, want /api/health 404", err)
+	}
+}
+
+func TestCheckRuntimeHealthReportsStoreFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/health":
+			w.WriteHeader(http.StatusOK)
+		case "/api/workspaces":
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(`{"error":"failed to list workspaces from store"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	err := checkRuntimeHealth(context.Background(), server.URL)
+	if err == nil {
+		t.Fatal("checkRuntimeHealth() error = nil, want store readiness error")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "/api/workspaces returned 500") {
+		t.Fatalf("checkRuntimeHealth() error = %q, want /api/workspaces 500", msg)
+	}
+	if !strings.Contains(msg, "failed to list workspaces") {
+		t.Fatalf("checkRuntimeHealth() error = %q, want store body", msg)
 	}
 }
 
@@ -117,6 +148,26 @@ func TestLocalEnvForcesLocalFleetDBBackend(t *testing.T) {
 		if !containsEnv(env, want) {
 			t.Fatalf("localEnv() missing %s", want)
 		}
+	}
+}
+
+func TestLocalEnvOverridesConflictingParentEnv(t *testing.T) {
+	t.Setenv("LOOM_FLEET_DB_URL", "http://stale-fleet-db")
+	t.Setenv("LOOM_SERVER_URL", "http://stale-server")
+
+	env := localEnv("/tmp/loom-data", 12345)
+
+	if got := countEnvPrefix(env, "LOOM_FLEET_DB_URL="); got != 1 {
+		t.Fatalf("LOOM_FLEET_DB_URL entries = %d, want 1", got)
+	}
+	if !containsEnv(env, "LOOM_FLEET_DB_URL=") {
+		t.Fatalf("localEnv() did not clear LOOM_FLEET_DB_URL: %v", env)
+	}
+	if got := countEnvPrefix(env, "LOOM_SERVER_URL="); got != 1 {
+		t.Fatalf("LOOM_SERVER_URL entries = %d, want 1", got)
+	}
+	if !containsEnv(env, "LOOM_SERVER_URL=") {
+		t.Fatalf("localEnv() did not clear LOOM_SERVER_URL: %v", env)
 	}
 }
 
@@ -251,6 +302,90 @@ func TestEnsureRuntimeStartedRestartsUnhealthyRecordedRuntime(t *testing.T) {
 	}
 }
 
+func TestCleanupOrphanedEmbeddedLockStopsOrphanedFleetModeServe(t *testing.T) {
+	originalProcessRunning := processRunningFn
+	originalInspect := inspectProcessFn
+	originalStop := stopRuntimeProcessFn
+	t.Cleanup(func() {
+		processRunningFn = originalProcessRunning
+		inspectProcessFn = originalInspect
+		stopRuntimeProcessFn = originalStop
+	})
+
+	dataDir := t.TempDir()
+	if err := writeRuntime(dataDir, &runtimeInfo{Status: "failed", PID: 100, ServePID: 101}); err != nil {
+		t.Fatalf("writeRuntime() error = %v", err)
+	}
+	fleetDir := filepath.Join(dataDir, "fleet-db")
+	if err := os.MkdirAll(fleetDir, 0755); err != nil {
+		t.Fatalf("mkdir fleet dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(fleetDir, "embedded.lock"), []byte("42\n"), 0600); err != nil {
+		t.Fatalf("write embedded lock: %v", err)
+	}
+
+	processRunningFn = func(pid int) bool {
+		return pid == 42
+	}
+	inspectProcessFn = func(pid int) (processDetails, error) {
+		if pid != 42 {
+			t.Fatalf("inspect pid = %d, want 42", pid)
+		}
+		return processDetails{
+			PPID:    1,
+			Command: "/Applications/Loom.app/Contents/MacOS/loom serve --bind 127.0.0.1 --port 54893 --fleet-mode",
+		}, nil
+	}
+	stoppedPID := 0
+	stopRuntimeProcessFn = func(pid int, _ time.Duration) error {
+		stoppedPID = pid
+		return nil
+	}
+
+	if err := cleanupOrphanedEmbeddedLock(dataDir, time.Second); err != nil {
+		t.Fatalf("cleanupOrphanedEmbeddedLock() error = %v", err)
+	}
+	if stoppedPID != 42 {
+		t.Fatalf("stopped pid = %d, want 42", stoppedPID)
+	}
+}
+
+func TestCleanupOrphanedEmbeddedLockLeavesNonOrphanedServe(t *testing.T) {
+	originalProcessRunning := processRunningFn
+	originalInspect := inspectProcessFn
+	originalStop := stopRuntimeProcessFn
+	t.Cleanup(func() {
+		processRunningFn = originalProcessRunning
+		inspectProcessFn = originalInspect
+		stopRuntimeProcessFn = originalStop
+	})
+
+	dataDir := t.TempDir()
+	fleetDir := filepath.Join(dataDir, "fleet-db")
+	if err := os.MkdirAll(fleetDir, 0755); err != nil {
+		t.Fatalf("mkdir fleet dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(fleetDir, "embedded.lock"), []byte("42\n"), 0600); err != nil {
+		t.Fatalf("write embedded lock: %v", err)
+	}
+
+	processRunningFn = func(pid int) bool { return pid == 42 }
+	inspectProcessFn = func(int) (processDetails, error) {
+		return processDetails{
+			PPID:    os.Getpid(),
+			Command: "/Applications/Loom.app/Contents/MacOS/loom serve --fleet-mode",
+		}, nil
+	}
+	stopRuntimeProcessFn = func(pid int, _ time.Duration) error {
+		t.Fatalf("stopRuntimeProcessFn called for pid %d", pid)
+		return nil
+	}
+
+	if err := cleanupOrphanedEmbeddedLock(dataDir, time.Second); err != nil {
+		t.Fatalf("cleanupOrphanedEmbeddedLock() error = %v", err)
+	}
+}
+
 // TestWaitForWorkspaceReadyReturnsOnSuccess verifies the happy path: when the
 // workspace readyz endpoint responds 200, WaitForWorkspaceReady returns
 // nil promptly. The request path is also asserted so a future refactor that
@@ -321,4 +456,14 @@ func containsEnvPrefix(env []string, prefix string) bool {
 		}
 	}
 	return false
+}
+
+func countEnvPrefix(env []string, prefix string) int {
+	count := 0
+	for _, entry := range env {
+		if strings.HasPrefix(entry, prefix) {
+			count++
+		}
+	}
+	return count
 }

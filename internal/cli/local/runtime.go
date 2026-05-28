@@ -28,6 +28,8 @@ const (
 	logsDirName     = "logs"
 )
 
+var processRunningFn = lockfile.IsProcessRunning
+
 type runtimeInfo struct {
 	Version          int       `json:"version"`
 	Status           string    `json:"status"`
@@ -320,7 +322,14 @@ func checkRuntimeHealth(ctx context.Context, url string) error {
 	if url == "" {
 		return errors.New("runtime URL is empty")
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url+"/api/health", nil)
+	if err := checkRuntimeEndpoint(ctx, url, "/api/health"); err != nil {
+		return err
+	}
+	return checkRuntimeEndpoint(ctx, url, "/api/workspaces")
+}
+
+func checkRuntimeEndpoint(ctx context.Context, baseURL, path string) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+path, nil)
 	if err != nil {
 		return err
 	}
@@ -329,9 +338,13 @@ func checkRuntimeHealth(ctx context.Context, url string) error {
 		return err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	_, _ = io.Copy(io.Discard, resp.Body)
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("/api/health returned %d", resp.StatusCode)
+		detail := strings.TrimSpace(string(body))
+		if detail != "" {
+			return fmt.Errorf("%s returned %d: %s", path, resp.StatusCode, detail)
+		}
+		return fmt.Errorf("%s returned %d", path, resp.StatusCode)
 	}
 	return nil
 }
@@ -428,33 +441,42 @@ func probeWorkspaceReady(ctx context.Context, endpoint string) (string, bool, er
 }
 
 func processRunning(pid int) bool {
-	return pid > 0 && lockfile.IsProcessRunning(pid)
+	return pid > 0 && processRunningFn(pid)
 }
 
 func localEnv(dataDir string, port int) []string {
 	url := "http://127.0.0.1:" + strconv.Itoa(port)
-	env := append(os.Environ(),
-		"LOOM_CONFIG_DIR="+dataDir,
-		"LOOM_ISSUE_BACKEND=fleetdb",
-		"LOOM_SERVER_URL=",
-		"LOOM_WORKSPACE_RUNTIME_DIR="+dataDir,
-		"LOOM_WEBUI_URL="+url,
-		"LOOM_WORKSPACE=",
-		"LOOM_FLEET_DB_URL=",
-		"LOOM_FLEET_URL=",
-	)
+	env := os.Environ()
+	setEnv := func(key, value string) {
+		prefix := key + "="
+		for i, entry := range env {
+			if strings.HasPrefix(entry, prefix) {
+				env[i] = prefix + value
+				return
+			}
+		}
+		env = append(env, prefix+value)
+	}
+	setEnv("LOOM_CONFIG_DIR", dataDir)
+	setEnv("LOOM_ISSUE_BACKEND", "fleetdb")
+	setEnv("LOOM_SERVER_URL", "")
+	setEnv("LOOM_WORKSPACE_RUNTIME_DIR", dataDir)
+	setEnv("LOOM_WEBUI_URL", url)
+	setEnv("LOOM_WORKSPACE", "")
+	setEnv("LOOM_FLEET_DB_URL", "")
+	setEnv("LOOM_FLEET_URL", "")
 	if exe, err := os.Executable(); err == nil {
 		exeDir := filepath.Dir(exe)
-		env = append(env, "PATH="+desktopRuntimePath(exeDir, os.Getenv("PATH")))
+		setEnv("PATH", desktopRuntimePath(exeDir, os.Getenv("PATH")))
 	}
 	if os.Getenv("FLEET_DB_BIN") == "" {
 		if fleetDBBin := bundledExecutable("fleet-db"); fleetDBBin != "" {
-			env = append(env, "FLEET_DB_BIN="+fleetDBBin)
+			setEnv("FLEET_DB_BIN", fleetDBBin)
 		}
 	}
 	if os.Getenv("LOOM_FRONTEND_DIR") == "" {
 		if frontendDir := bundledFrontendDir(); frontendDir != "" {
-			env = append(env, "LOOM_FRONTEND_DIR="+frontendDir)
+			setEnv("LOOM_FRONTEND_DIR", frontendDir)
 		}
 	}
 	return env

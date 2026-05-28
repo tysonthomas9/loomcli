@@ -281,6 +281,7 @@ type EmbeddedFleetDB struct {
 	stopOnce      sync.Once
 	stopRequested atomic.Bool   // true once Stop is invoked; suppresses "unexpected exit" log
 	waitErr       chan error    // sole receiver of cmd.Wait result; size 1 + closed afterwards
+	exitErr       chan error    // publish-only subprocess exit signal for runtime supervisors
 	done          chan struct{} // closed by Stop after redisMgr.Close
 }
 
@@ -408,6 +409,7 @@ func StartEmbedded(ctx context.Context, dataDir string, logger *slog.Logger) (*E
 		runLock:  runLock,
 		logger:   logger,
 		waitErr:  make(chan error, 1),
+		exitErr:  make(chan error, 1),
 		done:     make(chan struct{}),
 	}
 	// Reaper goroutine. The sole cmd.Wait() caller in the lifecycle —
@@ -444,6 +446,11 @@ func StartEmbedded(ctx context.Context, dataDir string, logger *slog.Logger) (*E
 
 // URL returns the base HTTP URL of the embedded fleet-db (no trailing slash).
 func (e *EmbeddedFleetDB) URL() string { return e.url }
+
+// Exit is closed after the fleet-db subprocess exits. The single value, when
+// present, is the cmd.Wait result. Supervisors use this to stop treating a
+// live loom serve process as healthy after its embedded store has died.
+func (e *EmbeddedFleetDB) Exit() <-chan error { return e.exitErr }
 
 // Stop signals fleet-db to terminate, waits briefly for clean shutdown,
 // and closes the miniredis. Idempotent.
@@ -498,12 +505,19 @@ func (e *EmbeddedFleetDB) Done() <-chan struct{} { return e.done }
 // graceful shutdown.
 func (e *EmbeddedFleetDB) reapAndPublish() {
 	if e.cmd == nil {
-		close(e.waitErr)
+		if e.waitErr != nil {
+			close(e.waitErr)
+		}
+		if e.exitErr != nil {
+			close(e.exitErr)
+		}
 		return
 	}
 	err := e.cmd.Wait()
 	e.waitErr <- err
 	close(e.waitErr)
+	e.exitErr <- err
+	close(e.exitErr)
 	if !e.stopRequested.Load() && err != nil && !isSignalledExit(err) {
 		e.logger.Error("embedded fleet-db exited unexpectedly", "err", err)
 	}

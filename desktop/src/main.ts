@@ -211,11 +211,15 @@ async function openAdditionalWorkspaceWindow() {
 }
 
 async function focusExistingWorkspaceWindow() {
-  if (lastRuntimeUrl) {
-    await openWorkspaceWindow(lastRuntimeUrl);
+  if (bootInFlight) {
     return;
   }
-  await boot();
+  const status = await ensureRuntime();
+  const runtimeUrl = status.runtime?.url || lastRuntimeUrl;
+  if (!runtimeUrl) {
+    throw new Error("local runtime URL is missing");
+  }
+  await openWorkspaceWindow(runtimeUrl);
 }
 
 function showFailure(err: unknown) {
