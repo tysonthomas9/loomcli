@@ -34,32 +34,14 @@ func releaseClaimOnComplete(worktreePath string) {
 	if ib == nil {
 		return
 	}
+	releaser, ok := ib.(backend.ClaimReleaser)
+	if !ok {
+		return
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), releaseClaimTimeout)
 	defer cancel()
-	if err := releaseClaimForActor(ctx, ib, info.TaskID, info.AgentName); err != nil {
+	if err := releaser.ReleaseClaim(ctx, info.TaskID, info.AgentName); err != nil {
 		fmt.Fprintf(os.Stderr, "complete: release claim on %s failed (continuing): %v\n",
 			info.TaskID, err)
 	}
-}
-
-func releaseClaimForActor(ctx context.Context, ib backend.IssueBackend, taskID, actor string) error {
-	if taskID == "" || actor == "" || ib == nil {
-		return nil
-	}
-	if releaser, ok := ib.(backend.ClaimReleaser); ok {
-		return releaser.ReleaseClaim(ctx, taskID, actor)
-	}
-	current, err := ib.Get(ctx, taskID)
-	if err != nil {
-		return err
-	}
-	if current == nil || current.Assignee != actor {
-		return nil
-	}
-	if current.Status == "in_progress" {
-		open := "open"
-		empty := ""
-		return ib.Update(ctx, taskID, backend.UpdateParams{Status: &open, Assignee: &empty})
-	}
-	return ib.ReleaseIssueLock(ctx, taskID, actor)
 }

@@ -83,68 +83,6 @@ func TestReleaseClaimOnComplete_DispatchesReleaseWithLockTaskID(t *testing.T) {
 	}
 }
 
-func TestReleaseClaimOnComplete_InProgressOwnedByLockActorResetsOpen(t *testing.T) {
-	mock := NewMockIssueBackend()
-	mock.GetResult = &backend.IssueDetailData{
-		IssueData: backend.IssueData{
-			ID:       "ISSUE-42",
-			Status:   "in_progress",
-			Assignee: "test-planner",
-		},
-	}
-	var updateCalled bool
-	mock.UpdateFn = func(_ context.Context, id string, params backend.UpdateParams) error {
-		updateCalled = true
-		if id != "ISSUE-42" {
-			t.Errorf("Update id = %q, want ISSUE-42", id)
-		}
-		if params.Status == nil || *params.Status != "open" {
-			t.Fatalf("Update status = %v, want open", params.Status)
-		}
-		if params.Assignee == nil || *params.Assignee != "" {
-			t.Fatalf("Update assignee = %v, want empty string", params.Assignee)
-		}
-		return nil
-	}
-	cli.SetDefaultIssueBackend(mock)
-	t.Cleanup(cli.ResetDefaultIssueBackend)
-
-	wt := t.TempDir()
-	writeReleaseTestLock(t, wt, "ISSUE-42")
-
-	releaseClaimOnComplete(wt)
-
-	if !updateCalled {
-		t.Fatal("expected in-progress owned task to be reset open")
-	}
-}
-
-func TestReleaseClaimOnComplete_StaleLockDoesNotReleaseNewOwner(t *testing.T) {
-	mock := NewMockIssueBackend()
-	mock.GetResult = &backend.IssueDetailData{
-		IssueData: backend.IssueData{
-			ID:       "ISSUE-42",
-			Status:   "in_progress",
-			Assignee: "new-worker",
-		},
-	}
-	mock.UpdateFn = func(context.Context, string, backend.UpdateParams) error {
-		t.Fatal("stale complete must not reset a task now owned by another actor")
-		return nil
-	}
-	mock.ReleaseIssueLockFn = func(context.Context, string, string) error {
-		t.Fatal("stale complete must not release a task now owned by another actor")
-		return nil
-	}
-	cli.SetDefaultIssueBackend(mock)
-	t.Cleanup(cli.ResetDefaultIssueBackend)
-
-	wt := t.TempDir()
-	writeReleaseTestLock(t, wt, "ISSUE-42")
-
-	releaseClaimOnComplete(wt)
-}
-
 func TestReleaseClaimOnComplete_NoLockFileIsNoop(t *testing.T) {
 	stub := newReleaserStub(nil)
 	cli.SetDefaultIssueBackend(stub)
@@ -174,9 +112,10 @@ func TestReleaseClaimOnComplete_EmptyTaskIDIsNoop(t *testing.T) {
 	}
 }
 
-func TestReleaseClaimOnComplete_BackendWithoutClaimReleaserAndMissingIssueIsNoop(t *testing.T) {
-	// Plain MockIssueBackend does NOT implement ClaimReleaser. The generic
-	// fallback should still short-circuit gracefully when Get returns no issue.
+func TestReleaseClaimOnComplete_BackendWithoutClaimReleaserIsNoop(t *testing.T) {
+	// Plain MockIssueBackend does NOT implement ClaimReleaser. Release-on-complete
+	// should not try to reconstruct claim-release semantics from generic
+	// Get/Update calls; actor-safe behavior belongs behind the capability.
 	plain := NewMockIssueBackend()
 	cli.SetDefaultIssueBackend(plain)
 	t.Cleanup(cli.ResetDefaultIssueBackend)
@@ -184,8 +123,11 @@ func TestReleaseClaimOnComplete_BackendWithoutClaimReleaserAndMissingIssueIsNoop
 	wt := t.TempDir()
 	writeReleaseTestLock(t, wt, "ISSUE-42")
 
-	// Must not panic; nothing on plain to assert other than absence of crash.
 	releaseClaimOnComplete(wt)
+
+	if plain.Called("Get") || plain.Called("Update") || plain.Called("ReleaseIssueLock") {
+		t.Fatal("backend without ClaimReleaser should be a no-op")
+	}
 }
 
 func TestReleaseClaimOnComplete_ReleaseErrorIsSwallowed(t *testing.T) {

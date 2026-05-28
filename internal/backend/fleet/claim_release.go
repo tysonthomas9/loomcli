@@ -53,13 +53,7 @@ func (b *FleetBackend) ReleaseIssueLock(ctx context.Context, id, actor string) e
 // to symmetrically free a claim it acquired in claimIssueForAgent when the
 // agent process exits, rather than waiting for the lock's TTL to expire.
 func (b *FleetBackend) ReleaseIssueAsActor(ctx context.Context, id string, actor string) error {
-	if id == "" {
-		return backend.ErrValidation("ReleaseIssue", "id must not be empty")
-	}
-	if actor == "" {
-		return backend.ErrValidation("ReleaseIssue", "actor must not be empty")
-	}
-	return b.execAsActor(ctx, "ReleaseIssue", "/issues/"+url.PathEscape(id)+"/release-lock", nil, actor)
+	return b.ReleaseIssueLock(ctx, id, actor)
 }
 
 func claimIssueBody(lockTTL time.Duration) (interface{}, error) {
