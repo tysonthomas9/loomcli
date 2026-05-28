@@ -1,9 +1,15 @@
 package backends
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"os/exec"
 	"strings"
+
+	"github.com/olesho/harness-wrapper/pkg/wrapper"
+
+	"github.com/tysonthomas9/loomcli/internal/agenterr"
 )
 
 // InvocationError carries invocation-local output evidence for classifying
@@ -36,6 +42,14 @@ func wrapInvocationError(err error, outputTail string) error {
 		return nil
 	}
 
+	// Categorical wrapper signals: when the wrapper reports the binary
+	// is not on PATH, prepend the stable marker that agenterr classifies
+	// as BackendUnavailable. Without this, the outer supervisor sees a
+	// generic exec failure and falls back to Unknown (LOOM-4).
+	if errors.Is(err, wrapper.ErrBinaryNotFound) {
+		return binaryNotFoundInvocationError(err.Error(), outputTail)
+	}
+
 	exitCode := 1
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {
@@ -54,6 +68,81 @@ func wrapInvocationError(err error, outputTail string) error {
 
 	return &InvocationError{
 		Err:        err,
+		OutputTail: evidence,
+		ExitCode:   exitCode,
+	}
+}
+
+// binaryNotFoundInvocationError returns the canonical InvocationError
+// for the wrapper-detected "binary missing" case. Used by both
+// wrapWrapperResult (Status path) and wrapInvocationError (error path)
+// so the marker text is consistent across entry points.
+func binaryNotFoundInvocationError(reason, outputTail string) *InvocationError {
+	msg := strings.TrimSpace(reason)
+	if msg == "" {
+		msg = "binary not found"
+	}
+	combined := agenterr.BackendUnavailableMarker + ": " + msg
+	evidence := strings.TrimSpace(outputTail)
+	if evidence == "" {
+		evidence = combined
+	} else if !strings.Contains(evidence, combined) {
+		evidence = combined + "\n" + evidence
+	}
+	return &InvocationError{
+		Err:        errors.New(combined),
+		OutputTail: evidence,
+		// 127 is the Unix convention for "command not found". Kept for
+		// consumers that switch on ExitCode (the inner loom subprocess
+		// itself exits with 1 via cobra; the marker text is the primary
+		// signal for the outer classifier).
+		ExitCode: 127,
+	}
+}
+
+// wrapWrapperResult translates a terminal wrapper.Result into the same
+// InvocationError shape that the legacy exec.Cmd path produces, so
+// downstream classifiers (agenterr.ClassifyFromOutput) and consumers
+// (automode.classifyInvokeError) keep working unchanged.
+//
+// Mapping:
+//   - StatusIdle       → nil (success).
+//   - StatusInterrupted → context.Canceled-wrapped error (callers
+//     that use errors.Is(ctx.Canceled) keep working).
+//   - Every other status → *InvocationError. The synthesized Err
+//     carries the wrapper's Reason so agenterr's text-based
+//     classification has something to match on.
+func wrapWrapperResult(res wrapper.Result, outputTail string) error {
+	switch res.Status {
+	case wrapper.StatusIdle:
+		return nil
+	case wrapper.StatusInterrupted:
+		if res.Reason != "" {
+			return fmt.Errorf("%w: %s", context.Canceled, res.Reason)
+		}
+		return context.Canceled
+	case wrapper.StatusBinaryNotFound:
+		return binaryNotFoundInvocationError(res.Reason, outputTail)
+	}
+
+	reason := strings.TrimSpace(res.Reason)
+	if reason == "" {
+		reason = fmt.Sprintf("harness exited with status %s", res.Status)
+	}
+	exitCode := res.ExitCode
+	if exitCode <= 0 {
+		exitCode = 1
+	}
+
+	evidence := strings.TrimSpace(outputTail)
+	if evidence == "" {
+		evidence = reason
+	} else if !strings.Contains(evidence, reason) {
+		evidence = reason + "\n" + evidence
+	}
+
+	return &InvocationError{
+		Err:        errors.New(reason),
 		OutputTail: evidence,
 		ExitCode:   exitCode,
 	}

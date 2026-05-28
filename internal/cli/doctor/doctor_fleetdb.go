@@ -5,14 +5,73 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
+	"github.com/tysonthomas9/loomcli/internal/cli/monitor"
 	"github.com/tysonthomas9/loomcli/internal/kv"
 )
+
+// checkOrphanedFleetLocks scans all in_progress issues and warns when the
+// recorded assignee is not currently a running daemon-managed agent. This
+// surfaces "lock survived agent exit" situations so the operator can either
+// `loom recover <worktree>` (which releases the fleet-db lock) or wait for
+// the TTL to expire.
+//
+// Report-only. Returns an empty CheckResult (skipped) when no IssueBackend is
+// configured, when listing fails, or when no in_progress issues exist.
+func checkOrphanedFleetLocks(deps *cli.Deps) CheckResult {
+	if deps == nil || deps.IssueBackend == nil {
+		return CheckResult{}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	issues, err := deps.IssueBackend.List(ctx, backend.ListOpts{Status: "in_progress"})
+	if err != nil {
+		return CheckResult{}
+	}
+	if len(issues) == 0 {
+		return CheckResult{}
+	}
+
+	stateFilePath := cfgpkg.ResolveDaemonStatePath(cli.GetWorkspaceRuntimeDir())
+	managed := monitor.LoadDaemonManagedAgents(stateFilePath)
+
+	var orphans []string
+	for _, issue := range issues {
+		holder := issue.Assignee
+		if holder == "" {
+			continue
+		}
+		if _, ok := managed[holder]; ok {
+			continue
+		}
+		orphans = append(orphans, fmt.Sprintf("issue=%s holder=%s status=stopped-or-dead", issue.ID, holder))
+	}
+
+	if len(orphans) == 0 {
+		return CheckResult{
+			Name:    "orphaned_fleet_locks",
+			Status:  StatusPass,
+			Summary: fmt.Sprintf("no orphaned fleet-db issue locks (%d in_progress claimed by live agents)", len(issues)),
+		}
+	}
+
+	sort.Strings(orphans)
+	return CheckResult{
+		Name:    "orphaned_fleet_locks",
+		Status:  StatusWarn,
+		Summary: fmt.Sprintf("%d in_progress issue(s) claimed by agents that are not running", len(orphans)),
+		Detail:  strings.Join(orphans, "\n") + "\nremediation: run `loom recover <worktree>` to release the fleet-db lock, or wait for TTL expiry.",
+	}
+}
 
 // fleetHealthProbe is overridden in tests to avoid real network calls.
 // Default probes <url>/healthz with a short timeout.

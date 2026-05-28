@@ -517,6 +517,8 @@ func mergeRuntimeAgentStatus(storeAgent monitor.AgentStatus, runtimeAgent monito
 	merged.Ahead = runtimeAgent.Ahead
 	merged.Behind = runtimeAgent.Behind
 	merged.DaemonManaged = runtimeAgent.DaemonManaged
+	merged.CurrentTaskID = runtimeAgent.CurrentTaskID
+	merged.LastActivityAt = runtimeAgent.LastActivityAt
 	merged.Commits = runtimeAgent.Commits
 	merged.Changes = runtimeAgent.Changes
 	return merged

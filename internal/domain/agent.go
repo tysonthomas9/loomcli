@@ -11,6 +11,12 @@ const (
 	AgentStateIdle    AgentState = "idle"
 	AgentStateActive  AgentState = "active"
 	AgentStateStopped AgentState = "stopped"
+	// AgentStateBackendUnavailable means the agent is registered but
+	// the backend CLI it would invoke is not on PATH. Distinct from
+	// "stopped" (manual shutdown) or "failed" (exhausted retries): the
+	// daemon reconciler re-checks PATH each tick and auto-transitions
+	// back to AgentStateIdle once the binary appears.
+	AgentStateBackendUnavailable AgentState = "backend_unavailable"
 )
 
 // Agent is a long-lived assignment of a Role to one or more Repos within

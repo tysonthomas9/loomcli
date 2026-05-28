@@ -143,10 +143,19 @@ func TestHandleAgents_UsesStoreAgentsAsSourceOfTruth(t *testing.T) {
 		t.Fatalf("save state cache: %v", err)
 	}
 
+	lastActivity := time.Unix(1700000000, 123456000).UTC()
 	data := &monitor.MonitorData{
 		Timestamp: time.Unix(1, 0).UTC(),
 		Agents: []monitor.AgentStatus{
-			{Name: "falcon", Branch: "runtime/stale", Status: "planning: HELLO-WORLD-1", Ahead: 1},
+			{
+				Name:           "falcon",
+				Branch:         "runtime/stale",
+				Status:         "planning: HELLO-WORLD-1",
+				Ahead:          1,
+				DaemonManaged:  true,
+				CurrentTaskID:  "HELLO-WORLD-1",
+				LastActivityAt: lastActivity,
+			},
 			{Name: "stray", Branch: "feature/stray", Status: "ready", Workspace: "Test"},
 		},
 	}
@@ -172,8 +181,18 @@ func TestHandleAgents_UsesStoreAgentsAsSourceOfTruth(t *testing.T) {
 	if _, exists := byName["stray"]; exists {
 		t.Fatalf("unregistered runtime agent leaked into response: %+v", resp.Agents)
 	}
-	if got := byName["falcon"]; got.Role != "task" || got.Repo != "repo-a" || got.Workspace != "Test" || got.Status != "planning: HELLO-WORLD-1" || got.Branch != "feature/falcon" {
-		t.Fatalf("falcon not sourced from store: %+v", got)
+	falcon := byName["falcon"]
+	if falcon.Role != "task" || falcon.Repo != "repo-a" || falcon.Workspace != "Test" || falcon.Status != "planning: HELLO-WORLD-1" || falcon.Branch != "feature/falcon" {
+		t.Fatalf("falcon not sourced from store: %+v", falcon)
+	}
+	if !falcon.DaemonManaged {
+		t.Fatalf("falcon DaemonManaged = false, want true")
+	}
+	if falcon.CurrentTaskID != "HELLO-WORLD-1" {
+		t.Fatalf("falcon CurrentTaskID = %q, want HELLO-WORLD-1", falcon.CurrentTaskID)
+	}
+	if !falcon.LastActivityAt.Equal(lastActivity) {
+		t.Fatalf("falcon LastActivityAt = %v, want %v", falcon.LastActivityAt, lastActivity)
 	}
 	if got := byName["falcon"]; got.Parent != "EPIC-1" || got.OrchestratorSessionID != "lead-session" || got.Mode != "ephemeral" || got.DesiredState != "stopped" {
 		t.Fatalf("falcon orchestration fields not sourced from store: %+v", got)

@@ -71,6 +71,9 @@ func (s *stubGraphBackend) Update(_ context.Context, _ string, _ backend.UpdateP
 func (s *stubGraphBackend) ClaimIssue(_ context.Context, _ string, _ time.Duration) error {
 	return fmt.Errorf("ClaimIssue not implemented in stubGraphBackend")
 }
+func (s *stubGraphBackend) ReleaseIssueLock(_ context.Context, _, _ string) error {
+	return fmt.Errorf("ReleaseIssueLock not implemented in stubGraphBackend")
+}
 func (s *stubGraphBackend) DeferIssue(_ context.Context, _ string, _ time.Time) error {
 	return fmt.Errorf("DeferIssue not implemented in stubGraphBackend")
 }

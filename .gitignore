@@ -43,6 +43,7 @@ usage.jsonl
 internal/cli/sessions/
 internal/cli/agent/sessions/
 internal/cli/automode/sessions/
+internal/cli/daemon/supervisor/sessions/
 notify.token
 
 # Auth service

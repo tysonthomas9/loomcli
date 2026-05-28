@@ -1,16 +1,18 @@
 package backends
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"strings"
-	"syscall"
+
+	"github.com/olesho/harness-wrapper/pkg/wrapper"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/harness"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
@@ -58,42 +60,45 @@ func defaultOpenCodeInvoker(workDir, prompt, agentName string) error {
 
 func defaultOpenCodeNonInteractiveInvoker(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error {
 	args := append([]string{"run", "--format", "json", "--dir", workDir, "--dangerously-skip-permissions"}, openCodeModelArgs()...)
-	cmd := exec.Command("opencode", args...)
-	cmd.Dir = workDir
-	cmd.Env = buildBackendEnv(workDir, agentName)
-
-	r := pipePromptToCmd(cmd, prompt)
-
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		r.Close()
-		return wrapInvocationError(fmt.Errorf("failed to create stdout pipe: %w", err), "")
-	}
-	cmd.Stderr = os.Stderr
 
 	fmt.Println("Launching OpenCode agent (non-interactive)...")
 	fmt.Println("")
 
-	if err := cmd.Start(); err != nil {
-		r.Close()
-		return wrapInvocationError(fmt.Errorf("failed to start opencode: %w", err), "")
-	}
-
-	guard := newProcessGuard(cmd.Process)
-	go func() {
-		select {
-		case <-shutdown:
-			guard.Signal(syscall.SIGTERM)
-		case <-guard.Done():
-		}
-	}()
-
-	outputTail, streamErrMsg := scanOpenCodeStream(stdout, collector)
-
-	runErr := cmd.Wait()
-	guard.WaitAndMark()
-	r.Close()
-	return finalizeOpenCodeRun(runErr, outputTail, streamErrMsg)
+	var streamErrMsg string
+	return runHarness(context.Background(), shutdown, harnessInvocation{
+		BinaryName: "opencode",
+		Args:       args,
+		WorkDir:    workDir,
+		Env:        buildBackendEnv(workDir, agentName),
+		Prompt:     prompt,
+		// HarnessName left empty: OpenCode has no built-in classifier;
+		// the generic cost/quota classifier handles it.
+		HarnessName: "",
+		LineHandler: func(line string) {
+			fmt.Println(line)
+			if streamErrMsg == "" {
+				if msg, ok := extractOpenCodeStreamError(line); ok {
+					streamErrMsg = msg
+				}
+			}
+			if collector != nil {
+				collectOpenCodeStreamUsage(line, collector)
+			}
+		},
+		RetryPolicy: harness.DefaultRetryPolicy(),
+		Finalize: func(res wrapper.Result, runErr error, outputTail string) error {
+			if runErr != nil {
+				return finalizeOpenCodeRun(runErr, outputTail, streamErrMsg)
+			}
+			// Convert the wrapper's terminal Result into the same
+			// error shape the legacy exec path produced, then layer
+			// the stream-error captured from the JSON event stream
+			// on top — OpenCode reports recoverable-looking exits
+			// but the JSON channel can still flag a fatal error.
+			mapped := wrapWrapperResult(res, outputTail)
+			return finalizeOpenCodeRun(mapped, outputTail, streamErrMsg)
+		},
+	})
 }
 
 // Meta returns descriptive metadata about the OpenCode backend.
@@ -191,22 +196,6 @@ func finalizeOpenCodeRun(runErr error, outputTail, streamErrMsg string) error {
 		runErr = errors.New(streamErrMsg)
 	}
 	return wrapInvocationError(runErr, outputTail)
-}
-
-func scanOpenCodeStream(stdout io.Reader, collector *usage.Collector) (string, string) {
-	var streamErrMsg string
-	outputTail := scanStreamOutput(stdout, func(line string) {
-		fmt.Println(line)
-		if streamErrMsg == "" {
-			if msg, ok := extractOpenCodeStreamError(line); ok {
-				streamErrMsg = msg
-			}
-		}
-		if collector != nil {
-			collectOpenCodeStreamUsage(line, collector)
-		}
-	})
-	return outputTail, streamErrMsg
 }
 
 // collectOpenCodeStreamUsage is best-effort: parse JSON lines for a usage field.

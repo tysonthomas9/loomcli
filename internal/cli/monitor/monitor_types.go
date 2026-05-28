@@ -52,6 +52,8 @@ type AgentStatus struct {
 	DesiredState          string         `json:"desired_state,omitempty"`           // requested daemon state
 	Commits               []CommitDetail `json:"commits,omitempty"`                 // recent commits ahead of integration branch
 	Changes               []FileChange   `json:"changes,omitempty"`                 // uncommitted file changes
+	CurrentTaskID         string         `json:"current_task_id,omitempty"`         // task this daemon-managed agent has claimed; empty between tasks
+	LastActivityAt        time.Time      `json:"last_activity_at,omitempty"`        // most recent PTY-output observation from the agent's supervised backend; zero when not reported
 }
 
 // TaskInfo represents a task with basic info
@@ -110,15 +112,19 @@ type DaemonAgentState struct {
 
 // DaemonAgentStateEntry represents a single agent in daemon-agents.json
 type DaemonAgentStateEntry struct {
-	Worktree string `json:"worktree"`
-	Status   string `json:"status"`
-	Role     string `json:"role"`
-	Repo     string `json:"repo,omitempty"`
+	Worktree     string    `json:"worktree"`
+	Status       string    `json:"status"`
+	Role         string    `json:"role"`
+	Repo         string    `json:"repo,omitempty"`
+	TaskID       string    `json:"task_id,omitempty"`
+	LastActivity time.Time `json:"last_activity,omitempty"`
 }
 
 // DaemonAgentInfo carries daemon supervision metadata for a worktree.
 type DaemonAgentInfo struct {
-	Managed bool
-	Role    string
-	Repo    string
+	Managed       bool
+	Role          string
+	Repo          string
+	CurrentTaskID string
+	LastActivity  time.Time
 }

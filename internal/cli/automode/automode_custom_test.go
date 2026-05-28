@@ -1014,6 +1014,32 @@ func TestRunAutoModeLoop_CodexErrorRecovery(t *testing.T) {
 	}
 }
 
+// waitForTmuxPaneStartCommand polls `tmux list-panes` until it returns a
+// non-empty start command or the budget expires. Used to avoid races with
+// tmux server startup under CI load — fixed sleeps are not enough on
+// contended runners.
+func waitForTmuxPaneStartCommand(t *testing.T, sessionName string, budget time.Duration) string {
+	t.Helper()
+	deadline := time.Now().Add(budget)
+	var lastErr error
+	var lastOut string
+	for time.Now().Before(deadline) {
+		out, err := exec.Command("tmux", "list-panes", "-t", sessionName, "-F", "#{pane_start_command}").Output() //nolint:norawexec
+		if err == nil {
+			trimmed := strings.TrimSpace(string(out))
+			if trimmed != "" {
+				return trimmed
+			}
+			lastOut = trimmed
+		} else {
+			lastErr = err
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for tmux pane start command on %q (budget=%s lastErr=%v lastOut=%q)", sessionName, budget, lastErr, lastOut)
+	return ""
+}
+
 func TestStartTmuxSession_CodexBackend_NoTermDumb(t *testing.T) {
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux not available, skipping")
@@ -1049,19 +1075,7 @@ func TestStartTmuxSession_CodexBackend_NoTermDumb(t *testing.T) {
 		t.Fatalf("startTmuxSession failed: %v", err)
 	}
 
-	// Wait for tmux to set up — retry a few times under race detector.
-	var out []byte
-	for i := 0; i < 5; i++ {
-		time.Sleep(300 * time.Millisecond)
-		out, err = exec.Command("tmux", "list-panes", "-t", sessionName, "-F", "#{pane_start_command}").Output() //nolint:norawexec
-		if err == nil && strings.TrimSpace(string(out)) != "" {
-			break
-		}
-	}
-	if err != nil {
-		t.Fatalf("failed to get tmux pane start command after retries: %v", err)
-	}
-	paneCmd := strings.TrimSpace(string(out))
+	paneCmd := waitForTmuxPaneStartCommand(t, sessionName, 5*time.Second)
 
 	// Command should NOT contain "TERM=dumb" for codex
 	if strings.Contains(paneCmd, "TERM=dumb") {
@@ -1111,14 +1125,7 @@ func TestStartTmuxSession_ClaudeBackend_HasTermDumb(t *testing.T) {
 		t.Fatalf("startTmuxSession failed: %v", err)
 	}
 
-	// Give tmux a moment to set up
-	time.Sleep(300 * time.Millisecond)
-
-	out, err := exec.Command("tmux", "list-panes", "-t", sessionName, "-F", "#{pane_start_command}").Output() //nolint:norawexec
-	if err != nil {
-		t.Fatalf("failed to get tmux pane start command: %v", err)
-	}
-	paneCmd := strings.TrimSpace(string(out))
+	paneCmd := waitForTmuxPaneStartCommand(t, sessionName, 5*time.Second)
 
 	// Command SHOULD contain "TERM=dumb" for claude
 	if !strings.Contains(paneCmd, "TERM=dumb") {
