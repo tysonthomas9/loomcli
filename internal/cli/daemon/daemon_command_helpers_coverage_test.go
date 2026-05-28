@@ -315,11 +315,22 @@ func TestRunDaemonConfigPrintsDefaultConfig(t *testing.T) {
 func TestRunDaemonDryRunAndStopAgentWrapper(t *testing.T) {
 	projectDir := withShortDaemonTempCwd(t)
 	oldDryRun, oldStopForce, oldStopTimeout := daemonDryRun, daemonStopForce, daemonStopTimeout
+	oldIsolate := isolateProcessGroupFn
+	oldGetwd := daemonGetwdFn
+	oldLoadConfig := loadDaemonConfigFn
 	t.Cleanup(func() {
 		daemonDryRun, daemonStopForce, daemonStopTimeout = oldDryRun, oldStopForce, oldStopTimeout
+		isolateProcessGroupFn = oldIsolate
+		daemonGetwdFn = oldGetwd
+		loadDaemonConfigFn = oldLoadConfig
 	})
 
 	daemonDryRun = true
+	isolateProcessGroupFn = func() {}
+	daemonGetwdFn = func() (string, error) { return projectDir, nil }
+	loadDaemonConfigFn = func(string) (*DaemonConfig, error) {
+		return &DaemonConfig{Agents: []AgentEntry{{Worktree: "falcon", Role: "task"}}}, nil
+	}
 	out := captureDaemonStdout(t, func() { runDaemon(&cobra.Command{}, nil) })
 	if !strings.Contains(out, "DRY RUN") {
 		t.Fatalf("dry-run output = %q", out)

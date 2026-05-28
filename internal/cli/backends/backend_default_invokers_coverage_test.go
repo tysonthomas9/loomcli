@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/olesho/harness-wrapper/pkg/wrapper"
+
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
@@ -115,6 +117,12 @@ func TestDefaultBackendInvokerFailuresWrapOutput(t *testing.T) {
 	if invErr.ExitCode != 7 || !strings.Contains(invErr.OutputTail, "rate limit") {
 		t.Fatalf("codex invocation error = %#v", invErr)
 	}
+
+	fakeOpenCode := &fakeWrapperRun{
+		stdoutBody: `{"type":"error","error":{"data":{"message":"model missing"}}}` + "\n",
+		result:     wrapper.Result{Status: wrapper.StatusIdle},
+	}
+	installWrapperRunMock(t, fakeOpenCode.Run)
 
 	err = captureBackendStdout(t, func() error {
 		return defaultOpenCodeNonInteractiveInvoker(workDir, "prompt", "nova", make(chan struct{}), nil)

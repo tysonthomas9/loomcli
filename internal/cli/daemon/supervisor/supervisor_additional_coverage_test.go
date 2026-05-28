@@ -153,10 +153,11 @@ func TestSupervisorLifecycleHelpersAdditionalBranches(t *testing.T) {
 
 	t.Run("supervise observes shutdown after spawn failure iteration", func(t *testing.T) {
 		isolateSupervisorWorkspaceRuntimeDir(t)
+		one := 1
 		s := newTestSupervisorWithConfig(&cfgpkg.DaemonConfig{Daemon: cfgpkg.DaemonSettings{RestartPolicy: cfgpkg.RestartPolicy{
-			MaxRetries:     &zero,
-			BackoffInitial: &zero,
-			BackoffMax:     &zero,
+			MaxRetries:     &one,
+			BackoffInitial: &one,
+			BackoffMax:     &one,
 		}}})
 		s.Concurrency = NewConcurrencyTracker(nil)
 		s.EmitEvent = func(events.Event) {}

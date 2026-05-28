@@ -185,7 +185,7 @@ func testDaemonConfig(projectDir string) *DaemonConfig {
 			EventsDir: filepath.Join(projectDir, ".loom", "events"),
 		},
 		Roles:  map[string]RoleConfig{},
-		Agents: []AgentEntry{},
+		Agents: []AgentEntry{{Worktree: "worker", Role: "task"}},
 	}
 }
 

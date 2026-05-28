@@ -22,6 +22,7 @@ type procInfo struct {
 type processInspector struct {
 	List func() ([]procInfo, error)
 	CWD  func(pid int) (string, error)
+	CWDs func(pids []int) (map[int]string, error)
 }
 
 var procInspector processInspector
@@ -141,7 +142,7 @@ type orphanCandidate struct {
 // descendant of one). Returns one candidate per matching process. Best-effort:
 // returns nil on platforms without an inspector.
 func findWorktreeOrphans(worktreePaths []string) []orphanCandidate {
-	if procInspector.List == nil || procInspector.CWD == nil {
+	if procInspector.List == nil || (procInspector.CWD == nil && procInspector.CWDs == nil) {
 		return nil
 	}
 	if len(worktreePaths) == 0 {
@@ -169,7 +170,7 @@ func findWorktreeOrphans(worktreePaths []string) []orphanCandidate {
 		return nil
 	}
 
-	var out []orphanCandidate
+	candidates := make([]procInfo, 0)
 	for _, p := range procs {
 		if p.PPID != 1 {
 			continue
@@ -177,8 +178,32 @@ func findWorktreeOrphans(worktreePaths []string) []orphanCandidate {
 		if p.PID == 1 {
 			continue
 		}
-		cwd, err := procInspector.CWD(p.PID)
-		if err != nil || cwd == "" {
+		candidates = append(candidates, p)
+	}
+
+	cwdByPID := map[int]string{}
+	useBatchCWD := procInspector.CWDs != nil
+	if useBatchCWD {
+		pids := make([]int, 0, len(candidates))
+		for _, p := range candidates {
+			pids = append(pids, p.PID)
+		}
+		if got, err := procInspector.CWDs(pids); err == nil && got != nil {
+			cwdByPID = got
+		}
+	}
+
+	var out []orphanCandidate
+	for _, p := range candidates {
+		cwd := cwdByPID[p.PID]
+		if !useBatchCWD {
+			var err error
+			cwd, err = procInspector.CWD(p.PID)
+			if err != nil {
+				continue
+			}
+		}
+		if cwd == "" {
 			continue
 		}
 		cwd = strings.TrimRight(cwd, "/")

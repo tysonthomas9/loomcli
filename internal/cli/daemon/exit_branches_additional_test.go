@@ -124,7 +124,7 @@ func TestDaemonExitBranchesWithInjectedExit(t *testing.T) {
 			PIDFile:   ".loom/daemon.pid",
 			LogDir:    ".loom/logs",
 			EventsDir: ".loom/events",
-		}}
+		}, Agents: []cfgpkg.AgentEntry{{Worktree: "worker", Role: "task"}}}
 		loadDaemonConfigFn = func(string) (*cfgpkg.DaemonConfig, error) { return cfg, nil }
 		var validated, printed bool
 		validateDaemonPathsFn = func(string, string, string) { validated = true }

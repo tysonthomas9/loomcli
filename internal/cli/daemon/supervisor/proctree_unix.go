@@ -3,24 +3,39 @@
 package supervisor
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 )
 
 func init() {
 	procInspector = processInspector{
 		List: psListProcesses,
 		CWD:  lsofProcessCWD,
+		CWDs: lsofProcessCWDs,
 	}
 }
+
+const (
+	psListTimeout  = 2 * time.Second
+	lsofCWDTimeout = 2 * time.Second
+)
 
 // psListProcesses runs `ps -A -o pid,ppid,pgid` and parses the output.
 // Works on macOS (BSD ps) and Linux (procps ps): both accept the headerless
 // `=` suffix form and the listed columns.
 func psListProcesses() ([]procInfo, error) {
-	out, err := exec.Command("ps", "-A", "-o", "pid=,ppid=,pgid=").Output() //nolint:gosec // G204: fixed args
+	ctx, cancel := context.WithTimeout(context.Background(), psListTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "ps", "-A", "-o", "pid=,ppid=,pgid=") //nolint:gosec // G204: fixed args
+	cmd.WaitDelay = 500 * time.Millisecond
+	out, err := cmd.Output()
+	if ctx.Err() != nil {
+		return nil, fmt.Errorf("ps -A timed out")
+	}
 	if err != nil {
 		return nil, fmt.Errorf("ps -A: %w", err)
 	}
@@ -52,16 +67,55 @@ func lsofProcessCWD(pid int) (string, error) {
 	if pid <= 1 {
 		return "", nil
 	}
-	out, err := exec.Command("lsof", "-p", strconv.Itoa(pid), "-d", "cwd", "-F", "n", "-a").Output() //nolint:gosec // G204: pid is int
+	cwds, err := lsofProcessCWDs([]int{pid})
 	if err != nil {
-		// lsof exits non-zero when the process is gone or when the fd has no
-		// match. Treat both as "no cwd available" rather than propagating.
-		return "", nil
+		return "", err
 	}
-	for line := range strings.SplitSeq(string(out), "\n") {
-		if strings.HasPrefix(line, "n") {
-			return strings.TrimSpace(line[1:]), nil
+	return cwds[pid], nil
+}
+
+// lsofProcessCWDs returns cwd paths for many pids with one bounded lsof call.
+// Calling lsof once per orphan candidate can overload macOS process inspection
+// when a startup sweep runs on a machine with many PPID==1 processes.
+func lsofProcessCWDs(pids []int) (map[int]string, error) {
+	cwds := make(map[int]string)
+	ids := make([]string, 0, len(pids))
+	for _, pid := range pids {
+		if pid > 1 {
+			ids = append(ids, strconv.Itoa(pid))
 		}
 	}
-	return "", nil
+	if len(ids) == 0 {
+		return cwds, nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), lsofCWDTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "lsof", "-p", strings.Join(ids, ","), "-d", "cwd", "-F", "pn", "-a") //nolint:gosec // G204: pids are ints
+	cmd.WaitDelay = 500 * time.Millisecond
+	out, err := cmd.Output()
+	if ctx.Err() != nil {
+		return cwds, nil
+	}
+
+	currentPID := 0
+	for line := range strings.SplitSeq(string(out), "\n") {
+		switch {
+		case strings.HasPrefix(line, "p"):
+			pid, parseErr := strconv.Atoi(strings.TrimSpace(line[1:]))
+			if parseErr == nil {
+				currentPID = pid
+			}
+		case strings.HasPrefix(line, "n") && currentPID > 1:
+			if cwd := strings.TrimSpace(line[1:]); cwd != "" {
+				cwds[currentPID] = cwd
+			}
+		}
+	}
+	if err != nil {
+		// lsof exits non-zero when some processes vanish or have no cwd match.
+		// Treat that as best-effort and return whatever stdout contained.
+		return cwds, nil
+	}
+	return cwds, nil
 }

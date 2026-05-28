@@ -52,7 +52,7 @@ func TestPreFlightSetupRecordsEphemeralNoWork(t *testing.T) {
 	}
 }
 
-func TestSpawnAndWaitBuildFailureStopsOnShutdown(t *testing.T) {
+func TestSpawnAndWaitBuildFailureRecordsRetryableError(t *testing.T) {
 	s := newTestSupervisorWithConfig(&cfgpkg.DaemonConfig{})
 	s.Concurrency = NewConcurrencyTracker(nil)
 	s.EmitEvent = func(events.Event) {}
@@ -65,11 +65,14 @@ func TestSpawnAndWaitBuildFailureStopsOnShutdown(t *testing.T) {
 	}
 
 	s.spawnAndWait(ap)
-	if ap.RestartCount != 1 {
-		t.Fatalf("RestartCount = %d, want 1", ap.RestartCount)
+	if ap.RestartCount != 0 {
+		t.Fatalf("RestartCount = %d, want 0 before shouldRestart counts the failure", ap.RestartCount)
 	}
-	if ap.StopReason != StopReasonShutdown {
-		t.Fatalf("StopReason = %q, want shutdown", ap.StopReason)
+	if ap.LastError == nil || ap.LastError.Message == "" {
+		t.Fatalf("LastError = %+v, want recorded spawn failure", ap.LastError)
+	}
+	if ap.StopReason != "" {
+		t.Fatalf("StopReason = %q, want empty before supervisor loop handles shutdown", ap.StopReason)
 	}
 }
 

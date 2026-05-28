@@ -3,6 +3,7 @@
 package supervisor
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -190,7 +191,11 @@ func processAlive(pid int) bool {
 // failed test can show whether the grandchild has been reparented to init).
 func readPPID(t *testing.T, pid int) int {
 	t.Helper()
-	out, err := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "ppid=").Output() //nolint:norawexec // test-only readPPID via ps
+	ctx, cancel := context.WithTimeout(context.Background(), psListTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "ps", "-p", strconv.Itoa(pid), "-o", "ppid=") //nolint:norawexec // test-only readPPID via ps
+	cmd.WaitDelay = 500 * time.Millisecond
+	out, err := cmd.Output()
 	if err != nil {
 		return -1
 	}
@@ -243,6 +248,31 @@ func TestKillOrphanedWorktreeProcesses_StartupSweep(t *testing.T) {
 	if ppid := readPPID(t, childPID); ppid != 1 {
 		t.Fatalf("child PID %d not yet reparented to init: PPID=%d", childPID, ppid)
 	}
+	childPGID, err := syscall.Getpgid(childPID)
+	if err != nil {
+		t.Fatalf("child PGID: %v", err)
+	}
+	resolvedWorktree, err := filepath.EvalSymlinks(worktreeDir)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(%q): %v", worktreeDir, err)
+	}
+
+	oldInspector := procInspector
+	procInspector = processInspector{
+		List: func() ([]procInfo, error) {
+			return []procInfo{{PID: childPID, PPID: 1, PGID: childPGID}}, nil
+		},
+		CWD: func(pid int) (string, error) {
+			if pid == childPID {
+				return resolvedWorktree, nil
+			}
+			return "", nil
+		},
+		CWDs: func(pids []int) (map[int]string, error) {
+			return map[int]string{childPID: resolvedWorktree}, nil
+		},
+	}
+	t.Cleanup(func() { procInspector = oldInspector })
 
 	killed := s.killOrphanedWorktreeProcesses([]string{worktreeDir})
 	if killed == 0 {

@@ -466,6 +466,9 @@ func TestSupervisorPreFlightSpawnFailureAndFinalizeFallbacks(t *testing.T) {
 	}
 	s.Concurrency.Acquire("custom")
 	s.spawnAndWait(bad)
+	if s.shouldRestart(bad) {
+		t.Fatal("shouldRestart returned true after spawn failure with max_retries=0")
+	}
 	if bad.StopReason != StopReasonMaxRetries {
 		t.Fatalf("spawn failure stop reason = %q", bad.StopReason)
 	}
