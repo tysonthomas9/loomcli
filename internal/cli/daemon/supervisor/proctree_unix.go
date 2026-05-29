@@ -3,10 +3,12 @@
 package supervisor
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 )
 
 func init() {
@@ -52,7 +54,9 @@ func lsofProcessCWD(pid int) (string, error) {
 	if pid <= 1 {
 		return "", nil
 	}
-	out, err := exec.Command("lsof", "-p", strconv.Itoa(pid), "-d", "cwd", "-F", "n", "-a").Output() //nolint:gosec // G204: pid is int
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "lsof", "-p", strconv.Itoa(pid), "-d", "cwd", "-F", "n", "-a").Output() //nolint:gosec // G204: pid is int
 	if err != nil {
 		// lsof exits non-zero when the process is gone or when the fd has no
 		// match. Treat both as "no cwd available" rather than propagating.
