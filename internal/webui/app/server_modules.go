@@ -11,6 +11,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/agents"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/epics"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/onboarding"
+	"github.com/tysonthomas9/loomcli/internal/webui/handlers/workflows"
 	"github.com/tysonthomas9/loomcli/internal/webui/modbuilder"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/svcimpl"
@@ -108,6 +109,7 @@ func (app *Server) buildInfraModules() {
 		app.wsModules = append(app.wsModules, agents.NewModule(app.agentSvc, app.hub))
 		app.wsModules = append(app.wsModules, onboarding.NewModule(app.issueSvc, app.agentSvc))
 		app.wsModules = append(app.wsModules, epics.NewModule(app.config.Store, app.hub).WithIssueBackendFn(app.config.IssueBackendFn))
+		app.wsModules = append(app.wsModules, workflows.NewModule(app.config.Store).WithIssueBackendFn(app.config.IssueBackendFn))
 	} else if app.config.AgentControlFn != nil {
 		app.wsModules = append(app.wsModules, webui.NewAgentControlModule(app.config.AgentControlFn))
 	}
