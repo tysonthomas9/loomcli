@@ -29,11 +29,12 @@ import (
 // LineHandler scanner inside runHarness sees real bytes, then returns
 // the scripted Result/err.
 type fakeWrapperRun struct {
-	mu         sync.Mutex
-	calls      []wrapper.Config
-	stdoutBody string
-	result     wrapper.Result
-	err        error
+	mu          sync.Mutex
+	calls       []wrapper.Config
+	stdinBodies []string
+	stdoutBody  string
+	result      wrapper.Result
+	err         error
 }
 
 func (f *fakeWrapperRun) Run(ctx context.Context, cfg wrapper.Config, p harness.RetryPolicy) (wrapper.Result, error) {
@@ -47,7 +48,10 @@ func (f *fakeWrapperRun) Run(ctx context.Context, cfg wrapper.Config, p harness.
 	// Drain stdin so the prompt reader doesn't sit unread (mirrors
 	// what wrapper.Start would do via the PTY).
 	if cfg.Stdin != nil {
-		_, _ = io.Copy(io.Discard, cfg.Stdin)
+		data, _ := io.ReadAll(cfg.Stdin)
+		f.mu.Lock()
+		f.stdinBodies = append(f.stdinBodies, string(data))
+		f.mu.Unlock()
 	}
 	return f.result, f.err
 }
@@ -57,6 +61,14 @@ func (f *fakeWrapperRun) Calls() []wrapper.Config {
 	defer f.mu.Unlock()
 	out := make([]wrapper.Config, len(f.calls))
 	copy(out, f.calls)
+	return out
+}
+
+func (f *fakeWrapperRun) StdinBodies() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]string, len(f.stdinBodies))
+	copy(out, f.stdinBodies)
 	return out
 }
 
@@ -165,6 +177,9 @@ func TestRunHarness_PipesPromptAndCallsWrapper(t *testing.T) {
 	}
 	if cfg.Harness != "claude" {
 		t.Errorf("Harness: got %q, want claude", cfg.Harness)
+	}
+	if got := fake.StdinBodies(); len(got) != 1 || got[0] != "hello" {
+		t.Errorf("stdin bodies: got %v, want [hello]", got)
 	}
 	if got, want := seen, []string{"line one", "line two"}; !equalStrings(got, want) {
 		t.Errorf("line handler saw %v, want %v", got, want)
@@ -353,6 +368,12 @@ func TestDefaultCodexNonInteractiveInvoker_UsesWrapperWithCodexHarness(t *testin
 	}
 	if !containsArg(calls[0].Args, "exec") || !containsArg(calls[0].Args, "--json") {
 		t.Errorf("codex args: got %v, want to contain 'exec' and '--json'", calls[0].Args)
+	}
+	if got := calls[0].Args[len(calls[0].Args)-1]; got != "prompt body" {
+		t.Errorf("codex final arg = %q, want prompt body", got)
+	}
+	if got := fake.StdinBodies(); len(got) != 1 || got[0] != "" {
+		t.Errorf("codex stdin bodies: got %v, want one empty body", got)
 	}
 }
 
