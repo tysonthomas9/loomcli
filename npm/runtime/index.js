@@ -12,6 +12,10 @@ export function defineAgentProfile(profile) {
   return profile || {};
 }
 
+export function defineSkill(skill) {
+  return skill || {};
+}
+
 export function defineWorkflow(workflow) {
   return workflow || {};
 }

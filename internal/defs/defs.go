@@ -22,6 +22,7 @@ type Plan struct {
 	Agents    []AgentModule    `json:"agents,omitempty"`
 	Workflows []WorkflowModule `json:"workflows,omitempty"`
 	Runtimes  []RuntimeModule  `json:"runtimes,omitempty"`
+	Skills    []SkillModule    `json:"skills,omitempty"`
 }
 
 type AgentModule struct {
@@ -74,6 +75,16 @@ type RuntimeModule struct {
 	Memory     string                 `json:"memory,omitempty"`
 }
 
+type SkillModule struct {
+	Name         string   `json:"name"`
+	Description  string   `json:"description,omitempty"`
+	Version      string   `json:"version"`
+	SourcePath   string   `json:"source_path"`
+	SourceHash   string   `json:"source_hash"`
+	Instructions string   `json:"instructions,omitempty"`
+	Resources    []string `json:"resources,omitempty"`
+}
+
 func Load(root string) (*Plan, error) {
 	if strings.TrimSpace(root) == "" {
 		root = "."
@@ -110,9 +121,28 @@ func Apply(ctx context.Context, st store.Store, workspaceKey, actor string, plan
 	if plan == nil {
 		return fmt.Errorf("definition plan required")
 	}
+	for _, skill := range plan.Skills {
+		manifest := mustJSON(skill)
+		capability := skillCapabilityManifest(skill)
+		if _, err := st.DefinitionVersions().Apply(ctx, store.DefinitionVersionApply{
+			WorkspaceKey:       workspaceKey,
+			DefinitionType:     domain.DefinitionTypeSkill,
+			DefinitionName:     skill.Name,
+			Version:            skill.Version,
+			SourceHash:         skill.SourceHash,
+			BundleHash:         skill.SourceHash,
+			Manifest:           manifest,
+			CapabilityManifest: capability,
+			CreatedBy:          actor,
+			Status:             domain.DefinitionStatusActive,
+		}); err != nil {
+			return fmt.Errorf("apply skill definition %s: %w", skill.Name, err)
+		}
+	}
+	skillIndex := indexSkills(plan.Skills)
 	for _, agent := range plan.Agents {
 		manifest := mustJSON(agent)
-		capability := agentCapabilityManifest(agent)
+		capability := agentCapabilityManifest(agent, skillIndex)
 		if _, err := st.DefinitionVersions().Apply(ctx, store.DefinitionVersionApply{
 			WorkspaceKey:       workspaceKey,
 			DefinitionType:     domain.DefinitionTypeAgent,
@@ -223,7 +253,7 @@ func Apply(ctx context.Context, st store.Store, workspaceKey, actor string, plan
 	return nil
 }
 
-func agentCapabilityManifest(agent AgentModule) json.RawMessage {
+func agentCapabilityManifest(agent AgentModule, skills map[string]SkillModule) json.RawMessage {
 	out := map[string]any{
 		"manifest_version": "loom.capabilities.v1",
 		"definition": map[string]any{
@@ -232,8 +262,10 @@ func agentCapabilityManifest(agent AgentModule) json.RawMessage {
 			"version": agent.Version,
 		},
 		"model": map[string]any{
-			"tools":  compactStrings(agent.Tools),
-			"skills": compactStrings(agent.Skills),
+			"tools":              compactStrings(agent.Tools),
+			"skills":             compactStrings(agent.Skills),
+			"skill_bundles":      agentSkillBundles(agent, skills),
+			"prompt_bundle_hash": agentPromptBundleHash(agent, skills),
 		},
 		"sandbox": map[string]any{
 			"allowed_commands": compactStrings(agent.AllowedCommands),
@@ -250,6 +282,62 @@ func agentCapabilityManifest(agent AgentModule) json.RawMessage {
 		},
 	}
 	return mustJSON(compactMap(out))
+}
+
+func skillCapabilityManifest(skill SkillModule) json.RawMessage {
+	out := map[string]any{
+		"manifest_version": "loom.capabilities.v1",
+		"definition": map[string]any{
+			"type":    string(domain.DefinitionTypeSkill),
+			"name":    skill.Name,
+			"version": skill.Version,
+		},
+		"skill": map[string]any{
+			"instructions_hash": hashString(skill.Instructions),
+			"resources":         compactStrings(skill.Resources),
+		},
+	}
+	return mustJSON(compactMap(out))
+}
+
+func agentSkillBundles(agent AgentModule, skills map[string]SkillModule) []map[string]any {
+	out := make([]map[string]any, 0, len(agent.Skills))
+	for _, name := range compactStrings(agent.Skills) {
+		skill, ok := skills[name]
+		if !ok {
+			continue
+		}
+		out = append(out, map[string]any{
+			"name":        skill.Name,
+			"version":     skill.Version,
+			"source_hash": skill.SourceHash,
+			"resources":   compactStrings(skill.Resources),
+		})
+	}
+	return out
+}
+
+func agentPromptBundleHash(agent AgentModule, skills map[string]SkillModule) string {
+	h := sha256.New()
+	_, _ = h.Write([]byte(agent.Instructions))
+	for _, name := range compactStrings(agent.Skills) {
+		if skill, ok := skills[name]; ok {
+			_, _ = h.Write([]byte(name))
+			_, _ = h.Write([]byte(skill.SourceHash))
+		}
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+func indexSkills(skills []SkillModule) map[string]SkillModule {
+	out := make(map[string]SkillModule, len(skills))
+	for _, skill := range skills {
+		if strings.TrimSpace(skill.Name) == "" {
+			continue
+		}
+		out[skill.Name] = skill
+	}
+	return out
 }
 
 func workflowCapabilityManifest(wf WorkflowModule) json.RawMessage {
@@ -421,7 +509,11 @@ func Summary(plan *Plan) string {
 	if plan == nil {
 		return "No definition plan loaded"
 	}
-	return fmt.Sprintf("agents=%d workflows=%d runtimes=%d", len(plan.Agents), len(plan.Workflows), len(plan.Runtimes))
+	summary := fmt.Sprintf("agents=%d workflows=%d runtimes=%d", len(plan.Agents), len(plan.Workflows), len(plan.Runtimes))
+	if len(plan.Skills) > 0 {
+		summary += fmt.Sprintf(" skills=%d", len(plan.Skills))
+	}
+	return summary
 }
 
 func loadDir(dir string, fn func(string, []byte) error) error {
@@ -533,6 +625,24 @@ func parseRuntime(path string, data []byte) (RuntimeModule, error) {
 
 func validatePlan(plan *Plan) error {
 	seen := make(map[string]string)
+	for _, skill := range plan.Skills {
+		if strings.TrimSpace(skill.Name) == "" {
+			return fmt.Errorf("%s: skill definition name is required", skill.SourcePath)
+		}
+		if !definitionNamePattern.MatchString(skill.Name) {
+			return fmt.Errorf("%s: skill definition name %q must be lower-kebab-case", skill.SourcePath, skill.Name)
+		}
+		if prior := seen["skill:"+skill.Name]; prior != "" {
+			return fmt.Errorf("duplicate skill definition %q in %s and %s", skill.Name, prior, skill.SourcePath)
+		}
+		seen["skill:"+skill.Name] = skill.SourcePath
+		if err := validateUniqueStrings(skill.SourcePath, "skill resources", skill.Resources); err != nil {
+			return err
+		}
+		if err := validateSkillResources(skill.SourcePath, skill.Resources); err != nil {
+			return err
+		}
+	}
 	for _, agent := range plan.Agents {
 		if strings.TrimSpace(agent.Name) == "" {
 			return fmt.Errorf("%s: agent definition name is required", agent.SourcePath)
@@ -597,6 +707,19 @@ func validatePlan(plan *Plan) error {
 		seen["runtime:"+rt.Name] = rt.SourcePath
 		if err := validateRepoAndEnvPolicy(rt.SourcePath, rt.Repos, rt.Env); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+func validateSkillResources(sourcePath string, resources []string) error {
+	for _, resource := range resources {
+		resource = strings.TrimSpace(resource)
+		if resource == "" {
+			continue
+		}
+		if filepath.IsAbs(resource) || strings.HasPrefix(resource, "../") || strings.Contains(resource, "/../") || resource == ".." {
+			return fmt.Errorf("%s: skill resource %q must stay inside the skill directory", sourcePath, resource)
 		}
 	}
 	return nil
@@ -806,6 +929,10 @@ func hashSource(data []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
+func hashString(value string) string {
+	return hashSource([]byte(value))
+}
+
 func version(hash string) string {
 	if len(hash) < 12 {
 		return hash
@@ -881,6 +1008,11 @@ func compactValue(value any) (any, bool) {
 			return nil, false
 		}
 		return nested, true
+	case []map[string]any:
+		if len(v) == 0 {
+			return nil, false
+		}
+		return v, true
 	default:
 		return value, true
 	}

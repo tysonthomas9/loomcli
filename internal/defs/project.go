@@ -71,6 +71,24 @@ func ScaffoldWorkflow(root, name string) (string, error) {
 	return path, nil
 }
 
+func ScaffoldSkill(root, name string) (string, error) {
+	if strings.TrimSpace(root) == "" {
+		root = "."
+	}
+	name = strings.TrimSpace(name)
+	if !definitionNamePattern.MatchString(name) {
+		return "", fmt.Errorf("skill name %q must be lower-kebab-case", name)
+	}
+	if err := InitTypeScriptProject(root); err != nil {
+		return "", err
+	}
+	path := filepath.Join(root, ".loom", "skills", name, "SKILL.md")
+	if err := writeIfMissing(path, []byte(skillTemplate(name))); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
 func writeIfMissing(path string, data []byte) error {
 	if _, err := os.Stat(path); err == nil {
 		return nil
@@ -81,6 +99,18 @@ func writeIfMissing(path string, data []byte) error {
 		return err
 	}
 	return os.WriteFile(path, data, 0o644)
+}
+
+func skillTemplate(name string) string {
+	return fmt.Sprintf(`---
+name: %s
+description: Reusable guidance for %s work.
+---
+
+Use this skill when the agent needs to perform %s work consistently.
+
+Before finishing, summarize what changed, what evidence was checked, and any follow-up work.
+`, name, name, name)
 }
 
 const defaultConfig = `import { defineConfig } from '@loom/runtime';
@@ -158,7 +188,7 @@ const runtimeTypes = `declare module '@loom/runtime' {
     model?: string;
     runtime?: RuntimeProfile;
     instructions?: string;
-    skills?: string[];
+    skills?: Array<string | SkillDefinition>;
     tools?: Array<string | unknown>;
     allowedCommands?: string[];
     deniedCommands?: string[];
@@ -174,6 +204,16 @@ const runtimeTypes = `declare module '@loom/runtime' {
       maxBudgetUSD?: number;
       readOnly?: boolean;
     };
+  };
+
+  export type SkillDefinition = {
+    name: string;
+    description?: string;
+    version?: string;
+    source_path?: string;
+    source_hash?: string;
+    instructions?: string;
+    resources?: string[];
   };
 
   export type WorkflowDefinition = {
@@ -204,6 +244,7 @@ const runtimeTypes = `declare module '@loom/runtime' {
   export function defineAgent<T extends AgentDefinition>(agent: T): T;
   export function createAgent<T extends AgentDefinition>(agent: T): T;
   export function defineAgentProfile<T extends AgentDefinition>(profile: T): T;
+  export function defineSkill<T extends SkillDefinition>(skill: T): T;
   export function defineWorkflow<T extends WorkflowDefinition>(workflow: T): T;
 
   export const runtime: {
@@ -215,5 +256,10 @@ const runtimeTypes = `declare module '@loom/runtime' {
   export const trigger: {
     issueLabelAdded(config?: Record<string, string>): { event: 'issue.label_added'; filter: Record<string, string> };
   };
+}
+
+declare module '*.md' {
+  const skill: import('@loom/runtime').SkillDefinition;
+  export default skill;
 }
 `

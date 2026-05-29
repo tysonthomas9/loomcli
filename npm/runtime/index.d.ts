@@ -23,7 +23,7 @@ export type AgentDefinition = {
   model?: string;
   runtime?: RuntimeProfile;
   instructions?: string;
-  skills?: string[];
+  skills?: Array<string | SkillDefinition>;
   tools?: Array<string | unknown>;
   allowedCommands?: string[];
   deniedCommands?: string[];
@@ -33,6 +33,16 @@ export type AgentDefinition = {
   maxBudgetUSD?: number;
   readOnly?: boolean;
   policy?: AgentPolicy;
+};
+
+export type SkillDefinition = {
+  name: string;
+  description?: string;
+  version?: string;
+  source_path?: string;
+  source_hash?: string;
+  instructions?: string;
+  resources?: string[];
 };
 
 export type WorkflowDefinition = {
@@ -57,6 +67,7 @@ export declare function defineConfig<T extends Config>(config: T): T;
 export declare function defineAgent<T extends AgentDefinition>(agent: T): T;
 export declare function createAgent<T extends AgentDefinition>(agent: T): T;
 export declare function defineAgentProfile<T extends AgentDefinition>(profile: T): T;
+export declare function defineSkill<T extends SkillDefinition>(skill: T): T;
 export declare function defineWorkflow<T extends WorkflowDefinition>(workflow: T): T;
 export declare function defineTool<T extends object>(tool: T): T;
 
@@ -71,3 +82,8 @@ export declare const trigger: {
 };
 
 export declare const schema: Record<string, (...args: unknown[]) => unknown>;
+
+declare module "*.md" {
+  const skill: import("@loom/runtime").SkillDefinition;
+  export default skill;
+}

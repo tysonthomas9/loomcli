@@ -52,6 +52,13 @@ var addWorkflowCmd = &cobra.Command{
 	RunE:  runAddWorkflow,
 }
 
+var addSkillCmd = &cobra.Command{
+	Use:   "skill <NAME>",
+	Short: "Scaffold a source-owned Loom skill bundle",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runAddSkill,
+}
+
 var checkCmd = &cobra.Command{
 	Use:   "check",
 	Short: "Compile and validate TypeScript-first Loom definitions",
@@ -83,7 +90,7 @@ var applyWorkflowCmd = &cobra.Command{
 func init() {
 	addCmd.PersistentFlags().StringVar(&addDir, "dir", ".", "Directory containing the Loom TypeScript project")
 	addCmd.PersistentFlags().BoolVar(&addJSON, "json", false, "JSON output")
-	addCmd.AddCommand(addAgentCmd, addWorkflowCmd)
+	addCmd.AddCommand(addAgentCmd, addWorkflowCmd, addSkillCmd)
 
 	checkCmd.Flags().StringVar(&checkDir, "dir", ".", "Directory containing the Loom TypeScript project")
 	checkCmd.Flags().BoolVar(&checkJSON, "json", false, "JSON output")
@@ -133,6 +140,23 @@ func runAddWorkflow(_ *cobra.Command, args []string) error {
 		})
 	}
 	fmt.Printf("Created TypeScript workflow scaffold: %s\n", path)
+	fmt.Println("Next: loom check")
+	return nil
+}
+
+func runAddSkill(_ *cobra.Command, args []string) error {
+	path, err := defspkg.ScaffoldSkill(addDir, args[0])
+	if err != nil {
+		return err
+	}
+	if addJSON {
+		return cmdstore.WriteJSON(map[string]any{
+			"skill": args[0],
+			"path":  path,
+		})
+	}
+	fmt.Printf("Created Loom skill scaffold: %s\n", path)
+	fmt.Printf("Import it from an agent with: import %s from '../skills/%s/SKILL.md' with { type: 'skill' };\n", importName(args[0]), args[0])
 	fmt.Println("Next: loom check")
 	return nil
 }
@@ -363,4 +387,19 @@ func fallback(v, fallbackValue string) string {
 		return fallbackValue
 	}
 	return v
+}
+
+func importName(name string) string {
+	parts := strings.Split(strings.TrimSpace(name), "-")
+	if len(parts) == 0 {
+		return "skill"
+	}
+	out := parts[0]
+	for _, part := range parts[1:] {
+		if part == "" {
+			continue
+		}
+		out += strings.ToUpper(part[:1]) + part[1:]
+	}
+	return out + "Skill"
 }

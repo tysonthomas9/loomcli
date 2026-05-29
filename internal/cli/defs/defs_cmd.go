@@ -96,9 +96,15 @@ func runDefsApply(_ *cobra.Command, _ []string) error {
 
 func printPlan(plan *defspkg.Plan) {
 	fmt.Printf("Definition plan for %s\n", plan.Root)
-	if len(plan.Agents) == 0 && len(plan.Workflows) == 0 && len(plan.Runtimes) == 0 {
+	if len(plan.Agents) == 0 && len(plan.Workflows) == 0 && len(plan.Runtimes) == 0 && len(plan.Skills) == 0 {
 		fmt.Println("  no .loom definitions found")
 		return
+	}
+	for _, skill := range plan.Skills {
+		fmt.Printf("  skill    %-28s %s\n", skill.Name, skill.Version)
+		if len(skill.Resources) > 0 {
+			fmt.Printf("           resources: %s\n", strings.Join(skill.Resources, ", "))
+		}
 	}
 	for _, agent := range plan.Agents {
 		fmt.Printf("  agent    %-28s %s\n", agent.Name, agent.Version)

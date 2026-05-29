@@ -5,6 +5,11 @@ const vm = require("vm");
 const { stripTypeScriptTypes } = require("node:module");
 
 const root = path.resolve(process.argv[2] || ".");
+const moduleCache = new Map();
+const skillRegistry = new Map();
+const ignoredResourceDirs = new Set([".git", ".cache", ".turbo", ".wrangler", "dist", "node_modules"]);
+const ignoredResourceFiles = new Set([".DS_Store"]);
+const sensitiveResourceNames = new Set([".env", ".npmrc", ".netrc", "_netrc", ".pypirc", "credentials.json", "secret", "secrets"]);
 
 function hashSource(data) {
   return crypto.createHash("sha256").update(data).digest("hex");
@@ -41,12 +46,16 @@ function transformSource(src, file) {
   }
   return transformed
     .replace(/import\s+type\s+[^;]+;?/g, "")
-    .replace(/import\s+[^;]+from\s+['"][^'"]+['"];?/g, "")
+    .replace(importStatementRegex(), "")
     .replace(/export\s+type\s+[^;]+;?/g, "")
     .replace(/export\s+interface\s+[A-Za-z0-9_]+\s*\{[^}]*\}/gs, "")
     .replace(/export\s+default\s+/, "module.exports.default = ")
-    .replace(/export\s+const\s+([A-Za-z0-9_]+)\s*=/g, "const $1 =")
+    .replace(/export\s+const\s+([A-Za-z0-9_]+)\s*=/g, "const $1 = module.exports.$1 =")
     .replace(/export\s+function\s+([A-Za-z0-9_]+)\s*\(/g, "function $1(");
+}
+
+function importStatementRegex() {
+  return /import\s+(?!type)(?:[^'";]+?\s+from\s+)?['"][^'"]+['"](?:\s+(?:with|assert)\s+\{[^}]*\})?\s*;?/g;
 }
 
 function defineConfig(config) {
@@ -61,6 +70,10 @@ const createAgent = defineAgent;
 
 function defineAgentProfile(config) {
   return { __loomType: "agent_profile", ...config };
+}
+
+function defineSkill(config) {
+  return { __loomType: "skill", ...config };
 }
 
 function defineWorkflow(config) {
@@ -99,16 +112,26 @@ const trigger = {
 };
 
 function evaluateModule(file) {
+  file = path.resolve(file);
+  if (moduleCache.has(file)) return moduleCache.get(file);
+  if (file.endsWith(".md")) {
+    const markdownRecord = evaluateMarkdownSkill(file);
+    moduleCache.set(file, markdownRecord);
+    return markdownRecord;
+  }
   const src = fs.readFileSync(file, "utf8");
   const module = { exports: {} };
+  const imported = importedBindings(file, src);
   const sandbox = {
     module,
     exports: module.exports,
     console,
+    ...imported,
     defineConfig,
     defineAgent,
     createAgent,
     defineAgentProfile,
+    defineSkill,
     defineWorkflow,
     defineTool,
     runtime,
@@ -117,8 +140,199 @@ function evaluateModule(file) {
     github: toolProxy(["github"]),
     fleetdb: toolProxy(["fleetdb"]),
   };
+  const record = { source: src, value: undefined, exports: module.exports };
+  moduleCache.set(file, record);
   vm.runInNewContext(transformSource(src, file), sandbox, { filename: file });
-  return { source: src, value: module.exports.default };
+  record.value = module.exports.default;
+  record.exports = module.exports;
+  registerExportedSkills(file, src, module.exports);
+  return record;
+}
+
+function importedBindings(file, src) {
+  const out = {};
+  const re = /import\s+(?!type)([^'";]+?)\s+from\s+['"]([^'"]+)['"](?:\s+(?:with|assert)\s+\{[^}]*\})?\s*;?/g;
+  for (const match of src.matchAll(re)) {
+    const clause = match[1].trim();
+    const spec = match[2].trim();
+    if (!spec.startsWith(".")) {
+      if (spec === "valibot") bindNonRelativeModule(out, clause, schema);
+      continue;
+    }
+    const dep = evaluateModule(resolveRelativeImport(file, spec));
+    bindImportClause(out, clause, dep);
+  }
+  return out;
+}
+
+function bindNonRelativeModule(out, clause, value) {
+  if (clause.startsWith("* as ")) {
+    out[clause.slice(5).trim()] = value;
+    return;
+  }
+  if (!clause.startsWith("{")) {
+    const name = clause.split(",", 1)[0].trim();
+    if (name) out[name] = value;
+  }
+}
+
+function bindImportClause(out, clause, dep) {
+  if (clause.startsWith("* as ")) {
+    out[clause.slice(5).trim()] = dep.exports;
+    return;
+  }
+  if (clause.startsWith("{")) {
+    bindNamedImports(out, clause, dep);
+    return;
+  }
+  const comma = clause.indexOf(",");
+  const defaultName = (comma === -1 ? clause : clause.slice(0, comma)).trim();
+  if (defaultName) out[defaultName] = dep.value;
+  if (comma !== -1) {
+    const rest = clause.slice(comma + 1).trim();
+    if (rest.startsWith("{")) bindNamedImports(out, rest, dep);
+  }
+}
+
+function bindNamedImports(out, clause, dep) {
+  const inner = clause.replace(/^\{/, "").replace(/\}$/, "");
+  for (const part of inner.split(",")) {
+    const item = part.trim();
+    if (!item) continue;
+    const [imported, local] = item.split(/\s+as\s+/);
+    const importedName = imported.trim();
+    const localName = (local || imported).trim();
+    out[localName] = dep.exports[importedName];
+  }
+}
+
+function resolveRelativeImport(fromFile, spec) {
+  const base = path.resolve(path.dirname(fromFile), spec);
+  if (!insideRoot(base)) {
+    throw new Error(`${fromFile}: import ${spec} resolves outside project root`);
+  }
+  const candidates = [];
+  if (path.extname(base)) {
+    candidates.push(base);
+  } else {
+    candidates.push(base + ".ts", base + ".mts", base + ".js", base + ".mjs", path.join(base, "index.ts"), path.join(base, "SKILL.md"));
+  }
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) return candidate;
+  }
+  throw new Error(`${fromFile}: cannot resolve import ${spec}`);
+}
+
+function insideRoot(file) {
+  const rel = path.relative(root, file);
+  return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
+}
+
+function evaluateMarkdownSkill(file) {
+  const source = fs.readFileSync(file, "utf8");
+  const skill = registerSkill(markdownSkill(file, source));
+  return { source, value: skill, exports: { default: skill } };
+}
+
+function markdownSkill(file, source) {
+  const parsed = parseMarkdownSkill(source);
+  const dirName = path.basename(path.dirname(file));
+  const name = stringValue(parsed.frontmatter.name || dirName);
+  const resources = listSkillResources(file);
+  const sourceHash = hashSkillBundle(file, source, resources);
+  return {
+    __loomType: "skill",
+    name,
+    description: stringValue(parsed.frontmatter.description),
+    source_path: file,
+    source_hash: sourceHash,
+    version: version(sourceHash),
+    instructions: parsed.body.trim(),
+    resources,
+  };
+}
+
+function parseMarkdownSkill(source) {
+  if (!source.startsWith("---")) return { frontmatter: {}, body: source };
+  const close = source.indexOf("\n---", 3);
+  if (close === -1) return { frontmatter: {}, body: source };
+  const frontmatterSource = source.slice(3, close).trim();
+  const body = source.slice(source.indexOf("\n", close + 1) + 1);
+  const frontmatter = {};
+  for (const line of frontmatterSource.split(/\r?\n/)) {
+    const match = line.match(/^([A-Za-z0-9_-]+)\s*:\s*(.*)$/);
+    if (!match) continue;
+    frontmatter[match[1]] = match[2].trim().replace(/^["']|["']$/g, "");
+  }
+  return { frontmatter, body };
+}
+
+function listSkillResources(skillFile) {
+  const dir = path.dirname(skillFile);
+  const out = [];
+  const walk = (current) => {
+    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+      const full = path.join(current, entry.name);
+      const rel = path.relative(dir, full).split(path.sep).join("/");
+      if (entry.isSymbolicLink()) throw new Error(`${skillFile}: skill resources must not include symlinks: ${rel}`);
+      if (entry.isDirectory()) {
+        if (ignoredResourceDirs.has(entry.name) || entry.name === ".aws" || entry.name === ".ssh" || entry.name === ".gnupg") continue;
+        walk(full);
+        continue;
+      }
+      if (!entry.isFile() || full === skillFile || ignoredResourceFiles.has(entry.name)) continue;
+      rejectSensitiveResource(skillFile, rel, entry.name);
+      out.push(rel);
+    }
+  };
+  walk(dir);
+  return out.sort();
+}
+
+function rejectSensitiveResource(skillFile, rel, name) {
+  if (
+    sensitiveResourceNames.has(name) ||
+    name.startsWith(".env.") ||
+    name.startsWith(".dev.vars") ||
+    name.endsWith(".key") ||
+    name.endsWith(".pem") ||
+    name.endsWith(".p12") ||
+    name.endsWith(".pfx") ||
+    name.startsWith("secret.") ||
+    name.startsWith("secrets.")
+  ) {
+    throw new Error(`${skillFile}: refusing to package sensitive-looking skill resource ${rel}`);
+  }
+}
+
+function hashSkillBundle(skillFile, source, resources) {
+  const h = crypto.createHash("sha256");
+  h.update("SKILL.md\0");
+  h.update(source);
+  const dir = path.dirname(skillFile);
+  for (const resource of resources) {
+    h.update("\0");
+    h.update(resource);
+    h.update("\0");
+    h.update(fs.readFileSync(path.join(dir, resource)));
+  }
+  return h.digest("hex");
+}
+
+function registerExportedSkills(file, source, exports) {
+  const hash = hashSource(source);
+  const candidates = [exports.default, ...Object.values(exports)];
+  for (const candidate of candidates) {
+    if (!candidate || candidate.__loomType !== "skill") continue;
+    registerSkill({
+      ...candidate,
+      source_path: candidate.source_path || file,
+      source_hash: candidate.source_hash || hash,
+      version: candidate.version || version(hash),
+      instructions: stringValue(candidate.instructions),
+      resources: stringArray(candidate.resources),
+    });
+  }
 }
 
 function projectConfig() {
@@ -139,12 +353,41 @@ function sourceRootDir() {
 
 function stringValue(v) {
   if (v == null) return "";
+  if (typeof v === "object" && v.name != null) return String(v.name).trim();
   return String(v).trim();
 }
 
 function stringArray(v) {
   if (!Array.isArray(v)) return [];
   return v.map((item) => stringValue(item)).filter(Boolean);
+}
+
+function skillArray(v) {
+  if (!Array.isArray(v)) return [];
+  return v
+    .map((item) => {
+      if (item && item.__loomType === "skill") registerSkill(item);
+      return stringValue(item);
+    })
+    .filter(Boolean);
+}
+
+function registerSkill(skill) {
+  if (!skill || skill.__loomType !== "skill") return skill;
+  const name = stringValue(skill.name);
+  if (!name) return skill;
+  const normalized = {
+    name,
+    description: stringValue(skill.description),
+    version: stringValue(skill.version),
+    source_path: stringValue(skill.source_path),
+    source_hash: stringValue(skill.source_hash),
+    instructions: stringValue(skill.instructions),
+    resources: stringArray(skill.resources),
+  };
+  if (!normalized.version && normalized.source_hash) normalized.version = version(normalized.source_hash);
+  skillRegistry.set(name, normalized);
+  return { __loomType: "skill", ...normalized };
 }
 
 function numberValue(v) {
@@ -203,7 +446,7 @@ function agentModule(file) {
     source_hash: hash,
     version: version(hash),
     instructions: stringValue(value.instructions),
-    skills: stringArray(value.skills),
+    skills: skillArray(value.skills),
     tools: stringArray(value.tools),
     allowed_commands: stringArray(value.allowedCommands || (value.policy && value.policy.allowedCommands)),
     denied_commands: stringArray(value.deniedCommands || (value.policy && value.policy.deniedCommands)),
@@ -218,6 +461,24 @@ function agentModule(file) {
           : undefined,
     read_only: boolValue(value.readOnly || (value.policy && value.policy.readOnly)),
   };
+}
+
+function skillModule(file) {
+  const data = fs.readFileSync(file, "utf8");
+  const hash = hashSource(data);
+  const { value, exports } = evaluateModule(file);
+  const skill = value && value.__loomType === "skill" ? value : Object.values(exports).find((item) => item && item.__loomType === "skill");
+  if (!skill) {
+    throw new Error(`${file}: default export must be defineSkill(...)`);
+  }
+  return registerSkill({
+    ...skill,
+    source_path: file,
+    source_hash: hash,
+    version: version(hash),
+    instructions: stringValue(skill.instructions),
+    resources: stringArray(skill.resources),
+  });
 }
 
 function runtimeModule(file) {
@@ -284,11 +545,18 @@ function compactArrayObjects(items) {
 
 const sourceRoot = sourceRootDir();
 
+readEntrypoints(path.join(sourceRoot, "skills")).forEach(skillModule);
+const agents = compactArrayObjects(readEntrypoints(path.join(sourceRoot, "agents")).map(agentModule));
+const workflows = compactArrayObjects(readEntrypoints(path.join(sourceRoot, "workflows")).map(workflowModule));
+const runtimes = compactArrayObjects(readEntrypoints(path.join(sourceRoot, "runtimes")).map(runtimeModule));
+const skills = compactArrayObjects(Array.from(skillRegistry.values()).sort((a, b) => a.name.localeCompare(b.name)));
+
 const plan = {
   root,
-  agents: compactArrayObjects(readEntrypoints(path.join(sourceRoot, "agents")).map(agentModule)),
-  workflows: compactArrayObjects(readEntrypoints(path.join(sourceRoot, "workflows")).map(workflowModule)),
-  runtimes: compactArrayObjects(readEntrypoints(path.join(sourceRoot, "runtimes")).map(runtimeModule)),
+  agents,
+  workflows,
+  runtimes,
+  skills,
 };
 
 process.stdout.write(JSON.stringify(plan));

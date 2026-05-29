@@ -171,6 +171,92 @@ func TestTypeScriptFirstWorkflowApplyCreatesDurableBindings(t *testing.T) {
 	}
 }
 
+func TestTypeScriptFirstSkillImportBundlesMetadata(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+
+	skillPath, err := ScaffoldSkill(root, "triage")
+	if err != nil {
+		t.Fatalf("ScaffoldSkill() error = %v", err)
+	}
+	writeDefFile(t, root, ".loom/skills/triage/references/checklist.md", "Check reproduction, root cause, and validation evidence.\n")
+	writeDefFile(t, root, ".loom/agents/triage-agent.ts", `import { createAgent, runtime } from '@loom/runtime';
+import triageSkill from '../skills/triage/SKILL.md' with { type: 'skill' };
+
+export default createAgent({
+  name: 'triage-agent',
+  backend: 'echo',
+  model: 'local/echo',
+  runtime: runtime.local({ repos: ['.'], env: [] }),
+  instructions: 'Use imported skills when they match the requested work.',
+  skills: [triageSkill],
+  tools: [],
+});`)
+
+	plan, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if got := Summary(plan); got != "agents=1 workflows=0 runtimes=0 skills=1" {
+		t.Fatalf("Summary() = %q, want agent plus skill bundle", got)
+	}
+	if len(plan.Skills) != 1 {
+		t.Fatalf("skills = %+v, want one imported skill", plan.Skills)
+	}
+	skill := plan.Skills[0]
+	if skill.Name != "triage" || skill.SourcePath != skillPath {
+		t.Fatalf("skill = %+v, want triage from %s", skill, skillPath)
+	}
+	if !strings.Contains(skill.Instructions, "Before finishing") {
+		t.Fatalf("skill instructions = %q, want scaffolded instructions", skill.Instructions)
+	}
+	if len(skill.Resources) != 1 || skill.Resources[0] != "references/checklist.md" {
+		t.Fatalf("skill resources = %+v, want packaged checklist", skill.Resources)
+	}
+	agent, ok := FindAgent(plan, "triage-agent")
+	if !ok {
+		t.Fatalf("FindAgent() did not find triage-agent")
+	}
+	if len(agent.Skills) != 1 || agent.Skills[0] != "triage" {
+		t.Fatalf("agent skills = %+v, want imported skill name", agent.Skills)
+	}
+
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TSSKILL", Name: "TypeScript Skills"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := Apply(ctx, st, "TSSKILL", "test", plan); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	if _, err := st.DefinitionVersions().Get(ctx, "TSSKILL", domain.DefinitionTypeSkill, "triage", skill.Version); err != nil {
+		t.Fatalf("skill definition version not created: %v", err)
+	}
+	role, err := st.Roles().Get(ctx, "TSSKILL", "triage-agent")
+	if err != nil {
+		t.Fatalf("role not created: %v", err)
+	}
+	if len(role.Skills) != 1 || role.Skills[0] != "triage" {
+		t.Fatalf("role skills = %+v, want imported skill name", role.Skills)
+	}
+	version, err := st.DefinitionVersions().Get(ctx, "TSSKILL", domain.DefinitionTypeAgent, "triage-agent", agent.Version)
+	if err != nil {
+		t.Fatalf("agent definition version not created: %v", err)
+	}
+	capability := jsonMap(t, version.CapabilityManifest)
+	model := capability["model"].(map[string]any)
+	if model["prompt_bundle_hash"] == "" {
+		t.Fatalf("model capability = %#v, want prompt bundle hash", model)
+	}
+	bundles := model["skill_bundles"].([]any)
+	if len(bundles) != 1 {
+		t.Fatalf("skill_bundles = %#v, want one bundle", bundles)
+	}
+	bundle := bundles[0].(map[string]any)
+	if bundle["name"] != "triage" || bundle["source_hash"] != skill.SourceHash {
+		t.Fatalf("skill bundle = %#v, want triage metadata", bundle)
+	}
+}
+
 func TestLoadRejectsUnauthenticatedWorkflowRoute(t *testing.T) {
 	root := t.TempDir()
 	writeDefFile(t, root, ".loom/workflows/unsafe.ts", `export default defineWorkflow({
