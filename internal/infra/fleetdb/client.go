@@ -71,18 +71,26 @@ type Client struct {
 	actor     string
 	authToken string
 
-	workspaces *workspaceStore
-	repos      *repoStore
-	agents     *agentStore
-	nodes      *nodeStore
-	sessions   *agentSessionStore
-	terminals  *terminalSessionStore
-	artifacts  *artifactStore
-	leases     *agentLeaseStore
-	ownership  *agentOwnershipLeaseStore
-	commands   *agentCommandStore
-	roles      *roleStore
-	daemon     *daemonStore
+	workspaces   *workspaceStore
+	repos        *repoStore
+	agents       *agentStore
+	nodes        *nodeStore
+	sessions     *agentSessionStore
+	terminals    *terminalSessionStore
+	artifacts    *artifactStore
+	leases       *agentLeaseStore
+	ownership    *agentOwnershipLeaseStore
+	commands     *agentCommandStore
+	roles        *roleStore
+	daemon       *daemonStore
+	defVersions  *definitionVersionStore
+	workflowDefs *workflowDefinitionStore
+	workflowRuns *workflowRunStore
+	taskRuns     *taskRunStore
+	runEvents    *runEventStore
+	runtimes     *runtimeProfileStore
+	routes       *routeBindingStore
+	triggers     *triggerBindingStore
 }
 
 // New constructs a fleet-db client. Returns an error if BaseURL is empty.
@@ -115,6 +123,14 @@ func New(cfg Config) (*Client, error) {
 	c.commands = &agentCommandStore{client: c}
 	c.roles = &roleStore{client: c}
 	c.daemon = &daemonStore{client: c}
+	c.defVersions = &definitionVersionStore{client: c}
+	c.workflowDefs = &workflowDefinitionStore{client: c}
+	c.workflowRuns = &workflowRunStore{client: c}
+	c.taskRuns = &taskRunStore{client: c}
+	c.runEvents = &runEventStore{client: c}
+	c.runtimes = &runtimeProfileStore{client: c}
+	c.routes = &routeBindingStore{client: c}
+	c.triggers = &triggerBindingStore{client: c}
 	return c, nil
 }
 
@@ -154,6 +170,22 @@ func (c *Client) Roles() store.RoleStore { return c.roles }
 
 // Daemon returns the DaemonProfileStore.
 func (c *Client) Daemon() store.DaemonProfileStore { return c.daemon }
+
+func (c *Client) DefinitionVersions() store.DefinitionVersionStore { return c.defVersions }
+
+func (c *Client) WorkflowDefinitions() store.WorkflowDefinitionStore { return c.workflowDefs }
+
+func (c *Client) WorkflowRuns() store.WorkflowRunStore { return c.workflowRuns }
+
+func (c *Client) TaskRuns() store.TaskRunStore { return c.taskRuns }
+
+func (c *Client) RunEvents() store.RunEventStore { return c.runEvents }
+
+func (c *Client) RuntimeProfiles() store.RuntimeProfileStore { return c.runtimes }
+
+func (c *Client) RouteBindings() store.RouteBindingStore { return c.routes }
+
+func (c *Client) TriggerBindings() store.TriggerBindingStore { return c.triggers }
 
 // Close is a no-op — HTTP clients hold no resources beyond the
 // transport's connection pool, and that is shared / not owned by us.

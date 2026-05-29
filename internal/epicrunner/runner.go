@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -15,6 +16,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	workflowpkg "github.com/tysonthomas9/loomcli/internal/workflow"
 )
 
 const stalledWorkerFatalConsecutiveTicks = 2
@@ -61,6 +63,7 @@ type Runner struct {
 	interval              time.Duration
 	orchestratorSessionID string
 	targetNodeID          string
+	workflowRunID         string
 	dryRun                bool
 	failOnDispatchError   bool
 	prepareWorktrees      bool
@@ -100,6 +103,10 @@ func NewRunner(ctx context.Context, cfg RunnerConfig) (*Runner, *StartResult, er
 		cfg.LeadName = result.LeadName
 		cfg.OrchestratorSessionID = result.OrchestratorSessionID
 	}
+	workflowRunID, err := ensureEpicWorkflowRun(ctx, cfg)
+	if err != nil {
+		return nil, nil, err
+	}
 
 	r := &Runner{
 		store:                 cfg.Store,
@@ -114,6 +121,7 @@ func NewRunner(ctx context.Context, cfg RunnerConfig) (*Runner, *StartResult, er
 		interval:              cfg.Interval,
 		orchestratorSessionID: cfg.OrchestratorSessionID,
 		targetNodeID:          nodeID,
+		workflowRunID:         workflowRunID,
 		dryRun:                cfg.DryRun,
 		failOnDispatchError:   cfg.FailOnDispatchError,
 		prepareWorktrees:      cfg.PrepareWorktrees,
@@ -220,6 +228,33 @@ func validateEpicIssue(ctx context.Context, ib backend.IssueBackend, epicID stri
 	return nil
 }
 
+func ensureEpicWorkflowRun(ctx context.Context, cfg RunnerConfig) (string, error) {
+	if cfg.DryRun {
+		return "", nil
+	}
+	if cfg.Store == nil || cfg.Store.WorkflowRuns() == nil || cfg.Store.TaskRuns() == nil || cfg.Store.RunEvents() == nil {
+		return "", runError(ErrorKindUnavailable, "workflow control-plane stores are required for epic runner dispatch", nil)
+	}
+	input := workflowpkg.ParentWorkItemsInput{
+		ParentID:       cfg.EpicID,
+		Role:           cfg.Role,
+		MaxConcurrency: cfg.MaxConcurrency,
+	}
+	raw, err := json.Marshal(input)
+	if err != nil {
+		return "", runError(ErrorKindInternal, "marshal epic workflow input", err)
+	}
+	actor := cfg.LeadName
+	if actor == "" {
+		actor = "epic-runner"
+	}
+	run, err := workflowpkg.CreateOrResumeRun(ctx, cfg.Store, cfg.WorkspaceKey, workflowpkg.RunParentWorkItemsName, raw, actor)
+	if err != nil {
+		return "", runError(ErrorKindInternal, "create or resume epic workflow run", err)
+	}
+	return run.RunID, nil
+}
+
 func backendRunError(defaultKind ErrorKind, msg string, err error) error {
 	var be *backend.BackendError
 	if !errors.As(err, &be) {
@@ -259,6 +294,9 @@ func (r *Runner) PrintHeader() {
 		r.writef("  orchestrator:     %s\n", r.orchestratorSessionID)
 	} else {
 		r.writeln("  orchestrator:     (none - workers will be unattached)")
+	}
+	if r.workflowRunID != "" {
+		r.writef("  workflow run:     %s\n", r.workflowRunID)
 	}
 	if r.targetNodeID != "" {
 		r.writef("  target node:      %s\n", r.targetNodeID)
@@ -333,6 +371,9 @@ func (r *Runner) ReconcileOnce(ctx context.Context) (ReconcileResult, error) {
 	r.ensureWriters()
 	snapshot, err := r.loadReconcileSnapshot(ctx)
 	if err != nil {
+		return ReconcileResult{}, err
+	}
+	if err := r.reconcileTaskRuns(ctx, snapshot.openChildren); err != nil {
 		return ReconcileResult{}, err
 	}
 	result := ReconcileResult{
@@ -418,6 +459,116 @@ func (r *Runner) loadReconcileSnapshot(ctx context.Context) (*reconcileSnapshot,
 	return &reconcileSnapshot{ready: ready, blocked: blocked, openChildren: openChildren}, nil
 }
 
+func (r *Runner) ensureTaskRun(ctx context.Context, task backend.IssueData) (*domain.TaskRun, error) {
+	if r.dryRun || r.workflowRunID == "" {
+		return nil, nil
+	}
+	run, err := r.store.TaskRuns().Ensure(ctx, store.TaskRunEnsure{
+		WorkspaceKey:    r.workspace,
+		WorkflowRunID:   r.workflowRunID,
+		WorkItemID:      task.ID,
+		RoleName:        r.role,
+		IdempotencyKey:  "child:" + task.ID + ":role:" + r.role,
+		ParentSessionID: r.orchestratorSessionID,
+		Reason:          task.Title,
+		Metadata: map[string]string{
+			"parent_id":     r.parent,
+			"workflow_name": workflowpkg.RunParentWorkItemsName,
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	_, _ = r.store.RunEvents().Append(ctx, store.RunEventAppend{
+		WorkspaceKey:  r.workspace,
+		WorkflowRunID: r.workflowRunID,
+		TaskRunID:     run.TaskRunID,
+		Type:          "task_run_ensured",
+		Message:       "ensured epic child task run",
+		Data:          mustJSON(map[string]string{"work_item_id": task.ID, "role": r.role}),
+	})
+	return run, nil
+}
+
+func (r *Runner) reconcileTaskRuns(ctx context.Context, openChildren []backend.IssueData) error {
+	if r.dryRun || r.workflowRunID == "" || r.store.TaskRuns() == nil {
+		return nil
+	}
+	runs, err := r.store.TaskRuns().List(ctx, r.workspace, store.TaskRunFilter{WorkflowRunID: r.workflowRunID, Live: true, Limit: 10000})
+	if err != nil {
+		return fmt.Errorf("list live task runs: %w", err)
+	}
+	openByID := make(map[string]backend.IssueData, len(openChildren))
+	for _, child := range openChildren {
+		openByID[child.ID] = child
+	}
+	for _, run := range runs {
+		if run == nil {
+			continue
+		}
+		child, open := openByID[run.WorkItemID]
+		if !open {
+			status := domain.TaskRunPassed
+			now := time.Now().UTC()
+			finishedAt := &now
+			if _, err := r.store.TaskRuns().Update(ctx, r.workspace, run.TaskRunID, store.TaskRunUpdate{Status: &status, FinishedAt: &finishedAt}); err != nil {
+				return err
+			}
+			_, _ = r.store.RunEvents().Append(ctx, store.RunEventAppend{
+				WorkspaceKey:  r.workspace,
+				WorkflowRunID: r.workflowRunID,
+				TaskRunID:     run.TaskRunID,
+				Type:          "task_run_completed",
+				Message:       "child work item is terminal",
+				Data:          mustJSON(map[string]string{"work_item_id": run.WorkItemID}),
+			})
+			continue
+		}
+		if child.Status == "in_progress" && child.Assignee != "" && run.ClaimActor == "" {
+			status := domain.TaskRunClaimed
+			claimActor := child.Assignee
+			if _, err := r.store.TaskRuns().Update(ctx, r.workspace, run.TaskRunID, store.TaskRunUpdate{Status: &status, ClaimActor: &claimActor}); err != nil {
+				return err
+			}
+		}
+		if sessionID, ok, err := r.liveTaskSessionID(ctx, run.AgentID, run.WorkItemID); err != nil {
+			return err
+		} else if ok {
+			status := domain.TaskRunRunning
+			_, _ = r.store.TaskRuns().Update(ctx, r.workspace, run.TaskRunID, store.TaskRunUpdate{Status: &status, SessionID: &sessionID})
+		}
+	}
+	return nil
+}
+
+func (r *Runner) failTaskRun(ctx context.Context, taskRun *domain.TaskRun, cause error) {
+	if taskRun == nil || r.store.TaskRuns() == nil {
+		return
+	}
+	status := domain.TaskRunFailed
+	now := time.Now().UTC()
+	finishedAt := &now
+	message := ""
+	if cause != nil {
+		message = cause.Error()
+	}
+	_, _ = r.store.TaskRuns().Update(ctx, r.workspace, taskRun.TaskRunID, store.TaskRunUpdate{
+		Status:       &status,
+		FinishedAt:   &finishedAt,
+		ErrorMessage: &message,
+	})
+	if r.store.RunEvents() != nil {
+		_, _ = r.store.RunEvents().Append(ctx, store.RunEventAppend{
+			WorkspaceKey:  r.workspace,
+			WorkflowRunID: r.workflowRunID,
+			TaskRunID:     taskRun.TaskRunID,
+			Type:          "task_run_failed",
+			Message:       "epic runner failed to dispatch task run",
+			Data:          mustJSON(map[string]string{"work_item_id": taskRun.WorkItemID, "error": message}),
+		})
+	}
+}
+
 func (r *Runner) drainState(ctx context.Context, openChildren []backend.IssueData) (drained bool, activeWorkers int) {
 	if len(openChildren) > 0 {
 		return false, 0
@@ -440,6 +591,13 @@ func (r *Runner) dispatchReadyTasks(ctx context.Context, ready []backend.IssueDa
 			continue
 		}
 		name := WorkerName(r.prefix, task.ID)
+		taskRun, err := r.ensureTaskRun(ctx, task)
+		if err != nil {
+			msg := fmt.Sprintf("ensure task run for %s failed: %v", task.ID, err)
+			r.errorf("[epic-run] %s\n", msg)
+			failures = append(failures, msg)
+			continue
+		}
 		active, err := r.workerActiveForTask(ctx, name, task.ID)
 		if err != nil {
 			msg := fmt.Sprintf("active worker check for %s failed: %v", task.ID, err)
@@ -450,10 +608,11 @@ func (r *Runner) dispatchReadyTasks(ctx context.Context, ready []backend.IssueDa
 		if active {
 			continue
 		}
-		if err := r.spawnWorker(ctx, task); err != nil {
+		if err := r.spawnWorker(ctx, task, taskRun); err != nil {
 			msg := fmt.Sprintf("spawn for %s failed: %v", task.ID, err)
 			r.errorf("[epic-run] %s\n", msg)
 			failures = append(failures, msg)
+			r.failTaskRun(ctx, taskRun, err)
 			continue
 		}
 		dispatched = append(dispatched, DispatchedTask{
@@ -583,6 +742,30 @@ func (r *Runner) hasLiveTaskSession(ctx context.Context, name, taskID string) (b
 	return false, nil
 }
 
+func (r *Runner) liveTaskSessionID(ctx context.Context, name, taskID string) (string, bool, error) {
+	if r.store.AgentSessions() == nil || name == "" {
+		return "", false, nil
+	}
+	filter := store.AgentSessionFilter{AgentID: name, Limit: 100}
+	if taskID != "" {
+		filter.TaskID = taskID
+	}
+	sessions, err := r.store.AgentSessions().List(ctx, r.workspace, filter)
+	if err != nil {
+		return "", false, err
+	}
+	for _, session := range sessions {
+		if session == nil || session.Kind != domain.AgentSessionKindTask || !liveAgentSessionStatus(session.Status) {
+			continue
+		}
+		if taskID != "" && session.TaskID != taskID {
+			continue
+		}
+		return session.SessionID, true, nil
+	}
+	return "", false, nil
+}
+
 func liveAgentCommandStatus(status domain.AgentCommandStatus) bool {
 	switch status {
 	case "", domain.AgentCommandQueued, domain.AgentCommandAcked, domain.AgentCommandRunning:
@@ -633,7 +816,7 @@ func (r *Runner) stalledTasks(ctx context.Context, openChildren []backend.IssueD
 	return stalled
 }
 
-func (r *Runner) spawnWorker(ctx context.Context, task backend.IssueData) error {
+func (r *Runner) spawnWorker(ctx context.Context, task backend.IssueData, taskRun *domain.TaskRun) error {
 	r.ensureWriters()
 	name := WorkerName(r.prefix, task.ID)
 	if r.dryRun {
@@ -650,8 +833,36 @@ func (r *Runner) spawnWorker(ctx context.Context, task backend.IssueData) error 
 			return err
 		}
 	}
-	if err := r.enqueueWorkerStart(ctx, name, task); err != nil {
+	if taskRun != nil {
+		status := domain.TaskRunStarting
+		agentID := agent.Name
+		claimActor := agent.Name
+		parent := r.orchestratorSessionID
+		_, _ = r.store.TaskRuns().Update(ctx, r.workspace, taskRun.TaskRunID, store.TaskRunUpdate{
+			Status:          &status,
+			AgentID:         &agentID,
+			ClaimActor:      &claimActor,
+			ParentSessionID: &parent,
+		})
+	}
+	commandID, err := r.enqueueWorkerStart(ctx, name, task, taskRun)
+	if err != nil {
 		return err
+	}
+	if taskRun != nil && commandID != "" {
+		status := domain.TaskRunStarting
+		_, _ = r.store.TaskRuns().Update(ctx, r.workspace, taskRun.TaskRunID, store.TaskRunUpdate{
+			Status:    &status,
+			CommandID: &commandID,
+		})
+		_, _ = r.store.RunEvents().Append(ctx, store.RunEventAppend{
+			WorkspaceKey:  r.workspace,
+			WorkflowRunID: r.workflowRunID,
+			TaskRunID:     taskRun.TaskRunID,
+			Type:          "task_run_dispatched",
+			Message:       "derived daemon start command from task run",
+			Data:          mustJSON(map[string]string{"agent_id": name, "command_id": commandID, "work_item_id": task.ID}),
+		})
 	}
 	r.writef("[epic-run] spawned %s -> %s (%s)\n", name, task.ID, task.Title)
 	return nil
@@ -691,26 +902,33 @@ func (r *Runner) createOrLoadWorkerAgent(ctx context.Context, name string) (*dom
 	return agent, nil
 }
 
-func (r *Runner) enqueueWorkerStart(ctx context.Context, name string, task backend.IssueData) error {
+func (r *Runner) enqueueWorkerStart(ctx context.Context, name string, task backend.IssueData, taskRun *domain.TaskRun) (string, error) {
 	if r.store.AgentCommands() == nil {
 		r.writef("[epic-run] spawned %s for %s (%s) - no command channel, agent will pick task via Ready())\n", name, task.ID, task.Title)
-		return nil
+		return "", nil
 	}
 
 	payload := map[string]string{"task_id": task.ID}
 	if r.orchestratorSessionID != "" {
 		payload["parent_session_id"] = r.orchestratorSessionID
 	}
-	if _, err := r.store.AgentCommands().Create(ctx, store.AgentCommandCreate{
+	if r.workflowRunID != "" {
+		payload["workflow_run_id"] = r.workflowRunID
+	}
+	if taskRun != nil {
+		payload["task_run_id"] = taskRun.TaskRunID
+	}
+	cmd, err := r.store.AgentCommands().Create(ctx, store.AgentCommandCreate{
 		WorkspaceKey:  r.workspace,
 		TargetAgentID: name,
 		TargetNodeID:  r.targetNodeID,
 		Type:          "start",
 		Payload:       payload,
-	}); err != nil {
-		return fmt.Errorf("enqueue start command for %s: %w", name, err)
+	})
+	if err != nil {
+		return "", fmt.Errorf("enqueue start command for %s: %w", name, err)
 	}
-	return nil
+	return cmd.CommandID, nil
 }
 
 func (r *Runner) ensureLocalWorkerWorktrees(ctx context.Context, agent domain.Agent) error {
@@ -783,6 +1001,14 @@ func (r *Runner) writeln(args ...any) {
 func (r *Runner) errorf(format string, args ...any) {
 	r.ensureWriters()
 	_, _ = fmt.Fprintf(r.errOut, format, args...)
+}
+
+func mustJSON(v any) json.RawMessage {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return nil
+	}
+	return raw
 }
 
 // WorkerName derives a deterministic agent name from prefix + task ID.

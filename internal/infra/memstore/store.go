@@ -34,6 +34,7 @@ type Store struct {
 	commands   *agentCommandStore
 	roles      *roleStore
 	daemon     *daemonStore
+	workflow   *workflowStore
 }
 
 // New constructs an empty in-memory store for tests.
@@ -57,6 +58,7 @@ func New() *Store {
 		commands:   newAgentCommandStore(),
 		roles:      newRoleStore(),
 		daemon:     newDaemonStore(),
+		workflow:   newWorkflowStore(),
 	}
 }
 
@@ -114,6 +116,30 @@ func (s *Store) Roles() store.RoleStore { return s.roles }
 
 // Daemon returns the DaemonProfileStore.
 func (s *Store) Daemon() store.DaemonProfileStore { return s.daemon }
+
+func (s *Store) DefinitionVersions() store.DefinitionVersionStore {
+	return &definitionVersionStore{core: s.workflow}
+}
+
+func (s *Store) WorkflowDefinitions() store.WorkflowDefinitionStore {
+	return &workflowDefinitionStore{core: s.workflow}
+}
+
+func (s *Store) WorkflowRuns() store.WorkflowRunStore { return &workflowRunStore{core: s.workflow} }
+
+func (s *Store) TaskRuns() store.TaskRunStore { return &taskRunStore{core: s.workflow} }
+
+func (s *Store) RunEvents() store.RunEventStore { return &runEventStore{core: s.workflow} }
+
+func (s *Store) RuntimeProfiles() store.RuntimeProfileStore {
+	return &runtimeProfileStore{core: s.workflow}
+}
+
+func (s *Store) RouteBindings() store.RouteBindingStore { return &routeBindingStore{core: s.workflow} }
+
+func (s *Store) TriggerBindings() store.TriggerBindingStore {
+	return &triggerBindingStore{core: s.workflow}
+}
 
 // Close is a no-op — memory has no resources to release.
 func (s *Store) Close() error { return nil }

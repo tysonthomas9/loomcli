@@ -119,4 +119,20 @@ func (s commandPollerTestStore) AgentCommands() store.AgentCommandStore {
 }
 func (s commandPollerTestStore) Roles() store.RoleStore           { return nil }
 func (s commandPollerTestStore) Daemon() store.DaemonProfileStore { return nil }
-func (s commandPollerTestStore) Close() error                     { return nil }
+func (s commandPollerTestStore) DefinitionVersions() store.DefinitionVersionStore {
+	return nil
+}
+func (s commandPollerTestStore) WorkflowDefinitions() store.WorkflowDefinitionStore {
+	return nil
+}
+func (s commandPollerTestStore) WorkflowRuns() store.WorkflowRunStore { return nil }
+func (s commandPollerTestStore) TaskRuns() store.TaskRunStore         { return nil }
+func (s commandPollerTestStore) RunEvents() store.RunEventStore       { return nil }
+func (s commandPollerTestStore) RuntimeProfiles() store.RuntimeProfileStore {
+	return nil
+}
+func (s commandPollerTestStore) RouteBindings() store.RouteBindingStore { return nil }
+func (s commandPollerTestStore) TriggerBindings() store.TriggerBindingStore {
+	return nil
+}
+func (s commandPollerTestStore) Close() error { return nil }

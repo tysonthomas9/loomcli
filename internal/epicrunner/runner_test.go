@@ -220,7 +220,7 @@ func TestSpawnWorkerPinsConfiguredBackend(t *testing.T) {
 	}
 	task := backend.IssueData{ID: "EPIC-2", Title: "worker backend", Status: "open"}
 
-	if err := r.spawnWorker(ctx, task); err != nil {
+	if err := r.spawnWorker(ctx, task, nil); err != nil {
 		t.Fatalf("spawnWorker() error = %v", err)
 	}
 
@@ -231,6 +231,58 @@ func TestSpawnWorkerPinsConfiguredBackend(t *testing.T) {
 	}
 	if agent.Backend != "codex" {
 		t.Fatalf("worker backend = %q, want codex", agent.Backend)
+	}
+}
+
+func TestReconcileOnceDispatchesTaskRunMetadata(t *testing.T) {
+	ctx := context.Background()
+	st := newTestStore(t)
+	task := backend.IssueData{ID: "EPIC-2", Title: "task run dispatch", Status: "open"}
+	ib := clitest.NewMockIssueBackend()
+	ib.ReadyResult = []backend.IssueData{task}
+	ib.ListResult = []backend.IssueData{task}
+
+	r := &Runner{
+		store:                 st,
+		ib:                    ib,
+		workspace:             "ws",
+		parent:                "EPIC-1",
+		prefix:                "epic-1",
+		role:                  "task",
+		maxConcurrency:        1,
+		orchestratorSessionID: "lead-session-1",
+		workflowRunID:         "wrun-1",
+	}
+
+	result, err := r.ReconcileOnce(ctx)
+	if err != nil {
+		t.Fatalf("ReconcileOnce error = %v", err)
+	}
+	if result.DispatchedCount != 1 {
+		t.Fatalf("DispatchedCount = %d, want 1", result.DispatchedCount)
+	}
+
+	runs, err := st.TaskRuns().List(ctx, "ws", store.TaskRunFilter{WorkflowRunID: "wrun-1", WorkItemID: task.ID})
+	if err != nil {
+		t.Fatalf("list task runs: %v", err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("task runs = %d, want 1", len(runs))
+	}
+	taskRun := runs[0]
+	if taskRun.Status != domain.TaskRunStarting || taskRun.AgentID == "" || taskRun.CommandID == "" {
+		t.Fatalf("task run = %+v, want starting with agent and command", taskRun)
+	}
+
+	cmds, err := st.AgentCommands().List(ctx, "ws", store.AgentCommandFilter{TargetAgentID: taskRun.AgentID})
+	if err != nil {
+		t.Fatalf("list agent commands: %v", err)
+	}
+	if len(cmds) != 1 {
+		t.Fatalf("commands = %d, want 1", len(cmds))
+	}
+	if cmds[0].Payload["workflow_run_id"] != "wrun-1" || cmds[0].Payload["task_run_id"] != taskRun.TaskRunID {
+		t.Fatalf("command payload = %#v, want workflow and task run ids", cmds[0].Payload)
 	}
 }
 

@@ -31,5 +31,13 @@ type Store interface {
 	AgentCommands() AgentCommandStore
 	Roles() RoleStore
 	Daemon() DaemonProfileStore
+	DefinitionVersions() DefinitionVersionStore
+	WorkflowDefinitions() WorkflowDefinitionStore
+	WorkflowRuns() WorkflowRunStore
+	TaskRuns() TaskRunStore
+	RunEvents() RunEventStore
+	RuntimeProfiles() RuntimeProfileStore
+	RouteBindings() RouteBindingStore
+	TriggerBindings() TriggerBindingStore
 	io.Closer
 }

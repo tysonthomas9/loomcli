@@ -51,6 +51,14 @@ func WrapStoreWithTracing(inner store.Store) store.Store {
 		agentCommands:        &tracedAgentCommandStore{inner: inner.AgentCommands()},
 		roles:                &tracedRoleStore{inner: inner.Roles()},
 		daemon:               &tracedDaemonStore{inner: inner.Daemon()},
+		defVersions:          inner.DefinitionVersions(),
+		workflowDefs:         inner.WorkflowDefinitions(),
+		workflowRuns:         inner.WorkflowRuns(),
+		taskRuns:             inner.TaskRuns(),
+		runEvents:            inner.RunEvents(),
+		runtimes:             inner.RuntimeProfiles(),
+		routes:               inner.RouteBindings(),
+		triggers:             inner.TriggerBindings(),
 	}
 }
 
@@ -68,6 +76,14 @@ type tracedStore struct {
 	agentCommands        *tracedAgentCommandStore
 	roles                *tracedRoleStore
 	daemon               *tracedDaemonStore
+	defVersions          store.DefinitionVersionStore
+	workflowDefs         store.WorkflowDefinitionStore
+	workflowRuns         store.WorkflowRunStore
+	taskRuns             store.TaskRunStore
+	runEvents            store.RunEventStore
+	runtimes             store.RuntimeProfileStore
+	routes               store.RouteBindingStore
+	triggers             store.TriggerBindingStore
 }
 
 func (t *tracedStore) Workspaces() store.WorkspaceStore       { return t.workspaces }
@@ -90,6 +106,22 @@ func (t *tracedStore) AgentCommands() store.AgentCommandStore {
 }
 func (t *tracedStore) Roles() store.RoleStore           { return t.roles }
 func (t *tracedStore) Daemon() store.DaemonProfileStore { return t.daemon }
+func (t *tracedStore) DefinitionVersions() store.DefinitionVersionStore {
+	return t.defVersions
+}
+func (t *tracedStore) WorkflowDefinitions() store.WorkflowDefinitionStore {
+	return t.workflowDefs
+}
+func (t *tracedStore) WorkflowRuns() store.WorkflowRunStore { return t.workflowRuns }
+func (t *tracedStore) TaskRuns() store.TaskRunStore         { return t.taskRuns }
+func (t *tracedStore) RunEvents() store.RunEventStore       { return t.runEvents }
+func (t *tracedStore) RuntimeProfiles() store.RuntimeProfileStore {
+	return t.runtimes
+}
+func (t *tracedStore) RouteBindings() store.RouteBindingStore { return t.routes }
+func (t *tracedStore) TriggerBindings() store.TriggerBindingStore {
+	return t.triggers
+}
 
 func (t *tracedStore) Close() error {
 	if c, ok := t.inner.(io.Closer); ok {
