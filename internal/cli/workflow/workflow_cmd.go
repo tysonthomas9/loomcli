@@ -27,6 +27,9 @@ var (
 	workflowLogsJSON bool
 	workflowShowJSON bool
 	workflowListJSON bool
+
+	workflowWithActiveWorkspace = cmdstore.WithActiveWorkspace
+	workflowWriteJSON           = cmdstore.WriteJSON
 )
 
 var workflowCmd = &cobra.Command{
@@ -84,7 +87,7 @@ func init() {
 }
 
 func runWorkflowList(_ *cobra.Command, _ []string) error {
-	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
+	return workflowWithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
 		if err := workflowpkg.EnsureBuiltins(ctx, h.Store, ws); err != nil {
 			return err
 		}
@@ -93,7 +96,7 @@ func runWorkflowList(_ *cobra.Command, _ []string) error {
 			return fmt.Errorf("list workflows: %w", err)
 		}
 		if workflowListJSON {
-			return cmdstore.WriteJSON(defs)
+			return workflowWriteJSON(defs)
 		}
 		if len(defs) == 0 {
 			fmt.Printf("No workflow definitions in workspace %s\n", ws)
@@ -111,7 +114,7 @@ func runWorkflowRun(_ *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
+	return workflowWithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
 		ib := cli.DefaultIssueBackend()
 		if ib == nil {
 			return errors.New("no issue backend available")
@@ -136,9 +139,9 @@ func runWorkflowRun(_ *cobra.Command, args []string) error {
 		}
 		if workflowJSON {
 			if result != nil {
-				return cmdstore.WriteJSON(result)
+				return workflowWriteJSON(result)
 			}
-			return cmdstore.WriteJSON(run)
+			return workflowWriteJSON(run)
 		}
 		fmt.Printf("Workflow run %s %s (%s)\n", run.RunID, run.Status, run.WorkflowName)
 		if result != nil {
@@ -149,13 +152,13 @@ func runWorkflowRun(_ *cobra.Command, args []string) error {
 }
 
 func runWorkflowShow(_ *cobra.Command, args []string) error {
-	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
+	return workflowWithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
 		run, err := h.Store.WorkflowRuns().Get(ctx, ws, args[0])
 		if err != nil {
 			return fmt.Errorf("get workflow run: %w", err)
 		}
 		if workflowShowJSON {
-			return cmdstore.WriteJSON(run)
+			return workflowWriteJSON(run)
 		}
 		fmt.Printf("Run:        %s\n", run.RunID)
 		fmt.Printf("Workflow:   %s@%s\n", run.WorkflowName, run.WorkflowVersion)
@@ -174,13 +177,13 @@ func runWorkflowShow(_ *cobra.Command, args []string) error {
 }
 
 func runWorkflowLogs(_ *cobra.Command, args []string) error {
-	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
+	return workflowWithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
 		events, err := h.Store.RunEvents().List(ctx, ws, store.RunEventFilter{WorkflowRunID: args[0]})
 		if err != nil {
 			return fmt.Errorf("list workflow events: %w", err)
 		}
 		if workflowLogsJSON {
-			return cmdstore.WriteJSON(events)
+			return workflowWriteJSON(events)
 		}
 		for _, ev := range events {
 			fmt.Printf("%03d %-24s %s\n", ev.EventIndex, ev.Type, ev.Message)
@@ -190,7 +193,7 @@ func runWorkflowLogs(_ *cobra.Command, args []string) error {
 }
 
 func runWorkflowCancel(_ *cobra.Command, args []string) error {
-	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
+	return workflowWithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
 		now := time.Now().UTC()
 		finishedAt := &now
 		status := domain.WorkflowRunCancelled
