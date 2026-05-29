@@ -40,15 +40,15 @@ func TestSafeRepoCheckoutPathRejectsPathNames(t *testing.T) {
 	}
 }
 
-func TestEnsureRepoLocalCheckoutNoopsWithoutLocalWorkspacePath(t *testing.T) {
+func TestEnsureRepoLocalCheckoutRejectsMissingLocalWorkspacePath(t *testing.T) {
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
 
 	path, cloned, err := ensureRepoLocalCheckout(context.Background(), "TEST", "hello-world", "https://github.com/octocat/Hello-World")
-	if err != nil {
-		t.Fatalf("ensureRepoLocalCheckout returned error: %v", err)
+	if err == nil {
+		t.Fatalf("ensureRepoLocalCheckout returned path=%q cloned=%t, want local path error", path, cloned)
 	}
-	if path != "" || cloned {
-		t.Fatalf("path=%q cloned=%t, want no-op", path, cloned)
+	if !strings.Contains(err.Error(), "has no local path") {
+		t.Fatalf("ensureRepoLocalCheckout error = %q, want local path message", err)
 	}
 }
 
