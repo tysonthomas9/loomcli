@@ -22,6 +22,7 @@ const (
 	codexAppServerReadyTimeout   = 10 * time.Second
 	codexThreadDiscoveryTimeout  = 45 * time.Second
 	codexThreadDiscoveryInterval = 500 * time.Millisecond
+	codexRuntimeStoreTimeout     = 5 * time.Second
 )
 
 type CodexLeadRuntimeConfig struct {
@@ -72,7 +73,7 @@ func RunCodexLeadRuntime(ctx context.Context, cfg CodexLeadRuntimeConfig) error 
 	if err := waitForCodexAppServer(ctx, endpoint, appErr); err != nil {
 		_ = stopCodexAppServer(appCmd, appErr, cancelApp)
 		runtime.Status = RuntimeStatusFailed
-		_ = UpdateCodexRuntimeMetadata(context.Background(), cfg.Store, cfg.Workspace, cfg.SessionID, runtime)
+		_ = persistCodexRuntimeMetadata(ctx, cfg, runtime)
 		return err
 	}
 
@@ -87,8 +88,18 @@ func RunCodexLeadRuntime(ctx context.Context, cfg CodexLeadRuntimeConfig) error 
 		cfg.Logger.Debug("codex app-server shutdown failed", "err", err)
 	}
 	runtime.Status = RuntimeStatusDisconnected
-	_ = UpdateCodexRuntimeMetadata(context.Background(), cfg.Store, cfg.Workspace, cfg.SessionID, runtime)
+	_ = persistCodexRuntimeMetadata(ctx, cfg, runtime)
 	return tuiErr
+}
+
+func persistCodexRuntimeMetadata(ctx context.Context, cfg CodexLeadRuntimeConfig, runtime CodexRuntimeMetadata) error {
+	persistCtx, cancelPersist := codexRuntimeStoreContext(ctx)
+	defer cancelPersist()
+	return UpdateCodexRuntimeMetadata(persistCtx, cfg.Store, cfg.Workspace, cfg.SessionID, runtime)
+}
+
+func codexRuntimeStoreContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), codexRuntimeStoreTimeout)
 }
 
 func startCodexAppServer(
@@ -254,7 +265,9 @@ func discoverCodexLeadThread(ctx context.Context, cfg CodexLeadRuntimeConfig, ru
 		case <-ctx.Done():
 			return
 		case <-deadline.C:
-			_ = MarkAssignmentDeliveryAttempt(context.Background(), cfg.Store, cfg.Workspace, cfg.SessionID, "codex thread discovery timed out")
+			persistCtx, cancelPersist := codexRuntimeStoreContext(ctx)
+			_ = MarkAssignmentDeliveryAttempt(persistCtx, cfg.Store, cfg.Workspace, cfg.SessionID, "codex thread discovery timed out")
+			cancelPersist()
 			return
 		case <-ticker.C:
 			thread, err := findNewestCodexThread(ctx, runtime.Endpoint, cfg.WorkDir, runtimeStartedAt)
@@ -263,9 +276,11 @@ func discoverCodexLeadThread(ctx context.Context, cfg CodexLeadRuntimeConfig, ru
 			}
 			runtime.ThreadID = thread.ID
 			runtime.Status = thread.Status.RuntimeStatus()
-			if err := UpdateCodexRuntimeMetadata(context.Background(), cfg.Store, cfg.Workspace, cfg.SessionID, runtime); err != nil {
+			persistCtx, cancelPersist := codexRuntimeStoreContext(ctx)
+			if err := UpdateCodexRuntimeMetadata(persistCtx, cfg.Store, cfg.Workspace, cfg.SessionID, runtime); err != nil {
 				cfg.Logger.Debug("failed to persist codex thread metadata", "err", err)
 			}
+			cancelPersist()
 			return
 		}
 	}
