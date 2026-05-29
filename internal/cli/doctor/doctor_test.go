@@ -160,9 +160,7 @@ func TestCheckGitRepo(t *testing.T) {
 func TestCheckProjectConfig(t *testing.T) {
 	t.Run("no loom.yaml", func(t *testing.T) {
 		dir := t.TempDir()
-		defer ResetWorkspaceRuntimeDirCache()
-		ResetWorkspaceRuntimeDirCache()
-		setupWorkspaceConfig(t, &LoomConfig{DefaultWorkspace: "test", Workspaces: map[string]WorkspaceConfig{"test": {Path: dir}}})
+		setupProjectConfigRuntimeDir(t, dir)
 
 		result := checkProjectConfig()
 		if result.Status != StatusPass {
@@ -175,9 +173,7 @@ func TestCheckProjectConfig(t *testing.T) {
 
 	t.Run("invalid loom.yaml ignored by FleetDB config", func(t *testing.T) {
 		dir := t.TempDir()
-		defer ResetWorkspaceRuntimeDirCache()
-		ResetWorkspaceRuntimeDirCache()
-		setupWorkspaceConfig(t, &LoomConfig{DefaultWorkspace: "test", Workspaces: map[string]WorkspaceConfig{"test": {Path: dir}}})
+		setupProjectConfigRuntimeDir(t, dir)
 
 		// Write invalid YAML with a missing colon on line 3
 		invalidYAML := "agents:\n  - worktree: falcon\n    role plan\n  - worktree: nova\n"
@@ -193,9 +189,7 @@ func TestCheckProjectConfig(t *testing.T) {
 
 	t.Run("valid loom.yaml", func(t *testing.T) {
 		dir := t.TempDir()
-		defer ResetWorkspaceRuntimeDirCache()
-		ResetWorkspaceRuntimeDirCache()
-		setupWorkspaceConfig(t, &LoomConfig{DefaultWorkspace: "test", Workspaces: map[string]WorkspaceConfig{"test": {Path: dir}}})
+		setupProjectConfigRuntimeDir(t, dir)
 
 		yamlContent := `agents:
   - worktree: falcon
@@ -212,6 +206,15 @@ func TestCheckProjectConfig(t *testing.T) {
 			t.Errorf("expected pass for valid loom.yaml, got %v: %s", result.Status, result.Summary)
 		}
 	})
+}
+
+func setupProjectConfigRuntimeDir(t *testing.T, dir string) {
+	t.Helper()
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	t.Setenv("LOOM_WORKSPACE", "")
+	t.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", dir)
+	ResetWorkspaceRuntimeDirCache()
+	t.Cleanup(func() { ResetWorkspaceRuntimeDirCache() })
 }
 
 func TestCheckGlobalConfig(t *testing.T) {
@@ -1099,17 +1102,9 @@ func TestCheckStaleSignalFiles_SkipsSubdirectories(t *testing.T) {
 // Must not be used with t.Parallel() since it mutates global state.
 func setupRuntimeDirForTest(t *testing.T, dir string) {
 	t.Helper()
-	// setupWorkspaceConfig stores under the uppercased key; the production
-	// resolveActiveWorkspaceName requires LOOM_WORKSPACE (or --workspace)
-	// to pick the active workspace.
-	t.Setenv("LOOM_WORKSPACE", "TEST")
+	t.Setenv("LOOM_WORKSPACE", "")
+	t.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", dir)
 	ResetWorkspaceRuntimeDirCache()
-	setupWorkspaceConfig(t, &LoomConfig{
-		DefaultWorkspace: "test",
-		Workspaces: map[string]WorkspaceConfig{
-			"test": {Path: dir},
-		},
-	})
 	t.Cleanup(func() { ResetWorkspaceRuntimeDirCache() })
 }
 

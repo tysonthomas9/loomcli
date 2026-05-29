@@ -10,6 +10,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/clitest"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
+	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -46,17 +47,15 @@ func setupWorkspaceConfigInDir(t *testing.T, configDir string, cfg *config.LoomC
 	t.Helper()
 	t.Setenv("LOOM_CONFIG_DIR", configDir)
 	t.Setenv("LOOM_FLEET_DB_ACTOR", "test")
+	t.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", "")
 	config.InvalidateConfigCache()
 	cli.ResetWorkspaceRuntimeDirCache()
 	oldResolver := cli.TestingResetDefaultResolver()
 
 	ctx := context.Background()
-	handle, err := bootstrap.OpenStore(ctx, configDir, nil)
-	if err != nil {
-		t.Fatalf("open fleet-db store: %v", err)
-	}
+	st := memstore.New()
 	t.Cleanup(func() {
-		_ = handle.Close()
+		_ = st.Close()
 		cli.TestingSetDefaultResolver(oldResolver)
 		config.InvalidateConfigCache()
 		cli.ResetWorkspaceRuntimeDirCache()
@@ -75,7 +74,7 @@ func setupWorkspaceConfigInDir(t *testing.T, configDir string, cfg *config.LoomC
 	for _, name := range names {
 		ws := cfg.Workspaces[name]
 		key := strings.ToUpper(name)
-		if _, err := handle.Store.Workspaces().Create(ctx, store.WorkspaceCreate{
+		if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{
 			Key:           key,
 			Name:          name,
 			DefaultBranch: firstRepoDefaultBranch(ws.Repos),
@@ -89,7 +88,7 @@ func setupWorkspaceConfigInDir(t *testing.T, configDir string, cfg *config.LoomC
 			if sourceRepoID == "" {
 				sourceRepoID = repo.Name
 			}
-			if _, err := handle.Store.Repos().Create(ctx, store.RepoCreate{
+			if _, err := st.Repos().Create(ctx, store.RepoCreate{
 				WorkspaceKey:  key,
 				Name:          repo.Name,
 				Remote:        repo.Remote,
@@ -110,7 +109,7 @@ func setupWorkspaceConfigInDir(t *testing.T, configDir string, cfg *config.LoomC
 	if cfg.DefaultWorkspace != "" {
 		t.Setenv("LOOM_WORKSPACE", strings.ToUpper(cfg.DefaultWorkspace))
 	}
-	if _, err := config.TestingPrimeConfigCacheFromStore(ctx, handle.Store); err != nil {
+	if _, err := config.TestingPrimeConfigCacheFromStore(ctx, st); err != nil {
 		t.Fatalf("prime config cache: %v", err)
 	}
 	cli.ResetWorkspaceRuntimeDirCache()
