@@ -6,16 +6,21 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
+
+const repoCheckoutHealTimeout = 2 * time.Minute
 
 // BuildActiveWorkspaceData materializes the active workspace topology as
 // an *ops.WorkspaceData using the supplied Store. The "active" workspace
@@ -56,11 +61,9 @@ func BuildWorkspaceDataForKey(ctx context.Context, s store.Store, key string) (*
 	if err != nil {
 		return nil, err
 	}
-	wsPath := resolveWorkspacePath(ws.Key)
-	if wsPath == "" {
-		if path, err := EnsureWorkspacePath(ws.Key); err == nil {
-			wsPath = path
-		}
+	wsPath, pathErr := EnsureWorkspacePath(ws.Key)
+	if pathErr != nil {
+		wsPath = resolveWorkspacePath(ws.Key)
 	}
 	repos, groups, err := loadRepos(ctx, s, ws.Key)
 	if err != nil {
@@ -152,14 +155,7 @@ func loadRepos(ctx context.Context, s store.Store, wsKey string) ([]ops.Workspac
 		if remote == "" {
 			remote = "origin"
 		}
-		// Best-effort path resolution: state cache should have an entry.
-		repoPath := resolveRepoPath(wsKey, r.Name)
-		if repoPath == "" && wsRoot != "" {
-			candidate := filepath.Join(wsRoot, r.Name)
-			if validWorkspaceDir(candidate) {
-				repoPath = candidate
-			}
-		}
+		repoPath := ensureRepoCheckout(ctx, wsKey, wsRoot, r)
 		out = append(out, ops.WorkspaceRepo{
 			Name:          r.Name,
 			Path:          repoPath,
@@ -178,6 +174,55 @@ func loadRepos(ctx context.Context, s store.Store, wsKey string) ([]ops.Workspac
 	}
 	sort.Strings(groups)
 	return out, groups, nil
+}
+
+func ensureRepoCheckout(ctx context.Context, wsKey, wsRoot string, r *domain.Repo) string {
+	if r == nil {
+		return ""
+	}
+	if cached := resolveRepoPath(wsKey, r.Name); validRepoCheckout(cached) {
+		return cached
+	}
+	if wsRoot == "" {
+		return ""
+	}
+	target, err := localworkspace.RepoCheckoutPath(wsRoot, r.Name)
+	if err != nil {
+		slog.Warn("failed to resolve local repo checkout path", "workspace", wsKey, "repo", r.Name, "err", err)
+		return ""
+	}
+	if validRepoCheckout(target) {
+		if err := localworkspace.RememberRepoPath(wsKey, r.Name, target); err != nil {
+			slog.Warn("failed to cache discovered local repo checkout", "workspace", wsKey, "repo", r.Name, "path", target, "err", err)
+		}
+		return target
+	}
+	if strings.TrimSpace(r.RemoteURL) == "" {
+		return ""
+	}
+	if info, err := os.Stat(target); err == nil {
+		if !info.IsDir() {
+			slog.Warn("cannot self-heal repo checkout because target exists and is not a directory", "workspace", wsKey, "repo", r.Name, "path", target)
+			return ""
+		}
+		slog.Warn("cannot self-heal repo checkout because target directory is not a git checkout", "workspace", wsKey, "repo", r.Name, "path", target)
+		return ""
+	} else if err != nil && !os.IsNotExist(err) {
+		slog.Warn("failed to inspect local repo checkout target", "workspace", wsKey, "repo", r.Name, "path", target, "err", err)
+		return ""
+	}
+
+	cloneCtx, cancel := context.WithTimeout(ctx, repoCheckoutHealTimeout)
+	defer cancel()
+	if err := localworkspace.CloneRepoTo(cloneCtx, strings.TrimSpace(r.RemoteURL), target); err != nil {
+		slog.Warn("failed to self-heal local repo checkout", "workspace", wsKey, "repo", r.Name, "remote_url", r.RemoteURL, "path", target, "err", err)
+		_ = os.RemoveAll(target)
+		return ""
+	}
+	if err := localworkspace.RememberRepoPath(wsKey, r.Name, target); err != nil {
+		slog.Warn("failed to cache self-healed repo checkout", "workspace", wsKey, "repo", r.Name, "path", target, "err", err)
+	}
+	return target
 }
 
 func loadAgents(ctx context.Context, s store.Store, wsKey string) ([]ops.WorkspaceAgentInfo, error) {
@@ -293,6 +338,14 @@ func validWorkspaceDir(path string) bool {
 	}
 	info, err := os.Stat(path)
 	return err == nil && info.IsDir()
+}
+
+func validRepoCheckout(path string) bool {
+	if strings.TrimSpace(path) == "" {
+		return false
+	}
+	_, err := os.Stat(filepath.Join(path, ".git"))
+	return err == nil
 }
 
 func defaultWorkspacePath(key string) (string, error) {
