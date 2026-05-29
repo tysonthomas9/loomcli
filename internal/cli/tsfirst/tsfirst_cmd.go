@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -15,10 +16,14 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	defspkg "github.com/tysonthomas9/loomcli/internal/defs"
+	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/store"
+	workflowpkg "github.com/tysonthomas9/loomcli/internal/workflow"
 )
 
 var (
@@ -38,6 +43,12 @@ var (
 	applyInstance string
 	applyStart    bool
 	applyJSON     bool
+
+	runDir   string
+	runInput string
+	runWait  bool
+	runOnce  bool
+	runJSON  bool
 )
 
 var addCmd = &cobra.Command{
@@ -94,6 +105,13 @@ var applyWorkflowCmd = &cobra.Command{
 	RunE:  runApplyWorkflow,
 }
 
+var runCmd = &cobra.Command{
+	Use:   "run <WORKFLOW>",
+	Short: "Apply and run a TypeScript-defined workflow",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runTypeScriptWorkflowCommand,
+}
+
 func init() {
 	addCmd.PersistentFlags().StringVar(&addDir, "dir", ".", "Directory containing the Loom TypeScript project")
 	addCmd.PersistentFlags().BoolVar(&addJSON, "json", false, "JSON output")
@@ -114,10 +132,17 @@ func init() {
 	applyCmd.Flags().BoolVar(&applyStart, "start", false, "Set desired state to running and queue a start command")
 	applyCmd.AddCommand(applyWorkflowCmd)
 
+	runCmd.Flags().StringVar(&runDir, "dir", ".", "Directory containing the Loom TypeScript project")
+	runCmd.Flags().StringVar(&runInput, "input", "{}", "Workflow input JSON")
+	runCmd.Flags().BoolVar(&runWait, "wait", false, "Poll until the workflow reaches a terminal state")
+	runCmd.Flags().BoolVar(&runOnce, "once", true, "Run one reconcile pass for constrained built-in workflows")
+	runCmd.Flags().BoolVar(&runJSON, "json", false, "JSON output")
+
 	cli.RegisterCommand(addCmd)
 	cli.RegisterCommand(checkCmd)
 	cli.RegisterCommand(connectCmd)
 	cli.RegisterCommand(applyCmd)
+	cli.RegisterCommand(runCmd)
 }
 
 func runAddAgent(_ *cobra.Command, args []string) error {
@@ -415,6 +440,15 @@ type applyWorkflowResult struct {
 	Summary   string `json:"summary"`
 }
 
+type workflowRunResult struct {
+	Workspace string                        `json:"workspace"`
+	Workflow  string                        `json:"workflow"`
+	Version   string                        `json:"version"`
+	Summary   string                        `json:"summary"`
+	Run       *domain.WorkflowRun           `json:"run"`
+	Builtin   *workflowpkg.BuiltinRunResult `json:"builtin,omitempty"`
+}
+
 func runApply(_ *cobra.Command, args []string) error {
 	plan, err := defspkg.Load(applyDir)
 	if err != nil {
@@ -486,6 +520,102 @@ func runApplyWorkflow(_ *cobra.Command, args []string) error {
 		}
 		return nil
 	})
+}
+
+func runTypeScriptWorkflowCommand(_ *cobra.Command, args []string) error {
+	plan, err := defspkg.Load(runDir)
+	if err != nil {
+		return err
+	}
+	workflow, ok := defspkg.FindWorkflow(plan, args[0])
+	if !ok {
+		return fmt.Errorf("workflow definition %q not found", args[0])
+	}
+	input, err := parseWorkflowInput(runInput)
+	if err != nil {
+		return err
+	}
+	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
+		result, err := runTypeScriptWorkflow(ctx, h.Store, cli.DefaultIssueBackend(), ws, actorName(), plan, workflow, input, runOnce, runWait)
+		if err != nil {
+			return err
+		}
+		if runJSON {
+			return cmdstore.WriteJSON(result)
+		}
+		fmt.Printf("Workflow run %s %s (%s@%s)\n", result.Run.RunID, result.Run.Status, result.Workflow, result.Version)
+		fmt.Printf("Applied TypeScript workflow to workspace %s\n", result.Workspace)
+		if result.Builtin != nil {
+			fmt.Printf("ready=%d open=%d blocked=%d ensured=%d\n", result.Builtin.ReadyCount, result.Builtin.OpenCount, result.Builtin.BlockedCount, len(result.Builtin.TaskRuns))
+		}
+		return nil
+	})
+}
+
+func runTypeScriptWorkflow(ctx context.Context, st store.Store, ib backend.IssueBackend, workspace, actor string, plan *defspkg.Plan, workflow defspkg.WorkflowModule, input json.RawMessage, once, wait bool) (*workflowRunResult, error) {
+	if err := defspkg.Apply(ctx, st, workspace, actor, plan); err != nil {
+		return nil, err
+	}
+	run, err := workflowpkg.CreateOrResumeRun(ctx, st, workspace, workflow.Name, input, actor)
+	if err != nil {
+		return nil, fmt.Errorf("create workflow run: %w", err)
+	}
+	var builtin *workflowpkg.BuiltinRunResult
+	if once {
+		if ib == nil {
+			return nil, errors.New("no issue backend available")
+		}
+		builtin, err = workflowpkg.RunOnce(ctx, st, ib, run)
+		if err != nil {
+			return nil, fmt.Errorf("run workflow: %w", err)
+		}
+		run = builtin.Run
+	}
+	if wait {
+		run, err = waitTypeScriptWorkflow(ctx, st, workspace, run.RunID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return &workflowRunResult{
+		Workspace: workspace,
+		Workflow:  workflow.Name,
+		Version:   workflow.Version,
+		Summary:   defspkg.Summary(plan),
+		Run:       run,
+		Builtin:   builtin,
+	}, nil
+}
+
+func parseWorkflowInput(s string) (json.RawMessage, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		s = "{}"
+	}
+	var tmp any
+	if err := json.Unmarshal([]byte(s), &tmp); err != nil {
+		return nil, fmt.Errorf("--input must be valid JSON: %w", err)
+	}
+	return json.RawMessage(s), nil
+}
+
+func waitTypeScriptWorkflow(ctx context.Context, st store.Store, workspace, runID string) (*domain.WorkflowRun, error) {
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for {
+		run, err := st.WorkflowRuns().Get(ctx, workspace, runID)
+		if err != nil {
+			return nil, err
+		}
+		if !domain.WorkflowRunStatusLive(run.Status) {
+			return run, nil
+		}
+		select {
+		case <-ctx.Done():
+			return run, ctx.Err()
+		case <-ticker.C:
+		}
+	}
 }
 
 func envForConnect(path string) ([]string, map[string]string, error) {

@@ -10,8 +10,13 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/cli/clitest"
 	defspkg "github.com/tysonthomas9/loomcli/internal/defs"
+	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
@@ -156,6 +161,70 @@ func TestRunInteractiveConnectProcessesPromptLines(t *testing.T) {
 	}
 }
 
+func TestRunTypeScriptWorkflowAppliesAndRunsBuiltin(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	path, err := defspkg.ScaffoldWorkflow(root, "epic-runner")
+	if err != nil {
+		t.Fatalf("ScaffoldWorkflow() error = %v", err)
+	}
+	plan, err := defspkg.Load(root)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	workflow, ok := defspkg.FindWorkflow(plan, "epic-runner")
+	if !ok {
+		t.Fatalf("FindWorkflow() did not find epic-runner in %+v", plan.Workflows)
+	}
+
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TSRUN", Name: "TypeScript Run"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	ready := backend.IssueData{ID: "TASK-2", Title: "Build composer", Status: "open"}
+	ib := clitest.NewMockIssueBackend()
+	ib.ReadyResult = []backend.IssueData{ready}
+	ib.BlockedResult = nil
+	ib.ListResult = []backend.IssueData{ready}
+
+	input := json.RawMessage(`{"parentId":"EPIC-1","role":"task","maxConcurrency":1}`)
+	result, err := runTypeScriptWorkflow(ctx, st, ib, "TSRUN", "test", plan, workflow, input, true, false)
+	if err != nil {
+		t.Fatalf("runTypeScriptWorkflow() error = %v", err)
+	}
+	if result.Workflow != "epic-runner" || result.Version != workflow.Version {
+		t.Fatalf("result = %+v, want epic-runner@%s", result, workflow.Version)
+	}
+	if result.Run == nil || result.Run.Status != domain.WorkflowRunWaiting {
+		t.Fatalf("run = %+v, want waiting workflow run", result.Run)
+	}
+	if result.Builtin == nil || len(result.Builtin.TaskRuns) != 1 {
+		t.Fatalf("builtin = %+v, want one ensured task run", result.Builtin)
+	}
+
+	def, err := st.WorkflowDefinitions().Get(ctx, "TSRUN", "epic-runner")
+	if err != nil {
+		t.Fatalf("workflow definition not applied: %v", err)
+	}
+	if def.Version != workflow.Version || def.SourceRef != path {
+		t.Fatalf("workflow definition = %+v, want TypeScript source %s@%s", def, path, workflow.Version)
+	}
+	taskRuns, err := st.TaskRuns().List(ctx, "TSRUN", store.TaskRunFilter{WorkflowRunID: result.Run.RunID, WorkItemID: ready.ID})
+	if err != nil {
+		t.Fatalf("list task runs: %v", err)
+	}
+	if len(taskRuns) != 1 || taskRuns[0].Status != domain.TaskRunQueued || taskRuns[0].RoleName != "task" {
+		t.Fatalf("taskRuns = %+v, want one queued task role run", taskRuns)
+	}
+	events, err := st.RunEvents().List(ctx, "TSRUN", store.RunEventFilter{WorkflowRunID: result.Run.RunID})
+	if err != nil {
+		t.Fatalf("list run events: %v", err)
+	}
+	if !hasRunEvent(events, "workflow_ts_reconciled") || !hasRunEvent(events, "task_run_ensured") {
+		t.Fatalf("events = %+v, want TypeScript reconcile and task-run evidence", events)
+	}
+}
+
 type envCheckBackend struct{}
 
 func (envCheckBackend) Name() string { return "envcheck" }
@@ -188,4 +257,13 @@ export default createAgent({
 	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
 		t.Fatalf("write agent: %v", err)
 	}
+}
+
+func hasRunEvent(events []*domain.RunEvent, typ string) bool {
+	for _, event := range events {
+		if event != nil && event.Type == typ {
+			return true
+		}
+	}
+	return false
 }
