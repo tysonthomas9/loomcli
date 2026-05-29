@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/tysonthomas9/loomcli/internal/cli/config"
 )
 
 func TestGeneratePlanningPrompt(t *testing.T) {
@@ -1168,17 +1170,14 @@ func TestResolveActiveWorkspace_NoConfig(t *testing.T) {
 		t.Fatalf("failed to create temp config dir: %v", err)
 	}
 
-	// Save and restore original env var
-	origVal, origSet := os.LookupEnv("LOOM_CONFIG_DIR")
+	t.Setenv("LOOM_CONFIG_DIR", configDir)
+	t.Setenv("LOOM_WORKSPACE", "")
+	config.InvalidateConfigCache()
+	ResetWorkspaceRuntimeDirCache()
 	t.Cleanup(func() {
-		if origSet {
-			os.Setenv("LOOM_CONFIG_DIR", origVal)
-		} else {
-			os.Unsetenv("LOOM_CONFIG_DIR")
-		}
+		config.InvalidateConfigCache()
+		ResetWorkspaceRuntimeDirCache()
 	})
-
-	os.Setenv("LOOM_CONFIG_DIR", configDir)
 
 	ws, err := ResolveActiveWorkspace()
 	if err != nil {

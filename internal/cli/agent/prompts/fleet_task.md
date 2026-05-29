@@ -70,7 +70,7 @@ Procedure:
 3. Change status to blocked:
    loom data update <id> --status blocked
 4. Commit any partial work (if meaningful):
-   git add -A && git commit -m "WIP: <task-id> - blocked on <reason>"
+   git add <files> && git commit -m "WIP: <task-id> - blocked on <reason>"
    git push origin HEAD
 5. Signal completion: loom complete
 6. EXIT immediately
@@ -95,7 +95,7 @@ Procedure:
    design + concrete next-iteration direction + evidence>"
 2. Commit any salvageable infrastructure (tests, helpers, params) with
    feature flags OFF so a future implementation can re-enable them:
-   git add -A && git commit -m "WIP: <task-id> - design revision pending"
+   git add <files> && git commit -m "WIP: <task-id> - design revision pending"
    git push origin HEAD
 3. Flip the task back to the planner:
    loom data update <id> --status open --labels +needs-revision
@@ -115,9 +115,9 @@ the planner is cheaper to re-engage than a human, and 8b is non-terminal
   - Otherwise run the manual test command(s) from the task design or acceptance criteria
 - If the gate or manual test fails, fix ALL failures and re-run until it passes
 - Do NOT commit or push with failing tests
+- Stage and commit: git add <files> && git commit -m "<brief description> (<task-id>)"
+- Integrate to the workspace target branch: loom push "{{ .AgentName }}"
 - Run 'loom data close <id> --reason "Completed with tests and code review"'
-- Stage and commit: git add -A && git commit -m "<brief description> (<task-id>)"
-- Push: git push origin HEAD
 - Signal completion: loom complete
 
 ### CRITICAL: STOP
