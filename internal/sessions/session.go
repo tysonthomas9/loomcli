@@ -22,3 +22,13 @@ func (s *Session) SyncLatestCodexRollout(workDir string, since time.Time) (strin
 	}
 	return s.store.SyncLatestCodexRollout(s.Meta.SessionID, workDir, since)
 }
+
+// SyncLatestClaudeTranscript mirrors the matching Claude Code transcript into
+// this session. claudeUUID is the session UUID captured from the agent's
+// stream output (empty falls back to newest-by-mtime).
+func (s *Session) SyncLatestClaudeTranscript(workDir, claudeUUID string, since time.Time) (string, error) {
+	if s == nil || s.store == nil {
+		return "", nil
+	}
+	return s.store.SyncLatestClaudeTranscript(s.Meta.SessionID, workDir, claudeUUID, since)
+}

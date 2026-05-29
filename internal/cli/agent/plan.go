@@ -158,7 +158,7 @@ func runPlanDaemon(deps *cli.Deps, worktreePath, agentName string) {
 	invokeErr := deps.Agent.InvokeNonInteractive(worktreePath, prompt, agentName, shutdown, collector)
 
 	emitTaskLifecycleResult(agentName, worktreePath, startedAt, invokeErr)
-	finalizeAgentSession(sess, worktreePath, beforeRef, invokeErr)
+	finalizeAgentSession(sess, worktreePath, beforeRef, invokeErr, collector, startedAt, planParentID)
 
 	if invokeErr != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", invokeErr)
@@ -220,7 +220,7 @@ func runPlanSingleTask(deps *cli.Deps, worktreePath, agentName string, routerChe
 	startedAt := time.Now()
 	invokeErr := deps.Agent.InvokeInteractive(worktreePath, prompt, agentName)
 	emitTaskLifecycleResult(agentName, worktreePath, startedAt, invokeErr)
-	finalizeAgentSession(sess, worktreePath, beforeRef, invokeErr)
+	finalizeAgentSession(sess, worktreePath, beforeRef, invokeErr, nil, startedAt, planParentID)
 
 	if invokeErr != nil {
 		fmt.Fprintf(os.Stderr, "Error running agent: %v\n", invokeErr)
@@ -263,30 +263,71 @@ func createAgentSession(agentName, parentID, prompt, phase string) *sessions.Ses
 	return sess
 }
 
-// finalizeAgentSession finalizes a session after agent invocation.
-func finalizeAgentSession(sess *sessions.Session, worktreePath, beforeRef string, invokeErr error) {
+// finalizeAgentSession finalizes a session after agent invocation: computes
+// diff stats and mirrors the backend's native transcript (via WithWorktree),
+// and — for self-created sessions with no Claude Code hooks (the fleet /
+// daemon-mode path) — records token usage from the live collector into both
+// the session metadata and the workspace usage.jsonl. A nil collector
+// (interactive single-task mode) still finalizes; the transcript is mirrored
+// via the WithWorktree backend branch.
+func finalizeAgentSession(sess *sessions.Session, worktreePath, beforeRef string, invokeErr error, collector *usage.Collector, startedAt time.Time, epicID string) {
 	if sess == nil {
 		return
 	}
-	exitCode := 0
-	if invokeErr != nil {
-		exitCode = 1
-		var exitErr *exec.ExitError
-		if errors.As(invokeErr, &exitErr) {
-			exitCode = exitErr.ExitCode()
-		}
-	}
+	exitCode := exitCodeFromErr(invokeErr)
 	taskID := ""
 	if info, lockErr := cli.ReadLockFile(worktreePath); lockErr == nil {
 		taskID = info.TaskID
 	}
-	_, _ = sessionfinalize.WithWorktree(sess, sessionfinalize.WithWorktreeOptions{
-		WorktreePath: worktreePath,
-		BeforeRef:    beforeRef,
-		TaskID:       taskID,
-		ExitCode:     exitCode,
-	})
+
+	// GetLastCapturedSessionID returns the Claude session UUID scraped from the
+	// run's stream output (empty for interactive runs or non-Claude backends),
+	// letting WithWorktree resolve the native transcript exactly.
+	opts := sessionfinalize.WithWorktreeOptions{
+		WorktreePath:    worktreePath,
+		BeforeRef:       beforeRef,
+		TaskID:          taskID,
+		ExitCode:        exitCode,
+		ClaudeSessionID: backends.GetLastCapturedSessionID(),
+	}
+	if collector != nil {
+		rec := collector.Finalize(taskID, epicID, startedAt, time.Now(), exitCode)
+		opts.InputTokens = rec.InputTokens
+		opts.OutputTokens = rec.OutputTokens
+		opts.CacheReadTokens = rec.CacheReadTokens
+		opts.CacheWriteTokens = rec.CacheWriteTokens
+		opts.EstimatedCostUSD = rec.EstimatedCostUSD
+		appendUsageRecord(rec)
+	}
+
+	_, _ = sessionfinalize.WithWorktree(sess, opts)
 	backends.ClearActiveSessionEnv()
+}
+
+// exitCodeFromErr derives a process exit code from an invocation error.
+func exitCodeFromErr(invokeErr error) int {
+	if invokeErr == nil {
+		return 0
+	}
+	var exitErr *exec.ExitError
+	if errors.As(invokeErr, &exitErr) {
+		return exitErr.ExitCode()
+	}
+	return 1
+}
+
+// appendUsageRecord persists a usage record to the workspace usage.jsonl so the
+// cost-aggregation UI reflects daemon-mode runs, which bypass the auto-mode
+// loop's own recordSessionUsage. Best-effort: failures are logged, not fatal.
+func appendUsageRecord(rec usage.SessionUsage) {
+	store, err := usage.NewStore(cli.GetWorkspaceRuntimeDir())
+	if err != nil {
+		log.Printf("[agent] Warning: usage store unavailable: %v", err)
+		return
+	}
+	if err := store.Append(rec); err != nil {
+		log.Printf("[agent] Warning: failed to record usage: %v", err)
+	}
 }
 
 // emitTaskClaimedFromEnv emits a TaskClaimed event before InvokeInteractive
