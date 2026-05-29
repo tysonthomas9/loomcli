@@ -91,16 +91,25 @@ func (s *sessionServiceImpl) storesForWorkspace(ctx context.Context, wsID string
 	return stores, nil
 }
 
+// storeOwningSession returns the first store whose metadata exists for
+// sessionID (i.e. the store that owns the session on disk), or nil.
+func storeOwningSession(stores []*sessions.Store, sessionID string) *sessions.Store {
+	for _, st := range stores {
+		if _, err := st.LoadMetadata(sessionID); err == nil {
+			return st
+		}
+	}
+	return nil
+}
+
 // findStoreForSession returns the first store that has metadata for the given session.
 func (s *sessionServiceImpl) findStoreForSession(ctx context.Context, wsID, sessionID string) (*sessions.Store, error) {
 	stores, err := s.storesForWorkspace(ctx, wsID)
 	if err != nil {
 		return nil, err
 	}
-	for _, store := range stores {
-		if _, err := store.LoadMetadata(sessionID); err == nil {
-			return store, nil
-		}
+	if st := storeOwningSession(stores, sessionID); st != nil {
+		return st, nil
 	}
 	return nil, service.ErrNotFound("session not found")
 }
@@ -149,6 +158,13 @@ func (s *sessionServiceImpl) controlPlaneTaskSessions(ctx context.Context, wsID,
 	if err != nil {
 		return nil, err
 	}
+	// Resolve local stores once so artifact presence reflects on-disk truth, not the
+	// metadata keys (stamped at creation/completion). Best-effort: a remote-only
+	// deployment may have no local store, in which case we fall back to metadata.
+	var stores []*sessions.Store
+	if len(records) > 0 {
+		stores, _ = s.storesForWorkspace(ctx, wsID)
+	}
 	items := make([]service.SessionListItem, 0, len(records))
 	for _, rec := range records {
 		if rec == nil {
@@ -158,16 +174,34 @@ func (s *sessionServiceImpl) controlPlaneTaskSessions(ctx context.Context, wsID,
 			SessionRecord: sessionRecordFromAgentSession(rec),
 			IsActive:      isActiveAgentSession(rec.Status),
 		}
-		if rec.Metadata != nil {
-			item.HasTranscript = rec.Metadata["transcript_path"] != ""
-			item.HasDiff = rec.Metadata["diff_path"] != "" || rec.Metadata["diff_artifact_id"] != ""
-		}
+		fillControlPlaneArtifactFlags(&item, stores, rec)
 		items = append(items, item)
 	}
 	sort.Slice(items, func(i, j int) bool {
 		return items[i].StartedAt.After(items[j].StartedAt)
 	})
 	return items, nil
+}
+
+// fillControlPlaneArtifactFlags sets HasTranscript/HasDiff from on-disk truth when a
+// local store owns the session. The control-plane metadata keys (transcript_path is
+// stamped at creation, diff_path at completion) only record expected paths and don't
+// prove the artifact exists, so they're used only as a fallback for remote-only
+// sessions that have no local store.
+func fillControlPlaneArtifactFlags(item *service.SessionListItem, stores []*sessions.Store, rec *domain.AgentSession) {
+	if st := storeOwningSession(stores, rec.SessionID); st != nil {
+		if info, err := os.Stat(st.NativeTranscriptPath(rec.SessionID)); err == nil && info.Size() > 0 {
+			item.HasTranscript = true
+		}
+		if diff, err := st.ReadDiff(rec.SessionID); err == nil && diff != "" {
+			item.HasDiff = true
+		}
+		return
+	}
+	if rec.Metadata != nil {
+		item.HasTranscript = rec.Metadata["transcript_path"] != ""
+		item.HasDiff = rec.Metadata["diff_path"] != "" || rec.Metadata["diff_artifact_id"] != ""
+	}
 }
 
 func sessionRecordFromAgentSession(rec *domain.AgentSession) sessions.SessionRecord {
