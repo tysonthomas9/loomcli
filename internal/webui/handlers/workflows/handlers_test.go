@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
-	"github.com/tysonthomas9/loomcli/internal/cli/clitest"
 	defspkg "github.com/tysonthomas9/loomcli/internal/defs"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
@@ -35,9 +34,7 @@ func TestWorkflowRunAPICreatesInspectableRun(t *testing.T) {
 	}
 
 	ready := backend.IssueData{ID: "TASK-2", Title: "Build composer", Status: "open"}
-	ib := clitest.NewMockIssueBackend()
-	ib.ReadyResult = []backend.IssueData{ready}
-	ib.ListResult = []backend.IssueData{ready}
+	ib := testIssueBackend{ready: []backend.IssueData{ready}, list: []backend.IssueData{ready}}
 	mux := workflowMux(st, ib)
 
 	listRec := httptest.NewRecorder()
@@ -148,4 +145,27 @@ func hasRunEvent(events []domain.RunEvent, typ string) bool {
 		}
 	}
 	return false
+}
+
+type testIssueBackend struct {
+	backend.IssueBackend
+	ready   []backend.IssueData
+	blocked []backend.IssueData
+	list    []backend.IssueData
+}
+
+func (b testIssueBackend) Ready(context.Context, backend.ReadyOpts) ([]backend.IssueData, error) {
+	return b.ready, nil
+}
+
+func (b testIssueBackend) Blocked(context.Context, backend.BlockedOpts) ([]backend.IssueData, error) {
+	return b.blocked, nil
+}
+
+func (b testIssueBackend) List(context.Context, backend.ListOpts) ([]backend.IssueData, error) {
+	return b.list, nil
+}
+
+func (b testIssueBackend) BackendName() string {
+	return "test"
 }

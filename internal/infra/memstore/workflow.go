@@ -416,6 +416,7 @@ func (s *workflowStore) updateWorkflowRun(_ context.Context, ws, runID string, p
 	return cloneWorkflowRun(run), nil
 }
 
+//nolint:funlen // The in-memory store mirrors the full TaskRun record shape for test fidelity.
 func (s *workflowStore) ensureTaskRun(_ context.Context, in store.TaskRunEnsure) (*domain.TaskRun, error) {
 	if in.WorkspaceKey == "" || in.WorkflowRunID == "" || in.WorkItemID == "" || in.RoleName == "" {
 		return nil, fmt.Errorf("workspace_key + workflow_run_id + work_item_id + role_name required: %w", domain.ErrInvalid)
@@ -517,6 +518,7 @@ func (s *workflowStore) listTaskRuns(_ context.Context, ws string, filter store.
 	return limitTaskRuns(out, filter.Limit), nil
 }
 
+//nolint:funlen // Patch application is deliberately explicit for each persisted TaskRun field.
 func (s *workflowStore) updateTaskRun(_ context.Context, ws, taskRunID string, patch store.TaskRunUpdate) (*domain.TaskRun, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

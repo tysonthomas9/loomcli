@@ -94,6 +94,7 @@ func runDefsApply(_ *cobra.Command, _ []string) error {
 	})
 }
 
+//nolint:gocognit,cyclop,funlen // Plan output intentionally groups several definition kinds in one stable CLI view.
 func printPlan(plan *defspkg.Plan) {
 	fmt.Printf("Definition plan for %s\n", plan.Root)
 	if len(plan.Agents) == 0 && len(plan.Workflows) == 0 && len(plan.Runtimes) == 0 && len(plan.Skills) == 0 {

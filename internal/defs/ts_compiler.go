@@ -19,7 +19,7 @@ func loadWithTypeScriptCompiler(root string) (*Plan, error) {
 	}
 	defer func() { _ = os.RemoveAll(compilerDir) }()
 
-	cmd := exec.Command("node", "--no-warnings", compiler, root)
+	cmd := exec.Command("node", "--no-warnings", compiler, root) //nolint:gosec // Compiler path is generated under a private temp dir by writeCompiler.
 	cmd.Dir = root
 	out, err := cmd.CombinedOutput()
 	if err != nil {

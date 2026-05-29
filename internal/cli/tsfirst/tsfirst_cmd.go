@@ -240,31 +240,43 @@ func runConnect(_ *cobra.Command, args []string) error {
 		Message:  connectMessage,
 	}
 	if opts.Message != "" {
-		result, err := runLocalConnect(context.Background(), opts)
-		if err != nil {
-			return err
-		}
-		return printConnectResult(result, connectJSON)
+		return runOneConnectMessage(opts)
 	}
 	messages, interactive, err := stdinMessages()
 	if err != nil {
 		return err
 	}
 	if len(messages) == 0 {
-		if interactive && !connectJSON {
-			return runInteractiveConnect(context.Background(), opts, os.Stdin, os.Stdout)
-		}
-		result, err := connectReady(opts)
-		if err != nil {
-			return err
-		}
-		if connectJSON {
-			return cmdstore.WriteJSON(result)
-		}
-		fmt.Printf("Connected to %s instance %s session %s (backend=%s model=%s)\n", result.Agent, result.Instance, result.Session, fallback(result.Backend, "default"), fallback(result.Model, "default"))
-		fmt.Println("Local session ready. Pass --message or pipe prompts on stdin to run turns.")
-		return nil
+		return runConnectReady(opts, interactive)
 	}
+	return runConnectMessages(opts, messages)
+}
+
+func runOneConnectMessage(opts connectOptions) error {
+	result, err := runLocalConnect(context.Background(), opts)
+	if err != nil {
+		return err
+	}
+	return printConnectResult(result, connectJSON)
+}
+
+func runConnectReady(opts connectOptions, interactive bool) error {
+	if interactive && !connectJSON {
+		return runInteractiveConnect(context.Background(), opts, os.Stdin, os.Stdout)
+	}
+	result, err := connectReady(opts)
+	if err != nil {
+		return err
+	}
+	if connectJSON {
+		return cmdstore.WriteJSON(result)
+	}
+	fmt.Printf("Connected to %s instance %s session %s (backend=%s model=%s)\n", result.Agent, result.Instance, result.Session, fallback(result.Backend, "default"), fallback(result.Model, "default"))
+	fmt.Println("Local session ready. Pass --message or pipe prompts on stdin to run turns.")
+	return nil
+}
+
+func runConnectMessages(opts connectOptions, messages []string) error {
 	results := make([]connectResult, 0, len(messages))
 	for _, message := range messages {
 		opts.Message = message
@@ -295,17 +307,19 @@ func runInteractiveConnect(ctx context.Context, opts connectOptions, in io.Reade
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "Connected to %s instance %s session %s (backend=%s model=%s)\n", result.Agent, result.Instance, result.Session, fallback(result.Backend, "default"), fallback(result.Model, "default"))
-	if len(result.Env) > 0 {
-		fmt.Fprintf(out, "Env allowlist: %s\n", strings.Join(result.Env, ", "))
+	if err := printInteractiveConnectHeader(out, result); err != nil {
+		return err
 	}
-	fmt.Fprintln(out, "Enter one prompt per line. Ctrl-D, /exit, or /quit ends the session.")
 	scanner := bufio.NewScanner(in)
 	scanner.Buffer(make([]byte, 0, 64*1024), 10*1024*1024)
 	for {
-		fmt.Fprint(out, "> ")
+		if _, err := fmt.Fprint(out, "> "); err != nil {
+			return err
+		}
 		if !scanner.Scan() {
-			fmt.Fprintln(out)
+			if _, err := fmt.Fprintln(out); err != nil {
+				return err
+			}
 			break
 		}
 		message := strings.TrimSpace(scanner.Text())
@@ -320,12 +334,27 @@ func runInteractiveConnect(ctx context.Context, opts connectOptions, in io.Reade
 		if err != nil {
 			return err
 		}
-		fmt.Fprintf(out, "%s: %s\n", turn.Agent, turn.Response)
+		if _, err := fmt.Fprintf(out, "%s: %s\n", turn.Agent, turn.Response); err != nil {
+			return err
+		}
 	}
 	if err := scanner.Err(); err != nil {
 		return err
 	}
 	return nil
+}
+
+func printInteractiveConnectHeader(out io.Writer, result connectResult) error {
+	if _, err := fmt.Fprintf(out, "Connected to %s instance %s session %s (backend=%s model=%s)\n", result.Agent, result.Instance, result.Session, fallback(result.Backend, "default"), fallback(result.Model, "default")); err != nil {
+		return err
+	}
+	if len(result.Env) > 0 {
+		if _, err := fmt.Fprintf(out, "Env allowlist: %s\n", strings.Join(result.Env, ", ")); err != nil {
+			return err
+		}
+	}
+	_, err := fmt.Fprintln(out, "Enter one prompt per line. Ctrl-D, /exit, or /quit ends the session.")
+	return err
 }
 
 func runLocalConnect(ctx context.Context, opts connectOptions) (connectResult, error) {
@@ -839,7 +868,10 @@ func stdinMessages() ([]string, bool, error) {
 func localWorkDir(root string, agent defspkg.AgentModule) string {
 	for _, repo := range agent.Repos {
 		repo = strings.TrimSpace(repo)
-		if repo == "" || repo == "." {
+		if repo == "" {
+			continue
+		}
+		if repo == "." {
 			return root
 		}
 		if filepath.IsAbs(repo) {

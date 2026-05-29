@@ -10,7 +10,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
-	"github.com/tysonthomas9/loomcli/internal/events"
 )
 
 var claimCmd = &cobra.Command{
@@ -66,29 +65,6 @@ func runClaim(cmd *cobra.Command, args []string) {
 	fmt.Printf("Claimed task: %s\n", taskID)
 	if taskTitle != "" {
 		fmt.Printf("Title: %s\n", taskTitle)
-	}
-}
-
-// emitTaskClaimedEvent emits a task_claimed event via the process-wide
-// AgentEventBus singleton. The singleton is subscribed to otelexport, so this
-// emission produces a loom.task span under the active trace context.
-//
-// LOOM_EVENTS_DIR is honored by the singleton's lazy init in
-// cli.initAgentEventBus, so the previous fallback behavior is preserved.
-// When the bus is unavailable (mkdir failure on first use) emission is
-// skipped silently — same best-effort contract as before.
-func emitTaskClaimedEvent(taskID, taskTitle string) {
-	bus := cli.AgentEventBus()
-	if bus == nil {
-		return
-	}
-	agentName := os.Getenv("LOOM_AGENT_NAME")
-	evt, err := events.NewEvent(events.TaskClaimed, agentName, "", "", events.TaskClaimedData{TaskID: taskID, Title: taskTitle})
-	if err != nil {
-		return
-	}
-	if emitErr := bus.Emit(evt); emitErr != nil {
-		log.Printf("[claim] Failed to emit task_claimed event: %v", emitErr)
 	}
 }
 

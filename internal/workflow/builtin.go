@@ -133,6 +133,7 @@ func RunOnce(ctx context.Context, st store.Store, ib backend.IssueBackend, run *
 	}
 }
 
+//nolint:funlen // The built-in reconcile pass keeps query, ensure, and terminal-state updates in one readable flow.
 func runParentWorkItemsOnce(ctx context.Context, st store.Store, ib backend.IssueBackend, run *domain.WorkflowRun) (*BuiltinRunResult, error) {
 	if st == nil || st.TaskRuns() == nil || st.RunEvents() == nil {
 		return nil, fmt.Errorf("workflow stores not configured")
@@ -168,42 +169,9 @@ func runParentWorkItemsOnce(ctx context.Context, st store.Store, ib backend.Issu
 		}
 	}
 	capacity := input.MaxConcurrency - len(live)
-	created := make([]*domain.TaskRun, 0)
-	for _, child := range ready {
-		if capacity <= 0 {
-			break
-		}
-		if child.Status == "closed" || child.Status == "deferred" {
-			continue
-		}
-		if _, ok := liveWork[child.ID]; ok {
-			continue
-		}
-		tr, err := st.TaskRuns().Ensure(ctx, store.TaskRunEnsure{
-			WorkspaceKey:   run.WorkspaceKey,
-			WorkflowRunID:  run.RunID,
-			WorkItemID:     child.ID,
-			RoleName:       input.Role,
-			IdempotencyKey: "child:" + child.ID + ":role:" + input.Role,
-			Reason:         child.Title,
-			Metadata: map[string]string{
-				"parent_id":     input.ParentID,
-				"workflow_name": run.WorkflowName,
-			},
-		})
-		if err != nil {
-			return nil, fmt.Errorf("ensure task run for %s: %w", child.ID, err)
-		}
-		created = append(created, tr)
-		capacity--
-		_, _ = st.RunEvents().Append(ctx, store.RunEventAppend{
-			WorkspaceKey:  run.WorkspaceKey,
-			WorkflowRunID: run.RunID,
-			TaskRunID:     tr.TaskRunID,
-			Type:          "task_run_ensured",
-			Message:       "ensured child task run",
-			Data:          mustJSON(map[string]string{"work_item_id": child.ID, "role": input.Role}),
-		})
+	created, err := ensureReadyTaskRuns(ctx, st, run, input, ready, liveWork, capacity)
+	if err != nil {
+		return nil, err
 	}
 	result := &BuiltinRunResult{
 		Run:          run,
@@ -254,6 +222,56 @@ func runParentWorkItemsOnce(ctx context.Context, st store.Store, ib backend.Issu
 		Data:          mustJSON(map[string]any{"ready": len(ready), "open": openCount, "blocked": len(blocked)}),
 	})
 	return result, nil
+}
+
+func ensureReadyTaskRuns(ctx context.Context, st store.Store, run *domain.WorkflowRun, input ParentWorkItemsInput, ready []backend.IssueData, liveWork map[string]struct{}, capacity int) ([]*domain.TaskRun, error) {
+	created := make([]*domain.TaskRun, 0)
+	for _, child := range ready {
+		if capacity <= 0 {
+			break
+		}
+		if !shouldEnsureChild(child, liveWork) {
+			continue
+		}
+		tr, err := st.TaskRuns().Ensure(ctx, taskRunEnsure(run, input, child))
+		if err != nil {
+			return nil, fmt.Errorf("ensure task run for %s: %w", child.ID, err)
+		}
+		created = append(created, tr)
+		capacity--
+		_, _ = st.RunEvents().Append(ctx, store.RunEventAppend{
+			WorkspaceKey:  run.WorkspaceKey,
+			WorkflowRunID: run.RunID,
+			TaskRunID:     tr.TaskRunID,
+			Type:          "task_run_ensured",
+			Message:       "ensured child task run",
+			Data:          mustJSON(map[string]string{"work_item_id": child.ID, "role": input.Role}),
+		})
+	}
+	return created, nil
+}
+
+func shouldEnsureChild(child backend.IssueData, liveWork map[string]struct{}) bool {
+	if child.Status == "closed" || child.Status == "deferred" {
+		return false
+	}
+	_, alreadyLive := liveWork[child.ID]
+	return !alreadyLive
+}
+
+func taskRunEnsure(run *domain.WorkflowRun, input ParentWorkItemsInput, child backend.IssueData) store.TaskRunEnsure {
+	return store.TaskRunEnsure{
+		WorkspaceKey:   run.WorkspaceKey,
+		WorkflowRunID:  run.RunID,
+		WorkItemID:     child.ID,
+		RoleName:       input.Role,
+		IdempotencyKey: "child:" + child.ID + ":role:" + input.Role,
+		Reason:         child.Title,
+		Metadata: map[string]string{
+			"parent_id":     input.ParentID,
+			"workflow_name": run.WorkflowName,
+		},
+	}
 }
 
 func decodeParentInput(raw json.RawMessage) (ParentWorkItemsInput, error) {
