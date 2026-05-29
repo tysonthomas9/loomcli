@@ -626,6 +626,24 @@ func (s *Supervisor) completeControlPlaneAgentSession(ap *AgentProcess, input ag
 		}
 	}
 	s.releaseAssignedTaskClaim(ap, input.taskID)
+	s.deregisterWorker(ap)
+}
+
+// deregisterWorker removes the agent's fleet-db worker registration on exit,
+// keyed by the claim actor (ap.Entry.Worktree). This is the graceful fast path:
+// it collapses the common stop/drain case to instant board cleanup and releases
+// any issue lock the worker still holds. Best-effort and idempotent — the
+// server-side worker TTL + sweeper are the backstop for non-graceful death.
+func (s *Supervisor) deregisterWorker(ap *AgentProcess) {
+	if s.ControlStore == nil || s.WorkspaceID == "" || ap.Entry.Worktree == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), controlPlaneOperationTimeout)
+	defer cancel()
+	if err := s.ControlStore.Workers().Deregister(ctx, s.WorkspaceID, ap.Entry.Worktree); err != nil {
+		slog.Debug("supervisor worker deregister failed",
+			"workspace", s.WorkspaceID, "worker_id", ap.Entry.Worktree, "err", err)
+	}
 }
 
 // spawnAndWait spawns the agent and waits for it to exit. A spawn failure is
