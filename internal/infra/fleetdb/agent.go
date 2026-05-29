@@ -32,6 +32,11 @@ type agentWire struct {
 	DesiredState     string    `json:"desired_state,omitempty"`
 	CreatedAt        time.Time `json:"created_at"`
 	UpdatedAt        time.Time `json:"updated_at"`
+	// Derived, read-only liveness fields fleet-db computes from the
+	// session+lease join; passed through to domain.Agent, never sent on writes.
+	LiveStatus   string `json:"live_status,omitempty"`
+	ActiveTaskID string `json:"active_task_id,omitempty"`
+	ActivePhase  string `json:"active_phase,omitempty"`
 }
 
 func (a agentWire) toDomain() *domain.Agent {
@@ -54,6 +59,9 @@ func (a agentWire) toDomain() *domain.Agent {
 		DesiredState:     domain.AgentDesiredState(a.DesiredState),
 		CreatedAt:        a.CreatedAt,
 		UpdatedAt:        a.UpdatedAt,
+		LiveStatus:       domain.AgentLiveStatus(a.LiveStatus),
+		ActiveTaskID:     a.ActiveTaskID,
+		ActivePhase:      a.ActivePhase,
 	}
 }
 
