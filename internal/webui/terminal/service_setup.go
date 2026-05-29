@@ -2,6 +2,7 @@ package terminal
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"strings"
 	"time"
@@ -195,6 +196,9 @@ func (s *terminalServiceImpl) StartSetup(ctx context.Context, wsID string, req s
 	key := SessionKey{Workspace: wsID, Name: session}
 	created, err := runner.EnsureSession(key, setupTerminalCols, setupTerminalRows, setupShellArgv(command))
 	if err != nil {
+		if errors.Is(err, ErrWorkspaceNotRegistered) || errors.Is(err, ErrInvalidWorkspacePath) {
+			return nil, service.ErrUnavailable("workspace is not ready for terminals; re-add the workspace with a repository path")
+		}
 		return nil, service.ErrInternal("failed to start setup terminal", err)
 	}
 	if !created {

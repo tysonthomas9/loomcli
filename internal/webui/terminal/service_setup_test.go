@@ -2,6 +2,8 @@ package terminal
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -25,6 +27,7 @@ type setupWriteCall struct {
 type fakeSetupPTYSource struct {
 	alive       map[SessionKey]bool
 	created     bool
+	ensureErr   error
 	ensureCalls []setupEnsureCall
 	writeCalls  []setupWriteCall
 }
@@ -53,6 +56,9 @@ func (f *fakeSetupPTYSource) SessionCountFor(_ string) int { return len(f.alive)
 func (f *fakeSetupPTYSource) MaxSessions() int             { return 100 }
 func (f *fakeSetupPTYSource) EnsureSession(key SessionKey, _ uint16, _ uint16, argv []string) (bool, error) {
 	f.ensureCalls = append(f.ensureCalls, setupEnsureCall{key: key, argv: argv})
+	if f.ensureErr != nil {
+		return false, f.ensureErr
+	}
 	f.alive[key] = true
 	return f.created, nil
 }
@@ -140,6 +146,38 @@ func TestStartSetupWritesCommandIntoExistingSetupSession(t *testing.T) {
 	}
 	if result.Created {
 		t.Fatal("Created = true, want false for existing session")
+	}
+}
+
+func TestStartSetupReportsWorkspaceNotReadyForTerminal(t *testing.T) {
+	fake := newFakeSetupPTYSource(true)
+	fake.ensureErr = fmt.Errorf("%w: %q", ErrWorkspaceNotRegistered, "SLACK-UI")
+	svc, _ := newSetupTestSvc(t, fake)
+
+	_, err := svc.StartSetup(context.Background(), "SLACK-UI", service.TerminalSetupRequest{
+		Backend: "codex",
+		Action:  "test",
+	})
+	if err == nil {
+		t.Fatal("StartSetup unexpectedly succeeded")
+	}
+	var svcErr *service.ServiceError
+	if !errors.As(err, &svcErr) {
+		t.Fatalf("StartSetup error = %T %[1]v, want *service.ServiceError", err)
+	}
+	if svcErr.Kind != service.KindUnavailable {
+		t.Fatalf("error kind = %q, want %q", svcErr.Kind, service.KindUnavailable)
+	}
+	if !strings.Contains(svcErr.Message, "workspace is not ready for terminals") {
+		t.Fatalf("error message = %q", svcErr.Message)
+	}
+	if len(fake.writeCalls) != 0 {
+		t.Fatalf("WriteToSession calls = %d, want 0", len(fake.writeCalls))
+	}
+	if meta, getErr := svc.tabStore.Get(context.Background(), "SLACK-UI", "SLACK-UI--lead-shell-setup-codex"); getErr != nil {
+		t.Fatalf("Get setup tab: %v", getErr)
+	} else if meta != nil {
+		t.Fatalf("setup tab metadata persisted despite terminal failure: %+v", meta)
 	}
 }
 
