@@ -221,11 +221,14 @@ func runConnect(_ *cobra.Command, args []string) error {
 		}
 		return printConnectResult(result, connectJSON)
 	}
-	messages, err := stdinMessages()
+	messages, interactive, err := stdinMessages()
 	if err != nil {
 		return err
 	}
 	if len(messages) == 0 {
+		if interactive && !connectJSON {
+			return runInteractiveConnect(context.Background(), opts, os.Stdin, os.Stdout)
+		}
 		result, err := connectReady(opts)
 		if err != nil {
 			return err
@@ -258,6 +261,44 @@ func runConnect(_ *cobra.Command, args []string) error {
 	}
 	if connectJSON {
 		return cmdstore.WriteJSON(results)
+	}
+	return nil
+}
+
+func runInteractiveConnect(ctx context.Context, opts connectOptions, in io.Reader, out io.Writer) error {
+	result, err := connectReady(opts)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "Connected to %s instance %s session %s (backend=%s model=%s)\n", result.Agent, result.Instance, result.Session, fallback(result.Backend, "default"), fallback(result.Model, "default"))
+	if len(result.Env) > 0 {
+		fmt.Fprintf(out, "Env allowlist: %s\n", strings.Join(result.Env, ", "))
+	}
+	fmt.Fprintln(out, "Enter one prompt per line. Ctrl-D, /exit, or /quit ends the session.")
+	scanner := bufio.NewScanner(in)
+	scanner.Buffer(make([]byte, 0, 64*1024), 10*1024*1024)
+	for {
+		fmt.Fprint(out, "> ")
+		if !scanner.Scan() {
+			fmt.Fprintln(out)
+			break
+		}
+		message := strings.TrimSpace(scanner.Text())
+		if message == "" {
+			continue
+		}
+		if message == "/exit" || message == "/quit" {
+			break
+		}
+		opts.Message = message
+		turn, err := runLocalConnect(ctx, opts)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "%s: %s\n", turn.Agent, turn.Response)
+	}
+	if err := scanner.Err(); err != nil {
+		return err
 	}
 	return nil
 }
@@ -642,17 +683,17 @@ func localConnectPrompt(plan *defspkg.Plan, agent defspkg.AgentModule, instance,
 	return b.String()
 }
 
-func stdinMessages() ([]string, error) {
+func stdinMessages() ([]string, bool, error) {
 	info, err := os.Stdin.Stat()
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if info.Mode()&os.ModeCharDevice != 0 {
-		return nil, nil
+		return nil, true, nil
 	}
 	data, err := io.ReadAll(os.Stdin)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	lines := strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n")
 	out := make([]string, 0, len(lines))
@@ -662,7 +703,7 @@ func stdinMessages() ([]string, error) {
 			out = append(out, line)
 		}
 	}
-	return out, nil
+	return out, false, nil
 }
 
 func localWorkDir(root string, agent defspkg.AgentModule) string {

@@ -1,6 +1,7 @@
 package tsfirst
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -125,6 +126,33 @@ func TestRunLocalConnectLoadsEnvFileForBackend(t *testing.T) {
 	}
 	if got := os.Getenv("LOCAL_CONNECT_TOKEN"); got != "" {
 		t.Fatalf("LOCAL_CONNECT_TOKEN after run = %q, want restored empty value", got)
+	}
+}
+
+func TestRunInteractiveConnectProcessesPromptLines(t *testing.T) {
+	root := t.TempDir()
+	if _, err := defspkg.ScaffoldAgent(root, "hello-world"); err != nil {
+		t.Fatalf("ScaffoldAgent() error = %v", err)
+	}
+	var out bytes.Buffer
+	if err := runInteractiveConnect(context.Background(), connectOptions{
+		Dir:      root,
+		Agent:    "hello-world",
+		Instance: "local",
+		Session:  "interactive",
+	}, strings.NewReader("first\n\nsecond\n/quit\nignored\n"), &out); err != nil {
+		t.Fatalf("runInteractiveConnect() error = %v", err)
+	}
+	got := out.String()
+	if !strings.Contains(got, "Enter one prompt per line") || !strings.Contains(got, "hello-world: echo: first") || !strings.Contains(got, "hello-world: echo: second") {
+		t.Fatalf("interactive output = %q, want prompt loop and two echo responses", got)
+	}
+	turns, err := readLocalTurns(localTranscriptPath(root, "hello-world", "local", "interactive"))
+	if err != nil {
+		t.Fatalf("readLocalTurns() error = %v", err)
+	}
+	if len(turns) != 2 || turns[0].Message != "first" || turns[1].Message != "second" {
+		t.Fatalf("turns = %+v, want two persisted interactive turns before /quit", turns)
 	}
 }
 
