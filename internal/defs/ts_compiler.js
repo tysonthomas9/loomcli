@@ -186,7 +186,7 @@ function agentModule(file) {
   const hash = hashSource(data);
   const { value } = evaluateModule(file);
   if (!value || value.__loomType !== "agent") {
-    throw new Error(`${file}: default export must be defineAgent(...)`);
+    throw new Error(`${file}: default export must be defineAgent(...) or createAgent(...)`);
   }
   const rt = value.runtime || {};
   return {

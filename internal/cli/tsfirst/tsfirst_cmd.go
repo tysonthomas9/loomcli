@@ -45,6 +45,13 @@ var addAgentCmd = &cobra.Command{
 	RunE:  runAddAgent,
 }
 
+var addWorkflowCmd = &cobra.Command{
+	Use:   "workflow <NAME>",
+	Short: "Scaffold a TypeScript-defined Loom workflow",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runAddWorkflow,
+}
+
 var checkCmd = &cobra.Command{
 	Use:   "check",
 	Short: "Compile and validate TypeScript-first Loom definitions",
@@ -66,10 +73,17 @@ var applyCmd = &cobra.Command{
 	RunE:  runApply,
 }
 
+var applyWorkflowCmd = &cobra.Command{
+	Use:   "workflow <NAME>",
+	Short: "Apply a TypeScript-defined workflow into the active Loom workspace",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runApplyWorkflow,
+}
+
 func init() {
 	addCmd.PersistentFlags().StringVar(&addDir, "dir", ".", "Directory containing the Loom TypeScript project")
 	addCmd.PersistentFlags().BoolVar(&addJSON, "json", false, "JSON output")
-	addCmd.AddCommand(addAgentCmd)
+	addCmd.AddCommand(addAgentCmd, addWorkflowCmd)
 
 	checkCmd.Flags().StringVar(&checkDir, "dir", ".", "Directory containing the Loom TypeScript project")
 	checkCmd.Flags().BoolVar(&checkJSON, "json", false, "JSON output")
@@ -79,10 +93,11 @@ func init() {
 	connectCmd.Flags().StringVar(&connectMessage, "message", "", "One-shot message for non-interactive local connect")
 	connectCmd.Flags().BoolVar(&connectJSON, "json", false, "JSON output")
 
-	applyCmd.Flags().StringVar(&applyDir, "dir", ".", "Directory containing the Loom TypeScript project")
+	applyCmd.PersistentFlags().StringVar(&applyDir, "dir", ".", "Directory containing the Loom TypeScript project")
+	applyCmd.PersistentFlags().BoolVar(&applyJSON, "json", false, "JSON output")
 	applyCmd.Flags().StringVar(&applyInstance, "instance", "", "Durable agent instance name (default: agent definition name)")
 	applyCmd.Flags().BoolVar(&applyStart, "start", false, "Set desired state to running and queue a start command")
-	applyCmd.Flags().BoolVar(&applyJSON, "json", false, "JSON output")
+	applyCmd.AddCommand(applyWorkflowCmd)
 
 	cli.RegisterCommand(addCmd)
 	cli.RegisterCommand(checkCmd)
@@ -102,6 +117,22 @@ func runAddAgent(_ *cobra.Command, args []string) error {
 		})
 	}
 	fmt.Printf("Created TypeScript agent scaffold: %s\n", path)
+	fmt.Println("Next: loom check")
+	return nil
+}
+
+func runAddWorkflow(_ *cobra.Command, args []string) error {
+	path, err := defspkg.ScaffoldWorkflow(addDir, args[0])
+	if err != nil {
+		return err
+	}
+	if addJSON {
+		return cmdstore.WriteJSON(map[string]any{
+			"workflow": args[0],
+			"path":     path,
+		})
+	}
+	fmt.Printf("Created TypeScript workflow scaffold: %s\n", path)
 	fmt.Println("Next: loom check")
 	return nil
 }
@@ -184,6 +215,15 @@ type applyResult struct {
 	Summary   string `json:"summary"`
 }
 
+type applyWorkflowResult struct {
+	Workspace string `json:"workspace"`
+	Workflow  string `json:"workflow"`
+	Version   string `json:"version"`
+	Route     string `json:"route,omitempty"`
+	Trigger   string `json:"trigger,omitempty"`
+	Summary   string `json:"summary"`
+}
+
 func runApply(_ *cobra.Command, args []string) error {
 	plan, err := defspkg.Load(applyDir)
 	if err != nil {
@@ -217,6 +257,41 @@ func runApply(_ *cobra.Command, args []string) error {
 		fmt.Printf("Applied %s@%s to workspace %s as agent instance %s\n", result.Agent, result.Version, result.Workspace, result.Instance)
 		if applyStart {
 			fmt.Println("Queued start request; a running workspace daemon will pick it up.")
+		}
+		return nil
+	})
+}
+
+func runApplyWorkflow(_ *cobra.Command, args []string) error {
+	plan, err := defspkg.Load(applyDir)
+	if err != nil {
+		return err
+	}
+	workflow, ok := defspkg.FindWorkflow(plan, args[0])
+	if !ok {
+		return fmt.Errorf("workflow definition %q not found", args[0])
+	}
+	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
+		if err := defspkg.Apply(ctx, h.Store, ws, actorName(), plan); err != nil {
+			return err
+		}
+		result := applyWorkflowResult{
+			Workspace: ws,
+			Workflow:  workflow.Name,
+			Version:   workflow.Version,
+			Route:     workflow.RoutePath,
+			Trigger:   workflow.TriggerEvent,
+			Summary:   defspkg.Summary(plan),
+		}
+		if applyJSON {
+			return cmdstore.WriteJSON(result)
+		}
+		fmt.Printf("Applied workflow %s@%s to workspace %s\n", result.Workflow, result.Version, result.Workspace)
+		if result.Route != "" {
+			fmt.Printf("Route: POST %s\n", result.Route)
+		}
+		if result.Trigger != "" {
+			fmt.Printf("Trigger: %s\n", result.Trigger)
 		}
 		return nil
 	})

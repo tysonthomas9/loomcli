@@ -246,6 +246,18 @@ func FindAgent(plan *Plan, name string) (AgentModule, bool) {
 	return AgentModule{}, false
 }
 
+func FindWorkflow(plan *Plan, name string) (WorkflowModule, bool) {
+	if plan == nil {
+		return WorkflowModule{}, false
+	}
+	for _, workflow := range plan.Workflows {
+		if workflow.Name == name {
+			return workflow, true
+		}
+	}
+	return WorkflowModule{}, false
+}
+
 func ApplyAgentInstance(ctx context.Context, st store.Store, workspaceKey string, agent AgentModule, instanceName string, start bool) (*domain.Agent, error) {
 	if st == nil || st.Agents() == nil {
 		return nil, fmt.Errorf("agent store not configured")
