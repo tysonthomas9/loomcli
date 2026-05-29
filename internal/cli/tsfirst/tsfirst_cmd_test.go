@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -161,6 +162,110 @@ func TestRunInteractiveConnectProcessesPromptLines(t *testing.T) {
 	}
 }
 
+func TestScaffoldAndCheckCommands(t *testing.T) {
+	root := t.TempDir()
+	withTSFirstGlobals(t, func() {
+		addDir = root
+		addJSON = false
+		checkDir = root
+		checkJSON = false
+
+		if err := runAddAgent(nil, []string{"helper-agent"}); err != nil {
+			t.Fatalf("runAddAgent() error = %v", err)
+		}
+		if err := runAddWorkflow(nil, []string{"helper-flow"}); err != nil {
+			t.Fatalf("runAddWorkflow() error = %v", err)
+		}
+		if err := runAddSkill(nil, []string{"code-review"}); err != nil {
+			t.Fatalf("runAddSkill() error = %v", err)
+		}
+		if err := runCheck(nil, nil); err != nil {
+			t.Fatalf("runCheck() error = %v", err)
+		}
+	})
+	for _, path := range []string{
+		filepath.Join(root, ".loom", "agents", "helper-agent.ts"),
+		filepath.Join(root, ".loom", "workflows", "helper-flow.ts"),
+		filepath.Join(root, ".loom", "skills", "code-review", "SKILL.md"),
+	} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("expected scaffolded file %s: %v", path, err)
+		}
+	}
+}
+
+func TestConnectCommandWrappers(t *testing.T) {
+	root := t.TempDir()
+	if _, err := defspkg.ScaffoldAgent(root, "hello-world"); err != nil {
+		t.Fatalf("ScaffoldAgent() error = %v", err)
+	}
+	withTSFirstGlobals(t, func() {
+		connectJSON = false
+		if err := runOneConnectMessage(connectOptions{
+			Dir:      root,
+			Agent:    "hello-world",
+			Instance: "local",
+			Session:  "single",
+			Message:  "one",
+		}); err != nil {
+			t.Fatalf("runOneConnectMessage() error = %v", err)
+		}
+		if err := runConnectMessages(connectOptions{
+			Dir:      root,
+			Agent:    "hello-world",
+			Instance: "local",
+			Session:  "batch",
+		}, []string{"first", "second"}); err != nil {
+			t.Fatalf("runConnectMessages() error = %v", err)
+		}
+		if err := runConnectReady(connectOptions{
+			Dir:      root,
+			Agent:    "hello-world",
+			Instance: "local",
+			Session:  "ready",
+		}, false); err != nil {
+			t.Fatalf("runConnectReady() error = %v", err)
+		}
+	})
+	for session, want := range map[string]int{"single": 1, "batch": 2} {
+		turns, err := readLocalTurns(localTranscriptPath(root, "hello-world", "local", session))
+		if err != nil {
+			t.Fatalf("readLocalTurns(%s) error = %v", session, err)
+		}
+		if len(turns) != want {
+			t.Fatalf("session %s turns = %d, want %d", session, len(turns), want)
+		}
+	}
+}
+
+func TestTypeScriptCommandValidationBeforeStoreAccess(t *testing.T) {
+	root := t.TempDir()
+	if _, err := defspkg.ScaffoldAgent(root, "hello-world"); err != nil {
+		t.Fatalf("ScaffoldAgent() error = %v", err)
+	}
+	if _, err := defspkg.ScaffoldWorkflow(root, "epic-runner"); err != nil {
+		t.Fatalf("ScaffoldWorkflow() error = %v", err)
+	}
+	withTSFirstGlobals(t, func() {
+		applyDir = root
+		runDir = root
+		runInput = `{"parentId":`
+
+		if err := runApply(nil, []string{"missing-agent"}); err == nil || !strings.Contains(err.Error(), "missing-agent") {
+			t.Fatalf("runApply() error = %v, want missing-agent", err)
+		}
+		if err := runApplyWorkflow(nil, []string{"missing-flow"}); err == nil || !strings.Contains(err.Error(), "missing-flow") {
+			t.Fatalf("runApplyWorkflow() error = %v, want missing-flow", err)
+		}
+		if err := runTypeScriptWorkflowCommand(nil, []string{"missing-flow"}); err == nil || !strings.Contains(err.Error(), "missing-flow") {
+			t.Fatalf("runTypeScriptWorkflowCommand() error = %v, want missing-flow", err)
+		}
+		if err := runTypeScriptWorkflowCommand(nil, []string{"epic-runner"}); err == nil || !strings.Contains(err.Error(), "--input must be valid JSON") {
+			t.Fatalf("runTypeScriptWorkflowCommand() invalid input error = %v", err)
+		}
+	})
+}
+
 func TestRunTypeScriptWorkflowAppliesAndRunsBuiltin(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
@@ -225,6 +330,129 @@ func TestRunTypeScriptWorkflowAppliesAndRunsBuiltin(t *testing.T) {
 	}
 }
 
+func TestRunTypeScriptWorkflowCanCreateRunWithoutReconcile(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	if _, err := defspkg.ScaffoldWorkflow(root, "epic-runner"); err != nil {
+		t.Fatalf("ScaffoldWorkflow() error = %v", err)
+	}
+	plan, err := defspkg.Load(root)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	workflow, ok := defspkg.FindWorkflow(plan, "epic-runner")
+	if !ok {
+		t.Fatalf("FindWorkflow() did not find epic-runner")
+	}
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "NOWAIT", Name: "No Wait"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	input := json.RawMessage(`{"parentId":"EPIC-1"}`)
+	result, err := runTypeScriptWorkflow(ctx, st, nil, "NOWAIT", "test", plan, workflow, input, false, false)
+	if err != nil {
+		t.Fatalf("runTypeScriptWorkflow() error = %v", err)
+	}
+	if result.Run == nil || result.Run.Status != domain.WorkflowRunQueued || result.Builtin != nil {
+		t.Fatalf("result = %+v, want queued run without builtin reconcile", result)
+	}
+	completed := domain.WorkflowRunCompleted
+	if _, err := st.WorkflowRuns().Update(ctx, "NOWAIT", result.Run.RunID, store.WorkflowRunUpdate{Status: &completed}); err != nil {
+		t.Fatalf("complete workflow run: %v", err)
+	}
+	waited, err := waitTypeScriptWorkflow(ctx, st, "NOWAIT", result.Run.RunID)
+	if err != nil {
+		t.Fatalf("waitTypeScriptWorkflow() error = %v", err)
+	}
+	if waited.RunID != result.Run.RunID {
+		t.Fatalf("waited run = %+v, want %s", waited, result.Run.RunID)
+	}
+}
+
+func TestRunTypeScriptWorkflowRequiresIssueBackendWhenReconciling(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	if _, err := defspkg.ScaffoldWorkflow(root, "epic-runner"); err != nil {
+		t.Fatalf("ScaffoldWorkflow() error = %v", err)
+	}
+	plan, err := defspkg.Load(root)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	workflow, ok := defspkg.FindWorkflow(plan, "epic-runner")
+	if !ok {
+		t.Fatalf("FindWorkflow() did not find epic-runner")
+	}
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "NOIB", Name: "No Issue Backend"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	_, err = runTypeScriptWorkflow(ctx, st, nil, "NOIB", "test", plan, workflow, json.RawMessage(`{"parentId":"EPIC-1"}`), true, false)
+	if err == nil || !strings.Contains(err.Error(), "no issue backend") {
+		t.Fatalf("runTypeScriptWorkflow() error = %v, want no issue backend", err)
+	}
+}
+
+func TestParseWorkflowInputAndHelpers(t *testing.T) {
+	for _, input := range []string{"", "  ", `{"parentId":"EPIC-1"}`} {
+		got, err := parseWorkflowInput(input)
+		if err != nil {
+			t.Fatalf("parseWorkflowInput(%q) error = %v", input, err)
+		}
+		if len(got) == 0 {
+			t.Fatalf("parseWorkflowInput(%q) returned empty JSON", input)
+		}
+	}
+	if _, err := parseWorkflowInput(`{"broken":`); err == nil {
+		t.Fatal("parseWorkflowInput() succeeded for invalid JSON")
+	}
+
+	t.Setenv("LOOM_ACTOR", " loom-user ")
+	if got := actorName(); got != "loom-user" {
+		t.Fatalf("actorName() = %q, want loom-user", got)
+	}
+	t.Setenv("LOOM_ACTOR", "")
+	t.Setenv("USER", "")
+	if got := actorName(); got != "loom" {
+		t.Fatalf("actorName() = %q, want loom", got)
+	}
+
+	if got := importName("code-review-helper"); got != "codeReviewHelperSkill" {
+		t.Fatalf("importName() = %q", got)
+	}
+	if got := safePathSegment(" a/b:c "); got != "a-b-c" {
+		t.Fatalf("safePathSegment() = %q", got)
+	}
+	if got := localWorkDir("/root", defspkg.AgentModule{Repos: []string{"", "repo"}}); got != filepath.Join("/root", "repo") {
+		t.Fatalf("localWorkDir(relative) = %q", got)
+	}
+	if got := localWorkDir("/root", defspkg.AgentModule{Repos: []string{"/tmp/work"}}); got != "/tmp/work" {
+		t.Fatalf("localWorkDir(abs) = %q", got)
+	}
+}
+
+func TestInvokeLocalAgentStreamingBackend(t *testing.T) {
+	cli.TestingResetBackendState(t)
+	cli.RegisterBackend(streamingBackend{})
+	root := t.TempDir()
+	writeAgent(t, root, "stream-agent", "streamtest")
+	plan, err := defspkg.Load(root)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	agent, ok := defspkg.FindAgent(plan, "stream-agent")
+	if !ok {
+		t.Fatalf("FindAgent() did not find stream-agent")
+	}
+	got, err := invokeLocalAgent(context.Background(), plan, agent, "prompt", "hello stream")
+	if err != nil {
+		t.Fatalf("invokeLocalAgent() error = %v", err)
+	}
+	if got != "streamed response" {
+		t.Fatalf("invokeLocalAgent() = %q", got)
+	}
+}
+
 type envCheckBackend struct{}
 
 func (envCheckBackend) Name() string { return "envcheck" }
@@ -236,6 +464,37 @@ func (envCheckBackend) InvokeNonInteractive(_, _, _ string, _ <-chan struct{}, _
 		return fmt.Errorf("LOCAL_CONNECT_TOKEN = %q, want loaded-from-file", got)
 	}
 	return nil
+}
+
+type streamingBackend struct{}
+
+func (streamingBackend) Name() string { return "streamtest" }
+
+func (streamingBackend) InvokeInteractive(_, _, _ string) error { return nil }
+
+func (streamingBackend) InvokeNonInteractive(_, _, _ string, _ <-chan struct{}, _ *usage.Collector) error {
+	return fmt.Errorf("InvokeNonInteractive should not be called for streaming backend")
+}
+
+func (streamingBackend) InvokeStreaming(context.Context, string, string, string) (io.ReadCloser, error) {
+	return io.NopCloser(strings.NewReader(" streamed response\n")), nil
+}
+
+func withTSFirstGlobals(t *testing.T, fn func()) {
+	t.Helper()
+	oldAddDir, oldAddJSON := addDir, addJSON
+	oldCheckDir, oldCheckJSON := checkDir, checkJSON
+	oldConnectJSON := connectJSON
+	oldApplyDir, oldApplyInstance, oldApplyStart, oldApplyJSON := applyDir, applyInstance, applyStart, applyJSON
+	oldRunDir, oldRunInput, oldRunWait, oldRunOnce, oldRunJSON := runDir, runInput, runWait, runOnce, runJSON
+	t.Cleanup(func() {
+		addDir, addJSON = oldAddDir, oldAddJSON
+		checkDir, checkJSON = oldCheckDir, oldCheckJSON
+		connectJSON = oldConnectJSON
+		applyDir, applyInstance, applyStart, applyJSON = oldApplyDir, oldApplyInstance, oldApplyStart, oldApplyJSON
+		runDir, runInput, runWait, runOnce, runJSON = oldRunDir, oldRunInput, oldRunWait, oldRunOnce, oldRunJSON
+	})
+	fn()
 }
 
 func writeAgent(t *testing.T, root, name, backend string) {

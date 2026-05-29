@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
@@ -107,12 +108,78 @@ func TestWorkflowRunAPICreatesInspectableRun(t *testing.T) {
 	}
 }
 
+func TestWorkflowRunAPIValidationAndOnceFalse(t *testing.T) {
+	ctx := context.Background()
+	st, mux := setupWorkflowTestMux(t, ctx, nil)
+
+	bad := httptest.NewRecorder()
+	mux.ServeHTTP(bad, httptest.NewRequest(http.MethodPost, "/api/workspaces/WS/workflows/epic-runner/runs", strings.NewReader(`{"input":`)))
+	if bad.Code != http.StatusBadRequest {
+		t.Fatalf("bad request status = %d, want 400; body=%s", bad.Code, bad.Body.String())
+	}
+
+	runRec := postJSON(t, mux, "/api/workspaces/WS/workflows/epic-runner/runs", map[string]any{
+		"once":  false,
+		"input": map[string]any{"parentId": "EPIC-1"},
+	})
+	if runRec.Code != http.StatusCreated {
+		t.Fatalf("run once=false status = %d, want 201; body=%s", runRec.Code, runRec.Body.String())
+	}
+	var created runResponse
+	if err := json.Unmarshal(runRec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode run: %v", err)
+	}
+	if created.Run == nil || created.Run.Status != domain.WorkflowRunQueued || created.Builtin != nil {
+		t.Fatalf("created = %+v, want queued run without builtin result", created)
+	}
+
+	runs, err := st.WorkflowRuns().List(ctx, "WS", store.WorkflowRunFilter{})
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("runs = %d, want 1", len(runs))
+	}
+}
+
+func TestWorkflowRunAPIDefaultOnceRequiresIssueBackend(t *testing.T) {
+	ctx := context.Background()
+	_, mux := setupWorkflowTestMux(t, ctx, nil)
+
+	runRec := postJSON(t, mux, "/api/workspaces/WS/workflows/epic-runner/runs", map[string]any{
+		"input": map[string]any{"parentId": "EPIC-1"},
+	})
+	if runRec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("run status = %d, want 503; body=%s", runRec.Code, runRec.Body.String())
+	}
+}
+
 func workflowMux(st store.Store, ib backend.IssueBackend) *http.ServeMux {
 	mux := http.NewServeMux()
 	NewModule(st).
 		WithIssueBackendFn(func(context.Context) backend.IssueBackend { return ib }).
 		Register(mux)
 	return mux
+}
+
+func setupWorkflowTestMux(t *testing.T, ctx context.Context, ib backend.IssueBackend) (store.Store, *http.ServeMux) {
+	t.Helper()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS", Name: "Workflow Store"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	root := t.TempDir()
+	if _, err := defspkg.ScaffoldWorkflow(root, "epic-runner"); err != nil {
+		t.Fatalf("ScaffoldWorkflow() error = %v", err)
+	}
+	plan, err := defspkg.Load(root)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if err := defspkg.Apply(ctx, st, "WS", "test", plan); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	return st, workflowMux(st, ib)
 }
 
 func postJSON(t *testing.T, mux *http.ServeMux, path string, body any) *httptest.ResponseRecorder {

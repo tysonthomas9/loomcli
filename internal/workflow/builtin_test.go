@@ -109,3 +109,72 @@ func TestCodeDefinedSlackCloneWorkflowDelegatesToBuiltinRunner(t *testing.T) {
 		t.Fatalf("events = %+v, want workflow_ts_reconciled delegation event", events)
 	}
 }
+
+func TestParentWorkItemsWorkflowCompletesWhenNoOpenChildren(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	ib := clitest.NewMockIssueBackend()
+	ib.ReadyResult = nil
+	ib.BlockedResult = nil
+	ib.ListResult = nil
+
+	run, err := CreateOrResumeRun(ctx, st, "WS", RunParentWorkItemsName, json.RawMessage(`{"parentId":"DONE","role":"task"}`), "atlas")
+	if err != nil {
+		t.Fatalf("CreateOrResumeRun() error = %v", err)
+	}
+	result, err := RunBuiltinOnce(ctx, st, ib, run)
+	if err != nil {
+		t.Fatalf("RunBuiltinOnce() error = %v", err)
+	}
+	if !result.Done || result.Run.Status != domain.WorkflowRunCompleted {
+		t.Fatalf("result = %+v, want completed done run", result)
+	}
+	events, err := st.RunEvents().List(ctx, "WS", store.RunEventFilter{WorkflowRunID: run.RunID})
+	if err != nil {
+		t.Fatalf("list events: %v", err)
+	}
+	if !hasWorkflowEvent(events, "workflow_completed") {
+		t.Fatalf("events = %+v, want workflow_completed", events)
+	}
+}
+
+func TestParentWorkItemHelpers(t *testing.T) {
+	input, err := decodeParentInput(json.RawMessage(`{"parentId":"EPIC","maxConcurrency":0}`))
+	if err != nil {
+		t.Fatalf("decodeParentInput() error = %v", err)
+	}
+	if input.Role != "task" || input.MaxConcurrency != 4 {
+		t.Fatalf("input = %+v, want default role/task concurrency", input)
+	}
+	if _, err := decodeParentInput(json.RawMessage(`{"parentId":`)); err == nil {
+		t.Fatal("decodeParentInput() succeeded for invalid JSON")
+	}
+
+	live := map[string]struct{}{"TASK-1": {}}
+	for _, child := range []backend.IssueData{
+		{ID: "TASK-1", Status: "open"},
+		{ID: "TASK-2", Status: "closed"},
+		{ID: "TASK-3", Status: "deferred"},
+	} {
+		if shouldEnsureChild(child, live) {
+			t.Fatalf("shouldEnsureChild(%+v) = true, want false", child)
+		}
+	}
+	if !shouldEnsureChild(backend.IssueData{ID: "TASK-4", Status: "open"}, live) {
+		t.Fatal("shouldEnsureChild(open unseen child) = false, want true")
+	}
+
+	ensure := taskRunEnsure(&domain.WorkflowRun{WorkspaceKey: "WS", RunID: "RUN", WorkflowName: "wf"}, input, backend.IssueData{ID: "TASK-4", Title: "Build"})
+	if ensure.IdempotencyKey != "child:TASK-4:role:task" || ensure.Metadata["parent_id"] != "EPIC" {
+		t.Fatalf("taskRunEnsure() = %+v", ensure)
+	}
+}
+
+func hasWorkflowEvent(events []*domain.RunEvent, typ string) bool {
+	for _, event := range events {
+		if event != nil && event.Type == typ {
+			return true
+		}
+	}
+	return false
+}
