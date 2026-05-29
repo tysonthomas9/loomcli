@@ -185,6 +185,46 @@ func TestLoadRejectsUnauthenticatedWorkflowRoute(t *testing.T) {
 	}
 }
 
+func TestLoadSupportsTypeScriptSyntax(t *testing.T) {
+	root := t.TempDir()
+	writeDefFile(t, root, ".loom/workflows/typed-epic.ts", `import { defineWorkflow, trigger } from '@loom/runtime';
+
+type Input = { parentId: string };
+type ToolName = string;
+
+const workflowTools = ['workItems.readyChildren', 'taskRuns.ensure'] satisfies ToolName[];
+const route = {
+  path: '/workflows/typed-epic/run',
+  auth: 'workspace',
+} as const;
+
+export default defineWorkflow({
+  name: 'typed-epic',
+  builtin: 'run-parent-work-items',
+  singleton: (input: Input): string => `+"`"+`parent:${input.parentId}`+"`"+`,
+  expose: { http: route },
+  triggers: [
+    trigger.issueLabelAdded({ label: 'typed-epic', type: 'epic' } as const),
+  ],
+  tools: workflowTools,
+});`)
+
+	plan, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if len(plan.Workflows) != 1 {
+		t.Fatalf("workflows = %+v, want one typed workflow", plan.Workflows)
+	}
+	workflow := plan.Workflows[0]
+	if workflow.Name != "typed-epic" || workflow.RoutePath != "/workflows/typed-epic/run" {
+		t.Fatalf("workflow = %+v, want typed workflow route", workflow)
+	}
+	if len(workflow.Tools) != 2 || workflow.Tools[1] != "taskRuns.ensure" {
+		t.Fatalf("tools = %+v, want typed workflow tools", workflow.Tools)
+	}
+}
+
 func jsonMap(t *testing.T, raw json.RawMessage) map[string]any {
 	t.Helper()
 	var out map[string]any

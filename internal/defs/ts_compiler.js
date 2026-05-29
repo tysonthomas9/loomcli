@@ -2,6 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const vm = require("vm");
+const { stripTypeScriptTypes } = require("node:module");
 
 const root = path.resolve(process.argv[2] || ".");
 
@@ -33,8 +34,12 @@ function toolProxy(parts) {
   });
 }
 
-function transformSource(src) {
-  return src
+function transformSource(src, file) {
+  let transformed = src;
+  if (typeof stripTypeScriptTypes === "function") {
+    transformed = stripTypeScriptTypes(transformed, { mode: "strip", sourceUrl: file });
+  }
+  return transformed
     .replace(/import\s+type\s+[^;]+;?/g, "")
     .replace(/import\s+[^;]+from\s+['"][^'"]+['"];?/g, "")
     .replace(/export\s+type\s+[^;]+;?/g, "")
@@ -112,7 +117,7 @@ function evaluateModule(file) {
     github: toolProxy(["github"]),
     fleetdb: toolProxy(["fleetdb"]),
   };
-  vm.runInNewContext(transformSource(src), sandbox, { filename: file });
+  vm.runInNewContext(transformSource(src, file), sandbox, { filename: file });
   return { source: src, value: module.exports.default };
 }
 
