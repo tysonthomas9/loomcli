@@ -3,9 +3,15 @@ package tsfirst
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"io"
 	"os"
+	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -26,6 +32,7 @@ var (
 	connectEnvFile string
 	connectJSON    bool
 	connectMessage string
+	connectSession string
 
 	applyDir      string
 	applyInstance string
@@ -98,6 +105,7 @@ func init() {
 	connectCmd.Flags().StringVar(&connectDir, "dir", ".", "Directory containing the Loom TypeScript project")
 	connectCmd.Flags().StringVar(&connectEnvFile, "env", "", "Env file to allowlist for the local session")
 	connectCmd.Flags().StringVar(&connectMessage, "message", "", "One-shot message for non-interactive local connect")
+	connectCmd.Flags().StringVar(&connectSession, "session", "default", "Named local session to continue")
 	connectCmd.Flags().BoolVar(&connectJSON, "json", false, "JSON output")
 
 	applyCmd.PersistentFlags().StringVar(&applyDir, "dir", ".", "Directory containing the Loom TypeScript project")
@@ -174,57 +182,175 @@ func runCheck(_ *cobra.Command, _ []string) error {
 }
 
 type connectResult struct {
-	Root     string   `json:"root"`
-	Agent    string   `json:"agent"`
-	Instance string   `json:"instance"`
-	Backend  string   `json:"backend,omitempty"`
-	Model    string   `json:"model,omitempty"`
-	EnvFile  string   `json:"env_file,omitempty"`
-	Env      []string `json:"env,omitempty"`
-	Message  string   `json:"message,omitempty"`
-	Response string   `json:"response,omitempty"`
+	Root           string   `json:"root"`
+	Agent          string   `json:"agent"`
+	Instance       string   `json:"instance"`
+	Session        string   `json:"session"`
+	Backend        string   `json:"backend,omitempty"`
+	Model          string   `json:"model,omitempty"`
+	WorkDir        string   `json:"work_dir,omitempty"`
+	EnvFile        string   `json:"env_file,omitempty"`
+	Env            []string `json:"env,omitempty"`
+	Message        string   `json:"message,omitempty"`
+	Response       string   `json:"response,omitempty"`
+	TranscriptPath string   `json:"transcript_path,omitempty"`
+}
+
+type connectOptions struct {
+	Dir      string
+	Agent    string
+	Instance string
+	Session  string
+	EnvFile  string
+	Message  string
 }
 
 func runConnect(_ *cobra.Command, args []string) error {
-	plan, err := defspkg.Load(connectDir)
+	opts := connectOptions{
+		Dir:      connectDir,
+		Agent:    args[0],
+		Instance: args[1],
+		Session:  connectSession,
+		EnvFile:  connectEnvFile,
+		Message:  connectMessage,
+	}
+	if opts.Message != "" {
+		result, err := runLocalConnect(context.Background(), opts)
+		if err != nil {
+			return err
+		}
+		return printConnectResult(result, connectJSON)
+	}
+	messages, err := stdinMessages()
 	if err != nil {
 		return err
 	}
-	agent, ok := defspkg.FindAgent(plan, args[0])
+	if len(messages) == 0 {
+		result, err := connectReady(opts)
+		if err != nil {
+			return err
+		}
+		if connectJSON {
+			return cmdstore.WriteJSON(result)
+		}
+		fmt.Printf("Connected to %s instance %s session %s (backend=%s model=%s)\n", result.Agent, result.Instance, result.Session, fallback(result.Backend, "default"), fallback(result.Model, "default"))
+		fmt.Println("Local session ready. Pass --message or pipe prompts on stdin to run turns.")
+		return nil
+	}
+	results := make([]connectResult, 0, len(messages))
+	for _, message := range messages {
+		opts.Message = message
+		result, err := runLocalConnect(context.Background(), opts)
+		if err != nil {
+			return err
+		}
+		results = append(results, result)
+		if !connectJSON {
+			if len(results) == 1 {
+				fmt.Printf("Connected to %s instance %s session %s (backend=%s model=%s)\n", result.Agent, result.Instance, result.Session, fallback(result.Backend, "default"), fallback(result.Model, "default"))
+				if len(result.Env) > 0 {
+					fmt.Printf("Env allowlist: %s\n", strings.Join(result.Env, ", "))
+				}
+			}
+			fmt.Printf("You: %s\n", result.Message)
+			fmt.Printf("%s: %s\n", result.Agent, result.Response)
+		}
+	}
+	if connectJSON {
+		return cmdstore.WriteJSON(results)
+	}
+	return nil
+}
+
+func runLocalConnect(ctx context.Context, opts connectOptions) (connectResult, error) {
+	plan, agent, result, err := connectReadyWithAgent(opts)
+	if err != nil {
+		return connectResult{}, err
+	}
+	history, err := readLocalTurns(result.TranscriptPath)
+	if err != nil {
+		return connectResult{}, err
+	}
+	prompt := localConnectPrompt(plan, agent, result.Instance, result.Session, opts.Message, history)
+	_, envValues, err := envForConnect(opts.EnvFile)
+	if err != nil {
+		return connectResult{}, err
+	}
+	response, err := withTemporaryEnv(envValues, func() (string, error) {
+		return invokeLocalAgent(ctx, plan, agent, prompt, opts.Message)
+	})
+	if err != nil {
+		return connectResult{}, err
+	}
+	result.Message = opts.Message
+	result.Response = response
+	turn := localTurn{
+		Timestamp:         time.Now().UTC().Format(time.RFC3339Nano),
+		Agent:             agent.Name,
+		Instance:          result.Instance,
+		Session:           result.Session,
+		Backend:           result.Backend,
+		Model:             result.Model,
+		DefinitionVersion: agent.Version,
+		Message:           opts.Message,
+		Response:          response,
+		PromptHash:        hashText(prompt),
+	}
+	if err := appendLocalTurn(result.TranscriptPath, turn); err != nil {
+		return connectResult{}, err
+	}
+	return result, nil
+}
+
+func connectReady(opts connectOptions) (connectResult, error) {
+	_, _, result, err := connectReadyWithAgent(opts)
+	return result, err
+}
+
+func connectReadyWithAgent(opts connectOptions) (*defspkg.Plan, defspkg.AgentModule, connectResult, error) {
+	plan, err := defspkg.Load(opts.Dir)
+	if err != nil {
+		return nil, defspkg.AgentModule{}, connectResult{}, err
+	}
+	agent, ok := defspkg.FindAgent(plan, opts.Agent)
 	if !ok {
-		return fmt.Errorf("agent definition %q not found", args[0])
+		return nil, defspkg.AgentModule{}, connectResult{}, fmt.Errorf("agent definition %q not found", opts.Agent)
 	}
-	envNames, err := envNamesForConnect(connectEnvFile)
+	envNames, _, err := envForConnect(opts.EnvFile)
 	if err != nil {
-		return err
+		return nil, defspkg.AgentModule{}, connectResult{}, err
 	}
 	envNames = compactStrings(append(agent.Env, envNames...))
 	result := connectResult{
-		Root:     plan.Root,
-		Agent:    agent.Name,
-		Instance: args[1],
-		Backend:  agent.Backend,
-		Model:    agent.Model,
-		EnvFile:  connectEnvFile,
-		Env:      envNames,
+		Root:           plan.Root,
+		Agent:          agent.Name,
+		Instance:       fallback(opts.Instance, "local"),
+		Session:        fallback(opts.Session, "default"),
+		Backend:        agent.Backend,
+		Model:          agent.Model,
+		WorkDir:        localWorkDir(plan.Root, agent),
+		EnvFile:        opts.EnvFile,
+		Env:            envNames,
+		TranscriptPath: localTranscriptPath(plan.Root, agent.Name, fallback(opts.Instance, "local"), fallback(opts.Session, "default")),
 	}
-	if connectMessage != "" {
-		result.Message = connectMessage
-		result.Response = localConnectResponse(agent, connectMessage)
-	}
-	if connectJSON {
+	return plan, agent, result, nil
+}
+
+func printConnectResult(result connectResult, jsonOut bool) error {
+	if jsonOut {
 		return cmdstore.WriteJSON(result)
 	}
-	fmt.Printf("Connected to %s instance %s (backend=%s model=%s)\n", result.Agent, result.Instance, fallback(result.Backend, "default"), fallback(result.Model, "default"))
+	fmt.Printf("Connected to %s instance %s session %s (backend=%s model=%s)\n", result.Agent, result.Instance, result.Session, fallback(result.Backend, "default"), fallback(result.Model, "default"))
 	if len(result.Env) > 0 {
 		fmt.Printf("Env allowlist: %s\n", strings.Join(result.Env, ", "))
 	}
 	if result.Message != "" {
 		fmt.Printf("You: %s\n", result.Message)
 		fmt.Printf("%s: %s\n", result.Agent, result.Response)
-		return nil
 	}
-	fmt.Println("Local session ready. Use --message for a one-shot prompt in non-interactive shells.")
+	if result.TranscriptPath != "" {
+		fmt.Printf("Transcript: %s\n", result.TranscriptPath)
+	}
 	return nil
 }
 
@@ -321,17 +447,18 @@ func runApplyWorkflow(_ *cobra.Command, args []string) error {
 	})
 }
 
-func envNamesForConnect(path string) ([]string, error) {
+func envForConnect(path string) ([]string, map[string]string, error) {
 	path = strings.TrimSpace(path)
 	if path == "" {
-		return nil, nil
+		return nil, nil, nil
 	}
 	f, err := os.Open(path) //nolint:gosec // explicit user-supplied env file path for local dev.
 	if err != nil {
-		return nil, fmt.Errorf("read env file %s: %w", path, err)
+		return nil, nil, fmt.Errorf("read env file %s: %w", path, err)
 	}
 	defer func() { _ = f.Close() }()
 	var out []string
+	values := make(map[string]string)
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -339,20 +466,243 @@ func envNamesForConnect(path string) ([]string, error) {
 			continue
 		}
 		if idx := strings.IndexByte(line, '='); idx > 0 {
-			out = append(out, strings.TrimSpace(line[:idx]))
+			name := strings.TrimSpace(line[:idx])
+			out = append(out, name)
+			values[name] = cleanEnvValue(line[idx+1:])
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("read env file %s: %w", path, err)
+		return nil, nil, fmt.Errorf("read env file %s: %w", path, err)
 	}
-	return compactStrings(out), nil
+	return compactStrings(out), values, nil
 }
 
-func localConnectResponse(agent defspkg.AgentModule, message string) string {
-	if strings.EqualFold(agent.Backend, "echo") {
-		return "echo: " + message
+func cleanEnvValue(value string) string {
+	value = strings.TrimSpace(value)
+	if len(value) >= 2 {
+		if (value[0] == '"' && value[len(value)-1] == '"') || (value[0] == '\'' && value[len(value)-1] == '\'') {
+			return value[1 : len(value)-1]
+		}
 	}
-	return "local connect compiled the agent manifest; live backend chat is handled by the runtime provider"
+	return value
+}
+
+func withTemporaryEnv(values map[string]string, fn func() (string, error)) (string, error) {
+	if len(values) == 0 {
+		return fn()
+	}
+	type prior struct {
+		value string
+		ok    bool
+	}
+	restore := make(map[string]prior, len(values))
+	for key, value := range values {
+		old, ok := os.LookupEnv(key)
+		restore[key] = prior{value: old, ok: ok}
+		if err := os.Setenv(key, value); err != nil {
+			return "", err
+		}
+	}
+	defer func() {
+		for key, old := range restore {
+			if old.ok {
+				_ = os.Setenv(key, old.value)
+			} else {
+				_ = os.Unsetenv(key)
+			}
+		}
+	}()
+	return fn()
+}
+
+func invokeLocalAgent(ctx context.Context, plan *defspkg.Plan, agent defspkg.AgentModule, prompt, message string) (string, error) {
+	if strings.EqualFold(agent.Backend, "echo") {
+		return "echo: " + message, nil
+	}
+	backendName := strings.TrimSpace(agent.Backend)
+	if backendName == "" {
+		backendName = cli.GetBackendName()
+	}
+	backend, ok := cli.GetBackendByName(backendName)
+	if !ok {
+		return "", fmt.Errorf("backend %q is not registered; use backend \"echo\" for offline local connect or install/configure the backend", backendName)
+	}
+	workDir := localWorkDir(plan.Root, agent)
+	if streamer, ok := backend.(interface {
+		InvokeStreaming(context.Context, string, string, string) (io.ReadCloser, error)
+	}); ok {
+		rc, err := streamer.InvokeStreaming(ctx, workDir, prompt, agent.Name)
+		if err != nil {
+			return "", err
+		}
+		defer func() { _ = rc.Close() }()
+		data, err := io.ReadAll(rc)
+		if err != nil {
+			return "", err
+		}
+		return strings.TrimSpace(string(data)), nil
+	}
+	shutdown := make(chan struct{})
+	if err := backend.InvokeNonInteractive(workDir, prompt, agent.Name, shutdown, nil); err != nil {
+		return "", err
+	}
+	return "backend completed; response was written by the configured backend", nil
+}
+
+type localTurn struct {
+	Timestamp         string `json:"timestamp"`
+	Agent             string `json:"agent"`
+	Instance          string `json:"instance"`
+	Session           string `json:"session"`
+	Backend           string `json:"backend,omitempty"`
+	Model             string `json:"model,omitempty"`
+	DefinitionVersion string `json:"definition_version,omitempty"`
+	Message           string `json:"message"`
+	Response          string `json:"response,omitempty"`
+	PromptHash        string `json:"prompt_hash,omitempty"`
+}
+
+func readLocalTurns(path string) ([]localTurn, error) {
+	f, err := os.Open(path) //nolint:gosec // local transcript path under the selected project root.
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read local transcript %s: %w", path, err)
+	}
+	defer func() { _ = f.Close() }()
+	var out []localTurn
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 64*1024), 10*1024*1024)
+	for scanner.Scan() {
+		var turn localTurn
+		if err := json.Unmarshal(scanner.Bytes(), &turn); err != nil {
+			return nil, fmt.Errorf("parse local transcript %s: %w", path, err)
+		}
+		out = append(out, turn)
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("read local transcript %s: %w", path, err)
+	}
+	return out, nil
+}
+
+func appendLocalTurn(path string, turn localTurn) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("create local session dir: %w", err)
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644) //nolint:gosec // transcript file under selected project root.
+	if err != nil {
+		return fmt.Errorf("open local transcript %s: %w", path, err)
+	}
+	defer func() { _ = f.Close() }()
+	data, err := json.Marshal(turn)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(append(data, '\n')); err != nil {
+		return fmt.Errorf("write local transcript %s: %w", path, err)
+	}
+	return nil
+}
+
+func localConnectPrompt(plan *defspkg.Plan, agent defspkg.AgentModule, instance, session, message string, history []localTurn) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "You are the TypeScript-defined Loom agent %q.\n", agent.Name)
+	if agent.Description != "" {
+		fmt.Fprintf(&b, "Description: %s\n", agent.Description)
+	}
+	if agent.Model != "" {
+		fmt.Fprintf(&b, "Model: %s\n", agent.Model)
+	}
+	fmt.Fprintf(&b, "Instance: %s\nSession: %s\nProject root: %s\n", instance, session, plan.Root)
+	if len(agent.Repos) > 0 {
+		fmt.Fprintf(&b, "Runtime repos: %s\n", strings.Join(agent.Repos, ", "))
+	}
+	if len(agent.AllowedCommands) > 0 || len(agent.DeniedCommands) > 0 {
+		fmt.Fprintf(&b, "Allowed commands: %s\nDenied commands: %s\n", strings.Join(agent.AllowedCommands, ", "), strings.Join(agent.DeniedCommands, ", "))
+	}
+	if len(agent.Skills) > 0 {
+		fmt.Fprintf(&b, "Registered skills: %s\n", strings.Join(agent.Skills, ", "))
+	}
+	if strings.TrimSpace(agent.Instructions) != "" {
+		fmt.Fprintf(&b, "\nAgent instructions:\n%s\n", strings.TrimSpace(agent.Instructions))
+	}
+	if len(history) > 0 {
+		fmt.Fprintf(&b, "\nRecent local session history:\n")
+		start := 0
+		if len(history) > 6 {
+			start = len(history) - 6
+		}
+		for _, turn := range history[start:] {
+			fmt.Fprintf(&b, "User: %s\nAgent: %s\n", turn.Message, turn.Response)
+		}
+	}
+	fmt.Fprintf(&b, "\nUser message:\n%s\n", message)
+	return b.String()
+}
+
+func stdinMessages() ([]string, error) {
+	info, err := os.Stdin.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if info.Mode()&os.ModeCharDevice != 0 {
+		return nil, nil
+	}
+	data, err := io.ReadAll(os.Stdin)
+	if err != nil {
+		return nil, err
+	}
+	lines := strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n")
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			out = append(out, line)
+		}
+	}
+	return out, nil
+}
+
+func localWorkDir(root string, agent defspkg.AgentModule) string {
+	for _, repo := range agent.Repos {
+		repo = strings.TrimSpace(repo)
+		if repo == "" || repo == "." {
+			return root
+		}
+		if filepath.IsAbs(repo) {
+			return repo
+		}
+		return filepath.Join(root, repo)
+	}
+	return root
+}
+
+func localTranscriptPath(root, agent, instance, session string) string {
+	return filepath.Join(root, ".loom", "local-sessions", safePathSegment(agent), safePathSegment(instance), safePathSegment(session)+".jsonl")
+}
+
+func safePathSegment(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "default"
+	}
+	var b strings.Builder
+	for _, r := range value {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_', r == '.':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('-')
+		}
+	}
+	return b.String()
+}
+
+func hashText(value string) string {
+	sum := sha256.Sum256([]byte(value))
+	return hex.EncodeToString(sum[:])
 }
 
 func actorName() string {
