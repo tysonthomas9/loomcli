@@ -2623,6 +2623,12 @@ export interface components {
        * @description Most recent PTY-output observation from the agent's supervised backend (claude/codex/gemini), forwarded over IPC. Compare to "now" to detect stuck agents. Zero/absent when no observation yet or agent isn't daemon-managed.
        */
       last_activity_at?: string;
+      /** @description Fleet-db's DERIVED liveness signal ("working" or "idle"), computed server-side from the running-session + fresh-lease join (never re-derived by loom). "working" means the agent has a live session right now. Absent when liveness was not computed (no fleet-db store). The UI prefers this over the lock-derived status, which stays "idle" for a provably-working agent on serve-only deployments. */
+      live_status?: string;
+      /** @description Task id of the agent's live session, set only when live_status == "working". */
+      active_task_id?: string;
+      /** @description Phase of the agent's live session (e.g. "planning", "implementation"), set only when live_status == "working". */
+      active_phase?: string;
     };
     MonitorCommitDetail: {
       hash: string;
