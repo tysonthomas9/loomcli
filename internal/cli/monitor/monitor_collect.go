@@ -141,12 +141,22 @@ func buildAgentStatus(deps *cli.Deps, wt cli.WorktreeInfo, daemonManaged map[str
 	agent := AgentStatus{
 		Name: wt.Name, Branch: wt.Branch, Workspace: wt.Workspace,
 		Role: daemonInfo.Role, Repo: daemonInfo.Repo, DaemonManaged: daemonInfo.Managed,
-		CurrentTaskID:  daemonInfo.CurrentTaskID,
-		LastActivityAt: daemonInfo.LastActivity,
+		CurrentTaskID: daemonInfo.CurrentTaskID,
+	}
+	if !daemonInfo.LastActivity.IsZero() {
+		la := daemonInfo.LastActivity
+		agent.LastActivityAt = &la
 	}
 
 	if lockInfo, running, _ := cli.CheckLock(wt.Path); running && lockInfo != nil && lockInfo.TaskID != "" {
 		taskIDToAgents[lockInfo.TaskID] = append(taskIDToAgents[lockInfo.TaskID], wt.Name)
+		// Daemon state only records CurrentTaskID for daemon-managed agents;
+		// auto/manual agents leave it empty. Fall back to the lock's claimed
+		// task so the kanban can still join the live agent to its in-progress
+		// card (otherwise the card renders a spurious "agent missing").
+		if agent.CurrentTaskID == "" {
+			agent.CurrentTaskID = lockInfo.TaskID
+		}
 	}
 
 	var idleChanges []FileChange
