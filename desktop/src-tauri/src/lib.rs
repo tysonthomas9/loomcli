@@ -216,6 +216,7 @@ fn show_launcher_window<R: Runtime>(app: &AppHandle<R>) {
         .title("Loom")
         .inner_size(520.0, 300.0)
         .min_inner_size(420.0, 260.0)
+        .zoom_hotkeys_enabled(true)
         .content_protected(false)
         .focused(true)
         .build()
@@ -333,6 +334,7 @@ fn open_workspace_window_native<R: Runtime>(
         .title("Loom")
         .inner_size(1280.0, 800.0)
         .min_inner_size(720.0, 520.0)
+        .zoom_hotkeys_enabled(true)
         .content_protected(false)
         .focused(true)
         .build()?;
@@ -355,6 +357,7 @@ fn open_additional_workspace_window<R: Runtime>(app: &AppHandle<R>) -> tauri::Re
         .title("Loom")
         .inner_size(1280.0, 800.0)
         .min_inner_size(720.0, 520.0)
+        .zoom_hotkeys_enabled(true)
         .content_protected(false)
         .focused(true)
         .build()?;
