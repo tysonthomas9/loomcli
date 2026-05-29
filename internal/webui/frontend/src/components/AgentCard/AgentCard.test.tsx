@@ -179,6 +179,53 @@ describe("AgentCard", () => {
       expect(screen.getByText("Planning")).toBeInTheDocument();
     });
 
+    it('shows "Working" from live_status when the lock-derived status reads idle', () => {
+      // Serve-only deployments: the monitor status stays "idle", but fleet-db's
+      // live_status proves the agent is working. The badge must flip.
+      render(
+        <AgentCard
+          agent={makeAgent({
+            status: "idle",
+            live_status: "working",
+            active_task_id: "loom-42",
+            branch: "b",
+          })}
+        />,
+      );
+
+      expect(screen.getByText("Working")).toBeInTheDocument();
+    });
+
+    it('shows "Planning" from live_status for a plan-role agent that reads idle', () => {
+      render(
+        <AgentCard
+          agent={makeAgent({
+            status: "idle",
+            live_status: "working",
+            active_task_id: "loom-43",
+            role: "plan",
+            branch: "b",
+          })}
+        />,
+      );
+
+      expect(screen.getByText("Planning")).toBeInTheDocument();
+    });
+
+    it('keeps "Idle" when live_status is idle', () => {
+      render(
+        <AgentCard
+          agent={makeAgent({
+            status: "idle",
+            live_status: "idle",
+            branch: "b",
+          })}
+        />,
+      );
+
+      expect(screen.getByText("Idle")).toBeInTheDocument();
+    });
+
     it('shows "Done" for done status', () => {
       render(<AgentCard agent={makeAgent({ status: "done", branch: "b" })} />);
 

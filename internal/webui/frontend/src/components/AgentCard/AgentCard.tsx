@@ -4,7 +4,7 @@
  */
 
 import type { LoomAgentStatus, ParsedLoomStatus } from "@/types";
-import { parseLoomStatus } from "@/types";
+import { effectiveAgentStatus, parseLoomStatus } from "@/types";
 import { RepoBadge } from "@/components/RepoBadge";
 import { getAvatarColor, shouldUseWhiteText } from "@/utils/colorUtils";
 
@@ -86,10 +86,16 @@ export function AgentCard({
   onClick,
   showRepoBadge = true,
 }: AgentCardProps): JSX.Element {
-  const parsed = parseLoomStatus(agent.status);
+  const parsed = parseLoomStatus(effectiveAgentStatus(agent));
   const avatarColor = getAvatarColor(agent.name);
   const dotColor = getStatusDotColor(parsed.type);
   const statusLabel = getStatusLabel(parsed);
+  // When the badge reflects fleet-db's live_status (serve-only deployments,
+  // where no task title is loaded), surface the active task/phase on hover.
+  const liveDetail =
+    agent.live_status === "working"
+      ? [agent.active_task_id, agent.active_phase].filter(Boolean).join(" · ")
+      : "";
   const isError = parsed.type === "error";
   const initial = agent.name.charAt(0) || "?";
   const textColor = shouldUseWhiteText(avatarColor) ? "#fff" : "#1f2937";
@@ -156,7 +162,7 @@ export function AgentCard({
         <span
           className={styles.statusLine}
           data-error={isError || undefined}
-          title={taskTitle || statusLabel}
+          title={taskTitle || liveDetail || statusLabel}
         >
           {statusLabel}
         </span>

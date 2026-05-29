@@ -20,6 +20,7 @@ import type {
   LoomTaskInfo,
   WorktreeSyncDetail,
 } from "@/types";
+import { effectiveAgentStatus } from "@/types";
 
 import { TaskDrawer } from "../TaskDrawer";
 import type { TaskCategory } from "../TaskDrawer";
@@ -299,10 +300,13 @@ export function AgentsSidebar({
     .filter(Boolean)
     .join(" ");
 
-  // Count active agents (working or planning)
-  const activeCount = agents.filter(
-    (a) => a.status.startsWith("working:") || a.status.startsWith("planning:"),
-  ).length;
+  // Count active agents (working or planning), preferring fleet-db's live_status
+  // so serve-only deployments count provably-working agents that the lock-derived
+  // status would otherwise leave as "idle".
+  const activeCount = agents.filter((a) => {
+    const s = effectiveAgentStatus(a);
+    return s.startsWith("working:") || s.startsWith("planning:");
+  }).length;
 
   // Check if there are sync warnings for the footer (push count moved to banner)
   const hasSyncWarning = sync.git_needs_pull > 0 || !sync.db_synced;

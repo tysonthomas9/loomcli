@@ -251,3 +251,29 @@ export function parseLoomStatus(status: string): ParsedLoomStatus {
   // Unknown status - treat as ready
   return { type: "ready" };
 }
+
+/**
+ * Effective display status for an agent, preferring fleet-db's derived
+ * live_status.
+ *
+ * On serve-only deployments the lock-derived `status` stays "idle"/"ready" even
+ * while an agent is provably working, but fleet-db's live_status (carried on the
+ * monitor response, computed there from the session+lease join) knows the truth.
+ * When the raw status already encodes working/planning (daemon mode, often with a
+ * duration we want to keep) it is returned verbatim; otherwise, if live_status is
+ * "working", a "working: <task>" / "planning: <task>" string is synthesized so the
+ * existing status parsing, labels, dot colors, and active-agent counters all
+ * reflect it without re-deriving liveness. Falls back to the raw status.
+ */
+export function effectiveAgentStatus(agent: LoomAgentStatus): string {
+  const raw = agent.status ?? "";
+  if (raw.startsWith("working:") || raw.startsWith("planning:")) {
+    return raw;
+  }
+  if (agent.live_status === "working") {
+    const planning = agent.active_phase === "planning" || agent.role === "plan";
+    const prefix = planning ? "planning" : "working";
+    return agent.active_task_id ? `${prefix}: ${agent.active_task_id}` : prefix;
+  }
+  return raw;
+}

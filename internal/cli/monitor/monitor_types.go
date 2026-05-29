@@ -47,6 +47,16 @@ type AgentStatus struct {
 	Changes        []FileChange   `json:"changes,omitempty"`          // uncommitted file changes
 	CurrentTaskID  string         `json:"current_task_id,omitempty"`  // task this daemon-managed agent has claimed; empty between tasks
 	LastActivityAt time.Time      `json:"last_activity_at,omitempty"` // most recent PTY-output observation from the agent's supervised backend; zero when not reported
+	// LiveStatus/ActiveTaskID/ActivePhase are fleet-db's DERIVED liveness signal
+	// (computed there from the running-session+fresh-lease join), carried through
+	// from the store agent record — never re-derived here. LiveStatus is "working"
+	// or "idle"; when "working", ActiveTaskID/ActivePhase describe the live session.
+	// Empty when liveness was not computed (e.g. no fleet-db store). The store-backed
+	// serve path sets these so the UI shows a provably-working agent that the
+	// lock-derived Status would otherwise report "idle".
+	LiveStatus   string `json:"live_status,omitempty"`
+	ActiveTaskID string `json:"active_task_id,omitempty"`
+	ActivePhase  string `json:"active_phase,omitempty"`
 }
 
 // TaskInfo represents a task with basic info
