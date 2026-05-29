@@ -90,35 +90,12 @@ func Load(root string) (*Plan, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := loadDir(filepath.Join(loomDir, "agents"), func(path string, data []byte) error {
-		mod, err := parseAgent(path, data)
-		if err != nil {
-			return err
-		}
-		plan.Agents = append(plan.Agents, mod)
-		return nil
-	}); err != nil {
+	plan, err = loadWithTypeScriptCompiler(abs)
+	if err != nil {
 		return nil, err
 	}
-	if err := loadDir(filepath.Join(loomDir, "workflows"), func(path string, data []byte) error {
-		mod, err := parseWorkflow(path, data)
-		if err != nil {
-			return err
-		}
-		plan.Workflows = append(plan.Workflows, mod)
-		return nil
-	}); err != nil {
-		return nil, err
-	}
-	if err := loadDir(filepath.Join(loomDir, "runtimes"), func(path string, data []byte) error {
-		mod, err := parseRuntime(path, data)
-		if err != nil {
-			return err
-		}
-		plan.Runtimes = append(plan.Runtimes, mod)
-		return nil
-	}); err != nil {
-		return nil, err
+	if strings.TrimSpace(plan.Root) == "" {
+		plan.Root = abs
 	}
 	if err := validatePlan(plan); err != nil {
 		return nil, err
@@ -257,6 +234,119 @@ func Apply(ctx context.Context, st store.Store, workspaceKey, actor string, plan
 	return nil
 }
 
+func FindAgent(plan *Plan, name string) (AgentModule, bool) {
+	if plan == nil {
+		return AgentModule{}, false
+	}
+	for _, agent := range plan.Agents {
+		if agent.Name == name {
+			return agent, true
+		}
+	}
+	return AgentModule{}, false
+}
+
+func ApplyAgentInstance(ctx context.Context, st store.Store, workspaceKey string, agent AgentModule, instanceName string, start bool) (*domain.Agent, error) {
+	if st == nil || st.Agents() == nil {
+		return nil, fmt.Errorf("agent store not configured")
+	}
+	instanceName = strings.TrimSpace(instanceName)
+	if instanceName == "" {
+		instanceName = agent.Name
+	}
+	desired := domain.AgentDesiredIdle
+	state := domain.AgentStateIdle
+	if start {
+		desired = domain.AgentDesiredRunning
+		state = domain.AgentStateActive
+	}
+	mode := domain.AgentModeService
+	created, err := st.Agents().Create(ctx, store.AgentCreate{
+		WorkspaceKey:   workspaceKey,
+		Name:           instanceName,
+		RoleName:       agent.Name,
+		Auto:           start,
+		Backend:        agent.Backend,
+		Repos:          durableAgentRepos(agent.Repos),
+		Mode:           mode,
+		MaxConcurrency: agent.MaxConcurrency,
+		DesiredState:   desired,
+	})
+	if err == nil {
+		if start && st.AgentCommands() != nil {
+			if _, cmdErr := st.AgentCommands().Create(ctx, store.AgentCommandCreate{
+				WorkspaceKey:  workspaceKey,
+				TargetAgentID: created.Name,
+				Type:          "start",
+				Payload: map[string]string{
+					"source":          "typescript-first",
+					"definition_name": agent.Name,
+					"definition_ver":  agent.Version,
+				},
+			}); cmdErr != nil {
+				return nil, fmt.Errorf("create start command: %w", cmdErr)
+			}
+		}
+		if start && created.State != state {
+			return st.Agents().Update(ctx, workspaceKey, created.Name, store.AgentUpdate{
+				State:        &state,
+				DesiredState: &desired,
+			})
+		}
+		return created, nil
+	}
+	if !errors.Is(err, domain.ErrAlreadyExists) {
+		return nil, fmt.Errorf("create agent instance %s: %w", instanceName, err)
+	}
+	patch := store.AgentUpdate{
+		RoleName:       &agent.Name,
+		Auto:           &start,
+		Backend:        &agent.Backend,
+		Repos:          ptrSlice(durableAgentRepos(agent.Repos)),
+		Mode:           &mode,
+		MaxConcurrency: &agent.MaxConcurrency,
+		DesiredState:   &desired,
+	}
+	if start {
+		patch.State = &state
+	}
+	updated, err := st.Agents().Update(ctx, workspaceKey, instanceName, patch)
+	if err != nil {
+		return nil, fmt.Errorf("update agent instance %s: %w", instanceName, err)
+	}
+	if start && st.AgentCommands() != nil {
+		if _, err := st.AgentCommands().Create(ctx, store.AgentCommandCreate{
+			WorkspaceKey:  workspaceKey,
+			TargetAgentID: updated.Name,
+			Type:          "start",
+			Payload: map[string]string{
+				"source":          "typescript-first",
+				"definition_name": agent.Name,
+				"definition_ver":  agent.Version,
+			},
+		}); err != nil {
+			return nil, fmt.Errorf("create start command: %w", err)
+		}
+	}
+	return updated, nil
+}
+
+func durableAgentRepos(repos []string) []string {
+	out := make([]string, 0, len(repos))
+	for _, repo := range repos {
+		repo = strings.TrimSpace(repo)
+		if repo == "" || repo == "." {
+			continue
+		}
+		out = append(out, repo)
+	}
+	return compactStrings(out)
+}
+
+func ptrSlice(values []string) *[]string {
+	return &values
+}
+
 func Summary(plan *Plan) string {
 	if plan == nil {
 		return "No definition plan loaded"
@@ -374,16 +464,40 @@ func parseRuntime(path string, data []byte) (RuntimeModule, error) {
 func validatePlan(plan *Plan) error {
 	seen := make(map[string]string)
 	for _, agent := range plan.Agents {
+		if strings.TrimSpace(agent.Name) == "" {
+			return fmt.Errorf("%s: agent definition name is required", agent.SourcePath)
+		}
+		if !definitionNamePattern.MatchString(agent.Name) {
+			return fmt.Errorf("%s: agent definition name %q must be lower-kebab-case", agent.SourcePath, agent.Name)
+		}
 		if prior := seen["agent:"+agent.Name]; prior != "" {
 			return fmt.Errorf("duplicate agent definition %q in %s and %s", agent.Name, prior, agent.SourcePath)
 		}
 		seen["agent:"+agent.Name] = agent.SourcePath
 	}
 	for _, wf := range plan.Workflows {
+		if strings.TrimSpace(wf.Name) == "" {
+			return fmt.Errorf("%s: workflow definition name is required", wf.SourcePath)
+		}
+		if !definitionNamePattern.MatchString(wf.Name) {
+			return fmt.Errorf("%s: workflow definition name %q must be lower-kebab-case", wf.SourcePath, wf.Name)
+		}
 		if prior := seen["workflow:"+wf.Name]; prior != "" {
 			return fmt.Errorf("duplicate workflow definition %q in %s and %s", wf.Name, prior, wf.SourcePath)
 		}
 		seen["workflow:"+wf.Name] = wf.SourcePath
+	}
+	for _, rt := range plan.Runtimes {
+		if strings.TrimSpace(rt.Name) == "" {
+			return fmt.Errorf("%s: runtime definition name is required", rt.SourcePath)
+		}
+		if !definitionNamePattern.MatchString(rt.Name) {
+			return fmt.Errorf("%s: runtime definition name %q must be lower-kebab-case", rt.SourcePath, rt.Name)
+		}
+		if prior := seen["runtime:"+rt.Name]; prior != "" {
+			return fmt.Errorf("duplicate runtime definition %q in %s and %s", rt.Name, prior, rt.SourcePath)
+		}
+		seen["runtime:"+rt.Name] = rt.SourcePath
 	}
 	return nil
 }

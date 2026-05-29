@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
+	defspkg "github.com/tysonthomas9/loomcli/internal/defs"
 )
 
 var (
@@ -18,6 +20,7 @@ var (
 	initWorktreesDir string
 	initNames        string
 	initWorkspace    string
+	initTarget       string
 )
 
 // Default agent names (fast things)
@@ -39,9 +42,11 @@ Flags:
   --worktrees-dir DIR    Override worktrees directory
   --names NAMES          Comma-separated worktree names
   --workspace NAME       Initialize within an existing workspace
+  --target local         Initialize TypeScript-first .loom authoring files
 
 Examples:
   loom init                           # Interactive setup
+  loom init --target local            # TypeScript-first local authoring setup
   loom init --yes                     # Non-interactive with defaults
   loom init --workspace myws          # Workspace-aware setup
   loom init --workspace myws --yes    # Non-interactive workspace setup`,
@@ -54,10 +59,19 @@ func init() {
 	initCmd.Flags().StringVar(&initWorktreesDir, "worktrees-dir", "", "Worktrees directory (default: from LOOM_WORKTREES_DIR or 'worktrees')")
 	initCmd.Flags().StringVar(&initNames, "names", "", "Comma-separated worktree names for non-interactive mode")
 	initCmd.Flags().StringVar(&initWorkspace, "workspace", "", "Workspace name for workspace-aware setup")
+	initCmd.Flags().StringVar(&initTarget, "target", "", "Initialize a TypeScript-first target (currently: local)")
 	cli.RegisterCommand(initCmd)
 }
 
 func runInit(cmd *cobra.Command, args []string) {
+	if initTarget != "" {
+		if err := runInitTarget(initTarget); err != nil {
+			fmt.Fprintf(os.Stderr, "✗ %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	// Check if workspace mode requested
 	if initWorkspace != "" {
 		runInitWorkspace(cmd, args)
@@ -125,6 +139,25 @@ func runInitWorkspace(cmd *cobra.Command, _ []string) {
 	fmt.Println("")
 
 	showWorkspaceSummary(ws)
+}
+
+func runInitTarget(target string) error {
+	target = strings.TrimSpace(strings.ToLower(target))
+	if target != "local" {
+		return fmt.Errorf("unsupported init target %q (supported: local)", target)
+	}
+	if err := defspkg.InitTypeScriptProject("."); err != nil {
+		return err
+	}
+	fmt.Println("Initialized TypeScript-first Loom project")
+	fmt.Println("  created/verified .loom/agents, .loom/workflows, .loom/runtimes")
+	fmt.Println("  created/verified loom.config.ts and .loom/runtime.d.ts")
+	fmt.Println("")
+	fmt.Println("Next steps:")
+	fmt.Println("  loom add agent hello-world")
+	fmt.Println("  loom check")
+	fmt.Println("  loom connect hello-world local --message \"hello\"")
+	return nil
 }
 
 // validateWorkspaceExists loads FleetDB workspace metadata and validates the

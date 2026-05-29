@@ -1,0 +1,13 @@
+{
+  "name": "@loom/runtime",
+  "version": "0.1.0",
+  "description": "TypeScript authoring helpers for Loom agents and workflows",
+  "type": "module",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "license": "MIT",
+  "files": [
+    "index.js",
+    "index.d.ts"
+  ]
+}
