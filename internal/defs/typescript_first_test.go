@@ -45,6 +45,22 @@ func TestTypeScriptFirstAgentApplyCreatesUIVisibleInstance(t *testing.T) {
 	if err := Apply(ctx, st, "TSFIRST", "test", plan); err != nil {
 		t.Fatalf("Apply() error = %v", err)
 	}
+	version, err := st.DefinitionVersions().Get(ctx, "TSFIRST", domain.DefinitionTypeAgent, "hello-world", agent.Version)
+	if err != nil {
+		t.Fatalf("definition version not created: %v", err)
+	}
+	capability := jsonMap(t, version.CapabilityManifest)
+	if capability["manifest_version"] != "loom.capabilities.v1" {
+		t.Fatalf("capability manifest = %#v, want v1 scoped manifest", capability)
+	}
+	sandbox := capability["sandbox"].(map[string]any)
+	if !strings.Contains(fmtStringSlice(sandbox["allowed_commands"]), "git status") {
+		t.Fatalf("sandbox capability = %#v, want allowed git status command", sandbox)
+	}
+	runtime := capability["runtime"].(map[string]any)
+	if !strings.Contains(fmtStringSlice(runtime["repos"]), ".") {
+		t.Fatalf("runtime capability = %#v, want local repo grant preserved", runtime)
+	}
 	role, err := st.Roles().Get(ctx, "TSFIRST", "hello-world")
 	if err != nil {
 		t.Fatalf("role not created: %v", err)
@@ -115,8 +131,22 @@ func TestTypeScriptFirstWorkflowApplyCreatesDurableBindings(t *testing.T) {
 	if def.Version != workflow.Version || def.SourceRef != workflow.SourcePath {
 		t.Fatalf("definition = %+v, want TypeScript source/version", def)
 	}
-	if !strings.Contains(string(def.CapabilityManifest), "taskRuns.ensure") {
-		t.Fatalf("capability manifest = %s, want workflow tool grants", def.CapabilityManifest)
+	capability := jsonMap(t, def.CapabilityManifest)
+	if capability["manifest_version"] != "loom.capabilities.v1" {
+		t.Fatalf("capability manifest = %#v, want v1 scoped manifest", capability)
+	}
+	workflowCaps := capability["workflow"].(map[string]any)
+	if !strings.Contains(fmtStringSlice(workflowCaps["tools"]), "taskRuns.ensure") {
+		t.Fatalf("workflow capabilities = %#v, want taskRuns.ensure grant", workflowCaps)
+	}
+	runner := capability["runner"].(map[string]any)
+	if runner["builtin"] != "run-parent-work-items" {
+		t.Fatalf("runner capability = %#v, want constrained builtin runner", runner)
+	}
+	ingress := capability["ingress"].(map[string]any)
+	route := ingress["route"].(map[string]any)
+	if route["path"] != "/workflows/epic-runner/run" || route["auth"] != "workspace" {
+		t.Fatalf("route capability = %#v, want workspace route", route)
 	}
 	var manifest map[string]any
 	if err := json.Unmarshal(def.Manifest, &manifest); err != nil {
@@ -139,4 +169,36 @@ func TestTypeScriptFirstWorkflowApplyCreatesDurableBindings(t *testing.T) {
 	if len(triggers) != 1 || triggers[0].EventType != "issue.label_added" || !strings.Contains(string(triggers[0].Filter), `"epic"`) {
 		t.Fatalf("triggers = %+v, want one issue label trigger", triggers)
 	}
+}
+
+func TestLoadRejectsUnauthenticatedWorkflowRoute(t *testing.T) {
+	root := t.TempDir()
+	writeDefFile(t, root, ".loom/workflows/unsafe.ts", `export default defineWorkflow({
+  name: "unsafe-route",
+  builtin: "run-parent-work-items",
+  path: "/workflows/unsafe/run",
+});`)
+
+	_, err := Load(root)
+	if err == nil || !strings.Contains(err.Error(), "must declare an auth policy") {
+		t.Fatalf("Load() error = %v, want route auth policy validation", err)
+	}
+}
+
+func jsonMap(t *testing.T, raw json.RawMessage) map[string]any {
+	t.Helper()
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("decode JSON map: %v\n%s", err, raw)
+	}
+	return out
+}
+
+func fmtStringSlice(value any) string {
+	return strings.Trim(strings.ReplaceAll(strings.ReplaceAll(strings.TrimSpace(fmtAny(value)), "\n", " "), "  ", " "), "[]")
+}
+
+func fmtAny(value any) string {
+	data, _ := json.Marshal(value)
+	return string(data)
 }

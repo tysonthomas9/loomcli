@@ -102,17 +102,44 @@ func printPlan(plan *defspkg.Plan) {
 	}
 	for _, agent := range plan.Agents {
 		fmt.Printf("  agent    %-28s %s\n", agent.Name, agent.Version)
-		if len(agent.AllowedCommands) > 0 || len(agent.Tools) > 0 {
-			fmt.Printf("           tools: %s\n", strings.Join(append(agent.AllowedCommands, agent.Tools...), ", "))
+		if len(agent.Tools) > 0 {
+			fmt.Printf("           model tools: %s\n", strings.Join(agent.Tools, ", "))
+		}
+		if len(agent.Skills) > 0 {
+			fmt.Printf("           skills: %s\n", strings.Join(agent.Skills, ", "))
+		}
+		if len(agent.AllowedCommands) > 0 {
+			fmt.Printf("           sandbox allow: %s\n", strings.Join(agent.AllowedCommands, ", "))
+		}
+		if len(agent.DeniedCommands) > 0 {
+			fmt.Printf("           sandbox deny: %s\n", strings.Join(agent.DeniedCommands, ", "))
+		}
+		if len(agent.Repos) > 0 {
+			fmt.Printf("           repos: %s\n", strings.Join(agent.Repos, ", "))
+		}
+		if len(agent.Env) > 0 {
+			fmt.Printf("           env: %s\n", strings.Join(agent.Env, ", "))
 		}
 	}
 	for _, wf := range plan.Workflows {
 		fmt.Printf("  workflow %-28s %s\n", wf.Name, wf.Version)
+		if wf.Builtin != "" {
+			fmt.Printf("           runner: %s\n", wf.Builtin)
+		}
+		if len(wf.Tools) > 0 {
+			fmt.Printf("           workflow tools: %s\n", strings.Join(wf.Tools, ", "))
+		}
 		if wf.RoutePath != "" {
 			fmt.Printf("           route: POST %s auth=%s\n", wf.RoutePath, wf.RouteAuth)
 		}
 		if wf.TriggerEvent != "" {
 			fmt.Printf("           trigger: %s\n", wf.TriggerEvent)
+		}
+		if len(wf.Repos) > 0 {
+			fmt.Printf("           repos: %s\n", strings.Join(wf.Repos, ", "))
+		}
+		if len(wf.Env) > 0 {
+			fmt.Printf("           env: %s\n", strings.Join(wf.Env, ", "))
 		}
 	}
 	for _, rt := range plan.Runtimes {

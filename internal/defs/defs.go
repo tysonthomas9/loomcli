@@ -112,13 +112,7 @@ func Apply(ctx context.Context, st store.Store, workspaceKey, actor string, plan
 	}
 	for _, agent := range plan.Agents {
 		manifest := mustJSON(agent)
-		capability := mustJSON(map[string]any{
-			"model_tools":      agent.Tools,
-			"sandbox_commands": agent.AllowedCommands,
-			"denied_commands":  agent.DeniedCommands,
-			"repos":            agent.Repos,
-			"env":              agent.Env,
-		})
+		capability := agentCapabilityManifest(agent)
 		if _, err := st.DefinitionVersions().Apply(ctx, store.DefinitionVersionApply{
 			WorkspaceKey:       workspaceKey,
 			DefinitionType:     domain.DefinitionTypeAgent,
@@ -170,12 +164,7 @@ func Apply(ctx context.Context, st store.Store, workspaceKey, actor string, plan
 	}
 	for _, wf := range plan.Workflows {
 		manifest := mustJSON(wf)
-		capability := mustJSON(map[string]any{
-			"workflow_tools": wf.Tools,
-			"repos":          wf.Repos,
-			"env":            wf.Env,
-			"builtin":        wf.Builtin,
-		})
+		capability := workflowCapabilityManifest(wf)
 		if _, err := st.DefinitionVersions().Apply(ctx, store.DefinitionVersionApply{
 			WorkspaceKey:       workspaceKey,
 			DefinitionType:     domain.DefinitionTypeWorkflow,
@@ -232,6 +221,75 @@ func Apply(ctx context.Context, st store.Store, workspaceKey, actor string, plan
 		}
 	}
 	return nil
+}
+
+func agentCapabilityManifest(agent AgentModule) json.RawMessage {
+	out := map[string]any{
+		"manifest_version": "loom.capabilities.v1",
+		"definition": map[string]any{
+			"type":    string(domain.DefinitionTypeAgent),
+			"name":    agent.Name,
+			"version": agent.Version,
+		},
+		"model": map[string]any{
+			"tools":  compactStrings(agent.Tools),
+			"skills": compactStrings(agent.Skills),
+		},
+		"sandbox": map[string]any{
+			"allowed_commands": compactStrings(agent.AllowedCommands),
+			"denied_commands":  compactStrings(agent.DeniedCommands),
+		},
+		"runtime": map[string]any{
+			"repos": compactStrings(agent.Repos),
+			"env":   compactStrings(agent.Env),
+		},
+		"limits": map[string]any{
+			"max_concurrency": agent.MaxConcurrency,
+			"max_budget_usd":  agent.MaxBudgetUSD,
+			"read_only":       agent.ReadOnly,
+		},
+	}
+	return mustJSON(compactMap(out))
+}
+
+func workflowCapabilityManifest(wf WorkflowModule) json.RawMessage {
+	ingress := map[string]any{}
+	if wf.RoutePath != "" {
+		ingress["route"] = map[string]any{
+			"method": "POST",
+			"path":   wf.RoutePath,
+			"auth":   wf.RouteAuth,
+		}
+	}
+	if wf.TriggerEvent != "" {
+		ingress["trigger"] = map[string]any{
+			"event":  wf.TriggerEvent,
+			"filter": wf.TriggerFilter,
+		}
+	}
+	out := map[string]any{
+		"manifest_version": "loom.capabilities.v1",
+		"definition": map[string]any{
+			"type":    string(domain.DefinitionTypeWorkflow),
+			"name":    wf.Name,
+			"version": wf.Version,
+		},
+		"workflow": map[string]any{
+			"tools": compactStrings(wf.Tools),
+		},
+		"runtime": map[string]any{
+			"repos": compactStrings(wf.Repos),
+			"env":   compactStrings(wf.Env),
+		},
+		"runner": map[string]any{
+			"builtin": wf.Builtin,
+		},
+		"ingress": ingress,
+		"idempotency": map[string]any{
+			"singleton_policy": wf.SingletonPolicy,
+		},
+	}
+	return mustJSON(compactMap(out))
 }
 
 func FindAgent(plan *Plan, name string) (AgentModule, bool) {
@@ -486,6 +544,24 @@ func validatePlan(plan *Plan) error {
 			return fmt.Errorf("duplicate agent definition %q in %s and %s", agent.Name, prior, agent.SourcePath)
 		}
 		seen["agent:"+agent.Name] = agent.SourcePath
+		if err := validateUniqueStrings(agent.SourcePath, "agent model tools", agent.Tools); err != nil {
+			return err
+		}
+		if err := validateUniqueStrings(agent.SourcePath, "agent skills", agent.Skills); err != nil {
+			return err
+		}
+		if err := validateUniqueStrings(agent.SourcePath, "agent allowed commands", agent.AllowedCommands); err != nil {
+			return err
+		}
+		if err := validateUniqueStrings(agent.SourcePath, "agent denied commands", agent.DeniedCommands); err != nil {
+			return err
+		}
+		if err := validateRepoAndEnvPolicy(agent.SourcePath, agent.Repos, agent.Env); err != nil {
+			return err
+		}
+		if err := validateNoExactCollision(agent.SourcePath, "model tool", agent.Tools, "sandbox command", agent.AllowedCommands); err != nil {
+			return err
+		}
 	}
 	for _, wf := range plan.Workflows {
 		if strings.TrimSpace(wf.Name) == "" {
@@ -498,6 +574,15 @@ func validatePlan(plan *Plan) error {
 			return fmt.Errorf("duplicate workflow definition %q in %s and %s", wf.Name, prior, wf.SourcePath)
 		}
 		seen["workflow:"+wf.Name] = wf.SourcePath
+		if err := validateUniqueStrings(wf.SourcePath, "workflow tools", wf.Tools); err != nil {
+			return err
+		}
+		if err := validateRepoAndEnvPolicy(wf.SourcePath, wf.Repos, wf.Env); err != nil {
+			return err
+		}
+		if wf.RoutePath != "" && strings.TrimSpace(wf.RouteAuth) == "" {
+			return fmt.Errorf("%s: workflow route %q must declare an auth policy", wf.SourcePath, wf.RoutePath)
+		}
 	}
 	for _, rt := range plan.Runtimes {
 		if strings.TrimSpace(rt.Name) == "" {
@@ -510,6 +595,58 @@ func validatePlan(plan *Plan) error {
 			return fmt.Errorf("duplicate runtime definition %q in %s and %s", rt.Name, prior, rt.SourcePath)
 		}
 		seen["runtime:"+rt.Name] = rt.SourcePath
+		if err := validateRepoAndEnvPolicy(rt.SourcePath, rt.Repos, rt.Env); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateUniqueStrings(sourcePath, label string, values []string) error {
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			return fmt.Errorf("%s: duplicate %s capability %q", sourcePath, label, value)
+		}
+		seen[value] = struct{}{}
+	}
+	return nil
+}
+
+func validateRepoAndEnvPolicy(sourcePath string, repos, env []string) error {
+	for _, repo := range repos {
+		if strings.TrimSpace(repo) == "*" {
+			return fmt.Errorf("%s: wildcard repo mounts are not allowed", sourcePath)
+		}
+	}
+	for _, name := range env {
+		if strings.TrimSpace(name) == "*" {
+			return fmt.Errorf("%s: wildcard environment grants are not allowed", sourcePath)
+		}
+	}
+	return nil
+}
+
+func validateNoExactCollision(sourcePath, leftLabel string, left []string, rightLabel string, right []string) error {
+	rightSet := make(map[string]struct{}, len(right))
+	for _, value := range right {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			rightSet[value] = struct{}{}
+		}
+	}
+	for _, value := range left {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := rightSet[value]; ok {
+			return fmt.Errorf("%s: %s %q collides with %s capability", sourcePath, leftLabel, value, rightLabel)
+		}
 	}
 	return nil
 }
@@ -704,6 +841,49 @@ func routeBindingID(name, method, routePath string) string {
 	}
 	safePath = strings.NewReplacer("/", ".", " ", "-").Replace(safePath)
 	return "workflow:" + name + ":" + method + ":" + safePath
+}
+
+func compactMap(in map[string]any) map[string]any {
+	out := make(map[string]any, len(in))
+	for key, value := range in {
+		compact, ok := compactValue(value)
+		if !ok {
+			continue
+		}
+		out[key] = compact
+	}
+	return out
+}
+
+func compactValue(value any) (any, bool) {
+	switch v := value.(type) {
+	case nil:
+		return nil, false
+	case string:
+		if strings.TrimSpace(v) == "" {
+			return nil, false
+		}
+		return v, true
+	case []string:
+		items := compactStrings(v)
+		if len(items) == 0 {
+			return nil, false
+		}
+		return items, true
+	case map[string]string:
+		if len(v) == 0 {
+			return nil, false
+		}
+		return v, true
+	case map[string]any:
+		nested := compactMap(v)
+		if len(nested) == 0 {
+			return nil, false
+		}
+		return nested, true
+	default:
+		return value, true
+	}
 }
 
 func mustJSON(v any) json.RawMessage {
