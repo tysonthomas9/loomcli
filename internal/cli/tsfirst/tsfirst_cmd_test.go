@@ -266,7 +266,7 @@ func TestTypeScriptCommandValidationBeforeStoreAccess(t *testing.T) {
 	})
 }
 
-func TestRunTypeScriptWorkflowAppliesAndRunsBuiltin(t *testing.T) {
+func TestRunTypeScriptWorkflowAppliesAndRunsWorkflowContext(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 	path, err := defspkg.ScaffoldWorkflow(root, "epic-runner")
@@ -304,7 +304,7 @@ func TestRunTypeScriptWorkflowAppliesAndRunsBuiltin(t *testing.T) {
 		t.Fatalf("run = %+v, want waiting workflow run", result.Run)
 	}
 	if result.Builtin == nil || len(result.Builtin.TaskRuns) != 1 {
-		t.Fatalf("builtin = %+v, want one ensured task run", result.Builtin)
+		t.Fatalf("execution = %+v, want one ensured task run", result.Builtin)
 	}
 	if result.Builtin.DispatchedCount != 1 {
 		t.Fatalf("DispatchedCount = %d, want one daemon command dispatch", result.Builtin.DispatchedCount)
@@ -335,8 +335,8 @@ func TestRunTypeScriptWorkflowAppliesAndRunsBuiltin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list run events: %v", err)
 	}
-	if !hasRunEvent(events, "workflow_ts_reconciled") || !hasRunEvent(events, "task_run_ensured") || !hasRunEvent(events, "task_run_dispatched") {
-		t.Fatalf("events = %+v, want TypeScript reconcile, ensure, and dispatch evidence", events)
+	if !hasRunEvent(events, "workflow_ts_context_started") || !hasRunEvent(events, "workflow_log") || !hasRunEvent(events, "task_run_ensured") || !hasRunEvent(events, "task_run_dispatched") {
+		t.Fatalf("events = %+v, want TypeScript WorkflowContext, log, ensure, and dispatch evidence", events)
 	}
 }
 

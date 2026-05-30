@@ -51,6 +51,7 @@ func parseWorkflow(path string, data []byte) (WorkflowModule, error) {
 		Version:         version(hash),
 		SingletonPolicy: singletonPolicy(src),
 		Builtin:         stringField(src, "builtin"),
+		Runner:          workflowRunner(src),
 		RoutePath:       firstPathField(src),
 		RouteAuth:       stringField(src, "auth"),
 		TriggerEvent:    triggerEvent(src),
@@ -63,6 +64,13 @@ func parseWorkflow(path string, data []byte) (WorkflowModule, error) {
 		return mod, fmt.Errorf("%s: defineWorkflow name is required", path)
 	}
 	return mod, nil
+}
+
+func workflowRunner(src string) string {
+	if strings.Contains(src, "async run(") || strings.Contains(src, "run(") {
+		return "workflow-context-v1"
+	}
+	return stringField(src, "runner")
 }
 
 func parseRuntime(path string, data []byte) RuntimeModule {

@@ -115,8 +115,19 @@ func RunOnce(ctx context.Context, st store.Store, ib backend.IssueBackend, run *
 	}
 	var manifest struct {
 		Builtin string `json:"builtin"`
+		Runner  string `json:"runner"`
 	}
 	_ = json.Unmarshal(def.Manifest, &manifest)
+	if manifest.Runner == "workflow-context-v1" {
+		_, _ = st.RunEvents().Append(ctx, store.RunEventAppend{
+			WorkspaceKey:  run.WorkspaceKey,
+			WorkflowRunID: run.RunID,
+			Type:          "workflow_ts_context_started",
+			Message:       "code-defined workflow executing constrained WorkflowContext",
+			Data:          mustJSON(map[string]string{"runner": manifest.Runner, "source_ref": def.SourceRef}),
+		})
+		return runTypeScriptContextOnce(ctx, st, ib, run, def)
+	}
 	switch manifest.Builtin {
 	case RunParentWorkItemsName:
 		_, _ = st.RunEvents().Append(ctx, store.RunEventAppend{

@@ -3,10 +3,13 @@ package workflow
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli/clitest"
+	defspkg "github.com/tysonthomas9/loomcli/internal/defs"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -121,6 +124,85 @@ func TestCodeDefinedSlackCloneWorkflowDelegatesToBuiltinRunner(t *testing.T) {
 	}
 	if !foundReconcile || !hasWorkflowEvent(events, "task_run_dispatched") {
 		t.Fatalf("events = %+v, want workflow_ts_reconciled and dispatch events", events)
+	}
+}
+
+func TestCodeDefinedWorkflowExecutesConstrainedTypeScriptContext(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	workflowPath := filepath.Join(root, ".loom", "workflows", "context-epic.ts")
+	if err := os.MkdirAll(filepath.Dir(workflowPath), 0o755); err != nil {
+		t.Fatalf("mkdir workflow dir: %v", err)
+	}
+	if err := os.WriteFile(workflowPath, []byte(`import { defineWorkflow } from '@loom/runtime';
+
+export default defineWorkflow({
+  name: 'context-epic',
+  singleton: (input) => `+"`"+`parent:${input.parentId}`+"`"+`,
+  tools: ['workItems.readyChildren', 'taskRuns.ensure'],
+  async run(ctx) {
+    ctx.log.info('context epic started', { parentId: ctx.input.parentId });
+    const ready = await ctx.workItems.readyChildren(String(ctx.input.parentId));
+    for (const issue of ready) {
+      await ctx.taskRuns.ensure({
+        workItemId: issue.id,
+        role: 'task',
+        reason: issue.title,
+        metadata: { source: 'typescript' },
+      });
+    }
+    return { ensured: ready.length };
+  },
+});
+`), 0o644); err != nil {
+		t.Fatalf("write workflow: %v", err)
+	}
+	plan, err := defspkg.Load(root)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if len(plan.Workflows) != 1 || plan.Workflows[0].Runner != "workflow-context-v1" {
+		t.Fatalf("workflows = %+v, want one WorkflowContext runner", plan.Workflows)
+	}
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TSCTX", Name: "TypeScript Context"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := defspkg.Apply(ctx, st, "TSCTX", "atlas", plan); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	ready := backend.IssueData{ID: "CTX-2", Title: "Build workflow context", Status: "open"}
+	ib := clitest.NewMockIssueBackend()
+	ib.ReadyResult = []backend.IssueData{ready}
+	ib.BlockedResult = nil
+	ib.ListResult = []backend.IssueData{ready}
+
+	run, err := CreateOrResumeRun(ctx, st, "TSCTX", "context-epic", json.RawMessage(`{"parentId":"CTX-1"}`), "atlas")
+	if err != nil {
+		t.Fatalf("CreateOrResumeRun() error = %v", err)
+	}
+	result, err := RunOnce(ctx, st, ib, run)
+	if err != nil {
+		t.Fatalf("RunOnce() error = %v", err)
+	}
+	if result.Run == nil || result.Run.Status != domain.WorkflowRunWaiting || len(result.TaskRuns) != 1 || result.DispatchedCount != 1 {
+		t.Fatalf("result = %+v, want waiting run with one dispatched task", result)
+	}
+	taskRuns, err := st.TaskRuns().List(ctx, "TSCTX", store.TaskRunFilter{WorkflowRunID: run.RunID, WorkItemID: ready.ID})
+	if err != nil {
+		t.Fatalf("list task runs: %v", err)
+	}
+	if len(taskRuns) != 1 || taskRuns[0].Status != domain.TaskRunStarting || taskRuns[0].Metadata["source"] != "typescript" {
+		t.Fatalf("taskRuns = %+v, want TypeScript-created dispatched task run", taskRuns)
+	}
+	events, err := st.RunEvents().List(ctx, "TSCTX", store.RunEventFilter{WorkflowRunID: run.RunID})
+	if err != nil {
+		t.Fatalf("list run events: %v", err)
+	}
+	for _, typ := range []string{"workflow_ts_context_started", "workflow_log", "task_run_ensured", "task_run_dispatched"} {
+		if !hasWorkflowEvent(events, typ) {
+			t.Fatalf("events = %+v, want %s", events, typ)
+		}
 	}
 }
 

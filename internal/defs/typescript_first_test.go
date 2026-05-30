@@ -107,8 +107,8 @@ func TestTypeScriptFirstWorkflowApplyCreatesDurableBindings(t *testing.T) {
 	if workflow.SourcePath != path || workflow.Name != "epic-runner" {
 		t.Fatalf("workflow = %+v, want scaffolded epic-runner from %s", workflow, path)
 	}
-	if workflow.Builtin != "run-parent-work-items" {
-		t.Fatalf("Builtin = %q, want constrained built-in runner", workflow.Builtin)
+	if workflow.Runner != "workflow-context-v1" || workflow.Builtin != "" {
+		t.Fatalf("workflow runner = %q builtin=%q, want constrained WorkflowContext runner", workflow.Runner, workflow.Builtin)
 	}
 	if workflow.RoutePath != "/workflows/epic-runner/run" || workflow.RouteAuth != "workspace" {
 		t.Fatalf("route = %q auth=%q, want workspace HTTP route", workflow.RoutePath, workflow.RouteAuth)
@@ -140,8 +140,8 @@ func TestTypeScriptFirstWorkflowApplyCreatesDurableBindings(t *testing.T) {
 		t.Fatalf("workflow capabilities = %#v, want taskRuns.ensure grant", workflowCaps)
 	}
 	runner := capability["runner"].(map[string]any)
-	if runner["builtin"] != "run-parent-work-items" {
-		t.Fatalf("runner capability = %#v, want constrained builtin runner", runner)
+	if runner["context"] != "workflow-context-v1" {
+		t.Fatalf("runner capability = %#v, want constrained WorkflowContext runner", runner)
 	}
 	ingress := capability["ingress"].(map[string]any)
 	route := ingress["route"].(map[string]any)
@@ -152,8 +152,8 @@ func TestTypeScriptFirstWorkflowApplyCreatesDurableBindings(t *testing.T) {
 	if err := json.Unmarshal(def.Manifest, &manifest); err != nil {
 		t.Fatalf("manifest is not JSON: %v", err)
 	}
-	if manifest["builtin"] != "run-parent-work-items" {
-		t.Fatalf("manifest builtin = %v, want run-parent-work-items", manifest["builtin"])
+	if manifest["runner"] != "workflow-context-v1" {
+		t.Fatalf("manifest runner = %v, want workflow-context-v1", manifest["runner"])
 	}
 	routes, err := st.RouteBindings().List(ctx, "TSWF", store.RouteBindingFilter{DefinitionName: "epic-runner"})
 	if err != nil {

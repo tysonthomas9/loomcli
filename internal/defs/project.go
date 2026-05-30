@@ -160,11 +160,16 @@ export default createAgent({
 func workflowTemplate(name string) string {
 	return fmt.Sprintf(`import { defineWorkflow, trigger } from '@loom/runtime';
 
+type Input = {
+  parentId: string;
+  role?: string;
+  maxConcurrency?: number;
+};
+
 export default defineWorkflow({
   name: '%s',
   description: 'Ensure one live task run per ready child under a parent work item.',
-  builtin: 'run-parent-work-items',
-  singleton: (input) => `+"`"+`parent:${input.parentId}`+"`"+`,
+  singleton: (input: Input) => `+"`"+`parent:${input.parentId}`+"`"+`,
   expose: {
     http: {
       path: '/workflows/%s/run',
@@ -177,6 +182,26 @@ export default defineWorkflow({
   tools: ['workItems.readyChildren', 'taskRuns.ensure'],
   repos: ['.'],
   env: [],
+
+  async run(ctx) {
+    const parentId = String(ctx.input.parentId ?? ctx.input.parent_id ?? '');
+    if (!parentId) throw new Error('parentId is required');
+
+    const role = String(ctx.input.role ?? 'task');
+    const maxConcurrency = Number(ctx.input.maxConcurrency ?? ctx.input.max_concurrency ?? 4);
+    ctx.log.info('checking ready child work', { parentId, role, maxConcurrency });
+
+    const ready = await ctx.workItems.readyChildren(parentId, { limit: maxConcurrency });
+    for (const child of ready.slice(0, maxConcurrency)) {
+      await ctx.taskRuns.ensure({
+        workItemId: String(child.id),
+        role,
+        reason: String(child.title ?? ''),
+      });
+    }
+
+    return { parentId, ensured: ready.length };
+  },
 });
 `, name, name, name)
 }
@@ -245,6 +270,7 @@ const runtimeTypes = `declare module '@loom/runtime' {
     name: string;
     description?: string;
     builtin?: string;
+    runner?: string;
     singleton?: string | ((input: Record<string, unknown>) => string);
     path?: string;
     auth?: string;
@@ -263,6 +289,34 @@ const runtimeTypes = `declare module '@loom/runtime' {
     tools?: Array<string | unknown>;
     repos?: string[];
     env?: string[];
+    run?: (ctx: WorkflowContext) => unknown | Promise<unknown>;
+  };
+
+  export type WorkflowContext = {
+    id: string;
+    input: Record<string, unknown>;
+    payload: Record<string, unknown>;
+    env: Record<string, string | undefined>;
+    log: {
+      info(message: string, attributes?: Record<string, unknown>): void;
+      warn(message: string, attributes?: Record<string, unknown>): void;
+      error(message: string, attributes?: Record<string, unknown>): void;
+    };
+    workItems: {
+      readyChildren(parentId: string, options?: Record<string, unknown>): Promise<Array<Record<string, unknown>>>;
+      blockedChildren(parentId: string, options?: Record<string, unknown>): Promise<Array<Record<string, unknown>>>;
+      listChildren(parentId: string, options?: Record<string, unknown>): Promise<Array<Record<string, unknown>>>;
+    };
+    taskRuns: {
+      ensure(input: {
+        workItemId?: string;
+        work_item_id?: string;
+        role?: string;
+        roleName?: string;
+        reason?: string;
+        metadata?: Record<string, string>;
+      }): Promise<Record<string, unknown>>;
+    };
   };
 
   export function defineConfig<T extends object>(config: T): T;

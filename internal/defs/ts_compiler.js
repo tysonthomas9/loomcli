@@ -547,6 +547,7 @@ function workflowModule(file) {
     version: version(hash),
     singleton_policy: singletonPolicy(source, value),
     builtin: stringValue(value.builtin),
+    runner: typeof value.run === "function" ? "workflow-context-v1" : stringValue(value.runner),
     route_path: r.path,
     route_auth: r.auth,
     trigger_event: t.event,

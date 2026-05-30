@@ -52,6 +52,7 @@ type WorkflowModule struct {
 	Version         string            `json:"version"`
 	SingletonPolicy string            `json:"singleton_policy,omitempty"`
 	Builtin         string            `json:"builtin,omitempty"`
+	Runner          string            `json:"runner,omitempty"`
 	RoutePath       string            `json:"route_path,omitempty"`
 	RouteAuth       string            `json:"route_auth,omitempty"`
 	TriggerEvent    string            `json:"trigger_event,omitempty"`
@@ -476,6 +477,7 @@ func workflowCapabilityManifest(wf WorkflowModule, tools map[string]ToolModule) 
 		},
 		"runner": map[string]any{
 			"builtin": wf.Builtin,
+			"context": wf.Runner,
 		},
 		"ingress": ingress,
 		"idempotency": map[string]any{
