@@ -268,12 +268,13 @@ func HandleMultiRunEventStream(st store.Store) http.HandlerFunc {
 				if err := writeWorkflowRunEventSet(r.Context(), st, sw, r.PathValue("ws"), runIDs, cursors); err != nil {
 					_ = sw.WriteComment(err.Error())
 				}
-				if workflowStreamUntilTerminal(r) {
-					done, err := workflowRunsTerminal(r.Context(), st, r.PathValue("ws"), runIDs)
-					if err == nil && done {
-						_ = writeWorkflowAdmissionEnvelope(sw, "workflow_run_stream_complete", "complete", map[string]any{"run_ids": runIDs})
-						return
-					}
+				complete, err := writeWorkflowRunStreamCompleteIfTerminal(r.Context(), st, sw, r.PathValue("ws"), runIDs, workflowStreamUntilTerminal(r))
+				if err != nil {
+					_ = sw.WriteComment(err.Error())
+					return
+				}
+				if complete {
+					return
 				}
 			}
 		}
@@ -485,8 +486,12 @@ func writeWorkflowAdmissionStream(w http.ResponseWriter, r *http.Request, st sto
 	if resp.Run == nil {
 		return nil
 	}
-	var lastIndex int64
-	return writeWorkflowRunEventsWithIDPrefix(r.Context(), st, sw, ws, resp.Run.RunID, &lastIndex, resp.Run.RunID)
+	runIDs := []string{resp.Run.RunID}
+	cursors := map[string]int64{resp.Run.RunID: 0}
+	if err := writeWorkflowRunEventSet(r.Context(), st, sw, ws, runIDs, cursors); err != nil {
+		return err
+	}
+	return followWorkflowRunsUntilTerminal(r.Context(), st, sw, ws, runIDs, cursors, workflowStreamUntilTerminal(r))
 }
 
 func writeWorkflowTriggerAdmissionStream(w http.ResponseWriter, r *http.Request, st store.Store, ws string, resp triggerResponse) error {
@@ -497,16 +502,79 @@ func writeWorkflowTriggerAdmissionStream(w http.ResponseWriter, r *http.Request,
 	if err := writeWorkflowAdmissionEnvelope(sw, "workflow_trigger_admission", "admission", resp); err != nil {
 		return err
 	}
+	var runIDs []string
+	cursors := map[string]int64{}
 	for _, run := range resp.Runs {
 		if run.Run == nil {
 			continue
 		}
-		var lastIndex int64
-		if err := writeWorkflowRunEventsWithIDPrefix(r.Context(), st, sw, ws, run.Run.RunID, &lastIndex, run.Run.RunID); err != nil {
+		runIDs = append(runIDs, run.Run.RunID)
+		cursors[run.Run.RunID] = 0
+	}
+	if err := writeWorkflowRunEventSet(r.Context(), st, sw, ws, runIDs, cursors); err != nil {
+		return err
+	}
+	return followWorkflowRunsUntilTerminal(r.Context(), st, sw, ws, runIDs, cursors, workflowStreamUntilTerminal(r))
+}
+
+func followWorkflowRunsUntilTerminal(ctx context.Context, st store.Store, sw *realtime.Writer, ws string, runIDs []string, cursors map[string]int64, enabled bool) error {
+	if !enabled || len(runIDs) == 0 {
+		return nil
+	}
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	for {
+		complete, err := writeWorkflowRunStreamCompleteIfTerminal(ctx, st, sw, ws, runIDs, true)
+		if err != nil {
 			return err
 		}
+		if complete {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+			if err := writeWorkflowRunEventSet(ctx, st, sw, ws, runIDs, cursors); err != nil {
+				return err
+			}
+		}
 	}
-	return nil
+}
+
+func writeWorkflowRunStreamCompleteIfTerminal(ctx context.Context, st store.Store, sw *realtime.Writer, ws string, runIDs []string, enabled bool) (bool, error) {
+	if !enabled || len(runIDs) == 0 {
+		return false, nil
+	}
+	done, err := workflowRunsTerminal(ctx, st, ws, runIDs)
+	if err != nil || !done {
+		return false, err
+	}
+	payload, err := workflowRunStreamCompletionPayload(ctx, st, ws, runIDs)
+	if err != nil {
+		return false, err
+	}
+	return true, writeWorkflowAdmissionEnvelope(sw, "workflow_run_stream_complete", "complete", payload)
+}
+
+func workflowRunStreamCompletionPayload(ctx context.Context, st store.Store, ws string, runIDs []string) (map[string]any, error) {
+	runs := make([]map[string]any, 0, len(runIDs))
+	for _, runID := range runIDs {
+		run, err := st.WorkflowRuns().Get(ctx, ws, runID)
+		if err != nil {
+			return nil, err
+		}
+		item := map[string]any{
+			"run_id":        run.RunID,
+			"workflow_name": run.WorkflowName,
+			"status":        string(run.Status),
+		}
+		if run.FinishedAt != nil {
+			item["finished_at"] = run.FinishedAt.Format(time.RFC3339Nano)
+		}
+		runs = append(runs, item)
+	}
+	return map[string]any{"run_ids": runIDs, "runs": runs}, nil
 }
 
 func newWorkflowAdmissionStreamWriter(w http.ResponseWriter, status int) (*realtime.Writer, error) {

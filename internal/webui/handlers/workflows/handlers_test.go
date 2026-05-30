@@ -286,6 +286,23 @@ func TestWorkflowRouteBindingAPIRunsBoundWorkflow(t *testing.T) {
 		!strings.Contains(body, `"type":"task_run_ensured"`) {
 		t.Fatalf("route stream body = %s, want admission and replayed workflow events", body)
 	}
+
+	terminalMux := workflowMux(st, testIssueBackend{})
+	terminalStreamRec := postJSONStream(t, terminalMux, "/api/workspaces/WS/workflow-routes/workflows/epic-runner/run?until=terminal", map[string]any{
+		"input": map[string]any{
+			"parentId":       "EPIC-ROUTE-DONE",
+			"role":           "task",
+			"maxConcurrency": 1,
+		},
+	})
+	if terminalStreamRec.Code != http.StatusCreated {
+		t.Fatalf("terminal route stream status = %d, want 201; body=%s", terminalStreamRec.Code, terminalStreamRec.Body.String())
+	}
+	if body := terminalStreamRec.Body.String(); !strings.Contains(body, "event: workflow_run_stream_complete") ||
+		!strings.Contains(body, `"status":"completed"`) ||
+		!strings.Contains(body, `"workflow_name":"epic-runner"`) {
+		t.Fatalf("terminal route stream body = %s, want terminal completion contract", body)
+	}
 }
 
 func TestWorkflowRouteBindingAPIValidation(t *testing.T) {
@@ -388,6 +405,24 @@ func TestWorkflowTriggerBindingAPIRunsMatchingWorkflow(t *testing.T) {
 		!strings.Contains(body, `"type":"workflow_trigger_admitted"`) ||
 		!strings.Contains(body, `"type":"task_run_ensured"`) {
 		t.Fatalf("trigger stream body = %s, want trigger admission and replayed workflow events", body)
+	}
+
+	terminalMux := workflowMux(st, testIssueBackend{})
+	terminalStreamRec := postJSONStream(t, terminalMux, "/api/workspaces/WS/workflow-triggers/issue.label_added?until=terminal", map[string]any{
+		"input": map[string]any{
+			"parentId":       "EPIC-TRIGGER-DONE",
+			"label":          "epic-runner",
+			"type":           "epic",
+			"maxConcurrency": 1,
+		},
+	})
+	if terminalStreamRec.Code != http.StatusCreated {
+		t.Fatalf("terminal trigger stream status = %d, want 201; body=%s", terminalStreamRec.Code, terminalStreamRec.Body.String())
+	}
+	if body := terminalStreamRec.Body.String(); !strings.Contains(body, "event: workflow_run_stream_complete") ||
+		!strings.Contains(body, `"status":"completed"`) ||
+		!strings.Contains(body, `"workflow_name":"epic-runner"`) {
+		t.Fatalf("terminal trigger stream body = %s, want terminal completion contract", body)
 	}
 }
 
