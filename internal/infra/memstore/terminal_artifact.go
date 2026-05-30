@@ -71,11 +71,38 @@ func (s *terminalSessionStore) Update(_ context.Context, ws, terminalID string, 
 	if patch.Status != nil {
 		term.Status = *patch.Status
 	}
+	if patch.AgentID != nil {
+		term.AgentID = *patch.AgentID
+	}
+	if patch.SessionID != nil {
+		term.SessionID = *patch.SessionID
+	}
+	if patch.NodeID != nil {
+		term.NodeID = *patch.NodeID
+	}
+	if patch.TaskID != nil {
+		term.TaskID = *patch.TaskID
+	}
+	if patch.Title != nil {
+		term.Title = *patch.Title
+	}
+	if patch.Kind != nil {
+		term.Kind = *patch.Kind
+	}
+	if patch.PTYProvider != nil {
+		term.PTYProvider = *patch.PTYProvider
+	}
+	if patch.StreamRef != nil {
+		term.StreamRef = *patch.StreamRef
+	}
+	if patch.TranscriptRef != nil {
+		term.TranscriptRef = *patch.TranscriptRef
+	}
 	if patch.LastSeenAt != nil {
 		term.LastSeenAt = *patch.LastSeenAt
 	}
 	if patch.EndedAt != nil {
-		term.EndedAt = *patch.EndedAt
+		term.EndedAt = clonePtr(*patch.EndedAt)
 	}
 	if patch.Metadata != nil {
 		term.Metadata = cloneMap(*patch.Metadata)
@@ -147,11 +174,35 @@ func (s *artifactStore) Update(_ context.Context, ws, artifactID string, patch s
 	if patch.Summary != nil {
 		artifact.Summary = *patch.Summary
 	}
+	if patch.AgentID != nil {
+		artifact.AgentID = *patch.AgentID
+	}
+	if patch.SessionID != nil {
+		artifact.SessionID = *patch.SessionID
+	}
+	if patch.TerminalID != nil {
+		artifact.TerminalID = *patch.TerminalID
+	}
+	if patch.TaskID != nil {
+		artifact.TaskID = *patch.TaskID
+	}
+	if patch.Type != nil {
+		artifact.Type = *patch.Type
+	}
 	if patch.Metadata != nil {
 		artifact.Metadata = cloneMap(*patch.Metadata)
 	}
 	if patch.URI != nil {
 		artifact.URI = *patch.URI
+	}
+	if patch.MIMEType != nil {
+		artifact.MIMEType = *patch.MIMEType
+	}
+	if patch.SizeBytes != nil {
+		artifact.SizeBytes = *patch.SizeBytes
+	}
+	if patch.Checksum != nil {
+		artifact.Checksum = *patch.Checksum
 	}
 	artifact.UpdatedAt = time.Now().UTC()
 	return cloneArtifact(artifact), nil

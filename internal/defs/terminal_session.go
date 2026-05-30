@@ -47,6 +47,15 @@ func applyTerminalSessions(ctx context.Context, st store.Store, ws string, termi
 }
 
 func applyTerminalSession(ctx context.Context, st store.Store, ws string, terminal TerminalSessionModule) error {
+	if terminal.TerminalID != "" {
+		existing, err := st.TerminalSessions().Get(ctx, ws, terminal.TerminalID)
+		if err == nil {
+			return syncTerminalSessionState(ctx, st, ws, existing.TerminalID, terminal)
+		}
+		if !errors.Is(err, domain.ErrNotFound) {
+			return fmt.Errorf("get terminal session %s: %w", terminal.TerminalID, err)
+		}
+	}
 	created, err := st.TerminalSessions().Create(ctx, store.TerminalSessionCreate{
 		WorkspaceKey:    ws,
 		TerminalID:      terminal.TerminalID,
@@ -69,7 +78,11 @@ func applyTerminalSession(ctx context.Context, st store.Store, ws string, termin
 	if !errors.Is(err, domain.ErrAlreadyExists) {
 		return fmt.Errorf("create terminal session %s: %w", terminal.TerminalID, err)
 	}
-	return syncTerminalSessionState(ctx, st, ws, terminal.TerminalID, terminal)
+	existing, getErr := st.TerminalSessions().Get(ctx, ws, terminal.TerminalID)
+	if getErr != nil {
+		return fmt.Errorf("get existing terminal session %s after create conflict: %w", terminal.TerminalID, getErr)
+	}
+	return syncTerminalSessionState(ctx, st, ws, existing.TerminalID, terminal)
 }
 
 func syncTerminalSessionState(ctx context.Context, st store.Store, ws, terminalID string, terminal TerminalSessionModule) error {

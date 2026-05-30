@@ -639,6 +639,199 @@ func TestPlanFromWorkspaceProjectsControlPlaneRecords(t *testing.T) {
 	}
 }
 
+func TestApplyRuntimeStateRecordsReconcilesExistingMutableRecords(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "REPLAY", Name: "Replay"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	firstSeenAt := time.Date(2026, 5, 30, 12, 0, 0, 0, time.UTC)
+	secondSeenAt := firstSeenAt.Add(5 * time.Minute)
+	endedAt := secondSeenAt.Add(time.Minute)
+	firstPlan := &Plan{
+		AgentCommands: []AgentCommandModule{{
+			CommandID:     "cmd-replay",
+			SourcePath:    "state/commands.json",
+			SourceHash:    "hash-1",
+			Version:       "state-v1",
+			TargetAgentID: "runner",
+			TargetNodeID:  "node-a",
+			SessionID:     "session-a",
+			Type:          "start-task",
+			Payload:       map[string]string{"task_id": "TASK-1"},
+			Status:        domain.AgentCommandSucceeded,
+			Result:        "started",
+		}},
+		TerminalSessions: []TerminalSessionModule{{
+			TerminalID:      "term-replay",
+			SourcePath:      "state/terminals.json",
+			SourceHash:      "hash-1",
+			Version:         "state-v1",
+			AgentID:         "runner",
+			SessionID:       "session-a",
+			NodeID:          "node-a",
+			TaskID:          "TASK-1",
+			Title:           "Runner terminal",
+			Kind:            "pty",
+			Status:          domain.TerminalSessionOpen,
+			PTYProvider:     "local",
+			StreamRef:       "stream://term-replay",
+			TranscriptRef:   "transcript://term-replay",
+			AttachedClients: 1,
+			LastSeenAt:      &firstSeenAt,
+			Metadata:        map[string]string{"phase": "first"},
+		}},
+		Artifacts: []ArtifactModule{{
+			ArtifactID: "artifact-replay",
+			SourcePath: "state/artifacts.json",
+			SourceHash: "hash-1",
+			Version:    "state-v1",
+			AgentID:    "runner",
+			SessionID:  "session-a",
+			TerminalID: "term-replay",
+			TaskID:     "TASK-1",
+			Type:       "report",
+			URI:        "artifact://runner/report.json",
+			Summary:    "runner report",
+			MIMEType:   "application/json",
+			SizeBytes:  128,
+			Checksum:   "sha256:first",
+			Metadata:   map[string]string{"phase": "first"},
+		}},
+	}
+	if err := Apply(ctx, st, "REPLAY", "test", firstPlan); err != nil {
+		t.Fatalf("Apply(firstPlan) error = %v", err)
+	}
+	firstCommand, err := st.AgentCommands().Get(ctx, "REPLAY", "cmd-replay")
+	if err != nil {
+		t.Fatalf("get first command: %v", err)
+	}
+	firstTerminal, err := st.TerminalSessions().Get(ctx, "REPLAY", "term-replay")
+	if err != nil {
+		t.Fatalf("get first terminal: %v", err)
+	}
+	firstArtifact, err := st.Artifacts().Get(ctx, "REPLAY", "artifact-replay")
+	if err != nil {
+		t.Fatalf("get first artifact: %v", err)
+	}
+
+	time.Sleep(2 * time.Millisecond)
+	secondPlan := &Plan{
+		AgentCommands: []AgentCommandModule{{
+			CommandID:     "cmd-replay",
+			SourcePath:    "state/commands.json",
+			SourceHash:    "hash-2",
+			Version:       "state-v2",
+			TargetAgentID: "runner",
+			TargetNodeID:  "node-a",
+			SessionID:     "session-a",
+			Type:          "start-task",
+			Payload:       map[string]string{"task_id": "TASK-1"},
+			Status:        domain.AgentCommandFailed,
+			Result:        "failed",
+			ErrorClass:    "provider_unavailable",
+		}},
+		TerminalSessions: []TerminalSessionModule{{
+			TerminalID:      "term-replay",
+			SourcePath:      "state/terminals.json",
+			SourceHash:      "hash-2",
+			Version:         "state-v2",
+			AgentID:         "runner-2",
+			SessionID:       "session-b",
+			NodeID:          "node-b",
+			TaskID:          "TASK-2",
+			Title:           "Updated runner terminal",
+			Kind:            "pty",
+			Status:          domain.TerminalSessionClosed,
+			PTYProvider:     "local",
+			StreamRef:       "stream://term-replay-v2",
+			TranscriptRef:   "transcript://term-replay-v2",
+			AttachedClients: 3,
+			LastSeenAt:      &secondSeenAt,
+			EndedAt:         &endedAt,
+			Metadata:        map[string]string{"phase": "second"},
+		}},
+		Artifacts: []ArtifactModule{{
+			ArtifactID: "artifact-replay",
+			SourcePath: "state/artifacts.json",
+			SourceHash: "hash-2",
+			Version:    "state-v2",
+			AgentID:    "runner-2",
+			SessionID:  "session-b",
+			TerminalID: "term-replay",
+			TaskID:     "TASK-2",
+			Type:       "log",
+			URI:        "artifact://runner/report-v2.txt",
+			Summary:    "updated runner report",
+			MIMEType:   "text/plain",
+			SizeBytes:  256,
+			Checksum:   "sha256:second",
+			Metadata:   map[string]string{"phase": "second"},
+		}},
+	}
+	if err := Apply(ctx, st, "REPLAY", "test", secondPlan); err != nil {
+		t.Fatalf("Apply(secondPlan) error = %v", err)
+	}
+
+	replayedCommand, err := st.AgentCommands().Get(ctx, "REPLAY", "cmd-replay")
+	if err != nil {
+		t.Fatalf("get replayed command: %v", err)
+	}
+	if replayedCommand.Cursor != firstCommand.Cursor || !replayedCommand.CreatedAt.Equal(firstCommand.CreatedAt) ||
+		replayedCommand.Status != domain.AgentCommandFailed || replayedCommand.Result != "failed" ||
+		replayedCommand.ErrorClass != "provider_unavailable" {
+		t.Fatalf("replayed command = %+v, want stable cursor/created_at with updated completion state", replayedCommand)
+	}
+	commands, err := st.AgentCommands().List(ctx, "REPLAY", store.AgentCommandFilter{})
+	if err != nil {
+		t.Fatalf("list replayed commands: %v", err)
+	}
+	if len(commands) != 1 {
+		t.Fatalf("replayed commands = %+v, want one reconciled command", commands)
+	}
+
+	replayedTerminal, err := st.TerminalSessions().Get(ctx, "REPLAY", "term-replay")
+	if err != nil {
+		t.Fatalf("get replayed terminal: %v", err)
+	}
+	if !replayedTerminal.CreatedAt.Equal(firstTerminal.CreatedAt) || replayedTerminal.AgentID != "runner-2" ||
+		replayedTerminal.SessionID != "session-b" || replayedTerminal.NodeID != "node-b" ||
+		replayedTerminal.TaskID != "TASK-2" || replayedTerminal.Title != "Updated runner terminal" ||
+		replayedTerminal.Status != domain.TerminalSessionClosed || replayedTerminal.StreamRef != "stream://term-replay-v2" ||
+		replayedTerminal.TranscriptRef != "transcript://term-replay-v2" || replayedTerminal.AttachedClients != 3 ||
+		replayedTerminal.Metadata["phase"] != "second" || !replayedTerminal.LastSeenAt.Equal(secondSeenAt) ||
+		replayedTerminal.EndedAt == nil || !replayedTerminal.EndedAt.Equal(endedAt) {
+		t.Fatalf("replayed terminal = %+v, want stable created_at with updated terminal state", replayedTerminal)
+	}
+	terminals, err := st.TerminalSessions().List(ctx, "REPLAY", store.TerminalSessionFilter{})
+	if err != nil {
+		t.Fatalf("list replayed terminals: %v", err)
+	}
+	if len(terminals) != 1 {
+		t.Fatalf("replayed terminals = %+v, want one reconciled terminal", terminals)
+	}
+
+	replayedArtifact, err := st.Artifacts().Get(ctx, "REPLAY", "artifact-replay")
+	if err != nil {
+		t.Fatalf("get replayed artifact: %v", err)
+	}
+	if !replayedArtifact.CreatedAt.Equal(firstArtifact.CreatedAt) || replayedArtifact.AgentID != "runner-2" ||
+		replayedArtifact.SessionID != "session-b" || replayedArtifact.TerminalID != "term-replay" ||
+		replayedArtifact.TaskID != "TASK-2" || replayedArtifact.Type != "log" ||
+		replayedArtifact.URI != "artifact://runner/report-v2.txt" || replayedArtifact.Summary != "updated runner report" ||
+		replayedArtifact.MIMEType != "text/plain" || replayedArtifact.SizeBytes != 256 ||
+		replayedArtifact.Checksum != "sha256:second" || replayedArtifact.Metadata["phase"] != "second" {
+		t.Fatalf("replayed artifact = %+v, want stable created_at with updated artifact state", replayedArtifact)
+	}
+	artifacts, err := st.Artifacts().List(ctx, "REPLAY", store.ArtifactFilter{})
+	if err != nil {
+		t.Fatalf("list replayed artifacts: %v", err)
+	}
+	if len(artifacts) != 1 {
+		t.Fatalf("replayed artifacts = %+v, want one reconciled artifact", artifacts)
+	}
+}
+
 func TestPlanFromWorkspacePrefersSourceBackedDefinitions(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()

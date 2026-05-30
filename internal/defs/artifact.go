@@ -43,6 +43,15 @@ func applyArtifacts(ctx context.Context, st store.Store, ws string, artifacts []
 }
 
 func applyArtifact(ctx context.Context, st store.Store, ws string, artifact ArtifactModule) error {
+	if artifact.ArtifactID != "" {
+		existing, err := st.Artifacts().Get(ctx, ws, artifact.ArtifactID)
+		if err == nil {
+			return syncArtifactState(ctx, st, ws, existing.ArtifactID, artifact)
+		}
+		if !errors.Is(err, domain.ErrNotFound) {
+			return fmt.Errorf("get artifact %s: %w", artifact.ArtifactID, err)
+		}
+	}
 	created, err := st.Artifacts().Create(ctx, store.ArtifactCreate{
 		WorkspaceKey: ws,
 		ArtifactID:   artifact.ArtifactID,
@@ -64,7 +73,11 @@ func applyArtifact(ctx context.Context, st store.Store, ws string, artifact Arti
 	if !errors.Is(err, domain.ErrAlreadyExists) {
 		return fmt.Errorf("create artifact %s: %w", artifact.ArtifactID, err)
 	}
-	return syncArtifactState(ctx, st, ws, artifact.ArtifactID, artifact)
+	existing, getErr := st.Artifacts().Get(ctx, ws, artifact.ArtifactID)
+	if getErr != nil {
+		return fmt.Errorf("get existing artifact %s after create conflict: %w", artifact.ArtifactID, getErr)
+	}
+	return syncArtifactState(ctx, st, ws, existing.ArtifactID, artifact)
 }
 
 func syncArtifactState(ctx context.Context, st store.Store, ws, artifactID string, artifact ArtifactModule) error {

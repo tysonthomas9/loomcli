@@ -2,6 +2,7 @@ package defs
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
@@ -40,6 +41,15 @@ func applyAgentCommands(ctx context.Context, st store.Store, ws string, commands
 }
 
 func applyAgentCommand(ctx context.Context, st store.Store, ws string, command AgentCommandModule) error {
+	if command.CommandID != "" {
+		existing, err := st.AgentCommands().Get(ctx, ws, command.CommandID)
+		if err == nil {
+			return syncAgentCommandState(ctx, st, ws, existing.CommandID, command)
+		}
+		if !errors.Is(err, domain.ErrNotFound) {
+			return fmt.Errorf("get agent command %s: %w", command.CommandID, err)
+		}
+	}
 	created, err := st.AgentCommands().Create(ctx, store.AgentCommandCreate{
 		WorkspaceKey:  ws,
 		CommandID:     command.CommandID,
@@ -50,6 +60,13 @@ func applyAgentCommand(ctx context.Context, st store.Store, ws string, command A
 		Payload:       cloneStringMap(command.Payload),
 	})
 	if err != nil {
+		if errors.Is(err, domain.ErrAlreadyExists) && command.CommandID != "" {
+			existing, getErr := st.AgentCommands().Get(ctx, ws, command.CommandID)
+			if getErr != nil {
+				return fmt.Errorf("get existing agent command %s after create conflict: %w", command.CommandID, getErr)
+			}
+			return syncAgentCommandState(ctx, st, ws, existing.CommandID, command)
+		}
 		return fmt.Errorf("create agent command %s: %w", command.CommandID, err)
 	}
 	return syncAgentCommandState(ctx, st, ws, created.CommandID, command)
