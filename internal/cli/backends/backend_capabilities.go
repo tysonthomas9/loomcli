@@ -55,6 +55,12 @@ type TypedToolCallReporter interface {
 	TypedToolCalls(workDir string) []TypedToolCallEvent
 }
 
+// ProviderMetadataReporter is an optional interface for backends that capture
+// provider-native metadata during the last invocation.
+type ProviderMetadataReporter interface {
+	LastProviderMetadata(workDir string) map[string]any
+}
+
 // TypedToolDefinition describes one TypeScript-authored model-callable tool
 // that a backend may expose to a provider.
 type TypedToolDefinition struct {
@@ -147,6 +153,7 @@ type BackendCapabilities struct {
 	HasToolControl          bool
 	HasTypedToolRuntime     bool
 	HasTypedToolCalls       bool
+	HasProviderMetadata     bool
 	HasHealthCheck          bool
 	HasConfig               bool
 	HasMeta                 bool
@@ -158,6 +165,7 @@ type BackendCapabilities struct {
 	Tools                ToolAwareBackend
 	TypedToolRuntime     TypedToolRuntimeBackend
 	TypedToolCalls       TypedToolCallReporter
+	ProviderMetadata     ProviderMetadataReporter
 	Health               HealthCheckableBackend
 	Config               ConfigurableBackend
 	Meta                 MetadataProvider
@@ -214,6 +222,10 @@ func InspectCapabilities(b cli.Backend) BackendCapabilities {
 	if t, ok := b.(TypedToolCallReporter); ok {
 		caps.HasTypedToolCalls = true
 		caps.TypedToolCalls = t
+	}
+	if p, ok := b.(ProviderMetadataReporter); ok {
+		caps.HasProviderMetadata = true
+		caps.ProviderMetadata = p
 	}
 	if h, ok := b.(HealthCheckableBackend); ok {
 		caps.HasHealthCheck = true

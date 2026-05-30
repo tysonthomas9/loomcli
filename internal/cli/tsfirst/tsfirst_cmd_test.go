@@ -607,6 +607,16 @@ func TestRunLocalConnectCapturesBackendSessionMetadataFallback(t *testing.T) {
 	if second.ProviderSessionID != "metadata-session-2" {
 		t.Fatalf("second provider session = %q, want metadata-session-2", second.ProviderSessionID)
 	}
+	if second.ProviderModel != "provider/session-metadata" {
+		t.Fatalf("second provider model = %q, want backend-reported provider model", second.ProviderModel)
+	}
+	if second.ProviderMetadata == nil {
+		t.Fatalf("provider metadata is nil, want backend-reported provider metadata")
+	}
+	backendReported, ok := second.ProviderMetadata["backend_reported"].(map[string]any)
+	if !ok || backendReported["provider"] != "session-metadata" || backendReported["provider_session_id"] != "metadata-session-2" {
+		t.Fatalf("provider metadata = %#v, want backend-reported provider metadata", second.ProviderMetadata)
+	}
 	if second.Resume == nil || second.Resume.Status != connectResumeUnsupported ||
 		second.Resume.Method != connectResumeMethodNone ||
 		second.Resume.PriorProviderSessionID != "metadata-session-1" {
@@ -1089,6 +1099,17 @@ func (b *sessionMetadataBackend) ContinueSession(_, _, _ string) error {
 
 func (b *sessionMetadataBackend) LastSessionID(_ string) string {
 	return b.lastID
+}
+
+func (b *sessionMetadataBackend) LastProviderMetadata(_ string) map[string]any {
+	if b.lastID == "" {
+		return nil
+	}
+	return map[string]any{
+		"provider":            "session-metadata",
+		"provider_model":      "provider/session-metadata",
+		"provider_session_id": b.lastID,
+	}
 }
 
 type nativeResumeBackend struct {

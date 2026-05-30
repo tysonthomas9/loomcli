@@ -4,8 +4,10 @@ import "testing"
 
 // Compile-time interface satisfaction checks.
 var (
-	_ MetadataProvider       = (*CodexBackend)(nil)
-	_ HealthCheckableBackend = (*CodexBackend)(nil)
+	_ MetadataProvider                          = (*CodexBackend)(nil)
+	_ HealthCheckableBackend                    = (*CodexBackend)(nil)
+	_ ProviderMetadataReporter                  = (*CodexBackend)(nil)
+	_ interface{ LastSessionID(string) string } = (*CodexBackend)(nil)
 )
 
 func TestCodexBackend_Meta(t *testing.T) {
@@ -50,6 +52,9 @@ func TestCodexBackend_InspectCapabilities(t *testing.T) {
 	}
 	if !caps.HasHealthCheck {
 		t.Error("expected HasHealthCheck=true")
+	}
+	if !caps.HasProviderMetadata {
+		t.Error("expected HasProviderMetadata=true")
 	}
 	if caps.HasStreaming {
 		t.Error("expected HasStreaming=false")

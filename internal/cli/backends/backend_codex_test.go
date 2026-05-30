@@ -301,3 +301,19 @@ func TestCollectCodexStreamUsage_InvalidJSON(t *testing.T) {
 		t.Errorf("InputTokens = %d, want 0", su.InputTokens)
 	}
 }
+
+func TestCodexBackendProviderMetadataReporter(t *testing.T) {
+	b := &CodexBackend{}
+	codexProviderMetadata.Clear(NameCodex)
+	t.Cleanup(func() { codexProviderMetadata.Clear(NameCodex) })
+
+	codexProviderMetadata.IngestLine(`{"type":"thread.started","thread_id":"codex-thread-1","model":"gpt-5"}`)
+
+	if got := b.LastSessionID("/work"); got != "codex-thread-1" {
+		t.Fatalf("LastSessionID() = %q, want codex-thread-1", got)
+	}
+	meta := b.LastProviderMetadata("/work")
+	if meta["provider"] != NameCodex || meta["provider_session_id"] != "codex-thread-1" || meta["provider_model"] != "gpt-5" {
+		t.Fatalf("LastProviderMetadata() = %#v, want codex provider metadata", meta)
+	}
+}

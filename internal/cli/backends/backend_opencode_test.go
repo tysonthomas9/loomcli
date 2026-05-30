@@ -335,3 +335,19 @@ func TestFinalizeOpenCodeRun_PreservesEarlyStreamErrorOnExitFailure(t *testing.T
 		t.Fatalf("OutputTail = %q, want later output retained", invErr.OutputTail)
 	}
 }
+
+func TestOpenCodeBackendProviderMetadataReporter(t *testing.T) {
+	b := &OpenCodeBackend{}
+	openCodeProviderMetadata.Clear("opencode")
+	t.Cleanup(func() { openCodeProviderMetadata.Clear("opencode") })
+
+	openCodeProviderMetadata.IngestLine(`{"type":"session","session":{"id":"opencode-session-1"},"model":"openai/gpt-5"}`)
+
+	if got := b.LastSessionID("/work"); got != "opencode-session-1" {
+		t.Fatalf("LastSessionID() = %q, want opencode-session-1", got)
+	}
+	meta := b.LastProviderMetadata("/work")
+	if meta["provider"] != "opencode" || meta["provider_session_id"] != "opencode-session-1" || meta["provider_model"] != "openai/gpt-5" {
+		t.Fatalf("LastProviderMetadata() = %#v, want opencode provider metadata", meta)
+	}
+}

@@ -18,12 +18,22 @@ type GeminiBackend struct{}
 
 func (g *GeminiBackend) Name() string { return "gemini" }
 
+var geminiProviderMetadata backendProviderMetadataCapture
+
 func (g *GeminiBackend) InvokeInteractive(workDir, prompt, agentName string) error {
 	return geminiInvoker(workDir, prompt, agentName)
 }
 
 func (g *GeminiBackend) InvokeNonInteractive(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error {
 	return geminiNonInteractiveInvoker(workDir, prompt, agentName, shutdown, collector)
+}
+
+func (g *GeminiBackend) LastSessionID(_ string) string {
+	return geminiProviderMetadata.LastSessionID()
+}
+
+func (g *GeminiBackend) LastProviderMetadata(_ string) map[string]any {
+	return geminiProviderMetadata.Metadata()
 }
 
 // geminiInvoker is the function used to invoke Gemini interactively (mockable for tests)
@@ -83,6 +93,7 @@ func defaultGeminiNonInteractiveInvoker(workDir, prompt, agentName string, shutd
 
 	fmt.Println("Launching Gemini agent (non-interactive)...")
 	fmt.Println("")
+	geminiProviderMetadata.Clear("gemini")
 
 	// Gemini takes the prompt as a -p argv flag, not stdin, so the
 	// harnessInvocation's Prompt is empty (the wrapper still attaches
@@ -95,6 +106,7 @@ func defaultGeminiNonInteractiveInvoker(workDir, prompt, agentName string, shutd
 		Prompt:      "",
 		HarnessName: "gemini",
 		LineHandler: func(line string) {
+			geminiProviderMetadata.IngestLine(line)
 			fmt.Println(line)
 			if collector != nil {
 				collectGeminiStreamUsage(line, collector)

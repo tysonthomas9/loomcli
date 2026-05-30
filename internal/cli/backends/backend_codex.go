@@ -22,12 +22,22 @@ type CodexBackend struct{}
 
 func (c *CodexBackend) Name() string { return NameCodex }
 
+var codexProviderMetadata backendProviderMetadataCapture
+
 func (c *CodexBackend) InvokeInteractive(workDir, prompt, agentName string) error {
 	return codexInvoker(workDir, prompt, agentName)
 }
 
 func (c *CodexBackend) InvokeNonInteractive(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error {
 	return codexNonInteractiveInvoker(workDir, prompt, agentName, shutdown, collector)
+}
+
+func (c *CodexBackend) LastSessionID(_ string) string {
+	return codexProviderMetadata.LastSessionID()
+}
+
+func (c *CodexBackend) LastProviderMetadata(_ string) map[string]any {
+	return codexProviderMetadata.Metadata()
 }
 
 // codexInvoker is the function used to invoke Codex interactively (mockable for tests)
@@ -77,6 +87,7 @@ func defaultCodexInvoker(workDir, prompt, agentName string) error {
 func defaultCodexNonInteractiveInvoker(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error {
 	fmt.Println("Launching Codex agent (non-interactive)...")
 	fmt.Println("")
+	codexProviderMetadata.Clear(NameCodex)
 
 	return runHarness(context.Background(), shutdown, harnessInvocation{
 		BinaryName:  "codex",
@@ -85,6 +96,7 @@ func defaultCodexNonInteractiveInvoker(workDir, prompt, agentName string, shutdo
 		Env:         buildBackendEnv(workDir, agentName),
 		HarnessName: "codex",
 		LineHandler: func(line string) {
+			codexProviderMetadata.IngestLine(line)
 			fmt.Println(line)
 			if collector != nil {
 				collectCodexStreamUsage(line, collector)

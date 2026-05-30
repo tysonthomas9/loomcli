@@ -769,6 +769,11 @@ func invokeLocalAgent(ctx context.Context, plan *defspkg.Plan, agent defspkg.Age
 		result, err := captureStreamingResponse(rc, stream)
 		result.ToolRuntime = appliedToolRuntime
 		result.ToolCalls = collectBackendTypedToolCalls(backend, workDir)
+		backendMetadata := backendReportedProviderMetadata(backend, workDir)
+		result.ProviderMetadata = mergeBackendProviderMetadata(result.ProviderMetadata, backendMetadata)
+		if result.ProviderModel == "" {
+			result.ProviderModel = backendProviderModel(backendMetadata)
+		}
 		result.Resume = resume
 		result = fillBackendSessionID(result, backend, workDir)
 		return result, err
@@ -792,6 +797,11 @@ func invokeLocalAgent(ctx context.Context, plan *defspkg.Plan, agent defspkg.Age
 	}
 	result.ToolRuntime = appliedToolRuntime
 	result.ToolCalls = collectBackendTypedToolCalls(backend, workDir)
+	backendMetadata := backendReportedProviderMetadata(backend, workDir)
+	result.ProviderMetadata = mergeBackendProviderMetadata(result.ProviderMetadata, backendMetadata)
+	if result.ProviderModel == "" {
+		result.ProviderModel = backendProviderModel(backendMetadata)
+	}
 	result.Resume = resume
 	result = fillBackendSessionID(result, backend, workDir)
 	return result, err

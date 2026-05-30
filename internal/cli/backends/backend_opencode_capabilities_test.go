@@ -4,8 +4,10 @@ import "testing"
 
 // Compile-time interface satisfaction checks.
 var (
-	_ MetadataProvider       = (*OpenCodeBackend)(nil)
-	_ HealthCheckableBackend = (*OpenCodeBackend)(nil)
+	_ MetadataProvider                          = (*OpenCodeBackend)(nil)
+	_ HealthCheckableBackend                    = (*OpenCodeBackend)(nil)
+	_ ProviderMetadataReporter                  = (*OpenCodeBackend)(nil)
+	_ interface{ LastSessionID(string) string } = (*OpenCodeBackend)(nil)
 )
 
 func TestOpenCodeBackend_Meta(t *testing.T) {
@@ -53,6 +55,9 @@ func TestOpenCodeBackend_InspectCapabilities(t *testing.T) {
 	}
 	if !caps.HasHealthCheck {
 		t.Error("expected HasHealthCheck=true")
+	}
+	if !caps.HasProviderMetadata {
+		t.Error("expected HasProviderMetadata=true")
 	}
 	if caps.HasStreaming {
 		t.Error("expected HasStreaming=false")

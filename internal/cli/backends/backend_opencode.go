@@ -21,12 +21,22 @@ type OpenCodeBackend struct{}
 
 func (o *OpenCodeBackend) Name() string { return "opencode" }
 
+var openCodeProviderMetadata backendProviderMetadataCapture
+
 func (o *OpenCodeBackend) InvokeInteractive(workDir, prompt, agentName string) error {
 	return openCodeInvoker(workDir, prompt, agentName)
 }
 
 func (o *OpenCodeBackend) InvokeNonInteractive(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error {
 	return openCodeNonInteractiveInvoker(workDir, prompt, agentName, shutdown, collector)
+}
+
+func (o *OpenCodeBackend) LastSessionID(_ string) string {
+	return openCodeProviderMetadata.LastSessionID()
+}
+
+func (o *OpenCodeBackend) LastProviderMetadata(_ string) map[string]any {
+	return openCodeProviderMetadata.Metadata()
 }
 
 // openCodeInvoker is the function used to invoke OpenCode interactively (mockable for tests)
@@ -63,6 +73,7 @@ func defaultOpenCodeNonInteractiveInvoker(workDir, prompt, agentName string, shu
 
 	fmt.Println("Launching OpenCode agent (non-interactive)...")
 	fmt.Println("")
+	openCodeProviderMetadata.Clear("opencode")
 
 	var streamErrMsg string
 	return runHarness(context.Background(), shutdown, harnessInvocation{
@@ -75,6 +86,7 @@ func defaultOpenCodeNonInteractiveInvoker(workDir, prompt, agentName string, shu
 		// the generic cost/quota classifier handles it.
 		HarnessName: "",
 		LineHandler: func(line string) {
+			openCodeProviderMetadata.IngestLine(line)
 			fmt.Println(line)
 			if streamErrMsg == "" {
 				if msg, ok := extractOpenCodeStreamError(line); ok {

@@ -35,6 +35,10 @@ func (f *fullCapabilityBackend) SetTypedTools(_ []TypedToolDefinition) error {
 	return nil
 }
 
+func (f *fullCapabilityBackend) LastProviderMetadata(_ string) map[string]any {
+	return map[string]any{"provider": "full"}
+}
+
 func (f *fullCapabilityBackend) HealthCheck() HealthStatus {
 	return HealthStatus{Healthy: true, Installed: true, Version: "1.0", APIKeySet: true}
 }
@@ -84,6 +88,9 @@ func TestInspectCapabilities_NoOptionalInterfaces(t *testing.T) {
 	if caps.HasTypedToolRuntime {
 		t.Error("expected HasTypedToolRuntime=false")
 	}
+	if caps.HasProviderMetadata {
+		t.Error("expected HasProviderMetadata=false")
+	}
 	if caps.HasHealthCheck {
 		t.Error("expected HasHealthCheck=false")
 	}
@@ -111,6 +118,9 @@ func TestInspectCapabilities_NoOptionalInterfaces(t *testing.T) {
 	}
 	if caps.TypedToolRuntime != nil {
 		t.Error("expected TypedToolRuntime=nil")
+	}
+	if caps.ProviderMetadata != nil {
+		t.Error("expected ProviderMetadata=nil")
 	}
 	if caps.Health != nil {
 		t.Error("expected Health=nil")
@@ -145,6 +155,9 @@ func TestInspectCapabilities_AllInterfaces(t *testing.T) {
 	if !caps.HasTypedToolRuntime {
 		t.Error("expected HasTypedToolRuntime=true")
 	}
+	if !caps.HasProviderMetadata {
+		t.Error("expected HasProviderMetadata=true")
+	}
 	if !caps.HasHealthCheck {
 		t.Error("expected HasHealthCheck=true")
 	}
@@ -172,6 +185,9 @@ func TestInspectCapabilities_AllInterfaces(t *testing.T) {
 	}
 	if caps.TypedToolRuntime == nil {
 		t.Error("expected TypedToolRuntime!=nil")
+	}
+	if caps.ProviderMetadata == nil {
+		t.Error("expected ProviderMetadata!=nil")
 	}
 	if caps.Health == nil {
 		t.Error("expected Health!=nil")
@@ -207,6 +223,9 @@ func TestInspectCapabilities_PartialInterfaces(t *testing.T) {
 	if caps.HasTypedToolRuntime {
 		t.Error("expected HasTypedToolRuntime=false")
 	}
+	if caps.HasProviderMetadata {
+		t.Error("expected HasProviderMetadata=false")
+	}
 	if !caps.HasHealthCheck {
 		t.Error("expected HasHealthCheck=true")
 	}
@@ -230,11 +249,13 @@ func TestInspectCapabilities_NilBackend(t *testing.T) {
 
 	if caps.HasStreaming || caps.HasStreamingResume || caps.HasNonInteractiveResume ||
 		caps.HasSessions || caps.HasToolControl || caps.HasTypedToolRuntime ||
+		caps.HasTypedToolCalls || caps.HasProviderMetadata ||
 		caps.HasHealthCheck || caps.HasConfig || caps.HasMeta {
 		t.Error("expected all Has* flags to be false for nil backend")
 	}
 	if caps.Streaming != nil || caps.StreamingResume != nil || caps.NonInteractiveResume != nil ||
 		caps.Sessions != nil || caps.Tools != nil || caps.TypedToolRuntime != nil ||
+		caps.TypedToolCalls != nil || caps.ProviderMetadata != nil ||
 		caps.Health != nil || caps.Config != nil || caps.Meta != nil {
 		t.Error("expected all typed fields to be nil for nil backend")
 	}
@@ -245,11 +266,13 @@ func TestBackendCapabilities_ZeroValue(t *testing.T) {
 
 	if caps.HasStreaming || caps.HasStreamingResume || caps.HasNonInteractiveResume ||
 		caps.HasSessions || caps.HasToolControl || caps.HasTypedToolRuntime ||
+		caps.HasTypedToolCalls || caps.HasProviderMetadata ||
 		caps.HasHealthCheck || caps.HasConfig || caps.HasMeta {
 		t.Error("expected all Has* flags to be false on zero value")
 	}
 	if caps.Streaming != nil || caps.StreamingResume != nil || caps.NonInteractiveResume != nil ||
 		caps.Sessions != nil || caps.Tools != nil || caps.TypedToolRuntime != nil ||
+		caps.TypedToolCalls != nil || caps.ProviderMetadata != nil ||
 		caps.Health != nil || caps.Config != nil || caps.Meta != nil {
 		t.Error("expected all typed fields to be nil on zero value")
 	}
