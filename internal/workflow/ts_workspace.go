@@ -305,10 +305,74 @@ func runtimeWorkspaceSkillRoots(profile *tsContextRuntimeProfile) []string {
 }
 
 func tsContextRuntimeWorkspaceRoot(profile *tsContextRuntimeProfile) string {
-	if profile == nil || profile.Provider != string(domain.RuntimeProviderLocal) {
+	if profile == nil {
 		return ""
 	}
+	if profile.Provider != string(domain.RuntimeProviderLocal) {
+		return remoteRuntimeWorkspaceRoot(profile)
+	}
 	return resolveRuntimeWorkspacePath(runtimeProfileProjectRoot(profile.SourcePath), profile.CWD)
+}
+
+func remoteRuntimeWorkspaceRoot(profile *tsContextRuntimeProfile) string {
+	if !runtimeProfileHasRemoteWorkspaceAdapter(profile) {
+		return ""
+	}
+	return filepath.Join(
+		os.TempDir(),
+		"loom-runtime-workspaces",
+		safeRuntimeWorkspacePart(profile.Provider),
+		safeRuntimeWorkspacePart(profile.Workspace.ProviderWorkspaceID),
+		safeRuntimeWorkspacePart(profile.Name),
+	)
+}
+
+func runtimeProfileHasRemoteWorkspaceAdapter(profile *tsContextRuntimeProfile) bool {
+	if profile == nil || profile.Provider == "" || profile.Provider == string(domain.RuntimeProviderLocal) || profile.Workspace == nil || profile.Workspace.ProviderWorkspaceID == "" {
+		return false
+	}
+	if profile.Workspace.Filesystem != nil && profile.Workspace.Cleanup != nil {
+		return true
+	}
+	if profile.Capabilities == nil || profile.Capabilities.Filesystem == nil || profile.Capabilities.Lifecycle == nil {
+		return false
+	}
+	fsCaps := profile.Capabilities.Filesystem
+	lifecycleCaps := profile.Capabilities.Lifecycle
+	return boolPtrValue(fsCaps.Read) &&
+		boolPtrValue(fsCaps.Write) &&
+		boolPtrValue(lifecycleCaps.Materialize) &&
+		boolPtrValue(lifecycleCaps.Cleanup)
+}
+
+func boolPtrValue(value *bool) bool {
+	return value != nil && *value
+}
+
+func safeRuntimeWorkspacePart(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "default"
+	}
+	var b strings.Builder
+	for _, r := range value {
+		switch {
+		case r >= 'a' && r <= 'z':
+			b.WriteRune(r)
+		case r >= 'A' && r <= 'Z':
+			b.WriteRune(r)
+		case r >= '0' && r <= '9':
+			b.WriteRune(r)
+		case r == '-', r == '_', r == '.':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('_')
+		}
+	}
+	if b.Len() == 0 {
+		return "default"
+	}
+	return b.String()
 }
 
 func runtimeProfileProjectRoot(sourcePath string) string {

@@ -1454,6 +1454,158 @@ export default defineWorkflow({
 	}
 }
 
+func TestCodeDefinedWorkflowContextExecutesRemoteRuntimeWorkspaceAdapter(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	runtimePath := filepath.Join(root, ".loom", "runtimes", "remote-e2b.ts")
+	if err := os.MkdirAll(filepath.Dir(runtimePath), 0o755); err != nil {
+		t.Fatalf("mkdir runtime dir: %v", err)
+	}
+	if err := os.WriteFile(runtimePath, []byte(`import { runtime } from '@loom/runtime';
+
+export default runtime.remote({
+  name: 'remote-e2b',
+  provider: 'e2b',
+  cwd: '.',
+  workspace: {
+    providerWorkspaceId: 'e2b-workspace-1',
+    owner: 'loom',
+    cleanup: { mode: 'after_ttl', ttl: '24h' },
+    filesystem: { persistence: 'session', durability: 'provider', retention: '2d' },
+  },
+  filesystem: { read: true, write: true, artifactURI: true, policy: 'provider_adapter' },
+  lifecycle: { materialize: true, cleanup: true, release: true, policy: 'provider_adapter' },
+  env: [],
+});
+`), 0o644); err != nil {
+		t.Fatalf("write runtime: %v", err)
+	}
+	workflowPath := filepath.Join(root, ".loom", "workflows", "remote-runtime-lifecycle.ts")
+	if err := os.MkdirAll(filepath.Dir(workflowPath), 0o755); err != nil {
+		t.Fatalf("mkdir workflow dir: %v", err)
+	}
+	if err := os.WriteFile(workflowPath, []byte(`import { defineWorkflow } from '@loom/runtime';
+
+export default defineWorkflow({
+  name: 'remote-runtime-lifecycle',
+  runtimeProfile: 'remote-e2b',
+  async run(ctx) {
+    const materialized = await ctx.runtime.materializeWorkspace({
+      reason: 'prepare remote provider workspace',
+      metadata: { phase: 'setup' },
+    });
+    const written = await ctx.runtime.files.writeJSON('state/result.json', { ok: true }, {
+      summary: 'Remote runtime workspace state',
+    });
+    const reread = await ctx.runtime.files.readJSON('state/result.json');
+    const cleaned = await ctx.runtime.cleanupWorkspace({
+      reason: 'workflow finished',
+      metadata: { phase: 'teardown' },
+    });
+    return {
+      provider: written.provider,
+      providerBacked: written.providerBacked,
+      materialized: materialized.materialized,
+      materializeProviderBacked: materialized.providerBacked,
+      cleanupEnforced: cleaned.cleanupEnforced,
+      cleanupProviderBacked: cleaned.providerBacked,
+      cleanupScope: cleaned.cleanupScope,
+      cleanedFiles: cleaned.cleanedFiles,
+      runtimeFileURI: written.uri,
+      readOK: reread.ok,
+    };
+  },
+});
+`), 0o644); err != nil {
+		t.Fatalf("write workflow: %v", err)
+	}
+	plan, err := defspkg.Load(root)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TSREMOTECTX", Name: "Remote Runtime"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := defspkg.Apply(ctx, st, "TSREMOTECTX", "atlas", plan); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	run, err := CreateOrResumeRun(ctx, st, "TSREMOTECTX", "remote-runtime-lifecycle", json.RawMessage(`{}`), "atlas")
+	if err != nil {
+		t.Fatalf("CreateOrResumeRun() error = %v", err)
+	}
+	result, err := RunOnce(ctx, st, clitest.NewMockIssueBackend(), run)
+	if err != nil {
+		t.Fatalf("RunOnce() error = %v", err)
+	}
+	if result.Run == nil || result.Run.Status != domain.WorkflowRunCompleted {
+		t.Fatalf("result = %+v, want completed remote runtime lifecycle workflow", result)
+	}
+	var data map[string]any
+	if err := json.Unmarshal(result.Run.Result, &data); err != nil {
+		t.Fatalf("decode workflow result: %v", err)
+	}
+	if data["provider"] != "e2b" || data["providerBacked"] != true ||
+		data["materialized"] != true || data["materializeProviderBacked"] != true ||
+		data["cleanupEnforced"] != true || data["cleanupProviderBacked"] != true ||
+		data["cleanupScope"] != "current_run_runtime_files" ||
+		data["cleanedFiles"] != float64(1) || data["readOK"] != true {
+		t.Fatalf("result data = %+v, want provider-backed remote lifecycle execution", data)
+	}
+	if uri, ok := data["runtimeFileURI"].(string); !ok ||
+		!strings.HasPrefix(uri, "runtime-workspace://e2b-workspace-1/state/result.json") ||
+		strings.HasPrefix(uri, "file://") {
+		t.Fatalf("runtimeFileURI = %#v, want provider-scoped runtime workspace URI", data["runtimeFileURI"])
+	}
+	def, err := st.WorkflowDefinitions().Get(ctx, "TSREMOTECTX", "remote-runtime-lifecycle")
+	if err != nil {
+		t.Fatalf("get workflow definition: %v", err)
+	}
+	adapterRoot := tsContextRuntimeWorkspaceRoot(tsContextRuntimeProfileForDefinition(ctx, st, def))
+	if adapterRoot == "" {
+		t.Fatalf("remote runtime adapter root is empty")
+	}
+	if _, err := os.Stat(filepath.Join(adapterRoot, "state", "result.json")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("remote adapter file exists after cleanup or stat failed with %v, want cleaned provider-backed file", err)
+	}
+	events, err := st.RunEvents().List(ctx, "TSREMOTECTX", store.RunEventFilter{WorkflowRunID: run.RunID})
+	if err != nil {
+		t.Fatalf("list run events: %v", err)
+	}
+	if !hasWorkflowEvent(events, "runtime_workspace_materialize_requested") ||
+		!hasWorkflowEvent(events, "runtime_workspace_cleanup_requested") ||
+		!hasWorkflowEvent(events, "runtime_workspace_file_written") ||
+		!hasWorkflowEvent(events, "runtime_workspace_file_read") ||
+		!hasWorkflowEvent(events, "workflow_completed") {
+		t.Fatalf("events = %+v, want remote lifecycle request and completion evidence", events)
+	}
+	materializeEvent := workflowEventDataByType(t, events, "runtime_workspace_materialize_requested")
+	if materializeEvent["provider"] != "e2b" || materializeEvent["providerWorkspaceId"] != "e2b-workspace-1" ||
+		materializeEvent["providerBacked"] != true || materializeEvent["materialized"] != true {
+		t.Fatalf("materialize event = %+v, want provider-backed remote materialization evidence", materializeEvent)
+	}
+	cleanupEvent := workflowEventDataByType(t, events, "runtime_workspace_cleanup_requested")
+	if cleanupEvent["providerBacked"] != true || cleanupEvent["cleanupEnforced"] != true ||
+		cleanupEvent["cleanupScope"] != "current_run_runtime_files" || cleanupEvent["cleanedFiles"] != float64(1) {
+		t.Fatalf("cleanup event = %+v, want provider-backed remote cleanup evidence", cleanupEvent)
+	}
+	fileEvent := workflowEventDataByType(t, events, "runtime_workspace_file_written")
+	if fileEvent["provider"] != "e2b" || fileEvent["providerBacked"] != true ||
+		fileEvent["providerWorkspaceId"] != "e2b-workspace-1" ||
+		fileEvent["visibility"] != "runtime_workspace" ||
+		fileEvent["source"] != "workflow_context" {
+		t.Fatalf("file event = %+v, want remote runtime workspace filesystem evidence", fileEvent)
+	}
+	artifacts, err := st.Artifacts().List(ctx, "TSREMOTECTX", store.ArtifactFilter{Type: "runtime_workspace_file"})
+	if err != nil {
+		t.Fatalf("list runtime workspace artifacts: %v", err)
+	}
+	if len(artifacts) != 1 || artifacts[0].Metadata["provider_backed"] != "true" ||
+		artifacts[0].URI == "" || strings.HasPrefix(artifacts[0].URI, "file://") {
+		t.Fatalf("artifacts = %+v, want remote runtime workspace artifact without host URI", artifacts)
+	}
+}
+
 func TestCodeDefinedWorkflowContextDiscoversRuntimeWorkspaceSkills(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()

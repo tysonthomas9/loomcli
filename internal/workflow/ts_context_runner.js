@@ -367,6 +367,7 @@ function makeRuntimeWorkspaceFiles(request, operations, workspace) {
         cleanupEnforced: false,
         cleanupScope: "admitted_only",
         cleanedFiles: 0,
+        providerBacked: false,
       };
     }
     let cleanedFiles = 0;
@@ -379,12 +380,14 @@ function makeRuntimeWorkspaceFiles(request, operations, workspace) {
       const stat = fs.lstatSync(abs);
       if (!stat.isFile() && !stat.isSymbolicLink()) continue;
       fs.unlinkSync(abs);
+      removeEmptyParents(abs, runtimeRoot);
       cleanedFiles += 1;
     }
     return {
       cleanupEnforced: true,
       cleanupScope: "current_run_runtime_files",
       cleanedFiles,
+      providerBacked: true,
     };
   };
   return {
@@ -398,6 +401,19 @@ function makeRuntimeWorkspaceFiles(request, operations, workspace) {
       }),
     readJSON: async (relativePath) => JSON.parse(await readText(relativePath)),
   };
+}
+
+function removeEmptyParents(abs, root) {
+  const resolvedRoot = path.resolve(root);
+  let dir = path.dirname(path.resolve(abs));
+  while (dir.startsWith(resolvedRoot + path.sep) && dir !== resolvedRoot) {
+    try {
+      fs.rmdirSync(dir);
+    } catch {
+      return;
+    }
+    dir = path.dirname(dir);
+  }
 }
 
 function makeWorkflowShell(request, operations) {
@@ -575,6 +591,12 @@ function makeContext(request, workflow) {
   };
   const materializeWorkspace = async (options = {}) => {
     const params = runtimeWorkspaceLifecycleParams("materialize", options || {});
+    const providerBacked = Boolean(request.runtimeWorkspaceRoot);
+    if (providerBacked) {
+      fs.mkdirSync(String(request.runtimeWorkspaceRoot), { recursive: true });
+    }
+    params.providerBacked = providerBacked;
+    params.materialized = providerBacked;
     operations.push({ type: "runtime.workspace.materialize", params });
     return { accepted: true, status: "admitted", ...jsonSafe(params) };
   };
