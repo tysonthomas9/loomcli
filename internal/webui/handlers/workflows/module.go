@@ -34,5 +34,6 @@ func (m *Module) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/workspaces/{ws}/workflow-triggers/{event}", HandleTriggerBinding(m.store, m.issueBackendFn))
 	mux.HandleFunc("GET /api/workspaces/{ws}/workflow-runs/{runID}", HandleShow(m.store))
 	mux.HandleFunc("GET /api/workspaces/{ws}/workflow-runs/{runID}/events", HandleEvents(m.store))
+	mux.HandleFunc("GET /api/workspaces/{ws}/workflow-runs/{runID}/events/stream", HandleEventStream(m.store))
 	mux.HandleFunc("POST /api/workspaces/{ws}/workflow-runs/{runID}/cancel", HandleCancel(m.store))
 }

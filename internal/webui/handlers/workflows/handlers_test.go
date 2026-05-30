@@ -127,6 +127,25 @@ func TestWorkflowRunAPICreatesInspectableRun(t *testing.T) {
 		t.Fatalf("events = %+v, want TypeScript WorkflowContext, log, ensure, and dispatch evidence", events.Data)
 	}
 
+	streamRec := httptest.NewRecorder()
+	mux.ServeHTTP(streamRec, httptest.NewRequest(http.MethodGet, "/api/workspaces/WS/workflow-runs/"+created.Run.RunID+"/events/stream?once=1", nil))
+	if streamRec.Code != http.StatusOK {
+		t.Fatalf("event stream status = %d, want 200; body=%s", streamRec.Code, streamRec.Body.String())
+	}
+	if ct := streamRec.Header().Get("Content-Type"); ct != "text/event-stream" {
+		t.Fatalf("event stream content type = %q, want text/event-stream", ct)
+	}
+	if body := streamRec.Body.String(); !strings.Contains(body, "event: workflow_event") || !strings.Contains(body, `"type":"task_run_ensured"`) {
+		t.Fatalf("event stream body = %s, want workflow_event SSE with task_run_ensured", body)
+	}
+	lastEventRec := httptest.NewRecorder()
+	lastEventReq := httptest.NewRequest(http.MethodGet, "/api/workspaces/WS/workflow-runs/"+created.Run.RunID+"/events/stream?once=1", nil)
+	lastEventReq.Header.Set("Last-Event-ID", "999")
+	mux.ServeHTTP(lastEventRec, lastEventReq)
+	if strings.Contains(lastEventRec.Body.String(), "event: workflow_event") {
+		t.Fatalf("event stream replayed events after Last-Event-ID=999: %s", lastEventRec.Body.String())
+	}
+
 	cancelRec := postJSON(t, mux, "/api/workspaces/WS/workflow-runs/"+created.Run.RunID+"/cancel", map[string]any{})
 	if cancelRec.Code != http.StatusOK {
 		t.Fatalf("cancel status = %d, want 200; body=%s", cancelRec.Code, cancelRec.Body.String())

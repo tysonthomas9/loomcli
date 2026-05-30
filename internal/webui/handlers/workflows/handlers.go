@@ -9,6 +9,7 @@ import (
 	"os"
 	"path"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/dto"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 	workflowpkg "github.com/tysonthomas9/loomcli/internal/workflow"
 )
@@ -180,6 +182,40 @@ func HandleEvents(st store.Store) http.HandlerFunc {
 	}
 }
 
+func HandleEventStream(st store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		sw, err := realtime.NewWriter(w)
+		if err != nil {
+			handler.HandleServiceError(w, service.ErrInternal("workflow event stream unsupported", err))
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		lastIndex := workflowLastEventIndex(r)
+		_ = sw.WriteRetry(3000)
+		if err := writeWorkflowRunEvents(r.Context(), st, sw, r.PathValue("ws"), r.PathValue("runID"), &lastIndex); err != nil {
+			handler.HandleServiceError(w, storeError("stream workflow events", err))
+			return
+		}
+		if r.URL.Query().Get("once") == "1" || r.URL.Query().Get("once") == "true" {
+			return
+		}
+		ticker := time.NewTicker(2 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-r.Context().Done():
+				return
+			case <-ticker.C:
+				if err := writeWorkflowRunEvents(r.Context(), st, sw, r.PathValue("ws"), r.PathValue("runID"), &lastIndex); err != nil {
+					_ = sw.WriteComment(err.Error())
+				}
+			}
+		}
+	}
+}
+
 func HandleCancel(st store.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		now := time.Now().UTC()
@@ -202,6 +238,46 @@ func HandleCancel(st store.Store) http.HandlerFunc {
 		})
 		handler.WriteJSON(w, http.StatusOK, run)
 	}
+}
+
+func writeWorkflowRunEvents(ctx context.Context, st store.Store, sw *realtime.Writer, ws, runID string, lastIndex *int64) error {
+	events, err := st.RunEvents().List(ctx, ws, store.RunEventFilter{WorkflowRunID: runID})
+	if err != nil {
+		return err
+	}
+	sort.Slice(events, func(i, j int) bool {
+		return events[i].EventIndex < events[j].EventIndex
+	})
+	for _, event := range events {
+		if event == nil || event.EventIndex <= *lastIndex {
+			continue
+		}
+		data, err := json.Marshal(event)
+		if err != nil {
+			return err
+		}
+		if err := sw.WriteEvent(event.EventIndex, "workflow_event", string(data)); err != nil {
+			return err
+		}
+		*lastIndex = event.EventIndex
+	}
+	return nil
+}
+
+func workflowLastEventIndex(r *http.Request) int64 {
+	if r == nil {
+		return 0
+	}
+	for _, value := range []string{r.Header.Get("Last-Event-ID"), r.URL.Query().Get("since")} {
+		if strings.TrimSpace(value) == "" {
+			continue
+		}
+		n, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
+		if err == nil && n > 0 {
+			return n
+		}
+	}
+	return 0
 }
 
 func appendWorkflowAdmissionEvent(ctx context.Context, st store.Store, run *domain.WorkflowRun, eventType string, data map[string]any) {
