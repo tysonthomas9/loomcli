@@ -196,6 +196,9 @@ func Apply(ctx context.Context, st store.Store, workspaceKey, actor string, plan
 			return fmt.Errorf("upsert runtime profile %s: %w", rt.Name, err)
 		}
 	}
+	if err := validateWorkflowRouteCollisions(ctx, st, workspaceKey, plan.Workflows); err != nil {
+		return err
+	}
 	for _, wf := range plan.Workflows {
 		manifest := mustJSON(wf)
 		capability := workflowCapabilityManifest(wf, toolIndex)

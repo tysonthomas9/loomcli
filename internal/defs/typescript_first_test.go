@@ -171,6 +171,41 @@ func TestTypeScriptFirstWorkflowApplyCreatesDurableBindings(t *testing.T) {
 	}
 }
 
+func TestApplyRejectsWorkflowRouteCollision(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+
+	writeDefFile(t, root, ".loom/workflows/slack-a.ts", `import { defineWorkflow } from '@loom/runtime';
+
+export default defineWorkflow({
+  name: 'slack-a',
+  path: '/workflows/slack/run',
+  auth: 'workspace',
+  builtin: 'run-parent-work-items',
+});`)
+	writeDefFile(t, root, ".loom/workflows/slack-b.ts", `import { defineWorkflow } from '@loom/runtime';
+
+export default defineWorkflow({
+  name: 'slack-b',
+  path: '/workflows/slack/run',
+  auth: 'workspace',
+  builtin: 'run-parent-work-items',
+});`)
+
+	plan, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TSCOLLIDE", Name: "TypeScript Collisions"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	err = Apply(ctx, st, "TSCOLLIDE", "test", plan)
+	if err == nil || !strings.Contains(err.Error(), "workflow route collision POST /workflows/slack/run") {
+		t.Fatalf("Apply() error = %v, want workflow route collision", err)
+	}
+}
+
 func TestTypeScriptFirstSkillImportBundlesMetadata(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
