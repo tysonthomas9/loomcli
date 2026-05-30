@@ -76,6 +76,26 @@ func TestWorkflowRunAPICreatesInspectableRun(t *testing.T) {
 		t.Fatalf("created builtin = %+v, want one ensured task run", created.Builtin)
 	}
 
+	admissionStreamRec := postJSONStream(t, mux, "/api/workspaces/WS/workflows/epic-runner/runs", map[string]any{
+		"input": map[string]any{
+			"parentId":       "EPIC-STREAM",
+			"role":           "task",
+			"maxConcurrency": 1,
+		},
+	})
+	if admissionStreamRec.Code != http.StatusCreated {
+		t.Fatalf("admission stream status = %d, want 201; body=%s", admissionStreamRec.Code, admissionStreamRec.Body.String())
+	}
+	if ct := admissionStreamRec.Header().Get("Content-Type"); ct != "text/event-stream" {
+		t.Fatalf("admission stream content type = %q, want text/event-stream", ct)
+	}
+	if body := admissionStreamRec.Body.String(); !strings.Contains(body, "event: workflow_admission") ||
+		!strings.Contains(body, "event: workflow_event") ||
+		!strings.Contains(body, `"type":"workflow_api_admitted"`) ||
+		!strings.Contains(body, `"type":"task_run_ensured"`) {
+		t.Fatalf("admission stream body = %s, want admission and replayed workflow events", body)
+	}
+
 	listRunsRec := httptest.NewRecorder()
 	mux.ServeHTTP(listRunsRec, httptest.NewRequest(http.MethodGet, "/api/workspaces/WS/workflow-runs?work_item_id=TASK-2&status=waiting", nil))
 	if listRunsRec.Code != http.StatusOK {
@@ -207,6 +227,26 @@ func TestWorkflowRouteBindingAPIRunsBoundWorkflow(t *testing.T) {
 	if !hasRunEventPtr(events, "workflow_route_admitted") || !hasRunEventPtr(events, "workflow_ts_context_started") || !hasRunEventPtr(events, "workflow_log") || !hasRunEventPtr(events, "task_run_ensured") || !hasRunEventPtr(events, "task_run_dispatched") {
 		t.Fatalf("events = %+v, want TypeScript WorkflowContext, log, ensure, and dispatch evidence", events)
 	}
+
+	streamRec := postJSONStream(t, mux, "/api/workspaces/WS/workflow-routes/workflows/epic-runner/run", map[string]any{
+		"input": map[string]any{
+			"parentId":       "EPIC-ROUTE-STREAM",
+			"role":           "task",
+			"maxConcurrency": 1,
+		},
+	})
+	if streamRec.Code != http.StatusCreated {
+		t.Fatalf("route stream status = %d, want 201; body=%s", streamRec.Code, streamRec.Body.String())
+	}
+	if ct := streamRec.Header().Get("Content-Type"); ct != "text/event-stream" {
+		t.Fatalf("route stream content type = %q, want text/event-stream", ct)
+	}
+	if body := streamRec.Body.String(); !strings.Contains(body, "event: workflow_admission") ||
+		!strings.Contains(body, "event: workflow_event") ||
+		!strings.Contains(body, `"type":"workflow_route_admitted"`) ||
+		!strings.Contains(body, `"type":"task_run_ensured"`) {
+		t.Fatalf("route stream body = %s, want admission and replayed workflow events", body)
+	}
 }
 
 func TestWorkflowRouteBindingAPIValidation(t *testing.T) {
@@ -288,6 +328,27 @@ func TestWorkflowTriggerBindingAPIRunsMatchingWorkflow(t *testing.T) {
 	}
 	if !hasRunEventPtr(events, "workflow_trigger_admitted") || !hasRunEventPtr(events, "task_run_ensured") {
 		t.Fatalf("events = %+v, want trigger admission and ensured task evidence", events)
+	}
+
+	streamRec := postJSONStream(t, mux, "/api/workspaces/WS/workflow-triggers/issue.label_added", map[string]any{
+		"input": map[string]any{
+			"parentId":       "EPIC-TRIGGER-STREAM",
+			"label":          "epic-runner",
+			"type":           "epic",
+			"maxConcurrency": 1,
+		},
+	})
+	if streamRec.Code != http.StatusCreated {
+		t.Fatalf("trigger stream status = %d, want 201; body=%s", streamRec.Code, streamRec.Body.String())
+	}
+	if ct := streamRec.Header().Get("Content-Type"); ct != "text/event-stream" {
+		t.Fatalf("trigger stream content type = %q, want text/event-stream", ct)
+	}
+	if body := streamRec.Body.String(); !strings.Contains(body, "event: workflow_trigger_admission") ||
+		!strings.Contains(body, "event: workflow_event") ||
+		!strings.Contains(body, `"type":"workflow_trigger_admitted"`) ||
+		!strings.Contains(body, `"type":"task_run_ensured"`) {
+		t.Fatalf("trigger stream body = %s, want trigger admission and replayed workflow events", body)
 	}
 }
 
@@ -487,12 +548,25 @@ func setupWorkflowTestMux(t *testing.T, ctx context.Context, ib backend.IssueBac
 
 func postJSON(t *testing.T, mux *http.ServeMux, path string, body any) *httptest.ResponseRecorder {
 	t.Helper()
+	return postJSONWithAccept(t, mux, path, body, "")
+}
+
+func postJSONStream(t *testing.T, mux *http.ServeMux, path string, body any) *httptest.ResponseRecorder {
+	t.Helper()
+	return postJSONWithAccept(t, mux, path, body, "text/event-stream")
+}
+
+func postJSONWithAccept(t *testing.T, mux *http.ServeMux, path string, body any, accept string) *httptest.ResponseRecorder {
+	t.Helper()
 	data, err := json.Marshal(body)
 	if err != nil {
 		t.Fatalf("marshal body: %v", err)
 	}
 	req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(data))
 	req.Header.Set("Content-Type", "application/json")
+	if accept != "" {
+		req.Header.Set("Accept", accept)
+	}
 	req.Header.Set("X-Actor", "tester")
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)

@@ -93,6 +93,12 @@ func HandleRun(st store.Store, issueBackendFn func(context.Context) backend.Issu
 			"workflow_name": r.PathValue("name"),
 			"actor":         actorName(r),
 		})
+		if wantsWorkflowAdmissionStream(r) {
+			if err := writeWorkflowAdmissionStream(w, r, st, ws, resp); err != nil {
+				handler.HandleServiceError(w, storeError("stream workflow admission", err))
+			}
+			return
+		}
 		handler.WriteJSON(w, http.StatusCreated, resp)
 	}
 }
@@ -122,6 +128,12 @@ func HandleRunRouteBinding(st store.Store, issueBackendFn func(context.Context) 
 			"path":          route.Path,
 			"actor":         actor,
 		})
+		if wantsWorkflowAdmissionStream(r) {
+			if err := writeWorkflowAdmissionStream(w, r, st, ws, resp); err != nil {
+				handler.HandleServiceError(w, storeError("stream workflow route admission", err))
+			}
+			return
+		}
 		handler.WriteJSON(w, http.StatusCreated, resp)
 	}
 }
@@ -155,6 +167,12 @@ func HandleTriggerBinding(st store.Store, issueBackendFn func(context.Context) b
 				"actor":         actor,
 			})
 			resp.Runs = append(resp.Runs, run)
+		}
+		if wantsWorkflowAdmissionStream(r) {
+			if err := writeWorkflowTriggerAdmissionStream(w, r, st, ws, resp); err != nil {
+				handler.HandleServiceError(w, storeError("stream workflow trigger admission", err))
+			}
+			return
 		}
 		handler.WriteJSON(w, http.StatusCreated, resp)
 	}
@@ -241,6 +259,10 @@ func HandleCancel(st store.Store) http.HandlerFunc {
 }
 
 func writeWorkflowRunEvents(ctx context.Context, st store.Store, sw *realtime.Writer, ws, runID string, lastIndex *int64) error {
+	return writeWorkflowRunEventsWithIDPrefix(ctx, st, sw, ws, runID, lastIndex, "")
+}
+
+func writeWorkflowRunEventsWithIDPrefix(ctx context.Context, st store.Store, sw *realtime.Writer, ws, runID string, lastIndex *int64, idPrefix string) error {
 	events, err := st.RunEvents().List(ctx, ws, store.RunEventFilter{WorkflowRunID: runID})
 	if err != nil {
 		return err
@@ -256,12 +278,91 @@ func writeWorkflowRunEvents(ctx context.Context, st store.Store, sw *realtime.Wr
 		if err != nil {
 			return err
 		}
-		if err := sw.WriteEvent(event.EventIndex, "workflow_event", string(data)); err != nil {
-			return err
+		var writeErr error
+		if idPrefix != "" {
+			writeErr = sw.WriteEventID(fmt.Sprintf("%s:%d", idPrefix, event.EventIndex), "workflow_event", string(data))
+		} else {
+			writeErr = sw.WriteEvent(event.EventIndex, "workflow_event", string(data))
+		}
+		if writeErr != nil {
+			return writeErr
 		}
 		*lastIndex = event.EventIndex
 	}
 	return nil
+}
+
+func wantsWorkflowAdmissionStream(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+	if strings.Contains(strings.ToLower(r.Header.Get("Accept")), "text/event-stream") {
+		return true
+	}
+	switch strings.ToLower(strings.TrimSpace(r.URL.Query().Get("stream"))) {
+	case "1", "true", "sse":
+		return true
+	default:
+		return false
+	}
+}
+
+func writeWorkflowAdmissionStream(w http.ResponseWriter, r *http.Request, st store.Store, ws string, resp runResponse) error {
+	sw, err := newWorkflowAdmissionStreamWriter(w, http.StatusCreated)
+	if err != nil {
+		return err
+	}
+	if err := writeWorkflowAdmissionEnvelope(sw, "workflow_admission", "admission", resp); err != nil {
+		return err
+	}
+	if resp.Run == nil {
+		return nil
+	}
+	var lastIndex int64
+	return writeWorkflowRunEventsWithIDPrefix(r.Context(), st, sw, ws, resp.Run.RunID, &lastIndex, resp.Run.RunID)
+}
+
+func writeWorkflowTriggerAdmissionStream(w http.ResponseWriter, r *http.Request, st store.Store, ws string, resp triggerResponse) error {
+	sw, err := newWorkflowAdmissionStreamWriter(w, http.StatusCreated)
+	if err != nil {
+		return err
+	}
+	if err := writeWorkflowAdmissionEnvelope(sw, "workflow_trigger_admission", "admission", resp); err != nil {
+		return err
+	}
+	for _, run := range resp.Runs {
+		if run.Run == nil {
+			continue
+		}
+		var lastIndex int64
+		if err := writeWorkflowRunEventsWithIDPrefix(r.Context(), st, sw, ws, run.Run.RunID, &lastIndex, run.Run.RunID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func newWorkflowAdmissionStreamWriter(w http.ResponseWriter, status int) (*realtime.Writer, error) {
+	sw, err := realtime.NewWriter(w)
+	if err != nil {
+		return nil, err
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.WriteHeader(status)
+	if err := sw.WriteRetry(3000); err != nil {
+		return nil, err
+	}
+	return sw, nil
+}
+
+func writeWorkflowAdmissionEnvelope(sw *realtime.Writer, eventName, eventID string, payload any) error {
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	return sw.WriteEventID(eventID, eventName, string(data))
 }
 
 func workflowLastEventIndex(r *http.Request) int64 {
