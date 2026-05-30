@@ -9,6 +9,21 @@ function defineWorkflow(config) {
   return { __loomType: "workflow", ...config };
 }
 
+function createAgent(config) {
+  if (typeof config === "function") {
+    return { __loomType: "agent", __loomFactory: config };
+  }
+  return { __loomType: "agent", ...(config || {}) };
+}
+
+function defineAgent(config) {
+  return createAgent(config);
+}
+
+function defineAgentProfile(config) {
+  return { __loomType: "agentProfile", ...(config || {}) };
+}
+
 function defineTool(config) {
   return { __loomType: "tool", ...config };
 }
@@ -62,6 +77,9 @@ function evaluateModule(file) {
     console,
     ...imported,
     defineWorkflow,
+    createAgent,
+    defineAgent,
+    defineAgentProfile,
     defineTool,
     trigger,
     runtime,
@@ -155,14 +173,80 @@ function makeContext(request, workflow) {
     logs.push({ level, message: String(message || ""), attributes: attributes || {} });
   };
   const tools = workflowTools(workflow, operations);
+  const requestContext = request.request || {};
+  const materializeAgent = (agent) => {
+    if (typeof agent === "function") {
+      return agent({ id: request.id, input, payload: input, env: request.env || {}, req: requestContext, request: requestContext }) || {};
+    }
+    if (agent && agent.__loomFactory) {
+      return agent.__loomFactory({ id: request.id, input, payload: input, env: request.env || {}, req: requestContext, request: requestContext }) || {};
+    }
+    return agent || {};
+  };
+  const sessionFor = (base) => async (nameOrOptions, maybeOptions) => {
+    const hasName = typeof nameOrOptions === "string";
+    const sessionName = hasName ? nameOrOptions : "default";
+    const options = hasName ? maybeOptions || {} : nameOrOptions || {};
+    const metadata = { ...(base.metadata || {}), ...((options && options.metadata) || {}) };
+    const op = {
+      type: "agents.session",
+      params: {
+        kind: "task",
+        ...base,
+        ...(options || {}),
+        metadata,
+        sessionName,
+      },
+    };
+    operations.push(op);
+    return {
+      accepted: true,
+      agentId: op.params.agentId || op.params.agent_id,
+      harness: op.params.harness,
+      sessionName,
+      sessionId: op.params.sessionId || op.params.session_id || op.params.id,
+      ...op.params,
+    };
+  };
 
   const ctx = {
     id: request.id,
     input,
     payload: input,
     env: request.env || {},
-    req: request.request || {},
-    request: request.request || {},
+    req: requestContext,
+    request: requestContext,
+    init: async (agent, options = {}) => {
+      const materialized = materializeAgent(agent);
+      const harness = String(options.name || options.harness || "default");
+      const agentId = String(
+        options.agentId ||
+          options.agent_id ||
+          materialized.name ||
+          materialized.id ||
+          workflow.name ||
+          "workflow-agent",
+      );
+      const base = {
+        agentId,
+        harness,
+        model: materialized.model,
+        backend: materialized.backend,
+        metadata: {
+          ...(options.metadata || {}),
+          ...(materialized.name ? { source_agent_name: String(materialized.name) } : {}),
+        },
+      };
+      return {
+        agentId,
+        harness,
+        session: sessionFor(base),
+        sessions: {
+          create: sessionFor(base),
+          get: sessionFor(base),
+        },
+      };
+    },
     log: {
       info: (message, attributes) => log("info", message, attributes),
       warn: (message, attributes) => log("warn", message, attributes),
@@ -190,6 +274,13 @@ function makeContext(request, workflow) {
     artifacts: {
       record: async (params) => {
         const op = { type: "artifacts.record", params: params || {} };
+        operations.push(op);
+        return { accepted: true, ...op.params };
+      },
+    },
+    agents: {
+      session: async (params) => {
+        const op = { type: "agents.session", params: params || {} };
         operations.push(op);
         return { accepted: true, ...op.params };
       },

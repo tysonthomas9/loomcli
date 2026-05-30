@@ -7,6 +7,7 @@ import (
 	_ "embed"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -281,6 +282,10 @@ func applyTSOperations(ctx context.Context, st store.Store, run *domain.Workflow
 			if err := applyRecordArtifactOperation(ctx, st, run, op.Params); err != nil {
 				return nil, err
 			}
+		case "agents.session":
+			if err := applyInitializeAgentSessionOperation(ctx, st, run, op.Params); err != nil {
+				return nil, err
+			}
 		default:
 			return nil, fmt.Errorf("unsupported WorkflowContext operation %q", op.Type)
 		}
@@ -345,6 +350,106 @@ func applyRecordArtifactOperation(ctx context.Context, st store.Store, run *doma
 	return nil
 }
 
+func applyInitializeAgentSessionOperation(ctx context.Context, st store.Store, run *domain.WorkflowRun, params map[string]any) error {
+	if st.AgentSessions() == nil {
+		return fmt.Errorf("agent session store not configured")
+	}
+	create, err := agentSessionCreateForWorkflow(run, params)
+	if err != nil {
+		return err
+	}
+	session, err := st.AgentSessions().Create(ctx, create)
+	if err != nil {
+		if !errors.Is(err, domain.ErrAlreadyExists) {
+			return fmt.Errorf("initialize workflow agent session %s: %w", create.SessionID, err)
+		}
+		session, err = st.AgentSessions().Get(ctx, run.WorkspaceKey, create.SessionID)
+		if err != nil {
+			return fmt.Errorf("load existing workflow agent session %s: %w", create.SessionID, err)
+		}
+	}
+	appendAgentSessionInitializedEvent(ctx, st, run, session)
+	return nil
+}
+
+func agentSessionCreateForWorkflow(run *domain.WorkflowRun, params map[string]any) (store.AgentSessionCreate, error) {
+	agentID := firstString(params, "agentId", "agent_id", "agent", "name")
+	if agentID == "" {
+		return store.AgentSessionCreate{}, fmt.Errorf("agents.session requires agentId")
+	}
+	kind, err := agentSessionKind(firstString(params, "kind"))
+	if err != nil {
+		return store.AgentSessionCreate{}, err
+	}
+	status, err := agentSessionStatus(firstString(params, "status"))
+	if err != nil {
+		return store.AgentSessionCreate{}, err
+	}
+	taskID := firstString(params, "taskId", "task_id", "workItemId", "work_item_id")
+	harnessName := firstString(params, "harness", "harnessName", "harness_name")
+	sessionName := firstString(params, "sessionName", "session_name")
+	sessionID := firstString(params, "sessionId", "session_id", "id")
+	if sessionID == "" {
+		sessionID = generatedSessionID(run.RunID, agentID, harnessName, sessionName, taskID)
+	}
+	phase := firstString(params, "phase")
+	if phase == "" {
+		phase = "initialized"
+	}
+	return store.AgentSessionCreate{
+		WorkspaceKey:    run.WorkspaceKey,
+		SessionID:       sessionID,
+		AgentID:         agentID,
+		NodeID:          firstString(params, "nodeId", "node_id"),
+		Kind:            kind,
+		TaskID:          taskID,
+		TerminalID:      firstString(params, "terminalId", "terminal_id"),
+		ParentSessionID: firstString(params, "parentSessionId", "parent_session_id"),
+		Status:          status,
+		Phase:           phase,
+		Attempt:         int(firstInt64(params, "attempt")),
+		Metadata:        agentSessionMetadataForWorkflow(run, params, harnessName, sessionName),
+	}, nil
+}
+
+func agentSessionMetadataForWorkflow(run *domain.WorkflowRun, params map[string]any, harnessName, sessionName string) map[string]string {
+	metadata := stringMap(params["metadata"])
+	metadata["workflow_run_id"] = run.RunID
+	metadata["workflow_name"] = run.WorkflowName
+	if run.WorkflowVersion != "" {
+		metadata["workflow_version"] = run.WorkflowVersion
+	}
+	if harnessName != "" {
+		metadata["harness"] = harnessName
+	}
+	if sessionName != "" {
+		metadata["session_name"] = sessionName
+	}
+	if model := firstString(params, "model"); model != "" {
+		metadata["model"] = model
+	}
+	if backendName := firstString(params, "backend"); backendName != "" {
+		metadata["backend"] = backendName
+	}
+	return metadata
+}
+
+func appendAgentSessionInitializedEvent(ctx context.Context, st store.Store, run *domain.WorkflowRun, session *domain.AgentSession) {
+	_, _ = st.RunEvents().Append(ctx, store.RunEventAppend{
+		WorkspaceKey:  run.WorkspaceKey,
+		WorkflowRunID: run.RunID,
+		Type:          "agent_session_initialized",
+		Message:       "workflow agent session initialized",
+		Data: mustJSON(map[string]string{
+			"session_id": session.SessionID,
+			"agent_id":   session.AgentID,
+			"kind":       string(session.Kind),
+			"task_id":    session.TaskID,
+			"phase":      session.Phase,
+		}),
+	})
+}
+
 func applyEnsureTaskRunOperation(ctx context.Context, st store.Store, run *domain.WorkflowRun, parentID string, params map[string]any) (*domain.TaskRun, error) {
 	workItemID := firstString(params, "workItemId", "work_item_id", "id")
 	if workItemID == "" {
@@ -386,6 +491,59 @@ func applyEnsureTaskRunOperation(ctx context.Context, st store.Store, run *domai
 func generatedArtifactID(runID, artifactType, uri string) string {
 	sum := sha256.Sum256([]byte(runID + "\x00" + artifactType + "\x00" + uri))
 	return "artifact:" + runID + ":" + hex.EncodeToString(sum[:])[:12]
+}
+
+func generatedSessionID(runID, agentID, harnessName, sessionName, taskID string) string {
+	sum := sha256.Sum256([]byte(runID + "\x00" + agentID + "\x00" + harnessName + "\x00" + sessionName + "\x00" + taskID))
+	return "session:" + runID + ":" + hex.EncodeToString(sum[:])[:12]
+}
+
+func agentSessionKind(raw string) (domain.AgentSessionKind, error) {
+	switch strings.TrimSpace(raw) {
+	case "":
+		return domain.AgentSessionKindTask, nil
+	case string(domain.AgentSessionKindTask):
+		return domain.AgentSessionKindTask, nil
+	case string(domain.AgentSessionKindOrchestration):
+		return domain.AgentSessionKindOrchestration, nil
+	case string(domain.AgentSessionKindTerminal):
+		return domain.AgentSessionKindTerminal, nil
+	case string(domain.AgentSessionKindMaintenance):
+		return domain.AgentSessionKindMaintenance, nil
+	case string(domain.AgentSessionKindAdHoc), "ad-hoc", "adhoc":
+		return domain.AgentSessionKindAdHoc, nil
+	default:
+		return "", fmt.Errorf("unsupported agents.session kind %q", raw)
+	}
+}
+
+func agentSessionStatus(raw string) (domain.AgentSessionStatus, error) {
+	switch strings.TrimSpace(raw) {
+	case "":
+		return domain.AgentSessionRunning, nil
+	case string(domain.AgentSessionQueued):
+		return domain.AgentSessionQueued, nil
+	case string(domain.AgentSessionLeased):
+		return domain.AgentSessionLeased, nil
+	case string(domain.AgentSessionStarting):
+		return domain.AgentSessionStarting, nil
+	case string(domain.AgentSessionRunning):
+		return domain.AgentSessionRunning, nil
+	case string(domain.AgentSessionIdle):
+		return domain.AgentSessionIdle, nil
+	case string(domain.AgentSessionYielded):
+		return domain.AgentSessionYielded, nil
+	case string(domain.AgentSessionCompleted):
+		return domain.AgentSessionCompleted, nil
+	case string(domain.AgentSessionFailed):
+		return domain.AgentSessionFailed, nil
+	case string(domain.AgentSessionCancelled):
+		return domain.AgentSessionCancelled, nil
+	case string(domain.AgentSessionExpired):
+		return domain.AgentSessionExpired, nil
+	default:
+		return "", fmt.Errorf("unsupported agents.session status %q", raw)
+	}
 }
 
 func firstString(values map[string]any, keys ...string) string {

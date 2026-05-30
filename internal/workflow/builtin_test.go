@@ -459,6 +459,99 @@ export default defineWorkflow({
 	}
 }
 
+func TestCodeDefinedWorkflowContextInitializesAgentSession(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	workflowPath := filepath.Join(root, ".loom", "workflows", "context-session.ts")
+	if err := os.MkdirAll(filepath.Dir(workflowPath), 0o755); err != nil {
+		t.Fatalf("mkdir workflow dir: %v", err)
+	}
+	if err := os.WriteFile(workflowPath, []byte(`import { createAgent, defineWorkflow } from '@loom/runtime';
+
+const worker = createAgent(({ id }) => ({
+  name: 'worker-one',
+  model: 'test/model',
+  backend: 'codex',
+  instructions: `+"`"+`Handle workflow run ${id}.`+"`"+`,
+}));
+
+export default defineWorkflow({
+  name: 'context-session',
+  async run(ctx) {
+    const harness = await ctx.init(worker, { name: 'planning' });
+    const session = await harness.session('review', {
+      taskId: String(ctx.input.taskId ?? ''),
+      phase: 'planning',
+      metadata: { source: 'workflow-context' },
+    });
+    await ctx.agents.session({
+      agentId: 'worker-two',
+      sessionId: 'explicit-session',
+      kind: 'ad_hoc',
+      status: 'idle',
+      metadata: { source: 'direct-context' },
+    });
+    return { agentId: session.agentId, sessionName: session.sessionName };
+  },
+});
+`), 0o644); err != nil {
+		t.Fatalf("write workflow: %v", err)
+	}
+	plan, err := defspkg.Load(root)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TSSESSION", Name: "TypeScript Session Context"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := defspkg.Apply(ctx, st, "TSSESSION", "atlas", plan); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	run, err := CreateOrResumeRun(ctx, st, "TSSESSION", "context-session", json.RawMessage(`{"taskId":"TASK-SESSION"}`), "atlas")
+	if err != nil {
+		t.Fatalf("CreateOrResumeRun() error = %v", err)
+	}
+	result, err := RunOnce(ctx, st, clitest.NewMockIssueBackend(), run)
+	if err != nil {
+		t.Fatalf("RunOnce() error = %v", err)
+	}
+	if result.Run == nil || result.Run.Status != domain.WorkflowRunCompleted {
+		t.Fatalf("result = %+v, want completed session workflow", result)
+	}
+	sessions, err := st.AgentSessions().List(ctx, "TSSESSION", store.AgentSessionFilter{AgentID: "worker-one", TaskID: "TASK-SESSION"})
+	if err != nil {
+		t.Fatalf("list worker sessions: %v", err)
+	}
+	if len(sessions) != 1 || sessions[0].Kind != domain.AgentSessionKindTask ||
+		sessions[0].Status != domain.AgentSessionRunning || sessions[0].Phase != "planning" ||
+		sessions[0].Metadata["source"] != "workflow-context" ||
+		sessions[0].Metadata["source_agent_name"] != "worker-one" ||
+		sessions[0].Metadata["workflow_run_id"] != run.RunID ||
+		sessions[0].Metadata["workflow_name"] != "context-session" ||
+		sessions[0].Metadata["harness"] != "planning" ||
+		sessions[0].Metadata["session_name"] != "review" ||
+		sessions[0].Metadata["model"] != "test/model" ||
+		sessions[0].Metadata["backend"] != "codex" {
+		t.Fatalf("sessions = %+v, want durable Flue-shaped workflow session", sessions)
+	}
+	direct, err := st.AgentSessions().Get(ctx, "TSSESSION", "explicit-session")
+	if err != nil {
+		t.Fatalf("get direct session: %v", err)
+	}
+	if direct.AgentID != "worker-two" || direct.Kind != domain.AgentSessionKindAdHoc ||
+		direct.Status != domain.AgentSessionIdle || direct.Metadata["source"] != "direct-context" {
+		t.Fatalf("direct session = %+v, want explicit low-level agent session", direct)
+	}
+	events, err := st.RunEvents().List(ctx, "TSSESSION", store.RunEventFilter{WorkflowRunID: run.RunID})
+	if err != nil {
+		t.Fatalf("list run events: %v", err)
+	}
+	if !hasWorkflowEvent(events, "agent_session_initialized") || !hasWorkflowEvent(events, "workflow_completed") {
+		t.Fatalf("events = %+v, want session initialization and completion evidence", events)
+	}
+}
+
 func TestParentWorkItemsWorkflowCompletesWhenNoOpenChildren(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()

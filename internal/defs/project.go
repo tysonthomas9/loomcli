@@ -242,6 +242,23 @@ const runtimeTypes = `declare module '@loom/runtime' {
     };
   };
 
+  export type AgentFactoryContext = {
+    id: string;
+    input: Record<string, unknown>;
+    payload: Record<string, unknown>;
+    env: Record<string, string | undefined>;
+    req: WorkflowRequestContext;
+    request: WorkflowRequestContext;
+  };
+
+  export type AgentFactory = (ctx: AgentFactoryContext) => Partial<AgentDefinition> & {
+    name?: string;
+  };
+
+  export type CreatedAgent = Partial<AgentDefinition> & {
+    name?: string;
+  };
+
   export type SkillDefinition = {
     name: string;
     description?: string;
@@ -299,6 +316,62 @@ const runtimeTypes = `declare module '@loom/runtime' {
     actor?: string;
   };
 
+  export type WorkflowAgentSessionInput = {
+    sessionId?: string;
+    session_id?: string;
+    id?: string;
+    agentId?: string;
+    agent_id?: string;
+    agent?: string;
+    name?: string;
+    nodeId?: string;
+    node_id?: string;
+    harness?: string;
+    harnessName?: string;
+    harness_name?: string;
+    sessionName?: string;
+    session_name?: string;
+    kind?: 'task' | 'orchestration' | 'terminal' | 'maintenance' | 'ad_hoc';
+    taskId?: string;
+    task_id?: string;
+    workItemId?: string;
+    work_item_id?: string;
+    terminalId?: string;
+    terminal_id?: string;
+    parentSessionId?: string;
+    parent_session_id?: string;
+    status?: 'queued' | 'leased' | 'starting' | 'running' | 'idle' | 'yielded' | 'completed' | 'failed' | 'cancelled' | 'expired';
+    phase?: string;
+    attempt?: number;
+    model?: string;
+    backend?: string;
+    metadata?: Record<string, string>;
+  };
+
+  export type WorkflowAgentSession = Record<string, unknown> & {
+    accepted: boolean;
+    agentId?: string;
+    agent_id?: string;
+    sessionId?: string;
+    session_id?: string;
+    sessionName?: string;
+    session_name?: string;
+    harness?: string;
+  };
+
+  export type WorkflowAgentHarness = {
+    agentId: string;
+    harness: string;
+    session(name?: string, options?: WorkflowAgentSessionInput): Promise<WorkflowAgentSession>;
+    session(options?: WorkflowAgentSessionInput): Promise<WorkflowAgentSession>;
+    sessions: {
+      create(name?: string, options?: WorkflowAgentSessionInput): Promise<WorkflowAgentSession>;
+      create(options?: WorkflowAgentSessionInput): Promise<WorkflowAgentSession>;
+      get(name?: string, options?: WorkflowAgentSessionInput): Promise<WorkflowAgentSession>;
+      get(options?: WorkflowAgentSessionInput): Promise<WorkflowAgentSession>;
+    };
+  };
+
   export type WorkflowContext = {
     id: string;
     input: Record<string, unknown>;
@@ -306,6 +379,13 @@ const runtimeTypes = `declare module '@loom/runtime' {
     env: Record<string, string | undefined>;
     req: WorkflowRequestContext;
     request: WorkflowRequestContext;
+    init(agent: AgentDefinition | CreatedAgent | AgentFactory, options?: {
+      name?: string;
+      harness?: string;
+      agentId?: string;
+      agent_id?: string;
+      metadata?: Record<string, string>;
+    }): Promise<WorkflowAgentHarness>;
     log: {
       info(message: string, attributes?: Record<string, unknown>): void;
       warn(message: string, attributes?: Record<string, unknown>): void;
@@ -325,6 +405,9 @@ const runtimeTypes = `declare module '@loom/runtime' {
         reason?: string;
         metadata?: Record<string, string>;
       }): Promise<Record<string, unknown>>;
+    };
+    agents: {
+      session(input: WorkflowAgentSessionInput): Promise<WorkflowAgentSession>;
     };
     artifacts: {
       record(input: {
@@ -351,7 +434,7 @@ const runtimeTypes = `declare module '@loom/runtime' {
 
   export function defineConfig<T extends object>(config: T): T;
   export function defineAgent<T extends AgentDefinition>(agent: T): T;
-  export function createAgent<T extends AgentDefinition>(agent: T): T;
+  export function createAgent<T extends AgentDefinition | AgentFactory>(agent: T): CreatedAgent;
   export function defineAgentProfile<T extends AgentDefinition>(profile: T): T;
   export function defineSkill<T extends SkillDefinition>(skill: T): T;
   export function defineTool<T extends ToolDefinition>(tool: T): T;
