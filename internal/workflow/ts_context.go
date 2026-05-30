@@ -19,13 +19,21 @@ import (
 var tsContextRunnerSource string
 
 type tsContextRequest struct {
-	ID              string              `json:"id"`
-	SourcePath      string              `json:"sourcePath"`
-	Input           map[string]any      `json:"input"`
-	Env             map[string]string   `json:"env,omitempty"`
-	ReadyChildren   []backend.IssueData `json:"readyChildren,omitempty"`
-	BlockedChildren []backend.IssueData `json:"blockedChildren,omitempty"`
-	ChildWorkItems  []backend.IssueData `json:"childWorkItems,omitempty"`
+	ID              string                   `json:"id"`
+	SourcePath      string                   `json:"sourcePath"`
+	Input           map[string]any           `json:"input"`
+	Env             map[string]string        `json:"env,omitempty"`
+	Request         tsContextRequestMetadata `json:"request"`
+	ReadyChildren   []backend.IssueData      `json:"readyChildren,omitempty"`
+	BlockedChildren []backend.IssueData      `json:"blockedChildren,omitempty"`
+	ChildWorkItems  []backend.IssueData      `json:"childWorkItems,omitempty"`
+}
+
+type tsContextRequestMetadata struct {
+	WorkspaceKey    string `json:"workspaceKey"`
+	WorkflowName    string `json:"workflowName"`
+	WorkflowVersion string `json:"workflowVersion"`
+	Actor           string `json:"actor,omitempty"`
 }
 
 type tsContextResponse struct {
@@ -169,6 +177,12 @@ func buildTSContextRequest(ctx context.Context, ib backend.IssueBackend, run *do
 		SourcePath: sourcePath,
 		Input:      inputMap,
 		Env:        map[string]string{},
+		Request: tsContextRequestMetadata{
+			WorkspaceKey:    run.WorkspaceKey,
+			WorkflowName:    run.WorkflowName,
+			WorkflowVersion: run.WorkflowVersion,
+			Actor:           run.LeaseOwner,
+		},
 	}
 	if ib == nil || parentID == "" {
 		return request, parentID, nil

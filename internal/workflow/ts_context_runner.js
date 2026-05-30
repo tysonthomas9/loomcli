@@ -160,6 +160,8 @@ function makeContext(request) {
     input,
     payload: input,
     env: request.env || {},
+    req: request.request || {},
+    request: request.request || {},
     log: {
       info: (message, attributes) => log("info", message, attributes),
       warn: (message, attributes) => log("warn", message, attributes),

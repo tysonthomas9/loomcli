@@ -238,6 +238,8 @@ export default defineWorkflow({
           source: 'typescript-query',
           blocked: String(blocked.length),
           children: String(children.length),
+          actor: String(ctx.req.actor),
+          workflow: String(ctx.req.workflowName),
         },
       });
     }
@@ -281,7 +283,12 @@ export default defineWorkflow({
 	if err != nil {
 		t.Fatalf("list first task runs: %v", err)
 	}
-	if len(firstTaskRuns) != 1 || firstTaskRuns[0].Metadata["source"] != "typescript-query" || firstTaskRuns[0].Metadata["blocked"] != "1" || firstTaskRuns[0].Metadata["children"] != "3" {
+	if len(firstTaskRuns) != 1 ||
+		firstTaskRuns[0].Metadata["source"] != "typescript-query" ||
+		firstTaskRuns[0].Metadata["blocked"] != "1" ||
+		firstTaskRuns[0].Metadata["children"] != "3" ||
+		firstTaskRuns[0].Metadata["actor"] != "atlas" ||
+		firstTaskRuns[0].Metadata["workflow"] != "context-queries" {
 		t.Fatalf("first task runs = %+v, want limited ready query with blocked/list metadata", firstTaskRuns)
 	}
 	secondTaskRuns, err := st.TaskRuns().List(ctx, "TSQ", store.TaskRunFilter{WorkflowRunID: run.RunID, WorkItemID: secondReady.ID})

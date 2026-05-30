@@ -292,11 +292,20 @@ const runtimeTypes = `declare module '@loom/runtime' {
     run?: (ctx: WorkflowContext) => unknown | Promise<unknown>;
   };
 
+  export type WorkflowRequestContext = {
+    workspaceKey: string;
+    workflowName: string;
+    workflowVersion: string;
+    actor?: string;
+  };
+
   export type WorkflowContext = {
     id: string;
     input: Record<string, unknown>;
     payload: Record<string, unknown>;
     env: Record<string, string | undefined>;
+    req: WorkflowRequestContext;
+    request: WorkflowRequestContext;
     log: {
       info(message: string, attributes?: Record<string, unknown>): void;
       warn(message: string, attributes?: Record<string, unknown>): void;
