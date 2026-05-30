@@ -137,9 +137,18 @@ function makeContext(request) {
   const input = request.input && typeof request.input === "object" ? request.input : {};
   const parentId = String(input.parentId || input.parent_id || "");
 
-  const byParent = (items, requestedParent) => {
-    if (!requestedParent || requestedParent === parentId) return items || [];
-    return (items || []).filter((item) => !item.parent || item.parent === requestedParent);
+  const byParent = (items, requestedParent, options) => {
+    let out;
+    if (!requestedParent || requestedParent === parentId) {
+      out = items || [];
+    } else {
+      out = (items || []).filter(
+        (item) => !item.parent || item.parent === requestedParent,
+      );
+    }
+    const limit = Number(options && options.limit);
+    if (Number.isFinite(limit) && limit > 0) return out.slice(0, limit);
+    return out;
   };
 
   const log = (level, message, attributes) => {
@@ -157,9 +166,16 @@ function makeContext(request) {
       error: (message, attributes) => log("error", message, attributes),
     },
     workItems: {
-      readyChildren: async (requestedParent) => byParent(request.readyChildren, String(requestedParent || "")),
-      blockedChildren: async (requestedParent) => byParent(request.blockedChildren, String(requestedParent || "")),
-      listChildren: async (requestedParent) => byParent(request.childWorkItems, String(requestedParent || "")),
+      readyChildren: async (requestedParent, options) =>
+        byParent(request.readyChildren, String(requestedParent || ""), options),
+      blockedChildren: async (requestedParent, options) =>
+        byParent(
+          request.blockedChildren,
+          String(requestedParent || ""),
+          options,
+        ),
+      listChildren: async (requestedParent, options) =>
+        byParent(request.childWorkItems, String(requestedParent || ""), options),
     },
     taskRuns: {
       ensure: async (params) => {

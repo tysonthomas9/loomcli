@@ -206,6 +206,100 @@ export default defineWorkflow({
 	}
 }
 
+func TestCodeDefinedWorkflowContextWorkItemQueriesHonorOptions(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	workflowPath := filepath.Join(root, ".loom", "workflows", "context-queries.ts")
+	if err := os.MkdirAll(filepath.Dir(workflowPath), 0o755); err != nil {
+		t.Fatalf("mkdir workflow dir: %v", err)
+	}
+	if err := os.WriteFile(workflowPath, []byte(`import { defineWorkflow } from '@loom/runtime';
+
+export default defineWorkflow({
+  name: 'context-queries',
+  singleton: (input) => `+"`"+`parent:${input.parentId}`+"`"+`,
+  tools: ['workItems.readyChildren', 'workItems.blockedChildren', 'workItems.listChildren', 'taskRuns.ensure'],
+  async run(ctx) {
+    const parentId = String(ctx.input.parentId);
+    const ready = await ctx.workItems.readyChildren(parentId, { limit: 1 });
+    const blocked = await ctx.workItems.blockedChildren(parentId, { limit: 2 });
+    const children = await ctx.workItems.listChildren(parentId);
+    ctx.log.info('context query counts', {
+      ready: ready.length,
+      blocked: blocked.length,
+      children: children.length,
+    });
+    for (const issue of ready) {
+      await ctx.taskRuns.ensure({
+        workItemId: issue.id,
+        role: 'task',
+        reason: issue.title,
+        metadata: {
+          source: 'typescript-query',
+          blocked: String(blocked.length),
+          children: String(children.length),
+        },
+      });
+    }
+    return { ready: ready.length, blocked: blocked.length, children: children.length };
+  },
+});
+`), 0o644); err != nil {
+		t.Fatalf("write workflow: %v", err)
+	}
+	plan, err := defspkg.Load(root)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TSQ", Name: "TypeScript Query Context"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := defspkg.Apply(ctx, st, "TSQ", "atlas", plan); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	firstReady := backend.IssueData{ID: "TSQ-2", Title: "Build sidebar", Status: "open", Parent: "TSQ-1"}
+	secondReady := backend.IssueData{ID: "TSQ-3", Title: "Build composer", Status: "open", Parent: "TSQ-1"}
+	blocked := backend.IssueData{ID: "TSQ-4", Title: "Blocked notifications", Status: "blocked", Parent: "TSQ-1"}
+	ib := clitest.NewMockIssueBackend()
+	ib.ReadyResult = []backend.IssueData{firstReady, secondReady}
+	ib.BlockedResult = []backend.IssueData{blocked}
+	ib.ListResult = []backend.IssueData{firstReady, secondReady, blocked}
+
+	run, err := CreateOrResumeRun(ctx, st, "TSQ", "context-queries", json.RawMessage(`{"parentId":"TSQ-1"}`), "atlas")
+	if err != nil {
+		t.Fatalf("CreateOrResumeRun() error = %v", err)
+	}
+	result, err := RunOnce(ctx, st, ib, run)
+	if err != nil {
+		t.Fatalf("RunOnce() error = %v", err)
+	}
+	if result.Run == nil || result.Run.Status != domain.WorkflowRunWaiting || len(result.TaskRuns) != 1 {
+		t.Fatalf("result = %+v, want waiting run with one limited task run", result)
+	}
+	firstTaskRuns, err := st.TaskRuns().List(ctx, "TSQ", store.TaskRunFilter{WorkflowRunID: run.RunID, WorkItemID: firstReady.ID})
+	if err != nil {
+		t.Fatalf("list first task runs: %v", err)
+	}
+	if len(firstTaskRuns) != 1 || firstTaskRuns[0].Metadata["source"] != "typescript-query" || firstTaskRuns[0].Metadata["blocked"] != "1" || firstTaskRuns[0].Metadata["children"] != "3" {
+		t.Fatalf("first task runs = %+v, want limited ready query with blocked/list metadata", firstTaskRuns)
+	}
+	secondTaskRuns, err := st.TaskRuns().List(ctx, "TSQ", store.TaskRunFilter{WorkflowRunID: run.RunID, WorkItemID: secondReady.ID})
+	if err != nil {
+		t.Fatalf("list second task runs: %v", err)
+	}
+	if len(secondTaskRuns) != 0 {
+		t.Fatalf("second task runs = %+v, want readyChildren limit to skip second ready child", secondTaskRuns)
+	}
+	events, err := st.RunEvents().List(ctx, "TSQ", store.RunEventFilter{WorkflowRunID: run.RunID})
+	if err != nil {
+		t.Fatalf("list run events: %v", err)
+	}
+	if !hasWorkflowEvent(events, "workflow_log") || !hasWorkflowEvent(events, "task_run_ensured") {
+		t.Fatalf("events = %+v, want query log and ensure evidence", events)
+	}
+}
+
 func TestParentWorkItemsWorkflowCompletesWhenNoOpenChildren(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
