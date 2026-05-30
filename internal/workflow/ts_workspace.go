@@ -3,6 +3,7 @@ package workflow
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -209,6 +210,29 @@ func appendRuntimeWorkspaceSkillsReadEvent(ctx context.Context, st store.Store, 
 		Message:       "workflow runtime workspace skills read from TypeScript WorkflowContext",
 		Data:          mustJSON(data),
 	})
+}
+
+func appendRuntimeWorkspaceLifecycleEvent(ctx context.Context, st store.Store, run *domain.WorkflowRun, params map[string]any, typ, message string) error {
+	runtimeProfileName := firstString(params, "runtimeProfileName", "runtime_profile_name")
+	if runtimeProfileName == "" {
+		action := firstNonEmptyString(firstString(params, "action"), "runtime workspace lifecycle request")
+		return fmt.Errorf("%s requires runtimeProfileName", action)
+	}
+	data := copyAnyMap(params)
+	data["runtime_profile_name"] = runtimeProfileName
+	data["workflow_run_id"] = run.RunID
+	data["source"] = "workflow_context"
+	if _, ok := data["status"]; !ok {
+		data["status"] = "admitted"
+	}
+	_, _ = st.RunEvents().Append(ctx, store.RunEventAppend{
+		WorkspaceKey:  run.WorkspaceKey,
+		WorkflowRunID: run.RunID,
+		Type:          typ,
+		Message:       message,
+		Data:          mustJSON(data),
+	})
+	return nil
 }
 
 func tsContextWorkspaceSkills(profile *tsContextRuntimeProfile) []tsContextWorkspaceSkill {

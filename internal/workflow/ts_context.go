@@ -375,6 +375,10 @@ func applyTSOperation(ctx context.Context, st store.Store, ib backend.IssueBacke
 	switch op.Type {
 	case "runtime.profile", "runtime.workspace", "runtime.skills":
 		appendRuntimeReadEvent(ctx, st, run, op)
+	case "runtime.workspace.materialize":
+		return appendRuntimeWorkspaceLifecycleEvent(ctx, st, run, op.Params, "runtime_workspace_materialize_requested", "workflow runtime workspace materialization requested")
+	case "runtime.workspace.cleanup":
+		return appendRuntimeWorkspaceLifecycleEvent(ctx, st, run, op.Params, "runtime_workspace_cleanup_requested", "workflow runtime workspace cleanup requested")
 	case "workItems.get":
 		appendWorkItemReadEvent(ctx, st, run, op.Params)
 	case "workItems.comment":

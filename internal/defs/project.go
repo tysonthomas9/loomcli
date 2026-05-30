@@ -486,6 +486,32 @@ const runtimeTypes = `declare module '@loom/runtime' {
     limit?: number;
   };
 
+  export type WorkflowRuntimeWorkspaceLifecycleInput = Record<string, unknown> & {
+    providerWorkspaceId?: string;
+    provider_workspace_id?: string;
+    owner?: string;
+    cleanup?: RuntimeCleanupPolicy;
+    filesystem?: RuntimeFilesystemPolicy;
+    reason?: string;
+    idempotencyKey?: string;
+    idempotency_key?: string;
+    metadata?: Record<string, string>;
+  };
+
+  export type WorkflowRuntimeWorkspaceLifecycleReceipt = Record<string, unknown> & {
+    accepted: boolean;
+    status: 'admitted' | string;
+    action: 'materialize' | 'cleanup' | string;
+    runtimeProfileName?: string;
+    provider?: string;
+    providerWorkspaceId?: string;
+    owner?: string;
+    cleanup?: RuntimeCleanupPolicy;
+    filesystem?: RuntimeFilesystemPolicy;
+    reason?: string;
+    idempotencyKey?: string;
+  };
+
   export type WorkflowWorkspaceRepo = {
     name: string;
     sourceRepoId?: string;
@@ -726,6 +752,18 @@ const runtimeTypes = `declare module '@loom/runtime' {
       workspace(): Promise<WorkflowRuntimeWorkspace>;
       profile(): Promise<WorkflowRuntimeProfile | null>;
       skills(options?: WorkflowSkillQuery): Promise<Array<WorkflowWorkspaceSkill>>;
+      materializeWorkspace(options?: WorkflowRuntimeWorkspaceLifecycleInput): Promise<WorkflowRuntimeWorkspaceLifecycleReceipt>;
+      cleanupWorkspace(reason?: string, metadata?: Record<string, string>): Promise<WorkflowRuntimeWorkspaceLifecycleReceipt>;
+      cleanupWorkspace(options?: WorkflowRuntimeWorkspaceLifecycleInput): Promise<WorkflowRuntimeWorkspaceLifecycleReceipt>;
+      releaseWorkspace(reason?: string, metadata?: Record<string, string>): Promise<WorkflowRuntimeWorkspaceLifecycleReceipt>;
+      releaseWorkspace(options?: WorkflowRuntimeWorkspaceLifecycleInput): Promise<WorkflowRuntimeWorkspaceLifecycleReceipt>;
+      workspaceLifecycle: {
+        materialize(options?: WorkflowRuntimeWorkspaceLifecycleInput): Promise<WorkflowRuntimeWorkspaceLifecycleReceipt>;
+        cleanup(reason?: string, metadata?: Record<string, string>): Promise<WorkflowRuntimeWorkspaceLifecycleReceipt>;
+        cleanup(options?: WorkflowRuntimeWorkspaceLifecycleInput): Promise<WorkflowRuntimeWorkspaceLifecycleReceipt>;
+        release(reason?: string, metadata?: Record<string, string>): Promise<WorkflowRuntimeWorkspaceLifecycleReceipt>;
+        release(options?: WorkflowRuntimeWorkspaceLifecycleInput): Promise<WorkflowRuntimeWorkspaceLifecycleReceipt>;
+      };
     };
     skills: {
       list(options?: WorkflowSkillQuery): Promise<Array<WorkflowWorkspaceSkill>>;

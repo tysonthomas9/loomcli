@@ -370,6 +370,46 @@ function makeContext(request, workflow) {
     });
     return match ? jsonSafe(match) : null;
   };
+  const runtimeWorkspacePolicy = () => {
+    const runtimeWorkspace = workspace.runtime && typeof workspace.runtime === "object" ? workspace.runtime : {};
+    return {
+      runtimeWorkspace,
+      providerWorkspaceId: String(runtimeWorkspace.providerWorkspaceId || ""),
+      owner: String(runtimeWorkspace.owner || ""),
+      cleanup: jsonSafe(runtimeWorkspace.cleanup || {}),
+      filesystem: jsonSafe(runtimeWorkspace.filesystem || {}),
+    };
+  };
+  const runtimeWorkspaceLifecycleParams = (action, options = {}) => {
+    const policy = runtimeWorkspacePolicy();
+    return {
+      action,
+      runtimeProfileName: String(policy.runtimeWorkspace.profileName || ""),
+      provider: String(policy.runtimeWorkspace.provider || ""),
+      providerWorkspaceId: String(options.providerWorkspaceId || options.provider_workspace_id || policy.providerWorkspaceId),
+      owner: String(options.owner || policy.owner),
+      cleanup: jsonSafe(options.cleanup || policy.cleanup || {}),
+      filesystem: jsonSafe(options.filesystem || policy.filesystem || {}),
+      reason: String(options.reason || ""),
+      idempotencyKey: String(options.idempotencyKey || options.idempotency_key || `${action}:${request.id}`),
+      metadata: jsonSafe(options.metadata || {}),
+      requestedAt: new Date().toISOString(),
+    };
+  };
+  const materializeWorkspace = async (options = {}) => {
+    const params = runtimeWorkspaceLifecycleParams("materialize", options || {});
+    operations.push({ type: "runtime.workspace.materialize", params });
+    return { accepted: true, status: "admitted", ...jsonSafe(params) };
+  };
+  const cleanupWorkspace = async (reasonOrOptions = {}, metadata) => {
+    const options =
+      typeof reasonOrOptions === "string"
+        ? { reason: reasonOrOptions, metadata: metadata || {} }
+        : reasonOrOptions || {};
+    const params = runtimeWorkspaceLifecycleParams("cleanup", options);
+    operations.push({ type: "runtime.workspace.cleanup", params });
+    return { accepted: true, status: "admitted", ...jsonSafe(params) };
+  };
   const taskRunFilter = (options = {}) => {
     let out = taskRuns.slice();
     const status = String(options.status || "");
@@ -515,6 +555,14 @@ function makeContext(request, workflow) {
         return runtimeProfile ? jsonSafe(runtimeProfile) : null;
       },
       skills: listSkills,
+      materializeWorkspace,
+      cleanupWorkspace,
+      releaseWorkspace: cleanupWorkspace,
+      workspaceLifecycle: {
+        materialize: materializeWorkspace,
+        cleanup: cleanupWorkspace,
+        release: cleanupWorkspace,
+      },
     },
     skills: {
       list: listSkills,

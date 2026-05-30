@@ -1052,6 +1052,113 @@ export default defineWorkflow({
 	}
 }
 
+func TestCodeDefinedWorkflowContextAdmitsRuntimeWorkspaceLifecycle(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	runtimePath := filepath.Join(root, ".loom", "runtimes", "local-node.ts")
+	if err := os.MkdirAll(filepath.Dir(runtimePath), 0o755); err != nil {
+		t.Fatalf("mkdir runtime dir: %v", err)
+	}
+	if err := os.WriteFile(runtimePath, []byte(`import { runtime } from '@loom/runtime';
+
+export default runtime.local({
+  name: 'local-node',
+  workspace: {
+    providerWorkspaceId: 'local-lifecycle-workspace',
+    owner: 'loom',
+    cleanup: { mode: 'after_ttl', ttl: '24h' },
+    filesystem: { persistence: 'session', retention: '1d' },
+  },
+  repos: ['slack-src'],
+  env: [],
+});
+`), 0o644); err != nil {
+		t.Fatalf("write runtime: %v", err)
+	}
+	workflowPath := filepath.Join(root, ".loom", "workflows", "runtime-lifecycle.ts")
+	if err := os.MkdirAll(filepath.Dir(workflowPath), 0o755); err != nil {
+		t.Fatalf("mkdir workflow dir: %v", err)
+	}
+	if err := os.WriteFile(workflowPath, []byte(`import { defineWorkflow } from '@loom/runtime';
+
+export default defineWorkflow({
+  name: 'runtime-lifecycle',
+  runtimeProfile: 'local-node',
+  async run(ctx) {
+    const materialized = await ctx.runtime.materializeWorkspace({
+      reason: 'prepare workflow sandbox',
+      metadata: { phase: 'setup' },
+    });
+    const cleaned = await ctx.runtime.cleanupWorkspace({
+      reason: 'workflow finished',
+      cleanup: { mode: 'after_ttl', ttl: '1h' },
+      metadata: { phase: 'teardown' },
+    });
+    return {
+      materializeAccepted: materialized.accepted,
+      cleanupAccepted: cleaned.accepted,
+      runtimeProfileName: materialized.runtimeProfileName,
+      providerWorkspaceId: materialized.providerWorkspaceId,
+      cleanupTTL: cleaned.cleanup?.ttl,
+    };
+  },
+});
+`), 0o644); err != nil {
+		t.Fatalf("write workflow: %v", err)
+	}
+	plan, err := defspkg.Load(root)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TSLIFECYCLECTX", Name: "Runtime Lifecycle"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := defspkg.Apply(ctx, st, "TSLIFECYCLECTX", "atlas", plan); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	run, err := CreateOrResumeRun(ctx, st, "TSLIFECYCLECTX", "runtime-lifecycle", json.RawMessage(`{}`), "atlas")
+	if err != nil {
+		t.Fatalf("CreateOrResumeRun() error = %v", err)
+	}
+	result, err := RunOnce(ctx, st, clitest.NewMockIssueBackend(), run)
+	if err != nil {
+		t.Fatalf("RunOnce() error = %v", err)
+	}
+	if result.Run == nil || result.Run.Status != domain.WorkflowRunCompleted {
+		t.Fatalf("result = %+v, want completed runtime lifecycle workflow", result)
+	}
+	var data map[string]any
+	if err := json.Unmarshal(result.Run.Result, &data); err != nil {
+		t.Fatalf("decode workflow result: %v", err)
+	}
+	if data["materializeAccepted"] != true || data["cleanupAccepted"] != true ||
+		data["runtimeProfileName"] != "local-node" || data["providerWorkspaceId"] != "local-lifecycle-workspace" ||
+		data["cleanupTTL"] != "1h" {
+		t.Fatalf("result data = %+v, want admitted lifecycle receipts", data)
+	}
+	events, err := st.RunEvents().List(ctx, "TSLIFECYCLECTX", store.RunEventFilter{WorkflowRunID: run.RunID})
+	if err != nil {
+		t.Fatalf("list run events: %v", err)
+	}
+	if !hasWorkflowEvent(events, "runtime_workspace_materialize_requested") ||
+		!hasWorkflowEvent(events, "runtime_workspace_cleanup_requested") ||
+		!hasWorkflowEvent(events, "workflow_completed") {
+		t.Fatalf("events = %+v, want lifecycle request and completion evidence", events)
+	}
+	materializeEvent := workflowEventDataByType(t, events, "runtime_workspace_materialize_requested")
+	if materializeEvent["runtime_profile_name"] != "local-node" ||
+		materializeEvent["providerWorkspaceId"] != "local-lifecycle-workspace" ||
+		materializeEvent["status"] != "admitted" || materializeEvent["source"] != "workflow_context" {
+		t.Fatalf("materialize event = %+v, want admitted lifecycle evidence", materializeEvent)
+	}
+	cleanupEvent := workflowEventDataByType(t, events, "runtime_workspace_cleanup_requested")
+	cleanup, ok := cleanupEvent["cleanup"].(map[string]any)
+	if !ok || cleanup["mode"] != "after_ttl" || cleanup["ttl"] != "1h" {
+		t.Fatalf("cleanup event = %+v, want cleanup policy override evidence", cleanupEvent)
+	}
+}
+
 func TestCodeDefinedWorkflowContextDiscoversRuntimeWorkspaceSkills(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
