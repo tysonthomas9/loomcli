@@ -91,6 +91,21 @@ func TestWorkflowRunAPICreatesInspectableRun(t *testing.T) {
 		t.Fatalf("listed runs = %+v, want created run with related task run", listedRuns.Data)
 	}
 
+	parentRunsRec := httptest.NewRecorder()
+	mux.ServeHTTP(parentRunsRec, httptest.NewRequest(http.MethodGet, "/api/workspaces/WS/workflow-runs?work_item_id=EPIC-1&status=waiting", nil))
+	if parentRunsRec.Code != http.StatusOK {
+		t.Fatalf("parent list runs status = %d, want 200; body=%s", parentRunsRec.Code, parentRunsRec.Body.String())
+	}
+	var parentRuns struct {
+		Data []runListItem `json:"data"`
+	}
+	if err := json.Unmarshal(parentRunsRec.Body.Bytes(), &parentRuns); err != nil {
+		t.Fatalf("decode parent list runs: %v", err)
+	}
+	if len(parentRuns.Data) != 1 || parentRuns.Data[0].Run == nil || parentRuns.Data[0].Run.RunID != created.Run.RunID {
+		t.Fatalf("parent listed runs = %+v, want run matched by input parentId", parentRuns.Data)
+	}
+
 	showRec := httptest.NewRecorder()
 	mux.ServeHTTP(showRec, httptest.NewRequest(http.MethodGet, "/api/workspaces/WS/workflow-runs/"+created.Run.RunID, nil))
 	if showRec.Code != http.StatusOK {

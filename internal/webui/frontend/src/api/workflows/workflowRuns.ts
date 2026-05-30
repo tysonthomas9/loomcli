@@ -30,6 +30,24 @@ export interface WorkflowRun {
   updated_at: string;
 }
 
+export interface WorkflowDefinition {
+  workspace_key: string;
+  name: string;
+  version: string;
+  description?: string;
+  input_schema?: unknown;
+  result_schema?: unknown;
+  singleton_policy?: string;
+  runtime_profile_name?: string;
+  source_ref?: string;
+  bundle_hash?: string;
+  manifest?: unknown;
+  capability_manifest?: unknown;
+  status: "draft" | "active" | "deprecated" | "disabled";
+  created_at: string;
+  updated_at: string;
+}
+
 export interface TaskRun {
   workspace_key: string;
   task_run_id: string;
@@ -65,6 +83,19 @@ export interface WorkflowRunListItem {
   task_runs?: TaskRun[];
 }
 
+export interface WorkflowRunResponse {
+  run: WorkflowRun;
+  builtin?: {
+    run: WorkflowRun;
+    task_runs?: TaskRun[];
+    done: boolean;
+    ready_count: number;
+    open_count: number;
+    blocked_count: number;
+    dispatched_count?: number;
+  };
+}
+
 export interface ListWorkflowRunsParams {
   workItemId?: string;
   workflowName?: string;
@@ -72,11 +103,26 @@ export interface ListWorkflowRunsParams {
   limit?: number;
 }
 
+export interface StartWorkflowRunOptions {
+  input?: unknown;
+  once?: boolean;
+  wait?: boolean;
+}
+
 interface ListEnvelope<T> {
   success?: boolean;
   data?: T[];
   total?: number;
   error?: string;
+}
+
+export async function listWorkflowDefinitions(
+  workspaceId: string,
+): Promise<WorkflowDefinition[]> {
+  const response = await get<ListEnvelope<WorkflowDefinition>>(
+    wsUrl(workspaceId, "/workflows"),
+  );
+  return unwrapList(response);
 }
 
 export async function listWorkflowRuns(
@@ -87,6 +133,21 @@ export async function listWorkflowRuns(
     `${wsUrl(workspaceId, "/workflow-runs")}${workflowRunQuery(params)}`,
   );
   return unwrapList(response);
+}
+
+export function startWorkflowRun(
+  workspaceId: string,
+  workflowName: string,
+  options: StartWorkflowRunOptions = {},
+): Promise<WorkflowRunResponse> {
+  return post<WorkflowRunResponse>(
+    wsUrl(workspaceId, `/workflows/${encodeURIComponent(workflowName)}/runs`),
+    {
+      input: options.input ?? {},
+      once: options.once ?? true,
+      wait: options.wait ?? false,
+    },
+  );
 }
 
 export async function getWorkflowRunEvents(

@@ -279,31 +279,13 @@ func listWorkflowRunItems(ctx context.Context, st store.Store, ws string, filter
 		return items, nil
 	}
 
-	taskRuns, err := st.TaskRuns().List(ctx, ws, store.TaskRunFilter{WorkItemID: workItemID, Limit: 10000})
+	items, seen, err := listWorkflowRunItemsByTaskRuns(ctx, st, ws, filter, workItemID)
 	if err != nil {
 		return nil, err
 	}
-	taskRunsByWorkflowRun := make(map[string][]*domain.TaskRun)
-	for _, taskRun := range taskRuns {
-		if taskRun == nil || taskRun.WorkflowRunID == "" {
-			continue
-		}
-		taskRunsByWorkflowRun[taskRun.WorkflowRunID] = append(taskRunsByWorkflowRun[taskRun.WorkflowRunID], taskRun)
-	}
-
-	items := make([]runListItem, 0, len(taskRunsByWorkflowRun))
-	for runID, relatedTaskRuns := range taskRunsByWorkflowRun {
-		run, err := st.WorkflowRuns().Get(ctx, ws, runID)
-		if err != nil {
-			return nil, err
-		}
-		if filter.WorkflowName != "" && run.WorkflowName != filter.WorkflowName {
-			continue
-		}
-		if filter.Status != "" && run.Status != filter.Status {
-			continue
-		}
-		items = append(items, runListItem{Run: run, TaskRuns: relatedTaskRuns})
+	items, err = appendWorkflowRunItemsByInput(ctx, st, ws, filter, workItemID, items, seen)
+	if err != nil {
+		return nil, err
 	}
 	sort.Slice(items, func(i, j int) bool {
 		left, right := items[i].Run, items[j].Run
@@ -316,6 +298,80 @@ func listWorkflowRunItems(ctx context.Context, st store.Store, ws string, filter
 		items = items[:filter.Limit]
 	}
 	return items, nil
+}
+
+func listWorkflowRunItemsByTaskRuns(ctx context.Context, st store.Store, ws string, filter store.WorkflowRunFilter, workItemID string) ([]runListItem, map[string]struct{}, error) {
+	taskRuns, err := st.TaskRuns().List(ctx, ws, store.TaskRunFilter{WorkItemID: workItemID, Limit: 10000})
+	if err != nil {
+		return nil, nil, err
+	}
+	taskRunsByWorkflowRun := make(map[string][]*domain.TaskRun)
+	for _, taskRun := range taskRuns {
+		if taskRun == nil || taskRun.WorkflowRunID == "" {
+			continue
+		}
+		taskRunsByWorkflowRun[taskRun.WorkflowRunID] = append(taskRunsByWorkflowRun[taskRun.WorkflowRunID], taskRun)
+	}
+
+	items := make([]runListItem, 0, len(taskRunsByWorkflowRun))
+	seen := make(map[string]struct{}, len(taskRunsByWorkflowRun))
+	for runID, relatedTaskRuns := range taskRunsByWorkflowRun {
+		run, err := st.WorkflowRuns().Get(ctx, ws, runID)
+		if err != nil {
+			return nil, nil, err
+		}
+		if filter.WorkflowName != "" && run.WorkflowName != filter.WorkflowName {
+			continue
+		}
+		if filter.Status != "" && run.Status != filter.Status {
+			continue
+		}
+		items = append(items, runListItem{Run: run, TaskRuns: relatedTaskRuns})
+		seen[run.RunID] = struct{}{}
+	}
+	return items, seen, nil
+}
+
+func appendWorkflowRunItemsByInput(ctx context.Context, st store.Store, ws string, filter store.WorkflowRunFilter, workItemID string, items []runListItem, seen map[string]struct{}) ([]runListItem, error) {
+	allRuns, err := st.WorkflowRuns().List(ctx, ws, store.WorkflowRunFilter{
+		WorkflowName: filter.WorkflowName,
+		Status:       filter.Status,
+		Limit:        10000,
+	})
+	if err != nil {
+		return nil, err
+	}
+	for _, run := range allRuns {
+		if run == nil {
+			continue
+		}
+		if _, ok := seen[run.RunID]; ok {
+			continue
+		}
+		if !workflowRunInputReferencesWorkItem(run.Input, workItemID) {
+			continue
+		}
+		items = append(items, runListItem{Run: run})
+		seen[run.RunID] = struct{}{}
+	}
+	return items, nil
+}
+
+func workflowRunInputReferencesWorkItem(input json.RawMessage, workItemID string) bool {
+	workItemID = strings.TrimSpace(workItemID)
+	if workItemID == "" || len(input) == 0 {
+		return false
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(input, &payload); err != nil || len(payload) == 0 {
+		return false
+	}
+	for _, key := range []string{"parentId", "parent_id", "workItemId", "work_item_id", "taskId", "task_id", "issueId", "issue_id", "id"} {
+		if strings.TrimSpace(fmt.Sprint(payload[key])) == workItemID {
+			return true
+		}
+	}
+	return false
 }
 
 func resolveWorkflowRouteBinding(ctx context.Context, st store.Store, ws, method, routePath string) (*domain.RouteBinding, error) {

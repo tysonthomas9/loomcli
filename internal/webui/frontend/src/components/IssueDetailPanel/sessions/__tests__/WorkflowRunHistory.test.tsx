@@ -8,7 +8,9 @@ import "@testing-library/jest-dom";
 
 import {
   useCancelWorkflowRun,
+  useStartWorkflowRun,
   useTaskWorkflowRuns,
+  useWorkflowDefinitions,
   useWorkflowRunEvents,
 } from "@/hooks/workflows";
 
@@ -29,18 +31,38 @@ vi.mock("@/hooks/workflows", () => ({
   isWorkflowRunLive: (status: string) =>
     status === "queued" || status === "running" || status === "waiting",
   useCancelWorkflowRun: vi.fn(),
+  useStartWorkflowRun: vi.fn(),
   useTaskWorkflowRuns: vi.fn(),
+  useWorkflowDefinitions: vi.fn(),
   useWorkflowRunEvents: vi.fn(),
 }));
 
 const mockUseCancelWorkflowRun = vi.mocked(useCancelWorkflowRun);
+const mockUseStartWorkflowRun = vi.mocked(useStartWorkflowRun);
 const mockUseTaskWorkflowRuns = vi.mocked(useTaskWorkflowRuns);
+const mockUseWorkflowDefinitions = vi.mocked(useWorkflowDefinitions);
 const mockUseWorkflowRunEvents = vi.mocked(useWorkflowRunEvents);
 
 describe("WorkflowRunHistory", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockUseCancelWorkflowRun.mockReturnValue(vi.fn());
+    mockUseStartWorkflowRun.mockReturnValue(vi.fn());
+    mockUseWorkflowDefinitions.mockReturnValue({
+      definitions: [
+        {
+          workspace_key: "WS",
+          name: "run-parent-work-items",
+          version: "builtin-v1",
+          status: "active",
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-01-01T00:00:00Z",
+        },
+      ],
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
   });
 
   it("renders task-scoped workflow runs and event logs", () => {
@@ -146,5 +168,46 @@ describe("WorkflowRunHistory", () => {
     await waitFor(() => expect(cancelRun).toHaveBeenCalledWith("wrun-1"));
     expect(refetchRuns).toHaveBeenCalled();
     expect(refetchEvents).toHaveBeenCalled();
+  });
+
+  it("starts a workflow with task-scoped JSON input and refetches", async () => {
+    const refetchRuns = vi.fn();
+    const startRun = vi.fn().mockResolvedValue({
+      run: {
+        workspace_key: "WS",
+        run_id: "wrun-new",
+        workflow_name: "run-parent-work-items",
+        workflow_version: "builtin-v1",
+        status: "waiting",
+        created_at: "2026-01-01T00:00:00Z",
+        updated_at: "2026-01-01T00:00:00Z",
+      },
+    });
+    mockUseStartWorkflowRun.mockReturnValue(startRun);
+    mockUseTaskWorkflowRuns.mockReturnValue({
+      runs: [],
+      isLoading: false,
+      error: null,
+      refetch: refetchRuns,
+    });
+    mockUseWorkflowRunEvents.mockReturnValue({
+      events: [],
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+
+    render(<WorkflowRunHistory taskId="EPIC-1" />);
+    expect(screen.getByText("No workflow runs")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Start" }));
+
+    await waitFor(() =>
+      expect(startRun).toHaveBeenCalledWith("run-parent-work-items", {
+        input: { parentId: "EPIC-1" },
+        once: true,
+        wait: false,
+      }),
+    );
+    expect(refetchRuns).toHaveBeenCalled();
   });
 });
