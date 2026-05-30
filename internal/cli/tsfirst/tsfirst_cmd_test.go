@@ -49,6 +49,14 @@ func TestRunLocalConnectEchoPersistsTranscript(t *testing.T) {
 	if result.Response != "echo: say hello" {
 		t.Fatalf("response = %q, want echo response", result.Response)
 	}
+	if result.Operation == nil || result.Operation.ID != result.OperationID ||
+		result.Operation.Kind != "local_connect_prompt" ||
+		result.Operation.Status != "completed" ||
+		result.Operation.Text != "echo: say hello" ||
+		result.Operation.TranscriptPath != result.TranscriptPath ||
+		result.Operation.EventCorrelation["session"] != "default" {
+		t.Fatalf("operation = %+v, want local connect result envelope", result.Operation)
+	}
 	if !strings.Contains(strings.Join(result.Env, ","), "ANTHROPIC_API_KEY") || !strings.Contains(strings.Join(result.Env, ","), "NODE_ENV") {
 		t.Fatalf("env allowlist = %+v, want env file keys", result.Env)
 	}
@@ -69,6 +77,9 @@ func TestRunLocalConnectEchoPersistsTranscript(t *testing.T) {
 	}
 	if turn.Message != "say hello" || turn.Response != "echo: say hello" || turn.DefinitionVersion == "" || turn.PromptHash == "" {
 		t.Fatalf("turn = %+v, want persisted local connect turn", turn)
+	}
+	if turn.Operation == nil || turn.Operation.ID != turn.OperationID || turn.Operation.PromptHash != turn.PromptHash {
+		t.Fatalf("turn operation = %+v promptHash=%q, want persisted operation envelope", turn.Operation, turn.PromptHash)
 	}
 }
 
@@ -322,6 +333,13 @@ func TestRunTypeScriptWorkflowAppliesAndRunsWorkflowContext(t *testing.T) {
 	}
 	if result.Run == nil || result.Run.Status != domain.WorkflowRunWaiting {
 		t.Fatalf("run = %+v, want waiting workflow run", result.Run)
+	}
+	if result.Operation == nil || result.Operation.ID != result.Run.RunID ||
+		result.Operation.Kind != "workflow_run" ||
+		result.Operation.Status != domain.WorkflowRunWaiting ||
+		result.Operation.WorkflowRunID != result.Run.RunID ||
+		result.Operation.EventCount == 0 {
+		t.Fatalf("operation = %+v, want workflow run result envelope", result.Operation)
 	}
 	if result.Builtin == nil || len(result.Builtin.TaskRuns) != 1 {
 		t.Fatalf("execution = %+v, want one ensured task run", result.Builtin)

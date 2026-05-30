@@ -373,7 +373,7 @@ func runLocalConnect(ctx context.Context, opts connectOptions) (connectResult, e
 	}
 	completed := time.Now().UTC()
 	providerSessionID := fallback(invocation.ProviderSessionID, lastProviderSessionID(history))
-	result, turn := completeLocalConnectResult(result, agent, opts.Message, operationID, providerSessionID, prompt, completed.Sub(started), invocation)
+	result, turn := completeLocalConnectResult(result, agent, opts.Message, operationID, providerSessionID, prompt, started, completed, completed.Sub(started), invocation)
 	if err := appendLocalTurn(result.TranscriptPath, turn); err != nil {
 		return connectResult{}, err
 	}
@@ -463,6 +463,24 @@ type workflowRunResult struct {
 	Summary   string                        `json:"summary"`
 	Run       *domain.WorkflowRun           `json:"run"`
 	Builtin   *workflowpkg.BuiltinRunResult `json:"builtin,omitempty"`
+	Operation *workflowRunOperation         `json:"operation,omitempty"`
+}
+
+type workflowRunOperation struct {
+	ID               string                   `json:"id"`
+	Kind             string                   `json:"kind"`
+	Status           domain.WorkflowRunStatus `json:"status"`
+	WorkflowRunID    string                   `json:"workflow_run_id"`
+	WorkflowName     string                   `json:"workflow_name"`
+	WorkflowVersion  string                   `json:"workflow_version,omitempty"`
+	Result           json.RawMessage          `json:"result,omitempty"`
+	ErrorClass       string                   `json:"error_class,omitempty"`
+	ErrorMessage     string                   `json:"error_message,omitempty"`
+	StartedAt        string                   `json:"started_at,omitempty"`
+	FinishedAt       string                   `json:"finished_at,omitempty"`
+	EventCount       int                      `json:"event_count,omitempty"`
+	TaskRunCount     int                      `json:"task_run_count,omitempty"`
+	EventCorrelation map[string]string        `json:"event_correlation,omitempty"`
 }
 
 func runApply(_ *cobra.Command, args []string) error {
@@ -593,6 +611,10 @@ func runTypeScriptWorkflow(ctx context.Context, st store.Store, ib backend.Issue
 			return nil, err
 		}
 	}
+	operation, err := workflowRunOperationEnvelope(ctx, st, workspace, run, builtin)
+	if err != nil {
+		return nil, err
+	}
 	return &workflowRunResult{
 		Workspace: workspace,
 		Workflow:  workflow.Name,
@@ -600,7 +622,58 @@ func runTypeScriptWorkflow(ctx context.Context, st store.Store, ib backend.Issue
 		Summary:   defspkg.Summary(plan),
 		Run:       run,
 		Builtin:   builtin,
+		Operation: operation,
 	}, nil
+}
+
+func workflowRunOperationEnvelope(ctx context.Context, st store.Store, workspace string, run *domain.WorkflowRun, builtin *workflowpkg.BuiltinRunResult) (*workflowRunOperation, error) {
+	if run == nil {
+		return nil, nil
+	}
+	eventCount := 0
+	if st != nil && st.RunEvents() != nil {
+		events, err := st.RunEvents().List(ctx, workspace, store.RunEventFilter{WorkflowRunID: run.RunID, Limit: 10000})
+		if err != nil {
+			return nil, fmt.Errorf("list workflow operation events: %w", err)
+		}
+		eventCount = len(events)
+	}
+	taskRunCount := 0
+	if builtin != nil {
+		taskRunCount = len(builtin.TaskRuns)
+	}
+	operation := &workflowRunOperation{
+		ID:              run.RunID,
+		Kind:            "workflow_run",
+		Status:          run.Status,
+		WorkflowRunID:   run.RunID,
+		WorkflowName:    run.WorkflowName,
+		WorkflowVersion: run.WorkflowVersion,
+		Result:          cloneRawMessage(run.Result),
+		ErrorClass:      run.ErrorClass,
+		ErrorMessage:    run.ErrorMessage,
+		EventCount:      eventCount,
+		TaskRunCount:    taskRunCount,
+		EventCorrelation: map[string]string{
+			"workspace":       workspace,
+			"workflow_run_id": run.RunID,
+			"workflow":        run.WorkflowName,
+		},
+	}
+	if !run.StartedAt.IsZero() {
+		operation.StartedAt = run.StartedAt.Format(time.RFC3339Nano)
+	}
+	if run.FinishedAt != nil {
+		operation.FinishedAt = run.FinishedAt.Format(time.RFC3339Nano)
+	}
+	return operation, nil
+}
+
+func cloneRawMessage(raw json.RawMessage) json.RawMessage {
+	if len(raw) == 0 {
+		return nil
+	}
+	return append(json.RawMessage(nil), raw...)
 }
 
 func parseWorkflowInput(s string) (json.RawMessage, error) {
@@ -810,6 +883,7 @@ func invokeLocalAgent(ctx context.Context, plan *defspkg.Plan, agent defspkg.Age
 type localTurn struct {
 	Timestamp         string              `json:"timestamp"`
 	OperationID       string              `json:"operation_id,omitempty"`
+	Operation         *connectOperation   `json:"operation,omitempty"`
 	Agent             string              `json:"agent"`
 	Instance          string              `json:"instance"`
 	Session           string              `json:"session"`

@@ -21,6 +21,7 @@ type connectResult struct {
 	ProviderSessionID string              `json:"provider_session_id,omitempty"`
 	ProviderMetadata  map[string]any      `json:"provider_metadata,omitempty"`
 	OperationID       string              `json:"operation_id,omitempty"`
+	Operation         *connectOperation   `json:"operation,omitempty"`
 	DurationMS        int64               `json:"duration_ms,omitempty"`
 	Usage             *connectUsage       `json:"usage,omitempty"`
 	WorkDir           string              `json:"work_dir,omitempty"`
@@ -32,6 +33,26 @@ type connectResult struct {
 	ToolRuntime       *connectToolRuntime `json:"tool_runtime,omitempty"`
 	ToolCalls         []connectToolCall   `json:"tool_calls,omitempty"`
 	Resume            *connectResume      `json:"resume,omitempty"`
+}
+
+type connectOperation struct {
+	ID                string            `json:"id"`
+	Kind              string            `json:"kind"`
+	Status            string            `json:"status"`
+	Text              string            `json:"text,omitempty"`
+	Model             string            `json:"model,omitempty"`
+	ProviderModel     string            `json:"provider_model,omitempty"`
+	ProviderSessionID string            `json:"provider_session_id,omitempty"`
+	Usage             *connectUsage     `json:"usage,omitempty"`
+	StartedAt         string            `json:"started_at,omitempty"`
+	CompletedAt       string            `json:"completed_at,omitempty"`
+	DurationMS        int64             `json:"duration_ms,omitempty"`
+	PromptHash        string            `json:"prompt_hash,omitempty"`
+	TranscriptPath    string            `json:"transcript_path,omitempty"`
+	Resume            *connectResume    `json:"resume,omitempty"`
+	ToolCalls         []connectToolCall `json:"tool_calls,omitempty"`
+	EventCorrelation  map[string]string `json:"event_correlation,omitempty"`
+	Metadata          map[string]any    `json:"metadata,omitempty"`
 }
 
 type connectOptions struct {
