@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path"
+	"sort"
 	"strings"
 	"time"
 
@@ -36,6 +37,11 @@ type triggerResponse struct {
 	Runs  []runResponse `json:"runs"`
 }
 
+type runListItem struct {
+	Run      *domain.WorkflowRun `json:"run"`
+	TaskRuns []*domain.TaskRun   `json:"task_runs,omitempty"`
+}
+
 func HandleList(st store.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ws := r.PathValue("ws")
@@ -49,6 +55,23 @@ func HandleList(st store.Store) http.HandlerFunc {
 			return
 		}
 		handler.WriteJSON(w, http.StatusOK, dto.NewListResponse(defs, len(defs)))
+	}
+}
+
+func HandleListRuns(st store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		filter, workItemID, err := parseWorkflowRunListFilter(r)
+		if err != nil {
+			handler.HandleServiceError(w, err)
+			return
+		}
+		ws := r.PathValue("ws")
+		items, err := listWorkflowRunItems(r.Context(), st, ws, filter, workItemID)
+		if err != nil {
+			handler.HandleServiceError(w, storeError("list workflow runs", err))
+			return
+		}
+		handler.WriteJSON(w, http.StatusOK, dto.NewListResponse(items, len(items)))
 	}
 }
 
@@ -211,6 +234,88 @@ func runWorkflowRequest(ctx context.Context, st store.Store, issueBackendFn func
 		}
 	}
 	return runResponse{Run: run, Builtin: result}, nil
+}
+
+func parseWorkflowRunListFilter(r *http.Request) (store.WorkflowRunFilter, string, error) {
+	opts, err := handler.ParseListOpts(r)
+	if err != nil {
+		return store.WorkflowRunFilter{}, "", err
+	}
+	status, err := parseWorkflowRunStatus(opts.Status)
+	if err != nil {
+		return store.WorkflowRunFilter{}, "", err
+	}
+	return store.WorkflowRunFilter{
+		WorkflowName: strings.TrimSpace(r.URL.Query().Get("workflow_name")),
+		Status:       status,
+		Limit:        opts.Limit,
+	}, strings.TrimSpace(r.URL.Query().Get("work_item_id")), nil
+}
+
+func parseWorkflowRunStatus(raw string) (domain.WorkflowRunStatus, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", nil
+	}
+	status := domain.WorkflowRunStatus(raw)
+	switch status {
+	case domain.WorkflowRunQueued, domain.WorkflowRunRunning, domain.WorkflowRunWaiting, domain.WorkflowRunCompleted, domain.WorkflowRunFailed, domain.WorkflowRunCancelled:
+		return status, nil
+	default:
+		return "", service.ErrValidation("invalid workflow run status")
+	}
+}
+
+func listWorkflowRunItems(ctx context.Context, st store.Store, ws string, filter store.WorkflowRunFilter, workItemID string) ([]runListItem, error) {
+	if workItemID == "" {
+		runs, err := st.WorkflowRuns().List(ctx, ws, filter)
+		if err != nil {
+			return nil, err
+		}
+		items := make([]runListItem, 0, len(runs))
+		for _, run := range runs {
+			items = append(items, runListItem{Run: run})
+		}
+		return items, nil
+	}
+
+	taskRuns, err := st.TaskRuns().List(ctx, ws, store.TaskRunFilter{WorkItemID: workItemID, Limit: 10000})
+	if err != nil {
+		return nil, err
+	}
+	taskRunsByWorkflowRun := make(map[string][]*domain.TaskRun)
+	for _, taskRun := range taskRuns {
+		if taskRun == nil || taskRun.WorkflowRunID == "" {
+			continue
+		}
+		taskRunsByWorkflowRun[taskRun.WorkflowRunID] = append(taskRunsByWorkflowRun[taskRun.WorkflowRunID], taskRun)
+	}
+
+	items := make([]runListItem, 0, len(taskRunsByWorkflowRun))
+	for runID, relatedTaskRuns := range taskRunsByWorkflowRun {
+		run, err := st.WorkflowRuns().Get(ctx, ws, runID)
+		if err != nil {
+			return nil, err
+		}
+		if filter.WorkflowName != "" && run.WorkflowName != filter.WorkflowName {
+			continue
+		}
+		if filter.Status != "" && run.Status != filter.Status {
+			continue
+		}
+		items = append(items, runListItem{Run: run, TaskRuns: relatedTaskRuns})
+	}
+	sort.Slice(items, func(i, j int) bool {
+		left, right := items[i].Run, items[j].Run
+		if left == nil || right == nil {
+			return right == nil
+		}
+		return left.CreatedAt.After(right.CreatedAt)
+	})
+	if filter.Limit > 0 && len(items) > filter.Limit {
+		items = items[:filter.Limit]
+	}
+	return items, nil
 }
 
 func resolveWorkflowRouteBinding(ctx context.Context, st store.Store, ws, method, routePath string) (*domain.RouteBinding, error) {

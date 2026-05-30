@@ -54,6 +54,12 @@ vi.mock("../SessionDetailView", () => ({
   ),
 }));
 
+vi.mock("../WorkflowRunHistory", () => ({
+  WorkflowRunHistory: ({ taskId }: { taskId: string }) => (
+    <div data-testid="workflow-run-history-mock">Workflows for {taskId}</div>
+  ),
+}));
+
 vi.mock("@/hooks/workspace", async () => {
   const actual =
     await vi.importActual<typeof import("@/hooks/workspace")>(
@@ -171,6 +177,9 @@ describe("SessionsTab", () => {
         refetch: vi.fn(),
       });
       render(<SessionsTab taskId="task-1" />);
+      expect(
+        screen.getByTestId("workflow-run-history-mock"),
+      ).toBeInTheDocument();
       expect(screen.getByTestId("sessions-empty")).toBeInTheDocument();
       expect(
         screen.getByText("No agent runs recorded yet"),

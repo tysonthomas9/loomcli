@@ -15,3 +15,6 @@ export { SessionTimelineRow } from "./SessionTimelineRow";
 export type { SessionTimelineRowProps } from "./SessionTimelineRow";
 
 export { SessionHistorySection } from "./SessionHistorySection";
+
+export { WorkflowRunHistory } from "./WorkflowRunHistory";
+export type { WorkflowRunHistoryProps } from "./WorkflowRunHistory";

@@ -10,6 +10,7 @@ export * from "./common";
 export * from "./issues";
 export * from "./terminal";
 export * from "./ui";
+export * from "./workflows";
 export * from "./workspace";
 
 // API re-exports so components can reach data-fetching functions through

@@ -74,6 +74,21 @@ func TestWorkflowRunAPICreatesInspectableRun(t *testing.T) {
 		t.Fatalf("created builtin = %+v, want one ensured task run", created.Builtin)
 	}
 
+	listRunsRec := httptest.NewRecorder()
+	mux.ServeHTTP(listRunsRec, httptest.NewRequest(http.MethodGet, "/api/workspaces/WS/workflow-runs?work_item_id=TASK-2&status=waiting", nil))
+	if listRunsRec.Code != http.StatusOK {
+		t.Fatalf("list runs status = %d, want 200; body=%s", listRunsRec.Code, listRunsRec.Body.String())
+	}
+	var listedRuns struct {
+		Data []runListItem `json:"data"`
+	}
+	if err := json.Unmarshal(listRunsRec.Body.Bytes(), &listedRuns); err != nil {
+		t.Fatalf("decode list runs: %v", err)
+	}
+	if len(listedRuns.Data) != 1 || listedRuns.Data[0].Run == nil || listedRuns.Data[0].Run.RunID != created.Run.RunID || len(listedRuns.Data[0].TaskRuns) != 1 {
+		t.Fatalf("listed runs = %+v, want created run with related task run", listedRuns.Data)
+	}
+
 	showRec := httptest.NewRecorder()
 	mux.ServeHTTP(showRec, httptest.NewRequest(http.MethodGet, "/api/workspaces/WS/workflow-runs/"+created.Run.RunID, nil))
 	if showRec.Code != http.StatusOK {

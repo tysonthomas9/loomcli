@@ -12,6 +12,7 @@ import type { SessionRecord } from "@/types/agent";
 
 import { SessionTimeline } from "./SessionTimeline";
 import { SessionDetailView } from "./SessionDetailView";
+import { WorkflowRunHistory } from "./WorkflowRunHistory";
 import styles from "./SessionsTab.module.css";
 
 export interface SessionsTabProps {
@@ -43,8 +44,11 @@ export function SessionsTab({ taskId }: SessionsTabProps): JSX.Element {
   // Error state
   if (error && sessions.length === 0) {
     return (
-      <div className={styles.emptyState}>
-        Failed to load runs: {error.message}
+      <div className={styles.outerContainer}>
+        <WorkflowRunHistory taskId={taskId} />
+        <div className={styles.emptyState}>
+          Failed to load runs: {error.message}
+        </div>
       </div>
     );
   }
@@ -52,14 +56,18 @@ export function SessionsTab({ taskId }: SessionsTabProps): JSX.Element {
   // Empty state
   if (!isLoading && sessions.length === 0) {
     return (
-      <div className={styles.emptyState} data-testid="sessions-empty">
-        No agent runs recorded yet
+      <div className={styles.outerContainer}>
+        <WorkflowRunHistory taskId={taskId} />
+        <div className={styles.emptyState} data-testid="sessions-empty">
+          No agent runs recorded yet
+        </div>
       </div>
     );
   }
 
   return (
     <div className={styles.outerContainer} data-testid="sessions-tab">
+      <WorkflowRunHistory taskId={taskId} />
       <div className={styles.costSummary}>
         <span className={styles.summaryItem}>
           <span className={styles.summaryLabel}>Runs</span>

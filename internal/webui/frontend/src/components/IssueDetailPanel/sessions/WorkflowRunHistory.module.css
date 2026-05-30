@@ -1,0 +1,280 @@
+.workflowRuns {
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--color-border-light);
+  background: var(--color-panel-bg);
+}
+
+.workflowHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+.workflowTitle {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+.workflowMeta {
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+}
+
+.workflowError {
+  min-width: 0;
+  font-size: 11px;
+  color: #dc2626;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workflowGrid {
+  display: grid;
+  grid-template-columns: minmax(220px, 34%) 1fr;
+  min-height: 148px;
+  max-height: 280px;
+}
+
+.workflowRunList {
+  min-width: 0;
+  overflow-y: auto;
+  border-right: 1px solid var(--color-border-light);
+}
+
+.workflowRunRow {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  border: 0;
+  border-bottom: 1px solid var(--color-border-light);
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.workflowRunRow:hover {
+  background-color: var(--color-bg-hover);
+}
+
+.selectedWorkflowRunRow {
+  background-color: var(--color-bg-selected, rgba(59, 130, 246, 0.08));
+  border-left: 3px solid var(--color-primary);
+  padding-left: 9px;
+}
+
+.statusDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.statusDot[data-status="completed"] {
+  background-color: #22c55e;
+}
+
+.statusDot[data-status="failed"] {
+  background-color: #ef4444;
+}
+
+.statusDot[data-status="running"] {
+  background-color: #facc15;
+  animation: statusPulse 1.5s ease-in-out infinite;
+}
+
+.statusDot[data-status="queued"],
+.statusDot[data-status="waiting"] {
+  background-color: #facc15;
+}
+
+.statusDot[data-status="cancelled"] {
+  background-color: #9ca3af;
+}
+
+@keyframes statusPulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.5;
+    transform: scale(1.3);
+  }
+}
+
+.workflowRunRowMain {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.workflowRunRowTop {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.workflowRunName {
+  min-width: 0;
+  color: var(--color-text-primary);
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workflowStatus {
+  margin-left: auto;
+  color: var(--color-text-tertiary);
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.workflowStatus[data-status="completed"] {
+  color: #16a34a;
+}
+
+.workflowStatus[data-status="failed"] {
+  color: #dc2626;
+}
+
+.workflowStatus[data-status="running"],
+.workflowStatus[data-status="queued"],
+.workflowStatus[data-status="waiting"] {
+  color: #ca8a04;
+}
+
+.workflowRunRowBottom {
+  display: flex;
+  gap: 8px;
+  color: var(--color-text-tertiary);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.workflowEventPanel {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.workflowDetailHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px 4px;
+}
+
+.workflowDetailTitle {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--color-text-primary);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.workflowDetailMeta {
+  display: flex;
+  gap: 10px;
+  padding: 0 12px 8px;
+  color: var(--color-text-tertiary);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.workflowCancelButton {
+  margin-left: auto;
+  padding: 4px 9px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-panel-bg);
+  color: var(--color-text-primary);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.workflowCancelButton:hover:not(:disabled) {
+  background: var(--color-bg-hover);
+}
+
+.workflowCancelButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.workflowEventList {
+  flex: 1;
+  overflow-y: auto;
+  border-top: 1px solid var(--color-border-light);
+}
+
+.workflowEventRow {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+.workflowEventTop {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.workflowEventType {
+  color: var(--color-text-primary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.workflowEventTime {
+  margin-left: auto;
+  color: var(--color-text-tertiary);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.workflowEventMessage {
+  margin-top: 4px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.workflowEventData {
+  margin: 6px 0 0;
+  max-height: 120px;
+  overflow: auto;
+  color: var(--color-text-secondary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+}
+
+.workflowEventEmpty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  padding: 18px;
+}
