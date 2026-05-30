@@ -3,6 +3,7 @@ package sessions
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -58,11 +59,20 @@ func claudeProjectDir(workDir string) string {
 	return filepath.Join(home, ".claude", "projects", encodeClaudeCWD(workDir))
 }
 
+// claudeCWDSanitize matches every character Claude Code rewrites when it names
+// a project dir: anything that is not an ASCII letter or digit. Crucially this
+// includes '.', so a path under ~/.loom encodes the dot too. Replacing only '/'
+// produced "-Users-oleh-.loom-..." while Claude writes "-Users-oleh--loom-...",
+// so the project dir was never found and transcripts came back empty for every
+// fleet-mode run (all run under ~/.loom). Hyphens map to themselves, matching
+// Claude's behavior of leaving existing '-' in place (no collapsing).
+var claudeCWDSanitize = regexp.MustCompile(`[^A-Za-z0-9]`)
+
 // encodeClaudeCWD encodes an absolute working directory the way Claude Code
-// names its project dirs: every '/' becomes '-' (a leading slash yields a
-// leading hyphen).
+// names its project dirs: every non-alphanumeric character becomes '-' (a
+// leading slash yields a leading hyphen; a '.' becomes '-').
 func encodeClaudeCWD(workDir string) string {
-	return strings.ReplaceAll(workDir, "/", "-")
+	return claudeCWDSanitize.ReplaceAllString(workDir, "-")
 }
 
 // resolveClaudeTranscript prefers the exact <uuid>.jsonl and otherwise returns

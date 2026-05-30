@@ -7,6 +7,33 @@ import (
 	"time"
 )
 
+// TestEncodeClaudeCWD pins the encoding to Claude Code's actual project-dir
+// convention with hardcoded expectations — every non-alphanumeric char becomes
+// '-'. The other tests place fixtures via encodeClaudeCWD itself, so they stay
+// self-consistent under any encoding and cannot catch a convention drift; this
+// one does. The first case is the real-world regression: a path under ~/.loom
+// must encode the dot, or the project dir is never found and the transcript is
+// empty for every fleet-mode run.
+func TestEncodeClaudeCWD(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{
+			"/Users/oleh/.loom/workspaces/WEB-EXTRACTOR-NEW/worktrees/tree-clustering/stacy-planner",
+			"-Users-oleh--loom-workspaces-WEB-EXTRACTOR-NEW-worktrees-tree-clustering-stacy-planner",
+		},
+		// Dot-free path is unchanged — guards against over-replacement.
+		{"/Users/oleh/Work/aether", "-Users-oleh-Work-aether"},
+		// Existing hyphens are preserved 1:1 (no collapsing of "--").
+		{"/x/a-b/c", "-x-a-b-c"},
+		// Multiple dots each map to a hyphen.
+		{"/a/.b.c/d", "-a--b-c-d"},
+	}
+	for _, tc := range cases {
+		if got := encodeClaudeCWD(tc.in); got != tc.want {
+			t.Errorf("encodeClaudeCWD(%q)\n  got  %q\n  want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
 func writeClaudeTranscript(t *testing.T, home, workDir, uuid string, mod time.Time, content string) {
 	t.Helper()
 	dir := filepath.Join(home, ".claude", "projects", encodeClaudeCWD(workDir))
