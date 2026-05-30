@@ -537,7 +537,50 @@ function runtimeModule(file) {
     memory: stringValue(value.memory),
     cwd: stringValue(value.cwd),
     workspace_skill_dirs: stringArray(value.workspaceSkillDirs || value.workspace_skill_dirs),
+    workspace: runtimeWorkspacePolicy(value),
   };
+}
+
+function runtimeWorkspacePolicy(value) {
+  const workspace = value.workspace && typeof value.workspace === "object" ? value.workspace : {};
+  const cleanup =
+    workspace.cleanup && typeof workspace.cleanup === "object"
+      ? workspace.cleanup
+      : value.cleanup && typeof value.cleanup === "object"
+        ? value.cleanup
+        : value.cleanupPolicy && typeof value.cleanupPolicy === "object"
+          ? value.cleanupPolicy
+          : {};
+  const filesystem =
+    workspace.filesystem && typeof workspace.filesystem === "object"
+      ? workspace.filesystem
+      : value.filesystem && typeof value.filesystem === "object"
+        ? value.filesystem
+        : {};
+  return compactObject({
+    provider_workspace_id: stringValue(
+      workspace.providerWorkspaceId ||
+        workspace.provider_workspace_id ||
+        workspace.workspaceId ||
+        workspace.workspace_id ||
+        workspace.id ||
+        value.providerWorkspaceId ||
+        value.provider_workspace_id ||
+        value.workspaceId ||
+        value.workspace_id,
+    ),
+    owner: stringValue(workspace.owner || value.workspaceOwner || value.workspace_owner),
+    cleanup: compactObject({
+      mode: stringValue(cleanup.mode || value.cleanupMode || value.cleanup_mode),
+      ttl: stringValue(cleanup.ttl || value.cleanupTTL || value.cleanup_ttl),
+      retention: stringValue(cleanup.retention || value.cleanupRetention || value.cleanup_retention),
+    }),
+    filesystem: compactObject({
+      persistence: stringValue(filesystem.persistence || value.filesystemPersistence || value.filesystem_persistence),
+      durability: stringValue(filesystem.durability || value.filesystemDurability || value.filesystem_durability),
+      retention: stringValue(filesystem.retention || value.filesystemRetention || value.filesystem_retention),
+    }),
+  });
 }
 
 function workflowModule(file) {
@@ -571,17 +614,19 @@ function workflowModule(file) {
 }
 
 function compactArrayObjects(items) {
-  return items.map((item) => {
-    const out = {};
-    for (const [k, v] of Object.entries(item)) {
-      if (v === undefined) continue;
-      if (Array.isArray(v) && v.length === 0) continue;
-      if (v && typeof v === "object" && !Array.isArray(v) && Object.keys(v).length === 0) continue;
-      if (v === "" || v === false || v === 0) continue;
-      out[k] = v;
-    }
-    return out;
-  });
+  return items.map((item) => compactObject(item));
+}
+
+function compactObject(item) {
+  const out = {};
+  for (const [k, v] of Object.entries(item || {})) {
+    if (v === undefined) continue;
+    if (Array.isArray(v) && v.length === 0) continue;
+    if (v && typeof v === "object" && !Array.isArray(v) && Object.keys(v).length === 0) continue;
+    if (v === "" || v === false || v === 0) continue;
+    out[k] = v;
+  }
+  return out;
 }
 
 const sourceRoot = sourceRootDir();

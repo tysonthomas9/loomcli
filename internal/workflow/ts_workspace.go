@@ -31,11 +31,15 @@ type tsContextWorkspaceWorkflow struct {
 }
 
 type tsContextWorkspaceRuntime struct {
-	ProfileName string   `json:"profileName,omitempty"`
-	Provider    string   `json:"provider,omitempty"`
-	Version     string   `json:"version,omitempty"`
-	Repos       []string `json:"repos,omitempty"`
-	Env         []string `json:"env,omitempty"`
+	ProfileName         string                            `json:"profileName,omitempty"`
+	Provider            string                            `json:"provider,omitempty"`
+	Version             string                            `json:"version,omitempty"`
+	Repos               []string                          `json:"repos,omitempty"`
+	Env                 []string                          `json:"env,omitempty"`
+	ProviderWorkspaceID string                            `json:"providerWorkspaceId,omitempty"`
+	Owner               string                            `json:"owner,omitempty"`
+	Cleanup             *tsContextRuntimeCleanupPolicy    `json:"cleanup,omitempty"`
+	Filesystem          *tsContextRuntimeFilesystemPolicy `json:"filesystem,omitempty"`
 }
 
 type tsContextWorkspaceRepo struct {
@@ -82,6 +86,12 @@ func tsContextWorkspaceForRun(ctx context.Context, st store.Store, run *domain.W
 		workspace.Runtime.Version = profile.Version
 		workspace.Runtime.Repos = cloneStrings(profile.Repos)
 		workspace.Runtime.Env = cloneStrings(profile.Env)
+		if profile.Workspace != nil {
+			workspace.Runtime.ProviderWorkspaceID = profile.Workspace.ProviderWorkspaceID
+			workspace.Runtime.Owner = profile.Workspace.Owner
+			workspace.Runtime.Cleanup = profile.Workspace.Cleanup
+			workspace.Runtime.Filesystem = profile.Workspace.Filesystem
+		}
 		workspace.SelectedRepos = cloneStrings(profile.Repos)
 	}
 	if len(workspace.SelectedRepos) == 0 {
@@ -310,7 +320,7 @@ func isPathWithin(parent, child string) bool {
 }
 
 func discoverRuntimeWorkspaceSkills(root string) []tsContextWorkspaceSkill {
-	entries, err := os.ReadDir(root)
+	entries, err := os.ReadDir(root) //nolint:gosec // root is resolved from runtime cwd under the reviewed project root.
 	if err != nil {
 		return nil
 	}
@@ -329,7 +339,7 @@ func discoverRuntimeWorkspaceSkills(root string) []tsContextWorkspaceSkill {
 }
 
 func readRuntimeWorkspaceSkill(path, fallbackName string) (tsContextWorkspaceSkill, bool) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // path is a SKILL.md under a project-scoped runtime workspace skill root.
 	if err != nil {
 		return tsContextWorkspaceSkill{}, false
 	}

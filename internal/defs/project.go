@@ -292,6 +292,29 @@ export default defineWorkflow({
 }
 
 const runtimeTypes = `declare module '@loom/runtime' {
+  export type RuntimeCleanupPolicy = {
+    mode?: 'never' | 'on_completion' | 'after_ttl' | 'provider_default' | string;
+    ttl?: string;
+    retention?: string;
+  };
+
+  export type RuntimeFilesystemPolicy = {
+    persistence?: 'ephemeral' | 'session' | 'durable' | 'provider_default' | string;
+    durability?: 'ephemeral' | 'session' | 'durable' | 'provider_default' | string;
+    retention?: string;
+  };
+
+  export type RuntimeWorkspacePolicy = {
+    id?: string;
+    providerWorkspaceId?: string;
+    provider_workspace_id?: string;
+    workspaceId?: string;
+    workspace_id?: string;
+    owner?: 'loom' | 'external' | 'user' | 'provider' | string;
+    cleanup?: RuntimeCleanupPolicy;
+    filesystem?: RuntimeFilesystemPolicy;
+  };
+
   export type RuntimeProfile = {
     provider: string;
     name?: string;
@@ -303,6 +326,22 @@ const runtimeTypes = `declare module '@loom/runtime' {
     cwd?: string;
     workspaceSkillDirs?: string[];
     workspace_skill_dirs?: string[];
+    workspace?: RuntimeWorkspacePolicy;
+    providerWorkspaceId?: string;
+    provider_workspace_id?: string;
+    workspaceId?: string;
+    workspace_id?: string;
+    workspaceOwner?: string;
+    workspace_owner?: string;
+    cleanup?: RuntimeCleanupPolicy;
+    cleanupPolicy?: RuntimeCleanupPolicy;
+    cleanupMode?: string;
+    cleanupTTL?: string;
+    cleanupRetention?: string;
+    filesystem?: RuntimeFilesystemPolicy;
+    filesystemPersistence?: string;
+    filesystemDurability?: string;
+    filesystemRetention?: string;
   };
 
   export type AgentDefinition = {
@@ -423,6 +462,12 @@ const runtimeTypes = `declare module '@loom/runtime' {
     cpu?: string;
     memory?: string;
     status?: string;
+    workspace?: {
+      providerWorkspaceId?: string;
+      owner?: string;
+      cleanup?: RuntimeCleanupPolicy;
+      filesystem?: RuntimeFilesystemPolicy;
+    };
   };
 
   export type WorkflowWorkspaceSkill = {
@@ -464,6 +509,10 @@ const runtimeTypes = `declare module '@loom/runtime' {
       version?: string;
       repos?: string[];
       env?: string[];
+      providerWorkspaceId?: string;
+      owner?: string;
+      cleanup?: RuntimeCleanupPolicy;
+      filesystem?: RuntimeFilesystemPolicy;
     };
     repos?: WorkflowWorkspaceRepo[];
     selectedRepos?: string[];

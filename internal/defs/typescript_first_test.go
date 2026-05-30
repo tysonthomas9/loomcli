@@ -501,6 +501,12 @@ export default runtime.local({
   image: 'node:22',
   cwd: '.',
   workspaceSkillDirs: ['.agents/skills'],
+  workspace: {
+    providerWorkspaceId: 'local-dev-workspace',
+    owner: 'loom',
+    cleanup: { mode: 'after_ttl', ttl: '24h' },
+    filesystem: { persistence: 'durable', retention: '7d' },
+  },
   repos: ['slack-src'],
   env: ['NODE_ENV'],
   cpu: '2',
@@ -537,6 +543,13 @@ export default defineWorkflow({
 	if len(runtimeDef.WorkspaceSkillDirs) != 1 || runtimeDef.WorkspaceSkillDirs[0] != ".agents/skills" {
 		t.Fatalf("runtime workspace skill dirs = %+v, want .agents/skills", runtimeDef.WorkspaceSkillDirs)
 	}
+	if runtimeDef.Workspace == nil || runtimeDef.Workspace.ProviderWorkspaceID != "local-dev-workspace" ||
+		runtimeDef.Workspace.Owner != "loom" || runtimeDef.Workspace.Cleanup == nil ||
+		runtimeDef.Workspace.Cleanup.Mode != "after_ttl" || runtimeDef.Workspace.Cleanup.TTL != "24h" ||
+		runtimeDef.Workspace.Filesystem == nil || runtimeDef.Workspace.Filesystem.Persistence != "durable" ||
+		runtimeDef.Workspace.Filesystem.Retention != "7d" {
+		t.Fatalf("runtime workspace policy = %+v, want lifecycle metadata", runtimeDef.Workspace)
+	}
 
 	st := memstore.New()
 	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TSRUNTIME", Name: "TypeScript Runtime"}); err != nil {
@@ -556,6 +569,15 @@ export default defineWorkflow({
 	runtimeCaps := capability["runtime"].(map[string]any)
 	if runtimeCaps["profile"] != "local-node" {
 		t.Fatalf("runtime capability = %#v, want profile binding", runtimeCaps)
+	}
+	profile, err := st.RuntimeProfiles().Get(ctx, "TSRUNTIME", "local-node")
+	if err != nil {
+		t.Fatalf("runtime profile not created: %v", err)
+	}
+	manifest := jsonMap(t, profile.Manifest)
+	workspaceManifest, ok := manifest["workspace"].(map[string]any)
+	if !ok || workspaceManifest["provider_workspace_id"] != "local-dev-workspace" || workspaceManifest["owner"] != "loom" {
+		t.Fatalf("runtime profile workspace manifest = %#v, want durable lifecycle metadata", manifest["workspace"])
 	}
 }
 

@@ -486,6 +486,10 @@ function makeContext(request, workflow) {
           workflowVersion: String((workspace.workflow && workspace.workflow.version) || requestContext.workflowVersion || ""),
           runtimeProfileName: String(runtimeWorkspace.profileName || ""),
           provider: String(runtimeWorkspace.provider || ""),
+          providerWorkspaceId: String(runtimeWorkspace.providerWorkspaceId || ""),
+          owner: String(runtimeWorkspace.owner || ""),
+          cleanup: jsonSafe(runtimeWorkspace.cleanup || {}),
+          filesystem: jsonSafe(runtimeWorkspace.filesystem || {}),
           selectedRepos: jsonSafe(workspace.selectedRepos || runtimeWorkspace.repos || []),
           repoCount: repos.length,
           skillCount: workspaceSkills.length,
@@ -505,6 +509,7 @@ function makeContext(request, workflow) {
             version: runtimeProfile ? String(runtimeProfile.version || "") : "",
             repos: runtimeProfile ? jsonSafe(runtimeProfile.repos || []) : [],
             env: runtimeProfile ? jsonSafe(runtimeProfile.env || []) : [],
+            workspace: runtimeProfile ? jsonSafe(runtimeProfile.workspace || {}) : {},
           },
         });
         return runtimeProfile ? jsonSafe(runtimeProfile) : null;

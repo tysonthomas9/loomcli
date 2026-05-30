@@ -828,6 +828,12 @@ func TestCodeDefinedWorkflowContextReadsRuntimeProfile(t *testing.T) {
 export default runtime.local({
   name: 'local-node',
   image: 'node:22',
+  workspace: {
+    providerWorkspaceId: 'local-dev-workspace',
+    owner: 'loom',
+    cleanup: { mode: 'after_ttl', ttl: '24h' },
+    filesystem: { persistence: 'durable', retention: '7d' },
+  },
   repos: ['slack-src'],
   env: ['NODE_ENV'],
 });
@@ -850,6 +856,12 @@ export default defineWorkflow({
       provider: profile?.provider,
       repos: profile?.repos ?? [],
       env: profile?.env ?? [],
+      providerWorkspaceId: profile?.workspace?.providerWorkspaceId,
+      owner: profile?.workspace?.owner,
+      cleanupMode: profile?.workspace?.cleanup?.mode,
+      cleanupTTL: profile?.workspace?.cleanup?.ttl,
+      filesystemPersistence: profile?.workspace?.filesystem?.persistence,
+      filesystemRetention: profile?.workspace?.filesystem?.retention,
     };
   },
 });
@@ -885,6 +897,11 @@ export default defineWorkflow({
 	if data["name"] != "local-node" || data["provider"] != "local" {
 		t.Fatalf("result data = %+v, want runtime profile identity", data)
 	}
+	if data["providerWorkspaceId"] != "local-dev-workspace" || data["owner"] != "loom" ||
+		data["cleanupMode"] != "after_ttl" || data["cleanupTTL"] != "24h" ||
+		data["filesystemPersistence"] != "durable" || data["filesystemRetention"] != "7d" {
+		t.Fatalf("result data = %+v, want runtime workspace lifecycle metadata", data)
+	}
 	events, err := st.RunEvents().List(ctx, "TSRUNTIMECTX", store.RunEventFilter{WorkflowRunID: run.RunID})
 	if err != nil {
 		t.Fatalf("list run events: %v", err)
@@ -895,6 +912,10 @@ export default defineWorkflow({
 	runtimeEvent := workflowEventDataByType(t, events, "runtime_profile_read")
 	if runtimeEvent["name"] != "local-node" || runtimeEvent["provider"] != "local" || runtimeEvent["found"] != true {
 		t.Fatalf("runtime event = %+v, want profile read evidence", runtimeEvent)
+	}
+	workspaceEvent, ok := runtimeEvent["workspace"].(map[string]any)
+	if !ok || workspaceEvent["providerWorkspaceId"] != "local-dev-workspace" || workspaceEvent["owner"] != "loom" {
+		t.Fatalf("runtime event workspace = %+v, want lifecycle metadata evidence", runtimeEvent["workspace"])
 	}
 }
 
@@ -910,6 +931,12 @@ func TestCodeDefinedWorkflowContextReadsRuntimeWorkspace(t *testing.T) {
 export default runtime.local({
   name: 'local-node',
   image: 'node:22',
+  workspace: {
+    providerWorkspaceId: 'local-runtime-workspace',
+    owner: 'external',
+    cleanup: { mode: 'provider_default' },
+    filesystem: { persistence: 'session', retention: '1d' },
+  },
   repos: ['slack-src'],
   env: ['NODE_ENV'],
 });
@@ -940,6 +967,11 @@ export default defineWorkflow({
       selectedRepos: workspace.selectedRepos ?? [],
       workflowEnv: workspace.env ?? [],
       runtimeEnv: workspace.runtime?.env ?? [],
+      providerWorkspaceId: workspace.runtime?.providerWorkspaceId,
+      owner: workspace.runtime?.owner,
+      cleanupMode: workspace.runtime?.cleanup?.mode,
+      filesystemPersistence: workspace.runtime?.filesystem?.persistence,
+      filesystemRetention: workspace.runtime?.filesystem?.retention,
     };
   },
 });
@@ -999,6 +1031,11 @@ export default defineWorkflow({
 	if got := stringSliceFromAny(data["runtimeEnv"]); len(got) != 1 || got[0] != "NODE_ENV" {
 		t.Fatalf("runtimeEnv = %+v, want runtime profile env names", got)
 	}
+	if data["providerWorkspaceId"] != "local-runtime-workspace" || data["owner"] != "external" ||
+		data["cleanupMode"] != "provider_default" || data["filesystemPersistence"] != "session" ||
+		data["filesystemRetention"] != "1d" {
+		t.Fatalf("result data = %+v, want workspace runtime lifecycle metadata", data)
+	}
 	events, err := st.RunEvents().List(ctx, "TSWORKSPACECTX", store.RunEventFilter{WorkflowRunID: run.RunID})
 	if err != nil {
 		t.Fatalf("list run events: %v", err)
@@ -1009,6 +1046,9 @@ export default defineWorkflow({
 	workspaceEvent := workflowEventDataByType(t, events, "runtime_workspace_read")
 	if workspaceEvent["key"] != "TSWORKSPACECTX" || workspaceEvent["runtimeProfileName"] != "local-node" || workspaceEvent["repoCount"] != float64(1) {
 		t.Fatalf("workspace event = %+v, want workspace read evidence", workspaceEvent)
+	}
+	if workspaceEvent["providerWorkspaceId"] != "local-runtime-workspace" || workspaceEvent["owner"] != "external" {
+		t.Fatalf("workspace event = %+v, want runtime lifecycle metadata evidence", workspaceEvent)
 	}
 }
 

@@ -86,6 +86,26 @@ type RuntimeModule struct {
 	Memory             string                 `json:"memory,omitempty"`
 	CWD                string                 `json:"cwd,omitempty"`
 	WorkspaceSkillDirs []string               `json:"workspace_skill_dirs,omitempty"`
+	Workspace          *RuntimeWorkspace      `json:"workspace,omitempty"`
+}
+
+type RuntimeWorkspace struct {
+	ProviderWorkspaceID string                 `json:"provider_workspace_id,omitempty"`
+	Owner               string                 `json:"owner,omitempty"`
+	Cleanup             *RuntimeCleanupPolicy  `json:"cleanup,omitempty"`
+	Filesystem          *RuntimeFilesystemSpec `json:"filesystem,omitempty"`
+}
+
+type RuntimeCleanupPolicy struct {
+	Mode      string `json:"mode,omitempty"`
+	TTL       string `json:"ttl,omitempty"`
+	Retention string `json:"retention,omitempty"`
+}
+
+type RuntimeFilesystemSpec struct {
+	Persistence string `json:"persistence,omitempty"`
+	Durability  string `json:"durability,omitempty"`
+	Retention   string `json:"retention,omitempty"`
 }
 
 type SkillModule struct {

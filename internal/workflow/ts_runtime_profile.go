@@ -9,18 +9,38 @@ import (
 )
 
 type tsContextRuntimeProfile struct {
-	Name               string   `json:"name"`
-	Version            string   `json:"version,omitempty"`
-	Provider           string   `json:"provider"`
-	Image              string   `json:"image,omitempty"`
-	Repos              []string `json:"repos,omitempty"`
-	Env                []string `json:"env,omitempty"`
-	CPU                string   `json:"cpu,omitempty"`
-	Memory             string   `json:"memory,omitempty"`
-	Status             string   `json:"status,omitempty"`
-	CWD                string   `json:"-"`
-	SourcePath         string   `json:"-"`
-	WorkspaceSkillDirs []string `json:"-"`
+	Name               string                           `json:"name"`
+	Version            string                           `json:"version,omitempty"`
+	Provider           string                           `json:"provider"`
+	Image              string                           `json:"image,omitempty"`
+	Repos              []string                         `json:"repos,omitempty"`
+	Env                []string                         `json:"env,omitempty"`
+	CPU                string                           `json:"cpu,omitempty"`
+	Memory             string                           `json:"memory,omitempty"`
+	Status             string                           `json:"status,omitempty"`
+	Workspace          *tsContextRuntimeWorkspacePolicy `json:"workspace,omitempty"`
+	CWD                string                           `json:"-"`
+	SourcePath         string                           `json:"-"`
+	WorkspaceSkillDirs []string                         `json:"-"`
+}
+
+type tsContextRuntimeWorkspacePolicy struct {
+	ProviderWorkspaceID string                            `json:"providerWorkspaceId,omitempty"`
+	Owner               string                            `json:"owner,omitempty"`
+	Cleanup             *tsContextRuntimeCleanupPolicy    `json:"cleanup,omitempty"`
+	Filesystem          *tsContextRuntimeFilesystemPolicy `json:"filesystem,omitempty"`
+}
+
+type tsContextRuntimeCleanupPolicy struct {
+	Mode      string `json:"mode,omitempty"`
+	TTL       string `json:"ttl,omitempty"`
+	Retention string `json:"retention,omitempty"`
+}
+
+type tsContextRuntimeFilesystemPolicy struct {
+	Persistence string `json:"persistence,omitempty"`
+	Durability  string `json:"durability,omitempty"`
+	Retention   string `json:"retention,omitempty"`
 }
 
 func tsContextRuntimeProfileForDefinition(ctx context.Context, st store.Store, def *domain.WorkflowDefinition) *tsContextRuntimeProfile {
@@ -42,6 +62,7 @@ func tsContextRuntimeProfileForDefinition(ctx context.Context, st store.Store, d
 		CPU:                profile.CPU,
 		Memory:             profile.Memory,
 		Status:             string(profile.Status),
+		Workspace:          runtimeWorkspacePolicyFromManifest(manifest.Workspace),
 		CWD:                manifest.CWD,
 		SourcePath:         manifest.SourcePath,
 		WorkspaceSkillDirs: compactUniqueStrings(manifest.WorkspaceSkillDirs),
@@ -52,16 +73,63 @@ func tsContextRuntimeProfileManifest(data json.RawMessage) struct {
 	CWD                string   `json:"cwd"`
 	SourcePath         string   `json:"source_path"`
 	WorkspaceSkillDirs []string `json:"workspace_skill_dirs"`
+	Workspace          *struct {
+		ProviderWorkspaceID string                            `json:"provider_workspace_id"`
+		Owner               string                            `json:"owner"`
+		Cleanup             *tsContextRuntimeCleanupPolicy    `json:"cleanup"`
+		Filesystem          *tsContextRuntimeFilesystemPolicy `json:"filesystem"`
+	} `json:"workspace"`
 } {
 	var manifest struct {
 		CWD                string   `json:"cwd"`
 		SourcePath         string   `json:"source_path"`
 		WorkspaceSkillDirs []string `json:"workspace_skill_dirs"`
+		Workspace          *struct {
+			ProviderWorkspaceID string                            `json:"provider_workspace_id"`
+			Owner               string                            `json:"owner"`
+			Cleanup             *tsContextRuntimeCleanupPolicy    `json:"cleanup"`
+			Filesystem          *tsContextRuntimeFilesystemPolicy `json:"filesystem"`
+		} `json:"workspace"`
 	}
 	if len(data) > 0 {
 		_ = json.Unmarshal(data, &manifest)
 	}
 	return manifest
+}
+
+func runtimeWorkspacePolicyFromManifest(in *struct {
+	ProviderWorkspaceID string                            `json:"provider_workspace_id"`
+	Owner               string                            `json:"owner"`
+	Cleanup             *tsContextRuntimeCleanupPolicy    `json:"cleanup"`
+	Filesystem          *tsContextRuntimeFilesystemPolicy `json:"filesystem"`
+}) *tsContextRuntimeWorkspacePolicy {
+	if in == nil {
+		return nil
+	}
+	out := &tsContextRuntimeWorkspacePolicy{
+		ProviderWorkspaceID: in.ProviderWorkspaceID,
+		Owner:               in.Owner,
+		Cleanup:             emptyRuntimeCleanupPolicyAsNil(in.Cleanup),
+		Filesystem:          emptyRuntimeFilesystemPolicyAsNil(in.Filesystem),
+	}
+	if out.ProviderWorkspaceID == "" && out.Owner == "" && out.Cleanup == nil && out.Filesystem == nil {
+		return nil
+	}
+	return out
+}
+
+func emptyRuntimeCleanupPolicyAsNil(policy *tsContextRuntimeCleanupPolicy) *tsContextRuntimeCleanupPolicy {
+	if policy == nil || (policy.Mode == "" && policy.TTL == "" && policy.Retention == "") {
+		return nil
+	}
+	return policy
+}
+
+func emptyRuntimeFilesystemPolicyAsNil(policy *tsContextRuntimeFilesystemPolicy) *tsContextRuntimeFilesystemPolicy {
+	if policy == nil || (policy.Persistence == "" && policy.Durability == "" && policy.Retention == "") {
+		return nil
+	}
+	return policy
 }
 
 func appendRuntimeProfileReadEvent(ctx context.Context, st store.Store, run *domain.WorkflowRun, params map[string]any) {

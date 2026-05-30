@@ -101,11 +101,44 @@ func parseRuntime(path string, data []byte) RuntimeModule {
 		Memory:             stringField(src, "memory"),
 		CWD:                stringField(src, "cwd"),
 		WorkspaceSkillDirs: runtimeWorkspaceSkillDirs(src),
+		Workspace:          runtimeWorkspacePolicy(src),
 	}
 }
 
 func runtimeWorkspaceSkillDirs(src string) []string {
 	return compactStrings(append(arrayField(src, "workspaceSkillDirs"), arrayField(src, "workspace_skill_dirs")...))
+}
+
+func runtimeWorkspacePolicy(src string) *RuntimeWorkspace {
+	workspace := &RuntimeWorkspace{
+		ProviderWorkspaceID: firstNonEmpty(
+			stringField(src, "providerWorkspaceId"),
+			stringField(src, "provider_workspace_id"),
+			stringField(src, "workspaceId"),
+			stringField(src, "workspace_id"),
+		),
+		Owner: firstNonEmpty(stringField(src, "workspaceOwner"), stringField(src, "workspace_owner"), stringField(src, "owner")),
+		Cleanup: &RuntimeCleanupPolicy{
+			Mode:      firstNonEmpty(stringField(src, "cleanupMode"), stringField(src, "cleanup_mode")),
+			TTL:       firstNonEmpty(stringField(src, "cleanupTTL"), stringField(src, "cleanup_ttl")),
+			Retention: firstNonEmpty(stringField(src, "cleanupRetention"), stringField(src, "cleanup_retention")),
+		},
+		Filesystem: &RuntimeFilesystemSpec{
+			Persistence: firstNonEmpty(stringField(src, "filesystemPersistence"), stringField(src, "filesystem_persistence")),
+			Durability:  firstNonEmpty(stringField(src, "filesystemDurability"), stringField(src, "filesystem_durability")),
+			Retention:   firstNonEmpty(stringField(src, "filesystemRetention"), stringField(src, "filesystem_retention")),
+		},
+	}
+	if workspace.Cleanup.Mode == "" && workspace.Cleanup.TTL == "" && workspace.Cleanup.Retention == "" {
+		workspace.Cleanup = nil
+	}
+	if workspace.Filesystem.Persistence == "" && workspace.Filesystem.Durability == "" && workspace.Filesystem.Retention == "" {
+		workspace.Filesystem = nil
+	}
+	if workspace.ProviderWorkspaceID == "" && workspace.Owner == "" && workspace.Cleanup == nil && workspace.Filesystem == nil {
+		return nil
+	}
+	return workspace
 }
 
 func stringField(src, name string) string {
