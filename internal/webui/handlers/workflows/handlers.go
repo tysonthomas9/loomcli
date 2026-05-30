@@ -234,6 +234,52 @@ func HandleEventStream(st store.Store) http.HandlerFunc {
 	}
 }
 
+func HandleMultiRunEventStream(st store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		runIDs := workflowStreamRunIDs(r)
+		if len(runIDs) == 0 {
+			handler.HandleServiceError(w, service.ErrValidation("run_id is required"))
+			return
+		}
+		sw, err := realtime.NewWriter(w)
+		if err != nil {
+			handler.HandleServiceError(w, service.ErrInternal("workflow event stream unsupported", err))
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		cursors := workflowRunEventCursors(r, runIDs)
+		_ = sw.WriteRetry(3000)
+		if err := writeWorkflowRunEventSet(r.Context(), st, sw, r.PathValue("ws"), runIDs, cursors); err != nil {
+			handler.HandleServiceError(w, storeError("stream workflow events", err))
+			return
+		}
+		if workflowStreamOnce(r) {
+			return
+		}
+		ticker := time.NewTicker(2 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-r.Context().Done():
+				return
+			case <-ticker.C:
+				if err := writeWorkflowRunEventSet(r.Context(), st, sw, r.PathValue("ws"), runIDs, cursors); err != nil {
+					_ = sw.WriteComment(err.Error())
+				}
+				if workflowStreamUntilTerminal(r) {
+					done, err := workflowRunsTerminal(r.Context(), st, r.PathValue("ws"), runIDs)
+					if err == nil && done {
+						_ = writeWorkflowAdmissionEnvelope(sw, "workflow_run_stream_complete", "complete", map[string]any{"run_ids": runIDs})
+						return
+					}
+				}
+			}
+		}
+	}
+}
+
 func HandleCancel(st store.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		now := time.Now().UTC()
@@ -292,6 +338,17 @@ func writeWorkflowRunEventsWithIDPrefix(ctx context.Context, st store.Store, sw 
 	return nil
 }
 
+func writeWorkflowRunEventSet(ctx context.Context, st store.Store, sw *realtime.Writer, ws string, runIDs []string, cursors map[string]int64) error {
+	for _, runID := range runIDs {
+		lastIndex := cursors[runID]
+		if err := writeWorkflowRunEventsWithIDPrefix(ctx, st, sw, ws, runID, &lastIndex, runID); err != nil {
+			return err
+		}
+		cursors[runID] = lastIndex
+	}
+	return nil
+}
+
 func wantsWorkflowAdmissionStream(r *http.Request) bool {
 	if r == nil {
 		return false
@@ -305,6 +362,116 @@ func wantsWorkflowAdmissionStream(r *http.Request) bool {
 	default:
 		return false
 	}
+}
+
+func workflowStreamRunIDs(r *http.Request) []string {
+	if r == nil {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	var out []string
+	for _, key := range []string{"run_id", "runID", "run_ids"} {
+		for _, raw := range r.URL.Query()[key] {
+			for _, part := range strings.Split(raw, ",") {
+				runID := strings.TrimSpace(part)
+				if runID == "" {
+					continue
+				}
+				if _, ok := seen[runID]; ok {
+					continue
+				}
+				seen[runID] = struct{}{}
+				out = append(out, runID)
+			}
+		}
+	}
+	return out
+}
+
+func workflowRunEventCursors(r *http.Request, runIDs []string) map[string]int64 {
+	cursors := make(map[string]int64, len(runIDs))
+	if r == nil {
+		return cursors
+	}
+	rawCursors := append([]string{}, r.URL.Query()["since"]...)
+	if lastEventID := strings.TrimSpace(r.Header.Get("Last-Event-ID")); lastEventID != "" {
+		rawCursors = append(rawCursors, lastEventID)
+	}
+	for _, raw := range rawCursors {
+		for _, part := range strings.Split(raw, ",") {
+			part = strings.TrimSpace(part)
+			if part == "" {
+				continue
+			}
+			if runID, index, ok := workflowRunEventCursor(part); ok {
+				if index > cursors[runID] {
+					cursors[runID] = index
+				}
+				continue
+			}
+			if index, err := strconv.ParseInt(part, 10, 64); err == nil && index > 0 {
+				for _, runID := range runIDs {
+					if index > cursors[runID] {
+						cursors[runID] = index
+					}
+				}
+			}
+		}
+	}
+	return cursors
+}
+
+func workflowRunEventCursor(raw string) (string, int64, bool) {
+	sep := strings.LastIndex(raw, ":")
+	if sep <= 0 || sep == len(raw)-1 {
+		return "", 0, false
+	}
+	index, err := strconv.ParseInt(strings.TrimSpace(raw[sep+1:]), 10, 64)
+	if err != nil || index <= 0 {
+		return "", 0, false
+	}
+	runID := strings.TrimSpace(raw[:sep])
+	if runID == "" {
+		return "", 0, false
+	}
+	return runID, index, true
+}
+
+func workflowStreamOnce(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(r.URL.Query().Get("once"))) {
+	case "1", "true":
+		return true
+	default:
+		return false
+	}
+}
+
+func workflowStreamUntilTerminal(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(r.URL.Query().Get("until"))) {
+	case "terminal", "complete", "completed":
+		return true
+	default:
+		return false
+	}
+}
+
+func workflowRunsTerminal(ctx context.Context, st store.Store, ws string, runIDs []string) (bool, error) {
+	for _, runID := range runIDs {
+		run, err := st.WorkflowRuns().Get(ctx, ws, runID)
+		if err != nil {
+			return false, err
+		}
+		if domain.WorkflowRunStatusLive(run.Status) {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 func writeWorkflowAdmissionStream(w http.ResponseWriter, r *http.Request, st store.Store, ws string, resp runResponse) error {

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -164,6 +165,44 @@ func TestWorkflowRunAPICreatesInspectableRun(t *testing.T) {
 	mux.ServeHTTP(lastEventRec, lastEventReq)
 	if strings.Contains(lastEventRec.Body.String(), "event: workflow_event") {
 		t.Fatalf("event stream replayed events after Last-Event-ID=999: %s", lastEventRec.Body.String())
+	}
+
+	secondRunRec := postJSON(t, mux, "/api/workspaces/WS/workflows/epic-runner/runs", map[string]any{
+		"input": map[string]any{
+			"parentId":       "EPIC-2",
+			"role":           "task",
+			"maxConcurrency": 1,
+		},
+	})
+	if secondRunRec.Code != http.StatusCreated {
+		t.Fatalf("second run status = %d, want 201; body=%s", secondRunRec.Code, secondRunRec.Body.String())
+	}
+	var secondCreated runResponse
+	if err := json.Unmarshal(secondRunRec.Body.Bytes(), &secondCreated); err != nil {
+		t.Fatalf("decode second run: %v", err)
+	}
+	multiStreamPath := "/api/workspaces/WS/workflow-runs/events/stream?once=1&run_id=" +
+		url.QueryEscape(created.Run.RunID) + "&run_id=" + url.QueryEscape(secondCreated.Run.RunID)
+	multiStreamRec := httptest.NewRecorder()
+	mux.ServeHTTP(multiStreamRec, httptest.NewRequest(http.MethodGet, multiStreamPath, nil))
+	if multiStreamRec.Code != http.StatusOK {
+		t.Fatalf("multi event stream status = %d, want 200; body=%s", multiStreamRec.Code, multiStreamRec.Body.String())
+	}
+	if ct := multiStreamRec.Header().Get("Content-Type"); ct != "text/event-stream" {
+		t.Fatalf("multi event stream content type = %q, want text/event-stream", ct)
+	}
+	multiBody := multiStreamRec.Body.String()
+	if !strings.Contains(multiBody, "id: "+created.Run.RunID+":") ||
+		!strings.Contains(multiBody, "id: "+secondCreated.Run.RunID+":") ||
+		!strings.Contains(multiBody, "event: workflow_event") {
+		t.Fatalf("multi event stream body = %s, want prefixed events for both runs", multiBody)
+	}
+	multiCursorPath := multiStreamPath + "&since=" + url.QueryEscape(created.Run.RunID+":999") +
+		"&since=" + url.QueryEscape(secondCreated.Run.RunID+":999")
+	multiCursorRec := httptest.NewRecorder()
+	mux.ServeHTTP(multiCursorRec, httptest.NewRequest(http.MethodGet, multiCursorPath, nil))
+	if strings.Contains(multiCursorRec.Body.String(), "event: workflow_event") {
+		t.Fatalf("multi event stream replayed events after per-run cursors: %s", multiCursorRec.Body.String())
 	}
 
 	cancelRec := postJSON(t, mux, "/api/workspaces/WS/workflow-runs/"+created.Run.RunID+"/cancel", map[string]any{})
