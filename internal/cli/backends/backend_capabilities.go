@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
 // StreamingBackend is an optional interface that backends can implement to
@@ -14,6 +15,18 @@ import (
 // check whether a Backend supports this.
 type StreamingBackend interface {
 	InvokeStreaming(ctx context.Context, workDir, prompt, agentName string) (io.ReadCloser, error)
+}
+
+// ResumableStreamingBackend is an optional interface for backends whose
+// provider requires the resume session ID on the streaming invocation itself.
+type ResumableStreamingBackend interface {
+	InvokeStreamingResumed(ctx context.Context, workDir, prompt, agentName, providerSessionID string) (io.ReadCloser, error)
+}
+
+// ResumableNonInteractiveBackend is an optional interface for backends whose
+// provider requires the resume session ID on the non-interactive invocation.
+type ResumableNonInteractiveBackend interface {
+	InvokeNonInteractiveResumed(workDir, prompt, agentName, providerSessionID string, shutdown <-chan struct{}, collector *usage.Collector) error
 }
 
 // SessionAwareBackend is an optional interface for backends that support
@@ -127,23 +140,27 @@ type BackendMeta struct {
 // fields (Streaming, Sessions, etc.) to determine available capabilities.
 // Typed fields are nil when the corresponding capability is not supported.
 type BackendCapabilities struct {
-	HasStreaming        bool
-	HasSessions         bool
-	HasToolControl      bool
-	HasTypedToolRuntime bool
-	HasTypedToolCalls   bool
-	HasHealthCheck      bool
-	HasConfig           bool
-	HasMeta             bool
+	HasStreaming            bool
+	HasStreamingResume      bool
+	HasNonInteractiveResume bool
+	HasSessions             bool
+	HasToolControl          bool
+	HasTypedToolRuntime     bool
+	HasTypedToolCalls       bool
+	HasHealthCheck          bool
+	HasConfig               bool
+	HasMeta                 bool
 
-	Streaming        StreamingBackend
-	Sessions         SessionAwareBackend
-	Tools            ToolAwareBackend
-	TypedToolRuntime TypedToolRuntimeBackend
-	TypedToolCalls   TypedToolCallReporter
-	Health           HealthCheckableBackend
-	Config           ConfigurableBackend
-	Meta             MetadataProvider
+	Streaming            StreamingBackend
+	StreamingResume      ResumableStreamingBackend
+	NonInteractiveResume ResumableNonInteractiveBackend
+	Sessions             SessionAwareBackend
+	Tools                ToolAwareBackend
+	TypedToolRuntime     TypedToolRuntimeBackend
+	TypedToolCalls       TypedToolCallReporter
+	Health               HealthCheckableBackend
+	Config               ConfigurableBackend
+	Meta                 MetadataProvider
 }
 
 // detectBinaryVersion runs "<binary> --version" and returns the first line of
@@ -173,6 +190,14 @@ func InspectCapabilities(b cli.Backend) BackendCapabilities {
 	if s, ok := b.(StreamingBackend); ok {
 		caps.HasStreaming = true
 		caps.Streaming = s
+	}
+	if s, ok := b.(ResumableStreamingBackend); ok {
+		caps.HasStreamingResume = true
+		caps.StreamingResume = s
+	}
+	if n, ok := b.(ResumableNonInteractiveBackend); ok {
+		caps.HasNonInteractiveResume = true
+		caps.NonInteractiveResume = n
 	}
 	if s, ok := b.(SessionAwareBackend); ok {
 		caps.HasSessions = true

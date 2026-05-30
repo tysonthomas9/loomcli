@@ -14,10 +14,16 @@ import (
 var localConnectStdoutMu sync.Mutex
 
 func invokeNonStreamingLocalAgent(backend cli.Backend, backendName, workDir, prompt, agentName string, stream io.Writer) (localInvocationResult, error) {
+	return invokeNonStreamingLocalAgentWithRunner(backendName, workDir, prompt, agentName, stream, func(shutdown <-chan struct{}, collector *usage.Collector) error {
+		return backend.InvokeNonInteractive(workDir, prompt, agentName, shutdown, collector)
+	})
+}
+
+func invokeNonStreamingLocalAgentWithRunner(backendName, workDir, prompt, agentName string, stream io.Writer, runner func(shutdown <-chan struct{}, collector *usage.Collector) error) (localInvocationResult, error) {
 	collector := usage.NewCollector(backendName, agentName)
 	shutdown := make(chan struct{})
 	output, err := captureLocalBackendStdout(stream, func() error {
-		return backend.InvokeNonInteractive(workDir, prompt, agentName, shutdown, collector)
+		return runner(shutdown, collector)
 	})
 	if err != nil {
 		return localInvocationResult{}, err

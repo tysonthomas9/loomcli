@@ -5,6 +5,8 @@ import (
 	"io"
 	"strings"
 	"testing"
+
+	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
 // fullCapabilityBackend implements Backend and all optional interfaces.
@@ -14,6 +16,14 @@ type fullCapabilityBackend struct {
 
 func (f *fullCapabilityBackend) InvokeStreaming(_ context.Context, _, _, _ string) (io.ReadCloser, error) {
 	return io.NopCloser(strings.NewReader("streamed")), nil
+}
+
+func (f *fullCapabilityBackend) InvokeStreamingResumed(_ context.Context, _, _, _, _ string) (io.ReadCloser, error) {
+	return io.NopCloser(strings.NewReader("resumed")), nil
+}
+
+func (f *fullCapabilityBackend) InvokeNonInteractiveResumed(_, _, _, _ string, _ <-chan struct{}, _ *usage.Collector) error {
+	return nil
 }
 
 func (f *fullCapabilityBackend) ContinueSession(_, _, _ string) error { return nil }
@@ -59,6 +69,12 @@ func TestInspectCapabilities_NoOptionalInterfaces(t *testing.T) {
 	if caps.HasStreaming {
 		t.Error("expected HasStreaming=false")
 	}
+	if caps.HasStreamingResume {
+		t.Error("expected HasStreamingResume=false")
+	}
+	if caps.HasNonInteractiveResume {
+		t.Error("expected HasNonInteractiveResume=false")
+	}
 	if caps.HasSessions {
 		t.Error("expected HasSessions=false")
 	}
@@ -80,6 +96,12 @@ func TestInspectCapabilities_NoOptionalInterfaces(t *testing.T) {
 
 	if caps.Streaming != nil {
 		t.Error("expected Streaming=nil")
+	}
+	if caps.StreamingResume != nil {
+		t.Error("expected StreamingResume=nil")
+	}
+	if caps.NonInteractiveResume != nil {
+		t.Error("expected NonInteractiveResume=nil")
 	}
 	if caps.Sessions != nil {
 		t.Error("expected Sessions=nil")
@@ -108,6 +130,12 @@ func TestInspectCapabilities_AllInterfaces(t *testing.T) {
 	if !caps.HasStreaming {
 		t.Error("expected HasStreaming=true")
 	}
+	if !caps.HasStreamingResume {
+		t.Error("expected HasStreamingResume=true")
+	}
+	if !caps.HasNonInteractiveResume {
+		t.Error("expected HasNonInteractiveResume=true")
+	}
 	if !caps.HasSessions {
 		t.Error("expected HasSessions=true")
 	}
@@ -129,6 +157,12 @@ func TestInspectCapabilities_AllInterfaces(t *testing.T) {
 
 	if caps.Streaming == nil {
 		t.Error("expected Streaming!=nil")
+	}
+	if caps.StreamingResume == nil {
+		t.Error("expected StreamingResume!=nil")
+	}
+	if caps.NonInteractiveResume == nil {
+		t.Error("expected NonInteractiveResume!=nil")
 	}
 	if caps.Sessions == nil {
 		t.Error("expected Sessions!=nil")
@@ -157,6 +191,12 @@ func TestInspectCapabilities_PartialInterfaces(t *testing.T) {
 	// Should have only MetadataProvider and HealthCheckableBackend
 	if caps.HasStreaming {
 		t.Error("expected HasStreaming=false")
+	}
+	if caps.HasStreamingResume {
+		t.Error("expected HasStreamingResume=false")
+	}
+	if caps.HasNonInteractiveResume {
+		t.Error("expected HasNonInteractiveResume=false")
 	}
 	if caps.HasSessions {
 		t.Error("expected HasSessions=false")
@@ -188,11 +228,13 @@ func TestInspectCapabilities_PartialInterfaces(t *testing.T) {
 func TestInspectCapabilities_NilBackend(t *testing.T) {
 	caps := InspectCapabilities(nil)
 
-	if caps.HasStreaming || caps.HasSessions || caps.HasToolControl || caps.HasTypedToolRuntime ||
+	if caps.HasStreaming || caps.HasStreamingResume || caps.HasNonInteractiveResume ||
+		caps.HasSessions || caps.HasToolControl || caps.HasTypedToolRuntime ||
 		caps.HasHealthCheck || caps.HasConfig || caps.HasMeta {
 		t.Error("expected all Has* flags to be false for nil backend")
 	}
-	if caps.Streaming != nil || caps.Sessions != nil || caps.Tools != nil || caps.TypedToolRuntime != nil ||
+	if caps.Streaming != nil || caps.StreamingResume != nil || caps.NonInteractiveResume != nil ||
+		caps.Sessions != nil || caps.Tools != nil || caps.TypedToolRuntime != nil ||
 		caps.Health != nil || caps.Config != nil || caps.Meta != nil {
 		t.Error("expected all typed fields to be nil for nil backend")
 	}
@@ -201,11 +243,13 @@ func TestInspectCapabilities_NilBackend(t *testing.T) {
 func TestBackendCapabilities_ZeroValue(t *testing.T) {
 	var caps BackendCapabilities
 
-	if caps.HasStreaming || caps.HasSessions || caps.HasToolControl || caps.HasTypedToolRuntime ||
+	if caps.HasStreaming || caps.HasStreamingResume || caps.HasNonInteractiveResume ||
+		caps.HasSessions || caps.HasToolControl || caps.HasTypedToolRuntime ||
 		caps.HasHealthCheck || caps.HasConfig || caps.HasMeta {
 		t.Error("expected all Has* flags to be false on zero value")
 	}
-	if caps.Streaming != nil || caps.Sessions != nil || caps.Tools != nil || caps.TypedToolRuntime != nil ||
+	if caps.Streaming != nil || caps.StreamingResume != nil || caps.NonInteractiveResume != nil ||
+		caps.Sessions != nil || caps.Tools != nil || caps.TypedToolRuntime != nil ||
 		caps.Health != nil || caps.Config != nil || caps.Meta != nil {
 		t.Error("expected all typed fields to be nil on zero value")
 	}

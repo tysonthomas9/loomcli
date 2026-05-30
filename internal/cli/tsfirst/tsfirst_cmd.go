@@ -19,10 +19,12 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	backendcaps "github.com/tysonthomas9/loomcli/internal/cli/backends"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	defspkg "github.com/tysonthomas9/loomcli/internal/defs"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/usage"
 	workflowpkg "github.com/tysonthomas9/loomcli/internal/workflow"
 )
 
@@ -717,14 +719,16 @@ func withTemporaryEnv[T any](values map[string]string, fn func() (T, error)) (T,
 
 func invokeLocalAgent(ctx context.Context, plan *defspkg.Plan, agent defspkg.AgentModule, prompt, message string, stream io.Writer, resumeProviderSessionID string) (localInvocationResult, error) {
 	toolRuntime := localConnectToolRuntime(plan, agent)
+	resume := newConnectResume(resumeProviderSessionID)
 	if strings.EqualFold(agent.Backend, "echo") {
 		response := "echo: " + message
+		markResumeUnsupported(resume, "echo")
 		if stream != nil {
 			if _, err := io.WriteString(stream, response); err != nil {
 				return localInvocationResult{}, err
 			}
 		}
-		return localInvocationResult{Response: response, ToolRuntime: echoToolRuntime(toolRuntime)}, nil
+		return localInvocationResult{Response: response, ToolRuntime: echoToolRuntime(toolRuntime), Resume: resume}, nil
 	}
 	backendName := strings.TrimSpace(agent.Backend)
 	if backendName == "" {
@@ -739,13 +743,26 @@ func invokeLocalAgent(ctx context.Context, plan *defspkg.Plan, agent defspkg.Age
 		return localInvocationResult{}, err
 	}
 	workDir := localWorkDir(plan.Root, agent)
-	if resumeProviderSessionID != "" {
-		setBackendResumeSessionID(backend, resumeProviderSessionID)
+	resumeApplied := false
+	if resume != nil && setBackendResumeSessionID(backend, resume.PriorProviderSessionID) {
+		markResumeApplied(resume, connectResumeMethodSetter)
+		resumeApplied = true
 	}
-	if streamer, ok := backend.(interface {
-		InvokeStreaming(context.Context, string, string, string) (io.ReadCloser, error)
-	}); ok {
-		rc, err := streamer.InvokeStreaming(ctx, workDir, prompt, agent.Name)
+	if streamer, ok := backend.(backendcaps.StreamingBackend); ok {
+		var rc io.ReadCloser
+		var err error
+		if resume != nil && !resumeApplied {
+			if resumable, ok := backend.(backendcaps.ResumableStreamingBackend); ok {
+				rc, err = resumable.InvokeStreamingResumed(ctx, workDir, prompt, agent.Name, resume.PriorProviderSessionID)
+				markResumeApplied(resume, connectResumeMethodStreamingResumed)
+				resumeApplied = true
+			} else {
+				markResumeUnsupported(resume, backendName)
+			}
+		}
+		if rc == nil && err == nil {
+			rc, err = streamer.InvokeStreaming(ctx, workDir, prompt, agent.Name)
+		}
 		if err != nil {
 			return localInvocationResult{}, err
 		}
@@ -753,12 +770,28 @@ func invokeLocalAgent(ctx context.Context, plan *defspkg.Plan, agent defspkg.Age
 		result, err := captureStreamingResponse(rc, stream)
 		result.ToolRuntime = appliedToolRuntime
 		result.ToolCalls = collectBackendTypedToolCalls(backend, workDir)
+		result.Resume = resume
 		result = fillBackendSessionID(result, backend, workDir)
 		return result, err
 	}
-	result, err := invokeNonStreamingLocalAgent(backend, backendName, workDir, prompt, agent.Name, stream)
+	var result localInvocationResult
+	if resume != nil && !resumeApplied {
+		if resumable, ok := backend.(backendcaps.ResumableNonInteractiveBackend); ok {
+			result, err = invokeNonStreamingLocalAgentWithRunner(backendName, workDir, prompt, agent.Name, stream, func(shutdown <-chan struct{}, collector *usage.Collector) error {
+				return resumable.InvokeNonInteractiveResumed(workDir, prompt, agent.Name, resume.PriorProviderSessionID, shutdown, collector)
+			})
+			markResumeApplied(resume, connectResumeMethodNonInteractiveResumed)
+			resumeApplied = true
+		} else {
+			markResumeUnsupported(resume, backendName)
+			result, err = invokeNonStreamingLocalAgent(backend, backendName, workDir, prompt, agent.Name, stream)
+		}
+	} else {
+		result, err = invokeNonStreamingLocalAgent(backend, backendName, workDir, prompt, agent.Name, stream)
+	}
 	result.ToolRuntime = appliedToolRuntime
 	result.ToolCalls = collectBackendTypedToolCalls(backend, workDir)
+	result.Resume = resume
 	result = fillBackendSessionID(result, backend, workDir)
 	return result, err
 }
@@ -782,6 +815,7 @@ type localTurn struct {
 	PromptHash        string              `json:"prompt_hash,omitempty"`
 	ToolRuntime       *connectToolRuntime `json:"tool_runtime,omitempty"`
 	ToolCalls         []connectToolCall   `json:"tool_calls,omitempty"`
+	Resume            *connectResume      `json:"resume,omitempty"`
 }
 
 func readLocalTurns(path string) ([]localTurn, error) {

@@ -31,6 +31,7 @@ type connectResult struct {
 	TranscriptPath    string              `json:"transcript_path,omitempty"`
 	ToolRuntime       *connectToolRuntime `json:"tool_runtime,omitempty"`
 	ToolCalls         []connectToolCall   `json:"tool_calls,omitempty"`
+	Resume            *connectResume      `json:"resume,omitempty"`
 }
 
 type connectOptions struct {
@@ -51,6 +52,15 @@ type localInvocationResult struct {
 	Usage             *connectUsage
 	ToolRuntime       *connectToolRuntime
 	ToolCalls         []connectToolCall
+	Resume            *connectResume
+}
+
+type connectResume struct {
+	Requested              bool   `json:"requested"`
+	Status                 string `json:"status"`
+	Method                 string `json:"method,omitempty"`
+	PriorProviderSessionID string `json:"prior_provider_session_id,omitempty"`
+	Message                string `json:"message,omitempty"`
 }
 
 type connectToolRuntime struct {

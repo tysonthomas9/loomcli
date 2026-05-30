@@ -553,12 +553,20 @@ func TestRunLocalConnectCapturesProviderSessionAndUsage(t *testing.T) {
 	if second.ProviderSessionID != "provider-session-2" {
 		t.Fatalf("second provider session = %q", second.ProviderSessionID)
 	}
+	if second.Resume == nil || second.Resume.Status != connectResumeApplied ||
+		second.Resume.Method != connectResumeMethodSetter ||
+		second.Resume.PriorProviderSessionID != "provider-session-1" {
+		t.Fatalf("second resume = %+v, want setter-applied provider-session-1", second.Resume)
+	}
 	turns, err := readLocalTurns(second.TranscriptPath)
 	if err != nil {
 		t.Fatalf("readLocalTurns() error = %v", err)
 	}
 	if len(turns) != 2 || turns[0].ProviderSessionID != "provider-session-1" || turns[1].ProviderSessionID != "provider-session-2" {
 		t.Fatalf("turns = %+v, want provider session metadata persisted", turns)
+	}
+	if turns[1].Resume == nil || turns[1].Resume.Status != connectResumeApplied || turns[1].Resume.Method != connectResumeMethodSetter {
+		t.Fatalf("turn[1] resume = %+v, want setter-applied resume evidence", turns[1].Resume)
 	}
 	if turns[0].OperationID == "" || turns[0].Usage == nil || turns[0].Usage.TotalTokens != 15 {
 		t.Fatalf("turn[0] metadata = %+v, want operation and usage metadata", turns[0])
@@ -599,12 +607,120 @@ func TestRunLocalConnectCapturesBackendSessionMetadataFallback(t *testing.T) {
 	if second.ProviderSessionID != "metadata-session-2" {
 		t.Fatalf("second provider session = %q, want metadata-session-2", second.ProviderSessionID)
 	}
+	if second.Resume == nil || second.Resume.Status != connectResumeUnsupported ||
+		second.Resume.Method != connectResumeMethodNone ||
+		second.Resume.PriorProviderSessionID != "metadata-session-1" {
+		t.Fatalf("second resume = %+v, want unsupported resume evidence", second.Resume)
+	}
 	turns, err := readLocalTurns(second.TranscriptPath)
 	if err != nil {
 		t.Fatalf("readLocalTurns() error = %v", err)
 	}
 	if len(turns) != 2 || turns[0].ProviderSessionID != "metadata-session-1" || turns[1].ProviderSessionID != "metadata-session-2" {
 		t.Fatalf("turns = %+v, want backend session metadata persisted", turns)
+	}
+	if turns[1].Resume == nil || turns[1].Resume.Status != connectResumeUnsupported {
+		t.Fatalf("turn[1] resume = %+v, want unsupported resume evidence persisted", turns[1].Resume)
+	}
+}
+
+func TestRunLocalConnectUsesNativeResumeWithoutSetter(t *testing.T) {
+	cli.TestingResetBackendState(t)
+	backend := &nativeResumeBackend{}
+	cli.RegisterBackend(backend)
+	root := t.TempDir()
+	writeAgent(t, root, "native-agent", "native-resume")
+
+	first, err := runLocalConnect(context.Background(), connectOptions{
+		Dir:      root,
+		Agent:    "native-agent",
+		Instance: "local",
+		Session:  "provider",
+		Message:  "first",
+	})
+	if err != nil {
+		t.Fatalf("first runLocalConnect() error = %v", err)
+	}
+	if first.Resume != nil {
+		t.Fatalf("first resume = %+v, want nil for first turn", first.Resume)
+	}
+	if first.ProviderSessionID != "native-session-1" {
+		t.Fatalf("first provider session = %q, want native-session-1", first.ProviderSessionID)
+	}
+
+	second, err := runLocalConnect(context.Background(), connectOptions{
+		Dir:      root,
+		Agent:    "native-agent",
+		Instance: "local",
+		Session:  "provider",
+		Message:  "second",
+	})
+	if err != nil {
+		t.Fatalf("second runLocalConnect() error = %v", err)
+	}
+	if got := backend.ResumeIDs(); len(got) != 1 || got[0] != "native-session-1" {
+		t.Fatalf("native resume IDs = %+v, want native-session-1", got)
+	}
+	if second.ProviderSessionID != "native-session-2" {
+		t.Fatalf("second provider session = %q, want native-session-2", second.ProviderSessionID)
+	}
+	if second.Resume == nil || second.Resume.Status != connectResumeApplied ||
+		second.Resume.Method != connectResumeMethodNonInteractiveResumed ||
+		second.Resume.PriorProviderSessionID != "native-session-1" {
+		t.Fatalf("second resume = %+v, want native noninteractive resume evidence", second.Resume)
+	}
+	turns, err := readLocalTurns(second.TranscriptPath)
+	if err != nil {
+		t.Fatalf("readLocalTurns() error = %v", err)
+	}
+	if len(turns) != 2 || turns[1].Resume == nil ||
+		turns[1].Resume.Method != connectResumeMethodNonInteractiveResumed ||
+		turns[1].Resume.PriorProviderSessionID != "native-session-1" {
+		t.Fatalf("turns = %+v, want native resume evidence persisted", turns)
+	}
+}
+
+func TestRunLocalConnectUsesNativeStreamingResumeWithoutSetter(t *testing.T) {
+	cli.TestingResetBackendState(t)
+	backend := &nativeStreamingResumeBackend{}
+	cli.RegisterBackend(backend)
+	root := t.TempDir()
+	writeAgent(t, root, "native-stream-agent", "native-stream-resume")
+
+	first, err := runLocalConnect(context.Background(), connectOptions{
+		Dir:      root,
+		Agent:    "native-stream-agent",
+		Instance: "local",
+		Session:  "provider",
+		Message:  "first",
+	})
+	if err != nil {
+		t.Fatalf("first runLocalConnect() error = %v", err)
+	}
+	if first.ProviderSessionID != "native-stream-session-1" {
+		t.Fatalf("first provider session = %q, want native-stream-session-1", first.ProviderSessionID)
+	}
+
+	second, err := runLocalConnect(context.Background(), connectOptions{
+		Dir:      root,
+		Agent:    "native-stream-agent",
+		Instance: "local",
+		Session:  "provider",
+		Message:  "second",
+	})
+	if err != nil {
+		t.Fatalf("second runLocalConnect() error = %v", err)
+	}
+	if got := backend.ResumeIDs(); len(got) != 1 || got[0] != "native-stream-session-1" {
+		t.Fatalf("native streaming resume IDs = %+v, want native-stream-session-1", got)
+	}
+	if second.ProviderSessionID != "native-stream-session-2" {
+		t.Fatalf("second provider session = %q, want native-stream-session-2", second.ProviderSessionID)
+	}
+	if second.Resume == nil || second.Resume.Status != connectResumeApplied ||
+		second.Resume.Method != connectResumeMethodStreamingResumed ||
+		second.Resume.PriorProviderSessionID != "native-stream-session-1" {
+		t.Fatalf("second resume = %+v, want native streaming resume evidence", second.Resume)
 	}
 }
 
@@ -936,6 +1052,84 @@ func (b *sessionMetadataBackend) ContinueSession(_, _, _ string) error {
 
 func (b *sessionMetadataBackend) LastSessionID(_ string) string {
 	return b.lastID
+}
+
+type nativeResumeBackend struct {
+	count     int
+	lastID    string
+	resumeIDs []string
+}
+
+func (b *nativeResumeBackend) Name() string { return "native-resume" }
+
+func (b *nativeResumeBackend) InvokeInteractive(_, _, _ string) error { return nil }
+
+func (b *nativeResumeBackend) InvokeNonInteractive(_, _, _ string, _ <-chan struct{}, _ *usage.Collector) error {
+	b.count++
+	b.lastID = fmt.Sprintf("native-session-%d", b.count)
+	fmt.Printf(`{"type":"session.created","session_id":%q,"model":"provider/native"}`+"\n", b.lastID)
+	fmt.Println("native cold answer")
+	return nil
+}
+
+func (b *nativeResumeBackend) InvokeNonInteractiveResumed(_, _, _ string, providerSessionID string, _ <-chan struct{}, _ *usage.Collector) error {
+	b.resumeIDs = append(b.resumeIDs, providerSessionID)
+	b.count++
+	b.lastID = fmt.Sprintf("native-session-%d", b.count)
+	fmt.Printf(`{"type":"session.created","session_id":%q,"model":"provider/native"}`+"\n", b.lastID)
+	fmt.Printf("native resumed from %s\n", providerSessionID)
+	return nil
+}
+
+func (b *nativeResumeBackend) LastSessionID(_ string) string {
+	return b.lastID
+}
+
+func (b *nativeResumeBackend) ResumeIDs() []string {
+	out := make([]string, len(b.resumeIDs))
+	copy(out, b.resumeIDs)
+	return out
+}
+
+type nativeStreamingResumeBackend struct {
+	count     int
+	resumeIDs []string
+}
+
+func (b *nativeStreamingResumeBackend) Name() string { return "native-stream-resume" }
+
+func (b *nativeStreamingResumeBackend) InvokeInteractive(_, _, _ string) error { return nil }
+
+func (b *nativeStreamingResumeBackend) InvokeNonInteractive(_, _, _ string, _ <-chan struct{}, _ *usage.Collector) error {
+	return fmt.Errorf("InvokeNonInteractive should not be called for native streaming resume backend")
+}
+
+func (b *nativeStreamingResumeBackend) InvokeStreaming(_ context.Context, _, _, _ string) (io.ReadCloser, error) {
+	b.count++
+	sessionID := fmt.Sprintf("native-stream-session-%d", b.count)
+	return io.NopCloser(strings.NewReader(nativeStreamingResumePayload(sessionID, "native streaming cold answer"))), nil
+}
+
+func (b *nativeStreamingResumeBackend) InvokeStreamingResumed(_ context.Context, _, _, _, providerSessionID string) (io.ReadCloser, error) {
+	b.resumeIDs = append(b.resumeIDs, providerSessionID)
+	b.count++
+	sessionID := fmt.Sprintf("native-stream-session-%d", b.count)
+	return io.NopCloser(strings.NewReader(nativeStreamingResumePayload(sessionID, "native streaming resumed answer"))), nil
+}
+
+func (b *nativeStreamingResumeBackend) ResumeIDs() []string {
+	out := make([]string, len(b.resumeIDs))
+	copy(out, b.resumeIDs)
+	return out
+}
+
+func nativeStreamingResumePayload(sessionID, answer string) string {
+	return strings.Join([]string{
+		fmt.Sprintf(`{"type":"system","subtype":"init","session_id":%q}`, sessionID),
+		fmt.Sprintf(`{"type":"assistant","message":{"model":"provider/native-stream","content":[{"type":"text","text":%q}]}}`, answer),
+		fmt.Sprintf(`{"type":"result","result":%q}`, answer),
+		"",
+	}, "\n")
 }
 
 type typedToolRuntimeBackend struct {

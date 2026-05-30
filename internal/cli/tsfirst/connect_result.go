@@ -21,6 +21,9 @@ func completeLocalConnectResult(result connectResult, agent defspkg.AgentModule,
 	if len(invocation.ToolCalls) > 0 {
 		result.ToolCalls = append([]connectToolCall(nil), invocation.ToolCalls...)
 	}
+	if invocation.Resume != nil {
+		result.Resume = invocation.Resume
+	}
 	turn := localTurn{
 		Timestamp:         time.Now().UTC().Format(time.RFC3339Nano),
 		OperationID:       operationID,
@@ -40,6 +43,7 @@ func completeLocalConnectResult(result connectResult, agent defspkg.AgentModule,
 		PromptHash:        hashText(prompt),
 		ToolRuntime:       result.ToolRuntime,
 		ToolCalls:         result.ToolCalls,
+		Resume:            result.Resume,
 	}
 	return result, turn
 }
