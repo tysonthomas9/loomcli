@@ -713,6 +713,60 @@ export default defineWorkflow({
 	}
 }
 
+func TestCodeDefinedWorkflowContextCancelMovesRunToCancelled(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	workflowPath := filepath.Join(root, ".loom", "workflows", "context-cancel.ts")
+	if err := os.MkdirAll(filepath.Dir(workflowPath), 0o755); err != nil {
+		t.Fatalf("mkdir workflow dir: %v", err)
+	}
+	if err := os.WriteFile(workflowPath, []byte(`import { defineWorkflow } from '@loom/runtime';
+
+export default defineWorkflow({
+  name: 'context-cancel',
+  async run(ctx) {
+    await ctx.workflow.cancel({ reason: 'policy stop', metadata: { source: 'test' } });
+    return { shouldNotComplete: true };
+  },
+});
+`), 0o644); err != nil {
+		t.Fatalf("write workflow: %v", err)
+	}
+	plan, err := defspkg.Load(root)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TSCANCEL", Name: "TypeScript Cancel Context"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := defspkg.Apply(ctx, st, "TSCANCEL", "atlas", plan); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	run, err := CreateOrResumeRun(ctx, st, "TSCANCEL", "context-cancel", json.RawMessage(`{}`), "atlas")
+	if err != nil {
+		t.Fatalf("CreateOrResumeRun() error = %v", err)
+	}
+	result, err := RunOnce(ctx, st, clitest.NewMockIssueBackend(), run)
+	if err != nil {
+		t.Fatalf("RunOnce() error = %v", err)
+	}
+	if result.Run == nil || result.Run.Status != domain.WorkflowRunCancelled || result.Run.FinishedAt == nil || !result.Done {
+		t.Fatalf("result = %+v, want cancelled terminal workflow run", result)
+	}
+	events, err := st.RunEvents().List(ctx, "TSCANCEL", store.RunEventFilter{WorkflowRunID: run.RunID})
+	if err != nil {
+		t.Fatalf("list run events: %v", err)
+	}
+	if hasWorkflowEvent(events, "workflow_completed") {
+		t.Fatalf("events = %+v, did not want workflow_completed after cancel", events)
+	}
+	cancelEvent := workflowEventDataByType(t, events, "workflow_cancelled")
+	if cancelEvent["reason"] != "policy stop" || cancelEvent["source"] != "workflow_context" {
+		t.Fatalf("cancel event = %+v, want workflow-context cancel reason", cancelEvent)
+	}
+}
+
 func TestCodeDefinedWorkflowContextReadsTaskClaimsAndAdmitsDispatch(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
@@ -895,5 +949,21 @@ func workflowEventDataByOperation(t *testing.T, events []*domain.RunEvent, opera
 		}
 	}
 	t.Fatalf("missing agent_session_operation event for %s in %+v", operation, events)
+	return nil
+}
+
+func workflowEventDataByType(t *testing.T, events []*domain.RunEvent, typ string) map[string]any {
+	t.Helper()
+	for _, event := range events {
+		if event == nil || event.Type != typ {
+			continue
+		}
+		var data map[string]any
+		if err := json.Unmarshal(event.Data, &data); err != nil {
+			t.Fatalf("decode event data %s: %v", event.EventID, err)
+		}
+		return data
+	}
+	t.Fatalf("missing workflow event %s in %+v", typ, events)
 	return nil
 }

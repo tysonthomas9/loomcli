@@ -457,6 +457,10 @@ const runtimeTypes = `declare module '@loom/runtime' {
       status(): Promise<WorkflowRunState>;
       cancelRequested(): Promise<boolean>;
       waitUntil(condition: string, metadata?: Record<string, unknown>): Promise<Record<string, unknown>>;
+      cancel(reasonOrOptions?: string | {
+        reason?: string;
+        metadata?: Record<string, unknown>;
+      }, metadata?: Record<string, unknown>): Promise<Record<string, unknown>>;
     };
     init(agent: AgentDefinition | CreatedAgent | AgentFactory, options?: {
       name?: string;

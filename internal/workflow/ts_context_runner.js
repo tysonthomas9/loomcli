@@ -262,6 +262,22 @@ function makeContext(request, workflow) {
         operations.push(op);
         return { accepted: true, ...op.params };
       },
+      cancel: async (reasonOrOptions, metadata) => {
+        const options =
+          reasonOrOptions && typeof reasonOrOptions === "object"
+            ? reasonOrOptions
+            : { reason: String(reasonOrOptions || "") };
+        const op = {
+          type: "workflow.cancel",
+          params: {
+            ...jsonSafe(options || {}),
+            metadata: jsonSafe(metadata || options.metadata || {}),
+            requestedAt: new Date().toISOString(),
+          },
+        };
+        operations.push(op);
+        return { accepted: true, ...op.params };
+      },
     },
     init: async (agent, options = {}) => {
       const materialized = materializeAgent(agent);

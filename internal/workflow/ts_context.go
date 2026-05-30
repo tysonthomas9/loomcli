@@ -80,6 +80,8 @@ type tsWorkflowOperation struct {
 type tsAppliedOperations struct {
 	TaskRuns      []*domain.TaskRun
 	WaitCondition string
+	Cancelled     bool
+	Run           *domain.WorkflowRun
 }
 
 func runTypeScriptContextOnce(ctx context.Context, st store.Store, ib backend.IssueBackend, run *domain.WorkflowRun, def *domain.WorkflowDefinition) (*BuiltinRunResult, error) {
@@ -108,6 +110,9 @@ func runTypeScriptContextOnce(ctx context.Context, st store.Store, ib backend.Is
 	if err != nil {
 		return nil, err
 	}
+	if applied.Cancelled {
+		return tsContextCancelledResult(ctx, st, run, applied.Run, request), nil
+	}
 	taskRuns, dispatched, err := dispatchTSContextTaskRuns(ctx, st, run, parentID, applied.TaskRuns)
 	if err != nil {
 		return nil, err
@@ -122,6 +127,19 @@ func runTypeScriptContextOnce(ctx context.Context, st store.Store, ib backend.Is
 	}
 	result.Done = len(taskRuns) == 0 && result.OpenCount == 0
 	return finishTSContextRun(ctx, st, run, response.Result, result, parentID, applied.WaitCondition)
+}
+
+func tsContextCancelledResult(ctx context.Context, st store.Store, original, cancelled *domain.WorkflowRun, request tsContextRequest) *BuiltinRunResult {
+	if cancelled == nil {
+		cancelled, _ = st.WorkflowRuns().Get(ctx, original.WorkspaceKey, original.RunID)
+	}
+	return &BuiltinRunResult{
+		Run:          cancelled,
+		Done:         true,
+		ReadyCount:   len(request.ReadyChildren),
+		OpenCount:    countOpen(request.ChildWorkItems),
+		BlockedCount: len(request.BlockedChildren),
+	}
 }
 
 func dispatchTSContextTaskRuns(ctx context.Context, st store.Store, run *domain.WorkflowRun, parentID string, taskRuns []*domain.TaskRun) ([]*domain.TaskRun, int, error) {
@@ -337,7 +355,7 @@ func appendTSLogEvent(ctx context.Context, st store.Store, run *domain.WorkflowR
 	})
 }
 
-//nolint:cyclop // This switch is the explicit WorkflowContext operation admission allowlist.
+//nolint:cyclop,gocognit // This switch is the explicit WorkflowContext operation admission allowlist.
 func applyTSOperations(ctx context.Context, st store.Store, run *domain.WorkflowRun, parentID string, operations []tsWorkflowOperation) (tsAppliedOperations, error) {
 	applied := tsAppliedOperations{TaskRuns: make([]*domain.TaskRun, 0)}
 	for _, op := range operations {
@@ -349,23 +367,22 @@ func applyTSOperations(ctx context.Context, st store.Store, run *domain.Workflow
 			}
 			applied.TaskRuns = append(applied.TaskRuns, taskRun)
 		case "taskRuns.wait":
-			waitCondition := applyTaskRunsWaitOperation(ctx, st, run, op.Params)
-			if applied.WaitCondition == "" {
-				applied.WaitCondition = waitCondition
-			}
+			setAppliedWaitCondition(&applied, applyTaskRunsWaitOperation(ctx, st, run, op.Params))
 		case "taskClaims.wait":
-			waitCondition := applyTaskClaimsWaitOperation(ctx, st, run, op.Params)
-			if applied.WaitCondition == "" {
-				applied.WaitCondition = waitCondition
-			}
+			setAppliedWaitCondition(&applied, applyTaskClaimsWaitOperation(ctx, st, run, op.Params))
 		case "workflow.waitUntil":
 			waitCondition, err := applyWorkflowWaitUntilOperation(ctx, st, run, op.Params)
 			if err != nil {
 				return tsAppliedOperations{}, err
 			}
-			if applied.WaitCondition == "" {
-				applied.WaitCondition = waitCondition
+			setAppliedWaitCondition(&applied, waitCondition)
+		case "workflow.cancel":
+			cancelled, err := applyWorkflowCancelOperation(ctx, st, run, op.Params)
+			if err != nil {
+				return tsAppliedOperations{}, err
 			}
+			applied.Cancelled = true
+			applied.Run = cancelled
 		case "tools.call":
 			appendToolCallEvent(ctx, st, run, op.Params)
 		case "artifacts.record":
@@ -389,6 +406,12 @@ func applyTSOperations(ctx context.Context, st store.Store, run *domain.Workflow
 		}
 	}
 	return applied, nil
+}
+
+func setAppliedWaitCondition(applied *tsAppliedOperations, waitCondition string) {
+	if applied.WaitCondition == "" {
+		applied.WaitCondition = waitCondition
+	}
 }
 
 func appendToolCallEvent(ctx context.Context, st store.Store, run *domain.WorkflowRun, params map[string]any) {
@@ -456,6 +479,30 @@ func applyWorkflowWaitUntilOperation(ctx context.Context, st store.Store, run *d
 		Data:          mustJSON(params),
 	})
 	return condition, nil
+}
+
+func applyWorkflowCancelOperation(ctx context.Context, st store.Store, run *domain.WorkflowRun, params map[string]any) (*domain.WorkflowRun, error) {
+	now := time.Now().UTC()
+	finishedAt := &now
+	status := domain.WorkflowRunCancelled
+	updated, err := st.WorkflowRuns().Update(ctx, run.WorkspaceKey, run.RunID, store.WorkflowRunUpdate{
+		Status:     &status,
+		FinishedAt: &finishedAt,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("cancel workflow run: %w", err)
+	}
+	data := copyAnyMap(params)
+	data["workflow_run_id"] = run.RunID
+	data["source"] = "workflow_context"
+	_, _ = st.RunEvents().Append(ctx, store.RunEventAppend{
+		WorkspaceKey:  run.WorkspaceKey,
+		WorkflowRunID: run.RunID,
+		Type:          "workflow_cancelled",
+		Message:       "TypeScript WorkflowContext cancelled workflow run",
+		Data:          mustJSON(data),
+	})
+	return updated, nil
 }
 
 func appendAgentDispatchAdmittedEvent(ctx context.Context, st store.Store, run *domain.WorkflowRun, params map[string]any) error {
