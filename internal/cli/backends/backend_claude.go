@@ -59,6 +59,12 @@ func (c *ClaudeBackend) InvokeNonInteractive(workDir, prompt, agentName string, 
 	return claudeNonInteractiveInvoker(workDir, prompt, agentName, shutdown, collector)
 }
 
+// InvokeNonInteractiveResumed runs a non-interactive Claude invocation against
+// an explicit provider session ID without relying on package-level resume state.
+func (c *ClaudeBackend) InvokeNonInteractiveResumed(workDir, prompt, agentName, providerSessionID string, shutdown <-chan struct{}, collector *usage.Collector) error {
+	return claudeNonInteractiveResumedInvoker(workDir, prompt, agentName, providerSessionID, shutdown, collector)
+}
+
 // Meta returns descriptive metadata about the Claude backend.
 func (c *ClaudeBackend) Meta() BackendMeta {
 	version := detectBinaryVersion("claude")
@@ -102,8 +108,18 @@ func (c *ClaudeBackend) HealthCheck() HealthStatus {
 // of JSON events. The caller is responsible for closing the returned ReadCloser,
 // which also terminates the subprocess.
 func (c *ClaudeBackend) InvokeStreaming(ctx context.Context, workDir, prompt, agentName string) (io.ReadCloser, error) {
-	ClearLastCapturedSessionID()
 	resumeID := consumeResumeSessionID()
+	return c.invokeStreamingWithResume(ctx, workDir, prompt, agentName, resumeID)
+}
+
+// InvokeStreamingResumed starts a Claude streaming invocation against an
+// explicit provider session ID without relying on package-level resume state.
+func (c *ClaudeBackend) InvokeStreamingResumed(ctx context.Context, workDir, prompt, agentName, providerSessionID string) (io.ReadCloser, error) {
+	return c.invokeStreamingWithResume(ctx, workDir, prompt, agentName, providerSessionID)
+}
+
+func (c *ClaudeBackend) invokeStreamingWithResume(ctx context.Context, workDir, prompt, agentName, resumeID string) (io.ReadCloser, error) {
+	ClearLastCapturedSessionID()
 	args := buildClaudeNonInteractiveArgs(resumeID, "")
 	cmd := exec.Command("claude", args...) //nolint:gosec // G204: intentional subprocess launch for claude CLI
 	cmd.Dir = workDir
@@ -216,6 +232,10 @@ func defaultClaudeInvoker(workDir, prompt, agentName string) error {
 // claudeNonInteractiveInvoker is the function used for non-interactive Claude invocation (mockable for tests)
 var claudeNonInteractiveInvoker func(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error = defaultClaudeNonInteractiveInvoker
 
+// claudeNonInteractiveResumedInvoker is the function used for explicit
+// provider-session resumed non-interactive Claude invocation (mockable for tests).
+var claudeNonInteractiveResumedInvoker func(workDir, prompt, agentName, providerSessionID string, shutdown <-chan struct{}, collector *usage.Collector) error = defaultClaudeNonInteractiveInvokerWithResume
+
 // buildClaudeEnv constructs the environment variables for Claude subprocess invocations.
 func buildClaudeEnv(workDir, agentName string) []string {
 	env := append(cli.FilteredEnv(), "LOOM_WORKTREE_PATH="+workDir)
@@ -270,7 +290,10 @@ func buildClaudeNonInteractiveCmd(workDir, agentName, resumeSessionID string) *e
 // StatusRetryLater / StatusAPIError before bubbling up.
 func defaultClaudeNonInteractiveInvoker(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error {
 	resumeID := consumeResumeSessionID()
+	return defaultClaudeNonInteractiveInvokerWithResume(workDir, prompt, agentName, resumeID, shutdown, collector)
+}
 
+func defaultClaudeNonInteractiveInvokerWithResume(workDir, prompt, agentName, resumeID string, shutdown <-chan struct{}, collector *usage.Collector) error {
 	if resumeID != "" {
 		fmt.Printf("[auto] Resuming Claude session %s...\n\n", resumeID)
 	} else {

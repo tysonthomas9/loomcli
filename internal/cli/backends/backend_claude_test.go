@@ -304,6 +304,33 @@ func TestClaudeBackendInvokeNonInteractive(t *testing.T) {
 	}
 }
 
+func TestClaudeBackendInvokeNonInteractiveResumed(t *testing.T) {
+	// Not parallel: mutates global claudeNonInteractiveResumedInvoker.
+	var called bool
+	var gotWorkDir, gotPrompt, gotAgent, gotSessionID string
+	installClaudeNonInteractiveResumedMock(t, func(workDir, prompt, agentName, providerSessionID string, shutdown <-chan struct{}, _ *usage.Collector) error {
+		called = true
+		gotWorkDir = workDir
+		gotPrompt = prompt
+		gotAgent = agentName
+		gotSessionID = providerSessionID
+		return nil
+	})
+
+	b := &ClaudeBackend{}
+	shutdown := make(chan struct{})
+	err := b.InvokeNonInteractiveResumed("/work", "task prompt", "agent2", "claude-session-123", shutdown, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !called {
+		t.Fatal("expected claudeNonInteractiveResumedInvoker to be called")
+	}
+	if gotWorkDir != "/work" || gotPrompt != "task prompt" || gotAgent != "agent2" || gotSessionID != "claude-session-123" {
+		t.Errorf("unexpected args: workDir=%q prompt=%q agent=%q session=%q", gotWorkDir, gotPrompt, gotAgent, gotSessionID)
+	}
+}
+
 // TestShutdownRace_NoSignalAfterExit verifies that no SIGTERM is sent when
 // the shutdown channel is triggered after the process has already exited.
 // This reproduces the race condition that the processGuard prevents:

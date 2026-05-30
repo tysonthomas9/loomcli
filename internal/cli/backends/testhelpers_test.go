@@ -89,6 +89,13 @@ func installClaudeNonInteractiveMock(t *testing.T, fn func(workDir, prompt, agen
 	t.Cleanup(func() { claudeNonInteractiveInvoker = orig })
 }
 
+func installClaudeNonInteractiveResumedMock(t *testing.T, fn func(workDir, prompt, agentName, providerSessionID string, shutdown <-chan struct{}, collector *usage.Collector) error) {
+	t.Helper()
+	orig := claudeNonInteractiveResumedInvoker
+	claudeNonInteractiveResumedInvoker = fn
+	t.Cleanup(func() { claudeNonInteractiveResumedInvoker = orig })
+}
+
 func installCodexInvokerMock(t *testing.T, fn func(workDir, prompt, agentName string) error) {
 	t.Helper()
 	orig := codexInvoker

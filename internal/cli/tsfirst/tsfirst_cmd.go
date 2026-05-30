@@ -743,24 +743,23 @@ func invokeLocalAgent(ctx context.Context, plan *defspkg.Plan, agent defspkg.Age
 		return localInvocationResult{}, err
 	}
 	workDir := localWorkDir(plan.Root, agent)
-	resumeApplied := false
-	if resume != nil && setBackendResumeSessionID(backend, resume.PriorProviderSessionID) {
-		markResumeApplied(resume, connectResumeMethodSetter)
-		resumeApplied = true
-	}
 	if streamer, ok := backend.(backendcaps.StreamingBackend); ok {
 		var rc io.ReadCloser
 		var err error
-		if resume != nil && !resumeApplied {
+		if resume != nil {
 			if resumable, ok := backend.(backendcaps.ResumableStreamingBackend); ok {
 				rc, err = resumable.InvokeStreamingResumed(ctx, workDir, prompt, agent.Name, resume.PriorProviderSessionID)
+				if err != nil {
+					return localInvocationResult{}, err
+				}
 				markResumeApplied(resume, connectResumeMethodStreamingResumed)
-				resumeApplied = true
+			} else if setBackendResumeSessionID(backend, resume.PriorProviderSessionID) {
+				markResumeApplied(resume, connectResumeMethodSetter)
 			} else {
 				markResumeUnsupported(resume, backendName)
 			}
 		}
-		if rc == nil && err == nil {
+		if rc == nil {
 			rc, err = streamer.InvokeStreaming(ctx, workDir, prompt, agent.Name)
 		}
 		if err != nil {
@@ -775,13 +774,15 @@ func invokeLocalAgent(ctx context.Context, plan *defspkg.Plan, agent defspkg.Age
 		return result, err
 	}
 	var result localInvocationResult
-	if resume != nil && !resumeApplied {
+	if resume != nil {
 		if resumable, ok := backend.(backendcaps.ResumableNonInteractiveBackend); ok {
 			result, err = invokeNonStreamingLocalAgentWithRunner(backendName, workDir, prompt, agent.Name, stream, func(shutdown <-chan struct{}, collector *usage.Collector) error {
 				return resumable.InvokeNonInteractiveResumed(workDir, prompt, agent.Name, resume.PriorProviderSessionID, shutdown, collector)
 			})
 			markResumeApplied(resume, connectResumeMethodNonInteractiveResumed)
-			resumeApplied = true
+		} else if setBackendResumeSessionID(backend, resume.PriorProviderSessionID) {
+			markResumeApplied(resume, connectResumeMethodSetter)
+			result, err = invokeNonStreamingLocalAgent(backend, backendName, workDir, prompt, agent.Name, stream)
 		} else {
 			markResumeUnsupported(resume, backendName)
 			result, err = invokeNonStreamingLocalAgent(backend, backendName, workDir, prompt, agent.Name, stream)

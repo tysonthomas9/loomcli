@@ -4,10 +4,12 @@ import "testing"
 
 // Compile-time interface satisfaction checks.
 var (
-	_ MetadataProvider       = (*ClaudeBackend)(nil)
-	_ HealthCheckableBackend = (*ClaudeBackend)(nil)
-	_ StreamingBackend       = (*ClaudeBackend)(nil)
-	_ SessionAwareBackend    = (*ClaudeBackend)(nil)
+	_ MetadataProvider               = (*ClaudeBackend)(nil)
+	_ HealthCheckableBackend         = (*ClaudeBackend)(nil)
+	_ StreamingBackend               = (*ClaudeBackend)(nil)
+	_ ResumableStreamingBackend      = (*ClaudeBackend)(nil)
+	_ ResumableNonInteractiveBackend = (*ClaudeBackend)(nil)
+	_ SessionAwareBackend            = (*ClaudeBackend)(nil)
 )
 
 func TestClaudeBackend_Meta(t *testing.T) {
@@ -73,6 +75,12 @@ func TestClaudeBackend_InspectCapabilities(t *testing.T) {
 	}
 	if !caps.HasStreaming {
 		t.Error("expected HasStreaming=true")
+	}
+	if !caps.HasStreamingResume {
+		t.Error("expected HasStreamingResume=true")
+	}
+	if !caps.HasNonInteractiveResume {
+		t.Error("expected HasNonInteractiveResume=true")
 	}
 	if !caps.HasSessions {
 		t.Error("expected HasSessions=true")

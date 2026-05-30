@@ -724,6 +724,43 @@ func TestRunLocalConnectUsesNativeStreamingResumeWithoutSetter(t *testing.T) {
 	}
 }
 
+func TestRunLocalConnectPrefersNativeStreamingResumeOverSetter(t *testing.T) {
+	cli.TestingResetBackendState(t)
+	backend := &dualResumeStreamingBackend{}
+	cli.RegisterBackend(backend)
+	root := t.TempDir()
+	writeAgent(t, root, "dual-stream-agent", "dual-stream-resume")
+
+	if _, err := runLocalConnect(context.Background(), connectOptions{
+		Dir:      root,
+		Agent:    "dual-stream-agent",
+		Instance: "local",
+		Session:  "provider",
+		Message:  "first",
+	}); err != nil {
+		t.Fatalf("first runLocalConnect() error = %v", err)
+	}
+	second, err := runLocalConnect(context.Background(), connectOptions{
+		Dir:      root,
+		Agent:    "dual-stream-agent",
+		Instance: "local",
+		Session:  "provider",
+		Message:  "second",
+	})
+	if err != nil {
+		t.Fatalf("second runLocalConnect() error = %v", err)
+	}
+	if len(backend.SetterIDs()) != 0 {
+		t.Fatalf("setter IDs = %+v, want native resume path without setter state", backend.SetterIDs())
+	}
+	if got := backend.ResumeIDs(); len(got) != 1 || got[0] != "dual-stream-session-1" {
+		t.Fatalf("native resume IDs = %+v, want dual-stream-session-1", got)
+	}
+	if second.Resume == nil || second.Resume.Method != connectResumeMethodStreamingResumed {
+		t.Fatalf("second resume = %+v, want native streaming resume method", second.Resume)
+	}
+}
+
 func TestRunLocalConnectCapturesNonStreamingBackendOutputAndUsage(t *testing.T) {
 	cli.TestingResetBackendState(t)
 	cli.RegisterBackend(nonStreamingCaptureBackend{})
@@ -1130,6 +1167,49 @@ func nativeStreamingResumePayload(sessionID, answer string) string {
 		fmt.Sprintf(`{"type":"result","result":%q}`, answer),
 		"",
 	}, "\n")
+}
+
+type dualResumeStreamingBackend struct {
+	count     int
+	resumeIDs []string
+	setterIDs []string
+}
+
+func (b *dualResumeStreamingBackend) Name() string { return "dual-stream-resume" }
+
+func (b *dualResumeStreamingBackend) InvokeInteractive(_, _, _ string) error { return nil }
+
+func (b *dualResumeStreamingBackend) InvokeNonInteractive(_, _, _ string, _ <-chan struct{}, _ *usage.Collector) error {
+	return fmt.Errorf("InvokeNonInteractive should not be called for dual streaming resume backend")
+}
+
+func (b *dualResumeStreamingBackend) SetResumeSessionID(providerSessionID string) {
+	b.setterIDs = append(b.setterIDs, providerSessionID)
+}
+
+func (b *dualResumeStreamingBackend) InvokeStreaming(_ context.Context, _, _, _ string) (io.ReadCloser, error) {
+	b.count++
+	sessionID := fmt.Sprintf("dual-stream-session-%d", b.count)
+	return io.NopCloser(strings.NewReader(nativeStreamingResumePayload(sessionID, "dual cold answer"))), nil
+}
+
+func (b *dualResumeStreamingBackend) InvokeStreamingResumed(_ context.Context, _, _, _, providerSessionID string) (io.ReadCloser, error) {
+	b.resumeIDs = append(b.resumeIDs, providerSessionID)
+	b.count++
+	sessionID := fmt.Sprintf("dual-stream-session-%d", b.count)
+	return io.NopCloser(strings.NewReader(nativeStreamingResumePayload(sessionID, "dual resumed answer"))), nil
+}
+
+func (b *dualResumeStreamingBackend) ResumeIDs() []string {
+	out := make([]string, len(b.resumeIDs))
+	copy(out, b.resumeIDs)
+	return out
+}
+
+func (b *dualResumeStreamingBackend) SetterIDs() []string {
+	out := make([]string, len(b.setterIDs))
+	copy(out, b.setterIDs)
+	return out
 }
 
 type typedToolRuntimeBackend struct {
