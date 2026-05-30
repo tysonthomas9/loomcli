@@ -26,9 +26,13 @@ func invokeNonStreamingLocalAgent(backend cli.Backend, backendName, workDir, pro
 	if response == "" {
 		response = "backend completed; no stdout response was captured"
 	}
+	metadata, providerSessionID, providerModel := providerMetadataFromOutput(output)
 	result := localInvocationResult{
-		Response: response,
-		Usage:    connectUsageFromCollector(collector),
+		Response:          response,
+		ProviderSessionID: providerSessionID,
+		ProviderModel:     providerModel,
+		ProviderMetadata:  metadata,
+		Usage:             connectUsageFromCollector(collector),
 	}
 	if stream != nil && strings.TrimSpace(output) == "" {
 		if _, err := io.WriteString(stream, response); err != nil {

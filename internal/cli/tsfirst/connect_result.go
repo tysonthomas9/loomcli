@@ -11,6 +11,7 @@ func completeLocalConnectResult(result connectResult, agent defspkg.AgentModule,
 	result.Response = invocation.Response
 	result.ProviderSessionID = providerSessionID
 	result.ProviderModel = invocation.ProviderModel
+	result.ProviderMetadata = invocation.ProviderMetadata
 	result.OperationID = operationID
 	result.DurationMS = duration.Milliseconds()
 	result.Usage = invocation.Usage
@@ -27,6 +28,7 @@ func completeLocalConnectResult(result connectResult, agent defspkg.AgentModule,
 		Model:             result.Model,
 		ProviderModel:     invocation.ProviderModel,
 		ProviderSessionID: providerSessionID,
+		ProviderMetadata:  invocation.ProviderMetadata,
 		DefinitionVersion: agent.Version,
 		Message:           message,
 		Response:          invocation.Response,

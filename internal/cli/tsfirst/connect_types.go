@@ -19,6 +19,7 @@ type connectResult struct {
 	Model             string              `json:"model,omitempty"`
 	ProviderModel     string              `json:"provider_model,omitempty"`
 	ProviderSessionID string              `json:"provider_session_id,omitempty"`
+	ProviderMetadata  map[string]any      `json:"provider_metadata,omitempty"`
 	OperationID       string              `json:"operation_id,omitempty"`
 	DurationMS        int64               `json:"duration_ms,omitempty"`
 	Usage             *connectUsage       `json:"usage,omitempty"`
@@ -45,6 +46,7 @@ type localInvocationResult struct {
 	Response          string
 	ProviderSessionID string
 	ProviderModel     string
+	ProviderMetadata  map[string]any
 	Usage             *connectUsage
 	ToolRuntime       *connectToolRuntime
 }

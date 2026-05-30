@@ -53,52 +53,81 @@ func printInteractiveConnectHeader(out io.Writer, result connectResult) error {
 }
 
 func captureStreamingResponse(rc io.Reader, stream io.Writer) (localInvocationResult, error) {
-	var result localInvocationResult
-	var response strings.Builder
-	var fallback bytes.Buffer
+	capture := &streamResponseCapture{stream: stream}
 	scanner := bufio.NewScanner(rc)
 	scanner.Buffer(make([]byte, 0, 64*1024), 10*1024*1024)
 	for scanner.Scan() {
-		line := scanner.Text()
-		event, ok := parseLocalStreamEvent(line)
-		if !ok {
-			if stream != nil {
-				if _, err := fmt.Fprintln(stream, line); err != nil {
-					return localInvocationResult{}, err
-				}
-			}
-			fmt.Fprintln(&fallback, line)
-			continue
-		}
-		if event.ProviderSessionID != "" {
-			result.ProviderSessionID = event.ProviderSessionID
-		}
-		if event.ProviderModel != "" {
-			result.ProviderModel = event.ProviderModel
-		}
-		if event.Usage != nil {
-			result.Usage = mergeConnectUsage(result.Usage, event.Usage)
-		}
-		if event.Text != "" {
-			if stream != nil {
-				if _, err := io.WriteString(stream, event.Text); err != nil {
-					return localInvocationResult{}, err
-				}
-			}
-			response.WriteString(event.Text)
-		}
-		if event.Result != "" && strings.TrimSpace(response.String()) == "" {
-			response.WriteString(event.Result)
+		if err := capture.ingest(scanner.Text()); err != nil {
+			return localInvocationResult{}, err
 		}
 	}
 	if err := scanner.Err(); err != nil {
 		return localInvocationResult{}, err
 	}
-	result.Response = strings.TrimSpace(response.String())
-	if result.Response == "" {
-		result.Response = strings.TrimSpace(fallback.String())
+	return capture.result(), nil
+}
+
+type streamResponseCapture struct {
+	invocation localInvocationResult
+	metadata   providerMetadataCollector
+	response   strings.Builder
+	fallback   bytes.Buffer
+	stream     io.Writer
+}
+
+func (c *streamResponseCapture) ingest(line string) error {
+	c.metadata.ingestLine(line)
+	event, ok := parseLocalStreamEvent(line)
+	if !ok {
+		if c.stream != nil {
+			if _, err := fmt.Fprintln(c.stream, line); err != nil {
+				return err
+			}
+		}
+		fmt.Fprintln(&c.fallback, line)
+		return nil
 	}
-	return result, nil
+	return c.ingestEvent(event)
+}
+
+func (c *streamResponseCapture) ingestEvent(event localStreamEvent) error {
+	if event.ProviderSessionID != "" {
+		c.invocation.ProviderSessionID = event.ProviderSessionID
+	}
+	if event.ProviderModel != "" {
+		c.invocation.ProviderModel = event.ProviderModel
+	}
+	if event.Usage != nil {
+		c.invocation.Usage = mergeConnectUsage(c.invocation.Usage, event.Usage)
+	}
+	if event.Text != "" {
+		if c.stream != nil {
+			if _, err := io.WriteString(c.stream, event.Text); err != nil {
+				return err
+			}
+		}
+		c.response.WriteString(event.Text)
+	}
+	if event.Result != "" && strings.TrimSpace(c.response.String()) == "" {
+		c.response.WriteString(event.Result)
+	}
+	return nil
+}
+
+func (c *streamResponseCapture) result() localInvocationResult {
+	result := c.invocation
+	result.Response = strings.TrimSpace(c.response.String())
+	if result.Response == "" {
+		result.Response = strings.TrimSpace(c.fallback.String())
+	}
+	result.ProviderMetadata = c.metadata.metadata()
+	if result.ProviderSessionID == "" {
+		result.ProviderSessionID = c.metadata.sessionID
+	}
+	if result.ProviderModel == "" {
+		result.ProviderModel = c.metadata.providerModel
+	}
+	return result
 }
 
 type localStreamEvent struct {

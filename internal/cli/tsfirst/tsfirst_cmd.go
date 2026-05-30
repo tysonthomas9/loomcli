@@ -755,6 +755,7 @@ type localTurn struct {
 	Model             string              `json:"model,omitempty"`
 	ProviderModel     string              `json:"provider_model,omitempty"`
 	ProviderSessionID string              `json:"provider_session_id,omitempty"`
+	ProviderMetadata  map[string]any      `json:"provider_metadata,omitempty"`
 	DefinitionVersion string              `json:"definition_version,omitempty"`
 	Message           string              `json:"message"`
 	Response          string              `json:"response,omitempty"`

@@ -627,6 +627,51 @@ func TestRunLocalConnectCapturesNonStreamingBackendOutputAndUsage(t *testing.T) 
 	}
 }
 
+func TestRunLocalConnectCapturesProviderJSONMetadata(t *testing.T) {
+	cli.TestingResetBackendState(t)
+	cli.RegisterBackend(jsonMetadataBackend{})
+	root := t.TempDir()
+	writeAgent(t, root, "json-agent", "json-metadata")
+
+	result, err := runLocalConnect(context.Background(), connectOptions{
+		Dir:      root,
+		Agent:    "json-agent",
+		Instance: "local",
+		Session:  "metadata",
+		Message:  "capture json",
+	})
+	if err != nil {
+		t.Fatalf("runLocalConnect() error = %v", err)
+	}
+	if result.ProviderSessionID != "json-session-1" {
+		t.Fatalf("provider session = %q, want json-session-1", result.ProviderSessionID)
+	}
+	if result.ProviderModel != "provider/model-json" {
+		t.Fatalf("provider model = %q, want provider/model-json", result.ProviderModel)
+	}
+	if result.ProviderMetadata == nil {
+		t.Fatalf("provider metadata is nil")
+	}
+	if result.ProviderMetadata["json_event_count"] != 2 {
+		t.Fatalf("provider metadata = %#v, want two JSON events", result.ProviderMetadata)
+	}
+	eventTypes, ok := result.ProviderMetadata["event_types"].([]string)
+	if !ok || len(eventTypes) != 2 || eventTypes[0] != "session.created" || eventTypes[1] != "turn.completed" {
+		t.Fatalf("event_types = %#v, want session.created and turn.completed", result.ProviderMetadata["event_types"])
+	}
+	ids, ok := result.ProviderMetadata["ids"].(map[string]string)
+	if !ok || ids["session_id"] != "json-session-1" || ids["id"] != "turn-1" {
+		t.Fatalf("ids = %#v, want session and turn IDs", result.ProviderMetadata["ids"])
+	}
+	turns, err := readLocalTurns(result.TranscriptPath)
+	if err != nil {
+		t.Fatalf("readLocalTurns() error = %v", err)
+	}
+	if len(turns) != 1 || turns[0].ProviderMetadata == nil || turns[0].ProviderMetadata["json_event_count"] == nil {
+		t.Fatalf("turns = %+v, want provider metadata persisted", turns)
+	}
+}
+
 func TestRunLocalConnectEchoCapturesTypedToolRuntimePolicy(t *testing.T) {
 	root := t.TempDir()
 	writeTypedToolAgent(t, root, "slack-agent", "echo")
@@ -754,6 +799,21 @@ func (nonStreamingCaptureBackend) InvokeNonInteractive(_, _, _ string, _ <-chan 
 	fmt.Println("final captured answer")
 	if collector != nil {
 		collector.Accumulate("", 11, 7, 3, 2)
+	}
+	return nil
+}
+
+type jsonMetadataBackend struct{}
+
+func (jsonMetadataBackend) Name() string { return "json-metadata" }
+
+func (jsonMetadataBackend) InvokeInteractive(_, _, _ string) error { return nil }
+
+func (jsonMetadataBackend) InvokeNonInteractive(_, _, _ string, _ <-chan struct{}, collector *usage.Collector) error {
+	fmt.Println(`{"type":"session.created","session_id":"json-session-1","model":"provider/model-json"}`)
+	fmt.Println(`{"type":"turn.completed","id":"turn-1","usage":{"input_tokens":13,"output_tokens":8}}`)
+	if collector != nil {
+		collector.Accumulate("", 13, 8, 0, 0)
 	}
 	return nil
 }
