@@ -9,6 +9,17 @@ import (
 )
 
 var definitionNamePattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,62}$`)
+var toolNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,62}$`)
+
+var reservedModelToolNames = map[string]bool{
+	"bash":  true,
+	"edit":  true,
+	"glob":  true,
+	"grep":  true,
+	"read":  true,
+	"task":  true,
+	"write": true,
+}
 
 func InitTypeScriptProject(root string) error {
 	if strings.TrimSpace(root) == "" {
@@ -216,6 +227,20 @@ const runtimeTypes = `declare module '@loom/runtime' {
     resources?: string[];
   };
 
+  export type ToolSchema = Record<string, unknown>;
+
+  export type ToolDefinition = {
+    name: string;
+    description: string;
+    parameters: ToolSchema;
+    handler?: string;
+    runtime?: string;
+    repos?: string[];
+    env?: string[];
+    readOnly?: boolean;
+    execute?: (args: Record<string, unknown>, signal?: AbortSignal) => string | Promise<string>;
+  };
+
   export type WorkflowDefinition = {
     name: string;
     description?: string;
@@ -245,7 +270,16 @@ const runtimeTypes = `declare module '@loom/runtime' {
   export function createAgent<T extends AgentDefinition>(agent: T): T;
   export function defineAgentProfile<T extends AgentDefinition>(profile: T): T;
   export function defineSkill<T extends SkillDefinition>(skill: T): T;
+  export function defineTool<T extends ToolDefinition>(tool: T): T;
   export function defineWorkflow<T extends WorkflowDefinition>(workflow: T): T;
+
+  export const schema: {
+    [kind: string]: (...args: unknown[]) => ToolSchema;
+  };
+
+  export const Type: {
+    [kind: string]: (...args: unknown[]) => ToolSchema;
+  };
 
   export const runtime: {
     local(config: Omit<RuntimeProfile, 'provider'>): RuntimeProfile;

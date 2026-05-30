@@ -81,7 +81,8 @@ function defineWorkflow(config) {
 }
 
 function defineTool(config) {
-  return { __loomType: "tool", name: config && config.name, ...config };
+  const handler = config && (config.handler || (typeof config.execute === "function" ? "typescript" : undefined));
+  return { __loomType: "tool", name: config && config.name, ...config, handler };
 }
 
 const runtime = {
@@ -104,6 +105,8 @@ const schema = new Proxy(
     },
   },
 );
+
+const Type = schema;
 
 const trigger = {
   issueLabelAdded(config = {}) {
@@ -136,6 +139,7 @@ function evaluateModule(file) {
     defineTool,
     runtime,
     schema,
+    Type,
     trigger,
     github: toolProxy(["github"]),
     fleetdb: toolProxy(["fleetdb"]),
@@ -481,6 +485,30 @@ function skillModule(file) {
   });
 }
 
+function toolModule(file) {
+  const data = fs.readFileSync(file, "utf8");
+  const hash = hashSource(data);
+  const { value, exports } = evaluateModule(file);
+  const tool = value && value.__loomType === "tool" ? value : Object.values(exports).find((item) => item && item.__loomType === "tool");
+  if (!tool) {
+    throw new Error(`${file}: default export must be defineTool(...)`);
+  }
+  const handler = stringValue(tool.handler || (typeof tool.execute === "function" ? "typescript" : ""));
+  return {
+    name: stringValue(tool.name),
+    description: stringValue(tool.description),
+    source_path: file,
+    source_hash: hash,
+    version: version(hash),
+    parameters: tool.parameters || {},
+    handler,
+    runtime: stringValue(tool.runtime),
+    repos: stringArray(tool.repos),
+    env: stringArray(tool.env),
+    read_only: boolValue(tool.readOnly),
+  };
+}
+
 function runtimeModule(file) {
   const data = fs.readFileSync(file, "utf8");
   const hash = hashSource(data);
@@ -546,6 +574,7 @@ function compactArrayObjects(items) {
 const sourceRoot = sourceRootDir();
 
 readEntrypoints(path.join(sourceRoot, "skills")).forEach(skillModule);
+const tools = compactArrayObjects(readEntrypoints(path.join(sourceRoot, "tools")).map(toolModule));
 const agents = compactArrayObjects(readEntrypoints(path.join(sourceRoot, "agents")).map(agentModule));
 const workflows = compactArrayObjects(readEntrypoints(path.join(sourceRoot, "workflows")).map(workflowModule));
 const runtimes = compactArrayObjects(readEntrypoints(path.join(sourceRoot, "runtimes")).map(runtimeModule));
@@ -557,6 +586,7 @@ const plan = {
   workflows,
   runtimes,
   skills,
+  tools,
 };
 
 process.stdout.write(JSON.stringify(plan));

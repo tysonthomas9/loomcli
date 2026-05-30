@@ -257,6 +257,128 @@ export default createAgent({
 	}
 }
 
+func TestTypeScriptFirstToolDefinitionsBecomeDurableCapabilities(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+
+	writeDefFile(t, root, ".loom/tools/create-channel.ts", `import { Type, defineTool } from '@loom/runtime';
+
+export default defineTool({
+  name: 'create_channel',
+  description: 'Create one channel after workspace policy checks pass.',
+  parameters: Type.Object({
+    name: Type.String({ description: 'Lowercase channel name' }),
+    private: Type.Optional(Type.Boolean()),
+  }),
+  handler: 'workflow',
+  repos: ['slack-src'],
+  env: ['SLACK_TOKEN'],
+  execute: async ({ name }) => `+"`"+`created ${name}`+"`"+`,
+});`)
+	writeDefFile(t, root, ".loom/agents/slack-agent.ts", `import { createAgent, runtime } from '@loom/runtime';
+import createChannel from '../tools/create-channel';
+
+export default createAgent({
+  name: 'slack-agent',
+  backend: 'echo',
+  model: 'local/echo',
+  runtime: runtime.local({ repos: ['slack-src'], env: ['SLACK_TOKEN'] }),
+  instructions: 'Use approved tools for Slack workspace actions.',
+  tools: [createChannel],
+  policy: {
+    allowedCommands: ['npm test'],
+  },
+});`)
+	writeDefFile(t, root, ".loom/workflows/provision-channel.ts", `import { defineWorkflow } from '@loom/runtime';
+import createChannel from '../tools/create-channel';
+
+export default defineWorkflow({
+  name: 'provision-channel',
+  description: 'Provision a Slack channel for an approved request.',
+  builtin: 'run-parent-work-items',
+  tools: [createChannel],
+});`)
+
+	plan, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if got := Summary(plan); got != "agents=1 workflows=1 runtimes=0 tools=1" {
+		t.Fatalf("Summary() = %q, want tool in TypeScript plan", got)
+	}
+	if len(plan.Tools) != 1 {
+		t.Fatalf("tools = %+v, want one typed tool definition", plan.Tools)
+	}
+	tool := plan.Tools[0]
+	if tool.Name != "create_channel" || tool.Handler != "workflow" {
+		t.Fatalf("tool = %+v, want create_channel with workflow handler", tool)
+	}
+	if len(tool.Parameters) == 0 || len(tool.Env) != 1 || tool.Env[0] != "SLACK_TOKEN" {
+		t.Fatalf("tool metadata = %+v, want parameters and env policy", tool)
+	}
+	agent, ok := FindAgent(plan, "slack-agent")
+	if !ok {
+		t.Fatalf("FindAgent() did not find slack-agent")
+	}
+	if len(agent.Tools) != 1 || agent.Tools[0] != "create_channel" {
+		t.Fatalf("agent tools = %+v, want imported typed tool name", agent.Tools)
+	}
+	workflow, ok := FindWorkflow(plan, "provision-channel")
+	if !ok {
+		t.Fatalf("FindWorkflow() did not find provision-channel")
+	}
+	if len(workflow.Tools) != 1 || workflow.Tools[0] != "create_channel" {
+		t.Fatalf("workflow tools = %+v, want imported typed tool name", workflow.Tools)
+	}
+
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TSTOOL", Name: "TypeScript Tools"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := Apply(ctx, st, "TSTOOL", "test", plan); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	toolVersion, err := st.DefinitionVersions().Get(ctx, "TSTOOL", domain.DefinitionTypeTool, "create_channel", tool.Version)
+	if err != nil {
+		t.Fatalf("tool definition version not created: %v", err)
+	}
+	toolCapability := jsonMap(t, toolVersion.CapabilityManifest)
+	execution := toolCapability["execution"].(map[string]any)
+	if execution["handler"] != "workflow" {
+		t.Fatalf("tool execution capability = %#v, want workflow handler", execution)
+	}
+	role, err := st.Roles().Get(ctx, "TSTOOL", "slack-agent")
+	if err != nil {
+		t.Fatalf("role not created: %v", err)
+	}
+	if strings.Contains(fmtStringSlice(role.AllowedTools), "create_channel") {
+		t.Fatalf("role allowed tools = %+v, want typed tool kept out of sandbox command policy", role.AllowedTools)
+	}
+	if !strings.Contains(fmtStringSlice(role.AllowedTools), "npm test") {
+		t.Fatalf("role allowed tools = %+v, want sandbox command policy preserved", role.AllowedTools)
+	}
+	agentVersion, err := st.DefinitionVersions().Get(ctx, "TSTOOL", domain.DefinitionTypeAgent, "slack-agent", agent.Version)
+	if err != nil {
+		t.Fatalf("agent definition version not created: %v", err)
+	}
+	agentCapability := jsonMap(t, agentVersion.CapabilityManifest)
+	model := agentCapability["model"].(map[string]any)
+	toolDefs := model["tool_definitions"].([]any)
+	if len(toolDefs) != 1 || toolDefs[0].(map[string]any)["name"] != "create_channel" {
+		t.Fatalf("agent tool_definitions = %#v, want create_channel metadata", toolDefs)
+	}
+	def, err := st.WorkflowDefinitions().Get(ctx, "TSTOOL", "provision-channel")
+	if err != nil {
+		t.Fatalf("workflow definition not created: %v", err)
+	}
+	workflowCapability := jsonMap(t, def.CapabilityManifest)
+	workflowCaps := workflowCapability["workflow"].(map[string]any)
+	workflowToolDefs := workflowCaps["tool_definitions"].([]any)
+	if len(workflowToolDefs) != 1 || workflowToolDefs[0].(map[string]any)["handler"] != "workflow" {
+		t.Fatalf("workflow tool_definitions = %#v, want workflow handler metadata", workflowToolDefs)
+	}
+}
+
 func TestLoadRejectsUnauthenticatedWorkflowRoute(t *testing.T) {
 	root := t.TempDir()
 	writeDefFile(t, root, ".loom/workflows/unsafe.ts", `export default defineWorkflow({

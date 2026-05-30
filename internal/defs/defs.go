@@ -21,6 +21,7 @@ type Plan struct {
 	Workflows []WorkflowModule `json:"workflows,omitempty"`
 	Runtimes  []RuntimeModule  `json:"runtimes,omitempty"`
 	Skills    []SkillModule    `json:"skills,omitempty"`
+	Tools     []ToolModule     `json:"tools,omitempty"`
 }
 
 type AgentModule struct {
@@ -83,6 +84,20 @@ type SkillModule struct {
 	Resources    []string `json:"resources,omitempty"`
 }
 
+type ToolModule struct {
+	Name        string         `json:"name"`
+	Description string         `json:"description,omitempty"`
+	Version     string         `json:"version"`
+	SourcePath  string         `json:"source_path"`
+	SourceHash  string         `json:"source_hash"`
+	Parameters  map[string]any `json:"parameters,omitempty"`
+	Handler     string         `json:"handler,omitempty"`
+	Runtime     string         `json:"runtime,omitempty"`
+	Repos       []string       `json:"repos,omitempty"`
+	Env         []string       `json:"env,omitempty"`
+	ReadOnly    bool           `json:"read_only,omitempty"`
+}
+
 func Load(root string) (*Plan, error) {
 	if strings.TrimSpace(root) == "" {
 		root = "."
@@ -120,28 +135,17 @@ func Apply(ctx context.Context, st store.Store, workspaceKey, actor string, plan
 	if plan == nil {
 		return fmt.Errorf("definition plan required")
 	}
-	for _, skill := range plan.Skills {
-		manifest := mustJSON(skill)
-		capability := skillCapabilityManifest(skill)
-		if _, err := st.DefinitionVersions().Apply(ctx, store.DefinitionVersionApply{
-			WorkspaceKey:       workspaceKey,
-			DefinitionType:     domain.DefinitionTypeSkill,
-			DefinitionName:     skill.Name,
-			Version:            skill.Version,
-			SourceHash:         skill.SourceHash,
-			BundleHash:         skill.SourceHash,
-			Manifest:           manifest,
-			CapabilityManifest: capability,
-			CreatedBy:          actor,
-			Status:             domain.DefinitionStatusActive,
-		}); err != nil {
-			return fmt.Errorf("apply skill definition %s: %w", skill.Name, err)
-		}
+	if err := applySkillDefinitions(ctx, st, workspaceKey, actor, plan.Skills); err != nil {
+		return err
 	}
 	skillIndex := indexSkills(plan.Skills)
+	if err := applyToolDefinitions(ctx, st, workspaceKey, actor, plan.Tools); err != nil {
+		return err
+	}
+	toolIndex := indexTools(plan.Tools)
 	for _, agent := range plan.Agents {
 		manifest := mustJSON(agent)
-		capability := agentCapabilityManifest(agent, skillIndex)
+		capability := agentCapabilityManifest(agent, skillIndex, toolIndex)
 		if _, err := st.DefinitionVersions().Apply(ctx, store.DefinitionVersionApply{
 			WorkspaceKey:       workspaceKey,
 			DefinitionType:     domain.DefinitionTypeAgent,
@@ -193,7 +197,7 @@ func Apply(ctx context.Context, st store.Store, workspaceKey, actor string, plan
 	}
 	for _, wf := range plan.Workflows {
 		manifest := mustJSON(wf)
-		capability := workflowCapabilityManifest(wf)
+		capability := workflowCapabilityManifest(wf, toolIndex)
 		if _, err := st.DefinitionVersions().Apply(ctx, store.DefinitionVersionApply{
 			WorkspaceKey:       workspaceKey,
 			DefinitionType:     domain.DefinitionTypeWorkflow,
@@ -252,7 +256,51 @@ func Apply(ctx context.Context, st store.Store, workspaceKey, actor string, plan
 	return nil
 }
 
-func agentCapabilityManifest(agent AgentModule, skills map[string]SkillModule) json.RawMessage {
+func applySkillDefinitions(ctx context.Context, st store.Store, workspaceKey, actor string, skills []SkillModule) error {
+	for _, skill := range skills {
+		manifest := mustJSON(skill)
+		capability := skillCapabilityManifest(skill)
+		if _, err := st.DefinitionVersions().Apply(ctx, store.DefinitionVersionApply{
+			WorkspaceKey:       workspaceKey,
+			DefinitionType:     domain.DefinitionTypeSkill,
+			DefinitionName:     skill.Name,
+			Version:            skill.Version,
+			SourceHash:         skill.SourceHash,
+			BundleHash:         skill.SourceHash,
+			Manifest:           manifest,
+			CapabilityManifest: capability,
+			CreatedBy:          actor,
+			Status:             domain.DefinitionStatusActive,
+		}); err != nil {
+			return fmt.Errorf("apply skill definition %s: %w", skill.Name, err)
+		}
+	}
+	return nil
+}
+
+func applyToolDefinitions(ctx context.Context, st store.Store, workspaceKey, actor string, tools []ToolModule) error {
+	for _, tool := range tools {
+		manifest := mustJSON(tool)
+		capability := toolCapabilityManifest(tool)
+		if _, err := st.DefinitionVersions().Apply(ctx, store.DefinitionVersionApply{
+			WorkspaceKey:       workspaceKey,
+			DefinitionType:     domain.DefinitionTypeTool,
+			DefinitionName:     tool.Name,
+			Version:            tool.Version,
+			SourceHash:         tool.SourceHash,
+			BundleHash:         tool.SourceHash,
+			Manifest:           manifest,
+			CapabilityManifest: capability,
+			CreatedBy:          actor,
+			Status:             domain.DefinitionStatusActive,
+		}); err != nil {
+			return fmt.Errorf("apply tool definition %s: %w", tool.Name, err)
+		}
+	}
+	return nil
+}
+
+func agentCapabilityManifest(agent AgentModule, skills map[string]SkillModule, tools map[string]ToolModule) json.RawMessage {
 	out := map[string]any{
 		"manifest_version": "loom.capabilities.v1",
 		"definition": map[string]any{
@@ -262,6 +310,7 @@ func agentCapabilityManifest(agent AgentModule, skills map[string]SkillModule) j
 		},
 		"model": map[string]any{
 			"tools":              compactStrings(agent.Tools),
+			"tool_definitions":   referencedToolDefinitions(agent.Tools, tools),
 			"skills":             compactStrings(agent.Skills),
 			"skill_bundles":      agentSkillBundles(agent, skills),
 			"prompt_bundle_hash": agentPromptBundleHash(agent, skills),
@@ -278,6 +327,31 @@ func agentCapabilityManifest(agent AgentModule, skills map[string]SkillModule) j
 			"max_concurrency": agent.MaxConcurrency,
 			"max_budget_usd":  agent.MaxBudgetUSD,
 			"read_only":       agent.ReadOnly,
+		},
+	}
+	return mustJSON(compactMap(out))
+}
+
+func toolCapabilityManifest(tool ToolModule) json.RawMessage {
+	out := map[string]any{
+		"manifest_version": "loom.capabilities.v1",
+		"definition": map[string]any{
+			"type":    string(domain.DefinitionTypeTool),
+			"name":    tool.Name,
+			"version": tool.Version,
+		},
+		"tool": map[string]any{
+			"description": tool.Description,
+			"parameters":  tool.Parameters,
+			"read_only":   tool.ReadOnly,
+		},
+		"execution": map[string]any{
+			"handler": tool.Handler,
+			"runtime": tool.Runtime,
+		},
+		"runtime": map[string]any{
+			"repos": compactStrings(tool.Repos),
+			"env":   compactStrings(tool.Env),
 		},
 	}
 	return mustJSON(compactMap(out))
@@ -328,6 +402,26 @@ func agentPromptBundleHash(agent AgentModule, skills map[string]SkillModule) str
 	return hex.EncodeToString(h.Sum(nil))
 }
 
+func referencedToolDefinitions(names []string, tools map[string]ToolModule) []map[string]any {
+	out := make([]map[string]any, 0, len(names))
+	for _, name := range compactStrings(names) {
+		tool, ok := tools[name]
+		if !ok {
+			continue
+		}
+		out = append(out, map[string]any{
+			"name":        tool.Name,
+			"version":     tool.Version,
+			"source_hash": tool.SourceHash,
+			"handler":     tool.Handler,
+			"runtime":     tool.Runtime,
+			"read_only":   tool.ReadOnly,
+			"parameters":  tool.Parameters,
+		})
+	}
+	return out
+}
+
 func indexSkills(skills []SkillModule) map[string]SkillModule {
 	out := make(map[string]SkillModule, len(skills))
 	for _, skill := range skills {
@@ -339,7 +433,18 @@ func indexSkills(skills []SkillModule) map[string]SkillModule {
 	return out
 }
 
-func workflowCapabilityManifest(wf WorkflowModule) json.RawMessage {
+func indexTools(tools []ToolModule) map[string]ToolModule {
+	out := make(map[string]ToolModule, len(tools))
+	for _, tool := range tools {
+		if strings.TrimSpace(tool.Name) == "" {
+			continue
+		}
+		out[tool.Name] = tool
+	}
+	return out
+}
+
+func workflowCapabilityManifest(wf WorkflowModule, tools map[string]ToolModule) json.RawMessage {
 	ingress := map[string]any{}
 	if wf.RoutePath != "" {
 		ingress["route"] = map[string]any{
@@ -362,7 +467,8 @@ func workflowCapabilityManifest(wf WorkflowModule) json.RawMessage {
 			"version": wf.Version,
 		},
 		"workflow": map[string]any{
-			"tools": compactStrings(wf.Tools),
+			"tools":            compactStrings(wf.Tools),
+			"tool_definitions": referencedToolDefinitions(wf.Tools, tools),
 		},
 		"runtime": map[string]any{
 			"repos": compactStrings(wf.Repos),
@@ -513,6 +619,9 @@ func Summary(plan *Plan) string {
 	if len(plan.Skills) > 0 {
 		summary += fmt.Sprintf(" skills=%d", len(plan.Skills))
 	}
+	if len(plan.Tools) > 0 {
+		summary += fmt.Sprintf(" tools=%d", len(plan.Tools))
+	}
 	return summary
 }
 
@@ -558,6 +667,33 @@ func validatePlan(plan *Plan) error {
 			return err
 		}
 		if err := validateSkillResources(skill.SourcePath, skill.Resources); err != nil {
+			return err
+		}
+	}
+	for _, tool := range plan.Tools {
+		if strings.TrimSpace(tool.Name) == "" {
+			return fmt.Errorf("%s: tool definition name is required", tool.SourcePath)
+		}
+		if !toolNamePattern.MatchString(tool.Name) {
+			return fmt.Errorf("%s: tool definition name %q must use lower_snake_case or lower-kebab-case", tool.SourcePath, tool.Name)
+		}
+		if reservedModelToolNames[tool.Name] {
+			return fmt.Errorf("%s: tool definition name %q collides with a built-in sandbox tool", tool.SourcePath, tool.Name)
+		}
+		if prior := seen["tool:"+tool.Name]; prior != "" {
+			return fmt.Errorf("duplicate tool definition %q in %s and %s", tool.Name, prior, tool.SourcePath)
+		}
+		seen["tool:"+tool.Name] = tool.SourcePath
+		if strings.TrimSpace(tool.Description) == "" {
+			return fmt.Errorf("%s: tool definition %q must declare a description", tool.SourcePath, tool.Name)
+		}
+		if len(tool.Parameters) == 0 {
+			return fmt.Errorf("%s: tool definition %q must declare parameters", tool.SourcePath, tool.Name)
+		}
+		if strings.TrimSpace(tool.Handler) == "" {
+			return fmt.Errorf("%s: tool definition %q must declare an execution handler", tool.SourcePath, tool.Name)
+		}
+		if err := validateRepoAndEnvPolicy(tool.SourcePath, tool.Repos, tool.Env); err != nil {
 			return err
 		}
 	}
@@ -694,7 +830,6 @@ func validateNoExactCollision(sourcePath, leftLabel string, left []string, right
 
 func upsertRole(ctx context.Context, st store.Store, ws string, agent AgentModule) error {
 	allowed := append([]string(nil), agent.AllowedCommands...)
-	allowed = append(allowed, agent.Tools...)
 	in := store.RoleCreate{
 		WorkspaceKey:   ws,
 		Name:           agent.Name,
