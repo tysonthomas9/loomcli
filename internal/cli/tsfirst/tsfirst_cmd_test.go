@@ -454,12 +454,12 @@ func TestInvokeLocalAgentStreamingBackend(t *testing.T) {
 	if !ok {
 		t.Fatalf("FindAgent() did not find stream-agent")
 	}
-	got, err := invokeLocalAgent(context.Background(), plan, agent, "prompt", "hello stream", nil)
+	got, err := invokeLocalAgent(context.Background(), plan, agent, "prompt", "hello stream", nil, "")
 	if err != nil {
 		t.Fatalf("invokeLocalAgent() error = %v", err)
 	}
-	if got != "streamed response" {
-		t.Fatalf("invokeLocalAgent() = %q", got)
+	if got.Response != "streamed response" {
+		t.Fatalf("invokeLocalAgent() = %+v", got)
 	}
 }
 
@@ -478,15 +478,70 @@ func TestInvokeLocalAgentStreamsAndCapturesResponse(t *testing.T) {
 	}
 
 	var streamed bytes.Buffer
-	got, err := invokeLocalAgent(context.Background(), plan, agent, "prompt", "hello stream", &streamed)
+	got, err := invokeLocalAgent(context.Background(), plan, agent, "prompt", "hello stream", &streamed, "")
 	if err != nil {
 		t.Fatalf("invokeLocalAgent() error = %v", err)
 	}
-	if got != "streamed response" {
-		t.Fatalf("invokeLocalAgent() = %q", got)
+	if got.Response != "streamed response" {
+		t.Fatalf("invokeLocalAgent() = %+v", got)
 	}
 	if streamed.String() != "streamed response\n" {
 		t.Fatalf("streamed output = %q", streamed.String())
+	}
+}
+
+func TestRunLocalConnectCapturesProviderSessionAndUsage(t *testing.T) {
+	cli.TestingResetBackendState(t)
+	backend := &providerSessionBackend{}
+	cli.RegisterBackend(backend)
+	root := t.TempDir()
+	writeAgent(t, root, "provider-agent", "provider-session")
+
+	first, err := runLocalConnect(context.Background(), connectOptions{
+		Dir:      root,
+		Agent:    "provider-agent",
+		Instance: "local",
+		Session:  "provider",
+		Message:  "first",
+	})
+	if err != nil {
+		t.Fatalf("first runLocalConnect() error = %v", err)
+	}
+	if first.Response != "hello from provider" || first.ProviderSessionID != "provider-session-1" || first.ProviderModel != "provider/model" {
+		t.Fatalf("first result = %+v, want provider metadata", first)
+	}
+	if first.OperationID == "" || first.DurationMS < 0 {
+		t.Fatalf("first result operation fields = %+v", first)
+	}
+	if first.Usage == nil || first.Usage.TotalTokens != 15 {
+		t.Fatalf("first usage = %+v, want total 15", first.Usage)
+	}
+
+	second, err := runLocalConnect(context.Background(), connectOptions{
+		Dir:      root,
+		Agent:    "provider-agent",
+		Instance: "local",
+		Session:  "provider",
+		Message:  "second",
+	})
+	if err != nil {
+		t.Fatalf("second runLocalConnect() error = %v", err)
+	}
+	if got := backend.ResumeIDs(); len(got) != 1 || got[0] != "provider-session-1" {
+		t.Fatalf("resume IDs = %+v, want provider-session-1", got)
+	}
+	if second.ProviderSessionID != "provider-session-2" {
+		t.Fatalf("second provider session = %q", second.ProviderSessionID)
+	}
+	turns, err := readLocalTurns(second.TranscriptPath)
+	if err != nil {
+		t.Fatalf("readLocalTurns() error = %v", err)
+	}
+	if len(turns) != 2 || turns[0].ProviderSessionID != "provider-session-1" || turns[1].ProviderSessionID != "provider-session-2" {
+		t.Fatalf("turns = %+v, want provider session metadata persisted", turns)
+	}
+	if turns[0].OperationID == "" || turns[0].Usage == nil || turns[0].Usage.TotalTokens != 15 {
+		t.Fatalf("turn[0] metadata = %+v, want operation and usage metadata", turns[0])
 	}
 }
 
@@ -543,6 +598,42 @@ func (streamingBackend) InvokeNonInteractive(_, _, _ string, _ <-chan struct{}, 
 
 func (streamingBackend) InvokeStreaming(context.Context, string, string, string) (io.ReadCloser, error) {
 	return io.NopCloser(strings.NewReader("streamed response\n")), nil
+}
+
+type providerSessionBackend struct {
+	resumeIDs []string
+	count     int
+}
+
+func (b *providerSessionBackend) Name() string { return "provider-session" }
+
+func (b *providerSessionBackend) InvokeInteractive(_, _, _ string) error { return nil }
+
+func (b *providerSessionBackend) InvokeNonInteractive(_, _, _ string, _ <-chan struct{}, _ *usage.Collector) error {
+	return fmt.Errorf("InvokeNonInteractive should not be called for provider session backend")
+}
+
+func (b *providerSessionBackend) SetResumeSessionID(id string) {
+	b.resumeIDs = append(b.resumeIDs, id)
+}
+
+func (b *providerSessionBackend) ResumeIDs() []string {
+	out := make([]string, len(b.resumeIDs))
+	copy(out, b.resumeIDs)
+	return out
+}
+
+func (b *providerSessionBackend) InvokeStreaming(context.Context, string, string, string) (io.ReadCloser, error) {
+	b.count++
+	sessionID := fmt.Sprintf("provider-session-%d", b.count)
+	payload := strings.Join([]string{
+		fmt.Sprintf(`{"type":"system","subtype":"init","session_id":%q}`, sessionID),
+		`{"type":"assistant","message":{"model":"provider/model","content":[{"type":"text","text":"hello from provider"}]}}`,
+		`{"type":"message_delta","usage":{"input_tokens":10,"output_tokens":5}}`,
+		`{"type":"result","result":"hello from provider"}`,
+		"",
+	}, "\n")
+	return io.NopCloser(strings.NewReader(payload)), nil
 }
 
 func withTSFirstGlobals(t *testing.T, fn func()) {

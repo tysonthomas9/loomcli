@@ -2,7 +2,6 @@ package tsfirst
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -207,31 +206,6 @@ func runCheck(_ *cobra.Command, _ []string) error {
 	return nil
 }
 
-type connectResult struct {
-	Root           string   `json:"root"`
-	Agent          string   `json:"agent"`
-	Instance       string   `json:"instance"`
-	Session        string   `json:"session"`
-	Backend        string   `json:"backend,omitempty"`
-	Model          string   `json:"model,omitempty"`
-	WorkDir        string   `json:"work_dir,omitempty"`
-	EnvFile        string   `json:"env_file,omitempty"`
-	Env            []string `json:"env,omitempty"`
-	Message        string   `json:"message,omitempty"`
-	Response       string   `json:"response,omitempty"`
-	TranscriptPath string   `json:"transcript_path,omitempty"`
-}
-
-type connectOptions struct {
-	Dir      string
-	Agent    string
-	Instance string
-	Session  string
-	EnvFile  string
-	Message  string
-	Stream   io.Writer
-}
-
 func runConnect(_ *cobra.Command, args []string) error {
 	opts := connectOptions{
 		Dir:      connectDir,
@@ -385,26 +359,17 @@ func runLocalConnect(ctx context.Context, opts connectOptions) (connectResult, e
 	if err != nil {
 		return connectResult{}, err
 	}
-	response, err := withTemporaryEnv(envValues, func() (string, error) {
-		return invokeLocalAgent(ctx, plan, agent, prompt, opts.Message, opts.Stream)
+	started := time.Now().UTC()
+	operationID := localOperationID(agent.Name, result.Instance, result.Session, started)
+	invocation, err := withTemporaryEnv(envValues, func() (localInvocationResult, error) {
+		return invokeLocalAgent(ctx, plan, agent, prompt, opts.Message, opts.Stream, lastProviderSessionID(history))
 	})
 	if err != nil {
 		return connectResult{}, err
 	}
-	result.Message = opts.Message
-	result.Response = response
-	turn := localTurn{
-		Timestamp:         time.Now().UTC().Format(time.RFC3339Nano),
-		Agent:             agent.Name,
-		Instance:          result.Instance,
-		Session:           result.Session,
-		Backend:           result.Backend,
-		Model:             result.Model,
-		DefinitionVersion: agent.Version,
-		Message:           opts.Message,
-		Response:          response,
-		PromptHash:        hashText(prompt),
-	}
+	completed := time.Now().UTC()
+	providerSessionID := fallback(invocation.ProviderSessionID, lastProviderSessionID(history))
+	result, turn := completeLocalConnectResult(result, agent, opts.Message, operationID, providerSessionID, prompt, completed.Sub(started), invocation)
 	if err := appendLocalTurn(result.TranscriptPath, turn); err != nil {
 		return connectResult{}, err
 	}
@@ -701,7 +666,8 @@ func cleanEnvValue(value string) string {
 	return value
 }
 
-func withTemporaryEnv(values map[string]string, fn func() (string, error)) (string, error) {
+func withTemporaryEnv[T any](values map[string]string, fn func() (T, error)) (T, error) {
+	var zero T
 	if len(values) == 0 {
 		return fn()
 	}
@@ -714,7 +680,7 @@ func withTemporaryEnv(values map[string]string, fn func() (string, error)) (stri
 		old, ok := os.LookupEnv(key)
 		restore[key] = prior{value: old, ok: ok}
 		if err := os.Setenv(key, value); err != nil {
-			return "", err
+			return zero, err
 		}
 	}
 	defer func() {
@@ -729,15 +695,15 @@ func withTemporaryEnv(values map[string]string, fn func() (string, error)) (stri
 	return fn()
 }
 
-func invokeLocalAgent(ctx context.Context, plan *defspkg.Plan, agent defspkg.AgentModule, prompt, message string, stream io.Writer) (string, error) {
+func invokeLocalAgent(ctx context.Context, plan *defspkg.Plan, agent defspkg.AgentModule, prompt, message string, stream io.Writer, resumeProviderSessionID string) (localInvocationResult, error) {
 	if strings.EqualFold(agent.Backend, "echo") {
 		response := "echo: " + message
 		if stream != nil {
 			if _, err := io.WriteString(stream, response); err != nil {
-				return "", err
+				return localInvocationResult{}, err
 			}
 		}
-		return response, nil
+		return localInvocationResult{Response: response}, nil
 	}
 	backendName := strings.TrimSpace(agent.Backend)
 	if backendName == "" {
@@ -745,51 +711,53 @@ func invokeLocalAgent(ctx context.Context, plan *defspkg.Plan, agent defspkg.Age
 	}
 	backend, ok := cli.GetBackendByName(backendName)
 	if !ok {
-		return "", fmt.Errorf("backend %q is not registered; use backend \"echo\" for offline local connect or install/configure the backend", backendName)
+		return localInvocationResult{}, fmt.Errorf("backend %q is not registered; use backend \"echo\" for offline local connect or install/configure the backend", backendName)
 	}
 	workDir := localWorkDir(plan.Root, agent)
+	if resumeProviderSessionID != "" {
+		if resumer, ok := backend.(interface{ SetResumeSessionID(string) }); ok {
+			resumer.SetResumeSessionID(resumeProviderSessionID)
+		}
+	}
 	if streamer, ok := backend.(interface {
 		InvokeStreaming(context.Context, string, string, string) (io.ReadCloser, error)
 	}); ok {
 		rc, err := streamer.InvokeStreaming(ctx, workDir, prompt, agent.Name)
 		if err != nil {
-			return "", err
+			return localInvocationResult{}, err
 		}
 		defer func() { _ = rc.Close() }()
-		var captured bytes.Buffer
-		writer := io.Writer(&captured)
-		if stream != nil {
-			writer = io.MultiWriter(stream, &captured)
-		}
-		if _, err := io.Copy(writer, rc); err != nil {
-			return "", err
-		}
-		return strings.TrimSpace(captured.String()), nil
+		return captureStreamingResponse(rc, stream)
 	}
 	shutdown := make(chan struct{})
 	if err := backend.InvokeNonInteractive(workDir, prompt, agent.Name, shutdown, nil); err != nil {
-		return "", err
+		return localInvocationResult{}, err
 	}
 	response := "backend completed; response was written by the configured backend"
 	if stream != nil {
 		if _, err := io.WriteString(stream, response); err != nil {
-			return "", err
+			return localInvocationResult{}, err
 		}
 	}
-	return response, nil
+	return localInvocationResult{Response: response}, nil
 }
 
 type localTurn struct {
-	Timestamp         string `json:"timestamp"`
-	Agent             string `json:"agent"`
-	Instance          string `json:"instance"`
-	Session           string `json:"session"`
-	Backend           string `json:"backend,omitempty"`
-	Model             string `json:"model,omitempty"`
-	DefinitionVersion string `json:"definition_version,omitempty"`
-	Message           string `json:"message"`
-	Response          string `json:"response,omitempty"`
-	PromptHash        string `json:"prompt_hash,omitempty"`
+	Timestamp         string        `json:"timestamp"`
+	OperationID       string        `json:"operation_id,omitempty"`
+	Agent             string        `json:"agent"`
+	Instance          string        `json:"instance"`
+	Session           string        `json:"session"`
+	Backend           string        `json:"backend,omitempty"`
+	Model             string        `json:"model,omitempty"`
+	ProviderModel     string        `json:"provider_model,omitempty"`
+	ProviderSessionID string        `json:"provider_session_id,omitempty"`
+	DefinitionVersion string        `json:"definition_version,omitempty"`
+	Message           string        `json:"message"`
+	Response          string        `json:"response,omitempty"`
+	DurationMS        int64         `json:"duration_ms,omitempty"`
+	Usage             *connectUsage `json:"usage,omitempty"`
+	PromptHash        string        `json:"prompt_hash,omitempty"`
 }
 
 func readLocalTurns(path string) ([]localTurn, error) {
@@ -870,6 +838,24 @@ func localConnectPrompt(plan *defspkg.Plan, agent defspkg.AgentModule, instance,
 	}
 	fmt.Fprintf(&b, "\nUser message:\n%s\n", message)
 	return b.String()
+}
+
+func lastProviderSessionID(history []localTurn) string {
+	for i := len(history) - 1; i >= 0; i-- {
+		if id := strings.TrimSpace(history[i].ProviderSessionID); id != "" {
+			return id
+		}
+	}
+	return ""
+}
+
+func localOperationID(agent, instance, session string, at time.Time) string {
+	seed := strings.Join([]string{agent, instance, session, at.Format(time.RFC3339Nano)}, "\x00")
+	sum := hashText(seed)
+	if len(sum) > 16 {
+		sum = sum[:16]
+	}
+	return "lc_" + sum
 }
 
 func stdinMessages() ([]string, bool, error) {
