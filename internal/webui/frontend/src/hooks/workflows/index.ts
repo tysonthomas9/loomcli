@@ -20,5 +20,7 @@ export type {
   WorkflowRunEvent,
   WorkflowRunListItem,
   WorkflowRunResponse,
+  WorkflowRunStreamCompletion,
+  WorkflowRunStreamCompletionRun,
   WorkflowRunStatus,
 } from "@/api/workflows";

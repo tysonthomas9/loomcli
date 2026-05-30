@@ -131,6 +131,11 @@ describe("workflow run API", () => {
     expect(workflowRunEventStreamUrl("WS", "wrun/1")).toBe(
       "/api/workspaces/WS/workflow-runs/wrun%2F1/events/stream",
     );
+    expect(
+      workflowRunEventStreamUrl("WS", "wrun/1", { untilTerminal: true }),
+    ).toBe(
+      "/api/workspaces/WS/workflow-runs/wrun%2F1/events/stream?until=terminal",
+    );
   });
 
   it("cancels workflow runs", async () => {

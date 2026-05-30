@@ -54,7 +54,21 @@ export function WorkflowRunHistory({
     isLoading: eventsLoading,
     error: eventsError,
     refetch: refetchEvents,
+    streamCompletion,
   } = useWorkflowRunEvents(selectedRunId, selectedIsLive);
+  const selectedTerminalRun = useMemo(
+    () =>
+      streamCompletion?.runs.find((run) => run.run_id === selectedRunId) ??
+      null,
+    [streamCompletion, selectedRunId],
+  );
+  const selectedDisplayStatus =
+    selectedTerminalRun?.status ?? selectedRun?.status ?? null;
+  const selectedDisplayFinishedAt =
+    selectedTerminalRun?.finished_at ?? selectedRun?.finished_at ?? null;
+  const selectedDisplayIsLive = selectedDisplayStatus
+    ? isWorkflowRunLive(selectedDisplayStatus)
+    : false;
 
   useEffect(() => {
     if (runs.length === 0) {
@@ -89,6 +103,12 @@ export function WorkflowRunHistory({
       setSelectedWorkflowName(definitions[0]?.name ?? "");
     }
   }, [definitions, selectedWorkflowName]);
+
+  useEffect(() => {
+    if (streamCompletion) {
+      refetch();
+    }
+  }, [streamCompletion, refetch]);
 
   const handleStartWorkflow = async () => {
     if (!selectedWorkflowName) return;
@@ -200,17 +220,17 @@ export function WorkflowRunHistory({
                 <div className={styles.workflowDetailTitle}>
                   <span
                     className={styles.statusDot}
-                    data-status={selectedRun.status}
+                    data-status={selectedDisplayStatus ?? selectedRun.status}
                   />
                   <span>{selectedRun.workflow_name}</span>
                   <span
                     className={styles.workflowStatus}
-                    data-status={selectedRun.status}
+                    data-status={selectedDisplayStatus ?? selectedRun.status}
                   >
-                    {formatStatus(selectedRun.status)}
+                    {formatStatus(selectedDisplayStatus ?? selectedRun.status)}
                   </span>
                 </div>
-                {selectedIsLive && (
+                {selectedDisplayIsLive && (
                   <button
                     type="button"
                     className={styles.workflowCancelButton}
@@ -226,6 +246,11 @@ export function WorkflowRunHistory({
               <div className={styles.workflowDetailMeta}>
                 <span>{shortRunID(selectedRun.run_id)}</span>
                 <span>{formatTimestamp(selectedRun.created_at)}</span>
+                {selectedTerminalRun && selectedDisplayFinishedAt ? (
+                  <span>
+                    Finished {formatTimestamp(selectedDisplayFinishedAt)}
+                  </span>
+                ) : null}
                 {selectedItem?.task_runs?.length ? (
                   <span>
                     {selectedItem.task_runs.length}{" "}

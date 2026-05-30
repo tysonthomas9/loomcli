@@ -4,11 +4,14 @@ import {
   getWorkflowRunEvents,
   workflowRunEventStreamUrl,
   type WorkflowRunEvent,
+  type WorkflowRunStreamCompletion,
 } from "@/api/workflows";
 import { useWorkspaceContext } from "@/hooks/workspace";
 
 export interface UseWorkflowRunEventsResult {
   events: WorkflowRunEvent[];
+  streamCompletion: WorkflowRunStreamCompletion | null;
+  isStreamComplete: boolean;
   isLoading: boolean;
   error: Error | null;
   refetch: () => void;
@@ -22,6 +25,8 @@ export function useWorkflowRunEvents(
 ): UseWorkflowRunEventsResult {
   const { workspaceId } = useWorkspaceContext();
   const [events, setEvents] = useState<WorkflowRunEvent[]>([]);
+  const [streamCompletion, setStreamCompletion] =
+    useState<WorkflowRunStreamCompletion | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   const mountedRef = useRef(true);
@@ -55,10 +60,12 @@ export function useWorkflowRunEvents(
     mountedRef.current = true;
     if (!runId) {
       setEvents([]);
+      setStreamCompletion(null);
       setError(null);
       return;
     }
 
+    setStreamCompletion(null);
     void fetchData();
     if (!shouldPoll) {
       return () => {
@@ -67,8 +74,11 @@ export function useWorkflowRunEvents(
     }
 
     if (typeof EventSource !== "undefined") {
+      let closedByCompletion = false;
       const source = new EventSource(
-        workflowRunEventStreamUrl(workspaceId, runId),
+        workflowRunEventStreamUrl(workspaceId, runId, {
+          untilTerminal: true,
+        }),
       );
       source.addEventListener("workflow_event", (event) => {
         try {
@@ -83,7 +93,25 @@ export function useWorkflowRunEvents(
           }
         }
       });
+      source.addEventListener("workflow_run_stream_complete", (event) => {
+        try {
+          const parsed = JSON.parse(
+            event.data,
+          ) as WorkflowRunStreamCompletion;
+          if (mountedRef.current) {
+            setStreamCompletion(parsed);
+            setError(null);
+          }
+          closedByCompletion = true;
+          source.close();
+        } catch (err) {
+          if (mountedRef.current) {
+            setError(err instanceof Error ? err : new Error(String(err)));
+          }
+        }
+      });
       source.onerror = () => {
+        if (closedByCompletion) return;
         if (mountedRef.current) void fetchData();
       };
       return () => {
@@ -101,7 +129,14 @@ export function useWorkflowRunEvents(
     };
   }, [workspaceId, runId, shouldPoll, fetchData]);
 
-  return { events, isLoading, error, refetch };
+  return {
+    events,
+    streamCompletion,
+    isStreamComplete: streamCompletion != null,
+    isLoading,
+    error,
+    refetch,
+  };
 }
 
 function mergeWorkflowRunEvent(

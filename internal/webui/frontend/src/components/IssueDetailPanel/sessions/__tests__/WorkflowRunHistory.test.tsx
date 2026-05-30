@@ -110,6 +110,8 @@ describe("WorkflowRunHistory", () => {
           created_at: "2026-01-01T00:00:00Z",
         },
       ],
+      streamCompletion: null,
+      isStreamComplete: false,
       isLoading: false,
       error: null,
       refetch: vi.fn(),
@@ -157,6 +159,8 @@ describe("WorkflowRunHistory", () => {
     });
     mockUseWorkflowRunEvents.mockReturnValue({
       events: [],
+      streamCompletion: null,
+      isStreamComplete: false,
       isLoading: false,
       error: null,
       refetch: refetchEvents,
@@ -192,6 +196,8 @@ describe("WorkflowRunHistory", () => {
     });
     mockUseWorkflowRunEvents.mockReturnValue({
       events: [],
+      streamCompletion: null,
+      isStreamComplete: false,
       isLoading: false,
       error: null,
       refetch: vi.fn(),
@@ -208,6 +214,54 @@ describe("WorkflowRunHistory", () => {
         wait: false,
       }),
     );
+    expect(refetchRuns).toHaveBeenCalled();
+  });
+
+  it("uses stream completion status before the run list refreshes", () => {
+    const refetchRuns = vi.fn();
+    mockUseTaskWorkflowRuns.mockReturnValue({
+      runs: [
+        {
+          run: {
+            workspace_key: "WS",
+            run_id: "wrun-1",
+            workflow_name: "epic-runner",
+            workflow_version: "v1",
+            status: "running",
+            created_at: "2026-01-01T00:00:00Z",
+            updated_at: "2026-01-01T00:00:00Z",
+          },
+        },
+      ],
+      isLoading: false,
+      error: null,
+      refetch: refetchRuns,
+    });
+    mockUseWorkflowRunEvents.mockReturnValue({
+      events: [],
+      streamCompletion: {
+        run_ids: ["wrun-1"],
+        runs: [
+          {
+            run_id: "wrun-1",
+            workflow_name: "epic-runner",
+            status: "completed",
+            finished_at: "2026-01-01T00:02:00Z",
+          },
+        ],
+      },
+      isStreamComplete: true,
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+
+    render(<WorkflowRunHistory taskId="TASK-1" />);
+
+    expect(screen.getByText("Completed")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Cancel" }),
+    ).not.toBeInTheDocument();
     expect(refetchRuns).toHaveBeenCalled();
   });
 });

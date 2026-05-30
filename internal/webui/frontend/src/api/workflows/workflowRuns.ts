@@ -78,6 +78,18 @@ export interface WorkflowRunEvent {
   created_at: string;
 }
 
+export interface WorkflowRunStreamCompletionRun {
+  run_id: string;
+  workflow_name: string;
+  status: WorkflowRunStatus;
+  finished_at?: string;
+}
+
+export interface WorkflowRunStreamCompletion {
+  run_ids: string[];
+  runs: WorkflowRunStreamCompletionRun[];
+}
+
 export interface WorkflowRunListItem {
   run: WorkflowRun;
   task_runs?: TaskRun[];
@@ -163,11 +175,14 @@ export async function getWorkflowRunEvents(
 export function workflowRunEventStreamUrl(
   workspaceId: string,
   runId: string,
+  options: { untilTerminal?: boolean } = {},
 ): string {
-  return wsUrl(
+  const path = wsUrl(
     workspaceId,
     `/workflow-runs/${encodeURIComponent(runId)}/events/stream`,
   );
+  if (!options.untilTerminal) return path;
+  return `${path}?until=terminal`;
 }
 
 export function cancelWorkflowRun(
