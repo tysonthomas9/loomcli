@@ -20,6 +20,7 @@ type Plan struct {
 	Agents         []AgentModule         `json:"agents,omitempty"`
 	AgentInstances []AgentInstanceModule `json:"agent_instances,omitempty"`
 	Workflows      []WorkflowModule      `json:"workflows,omitempty"`
+	WorkflowRuns   []WorkflowRunModule   `json:"workflow_runs,omitempty"`
 	Runtimes       []RuntimeModule       `json:"runtimes,omitempty"`
 	Skills         []SkillModule         `json:"skills,omitempty"`
 	Tools          []ToolModule          `json:"tools,omitempty"`
@@ -129,7 +130,6 @@ func Load(root string) (*Plan, error) {
 	return plan, nil
 }
 
-//nolint:gocognit,funlen // Applying a plan is intentionally linear so each durable record write stays visible.
 func Apply(ctx context.Context, st store.Store, workspaceKey, actor string, plan *Plan) error {
 	if st == nil {
 		return fmt.Errorf("store not configured")
@@ -145,121 +145,20 @@ func Apply(ctx context.Context, st store.Store, workspaceKey, actor string, plan
 		return err
 	}
 	toolIndex := indexTools(plan.Tools)
-	for _, agent := range plan.Agents {
-		manifest := mustJSON(agent)
-		capability := agentCapabilityManifest(agent, skillIndex, toolIndex)
-		if _, err := st.DefinitionVersions().Apply(ctx, store.DefinitionVersionApply{
-			WorkspaceKey:       workspaceKey,
-			DefinitionType:     domain.DefinitionTypeAgent,
-			DefinitionName:     agent.Name,
-			Version:            agent.Version,
-			SourceHash:         agent.SourceHash,
-			BundleHash:         agent.SourceHash,
-			Manifest:           manifest,
-			CapabilityManifest: capability,
-			CreatedBy:          actor,
-			Status:             domain.DefinitionStatusActive,
-		}); err != nil {
-			return fmt.Errorf("apply agent definition %s: %w", agent.Name, err)
-		}
-		if err := upsertRole(ctx, st, workspaceKey, agent); err != nil {
-			return err
-		}
+	if err := applyAgentDefinitions(ctx, st, workspaceKey, actor, plan.Agents, skillIndex, toolIndex); err != nil {
+		return err
 	}
 	if err := applyAgentInstances(ctx, st, workspaceKey, plan.AgentInstances); err != nil {
 		return err
 	}
-	for _, rt := range plan.Runtimes {
-		manifest := mustJSON(rt)
-		if _, err := st.DefinitionVersions().Apply(ctx, store.DefinitionVersionApply{
-			WorkspaceKey:   workspaceKey,
-			DefinitionType: domain.DefinitionTypeRuntime,
-			DefinitionName: rt.Name,
-			Version:        rt.Version,
-			SourceHash:     rt.SourceHash,
-			BundleHash:     rt.SourceHash,
-			Manifest:       manifest,
-			CreatedBy:      actor,
-			Status:         domain.DefinitionStatusActive,
-		}); err != nil {
-			return fmt.Errorf("apply runtime definition %s: %w", rt.Name, err)
-		}
-		if _, err := st.RuntimeProfiles().Upsert(ctx, store.RuntimeProfileUpsert{
-			WorkspaceKey: workspaceKey,
-			Name:         rt.Name,
-			Version:      rt.Version,
-			Provider:     rt.Provider,
-			Image:        rt.Image,
-			Repos:        rt.Repos,
-			Env:          rt.Env,
-			CPU:          rt.CPU,
-			Memory:       rt.Memory,
-			Manifest:     manifest,
-			Status:       domain.DefinitionStatusActive,
-		}); err != nil {
-			return fmt.Errorf("upsert runtime profile %s: %w", rt.Name, err)
-		}
-	}
-	if err := validateWorkflowBindingCollisions(ctx, st, workspaceKey, plan.Workflows); err != nil {
+	if err := applyRuntimeDefinitions(ctx, st, workspaceKey, actor, plan.Runtimes); err != nil {
 		return err
 	}
-	for _, wf := range plan.Workflows {
-		manifest := mustJSON(wf)
-		capability := workflowCapabilityManifest(wf, toolIndex)
-		if _, err := st.DefinitionVersions().Apply(ctx, store.DefinitionVersionApply{
-			WorkspaceKey:       workspaceKey,
-			DefinitionType:     domain.DefinitionTypeWorkflow,
-			DefinitionName:     wf.Name,
-			Version:            wf.Version,
-			SourceHash:         wf.SourceHash,
-			BundleHash:         wf.SourceHash,
-			Manifest:           manifest,
-			CapabilityManifest: capability,
-			CreatedBy:          actor,
-			Status:             domain.DefinitionStatusActive,
-		}); err != nil {
-			return fmt.Errorf("apply workflow definition %s: %w", wf.Name, err)
-		}
-		if _, err := st.WorkflowDefinitions().Upsert(ctx, store.WorkflowDefinitionUpsert{
-			WorkspaceKey:       workspaceKey,
-			Name:               wf.Name,
-			Version:            wf.Version,
-			Description:        wf.Description,
-			SingletonPolicy:    wf.SingletonPolicy,
-			SourceRef:          wf.SourcePath,
-			BundleHash:         wf.SourceHash,
-			Manifest:           manifest,
-			CapabilityManifest: capability,
-			Status:             domain.DefinitionStatusActive,
-		}); err != nil {
-			return fmt.Errorf("upsert workflow definition %s: %w", wf.Name, err)
-		}
-		if wf.RoutePath != "" {
-			if _, err := st.RouteBindings().Upsert(ctx, store.RouteBindingUpsert{
-				WorkspaceKey:   workspaceKey,
-				BindingID:      routeBindingID(wf.Name, "POST", wf.RoutePath),
-				DefinitionName: wf.Name,
-				DefinitionType: domain.DefinitionTypeWorkflow,
-				Path:           wf.RoutePath,
-				Method:         "POST",
-				AuthPolicy:     wf.RouteAuth,
-				Status:         domain.DefinitionStatusActive,
-			}); err != nil {
-				return fmt.Errorf("upsert route binding %s: %w", wf.Name, err)
-			}
-		}
-		if wf.TriggerEvent != "" {
-			if _, err := st.TriggerBindings().Upsert(ctx, store.TriggerBindingUpsert{
-				WorkspaceKey: workspaceKey,
-				BindingID:    "workflow:" + wf.Name + ":" + wf.TriggerEvent,
-				WorkflowName: wf.Name,
-				EventType:    wf.TriggerEvent,
-				Filter:       mustJSON(wf.TriggerFilter),
-				Status:       domain.DefinitionStatusActive,
-			}); err != nil {
-				return fmt.Errorf("upsert trigger binding %s: %w", wf.Name, err)
-			}
-		}
+	if err := applyWorkflowDefinitions(ctx, st, workspaceKey, actor, plan.Workflows, toolIndex); err != nil {
+		return err
+	}
+	if err := applyWorkflowRuns(ctx, st, workspaceKey, plan.WorkflowRuns); err != nil {
+		return err
 	}
 	return nil
 }
@@ -628,6 +527,9 @@ func Summary(plan *Plan) string {
 	if len(plan.AgentInstances) > 0 {
 		summary += fmt.Sprintf(" agent_instances=%d", len(plan.AgentInstances))
 	}
+	if len(plan.WorkflowRuns) > 0 {
+		summary += fmt.Sprintf(" workflow_runs=%d", len(plan.WorkflowRuns))
+	}
 	if len(plan.Skills) > 0 {
 		summary += fmt.Sprintf(" skills=%d", len(plan.Skills))
 	}
@@ -771,6 +673,19 @@ func validatePlan(plan *Plan) error {
 		if wf.RoutePath != "" && strings.TrimSpace(wf.RouteAuth) == "" {
 			return fmt.Errorf("%s: workflow route %q must declare an auth policy", wf.SourcePath, wf.RoutePath)
 		}
+	}
+	for _, run := range plan.WorkflowRuns {
+		sourcePath := firstNonEmpty(run.SourcePath, "workflow_run:"+run.RunID)
+		if strings.TrimSpace(run.RunID) == "" {
+			return fmt.Errorf("%s: workflow run id is required", sourcePath)
+		}
+		if strings.TrimSpace(run.WorkflowName) == "" {
+			return fmt.Errorf("%s: workflow run %q must declare a workflow_name", sourcePath, run.RunID)
+		}
+		if prior := seen["workflow-run:"+run.RunID]; prior != "" {
+			return fmt.Errorf("duplicate workflow run %q in %s and %s", run.RunID, prior, sourcePath)
+		}
+		seen["workflow-run:"+run.RunID] = sourcePath
 	}
 	for _, rt := range plan.Runtimes {
 		if strings.TrimSpace(rt.Name) == "" {

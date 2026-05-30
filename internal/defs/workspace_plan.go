@@ -41,6 +41,9 @@ func PlanFromWorkspace(ctx context.Context, st store.Store, workspaceKey string)
 	if err := appendControlPlaneRuntimes(ctx, st, workspaceKey, plan, index.hasRuntime); err != nil {
 		return nil, err
 	}
+	if err := appendControlPlaneWorkflowRuns(ctx, st, workspaceKey, plan); err != nil {
+		return nil, err
+	}
 	if err := applyWorkspaceWorkflowBindings(ctx, st, workspaceKey, plan); err != nil {
 		return nil, err
 	}
@@ -362,6 +365,52 @@ func runtimeFromProfile(profile *domain.RuntimeProfile) (RuntimeModule, error) {
 	return runtime, nil
 }
 
+func appendControlPlaneWorkflowRuns(ctx context.Context, st store.Store, workspaceKey string, plan *Plan) error {
+	runStore := st.WorkflowRuns()
+	if runStore == nil {
+		return fmt.Errorf("workflow run store not configured")
+	}
+	runs, err := runStore.List(ctx, workspaceKey, store.WorkflowRunFilter{Limit: 10000})
+	if err != nil {
+		return fmt.Errorf("list workflow runs: %w", err)
+	}
+	for _, run := range runs {
+		if run == nil {
+			continue
+		}
+		plan.WorkflowRuns = append(plan.WorkflowRuns, workflowRunFromControlPlane(run))
+	}
+	return nil
+}
+
+func workflowRunFromControlPlane(run *domain.WorkflowRun) WorkflowRunModule {
+	module := WorkflowRunModule{
+		RunID:           run.RunID,
+		WorkflowName:    run.WorkflowName,
+		WorkflowVersion: run.WorkflowVersion,
+		SourcePath:      "control-plane:workflow-run/" + run.RunID,
+		BundleHash:      run.BundleHash,
+		IdempotencyKey:  run.IdempotencyKey,
+		Input:           cloneWorkflowRunRaw(run.Input),
+		Status:          run.Status,
+		Result:          cloneWorkflowRunRaw(run.Result),
+		ErrorClass:      run.ErrorClass,
+		ErrorMessage:    run.ErrorMessage,
+		WaitCondition:   run.WaitCondition,
+		LeaseOwner:      run.LeaseOwner,
+		LeaseToken:      run.LeaseToken,
+		FencingToken:    run.FencingToken,
+		FinishedAt:      cloneWorkflowRunTime(run.FinishedAt),
+	}
+	if !run.StartedAt.IsZero() {
+		startedAt := run.StartedAt
+		module.StartedAt = &startedAt
+	}
+	module.SourceHash = workspaceHash(module)
+	module.Version = version(module.SourceHash)
+	return module
+}
+
 func applyWorkspaceWorkflowBindings(ctx context.Context, st store.Store, workspaceKey string, plan *Plan) error {
 	for i := range plan.Workflows {
 		workflow := &plan.Workflows[i]
@@ -431,6 +480,7 @@ func sortPlan(plan *Plan) {
 	sort.Slice(plan.Agents, func(i, j int) bool { return plan.Agents[i].Name < plan.Agents[j].Name })
 	sort.Slice(plan.AgentInstances, func(i, j int) bool { return plan.AgentInstances[i].Name < plan.AgentInstances[j].Name })
 	sort.Slice(plan.Workflows, func(i, j int) bool { return plan.Workflows[i].Name < plan.Workflows[j].Name })
+	sort.Slice(plan.WorkflowRuns, func(i, j int) bool { return plan.WorkflowRuns[i].RunID < plan.WorkflowRuns[j].RunID })
 	sort.Slice(plan.Runtimes, func(i, j int) bool { return plan.Runtimes[i].Name < plan.Runtimes[j].Name })
 }
 

@@ -2,8 +2,10 @@ package defs
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
@@ -123,12 +125,41 @@ func TestPlanFromWorkspaceProjectsControlPlaneRecords(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("apply tool definition: %v", err)
 	}
+	startedAt := time.Date(2026, 5, 29, 18, 0, 0, 0, time.UTC)
+	workflowRun, err := st.WorkflowRuns().CreateOrResume(ctx, store.WorkflowRunCreate{
+		WorkspaceKey:    "CP",
+		RunID:           "wrun-slack-1",
+		WorkflowName:    "slack-clone-runner",
+		WorkflowVersion: "control-v1",
+		BundleHash:      "workflow-bundle-hash",
+		IdempotencyKey:  "slack-clone-runner:EPIC-1",
+		Input:           json.RawMessage(`{"parentId":"EPIC-1"}`),
+		Status:          domain.WorkflowRunRunning,
+		LeaseOwner:      "epic-runner",
+		LeaseToken:      "lease-1",
+		StartedAt:       startedAt,
+	})
+	if err != nil {
+		t.Fatalf("create workflow run: %v", err)
+	}
+	waiting := domain.WorkflowRunWaiting
+	waitCondition := "work_item_changed(parent:EPIC-1)"
+	fencingToken := int64(7)
+	partialResult := json.RawMessage(`{"ready":2}`)
+	if _, err := st.WorkflowRuns().Update(ctx, "CP", workflowRun.RunID, store.WorkflowRunUpdate{
+		Status:        &waiting,
+		Result:        &partialResult,
+		WaitCondition: &waitCondition,
+		FencingToken:  &fencingToken,
+	}); err != nil {
+		t.Fatalf("update workflow run: %v", err)
+	}
 
 	plan, err := PlanFromWorkspace(ctx, st, "CP")
 	if err != nil {
 		t.Fatalf("PlanFromWorkspace() error = %v", err)
 	}
-	if got := Summary(plan); got != "agents=1 workflows=1 runtimes=1 agent_instances=1 tools=1" {
+	if got := Summary(plan); got != "agents=1 workflows=1 runtimes=1 agent_instances=1 workflow_runs=1 tools=1" {
 		t.Fatalf("Summary() = %q, want direct record parity", got)
 	}
 	if plan.Root != "workspace:CP" {
@@ -173,6 +204,17 @@ func TestPlanFromWorkspaceProjectsControlPlaneRecords(t *testing.T) {
 	if plan.Tools[0].Name != "github_issue_read" || plan.Tools[0].Handler != "workflow" {
 		t.Fatalf("tools = %+v, want active tool DefinitionVersion projection", plan.Tools)
 	}
+	run := plan.WorkflowRuns[0]
+	if run.RunID != "wrun-slack-1" || run.WorkflowName != "slack-clone-runner" ||
+		run.WorkflowVersion != "control-v1" || run.BundleHash != "workflow-bundle-hash" ||
+		run.IdempotencyKey != "slack-clone-runner:EPIC-1" {
+		t.Fatalf("workflow run = %+v, want durable workflow run identity", run)
+	}
+	if run.Status != domain.WorkflowRunWaiting || run.WaitCondition != waitCondition ||
+		run.FencingToken != fencingToken || run.StartedAt == nil || !run.StartedAt.Equal(startedAt) ||
+		string(run.Input) != `{"parentId":"EPIC-1"}` || string(run.Result) != `{"ready":2}` {
+		t.Fatalf("workflow run state = %+v, want round-trippable durable state", run)
+	}
 
 	imported := memstore.New()
 	if _, err := imported.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "IMPORT", Name: "Imported"}); err != nil {
@@ -188,6 +230,17 @@ func TestPlanFromWorkspaceProjectsControlPlaneRecords(t *testing.T) {
 	if importedAgent.RoleName != "triage" || importedAgent.DesiredState != domain.AgentDesiredRunning ||
 		importedAgent.State != domain.AgentStateActive || importedAgent.TaskFilter != "needs_design" {
 		t.Fatalf("imported agent = %+v, want round-tripped durable agent instance", importedAgent)
+	}
+	importedRun, err := imported.WorkflowRuns().Get(ctx, "IMPORT", "wrun-slack-1")
+	if err != nil {
+		t.Fatalf("get imported workflow run: %v", err)
+	}
+	if importedRun.WorkflowName != "slack-clone-runner" || importedRun.Status != domain.WorkflowRunWaiting ||
+		importedRun.WaitCondition != waitCondition || importedRun.FencingToken != fencingToken ||
+		importedRun.LeaseOwner != "epic-runner" || importedRun.LeaseToken != "lease-1" ||
+		!importedRun.StartedAt.Equal(startedAt) || string(importedRun.Input) != `{"parentId":"EPIC-1"}` ||
+		string(importedRun.Result) != `{"ready":2}` {
+		t.Fatalf("imported workflow run = %+v, want round-tripped durable run state", importedRun)
 	}
 }
 
