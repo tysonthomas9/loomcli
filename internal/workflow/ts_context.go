@@ -28,9 +28,17 @@ type tsContextRequest struct {
 	Input           map[string]any           `json:"input"`
 	Env             map[string]string        `json:"env,omitempty"`
 	Request         tsContextRequestMetadata `json:"request"`
+	Workflow        tsContextWorkflowState   `json:"workflow"`
+	TaskRuns        []*domain.TaskRun        `json:"taskRuns,omitempty"`
 	ReadyChildren   []backend.IssueData      `json:"readyChildren,omitempty"`
 	BlockedChildren []backend.IssueData      `json:"blockedChildren,omitempty"`
 	ChildWorkItems  []backend.IssueData      `json:"childWorkItems,omitempty"`
+}
+
+type tsContextWorkflowState struct {
+	Status          string `json:"status"`
+	WaitCondition   string `json:"waitCondition,omitempty"`
+	CancelRequested bool   `json:"cancelRequested"`
 }
 
 type tsContextRequestMetadata struct {
@@ -57,6 +65,11 @@ type tsWorkflowOperation struct {
 	Params map[string]any `json:"params"`
 }
 
+type tsAppliedOperations struct {
+	TaskRuns      []*domain.TaskRun
+	WaitCondition string
+}
+
 func runTypeScriptContextOnce(ctx context.Context, st store.Store, ib backend.IssueBackend, run *domain.WorkflowRun, def *domain.WorkflowDefinition) (*BuiltinRunResult, error) {
 	if st == nil || st.TaskRuns() == nil || st.RunEvents() == nil || st.WorkflowRuns() == nil {
 		return nil, fmt.Errorf("workflow stores not configured")
@@ -68,7 +81,7 @@ func runTypeScriptContextOnce(ctx context.Context, st store.Store, ib backend.Is
 	if sourcePath == "" {
 		return nil, fmt.Errorf("workflow %q has no TypeScript source_ref", run.WorkflowName)
 	}
-	request, parentID, err := buildTSContextRequest(ctx, ib, run, def, sourcePath)
+	request, parentID, err := buildTSContextRequest(ctx, st, ib, run, def, sourcePath)
 	if err != nil {
 		return nil, err
 	}
@@ -79,11 +92,11 @@ func runTypeScriptContextOnce(ctx context.Context, st store.Store, ib backend.Is
 	for _, log := range response.Logs {
 		appendTSLogEvent(ctx, st, run, log)
 	}
-	taskRuns, err := applyTSOperations(ctx, st, run, parentID, response.Operations)
+	applied, err := applyTSOperations(ctx, st, run, parentID, response.Operations)
 	if err != nil {
 		return nil, err
 	}
-	taskRuns, dispatched, err := dispatchTSContextTaskRuns(ctx, st, run, parentID, taskRuns)
+	taskRuns, dispatched, err := dispatchTSContextTaskRuns(ctx, st, run, parentID, applied.TaskRuns)
 	if err != nil {
 		return nil, err
 	}
@@ -96,7 +109,7 @@ func runTypeScriptContextOnce(ctx context.Context, st store.Store, ib backend.Is
 		DispatchedCount: dispatched,
 	}
 	result.Done = len(taskRuns) == 0 && result.OpenCount == 0
-	return finishTSContextRun(ctx, st, run, response.Result, result, parentID)
+	return finishTSContextRun(ctx, st, run, response.Result, result, parentID, applied.WaitCondition)
 }
 
 func dispatchTSContextTaskRuns(ctx context.Context, st store.Store, run *domain.WorkflowRun, parentID string, taskRuns []*domain.TaskRun) ([]*domain.TaskRun, int, error) {
@@ -118,12 +131,15 @@ func dispatchTSContextTaskRuns(ctx context.Context, st store.Store, run *domain.
 	return taskRuns, dispatched, nil
 }
 
-func finishTSContextRun(ctx context.Context, st store.Store, run *domain.WorkflowRun, runResult json.RawMessage, result *BuiltinRunResult, parentID string) (*BuiltinRunResult, error) {
-	if len(result.TaskRuns) > 0 || result.OpenCount > 0 {
+func finishTSContextRun(ctx context.Context, st store.Store, run *domain.WorkflowRun, runResult json.RawMessage, result *BuiltinRunResult, parentID, explicitWaitCondition string) (*BuiltinRunResult, error) {
+	if explicitWaitCondition != "" || len(result.TaskRuns) > 0 || result.OpenCount > 0 {
 		status := domain.WorkflowRunWaiting
-		wait := "workflow_context_task_runs(workflow_run:" + run.RunID + ")"
-		if parentID != "" {
-			wait = "work_item_changed(parent:" + parentID + ") OR task_run_terminal(workflow_run:" + run.RunID + ")"
+		wait := explicitWaitCondition
+		if wait == "" {
+			wait = "workflow_context_task_runs(workflow_run:" + run.RunID + ")"
+			if parentID != "" {
+				wait = "work_item_changed(parent:" + parentID + ") OR task_run_terminal(workflow_run:" + run.RunID + ")"
+			}
 		}
 		updated, err := st.WorkflowRuns().Update(ctx, run.WorkspaceKey, run.RunID, store.WorkflowRunUpdate{
 			Status:        &status,
@@ -138,7 +154,7 @@ func finishTSContextRun(ctx context.Context, st store.Store, run *domain.Workflo
 			WorkflowRunID: run.RunID,
 			Type:          "workflow_waiting",
 			Message:       "TypeScript WorkflowContext run is waiting for child work",
-			Data:          mustJSON(map[string]any{"ensured": len(result.TaskRuns), "open": result.OpenCount, "blocked": result.BlockedCount}),
+			Data:          mustJSON(map[string]any{"ensured": len(result.TaskRuns), "open": result.OpenCount, "blocked": result.BlockedCount, "wait_condition": wait}),
 		})
 		return result, nil
 	}
@@ -168,7 +184,11 @@ func finishTSContextRun(ctx context.Context, st store.Store, run *domain.Workflo
 	return result, nil
 }
 
-func buildTSContextRequest(ctx context.Context, ib backend.IssueBackend, run *domain.WorkflowRun, def *domain.WorkflowDefinition, sourcePath string) (tsContextRequest, string, error) {
+func buildTSContextRequest(ctx context.Context, st store.Store, ib backend.IssueBackend, run *domain.WorkflowRun, def *domain.WorkflowDefinition, sourcePath string) (tsContextRequest, string, error) {
+	workflowState, taskRuns, err := tsContextControlState(ctx, st, run)
+	if err != nil {
+		return tsContextRequest{}, "", err
+	}
 	inputMap := map[string]any{}
 	if len(run.Input) > 0 {
 		if err := json.Unmarshal(run.Input, &inputMap); err != nil {
@@ -181,6 +201,8 @@ func buildTSContextRequest(ctx context.Context, ib backend.IssueBackend, run *do
 		SourcePath: sourcePath,
 		Input:      inputMap,
 		Env:        workflowEnvBindings(def),
+		Workflow:   workflowState,
+		TaskRuns:   taskRuns,
 		Request: tsContextRequestMetadata{
 			WorkspaceKey:    run.WorkspaceKey,
 			WorkflowName:    run.WorkflowName,
@@ -207,6 +229,22 @@ func buildTSContextRequest(ctx context.Context, ib backend.IssueBackend, run *do
 	request.BlockedChildren = blocked
 	request.ChildWorkItems = all
 	return request, parentID, nil
+}
+
+func tsContextControlState(ctx context.Context, st store.Store, run *domain.WorkflowRun) (tsContextWorkflowState, []*domain.TaskRun, error) {
+	currentRun := run
+	if loaded, err := st.WorkflowRuns().Get(ctx, run.WorkspaceKey, run.RunID); err == nil {
+		currentRun = loaded
+	}
+	taskRuns, err := st.TaskRuns().List(ctx, run.WorkspaceKey, store.TaskRunFilter{WorkflowRunID: run.RunID, Limit: 10000})
+	if err != nil {
+		return tsContextWorkflowState{}, nil, fmt.Errorf("list workflow task runs: %w", err)
+	}
+	return tsContextWorkflowState{
+		Status:          string(currentRun.Status),
+		WaitCondition:   currentRun.WaitCondition,
+		CancelRequested: currentRun.Status == domain.WorkflowRunCancelled,
+	}, taskRuns, nil
 }
 
 func workflowEnvBindings(def *domain.WorkflowDefinition) map[string]string {
@@ -266,35 +304,48 @@ func appendTSLogEvent(ctx context.Context, st store.Store, run *domain.WorkflowR
 	})
 }
 
-func applyTSOperations(ctx context.Context, st store.Store, run *domain.WorkflowRun, parentID string, operations []tsWorkflowOperation) ([]*domain.TaskRun, error) {
-	taskRuns := make([]*domain.TaskRun, 0)
+func applyTSOperations(ctx context.Context, st store.Store, run *domain.WorkflowRun, parentID string, operations []tsWorkflowOperation) (tsAppliedOperations, error) {
+	applied := tsAppliedOperations{TaskRuns: make([]*domain.TaskRun, 0)}
 	for _, op := range operations {
 		switch op.Type {
 		case "taskRuns.ensure":
 			taskRun, err := applyEnsureTaskRunOperation(ctx, st, run, parentID, op.Params)
 			if err != nil {
-				return nil, err
+				return tsAppliedOperations{}, err
 			}
-			taskRuns = append(taskRuns, taskRun)
+			applied.TaskRuns = append(applied.TaskRuns, taskRun)
+		case "taskRuns.wait":
+			waitCondition := applyTaskRunsWaitOperation(ctx, st, run, op.Params)
+			if applied.WaitCondition == "" {
+				applied.WaitCondition = waitCondition
+			}
+		case "workflow.waitUntil":
+			waitCondition, err := applyWorkflowWaitUntilOperation(ctx, st, run, op.Params)
+			if err != nil {
+				return tsAppliedOperations{}, err
+			}
+			if applied.WaitCondition == "" {
+				applied.WaitCondition = waitCondition
+			}
 		case "tools.call":
 			appendToolCallEvent(ctx, st, run, op.Params)
 		case "artifacts.record":
 			if err := applyRecordArtifactOperation(ctx, st, run, op.Params); err != nil {
-				return nil, err
+				return tsAppliedOperations{}, err
 			}
 		case "agents.session":
 			if err := applyInitializeAgentSessionOperation(ctx, st, run, op.Params); err != nil {
-				return nil, err
+				return tsAppliedOperations{}, err
 			}
 		case "agents.session.operation":
 			if err := appendAgentSessionOperationEvent(ctx, st, run, op.Params); err != nil {
-				return nil, err
+				return tsAppliedOperations{}, err
 			}
 		default:
-			return nil, fmt.Errorf("unsupported WorkflowContext operation %q", op.Type)
+			return tsAppliedOperations{}, fmt.Errorf("unsupported WorkflowContext operation %q", op.Type)
 		}
 	}
-	return taskRuns, nil
+	return applied, nil
 }
 
 func appendToolCallEvent(ctx context.Context, st store.Store, run *domain.WorkflowRun, params map[string]any) {
@@ -305,6 +356,42 @@ func appendToolCallEvent(ctx context.Context, st store.Store, run *domain.Workfl
 		Message:       "typed workflow tool executed",
 		Data:          mustJSON(params),
 	})
+}
+
+func applyTaskRunsWaitOperation(ctx context.Context, st store.Store, run *domain.WorkflowRun, params map[string]any) string {
+	liveCount := firstInt64(params, "liveCount", "live_count")
+	data := copyAnyMap(params)
+	data["workflow_run_id"] = run.RunID
+	_, _ = st.RunEvents().Append(ctx, store.RunEventAppend{
+		WorkspaceKey:  run.WorkspaceKey,
+		WorkflowRunID: run.RunID,
+		Type:          "task_runs_observed",
+		Message:       "workflow task runs observed from TypeScript WorkflowContext",
+		Data:          mustJSON(data),
+	})
+	if liveCount <= 0 && !firstBool(params, "wait") {
+		return ""
+	}
+	condition := firstString(params, "condition")
+	if condition == "" {
+		condition = "task_run_terminal(workflow_run:" + run.RunID + ")"
+	}
+	return condition
+}
+
+func applyWorkflowWaitUntilOperation(ctx context.Context, st store.Store, run *domain.WorkflowRun, params map[string]any) (string, error) {
+	condition := firstString(params, "condition", "waitCondition", "wait_condition")
+	if condition == "" {
+		return "", fmt.Errorf("workflow.waitUntil requires condition")
+	}
+	_, _ = st.RunEvents().Append(ctx, store.RunEventAppend{
+		WorkspaceKey:  run.WorkspaceKey,
+		WorkflowRunID: run.RunID,
+		Type:          "workflow_wait_requested",
+		Message:       "TypeScript WorkflowContext requested workflow wait",
+		Data:          mustJSON(params),
+	})
+	return condition, nil
 }
 
 func applyRecordArtifactOperation(ctx context.Context, st store.Store, run *domain.WorkflowRun, params map[string]any) error {
@@ -630,6 +717,21 @@ func firstInt64(values map[string]any, keys ...string) int64 {
 		}
 	}
 	return 0
+}
+
+func firstBool(values map[string]any, keys ...string) bool {
+	for _, key := range keys {
+		if values == nil {
+			continue
+		}
+		switch v := values[key].(type) {
+		case bool:
+			return v
+		case string:
+			return strings.EqualFold(strings.TrimSpace(v), "true")
+		}
+	}
+	return false
 }
 
 func stringMap(value any) map[string]string {

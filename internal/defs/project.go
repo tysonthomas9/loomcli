@@ -316,6 +316,33 @@ const runtimeTypes = `declare module '@loom/runtime' {
     actor?: string;
   };
 
+  export type WorkflowRunState = {
+    status: 'queued' | 'running' | 'waiting' | 'completed' | 'failed' | 'cancelled' | string;
+    waitCondition?: string;
+    cancelRequested: boolean;
+  };
+
+  export type WorkflowTaskRun = Record<string, unknown> & {
+    task_run_id?: string;
+    workflow_run_id?: string;
+    work_item_id?: string;
+    role_name?: string;
+    status?: string;
+    agent_id?: string;
+    session_id?: string;
+  };
+
+  export type WorkflowTaskRunQuery = {
+    status?: string;
+    live?: boolean;
+    limit?: number;
+    workItemId?: string;
+    work_item_id?: string;
+    role?: string;
+    roleName?: string;
+    role_name?: string;
+  };
+
   export type WorkflowAgentSessionInput = {
     sessionId?: string;
     session_id?: string;
@@ -403,6 +430,11 @@ const runtimeTypes = `declare module '@loom/runtime' {
     env: Record<string, string | undefined>;
     req: WorkflowRequestContext;
     request: WorkflowRequestContext;
+    workflow: {
+      status(): Promise<WorkflowRunState>;
+      cancelRequested(): Promise<boolean>;
+      waitUntil(condition: string, metadata?: Record<string, unknown>): Promise<Record<string, unknown>>;
+    };
     init(agent: AgentDefinition | CreatedAgent | AgentFactory, options?: {
       name?: string;
       harness?: string;
@@ -421,6 +453,8 @@ const runtimeTypes = `declare module '@loom/runtime' {
       listChildren(parentId: string, options?: Record<string, unknown>): Promise<Array<Record<string, unknown>>>;
     };
     taskRuns: {
+      list(options?: WorkflowTaskRunQuery): Promise<Array<WorkflowTaskRun>>;
+      wait(options?: WorkflowTaskRunQuery): Promise<Array<WorkflowTaskRun>>;
       ensure(input: {
         workItemId?: string;
         work_item_id?: string;

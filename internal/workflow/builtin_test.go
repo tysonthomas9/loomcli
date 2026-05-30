@@ -562,6 +562,141 @@ export default defineWorkflow({
 	}
 }
 
+func TestCodeDefinedWorkflowContextReadsWorkflowAndTaskRunState(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	workflowPath := filepath.Join(root, ".loom", "workflows", "context-controller.ts")
+	if err := os.MkdirAll(filepath.Dir(workflowPath), 0o755); err != nil {
+		t.Fatalf("mkdir workflow dir: %v", err)
+	}
+	if err := os.WriteFile(workflowPath, []byte(`import { defineWorkflow } from '@loom/runtime';
+
+export default defineWorkflow({
+  name: 'context-controller',
+  async run(ctx) {
+    const status = await ctx.workflow.status();
+    const cancelled = await ctx.workflow.cancelRequested();
+    const all = await ctx.taskRuns.list();
+    const passed = await ctx.taskRuns.wait({ status: 'passed' });
+    ctx.log.info('controller state observed', {
+      workflowStatus: status.status,
+      taskRuns: all.length,
+      passed: passed.length,
+    });
+    return {
+      workflowStatus: status.status,
+      cancelled,
+      allCount: all.length,
+      passedCount: passed.length,
+    };
+  },
+});
+`), 0o644); err != nil {
+		t.Fatalf("write workflow: %v", err)
+	}
+	plan, err := defspkg.Load(root)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TSCTRL", Name: "TypeScript Controller Context"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := defspkg.Apply(ctx, st, "TSCTRL", "atlas", plan); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	run, err := CreateOrResumeRun(ctx, st, "TSCTRL", "context-controller", json.RawMessage(`{"parentId":"CTRL-1"}`), "atlas")
+	if err != nil {
+		t.Fatalf("CreateOrResumeRun() error = %v", err)
+	}
+	if _, err := st.TaskRuns().Ensure(ctx, store.TaskRunEnsure{
+		WorkspaceKey:   "TSCTRL",
+		WorkflowRunID:  run.RunID,
+		WorkItemID:     "CTRL-2",
+		RoleName:       "task",
+		IdempotencyKey: "seed:CTRL-2",
+		Status:         domain.TaskRunPassed,
+	}); err != nil {
+		t.Fatalf("seed task run: %v", err)
+	}
+	result, err := RunOnce(ctx, st, clitest.NewMockIssueBackend(), run)
+	if err != nil {
+		t.Fatalf("RunOnce() error = %v", err)
+	}
+	if result.Run == nil || result.Run.Status != domain.WorkflowRunCompleted {
+		t.Fatalf("result = %+v, want completed controller workflow", result)
+	}
+	var output struct {
+		WorkflowStatus string `json:"workflowStatus"`
+		Cancelled      bool   `json:"cancelled"`
+		AllCount       int    `json:"allCount"`
+		PassedCount    int    `json:"passedCount"`
+	}
+	if err := json.Unmarshal(result.Run.Result, &output); err != nil {
+		t.Fatalf("decode result %s: %v", result.Run.Result, err)
+	}
+	if output.WorkflowStatus != string(domain.WorkflowRunQueued) || output.Cancelled || output.AllCount != 1 || output.PassedCount != 1 {
+		t.Fatalf("output = %+v, want durable workflow/task run projection", output)
+	}
+	events, err := st.RunEvents().List(ctx, "TSCTRL", store.RunEventFilter{WorkflowRunID: run.RunID})
+	if err != nil {
+		t.Fatalf("list run events: %v", err)
+	}
+	if !hasWorkflowEvent(events, "task_runs_observed") || !hasWorkflowEvent(events, "workflow_completed") {
+		t.Fatalf("events = %+v, want task run observation and completion evidence", events)
+	}
+}
+
+func TestCodeDefinedWorkflowContextWaitUntilMovesRunToWaiting(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	workflowPath := filepath.Join(root, ".loom", "workflows", "context-wait.ts")
+	if err := os.MkdirAll(filepath.Dir(workflowPath), 0o755); err != nil {
+		t.Fatalf("mkdir workflow dir: %v", err)
+	}
+	if err := os.WriteFile(workflowPath, []byte(`import { defineWorkflow } from '@loom/runtime';
+
+export default defineWorkflow({
+  name: 'context-wait',
+  async run(ctx) {
+    await ctx.workflow.waitUntil('external_signal:continue');
+    return { waiting: true };
+  },
+});
+`), 0o644); err != nil {
+		t.Fatalf("write workflow: %v", err)
+	}
+	plan, err := defspkg.Load(root)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TSWAIT", Name: "TypeScript Wait Context"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := defspkg.Apply(ctx, st, "TSWAIT", "atlas", plan); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	run, err := CreateOrResumeRun(ctx, st, "TSWAIT", "context-wait", json.RawMessage(`{}`), "atlas")
+	if err != nil {
+		t.Fatalf("CreateOrResumeRun() error = %v", err)
+	}
+	result, err := RunOnce(ctx, st, clitest.NewMockIssueBackend(), run)
+	if err != nil {
+		t.Fatalf("RunOnce() error = %v", err)
+	}
+	if result.Run == nil || result.Run.Status != domain.WorkflowRunWaiting || result.Run.WaitCondition != "external_signal:continue" {
+		t.Fatalf("result = %+v, want explicit wait condition", result)
+	}
+	events, err := st.RunEvents().List(ctx, "TSWAIT", store.RunEventFilter{WorkflowRunID: run.RunID})
+	if err != nil {
+		t.Fatalf("list run events: %v", err)
+	}
+	if !hasWorkflowEvent(events, "workflow_wait_requested") || !hasWorkflowEvent(events, "workflow_waiting") {
+		t.Fatalf("events = %+v, want wait request and waiting evidence", events)
+	}
+}
+
 func TestParentWorkItemsWorkflowCompletesWhenNoOpenChildren(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()

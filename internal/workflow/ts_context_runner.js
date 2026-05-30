@@ -154,6 +154,8 @@ function makeContext(request, workflow) {
   const operations = [];
   const input = request.input && typeof request.input === "object" ? request.input : {};
   const parentId = String(input.parentId || input.parent_id || "");
+  const workflowState = request.workflow && typeof request.workflow === "object" ? request.workflow : {};
+  const taskRuns = Array.isArray(request.taskRuns) ? request.taskRuns : [];
 
   const byParent = (items, requestedParent, options) => {
     let out;
@@ -174,6 +176,19 @@ function makeContext(request, workflow) {
   };
   const tools = workflowTools(workflow, operations);
   const requestContext = request.request || {};
+  const taskRunFilter = (options = {}) => {
+    let out = taskRuns.slice();
+    const status = String(options.status || "");
+    if (status) out = out.filter((run) => String(run.status || "") === status);
+    const workItemId = String(options.workItemId || options.work_item_id || "");
+    if (workItemId) out = out.filter((run) => String(run.work_item_id || run.workItemId || "") === workItemId);
+    const role = String(options.role || options.roleName || options.role_name || "");
+    if (role) out = out.filter((run) => String(run.role_name || run.roleName || "") === role);
+    if (options.live === true) out = out.filter(isLiveTaskRun);
+    const limit = Number(options.limit);
+    if (Number.isFinite(limit) && limit > 0) out = out.slice(0, limit);
+    return out;
+  };
   const materializeAgent = (agent) => {
     if (typeof agent === "function") {
       return agent({ id: request.id, input, payload: input, env: request.env || {}, req: requestContext, request: requestContext }) || {};
@@ -216,6 +231,21 @@ function makeContext(request, workflow) {
     env: request.env || {},
     req: requestContext,
     request: requestContext,
+    workflow: {
+      status: async () => ({ ...workflowState }),
+      cancelRequested: async () => Boolean(workflowState.cancelRequested),
+      waitUntil: async (condition, metadata) => {
+        const op = {
+          type: "workflow.waitUntil",
+          params: {
+            condition: String(condition || ""),
+            metadata: jsonSafe(metadata || {}),
+          },
+        };
+        operations.push(op);
+        return { accepted: true, ...op.params };
+      },
+    },
     init: async (agent, options = {}) => {
       const materialized = materializeAgent(agent);
       const harness = String(options.name || options.harness || "default");
@@ -265,6 +295,21 @@ function makeContext(request, workflow) {
         byParent(request.childWorkItems, String(requestedParent || ""), options),
     },
     taskRuns: {
+      list: async (options = {}) => taskRunFilter(options || {}),
+      wait: async (options = {}) => {
+        const matches = taskRunFilter(options || {});
+        const liveCount = matches.filter(isLiveTaskRun).length;
+        operations.push({
+          type: "taskRuns.wait",
+          params: {
+            ...(options || {}),
+            matched: matches.length,
+            liveCount,
+            wait: liveCount > 0,
+          },
+        });
+        return matches;
+      },
       ensure: async (params) => {
         const op = { type: "taskRuns.ensure", params: params || {} };
         operations.push(op);
@@ -293,6 +338,11 @@ function makeContext(request, workflow) {
     },
   };
   return { ctx, logs, operations };
+}
+
+function isLiveTaskRun(run) {
+  const status = String(run && run.status || "");
+  return !["passed", "failed", "cancelled", "expired"].includes(status);
 }
 
 function sessionHandle(operations, session) {
