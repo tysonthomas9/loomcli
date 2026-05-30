@@ -433,6 +433,14 @@ function route(value) {
   };
 }
 
+function runtimeProfileName(value) {
+  const runtimeRef = value.runtimeProfile || value.runtime_profile || value.runtime;
+  if (runtimeRef == null) return "";
+  if (typeof runtimeRef === "string") return stringValue(runtimeRef);
+  if (typeof runtimeRef === "object") return stringValue(runtimeRef.name);
+  return "";
+}
+
 function agentModule(file) {
   const data = fs.readFileSync(file, "utf8");
   const hash = hashSource(data);
@@ -539,6 +547,7 @@ function workflowModule(file) {
   }
   const r = route(value);
   const t = workflowTrigger(value);
+  const rt = value.runtime && typeof value.runtime === "object" ? value.runtime : {};
   return {
     name: stringValue(value.name),
     description: stringValue(value.description),
@@ -546,6 +555,7 @@ function workflowModule(file) {
     source_hash: hash,
     version: version(hash),
     singleton_policy: singletonPolicy(source, value),
+    runtime_profile_name: runtimeProfileName(value),
     builtin: stringValue(value.builtin),
     runner: typeof value.run === "function" ? "workflow-context-v1" : stringValue(value.runner),
     route_path: r.path,
@@ -553,8 +563,8 @@ function workflowModule(file) {
     trigger_event: t.event,
     trigger_filter: t.filter,
     tools: stringArray(value.tools),
-    env: stringArray(value.env),
-    repos: stringArray(value.repos),
+    env: stringArray(value.env).concat(stringArray(rt.env)),
+    repos: stringArray(value.repos).concat(stringArray(rt.repos)),
   };
 }
 

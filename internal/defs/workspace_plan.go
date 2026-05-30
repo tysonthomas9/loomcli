@@ -512,6 +512,7 @@ func workflowFromDefinition(definition *domain.WorkflowDefinition) (WorkflowModu
 	workflow.Version = firstNonEmpty(workflow.Version, definition.Version)
 	workflow.SourcePath = firstNonEmpty(workflow.SourcePath, definition.SourceRef, "control-plane:workflow/"+definition.Name)
 	workflow.SingletonPolicy = firstNonEmpty(workflow.SingletonPolicy, definition.SingletonPolicy)
+	workflow.RuntimeProfileName = firstNonEmpty(workflow.RuntimeProfileName, definition.RuntimeProfileName)
 	workflow.SourceHash = firstNonEmpty(workflow.SourceHash, definition.BundleHash, workspaceHash(workflow))
 	return workflow, nil
 }

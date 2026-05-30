@@ -29,6 +29,7 @@ type tsContextRequest struct {
 	Env             map[string]string        `json:"env,omitempty"`
 	Request         tsContextRequestMetadata `json:"request"`
 	Workflow        tsContextWorkflowState   `json:"workflow"`
+	RuntimeProfile  *tsContextRuntimeProfile `json:"runtimeProfile,omitempty"`
 	TaskRuns        []*domain.TaskRun        `json:"taskRuns,omitempty"`
 	TaskClaims      []tsContextTaskClaim     `json:"taskClaims,omitempty"`
 	ReadyChildren   []backend.IssueData      `json:"readyChildren,omitempty"`
@@ -227,13 +228,14 @@ func buildTSContextRequest(ctx context.Context, st store.Store, ib backend.Issue
 	}
 	parentID := firstString(inputMap, "parentId", "parent_id")
 	request := tsContextRequest{
-		ID:         run.RunID,
-		SourcePath: sourcePath,
-		Input:      inputMap,
-		Env:        workflowEnvBindings(def),
-		Workflow:   workflowState,
-		TaskRuns:   taskRuns,
-		TaskClaims: taskClaims,
+		ID:             run.RunID,
+		SourcePath:     sourcePath,
+		Input:          inputMap,
+		Env:            workflowEnvBindings(def),
+		Workflow:       workflowState,
+		RuntimeProfile: tsContextRuntimeProfileForDefinition(ctx, st, def),
+		TaskRuns:       taskRuns,
+		TaskClaims:     taskClaims,
 		Request: tsContextRequestMetadata{
 			WorkspaceKey:    run.WorkspaceKey,
 			WorkflowName:    run.WorkflowName,
@@ -368,6 +370,8 @@ func applyTSOperations(ctx context.Context, st store.Store, ib backend.IssueBack
 //nolint:cyclop // This switch is the explicit WorkflowContext operation admission allowlist.
 func applyTSOperation(ctx context.Context, st store.Store, ib backend.IssueBackend, run *domain.WorkflowRun, parentID string, applied *tsAppliedOperations, op tsWorkflowOperation) error {
 	switch op.Type {
+	case "runtime.profile":
+		appendRuntimeProfileReadEvent(ctx, st, run, op.Params)
 	case "workItems.get":
 		appendWorkItemReadEvent(ctx, st, run, op.Params)
 	case "workItems.comment":

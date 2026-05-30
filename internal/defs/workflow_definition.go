@@ -35,6 +35,9 @@ func applyWorkflowDefinition(
 	wf WorkflowModule,
 	tools map[string]ToolModule,
 ) error {
+	if err := validateWorkflowRuntimeProfile(ctx, st, workspaceKey, wf); err != nil {
+		return err
+	}
 	manifest := mustJSON(wf)
 	capability := workflowCapabilityManifest(wf, tools)
 	if _, err := st.DefinitionVersions().Apply(ctx, store.DefinitionVersionApply{
@@ -57,6 +60,7 @@ func applyWorkflowDefinition(
 		Version:            wf.Version,
 		Description:        wf.Description,
 		SingletonPolicy:    wf.SingletonPolicy,
+		RuntimeProfileName: wf.RuntimeProfileName,
 		SourceRef:          wf.SourcePath,
 		BundleHash:         wf.SourceHash,
 		Manifest:           manifest,
@@ -70,6 +74,19 @@ func applyWorkflowDefinition(
 	}
 	if err := applyWorkflowTriggerBinding(ctx, st, workspaceKey, wf); err != nil {
 		return err
+	}
+	return nil
+}
+
+func validateWorkflowRuntimeProfile(ctx context.Context, st store.Store, workspaceKey string, wf WorkflowModule) error {
+	if wf.RuntimeProfileName == "" {
+		return nil
+	}
+	if st.RuntimeProfiles() == nil {
+		return fmt.Errorf("%s: workflow %q declares runtime profile %q but runtime profile store is not configured", wf.SourcePath, wf.Name, wf.RuntimeProfileName)
+	}
+	if _, err := st.RuntimeProfiles().Get(ctx, workspaceKey, wf.RuntimeProfileName); err != nil {
+		return fmt.Errorf("%s: workflow %q declares unknown runtime profile %q: %w", wf.SourcePath, wf.Name, wf.RuntimeProfileName, err)
 	}
 	return nil
 }

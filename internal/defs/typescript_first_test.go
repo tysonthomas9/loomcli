@@ -447,6 +447,66 @@ export default defineWorkflow({
 	}
 }
 
+func TestTypeScriptFirstWorkflowBindsRuntimeProfile(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+
+	writeDefFile(t, root, ".loom/runtimes/local-node.ts", `import { runtime } from '@loom/runtime';
+
+export default runtime.local({
+  name: 'local-node',
+  image: 'node:22',
+  repos: ['slack-src'],
+  env: ['NODE_ENV'],
+  cpu: '2',
+  memory: '4Gi',
+});`)
+	writeDefFile(t, root, ".loom/workflows/runtime-bound.ts", `import { defineWorkflow } from '@loom/runtime';
+
+export default defineWorkflow({
+  name: 'runtime-bound',
+  builtin: 'run-parent-work-items',
+  runtimeProfile: 'local-node',
+  env: ['WORKFLOW_ONLY'],
+  repos: ['workflow-src'],
+});`)
+
+	plan, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if got := Summary(plan); got != "agents=0 workflows=1 runtimes=1" {
+		t.Fatalf("Summary() = %q, want workflow plus runtime profile", got)
+	}
+	workflow, ok := FindWorkflow(plan, "runtime-bound")
+	if !ok {
+		t.Fatalf("FindWorkflow() did not find runtime-bound")
+	}
+	if workflow.RuntimeProfileName != "local-node" {
+		t.Fatalf("workflow runtime profile = %q, want local-node", workflow.RuntimeProfileName)
+	}
+
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TSRUNTIME", Name: "TypeScript Runtime"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := Apply(ctx, st, "TSRUNTIME", "test", plan); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	def, err := st.WorkflowDefinitions().Get(ctx, "TSRUNTIME", "runtime-bound")
+	if err != nil {
+		t.Fatalf("workflow definition not created: %v", err)
+	}
+	if def.RuntimeProfileName != "local-node" {
+		t.Fatalf("durable workflow runtime profile = %q, want local-node", def.RuntimeProfileName)
+	}
+	capability := jsonMap(t, def.CapabilityManifest)
+	runtimeCaps := capability["runtime"].(map[string]any)
+	if runtimeCaps["profile"] != "local-node" {
+		t.Fatalf("runtime capability = %#v, want profile binding", runtimeCaps)
+	}
+}
+
 func TestLoadRejectsUnauthenticatedWorkflowRoute(t *testing.T) {
 	root := t.TempDir()
 	writeDefFile(t, root, ".loom/workflows/unsafe.ts", `export default defineWorkflow({

@@ -277,6 +277,7 @@ function makeContext(request, workflow) {
   const input = request.input && typeof request.input === "object" ? request.input : {};
   const parentId = String(input.parentId || input.parent_id || "");
   const workflowState = request.workflow && typeof request.workflow === "object" ? request.workflow : {};
+  const runtimeProfile = request.runtimeProfile && typeof request.runtimeProfile === "object" ? request.runtimeProfile : null;
   const taskRuns = Array.isArray(request.taskRuns) ? request.taskRuns : [];
   const taskClaims = Array.isArray(request.taskClaims) ? request.taskClaims : [];
   const workItems = uniqueWorkItems([
@@ -406,6 +407,22 @@ function makeContext(request, workflow) {
         };
         operations.push(op);
         return { accepted: true, ...op.params };
+      },
+    },
+    runtime: {
+      profile: async () => {
+        operations.push({
+          type: "runtime.profile",
+          params: {
+            found: Boolean(runtimeProfile),
+            name: runtimeProfile ? String(runtimeProfile.name || "") : "",
+            provider: runtimeProfile ? String(runtimeProfile.provider || "") : "",
+            version: runtimeProfile ? String(runtimeProfile.version || "") : "",
+            repos: runtimeProfile ? jsonSafe(runtimeProfile.repos || []) : [],
+            env: runtimeProfile ? jsonSafe(runtimeProfile.env || []) : [],
+          },
+        });
+        return runtimeProfile ? jsonSafe(runtimeProfile) : null;
       },
     },
     init: async (agent, options = {}) => {

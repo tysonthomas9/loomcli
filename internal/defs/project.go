@@ -303,6 +303,9 @@ const runtimeTypes = `declare module '@loom/runtime' {
     triggerFilter?: Record<string, string>;
     issueLabelAdded?: Record<string, string>;
     triggers?: Array<{ event: string; filter?: Record<string, string> }>;
+    runtime?: string | RuntimeProfile;
+    runtimeProfile?: string;
+    runtime_profile?: string;
     tools?: Array<string | unknown>;
     repos?: string[];
     env?: string[];
@@ -320,6 +323,18 @@ const runtimeTypes = `declare module '@loom/runtime' {
     status: 'queued' | 'running' | 'waiting' | 'completed' | 'failed' | 'cancelled' | string;
     waitCondition?: string;
     cancelRequested: boolean;
+  };
+
+  export type WorkflowRuntimeProfile = {
+    name: string;
+    version?: string;
+    provider: string;
+    image?: string;
+    repos?: string[];
+    env?: string[];
+    cpu?: string;
+    memory?: string;
+    status?: string;
   };
 
   export type WorkflowTaskRun = Record<string, unknown> & {
@@ -522,6 +537,9 @@ const runtimeTypes = `declare module '@loom/runtime' {
         reason?: string;
         metadata?: Record<string, unknown>;
       }, metadata?: Record<string, unknown>): Promise<Record<string, unknown>>;
+    };
+    runtime: {
+      profile(): Promise<WorkflowRuntimeProfile | null>;
     };
     init(agent: AgentDefinition | CreatedAgent | AgentFactory, options?: {
       name?: string;

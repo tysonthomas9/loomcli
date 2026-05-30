@@ -55,19 +55,21 @@ func TestPlanFromWorkspaceProjectsControlPlaneRecords(t *testing.T) {
 		t.Fatalf("activate agent instance: %v", err)
 	}
 	workflowManifest := mustJSON(map[string]any{
-		"builtin": "run-parent-work-items",
-		"tools":   []string{"workItems.readyChildren", "taskRuns.ensure"},
-		"repos":   []string{"slack-src"},
-		"env":     []string{"NODE_ENV"},
+		"builtin":              "run-parent-work-items",
+		"runtime_profile_name": "local-node",
+		"tools":                []string{"workItems.readyChildren", "taskRuns.ensure"},
+		"repos":                []string{"slack-src"},
+		"env":                  []string{"NODE_ENV"},
 	})
 	if _, err := st.WorkflowDefinitions().Upsert(ctx, store.WorkflowDefinitionUpsert{
-		WorkspaceKey:    "CP",
-		Name:            "slack-clone-runner",
-		Version:         "control-v1",
-		Description:     "Run Slack clone epic tasks.",
-		SingletonPolicy: "parent:${parentId}",
-		Manifest:        workflowManifest,
-		Status:          domain.DefinitionStatusActive,
+		WorkspaceKey:       "CP",
+		Name:               "slack-clone-runner",
+		Version:            "control-v1",
+		Description:        "Run Slack clone epic tasks.",
+		SingletonPolicy:    "parent:${parentId}",
+		RuntimeProfileName: "local-node",
+		Manifest:           workflowManifest,
+		Status:             domain.DefinitionStatusActive,
 	}); err != nil {
 		t.Fatalf("upsert workflow definition: %v", err)
 	}
@@ -353,6 +355,9 @@ func TestPlanFromWorkspaceProjectsControlPlaneRecords(t *testing.T) {
 	if workflow.Name != "slack-clone-runner" || workflow.Builtin != "run-parent-work-items" {
 		t.Fatalf("workflow = %+v, want direct workflow projection", workflow)
 	}
+	if workflow.RuntimeProfileName != "local-node" {
+		t.Fatalf("workflow runtime profile = %q, want local-node", workflow.RuntimeProfileName)
+	}
 	if workflow.RoutePath != "/workflows/slack-clone-runner/run" || workflow.RouteAuth != "workspace" {
 		t.Fatalf("workflow route = %q auth=%q, want active route binding", workflow.RoutePath, workflow.RouteAuth)
 	}
@@ -408,6 +413,13 @@ func TestPlanFromWorkspaceProjectsControlPlaneRecords(t *testing.T) {
 	if importedAgent.RoleName != "triage" || importedAgent.DesiredState != domain.AgentDesiredRunning ||
 		importedAgent.State != domain.AgentStateActive || importedAgent.TaskFilter != "needs_design" {
 		t.Fatalf("imported agent = %+v, want round-tripped durable agent instance", importedAgent)
+	}
+	importedWorkflow, err := imported.WorkflowDefinitions().Get(ctx, "IMPORT", "slack-clone-runner")
+	if err != nil {
+		t.Fatalf("get imported workflow definition: %v", err)
+	}
+	if importedWorkflow.RuntimeProfileName != "local-node" {
+		t.Fatalf("imported workflow runtime profile = %q, want local-node", importedWorkflow.RuntimeProfileName)
 	}
 	importedRun, err := imported.WorkflowRuns().Get(ctx, "IMPORT", "wrun-slack-1")
 	if err != nil {

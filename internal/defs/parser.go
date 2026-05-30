@@ -44,21 +44,22 @@ func parseWorkflow(path string, data []byte) (WorkflowModule, error) {
 	src := string(data)
 	hash := hashSource(data)
 	mod := WorkflowModule{
-		Name:            stringField(src, "name"),
-		Description:     stringField(src, "description"),
-		SourcePath:      path,
-		SourceHash:      hash,
-		Version:         version(hash),
-		SingletonPolicy: singletonPolicy(src),
-		Builtin:         stringField(src, "builtin"),
-		Runner:          workflowRunner(src),
-		RoutePath:       firstPathField(src),
-		RouteAuth:       stringField(src, "auth"),
-		TriggerEvent:    triggerEvent(src),
-		TriggerFilter:   triggerFilter(src),
-		Tools:           dottedArrayField(src, "tools"),
-		Repos:           arrayField(src, "repos"),
-		Env:             arrayField(src, "env"),
+		Name:               stringField(src, "name"),
+		Description:        stringField(src, "description"),
+		SourcePath:         path,
+		SourceHash:         hash,
+		Version:            version(hash),
+		SingletonPolicy:    singletonPolicy(src),
+		RuntimeProfileName: firstNonEmpty(stringField(src, "runtimeProfile"), stringField(src, "runtime_profile"), stringField(src, "runtime")),
+		Builtin:            stringField(src, "builtin"),
+		Runner:             workflowRunner(src),
+		RoutePath:          firstPathField(src),
+		RouteAuth:          stringField(src, "auth"),
+		TriggerEvent:       triggerEvent(src),
+		TriggerFilter:      triggerFilter(src),
+		Tools:              dottedArrayField(src, "tools"),
+		Repos:              arrayField(src, "repos"),
+		Env:                arrayField(src, "env"),
 	}
 	if mod.Name == "" {
 		return mod, fmt.Errorf("%s: defineWorkflow name is required", path)

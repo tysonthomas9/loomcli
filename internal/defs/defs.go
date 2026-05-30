@@ -53,21 +53,22 @@ type AgentModule struct {
 }
 
 type WorkflowModule struct {
-	Name            string            `json:"name"`
-	Description     string            `json:"description,omitempty"`
-	SourcePath      string            `json:"source_path"`
-	SourceHash      string            `json:"source_hash"`
-	Version         string            `json:"version"`
-	SingletonPolicy string            `json:"singleton_policy,omitempty"`
-	Builtin         string            `json:"builtin,omitempty"`
-	Runner          string            `json:"runner,omitempty"`
-	RoutePath       string            `json:"route_path,omitempty"`
-	RouteAuth       string            `json:"route_auth,omitempty"`
-	TriggerEvent    string            `json:"trigger_event,omitempty"`
-	TriggerFilter   map[string]string `json:"trigger_filter,omitempty"`
-	Tools           []string          `json:"tools,omitempty"`
-	Env             []string          `json:"env,omitempty"`
-	Repos           []string          `json:"repos,omitempty"`
+	Name               string            `json:"name"`
+	Description        string            `json:"description,omitempty"`
+	SourcePath         string            `json:"source_path"`
+	SourceHash         string            `json:"source_hash"`
+	Version            string            `json:"version"`
+	SingletonPolicy    string            `json:"singleton_policy,omitempty"`
+	RuntimeProfileName string            `json:"runtime_profile_name,omitempty"`
+	Builtin            string            `json:"builtin,omitempty"`
+	Runner             string            `json:"runner,omitempty"`
+	RoutePath          string            `json:"route_path,omitempty"`
+	RouteAuth          string            `json:"route_auth,omitempty"`
+	TriggerEvent       string            `json:"trigger_event,omitempty"`
+	TriggerFilter      map[string]string `json:"trigger_filter,omitempty"`
+	Tools              []string          `json:"tools,omitempty"`
+	Env                []string          `json:"env,omitempty"`
+	Repos              []string          `json:"repos,omitempty"`
 }
 
 type RuntimeModule struct {
@@ -402,8 +403,9 @@ func workflowCapabilityManifest(wf WorkflowModule, tools map[string]ToolModule) 
 			"tool_definitions": referencedToolDefinitions(wf.Tools, tools),
 		},
 		"runtime": map[string]any{
-			"repos": compactStrings(wf.Repos),
-			"env":   compactStrings(wf.Env),
+			"profile": wf.RuntimeProfileName,
+			"repos":   compactStrings(wf.Repos),
+			"env":     compactStrings(wf.Env),
 		},
 		"runner": map[string]any{
 			"builtin": wf.Builtin,

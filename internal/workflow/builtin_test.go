@@ -816,6 +816,88 @@ export default defineWorkflow({
 	}
 }
 
+func TestCodeDefinedWorkflowContextReadsRuntimeProfile(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	runtimePath := filepath.Join(root, ".loom", "runtimes", "local-node.ts")
+	if err := os.MkdirAll(filepath.Dir(runtimePath), 0o755); err != nil {
+		t.Fatalf("mkdir runtime dir: %v", err)
+	}
+	if err := os.WriteFile(runtimePath, []byte(`import { runtime } from '@loom/runtime';
+
+export default runtime.local({
+  name: 'local-node',
+  image: 'node:22',
+  repos: ['slack-src'],
+  env: ['NODE_ENV'],
+});
+`), 0o644); err != nil {
+		t.Fatalf("write runtime: %v", err)
+	}
+	workflowPath := filepath.Join(root, ".loom", "workflows", "runtime-context.ts")
+	if err := os.MkdirAll(filepath.Dir(workflowPath), 0o755); err != nil {
+		t.Fatalf("mkdir workflow dir: %v", err)
+	}
+	if err := os.WriteFile(workflowPath, []byte(`import { defineWorkflow } from '@loom/runtime';
+
+export default defineWorkflow({
+  name: 'runtime-context',
+  runtimeProfile: 'local-node',
+  async run(ctx) {
+    const profile = await ctx.runtime.profile();
+    return {
+      name: profile?.name,
+      provider: profile?.provider,
+      repos: profile?.repos ?? [],
+      env: profile?.env ?? [],
+    };
+  },
+});
+`), 0o644); err != nil {
+		t.Fatalf("write workflow: %v", err)
+	}
+	plan, err := defspkg.Load(root)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TSRUNTIMECTX", Name: "TypeScript Runtime Context"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := defspkg.Apply(ctx, st, "TSRUNTIMECTX", "atlas", plan); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	run, err := CreateOrResumeRun(ctx, st, "TSRUNTIMECTX", "runtime-context", json.RawMessage(`{}`), "atlas")
+	if err != nil {
+		t.Fatalf("CreateOrResumeRun() error = %v", err)
+	}
+	result, err := RunOnce(ctx, st, clitest.NewMockIssueBackend(), run)
+	if err != nil {
+		t.Fatalf("RunOnce() error = %v", err)
+	}
+	if result.Run == nil || result.Run.Status != domain.WorkflowRunCompleted {
+		t.Fatalf("result = %+v, want completed runtime context workflow", result)
+	}
+	var data map[string]any
+	if err := json.Unmarshal(result.Run.Result, &data); err != nil {
+		t.Fatalf("decode workflow result: %v", err)
+	}
+	if data["name"] != "local-node" || data["provider"] != "local" {
+		t.Fatalf("result data = %+v, want runtime profile identity", data)
+	}
+	events, err := st.RunEvents().List(ctx, "TSRUNTIMECTX", store.RunEventFilter{WorkflowRunID: run.RunID})
+	if err != nil {
+		t.Fatalf("list run events: %v", err)
+	}
+	if !hasWorkflowEvent(events, "runtime_profile_read") || !hasWorkflowEvent(events, "workflow_completed") {
+		t.Fatalf("events = %+v, want runtime profile read and completion evidence", events)
+	}
+	runtimeEvent := workflowEventDataByType(t, events, "runtime_profile_read")
+	if runtimeEvent["name"] != "local-node" || runtimeEvent["provider"] != "local" || runtimeEvent["found"] != true {
+		t.Fatalf("runtime event = %+v, want profile read evidence", runtimeEvent)
+	}
+}
+
 func TestCodeDefinedWorkflowContextReadsWorkflowAndTaskRunState(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
