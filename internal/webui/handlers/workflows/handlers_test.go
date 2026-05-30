@@ -185,6 +185,75 @@ func TestWorkflowRouteBindingAPIValidation(t *testing.T) {
 	}
 }
 
+func TestWorkflowTriggerBindingAPIRunsMatchingWorkflow(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS", Name: "Workflow Store"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	root := t.TempDir()
+	if _, err := defspkg.ScaffoldWorkflow(root, "epic-runner"); err != nil {
+		t.Fatalf("ScaffoldWorkflow() error = %v", err)
+	}
+	plan, err := defspkg.Load(root)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if err := defspkg.Apply(ctx, st, "WS", "test", plan); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+
+	ready := backend.IssueData{ID: "TASK-4", Title: "Build trigger-bound runner", Status: "open"}
+	ib := testIssueBackend{ready: []backend.IssueData{ready}, list: []backend.IssueData{ready}}
+	mux := workflowMux(st, ib)
+	rec := postJSON(t, mux, "/api/workspaces/WS/workflow-triggers/issue.label_added", map[string]any{
+		"input": map[string]any{
+			"parentId":       "EPIC-TRIGGER",
+			"label":          "epic-runner",
+			"type":           "epic",
+			"maxConcurrency": 1,
+		},
+	})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("trigger status = %d, want 201; body=%s", rec.Code, rec.Body.String())
+	}
+	var created triggerResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode trigger response: %v", err)
+	}
+	if created.Event != "issue.label_added" || len(created.Runs) != 1 {
+		t.Fatalf("trigger response = %+v, want one issue.label_added run", created)
+	}
+	run := created.Runs[0].Run
+	if run == nil || run.WorkflowName != "epic-runner" || run.Status != domain.WorkflowRunWaiting {
+		t.Fatalf("trigger run = %+v, want waiting epic-runner run", run)
+	}
+	if created.Runs[0].Builtin == nil || len(created.Runs[0].Builtin.TaskRuns) != 1 {
+		t.Fatalf("trigger builtin = %+v, want one ensured task run", created.Runs[0].Builtin)
+	}
+}
+
+func TestWorkflowTriggerBindingAPIValidation(t *testing.T) {
+	ctx := context.Background()
+	_, mux := setupWorkflowTestMux(t, ctx, nil)
+
+	filterMiss := postJSON(t, mux, "/api/workspaces/WS/workflow-triggers/issue.label_added", map[string]any{
+		"once":  false,
+		"input": map[string]any{"label": "other", "type": "epic", "parentId": "EPIC"},
+	})
+	if filterMiss.Code != http.StatusNotFound {
+		t.Fatalf("filter miss status = %d, want 404; body=%s", filterMiss.Code, filterMiss.Body.String())
+	}
+
+	eventMiss := postJSON(t, mux, "/api/workspaces/WS/workflow-triggers/issue.closed", map[string]any{
+		"once":  false,
+		"input": map[string]any{"parentId": "EPIC"},
+	})
+	if eventMiss.Code != http.StatusNotFound {
+		t.Fatalf("event miss status = %d, want 404; body=%s", eventMiss.Code, eventMiss.Body.String())
+	}
+}
+
 func TestWorkflowRunAPIValidationAndOnceFalse(t *testing.T) {
 	ctx := context.Background()
 	st, mux := setupWorkflowTestMux(t, ctx, nil)

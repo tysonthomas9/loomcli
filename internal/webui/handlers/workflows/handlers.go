@@ -31,6 +31,11 @@ type runResponse struct {
 	Builtin *workflowpkg.BuiltinRunResult `json:"builtin,omitempty"`
 }
 
+type triggerResponse struct {
+	Event string        `json:"event"`
+	Runs  []runResponse `json:"runs"`
+}
+
 func HandleList(st store.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ws := r.PathValue("ws")
@@ -79,6 +84,32 @@ func HandleRunRouteBinding(st store.Store, issueBackendFn func(context.Context) 
 		if err != nil {
 			handler.HandleServiceError(w, err)
 			return
+		}
+		handler.WriteJSON(w, http.StatusCreated, resp)
+	}
+}
+
+func HandleTriggerBinding(st store.Store, issueBackendFn func(context.Context) backend.IssueBackend) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		req, ok := readRunRequest(w, r)
+		if !ok {
+			return
+		}
+		ws := r.PathValue("ws")
+		eventType := r.PathValue("event")
+		triggers, err := resolveWorkflowTriggerBindings(r.Context(), st, ws, eventType, req.Input)
+		if err != nil {
+			handler.HandleServiceError(w, err)
+			return
+		}
+		resp := triggerResponse{Event: eventType, Runs: make([]runResponse, 0, len(triggers))}
+		for _, trigger := range triggers {
+			run, err := runWorkflowRequest(r.Context(), st, issueBackendFn, ws, trigger.WorkflowName, req, actorName(r))
+			if err != nil {
+				handler.HandleServiceError(w, err)
+				return
+			}
+			resp.Runs = append(resp.Runs, run)
 		}
 		handler.WriteJSON(w, http.StatusCreated, resp)
 	}
@@ -212,6 +243,61 @@ func resolveWorkflowRouteBinding(ctx context.Context, st store.Store, ws, method
 		return route, nil
 	}
 	return nil, service.ErrNotFound("workflow route binding not found")
+}
+
+func resolveWorkflowTriggerBindings(ctx context.Context, st store.Store, ws, eventType string, input json.RawMessage) ([]*domain.TriggerBinding, error) {
+	if st == nil || st.TriggerBindings() == nil {
+		return nil, service.ErrUnavailable("trigger binding store not configured")
+	}
+	eventType = strings.TrimSpace(eventType)
+	if eventType == "" {
+		return nil, service.ErrValidation("trigger event is required")
+	}
+	triggers, err := st.TriggerBindings().List(ctx, ws, store.TriggerBindingFilter{
+		EventType: eventType,
+		Status:    domain.DefinitionStatusActive,
+		Limit:     10000,
+	})
+	if err != nil {
+		return nil, storeError("list trigger bindings", err)
+	}
+	out := make([]*domain.TriggerBinding, 0, len(triggers))
+	for _, trigger := range triggers {
+		if trigger == nil || !triggerFilterMatches(trigger.Filter, input) {
+			continue
+		}
+		out = append(out, trigger)
+	}
+	if len(out) == 0 {
+		return nil, service.ErrNotFound("workflow trigger binding not found")
+	}
+	return out, nil
+}
+
+func triggerFilterMatches(filter json.RawMessage, input json.RawMessage) bool {
+	var required map[string]string
+	if len(filter) > 0 {
+		_ = json.Unmarshal(filter, &required)
+	}
+	if len(required) == 0 {
+		return true
+	}
+	var payload map[string]any
+	if len(input) > 0 {
+		_ = json.Unmarshal(input, &payload)
+	}
+	if len(payload) == 0 {
+		return false
+	}
+	for key, want := range required {
+		if strings.TrimSpace(want) == "" {
+			continue
+		}
+		if strings.TrimSpace(fmt.Sprint(payload[key])) != want {
+			return false
+		}
+	}
+	return true
 }
 
 func normalizeRoutePath(value string) string {
