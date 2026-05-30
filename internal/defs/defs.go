@@ -21,6 +21,7 @@ type Plan struct {
 	AgentInstances []AgentInstanceModule `json:"agent_instances,omitempty"`
 	Workflows      []WorkflowModule      `json:"workflows,omitempty"`
 	WorkflowRuns   []WorkflowRunModule   `json:"workflow_runs,omitempty"`
+	TaskRuns       []TaskRunModule       `json:"task_runs,omitempty"`
 	Runtimes       []RuntimeModule       `json:"runtimes,omitempty"`
 	Skills         []SkillModule         `json:"skills,omitempty"`
 	Tools          []ToolModule          `json:"tools,omitempty"`
@@ -158,6 +159,9 @@ func Apply(ctx context.Context, st store.Store, workspaceKey, actor string, plan
 		return err
 	}
 	if err := applyWorkflowRuns(ctx, st, workspaceKey, plan.WorkflowRuns); err != nil {
+		return err
+	}
+	if err := applyTaskRuns(ctx, st, workspaceKey, plan.TaskRuns); err != nil {
 		return err
 	}
 	return nil
@@ -530,6 +534,9 @@ func Summary(plan *Plan) string {
 	if len(plan.WorkflowRuns) > 0 {
 		summary += fmt.Sprintf(" workflow_runs=%d", len(plan.WorkflowRuns))
 	}
+	if len(plan.TaskRuns) > 0 {
+		summary += fmt.Sprintf(" task_runs=%d", len(plan.TaskRuns))
+	}
 	if len(plan.Skills) > 0 {
 		summary += fmt.Sprintf(" skills=%d", len(plan.Skills))
 	}
@@ -693,6 +700,25 @@ func validatePlan(plan *Plan) error {
 			return fmt.Errorf("duplicate workflow run %q in %s and %s", run.RunID, prior, sourcePath)
 		}
 		seen["workflow-run:"+run.RunID] = sourcePath
+	}
+	for _, run := range plan.TaskRuns {
+		sourcePath := firstNonEmpty(run.SourcePath, "task_run:"+run.TaskRunID)
+		if strings.TrimSpace(run.TaskRunID) == "" {
+			return fmt.Errorf("%s: task run id is required", sourcePath)
+		}
+		if strings.TrimSpace(run.WorkflowRunID) == "" {
+			return fmt.Errorf("%s: task run %q must declare a workflow_run_id", sourcePath, run.TaskRunID)
+		}
+		if strings.TrimSpace(run.WorkItemID) == "" {
+			return fmt.Errorf("%s: task run %q must declare a work_item_id", sourcePath, run.TaskRunID)
+		}
+		if strings.TrimSpace(run.RoleName) == "" {
+			return fmt.Errorf("%s: task run %q must declare a role_name", sourcePath, run.TaskRunID)
+		}
+		if prior := seen["task-run:"+run.TaskRunID]; prior != "" {
+			return fmt.Errorf("duplicate task run %q in %s and %s", run.TaskRunID, prior, sourcePath)
+		}
+		seen["task-run:"+run.TaskRunID] = sourcePath
 	}
 	for _, rt := range plan.Runtimes {
 		if strings.TrimSpace(rt.Name) == "" {

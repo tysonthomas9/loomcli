@@ -154,12 +154,42 @@ func TestPlanFromWorkspaceProjectsControlPlaneRecords(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("update workflow run: %v", err)
 	}
+	taskStartedAt := startedAt.Add(5 * time.Minute)
+	taskRun, err := st.TaskRuns().Ensure(ctx, store.TaskRunEnsure{
+		WorkspaceKey:    "CP",
+		TaskRunID:       "trun-slack-1",
+		IdempotencyKey:  "workflow_run:wrun-slack-1:work_item:TASK-1:role:task",
+		WorkflowRunID:   workflowRun.RunID,
+		WorkItemID:      "TASK-1",
+		RoleName:        "task",
+		ClaimActor:      "triage-bot",
+		ClaimEventID:    "claim-event-1",
+		Status:          domain.TaskRunStarting,
+		AgentID:         "triage-bot",
+		NodeID:          "node-local",
+		CommandID:       "cmd-1",
+		SessionID:       "session-1",
+		LeaseID:         "lease-task-1",
+		ParentSessionID: "session-parent",
+		Reason:          "Build channel sidebar",
+		Metadata:        map[string]string{"surface": "sidebar", "app": "slack"},
+	})
+	if err != nil {
+		t.Fatalf("ensure task run: %v", err)
+	}
+	running := domain.TaskRunRunning
+	if _, err := st.TaskRuns().Update(ctx, "CP", taskRun.TaskRunID, store.TaskRunUpdate{
+		Status:    &running,
+		StartedAt: &taskStartedAt,
+	}); err != nil {
+		t.Fatalf("update task run: %v", err)
+	}
 
 	plan, err := PlanFromWorkspace(ctx, st, "CP")
 	if err != nil {
 		t.Fatalf("PlanFromWorkspace() error = %v", err)
 	}
-	if got := Summary(plan); got != "agents=1 workflows=1 runtimes=1 agent_instances=1 workflow_runs=1 tools=1" {
+	if got := Summary(plan); got != "agents=1 workflows=1 runtimes=1 agent_instances=1 workflow_runs=1 task_runs=1 tools=1" {
 		t.Fatalf("Summary() = %q, want direct record parity", got)
 	}
 	if plan.Root != "workspace:CP" {
@@ -215,6 +245,15 @@ func TestPlanFromWorkspaceProjectsControlPlaneRecords(t *testing.T) {
 		string(run.Input) != `{"parentId":"EPIC-1"}` || string(run.Result) != `{"ready":2}` {
 		t.Fatalf("workflow run state = %+v, want round-trippable durable state", run)
 	}
+	task := plan.TaskRuns[0]
+	if task.TaskRunID != "trun-slack-1" || task.WorkflowRunID != "wrun-slack-1" ||
+		task.WorkItemID != "TASK-1" || task.RoleName != "task" ||
+		task.Status != domain.TaskRunRunning || task.AgentID != "triage-bot" ||
+		task.CommandID != "cmd-1" || task.SessionID != "session-1" ||
+		task.ClaimActor != "triage-bot" || task.ClaimEventID != "claim-event-1" ||
+		task.Metadata["surface"] != "sidebar" || task.StartedAt == nil || !task.StartedAt.Equal(taskStartedAt) {
+		t.Fatalf("task run = %+v, want durable task run runtime state", task)
+	}
 
 	imported := memstore.New()
 	if _, err := imported.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "IMPORT", Name: "Imported"}); err != nil {
@@ -241,6 +280,17 @@ func TestPlanFromWorkspaceProjectsControlPlaneRecords(t *testing.T) {
 		!importedRun.StartedAt.Equal(startedAt) || string(importedRun.Input) != `{"parentId":"EPIC-1"}` ||
 		string(importedRun.Result) != `{"ready":2}` {
 		t.Fatalf("imported workflow run = %+v, want round-tripped durable run state", importedRun)
+	}
+	importedTaskRun, err := imported.TaskRuns().Get(ctx, "IMPORT", "trun-slack-1")
+	if err != nil {
+		t.Fatalf("get imported task run: %v", err)
+	}
+	if importedTaskRun.WorkflowRunID != "wrun-slack-1" || importedTaskRun.WorkItemID != "TASK-1" ||
+		importedTaskRun.Status != domain.TaskRunRunning || importedTaskRun.AgentID != "triage-bot" ||
+		importedTaskRun.CommandID != "cmd-1" || importedTaskRun.SessionID != "session-1" ||
+		importedTaskRun.ClaimActor != "triage-bot" || importedTaskRun.ClaimEventID != "claim-event-1" ||
+		importedTaskRun.Metadata["app"] != "slack" || !importedTaskRun.StartedAt.Equal(taskStartedAt) {
+		t.Fatalf("imported task run = %+v, want round-tripped durable task run state", importedTaskRun)
 	}
 }
 
