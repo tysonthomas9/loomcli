@@ -898,6 +898,120 @@ export default defineWorkflow({
 	}
 }
 
+func TestCodeDefinedWorkflowContextReadsRuntimeWorkspace(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	runtimePath := filepath.Join(root, ".loom", "runtimes", "local-node.ts")
+	if err := os.MkdirAll(filepath.Dir(runtimePath), 0o755); err != nil {
+		t.Fatalf("mkdir runtime dir: %v", err)
+	}
+	if err := os.WriteFile(runtimePath, []byte(`import { runtime } from '@loom/runtime';
+
+export default runtime.local({
+  name: 'local-node',
+  image: 'node:22',
+  repos: ['slack-src'],
+  env: ['NODE_ENV'],
+});
+`), 0o644); err != nil {
+		t.Fatalf("write runtime: %v", err)
+	}
+	workflowPath := filepath.Join(root, ".loom", "workflows", "runtime-workspace.ts")
+	if err := os.MkdirAll(filepath.Dir(workflowPath), 0o755); err != nil {
+		t.Fatalf("mkdir workflow dir: %v", err)
+	}
+	if err := os.WriteFile(workflowPath, []byte(`import { defineWorkflow } from '@loom/runtime';
+
+export default defineWorkflow({
+  name: 'runtime-workspace',
+  runtimeProfile: 'local-node',
+  env: ['WORKFLOW_FLAG'],
+  async run(ctx) {
+    const workspace = await ctx.runtime.workspace();
+    return {
+      key: workspace.key,
+      directKey: ctx.workspace.key,
+      workspaceName: workspace.name,
+      workflowName: workspace.workflow?.name,
+      profile: workspace.runtime?.profileName,
+      provider: workspace.runtime?.provider,
+      repoNames: (workspace.repos ?? []).map((repo) => repo.name),
+      repoFound: (workspace.repos ?? []).map((repo) => repo.found),
+      selectedRepos: workspace.selectedRepos ?? [],
+      workflowEnv: workspace.env ?? [],
+      runtimeEnv: workspace.runtime?.env ?? [],
+    };
+  },
+});
+`), 0o644); err != nil {
+		t.Fatalf("write workflow: %v", err)
+	}
+	plan, err := defspkg.Load(root)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TSWORKSPACECTX", Name: "Runtime Workspace", DefaultBranch: "main"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if _, err := st.Repos().Create(ctx, store.RepoCreate{WorkspaceKey: "TSWORKSPACECTX", Name: "slack-src", SourceRepoID: "slack-service", DefaultBranch: "main", Groups: []string{"app"}}); err != nil {
+		t.Fatalf("create selected repo: %v", err)
+	}
+	if _, err := st.Repos().Create(ctx, store.RepoCreate{WorkspaceKey: "TSWORKSPACECTX", Name: "docs", SourceRepoID: "docs"}); err != nil {
+		t.Fatalf("create unselected repo: %v", err)
+	}
+	if err := defspkg.Apply(ctx, st, "TSWORKSPACECTX", "atlas", plan); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	run, err := CreateOrResumeRun(ctx, st, "TSWORKSPACECTX", "runtime-workspace", json.RawMessage(`{}`), "atlas")
+	if err != nil {
+		t.Fatalf("CreateOrResumeRun() error = %v", err)
+	}
+	result, err := RunOnce(ctx, st, clitest.NewMockIssueBackend(), run)
+	if err != nil {
+		t.Fatalf("RunOnce() error = %v", err)
+	}
+	if result.Run == nil || result.Run.Status != domain.WorkflowRunCompleted {
+		t.Fatalf("result = %+v, want completed runtime workspace workflow", result)
+	}
+	var data map[string]any
+	if err := json.Unmarshal(result.Run.Result, &data); err != nil {
+		t.Fatalf("decode workflow result: %v", err)
+	}
+	if data["key"] != "TSWORKSPACECTX" || data["directKey"] != "TSWORKSPACECTX" || data["workspaceName"] != "Runtime Workspace" {
+		t.Fatalf("result data = %+v, want workspace identity", data)
+	}
+	if data["workflowName"] != "runtime-workspace" || data["profile"] != "local-node" || data["provider"] != "local" {
+		t.Fatalf("result data = %+v, want workflow/runtime identity", data)
+	}
+	if got := stringSliceFromAny(data["repoNames"]); len(got) != 1 || got[0] != "slack-src" {
+		t.Fatalf("repoNames = %+v, want selected runtime repo only", got)
+	}
+	if got := boolSliceFromAny(data["repoFound"]); len(got) != 1 || !got[0] {
+		t.Fatalf("repoFound = %+v, want selected repo found", got)
+	}
+	if got := stringSliceFromAny(data["selectedRepos"]); len(got) != 1 || got[0] != "slack-src" {
+		t.Fatalf("selectedRepos = %+v, want runtime profile selected repo", got)
+	}
+	if got := stringSliceFromAny(data["workflowEnv"]); len(got) != 1 || got[0] != "WORKFLOW_FLAG" {
+		t.Fatalf("workflowEnv = %+v, want workflow env names without values", got)
+	}
+	if got := stringSliceFromAny(data["runtimeEnv"]); len(got) != 1 || got[0] != "NODE_ENV" {
+		t.Fatalf("runtimeEnv = %+v, want runtime profile env names", got)
+	}
+	events, err := st.RunEvents().List(ctx, "TSWORKSPACECTX", store.RunEventFilter{WorkflowRunID: run.RunID})
+	if err != nil {
+		t.Fatalf("list run events: %v", err)
+	}
+	if !hasWorkflowEvent(events, "runtime_workspace_read") || !hasWorkflowEvent(events, "workflow_completed") {
+		t.Fatalf("events = %+v, want runtime workspace read and completion evidence", events)
+	}
+	workspaceEvent := workflowEventDataByType(t, events, "runtime_workspace_read")
+	if workspaceEvent["key"] != "TSWORKSPACECTX" || workspaceEvent["runtimeProfileName"] != "local-node" || workspaceEvent["repoCount"] != float64(1) {
+		t.Fatalf("workspace event = %+v, want workspace read evidence", workspaceEvent)
+	}
+}
+
 func TestCodeDefinedWorkflowContextReadsWorkflowAndTaskRunState(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
@@ -1252,6 +1366,34 @@ func countWorkflowEvents(events []*domain.RunEvent, typ string) int {
 		}
 	}
 	return count
+}
+
+func stringSliceFromAny(value any) []string {
+	raw, ok := value.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(raw))
+	for _, item := range raw {
+		if s, ok := item.(string); ok {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+func boolSliceFromAny(value any) []bool {
+	raw, ok := value.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]bool, 0, len(raw))
+	for _, item := range raw {
+		if b, ok := item.(bool); ok {
+			out = append(out, b)
+		}
+	}
+	return out
 }
 
 func workflowEventDataByOperation(t *testing.T, events []*domain.RunEvent, operation string) map[string]any {

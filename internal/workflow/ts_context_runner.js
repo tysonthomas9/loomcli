@@ -278,6 +278,16 @@ function makeContext(request, workflow) {
   const parentId = String(input.parentId || input.parent_id || "");
   const workflowState = request.workflow && typeof request.workflow === "object" ? request.workflow : {};
   const runtimeProfile = request.runtimeProfile && typeof request.runtimeProfile === "object" ? request.runtimeProfile : null;
+  const workspace =
+    request.workspace && typeof request.workspace === "object"
+      ? request.workspace
+      : {
+          key: String(requestContext.workspaceKey || ""),
+          workflow: {
+            name: String(requestContext.workflowName || ""),
+            version: String(requestContext.workflowVersion || ""),
+          },
+        };
   const taskRuns = Array.isArray(request.taskRuns) ? request.taskRuns : [];
   const taskClaims = Array.isArray(request.taskClaims) ? request.taskClaims : [];
   const workItems = uniqueWorkItems([
@@ -378,6 +388,7 @@ function makeContext(request, workflow) {
     env: request.env || {},
     req: requestContext,
     request: requestContext,
+    workspace: jsonSafe(workspace),
     workflow: {
       status: async () => ({ ...workflowState }),
       cancelRequested: async () => Boolean(workflowState.cancelRequested),
@@ -410,6 +421,25 @@ function makeContext(request, workflow) {
       },
     },
     runtime: {
+      workspace: async () => {
+        const runtimeWorkspace = workspace.runtime && typeof workspace.runtime === "object" ? workspace.runtime : {};
+        const repos = Array.isArray(workspace.repos) ? workspace.repos : [];
+        const params = {
+          key: String(workspace.key || requestContext.workspaceKey || ""),
+          name: String(workspace.name || ""),
+          state: String(workspace.state || ""),
+          defaultBranch: String(workspace.defaultBranch || ""),
+          workflowName: String((workspace.workflow && workspace.workflow.name) || requestContext.workflowName || ""),
+          workflowVersion: String((workspace.workflow && workspace.workflow.version) || requestContext.workflowVersion || ""),
+          runtimeProfileName: String(runtimeWorkspace.profileName || ""),
+          provider: String(runtimeWorkspace.provider || ""),
+          selectedRepos: jsonSafe(workspace.selectedRepos || runtimeWorkspace.repos || []),
+          repoCount: repos.length,
+          env: jsonSafe(workspace.env || []),
+        };
+        operations.push({ type: "runtime.workspace", params });
+        return jsonSafe(workspace);
+      },
       profile: async () => {
         operations.push({
           type: "runtime.profile",

@@ -52,6 +52,14 @@ func appendRuntimeProfileReadEvent(ctx context.Context, st store.Store, run *dom
 	})
 }
 
+func appendRuntimeReadEvent(ctx context.Context, st store.Store, run *domain.WorkflowRun, op tsWorkflowOperation) {
+	if op.Type == "runtime.workspace" {
+		appendRuntimeWorkspaceReadEvent(ctx, st, run, op.Params)
+		return
+	}
+	appendRuntimeProfileReadEvent(ctx, st, run, op.Params)
+}
+
 func cloneStrings(values []string) []string {
 	if len(values) == 0 {
 		return nil

@@ -337,6 +337,35 @@ const runtimeTypes = `declare module '@loom/runtime' {
     status?: string;
   };
 
+  export type WorkflowWorkspaceRepo = {
+    name: string;
+    sourceRepoId?: string;
+    defaultBranch?: string;
+    groups?: string[];
+    found: boolean;
+  };
+
+  export type WorkflowRuntimeWorkspace = {
+    key: string;
+    name?: string;
+    state?: string;
+    defaultBranch?: string;
+    workflow: {
+      name: string;
+      version?: string;
+    };
+    runtime?: {
+      profileName?: string;
+      provider?: string;
+      version?: string;
+      repos?: string[];
+      env?: string[];
+    };
+    repos?: WorkflowWorkspaceRepo[];
+    selectedRepos?: string[];
+    env?: string[];
+  };
+
   export type WorkflowTaskRun = Record<string, unknown> & {
     task_run_id?: string;
     workflow_run_id?: string;
@@ -529,6 +558,7 @@ const runtimeTypes = `declare module '@loom/runtime' {
     env: Record<string, string | undefined>;
     req: WorkflowRequestContext;
     request: WorkflowRequestContext;
+    workspace: WorkflowRuntimeWorkspace;
     workflow: {
       status(): Promise<WorkflowRunState>;
       cancelRequested(): Promise<boolean>;
@@ -539,6 +569,7 @@ const runtimeTypes = `declare module '@loom/runtime' {
       }, metadata?: Record<string, unknown>): Promise<Record<string, unknown>>;
     };
     runtime: {
+      workspace(): Promise<WorkflowRuntimeWorkspace>;
       profile(): Promise<WorkflowRuntimeProfile | null>;
     };
     init(agent: AgentDefinition | CreatedAgent | AgentFactory, options?: {
