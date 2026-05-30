@@ -466,6 +466,34 @@ const runtimeTypes = `declare module '@loom/runtime' {
     readJSON<T = unknown>(path: string): Promise<T>;
   };
 
+  export type WorkflowControllerShellRunInput<T = WorkflowControllerShellResult> = Record<string, unknown> & {
+    command?: string;
+    args?: Array<string>;
+    cwd?: string;
+    env?: Record<string, string>;
+    timeoutMs?: number;
+    timeout_ms?: number;
+    exitCode?: number;
+    exit_code?: number;
+    response?: T;
+    mockResult?: T;
+    status?: 'completed' | 'failed' | 'cancelled';
+    metadata?: Record<string, string>;
+  };
+
+  export type WorkflowControllerShellResult = Record<string, unknown> & {
+    accepted?: boolean;
+    command?: string;
+    cwd?: string;
+    exitCode?: number;
+    exit_code?: number;
+  };
+
+  export type WorkflowControllerShell = {
+    run<T = WorkflowControllerShellResult>(command: string, options?: WorkflowControllerShellRunInput<T>): Promise<T>;
+    run<T = WorkflowControllerShellResult>(input: WorkflowControllerShellRunInput<T> & { command: string }): Promise<T>;
+  };
+
   export type WorkflowAgentHarness = {
     agentId: string;
     harness: string;
@@ -568,6 +596,10 @@ const runtimeTypes = `declare module '@loom/runtime' {
         work_item_id?: string;
         metadata?: Record<string, string>;
       }): Promise<Record<string, unknown>>;
+    };
+    shell: WorkflowControllerShell;
+    setup: {
+      shell: WorkflowControllerShell;
     };
     files: WorkflowFileController;
     staging: WorkflowFileController;

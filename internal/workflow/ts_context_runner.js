@@ -224,6 +224,53 @@ function makeWorkflowFiles(request, operations) {
   };
 }
 
+function makeWorkflowShell(request, operations) {
+  const run = async (commandOrOptions, maybeOptions = {}) => {
+    const options =
+      typeof commandOrOptions === "string"
+        ? { ...(maybeOptions || {}), command: commandOrOptions }
+        : commandOrOptions || {};
+    const command = String(options.command || "").trim();
+    if (!command) throw new Error("ctx.shell.run requires command");
+    const startedAt = new Date().toISOString();
+    const params = {
+      operationId: `op:${String(request.id || "workflow")}:shell:${operations.length + 1}`,
+      command,
+      args: jsonSafe(options.args || []),
+      cwd: options.cwd ? String(options.cwd) : "",
+      env: jsonSafe(options.env || {}),
+      timeoutMs: Number(options.timeoutMs || options.timeout_ms || 0),
+      metadata: jsonSafe(options.metadata || {}),
+      visibility: "controller",
+      startedAt,
+    };
+    const result = controllerShellResult(options, params);
+    const completedAt = new Date().toISOString();
+    params.completedAt = completedAt;
+    params.durationMs = Date.parse(completedAt) - Date.parse(startedAt);
+    params.status = String(options.status || "completed");
+    params.result = jsonSafe(result);
+    operations.push({ type: "shell.run", params });
+    return result;
+  };
+  return { run };
+}
+
+function controllerShellResult(options, params) {
+  if (Object.prototype.hasOwnProperty.call(options, "mockResult")) {
+    return jsonSafe(options.mockResult);
+  }
+  if (Object.prototype.hasOwnProperty.call(options, "response")) {
+    return jsonSafe(options.response);
+  }
+  return {
+    accepted: true,
+    command: params.command,
+    cwd: params.cwd,
+    exitCode: Number(options.exitCode || options.exit_code || 0),
+  };
+}
+
 function makeContext(request, workflow) {
   const logs = [];
   const operations = [];
@@ -252,6 +299,7 @@ function makeContext(request, workflow) {
   };
   const tools = workflowTools(workflow, operations);
   const files = makeWorkflowFiles(request, operations);
+  const shell = makeWorkflowShell(request, operations);
   const requestContext = request.request || {};
   const taskRunFilter = (options = {}) => {
     let out = taskRuns.slice();
@@ -460,6 +508,10 @@ function makeContext(request, workflow) {
         operations.push(op);
         return { accepted: true, ...op.params };
       },
+    },
+    shell,
+    setup: {
+      shell,
     },
     files,
     staging: files,

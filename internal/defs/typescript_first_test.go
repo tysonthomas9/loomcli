@@ -501,7 +501,7 @@ func TestLoadSupportsTypeScriptSyntax(t *testing.T) {
 type Input = { parentId: string };
 type ToolName = string;
 
-const workflowTools = ['workItems.readyChildren', 'taskRuns.ensure'] satisfies ToolName[];
+const workflowTools = ['workItems.readyChildren', 'taskRuns.ensure', 'shell.run'] satisfies ToolName[];
 const route = {
   path: '/workflows/typed-epic/run',
   auth: 'workspace',
@@ -529,7 +529,7 @@ export default defineWorkflow({
 	if workflow.Name != "typed-epic" || workflow.RoutePath != "/workflows/typed-epic/run" {
 		t.Fatalf("workflow = %+v, want typed workflow route", workflow)
 	}
-	if len(workflow.Tools) != 2 || workflow.Tools[1] != "taskRuns.ensure" {
+	if len(workflow.Tools) != 3 || workflow.Tools[1] != "taskRuns.ensure" || workflow.Tools[2] != "shell.run" {
 		t.Fatalf("tools = %+v, want typed workflow tools", workflow.Tools)
 	}
 }

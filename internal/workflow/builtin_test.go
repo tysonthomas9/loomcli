@@ -541,6 +541,90 @@ export default defineWorkflow({
 	}
 }
 
+func TestCodeDefinedWorkflowContextRecordsControllerShellRun(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	workflowPath := filepath.Join(root, ".loom", "workflows", "context-shell.ts")
+	if err := os.MkdirAll(filepath.Dir(workflowPath), 0o755); err != nil {
+		t.Fatalf("mkdir workflow dir: %v", err)
+	}
+	if err := os.WriteFile(workflowPath, []byte(`import { defineWorkflow } from '@loom/runtime';
+
+export default defineWorkflow({
+  name: 'context-shell',
+  async run(ctx) {
+    const setup = await ctx.shell.run('npm test', {
+      cwd: 'packages/api',
+      metadata: { phase: 'setup' },
+      mockResult: { exitCode: 0, stdout: 'ok' },
+    });
+    const verify = await ctx.setup.shell.run({
+      command: 'go test ./internal/workflow',
+      mockResult: { exitCode: 0, stdout: 'workflow ok' },
+    });
+    return {
+      setupExitCode: setup.exitCode,
+      verifyStdout: verify.stdout,
+    };
+  },
+});
+`), 0o644); err != nil {
+		t.Fatalf("write workflow: %v", err)
+	}
+	plan, err := defspkg.Load(root)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TSSHELL", Name: "TypeScript Shell Context"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := defspkg.Apply(ctx, st, "TSSHELL", "atlas", plan); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	run, err := CreateOrResumeRun(ctx, st, "TSSHELL", "context-shell", json.RawMessage(`{}`), "atlas")
+	if err != nil {
+		t.Fatalf("CreateOrResumeRun() error = %v", err)
+	}
+	result, err := RunOnce(ctx, st, clitest.NewMockIssueBackend(), run)
+	if err != nil {
+		t.Fatalf("RunOnce() error = %v", err)
+	}
+	if result.Run == nil || result.Run.Status != domain.WorkflowRunCompleted {
+		t.Fatalf("result = %+v, want completed shell workflow", result)
+	}
+	var output struct {
+		SetupExitCode int    `json:"setupExitCode"`
+		VerifyStdout  string `json:"verifyStdout"`
+	}
+	if err := json.Unmarshal(result.Run.Result, &output); err != nil {
+		t.Fatalf("decode result %s: %v", result.Run.Result, err)
+	}
+	if output.SetupExitCode != 0 || output.VerifyStdout != "workflow ok" {
+		t.Fatalf("output = %+v, want controller shell mock results", output)
+	}
+	events, err := st.RunEvents().List(ctx, "TSSHELL", store.RunEventFilter{WorkflowRunID: run.RunID})
+	if err != nil {
+		t.Fatalf("list run events: %v", err)
+	}
+	if countWorkflowEvents(events, "workflow_shell_run") != 2 || !hasWorkflowEvent(events, "workflow_completed") {
+		t.Fatalf("events = %+v, want two controller shell events and completion evidence", events)
+	}
+	shellEvent := workflowEventDataByType(t, events, "workflow_shell_run")
+	if shellEvent["command"] != "npm test" || shellEvent["cwd"] != "packages/api" ||
+		shellEvent["visibility"] != "controller" || shellEvent["status"] != "completed" ||
+		shellEvent["operationId"] == "" {
+		t.Fatalf("shell event = %+v, want completed controller shell evidence", shellEvent)
+	}
+	resultData, ok := shellEvent["result"].(map[string]any)
+	if !ok || resultData["exitCode"] != float64(0) || resultData["stdout"] != "ok" {
+		t.Fatalf("shell event result = %+v, want captured mock result", shellEvent["result"])
+	}
+	if countWorkflowEvents(events, "agent_session_operation") != 0 {
+		t.Fatalf("events = %+v, controller shell must not be model-visible session operation", events)
+	}
+}
+
 func TestCodeDefinedWorkflowContextInitializesAgentSession(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()

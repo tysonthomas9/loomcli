@@ -399,6 +399,8 @@ func applyTSOperation(ctx context.Context, st store.Store, run *domain.WorkflowR
 		return applyStageFileOperation(ctx, st, run, op.Params)
 	case "files.read":
 		appendFileReadEvent(ctx, st, run, op.Params)
+	case "shell.run":
+		return appendControllerShellRunEvent(ctx, st, run, op.Params)
 	case "agents.session":
 		return applyInitializeAgentSessionOperation(ctx, st, run, op.Params)
 	case "agents.session.operation":
@@ -576,6 +578,32 @@ func appendFileReadEvent(ctx context.Context, st store.Store, run *domain.Workfl
 		Message:       "workflow controller read staged file",
 		Data:          mustJSON(data),
 	})
+}
+
+func appendControllerShellRunEvent(ctx context.Context, st store.Store, run *domain.WorkflowRun, params map[string]any) error {
+	command := firstString(params, "command")
+	if command == "" {
+		return fmt.Errorf("shell.run requires command")
+	}
+	data := copyAnyMap(params)
+	data["command"] = command
+	data["workflow_run_id"] = run.RunID
+	data["visibility"] = "controller"
+	if _, ok := data["status"]; !ok {
+		data["status"] = "completed"
+	}
+	message := "workflow controller shell run admitted"
+	if firstString(data, "status") == "completed" {
+		message = "workflow controller shell run completed"
+	}
+	_, _ = st.RunEvents().Append(ctx, store.RunEventAppend{
+		WorkspaceKey:  run.WorkspaceKey,
+		WorkflowRunID: run.RunID,
+		Type:          "workflow_shell_run",
+		Message:       message,
+		Data:          mustJSON(data),
+	})
+	return nil
 }
 
 func createWorkflowArtifact(ctx context.Context, st store.Store, run *domain.WorkflowRun, params map[string]any, missingURI string) (*domain.Artifact, error) {

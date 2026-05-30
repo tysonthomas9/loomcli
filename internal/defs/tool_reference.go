@@ -61,6 +61,8 @@ func workflowContextToolReference(name string) bool {
 		"agents.dispatch",
 		"artifacts.record",
 		"artifacts.create",
+		"shell.run",
+		"setup.shell.run",
 		"files.writeText",
 		"files.writeJSON",
 		"files.readText",
