@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 )
@@ -25,18 +26,42 @@ func stageClaudeSession(t *testing.T, runtimeDir, home, agent string, stageCC bo
 		t.Fatalf("CreateSession: %v", err)
 	}
 	if stageCC {
-		token := filepath.Base(runtimeDir)
-		projectDir := filepath.Join(home, ".claude", "projects", "-tmp-"+token+"-worktrees-"+agent)
-		if mkErr := os.MkdirAll(projectDir, 0o755); mkErr != nil {
-			t.Fatalf("mkdir project: %v", mkErr)
-		}
-		line := `{"type":"assistant","message":{"id":"m1","usage":` +
-			`{"input_tokens":100,"output_tokens":50,"cache_read_input_tokens":10,"cache_creation_input_tokens":5}}}` + "\n"
-		if wErr := os.WriteFile(filepath.Join(projectDir, "cc-uuid.jsonl"), []byte(line), 0o600); wErr != nil {
-			t.Fatalf("write cc transcript: %v", wErr)
-		}
+		stageClaudeCodeTranscript(t, runtimeDir, home, agent)
 	}
 	return store, sess.SessionID()
+}
+
+func markSessionCompleted(t *testing.T, store *sessions.Store, sid string) {
+	t.Helper()
+	meta, err := store.LoadMetadata(sid)
+	if err != nil {
+		t.Fatalf("LoadMetadata: %v", err)
+	}
+	now := time.Now().UTC()
+	meta.TaskID = "TASK-1"
+	meta.Status = sessions.StatusCompleted
+	meta.ExitCode = 0
+	meta.EndedAt = &now
+	if err := store.SaveMetadata(sid, meta); err != nil {
+		t.Fatalf("SaveMetadata: %v", err)
+	}
+	if err := store.ReIndex(meta.SessionRecord); err != nil {
+		t.Fatalf("ReIndex: %v", err)
+	}
+}
+
+func stageClaudeCodeTranscript(t *testing.T, runtimeDir, home, agent string) {
+	t.Helper()
+	token := filepath.Base(runtimeDir)
+	projectDir := filepath.Join(home, ".claude", "projects", "-tmp-"+token+"-worktrees-"+agent)
+	if mkErr := os.MkdirAll(projectDir, 0o755); mkErr != nil {
+		t.Fatalf("mkdir project: %v", mkErr)
+	}
+	line := `{"type":"assistant","message":{"id":"m1","usage":` +
+		`{"input_tokens":100,"output_tokens":50,"cache_read_input_tokens":10,"cache_creation_input_tokens":5}}}` + "\n"
+	if wErr := os.WriteFile(filepath.Join(projectDir, "cc-uuid.jsonl"), []byte(line), 0o600); wErr != nil {
+		t.Fatalf("write cc transcript: %v", wErr)
+	}
 }
 
 func TestCheckOrphanedTranscripts_Backfills(t *testing.T) {
@@ -49,6 +74,7 @@ func TestCheckOrphanedTranscripts_Backfills(t *testing.T) {
 	t.Cleanup(ResetWorkspaceRuntimeDirCache)
 
 	store, sid := stageClaudeSession(t, runtimeDir, home, "jack-worker", true)
+	markSessionCompleted(t, store, sid)
 
 	doctorFix = true
 	t.Cleanup(func() { doctorFix = false })
@@ -74,6 +100,78 @@ func TestCheckOrphanedTranscripts_Backfills(t *testing.T) {
 	}
 }
 
+func TestCheckOrphanedTranscripts_SkipsRunningSessions(t *testing.T) {
+	runtimeDir := t.TempDir()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", runtimeDir)
+	ResetWorkspaceRuntimeDirCache()
+	t.Cleanup(ResetWorkspaceRuntimeDirCache)
+
+	stageClaudeSession(t, runtimeDir, home, "jack-worker", true)
+
+	doctorFix = false
+	res := checkOrphanedTranscripts()
+	if res.Status != StatusPass {
+		t.Fatalf("status = %v, want pass for running session (summary=%q detail=%q)", res.Status, res.Summary, res.Detail)
+	}
+}
+
+func TestCheckOrphanedTranscripts_BackfillReindexesEmptyTranscript(t *testing.T) {
+	t.Setenv("LOOM_REDACT_TRANSCRIPTS", "off")
+	runtimeDir := t.TempDir()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", runtimeDir)
+	ResetWorkspaceRuntimeDirCache()
+	t.Cleanup(ResetWorkspaceRuntimeDirCache)
+
+	store, err := sessions.NewStore(runtimeDir)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	sess, err := store.CreateSession(sessions.CreateOptions{
+		AgentName: "jack-worker",
+		Backend:   "claude",
+		Phase:     "implementation",
+	})
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	if err := sess.Finalize(sessions.FinalizeOptions{TaskID: "TASK-1", ExitCode: 0}); err != nil {
+		t.Fatalf("Finalize: %v", err)
+	}
+	if err := os.WriteFile(store.NativeTranscriptPath(sess.SessionID()), nil, 0o600); err != nil {
+		t.Fatalf("write empty native transcript: %v", err)
+	}
+	stageClaudeCodeTranscript(t, runtimeDir, home, "jack-worker")
+
+	doctorFix = true
+	t.Cleanup(func() { doctorFix = false })
+
+	res := checkOrphanedTranscripts()
+	if res.Status != StatusPass {
+		t.Fatalf("status = %v, summary=%q detail=%q", res.Status, res.Summary, res.Detail)
+	}
+	info, err := os.Stat(store.NativeTranscriptPath(sess.SessionID()))
+	if err != nil {
+		t.Fatalf("stat native transcript: %v", err)
+	}
+	if info.Size() == 0 {
+		t.Fatal("native transcript remained empty after backfill")
+	}
+	records, err := store.SessionsByTask("TASK-1")
+	if err != nil {
+		t.Fatalf("SessionsByTask: %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("records = %d, want 1", len(records))
+	}
+	if records[0].InputTokens != 100 || records[0].OutputTokens != 50 {
+		t.Fatalf("indexed usage = in:%d out:%d, want 100/50", records[0].InputTokens, records[0].OutputTokens)
+	}
+}
+
 func TestCheckOrphanedTranscripts_NoFixWarns(t *testing.T) {
 	runtimeDir := t.TempDir()
 	home := t.TempDir()
@@ -82,7 +180,8 @@ func TestCheckOrphanedTranscripts_NoFixWarns(t *testing.T) {
 	ResetWorkspaceRuntimeDirCache()
 	t.Cleanup(ResetWorkspaceRuntimeDirCache)
 
-	stageClaudeSession(t, runtimeDir, home, "jack-worker", false)
+	store, sid := stageClaudeSession(t, runtimeDir, home, "jack-worker", false)
+	markSessionCompleted(t, store, sid)
 
 	doctorFix = false
 	res := checkOrphanedTranscripts()

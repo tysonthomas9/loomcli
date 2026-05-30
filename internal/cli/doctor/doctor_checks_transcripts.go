@@ -81,8 +81,11 @@ func scanOrphanedClaudeSessions(store *sessions.Store) ([]orphanSession, error) 
 		if loadErr != nil || meta.Backend != backendnames.Claude {
 			continue
 		}
-		if _, statErr := os.Stat(store.NativeTranscriptPath(id)); statErr == nil {
-			continue // transcript already present
+		if meta.Status == sessions.StatusRunning {
+			continue
+		}
+		if info, statErr := os.Stat(store.NativeTranscriptPath(id)); statErr == nil && !info.IsDir() && info.Size() > 0 {
+			continue // transcript already present with content
 		}
 		orphans = append(orphans, orphanSession{
 			sessionID: id,
@@ -163,7 +166,10 @@ func backfillSession(store *sessions.Store, o orphanSession, srcPath string) err
 		CacheReadTokens:  tok.CacheReadTokens,
 		CacheWriteTokens: tok.CacheWriteTokens,
 	})
-	return store.SaveMetadata(o.sessionID, meta)
+	if err := store.SaveMetadata(o.sessionID, meta); err != nil {
+		return err
+	}
+	return store.ReIndex(meta.SessionRecord)
 }
 
 type transcriptCandidate struct {
