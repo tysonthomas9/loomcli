@@ -357,6 +357,30 @@ const runtimeTypes = `declare module '@loom/runtime' {
     sessionName?: string;
     session_name?: string;
     harness?: string;
+    prompt<T = WorkflowAgentSessionOperationReceipt>(input: WorkflowAgentSessionOperationInput<T>): Promise<T>;
+    skill<T = WorkflowAgentSessionOperationReceipt>(input: WorkflowAgentSessionOperationInput<T>): Promise<T>;
+    task<T = WorkflowAgentSessionOperationReceipt>(input: WorkflowAgentSessionOperationInput<T>): Promise<T>;
+    shell<T = WorkflowAgentSessionOperationReceipt>(input: WorkflowAgentSessionOperationInput<T>): Promise<T>;
+  };
+
+  export type WorkflowAgentSessionOperationInput<T = unknown> = Record<string, unknown> & {
+    instruction?: string;
+    prompt?: string;
+    name?: string;
+    command?: string;
+    args?: Record<string, unknown>;
+    result?: unknown;
+    response?: T;
+    mockResult?: T;
+    metadata?: Record<string, string>;
+  };
+
+  export type WorkflowAgentSessionOperationReceipt = Record<string, unknown> & {
+    accepted: boolean;
+    operation: 'prompt' | 'skill' | 'task' | 'shell';
+    agentId?: string;
+    sessionId?: string;
+    sessionName?: string;
   };
 
   export type WorkflowAgentHarness = {

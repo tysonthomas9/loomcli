@@ -199,14 +199,14 @@ function makeContext(request, workflow) {
       },
     };
     operations.push(op);
-    return {
+    return sessionHandle(operations, {
       accepted: true,
       agentId: op.params.agentId || op.params.agent_id,
       harness: op.params.harness,
       sessionName,
       sessionId: op.params.sessionId || op.params.session_id || op.params.id,
       ...op.params,
-    };
+    });
   };
 
   const ctx = {
@@ -282,7 +282,7 @@ function makeContext(request, workflow) {
       session: async (params) => {
         const op = { type: "agents.session", params: params || {} };
         operations.push(op);
-        return { accepted: true, ...op.params };
+        return sessionHandle(operations, { accepted: true, ...op.params });
       },
     },
     tools,
@@ -293,6 +293,48 @@ function makeContext(request, workflow) {
     },
   };
   return { ctx, logs, operations };
+}
+
+function sessionHandle(operations, session) {
+  const call = async (operation, input = {}) => {
+    const startedAt = new Date().toISOString();
+    const params = {
+      agentId: session.agentId || session.agent_id,
+      sessionId: session.sessionId || session.session_id || session.id,
+      harness: session.harness,
+      sessionName: session.sessionName || session.session_name,
+      taskId: session.taskId || session.task_id || session.workItemId || session.work_item_id,
+      operation,
+      input: jsonSafe(input || {}),
+      startedAt,
+      completedAt: new Date().toISOString(),
+    };
+    operations.push({ type: "agents.session.operation", params });
+    return sessionOperationResult(operation, input, params);
+  };
+  return {
+    ...session,
+    prompt: (input) => call("prompt", input),
+    skill: (input) => call("skill", input),
+    task: (input) => call("task", input),
+    shell: (input) => call("shell", input),
+  };
+}
+
+function sessionOperationResult(operation, input, params) {
+  if (input && Object.prototype.hasOwnProperty.call(input, "mockResult")) {
+    return jsonSafe(input.mockResult);
+  }
+  if (input && Object.prototype.hasOwnProperty.call(input, "response")) {
+    return jsonSafe(input.response);
+  }
+  return {
+    accepted: true,
+    operation,
+    agentId: params.agentId,
+    sessionId: params.sessionId,
+    sessionName: params.sessionName,
+  };
 }
 
 function workflowTools(workflow, operations) {

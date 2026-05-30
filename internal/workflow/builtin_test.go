@@ -484,6 +484,13 @@ export default defineWorkflow({
       phase: 'planning',
       metadata: { source: 'workflow-context' },
     });
+    const report = await session.prompt({
+      instruction: 'Review the current task and summarize the next step.',
+      mockResult: { summary: 'ready to continue', needsFix: false },
+    });
+    await session.skill({ name: 'review-checklist', instruction: 'Apply the review checklist.' });
+    await session.task({ instruction: 'Delegate a bounded child session.' });
+    await session.shell({ command: 'npm test', mockResult: { exitCode: 0 } });
     await ctx.agents.session({
       agentId: 'worker-two',
       sessionId: 'explicit-session',
@@ -491,7 +498,7 @@ export default defineWorkflow({
       status: 'idle',
       metadata: { source: 'direct-context' },
     });
-    return { agentId: session.agentId, sessionName: session.sessionName };
+    return { agentId: session.agentId, sessionName: session.sessionName, summary: report.summary };
   },
 });
 `), 0o644); err != nil {
@@ -549,6 +556,9 @@ export default defineWorkflow({
 	}
 	if !hasWorkflowEvent(events, "agent_session_initialized") || !hasWorkflowEvent(events, "workflow_completed") {
 		t.Fatalf("events = %+v, want session initialization and completion evidence", events)
+	}
+	if countWorkflowEvents(events, "agent_session_operation") != 4 {
+		t.Fatalf("events = %+v, want four model-visible session operation events", events)
 	}
 }
 
@@ -619,4 +629,14 @@ func hasWorkflowEvent(events []*domain.RunEvent, typ string) bool {
 		}
 	}
 	return false
+}
+
+func countWorkflowEvents(events []*domain.RunEvent, typ string) int {
+	count := 0
+	for _, event := range events {
+		if event != nil && event.Type == typ {
+			count++
+		}
+	}
+	return count
 }

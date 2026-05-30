@@ -286,6 +286,10 @@ func applyTSOperations(ctx context.Context, st store.Store, run *domain.Workflow
 			if err := applyInitializeAgentSessionOperation(ctx, st, run, op.Params); err != nil {
 				return nil, err
 			}
+		case "agents.session.operation":
+			if err := appendAgentSessionOperationEvent(ctx, st, run, op.Params); err != nil {
+				return nil, err
+			}
 		default:
 			return nil, fmt.Errorf("unsupported WorkflowContext operation %q", op.Type)
 		}
@@ -450,6 +454,49 @@ func appendAgentSessionInitializedEvent(ctx context.Context, st store.Store, run
 	})
 }
 
+func appendAgentSessionOperationEvent(ctx context.Context, st store.Store, run *domain.WorkflowRun, params map[string]any) error {
+	operation := firstString(params, "operation", "type")
+	if !validAgentSessionOperation(operation) {
+		return fmt.Errorf("unsupported agents.session operation %q", operation)
+	}
+	agentID := firstString(params, "agentId", "agent_id", "agent", "name")
+	if agentID == "" {
+		return fmt.Errorf("agents.session.%s requires agentId", operation)
+	}
+	taskID := firstString(params, "taskId", "task_id", "workItemId", "work_item_id")
+	harnessName := firstString(params, "harness", "harnessName", "harness_name")
+	sessionName := firstString(params, "sessionName", "session_name")
+	sessionID := firstString(params, "sessionId", "session_id", "id")
+	if sessionID == "" {
+		sessionID = generatedSessionID(run.RunID, agentID, harnessName, sessionName, taskID)
+	}
+	data := copyAnyMap(params)
+	data["agent_id"] = agentID
+	data["session_id"] = sessionID
+	data["operation"] = operation
+	data["visibility"] = "model"
+	if taskID != "" {
+		data["task_id"] = taskID
+	}
+	_, _ = st.RunEvents().Append(ctx, store.RunEventAppend{
+		WorkspaceKey:  run.WorkspaceKey,
+		WorkflowRunID: run.RunID,
+		Type:          "agent_session_operation",
+		Message:       "workflow agent session operation admitted",
+		Data:          mustJSON(data),
+	})
+	return nil
+}
+
+func validAgentSessionOperation(operation string) bool {
+	switch operation {
+	case "prompt", "skill", "task", "shell":
+		return true
+	default:
+		return false
+	}
+}
+
 func applyEnsureTaskRunOperation(ctx context.Context, st store.Store, run *domain.WorkflowRun, parentID string, params map[string]any) (*domain.TaskRun, error) {
 	workItemID := firstString(params, "workItemId", "work_item_id", "id")
 	if workItemID == "" {
@@ -595,6 +642,14 @@ func stringMap(value any) map[string]string {
 		if s, ok := value.(string); ok && strings.TrimSpace(key) != "" {
 			out[key] = s
 		}
+	}
+	return out
+}
+
+func copyAnyMap(value map[string]any) map[string]any {
+	out := make(map[string]any, len(value))
+	for key, item := range value {
+		out[key] = item
 	}
 	return out
 }
