@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
@@ -243,6 +244,188 @@ func TestExportSourceFilesRejectsSanitizedPathCollisions(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), ".loom/agents/review-bot.ts") {
 		t.Fatalf("ExportSourceFiles() error = %v, want sanitized path collision", err)
+	}
+}
+
+func TestWriteRuntimeStateExportCodifiesMutableRuntimeRecords(t *testing.T) {
+	now := time.Date(2026, 5, 30, 16, 0, 0, 0, time.UTC)
+	finished := now.Add(3 * time.Minute)
+	exitCode := 0
+	plan := &Plan{
+		Root: "workspace:STATE",
+		AgentInstances: []AgentInstanceModule{{
+			Name:         "worker",
+			RoleName:     "task",
+			SourcePath:   "control-plane:agent/worker",
+			SourceHash:   "agent-instance-hash",
+			Version:      "agent-instance-v1",
+			State:        domain.AgentStateActive,
+			DesiredState: domain.AgentDesiredRunning,
+		}},
+		Nodes: []NodeModule{{
+			NodeID:          "node-1",
+			SourcePath:      "control-plane:node/node-1",
+			OwnerActor:      "daemon",
+			RuntimeProvider: domain.RuntimeProviderLocal,
+			Labels:          []string{"local"},
+			Capabilities:    []string{"task-run"},
+			Version:         "node-v1",
+			LastHeartbeat:   &now,
+		}},
+		AgentSessions: []AgentSessionModule{{
+			SessionID:     "session-1",
+			AgentID:       "worker",
+			SourcePath:    "control-plane:agent-session/session-1",
+			SourceHash:    "session-hash",
+			Version:       "session-v1",
+			NodeID:        "node-1",
+			Kind:          domain.AgentSessionKindTask,
+			Status:        domain.AgentSessionRunning,
+			LastHeartbeat: &now,
+			FinishedAt:    &finished,
+			ExitCode:      &exitCode,
+			Metadata:      map[string]string{"workflow_run_id": "wrun-1"},
+		}},
+		AgentLeases: []AgentLeaseModule{{
+			LeaseID:       "lease-1",
+			SessionID:     "session-1",
+			SourcePath:    "control-plane:agent-lease/lease-1",
+			SourceHash:    "lease-hash",
+			Version:       "lease-v1",
+			AgentID:       "worker",
+			NodeID:        "node-1",
+			Token:         "token-1",
+			FencingToken:  9,
+			Status:        domain.AgentLeaseActive,
+			ExpiresAt:     &finished,
+			LastHeartbeat: &now,
+		}},
+		AgentOwnershipLeases: []AgentOwnershipLeaseModule{{
+			AgentID:         "worker",
+			LeaseID:         "owner-lease-1",
+			OwnerID:         "daemon",
+			SourcePath:      "control-plane:agent-ownership-lease/worker",
+			SourceHash:      "owner-lease-hash",
+			Version:         "owner-lease-v1",
+			RuntimeProvider: domain.RuntimeProviderLocal,
+			NodeID:          "node-1",
+			Token:           "owner-token-1",
+			FencingToken:    11,
+			Status:          domain.AgentLeaseActive,
+			ExpiresAt:       &finished,
+			LastHeartbeat:   &now,
+		}},
+		AgentCommands: []AgentCommandModule{{
+			CommandID:     "cmd-1",
+			SourcePath:    "control-plane:agent-command/cmd-1",
+			SourceHash:    "cmd-hash",
+			Version:       "cmd-v1",
+			Cursor:        7,
+			TargetAgentID: "worker",
+			TargetNodeID:  "node-1",
+			SessionID:     "session-1",
+			Type:          "start-task",
+			Status:        domain.AgentCommandSucceeded,
+			Result:        "started",
+		}},
+		TerminalSessions: []TerminalSessionModule{{
+			TerminalID:      "term-1",
+			SourcePath:      "control-plane:terminal-session/term-1",
+			SourceHash:      "terminal-hash",
+			Version:         "terminal-v1",
+			AgentID:         "worker",
+			SessionID:       "session-1",
+			NodeID:          "node-1",
+			Title:           "Worker terminal",
+			Kind:            "pty",
+			Status:          domain.TerminalSessionOpen,
+			PTYProvider:     "local",
+			StreamRef:       "stream://term-1",
+			TranscriptRef:   "transcript://term-1",
+			AttachedClients: 1,
+			LastSeenAt:      &now,
+		}},
+		Artifacts: []ArtifactModule{{
+			ArtifactID: "artifact-1",
+			SourcePath: "control-plane:artifact/artifact-1",
+			SourceHash: "artifact-hash",
+			Version:    "artifact-v1",
+			AgentID:    "worker",
+			SessionID:  "session-1",
+			Type:       "report",
+			URI:        "artifact://report.json",
+			Summary:    "runtime report",
+		}},
+		WorkflowRuns: []WorkflowRunModule{{
+			RunID:        "wrun-1",
+			WorkflowName: "epic-runner",
+			SourcePath:   "control-plane:workflow-run/wrun-1",
+			SourceHash:   "workflow-run-hash",
+			Version:      "workflow-run-v1",
+			Input:        json.RawMessage(`{"parentId":"EPIC-1"}`),
+			Status:       domain.WorkflowRunRunning,
+			LeaseToken:   "workflow-token",
+			StartedAt:    &now,
+		}},
+		TaskRuns: []TaskRunModule{{
+			TaskRunID:     "trun-1",
+			WorkflowRunID: "wrun-1",
+			WorkItemID:    "TASK-1",
+			RoleName:      "task",
+			SourcePath:    "control-plane:task-run/trun-1",
+			SourceHash:    "task-run-hash",
+			Version:       "task-run-v1",
+			Status:        domain.TaskRunRunning,
+			AgentID:       "worker",
+			NodeID:        "node-1",
+			SessionID:     "session-1",
+			StartedAt:     &now,
+		}},
+		RunEvents: []RunEventModule{{
+			EventID:       "evt-1",
+			WorkflowRunID: "wrun-1",
+			TaskRunID:     "trun-1",
+			SourcePath:    "control-plane:run-event/evt-1",
+			SourceHash:    "event-hash",
+			Version:       "event-v1",
+			EventIndex:    1,
+			Type:          "task_run_dispatched",
+			Data:          json.RawMessage(`{"task_run_id":"trun-1"}`),
+		}},
+	}
+	exportRoot := t.TempDir()
+	files, err := WriteRuntimeStateExport(exportRoot, plan, false)
+	if err != nil {
+		t.Fatalf("WriteRuntimeStateExport() error = %v", err)
+	}
+	if len(files) != 1 || files[0].Path != runtimeStateExportPath {
+		t.Fatalf("state files = %+v, want runtime state snapshot", files)
+	}
+	data, err := os.ReadFile(filepath.Join(exportRoot, ".loom", "state", "workspace-runtime-state.json"))
+	if err != nil {
+		t.Fatalf("read runtime state snapshot: %v", err)
+	}
+	if !strings.Contains(string(data), runtimeStateExportSchema) ||
+		!strings.Contains(string(data), `"agent_instances"`) ||
+		!strings.Contains(string(data), `"workflow_runs"`) {
+		t.Fatalf("runtime state snapshot = %s, want reviewable mutable runtime records", data)
+	}
+
+	loaded, err := Load(exportRoot)
+	if err != nil {
+		t.Fatalf("Load(exportRoot) error = %v", err)
+	}
+	if got := Summary(loaded); got != "agents=0 workflows=0 runtimes=0 agent_instances=1 nodes=1 agent_sessions=1 agent_leases=1 agent_ownership_leases=1 agent_commands=1 terminal_sessions=1 workflow_runs=1 task_runs=1 run_events=1 artifacts=1" {
+		t.Fatalf("Summary(loaded) = %q, want mutable runtime state imported from reviewable artifact", got)
+	}
+	if loaded.AgentInstances[0].Name != "worker" ||
+		loaded.WorkflowRuns[0].RunID != "wrun-1" ||
+		!strings.Contains(string(loaded.WorkflowRuns[0].Input), `"parentId"`) ||
+		loaded.TaskRuns[0].TaskRunID != "trun-1" ||
+		loaded.RunEvents[0].EventID != "evt-1" ||
+		loaded.AgentSessions[0].ExitCode == nil ||
+		*loaded.AgentSessions[0].ExitCode != 0 {
+		t.Fatalf("loaded runtime state = %+v, want source-loadable mutable records", loaded)
 	}
 }
 

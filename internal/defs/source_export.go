@@ -62,12 +62,16 @@ func ExportSourceFiles(plan *Plan) ([]SourceExportFile, error) {
 }
 
 func WriteSourceExport(root string, plan *Plan, force bool) ([]SourceExportFile, error) {
-	if strings.TrimSpace(root) == "" {
-		root = "."
-	}
 	files, err := ExportSourceFiles(plan)
 	if err != nil {
 		return nil, err
+	}
+	return writeExportFiles(root, files, force)
+}
+
+func writeExportFiles(root string, files []SourceExportFile, force bool) ([]SourceExportFile, error) {
+	if strings.TrimSpace(root) == "" {
+		root = "."
 	}
 	for _, file := range files {
 		target := filepath.Clean(filepath.Join(root, filepath.FromSlash(file.Path)))

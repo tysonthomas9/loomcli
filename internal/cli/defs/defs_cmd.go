@@ -19,6 +19,7 @@ var (
 	defsJSON          bool
 	defsFromWorkspace bool
 	defsExportForce   bool
+	defsExportState   bool
 )
 
 var defsCmd = &cobra.Command{
@@ -60,6 +61,7 @@ func init() {
 	defsCmd.PersistentFlags().BoolVar(&defsJSON, "json", false, "JSON output")
 	defsPlanCmd.Flags().BoolVar(&defsFromWorkspace, "from-workspace", false, "Read durable definitions from the active Loom workspace instead of local source")
 	defsExportSourceCmd.Flags().BoolVar(&defsExportForce, "force", false, "Overwrite existing generated source files")
+	defsExportSourceCmd.Flags().BoolVar(&defsExportState, "include-state", false, "Also write reviewable mutable runtime state snapshots under .loom/state")
 	defsCmd.AddCommand(defsCheckCmd, defsPlanCmd, defsApplyCmd, defsExportSourceCmd)
 	cli.RegisterCommand(defsCmd)
 }
@@ -128,10 +130,17 @@ func runDefsExportSource(_ *cobra.Command, _ []string) error {
 		if err != nil {
 			return err
 		}
+		if defsExportState {
+			stateFiles, err := defspkg.WriteRuntimeStateExport(defsDir, plan, defsExportForce)
+			if err != nil {
+				return err
+			}
+			files = append(files, stateFiles...)
+		}
 		if defsJSON {
 			return cmdstore.WriteJSON(files)
 		}
-		fmt.Printf("Exported %d source files to %s\n", len(files), defsDir)
+		fmt.Printf("Exported %d files to %s\n", len(files), defsDir)
 		for _, file := range files {
 			fmt.Printf("  %s\n", file.Path)
 		}

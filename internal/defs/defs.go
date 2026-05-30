@@ -47,6 +47,10 @@ func Load(root string) (*Plan, error) {
 	if strings.TrimSpace(plan.Root) == "" {
 		plan.Root = abs
 	}
+	if err := mergeRuntimeStateExport(abs, plan); err != nil {
+		return nil, err
+	}
+	sortPlan(plan)
 	if err := validatePlan(plan); err != nil {
 		return nil, err
 	}
