@@ -108,6 +108,12 @@ func (s *Supervisor) supervisedAgentBody(name string, ap *AgentProcess) {
 	defer s.Wg.Done()
 	defer close(ap.Done)
 	defer s.RecoverAndSignal(name)
+	// Deregister the per-agent liveness tick on every exit path (max restarts,
+	// config removed, shutdown, or panic). The watchdog only guards goroutines
+	// it still tracks, so a goroutine that intentionally exited must stop being
+	// tracked — otherwise its frozen tick eventually trips SignalFatal and the
+	// daemon kills every healthy agent along with the departed one.
+	defer s.DeleteTick(name)
 	s.superviseAgent(ap)
 }
 
@@ -134,6 +140,16 @@ func (s *Supervisor) RecordTick(name string) {
 		return
 	}
 	tick.Store(time.Now().UnixNano())
+}
+
+// DeleteTick removes a goroutine's tick slot. Call this when a watched
+// goroutine deliberately and permanently exits (e.g. a per-agent supervise
+// loop that hit max restarts, had its config removed, or is shutting down).
+// Without it the slot freezes at its last stamp and the liveness watchdog
+// eventually mistakes the departed goroutine for a wedged one and FATAL-kills
+// the whole daemon. Idempotent: deleting an absent name is a no-op.
+func (s *Supervisor) DeleteTick(name string) {
+	s.Ticks.Delete(name)
 }
 
 // LoadTick returns the last recorded tick time for a goroutine name, and false
