@@ -32,6 +32,9 @@ func PlanFromWorkspace(ctx context.Context, st store.Store, workspaceKey string)
 	if err := appendControlPlaneRoles(ctx, st, workspaceKey, plan, index.hasAgent); err != nil {
 		return nil, err
 	}
+	if err := appendControlPlaneAgentInstances(ctx, st, workspaceKey, plan); err != nil {
+		return nil, err
+	}
 	if err := appendControlPlaneWorkflows(ctx, st, workspaceKey, plan, index.hasWorkflow); err != nil {
 		return nil, err
 	}
@@ -249,6 +252,44 @@ func agentFromRole(role *domain.Role) AgentModule {
 	return agent
 }
 
+func appendControlPlaneAgentInstances(ctx context.Context, st store.Store, workspaceKey string, plan *Plan) error {
+	agents, err := st.Agents().List(ctx, workspaceKey)
+	if err != nil {
+		return fmt.Errorf("list agent instances: %w", err)
+	}
+	for _, agent := range agents {
+		if agent == nil {
+			continue
+		}
+		plan.AgentInstances = append(plan.AgentInstances, agentInstanceFromControlPlane(agent))
+	}
+	return nil
+}
+
+func agentInstanceFromControlPlane(agent *domain.Agent) AgentInstanceModule {
+	instance := AgentInstanceModule{
+		Name:             agent.Name,
+		RoleName:         agent.RoleName,
+		SourcePath:       "control-plane:agent/" + agent.Name,
+		Auto:             agent.Auto,
+		Backend:          agent.Backend,
+		FallbackBackends: compactStrings(agent.FallbackBackends),
+		Repos:            compactStrings(agent.Repos),
+		RepoGroups:       compactStrings(agent.RepoGroups),
+		CrossRepo:        agent.CrossRepo,
+		Parent:           agent.Parent,
+		State:            agent.State,
+		Mode:             agent.Mode,
+		TaskFilter:       agent.TaskFilter,
+		MaxConcurrency:   agent.MaxConcurrency,
+		BudgetPolicy:     agent.BudgetPolicy,
+		DesiredState:     agent.DesiredState,
+	}
+	instance.SourceHash = workspaceHash(instance)
+	instance.Version = version(instance.SourceHash)
+	return instance
+}
+
 func appendControlPlaneWorkflows(ctx context.Context, st store.Store, workspaceKey string, plan *Plan, skip map[string]bool) error {
 	definitions, err := st.WorkflowDefinitions().List(ctx, workspaceKey, store.WorkflowDefinitionFilter{Status: domain.DefinitionStatusActive})
 	if err != nil {
@@ -388,6 +429,7 @@ func sortPlan(plan *Plan) {
 	sort.Slice(plan.Skills, func(i, j int) bool { return plan.Skills[i].Name < plan.Skills[j].Name })
 	sort.Slice(plan.Tools, func(i, j int) bool { return plan.Tools[i].Name < plan.Tools[j].Name })
 	sort.Slice(plan.Agents, func(i, j int) bool { return plan.Agents[i].Name < plan.Agents[j].Name })
+	sort.Slice(plan.AgentInstances, func(i, j int) bool { return plan.AgentInstances[i].Name < plan.AgentInstances[j].Name })
 	sort.Slice(plan.Workflows, func(i, j int) bool { return plan.Workflows[i].Name < plan.Workflows[j].Name })
 	sort.Slice(plan.Runtimes, func(i, j int) bool { return plan.Runtimes[i].Name < plan.Runtimes[j].Name })
 }

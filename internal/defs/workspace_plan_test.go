@@ -33,6 +33,25 @@ func TestPlanFromWorkspaceProjectsControlPlaneRecords(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create role: %v", err)
 	}
+	if _, err := st.Agents().Create(ctx, store.AgentCreate{
+		WorkspaceKey:   "CP",
+		Name:           "triage-bot",
+		RoleName:       "triage",
+		Auto:           true,
+		Backend:        "codex",
+		Repos:          []string{"slack-src"},
+		Mode:           domain.AgentModeService,
+		TaskFilter:     "needs_design",
+		MaxConcurrency: 1,
+		BudgetPolicy:   "p2",
+		DesiredState:   domain.AgentDesiredRunning,
+	}); err != nil {
+		t.Fatalf("create agent instance: %v", err)
+	}
+	active := domain.AgentStateActive
+	if _, err := st.Agents().Update(ctx, "CP", "triage-bot", store.AgentUpdate{State: &active}); err != nil {
+		t.Fatalf("activate agent instance: %v", err)
+	}
 	workflowManifest := mustJSON(map[string]any{
 		"builtin": "run-parent-work-items",
 		"tools":   []string{"workItems.readyChildren", "taskRuns.ensure"},
@@ -109,7 +128,7 @@ func TestPlanFromWorkspaceProjectsControlPlaneRecords(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PlanFromWorkspace() error = %v", err)
 	}
-	if got := Summary(plan); got != "agents=1 workflows=1 runtimes=1 tools=1" {
+	if got := Summary(plan); got != "agents=1 workflows=1 runtimes=1 agent_instances=1 tools=1" {
 		t.Fatalf("Summary() = %q, want direct record parity", got)
 	}
 	if plan.Root != "workspace:CP" {
@@ -124,6 +143,18 @@ func TestPlanFromWorkspaceProjectsControlPlaneRecords(t *testing.T) {
 	}
 	if !strings.Contains(fmtStringSlice(agent.Tools), "github.issue.read") || !strings.Contains(fmtStringSlice(agent.DeniedCommands), "bash") {
 		t.Fatalf("agent tools = %+v denied=%+v, want direct role tool policy", agent.Tools, agent.DeniedCommands)
+	}
+	instance := plan.AgentInstances[0]
+	if instance.Name != "triage-bot" || instance.RoleName != "triage" ||
+		instance.SourcePath != "control-plane:agent/triage-bot" {
+		t.Fatalf("agent instance = %+v, want durable agentdef projection", instance)
+	}
+	if !instance.Auto || instance.State != domain.AgentStateActive ||
+		instance.DesiredState != domain.AgentDesiredRunning ||
+		instance.Mode != domain.AgentModeService || instance.TaskFilter != "needs_design" ||
+		instance.MaxConcurrency != 1 || instance.BudgetPolicy != "p2" ||
+		!strings.Contains(fmtStringSlice(instance.Repos), "slack-src") {
+		t.Fatalf("agent instance policy = %+v, want durable runtime assignment", instance)
 	}
 	workflow := plan.Workflows[0]
 	if workflow.Name != "slack-clone-runner" || workflow.Builtin != "run-parent-work-items" {
@@ -141,6 +172,22 @@ func TestPlanFromWorkspaceProjectsControlPlaneRecords(t *testing.T) {
 	}
 	if plan.Tools[0].Name != "github_issue_read" || plan.Tools[0].Handler != "workflow" {
 		t.Fatalf("tools = %+v, want active tool DefinitionVersion projection", plan.Tools)
+	}
+
+	imported := memstore.New()
+	if _, err := imported.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "IMPORT", Name: "Imported"}); err != nil {
+		t.Fatalf("create import workspace: %v", err)
+	}
+	if err := Apply(ctx, imported, "IMPORT", "test", plan); err != nil {
+		t.Fatalf("Apply(imported plan) error = %v", err)
+	}
+	importedAgent, err := imported.Agents().Get(ctx, "IMPORT", "triage-bot")
+	if err != nil {
+		t.Fatalf("get imported agent instance: %v", err)
+	}
+	if importedAgent.RoleName != "triage" || importedAgent.DesiredState != domain.AgentDesiredRunning ||
+		importedAgent.State != domain.AgentStateActive || importedAgent.TaskFilter != "needs_design" {
+		t.Fatalf("imported agent = %+v, want round-tripped durable agent instance", importedAgent)
 	}
 }
 

@@ -16,12 +16,13 @@ import (
 )
 
 type Plan struct {
-	Root      string           `json:"root"`
-	Agents    []AgentModule    `json:"agents,omitempty"`
-	Workflows []WorkflowModule `json:"workflows,omitempty"`
-	Runtimes  []RuntimeModule  `json:"runtimes,omitempty"`
-	Skills    []SkillModule    `json:"skills,omitempty"`
-	Tools     []ToolModule     `json:"tools,omitempty"`
+	Root           string                `json:"root"`
+	Agents         []AgentModule         `json:"agents,omitempty"`
+	AgentInstances []AgentInstanceModule `json:"agent_instances,omitempty"`
+	Workflows      []WorkflowModule      `json:"workflows,omitempty"`
+	Runtimes       []RuntimeModule       `json:"runtimes,omitempty"`
+	Skills         []SkillModule         `json:"skills,omitempty"`
+	Tools          []ToolModule          `json:"tools,omitempty"`
 }
 
 type AgentModule struct {
@@ -128,7 +129,7 @@ func Load(root string) (*Plan, error) {
 	return plan, nil
 }
 
-//nolint:funlen // Applying a plan is intentionally linear so each durable record write stays visible.
+//nolint:gocognit,funlen // Applying a plan is intentionally linear so each durable record write stays visible.
 func Apply(ctx context.Context, st store.Store, workspaceKey, actor string, plan *Plan) error {
 	if st == nil {
 		return fmt.Errorf("store not configured")
@@ -164,6 +165,9 @@ func Apply(ctx context.Context, st store.Store, workspaceKey, actor string, plan
 		if err := upsertRole(ctx, st, workspaceKey, agent); err != nil {
 			return err
 		}
+	}
+	if err := applyAgentInstances(ctx, st, workspaceKey, plan.AgentInstances); err != nil {
+		return err
 	}
 	for _, rt := range plan.Runtimes {
 		manifest := mustJSON(rt)
@@ -621,6 +625,9 @@ func Summary(plan *Plan) string {
 		return "No definition plan loaded"
 	}
 	summary := fmt.Sprintf("agents=%d workflows=%d runtimes=%d", len(plan.Agents), len(plan.Workflows), len(plan.Runtimes))
+	if len(plan.AgentInstances) > 0 {
+		summary += fmt.Sprintf(" agent_instances=%d", len(plan.AgentInstances))
+	}
 	if len(plan.Skills) > 0 {
 		summary += fmt.Sprintf(" skills=%d", len(plan.Skills))
 	}
@@ -731,6 +738,18 @@ func validatePlan(plan *Plan) error {
 		if err := validateNoExactCollision(agent.SourcePath, "model tool", agent.Tools, "sandbox command", agent.AllowedCommands); err != nil {
 			return err
 		}
+	}
+	for _, instance := range plan.AgentInstances {
+		if strings.TrimSpace(instance.Name) == "" {
+			return fmt.Errorf("%s: agent instance name is required", instance.SourcePath)
+		}
+		if strings.TrimSpace(instance.RoleName) == "" {
+			return fmt.Errorf("%s: agent instance %q must declare a role_name", instance.SourcePath, instance.Name)
+		}
+		if prior := seen["agent-instance:"+instance.Name]; prior != "" {
+			return fmt.Errorf("duplicate agent instance %q in %s and %s", instance.Name, prior, instance.SourcePath)
+		}
+		seen["agent-instance:"+instance.Name] = instance.SourcePath
 	}
 	for _, wf := range plan.Workflows {
 		if strings.TrimSpace(wf.Name) == "" {
