@@ -560,6 +560,22 @@ export default defineWorkflow({
 	if countWorkflowEvents(events, "agent_session_operation") != 4 {
 		t.Fatalf("events = %+v, want four model-visible session operation events", events)
 	}
+	promptEvent := workflowEventDataByOperation(t, events, "prompt")
+	if promptEvent["status"] != "completed" || promptEvent["operationId"] == "" {
+		t.Fatalf("prompt event = %+v, want completed operation with operation id", promptEvent)
+	}
+	promptResult, ok := promptEvent["result"].(map[string]any)
+	if !ok || promptResult["summary"] != "ready to continue" || promptResult["needsFix"] != false {
+		t.Fatalf("prompt result = %+v, want captured structured mock result", promptEvent["result"])
+	}
+	if _, ok := promptEvent["durationMs"].(float64); !ok {
+		t.Fatalf("prompt event = %+v, want durationMs", promptEvent)
+	}
+	shellEvent := workflowEventDataByOperation(t, events, "shell")
+	shellResult, ok := shellEvent["result"].(map[string]any)
+	if !ok || shellResult["exitCode"] != float64(0) {
+		t.Fatalf("shell result = %+v, want captured shell mock result", shellEvent["result"])
+	}
 }
 
 func TestCodeDefinedWorkflowContextReadsWorkflowAndTaskRunState(t *testing.T) {
@@ -862,4 +878,22 @@ func countWorkflowEvents(events []*domain.RunEvent, typ string) int {
 		}
 	}
 	return count
+}
+
+func workflowEventDataByOperation(t *testing.T, events []*domain.RunEvent, operation string) map[string]any {
+	t.Helper()
+	for _, event := range events {
+		if event == nil || event.Type != "agent_session_operation" {
+			continue
+		}
+		var data map[string]any
+		if err := json.Unmarshal(event.Data, &data); err != nil {
+			t.Fatalf("decode event data %s: %v", event.EventID, err)
+		}
+		if data["operation"] == operation {
+			return data
+		}
+	}
+	t.Fatalf("missing agent_session_operation event for %s in %+v", operation, events)
+	return nil
 }

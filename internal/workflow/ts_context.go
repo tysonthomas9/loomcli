@@ -644,14 +644,21 @@ func appendAgentSessionOperationEvent(ctx context.Context, st store.Store, run *
 	data["session_id"] = sessionID
 	data["operation"] = operation
 	data["visibility"] = "model"
+	if _, ok := data["status"]; !ok {
+		data["status"] = "admitted"
+	}
 	if taskID != "" {
 		data["task_id"] = taskID
+	}
+	message := "workflow agent session operation admitted"
+	if firstString(data, "status") == "completed" {
+		message = "workflow agent session operation completed"
 	}
 	_, _ = st.RunEvents().Append(ctx, store.RunEventAppend{
 		WorkspaceKey:  run.WorkspaceKey,
 		WorkflowRunID: run.RunID,
 		Type:          "agent_session_operation",
-		Message:       "workflow agent session operation admitted",
+		Message:       message,
 		Data:          mustJSON(data),
 	})
 	return nil

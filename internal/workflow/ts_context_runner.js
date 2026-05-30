@@ -413,7 +413,9 @@ function isLiveTaskRun(run) {
 function sessionHandle(operations, session) {
   const call = async (operation, input = {}) => {
     const startedAt = new Date().toISOString();
+    const operationId = sessionOperationId(session, operation, operations.length);
     const params = {
+      operationId,
       agentId: session.agentId || session.agent_id,
       sessionId: session.sessionId || session.session_id || session.id,
       harness: session.harness,
@@ -422,10 +424,15 @@ function sessionHandle(operations, session) {
       operation,
       input: jsonSafe(input || {}),
       startedAt,
-      completedAt: new Date().toISOString(),
     };
+    const result = sessionOperationResult(operation, input, params);
+    const completedAt = new Date().toISOString();
+    params.completedAt = completedAt;
+    params.durationMs = Date.parse(completedAt) - Date.parse(startedAt);
+    params.status = "completed";
+    params.result = jsonSafe(result);
     operations.push({ type: "agents.session.operation", params });
-    return sessionOperationResult(operation, input, params);
+    return result;
   };
   return {
     ...session,
@@ -434,6 +441,11 @@ function sessionHandle(operations, session) {
     task: (input) => call("task", input),
     shell: (input) => call("shell", input),
   };
+}
+
+function sessionOperationId(session, operation, index) {
+  const sessionId = String(session.sessionId || session.session_id || session.id || session.sessionName || "session");
+  return `op:${sessionId}:${operation}:${index + 1}`;
 }
 
 function sessionOperationResult(operation, input, params) {
