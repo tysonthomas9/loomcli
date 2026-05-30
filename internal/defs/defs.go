@@ -20,6 +20,7 @@ type Plan struct {
 	Agents           []AgentModule           `json:"agents,omitempty"`
 	AgentInstances   []AgentInstanceModule   `json:"agent_instances,omitempty"`
 	AgentSessions    []AgentSessionModule    `json:"agent_sessions,omitempty"`
+	AgentCommands    []AgentCommandModule    `json:"agent_commands,omitempty"`
 	TerminalSessions []TerminalSessionModule `json:"terminal_sessions,omitempty"`
 	Artifacts        []ArtifactModule        `json:"artifacts,omitempty"`
 	Workflows        []WorkflowModule        `json:"workflows,omitempty"`
@@ -168,6 +169,9 @@ func Apply(ctx context.Context, st store.Store, workspaceKey, actor string, plan
 		return err
 	}
 	if err := applyAgentSessions(ctx, st, workspaceKey, plan.AgentSessions); err != nil {
+		return err
+	}
+	if err := applyAgentCommands(ctx, st, workspaceKey, plan.AgentCommands); err != nil {
 		return err
 	}
 	if err := applyTerminalSessions(ctx, st, workspaceKey, plan.TerminalSessions); err != nil {
@@ -665,6 +669,19 @@ func validatePlan(plan *Plan) error {
 			return fmt.Errorf("duplicate agent session %q in %s and %s", session.SessionID, prior, sourcePath)
 		}
 		seen["agent-session:"+session.SessionID] = sourcePath
+	}
+	for _, command := range plan.AgentCommands {
+		sourcePath := firstNonEmpty(command.SourcePath, "agent_command:"+command.CommandID)
+		if strings.TrimSpace(command.CommandID) == "" {
+			return fmt.Errorf("%s: agent command id is required", sourcePath)
+		}
+		if strings.TrimSpace(command.Type) == "" {
+			return fmt.Errorf("%s: agent command %q must declare a type", sourcePath, command.CommandID)
+		}
+		if prior := seen["agent-command:"+command.CommandID]; prior != "" {
+			return fmt.Errorf("duplicate agent command %q in %s and %s", command.CommandID, prior, sourcePath)
+		}
+		seen["agent-command:"+command.CommandID] = sourcePath
 	}
 	for _, terminal := range plan.TerminalSessions {
 		sourcePath := firstNonEmpty(terminal.SourcePath, "terminal_session:"+terminal.TerminalID)

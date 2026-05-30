@@ -232,6 +232,23 @@ func TestPlanFromWorkspaceProjectsControlPlaneRecords(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("update agent session: %v", err)
 	}
+	if _, err := st.AgentCommands().Create(ctx, store.AgentCommandCreate{
+		WorkspaceKey:  "CP",
+		CommandID:     "cmd-1",
+		TargetAgentID: "triage-bot",
+		TargetNodeID:  "node-local",
+		SessionID:     "session-1",
+		Type:          "start-task",
+		Payload:       map[string]string{"workflow_run_id": workflowRun.RunID, "task_run_id": taskRun.TaskRunID},
+	}); err != nil {
+		t.Fatalf("create agent command: %v", err)
+	}
+	if _, err := st.AgentCommands().Complete(ctx, "CP", "cmd-1", store.AgentCommandComplete{
+		Status: domain.AgentCommandSucceeded,
+		Result: "started",
+	}); err != nil {
+		t.Fatalf("complete agent command: %v", err)
+	}
 	if _, err := st.Artifacts().Create(ctx, store.ArtifactCreate{
 		WorkspaceKey: "CP",
 		ArtifactID:   "artifact-slack-1",
@@ -254,7 +271,7 @@ func TestPlanFromWorkspaceProjectsControlPlaneRecords(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PlanFromWorkspace() error = %v", err)
 	}
-	if got := Summary(plan); got != "agents=1 workflows=1 runtimes=1 agent_instances=1 agent_sessions=1 terminal_sessions=1 workflow_runs=1 task_runs=1 artifacts=1 tools=1" {
+	if got := Summary(plan); got != "agents=1 workflows=1 runtimes=1 agent_instances=1 agent_sessions=1 agent_commands=1 terminal_sessions=1 workflow_runs=1 task_runs=1 artifacts=1 tools=1" {
 		t.Fatalf("Summary() = %q, want direct record parity", got)
 	}
 	if plan.Root != "workspace:CP" {
@@ -291,6 +308,14 @@ func TestPlanFromWorkspaceProjectsControlPlaneRecords(t *testing.T) {
 		session.Summary != "working on sidebar" || session.Metadata["harness"] != "planning" ||
 		session.LastHeartbeat == nil || !session.LastHeartbeat.Equal(sessionHeartbeat) {
 		t.Fatalf("agent session = %+v, want durable session runtime state", session)
+	}
+	command := plan.AgentCommands[0]
+	if command.CommandID != "cmd-1" || command.TargetAgentID != "triage-bot" ||
+		command.TargetNodeID != "node-local" || command.SessionID != "session-1" ||
+		command.Type != "start-task" || command.Status != domain.AgentCommandSucceeded ||
+		command.Result != "started" || command.Payload["task_run_id"] != "trun-slack-1" ||
+		command.Cursor == 0 {
+		t.Fatalf("agent command = %+v, want durable command routing and result state", command)
 	}
 	terminal := plan.TerminalSessions[0]
 	if terminal.TerminalID != "term-1" || terminal.AgentID != "triage-bot" ||
@@ -400,6 +425,16 @@ func TestPlanFromWorkspaceProjectsControlPlaneRecords(t *testing.T) {
 		importedSession.Metadata["workflow_run_id"] != "wrun-slack-1" ||
 		!importedSession.LastHeartbeat.Equal(sessionHeartbeat) {
 		t.Fatalf("imported agent session = %+v, want round-tripped durable session state", importedSession)
+	}
+	importedCommand, err := imported.AgentCommands().Get(ctx, "IMPORT", "cmd-1")
+	if err != nil {
+		t.Fatalf("get imported agent command: %v", err)
+	}
+	if importedCommand.TargetAgentID != "triage-bot" || importedCommand.TargetNodeID != "node-local" ||
+		importedCommand.SessionID != "session-1" || importedCommand.Type != "start-task" ||
+		importedCommand.Status != domain.AgentCommandSucceeded || importedCommand.Result != "started" ||
+		importedCommand.Payload["workflow_run_id"] != "wrun-slack-1" {
+		t.Fatalf("imported agent command = %+v, want round-tripped command state", importedCommand)
 	}
 	importedTerminal, err := imported.TerminalSessions().Get(ctx, "IMPORT", "term-1")
 	if err != nil {

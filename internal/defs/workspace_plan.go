@@ -52,6 +52,9 @@ func appendControlPlaneState(ctx context.Context, st store.Store, workspaceKey s
 	if err := appendControlPlaneAgentSessions(ctx, st, workspaceKey, plan); err != nil {
 		return err
 	}
+	if err := appendControlPlaneAgentCommands(ctx, st, workspaceKey, plan); err != nil {
+		return err
+	}
 	if err := appendControlPlaneTerminalSessions(ctx, st, workspaceKey, plan); err != nil {
 		return err
 	}
@@ -350,6 +353,43 @@ func agentSessionFromControlPlane(session *domain.AgentSession) AgentSessionModu
 		module.LastHeartbeat = &lastHeartbeat
 	}
 	module.FinishedAt = cloneWorkflowRunTime(session.FinishedAt)
+	module.SourceHash = workspaceHash(module)
+	module.Version = version(module.SourceHash)
+	return module
+}
+
+func appendControlPlaneAgentCommands(ctx context.Context, st store.Store, workspaceKey string, plan *Plan) error {
+	commandStore := st.AgentCommands()
+	if commandStore == nil {
+		return fmt.Errorf("agent command store not configured")
+	}
+	commands, err := commandStore.List(ctx, workspaceKey, store.AgentCommandFilter{Limit: 10000})
+	if err != nil {
+		return fmt.Errorf("list agent commands: %w", err)
+	}
+	for _, command := range commands {
+		if command == nil {
+			continue
+		}
+		plan.AgentCommands = append(plan.AgentCommands, agentCommandFromControlPlane(command))
+	}
+	return nil
+}
+
+func agentCommandFromControlPlane(command *domain.AgentCommand) AgentCommandModule {
+	module := AgentCommandModule{
+		CommandID:     command.CommandID,
+		SourcePath:    "control-plane:agent-command/" + command.CommandID,
+		Cursor:        command.Cursor,
+		TargetAgentID: command.TargetAgentID,
+		TargetNodeID:  command.TargetNodeID,
+		SessionID:     command.SessionID,
+		Type:          command.Type,
+		Payload:       cloneStringMap(command.Payload),
+		Status:        command.Status,
+		Result:        command.Result,
+		ErrorClass:    command.ErrorClass,
+	}
 	module.SourceHash = workspaceHash(module)
 	module.Version = version(module.SourceHash)
 	return module
@@ -676,6 +716,7 @@ func sortPlan(plan *Plan) {
 	sort.Slice(plan.Agents, func(i, j int) bool { return plan.Agents[i].Name < plan.Agents[j].Name })
 	sort.Slice(plan.AgentInstances, func(i, j int) bool { return plan.AgentInstances[i].Name < plan.AgentInstances[j].Name })
 	sort.Slice(plan.AgentSessions, func(i, j int) bool { return plan.AgentSessions[i].SessionID < plan.AgentSessions[j].SessionID })
+	sort.Slice(plan.AgentCommands, func(i, j int) bool { return plan.AgentCommands[i].CommandID < plan.AgentCommands[j].CommandID })
 	sort.Slice(plan.TerminalSessions, func(i, j int) bool { return plan.TerminalSessions[i].TerminalID < plan.TerminalSessions[j].TerminalID })
 	sort.Slice(plan.Artifacts, func(i, j int) bool { return plan.Artifacts[i].ArtifactID < plan.Artifacts[j].ArtifactID })
 	sort.Slice(plan.Workflows, func(i, j int) bool { return plan.Workflows[i].Name < plan.Workflows[j].Name })
