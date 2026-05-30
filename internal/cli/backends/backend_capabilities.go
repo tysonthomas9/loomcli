@@ -30,6 +30,28 @@ type ToolAwareBackend interface {
 	SetDeniedTools(tools []string)
 }
 
+// TypedToolRuntimeBackend is an optional interface for backends that can
+// execute TypeScript-defined model tools through a trusted runtime boundary.
+type TypedToolRuntimeBackend interface {
+	SetTypedTools(tools []TypedToolDefinition) error
+}
+
+// TypedToolDefinition describes one TypeScript-authored model-callable tool
+// that a backend may expose to a provider.
+type TypedToolDefinition struct {
+	Name        string         `json:"name"`
+	Description string         `json:"description,omitempty"`
+	Version     string         `json:"version,omitempty"`
+	SourcePath  string         `json:"source_path,omitempty"`
+	SourceHash  string         `json:"source_hash,omitempty"`
+	Parameters  map[string]any `json:"parameters,omitempty"`
+	Handler     string         `json:"handler,omitempty"`
+	Runtime     string         `json:"runtime,omitempty"`
+	Repos       []string       `json:"repos,omitempty"`
+	Env         []string       `json:"env,omitempty"`
+	ReadOnly    bool           `json:"read_only,omitempty"`
+}
+
 // HealthCheckableBackend is an optional interface for backends that can
 // report their installation and readiness status.
 type HealthCheckableBackend interface {
@@ -81,19 +103,21 @@ type BackendMeta struct {
 // fields (Streaming, Sessions, etc.) to determine available capabilities.
 // Typed fields are nil when the corresponding capability is not supported.
 type BackendCapabilities struct {
-	HasStreaming   bool
-	HasSessions    bool
-	HasToolControl bool
-	HasHealthCheck bool
-	HasConfig      bool
-	HasMeta        bool
+	HasStreaming        bool
+	HasSessions         bool
+	HasToolControl      bool
+	HasTypedToolRuntime bool
+	HasHealthCheck      bool
+	HasConfig           bool
+	HasMeta             bool
 
-	Streaming StreamingBackend
-	Sessions  SessionAwareBackend
-	Tools     ToolAwareBackend
-	Health    HealthCheckableBackend
-	Config    ConfigurableBackend
-	Meta      MetadataProvider
+	Streaming        StreamingBackend
+	Sessions         SessionAwareBackend
+	Tools            ToolAwareBackend
+	TypedToolRuntime TypedToolRuntimeBackend
+	Health           HealthCheckableBackend
+	Config           ConfigurableBackend
+	Meta             MetadataProvider
 }
 
 // detectBinaryVersion runs "<binary> --version" and returns the first line of
@@ -131,6 +155,10 @@ func InspectCapabilities(b cli.Backend) BackendCapabilities {
 	if t, ok := b.(ToolAwareBackend); ok {
 		caps.HasToolControl = true
 		caps.Tools = t
+	}
+	if t, ok := b.(TypedToolRuntimeBackend); ok {
+		caps.HasTypedToolRuntime = true
+		caps.TypedToolRuntime = t
 	}
 	if h, ok := b.(HealthCheckableBackend); ok {
 		caps.HasHealthCheck = true

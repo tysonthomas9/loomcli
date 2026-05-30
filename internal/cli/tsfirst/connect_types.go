@@ -11,23 +11,24 @@ type connectUsage struct {
 }
 
 type connectResult struct {
-	Root              string        `json:"root"`
-	Agent             string        `json:"agent"`
-	Instance          string        `json:"instance"`
-	Session           string        `json:"session"`
-	Backend           string        `json:"backend,omitempty"`
-	Model             string        `json:"model,omitempty"`
-	ProviderModel     string        `json:"provider_model,omitempty"`
-	ProviderSessionID string        `json:"provider_session_id,omitempty"`
-	OperationID       string        `json:"operation_id,omitempty"`
-	DurationMS        int64         `json:"duration_ms,omitempty"`
-	Usage             *connectUsage `json:"usage,omitempty"`
-	WorkDir           string        `json:"work_dir,omitempty"`
-	EnvFile           string        `json:"env_file,omitempty"`
-	Env               []string      `json:"env,omitempty"`
-	Message           string        `json:"message,omitempty"`
-	Response          string        `json:"response,omitempty"`
-	TranscriptPath    string        `json:"transcript_path,omitempty"`
+	Root              string              `json:"root"`
+	Agent             string              `json:"agent"`
+	Instance          string              `json:"instance"`
+	Session           string              `json:"session"`
+	Backend           string              `json:"backend,omitempty"`
+	Model             string              `json:"model,omitempty"`
+	ProviderModel     string              `json:"provider_model,omitempty"`
+	ProviderSessionID string              `json:"provider_session_id,omitempty"`
+	OperationID       string              `json:"operation_id,omitempty"`
+	DurationMS        int64               `json:"duration_ms,omitempty"`
+	Usage             *connectUsage       `json:"usage,omitempty"`
+	WorkDir           string              `json:"work_dir,omitempty"`
+	EnvFile           string              `json:"env_file,omitempty"`
+	Env               []string            `json:"env,omitempty"`
+	Message           string              `json:"message,omitempty"`
+	Response          string              `json:"response,omitempty"`
+	TranscriptPath    string              `json:"transcript_path,omitempty"`
+	ToolRuntime       *connectToolRuntime `json:"tool_runtime,omitempty"`
 }
 
 type connectOptions struct {
@@ -45,4 +46,25 @@ type localInvocationResult struct {
 	ProviderSessionID string
 	ProviderModel     string
 	Usage             *connectUsage
+	ToolRuntime       *connectToolRuntime
+}
+
+type connectToolRuntime struct {
+	Status     string             `json:"status"`
+	Message    string             `json:"message,omitempty"`
+	TypedTools []connectTypedTool `json:"typed_tools,omitempty"`
+}
+
+type connectTypedTool struct {
+	Name        string         `json:"name"`
+	Description string         `json:"description,omitempty"`
+	Version     string         `json:"version,omitempty"`
+	SourcePath  string         `json:"source_path,omitempty"`
+	SourceHash  string         `json:"source_hash,omitempty"`
+	Parameters  map[string]any `json:"parameters,omitempty"`
+	Handler     string         `json:"handler,omitempty"`
+	Runtime     string         `json:"runtime,omitempty"`
+	Repos       []string       `json:"repos,omitempty"`
+	Env         []string       `json:"env,omitempty"`
+	ReadOnly    bool           `json:"read_only,omitempty"`
 }

@@ -43,6 +43,11 @@ func printInteractiveConnectHeader(out io.Writer, result connectResult) error {
 			return err
 		}
 	}
+	if result.ToolRuntime != nil && len(result.ToolRuntime.TypedTools) > 0 {
+		if _, err := fmt.Fprintf(out, "Typed tool runtime: %s (%s)\n", result.ToolRuntime.Status, typedToolNames(result.ToolRuntime)); err != nil {
+			return err
+		}
+	}
 	_, err := fmt.Fprintln(out, "Enter one prompt per line. Ctrl-D, /exit, or /quit ends the session.")
 	return err
 }

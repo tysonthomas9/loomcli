@@ -13,6 +13,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	backendcaps "github.com/tysonthomas9/loomcli/internal/cli/backends"
 	"github.com/tysonthomas9/loomcli/internal/cli/clitest"
 	defspkg "github.com/tysonthomas9/loomcli/internal/defs"
 	"github.com/tysonthomas9/loomcli/internal/domain"
@@ -583,6 +584,81 @@ func TestRunLocalConnectCapturesNonStreamingBackendOutputAndUsage(t *testing.T) 
 	}
 }
 
+func TestRunLocalConnectEchoCapturesTypedToolRuntimePolicy(t *testing.T) {
+	root := t.TempDir()
+	writeTypedToolAgent(t, root, "slack-agent", "echo")
+
+	result, err := runLocalConnect(context.Background(), connectOptions{
+		Dir:      root,
+		Agent:    "slack-agent",
+		Instance: "local",
+		Session:  "tools",
+		Message:  "create a channel",
+	})
+	if err != nil {
+		t.Fatalf("runLocalConnect() error = %v", err)
+	}
+	if result.ToolRuntime == nil || result.ToolRuntime.Status != connectToolRuntimeEcho {
+		t.Fatalf("tool runtime = %+v, want echo offline policy", result.ToolRuntime)
+	}
+	if len(result.ToolRuntime.TypedTools) != 1 || result.ToolRuntime.TypedTools[0].Name != "create_channel" || result.ToolRuntime.TypedTools[0].Handler != "workflow" {
+		t.Fatalf("typed tools = %+v, want create_channel workflow handler", result.ToolRuntime.TypedTools)
+	}
+	turns, err := readLocalTurns(result.TranscriptPath)
+	if err != nil {
+		t.Fatalf("readLocalTurns() error = %v", err)
+	}
+	if len(turns) != 1 || turns[0].ToolRuntime == nil || turns[0].ToolRuntime.Status != connectToolRuntimeEcho {
+		t.Fatalf("turns = %+v, want typed tool runtime policy persisted", turns)
+	}
+}
+
+func TestRunLocalConnectRejectsTypedToolsWithoutTypedRuntime(t *testing.T) {
+	cli.TestingResetBackendState(t)
+	cli.RegisterBackend(nonStreamingCaptureBackend{})
+	root := t.TempDir()
+	writeTypedToolAgent(t, root, "slack-agent", "nonstream-capture")
+
+	_, err := runLocalConnect(context.Background(), connectOptions{
+		Dir:      root,
+		Agent:    "slack-agent",
+		Instance: "local",
+		Session:  "tools",
+		Message:  "create a channel",
+	})
+	if err == nil || !strings.Contains(err.Error(), "TypeScript-defined model tools") || !strings.Contains(err.Error(), "create_channel") {
+		t.Fatalf("runLocalConnect() error = %v, want typed tool runtime rejection", err)
+	}
+}
+
+func TestRunLocalConnectPassesTypedToolsToRuntimeBackend(t *testing.T) {
+	cli.TestingResetBackendState(t)
+	typedBackend := &typedToolRuntimeBackend{}
+	cli.RegisterBackend(typedBackend)
+	root := t.TempDir()
+	writeTypedToolAgent(t, root, "slack-agent", "typed-runtime")
+
+	result, err := runLocalConnect(context.Background(), connectOptions{
+		Dir:      root,
+		Agent:    "slack-agent",
+		Instance: "local",
+		Session:  "tools",
+		Message:  "create a channel",
+	})
+	if err != nil {
+		t.Fatalf("runLocalConnect() error = %v", err)
+	}
+	if result.ToolRuntime == nil || result.ToolRuntime.Status != connectToolRuntimeBackend {
+		t.Fatalf("tool runtime = %+v, want backend runtime policy", result.ToolRuntime)
+	}
+	if len(typedBackend.tools) != 1 || typedBackend.tools[0].Name != "create_channel" || typedBackend.tools[0].Handler != "workflow" {
+		t.Fatalf("backend tools = %+v, want create_channel workflow handler", typedBackend.tools)
+	}
+	if !strings.Contains(result.Response, "typed runtime answer") {
+		t.Fatalf("response = %q, want typed backend response", result.Response)
+	}
+}
+
 func TestRunInteractiveConnectStreamsBackendOutput(t *testing.T) {
 	cli.TestingResetBackendState(t)
 	cli.RegisterBackend(streamingBackend{})
@@ -689,6 +765,24 @@ func (b *providerSessionBackend) InvokeStreaming(context.Context, string, string
 	return io.NopCloser(strings.NewReader(payload)), nil
 }
 
+type typedToolRuntimeBackend struct {
+	tools []backendcaps.TypedToolDefinition
+}
+
+func (b *typedToolRuntimeBackend) Name() string { return "typed-runtime" }
+
+func (b *typedToolRuntimeBackend) InvokeInteractive(_, _, _ string) error { return nil }
+
+func (b *typedToolRuntimeBackend) InvokeNonInteractive(_, _, _ string, _ <-chan struct{}, _ *usage.Collector) error {
+	fmt.Println("typed runtime answer")
+	return nil
+}
+
+func (b *typedToolRuntimeBackend) SetTypedTools(tools []backendcaps.TypedToolDefinition) error {
+	b.tools = append([]backendcaps.TypedToolDefinition(nil), tools...)
+	return nil
+}
+
 func withTSFirstGlobals(t *testing.T, fn func()) {
 	t.Helper()
 	oldAddDir, oldAddJSON := addDir, addJSON
@@ -724,6 +818,48 @@ export default createAgent({
 `, name, backend)
 	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
 		t.Fatalf("write agent: %v", err)
+	}
+}
+
+func writeTypedToolAgent(t *testing.T, root, name, backend string) {
+	t.Helper()
+	toolPath := filepath.Join(root, ".loom", "tools", "create-channel.ts")
+	if err := os.MkdirAll(filepath.Dir(toolPath), 0o755); err != nil {
+		t.Fatalf("mkdir tool dir: %v", err)
+	}
+	toolSrc := `import { Type, defineTool } from '@loom/runtime';
+
+export default defineTool({
+  name: 'create_channel',
+  description: 'Create one approved channel.',
+  parameters: Type.Object({
+    name: Type.String({ description: 'Channel name' }),
+  }),
+  handler: 'workflow',
+  execute: async ({ name }) => ` + "`" + `created ${name}` + "`" + `,
+});
+`
+	if err := os.WriteFile(toolPath, []byte(toolSrc), 0o644); err != nil {
+		t.Fatalf("write tool: %v", err)
+	}
+	agentPath := filepath.Join(root, ".loom", "agents", name+".ts")
+	if err := os.MkdirAll(filepath.Dir(agentPath), 0o755); err != nil {
+		t.Fatalf("mkdir agent dir: %v", err)
+	}
+	agentSrc := fmt.Sprintf(`import { createAgent, runtime } from '@loom/runtime';
+import createChannel from '../tools/create-channel';
+
+export default createAgent({
+  name: %q,
+  backend: %q,
+  model: 'local/test',
+  runtime: runtime.local({ repos: ['.'], env: ['LOCAL_CONNECT_TOKEN'] }),
+  instructions: 'Use approved Slack workspace tools.',
+  tools: [createChannel],
+});
+`, name, backend)
+	if err := os.WriteFile(agentPath, []byte(agentSrc), 0o644); err != nil {
+		t.Fatalf("write typed tool agent: %v", err)
 	}
 }
 

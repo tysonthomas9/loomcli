@@ -406,6 +406,7 @@ func connectReadyWithAgent(opts connectOptions) (*defspkg.Plan, defspkg.AgentMod
 		EnvFile:        opts.EnvFile,
 		Env:            envNames,
 		TranscriptPath: localTranscriptPath(plan.Root, agent.Name, fallback(opts.Instance, "local"), fallback(opts.Session, "default")),
+		ToolRuntime:    localConnectToolRuntime(plan, agent),
 	}
 	return plan, agent, result, nil
 }
@@ -417,6 +418,9 @@ func printConnectResult(result connectResult, jsonOut bool) error {
 	fmt.Printf("Connected to %s instance %s session %s (backend=%s model=%s)\n", result.Agent, result.Instance, result.Session, fallback(result.Backend, "default"), fallback(result.Model, "default"))
 	if len(result.Env) > 0 {
 		fmt.Printf("Env allowlist: %s\n", strings.Join(result.Env, ", "))
+	}
+	if result.ToolRuntime != nil && len(result.ToolRuntime.TypedTools) > 0 {
+		fmt.Printf("Typed tool runtime: %s (%s)\n", result.ToolRuntime.Status, typedToolNames(result.ToolRuntime))
 	}
 	if result.Message != "" {
 		fmt.Printf("You: %s\n", result.Message)
@@ -696,6 +700,7 @@ func withTemporaryEnv[T any](values map[string]string, fn func() (T, error)) (T,
 }
 
 func invokeLocalAgent(ctx context.Context, plan *defspkg.Plan, agent defspkg.AgentModule, prompt, message string, stream io.Writer, resumeProviderSessionID string) (localInvocationResult, error) {
+	toolRuntime := localConnectToolRuntime(plan, agent)
 	if strings.EqualFold(agent.Backend, "echo") {
 		response := "echo: " + message
 		if stream != nil {
@@ -703,7 +708,7 @@ func invokeLocalAgent(ctx context.Context, plan *defspkg.Plan, agent defspkg.Age
 				return localInvocationResult{}, err
 			}
 		}
-		return localInvocationResult{Response: response}, nil
+		return localInvocationResult{Response: response, ToolRuntime: echoToolRuntime(toolRuntime)}, nil
 	}
 	backendName := strings.TrimSpace(agent.Backend)
 	if backendName == "" {
@@ -712,6 +717,10 @@ func invokeLocalAgent(ctx context.Context, plan *defspkg.Plan, agent defspkg.Age
 	backend, ok := cli.GetBackendByName(backendName)
 	if !ok {
 		return localInvocationResult{}, fmt.Errorf("backend %q is not registered; use backend \"echo\" for offline local connect or install/configure the backend", backendName)
+	}
+	appliedToolRuntime, err := enforceBackendTypedTools(backendName, backend, toolRuntime)
+	if err != nil {
+		return localInvocationResult{}, err
 	}
 	workDir := localWorkDir(plan.Root, agent)
 	if resumeProviderSessionID != "" {
@@ -727,27 +736,32 @@ func invokeLocalAgent(ctx context.Context, plan *defspkg.Plan, agent defspkg.Age
 			return localInvocationResult{}, err
 		}
 		defer func() { _ = rc.Close() }()
-		return captureStreamingResponse(rc, stream)
+		result, err := captureStreamingResponse(rc, stream)
+		result.ToolRuntime = appliedToolRuntime
+		return result, err
 	}
-	return invokeNonStreamingLocalAgent(backend, backendName, workDir, prompt, agent.Name, stream)
+	result, err := invokeNonStreamingLocalAgent(backend, backendName, workDir, prompt, agent.Name, stream)
+	result.ToolRuntime = appliedToolRuntime
+	return result, err
 }
 
 type localTurn struct {
-	Timestamp         string        `json:"timestamp"`
-	OperationID       string        `json:"operation_id,omitempty"`
-	Agent             string        `json:"agent"`
-	Instance          string        `json:"instance"`
-	Session           string        `json:"session"`
-	Backend           string        `json:"backend,omitempty"`
-	Model             string        `json:"model,omitempty"`
-	ProviderModel     string        `json:"provider_model,omitempty"`
-	ProviderSessionID string        `json:"provider_session_id,omitempty"`
-	DefinitionVersion string        `json:"definition_version,omitempty"`
-	Message           string        `json:"message"`
-	Response          string        `json:"response,omitempty"`
-	DurationMS        int64         `json:"duration_ms,omitempty"`
-	Usage             *connectUsage `json:"usage,omitempty"`
-	PromptHash        string        `json:"prompt_hash,omitempty"`
+	Timestamp         string              `json:"timestamp"`
+	OperationID       string              `json:"operation_id,omitempty"`
+	Agent             string              `json:"agent"`
+	Instance          string              `json:"instance"`
+	Session           string              `json:"session"`
+	Backend           string              `json:"backend,omitempty"`
+	Model             string              `json:"model,omitempty"`
+	ProviderModel     string              `json:"provider_model,omitempty"`
+	ProviderSessionID string              `json:"provider_session_id,omitempty"`
+	DefinitionVersion string              `json:"definition_version,omitempty"`
+	Message           string              `json:"message"`
+	Response          string              `json:"response,omitempty"`
+	DurationMS        int64               `json:"duration_ms,omitempty"`
+	Usage             *connectUsage       `json:"usage,omitempty"`
+	PromptHash        string              `json:"prompt_hash,omitempty"`
+	ToolRuntime       *connectToolRuntime `json:"tool_runtime,omitempty"`
 }
 
 func readLocalTurns(path string) ([]localTurn, error) {

@@ -219,12 +219,13 @@ type backendInfoOutput struct {
 }
 
 type capabilitiesOutput struct {
-	Streaming bool `json:"streaming"`
-	Sessions  bool `json:"sessions"`
-	ToolCtrl  bool `json:"tool_control"`
-	HealthChk bool `json:"health_check"`
-	Config    bool `json:"config"`
-	Metadata  bool `json:"metadata"`
+	Streaming        bool `json:"streaming"`
+	Sessions         bool `json:"sessions"`
+	ToolCtrl         bool `json:"tool_control"`
+	TypedToolRuntime bool `json:"typed_tool_runtime"`
+	HealthChk        bool `json:"health_check"`
+	Config           bool `json:"config"`
+	Metadata         bool `json:"metadata"`
 }
 
 func runBackendInfo(cmd *cobra.Command, args []string) {
@@ -253,12 +254,13 @@ func buildInfoOutput(name string, caps BackendCapabilities) backendInfoOutput {
 	out := backendInfoOutput{
 		Name: name,
 		Capabilities: &capabilitiesOutput{
-			Streaming: caps.HasStreaming,
-			Sessions:  caps.HasSessions,
-			ToolCtrl:  caps.HasToolControl,
-			HealthChk: caps.HasHealthCheck,
-			Config:    caps.HasConfig,
-			Metadata:  caps.HasMeta,
+			Streaming:        caps.HasStreaming,
+			Sessions:         caps.HasSessions,
+			ToolCtrl:         caps.HasToolControl,
+			TypedToolRuntime: caps.HasTypedToolRuntime,
+			HealthChk:        caps.HasHealthCheck,
+			Config:           caps.HasConfig,
+			Metadata:         caps.HasMeta,
 		},
 	}
 	if caps.HasMeta {
@@ -316,6 +318,7 @@ func printInfoCapabilities(caps BackendCapabilities) {
 		{"Streaming", caps.HasStreaming},
 		{"Sessions", caps.HasSessions},
 		{"Tool Control", caps.HasToolControl},
+		{"Typed Tool Runtime", caps.HasTypedToolRuntime},
 		{"Health Check", caps.HasHealthCheck},
 		{"Configuration", caps.HasConfig},
 		{"Metadata", caps.HasMeta},
