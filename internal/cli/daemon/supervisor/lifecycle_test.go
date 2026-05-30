@@ -578,96 +578,93 @@ func cleanupAgentProcess(t *testing.T, ap *AgentProcess) {
 	})
 }
 
+func resolvedLoomExecutableForTest(t *testing.T) string {
+	t.Helper()
+	path, err := resolveLoomExecutable()
+	if err != nil {
+		t.Fatalf("resolve loom executable: %v", err)
+	}
+	return path
+}
+
+func assertCommandArgs(t *testing.T, got, want []string) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("cmd.Args = %v, want %v", got, want)
+	}
+	for i, expected := range want {
+		if got[i] != expected {
+			t.Errorf("cmd.Args[%d] = %q, want %q", i, got[i], expected)
+		}
+	}
+}
+
+func setupAgentLogFileForTest(t *testing.T, s *Supervisor, ap *AgentProcess) *exec.Cmd {
+	t.Helper()
+	cmd, err := s.buildCommand(ap)
+	if err != nil {
+		t.Fatalf("buildCommand error: %v", err)
+	}
+	ap.Mu.Lock()
+	s.setupAgentLogFile(ap, cmd)
+	ap.Mu.Unlock()
+	cleanupAgentProcess(t, ap)
+	return cmd
+}
+
 // TestSpawnAgent_BuiltInRoleCommandConstruction tests the command args
-// constructed for built-in roles by inspecting what spawnAgent would build.
+// constructed for built-in roles without starting the test binary.
 func TestSpawnAgent_BuiltInRoleCommandConstruction(t *testing.T) {
 	tmpDir := t.TempDir()
+	loomPath := resolvedLoomExecutableForTest(t)
 
-	t.Run("plan role builds correct command", func(t *testing.T) {
-		s := &Supervisor{
-			ConfigSnapshot: func() *cfgpkg.DaemonConfig { return &cfgpkg.DaemonConfig{Daemon: cfgpkg.DaemonSettings{}} },
-			ProjectDir:     tmpDir,
-			Shutdown:       make(chan struct{}),
-			StoppedAgents:  make(map[string]struct{}),
-			Agents:         make([]*AgentProcess, 0),
-			EmitEvent:      func(events.Event) {},
-		}
+	tests := []struct {
+		name          string
+		configBackend string
+		agentBackend  string
+		wantBackend   string
+	}{
+		{name: "plan role builds correct command"},
+		{name: "backend flag is propagated", configBackend: "openai", wantBackend: "openai"},
+		{name: "per-agent backend overrides project backend", configBackend: "openai", agentBackend: "anthropic", wantBackend: "anthropic"},
+	}
 
-		ap := &AgentProcess{
-			Entry:        cfgpkg.AgentEntry{Worktree: "falcon", Role: "plan"},
-			RoleConfig:   cfgpkg.RoleConfig{Description: "Built-in plan agent"},
-			WorktreePath: tmpDir,
-		}
-		cleanupAgentProcess(t, ap)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfgBackend := tt.configBackend
+			s := &Supervisor{
+				ConfigSnapshot: func() *cfgpkg.DaemonConfig {
+					return &cfgpkg.DaemonConfig{Daemon: cfgpkg.DaemonSettings{}, Backend: cfgBackend}
+				},
+				ProjectDir:    tmpDir,
+				Shutdown:      make(chan struct{}),
+				StoppedAgents: make(map[string]struct{}),
+				Agents:        make([]*AgentProcess, 0),
+				EmitEvent:     func(events.Event) {},
+			}
 
-		err := s.spawnAgent(ap)
-		if err != nil {
-			t.Logf("spawnAgent error (expected in test): %v", err)
-		}
-	})
-
-	t.Run("backend flag is propagated", func(t *testing.T) {
-		s := &Supervisor{
-			ConfigSnapshot: func() *cfgpkg.DaemonConfig {
-				return &cfgpkg.DaemonConfig{Daemon: cfgpkg.DaemonSettings{}, Backend: "openai"}
-			},
-			ProjectDir:    tmpDir,
-			Shutdown:      make(chan struct{}),
-			StoppedAgents: make(map[string]struct{}),
-			Agents:        make([]*AgentProcess, 0),
-			EmitEvent:     func(events.Event) {},
-		}
-
-		ap := &AgentProcess{
-			Entry:        cfgpkg.AgentEntry{Worktree: "falcon", Role: "plan"},
-			RoleConfig:   cfgpkg.RoleConfig{Description: "Built-in plan agent"},
-			WorktreePath: tmpDir,
-		}
-		cleanupAgentProcess(t, ap)
-
-		if s.ConfigSnapshot().Backend != "openai" {
-			t.Errorf("Backend = %q, want %q", s.ConfigSnapshot().Backend, "openai")
-		}
-
-		err := s.spawnAgent(ap)
-		if err != nil {
-			t.Logf("spawnAgent error (expected in test): %v", err)
-		}
-	})
-
-	t.Run("per-agent backend overrides project backend", func(t *testing.T) {
-		s := &Supervisor{
-			ConfigSnapshot: func() *cfgpkg.DaemonConfig {
-				return &cfgpkg.DaemonConfig{Daemon: cfgpkg.DaemonSettings{}, Backend: "openai"}
-			},
-			ProjectDir:    tmpDir,
-			Shutdown:      make(chan struct{}),
-			StoppedAgents: make(map[string]struct{}),
-			Agents:        make([]*AgentProcess, 0),
-			EmitEvent:     func(events.Event) {},
-		}
-
-		ap := &AgentProcess{
-			Entry:        cfgpkg.AgentEntry{Worktree: "falcon", Role: "plan", Backend: "anthropic"},
-			RoleConfig:   cfgpkg.RoleConfig{Description: "Built-in plan agent"},
-			WorktreePath: tmpDir,
-		}
-		cleanupAgentProcess(t, ap)
-
-		if ap.Entry.Backend != "anthropic" {
-			t.Errorf("agent Backend = %q, want %q", ap.Entry.Backend, "anthropic")
-		}
-
-		err := s.spawnAgent(ap)
-		if err != nil {
-			t.Logf("spawnAgent error (expected in test): %v", err)
-		}
-	})
+			ap := &AgentProcess{
+				Entry:        cfgpkg.AgentEntry{Worktree: "falcon", Role: "plan", Backend: tt.agentBackend},
+				RoleConfig:   cfgpkg.RoleConfig{Description: "Built-in plan agent"},
+				WorktreePath: tmpDir,
+			}
+			cmd, err := s.buildCommand(ap)
+			if err != nil {
+				t.Fatalf("buildCommand error: %v", err)
+			}
+			wantArgs := []string{loomPath, "plan", tmpDir, "--auto", "--daemon-mode"}
+			if tt.wantBackend != "" {
+				wantArgs = append(wantArgs, "--backend", tt.wantBackend)
+			}
+			assertCommandArgs(t, cmd.Args, wantArgs)
+		})
+	}
 }
 
 // TestSpawnAgent_CustomRoleCommandConstruction tests command construction for custom roles.
 func TestSpawnAgent_CustomRoleCommandConstruction(t *testing.T) {
 	tmpDir := t.TempDir()
+	loomPath := resolvedLoomExecutableForTest(t)
 	promptFile := filepath.Join(tmpDir, "prompt.md")
 	if err := os.WriteFile(promptFile, []byte("test prompt"), 0644); err != nil {
 		t.Fatal(err)
@@ -687,12 +684,15 @@ func TestSpawnAgent_CustomRoleCommandConstruction(t *testing.T) {
 		RoleConfig:   cfgpkg.RoleConfig{Description: "Code reviewer", PromptFile: promptFile, TaskFilter: "review"},
 		WorktreePath: tmpDir,
 	}
-	cleanupAgentProcess(t, ap)
 
-	err := s.spawnAgent(ap)
+	cmd, err := s.buildCommand(ap)
 	if err != nil {
-		t.Logf("spawnAgent error (expected in test): %v", err)
+		t.Fatalf("buildCommand error: %v", err)
 	}
+	assertCommandArgs(t, cmd.Args, []string{
+		loomPath, "agent", tmpDir, "--prompt", promptFile, "--auto", "--daemon-mode",
+		"--task-filter", "review",
+	})
 }
 
 // TestSpawnAgent_LogFileSetup tests that spawnAgent creates log directory and
@@ -721,10 +721,8 @@ func TestSpawnAgent_LogFileSetup(t *testing.T) {
 		RoleConfig:   cfgpkg.RoleConfig{Description: "Built-in plan agent"},
 		WorktreePath: tmpDir,
 	}
-	cleanupAgentProcess(t, ap)
 
-	// spawnAgent will try to create log dir even if loom binary doesn't exist
-	_ = s.spawnAgent(ap)
+	_ = setupAgentLogFileForTest(t, s, ap)
 
 	// Verify log directory was created
 	if _, err := os.Stat(logDir); os.IsNotExist(err) {
@@ -743,10 +741,8 @@ func TestSpawnAgent_LogFileSetup(t *testing.T) {
 func TestSpawnAgent_Environment(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	// Instead of spawning loom (which doesn't exist in test), spawn a command
-	// that will print its environment so we can verify.
-	// We test environment configuration indirectly by verifying the fields
-	// that spawnAgent uses to construct the env.
+	// Inspect the command environment directly; starting the command in unit
+	// tests would execute this package's .test binary.
 	s := &Supervisor{
 		ConfigSnapshot: func() *cfgpkg.DaemonConfig { return &cfgpkg.DaemonConfig{Daemon: cfgpkg.DaemonSettings{}} },
 		ProjectDir:     tmpDir,
@@ -762,8 +758,6 @@ func TestSpawnAgent_Environment(t *testing.T) {
 		WorktreePath: tmpDir,
 	}
 
-	cleanupAgentProcess(t, ap)
-
 	// Verify the inputs that spawnAgent uses for env
 	if ap.Entry.Worktree != "falcon" {
 		t.Errorf("Worktree = %q, want %q", ap.Entry.Worktree, "falcon")
@@ -778,7 +772,25 @@ func TestSpawnAgent_Environment(t *testing.T) {
 		t.Error("cli.FilteredEnv() returned empty slice")
 	}
 
-	_ = s.spawnAgent(ap)
+	cmd, err := s.buildCommand(ap)
+	if err != nil {
+		t.Fatalf("buildCommand error: %v", err)
+	}
+	foundActor, foundPath := false, false
+	for _, entry := range cmd.Env {
+		if entry == "LOOM_AGENT_NAME=falcon" {
+			foundActor = true
+		}
+		if entry == "LOOM_WORKTREE_PATH="+tmpDir {
+			foundPath = true
+		}
+	}
+	if !foundActor {
+		t.Error("LOOM_AGENT_NAME=falcon not found in cmd.Env")
+	}
+	if !foundPath {
+		t.Errorf("LOOM_WORKTREE_PATH=%s not found in cmd.Env", tmpDir)
+	}
 }
 
 // TestDaemonStartStop tests the full Start/Stop lifecycle.
@@ -964,9 +976,7 @@ func TestSpawnAgent_RelativeLogDir(t *testing.T) {
 		WorktreePath: tmpDir,
 	}
 
-	cleanupAgentProcess(t, ap)
-
-	_ = s.spawnAgent(ap)
+	_ = setupAgentLogFileForTest(t, s, ap)
 
 	// Verify the absolute log dir was created
 	absLogDir := filepath.Join(tmpDir, "relative-logs")
@@ -979,6 +989,7 @@ func TestSpawnAgent_RelativeLogDir(t *testing.T) {
 // as --parent flag to the subprocess command.
 func TestSpawnAgent_EpicIDAddsParentFlag(t *testing.T) {
 	tmpDir := t.TempDir()
+	loomPath := resolvedLoomExecutableForTest(t)
 
 	s := &Supervisor{
 		ConfigSnapshot: func() *cfgpkg.DaemonConfig { return &cfgpkg.DaemonConfig{Daemon: cfgpkg.DaemonSettings{}} },
@@ -996,14 +1007,18 @@ func TestSpawnAgent_EpicIDAddsParentFlag(t *testing.T) {
 		AssignedEpicID: "epic-123",
 	}
 
-	cleanupAgentProcess(t, ap)
-
 	// Verify the assignedEpicID is set - spawnAgent will use this
 	if ap.AssignedEpicID != "epic-123" {
 		t.Errorf("assignedEpicID = %q, want %q", ap.AssignedEpicID, "epic-123")
 	}
 
-	_ = s.spawnAgent(ap)
+	cmd, err := s.buildCommand(ap)
+	if err != nil {
+		t.Fatalf("buildCommand error: %v", err)
+	}
+	assertCommandArgs(t, cmd.Args, []string{
+		loomPath, "plan", tmpDir, "--auto", "--daemon-mode", "--parent", "epic-123",
+	})
 }
 
 // TestSpawnAgent_SetsWorkingDirectory verifies that cmd.Dir is set to worktreePath.
@@ -1025,24 +1040,29 @@ func TestSpawnAgent_SetsWorkingDirectory(t *testing.T) {
 		WorktreePath: tmpDir,
 	}
 
-	cleanupAgentProcess(t, ap)
-
-	_ = s.spawnAgent(ap)
+	cmd, err := s.buildCommand(ap)
+	if err != nil {
+		t.Fatalf("buildCommand error: %v", err)
+	}
 
 	// Check that the working directory was set
-	ap.Mu.Lock()
-	if ap.Cmd != nil && ap.Cmd.Dir != tmpDir {
-		t.Errorf("cmd.Dir = %q, want %q", ap.Cmd.Dir, tmpDir)
+	if cmd.Dir != tmpDir {
+		t.Errorf("cmd.Dir = %q, want %q", cmd.Dir, tmpDir)
 	}
-	ap.Mu.Unlock()
 }
 
 // TestSpawnAgent_SetsLastStartAndPID verifies that lastStart and pid are set
 // after a successful spawn.
 func TestSpawnAgent_SetsLastStartAndPID(t *testing.T) {
 	tmpDir := t.TempDir()
+	truePath, err := exec.LookPath("true")
+	if err != nil {
+		t.Fatalf("look up true: %v", err)
+	}
+	oldResolve := resolveLoomExecutable
+	resolveLoomExecutable = func() (string, error) { return truePath, nil }
+	t.Cleanup(func() { resolveLoomExecutable = oldResolve })
 
-	// Use a real command that exists so spawn succeeds
 	s := &Supervisor{
 		ConfigSnapshot: func() *cfgpkg.DaemonConfig { return &cfgpkg.DaemonConfig{Daemon: cfgpkg.DaemonSettings{}} },
 		ProjectDir:     tmpDir,
@@ -1051,11 +1071,6 @@ func TestSpawnAgent_SetsLastStartAndPID(t *testing.T) {
 		Agents:         make([]*AgentProcess, 0),
 		EmitEvent:      func(events.Event) {},
 	}
-
-	// We can't easily test with a real "loom" binary, so we verify the
-	// spawn sets lastStart and pid when using a process that exists.
-	// The test for spawnAgent with loom will fail at exec, but the
-	// integration test in TestDaemonStartStop covers the lifecycle.
 
 	ap := &AgentProcess{
 		Entry:        cfgpkg.AgentEntry{Worktree: "falcon", Role: "plan"},
@@ -1066,21 +1081,20 @@ func TestSpawnAgent_SetsLastStartAndPID(t *testing.T) {
 	cleanupAgentProcess(t, ap)
 
 	before := time.Now()
-	err := s.spawnAgent(ap)
+	err = s.spawnAgent(ap)
+	if err != nil {
+		t.Fatalf("spawnAgent error: %v", err)
+	}
 
 	ap.Mu.Lock()
 	defer ap.Mu.Unlock()
 
-	if err == nil {
-		// Spawn succeeded (loom binary exists)
-		if ap.Pid == 0 {
-			t.Error("pid = 0 after successful spawn, want non-zero")
-		}
-		if ap.LastStart.Before(before) {
-			t.Error("lastStart was not updated after spawn")
-		}
+	if ap.Pid == 0 {
+		t.Error("pid = 0 after successful spawn, want non-zero")
 	}
-	// If spawn failed (loom not found), that's expected in test env
+	if ap.LastStart.Before(before) {
+		t.Error("lastStart was not updated after spawn")
+	}
 }
 
 // TestStopAgent_KillsProcessGroup verifies that stopAgent kills the entire process

@@ -39,12 +39,23 @@ func (c *backendProviderMetadataCapture) IngestLine(line string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.jsonEventCount++
+	c.ensureIngestState()
+	c.ingestEventType(event)
+	c.ingestProviderIDs(event)
+	c.ingestSessionID(event)
+	c.ingestProviderModel(event)
+}
+
+func (c *backendProviderMetadataCapture) ensureIngestState() {
 	if c.eventTypeSeen == nil {
 		c.eventTypeSeen = make(map[string]bool)
 	}
 	if c.ids == nil {
 		c.ids = make(map[string]string)
 	}
+}
+
+func (c *backendProviderMetadataCapture) ingestEventType(event map[string]any) {
 	if typ := firstProviderStringField(event, "type"); typ != "" {
 		c.lastEventType = typ
 		if !c.eventTypeSeen[typ] {
@@ -52,6 +63,9 @@ func (c *backendProviderMetadataCapture) IngestLine(line string) {
 			c.eventTypes = append(c.eventTypes, typ)
 		}
 	}
+}
+
+func (c *backendProviderMetadataCapture) ingestProviderIDs(event map[string]any) {
 	for _, key := range []string{
 		"id",
 		"session_id", "sessionID",
@@ -64,6 +78,9 @@ func (c *backendProviderMetadataCapture) IngestLine(line string) {
 			c.ids[key] = value
 		}
 	}
+}
+
+func (c *backendProviderMetadataCapture) ingestSessionID(event map[string]any) {
 	if c.sessionID == "" {
 		c.sessionID = firstProviderStringField(event,
 			"session_id", "sessionID",
@@ -80,6 +97,9 @@ func (c *backendProviderMetadataCapture) IngestLine(line string) {
 	if c.sessionID == "" {
 		c.sessionID = nestedProviderStringField(event, "thread", "id")
 	}
+}
+
+func (c *backendProviderMetadataCapture) ingestProviderModel(event map[string]any) {
 	if c.providerModel == "" {
 		c.providerModel = firstProviderStringField(event, "provider_model", "model", "model_id", "modelID")
 	}

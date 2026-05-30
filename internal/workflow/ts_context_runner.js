@@ -81,11 +81,7 @@ const runtime = {
 };
 
 function transformSource(src, file) {
-  let transformed = src;
-  if (typeof stripTypeScriptTypes === "function") {
-    transformed = stripTypeScriptTypes(transformed, { mode: "strip", sourceUrl: file });
-  }
-  return transformed
+  return stripTypeScriptSyntax(src, file)
     .replace(/import\s+type\s+[^;]+;?/g, "")
     .replace(importStatementRegex(), "")
     .replace(/export\s+type\s+[^;]+;?/g, "")
@@ -93,6 +89,53 @@ function transformSource(src, file) {
     .replace(/export\s+default\s+/, "module.exports.default = ")
     .replace(/export\s+const\s+([A-Za-z0-9_]+)\s*=/g, "const $1 = module.exports.$1 =")
     .replace(/export\s+function\s+([A-Za-z0-9_]+)\s*\(/g, "function $1(");
+}
+
+function stripTypeScriptSyntax(src, file) {
+  if (typeof stripTypeScriptTypes === "function") {
+    return stripTypeScriptTypes(src, { mode: "strip", sourceUrl: file });
+  }
+  return stripTypeScriptFallback(src);
+}
+
+function stripTypeScriptFallback(src) {
+  return stripTypeDeclarations(src)
+    .replace(/\s+satisfies\s+[A-Za-z_$][\w$]*(?:\[\])?/g, "")
+    .replace(/\s+as\s+const\b/g, "")
+    .replace(/\s+as\s+[A-Za-z_$][\w$]*(?:\[\])?/g, "")
+    .replace(/\)\s*:\s*[^=]+=>/g, ") =>")
+    .replace(/\((\s*[A-Za-z_$][\w$]*)\??\s*:\s*[^)=,]+(\s*)\)/g, "($1$2)")
+    .replace(/(\b(?:const|let|var)\s+[A-Za-z_$][\w$]*)\s*:\s*[^=;]+=/g, "$1 =");
+}
+
+function stripTypeDeclarations(src) {
+  const out = [];
+  let skipping = false;
+  let depth = 0;
+  for (const line of src.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!skipping && /^(export\s+)?(type|interface)\s+[A-Za-z_$][\w$]*/.test(trimmed)) {
+      skipping = true;
+      depth = braceDelta(line);
+      if (typeDeclarationComplete(trimmed, depth)) skipping = false;
+      continue;
+    }
+    if (skipping) {
+      depth += braceDelta(line);
+      if (typeDeclarationComplete(trimmed, depth)) skipping = false;
+      continue;
+    }
+    out.push(line);
+  }
+  return out.join("\n");
+}
+
+function braceDelta(line) {
+  return (line.match(/\{/g) || []).length - (line.match(/\}/g) || []).length;
+}
+
+function typeDeclarationComplete(line, depth) {
+  return depth <= 0 && /[};]\s*$/.test(line);
 }
 
 function importStatementRegex() {

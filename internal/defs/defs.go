@@ -15,184 +15,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
-type Plan struct {
-	Root                 string                      `json:"root"`
-	ModelPolicy          *ModelPolicy                `json:"model_policy,omitempty"`
-	Agents               []AgentModule               `json:"agents,omitempty"`
-	AgentInstances       []AgentInstanceModule       `json:"agent_instances,omitempty"`
-	AgentSessions        []AgentSessionModule        `json:"agent_sessions,omitempty"`
-	AgentLeases          []AgentLeaseModule          `json:"agent_leases,omitempty"`
-	AgentOwnershipLeases []AgentOwnershipLeaseModule `json:"agent_ownership_leases,omitempty"`
-	AgentCommands        []AgentCommandModule        `json:"agent_commands,omitempty"`
-	TerminalSessions     []TerminalSessionModule     `json:"terminal_sessions,omitempty"`
-	Artifacts            []ArtifactModule            `json:"artifacts,omitempty"`
-	Workflows            []WorkflowModule            `json:"workflows,omitempty"`
-	WorkflowRuns         []WorkflowRunModule         `json:"workflow_runs,omitempty"`
-	TaskRuns             []TaskRunModule             `json:"task_runs,omitempty"`
-	RunEvents            []RunEventModule            `json:"run_events,omitempty"`
-	Runtimes             []RuntimeModule             `json:"runtimes,omitempty"`
-	Skills               []SkillModule               `json:"skills,omitempty"`
-	Tools                []ToolModule                `json:"tools,omitempty"`
-}
-
-type ModelPolicy struct {
-	AllowedModels    []string `json:"allowed_models,omitempty"`
-	AllowedProviders []string `json:"allowed_providers,omitempty"`
-	AllowUnknown     bool     `json:"allow_unknown,omitempty"`
-}
-
-type AgentModule struct {
-	Name            string   `json:"name"`
-	Description     string   `json:"description,omitempty"`
-	Backend         string   `json:"backend,omitempty"`
-	Model           string   `json:"model,omitempty"`
-	ProfileName     string   `json:"profile_name,omitempty"`
-	SourcePath      string   `json:"source_path"`
-	SourceHash      string   `json:"source_hash"`
-	Version         string   `json:"version"`
-	Instructions    string   `json:"instructions,omitempty"`
-	Skills          []string `json:"skills,omitempty"`
-	Tools           []string `json:"tools,omitempty"`
-	AllowedCommands []string `json:"allowed_commands,omitempty"`
-	DeniedCommands  []string `json:"denied_commands,omitempty"`
-	Repos           []string `json:"repos,omitempty"`
-	Env             []string `json:"env,omitempty"`
-	MaxConcurrency  int      `json:"max_concurrency,omitempty"`
-	MaxBudgetUSD    *float64 `json:"max_budget_usd,omitempty"`
-	ReadOnly        bool     `json:"read_only,omitempty"`
-}
-
-type WorkflowModule struct {
-	Name               string            `json:"name"`
-	Description        string            `json:"description,omitempty"`
-	SourcePath         string            `json:"source_path"`
-	SourceHash         string            `json:"source_hash"`
-	Version            string            `json:"version"`
-	SingletonPolicy    string            `json:"singleton_policy,omitempty"`
-	RuntimeProfileName string            `json:"runtime_profile_name,omitempty"`
-	Builtin            string            `json:"builtin,omitempty"`
-	Runner             string            `json:"runner,omitempty"`
-	RoutePath          string            `json:"route_path,omitempty"`
-	RouteAuth          string            `json:"route_auth,omitempty"`
-	TriggerEvent       string            `json:"trigger_event,omitempty"`
-	TriggerFilter      map[string]string `json:"trigger_filter,omitempty"`
-	Tools              []string          `json:"tools,omitempty"`
-	Env                []string          `json:"env,omitempty"`
-	Repos              []string          `json:"repos,omitempty"`
-}
-
-type RuntimeModule struct {
-	Name               string                 `json:"name"`
-	Version            string                 `json:"version"`
-	SourcePath         string                 `json:"source_path"`
-	SourceHash         string                 `json:"source_hash"`
-	Provider           domain.RuntimeProvider `json:"provider"`
-	Image              string                 `json:"image,omitempty"`
-	Repos              []string               `json:"repos,omitempty"`
-	Env                []string               `json:"env,omitempty"`
-	CPU                string                 `json:"cpu,omitempty"`
-	Memory             string                 `json:"memory,omitempty"`
-	CWD                string                 `json:"cwd,omitempty"`
-	WorkspaceSkillDirs []string               `json:"workspace_skill_dirs,omitempty"`
-	Workspace          *RuntimeWorkspace      `json:"workspace,omitempty"`
-	Capabilities       *RuntimeCapabilities   `json:"capabilities,omitempty"`
-}
-
-type RuntimeWorkspace struct {
-	ProviderWorkspaceID string                 `json:"provider_workspace_id,omitempty"`
-	Owner               string                 `json:"owner,omitempty"`
-	Cleanup             *RuntimeCleanupPolicy  `json:"cleanup,omitempty"`
-	Filesystem          *RuntimeFilesystemSpec `json:"filesystem,omitempty"`
-}
-
-type RuntimeCleanupPolicy struct {
-	Mode      string `json:"mode,omitempty"`
-	TTL       string `json:"ttl,omitempty"`
-	Retention string `json:"retention,omitempty"`
-}
-
-type RuntimeFilesystemSpec struct {
-	Persistence string `json:"persistence,omitempty"`
-	Durability  string `json:"durability,omitempty"`
-	Retention   string `json:"retention,omitempty"`
-}
-
-type RuntimeCapabilities struct {
-	Filesystem *RuntimeFilesystemCapabilities `json:"filesystem,omitempty"`
-	Shell      *RuntimeShellCapabilities      `json:"shell,omitempty"`
-	Network    *RuntimeNetworkCapabilities    `json:"network,omitempty"`
-	Env        *RuntimeEnvCapabilities        `json:"env,omitempty"`
-	Workspace  *RuntimeWorkspaceCapabilities  `json:"workspace,omitempty"`
-	Lifecycle  *RuntimeLifecycleCapabilities  `json:"lifecycle,omitempty"`
-}
-
-type RuntimeFilesystemCapabilities struct {
-	Read        *bool  `json:"read,omitempty"`
-	Write       *bool  `json:"write,omitempty"`
-	ArtifactURI *bool  `json:"artifact_uri,omitempty"`
-	Policy      string `json:"policy,omitempty"`
-	Persistence string `json:"persistence,omitempty"`
-	Durability  string `json:"durability,omitempty"`
-	Retention   string `json:"retention,omitempty"`
-}
-
-type RuntimeShellCapabilities struct {
-	Enabled  *bool    `json:"enabled,omitempty"`
-	Commands []string `json:"commands,omitempty"`
-	Policy   string   `json:"policy,omitempty"`
-}
-
-type RuntimeNetworkCapabilities struct {
-	Enabled *bool  `json:"enabled,omitempty"`
-	Policy  string `json:"policy,omitempty"`
-}
-
-type RuntimeEnvCapabilities struct {
-	Forwarded []string `json:"forwarded,omitempty"`
-	Policy    string   `json:"policy,omitempty"`
-}
-
-type RuntimeWorkspaceCapabilities struct {
-	ProviderWorkspaceID string   `json:"provider_workspace_id,omitempty"`
-	Owner               string   `json:"owner,omitempty"`
-	CWD                 string   `json:"cwd,omitempty"`
-	Repos               []string `json:"repos,omitempty"`
-	SkillDirs           []string `json:"skill_dirs,omitempty"`
-}
-
-type RuntimeLifecycleCapabilities struct {
-	Materialize    *bool  `json:"materialize,omitempty"`
-	Cleanup        *bool  `json:"cleanup,omitempty"`
-	Release        *bool  `json:"release,omitempty"`
-	Cancellation   *bool  `json:"cancellation,omitempty"`
-	DefaultTimeout string `json:"default_timeout,omitempty"`
-	Policy         string `json:"policy,omitempty"`
-}
-
-type SkillModule struct {
-	Name         string   `json:"name"`
-	Description  string   `json:"description,omitempty"`
-	Version      string   `json:"version"`
-	SourcePath   string   `json:"source_path"`
-	SourceHash   string   `json:"source_hash"`
-	Instructions string   `json:"instructions,omitempty"`
-	Resources    []string `json:"resources,omitempty"`
-}
-
-type ToolModule struct {
-	Name        string         `json:"name"`
-	Description string         `json:"description,omitempty"`
-	Version     string         `json:"version"`
-	SourcePath  string         `json:"source_path"`
-	SourceHash  string         `json:"source_hash"`
-	Parameters  map[string]any `json:"parameters,omitempty"`
-	Handler     string         `json:"handler,omitempty"`
-	Runtime     string         `json:"runtime,omitempty"`
-	Repos       []string       `json:"repos,omitempty"`
-	Env         []string       `json:"env,omitempty"`
-	ReadOnly    bool           `json:"read_only,omitempty"`
-}
-
 func Load(root string) (*Plan, error) {
 	if strings.TrimSpace(root) == "" {
 		root = "."
@@ -789,6 +611,16 @@ func validatePlan(plan *Plan) error {
 			return fmt.Errorf("duplicate agent instance %q in %s and %s", instance.Name, prior, instance.SourcePath)
 		}
 		seen["agent-instance:"+instance.Name] = instance.SourcePath
+	}
+	for _, node := range plan.Nodes {
+		sourcePath := firstNonEmpty(node.SourcePath, "node:"+node.NodeID)
+		if strings.TrimSpace(node.NodeID) == "" {
+			return fmt.Errorf("%s: node id is required", sourcePath)
+		}
+		if prior := seen["node:"+node.NodeID]; prior != "" {
+			return fmt.Errorf("duplicate node %q in %s and %s", node.NodeID, prior, sourcePath)
+		}
+		seen["node:"+node.NodeID] = sourcePath
 	}
 	for _, session := range plan.AgentSessions {
 		sourcePath := firstNonEmpty(session.SourcePath, "agent_session:"+session.SessionID)

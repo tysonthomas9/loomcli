@@ -22,71 +22,6 @@ import (
 //go:embed ts_context_runner.js
 var tsContextRunnerSource string
 
-type tsContextRequest struct {
-	ID              string                   `json:"id"`
-	SourcePath      string                   `json:"sourcePath"`
-	Input           map[string]any           `json:"input"`
-	Env             map[string]string        `json:"env,omitempty"`
-	Request         tsContextRequestMetadata `json:"request"`
-	Workspace       tsContextWorkspace       `json:"workspace"`
-	Workflow        tsContextWorkflowState   `json:"workflow"`
-	RuntimeProfile  *tsContextRuntimeProfile `json:"runtimeProfile,omitempty"`
-	RuntimeRoot     string                   `json:"runtimeWorkspaceRoot,omitempty"`
-	TaskRuns        []*domain.TaskRun        `json:"taskRuns,omitempty"`
-	TaskClaims      []tsContextTaskClaim     `json:"taskClaims,omitempty"`
-	ReadyChildren   []backend.IssueData      `json:"readyChildren,omitempty"`
-	BlockedChildren []backend.IssueData      `json:"blockedChildren,omitempty"`
-	ChildWorkItems  []backend.IssueData      `json:"childWorkItems,omitempty"`
-}
-
-type tsContextWorkflowState struct {
-	Status          string `json:"status"`
-	WaitCondition   string `json:"waitCondition,omitempty"`
-	CancelRequested bool   `json:"cancelRequested"`
-}
-
-type tsContextTaskClaim struct {
-	TaskRunID    string `json:"task_run_id"`
-	WorkItemID   string `json:"work_item_id"`
-	ClaimActor   string `json:"claim_actor,omitempty"`
-	ClaimEventID string `json:"claim_event_id,omitempty"`
-	Status       string `json:"status"`
-	AgentID      string `json:"agent_id,omitempty"`
-	SessionID    string `json:"session_id,omitempty"`
-	Active       bool   `json:"active"`
-}
-
-type tsContextRequestMetadata struct {
-	WorkspaceKey    string `json:"workspaceKey"`
-	WorkflowName    string `json:"workflowName"`
-	WorkflowVersion string `json:"workflowVersion"`
-	Actor           string `json:"actor,omitempty"`
-}
-
-type tsContextResponse struct {
-	Result     json.RawMessage       `json:"result"`
-	Logs       []tsWorkflowLog       `json:"logs"`
-	Operations []tsWorkflowOperation `json:"operations"`
-}
-
-type tsWorkflowLog struct {
-	Level      string         `json:"level"`
-	Message    string         `json:"message"`
-	Attributes map[string]any `json:"attributes,omitempty"`
-}
-
-type tsWorkflowOperation struct {
-	Type   string         `json:"type"`
-	Params map[string]any `json:"params"`
-}
-
-type tsAppliedOperations struct {
-	TaskRuns      []*domain.TaskRun
-	WaitCondition string
-	Cancelled     bool
-	Run           *domain.WorkflowRun
-}
-
 func runTypeScriptContextOnce(ctx context.Context, st store.Store, ib backend.IssueBackend, run *domain.WorkflowRun, def *domain.WorkflowDefinition) (*BuiltinRunResult, error) {
 	if st == nil || st.TaskRuns() == nil || st.RunEvents() == nil || st.WorkflowRuns() == nil {
 		return nil, fmt.Errorf("workflow stores not configured")
@@ -372,7 +307,7 @@ func applyTSOperations(ctx context.Context, st store.Store, ib backend.IssueBack
 	return applied, nil
 }
 
-//nolint:cyclop // This switch is the explicit WorkflowContext operation admission allowlist.
+//nolint:cyclop,funlen // This switch is the explicit WorkflowContext operation admission allowlist.
 func applyTSOperation(ctx context.Context, st store.Store, ib backend.IssueBackend, run *domain.WorkflowRun, parentID string, applied *tsAppliedOperations, op tsWorkflowOperation) error {
 	switch op.Type {
 	case "runtime.profile", "runtime.workspace", "runtime.skills":
@@ -536,6 +471,18 @@ func appendAgentDispatchAdmittedEvent(ctx context.Context, st store.Store, run *
 	if agentID == "" {
 		return fmt.Errorf("agents.dispatch requires agentId")
 	}
+	data := agentDispatchAdmittedEventData(run, params, agentID)
+	_, _ = st.RunEvents().Append(ctx, store.RunEventAppend{
+		WorkspaceKey:  run.WorkspaceKey,
+		WorkflowRunID: run.RunID,
+		Type:          "agent_dispatch_admitted",
+		Message:       "workflow agent dispatch admitted",
+		Data:          mustJSON(data),
+	})
+	return nil
+}
+
+func agentDispatchAdmittedEventData(run *domain.WorkflowRun, params map[string]any, agentID string) map[string]any {
 	dispatchID := firstString(params, "dispatchId", "dispatch_id")
 	if dispatchID == "" {
 		dispatchID = "dispatch:" + run.RunID + ":" + agentID
@@ -581,14 +528,7 @@ func appendAgentDispatchAdmittedEvent(ctx context.Context, st store.Store, run *
 			"sessionId":     sessionID,
 		}
 	}
-	_, _ = st.RunEvents().Append(ctx, store.RunEventAppend{
-		WorkspaceKey:  run.WorkspaceKey,
-		WorkflowRunID: run.RunID,
-		Type:          "agent_dispatch_admitted",
-		Message:       "workflow agent dispatch admitted",
-		Data:          mustJSON(data),
-	})
-	return nil
+	return data
 }
 
 func applyRecordArtifactOperation(ctx context.Context, st store.Store, run *domain.WorkflowRun, params map[string]any) error {

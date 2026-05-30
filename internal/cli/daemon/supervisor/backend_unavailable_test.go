@@ -152,11 +152,12 @@ func TestSpawnAgent_BackendRecoveryClearsState(t *testing.T) {
 	}
 
 	// Second call: binary is "installed"; gate should clear state.
-	// (Spawn itself will fail later because the buildCommand step has
-	// no real `loom` binary in the test env. We only assert the gate's
-	// recovery branch ran.)
+	// Exercise the gate directly so this unit test does not start the
+	// package's .test binary via spawnAgent.
 	installed = true
-	_ = s.spawnAgent(ap)
+	if err := s.gateBackendAvailable(ap); err != nil {
+		t.Fatalf("recovery gate error: %v", err)
+	}
 
 	if ap.StopReason != "" {
 		t.Errorf("StopReason after recovery = %q, want empty", ap.StopReason)

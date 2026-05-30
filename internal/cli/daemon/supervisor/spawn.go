@@ -20,6 +20,8 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 )
 
+var resolveLoomExecutable = os.Executable
+
 // buildCommand constructs the exec.Cmd for spawning an agent subprocess (does not start it).
 func (s *Supervisor) buildCommand(ap *AgentProcess) (*exec.Cmd, error) {
 	cfg := s.ConfigSnapshot()
@@ -77,7 +79,7 @@ func (s *Supervisor) buildCommand(ap *AgentProcess) (*exec.Cmd, error) {
 
 // buildAgentExecCmd creates the exec.Cmd with the correct arguments for the agent role.
 func buildAgentExecCmd(ap *AgentProcess, backend, epicID string) (*exec.Cmd, error) {
-	loomPath, err := os.Executable()
+	loomPath, err := resolveLoomExecutable()
 	if err != nil {
 		return nil, fmt.Errorf("resolve loom executable: %w", err)
 	}

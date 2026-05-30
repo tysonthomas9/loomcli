@@ -74,6 +74,8 @@ func TestEnsureGitWorktreeFromBranchFallsBackToLocalDefaultBranch(t *testing.T) 
 	git(t, seed, "push", "origin", "main")
 
 	git(t, "", "clone", remote, repo)
+	git(t, repo, "config", "user.name", "Test User")
+	git(t, repo, "config", "user.email", "test@example.test")
 	git(t, repo, "checkout", "-b", "browser-e2e")
 	writeFile(t, filepath.Join(repo, "base.txt"), "local branch\n")
 	git(t, repo, "add", "base.txt")

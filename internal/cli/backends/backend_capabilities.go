@@ -194,7 +194,13 @@ func InspectCapabilities(b cli.Backend) BackendCapabilities {
 	}
 
 	var caps BackendCapabilities
+	inspectStreamingCapabilities(b, &caps)
+	inspectToolCapabilities(b, &caps)
+	inspectBackendMetadataCapabilities(b, &caps)
+	return caps
+}
 
+func inspectStreamingCapabilities(b cli.Backend, caps *BackendCapabilities) {
 	if s, ok := b.(StreamingBackend); ok {
 		caps.HasStreaming = true
 		caps.Streaming = s
@@ -211,6 +217,9 @@ func InspectCapabilities(b cli.Backend) BackendCapabilities {
 		caps.HasSessions = true
 		caps.Sessions = s
 	}
+}
+
+func inspectToolCapabilities(b cli.Backend, caps *BackendCapabilities) {
 	if t, ok := b.(ToolAwareBackend); ok {
 		caps.HasToolControl = true
 		caps.Tools = t
@@ -223,6 +232,9 @@ func InspectCapabilities(b cli.Backend) BackendCapabilities {
 		caps.HasTypedToolCalls = true
 		caps.TypedToolCalls = t
 	}
+}
+
+func inspectBackendMetadataCapabilities(b cli.Backend, caps *BackendCapabilities) {
 	if p, ok := b.(ProviderMetadataReporter); ok {
 		caps.HasProviderMetadata = true
 		caps.ProviderMetadata = p
@@ -239,8 +251,6 @@ func InspectCapabilities(b cli.Backend) BackendCapabilities {
 		caps.HasMeta = true
 		caps.Meta = m
 	}
-
-	return caps
 }
 
 // CheckBackendHealth returns the health status of the named backend.

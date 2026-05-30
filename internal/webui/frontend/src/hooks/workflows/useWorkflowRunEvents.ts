@@ -95,9 +95,7 @@ export function useWorkflowRunEvents(
       });
       source.addEventListener("workflow_run_stream_complete", (event) => {
         try {
-          const parsed = JSON.parse(
-            event.data,
-          ) as WorkflowRunStreamCompletion;
+          const parsed = JSON.parse(event.data) as WorkflowRunStreamCompletion;
           if (mountedRef.current) {
             setStreamCompletion(parsed);
             setError(null);
