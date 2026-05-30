@@ -3,6 +3,7 @@ package workflow
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -87,10 +88,11 @@ func CreateOrResumeRun(ctx context.Context, st store.Store, workspaceKey, workfl
 	return run, nil
 }
 
-func RunBuiltinOnce(ctx context.Context, st store.Store, ib backend.IssueBackend, run *domain.WorkflowRun) (*BuiltinRunResult, error) {
+func RunBuiltinOnce(ctx context.Context, st store.Store, ib backend.IssueBackend, run *domain.WorkflowRun) (result *BuiltinRunResult, err error) {
 	if run == nil {
 		return nil, fmt.Errorf("workflow run required")
 	}
+	defer markWorkflowRunFailedOnError(ctx, st, run, &result, &err)
 	switch run.WorkflowName {
 	case RunParentWorkItemsName:
 		return runParentWorkItemsOnce(ctx, st, ib, run)
@@ -99,10 +101,11 @@ func RunBuiltinOnce(ctx context.Context, st store.Store, ib backend.IssueBackend
 	}
 }
 
-func RunOnce(ctx context.Context, st store.Store, ib backend.IssueBackend, run *domain.WorkflowRun) (*BuiltinRunResult, error) {
+func RunOnce(ctx context.Context, st store.Store, ib backend.IssueBackend, run *domain.WorkflowRun) (result *BuiltinRunResult, err error) {
 	if run == nil {
 		return nil, fmt.Errorf("workflow run required")
 	}
+	defer markWorkflowRunFailedOnError(ctx, st, run, &result, &err)
 	if run.WorkflowName == RunParentWorkItemsName {
 		return runParentWorkItemsOnce(ctx, st, ib, run)
 	}
@@ -142,6 +145,91 @@ func RunOnce(ctx context.Context, st store.Store, ib backend.IssueBackend, run *
 		return nil, fmt.Errorf("code-defined workflow %q has no constrained runner in manifest", run.WorkflowName)
 	default:
 		return nil, fmt.Errorf("code-defined workflow %q declares unsupported constrained runner %q", run.WorkflowName, manifest.Builtin)
+	}
+}
+
+func markWorkflowRunFailedOnError(ctx context.Context, st store.Store, run *domain.WorkflowRun, result **BuiltinRunResult, errp *error) {
+	if errp == nil || *errp == nil || st == nil || run == nil || run.RunID == "" || st.WorkflowRuns() == nil {
+		return
+	}
+	failed, err := markWorkflowRunFailed(ctx, st, run, *errp)
+	if failed != nil && result != nil {
+		if *result == nil {
+			*result = &BuiltinRunResult{Run: failed}
+		} else if (*result).Run == nil {
+			(*result).Run = failed
+		}
+	}
+	if err != nil {
+		*errp = errors.Join(*errp, err)
+	}
+}
+
+func markWorkflowRunFailed(ctx context.Context, st store.Store, run *domain.WorkflowRun, cause error) (*domain.WorkflowRun, error) {
+	current := run
+	if loaded, err := st.WorkflowRuns().Get(ctx, run.WorkspaceKey, run.RunID); err == nil && loaded != nil {
+		current = loaded
+	}
+	if current.Status == domain.WorkflowRunCompleted || current.Status == domain.WorkflowRunCancelled || current.Status == domain.WorkflowRunFailed {
+		return current, nil
+	}
+	now := time.Now().UTC()
+	finishedAt := &now
+	status := domain.WorkflowRunFailed
+	errorClass := workflowRunErrorClass(cause)
+	errorMessage := cause.Error()
+	updated, err := st.WorkflowRuns().Update(ctx, run.WorkspaceKey, run.RunID, store.WorkflowRunUpdate{
+		Status:       &status,
+		ErrorClass:   &errorClass,
+		ErrorMessage: &errorMessage,
+		FinishedAt:   &finishedAt,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("mark workflow run failed: %w", err)
+	}
+	if st.RunEvents() != nil {
+		_, _ = st.RunEvents().Append(ctx, store.RunEventAppend{
+			WorkspaceKey:  run.WorkspaceKey,
+			WorkflowRunID: run.RunID,
+			Type:          "workflow_failed",
+			Message:       "workflow run failed",
+			Data: mustJSON(map[string]any{
+				"workflow_run_id": run.RunID,
+				"error_class":     errorClass,
+				"error_message":   errorMessage,
+				"source":          "workflow_run_once",
+			}),
+		})
+	}
+	return updated, nil
+}
+
+func workflowRunErrorClass(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := err.Error()
+	switch {
+	case strings.Contains(msg, "decode workflow input") ||
+		strings.Contains(msg, "parentId is required") ||
+		strings.Contains(msg, "requires condition"):
+		return "validation_error"
+	case strings.Contains(msg, "issue backend") ||
+		strings.Contains(msg, "ready child query") ||
+		strings.Contains(msg, "blocked child query") ||
+		strings.Contains(msg, "list child work"):
+		return "backend_error"
+	case strings.Contains(msg, "execute TypeScript WorkflowContext runner") ||
+		strings.Contains(msg, "decode TypeScript WorkflowContext response"):
+		return "runner_error"
+	case strings.Contains(msg, "unsupported WorkflowContext operation"):
+		return "workflow_context_error"
+	case strings.Contains(msg, "no constrained runner") ||
+		strings.Contains(msg, "unsupported constrained runner") ||
+		strings.Contains(msg, "workflow definition store not configured"):
+		return "configuration_error"
+	default:
+		return "workflow_error"
 	}
 }
 

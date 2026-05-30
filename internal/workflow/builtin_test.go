@@ -208,6 +208,68 @@ export default defineWorkflow({
 	}
 }
 
+func TestRunOncePersistsFailedWorkflowRunOnTypeScriptError(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	workflowPath := filepath.Join(root, ".loom", "workflows", "context-fails.ts")
+	if err := os.MkdirAll(filepath.Dir(workflowPath), 0o755); err != nil {
+		t.Fatalf("mkdir workflow dir: %v", err)
+	}
+	if err := os.WriteFile(workflowPath, []byte(`import { defineWorkflow } from '@loom/runtime';
+
+export default defineWorkflow({
+  name: 'context-fails',
+  async run(ctx) {
+    ctx.log.info('about to fail');
+    throw new Error('boom from workflow');
+  },
+});
+`), 0o644); err != nil {
+		t.Fatalf("write workflow: %v", err)
+	}
+	plan, err := defspkg.Load(root)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TSFAIL", Name: "TypeScript Failure"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := defspkg.Apply(ctx, st, "TSFAIL", "atlas", plan); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	run, err := CreateOrResumeRun(ctx, st, "TSFAIL", "context-fails", json.RawMessage(`{}`), "atlas")
+	if err != nil {
+		t.Fatalf("CreateOrResumeRun() error = %v", err)
+	}
+	_, err = RunOnce(ctx, st, clitest.NewMockIssueBackend(), run)
+	if err == nil || !strings.Contains(err.Error(), "boom from workflow") {
+		t.Fatalf("RunOnce() error = %v, want TypeScript workflow failure", err)
+	}
+	failed, err := st.WorkflowRuns().Get(ctx, "TSFAIL", run.RunID)
+	if err != nil {
+		t.Fatalf("get failed run: %v", err)
+	}
+	if failed.Status != domain.WorkflowRunFailed || failed.ErrorClass != "runner_error" ||
+		!strings.Contains(failed.ErrorMessage, "boom from workflow") || failed.FinishedAt == nil {
+		t.Fatalf("failed run = %+v, want durable failed state with runner error", failed)
+	}
+	events, err := st.RunEvents().List(ctx, "TSFAIL", store.RunEventFilter{WorkflowRunID: run.RunID})
+	if err != nil {
+		t.Fatalf("list run events: %v", err)
+	}
+	if !hasWorkflowEvent(events, "workflow_ts_context_started") || !hasWorkflowEvent(events, "workflow_failed") {
+		t.Fatalf("events = %+v, want context start and durable failure evidence", events)
+	}
+	failureEvent := workflowEventDataByType(t, events, "workflow_failed")
+	errorMessage, _ := failureEvent["error_message"].(string)
+	if failureEvent["error_class"] != "runner_error" ||
+		!strings.Contains(errorMessage, "boom from workflow") ||
+		failureEvent["source"] != "workflow_run_once" {
+		t.Fatalf("failure event = %+v, want runner error evidence", failureEvent)
+	}
+}
+
 func TestCodeDefinedWorkflowContextWorkItemQueriesHonorOptions(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
