@@ -90,6 +90,13 @@ export interface WorkflowRunStreamCompletion {
   runs: WorkflowRunStreamCompletionRun[];
 }
 
+export interface WorkflowRunStreamError {
+  run_ids?: string[];
+  error?: string;
+  message?: string;
+  terminal?: boolean;
+}
+
 export interface WorkflowRunListItem {
   run: WorkflowRun;
   task_runs?: TaskRun[];

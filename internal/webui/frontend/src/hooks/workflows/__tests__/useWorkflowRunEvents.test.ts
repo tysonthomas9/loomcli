@@ -10,6 +10,7 @@ import {
   workflowRunEventStreamUrl,
   type WorkflowRunEvent,
   type WorkflowRunStreamCompletion,
+  type WorkflowRunStreamError,
 } from "@/api/workflows";
 
 import { useWorkflowRunEvents } from "../useWorkflowRunEvents";
@@ -171,6 +172,32 @@ describe("useWorkflowRunEvents", () => {
     expect(MockEventSource.instances).toHaveLength(0);
     expect(result.current.streamCompletion).toBeNull();
     expect(result.current.isStreamComplete).toBe(false);
+  });
+
+  it("reports structured stream error envelopes and closes the stream", async () => {
+    const { result } = renderHook(() => useWorkflowRunEvents("wrun-1", true));
+
+    await waitFor(() => expect(result.current.events).toEqual([initialEvent]));
+
+    const streamError: WorkflowRunStreamError = {
+      run_ids: ["wrun-1"],
+      message: "run disappeared",
+      terminal: true,
+    };
+    act(() => {
+      MockEventSource.last.emit("workflow_run_stream_error", streamError);
+    });
+
+    await waitFor(() =>
+      expect(result.current.error?.message).toBe("run disappeared"),
+    );
+    expect(result.current.isStreamComplete).toBe(false);
+    expect(MockEventSource.last.closed).toBe(true);
+
+    act(() => {
+      MockEventSource.last.emitError();
+    });
+    expect(mockGetWorkflowRunEvents).toHaveBeenCalledTimes(1);
   });
 
   it("reports malformed completion envelopes as errors", async () => {

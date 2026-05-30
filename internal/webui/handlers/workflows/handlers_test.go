@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -215,6 +216,25 @@ func TestWorkflowRunAPICreatesInspectableRun(t *testing.T) {
 	}
 	if cancelled.Status != domain.WorkflowRunCancelled {
 		t.Fatalf("cancelled status = %s, want cancelled", cancelled.Status)
+	}
+}
+
+func TestWorkflowRunStreamErrorEnvelope(t *testing.T) {
+	rec := httptest.NewRecorder()
+	sw, err := newWorkflowAdmissionStreamWriter(rec, http.StatusOK)
+	if err != nil {
+		t.Fatalf("newWorkflowAdmissionStreamWriter() error = %v", err)
+	}
+	if err := writeWorkflowRunStreamError(sw, []string{"wrun-1"}, errors.New("run disappeared")); err != nil {
+		t.Fatalf("writeWorkflowRunStreamError() error = %v", err)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "event: workflow_run_stream_error") ||
+		!strings.Contains(body, "id: error") ||
+		!strings.Contains(body, `"run_ids":["wrun-1"]`) ||
+		!strings.Contains(body, `"message":"run disappeared"`) ||
+		!strings.Contains(body, `"terminal":true`) {
+		t.Fatalf("stream error body = %s, want structured stream error envelope", body)
 	}
 }
 

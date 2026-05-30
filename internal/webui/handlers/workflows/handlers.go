@@ -227,7 +227,8 @@ func HandleEventStream(st store.Store) http.HandlerFunc {
 				return
 			case <-ticker.C:
 				if err := writeWorkflowRunEvents(r.Context(), st, sw, r.PathValue("ws"), r.PathValue("runID"), &lastIndex); err != nil {
-					_ = sw.WriteComment(err.Error())
+					_ = writeWorkflowRunStreamError(sw, []string{r.PathValue("runID")}, err)
+					return
 				}
 			}
 		}
@@ -266,11 +267,12 @@ func HandleMultiRunEventStream(st store.Store) http.HandlerFunc {
 				return
 			case <-ticker.C:
 				if err := writeWorkflowRunEventSet(r.Context(), st, sw, r.PathValue("ws"), runIDs, cursors); err != nil {
-					_ = sw.WriteComment(err.Error())
+					_ = writeWorkflowRunStreamError(sw, runIDs, err)
+					return
 				}
 				complete, err := writeWorkflowRunStreamCompleteIfTerminal(r.Context(), st, sw, r.PathValue("ws"), runIDs, workflowStreamUntilTerminal(r))
 				if err != nil {
-					_ = sw.WriteComment(err.Error())
+					_ = writeWorkflowRunStreamError(sw, runIDs, err)
 					return
 				}
 				if complete {
@@ -489,7 +491,7 @@ func writeWorkflowAdmissionStream(w http.ResponseWriter, r *http.Request, st sto
 	runIDs := []string{resp.Run.RunID}
 	cursors := map[string]int64{resp.Run.RunID: 0}
 	if err := writeWorkflowRunEventSet(r.Context(), st, sw, ws, runIDs, cursors); err != nil {
-		return err
+		return writeWorkflowRunStreamError(sw, runIDs, err)
 	}
 	return followWorkflowRunsUntilTerminal(r.Context(), st, sw, ws, runIDs, cursors, workflowStreamUntilTerminal(r))
 }
@@ -512,7 +514,7 @@ func writeWorkflowTriggerAdmissionStream(w http.ResponseWriter, r *http.Request,
 		cursors[run.Run.RunID] = 0
 	}
 	if err := writeWorkflowRunEventSet(r.Context(), st, sw, ws, runIDs, cursors); err != nil {
-		return err
+		return writeWorkflowRunStreamError(sw, runIDs, err)
 	}
 	return followWorkflowRunsUntilTerminal(r.Context(), st, sw, ws, runIDs, cursors, workflowStreamUntilTerminal(r))
 }
@@ -526,7 +528,7 @@ func followWorkflowRunsUntilTerminal(ctx context.Context, st store.Store, sw *re
 	for {
 		complete, err := writeWorkflowRunStreamCompleteIfTerminal(ctx, st, sw, ws, runIDs, true)
 		if err != nil {
-			return err
+			return writeWorkflowRunStreamError(sw, runIDs, err)
 		}
 		if complete {
 			return nil
@@ -536,7 +538,7 @@ func followWorkflowRunsUntilTerminal(ctx context.Context, st store.Store, sw *re
 			return nil
 		case <-ticker.C:
 			if err := writeWorkflowRunEventSet(ctx, st, sw, ws, runIDs, cursors); err != nil {
-				return err
+				return writeWorkflowRunStreamError(sw, runIDs, err)
 			}
 		}
 	}
@@ -555,6 +557,19 @@ func writeWorkflowRunStreamCompleteIfTerminal(ctx context.Context, st store.Stor
 		return false, err
 	}
 	return true, writeWorkflowAdmissionEnvelope(sw, "workflow_run_stream_complete", "complete", payload)
+}
+
+func writeWorkflowRunStreamError(sw *realtime.Writer, runIDs []string, err error) error {
+	if err == nil {
+		return nil
+	}
+	payload := map[string]any{
+		"run_ids":  runIDs,
+		"error":    err.Error(),
+		"message":  err.Error(),
+		"terminal": true,
+	}
+	return writeWorkflowAdmissionEnvelope(sw, "workflow_run_stream_error", "error", payload)
 }
 
 func workflowRunStreamCompletionPayload(ctx context.Context, st store.Store, ws string, runIDs []string) (map[string]any, error) {

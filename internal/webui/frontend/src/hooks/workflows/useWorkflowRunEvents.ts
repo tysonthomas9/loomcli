@@ -5,6 +5,7 @@ import {
   workflowRunEventStreamUrl,
   type WorkflowRunEvent,
   type WorkflowRunStreamCompletion,
+  type WorkflowRunStreamError,
 } from "@/api/workflows";
 import { useWorkspaceContext } from "@/hooks/workspace";
 
@@ -74,7 +75,7 @@ export function useWorkflowRunEvents(
     }
 
     if (typeof EventSource !== "undefined") {
-      let closedByCompletion = false;
+      let closedByServerEvent = false;
       const source = new EventSource(
         workflowRunEventStreamUrl(workspaceId, runId, {
           untilTerminal: true,
@@ -100,7 +101,23 @@ export function useWorkflowRunEvents(
             setStreamCompletion(parsed);
             setError(null);
           }
-          closedByCompletion = true;
+          closedByServerEvent = true;
+          source.close();
+        } catch (err) {
+          if (mountedRef.current) {
+            setError(err instanceof Error ? err : new Error(String(err)));
+          }
+        }
+      });
+      source.addEventListener("workflow_run_stream_error", (event) => {
+        try {
+          const parsed = JSON.parse(event.data) as WorkflowRunStreamError;
+          const message =
+            parsed.message || parsed.error || "Workflow run stream failed";
+          if (mountedRef.current) {
+            setError(new Error(message));
+          }
+          closedByServerEvent = true;
           source.close();
         } catch (err) {
           if (mountedRef.current) {
@@ -109,7 +126,7 @@ export function useWorkflowRunEvents(
         }
       });
       source.onerror = () => {
-        if (closedByCompletion) return;
+        if (closedByServerEvent) return;
         if (mountedRef.current) void fetchData();
       };
       return () => {

@@ -414,6 +414,9 @@ function WorkflowEventList({
   }
   return (
     <div className={styles.workflowEventList}>
+      {error ? (
+        <div className={styles.workflowError}>{error.message}</div>
+      ) : null}
       {events.map((event) => (
         <div
           key={event.event_id}
