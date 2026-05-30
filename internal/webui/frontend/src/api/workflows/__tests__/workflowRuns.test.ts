@@ -13,6 +13,7 @@ import {
   listWorkflowDefinitions,
   listWorkflowRuns,
   startWorkflowRun,
+  workflowRunEventStreamUrl,
 } from "../workflowRuns";
 
 vi.mock("@/api/common", async (importOriginal) => {
@@ -123,6 +124,12 @@ describe("workflow run API", () => {
     expect(result).toEqual([event]);
     expect(mockGet).toHaveBeenCalledWith(
       "/api/workspaces/WS/workflow-runs/wrun-1/events",
+    );
+  });
+
+  it("builds workflow run event stream URLs", () => {
+    expect(workflowRunEventStreamUrl("WS", "wrun/1")).toBe(
+      "/api/workspaces/WS/workflow-runs/wrun%2F1/events/stream",
     );
   });
 

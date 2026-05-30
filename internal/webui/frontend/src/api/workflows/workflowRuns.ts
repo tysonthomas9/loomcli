@@ -160,6 +160,16 @@ export async function getWorkflowRunEvents(
   return unwrapList(response);
 }
 
+export function workflowRunEventStreamUrl(
+  workspaceId: string,
+  runId: string,
+): string {
+  return wsUrl(
+    workspaceId,
+    `/workflow-runs/${encodeURIComponent(runId)}/events/stream`,
+  );
+}
+
 export function cancelWorkflowRun(
   workspaceId: string,
   runId: string,

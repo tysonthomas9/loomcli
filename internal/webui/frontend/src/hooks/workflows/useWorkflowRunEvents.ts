@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { getWorkflowRunEvents, type WorkflowRunEvent } from "@/api/workflows";
+import {
+  getWorkflowRunEvents,
+  workflowRunEventStreamUrl,
+  type WorkflowRunEvent,
+} from "@/api/workflows";
 import { useWorkspaceContext } from "@/hooks/workspace";
 
 export interface UseWorkflowRunEventsResult {
@@ -62,6 +66,32 @@ export function useWorkflowRunEvents(
       };
     }
 
+    if (typeof EventSource !== "undefined") {
+      const source = new EventSource(
+        workflowRunEventStreamUrl(workspaceId, runId),
+      );
+      source.addEventListener("workflow_event", (event) => {
+        try {
+          const parsed = JSON.parse(event.data) as WorkflowRunEvent;
+          if (mountedRef.current) {
+            setEvents((current) => mergeWorkflowRunEvent(current, parsed));
+            setError(null);
+          }
+        } catch (err) {
+          if (mountedRef.current) {
+            setError(err instanceof Error ? err : new Error(String(err)));
+          }
+        }
+      });
+      source.onerror = () => {
+        if (mountedRef.current) void fetchData();
+      };
+      return () => {
+        mountedRef.current = false;
+        source.close();
+      };
+    }
+
     const timer = setInterval(() => {
       void fetchData();
     }, POLL_INTERVAL);
@@ -72,4 +102,26 @@ export function useWorkflowRunEvents(
   }, [workspaceId, runId, shouldPoll, fetchData]);
 
   return { events, isLoading, error, refetch };
+}
+
+function mergeWorkflowRunEvent(
+  current: WorkflowRunEvent[],
+  next: WorkflowRunEvent,
+): WorkflowRunEvent[] {
+  const existingIndex = current.findIndex(
+    (event) => event.event_id === next.event_id,
+  );
+  if (existingIndex !== -1) {
+    const copy = current.slice();
+    copy[existingIndex] = next;
+    return copy.sort(compareWorkflowRunEvents);
+  }
+  return [...current, next].sort(compareWorkflowRunEvents);
+}
+
+function compareWorkflowRunEvents(
+  left: WorkflowRunEvent,
+  right: WorkflowRunEvent,
+): number {
+  return left.event_index - right.event_index;
 }
