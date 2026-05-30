@@ -117,6 +117,40 @@ func TestRunLocalConnectIncludesPriorSessionHistory(t *testing.T) {
 	}
 }
 
+func TestRunLocalConnectPersistsFailedOperation(t *testing.T) {
+	cli.TestingResetBackendState(t)
+	cli.RegisterBackend(failingConnectBackend{})
+	root := t.TempDir()
+	writeAgent(t, root, "fail-agent", "fail-connect")
+
+	result, err := runLocalConnect(context.Background(), connectOptions{
+		Dir:      root,
+		Agent:    "fail-agent",
+		Instance: "local",
+		Session:  "failure",
+		Message:  "please fail",
+	})
+	if err == nil || !strings.Contains(err.Error(), "backend exploded") {
+		t.Fatalf("runLocalConnect() error = %v, want backend failure", err)
+	}
+	if result.Operation == nil || result.Operation.Status != "failed" ||
+		result.Operation.ErrorClass != "backend_error" ||
+		!strings.Contains(result.Operation.ErrorMessage, "backend exploded") ||
+		result.Operation.TranscriptPath != result.TranscriptPath {
+		t.Fatalf("operation = %+v, want failed local connect operation envelope", result.Operation)
+	}
+	turns, err := readLocalTurns(result.TranscriptPath)
+	if err != nil {
+		t.Fatalf("readLocalTurns() error = %v", err)
+	}
+	if len(turns) != 1 || turns[0].Operation == nil || turns[0].Operation.Status != "failed" ||
+		turns[0].ErrorClass != "backend_error" ||
+		!strings.Contains(turns[0].ErrorMessage, "backend exploded") ||
+		turns[0].PromptHash == "" {
+		t.Fatalf("turns = %+v, want persisted failed operation turn", turns)
+	}
+}
+
 func TestRunLocalConnectLoadsEnvFileForBackend(t *testing.T) {
 	cli.TestingResetBackendState(t)
 	cli.RegisterBackend(envCheckBackend{})
@@ -1143,6 +1177,16 @@ func (envCheckBackend) InvokeNonInteractive(_, _, _ string, _ <-chan struct{}, _
 		return fmt.Errorf("LOCAL_CONNECT_TOKEN = %q, want loaded-from-file", got)
 	}
 	return nil
+}
+
+type failingConnectBackend struct{}
+
+func (failingConnectBackend) Name() string { return "fail-connect" }
+
+func (failingConnectBackend) InvokeInteractive(_, _, _ string) error { return nil }
+
+func (failingConnectBackend) InvokeNonInteractive(_, _, _ string, _ <-chan struct{}, _ *usage.Collector) error {
+	return fmt.Errorf("backend exploded")
 }
 
 type nonStreamingCaptureBackend struct{}

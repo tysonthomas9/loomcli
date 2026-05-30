@@ -22,6 +22,8 @@ type connectResult struct {
 	ProviderMetadata  map[string]any      `json:"provider_metadata,omitempty"`
 	OperationID       string              `json:"operation_id,omitempty"`
 	Operation         *connectOperation   `json:"operation,omitempty"`
+	ErrorClass        string              `json:"error_class,omitempty"`
+	ErrorMessage      string              `json:"error_message,omitempty"`
 	DurationMS        int64               `json:"duration_ms,omitempty"`
 	Usage             *connectUsage       `json:"usage,omitempty"`
 	WorkDir           string              `json:"work_dir,omitempty"`
@@ -53,6 +55,8 @@ type connectOperation struct {
 	ToolCalls         []connectToolCall `json:"tool_calls,omitempty"`
 	EventCorrelation  map[string]string `json:"event_correlation,omitempty"`
 	Metadata          map[string]any    `json:"metadata,omitempty"`
+	ErrorClass        string            `json:"error_class,omitempty"`
+	ErrorMessage      string            `json:"error_message,omitempty"`
 }
 
 type connectOptions struct {

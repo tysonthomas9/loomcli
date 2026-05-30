@@ -369,7 +369,12 @@ func runLocalConnect(ctx context.Context, opts connectOptions) (connectResult, e
 		return invokeLocalAgent(ctx, plan, agent, prompt, opts.Message, opts.Stream, lastProviderSessionID(history))
 	})
 	if err != nil {
-		return connectResult{}, err
+		completed := time.Now().UTC()
+		result, turn := failLocalConnectResult(result, agent, opts.Message, operationID, lastProviderSessionID(history), prompt, started, completed, err)
+		if appendErr := appendLocalTurn(result.TranscriptPath, turn); appendErr != nil {
+			return result, errors.Join(err, appendErr)
+		}
+		return result, err
 	}
 	completed := time.Now().UTC()
 	providerSessionID := fallback(invocation.ProviderSessionID, lastProviderSessionID(history))
@@ -884,6 +889,8 @@ type localTurn struct {
 	Timestamp         string              `json:"timestamp"`
 	OperationID       string              `json:"operation_id,omitempty"`
 	Operation         *connectOperation   `json:"operation,omitempty"`
+	ErrorClass        string              `json:"error_class,omitempty"`
+	ErrorMessage      string              `json:"error_message,omitempty"`
 	Agent             string              `json:"agent"`
 	Instance          string              `json:"instance"`
 	Session           string              `json:"session"`

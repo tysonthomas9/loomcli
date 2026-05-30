@@ -1,6 +1,8 @@
 package tsfirst
 
 import (
+	"context"
+	"errors"
 	"time"
 
 	defspkg "github.com/tysonthomas9/loomcli/internal/defs"
@@ -51,6 +53,36 @@ func completeLocalConnectResult(result connectResult, agent defspkg.AgentModule,
 	return result, turn
 }
 
+func failLocalConnectResult(result connectResult, agent defspkg.AgentModule, message, operationID, providerSessionID, prompt string, started, completed time.Time, cause error) (connectResult, localTurn) {
+	promptHash := hashText(prompt)
+	result.Message = message
+	result.ProviderSessionID = providerSessionID
+	result.OperationID = operationID
+	result.DurationMS = completed.Sub(started).Milliseconds()
+	result.ErrorClass = connectErrorClass(cause)
+	result.ErrorMessage = cause.Error()
+	result.Operation = failedConnectOperationEnvelope(result, operationID, promptHash, started, completed)
+	turn := localTurn{
+		Timestamp:         time.Now().UTC().Format(time.RFC3339Nano),
+		OperationID:       operationID,
+		Operation:         result.Operation,
+		Agent:             agent.Name,
+		Instance:          result.Instance,
+		Session:           result.Session,
+		Backend:           result.Backend,
+		Model:             result.Model,
+		ProviderSessionID: providerSessionID,
+		DefinitionVersion: agent.Version,
+		Message:           message,
+		DurationMS:        result.DurationMS,
+		PromptHash:        promptHash,
+		ToolRuntime:       result.ToolRuntime,
+		ErrorClass:        result.ErrorClass,
+		ErrorMessage:      result.ErrorMessage,
+	}
+	return result, turn
+}
+
 func connectOperationEnvelope(result connectResult, operationID, promptHash string, started, completed time.Time, invocation localInvocationResult) *connectOperation {
 	operation := &connectOperation{
 		ID:                operationID,
@@ -81,4 +113,39 @@ func connectOperationEnvelope(result connectResult, operationID, promptHash stri
 		operation.Metadata = map[string]any{"provider": result.ProviderMetadata}
 	}
 	return operation
+}
+
+func failedConnectOperationEnvelope(result connectResult, operationID, promptHash string, started, completed time.Time) *connectOperation {
+	return &connectOperation{
+		ID:                operationID,
+		Kind:              "local_connect_prompt",
+		Status:            "failed",
+		Model:             result.Model,
+		ProviderSessionID: result.ProviderSessionID,
+		StartedAt:         started.Format(time.RFC3339Nano),
+		CompletedAt:       completed.Format(time.RFC3339Nano),
+		DurationMS:        result.DurationMS,
+		PromptHash:        promptHash,
+		TranscriptPath:    result.TranscriptPath,
+		ErrorClass:        result.ErrorClass,
+		ErrorMessage:      result.ErrorMessage,
+		EventCorrelation: map[string]string{
+			"agent":    result.Agent,
+			"instance": result.Instance,
+			"session":  result.Session,
+		},
+	}
+}
+
+func connectErrorClass(err error) string {
+	switch {
+	case err == nil:
+		return ""
+	case errors.Is(err, context.Canceled):
+		return "cancelled"
+	case errors.Is(err, context.DeadlineExceeded):
+		return "deadline_exceeded"
+	default:
+		return "backend_error"
+	}
 }
