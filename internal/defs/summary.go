@@ -25,6 +25,9 @@ func Summary(plan *Plan) string {
 	if len(plan.TaskRuns) > 0 {
 		summary += fmt.Sprintf(" task_runs=%d", len(plan.TaskRuns))
 	}
+	if len(plan.RunEvents) > 0 {
+		summary += fmt.Sprintf(" run_events=%d", len(plan.RunEvents))
+	}
 	if len(plan.Artifacts) > 0 {
 		summary += fmt.Sprintf(" artifacts=%d", len(plan.Artifacts))
 	}

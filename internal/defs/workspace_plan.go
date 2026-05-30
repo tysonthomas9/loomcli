@@ -70,7 +70,10 @@ func appendControlPlaneState(ctx context.Context, st store.Store, workspaceKey s
 	if err := appendControlPlaneWorkflowRuns(ctx, st, workspaceKey, plan); err != nil {
 		return err
 	}
-	return appendControlPlaneTaskRuns(ctx, st, workspaceKey, plan)
+	if err := appendControlPlaneTaskRuns(ctx, st, workspaceKey, plan); err != nil {
+		return err
+	}
+	return appendControlPlaneRunEvents(ctx, st, workspaceKey, plan)
 }
 
 type workspaceDefinitionIndex struct {
@@ -647,6 +650,42 @@ func taskRunFromControlPlane(run *domain.TaskRun) TaskRunModule {
 	return module
 }
 
+func appendControlPlaneRunEvents(ctx context.Context, st store.Store, workspaceKey string, plan *Plan) error {
+	eventStore := st.RunEvents()
+	if eventStore == nil {
+		return fmt.Errorf("run event store not configured")
+	}
+	for _, run := range plan.WorkflowRuns {
+		events, err := eventStore.List(ctx, workspaceKey, store.RunEventFilter{WorkflowRunID: run.RunID, Limit: 10000})
+		if err != nil {
+			return fmt.Errorf("list run events for %s: %w", run.RunID, err)
+		}
+		for _, event := range events {
+			if event == nil {
+				continue
+			}
+			plan.RunEvents = append(plan.RunEvents, runEventFromControlPlane(event))
+		}
+	}
+	return nil
+}
+
+func runEventFromControlPlane(event *domain.RunEvent) RunEventModule {
+	module := RunEventModule{
+		EventID:       event.EventID,
+		WorkflowRunID: event.WorkflowRunID,
+		TaskRunID:     event.TaskRunID,
+		EventIndex:    event.EventIndex,
+		SourcePath:    "control-plane:run-event/" + event.EventID,
+		Type:          event.Type,
+		Message:       event.Message,
+		Data:          cloneWorkflowRunRaw(event.Data),
+	}
+	module.SourceHash = workspaceHash(module)
+	module.Version = version(module.SourceHash)
+	return module
+}
+
 func applyWorkspaceWorkflowBindings(ctx context.Context, st store.Store, workspaceKey string, plan *Plan) error {
 	for i := range plan.Workflows {
 		workflow := &plan.Workflows[i]
@@ -722,6 +761,12 @@ func sortPlan(plan *Plan) {
 	sort.Slice(plan.Workflows, func(i, j int) bool { return plan.Workflows[i].Name < plan.Workflows[j].Name })
 	sort.Slice(plan.WorkflowRuns, func(i, j int) bool { return plan.WorkflowRuns[i].RunID < plan.WorkflowRuns[j].RunID })
 	sort.Slice(plan.TaskRuns, func(i, j int) bool { return plan.TaskRuns[i].TaskRunID < plan.TaskRuns[j].TaskRunID })
+	sort.Slice(plan.RunEvents, func(i, j int) bool {
+		if plan.RunEvents[i].WorkflowRunID == plan.RunEvents[j].WorkflowRunID {
+			return plan.RunEvents[i].EventIndex < plan.RunEvents[j].EventIndex
+		}
+		return plan.RunEvents[i].WorkflowRunID < plan.RunEvents[j].WorkflowRunID
+	})
 	sort.Slice(plan.Runtimes, func(i, j int) bool { return plan.Runtimes[i].Name < plan.Runtimes[j].Name })
 }
 

@@ -26,6 +26,7 @@ type Plan struct {
 	Workflows        []WorkflowModule        `json:"workflows,omitempty"`
 	WorkflowRuns     []WorkflowRunModule     `json:"workflow_runs,omitempty"`
 	TaskRuns         []TaskRunModule         `json:"task_runs,omitempty"`
+	RunEvents        []RunEventModule        `json:"run_events,omitempty"`
 	Runtimes         []RuntimeModule         `json:"runtimes,omitempty"`
 	Skills           []SkillModule           `json:"skills,omitempty"`
 	Tools            []ToolModule            `json:"tools,omitempty"`
@@ -166,6 +167,9 @@ func Apply(ctx context.Context, st store.Store, workspaceKey, actor string, plan
 		return err
 	}
 	if err := applyTaskRuns(ctx, st, workspaceKey, plan.TaskRuns); err != nil {
+		return err
+	}
+	if err := applyRunEvents(ctx, st, workspaceKey, plan.RunEvents); err != nil {
 		return err
 	}
 	if err := applyAgentSessions(ctx, st, workspaceKey, plan.AgentSessions); err != nil {
@@ -523,22 +527,6 @@ func ApplyAgentInstance(ctx context.Context, st store.Store, workspaceKey string
 	return updated, nil
 }
 
-func durableAgentRepos(repos []string) []string {
-	out := make([]string, 0, len(repos))
-	for _, repo := range repos {
-		repo = strings.TrimSpace(repo)
-		if repo == "" || repo == "." {
-			continue
-		}
-		out = append(out, repo)
-	}
-	return compactStrings(out)
-}
-
-func ptrSlice(values []string) *[]string {
-	return &values
-}
-
 func loadDir(dir string, fn func(string, []byte) error) error {
 	entries, err := os.ReadDir(dir)
 	if errors.Is(err, os.ErrNotExist) {
@@ -764,6 +752,22 @@ func validatePlan(plan *Plan) error {
 			return fmt.Errorf("duplicate task run %q in %s and %s", run.TaskRunID, prior, sourcePath)
 		}
 		seen["task-run:"+run.TaskRunID] = sourcePath
+	}
+	for _, event := range plan.RunEvents {
+		sourcePath := firstNonEmpty(event.SourcePath, "run_event:"+event.EventID)
+		if strings.TrimSpace(event.EventID) == "" {
+			return fmt.Errorf("%s: run event id is required", sourcePath)
+		}
+		if strings.TrimSpace(event.WorkflowRunID) == "" {
+			return fmt.Errorf("%s: run event %q must declare a workflow_run_id", sourcePath, event.EventID)
+		}
+		if strings.TrimSpace(event.Type) == "" {
+			return fmt.Errorf("%s: run event %q must declare a type", sourcePath, event.EventID)
+		}
+		if prior := seen["run-event:"+event.EventID]; prior != "" {
+			return fmt.Errorf("duplicate run event %q in %s and %s", event.EventID, prior, sourcePath)
+		}
+		seen["run-event:"+event.EventID] = sourcePath
 	}
 	for _, rt := range plan.Runtimes {
 		if strings.TrimSpace(rt.Name) == "" {
