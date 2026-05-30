@@ -151,7 +151,7 @@ func runInitTarget(target string) error {
 	}
 	fmt.Println("Initialized TypeScript-first Loom project")
 	fmt.Println("  created/verified .loom/agents, .loom/workflows, .loom/runtimes")
-	fmt.Println("  created/verified loom.config.ts and .loom/runtime.d.ts")
+	fmt.Println("  created/verified loom.config.ts, .loom/runtime.d.ts, and .loom/start.md")
 	fmt.Println("")
 	fmt.Println("Next steps:")
 	fmt.Println("  loom add agent hello-world")

@@ -3,6 +3,8 @@ package defs
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -10,6 +12,47 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
+
+func TestInitTypeScriptProjectWritesStartContract(t *testing.T) {
+	root := t.TempDir()
+	if err := InitTypeScriptProject(root); err != nil {
+		t.Fatalf("InitTypeScriptProject() error = %v", err)
+	}
+	path := filepath.Join(root, ".loom", "start.md")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read start contract: %v", err)
+	}
+	text := string(data)
+	for _, want := range []string{
+		"Create a TypeScript-First Loom Agent",
+		".loom/agents/<name>.ts",
+		"loom connect <name> local",
+		"loom run <name> --payload '{}'",
+		"loom defs apply --start",
+		"never invent or write secret values",
+		"Loom/FleetDB durable records remain",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("start contract missing %q:\n%s", want, text)
+		}
+	}
+
+	custom := []byte("# Custom onboarding\n")
+	if err := os.WriteFile(path, custom, 0o644); err != nil {
+		t.Fatalf("write custom start contract: %v", err)
+	}
+	if err := InitTypeScriptProject(root); err != nil {
+		t.Fatalf("second InitTypeScriptProject() error = %v", err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read custom start contract: %v", err)
+	}
+	if string(got) != string(custom) {
+		t.Fatalf("start contract overwritten = %q, want custom preserved", got)
+	}
+}
 
 func TestTypeScriptFirstAgentApplyCreatesUIVisibleInstance(t *testing.T) {
 	ctx := context.Background()

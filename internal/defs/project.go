@@ -40,6 +40,9 @@ func InitTypeScriptProject(root string) error {
 	if err := writeIfMissing(filepath.Join(root, "loom.config.ts"), []byte(defaultConfig)); err != nil {
 		return err
 	}
+	if err := writeIfMissing(filepath.Join(root, ".loom", "start.md"), []byte(startContract)); err != nil {
+		return err
+	}
 	if err := writeIfMissing(filepath.Join(root, ".loom", "runtime.d.ts"), []byte(runtimeTypes)); err != nil {
 		return err
 	}
@@ -129,6 +132,88 @@ const defaultConfig = `import { defineConfig } from '@loom/runtime';
 export default defineConfig({
   sourceRoot: '.loom',
 });
+`
+
+const startContract = `# Create a TypeScript-First Loom Agent
+
+You are helping the user create or update a TypeScript-first Loom agent or
+workflow in this repository.
+
+## Contract
+
+Before changing files, inspect the current repository and treat the existing
+layout as authoritative. Use the .loom source layout:
+
+.loom/
+  agents/
+  workflows/
+  runtimes/
+  tools/
+  skills/
+
+Ask only for choices that cannot be inferred safely:
+
+1. Agent or workflow purpose.
+2. Whether this is a continuing agent session or a finite workflow run.
+3. Runtime target and model/provider.
+4. Required environment variable names.
+
+## First Agent Path
+
+For a continuing agent, create .loom/agents/<name>.ts with createAgent(...).
+Keep the first version small and locally provable. The first success moment is
+a private local connect session:
+
+loom add agent <name>
+loom check
+loom connect <name> local --message "hello"
+loom defs plan
+loom defs apply --start
+
+Source files alone do not make an agent visible in the Loom UI. UI/runtime
+visibility starts after durable apply and explicit start creates or updates the
+workspace agent instance.
+
+## First Workflow Path
+
+For a finite orchestration, create .loom/workflows/<name>.ts with
+defineWorkflow(...). The first success moment is a bounded workflow run:
+
+loom add workflow <name>
+loom check
+loom run <name> --payload '{}'
+loom defs plan
+loom defs apply
+
+Do not turn an agent request into a workflow-only artifact unless the user asks
+for a bounded job.
+
+## Runtime And Capabilities
+
+Keep runtime authority explicit:
+
+- Runtime profiles live in .loom/runtimes/*.ts.
+- Typed tools live in .loom/tools/*.ts and need trusted handlers.
+- Skills live in .loom/skills/<name>/SKILL.md when source-owned.
+- Environment bindings list names only; never invent or write secret values.
+- Route and trigger exposure must be reviewed in loom defs plan.
+
+## Control Plane Fit
+
+TypeScript is the reviewed authoring layer. Loom/FleetDB durable records remain
+the runtime source of truth. Direct control-plane changes are valid for
+operators and should converge with TypeScript through plan/apply or
+from-workspace export.
+
+## Finish Criteria
+
+Before finishing:
+
+- Run loom check or explain why it cannot run.
+- Show the files changed.
+- Show the plan/apply command the user should run next.
+- State whether the agent/workflow is only local source or has been durably
+  applied and started.
 `
 
 func agentTemplate(name string) string {
