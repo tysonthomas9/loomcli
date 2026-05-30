@@ -110,6 +110,13 @@ func installCodexNonInteractiveMock(t *testing.T, fn func(workDir, prompt, agent
 	t.Cleanup(func() { codexNonInteractiveInvoker = orig })
 }
 
+func installCodexNonInteractiveResumedMock(t *testing.T, fn func(workDir, prompt, agentName, providerSessionID string, shutdown <-chan struct{}, collector *usage.Collector) error) {
+	t.Helper()
+	orig := codexNonInteractiveResumedInvoker
+	codexNonInteractiveResumedInvoker = fn
+	t.Cleanup(func() { codexNonInteractiveResumedInvoker = orig })
+}
+
 func installOpenCodeInvokerMock(t *testing.T, fn func(workDir, prompt, agentName string) error) {
 	t.Helper()
 	orig := openCodeInvoker
@@ -122,6 +129,13 @@ func installOpenCodeNonInteractiveMock(t *testing.T, fn func(workDir, prompt, ag
 	orig := openCodeNonInteractiveInvoker
 	openCodeNonInteractiveInvoker = fn
 	t.Cleanup(func() { openCodeNonInteractiveInvoker = orig })
+}
+
+func installOpenCodeNonInteractiveResumedMock(t *testing.T, fn func(workDir, prompt, agentName, providerSessionID string, shutdown <-chan struct{}, collector *usage.Collector) error) {
+	t.Helper()
+	orig := openCodeNonInteractiveResumedInvoker
+	openCodeNonInteractiveResumedInvoker = fn
+	t.Cleanup(func() { openCodeNonInteractiveResumedInvoker = orig })
 }
 
 // installWrapperRunMock swaps the package-level wrapperRun seam for fn
@@ -178,6 +192,18 @@ func containsSubstring(slice []string, substr string) bool {
 		}
 	}
 	return false
+}
+
+func stringSlicesEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func setupWorkspaceConfig(t *testing.T, cfg *config.LoomConfig) {

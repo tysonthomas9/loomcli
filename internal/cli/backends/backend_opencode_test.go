@@ -219,6 +219,54 @@ func TestOpenCodeBackendInvokeNonInteractive(t *testing.T) {
 	}
 }
 
+func TestOpenCodeBackendInvokeNonInteractiveResumed(t *testing.T) {
+	// Not parallel: mutates global openCodeNonInteractiveResumedInvoker.
+	var called bool
+	var gotWorkDir, gotPrompt, gotAgentName, gotProviderSessionID string
+	var gotShutdown <-chan struct{}
+	installOpenCodeNonInteractiveResumedMock(t, func(workDir, prompt, agentName, providerSessionID string, shutdown <-chan struct{}, _ *usage.Collector) error {
+		called = true
+		gotWorkDir = workDir
+		gotPrompt = prompt
+		gotAgentName = agentName
+		gotProviderSessionID = providerSessionID
+		gotShutdown = shutdown
+		return nil
+	})
+
+	shutdown := make(chan struct{})
+	b := &OpenCodeBackend{}
+	err := b.InvokeNonInteractiveResumed("/work", "follow-up task", "agent2", "opencode-session-123", shutdown, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !called {
+		t.Fatal("expected openCodeNonInteractiveResumedInvoker to be called")
+	}
+	if gotWorkDir != "/work" || gotPrompt != "follow-up task" || gotAgentName != "agent2" || gotProviderSessionID != "opencode-session-123" {
+		t.Fatalf("resumed invocation = workDir=%q prompt=%q agent=%q session=%q", gotWorkDir, gotPrompt, gotAgentName, gotProviderSessionID)
+	}
+	if gotShutdown == nil {
+		t.Error("expected shutdown channel to be passed, got nil")
+	}
+}
+
+func TestBuildOpenCodeNonInteractiveArgs(t *testing.T) {
+	t.Setenv("LOOM_OPENCODE_MODEL", "")
+
+	got := buildOpenCodeNonInteractiveArgs("/work", "")
+	want := []string{"run", "--format", "json", "--dir", "/work", "--dangerously-skip-permissions"}
+	if !stringSlicesEqual(got, want) {
+		t.Fatalf("buildOpenCodeNonInteractiveArgs() = %+v, want %+v", got, want)
+	}
+
+	got = buildOpenCodeNonInteractiveArgs("/work", "opencode-session-123")
+	want = []string{"run", "--format", "json", "--dir", "/work", "--dangerously-skip-permissions", "--session", "opencode-session-123"}
+	if !stringSlicesEqual(got, want) {
+		t.Fatalf("buildOpenCodeNonInteractiveArgs(resume) = %+v, want %+v", got, want)
+	}
+}
+
 func TestCollectOpenCodeStreamUsage_WithUsage(t *testing.T) {
 	t.Parallel()
 	c := usage.NewCollector("opencode", "test")

@@ -6,6 +6,7 @@ import "testing"
 var (
 	_ MetadataProvider                          = (*OpenCodeBackend)(nil)
 	_ HealthCheckableBackend                    = (*OpenCodeBackend)(nil)
+	_ ResumableNonInteractiveBackend            = (*OpenCodeBackend)(nil)
 	_ ProviderMetadataReporter                  = (*OpenCodeBackend)(nil)
 	_ interface{ LastSessionID(string) string } = (*OpenCodeBackend)(nil)
 )
@@ -58,6 +59,9 @@ func TestOpenCodeBackend_InspectCapabilities(t *testing.T) {
 	}
 	if !caps.HasProviderMetadata {
 		t.Error("expected HasProviderMetadata=true")
+	}
+	if !caps.HasNonInteractiveResume {
+		t.Error("expected HasNonInteractiveResume=true")
 	}
 	if caps.HasStreaming {
 		t.Error("expected HasStreaming=false")

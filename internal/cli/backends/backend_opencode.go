@@ -31,6 +31,12 @@ func (o *OpenCodeBackend) InvokeNonInteractive(workDir, prompt, agentName string
 	return openCodeNonInteractiveInvoker(workDir, prompt, agentName, shutdown, collector)
 }
 
+// InvokeNonInteractiveResumed runs a non-interactive OpenCode invocation
+// against an explicit provider session ID using `opencode run --session`.
+func (o *OpenCodeBackend) InvokeNonInteractiveResumed(workDir, prompt, agentName, providerSessionID string, shutdown <-chan struct{}, collector *usage.Collector) error {
+	return openCodeNonInteractiveResumedInvoker(workDir, prompt, agentName, providerSessionID, shutdown, collector)
+}
+
 func (o *OpenCodeBackend) LastSessionID(_ string) string {
 	return openCodeProviderMetadata.LastSessionID()
 }
@@ -44,6 +50,10 @@ var openCodeInvoker = defaultOpenCodeInvoker
 
 // openCodeNonInteractiveInvoker is the function used for non-interactive OpenCode invocation (mockable for tests)
 var openCodeNonInteractiveInvoker func(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error = defaultOpenCodeNonInteractiveInvoker
+
+// openCodeNonInteractiveResumedInvoker is the function used for explicit
+// provider-session resumed non-interactive OpenCode invocation (mockable for tests).
+var openCodeNonInteractiveResumedInvoker func(workDir, prompt, agentName, providerSessionID string, shutdown <-chan struct{}, collector *usage.Collector) error = defaultOpenCodeNonInteractiveInvokerWithResume
 
 // buildOpenCodeInteractiveCmd constructs the exec.Cmd for interactive OpenCode invocation.
 // Extracted for testability — callers can inspect the returned cmd without execution.
@@ -69,10 +79,18 @@ func defaultOpenCodeInvoker(workDir, prompt, agentName string) error {
 }
 
 func defaultOpenCodeNonInteractiveInvoker(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error {
-	args := append([]string{"run", "--format", "json", "--dir", workDir, "--dangerously-skip-permissions"}, openCodeModelArgs()...)
+	return defaultOpenCodeNonInteractiveInvokerWithResume(workDir, prompt, agentName, "", shutdown, collector)
+}
 
-	fmt.Println("Launching OpenCode agent (non-interactive)...")
-	fmt.Println("")
+func defaultOpenCodeNonInteractiveInvokerWithResume(workDir, prompt, agentName, resumeID string, shutdown <-chan struct{}, collector *usage.Collector) error {
+	args := buildOpenCodeNonInteractiveArgs(workDir, resumeID)
+
+	if resumeID != "" {
+		fmt.Printf("[auto] Resuming OpenCode session %s...\n\n", resumeID)
+	} else {
+		fmt.Println("Launching OpenCode agent (non-interactive)...")
+		fmt.Println("")
+	}
 	openCodeProviderMetadata.Clear("opencode")
 
 	var streamErrMsg string
@@ -111,6 +129,14 @@ func defaultOpenCodeNonInteractiveInvoker(workDir, prompt, agentName string, shu
 			return finalizeOpenCodeRun(mapped, outputTail, streamErrMsg)
 		},
 	})
+}
+
+func buildOpenCodeNonInteractiveArgs(workDir, resumeID string) []string {
+	args := append([]string{"run", "--format", "json", "--dir", workDir, "--dangerously-skip-permissions"}, openCodeModelArgs()...)
+	if resumeID != "" {
+		args = append(args, "--session", resumeID)
+	}
+	return args
 }
 
 // Meta returns descriptive metadata about the OpenCode backend.

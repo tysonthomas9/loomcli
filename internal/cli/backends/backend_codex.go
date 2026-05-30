@@ -32,6 +32,12 @@ func (c *CodexBackend) InvokeNonInteractive(workDir, prompt, agentName string, s
 	return codexNonInteractiveInvoker(workDir, prompt, agentName, shutdown, collector)
 }
 
+// InvokeNonInteractiveResumed runs a non-interactive Codex invocation against
+// an explicit provider session ID using `codex exec resume`.
+func (c *CodexBackend) InvokeNonInteractiveResumed(workDir, prompt, agentName, providerSessionID string, shutdown <-chan struct{}, collector *usage.Collector) error {
+	return codexNonInteractiveResumedInvoker(workDir, prompt, agentName, providerSessionID, shutdown, collector)
+}
+
 func (c *CodexBackend) LastSessionID(_ string) string {
 	return codexProviderMetadata.LastSessionID()
 }
@@ -45,6 +51,10 @@ var codexInvoker = defaultCodexInvoker
 
 // codexNonInteractiveInvoker is the function used for non-interactive Codex invocation (mockable for tests)
 var codexNonInteractiveInvoker func(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error = defaultCodexNonInteractiveInvoker
+
+// codexNonInteractiveResumedInvoker is the function used for explicit
+// provider-session resumed non-interactive Codex invocation (mockable for tests).
+var codexNonInteractiveResumedInvoker func(workDir, prompt, agentName, providerSessionID string, shutdown <-chan struct{}, collector *usage.Collector) error = defaultCodexNonInteractiveInvokerWithResume
 
 // buildCodexInteractiveCmd constructs the exec.Cmd for interactive Codex invocation.
 // Extracted for testability — callers can inspect the returned cmd without execution.
@@ -85,13 +95,21 @@ func defaultCodexInvoker(workDir, prompt, agentName string) error {
 }
 
 func defaultCodexNonInteractiveInvoker(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error {
-	fmt.Println("Launching Codex agent (non-interactive)...")
-	fmt.Println("")
+	return defaultCodexNonInteractiveInvokerWithResume(workDir, prompt, agentName, "", shutdown, collector)
+}
+
+func defaultCodexNonInteractiveInvokerWithResume(workDir, prompt, agentName, resumeID string, shutdown <-chan struct{}, collector *usage.Collector) error {
+	if resumeID != "" {
+		fmt.Printf("[auto] Resuming Codex session %s...\n\n", resumeID)
+	} else {
+		fmt.Println("Launching Codex agent (non-interactive)...")
+		fmt.Println("")
+	}
 	codexProviderMetadata.Clear(NameCodex)
 
 	return runHarness(context.Background(), shutdown, harnessInvocation{
 		BinaryName:  "codex",
-		Args:        buildCodexNonInteractiveArgs(prompt),
+		Args:        buildCodexNonInteractiveArgs(resumeID, prompt),
 		WorkDir:     workDir,
 		Env:         buildBackendEnv(workDir, agentName),
 		HarnessName: "codex",
@@ -106,8 +124,15 @@ func defaultCodexNonInteractiveInvoker(workDir, prompt, agentName string, shutdo
 	})
 }
 
-func buildCodexNonInteractiveArgs(prompt string) []string {
-	args := []string{"exec", "--json", "--dangerously-bypass-approvals-and-sandbox"}
+func buildCodexNonInteractiveArgs(resumeID, prompt string) []string {
+	args := []string{"exec"}
+	if resumeID != "" {
+		args = append(args, "resume")
+	}
+	args = append(args, "--json", "--dangerously-bypass-approvals-and-sandbox")
+	if resumeID != "" {
+		args = append(args, resumeID)
+	}
 	if prompt != "" {
 		// The wrapper runs subprocesses under a PTY. Codex treats PTY stdin as
 		// interactive input and requires the initial exec prompt as argv.

@@ -222,6 +222,53 @@ func TestCodexBackendInvokeNonInteractive(t *testing.T) {
 	}
 }
 
+func TestCodexBackendInvokeNonInteractiveResumed(t *testing.T) {
+	// Not parallel: mutates global codexNonInteractiveResumedInvoker.
+	var called bool
+	var gotWorkDir, gotPrompt, gotAgentName, gotProviderSessionID string
+	var gotShutdown <-chan struct{}
+	installCodexNonInteractiveResumedMock(t, func(workDir, prompt, agentName, providerSessionID string, shutdown <-chan struct{}, _ *usage.Collector) error {
+		called = true
+		gotWorkDir = workDir
+		gotPrompt = prompt
+		gotAgentName = agentName
+		gotProviderSessionID = providerSessionID
+		gotShutdown = shutdown
+		return nil
+	})
+
+	shutdown := make(chan struct{})
+	b := &CodexBackend{}
+	err := b.InvokeNonInteractiveResumed("/work", "follow-up task", "agent2", "codex-session-123", shutdown, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !called {
+		t.Fatal("expected codexNonInteractiveResumedInvoker to be called")
+	}
+	if gotWorkDir != "/work" || gotPrompt != "follow-up task" || gotAgentName != "agent2" || gotProviderSessionID != "codex-session-123" {
+		t.Fatalf("resumed invocation = workDir=%q prompt=%q agent=%q session=%q", gotWorkDir, gotPrompt, gotAgentName, gotProviderSessionID)
+	}
+	if gotShutdown == nil {
+		t.Error("expected shutdown channel to be passed, got nil")
+	}
+}
+
+func TestBuildCodexNonInteractiveArgs(t *testing.T) {
+	t.Parallel()
+	got := buildCodexNonInteractiveArgs("", "do the thing")
+	want := []string{"exec", "--json", "--dangerously-bypass-approvals-and-sandbox", "do the thing"}
+	if !stringSlicesEqual(got, want) {
+		t.Fatalf("buildCodexNonInteractiveArgs() = %+v, want %+v", got, want)
+	}
+
+	got = buildCodexNonInteractiveArgs("codex-session-123", "continue the thing")
+	want = []string{"exec", "resume", "--json", "--dangerously-bypass-approvals-and-sandbox", "codex-session-123", "continue the thing"}
+	if !stringSlicesEqual(got, want) {
+		t.Fatalf("buildCodexNonInteractiveArgs(resume) = %+v, want %+v", got, want)
+	}
+}
+
 func TestCodexBackend_DispatchViaNonInteractive(t *testing.T) {
 	// Not parallel: mutates global backend state and codexNonInteractiveInvoker.
 	// Tests the full dispatch chain: InvokeAgentNonInteractive -> CodexBackend.InvokeNonInteractive -> codexNonInteractiveInvoker

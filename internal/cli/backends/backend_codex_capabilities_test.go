@@ -6,6 +6,7 @@ import "testing"
 var (
 	_ MetadataProvider                          = (*CodexBackend)(nil)
 	_ HealthCheckableBackend                    = (*CodexBackend)(nil)
+	_ ResumableNonInteractiveBackend            = (*CodexBackend)(nil)
 	_ ProviderMetadataReporter                  = (*CodexBackend)(nil)
 	_ interface{ LastSessionID(string) string } = (*CodexBackend)(nil)
 )
@@ -55,6 +56,9 @@ func TestCodexBackend_InspectCapabilities(t *testing.T) {
 	}
 	if !caps.HasProviderMetadata {
 		t.Error("expected HasProviderMetadata=true")
+	}
+	if !caps.HasNonInteractiveResume {
+		t.Error("expected HasNonInteractiveResume=true")
 	}
 	if caps.HasStreaming {
 		t.Error("expected HasStreaming=false")
