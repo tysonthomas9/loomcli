@@ -229,6 +229,7 @@ function makeRuntimeWorkspaceFiles(request, operations, workspace) {
   const checksum = (text) => `sha256:${crypto.createHash("sha256").update(text).digest("hex")}`;
   const runtimeWorkspace = workspace && workspace.runtime && typeof workspace.runtime === "object" ? workspace.runtime : {};
   const providerWorkspaceId = String(runtimeWorkspace.providerWorkspaceId || request.id || "runtime-workspace").replace(/[^A-Za-z0-9_.:-]/g, "_");
+  const runtimeRoot = String(request.runtimeWorkspaceRoot || "");
   const uriFor = (rel) => `runtime-workspace://${encodeURIComponent(providerWorkspaceId)}/${rel}`;
   const commonParams = (rel, text, options = {}) => ({
     path: rel,
@@ -241,11 +242,13 @@ function makeRuntimeWorkspaceFiles(request, operations, workspace) {
     runtimeProfileName: String(runtimeWorkspace.profileName || ""),
     provider: String(runtimeWorkspace.provider || ""),
     providerWorkspaceId,
+    providerBacked: Boolean(runtimeRoot),
     filesystem: jsonSafe(runtimeWorkspace.filesystem || {}),
     metadata: {
       ...(options.metadata || {}),
       path: rel,
       source: "runtime_workspace_filesystem",
+      provider_backed: String(Boolean(runtimeRoot)),
     },
     visibility: "runtime_workspace",
   });
@@ -253,14 +256,28 @@ function makeRuntimeWorkspaceFiles(request, operations, workspace) {
     const rel = safeRelativePath(relativePath);
     const text = String(content ?? "");
     files.set(rel, text);
+    if (runtimeRoot) {
+      const abs = path.join(runtimeRoot, rel);
+      fs.mkdirSync(path.dirname(abs), { recursive: true });
+      fs.writeFileSync(abs, text, "utf8");
+    }
     const params = commonParams(rel, text, options);
     operations.push({ type: "runtime.workspace.files.write", params });
     return { accepted: true, ...params };
   };
   const readText = async (relativePath) => {
     const rel = safeRelativePath(relativePath);
-    if (!files.has(rel)) throw new Error(`runtime workspace file not found: ${rel}`);
-    const text = files.get(rel);
+    let text;
+    if (runtimeRoot) {
+      const abs = path.join(runtimeRoot, rel);
+      if (fs.existsSync(abs) && fs.statSync(abs).isFile()) {
+        text = fs.readFileSync(abs, "utf8");
+      }
+    }
+    if (text === undefined) {
+      if (!files.has(rel)) throw new Error(`runtime workspace file not found: ${rel}`);
+      text = files.get(rel);
+    }
     operations.push({
       type: "runtime.workspace.files.read",
       params: commonParams(rel, text, { type: "runtime_workspace_file" }),

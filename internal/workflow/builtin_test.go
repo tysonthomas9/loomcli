@@ -1063,6 +1063,7 @@ func TestCodeDefinedWorkflowContextAdmitsRuntimeWorkspaceLifecycle(t *testing.T)
 
 export default runtime.local({
   name: 'local-node',
+  cwd: '.',
   workspace: {
     providerWorkspaceId: 'local-lifecycle-workspace',
     owner: 'loom',
@@ -1146,6 +1147,13 @@ export default defineWorkflow({
 	if uri, ok := data["runtimeFileURI"].(string); !ok || !strings.HasPrefix(uri, "runtime-workspace://local-lifecycle-workspace/state/summary.txt") {
 		t.Fatalf("runtimeFileURI = %#v, want runtime workspace URI without host path", data["runtimeFileURI"])
 	}
+	diskData, err := os.ReadFile(filepath.Join(root, "state", "summary.txt"))
+	if err != nil {
+		t.Fatalf("read local runtime workspace file: %v", err)
+	}
+	if string(diskData) != "runtime workspace ready" {
+		t.Fatalf("runtime workspace file = %q, want provider-backed local filesystem write", string(diskData))
+	}
 	events, err := st.RunEvents().List(ctx, "TSLIFECYCLECTX", store.RunEventFilter{WorkflowRunID: run.RunID})
 	if err != nil {
 		t.Fatalf("list run events: %v", err)
@@ -1170,7 +1178,7 @@ export default defineWorkflow({
 	}
 	fileEvent := workflowEventDataByType(t, events, "runtime_workspace_file_written")
 	if fileEvent["providerWorkspaceId"] != "local-lifecycle-workspace" || fileEvent["visibility"] != "runtime_workspace" ||
-		fileEvent["source"] != "workflow_context" {
+		fileEvent["source"] != "workflow_context" || fileEvent["providerBacked"] != true {
 		t.Fatalf("file event = %+v, want runtime workspace filesystem evidence", fileEvent)
 	}
 	if uri, ok := fileEvent["uri"].(string); !ok || strings.HasPrefix(uri, "file://") {

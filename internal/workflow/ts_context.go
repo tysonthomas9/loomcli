@@ -31,6 +31,7 @@ type tsContextRequest struct {
 	Workspace       tsContextWorkspace       `json:"workspace"`
 	Workflow        tsContextWorkflowState   `json:"workflow"`
 	RuntimeProfile  *tsContextRuntimeProfile `json:"runtimeProfile,omitempty"`
+	RuntimeRoot     string                   `json:"runtimeWorkspaceRoot,omitempty"`
 	TaskRuns        []*domain.TaskRun        `json:"taskRuns,omitempty"`
 	TaskClaims      []tsContextTaskClaim     `json:"taskClaims,omitempty"`
 	ReadyChildren   []backend.IssueData      `json:"readyChildren,omitempty"`
@@ -237,6 +238,7 @@ func buildTSContextRequest(ctx context.Context, st store.Store, ib backend.Issue
 		Workspace:      tsContextWorkspaceForRun(ctx, st, run, def, runtimeProfile),
 		Workflow:       workflowState,
 		RuntimeProfile: runtimeProfile,
+		RuntimeRoot:    tsContextRuntimeWorkspaceRoot(runtimeProfile),
 		TaskRuns:       taskRuns,
 		TaskClaims:     taskClaims,
 		Request: tsContextRequestMetadata{

@@ -302,6 +302,13 @@ func runtimeWorkspaceSkillRoots(profile *tsContextRuntimeProfile) []string {
 	return compactUniqueStrings(roots)
 }
 
+func tsContextRuntimeWorkspaceRoot(profile *tsContextRuntimeProfile) string {
+	if profile == nil || profile.Provider != string(domain.RuntimeProviderLocal) {
+		return ""
+	}
+	return resolveRuntimeWorkspacePath(runtimeProfileProjectRoot(profile.SourcePath), profile.CWD)
+}
+
 func runtimeProfileProjectRoot(sourcePath string) string {
 	sourcePath = strings.TrimSpace(sourcePath)
 	if sourcePath == "" || strings.HasPrefix(sourcePath, "control-plane:") || strings.Contains(sourcePath, "://") {
