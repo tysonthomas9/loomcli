@@ -2,6 +2,7 @@ package tsfirst
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -228,6 +229,7 @@ type connectOptions struct {
 	Session  string
 	EnvFile  string
 	Message  string
+	Stream   io.Writer
 }
 
 func runConnect(_ *cobra.Command, args []string) error {
@@ -253,6 +255,9 @@ func runConnect(_ *cobra.Command, args []string) error {
 }
 
 func runOneConnectMessage(opts connectOptions) error {
+	if !connectJSON {
+		return runConnectMessages(opts, []string{opts.Message})
+	}
 	result, err := runLocalConnect(context.Background(), opts)
 	if err != nil {
 		return err
@@ -278,26 +283,43 @@ func runConnectReady(opts connectOptions, interactive bool) error {
 
 func runConnectMessages(opts connectOptions, messages []string) error {
 	results := make([]connectResult, 0, len(messages))
+	var ready connectResult
+	if !connectJSON {
+		var err error
+		ready, err = connectReady(opts)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("Connected to %s instance %s session %s (backend=%s model=%s)\n", ready.Agent, ready.Instance, ready.Session, fallback(ready.Backend, "default"), fallback(ready.Model, "default"))
+		if len(ready.Env) > 0 {
+			fmt.Printf("Env allowlist: %s\n", strings.Join(ready.Env, ", "))
+		}
+	}
 	for _, message := range messages {
 		opts.Message = message
+		var streamed *trackingWriter
+		if !connectJSON {
+			fmt.Printf("You: %s\n", message)
+			fmt.Printf("%s: ", ready.Agent)
+			streamed = &trackingWriter{w: os.Stdout}
+			opts.Stream = streamed
+		}
 		result, err := runLocalConnect(context.Background(), opts)
 		if err != nil {
 			return err
 		}
 		results = append(results, result)
 		if !connectJSON {
-			if len(results) == 1 {
-				fmt.Printf("Connected to %s instance %s session %s (backend=%s model=%s)\n", result.Agent, result.Instance, result.Session, fallback(result.Backend, "default"), fallback(result.Model, "default"))
-				if len(result.Env) > 0 {
-					fmt.Printf("Env allowlist: %s\n", strings.Join(result.Env, ", "))
-				}
+			if err := ensureStreamLineBreak(streamed); err != nil {
+				return err
 			}
-			fmt.Printf("You: %s\n", result.Message)
-			fmt.Printf("%s: %s\n", result.Agent, result.Response)
 		}
 	}
 	if connectJSON {
 		return cmdstore.WriteJSON(results)
+	}
+	if len(results) > 0 && results[len(results)-1].TranscriptPath != "" {
+		fmt.Printf("Transcript: %s\n", results[len(results)-1].TranscriptPath)
 	}
 	return nil
 }
@@ -329,12 +351,17 @@ func runInteractiveConnect(ctx context.Context, opts connectOptions, in io.Reade
 		if message == "/exit" || message == "/quit" {
 			break
 		}
-		opts.Message = message
-		turn, err := runLocalConnect(ctx, opts)
-		if err != nil {
+		turnOpts := opts
+		turnOpts.Message = message
+		if _, err := fmt.Fprintf(out, "%s: ", result.Agent); err != nil {
 			return err
 		}
-		if _, err := fmt.Fprintf(out, "%s: %s\n", turn.Agent, turn.Response); err != nil {
+		streamed := &trackingWriter{w: out}
+		turnOpts.Stream = streamed
+		if _, err := runLocalConnect(ctx, turnOpts); err != nil {
+			return err
+		}
+		if err := ensureStreamLineBreak(streamed); err != nil {
 			return err
 		}
 	}
@@ -342,19 +369,6 @@ func runInteractiveConnect(ctx context.Context, opts connectOptions, in io.Reade
 		return err
 	}
 	return nil
-}
-
-func printInteractiveConnectHeader(out io.Writer, result connectResult) error {
-	if _, err := fmt.Fprintf(out, "Connected to %s instance %s session %s (backend=%s model=%s)\n", result.Agent, result.Instance, result.Session, fallback(result.Backend, "default"), fallback(result.Model, "default")); err != nil {
-		return err
-	}
-	if len(result.Env) > 0 {
-		if _, err := fmt.Fprintf(out, "Env allowlist: %s\n", strings.Join(result.Env, ", ")); err != nil {
-			return err
-		}
-	}
-	_, err := fmt.Fprintln(out, "Enter one prompt per line. Ctrl-D, /exit, or /quit ends the session.")
-	return err
 }
 
 func runLocalConnect(ctx context.Context, opts connectOptions) (connectResult, error) {
@@ -372,7 +386,7 @@ func runLocalConnect(ctx context.Context, opts connectOptions) (connectResult, e
 		return connectResult{}, err
 	}
 	response, err := withTemporaryEnv(envValues, func() (string, error) {
-		return invokeLocalAgent(ctx, plan, agent, prompt, opts.Message)
+		return invokeLocalAgent(ctx, plan, agent, prompt, opts.Message, opts.Stream)
 	})
 	if err != nil {
 		return connectResult{}, err
@@ -715,9 +729,15 @@ func withTemporaryEnv(values map[string]string, fn func() (string, error)) (stri
 	return fn()
 }
 
-func invokeLocalAgent(ctx context.Context, plan *defspkg.Plan, agent defspkg.AgentModule, prompt, message string) (string, error) {
+func invokeLocalAgent(ctx context.Context, plan *defspkg.Plan, agent defspkg.AgentModule, prompt, message string, stream io.Writer) (string, error) {
 	if strings.EqualFold(agent.Backend, "echo") {
-		return "echo: " + message, nil
+		response := "echo: " + message
+		if stream != nil {
+			if _, err := io.WriteString(stream, response); err != nil {
+				return "", err
+			}
+		}
+		return response, nil
 	}
 	backendName := strings.TrimSpace(agent.Backend)
 	if backendName == "" {
@@ -736,17 +756,27 @@ func invokeLocalAgent(ctx context.Context, plan *defspkg.Plan, agent defspkg.Age
 			return "", err
 		}
 		defer func() { _ = rc.Close() }()
-		data, err := io.ReadAll(rc)
-		if err != nil {
+		var captured bytes.Buffer
+		writer := io.Writer(&captured)
+		if stream != nil {
+			writer = io.MultiWriter(stream, &captured)
+		}
+		if _, err := io.Copy(writer, rc); err != nil {
 			return "", err
 		}
-		return strings.TrimSpace(string(data)), nil
+		return strings.TrimSpace(captured.String()), nil
 	}
 	shutdown := make(chan struct{})
 	if err := backend.InvokeNonInteractive(workDir, prompt, agent.Name, shutdown, nil); err != nil {
 		return "", err
 	}
-	return "backend completed; response was written by the configured backend", nil
+	response := "backend completed; response was written by the configured backend"
+	if stream != nil {
+		if _, err := io.WriteString(stream, response); err != nil {
+			return "", err
+		}
+	}
+	return response, nil
 }
 
 type localTurn struct {

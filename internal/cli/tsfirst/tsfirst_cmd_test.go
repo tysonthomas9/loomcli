@@ -454,12 +454,67 @@ func TestInvokeLocalAgentStreamingBackend(t *testing.T) {
 	if !ok {
 		t.Fatalf("FindAgent() did not find stream-agent")
 	}
-	got, err := invokeLocalAgent(context.Background(), plan, agent, "prompt", "hello stream")
+	got, err := invokeLocalAgent(context.Background(), plan, agent, "prompt", "hello stream", nil)
 	if err != nil {
 		t.Fatalf("invokeLocalAgent() error = %v", err)
 	}
 	if got != "streamed response" {
 		t.Fatalf("invokeLocalAgent() = %q", got)
+	}
+}
+
+func TestInvokeLocalAgentStreamsAndCapturesResponse(t *testing.T) {
+	cli.TestingResetBackendState(t)
+	cli.RegisterBackend(streamingBackend{})
+	root := t.TempDir()
+	writeAgent(t, root, "stream-agent", "streamtest")
+	plan, err := defspkg.Load(root)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	agent, ok := defspkg.FindAgent(plan, "stream-agent")
+	if !ok {
+		t.Fatalf("FindAgent() did not find stream-agent")
+	}
+
+	var streamed bytes.Buffer
+	got, err := invokeLocalAgent(context.Background(), plan, agent, "prompt", "hello stream", &streamed)
+	if err != nil {
+		t.Fatalf("invokeLocalAgent() error = %v", err)
+	}
+	if got != "streamed response" {
+		t.Fatalf("invokeLocalAgent() = %q", got)
+	}
+	if streamed.String() != "streamed response\n" {
+		t.Fatalf("streamed output = %q", streamed.String())
+	}
+}
+
+func TestRunInteractiveConnectStreamsBackendOutput(t *testing.T) {
+	cli.TestingResetBackendState(t)
+	cli.RegisterBackend(streamingBackend{})
+	root := t.TempDir()
+	writeAgent(t, root, "stream-agent", "streamtest")
+
+	var out bytes.Buffer
+	if err := runInteractiveConnect(context.Background(), connectOptions{
+		Dir:      root,
+		Agent:    "stream-agent",
+		Instance: "local",
+		Session:  "interactive",
+	}, strings.NewReader("hello stream\n/quit\n"), &out); err != nil {
+		t.Fatalf("runInteractiveConnect() error = %v", err)
+	}
+	got := out.String()
+	if strings.Count(got, "stream-agent: streamed response\n") != 1 {
+		t.Fatalf("interactive output = %q, want one streamed response", got)
+	}
+	turns, err := readLocalTurns(localTranscriptPath(root, "stream-agent", "local", "interactive"))
+	if err != nil {
+		t.Fatalf("readLocalTurns() error = %v", err)
+	}
+	if len(turns) != 1 || turns[0].Message != "hello stream" || turns[0].Response != "streamed response" {
+		t.Fatalf("turns = %+v, want captured streamed response", turns)
 	}
 }
 
@@ -487,7 +542,7 @@ func (streamingBackend) InvokeNonInteractive(_, _, _ string, _ <-chan struct{}, 
 }
 
 func (streamingBackend) InvokeStreaming(context.Context, string, string, string) (io.ReadCloser, error) {
-	return io.NopCloser(strings.NewReader(" streamed response\n")), nil
+	return io.NopCloser(strings.NewReader("streamed response\n")), nil
 }
 
 func withTSFirstGlobals(t *testing.T, fn func()) {
