@@ -300,6 +300,9 @@ const runtimeTypes = `declare module '@loom/runtime' {
     env?: string[];
     cpu?: string;
     memory?: string;
+    cwd?: string;
+    workspaceSkillDirs?: string[];
+    workspace_skill_dirs?: string[];
   };
 
   export type AgentDefinition = {
@@ -422,6 +425,22 @@ const runtimeTypes = `declare module '@loom/runtime' {
     status?: string;
   };
 
+  export type WorkflowWorkspaceSkill = {
+    name: string;
+    description?: string;
+    source: 'runtime_workspace' | string;
+    compatibility?: string;
+    metadata?: Record<string, string>;
+  };
+
+  export type WorkflowSkillQuery = {
+    name?: string;
+    names?: string[];
+    source?: string;
+    compatibility?: string;
+    limit?: number;
+  };
+
   export type WorkflowWorkspaceRepo = {
     name: string;
     sourceRepoId?: string;
@@ -448,6 +467,7 @@ const runtimeTypes = `declare module '@loom/runtime' {
     };
     repos?: WorkflowWorkspaceRepo[];
     selectedRepos?: string[];
+    skills?: WorkflowWorkspaceSkill[];
     env?: string[];
   };
 
@@ -656,6 +676,11 @@ const runtimeTypes = `declare module '@loom/runtime' {
     runtime: {
       workspace(): Promise<WorkflowRuntimeWorkspace>;
       profile(): Promise<WorkflowRuntimeProfile | null>;
+      skills(options?: WorkflowSkillQuery): Promise<Array<WorkflowWorkspaceSkill>>;
+    };
+    skills: {
+      list(options?: WorkflowSkillQuery): Promise<Array<WorkflowWorkspaceSkill>>;
+      get(nameOrOptions: string | WorkflowSkillQuery): Promise<WorkflowWorkspaceSkill | null>;
     };
     init(agent: AgentDefinition | CreatedAgent | AgentFactory, options?: {
       name?: string;

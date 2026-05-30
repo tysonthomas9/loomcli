@@ -535,6 +535,8 @@ function runtimeModule(file) {
     env: stringArray(value.env),
     cpu: stringValue(value.cpu),
     memory: stringValue(value.memory),
+    cwd: stringValue(value.cwd),
+    workspace_skill_dirs: stringArray(value.workspaceSkillDirs || value.workspace_skill_dirs),
   };
 }
 

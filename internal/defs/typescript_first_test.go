@@ -499,6 +499,8 @@ func TestTypeScriptFirstWorkflowBindsRuntimeProfile(t *testing.T) {
 export default runtime.local({
   name: 'local-node',
   image: 'node:22',
+  cwd: '.',
+  workspaceSkillDirs: ['.agents/skills'],
   repos: ['slack-src'],
   env: ['NODE_ENV'],
   cpu: '2',
@@ -527,6 +529,13 @@ export default defineWorkflow({
 	}
 	if workflow.RuntimeProfileName != "local-node" {
 		t.Fatalf("workflow runtime profile = %q, want local-node", workflow.RuntimeProfileName)
+	}
+	runtimeDef := plan.Runtimes[0]
+	if runtimeDef.CWD != "." {
+		t.Fatalf("runtime cwd = %q, want explicit local cwd", runtimeDef.CWD)
+	}
+	if len(runtimeDef.WorkspaceSkillDirs) != 1 || runtimeDef.WorkspaceSkillDirs[0] != ".agents/skills" {
+		t.Fatalf("runtime workspace skill dirs = %+v, want .agents/skills", runtimeDef.WorkspaceSkillDirs)
 	}
 
 	st := memstore.New()

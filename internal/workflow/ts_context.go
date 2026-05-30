@@ -373,7 +373,7 @@ func applyTSOperations(ctx context.Context, st store.Store, ib backend.IssueBack
 //nolint:cyclop // This switch is the explicit WorkflowContext operation admission allowlist.
 func applyTSOperation(ctx context.Context, st store.Store, ib backend.IssueBackend, run *domain.WorkflowRun, parentID string, applied *tsAppliedOperations, op tsWorkflowOperation) error {
 	switch op.Type {
-	case "runtime.profile", "runtime.workspace":
+	case "runtime.profile", "runtime.workspace", "runtime.skills":
 		appendRuntimeReadEvent(ctx, st, run, op)
 	case "workItems.get":
 		appendWorkItemReadEvent(ctx, st, run, op.Params)

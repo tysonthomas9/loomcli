@@ -89,17 +89,23 @@ func parseRuntime(path string, data []byte) RuntimeModule {
 		name = strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 	}
 	return RuntimeModule{
-		Name:       name,
-		Version:    version(hash),
-		SourcePath: path,
-		SourceHash: hash,
-		Provider:   provider,
-		Image:      stringField(src, "image"),
-		Repos:      arrayField(src, "repos"),
-		Env:        arrayField(src, "env"),
-		CPU:        stringField(src, "cpu"),
-		Memory:     stringField(src, "memory"),
+		Name:               name,
+		Version:            version(hash),
+		SourcePath:         path,
+		SourceHash:         hash,
+		Provider:           provider,
+		Image:              stringField(src, "image"),
+		Repos:              arrayField(src, "repos"),
+		Env:                arrayField(src, "env"),
+		CPU:                stringField(src, "cpu"),
+		Memory:             stringField(src, "memory"),
+		CWD:                stringField(src, "cwd"),
+		WorkspaceSkillDirs: runtimeWorkspaceSkillDirs(src),
 	}
+}
+
+func runtimeWorkspaceSkillDirs(src string) []string {
+	return compactStrings(append(arrayField(src, "workspaceSkillDirs"), arrayField(src, "workspace_skill_dirs")...))
 }
 
 func stringField(src, name string) string {

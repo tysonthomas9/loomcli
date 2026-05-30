@@ -1012,6 +1012,167 @@ export default defineWorkflow({
 	}
 }
 
+func TestCodeDefinedWorkflowContextDiscoversRuntimeWorkspaceSkills(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	skillDir := filepath.Join(root, ".agents", "skills", "review-pr")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatalf("mkdir skill dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(`---
+name: review-pr
+description: Review pull request changes.
+compatibility: codex
+owner: quality
+---
+
+Review the diff, risks, and verification evidence.
+`), 0o644); err != nil {
+		t.Fatalf("write review skill: %v", err)
+	}
+	skillDir = filepath.Join(root, ".agents", "skills", "release-note")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatalf("mkdir second skill dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(`---
+name: release-note
+description: Draft release notes from merged changes.
+---
+
+Summarize user-visible changes.
+`), 0o644); err != nil {
+		t.Fatalf("write release skill: %v", err)
+	}
+	runtimePath := filepath.Join(root, ".loom", "runtimes", "local-node.ts")
+	if err := os.MkdirAll(filepath.Dir(runtimePath), 0o755); err != nil {
+		t.Fatalf("mkdir runtime dir: %v", err)
+	}
+	if err := os.WriteFile(runtimePath, []byte(`import { runtime } from '@loom/runtime';
+
+export default runtime.local({
+  name: 'local-node',
+  cwd: '.',
+  workspaceSkillDirs: ['.agents/skills'],
+  repos: ['slack-src'],
+  env: ['NODE_ENV'],
+});
+`), 0o644); err != nil {
+		t.Fatalf("write runtime: %v", err)
+	}
+	workflowPath := filepath.Join(root, ".loom", "workflows", "runtime-skills.ts")
+	if err := os.MkdirAll(filepath.Dir(workflowPath), 0o755); err != nil {
+		t.Fatalf("mkdir workflow dir: %v", err)
+	}
+	if err := os.WriteFile(workflowPath, []byte(`import { defineWorkflow } from '@loom/runtime';
+
+export default defineWorkflow({
+  name: 'runtime-skills',
+  runtimeProfile: 'local-node',
+  async run(ctx) {
+    const all = await ctx.skills.list();
+    const review = await ctx.skills.get('review-pr');
+    const codex = await ctx.skills.list({ compatibility: 'codex' });
+    const runtimeSkills = await ctx.runtime.skills();
+    return {
+      names: all.map((skill) => skill.name),
+      sources: all.map((skill) => skill.source),
+      directNames: (ctx.workspace.skills ?? []).map((skill) => skill.name),
+      reviewDescription: review?.description,
+      reviewOwner: review?.metadata?.owner,
+      codexCount: codex.length,
+      runtimeCount: runtimeSkills.length,
+    };
+  },
+});
+`), 0o644); err != nil {
+		t.Fatalf("write workflow: %v", err)
+	}
+	plan, err := defspkg.Load(root)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TSSKILLSCTX", Name: "Runtime Skills"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := defspkg.Apply(ctx, st, "TSSKILLSCTX", "atlas", plan); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	run, err := CreateOrResumeRun(ctx, st, "TSSKILLSCTX", "runtime-skills", json.RawMessage(`{}`), "atlas")
+	if err != nil {
+		t.Fatalf("CreateOrResumeRun() error = %v", err)
+	}
+	result, err := RunOnce(ctx, st, clitest.NewMockIssueBackend(), run)
+	if err != nil {
+		t.Fatalf("RunOnce() error = %v", err)
+	}
+	if result.Run == nil || result.Run.Status != domain.WorkflowRunCompleted {
+		t.Fatalf("result = %+v, want completed runtime skills workflow", result)
+	}
+	var data map[string]any
+	if err := json.Unmarshal(result.Run.Result, &data); err != nil {
+		t.Fatalf("decode workflow result: %v", err)
+	}
+	if got := stringSliceFromAny(data["names"]); len(got) != 2 || got[0] != "release-note" || got[1] != "review-pr" {
+		t.Fatalf("names = %+v, want discovered runtime workspace skills", got)
+	}
+	if got := stringSliceFromAny(data["sources"]); len(got) != 2 || got[0] != "runtime_workspace" || got[1] != "runtime_workspace" {
+		t.Fatalf("sources = %+v, want runtime workspace source", got)
+	}
+	if got := stringSliceFromAny(data["directNames"]); len(got) != 2 || got[0] != "release-note" || got[1] != "review-pr" {
+		t.Fatalf("directNames = %+v, want skills projected on ctx.workspace", got)
+	}
+	if data["reviewDescription"] != "Review pull request changes." || data["reviewOwner"] != "quality" {
+		t.Fatalf("result data = %+v, want frontmatter metadata without skill body", data)
+	}
+	if data["codexCount"] != float64(1) || data["runtimeCount"] != float64(2) {
+		t.Fatalf("result data = %+v, want filtered and runtime skill counts", data)
+	}
+	events, err := st.RunEvents().List(ctx, "TSSKILLSCTX", store.RunEventFilter{WorkflowRunID: run.RunID})
+	if err != nil {
+		t.Fatalf("list run events: %v", err)
+	}
+	if countWorkflowEvents(events, "runtime_workspace_skills_read") != 4 || !hasWorkflowEvent(events, "workflow_completed") {
+		t.Fatalf("events = %+v, want runtime workspace skill read evidence and completion", events)
+	}
+	skillsEvent := workflowEventDataByType(t, events, "runtime_workspace_skills_read")
+	if skillsEvent["action"] != "list" || skillsEvent["count"] != float64(2) {
+		t.Fatalf("skills event = %+v, want list read evidence", skillsEvent)
+	}
+	if got := stringSliceFromAny(skillsEvent["names"]); len(got) != 2 || got[0] != "release-note" || got[1] != "review-pr" {
+		t.Fatalf("skills event names = %+v, want discovered skill names", got)
+	}
+}
+
+func TestRuntimeWorkspaceSkillRootsStayInsideProject(t *testing.T) {
+	root := t.TempDir()
+	sourcePath := filepath.Join(root, ".loom", "runtimes", "local-node.ts")
+	inside := runtimeWorkspaceSkillRoots(&tsContextRuntimeProfile{
+		SourcePath:         sourcePath,
+		CWD:                ".",
+		WorkspaceSkillDirs: []string{".agents/skills"},
+	})
+	if len(inside) != 1 || inside[0] != filepath.Join(root, ".agents", "skills") {
+		t.Fatalf("inside roots = %+v, want project-local .agents skills root", inside)
+	}
+	escapedCWD := runtimeWorkspaceSkillRoots(&tsContextRuntimeProfile{
+		SourcePath:         sourcePath,
+		CWD:                "..",
+		WorkspaceSkillDirs: []string{".agents/skills"},
+	})
+	if len(escapedCWD) != 0 {
+		t.Fatalf("escaped cwd roots = %+v, want ignored", escapedCWD)
+	}
+	absoluteDir := runtimeWorkspaceSkillRoots(&tsContextRuntimeProfile{
+		SourcePath:         sourcePath,
+		CWD:                ".",
+		WorkspaceSkillDirs: []string{filepath.Join(root, ".agents", "skills")},
+	})
+	if len(absoluteDir) != 0 {
+		t.Fatalf("absolute skill roots = %+v, want ignored", absoluteDir)
+	}
+}
+
 func TestCodeDefinedWorkflowContextReadsWorkflowAndTaskRunState(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()

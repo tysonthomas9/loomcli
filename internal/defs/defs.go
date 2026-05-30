@@ -74,16 +74,18 @@ type WorkflowModule struct {
 }
 
 type RuntimeModule struct {
-	Name       string                 `json:"name"`
-	Version    string                 `json:"version"`
-	SourcePath string                 `json:"source_path"`
-	SourceHash string                 `json:"source_hash"`
-	Provider   domain.RuntimeProvider `json:"provider"`
-	Image      string                 `json:"image,omitempty"`
-	Repos      []string               `json:"repos,omitempty"`
-	Env        []string               `json:"env,omitempty"`
-	CPU        string                 `json:"cpu,omitempty"`
-	Memory     string                 `json:"memory,omitempty"`
+	Name               string                 `json:"name"`
+	Version            string                 `json:"version"`
+	SourcePath         string                 `json:"source_path"`
+	SourceHash         string                 `json:"source_hash"`
+	Provider           domain.RuntimeProvider `json:"provider"`
+	Image              string                 `json:"image,omitempty"`
+	Repos              []string               `json:"repos,omitempty"`
+	Env                []string               `json:"env,omitempty"`
+	CPU                string                 `json:"cpu,omitempty"`
+	Memory             string                 `json:"memory,omitempty"`
+	CWD                string                 `json:"cwd,omitempty"`
+	WorkspaceSkillDirs []string               `json:"workspace_skill_dirs,omitempty"`
 }
 
 type SkillModule struct {

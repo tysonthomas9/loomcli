@@ -290,6 +290,7 @@ function makeContext(request, workflow) {
         };
   const taskRuns = Array.isArray(request.taskRuns) ? request.taskRuns : [];
   const taskClaims = Array.isArray(request.taskClaims) ? request.taskClaims : [];
+  const workspaceSkills = Array.isArray(workspace.skills) ? workspace.skills : [];
   const workItems = uniqueWorkItems([
     ...(Array.isArray(request.readyChildren) ? request.readyChildren : []),
     ...(Array.isArray(request.blockedChildren) ? request.blockedChildren : []),
@@ -317,6 +318,58 @@ function makeContext(request, workflow) {
   const files = makeWorkflowFiles(request, operations);
   const shell = makeWorkflowShell(request, operations);
   const requestContext = request.request || {};
+  const skillFilter = (options = {}) => {
+    let out = workspaceSkills.slice();
+    const name = String(options.name || "");
+    if (name) out = out.filter((skill) => String(skill.name || "") === name);
+    if (Array.isArray(options.names) && options.names.length > 0) {
+      const names = new Set(options.names.map((item) => String(item || "")));
+      out = out.filter((skill) => names.has(String(skill.name || "")));
+    }
+    const source = String(options.source || "");
+    if (source) out = out.filter((skill) => String(skill.source || "") === source);
+    const compatibility = String(options.compatibility || "");
+    if (compatibility) {
+      out = out.filter((skill) => String(skill.compatibility || "") === compatibility);
+    }
+    const limit = Number(options.limit);
+    if (Number.isFinite(limit) && limit > 0) out = out.slice(0, limit);
+    return out;
+  };
+  const listSkills = async (options = {}) => {
+    const query = options || {};
+    const matches = skillFilter(query);
+    operations.push({
+      type: "runtime.skills",
+      params: {
+        action: "list",
+        source: String(query.source || "runtime_workspace"),
+        count: matches.length,
+        names: matches.map((skill) => String(skill.name || "")),
+        query: jsonSafe(query),
+      },
+    });
+    return jsonSafe(matches);
+  };
+  const getSkill = async (nameOrOptions = {}) => {
+    const query =
+      typeof nameOrOptions === "string"
+        ? { name: nameOrOptions }
+        : nameOrOptions || {};
+    const match = skillFilter({ ...query, limit: 1 })[0] || null;
+    operations.push({
+      type: "runtime.skills",
+      params: {
+        action: "get",
+        source: String(query.source || "runtime_workspace"),
+        name: String(query.name || ""),
+        found: Boolean(match),
+        count: match ? 1 : 0,
+        query: jsonSafe(query),
+      },
+    });
+    return match ? jsonSafe(match) : null;
+  };
   const taskRunFilter = (options = {}) => {
     let out = taskRuns.slice();
     const status = String(options.status || "");
@@ -435,6 +488,8 @@ function makeContext(request, workflow) {
           provider: String(runtimeWorkspace.provider || ""),
           selectedRepos: jsonSafe(workspace.selectedRepos || runtimeWorkspace.repos || []),
           repoCount: repos.length,
+          skillCount: workspaceSkills.length,
+          skillNames: workspaceSkills.map((skill) => String(skill.name || "")),
           env: jsonSafe(workspace.env || []),
         };
         operations.push({ type: "runtime.workspace", params });
@@ -454,6 +509,11 @@ function makeContext(request, workflow) {
         });
         return runtimeProfile ? jsonSafe(runtimeProfile) : null;
       },
+      skills: listSkills,
+    },
+    skills: {
+      list: listSkills,
+      get: getSkill,
     },
     init: async (agent, options = {}) => {
       const materialized = materializeAgent(agent);
