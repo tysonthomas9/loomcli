@@ -18,6 +18,7 @@ var (
 	defsDir           string
 	defsJSON          bool
 	defsFromWorkspace bool
+	defsExportForce   bool
 )
 
 var defsCmd = &cobra.Command{
@@ -47,11 +48,19 @@ var defsApplyCmd = &cobra.Command{
 	RunE:  runDefsApply,
 }
 
+var defsExportSourceCmd = &cobra.Command{
+	Use:   "export-source",
+	Short: "Write durable workspace definitions back to .loom TypeScript source",
+	Args:  cobra.NoArgs,
+	RunE:  runDefsExportSource,
+}
+
 func init() {
 	defsCmd.PersistentFlags().StringVar(&defsDir, "dir", ".", "Directory containing optional .loom definitions")
 	defsCmd.PersistentFlags().BoolVar(&defsJSON, "json", false, "JSON output")
 	defsPlanCmd.Flags().BoolVar(&defsFromWorkspace, "from-workspace", false, "Read durable definitions from the active Loom workspace instead of local source")
-	defsCmd.AddCommand(defsCheckCmd, defsPlanCmd, defsApplyCmd)
+	defsExportSourceCmd.Flags().BoolVar(&defsExportForce, "force", false, "Overwrite existing generated source files")
+	defsCmd.AddCommand(defsCheckCmd, defsPlanCmd, defsApplyCmd, defsExportSourceCmd)
 	cli.RegisterCommand(defsCmd)
 }
 
@@ -105,6 +114,27 @@ func runDefsApply(_ *cobra.Command, _ []string) error {
 			return cmdstore.WriteJSON(plan)
 		}
 		fmt.Printf("Applied definitions to %s: %s\n", ws, defspkg.Summary(plan))
+		return nil
+	})
+}
+
+func runDefsExportSource(_ *cobra.Command, _ []string) error {
+	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
+		plan, err := defspkg.PlanFromWorkspace(ctx, h.Store, ws)
+		if err != nil {
+			return err
+		}
+		files, err := defspkg.WriteSourceExport(defsDir, plan, defsExportForce)
+		if err != nil {
+			return err
+		}
+		if defsJSON {
+			return cmdstore.WriteJSON(files)
+		}
+		fmt.Printf("Exported %d source files to %s\n", len(files), defsDir)
+		for _, file := range files {
+			fmt.Printf("  %s\n", file.Path)
+		}
 		return nil
 	})
 }

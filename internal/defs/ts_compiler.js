@@ -28,6 +28,19 @@ function readEntrypoints(dir) {
     .sort();
 }
 
+function readSkillEntrypoints(dir) {
+  const out = readEntrypoints(dir);
+  if (!fs.existsSync(dir)) return out;
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const skillFile = path.join(dir, entry.name, "SKILL.md");
+    if (fs.existsSync(skillFile) && fs.statSync(skillFile).isFile()) {
+      out.push(skillFile);
+    }
+  }
+  return out.sort();
+}
+
 function toolProxy(parts) {
   return new Proxy(function loomTool() {}, {
     get(_target, prop) {
@@ -857,7 +870,7 @@ const config = projectConfig();
 const sourceRoot = sourceRootDir(config);
 rejectMixedSourceRoots(sourceRoot);
 
-readEntrypoints(path.join(sourceRoot, "skills")).forEach(skillModule);
+readSkillEntrypoints(path.join(sourceRoot, "skills")).forEach(skillModule);
 const tools = compactArrayObjects(readEntrypoints(path.join(sourceRoot, "tools")).map(toolModule));
 const agents = compactArrayObjects(readEntrypoints(path.join(sourceRoot, "agents")).map(agentModule));
 const workflows = compactArrayObjects(readEntrypoints(path.join(sourceRoot, "workflows")).map(workflowModule));
