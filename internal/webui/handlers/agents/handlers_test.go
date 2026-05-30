@@ -9,10 +9,14 @@ import (
 	"testing"
 	"time"
 
+	defspkg "github.com/tysonthomas9/loomcli/internal/defs"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/ops"
+	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/webui/svcimpl"
 )
 
 func TestAgentHandlersCRUDValidationAndLifecycle(t *testing.T) {
@@ -115,6 +119,79 @@ func TestAgentLifecycleRejectsInvalidRequestBody(t *testing.T) {
 	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/workspaces/WS/agents/spark/start", strings.NewReader(`{"payload":`)))
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestTypeScriptFirstApplyStartAgentVisibleInWorkspaceAgentList(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	if err := defspkg.InitTypeScriptProject(root); err != nil {
+		t.Fatalf("InitTypeScriptProject() error = %v", err)
+	}
+	if _, err := defspkg.ScaffoldAgent(root, "hello-world"); err != nil {
+		t.Fatalf("ScaffoldAgent() error = %v", err)
+	}
+	plan, err := defspkg.Load(root)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	agent, ok := defspkg.FindAgent(plan, "hello-world")
+	if !ok {
+		t.Fatalf("FindAgent() did not find hello-world in %+v", plan.Agents)
+	}
+
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TSUI", Name: "TypeScript UI"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := defspkg.Apply(ctx, st, "TSUI", "test", plan); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	if _, err := defspkg.ApplyAgentInstance(ctx, st, "TSUI", agent, "local", true); err != nil {
+		t.Fatalf("ApplyAgentInstance() error = %v", err)
+	}
+
+	mux := http.NewServeMux()
+	NewModule(svcimpl.NewAgentService(nil, nil, nil, st), nil).Register(mux)
+
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/workspaces/TSUI/agents", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	var list struct {
+		Success bool `json:"success"`
+		Total   int  `json:"total"`
+		Data    []struct {
+			WorkspaceKey string `json:"workspace_key"`
+			Name         string `json:"name"`
+			RoleName     string `json:"role_name"`
+			State        string `json:"state"`
+			DesiredState string `json:"desired_state"`
+			Auto         bool   `json:"auto"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &list); err != nil {
+		t.Fatalf("decode list response: %v", err)
+	}
+	if !list.Success || list.Total != 1 || len(list.Data) != 1 {
+		t.Fatalf("list response = %+v, want one visible TypeScript-created agent", list)
+	}
+	got := list.Data[0]
+	if got.WorkspaceKey != "TSUI" || got.Name != "local" || got.RoleName != "hello-world" ||
+		got.State != string(domain.AgentStateActive) || got.DesiredState != string(domain.AgentDesiredRunning) || !got.Auto {
+		t.Fatalf("listed agent = %+v, want started local hello-world instance", got)
+	}
+
+	cmds, err := st.AgentCommands().List(ctx, "TSUI", store.AgentCommandFilter{
+		Status:        domain.AgentCommandQueued,
+		TargetAgentID: "local",
+	})
+	if err != nil {
+		t.Fatalf("list agent commands: %v", err)
+	}
+	if len(cmds) != 1 || cmds[0].Type != "start" || cmds[0].Payload["source"] != "typescript-first" {
+		t.Fatalf("queued commands = %+v, want TypeScript-first start command for local", cmds)
 	}
 }
 
