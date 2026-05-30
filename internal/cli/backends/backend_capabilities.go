@@ -36,6 +36,12 @@ type TypedToolRuntimeBackend interface {
 	SetTypedTools(tools []TypedToolDefinition) error
 }
 
+// TypedToolCallReporter is an optional interface for backends that can report
+// model-visible TypeScript tool calls observed during the last invocation.
+type TypedToolCallReporter interface {
+	TypedToolCalls(workDir string) []TypedToolCallEvent
+}
+
 // TypedToolDefinition describes one TypeScript-authored model-callable tool
 // that a backend may expose to a provider.
 type TypedToolDefinition struct {
@@ -50,6 +56,24 @@ type TypedToolDefinition struct {
 	Repos       []string       `json:"repos,omitempty"`
 	Env         []string       `json:"env,omitempty"`
 	ReadOnly    bool           `json:"read_only,omitempty"`
+}
+
+// TypedToolCallEvent describes one model-visible typed tool call observed by a
+// backend runtime. Backends should redact sensitive arguments/results before
+// returning these events.
+type TypedToolCallEvent struct {
+	CallID              string         `json:"call_id,omitempty"`
+	Name                string         `json:"name"`
+	Status              string         `json:"status,omitempty"`
+	Arguments           map[string]any `json:"arguments,omitempty"`
+	Result              any            `json:"result,omitempty"`
+	Error               string         `json:"error,omitempty"`
+	StartedAt           string         `json:"started_at,omitempty"`
+	CompletedAt         string         `json:"completed_at,omitempty"`
+	DurationMS          int64          `json:"duration_ms,omitempty"`
+	IdempotencyKey      string         `json:"idempotency_key,omitempty"`
+	AuthorizationStatus string         `json:"authorization_status,omitempty"`
+	Redacted            bool           `json:"redacted,omitempty"`
 }
 
 // HealthCheckableBackend is an optional interface for backends that can
@@ -107,6 +131,7 @@ type BackendCapabilities struct {
 	HasSessions         bool
 	HasToolControl      bool
 	HasTypedToolRuntime bool
+	HasTypedToolCalls   bool
 	HasHealthCheck      bool
 	HasConfig           bool
 	HasMeta             bool
@@ -115,6 +140,7 @@ type BackendCapabilities struct {
 	Sessions         SessionAwareBackend
 	Tools            ToolAwareBackend
 	TypedToolRuntime TypedToolRuntimeBackend
+	TypedToolCalls   TypedToolCallReporter
 	Health           HealthCheckableBackend
 	Config           ConfigurableBackend
 	Meta             MetadataProvider
@@ -159,6 +185,10 @@ func InspectCapabilities(b cli.Backend) BackendCapabilities {
 	if t, ok := b.(TypedToolRuntimeBackend); ok {
 		caps.HasTypedToolRuntime = true
 		caps.TypedToolRuntime = t
+	}
+	if t, ok := b.(TypedToolCallReporter); ok {
+		caps.HasTypedToolCalls = true
+		caps.TypedToolCalls = t
 	}
 	if h, ok := b.(HealthCheckableBackend); ok {
 		caps.HasHealthCheck = true

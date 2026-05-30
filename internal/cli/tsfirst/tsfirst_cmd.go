@@ -752,11 +752,13 @@ func invokeLocalAgent(ctx context.Context, plan *defspkg.Plan, agent defspkg.Age
 		defer func() { _ = rc.Close() }()
 		result, err := captureStreamingResponse(rc, stream)
 		result.ToolRuntime = appliedToolRuntime
+		result.ToolCalls = collectBackendTypedToolCalls(backend, workDir)
 		result = fillBackendSessionID(result, backend, workDir)
 		return result, err
 	}
 	result, err := invokeNonStreamingLocalAgent(backend, backendName, workDir, prompt, agent.Name, stream)
 	result.ToolRuntime = appliedToolRuntime
+	result.ToolCalls = collectBackendTypedToolCalls(backend, workDir)
 	result = fillBackendSessionID(result, backend, workDir)
 	return result, err
 }
@@ -779,6 +781,7 @@ type localTurn struct {
 	Usage             *connectUsage       `json:"usage,omitempty"`
 	PromptHash        string              `json:"prompt_hash,omitempty"`
 	ToolRuntime       *connectToolRuntime `json:"tool_runtime,omitempty"`
+	ToolCalls         []connectToolCall   `json:"tool_calls,omitempty"`
 }
 
 func readLocalTurns(path string) ([]localTurn, error) {

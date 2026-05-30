@@ -30,6 +30,7 @@ type connectResult struct {
 	Response          string              `json:"response,omitempty"`
 	TranscriptPath    string              `json:"transcript_path,omitempty"`
 	ToolRuntime       *connectToolRuntime `json:"tool_runtime,omitempty"`
+	ToolCalls         []connectToolCall   `json:"tool_calls,omitempty"`
 }
 
 type connectOptions struct {
@@ -49,6 +50,7 @@ type localInvocationResult struct {
 	ProviderMetadata  map[string]any
 	Usage             *connectUsage
 	ToolRuntime       *connectToolRuntime
+	ToolCalls         []connectToolCall
 }
 
 type connectToolRuntime struct {
@@ -69,4 +71,19 @@ type connectTypedTool struct {
 	Repos       []string       `json:"repos,omitempty"`
 	Env         []string       `json:"env,omitempty"`
 	ReadOnly    bool           `json:"read_only,omitempty"`
+}
+
+type connectToolCall struct {
+	CallID              string         `json:"call_id,omitempty"`
+	Name                string         `json:"name"`
+	Status              string         `json:"status,omitempty"`
+	Arguments           map[string]any `json:"arguments,omitempty"`
+	Result              any            `json:"result,omitempty"`
+	Error               string         `json:"error,omitempty"`
+	StartedAt           string         `json:"started_at,omitempty"`
+	CompletedAt         string         `json:"completed_at,omitempty"`
+	DurationMS          int64          `json:"duration_ms,omitempty"`
+	IdempotencyKey      string         `json:"idempotency_key,omitempty"`
+	AuthorizationStatus string         `json:"authorization_status,omitempty"`
+	Redacted            bool           `json:"redacted,omitempty"`
 }

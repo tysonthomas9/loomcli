@@ -108,6 +108,43 @@ func backendTypedToolDefinitions(tools []connectTypedTool) []backendcaps.TypedTo
 	return out
 }
 
+func collectBackendTypedToolCalls(backend any, workDir string) []connectToolCall {
+	reporter, ok := backend.(backendcaps.TypedToolCallReporter)
+	if !ok {
+		return nil
+	}
+	events := reporter.TypedToolCalls(workDir)
+	if len(events) == 0 {
+		return nil
+	}
+	out := make([]connectToolCall, 0, len(events))
+	for _, event := range events {
+		name := strings.TrimSpace(event.Name)
+		if name == "" {
+			continue
+		}
+		status := strings.TrimSpace(event.Status)
+		if status == "" {
+			status = "completed"
+		}
+		out = append(out, connectToolCall{
+			CallID:              event.CallID,
+			Name:                name,
+			Status:              status,
+			Arguments:           cloneMap(event.Arguments),
+			Result:              event.Result,
+			Error:               event.Error,
+			StartedAt:           event.StartedAt,
+			CompletedAt:         event.CompletedAt,
+			DurationMS:          event.DurationMS,
+			IdempotencyKey:      event.IdempotencyKey,
+			AuthorizationStatus: event.AuthorizationStatus,
+			Redacted:            event.Redacted,
+		})
+	}
+	return out
+}
+
 func cloneToolRuntime(policy *connectToolRuntime) *connectToolRuntime {
 	if policy == nil {
 		return nil
@@ -117,6 +154,17 @@ func cloneToolRuntime(policy *connectToolRuntime) *connectToolRuntime {
 		out.TypedTools = append([]connectTypedTool(nil), policy.TypedTools...)
 	}
 	return &out
+}
+
+func cloneMap(in map[string]any) map[string]any {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(in))
+	for key, value := range in {
+		out[key] = value
+	}
+	return out
 }
 
 func describeTypedTools(tools []connectTypedTool) string {

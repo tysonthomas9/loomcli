@@ -740,7 +740,19 @@ func TestRunLocalConnectRejectsTypedToolsWithoutTypedRuntime(t *testing.T) {
 
 func TestRunLocalConnectPassesTypedToolsToRuntimeBackend(t *testing.T) {
 	cli.TestingResetBackendState(t)
-	typedBackend := &typedToolRuntimeBackend{}
+	typedBackend := &typedToolRuntimeBackend{toolCalls: []backendcaps.TypedToolCallEvent{{
+		CallID:              "call-create-channel",
+		Name:                "create_channel",
+		Status:              "completed",
+		Arguments:           map[string]any{"name": "triage"},
+		Result:              map[string]any{"channel_id": "C123"},
+		StartedAt:           "2026-05-30T12:00:00Z",
+		CompletedAt:         "2026-05-30T12:00:01Z",
+		DurationMS:          1000,
+		IdempotencyKey:      "tool:create_channel:triage",
+		AuthorizationStatus: "authorized",
+		Redacted:            true,
+	}}}
 	cli.RegisterBackend(typedBackend)
 	root := t.TempDir()
 	writeTypedToolAgent(t, root, "slack-agent", "typed-runtime")
@@ -761,8 +773,23 @@ func TestRunLocalConnectPassesTypedToolsToRuntimeBackend(t *testing.T) {
 	if len(typedBackend.tools) != 1 || typedBackend.tools[0].Name != "create_channel" || typedBackend.tools[0].Handler != "workflow" {
 		t.Fatalf("backend tools = %+v, want create_channel workflow handler", typedBackend.tools)
 	}
+	if len(result.ToolCalls) != 1 || result.ToolCalls[0].Name != "create_channel" ||
+		result.ToolCalls[0].CallID != "call-create-channel" ||
+		result.ToolCalls[0].Status != "completed" ||
+		result.ToolCalls[0].IdempotencyKey != "tool:create_channel:triage" ||
+		result.ToolCalls[0].AuthorizationStatus != "authorized" ||
+		!result.ToolCalls[0].Redacted {
+		t.Fatalf("tool calls = %+v, want backend-reported model tool call evidence", result.ToolCalls)
+	}
 	if !strings.Contains(result.Response, "typed runtime answer") {
 		t.Fatalf("response = %q, want typed backend response", result.Response)
+	}
+	turns, err := readLocalTurns(result.TranscriptPath)
+	if err != nil {
+		t.Fatalf("readLocalTurns() error = %v", err)
+	}
+	if len(turns) != 1 || len(turns[0].ToolCalls) != 1 || turns[0].ToolCalls[0].Name != "create_channel" {
+		t.Fatalf("turns = %+v, want typed tool call evidence persisted", turns)
 	}
 }
 
@@ -912,7 +939,8 @@ func (b *sessionMetadataBackend) LastSessionID(_ string) string {
 }
 
 type typedToolRuntimeBackend struct {
-	tools []backendcaps.TypedToolDefinition
+	tools     []backendcaps.TypedToolDefinition
+	toolCalls []backendcaps.TypedToolCallEvent
 }
 
 func (b *typedToolRuntimeBackend) Name() string { return "typed-runtime" }
@@ -927,6 +955,10 @@ func (b *typedToolRuntimeBackend) InvokeNonInteractive(_, _, _ string, _ <-chan 
 func (b *typedToolRuntimeBackend) SetTypedTools(tools []backendcaps.TypedToolDefinition) error {
 	b.tools = append([]backendcaps.TypedToolDefinition(nil), tools...)
 	return nil
+}
+
+func (b *typedToolRuntimeBackend) TypedToolCalls(_ string) []backendcaps.TypedToolCallEvent {
+	return append([]backendcaps.TypedToolCallEvent(nil), b.toolCalls...)
 }
 
 func withTSFirstGlobals(t *testing.T, fn func()) {
