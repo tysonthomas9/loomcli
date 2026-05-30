@@ -209,6 +209,7 @@ export default defineWorkflow({
 func TestCodeDefinedWorkflowContextWorkItemQueriesHonorOptions(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
+	t.Setenv("WORKFLOW_ENV_TOKEN", "loaded-from-env")
 	workflowPath := filepath.Join(root, ".loom", "workflows", "context-queries.ts")
 	if err := os.MkdirAll(filepath.Dir(workflowPath), 0o755); err != nil {
 		t.Fatalf("mkdir workflow dir: %v", err)
@@ -219,6 +220,7 @@ export default defineWorkflow({
   name: 'context-queries',
   singleton: (input) => `+"`"+`parent:${input.parentId}`+"`"+`,
   tools: ['workItems.readyChildren', 'workItems.blockedChildren', 'workItems.listChildren', 'taskRuns.ensure'],
+  env: ['WORKFLOW_ENV_TOKEN'],
   async run(ctx) {
     const parentId = String(ctx.input.parentId);
     const ready = await ctx.workItems.readyChildren(parentId, { limit: 1 });
@@ -240,6 +242,7 @@ export default defineWorkflow({
           children: String(children.length),
           actor: String(ctx.req.actor),
           workflow: String(ctx.req.workflowName),
+          envToken: String(ctx.env.WORKFLOW_ENV_TOKEN),
         },
       });
     }
@@ -288,7 +291,8 @@ export default defineWorkflow({
 		firstTaskRuns[0].Metadata["blocked"] != "1" ||
 		firstTaskRuns[0].Metadata["children"] != "3" ||
 		firstTaskRuns[0].Metadata["actor"] != "atlas" ||
-		firstTaskRuns[0].Metadata["workflow"] != "context-queries" {
+		firstTaskRuns[0].Metadata["workflow"] != "context-queries" ||
+		firstTaskRuns[0].Metadata["envToken"] != "loaded-from-env" {
 		t.Fatalf("first task runs = %+v, want limited ready query with blocked/list metadata", firstTaskRuns)
 	}
 	secondTaskRuns, err := st.TaskRuns().List(ctx, "TSQ", store.TaskRunFilter{WorkflowRunID: run.RunID, WorkItemID: secondReady.ID})

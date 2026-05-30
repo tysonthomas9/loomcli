@@ -6,6 +6,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -64,7 +65,7 @@ func runTypeScriptContextOnce(ctx context.Context, st store.Store, ib backend.Is
 	if sourcePath == "" {
 		return nil, fmt.Errorf("workflow %q has no TypeScript source_ref", run.WorkflowName)
 	}
-	request, parentID, err := buildTSContextRequest(ctx, ib, run, sourcePath)
+	request, parentID, err := buildTSContextRequest(ctx, ib, run, def, sourcePath)
 	if err != nil {
 		return nil, err
 	}
@@ -164,7 +165,7 @@ func finishTSContextRun(ctx context.Context, st store.Store, run *domain.Workflo
 	return result, nil
 }
 
-func buildTSContextRequest(ctx context.Context, ib backend.IssueBackend, run *domain.WorkflowRun, sourcePath string) (tsContextRequest, string, error) {
+func buildTSContextRequest(ctx context.Context, ib backend.IssueBackend, run *domain.WorkflowRun, def *domain.WorkflowDefinition, sourcePath string) (tsContextRequest, string, error) {
 	inputMap := map[string]any{}
 	if len(run.Input) > 0 {
 		if err := json.Unmarshal(run.Input, &inputMap); err != nil {
@@ -176,7 +177,7 @@ func buildTSContextRequest(ctx context.Context, ib backend.IssueBackend, run *do
 		ID:         run.RunID,
 		SourcePath: sourcePath,
 		Input:      inputMap,
-		Env:        map[string]string{},
+		Env:        workflowEnvBindings(def),
 		Request: tsContextRequestMetadata{
 			WorkspaceKey:    run.WorkspaceKey,
 			WorkflowName:    run.WorkflowName,
@@ -203,6 +204,29 @@ func buildTSContextRequest(ctx context.Context, ib backend.IssueBackend, run *do
 	request.BlockedChildren = blocked
 	request.ChildWorkItems = all
 	return request, parentID, nil
+}
+
+func workflowEnvBindings(def *domain.WorkflowDefinition) map[string]string {
+	out := map[string]string{}
+	if def == nil || len(def.Manifest) == 0 {
+		return out
+	}
+	var manifest struct {
+		Env []string `json:"env"`
+	}
+	if err := json.Unmarshal(def.Manifest, &manifest); err != nil {
+		return out
+	}
+	for _, name := range manifest.Env {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		if value, ok := os.LookupEnv(name); ok {
+			out[name] = value
+		}
+	}
+	return out
 }
 
 func executeTSContext(ctx context.Context, request tsContextRequest) (tsContextResponse, error) {
