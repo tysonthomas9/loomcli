@@ -273,11 +273,23 @@ func applyTSOperations(ctx context.Context, st store.Store, run *domain.Workflow
 				return nil, err
 			}
 			taskRuns = append(taskRuns, taskRun)
+		case "tools.call":
+			appendToolCallEvent(ctx, st, run, op.Params)
 		default:
 			return nil, fmt.Errorf("unsupported WorkflowContext operation %q", op.Type)
 		}
 	}
 	return taskRuns, nil
+}
+
+func appendToolCallEvent(ctx context.Context, st store.Store, run *domain.WorkflowRun, params map[string]any) {
+	_, _ = st.RunEvents().Append(ctx, store.RunEventAppend{
+		WorkspaceKey:  run.WorkspaceKey,
+		WorkflowRunID: run.RunID,
+		Type:          "tool_call",
+		Message:       "typed workflow tool executed",
+		Data:          mustJSON(params),
+	})
 }
 
 func applyEnsureTaskRunOperation(ctx context.Context, st store.Store, run *domain.WorkflowRun, parentID string, params map[string]any) (*domain.TaskRun, error) {

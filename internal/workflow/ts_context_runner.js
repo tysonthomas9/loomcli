@@ -131,7 +131,7 @@ function resolveRelativeImport(fromFile, spec) {
   throw new Error(`${fromFile}: cannot resolve import ${spec}`);
 }
 
-function makeContext(request) {
+function makeContext(request, workflow) {
   const logs = [];
   const operations = [];
   const input = request.input && typeof request.input === "object" ? request.input : {};
@@ -154,6 +154,7 @@ function makeContext(request) {
   const log = (level, message, attributes) => {
     logs.push({ level, message: String(message || ""), attributes: attributes || {} });
   };
+  const tools = workflowTools(workflow, operations);
 
   const ctx = {
     id: request.id,
@@ -186,8 +187,48 @@ function makeContext(request) {
         return { accepted: true, ...op.params };
       },
     },
+    tools,
+    tool: async (name, args) => {
+      const fn = tools[String(name || "")];
+      if (!fn) throw new Error(`workflow tool ${String(name || "")} is not declared`);
+      return fn(args || {});
+    },
   };
   return { ctx, logs, operations };
+}
+
+function workflowTools(workflow, operations) {
+  const tools = {};
+  for (const tool of Array.isArray(workflow && workflow.tools) ? workflow.tools : []) {
+    if (!tool || tool.__loomType !== "tool") continue;
+    const name = String(tool.name || "").trim();
+    if (!name) continue;
+    if (tools[name]) throw new Error(`duplicate workflow tool ${name}`);
+    tools[name] = async (args = {}) => {
+      if (typeof tool.execute !== "function") {
+        throw new Error(`workflow tool ${name} has no executable handler`);
+      }
+      const startedAt = new Date().toISOString();
+      const result = await tool.execute(args);
+      operations.push({
+        type: "tools.call",
+        params: {
+          name,
+          args: jsonSafe(args),
+          result: jsonSafe(result),
+          startedAt,
+          completedAt: new Date().toISOString(),
+        },
+      });
+      return result;
+    };
+  }
+  return tools;
+}
+
+function jsonSafe(value) {
+  if (value === undefined) return null;
+  return JSON.parse(JSON.stringify(value));
 }
 
 async function readStdin() {
@@ -206,7 +247,7 @@ async function main() {
   if (typeof value.run !== "function") {
     throw new Error(`${sourcePath}: workflow has no run(ctx) function`);
   }
-  const { ctx, logs, operations } = makeContext(request);
+  const { ctx, logs, operations } = makeContext(request, value);
   const result = await value.run(ctx);
   process.stdout.write(JSON.stringify({ result: result === undefined ? null : result, logs, operations }));
 }

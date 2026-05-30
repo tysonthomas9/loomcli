@@ -326,6 +326,8 @@ const runtimeTypes = `declare module '@loom/runtime' {
         metadata?: Record<string, string>;
       }): Promise<Record<string, unknown>>;
     };
+    tools: Record<string, (args?: Record<string, unknown>) => Promise<unknown>>;
+    tool(name: string, args?: Record<string, unknown>): Promise<unknown>;
   };
 
   export function defineConfig<T extends object>(config: T): T;

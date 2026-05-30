@@ -311,6 +311,87 @@ export default defineWorkflow({
 	}
 }
 
+func TestCodeDefinedWorkflowContextExecutesDeclaredTool(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	toolPath := filepath.Join(root, ".loom", "tools", "echo-tool.ts")
+	if err := os.MkdirAll(filepath.Dir(toolPath), 0o755); err != nil {
+		t.Fatalf("mkdir tool dir: %v", err)
+	}
+	if err := os.WriteFile(toolPath, []byte(`import { defineTool } from '@loom/runtime';
+
+export default defineTool({
+  name: 'echo_tool',
+  description: 'Echo a message for workflow tests.',
+  parameters: {
+    type: 'object',
+    required: ['message'],
+    properties: { message: { type: 'string' } },
+  },
+  async execute(args) {
+    return { echo: String(args.message ?? '') };
+  },
+});
+`), 0o644); err != nil {
+		t.Fatalf("write tool: %v", err)
+	}
+	workflowPath := filepath.Join(root, ".loom", "workflows", "context-tool.ts")
+	if err := os.MkdirAll(filepath.Dir(workflowPath), 0o755); err != nil {
+		t.Fatalf("mkdir workflow dir: %v", err)
+	}
+	if err := os.WriteFile(workflowPath, []byte(`import { defineWorkflow } from '@loom/runtime';
+import echoTool from '../tools/echo-tool';
+
+export default defineWorkflow({
+  name: 'context-tool',
+  tools: [echoTool],
+  async run(ctx) {
+    const result = await ctx.tools.echo_tool({ message: String(ctx.input.message ?? '') });
+    ctx.log.info('typed tool returned', result);
+    return result;
+  },
+});
+`), 0o644); err != nil {
+		t.Fatalf("write workflow: %v", err)
+	}
+	plan, err := defspkg.Load(root)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TSTOOLCTX", Name: "TypeScript Tool Context"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := defspkg.Apply(ctx, st, "TSTOOLCTX", "atlas", plan); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	run, err := CreateOrResumeRun(ctx, st, "TSTOOLCTX", "context-tool", json.RawMessage(`{"message":"hello tool"}`), "atlas")
+	if err != nil {
+		t.Fatalf("CreateOrResumeRun() error = %v", err)
+	}
+	result, err := RunOnce(ctx, st, clitest.NewMockIssueBackend(), run)
+	if err != nil {
+		t.Fatalf("RunOnce() error = %v", err)
+	}
+	if result.Run == nil || result.Run.Status != domain.WorkflowRunCompleted {
+		t.Fatalf("result = %+v, want completed tool workflow", result)
+	}
+	var data map[string]string
+	if err := json.Unmarshal(result.Run.Result, &data); err != nil {
+		t.Fatalf("decode workflow result: %v", err)
+	}
+	if data["echo"] != "hello tool" {
+		t.Fatalf("result data = %+v, want echoed tool result", data)
+	}
+	events, err := st.RunEvents().List(ctx, "TSTOOLCTX", store.RunEventFilter{WorkflowRunID: run.RunID})
+	if err != nil {
+		t.Fatalf("list run events: %v", err)
+	}
+	if !hasWorkflowEvent(events, "tool_call") || !hasWorkflowEvent(events, "workflow_completed") {
+		t.Fatalf("events = %+v, want tool call and completion evidence", events)
+	}
+}
+
 func TestParentWorkItemsWorkflowCompletesWhenNoOpenChildren(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
