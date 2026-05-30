@@ -187,6 +187,13 @@ function makeContext(request, workflow) {
         return { accepted: true, ...op.params };
       },
     },
+    artifacts: {
+      record: async (params) => {
+        const op = { type: "artifacts.record", params: params || {} };
+        operations.push(op);
+        return { accepted: true, ...op.params };
+      },
+    },
     tools,
     tool: async (name, args) => {
       const fn = tools[String(name || "")];

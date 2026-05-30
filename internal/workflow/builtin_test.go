@@ -392,6 +392,73 @@ export default defineWorkflow({
 	}
 }
 
+func TestCodeDefinedWorkflowContextRecordsArtifact(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	workflowPath := filepath.Join(root, ".loom", "workflows", "context-artifact.ts")
+	if err := os.MkdirAll(filepath.Dir(workflowPath), 0o755); err != nil {
+		t.Fatalf("mkdir workflow dir: %v", err)
+	}
+	if err := os.WriteFile(workflowPath, []byte(`import { defineWorkflow } from '@loom/runtime';
+
+export default defineWorkflow({
+  name: 'context-artifact',
+  async run(ctx) {
+    const recorded = await ctx.artifacts.record({
+      type: 'report',
+      uri: 'artifact://workflow/context-artifact/report.json',
+      summary: 'controller report',
+      mimeType: 'application/json',
+      sizeBytes: 123,
+      taskId: String(ctx.input.taskId ?? ''),
+      metadata: { source: 'workflow-context' },
+    });
+    return { artifactUri: recorded.uri };
+  },
+});
+`), 0o644); err != nil {
+		t.Fatalf("write workflow: %v", err)
+	}
+	plan, err := defspkg.Load(root)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TSART", Name: "TypeScript Artifact Context"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := defspkg.Apply(ctx, st, "TSART", "atlas", plan); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	run, err := CreateOrResumeRun(ctx, st, "TSART", "context-artifact", json.RawMessage(`{"taskId":"TASK-ART"}`), "atlas")
+	if err != nil {
+		t.Fatalf("CreateOrResumeRun() error = %v", err)
+	}
+	result, err := RunOnce(ctx, st, clitest.NewMockIssueBackend(), run)
+	if err != nil {
+		t.Fatalf("RunOnce() error = %v", err)
+	}
+	if result.Run == nil || result.Run.Status != domain.WorkflowRunCompleted {
+		t.Fatalf("result = %+v, want completed artifact workflow", result)
+	}
+	artifacts, err := st.Artifacts().List(ctx, "TSART", store.ArtifactFilter{TaskID: "TASK-ART", Type: "report"})
+	if err != nil {
+		t.Fatalf("list artifacts: %v", err)
+	}
+	if len(artifacts) != 1 || artifacts[0].URI != "artifact://workflow/context-artifact/report.json" ||
+		artifacts[0].MIMEType != "application/json" || artifacts[0].SizeBytes != 123 ||
+		artifacts[0].Metadata["source"] != "workflow-context" {
+		t.Fatalf("artifacts = %+v, want recorded controller artifact", artifacts)
+	}
+	events, err := st.RunEvents().List(ctx, "TSART", store.RunEventFilter{WorkflowRunID: run.RunID})
+	if err != nil {
+		t.Fatalf("list run events: %v", err)
+	}
+	if !hasWorkflowEvent(events, "artifact_recorded") || !hasWorkflowEvent(events, "workflow_completed") {
+		t.Fatalf("events = %+v, want artifact recording and completion evidence", events)
+	}
+}
+
 func TestParentWorkItemsWorkflowCompletesWhenNoOpenChildren(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()

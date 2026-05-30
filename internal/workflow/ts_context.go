@@ -3,7 +3,9 @@ package workflow
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	_ "embed"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -275,6 +277,10 @@ func applyTSOperations(ctx context.Context, st store.Store, run *domain.Workflow
 			taskRuns = append(taskRuns, taskRun)
 		case "tools.call":
 			appendToolCallEvent(ctx, st, run, op.Params)
+		case "artifacts.record":
+			if err := applyRecordArtifactOperation(ctx, st, run, op.Params); err != nil {
+				return nil, err
+			}
 		default:
 			return nil, fmt.Errorf("unsupported WorkflowContext operation %q", op.Type)
 		}
@@ -290,6 +296,53 @@ func appendToolCallEvent(ctx context.Context, st store.Store, run *domain.Workfl
 		Message:       "typed workflow tool executed",
 		Data:          mustJSON(params),
 	})
+}
+
+func applyRecordArtifactOperation(ctx context.Context, st store.Store, run *domain.WorkflowRun, params map[string]any) error {
+	if st.Artifacts() == nil {
+		return fmt.Errorf("artifact store not configured")
+	}
+	uri := firstString(params, "uri")
+	if uri == "" {
+		return fmt.Errorf("artifacts.record requires uri")
+	}
+	artifactType := firstString(params, "type", "kind")
+	if artifactType == "" {
+		artifactType = "workflow"
+	}
+	artifactID := firstString(params, "artifactId", "artifact_id", "id")
+	if artifactID == "" {
+		artifactID = generatedArtifactID(run.RunID, artifactType, uri)
+	}
+	taskID := firstString(params, "taskId", "task_id", "workItemId", "work_item_id")
+	artifact, err := st.Artifacts().Create(ctx, store.ArtifactCreate{
+		WorkspaceKey: run.WorkspaceKey,
+		ArtifactID:   artifactID,
+		TaskID:       taskID,
+		Type:         artifactType,
+		URI:          uri,
+		Summary:      firstString(params, "summary"),
+		MIMEType:     firstString(params, "mimeType", "mime_type"),
+		SizeBytes:    firstInt64(params, "sizeBytes", "size_bytes"),
+		Checksum:     firstString(params, "checksum"),
+		Metadata:     stringMap(params["metadata"]),
+	})
+	if err != nil {
+		return fmt.Errorf("record workflow artifact %s: %w", artifactID, err)
+	}
+	_, _ = st.RunEvents().Append(ctx, store.RunEventAppend{
+		WorkspaceKey:  run.WorkspaceKey,
+		WorkflowRunID: run.RunID,
+		Type:          "artifact_recorded",
+		Message:       "workflow artifact recorded",
+		Data: mustJSON(map[string]string{
+			"artifact_id": artifact.ArtifactID,
+			"type":        artifact.Type,
+			"uri":         artifact.URI,
+			"task_id":     artifact.TaskID,
+		}),
+	})
+	return nil
 }
 
 func applyEnsureTaskRunOperation(ctx context.Context, st store.Store, run *domain.WorkflowRun, parentID string, params map[string]any) (*domain.TaskRun, error) {
@@ -330,6 +383,11 @@ func applyEnsureTaskRunOperation(ctx context.Context, st store.Store, run *domai
 	return taskRun, nil
 }
 
+func generatedArtifactID(runID, artifactType, uri string) string {
+	sum := sha256.Sum256([]byte(runID + "\x00" + artifactType + "\x00" + uri))
+	return "artifact:" + runID + ":" + hex.EncodeToString(sum[:])[:12]
+}
+
 func firstString(values map[string]any, keys ...string) string {
 	for _, key := range keys {
 		if values == nil {
@@ -347,6 +405,26 @@ func firstString(values map[string]any, keys ...string) string {
 		}
 	}
 	return ""
+}
+
+func firstInt64(values map[string]any, keys ...string) int64 {
+	for _, key := range keys {
+		if values == nil {
+			continue
+		}
+		switch v := values[key].(type) {
+		case int:
+			return int64(v)
+		case int64:
+			return v
+		case float64:
+			return int64(v)
+		case json.Number:
+			n, _ := v.Int64()
+			return n
+		}
+	}
+	return 0
 }
 
 func stringMap(value any) map[string]string {

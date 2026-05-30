@@ -326,6 +326,25 @@ const runtimeTypes = `declare module '@loom/runtime' {
         metadata?: Record<string, string>;
       }): Promise<Record<string, unknown>>;
     };
+    artifacts: {
+      record(input: {
+        artifactId?: string;
+        artifact_id?: string;
+        type?: string;
+        uri: string;
+        summary?: string;
+        mimeType?: string;
+        mime_type?: string;
+        sizeBytes?: number;
+        size_bytes?: number;
+        checksum?: string;
+        taskId?: string;
+        task_id?: string;
+        workItemId?: string;
+        work_item_id?: string;
+        metadata?: Record<string, string>;
+      }): Promise<Record<string, unknown>>;
+    };
     tools: Record<string, (args?: Record<string, unknown>) => Promise<unknown>>;
     tool(name: string, args?: Record<string, unknown>): Promise<unknown>;
   };
