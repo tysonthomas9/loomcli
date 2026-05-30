@@ -16,6 +16,9 @@ func applyWorkflowDefinitions(
 	workflows []WorkflowModule,
 	tools map[string]ToolModule,
 ) error {
+	if len(workflows) == 0 {
+		return nil
+	}
 	if err := validateWorkflowBindingCollisions(ctx, st, workspaceKey, workflows); err != nil {
 		return err
 	}
