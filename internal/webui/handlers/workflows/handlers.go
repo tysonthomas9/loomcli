@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path"
 	"strings"
 	"time"
 
@@ -53,38 +54,33 @@ func HandleRun(st store.Store, issueBackendFn func(context.Context) backend.Issu
 			return
 		}
 		ws := r.PathValue("ws")
-		actor := actorName(r)
-		run, err := workflowpkg.CreateOrResumeRun(r.Context(), st, ws, r.PathValue("name"), req.Input, actor)
+		resp, err := runWorkflowRequest(r.Context(), st, issueBackendFn, ws, r.PathValue("name"), req, actorName(r))
 		if err != nil {
-			handler.HandleServiceError(w, storeError("create workflow run", err))
+			handler.HandleServiceError(w, err)
 			return
 		}
-		var result *workflowpkg.BuiltinRunResult
-		if req.runOnce() {
-			if issueBackendFn == nil {
-				handler.HandleServiceError(w, service.ErrUnavailable("issue backend not configured"))
-				return
-			}
-			ib := issueBackendFn(r.Context())
-			if ib == nil {
-				handler.HandleServiceError(w, service.ErrUnavailable("issue backend not available"))
-				return
-			}
-			result, err = workflowpkg.RunOnce(r.Context(), st, ib, run)
-			if err != nil {
-				handler.HandleServiceError(w, storeError("run workflow", err))
-				return
-			}
-			run = result.Run
+		handler.WriteJSON(w, http.StatusCreated, resp)
+	}
+}
+
+func HandleRunRouteBinding(st store.Store, issueBackendFn func(context.Context) backend.IssueBackend) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		req, ok := readRunRequest(w, r)
+		if !ok {
+			return
 		}
-		if req.Wait {
-			run, err = waitWorkflow(r.Context(), st, ws, run.RunID)
-			if err != nil {
-				handler.HandleServiceError(w, storeError("wait workflow run", err))
-				return
-			}
+		ws := r.PathValue("ws")
+		route, err := resolveWorkflowRouteBinding(r.Context(), st, ws, r.Method, "/"+r.PathValue("route"))
+		if err != nil {
+			handler.HandleServiceError(w, err)
+			return
 		}
-		handler.WriteJSON(w, http.StatusCreated, runResponse{Run: run, Builtin: result})
+		resp, err := runWorkflowRequest(r.Context(), st, issueBackendFn, ws, route.DefinitionName, req, actorName(r))
+		if err != nil {
+			handler.HandleServiceError(w, err)
+			return
+		}
+		handler.WriteJSON(w, http.StatusCreated, resp)
 	}
 }
 
@@ -155,6 +151,82 @@ func readRunRequest(w http.ResponseWriter, r *http.Request) (runRequest, bool) {
 
 func (r runRequest) runOnce() bool {
 	return r.Once == nil || *r.Once
+}
+
+func runWorkflowRequest(ctx context.Context, st store.Store, issueBackendFn func(context.Context) backend.IssueBackend, ws, workflowName string, req runRequest, actor string) (runResponse, error) {
+	run, err := workflowpkg.CreateOrResumeRun(ctx, st, ws, workflowName, req.Input, actor)
+	if err != nil {
+		return runResponse{}, storeError("create workflow run", err)
+	}
+	var result *workflowpkg.BuiltinRunResult
+	if req.runOnce() {
+		if issueBackendFn == nil {
+			return runResponse{}, service.ErrUnavailable("issue backend not configured")
+		}
+		ib := issueBackendFn(ctx)
+		if ib == nil {
+			return runResponse{}, service.ErrUnavailable("issue backend not available")
+		}
+		result, err = workflowpkg.RunOnce(ctx, st, ib, run)
+		if err != nil {
+			return runResponse{}, storeError("run workflow", err)
+		}
+		run = result.Run
+	}
+	if req.Wait {
+		run, err = waitWorkflow(ctx, st, ws, run.RunID)
+		if err != nil {
+			return runResponse{}, storeError("wait workflow run", err)
+		}
+	}
+	return runResponse{Run: run, Builtin: result}, nil
+}
+
+func resolveWorkflowRouteBinding(ctx context.Context, st store.Store, ws, method, routePath string) (*domain.RouteBinding, error) {
+	if st == nil || st.RouteBindings() == nil {
+		return nil, service.ErrUnavailable("route binding store not configured")
+	}
+	routes, err := st.RouteBindings().List(ctx, ws, store.RouteBindingFilter{Status: domain.DefinitionStatusActive, Limit: 10000})
+	if err != nil {
+		return nil, storeError("list route bindings", err)
+	}
+	wantPath := normalizeRoutePath(routePath)
+	wantMethod := strings.ToUpper(strings.TrimSpace(method))
+	if wantMethod == "" {
+		wantMethod = http.MethodPost
+	}
+	for _, route := range routes {
+		if route == nil || route.DefinitionType != domain.DefinitionTypeWorkflow {
+			continue
+		}
+		routeMethod := strings.ToUpper(strings.TrimSpace(route.Method))
+		if routeMethod == "" {
+			routeMethod = http.MethodPost
+		}
+		if routeMethod != wantMethod || normalizeRoutePath(route.Path) != wantPath {
+			continue
+		}
+		if strings.TrimSpace(route.AuthPolicy) != "workspace" {
+			return nil, service.ErrForbidden("workflow route binding auth policy is not supported")
+		}
+		return route, nil
+	}
+	return nil, service.ErrNotFound("workflow route binding not found")
+}
+
+func normalizeRoutePath(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" || value == "/" {
+		return "/"
+	}
+	if !strings.HasPrefix(value, "/") {
+		value = "/" + value
+	}
+	clean := path.Clean(value)
+	if clean == "." {
+		return "/"
+	}
+	return clean
 }
 
 func waitWorkflow(ctx context.Context, st store.Store, ws, runID string) (*domain.WorkflowRun, error) {

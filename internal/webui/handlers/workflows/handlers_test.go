@@ -108,6 +108,83 @@ func TestWorkflowRunAPICreatesInspectableRun(t *testing.T) {
 	}
 }
 
+func TestWorkflowRouteBindingAPIRunsBoundWorkflow(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS", Name: "Workflow Store"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	root := t.TempDir()
+	if _, err := defspkg.ScaffoldWorkflow(root, "epic-runner"); err != nil {
+		t.Fatalf("ScaffoldWorkflow() error = %v", err)
+	}
+	plan, err := defspkg.Load(root)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if err := defspkg.Apply(ctx, st, "WS", "test", plan); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+
+	ready := backend.IssueData{ID: "TASK-3", Title: "Build route-bound runner", Status: "open"}
+	ib := testIssueBackend{ready: []backend.IssueData{ready}, list: []backend.IssueData{ready}}
+	mux := workflowMux(st, ib)
+	rec := postJSON(t, mux, "/api/workspaces/WS/workflow-routes/workflows/epic-runner/run", map[string]any{
+		"input": map[string]any{
+			"parentId":       "EPIC-ROUTE",
+			"role":           "task",
+			"maxConcurrency": 1,
+		},
+	})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("route run status = %d, want 201; body=%s", rec.Code, rec.Body.String())
+	}
+	var created runResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode route run: %v", err)
+	}
+	if created.Run == nil || created.Run.WorkflowName != "epic-runner" || created.Run.Status != domain.WorkflowRunWaiting {
+		t.Fatalf("route run = %+v, want waiting epic-runner run", created.Run)
+	}
+	if created.Builtin == nil || len(created.Builtin.TaskRuns) != 1 {
+		t.Fatalf("route builtin = %+v, want one ensured task run", created.Builtin)
+	}
+	events, err := st.RunEvents().List(ctx, "WS", store.RunEventFilter{WorkflowRunID: created.Run.RunID})
+	if err != nil {
+		t.Fatalf("list run events: %v", err)
+	}
+	if !hasRunEventPtr(events, "workflow_ts_reconciled") || !hasRunEventPtr(events, "task_run_ensured") {
+		t.Fatalf("events = %+v, want TypeScript reconcile and task-run evidence", events)
+	}
+}
+
+func TestWorkflowRouteBindingAPIValidation(t *testing.T) {
+	ctx := context.Background()
+	st, mux := setupWorkflowTestMux(t, ctx, nil)
+
+	missing := postJSON(t, mux, "/api/workspaces/WS/workflow-routes/missing/route", map[string]any{"once": false})
+	if missing.Code != http.StatusNotFound {
+		t.Fatalf("missing route status = %d, want 404; body=%s", missing.Code, missing.Body.String())
+	}
+
+	if _, err := st.RouteBindings().Upsert(ctx, store.RouteBindingUpsert{
+		WorkspaceKey:   "WS",
+		BindingID:      "workflow:epic-runner:POST:public",
+		DefinitionName: "epic-runner",
+		DefinitionType: domain.DefinitionTypeWorkflow,
+		Path:           "/public",
+		Method:         http.MethodPost,
+		AuthPolicy:     "public",
+		Status:         domain.DefinitionStatusActive,
+	}); err != nil {
+		t.Fatalf("upsert public route binding: %v", err)
+	}
+	unsupported := postJSON(t, mux, "/api/workspaces/WS/workflow-routes/public", map[string]any{"once": false})
+	if unsupported.Code != http.StatusForbidden {
+		t.Fatalf("unsupported auth route status = %d, want 403; body=%s", unsupported.Code, unsupported.Body.String())
+	}
+}
+
 func TestWorkflowRunAPIValidationAndOnceFalse(t *testing.T) {
 	ctx := context.Background()
 	st, mux := setupWorkflowTestMux(t, ctx, nil)
@@ -208,6 +285,15 @@ func hasWorkflowDefinition(defs []domain.WorkflowDefinition, name string) bool {
 func hasRunEvent(events []domain.RunEvent, typ string) bool {
 	for _, event := range events {
 		if event.Type == typ {
+			return true
+		}
+	}
+	return false
+}
+
+func hasRunEventPtr(events []*domain.RunEvent, typ string) bool {
+	for _, event := range events {
+		if event != nil && event.Type == typ {
 			return true
 		}
 	}
