@@ -206,6 +206,39 @@ export default defineWorkflow({
 	}
 }
 
+func TestApplyRejectsWorkflowTriggerCollision(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+
+	writeDefFile(t, root, ".loom/workflows/slack-a.ts", `import { defineWorkflow, trigger } from '@loom/runtime';
+
+export default defineWorkflow({
+  name: 'slack-a',
+  triggers: [trigger.issueLabelAdded({ label: 'ready', type: 'epic' })],
+  builtin: 'run-parent-work-items',
+});`)
+	writeDefFile(t, root, ".loom/workflows/slack-b.ts", `import { defineWorkflow, trigger } from '@loom/runtime';
+
+export default defineWorkflow({
+  name: 'slack-b',
+  triggers: [trigger.issueLabelAdded({ type: 'epic', label: 'ready' })],
+  builtin: 'run-parent-work-items',
+});`)
+
+	plan, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TSTRIGGER", Name: "TypeScript Trigger Collisions"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	err = Apply(ctx, st, "TSTRIGGER", "test", plan)
+	if err == nil || !strings.Contains(err.Error(), `workflow trigger collision issue.label_added {"label":"ready","type":"epic"}`) {
+		t.Fatalf("Apply() error = %v, want workflow trigger collision", err)
+	}
+}
+
 func TestTypeScriptFirstSkillImportBundlesMetadata(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()

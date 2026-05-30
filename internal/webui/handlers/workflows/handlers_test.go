@@ -185,7 +185,7 @@ func TestWorkflowRouteBindingAPIRunsBoundWorkflow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list run events: %v", err)
 	}
-	if !hasRunEventPtr(events, "workflow_ts_context_started") || !hasRunEventPtr(events, "workflow_log") || !hasRunEventPtr(events, "task_run_ensured") || !hasRunEventPtr(events, "task_run_dispatched") {
+	if !hasRunEventPtr(events, "workflow_route_admitted") || !hasRunEventPtr(events, "workflow_ts_context_started") || !hasRunEventPtr(events, "workflow_log") || !hasRunEventPtr(events, "task_run_ensured") || !hasRunEventPtr(events, "task_run_dispatched") {
 		t.Fatalf("events = %+v, want TypeScript WorkflowContext, log, ensure, and dispatch evidence", events)
 	}
 }
@@ -262,6 +262,13 @@ func TestWorkflowTriggerBindingAPIRunsMatchingWorkflow(t *testing.T) {
 	}
 	if created.Runs[0].Builtin == nil || len(created.Runs[0].Builtin.TaskRuns) != 1 {
 		t.Fatalf("trigger builtin = %+v, want one ensured task run", created.Runs[0].Builtin)
+	}
+	events, err := st.RunEvents().List(ctx, "WS", store.RunEventFilter{WorkflowRunID: run.RunID})
+	if err != nil {
+		t.Fatalf("list run events: %v", err)
+	}
+	if !hasRunEventPtr(events, "workflow_trigger_admitted") || !hasRunEventPtr(events, "task_run_ensured") {
+		t.Fatalf("events = %+v, want trigger admission and ensured task evidence", events)
 	}
 }
 

@@ -87,6 +87,10 @@ func HandleRun(st store.Store, issueBackendFn func(context.Context) backend.Issu
 			handler.HandleServiceError(w, err)
 			return
 		}
+		appendWorkflowAdmissionEvent(r.Context(), st, resp.Run, "workflow_api_admitted", map[string]any{
+			"workflow_name": r.PathValue("name"),
+			"actor":         actorName(r),
+		})
 		handler.WriteJSON(w, http.StatusCreated, resp)
 	}
 }
@@ -103,11 +107,19 @@ func HandleRunRouteBinding(st store.Store, issueBackendFn func(context.Context) 
 			handler.HandleServiceError(w, err)
 			return
 		}
-		resp, err := runWorkflowRequest(r.Context(), st, issueBackendFn, ws, route.DefinitionName, req, actorName(r))
+		actor := actorName(r)
+		resp, err := runWorkflowRequest(r.Context(), st, issueBackendFn, ws, route.DefinitionName, req, actor)
 		if err != nil {
 			handler.HandleServiceError(w, err)
 			return
 		}
+		appendWorkflowAdmissionEvent(r.Context(), st, resp.Run, "workflow_route_admitted", map[string]any{
+			"binding_id":    route.BindingID,
+			"workflow_name": route.DefinitionName,
+			"method":        route.Method,
+			"path":          route.Path,
+			"actor":         actor,
+		})
 		handler.WriteJSON(w, http.StatusCreated, resp)
 	}
 }
@@ -126,12 +138,20 @@ func HandleTriggerBinding(st store.Store, issueBackendFn func(context.Context) b
 			return
 		}
 		resp := triggerResponse{Event: eventType, Runs: make([]runResponse, 0, len(triggers))}
+		actor := actorName(r)
 		for _, trigger := range triggers {
-			run, err := runWorkflowRequest(r.Context(), st, issueBackendFn, ws, trigger.WorkflowName, req, actorName(r))
+			run, err := runWorkflowRequest(r.Context(), st, issueBackendFn, ws, trigger.WorkflowName, req, actor)
 			if err != nil {
 				handler.HandleServiceError(w, err)
 				return
 			}
+			appendWorkflowAdmissionEvent(r.Context(), st, run.Run, "workflow_trigger_admitted", map[string]any{
+				"binding_id":    trigger.BindingID,
+				"workflow_name": trigger.WorkflowName,
+				"event":         trigger.EventType,
+				"filter":        stringMapFromRaw(trigger.Filter),
+				"actor":         actor,
+			})
 			resp.Runs = append(resp.Runs, run)
 		}
 		handler.WriteJSON(w, http.StatusCreated, resp)
@@ -182,6 +202,19 @@ func HandleCancel(st store.Store) http.HandlerFunc {
 		})
 		handler.WriteJSON(w, http.StatusOK, run)
 	}
+}
+
+func appendWorkflowAdmissionEvent(ctx context.Context, st store.Store, run *domain.WorkflowRun, eventType string, data map[string]any) {
+	if st == nil || st.RunEvents() == nil || run == nil || run.RunID == "" {
+		return
+	}
+	_, _ = st.RunEvents().Append(ctx, store.RunEventAppend{
+		WorkspaceKey:  run.WorkspaceKey,
+		WorkflowRunID: run.RunID,
+		Type:          eventType,
+		Message:       "workflow run admitted",
+		Data:          mustJSON(data),
+	})
 }
 
 func readRunRequest(w http.ResponseWriter, r *http.Request) (runRequest, bool) {
@@ -459,6 +492,22 @@ func triggerFilterMatches(filter json.RawMessage, input json.RawMessage) bool {
 		}
 	}
 	return true
+}
+
+func stringMapFromRaw(raw json.RawMessage) map[string]string {
+	var values map[string]string
+	if err := json.Unmarshal(raw, &values); err == nil {
+		return values
+	}
+	var generic map[string]any
+	if err := json.Unmarshal(raw, &generic); err != nil {
+		return nil
+	}
+	out := make(map[string]string, len(generic))
+	for key, value := range generic {
+		out[key] = fmt.Sprint(value)
+	}
+	return out
 }
 
 func normalizeRoutePath(value string) string {
