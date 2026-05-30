@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -245,6 +247,105 @@ func TestWorkflowTriggerBindingAPIRunsMatchingWorkflow(t *testing.T) {
 	}
 	if created.Runs[0].Builtin == nil || len(created.Runs[0].Builtin.TaskRuns) != 1 {
 		t.Fatalf("trigger builtin = %+v, want one ensured task run", created.Runs[0].Builtin)
+	}
+}
+
+func TestSlackCloneTypeScriptFirstWorkflowRunsThroughTrigger(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS", Name: "Workflow Store"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	root := t.TempDir()
+	workflowPath := filepath.Join(root, ".loom", "workflows", "slack-clone-epic.ts")
+	if err := os.MkdirAll(filepath.Dir(workflowPath), 0o755); err != nil {
+		t.Fatalf("mkdir workflow dir: %v", err)
+	}
+	if err := os.WriteFile(workflowPath, []byte(`import { defineWorkflow } from '@loom/runtime';
+
+export default defineWorkflow({
+  name: 'slack-clone-epic-runner',
+  description: 'Runs Slack clone child tasks from a parent epic.',
+  path: '/workflows/slack-clone-epic-runner/run',
+  auth: 'workspace',
+  issueLabelAdded: { label: 'slack-clone', type: 'epic' },
+  singleton: (input) => `+"`"+`slack:${input.parentId}`+"`"+`,
+  tools: ['workItems.readyChildren', 'taskRuns.ensure'],
+  async run(ctx) {
+    ctx.log.info('slack clone epic started', { parentId: ctx.input.parentId });
+    const ready = await ctx.workItems.readyChildren(String(ctx.input.parentId));
+    for (const issue of ready) {
+      await ctx.taskRuns.ensure({
+        workItemId: issue.id,
+        role: 'task',
+        reason: issue.title,
+        metadata: { app: 'slack-clone', surface: 'channel-sidebar' },
+      });
+    }
+    return { delegated: ready.length };
+  },
+});
+`), 0o644); err != nil {
+		t.Fatalf("write workflow: %v", err)
+	}
+	plan, err := defspkg.Load(root)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if len(plan.Workflows) != 1 || plan.Workflows[0].Name != "slack-clone-epic-runner" || plan.Workflows[0].Runner != "workflow-context-v1" {
+		t.Fatalf("workflows = %+v, want TypeScript-first Slack clone WorkflowContext runner", plan.Workflows)
+	}
+	if err := defspkg.Apply(ctx, st, "WS", "test", plan); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+
+	ready := backend.IssueData{ID: "SLACK-2", Title: "Build channel sidebar", Status: "open"}
+	ib := testIssueBackend{ready: []backend.IssueData{ready}, list: []backend.IssueData{ready}}
+	mux := workflowMux(st, ib)
+	rec := postJSON(t, mux, "/api/workspaces/WS/workflow-triggers/issue.label_added", map[string]any{
+		"input": map[string]any{
+			"parentId": "SLACK-1",
+			"label":    "slack-clone",
+			"type":     "epic",
+		},
+	})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("trigger status = %d, want 201; body=%s", rec.Code, rec.Body.String())
+	}
+	var created triggerResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode trigger response: %v", err)
+	}
+	if created.Event != "issue.label_added" || len(created.Runs) != 1 {
+		t.Fatalf("trigger response = %+v, want one issue.label_added run", created)
+	}
+	run := created.Runs[0].Run
+	if run == nil || run.WorkflowName != "slack-clone-epic-runner" || run.Status != domain.WorkflowRunWaiting {
+		t.Fatalf("trigger run = %+v, want waiting TypeScript Slack clone run", run)
+	}
+	if created.Runs[0].Builtin == nil || len(created.Runs[0].Builtin.TaskRuns) != 1 || created.Runs[0].Builtin.DispatchedCount != 1 {
+		t.Fatalf("trigger builtin = %+v, want one ensured and dispatched Slack task run", created.Runs[0].Builtin)
+	}
+	taskRuns, err := st.TaskRuns().List(ctx, "WS", store.TaskRunFilter{WorkflowRunID: run.RunID, WorkItemID: ready.ID})
+	if err != nil {
+		t.Fatalf("list task runs: %v", err)
+	}
+	if len(taskRuns) != 1 || taskRuns[0].Status != domain.TaskRunStarting || taskRuns[0].Metadata["app"] != "slack-clone" || taskRuns[0].Metadata["surface"] != "channel-sidebar" {
+		t.Fatalf("taskRuns = %+v, want TypeScript-created Slack clone task run metadata", taskRuns)
+	}
+	cmds, err := st.AgentCommands().List(ctx, "WS", store.AgentCommandFilter{TargetAgentID: taskRuns[0].AgentID})
+	if err != nil {
+		t.Fatalf("list agent commands: %v", err)
+	}
+	if len(cmds) != 1 || cmds[0].Payload["workflow_run_id"] != run.RunID || cmds[0].Payload["task_run_id"] != taskRuns[0].TaskRunID {
+		t.Fatalf("commands = %+v, want one agent command linked to Slack workflow task run", cmds)
+	}
+	events, err := st.RunEvents().List(ctx, "WS", store.RunEventFilter{WorkflowRunID: run.RunID})
+	if err != nil {
+		t.Fatalf("list run events: %v", err)
+	}
+	if !hasRunEventPtr(events, "workflow_ts_context_started") || !hasRunEventPtr(events, "workflow_log") || !hasRunEventPtr(events, "task_run_ensured") || !hasRunEventPtr(events, "task_run_dispatched") {
+		t.Fatalf("events = %+v, want TypeScript WorkflowContext, log, ensure, and dispatch evidence", events)
 	}
 }
 
