@@ -38,6 +38,13 @@ const (
 	defaultInterval      = 30 * time.Second
 	dumpTimeout          = 5 * time.Second
 
+	// clockTickInterval is how often the Manager advances miniredis' clock so
+	// that relative TTLs (SET ... EX, SETEX, EXPIRE) actually count down. See
+	// run() for why this is load-bearing. 1s keeps PTTL within a second of
+	// wall time, which is well inside the tolerance of every TTL we set
+	// (issue locks/worker leases/leader election are tens of seconds or more).
+	clockTickInterval = 1 * time.Second
+
 	// maxStreamEntriesPerKey caps how many entries from a single Redis
 	// Stream are serialized into the snapshot. Fleet-db's compaction
 	// keeps streams bounded, but this is a defense against runaway
@@ -73,6 +80,11 @@ type Manager struct {
 	fleetKeys    bool
 	logger       *slog.Logger
 
+	// clockInterval is how often run() fast-forwards miniredis' clock.
+	// Defaults to clockTickInterval; overridable in tests so TTL expiry can
+	// be driven quickly without real sleeps.
+	clockInterval time.Duration
+
 	stopCh    chan struct{}
 	stoppedCh chan struct{}
 	started   bool
@@ -102,13 +114,14 @@ func NewManager(snapshotPath string, fleetKeys bool, logger *slog.Logger) (*Mana
 		return nil, fmt.Errorf("start miniredis: %w", err)
 	}
 	m := &Manager{
-		mr:           mr,
-		client:       redis.NewClient(&redis.Options{Addr: mr.Addr()}),
-		snapshotPath: snapshotPath,
-		fleetKeys:    fleetKeys,
-		logger:       logger,
-		stopCh:       make(chan struct{}),
-		stoppedCh:    make(chan struct{}),
+		mr:            mr,
+		client:        redis.NewClient(&redis.Options{Addr: mr.Addr()}),
+		snapshotPath:  snapshotPath,
+		fleetKeys:     fleetKeys,
+		logger:        logger,
+		clockInterval: clockTickInterval,
+		stopCh:        make(chan struct{}),
+		stoppedCh:     make(chan struct{}),
 	}
 	if snapshotPath != "" {
 		if err := m.load(); err != nil {
@@ -142,16 +155,38 @@ func (m *Manager) Start(ctx context.Context) {
 // run is the periodic-dump loop. It uses context.Background() for the
 // dump call itself so shutdown dumps still go through after the parent
 // ctx is cancelled.
+//
+// It also drives miniredis' clock. miniredis stores relative TTLs (SET ... EX,
+// SETEX, EXPIRE) as remaining *durations*, not absolute deadlines, and only
+// decrements them when the host calls FastForward — PTTL returns the stored
+// duration verbatim. With no host advancing the clock, every TTL'd key is
+// immortal: fleet-db issue locks, worker leases and leader-election keys never
+// expire, so an abandoned lock keeps a holder forever and the fleet-db reaper
+// skips it, leaving tasks stuck in_progress indefinitely. (SetTime does NOT
+// help: it only affects EXPIREAT comparisons and stream IDs, not the stored
+// countdown.) FastForward by the real elapsed wall time keeps expiry honest and
+// self-corrects across missed/coalesced ticks (e.g. laptop sleep), since the
+// delta is measured against wall time rather than counting fixed-size steps.
 func (m *Manager) run(ctx context.Context) {
 	defer close(m.stoppedCh)
 	ticker := time.NewTicker(defaultInterval)
 	defer ticker.Stop()
+	clockInterval := m.clockInterval
+	if clockInterval <= 0 {
+		clockInterval = clockTickInterval
+	}
+	clockTicker := time.NewTicker(clockInterval)
+	defer clockTicker.Stop()
+	lastTick := time.Now()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-m.stopCh:
 			return
+		case now := <-clockTicker.C:
+			m.mr.FastForward(now.Sub(lastTick))
+			lastTick = now
 		case <-ticker.C:
 			if err := m.Dump(); err != nil {
 				m.logger.Warn("periodic snapshot dump failed", "err", err)
