@@ -6,6 +6,7 @@ const vm = require("vm");
 const { stripTypeScriptTypes } = require("node:module");
 
 const moduleCache = new Map();
+const cleanupRuntimeWorkspaceFiles = Symbol("cleanupRuntimeWorkspaceFiles");
 
 function defineWorkflow(config) {
   return { __loomType: "workflow", ...config };
@@ -226,6 +227,7 @@ function makeWorkflowFiles(request, operations) {
 
 function makeRuntimeWorkspaceFiles(request, operations, workspace) {
   const files = new Map();
+  const writtenPaths = new Set();
   const checksum = (text) => `sha256:${crypto.createHash("sha256").update(text).digest("hex")}`;
   const runtimeWorkspace = workspace && workspace.runtime && typeof workspace.runtime === "object" ? workspace.runtime : {};
   const providerWorkspaceId = String(runtimeWorkspace.providerWorkspaceId || request.id || "runtime-workspace").replace(/[^A-Za-z0-9_.:-]/g, "_");
@@ -256,6 +258,7 @@ function makeRuntimeWorkspaceFiles(request, operations, workspace) {
     const rel = safeRelativePath(relativePath);
     const text = String(content ?? "");
     files.set(rel, text);
+    writtenPaths.add(rel);
     if (runtimeRoot) {
       const abs = path.join(runtimeRoot, rel);
       fs.mkdirSync(path.dirname(abs), { recursive: true });
@@ -284,9 +287,36 @@ function makeRuntimeWorkspaceFiles(request, operations, workspace) {
     });
     return text;
   };
+  const cleanupWrittenFiles = () => {
+    if (!runtimeRoot) {
+      return {
+        cleanupEnforced: false,
+        cleanupScope: "admitted_only",
+        cleanedFiles: 0,
+      };
+    }
+    let cleanedFiles = 0;
+    for (const rel of writtenPaths) {
+      const abs = path.join(runtimeRoot, rel);
+      if (!path.resolve(abs).startsWith(path.resolve(runtimeRoot) + path.sep)) {
+        throw new Error(`runtime workspace cleanup path escapes root: ${rel}`);
+      }
+      if (!fs.existsSync(abs)) continue;
+      const stat = fs.lstatSync(abs);
+      if (!stat.isFile() && !stat.isSymbolicLink()) continue;
+      fs.unlinkSync(abs);
+      cleanedFiles += 1;
+    }
+    return {
+      cleanupEnforced: true,
+      cleanupScope: "current_run_runtime_files",
+      cleanedFiles,
+    };
+  };
   return {
     writeText,
     readText,
+    [cleanupRuntimeWorkspaceFiles]: cleanupWrittenFiles,
     writeJSON: (relativePath, value, options = {}) =>
       writeText(relativePath, JSON.stringify(value ?? null, null, 2), {
         mimeType: "application/json",
@@ -480,6 +510,7 @@ function makeContext(request, workflow) {
         ? { reason: reasonOrOptions, metadata: metadata || {} }
         : reasonOrOptions || {};
     const params = runtimeWorkspaceLifecycleParams("cleanup", options);
+    Object.assign(params, runtimeFiles[cleanupRuntimeWorkspaceFiles]());
     operations.push({ type: "runtime.workspace.cleanup", params });
     return { accepted: true, status: "admitted", ...jsonSafe(params) };
   };

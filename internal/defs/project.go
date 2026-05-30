@@ -510,6 +510,9 @@ const runtimeTypes = `declare module '@loom/runtime' {
     filesystem?: RuntimeFilesystemPolicy;
     reason?: string;
     idempotencyKey?: string;
+    cleanupEnforced?: boolean;
+    cleanupScope?: string;
+    cleanedFiles?: number;
   };
 
   export type WorkflowWorkspaceRepo = {

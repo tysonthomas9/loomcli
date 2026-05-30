@@ -3,6 +3,7 @@ package workflow
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1090,21 +1091,23 @@ export default defineWorkflow({
       reason: 'prepare workflow sandbox',
       metadata: { phase: 'setup' },
     });
+    const written = await ctx.runtime.files.writeText('state/summary.txt', 'runtime workspace ready', {
+      summary: 'Runtime workspace state',
+    });
+    const reread = await ctx.runtime.files.readText('state/summary.txt');
     const cleaned = await ctx.runtime.cleanupWorkspace({
       reason: 'workflow finished',
       cleanup: { mode: 'after_ttl', ttl: '1h' },
       metadata: { phase: 'teardown' },
     });
-    const written = await ctx.runtime.files.writeText('state/summary.txt', 'runtime workspace ready', {
-      summary: 'Runtime workspace state',
-    });
-    const reread = await ctx.runtime.files.readText('state/summary.txt');
     return {
       materializeAccepted: materialized.accepted,
       cleanupAccepted: cleaned.accepted,
       runtimeProfileName: materialized.runtimeProfileName,
       providerWorkspaceId: materialized.providerWorkspaceId,
       cleanupTTL: cleaned.cleanup?.ttl,
+      cleanupEnforced: cleaned.cleanupEnforced,
+      cleanedFiles: cleaned.cleanedFiles,
       runtimeFileURI: written.uri,
       runtimeFileRead: reread,
     };
@@ -1141,18 +1144,15 @@ export default defineWorkflow({
 	}
 	if data["materializeAccepted"] != true || data["cleanupAccepted"] != true ||
 		data["runtimeProfileName"] != "local-node" || data["providerWorkspaceId"] != "local-lifecycle-workspace" ||
-		data["cleanupTTL"] != "1h" || data["runtimeFileRead"] != "runtime workspace ready" {
+		data["cleanupTTL"] != "1h" || data["cleanupEnforced"] != true || data["cleanedFiles"] != float64(1) ||
+		data["runtimeFileRead"] != "runtime workspace ready" {
 		t.Fatalf("result data = %+v, want admitted lifecycle receipts", data)
 	}
 	if uri, ok := data["runtimeFileURI"].(string); !ok || !strings.HasPrefix(uri, "runtime-workspace://local-lifecycle-workspace/state/summary.txt") {
 		t.Fatalf("runtimeFileURI = %#v, want runtime workspace URI without host path", data["runtimeFileURI"])
 	}
-	diskData, err := os.ReadFile(filepath.Join(root, "state", "summary.txt"))
-	if err != nil {
-		t.Fatalf("read local runtime workspace file: %v", err)
-	}
-	if string(diskData) != "runtime workspace ready" {
-		t.Fatalf("runtime workspace file = %q, want provider-backed local filesystem write", string(diskData))
+	if _, err := os.Stat(filepath.Join(root, "state", "summary.txt")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("runtime workspace file exists after cleanup or stat failed with %v, want cleaned local runtime file", err)
 	}
 	events, err := st.RunEvents().List(ctx, "TSLIFECYCLECTX", store.RunEventFilter{WorkflowRunID: run.RunID})
 	if err != nil {
@@ -1175,6 +1175,10 @@ export default defineWorkflow({
 	cleanup, ok := cleanupEvent["cleanup"].(map[string]any)
 	if !ok || cleanup["mode"] != "after_ttl" || cleanup["ttl"] != "1h" {
 		t.Fatalf("cleanup event = %+v, want cleanup policy override evidence", cleanupEvent)
+	}
+	if cleanupEvent["cleanupEnforced"] != true || cleanupEvent["cleanupScope"] != "current_run_runtime_files" ||
+		cleanupEvent["cleanedFiles"] != float64(1) {
+		t.Fatalf("cleanup event = %+v, want enforced local cleanup evidence", cleanupEvent)
 	}
 	fileEvent := workflowEventDataByType(t, events, "runtime_workspace_file_written")
 	if fileEvent["providerWorkspaceId"] != "local-lifecycle-workspace" || fileEvent["visibility"] != "runtime_workspace" ||
