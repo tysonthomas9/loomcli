@@ -461,6 +461,39 @@ func TestLoadRejectsUnauthenticatedWorkflowRoute(t *testing.T) {
 	}
 }
 
+func TestLoadRejectsMissingTypedAgentToolDefinition(t *testing.T) {
+	root := t.TempDir()
+	writeDefFile(t, root, ".loom/agents/slack-agent.ts", `import { createAgent } from '@loom/runtime';
+
+export default createAgent({
+  name: 'slack-agent',
+  backend: 'echo',
+  model: 'local/echo',
+  tools: ['create_channel'],
+});`)
+
+	_, err := Load(root)
+	if err == nil || !strings.Contains(err.Error(), `agent model tool "create_channel" must reference a declared typed tool definition`) {
+		t.Fatalf("Load() error = %v, want missing typed agent tool validation", err)
+	}
+}
+
+func TestLoadRejectsMissingTypedWorkflowToolDefinition(t *testing.T) {
+	root := t.TempDir()
+	writeDefFile(t, root, ".loom/workflows/provision-channel.ts", `import { defineWorkflow } from '@loom/runtime';
+
+export default defineWorkflow({
+  name: 'provision-channel',
+  builtin: 'run-parent-work-items',
+  tools: ['create_channel'],
+});`)
+
+	_, err := Load(root)
+	if err == nil || !strings.Contains(err.Error(), `workflow tool "create_channel" must reference a declared typed tool definition`) {
+		t.Fatalf("Load() error = %v, want missing typed workflow tool validation", err)
+	}
+}
+
 func TestLoadSupportsTypeScriptSyntax(t *testing.T) {
 	root := t.TempDir()
 	writeDefFile(t, root, ".loom/workflows/typed-epic.ts", `import { defineWorkflow, trigger } from '@loom/runtime';

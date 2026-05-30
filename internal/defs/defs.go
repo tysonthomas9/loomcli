@@ -611,6 +611,7 @@ func validatePlan(plan *Plan) error {
 			return err
 		}
 	}
+	toolIndex := indexTools(plan.Tools)
 	for _, agent := range plan.Agents {
 		if strings.TrimSpace(agent.Name) == "" {
 			return fmt.Errorf("%s: agent definition name is required", agent.SourcePath)
@@ -640,6 +641,9 @@ func validatePlan(plan *Plan) error {
 		if err := validateNoExactCollision(agent.SourcePath, "model tool", agent.Tools, "sandbox command", agent.AllowedCommands); err != nil {
 			return err
 		}
+		if err := validateAgentToolReferences(agent, toolIndex); err != nil {
+			return err
+		}
 	}
 	for _, instance := range plan.AgentInstances {
 		if strings.TrimSpace(instance.Name) == "" {
@@ -665,6 +669,9 @@ func validatePlan(plan *Plan) error {
 		}
 		seen["workflow:"+wf.Name] = wf.SourcePath
 		if err := validateUniqueStrings(wf.SourcePath, "workflow tools", wf.Tools); err != nil {
+			return err
+		}
+		if err := validateWorkflowToolReferences(wf, toolIndex); err != nil {
 			return err
 		}
 		if err := validateRepoAndEnvPolicy(wf.SourcePath, wf.Repos, wf.Env); err != nil {
