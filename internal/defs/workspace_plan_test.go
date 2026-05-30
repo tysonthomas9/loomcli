@@ -208,12 +208,29 @@ func TestPlanFromWorkspaceProjectsControlPlaneRecords(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("update agent session: %v", err)
 	}
+	if _, err := st.Artifacts().Create(ctx, store.ArtifactCreate{
+		WorkspaceKey: "CP",
+		ArtifactID:   "artifact-slack-1",
+		AgentID:      "triage-bot",
+		SessionID:    "session-1",
+		TerminalID:   "term-1",
+		TaskID:       "TASK-1",
+		Type:         "report",
+		URI:          "artifact://workflow/wrun-slack-1/report.json",
+		Summary:      "Slack runner report",
+		MIMEType:     "application/json",
+		SizeBytes:    512,
+		Checksum:     "sha256:abc123",
+		Metadata:     map[string]string{"workflow_run_id": workflowRun.RunID, "kind": "summary"},
+	}); err != nil {
+		t.Fatalf("create artifact: %v", err)
+	}
 
 	plan, err := PlanFromWorkspace(ctx, st, "CP")
 	if err != nil {
 		t.Fatalf("PlanFromWorkspace() error = %v", err)
 	}
-	if got := Summary(plan); got != "agents=1 workflows=1 runtimes=1 agent_instances=1 agent_sessions=1 workflow_runs=1 task_runs=1 tools=1" {
+	if got := Summary(plan); got != "agents=1 workflows=1 runtimes=1 agent_instances=1 agent_sessions=1 workflow_runs=1 task_runs=1 artifacts=1 tools=1" {
 		t.Fatalf("Summary() = %q, want direct record parity", got)
 	}
 	if plan.Root != "workspace:CP" {
@@ -250,6 +267,16 @@ func TestPlanFromWorkspaceProjectsControlPlaneRecords(t *testing.T) {
 		session.Summary != "working on sidebar" || session.Metadata["harness"] != "planning" ||
 		session.LastHeartbeat == nil || !session.LastHeartbeat.Equal(sessionHeartbeat) {
 		t.Fatalf("agent session = %+v, want durable session runtime state", session)
+	}
+	artifact := plan.Artifacts[0]
+	if artifact.ArtifactID != "artifact-slack-1" || artifact.AgentID != "triage-bot" ||
+		artifact.SessionID != "session-1" || artifact.TerminalID != "term-1" ||
+		artifact.TaskID != "TASK-1" || artifact.Type != "report" ||
+		artifact.URI != "artifact://workflow/wrun-slack-1/report.json" ||
+		artifact.Summary != "Slack runner report" || artifact.MIMEType != "application/json" ||
+		artifact.SizeBytes != 512 || artifact.Checksum != "sha256:abc123" ||
+		artifact.Metadata["kind"] != "summary" {
+		t.Fatalf("artifact = %+v, want durable artifact runtime state", artifact)
 	}
 	workflow := plan.Workflows[0]
 	if workflow.Name != "slack-clone-runner" || workflow.Builtin != "run-parent-work-items" {
@@ -338,6 +365,18 @@ func TestPlanFromWorkspaceProjectsControlPlaneRecords(t *testing.T) {
 		importedSession.Metadata["workflow_run_id"] != "wrun-slack-1" ||
 		!importedSession.LastHeartbeat.Equal(sessionHeartbeat) {
 		t.Fatalf("imported agent session = %+v, want round-tripped durable session state", importedSession)
+	}
+	importedArtifact, err := imported.Artifacts().Get(ctx, "IMPORT", "artifact-slack-1")
+	if err != nil {
+		t.Fatalf("get imported artifact: %v", err)
+	}
+	if importedArtifact.AgentID != "triage-bot" || importedArtifact.SessionID != "session-1" ||
+		importedArtifact.TerminalID != "term-1" || importedArtifact.TaskID != "TASK-1" ||
+		importedArtifact.Type != "report" || importedArtifact.URI != "artifact://workflow/wrun-slack-1/report.json" ||
+		importedArtifact.Summary != "Slack runner report" || importedArtifact.MIMEType != "application/json" ||
+		importedArtifact.SizeBytes != 512 || importedArtifact.Checksum != "sha256:abc123" ||
+		importedArtifact.Metadata["workflow_run_id"] != "wrun-slack-1" {
+		t.Fatalf("imported artifact = %+v, want round-tripped artifact state", importedArtifact)
 	}
 }
 

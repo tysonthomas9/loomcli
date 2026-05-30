@@ -38,6 +38,9 @@ func PlanFromWorkspace(ctx context.Context, st store.Store, workspaceKey string)
 	if err := appendControlPlaneAgentSessions(ctx, st, workspaceKey, plan); err != nil {
 		return nil, err
 	}
+	if err := appendControlPlaneArtifacts(ctx, st, workspaceKey, plan); err != nil {
+		return nil, err
+	}
 	if err := appendControlPlaneWorkflows(ctx, st, workspaceKey, plan, index.hasWorkflow); err != nil {
 		return nil, err
 	}
@@ -345,6 +348,45 @@ func agentSessionFromControlPlane(session *domain.AgentSession) AgentSessionModu
 	return module
 }
 
+func appendControlPlaneArtifacts(ctx context.Context, st store.Store, workspaceKey string, plan *Plan) error {
+	artifactStore := st.Artifacts()
+	if artifactStore == nil {
+		return fmt.Errorf("artifact store not configured")
+	}
+	artifacts, err := artifactStore.List(ctx, workspaceKey, store.ArtifactFilter{Limit: 10000})
+	if err != nil {
+		return fmt.Errorf("list artifacts: %w", err)
+	}
+	for _, artifact := range artifacts {
+		if artifact == nil {
+			continue
+		}
+		plan.Artifacts = append(plan.Artifacts, artifactFromControlPlane(artifact))
+	}
+	return nil
+}
+
+func artifactFromControlPlane(artifact *domain.Artifact) ArtifactModule {
+	module := ArtifactModule{
+		ArtifactID: artifact.ArtifactID,
+		SourcePath: "control-plane:artifact/" + artifact.ArtifactID,
+		AgentID:    artifact.AgentID,
+		SessionID:  artifact.SessionID,
+		TerminalID: artifact.TerminalID,
+		TaskID:     artifact.TaskID,
+		Type:       artifact.Type,
+		URI:        artifact.URI,
+		Summary:    artifact.Summary,
+		MIMEType:   artifact.MIMEType,
+		SizeBytes:  artifact.SizeBytes,
+		Checksum:   artifact.Checksum,
+		Metadata:   cloneStringMap(artifact.Metadata),
+	}
+	module.SourceHash = workspaceHash(module)
+	module.Version = version(module.SourceHash)
+	return module
+}
+
 func appendControlPlaneWorkflows(ctx context.Context, st store.Store, workspaceKey string, plan *Plan, skip map[string]bool) error {
 	definitions, err := st.WorkflowDefinitions().List(ctx, workspaceKey, store.WorkflowDefinitionFilter{Status: domain.DefinitionStatusActive})
 	if err != nil {
@@ -582,6 +624,7 @@ func sortPlan(plan *Plan) {
 	sort.Slice(plan.Agents, func(i, j int) bool { return plan.Agents[i].Name < plan.Agents[j].Name })
 	sort.Slice(plan.AgentInstances, func(i, j int) bool { return plan.AgentInstances[i].Name < plan.AgentInstances[j].Name })
 	sort.Slice(plan.AgentSessions, func(i, j int) bool { return plan.AgentSessions[i].SessionID < plan.AgentSessions[j].SessionID })
+	sort.Slice(plan.Artifacts, func(i, j int) bool { return plan.Artifacts[i].ArtifactID < plan.Artifacts[j].ArtifactID })
 	sort.Slice(plan.Workflows, func(i, j int) bool { return plan.Workflows[i].Name < plan.Workflows[j].Name })
 	sort.Slice(plan.WorkflowRuns, func(i, j int) bool { return plan.WorkflowRuns[i].RunID < plan.WorkflowRuns[j].RunID })
 	sort.Slice(plan.TaskRuns, func(i, j int) bool { return plan.TaskRuns[i].TaskRunID < plan.TaskRuns[j].TaskRunID })

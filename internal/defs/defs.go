@@ -20,6 +20,7 @@ type Plan struct {
 	Agents         []AgentModule         `json:"agents,omitempty"`
 	AgentInstances []AgentInstanceModule `json:"agent_instances,omitempty"`
 	AgentSessions  []AgentSessionModule  `json:"agent_sessions,omitempty"`
+	Artifacts      []ArtifactModule      `json:"artifacts,omitempty"`
 	Workflows      []WorkflowModule      `json:"workflows,omitempty"`
 	WorkflowRuns   []WorkflowRunModule   `json:"workflow_runs,omitempty"`
 	TaskRuns       []TaskRunModule       `json:"task_runs,omitempty"`
@@ -166,6 +167,9 @@ func Apply(ctx context.Context, st store.Store, workspaceKey, actor string, plan
 		return err
 	}
 	if err := applyAgentSessions(ctx, st, workspaceKey, plan.AgentSessions); err != nil {
+		return err
+	}
+	if err := applyArtifacts(ctx, st, workspaceKey, plan.Artifacts); err != nil {
 		return err
 	}
 	return nil
@@ -544,6 +548,9 @@ func Summary(plan *Plan) string {
 	if len(plan.TaskRuns) > 0 {
 		summary += fmt.Sprintf(" task_runs=%d", len(plan.TaskRuns))
 	}
+	if len(plan.Artifacts) > 0 {
+		summary += fmt.Sprintf(" artifacts=%d", len(plan.Artifacts))
+	}
 	if len(plan.Skills) > 0 {
 		summary += fmt.Sprintf(" skills=%d", len(plan.Skills))
 	}
@@ -683,6 +690,22 @@ func validatePlan(plan *Plan) error {
 			return fmt.Errorf("duplicate agent session %q in %s and %s", session.SessionID, prior, sourcePath)
 		}
 		seen["agent-session:"+session.SessionID] = sourcePath
+	}
+	for _, artifact := range plan.Artifacts {
+		sourcePath := firstNonEmpty(artifact.SourcePath, "artifact:"+artifact.ArtifactID)
+		if strings.TrimSpace(artifact.ArtifactID) == "" {
+			return fmt.Errorf("%s: artifact id is required", sourcePath)
+		}
+		if strings.TrimSpace(artifact.Type) == "" {
+			return fmt.Errorf("%s: artifact %q must declare a type", sourcePath, artifact.ArtifactID)
+		}
+		if strings.TrimSpace(artifact.URI) == "" {
+			return fmt.Errorf("%s: artifact %q must declare a uri", sourcePath, artifact.ArtifactID)
+		}
+		if prior := seen["artifact:"+artifact.ArtifactID]; prior != "" {
+			return fmt.Errorf("duplicate artifact %q in %s and %s", artifact.ArtifactID, prior, sourcePath)
+		}
+		seen["artifact:"+artifact.ArtifactID] = sourcePath
 	}
 	for _, wf := range plan.Workflows {
 		if strings.TrimSpace(wf.Name) == "" {
