@@ -30,6 +30,25 @@ func TestParseInput(t *testing.T) {
 	}
 }
 
+func TestParseWorkflowPayloadAlias(t *testing.T) {
+	got, err := parseWorkflowPayload("{}", `{"parentId":"EPIC-1"}`)
+	if err != nil {
+		t.Fatalf("parseWorkflowPayload() error = %v", err)
+	}
+	if string(got) != `{"parentId":"EPIC-1"}` {
+		t.Fatalf("payload = %s, want payload alias value", got)
+	}
+	if _, err := parseWorkflowPayload("{}", `{"broken":`); err == nil || !strings.Contains(err.Error(), "--payload must be valid JSON") {
+		t.Fatalf("invalid payload error = %v, want --payload validation", err)
+	}
+	if _, err := parseWorkflowPayload(`{"input":true}`, `{"payload":true}`); err == nil || !strings.Contains(err.Error(), "cannot both be set") {
+		t.Fatalf("conflicting input/payload error = %v, want conflict", err)
+	}
+	if workflowRunCmd.Flags().Lookup("payload") == nil {
+		t.Fatal("loom workflow run missing --payload flag")
+	}
+}
+
 func TestRunWorkflowRunRejectsInvalidInputBeforeOpeningStore(t *testing.T) {
 	old := workflowRunInput
 	workflowRunInput = `{"broken":`
@@ -142,11 +161,11 @@ func withWorkflowStore(t *testing.T, st store.Store, workspace string) {
 func withWorkflowGlobals(t *testing.T, fn func()) {
 	t.Helper()
 	oldWorkflowJSON := workflowJSON
-	oldWorkflowRunInput, oldWorkflowRunWait, oldWorkflowRunOnce := workflowRunInput, workflowRunWait, workflowRunOnce
+	oldWorkflowRunInput, oldWorkflowRunPayload, oldWorkflowRunWait, oldWorkflowRunOnce := workflowRunInput, workflowRunPayload, workflowRunWait, workflowRunOnce
 	oldWorkflowLogsJSON, oldWorkflowShowJSON, oldWorkflowListJSON := workflowLogsJSON, workflowShowJSON, workflowListJSON
 	t.Cleanup(func() {
 		workflowJSON = oldWorkflowJSON
-		workflowRunInput, workflowRunWait, workflowRunOnce = oldWorkflowRunInput, oldWorkflowRunWait, oldWorkflowRunOnce
+		workflowRunInput, workflowRunPayload, workflowRunWait, workflowRunOnce = oldWorkflowRunInput, oldWorkflowRunPayload, oldWorkflowRunWait, oldWorkflowRunOnce
 		workflowLogsJSON, workflowShowJSON, workflowListJSON = oldWorkflowLogsJSON, oldWorkflowShowJSON, oldWorkflowListJSON
 	})
 	fn()

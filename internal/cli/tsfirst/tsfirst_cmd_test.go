@@ -267,6 +267,25 @@ func TestTypeScriptCommandValidationBeforeStoreAccess(t *testing.T) {
 	})
 }
 
+func TestParseWorkflowPayloadAlias(t *testing.T) {
+	got, err := parseWorkflowPayload("{}", `{"parentId":"EPIC-1"}`)
+	if err != nil {
+		t.Fatalf("parseWorkflowPayload() error = %v", err)
+	}
+	if string(got) != `{"parentId":"EPIC-1"}` {
+		t.Fatalf("payload = %s, want payload alias value", got)
+	}
+	if _, err := parseWorkflowPayload("{}", `{"broken":`); err == nil || !strings.Contains(err.Error(), "--payload must be valid JSON") {
+		t.Fatalf("invalid payload error = %v, want --payload validation", err)
+	}
+	if _, err := parseWorkflowPayload(`{"input":true}`, `{"payload":true}`); err == nil || !strings.Contains(err.Error(), "cannot both be set") {
+		t.Fatalf("conflicting input/payload error = %v, want conflict", err)
+	}
+	if runCmd.Flags().Lookup("payload") == nil {
+		t.Fatal("loom run missing --payload flag")
+	}
+}
+
 func TestRunTypeScriptWorkflowAppliesAndRunsWorkflowContext(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
@@ -916,13 +935,13 @@ func withTSFirstGlobals(t *testing.T, fn func()) {
 	oldCheckDir, oldCheckJSON := checkDir, checkJSON
 	oldConnectJSON := connectJSON
 	oldApplyDir, oldApplyInstance, oldApplyStart, oldApplyJSON := applyDir, applyInstance, applyStart, applyJSON
-	oldRunDir, oldRunInput, oldRunWait, oldRunOnce, oldRunJSON := runDir, runInput, runWait, runOnce, runJSON
+	oldRunDir, oldRunInput, oldRunPayload, oldRunWait, oldRunOnce, oldRunJSON := runDir, runInput, runPayload, runWait, runOnce, runJSON
 	t.Cleanup(func() {
 		addDir, addJSON = oldAddDir, oldAddJSON
 		checkDir, checkJSON = oldCheckDir, oldCheckJSON
 		connectJSON = oldConnectJSON
 		applyDir, applyInstance, applyStart, applyJSON = oldApplyDir, oldApplyInstance, oldApplyStart, oldApplyJSON
-		runDir, runInput, runWait, runOnce, runJSON = oldRunDir, oldRunInput, oldRunWait, oldRunOnce, oldRunJSON
+		runDir, runInput, runPayload, runWait, runOnce, runJSON = oldRunDir, oldRunInput, oldRunPayload, oldRunWait, oldRunOnce, oldRunJSON
 	})
 	fn()
 }

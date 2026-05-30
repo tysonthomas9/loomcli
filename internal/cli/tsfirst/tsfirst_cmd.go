@@ -44,11 +44,12 @@ var (
 	applyStart    bool
 	applyJSON     bool
 
-	runDir   string
-	runInput string
-	runWait  bool
-	runOnce  bool
-	runJSON  bool
+	runDir     string
+	runInput   string
+	runPayload string
+	runWait    bool
+	runOnce    bool
+	runJSON    bool
 )
 
 var addCmd = &cobra.Command{
@@ -134,6 +135,7 @@ func init() {
 
 	runCmd.Flags().StringVar(&runDir, "dir", ".", "Directory containing the Loom TypeScript project")
 	runCmd.Flags().StringVar(&runInput, "input", "{}", "Workflow input JSON")
+	runCmd.Flags().StringVar(&runPayload, "payload", "", "Workflow input JSON (alias for --input)")
 	runCmd.Flags().BoolVar(&runWait, "wait", false, "Poll until the workflow reaches a terminal state")
 	runCmd.Flags().BoolVar(&runOnce, "once", true, "Run one reconcile pass for constrained built-in workflows")
 	runCmd.Flags().BoolVar(&runJSON, "json", false, "JSON output")
@@ -543,7 +545,7 @@ func runTypeScriptWorkflowCommand(_ *cobra.Command, args []string) error {
 	if !ok {
 		return fmt.Errorf("workflow definition %q not found", args[0])
 	}
-	input, err := parseWorkflowInput(runInput)
+	input, err := parseWorkflowPayload(runInput, runPayload)
 	if err != nil {
 		return err
 	}
@@ -600,13 +602,27 @@ func runTypeScriptWorkflow(ctx context.Context, st store.Store, ib backend.Issue
 }
 
 func parseWorkflowInput(s string) (json.RawMessage, error) {
+	return parseWorkflowInputFlag(s, "--input")
+}
+
+func parseWorkflowPayload(input, payload string) (json.RawMessage, error) {
+	if strings.TrimSpace(payload) == "" {
+		return parseWorkflowInput(input)
+	}
+	if trimmedInput := strings.TrimSpace(input); trimmedInput != "" && trimmedInput != "{}" {
+		return nil, errors.New("--input and --payload cannot both be set")
+	}
+	return parseWorkflowInputFlag(payload, "--payload")
+}
+
+func parseWorkflowInputFlag(s, flagName string) (json.RawMessage, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {
 		s = "{}"
 	}
 	var tmp any
 	if err := json.Unmarshal([]byte(s), &tmp); err != nil {
-		return nil, fmt.Errorf("--input must be valid JSON: %w", err)
+		return nil, fmt.Errorf("%s must be valid JSON: %w", flagName, err)
 	}
 	return json.RawMessage(s), nil
 }

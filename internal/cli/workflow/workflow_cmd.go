@@ -20,13 +20,14 @@ import (
 )
 
 var (
-	workflowJSON     bool
-	workflowRunInput string
-	workflowRunWait  bool
-	workflowRunOnce  bool
-	workflowLogsJSON bool
-	workflowShowJSON bool
-	workflowListJSON bool
+	workflowJSON       bool
+	workflowRunInput   string
+	workflowRunPayload string
+	workflowRunWait    bool
+	workflowRunOnce    bool
+	workflowLogsJSON   bool
+	workflowShowJSON   bool
+	workflowListJSON   bool
 
 	workflowWithActiveWorkspace = cmdstore.WithActiveWorkspace
 	workflowWriteJSON           = cmdstore.WriteJSON
@@ -76,6 +77,7 @@ var workflowCancelCmd = &cobra.Command{
 func init() {
 	workflowListCmd.Flags().BoolVar(&workflowListJSON, "json", false, "JSON output")
 	workflowRunCmd.Flags().StringVar(&workflowRunInput, "input", "{}", "Workflow input JSON")
+	workflowRunCmd.Flags().StringVar(&workflowRunPayload, "payload", "", "Workflow input JSON (alias for --input)")
 	workflowRunCmd.Flags().BoolVar(&workflowRunWait, "wait", false, "Poll until the workflow reaches a terminal state")
 	workflowRunCmd.Flags().BoolVar(&workflowRunOnce, "once", true, "Run one reconcile pass for built-in workflows")
 	workflowRunCmd.Flags().BoolVar(&workflowJSON, "json", false, "JSON output")
@@ -110,7 +112,7 @@ func runWorkflowList(_ *cobra.Command, _ []string) error {
 }
 
 func runWorkflowRun(_ *cobra.Command, args []string) error {
-	input, err := parseInput(workflowRunInput)
+	input, err := parseWorkflowPayload(workflowRunInput, workflowRunPayload)
 	if err != nil {
 		return err
 	}
@@ -216,13 +218,27 @@ func runWorkflowCancel(_ *cobra.Command, args []string) error {
 }
 
 func parseInput(s string) (json.RawMessage, error) {
+	return parseInputFlag(s, "--input")
+}
+
+func parseWorkflowPayload(input, payload string) (json.RawMessage, error) {
+	if strings.TrimSpace(payload) == "" {
+		return parseInput(input)
+	}
+	if trimmedInput := strings.TrimSpace(input); trimmedInput != "" && trimmedInput != "{}" {
+		return nil, errors.New("--input and --payload cannot both be set")
+	}
+	return parseInputFlag(payload, "--payload")
+}
+
+func parseInputFlag(s, flagName string) (json.RawMessage, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {
 		s = "{}"
 	}
 	var tmp any
 	if err := json.Unmarshal([]byte(s), &tmp); err != nil {
-		return nil, fmt.Errorf("--input must be valid JSON: %w", err)
+		return nil, fmt.Errorf("%s must be valid JSON: %w", flagName, err)
 	}
 	return json.RawMessage(s), nil
 }
