@@ -343,6 +343,29 @@ const runtimeTypes = `declare module '@loom/runtime' {
     role_name?: string;
   };
 
+  export type WorkflowTaskClaim = Record<string, unknown> & {
+    task_run_id?: string;
+    work_item_id?: string;
+    claim_actor?: string;
+    claim_event_id?: string;
+    status?: string;
+    agent_id?: string;
+    session_id?: string;
+    active?: boolean;
+  };
+
+  export type WorkflowTaskClaimQuery = {
+    active?: boolean;
+    limit?: number;
+    workItemId?: string;
+    work_item_id?: string;
+    taskRunId?: string;
+    task_run_id?: string;
+    actor?: string;
+    claimActor?: string;
+    claim_actor?: string;
+  };
+
   export type WorkflowAgentSessionInput = {
     sessionId?: string;
     session_id?: string;
@@ -464,8 +487,14 @@ const runtimeTypes = `declare module '@loom/runtime' {
         metadata?: Record<string, string>;
       }): Promise<Record<string, unknown>>;
     };
+    taskClaims: {
+      list(options?: WorkflowTaskClaimQuery): Promise<Array<WorkflowTaskClaim>>;
+      get(idOrOptions: string | WorkflowTaskClaimQuery): Promise<WorkflowTaskClaim | null>;
+      wait(options?: WorkflowTaskClaimQuery): Promise<Array<WorkflowTaskClaim>>;
+    };
     agents: {
       session(input: WorkflowAgentSessionInput): Promise<WorkflowAgentSession>;
+      dispatch(agent: string | AgentDefinition | CreatedAgent | AgentFactory, input?: Record<string, unknown>): Promise<Record<string, unknown>>;
     };
     artifacts: {
       record(input: {

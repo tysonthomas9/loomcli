@@ -30,6 +30,7 @@ type tsContextRequest struct {
 	Request         tsContextRequestMetadata `json:"request"`
 	Workflow        tsContextWorkflowState   `json:"workflow"`
 	TaskRuns        []*domain.TaskRun        `json:"taskRuns,omitempty"`
+	TaskClaims      []tsContextTaskClaim     `json:"taskClaims,omitempty"`
 	ReadyChildren   []backend.IssueData      `json:"readyChildren,omitempty"`
 	BlockedChildren []backend.IssueData      `json:"blockedChildren,omitempty"`
 	ChildWorkItems  []backend.IssueData      `json:"childWorkItems,omitempty"`
@@ -39,6 +40,17 @@ type tsContextWorkflowState struct {
 	Status          string `json:"status"`
 	WaitCondition   string `json:"waitCondition,omitempty"`
 	CancelRequested bool   `json:"cancelRequested"`
+}
+
+type tsContextTaskClaim struct {
+	TaskRunID    string `json:"task_run_id"`
+	WorkItemID   string `json:"work_item_id"`
+	ClaimActor   string `json:"claim_actor,omitempty"`
+	ClaimEventID string `json:"claim_event_id,omitempty"`
+	Status       string `json:"status"`
+	AgentID      string `json:"agent_id,omitempty"`
+	SessionID    string `json:"session_id,omitempty"`
+	Active       bool   `json:"active"`
 }
 
 type tsContextRequestMetadata struct {
@@ -185,7 +197,7 @@ func finishTSContextRun(ctx context.Context, st store.Store, run *domain.Workflo
 }
 
 func buildTSContextRequest(ctx context.Context, st store.Store, ib backend.IssueBackend, run *domain.WorkflowRun, def *domain.WorkflowDefinition, sourcePath string) (tsContextRequest, string, error) {
-	workflowState, taskRuns, err := tsContextControlState(ctx, st, run)
+	workflowState, taskRuns, taskClaims, err := tsContextControlState(ctx, st, run)
 	if err != nil {
 		return tsContextRequest{}, "", err
 	}
@@ -203,6 +215,7 @@ func buildTSContextRequest(ctx context.Context, st store.Store, ib backend.Issue
 		Env:        workflowEnvBindings(def),
 		Workflow:   workflowState,
 		TaskRuns:   taskRuns,
+		TaskClaims: taskClaims,
 		Request: tsContextRequestMetadata{
 			WorkspaceKey:    run.WorkspaceKey,
 			WorkflowName:    run.WorkflowName,
@@ -231,20 +244,40 @@ func buildTSContextRequest(ctx context.Context, st store.Store, ib backend.Issue
 	return request, parentID, nil
 }
 
-func tsContextControlState(ctx context.Context, st store.Store, run *domain.WorkflowRun) (tsContextWorkflowState, []*domain.TaskRun, error) {
+func tsContextControlState(ctx context.Context, st store.Store, run *domain.WorkflowRun) (tsContextWorkflowState, []*domain.TaskRun, []tsContextTaskClaim, error) {
 	currentRun := run
 	if loaded, err := st.WorkflowRuns().Get(ctx, run.WorkspaceKey, run.RunID); err == nil {
 		currentRun = loaded
 	}
 	taskRuns, err := st.TaskRuns().List(ctx, run.WorkspaceKey, store.TaskRunFilter{WorkflowRunID: run.RunID, Limit: 10000})
 	if err != nil {
-		return tsContextWorkflowState{}, nil, fmt.Errorf("list workflow task runs: %w", err)
+		return tsContextWorkflowState{}, nil, nil, fmt.Errorf("list workflow task runs: %w", err)
 	}
 	return tsContextWorkflowState{
 		Status:          string(currentRun.Status),
 		WaitCondition:   currentRun.WaitCondition,
 		CancelRequested: currentRun.Status == domain.WorkflowRunCancelled,
-	}, taskRuns, nil
+	}, taskRuns, taskClaimProjections(taskRuns), nil
+}
+
+func taskClaimProjections(taskRuns []*domain.TaskRun) []tsContextTaskClaim {
+	out := make([]tsContextTaskClaim, 0, len(taskRuns))
+	for _, taskRun := range taskRuns {
+		if taskRun == nil || (taskRun.ClaimActor == "" && taskRun.AgentID == "" && taskRun.SessionID == "") {
+			continue
+		}
+		out = append(out, tsContextTaskClaim{
+			TaskRunID:    taskRun.TaskRunID,
+			WorkItemID:   taskRun.WorkItemID,
+			ClaimActor:   taskRun.ClaimActor,
+			ClaimEventID: taskRun.ClaimEventID,
+			Status:       string(taskRun.Status),
+			AgentID:      taskRun.AgentID,
+			SessionID:    taskRun.SessionID,
+			Active:       domain.TaskRunStatusLive(taskRun.Status),
+		})
+	}
+	return out
 }
 
 func workflowEnvBindings(def *domain.WorkflowDefinition) map[string]string {
@@ -304,6 +337,7 @@ func appendTSLogEvent(ctx context.Context, st store.Store, run *domain.WorkflowR
 	})
 }
 
+//nolint:cyclop // This switch is the explicit WorkflowContext operation admission allowlist.
 func applyTSOperations(ctx context.Context, st store.Store, run *domain.WorkflowRun, parentID string, operations []tsWorkflowOperation) (tsAppliedOperations, error) {
 	applied := tsAppliedOperations{TaskRuns: make([]*domain.TaskRun, 0)}
 	for _, op := range operations {
@@ -316,6 +350,11 @@ func applyTSOperations(ctx context.Context, st store.Store, run *domain.Workflow
 			applied.TaskRuns = append(applied.TaskRuns, taskRun)
 		case "taskRuns.wait":
 			waitCondition := applyTaskRunsWaitOperation(ctx, st, run, op.Params)
+			if applied.WaitCondition == "" {
+				applied.WaitCondition = waitCondition
+			}
+		case "taskClaims.wait":
+			waitCondition := applyTaskClaimsWaitOperation(ctx, st, run, op.Params)
 			if applied.WaitCondition == "" {
 				applied.WaitCondition = waitCondition
 			}
@@ -339,6 +378,10 @@ func applyTSOperations(ctx context.Context, st store.Store, run *domain.Workflow
 			}
 		case "agents.session.operation":
 			if err := appendAgentSessionOperationEvent(ctx, st, run, op.Params); err != nil {
+				return tsAppliedOperations{}, err
+			}
+		case "agents.dispatch":
+			if err := appendAgentDispatchAdmittedEvent(ctx, st, run, op.Params); err != nil {
 				return tsAppliedOperations{}, err
 			}
 		default:
@@ -379,6 +422,27 @@ func applyTaskRunsWaitOperation(ctx context.Context, st store.Store, run *domain
 	return condition
 }
 
+func applyTaskClaimsWaitOperation(ctx context.Context, st store.Store, run *domain.WorkflowRun, params map[string]any) string {
+	activeCount := firstInt64(params, "activeCount", "active_count")
+	data := copyAnyMap(params)
+	data["workflow_run_id"] = run.RunID
+	_, _ = st.RunEvents().Append(ctx, store.RunEventAppend{
+		WorkspaceKey:  run.WorkspaceKey,
+		WorkflowRunID: run.RunID,
+		Type:          "task_claims_observed",
+		Message:       "workflow task claims observed from TypeScript WorkflowContext",
+		Data:          mustJSON(data),
+	})
+	if activeCount <= 0 && !firstBool(params, "wait") {
+		return ""
+	}
+	condition := firstString(params, "condition")
+	if condition == "" {
+		condition = "task_claim_changed(workflow_run:" + run.RunID + ")"
+	}
+	return condition
+}
+
 func applyWorkflowWaitUntilOperation(ctx context.Context, st store.Store, run *domain.WorkflowRun, params map[string]any) (string, error) {
 	condition := firstString(params, "condition", "waitCondition", "wait_condition")
 	if condition == "" {
@@ -392,6 +456,24 @@ func applyWorkflowWaitUntilOperation(ctx context.Context, st store.Store, run *d
 		Data:          mustJSON(params),
 	})
 	return condition, nil
+}
+
+func appendAgentDispatchAdmittedEvent(ctx context.Context, st store.Store, run *domain.WorkflowRun, params map[string]any) error {
+	agentID := firstString(params, "agentId", "agent_id", "agent", "name")
+	if agentID == "" {
+		return fmt.Errorf("agents.dispatch requires agentId")
+	}
+	data := copyAnyMap(params)
+	data["agent_id"] = agentID
+	data["workflow_run_id"] = run.RunID
+	_, _ = st.RunEvents().Append(ctx, store.RunEventAppend{
+		WorkspaceKey:  run.WorkspaceKey,
+		WorkflowRunID: run.RunID,
+		Type:          "agent_dispatch_admitted",
+		Message:       "workflow agent dispatch admitted",
+		Data:          mustJSON(data),
+	})
+	return nil
 }
 
 func applyRecordArtifactOperation(ctx context.Context, st store.Store, run *domain.WorkflowRun, params map[string]any) error {

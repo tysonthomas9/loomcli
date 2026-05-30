@@ -697,6 +697,94 @@ export default defineWorkflow({
 	}
 }
 
+func TestCodeDefinedWorkflowContextReadsTaskClaimsAndAdmitsDispatch(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	workflowPath := filepath.Join(root, ".loom", "workflows", "context-claims.ts")
+	if err := os.MkdirAll(filepath.Dir(workflowPath), 0o755); err != nil {
+		t.Fatalf("mkdir workflow dir: %v", err)
+	}
+	if err := os.WriteFile(workflowPath, []byte(`import { defineWorkflow } from '@loom/runtime';
+
+export default defineWorkflow({
+  name: 'context-claims',
+  async run(ctx) {
+    const claims = await ctx.taskClaims.list();
+    const claim = await ctx.taskClaims.get('CLAIM-1');
+    const observed = await ctx.taskClaims.wait({ workItemId: 'CLAIM-1' });
+    const dispatch = await ctx.agents.dispatch('worker-one', {
+      workItemId: 'CLAIM-1',
+      message: 'continue from claim projection',
+    });
+    return {
+      claims: claims.length,
+      observed: observed.length,
+      actor: claim?.claim_actor ?? '',
+      dispatched: dispatch.accepted === true,
+    };
+  },
+});
+`), 0o644); err != nil {
+		t.Fatalf("write workflow: %v", err)
+	}
+	plan, err := defspkg.Load(root)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TSCLAIM", Name: "TypeScript Claim Context"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := defspkg.Apply(ctx, st, "TSCLAIM", "atlas", plan); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	run, err := CreateOrResumeRun(ctx, st, "TSCLAIM", "context-claims", json.RawMessage(`{}`), "atlas")
+	if err != nil {
+		t.Fatalf("CreateOrResumeRun() error = %v", err)
+	}
+	if _, err := st.TaskRuns().Ensure(ctx, store.TaskRunEnsure{
+		WorkspaceKey:   "TSCLAIM",
+		WorkflowRunID:  run.RunID,
+		WorkItemID:     "CLAIM-1",
+		RoleName:       "task",
+		IdempotencyKey: "seed:CLAIM-1",
+		ClaimActor:     "worker-one",
+		ClaimEventID:   "evt-claim",
+		Status:         domain.TaskRunPassed,
+		AgentID:        "worker-one",
+		SessionID:      "session-one",
+	}); err != nil {
+		t.Fatalf("seed claim projection: %v", err)
+	}
+	result, err := RunOnce(ctx, st, clitest.NewMockIssueBackend(), run)
+	if err != nil {
+		t.Fatalf("RunOnce() error = %v", err)
+	}
+	if result.Run == nil || result.Run.Status != domain.WorkflowRunCompleted {
+		t.Fatalf("result = %+v, want completed claim workflow", result)
+	}
+	var output struct {
+		Claims     int    `json:"claims"`
+		Observed   int    `json:"observed"`
+		Actor      string `json:"actor"`
+		Dispatched bool   `json:"dispatched"`
+	}
+	if err := json.Unmarshal(result.Run.Result, &output); err != nil {
+		t.Fatalf("decode result %s: %v", result.Run.Result, err)
+	}
+	if output.Claims != 1 || output.Observed != 1 || output.Actor != "worker-one" || !output.Dispatched {
+		t.Fatalf("output = %+v, want task claim projection and dispatch admission", output)
+	}
+	events, err := st.RunEvents().List(ctx, "TSCLAIM", store.RunEventFilter{WorkflowRunID: run.RunID})
+	if err != nil {
+		t.Fatalf("list run events: %v", err)
+	}
+	if !hasWorkflowEvent(events, "task_claims_observed") || !hasWorkflowEvent(events, "agent_dispatch_admitted") ||
+		!hasWorkflowEvent(events, "workflow_completed") {
+		t.Fatalf("events = %+v, want task claim observation, dispatch, and completion evidence", events)
+	}
+}
+
 func TestParentWorkItemsWorkflowCompletesWhenNoOpenChildren(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()

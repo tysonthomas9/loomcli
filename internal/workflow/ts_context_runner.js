@@ -156,6 +156,7 @@ function makeContext(request, workflow) {
   const parentId = String(input.parentId || input.parent_id || "");
   const workflowState = request.workflow && typeof request.workflow === "object" ? request.workflow : {};
   const taskRuns = Array.isArray(request.taskRuns) ? request.taskRuns : [];
+  const taskClaims = Array.isArray(request.taskClaims) ? request.taskClaims : [];
 
   const byParent = (items, requestedParent, options) => {
     let out;
@@ -189,7 +190,23 @@ function makeContext(request, workflow) {
     if (Number.isFinite(limit) && limit > 0) out = out.slice(0, limit);
     return out;
   };
+  const taskClaimFilter = (options = {}) => {
+    let out = taskClaims.slice();
+    const workItemId = String(options.workItemId || options.work_item_id || "");
+    if (workItemId) out = out.filter((claim) => String(claim.work_item_id || claim.workItemId || "") === workItemId);
+    const taskRunId = String(options.taskRunId || options.task_run_id || "");
+    if (taskRunId) out = out.filter((claim) => String(claim.task_run_id || claim.taskRunId || "") === taskRunId);
+    const actor = String(options.actor || options.claimActor || options.claim_actor || "");
+    if (actor) out = out.filter((claim) => String(claim.claim_actor || claim.claimActor || "") === actor);
+    if (options.active === true) out = out.filter((claim) => Boolean(claim.active));
+    const limit = Number(options.limit);
+    if (Number.isFinite(limit) && limit > 0) out = out.slice(0, limit);
+    return out;
+  };
   const materializeAgent = (agent) => {
+    if (typeof agent === "string") {
+      return { name: agent };
+    }
     if (typeof agent === "function") {
       return agent({ id: request.id, input, payload: input, env: request.env || {}, req: requestContext, request: requestContext }) || {};
     }
@@ -316,6 +333,30 @@ function makeContext(request, workflow) {
         return { accepted: true, ...op.params };
       },
     },
+    taskClaims: {
+      list: async (options = {}) => taskClaimFilter(options || {}),
+      get: async (idOrOptions = {}) => {
+        const options =
+          typeof idOrOptions === "string"
+            ? { workItemId: idOrOptions }
+            : idOrOptions || {};
+        return taskClaimFilter({ ...options, limit: 1 })[0] || null;
+      },
+      wait: async (options = {}) => {
+        const matches = taskClaimFilter(options || {});
+        const activeCount = matches.filter((claim) => Boolean(claim.active)).length;
+        operations.push({
+          type: "taskClaims.wait",
+          params: {
+            ...(options || {}),
+            matched: matches.length,
+            activeCount,
+            wait: activeCount > 0,
+          },
+        });
+        return matches;
+      },
+    },
     artifacts: {
       record: async (params) => {
         const op = { type: "artifacts.record", params: params || {} };
@@ -328,6 +369,30 @@ function makeContext(request, workflow) {
         const op = { type: "agents.session", params: params || {} };
         operations.push(op);
         return sessionHandle(operations, { accepted: true, ...op.params });
+      },
+      dispatch: async (agent, input = {}) => {
+        const materialized = materializeAgent(agent);
+        const agentId = String(
+          input.agentId ||
+            input.agent_id ||
+            materialized.name ||
+            materialized.id ||
+            "",
+        );
+        const op = {
+          type: "agents.dispatch",
+          params: {
+            agentId,
+            input: jsonSafe(input || {}),
+            admittedAt: new Date().toISOString(),
+          },
+        };
+        operations.push(op);
+        return {
+          accepted: true,
+          agentId,
+          input: op.params.input,
+        };
       },
     },
     tools,
