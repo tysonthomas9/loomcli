@@ -545,6 +545,44 @@ func TestRunLocalConnectCapturesProviderSessionAndUsage(t *testing.T) {
 	}
 }
 
+func TestRunLocalConnectCapturesNonStreamingBackendOutputAndUsage(t *testing.T) {
+	cli.TestingResetBackendState(t)
+	cli.RegisterBackend(nonStreamingCaptureBackend{})
+	root := t.TempDir()
+	writeAgent(t, root, "nonstream-agent", "nonstream-capture")
+
+	var streamed bytes.Buffer
+	result, err := runLocalConnect(context.Background(), connectOptions{
+		Dir:      root,
+		Agent:    "nonstream-agent",
+		Instance: "local",
+		Session:  "capture",
+		Message:  "capture stdout",
+		Stream:   &streamed,
+	})
+	if err != nil {
+		t.Fatalf("runLocalConnect() error = %v", err)
+	}
+	if !strings.Contains(result.Response, "final captured answer") || !strings.Contains(result.Response, "assistant progress") {
+		t.Fatalf("response = %q, want captured non-streaming backend stdout", result.Response)
+	}
+	if !strings.Contains(streamed.String(), "final captured answer") {
+		t.Fatalf("streamed output = %q, want tee of non-streaming stdout", streamed.String())
+	}
+	if result.Usage == nil || result.Usage.InputTokens != 11 || result.Usage.OutputTokens != 7 ||
+		result.Usage.CacheReadInputTokens != 3 || result.Usage.CacheCreationInputTokens != 2 ||
+		result.Usage.TotalTokens != 23 {
+		t.Fatalf("usage = %+v, want captured collector totals", result.Usage)
+	}
+	turns, err := readLocalTurns(result.TranscriptPath)
+	if err != nil {
+		t.Fatalf("readLocalTurns() error = %v", err)
+	}
+	if len(turns) != 1 || turns[0].Response != result.Response || turns[0].Usage == nil || turns[0].Usage.TotalTokens != 23 {
+		t.Fatalf("turns = %+v, want persisted non-streaming response and usage", turns)
+	}
+}
+
 func TestRunInteractiveConnectStreamsBackendOutput(t *testing.T) {
 	cli.TestingResetBackendState(t)
 	cli.RegisterBackend(streamingBackend{})
@@ -582,6 +620,21 @@ func (envCheckBackend) InvokeInteractive(_, _, _ string) error { return nil }
 func (envCheckBackend) InvokeNonInteractive(_, _, _ string, _ <-chan struct{}, _ *usage.Collector) error {
 	if got := os.Getenv("LOCAL_CONNECT_TOKEN"); got != "loaded-from-file" {
 		return fmt.Errorf("LOCAL_CONNECT_TOKEN = %q, want loaded-from-file", got)
+	}
+	return nil
+}
+
+type nonStreamingCaptureBackend struct{}
+
+func (nonStreamingCaptureBackend) Name() string { return "nonstream-capture" }
+
+func (nonStreamingCaptureBackend) InvokeInteractive(_, _, _ string) error { return nil }
+
+func (nonStreamingCaptureBackend) InvokeNonInteractive(_, _, _ string, _ <-chan struct{}, collector *usage.Collector) error {
+	fmt.Println("assistant progress")
+	fmt.Println("final captured answer")
+	if collector != nil {
+		collector.Accumulate("", 11, 7, 3, 2)
 	}
 	return nil
 }

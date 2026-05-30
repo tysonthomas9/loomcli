@@ -729,17 +729,7 @@ func invokeLocalAgent(ctx context.Context, plan *defspkg.Plan, agent defspkg.Age
 		defer func() { _ = rc.Close() }()
 		return captureStreamingResponse(rc, stream)
 	}
-	shutdown := make(chan struct{})
-	if err := backend.InvokeNonInteractive(workDir, prompt, agent.Name, shutdown, nil); err != nil {
-		return localInvocationResult{}, err
-	}
-	response := "backend completed; response was written by the configured backend"
-	if stream != nil {
-		if _, err := io.WriteString(stream, response); err != nil {
-			return localInvocationResult{}, err
-		}
-	}
-	return localInvocationResult{Response: response}, nil
+	return invokeNonStreamingLocalAgent(backend, backendName, workDir, prompt, agent.Name, stream)
 }
 
 type localTurn struct {
