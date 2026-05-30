@@ -279,6 +279,11 @@ function makeContext(request, workflow) {
   const workflowState = request.workflow && typeof request.workflow === "object" ? request.workflow : {};
   const taskRuns = Array.isArray(request.taskRuns) ? request.taskRuns : [];
   const taskClaims = Array.isArray(request.taskClaims) ? request.taskClaims : [];
+  const workItems = uniqueWorkItems([
+    ...(Array.isArray(request.readyChildren) ? request.readyChildren : []),
+    ...(Array.isArray(request.blockedChildren) ? request.blockedChildren : []),
+    ...(Array.isArray(request.childWorkItems) ? request.childWorkItems : []),
+  ]);
 
   const byParent = (items, requestedParent, options) => {
     let out;
@@ -440,6 +445,32 @@ function makeContext(request, workflow) {
       error: (message, attributes) => log("error", message, attributes),
     },
     workItems: {
+      get: async (id) => {
+        const workItemId = String(id || "");
+        const item = findWorkItem(workItems, workItemId);
+        operations.push({
+          type: "workItems.get",
+          params: { workItemId, found: Boolean(item) },
+        });
+        return item || null;
+      },
+      comment: async (idOrOptions, body, metadata) => {
+        const options =
+          idOrOptions && typeof idOrOptions === "object"
+            ? idOrOptions
+            : { workItemId: idOrOptions, body, metadata };
+        const workItemId = String(options.workItemId || options.work_item_id || options.id || "");
+        const text = String(options.body || options.text || options.comment || "");
+        if (!workItemId) throw new Error("ctx.workItems.comment requires workItemId");
+        if (!text.trim()) throw new Error("ctx.workItems.comment requires body");
+        const params = {
+          workItemId,
+          body: text,
+          metadata: jsonSafe(options.metadata || metadata || {}),
+        };
+        operations.push({ type: "workItems.comment", params });
+        return { accepted: true, ...params };
+      },
       readyChildren: async (requestedParent, options) =>
         byParent(request.readyChildren, String(requestedParent || ""), options),
       blockedChildren: async (requestedParent, options) =>
@@ -559,6 +590,21 @@ function makeContext(request, workflow) {
 function isLiveTaskRun(run) {
   const status = String(run && run.status || "");
   return !["passed", "failed", "cancelled", "expired"].includes(status);
+}
+
+function uniqueWorkItems(items) {
+  const byId = new Map();
+  for (const item of items || []) {
+    const id = String(item && (item.id || item.ID) || "");
+    if (id && !byId.has(id)) byId.set(id, item);
+  }
+  return Array.from(byId.values());
+}
+
+function findWorkItem(items, id) {
+  const wanted = String(id || "");
+  if (!wanted) return null;
+  return (items || []).find((item) => String(item && (item.id || item.ID) || "") === wanted) || null;
 }
 
 function sessionHandle(operations, session) {

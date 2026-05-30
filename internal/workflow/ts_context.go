@@ -106,7 +106,7 @@ func runTypeScriptContextOnce(ctx context.Context, st store.Store, ib backend.Is
 	for _, log := range response.Logs {
 		appendTSLogEvent(ctx, st, run, log)
 	}
-	applied, err := applyTSOperations(ctx, st, run, parentID, response.Operations)
+	applied, err := applyTSOperations(ctx, st, ib, run, parentID, response.Operations)
 	if err != nil {
 		return nil, err
 	}
@@ -355,10 +355,10 @@ func appendTSLogEvent(ctx context.Context, st store.Store, run *domain.WorkflowR
 	})
 }
 
-func applyTSOperations(ctx context.Context, st store.Store, run *domain.WorkflowRun, parentID string, operations []tsWorkflowOperation) (tsAppliedOperations, error) {
+func applyTSOperations(ctx context.Context, st store.Store, ib backend.IssueBackend, run *domain.WorkflowRun, parentID string, operations []tsWorkflowOperation) (tsAppliedOperations, error) {
 	applied := tsAppliedOperations{TaskRuns: make([]*domain.TaskRun, 0)}
 	for _, op := range operations {
-		if err := applyTSOperation(ctx, st, run, parentID, &applied, op); err != nil {
+		if err := applyTSOperation(ctx, st, ib, run, parentID, &applied, op); err != nil {
 			return tsAppliedOperations{}, err
 		}
 	}
@@ -366,8 +366,12 @@ func applyTSOperations(ctx context.Context, st store.Store, run *domain.Workflow
 }
 
 //nolint:cyclop // This switch is the explicit WorkflowContext operation admission allowlist.
-func applyTSOperation(ctx context.Context, st store.Store, run *domain.WorkflowRun, parentID string, applied *tsAppliedOperations, op tsWorkflowOperation) error {
+func applyTSOperation(ctx context.Context, st store.Store, ib backend.IssueBackend, run *domain.WorkflowRun, parentID string, applied *tsAppliedOperations, op tsWorkflowOperation) error {
 	switch op.Type {
+	case "workItems.get":
+		appendWorkItemReadEvent(ctx, st, run, op.Params)
+	case "workItems.comment":
+		return applyWorkItemCommentOperation(ctx, st, ib, run, op.Params)
 	case "taskRuns.ensure":
 		taskRun, err := applyEnsureTaskRunOperation(ctx, st, run, parentID, op.Params)
 		if err != nil {

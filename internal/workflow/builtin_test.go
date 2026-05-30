@@ -312,6 +312,78 @@ export default defineWorkflow({
 	}
 }
 
+func TestCodeDefinedWorkflowContextGetsAndCommentsOnWorkItem(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	workflowPath := filepath.Join(root, ".loom", "workflows", "context-work-item.ts")
+	if err := os.MkdirAll(filepath.Dir(workflowPath), 0o755); err != nil {
+		t.Fatalf("mkdir workflow dir: %v", err)
+	}
+	if err := os.WriteFile(workflowPath, []byte(`import { defineWorkflow } from '@loom/runtime';
+
+export default defineWorkflow({
+  name: 'context-work-item',
+  tools: ['workItems.get', 'workItems.comment'],
+  async run(ctx) {
+    const issue = await ctx.workItems.get('TSWI-2');
+    if (!issue) throw new Error('missing work item');
+    const comment = await ctx.workItems.comment({
+      workItemId: issue.id,
+      text: `+"`"+`reviewed ${issue.title}`+"`"+`,
+      metadata: { source: 'workflow-context' },
+    });
+    return { title: issue.title, commentAccepted: comment.accepted };
+  },
+});
+`), 0o644); err != nil {
+		t.Fatalf("write workflow: %v", err)
+	}
+	plan, err := defspkg.Load(root)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TSWI", Name: "TypeScript Work Item Context"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := defspkg.Apply(ctx, st, "TSWI", "atlas", plan); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	ib := clitest.NewMockIssueBackend()
+	ib.ListResult = []backend.IssueData{{ID: "TSWI-2", Title: "Review composer", Status: "closed", Parent: "TSWI-1"}}
+	ib.AddCommentResult = &backend.CommentData{ID: 42, IssueID: "TSWI-2", Author: "atlas", Text: "reviewed Review composer"}
+
+	run, err := CreateOrResumeRun(ctx, st, "TSWI", "context-work-item", json.RawMessage(`{"parentId":"TSWI-1"}`), "atlas")
+	if err != nil {
+		t.Fatalf("CreateOrResumeRun() error = %v", err)
+	}
+	result, err := RunOnce(ctx, st, ib, run)
+	if err != nil {
+		t.Fatalf("RunOnce() error = %v", err)
+	}
+	if result.Run == nil || result.Run.Status != domain.WorkflowRunCompleted {
+		t.Fatalf("result = %+v, want completed work item controller workflow", result)
+	}
+	if ib.CallCount("AddComment") != 1 {
+		t.Fatalf("AddComment calls = %+v, want one work item comment", ib.Calls)
+	}
+	params, ok := ib.Calls[len(ib.Calls)-1].Args[0].(backend.CommentAddParams)
+	if !ok || params.IssueID != "TSWI-2" || params.Author != "atlas" || params.Text != "reviewed Review composer" {
+		t.Fatalf("AddComment params = %+v, want workflow-authored comment", ib.Calls[len(ib.Calls)-1].Args)
+	}
+	events, err := st.RunEvents().List(ctx, "TSWI", store.RunEventFilter{WorkflowRunID: run.RunID})
+	if err != nil {
+		t.Fatalf("list run events: %v", err)
+	}
+	if !hasWorkflowEvent(events, "work_item_read") || !hasWorkflowEvent(events, "work_item_comment_added") || !hasWorkflowEvent(events, "workflow_completed") {
+		t.Fatalf("events = %+v, want work item read/comment and completion evidence", events)
+	}
+	commentEvent := workflowEventDataByType(t, events, "work_item_comment_added")
+	if commentEvent["work_item_id"] != "TSWI-2" || commentEvent["author"] != "atlas" || commentEvent["comment_id"] != float64(42) {
+		t.Fatalf("comment event = %+v, want durable comment evidence", commentEvent)
+	}
+}
+
 func TestCodeDefinedWorkflowContextExecutesDeclaredTool(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()

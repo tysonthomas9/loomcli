@@ -536,6 +536,17 @@ const runtimeTypes = `declare module '@loom/runtime' {
       error(message: string, attributes?: Record<string, unknown>): void;
     };
     workItems: {
+      get(id: string): Promise<Record<string, unknown> | null>;
+      comment(id: string, body: string, metadata?: Record<string, unknown>): Promise<Record<string, unknown>>;
+      comment(input: {
+        id?: string;
+        workItemId?: string;
+        work_item_id?: string;
+        body?: string;
+        text?: string;
+        comment?: string;
+        metadata?: Record<string, unknown>;
+      }): Promise<Record<string, unknown>>;
       readyChildren(parentId: string, options?: Record<string, unknown>): Promise<Array<Record<string, unknown>>>;
       blockedChildren(parentId: string, options?: Record<string, unknown>): Promise<Array<Record<string, unknown>>>;
       listChildren(parentId: string, options?: Record<string, unknown>): Promise<Array<Record<string, unknown>>>;
