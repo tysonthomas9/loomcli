@@ -59,14 +59,21 @@ const mockStatus = {
 async function setupBaseMocks(page: Page): Promise<void> {
   await setupFleetMocks(page, []);
 
-  await page.route('**/api/monitor/status', async (route) => {
+  await page.route('**/api/workspaces/*/monitor/status**', async (route) => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify(mockStatus),
     });
   });
-  await page.route('**/localhost:9000/api/status', async (route) => {
+  await page.route('**/api/monitor/status**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(mockStatus),
+    });
+  });
+  await page.route('**/localhost:9000/api/status**', async (route) => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -74,14 +81,14 @@ async function setupBaseMocks(page: Page): Promise<void> {
     });
   });
 
-  await page.route('**/api/monitor/agents', async (route) => {
+  await page.route('**/api/monitor/agents**', async (route) => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({ agents: mockAgents }),
     });
   });
-  await page.route('**/localhost:9000/api/agents', async (route) => {
+  await page.route('**/localhost:9000/api/agents**', async (route) => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -89,7 +96,7 @@ async function setupBaseMocks(page: Page): Promise<void> {
     });
   });
 
-  await page.route('**/api/monitor/tasks', async (route) => {
+  await page.route('**/api/monitor/tasks**', async (route) => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -102,7 +109,7 @@ async function setupBaseMocks(page: Page): Promise<void> {
       }),
     });
   });
-  await page.route('**/localhost:9000/api/tasks', async (route) => {
+  await page.route('**/localhost:9000/api/tasks**', async (route) => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -168,6 +175,48 @@ test.describe('Agent Logs Terminal Transport UI', () => {
     await expect(panel.getByText('Archive snapshot')).toBeVisible();
     await expect(panel.getByRole('button', { name: 'Refresh' })).toBeVisible();
     await expect(panel.locator('[data-testid="log-viewer"] [data-state="connected"]')).toBeVisible();
+  });
+
+  test('archive mode log panel scrolls when the snapshot exceeds the viewport', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await setupBaseMocks(page);
+    await page.route('**/api/workspaces/default/agents/ember/terminal/info', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          success: true,
+          data: { agent: 'ember', mode: 'archive' },
+        }),
+      });
+    });
+    await page.route('**/api/workspaces/default/agents/ember/logs**', async (route) => {
+      const lines = Array.from(
+        { length: 120 },
+        (_, index) => `line ${String(index + 1).padStart(3, '0')} ${'x'.repeat(80)}`,
+      );
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          success: true,
+          data: { lines, line_count: lines.length },
+        }),
+      });
+    });
+
+    await openEmberLogs(page);
+
+    const logPanel = page.locator('#agent-panel-tabpanel-logs');
+    await expect(logPanel).toBeVisible();
+    await expect
+      .poll(() => logPanel.evaluate((element) => element.scrollHeight - element.clientHeight))
+      .toBeGreaterThan(100);
+
+    await logPanel.hover();
+    await page.mouse.wheel(0, 900);
+
+    await expect.poll(() => logPanel.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
   });
 
   test('archive refresh triggers another archive fetch', async ({ page }) => {

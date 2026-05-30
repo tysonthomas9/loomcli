@@ -55,34 +55,30 @@ export function AgentLogsTab({
   }, [isActive, load]);
 
   return (
-    <div className={styles.scrollableContent}>
-      <div className={styles.section}>
-        <h3 className={styles.sectionTitle}>
-          {mode === "tmux" ? "Live (tmux)" : "Archive snapshot"}
-        </h3>
-        <button type="button" onClick={load}>
-          Refresh
-        </button>
-        <div data-testid="log-viewer">
-          <span data-state={state}>
-            {state === "empty" ? "no logs" : state}
-          </span>
-          {mode === "tmux" ? (
-            <EmbeddedTerminal
-              sessionName={`agent-${agentName}`}
-              backend="agent"
-              agentName={agentName}
-              isActive={isActive}
-              onConnectionStateChange={(next) => setState(next)}
-            />
-          ) : state === "empty" ? (
-            <p data-testid="archive-empty" className={styles.emptyState}>
-              No logs available for this agent yet.
-            </p>
-          ) : (
-            <pre data-testid="terminal-container">{lines.join("\n")}</pre>
-          )}
-        </div>
+    <div className={styles.section}>
+      <h3 className={styles.sectionTitle}>
+        {mode === "tmux" ? "Live (tmux)" : "Archive snapshot"}
+      </h3>
+      <button type="button" onClick={load}>
+        Refresh
+      </button>
+      <div data-testid="log-viewer">
+        <span data-state={state}>{state === "empty" ? "no logs" : state}</span>
+        {mode === "tmux" ? (
+          <EmbeddedTerminal
+            sessionName={`agent-${agentName}`}
+            backend="agent"
+            agentName={agentName}
+            isActive={isActive}
+            onConnectionStateChange={(next) => setState(next)}
+          />
+        ) : state === "empty" ? (
+          <p data-testid="archive-empty" className={styles.emptyState}>
+            No logs available for this agent yet.
+          </p>
+        ) : (
+          <pre data-testid="terminal-container">{lines.join("\n")}</pre>
+        )}
       </div>
     </div>
   );
