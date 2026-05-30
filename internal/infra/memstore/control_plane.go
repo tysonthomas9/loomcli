@@ -126,6 +126,9 @@ func (s *nodeStore) Update(_ context.Context, ws, nodeID string, patch store.Nod
 	if patch.DrainState != nil {
 		n.DrainState = *patch.DrainState
 	}
+	if patch.LastHeartbeat != nil {
+		n.LastHeartbeat = *patch.LastHeartbeat
+	}
 	if patch.ExpiresAt != nil {
 		n.ExpiresAt = *patch.ExpiresAt
 	}

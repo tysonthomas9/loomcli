@@ -7,6 +7,9 @@ import (
 )
 
 func applyRuntimeStateRecords(ctx context.Context, st store.Store, workspaceKey string, plan *Plan) error {
+	if err := applyNodes(ctx, st, workspaceKey, plan.Nodes); err != nil {
+		return err
+	}
 	if err := applyWorkflowRuns(ctx, st, workspaceKey, plan.WorkflowRuns); err != nil {
 		return err
 	}

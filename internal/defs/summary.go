@@ -10,6 +10,9 @@ func Summary(plan *Plan) string {
 	if len(plan.AgentInstances) > 0 {
 		summary += fmt.Sprintf(" agent_instances=%d", len(plan.AgentInstances))
 	}
+	if len(plan.Nodes) > 0 {
+		summary += fmt.Sprintf(" nodes=%d", len(plan.Nodes))
+	}
 	if len(plan.AgentSessions) > 0 {
 		summary += fmt.Sprintf(" agent_sessions=%d", len(plan.AgentSessions))
 	}

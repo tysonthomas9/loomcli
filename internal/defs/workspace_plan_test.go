@@ -156,6 +156,29 @@ func TestPlanFromWorkspaceProjectsControlPlaneRecords(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("update workflow run: %v", err)
 	}
+	nodeHeartbeat := startedAt.Add(2 * time.Minute)
+	nodeExpiresAt := nodeHeartbeat.Add(30 * time.Minute)
+	if _, err := st.Nodes().Create(ctx, store.NodeCreate{
+		WorkspaceKey:    "CP",
+		NodeID:          "node-local",
+		OwnerActor:      "daemon-local",
+		RuntimeProvider: domain.RuntimeProviderLocal,
+		Labels:          []string{"local", "mac"},
+		Capabilities:    []string{"task-run", "terminal"},
+		ToolInventory:   []string{"bash", "codex"},
+		Version:         "daemon-v1",
+		Capacity:        4,
+		DrainState:      domain.NodeDrainActive,
+		TTL:             time.Hour,
+	}); err != nil {
+		t.Fatalf("create node: %v", err)
+	}
+	if _, err := st.Nodes().Update(ctx, "CP", "node-local", store.NodeUpdate{
+		LastHeartbeat: &nodeHeartbeat,
+		ExpiresAt:     &nodeExpiresAt,
+	}); err != nil {
+		t.Fatalf("update node heartbeat: %v", err)
+	}
 	taskStartedAt := startedAt.Add(5 * time.Minute)
 	taskRun, err := st.TaskRuns().Ensure(ctx, store.TaskRunEnsure{
 		WorkspaceKey:    "CP",
@@ -321,7 +344,7 @@ func TestPlanFromWorkspaceProjectsControlPlaneRecords(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PlanFromWorkspace() error = %v", err)
 	}
-	if got := Summary(plan); got != "agents=1 workflows=1 runtimes=1 agent_instances=1 agent_sessions=1 agent_leases=1 agent_ownership_leases=1 agent_commands=1 terminal_sessions=1 workflow_runs=1 task_runs=1 run_events=1 artifacts=1 tools=1" {
+	if got := Summary(plan); got != "agents=1 workflows=1 runtimes=1 agent_instances=1 nodes=1 agent_sessions=1 agent_leases=1 agent_ownership_leases=1 agent_commands=1 terminal_sessions=1 workflow_runs=1 task_runs=1 run_events=1 artifacts=1 tools=1" {
 		t.Fatalf("Summary() = %q, want direct record parity", got)
 	}
 	if plan.Root != "workspace:CP" {
@@ -348,6 +371,17 @@ func TestPlanFromWorkspaceProjectsControlPlaneRecords(t *testing.T) {
 		instance.MaxConcurrency != 1 || instance.BudgetPolicy != "p2" ||
 		!strings.Contains(fmtStringSlice(instance.Repos), "slack-src") {
 		t.Fatalf("agent instance policy = %+v, want durable runtime assignment", instance)
+	}
+	node := plan.Nodes[0]
+	if node.NodeID != "node-local" || node.SourcePath != "control-plane:node/node-local" ||
+		node.OwnerActor != "daemon-local" || node.RuntimeProvider != domain.RuntimeProviderLocal ||
+		node.Version != "daemon-v1" || node.Capacity != 4 || node.DrainState != domain.NodeDrainActive ||
+		!strings.Contains(fmtStringSlice(node.Labels), "mac") ||
+		!strings.Contains(fmtStringSlice(node.Capabilities), "terminal") ||
+		!strings.Contains(fmtStringSlice(node.ToolInventory), "codex") ||
+		node.LastHeartbeat == nil || !node.LastHeartbeat.Equal(nodeHeartbeat) ||
+		node.ExpiresAt == nil || !node.ExpiresAt.Equal(nodeExpiresAt) {
+		t.Fatalf("node = %+v, want durable daemon node runtime state", node)
 	}
 	session := plan.AgentSessions[0]
 	if session.SessionID != "session-1" || session.AgentID != "triage-bot" ||
@@ -470,6 +504,20 @@ func TestPlanFromWorkspaceProjectsControlPlaneRecords(t *testing.T) {
 	if importedAgent.RoleName != "triage" || importedAgent.DesiredState != domain.AgentDesiredRunning ||
 		importedAgent.State != domain.AgentStateActive || importedAgent.TaskFilter != "needs_design" {
 		t.Fatalf("imported agent = %+v, want round-tripped durable agent instance", importedAgent)
+	}
+	importedNode, err := imported.Nodes().Get(ctx, "IMPORT", "node-local")
+	if err != nil {
+		t.Fatalf("get imported node: %v", err)
+	}
+	if importedNode.OwnerActor != "daemon-local" || importedNode.RuntimeProvider != domain.RuntimeProviderLocal ||
+		importedNode.Version != "daemon-v1" || importedNode.Capacity != 4 ||
+		importedNode.DrainState != domain.NodeDrainActive ||
+		!strings.Contains(fmtStringSlice(importedNode.Labels), "local") ||
+		!strings.Contains(fmtStringSlice(importedNode.Capabilities), "task-run") ||
+		!strings.Contains(fmtStringSlice(importedNode.ToolInventory), "bash") ||
+		!importedNode.LastHeartbeat.Equal(nodeHeartbeat) ||
+		!importedNode.ExpiresAt.Equal(nodeExpiresAt) {
+		t.Fatalf("imported node = %+v, want round-tripped durable node state", importedNode)
 	}
 	importedLease, err := imported.AgentLeases().Get(ctx, "IMPORT", "lease-task-1")
 	if err != nil {

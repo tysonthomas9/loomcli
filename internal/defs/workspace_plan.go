@@ -49,6 +49,9 @@ func appendControlPlaneState(ctx context.Context, st store.Store, workspaceKey s
 	if err := appendControlPlaneAgentInstances(ctx, st, workspaceKey, plan); err != nil {
 		return err
 	}
+	if err := appendControlPlaneNodes(ctx, st, workspaceKey, plan); err != nil {
+		return err
+	}
 	if err := appendControlPlaneAgentSessions(ctx, st, workspaceKey, plan); err != nil {
 		return err
 	}
@@ -319,6 +322,48 @@ func agentInstanceFromControlPlane(agent *domain.Agent) AgentInstanceModule {
 	instance.SourceHash = workspaceHash(instance)
 	instance.Version = version(instance.SourceHash)
 	return instance
+}
+
+func appendControlPlaneNodes(ctx context.Context, st store.Store, workspaceKey string, plan *Plan) error {
+	nodeStore := st.Nodes()
+	if nodeStore == nil {
+		return fmt.Errorf("node store not configured")
+	}
+	nodes, err := nodeStore.List(ctx, workspaceKey)
+	if err != nil {
+		return fmt.Errorf("list nodes: %w", err)
+	}
+	for _, node := range nodes {
+		if node == nil {
+			continue
+		}
+		plan.Nodes = append(plan.Nodes, nodeFromControlPlane(node))
+	}
+	return nil
+}
+
+func nodeFromControlPlane(node *domain.Node) NodeModule {
+	module := NodeModule{
+		NodeID:          node.NodeID,
+		SourcePath:      "control-plane:node/" + node.NodeID,
+		OwnerActor:      node.OwnerActor,
+		RuntimeProvider: node.RuntimeProvider,
+		Labels:          cloneStringSlice(node.Labels),
+		Capabilities:    cloneStringSlice(node.Capabilities),
+		ToolInventory:   cloneStringSlice(node.ToolInventory),
+		Version:         node.Version,
+		Capacity:        node.Capacity,
+		DrainState:      node.DrainState,
+	}
+	if !node.LastHeartbeat.IsZero() {
+		lastHeartbeat := node.LastHeartbeat
+		module.LastHeartbeat = &lastHeartbeat
+	}
+	if !node.ExpiresAt.IsZero() {
+		expiresAt := node.ExpiresAt
+		module.ExpiresAt = &expiresAt
+	}
+	return module
 }
 
 func appendControlPlaneAgentSessions(ctx context.Context, st store.Store, workspaceKey string, plan *Plan) error {
@@ -895,6 +940,7 @@ func sortPlan(plan *Plan) {
 	sort.Slice(plan.Tools, func(i, j int) bool { return plan.Tools[i].Name < plan.Tools[j].Name })
 	sort.Slice(plan.Agents, func(i, j int) bool { return plan.Agents[i].Name < plan.Agents[j].Name })
 	sort.Slice(plan.AgentInstances, func(i, j int) bool { return plan.AgentInstances[i].Name < plan.AgentInstances[j].Name })
+	sort.Slice(plan.Nodes, func(i, j int) bool { return plan.Nodes[i].NodeID < plan.Nodes[j].NodeID })
 	sort.Slice(plan.AgentSessions, func(i, j int) bool { return plan.AgentSessions[i].SessionID < plan.AgentSessions[j].SessionID })
 	sort.Slice(plan.AgentLeases, func(i, j int) bool { return plan.AgentLeases[i].LeaseID < plan.AgentLeases[j].LeaseID })
 	sort.Slice(plan.AgentOwnershipLeases, func(i, j int) bool {

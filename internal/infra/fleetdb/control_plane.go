@@ -404,6 +404,9 @@ func nodeUpdateBody(patch store.NodeUpdate) map[string]any {
 	if patch.DrainState != nil {
 		body["drain_state"] = *patch.DrainState
 	}
+	if patch.LastHeartbeat != nil {
+		body["last_heartbeat"] = *patch.LastHeartbeat
+	}
 	if patch.ExpiresAt != nil {
 		body["expires_at"] = *patch.ExpiresAt
 	}

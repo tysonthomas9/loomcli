@@ -30,6 +30,7 @@ type NodeUpdate struct {
 	Version         *string
 	Capacity        *int
 	DrainState      *domain.NodeDrainState
+	LastHeartbeat   *time.Time
 	ExpiresAt       *time.Time
 }
 
