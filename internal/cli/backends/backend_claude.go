@@ -102,6 +102,7 @@ func (c *ClaudeBackend) HealthCheck() HealthStatus {
 // of JSON events. The caller is responsible for closing the returned ReadCloser,
 // which also terminates the subprocess.
 func (c *ClaudeBackend) InvokeStreaming(ctx context.Context, workDir, prompt, agentName string) (io.ReadCloser, error) {
+	ClearLastCapturedSessionID()
 	resumeID := consumeResumeSessionID()
 	args := buildClaudeNonInteractiveArgs(resumeID, "")
 	cmd := exec.Command("claude", args...) //nolint:gosec // G204: intentional subprocess launch for claude CLI
@@ -174,10 +175,10 @@ func (c *ClaudeBackend) SetResumeSessionID(sessionID string) {
 	SetResumeSessionID(sessionID)
 }
 
-// LastSessionID returns the most recent session ID. Returns "" because Claude
-// CLI manages sessions internally without exposing a listing API.
+// LastSessionID returns the session ID captured from the most recent Claude
+// stream-json init event.
 func (c *ClaudeBackend) LastSessionID(_ string) string {
-	return ""
+	return GetLastCapturedSessionID()
 }
 
 func init() {

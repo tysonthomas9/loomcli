@@ -50,8 +50,14 @@ func TestClaudeBackend_HealthCheck(t *testing.T) {
 
 func TestClaudeBackend_LastSessionID(t *testing.T) {
 	b := &ClaudeBackend{}
+	ClearLastCapturedSessionID()
+	t.Cleanup(ClearLastCapturedSessionID)
 	if id := b.LastSessionID("/tmp"); id != "" {
-		t.Errorf("LastSessionID = %q, want empty string", id)
+		t.Errorf("LastSessionID before capture = %q, want empty string", id)
+	}
+	SetLastCapturedSessionID("claude-session-1")
+	if id := b.LastSessionID("/tmp"); id != "claude-session-1" {
+		t.Errorf("LastSessionID after capture = %q, want claude-session-1", id)
 	}
 }
 

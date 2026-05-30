@@ -724,9 +724,7 @@ func invokeLocalAgent(ctx context.Context, plan *defspkg.Plan, agent defspkg.Age
 	}
 	workDir := localWorkDir(plan.Root, agent)
 	if resumeProviderSessionID != "" {
-		if resumer, ok := backend.(interface{ SetResumeSessionID(string) }); ok {
-			resumer.SetResumeSessionID(resumeProviderSessionID)
-		}
+		setBackendResumeSessionID(backend, resumeProviderSessionID)
 	}
 	if streamer, ok := backend.(interface {
 		InvokeStreaming(context.Context, string, string, string) (io.ReadCloser, error)
@@ -738,10 +736,12 @@ func invokeLocalAgent(ctx context.Context, plan *defspkg.Plan, agent defspkg.Age
 		defer func() { _ = rc.Close() }()
 		result, err := captureStreamingResponse(rc, stream)
 		result.ToolRuntime = appliedToolRuntime
+		result = fillBackendSessionID(result, backend, workDir)
 		return result, err
 	}
 	result, err := invokeNonStreamingLocalAgent(backend, backendName, workDir, prompt, agent.Name, stream)
 	result.ToolRuntime = appliedToolRuntime
+	result = fillBackendSessionID(result, backend, workDir)
 	return result, err
 }
 

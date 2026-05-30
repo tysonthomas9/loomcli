@@ -546,6 +546,49 @@ func TestRunLocalConnectCapturesProviderSessionAndUsage(t *testing.T) {
 	}
 }
 
+func TestRunLocalConnectCapturesBackendSessionMetadataFallback(t *testing.T) {
+	cli.TestingResetBackendState(t)
+	backend := &sessionMetadataBackend{}
+	cli.RegisterBackend(backend)
+	root := t.TempDir()
+	writeAgent(t, root, "session-agent", "session-metadata")
+
+	first, err := runLocalConnect(context.Background(), connectOptions{
+		Dir:      root,
+		Agent:    "session-agent",
+		Instance: "local",
+		Session:  "provider",
+		Message:  "first",
+	})
+	if err != nil {
+		t.Fatalf("first runLocalConnect() error = %v", err)
+	}
+	if first.ProviderSessionID != "metadata-session-1" {
+		t.Fatalf("first provider session = %q, want metadata-session-1", first.ProviderSessionID)
+	}
+
+	second, err := runLocalConnect(context.Background(), connectOptions{
+		Dir:      root,
+		Agent:    "session-agent",
+		Instance: "local",
+		Session:  "provider",
+		Message:  "second",
+	})
+	if err != nil {
+		t.Fatalf("second runLocalConnect() error = %v", err)
+	}
+	if second.ProviderSessionID != "metadata-session-2" {
+		t.Fatalf("second provider session = %q, want metadata-session-2", second.ProviderSessionID)
+	}
+	turns, err := readLocalTurns(second.TranscriptPath)
+	if err != nil {
+		t.Fatalf("readLocalTurns() error = %v", err)
+	}
+	if len(turns) != 2 || turns[0].ProviderSessionID != "metadata-session-1" || turns[1].ProviderSessionID != "metadata-session-2" {
+		t.Fatalf("turns = %+v, want backend session metadata persisted", turns)
+	}
+}
+
 func TestRunLocalConnectCapturesNonStreamingBackendOutputAndUsage(t *testing.T) {
 	cli.TestingResetBackendState(t)
 	cli.RegisterBackend(nonStreamingCaptureBackend{})
@@ -763,6 +806,30 @@ func (b *providerSessionBackend) InvokeStreaming(context.Context, string, string
 		"",
 	}, "\n")
 	return io.NopCloser(strings.NewReader(payload)), nil
+}
+
+type sessionMetadataBackend struct {
+	count  int
+	lastID string
+}
+
+func (b *sessionMetadataBackend) Name() string { return "session-metadata" }
+
+func (b *sessionMetadataBackend) InvokeInteractive(_, _, _ string) error { return nil }
+
+func (b *sessionMetadataBackend) InvokeNonInteractive(_, _, _ string, _ <-chan struct{}, _ *usage.Collector) error {
+	b.count++
+	b.lastID = fmt.Sprintf("metadata-session-%d", b.count)
+	fmt.Printf("metadata response %d\n", b.count)
+	return nil
+}
+
+func (b *sessionMetadataBackend) ContinueSession(_, _, _ string) error {
+	return fmt.Errorf("ContinueSession should not be called by local one-shot connect")
+}
+
+func (b *sessionMetadataBackend) LastSessionID(_ string) string {
+	return b.lastID
 }
 
 type typedToolRuntimeBackend struct {
