@@ -359,21 +359,74 @@ func (r *Runner) reconcileTaskRuns(ctx context.Context, openChildren []backend.I
 			})
 			continue
 		}
-		if child.Status == "in_progress" && child.Assignee != "" && run.ClaimActor == "" {
-			status := domain.TaskRunClaimed
-			claimActor := child.Assignee
-			if _, err := r.store.TaskRuns().Update(ctx, r.workspace, run.TaskRunID, store.TaskRunUpdate{Status: &status, ClaimActor: &claimActor}); err != nil {
-				return err
-			}
-		}
-		if sessionID, ok, err := r.liveTaskSessionID(ctx, run.AgentID, run.WorkItemID); err != nil {
+		if err := r.projectOpenTaskRunState(ctx, run, child); err != nil {
 			return err
-		} else if ok {
-			status := domain.TaskRunRunning
-			_, _ = r.store.TaskRuns().Update(ctx, r.workspace, run.TaskRunID, store.TaskRunUpdate{Status: &status, SessionID: &sessionID})
 		}
 	}
 	return nil
+}
+
+func (r *Runner) projectOpenTaskRunState(ctx context.Context, run *domain.TaskRun, child backend.IssueData) error {
+	if child.Status == "in_progress" && child.Assignee != "" && run.Status != domain.TaskRunRunning {
+		updated, err := r.projectTaskRunClaim(ctx, run, child.Assignee)
+		if err != nil {
+			return err
+		}
+		run = updated
+	}
+	if sessionID, ok, err := r.liveTaskSessionID(ctx, run.AgentID, run.WorkItemID); err != nil {
+		return err
+	} else if ok {
+		_, err := r.projectTaskRunSession(ctx, run, sessionID)
+		return err
+	}
+	return nil
+}
+
+func (r *Runner) projectTaskRunClaim(ctx context.Context, run *domain.TaskRun, claimActor string) (*domain.TaskRun, error) {
+	if run.Status == domain.TaskRunClaimed && run.ClaimActor == claimActor {
+		return run, nil
+	}
+	status := domain.TaskRunClaimed
+	updated, err := r.store.TaskRuns().Update(ctx, r.workspace, run.TaskRunID, store.TaskRunUpdate{
+		Status:     &status,
+		ClaimActor: &claimActor,
+	})
+	if err != nil {
+		return nil, err
+	}
+	_, _ = r.store.RunEvents().Append(ctx, store.RunEventAppend{
+		WorkspaceKey:  r.workspace,
+		WorkflowRunID: r.workflowRunID,
+		TaskRunID:     run.TaskRunID,
+		Type:          "task_run_claimed",
+		Message:       "observed issue claim for task run",
+		Data:          mustJSON(map[string]string{"work_item_id": run.WorkItemID, "claim_actor": claimActor}),
+	})
+	return updated, nil
+}
+
+func (r *Runner) projectTaskRunSession(ctx context.Context, run *domain.TaskRun, sessionID string) (*domain.TaskRun, error) {
+	if run.Status == domain.TaskRunRunning && run.SessionID == sessionID {
+		return run, nil
+	}
+	status := domain.TaskRunRunning
+	updated, err := r.store.TaskRuns().Update(ctx, r.workspace, run.TaskRunID, store.TaskRunUpdate{
+		Status:    &status,
+		SessionID: &sessionID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	_, _ = r.store.RunEvents().Append(ctx, store.RunEventAppend{
+		WorkspaceKey:  r.workspace,
+		WorkflowRunID: r.workflowRunID,
+		TaskRunID:     run.TaskRunID,
+		Type:          "task_run_running",
+		Message:       "observed live task session for task run",
+		Data:          mustJSON(map[string]string{"work_item_id": run.WorkItemID, "session_id": sessionID}),
+	})
+	return updated, nil
 }
 
 func (r *Runner) failTaskRun(ctx context.Context, taskRun *domain.TaskRun, cause error) {

@@ -286,6 +286,73 @@ func TestReconcileOnceDispatchesTaskRunMetadata(t *testing.T) {
 	}
 }
 
+func TestReconcileOnceProjectsTaskRunClaimAndSession(t *testing.T) {
+	ctx := context.Background()
+	st := newTestStore(t)
+	task := backend.IssueData{ID: "EPIC-2", Title: "task run projection", Status: "open"}
+	ib := clitest.NewMockIssueBackend()
+	ib.ReadyResult = []backend.IssueData{task}
+	ib.ListResult = []backend.IssueData{task}
+
+	r := &Runner{
+		store:          st,
+		ib:             ib,
+		workspace:      "ws",
+		parent:         "EPIC-1",
+		prefix:         "epic-1",
+		role:           "task",
+		maxConcurrency: 1,
+		workflowRunID:  "wrun-claim",
+	}
+
+	if _, err := r.ReconcileOnce(ctx); err != nil {
+		t.Fatalf("initial ReconcileOnce error = %v", err)
+	}
+	runs, err := st.TaskRuns().List(ctx, "ws", store.TaskRunFilter{WorkflowRunID: "wrun-claim", WorkItemID: task.ID})
+	if err != nil {
+		t.Fatalf("list task runs: %v", err)
+	}
+	if len(runs) != 1 || runs[0].AgentID == "" {
+		t.Fatalf("task runs = %+v, want dispatched task run with agent", runs)
+	}
+	taskRun := runs[0]
+	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey: "ws",
+		SessionID:    "sess-claim",
+		AgentID:      taskRun.AgentID,
+		Kind:         domain.AgentSessionKindTask,
+		TaskID:       task.ID,
+		Status:       domain.AgentSessionRunning,
+	}); err != nil {
+		t.Fatalf("create agent session: %v", err)
+	}
+
+	ib.ReadyResult = nil
+	ib.ListResult = []backend.IssueData{{
+		ID:       task.ID,
+		Title:    task.Title,
+		Status:   "in_progress",
+		Assignee: taskRun.AgentID,
+	}}
+	if _, err := r.ReconcileOnce(ctx); err != nil {
+		t.Fatalf("projection ReconcileOnce error = %v", err)
+	}
+	updated, err := st.TaskRuns().Get(ctx, "ws", taskRun.TaskRunID)
+	if err != nil {
+		t.Fatalf("get task run: %v", err)
+	}
+	if updated.Status != domain.TaskRunRunning || updated.ClaimActor != taskRun.AgentID || updated.SessionID != "sess-claim" {
+		t.Fatalf("updated task run = %+v, want running with projected claim/session", updated)
+	}
+	events, err := st.RunEvents().List(ctx, "ws", store.RunEventFilter{WorkflowRunID: "wrun-claim"})
+	if err != nil {
+		t.Fatalf("list run events: %v", err)
+	}
+	if !hasRunEvent(events, "task_run_claimed") || !hasRunEvent(events, "task_run_running") {
+		t.Fatalf("events = %+v, want claim and session projection events", events)
+	}
+}
+
 func TestReconcileOnceSkipsReadyTaskWithLiveStartCommand(t *testing.T) {
 	ctx := context.Background()
 	st := newTestStore(t)
@@ -455,6 +522,15 @@ func TestLiveAgentCommandStatusTreatsEmptyAsLive(t *testing.T) {
 	if liveAgentCommandStatus(domain.AgentCommandSucceeded) {
 		t.Fatal("succeeded agent command status should not be live")
 	}
+}
+
+func hasRunEvent(events []*domain.RunEvent, typ string) bool {
+	for _, event := range events {
+		if event != nil && event.Type == typ {
+			return true
+		}
+	}
+	return false
 }
 
 func createStoppedWorker(t *testing.T, st store.Store, workspace, name string) {
