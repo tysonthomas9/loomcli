@@ -11,54 +11,86 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/types"
 )
 
+// fleetDepWire is one row from fleet-db's GET /issues/{id}/deps response. Each
+// row links IssueID -> DependsOnID with a relationship Type.
+type fleetDepWire struct {
+	IssueID     string    `json:"issue_id"`
+	DependsOnID string    `json:"depends_on_id"`
+	Type        string    `json:"type"`
+	Title       string    `json:"title,omitempty"`
+	Status      string    `json:"status,omitempty"`
+	Priority    int       `json:"priority,omitempty"`
+	IssueType   string    `json:"issue_type,omitempty"`
+	CreatedAt   time.Time `json:"created_at,omitempty"`
+	CreatedBy   string    `json:"created_by,omitempty"`
+}
+
 // fetchDependencies calls fleet-db's GET /issues/{id}/deps and projects the
-// native payload into the backend.DependencyData shape.
-func (b *FleetBackend) fetchDependencies(ctx context.Context, id string) ([]backend.DependencyData, error) {
+// native payload into backend.DependencyData, split by perspective relative to
+// id:
+//   - deps:       rows where the viewed issue depends on the other issue
+//     (issue_id == id). The related issue is depends_on_id.
+//   - dependents: rows where the other issue depends on the viewed issue
+//     (depends_on_id == id), e.g. an epic's children. The related issue is
+//     issue_id.
+//
+// The single /deps endpoint returns both kinds (fleet-db stores parent-child
+// rows on the child's side), so we must classify each row rather than assume
+// every row is a dependency.
+func (b *FleetBackend) fetchDependencies(ctx context.Context, id string) (deps, dependents []backend.DependencyData, err error) {
 	resp, err := b.exec(ctx, "Get", "GET", "/issues/"+url.PathEscape(id)+"/deps", nil)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if !hasData(resp) {
-		return nil, nil
-	}
-	type depWire struct {
-		IssueID     string    `json:"issue_id"`
-		DependsOnID string    `json:"depends_on_id"`
-		Type        string    `json:"type"`
-		Title       string    `json:"title,omitempty"`
-		Status      string    `json:"status,omitempty"`
-		Priority    int       `json:"priority,omitempty"`
-		IssueType   string    `json:"issue_type,omitempty"`
-		CreatedAt   time.Time `json:"created_at,omitempty"`
-		CreatedBy   string    `json:"created_by,omitempty"`
+		return nil, nil, nil
 	}
 	var wrap struct {
-		Dependencies []depWire `json:"dependencies"`
+		Dependencies []fleetDepWire `json:"dependencies"`
 	}
 	if json.Unmarshal(resp.Data, &wrap) != nil {
-		return nil, nil
+		return nil, nil, nil
 	}
-	out := make([]backend.DependencyData, 0, len(wrap.Dependencies))
 	for _, d := range wrap.Dependencies {
-		dep := backend.DependencyData{
-			IssueID:     d.IssueID,
-			DependsOnID: d.DependsOnID,
-			Type:        d.Type,
-			Title:       d.Title,
-			Status:      d.Status,
-			Priority:    d.Priority,
-			IssueType:   d.IssueType,
-			CreatedAt:   d.CreatedAt,
-			CreatedBy:   d.CreatedBy,
+		dep, isDependent := b.depWireToData(ctx, d, id)
+		if isDependent {
+			dependents = append(dependents, dep)
+		} else {
+			deps = append(deps, dep)
 		}
-		if dep.Title == "" {
-			if issue, err := b.fetchIssueSummary(ctx, d.DependsOnID); err == nil && issue != nil {
-				hydrateDependencyData(&dep, *issue)
-			}
-		}
-		out = append(out, dep)
 	}
-	return out, nil
+	return deps, dependents, nil
+}
+
+// depWireToData converts one /deps wire row into a DependencyData and reports
+// whether it is a dependent (the other issue depends on viewID) rather than a
+// dependency (viewID depends on the other issue). Missing display fields are
+// hydrated from the *related* issue's summary — the side that is not viewID —
+// so an epic's children carry their own metadata rather than the epic's.
+func (b *FleetBackend) depWireToData(ctx context.Context, d fleetDepWire, viewID string) (backend.DependencyData, bool) {
+	dep := backend.DependencyData{
+		IssueID:     d.IssueID,
+		DependsOnID: d.DependsOnID,
+		Type:        d.Type,
+		Title:       d.Title,
+		Status:      d.Status,
+		Priority:    d.Priority,
+		IssueType:   d.IssueType,
+		CreatedAt:   d.CreatedAt,
+		CreatedBy:   d.CreatedBy,
+	}
+	relatedID := d.DependsOnID
+	isDependent := false
+	if d.DependsOnID == viewID && d.IssueID != "" {
+		relatedID = d.IssueID
+		isDependent = true
+	}
+	if dep.Title == "" {
+		if issue, err := b.fetchIssueSummary(ctx, relatedID); err == nil && issue != nil {
+			hydrateDependencyData(&dep, *issue)
+		}
+	}
+	return dep, isDependent
 }
 
 func (b *FleetBackend) fetchIssueSummary(ctx context.Context, id string) (*backend.IssueData, error) {

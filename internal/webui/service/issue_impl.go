@@ -655,7 +655,7 @@ func (s *issueServiceImpl) ListDependencies(ctx context.Context, issueID string)
 		return nil, ErrNotFound(fmt.Sprintf("issue not found: %s", issueID))
 	}
 
-	out, err := json.Marshal(depsToWire(detail.Dependencies))
+	out, err := json.Marshal(depsToWire(detail.Dependencies, issueID))
 	if err != nil {
 		return nil, ErrInternal("failed to marshal dependencies", err)
 	}
