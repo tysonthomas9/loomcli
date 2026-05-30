@@ -278,6 +278,32 @@ func TestCreateSingleWorktree_Success(t *testing.T) {
 	}
 }
 
+func TestCreateSingleWorktree_FleetModeInstallsClaudeHooks(t *testing.T) {
+	tmpDir := t.TempDir()
+	wtPath := filepath.Join(tmpDir, "falcon")
+	t.Setenv("LOOM_ISSUE_BACKEND", "fleet")
+
+	deps, _, _, _, _ := NewTestDeps(t)
+	mock := NewCommandMock(t, []CommandStub{
+		{Name: "git", Args: []string{"worktree", "add", wtPath, "-b", "falcon"}, Stdout: "Created worktree"},
+	})
+	mock.InstallOn(deps)
+
+	result := createSingleWorktree(deps, tmpDir, "falcon")
+	if !result {
+		t.Fatal("createSingleWorktree() should return true on success")
+	}
+
+	settingsPath := filepath.Join(wtPath, ".claude", "settings.json")
+	data, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatalf("expected Claude hooks settings at %s: %v", settingsPath, err)
+	}
+	if !strings.Contains(string(data), "loom hooks claude-code session-start") {
+		t.Fatalf("expected fleet worktree to install Claude hooks, got settings:\n%s", data)
+	}
+}
+
 func TestCreateSingleWorktree_BranchExists(t *testing.T) {
 	t.Parallel()
 	tmpDir := t.TempDir()
