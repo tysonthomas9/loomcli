@@ -16,17 +16,18 @@ import (
 )
 
 type Plan struct {
-	Root           string                `json:"root"`
-	Agents         []AgentModule         `json:"agents,omitempty"`
-	AgentInstances []AgentInstanceModule `json:"agent_instances,omitempty"`
-	AgentSessions  []AgentSessionModule  `json:"agent_sessions,omitempty"`
-	Artifacts      []ArtifactModule      `json:"artifacts,omitempty"`
-	Workflows      []WorkflowModule      `json:"workflows,omitempty"`
-	WorkflowRuns   []WorkflowRunModule   `json:"workflow_runs,omitempty"`
-	TaskRuns       []TaskRunModule       `json:"task_runs,omitempty"`
-	Runtimes       []RuntimeModule       `json:"runtimes,omitempty"`
-	Skills         []SkillModule         `json:"skills,omitempty"`
-	Tools          []ToolModule          `json:"tools,omitempty"`
+	Root             string                  `json:"root"`
+	Agents           []AgentModule           `json:"agents,omitempty"`
+	AgentInstances   []AgentInstanceModule   `json:"agent_instances,omitempty"`
+	AgentSessions    []AgentSessionModule    `json:"agent_sessions,omitempty"`
+	TerminalSessions []TerminalSessionModule `json:"terminal_sessions,omitempty"`
+	Artifacts        []ArtifactModule        `json:"artifacts,omitempty"`
+	Workflows        []WorkflowModule        `json:"workflows,omitempty"`
+	WorkflowRuns     []WorkflowRunModule     `json:"workflow_runs,omitempty"`
+	TaskRuns         []TaskRunModule         `json:"task_runs,omitempty"`
+	Runtimes         []RuntimeModule         `json:"runtimes,omitempty"`
+	Skills           []SkillModule           `json:"skills,omitempty"`
+	Tools            []ToolModule            `json:"tools,omitempty"`
 }
 
 type AgentModule struct {
@@ -167,6 +168,9 @@ func Apply(ctx context.Context, st store.Store, workspaceKey, actor string, plan
 		return err
 	}
 	if err := applyAgentSessions(ctx, st, workspaceKey, plan.AgentSessions); err != nil {
+		return err
+	}
+	if err := applyTerminalSessions(ctx, st, workspaceKey, plan.TerminalSessions); err != nil {
 		return err
 	}
 	if err := applyArtifacts(ctx, st, workspaceKey, plan.Artifacts); err != nil {
@@ -531,35 +535,6 @@ func ptrSlice(values []string) *[]string {
 	return &values
 }
 
-func Summary(plan *Plan) string {
-	if plan == nil {
-		return "No definition plan loaded"
-	}
-	summary := fmt.Sprintf("agents=%d workflows=%d runtimes=%d", len(plan.Agents), len(plan.Workflows), len(plan.Runtimes))
-	if len(plan.AgentInstances) > 0 {
-		summary += fmt.Sprintf(" agent_instances=%d", len(plan.AgentInstances))
-	}
-	if len(plan.AgentSessions) > 0 {
-		summary += fmt.Sprintf(" agent_sessions=%d", len(plan.AgentSessions))
-	}
-	if len(plan.WorkflowRuns) > 0 {
-		summary += fmt.Sprintf(" workflow_runs=%d", len(plan.WorkflowRuns))
-	}
-	if len(plan.TaskRuns) > 0 {
-		summary += fmt.Sprintf(" task_runs=%d", len(plan.TaskRuns))
-	}
-	if len(plan.Artifacts) > 0 {
-		summary += fmt.Sprintf(" artifacts=%d", len(plan.Artifacts))
-	}
-	if len(plan.Skills) > 0 {
-		summary += fmt.Sprintf(" skills=%d", len(plan.Skills))
-	}
-	if len(plan.Tools) > 0 {
-		summary += fmt.Sprintf(" tools=%d", len(plan.Tools))
-	}
-	return summary
-}
-
 func loadDir(dir string, fn func(string, []byte) error) error {
 	entries, err := os.ReadDir(dir)
 	if errors.Is(err, os.ErrNotExist) {
@@ -690,6 +665,16 @@ func validatePlan(plan *Plan) error {
 			return fmt.Errorf("duplicate agent session %q in %s and %s", session.SessionID, prior, sourcePath)
 		}
 		seen["agent-session:"+session.SessionID] = sourcePath
+	}
+	for _, terminal := range plan.TerminalSessions {
+		sourcePath := firstNonEmpty(terminal.SourcePath, "terminal_session:"+terminal.TerminalID)
+		if strings.TrimSpace(terminal.TerminalID) == "" {
+			return fmt.Errorf("%s: terminal session id is required", sourcePath)
+		}
+		if prior := seen["terminal-session:"+terminal.TerminalID]; prior != "" {
+			return fmt.Errorf("duplicate terminal session %q in %s and %s", terminal.TerminalID, prior, sourcePath)
+		}
+		seen["terminal-session:"+terminal.TerminalID] = sourcePath
 	}
 	for _, artifact := range plan.Artifacts {
 		sourcePath := firstNonEmpty(artifact.SourcePath, "artifact:"+artifact.ArtifactID)

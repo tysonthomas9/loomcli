@@ -185,6 +185,30 @@ func TestPlanFromWorkspaceProjectsControlPlaneRecords(t *testing.T) {
 		t.Fatalf("update task run: %v", err)
 	}
 	sessionHeartbeat := taskStartedAt.Add(time.Minute)
+	if _, err := st.TerminalSessions().Create(ctx, store.TerminalSessionCreate{
+		WorkspaceKey:    "CP",
+		TerminalID:      "term-1",
+		AgentID:         "triage-bot",
+		SessionID:       "session-1",
+		NodeID:          "node-local",
+		TaskID:          "TASK-1",
+		Title:           "Slack runner terminal",
+		Kind:            "pty",
+		Status:          domain.TerminalSessionOpen,
+		PTYProvider:     "local",
+		StreamRef:       "stream://term-1",
+		TranscriptRef:   "transcript://term-1",
+		AttachedClients: 1,
+		Metadata:        map[string]string{"pane": "runner"},
+	}); err != nil {
+		t.Fatalf("create terminal session: %v", err)
+	}
+	terminalSeenAt := sessionHeartbeat.Add(time.Minute)
+	if _, err := st.TerminalSessions().Update(ctx, "CP", "term-1", store.TerminalSessionUpdate{
+		LastSeenAt: &terminalSeenAt,
+	}); err != nil {
+		t.Fatalf("update terminal session: %v", err)
+	}
 	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
 		WorkspaceKey:    "CP",
 		SessionID:       "session-1",
@@ -230,7 +254,7 @@ func TestPlanFromWorkspaceProjectsControlPlaneRecords(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PlanFromWorkspace() error = %v", err)
 	}
-	if got := Summary(plan); got != "agents=1 workflows=1 runtimes=1 agent_instances=1 agent_sessions=1 workflow_runs=1 task_runs=1 artifacts=1 tools=1" {
+	if got := Summary(plan); got != "agents=1 workflows=1 runtimes=1 agent_instances=1 agent_sessions=1 terminal_sessions=1 workflow_runs=1 task_runs=1 artifacts=1 tools=1" {
 		t.Fatalf("Summary() = %q, want direct record parity", got)
 	}
 	if plan.Root != "workspace:CP" {
@@ -267,6 +291,17 @@ func TestPlanFromWorkspaceProjectsControlPlaneRecords(t *testing.T) {
 		session.Summary != "working on sidebar" || session.Metadata["harness"] != "planning" ||
 		session.LastHeartbeat == nil || !session.LastHeartbeat.Equal(sessionHeartbeat) {
 		t.Fatalf("agent session = %+v, want durable session runtime state", session)
+	}
+	terminal := plan.TerminalSessions[0]
+	if terminal.TerminalID != "term-1" || terminal.AgentID != "triage-bot" ||
+		terminal.SessionID != "session-1" || terminal.NodeID != "node-local" ||
+		terminal.TaskID != "TASK-1" || terminal.Title != "Slack runner terminal" ||
+		terminal.Kind != "pty" || terminal.Status != domain.TerminalSessionOpen ||
+		terminal.PTYProvider != "local" || terminal.StreamRef != "stream://term-1" ||
+		terminal.TranscriptRef != "transcript://term-1" || terminal.AttachedClients != 1 ||
+		terminal.Metadata["pane"] != "runner" || terminal.LastSeenAt == nil ||
+		!terminal.LastSeenAt.Equal(terminalSeenAt) {
+		t.Fatalf("terminal session = %+v, want durable terminal runtime state", terminal)
 	}
 	artifact := plan.Artifacts[0]
 	if artifact.ArtifactID != "artifact-slack-1" || artifact.AgentID != "triage-bot" ||
@@ -365,6 +400,19 @@ func TestPlanFromWorkspaceProjectsControlPlaneRecords(t *testing.T) {
 		importedSession.Metadata["workflow_run_id"] != "wrun-slack-1" ||
 		!importedSession.LastHeartbeat.Equal(sessionHeartbeat) {
 		t.Fatalf("imported agent session = %+v, want round-tripped durable session state", importedSession)
+	}
+	importedTerminal, err := imported.TerminalSessions().Get(ctx, "IMPORT", "term-1")
+	if err != nil {
+		t.Fatalf("get imported terminal session: %v", err)
+	}
+	if importedTerminal.AgentID != "triage-bot" || importedTerminal.SessionID != "session-1" ||
+		importedTerminal.NodeID != "node-local" || importedTerminal.TaskID != "TASK-1" ||
+		importedTerminal.Title != "Slack runner terminal" || importedTerminal.Kind != "pty" ||
+		importedTerminal.Status != domain.TerminalSessionOpen || importedTerminal.PTYProvider != "local" ||
+		importedTerminal.StreamRef != "stream://term-1" || importedTerminal.TranscriptRef != "transcript://term-1" ||
+		importedTerminal.AttachedClients != 1 || importedTerminal.Metadata["pane"] != "runner" ||
+		!importedTerminal.LastSeenAt.Equal(terminalSeenAt) {
+		t.Fatalf("imported terminal session = %+v, want round-tripped terminal state", importedTerminal)
 	}
 	importedArtifact, err := imported.Artifacts().Get(ctx, "IMPORT", "artifact-slack-1")
 	if err != nil {

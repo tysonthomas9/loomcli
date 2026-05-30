@@ -29,28 +29,7 @@ func PlanFromWorkspace(ctx context.Context, st store.Store, workspaceKey string)
 	plan.Agents = index.agents
 	plan.Workflows = index.workflows
 	plan.Runtimes = index.runtimes
-	if err := appendControlPlaneRoles(ctx, st, workspaceKey, plan, index.hasAgent); err != nil {
-		return nil, err
-	}
-	if err := appendControlPlaneAgentInstances(ctx, st, workspaceKey, plan); err != nil {
-		return nil, err
-	}
-	if err := appendControlPlaneAgentSessions(ctx, st, workspaceKey, plan); err != nil {
-		return nil, err
-	}
-	if err := appendControlPlaneArtifacts(ctx, st, workspaceKey, plan); err != nil {
-		return nil, err
-	}
-	if err := appendControlPlaneWorkflows(ctx, st, workspaceKey, plan, index.hasWorkflow); err != nil {
-		return nil, err
-	}
-	if err := appendControlPlaneRuntimes(ctx, st, workspaceKey, plan, index.hasRuntime); err != nil {
-		return nil, err
-	}
-	if err := appendControlPlaneWorkflowRuns(ctx, st, workspaceKey, plan); err != nil {
-		return nil, err
-	}
-	if err := appendControlPlaneTaskRuns(ctx, st, workspaceKey, plan); err != nil {
+	if err := appendControlPlaneState(ctx, st, workspaceKey, plan, index); err != nil {
 		return nil, err
 	}
 	if err := applyWorkspaceWorkflowBindings(ctx, st, workspaceKey, plan); err != nil {
@@ -61,6 +40,34 @@ func PlanFromWorkspace(ctx context.Context, st store.Store, workspaceKey string)
 		return nil, err
 	}
 	return plan, nil
+}
+
+func appendControlPlaneState(ctx context.Context, st store.Store, workspaceKey string, plan *Plan, index workspaceDefinitionIndex) error {
+	if err := appendControlPlaneRoles(ctx, st, workspaceKey, plan, index.hasAgent); err != nil {
+		return err
+	}
+	if err := appendControlPlaneAgentInstances(ctx, st, workspaceKey, plan); err != nil {
+		return err
+	}
+	if err := appendControlPlaneAgentSessions(ctx, st, workspaceKey, plan); err != nil {
+		return err
+	}
+	if err := appendControlPlaneTerminalSessions(ctx, st, workspaceKey, plan); err != nil {
+		return err
+	}
+	if err := appendControlPlaneArtifacts(ctx, st, workspaceKey, plan); err != nil {
+		return err
+	}
+	if err := appendControlPlaneWorkflows(ctx, st, workspaceKey, plan, index.hasWorkflow); err != nil {
+		return err
+	}
+	if err := appendControlPlaneRuntimes(ctx, st, workspaceKey, plan, index.hasRuntime); err != nil {
+		return err
+	}
+	if err := appendControlPlaneWorkflowRuns(ctx, st, workspaceKey, plan); err != nil {
+		return err
+	}
+	return appendControlPlaneTaskRuns(ctx, st, workspaceKey, plan)
 }
 
 type workspaceDefinitionIndex struct {
@@ -348,6 +355,51 @@ func agentSessionFromControlPlane(session *domain.AgentSession) AgentSessionModu
 	return module
 }
 
+func appendControlPlaneTerminalSessions(ctx context.Context, st store.Store, workspaceKey string, plan *Plan) error {
+	terminalStore := st.TerminalSessions()
+	if terminalStore == nil {
+		return fmt.Errorf("terminal session store not configured")
+	}
+	terminals, err := terminalStore.List(ctx, workspaceKey, store.TerminalSessionFilter{Limit: 10000})
+	if err != nil {
+		return fmt.Errorf("list terminal sessions: %w", err)
+	}
+	for _, terminal := range terminals {
+		if terminal == nil {
+			continue
+		}
+		plan.TerminalSessions = append(plan.TerminalSessions, terminalSessionFromControlPlane(terminal))
+	}
+	return nil
+}
+
+func terminalSessionFromControlPlane(terminal *domain.TerminalSession) TerminalSessionModule {
+	module := TerminalSessionModule{
+		TerminalID:      terminal.TerminalID,
+		SourcePath:      "control-plane:terminal-session/" + terminal.TerminalID,
+		AgentID:         terminal.AgentID,
+		SessionID:       terminal.SessionID,
+		NodeID:          terminal.NodeID,
+		TaskID:          terminal.TaskID,
+		Title:           terminal.Title,
+		Kind:            terminal.Kind,
+		Status:          terminal.Status,
+		PTYProvider:     terminal.PTYProvider,
+		StreamRef:       terminal.StreamRef,
+		TranscriptRef:   terminal.TranscriptRef,
+		AttachedClients: terminal.AttachedClients,
+		Metadata:        cloneStringMap(terminal.Metadata),
+	}
+	if !terminal.LastSeenAt.IsZero() {
+		lastSeenAt := terminal.LastSeenAt
+		module.LastSeenAt = &lastSeenAt
+	}
+	module.EndedAt = cloneWorkflowRunTime(terminal.EndedAt)
+	module.SourceHash = workspaceHash(module)
+	module.Version = version(module.SourceHash)
+	return module
+}
+
 func appendControlPlaneArtifacts(ctx context.Context, st store.Store, workspaceKey string, plan *Plan) error {
 	artifactStore := st.Artifacts()
 	if artifactStore == nil {
@@ -624,6 +676,7 @@ func sortPlan(plan *Plan) {
 	sort.Slice(plan.Agents, func(i, j int) bool { return plan.Agents[i].Name < plan.Agents[j].Name })
 	sort.Slice(plan.AgentInstances, func(i, j int) bool { return plan.AgentInstances[i].Name < plan.AgentInstances[j].Name })
 	sort.Slice(plan.AgentSessions, func(i, j int) bool { return plan.AgentSessions[i].SessionID < plan.AgentSessions[j].SessionID })
+	sort.Slice(plan.TerminalSessions, func(i, j int) bool { return plan.TerminalSessions[i].TerminalID < plan.TerminalSessions[j].TerminalID })
 	sort.Slice(plan.Artifacts, func(i, j int) bool { return plan.Artifacts[i].ArtifactID < plan.Artifacts[j].ArtifactID })
 	sort.Slice(plan.Workflows, func(i, j int) bool { return plan.Workflows[i].Name < plan.Workflows[j].Name })
 	sort.Slice(plan.WorkflowRuns, func(i, j int) bool { return plan.WorkflowRuns[i].RunID < plan.WorkflowRuns[j].RunID })
