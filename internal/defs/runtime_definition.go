@@ -18,6 +18,9 @@ func applyRuntimeDefinitions(ctx context.Context, st store.Store, workspaceKey, 
 }
 
 func applyRuntimeDefinition(ctx context.Context, st store.Store, workspaceKey, actor string, rt RuntimeModule) error {
+	if rt.Capabilities == nil {
+		rt.Capabilities = runtimeCapabilities("", rt)
+	}
 	manifest := mustJSON(rt)
 	if _, err := st.DefinitionVersions().Apply(ctx, store.DefinitionVersionApply{
 		WorkspaceKey:   workspaceKey,

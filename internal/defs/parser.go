@@ -88,7 +88,7 @@ func parseRuntime(path string, data []byte) RuntimeModule {
 	if name == "" {
 		name = strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 	}
-	return RuntimeModule{
+	runtime := RuntimeModule{
 		Name:               name,
 		Version:            version(hash),
 		SourcePath:         path,
@@ -103,6 +103,8 @@ func parseRuntime(path string, data []byte) RuntimeModule {
 		WorkspaceSkillDirs: runtimeWorkspaceSkillDirs(src),
 		Workspace:          runtimeWorkspacePolicy(src),
 	}
+	runtime.Capabilities = runtimeCapabilities(src, runtime)
+	return runtime
 }
 
 func runtimeWorkspaceSkillDirs(src string) []string {
@@ -139,6 +141,144 @@ func runtimeWorkspacePolicy(src string) *RuntimeWorkspace {
 		return nil
 	}
 	return workspace
+}
+
+func runtimeCapabilities(src string, rt RuntimeModule) *RuntimeCapabilities {
+	local := rt.Provider == domain.RuntimeProviderLocal
+	providerDefault := "provider_default"
+	policy := providerDefault
+	if local {
+		policy = "local"
+	}
+	filesystemPolicy := firstNonEmpty(capabilityStringField(src, "filesystem", "policy"), policy)
+	shellPolicy := firstNonEmpty(capabilityStringField(src, "shell", "policy"), policy)
+	networkPolicy := firstNonEmpty(capabilityStringField(src, "network", "policy"), policy)
+	lifecyclePolicy := firstNonEmpty(capabilityStringField(src, "lifecycle", "policy"), policy)
+	return &RuntimeCapabilities{
+		Filesystem: &RuntimeFilesystemCapabilities{
+			Read:        capabilityBoolPointer(src, "filesystem", "read", boolPointer(local)),
+			Write:       capabilityBoolPointer(src, "filesystem", "write", boolPointer(local)),
+			ArtifactURI: capabilityBoolPointer(src, "filesystem", "artifactURI", boolPointer(true)),
+			Policy:      filesystemPolicy,
+			Persistence: firstNonEmpty(runtimeFilesystemPersistence(rt.Workspace), capabilityStringField(src, "filesystem", "persistence")),
+			Durability:  firstNonEmpty(runtimeFilesystemDurability(rt.Workspace), capabilityStringField(src, "filesystem", "durability")),
+			Retention:   firstNonEmpty(runtimeFilesystemRetention(rt.Workspace), capabilityStringField(src, "filesystem", "retention")),
+		},
+		Shell: &RuntimeShellCapabilities{
+			Enabled:  capabilityBoolPointer(src, "shell", "enabled", boolPointer(local)),
+			Commands: compactStrings(append(capabilityArrayField(src, "shell", "commands"), arrayField(src, "shellCommands")...)),
+			Policy:   shellPolicy,
+		},
+		Network: &RuntimeNetworkCapabilities{
+			Enabled: capabilityBoolPointer(src, "network", "enabled", boolPointer(local)),
+			Policy:  networkPolicy,
+		},
+		Env: &RuntimeEnvCapabilities{
+			Forwarded: cloneStringSlice(rt.Env),
+			Policy:    "allowlist",
+		},
+		Workspace: &RuntimeWorkspaceCapabilities{
+			ProviderWorkspaceID: runtimeProviderWorkspaceID(rt.Workspace),
+			Owner:               runtimeWorkspaceOwner(rt.Workspace),
+			CWD:                 rt.CWD,
+			Repos:               cloneStringSlice(rt.Repos),
+			SkillDirs:           cloneStringSlice(rt.WorkspaceSkillDirs),
+		},
+		Lifecycle: &RuntimeLifecycleCapabilities{
+			Materialize:    capabilityBoolPointer(src, "lifecycle", "materialize", boolPointer(local)),
+			Cleanup:        capabilityBoolPointer(src, "lifecycle", "cleanup", boolPointer(local)),
+			Release:        capabilityBoolPointer(src, "lifecycle", "release", boolPointer(local)),
+			Cancellation:   capabilityBoolPointer(src, "lifecycle", "cancellation", boolPointer(true)),
+			DefaultTimeout: firstNonEmpty(capabilityStringField(src, "lifecycle", "defaultTimeout"), capabilityStringField(src, "lifecycle", "default_timeout")),
+			Policy:         lifecyclePolicy,
+		},
+	}
+}
+
+func runtimeFilesystemPersistence(workspace *RuntimeWorkspace) string {
+	if workspace == nil || workspace.Filesystem == nil {
+		return ""
+	}
+	return workspace.Filesystem.Persistence
+}
+
+func runtimeFilesystemDurability(workspace *RuntimeWorkspace) string {
+	if workspace == nil || workspace.Filesystem == nil {
+		return ""
+	}
+	return workspace.Filesystem.Durability
+}
+
+func runtimeFilesystemRetention(workspace *RuntimeWorkspace) string {
+	if workspace == nil || workspace.Filesystem == nil {
+		return ""
+	}
+	return workspace.Filesystem.Retention
+}
+
+func runtimeProviderWorkspaceID(workspace *RuntimeWorkspace) string {
+	if workspace == nil {
+		return ""
+	}
+	return workspace.ProviderWorkspaceID
+}
+
+func runtimeWorkspaceOwner(workspace *RuntimeWorkspace) string {
+	if workspace == nil {
+		return ""
+	}
+	return workspace.Owner
+}
+
+func capabilityBoolPointer(src, objectName, fieldName string, fallback *bool) *bool {
+	if value, ok := capabilityBoolField(src, objectName, fieldName); ok {
+		return boolPointer(value)
+	}
+	return fallback
+}
+
+func capabilityBoolField(src, objectName, fieldName string) (bool, bool) {
+	re := regexp.MustCompile(`(?s)\b` + regexp.QuoteMeta(objectName) + `\s*:\s*\{[^{}]*\b` + regexp.QuoteMeta(fieldName) + `\s*:\s*(true|false)`)
+	if m := re.FindStringSubmatch(src); len(m) > 1 {
+		return m[1] == "true", true
+	}
+	return false, false
+}
+
+func capabilityStringField(src, objectName, fieldName string) string {
+	re := regexp.MustCompile(`(?s)\b` + regexp.QuoteMeta(objectName) + `\s*:\s*\{[^{}]*\b` + regexp.QuoteMeta(fieldName) + `\s*:\s*['"]([^'"]+)['"]`)
+	if m := re.FindStringSubmatch(src); len(m) > 1 {
+		return strings.TrimSpace(m[1])
+	}
+	return ""
+}
+
+func capabilityArrayField(src, objectName, fieldName string) []string {
+	re := regexp.MustCompile(`(?s)\b` + regexp.QuoteMeta(objectName) + `\s*:\s*\{[^{}]*\b` + regexp.QuoteMeta(fieldName) + `\s*:\s*\[([^\]]*)\]`)
+	m := re.FindStringSubmatch(src)
+	if len(m) < 2 {
+		return nil
+	}
+	itemRe := regexp.MustCompile(`['"]([^'"]+)['"]`)
+	items := itemRe.FindAllStringSubmatch(m[1], -1)
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		out = append(out, strings.TrimSpace(item[1]))
+	}
+	return compactStrings(out)
+}
+
+func boolPointer(value bool) *bool {
+	return &value
+}
+
+func cloneStringSlice(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make([]string, len(values))
+	copy(out, values)
+	return out
 }
 
 func stringField(src, name string) string {

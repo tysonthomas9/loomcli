@@ -18,10 +18,63 @@ type tsContextRuntimeProfile struct {
 	CPU                string                           `json:"cpu,omitempty"`
 	Memory             string                           `json:"memory,omitempty"`
 	Status             string                           `json:"status,omitempty"`
+	Capabilities       *tsContextRuntimeCapabilities    `json:"capabilities,omitempty"`
 	Workspace          *tsContextRuntimeWorkspacePolicy `json:"workspace,omitempty"`
 	CWD                string                           `json:"-"`
 	SourcePath         string                           `json:"-"`
 	WorkspaceSkillDirs []string                         `json:"-"`
+}
+
+type tsContextRuntimeCapabilities struct {
+	Filesystem *tsContextRuntimeFilesystemCapabilities `json:"filesystem,omitempty"`
+	Shell      *tsContextRuntimeShellCapabilities      `json:"shell,omitempty"`
+	Network    *tsContextRuntimeNetworkCapabilities    `json:"network,omitempty"`
+	Env        *tsContextRuntimeEnvCapabilities        `json:"env,omitempty"`
+	Workspace  *tsContextRuntimeWorkspaceCapabilities  `json:"workspace,omitempty"`
+	Lifecycle  *tsContextRuntimeLifecycleCapabilities  `json:"lifecycle,omitempty"`
+}
+
+type tsContextRuntimeFilesystemCapabilities struct {
+	Read        *bool  `json:"read,omitempty"`
+	Write       *bool  `json:"write,omitempty"`
+	ArtifactURI *bool  `json:"artifact_uri,omitempty"`
+	Policy      string `json:"policy,omitempty"`
+	Persistence string `json:"persistence,omitempty"`
+	Durability  string `json:"durability,omitempty"`
+	Retention   string `json:"retention,omitempty"`
+}
+
+type tsContextRuntimeShellCapabilities struct {
+	Enabled  *bool    `json:"enabled,omitempty"`
+	Commands []string `json:"commands,omitempty"`
+	Policy   string   `json:"policy,omitempty"`
+}
+
+type tsContextRuntimeNetworkCapabilities struct {
+	Enabled *bool  `json:"enabled,omitempty"`
+	Policy  string `json:"policy,omitempty"`
+}
+
+type tsContextRuntimeEnvCapabilities struct {
+	Forwarded []string `json:"forwarded,omitempty"`
+	Policy    string   `json:"policy,omitempty"`
+}
+
+type tsContextRuntimeWorkspaceCapabilities struct {
+	ProviderWorkspaceID string   `json:"provider_workspace_id,omitempty"`
+	Owner               string   `json:"owner,omitempty"`
+	CWD                 string   `json:"cwd,omitempty"`
+	Repos               []string `json:"repos,omitempty"`
+	SkillDirs           []string `json:"skill_dirs,omitempty"`
+}
+
+type tsContextRuntimeLifecycleCapabilities struct {
+	Materialize    *bool  `json:"materialize,omitempty"`
+	Cleanup        *bool  `json:"cleanup,omitempty"`
+	Release        *bool  `json:"release,omitempty"`
+	Cancellation   *bool  `json:"cancellation,omitempty"`
+	DefaultTimeout string `json:"default_timeout,omitempty"`
+	Policy         string `json:"policy,omitempty"`
 }
 
 type tsContextRuntimeWorkspacePolicy struct {
@@ -62,6 +115,7 @@ func tsContextRuntimeProfileForDefinition(ctx context.Context, st store.Store, d
 		CPU:                profile.CPU,
 		Memory:             profile.Memory,
 		Status:             string(profile.Status),
+		Capabilities:       manifest.Capabilities,
 		Workspace:          runtimeWorkspacePolicyFromManifest(manifest.Workspace),
 		CWD:                manifest.CWD,
 		SourcePath:         manifest.SourcePath,
@@ -70,9 +124,10 @@ func tsContextRuntimeProfileForDefinition(ctx context.Context, st store.Store, d
 }
 
 func tsContextRuntimeProfileManifest(data json.RawMessage) struct {
-	CWD                string   `json:"cwd"`
-	SourcePath         string   `json:"source_path"`
-	WorkspaceSkillDirs []string `json:"workspace_skill_dirs"`
+	CWD                string                        `json:"cwd"`
+	SourcePath         string                        `json:"source_path"`
+	WorkspaceSkillDirs []string                      `json:"workspace_skill_dirs"`
+	Capabilities       *tsContextRuntimeCapabilities `json:"capabilities"`
 	Workspace          *struct {
 		ProviderWorkspaceID string                            `json:"provider_workspace_id"`
 		Owner               string                            `json:"owner"`
@@ -81,9 +136,10 @@ func tsContextRuntimeProfileManifest(data json.RawMessage) struct {
 	} `json:"workspace"`
 } {
 	var manifest struct {
-		CWD                string   `json:"cwd"`
-		SourcePath         string   `json:"source_path"`
-		WorkspaceSkillDirs []string `json:"workspace_skill_dirs"`
+		CWD                string                        `json:"cwd"`
+		SourcePath         string                        `json:"source_path"`
+		WorkspaceSkillDirs []string                      `json:"workspace_skill_dirs"`
+		Capabilities       *tsContextRuntimeCapabilities `json:"capabilities"`
 		Workspace          *struct {
 			ProviderWorkspaceID string                            `json:"provider_workspace_id"`
 			Owner               string                            `json:"owner"`

@@ -328,6 +328,50 @@ const runtimeTypes = `declare module '@loom/runtime' {
     retention?: string;
   };
 
+  export type RuntimeCapabilities = {
+    filesystem?: {
+      read?: boolean;
+      write?: boolean;
+      artifactURI?: boolean;
+      artifact_uri?: boolean;
+      policy?: 'local' | 'provider_default' | string;
+      persistence?: string;
+      durability?: string;
+      retention?: string;
+    };
+    shell?: {
+      enabled?: boolean;
+      commands?: string[];
+      policy?: 'local' | 'provider_default' | string;
+    };
+    network?: {
+      enabled?: boolean;
+      policy?: 'local' | 'provider_default' | string;
+    };
+    env?: {
+      forwarded?: string[];
+      policy?: 'allowlist' | string;
+    };
+    workspace?: {
+      providerWorkspaceId?: string;
+      provider_workspace_id?: string;
+      owner?: string;
+      cwd?: string;
+      repos?: string[];
+      skillDirs?: string[];
+      skill_dirs?: string[];
+    };
+    lifecycle?: {
+      materialize?: boolean;
+      cleanup?: boolean;
+      release?: boolean;
+      cancellation?: boolean;
+      defaultTimeout?: string;
+      default_timeout?: string;
+      policy?: 'local' | 'provider_default' | string;
+    };
+  };
+
   export type RuntimeWorkspacePolicy = {
     id?: string;
     providerWorkspaceId?: string;
@@ -366,6 +410,7 @@ const runtimeTypes = `declare module '@loom/runtime' {
     filesystemPersistence?: string;
     filesystemDurability?: string;
     filesystemRetention?: string;
+    capabilities?: RuntimeCapabilities;
   };
 
   export type AgentDefinition = {
@@ -486,6 +531,7 @@ const runtimeTypes = `declare module '@loom/runtime' {
     cpu?: string;
     memory?: string;
     status?: string;
+    capabilities?: RuntimeCapabilities;
     workspace?: {
       providerWorkspaceId?: string;
       owner?: string;
@@ -566,6 +612,7 @@ const runtimeTypes = `declare module '@loom/runtime' {
       owner?: string;
       cleanup?: RuntimeCleanupPolicy;
       filesystem?: RuntimeFilesystemPolicy;
+      capabilities?: RuntimeCapabilities;
     };
     repos?: WorkflowWorkspaceRepo[];
     selectedRepos?: string[];

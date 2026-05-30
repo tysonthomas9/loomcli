@@ -41,6 +41,7 @@ type tsContextWorkspaceRuntime struct {
 	Owner               string                            `json:"owner,omitempty"`
 	Cleanup             *tsContextRuntimeCleanupPolicy    `json:"cleanup,omitempty"`
 	Filesystem          *tsContextRuntimeFilesystemPolicy `json:"filesystem,omitempty"`
+	Capabilities        *tsContextRuntimeCapabilities     `json:"capabilities,omitempty"`
 }
 
 type tsContextWorkspaceRepo struct {
@@ -93,6 +94,7 @@ func tsContextWorkspaceForRun(ctx context.Context, st store.Store, run *domain.W
 			workspace.Runtime.Cleanup = profile.Workspace.Cleanup
 			workspace.Runtime.Filesystem = profile.Workspace.Filesystem
 		}
+		workspace.Runtime.Capabilities = profile.Capabilities
 		workspace.SelectedRepos = cloneStrings(profile.Repos)
 	}
 	if len(workspace.SelectedRepos) == 0 {

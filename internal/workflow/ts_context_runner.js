@@ -634,6 +634,7 @@ function makeContext(request, workflow) {
           owner: String(runtimeWorkspace.owner || ""),
           cleanup: jsonSafe(runtimeWorkspace.cleanup || {}),
           filesystem: jsonSafe(runtimeWorkspace.filesystem || {}),
+          capabilities: jsonSafe(runtimeWorkspace.capabilities || {}),
           selectedRepos: jsonSafe(workspace.selectedRepos || runtimeWorkspace.repos || []),
           repoCount: repos.length,
           skillCount: workspaceSkills.length,
@@ -654,6 +655,7 @@ function makeContext(request, workflow) {
             repos: runtimeProfile ? jsonSafe(runtimeProfile.repos || []) : [],
             env: runtimeProfile ? jsonSafe(runtimeProfile.env || []) : [],
             workspace: runtimeProfile ? jsonSafe(runtimeProfile.workspace || {}) : {},
+            capabilities: runtimeProfile ? jsonSafe(runtimeProfile.capabilities || {}) : {},
           },
         });
         return runtimeProfile ? jsonSafe(runtimeProfile) : null;

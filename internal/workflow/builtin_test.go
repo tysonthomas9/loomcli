@@ -898,6 +898,12 @@ export default runtime.local({
     cleanup: { mode: 'after_ttl', ttl: '24h' },
     filesystem: { persistence: 'durable', retention: '7d' },
   },
+  capabilities: {
+    filesystem: { read: true, write: true, artifactURI: true },
+    shell: { enabled: true, commands: ['node', 'npm'] },
+    network: { enabled: false, policy: 'disabled' },
+    lifecycle: { materialize: true, cleanup: true, release: true, cancellation: true, defaultTimeout: '30m' },
+  },
   repos: ['slack-src'],
   env: ['NODE_ENV'],
 });
@@ -926,6 +932,13 @@ export default defineWorkflow({
       cleanupTTL: profile?.workspace?.cleanup?.ttl,
       filesystemPersistence: profile?.workspace?.filesystem?.persistence,
       filesystemRetention: profile?.workspace?.filesystem?.retention,
+      filesystemRead: profile?.capabilities?.filesystem?.read,
+      filesystemWrite: profile?.capabilities?.filesystem?.write,
+      shellEnabled: profile?.capabilities?.shell?.enabled,
+      shellCommands: profile?.capabilities?.shell?.commands ?? [],
+      networkEnabled: profile?.capabilities?.network?.enabled,
+      networkPolicy: profile?.capabilities?.network?.policy,
+      lifecycleTimeout: profile?.capabilities?.lifecycle?.default_timeout,
     };
   },
 });
@@ -966,6 +979,12 @@ export default defineWorkflow({
 		data["filesystemPersistence"] != "durable" || data["filesystemRetention"] != "7d" {
 		t.Fatalf("result data = %+v, want runtime workspace lifecycle metadata", data)
 	}
+	if data["filesystemRead"] != true || data["filesystemWrite"] != true ||
+		data["shellEnabled"] != true || len(stringSliceFromAny(data["shellCommands"])) != 2 ||
+		data["networkEnabled"] != false || data["networkPolicy"] != "disabled" ||
+		data["lifecycleTimeout"] != "30m" {
+		t.Fatalf("result data = %+v, want runtime capability metadata", data)
+	}
 	events, err := st.RunEvents().List(ctx, "TSRUNTIMECTX", store.RunEventFilter{WorkflowRunID: run.RunID})
 	if err != nil {
 		t.Fatalf("list run events: %v", err)
@@ -980,6 +999,18 @@ export default defineWorkflow({
 	workspaceEvent, ok := runtimeEvent["workspace"].(map[string]any)
 	if !ok || workspaceEvent["providerWorkspaceId"] != "local-dev-workspace" || workspaceEvent["owner"] != "loom" {
 		t.Fatalf("runtime event workspace = %+v, want lifecycle metadata evidence", runtimeEvent["workspace"])
+	}
+	capabilitiesEvent, ok := runtimeEvent["capabilities"].(map[string]any)
+	if !ok {
+		t.Fatalf("runtime event capabilities = %+v, want capability metadata evidence", runtimeEvent["capabilities"])
+	}
+	shellEventCaps, ok := capabilitiesEvent["shell"].(map[string]any)
+	if !ok || shellEventCaps["enabled"] != true || len(stringSliceFromAny(shellEventCaps["commands"])) != 2 {
+		t.Fatalf("runtime event shell capabilities = %+v, want shell capability evidence", capabilitiesEvent["shell"])
+	}
+	networkEventCaps, ok := capabilitiesEvent["network"].(map[string]any)
+	if !ok || networkEventCaps["enabled"] != false || networkEventCaps["policy"] != "disabled" {
+		t.Fatalf("runtime event network capabilities = %+v, want network capability evidence", capabilitiesEvent["network"])
 	}
 }
 

@@ -507,6 +507,12 @@ export default runtime.local({
     cleanup: { mode: 'after_ttl', ttl: '24h' },
     filesystem: { persistence: 'durable', retention: '7d' },
   },
+  capabilities: {
+    filesystem: { read: true, write: true, artifactURI: true },
+    shell: { enabled: true, commands: ['node', 'npm'] },
+    network: { enabled: false, policy: 'disabled' },
+    lifecycle: { materialize: true, cleanup: true, release: true, cancellation: true, defaultTimeout: '30m' },
+  },
   repos: ['slack-src'],
   env: ['NODE_ENV'],
   cpu: '2',
@@ -550,6 +556,17 @@ export default defineWorkflow({
 		runtimeDef.Workspace.Filesystem.Retention != "7d" {
 		t.Fatalf("runtime workspace policy = %+v, want lifecycle metadata", runtimeDef.Workspace)
 	}
+	if runtimeDef.Capabilities == nil || runtimeDef.Capabilities.Filesystem == nil ||
+		runtimeDef.Capabilities.Filesystem.Read == nil || !*runtimeDef.Capabilities.Filesystem.Read ||
+		runtimeDef.Capabilities.Filesystem.Write == nil || !*runtimeDef.Capabilities.Filesystem.Write ||
+		runtimeDef.Capabilities.Shell == nil || runtimeDef.Capabilities.Shell.Enabled == nil ||
+		!*runtimeDef.Capabilities.Shell.Enabled || len(runtimeDef.Capabilities.Shell.Commands) != 2 ||
+		runtimeDef.Capabilities.Network == nil || runtimeDef.Capabilities.Network.Enabled == nil ||
+		*runtimeDef.Capabilities.Network.Enabled || runtimeDef.Capabilities.Network.Policy != "disabled" ||
+		runtimeDef.Capabilities.Env == nil || len(runtimeDef.Capabilities.Env.Forwarded) != 1 ||
+		runtimeDef.Capabilities.Lifecycle == nil || runtimeDef.Capabilities.Lifecycle.DefaultTimeout != "30m" {
+		t.Fatalf("runtime capabilities = %+v, want explicit capability matrix", runtimeDef.Capabilities)
+	}
 
 	st := memstore.New()
 	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TSRUNTIME", Name: "TypeScript Runtime"}); err != nil {
@@ -578,6 +595,22 @@ export default defineWorkflow({
 	workspaceManifest, ok := manifest["workspace"].(map[string]any)
 	if !ok || workspaceManifest["provider_workspace_id"] != "local-dev-workspace" || workspaceManifest["owner"] != "loom" {
 		t.Fatalf("runtime profile workspace manifest = %#v, want durable lifecycle metadata", manifest["workspace"])
+	}
+	capabilityManifest, ok := manifest["capabilities"].(map[string]any)
+	if !ok {
+		t.Fatalf("runtime profile capabilities manifest = %#v, want durable capability metadata", manifest["capabilities"])
+	}
+	fsCaps, ok := capabilityManifest["filesystem"].(map[string]any)
+	if !ok || fsCaps["read"] != true || fsCaps["write"] != true || fsCaps["persistence"] != "durable" {
+		t.Fatalf("filesystem capabilities = %#v, want durable filesystem capability metadata", capabilityManifest["filesystem"])
+	}
+	shellCaps, ok := capabilityManifest["shell"].(map[string]any)
+	if !ok || shellCaps["enabled"] != true || len(shellCaps["commands"].([]any)) != 2 {
+		t.Fatalf("shell capabilities = %#v, want durable shell capability metadata", capabilityManifest["shell"])
+	}
+	networkCaps, ok := capabilityManifest["network"].(map[string]any)
+	if !ok || networkCaps["enabled"] != false || networkCaps["policy"] != "disabled" {
+		t.Fatalf("network capabilities = %#v, want durable network capability metadata", capabilityManifest["network"])
 	}
 }
 

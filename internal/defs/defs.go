@@ -94,6 +94,7 @@ type RuntimeModule struct {
 	CWD                string                 `json:"cwd,omitempty"`
 	WorkspaceSkillDirs []string               `json:"workspace_skill_dirs,omitempty"`
 	Workspace          *RuntimeWorkspace      `json:"workspace,omitempty"`
+	Capabilities       *RuntimeCapabilities   `json:"capabilities,omitempty"`
 }
 
 type RuntimeWorkspace struct {
@@ -113,6 +114,58 @@ type RuntimeFilesystemSpec struct {
 	Persistence string `json:"persistence,omitempty"`
 	Durability  string `json:"durability,omitempty"`
 	Retention   string `json:"retention,omitempty"`
+}
+
+type RuntimeCapabilities struct {
+	Filesystem *RuntimeFilesystemCapabilities `json:"filesystem,omitempty"`
+	Shell      *RuntimeShellCapabilities      `json:"shell,omitempty"`
+	Network    *RuntimeNetworkCapabilities    `json:"network,omitempty"`
+	Env        *RuntimeEnvCapabilities        `json:"env,omitempty"`
+	Workspace  *RuntimeWorkspaceCapabilities  `json:"workspace,omitempty"`
+	Lifecycle  *RuntimeLifecycleCapabilities  `json:"lifecycle,omitempty"`
+}
+
+type RuntimeFilesystemCapabilities struct {
+	Read        *bool  `json:"read,omitempty"`
+	Write       *bool  `json:"write,omitempty"`
+	ArtifactURI *bool  `json:"artifact_uri,omitempty"`
+	Policy      string `json:"policy,omitempty"`
+	Persistence string `json:"persistence,omitempty"`
+	Durability  string `json:"durability,omitempty"`
+	Retention   string `json:"retention,omitempty"`
+}
+
+type RuntimeShellCapabilities struct {
+	Enabled  *bool    `json:"enabled,omitempty"`
+	Commands []string `json:"commands,omitempty"`
+	Policy   string   `json:"policy,omitempty"`
+}
+
+type RuntimeNetworkCapabilities struct {
+	Enabled *bool  `json:"enabled,omitempty"`
+	Policy  string `json:"policy,omitempty"`
+}
+
+type RuntimeEnvCapabilities struct {
+	Forwarded []string `json:"forwarded,omitempty"`
+	Policy    string   `json:"policy,omitempty"`
+}
+
+type RuntimeWorkspaceCapabilities struct {
+	ProviderWorkspaceID string   `json:"provider_workspace_id,omitempty"`
+	Owner               string   `json:"owner,omitempty"`
+	CWD                 string   `json:"cwd,omitempty"`
+	Repos               []string `json:"repos,omitempty"`
+	SkillDirs           []string `json:"skill_dirs,omitempty"`
+}
+
+type RuntimeLifecycleCapabilities struct {
+	Materialize    *bool  `json:"materialize,omitempty"`
+	Cleanup        *bool  `json:"cleanup,omitempty"`
+	Release        *bool  `json:"release,omitempty"`
+	Cancellation   *bool  `json:"cancellation,omitempty"`
+	DefaultTimeout string `json:"default_timeout,omitempty"`
+	Policy         string `json:"policy,omitempty"`
 }
 
 type SkillModule struct {

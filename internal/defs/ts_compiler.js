@@ -597,7 +597,7 @@ function runtimeModule(file) {
   if (!value || value.__loomType !== "runtime") {
     throw new Error(`${file}: default export must be runtime.local/podman/remote(...)`);
   }
-  return {
+  const module = {
     name: stringValue(value.name || path.basename(file, ".ts")),
     version: version(hash),
     source_path: file,
@@ -612,6 +612,8 @@ function runtimeModule(file) {
     workspace_skill_dirs: stringArray(value.workspaceSkillDirs || value.workspace_skill_dirs),
     workspace: runtimeWorkspacePolicy(value),
   };
+  module.capabilities = runtimeCapabilities(value, module);
+  return module;
 }
 
 function runtimeWorkspacePolicy(value) {
@@ -656,6 +658,67 @@ function runtimeWorkspacePolicy(value) {
   });
 }
 
+function runtimeCapabilities(value, module) {
+  const provider = stringValue(module.provider || value.provider || "local");
+  const local = provider === "local";
+  const policy = local ? "local" : "provider_default";
+  const caps = value.capabilities && typeof value.capabilities === "object" ? value.capabilities : {};
+  const filesystem = caps.filesystem && typeof caps.filesystem === "object" ? caps.filesystem : {};
+  const shell = caps.shell && typeof caps.shell === "object" ? caps.shell : {};
+  const network = caps.network && typeof caps.network === "object" ? caps.network : {};
+  const lifecycle = caps.lifecycle && typeof caps.lifecycle === "object" ? caps.lifecycle : {};
+  const workspaceCaps = caps.workspace && typeof caps.workspace === "object" ? caps.workspace : {};
+  const workspace = module.workspace && typeof module.workspace === "object" ? module.workspace : {};
+  const workspaceFilesystem = workspace.filesystem && typeof workspace.filesystem === "object" ? workspace.filesystem : {};
+  return compactObjectKeepFalse({
+    filesystem: compactObjectKeepFalse({
+      read: boolOr(filesystem.read, local),
+      write: boolOr(filesystem.write, local),
+      artifact_uri: boolOr(filesystem.artifactURI ?? filesystem.artifact_uri, true),
+      policy: stringValue(filesystem.policy || policy),
+      persistence: stringValue(filesystem.persistence || workspaceFilesystem.persistence),
+      durability: stringValue(filesystem.durability || workspaceFilesystem.durability),
+      retention: stringValue(filesystem.retention || workspaceFilesystem.retention),
+    }),
+    shell: compactObjectKeepFalse({
+      enabled: boolOr(shell.enabled, local),
+      commands: stringArray(shell.commands || value.shellCommands || value.shell_commands),
+      policy: stringValue(shell.policy || policy),
+    }),
+    network: compactObjectKeepFalse({
+      enabled: boolOr(network.enabled, local),
+      policy: stringValue(network.policy || policy),
+    }),
+    env: compactObjectKeepFalse({
+      forwarded: stringArray(module.env),
+      policy: "allowlist",
+    }),
+    workspace: compactObjectKeepFalse({
+      provider_workspace_id: stringValue(
+        workspaceCaps.providerWorkspaceId ||
+          workspaceCaps.provider_workspace_id ||
+          workspace.provider_workspace_id,
+      ),
+      owner: stringValue(workspaceCaps.owner || workspace.owner),
+      cwd: stringValue(workspaceCaps.cwd || module.cwd),
+      repos: stringArray(workspaceCaps.repos || module.repos),
+      skill_dirs: stringArray(workspaceCaps.skillDirs || workspaceCaps.skill_dirs || module.workspace_skill_dirs),
+    }),
+    lifecycle: compactObjectKeepFalse({
+      materialize: boolOr(lifecycle.materialize, local),
+      cleanup: boolOr(lifecycle.cleanup, local),
+      release: boolOr(lifecycle.release, local),
+      cancellation: boolOr(lifecycle.cancellation, true),
+      default_timeout: stringValue(lifecycle.defaultTimeout || lifecycle.default_timeout),
+      policy: stringValue(lifecycle.policy || policy),
+    }),
+  });
+}
+
+function boolOr(value, fallback) {
+  return typeof value === "boolean" ? value : fallback;
+}
+
 function workflowModule(file) {
   const data = fs.readFileSync(file, "utf8");
   const hash = hashSource(data);
@@ -697,6 +760,18 @@ function compactObject(item) {
     if (Array.isArray(v) && v.length === 0) continue;
     if (v && typeof v === "object" && !Array.isArray(v) && Object.keys(v).length === 0) continue;
     if (v === "" || v === false || v === 0) continue;
+    out[k] = v;
+  }
+  return out;
+}
+
+function compactObjectKeepFalse(item) {
+  const out = {};
+  for (const [k, v] of Object.entries(item || {})) {
+    if (v === undefined || v === null) continue;
+    if (Array.isArray(v) && v.length === 0) continue;
+    if (v && typeof v === "object" && !Array.isArray(v) && Object.keys(v).length === 0) continue;
+    if (v === "" || v === 0) continue;
     out[k] = v;
   }
   return out;
