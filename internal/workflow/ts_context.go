@@ -355,57 +355,60 @@ func appendTSLogEvent(ctx context.Context, st store.Store, run *domain.WorkflowR
 	})
 }
 
-//nolint:cyclop,gocognit // This switch is the explicit WorkflowContext operation admission allowlist.
 func applyTSOperations(ctx context.Context, st store.Store, run *domain.WorkflowRun, parentID string, operations []tsWorkflowOperation) (tsAppliedOperations, error) {
 	applied := tsAppliedOperations{TaskRuns: make([]*domain.TaskRun, 0)}
 	for _, op := range operations {
-		switch op.Type {
-		case "taskRuns.ensure":
-			taskRun, err := applyEnsureTaskRunOperation(ctx, st, run, parentID, op.Params)
-			if err != nil {
-				return tsAppliedOperations{}, err
-			}
-			applied.TaskRuns = append(applied.TaskRuns, taskRun)
-		case "taskRuns.wait":
-			setAppliedWaitCondition(&applied, applyTaskRunsWaitOperation(ctx, st, run, op.Params))
-		case "taskClaims.wait":
-			setAppliedWaitCondition(&applied, applyTaskClaimsWaitOperation(ctx, st, run, op.Params))
-		case "workflow.waitUntil":
-			waitCondition, err := applyWorkflowWaitUntilOperation(ctx, st, run, op.Params)
-			if err != nil {
-				return tsAppliedOperations{}, err
-			}
-			setAppliedWaitCondition(&applied, waitCondition)
-		case "workflow.cancel":
-			cancelled, err := applyWorkflowCancelOperation(ctx, st, run, op.Params)
-			if err != nil {
-				return tsAppliedOperations{}, err
-			}
-			applied.Cancelled = true
-			applied.Run = cancelled
-		case "tools.call":
-			appendToolCallEvent(ctx, st, run, op.Params)
-		case "artifacts.record":
-			if err := applyRecordArtifactOperation(ctx, st, run, op.Params); err != nil {
-				return tsAppliedOperations{}, err
-			}
-		case "agents.session":
-			if err := applyInitializeAgentSessionOperation(ctx, st, run, op.Params); err != nil {
-				return tsAppliedOperations{}, err
-			}
-		case "agents.session.operation":
-			if err := appendAgentSessionOperationEvent(ctx, st, run, op.Params); err != nil {
-				return tsAppliedOperations{}, err
-			}
-		case "agents.dispatch":
-			if err := appendAgentDispatchAdmittedEvent(ctx, st, run, op.Params); err != nil {
-				return tsAppliedOperations{}, err
-			}
-		default:
-			return tsAppliedOperations{}, fmt.Errorf("unsupported WorkflowContext operation %q", op.Type)
+		if err := applyTSOperation(ctx, st, run, parentID, &applied, op); err != nil {
+			return tsAppliedOperations{}, err
 		}
 	}
 	return applied, nil
+}
+
+//nolint:cyclop // This switch is the explicit WorkflowContext operation admission allowlist.
+func applyTSOperation(ctx context.Context, st store.Store, run *domain.WorkflowRun, parentID string, applied *tsAppliedOperations, op tsWorkflowOperation) error {
+	switch op.Type {
+	case "taskRuns.ensure":
+		taskRun, err := applyEnsureTaskRunOperation(ctx, st, run, parentID, op.Params)
+		if err != nil {
+			return err
+		}
+		applied.TaskRuns = append(applied.TaskRuns, taskRun)
+	case "taskRuns.wait":
+		setAppliedWaitCondition(applied, applyTaskRunsWaitOperation(ctx, st, run, op.Params))
+	case "taskClaims.wait":
+		setAppliedWaitCondition(applied, applyTaskClaimsWaitOperation(ctx, st, run, op.Params))
+	case "workflow.waitUntil":
+		waitCondition, err := applyWorkflowWaitUntilOperation(ctx, st, run, op.Params)
+		if err != nil {
+			return err
+		}
+		setAppliedWaitCondition(applied, waitCondition)
+	case "workflow.cancel":
+		cancelled, err := applyWorkflowCancelOperation(ctx, st, run, op.Params)
+		if err != nil {
+			return err
+		}
+		applied.Cancelled = true
+		applied.Run = cancelled
+	case "tools.call":
+		appendToolCallEvent(ctx, st, run, op.Params)
+	case "artifacts.record":
+		return applyRecordArtifactOperation(ctx, st, run, op.Params)
+	case "files.write":
+		return applyStageFileOperation(ctx, st, run, op.Params)
+	case "files.read":
+		appendFileReadEvent(ctx, st, run, op.Params)
+	case "agents.session":
+		return applyInitializeAgentSessionOperation(ctx, st, run, op.Params)
+	case "agents.session.operation":
+		return appendAgentSessionOperationEvent(ctx, st, run, op.Params)
+	case "agents.dispatch":
+		return appendAgentDispatchAdmittedEvent(ctx, st, run, op.Params)
+	default:
+		return fmt.Errorf("unsupported WorkflowContext operation %q", op.Type)
+	}
+	return nil
 }
 
 func setAppliedWaitCondition(applied *tsAppliedOperations, waitCondition string) {
@@ -524,12 +527,64 @@ func appendAgentDispatchAdmittedEvent(ctx context.Context, st store.Store, run *
 }
 
 func applyRecordArtifactOperation(ctx context.Context, st store.Store, run *domain.WorkflowRun, params map[string]any) error {
+	artifact, err := createWorkflowArtifact(ctx, st, run, params, "artifacts.record requires uri")
+	if err != nil {
+		return err
+	}
+	_, _ = st.RunEvents().Append(ctx, store.RunEventAppend{
+		WorkspaceKey:  run.WorkspaceKey,
+		WorkflowRunID: run.RunID,
+		Type:          "artifact_recorded",
+		Message:       "workflow artifact recorded",
+		Data: mustJSON(map[string]string{
+			"artifact_id": artifact.ArtifactID,
+			"type":        artifact.Type,
+			"uri":         artifact.URI,
+			"task_id":     artifact.TaskID,
+		}),
+	})
+	return nil
+}
+
+func applyStageFileOperation(ctx context.Context, st store.Store, run *domain.WorkflowRun, params map[string]any) error {
+	artifact, err := createWorkflowArtifact(ctx, st, run, params, "files.write requires uri")
+	if err != nil {
+		return err
+	}
+	data := copyAnyMap(params)
+	data["artifact_id"] = artifact.ArtifactID
+	data["workflow_run_id"] = run.RunID
+	data["visibility"] = "controller"
+	_, _ = st.RunEvents().Append(ctx, store.RunEventAppend{
+		WorkspaceKey:  run.WorkspaceKey,
+		WorkflowRunID: run.RunID,
+		Type:          "workflow_file_staged",
+		Message:       "workflow controller staged file",
+		Data:          mustJSON(data),
+	})
+	return nil
+}
+
+func appendFileReadEvent(ctx context.Context, st store.Store, run *domain.WorkflowRun, params map[string]any) {
+	data := copyAnyMap(params)
+	data["workflow_run_id"] = run.RunID
+	data["visibility"] = "controller"
+	_, _ = st.RunEvents().Append(ctx, store.RunEventAppend{
+		WorkspaceKey:  run.WorkspaceKey,
+		WorkflowRunID: run.RunID,
+		Type:          "workflow_file_read",
+		Message:       "workflow controller read staged file",
+		Data:          mustJSON(data),
+	})
+}
+
+func createWorkflowArtifact(ctx context.Context, st store.Store, run *domain.WorkflowRun, params map[string]any, missingURI string) (*domain.Artifact, error) {
 	if st.Artifacts() == nil {
-		return fmt.Errorf("artifact store not configured")
+		return nil, fmt.Errorf("artifact store not configured")
 	}
 	uri := firstString(params, "uri")
 	if uri == "" {
-		return fmt.Errorf("artifacts.record requires uri")
+		return nil, errors.New(missingURI)
 	}
 	artifactType := firstString(params, "type", "kind")
 	if artifactType == "" {
@@ -553,21 +608,9 @@ func applyRecordArtifactOperation(ctx context.Context, st store.Store, run *doma
 		Metadata:     stringMap(params["metadata"]),
 	})
 	if err != nil {
-		return fmt.Errorf("record workflow artifact %s: %w", artifactID, err)
+		return nil, fmt.Errorf("record workflow artifact %s: %w", artifactID, err)
 	}
-	_, _ = st.RunEvents().Append(ctx, store.RunEventAppend{
-		WorkspaceKey:  run.WorkspaceKey,
-		WorkflowRunID: run.RunID,
-		Type:          "artifact_recorded",
-		Message:       "workflow artifact recorded",
-		Data: mustJSON(map[string]string{
-			"artifact_id": artifact.ArtifactID,
-			"type":        artifact.Type,
-			"uri":         artifact.URI,
-			"task_id":     artifact.TaskID,
-		}),
-	})
-	return nil
+	return artifact, nil
 }
 
 func applyInitializeAgentSessionOperation(ctx context.Context, st store.Store, run *domain.WorkflowRun, params map[string]any) error {
@@ -690,7 +733,7 @@ func appendAgentSessionOperationEvent(ctx context.Context, st store.Store, run *
 	data["agent_id"] = agentID
 	data["session_id"] = sessionID
 	data["operation"] = operation
-	data["visibility"] = "model"
+	data["visibility"] = agentSessionOperationVisibility(operation)
 	if _, ok := data["status"]; !ok {
 		data["status"] = "admitted"
 	}
@@ -713,11 +756,18 @@ func appendAgentSessionOperationEvent(ctx context.Context, st store.Store, run *
 
 func validAgentSessionOperation(operation string) bool {
 	switch operation {
-	case "prompt", "skill", "task", "shell":
+	case "prompt", "skill", "task", "shell", "compact":
 		return true
 	default:
 		return false
 	}
+}
+
+func agentSessionOperationVisibility(operation string) string {
+	if operation == "compact" {
+		return "controller"
+	}
+	return "model"
 }
 
 func applyEnsureTaskRunOperation(ctx context.Context, st store.Store, run *domain.WorkflowRun, parentID string, params map[string]any) (*domain.TaskRun, error) {

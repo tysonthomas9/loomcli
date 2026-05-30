@@ -1,4 +1,6 @@
 const fs = require("fs");
+const crypto = require("crypto");
+const os = require("os");
 const path = require("path");
 const vm = require("vm");
 const { stripTypeScriptTypes } = require("node:module");
@@ -149,6 +151,79 @@ function resolveRelativeImport(fromFile, spec) {
   throw new Error(`${fromFile}: cannot resolve import ${spec}`);
 }
 
+function safeRelativePath(value) {
+  const raw = String(value || "").trim();
+  if (!raw) throw new Error("staging path is required");
+  if (path.isAbsolute(raw)) throw new Error(`staging path must be relative: ${raw}`);
+  const normalized = path.posix.normalize(raw.replace(/\\/g, "/"));
+  if (normalized === "." || normalized === ".." || normalized.startsWith("../")) {
+    throw new Error(`staging path escapes workflow staging root: ${raw}`);
+  }
+  return normalized;
+}
+
+function makeWorkflowFiles(request, operations) {
+  let stagingRoot = "";
+  const ensureRoot = () => {
+    if (!stagingRoot) {
+      const runPart = String(request.id || "workflow").replace(/[^A-Za-z0-9_.-]/g, "_");
+      stagingRoot = fs.mkdtempSync(path.join(os.tmpdir(), `loom-workflow-${runPart}-`));
+    }
+    return stagingRoot;
+  };
+  const checksum = (text) => `sha256:${crypto.createHash("sha256").update(text).digest("hex")}`;
+  const writeText = async (relativePath, content, options = {}) => {
+    const rel = safeRelativePath(relativePath);
+    const text = String(content ?? "");
+    const abs = path.join(ensureRoot(), rel);
+    fs.mkdirSync(path.dirname(abs), { recursive: true });
+    fs.writeFileSync(abs, text, "utf8");
+    const params = {
+      path: rel,
+      uri: `file://${abs}`,
+      type: options.type || options.artifactType || options.artifact_type || "staging",
+      summary: options.summary,
+      mimeType: options.mimeType || options.mime_type || "text/plain; charset=utf-8",
+      sizeBytes: Buffer.byteLength(text, "utf8"),
+      checksum: checksum(text),
+      metadata: {
+        ...(options.metadata || {}),
+        path: rel,
+        source: "workflow_context_staging",
+      },
+      visibility: "controller",
+    };
+    operations.push({ type: "files.write", params });
+    return { accepted: true, ...params };
+  };
+  const readText = async (relativePath) => {
+    const rel = safeRelativePath(relativePath);
+    const abs = path.join(ensureRoot(), rel);
+    const text = fs.readFileSync(abs, "utf8");
+    operations.push({
+      type: "files.read",
+      params: {
+        path: rel,
+        uri: `file://${abs}`,
+        sizeBytes: Buffer.byteLength(text, "utf8"),
+        checksum: checksum(text),
+        visibility: "controller",
+      },
+    });
+    return text;
+  };
+  return {
+    writeText,
+    readText,
+    writeJSON: (relativePath, value, options = {}) =>
+      writeText(relativePath, JSON.stringify(value ?? null, null, 2), {
+        mimeType: "application/json",
+        ...options,
+      }),
+    readJSON: async (relativePath) => JSON.parse(await readText(relativePath)),
+  };
+}
+
 function makeContext(request, workflow) {
   const logs = [];
   const operations = [];
@@ -176,6 +251,7 @@ function makeContext(request, workflow) {
     logs.push({ level, message: String(message || ""), attributes: attributes || {} });
   };
   const tools = workflowTools(workflow, operations);
+  const files = makeWorkflowFiles(request, operations);
   const requestContext = request.request || {};
   const taskRunFilter = (options = {}) => {
     let out = taskRuns.slice();
@@ -379,7 +455,14 @@ function makeContext(request, workflow) {
         operations.push(op);
         return { accepted: true, ...op.params };
       },
+      create: async (params) => {
+        const op = { type: "artifacts.record", params: params || {} };
+        operations.push(op);
+        return { accepted: true, ...op.params };
+      },
     },
+    files,
+    staging: files,
     agents: {
       session: async (params) => {
         const op = { type: "agents.session", params: params || {} };
@@ -456,6 +539,7 @@ function sessionHandle(operations, session) {
     skill: (input) => call("skill", input),
     task: (input) => call("task", input),
     shell: (input) => call("shell", input),
+    compact: (input) => call("compact", input),
   };
 }
 

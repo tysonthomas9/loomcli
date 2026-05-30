@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
@@ -456,6 +457,87 @@ export default defineWorkflow({
 	}
 	if !hasWorkflowEvent(events, "artifact_recorded") || !hasWorkflowEvent(events, "workflow_completed") {
 		t.Fatalf("events = %+v, want artifact recording and completion evidence", events)
+	}
+}
+
+func TestCodeDefinedWorkflowContextStagesFilesAndCompactsSession(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	workflowPath := filepath.Join(root, ".loom", "workflows", "context-staging.ts")
+	if err := os.MkdirAll(filepath.Dir(workflowPath), 0o755); err != nil {
+		t.Fatalf("mkdir workflow dir: %v", err)
+	}
+	if err := os.WriteFile(workflowPath, []byte(`import { defineWorkflow } from '@loom/runtime';
+
+export default defineWorkflow({
+  name: 'context-staging',
+  async run(ctx) {
+    const staged = await ctx.staging.writeText('reports/summary.md', '# Summary\nready', {
+      summary: 'controller-staged report',
+      metadata: { source: 'workflow-context' },
+    });
+    const reread = await ctx.files.readText('reports/summary.md');
+    const session = await ctx.agents.session({
+      agentId: 'worker-staging',
+      taskId: String(ctx.input.taskId ?? ''),
+      sessionName: 'phase-one',
+    });
+    const compacted = await session.compact({ reason: 'phase boundary' });
+    return {
+      stagedUri: staged.uri,
+      reread,
+      compactOperation: compacted.operation,
+    };
+  },
+});
+`), 0o644); err != nil {
+		t.Fatalf("write workflow: %v", err)
+	}
+	plan, err := defspkg.Load(root)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TSSTAGE", Name: "TypeScript Staging Context"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := defspkg.Apply(ctx, st, "TSSTAGE", "atlas", plan); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	run, err := CreateOrResumeRun(ctx, st, "TSSTAGE", "context-staging", json.RawMessage(`{"taskId":"TASK-STAGE"}`), "atlas")
+	if err != nil {
+		t.Fatalf("CreateOrResumeRun() error = %v", err)
+	}
+	result, err := RunOnce(ctx, st, clitest.NewMockIssueBackend(), run)
+	if err != nil {
+		t.Fatalf("RunOnce() error = %v", err)
+	}
+	if result.Run == nil || result.Run.Status != domain.WorkflowRunCompleted {
+		t.Fatalf("result = %+v, want completed staging workflow", result)
+	}
+	artifacts, err := st.Artifacts().List(ctx, "TSSTAGE", store.ArtifactFilter{TaskID: "", Type: "staging"})
+	if err != nil {
+		t.Fatalf("list staged artifacts: %v", err)
+	}
+	if len(artifacts) != 1 || !strings.HasPrefix(artifacts[0].URI, "file://") ||
+		artifacts[0].MIMEType != "text/plain; charset=utf-8" ||
+		artifacts[0].SizeBytes != int64(len("# Summary\nready")) ||
+		!strings.HasPrefix(artifacts[0].Checksum, "sha256:") ||
+		artifacts[0].Metadata["path"] != "reports/summary.md" ||
+		artifacts[0].Metadata["source"] != "workflow_context_staging" {
+		t.Fatalf("artifacts = %+v, want controller-staged file artifact", artifacts)
+	}
+	events, err := st.RunEvents().List(ctx, "TSSTAGE", store.RunEventFilter{WorkflowRunID: run.RunID})
+	if err != nil {
+		t.Fatalf("list run events: %v", err)
+	}
+	if !hasWorkflowEvent(events, "workflow_file_staged") || !hasWorkflowEvent(events, "workflow_file_read") ||
+		!hasWorkflowEvent(events, "workflow_completed") {
+		t.Fatalf("events = %+v, want staged/read file and completion evidence", events)
+	}
+	compactEvent := workflowEventDataByOperation(t, events, "compact")
+	if compactEvent["status"] != "completed" || compactEvent["visibility"] != "controller" {
+		t.Fatalf("compact event = %+v, want completed controller compaction evidence", compactEvent)
 	}
 }
 

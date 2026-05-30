@@ -411,6 +411,7 @@ const runtimeTypes = `declare module '@loom/runtime' {
     skill<T = WorkflowAgentSessionOperationReceipt>(input: WorkflowAgentSessionOperationInput<T>): Promise<T>;
     task<T = WorkflowAgentSessionOperationReceipt>(input: WorkflowAgentSessionOperationInput<T>): Promise<T>;
     shell<T = WorkflowAgentSessionOperationReceipt>(input: WorkflowAgentSessionOperationInput<T>): Promise<T>;
+    compact<T = WorkflowAgentSessionOperationReceipt>(input?: WorkflowAgentSessionOperationInput<T>): Promise<T>;
   };
 
   export type WorkflowAgentSessionOperationInput<T = unknown> = Record<string, unknown> & {
@@ -427,10 +428,42 @@ const runtimeTypes = `declare module '@loom/runtime' {
 
   export type WorkflowAgentSessionOperationReceipt = Record<string, unknown> & {
     accepted: boolean;
-    operation: 'prompt' | 'skill' | 'task' | 'shell';
+    operation: 'prompt' | 'skill' | 'task' | 'shell' | 'compact';
     agentId?: string;
     sessionId?: string;
     sessionName?: string;
+  };
+
+  export type WorkflowStagedFile = Record<string, unknown> & {
+    accepted: boolean;
+    path: string;
+    uri: string;
+    type?: string;
+    summary?: string;
+    mimeType?: string;
+    mime_type?: string;
+    sizeBytes?: number;
+    size_bytes?: number;
+    checksum?: string;
+    metadata?: Record<string, string>;
+    visibility: 'controller';
+  };
+
+  export type WorkflowFileWriteOptions = {
+    type?: string;
+    artifactType?: string;
+    artifact_type?: string;
+    summary?: string;
+    mimeType?: string;
+    mime_type?: string;
+    metadata?: Record<string, string>;
+  };
+
+  export type WorkflowFileController = {
+    writeText(path: string, content: string, options?: WorkflowFileWriteOptions): Promise<WorkflowStagedFile>;
+    readText(path: string): Promise<string>;
+    writeJSON(path: string, value: unknown, options?: WorkflowFileWriteOptions): Promise<WorkflowStagedFile>;
+    readJSON<T = unknown>(path: string): Promise<T>;
   };
 
   export type WorkflowAgentHarness = {
@@ -518,7 +551,26 @@ const runtimeTypes = `declare module '@loom/runtime' {
         work_item_id?: string;
         metadata?: Record<string, string>;
       }): Promise<Record<string, unknown>>;
+      create(input: {
+        artifactId?: string;
+        artifact_id?: string;
+        type?: string;
+        uri: string;
+        summary?: string;
+        mimeType?: string;
+        mime_type?: string;
+        sizeBytes?: number;
+        size_bytes?: number;
+        checksum?: string;
+        taskId?: string;
+        task_id?: string;
+        workItemId?: string;
+        work_item_id?: string;
+        metadata?: Record<string, string>;
+      }): Promise<Record<string, unknown>>;
     };
+    files: WorkflowFileController;
+    staging: WorkflowFileController;
     tools: Record<string, (args?: Record<string, unknown>) => Promise<unknown>>;
     tool(name: string, args?: Record<string, unknown>): Promise<unknown>;
   };
