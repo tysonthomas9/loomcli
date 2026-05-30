@@ -15,8 +15,9 @@ import (
 )
 
 var (
-	defsDir  string
-	defsJSON bool
+	defsDir           string
+	defsJSON          bool
+	defsFromWorkspace bool
 )
 
 var defsCmd = &cobra.Command{
@@ -49,6 +50,7 @@ var defsApplyCmd = &cobra.Command{
 func init() {
 	defsCmd.PersistentFlags().StringVar(&defsDir, "dir", ".", "Directory containing optional .loom definitions")
 	defsCmd.PersistentFlags().BoolVar(&defsJSON, "json", false, "JSON output")
+	defsPlanCmd.Flags().BoolVar(&defsFromWorkspace, "from-workspace", false, "Read durable definitions from the active Loom workspace instead of local source")
 	defsCmd.AddCommand(defsCheckCmd, defsPlanCmd, defsApplyCmd)
 	cli.RegisterCommand(defsCmd)
 }
@@ -66,6 +68,19 @@ func runDefsCheck(_ *cobra.Command, _ []string) error {
 }
 
 func runDefsPlan(_ *cobra.Command, _ []string) error {
+	if defsFromWorkspace {
+		return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
+			plan, err := defspkg.PlanFromWorkspace(ctx, h.Store, ws)
+			if err != nil {
+				return err
+			}
+			if defsJSON {
+				return cmdstore.WriteJSON(plan)
+			}
+			printPlan(plan)
+			return nil
+		})
+	}
 	plan, err := defspkg.Load(defsDir)
 	if err != nil {
 		return err
