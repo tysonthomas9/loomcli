@@ -151,6 +151,14 @@ export const IssueCard = memo(function IssueCard({
   // releases the task at handoff.
   const isAgentMissing =
     columnId === "in_progress" && !!issue.assignee && !assignedAgent;
+  // A stalled agent isn't on this task (current_task_id won't match), so look
+  // it up by name to surface WHY it stopped — its last failed run's error_class
+  // — alongside "agent missing" instead of just the bare label.
+  const assigneeName = issue.assignee?.replace(/^\[H\]\s*/, "");
+  const assigneeAgent = assigneeName
+    ? agents.find((a) => a.name === assigneeName)
+    : undefined;
+  const assigneeLastErrorClass = assigneeAgent?.last_error_class;
 
   const rootClassName = className
     ? `${styles.issueCard} ${className}`
@@ -321,6 +329,7 @@ export const IssueCard = memo(function IssueCard({
               : (assignedAgent?.last_activity_at ?? null)
           }
           agentMissing={isAgentMissing}
+          lastErrorClass={isReviewColumn ? undefined : assigneeLastErrorClass}
         />
       )}
     </article>

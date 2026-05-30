@@ -2629,6 +2629,8 @@ export interface components {
       active_task_id?: string;
       /** @description Phase of the agent's live session (e.g. "planning", "implementation"), set only when live_status == "working". */
       active_phase?: string;
+      /** @description Fleet-db's DERIVED error_class of the agent's most recent terminal session, set only when that latest run failed and the agent is currently idle (a newer success clears it). Lets the UI explain a stalled idle agent (e.g. "SpawnFailure") instead of a bare "agent missing". Absent when liveness was not computed or the last run succeeded. */
+      last_error_class?: string;
     };
     MonitorCommitDetail: {
       hash: string;

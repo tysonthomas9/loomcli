@@ -234,6 +234,55 @@ describe("AgentRow", () => {
       expect(activity).toHaveAttribute("data-state", "missing");
     });
 
+    it('enriches "agent missing" with the failure reason when lastErrorClass is known', () => {
+      const { container } = render(
+        <AgentRow
+          {...createProps({
+            agentName: "worker2",
+            agentMissing: true,
+            lastErrorClass: "SpawnFailure",
+          })}
+        />,
+      );
+      expect(
+        screen.getByText("agent missing · launch failed"),
+      ).toBeInTheDocument();
+      const activity = container.querySelector('[class*="activity"]');
+      expect(activity).toHaveAttribute("data-state", "missing");
+      // Raw class is preserved as the hover title for precision.
+      expect(activity).toHaveAttribute("title", "SpawnFailure");
+    });
+
+    it("renders an unknown error_class as a generic red 'run failed'", () => {
+      const { container } = render(
+        <AgentRow
+          {...createProps({ agentMissing: true, lastErrorClass: "Wat" })}
+        />,
+      );
+      expect(
+        screen.getByText("agent missing · run failed"),
+      ).toBeInTheDocument();
+      expect(container.querySelector('[class*="activity"]')).toHaveAttribute(
+        "data-state",
+        "missing",
+      );
+    });
+
+    it("shows the failure reason in red for an idle (not-missing) agent whose last run failed", () => {
+      const { container } = render(
+        <AgentRow
+          {...createProps({
+            agentMissing: false,
+            lastErrorClass: "RateLimited",
+          })}
+        />,
+      );
+      const activity = container.querySelector('[class*="activity"]');
+      expect(screen.getByText("rate limited")).toBeInTheDocument();
+      expect(activity).toHaveAttribute("data-state", "missing");
+      expect(activity).toHaveAttribute("title", "RateLimited");
+    });
+
     it("suppresses the status dot when agentMissing is true (live status is meaningless)", () => {
       const { container } = render(
         <AgentRow

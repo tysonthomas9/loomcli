@@ -3,12 +3,14 @@
  * Shows mini avatar with status dot, agent name, and activity text.
  *
  * Activity slot resolution order (first non-null wins):
- *   1. agentMissing → red "agent missing"
- *   2. activity prop with lastActivityAt → "<activity> · active Ns ago"
- *   3. activity prop alone → unchanged (existing behavior)
- *   4. lastActivityAt alone → "active Ns ago" / "last seen Xm ago"
- *   5. agent present but no activity yet → "awaiting activity"
- *   6. nothing → no activity text rendered
+ *   1. agentMissing → red "agent missing", enriched with the agent's last
+ *      failure reason when known ("agent missing · launch failed")
+ *   2. lastErrorClass alone (idle agent whose last run failed) → red "<reason>"
+ *   3. activity prop with lastActivityAt → "<activity> · active Ns ago"
+ *   4. activity prop alone → unchanged (existing behavior)
+ *   5. lastActivityAt alone → "active Ns ago" / "last seen Xm ago"
+ *   6. agent present but no activity yet → "awaiting activity"
+ *   7. nothing → no activity text rendered
  *
  * The relative-time label self-refreshes every 10s so a stuck card
  * reads "12s ago", "22s ago", "32s ago…" without a parent re-render.
@@ -47,6 +49,13 @@ export interface AgentRowProps {
    */
   agentMissing?: boolean | undefined;
   /**
+   * Fleet-db's derived error_class of the agent's most recent terminal run when
+   * that run failed (idle agents only; a later success clears it). Used to
+   * explain a stalled agent in the red activity slot — on its own, or appended
+   * to "agent missing". Undefined when the last run was fine or not computed.
+   */
+  lastErrorClass?: string | undefined;
+  /**
    * Test seam: clock used for relative-time formatting. Defaults to
    * `() => Date.now()`. Providing a frozen clock from tests removes the
    * need to advance real wall time.
@@ -56,6 +65,30 @@ export interface AgentRowProps {
 
 /** Re-render the relative-time label this often. */
 const RELATIVE_TIME_TICK_MS = 10_000;
+
+/**
+ * Human labels for the agent error_class values fleet-db derives (which mirror
+ * loom's agenterr.ErrorClass). Anything unmapped falls back to "run failed" so
+ * a new class still reads as an error rather than vanishing. The raw class is
+ * kept as the badge's hover title for precision.
+ */
+const ERROR_CLASS_LABELS: Record<string, string> = {
+  SpawnFailure: "launch failed",
+  BackendUnavailable: "backend unavailable",
+  RateLimited: "rate limited",
+  AuthFailure: "auth failed",
+  BillingError: "billing error",
+  Timeout: "timed out",
+  ContextOverflow: "context overflow",
+  ModelNotFound: "model not found",
+  LockConflict: "lock conflict",
+};
+
+/** Map an error_class to a short badge label, or undefined when absent. */
+function errorClassLabel(cls: string | undefined): string | undefined {
+  if (!cls) return undefined;
+  return ERROR_CLASS_LABELS[cls] ?? "run failed";
+}
 
 /**
  * Format a relative-time label suitable for the activity slot.
@@ -95,6 +128,7 @@ export function AgentRow({
   activity,
   lastActivityAt,
   agentMissing,
+  lastErrorClass,
   now = () => Date.now(),
 }: AgentRowProps): JSX.Element {
   // Strip [H] prefix for human assignees
@@ -111,12 +145,25 @@ export function AgentRow({
     return () => clearInterval(id);
   }, [lastActivityAt]);
 
+  const errorLabel = errorClassLabel(lastErrorClass);
+
   let activityState: "missing" | "neutral" | undefined;
   let activityText: string | undefined;
+  // Full error_class shown on hover when an error label is rendered; falls back
+  // to the visible text otherwise.
+  let activityTitle: string | undefined;
 
   if (agentMissing) {
     activityState = "missing";
-    activityText = "agent missing";
+    activityText = errorLabel
+      ? `agent missing · ${errorLabel}`
+      : "agent missing";
+    activityTitle = lastErrorClass;
+  } else if (errorLabel) {
+    // Idle agent whose most recent run failed and is not on a live session.
+    activityState = "missing";
+    activityText = errorLabel;
+    activityTitle = lastErrorClass;
   } else {
     const parsedAt = lastActivityAt ? Date.parse(lastActivityAt) : NaN;
     const ago = Number.isFinite(parsedAt)
@@ -157,7 +204,7 @@ export function AgentRow({
         <span
           className={styles.activity}
           data-state={activityState}
-          title={activityText}
+          title={activityTitle ?? activityText}
         >
           {activityText}
         </span>
