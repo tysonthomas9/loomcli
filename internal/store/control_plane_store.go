@@ -196,12 +196,19 @@ type ArtifactStore interface {
 }
 
 type AgentLeaseCreate struct {
-	WorkspaceKey string
-	SessionID    string
-	LeaseID      string
-	AgentID      string
-	NodeID       string
-	TTL          time.Duration
+	WorkspaceKey  string
+	SessionID     string
+	LeaseID       string
+	AgentID       string
+	NodeID        string
+	Token         string
+	FencingToken  int64
+	Status        domain.AgentLeaseStatus
+	ExpiresAt     time.Time
+	LastHeartbeat time.Time
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+	TTL           time.Duration
 }
 
 type AgentLeaseFilter struct {
@@ -227,6 +234,13 @@ type AgentOwnershipLeaseAcquire struct {
 	OwnerID         string
 	RuntimeProvider domain.RuntimeProvider
 	NodeID          string
+	Token           string
+	FencingToken    int64
+	Status          domain.AgentLeaseStatus
+	ExpiresAt       time.Time
+	LastHeartbeat   time.Time
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
 	TTL             time.Duration
 }
 

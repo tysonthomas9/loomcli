@@ -52,6 +52,12 @@ func appendControlPlaneState(ctx context.Context, st store.Store, workspaceKey s
 	if err := appendControlPlaneAgentSessions(ctx, st, workspaceKey, plan); err != nil {
 		return err
 	}
+	if err := appendControlPlaneAgentLeases(ctx, st, workspaceKey, plan); err != nil {
+		return err
+	}
+	if err := appendControlPlaneAgentOwnershipLeases(ctx, st, workspaceKey, plan); err != nil {
+		return err
+	}
 	if err := appendControlPlaneAgentCommands(ctx, st, workspaceKey, plan); err != nil {
 		return err
 	}
@@ -356,6 +362,107 @@ func agentSessionFromControlPlane(session *domain.AgentSession) AgentSessionModu
 		module.LastHeartbeat = &lastHeartbeat
 	}
 	module.FinishedAt = cloneWorkflowRunTime(session.FinishedAt)
+	module.SourceHash = workspaceHash(module)
+	module.Version = version(module.SourceHash)
+	return module
+}
+
+func appendControlPlaneAgentLeases(ctx context.Context, st store.Store, workspaceKey string, plan *Plan) error {
+	leaseStore := st.AgentLeases()
+	if leaseStore == nil {
+		return fmt.Errorf("agent lease store not configured")
+	}
+	leases, err := leaseStore.List(ctx, workspaceKey, store.AgentLeaseFilter{Limit: 10000})
+	if err != nil {
+		return fmt.Errorf("list agent leases: %w", err)
+	}
+	for _, lease := range leases {
+		if lease == nil {
+			continue
+		}
+		plan.AgentLeases = append(plan.AgentLeases, agentLeaseFromControlPlane(lease))
+	}
+	return nil
+}
+
+func agentLeaseFromControlPlane(lease *domain.AgentLease) AgentLeaseModule {
+	module := AgentLeaseModule{
+		LeaseID:      lease.LeaseID,
+		SessionID:    lease.SessionID,
+		SourcePath:   "control-plane:agent-lease/" + lease.LeaseID,
+		AgentID:      lease.AgentID,
+		NodeID:       lease.NodeID,
+		Token:        lease.Token,
+		FencingToken: lease.FencingToken,
+		Status:       lease.Status,
+	}
+	if !lease.ExpiresAt.IsZero() {
+		expiresAt := lease.ExpiresAt
+		module.ExpiresAt = &expiresAt
+	}
+	if !lease.LastHeartbeat.IsZero() {
+		lastHeartbeat := lease.LastHeartbeat
+		module.LastHeartbeat = &lastHeartbeat
+	}
+	if !lease.CreatedAt.IsZero() {
+		createdAt := lease.CreatedAt
+		module.CreatedAt = &createdAt
+	}
+	if !lease.UpdatedAt.IsZero() {
+		updatedAt := lease.UpdatedAt
+		module.UpdatedAt = &updatedAt
+	}
+	module.SourceHash = workspaceHash(module)
+	module.Version = version(module.SourceHash)
+	return module
+}
+
+func appendControlPlaneAgentOwnershipLeases(ctx context.Context, st store.Store, workspaceKey string, plan *Plan) error {
+	leaseStore := st.AgentOwnershipLeases()
+	if leaseStore == nil {
+		return fmt.Errorf("agent ownership lease store not configured")
+	}
+	leases, err := leaseStore.List(ctx, workspaceKey, store.AgentOwnershipLeaseFilter{Limit: 10000})
+	if err != nil {
+		return fmt.Errorf("list agent ownership leases: %w", err)
+	}
+	for _, lease := range leases {
+		if lease == nil {
+			continue
+		}
+		plan.AgentOwnershipLeases = append(plan.AgentOwnershipLeases, agentOwnershipLeaseFromControlPlane(lease))
+	}
+	return nil
+}
+
+func agentOwnershipLeaseFromControlPlane(lease *domain.AgentOwnershipLease) AgentOwnershipLeaseModule {
+	module := AgentOwnershipLeaseModule{
+		AgentID:         lease.AgentID,
+		LeaseID:         lease.LeaseID,
+		OwnerID:         lease.OwnerID,
+		SourcePath:      "control-plane:agent-ownership-lease/" + lease.AgentID,
+		RuntimeProvider: lease.RuntimeProvider,
+		NodeID:          lease.NodeID,
+		Token:           lease.Token,
+		FencingToken:    lease.FencingToken,
+		Status:          lease.Status,
+	}
+	if !lease.ExpiresAt.IsZero() {
+		expiresAt := lease.ExpiresAt
+		module.ExpiresAt = &expiresAt
+	}
+	if !lease.LastHeartbeat.IsZero() {
+		lastHeartbeat := lease.LastHeartbeat
+		module.LastHeartbeat = &lastHeartbeat
+	}
+	if !lease.CreatedAt.IsZero() {
+		createdAt := lease.CreatedAt
+		module.CreatedAt = &createdAt
+	}
+	if !lease.UpdatedAt.IsZero() {
+		updatedAt := lease.UpdatedAt
+		module.UpdatedAt = &updatedAt
+	}
 	module.SourceHash = workspaceHash(module)
 	module.Version = version(module.SourceHash)
 	return module
@@ -756,6 +863,10 @@ func sortPlan(plan *Plan) {
 	sort.Slice(plan.Agents, func(i, j int) bool { return plan.Agents[i].Name < plan.Agents[j].Name })
 	sort.Slice(plan.AgentInstances, func(i, j int) bool { return plan.AgentInstances[i].Name < plan.AgentInstances[j].Name })
 	sort.Slice(plan.AgentSessions, func(i, j int) bool { return plan.AgentSessions[i].SessionID < plan.AgentSessions[j].SessionID })
+	sort.Slice(plan.AgentLeases, func(i, j int) bool { return plan.AgentLeases[i].LeaseID < plan.AgentLeases[j].LeaseID })
+	sort.Slice(plan.AgentOwnershipLeases, func(i, j int) bool {
+		return plan.AgentOwnershipLeases[i].AgentID < plan.AgentOwnershipLeases[j].AgentID
+	})
 	sort.Slice(plan.AgentCommands, func(i, j int) bool { return plan.AgentCommands[i].CommandID < plan.AgentCommands[j].CommandID })
 	sort.Slice(plan.TerminalSessions, func(i, j int) bool { return plan.TerminalSessions[i].TerminalID < plan.TerminalSessions[j].TerminalID })
 	sort.Slice(plan.Artifacts, func(i, j int) bool { return plan.Artifacts[i].ArtifactID < plan.Artifacts[j].ArtifactID })

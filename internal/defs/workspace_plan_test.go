@@ -245,6 +245,43 @@ func TestPlanFromWorkspaceProjectsControlPlaneRecords(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("update agent session: %v", err)
 	}
+	leaseCreatedAt := sessionHeartbeat.Add(-30 * time.Second)
+	leaseUpdatedAt := sessionHeartbeat.Add(30 * time.Second)
+	leaseExpiresAt := sessionHeartbeat.Add(10 * time.Minute)
+	if _, err := st.AgentLeases().Create(ctx, store.AgentLeaseCreate{
+		WorkspaceKey:  "CP",
+		SessionID:     "session-1",
+		LeaseID:       "lease-task-1",
+		AgentID:       "triage-bot",
+		NodeID:        "node-local",
+		Token:         "task-token-1",
+		FencingToken:  11,
+		Status:        domain.AgentLeaseActive,
+		ExpiresAt:     leaseExpiresAt,
+		LastHeartbeat: sessionHeartbeat,
+		CreatedAt:     leaseCreatedAt,
+		UpdatedAt:     leaseUpdatedAt,
+	}); err != nil {
+		t.Fatalf("create agent lease: %v", err)
+	}
+	ownershipExpiresAt := sessionHeartbeat.Add(15 * time.Minute)
+	if _, err := st.AgentOwnershipLeases().Acquire(ctx, store.AgentOwnershipLeaseAcquire{
+		WorkspaceKey:    "CP",
+		AgentID:         "triage-bot",
+		LeaseID:         "owner-lease-1",
+		OwnerID:         "daemon-local",
+		RuntimeProvider: domain.RuntimeProviderLocal,
+		NodeID:          "node-local",
+		Token:           "owner-token-1",
+		FencingToken:    13,
+		Status:          domain.AgentLeaseActive,
+		ExpiresAt:       ownershipExpiresAt,
+		LastHeartbeat:   sessionHeartbeat,
+		CreatedAt:       leaseCreatedAt,
+		UpdatedAt:       leaseUpdatedAt,
+	}); err != nil {
+		t.Fatalf("acquire agent ownership lease: %v", err)
+	}
 	if _, err := st.AgentCommands().Create(ctx, store.AgentCommandCreate{
 		WorkspaceKey:  "CP",
 		CommandID:     "cmd-1",
@@ -284,7 +321,7 @@ func TestPlanFromWorkspaceProjectsControlPlaneRecords(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PlanFromWorkspace() error = %v", err)
 	}
-	if got := Summary(plan); got != "agents=1 workflows=1 runtimes=1 agent_instances=1 agent_sessions=1 agent_commands=1 terminal_sessions=1 workflow_runs=1 task_runs=1 run_events=1 artifacts=1 tools=1" {
+	if got := Summary(plan); got != "agents=1 workflows=1 runtimes=1 agent_instances=1 agent_sessions=1 agent_leases=1 agent_ownership_leases=1 agent_commands=1 terminal_sessions=1 workflow_runs=1 task_runs=1 run_events=1 artifacts=1 tools=1" {
 		t.Fatalf("Summary() = %q, want direct record parity", got)
 	}
 	if plan.Root != "workspace:CP" {
@@ -321,6 +358,26 @@ func TestPlanFromWorkspaceProjectsControlPlaneRecords(t *testing.T) {
 		session.Summary != "working on sidebar" || session.Metadata["harness"] != "planning" ||
 		session.LastHeartbeat == nil || !session.LastHeartbeat.Equal(sessionHeartbeat) {
 		t.Fatalf("agent session = %+v, want durable session runtime state", session)
+	}
+	lease := plan.AgentLeases[0]
+	if lease.LeaseID != "lease-task-1" || lease.SessionID != "session-1" ||
+		lease.AgentID != "triage-bot" || lease.NodeID != "node-local" ||
+		lease.Token != "task-token-1" || lease.FencingToken != 11 ||
+		lease.Status != domain.AgentLeaseActive ||
+		lease.ExpiresAt == nil || !lease.ExpiresAt.Equal(leaseExpiresAt) ||
+		lease.LastHeartbeat == nil || !lease.LastHeartbeat.Equal(sessionHeartbeat) ||
+		lease.CreatedAt == nil || !lease.CreatedAt.Equal(leaseCreatedAt) ||
+		lease.UpdatedAt == nil || !lease.UpdatedAt.Equal(leaseUpdatedAt) {
+		t.Fatalf("agent lease = %+v, want durable session lease runtime state", lease)
+	}
+	ownership := plan.AgentOwnershipLeases[0]
+	if ownership.AgentID != "triage-bot" || ownership.LeaseID != "owner-lease-1" ||
+		ownership.OwnerID != "daemon-local" || ownership.RuntimeProvider != domain.RuntimeProviderLocal ||
+		ownership.NodeID != "node-local" || ownership.Token != "owner-token-1" ||
+		ownership.FencingToken != 13 || ownership.Status != domain.AgentLeaseActive ||
+		ownership.ExpiresAt == nil || !ownership.ExpiresAt.Equal(ownershipExpiresAt) ||
+		ownership.LastHeartbeat == nil || !ownership.LastHeartbeat.Equal(sessionHeartbeat) {
+		t.Fatalf("agent ownership lease = %+v, want durable agent ownership lease state", ownership)
 	}
 	command := plan.AgentCommands[0]
 	if command.CommandID != "cmd-1" || command.TargetAgentID != "triage-bot" ||
@@ -413,6 +470,27 @@ func TestPlanFromWorkspaceProjectsControlPlaneRecords(t *testing.T) {
 	if importedAgent.RoleName != "triage" || importedAgent.DesiredState != domain.AgentDesiredRunning ||
 		importedAgent.State != domain.AgentStateActive || importedAgent.TaskFilter != "needs_design" {
 		t.Fatalf("imported agent = %+v, want round-tripped durable agent instance", importedAgent)
+	}
+	importedLease, err := imported.AgentLeases().Get(ctx, "IMPORT", "lease-task-1")
+	if err != nil {
+		t.Fatalf("get imported agent lease: %v", err)
+	}
+	if importedLease.SessionID != "session-1" || importedLease.AgentID != "triage-bot" ||
+		importedLease.Token != "task-token-1" || importedLease.FencingToken != 11 ||
+		importedLease.Status != domain.AgentLeaseActive ||
+		!importedLease.ExpiresAt.Equal(leaseExpiresAt) || !importedLease.LastHeartbeat.Equal(sessionHeartbeat) {
+		t.Fatalf("imported agent lease = %+v, want round-tripped durable lease state", importedLease)
+	}
+	importedOwnership, err := imported.AgentOwnershipLeases().Get(ctx, "IMPORT", "triage-bot")
+	if err != nil {
+		t.Fatalf("get imported agent ownership lease: %v", err)
+	}
+	if importedOwnership.LeaseID != "owner-lease-1" || importedOwnership.OwnerID != "daemon-local" ||
+		importedOwnership.Token != "owner-token-1" || importedOwnership.FencingToken != 13 ||
+		importedOwnership.Status != domain.AgentLeaseActive ||
+		!importedOwnership.ExpiresAt.Equal(ownershipExpiresAt) ||
+		!importedOwnership.LastHeartbeat.Equal(sessionHeartbeat) {
+		t.Fatalf("imported ownership lease = %+v, want round-tripped durable ownership state", importedOwnership)
 	}
 	importedWorkflow, err := imported.WorkflowDefinitions().Get(ctx, "IMPORT", "slack-clone-runner")
 	if err != nil {

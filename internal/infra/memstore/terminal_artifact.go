@@ -207,7 +207,35 @@ func (s *agentLeaseStore) Create(_ context.Context, in store.AgentLeaseCreate) (
 	if id == "" {
 		id = fmt.Sprintf("lease-%d", s.next)
 	}
-	lease := &domain.AgentLease{WorkspaceKey: in.WorkspaceKey, LeaseID: id, SessionID: in.SessionID, AgentID: in.AgentID, NodeID: in.NodeID, Token: fmt.Sprintf("token-%d", s.next), FencingToken: s.next, Status: domain.AgentLeaseActive, ExpiresAt: now.Add(ttl), LastHeartbeat: now, CreatedAt: now, UpdatedAt: now}
+	token := in.Token
+	if token == "" {
+		token = fmt.Sprintf("token-%d", s.next)
+	}
+	fencingToken := in.FencingToken
+	if fencingToken == 0 {
+		fencingToken = s.next
+	}
+	status := in.Status
+	if status == "" {
+		status = domain.AgentLeaseActive
+	}
+	expiresAt := in.ExpiresAt
+	if expiresAt.IsZero() {
+		expiresAt = now.Add(ttl)
+	}
+	lastHeartbeat := in.LastHeartbeat
+	if lastHeartbeat.IsZero() {
+		lastHeartbeat = now
+	}
+	createdAt := in.CreatedAt
+	if createdAt.IsZero() {
+		createdAt = now
+	}
+	updatedAt := in.UpdatedAt
+	if updatedAt.IsZero() {
+		updatedAt = now
+	}
+	lease := &domain.AgentLease{WorkspaceKey: in.WorkspaceKey, LeaseID: id, SessionID: in.SessionID, AgentID: in.AgentID, NodeID: in.NodeID, Token: token, FencingToken: fencingToken, Status: status, ExpiresAt: expiresAt, LastHeartbeat: lastHeartbeat, CreatedAt: createdAt, UpdatedAt: updatedAt}
 	s.items[in.WorkspaceKey][id] = lease
 	return cloneAgentLease(lease), nil
 }
@@ -304,31 +332,57 @@ func (s *agentOwnershipLeaseStore) Acquire(_ context.Context, in store.AgentOwne
 	if ttl <= 0 {
 		ttl = 5 * time.Minute
 	}
-	id := in.LeaseID
-	if id == "" {
-		id = fmt.Sprintf("agent-owner-%d", s.next)
-	}
+	lease := newAgentOwnershipLeaseMem(in, now, ttl, s.next)
+	s.items[in.WorkspaceKey][in.AgentID] = lease
+	return cloneAgentOwnershipLease(lease), nil
+}
+
+func newAgentOwnershipLeaseMem(in store.AgentOwnershipLeaseAcquire, now time.Time, ttl time.Duration, next int64) *domain.AgentOwnershipLease {
+	id := defaultString(in.LeaseID, fmt.Sprintf("agent-owner-%d", next))
 	provider := in.RuntimeProvider
 	if provider == "" {
 		provider = domain.RuntimeProviderLocal
 	}
-	lease := &domain.AgentOwnershipLease{
+	fencingToken := in.FencingToken
+	if fencingToken == 0 {
+		fencingToken = next
+	}
+	return &domain.AgentOwnershipLease{
 		WorkspaceKey:    in.WorkspaceKey,
 		AgentID:         in.AgentID,
 		LeaseID:         id,
 		OwnerID:         in.OwnerID,
 		RuntimeProvider: provider,
 		NodeID:          in.NodeID,
-		Token:           fmt.Sprintf("ownership-token-%d", s.next),
-		FencingToken:    s.next,
-		Status:          domain.AgentLeaseActive,
-		ExpiresAt:       now.Add(ttl),
-		LastHeartbeat:   now,
-		CreatedAt:       now,
-		UpdatedAt:       now,
+		Token:           defaultString(in.Token, fmt.Sprintf("ownership-token-%d", next)),
+		FencingToken:    fencingToken,
+		Status:          agentLeaseStatusDefault(in.Status),
+		ExpiresAt:       defaultTime(in.ExpiresAt, now.Add(ttl)),
+		LastHeartbeat:   defaultTime(in.LastHeartbeat, now),
+		CreatedAt:       defaultTime(in.CreatedAt, now),
+		UpdatedAt:       defaultTime(in.UpdatedAt, now),
 	}
-	s.items[in.WorkspaceKey][in.AgentID] = lease
-	return cloneAgentOwnershipLease(lease), nil
+}
+
+func defaultString(value, fallback string) string {
+	if value != "" {
+		return value
+	}
+	return fallback
+}
+
+func defaultTime(value, fallback time.Time) time.Time {
+	if value.IsZero() {
+		return fallback
+	}
+	return value
+}
+
+func agentLeaseStatusDefault(status domain.AgentLeaseStatus) domain.AgentLeaseStatus {
+	if status == "" {
+		return domain.AgentLeaseActive
+	}
+	return status
 }
 
 func (s *agentOwnershipLeaseStore) Get(_ context.Context, ws, agentID string) (*domain.AgentOwnershipLease, error) {

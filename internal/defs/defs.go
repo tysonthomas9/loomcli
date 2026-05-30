@@ -16,20 +16,22 @@ import (
 )
 
 type Plan struct {
-	Root             string                  `json:"root"`
-	Agents           []AgentModule           `json:"agents,omitempty"`
-	AgentInstances   []AgentInstanceModule   `json:"agent_instances,omitempty"`
-	AgentSessions    []AgentSessionModule    `json:"agent_sessions,omitempty"`
-	AgentCommands    []AgentCommandModule    `json:"agent_commands,omitempty"`
-	TerminalSessions []TerminalSessionModule `json:"terminal_sessions,omitempty"`
-	Artifacts        []ArtifactModule        `json:"artifacts,omitempty"`
-	Workflows        []WorkflowModule        `json:"workflows,omitempty"`
-	WorkflowRuns     []WorkflowRunModule     `json:"workflow_runs,omitempty"`
-	TaskRuns         []TaskRunModule         `json:"task_runs,omitempty"`
-	RunEvents        []RunEventModule        `json:"run_events,omitempty"`
-	Runtimes         []RuntimeModule         `json:"runtimes,omitempty"`
-	Skills           []SkillModule           `json:"skills,omitempty"`
-	Tools            []ToolModule            `json:"tools,omitempty"`
+	Root                 string                      `json:"root"`
+	Agents               []AgentModule               `json:"agents,omitempty"`
+	AgentInstances       []AgentInstanceModule       `json:"agent_instances,omitempty"`
+	AgentSessions        []AgentSessionModule        `json:"agent_sessions,omitempty"`
+	AgentLeases          []AgentLeaseModule          `json:"agent_leases,omitempty"`
+	AgentOwnershipLeases []AgentOwnershipLeaseModule `json:"agent_ownership_leases,omitempty"`
+	AgentCommands        []AgentCommandModule        `json:"agent_commands,omitempty"`
+	TerminalSessions     []TerminalSessionModule     `json:"terminal_sessions,omitempty"`
+	Artifacts            []ArtifactModule            `json:"artifacts,omitempty"`
+	Workflows            []WorkflowModule            `json:"workflows,omitempty"`
+	WorkflowRuns         []WorkflowRunModule         `json:"workflow_runs,omitempty"`
+	TaskRuns             []TaskRunModule             `json:"task_runs,omitempty"`
+	RunEvents            []RunEventModule            `json:"run_events,omitempty"`
+	Runtimes             []RuntimeModule             `json:"runtimes,omitempty"`
+	Skills               []SkillModule               `json:"skills,omitempty"`
+	Tools                []ToolModule                `json:"tools,omitempty"`
 }
 
 type AgentModule struct {
@@ -164,28 +166,7 @@ func Apply(ctx context.Context, st store.Store, workspaceKey, actor string, plan
 	if err := applyWorkflowDefinitions(ctx, st, workspaceKey, actor, plan.Workflows, toolIndex); err != nil {
 		return err
 	}
-	if err := applyWorkflowRuns(ctx, st, workspaceKey, plan.WorkflowRuns); err != nil {
-		return err
-	}
-	if err := applyTaskRuns(ctx, st, workspaceKey, plan.TaskRuns); err != nil {
-		return err
-	}
-	if err := applyRunEvents(ctx, st, workspaceKey, plan.RunEvents); err != nil {
-		return err
-	}
-	if err := applyAgentSessions(ctx, st, workspaceKey, plan.AgentSessions); err != nil {
-		return err
-	}
-	if err := applyAgentCommands(ctx, st, workspaceKey, plan.AgentCommands); err != nil {
-		return err
-	}
-	if err := applyTerminalSessions(ctx, st, workspaceKey, plan.TerminalSessions); err != nil {
-		return err
-	}
-	if err := applyArtifacts(ctx, st, workspaceKey, plan.Artifacts); err != nil {
-		return err
-	}
-	return nil
+	return applyRuntimeStateRecords(ctx, st, workspaceKey, plan)
 }
 
 func applySkillDefinitions(ctx context.Context, st store.Store, workspaceKey, actor string, skills []SkillModule) error {
@@ -754,6 +735,9 @@ func validatePlan(plan *Plan) error {
 			return fmt.Errorf("duplicate task run %q in %s and %s", run.TaskRunID, prior, sourcePath)
 		}
 		seen["task-run:"+run.TaskRunID] = sourcePath
+	}
+	if err := validateAgentLeaseModules(plan, seen); err != nil {
+		return err
 	}
 	for _, event := range plan.RunEvents {
 		sourcePath := firstNonEmpty(event.SourcePath, "run_event:"+event.EventID)
