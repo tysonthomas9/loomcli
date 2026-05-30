@@ -52,6 +52,8 @@ var (
 	runWait    bool
 	runOnce    bool
 	runJSON    bool
+
+	tsfirstWithActiveWorkspace = cmdstore.WithActiveWorkspace
 )
 
 var addCmd = &cobra.Command{
@@ -497,7 +499,7 @@ func runApply(_ *cobra.Command, args []string) error {
 	if !ok {
 		return fmt.Errorf("agent definition %q not found", args[0])
 	}
-	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
+	return tsfirstWithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
 		if err := defspkg.Apply(ctx, h.Store, ws, actorName(), plan); err != nil {
 			return err
 		}
@@ -535,7 +537,7 @@ func runApplyWorkflow(_ *cobra.Command, args []string) error {
 	if !ok {
 		return fmt.Errorf("workflow definition %q not found", args[0])
 	}
-	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
+	return tsfirstWithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
 		if err := defspkg.Apply(ctx, h.Store, ws, actorName(), plan); err != nil {
 			return err
 		}
@@ -574,7 +576,7 @@ func runTypeScriptWorkflowCommand(_ *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
+	return tsfirstWithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
 		result, err := runTypeScriptWorkflow(ctx, h.Store, cli.DefaultIssueBackend(), ws, actorName(), plan, workflow, input, runOnce, runWait)
 		if err != nil {
 			return err

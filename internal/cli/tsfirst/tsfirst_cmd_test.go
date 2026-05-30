@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	backendcaps "github.com/tysonthomas9/loomcli/internal/cli/backends"
 	"github.com/tysonthomas9/loomcli/internal/cli/clitest"
@@ -539,6 +540,130 @@ func TestTypeScriptFirstEndToEndPatternConvergesOnDurableGraph(t *testing.T) {
 		!hasExportedRunEvent(exported.RunEvents, "task_run_ensured") ||
 		!hasExportedRunEvent(exported.RunEvents, "task_run_dispatched") {
 		t.Fatalf("exported run events = %+v, want workflow context and task dispatch evidence", exported.RunEvents)
+	}
+}
+
+func TestTypeScriptFirstCommandSurfaceProofLoopConvergesOnDurableGraph(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	st := memstore.New()
+	const workspace = "TSCMD"
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: workspace, Name: "TypeScript Command Surface"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	ready := backend.IssueData{ID: "TASK-CMD-1", Title: "Build command path", Status: "open"}
+	ib := clitest.NewMockIssueBackend()
+	ib.ReadyResult = []backend.IssueData{ready}
+	ib.BlockedResult = nil
+	ib.ListResult = []backend.IssueData{ready}
+	cli.SetDefaultIssueBackend(ib)
+	t.Cleanup(cli.ResetDefaultIssueBackend)
+
+	withTSFirstStore(t, st, workspace)
+	withTSFirstGlobals(t, func() {
+		addDir = root
+		checkDir = root
+		connectDir = root
+		applyDir = root
+		runDir = root
+
+		if err := runAddAgent(nil, []string{"hello-world"}); err != nil {
+			t.Fatalf("runAddAgent() error = %v", err)
+		}
+		if err := runAddWorkflow(nil, []string{"epic-runner"}); err != nil {
+			t.Fatalf("runAddWorkflow() error = %v", err)
+		}
+		if err := runCheck(nil, nil); err != nil {
+			t.Fatalf("runCheck() error = %v", err)
+		}
+
+		connectSession = "command"
+		connectMessage = "prove the command surface"
+		if err := runConnect(nil, []string{"hello-world", "local"}); err != nil {
+			t.Fatalf("runConnect() error = %v", err)
+		}
+
+		applyInstance = "local"
+		applyStart = true
+		if err := runApply(nil, []string{"hello-world"}); err != nil {
+			t.Fatalf("runApply() error = %v", err)
+		}
+		if err := runApplyWorkflow(nil, []string{"epic-runner"}); err != nil {
+			t.Fatalf("runApplyWorkflow() error = %v", err)
+		}
+
+		runInput = "{}"
+		runPayload = `{"parentId":"EPIC-CMD-1","role":"task","maxConcurrency":1}`
+		runOnce = true
+		runWait = false
+		if err := runTypeScriptWorkflowCommand(nil, []string{"epic-runner"}); err != nil {
+			t.Fatalf("runTypeScriptWorkflowCommand() error = %v", err)
+		}
+	})
+
+	turns, err := readLocalTurns(localTranscriptPath(root, "hello-world", "local", "command"))
+	if err != nil {
+		t.Fatalf("readLocalTurns() error = %v", err)
+	}
+	if len(turns) != 1 || turns[0].Operation == nil ||
+		turns[0].Operation.Status != "completed" ||
+		turns[0].Operation.EventCorrelation["agent"] != "hello-world" ||
+		turns[0].PromptHash == "" {
+		t.Fatalf("turns = %+v, want command connect proof with operation evidence", turns)
+	}
+
+	instance, err := st.Agents().Get(ctx, workspace, "local")
+	if err != nil {
+		t.Fatalf("get applied agent instance: %v", err)
+	}
+	if instance.RoleName != "hello-world" || instance.State != domain.AgentStateActive || instance.DesiredState != domain.AgentDesiredRunning {
+		t.Fatalf("instance = %+v, want UI-visible active/running hello-world instance", instance)
+	}
+	if _, err := st.WorkflowDefinitions().Get(ctx, workspace, "epic-runner"); err != nil {
+		t.Fatalf("workflow definition not applied through command surface: %v", err)
+	}
+	runs, err := st.WorkflowRuns().List(ctx, workspace, store.WorkflowRunFilter{WorkflowName: "epic-runner"})
+	if err != nil {
+		t.Fatalf("list workflow runs: %v", err)
+	}
+	if len(runs) != 1 || runs[0].Status != domain.WorkflowRunWaiting {
+		t.Fatalf("runs = %+v, want one waiting command-surface workflow run", runs)
+	}
+	taskRuns, err := st.TaskRuns().List(ctx, workspace, store.TaskRunFilter{WorkflowRunID: runs[0].RunID, WorkItemID: ready.ID})
+	if err != nil {
+		t.Fatalf("list task runs: %v", err)
+	}
+	if len(taskRuns) != 1 || taskRuns[0].AgentID == "" || taskRuns[0].CommandID == "" {
+		t.Fatalf("taskRuns = %+v, want command-surface dispatched child task", taskRuns)
+	}
+	cmds, err := st.AgentCommands().List(ctx, workspace, store.AgentCommandFilter{Limit: 100})
+	if err != nil {
+		t.Fatalf("list commands: %v", err)
+	}
+	if len(cmds) < 2 {
+		t.Fatalf("commands = %+v, want local start command and task dispatch command", cmds)
+	}
+	events, err := st.RunEvents().List(ctx, workspace, store.RunEventFilter{WorkflowRunID: runs[0].RunID})
+	if err != nil {
+		t.Fatalf("list run events: %v", err)
+	}
+	if !hasRunEvent(events, "workflow_ts_context_started") ||
+		!hasRunEvent(events, "task_run_ensured") ||
+		!hasRunEvent(events, "task_run_dispatched") {
+		t.Fatalf("events = %+v, want command-surface workflow context and task dispatch evidence", events)
+	}
+	exported, err := defspkg.PlanFromWorkspace(ctx, st, workspace)
+	if err != nil {
+		t.Fatalf("PlanFromWorkspace() error = %v", err)
+	}
+	if _, ok := defspkg.FindAgent(exported, "hello-world"); !ok {
+		t.Fatalf("exported agents = %+v, want command-surface hello-world source intent", exported.Agents)
+	}
+	if _, ok := defspkg.FindWorkflow(exported, "epic-runner"); !ok {
+		t.Fatalf("exported workflows = %+v, want command-surface epic-runner source intent", exported.Workflows)
+	}
+	if len(exported.WorkflowRuns) != 1 || exported.WorkflowRuns[0].RunID != runs[0].RunID {
+		t.Fatalf("exported runs = %+v, want command-surface workflow run %s", exported.WorkflowRuns, runs[0].RunID)
 	}
 }
 
@@ -1452,17 +1577,26 @@ func withTSFirstGlobals(t *testing.T, fn func()) {
 	t.Helper()
 	oldAddDir, oldAddJSON := addDir, addJSON
 	oldCheckDir, oldCheckJSON := checkDir, checkJSON
-	oldConnectJSON := connectJSON
+	oldConnectDir, oldConnectEnvFile, oldConnectJSON, oldConnectMessage, oldConnectSession := connectDir, connectEnvFile, connectJSON, connectMessage, connectSession
 	oldApplyDir, oldApplyInstance, oldApplyStart, oldApplyJSON := applyDir, applyInstance, applyStart, applyJSON
 	oldRunDir, oldRunInput, oldRunPayload, oldRunWait, oldRunOnce, oldRunJSON := runDir, runInput, runPayload, runWait, runOnce, runJSON
 	t.Cleanup(func() {
 		addDir, addJSON = oldAddDir, oldAddJSON
 		checkDir, checkJSON = oldCheckDir, oldCheckJSON
-		connectJSON = oldConnectJSON
+		connectDir, connectEnvFile, connectJSON, connectMessage, connectSession = oldConnectDir, oldConnectEnvFile, oldConnectJSON, oldConnectMessage, oldConnectSession
 		applyDir, applyInstance, applyStart, applyJSON = oldApplyDir, oldApplyInstance, oldApplyStart, oldApplyJSON
 		runDir, runInput, runPayload, runWait, runOnce, runJSON = oldRunDir, oldRunInput, oldRunPayload, oldRunWait, oldRunOnce, oldRunJSON
 	})
 	fn()
+}
+
+func withTSFirstStore(t *testing.T, st store.Store, workspace string) {
+	t.Helper()
+	old := tsfirstWithActiveWorkspace
+	tsfirstWithActiveWorkspace = func(fn func(context.Context, *bootstrap.StoreHandle, string) error) error {
+		return fn(context.Background(), &bootstrap.StoreHandle{Store: st}, workspace)
+	}
+	t.Cleanup(func() { tsfirstWithActiveWorkspace = old })
 }
 
 func writeAgent(t *testing.T, root, name, backend string) {
