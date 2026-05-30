@@ -149,11 +149,20 @@ func Load(root string) (*Plan, error) {
 	}
 	loomDir := filepath.Join(abs, ".loom")
 	plan := &Plan{Root: abs}
-	if _, err := os.Stat(loomDir); errors.Is(err, os.ErrNotExist) {
-		return plan, nil
-	}
+	loomExists, err := pathExists(loomDir)
 	if err != nil {
 		return nil, err
+	}
+	configExists, err := pathExists(filepath.Join(abs, "loom.config.ts"))
+	if err != nil {
+		return nil, err
+	}
+	rootEntrypoints, err := hasRootSourceEntrypoints(abs)
+	if err != nil {
+		return nil, err
+	}
+	if !loomExists && !configExists && !rootEntrypoints {
+		return plan, nil
 	}
 	plan, err = loadWithTypeScriptCompiler(abs)
 	if err != nil {
@@ -166,6 +175,64 @@ func Load(root string) (*Plan, error) {
 		return nil, err
 	}
 	return plan, nil
+}
+
+func pathExists(path string) (bool, error) {
+	if _, err := os.Stat(path); err == nil {
+		return true, nil
+	} else if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	} else {
+		return false, err
+	}
+}
+
+func hasRootSourceEntrypoints(root string) (bool, error) {
+	for _, dir := range []string{"agents", "workflows", "runtimes", "tools"} {
+		ok, err := hasImmediateTypeScriptFile(filepath.Join(root, dir))
+		if err != nil || ok {
+			return ok, err
+		}
+	}
+	return hasSkillEntrypoint(filepath.Join(root, "skills"))
+}
+
+func hasImmediateTypeScriptFile(dir string) (bool, error) {
+	entries, err := os.ReadDir(dir)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".ts") {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func hasSkillEntrypoint(dir string) (bool, error) {
+	entries, err := os.ReadDir(dir)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".ts") {
+			return true, nil
+		}
+		if entry.IsDir() {
+			ok, err := pathExists(filepath.Join(dir, entry.Name(), "SKILL.md"))
+			if err != nil || ok {
+				return ok, err
+			}
+		}
+	}
+	return false, nil
 }
 
 func Apply(ctx context.Context, st store.Store, workspaceKey, actor string, plan *Plan) error {

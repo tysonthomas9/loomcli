@@ -135,6 +135,48 @@ func TestWorkspaceExportPlanAllowsExistingPrivateModelProvider(t *testing.T) {
 	}
 }
 
+func TestLoadRejectsRootLayoutEntrypoints(t *testing.T) {
+	root := t.TempDir()
+	writeDefFile(t, root, "agents/root-agent.ts", `export default defineAgent({
+  name: "root-agent",
+  backend: "codex",
+  model: "gpt-5",
+});`)
+
+	_, err := Load(root)
+	if err == nil {
+		t.Fatalf("Load() succeeded, want root source layout rejection")
+	}
+	if !strings.Contains(err.Error(), "mixed Loom TypeScript source roots") ||
+		!strings.Contains(err.Error(), "project root entrypoints") ||
+		!strings.Contains(err.Error(), "agents/root-agent.ts") {
+		t.Fatalf("Load() error = %v, want mixed source root guidance", err)
+	}
+}
+
+func TestLoadRejectsMixedLoomAndRootEntrypoints(t *testing.T) {
+	root := t.TempDir()
+	writeDefFile(t, root, ".loom/agents/loom-agent.ts", `export default defineAgent({
+  name: "loom-agent",
+  backend: "codex",
+  model: "gpt-5",
+});`)
+	writeDefFile(t, root, "workflows/root-workflow.ts", `export default defineWorkflow({
+  name: "root-workflow",
+  builtin: "run-parent-work-items",
+});`)
+
+	_, err := Load(root)
+	if err == nil {
+		t.Fatalf("Load() succeeded, want mixed source root rejection")
+	}
+	if !strings.Contains(err.Error(), "mixed Loom TypeScript source roots") ||
+		!strings.Contains(err.Error(), "selected .loom") ||
+		!strings.Contains(err.Error(), "workflows/root-workflow.ts") {
+		t.Fatalf("Load() error = %v, want mixed source root guidance", err)
+	}
+}
+
 func containsString(values []string, want string) bool {
 	for _, value := range values {
 		if value == want {

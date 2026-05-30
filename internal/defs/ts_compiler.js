@@ -354,6 +354,58 @@ function sourceRootDir(config = projectConfig()) {
   return path.join(root, sourceRoot);
 }
 
+function rejectMixedSourceRoots(selectedRoot) {
+  const selected = path.resolve(selectedRoot);
+  const candidates = [path.join(root, ".loom"), root];
+  for (const candidate of candidates) {
+    const resolved = path.resolve(candidate);
+    if (resolved === selected) continue;
+    const entries = authoredEntrypoints(resolved);
+    if (entries.length === 0) continue;
+    const selectedLabel = sourceRootLabel(selected);
+    const candidateLabel = resolved === root ? "project root" : path.relative(root, resolved).split(path.sep).join("/");
+    throw new Error(
+      `mixed Loom TypeScript source roots: selected ${selectedLabel} but found ${candidateLabel} entrypoints: ${entries.join(", ")}. Move them under ${selectedLabel} or set exactly one sourceRoot in loom.config.ts.`,
+    );
+  }
+}
+
+function authoredEntrypoints(base) {
+  const out = [];
+  for (const dir of ["agents", "workflows", "runtimes", "tools"]) {
+    for (const file of immediateTypeScriptFiles(path.join(base, dir))) {
+      out.push(path.relative(root, file).split(path.sep).join("/"));
+    }
+  }
+  const skillsDir = path.join(base, "skills");
+  for (const file of immediateTypeScriptFiles(skillsDir)) {
+    out.push(path.relative(root, file).split(path.sep).join("/"));
+  }
+  if (fs.existsSync(skillsDir)) {
+    for (const entry of fs.readdirSync(skillsDir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const skillFile = path.join(skillsDir, entry.name, "SKILL.md");
+      if (fs.existsSync(skillFile) && fs.statSync(skillFile).isFile()) {
+        out.push(path.relative(root, skillFile).split(path.sep).join("/"));
+      }
+    }
+  }
+  return out.sort();
+}
+
+function immediateTypeScriptFiles(dir) {
+  if (!fs.existsSync(dir)) return [];
+  return fs
+    .readdirSync(dir, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".ts"))
+    .map((entry) => path.join(dir, entry.name));
+}
+
+function sourceRootLabel(sourceRoot) {
+  const rel = path.relative(root, sourceRoot).split(path.sep).join("/");
+  return rel || "project root";
+}
+
 function modelPolicy(config = {}) {
   const models =
     config.models && typeof config.models === "object"
@@ -652,6 +704,7 @@ function compactObject(item) {
 
 const config = projectConfig();
 const sourceRoot = sourceRootDir(config);
+rejectMixedSourceRoots(sourceRoot);
 
 readEntrypoints(path.join(sourceRoot, "skills")).forEach(skillModule);
 const tools = compactArrayObjects(readEntrypoints(path.join(sourceRoot, "tools")).map(toolModule));
