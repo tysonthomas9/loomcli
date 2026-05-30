@@ -1628,6 +1628,9 @@ export default defineWorkflow({
     const observed = await ctx.taskClaims.wait({ workItemId: 'CLAIM-1' });
     const dispatch = await ctx.agents.dispatch('worker-one', {
       workItemId: 'CLAIM-1',
+      idempotencyKey: 'claim-dispatch:CLAIM-1',
+      providerModel: 'test/dispatch-model',
+      metadata: { source: 'claim-projection' },
       message: 'continue from claim projection',
     });
     return {
@@ -1635,6 +1638,13 @@ export default defineWorkflow({
       observed: observed.length,
       actor: claim?.claim_actor ?? '',
       dispatched: dispatch.accepted === true,
+      dispatchId: dispatch.dispatchId,
+      operationId: dispatch.operationId,
+      sessionId: dispatch.sessionId,
+      taskRunId: dispatch.taskRunId,
+      workItemId: dispatch.workItemId,
+      status: dispatch.status,
+      providerModel: dispatch.providerModel,
     };
   },
 });
@@ -1678,16 +1688,26 @@ export default defineWorkflow({
 		t.Fatalf("result = %+v, want completed claim workflow", result)
 	}
 	var output struct {
-		Claims     int    `json:"claims"`
-		Observed   int    `json:"observed"`
-		Actor      string `json:"actor"`
-		Dispatched bool   `json:"dispatched"`
+		Claims        int    `json:"claims"`
+		Observed      int    `json:"observed"`
+		Actor         string `json:"actor"`
+		Dispatched    bool   `json:"dispatched"`
+		DispatchID    string `json:"dispatchId"`
+		OperationID   string `json:"operationId"`
+		SessionID     string `json:"sessionId"`
+		TaskRunID     string `json:"taskRunId"`
+		WorkItemID    string `json:"workItemId"`
+		Status        string `json:"status"`
+		ProviderModel string `json:"providerModel"`
 	}
 	if err := json.Unmarshal(result.Run.Result, &output); err != nil {
 		t.Fatalf("decode result %s: %v", result.Run.Result, err)
 	}
-	if output.Claims != 1 || output.Observed != 1 || output.Actor != "worker-one" || !output.Dispatched {
-		t.Fatalf("output = %+v, want task claim projection and dispatch admission", output)
+	if output.Claims != 1 || output.Observed != 1 || output.Actor != "worker-one" || !output.Dispatched ||
+		output.DispatchID == "" || output.OperationID != "op:"+output.DispatchID ||
+		output.SessionID != "session-one" || output.TaskRunID == "" || output.WorkItemID != "CLAIM-1" ||
+		output.Status != "admitted" || output.ProviderModel != "test/dispatch-model" {
+		t.Fatalf("output = %+v, want task claim projection and correlated dispatch admission", output)
 	}
 	events, err := st.RunEvents().List(ctx, "TSCLAIM", store.RunEventFilter{WorkflowRunID: run.RunID})
 	if err != nil {
@@ -1696,6 +1716,32 @@ export default defineWorkflow({
 	if !hasWorkflowEvent(events, "task_claims_observed") || !hasWorkflowEvent(events, "agent_dispatch_admitted") ||
 		!hasWorkflowEvent(events, "workflow_completed") {
 		t.Fatalf("events = %+v, want task claim observation, dispatch, and completion evidence", events)
+	}
+	dispatchEvent := workflowEventDataByType(t, events, "agent_dispatch_admitted")
+	if dispatchEvent["agent_id"] != "worker-one" ||
+		dispatchEvent["dispatchId"] == "" ||
+		dispatchEvent["dispatch_id"] != dispatchEvent["dispatchId"] ||
+		dispatchEvent["operationId"] != "op:"+dispatchEvent["dispatchId"].(string) ||
+		dispatchEvent["session_id"] != "session-one" ||
+		dispatchEvent["task_run_id"] == "" ||
+		dispatchEvent["work_item_id"] != "CLAIM-1" ||
+		dispatchEvent["status"] != "admitted" ||
+		dispatchEvent["source"] != "workflow_context" ||
+		dispatchEvent["providerModel"] != "test/dispatch-model" {
+		t.Fatalf("dispatch event = %+v, want correlated dispatch admission evidence", dispatchEvent)
+	}
+	dispatchInput, ok := dispatchEvent["input"].(map[string]any)
+	if !ok || dispatchInput["idempotencyKey"] != "claim-dispatch:CLAIM-1" ||
+		dispatchInput["message"] != "continue from claim projection" {
+		t.Fatalf("dispatch input = %+v, want original dispatch payload", dispatchEvent["input"])
+	}
+	dispatchCorrelation, ok := dispatchEvent["correlation"].(map[string]any)
+	if !ok || dispatchCorrelation["workflowRunId"] != run.RunID ||
+		dispatchCorrelation["dispatchId"] != dispatchEvent["dispatchId"] ||
+		dispatchCorrelation["operationId"] != dispatchEvent["operationId"] ||
+		dispatchCorrelation["sessionId"] != "session-one" ||
+		dispatchCorrelation["workItemId"] != "CLAIM-1" {
+		t.Fatalf("dispatch correlation = %+v, want workflow/session/task linkage", dispatchEvent["correlation"])
 	}
 }
 

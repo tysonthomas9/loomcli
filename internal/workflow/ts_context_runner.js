@@ -819,27 +819,95 @@ function makeContext(request, workflow) {
         return sessionHandle(operations, { accepted: true, ...op.params });
       },
       dispatch: async (agent, input = {}) => {
+        const dispatchInput = input && typeof input === "object" ? input : {};
         const materialized = materializeAgent(agent);
         const agentId = String(
-          input.agentId ||
-            input.agent_id ||
+          dispatchInput.agentId ||
+            dispatchInput.agent_id ||
             materialized.name ||
             materialized.id ||
             "",
         );
+        const claim = findDispatchTaskClaim(taskClaims, agentId, dispatchInput);
+        const workItemId = stringPresent(
+          dispatchInput.workItemId,
+          dispatchInput.work_item_id,
+          claim && claim.work_item_id,
+          claim && claim.workItemId,
+        );
+        const taskRunId = stringPresent(
+          dispatchInput.taskRunId,
+          dispatchInput.task_run_id,
+          claim && claim.task_run_id,
+          claim && claim.taskRunId,
+        );
+        const sessionId = stringPresent(
+          dispatchInput.sessionId,
+          dispatchInput.session_id,
+          claim && claim.session_id,
+          claim && claim.sessionId,
+        );
+        const sessionName = stringPresent(dispatchInput.sessionName, dispatchInput.session_name);
+        const dispatchId = String(firstPresent(dispatchInput.dispatchId, dispatchInput.dispatch_id, dispatchOperationId(request, agentId, operations.length)));
+        const operationId = String(firstPresent(dispatchInput.operationId, dispatchInput.operation_id, `op:${dispatchId}`));
+        const admittedAt = new Date().toISOString();
         const op = {
           type: "agents.dispatch",
           params: {
+            accepted: true,
+            status: "admitted",
+            dispatchId,
+            operationId,
             agentId,
-            input: jsonSafe(input || {}),
-            admittedAt: new Date().toISOString(),
+            sessionId,
+            sessionName,
+            taskRunId,
+            taskId: workItemId,
+            workItemId,
+            model: firstPresent(dispatchInput.model, materialized.model),
+            provider: firstPresent(dispatchInput.provider, materialized.provider, materialized.backend),
+            providerModel: firstPresent(
+              dispatchInput.providerModel,
+              dispatchInput.provider_model,
+              materialized.providerModel,
+              materialized.provider_model,
+            ),
+            idempotencyKey: firstPresent(dispatchInput.idempotencyKey, dispatchInput.idempotency_key),
+            metadata: Object.prototype.hasOwnProperty.call(dispatchInput, "metadata") ? jsonSafe(dispatchInput.metadata) : undefined,
+            input: jsonSafe(dispatchInput),
+            admittedAt,
+            source: "workflow_context",
+            correlation: jsonSafe({
+              workflowRunId: request.id,
+              agentId,
+              dispatchId,
+              operationId,
+              taskRunId,
+              workItemId,
+              sessionId,
+            }),
           },
         };
         operations.push(op);
         return {
           accepted: true,
+          status: "admitted",
+          dispatchId,
+          operationId,
           agentId,
+          sessionId,
+          sessionName,
+          taskRunId,
+          taskId: workItemId,
+          workItemId,
+          model: op.params.model,
+          provider: op.params.provider,
+          providerModel: op.params.providerModel,
+          idempotencyKey: op.params.idempotencyKey,
+          metadata: op.params.metadata,
           input: op.params.input,
+          admittedAt,
+          correlation: op.params.correlation,
         };
       },
     },
@@ -918,6 +986,29 @@ function sessionHandle(operations, session) {
 function sessionOperationId(session, operation, index) {
   const sessionId = String(session.sessionId || session.session_id || session.id || session.sessionName || "session");
   return `op:${sessionId}:${operation}:${index + 1}`;
+}
+
+function dispatchOperationId(request, agentId, index) {
+  const runId = String((request && request.id) || "workflow");
+  const target = String(agentId || "agent");
+  return `dispatch:${runId}:${target}:${index + 1}`;
+}
+
+function findDispatchTaskClaim(taskClaims, agentId, input) {
+  const workItemId = stringPresent(input.workItemId, input.work_item_id);
+  const taskRunId = stringPresent(input.taskRunId, input.task_run_id);
+  const sessionId = stringPresent(input.sessionId, input.session_id);
+  const matches = (taskClaims || []).filter((claim) => {
+    if (!claim) return false;
+    if (agentId && stringPresent(claim.agent_id, claim.agentId, claim.claim_actor, claim.claimActor) !== agentId) {
+      return false;
+    }
+    if (workItemId && stringPresent(claim.work_item_id, claim.workItemId) !== workItemId) return false;
+    if (taskRunId && stringPresent(claim.task_run_id, claim.taskRunId) !== taskRunId) return false;
+    if (sessionId && stringPresent(claim.session_id, claim.sessionId) !== sessionId) return false;
+    return Boolean(workItemId || taskRunId || sessionId || agentId);
+  });
+  return matches.find((claim) => Boolean(claim.active)) || matches[0] || null;
 }
 
 function sessionOperationResult(operation, input, params) {
@@ -1045,6 +1136,11 @@ function firstPresent(...values) {
     if (value !== undefined && value !== null && value !== "") return value;
   }
   return undefined;
+}
+
+function stringPresent(...values) {
+  const value = firstPresent(...values);
+  return value === undefined ? "" : String(value);
 }
 
 function workflowTools(workflow, operations) {

@@ -741,6 +741,53 @@ const runtimeTypes = `declare module '@loom/runtime' {
     eventType?: 'agent_session_operation';
   };
 
+  export type WorkflowAgentDispatchInput = Record<string, unknown> & {
+    agentId?: string;
+    agent_id?: string;
+    dispatchId?: string;
+    dispatch_id?: string;
+    operationId?: string;
+    operation_id?: string;
+    sessionId?: string;
+    session_id?: string;
+    sessionName?: string;
+    session_name?: string;
+    taskRunId?: string;
+    task_run_id?: string;
+    taskId?: string;
+    task_id?: string;
+    workItemId?: string;
+    work_item_id?: string;
+    idempotencyKey?: string;
+    idempotency_key?: string;
+    model?: string;
+    provider?: string;
+    providerModel?: string;
+    provider_model?: string;
+    metadata?: Record<string, string>;
+  };
+
+  export type WorkflowAgentDispatchReceipt = Record<string, unknown> & {
+    accepted: boolean;
+    status: 'admitted' | 'rejected';
+    dispatchId: string;
+    operationId: string;
+    agentId: string;
+    sessionId?: string;
+    sessionName?: string;
+    taskRunId?: string;
+    taskId?: string;
+    workItemId?: string;
+    model?: string;
+    provider?: string;
+    providerModel?: string;
+    idempotencyKey?: string;
+    admittedAt: string;
+    input: Record<string, unknown>;
+    metadata?: Record<string, string>;
+    correlation?: Record<string, unknown>;
+  };
+
   export type WorkflowStagedFile = Record<string, unknown> & {
     accepted: boolean;
     path: string;
@@ -901,7 +948,7 @@ const runtimeTypes = `declare module '@loom/runtime' {
     };
     agents: {
       session(input: WorkflowAgentSessionInput): Promise<WorkflowAgentSession>;
-      dispatch(agent: string | AgentDefinition | CreatedAgent | AgentFactory, input?: Record<string, unknown>): Promise<Record<string, unknown>>;
+      dispatch(agent: string | AgentDefinition | CreatedAgent | AgentFactory, input?: WorkflowAgentDispatchInput): Promise<WorkflowAgentDispatchReceipt>;
     };
     artifacts: {
       record(input: {

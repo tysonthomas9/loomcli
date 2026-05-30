@@ -536,9 +536,51 @@ func appendAgentDispatchAdmittedEvent(ctx context.Context, st store.Store, run *
 	if agentID == "" {
 		return fmt.Errorf("agents.dispatch requires agentId")
 	}
+	dispatchID := firstString(params, "dispatchId", "dispatch_id")
+	if dispatchID == "" {
+		dispatchID = "dispatch:" + run.RunID + ":" + agentID
+	}
+	operationID := firstString(params, "operationId", "operation_id")
+	if operationID == "" {
+		operationID = "op:" + dispatchID
+	}
+	status := firstString(params, "status")
+	if status == "" {
+		status = "admitted"
+	}
+	taskID := firstString(params, "taskId", "task_id", "workItemId", "work_item_id")
+	taskRunID := firstString(params, "taskRunId", "task_run_id")
+	sessionID := firstString(params, "sessionId", "session_id")
 	data := copyAnyMap(params)
 	data["agent_id"] = agentID
+	data["dispatch_id"] = dispatchID
+	data["dispatchId"] = dispatchID
+	data["operation_id"] = operationID
+	data["operationId"] = operationID
+	data["status"] = status
 	data["workflow_run_id"] = run.RunID
+	data["source"] = "workflow_context"
+	if taskID != "" {
+		data["task_id"] = taskID
+		data["work_item_id"] = taskID
+	}
+	if taskRunID != "" {
+		data["task_run_id"] = taskRunID
+	}
+	if sessionID != "" {
+		data["session_id"] = sessionID
+	}
+	if _, ok := data["correlation"]; !ok {
+		data["correlation"] = map[string]any{
+			"workflowRunId": run.RunID,
+			"agentId":       agentID,
+			"dispatchId":    dispatchID,
+			"operationId":   operationID,
+			"taskRunId":     taskRunID,
+			"workItemId":    taskID,
+			"sessionId":     sessionID,
+		}
+	}
 	_, _ = st.RunEvents().Append(ctx, store.RunEventAppend{
 		WorkspaceKey:  run.WorkspaceKey,
 		WorkflowRunID: run.RunID,
