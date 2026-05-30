@@ -141,14 +141,22 @@ export const IssueCard = memo(function IssueCard({
   // the saved assignee. The two can diverge (stale assignee after a
   // worker crash, mid-handoff between siblings) — and that divergence is
   // exactly what "agent missing" needs to surface.
-  const assignedAgent = agents.find((a) => a.current_task_id === issue.id);
+  //
+  // active_task_id is fleet-db's DERIVED claim (session+lease join); it is the
+  // only one populated on the store-backed serve path, where the lock-derived
+  // current_task_id stays empty even for a provably-working agent (same reason
+  // live_status exists). Match either so a working agent resolves to its card
+  // instead of falsely reading "agent missing".
+  const assignedAgent = agents.find(
+    (a) => a.current_task_id === issue.id || a.active_task_id === issue.id,
+  );
   const agentParsedStatus = assignedAgent
     ? parseLoomStatus(assignedAgent.status)
     : null;
   // On in_progress cards where the issue claims an assignee, but no live
-  // agent has current_task_id === issue.id, the task is orphaned. Review
-  // cards intentionally don't show "missing" — the agent legitimately
-  // releases the task at handoff.
+  // agent is claiming the task (by current_task_id or the derived
+  // active_task_id), the task is orphaned. Review cards intentionally don't
+  // show "missing" — the agent legitimately releases the task at handoff.
   const isAgentMissing =
     columnId === "in_progress" && !!issue.assignee && !assignedAgent;
   // A stalled agent isn't on this task (current_task_id won't match), so look

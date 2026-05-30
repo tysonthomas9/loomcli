@@ -128,6 +128,27 @@ describe("IssueCard AgentRow integration", () => {
       expect(dot).toBeInTheDocument();
     });
 
+    it('resolves the live agent via the derived active_task_id (not "agent missing") when current_task_id is empty', () => {
+      // Store-backed serve path: the lock-derived current_task_id stays empty
+      // for a provably-working agent; the claim is in fleet-db's derived
+      // active_task_id. The card must still match it to the live agent.
+      const agent = createMockAgent({
+        name: "jack-worker",
+        current_task_id: "",
+        active_task_id: "test-issue-abc123",
+        live_status: "working",
+      });
+      setupAgentContext(agent);
+
+      // Mirrors the real board: the claim's assignee is the human actor.
+      const issue = createTestIssue({ assignee: "oleh" });
+      render(<IssueCard issue={issue} columnId="in_progress" />);
+
+      // The agent is provably on this task, so no false "agent missing".
+      expect(screen.queryByText("agent missing")).not.toBeInTheDocument();
+      expect(screen.getByText("oleh")).toBeInTheDocument();
+    });
+
     it('renders AgentRow with the saved assignee name and "agent missing" when no live agent has current_task_id === issue.id', () => {
       // No agent claims this issue right now (orphaned in_progress).
       setupAgentContext(undefined);
