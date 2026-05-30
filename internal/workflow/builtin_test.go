@@ -29,8 +29,12 @@ func TestSlackCloneEpicWorkflowEnsuresTaskRuns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateOrResumeRun() error = %v", err)
 	}
-	if _, err := RunOnce(ctx, st, ib, run); err != nil {
+	result, err := RunOnce(ctx, st, ib, run)
+	if err != nil {
 		t.Fatalf("RunOnce() error = %v", err)
+	}
+	if result.DispatchedCount != 1 {
+		t.Fatalf("DispatchedCount = %d, want 1", result.DispatchedCount)
 	}
 
 	taskRuns, err := st.TaskRuns().List(ctx, "WS", store.TaskRunFilter{WorkflowRunID: run.RunID, WorkItemID: ready.ID})
@@ -40,16 +44,23 @@ func TestSlackCloneEpicWorkflowEnsuresTaskRuns(t *testing.T) {
 	if len(taskRuns) != 1 {
 		t.Fatalf("task runs = %d, want 1", len(taskRuns))
 	}
-	if taskRuns[0].Status != domain.TaskRunQueued || taskRuns[0].RoleName != "task" {
-		t.Fatalf("task run = %+v, want queued task role", taskRuns[0])
+	if taskRuns[0].Status != domain.TaskRunStarting || taskRuns[0].RoleName != "task" || taskRuns[0].AgentID == "" || taskRuns[0].CommandID == "" {
+		t.Fatalf("task run = %+v, want dispatched starting task role", taskRuns[0])
+	}
+	cmds, err := st.AgentCommands().List(ctx, "WS", store.AgentCommandFilter{TargetAgentID: taskRuns[0].AgentID})
+	if err != nil {
+		t.Fatalf("list agent commands: %v", err)
+	}
+	if len(cmds) != 1 || cmds[0].Payload["workflow_run_id"] != run.RunID || cmds[0].Payload["task_run_id"] != taskRuns[0].TaskRunID {
+		t.Fatalf("commands = %+v, want one start command linked to workflow/task run", cmds)
 	}
 
 	events, err := st.RunEvents().List(ctx, "WS", store.RunEventFilter{WorkflowRunID: run.RunID})
 	if err != nil {
 		t.Fatalf("list run events: %v", err)
 	}
-	if len(events) < 2 {
-		t.Fatalf("events = %d, want workflow start and task ensure events", len(events))
+	if !hasWorkflowEvent(events, "task_run_ensured") || !hasWorkflowEvent(events, "task_run_dispatched") {
+		t.Fatalf("events = %+v, want task ensure and dispatch events", events)
 	}
 	updated, err := st.WorkflowRuns().Get(ctx, "WS", run.RunID)
 	if err != nil {
@@ -94,6 +105,9 @@ func TestCodeDefinedSlackCloneWorkflowDelegatesToBuiltinRunner(t *testing.T) {
 	if len(taskRuns) != 1 {
 		t.Fatalf("task runs = %d, want 1 from code-defined workflow delegation", len(taskRuns))
 	}
+	if taskRuns[0].Status != domain.TaskRunStarting || taskRuns[0].CommandID == "" {
+		t.Fatalf("task run = %+v, want dispatched code-defined task run", taskRuns[0])
+	}
 	events, err := st.RunEvents().List(ctx, "WS", store.RunEventFilter{WorkflowRunID: run.RunID})
 	if err != nil {
 		t.Fatalf("list events: %v", err)
@@ -105,8 +119,8 @@ func TestCodeDefinedSlackCloneWorkflowDelegatesToBuiltinRunner(t *testing.T) {
 			break
 		}
 	}
-	if !foundReconcile {
-		t.Fatalf("events = %+v, want workflow_ts_reconciled delegation event", events)
+	if !foundReconcile || !hasWorkflowEvent(events, "task_run_dispatched") {
+		t.Fatalf("events = %+v, want workflow_ts_reconciled and dispatch events", events)
 	}
 }
 

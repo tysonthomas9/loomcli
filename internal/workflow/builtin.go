@@ -21,12 +21,13 @@ type ParentWorkItemsInput struct {
 }
 
 type BuiltinRunResult struct {
-	Run          *domain.WorkflowRun `json:"run"`
-	TaskRuns     []*domain.TaskRun   `json:"task_runs,omitempty"`
-	Done         bool                `json:"done"`
-	ReadyCount   int                 `json:"ready_count"`
-	OpenCount    int                 `json:"open_count"`
-	BlockedCount int                 `json:"blocked_count"`
+	Run             *domain.WorkflowRun `json:"run"`
+	TaskRuns        []*domain.TaskRun   `json:"task_runs,omitempty"`
+	Done            bool                `json:"done"`
+	ReadyCount      int                 `json:"ready_count"`
+	OpenCount       int                 `json:"open_count"`
+	BlockedCount    int                 `json:"blocked_count"`
+	DispatchedCount int                 `json:"dispatched_count,omitempty"`
 }
 
 func EnsureBuiltins(ctx context.Context, st store.Store, workspaceKey string) error {
@@ -173,13 +174,18 @@ func runParentWorkItemsOnce(ctx context.Context, st store.Store, ib backend.Issu
 	if err != nil {
 		return nil, err
 	}
+	taskRuns, dispatched, err := dispatchTaskRuns(ctx, st, run, input, created)
+	if err != nil {
+		return nil, err
+	}
 	result := &BuiltinRunResult{
-		Run:          run,
-		TaskRuns:     created,
-		Done:         openCount == 0,
-		ReadyCount:   len(ready),
-		OpenCount:    openCount,
-		BlockedCount: len(blocked),
+		Run:             run,
+		TaskRuns:        taskRuns,
+		Done:            openCount == 0,
+		ReadyCount:      len(ready),
+		OpenCount:       openCount,
+		BlockedCount:    len(blocked),
+		DispatchedCount: dispatched,
 	}
 	if result.Done {
 		now := time.Now().UTC()

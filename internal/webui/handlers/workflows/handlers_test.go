@@ -91,8 +91,8 @@ func TestWorkflowRunAPICreatesInspectableRun(t *testing.T) {
 	if err := json.Unmarshal(eventsRec.Body.Bytes(), &events); err != nil {
 		t.Fatalf("decode events: %v", err)
 	}
-	if !hasRunEvent(events.Data, "workflow_ts_reconciled") || !hasRunEvent(events.Data, "task_run_ensured") {
-		t.Fatalf("events = %+v, want TypeScript reconcile and task-run evidence", events.Data)
+	if !hasRunEvent(events.Data, "workflow_ts_reconciled") || !hasRunEvent(events.Data, "task_run_ensured") || !hasRunEvent(events.Data, "task_run_dispatched") {
+		t.Fatalf("events = %+v, want TypeScript reconcile, ensure, and dispatch evidence", events.Data)
 	}
 
 	cancelRec := postJSON(t, mux, "/api/workspaces/WS/workflow-runs/"+created.Run.RunID+"/cancel", map[string]any{})
@@ -153,8 +153,8 @@ func TestWorkflowRouteBindingAPIRunsBoundWorkflow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list run events: %v", err)
 	}
-	if !hasRunEventPtr(events, "workflow_ts_reconciled") || !hasRunEventPtr(events, "task_run_ensured") {
-		t.Fatalf("events = %+v, want TypeScript reconcile and task-run evidence", events)
+	if !hasRunEventPtr(events, "workflow_ts_reconciled") || !hasRunEventPtr(events, "task_run_ensured") || !hasRunEventPtr(events, "task_run_dispatched") {
+		t.Fatalf("events = %+v, want TypeScript reconcile, ensure, and dispatch evidence", events)
 	}
 }
 

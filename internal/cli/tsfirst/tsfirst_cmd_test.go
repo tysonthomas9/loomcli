@@ -306,6 +306,9 @@ func TestRunTypeScriptWorkflowAppliesAndRunsBuiltin(t *testing.T) {
 	if result.Builtin == nil || len(result.Builtin.TaskRuns) != 1 {
 		t.Fatalf("builtin = %+v, want one ensured task run", result.Builtin)
 	}
+	if result.Builtin.DispatchedCount != 1 {
+		t.Fatalf("DispatchedCount = %d, want one daemon command dispatch", result.Builtin.DispatchedCount)
+	}
 
 	def, err := st.WorkflowDefinitions().Get(ctx, "TSRUN", "epic-runner")
 	if err != nil {
@@ -318,15 +321,22 @@ func TestRunTypeScriptWorkflowAppliesAndRunsBuiltin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list task runs: %v", err)
 	}
-	if len(taskRuns) != 1 || taskRuns[0].Status != domain.TaskRunQueued || taskRuns[0].RoleName != "task" {
-		t.Fatalf("taskRuns = %+v, want one queued task role run", taskRuns)
+	if len(taskRuns) != 1 || taskRuns[0].Status != domain.TaskRunStarting || taskRuns[0].RoleName != "task" || taskRuns[0].AgentID == "" || taskRuns[0].CommandID == "" {
+		t.Fatalf("taskRuns = %+v, want one dispatched starting task role run", taskRuns)
+	}
+	cmds, err := st.AgentCommands().List(ctx, "TSRUN", store.AgentCommandFilter{TargetAgentID: taskRuns[0].AgentID})
+	if err != nil {
+		t.Fatalf("list agent commands: %v", err)
+	}
+	if len(cmds) != 1 || cmds[0].Payload["workflow_run_id"] != result.Run.RunID || cmds[0].Payload["task_run_id"] != taskRuns[0].TaskRunID {
+		t.Fatalf("commands = %+v, want one start command linked to workflow/task run", cmds)
 	}
 	events, err := st.RunEvents().List(ctx, "TSRUN", store.RunEventFilter{WorkflowRunID: result.Run.RunID})
 	if err != nil {
 		t.Fatalf("list run events: %v", err)
 	}
-	if !hasRunEvent(events, "workflow_ts_reconciled") || !hasRunEvent(events, "task_run_ensured") {
-		t.Fatalf("events = %+v, want TypeScript reconcile and task-run evidence", events)
+	if !hasRunEvent(events, "workflow_ts_reconciled") || !hasRunEvent(events, "task_run_ensured") || !hasRunEvent(events, "task_run_dispatched") {
+		t.Fatalf("events = %+v, want TypeScript reconcile, ensure, and dispatch evidence", events)
 	}
 }
 
