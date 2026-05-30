@@ -346,13 +346,34 @@ function projectConfig() {
   return value || {};
 }
 
-function sourceRootDir() {
-  const config = projectConfig();
+function sourceRootDir(config = projectConfig()) {
   const sourceRoot = stringValue(config.sourceRoot || ".loom");
   if (sourceRoot === "" || path.isAbsolute(sourceRoot)) {
     throw new Error("loom.config.ts sourceRoot must be a relative path");
   }
   return path.join(root, sourceRoot);
+}
+
+function modelPolicy(config = {}) {
+  const models =
+    config.models && typeof config.models === "object"
+      ? config.models
+      : config.modelPolicy && typeof config.modelPolicy === "object"
+        ? config.modelPolicy
+        : {};
+  return compactObject({
+    allowed_models: stringArray(
+      models.allowed || models.allow || models.allowedModels || models.allowed_models || config.allowedModels || config.allowed_models,
+    ),
+    allowed_providers: stringArray(
+      models.providers ||
+        models.allowedProviders ||
+        models.allowed_providers ||
+        config.allowedModelProviders ||
+        config.allowed_model_providers,
+    ),
+    allow_unknown: boolValue(models.allowUnknown || models.allow_unknown || config.allowUnknownModels || config.allow_unknown_models),
+  });
 }
 
 function stringValue(v) {
@@ -629,7 +650,8 @@ function compactObject(item) {
   return out;
 }
 
-const sourceRoot = sourceRootDir();
+const config = projectConfig();
+const sourceRoot = sourceRootDir(config);
 
 readEntrypoints(path.join(sourceRoot, "skills")).forEach(skillModule);
 const tools = compactArrayObjects(readEntrypoints(path.join(sourceRoot, "tools")).map(toolModule));
@@ -640,6 +662,7 @@ const skills = compactArrayObjects(Array.from(skillRegistry.values()).sort((a, b
 
 const plan = {
   root,
+  model_policy: modelPolicy(config),
   agents,
   workflows,
   runtimes,

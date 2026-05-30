@@ -17,6 +17,7 @@ import (
 
 type Plan struct {
 	Root                 string                      `json:"root"`
+	ModelPolicy          *ModelPolicy                `json:"model_policy,omitempty"`
 	Agents               []AgentModule               `json:"agents,omitempty"`
 	AgentInstances       []AgentInstanceModule       `json:"agent_instances,omitempty"`
 	AgentSessions        []AgentSessionModule        `json:"agent_sessions,omitempty"`
@@ -32,6 +33,12 @@ type Plan struct {
 	Runtimes             []RuntimeModule             `json:"runtimes,omitempty"`
 	Skills               []SkillModule               `json:"skills,omitempty"`
 	Tools                []ToolModule                `json:"tools,omitempty"`
+}
+
+type ModelPolicy struct {
+	AllowedModels    []string `json:"allowed_models,omitempty"`
+	AllowedProviders []string `json:"allowed_providers,omitempty"`
+	AllowUnknown     bool     `json:"allow_unknown,omitempty"`
 }
 
 type AgentModule struct {
@@ -558,6 +565,9 @@ func loadDir(dir string, fn func(string, []byte) error) error {
 
 //nolint:gocognit,cyclop,funlen // Validation is kept centralized so duplicate-name and capability errors share one pass.
 func validatePlan(plan *Plan) error {
+	if err := validateModelPolicy(plan.ModelPolicy); err != nil {
+		return err
+	}
 	seen := make(map[string]string)
 	for _, skill := range plan.Skills {
 		if strings.TrimSpace(skill.Name) == "" {
@@ -630,6 +640,12 @@ func validatePlan(plan *Plan) error {
 		}
 		if err := validateRepoAndEnvPolicy(agent.SourcePath, agent.Repos, agent.Env); err != nil {
 			return err
+		}
+		if shouldValidateModelSpecifiers(plan) {
+			err := validateAgentModel(agent, plan.ModelPolicy)
+			if err != nil {
+				return err
+			}
 		}
 		if err := validateNoExactCollision(agent.SourcePath, "model tool", agent.Tools, "sandbox command", agent.AllowedCommands); err != nil {
 			return err
@@ -793,6 +809,13 @@ func validatePlan(plan *Plan) error {
 		}
 	}
 	return nil
+}
+
+func shouldValidateModelSpecifiers(plan *Plan) bool {
+	if plan == nil {
+		return false
+	}
+	return plan.ModelPolicy != nil || !strings.HasPrefix(strings.TrimSpace(plan.Root), "workspace:")
 }
 
 func validateSkillResources(sourcePath string, resources []string) error {

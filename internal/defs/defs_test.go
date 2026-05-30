@@ -3,6 +3,7 @@ package defs
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -66,6 +67,81 @@ func TestLoadSlackCloneDefinitions(t *testing.T) {
 	if got := routeBindingID(plan.Workflows[0].Name, "POST", plan.Workflows[0].RoutePath); got != "workflow:slack-clone-epic-runner:POST:workflows.slack-clone-epic-runner.run" {
 		t.Fatalf("routeBindingID() = %q, want path-safe route binding id", got)
 	}
+}
+
+func TestLoadRejectsUnknownModelProvider(t *testing.T) {
+	root := t.TempDir()
+	writeDefFile(t, root, ".loom/agents/bad-model.ts", `export default defineAgent({
+  name: "bad-model",
+  backend: "codex",
+  model: "unknown-provider/example-model",
+});`)
+
+	_, err := Load(root)
+	if err == nil {
+		t.Fatalf("Load() succeeded, want unknown model provider error")
+	}
+	if !strings.Contains(err.Error(), `unknown model provider "unknown-provider"`) ||
+		!strings.Contains(err.Error(), "loom.config.ts models.allowedProviders") {
+		t.Fatalf("Load() error = %v, want model provider validation guidance", err)
+	}
+}
+
+func TestLoadAllowsConfiguredPrivateModelProviderAndAlias(t *testing.T) {
+	root := t.TempDir()
+	writeDefFile(t, root, "loom.config.ts", `export default defineConfig({
+  sourceRoot: ".loom",
+  models: {
+    allowedProviders: ["acme-ai"],
+    allowed: ["enterprise-default"],
+  },
+});`)
+	writeDefFile(t, root, ".loom/agents/private-gateway.ts", `export default defineAgent({
+  name: "private-gateway",
+  backend: "codex",
+  model: "acme-ai/team-model",
+});`)
+	writeDefFile(t, root, ".loom/agents/private-alias.ts", `export default defineAgent({
+  name: "private-alias",
+  backend: "codex",
+  model: "enterprise-default",
+});`)
+
+	plan, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if len(plan.Agents) != 2 {
+		t.Fatalf("agents = %+v, want private provider and alias agents", plan.Agents)
+	}
+	if plan.ModelPolicy == nil ||
+		!containsString(plan.ModelPolicy.AllowedProviders, "acme-ai") ||
+		!containsString(plan.ModelPolicy.AllowedModels, "enterprise-default") {
+		t.Fatalf("model policy = %+v, want configured private provider and alias", plan.ModelPolicy)
+	}
+}
+
+func TestWorkspaceExportPlanAllowsExistingPrivateModelProvider(t *testing.T) {
+	plan := &Plan{
+		Root: "workspace:PRIVATE",
+		Agents: []AgentModule{{
+			Name:       "private-agent",
+			SourcePath: "control-plane:role/private-agent",
+			Model:      "private-provider/team-model",
+		}},
+	}
+	if err := validatePlan(plan); err != nil {
+		t.Fatalf("validatePlan() error = %v, want control-plane export to preserve private provider", err)
+	}
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func writeDefFile(t *testing.T, root, rel, content string) {

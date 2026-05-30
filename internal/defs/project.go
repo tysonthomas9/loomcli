@@ -292,6 +292,30 @@ export default defineWorkflow({
 }
 
 const runtimeTypes = `declare module '@loom/runtime' {
+  export type ModelValidationPolicy = {
+    allowed?: string[];
+    allow?: string[];
+    allowedModels?: string[];
+    allowed_models?: string[];
+    providers?: string[];
+    allowedProviders?: string[];
+    allowed_providers?: string[];
+    allowUnknown?: boolean;
+    allow_unknown?: boolean;
+  };
+
+  export type LoomConfig = {
+    sourceRoot?: string;
+    models?: ModelValidationPolicy;
+    modelPolicy?: ModelValidationPolicy;
+    allowedModels?: string[];
+    allowed_models?: string[];
+    allowedModelProviders?: string[];
+    allowed_model_providers?: string[];
+    allowUnknownModels?: boolean;
+    allow_unknown_models?: boolean;
+  };
+
   export type RuntimeCleanupPolicy = {
     mode?: 'never' | 'on_completion' | 'after_ttl' | 'provider_default' | string;
     ttl?: string;
@@ -869,7 +893,7 @@ const runtimeTypes = `declare module '@loom/runtime' {
     tool(name: string, args?: Record<string, unknown>): Promise<unknown>;
   };
 
-  export function defineConfig<T extends object>(config: T): T;
+  export function defineConfig<T extends LoomConfig>(config: T): T;
   export function defineAgent<T extends AgentDefinition>(agent: T): T;
   export function createAgent<T extends AgentDefinition | AgentFactory>(agent: T): CreatedAgent;
   export function defineAgentProfile<T extends AgentDefinition>(profile: T): T;
