@@ -725,6 +725,9 @@ export default defineWorkflow({
     });
     const report = await session.prompt({
       instruction: 'Review the current task and summarize the next step.',
+      result: { type: 'object', required: ['summary'] },
+      providerModel: 'test/provider-model',
+      usage: { inputTokens: 12, outputTokens: 5, totalTokens: 17, costUSD: 0.004 },
       mockResult: { summary: 'ready to continue', needsFix: false },
     });
     await session.skill({ name: 'review-checklist', instruction: 'Apply the review checklist.' });
@@ -737,7 +740,20 @@ export default defineWorkflow({
       status: 'idle',
       metadata: { source: 'direct-context' },
     });
-    return { agentId: session.agentId, sessionName: session.sessionName, summary: report.summary };
+    return {
+      agentId: session.agentId,
+      sessionName: session.sessionName,
+      summary: report.summary,
+      promptOperationId: report.operationId,
+      promptDataSummary: report.data?.summary,
+      promptResultSummary: report.result?.summary,
+      promptModel: report.model,
+      promptProvider: report.provider,
+      promptProviderModel: report.providerModel,
+      promptUsageTotal: report.usage?.totalTokens,
+      promptValidationStatus: report.validation?.status,
+      promptText: report.text,
+    };
   },
 });
 `), 0o644); err != nil {
@@ -764,6 +780,22 @@ export default defineWorkflow({
 	}
 	if result.Run == nil || result.Run.Status != domain.WorkflowRunCompleted {
 		t.Fatalf("result = %+v, want completed session workflow", result)
+	}
+	var workflowOutput map[string]any
+	if err := json.Unmarshal(result.Run.Result, &workflowOutput); err != nil {
+		t.Fatalf("decode result %s: %v", result.Run.Result, err)
+	}
+	if workflowOutput["summary"] != "ready to continue" ||
+		workflowOutput["promptDataSummary"] != "ready to continue" ||
+		workflowOutput["promptResultSummary"] != "ready to continue" ||
+		workflowOutput["promptModel"] != "test/model" ||
+		workflowOutput["promptProvider"] != "codex" ||
+		workflowOutput["promptProviderModel"] != "test/provider-model" ||
+		workflowOutput["promptUsageTotal"] != float64(17) ||
+		workflowOutput["promptValidationStatus"] != "not_validated" ||
+		workflowOutput["promptText"] != "ready to continue" ||
+		workflowOutput["promptOperationId"] == "" {
+		t.Fatalf("workflow output = %+v, want session operation envelope fields", workflowOutput)
 	}
 	sessions, err := st.AgentSessions().List(ctx, "TSSESSION", store.AgentSessionFilter{AgentID: "worker-one", TaskID: "TASK-SESSION"})
 	if err != nil {
@@ -803,9 +835,36 @@ export default defineWorkflow({
 	if promptEvent["status"] != "completed" || promptEvent["operationId"] == "" {
 		t.Fatalf("prompt event = %+v, want completed operation with operation id", promptEvent)
 	}
+	if promptEvent["model"] != "test/model" || promptEvent["provider"] != "codex" || promptEvent["providerModel"] != "test/provider-model" {
+		t.Fatalf("prompt event = %+v, want model/provider metadata", promptEvent)
+	}
+	promptUsage, ok := promptEvent["usage"].(map[string]any)
+	if !ok || promptUsage["totalTokens"] != float64(17) || promptUsage["inputTokens"] != float64(12) {
+		t.Fatalf("prompt event usage = %+v, want token usage metadata", promptEvent["usage"])
+	}
 	promptResult, ok := promptEvent["result"].(map[string]any)
 	if !ok || promptResult["summary"] != "ready to continue" || promptResult["needsFix"] != false {
 		t.Fatalf("prompt result = %+v, want captured structured mock result", promptEvent["result"])
+	}
+	if promptResult["operationId"] != promptEvent["operationId"] ||
+		promptResult["status"] != "completed" ||
+		promptResult["model"] != "test/model" ||
+		promptResult["provider"] != "codex" ||
+		promptResult["providerModel"] != "test/provider-model" ||
+		promptResult["text"] != "ready to continue" {
+		t.Fatalf("prompt result = %+v, want result envelope metadata", promptResult)
+	}
+	promptData, ok := promptResult["data"].(map[string]any)
+	if !ok || promptData["summary"] != "ready to continue" || promptData["needsFix"] != false {
+		t.Fatalf("prompt result data = %+v, want structured data payload", promptResult["data"])
+	}
+	promptEnvelopeUsage, ok := promptResult["usage"].(map[string]any)
+	if !ok || promptEnvelopeUsage["totalTokens"] != float64(17) {
+		t.Fatalf("prompt result usage = %+v, want usage envelope", promptResult["usage"])
+	}
+	promptValidation, ok := promptResult["validation"].(map[string]any)
+	if !ok || promptValidation["requested"] != true || promptValidation["status"] != "not_validated" {
+		t.Fatalf("prompt validation = %+v, want schema request evidence", promptResult["validation"])
 	}
 	if _, ok := promptEvent["durationMs"].(float64); !ok {
 		t.Fatalf("prompt event = %+v, want durationMs", promptEvent)
@@ -814,6 +873,10 @@ export default defineWorkflow({
 	shellResult, ok := shellEvent["result"].(map[string]any)
 	if !ok || shellResult["exitCode"] != float64(0) {
 		t.Fatalf("shell result = %+v, want captured shell mock result", shellEvent["result"])
+	}
+	shellData, ok := shellResult["data"].(map[string]any)
+	if !ok || shellData["exitCode"] != float64(0) {
+		t.Fatalf("shell data = %+v, want shell result envelope data", shellResult["data"])
 	}
 }
 

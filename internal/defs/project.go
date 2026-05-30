@@ -658,12 +658,29 @@ const runtimeTypes = `declare module '@loom/runtime' {
     sessionName?: string;
     session_name?: string;
     harness?: string;
-    prompt<T = WorkflowAgentSessionOperationReceipt>(input: WorkflowAgentSessionOperationInput<T>): Promise<T>;
-    skill<T = WorkflowAgentSessionOperationReceipt>(input: WorkflowAgentSessionOperationInput<T>): Promise<T>;
-    task<T = WorkflowAgentSessionOperationReceipt>(input: WorkflowAgentSessionOperationInput<T>): Promise<T>;
-    shell<T = WorkflowAgentSessionOperationReceipt>(input: WorkflowAgentSessionOperationInput<T>): Promise<T>;
-    compact<T = WorkflowAgentSessionOperationReceipt>(input?: WorkflowAgentSessionOperationInput<T>): Promise<T>;
+    prompt<T = unknown>(input: WorkflowAgentSessionOperationInput<T>): Promise<WorkflowAgentSessionOperationResult<T>>;
+    skill<T = unknown>(input: WorkflowAgentSessionOperationInput<T>): Promise<WorkflowAgentSessionOperationResult<T>>;
+    task<T = unknown>(input: WorkflowAgentSessionOperationInput<T>): Promise<WorkflowAgentSessionOperationResult<T>>;
+    shell<T = unknown>(input: WorkflowAgentSessionOperationInput<T>): Promise<WorkflowAgentSessionOperationResult<T>>;
+    compact<T = unknown>(input?: WorkflowAgentSessionOperationInput<T>): Promise<WorkflowAgentSessionOperationResult<T>>;
   };
+
+  export type WorkflowModelUsage = Record<string, unknown> & {
+    inputTokens?: number;
+    input_tokens?: number;
+    outputTokens?: number;
+    output_tokens?: number;
+    totalTokens?: number;
+    total_tokens?: number;
+    costUSD?: number;
+    cost_usd?: number;
+  };
+
+  export type WorkflowAgentSessionOperationStatus =
+    | 'completed'
+    | 'failed'
+    | 'cancelled'
+    | 'result_unavailable';
 
   export type WorkflowAgentSessionOperationInput<T = unknown> = Record<string, unknown> & {
     instruction?: string;
@@ -671,18 +688,57 @@ const runtimeTypes = `declare module '@loom/runtime' {
     name?: string;
     command?: string;
     args?: Record<string, unknown>;
+    model?: string;
+    provider?: string;
+    providerModel?: string;
+    provider_model?: string;
+    usage?: WorkflowModelUsage;
+    status?: WorkflowAgentSessionOperationStatus;
     result?: unknown;
     response?: T;
     mockResult?: T;
+    resultUnavailable?: string | boolean | Record<string, unknown>;
+    result_unavailable?: string | boolean | Record<string, unknown>;
+    cancellation?: string | boolean | Record<string, unknown>;
+    cancelled?: string | boolean | Record<string, unknown>;
+    cancelReason?: string;
+    cancel_reason?: string;
+    failure?: string | boolean | Record<string, unknown>;
+    error?: string | boolean | Record<string, unknown>;
     metadata?: Record<string, string>;
   };
 
-  export type WorkflowAgentSessionOperationReceipt = Record<string, unknown> & {
+  export type WorkflowAgentSessionOperationResult<T = unknown> =
+    WorkflowAgentSessionOperationReceipt<T> & (T extends object ? T : Record<string, unknown>);
+
+  export type WorkflowAgentSessionOperationReceipt<T = unknown> = Record<string, unknown> & {
     accepted: boolean;
+    status: WorkflowAgentSessionOperationStatus;
     operation: 'prompt' | 'skill' | 'task' | 'shell' | 'compact';
+    operationId: string;
     agentId?: string;
     sessionId?: string;
     sessionName?: string;
+    model?: string;
+    provider?: string;
+    providerModel?: string;
+    usage?: WorkflowModelUsage;
+    startedAt?: string;
+    completedAt?: string;
+    durationMs?: number;
+    text?: string;
+    data?: T;
+    result?: T;
+    validation?: {
+      requested: boolean;
+      status: 'validated' | 'failed' | 'not_validated';
+      reason?: string;
+    };
+    resultUnavailable?: Record<string, unknown>;
+    result_unavailable?: Record<string, unknown>;
+    cancellation?: Record<string, unknown>;
+    failure?: Record<string, unknown>;
+    eventType?: 'agent_session_operation';
   };
 
   export type WorkflowStagedFile = Record<string, unknown> & {

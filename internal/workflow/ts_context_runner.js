@@ -875,6 +875,7 @@ function findWorkItem(items, id) {
 
 function sessionHandle(operations, session) {
   const call = async (operation, input = {}) => {
+    const operationInput = input && typeof input === "object" ? input : {};
     const startedAt = new Date().toISOString();
     const operationId = sessionOperationId(session, operation, operations.length);
     const params = {
@@ -884,15 +885,22 @@ function sessionHandle(operations, session) {
       harness: session.harness,
       sessionName: session.sessionName || session.session_name,
       taskId: session.taskId || session.task_id || session.workItemId || session.work_item_id,
+      model: firstPresent(operationInput.model, session.model),
+      provider: firstPresent(operationInput.provider, session.provider, session.backend),
+      providerModel: firstPresent(operationInput.providerModel, operationInput.provider_model, session.providerModel, session.provider_model),
+      usage: Object.prototype.hasOwnProperty.call(operationInput, "usage") ? jsonSafe(operationInput.usage) : undefined,
+      metadata: Object.prototype.hasOwnProperty.call(operationInput, "metadata") ? jsonSafe(operationInput.metadata) : undefined,
       operation,
-      input: jsonSafe(input || {}),
+      input: jsonSafe(operationInput),
       startedAt,
     };
-    const result = sessionOperationResult(operation, input, params);
+    const result = sessionOperationResult(operation, operationInput, params);
     const completedAt = new Date().toISOString();
     params.completedAt = completedAt;
     params.durationMs = Date.parse(completedAt) - Date.parse(startedAt);
-    params.status = "completed";
+    params.status = String(result.status || "completed");
+    result.completedAt = completedAt;
+    result.durationMs = params.durationMs;
     params.result = jsonSafe(result);
     operations.push({ type: "agents.session.operation", params });
     return result;
@@ -913,6 +921,55 @@ function sessionOperationId(session, operation, index) {
 }
 
 function sessionOperationResult(operation, input, params) {
+  const status = sessionOperationStatus(input);
+  const raw = sessionOperationRawResult(operation, input, params);
+  const rawObject = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : null;
+  const envelope = {};
+  if (rawObject) {
+    Object.assign(envelope, jsonSafe(rawObject));
+  }
+  Object.assign(envelope, {
+    accepted: status === "completed",
+    status,
+    operation,
+    operationId: params.operationId,
+    agentId: params.agentId,
+    sessionId: params.sessionId,
+    sessionName: params.sessionName,
+    model: params.model,
+    provider: params.provider,
+    providerModel: params.providerModel,
+    usage: params.usage,
+    startedAt: params.startedAt,
+    text: sessionOperationText(raw),
+    data: jsonSafe(raw),
+    result: jsonSafe(raw),
+    eventType: "agent_session_operation",
+  });
+  if (Object.prototype.hasOwnProperty.call(input, "result")) {
+    envelope.validation = {
+      requested: true,
+      status: "not_validated",
+      reason: "constrained workflow runner records result schema requests but does not execute provider output validation",
+    };
+  }
+  const unavailable = sessionOperationUnavailable(input);
+  if (unavailable) {
+    envelope.resultUnavailable = unavailable;
+    envelope.result_unavailable = unavailable;
+  }
+  const cancellation = sessionOperationCancellation(input);
+  if (cancellation) {
+    envelope.cancellation = cancellation;
+  }
+  const failure = sessionOperationFailure(input);
+  if (failure) {
+    envelope.failure = failure;
+  }
+  return jsonSafe(envelope);
+}
+
+function sessionOperationRawResult(operation, input, params) {
   if (input && Object.prototype.hasOwnProperty.call(input, "mockResult")) {
     return jsonSafe(input.mockResult);
   }
@@ -926,6 +983,68 @@ function sessionOperationResult(operation, input, params) {
     sessionId: params.sessionId,
     sessionName: params.sessionName,
   };
+}
+
+function sessionOperationStatus(input) {
+  const explicit = String((input && input.status) || "").toLowerCase();
+  if (["completed", "failed", "cancelled", "result_unavailable"].includes(explicit)) return explicit;
+  if (sessionOperationCancellation(input)) return "cancelled";
+  if (sessionOperationUnavailable(input)) return "result_unavailable";
+  if (sessionOperationFailure(input)) return "failed";
+  return "completed";
+}
+
+function sessionOperationText(raw) {
+  if (typeof raw === "string") return raw;
+  if (!raw || typeof raw !== "object") return undefined;
+  const text = raw.text || raw.summary || raw.message;
+  return typeof text === "string" ? text : undefined;
+}
+
+function sessionOperationUnavailable(input) {
+  if (!input) return null;
+  const value = Object.prototype.hasOwnProperty.call(input, "resultUnavailable")
+    ? input.resultUnavailable
+    : Object.prototype.hasOwnProperty.call(input, "result_unavailable")
+      ? input.result_unavailable
+      : null;
+  if (!value) return null;
+  if (typeof value === "string") return { reason: value };
+  if (typeof value === "object") return jsonSafe(value);
+  return { reason: "operation result unavailable" };
+}
+
+function sessionOperationCancellation(input) {
+  if (!input) return null;
+  const value =
+    input.cancellation ||
+    input.cancelled ||
+    input.cancelReason ||
+    input.cancel_reason ||
+    (String(input.status || "").toLowerCase() === "cancelled" ? "cancelled" : null);
+  if (!value) return null;
+  if (typeof value === "string") return { reason: value };
+  if (typeof value === "object") return jsonSafe(value);
+  return { reason: "operation cancelled" };
+}
+
+function sessionOperationFailure(input) {
+  if (!input) return null;
+  const value =
+    input.failure ||
+    input.error ||
+    (String(input.status || "").toLowerCase() === "failed" ? "operation failed" : null);
+  if (!value) return null;
+  if (typeof value === "string") return { message: value };
+  if (typeof value === "object") return jsonSafe(value);
+  return { message: "operation failed" };
+}
+
+function firstPresent(...values) {
+  for (const value of values) {
+    if (value !== undefined && value !== null && value !== "") return value;
+  }
+  return undefined;
 }
 
 function workflowTools(workflow, operations) {
