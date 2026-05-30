@@ -184,12 +184,36 @@ func TestPlanFromWorkspaceProjectsControlPlaneRecords(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("update task run: %v", err)
 	}
+	sessionHeartbeat := taskStartedAt.Add(time.Minute)
+	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey:    "CP",
+		SessionID:       "session-1",
+		AgentID:         "triage-bot",
+		NodeID:          "node-local",
+		Kind:            domain.AgentSessionKindTask,
+		TaskID:          "TASK-1",
+		TerminalID:      "term-1",
+		ParentSessionID: "session-parent",
+		Status:          domain.AgentSessionRunning,
+		Phase:           "implementing",
+		Attempt:         2,
+		Metadata:        map[string]string{"workflow_run_id": workflowRun.RunID, "harness": "planning"},
+	}); err != nil {
+		t.Fatalf("create agent session: %v", err)
+	}
+	sessionSummary := "working on sidebar"
+	if _, err := st.AgentSessions().Update(ctx, "CP", "session-1", store.AgentSessionUpdate{
+		LastHeartbeat: &sessionHeartbeat,
+		Summary:       &sessionSummary,
+	}); err != nil {
+		t.Fatalf("update agent session: %v", err)
+	}
 
 	plan, err := PlanFromWorkspace(ctx, st, "CP")
 	if err != nil {
 		t.Fatalf("PlanFromWorkspace() error = %v", err)
 	}
-	if got := Summary(plan); got != "agents=1 workflows=1 runtimes=1 agent_instances=1 workflow_runs=1 task_runs=1 tools=1" {
+	if got := Summary(plan); got != "agents=1 workflows=1 runtimes=1 agent_instances=1 agent_sessions=1 workflow_runs=1 task_runs=1 tools=1" {
 		t.Fatalf("Summary() = %q, want direct record parity", got)
 	}
 	if plan.Root != "workspace:CP" {
@@ -216,6 +240,16 @@ func TestPlanFromWorkspaceProjectsControlPlaneRecords(t *testing.T) {
 		instance.MaxConcurrency != 1 || instance.BudgetPolicy != "p2" ||
 		!strings.Contains(fmtStringSlice(instance.Repos), "slack-src") {
 		t.Fatalf("agent instance policy = %+v, want durable runtime assignment", instance)
+	}
+	session := plan.AgentSessions[0]
+	if session.SessionID != "session-1" || session.AgentID != "triage-bot" ||
+		session.NodeID != "node-local" || session.Kind != domain.AgentSessionKindTask ||
+		session.TaskID != "TASK-1" || session.TerminalID != "term-1" ||
+		session.ParentSessionID != "session-parent" || session.Status != domain.AgentSessionRunning ||
+		session.Phase != "implementing" || session.Attempt != 2 ||
+		session.Summary != "working on sidebar" || session.Metadata["harness"] != "planning" ||
+		session.LastHeartbeat == nil || !session.LastHeartbeat.Equal(sessionHeartbeat) {
+		t.Fatalf("agent session = %+v, want durable session runtime state", session)
 	}
 	workflow := plan.Workflows[0]
 	if workflow.Name != "slack-clone-runner" || workflow.Builtin != "run-parent-work-items" {
@@ -291,6 +325,19 @@ func TestPlanFromWorkspaceProjectsControlPlaneRecords(t *testing.T) {
 		importedTaskRun.ClaimActor != "triage-bot" || importedTaskRun.ClaimEventID != "claim-event-1" ||
 		importedTaskRun.Metadata["app"] != "slack" || !importedTaskRun.StartedAt.Equal(taskStartedAt) {
 		t.Fatalf("imported task run = %+v, want round-tripped durable task run state", importedTaskRun)
+	}
+	importedSession, err := imported.AgentSessions().Get(ctx, "IMPORT", "session-1")
+	if err != nil {
+		t.Fatalf("get imported agent session: %v", err)
+	}
+	if importedSession.AgentID != "triage-bot" || importedSession.NodeID != "node-local" ||
+		importedSession.Kind != domain.AgentSessionKindTask || importedSession.TaskID != "TASK-1" ||
+		importedSession.TerminalID != "term-1" || importedSession.ParentSessionID != "session-parent" ||
+		importedSession.Status != domain.AgentSessionRunning || importedSession.Phase != "implementing" ||
+		importedSession.Attempt != 2 || importedSession.Summary != "working on sidebar" ||
+		importedSession.Metadata["workflow_run_id"] != "wrun-slack-1" ||
+		!importedSession.LastHeartbeat.Equal(sessionHeartbeat) {
+		t.Fatalf("imported agent session = %+v, want round-tripped durable session state", importedSession)
 	}
 }
 

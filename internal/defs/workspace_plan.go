@@ -35,6 +35,9 @@ func PlanFromWorkspace(ctx context.Context, st store.Store, workspaceKey string)
 	if err := appendControlPlaneAgentInstances(ctx, st, workspaceKey, plan); err != nil {
 		return nil, err
 	}
+	if err := appendControlPlaneAgentSessions(ctx, st, workspaceKey, plan); err != nil {
+		return nil, err
+	}
 	if err := appendControlPlaneWorkflows(ctx, st, workspaceKey, plan, index.hasWorkflow); err != nil {
 		return nil, err
 	}
@@ -296,6 +299,52 @@ func agentInstanceFromControlPlane(agent *domain.Agent) AgentInstanceModule {
 	return instance
 }
 
+func appendControlPlaneAgentSessions(ctx context.Context, st store.Store, workspaceKey string, plan *Plan) error {
+	sessionStore := st.AgentSessions()
+	if sessionStore == nil {
+		return fmt.Errorf("agent session store not configured")
+	}
+	sessions, err := sessionStore.List(ctx, workspaceKey, store.AgentSessionFilter{Limit: 10000})
+	if err != nil {
+		return fmt.Errorf("list agent sessions: %w", err)
+	}
+	for _, session := range sessions {
+		if session == nil {
+			continue
+		}
+		plan.AgentSessions = append(plan.AgentSessions, agentSessionFromControlPlane(session))
+	}
+	return nil
+}
+
+func agentSessionFromControlPlane(session *domain.AgentSession) AgentSessionModule {
+	module := AgentSessionModule{
+		SessionID:       session.SessionID,
+		AgentID:         session.AgentID,
+		SourcePath:      "control-plane:agent-session/" + session.SessionID,
+		NodeID:          session.NodeID,
+		Kind:            session.Kind,
+		TaskID:          session.TaskID,
+		TerminalID:      session.TerminalID,
+		ParentSessionID: session.ParentSessionID,
+		Status:          session.Status,
+		Phase:           session.Phase,
+		Attempt:         session.Attempt,
+		Summary:         session.Summary,
+		ErrorClass:      session.ErrorClass,
+		ExitCode:        cloneInt(session.ExitCode),
+		Metadata:        cloneStringMap(session.Metadata),
+	}
+	if !session.LastHeartbeat.IsZero() {
+		lastHeartbeat := session.LastHeartbeat
+		module.LastHeartbeat = &lastHeartbeat
+	}
+	module.FinishedAt = cloneWorkflowRunTime(session.FinishedAt)
+	module.SourceHash = workspaceHash(module)
+	module.Version = version(module.SourceHash)
+	return module
+}
+
 func appendControlPlaneWorkflows(ctx context.Context, st store.Store, workspaceKey string, plan *Plan, skip map[string]bool) error {
 	definitions, err := st.WorkflowDefinitions().List(ctx, workspaceKey, store.WorkflowDefinitionFilter{Status: domain.DefinitionStatusActive})
 	if err != nil {
@@ -532,6 +581,7 @@ func sortPlan(plan *Plan) {
 	sort.Slice(plan.Tools, func(i, j int) bool { return plan.Tools[i].Name < plan.Tools[j].Name })
 	sort.Slice(plan.Agents, func(i, j int) bool { return plan.Agents[i].Name < plan.Agents[j].Name })
 	sort.Slice(plan.AgentInstances, func(i, j int) bool { return plan.AgentInstances[i].Name < plan.AgentInstances[j].Name })
+	sort.Slice(plan.AgentSessions, func(i, j int) bool { return plan.AgentSessions[i].SessionID < plan.AgentSessions[j].SessionID })
 	sort.Slice(plan.Workflows, func(i, j int) bool { return plan.Workflows[i].Name < plan.Workflows[j].Name })
 	sort.Slice(plan.WorkflowRuns, func(i, j int) bool { return plan.WorkflowRuns[i].RunID < plan.WorkflowRuns[j].RunID })
 	sort.Slice(plan.TaskRuns, func(i, j int) bool { return plan.TaskRuns[i].TaskRunID < plan.TaskRuns[j].TaskRunID })

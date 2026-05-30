@@ -19,6 +19,7 @@ type Plan struct {
 	Root           string                `json:"root"`
 	Agents         []AgentModule         `json:"agents,omitempty"`
 	AgentInstances []AgentInstanceModule `json:"agent_instances,omitempty"`
+	AgentSessions  []AgentSessionModule  `json:"agent_sessions,omitempty"`
 	Workflows      []WorkflowModule      `json:"workflows,omitempty"`
 	WorkflowRuns   []WorkflowRunModule   `json:"workflow_runs,omitempty"`
 	TaskRuns       []TaskRunModule       `json:"task_runs,omitempty"`
@@ -162,6 +163,9 @@ func Apply(ctx context.Context, st store.Store, workspaceKey, actor string, plan
 		return err
 	}
 	if err := applyTaskRuns(ctx, st, workspaceKey, plan.TaskRuns); err != nil {
+		return err
+	}
+	if err := applyAgentSessions(ctx, st, workspaceKey, plan.AgentSessions); err != nil {
 		return err
 	}
 	return nil
@@ -531,6 +535,9 @@ func Summary(plan *Plan) string {
 	if len(plan.AgentInstances) > 0 {
 		summary += fmt.Sprintf(" agent_instances=%d", len(plan.AgentInstances))
 	}
+	if len(plan.AgentSessions) > 0 {
+		summary += fmt.Sprintf(" agent_sessions=%d", len(plan.AgentSessions))
+	}
 	if len(plan.WorkflowRuns) > 0 {
 		summary += fmt.Sprintf(" workflow_runs=%d", len(plan.WorkflowRuns))
 	}
@@ -663,6 +670,19 @@ func validatePlan(plan *Plan) error {
 			return fmt.Errorf("duplicate agent instance %q in %s and %s", instance.Name, prior, instance.SourcePath)
 		}
 		seen["agent-instance:"+instance.Name] = instance.SourcePath
+	}
+	for _, session := range plan.AgentSessions {
+		sourcePath := firstNonEmpty(session.SourcePath, "agent_session:"+session.SessionID)
+		if strings.TrimSpace(session.SessionID) == "" {
+			return fmt.Errorf("%s: agent session id is required", sourcePath)
+		}
+		if strings.TrimSpace(session.AgentID) == "" {
+			return fmt.Errorf("%s: agent session %q must declare an agent_id", sourcePath, session.SessionID)
+		}
+		if prior := seen["agent-session:"+session.SessionID]; prior != "" {
+			return fmt.Errorf("duplicate agent session %q in %s and %s", session.SessionID, prior, sourcePath)
+		}
+		seen["agent-session:"+session.SessionID] = sourcePath
 	}
 	for _, wf := range plan.Workflows {
 		if strings.TrimSpace(wf.Name) == "" {
