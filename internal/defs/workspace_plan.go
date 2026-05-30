@@ -198,8 +198,8 @@ func agentFromDefinitionVersion(version *domain.DefinitionVersion) (AgentModule,
 }
 
 func workflowFromDefinitionVersion(version *domain.DefinitionVersion) (WorkflowModule, error) {
-	var workflow WorkflowModule
-	if err := json.Unmarshal(version.Manifest, &workflow); err != nil {
+	workflow, err := workflowFromManifest(version.Manifest)
+	if err != nil {
 		return workflow, fmt.Errorf("decode workflow definition %s: %w", version.DefinitionName, err)
 	}
 	workflow.Name = firstNonEmpty(workflow.Name, version.DefinitionName)
@@ -610,7 +610,9 @@ func appendControlPlaneWorkflows(ctx context.Context, st store.Store, workspaceK
 func workflowFromDefinition(definition *domain.WorkflowDefinition) (WorkflowModule, error) {
 	workflow := WorkflowModule{}
 	if len(definition.Manifest) > 0 {
-		if err := json.Unmarshal(definition.Manifest, &workflow); err != nil {
+		var err error
+		workflow, err = workflowFromManifest(definition.Manifest)
+		if err != nil {
 			return workflow, fmt.Errorf("decode workflow manifest %s: %w", definition.Name, err)
 		}
 	}
@@ -621,6 +623,37 @@ func workflowFromDefinition(definition *domain.WorkflowDefinition) (WorkflowModu
 	workflow.SingletonPolicy = firstNonEmpty(workflow.SingletonPolicy, definition.SingletonPolicy)
 	workflow.RuntimeProfileName = firstNonEmpty(workflow.RuntimeProfileName, definition.RuntimeProfileName)
 	workflow.SourceHash = firstNonEmpty(workflow.SourceHash, definition.BundleHash, workspaceHash(workflow))
+	return workflow, nil
+}
+
+func workflowFromManifest(raw json.RawMessage) (WorkflowModule, error) {
+	var workflow WorkflowModule
+	if len(raw) == 0 {
+		return workflow, nil
+	}
+	fields := map[string]json.RawMessage{}
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return workflow, err
+	}
+	builtinRaw, hasBuiltin := fields["builtin"]
+	var builtin string
+	if hasBuiltin {
+		if err := json.Unmarshal(builtinRaw, &builtin); err != nil {
+			var builtinFlag bool
+			if boolErr := json.Unmarshal(builtinRaw, &builtinFlag); boolErr != nil {
+				return workflow, err
+			}
+		}
+		delete(fields, "builtin")
+	}
+	normalized, err := json.Marshal(fields)
+	if err != nil {
+		return workflow, err
+	}
+	if err := json.Unmarshal(normalized, &workflow); err != nil {
+		return workflow, err
+	}
+	workflow.Builtin = builtin
 	return workflow, nil
 }
 

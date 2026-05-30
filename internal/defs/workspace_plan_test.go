@@ -628,3 +628,39 @@ func TestPlanFromWorkspacePrefersSourceBackedDefinitions(t *testing.T) {
 		t.Fatalf("allowed commands = %+v, want source manifest command policy", agent.AllowedCommands)
 	}
 }
+
+func TestPlanFromWorkspaceDecodesRuntimeBuiltinWorkflowManifest(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "BUILTIN", Name: "Runtime Builtin"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if _, err := st.WorkflowDefinitions().Upsert(ctx, store.WorkflowDefinitionUpsert{
+		WorkspaceKey:    "BUILTIN",
+		Name:            "run-parent-work-items",
+		Version:         "builtin-v1",
+		Description:     "Ensure one live TaskRun per ready child.",
+		SingletonPolicy: "parent:${input.parentId}",
+		SourceRef:       "builtin:run-parent-work-items",
+		BundleHash:      "builtin:run-parent-work-items:v1",
+		Manifest:        json.RawMessage(`{"builtin":true,"runner":"go","kind":"parent-work-items"}`),
+		Status:          domain.DefinitionStatusActive,
+	}); err != nil {
+		t.Fatalf("upsert workflow definition: %v", err)
+	}
+
+	plan, err := PlanFromWorkspace(ctx, st, "BUILTIN")
+	if err != nil {
+		t.Fatalf("PlanFromWorkspace() error = %v", err)
+	}
+	if len(plan.Workflows) != 1 {
+		t.Fatalf("workflows = %+v, want one runtime builtin workflow", plan.Workflows)
+	}
+	workflow := plan.Workflows[0]
+	if workflow.Name != "run-parent-work-items" || workflow.Runner != "go" || workflow.Builtin != "" {
+		t.Fatalf("workflow = %+v, want runtime builtin manifest decoded without delegated builtin", workflow)
+	}
+	if workflow.SourcePath != "builtin:run-parent-work-items" || workflow.SourceHash != "builtin:run-parent-work-items:v1" {
+		t.Fatalf("workflow source = %q hash=%q, want runtime builtin source evidence", workflow.SourcePath, workflow.SourceHash)
+	}
+}

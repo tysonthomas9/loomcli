@@ -360,6 +360,136 @@ func TestRunTypeScriptWorkflowAppliesAndRunsWorkflowContext(t *testing.T) {
 	}
 }
 
+func TestTypeScriptFirstEndToEndPatternConvergesOnDurableGraph(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	if err := defspkg.InitTypeScriptProject(root); err != nil {
+		t.Fatalf("InitTypeScriptProject() error = %v", err)
+	}
+	if _, err := defspkg.ScaffoldAgent(root, "hello-world"); err != nil {
+		t.Fatalf("ScaffoldAgent() error = %v", err)
+	}
+	if _, err := defspkg.ScaffoldWorkflow(root, "epic-runner"); err != nil {
+		t.Fatalf("ScaffoldWorkflow() error = %v", err)
+	}
+	withTSFirstGlobals(t, func() {
+		checkDir = root
+		checkJSON = false
+		if err := runCheck(nil, nil); err != nil {
+			t.Fatalf("runCheck() error = %v", err)
+		}
+	})
+	plan, err := defspkg.Load(root)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if got := defspkg.Summary(plan); got != "agents=1 workflows=1 runtimes=0" {
+		t.Fatalf("Summary() = %q, want source agent and workflow", got)
+	}
+	agent, ok := defspkg.FindAgent(plan, "hello-world")
+	if !ok {
+		t.Fatalf("FindAgent() did not find hello-world")
+	}
+	workflow, ok := defspkg.FindWorkflow(plan, "epic-runner")
+	if !ok {
+		t.Fatalf("FindWorkflow() did not find epic-runner")
+	}
+
+	connectResult, err := runLocalConnect(ctx, connectOptions{
+		Dir:      root,
+		Agent:    "hello-world",
+		Instance: "local",
+		Session:  "e2e",
+		Message:  "prove local agent first",
+	})
+	if err != nil {
+		t.Fatalf("runLocalConnect() error = %v", err)
+	}
+	if connectResult.Response != "echo: prove local agent first" || connectResult.TranscriptPath == "" {
+		t.Fatalf("connect result = %+v, want local echo proof and transcript", connectResult)
+	}
+	turns, err := readLocalTurns(connectResult.TranscriptPath)
+	if err != nil {
+		t.Fatalf("readLocalTurns() error = %v", err)
+	}
+	if len(turns) != 1 || turns[0].OperationID == "" || turns[0].PromptHash == "" {
+		t.Fatalf("turns = %+v, want local proof evidence with operation and prompt hash", turns)
+	}
+
+	st := memstore.New()
+	const workspace = "TSE2E"
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: workspace, Name: "TypeScript E2E"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := defspkg.Apply(ctx, st, workspace, "test", plan); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	instance, err := defspkg.ApplyAgentInstance(ctx, st, workspace, agent, "local", true)
+	if err != nil {
+		t.Fatalf("ApplyAgentInstance() error = %v", err)
+	}
+	if instance.Name != "local" || instance.RoleName != "hello-world" ||
+		instance.State != domain.AgentStateActive || instance.DesiredState != domain.AgentDesiredRunning {
+		t.Fatalf("instance = %+v, want active/running TypeScript-first agent instance", instance)
+	}
+
+	ready := backend.IssueData{ID: "TASK-1", Title: "Build first task", Status: "open"}
+	ib := clitest.NewMockIssueBackend()
+	ib.ReadyResult = []backend.IssueData{ready}
+	ib.BlockedResult = nil
+	ib.ListResult = []backend.IssueData{ready}
+	runResult, err := runTypeScriptWorkflow(ctx, st, ib, workspace, "test", plan, workflow, json.RawMessage(`{"parentId":"EPIC-1","role":"task","maxConcurrency":1}`), true, false)
+	if err != nil {
+		t.Fatalf("runTypeScriptWorkflow() error = %v", err)
+	}
+	if runResult.Run == nil || runResult.Run.Status != domain.WorkflowRunWaiting {
+		t.Fatalf("run result = %+v, want waiting workflow run", runResult)
+	}
+	if runResult.Builtin == nil || runResult.Builtin.DispatchedCount != 1 {
+		t.Fatalf("builtin result = %+v, want one dispatched child task", runResult.Builtin)
+	}
+
+	exported, err := defspkg.PlanFromWorkspace(ctx, st, workspace)
+	if err != nil {
+		t.Fatalf("PlanFromWorkspace() error = %v", err)
+	}
+	if exported.Root != "workspace:"+workspace {
+		t.Fatalf("exported root = %q, want workspace root", exported.Root)
+	}
+	if exportedAgent, ok := defspkg.FindAgent(exported, "hello-world"); !ok || exportedAgent.Version != agent.Version {
+		t.Fatalf("exported agents = %+v, want hello-world@%s", exported.Agents, agent.Version)
+	}
+	if exportedWorkflow, ok := defspkg.FindWorkflow(exported, "epic-runner"); !ok || exportedWorkflow.Version != workflow.Version {
+		t.Fatalf("exported workflows = %+v, want epic-runner@%s", exported.Workflows, workflow.Version)
+	}
+	localInstance, ok := findExportedAgentInstance(exported.AgentInstances, "local")
+	if !ok || localInstance.RoleName != "hello-world" || localInstance.DesiredState != domain.AgentDesiredRunning {
+		t.Fatalf("exported agent instances = %+v, want started local instance", exported.AgentInstances)
+	}
+	if len(exported.WorkflowRuns) != 1 || exported.WorkflowRuns[0].RunID != runResult.Run.RunID {
+		t.Fatalf("exported workflow runs = %+v, want run %s", exported.WorkflowRuns, runResult.Run.RunID)
+	}
+	if len(exported.TaskRuns) != 1 || exported.TaskRuns[0].WorkItemID != ready.ID ||
+		exported.TaskRuns[0].WorkflowRunID != runResult.Run.RunID ||
+		exported.TaskRuns[0].AgentID == "" || exported.TaskRuns[0].CommandID == "" {
+		t.Fatalf("exported task runs = %+v, want dispatched child task run", exported.TaskRuns)
+	}
+	workerInstance, ok := findExportedAgentInstance(exported.AgentInstances, exported.TaskRuns[0].AgentID)
+	if !ok || workerInstance.RoleName != "task" || workerInstance.Parent != "EPIC-1" ||
+		workerInstance.Mode != domain.AgentModeEphemeral ||
+		workerInstance.DesiredState != domain.AgentDesiredStopped {
+		t.Fatalf("exported worker instance = %+v present=%t, want dispatched ephemeral worker for task run %+v", workerInstance, ok, exported.TaskRuns[0])
+	}
+	if len(exported.AgentCommands) < 2 {
+		t.Fatalf("exported agent commands = %+v, want start plus task dispatch commands", exported.AgentCommands)
+	}
+	if !hasExportedRunEvent(exported.RunEvents, "workflow_ts_context_started") ||
+		!hasExportedRunEvent(exported.RunEvents, "task_run_ensured") ||
+		!hasExportedRunEvent(exported.RunEvents, "task_run_dispatched") {
+		t.Fatalf("exported run events = %+v, want workflow context and task dispatch evidence", exported.RunEvents)
+	}
+}
+
 func TestRunTypeScriptWorkflowCanCreateRunWithoutReconcile(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
@@ -1343,4 +1473,22 @@ func hasRunEvent(events []*domain.RunEvent, typ string) bool {
 		}
 	}
 	return false
+}
+
+func hasExportedRunEvent(events []defspkg.RunEventModule, typ string) bool {
+	for _, event := range events {
+		if event.Type == typ {
+			return true
+		}
+	}
+	return false
+}
+
+func findExportedAgentInstance(instances []defspkg.AgentInstanceModule, name string) (defspkg.AgentInstanceModule, bool) {
+	for _, instance := range instances {
+		if instance.Name == name {
+			return instance, true
+		}
+	}
+	return defspkg.AgentInstanceModule{}, false
 }
