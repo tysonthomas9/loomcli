@@ -418,6 +418,8 @@ const runtimeTypes = `declare module '@loom/runtime' {
     description?: string;
     backend?: string;
     model?: string;
+    profileName?: string;
+    profile_name?: string;
     runtime?: RuntimeProfile;
     instructions?: string;
     skills?: Array<string | SkillDefinition>;
@@ -436,6 +438,10 @@ const runtimeTypes = `declare module '@loom/runtime' {
       maxBudgetUSD?: number;
       readOnly?: boolean;
     };
+  };
+
+  export type AgentProfileDefinition = Omit<AgentDefinition, 'profileName' | 'profile_name'> & {
+    name: string;
   };
 
   export type AgentFactoryContext = {
@@ -704,6 +710,8 @@ const runtimeTypes = `declare module '@loom/runtime' {
     session_id?: string;
     sessionName?: string;
     session_name?: string;
+    profileName?: string;
+    profile_name?: string;
     harness?: string;
     prompt<T = unknown>(input: WorkflowAgentSessionOperationInput<T>): Promise<WorkflowAgentSessionOperationResult<T>>;
     skill<T = unknown>(input: WorkflowAgentSessionOperationInput<T>): Promise<WorkflowAgentSessionOperationResult<T>>;
@@ -766,6 +774,7 @@ const runtimeTypes = `declare module '@loom/runtime' {
     agentId?: string;
     sessionId?: string;
     sessionName?: string;
+    profileName?: string;
     model?: string;
     provider?: string;
     providerModel?: string;
@@ -898,6 +907,7 @@ const runtimeTypes = `declare module '@loom/runtime' {
   export type WorkflowAgentHarness = {
     agentId: string;
     harness: string;
+    profileName?: string;
     session(name?: string, options?: WorkflowAgentSessionInput): Promise<WorkflowAgentSession>;
     session(options?: WorkflowAgentSessionInput): Promise<WorkflowAgentSession>;
     sessions: {
@@ -1046,7 +1056,8 @@ const runtimeTypes = `declare module '@loom/runtime' {
   export function defineConfig<T extends LoomConfig>(config: T): T;
   export function defineAgent<T extends AgentDefinition>(agent: T): T;
   export function createAgent<T extends AgentDefinition | AgentFactory>(agent: T): CreatedAgent;
-  export function defineAgentProfile<T extends AgentDefinition>(profile: T): T;
+  export function createAgent<T extends AgentProfileDefinition>(profile: T, overrides?: Partial<AgentDefinition>): CreatedAgent;
+  export function defineAgentProfile<T extends AgentProfileDefinition>(profile: T): T;
   export function defineSkill<T extends SkillDefinition>(skill: T): T;
   export function defineTool<T extends ToolDefinition>(tool: T): T;
   export function defineWorkflow<T extends WorkflowDefinition>(workflow: T): T;

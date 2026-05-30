@@ -46,6 +46,7 @@ type AgentModule struct {
 	Description     string   `json:"description,omitempty"`
 	Backend         string   `json:"backend,omitempty"`
 	Model           string   `json:"model,omitempty"`
+	ProfileName     string   `json:"profile_name,omitempty"`
 	SourcePath      string   `json:"source_path"`
 	SourceHash      string   `json:"source_hash"`
 	Version         string   `json:"version"`
@@ -376,6 +377,9 @@ func agentCapabilityManifest(agent AgentModule, skills map[string]SkillModule, t
 			"skills":             compactStrings(agent.Skills),
 			"skill_bundles":      agentSkillBundles(agent, skills),
 			"prompt_bundle_hash": agentPromptBundleHash(agent, skills),
+		},
+		"profile": map[string]any{
+			"name": agent.ProfileName,
 		},
 		"sandbox": map[string]any{
 			"allowed_commands": compactStrings(agent.AllowedCommands),

@@ -18,6 +18,7 @@ func parseAgent(path string, data []byte) (AgentModule, error) {
 		Description:     stringField(src, "description"),
 		Backend:         stringField(src, "backend"),
 		Model:           stringField(src, "model"),
+		ProfileName:     firstNonEmpty(stringField(src, "profileName"), stringField(src, "profile_name")),
 		SourcePath:      path,
 		SourceHash:      hash,
 		Version:         version(hash),

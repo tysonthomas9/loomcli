@@ -785,22 +785,37 @@ func agentSessionMetadataForWorkflow(run *domain.WorkflowRun, params map[string]
 	if backendName := firstString(params, "backend"); backendName != "" {
 		metadata["backend"] = backendName
 	}
+	if profileName := firstString(params, "profileName", "profile_name"); profileName != "" {
+		metadata["profile_name"] = profileName
+		if _, ok := metadata["source_agent_profile"]; !ok {
+			metadata["source_agent_profile"] = profileName
+		}
+	}
 	return metadata
 }
 
 func appendAgentSessionInitializedEvent(ctx context.Context, st store.Store, run *domain.WorkflowRun, session *domain.AgentSession) {
+	data := map[string]string{
+		"session_id": session.SessionID,
+		"agent_id":   session.AgentID,
+		"kind":       string(session.Kind),
+		"task_id":    session.TaskID,
+		"phase":      session.Phase,
+	}
+	if session.Metadata != nil {
+		if profileName := session.Metadata["profile_name"]; profileName != "" {
+			data["profile_name"] = profileName
+		}
+		if sourceProfile := session.Metadata["source_agent_profile"]; sourceProfile != "" {
+			data["source_agent_profile"] = sourceProfile
+		}
+	}
 	_, _ = st.RunEvents().Append(ctx, store.RunEventAppend{
 		WorkspaceKey:  run.WorkspaceKey,
 		WorkflowRunID: run.RunID,
 		Type:          "agent_session_initialized",
 		Message:       "workflow agent session initialized",
-		Data: mustJSON(map[string]string{
-			"session_id": session.SessionID,
-			"agent_id":   session.AgentID,
-			"kind":       string(session.Kind),
-			"task_id":    session.TaskID,
-			"phase":      session.Phase,
-		}),
+		Data:          mustJSON(data),
 	})
 }
 

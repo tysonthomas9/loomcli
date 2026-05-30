@@ -12,11 +12,14 @@ function defineWorkflow(config) {
   return { __loomType: "workflow", ...config };
 }
 
-function createAgent(config) {
+function createAgent(config, overrides) {
   if (typeof config === "function") {
     return { __loomType: "agent", __loomFactory: config };
   }
-  return { __loomType: "agent", ...(config || {}) };
+  if (config && isAgentProfile(config)) {
+    return agentFromProfile(config, overrides || {});
+  }
+  return { __loomType: "agent", ...(config || {}), ...(overrides || {}) };
 }
 
 function defineAgent(config) {
@@ -24,7 +27,35 @@ function defineAgent(config) {
 }
 
 function defineAgentProfile(config) {
-  return { __loomType: "agentProfile", ...(config || {}) };
+  return { __loomType: "agent_profile", ...(config || {}) };
+}
+
+function isAgentProfile(value) {
+  return value && (value.__loomType === "agent_profile" || value.__loomType === "agentProfile");
+}
+
+function agentFromProfile(profile, overrides) {
+  const merged = {
+    ...profile,
+    ...overrides,
+    __loomType: "agent",
+    profileName: String(overrides.profileName || overrides.profile_name || profile.name || ""),
+    profile_name: String(overrides.profileName || overrides.profile_name || profile.name || ""),
+  };
+  for (const key of ["skills", "tools", "allowedCommands", "deniedCommands", "repos", "env"]) {
+    merged[key] = uniqueStrings([...(Array.isArray(profile[key]) ? profile[key] : []), ...(Array.isArray(overrides[key]) ? overrides[key] : [])]);
+  }
+  const profilePolicy = profile.policy && typeof profile.policy === "object" ? profile.policy : {};
+  const overridePolicy = overrides.policy && typeof overrides.policy === "object" ? overrides.policy : {};
+  merged.policy = { ...profilePolicy, ...overridePolicy };
+  for (const key of ["allowedCommands", "deniedCommands"]) {
+    merged.policy[key] = uniqueStrings([...(Array.isArray(profilePolicy[key]) ? profilePolicy[key] : []), ...(Array.isArray(overridePolicy[key]) ? overridePolicy[key] : [])]);
+  }
+  return merged;
+}
+
+function uniqueStrings(values) {
+  return Array.from(new Set((values || []).map((item) => String(item || "").trim()).filter(Boolean)));
 }
 
 function defineTool(config) {
@@ -552,6 +583,10 @@ function makeContext(request, workflow) {
     }
     return agent || {};
   };
+  const profileNameFor = (agent) => {
+    if (!agent || typeof agent !== "object") return "";
+    return String(agent.profileName || agent.profile_name || (isAgentProfile(agent) ? agent.name : "") || "");
+  };
   const sessionFor = (base) => async (nameOrOptions, maybeOptions) => {
     const hasName = typeof nameOrOptions === "string";
     const sessionName = hasName ? nameOrOptions : "default";
@@ -678,6 +713,7 @@ function makeContext(request, workflow) {
     },
     init: async (agent, options = {}) => {
       const materialized = materializeAgent(agent);
+      const profileName = String(options.profileName || options.profile_name || profileNameFor(materialized));
       const harness = String(options.name || options.harness || "default");
       const agentId = String(
         options.agentId ||
@@ -690,16 +726,19 @@ function makeContext(request, workflow) {
       const base = {
         agentId,
         harness,
+        profileName,
         model: materialized.model,
         backend: materialized.backend,
         metadata: {
           ...(options.metadata || {}),
           ...(materialized.name ? { source_agent_name: String(materialized.name) } : {}),
+          ...(profileName ? { source_agent_profile: profileName, profile_name: profileName } : {}),
         },
       };
       return {
         agentId,
         harness,
+        profileName,
         session: sessionFor(base),
         sessions: {
           create: sessionFor(base),
@@ -954,6 +993,7 @@ function sessionHandle(operations, session) {
       sessionId: session.sessionId || session.session_id || session.id,
       harness: session.harness,
       sessionName: session.sessionName || session.session_name,
+      profileName: session.profileName || session.profile_name,
       taskId: session.taskId || session.task_id || session.workItemId || session.work_item_id,
       model: firstPresent(operationInput.model, session.model),
       provider: firstPresent(operationInput.provider, session.provider, session.backend),
@@ -1029,6 +1069,7 @@ function sessionOperationResult(operation, input, params) {
     agentId: params.agentId,
     sessionId: params.sessionId,
     sessionName: params.sessionName,
+    profileName: params.profileName,
     model: params.model,
     provider: params.provider,
     providerModel: params.providerModel,
@@ -1075,6 +1116,7 @@ function sessionOperationRawResult(operation, input, params) {
     agentId: params.agentId,
     sessionId: params.sessionId,
     sessionName: params.sessionName,
+    profileName: params.profileName,
   };
 }
 

@@ -880,6 +880,106 @@ export default defineWorkflow({
 	}
 }
 
+func TestCodeDefinedWorkflowContextInitializesAgentProfileSession(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	workflowPath := filepath.Join(root, ".loom", "workflows", "context-profile-session.ts")
+	if err := os.MkdirAll(filepath.Dir(workflowPath), 0o755); err != nil {
+		t.Fatalf("mkdir workflow dir: %v", err)
+	}
+	if err := os.WriteFile(workflowPath, []byte(`import { createAgent, defineAgentProfile, defineWorkflow } from '@loom/runtime';
+
+const reviewer = defineAgentProfile({
+  name: 'review-specialist',
+  model: 'test/review',
+  backend: 'codex',
+  instructions: 'Review implementation evidence.',
+});
+
+const worker = createAgent(reviewer, {
+  name: 'review-worker',
+  model: 'test/worker',
+});
+
+export default defineWorkflow({
+  name: 'context-profile-session',
+  async run(ctx) {
+    const harness = await ctx.init(worker, {
+      agentId: 'review-service',
+      name: 'profile-review',
+    });
+    const session = await harness.session('audit', {
+      taskId: 'TASK-PROFILE',
+      phase: 'review',
+    });
+    const report = await session.prompt({
+      instruction: 'Review the profile-scoped task.',
+      mockResult: { summary: 'profile preserved' },
+    });
+    return {
+      agentId: session.agentId,
+      profileName: harness.profileName,
+      summary: report.summary,
+      operationProfileName: report.profileName,
+    };
+  },
+});
+`), 0o644); err != nil {
+		t.Fatalf("write workflow: %v", err)
+	}
+	plan, err := defspkg.Load(root)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TSPROFILECTX", Name: "TypeScript Profile Context"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := defspkg.Apply(ctx, st, "TSPROFILECTX", "atlas", plan); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	run, err := CreateOrResumeRun(ctx, st, "TSPROFILECTX", "context-profile-session", json.RawMessage(`{}`), "atlas")
+	if err != nil {
+		t.Fatalf("CreateOrResumeRun() error = %v", err)
+	}
+	result, err := RunOnce(ctx, st, clitest.NewMockIssueBackend(), run)
+	if err != nil {
+		t.Fatalf("RunOnce() error = %v", err)
+	}
+	if result.Run == nil || result.Run.Status != domain.WorkflowRunCompleted {
+		t.Fatalf("result = %+v, want completed profile session workflow", result)
+	}
+	var output map[string]any
+	if err := json.Unmarshal(result.Run.Result, &output); err != nil {
+		t.Fatalf("decode result %s: %v", result.Run.Result, err)
+	}
+	if output["agentId"] != "review-service" || output["profileName"] != "review-specialist" ||
+		output["operationProfileName"] != "review-specialist" || output["summary"] != "profile preserved" {
+		t.Fatalf("output = %+v, want reusable profile identity preserved", output)
+	}
+	sessions, err := st.AgentSessions().List(ctx, "TSPROFILECTX", store.AgentSessionFilter{AgentID: "review-service", TaskID: "TASK-PROFILE"})
+	if err != nil {
+		t.Fatalf("list profile sessions: %v", err)
+	}
+	if len(sessions) != 1 || sessions[0].Metadata["profile_name"] != "review-specialist" ||
+		sessions[0].Metadata["source_agent_profile"] != "review-specialist" ||
+		sessions[0].Metadata["source_agent_name"] != "review-worker" {
+		t.Fatalf("sessions = %+v, want durable profile identity metadata", sessions)
+	}
+	events, err := st.RunEvents().List(ctx, "TSPROFILECTX", store.RunEventFilter{WorkflowRunID: run.RunID})
+	if err != nil {
+		t.Fatalf("list run events: %v", err)
+	}
+	initEvent := workflowEventDataByType(t, events, "agent_session_initialized")
+	if initEvent["profile_name"] != "review-specialist" || initEvent["source_agent_profile"] != "review-specialist" {
+		t.Fatalf("init event = %+v, want profile identity evidence", initEvent)
+	}
+	promptEvent := workflowEventDataByOperation(t, events, "prompt")
+	if promptEvent["profileName"] != "review-specialist" {
+		t.Fatalf("prompt event = %+v, want operation profile identity", promptEvent)
+	}
+}
+
 func TestCodeDefinedWorkflowContextReadsRuntimeProfile(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()

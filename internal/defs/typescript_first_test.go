@@ -131,6 +131,71 @@ func TestTypeScriptFirstAgentApplyCreatesUIVisibleInstance(t *testing.T) {
 	}
 }
 
+func TestTypeScriptFirstAgentCanUseReusableProfile(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+
+	writeDefFile(t, root, ".loom/agents/reviewer.ts", `import { createAgent, defineAgentProfile } from '@loom/runtime';
+
+const reviewProfile = defineAgentProfile({
+  name: 'review-specialist',
+  backend: 'echo',
+  model: 'local/echo',
+  instructions: 'Review plans and implementation evidence.',
+  skills: ['review-checklist'],
+  tools: ['github.issue.read'],
+  allowedCommands: ['git status'],
+});
+
+export default createAgent(reviewProfile, {
+  name: 'reviewer-bot',
+  description: 'Workspace reviewer',
+  tools: ['github.pr.open'],
+  allowedCommands: ['go test ./internal/defs'],
+});
+`)
+
+	plan, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	agent, ok := FindAgent(plan, "reviewer-bot")
+	if !ok {
+		t.Fatalf("FindAgent() did not find reviewer-bot in %+v", plan.Agents)
+	}
+	if agent.ProfileName != "review-specialist" || agent.Model != "local/echo" || agent.Backend != "echo" {
+		t.Fatalf("agent = %+v, want reusable profile identity and behavior", agent)
+	}
+	if !strings.Contains(fmtStringSlice(agent.Tools), "github.issue.read") || !strings.Contains(fmtStringSlice(agent.Tools), "github.pr.open") {
+		t.Fatalf("agent tools = %+v, want profile and agent tools merged", agent.Tools)
+	}
+	if !strings.Contains(fmtStringSlice(agent.AllowedCommands), "git status") ||
+		!strings.Contains(fmtStringSlice(agent.AllowedCommands), "go test ./internal/defs") {
+		t.Fatalf("agent allowed commands = %+v, want profile and agent commands merged", agent.AllowedCommands)
+	}
+
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TSPROFILE", Name: "TypeScript Profile"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := Apply(ctx, st, "TSPROFILE", "test", plan); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	version, err := st.DefinitionVersions().Get(ctx, "TSPROFILE", domain.DefinitionTypeAgent, "reviewer-bot", agent.Version)
+	if err != nil {
+		t.Fatalf("definition version not created: %v", err)
+	}
+	manifest := jsonMap(t, version.Manifest)
+	if manifest["profile_name"] != "review-specialist" {
+		t.Fatalf("manifest = %#v, want profile identity", manifest)
+	}
+	capability := jsonMap(t, version.CapabilityManifest)
+	profileCapability, ok := capability["profile"].(map[string]any)
+	if !ok || profileCapability["name"] != "review-specialist" {
+		t.Fatalf("capability profile = %#v, want reusable profile identity", capability["profile"])
+	}
+}
+
 func TestTypeScriptFirstWorkflowApplyCreatesDurableBindings(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()

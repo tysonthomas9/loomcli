@@ -66,10 +66,38 @@ function defineAgent(config) {
   return { __loomType: "agent", ...config };
 }
 
-const createAgent = defineAgent;
+function createAgent(config, overrides) {
+  if (typeof config === "function") {
+    return { __loomType: "agent", __loomFactory: config };
+  }
+  if (config && config.__loomType === "agent_profile") {
+    return agentFromProfile(config, overrides || {});
+  }
+  return { __loomType: "agent", ...(config || {}), ...(overrides || {}) };
+}
 
 function defineAgentProfile(config) {
   return { __loomType: "agent_profile", ...config };
+}
+
+function agentFromProfile(profile, overrides) {
+  const merged = {
+    ...profile,
+    ...overrides,
+    __loomType: "agent",
+    profileName: stringValue(overrides.profileName || overrides.profile_name || profile.name),
+    profile_name: stringValue(overrides.profileName || overrides.profile_name || profile.name),
+  };
+  for (const key of ["skills", "tools", "allowedCommands", "deniedCommands", "repos", "env"]) {
+    merged[key] = uniqueStrings(stringArray(profile[key]).concat(stringArray(overrides[key])));
+  }
+  const profilePolicy = profile.policy && typeof profile.policy === "object" ? profile.policy : {};
+  const overridePolicy = overrides.policy && typeof overrides.policy === "object" ? overrides.policy : {};
+  merged.policy = { ...profilePolicy, ...overridePolicy };
+  for (const key of ["allowedCommands", "deniedCommands"]) {
+    merged.policy[key] = uniqueStrings(stringArray(profilePolicy[key]).concat(stringArray(overridePolicy[key])));
+  }
+  return merged;
 }
 
 function defineSkill(config) {
@@ -439,6 +467,10 @@ function stringArray(v) {
   return v.map((item) => stringValue(item)).filter(Boolean);
 }
 
+function uniqueStrings(values) {
+  return Array.from(new Set((values || []).map((item) => stringValue(item)).filter(Boolean)));
+}
+
 function skillArray(v) {
   if (!Array.isArray(v)) return [];
   return v
@@ -527,6 +559,7 @@ function agentModule(file) {
     description: stringValue(value.description),
     backend: stringValue(value.backend),
     model: stringValue(value.model),
+    profile_name: stringValue(value.profileName || value.profile_name),
     source_path: file,
     source_hash: hash,
     version: version(hash),
