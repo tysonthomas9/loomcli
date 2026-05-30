@@ -670,7 +670,7 @@ const runtimeTypes = `declare module '@loom/runtime' {
     size_bytes?: number;
     checksum?: string;
     metadata?: Record<string, string>;
-    visibility: 'controller';
+    visibility: 'controller' | 'runtime_workspace';
   };
 
   export type WorkflowFileWriteOptions = {
@@ -764,6 +764,8 @@ const runtimeTypes = `declare module '@loom/runtime' {
         release(reason?: string, metadata?: Record<string, string>): Promise<WorkflowRuntimeWorkspaceLifecycleReceipt>;
         release(options?: WorkflowRuntimeWorkspaceLifecycleInput): Promise<WorkflowRuntimeWorkspaceLifecycleReceipt>;
       };
+      files: WorkflowFileController;
+      filesystem: WorkflowFileController;
     };
     skills: {
       list(options?: WorkflowSkillQuery): Promise<Array<WorkflowWorkspaceSkill>>;

@@ -235,6 +235,26 @@ func appendRuntimeWorkspaceLifecycleEvent(ctx context.Context, st store.Store, r
 	return nil
 }
 
+func applyRuntimeWorkspaceFileOperation(ctx context.Context, st store.Store, run *domain.WorkflowRun, params map[string]any, typ, message string) error {
+	artifact, err := createWorkflowArtifact(ctx, st, run, params, "runtime workspace file operation requires uri")
+	if err != nil {
+		return err
+	}
+	data := copyAnyMap(params)
+	data["artifact_id"] = artifact.ArtifactID
+	data["workflow_run_id"] = run.RunID
+	data["visibility"] = "runtime_workspace"
+	data["source"] = "workflow_context"
+	_, _ = st.RunEvents().Append(ctx, store.RunEventAppend{
+		WorkspaceKey:  run.WorkspaceKey,
+		WorkflowRunID: run.RunID,
+		Type:          typ,
+		Message:       message,
+		Data:          mustJSON(data),
+	})
+	return nil
+}
+
 func tsContextWorkspaceSkills(profile *tsContextRuntimeProfile) []tsContextWorkspaceSkill {
 	roots := runtimeWorkspaceSkillRoots(profile)
 	if len(roots) == 0 {

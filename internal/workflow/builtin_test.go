@@ -1094,12 +1094,18 @@ export default defineWorkflow({
       cleanup: { mode: 'after_ttl', ttl: '1h' },
       metadata: { phase: 'teardown' },
     });
+    const written = await ctx.runtime.files.writeText('state/summary.txt', 'runtime workspace ready', {
+      summary: 'Runtime workspace state',
+    });
+    const reread = await ctx.runtime.files.readText('state/summary.txt');
     return {
       materializeAccepted: materialized.accepted,
       cleanupAccepted: cleaned.accepted,
       runtimeProfileName: materialized.runtimeProfileName,
       providerWorkspaceId: materialized.providerWorkspaceId,
       cleanupTTL: cleaned.cleanup?.ttl,
+      runtimeFileURI: written.uri,
+      runtimeFileRead: reread,
     };
   },
 });
@@ -1134,8 +1140,11 @@ export default defineWorkflow({
 	}
 	if data["materializeAccepted"] != true || data["cleanupAccepted"] != true ||
 		data["runtimeProfileName"] != "local-node" || data["providerWorkspaceId"] != "local-lifecycle-workspace" ||
-		data["cleanupTTL"] != "1h" {
+		data["cleanupTTL"] != "1h" || data["runtimeFileRead"] != "runtime workspace ready" {
 		t.Fatalf("result data = %+v, want admitted lifecycle receipts", data)
+	}
+	if uri, ok := data["runtimeFileURI"].(string); !ok || !strings.HasPrefix(uri, "runtime-workspace://local-lifecycle-workspace/state/summary.txt") {
+		t.Fatalf("runtimeFileURI = %#v, want runtime workspace URI without host path", data["runtimeFileURI"])
 	}
 	events, err := st.RunEvents().List(ctx, "TSLIFECYCLECTX", store.RunEventFilter{WorkflowRunID: run.RunID})
 	if err != nil {
@@ -1143,6 +1152,8 @@ export default defineWorkflow({
 	}
 	if !hasWorkflowEvent(events, "runtime_workspace_materialize_requested") ||
 		!hasWorkflowEvent(events, "runtime_workspace_cleanup_requested") ||
+		!hasWorkflowEvent(events, "runtime_workspace_file_written") ||
+		!hasWorkflowEvent(events, "runtime_workspace_file_read") ||
 		!hasWorkflowEvent(events, "workflow_completed") {
 		t.Fatalf("events = %+v, want lifecycle request and completion evidence", events)
 	}
@@ -1156,6 +1167,22 @@ export default defineWorkflow({
 	cleanup, ok := cleanupEvent["cleanup"].(map[string]any)
 	if !ok || cleanup["mode"] != "after_ttl" || cleanup["ttl"] != "1h" {
 		t.Fatalf("cleanup event = %+v, want cleanup policy override evidence", cleanupEvent)
+	}
+	fileEvent := workflowEventDataByType(t, events, "runtime_workspace_file_written")
+	if fileEvent["providerWorkspaceId"] != "local-lifecycle-workspace" || fileEvent["visibility"] != "runtime_workspace" ||
+		fileEvent["source"] != "workflow_context" {
+		t.Fatalf("file event = %+v, want runtime workspace filesystem evidence", fileEvent)
+	}
+	if uri, ok := fileEvent["uri"].(string); !ok || strings.HasPrefix(uri, "file://") {
+		t.Fatalf("file event uri = %#v, want provider-scoped runtime workspace URI", fileEvent["uri"])
+	}
+	artifacts, err := st.Artifacts().List(ctx, "TSLIFECYCLECTX", store.ArtifactFilter{Type: "runtime_workspace_file"})
+	if err != nil {
+		t.Fatalf("list runtime workspace artifacts: %v", err)
+	}
+	if len(artifacts) != 1 || artifacts[0].Metadata["source"] != "runtime_workspace_filesystem" ||
+		artifacts[0].URI == "" || strings.HasPrefix(artifacts[0].URI, "file://") {
+		t.Fatalf("artifacts = %+v, want runtime workspace file artifact without host URI", artifacts)
 	}
 }
 

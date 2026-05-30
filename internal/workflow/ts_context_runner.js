@@ -224,6 +224,61 @@ function makeWorkflowFiles(request, operations) {
   };
 }
 
+function makeRuntimeWorkspaceFiles(request, operations, workspace) {
+  const files = new Map();
+  const checksum = (text) => `sha256:${crypto.createHash("sha256").update(text).digest("hex")}`;
+  const runtimeWorkspace = workspace && workspace.runtime && typeof workspace.runtime === "object" ? workspace.runtime : {};
+  const providerWorkspaceId = String(runtimeWorkspace.providerWorkspaceId || request.id || "runtime-workspace").replace(/[^A-Za-z0-9_.:-]/g, "_");
+  const uriFor = (rel) => `runtime-workspace://${encodeURIComponent(providerWorkspaceId)}/${rel}`;
+  const commonParams = (rel, text, options = {}) => ({
+    path: rel,
+    uri: uriFor(rel),
+    type: options.type || options.artifactType || options.artifact_type || "runtime_workspace_file",
+    summary: options.summary,
+    mimeType: options.mimeType || options.mime_type || "text/plain; charset=utf-8",
+    sizeBytes: Buffer.byteLength(text, "utf8"),
+    checksum: checksum(text),
+    runtimeProfileName: String(runtimeWorkspace.profileName || ""),
+    provider: String(runtimeWorkspace.provider || ""),
+    providerWorkspaceId,
+    filesystem: jsonSafe(runtimeWorkspace.filesystem || {}),
+    metadata: {
+      ...(options.metadata || {}),
+      path: rel,
+      source: "runtime_workspace_filesystem",
+    },
+    visibility: "runtime_workspace",
+  });
+  const writeText = async (relativePath, content, options = {}) => {
+    const rel = safeRelativePath(relativePath);
+    const text = String(content ?? "");
+    files.set(rel, text);
+    const params = commonParams(rel, text, options);
+    operations.push({ type: "runtime.workspace.files.write", params });
+    return { accepted: true, ...params };
+  };
+  const readText = async (relativePath) => {
+    const rel = safeRelativePath(relativePath);
+    if (!files.has(rel)) throw new Error(`runtime workspace file not found: ${rel}`);
+    const text = files.get(rel);
+    operations.push({
+      type: "runtime.workspace.files.read",
+      params: commonParams(rel, text, { type: "runtime_workspace_file" }),
+    });
+    return text;
+  };
+  return {
+    writeText,
+    readText,
+    writeJSON: (relativePath, value, options = {}) =>
+      writeText(relativePath, JSON.stringify(value ?? null, null, 2), {
+        mimeType: "application/json",
+        ...options,
+      }),
+    readJSON: async (relativePath) => JSON.parse(await readText(relativePath)),
+  };
+}
+
 function makeWorkflowShell(request, operations) {
   const run = async (commandOrOptions, maybeOptions = {}) => {
     const options =
@@ -317,6 +372,7 @@ function makeContext(request, workflow) {
   const tools = workflowTools(workflow, operations);
   const files = makeWorkflowFiles(request, operations);
   const shell = makeWorkflowShell(request, operations);
+  const runtimeFiles = makeRuntimeWorkspaceFiles(request, operations, workspace);
   const requestContext = request.request || {};
   const skillFilter = (options = {}) => {
     let out = workspaceSkills.slice();
@@ -563,6 +619,8 @@ function makeContext(request, workflow) {
         cleanup: cleanupWorkspace,
         release: cleanupWorkspace,
       },
+      files: runtimeFiles,
+      filesystem: runtimeFiles,
     },
     skills: {
       list: listSkills,

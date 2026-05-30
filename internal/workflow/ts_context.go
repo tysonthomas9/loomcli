@@ -379,6 +379,10 @@ func applyTSOperation(ctx context.Context, st store.Store, ib backend.IssueBacke
 		return appendRuntimeWorkspaceLifecycleEvent(ctx, st, run, op.Params, "runtime_workspace_materialize_requested", "workflow runtime workspace materialization requested")
 	case "runtime.workspace.cleanup":
 		return appendRuntimeWorkspaceLifecycleEvent(ctx, st, run, op.Params, "runtime_workspace_cleanup_requested", "workflow runtime workspace cleanup requested")
+	case "runtime.workspace.files.write":
+		return applyRuntimeWorkspaceFileOperation(ctx, st, run, op.Params, "runtime_workspace_file_written", "workflow runtime workspace file written")
+	case "runtime.workspace.files.read":
+		return applyRuntimeWorkspaceFileOperation(ctx, st, run, op.Params, "runtime_workspace_file_read", "workflow runtime workspace file read")
 	case "workItems.get":
 		appendWorkItemReadEvent(ctx, st, run, op.Params)
 	case "workItems.comment":
