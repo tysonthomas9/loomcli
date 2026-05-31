@@ -97,10 +97,7 @@ type Supervisor struct {
 // NewAgent creates an AgentProcess from an agent entry, resolving the worktree path
 // and role config. The idx is used for error messages only.
 func (s *Supervisor) NewAgent(entry config.AgentEntry, idx int) (*AgentProcess, error) {
-	repoName := entry.Repo
-	if repoName == "" && len(entry.Repos) == 1 && !entry.CrossRepo {
-		repoName = entry.Repos[0]
-	}
+	entry, repoName := entryWithRuntimeRepo(entry)
 	target, err := workspace.ResolveAgentTarget(entry.Worktree, repoName)
 	if err != nil {
 		return nil, fmt.Errorf("agent[%d] worktree %q: %w", idx, entry.Worktree, err)
@@ -118,6 +115,14 @@ func (s *Supervisor) NewAgent(entry config.AgentEntry, idx int) (*AgentProcess, 
 		RepoConfig:   s.FindRepoConfig(repoName),
 	}
 	return ap, nil
+}
+
+func entryWithRuntimeRepo(entry config.AgentEntry) (config.AgentEntry, string) {
+	repoName := entry.Repo
+	if repoName == "" && len(entry.Repos) == 1 && !entry.CrossRepo {
+		repoName = entry.Repos[0]
+	}
+	return entry, repoName
 }
 
 // Start launches supervisor goroutines for all configured agents.

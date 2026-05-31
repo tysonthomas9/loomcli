@@ -18,6 +18,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	backendcaps "github.com/tysonthomas9/loomcli/internal/cli/backends"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
+	workspacecli "github.com/tysonthomas9/loomcli/internal/cli/workspace"
 	defspkg "github.com/tysonthomas9/loomcli/internal/defs"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -441,14 +442,17 @@ func printConnectResult(result connectResult, jsonOut bool) error {
 }
 
 type applyResult struct {
-	Workspace string `json:"workspace"`
-	Agent     string `json:"agent"`
-	Instance  string `json:"instance"`
-	Version   string `json:"version"`
-	Started   bool   `json:"started"`
-	State     string `json:"state,omitempty"`
-	Desired   string `json:"desired_state,omitempty"`
-	Summary   string `json:"summary"`
+	Workspace     string `json:"workspace"`
+	Agent         string `json:"agent"`
+	Instance      string `json:"instance"`
+	Version       string `json:"version"`
+	Started       bool   `json:"started"`
+	State         string `json:"state,omitempty"`
+	Desired       string `json:"desired_state,omitempty"`
+	WorktreeRepo  string `json:"worktree_repo,omitempty"`
+	WorktreePath  string `json:"worktree_path,omitempty"`
+	WorktreeReady bool   `json:"worktree_ready,omitempty"`
+	Summary       string `json:"summary"`
 }
 
 type applyWorkflowResult struct {
@@ -504,6 +508,10 @@ func runApply(_ *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
+		worktree, err := provisionAppliedAgentWorktree(agent, instance.Name)
+		if err != nil {
+			return err
+		}
 		result := applyResult{
 			Workspace: ws,
 			Agent:     agent.Name,
@@ -514,15 +522,55 @@ func runApply(_ *cobra.Command, args []string) error {
 			Desired:   string(instance.DesiredState),
 			Summary:   defspkg.Summary(plan),
 		}
+		if worktree != nil {
+			result.WorktreeRepo = worktree.Repo
+			result.WorktreePath = worktree.Path
+			result.WorktreeReady = true
+		}
 		if applyJSON {
 			return cmdstore.WriteJSON(result)
 		}
 		fmt.Printf("Applied %s@%s to workspace %s as agent instance %s\n", result.Agent, result.Version, result.Workspace, result.Instance)
+		if result.WorktreeReady {
+			fmt.Printf("Prepared worktree for repo %s: %s\n", result.WorktreeRepo, result.WorktreePath)
+		}
 		if applyStart {
 			fmt.Println("Queued start request; a running workspace daemon will pick it up.")
 		}
 		return nil
 	})
+}
+
+type appliedAgentWorktree struct {
+	Repo string
+	Path string
+}
+
+func provisionAppliedAgentWorktree(agent defspkg.AgentModule, instanceName string) (*appliedAgentWorktree, error) {
+	repo, ok := singleAppliedAgentRepo(agent.Repos)
+	if !ok {
+		return nil, nil
+	}
+	target, err := workspacecli.ResolveAgentTarget(instanceName, repo)
+	if err != nil {
+		return nil, fmt.Errorf("prepare worktree for agent %q repo %q: %w", instanceName, repo, err)
+	}
+	return &appliedAgentWorktree{Repo: repo, Path: target.WorkDir}, nil
+}
+
+func singleAppliedAgentRepo(repos []string) (string, bool) {
+	var selected string
+	for _, repo := range repos {
+		repo = strings.TrimSpace(repo)
+		if repo == "" || repo == "." {
+			continue
+		}
+		if selected != "" && selected != repo {
+			return "", false
+		}
+		selected = repo
+	}
+	return selected, selected != ""
 }
 
 func runApplyWorkflow(_ *cobra.Command, args []string) error {

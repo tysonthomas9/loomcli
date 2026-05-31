@@ -21,7 +21,10 @@ func TestSlackCloneEpicWorkflowEnsuresTaskRuns(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
 	ib := clitest.NewMockIssueBackend()
-	ready := backend.IssueData{ID: "SLACK-2", Title: "Build channel sidebar", Status: "open"}
+	if _, err := st.Repos().Create(ctx, store.RepoCreate{WorkspaceKey: "WS", Name: "slack-src", SourceRepoID: "slack-service"}); err != nil {
+		t.Fatalf("create repo: %v", err)
+	}
+	ready := backend.IssueData{ID: "SLACK-2", Title: "Build channel sidebar", Status: "open", SourceRepo: "slack-service"}
 	ib.ReadyResult = []backend.IssueData{ready}
 	ib.ListResult = []backend.IssueData{ready}
 
@@ -58,6 +61,13 @@ func TestSlackCloneEpicWorkflowEnsuresTaskRuns(t *testing.T) {
 	}
 	if len(cmds) != 1 || cmds[0].Payload["workflow_run_id"] != run.RunID || cmds[0].Payload["task_run_id"] != taskRuns[0].TaskRunID {
 		t.Fatalf("commands = %+v, want one start command linked to workflow/task run", cmds)
+	}
+	agent, err := st.Agents().Get(ctx, "WS", taskRuns[0].AgentID)
+	if err != nil {
+		t.Fatalf("get dispatched agent: %v", err)
+	}
+	if len(agent.Repos) != 1 || agent.Repos[0] != "slack-src" {
+		t.Fatalf("agent repos = %v, want [slack-src]", agent.Repos)
 	}
 
 	events, err := st.RunEvents().List(ctx, "WS", store.RunEventFilter{WorkflowRunID: run.RunID})
@@ -173,7 +183,10 @@ export default defineWorkflow({
 	if err := defspkg.Apply(ctx, st, "TSCTX", "atlas", plan); err != nil {
 		t.Fatalf("Apply() error = %v", err)
 	}
-	ready := backend.IssueData{ID: "CTX-2", Title: "Build workflow context", Status: "open"}
+	if _, err := st.Repos().Create(ctx, store.RepoCreate{WorkspaceKey: "TSCTX", Name: "slack-src", SourceRepoID: "slack-service"}); err != nil {
+		t.Fatalf("create repo: %v", err)
+	}
+	ready := backend.IssueData{ID: "CTX-2", Title: "Build workflow context", Status: "open", SourceRepo: "slack-service"}
 	ib := clitest.NewMockIssueBackend()
 	ib.ReadyResult = []backend.IssueData{ready}
 	ib.BlockedResult = nil
@@ -194,8 +207,15 @@ export default defineWorkflow({
 	if err != nil {
 		t.Fatalf("list task runs: %v", err)
 	}
-	if len(taskRuns) != 1 || taskRuns[0].Status != domain.TaskRunStarting || taskRuns[0].Metadata["source"] != "typescript" {
+	if len(taskRuns) != 1 || taskRuns[0].Status != domain.TaskRunStarting || taskRuns[0].Metadata["source"] != "typescript" || taskRuns[0].Metadata["source_repo"] != "slack-service" {
 		t.Fatalf("taskRuns = %+v, want TypeScript-created dispatched task run", taskRuns)
+	}
+	agent, err := st.Agents().Get(ctx, "TSCTX", taskRuns[0].AgentID)
+	if err != nil {
+		t.Fatalf("get dispatched agent: %v", err)
+	}
+	if len(agent.Repos) != 1 || agent.Repos[0] != "slack-src" {
+		t.Fatalf("agent repos = %v, want [slack-src]", agent.Repos)
 	}
 	events, err := st.RunEvents().List(ctx, "TSCTX", store.RunEventFilter{WorkflowRunID: run.RunID})
 	if err != nil {

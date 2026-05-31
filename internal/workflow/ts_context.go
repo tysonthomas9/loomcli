@@ -325,7 +325,7 @@ func applyTSOperation(ctx context.Context, st store.Store, ib backend.IssueBacke
 	case "workItems.comment":
 		return applyWorkItemCommentOperation(ctx, st, ib, run, op.Params)
 	case "taskRuns.ensure":
-		taskRun, err := applyEnsureTaskRunOperation(ctx, st, run, parentID, op.Params)
+		taskRun, err := applyEnsureTaskRunOperation(ctx, st, ib, run, parentID, op.Params)
 		if err != nil {
 			return err
 		}
@@ -883,7 +883,7 @@ func agentSessionOperationVisibility(operation string) string {
 	return "model"
 }
 
-func applyEnsureTaskRunOperation(ctx context.Context, st store.Store, run *domain.WorkflowRun, parentID string, params map[string]any) (*domain.TaskRun, error) {
+func applyEnsureTaskRunOperation(ctx context.Context, st store.Store, ib backend.IssueBackend, run *domain.WorkflowRun, parentID string, params map[string]any) (*domain.TaskRun, error) {
 	workItemID := firstString(params, "workItemId", "work_item_id", "id")
 	if workItemID == "" {
 		return nil, fmt.Errorf("taskRuns.ensure requires workItemId")
@@ -898,6 +898,14 @@ func applyEnsureTaskRunOperation(ctx context.Context, st store.Store, run *domai
 		metadata["parent_id"] = parentID
 	}
 	metadata["workflow_name"] = run.WorkflowName
+	if sourceRepo := firstString(params, "sourceRepo", "source_repo", "repo"); sourceRepo != "" {
+		metadata["source_repo"] = sourceRepo
+	}
+	if metadata["source_repo"] == "" && ib != nil {
+		if detail, err := ib.Get(ctx, workItemID); err == nil && detail != nil && strings.TrimSpace(detail.SourceRepo) != "" {
+			metadata["source_repo"] = strings.TrimSpace(detail.SourceRepo)
+		}
+	}
 	taskRun, err := st.TaskRuns().Ensure(ctx, store.TaskRunEnsure{
 		WorkspaceKey:   run.WorkspaceKey,
 		WorkflowRunID:  run.RunID,

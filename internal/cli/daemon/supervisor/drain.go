@@ -293,7 +293,8 @@ func (s *Supervisor) AddAgentForTask(entry config.AgentEntry, taskID string, par
 	}
 
 	// Resolve worktree path (outside lock — may do I/O)
-	target, err := workspace.ResolveAgentTarget(entry.Worktree, entry.Repo)
+	entry, repoName := entryWithRuntimeRepo(entry)
+	target, err := workspace.ResolveAgentTarget(entry.Worktree, repoName)
 	if err != nil {
 		return fmt.Errorf("agent %q worktree: %w", entry.Worktree, err)
 	}
@@ -306,7 +307,7 @@ func (s *Supervisor) AddAgentForTask(entry config.AgentEntry, taskID string, par
 		return err
 	}
 
-	ap := s.newRuntimeAgentProcess(entry, roleConfig, target.WorkDir, taskID, parentSessionID)
+	ap := s.newRuntimeAgentProcess(entry, roleConfig, target.WorkDir, repoName, taskID, parentSessionID)
 
 	// Authoritative duplicate check + slice append + WaitGroup increment under
 	// a single write lock so Wg.Add can't race with Stop()'s Wg.Wait.
@@ -329,12 +330,12 @@ func (s *Supervisor) AddAgentForTask(entry config.AgentEntry, taskID string, par
 	return nil
 }
 
-func (s *Supervisor) newRuntimeAgentProcess(entry config.AgentEntry, roleConfig config.RoleConfig, workDir, taskID, parentSessionID string) *AgentProcess {
+func (s *Supervisor) newRuntimeAgentProcess(entry config.AgentEntry, roleConfig config.RoleConfig, workDir, repoName, taskID, parentSessionID string) *AgentProcess {
 	return &AgentProcess{
 		Entry:           entry,
 		RoleConfig:      roleConfig,
 		WorktreePath:    workDir,
-		RepoConfig:      s.FindRepoConfig(entry.Repo),
+		RepoConfig:      s.FindRepoConfig(repoName),
 		RequestedTaskID: taskID,
 		ParentSessionID: parentSessionID,
 		StopCh:          make(chan struct{}),

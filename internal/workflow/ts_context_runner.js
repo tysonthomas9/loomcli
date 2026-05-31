@@ -936,7 +936,26 @@ function makeContext(request, workflow) {
         return matches;
       },
       ensure: async (params) => {
-        const op = { type: "taskRuns.ensure", params: params || {} };
+        const ensureParams = params && typeof params === "object" ? { ...params } : {};
+        const workItemId = String(ensureParams.workItemId || ensureParams.work_item_id || ensureParams.id || "");
+        const metadata =
+          ensureParams.metadata && typeof ensureParams.metadata === "object"
+            ? { ...jsonSafe(ensureParams.metadata) }
+            : {};
+        const item = findWorkItem(workItems, workItemId);
+        const sourceRepo = String(
+          ensureParams.sourceRepo ||
+            ensureParams.source_repo ||
+            ensureParams.repo ||
+            metadata.source_repo ||
+            metadata.sourceRepo ||
+            metadata.repo ||
+            (item && (item.source_repo || item.sourceRepo || item.repo)) ||
+            "",
+        );
+        if (sourceRepo && !metadata.source_repo) metadata.source_repo = sourceRepo;
+        if (Object.keys(metadata).length > 0) ensureParams.metadata = metadata;
+        const op = { type: "taskRuns.ensure", params: ensureParams };
         operations.push(op);
         return { accepted: true, ...op.params };
       },

@@ -365,6 +365,13 @@ func shouldEnsureChild(child backend.IssueData, liveWork map[string]struct{}) bo
 }
 
 func taskRunEnsure(run *domain.WorkflowRun, input ParentWorkItemsInput, child backend.IssueData) store.TaskRunEnsure {
+	metadata := map[string]string{
+		"parent_id":     input.ParentID,
+		"workflow_name": run.WorkflowName,
+	}
+	if child.SourceRepo != "" {
+		metadata["source_repo"] = child.SourceRepo
+	}
 	return store.TaskRunEnsure{
 		WorkspaceKey:   run.WorkspaceKey,
 		WorkflowRunID:  run.RunID,
@@ -372,10 +379,7 @@ func taskRunEnsure(run *domain.WorkflowRun, input ParentWorkItemsInput, child ba
 		RoleName:       input.Role,
 		IdempotencyKey: "child:" + child.ID + ":role:" + input.Role,
 		Reason:         child.Title,
-		Metadata: map[string]string{
-			"parent_id":     input.ParentID,
-			"workflow_name": run.WorkflowName,
-		},
+		Metadata:       metadata,
 	}
 }
 

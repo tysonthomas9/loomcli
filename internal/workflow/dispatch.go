@@ -39,7 +39,7 @@ func dispatchTaskRun(ctx context.Context, st store.Store, run *domain.WorkflowRu
 		return taskRun, false, nil
 	}
 	agentName := taskWorkerName(input.ParentID, taskRun.WorkItemID)
-	agent, err := createOrLoadTaskWorker(ctx, st, run.WorkspaceKey, input, agentName)
+	agent, err := createOrLoadTaskWorker(ctx, st, run.WorkspaceKey, input, taskRun, agentName)
 	if err != nil {
 		return nil, false, err
 	}
@@ -82,14 +82,16 @@ func dispatchTaskRun(ctx context.Context, st store.Store, run *domain.WorkflowRu
 	return updated, true, nil
 }
 
-func createOrLoadTaskWorker(ctx context.Context, st store.Store, workspace string, input ParentWorkItemsInput, name string) (*domain.Agent, error) {
+func createOrLoadTaskWorker(ctx context.Context, st store.Store, workspace string, input ParentWorkItemsInput, taskRun *domain.TaskRun, name string) (*domain.Agent, error) {
 	mode := domain.AgentModeEphemeral
 	desired := domain.AgentDesiredStopped
+	repos := taskWorkerRepos(ctx, st, workspace, taskRun)
 	agent, err := st.Agents().Create(ctx, store.AgentCreate{
 		WorkspaceKey:   workspace,
 		Name:           name,
 		RoleName:       input.Role,
 		Auto:           true,
+		Repos:          repos,
 		Parent:         input.ParentID,
 		Mode:           mode,
 		MaxConcurrency: 1,
@@ -108,7 +110,85 @@ func createOrLoadTaskWorker(ctx context.Context, st store.Store, workspace strin
 	if agent.Mode != domain.AgentModeEphemeral || agent.Parent != input.ParentID || agent.RoleName != input.Role {
 		return nil, fmt.Errorf("task worker name %s already exists for role %q parent %q mode %q", name, agent.RoleName, agent.Parent, agent.Mode)
 	}
+	if len(repos) > 0 && len(agent.Repos) == 0 && len(agent.RepoGroups) == 0 && !agent.CrossRepo {
+		updated, updateErr := st.Agents().Update(ctx, workspace, name, store.AgentUpdate{Repos: &repos})
+		if updateErr != nil {
+			return nil, fmt.Errorf("update task worker %s repos: %w", name, updateErr)
+		}
+		agent = updated
+	}
+	if len(repos) > 0 && len(agent.Repos) > 0 && !sameStringSet(agent.Repos, repos) {
+		return nil, fmt.Errorf("task worker name %s already exists for repos %v, wanted %v", name, agent.Repos, repos)
+	}
 	return agent, nil
+}
+
+func taskWorkerRepos(ctx context.Context, st store.Store, workspace string, taskRun *domain.TaskRun) []string {
+	sourceRepo := taskRunSourceRepo(taskRun)
+	repos := workspaceRepos(ctx, st, workspace)
+	if sourceRepo != "" {
+		if name := workspaceRepoNameForSourceRepo(repos, sourceRepo); name != "" {
+			return []string{name}
+		}
+		return []string{sourceRepo}
+	}
+	if len(repos) == 1 && repos[0] != nil && repos[0].Name != "" {
+		return []string{repos[0].Name}
+	}
+	return nil
+}
+
+func taskRunSourceRepo(taskRun *domain.TaskRun) string {
+	if taskRun == nil {
+		return ""
+	}
+	for _, key := range []string{"source_repo", "sourceRepo", "repo"} {
+		if sourceRepo := strings.TrimSpace(taskRun.Metadata[key]); sourceRepo != "" {
+			return sourceRepo
+		}
+	}
+	return ""
+}
+
+func workspaceRepos(ctx context.Context, st store.Store, workspace string) []*domain.Repo {
+	if st == nil || st.Repos() == nil {
+		return nil
+	}
+	repos, err := st.Repos().List(ctx, workspace)
+	if err != nil {
+		return nil
+	}
+	return repos
+}
+
+func workspaceRepoNameForSourceRepo(repos []*domain.Repo, sourceRepo string) string {
+	sourceRepo = strings.TrimSpace(sourceRepo)
+	for _, repo := range repos {
+		if repo == nil {
+			continue
+		}
+		if repo.Name == sourceRepo || repo.SourceRepoID == sourceRepo {
+			return repo.Name
+		}
+	}
+	return ""
+}
+
+func sameStringSet(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	seen := make(map[string]int, len(a))
+	for _, value := range a {
+		seen[value]++
+	}
+	for _, value := range b {
+		seen[value]--
+		if seen[value] < 0 {
+			return false
+		}
+	}
+	return true
 }
 
 func taskWorkerName(parentID, taskID string) string {
