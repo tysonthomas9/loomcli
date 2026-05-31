@@ -239,8 +239,9 @@ func init() {
 type codexUsageEvent struct {
 	Type  string `json:"type"`
 	Usage *struct {
-		InputTokens  int64 `json:"input_tokens"`
-		OutputTokens int64 `json:"output_tokens"`
+		InputTokens       int64 `json:"input_tokens"`
+		CachedInputTokens int64 `json:"cached_input_tokens"`
+		OutputTokens      int64 `json:"output_tokens"`
 	} `json:"usage,omitempty"`
 }
 
@@ -256,5 +257,5 @@ func collectCodexStreamUsage(line string, collector *usage.Collector) {
 		return
 	}
 	// No message-level dedup needed for Codex (one usage per turn)
-	collector.Accumulate("", event.Usage.InputTokens, event.Usage.OutputTokens, 0, 0)
+	collector.Accumulate("", event.Usage.InputTokens, event.Usage.OutputTokens, event.Usage.CachedInputTokens, 0)
 }

@@ -61,6 +61,7 @@ func finalizeAutoSession(ctx *autoLoopCtx, sess *sessions.Session, beforeRef str
 		CacheWriteTokens: record.CacheWriteTokens,
 		EstimatedCostUSD: record.EstimatedCostUSD,
 		Model:            record.Model,
+		ClaudeSessionID:  backends.GetLastCapturedSessionID(),
 	})
 	backends.ClearActiveSessionEnv()
 	go sessions.NotifyWebUI(cmdstore.RootContext(), backends.ResolveWebUIURL(), taskID, sess.SessionID(), sess.Meta.Status, backends.ResolveNotifyToken())

@@ -9,7 +9,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/runtimectx"
 )
 
-// TokenUsage holds aggregated token counts from a Claude transcript.
+// TokenUsage holds aggregated token counts from a backend native transcript.
 type TokenUsage struct {
 	InputTokens      int64
 	OutputTokens     int64
@@ -19,16 +19,28 @@ type TokenUsage struct {
 	Model            string
 }
 
-// claudeTranscriptEntry is the minimal structure needed to extract usage from
-// Claude Code's transcript JSONL file. Only fields we need are parsed.
-// The message field is at the top level for type=assistant entries.
-type claudeTranscriptEntry struct {
+// transcriptUsageEntry is the minimal structure needed to extract usage from
+// backend native transcript files. Only fields we need are parsed. Claude Code
+// records assistant usage under message.usage; Codex records cumulative usage
+// in event_msg payloads with payload.type=token_count.
+type transcriptUsageEntry struct {
 	Type         string  `json:"type"`
 	Model        string  `json:"model,omitempty"`
 	CostUSD      float64 `json:"cost_usd,omitempty"`
 	TotalCostUSD float64 `json:"total_cost_usd,omitempty"`
 	CostUSDCamel float64 `json:"costUSD,omitempty"`
-	Message      struct {
+	Payload      struct {
+		Type  string `json:"type"`
+		Model string `json:"model,omitempty"`
+		Info  struct {
+			TotalTokenUsage struct {
+				InputTokens       int64 `json:"input_tokens"`
+				CachedInputTokens int64 `json:"cached_input_tokens"`
+				OutputTokens      int64 `json:"output_tokens"`
+			} `json:"total_token_usage"`
+		} `json:"info"`
+	} `json:"payload"`
+	Message struct {
 		ID    string `json:"id"`
 		Model string `json:"model,omitempty"`
 		Usage struct {
@@ -40,13 +52,13 @@ type claudeTranscriptEntry struct {
 	} `json:"message"`
 }
 
-// SumTranscriptUsage reads a Claude Code transcript JSONL file and sums token
-// usage across all assistant messages. Duplicate message IDs are deduplicated
-// by keeping the last occurrence (Claude writes snapshot updates with
-// increasing token counts for the same message). When the transcript includes
-// backend-reported cost/model fields, the latest non-zero cost and latest model
-// are copied through. Returns zero usage and nil error if the file does not
-// exist (graceful degradation).
+// SumTranscriptUsage reads a backend native transcript file and sums token
+// usage. Claude assistant messages are deduplicated by message ID, keeping the
+// last occurrence because Claude writes snapshot updates with increasing token
+// counts. Codex token_count events are cumulative, so the latest event wins.
+// When the transcript includes backend-reported cost/model fields, the latest
+// non-zero cost and latest model are copied through. Returns zero usage and nil
+// error if the file does not exist (graceful degradation).
 //
 // On I/O errors mid-scan, returns partial results alongside the error.
 // Callers that need exact totals should check the error before using the result.
@@ -82,7 +94,7 @@ func SumTranscriptUsage(transcriptPath string) (TokenUsage, error) {
 			continue
 		}
 
-		var entry claudeTranscriptEntry
+		var entry transcriptUsageEntry
 		if err := json.Unmarshal(line, &entry); err != nil {
 			continue // skip corrupt lines gracefully
 		}
@@ -92,8 +104,19 @@ func SumTranscriptUsage(transcriptPath string) (TokenUsage, error) {
 		if entry.Message.Model != "" {
 			total.Model = entry.Message.Model
 		}
+		if entry.Payload.Model != "" {
+			total.Model = entry.Payload.Model
+		}
 		if costUSD := firstPositiveCost(entry.TotalCostUSD, entry.CostUSD, entry.CostUSDCamel); costUSD > 0 {
 			total.CostUSD = costUSD
+		}
+		if entry.Type == "event_msg" && entry.Payload.Type == "token_count" {
+			u := entry.Payload.Info.TotalTokenUsage
+			total.InputTokens = u.InputTokens
+			total.OutputTokens = u.OutputTokens
+			total.CacheReadTokens = u.CachedInputTokens
+			total.CacheWriteTokens = 0
+			continue
 		}
 
 		if entry.Type != "assistant" {

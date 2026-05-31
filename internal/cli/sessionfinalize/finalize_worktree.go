@@ -52,10 +52,10 @@ func WithWorktree(sess *sessions.Session, opts WithWorktreeOptions) (WithWorktre
 	if sess == nil {
 		return result, nil
 	}
-	if sess.Meta.Backend == backendnames.Codex {
-		_, _ = sess.SyncLatestCodexRollout(opts.WorktreePath, sess.Meta.StartedAt)
-	}
-	if sess.Meta.Backend == backendnames.Claude {
+	switch sess.Meta.Backend {
+	case backendnames.Codex:
+		enrichCodexUsageFromTranscript(sess, &opts)
+	case backendnames.Claude:
 		enrichClaudeUsageFromTranscript(sess, &opts)
 	}
 	return result, sess.Finalize(sessions.FinalizeOptions{
@@ -75,8 +75,17 @@ func WithWorktree(sess *sessions.Session, opts WithWorktreeOptions) (WithWorktre
 	})
 }
 
+func enrichCodexUsageFromTranscript(sess *sessions.Session, opts *WithWorktreeOptions) {
+	srcPath, _ := sess.SyncLatestCodexRollout(opts.WorktreePath, sess.Meta.StartedAt)
+	enrichUsageFromTranscript(srcPath, opts)
+}
+
 func enrichClaudeUsageFromTranscript(sess *sessions.Session, opts *WithWorktreeOptions) {
 	srcPath, _ := sess.SyncLatestClaudeTranscript(opts.WorktreePath, opts.ClaudeSessionID, sess.Meta.StartedAt)
+	enrichUsageFromTranscript(srcPath, opts)
+}
+
+func enrichUsageFromTranscript(srcPath string, opts *WithWorktreeOptions) {
 	if srcPath == "" {
 		return
 	}

@@ -76,6 +76,35 @@ func TestSumTranscriptUsage_ResultCost(t *testing.T) {
 	}
 }
 
+func TestSumTranscriptUsage_CodexTokenCount(t *testing.T) {
+	dir := t.TempDir()
+	txPath := filepath.Join(dir, "rollout.jsonl")
+
+	lines := `{"type":"turn_context","payload":{"model":"gpt-5.5"}}
+{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":13797,"cached_input_tokens":4480,"output_tokens":28,"reasoning_output_tokens":17,"total_tokens":13825}}}}
+`
+	if err := os.WriteFile(txPath, []byte(lines), 0o600); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	usage, err := SumTranscriptUsage(txPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if usage.InputTokens != 13797 {
+		t.Errorf("InputTokens = %d, want 13797", usage.InputTokens)
+	}
+	if usage.OutputTokens != 28 {
+		t.Errorf("OutputTokens = %d, want 28", usage.OutputTokens)
+	}
+	if usage.CacheReadTokens != 4480 {
+		t.Errorf("CacheReadTokens = %d, want 4480", usage.CacheReadTokens)
+	}
+	if usage.Model != "gpt-5.5" {
+		t.Errorf("Model = %q, want gpt-5.5", usage.Model)
+	}
+}
+
 func TestSumTranscriptUsage_MultipleMessages(t *testing.T) {
 	dir := t.TempDir()
 	txPath := filepath.Join(dir, "transcript.jsonl")

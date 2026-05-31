@@ -15,6 +15,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/sessionfinalize"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
+	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
@@ -148,6 +149,14 @@ func runRealCLIBackendSmoke(t *testing.T, root, backendName, prompt string, time
 	if backendName == "claude" || backendName == "codex" {
 		if !nativeCaptured {
 			t.Errorf("%s did not mirror a native transcript into the Loom session", backendName)
+		} else {
+			events, eventsErr := store.LoadNativeEvents(sess.SessionID())
+			if eventsErr != nil {
+				t.Errorf("%s native transcript did not parse: %v", backendName, eventsErr)
+			}
+			if !nativeEventsContainText(events, "loom real CLI smoke ok") {
+				t.Errorf("%s native transcript did not include the expected assistant response", backendName)
+			}
 		}
 	}
 	if backendName == "claude" || requireCost {
@@ -291,6 +300,15 @@ func fileExists(path string) bool {
 	}
 	_, err := os.Stat(path)
 	return err == nil || !errors.Is(err, os.ErrNotExist)
+}
+
+func nativeEventsContainText(events []transcript.Event, want string) bool {
+	for _, event := range events {
+		if event.Role == transcript.RoleAssistant && strings.Contains(event.Text, want) {
+			return true
+		}
+	}
+	return false
 }
 
 func TestRealCLISelectedBackendsParser(t *testing.T) {
