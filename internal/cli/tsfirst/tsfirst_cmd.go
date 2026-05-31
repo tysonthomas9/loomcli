@@ -912,7 +912,7 @@ func runNonStreamingLocalAgent(backendName string, backend cli.Backend, workDir,
 
 func finishLocalInvocationResult(result localInvocationResult, backend cli.Backend, workDir string, resume *connectResume, appliedToolRuntime *connectToolRuntime) localInvocationResult {
 	result.ToolRuntime = appliedToolRuntime
-	result.ToolCalls = collectBackendTypedToolCalls(backend, workDir)
+	result.ToolCalls = collectBackendTypedToolCalls(backend, workDir, appliedToolRuntime)
 	backendMetadata := backendReportedProviderMetadata(backend, workDir)
 	result.ProviderMetadata = mergeBackendProviderMetadata(result.ProviderMetadata, backendMetadata)
 	if result.ProviderModel == "" {

@@ -108,7 +108,7 @@ func backendTypedToolDefinitions(tools []connectTypedTool) []backendcaps.TypedTo
 	return out
 }
 
-func collectBackendTypedToolCalls(backend any, workDir string) []connectToolCall {
+func collectBackendTypedToolCalls(backend any, workDir string, policy *connectToolRuntime) []connectToolCall {
 	reporter, ok := backend.(backendcaps.TypedToolCallReporter)
 	if !ok {
 		return nil
@@ -117,32 +117,80 @@ func collectBackendTypedToolCalls(backend any, workDir string) []connectToolCall
 	if len(events) == 0 {
 		return nil
 	}
+	allowed := indexConnectTypedTools(policy)
 	out := make([]connectToolCall, 0, len(events))
-	for _, event := range events {
+	for index, event := range events {
 		name := strings.TrimSpace(event.Name)
 		if name == "" {
 			continue
 		}
+		tool, authorized := allowed[name]
 		status := strings.TrimSpace(event.Status)
 		if status == "" {
 			status = "completed"
+		}
+		authorizationStatus := strings.TrimSpace(event.AuthorizationStatus)
+		if authorizationStatus == "" {
+			if authorized {
+				authorizationStatus = "authorized"
+			} else {
+				authorizationStatus = "denied"
+			}
+		}
+		errorMessage := strings.TrimSpace(event.Error)
+		redacted := event.Redacted
+		if !authorized {
+			status = "failed"
+			errorMessage = fmt.Sprintf("typed tool call %q is not declared in the reviewed TypeScript tool manifest", name)
+			redacted = true
 		}
 		out = append(out, connectToolCall{
 			CallID:              event.CallID,
 			Name:                name,
 			Status:              status,
+			ToolVersion:         tool.Version,
+			SourceHash:          tool.SourceHash,
+			Handler:             tool.Handler,
+			Runtime:             tool.Runtime,
+			ReadOnly:            tool.ReadOnly,
 			Arguments:           cloneMap(event.Arguments),
 			Result:              event.Result,
-			Error:               event.Error,
+			Error:               errorMessage,
 			StartedAt:           event.StartedAt,
 			CompletedAt:         event.CompletedAt,
 			DurationMS:          event.DurationMS,
-			IdempotencyKey:      event.IdempotencyKey,
-			AuthorizationStatus: event.AuthorizationStatus,
-			Redacted:            event.Redacted,
+			IdempotencyKey:      typedToolCallIdempotencyKey(event, name, index),
+			AuthorizationStatus: authorizationStatus,
+			Redacted:            redacted,
 		})
 	}
 	return out
+}
+
+func indexConnectTypedTools(policy *connectToolRuntime) map[string]connectTypedTool {
+	if policy == nil || len(policy.TypedTools) == 0 {
+		return map[string]connectTypedTool{}
+	}
+	out := make(map[string]connectTypedTool, len(policy.TypedTools))
+	for _, tool := range policy.TypedTools {
+		name := strings.TrimSpace(tool.Name)
+		if name == "" {
+			continue
+		}
+		out[name] = tool
+	}
+	return out
+}
+
+func typedToolCallIdempotencyKey(event backendcaps.TypedToolCallEvent, name string, index int) string {
+	if key := strings.TrimSpace(event.IdempotencyKey); key != "" {
+		return key
+	}
+	callID := strings.TrimSpace(event.CallID)
+	if callID == "" {
+		callID = fmt.Sprintf("%d", index+1)
+	}
+	return "local-connect:" + name + ":" + callID
 }
 
 func cloneToolRuntime(policy *connectToolRuntime) *connectToolRuntime {

@@ -112,6 +112,11 @@ type connectToolCall struct {
 	CallID              string         `json:"call_id,omitempty"`
 	Name                string         `json:"name"`
 	Status              string         `json:"status,omitempty"`
+	ToolVersion         string         `json:"tool_version,omitempty"`
+	SourceHash          string         `json:"source_hash,omitempty"`
+	Handler             string         `json:"handler,omitempty"`
+	Runtime             string         `json:"runtime,omitempty"`
+	ReadOnly            bool           `json:"read_only,omitempty"`
 	Arguments           map[string]any `json:"arguments,omitempty"`
 	Result              any            `json:"result,omitempty"`
 	Error               string         `json:"error,omitempty"`

@@ -1248,6 +1248,7 @@ func TestRunLocalConnectPassesTypedToolsToRuntimeBackend(t *testing.T) {
 		result.ToolCalls[0].Status != "completed" ||
 		result.ToolCalls[0].IdempotencyKey != "tool:create_channel:triage" ||
 		result.ToolCalls[0].AuthorizationStatus != "authorized" ||
+		result.ToolCalls[0].Handler != "workflow" ||
 		!result.ToolCalls[0].Redacted {
 		t.Fatalf("tool calls = %+v, want backend-reported model tool call evidence", result.ToolCalls)
 	}
@@ -1260,6 +1261,78 @@ func TestRunLocalConnectPassesTypedToolsToRuntimeBackend(t *testing.T) {
 	}
 	if len(turns) != 1 || len(turns[0].ToolCalls) != 1 || turns[0].ToolCalls[0].Name != "create_channel" {
 		t.Fatalf("turns = %+v, want typed tool call evidence persisted", turns)
+	}
+}
+
+func TestRunLocalConnectAuthorizesBackendToolCallsAgainstManifest(t *testing.T) {
+	cli.TestingResetBackendState(t)
+	typedBackend := &typedToolRuntimeBackend{toolCalls: []backendcaps.TypedToolCallEvent{{
+		CallID:    "call-create-channel",
+		Name:      "create_channel",
+		Arguments: map[string]any{"name": "triage"},
+		Result:    map[string]any{"channel_id": "C123"},
+	}}}
+	cli.RegisterBackend(typedBackend)
+	root := t.TempDir()
+	writeTypedToolAgent(t, root, "slack-agent", "typed-runtime")
+
+	result, err := runLocalConnect(context.Background(), connectOptions{
+		Dir:      root,
+		Agent:    "slack-agent",
+		Instance: "local",
+		Session:  "tools",
+		Message:  "create a channel",
+	})
+	if err != nil {
+		t.Fatalf("runLocalConnect() error = %v", err)
+	}
+	if len(result.ToolCalls) != 1 ||
+		result.ToolCalls[0].AuthorizationStatus != "authorized" ||
+		result.ToolCalls[0].IdempotencyKey != "local-connect:create_channel:call-create-channel" ||
+		result.ToolCalls[0].Handler != "workflow" ||
+		result.ToolCalls[0].ToolVersion == "" ||
+		result.ToolCalls[0].SourceHash == "" {
+		t.Fatalf("tool calls = %+v, want manifest-authorized call with deterministic evidence", result.ToolCalls)
+	}
+}
+
+func TestRunLocalConnectMarksUndeclaredBackendToolCallsDenied(t *testing.T) {
+	cli.TestingResetBackendState(t)
+	typedBackend := &typedToolRuntimeBackend{toolCalls: []backendcaps.TypedToolCallEvent{{
+		CallID: "call-delete-workspace",
+		Name:   "delete_workspace",
+		Status: "completed",
+		Result: map[string]any{"deleted": true},
+	}}}
+	cli.RegisterBackend(typedBackend)
+	root := t.TempDir()
+	writeTypedToolAgent(t, root, "slack-agent", "typed-runtime")
+
+	result, err := runLocalConnect(context.Background(), connectOptions{
+		Dir:      root,
+		Agent:    "slack-agent",
+		Instance: "local",
+		Session:  "tools",
+		Message:  "delete the workspace",
+	})
+	if err != nil {
+		t.Fatalf("runLocalConnect() error = %v", err)
+	}
+	if len(result.ToolCalls) != 1 ||
+		result.ToolCalls[0].Name != "delete_workspace" ||
+		result.ToolCalls[0].Status != "failed" ||
+		result.ToolCalls[0].AuthorizationStatus != "denied" ||
+		result.ToolCalls[0].IdempotencyKey != "local-connect:delete_workspace:call-delete-workspace" ||
+		!result.ToolCalls[0].Redacted ||
+		!strings.Contains(result.ToolCalls[0].Error, "not declared") {
+		t.Fatalf("tool calls = %+v, want undeclared backend tool call denial evidence", result.ToolCalls)
+	}
+	turns, err := readLocalTurns(result.TranscriptPath)
+	if err != nil {
+		t.Fatalf("readLocalTurns() error = %v", err)
+	}
+	if len(turns) != 1 || len(turns[0].ToolCalls) != 1 || turns[0].ToolCalls[0].AuthorizationStatus != "denied" {
+		t.Fatalf("turns = %+v, want denied typed tool call evidence persisted", turns)
 	}
 }
 
