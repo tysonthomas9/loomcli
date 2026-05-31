@@ -13,6 +13,9 @@ export type {
   UseWorkflowRunEventsResult,
   WorkflowRunEventStreamStatus,
 } from "./useWorkflowRunEvents";
+
+export { useWorkflowRunEventSnapshots } from "./useWorkflowRunEventSnapshots";
+export type { UseWorkflowRunEventSnapshotsResult } from "./useWorkflowRunEventSnapshots";
 export { useWorkflowRuns } from "./useWorkflowRuns";
 export type { UseWorkflowRunsResult } from "./useWorkflowRuns";
 

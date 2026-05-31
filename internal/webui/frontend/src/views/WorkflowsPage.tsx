@@ -5,6 +5,7 @@ import {
   useCancelWorkflowRun,
   useStartWorkflowRun,
   useWorkflowDefinitions,
+  useWorkflowRunEventSnapshots,
   useWorkflowRunEvents,
   useWorkflowRuns,
   type WorkflowDefinition,
@@ -67,10 +68,20 @@ function WorkflowsSurface(): JSX.Element {
     () => runs.filter((item) => comparedRunIds.has(item.run.run_id)),
     [runs, comparedRunIds],
   );
+  const comparedRuns = useMemo(
+    () => comparedItems.map((item) => item.run),
+    [comparedItems],
+  );
   const comparedLiveItems = useMemo(
     () => comparedItems.filter((item) => isWorkflowRunLive(item.run.status)),
     [comparedItems],
   );
+  const {
+    eventsByRunId: comparisonEventsByRunId,
+    isLoading: comparisonEventsLoading,
+    error: comparisonEventsError,
+    refetch: refetchComparisonEvents,
+  } = useWorkflowRunEventSnapshots(comparedRuns);
   const selectedRun = selectedItem?.run ?? null;
   const selectedIsLive = selectedRun
     ? isWorkflowRunLive(selectedRun.status)
@@ -172,6 +183,7 @@ function WorkflowsSurface(): JSX.Element {
       await cancelWorkflowRun(run.run_id);
       refetch();
       refetchEvents();
+      refetchComparisonEvents();
     } catch (err) {
       setCancelError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -210,6 +222,7 @@ function WorkflowsSurface(): JSX.Element {
       }
       refetch();
       refetchEvents();
+      refetchComparisonEvents();
     } finally {
       setIsBatchCanceling(false);
     }
@@ -245,8 +258,11 @@ function WorkflowsSurface(): JSX.Element {
       ))}
       <WorkflowComparisonBar
         comparedItems={comparedItems}
+        eventsByRunId={comparisonEventsByRunId}
         liveCount={comparedLiveItems.length}
         isCanceling={isBatchCanceling}
+        isLoadingEvents={comparisonEventsLoading}
+        eventError={comparisonEventsError}
         onCancelSelected={() => void handleBatchCancel()}
         onClear={() => setComparedRunIds(new Set())}
       />
@@ -462,14 +478,20 @@ function WorkflowRunRow({
 
 function WorkflowComparisonBar({
   comparedItems,
+  eventsByRunId,
   liveCount,
   isCanceling,
+  isLoadingEvents,
+  eventError,
   onCancelSelected,
   onClear,
 }: {
   comparedItems: WorkflowRunListItem[];
+  eventsByRunId: Record<string, WorkflowRunEvent[]>;
   liveCount: number;
   isCanceling: boolean;
+  isLoadingEvents: boolean;
+  eventError: Error | null;
   onCancelSelected: () => void;
   onClear: () => void;
 }): JSX.Element | null {
@@ -500,6 +522,11 @@ function WorkflowComparisonBar({
           {isCanceling ? "Canceling selected" : "Cancel selected live"}
         </button>
       </div>
+      {eventError ? (
+        <div className={styles.comparisonError} role="alert">
+          {eventError.message}
+        </div>
+      ) : null}
       <div className={styles.comparisonList}>
         {comparedItems.map((item) => (
           <div
@@ -529,6 +556,61 @@ function WorkflowComparisonBar({
             </div>
           </div>
         ))}
+      </div>
+      <div
+        className={styles.timelineGrid}
+        data-testid="workflow-comparison-timelines"
+      >
+        {comparedItems.map((item) => {
+          const runId = item.run.run_id;
+          const events = eventsByRunId[runId] ?? [];
+          return (
+            <div
+              key={runId}
+              className={styles.timelineColumn}
+              data-testid={`workflow-comparison-timeline-${runId}`}
+            >
+              <div className={styles.timelineHeader}>
+                <span>{shortRunID(runId)}</span>
+                <span>
+                  {events.length} {events.length === 1 ? "event" : "events"}
+                </span>
+              </div>
+              {isLoadingEvents && events.length === 0 ? (
+                <div className={styles.timelineEmpty}>Loading events</div>
+              ) : events.length === 0 ? (
+                <div className={styles.timelineEmpty}>No events recorded</div>
+              ) : (
+                <div className={styles.timelineEvents}>
+                  {events.map((event) => (
+                    <div
+                      key={event.event_id}
+                      className={styles.timelineEvent}
+                      data-testid={`workflow-comparison-event-${runId}-${event.event_index}`}
+                    >
+                      <div className={styles.timelineEventTop}>
+                        <span className={styles.timelineEventIndex}>
+                          #{event.event_index}
+                        </span>
+                        <span className={styles.timelineEventType}>
+                          {event.type}
+                        </span>
+                        <span className={styles.timelineEventTime}>
+                          {formatTimestamp(event.created_at)}
+                        </span>
+                      </div>
+                      {event.message ? (
+                        <div className={styles.timelineEventMessage}>
+                          {event.message}
+                        </div>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );

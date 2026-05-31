@@ -11,6 +11,7 @@ import {
   useCancelWorkflowRun,
   useStartWorkflowRun,
   useWorkflowDefinitions,
+  useWorkflowRunEventSnapshots,
   useWorkflowRunEvents,
   useWorkflowRuns,
   type WorkflowDefinition,
@@ -30,6 +31,7 @@ vi.mock("@/hooks/workflows", () => ({
   useCancelWorkflowRun: vi.fn(),
   useStartWorkflowRun: vi.fn(),
   useWorkflowDefinitions: vi.fn(),
+  useWorkflowRunEventSnapshots: vi.fn(),
   useWorkflowRunEvents: vi.fn(),
   useWorkflowRuns: vi.fn(),
 }));
@@ -38,6 +40,9 @@ const mockUseRouteView = vi.mocked(useRouteView);
 const mockUseCancelWorkflowRun = vi.mocked(useCancelWorkflowRun);
 const mockUseStartWorkflowRun = vi.mocked(useStartWorkflowRun);
 const mockUseWorkflowDefinitions = vi.mocked(useWorkflowDefinitions);
+const mockUseWorkflowRunEventSnapshots = vi.mocked(
+  useWorkflowRunEventSnapshots,
+);
 const mockUseWorkflowRunEvents = vi.mocked(useWorkflowRunEvents);
 const mockUseWorkflowRuns = vi.mocked(useWorkflowRuns);
 
@@ -79,6 +84,16 @@ const routeEvent: WorkflowRunEvent = {
   created_at: "2026-01-01T00:00:01Z",
 };
 
+const waitingEvent: WorkflowRunEvent = {
+  ...routeEvent,
+  event_id: "evt-2",
+  workflow_run_id: "wrun-2",
+  event_index: 2,
+  type: "workflow_waiting",
+  message: "Waiting for trigger follow-up",
+  created_at: "2026-01-01T00:01:01Z",
+};
+
 describe("WorkflowsPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -112,6 +127,12 @@ describe("WorkflowsPage", () => {
       error: null,
       refetch: vi.fn(),
       retryStream: vi.fn(),
+    });
+    mockUseWorkflowRunEventSnapshots.mockReturnValue({
+      eventsByRunId: {},
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
     });
   });
 
@@ -200,6 +221,15 @@ describe("WorkflowsPage", () => {
       refetch: refetchEvents,
       retryStream: vi.fn(),
     });
+    mockUseWorkflowRunEventSnapshots.mockReturnValue({
+      eventsByRunId: {
+        "wrun-1": [routeEvent],
+        "wrun-2": [waitingEvent],
+      },
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
 
     render(<WorkflowsPage />);
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
@@ -258,6 +288,15 @@ describe("WorkflowsPage", () => {
       refetch: refetchEvents,
       retryStream: vi.fn(),
     });
+    mockUseWorkflowRunEventSnapshots.mockReturnValue({
+      eventsByRunId: {
+        "wrun-1": [routeEvent],
+        "wrun-2": [waitingEvent],
+      },
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
 
     render(<WorkflowsPage />);
     fireEvent.click(screen.getByLabelText("Compare run wrun-1"));
@@ -272,6 +311,15 @@ describe("WorkflowsPage", () => {
     expect(
       screen.getByTestId("workflow-comparison-run-wrun-2"),
     ).toHaveTextContent("Waiting");
+    expect(
+      screen.getByTestId("workflow-comparison-timeline-wrun-1"),
+    ).toHaveTextContent("workflow_route_admitted");
+    expect(
+      screen.getByTestId("workflow-comparison-timeline-wrun-2"),
+    ).toHaveTextContent("workflow_waiting");
+    expect(
+      screen.getByTestId("workflow-comparison-event-wrun-2-2"),
+    ).toHaveTextContent("Waiting for trigger follow-up");
 
     fireEvent.click(
       screen.getByRole("button", { name: "Cancel selected live" }),
