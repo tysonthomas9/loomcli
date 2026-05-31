@@ -158,24 +158,12 @@ func appendLocalConnectTypedToolContract(b *strings.Builder, plan *defspkg.Plan,
 func appendLocalConnectTypedToolResultFeed(b *strings.Builder, history []localTurn) {
 	var entries []map[string]any
 	for _, turn := range history {
-		for _, call := range turn.ToolCalls {
-			entry := map[string]any{
-				"operation_id":         turn.OperationID,
-				"call_id":              call.CallID,
-				"name":                 call.Name,
-				"status":               call.Status,
-				"authorization_status": call.AuthorizationStatus,
-				"redacted":             call.Redacted,
-			}
-			if call.Error != "" {
-				entry["error"] = call.Error
-			}
-			if !call.Redacted && call.Result != nil {
-				entry["result"] = call.Result
-			}
-			entries = append(entries, entry)
-		}
+		entries = append(entries, localConnectTypedToolResultEntries(turn.OperationID, turn.ToolCalls)...)
 	}
+	appendLocalConnectTypedToolResultEntries(b, "Recent typed tool results", entries)
+}
+
+func appendLocalConnectTypedToolResultEntries(b *strings.Builder, heading string, entries []map[string]any) {
 	if len(entries) == 0 {
 		return
 	}
@@ -183,7 +171,31 @@ func appendLocalConnectTypedToolResultFeed(b *strings.Builder, history []localTu
 	if err != nil {
 		return
 	}
-	fmt.Fprintf(b, "\nRecent typed tool results:\n%s\n", string(data))
+	fmt.Fprintf(b, "\n%s:\n%s\n", heading, string(data))
+}
+
+func localConnectTypedToolResultEntries(operationID string, calls []connectToolCall) []map[string]any {
+	entries := make([]map[string]any, 0, len(calls))
+	for _, call := range calls {
+		entry := map[string]any{
+			"call_id":              call.CallID,
+			"name":                 call.Name,
+			"status":               call.Status,
+			"authorization_status": call.AuthorizationStatus,
+			"redacted":             call.Redacted,
+		}
+		if operationID != "" {
+			entry["operation_id"] = operationID
+		}
+		if call.Error != "" {
+			entry["error"] = call.Error
+		}
+		if !call.Redacted && call.Result != nil {
+			entry["result"] = call.Result
+		}
+		entries = append(entries, entry)
+	}
+	return entries
 }
 
 func lastProviderSessionID(history []localTurn) string {

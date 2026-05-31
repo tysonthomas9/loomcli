@@ -1562,6 +1562,64 @@ func TestRunLocalConnectStreamingProviderToolLineExecutesTrustedHandler(t *testi
 	}
 }
 
+func TestRunLocalConnectFeedsTypedToolResultBackSameTurn(t *testing.T) {
+	cli.TestingResetBackendState(t)
+	typedBackend := &streamingTypedToolFollowupBackend{}
+	cli.RegisterBackend(typedBackend)
+	root := t.TempDir()
+	writeTypedToolAgent(t, root, "slack-agent", "streaming-followup-typed-runtime")
+
+	result, err := runLocalConnect(context.Background(), connectOptions{
+		Dir:      root,
+		Agent:    "slack-agent",
+		Instance: "local",
+		Session:  "tools",
+		Message:  "create a channel",
+	})
+	if err != nil {
+		t.Fatalf("runLocalConnect() error = %v", err)
+	}
+	if result.Response != "final answer after trusted tool result" {
+		t.Fatalf("response = %q, want same-turn follow-up answer", result.Response)
+	}
+	if result.ToolRuntime == nil ||
+		result.ToolRuntime.Status != connectToolRuntimeBackend ||
+		result.ToolRuntime.HandlerExecution != connectToolHandlerExecutionConfigured ||
+		result.ToolRuntime.ResultFeed != connectToolResultFeedSameTurnPrompt {
+		t.Fatalf("tool runtime = %+v, want same-turn typed tool result feed evidence", result.ToolRuntime)
+	}
+	if len(result.ToolCalls) != 1 ||
+		result.ToolCalls[0].Name != "create_channel" ||
+		result.ToolCalls[0].CallID != "call-create-channel" ||
+		result.ToolCalls[0].Status != "completed" ||
+		result.ToolCalls[0].Result != "created triage" {
+		t.Fatalf("tool calls = %+v, want one trusted typed tool call preserved", result.ToolCalls)
+	}
+	if len(typedBackend.prompts) != 2 {
+		t.Fatalf("prompts = %d, want initial prompt plus same-turn result follow-up", len(typedBackend.prompts))
+	}
+	followupPrompt := typedBackend.prompts[1]
+	if !strings.Contains(followupPrompt, "Typed tool results for this operation") ||
+		!strings.Contains(followupPrompt, "created triage") ||
+		!strings.Contains(followupPrompt, "Original user message") ||
+		!strings.Contains(followupPrompt, "create a channel") {
+		t.Fatalf("follow-up prompt = %q, want trusted typed tool result and original user message", followupPrompt)
+	}
+	turns, err := readLocalTurns(result.TranscriptPath)
+	if err != nil {
+		t.Fatalf("readLocalTurns() error = %v", err)
+	}
+	if len(turns) != 1 ||
+		turns[0].Response != "final answer after trusted tool result" ||
+		turns[0].ToolRuntime == nil ||
+		turns[0].ToolRuntime.ResultFeed != connectToolResultFeedSameTurnPrompt ||
+		len(turns[0].ToolCalls) != 1 ||
+		turns[0].Operation == nil ||
+		len(turns[0].Operation.ToolCalls) != 1 {
+		t.Fatalf("turns = %+v, want one transcript turn with final answer and typed tool evidence", turns)
+	}
+}
+
 func TestRunLocalConnectAuthorizesBackendToolCallsAgainstManifest(t *testing.T) {
 	cli.TestingResetBackendState(t)
 	typedBackend := &typedToolRuntimeBackend{toolCalls: []backendcaps.TypedToolCallEvent{{
@@ -2061,6 +2119,85 @@ func (b *streamingTypedToolBridgeBackend) IngestTypedToolProviderLine(ctx contex
 }
 
 func (b *streamingTypedToolBridgeBackend) TypedToolCalls(_ string) []backendcaps.TypedToolCallEvent {
+	return append([]backendcaps.TypedToolCallEvent(nil), b.calls...)
+}
+
+type streamingTypedToolFollowupBackend struct {
+	tools    []backendcaps.TypedToolDefinition
+	executor backendcaps.TypedToolExecutor
+	calls    []backendcaps.TypedToolCallEvent
+	prompts  []string
+}
+
+func (b *streamingTypedToolFollowupBackend) Name() string { return "streaming-followup-typed-runtime" }
+
+func (b *streamingTypedToolFollowupBackend) InvokeInteractive(_, _, _ string) error { return nil }
+
+func (b *streamingTypedToolFollowupBackend) InvokeNonInteractive(_, _, _ string, _ <-chan struct{}, _ *usage.Collector) error {
+	return fmt.Errorf("InvokeNonInteractive should not be called for streaming typed tool follow-up backend")
+}
+
+func (b *streamingTypedToolFollowupBackend) InvokeStreaming(_ context.Context, _ string, prompt string, _ string) (io.ReadCloser, error) {
+	b.prompts = append(b.prompts, prompt)
+	if len(b.prompts) == 1 {
+		payload := strings.Join([]string{
+			`{"type":"assistant","message":{"content":[{"type":"tool_use","id":"call-create-channel","name":"create_channel","input":{"name":"triage"}}]}}`,
+			"",
+		}, "\n")
+		return io.NopCloser(strings.NewReader(payload)), nil
+	}
+	payload := strings.Join([]string{
+		`{"type":"assistant","message":{"content":[{"type":"text","text":"final answer after trusted tool result"}]}}`,
+		"",
+	}, "\n")
+	return io.NopCloser(strings.NewReader(payload)), nil
+}
+
+func (b *streamingTypedToolFollowupBackend) SetTypedTools(tools []backendcaps.TypedToolDefinition) error {
+	b.tools = append([]backendcaps.TypedToolDefinition(nil), tools...)
+	return nil
+}
+
+func (b *streamingTypedToolFollowupBackend) SetTypedToolExecutor(executor backendcaps.TypedToolExecutor) error {
+	b.executor = executor
+	return nil
+}
+
+func (b *streamingTypedToolFollowupBackend) BeginTypedToolInvocation() {
+	b.calls = nil
+}
+
+func (b *streamingTypedToolFollowupBackend) IngestTypedToolProviderLine(ctx context.Context, line string) {
+	var event struct {
+		Message *struct {
+			Content []struct {
+				Type  string         `json:"type"`
+				ID    string         `json:"id"`
+				Name  string         `json:"name"`
+				Input map[string]any `json:"input"`
+			} `json:"content"`
+		} `json:"message"`
+	}
+	if err := json.Unmarshal([]byte(line), &event); err != nil || event.Message == nil {
+		return
+	}
+	for _, block := range event.Message.Content {
+		if block.Type != "tool_use" || block.Name == "" || b.executor == nil {
+			continue
+		}
+		call, err := b.executor.ExecuteTypedTool(ctx, backendcaps.TypedToolExecutionRequest{
+			CallID:    block.ID,
+			Name:      block.Name,
+			Arguments: block.Input,
+		})
+		if err != nil {
+			continue
+		}
+		b.calls = append(b.calls, call)
+	}
+}
+
+func (b *streamingTypedToolFollowupBackend) TypedToolCalls(_ string) []backendcaps.TypedToolCallEvent {
 	return append([]backendcaps.TypedToolCallEvent(nil), b.calls...)
 }
 

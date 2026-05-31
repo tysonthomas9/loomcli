@@ -818,7 +818,7 @@ func invokeLocalAgent(ctx context.Context, plan *defspkg.Plan, agent defspkg.Age
 	beginBackendTypedToolInvocation(backend)
 	workDir := localWorkDir(plan.Root, agent)
 	if streamer, ok := backend.(backendcaps.StreamingBackend); ok {
-		return invokeStreamingLocalAgent(ctx, streamingLocalInvocation{
+		invocation, err := invokeStreamingLocalAgent(ctx, streamingLocalInvocation{
 			backendName:        backendName,
 			backend:            backend,
 			streamer:           streamer,
@@ -829,8 +829,33 @@ func invokeLocalAgent(ctx context.Context, plan *defspkg.Plan, agent defspkg.Age
 			resume:             resume,
 			appliedToolRuntime: appliedToolRuntime,
 		})
+		if err != nil {
+			return invocation, err
+		}
+		return maybeInvokeTypedToolResultFollowup(ctx, typedToolFollowupInvocation{
+			backendName:        backendName,
+			backend:            backend,
+			streamer:           streamer,
+			workDir:            workDir,
+			agentName:          agent.Name,
+			message:            message,
+			stream:             stream,
+			appliedToolRuntime: appliedToolRuntime,
+		}, invocation)
 	}
-	return invokeNonStreamingLocalAgentWithResume(backendName, backend, workDir, prompt, agent.Name, stream, resume, appliedToolRuntime)
+	invocation, err := invokeNonStreamingLocalAgentWithResume(backendName, backend, workDir, prompt, agent.Name, stream, resume, appliedToolRuntime)
+	if err != nil {
+		return invocation, err
+	}
+	return maybeInvokeTypedToolResultFollowup(ctx, typedToolFollowupInvocation{
+		backendName:        backendName,
+		backend:            backend,
+		workDir:            workDir,
+		agentName:          agent.Name,
+		message:            message,
+		stream:             stream,
+		appliedToolRuntime: appliedToolRuntime,
+	}, invocation)
 }
 
 func lookupLocalBackend(agent defspkg.AgentModule) (string, cli.Backend, error) {

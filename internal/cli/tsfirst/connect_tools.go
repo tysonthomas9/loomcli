@@ -30,6 +30,7 @@ const (
 	connectToolHandlerExecutionConfigured = "trusted_executor_configured"
 	connectToolSchemaPublicationPrompt    = "prompt_json_contract"
 	connectToolResultFeedPromptHistory    = "prompt_history"
+	connectToolResultFeedSameTurnPrompt   = "same_turn_prompt_followup"
 )
 
 func localConnectToolRuntime(plan *defspkg.Plan, agent defspkg.AgentModule) *connectToolRuntime {
