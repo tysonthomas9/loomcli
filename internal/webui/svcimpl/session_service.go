@@ -119,6 +119,7 @@ func (s *sessionServiceImpl) ListTaskSessions(ctx context.Context, wsID, taskID 
 		return nil, service.ErrValidation("invalid task ID: must match [a-zA-Z0-9._-]+")
 	}
 	if items, err := s.controlPlaneTaskSessions(ctx, wsID, taskID); err == nil && len(items) > 0 {
+		s.enrichSessionListItemsFromFileStores(ctx, wsID, taskID, items)
 		return items, nil
 	}
 
@@ -148,6 +149,78 @@ func (s *sessionServiceImpl) ListTaskSessions(ctx context.Context, wsID, taskID 
 		}
 	}
 	return items, nil
+}
+
+func (s *sessionServiceImpl) enrichSessionListItemsFromFileStores(ctx context.Context, wsID, taskID string, items []service.SessionListItem) {
+	stores, err := s.storesForWorkspace(ctx, wsID)
+	if err != nil {
+		return
+	}
+	for i := range items {
+		item := &items[i]
+		for _, sessStore := range stores {
+			meta, err := sessStore.LoadMetadata(item.SessionID)
+			if err != nil || meta.TaskID != taskID {
+				continue
+			}
+			enrichSessionRecordFromLocal(&item.SessionRecord, meta.SessionRecord)
+			if info, err := os.Stat(sessStore.NativeTranscriptPath(item.SessionID)); err == nil && info.Size() > 0 {
+				item.HasTranscript = true
+			}
+			if diff, err := sessStore.ReadDiff(item.SessionID); err == nil && diff != "" {
+				item.HasDiff = true
+			}
+			break
+		}
+	}
+}
+
+func enrichSessionRecordFromLocal(rec *sessions.SessionRecord, local sessions.SessionRecord) {
+	if rec.TaskID == "" {
+		rec.TaskID = local.TaskID
+	}
+	if rec.EpicID == "" {
+		rec.EpicID = local.EpicID
+	}
+	if rec.Backend == "" {
+		rec.Backend = local.Backend
+	}
+	if rec.Model == "" {
+		rec.Model = local.Model
+	}
+	if rec.Phase == "" {
+		rec.Phase = local.Phase
+	}
+	if localHasUsage(local) {
+		rec.InputTokens = local.InputTokens
+		rec.OutputTokens = local.OutputTokens
+		rec.CacheReadTokens = local.CacheReadTokens
+		rec.CacheWriteTokens = local.CacheWriteTokens
+		rec.EstimatedCostUSD = local.EstimatedCostUSD
+	}
+	if local.FilesChanged != 0 {
+		rec.FilesChanged = local.FilesChanged
+	}
+	if local.LinesAdded != 0 {
+		rec.LinesAdded = local.LinesAdded
+	}
+	if local.LinesRemoved != 0 {
+		rec.LinesRemoved = local.LinesRemoved
+	}
+	if len(local.FilesTouched) > 0 {
+		rec.FilesTouched = local.FilesTouched
+	}
+	if rec.ErrorClass == "" {
+		rec.ErrorClass = local.ErrorClass
+	}
+}
+
+func localHasUsage(rec sessions.SessionRecord) bool {
+	return rec.InputTokens != 0 ||
+		rec.OutputTokens != 0 ||
+		rec.CacheReadTokens != 0 ||
+		rec.CacheWriteTokens != 0 ||
+		rec.EstimatedCostUSD != 0
 }
 
 func (s *sessionServiceImpl) controlPlaneTaskSessions(ctx context.Context, wsID, taskID string) ([]service.SessionListItem, error) {
