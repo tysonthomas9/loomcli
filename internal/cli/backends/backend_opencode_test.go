@@ -278,6 +278,28 @@ func TestCollectOpenCodeStreamUsage_InvalidJSON(t *testing.T) {
 	}
 }
 
+func TestExtractOpenCodeSessionID(t *testing.T) {
+	t.Parallel()
+
+	line := `{"type":"step_start","sessionID":"ses_1836797d8ffe0cYlvvI2xlmSke","part":{"type":"step-start"}}`
+	got, ok := extractOpenCodeSessionID(line)
+	if !ok {
+		t.Fatal("extractOpenCodeSessionID() = not found, want found")
+	}
+	if got != "ses_1836797d8ffe0cYlvvI2xlmSke" {
+		t.Fatalf("extractOpenCodeSessionID() = %q", got)
+	}
+}
+
+func TestExtractOpenCodeSessionID_Missing(t *testing.T) {
+	t.Parallel()
+
+	line := `{"type":"message","content":"hello"}`
+	if got, ok := extractOpenCodeSessionID(line); ok {
+		t.Fatalf("extractOpenCodeSessionID() = (%q, true), want not found", got)
+	}
+}
+
 func TestExtractOpenCodeStreamError_DataMessage(t *testing.T) {
 	t.Parallel()
 

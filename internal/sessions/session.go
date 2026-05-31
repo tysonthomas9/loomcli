@@ -32,3 +32,12 @@ func (s *Session) SyncLatestClaudeTranscript(workDir, claudeUUID string, since t
 	}
 	return s.store.SyncLatestClaudeTranscript(s.Meta.SessionID, workDir, claudeUUID, since)
 }
+
+// SyncNativeTranscriptBytes writes an already-captured native transcript into
+// this session.
+func (s *Session) SyncNativeTranscriptBytes(data []byte) error {
+	if s == nil || s.store == nil {
+		return nil
+	}
+	return s.store.SyncNativeTranscriptBytes(s.Meta.SessionID, data)
+}

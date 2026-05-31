@@ -44,6 +44,24 @@ func TestSyncNativeTranscript_CopiesContent(t *testing.T) {
 	}
 }
 
+func TestSyncNativeTranscriptBytes_CopiesContent(t *testing.T) {
+	const sid = "20260417-120000-opencode-abcd-0123abcd"
+	store, sessDir := newStoreWithSession(t, sid)
+	payload := []byte(`{"info":{"id":"ses_123"},"messages":[]}` + "\n")
+
+	if err := store.SyncNativeTranscriptBytes(sid, payload); err != nil {
+		t.Fatalf("SyncNativeTranscriptBytes: %v", err)
+	}
+
+	got, err := os.ReadFile(filepath.Join(sessDir, NativeTranscriptFile))
+	if err != nil {
+		t.Fatalf("read dst: %v", err)
+	}
+	if string(got) != string(payload) {
+		t.Errorf("got %q, want %q", got, payload)
+	}
+}
+
 func TestSyncNativeTranscript_EmptySrcPathIsNoop(t *testing.T) {
 	const sid = "20260417-120000-claude-abcd-0123abcd"
 	store, _ := newStoreWithSession(t, sid)

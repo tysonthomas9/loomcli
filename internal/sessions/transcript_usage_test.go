@@ -1,6 +1,7 @@
 package sessions
 
 import (
+	"math"
 	"os"
 	"path/filepath"
 	"testing"
@@ -102,6 +103,63 @@ func TestSumTranscriptUsage_CodexTokenCount(t *testing.T) {
 	}
 	if usage.Model != "gpt-5.5" {
 		t.Errorf("Model = %q, want gpt-5.5", usage.Model)
+	}
+}
+
+func TestSumTranscriptUsage_OpenCodeExport(t *testing.T) {
+	data := []byte(`{
+  "info": {"id":"ses_123"},
+  "messages": [
+    {
+      "info": {"id":"msg_user","role":"user","time":{"created":1700000000000}},
+      "parts": [{"type":"text","text":"hello"}]
+    },
+    {
+      "info": {
+        "id":"msg_assistant_1",
+        "role":"assistant",
+        "modelID":"anthropic/claude-sonnet-4",
+        "time":{"created":1700000001000},
+        "tokens":{"input":11,"output":7,"cache":{"read":3,"write":2}},
+        "cost":0.0012
+      },
+      "parts": [{"type":"text","text":"first"}]
+    },
+    {
+      "info": {
+        "id":"msg_assistant_2",
+        "role":"assistant",
+        "modelID":"anthropic/claude-sonnet-4",
+        "time":{"created":1700000002000},
+        "tokens":{"input":13,"output":5,"cache":{"read":4,"write":1}},
+        "cost":0.0023
+      },
+      "parts": [{"type":"text","text":"second"}]
+    }
+  ]
+}`)
+
+	usage, err := SumTranscriptUsageBytes(data)
+	if err != nil {
+		t.Fatalf("SumTranscriptUsageBytes: %v", err)
+	}
+	if usage.InputTokens != 24 {
+		t.Errorf("InputTokens = %d, want 24", usage.InputTokens)
+	}
+	if usage.OutputTokens != 12 {
+		t.Errorf("OutputTokens = %d, want 12", usage.OutputTokens)
+	}
+	if usage.CacheReadTokens != 7 {
+		t.Errorf("CacheReadTokens = %d, want 7", usage.CacheReadTokens)
+	}
+	if usage.CacheWriteTokens != 3 {
+		t.Errorf("CacheWriteTokens = %d, want 3", usage.CacheWriteTokens)
+	}
+	if math.Abs(usage.CostUSD-0.0035) > 0.0000001 {
+		t.Errorf("CostUSD = %f, want 0.0035", usage.CostUSD)
+	}
+	if usage.Model != "anthropic/claude-sonnet-4" {
+		t.Errorf("Model = %q, want anthropic/claude-sonnet-4", usage.Model)
 	}
 }
 

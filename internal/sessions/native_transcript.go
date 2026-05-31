@@ -69,21 +69,9 @@ func (s *Store) SyncNativeTranscript(sessionID, srcPath, format string) error {
 		recordErr(span, err)
 		return fmt.Errorf("read source transcript: %w", err)
 	}
-	// Redact raw backend streams here (their only redaction). Canonical input is
-	// pre-redacted by the TS leaf, so re-redacting would be a duplicate pass.
-	if format != TranscriptFormatCanonical && redactionEnabled() {
-		redacted, rerr := redact.JSONLBytes(data)
-		if rerr != nil {
-			recordErr(span, rerr)
-			return fmt.Errorf("redact native transcript: %w", rerr)
-		}
-		data = redacted
-	}
-
-	dstPath := filepath.Join(sessDir, NativeTranscriptFile)
-	if err := atomicfile.WriteFile(dstPath, data, sessFilePerm); err != nil {
+	if err := writeNativeTranscriptData(sessDir, data, format); err != nil {
 		recordErr(span, err)
-		return fmt.Errorf("write native transcript: %w", err)
+		return err
 	}
 	// Record the format alongside the file so the read path never has to guess.
 	// Best-effort: the transcript is already written; a metadata hiccup must not
@@ -92,6 +80,51 @@ func (s *Store) SyncNativeTranscript(sessionID, srcPath, format string) error {
 		if ferr := s.recordTranscriptFormat(sessionID, format); ferr != nil {
 			recordErr(span, ferr)
 		}
+	}
+	return nil
+}
+
+// SyncNativeTranscriptBytes writes an already-captured native transcript into a
+// Loom session. This is used for backends whose native transcript must be
+// obtained from a CLI export command instead of an on-disk file path.
+func (s *Store) SyncNativeTranscriptBytes(sessionID string, data []byte) error {
+	if len(data) == 0 {
+		return nil
+	}
+	_, span := startSpan(runtimectx.RootContext(), "service.Sessions.SyncNativeTranscriptBytes",
+		attrLoomSessionID(sessionID),
+	)
+	defer span.End()
+
+	sessDir, err := s.resolveSessionDir(sessionID)
+	if err != nil {
+		recordErr(span, err)
+		return err
+	}
+	if err := writeNativeTranscriptData(sessDir, data, TranscriptFormatRaw); err != nil {
+		recordErr(span, err)
+		return err
+	}
+	if ferr := s.recordTranscriptFormat(sessionID, TranscriptFormatRaw); ferr != nil {
+		recordErr(span, ferr)
+	}
+	return nil
+}
+
+func writeNativeTranscriptData(sessDir string, data []byte, format string) error {
+	// Redact raw backend streams here (their only redaction). Canonical input is
+	// pre-redacted by the TS leaf, so re-redacting would be a duplicate pass.
+	if format != TranscriptFormatCanonical && redactionEnabled() {
+		redacted, err := redact.JSONLBytes(data)
+		if err != nil {
+			return fmt.Errorf("redact native transcript: %w", err)
+		}
+		data = redacted
+	}
+
+	dstPath := filepath.Join(sessDir, NativeTranscriptFile)
+	if err := atomicfile.WriteFile(dstPath, data, sessFilePerm); err != nil {
+		return fmt.Errorf("write native transcript: %w", err)
 	}
 	return nil
 }

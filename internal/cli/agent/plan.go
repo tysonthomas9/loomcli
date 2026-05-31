@@ -293,15 +293,15 @@ func finalizeAgentSession(sess *sessions.Session, worktreePath, beforeRef string
 		taskID = info.TaskID
 	}
 
-	// GetLastCapturedSessionID returns the Claude session UUID scraped from the
-	// run's stream output (empty for interactive runs or non-Claude backends),
-	// letting WithWorktree resolve the native transcript exactly.
+	// Captured backend session IDs let WithWorktree resolve native transcripts
+	// exactly for CLIs that need a session-specific lookup/export.
 	opts := sessionfinalize.WithWorktreeOptions{
-		WorktreePath:    worktreePath,
-		BeforeRef:       beforeRef,
-		TaskID:          taskID,
-		ExitCode:        exitCode,
-		ClaudeSessionID: backends.GetLastCapturedSessionID(),
+		WorktreePath:      worktreePath,
+		BeforeRef:         beforeRef,
+		TaskID:            taskID,
+		ExitCode:          exitCode,
+		ClaudeSessionID:   backends.GetLastCapturedSessionID(),
+		OpenCodeSessionID: backends.GetLastCapturedOpenCodeSessionID(),
 	}
 	var rec *usage.SessionUsage
 	endedAt := time.Now()

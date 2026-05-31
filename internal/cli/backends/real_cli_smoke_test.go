@@ -84,6 +84,7 @@ func runRealCLIBackendSmoke(t *testing.T, root, backendName, prompt string, time
 	SetActiveSessionRuntimeEnv(runtimeDir, sess.SessionID())
 	defer ClearActiveSessionEnv()
 	ClearLastCapturedSessionID()
+	ClearLastCapturedOpenCodeSessionID()
 
 	collector := usage.NewCollector(backendName, agentName)
 	shutdown := make(chan struct{})
@@ -101,17 +102,18 @@ func runRealCLIBackendSmoke(t *testing.T, root, backendName, prompt string, time
 	}
 	record := collector.Finalize("real-cli-smoke", "", startedAt, endedAt, exitCode)
 	_, finalizeErr := sessionfinalize.WithWorktree(sess, sessionfinalize.WithWorktreeOptions{
-		WorktreePath:     workDir,
-		BeforeRef:        beforeRef,
-		TaskID:           "real-cli-smoke",
-		ExitCode:         exitCode,
-		ClaudeSessionID:  GetLastCapturedSessionID(),
-		InputTokens:      record.InputTokens,
-		OutputTokens:     record.OutputTokens,
-		CacheReadTokens:  record.CacheReadTokens,
-		CacheWriteTokens: record.CacheWriteTokens,
-		EstimatedCostUSD: record.EstimatedCostUSD,
-		Model:            record.Model,
+		WorktreePath:      workDir,
+		BeforeRef:         beforeRef,
+		TaskID:            "real-cli-smoke",
+		ExitCode:          exitCode,
+		ClaudeSessionID:   GetLastCapturedSessionID(),
+		OpenCodeSessionID: GetLastCapturedOpenCodeSessionID(),
+		InputTokens:       record.InputTokens,
+		OutputTokens:      record.OutputTokens,
+		CacheReadTokens:   record.CacheReadTokens,
+		CacheWriteTokens:  record.CacheWriteTokens,
+		EstimatedCostUSD:  record.EstimatedCostUSD,
+		Model:             record.Model,
 	})
 	if finalizeErr != nil {
 		t.Fatalf("finalize session: %v", finalizeErr)
@@ -146,7 +148,7 @@ func runRealCLIBackendSmoke(t *testing.T, root, backendName, prompt string, time
 	if meta.InputTokens+meta.OutputTokens+meta.CacheReadTokens+meta.CacheWriteTokens == 0 {
 		t.Errorf("%s did not report token usage into session metadata", backendName)
 	}
-	if backendName == "claude" || backendName == "codex" {
+	if expectsNativeTranscript(backendName) {
 		if !nativeCaptured {
 			t.Errorf("%s did not mirror a native transcript into the Loom session", backendName)
 		} else {
@@ -163,6 +165,15 @@ func runRealCLIBackendSmoke(t *testing.T, root, backendName, prompt string, time
 		if meta.EstimatedCostUSD == 0 {
 			t.Errorf("%s did not report backend/session cost into session metadata", backendName)
 		}
+	}
+}
+
+func expectsNativeTranscript(backendName string) bool {
+	switch backendName {
+	case "claude", "codex", "opencode":
+		return true
+	default:
+		return false
 	}
 }
 

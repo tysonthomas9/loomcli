@@ -2,6 +2,7 @@ package sessions
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -56,26 +57,39 @@ type transcriptUsageEntry struct {
 // usage. Claude assistant messages are deduplicated by message ID, keeping the
 // last occurrence because Claude writes snapshot updates with increasing token
 // counts. Codex token_count events are cumulative, so the latest event wins.
+// OpenCode export JSON is summed from assistant message info tokens/cost.
 // When the transcript includes backend-reported cost/model fields, the latest
 // non-zero cost and latest model are copied through. Returns zero usage and nil
 // error if the file does not exist (graceful degradation).
 //
-// On I/O errors mid-scan, returns partial results alongside the error.
 // Callers that need exact totals should check the error before using the result.
 func SumTranscriptUsage(transcriptPath string) (TokenUsage, error) {
 	_, span := startSpan(runtimectx.RootContext(), "service.Sessions.SumTranscriptUsage")
 	defer span.End()
 
 	// #nosec G304 — transcriptPath comes from Claude's hook payload (trusted)
-	f, err := os.Open(transcriptPath)
+	data, err := os.ReadFile(transcriptPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return TokenUsage{}, nil
 		}
 		recordErr(span, err)
-		return TokenUsage{}, fmt.Errorf("open transcript: %w", err)
+		return TokenUsage{}, fmt.Errorf("read transcript: %w", err)
 	}
-	defer func() { _ = f.Close() }()
+
+	total, err := SumTranscriptUsageBytes(data)
+	if err != nil {
+		recordErr(span, err)
+	}
+	return total, err
+}
+
+// SumTranscriptUsageBytes sums token/cost usage from in-memory native
+// transcript content.
+func SumTranscriptUsageBytes(data []byte) (TokenUsage, error) {
+	if total, ok := sumOpenCodeExportUsage(data); ok {
+		return total, nil
+	}
 
 	type msgUsage struct {
 		input      int64
@@ -86,7 +100,7 @@ func SumTranscriptUsage(transcriptPath string) (TokenUsage, error) {
 	seen := make(map[string]msgUsage)
 	var total TokenUsage
 
-	scanner := bufio.NewScanner(f)
+	scanner := bufio.NewScanner(bytes.NewReader(data))
 	scanner.Buffer(make([]byte, 0, 64*1024), 1*1024*1024) // 1MB buffer matching existing pattern
 	for scanner.Scan() {
 		line := scanner.Bytes()
@@ -145,11 +159,69 @@ func SumTranscriptUsage(transcriptPath string) (TokenUsage, error) {
 	}
 
 	if err := scanner.Err(); err != nil {
-		recordErr(span, err)
 		return total, fmt.Errorf("scan transcript: %w", err)
 	}
 
 	return total, nil
+}
+
+type openCodeUsageExport struct {
+	Info struct {
+		ID string `json:"id,omitempty"`
+	} `json:"info"`
+	Messages []struct {
+		Info struct {
+			Role    string  `json:"role"`
+			Cost    float64 `json:"cost,omitempty"`
+			Model   string  `json:"model,omitempty"`
+			ModelID string  `json:"modelID,omitempty"`
+			Tokens  *struct {
+				Input  int64 `json:"input"`
+				Output int64 `json:"output"`
+				Cache  struct {
+					Read  int64 `json:"read"`
+					Write int64 `json:"write"`
+				} `json:"cache"`
+			} `json:"tokens,omitempty"`
+		} `json:"info"`
+	} `json:"messages"`
+}
+
+func sumOpenCodeExportUsage(data []byte) (TokenUsage, bool) {
+	trimmed := bytes.TrimSpace(data)
+	if !bytes.HasPrefix(trimmed, []byte("{")) {
+		return TokenUsage{}, false
+	}
+	var export openCodeUsageExport
+	if err := json.Unmarshal(trimmed, &export); err != nil {
+		return TokenUsage{}, false
+	}
+	if export.Info.ID == "" && len(export.Messages) == 0 {
+		return TokenUsage{}, false
+	}
+
+	var total TokenUsage
+	for _, msg := range export.Messages {
+		if msg.Info.Model != "" {
+			total.Model = msg.Info.Model
+		}
+		if msg.Info.ModelID != "" {
+			total.Model = msg.Info.ModelID
+		}
+		if msg.Info.Role != "assistant" {
+			continue
+		}
+		if msg.Info.Tokens != nil {
+			total.InputTokens += msg.Info.Tokens.Input
+			total.OutputTokens += msg.Info.Tokens.Output
+			total.CacheReadTokens += msg.Info.Tokens.Cache.Read
+			total.CacheWriteTokens += msg.Info.Tokens.Cache.Write
+		}
+		if msg.Info.Cost > 0 {
+			total.CostUSD += msg.Info.Cost
+		}
+	}
+	return total, true
 }
 
 func firstPositiveCost(vals ...float64) float64 {

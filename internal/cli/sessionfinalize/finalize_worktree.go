@@ -1,10 +1,16 @@
 package sessionfinalize
 
 import (
+	"fmt"
+	"strings"
+
 	"github.com/tysonthomas9/loomcli/internal/backendnames"
+	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/git"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 )
+
+var openCodeExportSession = defaultOpenCodeExportSession
 
 type WithWorktreeOptions struct {
 	WorktreePath string
@@ -17,6 +23,10 @@ type WithWorktreeOptions struct {
 	// stream output. Used to resolve the native transcript exactly; empty
 	// falls back to newest-by-mtime in the worktree's project dir.
 	ClaudeSessionID string
+
+	// OpenCodeSessionID is the OpenCode session ID captured from the run's
+	// stream output. Used to export the exact native transcript.
+	OpenCodeSessionID string
 
 	InputTokens      int64
 	OutputTokens     int64
@@ -57,6 +67,8 @@ func WithWorktree(sess *sessions.Session, opts WithWorktreeOptions) (WithWorktre
 		enrichCodexUsageFromTranscript(sess, &opts)
 	case backendnames.Claude:
 		enrichClaudeUsageFromTranscript(sess, &opts)
+	case backendnames.OpenCode:
+		enrichOpenCodeUsageFromExport(sess, &opts)
 	}
 	return result, sess.Finalize(sessions.FinalizeOptions{
 		TaskID:       opts.TaskID,
@@ -83,6 +95,41 @@ func enrichCodexUsageFromTranscript(sess *sessions.Session, opts *WithWorktreeOp
 func enrichClaudeUsageFromTranscript(sess *sessions.Session, opts *WithWorktreeOptions) {
 	srcPath, _ := sess.SyncLatestClaudeTranscript(opts.WorktreePath, opts.ClaudeSessionID, sess.Meta.StartedAt)
 	enrichUsageFromTranscript(srcPath, opts)
+}
+
+func enrichOpenCodeUsageFromExport(sess *sessions.Session, opts *WithWorktreeOptions) {
+	data, err := openCodeExportSession(opts.WorktreePath, opts.OpenCodeSessionID)
+	if err != nil || len(data) == 0 {
+		return
+	}
+	if err := sess.SyncNativeTranscriptBytes(data); err != nil {
+		return
+	}
+	tok, err := sessions.SumTranscriptUsageBytes(data)
+	if err != nil {
+		return
+	}
+	applyTranscriptUsage(opts, tok)
+}
+
+func defaultOpenCodeExportSession(workDir, sessionID string) ([]byte, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return nil, nil
+	}
+	result := cli.DefaultDeps().Exec.Run(workDir, "opencode", "export", sessionID)
+	if result.Err != nil {
+		return nil, fmt.Errorf("opencode export %s: %w: %s", sessionID, result.Err, strings.TrimSpace(result.Stderr))
+	}
+	return normalizeOpenCodeExportOutput(result.Stdout), nil
+}
+
+func normalizeOpenCodeExportOutput(stdout string) []byte {
+	idx := strings.Index(stdout, "{")
+	if idx < 0 {
+		return nil
+	}
+	return []byte(strings.TrimSpace(stdout[idx:]))
 }
 
 func enrichUsageFromTranscript(srcPath string, opts *WithWorktreeOptions) {

@@ -51,17 +51,18 @@ func finalizeAutoSession(ctx *autoLoopCtx, sess *sessions.Session, beforeRef str
 		taskID = info.TaskID
 	}
 	_, _ = sessionfinalize.WithWorktree(sess, sessionfinalize.WithWorktreeOptions{
-		WorktreePath:     ctx.opts.WorktreePath,
-		BeforeRef:        beforeRef,
-		TaskID:           taskID,
-		ExitCode:         exitCode,
-		InputTokens:      record.InputTokens,
-		OutputTokens:     record.OutputTokens,
-		CacheReadTokens:  record.CacheReadTokens,
-		CacheWriteTokens: record.CacheWriteTokens,
-		EstimatedCostUSD: record.EstimatedCostUSD,
-		Model:            record.Model,
-		ClaudeSessionID:  backends.GetLastCapturedSessionID(),
+		WorktreePath:      ctx.opts.WorktreePath,
+		BeforeRef:         beforeRef,
+		TaskID:            taskID,
+		ExitCode:          exitCode,
+		InputTokens:       record.InputTokens,
+		OutputTokens:      record.OutputTokens,
+		CacheReadTokens:   record.CacheReadTokens,
+		CacheWriteTokens:  record.CacheWriteTokens,
+		EstimatedCostUSD:  record.EstimatedCostUSD,
+		Model:             record.Model,
+		ClaudeSessionID:   backends.GetLastCapturedSessionID(),
+		OpenCodeSessionID: backends.GetLastCapturedOpenCodeSessionID(),
 	})
 	backends.ClearActiveSessionEnv()
 	go sessions.NotifyWebUI(cmdstore.RootContext(), backends.ResolveWebUIURL(), taskID, sess.SessionID(), sess.Meta.Status, backends.ResolveNotifyToken())

@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 
 	"github.com/olesho/harness-wrapper/pkg/wrapper"
 
@@ -68,6 +69,8 @@ func defaultOpenCodeNonInteractiveInvoker(workDir, prompt, agentName string, shu
 	fmt.Println("")
 
 	var streamErrMsg string
+	var sessionOnce sync.Once
+	ClearLastCapturedOpenCodeSessionID()
 	return runHarness(context.Background(), shutdown, harnessInvocation{
 		BinaryName: "opencode",
 		Args:       args,
@@ -79,6 +82,11 @@ func defaultOpenCodeNonInteractiveInvoker(workDir, prompt, agentName string, shu
 		HarnessName: "",
 		LineHandler: func(line string) {
 			fmt.Println(line)
+			if sid, ok := extractOpenCodeSessionID(line); ok {
+				sessionOnce.Do(func() {
+					SetLastCapturedOpenCodeSessionID(sid)
+				})
+			}
 			if streamErrMsg == "" {
 				if msg, ok := extractOpenCodeStreamError(line); ok {
 					streamErrMsg = msg
@@ -177,6 +185,22 @@ type openCodeErrorEvent struct {
 			Message string `json:"message,omitempty"`
 		} `json:"data,omitempty"`
 	} `json:"error,omitempty"`
+}
+
+type openCodeSessionEvent struct {
+	SessionID string `json:"sessionID,omitempty"`
+}
+
+func extractOpenCodeSessionID(line string) (string, bool) {
+	var event openCodeSessionEvent
+	if err := json.Unmarshal([]byte(line), &event); err != nil {
+		return "", false
+	}
+	id := strings.TrimSpace(event.SessionID)
+	if id == "" {
+		return "", false
+	}
+	return id, true
 }
 
 func extractOpenCodeStreamError(line string) (string, bool) {
