@@ -331,10 +331,30 @@ describe("WorkflowsPage", () => {
     ).toHaveTextContent("Waiting for trigger follow-up");
     expect(
       screen.getByTestId("workflow-comparison-event-wrun-1-1"),
+    ).toHaveTextContent("+0s");
+    expect(
+      screen.getByTestId("workflow-comparison-event-wrun-2-2"),
+    ).toHaveTextContent("+1m");
+    expect(
+      screen.getByTestId("workflow-comparison-event-wrun-1-1"),
     ).toHaveAttribute("data-shared", "true");
     expect(
       screen.getByTestId("workflow-comparison-event-wrun-2-3"),
     ).toHaveAttribute("data-shared", "true");
+
+    fireEvent.change(screen.getByLabelText("Comparison time window"), {
+      target: { value: "1m" },
+    });
+
+    expect(
+      screen.getByTestId("workflow-comparison-timeline-wrun-1"),
+    ).toHaveTextContent("No matching events");
+    expect(
+      screen.queryByTestId("workflow-comparison-event-wrun-1-1"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByTestId("workflow-comparison-event-wrun-2-3"),
+    ).toHaveTextContent("Route admission accepted for waiting run");
 
     fireEvent.change(screen.getByLabelText("Comparison event type filter"), {
       target: { value: "workflow_waiting" },
@@ -349,6 +369,9 @@ describe("WorkflowsPage", () => {
     expect(
       screen.getByTestId("workflow-comparison-event-wrun-2-2"),
     ).toHaveTextContent("Waiting for trigger follow-up");
+    expect(
+      screen.queryByTestId("workflow-comparison-event-wrun-2-3"),
+    ).not.toBeInTheDocument();
 
     fireEvent.click(
       screen.getByRole("button", { name: "Cancel selected live" }),

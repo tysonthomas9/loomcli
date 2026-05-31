@@ -391,13 +391,19 @@
 }
 
 .timelineEventIndex,
+.timelineEventOffset,
 .timelineEventType {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12px;
 }
 
-.timelineEventIndex {
+.timelineEventIndex,
+.timelineEventOffset {
   color: var(--color-muted-fg, #57606a);
+}
+
+.timelineEventOffset {
+  white-space: nowrap;
 }
 
 .timelineEventType {

@@ -22,6 +22,18 @@ import styles from "./WorkflowsPage.module.css";
 
 type StatusFilter = "" | WorkflowRunStatus;
 
+const TIMELINE_WINDOW_OPTIONS = [
+  { value: "all", label: "All events", durationMs: null },
+  { value: "1m", label: "Last 1 minute", durationMs: 60_000 },
+  { value: "15m", label: "Last 15 minutes", durationMs: 15 * 60_000 },
+  { value: "1h", label: "Last 1 hour", durationMs: 60 * 60_000 },
+  { value: "24h", label: "Last 24 hours", durationMs: 24 * 60 * 60_000 },
+] as const;
+
+type TimelineWindowValue = (typeof TIMELINE_WINDOW_OPTIONS)[number]["value"];
+
+const DEFAULT_TIMELINE_WINDOW = TIMELINE_WINDOW_OPTIONS[0];
+
 export function WorkflowsPage(): JSX.Element {
   const { view: activeView } = useRouteView();
 
@@ -496,6 +508,22 @@ function WorkflowComparisonBar({
   onClear: () => void;
 }): JSX.Element | null {
   const [eventTypeFilter, setEventTypeFilter] = useState("");
+  const [timeWindow, setTimeWindow] = useState<TimelineWindowValue>("all");
+  const timelineWindow =
+    TIMELINE_WINDOW_OPTIONS.find((option) => option.value === timeWindow) ??
+    DEFAULT_TIMELINE_WINDOW;
+  const allComparisonEvents = useMemo(
+    () => comparedItems.flatMap((item) => eventsByRunId[item.run.run_id] ?? []),
+    [comparedItems, eventsByRunId],
+  );
+  const latestEventTime = useMemo(
+    () => maxEventTime(allComparisonEvents),
+    [allComparisonEvents],
+  );
+  const baselineEventTime = useMemo(
+    () => minEventTime(allComparisonEvents),
+    [allComparisonEvents],
+  );
   const eventTypes = useMemo(() => {
     const types = new Set<string>();
     for (const item of comparedItems) {
@@ -539,6 +567,20 @@ function WorkflowComparisonBar({
         <span className={styles.comparisonMeta}>
           {liveCount} live {liveCount === 1 ? "run" : "runs"}
         </span>
+        <select
+          className={styles.timelineFilter}
+          aria-label="Comparison time window"
+          value={timeWindow}
+          onChange={(event) =>
+            setTimeWindow(event.target.value as TimelineWindowValue)
+          }
+        >
+          {TIMELINE_WINDOW_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
         {eventTypes.length > 0 ? (
           <select
             className={styles.timelineFilter}
@@ -612,9 +654,16 @@ function WorkflowComparisonBar({
         {comparedItems.map((item) => {
           const runId = item.run.run_id;
           const events = eventsByRunId[runId] ?? [];
-          const visibleEvents = eventTypeFilter
-            ? events.filter((event) => event.type === eventTypeFilter)
-            : events;
+          const visibleEvents = events.filter((event) =>
+            isTimelineEventVisible(
+              event,
+              eventTypeFilter,
+              timelineWindow.durationMs,
+              latestEventTime,
+            ),
+          );
+          const filtersActive =
+            Boolean(eventTypeFilter) || timelineWindow.durationMs != null;
           return (
             <div
               key={runId}
@@ -626,7 +675,7 @@ function WorkflowComparisonBar({
                 <span>
                   {visibleEvents.length}{" "}
                   {visibleEvents.length === 1 ? "event" : "events"}
-                  {eventTypeFilter && events.length !== visibleEvents.length
+                  {filtersActive && events.length !== visibleEvents.length
                     ? ` of ${events.length}`
                     : ""}
                 </span>
@@ -641,31 +690,42 @@ function WorkflowComparisonBar({
                 </div>
               ) : (
                 <div className={styles.timelineEvents}>
-                  {visibleEvents.map((event) => (
-                    <div
-                      key={event.event_id}
-                      className={styles.timelineEvent}
-                      data-shared={sharedEventTypes.has(event.type)}
-                      data-testid={`workflow-comparison-event-${runId}-${event.event_index}`}
-                    >
-                      <div className={styles.timelineEventTop}>
-                        <span className={styles.timelineEventIndex}>
-                          #{event.event_index}
-                        </span>
-                        <span className={styles.timelineEventType}>
-                          {event.type}
-                        </span>
-                        <span className={styles.timelineEventTime}>
-                          {formatTimestamp(event.created_at)}
-                        </span>
-                      </div>
-                      {event.message ? (
-                        <div className={styles.timelineEventMessage}>
-                          {event.message}
+                  {visibleEvents.map((event) => {
+                    const eventOffset = formatRelativeOffset(
+                      parseEventTime(event.created_at),
+                      baselineEventTime,
+                    );
+                    return (
+                      <div
+                        key={event.event_id}
+                        className={styles.timelineEvent}
+                        data-shared={sharedEventTypes.has(event.type)}
+                        data-testid={`workflow-comparison-event-${runId}-${event.event_index}`}
+                      >
+                        <div className={styles.timelineEventTop}>
+                          <span className={styles.timelineEventIndex}>
+                            #{event.event_index}
+                          </span>
+                          {eventOffset ? (
+                            <span className={styles.timelineEventOffset}>
+                              {eventOffset}
+                            </span>
+                          ) : null}
+                          <span className={styles.timelineEventType}>
+                            {event.type}
+                          </span>
+                          <span className={styles.timelineEventTime}>
+                            {formatTimestamp(event.created_at)}
+                          </span>
                         </div>
-                      ) : null}
-                    </div>
-                  ))}
+                        {event.message ? (
+                          <div className={styles.timelineEventMessage}>
+                            {event.message}
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -867,6 +927,71 @@ function streamStatusLabel(
 function shortRunID(runId: string): string {
   if (runId.length <= 12) return runId;
   return runId.slice(0, 12);
+}
+
+function isTimelineEventVisible(
+  event: WorkflowRunEvent,
+  eventTypeFilter: string,
+  windowMs: number | null,
+  latestEventTime: number | null,
+): boolean {
+  if (eventTypeFilter && event.type !== eventTypeFilter) return false;
+  if (windowMs == null || latestEventTime == null) return true;
+  const eventTime = parseEventTime(event.created_at);
+  if (eventTime == null) return true;
+  return eventTime >= latestEventTime - windowMs;
+}
+
+function minEventTime(events: WorkflowRunEvent[]): number | null {
+  let min: number | null = null;
+  for (const event of events) {
+    const eventTime = parseEventTime(event.created_at);
+    if (eventTime == null) continue;
+    min = min == null ? eventTime : Math.min(min, eventTime);
+  }
+  return min;
+}
+
+function maxEventTime(events: WorkflowRunEvent[]): number | null {
+  let max: number | null = null;
+  for (const event of events) {
+    const eventTime = parseEventTime(event.created_at);
+    if (eventTime == null) continue;
+    max = max == null ? eventTime : Math.max(max, eventTime);
+  }
+  return max;
+}
+
+function parseEventTime(ts: string | undefined | null): number | null {
+  if (!ts) return null;
+  const time = new Date(ts).getTime();
+  return Number.isNaN(time) ? null : time;
+}
+
+function formatRelativeOffset(
+  eventTime: number | null,
+  baselineEventTime: number | null,
+): string | null {
+  if (eventTime == null || baselineEventTime == null) return null;
+  return formatOffsetDuration(eventTime - baselineEventTime);
+}
+
+function formatOffsetDuration(diffMs: number): string {
+  const sign = diffMs < 0 ? "-" : "+";
+  const totalSeconds = Math.round(Math.abs(diffMs) / 1000);
+  if (totalSeconds < 60) return `${sign}${totalSeconds}s`;
+
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (totalMinutes < 60) {
+    return seconds
+      ? `${sign}${totalMinutes}m ${seconds}s`
+      : `${sign}${totalMinutes}m`;
+  }
+
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return minutes ? `${sign}${hours}h ${minutes}m` : `${sign}${hours}h`;
 }
 
 function formatTimestamp(ts: string | undefined | null): string {
