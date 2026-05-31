@@ -942,6 +942,133 @@ export default defineWorkflow({
 	}
 }
 
+func TestCodeDefinedWorkflowContextProjectsAgentSessionToolCalls(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	workflowPath := filepath.Join(root, ".loom", "workflows", "context-session-tools.ts")
+	if err := os.MkdirAll(filepath.Dir(workflowPath), 0o755); err != nil {
+		t.Fatalf("mkdir workflow dir: %v", err)
+	}
+	if err := os.WriteFile(workflowPath, []byte(`import { createAgent, defineWorkflow } from '@loom/runtime';
+
+const worker = createAgent(() => ({
+  name: 'tool-worker',
+  model: 'test/model',
+  backend: 'codex',
+  instructions: 'Exercise session-level tool call projection.',
+}));
+
+export default defineWorkflow({
+  name: 'context-session-tools',
+  async run(ctx) {
+    const harness = await ctx.init(worker, { name: 'tool-harness' });
+    const session = await harness.session('tool-review', {
+      taskId: 'TASK-TOOLS',
+      phase: 'execution',
+    });
+    const report = await session.prompt({
+      instruction: 'Use the reviewed lookup tool.',
+      providerModel: 'test/provider-model',
+      usage: { inputTokens: 7, outputTokens: 3, totalTokens: 10 },
+      toolCalls: [{
+        callId: 'call-lookup-1',
+        providerCallId: 'provider-call-lookup-1',
+        name: 'lookup_order_status',
+        status: 'completed',
+        authorizationStatus: 'authorized',
+        idempotencyKey: 'idem-lookup-1',
+        toolVersion: 'v1',
+        sourceHash: 'sha256:lookup',
+        handler: 'typescript',
+        runtime: 'local',
+        timeout: '2s',
+        cancellable: true,
+        readOnly: true,
+        redacted: false,
+        args: { orderId: 'order_1042' },
+        result: { status: 'packed' },
+      }],
+      mockResult: { summary: 'tool call recorded' },
+    });
+    return {
+      summary: report.summary,
+      toolCallCount: report.toolCalls?.length ?? 0,
+      toolCallName: report.toolCalls?.[0]?.name,
+    };
+  },
+});
+`), 0o644); err != nil {
+		t.Fatalf("write workflow: %v", err)
+	}
+	plan, err := defspkg.Load(root)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TSSESSIONTOOLS", Name: "TypeScript Session Tool Calls"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := defspkg.Apply(ctx, st, "TSSESSIONTOOLS", "atlas", plan); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	run, err := CreateOrResumeRun(ctx, st, "TSSESSIONTOOLS", "context-session-tools", json.RawMessage(`{}`), "atlas")
+	if err != nil {
+		t.Fatalf("CreateOrResumeRun() error = %v", err)
+	}
+	result, err := RunOnce(ctx, st, clitest.NewMockIssueBackend(), run)
+	if err != nil {
+		t.Fatalf("RunOnce() error = %v", err)
+	}
+	if result.Run == nil || result.Run.Status != domain.WorkflowRunCompleted {
+		t.Fatalf("result = %+v, want completed session tool workflow", result)
+	}
+	var output map[string]any
+	if err := json.Unmarshal(result.Run.Result, &output); err != nil {
+		t.Fatalf("decode result %s: %v", result.Run.Result, err)
+	}
+	if output["summary"] != "tool call recorded" || output["toolCallCount"] != float64(1) || output["toolCallName"] != "lookup_order_status" {
+		t.Fatalf("output = %+v, want tool-call receipt returned to TypeScript", output)
+	}
+	events, err := st.RunEvents().List(ctx, "TSSESSIONTOOLS", store.RunEventFilter{WorkflowRunID: run.RunID})
+	if err != nil {
+		t.Fatalf("list run events: %v", err)
+	}
+	if countWorkflowEvents(events, "agent_session_operation") != 1 || countWorkflowEvents(events, "agent_session_tool_call") != 1 {
+		t.Fatalf("events = %+v, want one session operation and one session tool call event", events)
+	}
+	operationEvent := workflowEventDataByOperation(t, events, "prompt")
+	toolEvent := workflowEventDataByType(t, events, "agent_session_tool_call")
+	if toolEvent["workflow_run_id"] != run.RunID ||
+		toolEvent["agent_id"] != "tool-worker" ||
+		toolEvent["session_id"] == "" ||
+		toolEvent["operation_id"] != operationEvent["operation_id"] ||
+		toolEvent["call_id"] != "call-lookup-1" ||
+		toolEvent["provider_call_id"] != "provider-call-lookup-1" ||
+		toolEvent["name"] != "lookup_order_status" ||
+		toolEvent["tool_name"] != "lookup_order_status" ||
+		toolEvent["status"] != "completed" ||
+		toolEvent["authorization_status"] != "authorized" ||
+		toolEvent["idempotency_key"] != "idem-lookup-1" ||
+		toolEvent["tool_version"] != "v1" ||
+		toolEvent["source_hash"] != "sha256:lookup" ||
+		toolEvent["handler"] != "typescript" ||
+		toolEvent["runtime"] != "local" ||
+		toolEvent["timeout"] != "2s" ||
+		toolEvent["cancellable"] != true ||
+		toolEvent["read_only"] != true ||
+		toolEvent["redacted"] != false {
+		t.Fatalf("tool event = %+v, want normalized session tool-call evidence", toolEvent)
+	}
+	args, ok := toolEvent["args"].(map[string]any)
+	if !ok || args["orderId"] != "order_1042" {
+		t.Fatalf("tool event args = %+v, want model-selected args", toolEvent["args"])
+	}
+	toolResult, ok := toolEvent["result"].(map[string]any)
+	if !ok || toolResult["status"] != "packed" {
+		t.Fatalf("tool event result = %+v, want tool result evidence", toolEvent["result"])
+	}
+}
+
 func TestCodeDefinedWorkflowContextInitializesAgentProfileSession(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()

@@ -780,6 +780,9 @@ func appendAgentSessionOperationEvent(ctx context.Context, st store.Store, run *
 	data["session_id"] = sessionID
 	data["operation"] = operation
 	data["visibility"] = agentSessionOperationVisibility(operation)
+	if operationID := firstString(data, "operationId", "operation_id"); operationID != "" {
+		data["operation_id"] = operationID
+	}
 	if _, ok := data["status"]; !ok {
 		data["status"] = "admitted"
 	}
@@ -797,6 +800,70 @@ func appendAgentSessionOperationEvent(ctx context.Context, st store.Store, run *
 		Message:       message,
 		Data:          mustJSON(data),
 	})
+	return appendAgentSessionToolCallEvents(ctx, st, run, data)
+}
+
+func appendAgentSessionToolCallEvents(ctx context.Context, st store.Store, run *domain.WorkflowRun, operationData map[string]any) error {
+	calls, found, err := firstMapSlice(operationData, "toolCalls", "tool_calls")
+	if err != nil {
+		return err
+	}
+	if !found {
+		return nil
+	}
+	operationID := firstString(operationData, "operation_id", "operationId")
+	for i, call := range calls {
+		data := copyAnyMap(call)
+		data["workflow_run_id"] = run.RunID
+		data["agent_id"] = firstString(operationData, "agent_id", "agentId")
+		data["session_id"] = firstString(operationData, "session_id", "sessionId")
+		data["operation"] = firstString(operationData, "operation")
+		if operationID != "" {
+			data["operation_id"] = operationID
+		}
+		callID := firstString(data, "call_id", "callId", "id")
+		if callID == "" {
+			callID = fmt.Sprintf("%s:tool:%d", firstNonEmptyString(operationID, "agent_session_operation"), i+1)
+		}
+		data["call_id"] = callID
+		if name := firstString(data, "name", "toolName", "tool_name", "tool"); name != "" {
+			data["name"] = name
+			data["tool_name"] = name
+		}
+		status := firstString(data, "status")
+		if status == "" {
+			status = "completed"
+			if _, ok := firstValue(data, "error", "failure"); ok {
+				status = "failed"
+			}
+			data["status"] = status
+		}
+		if authorization := firstString(data, "authorization_status", "authorizationStatus"); authorization != "" {
+			data["authorization_status"] = authorization
+		} else {
+			data["authorization_status"] = "authorized"
+		}
+		copyFirstValue(data, "idempotency_key", "idempotencyKey", "idempotency_key")
+		copyFirstValue(data, "tool_version", "toolVersion", "tool_version", "version")
+		copyFirstValue(data, "source_hash", "sourceHash", "source_hash")
+		copyFirstValue(data, "provider_call_id", "providerCallId", "provider_call_id")
+		copyFirstValue(data, "started_at", "startedAt", "started_at")
+		copyFirstValue(data, "completed_at", "completedAt", "completed_at")
+		copyFirstValue(data, "duration_ms", "durationMs", "duration_ms")
+		copyFirstValue(data, "read_only", "readOnly", "read_only")
+		copyFirstValue(data, "redacted", "redacted")
+		copyFirstValue(data, "handler", "handler")
+		copyFirstValue(data, "runtime", "runtime")
+		copyFirstValue(data, "timeout", "timeout")
+		copyFirstValue(data, "cancellable", "cancellable")
+		_, _ = st.RunEvents().Append(ctx, store.RunEventAppend{
+			WorkspaceKey:  run.WorkspaceKey,
+			WorkflowRunID: run.RunID,
+			Type:          "agent_session_tool_call",
+			Message:       "workflow agent session tool call recorded",
+			Data:          mustJSON(data),
+		})
+	}
 	return nil
 }
 
@@ -929,6 +996,52 @@ func firstString(values map[string]any, keys ...string) string {
 		}
 	}
 	return ""
+}
+
+func firstValue(values map[string]any, keys ...string) (any, bool) {
+	for _, key := range keys {
+		if values == nil {
+			continue
+		}
+		value, ok := values[key]
+		if !ok || value == nil {
+			continue
+		}
+		return value, true
+	}
+	return nil, false
+}
+
+func copyFirstValue(values map[string]any, target string, keys ...string) {
+	if _, ok := values[target]; ok {
+		return
+	}
+	if value, ok := firstValue(values, keys...); ok {
+		values[target] = value
+	}
+}
+
+func firstMapSlice(values map[string]any, keys ...string) ([]map[string]any, bool, error) {
+	value, ok := firstValue(values, keys...)
+	if !ok {
+		return nil, false, nil
+	}
+	switch raw := value.(type) {
+	case []map[string]any:
+		return raw, true, nil
+	case []any:
+		out := make([]map[string]any, 0, len(raw))
+		for i, item := range raw {
+			mapped, ok := item.(map[string]any)
+			if !ok {
+				return nil, true, fmt.Errorf("agent session tool call %d must be an object", i+1)
+			}
+			out = append(out, mapped)
+		}
+		return out, true, nil
+	default:
+		return nil, true, fmt.Errorf("agent session tool calls must be an array")
+	}
 }
 
 func firstInt64(values map[string]any, keys ...string) int64 {

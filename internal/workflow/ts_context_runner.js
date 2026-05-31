@@ -1065,6 +1065,11 @@ function sessionHandle(operations, session) {
       providerModel: firstPresent(operationInput.providerModel, operationInput.provider_model, session.providerModel, session.provider_model),
       usage: Object.prototype.hasOwnProperty.call(operationInput, "usage") ? jsonSafe(operationInput.usage) : undefined,
       metadata: Object.prototype.hasOwnProperty.call(operationInput, "metadata") ? jsonSafe(operationInput.metadata) : undefined,
+      toolCalls: Object.prototype.hasOwnProperty.call(operationInput, "toolCalls")
+        ? jsonSafe(operationInput.toolCalls)
+        : Object.prototype.hasOwnProperty.call(operationInput, "tool_calls")
+          ? jsonSafe(operationInput.tool_calls)
+          : undefined,
       operation,
       input: jsonSafe(operationInput),
       startedAt,
@@ -1152,6 +1157,11 @@ function sessionOperationResult(operation, input, params) {
       reason: "constrained workflow runner records result schema requests but does not execute provider output validation",
     };
   }
+  const toolCalls = sessionOperationToolCalls(input);
+  if (toolCalls) {
+    envelope.toolCalls = jsonSafe(toolCalls);
+    envelope.tool_calls = jsonSafe(toolCalls);
+  }
   const unavailable = sessionOperationUnavailable(input);
   if (unavailable) {
     envelope.resultUnavailable = unavailable;
@@ -1166,6 +1176,13 @@ function sessionOperationResult(operation, input, params) {
     envelope.failure = failure;
   }
   return jsonSafe(envelope);
+}
+
+function sessionOperationToolCalls(input) {
+  if (!input) return null;
+  if (Object.prototype.hasOwnProperty.call(input, "toolCalls")) return input.toolCalls;
+  if (Object.prototype.hasOwnProperty.call(input, "tool_calls")) return input.tool_calls;
+  return null;
 }
 
 function sessionOperationRawResult(operation, input, params) {

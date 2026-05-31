@@ -448,6 +448,45 @@ const runtimeTypes = `declare module '@loom/runtime' {
     | 'cancelled'
     | 'result_unavailable';
 
+  export type WorkflowAgentSessionToolCall = Record<string, unknown> & {
+    id?: string;
+    callId?: string;
+    call_id?: string;
+    providerCallId?: string;
+    provider_call_id?: string;
+    name?: string;
+    toolName?: string;
+    tool_name?: string;
+    status?: string;
+    authorizationStatus?: string;
+    authorization_status?: string;
+    idempotencyKey?: string;
+    idempotency_key?: string;
+    args?: Record<string, unknown>;
+    arguments?: Record<string, unknown>;
+    input?: unknown;
+    result?: unknown;
+    output?: unknown;
+    error?: string | Record<string, unknown>;
+    toolVersion?: string;
+    tool_version?: string;
+    sourceHash?: string;
+    source_hash?: string;
+    handler?: string;
+    runtime?: string;
+    timeout?: string;
+    cancellable?: boolean;
+    readOnly?: boolean;
+    read_only?: boolean;
+    redacted?: boolean;
+    startedAt?: string;
+    started_at?: string;
+    completedAt?: string;
+    completed_at?: string;
+    durationMs?: number;
+    duration_ms?: number;
+  };
+
   export type WorkflowAgentSessionOperationInput<T = unknown> = Record<string, unknown> & {
     instruction?: string;
     prompt?: string;
@@ -471,6 +510,8 @@ const runtimeTypes = `declare module '@loom/runtime' {
     cancel_reason?: string;
     failure?: string | boolean | Record<string, unknown>;
     error?: string | boolean | Record<string, unknown>;
+    toolCalls?: Array<WorkflowAgentSessionToolCall>;
+    tool_calls?: Array<WorkflowAgentSessionToolCall>;
     metadata?: Record<string, string>;
   };
 
@@ -505,6 +546,8 @@ const runtimeTypes = `declare module '@loom/runtime' {
     result_unavailable?: Record<string, unknown>;
     cancellation?: Record<string, unknown>;
     failure?: Record<string, unknown>;
+    toolCalls?: Array<WorkflowAgentSessionToolCall>;
+    tool_calls?: Array<WorkflowAgentSessionToolCall>;
     eventType?: 'agent_session_operation';
   };
 
