@@ -48,6 +48,15 @@ func applyAgentSessions(ctx context.Context, st store.Store, ws string, sessions
 }
 
 func applyAgentSession(ctx context.Context, st store.Store, ws string, session AgentSessionModule) error {
+	if session.SessionID != "" {
+		existing, err := st.AgentSessions().Get(ctx, ws, session.SessionID)
+		if err == nil {
+			return syncAgentSessionState(ctx, st, ws, existing.SessionID, session)
+		}
+		if !errors.Is(err, domain.ErrNotFound) {
+			return fmt.Errorf("get agent session %s: %w", session.SessionID, err)
+		}
+	}
 	created, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
 		WorkspaceKey:    ws,
 		SessionID:       session.SessionID,
@@ -68,7 +77,11 @@ func applyAgentSession(ctx context.Context, st store.Store, ws string, session A
 	if !errors.Is(err, domain.ErrAlreadyExists) {
 		return fmt.Errorf("create agent session %s: %w", session.SessionID, err)
 	}
-	return syncAgentSessionState(ctx, st, ws, session.SessionID, session)
+	existing, getErr := st.AgentSessions().Get(ctx, ws, session.SessionID)
+	if getErr != nil {
+		return fmt.Errorf("get existing agent session %s after create conflict: %w", session.SessionID, getErr)
+	}
+	return syncAgentSessionState(ctx, st, ws, existing.SessionID, session)
 }
 
 func syncAgentSessionState(ctx context.Context, st store.Store, ws, sessionID string, session AgentSessionModule) error {

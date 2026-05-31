@@ -52,6 +52,15 @@ func applyTaskRuns(ctx context.Context, st store.Store, ws string, runs []TaskRu
 }
 
 func applyTaskRun(ctx context.Context, st store.Store, ws string, run TaskRunModule) error {
+	if run.TaskRunID != "" {
+		existing, err := st.TaskRuns().Get(ctx, ws, run.TaskRunID)
+		if err == nil {
+			return syncTaskRunState(ctx, st, ws, existing.TaskRunID, run)
+		}
+		if !errors.Is(err, domain.ErrNotFound) {
+			return fmt.Errorf("get task run %s: %w", run.TaskRunID, err)
+		}
+	}
 	created, err := st.TaskRuns().Ensure(ctx, store.TaskRunEnsure{
 		WorkspaceKey:    ws,
 		TaskRunID:       run.TaskRunID,
@@ -80,7 +89,11 @@ func applyTaskRun(ctx context.Context, st store.Store, ws string, run TaskRunMod
 	if !errors.Is(err, domain.ErrAlreadyExists) {
 		return fmt.Errorf("ensure task run %s: %w", run.TaskRunID, err)
 	}
-	return syncTaskRunState(ctx, st, ws, run.TaskRunID, run)
+	existing, getErr := st.TaskRuns().Get(ctx, ws, run.TaskRunID)
+	if getErr != nil {
+		return fmt.Errorf("get existing task run %s after ensure conflict: %w", run.TaskRunID, getErr)
+	}
+	return syncTaskRunState(ctx, st, ws, existing.TaskRunID, run)
 }
 
 func syncTaskRunState(ctx context.Context, st store.Store, ws, taskRunID string, run TaskRunModule) error {

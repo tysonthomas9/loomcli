@@ -49,6 +49,15 @@ func applyWorkflowRuns(ctx context.Context, st store.Store, ws string, runs []Wo
 }
 
 func applyWorkflowRun(ctx context.Context, st store.Store, ws string, run WorkflowRunModule) error {
+	if run.RunID != "" {
+		existing, err := st.WorkflowRuns().Get(ctx, ws, run.RunID)
+		if err == nil {
+			return syncWorkflowRunState(ctx, st, ws, existing.RunID, run)
+		}
+		if !errors.Is(err, domain.ErrNotFound) {
+			return fmt.Errorf("get workflow run %s: %w", run.RunID, err)
+		}
+	}
 	created, err := st.WorkflowRuns().CreateOrResume(ctx, store.WorkflowRunCreate{
 		WorkspaceKey:    ws,
 		RunID:           run.RunID,
@@ -71,7 +80,11 @@ func applyWorkflowRun(ctx context.Context, st store.Store, ws string, run Workfl
 	if !errors.Is(err, domain.ErrAlreadyExists) {
 		return fmt.Errorf("create workflow run %s: %w", run.RunID, err)
 	}
-	return syncWorkflowRunState(ctx, st, ws, run.RunID, run)
+	existing, getErr := st.WorkflowRuns().Get(ctx, ws, run.RunID)
+	if getErr != nil {
+		return fmt.Errorf("get existing workflow run %s after create conflict: %w", run.RunID, getErr)
+	}
+	return syncWorkflowRunState(ctx, st, ws, existing.RunID, run)
 }
 
 func syncWorkflowRunState(ctx context.Context, st store.Store, ws, runID string, run WorkflowRunModule) error {
